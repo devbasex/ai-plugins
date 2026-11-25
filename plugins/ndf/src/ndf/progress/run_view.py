@@ -2,12 +2,16 @@
 
 `View` と事象の種類は `ndf.progress.run` が読み書きと次の 1 手の判断に使う。移行（#4409 の決定 6）は、このリリースの前に
 始めた状態機械の写しでクリーンアップをデプロイの直後へ移す事象を作るだけで、書くのは `run.migrate_definition` である。
+
+承認を繰り上げた head のファイルもここで読み書きする。`gate` は `run` を読むので、`run` も読むものはその下に置く。
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, Optional
 
 from ndf.progress import invoke, model, stages
@@ -34,6 +38,29 @@ RETRY_EVENT = _event_kind("retry")
 DEFINITION_MIGRATED = _event_kind("definition_migrated")
 # 移行で並べ替える工程（定義の id）。クリーンアップをデプロイの直後へ移す
 CLEANUP_STAGE_ID, DEPLOY_STAGE_ID = "cleanup", "deploy"
+# 承認資料の保存先（状態機械の作業の保存先 `run.work_root` の下）
+MATERIAL_DIR = "gate-materials"
+# 承認の後に文書だけが加わって出し直さなかった head の保存先（承認資料の隣）
+ACCEPTED_SUFFIX = ".accepted.json"
+
+
+def _accepted_path(work: Path, gate_id: str) -> Path:
+    return work / MATERIAL_DIR / f"{gate_id}{ACCEPTED_SUFFIX}"
+
+
+def write_accepted_head(work: Path, gate_id: str, head: Optional[str]) -> None:
+    """質問 `gate_id` の承認を、出し直さずに `head` へ繰り上げたことを残す。"""
+    path = _accepted_path(work, gate_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"head": head}) + "\n", encoding="utf-8")
+
+
+def read_accepted_head(work: Path, gate_id: str) -> Optional[str]:
+    """質問 `gate_id` の承認を繰り上げた head（繰り上げていなければ None）。"""
+    path = _accepted_path(work, gate_id)
+    if not path.exists():
+        return None
+    return str(json.loads(path.read_text(encoding="utf-8"))["head"])
 
 
 @dataclass(frozen=True)

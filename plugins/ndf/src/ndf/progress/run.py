@@ -50,6 +50,7 @@ from ndf.progress.run_view import (
     migrated_order,
     migration_drafts,
     event_payload,
+    read_accepted_head,
 )
 
 TOOL = __package__.rpartition(".")[2]
@@ -539,7 +540,7 @@ def _prepare(d: Drive, v: View, s: stages.StageDef, inputs: dict[str, Any]) -> O
     step = s.steps[0] if prog.redo else prog.next_step(s)
     if step is None or invoke.kind_of(step) != invoke.PLAN:
         return None
-    run = replace(invoke.stage_run(s, step, inputs), approved=approved_seen(v, s.name))
+    run = replace(invoke.stage_run(s, step, inputs), approved=approved_seen(v, s.name, d.st.root))
     if invoke.template(run.name) is None:
         return None  # テンプレートの無いプランは、流すときの _call_plan が precondition で止める
     try:
@@ -821,16 +822,24 @@ def step_dir(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> Pat
     return work_root(d.st.root, v.machine_id) / s.id / step_location(step.id, step_progress(v, s.name))
 
 
-def approved_seen(v: View, stage: str) -> Optional[dict[str, Any]]:
+def approved_seen(v: View, stage: str, root: Path) -> Optional[dict[str, Any]]:
     """工程 `stage` の承認ゲートの最新の承認の回答が見た対象（事象の `seen`）。無ければ None（#4409 の決定 5）。
 
-    利用者の回答でも、MVV 判定が通した回答（`service:mvv`）でも同じ形で読む。
+    利用者の回答でも、MVV 判定が通した回答（`service:mvv`）でも同じ形で読む。マージが本番へ反映されない（`production` が偽）
+    承認は、出し直さずに繰り上げた head（`gate.recheck`）を重ねる。分からない・本番へ反映される承認には重ねない。
+    `root` は状態の保存先。
     """
     for ev in reversed(v.events):
         p = event_payload(ev)
         if ev.draft.kind == ANSWERED and ev.draft.row_key == stage and p.get("answer") == APPROVED:
             seen = p.get("seen")
-            return dict(seen) if isinstance(seen, dict) else None
+            if not isinstance(seen, dict):
+                return None
+            gate_id = p.get("gate_id")
+            carried = None
+            if seen.get("production") is False and gate_id:
+                carried = read_accepted_head(work_root(root, v.machine_id), str(gate_id))
+            return {**seen, "head": carried} if carried else dict(seen)
     return None
 
 
@@ -841,7 +850,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> mo
         inputs = invoke.resolve_inputs(s, v.context())
     except invoke.StageInputError as exc:
         return _failed(s, step.id, v.rev, exc.kind, str(exc))
-    run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries, approved=approved_seen(v, s.name))
+    run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries, approved=approved_seen(v, s.name, d.st.root))
     waited = prog.waiting is not None and prog.waiting["step"] == step.id
     ans = prog.answer_value() if waited else None
     work_dir = step_dir(d, v, s, step)

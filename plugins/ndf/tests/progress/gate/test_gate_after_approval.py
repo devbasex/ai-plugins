@@ -9,8 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from ndf.progress import gate, model, run
-from ndf.progress.gate import answering
+from ndf.core import route
+from ndf.progress import gate, invoke, model, run
+from ndf.progress.gate import answering, asking
 
 BY = "human:reviewer"
 
@@ -19,9 +20,19 @@ def _approve(st, tid, q, head, key="k-release", value="approved"):
     return gate.answer(st, tid, gate.Answer(q.id, value, "出してよい", BY, key, seen=gate.Target(head=head)))
 
 
-def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new_table, release_question):
+# （提示した対象の「本番へ反映されるか」（None は提示した対象が無く分からない）・リリースのプランへ差し込む承認の head）
+@pytest.mark.parametrize(("production", "injected"), [(False, "h2"), (None, "h1")], ids=["not-production", "unknown"])
+def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new_table, release_question, flow, env, production, injected):
     tid = new_table()
-    _approve(st, tid, release_question(tid), "h1")
+    q = release_question(tid)
+    if production is None:
+        _approve(st, tid, q, "h1")
+    else:
+        shown = replace(q, target=gate.Target("h1", None, "o/r", 7, "main", production))
+        gate.write_material(st.root, run.read(st, tid), shown)
+        presentation = asking.read_presented(st.root, q).presentation
+        seen = gate.Target(head="h1", presentation=presentation)
+        gate.answer(st, tid, gate.Answer(q.id, "approved", "出してよい", BY, "k-release", seen=seen))
     moved = lambda q, **_: gate.Target(head="h2")  # noqa: E731
     why = gate.recheck(st, tid, moved, lambda seen, now: (seen, now) == ("h1", "h2"))
     assert why is not None and "文書だけ" in why
@@ -29,6 +40,12 @@ def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new
     # マージの側が照らす head は、出し直さずに進めた今の head
     assert gate.approved_head(run.read(st, tid), "release", st.root) == "h2"
     assert gate.approved_head(run.read(st, tid), "release") == "h1"
+    # リリースのプランの `ndf ci merge --approved-head` へ差し込む値
+    called = []
+    spy = replace(env, invoker=lambda r, *a: called.append(r) or env.invoker(r, *a))
+    flow.turn(tid, spy)
+    got = invoke._fill_production_gate(route.templates()["release"], called[0])
+    assert got["approved_head"] == injected
 
 
 def test_a_range_with_code_after_the_release_approval_asks_again(st, new_table, release_question):

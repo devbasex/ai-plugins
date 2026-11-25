@@ -21,6 +21,7 @@ from ndf import cli
 from ndf.contracts import result
 from ndf.core import merge_approval
 from ndf.progress import lane, model, plan, run
+from ndf.progress.run_view import MATERIAL_DIR
 
 # 結果 JSON の tool（サブコマンドの表がこのパッケージを指す）
 TOOL = cli.tool_of(__package__)
@@ -39,8 +40,6 @@ RELEASE_GATE = _gate("release")
 question_id = model.question_id
 # 承認しなかった回答（変更要求の記録に数える）
 REJECTING = (run.REQUEST_CHANGES, run.REJECTED)
-# 承認資料の保存先（ステートマシンごとの作業の保存先の下。名前は質問の id）
-MATERIAL_DIR = "gate-materials"
 
 
 # --- 質問 --------------------------------------------------------------------------------------
@@ -476,14 +475,6 @@ def read_presented(root: Path, q: Question) -> Target:
     except (OSError, ValueError):
         # 提示の記録の無い質問は、承認の対象の無い質問として扱う
         return Target()
-
-
-# 承認の後に文書だけが加わって出し直さなかった head の保存先（承認資料の隣）
-ACCEPTED_SUFFIX = ".accepted.json"
-
-
-def accepted_path(root: Path, machine_id: str, gate_id: str) -> Path:
-    return run.work_root(root, machine_id) / MATERIAL_DIR / f"{gate_id}{ACCEPTED_SUFFIX}"
 
 
 # オーガナイザーのリリースの回答の語 → 承認ゲートの回答の語（`release.take_reply` と、中継を確かめる `answering` が共有する）

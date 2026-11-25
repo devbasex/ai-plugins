@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -27,7 +26,6 @@ from ndf.progress.gate.asking import (
     Answer,
     Question,
     Target,
-    accepted_path,
     material_path,
     material_sha256,
     presented_id,
@@ -37,6 +35,7 @@ from ndf.progress.gate.asking import (
     waiting,
 )
 from ndf.progress.gate.records import record_answer, rejections_path
+from ndf.progress.run_view import write_accepted_head
 
 # 回答した者の形（人・conductor・サービス。サービスは `service:<主体>`。プランの承認待ちと共有する）
 ACTORS = actors.ACTORS
@@ -425,9 +424,7 @@ def _docs_only_after(root: Path, q: Question, seen: Target, now: Target, docs_on
 
 def _accept(root: Path, q: Question, now: Target) -> None:
     """出し直さずに進めた今の head を残す（マージの側が照らす head。`approved_head`）。"""
-    path = accepted_path(root, q.machine_id, q.id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"head": now.head}) + "\n", encoding="utf-8")
+    write_accepted_head(run.work_root(root, q.machine_id), q.id, now.head)
 
 
 def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsOnly = never_docs_only) -> Optional[str]:

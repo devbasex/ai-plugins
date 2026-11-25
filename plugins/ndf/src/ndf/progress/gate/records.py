@@ -16,7 +16,8 @@ from typing import Any, Optional
 from ndf import identity
 from ndf.contracts import facts
 from ndf.progress import invoke, model, run
-from ndf.progress.gate.asking import REJECTING, Answer, Question, Target, accepted_path, sprint_issues
+from ndf.progress.gate.asking import REJECTING, Answer, Question, Target, sprint_issues
+from ndf.progress.run_view import read_accepted_head
 
 # --- 変更要求の記録 ---------------------------------------------------------------------------------
 
@@ -118,7 +119,8 @@ def approved_head(v: run.View, kind: str, root: Optional[Path] = None) -> Option
     last = next(a for a in answers(v) if a["seq"] == got[-1].seq)
     if last["answer"] != run.APPROVED:
         return None
-    accepted = accepted_path(root, v.machine_id, str(last["gate_id"])) if root is not None and last["gate_id"] else None
-    if accepted is not None and accepted.exists():
-        return str(json.loads(accepted.read_text(encoding="utf-8"))["head"])
+    if root is not None and last["gate_id"]:
+        carried = read_accepted_head(run.work_root(root, v.machine_id), str(last["gate_id"]))
+        if carried is not None:
+            return carried
     return str(last["head"]) if last["head"] else None
