@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import os
+import tempfile
 from dataclasses import dataclass, field
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -183,8 +186,11 @@ def material_sha256(path: Path) -> str:
 
 
 def material_path(root: Path, q: Question) -> Path:
-    """質問の承認資料の保存先（`run.work_root` の下）。質問ごとに 1 つで、書いた後は書き換えない。"""
-    return run.work_root(root, q.machine_id) / MATERIAL_DIR / f"{q.id}.md"
+    """質問の承認資料の保存先（`run.work_root` の下）。資料を作る時点の head ごとに別のファイルで、書いた後は書き換えない。
+
+    head が分からなければ質問の id だけの名前（この変更の前の名前でもある。`answering.seen_material` が探す）。"""
+    name = f"{q.id}-{q.target.head}.md" if q.target.head else f"{q.id}.md"
+    return run.work_root(root, q.machine_id) / MATERIAL_DIR / name
 
 
 def unconfirmed(v: run.View, stage: str) -> list[str]:
@@ -208,8 +214,125 @@ def bullets(items: Iterable[str]) -> list[str]:
     return [f"- {x}" for x in items] or ["- （無し）"]
 
 
-def material(v: run.View, q: Question) -> str:
-    """承認資料（Markdown）。質問・見る PR と head・出したバージョン（#2554）・未確認の点（#2444）・回答の選択肢を持つ。"""
+# --- 承認資料の「MVV 判定」の欄（#3959） -------------------------------------------------------------
+
+# 判定のやり直しを求める文（承認する人は「変更を求める」で回答し、担当の側が判定を打ち直す）
+REDO = "承認せず、「変更を求める」の回答で判定のやり直しを求めてください"
+# 照らして一致しないときの保留の欄
+UNSEEN_HOLDS = "- レビューの保留: 未確認（今の head の判定が無い）"
+
+
+def _mismatch(out: Mapping[str, Any], pr: Optional[int], head: Optional[str]) -> Optional[list[str]]:
+    """判定の `pr`・`head` を質問の PR と資料を作る時点の head に照らし、一致しなければ欄の行を返す（一致すれば None）。
+
+    別の PR の判定は、判定した PR の番号と head を載せない（承認する人が見られない PR とコミットを知らせないため）。"""
+    if "pr" not in out and "head" not in out and isinstance(out.get("stopped_by"), dict):
+        text = out["stopped_by"]["text"] if "text" in out["stopped_by"] else ""
+        # MVV を導入していないリポジトリは PR を読む前に止める（`mvv_gate.mvv_declared_locally`）。PR の特定の失敗と書かない
+        if out["stopped_by"].get("kind") == "mvv_unapproved":
+            return [f"- MVV 判定は打っていない。{text}", "- レビューの保留: 未確認（MVV 判定を打っていない）"]
+        return [
+            f"- 対象の PR を特定できなかったため、MVV 判定は済んでいない。{text}",
+            "- レビューの保留: 未確認（保留を読む前に判定が止まった）",
+        ]
+    if "pr" not in out or "head" not in out or head is None:
+        line = f"- 残っている判定が、承認を求める PR #{pr} の今の変更に対するものかを確かめられません。この変更に対する判定はまだありません。{REDO}"
+        return [line, UNSEEN_HOLDS]
+    if out["pr"] != pr:
+        return [f"- 承認を求める PR #{pr}・head {head} に対する判定はまだありません。{REDO}", UNSEEN_HOLDS]
+    if out["head"] != head:
+        line = (
+            f"- 承認を求める PR #{pr}・head {head} の判定はまだ無い。今ある判定は、判定の後に PR が更新される前の head {out['head']} に"
+            f"対するもの。この変更に対する判定はまだありません。{REDO}"
+        )
+        return [line, UNSEEN_HOLDS]
+    return None
+
+
+def _strings(raw: Any) -> list[str]:
+    return [str(x) for x in raw] if isinstance(raw, list) else []
+
+
+def _unread_reason(gate: str, verdict: Any, why: list[str], private: bool) -> str:
+    """保留が `null` のときの未確認の理由。空の `why` でも組める。"""
+    if gate == RELEASE_GATE:
+        return "リリースの保留は #4105 まで読まない（省かない）"
+    if verdict is None:
+        return f"保留を読む前に判定が止まった: {why[0]}" if why and private else "保留を読む前に判定が止まった"
+    return "この判定は保留を読んでいない"
+
+
+def _holds_lines(out: Mapping[str, Any], gate: str, private: bool) -> list[str]:
+    holds, verdict, why = out.get("holds"), out.get("verdict"), _strings(out.get("why"))
+    if isinstance(holds, list) and holds:
+        return [f"- レビューの保留: {len(holds)} 件", *([f"  - {h}" for h in holds] if private else [])]
+    if isinstance(holds, list):
+        return ["- レビューの保留: 無し（レビューの記録に保留が無い。記録がまだ作られていない場合を含む）"]
+    return [f"- レビューの保留: 未確認（{_unread_reason(gate, verdict, why, private)}）"]
+
+
+def _verdict_lines(out: Mapping[str, Any], private: bool) -> list[str]:
+    verdict = out.get("verdict")
+    if not isinstance(verdict, dict):
+        stop = out.get("stopped_by")
+        text = stop.get("text") if isinstance(stop, dict) else None
+        return [f"- 判定できない。理由: {text}" if text else "- 判定できない"]
+    reasons, boundary = _strings(verdict.get("reasons")), _strings(verdict.get("boundary"))
+    lines = [
+        f"- 判定: {verdict['verdict'] if 'verdict' in verdict else '無し'}",
+        f"- 根拠の項目: {'・'.join(_strings(verdict.get('basis') if private else model.mvv_basis_shared(verdict.get('basis')))) or '無し'}",
+    ]
+    if not private:
+        return [*lines, f"- 理由 {len(reasons)} 件・レッドライン {len(boundary)} 件"]
+    return [*lines, *_labeled_bullets("理由", reasons), *_labeled_bullets("レッドライン", boundary)]
+
+
+def _labeled_bullets(label: str, items: list[str]) -> list[str]:
+    """見出しの行と、字下げした箇条書きの行。空なら「（無し）」の 1 行。"""
+    return [f"- {label}:", *[f"  - {x}" for x in items or ["（無し）"]]]
+
+
+def _where_lines(out: Mapping[str, Any], private: bool) -> list[str]:
+    """全文の参照先。閲覧範囲を限れない保存先では、全文を読める場所が無ければやり直しを求める（読むべき本文が無ければ求めない）。"""
+    url = out.get("note_url") if out.get("noted") is True else None
+    if private:
+        return (
+            [f"- 今回の判定のコメント: {url}"]
+            if url
+            else ["- 今回は PR に判定のコメントを載せていない。PR に既存の判定のコメントがあっても、今回の結果はここで確かめる"]
+        )
+    if out.get("verdict") is None and not out.get("holds"):
+        return []
+    if url:
+        return [
+            f"- 理由と保留の全文は、今回の判定のコメント {url} で読めます。コメントを開けない場合や、判断に必要な理由が伏せ字で読めない場合は、{REDO}"
+        ]
+    return [f"- 理由と保留の全文を読める場所がありません。{REDO}"]
+
+
+def mvv_lines(out: Optional[Mapping[str, Any]], gate: str, pr: Optional[int], head: Optional[str], *, private: bool = True) -> list[str]:
+    """承認資料の「## MVV 判定」の欄の行。`out` は待っている工程の判定のステップの出力 `mvv_gate`（無ければ None）。
+
+    `pr`・`head` は質問の PR と資料を作る時点の head で、判定の `pr`・`head` と照らす。`private` が偽（保存先の閲覧範囲を
+    限れない）なら判定の自由記述は伏せて保存されているので、本文の代わりに件数と全文の参照先を載せる（#3959）。"""
+    if out is None:
+        return ["- 判定できない: 待っている工程の判定のステップが済んでいない", "- レビューの保留: 未確認（判定の結果が無い）"]
+    off = _mismatch(out, pr, head)
+    if off is not None:
+        return off
+    why = _strings(out.get("why"))
+    lines = [f"- 判定した PR: #{pr}・head {head}", *_verdict_lines(out, private)]
+    if private:
+        lines += ["- 省かない理由:", *[f"  - {w}" for w in why or ["（無し）"]]]
+    else:
+        lines.append(f"- 省かない理由 {len(why)} 件")
+    return [*lines, *_holds_lines(out, gate, private), *_where_lines(out, private)]
+
+
+def material(v: run.View, q: Question, *, private: bool = True) -> str:
+    """承認資料（Markdown）。質問・見る PR と head・出したバージョン（#2554）・未確認の点（#2444）・MVV 判定（#3959）・回答の選択肢を持つ。
+
+    `private` は保存先の閲覧範囲を限れたか（`store.Store.private`）で、偽なら MVV 判定の自由記述の代わりに件数を載せる。"""
     ctx = v.context()
     lines = [f"# {q.label}の承認ゲート", "", f"- 工程: {q.stage}（ステップ {q.step}）", f"- 質問の id: {q.id}"]
     if q.pr_url or q.pr:
@@ -219,18 +342,40 @@ def material(v: run.View, q: Question) -> str:
     if q.gate == RELEASE_GATE and isinstance(ctx.get("product_version"), str):
         lines.append(f"- 出すバージョン: {ctx['product_version']}")
     lines += ["", "## 未確認の点", "", *bullets(unconfirmed(v, q.stage))]
+    step = model.MVV_GATE_STEPS.get(q.gate) if q.gate else None
+    if step is not None and any(s.id == step for s in v.snap.stage(q.stage).steps):
+        lines += ["", "## MVV 判定", "", *mvv_lines(_judged(v, q.stage, step), q.gate, q.pr, q.target.head, private=private)]
     lines += ["", "## 回答", "", *[f"- {c}" for c in q.choices]]
     return "\n".join(lines) + "\n"
 
 
-def write_material(root: Path, v: run.View, q: Question) -> Path:
-    """承認資料を書く（書いてあれば書き直さない。回答した者が見た資料の sha256 を変えないため）。"""
+def _judged(v: run.View, stage: str, step: str) -> Optional[Mapping[str, Any]]:
+    """待っている工程の判定のステップの済んだ記録の出力 `mvv_gate`（無ければ None）。
+
+    文脈（`v.context()`）は工程が終わるまで書かれず前の工程の判定が残るので読まない（#3959）。"""
+    report = run.step_progress(v, stage).done.get(step)
+    outputs = report.get("outputs") if isinstance(report, dict) else None
+    held = outputs.get(model.MVV_KEY) if isinstance(outputs, dict) else None
+    return held if isinstance(held, dict) else None
+
+
+def write_material(root: Path, v: run.View, q: Question, *, private: bool = True) -> Path:
+    """承認資料を所有者だけが読める 0600 で書く（書いてあれば書き直さない。回答した者が見た資料の sha256 を変えないため）。
+
+    一時ファイルは呼び出しごとに別名・排他的・0600 で作り、`os.link` で置く。置き先が既にあれば（同時に走った別の呼び出しが
+    先に置いた）その資料を使い、上書きしない。資料のディレクトリは 0700 で作る（#3959）。"""
     path = material_path(root, q)
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(material(v, q), encoding="utf-8")
-        tmp.replace(path)
+    if path.exists():
+        return path
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(material(v, q, private=private))
+        with contextlib.suppress(FileExistsError):  # noqa: NDF402 ファイル: 同時に走った別の呼び出しが先に置いた資料を使う
+            os.link(tmp, path)
+    finally:
+        os.unlink(tmp)
     return path
 
 

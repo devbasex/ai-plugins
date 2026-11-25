@@ -29,6 +29,7 @@
     "outcome": {"type": "string", "enum": ["fixed", "unresolved", "deferred", "redline"], "description": "指摘の終わり方。redline は、必ず人の承認が要る操作に当たる指摘"},
     "reason": {"type": "string", "description": "見送りの理由（伏せた後の値）"},
     "text": {"type": "string", "description": "必ず人の承認が要る操作に当たる指摘の本文（伏せた後の値）"},
+    "defer": {"type": "string", "enum": ["needs_user", "filed", "not_applicable"], "description": "見送りの区分（deferred の行だけ）。needs_user は利用者の判断が要る、filed は範囲外として起票した、not_applicable は基準に当たらない・意図どおり。区分の無い見送りは承認ゲートの保留になる"},
     "withheld": {"const": true, "description": "伏せる所を確かめられず、自由記述を書かなかった"},
     "mvv_version": {"type": ["integer", "null"], "description": "指摘を判定した MVV の設定のバージョン"},
     "sha256": {"type": ["string", "null"], "description": "指摘を判定した MVV の本文の sha256"}

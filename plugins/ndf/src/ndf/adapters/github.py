@@ -33,14 +33,15 @@ from githubkit.exception import GraphQLFailed, PrimaryRateLimitExceeded, RateLim
 
 from ndf.adapters import cli_floor, git, github_limits, write_gate
 from ndf.adapters.github_limits import GRAPHQL, REST, RetryWithin
+from ndf.adapters.github_rules import NO_RULES, PULL_REQUEST_RULE, RuleFacts, classic_facts_of, merge_facts, rule_facts_of
 from ndf.contracts import limits
 
 T = TypeVar("T")
 # GraphQL のエイリアスで引ける番号つきの節点
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")
-# PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
-PULL_FIELDS = (
+PULL_FIELDS = (  # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
     "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation mergeCommit { oid }"
+    " isCrossRepository"
 )
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
@@ -80,9 +81,6 @@ _ENQUEUE = (
     "mutation($id: ID!, $head: GitObjectID!, $jump: Boolean) {"
     " enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, jump: $jump}) { clientMutationId } }"
 )
-# 迂回の可否（ruleset の `current_user_can_bypass`）の強さ。弱いほうを全体の値にする。`always`・`pull_requests_only` だけが
-# 本番の PR を越えられる（10 系の `release_case._BYPASS_ORDER` と同じ並び）
-BYPASS_ORDER = ("never", "exempt", "pull_requests_only", "always")
 _DEQUEUE = "mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }"
 # マージの方式 → 「基底に含まれたか」の確かめ方（3378-2）。ancestry は head が基底の祖先か、merged は PR がマージ済み
 # （`merged_at` がある）か。squash と rebase は新しいコミットを作り、head は基底の祖先にならない。
@@ -237,8 +235,8 @@ class Pull(NamedTuple):
     merge_state: str
     author: str
     association: str
-    # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
-    merge_sha: str = ""
+    merge_sha: str = ""  # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
+    cross_repository: bool = False  # head のブランチがフォークにあるか（GraphQL で読んだときだけ埋める）
 
     @property
     def authored(self) -> Authored:
@@ -262,67 +260,8 @@ class Pull(NamedTuple):
             int(raw["number"]), "open" if state == "open" else "closed", bool(raw["merged"]), text_of(raw["headRefOid"]),
             text_of(raw["headRefName"]), text_of(raw["baseRefName"]), text_of(raw["body"]), text_of(raw["mergeStateStatus"]).lower(),
             _login(raw["author"]), text_of(raw["authorAssociation"]).upper(),
-            text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
+            text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "", bool(raw.get("isCrossRepository")),
         )  # fmt: skip
-
-
-class RuleFacts(NamedTuple):
-    """本番ブランチの ruleset と従来のブランチ保護を重ねた事実（#3672 の I10。10 系の `release_case.RuleFacts` と同じ値）。
-
-    `bypass` は当たった ruleset の `current_user_can_bypass`（どれか 1 つでも越えられない値なら、その値。ruleset が無ければ None）。
-    `queue_merge_method` は merge queue の規則の `parameters.merge_method`（`MERGE`・`SQUASH`・`REBASE`）。
-    """
-
-    present: bool
-    approvals: int
-    queue: bool
-    up_to_date: bool
-    bypass: Optional[str]
-    queue_merge_method: Optional[str] = None
-
-
-NO_RULES = RuleFacts(False, 0, False, False, None)
-
-
-def _weakest(bypasses: Iterable[Optional[str]]) -> Optional[str]:
-    known = [b for b in bypasses if b in BYPASS_ORDER]
-    return min(known, key=BYPASS_ORDER.index) if known else None
-
-
-def _review_count(raw: Any) -> int:
-    value = raw.get("required_approving_review_count") if isinstance(raw, dict) else None
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
-
-
-def rule_facts_of(rules: Sequence[dict], bypasses: Sequence[Optional[str]]) -> RuleFacts:
-    """`rules/branches/<branch>` の規則の配列と、当たった ruleset ごとの迂回の可否から事実を組む。"""
-    if not rules:
-        return NO_RULES
-    params = [(r.get("type"), r.get("parameters") if isinstance(r.get("parameters"), dict) else {}) for r in rules]
-    reviews = [_review_count(p) for kind, p in params if kind == "pull_request"]
-    up_to_date = any(kind == "required_status_checks" and p.get("strict_required_status_checks_policy") for kind, p in params)
-    queue_method = next((p.get("merge_method") for kind, p in params if kind == "merge_queue"), None)
-    queue = any(kind == "merge_queue" for kind, _ in params)
-    return RuleFacts(True, max(reviews) if reviews else 0, queue, bool(up_to_date), _weakest(bypasses), queue_method)
-
-
-def classic_facts_of(protection: dict) -> RuleFacts:
-    """従来のブランチ保護（`branches/<branch>/protection`）から事実を組む。保護を読めるのは管理者だけなので、
-    管理者に保護を課さない（`enforce_admins` が偽）ときは迂回できる（`always`）とみなす。"""
-    checks = protection.get("required_status_checks")
-    enforce = protection.get("enforce_admins")
-    up_to_date = isinstance(checks, dict) and bool(checks.get("strict"))
-    enforced = isinstance(enforce, dict) and bool(enforce.get("enabled"))
-    approvals = _review_count(protection.get("required_pull_request_reviews"))
-    return RuleFacts(True, approvals, False, up_to_date, "never" if enforced else "always")
-
-
-def merge_facts(a: RuleFacts, b: RuleFacts) -> RuleFacts:
-    """ruleset と従来のブランチ保護の事実を重ねる。GitHub は両方を効かせるため、厳しいほうを採る（迂回は弱いほう）。"""
-    if not a.present or not b.present:
-        return a if a.present else b
-    bypass, queue_method = _weakest((a.bypass, b.bypass)), a.queue_merge_method or b.queue_merge_method
-    return RuleFacts(True, max(a.approvals, b.approvals), a.queue or b.queue, a.up_to_date or b.up_to_date, bypass, queue_method)
 
 
 class MergeOutcome(NamedTuple):
@@ -358,7 +297,7 @@ def ruleset_merge_methods(rules: Iterable[dict]) -> Optional[list[str]]:
     """
     found: Optional[set[str]] = None
     for rule in rules:
-        if rule["type"] != "pull_request" or "allowed_merge_methods" not in rule["parameters"]:
+        if rule["type"] != PULL_REQUEST_RULE or "allowed_merge_methods" not in rule["parameters"]:
             continue
         methods = set(rule["parameters"]["allowed_merge_methods"])
         found = methods if found is None else found & methods
@@ -604,6 +543,23 @@ class GitHub:
         selection = "pullRequests(headRefName: {}, first: {}, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ {} }} }}"
         got = self.aliased({b: selection.format(_graphql_string(b), PULLS_PER_HEAD, PULL_FIELDS) for b in wanted})
         return {b: [Pull.from_graphql(p) for p in got[b]["nodes"]] if got[b] else [] for b in wanted}
+
+    def open_pulls_of_head(self, branch: str, enough: int) -> list[Pull]:
+        """head のブランチが `branch` で、このリポジトリの開いた PR（フォークの同名ブランチを除く。新しい順）。
+
+        取得の時点で開いた PR に絞り、同じリポジトリの候補が `enough` 件そろうか一覧を読み終えるまでページを送る
+        （候補が 1 件だけかを、取得の範囲から外れた古い PR で取り違えない）。`github.list-pages` ページを超えたら `GitHubError`。
+        """
+        pages = _page_cap("github.list-pages")
+        variables: dict[str, Any] = {"head": branch, "after": None}
+        found: list[Pull] = []
+        for _ in range(pages):
+            conn = self.repository(_OPEN_HEAD_PAGE, variables)["pullRequests"]
+            found += [p for p in (Pull.from_graphql(n) for n in conn["nodes"]) if not p.cross_repository]
+            if len(found) >= enough or not conn["pageInfo"]["hasNextPage"]:
+                return found[:enough]
+            variables["after"] = conn["pageInfo"]["endCursor"]
+        raise _too_many_pages(f"ブランチ {branch} の開いた PR の一覧が", pages, "github.list-pages")
 
     def pull(self, number: int) -> Pull:
         """PR を REST で読む。REST のスロットが一次の上限なら GraphQL のスロットで読み替える（不足 g）。二次レート制限は読み替えない。"""
@@ -976,6 +932,14 @@ _ISSUE_PAGE = (
     "query($owner: String!, $name: String!, $labels: [String!], $states: [IssueState!], $after: String) {"
     f" repository(owner: $owner, name: $name) {{ issues(labels: $labels, states: $states, first: {PER_PAGE}, after: $after) {{"
     " totalCount pageInfo { hasNextPage endCursor } nodes { number } } } }"
+)
+
+# head のブランチの開いた PR の 1 ページ（`GitHub.open_pulls_of_head`。新しい順）。1 ブランチ専用の照会なので、
+# フォークの同名ブランチが先に並んでも往復が増えないよう、上限の件数（`PER_PAGE`）で読む
+_OPEN_HEAD_PAGE = (
+    "query($owner: String!, $name: String!, $head: String!, $after: String) {"
+    f" repository(owner: $owner, name: $name) {{ pullRequests(headRefName: $head, states: [OPEN], first: {PER_PAGE},"
+    f" after: $after, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {PULL_FIELDS} }} }} }} }}"
 )
 
 

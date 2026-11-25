@@ -73,7 +73,8 @@ def _fix_prompt(run: FixRun, open_: Sequence[dict[str, Any]], handed: Sequence[f
     shape = (
         '{"pr": '
         + str(run.ref.origin_pr)
-        + ', "commit": "<最後のコミット>", "findings": [{"id": "<上の id>", "outcome": "fixed|deferred", "reason": "<見送った理由>"}]}'
+        + ', "commit": "<最後のコミット>", "findings": [{"id": "<上の id>", "outcome": "fixed|deferred", "reason": "<見送った理由>", '
+        + '"defer": "<deferred のときだけ needs_user|filed|not_applicable>"}]}'
     )
     lines += criteria_decide.fixer_block(run.cfg.settings.focus, run.snapshot)
     lines += criteria_decide.document_block(criteria_decide.FIXER, run.documents)

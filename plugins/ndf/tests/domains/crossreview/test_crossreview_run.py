@@ -470,9 +470,10 @@ def _entry(fid: str, by: str, text: str, outcome: str, round_no: int, reason: Op
 
 
 def _findings(state: dict) -> list[dict]:
-    """ジャーナルの行から発生の値（乱数。#4016）を外す。"""
+    """ジャーナルの行から発生の値（乱数。#4016）と、修正担当が直したと返した時刻（#3959）を外す。"""
     assert all(len(f["occurrence"]) == 12 for f in state["findings"])
-    return [{k: v for k, v in f.items() if k != "occurrence"} for f in state["findings"]]
+    assert all(isinstance(f.get("fixed_at", ""), str) for f in state["findings"])
+    return [{k: v for k, v in f.items() if k not in ("occurrence", "fixed_at")} for f in state["findings"]]
 
 
 def _rounds_without_heads(state: dict) -> list[dict]:

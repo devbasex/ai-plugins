@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -31,6 +32,10 @@ NDF_SCHEMA = "workflow/ndf.schema.json"
 # 承認ゲートを MVV 判定で省ける進め方（文脈の pace の一部）・省いた回答の回答した者・判定の結果を持つ文脈のキー
 MVV_PACES = contracts.schema_enum(CONTEXT, "/$defs/mvv_pace")
 MVV_SERVICE, MVV_KEY = "service:mvv", "mvv_gate"
+# 承認ゲートの区分 → その手前の MVV 判定のステップの id（工程の定義 stages/design.json・deploy.json の `<区分>-mvv`。表は 1 か所）
+MVV_GATE_STEPS = {gate: f"{gate}-mvv" for gate in contracts.schema_enum(CONTEXT, "/$defs/mvv_gate/properties/gate")}
+# MVV 判定で省いてよい承認ゲートの区分。リリース承認ゲートは保留を読む PR の範囲が決まるまで省かない（#3959 の決定 3。#4105 が足す）
+MVV_SKIP_GATES: tuple[str, ...] = ("design",)
 # 承認ゲートの質問の id の長さ（sha256 の頭）
 QUESTION_ID_LENGTH = 16
 
@@ -149,10 +154,39 @@ def mvv_skip(done: Mapping[str, Mapping[str, Any]], before: Optional[str], gate:
 
     読むのは承認ゲートの直前のステップ `before`（専用の判定 `ndf records mvv gate`）の済んだ結果（`done`）の出力 `MVV_KEY`
     だけである（#3745）。先のステップ（設計など）が出力に省けると書いても採らず、直前の判定が止めた承認ゲートは省かない。
+    省いてよい区分（`MVV_SKIP_GATES`）の判定で、レビューの保留を確かめて 0 件だった（`hold_checked`）ものだけを採る。
+    `holds` のキーが無い（更新前の NDF が書いた判定）・`null`（保留を読む前に止まった）・保留がある判定は採らない（#3959 の決定 3）。
     """
     report = done[before] if before is not None and before in done else None
     held = _outputs(report).get(MVV_KEY) if report is not None else None
+    if not mvv_counted(held, gate):
+        return None
     return held if isinstance(held, dict) and held.get("gate") == gate and held.get("skip") is True else None
+
+
+def hold_checked(held: Any) -> bool:
+    """判定の出力 `held` がレビューの保留を確かめて 0 件だったか（`holds` が空のリスト）。"""
+    return isinstance(held, dict) and isinstance(held.get("holds"), list) and not held["holds"]
+
+
+def mvv_counted(held: Any, gate: Optional[str]) -> bool:
+    """区分 `gate` の判定 `held` を、承認ゲートを省く判定として数えてよいか。
+
+    省いてよい区分（`MVV_SKIP_GATES`）で、レビューの保留を確かめて 0 件だった（`hold_checked`）ときだけ真。
+    `mvv_skip` と `mvv_answer_void` が同じ式で決める。
+    """
+    return gate in MVV_SKIP_GATES and hold_checked(held)
+
+
+def mvv_answer_void(payload: Mapping[str, Any], gate: Optional[str]) -> bool:
+    """回答の事象の payload が、回答として数えない MVV 判定の回答か（#3959 の決定 3）。
+
+    回答した者が `MVV_SERVICE` で、区分 `gate`（呼び手がステップか問い合わせの区分で渡す。payload の `gate` は読まない）が省いてよい
+    区分でないか、添えた判定の写しが保留を確かめた証拠を持たないなら真。更新前の NDF が書いた回答はここに当たる。
+    """
+    if payload.get("by") != MVV_SERVICE:
+        return False
+    return not mvv_counted(payload.get(MVV_KEY), gate)
 
 
 def _outputs(report: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -182,6 +216,40 @@ def mvv_answer(step: str, kind: str, answer: str, held: Optional[Mapping[str, An
         MVV_KEY: dict(held) if held is not None else None,
     }
     return payload, f"MVV 判定で承認ゲート {gate} を省いた"
+
+
+# 閲覧範囲を限れない保存先へ書く判定の自由記述の置き換え（件数は保つ。#3959）
+MVV_WITHHELD = "伏せた（全文は今回の判定のコメントで読む）"
+
+
+# 根拠の項目として共有してよい形（Mission・Vision・Value <番号>・共通原則の C<番号>・レッドラインの P<番号>。頭に「スプリント 」を
+# 付けた形も認める）。モデルが書いたほかの文字列は、閲覧範囲を限れない保存先と資料へ写さない（#3959）
+_SHARED_BASIS = re.compile(r"(?:スプリント )?(?:Mission|Vision|Value [0-9]{1,3})|[CP][0-9]{1,3}")
+
+
+def mvv_basis_shared(raw: Any) -> Any:
+    """判定の根拠の項目 `raw` のうち、`_SHARED_BASIS` の形に合う文字列だけ。配列でなければそのまま返す。"""
+    return [b for b in raw if isinstance(b, str) and _SHARED_BASIS.fullmatch(b)] if isinstance(raw, list) else raw
+
+
+def mvv_stored_view(held: Any) -> Any:
+    """判定の出力 `held` から自由記述（理由・レッドライン・保留・`why` の各要素）を `MVV_WITHHELD` に置き換えた写し。
+
+    根拠の項目は MVV と共通原則の項目の形に合うものだけを残す（`mvv_basis_shared`）。件数・`skip`・判定の語・
+    `holds` が空の配列か null か・`stopped_by`・`noted`・`note_url`・`pr`・`head` は残すので、`mvv_skip` と `hold_checked` の結果は変わらない。object でなければそのまま返す。"""
+    if not isinstance(held, dict):
+        return held
+
+    def hidden(raw: Any) -> Any:
+        return [MVV_WITHHELD for _ in raw] if isinstance(raw, list) else raw
+
+    out = {**held, **{k: hidden(held[k]) for k in ("why", "holds") if k in held}}
+    verdict = held.get("verdict")
+    if isinstance(verdict, dict):
+        out["verdict"] = {**verdict, **{k: hidden(verdict[k]) for k in ("reasons", "boundary") if k in verdict}}
+        if "basis" in verdict:
+            out["verdict"]["basis"] = mvv_basis_shared(verdict["basis"])
+    return out
 
 
 def branch_prefix(kind: str) -> str:

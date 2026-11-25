@@ -1,0 +1,7 @@
+{
+  "meaning": "cross-review が、承認ゲートの判定に要る MVV の記録の行（redline・deferred）を書けなかった。記録が無いと承認ゲートが PR を省けるため、収束にせず止まる（原因は状態ファイルの mvv_record_error にある）",
+  "std_type": "runtime",
+  "exit": "failed",
+  "route": "conductor",
+  "retry": null
+}

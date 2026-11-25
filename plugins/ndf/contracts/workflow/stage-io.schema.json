@@ -5,13 +5,8 @@
   "description": "工程の文書の input.schema・output.schema と、ステップの output.schema が参照する規約。工程の入力が要る文脈のキーと、工程の出力が書く文脈のキーは、工程の文書の metadata.ndf の inputs・outputs が持ち、読み手（ndf.progress.definition）がここの規約に重ねて確かめる",
   "$defs": {
     "stage-in": {
-      "type": "object",
-      "required": ["context"],
-      "properties": {
-        "context": {"$ref": "context.schema.json"},
-        "base": {"type": "string", "minLength": 1, "description": "入力の範囲の起点のコミット"},
-        "head": {"type": "string", "minLength": 1, "description": "入力の範囲の終点のコミット"}
-      }
+      "$ref": "context.schema.json",
+      "description": "工程の入力。工程の定義の inputs と、文脈にある optional_inputs のキーを文脈から取った平らな object（progress.invoke.resolve_inputs）。script の作業は環境変数 NDF_STAGE_INPUT で、Skill の作業は質問の「入力（JSON）」で受ける"
     },
     "stage-out": {
       "type": "object",
