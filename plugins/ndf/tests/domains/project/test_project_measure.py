@@ -210,9 +210,14 @@ def _files_tree(files: list[str]) -> measure_repo.Tree:
     return tree
 
 
+def _no_deps() -> dict[str, dict[str, str]]:
+    """`dependencies(tree)` と同じ形（依存の言語ごとの空の辞書）。"""
+    return {lang: {} for lang in measure_repo.DEP_LANGUAGES}
+
+
 def test_measure_languages_rows_have_no_file_count_and_are_sorted_by_name():
     tree = _files_tree(["a.py", "b.py", "c.py", "x.go", "y.ts"])
-    langs = measure_repo.measure_languages(tree, {})["value"]
+    langs = measure_repo.measure_languages(tree, _no_deps())["value"]
     assert [row["name"] for row in langs] == sorted(row["name"] for row in langs)
     assert all("files" not in row for row in langs)
 
@@ -220,7 +225,7 @@ def test_measure_languages_rows_have_no_file_count_and_are_sorted_by_name():
 def test_measure_languages_order_does_not_follow_the_file_counts():
     more_python = _files_tree(["a.py", "b.py", "c.py", "x.go"])
     more_go = _files_tree(["a.py", "x.go", "y.go", "z.go"])
-    assert measure_repo.measure_languages(more_python, {}) == measure_repo.measure_languages(more_go, {})
+    assert measure_repo.measure_languages(more_python, _no_deps()) == measure_repo.measure_languages(more_go, _no_deps())
 
 
 def _small_repo(tmp_path, files: dict[str, str]) -> Path:
