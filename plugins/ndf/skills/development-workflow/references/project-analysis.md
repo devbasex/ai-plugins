@@ -52,7 +52,7 @@ ndf project write --measure "$TMP/measure.json" --answers "$TMP/answers.json"; e
 
 **CI について測るのは、既定ブランチの必須のチェック（`ci.required_checks`）だけである。**
 `gh` で呼ぶ API は、必須のチェック（`rules/branches`）・閉じた PR（`pulls`）・課題（`issues`）の 3 つだけである。
-CI の実行時間・JUnit の合計・ワークフローの一覧・言語ごとのファイル数は、読む仕組みが無いので測らない（ https://github.com/devbasex/ai-plugins/issues/4516 で測るのをやめた）。
+CI の実行時間・JUnit の合計・ワークフローの一覧・言語ごとのファイル数は、読む仕組みが無いので測らない。
 テストの走らせ方（`test`）は、手がかりがあれば質問（`status: question`）になり、無ければ回答の要らない値になる。
 質問のときは、suite を次の順で決めて回答する。
 指示書・README にテストの走らせ方が書かれていれば、その記述に従う。
