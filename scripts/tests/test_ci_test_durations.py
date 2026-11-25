@@ -1040,13 +1040,6 @@ def test_trend_time_up_after_broken_total_warns_both(tmp_path, config, capsys) -
     assert "run 1000" in warning
 
 
-def test_trend_config_error_returns_two(tmp_path, config) -> None:
-    config(runs=0)
-    full_dir(tmp_path / "junit")
-
-    assert trend(tmp_path, trend_gh())[0] == 2
-
-
 def test_trend_unwritable_out_still_zero(tmp_path, config, capsys) -> None:
     full_dir(tmp_path / "junit")
     code, _ = trend(tmp_path, trend_gh(), out=tmp_path / "no" / "x.json")

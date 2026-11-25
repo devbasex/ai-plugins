@@ -37,7 +37,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from pytest_shard import NDF_JUNIT, ROOT_JUNIT
+# ファイルの直接実行（scripts が sys.path の先頭）と `python3 -m scripts.ci_test_durations` の両方で読めるようにする
+if __package__:
+    from .pytest_shard import NDF_JUNIT, ROOT_JUNIT
+else:
+    from pytest_shard import NDF_JUNIT, ROOT_JUNIT
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "scripts" / "ci-test-duration.json"
@@ -45,7 +49,7 @@ CONFIG = ROOT / "scripts" / "ci-test-duration.json"
 # 成果物の名前の頭（根と NDF）は scripts/pytest_shard.py の定数を正本にする
 ROOT_ARTIFACT = ROOT_JUNIT
 NDF_ARTIFACT = NDF_JUNIT
-ARTIFACT_NAME = re.compile(r"^pytest(-ndf)?-junit-(\d+)$")
+ARTIFACT_NAME = re.compile(rf"^(?:{re.escape(ROOT_ARTIFACT)}|({re.escape(NDF_ARTIFACT)}))(\d+)$")
 ARTIFACT_LIMIT = 16 * 1024 * 1024
 TOTAL_LIMIT = 64 * 1024 * 1024
 TOTAL_ARTIFACT = "ci-test-duration-total"
@@ -365,7 +369,7 @@ def current_total(xml_dir: Path, gh: Gh, run_id: int, attempt: int) -> tuple[dic
         return body(shard_attempts, None, None, None, reason), [f"この回（run {run_id}）: {reason}"]
 
     try:
-        listed = gh.get(f"{REPO_API}/actions/runs/{run_id}/jobs?filter=latest&per_page={PER_PAGE}", "jobs")["jobs"]
+        listed = latest_jobs(gh, run_id)
     except GhTimeUp:
         return invalid("ジョブの一覧を取れない（時間の上限）", guess)
     except (GhError, KeyError, TypeError):

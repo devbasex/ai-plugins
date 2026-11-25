@@ -23,7 +23,7 @@ scripts/
     └── test_ci_test_durations.py *
 ```
 
-依存の向き: ワークフローが 2 つのスクリプトを呼び、スクリプトは設定ファイルと実測秒の表を読む。`scripts/ci_test_durations.py` は標準ライブラリと `gh` コマンドだけに頼る。`scripts/pytest_shard.py` も NDF のコード（`plugins/ndf/src`）も import しない（決定 4）。`scripts/pytest_shard.py` は pytest のプラグインとして NDF のテストの手順に読み込まれるが、NDF の `conftest.py` とは互いに import しない。依存は一方向で、循環は無い。`scripts/pytest_shard.py` は、モジュールの最上位では標準ライブラリだけを import する。pytest はフックの中で初めて import するので、pytest を入れていない環境でも `python3 scripts/pytest_shard.py files` と `seconds` が動く（「割り当て」の「モジュールの読み込み」）。構成要素どうしの関係は設計文書の「構成要素」の図にあり、ここでは描き直さない。
+依存の向き: ワークフローが 2 つのスクリプトを呼び、スクリプトは設定ファイルと実測秒の表を読む。`scripts/ci_test_durations.py` は標準ライブラリと `gh` コマンドに頼り、成果物の名前の頭（`ROOT_JUNIT`・`NDF_JUNIT`）だけを `scripts/pytest_shard.py` から import する。`scripts/pytest_shard.py` は最上位で標準ライブラリだけを読むので、実行機の `python3` でも読める。NDF のコード（`plugins/ndf/src`）は import しない（決定 4）。`scripts/pytest_shard.py` は pytest のプラグインとして NDF のテストの手順に読み込まれるが、NDF の `conftest.py` とは互いに import しない。依存は一方向で、循環は無い。`scripts/pytest_shard.py` は、モジュールの最上位では標準ライブラリだけを import する。pytest はフックの中で初めて import するので、pytest を入れていない環境でも `python3 scripts/pytest_shard.py files` と `seconds` が動く（「割り当て」の「モジュールの読み込み」）。構成要素どうしの関係は設計文書の「構成要素」の図にあり、ここでは描き直さない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -72,7 +72,7 @@ scripts/
 | 試行の番号のファイルの名前 `shard-attempt-<番号>.txt` | 設定値 | `.github/workflows/pytest.yml` | — |
 | 手順の名前 `根のテスト`・`NDF のテスト` | 設定値 | `.github/workflows/pytest.yml` | — |
 
-成果物の名前の頭・試行の番号のファイルの名前・手順の名前は、読む側のスクリプトも定数で持つ。持つのは `scripts/ci_test_durations.py` と `scripts/pytest_shard.py` である（それぞれの「内部のデータと定数」）。ワークフローの YAML からスクリプトへ値を渡す経路が無いため、2 か所に置く。食い違うと、`run` が「XML が 1 つも読めない」で 1 を返し、`trend` が無効な集計を書くので、実装の Pull Request の CI の `run` で気づける。
+成果物の名前の頭・試行の番号のファイルの名前・手順の名前は、読む側のスクリプトも定数で持つ。成果物の名前の頭は `scripts/pytest_shard.py` の `ROOT_JUNIT`・`NDF_JUNIT` を正本にし、`scripts/ci_test_durations.py` はそれを import して、名前の判定（`ARTIFACT_NAME`）もその定数から組み立てる。試行の番号のファイルの名前と手順の名前は `scripts/ci_test_durations.py` だけが持つ。ワークフローの YAML からスクリプトへ値を渡す経路が無いため、YAML とスクリプトの 2 か所に置く。食い違うと、`run` が「XML が 1 つも読めない」で 1 を返し、`trend` が無効な集計を書くので、実装の Pull Request の CI の `run` で気づける。
 
 ## 割り当て
 
