@@ -128,6 +128,24 @@ class _XdistHooks:
             node.workerinput[OWNER_KEY] = owner
 
 
+def _worker_owner(workerinput: Mapping[str, Any]) -> dict[str, int]:
+    """worker の割り当て。controller が `workerinput` に入れたものを受け取る。"""
+    owner = workerinput.get(OWNER_KEY)
+    if owner is None:
+        import pytest
+
+        raise pytest.UsageError("pytest_shard: controller から割り当てを受け取れなかった")
+    return owner
+
+
+def _controller_owner(config: pytest.Config, total: int) -> dict[str, int]:
+    """controller の割り当て。テストのファイルを振り分け、xdist があれば worker へ渡すフックを登録する。"""
+    owner = assign_files(_test_files(config), total, read_seconds(SECONDS))
+    if config.pluginmanager.hasplugin("xdist"):
+        config.pluginmanager.register(_XdistHooks(config))
+    return owner
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """割り当てを決めて（worker は controller から受け取って）`config.stash` に置く。"""
     shard = shard_env(os.environ)
@@ -137,15 +155,9 @@ def pytest_configure(config: pytest.Config) -> None:
     owner_key, index_key = _stash_keys()
     workerinput = getattr(config, "workerinput", None)
     if workerinput is not None:
-        owner = workerinput.get(OWNER_KEY)
-        if owner is None:
-            import pytest
-
-            raise pytest.UsageError("pytest_shard: controller から割り当てを受け取れなかった")
+        owner = _worker_owner(workerinput)
     else:
-        owner = assign_files(_test_files(config), total, read_seconds(SECONDS))
-        if config.pluginmanager.hasplugin("xdist"):
-            config.pluginmanager.register(_XdistHooks(config))
+        owner = _controller_owner(config, total)
     config.stash[owner_key] = owner
     config.stash[index_key] = index
 
