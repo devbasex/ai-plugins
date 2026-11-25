@@ -124,13 +124,38 @@ class Gh:
         lines = stderr.decode("utf-8", "replace").strip().splitlines()
         return GhError(f"{path}: {lines[0] if lines else 'gh が失敗した'}")
 
-    def _run(self, path: str, kind: str) -> bytes:
+    def _begin(self, path: str, kind: str) -> tuple[list[str], float]:
+        """締め切りを確かめて呼び出しを数え、`gh` の起動の引数とこの呼び出しの待ち時間を返す。"""
         timeout = self._timeout()
         self.calls[kind] += 1
+        return ["gh", "api", "--method", "GET", path], timeout
+
+    @staticmethod
+    def _launch(start: Callable[[], Any]) -> Any:
+        """`gh` を起動する。`gh` が無ければ `GhUnavailable` にする。"""
         try:
-            p = subprocess.run(["gh", "api", "--method", "GET", path], capture_output=True, timeout=timeout)
+            return start()
         except FileNotFoundError as e:
             raise GhUnavailable("gh が無い") from e
+
+    @staticmethod
+    def _read_limited(proc: subprocess.Popen, limit: int) -> list[bytes]:
+        """標準出力を `limit` バイトまで読む。超えたら `gh` を止めて `ArtifactTooLarge` にする。"""
+        chunks: list[bytes] = []
+        size = 0
+        while chunk := proc.stdout.read(CHUNK):
+            size += len(chunk)
+            if size > limit:
+                proc.kill()
+                proc.wait()
+                raise ArtifactTooLarge(size)
+            chunks.append(chunk)
+        return chunks
+
+    def _run(self, path: str, kind: str) -> bytes:
+        cmd, timeout = self._begin(path, kind)
+        try:
+            p = self._launch(lambda: subprocess.run(cmd, capture_output=True, timeout=timeout))
         except subprocess.TimeoutExpired as e:
             raise self._timed_out(path, timeout) from e
         if p.returncode != 0:
@@ -147,26 +172,14 @@ class Gh:
     def raw(self, path: str, kind: str, limit: int | None = None) -> bytes:
         if limit is None:
             return self._run(path, kind)
-        timeout = self._timeout()
-        self.calls[kind] += 1
+        cmd, timeout = self._begin(path, kind)
         with tempfile.TemporaryFile() as err:
-            try:
-                proc = subprocess.Popen(["gh", "api", "--method", "GET", path], stdout=subprocess.PIPE, stderr=err)
-            except FileNotFoundError as e:
-                raise GhUnavailable("gh が無い") from e
+            proc = self._launch(lambda: subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err))
             fired: list[bool] = []
             timer = threading.Timer(timeout, lambda: (fired.append(True), proc.kill()))
             timer.start()
-            chunks: list[bytes] = []
-            size = 0
             try:
-                while chunk := proc.stdout.read(CHUNK):
-                    size += len(chunk)
-                    if size > limit:
-                        proc.kill()
-                        proc.wait()
-                        raise ArtifactTooLarge(size)
-                    chunks.append(chunk)
+                chunks = self._read_limited(proc, limit)
                 code = proc.wait()
             finally:
                 timer.cancel()
