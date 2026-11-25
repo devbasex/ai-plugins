@@ -910,9 +910,10 @@ def test_gh_raw_without_limit_matches_run(monkeypatch) -> None:
 # --- render_trend と cmd_trend ---
 
 
-def trend(tmp_path: Path, gh: FakeGh, *extra: str) -> tuple[int, Path]:
-    out = tmp_path / "out" / "total.json"
-    out.parent.mkdir(exist_ok=True)
+def trend(tmp_path: Path, gh: FakeGh, *extra: str, out: Path | None = None) -> tuple[int, Path]:
+    if out is None:
+        out = tmp_path / "out" / "total.json"
+        out.parent.mkdir(exist_ok=True)
     code = ctd.main(
         ["trend", str(tmp_path / "junit"), "--run", "7", "--run-number", "100", "--attempt", "1", "--out", str(out), *extra],
         gh=gh,
@@ -1048,10 +1049,7 @@ def test_trend_config_error_returns_two(tmp_path, config) -> None:
 
 def test_trend_unwritable_out_still_zero(tmp_path, config, capsys) -> None:
     full_dir(tmp_path / "junit")
-    code = ctd.main(
-        ["trend", str(tmp_path / "junit"), "--run", "7", "--run-number", "100", "--attempt", "1", "--out", str(tmp_path / "no" / "x.json")],
-        gh=trend_gh(),
-    )
+    code, _ = trend(tmp_path, trend_gh(), out=tmp_path / "no" / "x.json")
 
     assert code == 0 and "集計を書けない" in capsys.readouterr().out
 
