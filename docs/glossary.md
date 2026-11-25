@@ -15,7 +15,7 @@
 | NDF の設計（`ndf-design`） | 設計 Pull Request・設計文書・設計の結果・決定の記録・外部の調査・代表のリポジトリの語 | 47 | `docs/glossary/ndf-design.md` |
 | NDF のブランチ戦略（`ndf-branch-strategy`） | ブランチ戦略の設定がベースブランチ・スプリントブランチ・リリース方式・レビューの単位・承認の受け方を決めるときの語 | 36 | `docs/glossary/ndf-branch-strategy.md` |
 | NDF のコードの構造（`ndf-code-structure`） | NDF のスクリプトの構造・エントリポイントとコントラクト・公開する面・依存のバージョン・AI の兆候の検査の語 | 50 | `docs/glossary/ndf-code-structure.md` |
-| NDF のプロジェクトの設定（`ndf-project-settings`） | プロジェクトの設定（.ndf/）を解析で作り、選べる値と旧いキーの改名を扱うときの語 | 19 | `docs/glossary/ndf-project-settings.md` |
+| NDF のプロジェクトの設定（`ndf-project-settings`） | プロジェクトの設定（.ndf/）を解析で作り、選べる値と旧いキーの改名を扱うときの語 | 18 | `docs/glossary/ndf-project-settings.md` |
 | NDF の作り直し（`ndf-rebuild`） | #1142 の作り直し（ndf-next）と、旧いプラグインからの入れ替えの語。子の表・振り分け表・11.x の子 | 29 | `docs/glossary/ndf-rebuild.md` |
 | NDF の Slack 通知（`ndf-notification`） | 利用者の手を待つ時点・その種類・通知の本文と復帰先 | 3 | `docs/glossary/ndf-notification.md` |
 | NDF の外部 CLI 委譲（`ndf-agent-cli`） | cross-review / cross-refactoring が参加者の CLI を選び、起動し、監視し、結果を読むときの語。ランタイム・ホスト・参加者プール・起動結果 | 34 | `docs/glossary/ndf-agent-cli.md` |

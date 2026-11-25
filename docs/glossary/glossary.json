@@ -7738,14 +7738,7 @@
     {
       "term": "解析の記録",
       "context": "ndf-project-settings",
-      "meaning": "解析が書く、解析をいつどの入力で行ったかの値（解析器のバージョン・解析した時刻・入力のファイルのハッシュ・ブランチの構成）。git で追跡しないファイルに置き、設定には置かない",
-      "source": "",
-      "pending_source": "issues/issue-4516-requirements.md"
-    },
-    {
-      "term": "計測値",
-      "context": "ndf-project-settings",
-      "meaning": "解析が測る、実行ごとに変わる数（言語ごとのファイル数・CI のワークフローごとの実行時間・直近の実行のジョブ数）。解析の記録と同じ、git で追跡しないファイルに置き、設定には置かない",
+      "meaning": "解析が書く、解析をどの入力で行ったかの値（解析器のバージョン・入力のファイルのハッシュ・ブランチの構成）。設定が古くなっていないかの判定が読む。git で追跡しないファイルに置き、設定には置かない",
       "source": "",
       "pending_source": "issues/issue-4516-requirements.md"
     },
