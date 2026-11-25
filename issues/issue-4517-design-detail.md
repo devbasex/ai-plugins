@@ -81,12 +81,12 @@ plugins/ndf/
 | `skills/quality-gates/SKILL.md` | 変更 | 差分でモードを照らし直し、`recheck` が `None` でなければ出力 `mode_check` を書いて失敗で返す | — | — | — |
 | `skills/release-verification/SKILL.md` | 変更 | 「最終工程」の条件にリリース後レビューを足す。`hotfix` では合否・保留によらず結果を出力 `verification` に書いて工程を終え、不合格でも起票しない（起票はリリース後レビュー） | — | — | — |
 | `contracts/templates/fix.json` | 削除 | 課題番号の無い即時修正のプランを無くす | — | — | — |
-| `contracts/workflow/progress.json` | 変更 | 事象 `mode_decided` とレーンの行の事象 `row_restarted` を登録し、`manual_finished` の書き手に `workflow` を、`outputs_recorded` の `from` に `failed` を足す | — | — | — |
+| `contracts/workflow/progress.json` | 変更 | 事象 `mode_decided`・`issues_split` とレーンの行の事象 `row_restarted`・`row_issues_split` を登録し、`manual_finished` の書き手に `workflow` を、`outputs_recorded` の `from` に `failed` を足す | — | — | — |
 | `src/ndf/core/route/__init__.py` | 変更 | `immediate_fix` の説明を消す | — | — | — |
-| `src/ndf/progress/lane/__init__.py` | 変更 | `add_row`・`carry_issues` が行の判定を `row_errors` で確かめ、繰り越しで判定を写す。実行中の行のスプリントの ID を流し直しのスプリントへ付け替える | `judgment` | モジュール | `add_row`・`carry_issues`（変更）・`restart_row`・`order_rows`（新設） |
+| `src/ndf/progress/lane/__init__.py` | 変更 | `add_row`・`carry_issues` が行の判定を `row_errors` で確かめ、繰り越しで判定を写す。実行中の行のスプリントの ID を流し直しのスプリントへ付け替える。スプリントの始めに外した課題を実行中の行から除く。レーンを作るときに初期の行を優先の順に並べる | `judgment` | モジュール | `add_row`・`carry_issues`・`create_lane`・`fold_lane`（変更）・`restart_row`・`split_row_issues`・`order_rows`（新設） |
 | `contracts/workflow/modes/hotfix.json` | 新設 | `hotfix` の工程の並び。`metadata.ndf.priority` は 1 | 工程の定義 | — | — |
 | `contracts/workflow/modes/standard.json`・`light.json`・`operation.json`・`documentation.json`・`legacy-refactor.json` | 変更 | `metadata.ndf.priority` を足す（`operation` 2・`light` 3・`documentation`・`legacy-refactor` 4・`standard` 5） | — | — | — |
-| `src/ndf/progress/lane/machine.py` | 変更 | 上限で待つ行を優先の順に許可する | `judgment` | モジュール | `admitted`（変更） |
+| `src/ndf/progress/lane/machine.py` | 変更 | 上限で待つ行を優先の順に許可する。計画ごとに、起動を待つレーンの次の行の優先を読む | `judgment`・`lane.rules` | モジュール | `PlanLanes`・`lanes_of`・`admitted`（変更）・`waiting_order`（新設） |
 | `contracts/workflow/modes/legacy-refactor.json` | 変更 | 先頭に工程「要求と受け入れ条件」を足す（判定の場所） | 工程の定義 | — | — |
 | `contracts/workflow/stages/document-sources.json`・`layout-review.json`・`plan-to-spec.json` | 変更 | 条件（`when`）に `outside_reader` を足す | 条件の語 | — | — |
 | `skills/development-workflow/references/document-types.md` | 変更 | 「何が `documentation` に当たるか」の `README.md`・`docs/` の行を分け、タイプ「リポジトリの知識」を足す | — | — | — |
@@ -106,7 +106,7 @@ plugins/ndf/
 | `contracts/worker/kinds.json` | 変更 | 作業の種類 `mode`（`excerpt` は `skills/development-workflow/references/mode-criteria.md`、出力 `mode_judgment`） | — | — | — |
 | `src/ndf/progress/judgment.py` | 新設 | 判定の記録を確かめ、スプリントのモードを決め、工程表の作り直しの下書きを作る | `definition`・`stages`・`model` | モジュール | `sprint_mode`・`split_groups`・`priority_of`・`recheck`・`check`・`row_errors`・`redefine` |
 | `src/ndf/progress/store.py` | 変更 | 定義の改訂を足す。写し元の ID から流し直しの後継を引く | — | モジュール | `append_definition`・`find_successor`（新設） |
-| `src/ndf/progress/command.py` | 変更 | `new` の `--mode` を省略できる参考の値にし、`--requirements` と `finish` で判定を当てる。`--carry` の写し元に未解決のモードの引き上げ（判定の訂正を含む）があれば `rerun_floor` を作り、写し元がレーンの行のスプリントなら同じトランザクションで行を付け替える。写し元に後継（`carried_from` が写し元の流し直し）があれば、名前にかかわらず作らずに断り、後継の ID を返す。`show` の結果に `context`（`issues`・`pace`）と `parent` を足す。`new` に `--from-branch` を足し、文脈の `from_branch` に置く | `judgment`・`lane` | モジュール | `_sprint_new`・`_prepare_new`・`_cmd_finish`・`_cmd_show`・`parser`（変更）・`_unresolved_raise`（新設） |
+| `src/ndf/progress/command.py` | 変更 | `new` の `--mode` を省略できる参考の値にし、`--requirements` と `finish` で判定を当てる。`--carry` の写し元に未解決のモードの引き上げ（判定の訂正を含む）があれば `rerun_floor` を作り、写し元がレーンの行のスプリントなら同じトランザクションで行を付け替える。写し元に後継（`carried_from` が写し元の流し直し）があれば、名前にかかわらず作らずに断り、後継の ID を返す。`show` の結果に `context`（`issues`・`pace`）と `parent` と、分けたときの `split_out_rows`（外した課題の新しい行の名前と判定）を足す。`new` に `--from-branch` を足し、文脈の `from_branch` に置く | `judgment`・`lane` | モジュール | `_sprint_new`・`_prepare_new`・`_cmd_finish`・`_cmd_show`・`parser`（変更）・`_unresolved_raise`（新設） |
 | `src/ndf/progress/run.py` | 変更 | 工程が流れて終わったときに判定を当て、判定の無い後の工程を断る | `judgment` | モジュール | `_finish_stage`（変更）・`_judged`（新設）・`_outside_reader`（新設） |
 | `src/ndf/progress/plan/cli.py` | 変更 | `lanes init`・`lane add` が計画の行の `judgments` を `judgment.row_errors` で確かめ、`row add` に `--judgments` を足す | `judgment` | モジュール | `lanes init` の検査・`_row_add`（変更） |
 | `src/ndf/progress/lane/launch.py` | 変更 | 行の判定から決めたモードを参考の値として渡し、`DEFAULT_MODE` を消す | `judgment` | モジュール | `start_commands`（変更） |
@@ -128,11 +128,20 @@ plugins/ndf/
 
 - `check`
   - 事前条件: `record` は工程「要求と受け入れ条件」の出力の `mode_judgment`
-  - 事後条件: 空のリストなら、課題の組がスプリントの課題と等しく、どの課題もモードの値と空でない根拠を持つ
+  - 事後条件: 空のリストなら、課題の組がスプリントの課題と等しく、どの課題もモードの値と空でない根拠を持つ。モードの混ざりは `check` では見ない（`sprint_mode` が見る）。`check` を当てるのは判定の作業の出力（分ける前）である
 - `sprint_mode`
   - 事前条件: `check` が空を返した
-  - 事後条件: 設計文書の「スプリントのモード」の表のとおり。課題のモードが 1 つにそろい、`hotfix` なら課題が 1 つのときだけ、そのモードを返す。モードが 2 つ以上あるとき、または `hotfix` の課題が 2 つ以上のときは、高い方へ寄せずに `MixedModes`（`judgment.py` に置く `JudgmentError` の子。モードごとの課題の組 `groups` を持つ）を投げる。`JudgmentError` は `judgment.py` に置く `ValueError` の子である
-  - `documentation` の課題のタイプに `repo-knowledge` とほかのタイプが混ざっても `JudgmentError` を投げる（「リポジトリの知識は社外の文書と混ぜない。スプリントを分ける」）。社外の文書に要る工程（素材の収集と出典の確定・体裁レビュー）は課題ごとには選べず、スプリント全体で有効か無効かが決まるためである。今の 6 つのタイプどうしの混ざりは今のまま受ける
+  - 事後条件: 設計文書の「スプリントのモード」の表のとおり、課題を「組」に分け、組が 1 つのときだけそのモードを返す。組が 2 つ以上なら、高い方へ寄せずに `MixedModes` を投げる。`MixedModes` は `judgment.py` に置く `JudgmentError` の子で、`JudgmentError` は `judgment.py` に置く `ValueError` の子である
+  - 組の作り方は次の表のとおりで、1 つの組が 1 つのスプリントになる。`MixedModes.groups` は組の一覧 `[{"mode", "doc_side", "issues"}]` を持つ。`doc_side` は `documentation` の組だけが持ち、値は `repo-knowledge` か `outside`（今の 6 つのタイプ）である
+
+| 課題 | 組 |
+| --- | --- |
+| `hotfix` | 課題ごとに 1 つの組（課題 1 つの即時修正だけがスプリントになる） |
+| `documentation` で `doc_type` が `repo-knowledge` | `documentation`・`repo-knowledge` の組に集める |
+| `documentation` でほかのタイプ | `documentation`・`outside` の組に集める（6 つのタイプどうしは今のまま 1 つの組に入る） |
+| それ以外 | モードごとに 1 つの組 |
+
+  - `repo-knowledge` と社外向けのタイプを別の組にするのは、社外の文書に要る工程（素材の収集と出典の確定・体裁レビュー）が課題ごとには選べず、スプリント全体で有効か無効かが決まるためである。モードの違いと同じく `MixedModes` で表し、要求の工程では分けて続け、計画の行では断る（下の「混ざりを分ける・出現の少ないモードを先に流す」）
   - `floor` があれば、まず `hotfix` の課題を `standard` として数え（流し直しのスプリントは即時修正にしない）、その結果と `floor` の高い方を返す。`floor` は `recheck` の戻り値なので `hotfix` にならない。したがって `floor` があるとき `hotfix` は返らず、課題 1 つの条件を破らない
   - `floor` と課題の判定で側（「コード」「リポジトリの知識」「社外の文書」。`recheck` の「側」）が違えば、高さを比べずに `JudgmentError` を投げる（「差分の分類は `floor` の側。課題の判定を直す」）。`floor` の側は `rerun_floor.mode` と `rerun_floor.doc_type` で決まる。`floor` が文書の側なのは判定の訂正（`reclassify`）のときだけで、そのときは課題の判定がすべて同じ側であることを求め、`documentation` を返す
 - `recheck`
@@ -234,6 +243,8 @@ plugins/ndf/
 | `outputs_recorded`（既存） | 今のまま | 今のまま | `from` に `failed` を足す（失敗にした工程が `mode_check` を残すため。「完了判定の照らし直しと流し直し」） |
 | `failed`（既存） | `conductor` を足す（手で `mode_check` を渡して失敗にする経路のため） | 今のまま | 今のまま（`running` → `failed`） |
 | `row_restarted`（新設、レベル `lane`） | `conductor` | `row` | `running` → `running`。行の `sprint_id` を流し直しのスプリントの ID に置き換える（「レーンの行の付け替えと、途中で止まったときの再開」） |
+| `issues_split`（新設） | `workflow`・`conductor` | `table` | 変えない（記録だけの事象）。payload は外した課題の判定の行（`split_out`）と残す課題。文脈の `issues` を残す課題に置き換える（「混ざりを分ける・出現の少ないモードを先に流す」） |
+| `row_issues_split`（新設、レベル `lane`） | `workflow`・`conductor` | `row` | `running` → `running`。payload は外した課題の番号。行の畳み方は、行の課題と `judgments` から外した課題を除く（同上） |
 
 判定のモードが違うときは、1 つのトランザクションで次の順に書く。同じときは 1 から 3 だけを書く。
 
@@ -268,7 +279,8 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `check` | 判定の記録が無い | 印のあるステートマシンで、文脈にも要求の工程の出力にも `mode_judgment` が無い | `_cmd_finish`・`_finish_stage`・`_prepare_new`（`--requirements`） | 止める | `refused`、「判定の記録が無い」。終了コード 1 | 何も書かない。出力を直して打ち直せる |
 | `check` | 根拠が空・知らないモード・課題の組の食い違い | worker の出力の誤り | 同上 | 止める | `refused` に誤りの一覧 | 同上 |
-| `sprint_mode` | モードの混ざり（`MixedModes`） | 計画の切り方の誤りか、要求で判定が分かれた | 計画の行の登録・要求の工程を終えるとき | 計画の行では止める。要求の工程では `split_groups` で分けて続ける（下の「混ざりを分ける」） | 計画の行は `invalid`、「モードの違う課題は行を分ける」。要求の工程は `ok` と `items` の `split_out` | 計画の行は直して打ち直せる |
+| `sprint_mode` | 組が 2 つ以上（`MixedModes`。モードの混ざり・`hotfix` の課題が 2 つ以上・`repo-knowledge` と社外向けのタイプの混ざり） | 計画の切り方の誤りか、要求で判定が分かれた | 計画の行の登録・要求の工程を終えるとき | 計画の行では止める。要求の工程では `split_groups` で分けて続ける（下の「混ざりを分ける」） | 計画の行は `invalid`、「組の違う課題は行を分ける」。要求の工程は `ok` と `items` の `split_out` | 計画の行は直して打ち直せる |
+| `sprint_mode` | `floor` と課題の判定で側が違う（`JudgmentError`。`MixedModes` ではない） | 流し直しの判定が差分の分類と合わない | 流し直しのスプリントの要求の工程を終えるとき | 止める。分けない | `refused`、「差分の分類は `floor` の側。課題の判定を直す」 | 何も書かない。判定を直して打ち直せる |
 | `append_definition` | 改訂の番号がぶつかる | 同時の書き込み | `store` の一意の制約 | 呼び元へ返す | 既存の `Conflict` の扱い（読み直して書き直す回数の方針 `contracts/limits/` の方針 `progress.append`） | 読み直して再試行できる |
 
 ### 処理の手順
@@ -278,8 +290,9 @@ plugins/ndf/
 | `_cmd_finish`・`_finish_stage` | 印が無い、または文脈に `mode_judgment` が既にある | 今のとおり出力の事象と `finished` だけを書く（上の「判定を求めないステートマシン」と「判定を済ませた要求の工程の流し直し」） |
 | `_cmd_finish`・`_finish_stage` | 印があり、工程が「要求と受け入れ条件」で、判定のモードが今の定義と同じ | 出力の事象と `mode_decided`（判定の記録・参考の値）を書く |
 | 同上 | 同上で、判定のモードが違う | 上に加え、`append_definition` で改訂を足し、`redefine` の下書きを新しい改訂で書く。結果 JSON の `items` に `{"kind": "mode_changed", "hint": <参考の値>, "mode": <判定の値>}` を 1 行足す |
+| 同上 | 印があり、工程が「要求と受け入れ条件」で、`sprint_mode` が `MixedModes` を投げた | `split_groups` で残す組を決め、残す課題だけの判定の記録で上の 2 行のどちらかを行う。同じトランザクションで `issues_split` と、レーンの行なら `row_issues_split` を書き、`items` に `split_out` の行を出す（「混ざりを分ける・出現の少ないモードを先に流す」） |
 | `run.py` の工程を流す前の確かめ（`_judged`） | 定義に `judgment: "required"` があり、要求の工程より後の工程で、`View.context()` に `mode_judgment` が無い | 流さずに `refused`、「判定の記録が無い。要求と受け入れ条件を終える」 |
-| `_prepare_new` | `--requirements` の `mode_judgment` に出所（`source: {"machine": <ID>, "seq": <mode_decided の事象の番号>}`）がある | 出所のステートマシンをストアから読み、その事象が `mode_decided` で、判定の記録の sha256 と課題の組が `--requirements` と `--issues` に一致するときだけ受ける。判定のモードの定義で改訂 1 を作り、`mode_decided` を最初の事象に含める。`--mode` は参考の値として文脈の `mode_judgment.hint` に残す |
+| `_prepare_new` | `--requirements` の `mode_judgment` に出所（`source: {"machine": <ID>, "seq": <mode_decided の事象の番号>}`）がある | 出所のステートマシンをストアから読み、その事象が `mode_decided` で、判定の記録の sha256 が `--requirements` の `mode_judgment` と一致し、判定の記録の `issues` の課題の組（分けたときは残した課題だけ。`split_out` は含めない）が `--issues` と一致するときだけ受ける。判定のモードの定義で改訂 1 を作り、`mode_decided` を最初の事象に含める。`--mode` は参考の値として文脈の `mode_judgment.hint` に残す |
 | `_prepare_new` | `--requirements` に `mode_judgment` があるが出所が無い・一致しない | `refused`、「判定の記録は判定の作業で作る。出所の無い判定は受けない」。手で書いた JSON にモードを書くだけで判定を飛ばす経路を作らない |
 | `_prepare_new` | `--requirements` に `mode_judgment` が無い | 判定が済んでいないので、要求の工程を終えたものにはしない。`--mode`（省けば `standard`）の仮の改訂 1 を作り、`--requirements` の出力を文脈に置いて、要求の工程の行を `pending` に残す。この工程を流すと、要求の文書は文脈にあるので判定の作業 `mode` だけを通す |
 | `_prepare_new` | `--requirements` が無い | `--mode`（省けば `standard`）の定義で仮の改訂 1 を作る |
@@ -288,13 +301,13 @@ plugins/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `mode_judgment` | 型（`issues: [{issue, mode, basis, doc_type}]`・`mode`・`hint`・任意の `source`）。`doc_type` は `mode` が `documentation` の行だけが持ち、値は下の `DOC_TYPES` のどれかである。判定の作業が書き、`check` を通った後にだけ文脈に入る | `contracts/workflow/context.schema.json` | — |
+| `mode_judgment` | 型（`issues: [{issue, mode, basis, doc_type}]`・`mode`・`hint`・任意の `split_out`・任意の `source`）。`doc_type` は `mode` が `documentation` の行だけが持ち、値は下の `DOC_TYPES` のどれかである。判定の作業が書き、`check` を通った後にだけ文脈に入る。混ざりを分けたときは、文脈と `mode_decided` に書く値の `issues` を残す課題の行だけにし、外した課題の行は `issues` と同じ形のまま `split_out` へ移す（「混ざりを分ける・出現の少ないモードを先に流す」）。後の工程（`documents` の検査など）が読む課題の組は `issues` で、文脈の `issues` と等しい | `contracts/workflow/context.schema.json` | — |
 | `DOC_TYPES` | 定数。`documentation` のタイプの値 `proposal`（提案・企画）・`decision`（決裁・稟議）・`report`（定例報告）・`metrics`（指標定義）・`manual`（運用マニュアル）・`briefing`（説明・研修）・`repo-knowledge`（リポジトリの知識）。値は執筆の手引きのファイル名 `type-<値>.md` と同じにする。判定を作る作業の種類 `mode`、`context.schema.json` の `mode_judgment.issues[].doc_type` の列挙、`check`、条件の語 `outside_reader`、用語集のコードは、どれもこの値を使う | `src/ndf/progress/judgment.py`（スキーマの列挙は同じ値を書く） | — |
-| `mode_check` | 型（`mode`・`basis`・`evidence`・`kind`（`rerun`・`reclassify`・`split`）・`doc_type`（文書の側へ移すときだけ）・`split_plan`（`split` のときだけ。「分ける手順」））。`null` も取る（解消の記録）。完了判定と `operation` の適用前の確かめが、工程を失敗にするときに書く | `contracts/workflow/context.schema.json` | — |
-| `evidence` | 判定の根拠の型。次のどれか 1 つ。Git の差分 `{"kind": "git", "base", "head"}`（比較元と比較先の SHA）、保存した実行計画 `{"kind": "plan", "path", "sha256"}`、外部の設定のリクエスト `{"kind": "request", "target", "current", "planned"}`（今の値と変える予定の値） | `contracts/workflow/context.schema.json` | — |
+| `mode_check` | 型（`mode`・`basis`・`evidence`・`kind`（`rerun`・`reclassify`・`split`）・`doc_type`（文書の側へ移すときだけ）・`split_plan`（`split` のときだけ。「分ける手順」）・`needs_human`（真偽。省けば偽））。`null` も取る（解消の記録）。完了判定と `operation` の適用前の確かめが、工程を失敗にするときに書く。`needs_human` が真のときは、根拠の説明に実値が要るので人が読むまで流し直さない（「必ず人の承認が要る操作と公開しない情報」） | `contracts/workflow/context.schema.json` | — |
+| `evidence` | 判定の根拠の型。次のどれか 1 つ。Git の差分 `{"kind": "git", "base", "head"}`（比較元と比較先の SHA）、保存した実行計画 `{"kind": "plan", "ref", "sha256"}`、外部の設定のリクエスト `{"kind": "request", "target", "changes": [{"field", "change"}], "ref"}`。`changes` は変わる項目の名前と変更の種類（`add`・`modify`・`delete`）だけを持ち、今の値も変える予定の値も持たない。実行計画とリクエストの本体は秘密や公開していない値を含みうるので、リポジトリと進捗の DB の外の制限された保存先に置き、`ref` にはその場所の参照（パス）だけを書く | `contracts/workflow/context.schema.json` | — |
 | `from_branch` | `ndf progress new --from-branch` で作ったステートマシンの文脈の初期値。分けた変更を置いたブランチの名前。工程「作業場所の用意」が読む | `contracts/workflow/context.schema.json` | — |
 | `carried_from` | `--carry` で作ったステートマシンの文脈の初期値。写し元の ID。後継を引くのに使う | `contracts/workflow/context.schema.json` | — |
-| `rerun_floor` | 型（`mode`・`doc_type`（`mode_check` にあれば）・`kind`（`rerun` か `reclassify`）・`basis`・`evidence`・`from`（写し元のステートマシンの ID））。流し直しのスプリントの文脈の初期値。判定の作業は `evidence` を `mode_check` と同じ型で読む。判定ではないので `_judged` は見ない | `contracts/workflow/context.schema.json` | — |
+| `rerun_floor` | 型（`mode`・`doc_type`（`mode_check` にあれば）・`kind`（`rerun` か `reclassify`）・`basis`・`evidence`・`from`（写し元のステートマシンの ID））。流し直しのスプリントの文脈の初期値。`evidence` は `mode_check` の値をそのまま写す。上の型が実値を持たないので、写しても実値は広がらない。判定の作業は `evidence` を `mode_check` と同じ型で読み、実値が要れば `ref` の保存先を読む。判定ではないので `_judged` は見ない | `contracts/workflow/context.schema.json` | — |
 | `MODE_DECIDED` | 定数（事象の種類 `mode_decided`）。事象の登録は `contracts/workflow/progress.json`（上の「事象の登録と書く順」） | `src/ndf/progress/judgment.py` | — |
 | `judgment` | 定義の文書の項目（`"required"`）。判定を求めるステートマシンの印 | `src/ndf/progress/command.py` の `_new_doc` | — |
 | 仮の工程表の既定のモード | 定数 | `src/ndf/progress/command.py` | `standard`（判定ではない。判定の前に後の工程は流れない） |
@@ -326,7 +339,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `check` | 2 課題とも根拠つき | 課題 1 つ | 判定の記録が無い・根拠が空白だけ・知らないモード・課題の組が違う |
-| `sprint_mode` | `light` 3 件 → `light`。`documentation` の `proposal`+`report` → `documentation` | `hotfix` 1 件 → `hotfix`、`hotfix` 2 件 → `MixedModes`、`light`+`standard` → `MixedModes`（`groups` に 2 つ）、`light` 1 件で `floor` が `standard` → `standard`、`hotfix` 1 件で `floor` が `light` → `standard`。`documentation` 1 件で `floor` が `documentation`（訂正）→ `documentation` | `documentation`+`light` → `JudgmentError`。`documentation` の `repo-knowledge`+`proposal` → `JudgmentError`。`light` 1 件で `floor` が `documentation` → `JudgmentError` |
+| `sprint_mode` | `light` 3 件 → `light`。`documentation` の `proposal`+`report` → `documentation` | `hotfix` 1 件 → `hotfix`、`hotfix` 2 件 → `MixedModes`（`groups` に課題 1 つずつの 2 つ）、`light`+`standard` → `MixedModes`（`groups` に 2 つ）、`documentation`+`light` → `MixedModes`（`groups` に 2 つ）、`documentation` の `repo-knowledge`+`proposal` → `MixedModes`（`doc_side` が `repo-knowledge` と `outside` の 2 つ）、`light` 1 件で `floor` が `standard` → `standard`、`hotfix` 1 件で `floor` が `light` → `standard`。`documentation` 1 件で `floor` が `documentation`（訂正）→ `documentation` | `light` 1 件で `floor` が `documentation` → `JudgmentError`（`MixedModes` ではない） |
 | `recheck` | `light` のスプリントで部分が `standard` だけ → `rerun`・`standard`。`standard` のスプリントで部分が `standard` とビジネス文書の `documentation` → `split`、`split_plan.move` は文書の変更 | `hotfix` のスプリントで差分が `standard` → `standard`（高さが同じでも返す）。部分がすべて `hotfix` で課題が同じで全体も `hotfix` → `None`。`light` のスプリントで差分が `hotfix` → `standard`。同じ `README.md` の同じ hunk にコードの説明と章立ての組み直しがある → `split`。`base` に `move` だけを当てた木が `move_tree` で移す変更だけを持ち、`head` に `unmove` を当てた木が `keep_tree` で、2 つを `base` で合わせると `head` の木になる | `hotfix` のスプリントで部分が `hotfix` と `operation` → `rerun`・`standard`、`hotfix` と `light` → `rerun`・`standard`、`hotfix` と文書 → `split`。部分がすべて `hotfix` でも別の課題の部分がある → `rerun`・`standard`。部分がすべて `hotfix` でも `whole.mode` が `standard` → `rerun`・`standard`。`light` のスプリントで差分の全体が `documentation` → `reclassify`・`documentation`。リポジトリの知識のスプリントで部分に `proposal` の文書がある → `split`、差分の全体が `proposal` → `reclassify`・`documentation`・`proposal`。`base` に `move` だけを当てられない・当てた木に残す側の行が入る・2 つを合わせても `head` にならない → `split`、`split_plan` は無く、根拠は「自動で分けられない」 |
 | `redefine` | `standard` → `light` で、終えた要求の工程を引き継ぎ、設計の行が消える。改訂 `rev + 1` の文書が `judgment`・`mode_judgment` と、今回の要求の出力を持つ | 同じモード → `None`。`legacy-refactor` へ変えても、その定義も要求の行を先頭に持つので、終えた要求の工程を引き継ぐ。`--disable` で外した工程は改訂 `rev + 1` でも無効で、`disabled` は 1 回だけ | 新しく現れる承認ゲートの工程を `.ndf/project.json` で無効にしてある → `Refused` |
 | `_judged` | 判定の後は後の工程が流れる | 要求の工程そのものは判定の前でも流れる。印の無い定義は判定が無くても流れる | 判定の前に後の工程を `next` で流すと `refused` |
@@ -491,10 +504,18 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 
 | 外部の系 | 適用の前に判定するもの | 適用するもの |
 | --- | --- | --- |
-| dry-run を持つ（IaC の `terraform plan` など） | [operation-run.md](../plugins/ndf/skills/development-workflow/references/operation-run.md) の dry-run が出す実行計画。リソース・モジュールの追加や削除、構成の変更が出ていないかを、`mode-criteria.md` の `operation` の問い（変えるのが値だけか）で判定する | 判定した実行計画をファイルに保存し（`terraform plan -out` など）、その保存した計画だけを適用する。適用の時点で計画を作り直さない |
-| dry-run を持たない（権限・リポジトリの設定など） | 変える前の今の設定の値と、リクエストで指定する予定の値を並べる。対象、変わる項目、確かめられる副作用を確かめ、値以外の変更（項目の追加や削除など）が含まれないことを判定する | 判定したリクエストをそのまま適用する。適用の後に、実際の値を測って記録する |
+| dry-run を持つ（IaC の `terraform plan` など） | [operation-run.md](../plugins/ndf/skills/development-workflow/references/operation-run.md) の dry-run が出す実行計画。リソース・モジュールの追加や削除、構成の変更が出ていないかを、`mode-criteria.md` の `operation` の問い（変えるのが値だけか）で判定する | 判定した実行計画を制限された保存先のファイルに保存し（`terraform plan -out` など）、その保存した計画だけを適用する。適用の時点で計画を作り直さない |
+| dry-run を持たない（権限・リポジトリの設定など） | 変える前の今の設定の値と、リクエストで指定する予定の値を並べる。対象、変わる項目、確かめられる副作用を確かめ、値以外の変更（項目の追加や削除など）が含まれないことを判定する。並べた値は判定の作業の中だけで読み、記録には書かない | 判定したリクエストを制限された保存先に保存し、そのまま適用する。適用の後に実際の値を測り、記録には項目名と変更の種類と、測った値が予定どおりだったかの真偽だけを書く |
 
-値以外の変更が出たら、適用せずに工程「実装」を失敗にし、`mode_check` に `standard` と根拠を残す。根拠の `evidence` は、保存した実行計画（`{"kind": "plan", "path", "sha256"}`）か、判定したリクエスト（`{"kind": "request", "target", "current", "planned"}`）である。後は上の流し直しと同じである。これは今の operation-run.md の dry-run と記録の手順に、判定と、判定した内容の固定を足すものである。
+値以外の変更が出たら、適用せずに工程「実装」を失敗にし、`mode_check` に `standard` と根拠を残す。書き方は次のとおりで、記録にも、流し直し先へ写す `rerun_floor` にも、実値は入らない。後は上の流し直しと同じである。
+
+| 系 | `mode_check.evidence` | `mode_check.basis` |
+| --- | --- | --- |
+| dry-run を持つ | `{"kind": "plan", "ref": <保存した実行計画の参照>, "sha256": <計画のファイルの sha256>}` | 値以外の変更に当たったリソースの種類と名前と、変更の種類（例「`aws_iam_role.deploy` の追加」） |
+| dry-run を持たない | `{"kind": "request", "target": <対象の名前>, "changes": [{"field": <項目名>, "change": "add" か "modify" か "delete"}], "ref": <保存したリクエストの参照>}` | 値以外の変更に当たった項目名と変更の種類 |
+| どちらも、項目名と変更の種類では根拠を説明できない | 上と同じ | 「項目名では説明できない。`ref` の保存先を人が読む」と書き、`needs_human` を真にする。conductor は流し直しを作らず、利用者へ保存先の参照を示して判断を求める |
+
+制限された保存先は、operation-run.md の記録の置き場（リポジトリの中）とは別の、リポジトリと進捗の DB の外の場所である。これは今の operation-run.md の dry-run と記録の手順に、判定と、判定した内容の固定と、実値を記録から外すことを足すものである。
 
 ## 作業中に見つけた不具合
 
@@ -527,7 +548,7 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 | --- | --- | --- | --- | --- |
 | `_outside_reader` | `src/ndf/progress/run.py` | 新設 | `_outside_reader(v: View) -> bool` | 判定の記録の課題ごとの行のうち `doc_type` を持つ行が 1 つ以上あり、そのすべてが `repo-knowledge` なら偽、ほかは真を返す。`TABLE_FACTS` に `outside_reader` の語で足す |
 
-- 1 つのスプリントに `repo-knowledge` とほかのタイプは入らない。`sprint_mode` が断り、`check`（要求の工程の終わり）と `row_errors`（計画の行の登録）はどちらも `sprint_mode` を通すので、どちらの時点でも断る（「判定の記録」の `sprint_mode`）。`_outside_reader` が「すべて」で見るのは、断る検査を通らない旧い記録が来ても社外の文書の工程を外さない側に倒すためである
+- 1 つのスプリントに `repo-knowledge` とほかのタイプは入らない。`sprint_mode` は 2 つを別の組にして `MixedModes` を投げる。要求の工程を終えるときは `split_groups` で分けて続け、計画の行の登録（`row_errors`）では断る（「判定の記録」の `sprint_mode`）。`_outside_reader` が「すべて」で見るのは、この検査を通らない旧い記録が来ても社外の文書の工程を外さない側に倒すためである
 - 工程の定義 `stages/document-sources.json`・`stages/layout-review.json`・`stages/plan-to-spec.json`・`stages/release-verification.json` の条件（`when`）に `outside_reader` を足す。ほかのモードでは記録のタイプが無いので真になり、今の振る舞いのまま流れる
 - `check` は、`documentation` の課題の行に `doc_type`（「判定の記録」の `DOC_TYPES` のどれか）が無ければ誤りにし、ほかのモードの行に `doc_type` があっても誤りにする。計画の行の `judgments` も同じ形で、`row_errors` が同じ確かめをする
 - タイプの値は `DOC_TYPES` の 1 か所で決める。リポジトリの知識は `repo-knowledge` で、判定の作業 `mode` の出力、`context.schema.json` の `mode_judgment.issues[].doc_type` の列挙、`check`、`_outside_reader`、用語集（`docs/glossary/glossary.json` の「リポジトリの知識」のコード）で同じ値を使う
@@ -583,7 +604,7 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `check` | `documentation` の行に `doc_type` が無い・知らない値 | 判定の作業の誤り | 要求の工程を終えるとき | 止める | `refused`、「documentation の課題はタイプを持つ」 | 何も書かない。出力を直して打ち直せる |
-| `sprint_mode`（`check`・`row_errors` から） | `repo-knowledge` とほかのタイプの混ざり | 計画の切り方の誤り | 要求の工程を終えるとき・計画の行の登録 | 止める | `refused`（計画の行では `invalid`）、「リポジトリの知識は社外の文書と混ぜない。スプリントを分ける」 | 何も書かない。スプリントを中止して分け直すか、計画の行を分ける |
+| `sprint_mode`（`row_errors` と要求の工程の終わりから） | `repo-knowledge` とほかのタイプの混ざり（`MixedModes`） | 計画の切り方の誤りか、要求で判定が分かれた | 要求の工程を終えるとき・計画の行の登録 | 計画の行では止める。要求の工程では `split_groups` で分けて続ける | 計画の行は `invalid`、「リポジトリの知識は社外の文書と混ぜない。行を分ける」。要求の工程は `ok` と `items` の `split_out` | 計画の行は直して打ち直せる |
 | `_outside_reader` | 判定の記録がまだ無い | 要求の工程の前 | 工程を流す前 | 真として扱う（判定の前に後の工程は流れないので、当たる工程は無い） | — | — |
 
 ### 単体テストの観点
@@ -592,7 +613,7 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 | --- | --- | --- | --- |
 | `_outside_reader` | `repo-knowledge` の行だけ → 偽。`proposal` の行 → 真 | `standard` のスプリント（`doc_type` が無い）→ 真。`repo-knowledge` と `proposal` の行が両方ある記録 → 真 | — |
 | 工程の条件 | タイプ「リポジトリの知識」のスプリントで、素材の収集・体裁レビュー・確定仕様化・リリース後テストが無効になる | 提案のタイプでは 4 つとも有効のまま | — |
-| タイプの混在 | — | 今の 6 つのタイプどうし（`proposal` と `report`）の課題は 1 つのスプリントに入る | `repo-knowledge` と `proposal` の課題を、要求の工程の終わり（`check`）と計画の行の登録（`row_errors`）のどちらで渡しても断る |
+| タイプの混在 | 要求の工程の終わりで `repo-knowledge` と `proposal` の課題が混ざる → 分けて続け、片方の組の課題が `split_out` に出る | 今の 6 つのタイプどうし（`proposal` と `report`）の課題は 1 つのスプリントに入る | 計画の行の登録（`row_errors`）で `repo-knowledge` と `proposal` の課題を渡す → `invalid` |
 | タイプの値 | 判定の記録の `doc_type` が `repo-knowledge` なら `check` と `context.schema.json` の検査を通る | — | `repo_knowledge`（下線）は知らないタイプとして断る |
 | 文書ごとのタイプ | 提案と報告の課題を含むスプリントで、設計の出力 `documents` が文書ごとに 1 つのタイプを持ち、執筆と再構成がパスで引いたタイプのガイドを使う | 2 つの課題が同じタイプで同じ文書を変える → その文書のタイプは 1 つ | 違うタイプの課題が同じ文書を変える → 設計が `判断が要る` で止まる。報告の課題だけを持つ文書の `doc_type` が `proposal`（スプリントに提案の課題はある）→ 出力の検査で断る。判定に無い課題番号・どの文書にも出ない課題 → 断る |
 | デプロイ | リポジトリの知識のスプリントで差分が `docs/` だけでも、デプロイが工程を飛ばさずに PR のマージまで進み、結果の `product_version` が `null`、`merge.contained` が真 | 版の無い結果がデプロイの結果の型の検査を通る | `merge` の無い結果で `product_version` が `null` → 型の検査で断る。マージのコミットが対象のブランチの今の先端の祖先でない → `contained` を真にせず工程を失敗にする |
@@ -605,33 +626,70 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `split_groups` | `src/ndf/progress/judgment.py` | 新設 | `split_groups(err: MixedModes, hint: Optional[str], heights: Mapping[str, int]) -> tuple[str, list[int], list[Mapping[str, Any]]]` | 混ざった判定から、残すモード・残す課題・外す課題（`split_out` の行）を決める |
+| `split_groups` | `src/ndf/progress/judgment.py` | 新設 | `split_groups(err: MixedModes, record: Mapping[str, Any], hint: Optional[str], heights: Mapping[str, int]) -> Split` | 混ざった判定から、残す組と外す組を決める。`Split` は `mode`（残すモード）・`keep`（残す課題の判定の行）・`split_out`（外す課題の判定の行）・`rows`（外す課題から作る新しい行の課題の組の一覧）を持つ |
 | `priority_of` | `src/ndf/progress/judgment.py` | 新設 | `priority_of(mode: str) -> int` | モードの定義の `metadata.ndf.priority` を返す（小さいほど先） |
-| `order_rows` | `src/ndf/progress/lane/__init__.py` | 新設 | `order_rows(rows: Sequence[LaneRow]) -> list[LaneRow]` | 同じレーンの未着手の行を、依存（`after`）を守る範囲で優先の順に並べ直す |
-| 起動の許可（`admitted`） | `src/ndf/progress/lane/machine.py` | 変更 | 変えない | 上限で待っている行が複数あるとき、`priority_of` の小さい行から許可する |
+| `split_row_issues` | `src/ndf/progress/lane/__init__.py` | 新設 | `split_row_issues(conn: sa.Connection, plan_id: str, lane: str, key: str, sprint_id: str, issues: Sequence[int]) -> None` | 実行中の行から外した課題を除く事象 `row_issues_split` を書く。行が実行中で、その `sprint_id` が `sprint_id` のときだけ書き、ほかは `Refused` |
+| `order_rows` | `src/ndf/progress/lane/__init__.py` | 新設 | `order_rows(rows: Sequence[Mapping[str, Any]]) -> tuple[list[Mapping[str, Any]], list[str]]` | 同じレーンの未着手の行を、依存（`after`）を守る範囲で優先の順に並べ直し、並べ直した行と警告を返す |
+| `create_lane` | `src/ndf/progress/lane/__init__.py` | 変更 | 戻り値に警告の一覧を足す | 初期の行を書く前に `order_rows` を通す。`ndf lanes init`・`ndf lanes start`・`ndf lanes lane add` はどれもこの関数でレーンを作るので、3 つとも同じ優先の順と警告になる |
+| `lanes_of`・`PlanLanes` | `src/ndf/progress/lane/machine.py` | 変更 | `PlanLanes.lanes` の要素を（ラッパーの名前, 実行中の行を持つか, 起動を待つ行の優先）にする | 起動を待つ行の優先を、計画を読むときに一緒に求める（下の「起動の許可」） |
+| `waiting_order` | `src/ndf/progress/lane/machine.py` | 新設 | `waiting_order(plans: Sequence[PlanLanes]) -> list[str]` | 数えたすべての計画の、起動を待つレーンのラッパーの名前を、優先の小さい順（同じ優先ならラッパーの名前の順）に返す |
+| 起動の許可（`admitted`） | `src/ndf/progress/lane/machine.py` | 変更 | 変えない | 上限の空きを、`waiting_order` の先頭から割り当てる（下の「起動の許可」） |
 
 - `split_groups`
-  - 残すモード: 参考の値（`hint`）と同じモードの組。無ければ課題の数が最も多い組、同じ数なら高さの高い組。`hotfix` の組は課題を 1 つだけ残し（番号の最も小さい課題）、残りは `split_out` へ入れる
-  - 事後条件: 残す課題はすべて同じモードで、`sprint_mode` を通る。`split_out` は課題ごとに `{"issue", "mode", "basis"}` を持つ
-- `_cmd_finish`・`_finish_stage`（「判定の記録」）は、要求の工程の出力で `sprint_mode` が `MixedModes` を投げたら `split_groups` で分ける。文脈の `issues` を残す課題に書き換える事象 `issues_split`（外した課題と理由）を、`mode_decided` と同じトランザクションで書き、結果 JSON の `items` に `{"kind": "split_out", "issue", "mode", "basis"}` を 1 行ずつ出す
-- オーガナイザーは `split_out` の行を受けて、外した課題をモードごとの一時レーンの行にする（`ndf lanes lane add`）。レーンでないスプリントでは conductor が新しいスプリントを作る
+  - 参考の値: `hint` は判定の記録の `hint` で、`ndf progress new --mode` を明示したとき、またはレーンの行から始めたときに `start_commands` が計画の行の判定から決めて渡した値である。`--mode` を省いて作ったスプリントの仮の工程表の `standard` は参考の値にしない（`hint` は `None`）
+  - 残す組の選び方: 次の順に比べ、最初に 1 つに決まった組を残す
+    1. 組のモードが `hint` と同じ組だけを候補にする。同じ組が無い（`hint` が `None` を含む）ときは、すべての組を候補にする
+    2. 課題の数が最も多い組
+    3. 高さの高い組（`hotfix` は `standard` の高さで比べる）
+    4. 優先（`priority_of`）の値が小さい組
+    5. 番号の最も小さい課題を含む組。どの課題も 1 つの組にしか入らないので、ここで必ず 1 つに決まる
+  - 例: `hint` が `light` で課題が `hotfix` 1 件と `standard` 1 件なら、1 で候補が変わらず、2 と 3 で同じ（`hotfix` は `standard` の高さ）なので、4 で `hotfix`（優先 1）を残す。`hotfix` の課題が 2 件なら、組は課題ごとなので、5 で番号の小さい課題を残す
+  - 外す課題の新しい行（`rows`）: 外す課題を `sprint_mode` と同じ組に分け、1 つの組を 1 つの行にする。したがって `hotfix` は課題ごとに 1 行、`documentation` は `repo-knowledge` の組と社外向けのタイプの組を別の行にし、ほかのモードはモードごとに 1 行になる。どの行も `row_errors` を通る
+  - 事後条件: `keep` は 1 つの組で、`sprint_mode` を通る。`split_out` は外す課題ごとに、判定の作業の出力の行をそのまま持つ（`{"issue", "mode", "basis", "doc_type"}`。`doc_type` は `documentation` の課題だけ）。新しい行の `judgments` にそのまま使える
+- `_cmd_finish`・`_finish_stage`（「判定の記録」）は、要求の工程の出力で `sprint_mode` が `MixedModes` を投げたら `split_groups` で分け、`mode_decided` と同じトランザクションで次を書く
+  - 事象 `issues_split`（payload は `keep` の課題と `split_out`）。文脈の `issues` を残す課題に置き換える。文脈と `mode_decided` に書く `mode_judgment` は、`issues` を `keep`、`split_out` を外した課題の行にする
+  - スプリントがレーンの行から始めたもの（`lane.sprint_row` で行が引ける）なら、`split_row_issues` で行の事象 `row_issues_split` を書く。行の畳み方（`fold_lane`）は、行の `input.issues` と `input.judgments` から外した課題を除く。これで、計画の決まり I19（同じリポジトリの未着手・実行中の行どうしで課題が重ならない）が元の行の課題として外した課題を数えなくなり、一時レーンへ同じ課題を登録できる
+  - 結果 JSON の `items` に、新しい行ごとに `{"kind": "split_out", "name": <一時レーンか新しいスプリントの名前>, "judgments": <その行の課題の判定の行>}` を 1 行出す。名前は下の「名前を決める」の規則で決める
+- 外した課題の行の登録: 結果 JSON を受け取れずに止まっても同じ手順で続けられるよう、正本は進捗の DB に置き、登録は名前で一度だけにする
+
+| 手順 | すること |
+| --- | --- |
+| 未処理の分割を得る | オーガナイザー（レーンでないスプリントでは conductor）は、結果 JSON の `items` か、`ndf progress show <スプリントの ID>` の `metrics.split_out_rows` から、新しい行ごとの名前と判定を得る。`show` は文脈の `mode_judgment.split_out` から `split_groups` の `rows` と同じ規則で行を作り直して返すので、`items` と同じ一覧になる。進捗の DB から読むので、結果 JSON を受け取る前に止まっても同じ値が取れる |
+| 名前を決める | 一時レーンの名前は `<元のレーン>-split-<行の最小の課題番号>`、レーンでないスプリントの新しいスプリントの名前は `<元の名前>-split-<行の最小の課題番号>` にする。同じ分割からは必ず同じ名前になる |
+| 登録する | 1 行ずつ `ndf lanes lane add`（一時レーン 1 つに行 1 つ）か `ndf progress new` を打つ |
+| 既にあったとき | `lane add` が「レーンは既にある」で、`progress new` が同じ名前のステートマシンがあることで断ったら、そのレーンかスプリントの課題が行の課題と同じかを確かめる。同じなら登録済みとして次の行へ進む。違えば止めて利用者に問う |
+
 - モードの定義に `metadata.ndf.priority` を足す（`hotfix` 1・`operation` 2・`light` 3・`documentation`・`legacy-refactor` 4・`standard` 5）。手順書は値を写さず、`execution-plan.md`・`parallel-plan.md` は「モードの定義の優先の順」と書いて指す
-- `ndf lanes init`・`lanes row add` は行を足した後に `order_rows` を通し、並べ直したら結果の `warnings` に出す
+- 行の並べ直し: レーンを作るとき（`create_lane`。`lanes init`・`lanes start`・`lane add` の 3 つの入口）は、初期の行を書く前に `order_rows` を通す。既にあるレーンへ行を足すとき（`lanes row add`）は、足した後の未着手の行に `order_rows` を通し、位置が変わる行を `row_moved` で動かす。どの入口でも、並べ直したら結果の `warnings` に出す
+
+#### 起動の許可
+
+今の `plan/run.py` は、起動の候補ごとに `admitted` を呼び、空きがあれば先に呼ばれた候補が枠を取る。今の `lanes_of` が渡すのはラッパーの名前と実行中の行の有無だけで、待っている行のモードは分からない。そこで、待っている行の優先を計画を読むときに集め、空きの割り当てを `admitted` の排他の中で決める。
+
+| 項目 | 決まり |
+| --- | --- |
+| 待っている行の集め方 | `lanes_of` は、実行中の行を持たないレーンごとに、今の「次に始める行」の判定（`lane.rules.next_row`）で次の行を得る。`next_row` は依存（`after`）が済んでいない行を返さないので、依存が未解決の行は待つ行に入らない。行の `input.judgments` から `sprint_mode` で決めたモードの `priority_of` を、そのレーンの「起動を待つ行の優先」にする。行が無い、判定が無い（開発ループの行など）ときは `None` で、待つ行に入れない |
+| どの計画まで見るか | 今の `machine_plans` が数える計画すべて（自分の計画・登録簿の計画・索引の計画）。読めない計画の行は優先が分からないので待つ行に入れない |
+| 空きの割り当て | `admitted` は、今の `admit_lock` の中で上限と使っている数を数えた後、空き `n` を求める。`waiting_order(plans)` の先頭 `n` 個に自分のラッパーが入っていれば許可し、入っていなければ「優先の高い行が待つ」として、上限で待つときと同じ待ちの結果を返す |
+| 待たせた候補 | 今の上限の待ちと同じく、計画の次の起動の機会に打ち直す。優先の高い行が起動して実行中になれば待つ行から抜けるので、次の打ち直しで順が回る |
+| 自分の行の優先が `None` | 割り当ての順に入れず、今のとおり空きがあれば許可する（開発ループの行を止めない） |
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `split_groups` | 残す組が `documentation` で、外す組にもある | 判定の誤り | 要求の工程を終えるとき | 止める | `refused`、「判定を直す」 | 何も書かない。出力を直して打ち直せる |
+| `split_row_issues` | 行が実行中でない・行の `sprint_id` がスプリントと違う | 行の付け替えと分割が食い違った | 要求の工程を終えるとき | 止める。`issues_split` も `mode_decided` も書かない | `refused`、「レーンの行がこのスプリントを指していない」 | 何も書かない。行の状態を直して打ち直せる |
+| 外した課題の行の登録 | 同じ名前のレーンかスプリントがあり、課題が違う | 別の用途で同じ名前を使った | `lane add`・`progress new` の応答 | 止める | 利用者へ問う | 名前を変えずに、既にあるものを片付けてから打ち直す |
 | `order_rows` | 優先の順が依存（`after`）とぶつかる | 計画の依存 | 行の登録 | 依存を守り、優先は守れる範囲で並べる | `warnings` に「依存のため優先どおりに並べられない」 | — |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `split_groups` | 参考 `standard`・課題 `standard` 2 と `light` 1 → `standard` の 2 を残し `light` 1 を外す | 参考 `light`・課題 `standard` 1 と `operation` 1 → 同じ数なので高い `standard` を残す。`hotfix` 2 件 → 1 件を残し 1 件を外す | — |
-| `order_rows` | `standard`・`light`・`hotfix` の行 → `hotfix`・`light`・`standard` | `light` の行が `standard` の行の後（`after`）→ 並べ替えない | — |
-| `admitted` | 上限 1 で `standard` と `light` の行が待つ → `light` を先に許可する | 1 行だけ待つ → 今のまま | — |
+| `split_groups` | 参考 `standard`・課題 `standard` 2 と `light` 1 → `standard` の 2 を残し、`light` 1 を外して 1 行 | 参考 `light`・課題 `standard` 1 と `operation` 1 → 同じ数なので高い `standard` を残す。参考 `light`・課題 `hotfix` 1 と `standard` 1 → 優先で `hotfix` を残す。参考 `None`・課題 `light` 1 と `operation` 1 → 高さか優先で決まり、どちらでも同じ結果。`hotfix` 3 件 → 番号の最小を残し、外す 2 件は 1 件ずつ 2 行。`standard` 1・`documentation` の `repo-knowledge` 1・`proposal` 1 を `standard` で残す → 外す行は 2 つで、どちらも `doc_type` を持つ判定の行で `row_errors` を通る | — |
+| `issues_split` と `row_issues_split` | レーンの行から始めたスプリントで分けると、行の課題と `judgments` から外した課題が消え、同じ課題の一時レーンを `lane add` で登録できる | 結果 JSON を受け取らずに止まった後、`show` の `split_out_rows` から同じ名前で登録し直すと、既にあるレーンは登録済みとして飛ばす | 行の `sprint_id` が違う → `refused`、何も書かない |
+| `order_rows`・`create_lane` | `standard`・`light`・`hotfix` の行 → `hotfix`・`light`・`standard`。`lane add` で `standard`・`light` の順に渡したレーンが `light` から始まり、`warnings` が出る | `light` の行が `standard` の行の後（`after`）→ 並べ替えない | — |
+| `admitted` | 上限 1・空き 1 で `standard` と `light` の行が待ち、`standard` の候補が先に呼ばれる → `standard` を待たせ、`light` を許可する | 1 行だけ待つ → 今のまま。`light` の行の依存が済んでいない → `light` は待つ行に入らず、`standard` を許可する | — |
 
 ## 必ず人の承認が要る操作と公開しない情報
 
@@ -639,15 +697,36 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 
 | 対象 | 変える場所 | 振る舞い |
 | --- | --- | --- |
-| `operation` の外部への適用 | `operation-run.md` の承認の手順と、実行計画の単位の表 | 単位ごとに、必ず人の承認が要る操作（C1・C2・C3・C4・P3）に当たるかの列を持つ。当たる単位は、検証用の系でも、試行を含めて最初に状態を変える前に、工程「実装」のリリース承認ゲート（本番系へ届く操作）で承認を求める。承認の記録が無ければ適用しない。CD による再実行は当たらない |
-| `operation` の実行の記録・`mode_check`・`rerun_floor` | `operation-run.md` の記録の形と、`recheck` が書く `evidence` | 値は項目名と変更の種類（追加・変更・削除）で書く。秘密と公開していない値は書かない。実値が要るときは、リポジトリの外の制限された場所のパスを書き、公開の前に人へ戻す（`mode_check` に `needs_human` を立てて工程を失敗で返す） |
-| リリース後レビューの PR のコメントと起票 | `run --post-release` が書くコメントと、起票の本文 | 指摘・分け方の理由・リリース後テストの根拠を、項目名と変更の種類で書く。公開していない情報を除くと指摘を説明できないときは、その指摘を書かずに `outcome` を `hold`（人へ戻す）にし、工程の出力 `post_review` に件数を載せて止める |
+| `operation` の外部への適用 | `operation-run.md` の「4. 実行の前に承認を得る」と、実行計画の単位の表 | 単位ごとに、必ず人の承認が要る操作（C1・C2・C3・C4・P3）に当たるかの列を持つ。当たる単位の承認の取り方は、下の「`operation` の承認の置き場所」のとおり。CD による再実行は当たらない |
+| `operation` の実行の記録・`mode_check`・`rerun_floor` | `operation-run.md` の記録の形と、`recheck` が書く `evidence` | 値は項目名と変更の種類（追加・変更・削除）で書く。秘密と公開していない値は書かない。実値が要るときは、リポジトリと進捗の DB の外の制限された保存先に置いて参照（`evidence.ref`）だけを書き、`mode_check.needs_human` を真にして工程を失敗で返す（「`operation` の外部への適用の前の確かめ」） |
+| リリース後レビューの PR のコメントと起票 | `run --post-release` が書くコメントと、起票の本文 | 指摘・分け方の理由・リリース後テストの根拠を、項目名と変更の種類で書く。公開していない情報を除くと指摘を説明できないときは、その指摘を書かずに `outcome` を `hold`（人へ戻す）にする。扱いは下の「リリース後レビューの `hold`」のとおり |
+
+### `operation` の承認の置き場所
+
+承認ゲートは足さず、前倒しもしない。今の operation-run.md の「4. 実行の前に承認を得る」が、本番系の単位について工程「実装」の中で出しているリリース承認ゲートの問い（`metadata.source` が `ndf-gate:2`）を、必ず人の承認が要る操作に当たる単位では検証用の系にも広げる。問いの形は 2 つ目の承認ゲート（本番系へ届く操作）と同じで、工程「デプロイ」のゲートとは別の回答として残る。今の operation-run.md も同じゲートの問いを工程「実装」で出しているので、ゲートの数は 2 つのままである。
+
+| 項目 | 決まり |
+| --- | --- |
+| いつ問うか | 当たる単位を、試行を含めて最初に外部の状態を変える前。単位の表と、保存した実行計画かリクエストの参照（`ref`）と sha256 を問いに載せる |
+| 承認の記録 | 問いへの人の回答の事象（`answered`）。スプリントのステートマシンに残る。回答は単位の ID と、問いに載せた sha256 を持つ |
+| 適用してよいかの判定 | 単位ごとに、その単位の ID を含み、sha256 が今適用しようとしている実行計画かリクエストの sha256 と同じ、承認の回答があるかを見る。無い、承認でない回答しか無い、sha256 が違う（承認の後に計画を作り直した）のどれかなら適用しない |
+| 適用しないとき | 工程「実装」を `結果: 判断が要る` で止め、止めた理由に承認の無い単位を書く。承認が記録されたら、conductor が `ndf progress retry` で再開する |
+
+### リリース後レビューの `hold`
+
+`hold` は、公開していない情報を書かないと説明できない指摘を、人へ戻すための分け方である。`outcome` の値は `revert`・`fix`・`skip`・`hold` の 4 つにする（「工程『リリース後レビュー』」の事後条件も同じ）。
+
+| 時点 | すること |
+| --- | --- |
+| 指摘を分けた後 | `hold` の指摘が 1 つでもあれば、コメントも起票もしない。結果のファイルと工程の出力 `post_review` に分け方ごとの件数を書き、工程を `結果: 判断が要る` で止める。`hold` の指摘の本文は結果のファイル（`--state-dir`。リポジトリの外）にだけ残し、PR のコメントにも課題にも書かない |
+| 人の判断 | conductor は `hold` の指摘ごとに、`revert`・`fix`・`skip` のどれにするかを利用者に問う。答えを結果のファイルの指摘の `outcome` に書き、`decided_by: "human"` を足す |
+| 再開 | conductor が `ndf progress retry` で工程を流し直す。打ち直しは結果のファイルを読み（「再開の正本と起票の重複の防ぎ方」）、`hold` が残っていなければコメントと起票へ進む。残っていれば同じく止まる |
 
 | 確かめ | 正常 | 異常 |
 | --- | --- | --- |
-| 承認の記録 | 当たる単位に承認があれば適用する | 検証用の系で承認の記録が無い認証・認可の変更 → 適用しない |
-| 記録の値 | 項目名と変更の種類だけが記録に残る | 秘密の形の値（`check-repo-secrets.py` の規則に当たるもの）が記録に入る → 書かずに止める |
-| 公開の書き込み | 項目名で説明できる指摘はコメントに書く | 説明に実値が要る指摘 → 書かずに `hold` |
+| 承認の記録 | 当たる単位に、同じ sha256 の承認の回答があれば適用する | 検証用の系で承認の回答が無い認証・認可の変更 → 適用せず `判断が要る` で止まる。承認の後に計画を作り直して sha256 が変わった → 適用しない |
+| 記録の値 | 項目名と変更の種類だけが記録・`mode_check`・`rerun_floor` に残る。`evidence` の型が `current`・`planned` を受けない | 秘密の形の値（`check-repo-secrets.py` の規則に当たるもの）が記録に入る → 書かずに止める |
+| 公開の書き込み | 項目名で説明できる指摘はコメントに書く | 説明に実値が要る指摘 → `hold` になり、コメントも起票もせず `判断が要る` で止まる。人が分け方を決めた後の `retry` でコメントと起票へ進む |
 
 ## レーンの起動と計画の行
 
@@ -658,7 +737,7 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `start_commands` | `src/ndf/progress/lane/launch.py` | 変更 | 変えない | 行の `input.judgments` から `judgment.sprint_mode` で決めたモードを `--mode` に渡す。`DEFAULT_MODE` と、`args` の `--mode` を見る分岐を消す |
-| `row_errors` | `src/ndf/progress/judgment.py` | 新設 | `row_errors(issues: Sequence[int], judgments: Sequence[Mapping[str, Any]], heights: Mapping[str, int]) -> list[str]` | 計画の行の課題ごとの判定の誤りを並べる。課題の組の食い違い・根拠が空・知らないモード・`doc_type` の欠けと知らない値・モードの混ざり・`hotfix` で課題が 2 つ以上・`repo-knowledge` とほかのタイプの混ざり（`sprint_mode` の `JudgmentError`）を誤りにする |
+| `row_errors` | `src/ndf/progress/judgment.py` | 新設 | `row_errors(issues: Sequence[int], judgments: Sequence[Mapping[str, Any]], heights: Mapping[str, int]) -> list[str]` | 計画の行の課題ごとの判定の誤りを並べる。課題の組の食い違い・根拠が空・知らないモード・`doc_type` の欠けと知らない値・モードの混ざり・`hotfix` で課題が 2 つ以上・`repo-knowledge` とほかのタイプの混ざり（どれも `sprint_mode` の `MixedModes`）を誤りにする |
 | `add_row`・`carry_issues` | `src/ndf/progress/lane/__init__.py` | 変更 | 変えない | 足す行の `input` を `row_errors` で確かめ、誤りがあれば `Refused` |
 
 計画の行は、課題ごとの判定をそのまま持つ。行のモードは計画を書く者が書かず、コードが課題ごとの判定から決める（決定 3 と同じ規則）。こうすると、`documentation` と他のモードの混ざりを計画の登録の時点で断れる。
@@ -687,7 +766,7 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `start_commands` | 判定が `light`・`light` の行 → `progress new ... --mode light` | `hotfix` 2 件の行 → `--mode standard` | `args` に `--mode` を持つ行はスキーマで断られ、ここへ来ない |
+| `start_commands` | 判定が `light`・`light` の行 → `progress new ... --mode light` | `hotfix` 1 件の行 → `--mode hotfix` | `hotfix` 2 件の行は登録で `row_errors` が断り（`invalid`）、行が作られないので起動のコマンドも作られない。`args` に `--mode` を持つ行はスキーマで断られ、ここへ来ない |
 | `row_errors` | `light` で課題 3 つ → 空 | 課題 1 つ | 判定の課題が `issues` と違う・`documentation`+`light`・`light`+`standard`・`hotfix` 2 件 |
 | `add_row`・`carry_issues` | 判定のある行を足す・移す | 元の行の判定を移す課題の分だけ写す | `judgments` の無い `row add` を断る |
 
@@ -712,7 +791,7 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 
 - マージ前のレビューとの違い: 今の `cross-review` は、PR の head と比較元の merge-base から差分を取る。`--post-release` だけが上の表の比較先を読む
 - 事後条件: `--findings-out` に指摘ごとの次の項目の配列を書き、PR に 1 件のコメントを残す。ラウンドは 1 回で、`--max-rounds` は受けない
-  - `id`（指摘の ID）・`outcome`（`revert`・`fix`・`skip`）・`reason`（分けた理由）
+  - `id`（指摘の ID）・`outcome`（`revert`・`fix`・`skip`・`hold`。`hold` は「リリース後レビューの `hold`」）・`reason`（分けた理由）
   - `title`・`body`（相手役の指摘の本文）・`evidence`（根拠のファイルと行）
   - `pr`（PR の番号）・`commit`（上の表の比較先の SHA）
 - 副作用: PR へのコメント 1 件。push はしない
@@ -779,6 +858,6 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `run --post-release` | 指摘 3 件が 3 つに分かれて、本文・根拠・PR・コミットとともに結果に載る | 指摘 0 件（コメントは「指摘なし」）。squash でマージした PR は squash のコミットを比較先にする | マージされていない PR・知らない分け方 |
+| `run --post-release` | 指摘 3 件が 3 つに分かれて、本文・根拠・PR・コミットとともに結果に載る | 指摘 0 件（コメントは「指摘なし」）。squash でマージした PR は squash のコミットを比較先にする。`hold` の指摘が 1 件ある → コメントも起票もせず `判断が要る`。その指摘に人の分け方を書いて打ち直す → コメントと起票へ進む | マージされていない PR・4 つの値に無い分け方 |
 | 起票 | `revert` と `fix` の指摘が 1 件ずつ起票される。リリース後テストの不合格が `revert` に入る | `issue` のある指摘は起票しない。`filing` だけの指摘は、自分が作った印のある課題があればその番号を使う。その課題が一覧の 101 件目以降にあっても見つける | 第三者が作った印のある課題・PR のコメントの JSON は使わない。照合の API が失敗したら起票しない |
 | コメント | 結果を書いた後に 1 件書き、ID を記録する | `comment.started_at` だけがある打ち直しで、自分が書いた印のあるコメントがあれば書かない | 第三者が書いた印のあるコメントは使わず、自分のコメントを書く |
