@@ -323,7 +323,9 @@ class StopSteps:
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []
             fallbacks = inputs.fallbacks()
-            pick = account_decide.choose("auth", sec.account, rows, inputs.candidates(), self.s.guards, fallbacks, self._explicit())
+            pick = account_decide.choose(
+                "auth", sec.account, rows, account_decide.Pool(inputs.candidates(), fallbacks, explicit=self._explicit()), self.s.guards
+            )
             if pick.kind != "switch" and sec.rekeyed and sec.account in fallbacks:  # 登録し直した名前は新しい世代の候補に残す
                 return Pick("switch", sec.account, REKEYED_REASON.format(name=sec.account), (str(sec.account),))
             return pick

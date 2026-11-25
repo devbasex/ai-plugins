@@ -15,7 +15,7 @@
 | `auth`（認証の失敗の後） | 今を除いた並びの先頭、無ければ従量の接続、無ければ `stalled` |
 
 返す `Pick.order` が起動の順（先頭が `account`）で、呼ぶ側はこれをそのまま起動の要求にする。
-`candidates` は呼ぶ側が渡す起動できる登録済みアカウントの名前で、判断は候補と `fallbacks` の外の名前を返さない。
+`Pool.candidates` は呼ぶ側が渡す起動できる登録済みアカウントの名前で、判断は候補と `Pool.fallbacks` の外の名前を返さない。
 """
 
 from __future__ import annotations
@@ -91,7 +91,7 @@ def ranked(exclude: Optional[str], rows: Sequence[Usage], candidates: Sequence[s
         u = by.get(name)
         if name == exclude or (u is not None and u.limited):
             continue
-        keyed.append((not inside(u, g), first.get(name, len(first)), -_headroom(u), name))
+        keyed.append((not inside(u, g), first[name] if name in first else len(first), -_headroom(u), name))
     return [key[-1] for key in sorted(keyed)]
 
 
@@ -102,41 +102,45 @@ def _label(name: str, rows: Sequence[Usage], g: Guards) -> str:
     return f"{name}（{u.percent:g}%{'' if inside(u, g) else '・閾値の外側'}）"
 
 
-def choose(
-    scene: str,
-    current: Optional[str],
-    rows: Sequence[Usage],
-    candidates: Sequence[str],
-    g: Guards,
-    fallbacks: Sequence[str] = (),
-    explicit: Sequence[str] = (),
-) -> Pick:
-    """場面 `scene` での起動先（モジュールの説明の表）。`explicit` は明示の名前（環境変数 → 指定の順）。"""
-    if scene not in SCENES:
-        raise ValueError(f"場面 {scene} は無い")
+class Pool(NamedTuple):
+    """選べる起動先。`candidates` は起動できる登録済みアカウント、`fallbacks` は従量の接続（起動できる順）、
+    `explicit` は明示の名前（環境変数 → 指定の順。空文字は無いものとして読む）。"""
+
+    candidates: Sequence[str]
+    fallbacks: Sequence[str] = ()
+    explicit: Sequence[str] = ()
+
+
+def _start(rows: Sequence[Usage], pool: Pool, g: Guards) -> Pick:
+    order = ranked(None, rows, pool.candidates, g, pool.explicit)
+    if not order:
+        return Pick("keep", None, "起動できる登録済みアカウントが無い。既定のログインで起動する")
+    return Pick("switch", order[0], f"{_label(order[0], rows, g)} で起動する", tuple(order))
+
+
+def _running(current: Optional[str], rows: Sequence[Usage], pool: Pool, g: Guards) -> Pick:
+    now = next((u for u in rows if u.name == current), None)
+    order = ranked(current, rows, pool.candidates, g, pool.explicit)
+    if current is None or (not metered(current) and inside(now, g)):
+        who = DEFAULT_LOGIN if current is None else current
+        return Pick("keep", current, f"{who} で続ける", tuple(n for n in (current, *order) if n is not None))
+    if not metered(current):
+        order = [n for n in order if inside(next((u for u in rows if u.name == n), None), g)]
+    if not order:
+        return Pick("keep", current, f"{_label(current, rows, g)} より長く続けられる候補が無い", (current,))
+    return Pick("switch", order[0], f"{_label(current, rows, g)} から {_label(order[0], rows, g)} へ替える", tuple(order))
+
+
+def _after(scene: str, current: Optional[str], rows: Sequence[Usage], pool: Pool, g: Guards) -> Pick:
+    """`limit`・`auth` の判断（モジュールの説明の表）。"""
     who = DEFAULT_LOGIN if current is None else current
     now = next((u for u in rows if u.name == current), None)
-    if scene == "start":
-        order = ranked(None, rows, candidates, g, explicit)
-        if not order:
-            return Pick("keep", None, "起動できる登録済みアカウントが無い。既定のログインで起動する")
-        return Pick("switch", order[0], f"{_label(order[0], rows, g)} で起動する", tuple(order))
-    if scene == "running":
-        if current is None or (not metered(current) and inside(now, g)):
-            rest = ranked(current, rows, candidates, g, explicit)
-            return Pick("keep", current, f"{who} で続ける", tuple(n for n in (current, *rest) if n is not None))
-        order = ranked(current, rows, candidates, g, explicit)
-        if not metered(current):
-            order = [n for n in order if inside(next((u for u in rows if u.name == n), None), g)]
-        if not order:
-            return Pick("keep", current, f"{_label(current, rows, g)} より長く続けられる候補が無い", (current,))
-        return Pick("switch", order[0], f"{_label(current, rows, g)} から {_label(order[0], rows, g)} へ替える", tuple(order))
-    tail = [f for f in fallbacks if f != current]
-    if scene == "limit" and current is not None and not metered(current) and current in candidates and not (now is not None and now.limited):
+    usable = current is not None and not metered(current) and current in pool.candidates
+    if scene == "limit" and usable and not (now is not None and now.limited):
         return Pick("switch", current, f"{current} は API の結果で上限でない。同じアカウントで続ける", (current,))
-    order = ranked(current, rows, candidates, g, explicit)
-    what = "上限に当たった" if scene == "limit" else "の認証に失敗した"
-    what = f"{who} が{what}" if scene == "limit" else f"{who} {what}"
+    tail = [f for f in pool.fallbacks if f != current]
+    order = ranked(current, rows, pool.candidates, g, pool.explicit)
+    what = f"{who} が上限に当たった" if scene == "limit" else f"{who} の認証に失敗した"
     if order:
         return Pick("switch", order[0], f"{what}。{_label(order[0], rows, g)} で再開する", tuple(order + tail))
     if tail:
@@ -144,3 +148,14 @@ def choose(
     if scene == "limit":
         return Pick("wait_reset", current, f"{what}。替える先が無い。リセットの後に同じアカウントで再開する")
     return Pick("stalled", current, f"{what}。替える先が無い")
+
+
+def choose(scene: str, current: Optional[str], rows: Sequence[Usage], pool: Pool, g: Guards) -> Pick:
+    """場面 `scene` での起動先（モジュールの説明の表）。`pool` は選べる起動先（候補・従量の接続・明示の名前）。"""
+    if scene not in SCENES:
+        raise ValueError(f"場面 {scene} は無い")
+    if scene == "start":
+        return _start(rows, pool, g)
+    if scene == "running":
+        return _running(current, rows, pool, g)
+    return _after(scene, current, rows, pool, g)

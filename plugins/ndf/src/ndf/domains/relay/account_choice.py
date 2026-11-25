@@ -815,7 +815,9 @@ def retry_env(
     decl = metered_decl(store, env)
     probes = fallbacks(read, env, decl if isinstance(decl, tuple) else None, cwd, argv, frozenset())
     usable = [p.name for p in probes if p.reason is None]
-    pick = account_decide.choose("limit", account.name, rows, candidates(env, store, state_dir, now, cwd, argv), guards(), usable)
+    pick = account_decide.choose(
+        "limit", account.name, rows, account_decide.Pool(candidates(env, store, state_dir, now, cwd, argv), usable), guards()
+    )
     if pick.kind != "switch" or pick.account is None:
         return None
     child = session_env.child_env(env, state_dir, pick.account, decided=True)

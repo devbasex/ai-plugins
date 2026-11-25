@@ -9,7 +9,7 @@ import pytest
 
 from ndf.contracts import limits
 from ndf.domains.relay import account_decide, account_registry, cli, hub_decide, switch_decide
-from ndf.domains.relay.account_decide import Pick, Usage
+from ndf.domains.relay.account_decide import Pick, Pool, Usage
 from ndf.domains.relay.switch_decide import Background
 
 AT = "2026-11-22T03:19:34+00:00"
@@ -408,61 +408,61 @@ def test_4404_ranked_puts_inside_then_explicit_then_headroom_and_drops_limited()
 
 def test_4527_start_picks_the_longest_and_skips_a_limited_pin():
     rows = [use("main", None, 79), use("gmail", None, 32), use("team", None, 100, limited=True)]
-    got = choose("start", None, rows, ["gmail", "main", "team"], G)
+    got = choose("start", None, rows, Pool(["gmail", "main", "team"]), G)
     assert (got.kind, got.account, got.order) == ("switch", "gmail", ("gmail", "main"))
-    assert choose("start", None, rows, ["gmail", "main", "team"], G, explicit=("main",)).order == ("main", "gmail")
-    assert choose("start", None, rows, ["gmail", "main", "team"], G, explicit=("team",)).account == "gmail"
-    none = choose("start", None, rows, ["team"], G)
+    assert choose("start", None, rows, Pool(["gmail", "main", "team"], explicit=("main",)), G).order == ("main", "gmail")
+    assert choose("start", None, rows, Pool(["gmail", "main", "team"], explicit=("team",)), G).account == "gmail"
+    none = choose("start", None, rows, Pool(["team"]), G)
     assert (none.kind, none.account, none.order) == ("keep", None, ())  # 既定のログイン
 
 
 def test_4404_running_keeps_inside_and_moves_only_when_it_cannot_continue():
     rows = [use("main", None, 79), use("gmail", None, 32)]
-    keep = choose("running", "main", rows, ["main", "gmail"], G)
+    keep = choose("running", "main", rows, Pool(["main", "gmail"]), G)
     assert (keep.kind, keep.account, keep.order) == ("keep", "main", ("main", "gmail"))  # 区切りで替えない
     over = [use("main", None, 91), use("gmail", None, 32)]
-    assert choose("running", "main", over, ["main", "gmail"], G).account == "gmail"
+    assert choose("running", "main", over, Pool(["main", "gmail"]), G).account == "gmail"
     both = [use("main", None, 91), use("gmail", 86, 32)]
-    assert choose("running", "main", both, ["main", "gmail"], G).kind == "keep"  # 内側の候補が無ければ使い切る
-    assert choose("running", None, rows, ["gmail"], G).kind == "keep"
-    assert choose("running", "metered", over, ["main", "gmail"], G).account == "gmail"
-    assert choose("running", "metered", [use("main", None, 91)], ["main"], G).account == "main"  # 従量より上限でない登録へ戻る
-    assert choose("running", "key:k1", [], [], G).kind == "keep"
+    assert choose("running", "main", both, Pool(["main", "gmail"]), G).kind == "keep"  # 内側の候補が無ければ使い切る
+    assert choose("running", None, rows, Pool(["gmail"]), G).kind == "keep"
+    assert choose("running", "metered", over, Pool(["main", "gmail"]), G).account == "gmail"
+    assert choose("running", "metered", [use("main", None, 91)], Pool(["main"]), G).account == "main"  # 従量より上限でない登録へ戻る
+    assert choose("running", "key:k1", [], Pool([]), G).kind == "keep"
 
 
 def test_4404_limit_keeps_an_account_the_api_does_not_report_limited():
     freed = [use("work1", None, 40), use("work2", None, 10)]
-    got = choose("limit", "work1", freed, ["work1", "work2"], G)
+    got = choose("limit", "work1", freed, Pool(["work1", "work2"]), G)
     assert (got.kind, got.account, got.order) == ("switch", "work1", ("work1",))
-    assert choose("limit", "work1", [], ["work1"], G).account == "work1"  # 記録の無いものは解けたとして扱う
+    assert choose("limit", "work1", [], Pool(["work1"]), G).account == "work1"  # 記録の無いものは解けたとして扱う
 
 
 def test_4404_limit_moves_to_the_longest_then_fallbacks_then_waits():
     limited = use("work1", None, 100, limited=True)
     rows = [limited, use("work2", 86, 10), use("work3", None, 50)]
-    got = choose("limit", "work1", rows, ["work1", "work2", "work3"], G, ["metered"])
+    got = choose("limit", "work1", rows, Pool(["work1", "work2", "work3"], ["metered"]), G)
     assert got.order == ("work3", "work2", "metered")
-    assert choose("limit", "work1", [limited], ["work1"], G, ["metered", "key:k1"]).order == ("metered", "key:k1")
-    assert choose("limit", "metered", [], [], G, ["metered", "key:k1"]).account == "key:k1"
-    assert choose("limit", "work1", [limited], ["work1"], G).kind == "wait_reset"
-    assert choose("limit", None, [use("work2", None, 10)], ["work2"], G).account == "work2"  # 既定のログインは画面の行で上限
+    assert choose("limit", "work1", [limited], Pool(["work1"], ["metered", "key:k1"]), G).order == ("metered", "key:k1")
+    assert choose("limit", "metered", [], Pool([], ["metered", "key:k1"]), G).account == "key:k1"
+    assert choose("limit", "work1", [limited], Pool(["work1"]), G).kind == "wait_reset"
+    assert choose("limit", None, [use("work2", None, 10)], Pool(["work2"]), G).account == "work2"  # 既定のログインは画面の行で上限
 
 
 def test_after_auth_picks_the_order_then_fallbacks_and_stalls_without_any():
     rows = [use("work1", 10, 10), use("work2", 10, 10)]
-    assert choose("auth", "work1", rows, ["work1", "work2"], G).account == "work2"
-    assert choose("auth", None, rows, ["work2"], G).account == "work2"  # 既定のログインでも替える
-    assert choose("auth", "metered", [], ["work1"], G, ["metered"]).account == "work1"
-    assert choose("auth", "key:k1", [], [], G, ["key:k1", "key:k2"]).account == "key:k2"
-    assert choose("auth", "work1", [], ["work1"], G).kind == "stalled"
-    assert choose("auth", "metered", [], [], G, ["metered"]).kind == "stalled"
+    assert choose("auth", "work1", rows, Pool(["work1", "work2"]), G).account == "work2"
+    assert choose("auth", None, rows, Pool(["work2"]), G).account == "work2"  # 既定のログインでも替える
+    assert choose("auth", "metered", [], Pool(["work1"], ["metered"]), G).account == "work1"
+    assert choose("auth", "key:k1", [], Pool([], ["key:k1", "key:k2"]), G).account == "key:k2"
+    assert choose("auth", "work1", [], Pool(["work1"]), G).kind == "stalled"
+    assert choose("auth", "metered", [], Pool([], ["metered"]), G).kind == "stalled"
 
 
 def test_after_auth_names_the_default_login_in_every_reason():
     picks = [
-        choose("auth", None, [use("work2", 10, 10)], ["work2"], G),
-        choose("auth", None, [], [], G, ["metered"]),
-        choose("auth", None, [], [], G),
+        choose("auth", None, [use("work2", 10, 10)], Pool(["work2"]), G),
+        choose("auth", None, [], Pool([], ["metered"]), G),
+        choose("auth", None, [], Pool([]), G),
     ]
     assert [(p.kind, p.account) for p in picks] == [("switch", "work2"), ("switch", "metered"), ("stalled", None)]
     assert all(p.reason.startswith("既定のログイン の認証に失敗") and "None" not in p.reason for p in picks)
@@ -470,7 +470,7 @@ def test_after_auth_names_the_default_login_in_every_reason():
 
 def test_choose_refuses_an_unknown_scene():
     with pytest.raises(ValueError):
-        choose("cut", None, [], [], G)
+        choose("cut", None, [], Pool([]), G)
 
 
 def test_restart_judges_limits_before_stopping_and_excludes_the_target():

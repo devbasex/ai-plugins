@@ -4,7 +4,8 @@
 
 - 上限（`_limit_pick`）: 登録済みアカウントは、使用率の API の結果（取得の記録）で上限のときだけ `choose` の `limit` を呼ぶ（#4404）。
   画面の上限の行は、今のアカウントの取り直しを急がせるきっかけにだけ使う。取り直した結果が上限でなければ、その行は前の起動の
-  描き直しとして、このセグメントでは見ない。既定のログインと従量の接続と、使用率を取らないラッパー（`fetch` が None）は API の結果が無いので、画面の上限の行で決める。
+  描き直しとして、このセグメントでは見ない。既定のログインと従量の接続と、使用率を取らないラッパー（`fetch` が None）は API の結果が無いので、画面の上限の行で決める
+  （取得の記録が上限なら子が静かなときも上限とし、上限を見た後の取得が届くまでは今のアカウントを上限として判断する）。
   一度上限と判断したら `Section.limit_at` で引き継ぎ、解けた後も子が静かな間は再開先を判断する（解けたら同じアカウントで再開する）
 - 見回り（`_guard_pick`）: 今が閾値の外側か従量の接続のときに `choose` の `running` を呼ぶ
 - 止めてよい時点（`_safe_point`）: 静かな時間・回答待ちの質問が無い・会話の記録の最後が終わった応答で、最後の入力より後
@@ -48,38 +49,68 @@ class GuardSteps:
         line = observe.limit_line(screen) is not None
         t = sec.target
         if self.fetcher is not None and t is not None and t.account is not None and t.lease is not None:
-            if line and not sec.limit_refuted and sec.limit_asked is None and sec.limit_at is None:
-                sec.limit_asked = now  # 画面の行は取り直しを急がせるだけ。判断は取り直した API の結果で行う
-                self.fetcher.put(accounts.FetchTarget(self.store, t.account, t.generation), now, force=True)
-            if self._spent(sec, now):
-                if not (quiet or line):
-                    return None
-                sec.limit_asked = None
-                sec.limit_at = sec.limit_at or now
-            else:
-                if sec.limit_asked is not None and (accounts.fetched_at(self.store, t.account, t.generation) or 0.0) >= sec.limit_asked:
-                    sec.limit_asked, sec.limit_refuted = None, True
-                    self._log({"kind": "limit_refuted", "account": t.account, "reason": "画面に上限の行があるが、API の結果で上限でない"})
-                if sec.limit_at is None or not quiet:
-                    if not quiet:
-                        sec.limit_at = None  # 子がまた動き出した
-                    return None
+            by_line: Optional[bool] = self._limit_by_api(sec, now, quiet, line)
         else:
-            if not line:
-                if not quiet or sec.limit_at is None:
-                    sec.limit_at = None
-                    return None
-            sec.limit_at = sec.limit_at or now
+            by_line = self._limit_by_line(sec, now, quiet, line)
+        if by_line is None:
+            return None
 
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []
+            if by_line:
+                mine = account_decide.Usage(str(sec.account), None, None, None, None, True)
+                rows = [r._replace(limited=True) if r.name == sec.account else r for r in rows]
+                rows += [] if any(r.name == sec.account for r in rows) else [mine]
             # 認証の失敗を確かめたセグメントでは、今のアカウントを候補から除く（解けても同じアカウントで再開しない）
             candidates = [n for n in inputs.candidates() if sec.auth_at is None or n != sec.account]
-            return account_decide.choose("limit", sec.account, rows, candidates, self.s.guards, inputs.fallbacks(), self._explicit())
+            return account_decide.choose(
+                "limit", sec.account, rows, account_decide.Pool(candidates, inputs.fallbacks(), explicit=self._explicit()), self.s.guards
+            )
 
         pick = self._confirm(sec, "limit", now, judge)
         # 認証に失敗したアカウントはリセットを待っても再開できない。替え先が無ければ認証の判断（stalled と直し方の 1 行）へ進める
         return None if sec.auth_at is not None and pick.kind != "switch" else pick
+
+    def _limit_by_api(self, sec: Section, now: float, quiet: bool, line: bool) -> Optional[bool]:
+        """使用率を取るラッパーの登録済みアカウント。上限なら False（取得の記録で上限）、でなければ None。
+
+        画面の上限の行は取り直しを頼むだけにし、取り直した記録が上限でなければ `limit_refuted` を残して、このセグメントでは行を見ない。
+        """
+        t = sec.target
+        if line and not sec.limit_refuted and sec.limit_asked is None and sec.limit_at is None:
+            sec.limit_asked = now  # 画面の行は取り直しを急がせるだけ。判断は取り直した API の結果で行う
+            self.fetcher.put(accounts.FetchTarget(self.store, t.account, t.generation), now, force=True)
+        if self._spent(sec, now):
+            if not (quiet or line):
+                return None
+            sec.limit_asked = None
+            sec.limit_at = sec.limit_at or now
+            return False
+        if sec.limit_asked is not None and self._fetched_since(sec, sec.limit_asked):
+            sec.limit_asked, sec.limit_refuted = None, True
+            self._log({"kind": "limit_refuted", "account": t.account, "reason": "画面に上限の行があるが、API の結果で上限でない"})
+        if not quiet:
+            sec.limit_at = None  # 子がまた動き出した
+        return False if sec.limit_at is not None and quiet else None
+
+    def _limit_by_line(self, sec: Section, now: float, quiet: bool, line: bool) -> Optional[bool]:
+        """既定のログイン・従量の接続・使用率を取らないラッパー。上限なら今のアカウントを上限として判断するか、でなければ None。
+
+        画面の上限の行か、取得の記録の上限（別のラッパーが取った記録も含む）で子が静かなときを上限とする。取得の記録が
+        上限を見た後に成功していなければ、今のアカウントは画面の行どおり上限として判断する。
+        """
+        if not line and (not quiet or (sec.limit_at is None and not self._spent(sec, now))):
+            sec.limit_at = None
+            return None
+        sec.limit_at = sec.limit_at or now
+        t = sec.target
+        return t is not None and t.account is not None and t.lease is not None and not self._fetched_since(sec, sec.limit_at)
+
+    def _fetched_since(self, sec: Section, at: float) -> bool:
+        """セグメントの起動先の取得の記録が `at` 以後に成功したか。"""
+        t = sec.target
+        got = accounts.fetched_at(self.store, t.account, t.generation)
+        return got is not None and got >= at
 
     def _spent(self, sec: Section, now: float) -> bool:
         """今の登録済みアカウントが使用率の API の結果で上限か（過ぎていない窓が 100 以上か、API が上限の到達を返した）。
@@ -102,7 +133,9 @@ class GuardSteps:
 
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []
-            return account_decide.choose("running", sec.account, rows, inputs.candidates(), self.s.guards, explicit=self._explicit())
+            return account_decide.choose(
+                "running", sec.account, rows, account_decide.Pool(inputs.candidates(), explicit=self._explicit()), self.s.guards
+            )
 
         return self._confirm(sec, "guard", now, judge)
 

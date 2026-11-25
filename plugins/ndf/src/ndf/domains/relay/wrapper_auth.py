@@ -92,7 +92,13 @@ class AuthSteps:
 
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []
-            return account_decide.choose("auth", sec.account, rows, inputs.candidates(), self.s.guards, inputs.fallbacks(), self._explicit())
+            return account_decide.choose(
+                "auth",
+                sec.account,
+                rows,
+                account_decide.Pool(inputs.candidates(), inputs.fallbacks(), explicit=self._explicit()),
+                self.s.guards,
+            )
 
         if account_decide.metered(sec.account):  # 従量の接続は外した間の代わりに、この続きで試した接続先として除く
             self.tried.add(str(sec.account))

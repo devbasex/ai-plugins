@@ -557,7 +557,9 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySte
         now = self.wall.now()
         inputs = self._inputs(now, True)
         rows = inputs.usage.rows if inputs.usage is not None else []
-        pick = account_decide.choose("running", sec.account, rows, inputs.candidates(), self.s.guards, explicit=self._explicit())
+        pick = account_decide.choose(
+            "running", sec.account, rows, account_decide.Pool(inputs.candidates(), explicit=self._explicit()), self.s.guards
+        )
         return Choice(pick.order)
 
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:

@@ -363,7 +363,8 @@ class LaunchSteps:
         """最初のセグメントの要求（`account_decide.choose` の `start`。#4527）。
 
         候補を使用率の並びで選び、明示（環境変数 `NDF_CLAUDE_ACCOUNT` → 指定）を同じ側の先に置く。候補が無ければ既定のログイン。
-        環境変数の名前が使えるときは、壊れた指定で止めずに環境変数の名前だけを明示にする。
+        環境変数の名前が使えるときは、壊れた指定で止めずに環境変数の名前だけを明示にする。環境変数で明示した従量の接続
+        （`metered`）は登録済みの候補の外なので、並びの前に試す。
         """
         env = self.s.environ.get("NDF_CLAUDE_ACCOUNT")
         env = env if env and accounts.NAME_RE.match(env) else None
@@ -375,9 +376,17 @@ class LaunchSteps:
                 raise
             pin = None
         rows = inputs.usage.rows if inputs.usage is not None else []
-        pick = account_decide.choose("start", None, rows, inputs.candidates(), self.s.guards, explicit=(env or "", pin or ""))
+        pick = account_decide.choose(
+            "start",
+            None,
+            rows,
+            account_decide.Pool(inputs.candidates(), explicit=tuple(n for n in (env, pin) if n is not None)),
+            self.s.guards,
+        )
         self._log({"kind": "account_choice", "scene": "start", "account": pick.account, "reason": pick.reason})
-        return Choice(pick.order)
+        # 環境変数で明示した従量の接続は登録済みの候補の外なので、並びの前に試す（使えなければ 1 行で飛ばして並びへ進む）
+        first = (env,) if env is not None and account_decide.metered(env) else ()
+        return Choice((*first, *pick.order))
 
     def _settle(self, sec: Section) -> None:
         """終わった子のアカウントが登録済みなら 1 回だけ書き戻す（`account_dir.settle`）。書き戻せなければ 1 行を出して続ける。
