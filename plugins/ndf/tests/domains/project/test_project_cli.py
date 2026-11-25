@@ -577,9 +577,10 @@ GUARDS = ("check-ignore", "ls-files")  # 計画が設定と記録のパスを 1 
 
 
 def _count_guards(monkeypatch, fail: dict[str, git.Completed] | None = None) -> list[str]:
-    """`git ls-files`・`git check-ignore` の起動を数える。`fail` に挙げたコマンドは起動せずにその結果を返す。"""
+    """`git ls-files`・`git check-ignore` の起動を数える。`fail` に挙げたコマンドは起動せずにその結果を返す
+    （`run_bytes` の起動は、終了コードが 0 でも 1 でもなければ `GitError`）。"""
     calls: list[str] = []
-    real = git.Git.attempt
+    real, real_bytes = git.Git.attempt, git.Git.run_bytes
 
     def counted(self, *args):
         if args and args[0] in GUARDS:
@@ -588,7 +589,18 @@ def _count_guards(monkeypatch, fail: dict[str, git.Completed] | None = None) -> 
                 return fail[args[0]]
         return real(self, *args)
 
+    def counted_bytes(self, *args, stdin=None, codes=(0,)):
+        if args and args[0] in GUARDS:
+            calls.append(args[0])
+            if fail and args[0] in fail:
+                done = fail[args[0]]
+                if done.returncode not in codes:
+                    raise git.GitError(f"git {' '.join(args)} が失敗（終了コード {done.returncode}）: {done.stderr.strip()}")
+                return done.stdout.encode("utf-8")
+        return real_bytes(self, *args, stdin=stdin, codes=codes)
+
     monkeypatch.setattr(git.Git, "attempt", counted)
+    monkeypatch.setattr(git.Git, "run_bytes", counted_bytes)
     return calls
 
 
@@ -678,19 +690,42 @@ def test_writing_only_the_gitignore_runs_each_guard_once(repo, tmp_path, monkeyp
     assert last_result(capsys.readouterr().out)["metrics"]["files"] == [str(files.path(repo, "project-analysis-ignore"))]
 
 
-def _tree(repo: Path) -> tuple[str, dict[str, str]]:
-    """作業ツリーの状態（無視されたファイルを含む git status と、.ndf/ の下の各ファイルの中身）。"""
-    status = _git(repo, "status", "--porcelain", "--untracked-files=all", "--ignored")
-    ndf = repo / ".ndf"
-    contents = (
-        {str(f.relative_to(repo)): f.read_text(encoding="utf-8") for f in sorted(ndf.rglob("*")) if f.is_file()} if ndf.exists() else {}
-    )
-    return status, contents
+def test_check_ignored_reads_sources_with_a_colon_and_skips_negated_rules(monkeypatch, tmp_path):
+    """出所のパスにコロンがあっても、NUL 区切りの出力から出所・行・パターン・パスを読む。否定の行に当たったパスは無視されない扱い。"""
+    seen = {}
+    rows = [
+        ("/home/u/a:b/ignore", "3", "!.ndf/analysis/project.json", ".ndf/analysis/project.json"),
+        ("/home/u/a:b/ignore", "1", ".ndf/", ".ndf/project.json"),
+    ]
+    out = "".join(f"{field}\0" for row in rows for field in row)
+
+    def fake(self, *args, stdin=None, codes=(0,)):
+        seen.update(args=args, stdin=stdin, codes=tuple(codes))
+        return out.encode("utf-8")
+
+    monkeypatch.setattr(git.Git, "run_bytes", fake)
+    got = write.check_ignored(tmp_path, [".ndf/project.json", ".ndf/analysis/project.json"])
+    assert got == write.Ignored({".ndf/project.json": ("/home/u/a:b/ignore", "1", ".ndf/")}, None)
+    assert seen == {
+        "args": ("check-ignore", "-v", "-z", "--stdin"),
+        "stdin": b".ndf/project.json\0.ndf/analysis/project.json\0",
+        "codes": (0, 1),
+    }
+    assert write.ignored_notes(got, [".ndf/project.json"])[0]["source"] == "/home/u/a:b/ignore:1"
 
 
-@pytest.mark.parametrize("command, existing_ignore", [("ls-files", None), ("check-ignore", "*\n")])
+def _tree(repo: Path) -> tuple[bytes | None, dict[str, bytes]]:
+    """索引と作業ツリーの状態（.git/index の中身と、.git の外の各ファイル（無視されたものを含む）のパスと中身）。git は起動しない。"""
+    index = repo / ".git" / "index"
+    contents = {
+        str(f.relative_to(repo)): f.read_bytes() for f in sorted(repo.rglob("*")) if f.is_file() and ".git" not in f.relative_to(repo).parts
+    }
+    return (index.read_bytes() if index.exists() else None), contents
+
+
+@pytest.mark.parametrize("command, existing_ignore", [("ls-files", None), ("check-ignore", None), ("check-ignore", "*\n")])
 def test_git_that_cannot_tell_leaves_the_tree_as_it_was(repo, tmp_path, monkeypatch, capsys, last_result, command, existing_ignore):
-    """`.gitignore` を作る回は索引を読めないとき、`.gitignore` がある回は除外を確かめられないときに、何も書かずに止まる。"""
+    """索引を読めないとき・除外を確かめられないとき（`.gitignore` を作る回も含む）に、何も書かずに止まる。"""
     ignore = files.path(repo, "project-analysis-ignore")
     if existing_ignore is not None:
         ignore.parent.mkdir(parents=True)
@@ -698,8 +733,9 @@ def test_git_that_cannot_tell_leaves_the_tree_as_it_was(repo, tmp_path, monkeypa
     before = _tree(repo)
     calls = _count_guards(monkeypatch, {command: git.Completed(128, "", "fatal: index file corrupt\n")})
     assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 1
-    assert _stopped(capsys, last_result) == "git が .ndf/analysis/ の追跡と無視を確かめられない: fatal: index file corrupt"
-    assert calls == (list(GUARDS) if existing_ignore is None else ["check-ignore"])
+    summary = _stopped(capsys, last_result)
+    assert summary.startswith("git が .ndf/analysis/ の追跡と無視を確かめられない: ") and summary.endswith("fatal: index file corrupt")
+    assert calls == (list(GUARDS) if command == "ls-files" else ["check-ignore"])
     assert _tree(repo) == before
 
 

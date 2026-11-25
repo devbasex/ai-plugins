@@ -239,19 +239,18 @@ def _declare_ci_tests(
 
 
 def check_ignored(root: Path, rels: list[str]) -> Ignored:
-    """`rels` を 1 回の `git check-ignore -v` で確かめる。索引を読むので、追跡済みのパスは除外の行に当たっても無視されない扱い。"""
+    """`rels` を 1 回の `git check-ignore -v -z --stdin` で確かめる。索引を読むので、追跡済みのパスは除外の行に当たっても無視されない扱い。
+    出力は NUL 区切りの (出所, 行, パターン, パス) の組なので、出所のパスにコロンがあっても読み違えない。"""
+    stdin = "".join(f"{r}\0" for r in rels).encode("utf-8")
     try:
-        done = git.Git(root).attempt("check-ignore", "-v", "--", *rels)
-    except git.GitError as exc:  # git を起動できない
+        out = git.Git(root).run_bytes("check-ignore", "-v", "-z", "--stdin", stdin=stdin, codes=(0, 1))
+    except git.GitError as exc:  # git を起動できない・終了コードが 0 でも 1 でもない
         return Ignored({}, str(exc))
-    if done.returncode not in (0, 1):
-        return Ignored({}, done.stderr.strip())
+    fields = out.decode("utf-8", "replace").split("\0")
     rules = {}
-    for line in done.stdout.splitlines():
-        head, sep, path = line.partition("\t")
-        src, _, rest = head.partition(":")
-        num, _, pattern = rest.partition(":")
-        if sep and not pattern.startswith("!"):
+    for i in range(0, len(fields) - 3, 4):
+        src, num, pattern, path = fields[i : i + 4]
+        if not pattern.startswith("!"):
             rules[path] = (src, num, pattern)
     return Ignored(rules, None)
 

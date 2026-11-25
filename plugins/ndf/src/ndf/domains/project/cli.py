@@ -206,11 +206,13 @@ def _commit(main: Path, planned: write.Plan) -> None:
     """計画のファイルを順に書く。記録のディレクトリの下へ書くときは、どのファイルを書くよりも前に、記録が git に無視されることを
     確かめる（止めるときは何も書かずに `WriteError`）。`.gitignore` を作るときは、記録のディレクトリの下に追跡されたファイルが
     無いことを確かめる。同じディレクトリの `.gitignore` の `*` はどの除外の設定より優先されるので、追跡されていなければ記録は無視される。
-    `.gitignore` が既にあるときは、計画の `git check-ignore` の答えを使う。"""
+    `.gitignore` が既にあるときは、計画の `git check-ignore` の答えを使う。どちらの回も、計画の `git check-ignore` が答えられなかったら止める。"""
     record = files.relpath("project-analysis")
     folder = str(Path(record).parent)
     ignore = [f for f in planned.files if f.path == files.path(main, "project-analysis-ignore")]
     if any(f.path.parent == main / folder for f in planned.files):
+        if planned.ignored.error is not None:  # 記録のパスを git が扱えない（保存先が別の場所へのリンクなど）。作る回も書かない
+            raise _unsure(folder, planned.ignored.error)
         if ignore:
             _untracked(git.Git(main), folder)
         else:

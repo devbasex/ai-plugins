@@ -172,18 +172,19 @@ flowchart LR
 
 書き出しは、`.ndf/analysis/` の下へ何かを書くときだけ、どのファイルを書くよりも前に、記録が git に無視されることを確かめる。`.ndf/analysis/` の下へ書くときとは、`write.plan` が返す書くファイルに、`.gitignore`・途中の印・記録のどれか 1 つでも入っているときである（`.gitignore` だけの場合も含む）。止めるときは、どのファイルも書かないので、作業ツリーは書き出しの前のままである。
 
-`.ndf/analysis/.gitignore` は、無いときだけ作る。既にあれば変えない。中身は `# NDF の解析が書く記録。コミットしない` と `*` の 2 行である。既にあるファイルは、あることだけでは記録が無視されるとはみなさない。git の起動を増やさないため、設定が除外されているかを調べる `write.plan` の `git check-ignore -v`（前からある 1 回）に記録のパスも渡し、その答えを使う。確かめる手順は次のとおりで、手順 1 は `--dry-run` では行わない。
+`.ndf/analysis/.gitignore` は、無いときだけ作る。既にあれば変えない。中身は `# NDF の解析が書く記録。コミットしない` と `*` の 2 行である。既にあるファイルは、あることだけでは記録が無視されるとはみなさない。git の起動を増やさないため、設定が除外されているかを調べる `write.plan` の `git check-ignore -v -z --stdin`（前からある 1 回）に記録のパスも渡し、その答えを使う。出力は NUL 区切りの (出所, 行, パターン, パス) の組で読む。出所のパス（`core.excludesFile` など）にコロンがあっても、パターンの先頭の `!` を読み違えないためである。確かめる手順は次のとおりで、手順 1 は `--dry-run` では行わない。
 
-1. `.gitignore` が無いときは、作る前に、メインディレクトリで `git ls-files -- .ndf/analysis` を 1 回打つ。`.gitignore` を作るのは、終了コードが 0 で、かつ標準出力が空のときだけである。このときは手順 2 の答えを使わない。同じディレクトリの `.gitignore` は、ルートの `.gitignore`・`.git/info/exclude`・利用者の `core.excludesFile` より優先される（[gitignore](https://git-scm.com/docs/gitignore)）ので、追跡していない記録は作った `*` で必ず無視されるためである
+0. まず、計画の `git check-ignore -v -z --stdin` が答えたかを見る。終了コードが 0 でも 1 でもない（git が記録のパスを扱えない。`.ndf/analysis` が別の場所へのシンボリックリンクのときなど）なら、`.gitignore` を作る回も作らない回も、何も書かずに止める
+1. `.gitignore` が無いときは、作る前に、メインディレクトリで `git ls-files -- .ndf/analysis` を 1 回打つ。`.gitignore` を作るのは、終了コードが 0 で、かつ標準出力が空のときだけである。このときは手順 2 の判定（記録が除外の行に当たったか）を使わない。同じディレクトリの `.gitignore` は、ルートの `.gitignore`・`.git/info/exclude`・利用者の `core.excludesFile` より優先される（[gitignore](https://git-scm.com/docs/gitignore)）ので、追跡していない記録は作った `*` で必ず無視されるためである
    - 終了コード 0 で出力が空でない（追跡されているファイルが 1 つでもある）ときは、`.gitignore` を作らずに止める。利用者が追跡していた `.ndf/analysis/.gitignore` を作業ツリーで消した状態を、NDF が作り直して打ち消さないためである（作り直すと、生成した `.gitignore` が追跡されたファイルの差分に入る）。追跡済みの記録もここで見つかる
    - 終了コードが 0 でない（索引を読めないなど）ときは、出力が空でも追跡の有無は分からないので、`.gitignore` を作らずに止める
-2. `.gitignore` が既にあるときは、`write.plan` の `git check-ignore -v -- .ndf/project.json .ndf/analysis/project.json` の答えを使う。記録のパスが否定でない除外の行に当たって出力されていれば「無視され、かつ追跡されていない」、出力されていなければ「無視されない（追跡済みを含む）」、終了コードが 0 でも 1 でもなければ「git が判定できなかった」を表す（[git check-ignore](https://git-scm.com/docs/git-check-ignore)。`--no-index` を付けないので、追跡済みのパスは出力されない）。続けるのは無視されるときだけである
+2. `.gitignore` が既にあるときは、`write.plan` の `git check-ignore -v -z --stdin`（標準入力は `.ndf/project.json` と `.ndf/analysis/project.json`）の答えを使う。記録のパスが否定でない除外の行に当たって出力されていれば「無視され、かつ追跡されていない」、出力されないか、否定の行（`!` で始まるパターン）に当たって出力されていれば「無視されない（追跡済みを含む）」を表す（[git check-ignore](https://git-scm.com/docs/git-check-ignore)。`--no-index` を付けないので、追跡済みのパスは出力されない）。続けるのは無視されるときだけである
    - この答えは、`.ndf/analysis/.gitignore`・ルートの `.gitignore`・`.git/info/exclude`・利用者の `core.excludesFile` を合わせた結果である。条件にするのは、この合わせた結果（記録が実際に無視されること）である。どの除外の設定で無視されているかは問わない。記録がコミットされる差分に入らないことが目的で、それは無視の出所によらず満たされるためである
    - そのため、既存の `.ndf/analysis/.gitignore` が空でも、`.git/info/exclude` や `core.excludesFile` が記録のパスを無視していれば、書き出しは続ける
-3. どちらかで止めるときは、終了コード 1 で止まり、`.gitignore`・設定・記録のどれも書かない。理由は次のどれかを出す
+3. 手順 0〜2 のどれかで止めるときは、終了コード 1 で止まり、`.gitignore`・設定・記録のどれも書かない。理由は次のどれかを出す
    - 「`.ndf/analysis/` の下のファイルが git に追跡されている: <パス>」（手順 1 で出力が空でない）
-   - 「`.ndf/analysis/project.json` が git に無視されない。`.ndf/analysis/.gitignore` の中身か、記録が追跡されていないかを確かめる」（手順 2 で記録のパスが出力されない）
-   - 「git が `.ndf/analysis/` の追跡と無視を確かめられない: <git の標準エラー出力>」（手順 1 で終了コードが 0 でない、または手順 2 で終了コードが 0 でも 1 でもない）
+   - 「`.ndf/analysis/project.json` が git に無視されない。`.ndf/analysis/.gitignore` の中身か、記録が追跡されていないかを確かめる」（手順 2 で記録のパスが出力されないか、否定の行に当たって出力される）
+   - 「git が `.ndf/analysis/` の追跡と無視を確かめられない: <git の標準エラー出力>」（手順 0 で計画の `git check-ignore` の終了コードが 0 でも 1 でもない、または手順 1 で終了コードが 0 でない）
 
 git の起動は、記録を更新する書き出しでは前と同じ 1 回（`write.plan` の `git check-ignore`）、`.gitignore` を作る書き出しでは `git ls-files` を足した 2 回である。書くものが無い書き出し（`write.plan` が書くファイルを 1 つも返さない）では、手順 1・2 のどちらでも止めない。この場合、記録が追跡されていても終了コード 0 で終わり、今と同じく「書くものが無い（設定は解析と同じ）」と出す。記録を書かないので、追跡されている記録に新しい中身が入ることは無い。追跡されていることは、次に `.ndf/analysis/` の下へ書く書き出しで見つかり、そこで終了コード 1 になる。
 
@@ -213,10 +214,11 @@ sequenceDiagram
   W->>AR: strip_item（残す前の値から旧い形のキーを取り除く）
   W->>W: 設定の値から指紋を作る・スキーマを確かめる
   W->>W: 解析の記録を組む・記録のスキーマを確かめる
-  W->>FS: git check-ignore -v -- .ndf/project.json .ndf/analysis/project.json（設定の除外の案内と記録の確かめを 1 回で）
+  W->>FS: git check-ignore -v -z --stdin（.ndf/project.json と .ndf/analysis/project.json。設定の除外の案内と記録の確かめを 1 回で）
   W-->>CLI: 書くファイル（.gitignore → 途中の印を付けた前の記録 → project.json → 解析の記録の順）
   Note over CLI,FS: --dry-run なら以下を行わず、予定を表示して終える
   Note over CLI,FS: 次の確かめは、Plan.files に .ndf/analysis/ の下のファイルがあるときだけ。止めるときは何も書かない
+  CLI->>CLI: 計画の check-ignore が答えられなかったら止める
   CLI->>FS: .gitignore を作るなら git ls-files -- .ndf/analysis（追跡されたファイルがあれば止める）、既にあるなら計画の check-ignore の答え（無視されなければ止める）
   CLI->>FS: Plan.files を順番に書く
   Note over CLI,FS: ロックを放す
@@ -396,9 +398,9 @@ sequenceDiagram
 | 4・I2 | `ndf project measure` の `gh` の呼び出しを差し替えて記録すると、呼ばれるパスは `rules/branches/...`・`pulls?...`・`issues?...` だけで、`actions/` で始まるパスが無い。結果の `items` に `test_duration` が無く、`languages` の行に `files` が無い | 実行の一覧・ジョブ・成果物の取得を残す・テストの所要時間を測ると落ちる |
 | 5・6・7・I4・I8 | 書き出しの後、`.ndf/analysis/project.json` に `git check-ignore` が真。記録のキーは `version`・`analyzer`・`inputs`・`branches`・`written_digest`（と途中の印）だけで `at` が無い。追跡するファイルの変更は `.ndf/project.json` だけ。ルートの `.gitignore` に `!.ndf/analysis/` を書いても外れたまま | `.ndf/analysis/.gitignore` を置かない・`.ndf/.gitignore` へ書く・記録に時刻を書くと落ちる |
 | 5・I4 | テストのリポジトリでは、利用者の全体の設定を読ませず（環境変数 `GIT_CONFIG_GLOBAL` を空のファイルに、`GIT_CONFIG_NOSYSTEM=1`）、`.git/info/exclude` を空にする。その上で、`.ndf/analysis/` の下へ書く書き出しで、既存の `.ndf/analysis/.gitignore` が空・`*` を含まない独自のパターン・記録が `git add -f` で追跡済み、のどれでも、書き出しは終了コード 1 で止まり、`.gitignore`・設定・記録の中身が前のまま。既存の `.ndf/analysis/.gitignore` が空でも、`.git/info/exclude` に `.ndf/analysis/` を書いてあれば、書き出しは終了コード 0 で設定と記録を書く | `.gitignore` があることだけで無視が効くとみなす・`.ndf/analysis/.gitignore` の中身だけで判定すると落ちる |
-| 5・I4 | git の呼び出しを差し替え、`git ls-files` が終了コード 128 で標準出力が空のとき、書き出しは `.gitignore` を作らず、git の標準エラー出力を理由に含めて終了コード 1 で止まる。`git check-ignore` が終了コード 128 のときも、設定と記録を書かずに終了コード 1 で止まる | 標準出力が空なことだけで `.gitignore` を作る・終了コード 1 以外の失敗を「無視される」とみなすと落ちる |
-| 5・I4 | 追跡していた `.ndf/analysis/.gitignore` を作業ツリーで消した状態で書き出すと、`.gitignore` を作らずに終了コード 1 で止まる。記録と設定が前と同じで `.gitignore` だけが消えている（書くファイルが `.gitignore` だけ）とき、記録が追跡されていなければ `git ls-files` と `git check-ignore` を 1 回ずつ呼び、`.gitignore` を作って終了コード 0 で終わる。記録が追跡済みなら `git ls-files` だけを呼び、`.gitignore` を作らずに終了コード 1 で止まる | `.gitignore` の存在だけを見て作り直す・`.gitignore` だけの計画で確かめないと落ちる |
-| 5・I4 | 記録を作った後に `git add -f` で追跡し、同じ測定の結果と回答で打ち直す（書くものが無い）と、`git ls-files` と `git check-ignore` を呼ばずに終了コード 0 で「書くものが無い」と出る（作業場所の解決とロックは計画を作る前なので、この回も通る）。記録の無い clone で `--dry-run` を打つと、`.ndf/analysis/` の下に何も作られず、表示に `.gitignore` と記録が「書く予定」として出る | 書くものが無い回に確かめて止める・`--dry-run` で `.gitignore` を書くと落ちる |
+| 5・I4 | git の呼び出しを差し替え、`git ls-files` が終了コード 128 で標準出力が空のとき、書き出しは `.gitignore` を作らず、git の標準エラー出力を理由に含めて終了コード 1 で止まる。`git check-ignore` が終了コード 128 のときも、`.gitignore` の有無によらず、`.gitignore`・設定・記録を書かずに終了コード 1 で止まる | 標準出力が空なことだけで `.gitignore` を作る・終了コード 1 以外の失敗を「無視される」とみなすと落ちる |
+| 5・I4 | 追跡していた `.ndf/analysis/.gitignore` を作業ツリーで消した状態で書き出すと、`.gitignore` を作らずに終了コード 1 で止まる。記録と設定が前と同じで `.gitignore` だけが消えている（書くファイルが `.gitignore` だけ）とき、記録が追跡されていなければ計画の `git check-ignore` と `git ls-files` を 1 回ずつ呼び、`.gitignore` を作って終了コード 0 で終わる。記録が追跡済みなら同じ 2 回を呼び、`.gitignore` を作らずに終了コード 1 で止まる | `.gitignore` の存在だけを見て作り直す・`.gitignore` だけの計画で確かめないと落ちる |
+| 5・I4 | 記録を作った後に `git add -f` で追跡し、同じ測定の結果と回答で打ち直す（書くものが無い）と、`git ls-files` を呼ばず、計画の `git check-ignore` の答えでも止めずに、終了コード 0 で「書くものが無い」と出る（作業場所の解決・ロック・計画の `git check-ignore` は計画を作るまでに通るので、この回も打つ）。記録の無い clone で `--dry-run` を打つと、`.ndf/analysis/` の下に何も作られず、表示に `.gitignore` と記録が「書く予定」として出る | 書くものが無い回に確かめて止める・`--dry-run` で `.gitignore` を書くと落ちる |
 | 8 | 記録の入力のファイルのハッシュと今の HEAD が同じなら「新しい」、入力のファイルかブランチの構成を変えるか、記録の解析器のバージョンを下げると「古い」 | 判定が `.ndf/project.json` の `analysis` を読むままだと落ちる |
 | 8・I9 | 書き出しを 2 回（解析が書く値が違う測定の結果で）打ち、2 回目の後で `.ndf/project.json` だけを 1 回目の後の中身に戻すと、記録の入力とブランチの構成が今と同じでも「古い」（理由「設定が解析の記録と対応しない」）。人が解析の書いていない項目を直したときと、`branch_strategy` を書き足したときは「新しい」のまま | 記録が設定の指紋を持たない・設定のファイル全体のハッシュで比べると落ちる |
 | 17・I10 | テストの中でロック（`strategy_write.lock_file` のファイル）を持ったまま、待ちの上限を 0 秒に差し替えて書き出すと、終了コード 1 で止まり、設定と記録が前のまま。書き出しがロックを取る前に設定と記録を読まない（読み込みの関数を差し替え、呼ばれた時点でロックが取られていることを確かめる）。書き出し 1 回で `check.repo_dirs` は 1 回だけ呼ばれる（呼び出しを差し替えて数える） | ロックを取らない・ロックを取る前に設定と記録を読む・ロックのために共通ディレクトリを求め直すと落ちる |
