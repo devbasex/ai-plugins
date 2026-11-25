@@ -22,3 +22,5 @@
 | 選べる値の基準 | — | 設定で選べる値の集合ごとに、出所と値の一覧を持つファイル（`scripts/ndf-choices.json`）。値を減らすときは Issue の番号と理由を持つ例外を足す | — | — | `docs/specifications/ndf-next-repo-neutral-defaults.md` |
 | 設定のキーの改名表 | `ndf_settings_renames` | 利用者の設定（.ndf/）の旧いキーの位置・新しいキーの位置・値の対応を行ごとに持つコントラクトの表（contracts/data/ndf-settings-renames.json）。ブランチ戦略の移行（ndf project branch-strategy migrate）と旧い設定の検査、設定のキーの移行（ndf settings migrate）と設定を読む側の止める検査が、行を分けて同じ表を読む | — | — | `plugins/ndf-next/skills/worktree/references/ndf-settings.md` |
 | 移行のコマンド | `settings_migrate` | 設定のキーの改名表に従い、利用者の .ndf/ を新しいキーへ書き換えるサブコマンド。差分と差分のハッシュを示す実行と、利用者が承認した差分のハッシュを渡して書く実行に分かれる | — | — | `plugins/ndf-next/skills/worktree/references/ndf-settings.md` |
+| 解析の記録 | — | 解析が書く、実行や時刻で変わる値（解析器のバージョン・解析した時刻・入力のファイルの指紋・ブランチの構成・言語ごとのファイル数・CI の実行時間）。git で追跡しないファイルに置き、設定には置かない | — | — | — |
+| 書いた値の指紋 | — | 解析が書いた設定の値の SHA-256。今の値の指紋と一致すれば解析が書いた値、違えば人が書いた値として扱う。設定の値が変わったときだけ変わるため、設定と一緒に追跡する | — | — | — |
