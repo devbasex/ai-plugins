@@ -143,7 +143,7 @@ def test_restore_entries_leaves_foreign_stale_and_uninstalled_alone(tmp_path):
     entry, ndf = tmp_path / "bin" / install.ENTRY_NAME, tmp_path / "bin" / install.NDF_NAME
     entry.write_text("#!/bin/sh\necho mine\n", encoding="utf-8")
     # 別のアカウントの CLAUDE_CONFIG_DIR が置いたエントリポイントは中身が違う（stale）。書き換え合わない
-    ndf.write_text(f"#!/bin/sh\n{install.NDF_MARK}\nexec python3 /other/relay.py --ndf \"$@\"\n", encoding="utf-8")
+    ndf.write_text(f'#!/bin/sh\n{install.NDF_MARK}\nexec python3 /other/relay.py --ndf "$@"\n', encoding="utf-8")
     assert install.restore_entries(env) == []
     assert entry.read_text(encoding="utf-8") == "#!/bin/sh\necho mine\n"
     assert "/other/relay.py" in ndf.read_text(encoding="utf-8")
