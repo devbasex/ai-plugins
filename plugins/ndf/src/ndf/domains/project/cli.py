@@ -187,7 +187,7 @@ def _untracked(repo: git.Git, folder: str) -> None:
 
 
 def _ignored(ignored: write.Ignored, folder: str, record: str) -> None:
-    """計画の `git check-ignore` の答えで、記録のパスが無視されることを確かめる。無視の出所（どの除外の設定か）は問わない。
+    """計画の `git check-ignore` の結果で、記録のパスが無視されることを確かめる。無視の出所（どの除外の設定か）は問わない。
     無視されない（追跡済みを含む）・分からなければ `WriteError`。"""
     if ignored.error is not None:
         raise _unsure(folder, ignored.error)
@@ -206,7 +206,7 @@ def _commit(main: Path, planned: write.Plan) -> None:
     """計画のファイルを順に書く。記録のディレクトリの下へ書くときは、どのファイルを書くよりも前に、記録が git に無視されることを
     確かめる（止めるときは何も書かずに `WriteError`）。`.gitignore` を作るときは、記録のディレクトリの下に追跡されたファイルが
     無いことを確かめる。同じディレクトリの `.gitignore` の `*` はどの除外の設定より優先されるので、追跡されていなければ記録は無視される。
-    `.gitignore` が既にあるときは、計画の `git check-ignore` の答えを使う。どちらの回も、計画の `git check-ignore` が答えられなかったら止める。"""
+    `.gitignore` が既にあるときは、計画の `git check-ignore` の結果を使う。どちらの回も、計画の `git check-ignore` が判定できなかったら止める。"""
     record = files.relpath("project-analysis")
     folder = str(Path(record).parent)
     ignore = [f for f in planned.files if f.path == files.path(main, "project-analysis-ignore")]

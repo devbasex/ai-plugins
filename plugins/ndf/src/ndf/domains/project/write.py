@@ -53,15 +53,15 @@ class File(NamedTuple):
 
 
 class Ignored(NamedTuple):
-    """`git check-ignore -v` の 1 回の答え。`rules` は除外の行に当たったパス → (出所のファイル, 行, パターン)。否定の行に当たった
-    パスと追跡済みのパスは入らない。`error` は git が答えられなかった理由（答えたなら None）。"""
+    """`git check-ignore -v` の 1 回の結果。`rules` は除外の行に当たったパス → (出所のファイル, 行, パターン)。否定の行に当たった
+    パスと追跡済みのパスは入らない。`error` は git が判定できなかった理由（判定できたなら None）。"""
 
     rules: dict[str, tuple[str, str, str]]
     error: Optional[str]
 
 
 class Plan(NamedTuple):
-    """書くファイル・出力の行・設定と解析の記録のパスを 1 回の `git check-ignore` で確かめた答え。"""
+    """書くファイル・出力の行・設定と解析の記録のパスを 1 回の `git check-ignore` で確かめた結果。"""
 
     files: list[File]
     rows: list[dict[str, Any]]

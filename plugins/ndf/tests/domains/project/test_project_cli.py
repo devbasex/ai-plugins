@@ -715,7 +715,7 @@ def test_check_ignored_reads_sources_with_a_colon_and_skips_negated_rules(monkey
 
 
 def _tree(repo: Path) -> tuple[bytes | None, dict[str, bytes]]:
-    """索引と作業ツリーの状態（.git/index の中身と、.git の外の各ファイル（無視されたものを含む）のパスと中身）。git は起動しない。"""
+    """索引とworktreeの状態（.git/index の中身と、.git の外の各ファイル（無視されたものを含む）のパスと中身）。git は起動しない。"""
     index = repo / ".git" / "index"
     contents = {
         str(f.relative_to(repo)): f.read_bytes() for f in sorted(repo.rglob("*")) if f.is_file() and ".git" not in f.relative_to(repo).parts
@@ -741,7 +741,7 @@ def test_git_that_cannot_tell_leaves_the_tree_as_it_was(repo, tmp_path, monkeypa
 
 @pytest.mark.parametrize("with_ignore", [True, False])
 def test_an_unanswered_ignore_check_stops_before_any_write(tmp_path, monkeypatch, with_ignore):
-    """計画の `git check-ignore` が答えられなければ、`.gitignore` を作る回も作らない回も、git を起動せず何も書かずに止まる。"""
+    """計画の `git check-ignore` が判定できなければ、`.gitignore` を作る回も作らない回も、git を起動せず何も書かずに止まる。"""
 
     def no_git(self, *args):
         raise AssertionError(f"git を起動した: {args}")
