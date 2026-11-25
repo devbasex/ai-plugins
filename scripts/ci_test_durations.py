@@ -658,12 +658,7 @@ def render_run(parts: dict[tuple[str, int], Part], match: Match, jobs: dict[int,
     return "\n".join(lines)
 
 
-def cmd_run(args: argparse.Namespace, gh: Gh) -> int:
-    try:
-        cfg = read_config(CONFIG)
-    except ConfigError as e:
-        sys.stderr.write(f"{e}\n")
-        return 2
+def cmd_run(args: argparse.Namespace, gh: Gh, cfg: dict[str, int | float]) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         try:
             listed = fetch_run(gh, args.run_id, Path(tmp))
@@ -688,12 +683,7 @@ def _deadline() -> float:
     return started + JOB_BUDGET - UPLOAD_RESERVE
 
 
-def cmd_trend(args: argparse.Namespace, gh: Gh) -> int:
-    try:
-        cfg = read_config(CONFIG)
-    except ConfigError as e:
-        sys.stderr.write(f"{e}\n")
-        return 2
+def cmd_trend(args: argparse.Namespace, gh: Gh, cfg: dict[str, int | float]) -> int:
     current, unreadable = current_total(Path(args.xml_dir), gh, args.run, args.attempt)
     search = judged = None
     if current["valid"]:
@@ -733,9 +723,14 @@ def main(argv: list[str] | None = None, gh: Gh | None = None) -> int:
     t.add_argument("--attempt", type=int, required=True)
     t.add_argument("--out", required=True)
     a = p.parse_args(argv)
+    try:
+        cfg = read_config(CONFIG)
+    except ConfigError as e:
+        sys.stderr.write(f"{e}\n")
+        return 2
     if a.verb == "run":
-        return cmd_run(a, gh or Gh())
-    return cmd_trend(a, gh or Gh(deadline=_deadline()))
+        return cmd_run(a, gh or Gh(), cfg)
+    return cmd_trend(a, gh or Gh(deadline=_deadline()), cfg)
 
 
 if __name__ == "__main__":
