@@ -143,9 +143,9 @@ plugins/ndf/
 | `_replace_ours` | `write.py` | 変更（責務） | 変えない | 前の値のままの項目を置き換える。新しい値が不明なら前の値（計測値を取り除いた値）を残す。`ci` の実行時間の引き継ぎ（今の `_carry_walls` の呼び出し）を外す |
 | `_declare_ci_tests` | `write.py` | 変更（責務） | 変えない | 指紋を `doc["analysis"]["written"]` に書く（`analysis` が `written` だけになっても同じ場所） |
 | `File` | `write.py` | 変更 | 前: `File(path, name, old, new)`。後: `File(path, name, old, new, summary: Optional[str] = None)` | `summary` があれば、表示は差分の代わりにこの 1 行を出す |
-| `plan` | `write.py` | 変更（責務） | 変えない | 解析の記録を組み、書くファイルを `.ndf/measured/.gitignore`（無いときだけ）→ 途中の印を付けた前の記録 → `.ndf/project.json`（今の中身と違うときだけ）→ 解析の記録（時刻を除いて前と違うときだけ）の順で返す |
+| `plan` | `write.py` | 変更（責務） | 変えない | 解析の記録を組み、書くファイルを `.ndf/measured/.gitignore`（無いときだけ）→ 途中の印を付けた前の記録 → `.ndf/project.json`（今の中身と違うときだけ）→ 解析の記録の順で返す。解析の記録は、時刻を除いて前と違うとき、`.ndf/project.json` を書くとき、前の記録に途中の印が残っているときのどれかで入る |
 | `_workflow_entry` | `measure_ci.py` | 変更（責務） | 変えない | `jobs` に定義から数えたジョブ数（`static_jobs`）だけを書く。実行を選べたときは、その実行のジョブ数を `run_jobs` に書く（今は両者の大きい方を `jobs` に書く） |
-| `_write` | `cli.py` | 変更（責務） | 変えない | `Plan.files` の先頭の `.gitignore` を書いた後（無ければ書かずに）、メインディレクトリで `git check-ignore -q <記録のパス>` を 1 回打つ。0 以外なら残りを書かずに止める |
+| `_write` | `cli.py` | 変更（責務） | 変えない | `--dry-run` なら今と同じく何も書かず、`git check-ignore` も打たずに予定を表示する。実際に書くときで、`Plan.files` に `.ndf/measured/` の下のファイル（記録か途中の印）があるときだけ、`.gitignore` を書いた後（既にあれば書かずに）、メインディレクトリで `git check-ignore -q <記録のパス>` を 1 回打つ。0 以外なら残りを書かずに止める。`Plan.files` が空なら git を起動しない |
 | `_print_write` | `cli.py` | 変更（責務） | 変えない | `File.summary` があるファイルは `書いた: <パス>（<summary>）` の 1 行だけを出し、差分を出さない。`.ndf/project.json` は今と同じく差分を出す |
 
 - `merge_project`
@@ -153,7 +153,8 @@ plugins/ndf/
   - 事後条件: 返す設定に旧い形のキーが無い（I1）。`written` の指紋は計測値を取り除いた値から作る（I2）。返す計測値は、`languages` と `ci` の新しい値を `measured.split` で取り分けたもの（人が直した項目か解析が書いた項目かに依らない。人が直した項目でも測った値の計測値を記録へ書く）
 - `plan`
   - 事後条件: 返す `Plan.files` のうち追跡するファイルは `.ndf/project.json` だけ（受け入れ条件 5）。解析の記録は `write.plan` が組み、形は `{"version", "analyzer", "at", "inputs", "branches", "file_counts"?, "wall_seconds"?, "run_jobs"?}` で、`wall_seconds` は `measured.carry_walls` を通した後の値。`carry_walls` の `paths` には、新しい測定の `ci` が不明なら `None`、そうでなければ測定の結果の `ci.workflows[].path` の並びを渡す。`legacy` には、`Inputs.existing` の `ci` を `measured.split` に通した `wall_seconds` を渡す。`.gitignore` の `File` は `files.path(main, "project-measured-ignore")` が無いときだけ入り、中身は `measured.IGNORE_TEXT`
-  - 途中の印: `Inputs.record` があり、`.ndf/project.json` か記録のどちらかを書くときだけ、`{**Inputs.record, "pending": true}` の `File` を `.ndf/project.json` の前に入れる。最後の記録の `File` は `pending` を持たない
+  - 最後の記録: 次のどれかに当たるとき、印の無い記録の `File` を最後に入れる。(1) 記録の中身が時刻を除いて前の記録と違う。(2) `.ndf/project.json` を書く（このとき途中の印も入るので、印を消すために必ず書く）。(3) `Inputs.record` に `pending: true` が残っている。どれにも当たらなければ記録を書かない
+  - 途中の印: `Inputs.record` があり、`.ndf/project.json` か記録のどちらかを書くときだけ、`{**Inputs.record, "pending": true}` の `File` を `.ndf/project.json` の前に入れる。印を入れた計画には、必ず最後の記録が入る（上の (2) と (1)・(3) のどれかが当たるため）。最後の記録の `File` は `pending` を持たない
   - 表示の要約: `.gitignore`・途中の印・記録の `File` は `summary` を持つ。記録は `解析の記録。入力 <N> 件・言語 <M> 件・ワークフロー <K> 件`、途中の印は `書き出しの途中の印`、`.gitignore` は `git から外す設定` とする。`.ndf/project.json` の `File` は `summary` を持たない
   - 副作用: 無し（書くのは `cli._write`）
 
@@ -202,3 +203,4 @@ plugins/ndf/
 | `judge` | 記録の入力のファイルのハッシュと今の HEAD が同じなら「新しい」、入力かブランチが変われば「古い」 | worktree から打つとメインディレクトリの記録を読む | 記録が無い・壊れている・不正な UTF-8・途中の印・旧い形の設定（どれも終了コード 3） |
 | `load` | 新しい形の設定を返す | 旧い形の設定を、取り除かずに返す | 取り除いても形に合わない（終了コード 2） |
 | `plan`（`cli.main(["write", …])` から） | 2 回目の書き出しで `.ndf/project.json` を書かない。記録を差分でなく要約の 1 行で表示する | 移行の 1 回目（`wall_seconds: null` を含む・前の記録が無く移行前の実行時間を引き継ぐ）・記録の無い clone・`ci` が不明 | 前の記録の入力が今と同じで、`.ndf/project.json` か記録の書き込みを失敗させる（次の判定が「古い」）・記録のパスが無視されない（終了コード 1 で既存のファイルが前のまま） |
+| `plan`・`_write`（`cli.main(["write", …])` から） | 同じ測定の結果で回答だけを変えた書き出しの後、記録に途中の印が無い。印の残った記録から同じ内容で打ち直すと、印が消える | 記録の無い clone で `--dry-run` を打つと、`.ndf/measured/` の下に何も作られない。書くものが無い書き出しでは `git check-ignore` を呼ばない（呼び出しを差し替えて回数を数える） | — |
