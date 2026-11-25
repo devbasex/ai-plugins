@@ -161,11 +161,23 @@ def test_an_old_marker_is_filled_with_the_run_and_the_saved_presentation(waiting
     run = _started(sdir)
     routes = {"approved": result.command("plan", "next", plan, "--answer", "approved")}
     runner.waiting_path(sdir, run).write_text(json.dumps({"step": "s", "seq": 3, "routes": routes}), encoding="utf-8")
-    runner.write_json(runner.step_presented_path(sdir, "s"), {"step": "s", "presented_id": "p1", "presentation_path": "m.md"})
+    saved = {"step": "s", "run": run, "presented_id": "p1", "presentation_path": "m.md"}
+    runner.write_json(runner.step_presented_path(sdir, "s"), saved)
     _, out = _wait(capsys, plan, "--state-dir", str(sdir), "--timeout", "0")
     assert out["routes"]["approved"]["argv"][-4:] == ["--waiting", f"{run}:s:3", "--presented", "p1"]
     assert out["items"][0]["presentation_path"] == "m.md"
     assert runner.read_marker(sdir, run)["shown"]["presented_id"] == "p1"
+
+
+def test_an_old_marker_does_not_take_a_presentation_of_another_run(waiting):
+    """r1-1: 別の回（--fresh）か回の id の無い提示の写しでは補わず、確かめられない待ちとして資料を出し直させる。"""
+    _, sdir = waiting
+    run = _started(sdir)
+    runner.waiting_path(sdir, run).write_text(json.dumps({"step": "s", "seq": 3, "routes": {}}), encoding="utf-8")
+    for saved in ({"step": "s", "run": "other", "presented_id": "p2"}, {"step": "s", "presented_id": "p2"}):
+        runner.write_json(runner.step_presented_path(sdir, "s"), saved)
+        marker = runner.read_marker(sdir, run)
+        assert marker["shown"] == {} and runner.unconfirmed(marker)
 
 
 def test_a_stored_result_of_a_newer_version_is_watched_as_stopped(tmp_path):

@@ -64,6 +64,8 @@ WAITING_FLAG = "--waiting"
 # 承認待ちのステップの提示の写しの欄（提示の識別子・承認資料のパス・本番へ反映され得るか）
 SHOWN_KEYS = ("presented_id", "presentation_path", "production")
 PRESENTED_FLAG = "--presented"
+# 旧い形の目印で、同じ回の提示を確かめられなかった印（`read_marker` が足す。目印のファイルには書かない）
+UNCONFIRMED = "unconfirmed"
 TOPIC_ANSWER = "gate-answer"
 TOPIC_RETRY = "retry-wait"
 # 承認の回答を 1 回に待つ秒の方針（contracts/limits/）。期限で回答が無ければ待ち直す（回答の来ない承認ゲートを打ち切らない）
@@ -121,9 +123,10 @@ def waiting_path(state_dir: Path, run: str) -> Path:
 def read_marker(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
     """回 `run` の承認の回答を待つ目印。無ければ None。
 
-    回の id か提示の写しを持たない旧い形の目印（この形より前のバージョンが書いた目印）は、目印のファイルの回 `run` と、
-    状態の保存先に残った待っているステップの提示の写しで補ってから返す。書き終えた耐久ステップ（`mark_waiting`）は
-    再開で打ち直されないため、バージョンを上げた後も同じ待ちへ同じ資料で回答できるよう読む側で補う。
+    回の id か提示の写しを持たない旧い形の目印（この形より前のバージョンが書いた目印）は、目印のファイルの回 `run` で補う。
+    提示の写しは、状態の保存先に残った待っているステップの写しのうち、同じ回 `run` が書いたと確かめられるものだけで補う。
+    同じ保存先で `--fresh` から流した別の回が同じステップの写しを上書きし得るため、確かめられなければ提示を空にし、
+    `UNCONFIRMED` を真にする（`advance` は回答を受けずにステップを打ち直し、資料を出し直してから回答を受ける）。
     """
     marker = read_json(waiting_path(state_dir, run))
     if marker is None:
@@ -132,8 +135,16 @@ def read_marker(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
         marker = {**marker, "run": run}
     if not isinstance(marker.get("shown"), dict):
         saved = read_json(step_presented_path(state_dir, str(marker["step"])))
-        marker = {**marker, "shown": {k: saved.get(k) for k in SHOWN_KEYS} if isinstance(saved, dict) else {}}
+        if isinstance(saved, dict) and saved.get("run") == run:
+            marker = {**marker, "shown": {k: saved.get(k) for k in SHOWN_KEYS}}
+        else:
+            marker = {**marker, "shown": {}, UNCONFIRMED: True}
     return marker
+
+
+def unconfirmed(marker: dict[str, Any]) -> bool:
+    """旧い形の目印で、待ちと同じ回が書いた提示を確かめられなかったか（`read_marker`）。"""
+    return marker.get(UNCONFIRMED) is True
 
 
 def result_path(state_dir: Path, run: str) -> Path:
@@ -161,14 +172,17 @@ def stored_result(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
 
 @durable.step
 def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]:
-    """ステップを 1 回打つ耐久ステップ。済んだ呼び出しは回復のときに打ち直さない。"""
+    """ステップを 1 回打つ耐久ステップ。済んだ呼び出しは回復のときに打ち直さない。
+
+    承認待ちで止まれば提示の写しを、書いた回の id と組で残す（旧い形の目印を補うとき、同じ回の写しかを確かめる）。
+    """
     plan = model.parse(spec["plan"])
     ctx = steps.StepContext(plan, Path(spec["state_dir"]), dict(spec["values"]))
     out = steps.run(ctx, plan.step(step_id))
     out["attempt"] = attempt
     if out["status"] == GATE:
         shown = {k: out.get(k) for k in SHOWN_KEYS}
-        write_json(step_presented_path(ctx.state_dir, step_id), {"step": step_id, **shown})
+        write_json(step_presented_path(ctx.state_dir, step_id), {"step": step_id, "run": spec.get("run_id"), **shown})
     if out["prs"]:
         _add_prs(ctx.state_dir, out["prs"])
     if out["outputs"]:
@@ -458,6 +472,14 @@ def _pin_mismatch(baseline: dict[str, Any], reply: Reply) -> Optional[str]:
     return "回答した待ち（--waiting）が無い" if reply.waiting is None and human else None
 
 
+def _represented_notes(inv: Invocation, baseline: Optional[dict[str, Any]]) -> tuple[str, ...]:
+    """回答を記録せずに資料を出し直したとき（`unconfirmed` の待ちへの回答）の、承認待ちの結果の注意。"""
+    if baseline is None or not unconfirmed(baseline):
+        return ()
+    step = baseline["step"]
+    return (f"{inv.plan.name} のステップ {step} の資料がこの待ちのものか確かめられず、回答を記録せず資料を出し直した。読んで回答し直す",)
+
+
 def _deliver(inv: Invocation, baseline: Optional[dict[str, Any]], reply: Reply) -> Optional[dict[str, Any]]:
     """待っている回へ回答を送る。送る前に照らして回答の記録を書き、送れないときは止まる結果を返す（送れば None）。"""
     if baseline is None:
@@ -465,6 +487,10 @@ def _deliver(inv: Invocation, baseline: Optional[dict[str, Any]], reply: Reply) 
     if reply.by is None:
         detail = f"{inv.plan.name} への回答に回答した者（--by）が無い。返された経路（--answer <回答> --by human）で打ち直す"
         return result.stopped(TOOL, "invalid", detail)
+    if unconfirmed(baseline):
+        # 示した資料がこの待ちのものか確かめられないので回答を記録せず、ステップを打ち直して資料を出し直させる
+        durable.send(inv.workflow_id, transition_decide.REPRESENT, TOPIC_ANSWER)
+        return None
     mismatch = _pin_mismatch(baseline, reply)
     if mismatch is not None:
         detail = f"{inv.plan.name} への回答を記録しない: {mismatch}（ndf plan wait で今の承認待ちと資料を読み直して回答する）"
@@ -542,7 +568,7 @@ def _run_item(inv: Invocation) -> dict[str, Any]:
     return {"kind": "plan", "name": inv.plan.name, "run": inv.run_id}
 
 
-def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
+def gate_result(inv: Invocation, marker: dict[str, Any], warnings: tuple[str, ...] = ()) -> dict[str, Any]:
     """承認の回答を待つ結果。`routes` は回答ごとに打つコマンド。
 
     待っているステップが承認資料（`presentation_path`）と「本番へ反映され得るか」（`metrics.production`）を出していれば、
@@ -563,6 +589,7 @@ def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
         routes=presented_routes(marker),
         next=result.command(TOOL, "wait", str(inv.plan_path), "--state-dir", str(inv.state_dir)),
         presentation_path=material,
+        warnings=list(warnings),
     )
 
 
@@ -666,6 +693,7 @@ def advance(
     承認の回答（`reply`）は回答した者と組で受け、送る前に回答の記録（`answer_path`）を書く。回答した者が無ければ
     回答を送らずに invalid で止まる（承認待ちのステップの証跡は、回答した者の分かる回答の記録からだけ書く。#4409）。
     回答コマンドが固定した待ちと提示が今の待ちと提示に合わなければ、回答を記録せずに approval_stale で止まる。
+    同じ回の提示を確かめられない旧い形の目印（`unconfirmed`）には回答を記録せず、ステップを打ち直して資料を出し直す。
     """
     if _finished(root, inv.key):
         return _stored(inv)
@@ -678,16 +706,18 @@ def advance(
     with durable.session(root, inv.key, url):
         status = durable.status(inv.workflow_id)
         baseline = read_marker(inv.state_dir, inv.run_id)
+        notes: tuple[str, ...] = ()
         if status is None:
             durable.spawn(plan_workflow, inv.workflow_id, _spec(inv))
         elif reply is not None:
             refused = _deliver(inv, baseline, reply)
             if refused is not None:
                 return refused
+            notes = _represented_notes(inv, baseline)
         else:
             baseline = None
         reached, marker = _watch(inv, baseline)
         if reached == GATE:
-            on_gate(gate_result(inv, marker))
+            on_gate(gate_result(inv, marker, notes))
         out = _finish(inv)
     return out
