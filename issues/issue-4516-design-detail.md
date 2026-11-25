@@ -93,7 +93,7 @@ plugins/ndf/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `carry_walls` | `paths` が `None`（新しい測定の `ci` が不明） | 前の記録の `wall_seconds` をすべて残し、無ければ `legacy` をすべて残す。行 `{"kind": "unknown", "key": "ci", "reason": "新しい解析に CI が無い", "kept_previous": true}` を 1 つ返す（今の `_replace_ours` が不明の `ci` で前の値を残すのと同じ扱い） |
+| `carry_walls` | `paths` が `None`（新しい測定の `ci` が不明） | 前の記録に `wall_seconds` があれば、その表をすべて残す。前の記録が無いか `wall_seconds` を持たなければ、`legacy` の表をすべて残す（パスごとには混ぜない）。行 `{"kind": "unknown", "key": "ci", "reason": "新しい解析に CI が無い", "kept_previous": true}` を 1 つ返す（今の `_replace_ours` が不明の `ci` で前の値を残すのと同じ扱い） |
 | `carry_walls` | 新しい測定にそのパスの実行時間がある | 新しい値を使う |
 | `carry_walls` | 無く、前の記録の `wall_seconds` にそのパスがある | 前の記録の値を使い、行 `{"kind": "unknown", "key": "ci#<パス>", "reason": "新しい解析に壁時計が無い", "kept_previous": true}` を返す |
 | `carry_walls` | 前の記録にも無く、`legacy` にそのパスがある（移行の 1 回目） | 移行前の設定の値を使い、同じ行を返す |
@@ -204,4 +204,4 @@ plugins/ndf/
 | `judge` | 記録の入力のファイルのハッシュと今の HEAD が同じなら「新しい」、入力かブランチが変われば「古い」 | worktree から打つとメインディレクトリの記録を読む | 記録が無い・壊れている・不正な UTF-8・途中の印・旧い形の設定（どれも終了コード 3） |
 | `load` | 新しい形の設定を返す | 旧い形の設定を、取り除かずに返す | 取り除いても形に合わない（終了コード 2） |
 | `plan`（`cli.main(["write", …])` から） | 2 回目の書き出しで `.ndf/project.json` を書かない。記録を差分でなく要約の 1 行で表示する | 移行の 1 回目（`wall_seconds: null` を含む・前の記録が無く移行前の実行時間を引き継ぐ）・記録の無い clone・`ci` が不明 | 前の記録の入力が今と同じで、`.ndf/project.json` か記録の書き込みを失敗させる（次の判定が「古い」）・記録のパスが無視されない（終了コード 1 で既存のファイルが前のまま） |
-| `plan`・`_write`（`cli.main(["write", …])` から） | 同じ測定の結果で回答だけを変えた書き出しの後、記録に途中の印が無い。印の残った記録から同じ内容で打ち直すと、印が消える | 記録の無い clone で `--dry-run` を打つと、`.ndf/measured/` の下に何も作られず、表示の動詞が `書く（--dry-run）` になる。書くものが無い書き出しでは git を呼ばず終了コード 0（記録が追跡済みでも）。書くファイルが `.gitignore` だけのとき、`git ls-files` と `git check-ignore` を 1 回ずつ呼ぶ（呼び出しを差し替えて回数を数える） | 追跡していた `.gitignore` を作業ツリーで消した状態で、`.gitignore` を作らずに終了コード 1 |
+| `plan`・`_write`（`cli.main(["write", …])` から） | 同じ測定の結果で回答だけを変えた書き出しの後、記録に途中の印が無い。印の残った記録から同じ内容で打ち直すと、印が消える | 記録の無い clone で `--dry-run` を打つと、`.ndf/measured/` の下に何も作られず、表示の動詞が `書く（--dry-run）` になる。書くものが無い書き出しでは git を呼ばず終了コード 0（記録が追跡済みでも）。書くファイルが `.gitignore` だけで記録が追跡されていないとき、`git ls-files` と `git check-ignore` を 1 回ずつ呼ぶ（呼び出しを差し替えて回数を数える）。記録が追跡済みなら `git ls-files` だけを呼ぶ | 追跡していた `.gitignore` を作業ツリーで消した状態で、`.gitignore` を作らずに終了コード 1 |
