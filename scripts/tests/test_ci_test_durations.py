@@ -399,6 +399,197 @@ def test_past_totals_skips_runs_without_artifact() -> None:
     assert [r for r, _ in search.totals] == [1001, 1002] and gh.calls["zips"] == 2
 
 
+# --- past_totals: 一覧のページ取得と失敗の扱い（I-002 の前に振る舞いを固定する） ---
+
+RUNS_P1 = r".*/workflows/pytest\.yml/runs\?.*&page=1"
+ARTS_P1 = r".*/actions/artifacts\?name=ci-test-duration-total&.*&page=1"
+
+
+def test_past_totals_requests_list_paths_in_order() -> None:
+    gh = FakeGh(history(3))
+
+    ctd.past_totals(gh, 100, 2, NOW)
+
+    lists = [p for p in gh.paths if not p.endswith("/zip")]
+    assert lists == [
+        "repos/{owner}/{repo}/actions/workflows/pytest.yml/runs?branch=main&event=push&status=success&per_page=100&page=1",
+        "repos/{owner}/{repo}/actions/artifacts?name=ci-test-duration-total&per_page=100&page=1",
+    ]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [ctd.GhError("boom"), ctd.GhUnavailable("no gh"), {"other": []}, None],
+    ids=["gh_error", "unavailable", "key_error", "type_error"],
+)
+def test_past_totals_runs_list_error_kinds(answer) -> None:
+    routes = history(3)
+    routes[RUNS_P1] = answer
+
+    search = ctd.past_totals(FakeGh(routes), 100, 2, NOW)
+
+    assert search.stop == "list_error" and search.totals == []
+    assert len(search.unreadable) == 1 and search.unreadable[0].startswith("実行の一覧: ")
+
+
+def test_past_totals_runs_list_error_message_has_gh_message() -> None:
+    routes = history(3)
+    routes[RUNS_P1] = ctd.GhError("runs: 502")
+
+    search = ctd.past_totals(FakeGh(routes), 100, 2, NOW)
+
+    assert search.unreadable == ["実行の一覧: runs: 502"]
+
+
+def test_past_totals_runs_list_time_up() -> None:
+    routes = history(3)
+    routes[RUNS_P1] = ctd.GhTimeUp("x")
+
+    search = ctd.past_totals(FakeGh(routes), 100, 2, NOW)
+
+    assert search.stop == "time_limit" and search.totals == [] and search.unreadable == []
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [ctd.GhError("boom"), ctd.GhUnavailable("no gh"), {"other": []}, None],
+    ids=["gh_error", "unavailable", "key_error", "type_error"],
+)
+def test_past_totals_artifact_list_error_kinds(answer) -> None:
+    routes = history(3)
+    routes[ARTS_P1] = answer
+
+    gh = FakeGh(routes)
+    search = ctd.past_totals(gh, 100, 2, NOW)
+
+    assert search.stop == "list_error" and search.totals == [] and gh.calls["zips"] == 0
+    assert len(search.unreadable) == 1 and search.unreadable[0].startswith("成果物の一覧: ")
+
+
+def test_past_totals_artifact_list_error_message_has_gh_message() -> None:
+    routes = history(3)
+    routes[ARTS_P1] = ctd.GhError("arts: 500")
+
+    search = ctd.past_totals(FakeGh(routes), 100, 2, NOW)
+
+    assert search.unreadable == ["成果物の一覧: arts: 500"]
+
+
+def test_past_totals_artifact_list_time_up() -> None:
+    routes = history(3)
+    routes[ARTS_P1] = ctd.GhTimeUp("x")
+
+    search = ctd.past_totals(FakeGh(routes), 100, 2, NOW)
+
+    assert search.stop == "time_limit" and search.totals == [] and search.unreadable == []
+
+
+def test_past_totals_second_artifact_page_error_keeps_collected() -> None:
+    routes = history(150)
+    routes[r".*/actions/artifacts\?name=ci-test-duration-total&.*&page=2"] = ctd.GhError("arts2")
+
+    gh = FakeGh(routes)
+    search = ctd.past_totals(gh, 100, 150, NOW)
+
+    # zip の上限（2 * need）には届かず、101 件目の実行で 2 ページ目を引いて失敗する
+    assert search.stop == "list_error" and len(search.totals) == 100
+    assert search.unreadable == ["成果物の一覧: arts2"]
+
+
+def test_past_totals_page_limit_on_runs_list() -> None:
+    # 実行の一覧が満杯の新しい実行（数えない）ばかりで、ページを使い切る
+    full = [{"id": 9000 + k, "run_number": 200 + k, "run_attempt": 1, "created_at": NOW.isoformat()} for k in range(100)]
+    gh = FakeGh({r".*/workflows/pytest\.yml/runs\?.*": {"workflow_runs": full}})
+
+    search = ctd.past_totals(gh, 100, 2, NOW)
+
+    assert search.stop == "page_limit" and gh.calls["pages"] == ctd.PAGE_LIMIT
+    assert [p.rsplit("page=", 1)[1] for p in gh.paths] == [str(n) for n in range(1, ctd.PAGE_LIMIT + 1)]
+
+
+def test_past_totals_page_limit_counts_both_lists() -> None:
+    # 実行の一覧 1 ページ目の候補は新しい実行（数えない）ばかりで 9 ページを使い、
+    # 10 ページ目は成果物の一覧、11 ページ目を引こうとして止まる
+    routes: dict[str, object] = {}
+    full = [{"id": 9000 + k, "run_number": 200 + k, "run_attempt": 1, "created_at": NOW.isoformat()} for k in range(100)]
+    for no in range(1, 9):
+        routes[rf".*/workflows/pytest\.yml/runs\?.*&page={no}"] = {"workflow_runs": full}
+    base = history(150)
+    routes[r".*/workflows/pytest\.yml/runs\?.*&page=9"] = base[RUNS_P1]
+    routes[ARTS_P1] = base[ARTS_P1]
+    for pattern, value in base.items():
+        if pattern.endswith("/zip"):
+            routes[pattern] = value
+
+    gh = FakeGh(routes)
+    search = ctd.past_totals(gh, 100, 150, NOW)
+
+    assert search.stop == "page_limit" and gh.calls["pages"] == ctd.PAGE_LIMIT
+    assert len(search.totals) == 100
+
+
+def test_past_totals_artifact_pages_continue_until_oldest_passes_run() -> None:
+    routes = history(150)
+    gh = FakeGh(routes)
+
+    search = ctd.past_totals(gh, 100, 120, NOW)
+
+    assert search.stop == "enough" and len(search.totals) == 120
+    lists = [p for p in gh.paths if not p.endswith("/zip")]
+    assert [("runs" if "/runs?" in p else "arts", p.rsplit("page=", 1)[1]) for p in lists] == [
+        ("runs", "1"),
+        ("arts", "1"),
+        ("runs", "2"),
+        ("arts", "2"),
+    ]
+
+
+def test_past_totals_short_artifact_page_stops_artifact_paging() -> None:
+    routes = history(4)
+    arts = routes[ARTS_P1]["artifacts"]
+    del arts[2]  # 1002 の成果物が無い。1 ページ目は短いので次は引かない
+
+    gh = FakeGh(routes)
+    search = ctd.past_totals(gh, 100, 3, NOW)
+
+    assert [r for r, _ in search.totals] == [1000, 1001, 1003]
+    assert gh.calls["pages"] == 2
+
+
+def test_past_totals_skips_expired_or_runless_artifacts() -> None:
+    routes = history(4)
+    arts = routes[ARTS_P1]["artifacts"]
+    arts[0]["expired"] = True
+    arts[1]["workflow_run"] = None
+    del arts[2]["workflow_run"]
+
+    gh = FakeGh(routes)
+    search = ctd.past_totals(gh, 100, 1, NOW)
+
+    assert [r for r, _ in search.totals] == [1003] and gh.calls["zips"] == 1
+
+
+def test_past_totals_first_artifact_for_run_wins() -> None:
+    routes = history(2)
+    arts = routes[ARTS_P1]["artifacts"]
+    arts.insert(0, {"id": 7777, "expired": False, "workflow_run": {"id": 1000}, "created_at": arts[0]["created_at"]})
+    routes[r".*/artifacts/7777/zip"] = total_zip(1000, seconds=11.0)
+
+    search = ctd.past_totals(FakeGh(routes), 100, 1, NOW)
+
+    assert search.totals == [(1000, 11.0)]
+
+
+def test_past_totals_empty_artifact_page_does_not_refetch() -> None:
+    routes = history(3)
+    routes[ARTS_P1] = {"artifacts": []}
+
+    gh = FakeGh(routes)
+    search = ctd.past_totals(gh, 100, 2, NOW)
+
+    assert search.stop == "exhausted" and search.totals == [] and gh.calls == Counter({"pages": 2})
+
+
 # --- verdict ---
 
 
