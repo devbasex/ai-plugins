@@ -170,7 +170,10 @@ Pull Request が最後かどうかを判断できない。
 （バージョンの比較の URL・リリース対象の差分・**取り消しの手段とその限界**）。
 
 **承認資料の機械で作れる部分は `ndf release-steps materials` が組む。** 打ち方と `status` の読み方は
-[references/release-steps.md](references/release-steps.md) にある。
+[references/release-steps.md](references/release-steps.md) にある。判断の要る部分の書き足しと読み手役の確認は
+`ndf document-rebuild gate --gate release --pr <リリースの PR> --material <承認資料> --state-dir <保存先> --out <結果のファイル>` が行う
+（工程では読み手役のステップが打つ）。提示と質問には結果の `outputs.material` の資料を使い、会話のセッションは読み手役を起動しない
+（[approval-request.md の「読み手役の確認」](../development-workflow/references/approval-request.md#読み手役の確認)）。
 
 **承認の対象はリリースの PR の HEAD（40 桁）である。** 置き方は「リリースの場合」で変わる。
 

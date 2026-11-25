@@ -16,7 +16,7 @@ from plan_decls import doc as _doc
 from result_json import last_result
 
 from ndf.contracts import result
-from ndf.progress import command, gate, invoke, lane, model, plan, run, store
+from ndf.progress import command, gate, invoke, lane, plan, run, store
 from ndf.progress.gate import bump
 
 DIGEST = "a" * 64
@@ -67,9 +67,7 @@ def _fake_work(calls: dict):
     "value,recorded,ran_release",
     [("approved", plan.RELEASED, True), ("rejected", plan.REJECTED, False), ("request_changes", plan.REJECTED, False)],
 )
-def test_bump_sprint_hands_step_outputs_forward_and_records_the_answer(
-    st, repo, env, flow, capsys, tmp_path, value, recorded, ran_release
-):
+def test_bump_sprint_hands_step_outputs_forward_and_records_the_answer(st, repo, env, flow, capsys, tmp_path, value, recorded, ran_release):
     sprint = _bump_sprint(st, capsys)
     calls: dict = {}
     faked = run.Env(**{**vars(env), "invoker": _fake_work(calls), "in_lane": lambda _st, _tid: True})
@@ -96,7 +94,7 @@ def test_bump_sprint_hands_step_outputs_forward_and_records_the_answer(
     key = f"k-{value}"
     gate.answer(st, sprint.tid, gate.Answer(q.id, value, "回答", "organizer", key, notes if value == "request_changes" else None))
     flow.turn(sprint.tid, faked)
-    assert ("release" in calls) is ran_release 
+    assert ("release" in calls) is ran_release
     assert run.decide(run.read(st, sprint.tid)).action == run.Action.DONE
     environ = {invoke.INPUT_ENV: json.dumps(calls["bump-record"])}
     for _ in range(2):  # 打ち直しても、閉じたリクエストを二重に記録しない

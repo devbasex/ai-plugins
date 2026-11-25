@@ -1,8 +1,7 @@
 """サブコマンド `ndf progress`: スプリントのステートマシンを作り、読み、conductor の操作で状態を変える。
 
 ndf progress new <スプリント名> --mode <モード> --issues <番号>... [--pace <進め方>] [--disable <工程>=<理由>]...
-                 [--requirements <要求と受け入れ条件の出力>] [--parent <親のステートマシンの ID>]
-                 [--carry <中止したステートマシンの ID>]
+                 [--requirements <要求と受け入れ条件の出力>] [--parent <親のステートマシンの ID>] [--carry <中止したステートマシンの ID>]
 ndf progress new <スプリント名> --loop <ループの名前> --parent <レーンのステートマシンの ID>
 ndf progress new <スプリント名> --mode release-bump --release-requests <リクエスト>... --parent <レーンのステートマシンの ID>
 ndf progress show <ステートマシンの ID>
@@ -15,7 +14,6 @@ ndf progress docs-only --base <ベースブランチ> [--remote <リモート名
 ndf progress gathered [--branch <スプリントブランチ>] [--remote <リモート名>]
 
 どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
-
 結果は結果 JSON の 1 行で返す。このサブコマンドを打つのはレーンの conductor で、書く事象の書き手は conductor になる。
 `check` だけは何も書かず、工程の出力を書いた supervisor が `finish` と同じ規則で確かめるために打つ。
 工程を流す `next` と、承認ゲートの回答を書く `answer` は P1b（#3092）が足す。
@@ -595,7 +593,14 @@ def _prepare_new(
     if unknown:
         raise definition.WorkflowDefError([f"--disable の工程がモード {a.mode} に無い: {', '.join(unknown)}"])
     enabled = stages.resolve_enabled(snap, None, _declared(cwd), disables)
-    context = {"issues": a.issues, "mode": a.mode, "pace": a.pace, "mvv_ref": mvv_ref(cwd), **_carried(a, snap, disables, carry, repo), **added}
+    context = {
+        "issues": a.issues,
+        "mode": a.mode,
+        "pace": a.pace,
+        "mvv_ref": mvv_ref(cwd),
+        **_carried(a, snap, disables, carry, repo),
+        **added,
+    }
     errs = contracts.schema_errors(context, definition.CONTEXT)
     if errs:
         raise definition.WorkflowDefError([f"スプリントの文脈: {e}" for e in errs])
@@ -623,27 +628,14 @@ def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], l
     return LOOP_SNAPSHOT, _new_doc(LOOP_SNAPSHOT, {"issues": []}, {}), []
 
 
-def _bump_context(a: argparse.Namespace, st: store.Store) -> dict[str, Any]:
-    """版上げのスプリントの文脈に足す値（課題は持たず、まとめるリクエストと親の計画の名前。#4446）。ほかのモードは何も足さない。"""
-    if a.mode != model.RELEASE_BUMP_MODE:
-        if a.release_requests:
-            raise definition.WorkflowDefError([f"--release-requests はモード {model.RELEASE_BUMP_MODE} でだけ受ける"])
-        return {}
-    if not a.release_requests or a.parent is None:
-        raise definition.WorkflowDefError([f"モード {a.mode} には --release-requests とレーンのステートマシン（--parent）が要る"])
-    with store.transaction(st) as conn:
-        plan = store.read_parent(conn, a.parent)
-    if plan is None:
-        raise definition.WorkflowDefError([f"--parent {a.parent} は計画のレーンのステートマシンでない"])
-    return {"issues": [], "release_requests": a.release_requests, "release_plan": plan["name"]}
-
-
 def _sprint_new(
     a: argparse.Namespace, cwd: Path, st: store.Store, repo: str
 ) -> tuple[stages.Snapshot, dict[str, Any], list[model.EventDraft]]:
     snap = definition.load_definition(a.mode)
     carry = _read_carry(st, a.carry) if a.carry is not None else None
-    doc, drafts = _prepare_new(a, cwd, snap, carry, repo, _bump_context(a, st))
+    doc, drafts = _prepare_new(
+        a, cwd, snap, carry, repo, definition.bump_context(a.mode, a.release_requests, store.read_parent(st, a.parent))
+    )
     return snap, doc, drafts
 
 
@@ -883,6 +875,11 @@ def parser() -> argparse.ArgumentParser:
     )
     gathered.add_argument("--branch", help="スプリントブランチ（省けば worktree のブランチ）")
     gathered.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
+    sub.add_parser("reread", help="承認の前の確認をやり直し、承認ゲートの待ちを出し直す").add_argument(
+        "machine_id"
+    )  # 受けるのは gate.entry
+    for name in ("bump-assemble", "bump-present", "bump-record"):  # 版上げのスプリントのステップ。受けるのは gate.bump
+        sub.add_parser(name, help="版上げのスプリントのステップ（値は工程の入力で受ける）")
     add_cwd(sub.choices.values())
     return ap
 

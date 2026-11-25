@@ -66,7 +66,9 @@ def _hub(cwd: Path) -> GitHub:
 def _ndf(argv: Sequence[str], cwd: Path) -> dict[str, Any]:
     done = subprocess.run(invoke.ndf_command(*argv), cwd=cwd, capture_output=True, text=True, encoding="utf-8", check=False)
     got = result.last_line(done.stdout)
-    return got if got is not None else result.stopped(TOOL, "bad_report", f"ndf {argv[0]} の結果 JSON が無い（終了コード {done.returncode}）")
+    return (
+        got if got is not None else result.stopped(TOOL, "bad_report", f"ndf {argv[0]} の結果 JSON が無い（終了コード {done.returncode}）")
+    )
 
 
 def default_io() -> Io:

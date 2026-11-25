@@ -414,6 +414,18 @@ def build(mode_doc: Mapping[str, Any], stage_docs: Mapping[str, Any]) -> stages.
     return stages.Snapshot(doc["name"], doc["version"], digest, _ndf_meta(mode_doc)["height"], defs)
 
 
+def bump_context(mode: str, requests: Optional[list[str]], plan: Optional[Mapping[str, Any]]) -> dict[str, Any]:
+    """版上げのスプリントの文脈に足す値（課題は持たず、まとめるリクエストと、親（レーン）の親である計画の名前。#4446）。
+    ほかのモードは何も足さず、`requests` を受けない。足りない・多い引数は `WorkflowDefError`。"""
+    if mode != model.RELEASE_BUMP_MODE:
+        if requests:
+            raise WorkflowDefError([f"--release-requests はモード {model.RELEASE_BUMP_MODE} でだけ受ける"])
+        return {}
+    if not requests or plan is None:
+        raise WorkflowDefError([f"モード {mode} には --release-requests と計画のレーンのステートマシン（--parent）が要る"])
+    return {"issues": [], "release_requests": requests, "release_plan": plan["name"]}
+
+
 def modes() -> list[str]:
     """定義のあるモードの名前（辞書順）。"""
     return sorted(p.stem for p in (contracts.contracts_dir() / MODES_DIR).glob("*.json"))

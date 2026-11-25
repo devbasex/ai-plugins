@@ -167,7 +167,6 @@ def release_gate() -> str:
     return next(g for g in table()["gates"] if g == "release")
 
 
-
 def reading_skip(
     done: Mapping[str, Mapping[str, Any]], before: Optional[str], gate: Optional[str], waiting_gate: bool, in_lane: bool, mode: str
 ) -> bool:

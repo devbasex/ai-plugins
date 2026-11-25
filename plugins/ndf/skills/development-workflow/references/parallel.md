@@ -30,6 +30,7 @@
 | --- | --- |
 | `request_opened`・`lane_question` | レーンの質問である。下の「質問に回答する」 |
 | `request_opened`・`lane-release` | レーンのリリース承認ゲートのリクエストである。下の「まとめたリリース」 |
+| `request_opened`・`bump-release` | 版上げのスプリントのリリース承認ゲートのリクエストである。中身は版上げの PR（`prs`）・承認資料のパス（`material`）・まとめたリクエスト（`release_requests`）・版上げのスプリントの ID（`sprint_state`）。下の「質問に回答する」と同じく問う。記録との突き合わせは `ndf records reading check --gate release --pr <番号> --material <承認資料> --questions-out <ファイル>`、回答は `ndf answer <sprint_state> --gate <質問の id> ... --by organizer` で書く |
 | `request_opened`・`launch_failed` | 耐久ワークフローがレーンを起動できなかった（打ち直しの回数が尽きた・開発ループ以外の起動できない行・計画と別のリポジトリのレーン）。`detail` を読んで原因を直し、`ndf lanes request close p1 <リクエスト> --reason <理由>` で閉じる。閉じると、打ち直せば起動できる失敗のレーンを耐久ワークフローが起動し直す |
 | `request_opened`・`lane_stalled` | 実行中の行のレーンが止まった（生死の判定が `stalled`・`ended`）。中身に最後に動いた時刻と起動の試みの回数が載る。`ndf lanes status p1` とレーンの画面（下の「レーンの画面を見るとき」）で確かめて利用者へ伝える。レーンが動き出せば耐久ワークフローが閉じる |
 | `request_opened`・`halt_failed` | 最後の行が終わったレーンのラッパーを止められなかった。`ndf relay stop <ラッパー>` で止めてから、リクエストを閉じる。閉じるまで計画は完了しない |
@@ -49,6 +50,10 @@
 
 1. リクエストの中身（レーン・`questions`）を読み、区分ごとに `AskUserQuestion` で利用者へ問う（`metadata.source` は中身の質問の区分）。
    各問いにはレーン名・課題・設計 PR の URL か作業の場所を添える
+   - **承認ゲートの質問は、オーガナイザーが書かない。** [approval-request.md の「承認ゲートの質問」](approval-request.md#承認ゲートの質問) の
+     `check --gate` で質問を作り直して記録と突き合わせ、記録した `questions` を変えずに、ゲートごとに 1 回ずつ出す。添えるのは、PR と承認資料から
+     コピーした一覧（順・PR の URL・題・承認資料の場所）だけである。合わなければ `ndf progress reread <sprint_id>` を打つ（読み手役のステップは
+     スプリントの作業場所で打たれる）。読み手役は起動しない
 2. 回答をレーンのスプリントへ届ける。スプリントのステートマシンの ID は `ndf lanes status p1` の行の `sprint_id` にある
    - 承認ゲートの質問なら、質問に添えられた承認ゲートの結果（質問の id `metrics.gate.id` と回答ごとのルート）から、
      ルートの `ndf answer <スプリントの ID> --gate <質問の id> --result <回答の語> --reason <理由> --by organizer --key <冪等のキー>` を打つ
@@ -61,11 +66,15 @@
 計画のレーンのスプリントがリリース承認ゲートに着くと、`ndf progress` がリリースのリクエスト（`lane-release`。中身にレーン・PR・課題・
 スプリントのステートマシンの ID `sprint_state`）を計画のステートマシンへ書く。同じ質問には 1 回だけ書く。
 
-1. 届いているリリースのリクエストを 1 本のリリースにまとめ、利用者のリリース承認ゲートを通して出す（手順は `release` の Skill）
-2. 結果を `ndf lanes release p1 <リクエスト>... --result released --version <バージョン> --release <リリース記録の PR> --reason <理由>` で記録する。
-   承認されなければ `--result rejected`。まとめたリクエストは同じトランザクションで閉じる
-3. リクエストごとに `ndf lanes answered <sprint_state> --answer <released か rejected>` を打つ。起きたレーンの conductor がスプリントを続けると、`ndf progress` が
-   記録した回答を承認ゲートの回答（`by: organizer`）として書き、出したバージョンとリリース記録の PR をスプリントの文脈へ写す
+1. 届いているリリースのリクエストを 1 本にまとめると決めたら、一時レーンを足し（下の「レーンをまたぐ変更」）、行の入力を
+   `{"kind": "release", "requests": [<リクエスト>...]}` にする。起きた版上げのスプリントが、版上げの PR を作り、承認資料と質問の文を作って
+   読み手役に確かめさせる。オーガナイザーは版上げの PR を作らず、承認資料を組まない
+2. 版上げのスプリントがリリース承認ゲートに着くと、`bump-release` のリクエストが届く。上の表のとおりに質問し、回答を `ndf answer` で書き、
+   `ndf lanes answered <版上げのスプリントの ID> --answer <回答の語>` で載せてから、リクエストを `ndf lanes request close` で閉じる。
+   変更を求められたら、直しは各レーンのスプリントで行い、次のまとめたリリースで出し直す
+3. まとめたリクエストの回答の記録（`ndf lanes release` と、リクエストごとの `ndf lanes answered`）は、版上げのスプリントの `bump-record` が打つ。
+   起きたレーンの conductor がスプリントを続けると、`ndf progress` が記録した回答を承認ゲートの回答（`by: organizer`）として書き、出したバージョンと
+   リリース記録の PR をスプリントの文脈へ写す
 
 リクエストを出した後に PR の head が変わっていれば、回答は承認ゲートに断られ、待ちへ戻る。
 
@@ -141,6 +150,7 @@
 
 | すること | 打つもの |
 | --- | --- |
+| レーンの外で PR が要る作業（片付け・計画の直し）を行う | オーガナイザーは自分で PR を作らない。一時レーンを足し、`{"kind": "sprint", "issues": [...]}` の行で流す |
 | レーンを足す | 足すレーン 1 本の設定を JSON のファイルに書き（形は [parallel-plan.md](../../issue-plan-strategy/references/parallel-plan.md) の「レーンごとに決めること」）、`ndf lanes lane add p1 <JSON のファイル>` |
 | レーンの `touches`・`after` を変える | `ndf lanes set p1 <レーン> [--touches <場所>...] [--after <先>...] --reason <理由>`。`name` と `repo` は変えられない |
 | マシン全体の稼働中の数の上限を変える | `ndf relay cap --named <数>`（消すのは `--clear`）。計画ごとの上限は無い（[parallel-checks.md](parallel-checks.md) の「マシン全体の稼働中の数」） |

@@ -94,10 +94,16 @@ workflow の `assemble`（`ndf release-steps assemble --channel production`）�
 
 ```bash
 ndf release-steps materials --base <ベースブランチ> --production <本番ブランチ> --channel production --out <承認資料>
+ndf document-rebuild gate --gate release --pr <リリースの PR> --material <承認資料> --state-dir <保存先> --out <結果のファイル>   # 以後は outputs.material の資料を使う
 ndf release-steps present --pr <リリースの PR> --material <承認資料>   # routes が提示した HEAD と資料の SHA-256 を固定する
 ndf release-steps answer --pr <リリースの PR> --answer approved --presented <提示した HEAD> --material-sha256 <資料の SHA-256> --by user   # 承認を得てから
 ndf release-steps records --pr <リリース記録の PR>
 ```
+
+**版上げのスプリント（モード `release-bump`）では、組み立てから提示までを工程が行う。** `ndf progress bump-assemble` が workflow の
+`assemble` を起動して版上げの PR の本文を承認資料にし、読み手役のステップが確かめ、`bump-present` が提示する。承認の後のリリースのステップは、
+版上げの PR の最後の提示のコメントにある `提示したコミット:` と `提示した資料:` の値を `answer` の `--presented` と `--material-sha256` に渡す。
+`ndf release-steps open-releases --base <ベースブランチ> --production <本番ブランチ>` は、開いている版上げの PR の番号を返す。
 
 **`answer` は承認を得てから打つ。** `--by` は回答した担い手で、利用者が `user`、MVV 判定で通したときが `mvv` である。
 利用者の回答は `present` の routes が固定した `--material-sha256` を渡す。最新の提示の資料と違えば書かれない（資料を差し替えて提示し直したら、新しい資料に回答を取り直す）。`mvv` の回答には渡さない

@@ -19,7 +19,7 @@ conductor へ伝えれば次のフェーズから反映する。
 
 | 層 | 何者か | 人間へ問えるか | 起動する相手 | 持たないもの |
 | --- | --- | --- | --- | --- |
-| conductor | 人間と対話しているセッション。`/ndf:development-workflow` を受ける | **問える**（`AskUserQuestion`） | プラン（キュー）。テンプレートの無いフェーズだけ supervisor。承認の前の読み手役だけ worker | 工程 Skill の実行。**`development-workflow` と `issue-plan-strategy` 以外を起動しない** |
+| conductor | 人間と対話しているセッション。`/ndf:development-workflow` を受ける | **問える**（`AskUserQuestion`） | プラン（キュー）。テンプレートの無いフェーズだけ supervisor。判断の質問の前の読み手役だけ worker | 工程 Skill の実行。**`development-workflow` と `issue-plan-strategy` 以外を起動しない** |
 | supervisor | 1 つのフェーズ（連続する工程のグループ）を通す役割。`ndf plan` が主に担い、プランのテンプレートが無いなど対応できないフェーズだけサブエージェント（`ndf:supervisor`）が代行する | 問えない | worker | 人間への質問、設計 Pull Request のマージ、承認のない本番の操作 |
 | worker | 1 つの作業（調査・修正・検証・集計）を行うサブエージェント | 問えない | 起動しない。**別のサブエージェントを起動しない** | 人間への質問、進捗記録、収束の判定、設計の決定 |
 
@@ -34,7 +34,7 @@ conductor へ伝えれば次のフェーズから反映する。
 **着手の判定は conductor が行う。** 課題の組み方・スプリントのモード・到達点の
 置き直しは、最初のプランを流す（または最初の supervisor を起動する）前に決める。課題が多く本文の読解が conductor の
 context window を埋めるときは、**読解だけを worker へ出す**。判定そのものは conductor が行う。
-**conductor が worker を直接起動してよいのは、この読解と、承認や判断を求める前の読み手役の 2 つだけである。** 読み手役の手順と `prompt` の決まりは [approval-request.md の「読み手役の確認」](approval-request.md#読み手役の確認) にある。
+**conductor が worker を直接起動してよいのは、この読解と、判断の質問の前の読み手役の 2 つだけである。** 承認ゲートの読み手役は工程のステップが起動し、conductor は起動しない。手順と `prompt` の決まりは [approval-request.md の「読み手役の確認」](approval-request.md#読み手役の確認) にある。
 
 ## フェーズ
 

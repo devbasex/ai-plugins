@@ -80,7 +80,14 @@ def test_standard_rows_run_from_requirements_to_backlog_and_hold_the_closing_sta
 
 def test_modes_are_ordered_by_height():
     heights = definition.mode_heights()
-    assert sorted(heights, key=heights.__getitem__) == ["light", "operation", "legacy-refactor", "standard", "documentation", "release-bump"]
+    assert sorted(heights, key=heights.__getitem__) == [
+        "light",
+        "operation",
+        "legacy-refactor",
+        "standard",
+        "documentation",
+        "release-bump",
+    ]
 
 
 def test_gate_steps_name_which_gate_they_are():

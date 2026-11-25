@@ -33,6 +33,10 @@ def test_subcommands_keep_their_order():
         "restore",
         "docs-only",
         "gathered",
+        "reread",
+        "bump-assemble",
+        "bump-present",
+        "bump-record",
     ]
 
 

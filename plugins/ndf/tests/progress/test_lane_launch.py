@@ -63,9 +63,7 @@ def test_start_commands_create_the_sprint_under_the_lane_then_start_the_row():
         "progress", "new", name, "--mode", "release-bump", "--release-requests", "q1", "q2", "--parent", "lane-id"
     ]  # fmt: skip
     assert start["argv"][1:4] == ["lanes", "row", "start"] and going["argv"][1:] == ["progress", "next"]
-    assert launch.start_prompt("p6", "rel", "lane-id", bumped).startswith(
-        "/goal /ndf:development-workflow --release-requests q1 q2 -- "
-    )
+    assert launch.start_prompt("p6", "rel", "lane-id", bumped).startswith("/goal /ndf:development-workflow --release-requests q1 q2 -- ")
     assert bumped.requests == ["q1", "q2"] and bumped.issues() == set() and _row().requests == []
 
 

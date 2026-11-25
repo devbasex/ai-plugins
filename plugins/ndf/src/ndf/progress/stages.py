@@ -280,13 +280,17 @@ def passed_gate(stage: StageDef, gate: StepDef, report: dict[str, Any], approved
     if not approved:
         ids = [st.id for st in stage.steps]
         for i in ids[ids.index(gate.id) + 1 : ids.index(str(gate.on_reject))]:
-            out.append((i, result.result(__package__.rpartition(".")[2], result.OK, f"承認されなかったので、ステップ {i} は打たずに済ませた")))
+            out.append(
+                (i, result.result(__package__.rpartition(".")[2], result.OK, f"承認されなかったので、ステップ {i} は打たずに済ませた"))
+            )
     return out
 
 
 def check_order(steps: list[StepDef]) -> list[str]:
     """モードの全ステップを並びの順に平らにした一覧で、順序・範囲・重複の決まりを確かめ、破った理由を返す。"""
-    return _range_errors(steps) + _after_release_errors(steps) + _duplicate_errors(steps) + _reading_errors(steps) + _on_reject_errors(steps)
+    return (
+        _range_errors(steps) + _after_release_errors(steps) + _duplicate_errors(steps) + _reading_errors(steps) + _on_reject_errors(steps)
+    )
 
 
 def check_unique_stage_names(stages: Iterable[StageDef]) -> list[str]:
