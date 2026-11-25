@@ -76,6 +76,7 @@ plugins/ndf/
 | `skills/issue-plan-strategy/references/parallel-plan.md` | 変更 | スプリントの行の `mode`・`basis` の欄と、モードで行を切る手順（基準は `mode-criteria.md` を指す）。課題の本文に印 `ndf:split-branch` があれば、行の `args` に `--from-branch` を書く手順 | — | — | — |
 | `skills/issue-plan-strategy/references/execution-plan.md` | 変更 | モードの列の埋め方と、食い違いを「見直し」の表に書く手順 | — | — | — |
 | `skills/development-workflow/references/operation-run.md` | 変更 | 外部へ適用する前に dry-run の結果を `operation` の問いで照らし、値の外の変更があれば適用せずに止める（「`operation` の外部への適用の前の確かめ」）。必ず人の承認が要る操作に当たる単位は検証用の系でも承認の記録まで適用せず、記録には秘密と公開していない値を書かない（「必ず人の承認が要る操作と公開しない情報」） | — | — | — |
+| `contracts/workflow/stages/operation-implement.json` | 新設 | `operation` の工程「実装」の定義。`prepare`・回答を待つ `apply-gate`（`gate: release`）・`apply` の 3 ステップ。`contracts/workflow/modes/operation.json` の「実装」はこの定義を指す（「`operation` の承認の置き場所」） | 工程の定義 | — | — |
 | `skills/out-of-scope/SKILL.md` | 変更 | 即時修正の参照を「作業中に見つけた不具合」の 3 つの場合へ直す | — | — | — |
 | `agents/worker.md` | 変更 | 規則の「即時修正」を「作業中の直し」と `mode-criteria.md` の 4 条件へ | — | — | — |
 | `skills/quality-gates/SKILL.md` | 変更 | 差分でモードを照らし直し、`recheck` が `None` でなければ出力 `mode_check` を書いて失敗で返す | — | — | — |
@@ -668,11 +669,11 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 
 | 項目 | 決まり |
 | --- | --- |
-| 待っている行の集め方 | `lanes_of` は、実行中の行を持たないレーンごとに、今の「次に始める行」の判定（`lane.rules.next_row`）で次の行を得る。`next_row` は依存（`after`）が済んでいない行を返さないので、依存が未解決の行は待つ行に入らない。行の `input.judgments` から `sprint_mode` で決めたモードの `priority_of` を、そのレーンの「起動を待つ行の優先」にする。行が無い、判定が無い（開発ループの行など）ときは `None` で、待つ行に入れない |
+| 待っている行の集め方 | 起動を待つ行は、今すぐ起動できる行だけにする。`lanes_of` は、今の `lane.rules.wakeable_lanes` が返すレーンだけを候補にし、そのレーンの次の行（`wakeable_lanes` が返す行のキー）から優先を求める。`wakeable_lanes` は、計画が実行中でないとき（停止中の計画）は何も返さず、依存（`after`）が済んでいないレーンも返さない。`next_row` だけを使ってはいけない。`next_row` は依存が済んでいなくても行を返し、済んでいない依存を `waiting_after` に入れるだけだからである。優先は、行の `input.judgments` から `sprint_mode` で決めたモードの `priority_of` である。判定が無い行（開発ループの行など）の優先は `None` にする |
 | どの計画まで見るか | 今の `machine_plans` が数える計画すべて（自分の計画・登録簿の計画・索引の計画）。読めない計画の行は優先が分からないので待つ行に入れない |
-| 空きの割り当て | `admitted` は、今の `admit_lock` の中で上限と使っている数を数えた後、空き `n` を求める。`waiting_order(plans)` の先頭 `n` 個に自分のラッパーが入っていれば許可し、入っていなければ「優先の高い行が待つ」として、上限で待つときと同じ待ちの結果を返す |
+| 空きの割り当て | `admitted` は、今の `admit_lock` の中で上限と使っている数を数えた後、空き `n` を求める。空きは優先を持つ待ち行（`waiting_order(plans)`。優先が `None` の行は入らない）に先頭から割り当てる。自分の行の優先が `None` でなければ、`waiting_order` の先頭 `n` 個に自分のラッパーが入っているときだけ許可する。入っていなければ「優先の高い行が待つ」として、上限で待つときと同じ待ちの結果を返す |
 | 待たせた候補 | 今の上限の待ちと同じく、計画の次の起動の機会に打ち直す。優先の高い行が起動して実行中になれば待つ行から抜けるので、次の打ち直しで順が回る |
-| 自分の行の優先が `None` | 割り当ての順に入れず、今のとおり空きがあれば許可する（開発ループの行を止めない） |
+| 自分の行の優先が `None` | 優先を持つ待ち行に割り当てた後に残る枠があるときだけ許可する。残る枠の数は `n` から `waiting_order` の長さを引いた数で、1 以上なら許可し、0 以下なら待たせる。例: 空き 1 枠で `hotfix` の行が待っていれば、判定を持たない開発ループの行が先に起動を試みても待たせ、枠は `hotfix` に回る。優先を持つ待ち行が無くなれば、開発ループの行も起動する |
 
 ### 異常系の処理
 
@@ -689,7 +690,7 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 | `split_groups` | 参考 `standard`・課題 `standard` 2 と `light` 1 → `standard` の 2 を残し、`light` 1 を外して 1 行 | 参考 `light`・課題 `standard` 1 と `operation` 1 → 同じ数なので高い `standard` を残す。参考 `light`・課題 `hotfix` 1 と `standard` 1 → 優先で `hotfix` を残す。参考 `None`・課題 `light` 1 と `operation` 1 → 高さか優先で決まり、どちらでも同じ結果。`hotfix` 3 件 → 番号の最小を残し、外す 2 件は 1 件ずつ 2 行。`standard` 1・`documentation` の `repo-knowledge` 1・`proposal` 1 を `standard` で残す → 外す行は 2 つで、どちらも `doc_type` を持つ判定の行で `row_errors` を通る | — |
 | `issues_split` と `row_issues_split` | レーンの行から始めたスプリントで分けると、行の課題と `judgments` から外した課題が消え、同じ課題の一時レーンを `lane add` で登録できる | 結果 JSON を受け取らずに止まった後、`show` の `split_out_rows` から同じ名前で登録し直すと、既にあるレーンは登録済みとして飛ばす | 行の `sprint_id` が違う → `refused`、何も書かない |
 | `order_rows`・`create_lane` | `standard`・`light`・`hotfix` の行 → `hotfix`・`light`・`standard`。`lane add` で `standard`・`light` の順に渡したレーンが `light` から始まり、`warnings` が出る | `light` の行が `standard` の行の後（`after`）→ 並べ替えない | — |
-| `admitted` | 上限 1・空き 1 で `standard` と `light` の行が待ち、`standard` の候補が先に呼ばれる → `standard` を待たせ、`light` を許可する | 1 行だけ待つ → 今のまま。`light` の行の依存が済んでいない → `light` は待つ行に入らず、`standard` を許可する | — |
+| `admitted` | 上限 1・空き 1 で `standard` と `light` の行が待ち、`standard` の候補が先に呼ばれる → `standard` を待たせ、`light` を許可する | 1 行だけ待つ → 今のまま。`light` の行の依存が済んでいない → `light` は待つ行に入らず、`standard` を許可する。`light` の行が停止中の計画にある → 待つ行に入らず、`standard` を許可する。空き 1 で `hotfix` の行が待ち、優先が `None` の開発ループの行が先に呼ばれる → 開発ループの行を待たせる。優先を持つ待ち行が無い → 開発ループの行を許可する | — |
 
 ## 必ず人の承認が要る操作と公開しない情報
 
@@ -703,14 +704,23 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 
 ### `operation` の承認の置き場所
 
-承認ゲートは足さず、前倒しもしない。今の operation-run.md の「4. 実行の前に承認を得る」が、本番系の単位について工程「実装」の中で出しているリリース承認ゲートの問い（`metadata.source` が `ndf-gate:2`）を、必ず人の承認が要る操作に当たる単位では検証用の系にも広げる。問いの形は 2 つ目の承認ゲート（本番系へ届く操作）と同じで、工程「デプロイ」のゲートとは別の回答として残る。今の operation-run.md も同じゲートの問いを工程「実装」で出しているので、ゲートの数は 2 つのままである。
+承認は、今の工程「デプロイ」がリリース承認ゲートで使っている仕組み（承認待ちのステップ `listen` と `ndf answer`）を、`operation` の工程「実装」にも置いて受ける。今の operation-run.md の「4. 実行の前に承認を得る」は、本番系の単位について工程「実装」の中でリリース承認ゲートの問い（`metadata.source` が `ndf-gate:2`）を出すと書いているが、工程の定義に回答を受けるステップが無い。今の `run.answer_draft` は、回答を待っているステップ（`listen`）が無い工程への回答を「回答を待っていない」として断るので、このままでは承認を記録できない。そこで、`operation` のときだけ工程「実装」の定義を 3 つのステップに分け、間に回答を待つステップを置く。
+
+問いの種類は 2 つ目の承認ゲート（本番系へ届く操作）と同じ `gate: release` で、新しい種類の承認ゲートは足さない。工程「デプロイ」のゲートとは別の回答として残る。
+
+| ステップ | 定義 | すること |
+| --- | --- | --- |
+| 1. `prepare`（作業） | 新設の `contracts/workflow/stages/operation-implement.json`（工程名は「実装」。`operation.json` の「実装」はこの定義を指す） | 範囲の表を作り、dry-run を流し、`operation` の問いで判定し、実行計画かリクエストを制限された保存先に保存する（「`operation` の外部への適用の前の確かめ」）。報告の出力に承認要求 `apply_request: {"id", "units": [{"unit", "target", "needs_approval", "ref", "sha256"}]}` を書く。`needs_approval` は、単位が本番系に届くか、必ず人の承認が要る操作（C1・C2・C3・C4・P3）に当たるときに真である。`id` は承認要求の ID で、`units` の sha256 を並べた値の sha256 にする |
+| 2. `apply-gate`（回答を待つ `listen`。`gate: release`） | 同上 | `needs_approval` が真の単位が 1 つでもあれば、人へ問う。問いには `apply_request` の `id` と単位の表と、各単位の `ref` と sha256 を載せる。真の単位が無ければ、MVV 判定で省けるゲートと同じく、回答した者 `service:operation` の承認を書いて人に問わずに通す（今の `service:mvv` と同じ経路） |
+| 3. `apply`（作業） | 同上 | 承認された単位だけを、保存した実行計画かリクエストのまま適用する。適用の後の記録は項目名と変更の種類だけにする |
 
 | 項目 | 決まり |
 | --- | --- |
-| いつ問うか | 当たる単位を、試行を含めて最初に外部の状態を変える前。単位の表と、保存した実行計画かリクエストの参照（`ref`）と sha256 を問いに載せる |
-| 承認の記録 | 問いへの人の回答の事象（`answered`）。スプリントのステートマシンに残る。回答は単位の ID と、問いに載せた sha256 を持つ |
-| 適用してよいかの判定 | 単位ごとに、その単位の ID を含み、sha256 が今適用しようとしている実行計画かリクエストの sha256 と同じ、承認の回答があるかを見る。無い、承認でない回答しか無い、sha256 が違う（承認の後に計画を作り直した）のどれかなら適用しない |
-| 適用しないとき | 工程「実装」を `結果: 判断が要る` で止め、止めた理由に承認の無い単位を書く。承認が記録されたら、conductor が `ndf progress retry` で再開する |
+| 回答の入口 | 今の承認ゲートと同じ `ndf answer` で、質問の id（`gate_id`）と見た対象を添える。見た対象には `apply_request.id` を書く。工程「実装」は 2 のステップで回答を待っている（`next` が `gate` を返す）ので、`answer_draft` は断らない |
+| 承認の記録 | 事象 `answered`（2 のステップへの回答）。payload の `gate_id` と見た対象の `apply_request.id` で、承認した単位と sha256 の組に結び付く。単位と sha256 は 1 の報告の出力に残っているので、回答に写し直さない |
+| 再開 | 回答の後に conductor が `ndf progress next` を打つと、今のゲートと同じく回答を読んで 3 のステップを流す。`retry` は使わない |
+| 適用してよいかの判定 | 3 のステップは単位ごとに、2 への回答が承認で、その見た対象が 1 の `apply_request.id` と同じかを見る。さらに、適用しようとしている実行計画かリクエストの sha256 が、1 の出力の sha256 と同じかを見る。どれかが違えば、その単位を適用しない |
+| 承認されなかったとき・適用しないとき | 工程「実装」を失敗にし、理由に承認の無い単位を書く。計画を作り直すときは `ndf progress retry` で 1 から流し直し、新しい `apply_request.id` で問い直す。前の承認は `id` が違うので使われない |
 
 ### リリース後レビューの `hold`
 
@@ -718,15 +728,30 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 
 | 時点 | すること |
 | --- | --- |
-| 指摘を分けた後 | `hold` の指摘が 1 つでもあれば、コメントも起票もしない。結果のファイルと工程の出力 `post_review` に分け方ごとの件数を書き、工程を `結果: 判断が要る` で止める。`hold` の指摘の本文は結果のファイル（`--state-dir`。リポジトリの外）にだけ残し、PR のコメントにも課題にも書かない |
-| 人の判断 | conductor は `hold` の指摘ごとに、`revert`・`fix`・`skip` のどれにするかを利用者に問う。答えを結果のファイルの指摘の `outcome` に書き、`decided_by: "human"` を足す |
-| 再開 | conductor が `ndf progress retry` で工程を流し直す。打ち直しは結果のファイルを読み（「再開の正本と起票の重複の防ぎ方」）、`hold` が残っていなければコメントと起票へ進む。残っていれば同じく止まる |
+| 指摘を分けた後 | `hold` の指摘が 1 つでもあれば、コメントも起票もしない。結果のファイルと工程の出力 `post_review` に分け方ごとの件数を書き、工程を `結果: 判断が要る` で止める。`hold` の指摘の題・本文・理由・根拠は、結果のファイル（`--state-dir`。リポジトリの外の制限された場所）にだけ残す。`--findings-out` と PR のコメントと課題には、下の「`hold` だった指摘の書き出し」の公開してよい項目だけを書く |
+| 人の判断 | conductor は `hold` の指摘ごとに、`revert`・`fix`・`skip` のどれにするかを利用者に問う。答えを結果のファイルの指摘の `outcome` に書き、`decided_by: "human"` と `held: true`（一度 `hold` だった印）を足す。`held` は人が分け方を決めた後も消さない |
+| 再開 | conductor が `ndf progress retry` で工程を流し直す。打ち直しは結果のファイルを読み（「再開の正本と起票の重複の防ぎ方」）、`hold` が残っていなければコメントと起票へ進む。残っていれば同じく止まる。`held` が真の指摘は、`revert`・`fix` に決まっても、下の公開してよい項目だけでコメントと起票をする |
+
+#### `hold` だった指摘の書き出し
+
+`hold` のまま、または一度 `hold` だった（`held` が真の）指摘は、人が分け方を決めた後も、公開の場所とリポジトリの中へ書ける項目を次に限る。人が `revert` や `fix` に決めても、指摘の本文が公開してよいものに変わるわけではないためである。
+
+| 書き先 | 書く項目 | 書かない項目 |
+| --- | --- | --- |
+| 結果のファイル（`--state-dir`） | すべて | — |
+| `--findings-out` | `id`・`outcome`・`held`・`summary`（項目名と変更の種類だけで書いた 1 行。相手役の本文から作らず、修正担当が書く）・`state_ref`（結果のファイルのパスと指摘の `id`）・`pr`・`commit` | `title`・`body`・`reason`・`evidence` |
+| PR のコメント | `summary`・`outcome`・`state_ref` | 同上 |
+| 起票する課題の本文（`revert`・`fix` に決まったとき） | `summary`・`state_ref`・`pr`・`commit` と、印 `ndf:post-release-finding` | 同上。直す人は `state_ref` から結果のファイルを読む |
+
+`--findings-out` には、リポジトリの中のパスを渡しても非公開の情報が入らない。`hold` でない指摘の書き出しは今のまま（「工程『リリース後レビュー』」の事後条件）である。
+
+### この節の確かめ
 
 | 確かめ | 正常 | 異常 |
 | --- | --- | --- |
-| 承認の記録 | 当たる単位に、同じ sha256 の承認の回答があれば適用する | 検証用の系で承認の回答が無い認証・認可の変更 → 適用せず `判断が要る` で止まる。承認の後に計画を作り直して sha256 が変わった → 適用しない |
+| 承認の記録 | 検証用の系の認証・認可の変更で、2 のステップが回答を待ち、`ndf answer` で承認すると `next` で 3 が流れて適用する。`needs_approval` の単位が無い → `service:operation` の承認で人に問わずに 3 へ進む | 承認しない回答 → 適用せず工程を失敗にする。承認の後に計画を作り直して sha256 か `apply_request.id` が変わった → 適用しない。2 のステップが無い工程への `ndf answer` → 今のとおり断る |
 | 記録の値 | 項目名と変更の種類だけが記録・`mode_check`・`rerun_floor` に残る。`evidence` の型が `current`・`planned` を受けない | 秘密の形の値（`check-repo-secrets.py` の規則に当たるもの）が記録に入る → 書かずに止める |
-| 公開の書き込み | 項目名で説明できる指摘はコメントに書く | 説明に実値が要る指摘 → `hold` になり、コメントも起票もせず `判断が要る` で止まる。人が分け方を決めた後の `retry` でコメントと起票へ進む |
+| 公開の書き込み | 項目名で説明できる指摘はコメントに書く | 説明に実値が要る指摘 → `hold` になり、コメントも起票もせず `判断が要る` で止まる。`--findings-out` のその指摘は `summary` と `state_ref` だけで、`body`・`evidence` を持たない。人が `fix` に決めた後の `retry` → コメントと課題の本文は `summary`・`state_ref` だけで、`body`・`evidence` を含まない |
 
 ## レーンの起動と計画の行
 
@@ -795,7 +820,7 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
   - `title`・`body`（相手役の指摘の本文）・`evidence`（根拠のファイルと行）
   - `pr`（PR の番号）・`commit`（上の表の比較先の SHA）
 - 副作用: PR へのコメント 1 件。push はしない
-- 工程の定義 `post-release-review.json` は、入力に `pr` と `verification`（リリース後テストの出力）を持つ。この結果から出力 `post_review`（分け方ごとの件数と、指摘ごとの起票した課題の番号）を作る。`revert` と `fix` の起票は `out-of-scope` の起票の手順を使い、課題の本文には指摘の `title`・`body`・`evidence`・`pr`・`commit` を載せる。工程は起票で終わり、戻し・直しのスプリントを待たない
+- 工程の定義 `post-release-review.json` は、入力に `pr` と `verification`（リリース後テストの出力）を持つ。この結果から出力 `post_review`（分け方ごとの件数と、指摘ごとの起票した課題の番号）を作る。`revert` と `fix` の起票は `out-of-scope` の起票の手順を使い、課題の本文には指摘の `title`・`body`・`evidence`・`pr`・`commit` を載せる。ただし `held` が真の指摘は、`title`・`body`・`evidence` を載せず、「`hold` だった指摘の書き出し」の項目だけを載せる。工程は起票で終わり、戻し・直しのスプリントを待たない
 
 #### 再開の正本と起票の重複の防ぎ方
 
@@ -803,7 +828,7 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 
 | 時点 | すること |
 | --- | --- |
-| 相手役の結果を得た後 | 分けた指摘の配列を `--state-dir` の結果のファイルに書き、`--findings-out` にも同じものを書く |
+| 相手役の結果を得た後 | 分けた指摘の配列を `--state-dir` の結果のファイルに書く。`--findings-out` にも書くが、`hold` か `held` の指摘は「`hold` だった指摘の書き出し」の公開してよい項目だけにする |
 | コメントの前 | 結果のファイルに `comment: {"started_at": <時刻>}` を書く |
 | コメントの直後 | 書いたコメントの ID を結果のファイルの `comment.id` に書く |
 | 起票の前 | 結果のファイルの指摘に `filing: {"started_at": <時刻>}` を書く |
