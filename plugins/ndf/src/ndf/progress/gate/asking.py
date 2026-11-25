@@ -42,29 +42,37 @@ MATERIAL_DIR = "gate-materials"
 
 @dataclass(frozen=True)
 class Target:
-    """見る対象。`head` は PR の head の SHA、`material` は承認資料の sha256。分からなければ None。"""
+    """見る対象。`head` は PR の head の SHA、`material` は承認資料の sha256、`body`・`title` は PR の本文と題の sha256
+    （承認の質問の文は題から作る。#4446）。分からなければ None。"""
 
     head: Optional[str] = None
     material: Optional[str] = None
+    body: Optional[str] = None
+    title: Optional[str] = None
 
     def differs(self, seen: Target) -> list[str]:
-        """回答した者が見た対象 `seen` と今の対象の違い（今の側が分かる項目だけを比べる）。"""
+        """回答した者が見た対象 `seen` と今の対象の違い（今の側が分かる項目だけを比べる）。
+
+        本文と題は、見た側も値を持つときだけ比べる。MVV 判定で省いた回答は head だけを見て書くためである。"""
         out = []
         for name, now, then in (("head の SHA", self.head, seen.head), ("承認資料の sha256", self.material, seen.material)):
             if now is not None and then != now:
                 out.append(f"{name}（見た値 {then or '無し'}・今の値 {now}）")
+        for name, now, then in (("PR の本文の sha256", self.body, seen.body), ("PR の題の sha256", self.title, seen.title)):
+            if now is not None and then is not None and then != now:
+                out.append(f"{name}（見た値 {then}・今の値 {now}）")
         return out
 
     def as_dict(self) -> dict[str, Optional[str]]:
         """見た対象を記録する形（事象の payload の `seen` と、リクエストの隣の `.seen.json`）。"""
-        return {"head": self.head, "material_sha256": self.material}
+        return {"head": self.head, "material_sha256": self.material, "body_sha256": self.body, "title_sha256": self.title}
 
     @classmethod
     def from_dict(cls, raw: Any) -> Target:
         """`as_dict` の形から読み戻す。オブジェクトでなければ空の対象。"""
         if not isinstance(raw, dict):
             return cls()
-        return cls(raw.get("head"), raw.get("material_sha256"))
+        return cls(raw.get("head"), raw.get("material_sha256"), raw.get("body_sha256"), raw.get("title_sha256"))
 
 
 @dataclass(frozen=True)
@@ -145,6 +153,10 @@ def routes(q: Question) -> dict[str, Any]:
         seen += ["--head", q.target.head]
     if q.target.material:
         seen += ["--material-sha256", q.target.material]
+    if q.target.body:
+        seen += ["--body-sha256", q.target.body]
+    if q.target.title:
+        seen += ["--title-sha256", q.target.title]
     return {a: result.command(TOOL, q.machine_id, "--gate", q.id, "--result", a, *seen, ask=_asks(q, a)) for a in q.choices}
 
 
@@ -161,6 +173,8 @@ def describe(q: Question) -> dict[str, Any]:
         "pr_url": q.pr_url,
         "head": q.target.head,
         "material_sha256": q.target.material,
+        "body_sha256": q.target.body,
+        "title_sha256": q.target.title,
         "choices": list(q.choices),
     }
 
@@ -177,6 +191,11 @@ def gate_result(q: Question, metrics: Optional[Mapping[str, Any]] = None, presen
 
 def material_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def text_sha256(text: str) -> str:
+    """PR の本文と題の sha256（UTF-8 のバイト列。`ndf records reading` の本文のハッシュと同じ計算）。"""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 # --- 承認資料 -------------------------------------------------------------------------------------

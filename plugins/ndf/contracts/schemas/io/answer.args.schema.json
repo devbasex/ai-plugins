@@ -44,6 +44,14 @@
           "type": "string",
           "description": "見た承認資料の sha256"
         },
+        "--body-sha256": {
+          "type": "string",
+          "description": "見た PR の本文の sha256（#4446）"
+        },
+        "--title-sha256": {
+          "type": "string",
+          "description": "見た PR の題の sha256（承認の質問の文は題から作る。#4446）"
+        },
         "--drop": {
           "type": "array",
           "items": {

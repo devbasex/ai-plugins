@@ -62,7 +62,16 @@ class Fake:
 
     def __call__(self, r, cwd, work_dir, answer):
         self.calls.append(
-            SimpleNamespace(step=r.step, answer=answer, notes=r.notes, inputs=r.inputs, work_dir=work_dir, retries=r.retries, again=r.again)
+            SimpleNamespace(
+                step=r.step,
+                answer=answer,
+                notes=r.notes,
+                inputs=r.inputs,
+                work_dir=work_dir,
+                retries=r.retries,
+                again=r.again,
+                argv=r.args.get("argv"),
+            )  # fmt: skip
         )
         queued = self.script.get(r.step)
         return queued.pop(0)(r) if queued else self.ok(r)
@@ -125,7 +134,12 @@ def test_work_flows_rows_until_the_design_gate_and_returns_routes(repo, st, env,
     assert result.code_for(out) == 10
     labels = _labels(st, tid)
     assert labels["要求と受け入れ条件"] == labels["作業場所の用意"] == "finished" and labels["設計"] == "running"
-    assert [c.step for c in env.fake.calls] == ["requirements", "worktree", "design", "design-review", "design-mvv"]
+    assert [c.step for c in env.fake.calls] == ["requirements", "worktree", "design", "design-review", "design-mvv", "design-reading"]
+    # 読み手役のステップは保存先と結果ファイルを argv に足して打つ（#4446）
+    reading = env.fake.calls[-1]
+    assert reading.work_dir.name == "design-reading-g0"
+    assert reading.argv == ["ndf", "document-rebuild", "gate", "--gate", "design", "--state-dir", str(reading.work_dir),
+                            "--out", str(reading.work_dir / stages.READING_OUT)]  # fmt: skip
     # 作業場所の用意の出力が文脈に入り、設計の入力に届く（MVV 判定の材料のモード・進め方・承認済み MVV の参照も）
     assert env.fake.calls[2].inputs == {"issues": [ISSUE], "worktree": str(repo), "mode": "standard", "pace": "normal", "mvv_ref": None}
 
@@ -191,13 +205,54 @@ def test_revise_needs_a_notes_file_and_reruns_the_stage_with_the_notes(repo, st,
     out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate" and out["metrics"]["stage"] == "設計"
     rerun = env.fake.calls[before:]
-    assert [c.step for c in rerun] == ["design", "design-review", "design-mvv"] and {c.notes for c in rerun} == {
+    assert [c.step for c in rerun] == ["design", "design-review", "design-mvv", "design-reading"] and {c.notes for c in rerun} == {
         "セクション 2 の根拠が足りない"
     }
     assert rerun[0].work_dir.name == "design-g1"
 
 
 JUDGED = "a" * 40
+
+
+def _review_again(commit: str):
+    """読み手役のステップが文書を直して push した偽の結果（outputs.review_again）。"""
+    again = {"commit": commit, "docs": ["issues/issue-3092-design.md"]}
+    return lambda r: invoke.finished(r, result.result("script", "ok", "文書を直した", outputs={"review_again": again}))
+
+
+def test_a_reading_step_that_pushed_fixed_docs_runs_the_design_review_again(repo, st, env, capsys):
+    # #4446: review_again を受けたら、設計のレビュー・MVV 判定・読み手役を未了に戻して設計のレビューから流し直す。
+    # 戻した記録が工程に残り、レビューの後の読み手役には --reviewed <コミット> と --no-doc-fix（往復の上限）を渡す
+    tid = _new(capsys)
+    pushed = "c" * 40
+    env.fake.script["design-reading"] = [_review_again(pushed)]
+    out = lanes.turn(st, tid, repo, env.env)
+    assert out["status"] == "gate" and out["metrics"]["stage"] == "設計", out
+    steps = [c.step for c in env.fake.calls]
+    assert steps[2:] == ["design", "design-review", "design-mvv", "design-reading", "design-review", "design-mvv", "design-reading"]
+    first, second = env.fake.calls[5], env.fake.calls[-1]
+    assert second.argv[-3:] == ["--reviewed", pushed, "--no-doc-fix"] and "--reviewed" not in first.argv
+    # 流し直したステップは別の保存先で打つ（プランが前の回の結果を返さない）
+    assert env.fake.calls[6].work_dir.name == "design-review-g0-r1" and second.work_dir.name == "design-reading-g0-r1"
+    resets = [e.draft.payload for e in run.read(st, tid).events if e.draft.kind == "step_recorded" and e.draft.payload["status"] == "reset"]
+    assert [p["step"] for p in resets] == ["design-review", "design-mvv", "design-reading"]
+    assert resets[0]["review_again"]["commit"] == pushed and resets[0]["gate"] == "design"
+
+
+def test_a_sprint_in_a_lane_skips_only_the_release_reading(repo, st, env, capsys):
+    # #4446 の版上げのスプリントの判定表: 計画のレーンの行のスプリントはリリース承認ゲートの前の読み手役を済ませ、
+    # 設計承認ゲートの前はレーンでも打つ。版上げのスプリントのモードはレーンでも打つ（model.reading_skip）
+    tid = _new(capsys)
+    lane = run.Env(**{**vars(env.env), "in_lane": lambda _st, _tid: True})
+    assert lanes.turn(st, tid, repo, lane)["metrics"]["stage"] == "設計"
+    _approve(st, tid, "設計")
+    out = lanes.turn(st, tid, repo, lane)
+    assert out["status"] == "gate" and out["metrics"]["stage"] == "デプロイ"
+    called = [c.step for c in env.fake.calls]
+    assert "design-reading" in called and "release-reading" not in called and called[-1] == "release-mvv"
+    reading = run.step_progress(run.read(st, tid), "デプロイ").done["release-reading"]
+    assert reading["status"] == "ok" and "レーン" in reading["summary"]
+    assert model.reading_skip({}, None, "release", False, True, model.RELEASE_BUMP_MODE) is False
 
 
 def _mvv(kind: str, skip: bool, why: list[str]):
@@ -222,6 +277,9 @@ def test_a_skippable_mvv_verdict_passes_the_design_gate_as_service_mvv(repo, st,
     out = lanes.turn(st, tid, repo, env.env)
     # 設計承認ゲートは人へ問わずに通り、次に人を待つのはリリース承認ゲート（判定は省かない）
     assert out["status"] == "gate" and out["metrics"]["stage"] == "デプロイ"
+    # 省くと決めた承認ゲートの前の読み手役は打たずに済ませ、省かないリリース承認ゲートの前では打つ（#4446）
+    called = [c.step for c in env.fake.calls]
+    assert "design-reading" not in called and called[-2:] == ["release-mvv", "release-reading"]
     assert _labels(st, tid)["設計"] == "finished"
     (answered,) = [e for e in run.read(st, tid).events if e.draft.kind == "answered"]
     p = answered.draft.payload
@@ -369,7 +427,7 @@ def test_a_plan_gate_in_a_step_with_an_output_contract_is_recorded_as_waiting():
     step = next(st for st in s.steps if st.id == "release")
     assert step.output_ref
     gate = invoke.StageResult(result.result("plan", "gate", "承認を待つ", routes={"approved": None}), {})
-    draft = run._step_draft(SimpleNamespace(rev=1), s, step, run.StepProgress(), gate)
+    (draft,) = run._step_draft(SimpleNamespace(rev=1), s, step, run.StepProgress(), gate)
     assert draft.kind == run.STEP_EVENT and draft.payload["status"] == "waiting"
 
 

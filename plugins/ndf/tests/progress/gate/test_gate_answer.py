@@ -146,10 +146,45 @@ def test_an_answer_sent_back_to_waiting_restores_the_dropped_issues(st, lane_spr
     out = _give(st, tid, _waiting(st, tid), drop=(3092,), seen=gate.Target(head="h1"))
     assert gate.recheck(st, tid, lambda q: gate.Target(head="h2")) is not None
     assert run.read(st, tid).context()["issues"] == [3092, 5]
+    flow.turn(tid)  # 未了に戻した読み手役のステップを打ち直してから待つ（#4446）
     carried = next(r for r in _lane_rows(st, pid) if r.key == out["metrics"]["carried_row"])
     assert carried.state == lane.CANCELLED
     again = _give(st, tid, _waiting(st, tid), drop=(3092,), key="k-2", seen=gate.Target(head="h2"))
     assert run.read(st, tid).context()["issues"] == [5] and again["metrics"]["carried_row"] != carried.key
+
+
+def _readings(st, tid) -> int:
+    """設計の工程で読み手役のステップが済んだ回数（未了に戻した後に打ち直すと増える）。"""
+    events = run.read(st, tid).events
+    return sum(
+        1
+        for e in events
+        if e.draft.kind == "step_recorded" and e.draft.payload["step"] == "design-reading" and e.draft.payload["status"] == "finished"
+    )
+
+
+def test_reread_asks_again_with_a_new_question_after_the_reading_step(st, env, new_table, flow):
+    # #4446 の待ちの出し直し: 新しい質問の id で待ちを書き直し、読み手役のステップを打ち直す。待っていなければ断り、
+    # 読み手役が文書を直して push したら（review_again）待ちの知らせを返さずに設計のレビューから流し直す
+    tid = new_table()
+    assert gate.reread(st, tid, flow.repo, env)["cause"]["kind"] == "precondition"
+    flow.turn(tid)
+    before = _waiting(st, tid)
+    out = gate.reread(st, tid, flow.repo, env)
+    after = _waiting(st, tid)
+    assert out["status"] == "gate" and after.id != before.id and _readings(st, tid) == 2
+    pushed = "c" * 40
+    again = {"commit": pushed, "docs": ["issues/issue-3092-design.md"]}
+    fixed = result.result("script", "ok", "文書を直した", outputs={"review_again": again})
+    review = run.Env(
+        **{
+            **vars(env),
+            "invoker": lambda r, cwd, wd, a: invoke.finished(r, fixed) if r.step == "design-reading" else env.invoker(r, cwd, wd, a),
+        }
+    )
+    out = gate.reread(st, tid, flow.repo, review)
+    assert out["status"] == "ok" and out["next"]["argv"][2] == "wait" and gate.waiting(run.read(st, tid)) is None
+    assert run.decide(run.read(st, tid)).step.id == "design-review"
 
 
 def test_the_sprint_completion_ends_the_lane_row(st, env, lane_sprint, flow):
@@ -214,22 +249,22 @@ def _unresolvable_identity():
     raise identity.IdentityError("状態の保存先を解けない")
 
 
-def test_current_rejections_path_uses_the_environment_without_reading_the_identity(tmp_path, monkeypatch):
+@pytest.mark.parametrize("env", ["set", None, ""])
+def test_current_rejections_path_uses_the_environment_or_falls_back_to_the_state_dir(tmp_path, monkeypatch, env):
+    if env != "set":
+        if env is None:
+            monkeypatch.delenv("NDF_MVV_STATE_DIR", raising=False)
+        else:
+            monkeypatch.setenv("NDF_MVV_STATE_DIR", env)
+        assert gate.rejections_path() == identity.load().state_dir / "gate-rejections.jsonl"
+        return
+    # 環境変数があれば identity を読まずに使う
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "m"))
     monkeypatch.setattr(identity, "load", _unresolvable_identity)
     assert gate.rejections_path() == tmp_path / "m" / "gate-rejections.jsonl"
     monkeypatch.setenv("NDF_MVV_STATE_DIR", "rel")  # 相対のパスは解決せずそのまま使う
     assert str(gate.rejections_path()) == "rel/gate-rejections.jsonl"
     assert not (tmp_path / "m").exists()  # パスを返すだけで、ディレクトリは作らない
-
-
-@pytest.mark.parametrize("env", [None, ""])
-def test_current_rejections_path_falls_back_to_the_state_dir(monkeypatch, env):
-    if env is None:
-        monkeypatch.delenv("NDF_MVV_STATE_DIR", raising=False)
-    else:
-        monkeypatch.setenv("NDF_MVV_STATE_DIR", env)
-    assert gate.rejections_path() == identity.load().state_dir / "gate-rejections.jsonl"
 
 
 def test_current_rejections_path_raises_the_identity_error_and_the_copy_turns_it_into_a_warning(st, new_table, flow, monkeypatch):

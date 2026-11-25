@@ -16,7 +16,7 @@ from typing import Any, Optional
 import pytest
 
 from ndf.adapters import git
-from ndf.domains.docrebuild import gate
+from ndf.domains.docrebuild import cli, gate
 from ndf.domains.docrebuild import gate_decide as gd
 from ndf.domains.records import reading
 from ndf.domains.records import reading_decide as rd
@@ -272,6 +272,8 @@ def test_design_gate_reads_records_and_comments_once(tmp_path: Path) -> None:
     worker = FakeWorker()
     got = w.run(worker)
     assert got["status"] == "ok", got
+    # 結果は結果の規約（outputs の閉じた語彙）を通り、CLI が stopped（invalid）に差し替えない
+    assert cli.adopt(got)[0] == got
     assert w.hub.fetches == 2 and len(w.hub.posted) == 1 and worker.calls == 1
     names = {line.split("`")[1] for line in worker.prompts[0].splitlines() if line.startswith("- `") and "`: `" in line}
     assert names == {reading.QUESTION, reading.MATERIAL, DESIGN}
@@ -487,6 +489,7 @@ def test_fixed_docs_go_back_to_the_design_review(tmp_path: Path) -> None:
     w.hub.on_fetch = lambda hub: setattr(hub, "head", w.git.head)
     got = w.run(FakeWorker(_fixing, edit=_fix_doc))
     assert got["status"] == "ok" and got["outputs"]["review_again"]["docs"] == [DESIGN], got
+    assert cli.adopt(got)[0] == got
     commit = got["outputs"]["review_again"]["commit"]
     assert w.git.pushed == [commit] and w.ci == [7] and checks_rows() == [] and w.hub.posted == []
     kinds = [r["kind"] for r in reading.doc_rows()]

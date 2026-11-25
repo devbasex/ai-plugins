@@ -155,6 +155,25 @@ def mvv_skip(done: Mapping[str, Mapping[str, Any]], before: Optional[str], gate:
     return held if isinstance(held, dict) and held.get("gate") == gate and held.get("skip") is True else None
 
 
+# 版上げのスプリントのモード（まとめたリリースの版上げの PR を作り、資料と質問もその中で作る。#4446 の決定 9）
+RELEASE_BUMP_MODE = "release-bump"
+RELEASE_GATE = next(g for g in table()["gates"] if g == "release")  # 承認ゲートの区分の表に無ければ import の時点で止まる
+
+
+def reading_skip(
+    done: Mapping[str, Mapping[str, Any]], before: Optional[str], gate: Optional[str], waiting_gate: bool, in_lane: bool, mode: str
+) -> bool:
+    """読み手役のステップを打たずに済ませるか（#4446 の決定 2・9）。
+
+    直前の MVV 判定が同じゲートを省くと決めたとき（承認ゲートの待ちの記録 `waiting_gate` があれば人に問うので打つ）と、
+    計画のレーンの行にあるスプリントのリリース承認ゲートの前（オーガナイザーが問うのは版上げの PR の質問だけ）で済ませる。
+    版上げのスプリント（`RELEASE_BUMP_MODE`）はレーンの行でも打つ。設計承認ゲートの前はレーンでも打つ。
+    """
+    if not waiting_gate and mvv_skip(done, before, gate) is not None:
+        return True
+    return gate == RELEASE_GATE and mode != RELEASE_BUMP_MODE and in_lane
+
+
 def _outputs(report: Mapping[str, Any]) -> Mapping[str, Any]:
     """済んだステップの出力（形が違えば空）。"""
     got = report["outputs"] if "outputs" in report else None

@@ -109,6 +109,39 @@
       }
     },
     {
+      "design-reading": {
+        "call": "ndf.script",
+        "with": {
+          "argv": [
+            "ndf",
+            "document-rebuild",
+            "gate",
+            "--gate",
+            "design"
+          ]
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "reading",
+            "range": "none",
+            "gate": "design",
+            "modes": [
+              "documentation",
+              "legacy-refactor",
+              "standard"
+            ]
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    },
+    {
       "design-gate": {
         "listen": {
           "to": {

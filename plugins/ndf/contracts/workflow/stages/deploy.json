@@ -66,6 +66,34 @@
       }
     },
     {
+      "release-reading": {
+        "call": "ndf.script",
+        "with": {
+          "argv": [
+            "ndf",
+            "document-rebuild",
+            "gate",
+            "--gate",
+            "release"
+          ]
+        },
+        "metadata": {
+          "ndf": {
+            "kind": "reading",
+            "range": "none",
+            "gate": "release"
+          }
+        },
+        "output": {
+          "schema": {
+            "resource": {
+              "endpoint": "file:///workflow/stage-io.schema.json#/$defs/report"
+            }
+          }
+        }
+      }
+    },
+    {
       "release-gate": {
         "listen": {
           "to": {

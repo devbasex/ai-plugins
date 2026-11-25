@@ -157,6 +157,11 @@ class StepProgress:
     notes: Optional[str] = None
     failed: bool = False
     redo: bool = False
+    # #4446: 待ちの記録を持ったステップ（MVV 判定はゲートを省かない）・未了に戻した回数・終わりの事象の番号・設計のレビューへ戻した記録
+    held: set[str] = field(default_factory=set)
+    resets: dict[str, int] = field(default_factory=dict)
+    finished_at: dict[str, int] = field(default_factory=dict)
+    again: list[dict[str, Any]] = field(default_factory=list)
 
     def next_step(self, stage: stages.StageDef) -> Optional[stages.StepDef]:
         for st in stage.steps:
@@ -187,11 +192,19 @@ class StepProgress:
         self.redo = "step" in p and p["step"] is None
 
     def _recorded(self, ev: model.Event, p: dict[str, Any]) -> None:
-        """ステップの記録。終わったなら結果を残し、ほかは待ちにする。数え始めをここへ移す。"""
+        """ステップの記録。終わったなら結果を残し、未了に戻す記録（`stages.RESET`）なら結果を捨て、ほかは待ちにする。数え始めをここへ移す。"""
+        step = p["step"]
         if p["status"] == FINISHED:
-            self.done[p["step"]], self.waiting = p["report"], None
+            self.done[step], self.waiting = p["report"], None
+            self.finished_at[step] = ev.seq
+        elif p["status"] == stages.RESET:
+            self.done.pop(step, None)
+            self.resets[step] = (self.resets[step] if step in self.resets else 0) + 1
+            if isinstance(p.get(stages.REVIEW_AGAIN), dict):
+                self.again.append({"seq": ev.seq, "gate": p.get("gate"), **p[stages.REVIEW_AGAIN]})
         else:
             self.waiting = p
+            self.held.add(step)
         self.anchor, self.answer = ev.seq, None
 
     def _answered(self, ev: model.Event, p: dict[str, Any]) -> None:
@@ -199,6 +212,7 @@ class StepProgress:
         if p["answer"] == REQUEST_CHANGES and p["kind"] == invoke.LISTEN:
             self.generation += 1
             self.done, self.waiting, self.answer, self.anchor = {}, None, None, ev.seq
+            self.held, self.again = set(), []
             self.notes = p["notes"]
         elif ev.seq > self.anchor:
             self.answer = ev
@@ -261,7 +275,8 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
         return Move(Action.RESUME, s, None, prog)
     listen = invoke.is_listen(step)
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
-    skip = listen and prog.waiting is None and model.mvv_skip(prog.done, s.before(step.id), step.gate) is not None
+    held = prog.waiting is not None or step.id in prog.held
+    skip = listen and not held and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None
     if waiting and prog.answer is None and not skip:
         return Move(Action.GATE, s, step, prog)
     return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, prog.answer)
@@ -401,6 +416,8 @@ class Env:
     records: Callable[[Path], Records] = github_records
     sleep: Callable[[float], None] = time.sleep
     ended: Callable[[Any, str], Any] = lambda _conn, _machine_id: None  # スプリントの完了と同じトランザクションで打つ
+    # スプリントが計画のレーンの行にあるか（読み手役のステップを済ませる判定。レーンは `ndf.progress.gate.lane_env` が読む）
+    in_lane: Callable[[store.Store, str], bool] = lambda _st, _machine_id: False
 
 
 def work_root(root: Path, machine_id: str) -> Path:
@@ -563,7 +580,7 @@ def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     """
     assert m.stage is not None and m.step is not None and m.progress is not None
     if m.event is None:
-        held = model.mvv_skip(m.progress.done, m.stage.before(m.step.id), m.step.gate)
+        held = model.mvv_skip(m.progress.done, m.stage.mvv_before(m.step.id), m.step.gate)
         qid = model.question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
         payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, held, qid)
         d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
@@ -596,7 +613,7 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     if m.step is None:
         _finish_stage(d, v, m.stage)
     else:
-        d.write(_run_step(d, v, m.stage, m.step))
+        d.write(*_run_step(d, v, m.stage, m.step))
     if decide(read(d.st, d.machine_id)).stage != m.stage:
         d.synced()
     return None
@@ -767,25 +784,68 @@ def _failed(s: stages.StageDef, step: Optional[str], rev: int, kind: str, detail
     return _failed_with(s, step, rev, causes.cause(kind, detail))
 
 
-def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepProgress, res: invoke.StageResult) -> model.EventDraft:
+def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepProgress, res: invoke.StageResult) -> list[model.EventDraft]:
     """ステップの結果を事象にする。終われば出力の規約で照らし、承認ゲートで止まれば待ちを残し、止まれば失敗にする。
 
-    出力の規約は終わった結果（ok）だけに当てる。承認ゲートの待ちの結果は出力を持たないためである。
+    出力の規約は終わった結果（ok）だけに当てる。承認ゲートの待ちの結果は出力を持たないためである。読み手役のステップが
+    文書を直して `outputs.review_again` を返したら、続けて設計のレビューから流し直す事象を足す（`review_again_drafts`。#4446）。
     """
     if res.status == result.STOPPED:
         cause = res.cause if res.cause is not None else causes.cause("unknown", "作業が理由なく止まった")
-        return _failed_with(s, step.id, v.rev, cause)
+        return [_failed_with(s, step.id, v.rev, cause)]
     errs = definition.validate_io(step.output_ref, res.report) if step.output_ref and res.status == result.OK else []
     if errs:
-        return _failed(s, step.id, v.rev, "bad_report", f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")
+        return [_failed(s, step.id, v.rev, "bad_report", f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")]
     status = FINISHED if res.status == result.OK else "waiting"
     payload = {"step": step.id, "status": status, "report": res.report, "generation": prog.generation, "warnings": list(res.warnings)}
-    return model.EventDraft(STEP_EVENT, ACTOR, s.name, payload=payload, rev=v.rev)
+    done = model.EventDraft(STEP_EVENT, ACTOR, s.name, payload=payload, rev=v.rev)
+    again = review_again_drafts(v, s, step.gate, res.report) if status == FINISHED and step.kind == stages.READING_KIND else []
+    return [done, *again]
+
+
+def review_again_drafts(v: View, s: stages.StageDef, gate: Optional[str], report: Mapping[str, Any]) -> list[model.EventDraft]:
+    """`outputs.review_again` を受けて、設計のレビューから承認ゲート `gate` の前までのステップを未了に戻す事象（#4446）。
+    最初の事象が戻したことと `review_again` のコミットを持ち、工程の記録に残る（`reading_args` が読む）。"""
+    again = stages.review_again_of(report)
+    if again is None:
+        return []
+    gen, why = step_progress(v, s.name).generation, f"読み手役の直しで文書を push した（{again['commit']}）ので、設計のレビューから流し直す"
+    drafts = [
+        {"step": i, "status": stages.RESET, "report": None, "generation": gen, "reason": why} for i in stages.review_again_steps(s, gate)
+    ]
+    drafts[0].update({stages.REVIEW_AGAIN: again, "gate": gate})
+    return [model.EventDraft(STEP_EVENT, ACTOR, s.name, payload=p, rev=v.rev) for p in drafts]
+
+
+def reading_args(v: View, s: stages.StageDef, gate: Optional[str]) -> list[str]:
+    """読み手役のステップへ足す引数を、工程の記録とゲートの名前だけから作る（`stages.reading_flags`。#4446 の計画の (7)）。"""
+    prog = step_progress(v, s.name)
+    return stages.reading_flags(s, [a for a in prog.again if a["gate"] == gate], prog.finished_at)
+
+
+def _reading_run(v: View, s: stages.StageDef, step: stages.StepDef, run: invoke.StageRun, work_dir: Path) -> invoke.StageRun:
+    """読み手役のステップの argv に、保存先・結果ファイルと工程の記録から作る引数（`reading_args`）を足す。"""
+    out = ["--state-dir", str(work_dir), "--out", str(work_dir / stages.READING_OUT)]
+    return replace(run, args={**run.args, "argv": [*run.args["argv"], *out, *reading_args(v, s, step.gate)]})
+
+
+def _reading_skipped(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef, prog: StepProgress) -> Optional[list[model.EventDraft]]:
+    """読み手役のステップを打たずに済ませるなら、済ませた記録の事象。打つなら None（`model.reading_skip`）。"""
+    gate = next((st for st in s.steps if st.kind == stages.GATE_KIND and st.gate == step.gate), None)
+    waiting_gate = gate is not None and gate.id in prog.held
+    in_lane = step.gate == model.RELEASE_GATE and d.env.in_lane(d.st, v.machine_id)
+    if not model.reading_skip(prog.done, s.before(step.id), step.gate, waiting_gate, in_lane, v.snap.mode):
+        return None
+    why = "計画のレーンの行にあるスプリントなので" if in_lane else "直前の MVV 判定が承認ゲートを省くので"
+    rep = result.result(TOOL, result.OK, f"{why}、読み手役のステップ {step.id} を打たずに済ませた")
+    payload = {"step": step.id, "status": FINISHED, "report": rep, "generation": prog.generation, "warnings": []}
+    return [model.EventDraft(STEP_EVENT, ACTOR, s.name, payload=payload, rev=v.rev)]
 
 
 def step_location(step: str, prog: StepProgress) -> str:
-    """ステップのプランの実行の保存先の名前。変更要求（世代）で新しい保存先にする（打ち直しは同じ保存先の新しい回）。"""
-    return f"{step}-g{prog.generation}"
+    """ステップのプランの実行の保存先の名前。変更要求（世代）と未了に戻した記録（#4446）で新しい保存先にする（打ち直しは同じ保存先の新しい回）。"""
+    reset = prog.resets[step] if step in prog.resets else 0
+    return f"{step}-g{prog.generation}" + (f"-r{reset}" if reset else "")
 
 
 def step_dir(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> Path:
@@ -793,17 +853,23 @@ def step_dir(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> Pat
     return work_root(d.st.root, v.machine_id) / s.id / step_location(step.id, step_progress(v, s.name))
 
 
-def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> model.EventDraft:
-    """ステップを 1 つ呼ぶ。打ち直しで直る止まりは方針どおりに打ち直す（SF8）。"""
+def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> list[model.EventDraft]:
+    """ステップを 1 つ呼ぶ。打ち直しで直る止まりは方針どおりに打ち直す（SF8）。読み手役のステップは済ませるかを先に決める（#4446）。"""
     prog = step_progress(v, s.name)
+    skipped = _reading_skipped(d, v, s, step, prog) if step.kind == stages.READING_KIND else None
+    if skipped is not None:
+        return skipped
     try:
         inputs = invoke.resolve_inputs(s, v.context())
     except invoke.StageInputError as exc:
-        return _failed(s, step.id, v.rev, exc.kind, str(exc))
+        return [_failed(s, step.id, v.rev, exc.kind, str(exc))]
     run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries)
     waited = prog.waiting is not None and prog.waiting["step"] == step.id
     ans = prog.answer_value() if waited else None
     work_dir = step_dir(d, v, s, step)
+    if step.kind == stages.READING_KIND:
+        work_dir.mkdir(parents=True, exist_ok=True)
+        run = _reading_run(v, s, step, run, work_dir)
     res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
     return _step_draft(v, s, step, prog, res)
 

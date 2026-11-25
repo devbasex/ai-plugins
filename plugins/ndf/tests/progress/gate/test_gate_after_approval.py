@@ -26,12 +26,13 @@ def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new
     assert gate.approved_head(run.read(st, tid), "release") == "h1"
 
 
-def test_a_range_with_code_after_the_release_approval_asks_again(st, new_table, release_question):
+def test_a_range_with_code_after_the_release_approval_asks_again(st, new_table, release_question, flow):
     tid = new_table()
     old = release_question(tid)
     _approve(st, tid, old, "h1")
     why = gate.recheck(st, tid, lambda q: gate.Target(head="h2"), lambda seen, now: False)
     assert why is not None and "対象が変わった" in why
+    flow.turn(tid)  # 未了に戻した読み手役のステップを打ち直してから待つ（#4446）
     new = gate.waiting(run.read(st, tid))
     assert new is not None and new.id != old.id and new.gate == "release"
 
@@ -42,6 +43,7 @@ def test_the_design_gate_asks_again_even_for_docs_only(st, new_table, flow):
     q = gate.waiting(run.read(st, tid))
     _approve(st, tid, q, "h1")
     gate.recheck(st, tid, lambda q: gate.Target(head="h2"), lambda seen, now: True)
+    flow.turn(tid)
     assert gate.waiting(run.read(st, tid)) is not None
 
 

@@ -101,14 +101,38 @@ def test_gate_steps_name_which_gate_they_are():
 def test_design_hands_the_review_result_to_the_gate_without_a_final_judge():
     # SF5: 設計の工程はレビューの結果をそのまま設計承認ゲートへ渡し、最後の判定を置かない。
     # #2935: 承認は承認ゲートのステップの回答（gate-answer）で受け、ラベルの有無をステップの入力にしない
-    # #3745: レビューと承認ゲートの間に置くのは MVV 判定のステップ（ndf records mvv gate）だけ
+    # #3745・#4446: レビューと承認ゲートの間に置くのは MVV 判定（ndf records mvv gate）と読み手役（ndf document-rebuild gate）だけ
     steps = definition.load_definition("standard").stage("設計").steps
     kinds = [st.kind for st in steps]
     between = steps[kinds.index("review") + 1 : kinds.index("gate")]
-    assert [st.args["argv"][1:4] for st in between] == [["records", "mvv", "gate"]]
+    assert [st.args["argv"][1:4] for st in between] == [["records", "mvv", "gate"], ["document-rebuild", "gate", "--gate"]]
     assert kinds[kinds.index("gate") + 1 :] == ["merge"]
     gate = steps[kinds.index("gate")]
     assert gate.output_ref.endswith("#/$defs/gate-answer") and not gate.args
+
+
+@pytest.mark.parametrize("mode", ["standard", "light"])
+def test_reading_step_sits_between_the_mvv_judge_and_the_gate_and_is_not_counted_as_a_gate(mode):
+    # #4446 の決定 2: design-reading は design-mvv と design-gate の間、release-reading は release-mvv と release-gate の間。
+    # 承認ゲートは 1 つと数え、MVV 判定は読み手役のステップを飛ばして探す。設計承認ゲートの無いモードには読み手役も無い
+    snap = definition.load_definition(mode)
+    for name, gate, mvv in (("設計", "design", "design-mvv"), ("デプロイ", "release", "release-mvv")):
+        if name not in [s.name for s in snap.stages]:
+            continue
+        stage = snap.stage(name)
+        ids = [st.id for st in stage.steps]
+        if f"{gate}-gate" not in ids:
+            assert stage.reading_for(gate) is None and all(st.kind != "reading" for st in stage.steps)
+            continue
+        assert ids[ids.index(mvv) : ids.index(f"{gate}-gate") + 1] == [mvv, f"{gate}-reading", f"{gate}-gate"]
+        assert stage.gates == (gate,) and stage.mvv_before(f"{gate}-gate") == mvv
+        assert stage.reading_for(gate).id == f"{gate}-reading" and stage.reading_for(gate).args["argv"][-1] == gate
+    # 読み手役のステップの無い古い定義でも、MVV 判定は承認ゲートの直前のステップ
+    old = dataclasses.replace(snap.stage("デプロイ"), steps=tuple(st for st in snap.stage("デプロイ").steps if st.kind != "reading"))
+    assert old.mvv_before("release-gate") == "release-mvv" and old.reading_for("release") is None
+    # 読み手役のステップを承認ゲートの後ろへ入れ替えると、定義の検査で落ちる
+    swapped = _stage_doc("x", "行", [_step("g", "gate", "none", gate="release"), _step("r", "reading", "none", gate="release")])
+    assert any("I11:" in e for e in _errors(_mode_doc([("行", "x")]), {"x": swapped}))
 
 
 def test_refactoring_suspension_is_not_a_code_constant():
@@ -369,12 +393,9 @@ def test_current_listen_steps_offer_the_answer_enum_of_their_output_contract(mod
         assert run.choices(run.Move(run.Action.GATE, None, st, run.StepProgress())) == ["approved", "rejected", "request_changes"]
 
 
-def test_current_standard_has_listen_steps_for_both_gates():
-    gates = {st.gate for st in _listen_steps("standard")}
-    assert gates == {"design", "release"}
-
-
 def test_current_listen_step_without_output_contract_offers_nothing():
+    # standard は両方の承認ゲートの listen のステップを持ち、出力の規約の無い listen のステップは選択肢を出さない
+    assert {st.gate for st in _listen_steps("standard")} == {"design", "release"}
     st = dataclasses.replace(_listen_steps("standard")[0], output_ref=None)
     assert run.choices(run.Move(run.Action.GATE, None, st, run.StepProgress())) == []
 
