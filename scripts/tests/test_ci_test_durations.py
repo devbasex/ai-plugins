@@ -1234,3 +1234,113 @@ def test_fetch_run_drops_broken_zip(tmp_path, capsys, offset, value) -> None:
 
     assert not (tmp_path / "pytest-junit-0").exists()
     assert "pytest-junit-0 を読めない（壊れた ZIP）" in capsys.readouterr().err
+
+
+# --- main での設定の読み込みと終了コード 2（I-007 の前に振る舞いを固定する） ---
+
+TREND_ARGS = ["--run", "7", "--run-number", "100", "--attempt", "1"]
+
+
+def broken_config(config, how: str) -> Path:
+    path = config()
+    if how == "missing":
+        path.unlink()
+    elif how == "not_json":
+        path.write_text("{", encoding="utf-8")
+    elif how == "not_object":
+        path.write_text("[]", encoding="utf-8")
+    else:
+        config(runs=0)
+    return path
+
+
+@pytest.mark.parametrize("how", ["missing", "not_json", "not_object", "bad_value"])
+def test_run_config_error_returns_two_before_gh(config, capsys, how) -> None:
+    path = broken_config(config, how)
+    gh = FakeGh(run_routes())
+
+    code, out, err = run_cmd(gh, capsys)
+
+    assert code == 2 and out == ""
+    assert err.startswith(f"{path}: ") and err.endswith("\n") and len(err.splitlines()) == 1
+    assert sum(gh.calls.values()) == 0
+
+
+@pytest.mark.parametrize("how", ["missing", "not_json", "not_object", "bad_value"])
+def test_trend_config_error_writes_only_stderr(tmp_path, config, capsys, how, monkeypatch) -> None:
+    path = broken_config(config, how)
+    full_dir(tmp_path / "junit")
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    gh = trend_gh()
+
+    code, out = trend(tmp_path, gh)
+
+    captured = capsys.readouterr()
+    assert code == 2 and captured.out == ""
+    assert captured.err.startswith(f"{path}: ") and len(captured.err.splitlines()) == 1
+    assert sum(gh.calls.values()) == 0
+    assert not out.exists() and not summary.exists()
+
+
+def test_run_and_trend_report_same_config_error(tmp_path, config, capsys) -> None:
+    config(top=0)
+    full_dir(tmp_path / "junit")
+
+    code_run, _, run_err = run_cmd(FakeGh(run_routes()), capsys)
+    code_trend, _ = trend(tmp_path, trend_gh())
+    trend_err = capsys.readouterr().err
+
+    assert code_run == code_trend == 2
+    assert run_err == trend_err and "top" in run_err
+
+
+@pytest.mark.parametrize("argv", [["run"], ["run", "x"], ["trend", "d"], ["other"], []])
+def test_argument_error_exits_before_config(config, capsys, argv) -> None:
+    config().unlink()
+
+    with pytest.raises(SystemExit) as e:
+        ctd.main(argv, gh=FakeGh())
+
+    assert e.value.code == 2
+    assert "読めない" not in capsys.readouterr().err
+
+
+def test_config_error_without_injected_gh_does_not_start_gh(tmp_path, config, capsys, monkeypatch) -> None:
+    config(runs=0)
+    full_dir(tmp_path / "junit")
+    monkeypatch.setattr(ctd.subprocess, "run", lambda *a, **k: pytest.fail("gh を起動した"))
+    monkeypatch.setattr(ctd.subprocess, "Popen", lambda *a, **k: pytest.fail("gh を起動した"))
+    out = tmp_path / "total.json"
+
+    assert ctd.main(["run", "7"]) == 2
+    assert ctd.main(["trend", str(tmp_path / "junit"), *TREND_ARGS, "--out", str(out)]) == 2
+    assert not out.exists()
+
+
+def test_config_is_read_from_module_constant_each_call(config, capsys) -> None:
+    config(top=1)
+    first = run_cmd(FakeGh(run_routes()), capsys)[1]
+    config(top=2)
+    second = run_cmd(FakeGh(run_routes()), capsys)[1]
+
+    assert "遅い順の上位 1 件:" in first and "遅い順の上位 2 件:" in second
+
+
+@pytest.mark.parametrize(("extra", "shown"), [([], 3), (["--top", "5"], 5), (["--top", "0"], 3)])
+def test_run_top_falls_back_to_config(config, capsys, extra, shown) -> None:
+    code = ctd.main(["run", "7", *extra], gh=FakeGh(run_routes()))
+
+    assert code == 0 and f"遅い順の上位 {shown} 件:" in capsys.readouterr().out
+
+
+def test_trend_uses_config_runs_and_limit(tmp_path, config, capsys) -> None:
+    full_dir(tmp_path / "junit")
+    config(runs=2, limit_seconds=1)
+    gh = trend_gh(n_past=5)
+
+    code, out = trend(tmp_path, gh)
+
+    assert code == 0 and json.loads(out.read_text(encoding="utf-8"))["valid"] is True
+    assert annotations(capsys.readouterr().out, "::warning")
+    assert gh.calls["zips"] == 1
