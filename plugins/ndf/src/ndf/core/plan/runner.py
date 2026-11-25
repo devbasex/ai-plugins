@@ -475,14 +475,15 @@ def _pin_mismatch(baseline: dict[str, Any], reply: Reply) -> Optional[str]:
 def _unconfirmed_stop(inv: Invocation, baseline: dict[str, Any]) -> dict[str, Any]:
     """同じ回の提示を確かめられない旧い形の待ち（`unconfirmed`）への回答を、記録も送信もせずに止める結果。
 
-    待ちは解かず、ステップも打ち直さない（打ち直すとマージのステップがマージまで進み得る）。承認の対象と資料は、
-    利用者が `--fresh` で回を始め直して作り直す。待ちの照合（`--waiting`）は先に済ませてある。
+    待ちは解かず、ステップも打ち直さない。プランのステップは任意のコマンドで、資料だけを作り直す一般の経路が無く、
+    打ち直すとマージのステップが資料を出す前にマージまで進み得る。そのため打ち直しのコマンドは示さず、止まる理由だけを返す。
+    待ちの照合（`--waiting`）は先に済ませてある。
     """
     step = str(baseline["step"])
-    again = " ".join(["ndf plan next", *_with_start(inv.again, step), "--fresh"])
     detail = (
-        f"{inv.plan.name} のステップ {step} の待ちは更新前の版が残したもので、示した資料がこの待ちのものか確かめられない。"
-        f"回答を記録しない（{again} で回を始め直し、出し直した資料へ回答する）"
+        f"{inv.plan.name} のステップ {step} の待ちは更新前の版が残したもので、示した資料がこの待ちのものか確かめられないため、"
+        "回答を記録しない。資料だけを作り直す経路が無く、ステップを打ち直すとマージなどの操作が資料を出す前に進み得るので、"
+        "打ち直しは案内しない。承認の対象を人が確かめ、プランをどう進めるかを決める"
     )
     return result.stopped(TOOL, "precondition", detail)
 

@@ -423,14 +423,17 @@ def _an_answer_to_the_same_step_of_an_earlier_run_is_refused():
     assert runner._pin_mismatch(baseline, runner.Reply("approved", "human", "new:merge:1")) is None
 
 
-def _an_unconfirmed_old_wait_is_matched_first_and_never_answered(gated):
-    """PR 4502 r2-1・r2-2: 提示を確かめられない旧い形の待ちは、先に待ちを照らし、合っても回答を記録も送信もせずに止まる。"""
-    baseline = {"step": "merge", "seq": 3, "run": gated.run_id, "shown": {}, runner.UNCONFIRMED: True, "routes": {}}
-    other = runner._deliver(gated, baseline, runner.Reply("rejected", "human", "old:merge:3"))
+def _an_unconfirmed_old_wait_is_matched_first_and_never_answered(tmp_path):
+    """PR 4502 r2-1・r2-2・r3-1: 提示を確かめられない旧い形の待ちは、先に待ちを照らし、合っても回答を記録も送信もせず、
+    打ち直しのコマンドを示さずに止まる。回の組み立ては Git を起動しないよう直接作る（r3-3）。"""
+    plan = model.parse({"name": "g", "steps": [H.py_step("merge", "pass", on_answer={"approved": "end", "rejected": "end"})]})
+    inv = runner.Invocation(Path("g.json"), plan, None, (), tmp_path, "k", 1, None, again=("g.json",))
+    baseline = {"step": "merge", "seq": 3, "run": inv.run_id, "shown": {}, runner.UNCONFIRMED: True, "routes": {}}
+    other = runner._deliver(inv, baseline, runner.Reply("rejected", "human", "old:merge:3"))
     assert other["cause"]["kind"] == "approval_stale"
-    same = runner._deliver(gated, baseline, runner.Reply("rejected", "human", f"{gated.run_id}:merge:3"))
-    assert same["cause"]["kind"] == "precondition" and "--fresh" in same["cause"]["detail"]
-    assert not runner.answer_path(gated.state_dir, "merge").exists()
+    same = runner._deliver(inv, baseline, runner.Reply("rejected", "human", f"{inv.run_id}:merge:3"))
+    assert same["cause"]["kind"] == "precondition" and "next" not in same and "--fresh" not in same["cause"]["detail"]
+    assert not runner.answer_path(tmp_path, "merge").exists()
 
 
 def _next_refuses_an_actor_of_the_wrong_shape(capsys):
