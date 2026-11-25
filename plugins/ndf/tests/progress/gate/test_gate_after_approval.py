@@ -20,8 +20,11 @@ def _approve(st, tid, q, head, key="k-release", value="approved"):
     return gate.answer(st, tid, gate.Answer(q.id, value, "出してよい", BY, key, seen=gate.Target(head=head)))
 
 
-# （提示した対象の「本番へ反映されるか」（None は提示した対象が無く分からない）・リリースのプランへ差し込む承認の head）
-@pytest.mark.parametrize(("production", "injected"), [(False, "h2"), (None, "h1")], ids=["not-production", "unknown"])
+# （提示した対象の「本番へ反映されるか」（None は提示した対象が無く分からない）・リリースのプランへ差し込む承認の head
+# （None は文書だけの追加でも承認の head を繰り上げず、待ちへ戻す））
+@pytest.mark.parametrize(
+    ("production", "injected"), [(False, "h2"), (None, "h1"), (True, None)], ids=["not-production", "unknown", "production"]
+)
 def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new_table, release_question, flow, env, production, injected):
     tid = new_table()
     q = release_question(tid)
@@ -35,6 +38,12 @@ def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new
         gate.answer(st, tid, gate.Answer(q.id, "approved", "出してよい", BY, "k-release", seen=seen))
     moved = lambda q, **_: gate.Target(head="h2")  # noqa: E731
     why = gate.recheck(st, tid, moved, lambda seen, now: (seen, now) == ("h1", "h2"))
+    if injected is None:
+        assert why is not None and "対象が変わった" in why
+        new = gate.waiting(run.read(st, tid))
+        assert new is not None and new.id != q.id and new.gate == "release"
+        assert gate.approved_head(run.read(st, tid), "release", st.root) == "h1"
+        return
     assert why is not None and "文書だけ" in why
     assert run.decide(run.read(st, tid)).action == run.Action.CONSUME
     # マージの側が照らす head は、出し直さずに進めた今の head
@@ -93,6 +102,15 @@ def test_git_docs_only_splits_the_range_like_the_sprint_diff_and_needs_the_behav
     (repo / ".ndf" / "project.json").write_text("{}")
     _commit(repo, ".ndf/project.json", "{}")
     assert gate.git_docs_only(repo)(base, doc) is False
+
+
+def test_git_docs_only_counts_the_old_name_of_code_renamed_to_markdown(repo):
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "project.json").write_text('{"docs": {"behavior": []}}')
+    base = _commit(repo, "src/a.py", "x = 1\n")
+    subprocess.run(["git", "-C", str(repo), "mv", "src/a.py", "src/a.md"], check=True)
+    renamed = _commit(repo, "docs/a.md", "# a\n")
+    assert gate.git_docs_only(repo)(base, renamed) is False
 
 
 def test_the_approved_head_is_the_head_seen_by_the_last_release_answer(st, repo, new_table, capsys, release_question):

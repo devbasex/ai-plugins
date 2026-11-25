@@ -222,12 +222,15 @@ def _sprint_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str]:
 
 
 def _diff_names(git: Git, rng: str, specs: list[str] | None) -> set[str]:
-    """範囲の差分のパス。`specs` が `None` なら全体、空の並びなら空（`git diff` を打たない。打つと全体が返る）。"""
+    """範囲の差分のパス。`specs` が `None` なら全体、空の並びなら空（`git diff` を打たない。打つと全体が返る）。
+
+    改名は旧い名前と新しい名前の両方を出す（`--no-renames`。新しい名前だけだと、コードを `.md` へ改名した差分が文書だけになる）。
+    """
     if specs is None:
         specs = []
     elif not specs:
         return set()
-    return {p for p in git.run("diff", "--name-only", "-z", rng, "--", *specs).split("\0") if p}
+    return {p for p in git.run("diff", "--name-only", "--no-renames", "-z", rng, "--", *specs).split("\0") if p}
 
 
 def range_diff_kinds(git: Git, rng: str, cwd: Path) -> dict[str, bool]:
