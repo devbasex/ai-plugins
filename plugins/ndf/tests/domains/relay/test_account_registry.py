@@ -709,3 +709,12 @@ FAKE_KEY = "sk-ant-api03-fake-test-key-not-real"
 def test_metered_kind_settles_the_provider_or_the_api_key(env, kind):
     # 別冊の「設定の提供元の確定」: 提供元の選択が 1 つか、API キーの設定か、どちらでもなければ None
     assert reg.metered_kind(env) == kind
+
+
+@pytest.mark.parametrize("end", ["\x07", "\x1b\\"], ids=["bel", "st"])
+def test_read_url_strips_terminal_hyperlink(tmp_path, end):
+    # claude auth login は URL を端末のリンク（OSC 8）で包んで出す。包みの URL と表示の URL を 1 本につなげない
+    url = "https://claude.ai/oauth/authorize?z-abc"
+    out = tmp_path / "login.out"
+    out.write_text(f"If the browser didn't open, visit:\n\x1b]8;;{url}{end}{url}\x1b]8;;{end}\nPaste code here if prompted > ")
+    assert account_login._read_url(out, None) == url
