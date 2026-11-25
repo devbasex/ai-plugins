@@ -171,20 +171,27 @@ def _file_of(classname: str, base: Path) -> str | None:
     return None
 
 
-def _seconds(a) -> int:
+def _junit_seconds(junit: Path) -> Counter[str] | None:
+    """`junit` の下の JUnit XML を読み、ファイルごとの秒を合計する。読めない XML があれば None を返す。"""
     seconds: Counter[str] = Counter()
-    junit = Path(a.junit)
     for xml in sorted(junit.rglob("*.xml")):
         base = NDF_ROOT if NDF_JUNIT in xml.relative_to(junit).as_posix() else ROOT
         try:
             cases = list(ET.parse(xml).getroot().iter("testcase"))
         except ET.ParseError as e:
             sys.stderr.write(f"{xml} を読めない: {e}\n")
-            return 1
+            return None
         for case in cases:
             rel = _file_of(case.get("classname", ""), base)
             if rel:
                 seconds[rel] += float(case.get("time") or 0)
+    return seconds
+
+
+def _seconds(a: argparse.Namespace) -> int:
+    seconds = _junit_seconds(Path(a.junit))
+    if seconds is None:
+        return 1
     if not seconds:
         sys.stderr.write(f"{a.junit} に JUnit XML の項目が無い\n")
         return 1
