@@ -16,7 +16,7 @@ import json
 import re
 import stat
 from pathlib import Path
-from typing import Any, Mapping, NamedTuple, Optional
+from typing import Any, Callable, Mapping, NamedTuple, Optional
 
 from ndf import identity
 from ndf.domains.relay import signals
@@ -167,6 +167,15 @@ def _keep_refresh(p: Paths, data: dict[str, Any], line: dict[str, Any]) -> None:
     """NDF の表示を使う設定へ、再描画の間隔が無ければ足す。利用者が決めた値は残す。"""
     if "refreshInterval" not in line:
         _write(p.settings, {**data, "statusLine": {**line, "refreshInterval": REFRESH_INTERVAL}})
+
+
+def run_locked(p: Paths, run: Callable[[Paths], Switched], wait: float) -> Switched:
+    """排他を `wait` 秒まで取りにいき、取れたら `run` を打つ。取れなければ `StatuslineError`（store_in_use）。"""
+    p.lock.parent.mkdir(parents=True, exist_ok=True)
+    with signals.held(p.lock, wait) as got:
+        if not got:
+            raise StatuslineError("store_in_use", f"排他 {p.lock} を待ちきれない（別のセッションか旧い statusline-switch.sh が持つ）")
+        return run(p)
 
 
 def ensure(p: Paths, home: Optional[Path] = None) -> Switched:
