@@ -7736,6 +7736,20 @@
       "source": "plugins/ndf-next/skills/worktree/references/ndf-settings.md"
     },
     {
+      "term": "解析の記録",
+      "context": "ndf-project-settings",
+      "meaning": "解析が書く、解析をどの入力で行ったかの値（解析器のバージョン・入力のファイルのハッシュ・ブランチの構成）と、その解析が書いた設定の指紋。設定が古くなっていないかの判定が読む。git で追跡しないファイルに置き、設定には置かない",
+      "source": "",
+      "pending_source": "issues/issue-4516-requirements.md"
+    },
+    {
+      "term": "書いた値の指紋",
+      "context": "ndf-project-settings",
+      "meaning": "解析が書いた設定の値の SHA-256。今の値の指紋と一致すれば解析が書いた値、違えば人が直した値として扱う。設定の値が変わったときだけ変わるため、設定と一緒に追跡する",
+      "source": "",
+      "pending_source": "issues/issue-4516-requirements.md"
+    },
+    {
       "term": "ブランチ戦略",
       "context": "ndf-release",
       "meaning": "リポジトリがどのブランチから作業を切り、どこへマージし、どこから本番へ出すかの決まり。リポジトリごとに `.ndf/project.json` のセクション `branch_strategy`（ブランチ戦略の設定）の `release_strategy` で、リリース方式の表の行を選ぶ",
