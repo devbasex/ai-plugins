@@ -7,10 +7,14 @@ import subprocess
 import time
 from pathlib import Path
 
+import git_sandbox
 import pytest
+from filelock import FileLock
 
 from ndf import contracts
+from ndf.adapters import git
 from ndf.domains.project import analysis_record, check, cli, measure_ci, write
+from ndf.domains.project import strategy_write as bw
 from ndf.domains.project.items import unknown, value_digest
 from ndf.domains.records import files
 
@@ -20,7 +24,10 @@ def _git(repo: Path, *args: str) -> str:
 
 
 @pytest.fixture
-def repo(tmp_path) -> Path:
+def repo(tmp_path, monkeypatch) -> Path:
+    """一時のリポジトリ。git の system と global の設定（利用者の除外の設定を含む）を読ませない。"""
+    git_sandbox.isolate_git(tmp_path, monkeypatch)
+    (tmp_path / "gitconfig").write_text("", encoding="utf-8")
     path = tmp_path / "repo"
     path.mkdir()
     _git(path, "init", "-q", "-b", "main")
@@ -115,6 +122,8 @@ def test_check_reads_the_main_directory_from_a_linked_worktree(repo, tmp_path):
     _git(repo, "commit", "-qm", "decl")
     linked = tmp_path / "linked"
     _git(repo, "worktree", "add", "-q", str(linked), "-b", "side")
+    dirs = check.repo_dirs(linked)
+    assert (dirs.top.cwd, dirs.main, dirs.common) == (linked.resolve(), repo.resolve(), (repo / ".git").resolve())
     assert check.judge(linked, False).kind == check.FRESH
     files.path(repo, "project-analysis").unlink()
     assert check.judge(linked, False).kind == check.STALE
@@ -560,3 +569,205 @@ def test_changing_only_the_answers_leaves_no_pending_mark(repo, tmp_path, capsys
     assert {k: v for k, v in _record(repo).items() if k != "written_digest"} == {k: v for k, v in record.items() if k != "written_digest"}
     assert "pending" not in _record(repo)
     assert _judged(capsys, last_result, repo)[0] == 0
+
+
+# --- 書き出しを守る（#4516）: 記録が git に無視されることを git に確かめさせ、設定の書き込みと同じロックで守る ---
+
+GUARDS = ("check-ignore", "ls-files")  # 計画が設定と記録のパスを 1 回で確かめ、`.gitignore` を作るときだけ索引も読む
+
+
+def _count_guards(monkeypatch, fail: dict[str, git.Completed] | None = None) -> list[str]:
+    """`git ls-files`・`git check-ignore` の起動を数える。`fail` に挙げたコマンドは起動せずにその結果を返す
+    （`run_bytes` の起動は、終了コードが 0 でも 1 でもなければ `GitError`）。"""
+    calls: list[str] = []
+    real, real_bytes = git.Git.attempt, git.Git.run_bytes
+
+    def counted(self, *args):
+        if args and args[0] in GUARDS:
+            calls.append(args[0])
+            if fail and args[0] in fail:
+                return fail[args[0]]
+        return real(self, *args)
+
+    def counted_bytes(self, *args, stdin=None, codes=(0,)):
+        if args and args[0] in GUARDS:
+            calls.append(args[0])
+            if fail and args[0] in fail:
+                done = fail[args[0]]
+                if done.returncode not in codes:
+                    raise git.GitError(f"git {' '.join(args)} が失敗（終了コード {done.returncode}）: {done.stderr.strip()}")
+                return done.stdout.encode("utf-8")
+        return real_bytes(self, *args, stdin=stdin, codes=codes)
+
+    monkeypatch.setattr(git.Git, "attempt", counted)
+    monkeypatch.setattr(git.Git, "run_bytes", counted_bytes)
+    return calls
+
+
+def _stopped(capsys, last_result) -> str:
+    got = last_result(capsys.readouterr().out)
+    assert got["status"] == "stopped"
+    return got["summary"]
+
+
+def _first_write(repo: Path, tmp_path: Path) -> Path:
+    measure = _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)
+    assert _write_cli(repo, measure) == 0
+    return measure
+
+
+def test_an_empty_gitignore_stops_the_write_unless_git_ignores_the_record_elsewhere(repo, tmp_path, capsys, last_result):
+    ignore = files.path(repo, "project-analysis-ignore")
+    ignore.parent.mkdir(parents=True)
+    ignore.write_text("", encoding="utf-8")
+    measure = _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)
+    assert _write_cli(repo, measure) == 1
+    assert _stopped(capsys, last_result).startswith(".ndf/analysis/project.json が git に無視されない")
+    assert not (repo / ".ndf" / "project.json").exists() and not files.path(repo, "project-analysis").exists()
+    assert ignore.read_text(encoding="utf-8") == ""
+    with (repo / ".git" / "info" / "exclude").open("a", encoding="utf-8") as fh:
+        fh.write(".ndf/analysis/project.json\n")  # 無視の出所は問わない
+    assert _write_cli(repo, measure) == 0
+    assert _record(repo)["analyzer"] == check.ANALYZER and ignore.read_text(encoding="utf-8") == ""
+
+
+def test_a_negated_root_pattern_does_not_bring_the_record_back(repo, tmp_path):
+    (repo / ".gitignore").write_text("!.ndf/analysis/\n!.ndf/analysis/project.json\n", encoding="utf-8")
+    _first_write(repo, tmp_path)
+    done = subprocess.run(["git", "-C", str(repo), "check-ignore", "-q", files.relpath("project-analysis")], check=False)
+    assert done.returncode == 0
+    assert ".ndf/analysis" not in _git(repo, "status", "--porcelain", "--untracked-files=all")
+
+
+def test_a_tracked_record_stops_the_write_before_the_gitignore(repo, tmp_path, monkeypatch, capsys, last_result):
+    _put_record(repo, {"tracked": True})
+    _git(repo, "add", "-f", files.relpath("project-analysis"))
+    calls = _count_guards(monkeypatch)
+    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 1
+    assert calls == ["check-ignore", "ls-files"]
+    assert _stopped(capsys, last_result) == f".ndf/analysis/ の下のファイルが git に追跡されている: {files.relpath('project-analysis')}"
+    assert not files.path(repo, "project-analysis-ignore").exists() and not (repo / ".ndf" / "project.json").exists()
+    assert _record(repo) == {"tracked": True}
+
+
+def test_a_tracked_gitignore_removed_from_the_worktree_is_not_made_again(repo, tmp_path, capsys, last_result):
+    measure = _first_write(repo, tmp_path)
+    ignore = files.path(repo, "project-analysis-ignore")
+    _git(repo, "add", "-f", files.relpath("project-analysis-ignore"))
+    _git(repo, "commit", "-qm", "track the gitignore")
+    ignore.unlink()
+    record = _record(repo)
+    capsys.readouterr()
+    assert _write_cli(repo, measure) == 1
+    assert "git に追跡されている" in _stopped(capsys, last_result)
+    assert not ignore.exists() and _record(repo) == record
+
+
+def test_nothing_to_write_stops_on_no_guard_even_with_a_tracked_record(repo, tmp_path, monkeypatch, capsys, last_result):
+    measure = _first_write(repo, tmp_path)
+    _git(repo, "add", "-f", files.relpath("project-analysis"))
+    calls = _count_guards(monkeypatch)
+    capsys.readouterr()
+    assert _write_cli(repo, measure) == 0
+    assert calls == ["check-ignore"] and last_result(capsys.readouterr().out)["metrics"]["written"] == 0
+
+
+def test_updating_the_record_asks_git_once(repo, tmp_path, monkeypatch, capsys, last_result):
+    _first_write(repo, tmp_path)
+    calls = _count_guards(monkeypatch)
+    capsys.readouterr()
+    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": [{"name": "ruff", "config": "ruff.toml"}]})}, repo)) == 0
+    assert calls == ["check-ignore"] and last_result(capsys.readouterr().out)["metrics"]["written"] > 0
+
+
+def test_writing_only_the_gitignore_runs_each_guard_once(repo, tmp_path, monkeypatch, capsys, last_result):
+    measure = _first_write(repo, tmp_path)
+    files.path(repo, "project-analysis-ignore").unlink()
+    calls = _count_guards(monkeypatch)
+    capsys.readouterr()
+    assert _write_cli(repo, measure) == 0
+    assert calls == list(GUARDS)
+    assert last_result(capsys.readouterr().out)["metrics"]["files"] == [str(files.path(repo, "project-analysis-ignore"))]
+
+
+def test_check_ignored_reads_sources_with_a_colon_and_skips_negated_rules(monkeypatch, tmp_path):
+    """出所のパスにコロンがあっても、NUL 区切りの出力から出所・行・パターン・パスを読む。否定の行に当たったパスは無視されない扱い。"""
+    seen = {}
+    rows = [
+        ("/home/u/a:b/ignore", "3", "!.ndf/analysis/project.json", ".ndf/analysis/project.json"),
+        ("/home/u/a:b/ignore", "1", ".ndf/", ".ndf/project.json"),
+    ]
+    out = "".join(f"{field}\0" for row in rows for field in row)
+
+    def fake(self, *args, stdin=None, codes=(0,)):
+        seen.update(args=args, stdin=stdin, codes=tuple(codes))
+        return out.encode("utf-8")
+
+    monkeypatch.setattr(git.Git, "run_bytes", fake)
+    got = write.check_ignored(tmp_path, [".ndf/project.json", ".ndf/analysis/project.json"])
+    assert got == write.Ignored({".ndf/project.json": ("/home/u/a:b/ignore", "1", ".ndf/")}, None)
+    assert seen == {
+        "args": ("check-ignore", "-v", "-z", "--stdin"),
+        "stdin": b".ndf/project.json\0.ndf/analysis/project.json\0",
+        "codes": (0, 1),
+    }
+    assert write.ignored_notes(got, [".ndf/project.json"])[0]["source"] == "/home/u/a:b/ignore:1"
+
+
+def _tree(repo: Path) -> tuple[bytes | None, dict[str, bytes]]:
+    """索引とworktreeの状態（.git/index の中身と、.git の外の各ファイル（無視されたものを含む）のパスと中身）。git は起動しない。"""
+    index = repo / ".git" / "index"
+    contents = {
+        str(f.relative_to(repo)): f.read_bytes() for f in sorted(repo.rglob("*")) if f.is_file() and ".git" not in f.relative_to(repo).parts
+    }
+    return (index.read_bytes() if index.exists() else None), contents
+
+
+@pytest.mark.parametrize("command, existing_ignore", [("ls-files", None), ("check-ignore", "*\n")])
+def test_git_that_cannot_tell_leaves_the_tree_as_it_was(repo, tmp_path, monkeypatch, capsys, last_result, command, existing_ignore):
+    """索引を読めないとき・除外を確かめられないとき（`.gitignore` を作る回も含む）に、何も書かずに止まる。"""
+    ignore = files.path(repo, "project-analysis-ignore")
+    if existing_ignore is not None:
+        ignore.parent.mkdir(parents=True)
+        ignore.write_text(existing_ignore, encoding="utf-8")
+    before = _tree(repo)
+    calls = _count_guards(monkeypatch, {command: git.Completed(128, "", "fatal: index file corrupt\n")})
+    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 1
+    summary = _stopped(capsys, last_result)
+    assert summary.startswith("git が .ndf/analysis/ の追跡と無視を確かめられない: ") and summary.endswith("fatal: index file corrupt")
+    assert calls == (list(GUARDS) if command == "ls-files" else ["check-ignore"])
+    assert _tree(repo) == before
+
+
+@pytest.mark.parametrize("with_ignore", [True, False])
+def test_an_unanswered_ignore_check_stops_before_any_write(tmp_path, monkeypatch, with_ignore):
+    """計画の `git check-ignore` が判定できなければ、`.gitignore` を作る回も作らない回も、git を起動せず何も書かずに止まる。"""
+
+    def no_git(self, *args):
+        raise AssertionError(f"git を起動した: {args}")
+
+    monkeypatch.setattr(git.Git, "attempt", no_git)
+    record = files.path(tmp_path, "project-analysis")
+    planned = [write.File(record, files.relpath("project-analysis"), None, "{}\n", "解析の記録")]
+    if with_ignore:
+        ignore = files.path(tmp_path, "project-analysis-ignore")
+        planned.insert(
+            0, write.File(ignore, files.relpath("project-analysis-ignore"), None, analysis_record.IGNORE_TEXT, "git から外す設定")
+        )
+    plan = write.Plan(planned, [], write.Ignored({}, "fatal: beyond a symbolic link"))
+    with pytest.raises(write.WriteError, match="確かめられない: fatal: beyond a symbolic link"):
+        cli._commit(tmp_path, plan)
+    assert not (tmp_path / ".ndf").exists()
+
+
+def test_a_held_lock_stops_the_write_without_reading(repo, tmp_path, monkeypatch, capsys, last_result):
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "project.json").write_text("{", encoding="utf-8")  # 読めば終了コード 2 になる設定
+    measure = _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)
+    real = cli.limits.seconds
+    monkeypatch.setattr(cli.limits, "seconds", lambda name: 0 if name == "branch-strategy.write-lock" else real(name))
+    with FileLock(str(bw.lock_at(check.repo_dirs(repo).common))):
+        assert _write_cli(repo, measure) == 1
+        assert _stopped(capsys, last_result) == "別の実行が設定を書いています。終わってから打ち直してください"
+        assert cli.main(["write", "--root", str(repo), "--measure", str(measure), "--dry-run"]) == 2  # --dry-run はロックを取らない
+    assert (repo / ".ndf" / "project.json").read_text(encoding="utf-8") == "{"

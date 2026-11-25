@@ -128,18 +128,26 @@ def _read(path: Path) -> Optional[dict[str, Any]]:
     return jsonfile.read_object(path) if path.is_file() else None
 
 
-def repo_dirs(root: Path) -> tuple[git.Git, Path]:
-    """作業場所の git とメインディレクトリ。git の外なら `CheckError`。"""
+class RepoDirs(NamedTuple):
+    """作業場所の git・メインディレクトリ・git の共通ディレクトリ（linked worktree からでもメインの `.git`）。"""
+
+    top: git.Git
+    main: Path
+    common: Path
+
+
+def repo_dirs(root: Path) -> RepoDirs:
+    """作業場所の git・メインディレクトリ・git の共通ディレクトリ。git の外なら `CheckError`。"""
     repo = git.Git(root)
     done = repo.attempt("rev-parse", "--show-toplevel")
     if done.returncode != 0:
         raise CheckError(f"{root} は git の worktree ではない: {done.stderr.strip()}")
     top = git.Git(Path(done.stdout.strip()))
     try:
-        main = top.common_dir().parent
+        common = top.common_dir()
     except git.GitError as exc:
         raise CheckError(str(exc)) from exc
-    return top, main
+    return RepoDirs(top, common.parent, common)
 
 
 def load(main: Path) -> Optional[dict[str, Any]]:
@@ -181,7 +189,8 @@ def _record_reason(main: Path, decl: dict[str, Any]) -> tuple[Optional[dict[str,
 
 def judge(root: Path, force: bool) -> Judged:
     """設定が新しい・無い・古い・壊れているのどれかを決める。判定できなければ `CheckError`。"""
-    repo, main = repo_dirs(root)
+    dirs = repo_dirs(root)
+    repo, main = dirs.top, dirs.main
     try:
         decl = load(main)
     except jsonfile.JsonFileError as exc:

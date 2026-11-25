@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import difflib
 import json
-import subprocess
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
@@ -53,9 +52,20 @@ class File(NamedTuple):
     summary: Optional[str] = None
 
 
+class Ignored(NamedTuple):
+    """`git check-ignore -v` の 1 回の結果。`rules` は除外の行に当たったパス → (出所のファイル, 行, パターン)。否定の行に当たった
+    パスと追跡済みのパスは入らない。`error` は git が判定できなかった理由（判定できたなら None）。"""
+
+    rules: dict[str, tuple[str, str, str]]
+    error: Optional[str]
+
+
 class Plan(NamedTuple):
+    """書くファイル・出力の行・設定と解析の記録のパスを 1 回の `git check-ignore` で確かめた結果。"""
+
     files: list[File]
     rows: list[dict[str, Any]]
+    ignored: Ignored
 
 
 def is_unknown(value: Any) -> bool:
@@ -228,32 +238,42 @@ def _declare_ci_tests(
     return doc, {"kind": "note", "key": CI_KEY, "text": f"CI テストの設定: {line}"}
 
 
-def ignored_notes(root: Path, rels: list[str]) -> list[dict[str, Any]]:
-    """`rels` のうち `.gitignore` の対象のもの（kind note・key gitignore の行）。否定の行に当たったもの・git の外は外す。"""
+def check_ignored(root: Path, rels: list[str]) -> Ignored:
+    """`rels` を 1 回の `git check-ignore -v -z --stdin` で確かめる。索引を読むので、追跡済みのパスは除外の行に当たっても無視されない扱い。
+    出力は NUL 区切りの (出所, 行, パターン, パス) の組なので、出所のパスにコロンがあっても読み違えない。"""
+    stdin = "".join(f"{r}\0" for r in rels).encode("utf-8")
     try:
-        done = subprocess.run(["git", "check-ignore", "-v", "--", *rels], cwd=root, capture_output=True, text=True, check=False)
-    except OSError:  # 確かめられないことを除外と読ませない
-        return []
-    if done.returncode not in (0, 1):
-        return []
+        out = git.Git(root).run_bytes("check-ignore", "-v", "-z", "--stdin", stdin=stdin, codes=(0, 1))
+    except git.GitError as exc:  # git を起動できない・終了コードが 0 でも 1 でもない
+        return Ignored({}, str(exc))
+    fields = out.decode("utf-8", "replace").split("\0")
+    rules = {}
+    for i in range(0, len(fields) - 3, 4):
+        src, num, pattern, path = fields[i : i + 4]
+        if not pattern.startswith("!"):
+            rules[path] = (src, num, pattern)
+    return Ignored(rules, None)
+
+
+def ignored_notes(ignored: Ignored, rels: list[str]) -> list[dict[str, Any]]:
+    """`rels` のうち `.gitignore` の対象のもの（kind note・key gitignore の行）。確かめられなかったときは除外と読ませず空。"""
     out = []
-    for line in done.stdout.splitlines():
-        head, sep, path = line.partition("\t")
-        src, _, rest = head.partition(":")
-        num, _, pattern = rest.partition(":")
-        if sep and not pattern.startswith("!"):
-            text = f"{path} は {src}:{num} の `{pattern}` が除外している（コミットできない。.gitignore は変えない）"
-            out.append(
-                {
-                    "kind": "note",
-                    "key": "gitignore",
-                    "name": path,
-                    "result": "ignored",
-                    "source": f"{src}:{num}",
-                    "pattern": pattern,
-                    "text": text,
-                }
-            )
+    for path in rels:
+        if path not in ignored.rules:
+            continue
+        src, num, pattern = ignored.rules[path]
+        text = f"{path} は {src}:{num} の `{pattern}` が除外している（コミットできない。.gitignore は変えない）"
+        out.append(
+            {
+                "kind": "note",
+                "key": "gitignore",
+                "name": path,
+                "result": "ignored",
+                "source": f"{src}:{num}",
+                "pattern": pattern,
+                "text": text,
+            }
+        )
     return out
 
 
@@ -324,7 +344,8 @@ def plan(inp: Inputs) -> Plan:
         project = File(path, files.relpath("project"), old, dumps(doc))
     out = _record_files(inp, record, project)
     notes = [{"kind": "note", "key": "notes", "text": n} for n in seq(inp.measure.get("notes"))]
-    return Plan(out, item_rows + [ci_row] + rows + notes + ignored_notes(inp.main, [files.relpath("project")]))
+    ignored = check_ignored(inp.main, [files.relpath("project"), files.relpath("project-analysis")])  # 書き込みの前の確かめも兼ねる
+    return Plan(out, item_rows + [ci_row] + rows + notes + ignored_notes(ignored, [files.relpath("project")]), ignored)
 
 
 def p_number(key: str, default: str) -> str:

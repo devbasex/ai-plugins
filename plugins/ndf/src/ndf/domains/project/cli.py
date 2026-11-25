@@ -28,13 +28,15 @@ import time
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
+from filelock import FileLock, Timeout
+
 from ndf import cli, contracts
 from ndf.adapters import git
 from ndf.contracts import limits, result
 from ndf.domains.project import analysis_record, check, measure_ci, measure_repo, secret, strategy_cli, write
 from ndf.domains.project import strategy_write as bw
 from ndf.domains.project.items import STATUSES, obj, seq, unknown
-from ndf.domains.records import jsonfile
+from ndf.domains.records import files, jsonfile
 from ndf.domains.relay import signals
 
 TOOL = cli.tool_of(__name__)
@@ -110,7 +112,8 @@ def _ci_items(tree: measure_repo.Tree, step: _Steps, ctx: MeasurementContext) ->
 def measure_project(root: Path, budget: float) -> dict[str, Any]:
     """P1〜P10 を測る。git の木から測る項目を先に、残りの時間で `gh` の項目を測る。"""
     start = time.monotonic()
-    repo, main = check.repo_dirs(root)
+    dirs = check.repo_dirs(root)
+    repo, main = dirs.top, dirs.main
     tree = measure_repo.Tree(repo.cwd, start + budget)
     step = _Steps(start + budget)
     repo_issues = measure_repo.measure(tree, step, step.items)
@@ -159,31 +162,83 @@ def _read_input(path: Optional[str]) -> dict[str, Any]:
     return jsonfile.read_object(Path(path)) if path else {}
 
 
-def _inputs(args: argparse.Namespace) -> write.Inputs:
-    """書き出しの入力。git の外は `CheckError`、設定が壊れていれば `JsonFileError`、測定の結果か回答が読めなければ `WriteError`。
-    前の解析の記録は、無い・読めなければ None（書き出しが作り直す）。"""
-    repo, main = check.repo_dirs(Path(args.root).resolve())
-    existing = check.load(main)
+def _inputs(args: argparse.Namespace, dirs: check.RepoDirs) -> write.Inputs:
+    """書き出しの入力（解決済みの作業場所のメインディレクトリから読む）。設定が壊れていれば `JsonFileError`、測定の結果か回答が
+    読めなければ `WriteError`。前の解析の記録は、無い・読めなければ None（書き出しが作り直す）。"""
+    existing = check.load(dirs.main)
     try:
         measured, answers = _read_input(args.measure), _read_input(args.answers)
     except jsonfile.JsonFileError as exc:
         raise write.WriteError(f"測定の結果か回答を読めない: {exc}") from None
-    return write.Inputs(repo.cwd, main, existing, measured, answers, analysis_record.load(main)[0])
+    return write.Inputs(dirs.top.cwd, dirs.main, existing, measured, answers, analysis_record.load(dirs.main)[0])
+
+
+def _unsure(folder: str, reason: str) -> write.WriteError:
+    return write.WriteError(f"git が {folder}/ の追跡と無視を確かめられない: {reason}")
+
+
+def _untracked(repo: git.Git, folder: str) -> None:
+    """記録のディレクトリの下に git が追跡するファイルが無いことを確かめる（`.gitignore` を作る前）。あれば・分からなければ `WriteError`。"""
+    done = repo.attempt("ls-files", "--", folder)
+    if done.returncode != 0:  # 索引を読めなければ、出力が空でも追跡の有無は分からない
+        raise _unsure(folder, done.stderr.strip())
+    if done.stdout.strip():
+        raise write.WriteError(f"{folder}/ の下のファイルが git に追跡されている: {'・'.join(done.stdout.split())}")
+
+
+def _ignored(ignored: write.Ignored, folder: str, record: str) -> None:
+    """計画の `git check-ignore` の結果で、記録のパスが無視されることを確かめる。無視の出所（どの除外の設定か）は問わない。
+    無視されない（追跡済みを含む）・分からなければ `WriteError`。"""
+    if ignored.error is not None:
+        raise _unsure(folder, ignored.error)
+    if record not in ignored.rules:
+        raise write.WriteError(f"{record} が git に無視されない。{folder}/.gitignore の中身か、記録が追跡されていないかを確かめる")
+
+
+def _put(f: write.File) -> None:
+    try:
+        signals.replace_text(f.path, f.new)
+    except OSError as exc:
+        raise write.WriteError(f"設定を書けない: {exc}") from None
+
+
+def _commit(main: Path, planned: write.Plan) -> None:
+    """計画のファイルを順に書く。記録のディレクトリの下へ書くときは、どのファイルを書くよりも前に、記録が git に無視されることを
+    確かめる（止めるときは何も書かずに `WriteError`）。`.gitignore` を作るときは、記録のディレクトリの下に追跡されたファイルが
+    無いことを確かめる。同じディレクトリの `.gitignore` の `*` はどの除外の設定より優先されるので、追跡されていなければ記録は無視される。
+    `.gitignore` が既にあるときは、計画の `git check-ignore` の結果を使う。どちらの回も、計画の `git check-ignore` が判定できなかったら止める。"""
+    record = files.relpath("project-analysis")
+    folder = str(Path(record).parent)
+    ignore = [f for f in planned.files if f.path == files.path(main, "project-analysis-ignore")]
+    if any(f.path.parent == main / folder for f in planned.files):
+        if planned.ignored.error is not None:  # 記録のパスを git が扱えない（保存先が別の場所へのリンクなど）。作る回も書かない
+            raise _unsure(folder, planned.ignored.error)
+        if ignore:
+            _untracked(git.Git(main), folder)
+        else:
+            _ignored(planned.ignored, folder, record)
+    for f in ignore + [f for f in planned.files if f not in ignore]:
+        _put(f)
 
 
 def _write(args: argparse.Namespace) -> int:
+    """書き出す。`--dry-run` でなければ、設定と記録を読む前から最後のファイルを書くまで、ブランチ戦略の書き込みと同じロックを持つ。"""
     try:
-        planned = write.plan(_inputs(args))
+        dirs = check.repo_dirs(Path(args.root).resolve())
+        if args.dry_run:
+            planned = write.plan(_inputs(args, dirs))
+        else:
+            with FileLock(str(bw.lock_at(dirs.common)), timeout=limits.seconds("branch-strategy.write-lock")):
+                planned = write.plan(_inputs(args, dirs))
+                _commit(dirs.main, planned)
+    except Timeout:  # OSError の子なので、ロックのファイルを作れないときより先に見る
+        return result.emit(result.stopped(TOOL, "check_failed", "別の実行が設定を書いています。終わってから打ち直してください"))
+    except OSError as exc:  # ロックのファイルを作れない（git の共通ディレクトリに書けない）など
+        return result.emit(result.stopped(TOOL, "check_failed", f"設定を書けない: {exc}"))
     except jsonfile.JsonFileError as exc:
         return result.emit(result.stopped(TOOL, "invalid", f"既存の設定が壊れている（作り直さない）: {exc}。直してから打ち直す"))
     except (check.CheckError, write.WriteError) as exc:
         return result.emit(result.stopped(TOOL, "check_failed", str(exc)))
-    if not args.dry_run:
-        try:
-            for f in planned.files:
-                signals.replace_text(f.path, f.new)
-        except OSError as exc:
-            return result.emit(result.stopped(TOOL, "check_failed", f"設定を書けない: {exc}"))
     return result.emit(_report_write(planned, args.dry_run))
 
 
