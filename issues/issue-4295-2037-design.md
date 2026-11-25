@@ -90,6 +90,7 @@ graph TD
 | I4 | 計画 | 重なりの知らせは、行の組（自分の行と相手の計画・レーン・行）ごとに、開いたものを多くて 1 件に保つ。最後に書いた知らせのファイルにすべて含まれる重なりは書かない。新しいファイルが増えたら、開いた知らせは閉じて全部のファイルで開き直し、閉じた（回答済みの）知らせには増えた分を持つ知らせを新しく開く | 書く前に、同じ組の開いた・閉じた知らせを計画のステートマシンから読んで突き合わせる。打ち直しても、記録した知らせとの突き合わせで同じ知らせを書かない（決定 7） |
 | I5 | プラン | `touches` が無いプランはすべてと重なる。`/` で終わる値は重なりに数えない。同じファイルで片方が名前を持たなければ重なる。両方が名前を持てば、名前が等しいか一方が `<名前>.` で始まるときだけ重なる | テストで縛る（#2037 の受け入れ条件 2〜6） |
 | I6 | 計画 | 終わった行の変えたファイルは、終わった後の最後の観測（`final: true` の記録）を書くまで観測の対象に残す。計画の完了（I16）は、終わった行すべてに最後の観測の記録があるまで待つ | 読めない周が上限の回数（`parallel-run.touches` の `attempts`）続けば、`files: null` と理由で最後の観測を書いて終える |
+| I7 | 計画 | 比べた位置（`touches_compared`）は、その周の知らせを書いたのと同じトランザクションでだけ進める。比べる対象は、どの計画でも、比べた位置より新しい `touches_found` と触る場所の設定の変更（`lane_changed`）である | 記録の直後に中断しても、位置が進んでいないので次の周で比べ直す。知らせは I4 の突き合わせで重ならない |
 
 ### ドメインイベント
 
@@ -119,7 +120,7 @@ graph TD
 | 行の触る場所の畳み込み（`progress/lane/fold.py`・`types.py`） | 事象 `touches_found` から、行ごとの設計の触る場所と変えたファイルを持つ |
 | 計画の決まり（`progress/lane/rules.py`） | I13 を行の触る場所で判定する。重なりの知らせの組を「重なりの知らせの組の規則」で求め、組ごとに `after` が効くレーンを添える。計画の完了（`plan_complete`）に I6 を足す |
 | 触る場所の観測（`progress/plan/run.py`・`run_decide.py`） | 間隔（新設の上限 `parallel-run.touches`）ごとに、実行中の行と最後の観測の済んでいない終わった行（I6）のスプリントを読み、設計の触る場所と変えたファイルを記録し、知らせを書く・閉じる（I4） |
-| 事象のコントラクト（`contracts/workflow/progress.json`） | 事象 `touches_found`（書き込み元 `workflow`）を足す |
+| 事象のコントラクト（`contracts/workflow/progress.json`・`stages/document-review.json`） | 事象 `touches_found` と `touches_compared`（書き込み元 `workflow`）を足す。ドキュメントレビューの工程に出力 `pr` を宣言する |
 | オーガナイザーの手順（`skills/development-workflow/references/parallel.md` の知らせの表） | 今の表は `launch_failed`・`lane_stalled` などの種類ごとに扱いを持ち、`touches_overlap` の行が無い。知らせの `reorderable` に載ったレーンへ `after` を足して順序を付け直すか、そのまま進めて base-sync で直すかを決めて閉じる行を足す。`reorderable` が空の組（実装に入った行・別の計画の行）は base-sync で直すと書く（決定 7） |
 | 計画の書き方（`skills/issue-plan-strategy/references/parallel-plan.md`） | 設計の前のレーンの `touches` には、課題の設計文書のパス（`issues/issue-<番号>-*`）だけを書き、粗い触る場所の重なりを避けるための `after` を付けない、と書く（決定 3） |
 
@@ -140,6 +141,7 @@ graph TD
 | 事象 | 書き込み元 | 行のキー | 中身（`payload`） |
 | --- | --- | --- | --- |
 | `touches_found`（新設） | `workflow` | レーンの名前 | `row`（レーンの行のキー）・`source`（`design` か `diff`）・`files`（パスの並び。読めなかったときは `null`）・`from`（出典の並び。下の表）・`final`（`diff` で、行が終わった後の最後の観測なら `true`。I6）・`reason`（読めなかった理由。読めたときは無い） |
+| `touches_compared`（新設） | `workflow` | 計画（`scope: table`） | `seen`（計画ごとの、比べ終えた計画のステートマシンの最後の事象の番号。`{"<計画の ID>": <番号>}`。自分の計画と、比べた別の計画を並べる）。I7 |
 | `request_opened`（今の事象） | `workflow` | レーンの名前 | 今の形のまま。中身の `kind` に `touches_overlap` を足す（下の「入出力のコントラクト」） |
 
 `from` は出典ごとに 1 つの要素を持つ並びである。複数の課題の設計文書と別ファイルの詳細設計を合わせたときは、読んだ文書をすべて並べる。
@@ -172,9 +174,9 @@ graph TD
 
 | 手順 | 読むもの | 読めないときの扱い |
 | --- | --- | --- |
-| 1. 設計 Pull Request を決める | head が行のスプリントのブランチで、マージ済みの PR のうち、ドキュメントレビューの工程が終わった時刻までに最後にマージされたもの（`gh pr list --head <ブランチ> --state merged --json number,mergeCommit,mergedAt,files`）。読む版はその PR のマージのコミットである | PR が無い: 行全体を読めなかったとする（`files: null`）。GitHub を読めない: 何も書かず次の周で読み直す |
-| 2. 課題ごとに設計文書を決める | 1 の PR が変えたファイルのうち、`issues/issue-<番号の並び>-design.md` で、番号の並びに課題の番号を含むもの。`issue-4295-2037-design.md` は課題 4295 と 2037 の両方の設計文書になる | 課題の設計文書が無い、またはその文書の「設計の結果」の表に課題の行が無い: 行全体を読めなかったとする |
-| 3. 詳細設計を対応付ける | 2 の文書と同じ番号の並びの `issues/issue-<番号の並び>-design-detail.md` を、同じ版から読む（`gh api repos/<owner>/<repo>/contents/<パス>?ref=<コミット>`） | 版に無い（404）: 詳細設計を畳んだ設計として、設計の結果だけを使う。あるのに「地図」の表か「パス」の列を読めない: 行全体を読めなかったとする（受け入れ条件 4） |
+| 1. 設計 Pull Request を決める | スプリントのステートマシンの、ドキュメントレビューの工程の行の出力（`outputs_recorded` の `pr`）に記録された番号の PR。ドキュメントレビューの工程の定義（`contracts/workflow/stages/document-review.json`）に出力 `pr` を宣言し、工程が流す PR のプラン（`contracts/templates/pr.json`）が返す `outputs.pr` を残す。`gh pr view <番号> --json state,mergeCommit,files` で、マージ済みであることとマージのコミットを読む。読む版はそのコミットである。スプリントの文脈の `pr` ではなく工程の行の出力から引くので、後の工程「Pull Request」が `pr` を書いても取り違えない | 出力に番号が無い、または PR がマージ済みでない: 行全体を読めなかったとする（`files: null`）。GitHub を読めない: 何も書かず次の周で読み直す。読めない周が上限の回数（`parallel-run.touches` の `attempts`）続けば、理由を付けて `files: null` を書く |
+| 2. 課題ごとに設計文書を決める | 1 の PR が変えたファイルのうち、`issues/issue-<番号の並び>-design.md` で番号の並びに課題の番号を含むものを候補にし、課題ごとに照らし合わせる。`issue-4295-2037-design.md` は課題 4295 と 2037 の両方の候補になる。候補のうち「設計の結果」の表にその課題の行がある文書がちょうど 1 つなら、それを採る | 候補が無い、またはどの候補にも課題の行が無い: 行全体を読めなかったとする。課題の行がある候補が 2 つ以上ある（`issue-7-design.md` と `issue-7-8-design.md` の両方に課題 7 の行がある）: 採る文書を決められないので、候補のパスを理由に残し、行全体を読めなかったとする |
+| 3. 詳細設計を対応付ける | 2 の文書と同じ番号の並びの `issues/issue-<番号の並び>-design-detail.md` を、同じ版から読む（`gh api repos/<owner>/<repo>/contents/<パス>?ref=<コミット>`） | 版に無い（404）: 詳細設計を畳んだ設計として、設計の結果だけを使う。GitHub を読めない: 手順 1 と同じく、上限の回数まで次の周で読み直す。あるのに「地図」の表か「パス」の列を読めない: 行全体を読めなかったとする（受け入れ条件 4） |
 | 4. 和を取る | 課題ごとの設計の結果の触るファイル（`::` より前）と、地図の「パス」の列の和 | — |
 
 同じ文書を 2 つの課題で使うときは 1 回だけ読む。読んだ文書は `touches_found` の `from` にすべて残る（「データ構造」）。
@@ -185,12 +187,14 @@ graph TD
 
 | 自分の行の値 | 相手の行の値 | 知らせるか | `source` |
 | --- | --- | --- | --- |
-| 変えたファイル | 触る場所（設計の触る場所か、記録の無い行は設定） | 重なれば知らせる | `diff` |
+| 変えたファイル | 触る場所（I1 の規則で決まる今の値） | 重なれば知らせる | `diff` |
 | 変えたファイル | 変えたファイル | 重なれば知らせる。両方が宣言の外で同じファイルを変えた組はここで拾う | `diff` |
-| 設計の触る場所 | 触る場所 | 同じ計画の組は I13 の誤りで、別の計画の組は重なりとして知らせる | `design` |
+| 触る場所（I1 の今の値） | 触る場所（I1 の今の値） | 同じ計画の組は I13 の誤りになり、それに加えて知らせる。別の計画の組も知らせる。どちらも、知らせを閉じるまで両方の行を実装の入口で待たせる（決定 3） | `design` |
 
 - 相手の行は、同じ計画で前後の鎖の無い終わっていない行と、別の計画の実行中の行、最後の観測の済んでいない終わった行（I6）である
-- 比べるのは、どちらかの行に新しい記録が書かれた周だけである。表の比べ方は、2 つの行を入れ替えた向きでも行う。知らせは組ごとに書き、同じ計画の組は名前の順で先の行を「自分の行」にして 1 件だけ書く。別の計画の組は、それぞれの計画の耐久ワークフローが自分の計画に書く
+- 「触る場所」は、どの行でも I1 の規則で決まる今の値である。設計を記録した後にオーガナイザーが `ndf lanes set --touches` で直した行は、直した値で比べる
+- 比べるのは、比べた位置（`touches_compared`）より新しい記録のある行だけである。新しい記録は、自分の計画と別の計画のどちらの `touches_found` でもよく、触る場所の設定の変更（`lane_changed`）も含む。別の計画の新しい記録は、その計画のステートマシンの事象の番号で見分ける（I7）。比べた位置は、その周の知らせと同じトランザクションで進める
+- 表の比べ方は、2 つの行を入れ替えた向きでも行う。知らせは組ごとに書き、同じ計画の組は名前の順で先の行を「自分の行」にして 1 件だけ書く。別の計画の組は、それぞれの計画の耐久ワークフローが自分の計画に書く
 - 重なりの判定は `touch_hit` で行い、`::` より後ろは使わない
 
 ### 重なりの知らせ（`request_opened` の `body`）
@@ -238,9 +242,9 @@ sequenceDiagram
         GH-->>RUN: 変えたファイル
     end
     RUN->>PL: touches_found（diff。新しい組の分だけ。終わった行は final: true）
-    RUN->>RU: 新しい記録のある行の組（別の計画の行を含む）
+    RUN->>RU: 比べた位置より新しい記録か設定の変更のある行の組（別の計画の行を含む）
     RU-->>RUN: 重なりの組と、after が効くレーン
-    RUN->>PL: 組ごとに request_closed と request_opened（touches_overlap。I4）
+    RUN->>PL: 組ごとに request_closed と request_opened（touches_overlap。I4）と touches_compared（同じトランザクション。I7）
 ```
 
 - スプリントや PR を読めない周は、何も書かずに次の周で読み直す（行は止めない）。終わった行で読めない周が上限の回数続けば、`files: null` の最後の観測を書く（I6）
@@ -294,9 +298,10 @@ sequenceDiagram
 | --- | --- | --- |
 | 計画を作る（`ndf lanes init`・`start`・`lane add`） | 設計 Pull Request を出すモード（`standard`・`legacy-refactor`）のレーンは、課題の設計文書のパス（`issues/issue-<番号>-*`）だけを書く。重なりを避けるための `after` は付けない（`parallel-plan.md` に書く）。設計 Pull Request を出さないモードのレーンは、今のとおり変えるファイルを書く | I13 は設計文書のパスで判定する。課題が違えば重ならないので断らない |
 | 設計のフェーズ | 設定のまま | #4050 では設計のフェーズは排他を持たず、`after` と I13 の外にある |
-| ドキュメントレビューが済んだ後の観測 | 設計の触る場所の記録へ置き換わる（I1） | 設計の値で I13 を計算し直し、新しい誤りは `touches_overlap` で知らせる（決定 7）。以後の `ndf lanes set`・`lane add` の I13 も設計の値を見る |
-| 実装のフェーズの入口（#4050 の `after_touches`） | 設計 Pull Request を出すモードの行は、記録があれば「確定」。`files: null` の記録も確定とみなす（受け入れ条件 4。止めない）。設計 Pull Request を出さないモードの行は、今のとおり設定の値で確定 | 設計 Pull Request を出すモードで記録が無い行は、未確定として待つ。知らせを受けたオーガナイザーが `after` を足した行は、ここで待つ |
+| ドキュメントレビューが済んだ後の観測 | 設計の触る場所の記録へ置き換わる（I1） | 設計の値で I13 を計算し直し、重なる組は `touches_overlap`（`source: design`）で知らせる（決定 7）。以後の `ndf lanes set`・`lane add` の I13 も設計の値を見る |
+| 実装のフェーズの入口（#4050 の `after_touches`） | 設計 Pull Request を出すモードの行は、記録があれば「確定」。`files: null` の記録も確定とみなす（受け入れ条件 4。止めない）。設計 Pull Request を出さないモードの行は、今のとおり設定の値で確定 | 設計 Pull Request を出すモードで記録が無い行は、未確定として待つ。`source: design` の開いた `touches_overlap` がある行も未確定として待つ。オーガナイザーは、`after` で順序を付けてから閉じるか、並行を許すと決めて閉じる。閉じた後は、足した `after` に従って待つか進む |
 
+- 実装の入口で待たせるのは、設計で確定した値（I1 の今の値）どうしの重なりだけである。設計の段階で分かった重なりは、実装を始める前に順序を付けられるので、オーガナイザーが決めるまで待たせる。単位の PR の実際の差分だけが重なった組（`source: diff`）では待たせず、レーンも止めない（受け入れ条件 5）。この待ちは #4050 の実装の待ちの判定（`rules.implementation_wait`）が返す待つ先に、`touches_overlap` の印として足す
 - 既に付けた暫定の `after` は、耐久ワークフローが外さない。`after` はオーガナイザーの値で、本当に重なる組の順序か暫定の順序かを機械は見分けられないためである。計画の書き方で暫定の `after` を付けないようにし、残っていればオーガナイザーが `ndf lanes set --after` で外す
 - 計画の書き方の変更は、#4050 の実装のフェーズの入口の待ちを前提にする。入口の待ちが無いと、設計の値で重なりが見つかっても実行中の行を待たせる手段が無いためである。そのため #4050 を先に実装する（「影響と危険」）
 - 採らなかった案: 設計 Pull Request をマージするステップの後に、スプリントからコマンドを打つ。スプリントは自分のレーンと計画を知らない。計画のステートマシンの書き込み元も 2 つに分かれる
@@ -331,6 +336,7 @@ sequenceDiagram
 - **選んだ案**: head を先に確かめ、記録に無い PR と head の組だけファイルを読む。観測の間隔は新設の上限 `parallel-run.touches` の `interval`（300 秒）にする
   - 周ごとに、行ごとに `gh api --paginate "repos/<owner>/<repo>/pulls?base=<スプリントブランチ>&state=all&per_page=100"` を打ち、PR の番号と head だけを読む。ページ送りで全件を読むので、`gh pr list` の既定の 30 件で閉じた PR が枠を使い切ることは無い（LIB3）
   - 記録（`from` の PR と head）に無い組だけ、`gh api --paginate "repos/<owner>/<repo>/pulls/<番号>/files?per_page=100"` で変えたファイル（名前を変えたファイルは元の名前も）を読む。1 本の PR につき 3000 件まで返る（LIB3）
+  - ファイルの一覧は番号で引くので、読む間に push されると別の版の一覧になる。読んだ後に `gh api repos/<owner>/<repo>/pulls/<番号> --jq .head.sha` で head を読み直し、一覧の前に読んだ head と同じときだけ、その head の組として `from` に記録する。違えば記録せず、次の周で新しい head として読み直す
   - 観測の対象は、実行中の行と、終わった後の最後の観測の済んでいない行である（I6）。行が終わった後の最初の周で、終わる直前に出た PR と更新された head を読んで `final: true` を書く。計画の完了はこの記録を待つ
 - 計画を進める耐久ワークフローは今 GitHub を読まない（`progress/plan/run.py` に `gh` の呼び出しが無い）。生死の判定が読むのはスプリントのステートマシンとラッパーの一覧で、PR の状態は持たない。そのため、再利用できる PR の取得は無い
 - 費用は、次の仮定で比べた。実行中の行は 6 本、1 本のスプリントの単位の PR は 7 本（p12 の U1〜U7）、head の更新は行 1 本あたり 1 時間に 2 回とする。どれも測った値ではなく、比べるための仮の値である
@@ -338,13 +344,13 @@ sequenceDiagram
 | 案 | 1 時間の CLI の起動（6 本の合計） | 気づくまでの遅れ |
 | --- | --- | --- |
 | 前の案を 60 秒ごとに回す: `gh pr list --json files` で全 PR のファイルを読む | 360 回。head が動かない間も全 PR のファイルを読む。31 件目からは読めない | 60 秒 |
-| head を先に確かめる、60 秒ごと | 360 回＋ファイルの読み 12 回 | 60 秒 |
-| head を先に確かめる、300 秒ごと（選んだ案） | 72 回＋ファイルの読み 12 回 | 300 秒 |
+| head を先に確かめる、60 秒ごと | 360 回＋ファイルの読みと head の読み直し 24 回 | 60 秒 |
+| head を先に確かめる、300 秒ごと（選んだ案） | 72 回＋ファイルの読みと head の読み直し 24 回 | 300 秒 |
 
 - 採らなかった案: マージしたときだけ拾う（マージの時点ではもう衝突が起きていて、知らせても順序を付け直せない）
 - 採らなかった案: 手元の `git diff --name-only` で拾う（単位の worktree が消えた後と、別のマシンで動く単位を読めない）
 - 採らなかった案: 60 秒の周ごとに読む（起動が 5 倍になる。p12 の待ちは 24 時間で、5 分の遅れは順序の付け直しに影響しない）
-- **代償**: 実行中の行 6 本で 1 時間に約 84 回 `gh` を起動する（REST の上限は 1 時間に 5000 回）。重なりに気づくのが最大 300 秒遅れる
+- **代償**: 実行中の行 6 本で 1 時間に約 96 回 `gh` を起動する（REST の上限は 1 時間に 5000 回）。重なりに気づくのが最大 300 秒遅れる
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB1 / LIB2 / LIB3
 - 根拠: Value 5 / Value 2（MVV バージョン 11）。LIB3
@@ -408,8 +414,8 @@ sequenceDiagram
 - **当たるモード**: レーンの置き換えは設計 Pull Request を出す `standard`・`legacy-refactor`（設計の結果があるとき）。プランの `touches` は設計の結果を持つすべてのモード
 - **書きかけの文書**: 構成要素の手順書のうち `skills/development-workflow/references/agent-layers.md` を、開いている 2 本の PR が変えている。確定仕様化の自動のプランを直す PR（ https://github.com/devbasex/ai-plugins/pull/4502 ）と、承認ゲートの手前の MVV 判定を直す PR（ https://github.com/devbasex/ai-plugins/pull/4488 ）である（2026-11-25 に確かめた）。この設計は同じ文書の「スプリントの中の並列」だけを変えるので、後にマージする側が base-sync で直す。ほかの構成要素の文書と、この設計の 3 本の文書を変える開いた PR は無い
 - **同じファイルを触る別の変更**: #4050（ https://github.com/devbasex/ai-plugins/issues/4050 ）の設計が `progress/plan/run.py`・`progress/lane/*.py` を変える。この設計は #4050 の実装のフェーズの入口の待ちを前提にするので（決定 3）、#4050 を先に実装し、後に入るこの設計の側が base-sync で直す
-- **壊れうる箇所**: I13 を行の単位に変える。そのため、設計の記録の無い計画で、今の `test_touch_overlap_errors_as_they_are_now` の期待が変わらないことを確かめる。設計の結果の読み手を移すため、材料の収集（`ndf materials`）の結果が変わらないことを確かめる
-- **費用**: 観測の対象の行 1 本につき、300 秒ごとに PR の番号と head を読む `gh api` を 1 回打ち、head が変わった PR の分だけファイルを読む `gh api` を足す（決定 6）。設計の文書は行ごとに 1 回だけ読む（設計 PR の取得 1 回と、文書ごとの本文の取得）
+- **壊れうる箇所**: I13 を行の単位に変える。そのため、設計の記録の無い計画で、今の `test_touch_overlap_errors_as_they_are_now` の期待が変わらないことを確かめる。設計の結果の読み手を移すため、材料の収集（`ndf materials`）の結果が変わらないことを確かめる。ドキュメントレビューの工程に出力 `pr` を宣言すると、工程「Pull Request」までの間、スプリントの文脈の `pr` が設計 PR になり、進捗の記録（`progress/records.py` の `sync_records`）が設計 PR の本文へ進捗を書く。設計 PR の本文の進捗のセクションが書かれても、スプリントの PR の進捗が今と変わらないことを確かめる
+- **費用**: 観測の対象の行 1 本につき、300 秒ごとに PR の番号と head を読む `gh api` を 1 回打ち、head が変わった PR の分だけ、ファイルを読む `gh api` と head を読み直す `gh api` を足す（決定 6）。設計の文書は行ごとに 1 回だけ読む（設計 PR の取得 1 回と、文書ごとの本文の取得）
 
 ### 代表のリポジトリでの振る舞い
 
@@ -440,8 +446,13 @@ sequenceDiagram
 | #4295 の 3・I1 | 2 本の行の設計の触る場所に同じファイルがあれば I13 が誤りを出す。`test_touch_overlap_errors_as_they_are_now` は設計の記録の無い計画で今のまま通る | 行の単位の判定で設計の値を無視すると落ちる |
 | #4295 の 4・I3 | 次の 3 つの行が、どれも触る場所の設定のまま判定され、`files: null` の記録が 1 回だけ残り、行の状態が変わらず、実装の入口で待たない。(a) 設計 PR に設計文書が無い行。(b) 2 つの課題のうち 1 つだけ設計の結果に行がある行。(c) 別ファイルの詳細設計があるのに地図の表を読めない行 | 読めないときに行を止める・空の並びで置き換えると落ちる。読めた課題や設計の結果だけで置き換えると (b)・(c) で落ちる |
 | #4295 の 5・I2 | 触る場所の外のファイルを変えた PR を観測しても、計画の検査の誤りが増えず、行の追加とレーンの変更が断られない | 変えたファイルを I13 へ入れると落ちる |
-| #4295 の 6 | 「重なりの知らせの組の規則」の 3 つの比べ方で、それぞれ重なったレーンとファイルを持つ `touches_overlap` が開く。相手は同じ計画の同時に動き得る行と、別の計画の実行中の行の両方を試す。両方の行が宣言の外で同じファイルを変えた組でも開く。同じ相対パスでもリポジトリの違う組では開かない | 別の計画を読まないと落ちる。変えたファイルを相手の宣言だけと比べると落ちる。リポジトリを比べないと落ちる |
+| #4295 の 6 | 「重なりの知らせの組の規則」の 3 つの比べ方で、それぞれ重なったレーンとファイルを持つ `touches_overlap` が開く。触る場所どうしの比べ方では、同じ計画の組でも I13 の誤りに加えて `source: design` の知らせが開く。相手は同じ計画の同時に動き得る行と、別の計画の実行中の行の両方を試す。両方の行が宣言の外で同じファイルを変えた組でも開く。同じ相対パスでもリポジトリの違う組では開かない | 別の計画を読まないと落ちる。変えたファイルを相手の宣言だけと比べると落ちる。リポジトリを比べないと落ちる |
 | I4 | 同じ組の重なりを 2 周続けて観測しても、知らせは 1 件のまま。開いた知らせがある組でファイルが増えると、前の知らせが閉じて全部のファイルの知らせが 1 件開く。閉じた知らせの後にファイルが増えると、増えた分を `added` に持つ知らせが 1 件開く。観測を打ち直しても件数が変わらない | 組で 2 回書くと落ちる。増えた分を書かないと落ちる。開いた知らせを残したまま開くと落ちる |
+| 決定 3（設計の重なりの待ち） | 同じ計画の 2 本の行の設計の記録が同じファイルを持つと、I13 の誤りに加えて `source: design` の `touches_overlap` が開き、閉じるまで両方の行に `implementation_wait` が待つ先を返す。閉じた後は足した `after` に従う。`source: diff` の知らせだけがある行には待つ先を返さない | 設計の重なりで知らせを書かないと落ちる。知らせを閉じる前に実装へ入れると落ちる。差分だけの重なりで待たせると落ちる |
+| 手順 1・2（設計文書の決め方） | 同じスプリントのブランチからマージされた別の PR があっても、ドキュメントレビューの工程の行の出力の `pr` の文書を読む。1 つの課題に `issue-7-design.md` と `issue-7-8-design.md` の両方の候補があり、両方に課題 7 の行があると、候補のパスを理由に持つ `files: null` になる | ブランチで PR を探すと落ちる。候補の片方を選ぶと落ちる |
+| 手順 1・3（読み直しの上限） | GitHub を読めない周が上限の回数続くと、理由付きの `files: null` が 1 回書かれ、それより後の周では設計 PR を読まない。行は実装の入口で待たない | 上限を持たないと読みの回数で落ちる |
+| I7 | `touches_found` を書いた直後に中断して打ち直すと、次の周で同じ組の知らせが 1 件開く。別の計画だけに書かれた新しい記録でも、自分の計画の知らせが開く。`ndf lanes set --touches` で設計の後の値を直すと、直した値と既にある PR の変えたファイルが比べられる | 比べた位置を記録と別のトランザクションで進めると落ちる。自分の計画の記録しか見ないと落ちる。設定の変更で比べないと落ちる |
+| 決定 6（head の一致） | ファイルの一覧を読む間に head が変わった PR は、その周では `from` に記録されず、次の周で新しい head の一覧が記録される | 一覧を前の head の組として記録すると落ちる |
 | I6・決定 6 | 単位の PR が 31 本以上あるスプリントで、31 本目の PR の変えたファイルも記録される。head が変わらない周では、ファイルを読む呼び出しが 0 回である。行が終わる直前に出た PR は、終わった後の観測で `final: true` の記録に入り、その記録まで計画が完了しない | 1 ページだけ読むと落ちる。head を確かめずにファイルを読むと呼び出しの数で落ちる。終わった行を観測から外すと落ちる |
 | 決定 7 | 知らせの `reorderable` に、まだ始まっていない同じ計画の行のレーンが載り、実装に入った行と別の計画の行のレーンは載らない | 効かないレーンを載せると落ちる |
 | #4295 の 7 | 採らない（決定 4）。スプリントの中のレビューの単位の待ちは #2037 の 2・3 の行が縛る | — |
@@ -458,7 +469,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4295 | 実装する | — | `plugins/ndf/src/ndf/progress/lane/types.py`、`plugins/ndf/src/ndf/progress/lane/fold.py`、`plugins/ndf/src/ndf/progress/lane/rules.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/src/ndf/progress/lane/machine.py`、`plugins/ndf/src/ndf/progress/plan/__init__.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/progress/plan/run_decide.py`、`plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/contracts/limits/parallel-run.touches.json`（新設）、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/development-workflow/references/parallel-checks.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/tests/progress/test_lane.py`、`plugins/ndf/tests/progress/test_plan_run.py`、`plugins/ndf/tests/progress/test_lane_machine.py` |
+| #4295 | 実装する | — | `plugins/ndf/src/ndf/progress/lane/types.py`、`plugins/ndf/src/ndf/progress/lane/fold.py`、`plugins/ndf/src/ndf/progress/lane/rules.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/src/ndf/progress/lane/machine.py`、`plugins/ndf/src/ndf/progress/plan/__init__.py`、`plugins/ndf/src/ndf/progress/plan/run.py`、`plugins/ndf/src/ndf/progress/plan/run_decide.py`、`plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/contracts/workflow/stages/document-review.json`、`plugins/ndf/contracts/limits/parallel-run.touches.json`（新設）、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/development-workflow/references/parallel-checks.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/tests/progress/test_lane.py`、`plugins/ndf/tests/progress/test_plan_run.py`、`plugins/ndf/tests/progress/test_lane_machine.py` |
 | #2037 | 実装する | — | `plugins/ndf/src/ndf/core/design_results.py`（新設）、`plugins/ndf/src/ndf/domains/materials/collect.py`、`plugins/ndf/src/ndf/core/plan/queue_decide.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/contracts/templates/impl.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/tests/core/plan/test_queue.py`、`plugins/ndf/tests/core/test_design_results.py`（新設）、`plugins/ndf/tests/route/test_templates.py`、`plugins/ndf/tests/progress/test_invoke_template_values.py`、`plugins/ndf/tests/domains/materials/test_materials_cli.py` |
 
 ## 未確認のまま残ること
