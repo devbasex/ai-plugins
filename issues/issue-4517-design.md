@@ -132,6 +132,7 @@ flowchart LR
 | --- | --- |
 | 1 つのモードだけ | そのモード。ただし `hotfix` は課題が 1 つのときだけで、2 つ以上なら `standard` |
 | `documentation` とほかのモード | 断る（分ける。今の規則のまま。タイプ「リポジトリの知識」も同じ） |
+| `documentation` のうち、タイプ「リポジトリの知識」とほかのタイプ | 断る（分ける）。社外の文書に要る工程（素材の収集と出典の確定・体裁レビュー）はスプリント全体で有効か無効かが決まり、課題ごとには選べないため。今の 6 つのタイプどうしは今のまま混ぜてよい |
 | それ以外の混ざり | 高いもの（`standard` > `legacy-refactor` > `operation` > `light`）。`hotfix` の課題は `standard` として数える。高さはモードの定義（`contracts/workflow/modes/*.json`）の `metadata.ndf.height` が持つ |
 
 ## 工程表
@@ -177,14 +178,15 @@ flowchart LR
 | 計画・実装（執筆）・コードレビュー・完了判定・Pull Request | 通す | 通す | — |
 | 確定仕様化 | 確定版を残す場合 | 飛ばす | 書いた文書そのものが `docs/` に残る |
 | クリーンアップ | 通す | 通す | — |
-| デプロイ | 生成と提出 | Pull Request のマージだけ。リリース承認ゲートは、マージ先が自動反映の本番チャネルのときだけ当たる（今の決まりのまま） | 配布物を作らない |
+| デプロイ | 生成と提出 | Pull Request のマージだけ。`release` の Skill がコードのモードと同じくブランチ戦略の設定（`release.deliveries`）を読み、リリース承認ゲートは、マージ先が自動反映の本番チャネルのときだけ当たる（今の決まりのまま）。詳細は詳細設計の「デプロイ」 | 配布物を作らない |
 | 体裁レビュー | 通す | 飛ばす | 生成物が無い |
 | リリース後テスト | 提出の後に確かめる経路がある場合 | 飛ばす | 配った版で確かめるものが無い |
 | 振り返り・棚卸し | 通す | 通す | — |
 
-- 飛ばす工程は、タイプで工程を変える条件の語 `outside_reader`（課題の判定の記録のタイプが「リポジトリの知識」なら偽、ほかは真）を、素材の収集と出典の確定・体裁レビュー・リリース後テスト・確定仕様化の工程の条件（`when`）に足して無効にする。条件の語はステートマシンから求める語（`run.py` の `TABLE_FACTS`）に足す。新しいモードの定義は作らない
-- 判定の記録の課題ごとの行は、`documentation` のときタイプ（`doc_type`）を持つ
-- 執筆の手引き（`document-drafting` の `type-*.md`）にこのタイプの 1 本を足す。正本の表（`document-types.md` の「何が `documentation` に当たるか」）の `README.md`・`docs/` の行を、新しく書く・組み直すときは `documentation`、既存の記述を直すときは `light` に分ける
+- 飛ばす工程は、タイプで工程を変える条件の語 `outside_reader`（課題の判定の記録のタイプがすべて「リポジトリの知識」なら偽、ほかは真）を、素材の収集と出典の確定・体裁レビュー・リリース後テスト・確定仕様化の工程の条件（`when`）に足して無効にする。条件の語はステートマシンから求める語（`run.py` の `TABLE_FACTS`）に足す。新しいモードの定義は作らない
+- 判定の記録の課題ごとの行は、`documentation` のときタイプ（`doc_type`）を持つ。値は執筆の手引きのファイル名と同じで、リポジトリの知識は `repo-knowledge` である。判定・検査・工程の条件・用語集で同じ値を使う
+- 判定したタイプは、設計・執筆・ドキュメント再構成・デプロイの工程へ判定の記録で渡り、各工程はタイプで使う参照を選ぶ（詳細設計の「工程へのタイプの渡し方」）
+- 執筆の手引き（`document-drafting` の `type-*.md`）にこのタイプの 1 本を足し、`document-drafting` の参照先の表と、`document-rebuild` の文書タイプと目的別ガイドの対応表に行を足す。正本の表（`document-types.md` の「何が `documentation` に当たるか」）の `README.md`・`docs/` の行を、新しく書く・組み直すときは `documentation`、既存の記述を直すときは `light` に分ける
 
 #### `light` の手順書の直しと振る舞いの確認
 
@@ -355,9 +357,9 @@ flowchart LR
 
 - **質問**: 判定が要求の時点の予測で外れたとき、どこで捕まえるか。パスの規則で機械に判定させるか
 - **選んだ案**: 工程「完了判定」は、差分を `mode-criteria.md` の基準で判定し直し、スプリントのモードより高ければ工程を失敗で返す。続きは今の「途中でモードが変わったとき」と「文書を省いたときの工程」の流し直しと同じで、新しいステートマシンで上げたモードから流す。`hotfix`・`operation`・`light` は設計承認ゲートを持たないので、ここが人の承認の前の最後の機械の確かめになる。次の 2 つを足す（詳細設計の「完了判定の照らし直しと流し直し」）
-  - **`hotfix` は高さで比べない。** 混ざったときに `hotfix` を `standard` の高さで数えるのはスプリントのモードを決めるときだけである。完了判定では、`hotfix` のスプリントの差分が `hotfix` と判定されなければ、高さによらず失敗で返し、差分のモードで流し直す。4 条件を外れた即時修正が、設計承認とマージ前のレビューを省いたままリリースへ進まないようにするためである
-  - **上げたモードを次の判定の下限にする。** 完了判定は差分のモードと根拠を出力 `mode_check` に書く。`mode_check` は工程を失敗にするのと同じトランザクションで工程の出力として残す。流し直しは `--carry` で元のステートマシンを渡し、`mode_check` を新しいスプリントの文脈の下限 `rerun_floor` として写す（判定の記録 `mode_judgment` とは別に持ち、判定済みとは扱わない）。要求が同じでも次の判定が低いモードへ戻らない。作業場所の工程は `--disable` で外し、その出力 `worktree`・`branch` を写し元から写すので、元のブランチの変更を持つ作業場所で続く
-  - **文書とコードの食い違いは高さで比べない。** `documentation` のスプリントの差分にコードが入った場合と、その逆の場合は、モードを上げずに失敗にし、分ける側の変更をブランチから外して起票する（今の「文書とコードは分ける」規則）
+  - **`hotfix` は高さで比べない。** 混ざったときに `hotfix` を `standard` の高さで数えるのはスプリントのモードを決めるときだけである。完了判定では、`hotfix` のスプリントの差分を部分ごとに判定し、すべての部分が `hotfix` でなければ、高さによらず失敗で返し、差分のモードで流し直す。別の目的の変更（`operation` や `light` の部分）が混ざったときも同じで、`hotfix` の部分を `standard` として数えるので `standard` 以上で流し直す。即時修正のまま出すなら、別の目的の部分を起票した課題へ移してから外す。4 条件を外れた即時修正や別の目的の変更が、設計承認とマージ前のレビューを省いたままリリースへ進まないようにするためである
+  - **上げたモードを次の判定の下限にする。** 完了判定は差分のモードと根拠を出力 `mode_check` に書く。`mode_check` は工程を失敗にするのと同じトランザクションで工程の出力として残す。流し直しは元のステートマシンを中止してから `--carry` で渡し、`mode_check` を新しいスプリントの文脈の下限 `rerun_floor` として写す（判定の記録 `mode_judgment` とは別に持ち、判定済みとは扱わない）。中止は失敗した工程も中止の状態に変えるので、写すかどうかは中止の直前の状態と最後の試行の出力を履歴から読んで決める。レーンの行から始めたスプリントでは、作成と同じトランザクションで行のスプリントの ID を新しいスプリントへ付け替える。要求が同じでも次の判定が低いモードへ戻らない。作業場所の工程は `--disable` で外し、その出力 `worktree`・`branch` を写し元から写すので、元のブランチの変更を持つ作業場所で続く
+  - **文書とコードの食い違いは高さで比べない。** 差分に文書とコードの両方があり、スプリントと違う側の部分が混ざった場合は、モードを上げずに失敗にし、分ける側の変更を起票した課題へ移してからブランチから外す（今の「文書とコードは分ける」規則）。同じファイルに両方の変更があれば、ファイルを丸ごと外さず、分割案と移す先を決めてから、移す範囲だけを移す。差分の全体がスプリントと反対側の場合（例: `light` で始めた `README.md` の全面改稿が `documentation` と判定された）は、外さずに分類を訂正し、変更をブランチに残したまま正しいモードで流し直して、そのモードの承認（この例では企画の承認）へ進む
 - 採らなかった案: パスの規則（`contracts/` を触れば `standard` など）だけで判定させる（値の変更と処理の変更は同じファイルの中で混ざり、パスでは分けられない）
 - **代償**: 完了判定で外れると、そこまでの工程を新しいステートマシンでやり直す。決定 4 のように同じステートマシンを作り直さないのは、完了判定の時点では低いモードで終えた工程（省いた設計・マージした実装の単位）があり、終えた工程は同じステートマシンで開き直せないためである。要求の工程の終わりには、そうした工程がまだ無い
 - 根拠: Value 13 / Value 1（MVV バージョン 11）
@@ -430,7 +432,12 @@ flowchart LR
 | 6 | 完了判定が差分を部分ごとに判定し、`standard` のスプリントにビジネス文書が混ざれば分けるよう返す | 差分全体の 1 つのモードだけで比べる |
 | 1 | リリース後レビューの打ち直しで、書いたか分からない課題とコメントを、自分が作った要素だけからページの終わりまで照合する | 30 件で打ち切る・作成者を見ない |
 | 4 | `hotfix` から `standard` へ変わったスプリントで、流し直した要求の工程が `mode_judgment` の無い出力で終わり、`mode_decided` が増えない | 判定の記録を再び求める |
-| 4 | 完了判定がモードを上げると、失敗した工程の出力に `mode_check` が残り、`--carry` で作った流し直しの文脈が `rerun_floor` と元の `branch` を持ち、`mode_judgment` を持たない | 失敗の事象だけを書く・下限を判定の記録に入れる |
+| 4 | 完了判定がモードを上げると、失敗した工程の出力に `mode_check` が残り、元を `ndf progress cancel` で中止してから `--carry` で作った流し直しの文脈が `rerun_floor` と元の `branch` を持ち、`mode_judgment` を持たない | 失敗の事象だけを書く・下限を判定の記録に入れる・中止の後の今の状態で下限を決める |
+| 4 | レーンの行から始めたスプリントを流し直すと、行のスプリントの ID が新しいスプリントへ付け替わり、新しいスプリントの完了が行に写る | 付け替えずに元の ID を残す |
+| 6 | `light` のスプリントで差分の全体が `documentation` なら、変更を外さず分類の訂正として `documentation` で流し直す | 全体を `split` にして外す |
+| 6 | 同じファイルが文書の部分とコードの部分の両方に出ると、そのファイルを丸ごと外す一覧に入れない | パスだけで外す |
+| 6 | `hotfix` のスプリントの差分に `operation` か `light` の部分が混ざると、完了判定が `standard` で失敗にする | 最大の部分だけで比べる |
+| 9 | リポジトリの知識と提案のタイプの課題を同じスプリントに入れると、要求の工程の終わりでも計画の行の登録でも断る | どちらかの時点で混在を通す |
 | 5 | レーンの起動が、行の判定から決めたモードを `--mode` に渡し、判定が無い行を組まない | `standard` を補う |
 | 6 | 課題のモードの組ごとに、スプリントのモードが表のとおりになる（`hotfix` 2 件は `standard`、`documentation` の混ざりは断る、下限があれば下限より下げない） | 高い方の比べ方を逆にする・下限を無視する |
 | 6 | 完了判定の照らし直しが、`hotfix` のスプリントで差分が `standard` なら失敗にする | 高さだけで比べる |
@@ -444,7 +451,7 @@ flowchart LR
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4517 | 実装する | — | `plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/mode-criteria.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/loop.md`、`plugins/ndf/skills/development-workflow/references/operation-run.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/out-of-scope/SKILL.md`、`plugins/ndf/skills/quality-gates/SKILL.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/agents/worker.md`、`plugins/ndf/contracts/templates/fix.json`（削除）、`plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/contracts/workflow/modes/hotfix.json`（新設）、`plugins/ndf/skills/development-workflow/references/document-types.md`、`plugins/ndf/skills/document-drafting/references/type-repo-knowledge.md`（新設）、`plugins/ndf/contracts/workflow/stages/document-sources.json`、`plugins/ndf/contracts/workflow/stages/layout-review.json`、`plugins/ndf/contracts/workflow/stages/plan-to-spec.json`、`plugins/ndf/contracts/workflow/stages/release-verification.json`、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/workflow/stages/post-release-review.json`（新設）、`plugins/ndf/contracts/workflow/stages/requirements.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/judgment.py`（新設）、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/tests/progress/test_judgment.py`（新設）、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/progress/test_lane_launch.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_post_release.py`（新設） |
+| #4517 | 実装する | — | `plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/mode-criteria.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/loop.md`、`plugins/ndf/skills/development-workflow/references/operation-run.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/out-of-scope/SKILL.md`、`plugins/ndf/skills/quality-gates/SKILL.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/agents/worker.md`、`plugins/ndf/contracts/templates/fix.json`（削除）、`plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/contracts/workflow/modes/hotfix.json`（新設）、`plugins/ndf/skills/development-workflow/references/document-types.md`、`plugins/ndf/skills/document-drafting/references/type-repo-knowledge.md`（新設）、`plugins/ndf/skills/document-drafting/SKILL.md`、`plugins/ndf/skills/document-rebuild/references/related-skills.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/implement.json`、`plugins/ndf/contracts/workflow/stages/document-rebuild.json`、`plugins/ndf/contracts/workflow/stages/deploy.json`、`plugins/ndf/contracts/workflow/stages/document-sources.json`、`plugins/ndf/contracts/workflow/stages/layout-review.json`、`plugins/ndf/contracts/workflow/stages/plan-to-spec.json`、`plugins/ndf/contracts/workflow/stages/release-verification.json`、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/workflow/stages/post-release-review.json`（新設）、`plugins/ndf/contracts/workflow/stages/requirements.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/judgment.py`（新設）、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/tests/progress/test_judgment.py`（新設）、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/progress/test_lane_launch.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_post_release.py`（新設） |
 
 ファイルの役割・関数の責務・異常系は詳細設計（[issue-4517-design-detail.md](./issue-4517-design-detail.md)）にある。
 

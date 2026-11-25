@@ -8498,7 +8498,7 @@
       "meaning": "documentation のタイプの 1 つ。docs/ と README.md を新しく書く・組み直す仕事で、読み手はこのリポジトリで作業するエンジニアと AI。素材の収集と出典の確定・体裁レビュー・確定仕様化・リリース後テストを通らない。既存の記述を直すだけなら light",
       "source": "",
       "pending_source": "issues/issue-4517-design.md",
-      "code": "repo_knowledge"
+      "code": "repo-knowledge"
     }
   ]
 }
