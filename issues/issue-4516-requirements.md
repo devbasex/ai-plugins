@@ -20,7 +20,7 @@ NDF は、開発の作業を始めるたびに設定が古くなっていない�
 - 解析の書き出し（`ndf project write`。[`write.py`](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/src/ndf/domains/project/write.py)）は、測った値と回答を `.ndf/project.json` へ書く。同じファイルのキー `analysis` に、次の 2 種類の値も毎回書く
   - 解析の記録: 解析器のバージョン・解析した時刻・入力のファイルのハッシュ・ブランチの構成。設定が古くなっていないかを確かめる仕組み（`ndf project check`）が、解析器のバージョン・入力のファイルのハッシュ・ブランチの構成を今のリポジトリと比べる。解析した時刻は、どの仕組みも読まない。入力のファイルは、解析が読むファイル（CI のワークフローの定義・`pyproject.toml` などの依存とテストの設定・`AGENTS.md` などの指示書）である。ブランチの構成は、リモートの既定ブランチと、`main`・`develop` などの決まった名前のブランチがリモートにあるかである
   - 書いた値の指紋（`analysis.written`）: 解析が書いた設定の値のハッシュで、項目（`languages`・`ci` など）ごとに 1 つある。書き出しはこれで、人が手で直した値か解析が書いた値かを見分け、人が直した値を書き換えない（[project-analysis.md の「書き出しの規則」](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/skills/development-workflow/references/project-analysis.md#書き出しの規則)）
-- 設定の項目の中に、実行ごとに変わる計測値と、どの仕組みも読まない値が入っている（`plugins/ndf/src`・`plugins/ndf/skills`・`scripts`・`experimental` を `grep` で確かめた）
+- 設定の項目の `languages` と `ci` の中に、実行ごとに変わる計測値と、どの仕組みも読まない値が入っている。比べるために、読む仕組みのある `required_checks` も下の表に並べる（`plugins/ndf/src`・`plugins/ndf/skills`・`scripts`・`experimental` を `grep` で確かめた）
 
   | 値 | キー | 読む仕組み |
   | --- | --- | --- |
@@ -28,7 +28,7 @@ NDF は、開発の作業を始めるたびに設定が古くなっていない�
   | CI のワークフローごとの直近の実行時間 | `ci.workflows[].wall_seconds` | 無い |
   | CI のワークフローごとのジョブ数（定義から数えた数と直近の実行のジョブ数の大きい方） | `ci.workflows[].jobs` | 無い |
   | CI のワークフローの一覧と CI の種類 | `ci.workflows[].path`・`ci.provider` | 無い |
-  | 必須のチェックの名前 | `ci.required_checks` | ある（リファクタリングの最終ゲート・`merged` の手順） |
+  | 必須のチェックの名前 | `ci.required_checks` | ある（リファクタリングの工程の最後に CI の結果を待つ処理と、マージの後片付けの手順が、待つチェックの名前として読む） |
 
 - 解析は、ワークフローの実行時間とジョブ数のために、GitHub の API で直近の成功の実行の一覧・実行ごとのジョブ・テストの結果のファイル（成果物）を取りに行く
 - テストの所要時間（`test_duration`）は、設定のスキーマで非推奨になっていて、書き出しはもう書かない。ただし解析は今も、CI の実行と NDF の実行の記録からテストの所要時間を測っている。古い書き出しが書いた値が、このリポジトリの `.ndf/project.json` に残っている
@@ -69,7 +69,7 @@ NDF は、開発の作業を始めるたびに設定が古くなっていない�
 ## 対象範囲
 
 含む:
-- 計測値（`languages[].files`・`ci.workflows[].wall_seconds`・実行から数えたジョブ数）・テストの所要時間・ワークフローの一覧（`ci.workflows`）・CI の種類（`ci.provider`）を、測るのも書くのもやめること。取得のためだけにある処理（GitHub の API の呼び出し・NDF の実行の記録の読み取り・前の実行時間の引き継ぎ）を消すこと
+- 計測値（`languages[].files`・`ci.workflows[].wall_seconds`・実行から数えたジョブ数）・テストの所要時間・ワークフローの一覧（`ci.workflows`）・CI の種類（`ci.provider`）を、測るのも書くのもやめること。取得のためだけにある処理（GitHub の API の呼び出し・NDF の実行の記録の読み取り・前の実行時間の引き継ぎ。新しい解析で実行時間を測れなかったワークフローに前の値を残す処理）を消すこと
 - 解析の記録のうち、読む仕組みのある値だけを `.ndf/analysis/project.json` へ書くこと。解析した時刻は書かない
 - `.ndf/analysis/` を git から外すこと
 - 設定が古くなっていないかの確かめと、人が直した値を書き換えない決まりを、新しい置き場の上で今までどおり働かせること
@@ -77,7 +77,7 @@ NDF は、開発の作業を始めるたびに設定が古くなっていない�
 - 設定の形の定義（スキーマ）・置き場の一覧・`project-analysis.md`・設定とファイルの説明の文書（`ndf-settings.md`・`files.md`）・確定仕様を、新しい形に合わせること
 
 含まない:
-- 解析が書くほかの項目（`languages` の `name`・`frameworks`・`version`、`services`・`checks` など）の読み手の棚卸し。#4521 で扱う
+- 解析が書くほかの項目（`languages` の `name`・`frameworks`・`version`、`services`・`checks` など）について、その値を読むプログラムや手順があるかを調べ、無ければ測るのをやめること。課題 #4521（解析が書く項目を、読み手のあるものだけにする）で扱う
 - ブランチ戦略の設定（`branch_strategy`）を書くコマンド（`ndf project branch-strategy`）の変更
 - このリポジトリの `.ndf/project.json` にある利用者の未コミットの変更を、この課題の中で扱うこと。実装のリリースの後、利用者が書き出しをやり直せば片付く
 
@@ -92,7 +92,9 @@ NDF は、開発の作業を始めるたびに設定が古くなっていない�
 - [ ] 2. 書き出しの後、`.ndf/project.json` のキー `analysis` は `written`（書いた値の指紋）だけを持つ
 - [ ] 3. 書き出しの後、`.ndf/project.json` に `languages[].files`・`ci.workflows`・`ci.provider`・`test_duration` が無い。`ci` は `required_checks` だけを持つ
 - [ ] 4. `ndf project measure` の結果に、ファイル数・ワークフローの一覧・実行時間・ジョブ数・テストの所要時間が無い。測定の間に GitHub の API を呼ぶのは、必須のチェック（`rules/branches`）・閉じた PR（`pulls`）・課題（`issues`）の 3 か所だけで、実行の一覧・ジョブ・成果物（`actions/...`）を呼ばない
-- [ ] 5. 解析の記録は `.ndf/analysis/project.json` に書かれ、このファイルに `git check-ignore` が真を返す。記録が持つキーは、読む仕組みのあるもの（`version`・`analyzer`・`inputs`・`branches`、書き出しの途中の印 `pending`）だけで、解析した時刻を持たない。書き出しが `.ndf/analysis/` の下へ何かを書こうとするとき、次のどれかに当たれば、既存のファイルを変えずに終了コード 1 で止まり、理由を出す: 既にある `.ndf/analysis/.gitignore` が記録のパスを無視しない・記録が git に追跡されている・`.ndf/analysis/.gitignore` を作り直そうとしたが、そのパスか `.ndf/analysis/` の下のほかのファイルが git に追跡されている。書くものが無い書き出しは確かめずに終了コード 0 で終わる（記録を書かないので、記録が差分に混ざることは無い）
+- [ ] 5. 解析の記録は `.ndf/analysis/project.json` に書かれ、このファイルに `git check-ignore` が真を返す
+- [ ] 5a. 記録が持つキーは、読む仕組みのあるもの（`version`・`analyzer`・`inputs`・`branches`、書き出しの途中の印 `pending`）だけで、解析した時刻を持たない
+- [ ] 5b. 書き出しが `.ndf/analysis/` の下へ何かを書こうとするとき、次のどれかに当たれば、既存のファイルを変えずに終了コード 1 で止まり、理由を出す: 既にある `.ndf/analysis/.gitignore` が記録のパスを無視しない・記録が git に追跡されている・`.ndf/analysis/.gitignore` を作り直そうとしたが、そのパスか `.ndf/analysis/` の下のほかのファイルが git に追跡されている。書くものが無い書き出しは確かめずに終了コード 0 で終わる（記録を書かないので、記録が差分に混ざることは無い）
 - [ ] 6. 書き出しが書く、git で追跡するファイルは `.ndf/project.json` だけである（`.ndf/.gitignore`・根の `.gitignore` を書かない）
 - [ ] 7. 根の `.gitignore` に `!.ndf/analysis/` のような否定のパターン（無視を打ち消す行）があっても、`.ndf/analysis/project.json` は git から外れたままになる
 - [ ] 8. `ndf project check` は `.ndf/analysis/project.json` の解析の記録で、設定が古くなっていないかを確かめる。解析器のバージョン・入力のファイル・ブランチの構成のどれかが変わったら「古い」、変わらなければ「新しい」と、今と同じ判定を返す

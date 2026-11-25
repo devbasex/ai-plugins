@@ -9,7 +9,7 @@
 ```text
 .ndf/project.json                  このリポジトリの追跡している設定（スキーマの変更と同じコミットで移す）
 docs/specifications/
-├── project-decl-ci-representative-run.md -   消した振る舞い（代表の実行の選び方）だけを書いた確定仕様
+├── project-decl-ci-representative-run.md -   消した振る舞い（CI の実行時間を測る実行の選び方）だけを書いた確定仕様
 └── README.md                                  上の行を消す
 plugins/ndf/
 ├── src/ndf/domains/project/
@@ -52,7 +52,7 @@ plugins/ndf/
 | `plugins/ndf/contracts/domains/locations.json` | 変更 | 項目 `measured` を消し、`{"id": "analysis", "root": "repo", "path": ".ndf/analysis", "tracked": false}` を足す | 無し | — | — |
 | `plugins/ndf/contracts/domains/ndf-files.json` | 変更 | 行 `project-measured` を消す。行 `project-analysis`（`location` は `analysis`・`path` は `project.json`・`kind` は `record`・`tracked` は偽・`ends` は `replaced`・`keys` は `analyzer`・`inputs`・`branches`・`pending`）と、行 `project-analysis-ignore`（`path` は `.gitignore`・`kind` は `record`・`ends` は `kept`）を足す。summary の「実行で変わる計測値は追跡する設定へ書き戻さず、状態の保存先へ書く」を「読み手の無い計測値は保存しない。解析の記録は追跡しない保存先へ書く」へ | 無し | — | — |
 | `plugins/ndf/docs/contracts/ndf-settings.md`・`files.md` | 変更 | 生成し直す | `spec_render` | — | — |
-| `plugins/ndf/skills/development-workflow/references/project-analysis.md` | 変更 | 「3 手」の実行時間と代表の実行の段落を消す。「書き出しの規則」の実行時間の行を消し、指紋が設定に残ることを書く。「`.ndf/` の追跡」の表に解析の記録の行を足す。移行の 1 回目に出る差分をコミットする手順を書く | 無し | — | — |
+| `plugins/ndf/skills/development-workflow/references/project-analysis.md` | 変更 | 「3 手」（measure・回答・write の手順の節）の、実行時間と、それを測る実行の選び方の段落を消す。「書き出しの規則」の実行時間の行を消し、指紋が設定に残ることを書く。「`.ndf/` の追跡」の表に解析の記録の行を足す。移行の 1 回目に出る差分をコミットする手順を書く | 無し | — | — |
 | `docs/specifications/project-decl-ci-representative-run.md` | 削除 | 消した振る舞いだけを書いた確定仕様 | 無し | — | — |
 | `docs/specifications/README.md` | 変更 | 上の行を消す | 無し | — | — |
 | `plugins/ndf/tests/domains/project/test_analysis_record.py` | 新設 | `analysis_record` の単体テスト | `analysis_record` | — | — |
