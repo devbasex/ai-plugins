@@ -723,7 +723,7 @@ def _tree(repo: Path) -> tuple[bytes | None, dict[str, bytes]]:
     return (index.read_bytes() if index.exists() else None), contents
 
 
-@pytest.mark.parametrize("command, existing_ignore", [("ls-files", None), ("check-ignore", None), ("check-ignore", "*\n")])
+@pytest.mark.parametrize("command, existing_ignore", [("ls-files", None), ("check-ignore", "*\n")])
 def test_git_that_cannot_tell_leaves_the_tree_as_it_was(repo, tmp_path, monkeypatch, capsys, last_result, command, existing_ignore):
     """索引を読めないとき・除外を確かめられないとき（`.gitignore` を作る回も含む）に、何も書かずに止まる。"""
     ignore = files.path(repo, "project-analysis-ignore")
@@ -737,6 +737,27 @@ def test_git_that_cannot_tell_leaves_the_tree_as_it_was(repo, tmp_path, monkeypa
     assert summary.startswith("git が .ndf/analysis/ の追跡と無視を確かめられない: ") and summary.endswith("fatal: index file corrupt")
     assert calls == (list(GUARDS) if command == "ls-files" else ["check-ignore"])
     assert _tree(repo) == before
+
+
+@pytest.mark.parametrize("with_ignore", [True, False])
+def test_an_unanswered_ignore_check_stops_before_any_write(tmp_path, monkeypatch, with_ignore):
+    """計画の `git check-ignore` が答えられなければ、`.gitignore` を作る回も作らない回も、git を起動せず何も書かずに止まる。"""
+
+    def no_git(self, *args):
+        raise AssertionError(f"git を起動した: {args}")
+
+    monkeypatch.setattr(git.Git, "attempt", no_git)
+    record = files.path(tmp_path, "project-analysis")
+    planned = [write.File(record, files.relpath("project-analysis"), None, "{}\n", "解析の記録")]
+    if with_ignore:
+        ignore = files.path(tmp_path, "project-analysis-ignore")
+        planned.insert(
+            0, write.File(ignore, files.relpath("project-analysis-ignore"), None, analysis_record.IGNORE_TEXT, "git から外す設定")
+        )
+    plan = write.Plan(planned, [], write.Ignored({}, "fatal: beyond a symbolic link"))
+    with pytest.raises(write.WriteError, match="確かめられない: fatal: beyond a symbolic link"):
+        cli._commit(tmp_path, plan)
+    assert not (tmp_path / ".ndf").exists()
 
 
 def test_a_held_lock_stops_the_write_without_reading(repo, tmp_path, monkeypatch, capsys, last_result):

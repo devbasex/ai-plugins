@@ -182,7 +182,7 @@ plugins/ndf/
   - 副作用: 無し（書くのは `cli._write`）
 - `_write` の手順
   - 最初に `check.repo_dirs` を 1 回だけ呼び、作業場所・メインディレクトリ・git の共通ディレクトリを `RepoDirs` として求める。これは `--dry-run` でも行う。worktree から打ったときに、メインディレクトリの設定と記録から予定を作るためである。ロックのパスと `_inputs` は、この解決済みの値を使い、git の共通ディレクトリを求め直さない。今の書き出しも `check.repo_dirs` を 1 回呼んでいるので、git の起動の回数は今と同じである
-  - `--dry-run` のとき: 上の解決の後、ロックを取らずに `_inputs(args, dirs)` と `write.plan` で予定を作り、表示して終える。省くのは、ロック・`git ls-files`・ファイルの書き込みの 3 つである。`write.plan` の `git check-ignore` は設定の除外の案内に使うので、`--dry-run` でも打つ
+  - `--dry-run` のとき: 上の解決の後、ロックを取らずに `_inputs(args, dirs)` と `write.plan` で予定を作り、表示して終える。省くのは、ロック・`git ls-files`・ファイルの書き込みの 3 つである。`write.plan` の `git check-ignore` は設定の除外の案内に使うので、`--dry-run` でも打つ。ただし、その答え（記録が無視されない・git が判定できない）では止めず、予定を示して終了コード 0 で終える
   - `--dry-run` でないとき: 設定と記録を読む前に `FileLock(strategy_write.lock_file(dirs.common), timeout=limits.seconds("branch-strategy.write-lock"))` を取る。`_inputs(args, dirs)`（既存の設定と記録の読み込み）・`write.plan`・下の書き込みは、すべてこのロックの中で行う。ロックは最後のファイルを書いた後か、途中で止めたときに放す
   - `Plan.files` が空のとき: `git ls-files` を打たず、計画の `git check-ignore` の答えでも止めずに、終了コード 0 で終わる（`check.repo_dirs` の git・ロック・`write.plan` の `git check-ignore` は、計画を作るまでに通るので、この回も打つ）
   - `Plan.files` に `.ndf/analysis/` の下のファイル（`.gitignore`・途中の印・記録のどれか。`.gitignore` だけでもよい）があるとき:
