@@ -105,6 +105,14 @@
             "type": "object",
             "description": "回答ごとのコマンド（wait・queue の plan）"
           },
+          "presentation_path": {
+            "type": "string",
+            "description": "承認待ちの routes と同じ提示の承認資料の絶対パス（wait の plan）"
+          },
+          "production": {
+            "type": "boolean",
+            "description": "この承認でマージが本番へ反映され得るか（wait の plan。ステップが示したときだけ）"
+          },
           "number": {
             "type": "integer",
             "description": "PR の番号（pr）"
