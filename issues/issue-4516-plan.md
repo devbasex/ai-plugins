@@ -14,22 +14,22 @@
 
 ### Task 1: 読み手の無い値を測るのをやめる
 
-- **対象ファイル:** `measure_ci.py`・`measure_repo.py`・`cli.py`（`_ci_items`）・`write.py`（`p_number`・`_carry_walls` とその呼び出し）・`check.py`（`ANALYZER` を 4 へ）・設定のスキーマ（契約とそのコピー）・`docs/specifications/project-decl-ci-representative-run.md` と `docs/specifications/README.md` の行・`test_project_measure.py`・`test_project_cli.py`
-- **変更内容:** 詳細設計書の「測定」の節のとおり。`ci` は `required_checks` だけ、言語の行に `files` を書かず名前の順に並べる。GitHub の API は `rules/branches`・`pulls`・`issues` だけを呼ぶ。スキーマは、この単位では `Language.files` と `Ci.provider`・`Ci.workflows` を必須から外すだけにする（追跡している `.ndf/project.json` に残る旧い値を、単位 2 で移すまで受け付けるため。消すのは単位 2）
+- **対象ファイル:** `measure_ci.py`・`measure_repo.py`・`cli.py`（`_ci_items`）・`write.py`（`p_number`・`_carry_walls` とその呼び出し）・`check.py`（`ANALYZER` を 4 へ）・設定のスキーマ（契約とそのコピー）・`docs/specifications/project-decl-ci-representative-run.md` と `docs/specifications/README.md` の行・`project-analysis.md`（測るものと書き出しの規則の節）・`test_project_measure.py`・`test_project_cli.py`
+- **変更内容:** 詳細設計書の「測定」の節のとおり。`ci` は `required_checks` だけ、言語の行に `files` を書かず名前の順に並べる。GitHub の API は `rules/branches`・`pulls`・`issues` だけを呼ぶ。スキーマは、この単位では `Language.files` と `Ci.provider`・`Ci.workflows` を必須から外すだけにする（追跡している `.ndf/project.json` に残る旧い値を、単位 2 で移すまで受け付けるため。消すのは単位 2）。`project-analysis.md` は、この単位で測らなくなる値を案内しないように直す。例の手順 2 から CI の JUnit の合計とワークフローを外し、CI の実行時間を測る実行の選び方の段落を、測るものが必須のチェックだけであることと、テストの走らせ方を回答で決めることの説明に置き換え、「書き出しの規則」から実行時間を引き継ぐ行を消す
 - **満たす受け入れ条件:** 4（3 のうち測定の側）
 - **進め方:** 失敗するテスト（`gh` の呼び出しのパスが 3 つだけ・言語の行にファイル数が無く名前の順）→ 消す・直す → 整理
 
 ### Task 2: 解析の記録を `.ndf/analysis/project.json` へ分ける
 
-- **対象ファイル:** `analysis_record.py`（新設）・`items.py`・`check.py`（`load`・`judge`）・`write.py`（`Inputs`・`merge_item`・`merge_project`・`_replace_ours`・`_declare_ci_tests`・`File`・`plan`、`_same_but_time` の削除）・`cli.py`（`_inputs` の記録の読み込み・`_print_write` の要約）・設定のスキーマ（旧い形のキーを消す）と `internal/project-analysis.schema.json`（新設）・`locations.json`・`ndf-files.json`・生成する `ndf-settings.md`・`files.md`・追跡している `.ndf/project.json`・`test_analysis_record.py`（新設）・`test_project_cli.py`
-- **変更内容:** 詳細設計書の「解析の記録」「書き出し」「判定と読み込み」の節のとおり。`.gitignore` の作成・途中の印・`written_digest` を含む。追跡している `.ndf/project.json` は、設計書の決定 4 の移し方（`strip_legacy` と指紋の書き直し）で、スキーマの変更と同じコミットで移す
+- **対象ファイル:** `analysis_record.py`（新設）・`items.py`・`check.py`（`load`・`judge`）・`write.py`（`Inputs`・`merge_item`・`merge_project`・`_replace_ours`・`_declare_ci_tests`・`File`・`plan`、`_same_but_time` の削除）・`cli.py`（`_inputs` の記録の読み込み・`_print_write` の要約）・設定のスキーマ（旧い形のキーを消す）と `internal/project-analysis.schema.json`（新設）・`locations.json`・`ndf-files.json`・生成する `ndf-settings.md`・`files.md`・追跡している `.ndf/project.json`・`project-analysis.md`（記録の置き場に関わる記述）・`test_analysis_record.py`（新設）・`test_project_cli.py`
+- **変更内容:** 詳細設計書の「解析の記録」「書き出し」「判定と読み込み」の節のとおり。`.gitignore` の作成・途中の印・`written_digest` を含む。`project-analysis.md` には、設定に指紋が残ること・「`.ndf/` の追跡」の表の解析の記録の行・移行の 1 回目に出る差分をコミットする手順を書く。追跡している `.ndf/project.json` は、設計書の決定 4 の移し方（`strip_legacy` と指紋の書き直し）で、スキーマの変更と同じコミットで移す
 - **満たす受け入れ条件:** 1・2・3・5・5a・6・8・9・10・11・12・13・14・15・16
 - **進め方:** 失敗するテスト（2 回目の書き出しで何も書かない・旧い形を「古い」と判定・移行で持ち主の見分けが変わらない）→ 実装 → 整理
 
 ### Task 3: 記録が git に入らないことを確かめ、書き出しをロックで守る
 
-- **対象ファイル:** `cli.py`（`_write` の `git ls-files`・`git check-ignore`・ロック）・`check.py`（`repo_dirs` の `RepoDirs`）・`strategy_write.py`（`lock_file`）・`strategy_cli.py`・`contracts/limits/branch-strategy.write-lock.json`・`project-analysis.md`・`test_project_cli.py`
-- **変更内容:** 詳細設計書の `_write` の手順・異常系の表・`lock_file`・`repo_dirs` のとおり。`project-analysis.md` は詳細設計書の地図の行のとおり直す
+- **対象ファイル:** `cli.py`（`_write` の `git ls-files`・`git check-ignore`・ロック）・`check.py`（`repo_dirs` の `RepoDirs`）・`strategy_write.py`（`lock_file`）・`strategy_cli.py`・`contracts/limits/branch-strategy.write-lock.json`・`project-analysis.md`（ロックと、記録が git に無視されることの確認に関わる記述）・`test_project_cli.py`
+- **変更内容:** 詳細設計書の `_write` の手順・異常系の表・`lock_file`・`repo_dirs` のとおり。`project-analysis.md` には、書き出しがロックを待つことと、記録が git に無視されない状態では書かずに止まることを書く。測定の記述は単位 1、記録の置き場の記述は単位 2 で直す
 - **満たす受け入れ条件:** 5b・7・17
 - **進め方:** 失敗するテスト（追跡済みの記録・否定のパターン・`git` の 128・ロックの上限 0 秒）→ 実装 → 整理
 

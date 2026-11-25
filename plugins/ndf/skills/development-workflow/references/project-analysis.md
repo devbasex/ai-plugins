@@ -7,8 +7,8 @@
 ## 例: carmo-system-console で手順 0 を通す
 
 1. `ndf project check` が 3 で終わる（`.ndf/project.json` が無い）
-2. conductor が `ndf project measure --out "$TMP/measure.json"` を打つ。言語（PHP 8.3・Laravel 10）・CI の JUnit の合計・
-   ワークフロー・必須のチェック・compose の `mysql` を「測った値」として、テストの走らせ方・課題の SSOT・
+2. conductor が `ndf project measure --out "$TMP/measure.json"` を打つ。言語（PHP 8.3・Laravel 10）・必須のチェック・
+   compose の `mysql` を「測った値」として、テストの走らせ方・課題の SSOT・
    NDF の方針の検査を「質問」として、候補と根拠を付けて返す
 3. conductor が質問に回答する。`AGENTS.md` の `docker compose exec app ./vendor/bin/phpunit` の行を根拠にテストを
    「PHPUnit・`app` のコンテナ越し」と決め、回答のファイルを書く
@@ -50,11 +50,10 @@ ndf project write --measure "$TMP/measure.json" --answers "$TMP/answers.json"; e
 `measure` の締め切りは 120 秒（`--budget`）で、`gh` の 1 回の呼び出しは残りと 30 秒の小さい方で打ち切る。
 `measure` が書くのは `--out` だけで、リポジトリの中へは置けない。`gh` へは読む要求（`gh api --method GET`）だけを渡す。
 
-CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-steps`・`ci-junit` は、ワークフローごとの代表の run から測る。
-代表の run は、直近 50 件の成功の run のうち、そのワークフローの新しい順に最大 5 件を見て、ジョブを飛ばしていない最新の 1 件である。
-ジョブを飛ばした run は、conclusion が `skipped` のジョブを 1 つ以上含む run で、ワークフローやジョブの名前では判定しない。
-5 件ともジョブを飛ばしていたワークフローは、壁時計を持たない行になり、注記に `飛ばしていない run が無い: <パス>（候補 <n> 件）` が出る。
-候補のジョブの取得が時間切れになったら、そのワークフローから後は壁時計を持たない行になり、注記に `候補のジョブを取れない（時間切れ）: <パス>` が出る。
+**CI について測るのは、既定ブランチの必須のチェック（`ci.required_checks`）だけである。**
+`gh` で呼ぶ API は、必須のチェック（`rules/branches`）・閉じた PR（`pulls`）・課題（`issues`）の 3 つだけである。
+CI の実行時間・JUnit の合計・ワークフローの一覧・言語ごとのファイル数は、読む仕組みが無いので測らない（ https://github.com/devbasex/ai-plugins/issues/4516 で測るのをやめた）。
+テストの走らせ方（`test`）は測った値でなく質問で、下の「回答方」の表のとおり、指示書・README の走らせ方の行とワークフローのファイルから回答する。
 
 ## 回答方
 
@@ -94,7 +93,6 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
 - 手で書いた値は変えない。変えるのは、キーが無い項目と、前の `write` が書いた値のまま（`analysis.written` の指紋が一致する）の項目だけ。
   解析の値と食い違えば、出力に `設定 <値> / 解析 <値>` の行が出る
 - 新しい解析で不明になった項目は、前の値を残す
-- `ci` のワークフローの行に新しい解析の壁時計が無ければ、前の解析の同じパスの行の壁時計を残し、出力に `ci#<パス>: 不明（新しい解析に壁時計が無い）（前の値を残した）` の行が出る
 - 秘密の形の値は、手で書いた値でも捨てて `{"unknown": "秘密の形"}` にする。値は設定・差分・出力のどれにも出ない
 - ブランチ名とブランチ戦略（`branch_strategy`）は書かない。書くのは `ndf project branch-strategy` だけである
 - 解析の結果が前と同じなら、ファイルを書かない
