@@ -63,7 +63,7 @@ flowchart LR
 - `.ndf/project.json` には、設定の値と書いた値の指紋（`analysis.written`）だけが残る。`ci` は `required_checks` だけを持ち、`languages` は名前の順に並ぶ
 - 解析の記録は、読む仕組みのある値（形のバージョン・解析器のバージョン・入力のファイルのハッシュ・ブランチの構成・記録に対応する設定の指紋・書き出しの途中の印）だけを `.ndf/analysis/project.json` に書く。解析した時刻は書かない。書き出しは、`.ndf/analysis/.gitignore` が無いときだけ中身 `*` で作り、ディレクトリ全体を git から外す（pytest・ruff のキャッシュと同じ形）。記録を書く前に、記録のパスが実際に git に無視されることを `git check-ignore` で確かめ、無視されなければ止まる。どの除外の設定で無視されるかは問わない
 - 書き出しは、設定を書く前に前の記録へ途中の印を付け、最後に印の無い記録を書く。途中の印を付けた後に止まれば、次の判定は必ず「古い」になる。印を付ける前に止まれば、設定と記録は前のまま揃っている
-- 複数の worktree から同時に書き出しても、設定と記録が別々の解析の組み合わせにならないように、書き出しは既存の設定と記録を読む前に、メインディレクトリ単位の錠を取り、最後の記録を書き終えるまで持つ。錠は `ndf project branch-strategy` が `.ndf/project.json` を書くときの錠と同じものを使う
+- 複数の worktree から同時に書き出しても、設定と記録が別々の解析の組み合わせにならないように、書き出しは既存の設定と記録を読む前に、メインディレクトリ単位のロックを取り、最後の記録を書き終えるまで持つ。ロックは `ndf project branch-strategy` が `.ndf/project.json` を書くときのロックと同じものを使う
 - `ndf project check` は `.ndf/analysis/project.json` の解析の記録で判定する。無い・読めないときは「古い」と判定し、開発の作業の始めの手順に解析をやり直させる。記録に対応する設定の指紋が今の `.ndf/project.json` と合わないとき（設定だけを `git restore` で戻したときなど）も「古い」と判定する
 - 既存の `.ndf/project.json` に残る旧い形のキーも「古い」と判定し、次の書き出しが取り除く。項目ごとに人が直したか解析が書いたかは、値を取り除く前の値のハッシュを前の指紋と比べて見分ける
 
@@ -89,13 +89,13 @@ flowchart LR
 | I1 | 設定 | 書き出しの後、`.ndf/project.json` に `analysis` の `written` 以外のキー・`languages[].files`・`ci.workflows`・`ci.provider`・`test_duration` が無い | 書き出しがスキーマの検査（`additionalProperties`）で止まる |
 | I2 | 設定 | 解析は読み手の無い値を測らない。`ndf project measure` の結果に、ファイル数・ワークフローの一覧・実行時間・ジョブ数・テストの所要時間が無く、GitHub の API は `rules/branches`・`pulls`・`issues` だけを呼ぶ | テストが落ちる |
 | I3 | 設定 | 解析が書いたかの見分けは、旧い形の値を取り除く前の値と前の指紋で行う（移行の 1 回目に、解析が書いた値を人が直した値と取り違えない） | テストが落ちる |
-| I4 | 解析の記録 | 書き出しが `.ndf/analysis/` の下へ書くとき、記録のパスは git に無視され、追跡されていない（`git check-ignore -q` が終了コード 0）。無視の出所は問わない（`.ndf/analysis/.gitignore`・根の `.gitignore`・`.git/info/exclude`・利用者の `core.excludesFile` のどれでもよい）。`.gitignore` を作るときは、`.ndf/analysis/` の下に追跡されたファイルが無い（`git ls-files` が終了コード 0 で出力が空）。書き出しは設定と記録を書く前にこれらを確かめる。既存の `.gitignore` の中身だけでは信じない（空のファイル・独自のパターンでほかの除外も無いとき・追跡済みの記録では、外れない）。git が確かめられない（`git ls-files` の終了コードが 0 でない・`git check-ignore` の終了コードが 0 でも 1 でもない）ときも止まる | 書き出しが既存のファイルを変えずに止まる（終了コード 1） |
+| I4 | 解析の記録 | 書き出しが `.ndf/analysis/` の下へ書くとき、記録のパスは git に無視され、追跡されていない（`git check-ignore -q` が終了コード 0）。無視の出所は問わない（`.ndf/analysis/.gitignore`・ルートの `.gitignore`・`.git/info/exclude`・利用者の `core.excludesFile` のどれでもよい）。`.gitignore` を作るときは、`.ndf/analysis/` の下に追跡されたファイルが無い（`git ls-files` が終了コード 0 で出力が空）。書き出しは設定と記録を書く前にこれらを確かめる。既存の `.gitignore` の中身だけでは信じない（空のファイル・独自のパターンでほかの除外も無いとき・追跡済みの記録では、外れない）。git が確かめられない（`git ls-files` の終了コードが 0 でない・`git check-ignore` の終了コードが 0 でも 1 でもない）ときも止まる | 書き出しが既存のファイルを変えずに止まる（終了コード 1） |
 | I5 | 解析の記録 | 解析の記録が無い・読めない（不正な UTF-8 を含む）・形が違うとき、判定は「古い」である（「壊れている」にしない） | テストが落ちる |
 | I6 | 設定 | `.ndf/project.json` に旧い形のキーが残っているとき、判定は「古い」で、書き出しはそのキーを取り除いてから形を確かめる（旧い形を「壊れている」にしない） | テストが落ちる |
 | I7 | 解析の記録 | 書き出しが設定か記録を書き換えるときは、先に前の記録へ途中の印（`pending: true`）を付け、最後に印の無い記録を書く。印の付いた記録を、判定は「古い」とする | テストが落ちる |
 | I8 | 解析の記録 | 記録は読み手のあるキー（`version`・`analyzer`・`inputs`・`branches`・`written_digest`・`pending`）だけを持つ | 書き出しが記録のスキーマの検査で止まる |
 | I9 | 解析の記録 | 記録の `written_digest` が、今の `.ndf/project.json` の書いた値の指紋（`analysis.written`）から作った値と違うとき、判定は「古い」である | テストが落ちる |
-| I10 | 解析の記録 | 書き出しは、既存の設定と記録を読む前にメインディレクトリ単位の錠を取り、最後の記録を書き終えるまで放さない。別の書き出しは、その間の設定と記録を読まず、書かない | テストが落ちる |
+| I10 | 解析の記録 | 書き出しは、既存の設定と記録を読む前にメインディレクトリ単位のロックを取り、最後の記録を書き終えるまで放さない。別の書き出しは、その間の設定と記録を読まず、書かない | テストが落ちる |
 
 ### ドメインイベント
 
@@ -119,9 +119,9 @@ flowchart LR
 | `write.py`（変更） | 設定の値を決め、解析の記録を組み、`.gitignore`・途中の印を付けた前の記録・`.ndf/project.json`・解析の記録を書く計画を作る。実行時間の引き継ぎを消す |
 | `check.py`（変更） | 設定が古くなっていないかを、`.ndf/project.json` でなく `.ndf/analysis/project.json` の解析の記録から判定する。作業場所を解決する `repo_dirs` が、メインディレクトリと一緒に git の共通ディレクトリも返す |
 | `items.py`（変更） | 書いた値の指紋を作る `value_digest` を `write.py` から移し、`write` と `analysis_record` が共用する |
-| `strategy_write.py`（変更） | 解決済みの git の共通ディレクトリから錠のパスを作る `lock_file` を足す |
-| `cli.py`（変更） | 測定の結果からテストの所要時間を外す。書き出しの入力に前の解析の記録を足す。既存の設定と記録を読む前に錠を取り、最後の記録を書くまで持つ。記録を書く前に、記録のパスが git に無視されることを確かめる。`.ndf/analysis/` の下のファイルは差分でなく要約で表示する |
-| 錠の待ちの上限（変更） | `plugins/ndf/contracts/limits/branch-strategy.write-lock.json` の `read_by` に `ndf.domains.project.cli` を足し、summary を「`.ndf/project.json` を書く錠の待ちの上限。ブランチ戦略の書き込みと解析の書き出しが共有する」へ直す。上限の 30 秒は変えない |
+| `strategy_write.py`（変更） | 解決済みの git の共通ディレクトリからロックのパスを作る `lock_file` を足す |
+| `cli.py`（変更） | 測定の結果からテストの所要時間を外す。書き出しの入力に前の解析の記録を足す。既存の設定と記録を読む前にロックを取り、最後の記録を書くまで持つ。記録を書く前に、記録のパスが git に無視されることを確かめる。`.ndf/analysis/` の下のファイルは差分でなく要約で表示する |
+| ロックの待ちの上限（変更） | `plugins/ndf/contracts/limits/branch-strategy.write-lock.json` の `read_by` に `ndf.domains.project.cli` を足し、summary を「`.ndf/project.json` を書くロックの待ちの上限。ブランチ戦略の書き込みと解析の書き出しが共有する」へ直す。上限の 30 秒は変えない |
 | 設定のスキーマ（変更） | `analysis` を `written` だけにし、`languages[].files`・`ci.workflows`・`ci.provider`・`test_duration` と、それだけが使う定義（`TestDuration` など）を外す |
 | 解析の記録のスキーマ（新設） | `plugins/ndf/contracts/schemas/internal/project-analysis.schema.json` |
 | ファイルの一覧と保存先のディレクトリの定義（変更） | 保存先の表（`locations.json`）の項目 `measured` を消し、項目 `analysis`（リポジトリの `.ndf/analysis`・追跡しない）を足す。ファイルの表（`ndf-files.json`）の行 `project-measured` を消し、行 `project-analysis`（記録）と `project-analysis-ignore`（`.gitignore`）を足す。表の summary の「実行で変わる計測値は…状態の保存先へ書く」を、「読み手の無い計測値は保存しない。解析の記録は追跡しない保存先へ書く」へ直す |
@@ -168,7 +168,7 @@ flowchart LR
 `?` は省略できるキーである。今のスキーマでも `analysis.written`（既定は `{}`）と `ci.required_checks`（既定は `[]`）は省略でき、変えた後も省略できるままにする。必須にしない理由は、旧い形のキーを取り除くと、この 2 つを省いた今の有効な設定が `analysis: {}`・`ci: {}` になるためである。必須にすると、`check.load` が取り除いた後の形を確かめた時点で「壊れている」（終了コード 2）と判定し、移行（I6）ができない。
 
 - 書き出しは `analysis` を必ず `{"written": …}` の形で書く（指紋が 1 つも無ければ `{"written": {}}`）
-- `ci` が人の値（前の指紋に無い）で `required_checks` を持たなければ、取り除いた後の `{}` を人の値として残す。今の実装も、指紋の無い `ci` を人の値として残している
+- `ci` が人の値（前の指紋が無いか、前の指紋と一致しない）で `required_checks` を持たなければ、取り除いた後の `{}` を人の値として残す。今の実装も、指紋が無いか一致しない `ci` を人の値として残している
 
 書き出しは、`.ndf/analysis/` の下へ何かを書くときだけ、その前に、記録が git に無視されることを git 自身に確かめさせる。`.ndf/analysis/` の下へ書くときとは、`write.plan` が返す書くファイルに、`.gitignore`・途中の印・記録のどれか 1 つでも入っているときである（`.gitignore` だけの場合も含む）。
 
@@ -178,7 +178,7 @@ flowchart LR
    - 終了コード 0 で出力が空でない（追跡されているファイルが 1 つでもある）ときは、`.gitignore` を作らずに止める。利用者が追跡していた `.ndf/analysis/.gitignore` を作業ツリーで消した状態を、NDF が作り直して打ち消さないためである（作り直すと、生成した `.gitignore` が追跡されたファイルの差分に入る）。追跡済みの記録もここで見つかる
    - 終了コードが 0 でない（索引を読めないなど）ときは、出力が空でも追跡の有無は分からないので、`.gitignore` を作らずに止める
 2. `git check-ignore -q .ndf/analysis/project.json` を 1 回打つ。終了コード 0 は「無視され、かつ追跡されていない」、1 は「無視されない（追跡済みを含む）」、それ以外は「git が判定できなかった」を表す（[gitignore](https://git-scm.com/docs/gitignore)・[git check-ignore](https://git-scm.com/docs/git-check-ignore)。`--no-index` を付けないので、追跡済みのパスは無視されないと判定される）。続けるのは 0 のときだけである
-   - このコマンドは、`.ndf/analysis/.gitignore`・根の `.gitignore`・`.git/info/exclude`・利用者の `core.excludesFile` を合わせた結果を返す。条件にするのは、この合わせた結果（記録が実際に無視されること）である。どの除外の設定で無視されているかは問わない。記録がコミットされる差分に入らないことが目的で、それは無視の出所によらず満たされるためである
+   - このコマンドは、`.ndf/analysis/.gitignore`・ルートの `.gitignore`・`.git/info/exclude`・利用者の `core.excludesFile` を合わせた結果を返す。条件にするのは、この合わせた結果（記録が実際に無視されること）である。どの除外の設定で無視されているかは問わない。記録がコミットされる差分に入らないことが目的で、それは無視の出所によらず満たされるためである
    - そのため、既存の `.ndf/analysis/.gitignore` が空でも、`.git/info/exclude` や `core.excludesFile` が記録のパスを無視していれば、書き出しは続ける
 3. どちらかで止めるときは、終了コード 1 で止まり、設定と記録を書かない。手順 1 の前からあった `.gitignore` は変えない。手順 1 の後に新しく作った `.gitignore` は、手順 2 で止めても消さない。理由は次のどれかを出す
    - 「`.ndf/analysis/` の下のファイルが git に追跡されている: <パス>」（手順 1 で出力が空でない）
@@ -195,7 +195,7 @@ flowchart LR
 | --- | --- | --- |
 | 書き出しのたびに確かめる | 書き出し 1 回につき 1 回 | 採らない。同じ入力で打ち直して書くものが無い回にも起動が増えるが、その回は記録を書かないので確かめる意味が無い |
 | `.ndf/analysis/` の下へ書くときだけ確かめる | `.ndf/analysis/` の下へ書く書き出し 1 回につき 1 回（`.gitignore` を作る回は 2 回） | 選ぶ。書くものが無い回の確認を省いても、その回は記録を書かないので、記録が差分に混ざることは無い。記録を書く回は解析をやり直した後で、測定に GitHub の API の呼び出しが 3 回あるので、1 回の起動は比べて小さい |
-| `.gitignore` の中身を読み、`*` の行があれば無視されるとみなす | 0 回 | 採らない。根の `.gitignore` の否定のパターン・利用者の全体の除外設定（`core.excludesFile`）・追跡済みの記録を見られず、I4 を保証できない |
+| `.gitignore` の中身を読み、`*` の行があれば無視されるとみなす | 0 回 | 採らない。ルートの `.gitignore` の否定のパターン・利用者の全体の除外設定（`core.excludesFile`）・追跡済みの記録を見られず、I4 を保証できない |
 | gitignore の規則を Python のライブラリで再現する | 0 回 | 採らない。上と同じく、git の索引（追跡済みかどうか）と利用者ごとの設定を見られない。git の判定と食い違う所を持ち続けることになる |
 
 ## 処理の流れ
@@ -206,7 +206,7 @@ sequenceDiagram
   participant W as write.plan
   participant AR as analysis_record
   participant FS as メインディレクトリの .ndf/
-  Note over CLI,FS: --dry-run でなければ、ここで錠を取る（git の共通ディレクトリの ndf-branch-strategy.lock）
+  Note over CLI,FS: --dry-run でなければ、ここでロックを取る（git の共通ディレクトリの ndf-branch-strategy.lock）
   CLI->>FS: 今の .ndf/project.json と .ndf/analysis/project.json を読む
   CLI->>W: 今の設定・測定の結果・回答（解析が決められない項目に、作業を進める AI が答えた値）・前の .ndf/analysis/project.json
   W->>W: 項目ごとに、人が直したか解析が書いたかを見分ける（旧い形の値を取り除く前の値と前の指紋）
@@ -219,26 +219,26 @@ sequenceDiagram
   CLI->>FS: .gitignore が無ければ git ls-files -- .ndf/analysis（追跡されたファイルがあれば止める）し、.gitignore を書く
   CLI->>FS: git check-ignore -q .ndf/analysis/project.json（0 以外なら止める）
   CLI->>FS: Plan.files の残りを順番に書く
-  Note over CLI,FS: 錠を放す
+  Note over CLI,FS: ロックを放す
 ```
 
-書き出しは、既存の設定と記録を読む前に錠を取り、最後の記録を書き終えてから放す（I10）。錠が無いと、2 つの worktree（A と B）から同時に書き出したとき、次の順で設定と記録が別々の解析の組み合わせになる。
+書き出しは、既存の設定と記録を読む前にロックを取り、最後の記録を書き終えてから放す（I10）。ロックが無いと、2 つの worktree（A と B）から同時に書き出したとき、次の順で設定と記録が別々の解析の組み合わせになる。
 
 1. A が設定を書く
 2. B が設定と記録を書き切る
 3. A が最後の記録を書く
 
-このとき設定は B の解析、記録は A の解析のものになる。錠を取れば、B は A が記録を書き終えるまで設定と記録を読まないので、B の書き出しは A の結果の上に作られ、この組み合わせは起きない。
+このとき設定は B の解析、記録は A の解析のものになる。ロックを取れば、B は A が記録を書き終えるまで設定と記録を読まないので、B の書き出しは A の結果の上に作られ、この組み合わせは起きない。
 
-記録に対応する設定の指紋（I9）だけでも、A と B が書いた値が違えば「古い」と判定できる。それでも錠を取る理由は次の 2 つである。
+記録に対応する設定の指紋（I9）だけでも、A と B が書いた値が違えば「古い」と判定できる。それでもロックを取る理由は次の 2 つである。
 
-- 錠が無いと、組み合わせが食い違うたびに解析が 1 回余分に走る。食い違いを起こさない方が費用が小さい
+- ロックが無いと、組み合わせが食い違うたびに解析が 1 回余分に走る。食い違いを起こさない方が費用が小さい
 - 書き出しは `.ndf/project.json` 全体を読んでから書き直す。同じ時に `ndf project branch-strategy` がセクション `branch_strategy` を書くと、後から書いた側が先の変更を消す。これは指紋では見つからない
 
-- 錠のファイルは、`ndf project branch-strategy` が `.ndf/project.json` を書くときと同じ `<git の共通ディレクトリ>/ndf-branch-strategy.lock`（`strategy_write.lock_file` で、解決済みの共通ディレクトリから作る）である。どちらも `.ndf/project.json` 全体を読んで書き直すので、同じ錠で互いを待たせ、片方の書き込みがもう片方の変更を消さないようにする。git の共通ディレクトリはメインディレクトリと worktree で同じなので、錠はメインディレクトリ単位になる
+- ロックのファイルは、`ndf project branch-strategy` が `.ndf/project.json` を書くときと同じ `<git の共通ディレクトリ>/ndf-branch-strategy.lock`（`strategy_write.lock_file` で、解決済みの共通ディレクトリから作る）である。どちらも `.ndf/project.json` 全体を読んで書き直すので、同じロックで互いを待たせ、片方の書き込みがもう片方の変更を消さないようにする。git の共通ディレクトリはメインディレクトリと worktree で同じなので、ロックはメインディレクトリ単位になる
 - 待ちの上限は、ブランチ戦略の書き込みと同じ `branch-strategy.write-lock`（30 秒）を使う。上限までに取れなければ、何も読まず書かずに終了コード 1 で止まり、「別の実行が設定を書いています。終わってから打ち直してください」と出す。開発の作業の始めの手順は、ほかの終了コード 1 と同じく「解析: できなかった」と出して先へ進む。次の作業の始めの `ndf project check` が、待たせた側の書き出しの結果で判定し直す
-- `--dry-run` は何も書かないので錠を取らない。作業場所の解決（`check.repo_dirs`）は、worktree から打ってもメインディレクトリの設定と記録で予定を作るために、`--dry-run` でも行う
-- 錠のパスは、書き出しが最初に作業場所を解決したときの git の共通ディレクトリから作り、同じ解決結果で設定と記録を読む。今の書き出しも、メインディレクトリを求めるために共通ディレクトリを 1 回取っている（`check.repo_dirs`）。その値を錠にも使うので、錠のために git の起動は増えない
+- `--dry-run` は何も書かないのでロックを取らない。作業場所の解決（`check.repo_dirs`）は、worktree から打ってもメインディレクトリの設定と記録で予定を作るために、`--dry-run` でも行う
+- ロックのパスは、書き出しが最初に作業場所を解決したときの git の共通ディレクトリから作り、同じ解決結果で設定と記録を読む。今の書き出しも、メインディレクトリを求めるために共通ディレクトリを 1 回取っている（`check.repo_dirs`）。その値をロックにも使うので、ロックのために git の起動は増えない
 
 書く順は `.ndf/analysis/.gitignore` → 記録のパスが無視されることの確認 → 途中の印（`pending: true`）を付けた前の記録 → `.ndf/project.json` → `.ndf/analysis/project.json`（印の無い新しい記録）である。
 
@@ -253,7 +253,7 @@ sequenceDiagram
 
 | 止まった所 | 残る状態 | 次の `ndf project check` |
 | --- | --- | --- |
-| 錠を取る所（上限の 30 秒まで別の書き出しが持っていた） | この書き出しは何も変えていない。設定と記録は、錠を持っていた書き出しの結果 | 錠を持っていた書き出しの結果で判定する。書き出しは終了コード 1 |
+| ロックを取る所（上限の 30 秒まで別の書き出しが持っていた） | この書き出しは何も変えていない。設定と記録は、ロックを持っていた書き出しの結果 | ロックを持っていた書き出しの結果で判定する。書き出しは終了コード 1 で、開発の作業の始めの手順は「解析: できなかった」と出して先へ進む。ロックを持っていた側の結果が「新しい」と判定されれば、この回の回答の変更は、次に入力が変わるか `ndf project check --force` で解析をやり直すまで反映されない（途中の印を書く所で止まったときと同じ） |
 | `.gitignore` の後・無視の確認で | `.gitignore` だけが新しいか、どれも前のまま | 前の判定のまま。書き出しは終了コード 1 で、利用者が除外の設定を直す |
 | 途中の印を書く所 | 設定も記録も前のまま揃っている | 前の判定のまま。書き出しは終了コード 1 で止まり、開発の作業の始めの手順は「解析: できなかった」と出して先へ進む（今と同じ。`project-analysis.md` の「3 手」の節が、measure・回答・write の手順と終了コードごとの扱いを定める）。前の判定が「新しい」なら、この回の回答の変更は、次に入力が変わるか `ndf project check --force` で解析をやり直すまで反映されない。印を書けないのは `.ndf/analysis/` に書けないときで、そのときは記録の書き込みも失敗するため、再試行の仕組みを足しても直らない |
 | 途中の印の後・`.ndf/project.json` の後 | 記録に途中の印が残る | 「古い」（理由「前の書き出しが終わっていない」） |
@@ -269,7 +269,7 @@ sequenceDiagram
 - 採らなかった案: `.ndf/project.local.json` に置き、`.ndf/.gitignore` へ行を足す（理由は下の 2 つ）
   - 追跡する `.ndf/.gitignore` に差分が 1 回出て、利用者の設定の書き換え（C7）になる
   - 名前の `.local` は、`worktree.local.json` で「各自の機械の値で共有設定を上書きする個人設定」の意味で使っている。上書きしないファイルに付けると、1 語が 2 つの意味になる
-- 採らなかった案: 根の `.gitignore` に行を足す（`project-analysis.md` の「`.ndf/` の追跡」は、NDF が根の `.gitignore` を書き換えないと定めている）
+- 採らなかった案: ルートの `.gitignore` に行を足す（`project-analysis.md` の「`.ndf/` の追跡」は、NDF がルートの `.gitignore` を書き換えないと定めている）
 - **代償**: `.ndf/` の下にディレクトリが 1 つ増える。`git status --ignored` には `.ndf/analysis/` が出る
 - 作り方: 標準に倣う（pytest・ruff のキャッシュと同じく、ディレクトリの中に `*` の `.gitignore` を置く）
 - 比べた候補: STD1 / PRD1 / PRD2
@@ -394,14 +394,14 @@ sequenceDiagram
 | 1 | 言語のファイル数の順位だけが入れ替わった木を 2 回測って書き出しても、`languages` の並びが変わらない | 並びをファイル数の順に戻すと落ちる |
 | 2・3・I1 | 書き出した `.ndf/project.json` の `analysis` が `written` だけで、`languages[].files`・`ci.workflows`・`ci.provider`・`test_duration` が無く、`ci` が `required_checks` だけを持つ | 項目のどれかを取り除き忘れると落ちる |
 | 4・I2 | `ndf project measure` の `gh` の呼び出しを差し替えて記録すると、呼ばれるパスは `rules/branches/...`・`pulls?...`・`issues?...` だけで、`actions/` で始まるパスが無い。結果の `items` に `test_duration` が無く、`languages` の行に `files` が無い | 実行の一覧・ジョブ・成果物の取得を残す・テストの所要時間を測ると落ちる |
-| 5・6・7・I4・I8 | 書き出しの後、`.ndf/analysis/project.json` に `git check-ignore` が真。記録のキーは `version`・`analyzer`・`inputs`・`branches`・`written_digest`（と途中の印）だけで `at` が無い。追跡するファイルの変更は `.ndf/project.json` だけ。根の `.gitignore` に `!.ndf/analysis/` を書いても外れたまま | `.ndf/analysis/.gitignore` を置かない・`.ndf/.gitignore` へ書く・記録に時刻を書くと落ちる |
+| 5・6・7・I4・I8 | 書き出しの後、`.ndf/analysis/project.json` に `git check-ignore` が真。記録のキーは `version`・`analyzer`・`inputs`・`branches`・`written_digest`（と途中の印）だけで `at` が無い。追跡するファイルの変更は `.ndf/project.json` だけ。ルートの `.gitignore` に `!.ndf/analysis/` を書いても外れたまま | `.ndf/analysis/.gitignore` を置かない・`.ndf/.gitignore` へ書く・記録に時刻を書くと落ちる |
 | 5・I4 | テストのリポジトリでは、利用者の全体の設定を読ませず（環境変数 `GIT_CONFIG_GLOBAL` を空のファイルに、`GIT_CONFIG_NOSYSTEM=1`）、`.git/info/exclude` を空にする。その上で、`.ndf/analysis/` の下へ書く書き出しで、既存の `.ndf/analysis/.gitignore` が空・`*` を含まない独自のパターン・記録が `git add -f` で追跡済み、のどれでも、書き出しは終了コード 1 で止まり、`.gitignore`・設定・記録の中身が前のまま。既存の `.ndf/analysis/.gitignore` が空でも、`.git/info/exclude` に `.ndf/analysis/` を書いてあれば、書き出しは終了コード 0 で設定と記録を書く | `.gitignore` があることだけで無視が効くとみなす・`.ndf/analysis/.gitignore` の中身だけで判定すると落ちる |
 | 5・I4 | git の呼び出しを差し替え、`git ls-files` が終了コード 128 で標準出力が空のとき、書き出しは `.gitignore` を作らず、git の標準エラー出力を理由に含めて終了コード 1 で止まる。`git check-ignore` が終了コード 128 のときも、設定と記録を書かずに終了コード 1 で止まる | 標準出力が空なことだけで `.gitignore` を作る・終了コード 1 以外の失敗を「無視される」とみなすと落ちる |
 | 5・I4 | 追跡していた `.ndf/analysis/.gitignore` を作業ツリーで消した状態で書き出すと、`.gitignore` を作らずに終了コード 1 で止まる。記録と設定が前と同じで `.gitignore` だけが消えている（書くファイルが `.gitignore` だけ）とき、記録が追跡されていなければ `git ls-files` と `git check-ignore` を 1 回ずつ呼び、`.gitignore` を作って終了コード 0 で終わる。記録が追跡済みなら `git ls-files` だけを呼び、`.gitignore` を作らずに終了コード 1 で止まる | `.gitignore` の存在だけを見て作り直す・`.gitignore` だけの計画で確かめないと落ちる |
-| 5・I4 | 記録を作った後に `git add -f` で追跡し、同じ測定の結果と回答で打ち直す（書くものが無い）と、`git ls-files` と `git check-ignore` を呼ばずに終了コード 0 で「書くものが無い」と出る（作業場所の解決と錠は計画を作る前なので、この回も通る）。記録の無い clone で `--dry-run` を打つと、`.ndf/analysis/` の下に何も作られず、表示に `.gitignore` と記録が「書く予定」として出る | 書くものが無い回に確かめて止める・`--dry-run` で `.gitignore` を書くと落ちる |
+| 5・I4 | 記録を作った後に `git add -f` で追跡し、同じ測定の結果と回答で打ち直す（書くものが無い）と、`git ls-files` と `git check-ignore` を呼ばずに終了コード 0 で「書くものが無い」と出る（作業場所の解決とロックは計画を作る前なので、この回も通る）。記録の無い clone で `--dry-run` を打つと、`.ndf/analysis/` の下に何も作られず、表示に `.gitignore` と記録が「書く予定」として出る | 書くものが無い回に確かめて止める・`--dry-run` で `.gitignore` を書くと落ちる |
 | 8 | 記録の入力のファイルのハッシュと今の HEAD が同じなら「新しい」、入力のファイルかブランチの構成を変えるか、記録の解析器のバージョンを下げると「古い」 | 判定が `.ndf/project.json` の `analysis` を読むままだと落ちる |
 | 8・I9 | 書き出しを 2 回（解析が書く値が違う測定の結果で）打ち、2 回目の後で `.ndf/project.json` だけを 1 回目の後の中身に戻すと、記録の入力とブランチの構成が今と同じでも「古い」（理由「設定が解析の記録と対応しない」）。人が解析の書いていない項目を直したときと、`branch_strategy` を書き足したときは「新しい」のまま | 記録が設定の指紋を持たない・設定のファイル全体のハッシュで比べると落ちる |
-| 17・I10 | テストの中で錠（`strategy_write.lock_file` のファイル）を持ったまま、待ちの上限を 0 秒に差し替えて書き出すと、終了コード 1 で止まり、設定と記録が前のまま。書き出しが錠を取る前に設定と記録を読まない（読み込みの関数を差し替え、呼ばれた時点で錠が取られていることを確かめる）。書き出し 1 回で `check.repo_dirs` は 1 回だけ呼ばれる（呼び出しを差し替えて数える） | 錠を取らない・錠を取る前に設定と記録を読む・錠のために共通ディレクトリを求め直すと落ちる |
+| 17・I10 | テストの中でロック（`strategy_write.lock_file` のファイル）を持ったまま、待ちの上限を 0 秒に差し替えて書き出すと、終了コード 1 で止まり、設定と記録が前のまま。書き出しがロックを取る前に設定と記録を読まない（読み込みの関数を差し替え、呼ばれた時点でロックが取られていることを確かめる）。書き出し 1 回で `check.repo_dirs` は 1 回だけ呼ばれる（呼び出しを差し替えて数える） | ロックを取らない・ロックを取る前に設定と記録を読む・ロックのために共通ディレクトリを求め直すと落ちる |
 | 9・I5 | 記録が無い・JSON でない・不正な UTF-8 を含む・スキーマに合わない（`at` などの知らないキーを持つ場合を含む）とき「古い」（終了コード 3）で、理由に解析の記録が無い・読めないと出る | 「壊れている」（終了コード 2）を返す・`UnicodeDecodeError` を捕まえないと落ちる |
 | 10 | 記録の無い状態で、前の指紋が一致する項目は新しい値になり、一致しない項目は残る | 記録が無いと指紋を読まない・すべてを置き換えると落ちる |
 | 11・I6 | 旧い形（`analysis` の全体・`files`・`ci.workflows`・`ci.provider`・`test_duration` を持つ）の設定で、判定が「古い」（終了コード 3）を返す。`analysis.written` と `ci.required_checks` を両方省いた旧い形の設定でも同じ | 旧い形を「壊れている」にする・`written` か `required_checks` を必須にすると落ちる |
@@ -438,7 +438,7 @@ sequenceDiagram
 
 | # | 標準・仕様 | 何を定めているか | 設計への反映 | 出典 |
 | --- | --- | --- | --- | --- |
-| STD1 | gitignore | 下の階層の `.gitignore` のパターンが、上の階層のものに優先する（"patterns in the higher level files being overridden by those in lower level files down to the directory containing the file"）。共有するパターンは `.gitignore` に置き、clone で配る | 解析の記録のディレクトリに置いた `.gitignore` は、根の `.gitignore` の外さない行より優先する（受け入れ条件 7）。手元で `!.ndf/measured/` を根に書いても、下の階層の `*` で外れたままなことを確かめた（ディレクトリの名前に依らない） | https://git-scm.com/docs/gitignore （2026-11-25）・`git check-ignore -v`（git 2.53.0、2026-11-25） |
+| STD1 | gitignore | 下の階層の `.gitignore` のパターンが、上の階層のものに優先する（"patterns in the higher level files being overridden by those in lower level files down to the directory containing the file"）。共有するパターンは `.gitignore` に置き、clone で配る | 解析の記録のディレクトリに置いた `.gitignore` は、ルートの `.gitignore` の外さない行より優先する（受け入れ条件 7）。手元で `!.ndf/measured/` を根に書いても、下の階層の `*` で外れたままなことを確かめた（ディレクトリの名前に依らない） | https://git-scm.com/docs/gitignore （2026-11-25）・`git check-ignore -v`（git 2.53.0、2026-11-25） |
 
 ### 主要な製品
 
