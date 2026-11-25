@@ -155,6 +155,19 @@ def test_wait_reads_the_gate_marker_and_then_the_result(waiting, capsys):
     assert code == 0 and out["summary"] == "1 本のプランが終わった" and "next" not in out
 
 
+def test_an_old_marker_is_filled_with_the_run_and_the_saved_presentation(waiting, capsys):
+    """r3-1: 回の id と提示の写しを持たない旧い形の目印は、目印のファイルの回と保存済みの提示で補ってから表示する。"""
+    plan, sdir = waiting
+    run = _started(sdir)
+    routes = {"approved": result.command("plan", "next", plan, "--answer", "approved")}
+    runner.waiting_path(sdir, run).write_text(json.dumps({"step": "s", "seq": 3, "routes": routes}), encoding="utf-8")
+    runner.write_json(runner.step_presented_path(sdir, "s"), {"step": "s", "presented_id": "p1", "presentation_path": "m.md"})
+    _, out = _wait(capsys, plan, "--state-dir", str(sdir), "--timeout", "0")
+    assert out["routes"]["approved"]["argv"][-4:] == ["--waiting", f"{run}:s:3", "--presented", "p1"]
+    assert out["items"][0]["presentation_path"] == "m.md"
+    assert runner.read_marker(sdir, run)["shown"]["presented_id"] == "p1"
+
+
 def test_a_stored_result_of_a_newer_version_is_watched_as_stopped(tmp_path):
     plan, sdir = tmp_path / "w.json", tmp_path / "sd"
     plan.write_text(json.dumps({"name": "w", "steps": [H.py_step("s", "pass")]}), encoding="utf-8")

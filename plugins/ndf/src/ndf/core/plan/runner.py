@@ -118,6 +118,24 @@ def waiting_path(state_dir: Path, run: str) -> Path:
     return state_dir / f"{WAITING_PREFIX}{run}.json"
 
 
+def read_marker(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
+    """回 `run` の承認の回答を待つ目印。無ければ None。
+
+    回の id か提示の写しを持たない旧い形の目印（この形より前のバージョンが書いた目印）は、目印のファイルの回 `run` と、
+    状態の保存先に残った待っているステップの提示の写しで補ってから返す。書き終えた耐久ステップ（`mark_waiting`）は
+    再開で打ち直されないため、バージョンを上げた後も同じ待ちへ同じ資料で回答できるよう読む側で補う。
+    """
+    marker = read_json(waiting_path(state_dir, run))
+    if marker is None:
+        return None
+    if "run" not in marker:
+        marker = {**marker, "run": run}
+    if not isinstance(marker.get("shown"), dict):
+        saved = read_json(step_presented_path(state_dir, str(marker["step"])))
+        marker = {**marker, "shown": {k: saved.get(k) for k in SHOWN_KEYS} if isinstance(saved, dict) else {}}
+    return marker
+
+
 def result_path(state_dir: Path, run: str) -> Path:
     """回 `run`（キーの名前）の結果のバックアップ。"""
     return state_dir / RESULTS_DIR / f"{run}.json"
@@ -508,7 +526,7 @@ def _watch(inv: Invocation, baseline: Optional[dict[str, Any]]) -> tuple[str, Op
     while True:
         if durable.status(inv.workflow_id) not in durable.WAITING:
             return "done", None
-        marker = read_json(inv.waiting_path)
+        marker = read_marker(inv.state_dir, inv.run_id)
         if marker is not None and marker != baseline:
             return GATE, marker
         time.sleep(interval)
@@ -659,7 +677,7 @@ def advance(
     _record_run(inv)
     with durable.session(root, inv.key, url):
         status = durable.status(inv.workflow_id)
-        baseline = read_json(inv.waiting_path)
+        baseline = read_marker(inv.state_dir, inv.run_id)
         if status is None:
             durable.spawn(plan_workflow, inv.workflow_id, _spec(inv))
         elif reply is not None:

@@ -140,7 +140,7 @@ def _watched(path: Path, state_dir: Optional[str] = None) -> wait_decide.Watched
     if done is not None:
         cause = done.get("cause") if isinstance(done.get("cause"), dict) else {}
         return wait_decide.Watched(plan.name, done["status"], cause.get("kind"), cause.get("detail"), done.get("routes"))
-    marker = files.read_json(runner.waiting_path(sdir, run))
+    marker = runner.read_marker(sdir, run)
     if marker is not None:
         # 資料と回答コマンドは、目印に入れた同じ提示の一組から作る（別々に読んだ写しを混ぜない）
         shown = runner.presentation_fields(marker)
