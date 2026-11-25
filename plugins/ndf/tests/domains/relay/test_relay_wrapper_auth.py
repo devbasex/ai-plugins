@@ -159,10 +159,13 @@ def test_i8_a_held_account_is_neither_the_target_nor_the_pin(tmp_path):
 
 
 def test_3864_6_a_default_login_auth_failure_moves_to_a_registered_account(tmp_path):
-    # 既定のログインの認証の失敗も、登録済みアカウントへ替える（既定のログインは外した間に記録しない）
+    # 既定のログインの認証の失敗も、登録済みアカウントへ替える（既定のログインは外した間に記録しない）。
+    # 登録があれば最初の起動はそのアカウントになるので、work2 は既定のログインで起動した後に登録する
     first, prepare = _failing(
-        tmp_path, OAUTH_SCREEN, lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)], names=("work2",), pin=None
+        tmp_path, OAUTH_SCREEN, lambda at: [prompt_row(at), failure_row("authentication_failed", None, at)], names=(), pin=None
     )
+    started = first.on_start
+    first.on_start = lambda sid: (register(tmp_path, "work2"), started(sid))
     ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], prepare)
     assert _envs(spawn) == [None, "work2"] and ended.cause == "" and _held(tmp_path) == {}
     # 理由の文は名前の代わりに「既定のログイン」と書く（log.jsonl に None を出さない）
@@ -192,7 +195,10 @@ def test_3864_11_a_default_login_limit_moves_to_the_one_registered_account(tmp_p
     # 利用上限で work1 へ替わって同じ会話を --resume で続ける（リセットを待たない）。
     # 最初の子は終わらないので、替え先の選択が待ち（wait_reset）へ落ちると見回りが続く。見回りの回数に上限を置き、
     # 超えたらテストを落として CI のジョブを占有しない
-    ended, spawn, w, _ = _run(tmp_path, [_Bounded([LIMIT_LINE], None), FakeChild([], 0)], lambda state: register(tmp_path, "work1"))
+    # 登録があれば最初の起動はそのアカウントになるので、work1 は既定のログインで起動した後に登録する
+    first = _Bounded([LIMIT_LINE], None)
+    first.started = lambda *_: register(tmp_path, "work1")
+    ended, spawn, w, _ = _run(tmp_path, [first, FakeChild([], 0)], lambda state: register(tmp_path))
     (one, _), (two, _) = spawn.calls
     assert _envs(spawn) == [None, "work1"] and ended.cause == ""
     assert two[:3] == [wrapper.CLAUDE, "--resume", one[2]] and two[-1] == switch_decide.RESUME_PROMPT
@@ -268,7 +274,7 @@ def test_3864_7_without_a_target_the_child_stays_and_the_fix_is_shown_once(tmp_p
     assert _envs(spawn) == [pin] and ended.cause == "" and rows_of(w, "stalled")
     assert shown.count(fix) == 1
     # 保存される理由は今のログインの形の名で書く（既定のログインで None を出さない）
-    assert all(r["reason"].startswith(f"{who} の認証に失敗し、替える先が無い") for r in rows_of(w, "stalled"))
+    assert all(r["reason"].startswith(f"{who} の認証に失敗") for r in rows_of(w, "stalled"))
     # 待つ間、会話の記録が変わらなければ見回りごとに読み直さない
     assert len(reads) == 1
 

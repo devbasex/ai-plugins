@@ -23,7 +23,7 @@ scripts/
     └── test_ci_test_durations.py *
 ```
 
-依存の向き: ワークフローが 2 つのスクリプトを呼び、スクリプトは設定ファイルと実測秒の表を読む。`scripts/ci_test_durations.py` は標準ライブラリと `gh` コマンドだけに頼る。`scripts/pytest_shard.py` も NDF のコード（`plugins/ndf/src`）も import しない（決定 4）。`scripts/pytest_shard.py` は pytest のプラグインとして NDF のテストの手順に読み込まれるが、NDF の `conftest.py` とは互いに import しない。依存は一方向で、循環は無い。`scripts/pytest_shard.py` は、モジュールの最上位では標準ライブラリだけを import する。pytest はフックの中で初めて import するので、pytest を入れていない環境でも `python3 scripts/pytest_shard.py files` と `seconds` が動く（「割り当て」の「モジュールの読み込み」）。構成要素どうしの関係は設計文書の「構成要素」の図にあり、ここでは描き直さない。
+依存の向き: ワークフローが 2 つのスクリプトを呼び、スクリプトは設定ファイルと実測秒の表を読む。`scripts/ci_test_durations.py` は標準ライブラリと `gh` コマンドに頼り、成果物の名前の頭（`ROOT_JUNIT`・`NDF_JUNIT`）だけを `scripts/pytest_shard.py` から import する。`scripts/pytest_shard.py` は最上位で標準ライブラリだけを読むので、実行機の `python3` でも読める。NDF のコード（`plugins/ndf/src`）は import しない（決定 4）。`scripts/pytest_shard.py` は pytest のプラグインとして NDF のテストの手順に読み込まれるが、NDF の `conftest.py` とは互いに import しない。依存は一方向で、循環は無い。`scripts/pytest_shard.py` は、モジュールの最上位では標準ライブラリだけを import する。pytest はフックの中で初めて import するので、pytest を入れていない環境でも `python3 scripts/pytest_shard.py files` と `seconds` が動く（「割り当て」の「モジュールの読み込み」）。構成要素どうしの関係は設計文書の「構成要素」の図にあり、ここでは描き直さない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -72,7 +72,22 @@ scripts/
 | 試行の番号のファイルの名前 `shard-attempt-<番号>.txt` | 設定値 | `.github/workflows/pytest.yml` | — |
 | 手順の名前 `根のテスト`・`NDF のテスト` | 設定値 | `.github/workflows/pytest.yml` | — |
 
-成果物の名前の頭・試行の番号のファイルの名前・手順の名前は、読む側のスクリプトも定数で持つ。持つのは `scripts/ci_test_durations.py` と `scripts/pytest_shard.py` である（それぞれの「内部のデータと定数」）。ワークフローの YAML からスクリプトへ値を渡す経路が無いため、2 か所に置く。食い違うと、`run` が「XML が 1 つも読めない」で 1 を返し、`trend` が無効な集計を書くので、実装の Pull Request の CI の `run` で気づける。
+成果物の名前の頭・試行の番号のファイルの名前・手順の名前は、読む側のスクリプトも定数で持つ。成果物の名前の頭は `scripts/pytest_shard.py` の `ROOT_JUNIT`・`NDF_JUNIT` を正本にし、`scripts/ci_test_durations.py` はそれを import して、名前の判定（`ARTIFACT_NAME`）もその定数から組み立てる。試行の番号のファイルの名前と手順の名前は `scripts/ci_test_durations.py` だけが持つ。ワークフローの YAML からスクリプトへ値を渡す経路が無いため、YAML とスクリプトの 2 か所に置く。
+
+名前がそろっているかは、実装の Pull Request の CI が終わった後に、その実行を手元の `run` で読んで確かめる。`run` を CI のジョブに足すわけではない。手順は次のとおりである。
+
+1. 実装の Pull Request の CI が終わったら、その実行の ID を指定して、手元で `python3 scripts/ci_test_durations.py run <実行の ID>` を打つ
+2. 終了コードが 0 であることを確かめる
+3. 出力に「部分集計」の行が出ないことを確かめる
+4. ジョブごとの表で、どのジョブも「根のテスト」と「NDF のテスト」の列に秒が出ていて、`-` が無いことを確かめる
+
+終了コードだけでは足りない。YAML とスクリプトで名前が食い違ったときの影響は、次の表のとおり名前ごとに違い、`run` が 0 で終わる食い違いもあるためである。
+
+| 食い違う名前 | `run` の終了コード | `run` の出力 | `trend` の集計 |
+| --- | --- | --- | --- |
+| 成果物の名前の頭（根か NDF の片方でも） | 1 | 標準エラーに「根の JUnit XML が無い」か「NDF の JUnit XML が無い」を出し、集計は出さない | 無効（理由は「欠けたジョブ」） |
+| 試行の番号のファイルの名前 | 0 | 「部分集計（古い試行のジョブ: …）」の行を出し、どのジョブも合計に数えない | 無効（理由は「古い試行のジョブ」） |
+| 手順の名前 | 0 | ジョブごとの表で、根か NDF の手順の秒が `-` になる。合計と上位は正しい | 影響しない（手順の秒を使わない） |
 
 ## 割り当て
 
@@ -274,7 +289,7 @@ scripts/
 | `Gh.get`・`Gh.raw` | 認証できない・API の呼び出しの失敗・`CALL_TIMEOUT` を過ぎた | トークン切れ・権限不足・GitHub の障害 | 終了コードが 0 でない・`TimeoutExpired` | 呼び出し元へ返す（`GhError`。標準エラーの先頭の 1 行を持つ）。再試行しない | 呼び出し元の行のとおり | 再実行できる |
 | `Gh.get` | 応答が JSON でない | API の応答の変化 | `json.loads` | 呼び出し元へ返す（`GhError`） | 呼び出し元の行のとおり | 再実行できる |
 | `read_config` | 設定が無い・JSON でない・キーが無い・型が違う（`runs`・`top` が 1 以上の整数でない、`limit_seconds` が正の数でない） | 設定ファイルの誤り | `read_config` | 止める（`ConfigError`） | 標準エラーへファイルのパスと誤りを書き、`run`・`trend` とも 2 | 設定を直して再実行できる |
-| `read_parts` | XML が壊れている | 取得の途中で切れた・書き出しの途中で落ちた | `parse_junit` の `ET.ParseError` | 既定値で続ける（その部品の `error` に理由を入れ、`match_attempts` が `missing` に数える） | 呼び出し元の行のとおり | — |
+| `read_parts` | XML が壊れている、または `time` が有限の非負の数でない | 取得の途中で切れた・書き出しの途中で落ちた・計測値が壊れた | `parse_junit` の `ET.ParseError`・`ValueError` | 既定値で続ける（その部品の `error` に理由を入れ、`match_attempts` が `missing` に数える） | 呼び出し元の行のとおり | — |
 | `read_parts` | XML が 1 本も無い | pytest が XML を書く前に止まり、試行の番号のファイルだけが上がった | `read_parts`（`*.xml` の数が 0） | 既定値で続ける（その部品の `error` に「JUnit XML が無い」を入れ、`match_attempts` が `missing` に数える） | 呼び出し元の行のとおり | — |
 | `current_total` | ジョブの一覧が取れない | `GhError`・`GhUnavailable` | `current_total` | 既定値で続ける（無効な集計。`reason` は「ジョブの一覧を取れない」） | `::warning title=テストの所要の読み取り::` の行。終了コード 0 | 再実行で作り直せる |
 | `current_total` | 組がそろわない | 一部のジョブの成果物が無い・古い試行・落ちたジョブ・壊れた XML | `match_attempts` | 既定値で続ける（無効な集計。`reason` に欠けた番号・古い試行の番号・読めない XML を並べる） | `::warning title=テストの所要の読み取り::` に番号を書く。終了コード 0 | 再実行で作り直せる |
@@ -407,7 +422,7 @@ scripts/
 | --- | --- | --- | --- |
 | `read_config` | 3 つのキーを読む | `limit_seconds` に整数を書いても数として読む。`runs` が 1 でも通る | キーが無い・`runs` が 0・JSON でないと `ConfigError` |
 | `shard_jobs` | `pytest (0/6)`〜`pytest (5/6)` から総数 6 と 6 つのジョブを返す | `pytest (所要)` と `pytest (NDF の ok の出力)` を拾わない | 該当が無いと総数 0 |
-| `parse_junit` | `classname::name` と `time` の組を返す | `time` が無い項目は 0 秒 | 壊れた XML で `ET.ParseError` |
+| `parse_junit` | `classname::name` と `time` の組を返す | `time` が無い項目は 0 秒 | 壊れた XML で `ET.ParseError`。`time` が数でない・無限・NaN・負なら `ValueError` |
 | `read_parts` | 根と NDF のディレクトリを見分け、試行の番号を読む | `shard-attempt-<番号>.txt` が無いと `attempt` が `None` | 壊れた XML の部品は `error` を持つ。試行の番号のファイルだけがあり XML が無い部品も `error` を持つ |
 | `match_attempts` | 6 つとも試行が一致し成功なら `accepted` が 6 つ | 試行の番号が 1 つだけ違うジョブは `stale` に入る。`conclusion` が `failure` のジョブは `accepted` と `failed` の両方に入る | 根だけあって NDF が無いジョブは `missing`。NDF の部品が試行の番号のファイルだけを持ち、その番号が一覧の `run_attempt` と一致しても `missing` に入り、`accepted` に入らない |
 | `current_total` | 組がそろうと `valid` が真で、根・NDF・合計の秒を持つ | `shard_attempts` が番号 0〜5 の順に並ぶ | 試行の番号が違う・ジョブの一覧が取れない・XML が壊れている、のどれでも `valid` が偽、秒が `None`、`reason` を持ち、`--out` のファイルは書かれる |

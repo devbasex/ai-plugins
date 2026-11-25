@@ -9,6 +9,10 @@ from ._hooks import counted_tail, relay, relay_child  # noqa: F401  fixture の�
 
 
 @pytest.fixture(autouse=True)
-def _hook_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _hook_env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    # SessionStart が statusline の本体を `~/.claude/` へ置くため、テストを流す人の HOME へ書かない
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
     for name in ENV_NAMES:
         monkeypatch.delenv(name, raising=False)

@@ -21,6 +21,7 @@ from ndf.contracts import limits
 from ndf.domains.hooks import registration, tables
 from ndf.domains.relay import (
     account_choice,
+    account_decide,
     account_dir,
     accounts,
     key_helper,
@@ -359,20 +360,33 @@ class LaunchSteps:
         return switch_decide.hit(nxt, self.s.spin)
 
     def _initial(self, now: float) -> Choice:
-        """最初のセグメントの要求。環境変数 `NDF_CLAUDE_ACCOUNT` の名前 → 指定の順（登録を列挙しない）。
+        """最初のセグメントの要求（`account_decide.choose` の `start`。#4527）。
 
-        環境変数の名前が事前の確かめを通っても、用意や関所で落ちたときのために指定を続けて試す。環境変数の名前が使えるときは、
-        壊れた指定で止めずに環境変数の名前だけで試す。
+        候補を使用率の並びで選び、明示（環境変数 `NDF_CLAUDE_ACCOUNT` → 指定）を同じ側の先に置く。候補が無ければ既定のログイン。
+        環境変数の名前が使えるときは、壊れた指定で止めずに環境変数の名前だけを明示にする。環境変数で明示した従量の接続
+        （`metered`）は登録済みの候補の外なので、並びの前に試す。
         """
         env = self.s.environ.get("NDF_CLAUDE_ACCOUNT")
         env = env if env and accounts.NAME_RE.match(env) else None
+        inputs = self._inputs(now, True)
         try:
             pin = accounts.pinned(self.s.state_dir)
         except accounts.AccountError:
-            if env is None or self._inputs(now, True).excluded(env) is not None:
+            if env is None or inputs.excluded(env) is not None:
                 raise
             pin = None
-        return Choice(tuple(dict.fromkeys(n for n in (env, pin) if n is not None)))
+        rows = inputs.usage.rows if inputs.usage is not None else []
+        pick = account_decide.choose(
+            "start",
+            None,
+            rows,
+            account_decide.Pool(inputs.candidates(), explicit=tuple(n for n in (env, pin) if n is not None)),
+            self.s.guards,
+        )
+        self._log({"kind": "account_choice", "scene": "start", "account": pick.account, "reason": pick.reason})
+        # 環境変数で明示した従量の接続は登録済みの候補の外なので、並びの前に試す（使えなければ 1 行で飛ばして並びへ進む）
+        first = (env,) if env is not None and account_decide.metered(env) else ()
+        return Choice((*first, *pick.order))
 
     def _settle(self, sec: Section) -> None:
         """終わった子のアカウントが登録済みなら 1 回だけ書き戻す（`account_dir.settle`）。書き戻せなければ 1 行を出して続ける。

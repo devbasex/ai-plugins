@@ -29,9 +29,9 @@
 | 置くもの | 中身 |
 | --- | --- |
 | 複製と根の指し先 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` の下の起動の部品と `relay.root`（プラグインの根のパス 1 行）。部品は `relay.root` が指すプラグインの `bin/ndf relay` を呼ぶ。部品の中身はどのバージョンでも同じである。プラグインを更新したときは `relay.root` を書き換えるだけで済む |
-| PATH のエントリポイント | `${XDG_BIN_HOME:-~/.local/bin}/ndf-relay`。複製を呼ぶ 2 行のシェルのスクリプト |
+| PATH のエントリポイント | `${XDG_BIN_HOME:-~/.local/bin}/ndf-relay` と `${XDG_BIN_HOME:-~/.local/bin}/ndf`。どちらも複製を呼ぶ 2 行のシェルのスクリプトで、`ndf-relay` は `bin/ndf relay …` を、`ndf` は引数をそのまま `bin/ndf …` を呼ぶ |
 
-- `ndf-relay run` と打つと、ラッパーを通って claude が起動する。`~/.local/bin` が PATH に無ければ、`install` の `warnings` が足す 1 行を示す
+- `ndf-relay run` と打つと、ラッパーを通って claude が起動する。`ndf` のコマンドも端末・tmux・Codex から打てる。`~/.local/bin` が PATH に無ければ、`install` の `warnings` が足す 1 行を示す
 - **プラグインを更新した後の最初のセッションで、SessionStart hook が `relay.root` を更新後のバージョンへ向け直す。** 旧いバージョンの保存先は更新で消えないため、向け直さないと次の `claude` も旧いバージョンのラッパーで起動する。向け直すのは NDF が置いた複製があり、`relay.version` より新しいバージョンのときだけで、同じか旧いバージョンのセッションは向き先を戻さない
 - プラグインの更新で `relay.root` の指すバージョンの保存先が消えたら、複製は同じ親の下の最も新しいバージョンの保存先へ向け直す。見つからなければ理由と打ち直しのコマンドを 1 行出して止まる
 - 旧い NDF（10.x）の複製は残す。旧いラッパーを止めてから `ndf relay install --replace-old` で置き換える

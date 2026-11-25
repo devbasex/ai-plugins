@@ -21,7 +21,8 @@ def test_relay_session_is_none_without_a_value(env):
 @pytest.mark.parametrize("account", [None, "work1"], ids=["default-login", "named"])
 def test_each_child_gets_its_own_session_id(tmp_path, monkeypatch, account):
     # 既定のログイン・名前つきの起動先・起動の前の下限の確かめのどれも、その子の会話の ID を環境に持つ
-    register(tmp_path, "work1")
+    # （既定のログインで始めるときは登録しない。登録があれば最初の起動はそのアカウントになる）
+    register(tmp_path, *([] if account is None else [account]))
     checked = []
     monkeypatch.setattr(wrapper.cli_floor, "require", lambda name, argv0, env, cwd: checked.append(signals.relay_session(env)))
     prepare = None if account is None else lambda _dir, state: accounts.use(state, account)

@@ -170,7 +170,8 @@ def test_session_start_advises_on_a_broken_budget(tmp_path, monkeypatch):
     monkeypatch.setattr(tables, "policy", lambda name: broken[name] if name in broken else real(name))
     out = call_entry("claude", "SessionStart", sample("claude", "SessionStart", tmp_path))
     assert "予算の検査で破れ" in out["hookSpecificOutput"]["additionalContext"]
-    monkeypatch.undo()
+    # undo() は autouse の fixture が隔離した HOME・CLAUDE_CONFIG_DIR まで戻し、本物の環境へ書かせる（#4535）
+    monkeypatch.setattr(tables, "policy", real)
     assert call_entry("claude", "SessionStart", sample("claude", "SessionStart", tmp_path)) is None
 
 
