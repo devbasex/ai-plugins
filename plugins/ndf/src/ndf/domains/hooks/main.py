@@ -241,7 +241,7 @@ def _ensure_claude_settings() -> None:
 
 
 def _follow_relay() -> None:
-    """中継の複製の向き先を今のプラグインへ寄せる。書けなくても hook の判定は変えない。"""
+    """消えた中継のエントリポイントを置き直し（#4535）、中継の複製の向き先を今のプラグインへ寄せる。書けなくても hook の判定は変えない。"""
     from ndf import identity
     from ndf.domains.relay import install
 
@@ -249,6 +249,7 @@ def _follow_relay() -> None:
     if version is None:
         return
     try:
+        install.restore_entries(os.environ)
         install.follow(os.environ, tables.PLUGIN_ROOT, version)
     except OSError:  # noqa: NDF401 ファイル: 向き先を書けなくてもセッションの開始は止めない
         return
