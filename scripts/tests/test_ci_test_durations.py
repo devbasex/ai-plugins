@@ -489,6 +489,168 @@ def test_gh_raw_stops_over_limit(monkeypatch) -> None:
     assert killed and e.value.received == ctd.CHUNK * 2
 
 
+class FakePopen:
+    """`subprocess.Popen` の偽物。標準出力のバイト列・標準エラーへ書く文字・終了コードを渡す。"""
+
+    def __init__(self, out: bytes = b"", err: bytes = b"", code: int = 0):
+        self.out, self.err, self.code = out, err, code
+        self.killed = False
+
+    def __call__(self, cmd, stdout, stderr):
+        self.cmd = cmd
+        self.stdout = io.BytesIO(self.out)
+        stderr.write(self.err)
+        return self
+
+    def kill(self) -> None:
+        self.killed = True
+        self.stdout = io.BytesIO(b"")
+
+    def wait(self) -> int:
+        return -9 if self.killed else self.code
+
+
+def test_gh_raw_with_limit_returns_bytes_and_counts(monkeypatch) -> None:
+    fake = FakePopen(out=b"z" * (ctd.CHUNK + 5))
+    monkeypatch.setattr(ctd.subprocess, "Popen", fake)
+    monkeypatch.setattr(ctd.subprocess, "run", lambda *a, **k: pytest.fail("run を使った"))
+    gh = ctd.Gh()
+
+    assert gh.raw("p/zip", "zips", limit=ctd.CHUNK * 2) == b"z" * (ctd.CHUNK + 5)
+    assert fake.cmd == ["gh", "api", "--method", "GET", "p/zip"]
+    assert gh.calls == Counter({"zips": 1})
+    assert not fake.killed
+
+
+def test_gh_raw_exact_limit_is_accepted(monkeypatch) -> None:
+    monkeypatch.setattr(ctd.subprocess, "Popen", FakePopen(out=b"y" * 10))
+    assert ctd.Gh().raw("a", "zips", limit=10) == b"y" * 10
+
+
+def test_gh_raw_over_limit_counts_call(monkeypatch) -> None:
+    monkeypatch.setattr(ctd.subprocess, "Popen", FakePopen(out=b"y" * 11))
+    gh = ctd.Gh()
+    with pytest.raises(ctd.ArtifactTooLarge) as e:
+        gh.raw("a", "zips", limit=10)
+    assert e.value.received == 11
+    assert isinstance(e.value, ctd.GhError)
+    assert gh.calls == Counter({"zips": 1})
+
+
+def test_gh_raw_with_limit_failure_uses_stderr_first_line(monkeypatch) -> None:
+    monkeypatch.setattr(ctd.subprocess, "Popen", FakePopen(out=b"partial", err=b"  HTTP 410\nmore\n", code=1))
+    gh = ctd.Gh()
+    with pytest.raises(ctd.GhError, match="^p: HTTP 410$") as e:
+        gh.raw("p", "zips", limit=100)
+    assert type(e.value) is ctd.GhError
+    assert gh.calls == Counter({"zips": 1})
+
+
+def test_gh_raw_with_limit_failure_without_stderr(monkeypatch) -> None:
+    monkeypatch.setattr(ctd.subprocess, "Popen", FakePopen(code=2))
+    with pytest.raises(ctd.GhError, match="^p: gh が失敗した$"):
+        ctd.Gh().raw("p", "zips", limit=100)
+
+
+def test_gh_raw_with_limit_missing_gh(monkeypatch) -> None:
+    def missing(*a, **k):
+        raise FileNotFoundError("gh")
+
+    monkeypatch.setattr(ctd.subprocess, "Popen", missing)
+    gh = ctd.Gh()
+    with pytest.raises(ctd.GhUnavailable, match="gh が無い"):
+        gh.raw("a", "zips", limit=100)
+    assert gh.calls == Counter({"zips": 1})
+
+
+def test_gh_raw_with_limit_time_up_without_call(monkeypatch) -> None:
+    monkeypatch.setattr(ctd.subprocess, "Popen", lambda *a, **k: pytest.fail("gh を起動した"))
+    gh = ctd.Gh(deadline=100.0, clock=FakeClock(100.0))
+    with pytest.raises(ctd.GhTimeUp):
+        gh.raw("a", "zips", limit=100)
+    assert gh.calls == Counter()
+
+
+class FiringTimer:
+    """起動と同時に発火する `threading.Timer` の偽物。待ちの秒数を記録する。"""
+
+    seen: list[float] = []
+
+    def __init__(self, interval, fn) -> None:
+        FiringTimer.seen.append(interval)
+        self.fn = fn
+        self.cancelled = False
+
+    def start(self) -> None:
+        self.fn()
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
+@pytest.mark.parametrize(
+    ("deadline", "error", "message"),
+    [(105.0, ctd.GhTimeUp, "^a: 時間の上限$"), (None, ctd.GhError, f"^a: {ctd.CALL_TIMEOUT} 秒を過ぎた$")],
+)
+def test_gh_raw_with_limit_timer_fired(monkeypatch, deadline, error, message) -> None:
+    FiringTimer.seen = []
+    fake = FakePopen(out=b"data", code=0)
+    monkeypatch.setattr(ctd.subprocess, "Popen", fake)
+    monkeypatch.setattr(ctd.threading, "Timer", FiringTimer)
+    gh = ctd.Gh(deadline=deadline, clock=FakeClock(100.0))
+
+    with pytest.raises(error, match=message) as e:
+        gh.raw("a", "zips", limit=100)
+    if error is ctd.GhError:
+        assert not isinstance(e.value, ctd.GhTimeUp)
+    assert fake.killed
+    assert FiringTimer.seen == [5.0 if deadline else ctd.CALL_TIMEOUT]
+    assert gh.calls == Counter({"zips": 1})
+
+
+def test_gh_raw_with_limit_cancels_timer(monkeypatch) -> None:
+    timers = []
+
+    class Timer(FiringTimer):
+        def start(self) -> None:
+            timers.append(self)
+
+    monkeypatch.setattr(ctd.subprocess, "Popen", FakePopen(out=b"ok"))
+    monkeypatch.setattr(ctd.threading, "Timer", Timer)
+    assert ctd.Gh().raw("a", "zips", limit=100) == b"ok"
+    assert len(timers) == 1 and timers[0].cancelled
+
+
+def test_gh_raw_without_limit_matches_run(monkeypatch) -> None:
+    seen = []
+
+    def run(cmd, capture_output, timeout):
+        seen.append((cmd, timeout))
+        return subprocess.CompletedProcess(cmd, 0, b"\x00bin", b"")
+
+    monkeypatch.setattr(ctd.subprocess, "run", run)
+    monkeypatch.setattr(ctd.subprocess, "Popen", lambda *a, **k: pytest.fail("Popen を使った"))
+    gh = ctd.Gh()
+    assert gh.raw("a", "zips") == b"\x00bin"
+    assert seen == [(["gh", "api", "--method", "GET", "a"], ctd.CALL_TIMEOUT)]
+    assert gh.calls == Counter({"zips": 1})
+
+    monkeypatch.setattr(ctd.subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess(cmd, 1, b"", b"HTTP 500\n"))
+    with pytest.raises(ctd.GhError, match="^a: HTTP 500$"):
+        gh.raw("a", "zips")
+
+    def expired(cmd, capture_output, timeout):
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    monkeypatch.setattr(ctd.subprocess, "run", expired)
+    with pytest.raises(ctd.GhTimeUp, match="^a: 時間の上限$"):
+        ctd.Gh(deadline=101.0, clock=FakeClock(100.0)).raw("a", "zips")
+    with pytest.raises(ctd.GhError, match=f"^a: {ctd.CALL_TIMEOUT} 秒を過ぎた$") as e:
+        gh.raw("a", "zips")
+    assert not isinstance(e.value, ctd.GhTimeUp)
+    assert gh.calls == Counter({"zips": 3})
+
+
 # --- render_trend と cmd_trend ---
 
 
