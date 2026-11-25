@@ -159,17 +159,19 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
    `*` は足さない。同じディレクトリに利用者が置いた未追跡のファイルまで、`git status` と `git add` の対象から外れるためである。
    この確かめは必ず 3 の後に行う。`git check-ignore` は、追跡しているファイルを除外の対象として報告しないためである。
    共有していなければ、何もしない。各 clone では `write` が `*` の `.gitignore` を作り、その `.gitignore` は自分自身も除外するのでコミットされない
-5. 設定をステージする。4 で `.ndf/analysis/.gitignore` を直したときは、その変更もステージする。
-   `git diff --cached --name-status` で、ステージした変更が設定・4 で直した `.gitignore`・3 の削除だけで、
+5. 設定をステージする。4 で `.ndf/analysis/.gitignore` を直したときと、下の「止まったときの直し方」の表で `.gitignore` を作ったときは、
+   その `.gitignore` もステージする。
+   `git diff --cached --name-status` で、ステージした変更が設定・その `.gitignore`・3 の削除だけで、
    `.ndf/analysis/project.json` の追加や変更が無いことを確かめてからコミットする
 
 **`write` は、`.ndf/analysis/` の下のファイルを 1 つでも書く前に、解析の記録が git に無視されることを確かめる。**
 無視されない、または確かめられないときは、設定も記録も `.gitignore` も書かずに 1 で終わり、理由を出す。
-確かめ方は、メインディレクトリに `.ndf/analysis/.gitignore` があるかどうかで次のように分かれる。
+まず、記録のパスを git が判定できるかを見る。`.ndf/analysis` が別の場所へのシンボリックリンクのときなど、git が判定できなければ、
+`.gitignore` の有無によらず止まる。判定できるときの確かめ方は、メインディレクトリに `.ndf/analysis/.gitignore` があるかどうかで次のように分かれる。
 
 | `.ndf/analysis/.gitignore` | 確かめ方 |
 | --- | --- |
-| ある | 設定が除外されているかを調べる `git check-ignore` で、記録のパスも一緒に調べる。無視の出所（`.ndf/analysis/.gitignore`・ルートの `.gitignore`・`.git/info/exclude`・`core.excludesFile`）は問わない。記録を追跡していると、除外の行に当たっていても無視されない |
+| ある | 設定が除外されているかを調べる `git check-ignore` で、記録のパスも一緒に調べる。無視の出所（`.ndf/analysis/.gitignore`・ルートの `.gitignore`・`.git/info/exclude`・`core.excludesFile`）は問わない。記録を追跡しているときと、否定の行（`!` で始まるパターン）に当たったときは、無視されないとみなす |
 | 無い | `git ls-files` で、`.ndf/analysis/` の下に追跡しているファイルが無いことを確かめてから、`*` の `.gitignore` を作る。同じディレクトリの `.gitignore` はほかのどの除外の設定よりも優先されるので、これで記録は無視される。ルートの `.gitignore` に `!.ndf/analysis/` のような否定の行があっても同じである |
 
 書くものが無い `write` は、この確かめでは止まらずに 0 で終わる。
@@ -177,16 +179,18 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 **止まったときに直すコマンドは、メインディレクトリのルートで打つ。** `write` が調べるのは、メインディレクトリの索引と `.gitignore` だからである。
 リンクされた worktree の作業ディレクトリで直しても、メインディレクトリの索引では記録の追跡が続き、打ち直した `write` がまた止まる。
 追跡を外した変更や共有の `.gitignore` を直した変更のコミットは、上の移行の手順のとおり、移行用のブランチの作業ディレクトリで行う。
-理由に複数のパスが出たときは、パスごとに当てはまる行の直し方を行う。
+理由に複数のパスが出たときは、パスごとに当てはまる行の直し方を行う。ただし、追跡している `.ndf/analysis/.gitignore` が出たときは、
+ほかのパスより先にそれを戻す。記録とは別の追跡ファイルのために `.gitignore` を作るのは、戻した後も `.gitignore` が無いときに限る。
+戻した `.gitignore` を作り直すと、チームが共有している除外の行が失われるためである。
 
 | 出た理由 | 当てはまる状態 | 直し方 |
 | --- | --- | --- |
 | `.ndf/analysis/ の下のファイルが git に追跡されている: <パス>` で、パスが `.ndf/analysis/project.json` | 記録を追跡している | `git rm --cached -- .ndf/analysis/project.json` で記録だけを追跡から外してから打ち直す |
 | 同じ理由で、パスが `.ndf/analysis/.gitignore` | 追跡している `.gitignore` を手元で消した | `git restore -- .ndf/analysis/.gitignore` で戻し、移行の手順の 4 のとおり記録を外す行があるかを確かめてから打ち直す |
-| 同じ理由で、パスが上の 2 つ以外 | `.ndf/analysis/` に記録とは別のファイルを追跡している | 表示されたファイルの追跡はそのまま残す。`.ndf/analysis/.gitignore` を作って `/project.json` の行を書いてから打ち直す |
+| 同じ理由で、パスが上の 2 つ以外 | `.ndf/analysis/` に記録とは別のファイルを追跡している | 表示されたファイルの追跡はそのまま残す。`.ndf/analysis/.gitignore` を作って `/project.json` の行を書いてから打ち直す。この `.gitignore` はチームで共有する。移行の手順の 5 のとおり、移行用のブランチの作業ディレクトリにも同じ `.gitignore` を置き、設定と一緒にステージしてコミットする。共有しないと、別の clone の最初の `write` が同じ追跡ファイルで止まる |
 | `.ndf/analysis/project.json が git に無視されない。…` | 前からある `.ndf/analysis/.gitignore` が記録を外していない | その `.gitignore` に `/project.json` の行を足してから打ち直す。`.gitignore` を追跡しているかどうかによらず同じである。`*` は足さない。同じディレクトリに置いた別の未追跡のファイルまで、`git status` と `git add` の対象から外れるためである |
 | 同じ理由 | 記録を追跡している（`git ls-files -- .ndf/analysis/project.json` が何か出力する） | 1 行目と同じく、記録だけを追跡から外してから打ち直す |
-| `git が .ndf/analysis/ の追跡と無視を確かめられない: <git の出力>` | 索引が壊れているなど、git が判定できない | git の出力に従って直してから打ち直す |
+| `git が .ndf/analysis/ の追跡と無視を確かめられない: <git の出力>` | 索引が壊れている、`.ndf/analysis` が別の場所へのシンボリックリンクであるなど、git が判定できない | git の出力に従って直してから打ち直す |
 
 ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。
 設定を書くコマンド（`ndf project write`）は、設定が `.gitignore` の対象なら
