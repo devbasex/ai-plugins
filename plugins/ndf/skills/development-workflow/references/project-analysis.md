@@ -104,6 +104,11 @@ CI の実行時間・JUnit の合計・ワークフローの一覧・言語ご�
 - ブランチ名とブランチ戦略（`branch_strategy`）は書かない。書くのは `ndf project branch-strategy` だけである
 - 解析の結果が前と同じなら、ファイルを書かない
 - 設定はメインディレクトリの `.ndf/` に書く。コミットするかは下の「`.ndf/` の追跡」に従う。`.gitignore` の対象なら、そのことが出力に出る
+- `write` は、設定と記録を読む前に、`ndf project branch-strategy` が設定を書くときと同じロック（git の共通ディレクトリの
+  `ndf-branch-strategy.lock`）を取り、最後のファイルを書くまで持つ。ロックはメインディレクトリと worktree で共通なので、
+  別の worktree から同時に打っても、設定と記録は 1 回の `write` が書いた組み合わせになる。
+  30 秒（上限の設定 `branch-strategy.write-lock`）待っても取れなければ、何も読まず書かずに 1 で終わり、
+  `別の実行が設定を書いています。終わってから打ち直してください` を出す。`--dry-run` はロックを取らない
 - 設定の `analysis` には、項目ごとの書いた値の指紋（`analysis.written`）だけが残る。
   この指紋は、次の `write` が項目を前の `write` の値のままか、人が書き換えたかを見分けるためにある。設定と一緒にコミットする
 - `ndf project check` が読む解析の記録は、設定とは別のファイル（メインディレクトリの `.ndf/analysis/project.json`）に書く。
@@ -133,10 +138,18 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 3. 解析の記録を `.ndf/analysis/project.json` へ書き、`.ndf/analysis/.gitignore` が無ければ作る
 
 移行の後は、`.ndf/project.json` の差分を確かめてコミットする。差分には、旧い形のキーの削除・指紋の書き直し・解析で変わった項目が出る。
-`.ndf/analysis/` はコミットしない。`git status` に `.ndf/analysis/` が出たら、次のように直す。
+`.ndf/analysis/` はコミットしない。
 
-- 新しいファイルとして出る: 前からある `.ndf/analysis/.gitignore` が記録を外していない。`*` の行を書く
-- 変更として出る（すでに追跡している）: `git rm -r --cached .ndf/analysis` で追跡から外し、その削除をコミットする
+**`write` は、`.ndf/analysis/` の下へ書く前に、記録が git に無視されることを git 自身に確かめさせる。** 無視されない状態では、
+設定も記録も書かずに 1 で終わり、理由を出す。無視の出所（`.ndf/analysis/.gitignore`・ルートの `.gitignore`・`.git/info/exclude`・
+`core.excludesFile`）は問わない。ルートの `.gitignore` に `!.ndf/analysis/` のような否定の行があっても、`.ndf/analysis/.gitignore` の `*` が
+記録を外す。書くものが無い `write` は確かめずに 0 で終わる。
+
+| 理由 | 直し方 |
+| --- | --- |
+| `.ndf/analysis/ の下のファイルが git に追跡されている: <パス>` | `git rm -r --cached .ndf/analysis` で追跡から外し、その削除をコミットしてから打ち直す。追跡していた `.ndf/analysis/.gitignore` を手元で消した状態でも出る。そのときは消した `.gitignore` を `git restore` で戻してもよい |
+| `.ndf/analysis/project.json が git に無視されない。…` | 前からある `.ndf/analysis/.gitignore` が記録を外していないなら、`*` の行を書く。記録を追跡しているなら、上の行と同じく追跡から外す。直してから打ち直す |
+| `git が .ndf/analysis/ の追跡と無視を確かめられない: <git の出力>` | 索引が壊れているなど、git が判定できない。git の出力に従って直してから打ち直す |
 
 ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。
 設定を書くコマンド（`ndf project write`）は、設定が `.gitignore` の対象なら
