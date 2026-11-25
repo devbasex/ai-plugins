@@ -13,6 +13,8 @@
   `mvv_unresolved` で止まる（#4076）
 - 一部の相手役が起動し直しても結果を残さなかった（`incomplete_reviewers`。#3941）ら、欠けによらず `work_stopped` で止まる
   （読めなかった相手役の分を収束に数えない）
+- 承認ゲートの判定に要る MVV の記録の行（`redline`・`deferred`）を書けなかったら、どの終わり方より優先して `mvv_record_failed`
+  で止まる（記録が無いと承認ゲートが PR を省けるため。#3959）
 """
 
 from __future__ import annotations
@@ -45,6 +47,8 @@ GAP_UNRESOLVED = "unresolved_finding"
 GAP_UNHANDLED = "unhandled_finding"
 GAP_NO_REASON = "skip_without_reason"
 GAP_MVV = "mvv_unresolved"
+# 承認ゲートの判定に要る MVV の記録の行を書けなかった（#3959）
+RECORD_FAILED = "mvv_record_failed"
 # 必ず人の承認が要る操作に当たる指摘かどうかの欄（ジャーナルと要約の指摘）
 REDLINE = mvv_decide.REVIEW_REDLINE
 # NDF が機械で確かめて作った指摘かどうかの欄（要約の指摘）
@@ -187,8 +191,22 @@ def _bad_input(review: Review) -> Optional[str]:
     return None
 
 
-def finish(review: Review, handed: Sequence[Handed] = ()) -> Verdict:
-    """終わり方と指摘・足すべき内容から結果を決める。"""
+def finish(review: Review, handed: Sequence[Handed] = (), record_failed: Optional[Mapping[str, Any]] = None) -> Verdict:
+    """終わり方と指摘・足すべき内容から結果を決める。`record_failed` は承認ゲートの判定に要る MVV の記録の行を書けなかったときの
+    書けなかった行（`rows`）と注意（`cause`）で、あれば普段の判定の後に `mvv_record_failed` へ変える（欠けと判断は残す）。"""
+    verdict = _finish(review, handed)
+    if not record_failed:
+        return verdict
+    rows = record_failed.get("rows")
+    n = len(rows) if isinstance(rows, list) else 0
+    head = f"承認ゲートの判定に要る MVV の記録の行 {n} 件を書けない（保存先を直して打ち直す）"
+    summary = f"{head}。本来の終わり方は {verdict.kind or verdict.status}: {verdict.summary}"
+    cause = record_failed.get("cause")
+    warnings = (*verdict.warnings, *([cause] if isinstance(cause, str) else []))
+    return Verdict(STOPPED, RECORD_FAILED, summary, verdict.gaps, verdict.decisions, warnings)
+
+
+def _finish(review: Review, handed: Sequence[Handed]) -> Verdict:
     bad = _bad_input(review)
     if bad is not None:
         return Verdict(STOPPED, "invalid", bad, (), (), ())

@@ -226,6 +226,7 @@
 | [ndf-contract-fact-checks.md](ndf-contract-fact-checks.md) | `ndf check` が落とす 4 つ。使うモジュールの無い上限（`read_by` と規則 `limit-readers`）、スキーマの `enum` や上限と同じ値を持つ定数（`const-fact`）、コピーで増えた重複（`copy-dup` とラチェット）、対応先の無い設計レビューの指摘（`review-items`）。見つかった定数の直し方と、結果 JSON の `items` の欄も持つ |
 | [ndf-internal-data-versions.md](ndf-internal-data-versions.md) | NDF が書いて後で自分で読む記録（使用量・MVV・開発ループのイベント・工程どうしで引き継ぐ値など）の型とバージョン。古い形を読むときの変換、新しい形を読んだときの止まり方、製品のバージョンのキー `product_version`、キーの名前をそろえる規則 `internal-names` |
 | [ndf-mvv-current-and-stage-inputs.md](ndf-mvv-current-and-stage-inputs.md) | 承認済みのプロジェクト MVV をマージ先のブランチから読む `ndf records mvv current`、スナップショットと識別子、担当の AI へ渡す経路と渡さない担当、`--base` から MVV を読むブランチの決め方、cross-review の指摘の終わり方を残す MVV の記録と改訂の兆候 |
+| [ndf-mvv-gate-every-pace.md](ndf-mvv-gate-every-pace.md) | 承認ゲートの手前で進め方によらず打つ MVV 判定（#3959 #4055）。判定を打つ条件と省く条件の分離・出力 mvv_gate の終わり方と停止理由の定型文・レビューの保留の規則（review_holds）・cross-review の記録の欠落で止まる mvv_record_failed・リリース承認ゲートを省かない止めと数えない service:mvv の回答・承認資料の根拠の行の確かめ（ndf records mvv cite）・--machine と工程の入力（stage-in）の確かめ・失敗の原因と診断の記録・決定の理由・テスト観点。手順は development-workflow の references/pace.md と approval-request.md が正 |
 | [ndf-writing-criteria-and-reading-check.md](ndf-writing-criteria-and-reading-check.md) | 文書の種類ごとの読み手と、通じない文の見分け方をまとめた基準を、書く・レビューする・直す AI の指示に入れる仕組み。cross-review の基準 6 の重要度と 2 ラウンド目以降の範囲、読み手役の合否と 2 回まで、確認の記録 `reading-checks.jsonl` と `ndf records reading`、記録の無い質問を止める hook `reading-check`（2 回まで。`NDF_HOOK_OFF` で止められる）と、そう決めた理由 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

@@ -224,7 +224,8 @@ def resolve_inputs(stage: stages.StageDef, context: Mapping[str, Any]) -> dict[s
     if missing:
         raise StageInputMissing(missing)
     picked = {k: context[k] for k in (*stage.inputs, *stage.optional_inputs) if k in context}
-    errs = value_errors(picked)
+    # 規則は工程の入力の規約（`stage-in`）の 1 つで、`ndf records mvv gate` の環境変数の経路も同じ規則で確かめる（#3959 の決定 10）
+    errs = definition.validate_stage_input(stage, picked)
     if errs:
         raise StageInputInvalid(errs)
     return picked

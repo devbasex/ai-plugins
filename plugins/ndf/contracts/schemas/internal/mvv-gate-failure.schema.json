@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mvv-gate-failure.schema.json",
+  "title": "MVV 判定の失敗の診断の記録の 1 行",
+  "description": "MVV 判定と根拠の行の確かめが失敗したときの例外の全文（秘密の値だけを伏せる）を、判定を打った実行環境に残す行（表 ndf-files の mvv-gate-failures）。書き手は ndf.domains.records.mvv_gate.failure_text。PR のコメント・承認資料・結果 JSON には id だけを載せる",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "at", "id", "repo", "gate", "pr", "head", "kind", "cause"],
+  "properties": {
+    "version": {"$ref": "common.schema.json#/$defs/version", "description": "行の形のバージョン"},
+    "at": {"$ref": "common.schema.json#/$defs/time", "description": "記録した時刻"},
+    "id": {"type": "string", "pattern": "^[0-9a-f]{16}$", "description": "診断の記録の識別子。PR の値も例外の文も含まない乱数"},
+    "repo": {"type": ["string", "null"], "description": "記録の repo（メインディレクトリの絶対パス。mvv.repo_key）。解けなければ null"},
+    "gate": {"type": ["string", "null"], "description": "承認ゲートの区分（design・release）。無ければ null"},
+    "pr": {"type": ["integer", "null"], "description": "判定した PR の番号。決まる前なら null"},
+    "head": {"type": ["string", "null"], "description": "判定した PR の head。読む前なら null"},
+    "kind": {"type": "string", "minLength": 1, "description": "失敗の種類（mvv_material_decide.STOP_REASONS のキー）"},
+    "cause": {"type": "string", "description": "例外の全文に秘密の伏せ字（run_log.redact）だけを当てた文。ホスト名・パス・ブランチ名は残す"}
+  }
+}

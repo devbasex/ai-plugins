@@ -34,7 +34,7 @@ def _with_gaps(env):
 def test_the_gate_result_of_progress_is_the_question_with_the_material(st, env, repo, new_table, flow):
     tid = new_table()
     flow.turn(tid, _with_gaps(env))
-    out = _asked(st, repo, tid, lambda q: gate.Target(head="h1", material=None))
+    out = _asked(st, repo, tid, lambda q, **_: gate.Target(head="h1", material=None))
     assert out["status"] == "gate" and result.errors(out, 10) == []
     meta = out["metrics"]["gate"]
     assert meta["kind"] == "design" and meta["head"] == "h1" and out["metrics"]["stage"] == "設計"
@@ -68,9 +68,9 @@ def test_an_answer_whose_target_moved_before_it_is_read_goes_back_to_waiting(st,
     tid = new_table()
     flow.turn(tid)
     old = _answered(st, tid, "h1")
-    assert gate.recheck(st, tid, lambda q: gate.Target(head="h1")) is None
+    assert gate.recheck(st, tid, lambda q, **_: gate.Target(head="h1")) is None
     assert run.decide(run.read(st, tid)).action == run.Action.CONSUME
-    why = gate.recheck(st, tid, lambda q: gate.Target(head="h2"))
+    why = gate.recheck(st, tid, lambda q, **_: gate.Target(head="h2"))
     assert why is not None and "h2" in why
     new = gate.waiting(run.read(st, tid))
     assert new is not None and new.id != old.id and new.stage == "設計"
@@ -101,3 +101,108 @@ def test_github_observe_reads_the_head_and_refuses_when_it_cannot(st, repo, new_
 
     with pytest.raises(model.Refused, match="head を読めない"):
         gate.github_observe(repo, st.root, broken)(q)
+
+
+# --- プランの承認資料の「MVV 判定」の欄と head ごとの資料（#3959 の受け入れ条件 3） ------------------------------------
+
+JUDGED = {
+    "gate": "design",
+    "skip": False,
+    "verdict": {"verdict": "follow", "reasons": ["理由その 1", "理由その 2"], "boundary": ["レッドラインの本文"], "basis": ["Value 1"]},
+    "why": ["進め方 normal は承認ゲートを MVV 判定で省かない"],
+    "holds": ["#7: Value 3 の見送り（保留の本文）"],
+    "noted": True,
+    "note_url": "https://github.com/o/r/pull/7#issuecomment-1",
+    "pr": 7,
+    "head": "h1",
+}
+FREE = ("理由その 2", "レッドラインの本文", "進め方 normal は", "保留の本文")
+
+
+def _judging(env, judged):
+    """設計の工程の判定のステップ（design-mvv）が `judged` を出す `Env`。"""
+
+    def invoker(r, cwd, work_dir, answer):
+        if r.step == "design-mvv":
+            return invoke.finished(r, result.result("plan", "ok", "判定した", outputs={"mvv_gate": judged}))
+        return env.invoker(r, cwd, work_dir, answer)
+
+    return run.Env(**{**vars(env), "invoker": invoker})
+
+
+def _material_of(out):
+    return Path(out["presentation_path"]).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("private", [True, False])
+def test_the_plan_material_carries_the_verdict_of_the_head_it_was_made_for(st, env, repo, new_table, flow, monkeypatch, private):
+    from ndf.progress.gate import entry
+
+    st.private = private
+    tid = new_table()
+    flow.turn(tid, _judging(env, JUDGED))
+    first = _asked(st, repo, tid, lambda q, **_: gate.Target(head="h1"))
+    text = _material_of(first)
+    assert "## MVV 判定" in text and "判定した PR: #7・head h1" in text and "Value 1" in text
+    if private:
+        assert all(w in text for w in FREE) and JUDGED["note_url"] in text
+    else:
+        assert "理由 2 件・レッドライン 1 件" in text and f"コメント {JUDGED['note_url']} で読めます" in text
+        assert not any(w in text for w in FREE) and model.MVV_WITHHELD not in text
+    # 同じ head で表示し直す: 資料を書き直さず、observe が返したハッシュを使う（observe は 1 回だけ）
+    sha, calls = first["metrics"]["gate"]["material_sha256"], []
+    with monkeypatch.context() as m:
+        m.setattr(entry, "write_material", lambda *a, **k: pytest.fail("書き直した"))
+        m.setattr(entry, "material_sha256", lambda *a: pytest.fail("読み直した"))
+        again = _asked(st, repo, tid, lambda q, **kw: calls.append(kw) or gate.Target(head="h1", material=sha))
+    assert (
+        len(calls) == 1 and again["metrics"]["gate"]["material_sha256"] == sha and again["presentation_path"] == first["presentation_path"]
+    )
+    # 判定の後に push された: 新しい head の資料に前の head の判定を載せず、前の資料は残す
+    moved = _asked(st, repo, tid, lambda q, **_: gate.Target(head="h2"))
+    text = _material_of(moved)
+    assert moved["presentation_path"] != first["presentation_path"] and Path(first["presentation_path"]).exists()
+    assert "PR #7・head h2 の判定はまだ無い" in text and not any(w in text for w in FREE)
+    assert moved["metrics"]["gate"]["material_sha256"] == gate.material_sha256(Path(moved["presentation_path"]))
+    # 前の head の資料のハッシュで回答すると断る
+    old = gate.Target(head="h1", material=sha)
+    with pytest.raises(model.Refused, match="対象が変わった"):
+        gate.answer(
+            st,
+            tid,
+            gate.Answer(first["metrics"]["gate"]["id"], "approved", "見た", BY, "k-old", seen=old),
+            lambda q, **_: gate.Target(head="h2"),
+        )
+
+
+def test_write_material_places_an_owner_only_file_once_and_keeps_the_one_placed_first(st, repo, new_table, flow, monkeypatch, tmp_path):
+    import os
+    from dataclasses import replace
+
+    tid = new_table()
+    flow.turn(tid)
+    v = run.read(st, tid)
+    q = replace(gate.waiting(v), target=gate.Target("h1"))
+    old = os.umask(0o022)
+    try:
+        path = gate.write_material(tmp_path / "a", v, q)
+    finally:
+        os.umask(old)
+    mode = lambda p: p.stat().st_mode & 0o777  # noqa: E731
+    assert path.name == f"{q.id}-h1.md" and mode(path) == 0o600 and mode(path.parent) == 0o700
+    assert [p.name for p in path.parent.iterdir()] == [path.name]
+    # 既にある資料は書き直さず、権限も変えない
+    os.chmod(path, 0o640)
+    before = path.read_bytes()
+    assert gate.write_material(tmp_path / "a", v, q) == path and path.read_bytes() == before and mode(path) == 0o640
+    # 置く直前に別の呼び出しが同じ資料を置いた: 例外を出さず先の資料を使い、一時ファイルを残さない
+    raced = gate.material_path(tmp_path / "b", q)
+    real_link = os.link
+
+    def link(src, dst):
+        Path(dst).write_text("先に置いた資料\n", encoding="utf-8")
+        real_link(src, dst)
+
+    monkeypatch.setattr(os, "link", link)
+    assert gate.write_material(tmp_path / "b", v, q) == raced
+    assert raced.read_text(encoding="utf-8") == "先に置いた資料\n" and [p.name for p in raced.parent.iterdir()] == [raced.name]

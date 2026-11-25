@@ -48,6 +48,8 @@ SECRET_SHAPES = (
     # 認証ヘッダー（`Authorization: Bearer <値>`・`Proxy-Authorization: ...`）は値ごと伏せる
     (re.compile(r"(?i)\b((?:proxy-)?authorization\s*[:=]\s*)[^\r\n]+"), r"\1" + MASK),
 )
+# 秘密に数えない固定の SSH の利用者名（`ssh://git@github.com/...` の `git@`。群 user の終わりが `@` の後ろ）
+FIXED_SSH_USER = re.compile(r"(?<![A-Za-z0-9+.-])ssh://(?P<user>git@)github\.com(?![A-Za-z0-9.-])")
 # 全文ファイルへ逃がした値の、行に残す先頭の字数
 HEAD_CHARS = 200
 # JSON に書いた 1 字の最大のバイト数（制御文字の `\u00XX`）。stderr の続きの行の 1 行に入る字数を決める
@@ -81,12 +83,62 @@ def secret_values() -> list[str]:
     return sorted(found, key=len, reverse=True)
 
 
-def _mask(text: str, secrets: list[str]) -> str:
-    for s in secrets:
-        text = text.replace(s, MASK)
+def _occurrences(text: str, value: str) -> list[tuple[int, int]]:
+    """`value` の一致範囲をすべて返す。重なる一致も拾い（次は一致の開始の 1 字後から探す）、和は `union_spans` がまとめる。"""
+    found, at = [], text.find(value)
+    while at >= 0:
+        found.append((at, at + len(value)))
+        at = text.find(value, at + 1)
+    return found
+
+
+def _shape_span(m: re.Match[str], repl: str) -> tuple[int, int]:
+    """形の一致のうち伏せる範囲（置き換えが残す前置きの群と、URL の資格情報の後ろの `@` を除く）。"""
+    start = m.end(1) if m.re.groups else m.start()
+    return start, m.end() - 1 if repl.endswith("@") else m.end()
+
+
+def union_marked_spans(spans: list[tuple[int, int, bool]]) -> list[tuple[int, int, bool]]:
+    """伏せる範囲（始まり・終わり・秘密か）の重なりを和にまとめ、始まりの順に並べる。まとめた範囲は、どれかが秘密なら真。"""
+    out: list[tuple[int, int, bool]] = []
+    for start, end, mark in sorted(spans):
+        if out and start < out[-1][1]:
+            last = out[-1]
+            out[-1] = (last[0], max(last[1], end), last[2] or mark)
+        else:
+            out.append((start, end, mark))
+    return out
+
+
+def union_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """重なる範囲を和にまとめ、始まりの順に並べる。"""
+    return [(start, end) for start, end, _ in union_marked_spans([(start, end, False) for start, end in spans])]
+
+
+def secret_spans(text: str, secrets: Optional[list[str]] = None) -> list[tuple[int, int]]:
+    """原文の上の秘密の一致範囲（秘密の環境変数の値と `SECRET_SHAPES`）。重なりは和にまとめる（#3959）。
+
+    固定の SSH の利用者名（スキームがちょうど `ssh`・利用者名がちょうど `git`・ホストがちょうど `github.com`）は秘密に数えない。
+    """
+    secrets = secret_values() if secrets is None else secrets
+    fixed = {m.end("user") for m in FIXED_SSH_USER.finditer(text)}
+    spans = [span for value in secrets for span in _occurrences(text, value)]
     for pattern, repl in SECRET_SHAPES:
-        text = pattern.sub(repl, text)
-    return text
+        spans += [_shape_span(m, repl) for m in pattern.finditer(text) if not (repl.endswith("@") and m.end() in fixed)]
+    return union_spans(spans)
+
+
+def replace_spans(text: str, spans: list[tuple[int, int, str]]) -> str:
+    """重ならない範囲（始まり・終わり・置き換える文。始まりの順）を順に置き換えてつなぐ。"""
+    out, at = [], 0
+    for start, end, repl in spans:
+        out += [text[at:start], repl]
+        at = end
+    return "".join(out) + text[at:]
+
+
+def _mask(text: str, secrets: list[str]) -> str:
+    return replace_spans(text, [(start, end, MASK) for start, end in secret_spans(text, secrets)])
 
 
 def redact(value: Any, secrets: Optional[list[str]] = None) -> Any:

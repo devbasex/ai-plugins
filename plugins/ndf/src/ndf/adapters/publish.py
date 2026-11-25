@@ -17,7 +17,7 @@ from __future__ import annotations
 import getpass
 import re
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -43,11 +43,14 @@ MIN_ACCOUNT_CHARS = 3
 # リポジトリへの参照。URL の形は `https://github.com/<所有者>/<リポジトリ>...`・scheme の無い `github.com/...`・
 # SSH の clone の URL（`git@github.com:<所有者>/<リポジトリ>.git`・`ssh://git@github.com/...`）・
 # API の URL（`https://api.github.com/repos/<所有者>/<リポジトリ>...`）。番号の形は `<所有者>/<リポジトリ>#<番号>`。
+# スキームの後の利用者の部分は任意の値を許す（`user:pass@`・`<トークン>@`・伏せ字済みの `***@`）。認証情報の付いた URL も
+# 参照として拾い、秘密の範囲と重なる URL を全体ごと伏せるためである（#3959）。
 # リポジトリ名はリポジトリ名に使えない文字の手前で切り（日本語の句読点・全角の括弧・`,` に接しても一致する）、
 # 境界の `\w` は `re.ASCII` で ASCII に限る（`参照はacme/x#12` のように日本語の文字に接した参照も拾う）。
-# URL の続き（`/issues/1` など）は `/#?` で始まるときだけ、ASCII の区切りでない文字まで含める
+# URL の続き（`/issues/1` など）は `/#?` で始まるときだけ、ASCII の区切りでない文字まで含める。
+# スキームとホストは URL の規則どおり大文字・小文字を区別しない（`HTTPS://tok@GitHub.com/...` も URL の全体を拾って伏せる）
 _REPO_URL = re.compile(
-    r"(?<![\w.@-])(?:(?:https?|ssh|git)://)?(?:git@github\.com:|(?:git@)?(?:api\.github\.com/repos/|(?:www\.)?github\.com/))"
+    r"(?<![\w.@-])(?i:(?:(?:https?|ssh|git)://(?:[^\s/@]+@)?|git@)?(?:git@github\.com:|(?:api\.github\.com/repos/|(?:www\.)?github\.com/)))"
     r"(?P<repo>[A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?(?![A-Za-z0-9._-])(?:[/#?][^\s)\]>\"'`\u0080-\U0010ffff]*)?",
     re.ASCII,
 )
@@ -123,20 +126,49 @@ def qualified_ref(origin: str, source_repo: str, target_repo: str, visibility: M
     return f"{m.group('label')}{source_repo}#{m.group('number')}"
 
 
-def _drop_private_refs(text: str, private: set[str]) -> tuple[str, int]:
+def _overlaps(span: tuple[int, int], spans: Sequence[tuple[int, int]]) -> bool:
+    return any(start < span[1] and span[0] < end for start, end in spans)
+
+
+def _bare_repo(repo: str) -> re.Pattern[str]:
+    """対象のリポジトリの完全名 `repo` が単独で現れる所（`.git` の接尾辞ごと）に一致する正規表現（#3959）。
+
+    前は URL や別の名前の一部でないこと、後ろは名前の続きが来ないことだけを境界にする（文末の `.`・`/`・読点・括弧は外に残す）。
+    """
+    return re.compile(
+        r"(?<![A-Za-z0-9._/-])" + re.escape(repo) + r"(?:\.git)?(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9_-])(?!/[A-Za-z0-9._-])",
+        re.IGNORECASE,
+    )
+
+
+def _hidden_spans(text: str, private: set[str], bare: Optional[str] = None) -> list[tuple[int, int, bool]]:
+    """原文の上で伏せる範囲と、秘密を含むか（真なら秘密の伏せ字、偽なら非公開の参照の文）。重なる範囲は和にまとめる。
+
+    秘密の範囲（`run_log.secret_spans`）と、秘密と重なる URL の全体（認証情報の付いた URL）と、`private` の参照の範囲を
+    伏せ字をかける前の原文で求め、1 回で置き換える。参照を先に置き換えると参照の境界をまたぐ秘密の後半が残り、
+    秘密を先に伏せると `ssh://...@github.com/<所有者>/<リポジトリ>` が参照の形に一致しなくなってリポジトリ名が残るためである。
+    """
+    secrets = run_log.secret_spans(text)
+    marked = [(start, end, True) for start, end in secrets]
     lowered = {r.lower() for r in private}
-    count = 0
-
-    def repl(m: re.Match[str]) -> str:
-        nonlocal count
-        if m["repo"].lower() not in lowered:
-            return m[0]
-        count += 1
-        return PRIVATE_REF_TEXT
-
     for pattern in _REPO_PATTERNS:
-        text = pattern.sub(repl, text)
-    return text, count
+        for m in pattern.finditer(text):
+            if pattern is _REPO_URL and _overlaps(m.span(), secrets):
+                marked.append((m.start(), m.end(), True))
+            elif m["repo"].lower() in lowered:
+                marked.append((m.start(), m.end(), False))
+    if bare is not None and bare.lower() in lowered:
+        marked += [(m.start(), m.end(), False) for m in _bare_repo(bare).finditer(text)]
+    return run_log.union_marked_spans(marked)
+
+
+def _drop_hidden(text: str, private: set[str], bare: Optional[str] = None) -> tuple[str, dict[str, int]]:
+    spans = _hidden_spans(text, private, bare)
+    dropped = Counter[str](DropKind.SECRET if secret else DropKind.PRIVATE_REF for _, _, secret in spans)
+    if dropped[DropKind.SECRET]:
+        dropped[DropKind.SECRET] = 1
+    masked = run_log.replace_spans(text, [(start, end, run_log.MASK if secret else PRIVATE_REF_TEXT) for start, end, secret in spans])
+    return masked, dict(dropped)
 
 
 def _drop_emails(text: str) -> tuple[str, int]:
@@ -161,19 +193,13 @@ def _drop_accounts(text: str, accounts: Iterable[str]) -> tuple[str, int]:
     return pattern.subn(ACCOUNT_TEXT, text)
 
 
-def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: Iterable[str] = ()) -> Scrubbed:
-    """書く本文から、書き先に出してはいけないものを落とす（上の表）。`public` は書き先が公開か。"""
-    dropped: dict[str, int] = {}
-    # 非公開の参照は秘密の伏せ字より先に原文から落とす。伏せ字を先にかけると `ssh://git@github.com/...` が
-    # `ssh://[REDACTED]@github.com/...` に変わり、参照の形に一致しなくなってリポジトリ名が残る
-    if public:
-        text, n = _drop_private_refs(text, set(private_repos))
-        if n:
-            dropped[DropKind.PRIVATE_REF] = n
-    masked = run_log.redact(text)
-    if masked != text:
-        dropped[DropKind.SECRET] = 1
-    text = masked
+def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: Iterable[str] = (), bare: Optional[str] = None) -> Scrubbed:
+    """書く本文から、書き先に出してはいけないものを落とす（上の表）。`public` は書き先が公開か。
+
+    秘密（認証情報の付いた URL は全体）は書き先によらず落とし、非公開の参照は公開の書き先でだけ落とす。`bare` のリポジトリが
+    `private_repos` にあれば、その完全名が単独で現れる所も参照と同じに落とす（`_bare_repo`）。
+    """
+    text, dropped = _drop_hidden(text, set(private_repos) if public else set(), bare)
     if public:
         steps = (
             (DropKind.HOME, lambda t: _HOME.subn(HOME_TEXT, t)),
@@ -185,6 +211,41 @@ def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: 
             if n:
                 dropped[kind] = n
     return Scrubbed(text, dropped)
+
+
+# 参照先の公開範囲を確かめられず、どこを伏せるかを決められなかった自由記述の代わりに出す文
+WITHHELD = "（参照先の公開範囲を確かめられず伏せた）"
+
+
+def _query_failure(exc: Exception) -> str:
+    """伏せる処理の失敗の原因。例外の文は、照会した先のリポジトリの名前を含みうるので使わない（GitHub の失敗は
+    `adapters.github.GitHubError` の欄だけから決める）。"""
+    if not all(hasattr(exc, k) for k in ("quota", "unreached", "status")):
+        return f"照会の失敗（{type(exc).__name__}）"
+    if exc.quota:
+        return "レート制限"
+    return "通信の障害" if exc.unreached else f"GitHub が照会を断った（HTTP {exc.status}）"
+
+
+class Once:
+    """伏せる処理 `clean` を、値ごとに 1 回だけ打つ（レビューの結果と MVV の記録が、同じ値を 2 回照会しないための包み）。
+    失敗したら、以後はどの値も `WITHHELD` にして打ち直さない。`failure` は失敗の原因（無ければ None）。"""
+
+    def __init__(self, clean: Callable[[Sequence[str]], Sequence[str]]) -> None:
+        self._clean = clean
+        self._done: dict[str, str] = {}
+        self.failure: Optional[str] = None
+        # 失敗した例外（手元の診断の記録へ渡す。結果や PR へ載せるのは `failure` だけ）
+        self.error: Optional[Exception] = None
+
+    def __call__(self, texts: Sequence[str]) -> list[str]:
+        new = [t for t in dict.fromkeys(texts) if t not in self._done]
+        if new and self.failure is None:
+            try:
+                self._done |= dict(zip(new, self._clean(new), strict=True))
+            except Exception as exc:  # noqa: BLE001 ネットワーク: 照会できなくてもレビューの結果は返し、自由記述を伏せる
+                self.failure, self.error = _query_failure(exc), exc
+        return [WITHHELD if self.failure is not None else self._done[t] for t in texts]
 
 
 @dataclass
@@ -205,19 +266,46 @@ class Publisher:
         """書き先へ公開の書き先と同じ検査をかけるか。公開か、公開範囲を読めない（`UNKNOWN`）なら真。"""
         return self.visibility() in SCRUBBED_VISIBILITIES
 
-    def _private_refs(self, texts: Sequence[str]) -> set[str]:
-        """公開（か読めない）書き先のとき、本文に出る他のリポジトリのうち公開でないもの。ほかの書き先・参照が無ければ読まずに空。"""
-        if not self.exposed():
-            return set()
-        refs = {r for t in texts for r in repo_refs(t) if not same_repo(r, self.hub.repo)}
-        seen = self.hub.visibilities(refs) if refs else {}
-        return {r for r, v in seen.items() if v != PUBLIC}
+    def _private_refs(self, texts: Sequence[str], exposed: bool, assume_public: bool = False) -> set[str]:
+        """公開（か読めない）書き先のとき、本文に出る他のリポジトリのうち公開でないもの。ほかの書き先・参照が無ければ読まずに空。
 
-    def guarded(self, *texts: str) -> tuple[list[str], dict[str, int]]:
-        """書く本文（題と本文など）を検査した結果と、落とした所の種類ごとの件数の和。"""
-        exposed = self.exposed()
-        private = self._private_refs(texts)
-        got = [scrub(text, exposed, private, self.accounts) for text in texts]
+        秘密を含む参照（参照そのものを伏せると変わるか、原文の一致の範囲が秘密の範囲と重なる）は、秘密の値を GitHub へ
+        送らないよう照会せず、公開でないものとして返す（#3959）。`assume_public` が真なら、書き先のリポジトリ自身への参照と
+        その完全名が単独で現れる所も同じ 1 回の照会に入れる（受け手が書き先を読めるとは限らないため）。
+        """
+        if not exposed:
+            return set()
+        clean: set[str] = set()
+        tainted: set[str] = set()
+
+        def sort(repo: str, span: tuple[int, int], secrets: Sequence[tuple[int, int]]) -> None:
+            bad = run_log.redact(repo) != repo or _overlaps(span, secrets)
+            (tainted if bad else clean).add(repo)
+
+        for text in texts:
+            secrets = run_log.secret_spans(text)
+            for m in (m for pattern in _REPO_PATTERNS for m in pattern.finditer(text)):
+                if assume_public or not same_repo(m["repo"], self.hub.repo):
+                    sort(m["repo"], m.span(), secrets)
+            if assume_public:
+                # 単独の完全名も、URL・番号付きの参照と同じく秘密と重なれば照会しない
+                for m in _bare_repo(self.hub.repo).finditer(text):
+                    sort(self.hub.repo, m.span(), secrets)
+        # 照会の直前に same_repo と同じ規則（大文字・小文字を区別しない）で名前をまとめ、同じリポジトリを 1 回だけ問う
+        dirty = {t.lower() for t in tainted}
+        asked = set({r.lower(): r for r in sorted(clean) if r.lower() not in dirty}.values())
+        seen = self.hub.visibilities(asked) if asked else {}
+        return tainted | {r for r, v in seen.items() if v != PUBLIC}
+
+    def guarded(self, *texts: str, assume_public: bool = False) -> tuple[list[str], dict[str, int]]:
+        """書く本文（題と本文など）を検査した結果と、落とした所の種類ごとの件数の和。
+
+        `assume_public` が真なら書き先の公開範囲を照会せず、公開の書き先として伏せる（受け手が書き先の閲覧者と限らない結果）。
+        """
+        exposed = True if assume_public else self.exposed()
+        private = self._private_refs(texts, exposed, assume_public)
+        bare = next((r for r in private if same_repo(r, self.hub.repo)), None) if assume_public else None
+        got = [scrub(text, exposed, private, self.accounts, bare) for text in texts]
         return [g.text for g in got], dict(sum((Counter(g.dropped) for g in got), Counter()))
 
     def origin(self, origin: str, source_repo: str) -> str:

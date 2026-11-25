@@ -34,6 +34,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `loop-record` | `ndf-loop` main:.ndf/loop | `<loop>/loop.json` | record | — | 開発ループとスプリント（M1） | cleanup | 公開 |
 | `mvv` | `ndf` repo:.ndf | `mvv.json` | ndf_settings | 追跡 | 人の承認（M7） | kept | 内部（予告なく変えてよい） |
 | `mvv-body` | `ndf` repo:.ndf | `mvv.md` | ndf_settings | 追跡 | 人の承認（M7） | kept | 内部（予告なく変えてよい） |
+| `mvv-gate-failures` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `mvv-gate-failures.jsonl` | record | — | MVV 判定の失敗の診断の記録（#3959） | kept | 内部（予告なく変えてよい） |
 | `mvv-signals` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `mvv-signals.jsonl` | record | — | 承認ゲートの回答の写し（M7） | kept | 内部（予告なく変えてよい） |
 | `mvv-validation` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `mvv-validation.jsonl` | record | — | MVV 判定（M7） | kept | 内部（予告なく変えてよい） |
 | `organizer-answer` | `organizer` env:.（NDF_ORGANIZER_DIR で差し替え） | `answers/<id>.json` | exchange | — | 外のオーガナイザー（サービス） | kept | 公開 |

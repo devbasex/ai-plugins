@@ -21,7 +21,7 @@ from pathlib import PurePosixPath
 from typing import Any, NamedTuple, Optional
 
 from ndf import identity
-from ndf.contracts import facts
+from ndf.contracts import facts, internal
 from ndf.domains.records import files
 from ndf.domains.records import mvv_material_decide as mm
 
@@ -46,12 +46,23 @@ REVIEW_ITEM, REVIEW_JUDGED, REVIEW_REDLINE, REVIEW_REDLINE_ITEMS = "mvv", "judge
 REVIEW_FIXED, REVIEW_DEFERRED, REVIEW_UNRESOLVED = "fixed", "deferred", "unresolved"
 # 同じキーの指摘が 2 件あるとき、後のものほど優先して記録する終わり方の順
 _REVIEW_ORDER = (REVIEW_FIXED, REVIEW_UNRESOLVED, REVIEW_DEFERRED, REVIEW_REDLINE)
+# 承認ゲートの判定に要る（書けなければ cross-review を止める）終わり方（#3959）
+REVIEW_REQUIRED = (REVIEW_REDLINE, REVIEW_DEFERRED)
+# 見送りの区分（修正担当が見送るときに書く。#3959 の決定 2）: 利用者の判断が要る・範囲外として起票した・基準に当たらない
+REVIEW_DEFER = "defer"
+DEFER_NEEDS_USER, DEFER_FILED, DEFER_NOT_APPLICABLE = "needs_user", "filed", "not_applicable"
+DEFERS = (DEFER_NEEDS_USER, DEFER_FILED, DEFER_NOT_APPLICABLE)
+# 保留にしない見送りの区分
+_SETTLED_DEFERS = (DEFER_FILED, DEFER_NOT_APPLICABLE)
+# 指摘のジャーナルの行の欄: 修正担当が直したと返した時刻（`jsonl.now` の形）。通常の指摘を直した記録で承認ゲートの保留を解くのは、
+# 保留の見送りの記録より後に直した行だけである（見送りより前の直しの再送で保留を解かない。#3959）
+REVIEW_FIXED_AT = "fixed_at"
 # NDF が機械で確かめて作った指摘（根拠の記述の誤り）の `by`
 BY_NDF = identity.FIXED_WORDS["entrypoint"]
 # 終わり方ごとの、記録に残す自由記述の欄
 _REVIEW_NOTES = {REVIEW_DEFERRED: "reason", REVIEW_REDLINE: "text"}
 # 前の記録と比べる欄（最初の組は MVV と指摘の状態、次の組は記録の中身）
-_REVIEW_STATE = ("head", "outcome", "mvv_version", "sha256")
+_REVIEW_STATE = ("head", "outcome", "mvv_version", "sha256", REVIEW_DEFER)
 _REVIEW_CONTENT = ("item", "reason", "text", "withheld")
 # 判定の行が持つ、判定の中身（承認ゲートの判定が読む。再利用の行へも写す）
 VERDICT_DETAILS = ("reasons", "boundary", "basis")
@@ -71,8 +82,9 @@ _CITED_VERSION = re.compile(r"（MVV バージョン ([0-9]+)(?:・スプリン�
 _ITEM_SEPARATOR = re.compile(r" / |・")
 # プロジェクト MVV の項目でないので突き合わせない項目（スプリント MVV の項目と、当たる項目が無いことの明記）
 _SPRINT_ITEM, _NO_ITEM = "スプリント", "根拠なし"
-# 根拠の記述の誤りの種類: 承認済みでないバージョン・そのバージョンに無い項目・バージョンを読めない
-CITATION_VERSION, CITATION_UNKNOWN, CITATION_FORMAT = "version", "unknown", "format"
+# 根拠の記述の誤りの種類: 承認済みでないバージョン・そのバージョンに無い項目・バージョンを読めない・承認資料の見出しから外れた
+# （`mvv.cite`。#3959）
+CITATION_VERSION, CITATION_UNKNOWN, CITATION_FORMAT, CITATION_HEADING = "version", "unknown", "format", "heading"
 
 
 class MvvError(ValueError):
@@ -304,6 +316,8 @@ class Judged(NamedTuple):
     row: Mapping[str, Any]
     outcome: str
     item: Optional[str]
+    # MVV の項目の無い通常の指摘（承認ゲートの保留を決めるためだけに記録する。`judged_findings` の `holds`）
+    plain: bool = False
 
     @property
     def free_fields(self) -> dict[str, str]:
@@ -311,7 +325,7 @@ class Judged(NamedTuple):
 
         根拠の記述の誤りが引いた項目、見送りの理由、必ず人の承認が要る操作に当たる指摘の本文のうち、文字列のもの。
         """
-        held = {"item": self.row.get("cited")} if self.item is None else {}
+        held = {"item": self.row.get("cited")} if self.item is None and not self.plain else {}
         note = _REVIEW_NOTES.get(self.outcome)
         held |= {note: self.row.get(note)} if note is not None else {}
         return {k: v for k, v in held.items() if isinstance(v, str)}
@@ -322,11 +336,21 @@ class Judged(NamedTuple):
         return list(self.free_fields.values())
 
 
-def judged_findings(rows: Iterable[Mapping[str, Any]], mvv: str) -> list[Judged]:
-    """cross-review の指摘のうち、MVV `mvv`（`identity_of` の値）で判定したもの。前の MVV での判定は含まない。"""
+def judged_findings(rows: Iterable[Mapping[str, Any]], mvv: str, *, holds: bool = False, since: Optional[str] = None) -> list[Judged]:
+    """cross-review の指摘のうち、MVV `mvv`（`identity_of` の値）で判定したもの。前の MVV での判定は含まない。
+
+    `holds` なら、MVV で判定していない通常の指摘のうち、承認ゲートの保留に関わるもの（`plain` が真）も返す。区分が
+    `needs_user`・無い・知らない値の見送りと、直した時刻（`REVIEW_FIXED_AT`）が `since` より後の直した指摘である
+    （`since` が None ならすべての直した指摘。前の起動で記録へ照らした直しを、起動のたびに照らし直さない。#3959）。
+    """
     out = []
     for row in rows:
-        if row.get(REVIEW_JUDGED) != mvv or row.get("outcome") not in _REVIEW_ORDER:
+        if row.get("outcome") not in _REVIEW_ORDER:
+            continue
+        if holds and _plain_hold(row, since):
+            out.append(Judged(row, row["outcome"], None, True))
+            continue
+        if row.get(REVIEW_JUDGED) != mvv:
             continue
         if row.get(REVIEW_REDLINE):
             out.append(Judged(row, REVIEW_REDLINE, "・".join(row[REVIEW_REDLINE_ITEMS])))
@@ -335,13 +359,77 @@ def judged_findings(rows: Iterable[Mapping[str, Any]], mvv: str) -> list[Judged]
     return out
 
 
+def plain_row(row: Mapping[str, Any]) -> bool:
+    """MVV で判定していない通常の指摘（項目・判定・レッドラインが無く、NDF が作った指摘でない）か。"""
+    return not (row.get(REVIEW_JUDGED) is not None or REVIEW_ITEM in row or row.get("by") == BY_NDF or row.get(REVIEW_REDLINE))
+
+
+def _plain_hold(row: Mapping[str, Any], since: Optional[str]) -> bool:
+    """MVV で判定していない通常の指摘で、承認ゲートの保留を作る見送りか、`since` の後に直した指摘か。"""
+    if not plain_row(row):
+        return False
+    if row.get("outcome") == REVIEW_FIXED:
+        done = row.get(REVIEW_FIXED_AT)
+        return isinstance(done, str) and (since is None or internal.epoch(done) > internal.epoch(since))
+    return row.get("outcome") == REVIEW_DEFERRED and defer_holds(row.get(REVIEW_DEFER))
+
+
+def defer_holds(defer: Any) -> bool:
+    """見送りの区分 `defer` が、承認ゲートの保留になる区分（`needs_user`・無い・知らない値）か。"""
+    return defer not in _SETTLED_DEFERS
+
+
+def _user_deferral(row: Optional[Mapping[str, Any]]) -> bool:
+    """記録 `row` が、通常の指摘（項目の無い記録）の、利用者の判断に委ねた見送りか。"""
+    return row is not None and row.get("outcome") == REVIEW_DEFERRED and defer_holds(row.get(REVIEW_DEFER)) and "item" not in row
+
+
+def plain_fix_clears(seq: Sequence[Mapping[str, Any]], fixed_at: str) -> bool:
+    """1 つのキーの記録の並び `seq`（記録の順）の保留を、`fixed_at` に直した通常の指摘の記録で解いてよいか。
+
+    解けるのは通常の指摘（項目の無い記録）の、利用者の判断に委ねた見送りが最後の記録で、直っていないレッドラインが無く、
+    その見送りを記録した後に直したときだけ。前の MVV でレッドラインだった指摘は、MVV が変わると通常の指摘として扱われるが、
+    その直しではレッドラインの保留を解かない。別の状態ディレクトリが後から見送った指摘を、それより前の直しの再送では解かない。
+    """
+    # 自由記述を伏せて書いた直しの記録（自由記述の無い直しには付けないが、前のバージョンが付けた）は、補って書き直せるよう外して読む
+    end = len(seq)
+    while end and seq[end - 1].get("outcome") == REVIEW_FIXED and seq[end - 1].get("withheld"):
+        end -= 1
+    seq = seq[:end]
+    if not seq:
+        return False
+    if _open_redline(seq):
+        return False
+    last = seq[-1]
+    if not _user_deferral(last):
+        return False
+    return internal.epoch(str(last.get("at"))) < internal.epoch(fixed_at)
+
+
+def holding_keys(seqs: Mapping[str, Sequence[Mapping[str, Any]]]) -> set[str]:
+    """キー → 記録の並び（記録の順）`seqs` のうち、通常の指摘の、利用者の判断に委ねた見送りが（伏せた直しを除いて）最後の記録の
+    キー。通常の指摘を直した記録で解ける保留の候補である（実際に解けるかは `plain_fix_clears` が決める）。"""
+    out = set()
+    for key, seq in seqs.items():
+        rest = [r for r in seq if not (r.get("outcome") == REVIEW_FIXED and r.get("withheld"))]
+        last = rest[-1] if rest else None
+        if _user_deferral(last):
+            out.add(key)
+    return out
+
+
 def review_entry(found: Judged, shown: Optional[Mapping[str, str]]) -> dict[str, Any]:
-    """MVV の記録の、指摘ごとに違う欄。`shown` は自由記述 → 伏せた後の値で、None なら自由記述を書かずに `withheld` を置く。"""
+    """MVV の記録の、指摘ごとに違う欄。`shown` は自由記述 → 伏せた後の値で、None なら自由記述を書かずに `withheld` を置く。
+
+    自由記述の無い指摘（直した通常の指摘など）は、伏せるものが無いので `withheld` を置かない（後で補う記録にしない）。"""
     out: dict[str, Any] = {"id": str(found.row["id"]), "outcome": found.outcome}
     if found.item is not None:
         out["item"] = found.item
+    # 区分は自由記述でないので、伏せた記録にも書く
+    if found.outcome == REVIEW_DEFERRED and found.row.get(REVIEW_DEFER) in DEFERS:
+        out[REVIEW_DEFER] = found.row[REVIEW_DEFER]
     if shown is None:
-        return out | {"withheld": True}
+        return out | ({"withheld": True} if found.free_fields else {})
     return out | {k: shown[v] for k, v in found.free_fields.items()}
 
 
@@ -364,6 +452,70 @@ def review_recorded(last: Optional[Mapping[str, Any]], entry: Mapping[str, Any])
         return False
     keys = _REVIEW_STATE if entry.get("withheld") and not last.get("withheld") else _REVIEW_STATE + _REVIEW_CONTENT
     return all(last.get(k) == entry.get(k) for k in keys)
+
+
+def review_holds(
+    rows: Iterable[Mapping[str, Any]], broken: int, repo: str, prs: Iterable[int], mvv: tuple[int, str], *, hidden: str
+) -> list[str]:
+    """PR `prs` のレビューの記録 `rows`（`mvv-review` の行）のうち、承認ゲートを省かない保留（#3959 の決定 2・11）。
+
+    指摘のキーごとに記録の順（時刻の順。同じ時刻なら追記の順）で、多くても 1 件を次の優先順で返す。head で行を選ばない。
+    (1) 最後の `redline` の行より後に同じキーの `fixed` が無い（バージョンを問わない）。(2) 最後の行が今の MVV（`mvv` の
+    （バージョン, sha256）の組）の伏せた行。(3) 今の MVV の `deferred` のうち区分が `needs_user`・無い・知らない値のものがあり、
+    その後に今の MVV の `fixed` が無い。伏せた行の本文・理由の代わりに `hidden` を載せる。`broken` は読めなかった行の数。
+    """
+    wanted = set(prs)
+    mine = [r for r in rows if r.get("kind") == MVV_REVIEW and r.get("repo") == repo and r.get("pr") in wanted]
+    keyed: dict[tuple[Any, Any], list[Mapping[str, Any]]] = {}
+    for r in sorted(mine, key=lambda r: internal.epoch(str(r.get("at")))):
+        keyed.setdefault((r.get("pr"), r.get("key")), []).append(r)
+    out = [f"mvv-validation.jsonl に読めない行が {broken} 件ある"] if broken else []
+    for (pr, _), seq in keyed.items():
+        hold = _key_hold(seq, mvv, hidden)
+        if hold is not None:
+            out.append(f"PR #{pr} の {hold}")
+    return out
+
+
+def _note(row: Mapping[str, Any], name: str) -> str:
+    """記録の自由記述の欄（無ければ空の文字列）。"""
+    return str(row[name]) if name in row else ""
+
+
+def _named(row: Mapping[str, Any]) -> str:
+    return str(row["item"]) if isinstance(row.get("item"), str) else f"指摘 {row.get('id')}"
+
+
+def _open_redline(seq: Sequence[Mapping[str, Any]]) -> list[int]:
+    """1 つのキーの記録の並び `seq` に直っていないレッドラインがあれば、`redline` の行の位置（記録の順）。無ければ空。
+
+    直っていないとは、最後の `redline` の行より後に `fixed` の行が無いこと（バージョンを問わない）。"""
+    lines = [n for n, r in enumerate(seq) if r.get("outcome") == REVIEW_REDLINE]
+    if lines and not any(r.get("outcome") == REVIEW_FIXED for r in seq[lines[-1] + 1 :]):
+        return lines
+    return []
+
+
+def _key_hold(seq: Sequence[Mapping[str, Any]], mvv: tuple[int, str], hidden: str) -> Optional[str]:
+    """1 つのキーの記録の並びの保留（無ければ None）。優先順はレッドライン・伏せた行・見送り。"""
+    lines = _open_redline(seq)
+    if lines:
+        items = dict.fromkeys(i for n in lines for i in _named(seq[n]).split("・"))
+        last = seq[lines[-1]]
+        return f"{'・'.join(items)}（redline）: {hidden if last.get('withheld') else _note(last, 'text')}"
+    current = [r for r in seq if (r.get("mvv_version"), r.get("sha256")) == mvv]
+    if seq[-1].get("withheld") and current and current[-1] is seq[-1]:
+        return f"{_named(seq[-1])}（記録の自由記述が未完了）"
+    held: Optional[Mapping[str, Any]] = None
+    for r in current:
+        if r.get("outcome") == REVIEW_DEFERRED and defer_holds(r.get(REVIEW_DEFER)):
+            held = r
+        elif r.get("outcome") == REVIEW_FIXED:
+            held = None
+    if held is None:
+        return None
+    kind = held[REVIEW_DEFER] if isinstance(held.get(REVIEW_DEFER), str) else "区分なし"
+    return f"{_named(held)}（deferred・{kind}）: {hidden if held.get('withheld') else _note(held, 'reason')}"
 
 
 def signals_ref(base_branch: str, remote: str) -> str:
