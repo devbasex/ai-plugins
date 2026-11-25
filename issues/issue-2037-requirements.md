@@ -12,7 +12,7 @@
 
 ## 今の姿
 
-スプリントの中の並列は、設計と実装のフェーズで開く。`ndf progress new` が実装のプランを課題ごとに書き出し、`ndf plan queue --max 3` が同時に 3 本まで流す。`--max` を省くと、触るファイルの重ならないプランをすべて一度に起動する（[agent-layers.md の「スプリントの中の並列」](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/skills/development-workflow/references/agent-layers.md)）。
+スプリントの中では、実装のフェーズで、重ならない実装のプランを設定した本数まで同時に流す。`ndf progress new` は開発の工程を始めるだけで、実装のプランはまだ組まない。実装のフェーズに入ると、レビューの単位（1 つの課題か、まとめて見る複数の課題）ごとに実装のプランを組み、`ndf plan queue --max 3` が同時に 3 本まで流す。`--max` を省くと、触るファイルの重ならないプランをすべて一度に起動する（[agent-layers.md の「スプリントの中の並列」](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/skills/development-workflow/references/agent-layers.md)）。
 
 - キューの重なりの判定は `plugins/ndf/src/ndf/core/plan/queue_decide.py` の `overlaps` で行う。2 本のプランの触るファイルの設定に同じファイルがあれば重なるとし、関数の単位は見ない
 - 触るファイルの設定の無いプランは、すべてのプランと重なるとみなし直列にする（ https://github.com/devbasex/ai-plugins/issues/2165 で決めた）
@@ -77,7 +77,7 @@ $ ndf plan check p1.json p2.json
 ## 対象範囲
 
 含む:
-- 工程（`ndf progress new` と実装のフェーズの supervisor）が組む実装のプランに、設計書の「設計の結果」の触るファイルを入れること
+- 実装のフェーズの supervisor がレビューの単位ごとに組む実装のプランに、設計書の「設計の結果」の触るファイルを入れること
 - 触る範囲に関数（シンボル）を書けるようにし、キューの重なりの判定が関数の単位で分けること
 - 関数を書かないファイル・設定の無いプラン・ディレクトリの設定の扱いを今のまま保つこと
 
@@ -109,7 +109,7 @@ $ ndf plan check p1.json p2.json
 | # | イベント | 引き金 | 失敗したとき | 順序の前提 |
 | --- | --- | --- | --- | --- |
 | E1 | 設計書の「設計の結果」に触るファイルと関数を書いた | 設計の工程 | 関数を書かなければファイルの単位で判定する（受け入れ条件 4） | — |
-| E2 | 実装のプランを組み、触る範囲を入れた | `ndf progress new`・実装のフェーズの supervisor | 設計の結果が読めなければ触る範囲を入れず、今と同じく直列にする（受け入れ条件 5） | E1 |
+| E2 | 実装のプランを組み、触る範囲を入れた | 実装のフェーズの supervisor | 設計の結果が読めなければ触る範囲を入れず、今と同じく直列にする（受け入れ条件 5） | E1 |
 | E3 | キューが同時に流す組を決めた | `ndf plan queue` | — | E2 |
 | E4 | 同じファイルの 2 本がマージの順で衝突し、base-sync が取り込んだ | 2 本目のマージ | 今の base-sync の止まり方のまま | E3 |
 
