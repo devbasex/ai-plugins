@@ -161,13 +161,7 @@ def doc_rows_of(
     return rows
 
 
-def comment_has(comments: Iterable[str], file_sha256: str) -> bool:
-    """同じ承認資料のコメントがあるか（改行の CRLF と末尾の改行の有無をそろえて比べる）。"""
-    for body in comments:
-        text = body.replace("\r\n", "\n")
-        if file_sha256 in (reading.sha256(text), reading.sha256(text + "\n")):
-            return True
-    return False
+comment_has = reading.comment_has
 
 
 def remained_items(prefix: str, remained: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:

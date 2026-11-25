@@ -44,8 +44,7 @@ DESIGN, RELEASE = "design", "release"
 GATE_DOCS = re.compile(r"^issues/issue-\d+(?:-\d+)*-(?:requirements|design|design-detail)\.md$")
 TITLE, BODY = reading.SENT_BACK_TARGETS
 TARGET_NAMES = {TITLE: "題", BODY: "本文"}
-# 完了の行の承認資料と PR の本文のハッシュの名前
-_, _, MATERIAL_SHA, MATERIAL_FILE_SHA, BODY_SHA, _ = reading.DONE_VALUES
+MATERIAL_SHA, MATERIAL_FILE_SHA, BODY_SHA = reading.MATERIAL_SHA, reading.MATERIAL_FILE_SHA, reading.BODY_SHA
 
 HubOf = Callable[[str], GitHub]
 CiWatch = Callable[[int, Path], Mapping[str, Any]]

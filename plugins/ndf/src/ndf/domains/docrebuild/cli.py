@@ -29,10 +29,11 @@ from jsonschema import Draft202012Validator
 
 from ndf import cli, contracts, identity
 from ndf.contracts import causes, result
-from ndf.core import branch_strategy, route
+from ndf.core import route
 from ndf.core.plan import files
-from ndf.adapters import git, github
+from ndf.adapters import github
 from ndf.domains.docrebuild import drive, gate, select_decide
+from ndf.domains.records import reading
 from ndf.progress import invoke
 
 TOOL = cli.tool_of(__name__)
@@ -129,13 +130,10 @@ def _ci_watch(number: int, cwd: Path) -> dict[str, Any]:
 
 
 def _form(cwd: Path) -> Optional[str]:
-    """設定のリリースの形（branch_strategy.release.form）。無ければ None（質問を作れずに gate が止まる）。読めなければ `Precondition`。"""
     try:
-        section = branch_strategy.load(Path(git.Git(cwd).run("rev-parse", "--show-toplevel").strip())).section
-    except (git.GitError, branch_strategy.StrategyError) as exc:
-        raise gate.Precondition(f"設定のブランチ戦略を読めない: {exc}") from None
-    release = section["release"] if isinstance(section.get("release"), dict) else {}
-    return release["form"] if isinstance(release.get("form"), str) else None
+        return reading.release_form(cwd)
+    except reading.FormMissing as exc:
+        raise gate.Precondition(str(exc)) from None
 
 
 def _act(a: argparse.Namespace) -> dict[str, Any]:

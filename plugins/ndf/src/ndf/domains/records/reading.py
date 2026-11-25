@@ -12,11 +12,12 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.adapters.git import Git
+from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub
 from ndf import contracts
 from ndf.contracts import facts, internal, writing
-from ndf.domains.records import jsonl, mvv
+from ndf.core import branch_strategy
+from ndf.domains.records import jsonl, mvv, pull_view
 from ndf.domains.records import reading_decide as rd
 from ndf.domains.release import forms_decide
 
@@ -33,7 +34,6 @@ RESTATE = {
 }
 PROMPT_KEYS = {"files", "reader", "questions_kind"}
 ADD_KEYS = {"questions", "prs", "reads"}
-CHECK_KEYS = {"questions", "prs"}
 
 
 class ReadingInvalid(ValueError):
@@ -98,6 +98,8 @@ def append_doc(row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 DONE_VALUES = contracts.schema_enum(DOCS_SCHEMA, "/$defs/done_values")
+# 完了の行の承認資料と PR の本文のハッシュと、記録の行の指紋の名前
+_, _, MATERIAL_SHA, MATERIAL_FILE_SHA, BODY_SHA, FINGERPRINT = DONE_VALUES
 
 
 def done_row(base: Mapping[str, Any], **values: Any) -> dict[str, Any]:
@@ -329,32 +331,63 @@ def rows() -> list[dict[str, Any]]:
     return [row for row in found if rd.has_used_keys(row)]
 
 
-def check(entry: Mapping[str, Any], root: Path, hub: Callable[[str], GitHub]) -> list[str]:
-    """承認の手順用: 質問を出す前に足りないもの（`reading_decide.missing`）。PR の今の head は GitHub から読む。
+def comment_has(comments: Iterable[str], file_sha256: str) -> bool:
+    """同じ承認資料のコメントがあるか（改行の CRLF と末尾の改行の有無をそろえて比べる）。gate と check が同じ規則を使う。"""
+    for body in comments:
+        text = body.replace("\r\n", "\n")
+        if file_sha256 in (sha256(text), sha256(text + "\n")):
+            return True
+    return False
 
-    記録だけで足りないと決まれば、fetch せず GitHub も読まずに返す。後で動く hook が新しい head と比べられるように、
-    先に記録の PR のリモート追跡ブランチを `git fetch` で新しくする（失敗しても続ける）。
-    GitHub を読めなければ `GitHubError`、head を得られない PR があれば `HeadUnknown`（足りないものがあればそちらを返す）。
+
+def release_form(root: Path) -> Optional[str]:
+    """設定のリリースの形（`branch_strategy.release.form`）。無ければ None（質問を作れずに止まる）。読めなければ `FormMissing`。"""
+    try:
+        section = branch_strategy.load(Path(Git(root).run("rev-parse", "--show-toplevel").strip())).section
+    except (GitError, branch_strategy.StrategyError) as exc:
+        raise FormMissing(f"設定のブランチ戦略を読めない: {exc}") from None
+    release = section["release"] if isinstance(section.get("release"), dict) else {}
+    return release["form"] if isinstance(release.get("form"), str) else None
+
+
+def check(
+    gate: str, number: int, material: Optional[Path], root: Path, hub: Callable[[str], GitHub]
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """承認の手順用: 質問を出す前に足りないものと、決まった形の質問（設計書の「確認の id と完了の行」）。
+
+    PR を 1 回だけ取得し、その題で質問を作り直し、同じ取得の head・本文・コメントと突き合わせる。記録の行は hook と同じ選び方で選び、
+    行の指紋で完了の行と結び付ける。承認資料は、PR の本文の経路では同じ中身のコメントと PR の本文のハッシュ、`material` の経路では
+    そのファイルの 2 つのハッシュを比べる。後で動く hook が新しい head と比べられるように、記録の PR のリモート追跡ブランチを
+    `git fetch` で新しくする（失敗しても続ける）。GitHub を読めなければ `GitHubError`、PR が無ければ `HeadUnknown`。
     """
-    _require_keys(entry, CHECK_KEYS)
-    key, prs = _key(entry["questions"]), entry["prs"]
-    if not (isinstance(prs, list) and all(type(n) is int and n > 0 for n in prs)):
-        raise ReadingInvalid("prs は、承認する PR の番号の配列にする")
     git = Git(root)
     remote = git.remote()
-    repo, found = git.remote_repo(remote), rows()
+    repo = git.remote_repo(remote)
+    view = pull_view.pull_view(hub(repo), number, None)
+    if view is None:
+        raise HeadUnknown(f"GitHub に PR が無い: #{number}")
+    questions = gate_questions(gate, number, view.title, release_form(root) if gate == "release" else None)
+    key, found = rd.question_key(questions), rows()
     row = rd.used_row(key, repo, found)
-    short = rd.missing(key, repo, found, {}, prs)
-    if short or row is None or not row["prs"]:
-        return short
-    git.fetch(remote, *(f"+refs/heads/{pr['branch']}:refs/remotes/{remote}/{pr['branch']}" for pr in row["prs"]))
-    # 足りないものが無いので、承認する PR はすべて記録の行にある
-    pulls = hub(repo).pulls({pr["number"] for pr in row["prs"]})
-    short = rd.missing(key, repo, found, {n: pull.head_sha for n, pull in pulls.items() if pull is not None}, prs)
-    unread = sorted(n for n, pull in pulls.items() if pull is None)
-    if unread and not short:
-        raise HeadUnknown("GitHub に PR が無い: " + "・".join(f"#{n}" for n in unread))
-    return short
+    if row is not None and row["prs"]:
+        git.fetch(remote, *(f"+refs/heads/{pr['branch']}:refs/remotes/{remote}/{pr['branch']}" for pr in row["prs"]))
+    short = rd.missing(key, repo, found, {number: view.head_sha}, [number])
+    if short or row is None:
+        return short, questions
+    docs = doc_rows()
+    done = next((r for r in completed(docs).values() if r[FINGERPRINT] == row_fingerprint(row)), None)
+    if done is None:
+        return [rd.NO_RECORD], questions
+    return (["material_changed"] if _material_changed(done, docs, view, material) else []), questions
+
+
+def _material_changed(
+    done: Mapping[str, Any], docs: Sequence[Mapping[str, Any]], view: pull_view.PullView, material: Optional[Path]
+) -> bool:
+    if material is None:
+        return not comment_has(view.comments, done[MATERIAL_FILE_SHA]) or sha256(view.body) != done[BODY_SHA]
+    expected = remained_section(remained_in(docs, done["check"]))
+    return material_hashes(material.read_text(encoding="utf-8"), expected) != (done[MATERIAL_SHA], done[MATERIAL_FILE_SHA])
 
 
 def _require_prompt(entry: Any) -> None:

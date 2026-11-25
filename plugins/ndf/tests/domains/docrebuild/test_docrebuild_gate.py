@@ -85,6 +85,9 @@ class FakeGit:
         tree = self.trees[self.head]
         return sorted(p for p in tree if (self.cwd / p).read_text(encoding="utf-8") != tree[p])
 
+    def fetch(self, remote: str, *refspecs: str) -> git.Completed:
+        return git.Completed(0, "", "")
+
     def blobs(self, *names: str) -> list[Optional[bytes]]:
         return [self.objects.get(n) for n in names]
 
@@ -531,3 +534,61 @@ def test_no_doc_fix_keeps_docs_out_of_the_fixable_files(tmp_path: Path) -> None:
     worker = FakeWorker(_fixing, edit=_fix_doc)
     got = w.run(worker, no_doc_fix=True)
     assert got["cause"]["kind"] == "incomplete" and "文書は直さない" in worker.prompts[0]
+
+
+# --- ndf records reading check の突き合わせ（Task 7、条件 6・7） ---------------------------------------------------
+
+
+def _check(w: World, material: Optional[Path] = None, gate_name: str = "design") -> list[str]:
+    before = w.hub.fetches
+    missing, questions = reading.check(gate_name, 7, material, w.cwd, lambda repo: w.hub)  # type: ignore[arg-type,return-value]
+    assert w.hub.fetches == before + 1 and rd.question_key(questions) == checks_rows()[-1]["question_key"]
+    return missing
+
+
+def _patched(w: World, monkeypatch: pytest.MonkeyPatch) -> World:
+    """check が作業場所の git とリリースの形の設定を偽物から読むようにする。"""
+    monkeypatch.setattr(reading, "Git", lambda root: w.git)
+    monkeypatch.setattr(reading, "release_form", lambda root: "mobile")
+    return w
+
+
+def _drop_last_done(w: World) -> None:
+    path = reading.docs_path()
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    path.write_text("".join(lines[:-1]), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("change", "missing"),
+    [
+        (lambda w: None, []),
+        (lambda w: setattr(w.hub, "body", BODY + "\n足した。\n"), ["material_changed"]),
+        (lambda w: w.hub.comments.__setitem__(-1, w.hub.comments[-1].replace("A にする", "A")), ["material_changed"]),
+        (lambda w: setattr(w.hub, "head", H2), [rd.HEAD_MOVED]),
+        (_drop_last_done, [rd.NO_RECORD]),
+    ],
+    ids=["same", "body-edited", "comment-edited", "head-moved", "done-row-missing"],
+)
+def test_check_matches_the_gate_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: Any, missing: list[str]) -> None:
+    """gate が記録した後に、check は同じキーの質問を 1 回の取得で作り直す。本文・コメントの変更は material_changed、完了の行が無ければ no_record。"""
+    w = _patched(world(tmp_path), monkeypatch)
+    assert w.run(FakeWorker())["status"] == "ok"
+    change(w)
+    assert _check(w) == missing
+
+
+def test_check_on_the_material_route_and_a_renamed_title(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """--material の経路は、渡したファイルの 2 つのハッシュと突き合わせる（残った文のセクションを消すと material_changed）。題が変われば no_record。"""
+    w = _patched(world(tmp_path, {}), monkeypatch)
+    material = tmp_path / "materials.md"
+    material.write_text(f"# リリース\n\n提示したコミット: `{H1}`\n\n- 中身\n", encoding="utf-8")
+    got = w.run(FakeWorker(failing(reading.MATERIAL, "中身")), "release", pr=7, material=material)
+    final = Path(got["outputs"]["material"]["path"])
+    assert _check(w, final, "release") == []
+    trimmed = tmp_path / "trimmed.md"
+    trimmed.write_text(final.read_text(encoding="utf-8").split("\n\n" + reading.BEGIN)[0], encoding="utf-8")
+    assert _check(w, trimmed, "release") == ["material_changed"]
+    w.hub.title = "別の題"
+    missing, _ = reading.check("release", 7, final, w.cwd, lambda repo: w.hub)  # type: ignore[arg-type]
+    assert missing == [rd.NO_RECORD]

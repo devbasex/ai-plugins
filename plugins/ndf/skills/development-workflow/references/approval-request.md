@@ -265,7 +265,7 @@ gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
    }
    ```
 
-6. **承認の質問では、質問を出す直前に調べる（どのランタイムでも打つ）。** `questions` と、承認する Pull Request の番号の配列 `prs` を書いた JSON で `ndf records reading check --file <JSON>` を打つ。`ok` なら質問を出す。`stopped` の `precondition` なら、足りないものの語に従って直す。`unknown`（GitHub を読めない）なら、調べられなかったことを承認資料に書いて進む
+6. **承認の質問では、質問を出す直前に調べる（どのランタイムでも打つ）。** `ndf records reading check --gate <design か release> --pr <番号> --questions-out <ファイル>` を打つ（会話のセッションのリリースでは `present` に渡す承認資料を `--material <ファイル>` で足す）。PR を 1 回読み、決まった形の質問を作り直してファイルへ書き、記録と突き合わせる。`ok` なら質問を出す。`stopped` の `precondition` なら、足りないものの語に従って直す。`unknown`（GitHub を読めない）なら、調べられなかったことを承認資料に書いて進む
 
    | 足りないもの | すること |
    | --- | --- |
