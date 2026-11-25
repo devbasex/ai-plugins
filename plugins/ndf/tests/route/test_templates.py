@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 
 import pytest
@@ -10,7 +11,7 @@ import pytest
 from ndf.core import route
 from ndf.core.plan import model
 
-from ._flow import plan_of, values
+from ._flow import fake_bin, ndf_bin, plan_of, repo_with_base, values
 
 
 def test_all_templates_render_into_valid_plans():
@@ -215,6 +216,38 @@ def test_refactor_launch_wraps_the_refactor_run_with_the_branch_and_the_base():
     assert got[:5] == ["bash", "-c", route.REFACTOR_WITH_PR, "sprint/s1", "origin/develop"]
     assert got[5:] == ["ndf", "refactor", "run", "--branch", "sprint/s1", "--base", "origin/develop", "--required", "test", "lint"]
 
+
+# gh は AI エージェントの環境（AI_AGENT・CLAUDECODE など）で、成功しても標準エラーに複数行の案内を出す
+_GH_HINT = "printf 'hint: line1\\nhint: line2\\n' >&2"
+
+
+def _run_refactor_launch(repo, *bindirs):
+    """`refactor_launch` の argv を、`bindirs` を先頭に置いた PATH で打つ。"""
+    tmpdir = repo.parent / "tmp"
+    tmpdir.mkdir()
+    env = {**os.environ, "PATH": os.pathsep.join([*map(str, bindirs), os.environ["PATH"]]), "TMPDIR": str(tmpdir)}
+    argv = route.refactor_launch("feat/x", "origin/develop", ["test"])
+    done = subprocess.run(argv, cwd=repo, env=env, capture_output=True, text=True, check=False, timeout=60)
+    assert list(tmpdir.glob("ndf-gh.*")) == []  # gh の標準エラーを受けた一時ファイルは残さない
+    return done
+
+
+def test_refactor_launch_takes_only_the_stdout_of_gh_as_the_pr_number(tmp_path):
+    repo = repo_with_base(tmp_path / "a", {"a.py": "a = 1\n"})
+    gh = fake_bin(tmp_path / "gh", "gh", f"{_GH_HINT}\necho 7")
+    ndf = fake_bin(tmp_path / "ndf", "ndf", "printf '%s\\n' \"$@\"")
+    done = _run_refactor_launch(repo, gh, ndf)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.splitlines()[-4:] == ["--pr", "7", "--scope", "./a.py"]
+
+
+def test_refactor_launch_without_a_pr_stops_with_the_reason_of_gh(tmp_path):
+    repo = repo_with_base(tmp_path / "a", {"a.py": "a = 1\n"})
+    gh = fake_bin(tmp_path / "gh", "gh", f"{_GH_HINT}\necho 'no pull requests found' >&2\nexit 1")
+    done = _run_refactor_launch(repo, gh, ndf_bin(tmp_path / "ndf"))
+    out = json.loads(done.stdout.splitlines()[-1])
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
+    assert "no pull requests found" in done.stdout
 
 def test_impl_acceptance_of_several_issues_repeats_the_issue_flag():
     # #3908 の決定 7: 課題をまとめた単位は、課題ごとの --issue で全部の課題の条件を検証する（代表の課題だけにしない）
