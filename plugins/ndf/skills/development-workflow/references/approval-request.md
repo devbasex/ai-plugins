@@ -307,7 +307,7 @@ gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
 
 ## 回答を記録する
 
-**利用者が承認ゲートで回答したら、承認も変更要求も、利用者に示した時点の結果の `routes` にある、回答に対応するコマンドで記録する。**
+**利用者が承認ゲートで回答したら、承認も変更要求も、利用者に示した時点の結果の `routes`（複数のプランを提示したときは `items` のそのプランの行の `routes`）にある、回答に対応するコマンドで記録する。**
 pace と MVV 判定の有無を問わない。利用者へ新しい確認は求めない。`routes` を返すのは、スプリントのステートマシン（`ndf progress`）か、
 プラン自身（`ndf plan`）のどちらかで、返るコマンドと補う引数が違う。
 
@@ -317,13 +317,16 @@ pace と MVV 判定の有無を問わない。利用者へ新しい確認は求�
   書いた回答は `ndf answer list <ステートマシン>` で古い順に読める
 - `ndf plan` が回答を待つときの `routes` は、回答ごとの `ndf plan next ... --answer <回答> --by human` である。変更要求も含め、
   該当の回答のコマンドを引数を足さずにそのまま打つ
+- 複数のプランをまとめて提示した場合（キューで設計 PR を並べたときなど）は、提示時の結果の `items` から回答の対象のプランの行を
+  選び、その行の `routes` にあるコマンドで回答を記録する。結果の直下の `routes` は先頭のプランの分だけなので、それで済ませると
+  先頭以外のプランに回答が記録されず、承認待ちのまま残る
 
 下の表の `<…>` は `routes` が埋めない値である。
 
 | 回答を待っているもの | 承認 | 変更要求 |
 | --- | --- | --- |
 | スプリントのステートマシン（`ndf progress`） | 提示時の `routes.approved` の `ndf answer` に `--reason <要約> --by human --key <冪等のキー>` を補って打つ | 提示時の `routes.request_changes` の `ndf answer` に `--reason <要約> --by human --key <冪等のキー> [--notes <指摘ファイル>]` を補って打つ |
-| プラン自身（`ndf plan`） | 提示時の `routes.approved` の `ndf plan next` をそのまま打つ | 提示時の `routes` にある変更要求に当たる回答（雛形のプランでは `rejected`）の `ndf plan next` をそのまま打つ |
+| プラン自身（`ndf plan`）。複数のプランを提示したときは `items` のそのプランの行の `routes` を使う | 提示時の `routes.approved` の `ndf plan next` をそのまま打つ | 提示時の `routes` にある変更要求に当たる回答（雛形のプランでは `rejected`）の `ndf plan next` をそのまま打つ |
 | ステートマシンが無い（単発の変更など） | 記録しない。回答と要約を conductor の報告に書く | 同じ |
 
 `ndf answer` の `--gate` は承認ゲートの結果の `metrics.gate.id`、`--result` はその結果の `routes` のキーから写す。`--key` は回答ごとに決め、
