@@ -115,6 +115,9 @@ def test_check_reads_the_main_directory_from_a_linked_worktree(repo, tmp_path):
     _git(repo, "commit", "-qm", "decl")
     linked = tmp_path / "linked"
     _git(repo, "worktree", "add", "-q", str(linked), "-b", "side")
+    assert check.judge(linked, False).kind == check.FRESH
+    files.path(repo, "project-analysis").unlink()
+    assert check.judge(linked, False).kind == check.STALE
     (repo / ".ndf" / "project.json").write_text("{", encoding="utf-8")
     assert check.judge(linked, False).kind == check.BROKEN
 
@@ -398,17 +401,6 @@ def _settings(repo: Path) -> dict:
 def _judged(capsys, last_result, repo: Path) -> tuple[int, list[str]]:
     code = cli.main(["check", "--root", str(repo)])
     return code, [i["reason"] for i in last_result(capsys.readouterr().out)["items"]]
-
-
-def test_check_reads_the_record_of_the_main_directory_from_a_linked_worktree(repo, tmp_path):
-    _declare(repo, _fresh_record(repo))
-    _git(repo, "add", ".ndf/project.json")
-    _git(repo, "commit", "-qm", "decl")
-    linked = tmp_path / "linked"
-    _git(repo, "worktree", "add", "-q", str(linked), "-b", "side")
-    assert check.judge(linked, False).kind == check.FRESH
-    files.path(repo, "project-analysis").unlink()
-    assert check.judge(linked, False).kind == check.STALE
 
 
 @pytest.mark.parametrize(
