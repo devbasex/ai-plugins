@@ -329,7 +329,7 @@ pace と MVV 判定の有無を問わない。利用者へ新しい確認は求�
 | 回答を待っているもの | 承認 | 変更要求 |
 | --- | --- | --- |
 | スプリントのステートマシン（`ndf progress`） | 提示時の `routes.approved` の `ndf answer` に `--reason <要約> --by human --key <冪等のキー>` を補って打つ | 提示時の `routes.request_changes` の `ndf answer` に `--reason <要約> --by human --key <冪等のキー> [--notes <指摘ファイル>]` を補って打つ |
-| プラン自身（`ndf plan`）。`ndf plan queue` か `ndf plan wait` の結果に複数のプランが含まれる場合は、提示した件数にかかわらず、回答の対象のプランに当たる `items` の要素の `routes` を使う | 提示時の `routes.approved` の `ndf plan next` をそのまま打つ | 提示時の `routes` にある変更要求に当たる回答（雛形のプランでは `rejected`）の `ndf plan next` をそのまま打つ |
+| プラン自身（`ndf plan`）。`ndf plan queue` か `ndf plan wait` の結果に複数のプランが含まれる場合は、提示した件数にかかわらず、回答の対象のプランに当たる `items` の要素の `routes` を使う | 提示時の `routes.approved` の `ndf plan next` をそのまま打つ | 提示時の `routes` にある変更要求に当たる回答（テンプレートのプランでは `rejected`）の `ndf plan next` をそのまま打つ |
 | ステートマシンが無い（単発の変更など） | 記録しない。回答と要約を conductor の報告に書く | 同じ |
 
 `ndf answer` の `--gate` は承認ゲートの結果の `metrics.gate.id`、`--result` はその結果の `routes` のキーから写す。`--key` は回答ごとに決め、

@@ -28,8 +28,7 @@
 | 並列の計画 | — | 計画の保存先のリポジトリに置き、同時に進めるレーンの一覧と、レーンに共通の決まりを書いた 1 つの文書（レーンは別のリポジトリでもよい）。オーガナイザーが読む。名前（計画名）を持つ | — | — | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
 | レーン | — | 並列の計画の下で、名前つきのラッパー 1 本が進める開発の流れ。最初の入力は開発ループかスプリントの 1 つ。レーンのリポジトリは計画の保存先と違ってもよい（別のリポジトリのレーン）。名前は役割を含めず、役割は計画の設定の入力で読む。物理層のラッパーとフロー層の流れの組 | ライン | — | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` |
 | オーガナイザー | — | --parallel <計画名> で起動した conductor の役割。レーンの承認待ちをリクエストとして受けて問うか自分で決め、回答を送る（設計の承認ではレーンのリポジトリで設計 Pull Request をマージする）。レーンの起動・再起動・監視とリリースのまとめは耐久ワークフローが行う。人との窓口は計画ごとにオーガナイザー 1 つ。リレーハブとは別。並列の計画のまとめ役はオーケストレーターと呼ばない。開発者ごとの手元のマシンでは手元で起動しない | — | — | `docs/specifications/ndf-parallel-durable-lane-launch.md` |
-| リリースの組み方 | — | リリースのリクエストを受けたときに、まとめたリリースをどう扱うか。組む・組まない・組めないの 3 つがあり、設定から決まる | 配布の組み方 | — | — |
-| 組み直しのリクエスト | — | 組めなかったリリースのリクエストを、人が「直してから組み直す」と回答した後に耐久ワークフローが受けているリクエストへ入れ直したもの。元のリクエストの回答は変えない | — | — | — |
+| リリースの組み方 | — | リリースのリクエストを受けたときに、まとめたリリースをどう扱うか。組む・組まない・組めないの 3 つがあり、設定から決まる | 配布の組み方 | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 一時レーン | — | オーナーのいない共有の作業（まとめたリリースプランの実行・その失敗の対応・止まったレーンの保留したループの 1 回の残り・released の後のバージョンの要るまとめ）のために耐久ワークフローが起動するラッパー（<計画名>-rel<連番>、役割 helper）。同時に 1 本までで、作業を終えると自分で止まる | — | — | `docs/specifications/ndf-parallel-durable-lane-launch.md` |
 | 別のリポジトリのレーン | — | 並列の計画の置かれたリポジトリと違うリポジトリで動く、計画のレーン。質問と承認はオーガナイザーを通し、リリースは自分のリポジトリのチャネルへ出す | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | リクエストした側 | — | 作業の途中で、別のリポジトリの改修が先に要ると分かったレーンと、そのレーンが進めている課題 | — | — | `plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md` |
@@ -45,7 +44,6 @@
 | 例外の起動 | — | 計画の外のセッションが、理由を添えた明示の指定（--outside-plan <理由>）で開発ループかスプリントを始めること。理由はマシンの記録に残る | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
 | 保留したループの 1 回 | — | 並列の計画のループのレーンで、回答を待たずに締めたループの 1 回（リリース待ち・質問待ち）。課題は締め直すまで選定から外し、回答の後に残りの工程を流して 1 回だけ締め直す | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
 | 質問待ち | — | 作業の途中の質問を質問の hook がオーガナイザーへ送り、止まったプランとステップを残して締めたループの 1 回の結果 | — | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
-| 回答の後の整理 | — | オーガナイザーが回答を送った後、待つ間に届いたリクエストを取り直し、除くものを除いて残りをまとめて問う手順 | — | — | — |
 | 設計の承認のリクエスト | — | 並列の計画のレーンが、設計承認ゲートの判断をオーガナイザーへ求めて送るリクエスト。設計 PR の先頭の SHA を持つ | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
 | 前のループ | — | 同じリポジトリの開発ループのうち、並列の計画のレーンでないもの。その回答がまだの人の判断待ちは、オーガナイザーの質問の一覧に出す | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
 | 当たらなかった回答 | — | オーガナイザーの回答のうち、オーナーのループの記録の行へ当てられなかったもの。回答は耐久の記録に残し、区分 unmatched の質問としてオーガナイザーの質問の一覧に出す | — | — | `docs/specifications/ndf-loop-human-answer-delivery.md` |
@@ -54,7 +52,7 @@
 | リリース待ち | — | リリースのリクエストを送り、回答を待たずに締めたループの 1 回の結果。まとめはまだ流していない | 配布待ち | — | `plugins/ndf/skills/development-workflow/references/loop.md` |
 | リリースのリクエスト | — | レーンがリリース承認ゲートの手前で、リリースをオーガナイザーへ頼むために送る 1 件のメッセージ（parallel.py request）。テンプレートで出すリポジトリのレーンだけが送る | 配布の依頼 | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
 | 課題の差し込み | — | リリースのリクエストのプランのコマンドが、課題の番号の代わりに持つ `{plan_issues}`。ステップを流す時点に、プランの `課題` の空白区切りで埋まる | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
-| まとめたリリース | — | オーガナイザーが複数のレーンの Pull Request を 1 つのバージョンとして出すリリース。提示のプランとリリースのワークフローからなる | まとめた配布 | — | — |
+| まとめたリリース | — | オーガナイザーが複数のレーンの Pull Request を 1 つのバージョンとして出すリリース。提示のプランとリリースのワークフローからなる | まとめた配布 | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 回答待ちのリクエスト | — | オーガナイザーに届いて、まだ回答していないリクエスト。設計の承認・リリース承認ゲート・承認ゲートの外の質問・耐久ワークフローが自分で立てた質問の 4 種類 | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | 計画の閾値 | — | 計画全体の回答待ちのリクエストの件数の閾値。既定は 8 で、これを超えると計画のすべてのレーンを止める | — | — | `docs/specifications/ndf-parallel-organizer.md` |
 | レーンの閾値 | — | 1 つのレーンが送った回答待ちのリクエストの件数の閾値。既定は 3 で、これを超えるとそのレーンを止める | — | — | `docs/specifications/ndf-parallel-organizer.md` |
@@ -65,11 +63,7 @@
 | ロール層 | — | 並行開発の役割の軸。オーガナイザー → conductor → supervisor → worker の順に仕事を渡す | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
 | フロー層 | — | 並行開発の仕事の流れの軸。レーン → ループ → スプリント → フェーズ → 作業の順に入れ子になる | — | — | `docs/specifications/ndf-parallel-other-repo-lanes-and-outside-plan.md` |
 | 今の起動 | — | 一時レーンでは、耐久ワークフローが最後に打った起動。通常のレーンでは、ラッパーが最後に起動した回 | — | — | `docs/specifications/ndf-parallel-durable-lane-launch.md` |
-| レーンの再起動 | — | 止まった、または動かないレーンを `relay.py restart` で起動し直すこと。質問の選択肢の「再起動する」がこれに当たる | — | — | — |
-| 停滞の質問 | — | 動かないレーンについて耐久ワークフローが立てる質問（`kind: stall`）。一覧の時刻が区切りより前のとき、開発ループが止まったとき、再起動を断られてレーンが止まったときに立つ | — | — | — |
-| 途中停止の質問 | — | リリースの途中で止まった一時レーンについて耐久ワークフローが立てる質問（`kind: helper`） | — | — | — |
-| 質問の取り下げ | — | 耐久ワークフローが、回答を待たずに自分の質問を質問の一覧から外すこと | — | — | — |
-| 再起動の試み | — | レーンの再起動を 1 回打ったこと。起動できた回も断られた回も 1 回と数え、リレーハブの記録に時刻と結果を残す | — | — | — |
+| レーンの再起動 | — | 止まった、または動かないレーンを `relay.py restart` で起動し直すこと。質問の選択肢の「再起動する」がこれに当たる | — | — | `docs/specifications/ndf-parallel-durable-lane-launch.md` |
 | 計画のジャーナル | — | 1 つの並列の計画を続けるのに要る状態を、計画の保存先に持つ記録。受けた行を足す ledger.jsonl と、ジャーナルのチェックポイントからなる | — | — | `docs/specifications/ndf-parallel-plan-ledger.md` |
 | 耐久ワークフローの作り直し | — | 失われた計画で、耐久ワークフローを新しく始めて計画のジャーナルから状態を戻すこと | — | — | `docs/specifications/ndf-parallel-plan-ledger.md` |
 | ジャーナルのチェックポイント | — | 耐久ワークフローが自分の状態（回答したリクエスト・リリース記録・起動したレーン）と読み終えた位置を書く、計画の保存先の 1 ファイル。書くたびに全体を置き換える | — | — | `docs/specifications/ndf-parallel-plan-ledger.md` |

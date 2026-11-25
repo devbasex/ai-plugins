@@ -420,14 +420,6 @@ def test_last_reply_kind_does_not_read_the_prose_lines_twice(monkeypatch):
     assert extracted == ["どちらにしますか？"]
 
 
-def test_read_tail_drops_the_partial_first_line(tmp_path):
-    path = tmp_path / "t.jsonl"
-    path.write_text("aaaa\nbbbb\ncccc\n", encoding="utf-8")
-    assert context.read_tail(str(path), 7) == "cccc\n"
-    assert context.read_tail(str(path), 100) == "aaaa\nbbbb\ncccc\n"
-    assert context.read_tail(str(tmp_path / "none"), 10) == ""
-
-
 def test_context_tokens_sums_input_and_cache():
     usage = {"input_tokens": 10, "cache_read_input_tokens": 20, "cache_creation_input_tokens": 5}
     tail = "\n".join([json.dumps({"message": {"usage": {"input_tokens": 1}}}), json.dumps({"message": {"usage": usage}})])

@@ -60,7 +60,7 @@ def _connection(argv: list[str], env: Mapping[str, str], cwd: Path, keys: bool) 
     if not keys and account_choice.key_child(env, name, store):
         return _refused(name, "key_gate")
     child = session_env.child_env(env, state, name, decided=True)
-    got = account_choice.target_env(child, name, store, state, cwd, argv)
+    got = account_choice.target_env(child, name, store, state, account_choice.LaunchArgs(cwd, argv))
     if isinstance(got, str):
         return _refused(name, got)
     if got.pin is None or got.pin != env.get("NDF_RELAY_PIN"):

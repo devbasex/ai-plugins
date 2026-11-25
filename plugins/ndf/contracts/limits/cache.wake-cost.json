@@ -1,0 +1,7 @@
+{
+  "summary": "起床の応答 1 回の費用の見積り（入力のトークンに換算した量）",
+  "count": 2000,
+  "read_by": [
+    "ndf.domains.relay.keep_cache"
+  ]
+}

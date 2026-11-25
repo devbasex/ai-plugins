@@ -117,7 +117,7 @@ def test_registration_files_are_read_when_present(tmp_path):
     reg = {"hooks": {"Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "x", "timeout": 6}]}]}}
     (tmp_path / "hooks" / "claude.json").write_text(json.dumps(reg), encoding="utf-8")
     regs = budget.registrations_of(tmp_path)
-    assert {"runtime": "claude", "event": "Stop", "timeout": 6} in regs
+    assert {"runtime": "claude", "event": "Stop", "timeout": 6, "async_rewake": False, "file": True} in regs
     assert all(r["runtime"] != "claude" or r["event"] == "Stop" for r in regs)
     assert any(r["runtime"] == "codex" for r in regs)
 
@@ -144,12 +144,15 @@ def test_registration_files_keep_every_hook_in_order(tmp_path):
     }
     _write_registration(tmp_path, "claude", claude)
     _write_registration(tmp_path, "codex", {"hooks": {"Stop": [{"hooks": [{"timeout": 9}]}]}})
+    file = {"async_rewake": False, "file": True}
+    # 登録のファイルが在るランタイムでは、ファイルの行の後にバックグラウンドの登録の行（#4068）が 1 つ付く
     assert budget.registrations_of(tmp_path) == [
-        {"runtime": "claude", "event": "Stop", "timeout": 6},
-        {"runtime": "claude", "event": "Stop", "timeout": None},
-        {"runtime": "claude", "event": "Stop", "timeout": 2},
-        {"runtime": "claude", "event": "PreToolUse", "timeout": 3},
-        {"runtime": "codex", "event": "Stop", "timeout": 9},
+        {"runtime": "claude", "event": "Stop", "timeout": 6, **file},
+        {"runtime": "claude", "event": "Stop", "timeout": None, **file},
+        {"runtime": "claude", "event": "Stop", "timeout": 2, **file},
+        {"runtime": "claude", "event": "PreToolUse", "timeout": 3, **file},
+        *budget.rewake_registrations("claude"),
+        {"runtime": "codex", "event": "Stop", "timeout": 9, **file},
     ]
 
 
@@ -157,7 +160,7 @@ def test_registration_file_without_a_hooks_object_has_no_rows(tmp_path):
     others = [r for r in budget.budget_registrations() if r["runtime"] != "claude"]
     for data in ({}, {"hooks": [1]}, {"hooks": None}):
         _write_registration(tmp_path, "claude", data)
-        assert budget.registrations_of(tmp_path) == others
+        assert budget.registrations_of(tmp_path) == budget.rewake_registrations("claude") + others
 
 
 def test_session_start_advises_on_a_broken_budget(tmp_path, monkeypatch):
@@ -289,6 +292,8 @@ def test_budget_check_reads_only_the_policies_it_compares(read_limits):
     # 予算の検査で比べない hook の方針（hook.sleep など）を読まない（PR 4335 の r1-1）
     used = {p.policy for rt, spec in tables.runtimes().items() for ev in spec["events"] if (p := budget.budget_for(rt, ev)) is not None}
     used |= {name for guard in tables.guards() for name in guard["limits"]}
+    # バックグラウンドの登録の予算と、起床の時点の届きの検査が読む方針（#4068）
+    used |= {"hook.budget.stop-rewake", "cache.wake"}
     _forget_tables()
     read_limits.clear()
     budget.check_budget(budget.budget_registrations())

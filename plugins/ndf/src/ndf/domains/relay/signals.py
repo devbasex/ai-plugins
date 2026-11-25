@@ -9,6 +9,8 @@
 | `question.json` | PreToolUse の hook（`ask-forward`） | AskUserQuestion の質問。中継が人かオーガナイザーへ回す |
 | `launch.json` | 中継のラッパー | 今の子の起動の ID（子へは `NDF_RELAY_LAUNCH` で渡す）。止めた子の hook に質問を書かせない（#3814） |
 | `busy-<起動の ID>.json` | 子の会話の hook（SessionStart・PreToolUse の `relay-busy` と Stop の `relay-marker`） | その起動のバックグラウンドの作業の件数。ラッパーは書かず、ほかの起動のものを消すだけである（#4049） |
+| `keep-<会話の ID>.json` | 起床の hook（Stop のバックグラウンド）と UserPromptSubmit の guard（`turn`） | 会話ごとのキャッシュの起床の状態（世代・待ち・起床のフラグ）。子を止める排他の中で書く（#4068） |
+| `cache-log.jsonl` | 同上 | 起床の記録（待ちの始まりと終わり・起床・その結果・やめた理由）。`ndf relay cache report` が集計する（#4068） |
 
 オーガナイザーのレーン（`NDF_ORGANIZER_DIR` と `NDF_ORGANIZER_LANE`）では、質問を `questions/<レーン>.json` へも書く
 （#3035）。どれも一時の名前で書いて名前を変える。
@@ -45,6 +47,15 @@ BUSY_SOURCES = ("session", "start", "stop")
 LAUNCH_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 # 子を止める排他のファイル。質問の転送とバックグラウンドの作業の開始の記録が共有する
 STOP_LOCK = f"{QUESTION_FILE}.lock"
+# 会話ごとのキャッシュの起床の状態の名前の頭と、起床の記録（#4068）
+KEEP_PREFIX = "keep-"
+CACHE_LOG = "cache-log.jsonl"
+# 会話の ID の形（状態のファイルの名前を作る前に突き合わせる）
+SESSION_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+# 世代の書き込み元のうち、起床の hook でないもの（guard・同じ応答の取り合い・到着による失効）
+BY_TURN, BY_CONTESTED, BY_ARRIVAL = "turn", "contested", "arrival"
+# 待ちの項目（待ちを終えるか取り消すときにまとめて消す）
+WAIT_KEYS = ("wait_id", "k", "n_max", "spent", "wait_stop", "opened")
 # レーン・ラッパー・アカウントの名前の形（中継の名前はどれもこの形）
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -105,6 +116,11 @@ def launch_env(directory: Path, launch: str, session_id: str) -> dict[str, str]:
     }
 
 
+def rewake_registered(env: Mapping[str, str]) -> bool:
+    """ラッパーが起床の hook の登録を渡した子の環境か（`NDF_RELAY_REWAKE` が `1`。#4068）。ファイルを読まない。"""
+    return env.get(identity.env_name("relay-rewake")) == "1"
+
+
 def relay_launch(env: Mapping[str, str]) -> Optional[str]:
     """hook の環境の起動の ID。無ければ None。"""
     return env.get(LAUNCH_ENV) or None  # noqa: NDF501 利用者の入力: 空の環境変数は起動の ID が無いとして扱う
@@ -115,9 +131,43 @@ def relay_session(env: Mapping[str, str]) -> Optional[str]:
     return env.get(identity.env_name("relay-session")) or None  # noqa: NDF501 利用者の入力: 空の環境変数は会話の ID が無いとして扱う
 
 
-def set_launch(directory: Path, launch: Optional[str]) -> None:
-    """今の起動の ID を記録する。None は「今の起動が無い」で、止めた子の hook が書く前に外す（`question.json.lock` を持って呼ぶ）。"""
-    replace_json(directory / LAUNCH_FILE, {"launch": launch})
+def rewake_child(env: Mapping[str, str], session_id: Any) -> Optional[tuple[Path, str]]:
+    """起床の状態を書いてよい中継の子なら（保存先, 起動の ID）。ほかは None（登録を渡していない子はファイルを見ずに None）。"""
+    if not rewake_registered(env):
+        return None
+    directory, launch = relay_dir(env), relay_launch(env)
+    if directory is None or launch is None or session_id != relay_session(env):
+        return None
+    return (directory, launch) if keep_path(directory, session_id) is not None else None
+
+
+def set_launch(directory: Path, launch: Optional[str], rewake: bool = False, claude_version: Optional[str] = None) -> None:
+    """今の起動の ID を記録する。None は「今の起動が無い」で、止めた子の hook が書く前に外す（`question.json.lock` を持って呼ぶ）。
+
+    `rewake` はその起動に起床の hook の登録を渡したか、`claude_version` はその起動の claude のバージョン（#4068）。
+    """
+    replace_json(directory / LAUNCH_FILE, {"launch": launch, "rewake": rewake, "claude_version": claude_version})
+
+
+def _launch_file(directory: Path) -> dict[str, Any]:
+    """今の起動の記録。無い・読めないなら空（起床の登録を渡していない起動として扱う）。"""
+    try:
+        found = _read(directory / LAUNCH_FILE)
+    except (SignalError, OSError, UnicodeDecodeError):  # 読めない記録は今の起動が無いとして書かない
+        found = None
+    return {} if found is None else found
+
+
+def rewake_on(directory: Path, launch: str) -> bool:
+    """今の起動が `launch` で、その起動に起床の hook の登録を渡したか（#4068）。"""
+    found = _launch_file(directory)
+    return found.get("launch") == launch and found.get("rewake") is True
+
+
+def launch_version(directory: Path) -> Optional[str]:
+    """今の起動の claude のバージョン（ラッパーが `set_launch` に渡した値）。無ければ None。"""
+    got = _launch_file(directory).get("claude_version")
+    return got if isinstance(got, str) else None
 
 
 def current_launch(directory: Path) -> Optional[str]:
@@ -477,6 +527,122 @@ def _is_zoned(value: Any) -> bool:
         return isinstance(value, str) and datetime.fromisoformat(value).tzinfo is not None
     except ValueError:  # noqa: NDF401 ファイル: 時刻として読めない値は形が違うとして扱う
         return False
+
+
+class Generation(NamedTuple):
+    """起床の予約を会話ごとに 1 つに決める世代（#4068 の詳細設計の「内部の型」）。
+
+    `by` は書き込み元の ID（起床の hook の `hook_id`・guard の `turn`・取り合いの `contested`・到着による失効の `arrival`）、
+    `message_id` は起床の hook の Stop が取った応答（guard と起床は None）、`sleeps` はその世代を取った hook が眠ると決めたか。
+    """
+
+    at: float
+    by: str
+    message_id: Optional[str] = None
+    sleeps: bool = False
+
+
+def keep_path(directory: Path, session_id: Any) -> Optional[Path]:
+    """会話の起床の状態のファイル。会話の ID が UUID の形でなければ None（名前を作らない）。"""
+    if not isinstance(session_id, str) or not SESSION_ID_RE.match(session_id):
+        return None
+    return directory / f"{KEEP_PREFIX}{session_id}.json"
+
+
+def read_keep(directory: Path, session_id: Any) -> Optional[dict[str, Any]]:
+    """会話の起床の状態。無い・読めない・会話の ID の形が違うなら None。"""
+    path = keep_path(directory, session_id)
+    if path is None:
+        return None
+    try:
+        return _read(path)
+    except (SignalError, OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない状態は無い状態として扱い、書き直す
+        return None
+
+
+def generation_of(keep: Optional[Mapping[str, Any]]) -> Optional[Generation]:
+    """状態の世代。無い・形が違うなら None。"""
+    raw = keep.get("generation") if keep else None
+    if not isinstance(raw, dict) or not isinstance(raw.get("at"), (int, float)) or not isinstance(raw.get("by"), str):
+        return None
+    mid = raw.get("message_id")
+    return Generation(float(raw["at"]), raw["by"], mid if isinstance(mid, str) else None, raw.get("sleeps") is True)
+
+
+def with_generation(keep: Mapping[str, Any], gen: Generation) -> dict[str, Any]:
+    """世代を書き換えた状態。"""
+    return {**keep, "generation": gen._asdict()}
+
+
+def update_keep(directory: Path, session_id: str, keep: Mapping[str, Any]) -> None:
+    """会話の起床の状態を書く（子を止める排他の中で呼ぶ）。会話の ID の形が違えば `SignalError`。"""
+    path = keep_path(directory, session_id)
+    if path is None:
+        raise SignalError(f"会話の ID の形が違う: {session_id!r}")
+    replace_json(path, keep)
+
+
+def append_cache_log(directory: Path, launch: str, session_id: str, kind: str, wait_id: Any, **fields: Any) -> None:
+    """起床の記録へ 1 行を足す。どの行も `at`・`launch`・`session_id`・`claude_version`・`wait_id` を持つ。"""
+    row = {"kind": kind, "launch": launch, "session_id": session_id, "claude_version": launch_version(directory), "wait_id": wait_id}
+    append_jsonl(directory / CACHE_LOG, {**row, **fields})
+
+
+def void_wait(keep: dict[str, Any], at: float) -> bool:
+    """`at` で始まった、まだ起床させていない待ち（`k` 0・`pending` 無し）なら、待ちの項目を消して真。"""
+    if keep.get("wait_id") != at or keep.get("k") != 0 or keep.get("pending"):
+        return False
+    drop_wait(keep)
+    return True
+
+
+def drop_wait(keep: dict[str, Any]) -> None:
+    """待ちの項目（`WAIT_KEYS`）を状態から消す。"""
+    for key in WAIT_KEYS:
+        keep.pop(key, None)
+
+
+def bump_generation(directory: Path, launch: str, session_id: str, gen: Generation, works: int = 0) -> tuple[str, dict[str, Any]]:
+    """世代を新しい時刻でだけ書き換える（子を止める排他の中で呼ぶ）。返すのは結果と書いた後の状態。
+
+    - `contested`: 同じ応答（`message_id`）を別の書き込み元が既に取っていた。最初の取り合いだけが世代の `by` を `contested` に替え、
+      その応答で始まった起床させていない待ちを取り消す（`wait_void`）。`contest` の行は取り合った Stop ごとに 1 行書く（3 件目以降の
+      Stop も、版別の集計で作業待ちの Stop と取り合いの失効に数えるため）
+    - `older`: 世代が既に同じか新しい時刻。何も書かない
+    - `taken`: 世代を書いた。作業が 1 件以上なら `work_stop` の行を書く。状態が無ければ世代だけの状態を作る
+    """
+    found = read_keep(directory, session_id)
+    keep = {} if found is None else found
+    now = generation_of(keep)
+    if now is not None and gen.message_id is not None and now.message_id == gen.message_id and now.by != gen.by:
+        if now.by != BY_CONTESTED:
+            wait_id = keep.get("wait_id")
+            voided = void_wait(keep, now.at)
+            keep = with_generation(keep, now._replace(by=BY_CONTESTED, sleeps=False))
+            update_keep(directory, session_id, keep)
+            if voided:
+                append_cache_log(directory, launch, session_id, "wait_void", wait_id, reason=BY_CONTESTED)
+        append_cache_log(directory, launch, session_id, "contest", keep.get("wait_id"), message_id=gen.message_id, works=works)
+        return "contested", keep
+    if now is not None and now.at >= gen.at:
+        return "older", keep
+    keep = with_generation(keep, gen)
+    update_keep(directory, session_id, keep)
+    if works >= 1:
+        append_cache_log(directory, launch, session_id, "work_stop", keep.get("wait_id"), message_id=gen.message_id)
+    return "taken", keep
+
+
+def revoke_generation(keep: dict[str, Any], started: float) -> bool:
+    """生きた予約（`sleeps` 真で `by` が取り合い・失効でない世代）の `by` を `arrival` に替えたか。`at`・`message_id` は変えない。
+
+    替えるのは、この hook が予約の応答より後に動いた（`started` が世代の `at` より後）ときだけ。書くのは呼び手。
+    """
+    now = generation_of(keep)
+    if now is None or not now.sleeps or now.by in (BY_CONTESTED, BY_ARRIVAL) or started <= now.at:
+        return False
+    keep["generation"] = now._replace(by=BY_ARRIVAL)._asdict()
+    return True
 
 
 def drop_other_busy(directory: Path, launch: str) -> None:

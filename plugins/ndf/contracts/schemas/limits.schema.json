@@ -67,6 +67,23 @@
     },
     "rounds": {"type": "integer", "minimum": 1, "description": "判定の例を打つ周の数（hook.stop-wait.judge）"},
     "auth_markers": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "認証の失敗と読む本文の文字列（hook.stop-wait.judge）"},
-    "endpoint": {"$ref": "#/$defs/endpoint"}
+    "endpoint": {"$ref": "#/$defs/endpoint"},
+    "ratios": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"minLength": 1},
+      "additionalProperties": {"type": "number", "exclusiveMinimum": 0},
+      "description": "名前（寿命・モデル）ごとの倍率（cache.write-ratio・cache.read-ratio）"
+    },
+    "default": {"type": "number", "exclusiveMinimum": 0, "description": "ratios に無い名前の倍率（cache.read-ratio・cache.output-ratio）"},
+    "ratio": {"type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "割合の境（cache.hit）"},
+    "versions": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+      "uniqueItems": true,
+      "description": "確かめたバージョンの一覧（cache.rewake）。空も可"
+    },
+    "calls": {"type": "integer", "minimum": 1, "description": "呼び出しの回数"},
+    "start": {"type": "integer", "minimum": 0, "description": "始まりの値"}
   }
 }
