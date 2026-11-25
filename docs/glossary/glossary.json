@@ -740,11 +740,13 @@
     {
       "term": "即時修正",
       "context": "ndf-workflow",
-      "meaning": "4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと",
+      "meaning": "モード hotfix。4 つの条件（`development-workflow` の `references/mode-criteria.md`）を満たす不具合を、実装・完了判定・リリースを先に通し、リリースの後にリリース後レビューで見ること",
       "deprecated": [
         "その場で直す"
       ],
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md",
+      "code": "hotfix"
     },
     {
       "term": "棚卸し",
@@ -8459,6 +8461,29 @@
       "context": "ndf-durable",
       "meaning": "GitHub が一次の上限とは別に、短い間の書き込みの多さ・同時の要求の多さで断る上限。403 か 429 と本文の secondary rate limit で返る",
       "source": "docs/specifications/ndf-github-write-gate.md"
+    },
+    {
+      "term": "リリース後レビュー",
+      "context": "ndf-workflow",
+      "meaning": "hotfix のリリースの後に、マージ済みの差分を cross-review の相手役が読み、指摘を戻す・直す・見送るに分ける工程",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md",
+      "code": "post_release_review"
+    },
+    {
+      "term": "計画の時点の判定",
+      "context": "ndf-workflow",
+      "meaning": "開発計画（並列の計画・実行計画・開発ループの周）の行に載せる課題ごとのモード。スプリントでは ndf progress new の --mode に渡る参考の値になる",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md"
+    },
+    {
+      "term": "判定の記録",
+      "context": "ndf-workflow",
+      "meaning": "工程「要求と受け入れ条件」の出力 mode_judgment。課題ごとのモードと根拠・スプリントのモード・参考の値を持ち、スプリントの工程表を決める",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md",
+      "code": "mode_judgment"
     }
   ]
 }

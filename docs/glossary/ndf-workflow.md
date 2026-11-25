@@ -16,7 +16,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 進捗記録 | — | 工程に入った時点で 1 回打つ記録。リリース後テストだけは、受け入れ条件ごとの記録を投稿してその工程を終えた時点で打つ。課題の本文の「進行」も同じ 1 回で更新される | 進行の記録、記録のコマンド | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | フェーズレポート | — | supervisor（またはプラン）が最後に返す報告 | フェーズの報告 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 安定版と実験版 | — | NDF の変更の 2 つの経路（stable / experimental）。実験版の保存先は `experimental/ndf/`（配るディレクトリの `plugins/ndf/` の外） | 安定と試行 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 即時修正 | — | 4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと | その場で直す | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 即時修正 | `hotfix` | モード hotfix。4 つの条件（`development-workflow` の `references/mode-criteria.md`）を満たす不具合を、実装・完了判定・リリースを先に通し、リリースの後にリリース後レビューで見ること | その場で直す | — | — |
 | 手順 | — | 1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-rebuild の決める（文書形式・文書の目的・言語）・測る・組み直す・整える・測り直すの 5 つ（手順 0〜4） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | SSOT | `source` | その事柄の定義を持つ唯一の文書。食い違ったときはこれを正とする | 正本 | — | `docs/specifications/doc-consistency-checks.md` |
 | conductor | `conductor` | スプリントを持ち、プランを流す役割。人へ問えるかは置かれた場所で決まる（計画の外のセッションは自分で質問、レーンは質問をオーガナイザーへ送る） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -139,3 +139,6 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | パース | — | 設定や入力を読んで値を取り出すこと・解決すること | 読み分け | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
 | セクション | — | 文書や設定ファイルの中の区切り | 節（単独） | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
 | クリーンアップ | — | マージやリリースの後に、不要になったブランチ・worktree・一時ファイルを消すこと | 後片付け | — | `docs/specifications/ndf-next-terms-and-settings-renames.md` |
+| リリース後レビュー | `post_release_review` | hotfix のリリースの後に、マージ済みの差分を cross-review の相手役が読み、指摘を戻す・直す・見送るに分ける工程 | — | — | — |
+| 計画の時点の判定 | — | 開発計画（並列の計画・実行計画・開発ループの周）の行に載せる課題ごとのモード。スプリントでは ndf progress new の --mode に渡る参考の値になる | — | — | — |
+| 判定の記録 | `mode_judgment` | 工程「要求と受け入れ条件」の出力 mode_judgment。課題ごとのモードと根拠・スプリントのモード・参考の値を持ち、スプリントの工程表を決める | — | — | — |
