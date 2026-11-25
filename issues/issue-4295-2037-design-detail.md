@@ -235,11 +235,11 @@ plugins/ndf/
 
 満たす決定: 決定 3・10、受け入れ条件 #4295-1
 
-- `document-review.json`: `metadata.ndf.outputs` に `design_pr`、`docs-merge` のステップの `metadata.ndf` に `"outputs_as": {"pr": "design_pr"}` を書く。設計文書の `metadata.ndf.outputs_as` はこの位置を指す
+- `document-review.json`: 次の 2 つを書く。`metadata.ndf.outputs` には `design_pr` を書く。`docs-merge` のステップの `metadata.ndf` には `"outputs_as": {"pr": "design_pr"}` を書く。設計文書の `metadata.ndf.outputs_as` はこの位置を指す
 - `ndf.schema.json` の `$defs/step` に `outputs_as`（文字列から文字列への対応）を足す
 - `stages.StepDef` に `outputs_as: Mapping[str, str] = field(default_factory=dict)` を足す。`stage-snapshot.schema.json` の `$defs/step` にも足す。前に作ったステートマシンのスナップショットはこの項目を持たないので、既定の空で読む
 - `merge.json` は、共有のステップ `merge` の `run` と `probe` をこのテンプレートの中で上書きし、ステップの id と並びは変えない
-  - `run`: `ndf ci merge --branch <branch> --method <method>` を打つ。非 0 ならその出力と終了コードをそのまま返す。0 なら `git rev-parse HEAD` と head が一致するマージ済みの PR を `gh pr list --head <branch> --state merged --json number,headRefOid` で引き、`items` と `outputs.pr` を持つ結果 JSON を最後の行に出す
+  - `run`: `ndf ci merge --branch <branch> --method <method>` を打つ。非 0 ならその出力と終了コードをそのまま返す。0 なら、マージ済みの PR を `gh pr list --head <branch> --state merged --json number,headRefOid` で引く。選ぶのは、head が `git rev-parse HEAD` と一致する PR である。`items` と `outputs.pr` を持つ結果 JSON を最後の行に出す
   - `probe`: `gh pr view <branch> --json state,number` が `MERGED` なら、同じ形の結果 JSON を出して 0、そうでなければ非 0
   - `--head` だけで引くと、同じブランチの前にマージした PR も返る。head のコミットで絞る
 - この `outputs.pr` は工程「Pull Request」の `merge` からも出る。同じ PR の番号なので値は変わらない
@@ -411,7 +411,11 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 ### 耐久ワークフローへの組み込み
 
 - `Policy` に `touches_every: int = 0` を足す。値は `ceil(interval / poll)`（1 以上）で、`spec_of` が耐久ワークフローの入力へ書く
-- `decide` は、`Observe` の結果を受けたとき、`touches_every` が 0 でなく、写しの計画の状態が生死を判定する状態（`WATCHED_STATES`）で、読み直しの回数が `touches_every` の倍数（最初の回を含む）なら `Touches` の手を返す。`Touches` の結果を受けたら、今の `_after_observe` へ進む
+- `decide` は、`Observe` の結果を受けたとき、次の 3 つがそろえば `Touches` の手を返す
+  - `touches_every` が 0 でない
+  - スナップショットの計画の状態が、生死を判定する状態（`WATCHED_STATES`）である
+  - 読み直しの回数が `touches_every` の倍数（最初の回を含む）である
+- `Touches` の結果を受けたら、今の `_after_observe` へ進む
 - 前の版が始めた耐久ワークフローの入力は `touches_every` を持たない。0 になり、記録した呼び出しの順は変わらない。その計画の完了は I6 を求めない（`require_final` は入力の `touches_every` が 0 でないときだけ真）。観測は、計画を区切りで止めて再開した次の耐久ワークフローから働く
 - `lanes_workflow` の本体が変わるので `durable.FORMAT_SOURCE_HASH` を書き直す。呼び出しの順は上のとおり変わらないので `FORMAT` は上げない
 
@@ -448,7 +452,9 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 - `record_diffs`: PR の一覧の読み方、読み残し、ファイルと head の読み直し、一覧の読み取り済み時刻は、設計文書の決定 6 のとおり。走査の開始の時刻は `gh api -i` の応答の `Date` ヘッダから取る。1 周の 1 リポジトリの追記は、行ごとに 1 件の `touches_found` にする
 - `compare`: ほかの計画は、マシンの索引と中継の登録簿の所在に、前の周までに見た所在（`Memory.places`）を足して読む。計画が完了すると索引から外れるため、終わった行の最後の観測を、比べる前に見失わないようにする
 - `notices`
-  - 「新しく重なり始めたファイル」は、`overlaps` の `scope_files` のうち、`view.design_overlaps` の同じ組に無いものと、`view.scope_log` の比較済みより後の変更を行ごとに順に当てて途中で含まれなかったもの
+  - 「新しく重なり始めたファイル」は、`overlaps` の `scope_files` のうち、次のどちらかに当たるもの
+    - `view.design_overlaps` の同じ組に無い
+    - `view.scope_log` の比較済みより後の変更を行ごとに順に当てると、途中のどこかで行の触る場所がそのファイルを含まなかった
   - `reorderable` は、自分の計画の行のうち、未着手か、実行中で段階 `implement` に入っていない行のレーン
   - 比べ直さなかった組の `design_overlaps` は引き継ぎ、重なりが無くなった組は `files: []` にする
 
