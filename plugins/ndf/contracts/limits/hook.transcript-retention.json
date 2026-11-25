@@ -1,0 +1,7 @@
+{
+  "summary": "Claude Code の会話の記録を残す日数（settings.json の cleanupPeriodDays）の下限。SessionStart がこれ未満（未設定を含む）なら引き上げる。過去の記録を読む skill-stats・estimate の材料を残すため",
+  "count": 90,
+  "read_by": [
+    "ndf.domains.hooks.main"
+  ]
+}

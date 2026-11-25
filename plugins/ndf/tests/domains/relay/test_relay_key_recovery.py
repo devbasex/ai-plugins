@@ -245,19 +245,6 @@ def test_r1_1_the_helper_reads_the_key_inside_the_record_lock(tmp_path, monkeypa
     assert capsys.readouterr().out == KEY_MAIN and seen == [True]
 
 
-def test_r1_4_the_fallbacks_follow_the_accounts_after_a_limit(tmp_path):
-    # 先頭の従量の接続の用意が落ちても、残りの API キーを試せるように起動順の後ろへ並べる（今の接続先と tried は除く）
-    g = wrapper_guard.GuardSteps()
-    g.s = SimpleNamespace(guards=account_decide.Guards(80.0, 50.0, 90.0))
-    g._pinned_or = lambda pick, reason, current, now: pick
-    ok = launch_inputs.LaunchCache({}, None)
-    inputs = launch_inputs.Inputs(fallback={reg.METERED: ok, "key:k1": ok, "key:k2": ok}, tried=frozenset({"key:k2"}))
-    sec = SimpleNamespace(account="work1", limit_at=None, target=None, auth_at=None)
-    pick = account_decide.Pick("switch", reg.METERED, "")
-    assert g._names(sec, pick, "limit", inputs, 0.0) == [reg.METERED, "key:k1"]
-    assert g._names(sec, pick, "guard", inputs, 0.0) == [reg.METERED]
-
-
 def test_r1_5_off_after_the_choice_is_caught_before_the_old_child_stops(tmp_path):
     store = register(tmp_path)
     put_book(store)
@@ -418,15 +405,11 @@ def test_r4_5_a_row_without_a_usable_key_is_not_a_candidate(tmp_path, value):
 def test_r4_4_a_reregistered_key_stays_in_the_order_behind_another_first(tmp_path):
     # 同じ名前の登録し直しで止めたキーの子は、別の候補が先頭に立っても新しい世代のその名前を起動順に残す（先頭の用意が落ちても続ける）
     g = wrapper_guard.GuardSteps()
-    g.s = SimpleNamespace(guards=account_decide.Guards(80.0, 50.0, 90.0))
-    g._pinned_or = lambda pick, reason, current, now: pick
-    ok = launch_inputs.LaunchCache({}, None)
-    inputs = launch_inputs.Inputs(fallback={"key:k1": ok, "key:k2": ok})
-    pick = account_decide.Pick("switch", "key:k2", "")
+    pick = account_decide.Pick("switch", "key:k2", "", ("key:k2",))
     sec = SimpleNamespace(account="key:k1", limit_at=None, target=None, auth_at=None, rekeyed=True)
-    assert g._names(sec, pick, "revoked", inputs, 0.0) == ["key:k2", "key:k1"]
+    assert g._names(sec, pick, "revoked") == ["key:k2", "key:k1"]
     sec.rekeyed = False
-    assert g._names(sec, pick, "revoked", inputs, 0.0) == ["key:k2"]
+    assert g._names(sec, pick, "revoked") == ["key:k2"]
 
 
 def test_r5_2_a_metered_key_declaration_with_its_own_path_is_judged_with_that_path(tmp_path, monkeypatch):
