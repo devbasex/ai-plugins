@@ -33,6 +33,7 @@
         "inputs": {"$ref": "#/$defs/keys"},
         "outputs": {"$ref": "#/$defs/keys"},
         "optional_inputs": {"$ref": "#/$defs/keys"},
+        "optional_outputs": {"$ref": "#/$defs/keys"},
         "input_ref": {"$ref": "#/$defs/optional_text"},
         "output_ref": {"$ref": "#/$defs/optional_text"}
       }
@@ -48,6 +49,7 @@
         "range": {"type": "string", "minLength": 1},
         "subject": {"$ref": "#/$defs/optional_text"},
         "gate": {"$ref": "#/$defs/optional_text"},
+        "on_reject": {"$ref": "#/$defs/optional_text"},
         "args": {"type": "object"},
         "output_ref": {"$ref": "#/$defs/optional_text"}
       }

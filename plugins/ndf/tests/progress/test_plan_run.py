@@ -564,7 +564,7 @@ def test_a_loop_row_ends_through_its_table_and_is_cancelled_with_the_loop_halted
         assert '"--loop"' in run.first_input(conn, pid, Launch("lr", "r1"))
         view, _ = lane.read_plan(conn, pid)
         _, doc, drafts = command._loop_new(
-            argparse.Namespace(loop="lr", mode=None, issues=None, requirements=None, disable=[], carry=None, parent="x")
+            argparse.Namespace(loop="lr", mode=None, issues=None, requirements=None, disable=[], carry=None, parent="x", release_requests=None)
         )
         sid = store.create_machine(conn, ("sprint", REPO, "lr-r1"), view.lanes["lr"].machine_id, doc, drafts)
         lane.start_row(conn, pid, "lr", "r1", sid)

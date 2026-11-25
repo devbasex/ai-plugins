@@ -4,6 +4,7 @@ ndf progress new <スプリント名> --mode <モード> --issues <番号>... [-
                  [--requirements <要求と受け入れ条件の出力>] [--parent <親のステートマシンの ID>]
                  [--carry <中止したステートマシンの ID>]
 ndf progress new <スプリント名> --loop <ループの名前> --parent <レーンのステートマシンの ID>
+ndf progress new <スプリント名> --mode release-bump --release-requests <リクエスト>... --parent <レーンのステートマシンの ID>
 ndf progress show <ステートマシンの ID>
 ndf progress disable|enable|retry <ステートマシンの ID> <工程> --reason <理由>
 ndf progress finish <ステートマシンの ID> <工程> --output <出力のファイル> --reason <理由>
@@ -584,7 +585,7 @@ def _new_doc(snap: stages.Snapshot, context: dict[str, Any], enabled: Mapping[st
 
 
 def _prepare_new(
-    a: argparse.Namespace, cwd: Path, snap: stages.Snapshot, carry: Carry | None = None, repo: str = ""
+    a: argparse.Namespace, cwd: Path, snap: stages.Snapshot, carry: Carry | None = None, repo: str = "", added: Mapping[str, Any] = {}
 ) -> tuple[dict[str, Any], list[model.EventDraft]]:
     """引数の --disable と文脈を確かめ、保存する定義の改訂の文書と最初の事象の下書きを作る。
 
@@ -594,7 +595,7 @@ def _prepare_new(
     if unknown:
         raise definition.WorkflowDefError([f"--disable の工程がモード {a.mode} に無い: {', '.join(unknown)}"])
     enabled = stages.resolve_enabled(snap, None, _declared(cwd), disables)
-    context = {"issues": a.issues, "mode": a.mode, "pace": a.pace, "mvv_ref": mvv_ref(cwd), **_carried(a, snap, disables, carry, repo)}
+    context = {"issues": a.issues, "mode": a.mode, "pace": a.pace, "mvv_ref": mvv_ref(cwd), **_carried(a, snap, disables, carry, repo), **added}
     errs = contracts.schema_errors(context, definition.CONTEXT)
     if errs:
         raise definition.WorkflowDefError([f"スプリントの文脈: {e}" for e in errs])
@@ -611,6 +612,7 @@ def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], l
             ("--requirements", a.requirements),
             ("--disable", a.disable),
             ("--carry", a.carry),
+            ("--release-requests", a.release_requests),
         )
         if given
     ]
@@ -621,18 +623,33 @@ def _loop_new(a: argparse.Namespace) -> tuple[stages.Snapshot, dict[str, Any], l
     return LOOP_SNAPSHOT, _new_doc(LOOP_SNAPSHOT, {"issues": []}, {}), []
 
 
+def _bump_context(a: argparse.Namespace, st: store.Store) -> dict[str, Any]:
+    """版上げのスプリントの文脈に足す値（課題は持たず、まとめるリクエストと親の計画の名前。#4446）。ほかのモードは何も足さない。"""
+    if a.mode != model.RELEASE_BUMP_MODE:
+        if a.release_requests:
+            raise definition.WorkflowDefError([f"--release-requests はモード {model.RELEASE_BUMP_MODE} でだけ受ける"])
+        return {}
+    if not a.release_requests or a.parent is None:
+        raise definition.WorkflowDefError([f"モード {a.mode} には --release-requests とレーンのステートマシン（--parent）が要る"])
+    with store.transaction(st) as conn:
+        plan = store.read_parent(conn, a.parent)
+    if plan is None:
+        raise definition.WorkflowDefError([f"--parent {a.parent} は計画のレーンのステートマシンでない"])
+    return {"issues": [], "release_requests": a.release_requests, "release_plan": plan["name"]}
+
+
 def _sprint_new(
     a: argparse.Namespace, cwd: Path, st: store.Store, repo: str
 ) -> tuple[stages.Snapshot, dict[str, Any], list[model.EventDraft]]:
     snap = definition.load_definition(a.mode)
     carry = _read_carry(st, a.carry) if a.carry is not None else None
-    doc, drafts = _prepare_new(a, cwd, snap, carry, repo)
+    doc, drafts = _prepare_new(a, cwd, snap, carry, repo, _bump_context(a, st))
     return snap, doc, drafts
 
 
 def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
     # 引数の不足はリポジトリの識別（origin の URL を解く）より先に invalid で返す
-    if a.loop is None and (a.mode is None or not a.issues):
+    if a.loop is None and (a.mode is None or (not a.issues and a.mode != model.RELEASE_BUMP_MODE)):
         raise definition.WorkflowDefError(["--mode と --issues（開発ループの行なら --loop）を渡す"])
     if a.loop is not None:
         snap, doc, drafts = _loop_new(a)
@@ -839,6 +856,7 @@ def parser() -> argparse.ArgumentParser:
     new.add_argument("--mode")
     new.add_argument("--issues", type=int, nargs="+")
     new.add_argument("--loop", help="開発ループの行のステートマシンを作る（工程なし。ループの名前）")
+    new.add_argument("--release-requests", nargs="+", help="版上げのスプリントがまとめるリリースのリクエスト")
     new.add_argument("--pace", default="normal")
     new.add_argument("--disable", type=_disable_item, action="append", default=[], help="<工程>=<理由>")
     new.add_argument("--requirements", help="要求と受け入れ条件の出力（工程の出力の規約に合う JSON）")

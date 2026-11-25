@@ -13,8 +13,7 @@
   直前の MVV 判定が省けると決めた承認ゲートは、回答した者 `service:mvv` の承認を書いて人へ質問せずに通す（#3745）
 - スプリントの完了と同じトランザクションで `Env.ended` を打つ（レーンの行を終える口。決定 17。`ndf.progress.gate.lane_env`）
 - 工程の出力は工程の出力の規約で照らしてから終了のマーカーを付ける。合わなければマーカーを付けず失敗にする（受け入れ条件 8）
-- 課題の工程表とスプリント PR の「通した工程」は終了のマーカーから作る（受け入れ条件 6）。書けなくても工程は進め、
-  `resync` で何度でも同じ結果へ揃え直せる（3377-9）
+- 課題の工程表とスプリント PR の「通した工程」は終了のマーカーから作る（受け入れ条件 6）。書けなくても工程は進め、`resync` で揃え直せる（3377-9）
 """
 
 from __future__ import annotations
@@ -157,6 +156,7 @@ class StepProgress:
     notes: Optional[str] = None
     failed: bool = False
     redo: bool = False
+    carries: frozenset[str] = frozenset()  # 承認されなくても流し直さず先へ進む承認ゲート（定義の on_reject。#4446）
     # #4446: 待ちの記録を持ったステップ（MVV 判定はゲートを省かない）・未了に戻した回数・終わりの事象の番号・設計のレビューへ戻した記録
     held: set[str] = field(default_factory=set)
     resets: dict[str, int] = field(default_factory=dict)
@@ -209,7 +209,7 @@ class StepProgress:
 
     def _answered(self, ev: model.Event, p: dict[str, Any]) -> None:
         """回答。承認ゲートの変更要求なら世代を上げて初めから流し直し、ほかは数え始めの後の回答だけを残す。"""
-        if p["answer"] == REQUEST_CHANGES and p["kind"] == invoke.LISTEN:
+        if p["answer"] == REQUEST_CHANGES and p["kind"] == invoke.LISTEN and p["step"] not in self.carries:
             self.generation += 1
             self.done, self.waiting, self.answer, self.anchor = {}, None, None, ev.seq
             self.held, self.again = set(), []
@@ -228,7 +228,7 @@ _SEES: dict[str, Callable[[StepProgress, model.Event, dict[str, Any]], None]] = 
 
 
 def step_progress(v: View, stage: str) -> StepProgress:
-    prog = StepProgress()
+    prog = StepProgress(carries=frozenset(st.id for s in v.snap.stages if s.name == stage for st in s.steps if st.on_reject))
     for ev in v.row_events(stage):
         prog.see(ev)
     return prog
@@ -586,10 +586,10 @@ def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
         d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
         summary = f"{reason}。回答は検証を通してから読むので next を打つ"
         return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", d.machine_id))
-    if payload_of(m.event)["answer"] == APPROVED:
-        rep = gate_report(m.step, m.event)
-        payload = {"step": m.step.id, "status": FINISHED, "report": rep, "generation": m.progress.generation}
-        d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=payload, rev=v.rev))
+    if payload_of(m.event)["answer"] == APPROVED or m.step.on_reject is not None:
+        passed = stages.passed_gate(m.stage, m.step, gate_report(m.step, m.event), payload_of(m.event)["answer"] == APPROVED)
+        payloads = [{"step": i, "report": rep, "status": FINISHED, "generation": m.progress.generation} for i, rep in passed]
+        d.write(*[model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=p, rev=v.rev) for p in payloads])
         return None
     detail = f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）"
     d.write(_failed(m.stage, m.step.id, v.rev, "refused", detail))
@@ -833,7 +833,7 @@ def _reading_skipped(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef
     """読み手役のステップを打たずに済ませるなら、済ませた記録の事象。打つなら None（`model.reading_skip`）。"""
     gate = next((st for st in s.steps if st.kind == stages.GATE_KIND and st.gate == step.gate), None)
     waiting_gate = gate is not None and gate.id in prog.held
-    in_lane = step.gate == model.RELEASE_GATE and d.env.in_lane(d.st, v.machine_id)
+    in_lane = step.gate == model.release_gate() and d.env.in_lane(d.st, v.machine_id)
     if not model.reading_skip(prog.done, s.before(step.id), step.gate, waiting_gate, in_lane, v.snap.mode):
         return None
     why = "計画のレーンの行にあるスプリントなので" if in_lane else "直前の MVV 判定が承認ゲートを省くので"
@@ -860,7 +860,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
     if skipped is not None:
         return skipped
     try:
-        inputs = invoke.resolve_inputs(s, v.context())
+        inputs = invoke.resolve_inputs(s, stages.step_context(v.context(), s, prog.done))
     except invoke.StageInputError as exc:
         return [_failed(s, step.id, v.rev, exc.kind, str(exc))]
     run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries)

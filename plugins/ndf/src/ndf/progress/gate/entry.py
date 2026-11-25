@@ -32,6 +32,7 @@ from ndf.contracts import result, worker_paths
 from ndf.contracts.worker_kinds import kind_gaps, kind_values, values_in, work_dir_of, work_kinds
 from ndf.core import route
 from ndf.progress import command, invoke, model, run, store
+from ndf.progress.gate import bump
 from ndf.progress.gate.answering import Answer, Observe, answer, git_docs_only, github_observe, lane_env, recheck, reread
 from ndf.progress.gate.asking import RELEASE_GATE, TOOL, Target, gate_result, question, write_material
 from ndf.progress.gate.records import answers, approved_head
@@ -474,6 +475,8 @@ def progress_main(argv: list[str]) -> int:
     """
     if argv and argv[0] in run.COMMANDS:
         return command.run_main(run.parser(), lambda a, cwd: command.with_store(cwd, _progress, a), argv)
+    if argv and argv[0] in bump.COMMANDS:
+        return bump.main(argv)
     if argv and argv[0] == "reread":
         return command.run_main(reread_parser(), lambda a, cwd: command.with_store(cwd, _cmd_reread, a), argv[1:])
     return command.main(argv)

@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.progress import lane, model, plan, run, store
+from ndf.progress import lane, model, plan, run, stages, store
 from ndf.progress.gate.answering import Answer, Observe, answer, no_observe
 from ndf.progress.gate.asking import (
     RELEASE_GATE,
@@ -77,18 +77,38 @@ def _file_request(v: run.View, q: Question, env: Mapping[str, str], root: Path) 
     return {"kind": "file", "id": request_id(q), "path": str(external.write_request(root, body))}
 
 
+# 版上げのスプリントのリリース承認ゲートのリクエストの kind（オーガナイザーはレーンのリクエストと分けて、そのまま問う）
+BUMP_KIND = "bump-release"
+
+
+def _bump_body(v: run.View, q: Question, name: str) -> dict[str, Any]:
+    """版上げのスプリントのリクエストの中身。版上げの PR・読み手役が確かめた承認資料のパス・まとめたリクエスト（#4446）。"""
+    context = stages.step_context(v.context(), v.snap.stage(q.stage), run.step_progress(v, q.stage).done)
+    held = context[model.MATERIAL_KEY]["path"] if model.MATERIAL_KEY in context else None
+    fields = {**_request_fields(v, q, name), "id": f"{BUMP_KIND}-{q.id}", "kind": BUMP_KIND}
+    return {**fields, model.MATERIAL_KEY: held, "release_requests": context["release_requests"]}
+
+
 def _plan_request(st: store.Store, v: run.View, q: Question) -> Optional[dict[str, Any]]:
-    """計画のステートマシンへリクエストの事象を書き（同じ質問のリクエストがあれば使い直す）、出した先を返す。レーンの外なら None。"""
+    """計画のステートマシンへリクエストの事象を書き（同じ質問のリクエストがあれば使い直す）、出した先を返す。レーンの外なら None。
+
+    版上げのスプリントは種類 `bump-release` で書く。このリクエストはオーガナイザーが `ndf answer` で回答して閉じる。"""
+    bump = v.snap.mode == model.RELEASE_BUMP_MODE
     with store.transaction(st) as conn:
         found = release_request_of(conn, q)
         if found is None:
             return None
         plan_id, name, held = found
+        if bump:
+            view, _ = lane.read_plan(conn, plan_id)
+            ident = f"{BUMP_KIND}-{q.id}"
+            held = next((r for r in view.requests.values() if r.body.get("id") == ident), None)
         key = held.key if held is not None else None
         if key is None:
-            body = {**_request_fields(v, q, name), "kind": RELEASE_KIND}
+            body = _bump_body(v, q, name) if bump else {**_request_fields(v, q, name), "kind": RELEASE_KIND}
             key = plan.open_request(conn, plan_id, body, f"レーン {name} のリリースのリクエスト", run.ACTOR)
-    return {"kind": "plan", "id": request_id(q), "plan": plan_id, "request": key}
+    ident = f"{BUMP_KIND}-{q.id}" if bump else request_id(q)
+    return {"kind": "plan", "id": ident, "plan": plan_id, "request": key}
 
 
 def _organizer_reply(st: store.Store, q: Question, env: Mapping[str, str]) -> Optional[dict[str, Any]]:

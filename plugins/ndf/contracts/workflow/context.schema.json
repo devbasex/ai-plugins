@@ -19,13 +19,27 @@
     "delivery": {"$ref": "#/$defs/delivery", "description": ".ndf/project.json の delivery の 1 行。デプロイが書く。デプロイの経路になる値なので、キーの型と kind・channel の取りうる値を確かめてから渡す（3364-7）", "x-source": ".ndf/project.json の branch_strategy.release.deliveries の 1 行に result を足す"},
     "product_version": {"type": "string", "minLength": 1, "description": "出したバージョン。デプロイが書く", "x-source": "ステートマシンの release のステップの outputs の product_version。手でリリースしたら、記録の Pull Request（リリースの Pull Request、Pull Request を作らない形ではスプリントの最後にマージした Pull Request）の本文とコメントにある `## リリース記録` のうち、最後の本番の記録（release Skill の references/release-steps.md の「デプロイの後にリリース記録を置く」でデプロイの後にコメントで足したもの。`ndf release-steps records --pr <PR>` で読む）の `バージョン:` の行の → の後の値から、括弧内の根拠（例: `（MINOR: 機能追加）`）を除いた新しいバージョン"},
     "release_pr": {"type": "string", "minLength": 1, "description": "出したバージョンのリリース記録を書いた Pull Request。まとめたリリースの回答をリリース承認ゲートが書き、閉じとリリース後テストはここから読む"},
-    "gathered": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット。実装が書き、コードレビューはここから後のコミット（つなぎ目）だけを読む"}
+    "gathered": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット。実装が書き、コードレビューはここから後のコミット（つなぎ目）だけを読む"},
+    "release_requests": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "版上げのスプリントがまとめるリリースのリクエストのキー（計画のステートマシンのリクエスト）。ステートマシンの作成が書く"},
+    "release_plan": {"type": "string", "minLength": 1, "description": "版上げのスプリントのレーンを持つ計画の名前。ステートマシンの作成が親（レーン）から読んで書く"},
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "file_sha256"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^/[^\\u0000]*$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "file_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "description": "版上げのスプリントの承認資料のファイルと SHA-256。版上げの組み立てが書き、読み手役のステップが直した内容で上書きする",
+      "x-source": "版上げのスプリントの bump-assemble か release-reading のステップの outputs の material"
+    }
   },
   "$defs": {
     "plain_pace": {"enum": ["normal"], "description": "利用者の承認でゲートを通る進め方"},
     "mvv_pace": {"enum": ["fast", "auto"], "description": "承認ゲートを MVV 判定で省ける進め方"},
     "mvv_mode": {"enum": ["light", "legacy-refactor", "standard"], "description": "MVV 判定で承認ゲートを省けるモード"},
-    "gated_mode": {"enum": ["operation", "documentation"], "description": "MVV 判定があっても承認ゲートを省かないモード"},
+    "gated_mode": {"enum": ["operation", "documentation", "release-bump"], "description": "MVV 判定があっても承認ゲートを省かないモード"},
     "mvv_gate": {
       "type": "object",
       "description": "MVV 判定の結果。skip が真なら承認ゲートを人へ問わずに通す（回答した者 service:mvv）",

@@ -241,6 +241,13 @@
           "type": "string",
           "description": "開発ループの行のステートマシンを作る（工程なし。ループの名前）"
         },
+        "--release-requests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "版上げのスプリントがまとめるリリースのリクエスト"
+        },
         "--pace": {
           "type": "string",
           "default": "normal"

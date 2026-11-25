@@ -25,7 +25,7 @@ from ndf.contracts import limits
 from ndf.domains.records import files, jsonfile, mvv, preflight
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
-from ndf.progress import definition
+from ndf.progress import definition, model
 from ndf.progress.gate.checks import MvvFacts, may_skip, note, refusals
 from ndf.progress.model import MVV_PACES
 
@@ -87,7 +87,7 @@ def judge_with(ask: Ask) -> mvv.Judge:
     schema = contracts.load_json(contracts.schema_path(VERDICT_SCHEMA))
 
     def judge(inputs: Mapping[str, str]) -> tuple[str, Mapping[str, Any]]:
-        got = ask(inputs["question"], inputs["material"], schema, limits.seconds(JUDGE_LIMIT))
+        got = ask(inputs["question"], inputs[model.MATERIAL_KEY], schema, limits.seconds(JUDGE_LIMIT))
         if not got.ok:
             raise GateError(f"MVV 判定の回答が無い: {got.cause}")
         return str(got.answer["verdict"]), {"usd": got.cost, **{k: got.answer[k] for k in md.VERDICT_DETAILS}}
@@ -126,7 +126,7 @@ def _judged(
         "変えたファイルと差分": mm.patch_material(rows),
     }
     text = mm.prompt(mm.redlines(shared, project), materials)
-    asked = {"gate": gate_name, "question": mm.SYSTEM, "material": text}
+    asked = {"gate": gate_name, "question": mm.SYSTEM, model.MATERIAL_KEY: text}
     verdict = _verdict(mvv.mvv_validate_sprint(root, asked, judge_with(ask), warnings=warnings))
     skip, why = may_skip(facts, verdict)
     return _recorded(hub, number, mm.gate_outcome(gate_name, verdict, skip, why, pull.head_sha))

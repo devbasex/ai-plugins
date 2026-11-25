@@ -55,7 +55,7 @@ from ndf import identity
 from ndf.adapters import claude
 from ndf.contracts import result
 from ndf.contracts import named_cap
-from ndf.progress import command
+from ndf.progress import command, model
 from ndf.progress.lane import CANCELLED, LaneRow, PlanView
 
 # 行の入力の args に --mode が無いときのモード
@@ -166,8 +166,8 @@ def view_wrapper(view: PlanView, lane: str) -> str:
     return wrapper_name(str(view.repo), view.name, lane)
 
 
-# 起動できる行の種類（行の入力の `kind`）: スプリントの行と開発ループの行
-SPRINT_KIND, LOOP_KIND = "sprint", "loop"
+# 起動できる行の種類（行の入力の `kind`）: スプリントの行・開発ループの行・版上げの行（まとめたリリース。#4446）
+SPRINT_KIND, LOOP_KIND, RELEASE_KIND = "sprint", "loop", "release"
 
 
 class Unsupported(Exception):
@@ -184,15 +184,16 @@ def start_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[
 
     最後のコマンドは工程を続ける `ndf progress next`（#3858）。行を始めるだけで止まらないよう、最初の工程まで進める。
 
-    開発ループの行は `loop_commands`。スプリントの行でも開発ループの行でもなければ `Unsupported`。
+    開発ループの行は `loop_commands`、版上げの行は `release_commands`。ほかの行は `Unsupported`。
     """
     kind = row.input.get("kind")
     if kind == LOOP_KIND:
         return loop_commands(plan, lane, lane_table, row)
+    if kind == RELEASE_KIND:
+        return release_commands(plan, lane, lane_table, row)
     if kind != SPRINT_KIND:
-        raise Unsupported(
-            f"行 {lane}/{row.key} は {kind} の行で、起動する入力を組めない（起動できるのは {SPRINT_KIND} と {LOOP_KIND} の行だけ）"
-        )
+        known = "・".join((SPRINT_KIND, LOOP_KIND, RELEASE_KIND))
+        raise Unsupported(f"行 {lane}/{row.key} は {kind} の行で、起動する入力を組めない（起動できるのは {known} の行だけ）")
     args = [str(a) for a in row.args]
     mode = [] if "--mode" in args else ["--mode", DEFAULT_MODE]
     issues = [str(i) for i in row.input["issues"]]
@@ -212,6 +213,14 @@ def loop_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[d
     row_start = result.command("lanes", "row", "start", plan, lane, row.key, "--sprint", ask=("sprint",))
     start = result.command("loop", "start", lane, "--row", ask=("sprint", "session"))
     return [new, row_start, start, result.command("loop", "get", lane)]
+
+
+def release_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[dict[str, Any]]:
+    """版上げの行を始めるコマンドの並び。レーンの子の版上げのスプリントを作り、行を実行中にして最初の工程まで進める（#4446）。"""
+    name, mode = sprint_name(plan, lane, row.key), model.RELEASE_BUMP_MODE
+    new = result.command("progress", "new", name, "--mode", mode, "--release-requests", *row.requests, "--parent", lane_table)
+    start = result.command("lanes", "row", "start", plan, lane, row.key, "--sprint", ask=("sprint",))
+    return [new, start, result.command("progress", "next", ask=("sprint",))]
 
 
 def loop_of(lane: str, row: LaneRow) -> Optional[str]:
@@ -259,6 +268,8 @@ def _workflow_args(lane: str, row: LaneRow) -> list[str]:
     """Skill の引数。スプリントの行は課題（`#<番号>`）、開発ループの行は `--loop <レーン>`。"""
     if row.input.get("kind") == LOOP_KIND:
         return ["--loop", lane]
+    if row.input.get("kind") == RELEASE_KIND:
+        return ["--release-requests", *row.requests]
     return [f"#{i}" for i in row.input["issues"]]
 
 

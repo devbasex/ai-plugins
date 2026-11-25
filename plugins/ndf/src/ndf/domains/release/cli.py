@@ -4,6 +4,7 @@
 | --- | --- | --- |
 | `assemble` | workflow | `assemble`（ブランチの組み立てと PR） |
 | `materials` | 会話のセッション・workflow | `assemble.collect`（ブランチを作らずに承認資料を組む） |
+| `open-releases` | 版上げのスプリント | `assemble.open_releases`（本番ブランチ宛ての開いている版上げの PR の番号） |
 | `present` | 会話のセッション | `trail.present`（承認資料の提示。承認ゲート） |
 | `answer` | 会話のセッション | `trail.answer`（回答を証跡に書き、届いたかを確かめる） |
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
@@ -102,6 +103,16 @@ def assembled(built: assemble.Built) -> dict:
     return result.result(
         TOOL, result.OK, f"{built.branch} の PR #{built.pr} を作った: {built.url}", materials_decide.items(built.facts), outputs=outputs
     )
+
+
+def cmd_open_releases(args: argparse.Namespace) -> dict:
+    strategy = _strategy(args)
+    remote = _remote(args)
+    target = assemble.Target(version_decide.PRODUCTION, "patch", args.base, args.production, remote)
+    formats = names_decide.formats_of(strategy.section["release"])
+    numbers = assemble.open_releases(_hub(args, remote), target, formats)
+    items = [{"kind": "pr", "number": n} for n in numbers]
+    return result.result(TOOL, result.OK, f"{args.production} 宛ての開いている版上げの PR は {len(numbers)} 件", items)
 
 
 def cmd_materials(args: argparse.Namespace) -> dict:
@@ -371,6 +382,7 @@ def _branch(p: argparse.ArgumentParser) -> None:
 ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.ArgumentParser], None], ...]] = {
     cmd_assemble: (_target_args,),
     cmd_materials: (_target_args, _materials_out),
+    cmd_open_releases: (_branches,),
     cmd_present: (_pr, _material),
     cmd_answer: (_pr, _answer_args),
     cmd_approval_check: (_pr, _production),

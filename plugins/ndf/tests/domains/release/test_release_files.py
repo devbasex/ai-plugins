@@ -385,6 +385,7 @@ def test_release_steps_parser_current_behavior() -> None:
     expected = {
         "assemble": common + target,
         "materials": common + target + [opt("--out")],
+        "open-releases": common + [req("--base"), req("--production")],
         "present": common + [pr, opt("--material")],
         "answer": common
         + [

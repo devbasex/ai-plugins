@@ -181,7 +181,8 @@ def _validate_stage(
 
 def check_stage_output(stage: stages.StageDef, obj: Any) -> tuple[list[str], list[tuple[str, Optional[str]]]]:
     """工程の出力を確かめ、誤りと、欠けた文脈のキーと取り場所の組（工程の定義の `outputs` の順）を返す。"""
-    return _validate_stage(stage, obj, stage.output_ref, stage.outputs, "outputs", "出力")
+    required = tuple(k for k in stage.outputs if k not in stage.optional_outputs)
+    return _validate_stage(stage, obj, stage.output_ref, required, "outputs", "出力")
 
 
 def validate_stage_output(stage: stages.StageDef, obj: Any) -> list[str]:
@@ -227,10 +228,10 @@ def context_source(key: str) -> Optional[str]:
 
 
 def _context_key_errors(where: str, meta: dict[str, Any]) -> list[str]:
-    """工程の inputs・optional_inputs・outputs（配列のときだけ）のキーが、スプリントの文脈のキーにあるかを確かめる。"""
+    """工程の inputs・optional_inputs・outputs・optional_outputs（配列のときだけ）のキーが、スプリントの文脈のキーにあるかを確かめる。"""
     known = _context_keys()
     errs = []
-    for part in ("inputs", "optional_inputs", "outputs"):
+    for part in ("inputs", "optional_inputs", "outputs", "optional_outputs"):
         held = meta.get(part)
         if isinstance(held, list):
             errs += [f"{where}: {part} の {k} はスプリントの文脈のキーに無い" for k in held if k not in known]
@@ -318,6 +319,7 @@ def _step_def(stage: str, name: str, body: dict[str, Any]) -> stages.StepDef:
         gate=meta.get("gate"),
         args=dict(body["with"]) if "with" in body else {},
         output_ref=_endpoint(body, "output"),
+        on_reject=meta.get("on_reject"),
     )
 
 
@@ -351,6 +353,7 @@ def _stage_def(doc: Mapping[str, Any], mode: str) -> stages.StageDef:
         inputs=tuple(meta["inputs"]) if "inputs" in meta else (),
         outputs=tuple(meta["outputs"]) if "outputs" in meta else (),
         optional_inputs=tuple(meta["optional_inputs"]) if "optional_inputs" in meta else (),
+        optional_outputs=tuple(meta["optional_outputs"]) if "optional_outputs" in meta else (),
         input_ref=_endpoint(doc, "input"),
         output_ref=_endpoint(doc, "output"),
     )

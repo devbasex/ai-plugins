@@ -53,6 +53,20 @@ def test_start_commands_create_the_sprint_under_the_lane_then_start_the_row():
     ]
     assert start["argv"][1:] == ["lanes", "row", "start", "p6", "a", "r2", "--sprint"] and start["ask"] == ["sprint"]
     assert going == {"argv": [launch.result.ENTRY, "progress", "next"], "ask": ["sprint"]}
+    new, *_ = launch.start_commands("p6", "a", "lane-id", _row(["--mode", "fast"]))
+    assert new["argv"].count("--mode") == 1 and new["argv"][-2:] == ["--mode", "fast"]
+    # #4446: 版上げの行はリクエストをまとめる版上げのスプリントを起動し、Skill の引数もリクエストにする
+    bumped = LaneRow(key="r1", input={"kind": "release", "requests": ["q1", "q2"]}, state="pending")
+    new, start, going = launch.start_commands("p6", "rel", "lane-id", bumped)
+    name = launch.sprint_name("p6", "rel", "r1")
+    assert new["argv"][1:] == [
+        "progress", "new", name, "--mode", "release-bump", "--release-requests", "q1", "q2", "--parent", "lane-id"
+    ]  # fmt: skip
+    assert start["argv"][1:4] == ["lanes", "row", "start"] and going["argv"][1:] == ["progress", "next"]
+    assert launch.start_prompt("p6", "rel", "lane-id", bumped).startswith(
+        "/goal /ndf:development-workflow --release-requests q1 q2 -- "
+    )
+    assert bumped.requests == ["q1", "q2"] and bumped.issues() == set() and _row().requests == []
 
 
 def test_the_start_prompt_sets_the_goal_and_goes_on_past_starting_the_row():
@@ -69,11 +83,6 @@ def test_the_start_prompt_sets_the_goal_and_goes_on_past_starting_the_row():
     text = launch.start_prompt("p6", "lr", "lane-id", loop)
     assert text.startswith("/goal /ndf:development-workflow --loop lr -- ") and unattended.is_target(text)
     assert json.loads(text[text.index("[") :])[-1]["argv"][1:] == ["loop", "get", "lr"]
-
-
-def test_start_commands_keep_the_mode_given_by_the_row():
-    new, *_ = launch.start_commands("p6", "a", "lane-id", _row(["--mode", "fast"]))
-    assert new["argv"].count("--mode") == 1 and new["argv"][-2:] == ["--mode", "fast"]
 
 
 def test_sprint_names_of_two_plans_with_the_same_lane_do_not_collide():
@@ -119,13 +128,10 @@ def test_the_wrapper_name_differs_by_repo_and_by_the_plan_lane_boundary():
     assert signals.NAME_RE.match(launch.wrapper_name("o/r", "p" * 60, "l" * 60))
 
 
-def test_cancel_commands_cancel_the_running_sprint_then_end_the_lane_row():
+def test_cancel_and_resume_commands_of_a_sprint_row():
     cancel, end = launch.cancel_commands("s1")
     assert cancel["argv"][1:4] == ["progress", "cancel", "s1"]
     assert end["argv"][1:] == ["lanes", "row", "end", "s1", "--outcome", "cancelled"]
-
-
-def test_resume_commands_mark_the_next_then_run_next_on_the_sprint():
     mark, nxt = launch.resume_commands("s1")
     assert mark["argv"][1:] == ["lanes", "row", "resumed", "s1"]
     assert nxt["argv"][1:] == ["progress", "next", "s1"]

@@ -155,9 +155,17 @@ def mvv_skip(done: Mapping[str, Mapping[str, Any]], before: Optional[str], gate:
     return held if isinstance(held, dict) and held.get("gate") == gate and held.get("skip") is True else None
 
 
+# 版上げのスプリントの承認資料の、スプリントの文脈のキー
+MATERIAL_KEY = "material"
 # 版上げのスプリントのモード（まとめたリリースの版上げの PR を作り、資料と質問もその中で作る。#4446 の決定 9）
 RELEASE_BUMP_MODE = "release-bump"
-RELEASE_GATE = next(g for g in table()["gates"] if g == "release")  # 承認ゲートの区分の表に無ければ import の時点で止まる
+
+
+def release_gate() -> str:
+    """リリース承認ゲートの区分の語（コントラクト `workflow/progress.json` の gates の行。表に無ければ `StopIteration`）。
+    import の時点で表を読まない（スキーマの定数を読み直すときに、ほかのコントラクトを開かない）。"""
+    return next(g for g in table()["gates"] if g == "release")
+
 
 
 def reading_skip(
@@ -171,7 +179,7 @@ def reading_skip(
     """
     if not waiting_gate and mvv_skip(done, before, gate) is not None:
         return True
-    return gate == RELEASE_GATE and mode != RELEASE_BUMP_MODE and in_lane
+    return gate == release_gate() and mode != RELEASE_BUMP_MODE and in_lane
 
 
 def _outputs(report: Mapping[str, Any]) -> Mapping[str, Any]:

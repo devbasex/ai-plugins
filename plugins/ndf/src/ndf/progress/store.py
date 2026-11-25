@@ -396,6 +396,12 @@ def read_events(conn: sa.Connection, machine_id: str, after: int = 0) -> list[mo
     return [_event(r) for r in conn.execute(q)]
 
 
+def read_parent(conn: Any, machine_id: str) -> Optional[dict[str, Any]]:
+    """ステートマシンの親（レーンなら計画）のステートマシン。ステートマシンか親が無ければ None。"""
+    held = read_machine(conn, machine_id)
+    return read_machine(conn, held["parent_id"]) if held is not None and held["parent_id"] else None
+
+
 def read_machine(conn: sa.Connection, machine_id: str) -> Optional[dict[str, Any]]:
     row = conn.execute(sa.select(MACHINES).where(MACHINES.c.id == machine_id)).first()
     return dict(row._mapping) if row is not None else None

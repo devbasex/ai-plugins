@@ -63,6 +63,12 @@ GitHub の PR の更新には、前の版を条件にした書き換えが無い
 | `reread` の 1 ステップの実行 | `answering._step_once` に置き、読み手役のステップだけを同じプロセスで流す。`review_again` で続きがあれば作業を起動して `wait` を返す | `run.py` の安全網（1000 行）。続きの設計のレビューを前景で抱えないため |
 | ステップを未了に戻す記録 | 事象 `step_recorded` の `status: reset`。戻したステップは新しい保存先（`<ステップ>-g<世代>-r<回>`）で打つ | 同じ保存先でプランを打つと、終わった回の結果が返る |
 | 版上げの工程で、前のステップの出力を後ろのステップへ渡す方法（Task 11） | ステップの出力を工程の文脈へ重ねる（`step_context`）。後ろのステップは `NDF_STAGE_INPUT` から読む。argv の差し込みは作らない（conductor の判断、2026-11-25） | 後ろのステップが前のステップの出力を読む形が、ほかの工程でも 1 つの仕組みで済む |
+| 版上げの組み立て（`bump-assemble`） | テンプレート `release-bump` を置かず、`ndf.script` のステップ `ndf progress bump-assemble` の 1 つで行う。workflow（設定の `release.cd.workflow`）の `assemble` を起動し、開いた版上げの PR を待って、PR の本文を承認資料のファイルへ写す。`ndf release-steps materials` は打たない。開いた PR を読むサブコマンド `ndf release-steps open-releases` を足した | `assemble` が PR の本文に書く資料は、`materials` と同じ内容で、提示したコミットが版上げの PR の head になる。`materials` の資料は版上げのコミットの前を指すので、`present` が受けない |
+| 版上げの PR を作らない設定（承認の対象 `production_pr`） | `bump-assemble` が `precondition` で止める | この方式は版上げの PR を作らない |
+| 承認されなかったときに `bump-record` へ進む方法 | 承認ゲートのステップに `metadata.ndf.on_reject`（進む先のステップ）を足す。却下と変更要求のどちらでも、行を失敗にせず流し直しもせず、間のステップを打たずに済んだとして進む。`bump-record` は出力の `product_version` が無ければ `rejected` を記録する。検査 I12 を足した | 設計書の「承認ゲートで変更を求められたら、`release` を流さずに `bump-record` で `rejected` を書く」を、工程の仕組みで行う手段が詳細設計書に無かった |
+| 打たずに済ませたステップの出力 | 工程の定義に `metadata.ndf.optional_outputs` を足し、版上げの工程は `delivery`・`product_version` を終わりの検査で必須にしない | 承認されなければ `release` を打たないので、2 つの値が無い |
+| 読み手役と承認ゲートの間のステップ | 検査 I11 は、間に種類 `record` のステップ（`bump-present`）を許す。待ちへ戻すときは、読み手役のステップからゲートの前までを未了に戻す | 資料を直したら提示もやり直す |
+| `bump-record` が使う計画の名前 | `ndf progress new` が親（レーン）の親から読み、文脈の `release_plan` に書く | 引数を増やさずに済む |
 | 結果の規約の `outputs` | `questions`・`material`・`check`・`review_again` を閉じた語彙に足した | gate のサブコマンドが返す `outputs` が語彙に無く、CLI が結果を `stopped`（invalid）に差し替えていた（単位「gate のサブコマンド」の取りこぼし） |
 
 ## タスク分解

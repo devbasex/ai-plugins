@@ -111,5 +111,10 @@ class LaneRow:
     def issues(self) -> set[int]:
         return set(self.input["issues"]) if self.input.get("kind") == "sprint" else set()
 
+    @property
+    def requests(self) -> list[str]:
+        """版上げの行（`kind: release`）のリリースのリクエストのキー。ほかの行は空。"""
+        return list(self.input["requests"]) if self.input.get("kind") == "release" else []
+
 
 Lanes = Mapping[str, list[LaneRow]]
