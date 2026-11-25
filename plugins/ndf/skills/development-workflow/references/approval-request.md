@@ -467,8 +467,6 @@ ndf records mvv cite --gate <design か release> --base <ベースブランチ> 
 ## 回答を記録する
 
 **利用者が承認ゲートで回答したら、承認も変更要求も、利用者に示した時点の結果の `routes` にある、回答に対応するコマンドで記録する。**
-ただし `ndf plan queue` か `ndf plan wait` の結果に複数のプランが含まれる場合は、利用者に提示した件数にかかわらず、
-結果の直下ではなく、回答の対象のプランに当たる `items` の要素の `routes` を使う。
 pace と MVV 判定の有無を問わない。利用者へ新しい確認は求めない。`routes` を返すのは、スプリントのステートマシン（`ndf progress`）か、
 プラン自身（`ndf plan`）のどちらかで、返るコマンドと補う引数が違う。
 
@@ -485,17 +483,16 @@ pace と MVV 判定の有無を問わない。利用者へ新しい確認は求�
   止まったら、`ndf plan wait` で今の承認待ちと資料を読み直して回答する。
   `ndf plan wait` の結果では、承認待ちのプランの `items` の要素が、その `routes` と同じ提示の承認資料のパス（`presentation_path`）と、
   承認でマージが本番へ反映され得るか（`production`）を持つ。利用者には、この資料で本番への反映を説明する
-- `ndf plan queue` か `ndf plan wait` の結果に複数のプランが含まれる場合は、提示した件数にかかわらず、回答の対象のプランに
-  当たる `items` の要素の `routes` で回答を記録する。結果の直下の `routes` には、回答用のコマンドを持つ最初のプランのコマンドが返る。このコマンドには実行先のプランが指定されているので、
-  別のプランへの回答にそのコマンドを使うと、最初のプランに回答が記録される。提示時の `items` で対象プランの `name` を確認し、
-  その要素の `routes` を使う
+- `ndf plan queue` か `ndf plan wait` の結果に複数のプランが含まれる場合は、提示した件数にかかわらず、結果の直下ではなく、
+  回答の対象のプランに当たる `items` の要素の `routes` を使う。結果の直下の `routes` は回答用のコマンドを持つ最初のプランのもので、
+  実行先のプランが指定されているため、別のプランへの回答に使うと最初のプランに記録される。対象は提示時の `items` の `name` で確かめる
 
 下の表の `<…>` は `routes` が埋めない値である。
 
 | 回答を待っているもの | 承認 | 変更要求 |
 | --- | --- | --- |
 | スプリントのステートマシン（`ndf progress`） | 提示時の `routes.approved` の `ndf answer` に `--reason <要約> --by human --key <冪等のキー>` を補って打つ | 提示時の `routes.request_changes` の `ndf answer` に `--reason <要約> --by human --key <冪等のキー> [--notes <指摘ファイル>]` を補って打つ |
-| プラン自身（`ndf plan`）。`ndf plan queue` か `ndf plan wait` の結果に複数のプランが含まれる場合は、提示した件数にかかわらず、回答の対象のプランに当たる `items` の要素の `routes` を使う | 提示時の `routes.approved` の `ndf plan next` をそのまま打つ | 提示時の `routes` にある変更要求に当たる回答（テンプレートのプランでは `rejected`）の `ndf plan next` をそのまま打つ |
+| プラン自身（`ndf plan`） | 提示時の `routes.approved` の `ndf plan next` をそのまま打つ | 提示時の `routes` にある変更要求に当たる回答（テンプレートのプランでは `rejected`）の `ndf plan next` をそのまま打つ |
 | ステートマシンが無い（単発の変更など） | 記録しない。回答と要約を conductor の報告に書く | 同じ |
 
 `ndf answer` の `--gate` は承認ゲートの結果の `metrics.gate.id`、`--result` はその結果の `routes` のキーから写す。`--key` は回答ごとに決め、
