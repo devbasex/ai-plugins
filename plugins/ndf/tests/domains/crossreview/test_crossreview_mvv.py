@@ -104,6 +104,12 @@ def test_approved_mvv_of_the_base_reaches_both_prompts_as_snapshots(
         assert "バージョン 11" in _prompt(fake, agent)
         assert (body.read_text(encoding="utf-8"), principles.read_bytes()) == (BODY, mvv.principles())
     assert '"mvv"' in _prompt(fake, "codex").splitlines()[-1]
+    table = criteria_decide._table()
+    writing_of_criterion_5 = table["mvv"]["reviewer"].format(number=table["mvv_number"])
+    for agent in ("codex", "kiro"):
+        assert writing_of_criterion_5 in _prompt(fake, agent)
+        # 指示へ渡すのは本文の場所だけで、本文はコピーしない
+        assert "**一つ目**" not in _prompt(fake, agent)
 
 
 def test_unapproved_mvv_adds_nothing_to_the_prompts(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, mvv_state: Path) -> None:
