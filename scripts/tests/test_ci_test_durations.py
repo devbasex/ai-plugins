@@ -68,9 +68,7 @@ def zip_of(files: dict[str, bytes | str]) -> bytes:
 
 
 def xml_of(*cases: tuple[str, str, float | None]) -> str:
-    body = "".join(
-        f'<testcase classname="{c}" name="{n}"' + (f' time="{t}"' if t is not None else "") + "/>" for c, n, t in cases
-    )
+    body = "".join(f'<testcase classname="{c}" name="{n}"' + (f' time="{t}"' if t is not None else "") + "/>" for c, n, t in cases)
     return f"<testsuites><testsuite>{body}</testsuite></testsuites>"
 
 
@@ -280,9 +278,7 @@ def history(n: int, start: int = 100, per_page: int = 100) -> dict[str, object]:
         {"id": 1000 + k, "run_number": start - 1 - k, "run_attempt": 1, "created_at": (NOW - timedelta(hours=k + 1)).isoformat()}
         for k in range(n)
     ]
-    arts = [
-        {"id": 5000 + r["id"], "expired": False, "workflow_run": {"id": r["id"]}, "created_at": r["created_at"]} for r in runs
-    ]
+    arts = [{"id": 5000 + r["id"], "expired": False, "workflow_run": {"id": r["id"]}, "created_at": r["created_at"]} for r in runs]
     routes: dict[str, object] = {}
     for page in range(0, max(n, 1), per_page):
         no = page // per_page + 1

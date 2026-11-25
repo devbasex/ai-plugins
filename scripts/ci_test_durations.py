@@ -406,8 +406,7 @@ def past_totals(gh: Gh, run_number: int, need: int, now: datetime) -> Search:
             pages += 1
             runs_page += 1
             path = (
-                f"{REPO_API}/actions/workflows/{WORKFLOW}/runs?branch=main&event=push&status=success"
-                f"&per_page={PER_PAGE}&page={runs_page}"
+                f"{REPO_API}/actions/workflows/{WORKFLOW}/runs?branch=main&event=push&status=success&per_page={PER_PAGE}&page={runs_page}"
             )
             try:
                 runs = gh.get(path, "pages")["workflow_runs"]
@@ -486,7 +485,9 @@ def render_trend(
     md: list[str] = ["## テストの所要", ""]
     notes: list[str] = []
     if current["valid"]:
-        lines.append(f"この回（run {current['run']}）: 合計 {current['total_seconds']} 秒（根 {current['root_seconds']}・NDF {current['ndf_seconds']}）")
+        lines.append(
+            f"この回（run {current['run']}）: 合計 {current['total_seconds']} 秒（根 {current['root_seconds']}・NDF {current['ndf_seconds']}）"
+        )
     else:
         lines.append(f"この回（run {current['run']}）: 無効な集計（{current['reason']}）")
     counted = [(current["run"], current["total_seconds"])] if current["valid"] else []
