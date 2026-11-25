@@ -595,6 +595,20 @@
             ],
             "description": "使用率のキャッシュの使用率（account list。読めていなければ null）"
           },
+          "five_hour": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "5 時間の窓の使用率（account list。窓が無い・読めていなければ null）"
+          },
+          "seven_day": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "7 日の窓の使用率（モデル別の週の窓を含む最大。account list。窓が無い・読めていなければ null）"
+          },
           "capacity_declared": {
             "type": "object",
             "description": "定義した 5 時間と週のクォータの大きさ（account list・capacity）"

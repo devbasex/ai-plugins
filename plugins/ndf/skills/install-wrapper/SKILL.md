@@ -18,8 +18,9 @@ allowed-tools:
 
 1. claude の中で `/ndf:install-wrapper` を打つ
 2. `ndf relay install` が、起動の部品の複製を `~/.claude/ndf/` の下（隣の `relay.root` がプラグインの根を指す）に、
-   PATH のエントリポイントを `~/.local/bin/ndf-relay` に置く
-3. 次に開いたシェルで `ndf-relay run` と打つと、ラッパーを通って claude が起動する
+   PATH のエントリポイントを `~/.local/bin/ndf-relay` と `~/.local/bin/ndf` に置く
+3. 次に開いたシェルで `ndf-relay run` と打つと、ラッパーを通って claude が起動する。`ndf relay account list` などの
+   `ndf` のコマンドも、端末・tmux・Codex から打てる
 
 ## 引数
 
@@ -55,7 +56,7 @@ echo "exit=$?"
 | もの | パス |
 | --- | --- |
 | 複製と根の指し先 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` の下の複製と `relay.root` |
-| PATH のエントリポイント | `${XDG_BIN_HOME:-~/.local/bin}/ndf-relay` |
+| PATH のエントリポイント | `${XDG_BIN_HOME:-~/.local/bin}/ndf-relay`（`ndf relay …` を呼ぶ）と `${XDG_BIN_HOME:-~/.local/bin}/ndf`（引数をそのまま `ndf` へ渡す）。どちらも複製を呼ぶので、プラグインの更新に `relay.root` の向け直しだけで追従する |
 
 **devbase では `~/.claude` が同じアカウントグループのコンテナで共有される。** `install` と
 `uninstall` の効果は、同じグループの全コンテナに及ぶ。
