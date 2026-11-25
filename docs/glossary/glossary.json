@@ -8453,6 +8453,27 @@
       "context": "ndf-durable",
       "meaning": "GitHub が一次の上限とは別に、短い間の書き込みの多さ・同時の要求の多さで断る上限。403 か 429 と本文の secondary rate limit で返る",
       "source": "docs/specifications/ndf-github-write-gate.md"
+    },
+    {
+      "term": "触るシンボル",
+      "context": "ndf-design",
+      "meaning": "設計の結果の触るファイルのセルに `<パス>::<名前>` で書く、ファイルの中の関数・クラス・メソッドの名前。同じファイルでも触るシンボルが交わらない実装のプランは同時に流れる",
+      "code": "touch_symbol",
+      "pending_source": "issues/issue-4295-2037-design.md"
+    },
+    {
+      "term": "変えたファイル",
+      "context": "ndf-parallel",
+      "meaning": "単位の PR の差分に現れたファイル。計画を進める耐久ワークフローが拾ってレーンの行へ足し、重なりの知らせに使う。計画の検査（I13）では断らない",
+      "code": "changed_files",
+      "pending_source": "issues/issue-4295-2037-design.md"
+    },
+    {
+      "term": "重なりの知らせ",
+      "context": "ndf-parallel",
+      "meaning": "同じ時間帯に動く 2 本のレーンの触る場所か変えたファイルが重なったことを、オーガナイザーへ伝えるリクエスト。別の計画のレーンとの重なりも含む",
+      "code": "touches_overlap",
+      "pending_source": "issues/issue-4295-2037-design.md"
     }
   ]
 }
