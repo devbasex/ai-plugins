@@ -25,6 +25,18 @@ CASES = [
     ),
     pytest.param(pm.automatic_rows, (_section({"deliveries": [], "cd": None}),), Verdict.MANUAL, id="rows-no-delivery"),
     pytest.param(
+        pm.automatic_rows, (_section({"deliveries": [{"kind": "auto"}], "cd": None}),), Verdict.AUTOMATIC, id="rows-channel-omitted"
+    ),
+    pytest.param(
+        pm.automatic_rows,
+        (_section({"deliveries": [{"channel": None, "kind": "auto"}], "cd": None}),),
+        Verdict.AUTOMATIC,
+        id="rows-channel-null",
+    ),
+    pytest.param(
+        pm.automatic_rows, (_section({"deliveries": [{"kind": "manual"}], "cd": None}),), Verdict.MANUAL, id="rows-channel-omitted-manual"
+    ),
+    pytest.param(
         pm.automatic_rows,
         (_section({"deliveries": [{"channel": "staging", "kind": "auto"}], "cd": None}),),
         Verdict.MANUAL,

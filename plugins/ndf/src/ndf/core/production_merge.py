@@ -42,7 +42,8 @@ _NEEDS_APPROVAL = frozenset({Verdict.AUTOMATIC, Verdict.UNSET, Verdict.UNKNOWN})
 
 
 def _automatic_row(row: object) -> bool:
-    return isinstance(row, dict) and row.get("channel") == "production" and row.get("kind") != "manual"
+    """本番に適用される自動反映の行か。`channel` の省略・`null` はどのチャネルにも当たる（`forms_decide.deliveries_of` と同じ）。"""
+    return isinstance(row, dict) and row.get("channel") in (None, "production") and row.get("kind") != "manual"
 
 
 def automatic_rows(section: object) -> Verdict:

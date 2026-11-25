@@ -190,16 +190,18 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
    版数は渡さず、開発版のプランを流す時点に queue が決める（明示するなら `--version`）
    設計の前に別の課題を統合すると決めていれば `--absorb <課題>:<統合先>` を足す（統合した課題は設計のプランを持たない）
 2. 設計: `sv queue $O/1-design-1052.json` と `sv wait $O/1-design-1052.json`
-3. 設計承認ゲート: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。利用者が回答したら、設計 PR ごとに
-   利用者に示した時点のキューの結果の `routes` から、回答に対応する `ndf plan next`（`--answer <回答> --by human` まで入っている）をそのまま打つ。引数は足さない
+3. 設計承認ゲート: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。利用者が回答したら、設計 PR ごとに回答を打つ。
+   打つコマンドは、利用者に示した時点のキューの結果の `items` から、その PR の設計のプランの行（`name` が `1-design-1052` など）を選び、
+   その行の `routes` にある回答に対応する `ndf plan next`（`--answer <回答> --by human` まで入っている）である。引数は足さずにそのまま打つ。
+   結果の直下の `routes` は先頭のプランの分だけなので、それを PR の数だけ打っても残りのプランは承認待ちのまま残る
 4. 設計 PR のマージから開発版まで: `sv queue $O/3-design-merge-1052.json
    --then $O/4-design-results.json --then $O/5-sprint-branch.json --then $O/6-impl-1052.json $O/6-impl-1053.json
    --then $O/7-check.json --then $O/8-release.json` と、同じプランの並びで `sv wait`。マージのプランは 3 の記録を見て
    マージする（記録が無ければ承認ゲートで止まる）。設計の結果のプランがマージした設計文書の「設計の結果」の表を
    実装のプランへ写し、検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
 5. リリース承認ゲート: キューの結果が `gate`（開発版の facts のステップ）なら、`sprint.json` の `リリース承認ゲート` のステージの `gate` に沿って
-   承認資料（バージョンは `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が回答したら、利用者に示した時点のキューの結果の `routes` から、
-   回答に対応する `ndf plan next` をそのまま打つ（3 と同じ。引数は足さない）。変更を要求されたら 6 を打たない
+   承認資料（バージョンは `$O/8-release-state/version.json` の `base`）を添えて本番の承認（`ndf-gate:2`）を取る。利用者が回答したら、利用者に示した時点のキューの結果の `items` から
+   開発版のリリースプランの行を選び、その行の `routes` にある回答に対応する `ndf plan next` をそのまま打つ（3 と同じ。引数は足さない）。変更を要求されたら 6 を打たない
 6. 本番: `sv queue $O/10-release-prod.json` と `sv wait $O/10-release-prod.json`。先頭の `approve` が
    5 の記録を見て承認資料へ承認の記録を書き、出す PR は検査の報告から埋まる。最後のステップがクリーンアップを行う
 
