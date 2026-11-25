@@ -122,10 +122,20 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 承認ゲートの回答は [approval-request.md の「回答を記録する」](approval-request.md#回答を記録する) の手順で記録する。
 どの `routes` を使うかも、その手順に従う。
 
+**回答を記録した後は、承認待ちのために起動しなかった後続のプランが残っていないかを、キューの結果で確かめる。**
+回答の記録に打つ `ndf plan next` は対象のプランだけを進め、キューに残った後続のプランは起動しない。
+確かめる相手は、バックグラウンドで起動した `ndf plan queue` の出力の最後の行（結果の JSON）である。
+
+- キューの実行がまだ終わっていない（完了の通知が来ていない）なら、`wait` の結果の `next` の同じ `wait` を打つ
+- キューが `status: gate` で終わり、`items` に `status` が `null` のプラン（流さなかったプラン）があるなら、
+  キューの結果の `next`（`ndf plan queue … --resume`）で再開してから `wait` を打つ
+- `status` が `null` のプランが無い（後続のプランを指定していない、または承認待ちでも起動した）なら、再開しない。
+  後続のプランが人へ承認ゲートを届ける役（プランの `accepts_gate`）なら、前のプランが承認待ちでも起動する
+
 | 終わり方 | 終了コード | トップレベルの値 | 次にすること |
 | --- | --- | --- | --- |
 | 渡したプランがすべて終わった | 0 | `status: ok` | 次のステージへ進む |
-| どれかのプランが承認ゲートで待っている | 10 | `status: gate`・`routes`（回答ごとに打つコマンド。先頭の承認ゲートの分）・`next`（同じ待ち） | 承認ゲートの資料を提示し、人の回答を [approval-request.md の「回答を記録する」](approval-request.md#回答を記録する) の手順で記録する |
+| どれかのプランが承認ゲートで待っている | 10 | `status: gate`・`routes`（回答ごとに打つコマンド。先頭の承認ゲートの分）・`next`（同じ待ち） | 承認ゲートの資料を提示し、人の回答を [approval-request.md の「回答を記録する」](approval-request.md#回答を記録する) の手順で記録する。その後は表の上の「回答を記録した後は」のとおりキューの結果を確かめる |
 | どれかのプランが止まった | 原因の種類（`cause.kind`）ごとの終了コード | `status: stopped`・`cause`（先頭の止まり）・`next`（同じ待ち） | `cause.kind` と `items` の各行の `cause` を読み、原因を片付けてから続きを打つ |
 | 上限（`--timeout`、既定 3000 秒）に達した | 3（`cause.kind: wait_timeout`） | `status: stopped`・`next`（同じ待ち） | 待っている処理がまだ動いているかを確かめてから決める（表の下の「上限に達したとき」） |
 
@@ -139,7 +149,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
 | 実行の結果 | 次にすること |
 | --- | --- |
 | `status: ok` | 同じ `wait` を打つ（終わりをすぐに返す） |
-| `status: gate`（終了コード 10） | 承認ゲートで待っている。終了コードが 0 でなくても失敗ではない。承認ゲートの資料を提示し、人の回答を [approval-request.md の「回答を記録する」](approval-request.md#回答を記録する) の手順で記録する。`ndf plan queue` の結果なら、キューは承認ゲートで終わっているので、回答を記録するだけでは `--then` の後続のプランが起動しない。記録した後に、その結果の `next`（`ndf plan queue … --resume`）を打ってキューを続け、`wait` を打つ |
+| `status: gate`（終了コード 10） | 承認ゲートで待っている。終了コードが 0 でなくても失敗ではない。承認ゲートの資料を提示し、人の回答を [approval-request.md の「回答を記録する」](approval-request.md#回答を記録する) の手順で記録する。`ndf plan queue` の結果なら、その後は上の「回答を記録した後は」のとおり、`items` に流さなかったプランがあるときだけ再開する |
 | `status: stopped` で `next` がある | `cause` を読んで原因を直し、`next` のコマンドで再開してから `wait` を打つ。元の起動コマンドを打ち直さない（保存した止まりの結果が返り、先へ進まない） |
 | `next` が無い（起動の前に失敗したときなど） | `cause` を読んで原因を直し、元の `ndf plan queue` または `ndf plan next` を打ち直してから `wait` を打つ |
 
