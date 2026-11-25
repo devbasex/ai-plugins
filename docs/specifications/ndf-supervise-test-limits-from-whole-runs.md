@@ -2,6 +2,10 @@
 
 ## 概要
 
+この文書は、テストの所要時間を `.ndf/project.json` に保存していた当時の仕様を記録する。
+本文の `w` は当時の `test_duration`、`m` は直近の全体テストの実測、`c` は CI の壁時計の秒を指す。
+[解析で取得・保存する項目の見直し](https://github.com/devbasex/ai-plugins/issues/4516)で `test_duration` の測定と保存を廃止した。
+
 **`supervise.py` のプランと `test-run.py` が使う予算なしのテストの上限（`whole_timeout`・`test_timeout`・`init_test_timeout`）は、
 `.ndf/project.json` の所要の記録 w と、同じリポジトリで先に走った全体テストの実測 m の大きい方の 3 倍（`ceil(3·max(w, m))`）である。**
 手元の全体検証が上限の中で終わるたびに、その秒をリポジトリの git の共通ディレクトリへ 1 行追記する。範囲テストと全体テストの
@@ -38,7 +42,7 @@
 ## 用語
 
 「全体テストの実測」「テストの上限」「全体テストの鍵」の定義は用語集（[docs/glossary.md](../glossary.md)）が正である。
-この文書の w は所要の記録（`.ndf/project.json` の `test_duration`。#4516 で測るのも保存するのもやめ、用語集からも消した）、m は直近の全体テストの実測、c は CI の壁時計の秒を指す。
+w・m・c の意味は冒頭の「概要」に書いた。当時の「所要の記録」（w）は、`test_duration` の廃止とともに用語集から消した。
 
 コンテキストは NDF の開発ワークフロー（`ndf-workflow`）の 1 つである。cross-refactoring の着手前のテストは同じコンテキストの中の
 呼び出し元で、全体テストの実測を同じ関数（`whole_runs.record_whole`）で書く。
