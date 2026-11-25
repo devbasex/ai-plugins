@@ -171,7 +171,7 @@ class StopSteps:
         """キーの子の起動の後の設定の変更を確かめる（詳細設計書の「起動の後の設定の変更」）。源のスタンプが変わった見回りだけ確かめ直す。
 
         登録簿のキーの削除・登録し直し・`off` は `must_end` だけを立て（止めてよい時点を待つ）、接続先・資格情報・helper の変更
-        （`verify` の外れ）は `end_now` も立てる。候補・`after_auth` を読まず、`tried` に入れない（別冊の「設定の変更でキーの子を止める範囲」）。
+        （`verify` の外れ）は `end_now` も立てる。候補・`choose` を読まず、`tried` に入れない（別冊の「設定の変更でキーの子を止める範囲」）。
         """
         t = sec.target
         if sec.end_now or (sec.drift_stamps is not None and launch_inputs.unchanged(sec.drift_stamps)):
@@ -188,7 +188,7 @@ class StopSteps:
     def _key_auth(self, sec: Section, screen: str) -> None:
         """キーの子の helper の拒み・記録の異常・失敗のマークと 401 を認証の失敗、`gate` の行などを設定の当たりとして確かめ、フラグだけを立てる。
 
-        候補・`after_auth` を読まず、`hold` もしない。`must_end` が既に `drift` で立っていれば、認証の失敗では `end_now` を
+        候補・`choose` を読まず、`hold` もしない。`must_end` が既に `drift` で立っていれば、認証の失敗では `end_now` を
         立てない（設定の当たりは立てる）。401 では止める前に拒否のマークを記録へ足す（別冊の「同時の当たり」）。
         """
         rec = sec.target.helper
@@ -323,9 +323,9 @@ class StopSteps:
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []
             fallbacks = inputs.fallbacks()
-            pick = account_decide.after_auth(sec.account, rows, inputs.candidates(), fallbacks, self.s.guards)
+            pick = account_decide.choose("auth", sec.account, rows, inputs.candidates(), self.s.guards, fallbacks, self._explicit())
             if pick.kind != "switch" and sec.rekeyed and sec.account in fallbacks:  # 登録し直した名前は新しい世代の候補に残す
-                return Pick("switch", sec.account, REKEYED_REASON.format(name=sec.account))
+                return Pick("switch", sec.account, REKEYED_REASON.format(name=sec.account), (str(sec.account),))
             return pick
 
         try:

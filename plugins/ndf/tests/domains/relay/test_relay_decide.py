@@ -377,9 +377,10 @@ def test_i13_guard_comes_after_the_marker_question_and_limit_and_is_cut_by_the_s
         assert got.reason == switch_decide.ACTIVE
 
 
-G = account_decide.Guards(85.0, 70.0, 90.0)  # 閾値 A・B・C（`contracts/limits/` の既定）
+G = account_decide.Guards(85.0, 90.0)  # 閾値 A・C（`contracts/limits/` の既定）
 R = 1_800_000_000.0  # 7 日の窓のリセットの時刻の基準
 GONE = Usage("gone", None, None, None, None, True)  # 使用率は分からないが上限
+choose = account_decide.choose
 
 
 def use(name, five=None, seven=None, resets=None, limited=False):
@@ -387,136 +388,89 @@ def use(name, five=None, seven=None, resets=None, limited=False):
     return Usage(name, percent, five, seven, resets, limited)
 
 
-def test_3864_5_group_reads_the_five_hour_and_weekly_windows_against_a_b_c():
-    group = account_decide.group
-    assert [group(use("a", 40, 30), G), group(use("a", 40, 75), G), group(use("a", 86, 30), G), group(use("a", 40, 91), G)] == [0, 2, 3, 3]
-    # 境界: A ちょうどは使い切り、B ちょうどは B 越え、C ちょうどは使い切り。5 時間の窓の無いプランは A に掛からない
-    assert [group(use("a", 85, 10), G), group(use("a", 10, 70), G), group(use("a", 10, 90), G), group(use("a", None, 30), G)] == [
-        3,
-        2,
-        3,
-        0,
-    ]
-    assert group(None, G) == 1  # 使用率の分からないもの
-    assert group(GONE, G) is None and group(use("a", 100, 10, limited=True), G) is None  # 上限はどの組にも入れない
+def test_4404_inside_reads_the_five_hour_and_weekly_windows_against_a_and_c():
+    assert account_decide.inside(None, G)  # 使用率の分からないものは内側
+    assert account_decide.inside(use("a", 84, 89), G)
+    assert not account_decide.inside(use("a", 85, 10), G)
+    assert not account_decide.inside(use("a", 10, 90), G)
+    assert not account_decide.inside(use("a", 10, 10, limited=True), G)
 
 
-def test_3864_5_order_is_group_then_weekly_reset_then_weekly_use_then_name():
-    rows = [
-        use("full", 90, 10, R),
-        use("over", 10, 75, R),
-        use("late", 10, 10, R + 50),
-        use("early", 10, 20, R + 10),
-        use("lim", 100, 10, R, True),
-        GONE,
-        use("me", 10, 10, R),
-        use("outside", 1, 1, R),
-    ]
-    candidates = ["full", "over", "late", "early", "lim", "gone", "unknown", "me"]
-    assert account_decide.order("me", rows, candidates, G) == ["early", "late", "unknown", "over", "full"]
-    # 同じ組: リセットの早い順 → 7 日の使用率の大きい順 → 名前の順。リセットの分からないものは後
-    same = [use("b", 10, 20, R), use("a", 10, 20, R), use("c", 10, 40, R), use("d", 10, 50, None)]
-    assert account_decide.order(None, same, ["d", "b", "a", "c"], G) == ["c", "a", "b", "d"]
-    assert account_decide.order(None, rows, [], G) == []  # 候補の外の行を返さない
+def test_4404_ranked_puts_inside_then_explicit_then_headroom_and_drops_limited():
+    rows = [use("busy", 10, 79), use("calm", 5, 32), use("over", 86, 10), use("full", 10, 100, limited=True), GONE]
+    names = ["busy", "calm", "over", "full", "gone", "unknown"]
+    assert account_decide.ranked(None, rows, names, G) == ["calm", "busy", "unknown", "over"]
+    assert account_decide.ranked(None, rows, names, G, explicit=("", "busy")) == ["busy", "calm", "unknown", "over"]
+    assert account_decide.ranked(None, rows, names, G, explicit=("over",)) == ["calm", "busy", "unknown", "over"]  # 外側の明示は内側より後
+    assert account_decide.ranked("calm", rows, names, G) == ["busy", "unknown", "over"]
+    assert account_decide.ranked(None, rows, [], G) == []  # 候補の外の行を返さない
 
 
-def test_3864_4_cut_point_switches_to_a_lower_group_and_keeps_within_the_same_group():
-    rows = [use("work1", 92, 30, R + 100), use("work2", 10, 10, R + 200), use("work3", 10, 10, R + 50)]
-    got = account_decide.before_limit("work1", rows, ["work1", "work2"], G)
-    assert (got.kind, got.account) == ("switch", "work2") and "work1" in got.reason and "閾値 A" in got.reason
-    # 同じ組の候補が 2 つなら 7 日のリセットの早いほう
-    assert account_decide.before_limit("work1", rows, ["work1", "work2", "work3"], G).account == "work3"
-    # B 越えの組から余裕の組へ替える
-    over = [use("work1", 10, 75, R), use("work2", 10, 10, R + 200)]
-    assert account_decide.before_limit("work1", over, ["work1", "work2"], G).account == "work2"
-    # 余裕の組なら、同じ組の候補のリセットが早くても替えない（切り替えの余裕）
-    calm = [use("work1", 10, 10, R + 500), use("work2", 10, 10, R)]
-    assert account_decide.before_limit("work1", calm, ["work1", "work2"], G).kind == "keep"
-    # 使い切りの組どうし・候補が無い・候補の外の空いた行・今が分からない・既定のログインでは替えない
-    both = [use("work1", 92, 10, R), use("work2", 95, 10, R)]
-    assert account_decide.before_limit("work1", both, ["work1", "work2"], G).kind == "keep"
-    assert account_decide.before_limit("work1", rows, ["work1"], G).kind == "keep"
-    assert account_decide.before_limit("work9", rows, ["work2"], G).kind == "keep"
-    assert account_decide.before_limit(None, rows, ["work2"], G).kind == "keep"
-    # 今が上限なら組 4 として比べ、使い切りの組へも替える
-    limited = [use("work1", 100, 10, R, True), use("work2", 95, 10, R)]
-    assert account_decide.before_limit("work1", limited, ["work1", "work2"], G).account == "work2"
-    # 従量の接続からは順の先頭へ戻り、候補が無ければそのまま
-    assert account_decide.before_limit("metered", rows, ["work1", "work2"], G).account == "work2"
-    assert account_decide.before_limit("key:k1", rows, [], G).kind == "keep"
+def test_4527_start_picks_the_longest_and_skips_a_limited_pin():
+    rows = [use("main", None, 79), use("gmail", None, 32), use("team", None, 100, limited=True)]
+    got = choose("start", None, rows, ["gmail", "main", "team"], G)
+    assert (got.kind, got.account, got.order) == ("switch", "gmail", ("gmail", "main"))
+    assert choose("start", None, rows, ["gmail", "main", "team"], G, explicit=("main",)).order == ("main", "gmail")
+    assert choose("start", None, rows, ["gmail", "main", "team"], G, explicit=("team",)).account == "gmail"
+    none = choose("start", None, rows, ["team"], G)
+    assert (none.kind, none.account, none.order) == ("keep", None, ())  # 既定のログイン
 
 
-def test_i12_guard_switches_only_from_the_spent_group_to_an_inner_candidate():
-    calm = use("work2", 10, 10, R)
-    for spent in (use("work1", 86, 30, R), use("work1", 40, 91, R)):  # 5 時間が A 以上・7 日が C 以上
-        got = account_decide.guard("work1", [spent, calm], ["work1", "work2"], G)
-        assert (got.kind, got.account) == ("switch", "work2")
-    # 7 日が B 越え・C より下では途中で替えない
-    assert account_decide.guard("work1", [use("work1", 10, 75, R), calm], ["work1", "work2"], G).kind == "keep"
-    # 閾値の内側の候補が無ければ替えずに使い切る
-    assert account_decide.guard("work1", [use("work1", 86, 30, R), use("work2", 95, 10, R)], ["work1", "work2"], G).kind == "keep"
-    # 使用率の分からない候補（組 1）へは替える
-    assert account_decide.guard("work1", [use("work1", 86, 30, R)], ["work1", "work2"], G).account == "work2"
-    # API キーの子は、使い切りの組の登録済みアカウントにも戻る。候補が無ければそのまま
-    assert account_decide.guard("key:k1", [use("work1", 86, 30, R)], ["work1"], G).account == "work1"
-    assert account_decide.guard("metered", [], [], G).kind == "keep"
-    # 既定のログイン・使用率の分からない今のアカウントでは替えない
-    assert account_decide.guard(None, [calm], ["work2"], G).kind == "keep"
-    assert account_decide.guard("work1", [calm], ["work1", "work2"], G).kind == "keep"
+def test_4404_running_keeps_inside_and_moves_only_when_it_cannot_continue():
+    rows = [use("main", None, 79), use("gmail", None, 32)]
+    keep = choose("running", "main", rows, ["main", "gmail"], G)
+    assert (keep.kind, keep.account, keep.order) == ("keep", "main", ("main", "gmail"))  # 区切りで替えない
+    over = [use("main", None, 91), use("gmail", None, 32)]
+    assert choose("running", "main", over, ["main", "gmail"], G).account == "gmail"
+    both = [use("main", None, 91), use("gmail", 86, 32)]
+    assert choose("running", "main", both, ["main", "gmail"], G).kind == "keep"  # 内側の候補が無ければ使い切る
+    assert choose("running", None, rows, ["gmail"], G).kind == "keep"
+    assert choose("running", "metered", over, ["main", "gmail"], G).account == "gmail"
+    assert choose("running", "metered", [use("main", None, 91)], ["main"], G).account == "main"  # 従量より上限でない登録へ戻る
+    assert choose("running", "key:k1", [], [], G).kind == "keep"
 
 
-def test_3864_5_after_limit_prefers_inner_candidates_then_spent_then_fallbacks():
-    limited = use("work1", 100, 10, R, True)
-    # 使用率の分からない候補へも替える。背景の待ちが残っていても替える（#3337）
-    got = account_decide.after_limit("work1", [limited], ["work1", "work2"], [], G)
-    assert (got.kind, got.account) == ("switch", "work2")
-    # 閾値の内側が使い切りの組より先。内側が無ければ使い切りの組（7 日 95%）へも替える
-    spent = use("work2", 10, 95, R)
-    assert account_decide.after_limit("work1", [limited, spent, use("work3", 10, 10, R)], ["work2", "work3"], [], G).account == "work3"
-    assert account_decide.after_limit("work1", [limited, spent], ["work1", "work2"], [], G).account == "work2"
-    # 上限が解けた今のアカウント（組 0）へ戻る
-    freed = use("work1", 5, 10, R)
-    assert account_decide.after_limit("work1", [freed, spent], ["work1", "work2"], [], G) == Pick(
-        "switch", "work1", account_decide.after_limit("work1", [freed, spent], ["work1", "work2"], [], G).reason
-    )
-    # 登録が 1 つだけなら、解けるまでは待ち、解ければ同じアカウント
-    assert account_decide.after_limit("work1", [limited], ["work1"], [], G).kind == "wait_reset"
-    assert account_decide.after_limit("work1", [freed], ["work1"], [], G).account == "work1"
-    # 使用率の分からない上限の行・候補の外（外した間・再登録が要る）の今のアカウントには戻らない
-    gone = Usage("work1", None, None, None, None, True)
-    assert account_decide.after_limit("work1", [gone], ["work1"], [], G).kind == "wait_reset"
-    assert account_decide.after_limit("work1", [freed], [], [], G).kind == "wait_reset"
-    # cross-review の r1-2: 窓が分からないまま観測の期限を過ぎて行が消えた今のアカウントは、解けたとして同じアカウントで再開する
-    assert account_decide.after_limit("work1", [], ["work1"], [], G) == Pick(
-        "switch", "work1", account_decide.after_limit("work1", [], ["work1"], [], G).reason
-    )
-    # 候補が無ければ従量の接続、続けて API キー、それも無ければ待つ
-    fallbacks = ["metered", "key:k1"]
-    assert account_decide.after_limit("work1", [limited], [], fallbacks, G).account == "metered"
-    assert account_decide.after_limit("work1", [limited], [], ["key:k1"], G).account == "key:k1"
-    assert account_decide.after_limit("metered", [], [], fallbacks, G).account == "key:k1"
-    assert account_decide.after_limit("metered", [], [], ["metered"], G).kind == "wait_reset"
+def test_4404_limit_keeps_an_account_the_api_does_not_report_limited():
+    freed = [use("work1", None, 40), use("work2", None, 10)]
+    got = choose("limit", "work1", freed, ["work1", "work2"], G)
+    assert (got.kind, got.account, got.order) == ("switch", "work1", ("work1",))
+    assert choose("limit", "work1", [], ["work1"], G).account == "work1"  # 記録の無いものは解けたとして扱う
+
+
+def test_4404_limit_moves_to_the_longest_then_fallbacks_then_waits():
+    limited = use("work1", None, 100, limited=True)
+    rows = [limited, use("work2", 86, 10), use("work3", None, 50)]
+    got = choose("limit", "work1", rows, ["work1", "work2", "work3"], G, ["metered"])
+    assert got.order == ("work3", "work2", "metered")
+    assert choose("limit", "work1", [limited], ["work1"], G, ["metered", "key:k1"]).order == ("metered", "key:k1")
+    assert choose("limit", "metered", [], [], G, ["metered", "key:k1"]).account == "key:k1"
+    assert choose("limit", "work1", [limited], ["work1"], G).kind == "wait_reset"
+    assert choose("limit", None, [use("work2", None, 10)], ["work2"], G).account == "work2"  # 既定のログインは画面の行で上限
 
 
 def test_after_auth_picks_the_order_then_fallbacks_and_stalls_without_any():
-    rows = [use("work2", 10, 10, R)]
-    assert account_decide.after_auth("work1", rows, ["work1", "work2"], [], G).account == "work2"
-    assert account_decide.after_auth(None, rows, ["work2"], [], G).account == "work2"  # 既定のログインでも替える
-    assert account_decide.after_auth("metered", [], ["work1"], ["metered"], G).account == "work1"
-    assert account_decide.after_auth("key:k1", [], [], ["key:k1", "key:k2"], G).account == "key:k2"
-    assert account_decide.after_auth("work1", [], ["work1"], [], G).kind == "stalled"
-    assert account_decide.after_auth("metered", [], [], ["metered"], G).kind == "stalled"
+    rows = [use("work1", 10, 10), use("work2", 10, 10)]
+    assert choose("auth", "work1", rows, ["work1", "work2"], G).account == "work2"
+    assert choose("auth", None, rows, ["work2"], G).account == "work2"  # 既定のログインでも替える
+    assert choose("auth", "metered", [], ["work1"], G, ["metered"]).account == "work1"
+    assert choose("auth", "key:k1", [], [], G, ["key:k1", "key:k2"]).account == "key:k2"
+    assert choose("auth", "work1", [], ["work1"], G).kind == "stalled"
+    assert choose("auth", "metered", [], [], G, ["metered"]).kind == "stalled"
 
 
 def test_after_auth_names_the_default_login_in_every_reason():
-    # 今が既定のログイン（None）なら、登録済みへの替え・従量の接続・stalled のどの理由の文にも「既定のログイン」と書く
     picks = [
-        account_decide.after_auth(None, [use("work2", 10, 10, R)], ["work2"], [], G),
-        account_decide.after_auth(None, [], [], ["metered"], G),
-        account_decide.after_auth(None, [], [], [], G),
+        choose("auth", None, [use("work2", 10, 10)], ["work2"], G),
+        choose("auth", None, [], [], G, ["metered"]),
+        choose("auth", None, [], [], G),
     ]
     assert [(p.kind, p.account) for p in picks] == [("switch", "work2"), ("switch", "metered"), ("stalled", None)]
     assert all(p.reason.startswith("既定のログイン の認証に失敗") and "None" not in p.reason for p in picks)
+
+
+def test_choose_refuses_an_unknown_scene():
+    with pytest.raises(ValueError):
+        choose("cut", None, [], [], G)
 
 
 def test_restart_judges_limits_before_stopping_and_excludes_the_target():

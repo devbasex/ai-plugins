@@ -248,7 +248,7 @@ def test_r1_1_the_helper_reads_the_key_inside_the_record_lock(tmp_path, monkeypa
 def test_r1_4_the_fallbacks_follow_the_accounts_after_a_limit(tmp_path):
     # 先頭の従量の接続の用意が落ちても、残りの API キーを試せるように起動順の後ろへ並べる（今の接続先と tried は除く）
     g = wrapper_guard.GuardSteps()
-    g.s = SimpleNamespace(guards=account_decide.Guards(80.0, 50.0, 90.0))
+    g.s = SimpleNamespace(guards=account_decide.Guards(80.0, 90.0))
     g._pinned_or = lambda pick, reason, current, now: pick
     ok = launch_inputs.LaunchCache({}, None)
     inputs = launch_inputs.Inputs(fallback={reg.METERED: ok, "key:k1": ok, "key:k2": ok}, tried=frozenset({"key:k2"}))
@@ -418,7 +418,7 @@ def test_r4_5_a_row_without_a_usable_key_is_not_a_candidate(tmp_path, value):
 def test_r4_4_a_reregistered_key_stays_in_the_order_behind_another_first(tmp_path):
     # 同じ名前の登録し直しで止めたキーの子は、別の候補が先頭に立っても新しい世代のその名前を起動順に残す（先頭の用意が落ちても続ける）
     g = wrapper_guard.GuardSteps()
-    g.s = SimpleNamespace(guards=account_decide.Guards(80.0, 50.0, 90.0))
+    g.s = SimpleNamespace(guards=account_decide.Guards(80.0, 90.0))
     g._pinned_or = lambda pick, reason, current, now: pick
     ok = launch_inputs.LaunchCache({}, None)
     inputs = launch_inputs.Inputs(fallback={"key:k1": ok, "key:k2": ok})

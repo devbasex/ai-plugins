@@ -315,11 +315,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         stall=limits.seconds("relay.stall"),
         spin=hub.spin_of(environ),
         context_limit=context_thresholds.thresholds(environ, limits.value).limit,
-        guards=account_decide.Guards(
-            limits.value("relay.five-hour-guard", "count"),
-            limits.value("relay.weekly-prefer", "count"),
-            limits.value("relay.weekly-guard", "count"),
-        ),
+        guards=account_decide.Guards(limits.value("relay.five-hour-guard", "count"), limits.value("relay.weekly-guard", "count")),
         transcript_bytes=int(limits.value("relay.transcript-tail", "count")),
         ask_plan=lane_question.plan_asker(environ, name, cwd, ident.root, limits.seconds("relay.lanes-ask")),
         update=updater,

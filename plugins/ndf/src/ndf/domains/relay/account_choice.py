@@ -779,17 +779,13 @@ def reverify(built: Built, cwd: Path) -> Optional[str]:
 
 
 def guards() -> account_decide.Guards:
-    """閾値 A・B・C（`relay.five-hour-guard`・`relay.weekly-prefer`・`relay.weekly-guard`）。"""
-    return account_decide.Guards(
-        limits.value("relay.five-hour-guard", "count"),
-        limits.value("relay.weekly-prefer", "count"),
-        limits.value("relay.weekly-guard", "count"),
-    )
+    """閾値 A・C（`relay.five-hour-guard`・`relay.weekly-guard`）。"""
+    return account_decide.Guards(limits.value("relay.five-hour-guard", "count"), limits.value("relay.weekly-guard", "count"))
 
 
 def _limited_rows(store: Path, now: float, name: str) -> list[account_decide.Usage]:
     """今のアカウントを上限とした使用率の行（上限を見た直後で、取得の記録はまだ上限を写していないことがある）。"""
-    rows, _ = accounts.usage_rows(store, now, {n: a.generation for n, a in registered(store).items()}, {})
+    rows, _ = accounts.usage_rows(store, now, {n: a.generation for n, a in registered(store).items()})
     mine = account_decide.Usage(name, None, None, None, None, True)
     return [r._replace(limited=True) if r.name == name else r for r in rows] + ([] if any(r.name == name for r in rows) else [mine])
 
@@ -805,7 +801,7 @@ def retry_env(
 ) -> Optional[tuple[Built, str]]:
     """`ndf plan` の上限での打ち直しの替え先（決定 9）。返りは（`target_env` の `Built`、替え先の名前）か None。
 
-    `env` の `NDF_CLAUDE_ACCOUNT` を上限として `after_limit` を呼び、`switch` なら `target_env` を打つ。`keys` が偽なら
+    `env` の `NDF_CLAUDE_ACCOUNT` を上限（`claude -p` が受けた API の上限の応答）として `choose` の `limit` を呼び、`switch` なら `target_env` を打つ。`keys` が偽なら
     キーの子（API キーの設定の従量の接続と登録簿の API キー）を替え先にしない（`call_claude` の起動の形がキーを渡せないとき）。
     登録済みアカウントの名前でない・`wait_reset`・`target_env` が理由の符号を返したら None（符号は標準エラーの 1 行）。
     """
@@ -819,7 +815,7 @@ def retry_env(
     decl = metered_decl(store, env)
     probes = fallbacks(read, env, decl if isinstance(decl, tuple) else None, cwd, argv, frozenset())
     usable = [p.name for p in probes if p.reason is None]
-    pick = account_decide.after_limit(account.name, rows, candidates(env, store, state_dir, now, cwd, argv), usable, guards())
+    pick = account_decide.choose("limit", account.name, rows, candidates(env, store, state_dir, now, cwd, argv), guards(), usable)
     if pick.kind != "switch" or pick.account is None:
         return None
     child = session_env.child_env(env, state_dir, pick.account, decided=True)

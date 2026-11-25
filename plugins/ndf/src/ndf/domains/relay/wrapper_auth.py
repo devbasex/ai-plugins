@@ -9,7 +9,7 @@
   今のアカウントを除いた替え先の判断を続ける
 - 会話の記録はスタンプ（`stat`）が変わったときだけ読み直す（替え先が無く待つ間に、見回りごとに末尾を読まない）。
   開けない・読めなかった見回りの結果は残さず、次の見回りで読み直す
-- 替え先は `after_auth` で決め、子を止める前に起動の要求を確定する（`GuardSteps._confirm`。起動の理由は `auth`）
+- 替え先は `account_decide.choose` の `auth` で決め、子を止める前に起動の要求を確定する（`GuardSteps._confirm`。起動の理由は `auth`）
 - 替え先が無ければ、ログインの形ごとの直し方の 1 行を同じセグメントで 1 回出す（`Section.auth_told`）
 """
 
@@ -92,7 +92,7 @@ class AuthSteps:
 
         def judge(inputs: launch_inputs.Inputs) -> Pick:
             rows = inputs.usage.rows if inputs.usage is not None else []
-            return account_decide.after_auth(sec.account, rows, inputs.candidates(), inputs.fallbacks(), self.s.guards)
+            return account_decide.choose("auth", sec.account, rows, inputs.candidates(), self.s.guards, inputs.fallbacks(), self._explicit())
 
         if account_decide.metered(sec.account):  # 従量の接続は外した間の代わりに、この続きで試した接続先として除く
             self.tried.add(str(sec.account))
