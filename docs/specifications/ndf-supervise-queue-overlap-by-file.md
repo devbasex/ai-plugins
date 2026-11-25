@@ -53,7 +53,7 @@ https://git-scm.com/docs/git-merge の「HOW CONFLICTS ARE PRESENTED」）。同
 | `supervise_lib/flow.py` の `admit_step` | 規則を呼び、重なりの組ごとに「重なる組」の行を標準エラーへ出す |
 | [`supervise_lib/design_stage.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/design_stage.py) の `marked_dirs` | 設計の結果の「実装する」の行で、`paths.is_dir_entry(パス, --root)` が真のパスを末尾 `/` の形に揃え、課題ごとに「#番号 の触るファイルにディレクトリ …」を標準エラーへ出す。結果の JSON の `metrics.dirs`（課題の番号 → ディレクトリの宣言）に載せる |
 | `supervise_lib/new_args.py` | `new impl --files` の help に、ディレクトリ（末尾 `/`）は重なりの判定にも除外の行にも使わないことを書く |
-| `design` の `references/design-template.md` の「設計の結果の書き方」 | 触るファイルはファイル単位で書く。テストのように複数の課題が同時に触る置き場はファイルを 1 つずつ書き、索引のように行を書き足すファイルは、書き足すならそのファイルを書く |
+| `design` の `references/design-writing.md` の「設計の結果の書き方」 | 触るファイルはファイル単位で書く。テストのように複数の課題が同時に触る置き場はファイルを 1 つずつ書き、索引のように行を書き足すファイルは、書き足すならそのファイルを書く |
 | [`scripts/experimental/queue-overlap-replay.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/experimental/queue-overlap-replay.py)（実験版） | 過去のスプリントのプランの触るファイルで重なりの組を `admission.overlaps` で判定し直し、両方の PR の変更ファイルと突き合わせて偽の重なりを数える。規則を自分では持たない |
 
 ### 処理の流れ

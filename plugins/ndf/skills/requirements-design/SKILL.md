@@ -71,6 +71,9 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 - 不具合と機能追加の境目は、直す手段でなく、要求が満たそうとする約束が今の SSOT にあるかで決める
   （[document-roles.md の「変更の種類の決め方」](references/document-roles.md#変更の種類の決め方)）
+- 課題には Issue の種類（不具合・機能・調査・運用）のラベルを 1 つ付ける。ラベルの名前は、プロジェクトの記載項目の定義（`.ndf/issue-items.json`）に
+  `kind_labels` があればその名前を使い、無い種類は既定の名前（`bug`・`enhancement`・`investigation`・`operation`）を使う。定義があれば、
+  セクションの名前と書く水準はそちらを使う
 - 種類のラベル（Issue の種類）は変えない。ラベルが必須とする項目は、変更の種類によらず書く
   （[document-roles.md の「要求仕様の種類ごとの見出しの順」](references/document-roles.md#要求仕様の種類ごとの見出しの順)）
 
@@ -98,7 +101,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 1 条件で写す。各行に「条件」「推した出所」「この要求での扱い（受け入れ条件の番号・前提・含まない・採らない）」を書く。
 セクションは本文の後ろ（「リクエスト（原文）」の直前）に置き、読み手が要求の全体像を読んでから当たるようにする。0 件ならセクションごと消す
 （当たらないセクションは見出しごと消す。[document-roles.md](references/document-roles.md) の「どの文書にも当たる書き方」）。
-設計承認ゲートの承認資料はこのセクションの行をそのまま並べ、利用者が承認で確かめる
+利用者が確かめるまで、推定は利用者の決定として扱わない。設計承認ゲートの承認資料はこのセクションの行をそのまま並べ、利用者が承認で確かめる
 （`development-workflow` の `references/approval-request.md`）。
 
 1. 課題の本文に `## 起票者の推定` のセクションがあれば、その行を写して扱いを書き足す
@@ -135,6 +138,8 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 前提は「前提: 対象は既存の管理画面利用者のみで、外部公開はしない」のように、後から
 成否を判定できる文で書く。「たぶん〜だろう」は前提ではない。
 
+未決を空欄で放置しない。決まっていないこと自体を仕様の「未決」に書き、誰が決めるかを添える。
+
 ### 3a. ドメインイベントを時間の順に書き出す（`standard`）
 
 変更で起きることを過去形で時間の順に並べ、要求の抜けを探す（イベントストーミング）。書き出したイベントが無ければ
@@ -159,7 +164,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 3. 用語集を変えたら `ndf records glossary render` で文書を作り直し、`ndf records glossary meanings` が `ok` になり、当たりが 0 件になるまで繰り返す。採るかを決められない語は
    利用者へ一覧で示す
 
-### 4. 成功条件を観測可能な形へ変換する
+### 4. 受け入れ条件を観測可能な形で書く
 
 受け入れ条件の形式と、満たすべき性質（観測可能・一意・テスト可能）は
 [references/acceptance-criteria.md](references/acceptance-criteria.md) に置く。
@@ -175,17 +180,22 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 人へ戻す**（理由と根拠の項目つき）。受け入れ条件の文に MVV の項目を書き込まない。MVV の読み方・人へ戻す形・承認済みの MVV が
 無いときの扱いは [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md#工程での読み方) にある。
 
+### 5b. 運用の方針と作るものの仕様を分ける
+
+リクエストの「このリポジトリは〇〇の運用にする」は、作るものの仕様として書かない。そのリポジトリの設定の値として、仕様の
+「方針の分け方」の左の列に置き、作るものの既定や振る舞いへ入れない。作るものの振る舞いが変わるときだけ右の列に書く。
+
 ### 6. 実装前に明文化する項目
 
 次の 7 項目のうち、対象プロジェクトの記録（`AGENTS.md` / `README` / 既存の設定ファイル）から
-読み取れるものは参照先を書き、読み取れないものだけを新たに決める。目的・成功条件（受け入れ条件）・検証手段は必ず書くセクション、
+読み取れるものは参照先を書き、読み取れないものだけを新たに決める。目的・受け入れ条件・検証手段は必ず書くセクション、
 プロジェクト構造・コーディング規約・テスト戦略（仕様の「前提とする取り決め」）と境界は当たるときだけのセクションで、
 決めることが無ければセクションごと置かない。
 
 | 項目 | 決めること |
 | --- | --- |
 | 目的 | 何のための変更か。達成したい状態。設計承認ゲートの承認資料の「目的」の出所になる（設計書は目的を書かず、仕様へリンクする） |
-| 成功条件 | 受け入れ条件（4 で作ったもの） |
+| 受け入れ条件 | 4 で作ったもの |
 | 検証手段 | 起動・テスト・静的解析・型検査をどのコマンドで行うか。自動化できない条件は手動確認の手順。「人が見る」条件は、擬似端末などで確かめる振る舞いと人が見る見た目に分ける（acceptance-criteria.md） |
 | プロジェクト構造 | 変更を置く場所と、置いてはいけない場所 |
 | コーディング規約 | 準拠する規約と、その確認手段 |
@@ -208,6 +218,8 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 テンプレートは [references/spec-template.md](references/spec-template.md)。セクションは手順 0a で決めた変更の種類の順
 （[document-roles.md の「要求仕様の種類ごとの見出しの順」](references/document-roles.md#要求仕様の種類ごとの見出しの順)）で並べ、
 当たらないセクションは見出しごと消す。**仕様の正は課題の本文である。**
+「影響」の公開インタフェースの行に `互換なし` と書いた課題では、非機能の条件の移行性の行が実装の PR の「移行の手順」になり、
+リリースのバージョン種別は MAJOR が候補になる（`pr` Skill）。
 課題を読む人が GitHub の上で受け入れ条件を読めるように、要求の全文を本文へ書く
 （`gh issue edit <番号> --body-file <ファイル>`）。本文にファイルのパスだけを書かない。
 
@@ -217,8 +229,8 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 2. コピーは設計 PR と一緒にコミットする。本文を直したら、同じ手順でコピーを作り直す（コピーだけを手で直さない）
 3. 設計 PR を出す前に、コピーと本文が一致していることを確かめる（`design` の手順 7）
 
-`implementation-plan` が同じ変更の実装計画を作る場合は、コピーの**別のセクション**にする。コピーにしか無いセクションは
-一致の確かめで食い違いに数えない。仕様と分解を別ファイルに分けると、片方だけが更新されて食い違う。
+実装計画は仕様のコピーに書き足さず、別のファイル（`issues/issue-<番号>-plan.md`）にする（`implementation-plan` の「ファイル配置・命名」）。
+コピーにしか無いセクションは、一致の確かめで食い違いに数えない。
 
 ## 曖昧なまま実装しない
 

@@ -88,7 +88,7 @@ docs/specifications/ndf-slide-generation.md（確定仕様）
 | 書き方の規則とセルフチェック | [`document-style` の SKILL.md](../../plugins/ndf/skills/document-style/SKILL.md) |
 | 「工程から呼ぶ専用」の発動制御 | [AUTHORING.md の「発動制御の 5 分類」](../../plugins/ndf/skills/AUTHORING.md#発動制御の-5-分類) |
 | 組み直しを呼ぶ側 | `development-workflow` の工程表の「ドキュメント再構成」、[`document-drafting` の SKILL.md](../../plugins/ndf/skills/document-drafting/SKILL.md) の手順 4 |
-| 正本を指す側 | `release` の `form-slide.md`、`design` の `layout-slide.md`・`design-template.md`、`development-workflow` の `approval-request.md` |
+| 正本を指す側 | `release` の `form-slide.md`、`design` の `layout-slide.md`・`design-writing.md`、`development-workflow` の `approval-request.md` |
 
 形式への適用（pptx・Google ドキュメント・表計算の生成、Notion・Confluence への投稿、版面の点検）は対象に入らない。
 組み直しは形式別ガイドの「呼び出し先」へ渡すだけである。
@@ -106,7 +106,7 @@ docs/specifications/ndf-slide-generation.md（確定仕様）
 
 **組み直しの規約は、他の集約を書き換えない。** 二重を解くために他の集約の行を「正本を指す 1 行」へ置き換えた箇所
 （`document-style` のルール 9 の冒頭・`layout-slide.md` の「ページの文言と章立て」・`form-slide.md` のキーワードの行・
-`document-drafting` の手順 4・`design-template.md` と `approval-request.md` の題の行）だけが例外である。
+`document-drafting` の手順 4・`design-writing.md` と `approval-request.md` の題の行）だけが例外である。
 
 ### 正本の割り当て
 
@@ -117,7 +117,7 @@ docs/specifications/ndf-slide-generation.md（確定仕様）
 | 章と文の長さ | `format-<形式>.md`（数え方は `lang-<言語>.md`） | `document-style` のルール 9 |
 | スライドのページの文言・章扉 | `form-slide.md` の「ページの文言を書く」 | `layout-slide.md`・`format-slide.md` |
 | キーワードの確かめ方 | `keyword-check.md` | `form-slide.md`・`document-drafting`・`common.md` の K6 |
-| Issue・Pull Request・設計文書の題の付け方 | `format-markdown.md` の「題と見出し」 | `design-template.md`・`approval-request.md` |
+| Issue・Pull Request・設計文書の題の付け方 | `format-markdown.md` の「題と見出し」 | `design-writing.md`・`approval-request.md` |
 | 判断を求める前に示すもの | `decision-request` | `purpose-decision.md`・`purpose-discussion.md` |
 
 `document-style` と重なっていた規約の個別の扱いは
@@ -144,7 +144,7 @@ graph LR
   FS --> T
   LY --> FS
   WF[development-workflow 工程表] --> S
-  DT2[design-template・approval-request] -->|題の付け方| O
+  DT2[design-writing・approval-request] -->|題の付け方| O
 ```
 
 ### 常に成り立つ条件
@@ -211,7 +211,7 @@ I7 を成り立たせるためにある。** 規則の点検を測り直しの�
 - `document-drafting`・`document-sources`・`document-systems`・`document-style` の frontmatter に `user-invocable: false` があり、`python3 scripts/check-skill-frontmatter.py` が 0 で終わること。`SKILL.md` が 500 行・本文の上限・`description` の上限に収まること
 - 古い名前（`document-restructuring`・`markdown-writing`）を指す参照が、確定仕様・過去の記録・`CHANGELOG.md` の外に無いこと。`claude plugin validate .` と全体テストが通ること
 - `plugins/ndf/manifests/*-skills.txt` の差分が、改名した Skill の行の他に無いこと
-- 設計文書の題の決まりに「今の問題 → 直した後」の形が残らないこと（`design-template.md`・`approval-request.md`）
+- 設計文書の題の決まりに「今の問題 → 直した後」の形が残らないこと（`design-writing.md`・`approval-request.md`）
 - 人が見る観点: 形式と目的の違う文書（議論用の文書・スライド・確定事項を伝える文書）で、前後の値の表・固定の章と出典の節が残ったか・キーワードの表・読み手役の結果が報告に出ること（I5・I9・I10）
 - 人が見る観点: 議論用の文書を組み直した後の最初の章が論点で、提案の章が「案とする」で書かれていること（I11）
 - 人が見る観点: 目安を超えた項目に理由と採らなかった直し方が付き、手順 4 の後に手順 3 をやり直していないこと（I7）。行数の増加が表への置き換えと章の分割で説明できること（I4）
@@ -223,7 +223,7 @@ I7 を成り立たせるためにある。** 規則の点検を測り直しの�
 - [`document-rebuild` の SKILL.md](../../plugins/ndf/skills/document-rebuild/SKILL.md)（手順の正）・[references/](../../plugins/ndf/skills/document-rebuild/references/)
 - [`document-style` の SKILL.md](../../plugins/ndf/skills/document-style/SKILL.md)（書き方の規則の正）
 - [`document-drafting` の SKILL.md](../../plugins/ndf/skills/document-drafting/SKILL.md)・[`decision-request` の SKILL.md](../../plugins/ndf/skills/decision-request/SKILL.md)
-- [`release` の references/form-slide.md](../../plugins/ndf/skills/release/references/form-slide.md)・[`design` の references/layout-slide.md](../../plugins/ndf/skills/design/references/layout-slide.md)・[references/design-template.md](../../plugins/ndf/skills/design/references/design-template.md)
+- [`release` の references/form-slide.md](../../plugins/ndf/skills/release/references/form-slide.md)・[`design` の references/layout-slide.md](../../plugins/ndf/skills/design/references/layout-slide.md)・[references/design-writing.md](../../plugins/ndf/skills/design/references/design-writing.md)
 - [`development-workflow` の SKILL.md](../../plugins/ndf/skills/development-workflow/SKILL.md)・[references/approval-request.md](../../plugins/ndf/skills/development-workflow/references/approval-request.md)
 - [plugins/ndf/skills/AUTHORING.md](../../plugins/ndf/skills/AUTHORING.md)（発動制御の分類）
 - [ndf-slide-generation.md](ndf-slide-generation.md)（スライドの生成の経路）・[ndf-documentation-mode.md](ndf-documentation-mode.md)（`documentation` モード）

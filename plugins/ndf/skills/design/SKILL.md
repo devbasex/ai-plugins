@@ -56,7 +56,7 @@ issue のことではない。
 
 | 触る領域 | 読む参照 |
 | --- | --- |
-| すべての変更 | [references/design-template.md](references/design-template.md) / [references/deliverables.md](references/deliverables.md) / [references/decisions.md](references/decisions.md) / [references/external-survey.md](references/external-survey.md) |
+| すべての変更 | [references/design-template.md](references/design-template.md) / [references/design-writing.md](references/design-writing.md) / [references/deliverables.md](references/deliverables.md) / [references/decisions.md](references/decisions.md) / [references/external-survey.md](references/external-survey.md) |
 | 構成要素を追加・変更する、または配置・依存・反映先を変える | [references/system-architecture.md](references/system-architecture.md) |
 | 型・クラスを追加または変更する、または型を変えずに状態遷移か処理の順序を変える | [references/structure-behavior.md](references/structure-behavior.md) |
 | 永続データを持つ、またはスキーマを変える | [references/data-structure.md](references/data-structure.md) |
@@ -92,8 +92,8 @@ issue のことではない。
 
 ### 3. 設計文書を書く
 
-テンプレートは [references/design-template.md](references/design-template.md) にある。セクションの並びと、
-各節が `implementation-plan` のどのタスクへつながるかもそこにある。並びは `requirements-design` の
+テンプレートは [references/design-template.md](references/design-template.md)、書き方と、各節が `implementation-plan` の
+どのタスクへつながるかは [references/design-writing.md](references/design-writing.md) にある。セクションの並びは `requirements-design` の
 [document-roles.md](../requirements-design/references/document-roles.md)（文書の役割の表）の設計書の行が決め、承認する人が頭から読み、決定で立ち止まる順である。
 
 **次の順に書く。** ［ ］は当たるときだけ書き、当たらなければ見出しごと消す（「無し」と書かない。外部の調査だけは省くときも `省く: <理由>` の 1 行を残す）。
@@ -105,9 +105,9 @@ issue のことではない。
 5. 外部の調査（付録。手順 2 で調べた結果）
 
 承認する人が読む欄（題・要約の段落・今の姿・解き方の全体像・決定の見出し・影響と危険）の書き方は
-[design-template.md の「承認する人が読む欄」](references/design-template.md#承認する人が読む欄) にある。
+[design-writing.md の「承認する人が読む欄」](references/design-writing.md#承認する人が読む欄) にある。
 目的と受け入れ条件は要求仕様が持つので、設計文書には写さずにリンクで指す。
-設計 Pull Request を分ける `legacy-refactor` は要求仕様を通らないので、欄を design-template.md の「`legacy-refactor` の書き方」（目的・適用範囲・目指す姿・目指す姿の根拠）で書く。
+設計 Pull Request を分ける `legacy-refactor` は要求仕様を通らないので、欄を design-writing.md の「`legacy-refactor` の書き方」（目的・適用範囲・目指す姿・目指す姿の根拠）で書く。
 設計 Pull Request を出さない `light`・`operation` は承認資料に載せないため、欄を書かない（モードごとの要否は
 [deliverables.md の「設計の書き先」](references/deliverables.md#設計の書き先)）。
 
@@ -133,7 +133,7 @@ issue のことではない。
 **タスクを機械的に導けるだけの情報を書く。** 導けない設計は、次の工程が成立しない。
 
 **テスト設計は、縛る振る舞いと落ちるべき壊し方までにする。** フィクスチャ・起動の形・待ち方は実装
-（`tdd-cycle`）で走らせて決める。粒度は design-template.md の「テスト設計に書く粒度」にある。
+（`tdd-cycle`）で走らせて決める。粒度は design-writing.md の「テスト設計に書く粒度」にある。
 
 **値の集合へ値を足す設計では、その集合を前提にした既存の規則を集め、新しい値に当てはまるかを
 1 つずつ判定する。** モード・出力の形・種類のような集合へ値を足すと、それまでの値だけを想定して
@@ -149,7 +149,7 @@ issue のことではない。
 
 ### 4. 決定を記録する
 
-決定ごとに 質問・選んだ案・採らなかった案・代償・根拠 を残す。書き方は
+決定ごとに 質問・選んだ案・理由・採らなかった案・代償・根拠 を残す。書き方は
 [references/decisions.md](references/decisions.md) にある。
 
 **設計の判断（作り方・範囲の取り方・既定値・扱いの選択）は設計者が決める。** 「設計承認ゲートで利用者が決める」形で
@@ -166,7 +166,7 @@ issue のことではない。
 
 ### 5. 進む前に文書の内部整合を突き合わせる
 
-**[references/design-template.md](references/design-template.md) の「進む前に突き合わせる対」
+**[references/design-writing.md](references/design-writing.md) の「進む前に突き合わせる対」
 の 7 つを通す。** いずれも同じ文書の中だけで確かめられるもので、外部の情報を必要としない。
 
 **続けて、自前で作る決定に比べた候補があるかと、人へ残す判断がレッドラインを名指すかを検査で確かめる。**
@@ -191,13 +191,13 @@ issue のことではない。
 関数 1 つの仕様は表の 1 行に収まり、別ファイルにすると 1 つの関数のために別の文書を開かせるためである。`legacy-refactor` は別ファイルに書く。
 
 - 数えた結果は、「どこを変えるか」の頭の 1 行（畳んだとき）か、詳細設計書へのリンク（別ファイルのとき）で示す。どちらも無ければこの手順を終えていない
-- 畳んだときの書き方は [references/design-template.md の「分量」](references/design-template.md#分量)、別ファイルのテンプレートは
+- 畳んだときの書き方は [references/detailed-design.md の「畳んだときの書き方」](references/detailed-design.md#畳んだときの書き方)、別ファイルのテンプレートは
   [references/detail-template.md](references/detail-template.md)、項目ごとの書き方と既存の参照との分担は
   [references/detailed-design.md](references/detailed-design.md) にある
 - 書く関数は、新設する関数と、シグネチャ・責務・失敗の扱いのいずれかを変える関数だけである
 - 別ファイルの名前の番号の並びは、組になる設計書と同じにする。複数の課題をまとめた `issue-7-8-design.md` なら `issue-7-8-design-detail.md` で、課題 1 つなら `issue-7-design-detail.md` になる。完了判定と実装計画は、名前に含む番号のどれかで探す
 - 別ファイルは 1 本 1,000 行以下にする。超える主題は設計を 2 本に分けると報告して止まる
-- 別ファイルを書いたら、地図と構成要素ごとの小見出しがそろい、設計文書の構成要素がどれも詳細設計のどこかに下りていることを読んで確かめる（項目の規則は
+- 別ファイルを書いたら、モジュールマップと構成要素ごとの小見出しがそろい、設計文書の構成要素がどれも詳細設計のどこかに下りていることを読んで確かめる（項目の規則は
   [references/detailed-design.md](references/detailed-design.md)）。畳んだら、「どこを変えるか」の触るファイルが「設計の結果」の触るファイルと一致することを確かめる
 
 **設計のプランのステップから呼ばれたときは、手前で止まるか、ここだけを書く。** 設計のプランの `design` のステップの指示に
@@ -216,7 +216,7 @@ issue のことではない。
 **出す前に、仕様のコピーが課題の本文と一致しているかを確かめる。**
 `gh issue view <課題> --json body --jq .body` の `## 進行` より前の全文と `issues/issue-<番号>-requirements.md` を比べ、
 食い違えば本文が正なので、本文からコピーを作り直す（`requirements-design` の手順 7）。コピーにしか無いセクション
-（実装計画など）は食い違いに数えない。
+は食い違いに数えない。
 
 設計 PR の cross-review は、1 ラウンド目でドメインモデルのセクションだけを見て（モデルレビュー）、2 ラウンド目以降で
 残りを見る（詳細レビュー）。設計承認ゲートは詳細レビューの後の 1 回だけである。
@@ -274,7 +274,7 @@ API の記述を求めない。
 
 設計文書の各節は、`implementation-plan` のタスクの単位になる。各節が実装計画のどこへ
 つながるか（書く内容と使われ方の対応）は、
-[references/design-template.md](references/design-template.md) の「各節が実装計画のどこへつながるか」を
+[references/design-writing.md](references/design-writing.md) の「各節が実装計画のどこへつながるか」を
 唯一の定義として読む。
 
 ## 範囲外の課題を見つけたとき

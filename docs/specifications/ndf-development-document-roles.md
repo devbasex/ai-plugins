@@ -10,8 +10,8 @@ NDF が実装の前に書く 5 つの文書（要求仕様・設計書・詳細�
 | 何を | どこが正か |
 | --- | --- |
 | 文書ごとの読み手・判断・読み方・セクションの順、変更の種類ごとの中心、要求仕様の種類ごとの見出しの順、読み手役の言い直しの問いと照合先、省いてよい文書と条件、詳細設計を別ファイルにする条件、どの文書にも当たる書き方 | [requirements-design の references/document-roles.md](../../plugins/ndf/skills/requirements-design/references/document-roles.md)（文書の役割の表） |
-| 要求仕様のテンプレートと、ラベルの必須の項目を足す規則 | [requirements-design の references/spec-template.md](../../plugins/ndf/skills/requirements-design/references/spec-template.md) と [SKILL.md](../../plugins/ndf/skills/requirements-design/SKILL.md) |
-| 設計書のテンプレート・承認する人が読む欄・`legacy-refactor` の書き方 | [design の references/design-template.md](../../plugins/ndf/skills/design/references/design-template.md) |
+| 要求仕様のテンプレートと、ラベルの必須の項目を足す規則 | [requirements-design の references/spec-template.md](../../plugins/ndf/skills/requirements-design/references/spec-template.md) と [SKILL.md](../../plugins/ndf/skills/requirements-design/SKILL.md)。ラベルの必須の項目の規則は [document-roles.md](../../plugins/ndf/skills/requirements-design/references/document-roles.md) |
+| 設計書のテンプレート・承認する人が読む欄・`legacy-refactor` の書き方 | テンプレートは [design の references/design-template.md](../../plugins/ndf/skills/design/references/design-template.md)、欄の書き方は [design-writing.md](../../plugins/ndf/skills/design/references/design-writing.md) |
 | 成果物の要否・決定の形・詳細設計 | [design の references/deliverables.md](../../plugins/ndf/skills/design/references/deliverables.md)・[decisions.md](../../plugins/ndf/skills/design/references/decisions.md)・[detailed-design.md](../../plugins/ndf/skills/design/references/detailed-design.md)・[detail-template.md](../../plugins/ndf/skills/design/references/detail-template.md)、課題をまとめる条件は [design の SKILL.md](../../plugins/ndf/skills/design/SKILL.md) |
 | 実装計画のフォーマット（レビューの単位・リファクタリングの時機を含む） | [implementation-plan の SKILL.md](../../plugins/ndf/skills/implementation-plan/SKILL.md) と [references/pre-refactoring.md](../../plugins/ndf/skills/implementation-plan/references/pre-refactoring.md) |
 | 実行計画の `目標:` の行と、2 つの計画の読み手 | [issue-plan-strategy の references/execution-plan.md](../../plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md)・[parallel-plan.md](../../plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md) |
@@ -24,7 +24,7 @@ NDF が実装の前に書く 5 つの文書（要求仕様・設計書・詳細�
 ## 概要
 
 文書の形は「誰が・何を判断するために・どう読むか」から決まる。要求仕様は承認する人が頭から 1 回通して
-読み、「この問題をこの終わりの条件で解いてよいか」を決める。設計書は承認する人とレビュー担当が決定で
+読み、「この問題をこの受け入れ条件で解いてよいか」を決める。設計書は承認する人とレビュー担当が決定で
 立ち止まりながら読み、「この解き方でよいか」を決める。詳細設計書と実装計画は実装する人が要る箇所を引く。
 開発計画はオーケストレーター（conductor）が工程ごとに引く。テンプレートのセクションはこの判断の順に並ぶ。
 
@@ -33,7 +33,7 @@ NDF が実装の前に書く 5 つの文書（要求仕様・設計書・詳細�
 「今はどうしているか」）で始まり、設計書は見出しの無い要約の段落の次に今の姿を置く。
 
 - 当たるモードは `standard` である。`legacy-refactor` は設計書の書き方と承認資料の出所を変えない
-  （設計書の今の欄の書き方は design-template.md の「`legacy-refactor` の書き方」へ移した）。`light`・`operation`・
+  （設計書の今の欄の書き方は design-writing.md の「`legacy-refactor` の書き方」へ移した）。`light`・`operation`・
   `documentation` は変わらない
 - 承認ゲートの数と、承認資料が載せる項目の種類は変えない。項目の出所のセクションだけを付け替えた
 - コードは変えない。コードが読む見出しは名前を残す（「常に成り立つ条件」）
