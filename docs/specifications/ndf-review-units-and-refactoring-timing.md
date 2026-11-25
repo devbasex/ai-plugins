@@ -29,7 +29,7 @@ ndf route render implement --set branch=u1 --set base=sprint/x --set issue=1 \
 | 工程表（モードごとに起動する Skill・工程が動く単位とリファクタリングの時機・工程ごとの決まり・文書を省いたときの工程） | [development-workflow の SKILL.md](../../plugins/ndf/skills/development-workflow/SKILL.md) |
 | 工程が動く単位の詳細・リファクタリングの 3 つの時機と候補の渡し方・つなぎ目のレビュー | [development-workflow の references/parallel-work.md](../../plugins/ndf/skills/development-workflow/references/parallel-work.md)・[stage-notes.md](../../plugins/ndf/skills/development-workflow/references/stage-notes.md) |
 | 実装のフェーズの supervisor が単位ごとに打つコマンドと、単位のマージ・`gathered` の記録 | [development-workflow の references/agent-layers.md](../../plugins/ndf/skills/development-workflow/references/agent-layers.md) |
-| 実装計画の「レビューの単位」「リファクタリングの時機」の欄の形と、欄の行の行き先 | [implementation-plan の SKILL.md](../../plugins/ndf/skills/implementation-plan/SKILL.md) |
+| 実装計画の「レビューの単位」「リファクタリングの時機」の欄の形と、欄の行の行き先 | [implementation-plan の SKILL.md](../../plugins/ndf/skills/implementation-plan/SKILL.md)・[references/plan-template.md](../../plugins/ndf/skills/implementation-plan/references/plan-template.md) |
 | 実行計画の実装の行の作り方（仮の行から単位の行へ置き直す） | [issue-plan-strategy の references/execution-plan.md](../../plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md) |
 | 省いてよい文書と条件 | [requirements-design の references/document-roles.md](../../plugins/ndf/skills/requirements-design/references/document-roles.md)（理由は [ndf-development-document-roles.md](ndf-development-document-roles.md)） |
 | 設計書を省いた変更の数え直しと流し直しの判定 | [quality-gates の references/design-match.md](../../plugins/ndf/skills/quality-gates/references/design-match.md) |
