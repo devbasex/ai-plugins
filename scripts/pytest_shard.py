@@ -38,7 +38,8 @@ if TYPE_CHECKING:
 ROOT = Path(__file__).resolve().parent.parent
 SECONDS = ROOT / "scripts" / "pytest-shard-seconds.json"
 NDF_ROOT = ROOT / "plugins" / "ndf"
-# NDF のテストの JUnit XML を見分ける成果物の名前の頭（.github/workflows/pytest.yml と同じ値）
+# 根と NDF のテストの JUnit XML を見分ける成果物の名前の頭（.github/workflows/pytest.yml と同じ値）
+ROOT_JUNIT = "pytest-junit-"
 NDF_JUNIT = "pytest-ndf-junit-"
 # 割り当てを controller から worker へ渡す workerinput のキー
 OWNER_KEY = "pytest_shard_owner"

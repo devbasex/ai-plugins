@@ -37,11 +37,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from pytest_shard import NDF_JUNIT, ROOT_JUNIT
+
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "scripts" / "ci-test-duration.json"
 # 成果物の名前・試行の番号のファイル・手順の名前は .github/workflows/pytest.yml と同じ値（YAML から渡す経路が無い）
-ROOT_ARTIFACT = "pytest-junit-"
-NDF_ARTIFACT = "pytest-ndf-junit-"
+# 成果物の名前の頭（根と NDF）は scripts/pytest_shard.py の定数を正本にする
+ROOT_ARTIFACT = ROOT_JUNIT
+NDF_ARTIFACT = NDF_JUNIT
 ARTIFACT_NAME = re.compile(r"^pytest(-ndf)?-junit-(\d+)$")
 ARTIFACT_LIMIT = 16 * 1024 * 1024
 TOTAL_LIMIT = 64 * 1024 * 1024
