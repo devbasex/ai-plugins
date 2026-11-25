@@ -125,7 +125,7 @@ def cmd_present(args: argparse.Namespace) -> dict:
     hub = _hub(args)
     material = Path(args.material).read_text(encoding="utf-8") if args.material else hub.pull(args.pr).body
     shown = trail.present(hub, args.pr, material)
-    head = shown.head
+    head, sha = shown.head, trail.material_digest(material)
     if not shown.asked:
         detail = f"#{args.pr}（{head[:12]}）には今の HEAD への回答が既にあり、質問を送らない: {shown.judgment.detail}"
         return result.result(TOOL, result.OK, detail, outputs={"head": head, "state": shown.judgment.state, "writer": writer})
@@ -133,22 +133,24 @@ def cmd_present(args: argparse.Namespace) -> dict:
         TOOL,
         result.GATE,
         f"#{args.pr}（{head[:12]}）の承認資料を提示した。回答を待つ",
-        routes=present_routes(args.pr, head),
+        routes=present_routes(args.pr, head, sha),
         outputs={"head": head},
     )
 
 
-def present_routes(pr: int, head: str) -> dict:
-    """回答ごとに打つ `answer`。担い手（`by`）は打つ側が埋める（`ask` はキーの名前で、打つ側が `--by <値>` を足す）。"""
+def present_routes(pr: int, head: str, material_sha256: str) -> dict:
+    """回答ごとに打つ `answer`。担い手（`by`）は打つ側が埋める（`ask` はキーの名前で、打つ側が `--by <値>` を足す）。
+    提示した資料の SHA-256 を固定する（利用者の回答は最新の提示の資料と照らす。#4446）。"""
+    fixed = ("--presented", head, "--material-sha256", material_sha256)
     return {
-        answer: result.command(TOOL, "answer", "--pr", str(pr), "--answer", answer, "--presented", head, ask=("by",))
+        answer: result.command(TOOL, "answer", "--pr", str(pr), "--answer", answer, *fixed, ask=("by",))
         for answer in approval_decide.ANSWERS
     }
 
 
 def cmd_answer(args: argparse.Namespace) -> dict:
     writer = trail.trail_writer(_strategy(args), merged_by_human=False)
-    judgment = trail.answer(_hub(args), args.pr, args.answer, args.by, args.presented, writer)
+    judgment = trail.answer(_hub(args), args.pr, args.answer, args.by, trail.Shown(args.presented, args.material_sha256), writer)
     return result.result(TOOL, result.OK, f"#{args.pr} の回答が証跡に届いた: {judgment.detail}", outputs={"state": judgment.state})
 
 
@@ -312,6 +314,9 @@ def _material(p: argparse.ArgumentParser) -> None:
 def _answer_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--answer", choices=approval_decide.ANSWERS, required=True)
     p.add_argument("--presented", required=True, help="提示した HEAD の SHA（present の outputs.head）")
+    p.add_argument(
+        "--material-sha256", help="回答した承認資料のファイル全体の SHA-256（--by user で必須。present の routes が固定する。#4446）"
+    )
     p.add_argument(
         "--by", required=True, choices=trail.BY_CHOICES, help="回答した担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
     )

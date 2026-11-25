@@ -18,15 +18,16 @@
 | `via: gate`・`merge.actor: ndf`・人がマージしていない | `answer`（リリース承認ゲートの回答） |
 
 回答は提示した HEAD へのもので、回答するときに HEAD が動いていれば書かずに断る（見ていないコミットを承認しない）。
-今の HEAD への回答が既にあれば、提示（質問）を送らない（同じ質問を繰り返さない。#3671）。
+今の HEAD への最新の提示と同じ資料への回答が既にあれば、提示（質問）を送らない（同じ質問を繰り返さない。#3671）。
+資料が違えば、回答があっても提示し直す。利用者の回答は提示した資料の SHA-256 を持ち、最新の提示と違えば書かない（#4446）。
 """
 
 from __future__ import annotations
 
+import hashlib
+import re
 from enum import StrEnum
 from typing import NamedTuple
-
-import re
 
 from ndf import identity
 from ndf.adapters.github import WRITE_PERMISSIONS, Authored, GitHub, GitHubError, Pull, text_of
@@ -44,7 +45,7 @@ HUMAN_SHA_LINE = "人がマージした HEAD:"
 ADMIN_SHA_LINE = "マージした HEAD:"
 ADMIN_TRAIL_LINE = "照らした承認の証跡:"
 # 証跡の担い手の行。迂回の前提に数えるのは利用者の証跡だけ（#3506 の I9）
-BY_LINE = "担い手:"
+BY_LINE = approval_decide.BY_LINE
 
 
 class By(StrEnum):
@@ -94,6 +95,12 @@ def trail_writer(strategy: Strategy, merged_by_human: bool) -> str:
 class Read(NamedTuple):
     pull: Pull
     judgment: approval_decide.Judgment
+    presented: tuple[approval_decide.Presentation, ...] = ()
+
+
+def material_digest(material: str) -> str:
+    """承認資料のファイル全体の SHA-256（`ndf document-rebuild gate` の `outputs.material.file_sha256` と同じ計算）。"""
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 def _by_of(body: str) -> str | None:
@@ -127,9 +134,10 @@ def read(hub: GitHub, number: int, human_only: bool = False) -> Read:
 def judged(hub: GitHub, pull: Pull, human_only: bool = False) -> Read:
     """読んだ PR `pull` と、信用する書き手の証跡からの判定（PR を読み直さない。読んだばかりの呼び手が使う）。
     `human_only` は `read` と同じ。"""
-    number = pull.number
-    comments = [(c.author, c.body, _counts(hub, c, human_only)) for c in hub.comments(number)]
-    return Read(pull, approval_decide.judge(approval_decide.trails(comments), pull.head_sha))
+    found = hub.comments(pull.number)
+    comments = [(c.author, c.body, _counts(hub, c, human_only)) for c in found]
+    shown = approval_decide.presentations((c.author, c.body, not c.edited and hub.trusts(c)) for c in found)
+    return Read(pull, approval_decide.judge(approval_decide.trails(comments), shown, pull.head_sha), tuple(shown))
 
 
 def user_judgment_at(hub: GitHub, number: int, sha: str) -> approval_decide.Judgment | None:
@@ -147,36 +155,58 @@ class Presented(NamedTuple):
 
 
 def present(hub: GitHub, number: int, material: str) -> Presented:
-    """承認資料を提示する。今の HEAD への回答が既にあれば提示せず、その判定を返す（同じ質問を繰り返さない。#3671）。
+    """承認資料を提示する。今の HEAD への最新の提示が同じ資料で、それへの回答が既にあれば提示せず、その判定を返す
+    （同じ質問を繰り返さない。#3671）。資料が違えば回答があっても提示し直す（#4446）。
 
     資料が対象にしたコミット（行 `approval_decide.HEAD_LINE`）が PR の今の HEAD でなければ、提示せずに `TrailError`
     （資料の後に積んだ変更を含まない資料から、新しい HEAD を承認させない。資料を組み直してから提示する）。
     """
     got = read(hub, number)
-    pull = got.pull
-    if got.judgment.state in approval_decide.ANSWERS:
+    pull, sha = got.pull, material_digest(material)
+    latest = approval_decide.latest_presentation(got.presented, pull.head_sha)
+    if got.judgment.state in approval_decide.ANSWERS and latest is not None and latest.material == sha:
         return Presented(pull.head_sha, False, got.judgment)
     shown = approval_decide.material_head(material)
     if shown != pull.head_sha:
         target = shown[:12] if shown else "（資料に無い）"
         raise TrailError(f"#{number} の承認資料が対象にしたコミット {target} が今の HEAD {pull.head_sha[:12]} でない（資料を組み直す）")
-    Publisher(hub).comment(number, approval_decide.render_request(material, pull.head_sha))
+    Publisher(hub).comment(number, approval_decide.render_request(material, pull.head_sha, sha))
     return Presented(pull.head_sha, True, got.judgment)
 
 
-def answer(hub: GitHub, number: int, value: str, by: str, presented: str, writer: str = WRITER_ANSWER) -> approval_decide.Judgment:
+class Shown(NamedTuple):
+    """回答した者が見た提示: 提示した HEAD と、利用者が回答した資料のファイル全体の SHA-256（MVV 判定の回答は None）。"""
+
+    head: str
+    material_sha256: str | None = None
+
+
+def answer(hub: GitHub, number: int, value: str, by: str, presented: Shown, writer: str = WRITER_ANSWER) -> approval_decide.Judgment:
     """回答を証跡に書き、届いたことを読み直して確かめる。
 
     `writer` は設定から決めた書き手（`trail_writer`）。回答の手順でなければ書かずに `TrailError`（書き手を 1 つに保つ。#3671）。
+    利用者の回答（`--by user`）は回答した資料の SHA-256 が要り、今の HEAD への最新の提示の資料と違えば書かない。MVV 判定の
+    回答は資料の SHA-256 を受けず、提示が無くても今の HEAD で書く（#4446）。
     """
     if writer != WRITER_ANSWER:
         raise TrailError(
             f"#{number} の承認の証跡の書き手は {writer} で、リリース承認ゲートの回答を書かない（設定の approval.via・merge.actor）"
         )
-    pull = hub.pull(number)
-    if pull.head_sha != presented:
-        raise TrailError(f"#{number} の HEAD が提示した {presented[:12]} から {pull.head_sha[:12]} へ動いた（提示し直す）")
-    Publisher(hub).comment(number, approval_decide.render_trail(value, pull.head_sha, by))
+    head, material_sha256 = presented
+    if by == MVV_BY and material_sha256 is not None:
+        raise TrailError(f"#{number} への MVV 判定の回答は資料の SHA-256 を受けない（人に資料を示さずに通す経路）")
+    got = read(hub, number)
+    pull = got.pull
+    if pull.head_sha != head:
+        raise TrailError(f"#{number} の HEAD が提示した {head[:12]} から {pull.head_sha[:12]} へ動いた（提示し直す）")
+    if by == USER_BY:
+        latest = approval_decide.latest_presentation(got.presented, pull.head_sha)
+        if material_sha256 is None or latest is None or latest.material != material_sha256:
+            shown = latest.material[:12] if latest is not None and latest.material else "（提示が無い）"
+            raise TrailError(
+                f"#{number} の回答の資料 {str(material_sha256)[:12]} が最新の提示 {shown} と違う（提示し直した資料に回答を取り直す）"
+            )
+    Publisher(hub).comment(number, approval_decide.render_trail(value, pull.head_sha, by, material_sha256))
     after = read(hub, number)
     if after.judgment.state != value or after.pull.head_sha != pull.head_sha:
         raise TrailError(f"#{number} へ書いた回答 {value} が判定に届いていない（判定: {after.judgment.detail}）")

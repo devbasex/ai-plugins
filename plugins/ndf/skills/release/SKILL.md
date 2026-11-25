@@ -175,8 +175,8 @@ Pull Request が最後かどうかを判断できない。
 **承認の対象はリリースの PR の HEAD（40 桁）である。** 置き方は「リリースの場合」で変わる。
 
 - 証跡で承認する設定（`approval.via: gate`）: `ndf release-steps present --pr <リリースの PR> --material <承認資料>` で資料を PR へ置き、
-  承認を得たら `ndf release-steps answer --pr <リリースの PR> --answer approved --presented <present の outputs.head> --by user` で証跡を書く。
-  MVV 判定で通したときは `--by mvv` で書く。誰がいつ承認したかは証跡のコメントの作成者と作成時刻で読む
+  承認を得たら `present` の routes の `answer`（提示した HEAD と資料の SHA-256 を固定する）に `--by user` を足して証跡を書く。
+  MVV 判定で通したときは `--by mvv` で書く（`--material-sha256` は渡さない）。誰がいつ承認したかは証跡のコメントの作成者と作成時刻で読む
 - レビューで承認する設定（`approval.via: review`）: リリースの PR のレビューの承認がリリース承認である
 変更の要求を受けたら、その場で変更要求の記録へ 1 行書く（[approval-request.md](../development-workflow/references/approval-request.md) の「回答を記録する」）。
 

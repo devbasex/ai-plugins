@@ -387,7 +387,13 @@ def test_release_steps_parser_current_behavior() -> None:
         "materials": common + target + [opt("--out")],
         "present": common + [pr, opt("--material")],
         "answer": common
-        + [pr, req("--answer", choices=("approved", "rejected")), req("--presented"), req("--by", choices=("user", "mvv"))],
+        + [
+            pr,
+            req("--answer", choices=("approved", "rejected")),
+            req("--presented"),
+            opt("--material-sha256"),
+            req("--by", choices=("user", "mvv")),
+        ],
         "approval-check": common + [pr, req("--production")],
         "merge": common + [pr, req("--budget", float)],
         "record": common + [pr, req("--production"), opt("--production-sha")],

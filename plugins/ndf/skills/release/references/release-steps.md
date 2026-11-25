@@ -94,12 +94,13 @@ workflow の `assemble`（`ndf release-steps assemble --channel production`）�
 
 ```bash
 ndf release-steps materials --base <ベースブランチ> --production <本番ブランチ> --channel production --out <承認資料>
-ndf release-steps present --pr <リリースの PR> --material <承認資料>   # outputs.head が提示した HEAD
-ndf release-steps answer --pr <リリースの PR> --answer approved --presented <提示した HEAD> --by user   # 承認を得てから
+ndf release-steps present --pr <リリースの PR> --material <承認資料>   # routes が提示した HEAD と資料の SHA-256 を固定する
+ndf release-steps answer --pr <リリースの PR> --answer approved --presented <提示した HEAD> --material-sha256 <資料の SHA-256> --by user   # 承認を得てから
 ndf release-steps records --pr <リリース記録の PR>
 ```
 
-**`answer` は承認を得てから打つ。** `--by` は回答した担い手で、利用者が `user`、MVV 判定で通したときが `mvv` である
+**`answer` は承認を得てから打つ。** `--by` は回答した担い手で、利用者が `user`、MVV 判定で通したときが `mvv` である。
+利用者の回答は `present` の routes が固定した `--material-sha256` を渡す。最新の提示の資料と違えば書かれない（資料を差し替えて提示し直したら、新しい資料に回答を取り直す）。`mvv` の回答には渡さない
 （`pace: fast` と `pace: auto` だけ。条件は [pace.md](../../development-workflow/references/pace.md)）。管理者の迂回でマージする設定では、
 `user` の証跡だけを数える。却下は `--answer rejected` で書く。
 

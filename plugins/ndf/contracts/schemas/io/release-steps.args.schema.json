@@ -35,6 +35,10 @@
           "type": "string",
           "description": "提示した HEAD の SHA（present の outputs.head）"
         },
+        "--material-sha256": {
+          "type": "string",
+          "description": "回答した承認資料のファイル全体の SHA-256（--by user で必須。present の routes が固定する。#4446）"
+        },
         "--by": {
           "type": "string",
           "enum": [

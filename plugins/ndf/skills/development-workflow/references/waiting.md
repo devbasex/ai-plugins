@@ -166,7 +166,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
    `queue <リリースのワークフロー>` と `wait <リリースのワークフロー>` をバックグラウンドで起動する。リリースのワークフローの先頭の `approve` が、
    開発版の facts の承認したコミットと 3 の記録を照らして承認資料へ承認の記録を書く（記録が無い・facts の後に承認資料が
    書き直されていれば、書かずに承認ゲートで止まり `release` へ進まない）。状態のファイルが無いときは、`approve` の前に
-   `ndf release-steps answer --pr <リリースの PR> --answer approved --presented <提示した HEAD> --by user` で承認の記録を書いておく。
+   `ndf release-steps answer --pr <リリースの PR> --answer approved --presented <提示した HEAD> --material-sha256 <提示した資料の SHA-256> --by user` で承認の記録を書いておく。
    リリースのワークフローのステップの最後はクリーンアップ（`ndf release-steps cleanup`）で、リリースの PR（`release/v<バージョン>` → main）と
    スプリントの PR（`--prs`）のブランチ・worktree を片付ける。`git branch -D` が要るブランチがあれば承認ゲートで止まる
 5. どこかのプランが止まったら、原因を直してから `queue --resume <パス>` と `wait <パス>` をバックグラウンドで起動する。
@@ -209,7 +209,7 @@ ndf plan wait plan-1101.json plan-1102.json plan-release-dev.json
   は `--from <プラン名>=<ステップ>` を足す
 - ステージの番号とプランのファイル名は `new sprint` の出力（`sprint.json` の `ステージ`）が正である
 - `--state` を渡さないスプリントでは、リリース承認ゲートで
-  `ndf release-steps answer --pr <リリースの PR> --answer approved --presented <提示した HEAD> --by user` を打つ（`sprint.json` の承認ゲートのステージの文が示す）
+  `ndf release-steps answer --pr <リリースの PR> --answer approved --presented <提示した HEAD> --material-sha256 <提示した資料の SHA-256> --by user` を打つ（`sprint.json` の承認ゲートのステージの文が示す）
 - 確定仕様化・振り返り・棚卸しは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表のマージ・仕上げの行）
 - 本番の後に続けるコマンドは [relay.md](relay.md)、`pace: fast` と `pace: auto` の並びは [pace.md](pace.md) にある
 
