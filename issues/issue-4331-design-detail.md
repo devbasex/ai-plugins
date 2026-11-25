@@ -72,7 +72,15 @@ scripts/
 | 試行の番号のファイルの名前 `shard-attempt-<番号>.txt` | 設定値 | `.github/workflows/pytest.yml` | — |
 | 手順の名前 `根のテスト`・`NDF のテスト` | 設定値 | `.github/workflows/pytest.yml` | — |
 
-成果物の名前の頭・試行の番号のファイルの名前・手順の名前は、読む側のスクリプトも定数で持つ。成果物の名前の頭は `scripts/pytest_shard.py` の `ROOT_JUNIT`・`NDF_JUNIT` を正本にし、`scripts/ci_test_durations.py` はそれを import して、名前の判定（`ARTIFACT_NAME`）もその定数から組み立てる。試行の番号のファイルの名前と手順の名前は `scripts/ci_test_durations.py` だけが持つ。ワークフローの YAML からスクリプトへ値を渡す経路が無いため、YAML とスクリプトの 2 か所に置く。食い違うと、`run` が「XML が 1 つも読めない」で 1 を返し、`trend` が無効な集計を書くので、実装の Pull Request の CI の `run` で気づける。
+成果物の名前の頭・試行の番号のファイルの名前・手順の名前は、読む側のスクリプトも定数で持つ。成果物の名前の頭は `scripts/pytest_shard.py` の `ROOT_JUNIT`・`NDF_JUNIT` を正本にし、`scripts/ci_test_durations.py` はそれを import して、名前の判定（`ARTIFACT_NAME`）もその定数から組み立てる。試行の番号のファイルの名前と手順の名前は `scripts/ci_test_durations.py` だけが持つ。ワークフローの YAML からスクリプトへ値を渡す経路が無いため、YAML とスクリプトの 2 か所に置く。
+
+YAML とスクリプトで名前が食い違ったときの影響は、名前ごとに違う。`run` が 0 で終わっても、名前がそろっているとは限らない。実装の Pull Request の CI で `run` を打つときは、終了コードに加えて、出力の先頭の「部分集計」の行と、ジョブごとの手順の秒も確かめる。
+
+| 食い違う名前 | `run` の終了コード | `run` の出力 | `trend` の集計 |
+| --- | --- | --- | --- |
+| 成果物の名前の頭（根か NDF の片方でも） | 1 | 標準エラーに「根の JUnit XML が無い」か「NDF の JUnit XML が無い」を出し、集計は出さない | 無効（理由は「欠けたジョブ」） |
+| 試行の番号のファイルの名前 | 0 | 「部分集計（古い試行のジョブ: …）」の行を出し、どのジョブも合計に数えない | 無効（理由は「古い試行のジョブ」） |
+| 手順の名前 | 0 | ジョブごとの表で、根か NDF の手順の秒が `-` になる。合計と上位は正しい | 影響しない（手順の秒を使わない） |
 
 ## 割り当て
 
