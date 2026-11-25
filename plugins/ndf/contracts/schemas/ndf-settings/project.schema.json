@@ -1524,10 +1524,6 @@
           "type": "array"
         }
       },
-      "required": [
-        "provider",
-        "workflows"
-      ],
       "title": "Ci",
       "type": "object"
     },
@@ -1971,8 +1967,7 @@
         }
       },
       "required": [
-        "name",
-        "files"
+        "name"
       ],
       "title": "Language",
       "type": "object"

@@ -5,7 +5,7 @@
 
 - 秘密の形を最初に当てる: 書く値・既存の値のどちらかが秘密の形なら、その項目を `{"unknown": "秘密の形"}` にし、値を出さない
 - 置き換えてよいのは、キーが無い項目と、前の `write` の値のまま（`analysis.written` の指紋が一致する）項目だけ
-- 新しい解析で不明でも、前の値があれば残す。`ci` のワークフローの行の壁時計も、新しい行に無ければ同じパスの前の値を残す
+- 新しい解析で不明でも、前の値があれば残す
 - CI テストの設定（`test.ci.only`）は、テストの suite の `ci_jobs` のファイルがリポジトリにあるときだけ書く。人が書いた値は変えない
 """
 
@@ -96,20 +96,6 @@ def resolve_item(key: str, m: Optional[dict[str, Any]], answers: dict[str, Any],
     return ans.get("value"), "判断した"
 
 
-def _carry_walls(cur: Any, new: Any) -> tuple[Any, list[dict[str, Any]]]:
-    """`ci` の新しい値で `wall_seconds` の無い行に、前の値の同じ `path` の行の壁時計を引き継ぐ。"""
-    if not isinstance(cur, dict) or not isinstance(new, dict) or is_unknown(cur) or is_unknown(new):
-        return new, []
-    before = {w.get("path"): w["wall_seconds"] for w in seq(cur.get("workflows")) if isinstance(w, dict) and "wall_seconds" in w}
-    rows, workflows = [], []
-    for w in seq(new.get("workflows")):
-        if isinstance(w, dict) and "wall_seconds" not in w and w.get("path") in before:
-            w = {**w, "wall_seconds": before[w["path"]]}
-            rows.append({"kind": "unknown", "key": f"ci#{w['path']}", "reason": "新しい解析に壁時計が無い", "kept_previous": True})
-        workflows.append(w)
-    return ({**new, "workflows": workflows} if rows else new), rows
-
-
 def _put_row(key: str, value: Any, origin: str) -> dict[str, Any]:
     if is_unknown(value):
         return {"kind": "unknown", "key": key, "reason": value["unknown"]}
@@ -120,10 +106,7 @@ def _replace_ours(key: str, cur: Any, new: Any, origin: str) -> tuple[Any, list[
     """前の `write` の値のままの項目を置き換える。新しい値が不明なら前の値を残す。"""
     if is_unknown(new) and not is_unknown(cur):
         return cur, [{"kind": "unknown", "key": key, "reason": new["unknown"], "kept_previous": True}]
-    rows: list[dict[str, Any]] = []
-    if key == "ci":
-        new, rows = _carry_walls(cur, new)
-    return new, rows + [_put_row(key, new, origin)]
+    return new, [_put_row(key, new, origin)]
 
 
 def _owned_decision(tag: str, cur: Any, new: Any, written_before: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -333,7 +316,6 @@ def p_number(key: str, default: str) -> str:
     numbers = {
         "languages": "P1",
         "test": "P2",
-        "test_duration": "P3",
         "ci": "P4",
         "services": "P5",
         "issues": "P8",

@@ -100,10 +100,8 @@ def _ci_items(tree: measure_repo.Tree, step: _Steps, ctx: MeasurementContext) ->
     ci_part = step("ci", lambda: measure_ci.measure(tree, ctx.gh_repo, ctx.head, step.deadline, os.environ))
     notes = _instruction_notes(items)
     if ci_part:
-        items["ci"], items["test_duration"] = ci_part["ci"], ci_part["test_duration"]
+        items["ci"] = ci_part["ci"]
         notes += ci_part["notes"]
-    elif "test_duration" not in items:
-        items["test_duration"] = items["ci"] if "ci" in items else unknown("時間切れ")
     if "issues" not in items:
         items["issues"] = measure_ci.measure_issues(ctx.repo_issues, ci_part if ci_part else {})  # noqa: NDF501 外部コマンド: CI の測りが時間切れなら空の材料で数える
     return notes

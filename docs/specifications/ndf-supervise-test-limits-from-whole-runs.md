@@ -29,7 +29,7 @@
 | `test-run.py scope` / `whole` の `--limit` | [`test-run.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/test-run.py) の冒頭の説明と `--help` |
 | ステップの開始の決め直し | [`supervise_lib/steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/steps.py) の `fill_test_limit` |
 | `with_margin` の式（10%・最低 30 秒） | [`supervise_lib/verify_steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/verify_steps.py)。理由は [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md) |
-| 所要の記録（`test_duration`）の測り方 | [project-decl-ci-representative-run.md](project-decl-ci-representative-run.md) と `development-workflow` の [`references/project-analysis.md`](../../plugins/ndf/skills/development-workflow/references/project-analysis.md) |
+| 所要の記録（`test_duration`）の測り方 | #4516 で測るのをやめた（それまでの測り方は git の履歴の `project-decl-ci-representative-run.md` に残る）。今の解析が測るものは `development-workflow` の [`references/project-analysis.md`](../../plugins/ndf/skills/development-workflow/references/project-analysis.md) |
 | 予算を持つ呼び出し（cross-refactoring）の上限 | [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md)・[cross-refactoring-init-test-and-phase-windows.md](cross-refactoring-init-test-and-phase-windows.md) と `cross-refactoring` の `docs/02-plan-and-implement.md` |
 
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・データの形・既知の限界・テスト観点）を残す。
@@ -295,5 +295,4 @@ classDiagram
 - Pull Request: [#2238](https://github.com/devbasex/ai-plugins/pull/2238)（実装）・[#2247](https://github.com/devbasex/ai-plugins/pull/2247)（スプリント m1426）
 - 用語集: [docs/glossary.md](../glossary.md)
 - ステップの `timeout` の余裕（`with_margin`）: [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md)
-- 所要の記録の測り方: [project-decl-ci-representative-run.md](project-decl-ci-representative-run.md)
 - 予算を持つ呼び出しの上限: [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md)・[cross-refactoring-init-test-and-phase-windows.md](cross-refactoring-init-test-and-phase-windows.md)
