@@ -930,3 +930,25 @@ def discard(path: Path) -> None:
     """登録の途中の保存先を消す（無ければ何もしない）。"""
     if path.exists():
         shutil.rmtree(path)
+
+
+# ---------------------------------------------------------------- 端末で読む一覧の表（#4003）
+
+
+def _usage_cell(row: dict[str, Any]) -> Optional[str]:
+    """使用率の列。OAuth は使用率の最大、API キーは月の額。無ければ None（`-`）。"""
+    if row.get("percent") is not None:
+        return f"{row['percent']:g}%"
+    if row.get("monthly_usd") is not None:
+        return f"月 {row['monthly_usd']:g} ドル"
+    return None
+
+
+# 端末で読む一覧（`list_rows` の行）の表の列（`result.emit` の columns。名前の前の `*` は指定のアカウント。識別は email・従量の接続先・API キーの組織の順に引く）
+LIST_COLUMNS = (
+    ("名前", lambda r: ("* " if r.get("pinned") else "  ") + str(r["name"])),
+    ("種類", "kind"),
+    ("識別", lambda r: r.get("email") or r.get("provider") or r.get("account") or r.get("source")),
+    ("使用率", _usage_cell),
+    ("状態", "state"),
+)

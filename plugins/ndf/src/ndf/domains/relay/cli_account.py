@@ -263,7 +263,9 @@ def _acc_list(store: Path, a: argparse.Namespace) -> int:
     )
     metrics = {"accounts": sum(r["kind"] == "oauth" for r in rows), "keys": sum(r["kind"] == "api_key" for r in rows)}
     summary = f"登録: アカウント {metrics['accounts']} 件・API キー {metrics['keys']} 件" if rows else "登録済みのアカウントは無い"
-    return result.emit(result.result(TOOL, result.OK, summary, items=rows, metrics=metrics, warnings=warnings))
+    return result.emit(
+        result.result(TOOL, result.OK, summary, items=rows, metrics=metrics, warnings=warnings), columns=account_registry.LIST_COLUMNS
+    )
 
 
 def _acc_capacity(store: Path, a: argparse.Namespace) -> int:
