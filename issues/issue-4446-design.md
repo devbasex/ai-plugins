@@ -638,15 +638,23 @@ PR を承認資料とするゲート 1 件あたりの、PR の取得と更新�
 
 ## 子の表の変更
 
-`ndf document-rebuild gate`（子 M1 のサブパッケージ `ndf.domains.docrebuild`）が、読ませたものの記録と承認の質問の形（子 M7 の `ndf.domains.records.reading`）を読む。`reading.py` は、リリースの形の表の列 `approve`（子 M2 の `ndf.domains.release.forms_decide`）を読んで、リリースの質問の文を作る。今の子の表では、M1 の先に要る子に M7 が無く、M7 の先に要る子に M2 が無い。そのため、規則 `child-deps` の IG1 が `docrebuild/drive.py` と `records/reading.py` の import を落とす。依存の向き（`docrebuild` → `records.reading` → `release.forms_decide`）は「解き方の全体像」のとおりで、逆の向きの import は無い。
+**変える表:** 作り直しの子の表 `plugins/ndf/src/ndf/checks/children.json`（JSON）。子（NDF のコードの担当範囲。M1・M7 などの記号を持つ）ごとに、サブパッケージ `packages`・先に要る子 `needs`・流す順番 `order`・レーン `lane`・閉じたか `closed` を持ち、共有の表の書き手を `tables` に持つ。
 
-| 記号か表 | 項目 | 変更の前 | 変更の後 |
+**変える理由:** 子 M1 の `ndf.domains.docrebuild`（`ndf document-rebuild gate` を置く）は、子 M7 の `ndf.domains.records.reading` を import する。このモジュールは、読み手役に読ませたものの記録と、承認の質問の決まった形を扱う。`reading.py` は、リリースの質問の文を作るために、子 M2 の `ndf.domains.release.forms_decide`（リリースの形の表の列 `approve`）を import する。規則 `child-deps` の検査 IG1 は、ある子のモジュールが別の子のモジュールを import するなら、その子が `needs` の推移の閉包に入っていることを求める。今の表では M1 の `needs` に M7 が無く、M7 の `needs` に M2 が無いので、IG1 が `docrebuild/drive.py` と `records/reading.py` の import を不合格にする。依存の向き（`docrebuild` → `records.reading` → `release.forms_decide`）は「解き方の全体像」のとおりで、逆の向きの import は無い。
+
+| 子 | 項目 | 変更の前 | 変更の後 |
 | --- | --- | --- | --- |
 | M1 | `needs` | `P1b`・`M2`・`C3`・`C3+`・`C4`・`C5` | `P1b`・`M2`・`C3`・`C3+`・`C4`・`C5`・`M7` |
 | M1 | `order` | 7 | 8 |
 | M7 | `needs` | `P1b`・`P2`・`AD2`・`M3a` | `P1b`・`P2`・`AD2`・`M3a`・`M2` |
 
-M1 の順番を 8 にするのは、IG2（閉じていない子の順番は、閉じていない先に要る子の順番より大きい）を満たすためである。M7 は P2（順番 6）を先に要るので、順番を 7 より下げられない。M1 を先に要る子のうち閉じていないのは P4（順番 9）だけで、順番を変えずに IG2 を満たす。M1 のレーン `lr-fix-a` の順番 8 に、閉じていない子は M1 の 1 本だけになり、上限（`child_deps.max_per_slot`）に当たらない。`tables` は変えない。
+**順番の決め方:** 検査 IG2 は、閉じていない子の順番が、閉じていない先に要る子の順番より大きいことを求める。
+
+- M7 の順番は 7 のまま変えない。M7 は P2（順番 6）を先に要るので、7 より小さくできない。新たに先に要る M2 の順番は 5 なので、M7 は 7 のままで IG2 を満たす
+- M1 は M7（順番 7）を先に要るようになるので、順番を 8 に上げる
+- M1 を先に要る子で閉じていないのは P4（順番 9）だけである。M1 を 8 にしても 9 より小さいので、P4 の順番は変えずに済む。S1a（順番 8）も M1 を先に要るが、閉じた子なので IG2 の対象にならない
+- M1 のレーン `lr-fix-a` の順番 8 で閉じていない子は M1 だけになり、同じレーンと順番に並べてよい数の上限（`child_deps.max_per_slot`）に当たらない
+- `tables`（共有の表の書き手）は変えない。今回変えるのは import の依存だけで、表の書き手は変わらない
 
 ## 影響と危険
 
