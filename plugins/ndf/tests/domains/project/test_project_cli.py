@@ -573,7 +573,7 @@ def test_changing_only_the_answers_leaves_no_pending_mark(repo, tmp_path, capsys
 
 # --- 書き出しを守る（#4516）: 記録が git に無視されることを git に確かめさせ、設定の書き込みと同じロックで守る ---
 
-GUARDS = ("ls-files", "check-ignore")
+GUARDS = ("check-ignore", "ls-files")  # 計画が設定と記録のパスを 1 回で確かめ、`.gitignore` を作るときだけ索引も読む
 
 
 def _count_guards(monkeypatch, fail: dict[str, git.Completed] | None = None) -> list[str]:
@@ -632,7 +632,7 @@ def test_a_tracked_record_stops_the_write_before_the_gitignore(repo, tmp_path, m
     _git(repo, "add", "-f", files.relpath("project-analysis"))
     calls = _count_guards(monkeypatch)
     assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 1
-    assert calls == ["ls-files"]
+    assert calls == ["check-ignore", "ls-files"]
     assert _stopped(capsys, last_result) == f".ndf/analysis/ の下のファイルが git に追跡されている: {files.relpath('project-analysis')}"
     assert not files.path(repo, "project-analysis-ignore").exists() and not (repo / ".ndf" / "project.json").exists()
     assert _record(repo) == {"tracked": True}
@@ -651,13 +651,21 @@ def test_a_tracked_gitignore_removed_from_the_worktree_is_not_made_again(repo, t
     assert not ignore.exists() and _record(repo) == record
 
 
-def test_nothing_to_write_runs_no_guard_even_with_a_tracked_record(repo, tmp_path, monkeypatch, capsys, last_result):
+def test_nothing_to_write_stops_on_no_guard_even_with_a_tracked_record(repo, tmp_path, monkeypatch, capsys, last_result):
     measure = _first_write(repo, tmp_path)
     _git(repo, "add", "-f", files.relpath("project-analysis"))
     calls = _count_guards(monkeypatch)
     capsys.readouterr()
     assert _write_cli(repo, measure) == 0
-    assert calls == [] and last_result(capsys.readouterr().out)["metrics"]["written"] == 0
+    assert calls == ["check-ignore"] and last_result(capsys.readouterr().out)["metrics"]["written"] == 0
+
+
+def test_updating_the_record_asks_git_once(repo, tmp_path, monkeypatch, capsys, last_result):
+    _first_write(repo, tmp_path)
+    calls = _count_guards(monkeypatch)
+    capsys.readouterr()
+    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": [{"name": "ruff", "config": "ruff.toml"}]})}, repo)) == 0
+    assert calls == ["check-ignore"] and last_result(capsys.readouterr().out)["metrics"]["written"] > 0
 
 
 def test_writing_only_the_gitignore_runs_each_guard_once(repo, tmp_path, monkeypatch, capsys, last_result):
@@ -666,18 +674,33 @@ def test_writing_only_the_gitignore_runs_each_guard_once(repo, tmp_path, monkeyp
     calls = _count_guards(monkeypatch)
     capsys.readouterr()
     assert _write_cli(repo, measure) == 0
-    assert calls == ["ls-files", "check-ignore"]
+    assert calls == list(GUARDS)
     assert last_result(capsys.readouterr().out)["metrics"]["files"] == [str(files.path(repo, "project-analysis-ignore"))]
 
 
-@pytest.mark.parametrize("command", GUARDS)
-def test_git_that_cannot_tell_stops_the_write(repo, tmp_path, monkeypatch, capsys, last_result, command):
+def _tree(repo: Path) -> tuple[str, dict[str, str]]:
+    """作業ツリーの状態（無視されたファイルを含む git status と、.ndf/ の下の各ファイルの中身）。"""
+    status = _git(repo, "status", "--porcelain", "--untracked-files=all", "--ignored")
+    ndf = repo / ".ndf"
+    contents = (
+        {str(f.relative_to(repo)): f.read_text(encoding="utf-8") for f in sorted(ndf.rglob("*")) if f.is_file()} if ndf.exists() else {}
+    )
+    return status, contents
+
+
+@pytest.mark.parametrize("command, existing_ignore", [("ls-files", None), ("check-ignore", "*\n")])
+def test_git_that_cannot_tell_leaves_the_tree_as_it_was(repo, tmp_path, monkeypatch, capsys, last_result, command, existing_ignore):
+    """`.gitignore` を作る回は索引を読めないとき、`.gitignore` がある回は除外を確かめられないときに、何も書かずに止まる。"""
+    ignore = files.path(repo, "project-analysis-ignore")
+    if existing_ignore is not None:
+        ignore.parent.mkdir(parents=True)
+        ignore.write_text(existing_ignore, encoding="utf-8")
+    before = _tree(repo)
     calls = _count_guards(monkeypatch, {command: git.Completed(128, "", "fatal: index file corrupt\n")})
     assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 1
     assert _stopped(capsys, last_result) == "git が .ndf/analysis/ の追跡と無視を確かめられない: fatal: index file corrupt"
-    assert calls == list(GUARDS[: GUARDS.index(command) + 1])
-    assert files.path(repo, "project-analysis-ignore").exists() == (command == "check-ignore")
-    assert not (repo / ".ndf" / "project.json").exists() and not files.path(repo, "project-analysis").exists()
+    assert calls == (list(GUARDS) if existing_ignore is None else ["check-ignore"])
+    assert _tree(repo) == before
 
 
 def test_a_held_lock_stops_the_write_without_reading(repo, tmp_path, monkeypatch, capsys, last_result):

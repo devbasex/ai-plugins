@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import difflib
 import json
-import subprocess
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
@@ -53,9 +52,20 @@ class File(NamedTuple):
     summary: Optional[str] = None
 
 
+class Ignored(NamedTuple):
+    """`git check-ignore -v` の 1 回の答え。`rules` は除外の行に当たったパス → (出所のファイル, 行, パターン)。否定の行に当たった
+    パスと追跡済みのパスは入らない。`error` は git が答えられなかった理由（答えたなら None）。"""
+
+    rules: dict[str, tuple[str, str, str]]
+    error: Optional[str]
+
+
 class Plan(NamedTuple):
+    """書くファイル・出力の行・設定と解析の記録のパスを 1 回の `git check-ignore` で確かめた答え。"""
+
     files: list[File]
     rows: list[dict[str, Any]]
+    ignored: Ignored
 
 
 def is_unknown(value: Any) -> bool:
@@ -228,32 +238,43 @@ def _declare_ci_tests(
     return doc, {"kind": "note", "key": CI_KEY, "text": f"CI テストの設定: {line}"}
 
 
-def ignored_notes(root: Path, rels: list[str]) -> list[dict[str, Any]]:
-    """`rels` のうち `.gitignore` の対象のもの（kind note・key gitignore の行）。否定の行に当たったもの・git の外は外す。"""
+def check_ignored(root: Path, rels: list[str]) -> Ignored:
+    """`rels` を 1 回の `git check-ignore -v` で確かめる。索引を読むので、追跡済みのパスは除外の行に当たっても無視されない扱い。"""
     try:
-        done = subprocess.run(["git", "check-ignore", "-v", "--", *rels], cwd=root, capture_output=True, text=True, check=False)
-    except OSError:  # 確かめられないことを除外と読ませない
-        return []
+        done = git.Git(root).attempt("check-ignore", "-v", "--", *rels)
+    except git.GitError as exc:  # git を起動できない
+        return Ignored({}, str(exc))
     if done.returncode not in (0, 1):
-        return []
-    out = []
+        return Ignored({}, done.stderr.strip())
+    rules = {}
     for line in done.stdout.splitlines():
         head, sep, path = line.partition("\t")
         src, _, rest = head.partition(":")
         num, _, pattern = rest.partition(":")
         if sep and not pattern.startswith("!"):
-            text = f"{path} は {src}:{num} の `{pattern}` が除外している（コミットできない。.gitignore は変えない）"
-            out.append(
-                {
-                    "kind": "note",
-                    "key": "gitignore",
-                    "name": path,
-                    "result": "ignored",
-                    "source": f"{src}:{num}",
-                    "pattern": pattern,
-                    "text": text,
-                }
-            )
+            rules[path] = (src, num, pattern)
+    return Ignored(rules, None)
+
+
+def ignored_notes(ignored: Ignored, rels: list[str]) -> list[dict[str, Any]]:
+    """`rels` のうち `.gitignore` の対象のもの（kind note・key gitignore の行）。確かめられなかったときは除外と読ませず空。"""
+    out = []
+    for path in rels:
+        if path not in ignored.rules:
+            continue
+        src, num, pattern = ignored.rules[path]
+        text = f"{path} は {src}:{num} の `{pattern}` が除外している（コミットできない。.gitignore は変えない）"
+        out.append(
+            {
+                "kind": "note",
+                "key": "gitignore",
+                "name": path,
+                "result": "ignored",
+                "source": f"{src}:{num}",
+                "pattern": pattern,
+                "text": text,
+            }
+        )
     return out
 
 
@@ -324,7 +345,8 @@ def plan(inp: Inputs) -> Plan:
         project = File(path, files.relpath("project"), old, dumps(doc))
     out = _record_files(inp, record, project)
     notes = [{"kind": "note", "key": "notes", "text": n} for n in seq(inp.measure.get("notes"))]
-    return Plan(out, item_rows + [ci_row] + rows + notes + ignored_notes(inp.main, [files.relpath("project")]))
+    ignored = check_ignored(inp.main, [files.relpath("project"), files.relpath("project-analysis")])  # 書き込みの前の確かめも兼ねる
+    return Plan(out, item_rows + [ci_row] + rows + notes + ignored_notes(ignored, [files.relpath("project")]), ignored)
 
 
 def p_number(key: str, default: str) -> str:

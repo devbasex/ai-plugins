@@ -173,26 +173,26 @@ def _inputs(args: argparse.Namespace, dirs: check.RepoDirs) -> write.Inputs:
     return write.Inputs(dirs.top.cwd, dirs.main, existing, measured, answers, analysis_record.load(dirs.main)[0])
 
 
-def _unsure(folder: str, done: git.Completed) -> write.WriteError:
-    return write.WriteError(f"git が {folder}/ の追跡と無視を確かめられない: {done.stderr.strip()}")
+def _unsure(folder: str, reason: str) -> write.WriteError:
+    return write.WriteError(f"git が {folder}/ の追跡と無視を確かめられない: {reason}")
 
 
 def _untracked(repo: git.Git, folder: str) -> None:
     """記録のディレクトリの下に git が追跡するファイルが無いことを確かめる（`.gitignore` を作る前）。あれば・分からなければ `WriteError`。"""
     done = repo.attempt("ls-files", "--", folder)
     if done.returncode != 0:  # 索引を読めなければ、出力が空でも追跡の有無は分からない
-        raise _unsure(folder, done)
+        raise _unsure(folder, done.stderr.strip())
     if done.stdout.strip():
         raise write.WriteError(f"{folder}/ の下のファイルが git に追跡されている: {'・'.join(done.stdout.split())}")
 
 
-def _ignored(repo: git.Git, folder: str, record: str) -> None:
-    """記録のパスが git に無視されることを確かめる。無視の出所（どの除外の設定か）は問わない。無視されない・分からなければ `WriteError`。"""
-    done = repo.attempt("check-ignore", "-q", "--", record)
-    if done.returncode == 1:  # 無視されない（追跡済みを含む。--no-index を付けないので索引の追跡を見る）
+def _ignored(ignored: write.Ignored, folder: str, record: str) -> None:
+    """計画の `git check-ignore` の答えで、記録のパスが無視されることを確かめる。無視の出所（どの除外の設定か）は問わない。
+    無視されない（追跡済みを含む）・分からなければ `WriteError`。"""
+    if ignored.error is not None:
+        raise _unsure(folder, ignored.error)
+    if record not in ignored.rules:
         raise write.WriteError(f"{record} が git に無視されない。{folder}/.gitignore の中身か、記録が追跡されていないかを確かめる")
-    if done.returncode != 0:
-        raise _unsure(folder, done)
 
 
 def _put(f: write.File) -> None:
@@ -202,20 +202,20 @@ def _put(f: write.File) -> None:
         raise write.WriteError(f"設定を書けない: {exc}") from None
 
 
-def _commit(main: Path, planned: list[write.File]) -> None:
-    """計画のファイルを順に書く。記録のディレクトリの下へ書くときは、先に記録が git に無視されることを git に確かめさせる。
-    `.gitignore` を作るときは、その前に記録のディレクトリの下に追跡されたファイルが無いことを確かめる。止めるときは `WriteError`。"""
+def _commit(main: Path, planned: write.Plan) -> None:
+    """計画のファイルを順に書く。記録のディレクトリの下へ書くときは、どのファイルを書くよりも前に、記録が git に無視されることを
+    確かめる（止めるときは何も書かずに `WriteError`）。`.gitignore` を作るときは、記録のディレクトリの下に追跡されたファイルが
+    無いことを確かめる。同じディレクトリの `.gitignore` の `*` はどの除外の設定より優先されるので、追跡されていなければ記録は無視される。
+    `.gitignore` が既にあるときは、計画の `git check-ignore` の答えを使う。"""
     record = files.relpath("project-analysis")
     folder = str(Path(record).parent)
-    ignore = [f for f in planned if f.path == files.path(main, "project-analysis-ignore")]
-    rest = [f for f in planned if f not in ignore]
-    if any(f.path.parent == main / folder for f in planned):
-        repo = git.Git(main)
+    ignore = [f for f in planned.files if f.path == files.path(main, "project-analysis-ignore")]
+    if any(f.path.parent == main / folder for f in planned.files):
         if ignore:
-            _untracked(repo, folder)
-            _put(ignore[0])
-        _ignored(repo, folder, record)
-    for f in rest:
+            _untracked(git.Git(main), folder)
+        else:
+            _ignored(planned.ignored, folder, record)
+    for f in ignore + [f for f in planned.files if f not in ignore]:
         _put(f)
 
 
@@ -228,7 +228,7 @@ def _write(args: argparse.Namespace) -> int:
         else:
             with FileLock(str(bw.lock_at(dirs.common)), timeout=limits.seconds("branch-strategy.write-lock")):
                 planned = write.plan(_inputs(args, dirs))
-                _commit(dirs.main, planned.files)
+                _commit(dirs.main, planned)
     except Timeout:  # OSError の子なので、ロックのファイルを作れないときより先に見る
         return result.emit(result.stopped(TOOL, "check_failed", "別の実行が設定を書いています。終わってから打ち直してください"))
     except OSError as exc:  # ロックのファイルを作れない（git の共通ディレクトリに書けない）など
