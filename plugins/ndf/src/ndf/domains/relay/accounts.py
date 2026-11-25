@@ -152,7 +152,7 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 def usages(store: Path, now: float, generations: Mapping[str, str]) -> list[account_decide.Usage]:
     """登録済みアカウントの今の世代の使用率の行（`usage_rows` の行だけ）。"""
-    return usage_rows(store, now, generations, {})[0]
+    return usage_rows(store, now, generations)[0]
 
 
 def windows_of(store: Path, name: str, generation: str) -> Windows:
@@ -160,15 +160,16 @@ def windows_of(store: Path, name: str, generation: str) -> Windows:
     return _flat(_read_json(fetch_path(store, name, generation)).get("windows"))
 
 
-def usage_rows(
-    store: Path, now: float, generations: Mapping[str, str], seen: Mapping[str, tuple[str, float]]
-) -> tuple[list[account_decide.Usage], frozenset[str]]:
-    """登録済みアカウントの今の世代の取得の記録を名前の順に読んだ行と、API が上限の到達を返した名前。
+def fetched_at(store: Path, name: str, generation: str) -> Optional[float]:
+    """取得の記録の最後に成功した取得の時刻（無い・読めなければ None）。"""
+    return _number(_read_json(fetch_path(store, name, generation)).get("fetched_at"))
+
+
+def usage_rows(store: Path, now: float, generations: Mapping[str, str]) -> tuple[list[account_decide.Usage], frozenset[str]]:
+    """登録済みアカウントの今の世代の取得の記録を名前の順に読んだ行と、API が上限の到達を返した名前（#4404: API の結果だけで決める）。
 
     リセットの時刻を過ぎた窓は 0% として読み、上限は過ぎていない窓のどれかが 100 以上か、`spend_limit_reached` が真のとき。
-    `seen` は上限を見た名前 → (世代, 見た時刻)。同じ世代の記録の `fetched_at` がその時刻より前なら、記録はまだ上限を写して
-    いないので上限とする（窓・到達・`fetched_at` は 1 回読んだ同じ内容から取る）。
-    読めない・窓の無い記録は、上限なら使用率の分からない上限の行（`percent` が None）、でなければ返さない。
+    読めない・窓の無い記録は、上限の到達なら使用率の分からない上限の行（`percent` が None）、でなければ返さない。
     """
     rows, spent = [], set()
     for name in sorted(generations):
@@ -177,9 +178,6 @@ def usage_rows(
         stop = fetched.get("spend_limit_reached") is True
         if stop:
             spent.add(name)
-        hit = seen.get(name)
-        at = _number(fetched.get("fetched_at"))
-        stop = stop or (hit is not None and hit[0] == generations[name] and (at is None or at < hit[1]))
         if w:
             rows.append(_windowed(name, w, now, stop))
         elif stop:
