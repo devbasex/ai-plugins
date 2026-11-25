@@ -579,6 +579,35 @@ def test_a_lease_whose_process_cannot_be_checked_is_kept_and_stops_changes(tmp_p
             reg.ensure_free(store, "work1")
 
 
+OSC8_CLAUDE = """#!/bin/sh
+# 実物の claude auth login の出力の形: URL を OSC 8 のハイパーリンクで囲む。開くブラウザを記録して認可コードを待つ
+if [ "$2" = "login" ]; then
+  printf '%s' "$BROWSER" > "$CLAUDE_CONFIG_DIR/browser"
+  printf 'If the browser did not open, visit:\\n\\033]8;;https://claude.ai/oauth/authorize?z-1\\007https://claude.ai/oauth/authorize?z-1\\033]8;;\\007\\n'
+  read code
+fi
+exit 1
+"""
+
+
+def test_login_url_is_free_of_hyperlink_codes_and_no_browser_is_opened(tmp_path, monkeypatch):
+    """認可の URL から OSC 8 の制御文字を除く。ログインはブラウザを開かず、画面の認可コードを貼る形にする。"""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "claude").write_text(OSC8_CLAUDE)
+    (bin_dir / "claude").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin:/bin")
+    monkeypatch.setattr(account_login, "require_claude", lambda claude, env: None)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "BROWSER": "/opens/the/host/browser"}
+    store = tmp_path / "store"
+    try:
+        got = account_login.add(store, "work1", None, env)
+        assert got.url == "https://claude.ai/oauth/authorize?z-1"
+        assert (account_login.pending_dir(store, "work1") / "config" / "browser").read_text() == "true"
+    finally:
+        account_login.discard_pending(store, "work1")
+
+
 def test_login_env_does_not_carry_the_parents_provider_or_auth_profile(tmp_path):
     """登録用の子は、子の環境の表の account-drop の変数（提供元の選択・認証のプロファイルを含む）を親から継がない。"""
     drop = facts.ids("env", child="account-drop")

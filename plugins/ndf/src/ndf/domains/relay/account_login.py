@@ -35,7 +35,9 @@ PENDING_TTL = 600.0  # 登録の途中の状態の期限（秒。旧いと同じ
 POLL_INTERVAL = 0.1  # 締め切りまで条件を見直す間隔（秒）
 PENDING_CONFIG, PENDING_FIFO, PENDING_OUT, PENDING_FILE = "config", "code.fifo", "login.out", "pending.json"
 URL_RE = re.compile(r"https://[^\s\x1b\"'<>]+")
-ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+# 端末の制御文字: CSI（色など）と OSC（claude は URL を OSC 8 のハイパーリンクで囲み、同じ URL を 2 度並べる）
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+NO_BROWSER = "true"  # ログインにブラウザを開かせない（開いた URL の戻り先はこの機械に届かず、認可コードも出ない）
 
 
 class LoginError(Exception):
@@ -235,7 +237,7 @@ def _read_url(out: Path, proc: subprocess.Popen) -> Optional[str]:
 def _start(store: Path, name: str, environ: Mapping[str, str], now: float) -> Added:
     claude = _claude()
     d = pending_dir(store, name)
-    env = auth_env(environ, d / PENDING_CONFIG)
+    env = {**auth_env(environ, d / PENDING_CONFIG), "BROWSER": NO_BROWSER}
     require_claude(claude, env)  # 古ければ登録の途中の状態を作らずに止まる
     discard_pending(store, name)
     reg.make_store(store)
