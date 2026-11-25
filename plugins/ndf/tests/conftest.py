@@ -78,9 +78,9 @@ def _checked_emit(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureReques
     original = result_contract.emit
     allow_bad = request.node.get_closest_marker(BAD_RESULT_MARK) is not None
 
-    def checked(obj, code=None, stream=None):
+    def checked(obj, code=None, stream=None, **kwargs):
         record_output(obj, code, allow_bad)
-        return original(obj, code, stream)
+        return original(obj, code, stream, **kwargs)
 
     monkeypatch.setattr(result_contract, "emit", checked)
 
