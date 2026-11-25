@@ -126,7 +126,7 @@ def read_marker(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
     回の id か提示の写しを持たない旧い形の目印（この形より前のバージョンが書いた目印）は、目印のファイルの回 `run` で補う。
     提示の写しは、状態の保存先に残った待っているステップの写しのうち、同じ回 `run` が書いたと確かめられるものだけで補う。
     同じ保存先で `--fresh` から流した別の回が同じステップの写しを上書きし得るため、確かめられなければ提示を空にし、
-    `UNCONFIRMED` を真にする（`advance` は回答を受けずにステップを打ち直し、資料を出し直してから回答を受ける）。
+    `UNCONFIRMED` を真にする（`advance` はこの待ちへの回答を記録も送信もせずに止め、待ちを残す）。
     """
     marker = read_json(waiting_path(state_dir, run))
     if marker is None:
@@ -472,12 +472,19 @@ def _pin_mismatch(baseline: dict[str, Any], reply: Reply) -> Optional[str]:
     return "回答した待ち（--waiting）が無い" if reply.waiting is None and human else None
 
 
-def _represented_notes(inv: Invocation, baseline: Optional[dict[str, Any]]) -> tuple[str, ...]:
-    """回答を記録せずに資料を出し直したとき（`unconfirmed` の待ちへの回答）の、承認待ちの結果の注意。"""
-    if baseline is None or not unconfirmed(baseline):
-        return ()
-    step = baseline["step"]
-    return (f"{inv.plan.name} のステップ {step} の資料がこの待ちのものか確かめられず、回答を記録せず資料を出し直した。読んで回答し直す",)
+def _unconfirmed_stop(inv: Invocation, baseline: dict[str, Any]) -> dict[str, Any]:
+    """同じ回の提示を確かめられない旧い形の待ち（`unconfirmed`）への回答を、記録も送信もせずに止める結果。
+
+    待ちは解かず、ステップも打ち直さない（打ち直すとマージのステップがマージまで進み得る）。承認の対象と資料は、
+    利用者が `--fresh` で回を始め直して作り直す。待ちの照合（`--waiting`）は先に済ませてある。
+    """
+    step = str(baseline["step"])
+    again = " ".join(["ndf plan next", *_with_start(inv.again, step), "--fresh"])
+    detail = (
+        f"{inv.plan.name} のステップ {step} の待ちは更新前の版が残したもので、示した資料がこの待ちのものか確かめられない。"
+        f"回答を記録しない（{again} で回を始め直し、出し直した資料へ回答する）"
+    )
+    return result.stopped(TOOL, "precondition", detail)
 
 
 def _deliver(inv: Invocation, baseline: Optional[dict[str, Any]], reply: Reply) -> Optional[dict[str, Any]]:
@@ -487,14 +494,12 @@ def _deliver(inv: Invocation, baseline: Optional[dict[str, Any]], reply: Reply) 
     if reply.by is None:
         detail = f"{inv.plan.name} への回答に回答した者（--by）が無い。返された経路（--answer <回答> --by human）で打ち直す"
         return result.stopped(TOOL, "invalid", detail)
-    if unconfirmed(baseline):
-        # 示した資料がこの待ちのものか確かめられないので回答を記録せず、ステップを打ち直して資料を出し直させる
-        durable.send(inv.workflow_id, transition_decide.REPRESENT, TOPIC_ANSWER)
-        return None
     mismatch = _pin_mismatch(baseline, reply)
     if mismatch is not None:
         detail = f"{inv.plan.name} への回答を記録しない: {mismatch}（ndf plan wait で今の承認待ちと資料を読み直して回答する）"
         return result.stopped(TOOL, "approval_stale", detail)
+    if unconfirmed(baseline):
+        return _unconfirmed_stop(inv, baseline)
     try:
         _record_answer(inv, baseline, reply.answer, reply.by)
     except OSError as exc:
@@ -568,7 +573,7 @@ def _run_item(inv: Invocation) -> dict[str, Any]:
     return {"kind": "plan", "name": inv.plan.name, "run": inv.run_id}
 
 
-def gate_result(inv: Invocation, marker: dict[str, Any], warnings: tuple[str, ...] = ()) -> dict[str, Any]:
+def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
     """承認の回答を待つ結果。`routes` は回答ごとに打つコマンド。
 
     待っているステップが承認資料（`presentation_path`）と「本番へ反映され得るか」（`metrics.production`）を出していれば、
@@ -589,7 +594,6 @@ def gate_result(inv: Invocation, marker: dict[str, Any], warnings: tuple[str, ..
         routes=presented_routes(marker),
         next=result.command(TOOL, "wait", str(inv.plan_path), "--state-dir", str(inv.state_dir)),
         presentation_path=material,
-        warnings=list(warnings),
     )
 
 
@@ -693,7 +697,7 @@ def advance(
     承認の回答（`reply`）は回答した者と組で受け、送る前に回答の記録（`answer_path`）を書く。回答した者が無ければ
     回答を送らずに invalid で止まる（承認待ちのステップの証跡は、回答した者の分かる回答の記録からだけ書く。#4409）。
     回答コマンドが固定した待ちと提示が今の待ちと提示に合わなければ、回答を記録せずに approval_stale で止まる。
-    同じ回の提示を確かめられない旧い形の目印（`unconfirmed`）には回答を記録せず、ステップを打ち直して資料を出し直す。
+    同じ回の提示を確かめられない旧い形の目印（`unconfirmed`）への回答は、待ちを照らした後、記録も送信もせずに precondition で止まる。
     """
     if _finished(root, inv.key):
         return _stored(inv)
@@ -706,18 +710,16 @@ def advance(
     with durable.session(root, inv.key, url):
         status = durable.status(inv.workflow_id)
         baseline = read_marker(inv.state_dir, inv.run_id)
-        notes: tuple[str, ...] = ()
         if status is None:
             durable.spawn(plan_workflow, inv.workflow_id, _spec(inv))
         elif reply is not None:
             refused = _deliver(inv, baseline, reply)
             if refused is not None:
                 return refused
-            notes = _represented_notes(inv, baseline)
         else:
             baseline = None
         reached, marker = _watch(inv, baseline)
         if reached == GATE:
-            on_gate(gate_result(inv, marker, notes))
+            on_gate(gate_result(inv, marker))
         out = _finish(inv)
     return out

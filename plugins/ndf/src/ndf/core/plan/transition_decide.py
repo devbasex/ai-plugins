@@ -31,8 +31,6 @@ USAGE_LIMIT = "usage_limit"
 # 選択の記録の規則の番号（AI が判断している分岐の一覧。docs/specifications/ndf-rebuild-scripted-flow.md の「洗い出しの一覧」）。
 # 止まったプランの再開点（R03）、衝突で止まったときのマージ（R10）、承認の回答の後のルート（R13）
 RULE_STOPPED, RULE_CONFLICT, RULE_ANSWER = "R03", "R10", "R13"
-# 承認待ちのステップを打ち直して資料を出し直させる回答（プランの on_answer の回答と重ならない語。runner が送る）
-REPRESENT = "ndf:represent"
 
 
 class RunStep(NamedTuple):
@@ -187,12 +185,9 @@ def _after_gate(state: StepState, step: Step) -> Next:
 
 
 def _after_answer(plan: Plan, state: StepState, step: Step, done: Outcome) -> Next:
-    """回答を受けた後。回答が無ければ待ち直し、出し直しの回答ならステップを打ち直し、表に無い回答は止める。"""
+    """回答を受けた後。回答が無ければ待ち直し、表に無い回答は止める。"""
     if done.answer is None:
         return Next.step(AwaitAnswer(step.id, state.gates), state)
-    if done.answer == REPRESENT:
-        # 資料を確かめられない待ちには回答を受けず、ステップを打ち直して資料を出し直す（打ち直しはステップの数に数えない）
-        return Next.step(RunStep(step.id, 0), state)
     if done.answer not in step.on_answer:
         return _finish(state, STOPPED, "invalid", f"ステップ {step.id} の知らない回答: {done.answer}")
     target = step.on_answer[done.answer]

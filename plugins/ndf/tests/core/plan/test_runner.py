@@ -423,6 +423,16 @@ def _an_answer_to_the_same_step_of_an_earlier_run_is_refused():
     assert runner._pin_mismatch(baseline, runner.Reply("approved", "human", "new:merge:1")) is None
 
 
+def _an_unconfirmed_old_wait_is_matched_first_and_never_answered(gated):
+    """PR 4502 r2-1・r2-2: 提示を確かめられない旧い形の待ちは、先に待ちを照らし、合っても回答を記録も送信もせずに止まる。"""
+    baseline = {"step": "merge", "seq": 3, "run": gated.run_id, "shown": {}, runner.UNCONFIRMED: True, "routes": {}}
+    other = runner._deliver(gated, baseline, runner.Reply("rejected", "human", "old:merge:3"))
+    assert other["cause"]["kind"] == "approval_stale"
+    same = runner._deliver(gated, baseline, runner.Reply("rejected", "human", f"{gated.run_id}:merge:3"))
+    assert same["cause"]["kind"] == "precondition" and "--fresh" in same["cause"]["detail"]
+    assert not runner.answer_path(gated.state_dir, "merge").exists()
+
+
 def _next_refuses_an_actor_of_the_wrong_shape(capsys):
     from ndf.core.plan import cli
 
@@ -450,6 +460,10 @@ def _next_refuses_an_actor_of_the_wrong_shape(capsys):
         ),
         scenes.scene(
             _an_answer_to_the_same_step_of_an_earlier_run_is_refused, id="an_answer_to_the_same_step_of_an_earlier_run_is_refused"
+        ),
+        scenes.scene(
+            _an_unconfirmed_old_wait_is_matched_first_and_never_answered,
+            id="an_unconfirmed_old_wait_is_matched_first_and_never_answered",
         ),
         scenes.scene(_next_refuses_an_actor_of_the_wrong_shape, id="next_refuses_an_actor_of_the_wrong_shape"),
     ],

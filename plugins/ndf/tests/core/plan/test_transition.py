@@ -145,15 +145,6 @@ def test_a_gate_with_answers_waits_and_follows_the_answer():
     assert final.choices == (Choice("R13", "human", "ask", "release"),)
 
 
-def test_the_represent_answer_reruns_the_gate_step_and_waits_on_a_new_seq():
-    """r1-1: 資料を確かめられない待ちへの出し直しは、ステップを打ち直して新しい待ちの番号で待つ。ステップの数に数えない。"""
-    plan = _plan({"id": "ask", "on_answer": {"approved": "end"}}, limit=1)
-    outcomes = {"ask": [Outcome("gate"), Outcome("gate")], "answer:ask": [transition_decide.REPRESENT, "approved"]}
-    acts, final = _drive(plan, outcomes)
-    assert acts == [RunStep("ask", 0), AwaitAnswer("ask", 1), RunStep("ask", 0), AwaitAnswer("ask", 2)]
-    assert (final.status, final.count) == ("ok", 1)
-
-
 def test_an_unknown_answer_stops():
     plan = _plan({"id": "ask", "on_answer": {"approved": "end"}})
     _, final = _drive(plan, {"ask": [Outcome("gate")], "answer:ask": ["maybe"]})
