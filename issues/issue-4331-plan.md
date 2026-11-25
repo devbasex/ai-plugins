@@ -110,6 +110,21 @@
 | xdist の worker へ割り当てが渡らない | `pytest_configure` が worker で `UsageError` を上げて止める（詳細設計書の異常系の表）。CI で 6 ジョブの NDF のテストの件数の和が全体の件数と一致することを確かめる |
 | `.github/workflows/pytest.yml` と `.ndf/project.json` を別の変更も触る | 各単位のマージの前に `main` を取り込み、ジョブの数を数え直す |
 
+## 計測の記録
+
+### `ndf project measure` の JUnit の ZIP の取得の増分（マージの前の判定）
+
+JUnit の ZIP を 12 個に増やしても、取得の増分は 7.40 秒で、許容の 10 秒に収まった。そのため、根と NDF の XML を 1 つの成果物にまとめる変更はしない。
+
+測り方は、設計書の「影響と危険」の「マージの前の判定」のとおりである。`gh api repos/devbasex/ai-plugins/actions/artifacts/<成果物の ID>/zip` で ZIP を 1 個ずつ順に取得し、合計の秒を測った。2026-11-25 09:00 ごろ（JST）に、同じ機械で変更前と変更後を交互に 3 回ずつ測った。
+
+| 対象 | 実行 | ZIP の数 | 1 回目 | 2 回目 | 3 回目 | 中央値 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 変更前 | `main` の run [45495601478](https://github.com/devbasex/ai-plugins/actions/runs/45495601478) | 6 | 6.49 秒 | 6.26 秒 | 6.48 秒 | 6.48 秒 |
+| 変更後 | この Pull Request の run [45513913391](https://github.com/devbasex/ai-plugins/actions/runs/45513913391) | 12 | 14.04 秒 | 13.88 秒 | 13.86 秒 | 13.88 秒 |
+
+run 45513913391 では、ジョブ `pytest (4/6)` が必須のチェックの登録の検査で落ちた。ただし、根と NDF の成果物は 12 個ともそろっているので、ZIP の取得の秒は測れる。
+
 ## 切り戻し手順
 - 単位ごとに revert できる。データの移行は無い
 - 単位 1 を戻すと、NDF のテストは項目数で分ける今の形に戻る。単位 2・3 のスクリプトは NDF の XML が無い回を「記録が無い」として扱う（`run` は 1、`trend` は無効な集計）
