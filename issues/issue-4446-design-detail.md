@@ -620,12 +620,16 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
+| `step_context` | `progress/run.py` | 新設 | `step_context(v: View, s: stages.StageDef, prog: StepProgress) -> dict[str, Any]` | スプリントの文脈の上へ、同じ工程の済んだステップの出力（`s.outputs` にあるキーだけ）をステップの並び順に重ねる（`stages.compose_context`） |
+| `_run_step` | `progress/run.py` | 変更 | 今のまま | `invoke.resolve_inputs` へ `v.context()` の代わりに `step_context` を渡す |
 | `LaneRow.requests` | `progress/lane/types.py` | 新設 | `requests(self) -> list[str]`（プロパティ） | 行の入力 `kind: release` のリクエストの ID の並び。ほかの行は空 |
 | `release_commands` | `progress/lane/launch.py` | 新設 | `release_commands(plan: str, lane: str, lane_table: str, row: LaneRow) -> list[dict[str, Any]]` | `ndf progress new <名前> --mode release-bump --release-requests ... --parent <レーン>`・`lanes row start`・`progress next` を組む |
 | `start_commands` | `progress/lane/launch.py` | 変更 | 今のまま | `kind: release` の行を `release_commands` へ渡す |
 | `_workflow_args` | `progress/lane/launch.py` | 変更 | 今のまま | `kind: release` の行は `--release-requests` の並びを返す |
 | `_sprint_new`・`_cmd_new` | `progress/command.py` | 変更 | 今のまま | `--release-requests` を受け、モード `release-bump` は `--issues` 無しで作る。ほかのモードに `--release-requests` を渡したら断る |
 | `_request_fields`・`_plan_request` | `progress/gate/release.py` | 変更 | 今のまま | モードが `release-bump` なら種類 `bump-release` で、版上げの PR・`outputs.material` のパス・まとめたリクエストを書く |
+
+同じ工程の前のステップの出力は、`step_context` が文脈に重ね、環境変数 `NDF_STAGE_INPUT` で後ろのステップへ渡る。argv に差し込みは持たせない。`ndf document-rebuild gate`・`ndf release-steps present`・`bump-record` の打つコマンドは、引数に無い `pr`・`material` を `invoke.stage_inputs` で読む。引数があれば引数を優先する。`material` などの足りない文脈のキーは、スプリントの文脈のスキーマに足す。テストは `tests/progress/test_run.py` に足し、観点は「後ろのステップが前のステップの出力を受ける」「定義の `outputs` に無いキーは渡らない」「後のステップの同じキーが前の値を上書きする」である。
 
 リクエストを書くのは、`asking.py` ではなく `gate/release.py` の `_plan_request` である。そのため、設計書の「設計の結果」の触るファイルに `gate/release.py` を足した。
 

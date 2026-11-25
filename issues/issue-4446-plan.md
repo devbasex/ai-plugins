@@ -62,6 +62,7 @@ GitHub の PR の更新には、前の版を条件にした書き換えが無い
 | `reading_skip` の `in_lane` | `run.Env.in_lane` の口から引き、`gate.lane_env` が `lane.sprint_row` で埋める | `ndf.progress.run`（子 P1b）はレーン（子 P3）を読まない |
 | `reread` の 1 ステップの実行 | `answering._step_once` に置き、読み手役のステップだけを同じプロセスで流す。`review_again` で続きがあれば作業を起動して `wait` を返す | `run.py` の安全網（1000 行）。続きの設計のレビューを前景で抱えないため |
 | ステップを未了に戻す記録 | 事象 `step_recorded` の `status: reset`。戻したステップは新しい保存先（`<ステップ>-g<世代>-r<回>`）で打つ | 同じ保存先でプランを打つと、終わった回の結果が返る |
+| 版上げの工程で、前のステップの出力を後ろのステップへ渡す方法（Task 11） | ステップの出力を工程の文脈へ重ねる（`step_context`）。後ろのステップは `NDF_STAGE_INPUT` から読む。argv の差し込みは作らない（conductor の判断、2026-11-25） | 後ろのステップが前のステップの出力を読む形が、ほかの工程でも 1 つの仕組みで済む |
 | 結果の規約の `outputs` | `questions`・`material`・`check`・`review_again` を閉じた語彙に足した | gate のサブコマンドが返す `outputs` が語彙に無く、CLI が結果を `stopped`（invalid）に差し替えていた（単位「gate のサブコマンド」の取りこぼし） |
 
 ## タスク分解

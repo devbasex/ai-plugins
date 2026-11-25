@@ -294,6 +294,8 @@ graph TD
 | `release` | プランを流す（今の `release`） | 承認の後に、今の release の worker が証跡を書いて出す |
 | `bump-record` | コマンドを打つ | `ndf lanes release <計画> <まとめたリクエスト>... --result <released か rejected> --version <バージョン> --release <リリース記録の PR>` と、リクエストごとの `ndf lanes answered <sprint_state> --answer <released か rejected>` を打つ。今オーガナイザーが打っている 2 つである |
 
+**後ろのステップは、同じ工程の前のステップの出力を、工程の文脈に重ねて受け取る。** 工程を進める仕組みは、ステップを呼ぶたびに、スプリントの文脈の上へ、同じ工程で済んだステップの出力（工程の定義の `outputs` にあるキーだけ）を並び順に重ね、そこから工程の入力（`inputs` と `optional_inputs`）を取る。ステップへは今と同じく環境変数 `NDF_STAGE_INPUT` で渡る。工程「版上げ」は `pr` と `material` を `optional_inputs` と `outputs` の両方に持ち、`release-reading`・`bump-present`・`bump-record` は引数に無い値をここから読む。表の `<pr>`・`<出力の material>` は、この値を指す。`release-reading` が返す `material` は `bump-assemble` の `material` の上に重なるので、`bump-present` は直した後の資料を受ける。
+
 承認ゲートで変更を求められたら、`release` を流さずに `bump-record` で `--result rejected` を書いて終える。直しは各レーンのスプリントで行い、次のまとめたリリースで出し直す。今の「承認されなければ `--result rejected`」と同じである。
 
 **まとめたリリースに入るレーンのスプリントは、リリース承認ゲートの前の `release-reading` を打たずに済ませる。** オーガナイザーが問うのは版上げの PR の質問だけで、レーンの PR の質問は出ないためである。レーンの PR は、版上げの承認資料の「含む PR」の一覧に並ぶので、別に読ませなくても承認する人に示される。工程を進める仕組みは、種類 `reading` で `gate: release` のステップを、次の表の順 1 から順に判定して扱う。版上げのスプリントも一時レーンの行で動くので、モードを先に見る。スプリントが計画のレーンの行にあるかは、`ndf.progress.gate.asking.release_request_of` が計画とレーンを返すかで決める。
