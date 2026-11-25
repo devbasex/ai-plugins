@@ -167,7 +167,7 @@ plugins/ndf/
 | `_declare_ci_tests` | `write.py` | 変更（責務） | 変えない | 指紋を `doc["analysis"]["written"]` に書く（`analysis` が `written` だけになっても同じ場所） |
 | `File` | `write.py` | 変更 | 前: `File(path, name, old, new)`。後: `File(path, name, old, new, summary: Optional[str] = None)` | `summary` があれば、表示は差分の代わりにこの 1 行を出す |
 | `plan` | `write.py` | 変更（責務） | 変えない | 解析の記録を組み、書くファイルを `.ndf/analysis/.gitignore`（無いときだけ）→ 途中の印を付けた前の記録 → `.ndf/project.json`（今の中身と違うときだけ）→ 解析の記録の順で返す |
-| `_write` | `cli.py` | 変更（責務） | 変えない | `--dry-run` でなければ、既存の設定と記録を読む前に錠を取り、最後のファイルを書くまで持つ。書く前に、記録が git に無視されることを確かめてからファイルを書く（手順は表の下） |
+| `_write` | `cli.py` | 変更（責務） | 変えない | 作業場所を `check.repo_dirs` で 1 回解決する（`--dry-run` でも行う）。`--dry-run` でなければ、既存の設定と記録を読む前に錠を取り、最後のファイルを書くまで持つ。書く前に、記録が git に無視されることを確かめてからファイルを書く（手順は表の下） |
 | `_print_write` | `cli.py` | 変更（責務） | 変えない | 動詞は今と同じく `dry_run` で選ぶ（`書く（--dry-run）` か `書いた`）。`File.summary` があるファイルは `<動詞>: <パス>（<summary>）` の 1 行だけを出し、差分を出さない。`.ndf/project.json` は今と同じく差分を出す |
 
 - `merge_project`
@@ -181,8 +181,8 @@ plugins/ndf/
   - 表示の要約: `.gitignore`・途中の印・記録の `File` は `summary` を持つ。記録は `解析の記録。入力 <N> 件`、途中の印は `書き出しの途中の印`、`.gitignore` は `git から外す設定` とする。`.ndf/project.json` の `File` は `summary` を持たない
   - 副作用: 無し（書くのは `cli._write`）
 - `_write` の手順
-  - `--dry-run` のとき: 今と同じく錠を取らず、何も書かず、git も打たずに予定を表示する
-  - 最初に `check.repo_dirs` を 1 回だけ呼び、作業場所・メインディレクトリ・git の共通ディレクトリを `RepoDirs` として求める。錠のパスと `_inputs` は、この解決済みの値を使い、git の共通ディレクトリを求め直さない。今の書き出しも `check.repo_dirs` を 1 回呼んでいるので、git の起動の回数は今と同じである
+  - 最初に `check.repo_dirs` を 1 回だけ呼び、作業場所・メインディレクトリ・git の共通ディレクトリを `RepoDirs` として求める。これは `--dry-run` でも行う。worktree から打ったときに、メインディレクトリの設定と記録から予定を作るためである。錠のパスと `_inputs` は、この解決済みの値を使い、git の共通ディレクトリを求め直さない。今の書き出しも `check.repo_dirs` を 1 回呼んでいるので、git の起動の回数は今と同じである
+  - `--dry-run` のとき: 上の解決の後、錠を取らずに `_inputs(args, dirs)` と `write.plan` で予定を作り、表示して終える。省くのは、錠・`git ls-files`・`git check-ignore`・ファイルの書き込みの 4 つである
   - `--dry-run` でないとき: 設定と記録を読む前に `FileLock(strategy_write.lock_file(dirs.common), timeout=limits.seconds("branch-strategy.write-lock"))` を取る。`_inputs(args, dirs)`（既存の設定と記録の読み込み）・`write.plan`・下の書き込みは、すべてこの錠の中で行う。錠は最後のファイルを書いた後か、途中で止めたときに放す
   - `Plan.files` が空のとき: `git ls-files` と `git check-ignore` を打たず、終了コード 0 で終わる（`check.repo_dirs` の git と錠は、計画を作る前なので、この回も通る）
   - `Plan.files` に `.ndf/analysis/` の下のファイル（`.gitignore`・途中の印・記録のどれか。`.gitignore` だけでもよい）があるとき:
