@@ -145,8 +145,8 @@ plugins/ndf/
 | `File` | `write.py` | 変更 | 前: `File(path, name, old, new)`。後: `File(path, name, old, new, summary: Optional[str] = None)` | `summary` があれば、表示は差分の代わりにこの 1 行を出す |
 | `plan` | `write.py` | 変更（責務） | 変えない | 解析の記録を組み、書くファイルを `.ndf/measured/.gitignore`（無いときだけ）→ 途中の印を付けた前の記録 → `.ndf/project.json`（今の中身と違うときだけ）→ 解析の記録の順で返す。解析の記録は、時刻を除いて前と違うとき、`.ndf/project.json` を書くとき、前の記録に途中の印が残っているときのどれかで入る |
 | `_workflow_entry` | `measure_ci.py` | 変更（責務） | 変えない | `jobs` に定義から数えたジョブ数（`static_jobs`）だけを書く。実行を選べたときは、その実行のジョブ数を `run_jobs` に書く（今は両者の大きい方を `jobs` に書く） |
-| `_write` | `cli.py` | 変更（責務） | 変えない | `--dry-run` なら今と同じく何も書かず、`git check-ignore` も打たずに予定を表示する。実際に書くときで、`Plan.files` に `.ndf/measured/` の下のファイル（記録か途中の印）があるときだけ、`.gitignore` を書いた後（既にあれば書かずに）、メインディレクトリで `git check-ignore -q <記録のパス>` を 1 回打つ。0 以外なら残りを書かずに止める。`Plan.files` が空なら git を起動しない |
-| `_print_write` | `cli.py` | 変更（責務） | 変えない | `File.summary` があるファイルは `書いた: <パス>（<summary>）` の 1 行だけを出し、差分を出さない。`.ndf/project.json` は今と同じく差分を出す |
+| `_write` | `cli.py` | 変更（責務） | 変えない | `--dry-run` なら今と同じく何も書かず、`git check-ignore` も打たずに予定を表示する。実際に書くときで、`Plan.files` に `.ndf/measured/` の下のファイル（`.gitignore`・途中の印・記録のどれか。`.gitignore` だけでもよい）があるときだけ、次を行う。(1) `Plan.files` に `.gitignore` があれば、書く前にメインディレクトリで `git ls-files -- .ndf/measured` を 1 回打ち、出力が空でなければ何も書かずに止める。空なら `.gitignore` を書く。(2) `git check-ignore -q <記録のパス>` を 1 回打ち、0 以外なら残りを書かずに止める。(3) `Plan.files` の残りを順番に書く。`Plan.files` が空なら git を起動せず、終了コード 0 で終わる |
+| `_print_write` | `cli.py` | 変更（責務） | 変えない | 動詞は今と同じく `dry_run` で選ぶ（`書く（--dry-run）` か `書いた`）。`File.summary` があるファイルは `<動詞>: <パス>（<summary>）` の 1 行だけを出し、差分を出さない。`.ndf/project.json` は今と同じく差分を出す |
 
 - `merge_project`
   - 事前条件と順序: 項目ごとに、`resolve_item` が決めた新しい値を先に `measured.split` で計測値と設定の値に分け、設定の値だけを `merge_item` へ渡す。取り分けた計測値は返りの計測値に集める。そのため `merge_item` が比べる新しい値に計測値は残らず、人が直した項目で `mismatch` が毎回出ることは無い
@@ -164,6 +164,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `plan` | 書き出す設定が形に合わない | 解析器の誤り | `contracts.schema_errors(doc, check.SCHEMA)` | 止める（`WriteError`） | `書き出す設定が形に合わない（解析器の誤り）`、終了コード 1（今と同じ） | 何も書かない |
 | `plan` | 書き出す解析の記録が形に合わない | 解析器の誤り | `contracts.schema_errors(record, measured.SCHEMA)` | 止める（`WriteError`） | `書き出す解析の記録が形に合わない（解析器の誤り）`、終了コード 1 | 何も書かない |
+| `cli._write` | `.ndf/measured/` の下に追跡されたファイルがある（`.gitignore` を作る前） | 利用者が追跡していた `.gitignore` を作業ツリーで消した・記録を追跡した（I4） | `git ls-files -- .ndf/measured` の出力が空でない | 止める。`.gitignore`・途中の印・`.ndf/project.json`・記録は書かない | `.ndf/measured/ の下のファイルが git に追跡されている: <パス>`、終了コード 1 | 利用者が追跡をやめるか、消した `.gitignore` を戻してから打ち直す |
 | `cli._write` | 記録のパスが git に無視されない | 既存の `.ndf/measured/.gitignore` が空・独自のパターン・記録が追跡済み（I4） | `git check-ignore -q` の終了コードが 0 以外 | 止める。途中の印・`.ndf/project.json`・記録は書かない。既にあった `.gitignore` は変えない | `.ndf/measured/project.json が git に無視されない。.ndf/measured/.gitignore の中身か、記録が追跡されていないかを確かめる`、終了コード 1 | 利用者が除外の設定を直してから打ち直す |
 | `cli._write` | 途中のファイルを書けない（`.ndf/measured/.gitignore` を書けないとき（I4）を含む） | 権限・ディスク | `signals.replace_text` の `OSError` | 止める。`.gitignore` か途中の印を書けなければ、後の `.ndf/project.json` と解析の記録は書かない | `設定を書けない: <誤り>`、終了コード 1（今と同じ） | 書けた分は残る。途中の印の後で止まれば印が残り、前の記録が無ければ記録が無いので、次の判定が「古い」と読む（設計文書の「処理の流れ」の表、I7） |
 
@@ -203,4 +204,4 @@ plugins/ndf/
 | `judge` | 記録の入力のファイルのハッシュと今の HEAD が同じなら「新しい」、入力かブランチが変われば「古い」 | worktree から打つとメインディレクトリの記録を読む | 記録が無い・壊れている・不正な UTF-8・途中の印・旧い形の設定（どれも終了コード 3） |
 | `load` | 新しい形の設定を返す | 旧い形の設定を、取り除かずに返す | 取り除いても形に合わない（終了コード 2） |
 | `plan`（`cli.main(["write", …])` から） | 2 回目の書き出しで `.ndf/project.json` を書かない。記録を差分でなく要約の 1 行で表示する | 移行の 1 回目（`wall_seconds: null` を含む・前の記録が無く移行前の実行時間を引き継ぐ）・記録の無い clone・`ci` が不明 | 前の記録の入力が今と同じで、`.ndf/project.json` か記録の書き込みを失敗させる（次の判定が「古い」）・記録のパスが無視されない（終了コード 1 で既存のファイルが前のまま） |
-| `plan`・`_write`（`cli.main(["write", …])` から） | 同じ測定の結果で回答だけを変えた書き出しの後、記録に途中の印が無い。印の残った記録から同じ内容で打ち直すと、印が消える | 記録の無い clone で `--dry-run` を打つと、`.ndf/measured/` の下に何も作られない。書くものが無い書き出しでは `git check-ignore` を呼ばない（呼び出しを差し替えて回数を数える） | — |
+| `plan`・`_write`（`cli.main(["write", …])` から） | 同じ測定の結果で回答だけを変えた書き出しの後、記録に途中の印が無い。印の残った記録から同じ内容で打ち直すと、印が消える | 記録の無い clone で `--dry-run` を打つと、`.ndf/measured/` の下に何も作られず、表示の動詞が `書く（--dry-run）` になる。書くものが無い書き出しでは git を呼ばず終了コード 0（記録が追跡済みでも）。書くファイルが `.gitignore` だけのとき、`git ls-files` と `git check-ignore` を 1 回ずつ呼ぶ（呼び出しを差し替えて回数を数える） | 追跡していた `.gitignore` を作業ツリーで消した状態で、`.gitignore` を作らずに終了コード 1 |
