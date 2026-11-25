@@ -1,4 +1,7 @@
-"""SessionStart が statusline を整える（`ndf statusline ensure` と同じ処理）。Claude Code だけで、排他を持たれていれば待たない。"""
+"""SessionStart が Claude Code の settings.json を整える。会話の記録を残す日数の下限（#4515）と statusline（`ndf statusline ensure`）。
+
+Claude Code だけで、排他を持たれていれば待たない。
+"""
 
 from __future__ import annotations
 
@@ -6,6 +9,7 @@ import json
 import os
 from pathlib import Path
 
+from ndf.domains.hooks import tables
 from ndf.domains.relay import signals
 from ndf.domains.statusline import settings
 
@@ -48,3 +52,28 @@ def test_session_start_skips_without_waiting_when_the_lock_is_held(tmp_path):
         assert got
         assert call_entry("claude", "SessionStart", sample("claude", "SessionStart", tmp_path)) is None
     assert not _settings().exists()
+
+
+def _days() -> int:
+    return int(tables.policy_value("hook.transcript-retention", "count"))
+
+
+def _start_with(tmp_path, data: dict) -> dict:
+    _settings().parent.mkdir(parents=True, exist_ok=True)
+    _settings().write_text(json.dumps(data), encoding="utf-8")
+    call_entry("claude", "SessionStart", sample("claude", "SessionStart", tmp_path))
+    return json.loads(_settings().read_text(encoding="utf-8"))
+
+
+def test_claude_session_start_sets_retention_when_unset(tmp_path):
+    call_entry("claude", "SessionStart", sample("claude", "SessionStart", tmp_path))
+    assert json.loads(_settings().read_text(encoding="utf-8"))[settings.RETENTION_KEY] == _days()
+
+
+def test_claude_session_start_raises_a_short_retention_and_keeps_other_keys(tmp_path):
+    after = _start_with(tmp_path, {settings.RETENTION_KEY: _days() - 1, "model": "opus"})
+    assert after[settings.RETENTION_KEY] == _days() and after["model"] == "opus"
+
+
+def test_claude_session_start_keeps_a_longer_retention(tmp_path):
+    assert _start_with(tmp_path, {settings.RETENTION_KEY: _days() + 1})[settings.RETENTION_KEY] == _days() + 1

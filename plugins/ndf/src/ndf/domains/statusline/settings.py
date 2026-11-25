@@ -8,6 +8,8 @@
 - 表示の本体は `~/.claude/ndf-statusline.sh`。`statusLine.command` が `~` 起点で指すため `CLAUDE_CONFIG_DIR` に依らない
 - 排他は旧い `flock` コマンドと同じ種類の錠（`fcntl.flock`）で取り、旧い書き手と互いに待つ
 - JSON は Python で読み書きし、`jq` を使わない
+- 同じ `settings.json` の `cleanupPeriodDays` を下限まで引き上げる処理（`keep_retention`。旧い `ensure-retention.sh` の移し先、#4515）も
+  ここに置き、SessionStart が statusline と同じ排他の中で打つ
 """
 
 from __future__ import annotations
@@ -29,6 +31,8 @@ REFRESH_INTERVAL = 5
 BACKUP_NAME = ".ndf-statusline-backup.json"
 LOCK_NAME = ".ndf-statusline.lock"
 SETTINGS_NAME = "settings.json"
+# 会話の記録を残す日数のキー（SessionStart が下限まで引き上げる。#4515）
+RETENTION_KEY = "cleanupPeriodDays"
 BODY_NAME = "ndf-statusline.sh"
 # 表示の本体（同じパッケージに置く。旧い scripts/statusline.sh と同じバイト列）
 BODY_SOURCE = Path(__file__).resolve().parent / "statusline.sh"
@@ -167,6 +171,17 @@ def _keep_refresh(p: Paths, data: dict[str, Any], line: dict[str, Any]) -> None:
     """NDF の表示を使う設定へ、再描画の間隔が無ければ足す。利用者が決めた値は残す。"""
     if "refreshInterval" not in line:
         _write(p.settings, {**data, "statusLine": {**line, "refreshInterval": REFRESH_INTERVAL}})
+
+
+def keep_retention(p: Paths, days: int) -> bool:
+    """`cleanupPeriodDays` が `days` 未満（未設定・数でないを含む）なら `days` にする。書いたら真。"""
+    data = _read_settings(p)
+    current = data.get(RETENTION_KEY)
+    if isinstance(current, int) and not isinstance(current, bool) and current >= days:
+        return False
+    data[RETENTION_KEY] = days
+    _write(p.settings, data)
+    return True
 
 
 def run_locked(p: Paths, run: Callable[[Paths], Switched], wait: float) -> Switched:
