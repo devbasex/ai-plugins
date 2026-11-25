@@ -57,14 +57,14 @@ plugins/ndf/
 | `split` | `measured.py` | 新設 | `split(key: str, value: Any) -> tuple[Any, dict[str, Any]]` | 設定の項目の値から計測値を取り除いた値と、取り除いた計測値（`{"file_counts": …}` か `{"wall_seconds": …}` か `{}`）を返す |
 | `strip_legacy` | `measured.py` | 新設 | `strip_legacy(doc: dict[str, Any]) -> tuple[dict[str, Any], list[str]]` | 設定から旧い形のキー（`analysis` の `written` 以外のすべて・`test_duration`・`split` が取り除く計測値）を取り除いたコピーと、見つけたキーの名前の並びを返す |
 | `load` | `measured.py` | 新設 | `load(main: Path) -> tuple[Optional[dict[str, Any]], Optional[str]]` | メインディレクトリの解析の記録を読み、(記録, None) か (None, 読めない理由) を返す |
-| `carry_walls` | `measured.py` | 新設 | `carry_walls(walls: dict[str, float], paths: list[str], previous: Optional[dict[str, Any]]) -> tuple[dict[str, float], list[dict[str, Any]]]` | 新しい測定で実行時間の無いワークフローに、前の記録の同じパスの実行時間を引き継ぐ |
+| `carry_walls` | `measured.py` | 新設 | `carry_walls(walls: dict[str, float], paths: list[str], previous: Optional[dict[str, Any]]) -> tuple[dict[str, float], list[dict[str, Any]]]` | 新しい測定で実行時間の無いワークフローに、前の記録の同じパスの実行時間を引き継ぐ。`paths` は、新しい測定の結果の `ci.workflows[].path` の並びである（設定の `ci` ではない。設定の `ci` を人が直していても、測定の結果のワークフローで引き継ぐ） |
 
 - `split`
   - 事前条件: `value` は項目の新しい値か前の値（不明 `{"unknown": …}` を含む）
   - 事後条件: `key` が `languages` なら、配列の各行から `files` を除き、`{"file_counts": {名前: 数}}` を返す。`ci` なら `workflows` の各行から `wall_seconds` を除き、`{"wall_seconds": {パス: 秒}}` を返す。ほかのキー・不明・形の違う値は `(value, {})` をそのまま返す（取り除く物が無い）。入力を書き換えない
   - 副作用: 無し
 - `strip_legacy`
-  - 事後条件: 返したコピーには、`analysis` の `written` 以外のすべてのキー・`test_duration`・`languages[].files`・`ci.workflows[].wall_seconds` が無い。見つけたキーの名前は `analysis.at`・`test_duration`・`languages[].files`・`ci.workflows[].wall_seconds` の形で、見つけた順に並ぶ。入力を書き換えない
+  - 事後条件: 返したコピーには、`analysis` の `written` 以外のすべてのキー・`test_duration`・`languages[].files`・`ci.workflows[].wall_seconds` が無い。見つけたキーの名前は、取り除いたキーごとに 1 つ並ぶ。`analysis` のキーは 1 つずつ（例 `analysis.analyzer`・`analysis.at`・`analysis.inputs`・`analysis.branches`）、`test_duration` は 1 つ、`languages[].files` と `ci.workflows[].wall_seconds` は行がいくつあっても 1 つずつである。並びは設定のキーの順である。入力を書き換えない
   - 副作用: 無し
 - `load`
   - 事後条件: 記録が在り、JSON の object で、`SCHEMA`（`internal/project-measured`）に合えば (記録, None)
@@ -132,6 +132,7 @@ plugins/ndf/
 | `plan` | `write.py` | 変更（責務） | 変えない | 解析の記録を組み、書くファイルを `.ndf/measured/.gitignore`（無いときだけ）→ `.ndf/project.json`（今の中身と違うときだけ）→ 解析の記録（時刻を除いて前と違うときだけ）の順で返す |
 
 - `merge_project`
+  - 事前条件と順序: 項目ごとに、`resolve_item` が決めた新しい値を先に `measured.split` で計測値と設定の値に分け、設定の値だけを `merge_item` へ渡す。取り分けた計測値は返りの計測値に集める。そのため `merge_item` が比べる新しい値に計測値は残らず、人が直した項目で `mismatch` が毎回出ることは無い
   - 事後条件: 返す設定に旧い形のキーが無い（I1）。`written` の指紋は計測値を取り除いた値から作る（I2）。返す計測値は、`languages` と `ci` の新しい値を `measured.split` で取り分けたもの（人が直した項目か解析が書いた項目かに依らない。人が直した項目でも測った値の計測値を記録へ書く）
 - `plan`
   - 事後条件: 返す `Plan.files` のうち追跡するファイルは `.ndf/project.json` だけ（受け入れ条件 5）。解析の記録は `write.plan` が組み、形は `{"version", "analyzer", "at", "inputs", "branches", "file_counts"?, "wall_seconds"?}` で、`wall_seconds` は `measured.carry_walls` を通した後の値。`.gitignore` の `File` は `files.path(main, "project-measured-ignore")` が無いときだけ入り、中身は `measured.IGNORE_TEXT`
@@ -143,7 +144,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `plan` | 書き出す設定が形に合わない | 解析器の誤り | `contracts.schema_errors(doc, check.SCHEMA)` | 止める（`WriteError`） | `書き出す設定が形に合わない（解析器の誤り）`、終了コード 1（今と同じ） | 何も書かない |
 | `plan` | 書き出す解析の記録が形に合わない | 解析器の誤り | `contracts.schema_errors(record, measured.SCHEMA)` | 止める（`WriteError`） | `書き出す解析の記録が形に合わない（解析器の誤り）`、終了コード 1 | 何も書かない |
-| `cli._write` | 途中のファイルを書けない | 権限・ディスク | `signals.replace_text` の `OSError` | 止める | `設定を書けない: <誤り>`、終了コード 1（今と同じ） | 書けた分は残る。次の判定が「古い」と読む（設計文書の「処理の流れ」の表） |
+| `cli._write` | 途中のファイルを書けない（`.ndf/measured/.gitignore` を書けないとき（I4）を含む） | 権限・ディスク | `signals.replace_text` の `OSError` | 止める。`.gitignore` を書けなければ、後の `.ndf/project.json` と解析の記録は書かない | `設定を書けない: <誤り>`、終了コード 1（今と同じ） | 書けた分は残る。次の判定が「古い」と読む（設計文書の「処理の流れ」の表） |
 
 ### 処理の手順
 
