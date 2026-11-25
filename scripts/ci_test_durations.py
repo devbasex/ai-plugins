@@ -264,6 +264,25 @@ def parse_junit(data: bytes) -> list[tuple[str, float]]:
     return [(f"{c.get('classname', '')}::{c.get('name', '')}", _case_seconds(c.get("time"))) for c in root.iter("testcase")]
 
 
+def read_part(d: Path, kind: str, index: int) -> Part:
+    """成果物 1 つのディレクトリから、試行の番号と XML の項目を読んで Part にする。"""
+    part = Part(kind, index)
+    try:
+        part.attempt = int((d / ATTEMPT_FILE.format(index=part.index)).read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        part.attempt = None
+    xmls = sorted(d.rglob("*.xml"))
+    if not xmls:
+        part.error = "JUnit XML が無い"
+    for xml in xmls:
+        try:
+            part.cases.extend(parse_junit(xml.read_bytes()))
+        except (OSError, ET.ParseError, ValueError) as e:
+            part.error = f"{xml.name} を読めない（{e}）"
+            break
+    return part
+
+
 def read_parts(xml_dir: Path) -> dict[tuple[str, int], Part]:
     """成果物の名前ごとのディレクトリから、`(根か NDF, ジョブの番号)` ごとに XML の項目と試行の番号を読む。"""
     parts: dict[tuple[str, int], Part] = {}
@@ -273,20 +292,7 @@ def read_parts(xml_dir: Path) -> dict[tuple[str, int], Part]:
         m = ARTIFACT_NAME.match(d.name)
         if not m:
             continue
-        part = Part("ndf" if m[1] else "root", int(m[2]))
-        try:
-            part.attempt = int((d / ATTEMPT_FILE.format(index=part.index)).read_text(encoding="utf-8").strip())
-        except (OSError, ValueError):
-            part.attempt = None
-        xmls = sorted(d.rglob("*.xml"))
-        if not xmls:
-            part.error = "JUnit XML が無い"
-        for xml in xmls:
-            try:
-                part.cases.extend(parse_junit(xml.read_bytes()))
-            except (OSError, ET.ParseError, ValueError) as e:
-                part.error = f"{xml.name} を読めない（{e}）"
-                break
+        part = read_part(d, "ndf" if m[1] else "root", int(m[2]))
         parts[(part.kind, part.index)] = part
     return parts
 
