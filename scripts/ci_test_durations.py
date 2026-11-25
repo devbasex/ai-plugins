@@ -411,26 +411,33 @@ def past_totals(gh: Gh, run_number: int, need: int, now: datetime) -> Search:
         search.stop = reason
         return search
 
+    def fetch(path: str, key: str, label: str) -> tuple[list, str | None]:
+        """一覧を 1 ページ取る。取れなければ止める理由を返す。"""
+        nonlocal pages
+        if pages >= PAGE_LIMIT:
+            return [], "page_limit"
+        pages += 1
+        try:
+            return gh.get(path, "pages")[key], None
+        except GhTimeUp:
+            return [], "time_limit"
+        except (GhError, KeyError, TypeError) as e:
+            search.unreadable.append(f"{label}: {e}")
+            return [], "list_error"
+
     while True:
         if len(search.totals) >= need:
             return stop("enough")
         if not candidates:
             if runs_done:
                 return stop("exhausted")
-            if pages >= PAGE_LIMIT:
-                return stop("page_limit")
-            pages += 1
             runs_page += 1
             path = (
                 f"{REPO_API}/actions/workflows/{WORKFLOW}/runs?branch=main&event=push&status=success&per_page={PER_PAGE}&page={runs_page}"
             )
-            try:
-                runs = gh.get(path, "pages")["workflow_runs"]
-            except GhTimeUp:
-                return stop("time_limit")
-            except (GhError, KeyError, TypeError) as e:
-                search.unreadable.append(f"実行の一覧: {e}")
-                return stop("list_error")
+            runs, reason = fetch(path, "workflow_runs", "実行の一覧")
+            if reason:
+                return stop(reason)
             runs_done = len(runs) < PER_PAGE
             candidates.extend(sorted((r for r in runs if r["run_number"] < run_number), key=lambda r: -r["run_number"]))
             continue
@@ -441,18 +448,11 @@ def past_totals(gh: Gh, run_number: int, need: int, now: datetime) -> Search:
         art = arts.get(run["id"])
         if art is None:
             if not arts_done and (oldest is None or oldest > created):
-                if pages >= PAGE_LIMIT:
-                    return stop("page_limit")
-                pages += 1
                 arts_page += 1
                 path = f"{REPO_API}/actions/artifacts?name={TOTAL_ARTIFACT}&per_page={PER_PAGE}&page={arts_page}"
-                try:
-                    page = gh.get(path, "pages")["artifacts"]
-                except GhTimeUp:
-                    return stop("time_limit")
-                except (GhError, KeyError, TypeError) as e:
-                    search.unreadable.append(f"成果物の一覧: {e}")
-                    return stop("list_error")
+                page, reason = fetch(path, "artifacts", "成果物の一覧")
+                if reason:
+                    return stop(reason)
                 arts_done = len(page) < PER_PAGE
                 for a in page:
                     if not a.get("expired") and (a.get("workflow_run") or {}).get("id") is not None:
