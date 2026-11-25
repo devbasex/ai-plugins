@@ -113,6 +113,8 @@ flowchart LR
 | MVV・指示書の運用のセクションの改訂 | `standard` | 方針の変更。設計承認ゲートで見る |
 | 設計書だけを作る課題 | 実装する課題と同じスプリントに入れる。単独で出すなら `light` | 設計書はリポジトリの文書で、実装は後の判定で決まる |
 | バグ修正の大小 | 大小で決めない。4 条件で `hotfix` か `standard` | 小さくても契約を変える直しがある |
+| リリースした PR を戻す。差分は `git revert` で作った打ち消しだけ | `hotfix` | 4 条件の b と c は、戻した先（戻す PR の前の版）の契約と方針と比べる。戻す PR が契約を壊していても、戻せば元の契約に戻るので満たす。課題 1 つ・revert 1 回で戻せることも満たす |
+| 戻すときに競合を解く・ほかの直しを混ぜる | `standard` | 打ち消し以外の変更が入り、戻した先の版と同じになると言えない |
 | 1 つの課題・PR が、性質の違う部分を含む（例: リンクの直しと検査の追加） | 部分ごとに上から問い、得たモードのうち高いもの（`hotfix` は `standard` として比べる） | 分けられるなら課題を分ける |
 
 ### スプリントのモード
@@ -131,7 +133,7 @@ flowchart LR
 
 | 工程 | `hotfix` | 理由 |
 | --- | --- | --- |
-| 要求と受け入れ条件 | `requirements-design`（要求仕様のファイルは書かず、課題の本文に再現の手順と受け入れ条件を書く）と判定 | 判定の入力と、リリース後テストの合否の基準が要る |
+| 要求と受け入れ条件 | `requirements-design`（要求仕様のファイルは書かず、課題の本文に再現の手順と受け入れ条件を書く）と判定。判定が要求仕様を書くモード（`standard` など）になったら、改訂 2 はこの工程を終えたものとして引き継がず、判定を飛ばして要求仕様だけを書き直してから終える（決定 4） | 判定の入力と、リリース後テストの合否の基準が要る |
 | 作業場所の用意 | `worktree` | — |
 | 設計・詳細設計・ドキュメント再構成・ドキュメントレビュー・計画 | — | 4 条件が契約・方針を変えないことを保証する |
 | 実装 | `tdd-cycle`（再現するテストを先に書く）。単位は課題 1 つで、PR はベースブランチ宛て | 条件 a |
@@ -142,7 +144,7 @@ flowchart LR
 | 確定仕様化 | — | 仕様を変えない |
 | クリーンアップ | `merged`（工程表ではデプロイの前に並ぶ。PR がまだマージされていなければ、ブランチと PR を残して片付けを後へ回す。#4409 の決まり） | — |
 | デプロイ | `release`。リリース承認ゲートは人が見る | 決定 5 |
-| リリース後テスト | `release-verification` | 直した不具合が配った版で直ったかを確かめる |
+| リリース後テスト | `release-verification`。合格・不合格・保留のどれでも記録を残してリリース後レビューへ進む（不合格はリリース後レビューで「戻す」に分ける）。同 Skill の「振り返りを通らない変更では最終工程」の規則は「後に振り返りもリリース後レビューも無い変更」に直す | 直した不具合が配った版で直ったかを確かめる |
 | **リリース後レビュー**（加える行） | `cross-review`（直さずに読むラウンド） | 受け入れ条件 1-2 |
 | 振り返り | — | 進め方を変える材料が出ない |
 | 棚卸し | `backlog-refinement` | 全モードの終わり |
@@ -151,8 +153,21 @@ flowchart LR
 
 | モード | 変えること |
 | --- | --- |
-| `operation` | 工程「実装」は、リポジトリのファイルの値は直接編集し、外部の系は今のとおり [operation-run.md](../plugins/ndf/skills/development-workflow/references/operation-run.md) の実行で変える。値だけの変更でテストがあれば完了判定で走らせる。ほかの行は変えない |
-| `light` | 行は変えない。基準が広がり、1 つの Skill に閉じる手順書の直しが入る。その差分は今の「振る舞いの確認」を通る。振る舞いの確認は、変えた手順書（Skill の本文・`references/`・エージェント定義）ごとに `claude -p` を 1 回起動し、変わった指示どおりに動くかを確かめて PR のコメントに残す工程である（SKILL.md の「差分の中身で選ぶ工程」）。加えてコードレビューと完了判定の照らし直し（決定 9）を通る |
+| `operation` | 工程「実装」は、リポジトリのファイルの値は直接編集し、外部の系は今のとおり [operation-run.md](../plugins/ndf/skills/development-workflow/references/operation-run.md) の実行で変える。**外部へ適用する前に、dry-run（IaC では実行計画）の結果を `operation` の問いで照らし、リソースや構成の変更が出たら適用せずに工程を失敗で返す**（完了判定より前に外部が変わるため。詳細設計の「`operation` の外部への適用の前の確かめ」）。値だけの変更でテストがあれば完了判定で走らせる。ほかの行は変えない |
+| `light` | 行は変えない。基準が広がり、1 つの Skill に閉じる手順書の直しが入る。加えてコードレビューと完了判定の照らし直し（決定 9）を通る。振る舞いの確認の扱いは下の「`light` の手順書の直しと振る舞いの確認」 |
+
+#### `light` の手順書の直しと振る舞いの確認
+
+`light` の手順書の直しでは、指示を変えたファイルにだけ振る舞いの確認を起動する。振る舞いの確認は、変えた手順書（Skill の本文・`references/`・エージェント定義）ごとに `claude -p` を 1 回起動し、変わった指示どおりに動くかを確かめて PR のコメントに残す工程である（SKILL.md の「差分の中身で選ぶ工程」）。
+
+| 案 | 起動の回数 | 確かめられること | 採否 |
+| --- | --- | --- | --- |
+| 変えた手順書のファイルごとに必ず起動する（今の規則をそのまま当てる） | 手順書のファイル 1 つにつき 1 回。今は直接マージしていて 0 回だった直しにも掛かる | 記述の更新・説明の補足・誤記・リンクのように、指示の結果を変えない差分でも起動する。この起動は何も確かめない | 採らない |
+| 指示（手順・条件・判断の規則）を変えたファイルにだけ起動する | 指示を変えたファイル 1 つにつき 1 回 | 1 つの Skill の中で手順や条件を変えた直しは、変えた指示どおりに動くかを確かめる | **採る** |
+
+- どのファイルが「指示を変えた」かは、完了判定の照らし直しで差分を判定するときに、手順書のファイルごとに書き出す。振る舞いの確認はその一覧のファイルだけを起動する。一覧が空なら起動しない
+- 増える回数の上限: 直接マージ 52 本（11/19 以降の 7 日）のうち `light` は 13 本である。手順書のファイルを変えたのはその一部なので、採った案で増える起動はこの 13 本の中の、指示を変えたファイルの数を超えない。13 本のうち何本が手順書の指示を変えたかは、判定し直しでは数えていない
+- `light` 以外のモードの振る舞いの確認は今のまま変えない
 | `legacy-refactor` | 工程「要求と受け入れ条件」の行を先頭に足す。判定はこの工程の中で行うので、どのモードの工程表もこの行から始まる必要がある。このモードの要求仕様は今と同じく書かず、工程は判定の作業だけを通す |
 | すべて | 工程「要求と受け入れ条件」の最後に判定の作業 `mode` を通す |
 
@@ -231,7 +246,7 @@ flowchart LR
 ### 決定 2: `--mode` で判定を飛ばす経路を無くすため、判定を工程「要求と受け入れ条件」の出力にし、`--mode` を仮の工程表の値にする
 
 - **質問**: 判定をどの時点・どの入口で行えば、対話・レーン・開発ループのどの経路でも飛ばされないか
-- **選んだ案**: 工程「要求と受け入れ条件」の最後に判定の作業 `mode`（worker の作業の種類）を置き、出力 `mode_judgment`（課題ごとのモードと根拠・参考の値）を書く。`ndf progress new` の `--mode` は省略でき、仮の工程表（省けば `standard`）を作るだけになる。工程「要求と受け入れ条件」の出力に `mode_judgment` が無ければ、後の工程へ進まない。判定の入力は要求で、要求を書く工程の終わりが情報のそろう最も早い時点である
+- **選んだ案**: 工程「要求と受け入れ条件」の最後に判定の作業 `mode`（worker の作業の種類）を置き、出力 `mode_judgment`（課題ごとのモードと根拠・参考の値）を書く。`ndf progress new` の `--mode` は省略でき、仮の工程表（省けば `standard`）を作るだけになる。工程「要求と受け入れ条件」の出力に `mode_judgment` が無ければ、後の工程へ進まない。判定の入力は要求で、要求を書く工程の終わりが情報のそろう最も早い時点である。`ndf progress new --requirements` で要求の出力を先に渡す経路も、判定は判定の作業で作ったものだけを受ける。出所（判定したステートマシンと `mode_decided` の事象）を照合できない判定は断り、判定の無い出力からは判定の作業だけを流す（詳細設計の「処理の手順」）。JSON にモードを書くだけで判定を飛ばす経路を作らないためである
 - 採らなかった案: 工程表に行「モード判定」を足す（行の値が増え、SKILL.md の「モード判定は工程表の行を持たない」に反する）
 - 採らなかった案: `ndf progress new` の前に判定のコマンドを打たせる（入口ごとに同じ手順を足すことになり、飛ばす経路が再び生まれる）
 - **代償**: 仮の工程表と判定後の工程表が違うと、`ndf progress show` の行が途中で変わる
@@ -248,7 +263,11 @@ flowchart LR
 ### 決定 4: 判定が参考の値と違っても工程を流せるよう、工程表を定義の改訂 2 として作り直す
 
 - **質問**: 判定したモードが仮の工程表と違うとき、同じステートマシンを作り直すか、別のステートマシンを作るか
-- **選んだ案**: 判定したモードの定義（`contracts/workflow/modes/<モード>.json`）で改訂を 1 つ足し、両方にある行の状態（終えた工程・`--disable` で外した工程）を引き継ぐ。事象 `mode_decided` に判定の記録を残す。同じなら改訂を足さず、事象だけを残す。DB は既に改訂ごとの定義と事象を持つ（`DEFINITIONS` の `rev`、`model.fold`）
+- **選んだ案**: 判定したモードの定義（`contracts/workflow/modes/<モード>.json`）で改訂を 1 つ足し、両方にある行の状態（終えた工程・`--disable` で外した工程）を引き継ぐ。事象 `mode_decided` に判定の記録を残す。同じなら改訂を足さず、事象だけを残す。DB は既に改訂ごとの定義と事象を持つ（`DEFINITIONS` の `rev`、`model.fold`）。引き継ぐものは詳細設計の「改訂で引き継ぐもの」に決めてある。要点は次の 4 つである
+  - 文脈は新しい定義の `context` に写す（`mode` は判定の値、`mode_judgment` を足す）。引き継いだ工程の出力も新しい改訂の事象として写す。今の `View.context()` は最新の改訂の出力しか読まないため
+  - 新しい工程表に初めて現れる工程は、新しく作るときと同じ `stages.resolve_enabled`（`.ndf/project.json` の `workflow.stages` と承認ゲートの検査）で有効か無効かを決める
+  - 要求仕様を書かないモード（`hotfix`・`legacy-refactor`）から書くモードへ変わったときは、工程「要求と受け入れ条件」を引き継がず、要求仕様を書いてから終える
+  - この変更の前に作ったステートマシンには判定を求めない（定義の印 `judgment` の有無で見分ける）。版上げの前に要求の工程を過ぎたスプリントは、そのまま同じ所から続く（Value 3）
 - 採らなかった案: 中止して別の名前のステートマシンを作り直す（レーンの行・引継ぎ文書が持つ ID が変わり、レーンの終わりの判定を直す範囲が広がる）
 - **代償**: 既存のコードは最新の改訂だけを読む前提で書かれている。前の改訂の事象を読む箇所が無いかを、実装で 1 つずつ確かめる手間がかかる
 - 根拠: Value 8「履歴を残す事実は追記だけで持ち、今の値は最新の記録から引く」（MVV バージョン 11）
@@ -264,7 +283,7 @@ flowchart LR
 ### 決定 6: リリースの後に見つかった指摘を確実に扱うため、工程「リリース後レビュー」を足し、指摘を「戻す・直す・見送る」に分ける
 
 - **質問**: リリースの後のレビューの指摘を、同じスプリントで直すか、別のスプリントへ渡すか
-- **選んだ案**: `hotfix` の工程「リリース後テスト」の後に工程「リリース後レビュー」を置く。マージ済みの PR の差分を `cross-review` の相手役（レビューだけをする別の AI。既定は codex と kiro）が 1 回読み（1 ラウンド）、修正担当（指摘を直すか見送るかを決める claude）はコミットせずに指摘を分けて PR のコメントに残す。「戻す」（受け入れ条件を満たさない・コントラクトを壊した・元より重い不具合を生んだ）は課題を起票して revert を `hotfix` のスプリントで出す。「直す」は 4 条件を満たせば `hotfix` のスプリント、満たさなければ起票して計画で判定する。「見送る」は理由をコメントに残す
+- **選んだ案**: `hotfix` の工程「リリース後テスト」の後に工程「リリース後レビュー」を置く。マージ済みの PR の差分を `cross-review` の相手役（レビューだけをする別の AI。既定は codex と kiro）が 1 回読み（1 ラウンド）、修正担当（指摘を直すか見送るかを決める claude）はコミットせずに指摘を分けて PR のコメントに残す。「戻す」（受け入れ条件を満たさない・コントラクトを壊した・元より重い不具合を生んだ）は課題を起票して revert を出す。revert のモードも判定の基準で決める。対象の PR を `git revert` するだけの差分は `hotfix` になる（境界事例の「戻す」の行）。戻すときに競合を解く・ほかの直しを混ぜる差分は `standard` で出す。「直す」は 4 条件を満たせば `hotfix` のスプリント、満たさなければ起票して計画で判定する。「見送る」は理由をコメントに残す
 - 採らなかった案: 指摘の直しを同じスプリントの続きの PR で出す（1 つのスプリントに本番へ届くマージが 2 回でき、リリース承認ゲートが 2 回になる）
 - **代償**: 直しと戻しは新しいスプリントになり、課題が 1 つ増える
 - 作り方: 自前で作る・標準に倣う
@@ -274,7 +293,7 @@ flowchart LR
 ### 決定 7: 開発計画でスプリントを切れるよう、計画の行に課題ごとの判定を載せ、モードで行を分ける
 
 - **質問**: 開発計画の行にモードを必須で持たせるか、任意のままにするか
-- **選んだ案**: 並列の計画のスプリントの行（`kind: sprint`）に `mode` と `basis` を必須で持たせ、`ndf lanes init` は欠けた行・`hotfix` で課題が 2 つ以上の行・`documentation` とほかが混ざった行を断る。実行計画のモードの列は同じ基準で埋め、モードの違う課題を同じ行に入れない。開発ループの `ndf loop sprint --mode --basis` は計画の時点の判定として残す。どの計画の値も、スプリントでは `--mode` の参考の値として渡る。レーンの起動の `DEFAULT_MODE` は消す。手順は `mode-criteria.md` を指し、基準を写さない
+- **選んだ案**: 並列の計画のスプリントの行（`kind: sprint`）に、課題ごとの判定 `judgments`（課題・モード・根拠）を必須で持たせる。行のモードは計画を書く者が書かず、コードが決定 3 と同じ規則（`judgment.sprint_mode`）で決める。行を作る入口（`ndf lanes init`・`lanes start`・`lanes lane add`・`lanes row add`・`lanes row carry`）はすべて同じ検査（`judgment.row_errors`）を通し、判定の欠けた行・課題の組が食い違う行・`documentation` とほかが混ざった行を断る。`row add` には引数 `--judgments` を足し、`row carry` は元の行の判定を写す。判定はレーンの事象に残るので、再起動の後も同じ値で起動する。`hotfix` の課題 2 つの行は断らず `standard` で流れ、`lanes init` が警告を出す。実行計画のモードの列は同じ基準で埋め、モードの違う課題を同じ行に入れない。開発ループの `ndf loop sprint --mode --basis` は計画の時点の判定として残す。どの計画の値も、スプリントでは `--mode` の参考の値として渡る。レーンの起動の `DEFAULT_MODE` は消す。手順は `mode-criteria.md` を指し、基準を写さない
 - 採らなかった案: 計画の行のモードを任意のままにする（レーンの 54 本で `--mode` が 0 本だった今の姿が残る）
 - **代償**: 計画を作る手順に、課題ごとの判定の手間が増える
 - 根拠: Value 3 / Value 11（MVV バージョン 11）
@@ -291,7 +310,9 @@ flowchart LR
 ### 決定 9: 判定を下げて工程を省く誤りを止めるため、完了判定で差分からモードを照らし直す
 
 - **質問**: 判定が要求の時点の予測で外れたとき、どこで捕まえるか。パスの規則で機械に判定させるか
-- **選んだ案**: 工程「完了判定」は、差分を `mode-criteria.md` の基準で判定し直し、スプリントのモードより高ければ工程を失敗で返す。続きは今の「途中でモードが変わったとき」と「文書を省いたときの工程」の流し直しと同じで、新しいステートマシンで上げたモードから流す。`hotfix`・`operation`・`light` は設計承認ゲートを持たないので、ここが人の承認の前の最後の機械の確かめになる
+- **選んだ案**: 工程「完了判定」は、差分を `mode-criteria.md` の基準で判定し直し、スプリントのモードより高ければ工程を失敗で返す。続きは今の「途中でモードが変わったとき」と「文書を省いたときの工程」の流し直しと同じで、新しいステートマシンで上げたモードから流す。`hotfix`・`operation`・`light` は設計承認ゲートを持たないので、ここが人の承認の前の最後の機械の確かめになる。次の 2 つを足す（詳細設計の「完了判定の照らし直しと流し直し」）
+  - **`hotfix` は高さで比べない。** 混ざったときに `hotfix` を `standard` の高さで数えるのはスプリントのモードを決めるときだけである。完了判定では、`hotfix` のスプリントの差分が `hotfix` と判定されなければ、高さによらず失敗で返し、差分のモードで流し直す。4 条件を外れた即時修正が、設計承認とマージ前のレビューを省いたままリリースへ進まないようにするためである
+  - **上げたモードを次の判定の下限にする。** 完了判定は差分のモードと根拠を出力 `mode_check` に書く。流し直しは `--carry` で元のステートマシンを渡し、`mode_check` を新しい判定の下限（`mode_judgment.floor`）として写す。要求が同じでも次の判定が低いモードへ戻らない。作業場所とブランチは元のものを使い続け、元の変更を消さない
 - 採らなかった案: パスの規則（`contracts/` を触れば `standard` など）だけで判定させる（値の変更と処理の変更は同じファイルの中で混ざり、パスでは分けられない）
 - **代償**: 完了判定で外れると、そこまでの工程を新しいステートマシンでやり直す。決定 4 のように同じステートマシンを作り直さないのは、完了判定の時点では低いモードで終えた工程（省いた設計・マージした実装の単位）があり、終えた工程は同じステートマシンで開き直せないためである。要求の工程の終わりには、そうした工程がまだ無い
 - 根拠: Value 13 / Value 1（MVV バージョン 11）
@@ -304,8 +325,8 @@ flowchart LR
 | プロジェクトごとの違い | 受けない。基準はリポジトリの種類によらない |
 | 当たるモード | すべて。`hotfix` が加わり、`light`・`operation` の範囲が広がる |
 | 書きかけの文書・同じファイルを触る変更 | #4516（`.ndf/project.json` の統計の分離）は `.ndf/project.json` と `ndf project` を触り、この設計のファイルと重ならない |
-| 壊れうる箇所 | 判定を下げすぎて設計承認ゲートを通らない変更が出る（決定 9 の完了判定と、リリース承認ゲートで人がモードの根拠を読むことで受ける）。並列の計画の既存の設定ファイルは `mode` を持たないので `ndf lanes init` で断られる（コミットしない入力なので作り直す。後方互換は求めない） |
-| 改訂 2 の読み手 | `progress show`・`next`・`finish`・`gathered`・レーンの状態は最新の改訂を読む。改訂 1 の事象を読む箇所が無いかを実装で確かめる |
+| 壊れうる箇所 | 判定を下げすぎて設計承認ゲートを通らない変更が出る（決定 9 の完了判定と、リリース承認ゲートで人がモードの根拠を読むことで受ける）。並列の計画の既存の設定ファイルは `judgments` を持たないので `ndf lanes init` で断られる（コミットしない入力なので作り直す。後方互換は求めない）。版上げの前に作った実行中のスプリントには判定を求めないので、そのまま続く |
+| 改訂 2 の読み手 | `progress show`・`next`・`finish`・`gathered`・レーンの状態は最新の改訂を読む。改訂 2 の直後に読む文脈と出力は詳細設計の「改訂で引き継ぐもの」で改訂 2 へ写す。ほかに改訂 1 の事象を読む箇所が無いかを実装で確かめる |
 
 ### 代表のリポジトリでの振る舞い
 
@@ -324,9 +345,10 @@ flowchart LR
 
 | 用語 | 反映 | 意味 |
 | --- | --- | --- |
-| 即時修正（`hotfix`） | 意味の変更 | 4 条件を満たす不具合を、実装・完了判定・リリースを先に通し、リリースの後にレビューするモード。今は「起票せずその場のプランで直すこと」 |
+| 即時修正（`hotfix`） | 意味の変更 | 4 条件を満たす不具合を、実装・完了判定・リリースを先に通し、リリースの後にレビューするモード。今は「起票せずその場のプランで直すこと」。そのためのテンプレート `contracts/templates/fix.json`（`immediate_fix`）は消す |
+| 作業中の直し | 追加 | 作業の途中で見つけた、今の作業を妨げる不具合のうち、4 条件を満たし今の作業場所の中で直せるものを、今の変更に含めて直すこと（今の worker の規則 7 の振る舞い）。同じ PR で完了判定とレビューを通る。今の作業を妨げない不具合は起票して `hotfix` のスプリントにする（詳細設計の「作業中に見つけた不具合」） |
 | リリース後レビュー | 追加 | `hotfix` のリリースの後に、マージ済みの差分を相手役が読み、指摘を戻す・直す・見送るに分ける工程 |
-| 計画の時点の判定 | 追加 | 開発計画の行に載せる課題ごとのモード。スプリントでは参考の値になる |
+| 計画の時点の判定 | 追加 | 開発計画の行に載せる課題ごとのモードと根拠（`judgments`）。行のモードはここからコードが決め、スプリントでは参考の値になる |
 | 判定の記録（`mode_judgment`） | 追加 | 工程「要求と受け入れ条件」の出力。課題ごとのモードと根拠・スプリントのモード・参考の値 |
 | conductor・オーガナイザー・worker | 既存 | conductor は利用者と対話して工程を進める AI のセッション。オーガナイザーは並列の計画のレーンを起動・監視するセッション。worker は 1 つの作業だけを行うサブエージェント |
 | MVV・MVV 判定 | 既存 | MVV はこのリポジトリの判断の基準（`.ndf/mvv.md`）。MVV 判定は、利用者が任せた進め方で、AI が MVV に照らして承認ゲートを通してよいかを決めること |
@@ -338,19 +360,26 @@ flowchart LR
 | --- | --- | --- |
 | 1 | `hotfix` の定義から作ったステートマシンが「リリース後レビュー」を「リリース後テスト」の後に持ち、設計の行を持たない | 定義から行を消す・順を入れ替える |
 | 1 | リリース後レビューの出力が戻す・直す・見送るの 3 つの分け方だけを受ける | 知らない分け方を通す |
+| 1 | リリース後レビューが、マージの方式ごとにベースブランチへ取り込まれたコミットを比較先にする | PR の head を読む |
+| 1 | 打ち直したリリース後レビューが、印のある起票済みの課題を使い、同じ指摘を再び起票しない | 印を探さずに起票する |
 | 4 | `--mode light` で作ったスプリントで、要求の工程の出力に判定が無ければ `next` が後の工程へ進まない | 判定の確かめを外す |
-| 4 | 判定が `standard` なら改訂 2 が足され、`show` が `standard` の行を出し、終えた要求の工程は終えたまま | 改訂を足さない・状態を引き継がない |
+| 4 | `--mode light` で作ったスプリントで判定が `standard` なら改訂 2 が足され、直後の `next` が読む文脈の `mode` が `standard` で `mode_judgment` を持ち、`show` が `standard` の行を出し、終えた要求の工程は終えたまま | 改訂を足さない・状態や出力を引き継がない |
+| 4 | `--mode hotfix` で作ったスプリントで判定が `standard` なら、改訂 2 の要求の工程は未着手に戻る | 要求の工程を引き継ぐ |
+| 4 | 改訂 2 に初めて現れる工程を `.ndf/project.json` で無効にしてあれば無効になる。承認ゲートを持つ工程を無効にしてあれば判定を断る | 有効状態を決めずに作る |
 | 4 | 判定が参考と同じなら改訂は 1 のまま、事象 `mode_decided` だけが足される | 同じでも改訂を足す |
-| 5 | レーンの起動が、行の `mode` を `--mode` に渡し、`mode` が無い行を組まない | `standard` を補う |
-| 6 | 課題のモードの組ごとに、スプリントのモードが表のとおりになる（`hotfix` 2 件は `standard`、`documentation` の混ざりは断る） | 高い方の比べ方を逆にする |
-| 7 | `ndf lanes init` が `mode` の無い行・`hotfix` で課題 2 つの行を断る | スキーマの必須を外す |
+| 4 | 印 `judgment` の無い定義（版上げの前のスプリント）は、判定が無くても後の工程が流れる | 印を見ずに断る |
+| 4 | 出所の無い判定を `--requirements` で渡すと断る | 出所を確かめない |
+| 5 | レーンの起動が、行の判定から決めたモードを `--mode` に渡し、判定が無い行を組まない | `standard` を補う |
+| 6 | 課題のモードの組ごとに、スプリントのモードが表のとおりになる（`hotfix` 2 件は `standard`、`documentation` の混ざりは断る、下限があれば下限より下げない） | 高い方の比べ方を逆にする・下限を無視する |
+| 6 | 完了判定の照らし直しが、`hotfix` のスプリントで差分が `standard` なら失敗にする | 高さだけで比べる |
+| 7 | 行を作る入口（`lanes init`・`lane add`・`row add`・`row carry`）が、判定の無い行と `documentation` の混ざった行を断る | どれかの入口で検査を外す |
 | 8 | `.md` の文言は照合しない。参照切れは `ndf check` が見る | — |
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4517 | 実装する | — | `plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/mode-criteria.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/loop.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/out-of-scope/SKILL.md`、`plugins/ndf/contracts/workflow/modes/hotfix.json`（新設）、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/workflow/stages/post-release-review.json`（新設）、`plugins/ndf/contracts/workflow/stages/requirements.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/judgment.py`（新設）、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/tests/progress/test_judgment.py`（新設）、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/progress/test_lane_launch.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_post_release.py`（新設） |
+| #4517 | 実装する | — | `plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/mode-criteria.md`、`plugins/ndf/skills/development-workflow/references/workflow-modes.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/conductor-entrypoints.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/development-workflow/references/loop.md`、`plugins/ndf/skills/development-workflow/references/operation-run.md`、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/out-of-scope/SKILL.md`、`plugins/ndf/skills/quality-gates/SKILL.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/agents/worker.md`、`plugins/ndf/contracts/templates/fix.json`（削除）、`plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/contracts/workflow/modes/hotfix.json`（新設）、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/workflow/stages/post-release-review.json`（新設）、`plugins/ndf/contracts/workflow/stages/requirements.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/judgment.py`（新設）、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/tests/progress/test_judgment.py`（新設）、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/progress/test_lane_launch.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_post_release.py`（新設） |
 
 ファイルの役割・関数の責務・異常系は詳細設計（[issue-4517-design-detail.md](./issue-4517-design-detail.md)）にある。
 
