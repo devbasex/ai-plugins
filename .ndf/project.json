@@ -5,18 +5,15 @@
     {
       "name": "python",
       "frameworks": [],
-      "files": 885,
       "version": "3.11"
     },
     {
       "name": "shell",
-      "frameworks": [],
-      "files": 20
+      "frameworks": []
     },
     {
       "name": "javascript",
-      "frameworks": [],
-      "files": 8
+      "frameworks": []
     }
   ],
   "test": {
@@ -211,67 +208,7 @@
       }
     ]
   },
-  "test_duration": {
-    "measured": [
-      {
-        "seconds": 1548.0,
-        "source": "ci-steps",
-        "detail": "run 41193796288（.github/workflows/pytest.yml）のテストの step 4 個の合計"
-      }
-    ]
-  },
   "ci": {
-    "provider": "github-actions",
-    "workflows": [
-      {
-        "path": ".github/workflows/glossary.yml",
-        "jobs": 1,
-        "wall_seconds": 9.0
-      },
-      {
-        "path": ".github/workflows/lint.yml",
-        "jobs": 1,
-        "wall_seconds": 19.0
-      },
-      {
-        "path": ".github/workflows/pr-base-guard.yml",
-        "jobs": 1,
-        "wall_seconds": 10.0
-      },
-      {
-        "path": ".github/workflows/pytest.yml",
-        "jobs": 4,
-        "wall_seconds": 922.0
-      },
-      {
-        "path": ".github/workflows/runtime-plugin-authenticated-smoke.yml",
-        "jobs": 1
-      },
-      {
-        "path": ".github/workflows/runtime-plugin-smoke-latest.yml",
-        "jobs": 1
-      },
-      {
-        "path": ".github/workflows/runtime-plugin-smoke.yml",
-        "jobs": 5,
-        "wall_seconds": 73.0
-      },
-      {
-        "path": ".github/workflows/runtime-plugin-validate.yml",
-        "jobs": 10,
-        "wall_seconds": 113.0
-      },
-      {
-        "path": ".github/workflows/script-structure.yml",
-        "jobs": 1,
-        "wall_seconds": 26.0
-      },
-      {
-        "path": "dynamic/pages/pages-build-deployment",
-        "jobs": 3,
-        "wall_seconds": 27.0
-      }
-    ],
     "required_checks": [
       "doc-line-limit-check",
       "glossary-check",
@@ -583,35 +520,8 @@
     }
   },
   "analysis": {
-    "analyzer": 3,
-    "at": "2026-11-19T01:44:55+00:00",
-    "inputs": {
-      ".github/workflows/glossary.yml": "ccd259630ed43349ad18af575ee09db90cc6b000",
-      ".github/workflows/lint.yml": "e9252096978ad8eae57870d2bc884bbc377affe1",
-      ".github/workflows/ndf-release-reusable.yml": "3cbc70c09b1aa93c6bf1856463d5dfb5d1ad63e5",
-      ".github/workflows/pr-base-guard.yml": "72e96973c9c8652a3ee54d5722da92d258246403",
-      ".github/workflows/pytest.yml": "92b9c8f7cdd95da491aeba78cac8d5f927da7780",
-      ".github/workflows/release-cd.yml": "8411b76be3ded2c08361aa0d565a56fc986635d9",
-      ".github/workflows/runtime-plugin-authenticated-smoke.yml": "25acb945af7ce6c285acc8712681eec71b9b372d",
-      ".github/workflows/runtime-plugin-smoke-latest.yml": "d854a0e7a0eea6cae6ad9b7a28c2f4b0c95cd540",
-      ".github/workflows/runtime-plugin-smoke.yml": "88e34d968b1cbf6cb49b795a6c4e6aceba22a5a7",
-      ".github/workflows/runtime-plugin-validate.yml": "23901348c361a76ff86911e0279b5eeb83e521c3",
-      ".github/workflows/script-structure.yml": "814cd9a2c04bb13d0d579a43ff46c7671e784447",
-      "AGENTS.md": "3d3aba7b9a4bd932fed5348aeb4635145194a516",
-      "CLAUDE.md": "b5046a1d28d35cca5301d13456bb4287dc521360",
-      "KIRO.md": "095823563e64b1968d484b5f4158da4bfdcb73dc",
-      "pyproject.toml": "7a4a0d43ef4c59e193e673607363378c84df66f7",
-      "pytest.ini": "47b2c6e3d414cf343d7f45cda0d08980d28b1a5d"
-    },
-    "branches": {
-      "head": "main",
-      "present": [
-        "develop",
-        "main"
-      ]
-    },
     "written": {
-      "languages": "c28074d97a57de2af3d0b40b7f7be8504efde00232ae6046c884fb66e9b14312",
+      "languages": "7c808a2004eb5724982af572c03821ce64a796569d99da86db7df01c449077c4",
       "services": "53f4e4c15a04bde773f9d0d89be06cd65f1a9248c0603b06b78bfa8a5f8a0771",
       "issues": "c851aa29d3c11745f1307194db49eba6a488771771ea86c21c7237e400e336b8",
       "checks": "c53dec6a7bc99ba9a736a0eb9cf4fdaf9bf0d10ccb7be539658df958ed84c50b",

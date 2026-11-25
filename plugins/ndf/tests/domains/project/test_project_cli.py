@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 
 from ndf import contracts
-from ndf.domains.project import check, cli, measure_ci, write
-from ndf.domains.project.items import unknown
+from ndf.domains.project import analysis_record, check, cli, measure_ci, write
+from ndf.domains.project.items import unknown, value_digest
+from ndf.domains.records import files
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -32,17 +33,35 @@ def repo(tmp_path) -> Path:
     return path
 
 
-def _declare(repo: Path, analysis: dict | None) -> None:
-    data: dict = {"version": 1}
-    if analysis is not None:
-        data["analysis"] = analysis
+def _declare(repo: Path, record: dict | None, doc: dict | None = None) -> dict:
+    """設定（既定は解析の書いた値の無い新しい形）と、`record` があれば解析の記録を書く。書いた設定を返す。"""
+    data = doc if doc is not None else {"version": 1, "analysis": {"written": {}}}
     (repo / ".ndf").mkdir(exist_ok=True)
     (repo / ".ndf" / "project.json").write_text(json.dumps(data), encoding="utf-8")
+    if record is not None:
+        _put_record(repo, record)
+    return data
 
 
-def _fresh_analysis(repo: Path) -> dict:
+def _put_record(repo: Path, record: dict) -> None:
+    path = files.path(repo, "project-analysis")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record), encoding="utf-8")
+
+
+def _record(repo: Path) -> dict:
+    return json.loads(files.path(repo, "project-analysis").read_text(encoding="utf-8"))
+
+
+def _fresh_record(repo: Path, doc: dict | None = None) -> dict:
     g = check.git.Git(repo)
-    return {"analyzer": check.ANALYZER, "at": "2026-11-15T00:00:00+00:00", "inputs": check.inputs(g), "branches": check.branch_state(g)}
+    return {
+        "version": analysis_record.RECORD_VERSION,
+        "analyzer": check.ANALYZER,
+        "inputs": check.inputs(g),
+        "branches": check.branch_state(g),
+        "written_digest": analysis_record.written_digest(doc if doc is not None else {"analysis": {"written": {}}}),
+    }
 
 
 def test_inputs_pick_the_input_table():
@@ -56,7 +75,7 @@ def test_inputs_pick_the_input_table():
 def test_missing_fresh_stale_and_force(repo, capsys, last_result):
     assert cli.main(["check", "--root", str(repo)]) == 3
     assert last_result(capsys.readouterr().out)["items"][0]["kind"] == "missing"
-    _declare(repo, _fresh_analysis(repo))
+    _declare(repo, _fresh_record(repo))
     assert cli.main(["check", "--root", str(repo)]) == 0
     assert last_result(capsys.readouterr().out)["metrics"] == {"inputs": 1}
     assert cli.main(["check", "--force", "--root", str(repo)]) == 3
@@ -71,7 +90,7 @@ def test_missing_fresh_stale_and_force(repo, capsys, last_result):
 def test_old_analyzer_and_hand_written_are_stale(repo, capsys, last_result):
     _declare(repo, None)
     assert cli.main(["check", "--root", str(repo)]) == 3
-    _declare(repo, {**_fresh_analysis(repo), "analyzer": check.ANALYZER - 1})
+    _declare(repo, {**_fresh_record(repo), "analyzer": check.ANALYZER - 1})
     assert cli.main(["check", "--root", str(repo)]) == 3
     assert len(last_result(capsys.readouterr().out)["items"]) == 1
 
@@ -91,11 +110,14 @@ def test_outside_git_cannot_judge(tmp_path, capsys, last_result):
 
 
 def test_check_reads_the_main_directory_from_a_linked_worktree(repo, tmp_path):
-    _declare(repo, _fresh_analysis(repo))
-    _git(repo, "add", ".ndf")
+    _declare(repo, _fresh_record(repo))
+    _git(repo, "add", ".ndf/project.json")
     _git(repo, "commit", "-qm", "decl")
     linked = tmp_path / "linked"
     _git(repo, "worktree", "add", "-q", str(linked), "-b", "side")
+    assert check.judge(linked, False).kind == check.FRESH
+    files.path(repo, "project-analysis").unlink()
+    assert check.judge(linked, False).kind == check.STALE
     (repo / ".ndf" / "project.json").write_text("{", encoding="utf-8")
     assert check.judge(linked, False).kind == check.BROKEN
 
@@ -115,9 +137,11 @@ def test_unknown_subcommand_is_a_usage_error():
     assert exc.value.code == 2
 
 
-def _measure_file(tmp_path: Path, items: dict) -> Path:
+def _measure_file(tmp_path: Path, items: dict, repo: Path | None = None) -> Path:
+    """測定の結果。`repo` を渡せば、入力のファイルのハッシュをそのリポジトリの今の HEAD から入れる。"""
+    inputs = check.inputs(check.git.Git(repo)) if repo is not None else {}
     path = tmp_path / "measure.json"
-    path.write_text(json.dumps({"analyzer": check.ANALYZER, "items": items, "inputs": {}, "notes": ["注記"]}), encoding="utf-8")
+    path.write_text(json.dumps({"analyzer": check.ANALYZER, "items": items, "inputs": inputs, "notes": ["注記"]}), encoding="utf-8")
     return path
 
 
@@ -169,13 +193,16 @@ def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_resul
     )
     answers = _answers(tmp_path, {"test": {"value": {"suites": []}}, "nope": {"value": 1}})
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers), "--dry-run"]) == 0
-    assert not (repo / ".ndf" / "project.json").exists()
+    assert not (repo / ".ndf").exists()
+    out = capsys.readouterr().out
+    assert f"書く（--dry-run）: {files.path(repo, 'project-analysis-ignore')}（git から外す設定）" in out
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
     got = last_result(capsys.readouterr().out)
     kinds = {r["key"]: r["kind"] for r in got["items"] if "key" in r}
     assert kinds["checks"] == "written" and kinds["test"] == "written" and kinds["nope"] == "ignored"
     decl = json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))
-    assert decl["checks"] == {"tools": []} and decl["analysis"]["analyzer"] == check.ANALYZER
+    assert decl["checks"] == {"tools": []} and set(decl["analysis"]) == {"written"}
+    assert _record(repo)["analyzer"] == check.ANALYZER
     decl["checks"] = {"tools": [{"name": "ruff", "config": "ruff.toml"}]}  # 人が書き換えた値
     (repo / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
@@ -198,7 +225,7 @@ def test_merge_item_branches():
     """現状固定（I-008）: 秘密の形・キーが無い・手の値・食い違い・前の write の値の置き換えの各経路。"""
 
     old = {"x": 1}
-    ours = {"languages": write.value_digest(old)}
+    ours = {"languages": value_digest(old)}
     unknown = {"unknown": "測れない"}
     assert write.merge_item("languages", (True, {"t": SECRET}), {"x": 2}, "測った", ours) == (
         {"unknown": write.SECRET_REASON},
@@ -354,3 +381,182 @@ def test_collect_exit_codes_need_a_collect_command():
         contracts.schema_errors({**BASE_SUITE, "collect_command": "pytest --collect-only -q", "collect_exit_codes": [0, 5]}, SUITE_SCHEMA)
         == []
     )
+
+
+# --- 解析の記録（#4516）: 判定は .ndf/analysis/project.json を読み、書き出しは記録を分けて書く ---
+
+
+def _measured(value) -> dict:
+    return {"status": "measured", "value": value}
+
+
+def _write_cli(repo: Path, measure: Path, answers: Path | None = None) -> int:
+    return cli.main(["write", "--root", str(repo), "--measure", str(measure), *(["--answers", str(answers)] if answers else [])])
+
+
+def _settings(repo: Path) -> dict:
+    return json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))
+
+
+def _judged(capsys, last_result, repo: Path) -> tuple[int, list[str]]:
+    code = cli.main(["check", "--root", str(repo)])
+    return code, [i["reason"] for i in last_result(capsys.readouterr().out)["items"]]
+
+
+@pytest.mark.parametrize(
+    "text,head",
+    [
+        (None, "解析の記録が無い"),
+        ("{", "解析の記録が読めない: "),
+        (b'{"version": "\xff"}', "解析の記録が読めない: UTF-8 として読めない"),
+        ("AT", "解析の記録が形に合わない: "),
+    ],
+)
+def test_a_missing_or_unreadable_record_is_stale(repo, capsys, last_result, text, head):
+    _declare(repo, None)
+    path = files.path(repo, "project-analysis")
+    if text is not None:
+        path.parent.mkdir(parents=True)
+    if isinstance(text, bytes):
+        path.write_bytes(text)
+    elif text == "AT":
+        path.write_text(json.dumps({**_fresh_record(repo), "at": "2026-11-15T00:00:00+00:00"}), encoding="utf-8")
+    elif text is not None:
+        path.write_text(text, encoding="utf-8")
+    code, reasons = _judged(capsys, last_result, repo)
+    assert code == 3 and len(reasons) == 1 and reasons[0].startswith(head)
+
+
+def test_a_record_with_the_pending_mark_is_stale(repo, capsys, last_result):
+    _declare(repo, {**_fresh_record(repo), "pending": True})
+    assert _judged(capsys, last_result, repo) == (3, ["前の書き出しが終わっていない"])
+
+
+OLD_ANALYSIS = {"analyzer": 3, "at": "2026-11-19T01:44:55+00:00", "inputs": {}, "branches": {"head": None, "present": []}}
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {
+            "version": 1,
+            "languages": [{"name": "python", "frameworks": [], "files": 3}],
+            "test_duration": {"measured": [{"seconds": 1.0}]},
+            "ci": {"provider": "github-actions", "workflows": [], "required_checks": ["pytest"]},
+            "analysis": {**OLD_ANALYSIS, "written": {}},
+        },
+        {"version": 1, "ci": {"provider": "github-actions", "workflows": []}, "analysis": OLD_ANALYSIS},
+    ],
+)
+def test_an_old_settings_is_stale_not_broken(repo, capsys, last_result, doc):
+    _declare(repo, _fresh_record(repo, doc), doc)
+    code, reasons = _judged(capsys, last_result, repo)
+    assert code == 3 and len(reasons) == 1 and reasons[0].startswith("旧い形の値が設定にある: ")
+
+
+def test_the_second_write_writes_nothing_even_when_the_inputs_change(repo, tmp_path, capsys, last_result):
+    measure = _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)
+    assert _write_cli(repo, measure) == 0
+    lines = capsys.readouterr().out.splitlines()
+    record, decl = _record(repo), _settings(repo)
+    assert f"書いた: {files.path(repo, 'project-analysis')}（解析の記録。入力 1 件）" in lines
+    assert not any("pyproject.toml" in line for line in lines[:-1])  # 記録は差分でなく要約で出す
+    assert set(record) == {"version", "analyzer", "inputs", "branches", "written_digest"}
+    assert record["written_digest"] == analysis_record.written_digest(decl)
+    assert set(decl["analysis"]) == {"written"}
+    assert files.path(repo, "project-analysis-ignore").read_text(encoding="utf-8") == analysis_record.IGNORE_TEXT
+    assert _judged(capsys, last_result, repo)[0] == 0
+    assert _write_cli(repo, measure) == 0
+    assert last_result(capsys.readouterr().out)["metrics"]["written"] == 0
+    (repo / "pyproject.toml").write_text("[project]\nname = 'y'\n", encoding="utf-8")
+    _git(repo, "commit", "-qam", "change")
+    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 0
+    written = last_result(capsys.readouterr().out)["metrics"]["files"]
+    assert str(repo / ".ndf" / "project.json") not in written and str(files.path(repo, "project-analysis")) in written
+    assert _judged(capsys, last_result, repo)[0] == 0
+
+
+def test_restoring_only_the_settings_is_stale_but_hand_values_are_not(repo, tmp_path, capsys, last_result):
+    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 0
+    first = (repo / ".ndf" / "project.json").read_text(encoding="utf-8")
+    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": [{"name": "ruff", "config": "ruff.toml"}]})}, repo)) == 0
+    capsys.readouterr()
+    decl = _settings(repo)
+    decl["services"] = {"unknown": "人が直した"}  # analysis.written は変えない
+    (repo / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
+    assert _judged(capsys, last_result, repo)[0] == 0
+    (repo / ".ndf" / "project.json").write_text(first, encoding="utf-8")
+    assert _judged(capsys, last_result, repo) == (3, ["設定が解析の記録と対応しない"])
+
+
+def test_write_moves_an_old_settings_keeping_who_wrote_each_item(repo, tmp_path, capsys, last_result):
+    languages = [{"name": "python", "frameworks": [], "files": 3}]
+    doc = {
+        "version": 1,
+        "languages": languages,
+        "test_duration": {"measured": [{"seconds": 1.0}]},
+        "ci": {"provider": "github-actions", "workflows": [{"path": "a.yml", "jobs": 1}], "required_checks": ["pytest"]},
+        "analysis": {**OLD_ANALYSIS, "written": {"languages": value_digest(languages)}},
+    }
+    _declare(repo, None, doc)
+    items = {"languages": _measured([{"name": "python", "frameworks": ["django"]}]), "ci": _measured({"required_checks": ["lint"]})}
+    assert _write_cli(repo, _measure_file(tmp_path, items, repo)) == 0
+    rows = {r["key"]: r["kind"] for r in last_result(capsys.readouterr().out)["items"] if "key" in r}
+    decl = _settings(repo)
+    assert decl["languages"] == [{"name": "python", "frameworks": ["django"]}]  # 解析が書いた値は新しい値へ
+    assert decl["ci"] == {"required_checks": ["pytest"]} and rows["ci"] == "mismatch"  # 人の値は旧い形のキーだけを外して残す
+    assert "test_duration" not in decl and set(decl["analysis"]) == {"written"} and "ci" not in decl["analysis"]["written"]
+    assert _judged(capsys, last_result, repo)[0] == 0
+
+
+def test_write_moves_an_old_settings_without_written_and_required_checks(repo, tmp_path, capsys, last_result):
+    _declare(repo, None, {"version": 1, "ci": {"provider": "github-actions", "workflows": []}, "analysis": OLD_ANALYSIS})
+    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": ["lint"]})}, repo)) == 0
+    decl = _settings(repo)
+    assert decl["ci"] == {} and set(decl["analysis"]) == {"written"}
+
+
+def test_write_without_a_record_replaces_only_the_values_it_wrote(repo, tmp_path, capsys, last_result):
+    ours, hand = {"tools": []}, {"unknown": "人が書いた"}
+    doc = {"version": 1, "checks": ours, "services": hand, "analysis": {"written": {"checks": value_digest(ours)}}}
+    _declare(repo, None, doc)
+    items = {"checks": _measured({"tools": [{"name": "ruff", "config": "ruff.toml"}]}), "services": _measured({"containers": []})}
+    assert _write_cli(repo, _measure_file(tmp_path, items, repo)) == 0
+    decl = _settings(repo)
+    assert decl["checks"] == {"tools": [{"name": "ruff", "config": "ruff.toml"}]} and decl["services"] == hand
+
+
+@pytest.mark.parametrize("target", ["project", "record"])
+def test_a_write_that_fails_after_the_pending_mark_leaves_it_stale(repo, tmp_path, monkeypatch, capsys, last_result, target):
+    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 0
+    changed = _measure_file(tmp_path, {"checks": _measured({"tools": [{"name": "ruff", "config": "ruff.toml"}]})}, repo)
+    real = cli.signals.replace_text
+
+    def failing(path, text):
+        final_record = path == files.path(repo, "project-analysis") and '"pending"' not in text
+        if (target == "project" and path.name == "project.json" and path.parent.name == ".ndf") or (target == "record" and final_record):
+            raise OSError("書けない")
+        return real(path, text)
+
+    monkeypatch.setattr(cli.signals, "replace_text", failing)
+    assert _write_cli(repo, changed) == 1
+    monkeypatch.setattr(cli.signals, "replace_text", real)
+    capsys.readouterr()
+    assert _judged(capsys, last_result, repo) == (3, ["前の書き出しが終わっていない"])
+    assert _write_cli(repo, changed) == 0
+    assert "pending" not in _record(repo)
+    capsys.readouterr()
+    assert _judged(capsys, last_result, repo)[0] == 0
+
+
+def test_changing_only_the_answers_leaves_no_pending_mark(repo, tmp_path, capsys, last_result):
+    measure = _measure_file(tmp_path, {"test": {"status": "question", "candidates": {}, "evidence": []}}, repo)
+    assert _write_cli(repo, measure, _answers(tmp_path, {"test": {"value": {"suites": []}}})) == 0
+    record = _record(repo)
+    suites = {"suites": [{"name": "pytest", "runner": "pytest", "command": "pytest"}]}
+    assert _write_cli(repo, measure, _answers(tmp_path, {"test": {"value": suites}})) == 0
+    capsys.readouterr()
+    assert _settings(repo)["test"] == suites
+    assert {k: v for k, v in _record(repo).items() if k != "written_digest"} == {k: v for k, v in record.items() if k != "written_digest"}
+    assert "pending" not in _record(repo)
+    assert _judged(capsys, last_result, repo)[0] == 0
