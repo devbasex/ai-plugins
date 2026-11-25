@@ -48,7 +48,8 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `parallel` | `ndf-parallel` repo:.ndf/parallel | `<id>/` | record | — | 計画のステートマシン（P3） | cleanup | 内部（予告なく変えてよい） |
 | `plan-progress` | `ndf-tmp` repo:.ndf/tmp | `<sprint>/<n>-<plan>-state/progress.jsonl` | record | — | プランの実行（C2） | cleanup | 公開 |
 | `project` | `ndf` repo:.ndf | `project.json` | ndf_settings | 追跡 | 人と解析（M7） | kept | 内部（予告なく変えてよい） |
-| `project-measured` | `measured` state:measured | `<repo>/project.json` | measured | — | 解析とテストの実行（M7） | replaced | 内部（予告なく変えてよい） |
+| `project-analysis` | `analysis` repo:.ndf/analysis | `project.json` | record | — | 解析（M7） | replaced | 内部（予告なく変えてよい） |
+| `project-analysis-ignore` | `analysis` repo:.ndf/analysis | `.gitignore` | record | — | 解析（M7） | kept | 内部（予告なく変えてよい） |
 | `projects` | `ndf` repo:.ndf | `projects.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `reading-checks` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `reading-checks.jsonl` | record | — | 読み手役が確認した記録（#4285） | kept | 内部（予告なく変えてよい） |
 | `relay-auth-held` | `relay-accounts` state:relay/accounts | `held.json` | measured | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |

@@ -1,5 +1,5 @@
 {
-  "summary": "NDF の工程が書くファイル（設定・計測値・実行の記録・文書・受け渡し）の保存先・オーナー・消す時点。工程はこの表に無いパスへ書かない。同じ事実は 1 つの設定だけが持つ（テストのコマンドは project.json の test だけが持ち、supervise.json は持たない）。実行で変わる計測値は追跡する設定へ書き戻さず、状態の保存先へ書く。外の呼び手（サービスのランナー）が読むファイルは列 reader と fields に持ち、入れ替えの後も同じ保存先・同じ形で書く。読み手は知らない項目を受け流す",
+  "summary": "NDF の工程が書くファイル（設定・計測値・実行の記録・文書・受け渡し）の保存先・オーナー・消す時点。工程はこの表に無いパスへ書かない。同じ事実は 1 つの設定だけが持つ（テストのコマンドは project.json の test だけが持ち、supervise.json は持たない）。読み手の無い計測値は保存しない。解析の記録は追跡しない保存先へ書く。外の呼び手（サービスのランナー）が読むファイルは列 reader と fields に持ち、入れ替えの後も同じ保存先・同じ形で書く。読み手は知らない項目を受け流す",
   "owner": "D2（contracts/domains）",
   "shared_names": true,
   "columns": {
@@ -16,7 +16,8 @@
   },
   "rows": [
     {"id": "project", "location": "ndf", "path": "project.json", "kind": "ndf_settings", "tracked": true, "writer": "人と解析（M7）", "ends": "kept", "keys": ["languages", "test", "ci", "services", "issues", "checks", "ndf_policies", "instructions", "materials", "docs", "analysis", "workflow", "branch_strategy", "toolchain", "budget"], "main_keys": ["branch_strategy"]},
-    {"id": "project-measured", "location": "measured", "path": "<repo>/project.json", "kind": "measured", "tracked": false, "writer": "解析とテストの実行（M7）", "ends": "replaced", "keys": ["file_counts", "test_durations"]},
+    {"id": "project-analysis", "location": "analysis", "path": "project.json", "kind": "record", "tracked": false, "writer": "解析（M7）", "ends": "replaced", "keys": ["analyzer", "inputs", "branches", "written_digest", "pending"]},
+    {"id": "project-analysis-ignore", "location": "analysis", "path": ".gitignore", "kind": "record", "tracked": false, "writer": "解析（M7）", "ends": "kept"},
     {"id": "supervise", "location": "ndf", "path": "supervise.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["sync_checks", "format", "queue", "impl_timeout", "impl_stall_seconds", "refactor_budget_minutes"]},
     {"id": "release", "location": "ndf", "path": "release.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["steps", "undistributed", "bump_undistributed", "changelog"]},
     {"id": "worktree", "location": "ndf", "path": "worktree.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["remote", "guard", "follow_branch", "deps", "localenv", "testenv"]},

@@ -31,7 +31,7 @@ from typing import Any, NamedTuple, Optional
 from ndf import cli, contracts
 from ndf.adapters import git
 from ndf.contracts import limits, result
-from ndf.domains.project import check, measure_ci, measure_repo, secret, strategy_cli, write
+from ndf.domains.project import analysis_record, check, measure_ci, measure_repo, secret, strategy_cli, write
 from ndf.domains.project import strategy_write as bw
 from ndf.domains.project.items import STATUSES, obj, seq, unknown
 from ndf.domains.records import jsonfile
@@ -160,14 +160,15 @@ def _read_input(path: Optional[str]) -> dict[str, Any]:
 
 
 def _inputs(args: argparse.Namespace) -> write.Inputs:
-    """書き出しの入力。git の外は `CheckError`、設定が壊れていれば `JsonFileError`、測定の結果か回答が読めなければ `WriteError`。"""
+    """書き出しの入力。git の外は `CheckError`、設定が壊れていれば `JsonFileError`、測定の結果か回答が読めなければ `WriteError`。
+    前の解析の記録は、無い・読めなければ None（書き出しが作り直す）。"""
     repo, main = check.repo_dirs(Path(args.root).resolve())
     existing = check.load(main)
     try:
         measured, answers = _read_input(args.measure), _read_input(args.answers)
     except jsonfile.JsonFileError as exc:
         raise write.WriteError(f"測定の結果か回答を読めない: {exc}") from None
-    return write.Inputs(repo.cwd, main, existing, measured, answers)
+    return write.Inputs(repo.cwd, main, existing, measured, answers, analysis_record.load(main)[0])
 
 
 def _write(args: argparse.Namespace) -> int:
@@ -189,6 +190,9 @@ def _write(args: argparse.Namespace) -> int:
 def _print_write(planned: write.Plan, rows: list[dict[str, Any]], dry_run: bool) -> None:
     verb = "書く（--dry-run）" if dry_run else "書いた"
     for f in planned.files:
+        if f.summary:  # 解析の記録の側のファイルは差分でなく要約の 1 行だけを出す
+            print(f"{verb}: {f.path}（{f.summary}）")
+            continue
         print(f"{verb}: {f.path}")
         print(write.unified(f.name, f.old, f.new))
     if not planned.files:

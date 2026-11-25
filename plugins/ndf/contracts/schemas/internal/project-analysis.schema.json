@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "project-analysis.schema.json",
+  "title": "解析の記録",
+  "description": "解析の書き出し（ndf project write）が書く記録（表 ndf-files の project-analysis。git で追跡しない）。書き手は ndf.domains.project.write、読み手は ndf.domains.project.analysis_record.load と check.judge。解析した時刻と計測値は持たない",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "analyzer", "inputs", "branches", "written_digest"],
+  "properties": {
+    "version": {"type": "integer", "enum": [1], "description": "記録の形のバージョン"},
+    "analyzer": {"type": "integer", "minimum": 1, "description": "解析器のバージョン（check.ANALYZER）。今より古ければ判定は「古い」"},
+    "inputs": {"type": "object", "additionalProperties": {"type": "string"}, "description": "入力のファイルのパス → HEAD の blob の ID（check.inputs）"},
+    "branches": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head", "present"],
+      "description": "ブランチの構成（check.branch_state）",
+      "properties": {
+        "head": {"type": ["string", "null"], "description": "リモートの HEAD の指すブランチ"},
+        "present": {"type": "array", "items": {"type": "string"}, "description": "既知のブランチ名と設定のブランチのうち、リモートにあるもの"}
+      }
+    },
+    "written_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "記録に対応する設定の指紋。書き出しの後の .ndf/project.json の analysis.written の SHA-256（items.value_digest）"},
+    "pending": {"const": true, "description": "書き出しの途中のマーカー。在れば判定は「古い」"}
+  }
+}

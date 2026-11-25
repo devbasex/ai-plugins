@@ -4372,15 +4372,9 @@
       "source": "docs/specifications/ndf-worker-report-prepare.md"
     },
     {
-      "term": "所要の記録",
-      "context": "ndf-ci-test",
-      "meaning": "`.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。設定の解析が書き、プランの作成と test-run.py が読む",
-      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md"
-    },
-    {
       "term": "全体テストの実測",
       "context": "ndf-ci-test",
-      "meaning": "同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631）",
+      "meaning": "同じリポジトリで先に走った全体テストの壁時計の秒。後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631）",
       "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md"
     },
     {

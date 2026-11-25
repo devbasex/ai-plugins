@@ -4,16 +4,16 @@
 設定の値は辞書のまま扱い、キーの順序と知らないキーを保つ。
 
 - 秘密の形を最初に当てる: 書く値・既存の値のどちらかが秘密の形なら、その項目を `{"unknown": "秘密の形"}` にし、値を出さない
-- 置き換えてよいのは、キーが無い項目と、前の `write` の値のまま（`analysis.written` の指紋が一致する）項目だけ
+- 置き換えてよいのは、キーが無い項目と、前の `write` の値のまま（`analysis.written` の指紋が一致する）項目だけ。指紋は旧い形のキーを
+  取り除く前の値と比べ、残す前の値からは旧い形のキーを取り除く（#4516）
+- 解析の記録は `.ndf/analysis/project.json`（git で追跡しない）へ書き、設定の `analysis` は書いた値の指紋（`written`）だけにする
 - 新しい解析で不明でも、前の値があれば残す
 - CI テストの設定（`test.ci.only`）は、テストの suite の `ci_jobs` のファイルがリポジトリにあるときだけ書く。人が書いた値は変えない
 """
 
 from __future__ import annotations
 
-import datetime as dt
 import difflib
-import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -21,9 +21,9 @@ from typing import Any, Callable, NamedTuple, Optional
 
 from ndf import contracts
 from ndf.adapters import git
-from ndf.domains.project import check
+from ndf.domains.project import analysis_record, check
 from ndf.domains.records import files
-from ndf.domains.project.items import MEASURED, QUESTION, obj, seq
+from ndf.domains.project.items import MEASURED, QUESTION, obj, seq, value_digest
 from ndf.domains.project.secret import has_secret, redact
 
 # 解析が測る設定の項目（スキーマの並びの順）。外すのは人が書く項目（検査が読む toolchain・budget を含む）・解析の記録・
@@ -44,22 +44,18 @@ class WriteError(Exception):
 
 
 class File(NamedTuple):
-    """書く 1 つのファイル（保存先・表示の名前・前の中身・新しい中身）。"""
+    """書く 1 つのファイル（保存先・表示の名前・前の中身・新しい中身・表示の要約）。`summary` があれば差分の代わりに要約を出す。"""
 
     path: Path
     name: str
     old: Optional[str]
     new: str
+    summary: Optional[str] = None
 
 
 class Plan(NamedTuple):
     files: list[File]
     rows: list[dict[str, Any]]
-
-
-def value_digest(value: Any) -> str:
-    """値を正規化した JSON の SHA-256（書いた値の指紋）。"""
-    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def is_unknown(value: Any) -> bool:
@@ -103,26 +99,27 @@ def _put_row(key: str, value: Any, origin: str) -> dict[str, Any]:
 
 
 def _replace_ours(key: str, cur: Any, new: Any, origin: str) -> tuple[Any, list[dict[str, Any]]]:
-    """前の `write` の値のままの項目を置き換える。新しい値が不明なら前の値を残す。"""
+    """前の `write` の値のままの項目を置き換える。新しい値が不明なら前の値（旧い形のキーを取り除いた値）を残す。"""
     if is_unknown(new) and not is_unknown(cur):
         return cur, [{"kind": "unknown", "key": key, "reason": new["unknown"], "kept_previous": True}]
     return new, [_put_row(key, new, origin)]
 
 
-def _owned_decision(tag: str, cur: Any, new: Any, written_before: dict[str, Any]) -> Optional[dict[str, Any]]:
-    """前の値 `cur` のオーナーを指紋で見る。前の `write` の値のまま（指紋が一致）なら None（置き換えてよい）。
-    手の値なら、新しい値が不明か同じ値で `kept`、違えば `mismatch` の行を返す。"""
+def _owned_decision(tag: str, cur: Any, kept: Any, new: Any, written_before: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """前の値 `cur`（旧い形のキーを取り除く前）のオーナーを指紋で見る。前の `write` の値のまま（指紋が一致）なら None（置き換えてよい）。
+    手の値なら、新しい値が不明か残す値 `kept`（取り除いた後）と同じで `kept`、違えば `mismatch` の行を返す。"""
     if written_before.get(tag) == value_digest(cur):
         return None
-    if is_unknown(new) or value_digest(new) == value_digest(cur):
+    if is_unknown(new) or value_digest(new) == value_digest(kept):
         return {"kind": "kept", "key": tag}
-    return {"kind": "mismatch", "key": tag, "declared": cur, "analyzed": new}
+    return {"kind": "mismatch", "key": tag, "declared": kept, "analyzed": new}
 
 
 def merge_item(
     key: str, current: tuple[bool, Any], new: Any, origin: str, written: dict[str, Any]
 ) -> tuple[Any, list[dict[str, Any]], bool]:
-    """1 項目を決める。`current` は (前の値が有るか, 前の値)。返すのは (書く値, 出力の行, 解析の値か)。"""
+    """1 項目を決める。`current` は (前の値が有るか, 前の値)。返すのは (書く値, 出力の行, 解析の値か)。
+    オーナーは取り除く前の前の値で見分け、残す・比べるのは旧い形のキーを取り除いた前の値である。"""
     has_cur, cur = current
     if has_cur and has_secret(cur):
         return {"unknown": SECRET_REASON}, [{"kind": "secret", "key": key}], True
@@ -132,10 +129,11 @@ def merge_item(
         rows.append({"kind": "secret", "key": key})
     if not has_cur:
         return new, rows + [_put_row(key, new, origin)], True
-    decided = _owned_decision(key, cur, new, written)
+    kept = analysis_record.strip_item(key, cur)[0]
+    decided = _owned_decision(key, cur, kept, new, written)
     if decided is not None:
-        return cur, rows + [decided], False
-    value, got = _replace_ours(key, cur, new, origin)
+        return kept, rows + [decided], False
+    value, got = _replace_ours(key, kept, new, origin)
     return value, rows + got, True
 
 
@@ -148,10 +146,10 @@ def merge_project(
     existing: Optional[dict[str, Any]],
     measure: dict[str, Any],
     answers: dict[str, Any],
-    analysis: dict[str, Any],
     written_before: dict[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """新しい `project.json` と出力の行。`analysis` は `written` を除いたセクション（ここで指紋を作る）。`written_before` は前の指紋。"""
+    """新しい `project.json` と出力の行。`analysis` は書いた値の指紋（`written`）だけにし、旧い形の `test_duration` を取り除く。
+    `written_before` は前の指紋。"""
     doc = dict(existing) if existing else {"version": 1}
     written, rows = {}, []
     items = obj(measure.get("items"))
@@ -162,8 +160,10 @@ def merge_project(
         rows += got
         if ours:
             written[key] = value_digest(value)
+    for key in analysis_record.OLD_ITEMS:
+        doc.pop(key, None)
     doc.pop("analysis", None)
-    doc["analysis"] = {**analysis, "written": written}
+    doc["analysis"] = {"written": written}
     return doc, rows
 
 
@@ -267,46 +267,62 @@ def summary_note(rows: list[dict[str, Any]]) -> str:
     return f"。設定をコミットできない（{rules} が除外している: {names}）"
 
 
-def _same_but_time(old: Optional[dict[str, Any]], new: dict[str, Any]) -> bool:
-    if old is None:
-        return False
-
-    def strip(d: dict[str, Any]) -> dict[str, Any]:
-        return {**d, "analysis": {k: v for k, v in obj(d.get("analysis")).items() if k != "at"}}
-
-    return value_digest(strip(old)) == value_digest(strip(new))
-
-
 class Inputs(NamedTuple):
-    """書き出しの入力（作業場所の git・メインディレクトリ・今の設定・測定の結果・回答）。"""
+    """書き出しの入力（作業場所の git・メインディレクトリ・今の設定・測定の結果・回答・前の解析の記録（読めなければ None））。"""
 
     root: Path
     main: Path
     existing: Optional[dict[str, Any]]
     measure: dict[str, Any]
     answers: dict[str, Any]
+    record: Optional[dict[str, Any]]
+
+
+def _record_files(inp: Inputs, record: dict[str, Any], project: Optional[File]) -> list[File]:
+    """解析の記録の側のファイルを書く順に並べる: `.gitignore`（無いときだけ）→ 途中のマーカーを付けた前の記録 → 設定 → マーカーの無い記録。
+    記録は、設定を書くとき・中身が前と違うとき・前の記録に途中のマーカーが残るとき（後の 2 つは `inp.record != record`）だけ書く。
+    途中のマーカーは前の記録があり記録を書くときだけ入れ、入れた計画には必ずマーカーの無い記録が続く。"""
+    out: list[File] = []
+    ignore = files.path(inp.main, "project-analysis-ignore")
+    if not ignore.exists():
+        out.append(File(ignore, files.relpath("project-analysis-ignore"), None, analysis_record.IGNORE_TEXT, "git から外す設定"))
+    path, name = files.path(inp.main, "project-analysis"), files.relpath("project-analysis")
+    old = dumps(inp.record) if inp.record is not None else None
+    changed = project is not None or inp.record != record
+    if inp.record is not None and changed:
+        out.append(File(path, name, old, dumps({**inp.record, "pending": True}), "書き出しの途中のマーカー"))
+    out += [project] if project is not None else []
+    if changed:
+        out.append(File(path, name, old, dumps(record), f"解析の記録。入力 {len(record['inputs'])} 件"))
+    return out
 
 
 def plan(inp: Inputs) -> Plan:
-    """書くファイルと出力の行を決める（何も書かない）。書き出す設定が形に合わなければ `WriteError`。"""
+    """書くファイルと出力の行を決める（何も書かない）。書き出す設定か解析の記録が形に合わなければ `WriteError`。"""
     questions = {k for k, m in obj(inp.measure.get("items")).items() if obj(m).get("status") == QUESTION}
     rows = [{"kind": "ignored", "key": k} for k in inp.answers if k not in questions]
     written_before = written_digests(inp.existing)
-    analysis = {
-        "analyzer": check.ANALYZER,
-        "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-        "inputs": obj(inp.measure.get("inputs")),
-        "branches": check.branch_state(git.Git(inp.root), check.declared_branches(inp.existing)),
-    }
-    doc, item_rows = merge_project(inp.existing, inp.measure, inp.answers, analysis, written_before)
+    doc, item_rows = merge_project(inp.existing, inp.measure, inp.answers, written_before)
     doc, ci_row = _declare_ci_tests(doc, inp.existing, written_before, inp.root)
     errs = contracts.schema_errors(doc, check.SCHEMA)
     if errs:
         raise WriteError(f"書き出す設定が形に合わない（解析器の誤り）: {'; '.join(errs[:3])}")
-    out: list[File] = []
-    if not _same_but_time(inp.existing, doc):
+    record = {
+        "version": analysis_record.RECORD_VERSION,
+        "analyzer": check.ANALYZER,
+        "inputs": obj(inp.measure.get("inputs")),
+        "branches": check.branch_state(git.Git(inp.root), check.declared_branches(inp.existing)),
+        "written_digest": analysis_record.written_digest(doc),
+    }
+    errs = contracts.schema_errors(record, analysis_record.SCHEMA)
+    if errs:
+        raise WriteError(f"書き出す解析の記録が形に合わない（解析器の誤り）: {'; '.join(errs[:3])}")
+    project = None
+    if inp.existing is None or value_digest(inp.existing) != value_digest(doc):
         path = files.path(inp.main, "project")
-        out.append(File(path, files.relpath("project"), path.read_text(encoding="utf-8") if inp.existing is not None else None, dumps(doc)))
+        old = path.read_text(encoding="utf-8") if inp.existing is not None else None
+        project = File(path, files.relpath("project"), old, dumps(doc))
+    out = _record_files(inp, record, project)
     notes = [{"kind": "note", "key": "notes", "text": n} for n in seq(inp.measure.get("notes"))]
     return Plan(out, item_rows + [ci_row] + rows + notes + ignored_notes(inp.main, [files.relpath("project")]))
 
