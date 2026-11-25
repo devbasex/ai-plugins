@@ -8473,7 +8473,7 @@
     {
       "term": "計画の時点の判定",
       "context": "ndf-workflow",
-      "meaning": "開発計画（並列の計画・実行計画・開発ループの周）の行に載せる課題ごとのモード。スプリントでは ndf progress new の --mode に渡る参考の値になる",
+      "meaning": "開発計画（並列の計画・実行計画・開発ループの周）の行に載せる課題ごとのモードと根拠（judgments）。行のモードはここからコードが決め、スプリントでは ndf progress new の --mode に渡る参考の値になる",
       "source": "",
       "pending_source": "issues/issue-4517-design.md"
     },
@@ -8484,6 +8484,13 @@
       "source": "",
       "pending_source": "issues/issue-4517-design.md",
       "code": "mode_judgment"
+    },
+    {
+      "term": "作業中の直し",
+      "context": "ndf-workflow",
+      "meaning": "作業の途中で見つけた、今の作業を妨げる不具合のうち、4 条件を満たし今の作業場所の中で直せるものを、今の変更に含めて直すこと。同じ PR で完了判定とレビューを通る。今の作業を妨げない不具合は起票して hotfix のスプリントにする",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md"
     }
   ]
 }
