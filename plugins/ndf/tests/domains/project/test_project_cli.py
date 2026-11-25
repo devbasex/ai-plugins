@@ -239,21 +239,6 @@ def test_merge_item_branches():
     )
 
 
-def test_merge_item_carries_ci_walls():
-    """現状固定（I-008）: 前の write の値の `ci` は壁時計を引き継ぐ。"""
-
-    ci_old = {"workflows": [{"path": "a.yml", "wall_seconds": 60}, {"path": "b.yml"}]}
-    ci_new = {"workflows": [{"path": "a.yml"}, {"path": "c.yml"}]}
-    assert write.merge_item("ci", (True, ci_old), ci_new, "測った", {"ci": write.value_digest(ci_old)}) == (
-        {"workflows": [{"path": "a.yml", "wall_seconds": 60}, {"path": "c.yml"}]},
-        [
-            {"kind": "unknown", "key": "ci#a.yml", "reason": "新しい解析に壁時計が無い", "kept_previous": True},
-            {"kind": "written", "key": "ci", "origin": "測った"},
-        ],
-        True,
-    )
-
-
 def test_row_line_formats_each_kind():
     """現状固定（I-015）: 出力の行の種類ごとの 1 行と、P 番号の当て方。"""
 
@@ -261,7 +246,7 @@ def test_row_line_formats_each_kind():
         write.row_line({"kind": "written", "key": "languages", "origin": "測った"}),
         write.row_line({"kind": "kept", "key": "test"}),
         write.row_line({"kind": "secret", "key": "ci"}),
-        write.row_line({"kind": "unknown", "key": "ci#a.yml", "reason": "壁時計が無い", "kept_previous": True}),
+        write.row_line({"kind": "unknown", "key": "ci", "reason": "時間切れ", "kept_previous": True}),
         write.row_line({"kind": "unknown", "key": "issues"}),
         write.row_line({"kind": "mismatch", "key": "checks", "declared": {"a": "値"}, "analyzed": [1]}),
         write.row_line({"kind": "note", "key": "notes"}),
@@ -270,7 +255,7 @@ def test_row_line_formats_each_kind():
         "  P1 languages: 測った",
         "  P2 test: 手の値を保った",
         "  P4 ci: 秘密の形の値を捨てて不明にした",
-        "  P4 ci#a.yml: 不明（壁時計が無い）（前の値を残した）",
+        "  P4 ci: 不明（時間切れ）（前の値を残した）",
         "  P8 issues: 不明（None）",
         '  P9 checks: 食い違い 設定 {"a": "値"} / 解析 [1]',
         "   notes: note",
@@ -305,7 +290,6 @@ def test_ci_items_current_behavior_with_ci_part(monkeypatch):
     calls: list = []
     ci_part = {
         "ci": {"status": "measured", "value": "c"},
-        "test_duration": {"status": "measured", "value": 5},
         "notes": ["ci の注記"],
         "merges": {"develop": 3, "main": 7},
         "github_issues": 4,
@@ -319,7 +303,7 @@ def test_ci_items_current_behavior_with_ci_part(monkeypatch):
     assert notes == ["指示の注記", "ci の注記"]
     assert calls == [("ci", tree, "o/r", "abc")]
     assert step.items["ci"] == ci_part["ci"]
-    assert step.items["test_duration"] == ci_part["test_duration"]
+    assert "test_duration" not in step.items
     assert step.items["issues"] == measure_ci.measure_issues(_REPO_ISSUES, ci_part)
 
 
@@ -330,25 +314,15 @@ def test_ci_items_current_behavior_without_ci_part(monkeypatch):
     notes = cli._ci_items(object(), step, _ci_ctx())
     assert notes == []
     assert "ci" not in step.items
-    assert step.items["test_duration"] == unknown("時間切れ")
+    assert "test_duration" not in step.items
     assert step.items["issues"] == measure_ci.measure_issues(_REPO_ISSUES, {})
 
 
-def test_ci_items_current_behavior_failed_ci_copies_to_test_duration(monkeypatch):
-    _patch_ci(monkeypatch, RuntimeError("boom"), [])
-    step = cli._Steps(time.monotonic() + 60)
-    cli._ci_items(object(), step, _ci_ctx())
-    assert step.items["ci"] == unknown("測れない: RuntimeError: boom")
-    assert step.items["test_duration"] == step.items["ci"]
-
-
-def test_ci_items_current_behavior_keeps_existing_test_duration_and_issues(monkeypatch):
+def test_ci_items_current_behavior_keeps_existing_issues(monkeypatch):
     _patch_ci(monkeypatch, None, [])
     step = cli._Steps(time.monotonic() + 60)
-    step.items["test_duration"] = {"status": "measured", "value": 1}
     step.items["issues"] = {"status": "measured", "value": "keep"}
     cli._ci_items(object(), step, _ci_ctx())
-    assert step.items["test_duration"] == {"status": "measured", "value": 1}
     assert step.items["issues"] == {"status": "measured", "value": "keep"}
 
 
@@ -360,7 +334,7 @@ def test_ci_items_current_behavior_past_deadline_marks_unknown(monkeypatch):
     assert notes == []
     assert calls == []
     assert step.items["ci"] == unknown("時間切れ")
-    assert step.items["test_duration"] == unknown("時間切れ")
+    assert "test_duration" not in step.items
     assert step.items["issues"] == measure_ci.measure_issues(_REPO_ISSUES, {})
 
 

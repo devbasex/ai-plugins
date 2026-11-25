@@ -6,10 +6,10 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from ndf.domains.crossrefactor import allocation
 from ndf.domains.project import items as forms
 from ndf.domains.project import measure_ci, measure_repo, secret
 
@@ -66,7 +66,7 @@ def test_repo_items(repo):
     tree = _tree(repo)
     deps = measure_repo.dependencies(tree)
     langs = measure_repo.measure_languages(tree, deps)["value"]
-    assert langs[0] == {"name": "php", "frameworks": ["laravel 10"], "files": 2, "version": "8.3"}
+    assert langs[0] == {"name": "php", "frameworks": ["laravel 10"], "version": "8.3"}
     services, names = measure_repo.measure_services(tree)
     assert services["value"] == {"container": True, "compose_files": ["compose.yml"], "databases": ["mysql"]}
     assert names == ["app", "db"]
@@ -121,32 +121,111 @@ def test_compose_services_skips_blank_and_comment_lines(text, expected):
     assert measure_repo.compose_services(text) == expected
 
 
-def test_ci_reading_parts(repo):
-    assert measure_ci.workflow_jobs(_tree(repo)) == {".github/workflows/ci.yml": 2}
+def test_required_contexts_reads_the_required_status_checks():
     rules = [
         {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "b"}, {"context": "a"}]}},
         {"type": "x"},
     ]
     assert measure_ci.required_contexts(rules) == ["a", "b"]
-    assert measure_ci.junit_seconds(b'<testsuites><testsuite time="1.5"/><testsuite time="2"/></testsuites>') == 3.5
-    assert measure_ci.junit_seconds(b"<not-xml") is None
-    assert measure_ci.span("2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z") == 60.0
 
 
-def test_ci_without_github_is_unknown(repo):
-    got = measure_ci.measure(_tree(repo), None, None, time.monotonic() + 5, {"NDF_STATE_HOME": str(repo / "state")})
+# --- measure_ci.measure: GitHub の API は必須のチェック・閉じた PR・課題の 3 か所だけを呼ぶ（#4516 の受け入れ条件 4） ---
+
+_RULES = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "pytest"}]}}]
+_PULLS = [{"merged_at": "2026-01-01T00:00:00Z", "base": {"ref": "main"}, "body": "https://redmine.example.com/x"}]
+_ISSUES = [{"number": 1}, {"number": 2, "pull_request": {}}]
+
+
+def _patch_gh(monkeypatch, fail: dict[str, Exception] | None = None) -> list[str]:
+    """`Gh.get` を差し替え、呼ばれたパスを返す並びに記録する。`fail` はパスの頭 → 投げる例外。"""
+    called: list[str] = []
+    answers = {"repos/o/r/rules/branches/": _RULES, "repos/o/r/pulls?": _PULLS, "repos/o/r/issues?": _ISSUES}
+
+    def fake_get(self, path):
+        called.append(path)
+        for head, exc in (fail or {}).items():
+            if path.startswith(head):
+                raise exc
+        return next(v for k, v in answers.items() if path.startswith(k))
+
+    monkeypatch.setattr(measure_ci.Gh, "get", fake_get)
+    return called
+
+
+def _measure(tmp_path, repo="o/r", head="main"):
+    tree = SimpleNamespace(root=tmp_path)
+    return measure_ci.measure(tree, repo, head, time.monotonic() + 30, {})
+
+
+def test_measure_calls_only_the_three_github_paths(tmp_path, monkeypatch):
+    called = _patch_gh(monkeypatch)
+    got = _measure(tmp_path)
+    assert called == [
+        "repos/o/r/rules/branches/main",
+        "repos/o/r/pulls?state=closed&per_page=100",
+        "repos/o/r/issues?state=all&per_page=100",
+    ]
+    assert not [p for p in called if p.startswith("repos/o/r/actions/")]
+    assert set(got) == {"ci", "merges", "github_issues", "hosts", "notes"}
+    assert got["ci"] == forms.measured({"required_checks": ["pytest"]})
+    assert (got["merges"], got["github_issues"], got["hosts"], got["notes"]) == ({"main": 1}, 1, ["redmine.example.com"], [])
+
+
+def test_measure_without_head_skips_the_branch_rules(tmp_path, monkeypatch):
+    called = _patch_gh(monkeypatch)
+    got = _measure(tmp_path, head=None)
+    assert [p for p in called if "/rules/" in p] == []
+    assert got["ci"] == forms.measured({"required_checks": []})
+
+
+def test_measure_without_github_is_unknown_and_calls_nothing(tmp_path, monkeypatch):
+    called = _patch_gh(monkeypatch)
+    got = _measure(tmp_path, repo=None)
+    assert called == []
     assert got["ci"]["status"] == "unknown"
-    assert got["test_duration"]["status"] == "unknown"
+    assert "test_duration" not in got
     assert measure_ci.measure_issues({"markdown_files": 2, "hosts": ["redmine.example.com"]}, got)["candidates"] == ["markdown", "redmine"]
 
 
-def test_ndf_record_takes_the_median_of_run_rows(tmp_path):
-    d = tmp_path / "metrics" / "o--r"
-    d.mkdir(parents=True)
-    rows = ['{"whole_test": {"init": 10}}', '{"kind": "init_test", "whole_test": {"init": 999}}', "broken", '{"whole_test": {"init": 30}}']
-    (d / allocation.HISTORY_NAME).write_text("\n".join(rows), encoding="utf-8")
-    got = measure_ci.ndf_record("o/r", {"NDF_STATE_HOME": str(tmp_path)})
-    assert got is not None and got["seconds"] == 20.0 and got["source"] == "ndf-record"
+def test_measure_time_up_on_the_branch_rules_makes_ci_unknown(tmp_path, monkeypatch):
+    _patch_gh(monkeypatch, {"repos/o/r/rules/": measure_ci.GhUnavailable(measure_ci.TIME_UP)})
+    got = _measure(tmp_path)
+    assert got["ci"] == forms.unknown(measure_ci.TIME_UP)
+    assert "CI を測れない: 時間切れ" in got["notes"]
+
+
+def test_measure_other_failure_on_the_branch_rules_is_an_empty_list(tmp_path, monkeypatch):
+    _patch_gh(monkeypatch, {"repos/o/r/rules/": measure_ci.GhUnavailable("gh が失敗した: 404")})
+    got = _measure(tmp_path)
+    assert got["ci"] == forms.measured({"required_checks": []})
+    assert got["notes"] == []
+
+
+# --- measure_repo.measure_languages: 言語の行はファイル数を持たず、名前の順に並ぶ（#4516 の決定 3） ---
+
+
+def _files_tree(files: list[str]) -> measure_repo.Tree:
+    tree = object.__new__(measure_repo.Tree)
+    tree.root, tree.deadline, tree.files = Path("."), time.monotonic() + 30, files
+    return tree
+
+
+def _no_deps() -> dict[str, dict[str, str]]:
+    """`dependencies(tree)` と同じ形（依存の言語ごとの空の辞書）。"""
+    return {lang: {} for lang in measure_repo.DEP_LANGUAGES}
+
+
+def test_measure_languages_rows_have_no_file_count_and_are_sorted_by_name():
+    tree = _files_tree(["a.py", "b.py", "c.py", "x.go", "y.ts"])
+    langs = measure_repo.measure_languages(tree, _no_deps())["value"]
+    assert [row["name"] for row in langs] == sorted(row["name"] for row in langs)
+    assert all("files" not in row for row in langs)
+
+
+def test_measure_languages_order_does_not_follow_the_file_counts():
+    more_python = _files_tree(["a.py", "b.py", "c.py", "x.go"])
+    more_go = _files_tree(["a.py", "x.go", "y.go", "z.go"])
+    assert measure_repo.measure_languages(more_python, _no_deps()) == measure_repo.measure_languages(more_go, _no_deps())
 
 
 def _small_repo(tmp_path, files: dict[str, str]) -> Path:
@@ -230,28 +309,6 @@ def test_tree_words_and_its_readers(tmp_path):
     assert tree.words("for-each-ref", "--format=%(refname:short) x", "refs/heads") == ["develop", "x", "main", "x"]
     with pytest.raises(measure_repo.TimeUp):
         _tree(path, -1).words("tag")
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("on: push\njobs:\n  test:  # テスト\n    runs-on: x\n  lint:\n    runs-on: x\n", ["test", "lint"]),
-        # 引用した id・コメントの中の `#`・引用の中の `#`・空行とコメントだけの行
-        (
-            "jobs:\n\n  # 先頭のコメント\n  \"build-a\":\n    steps:\n      - run: echo '#x'\n  'b#c':\n    runs-on: x\n",
-            ["build-a", "b#c"],
-        ),
-        # 字下げの深い行・値を持つ行は id にしない。`jobs:` の後の根の行で終わる
-        ("jobs:\n    deep:\n      x: 1\n    two: {}\n    three:\nenv:\n  other:\n", ["deep", "three"]),
-        ("name: x\non:\n  jobs:\n    nope:\n", []),
-        ("jobs: # コメント\n  a:\n", ["a"]),
-        ("jobs:#x\n  a:\n", []),
-        ("", []),
-    ],
-)
-def test_job_ids_reads_ids_under_jobs(text, expected):
-    """現状固定（I-030）: `jobs:` の直下の job id を字下げで拾う規則。"""
-    assert measure_ci.job_ids(text) == expected
 
 
 # --- 現状固定: measure_repo.dependencies（I-021。言語ごとの依存の定義の読み方と処理系のバージョンの行） ---

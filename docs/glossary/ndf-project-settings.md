@@ -9,12 +9,10 @@
 | 設定 | — | リポジトリ側に置く .ndf/<名前>.json。無ければその機能は既定の動きだけになるか、何も動かない。「<対象>の設定」の形で呼ぶ（指示書チェックの設定・リリースの設定・ボードの設定・worktree の設定・用語集の設定）。git で追跡するものを共有設定、追跡しないものを個人設定と呼ぶ | 宣言 | — | `docs/specifications/ndf-instruction-files-check.md` |
 | プロジェクトの設定 | — | リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・デプロイ・課題の SSOT など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる | — | — | `plugins/ndf/skills/development-workflow/references/project-analysis.md` |
 | 解析 | — | プロジェクトの設定を作るために、リポジトリと CI を決定論で測り、測った値から設定の中身を決めること | — | — | `docs/specifications/ndf-ci-only-tests.md` |
-| 不明 | — | 解析が測れなかった・決められなかった項目の値。ai-plugins の値で埋めない | — | — | `docs/specifications/project-decl-ci-representative-run.md` |
+| 不明 | — | 解析が測れなかった・決められなかった項目の値。ai-plugins の値で埋めない | — | — | `plugins/ndf/skills/development-workflow/references/project-analysis.md` |
 | 測った値 | — | 解析の測定が、ファイル・git・`gh` の出力から決定論で決めた項目の値 | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
 | 質問 | `question` | 解析の測定が値を 1 つに決められず、候補と根拠を付けて conductor へ渡す項目 | 問い直、問い返、問い方、問い（単独） | — | `plugins/ndf/skills/development-workflow/references/project-analysis.md` |
 | 回答 | `answer` | 解析の質問ごとに conductor が選んだ値か不明。書き出しが形を確かめて設定へ書く | 答え | — | `plugins/ndf/skills/development-workflow/references/project-analysis.md` |
-| ジョブを飛ばした run | — | CI の成功した run のうち、conclusion が skipped のジョブを 1 つ以上含むもの。設定の解析は CI の所要を測る代表に採らない | — | — | `docs/specifications/project-decl-ci-representative-run.md` |
-| 代表の run | — | 設定の解析がワークフローごとに壁時計とテストの所要を測る 1 件の run。取得した候補（ワークフローごとに新しい順の成功の run を最大 5 件）のうち、ジョブを飛ばしていない最新のもの | — | — | `docs/specifications/project-decl-ci-representative-run.md` |
 | 入力の指紋 | — | 解析が読んだファイルの、HEAD の木での blob の SHA と、ブランチの構成の組。プロジェクトの設定の新しさの判定に使う | — | — | `plugins/ndf/skills/development-workflow/references/project-analysis.md` |
 | ハードコード | — | ai-plugins 固有の名前（リポジトリ名・組織名・ブランチ名・タグの形・マーケットプレイスの登録名など）を、設定から読まずに ndf-next のコード・コントラクト・Skill の本文へ直接書くこと。検査が例外リストの外の件数を数えて落とす | — | — | `docs/specifications/ndf-next-repo-neutral-defaults.md` |
 | 設定で選べる値 | — | `.ndf/` の設定ファイルに書ける値の選択肢（リリース方式の表の行・delivery の種類・リリースの形）。コントラクトから数え、Issue の番号のある例外なしに減ると検査が落ちる | — | — | `docs/specifications/ndf-next-repo-neutral-defaults.md` |
