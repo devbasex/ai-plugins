@@ -568,9 +568,14 @@ def _extract(data: bytes, name: str, kind: str, index: int, dest: Path) -> None:
             sys.stderr.write(f"成果物 {name} を読めない（壊れた ZIP）\n")
 
 
+def latest_jobs(gh: Gh, run_id: int) -> list[dict]:
+    """1 回の実行の最新の試行のジョブの一覧を取る。"""
+    return gh.get(f"{REPO_API}/actions/runs/{run_id}/jobs?filter=latest&per_page={PER_PAGE}", "jobs")["jobs"]
+
+
 def fetch_run(gh: Gh, run_id: int, dest: Path) -> list[dict]:
     """1 回の実行の `pytest-*junit-*` の成果物を `dest` の下へ展開し、最新の試行のジョブの一覧を返す。"""
-    jobs = gh.get(f"{REPO_API}/actions/runs/{run_id}/jobs?filter=latest&per_page={PER_PAGE}", "jobs")["jobs"]
+    jobs = latest_jobs(gh, run_id)
     total, _ = shard_jobs(jobs)
     arts = gh.get(f"{REPO_API}/actions/runs/{run_id}/artifacts?per_page={PER_PAGE}", "artifacts")["artifacts"]
     received = 0
