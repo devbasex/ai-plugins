@@ -325,12 +325,13 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `check` | 2 課題とも根拠つき | 課題 1 つ | 判定の記録が無い・根拠が空白だけ・知らないモード・課題の組が違う |
 | `sprint_mode` | `light`+`standard` → `standard`、`operation`+`light` → `operation`。`documentation` の `proposal`+`report` → `documentation` | `hotfix` 1 件 → `hotfix`、`hotfix` 2 件 → `standard`、`light` 1 件で `floor` が `standard` → `standard`、`hotfix` 1 件で `floor` が `light` → `standard`。`documentation` 1 件で `floor` が `documentation`（訂正）→ `documentation` | `documentation`+`light` → `JudgmentError`。`documentation` の `repo-knowledge`+`proposal` → `JudgmentError`。`light` 1 件で `floor` が `documentation` → `JudgmentError` |
-| `recheck` | `light` のスプリントで部分が `standard` だけ → `rerun`・`standard`。`standard` のスプリントで部分が `standard` とビジネス文書の `documentation` → `split`、`split_plan.move` は文書の変更 | `hotfix` のスプリントで差分が `standard` → `standard`（高さが同じでも返す）。部分がすべて `hotfix` で課題が同じで全体も `hotfix` → `None`。`light` のスプリントで差分が `hotfix` → `standard`。同じ `README.md` の同じ hunk にコードの説明と章立ての組み直しがある → `split`、`keep` と `move` を当てると `head` と同じ木になる | `hotfix` のスプリントで部分が `hotfix` と `operation` → `rerun`・`standard`、`hotfix` と `light` → `rerun`・`standard`、`hotfix` と文書 → `split`。部分がすべて `hotfix` でも別の課題の部分がある → `rerun`・`standard`。部分がすべて `hotfix` でも `whole.mode` が `standard` → `rerun`・`standard`。`light` のスプリントで差分の全体が `documentation` → `reclassify`・`documentation`。リポジトリの知識のスプリントで部分に `proposal` の文書がある → `split`、差分の全体が `proposal` → `reclassify`・`documentation`・`proposal`。`keep` と `move` を当てても `head` にならない → `split`、`split_plan` は無く、根拠は「自動で分けられない」 |
+| `recheck` | `light` のスプリントで部分が `standard` だけ → `rerun`・`standard`。`standard` のスプリントで部分が `standard` とビジネス文書の `documentation` → `split`、`split_plan.move` は文書の変更 | `hotfix` のスプリントで差分が `standard` → `standard`（高さが同じでも返す）。部分がすべて `hotfix` で課題が同じで全体も `hotfix` → `None`。`light` のスプリントで差分が `hotfix` → `standard`。同じ `README.md` の同じ hunk にコードの説明と章立ての組み直しがある → `split`。`base` に `move` だけを当てた木が `move_tree` で移す変更だけを持ち、`head` に `unmove` を当てた木が `keep_tree` で、2 つを `base` で合わせると `head` の木になる | `hotfix` のスプリントで部分が `hotfix` と `operation` → `rerun`・`standard`、`hotfix` と `light` → `rerun`・`standard`、`hotfix` と文書 → `split`。部分がすべて `hotfix` でも別の課題の部分がある → `rerun`・`standard`。部分がすべて `hotfix` でも `whole.mode` が `standard` → `rerun`・`standard`。`light` のスプリントで差分の全体が `documentation` → `reclassify`・`documentation`。リポジトリの知識のスプリントで部分に `proposal` の文書がある → `split`、差分の全体が `proposal` → `reclassify`・`documentation`・`proposal`。`base` に `move` だけを当てられない・当てた木に残す側の行が入る・2 つを合わせても `head` にならない → `split`、`split_plan` は無く、根拠は「自動で分けられない」 |
 | `redefine` | `standard` → `light` で、終えた要求の工程を引き継ぎ、設計の行が消える。改訂 `rev + 1` の文書が `judgment`・`mode_judgment` と、今回の要求の出力を持つ | 同じモード → `None`。`legacy-refactor` へ変えても、その定義も要求の行を先頭に持つので、終えた要求の工程を引き継ぐ。`--disable` で外した工程は改訂 `rev + 1` でも無効で、`disabled` は 1 回だけ | 新しく現れる承認ゲートの工程を `.ndf/project.json` で無効にしてある → `Refused` |
 | `_judged` | 判定の後は後の工程が流れる | 要求の工程そのものは判定の前でも流れる。印の無い定義は判定が無くても流れる | 判定の前に後の工程を `next` で流すと `refused` |
 | 流し直した要求の工程の終了 | 文脈に `mode_judgment` があれば、出力に無くても終わり、`mode_decided` を書かない。改訂 `rev + 1` の要求の工程の `steps` に `mode` が無い | — | 出力の `mode_judgment` が文脈と違う → `refused` |
 | 要求の工程の無効化 | — | 印の無い定義では今のとおり無効にできる | 印のある定義で `--disable`・`progress disable`・`workflow.stages` の無効 → `refused`。改訂 `rev + 1` で `pending` に戻した要求の工程を `progress disable` → `refused` |
 | 流し直しの作成（`--carry`） | 完了判定が `mode_check` を残して失敗した写し元を `ndf progress cancel` で中止し、`new --carry` で作ると、文脈に `rerun_floor` と元の `worktree`・`branch` があり、`mode_judgment` が無い。要求の工程で判定の作業が流れる（中止で工程の状態が `cancelled` になっても下限が渡る）。`reclassify` の写し元からも `rerun_floor`（`kind: reclassify`）が渡る | 写し元の `mode_check` が `null`（再試行で解消）・`kind` が `split`・最後の `started` より前 → `rerun_floor` を作らない。中止の直前の状態が `failed` でない（失敗の前に中止した）→ 作らない | 写し元に後継がある（名前を変えて打ち直した場合を含む）→ 作らずに断り、`metrics.successor` に後継の ID を返す。レーンの行は付け替えない |
+| 分ける手順の書き込み | 移す先のコミットの木が `move_tree`、打ち消しのコミットの木が `keep_tree` になって push される | — | 分割案を作った後に PR の head が動いた・作業場所の `HEAD` が違う・コミットしていない変更がある → 何も書かずに分割案を作り直す。当てた木の SHA が記録と違う → push しない |
 | 分けた変更の続き | `--from-branch` で作ったスプリントの作業場所の用意が、そのブランチの名前で作業場所を作り、移した変更を持つ | — | `--from-branch` のブランチがリモートに無い → `precondition`、ベースから切り直さない |
 | レーンの行の付け替え | レーンの行から始めたスプリントを中止して `new --carry` で作ると、同じトランザクションで行の `sprint_id` が新しい ID になり、行は実行中のまま。新しいスプリントの完了が `end_row` で行に写る | 中止と作成の間で止まった後に `new --carry` を打つと付け替わる | 行が実行中でない・行の `sprint_id` が写し元でない → `Refused`、ステートマシンも作らない |
 | `mode_check` の書き方 | 流す経路で `failed`（`step: null`）と `outputs_recorded` が書かれ、`retry` の後に完了判定の全ステップが流れ直す | 手で終える経路で工程が既に `failed` なら `outputs_recorded` だけを書く | 工程が `pending` → `refused` |
@@ -389,26 +390,40 @@ plugins/ndf/
 
 #### 分ける手順
 
-分ける側の変更は、移す先を決めて移し終え、元の PR から打ち消したことを確かめてから、完了判定を流し直す。分ける範囲はパスや hunk の見出しではなく、比べた 2 つのコミットにひも付けたパッチで残す。同じ hunk の中に両方の変更が入ることがあり、見出しでは区別できないためである。
+分ける側の変更は、移す先を作り、元の PR から打ち消したことを確かめてから、完了判定を流し直す。分ける範囲はパスや hunk の見出しではなく、比べた 2 つのコミットにひも付けた 2 本のパッチと、それを当てた結果の木（tree）の SHA で残す。同じ hunk の中に両方の変更が入ることがあり、見出しでは区別できないためである。
+
+2 本のパッチは起点が違う。移す先は `base` から作り、残す側は `head` から作る。1 本のパッチを `base` と `head` の両方へ当てると、同じ hunk で移す変更の前後の行（文脈の行）に残す変更が入っているとき、片方では当たらないためである。
 
 分割案 `split_plan` は、完了判定が工程を失敗にするときに `mode_check` に書く。
 
 | 項目 | 中身 |
 | --- | --- |
 | `base`・`head` | 比べた 2 つのコミットの SHA |
-| `keep` | 残す側のパッチ。`{"path": <ファイル>, "sha256": <中身の sha256>}` |
-| `move` | 移す側のパッチ。形は `keep` と同じ |
+| `move` | `base` に当てて、移す側の変更だけを持つ木を作るパッチ。`{"path": <ファイル>, "sha256": <中身の sha256>}` |
+| `move_tree` | `base` に `move` を当てた結果の木の SHA |
+| `unmove` | `head` に当てて、移す側の変更だけを取り除いた木を作るパッチ。形は `move` と同じ |
+| `keep_tree` | `head` に `unmove` を当てた結果の木の SHA |
 | `paths` | 移す側に出るファイルの一覧 `[{path, scope}]`。`scope` は `whole`（そのファイルの変更をすべて移す）か `partial`（一部だけを移す） |
 
 パッチのファイルは、ステートマシンの DB と同じ置き場の `split/<ステートマシンの ID>/` に置く。工程の出力に残るのはパスと sha256 で、再開した conductor はこの 2 つから同じパッチを読み直す。sha256 が合わなければ使わず、完了判定を流し直して作り直す。
 
-1. 分割案を作る（完了判定の作業）: 部分ごとに `base..head` の差分から自分の変更だけのパッチを組み立てる。1 つのファイルの変更が両方の側に入るときは、hunk を行の単位で分けて、側ごとのパッチを作る。`git apply --check` で、`base` に `keep` を当てた後に `move` を当てると `head` と同じ木になることと、`base` に `keep` だけを当てられることを確かめる。どちらかが通らなければ、分割案を作らずに `split` を返し、`mode_check.basis` に「自動で分けられない」と書いて止める（conductor は利用者へ分け方を問う）
-2. 保存先を確定する: `out-of-scope` の手順で起票する（その課題は計画で判定する）。課題の本文に、移す範囲の要約と、移す変更を置くブランチの名前（`<今のブランチ>-split-<課題番号>`）を書き、印 `<!-- ndf:split-branch name=<ブランチ> base=<base> -->` を置く
-3. 移す: `base` から 2 のブランチを作り、`move` のパッチを当ててコミットし、push する
-4. 外す: 2 のブランチの差分が `move` と同じであることを確かめる。次に、今の作業場所で `move` を逆に当て（`git apply -R`）、打ち消しのコミットを作って元の PR のブランチへ push する。`gh pr view <PR> --json headRefOid` で PR の head が push したコミットになったことを確かめる。起票した課題の本文に、打ち消しのコミットの SHA を書く
-5. 完了判定を `ndf progress retry` で流し直す。完了判定は更新した head で差分を読み直す。残った差分にまだ違う側の部分があれば、もう一度 `split` で止まる
+1. 分割案を作る（完了判定の作業）: 部分の組から `move` と `unmove` を組み立てる。1 つのファイルの変更が両方の側に入るときは、hunk を行の単位で分けて、それぞれの起点に合わせて文脈の行を作る。組み立てた後、作業場所を変えずに一時のインデックス（`GIT_INDEX_FILE` に一時のファイルを指定し、`git read-tree` で起点の木を読んでから `git apply --cached` で当て、`git write-tree` で木の SHA を得る）で次をすべて確かめる。`git apply --check` は当てられるかしか見ないので、結果は木の SHA で比べる
+   - `base` に `move` を当てられ、その木が `move_tree` になる
+   - `head` に `unmove` を当てられ、その木が `keep_tree` になる
+   - `git diff base move_tree` が、移す側の部分の変更だけを持つ（`paths` の外のファイルが変わらず、`partial` のファイルでは残す側の部分の行が入っていない）
+   - `git merge-tree --write-tree --merge-base=base keep_tree move_tree` が競合無しで `head` の木を返す（2 つに分けても失う変更も増える変更も無い）
 
-分けた課題のスプリントは、2 のブランチから始める。計画を作る者は、課題の本文の印からブランチを読み、計画の行の `args` に `--from-branch <ブランチ>` を書く（対話の conductor も同じ引数で `ndf progress new` を打つ）。`ndf progress new --from-branch` は文脈に `from_branch` を置き、工程「作業場所の用意」は入力に `from_branch` を持ち、値があればブランチの名前を自分で決めずにその名前で `ndf worktree create <ブランチ>` を打つ。今の `create` は、リモートに同じ名前のブランチがあれば新しく切らずにそれを取り出して作業場所を作る（`domains/worktree/create.py`）ので、移した変更の上で作業が続く。ブランチがリモートに無ければ、ベースから切り直さずに `precondition` で止まる（`--from-branch` のときだけの確かめ）。
+   どれかが通らなければ、分割案を作らずに `split` を返し、`mode_check.basis` に「自動で分けられない」と書いて止める（conductor は利用者へ分け方を問う）
+2. 保存先を確定する: `out-of-scope` の手順で起票する（その課題は計画で判定する）。課題の本文に、移す範囲の要約と、移す変更を置くブランチの名前（`<今のブランチ>-split-<課題番号>`）を書き、印 `<!-- ndf:split-branch name=<ブランチ> base=<base> -->` を置く
+3. 書き込みの前の確かめ: 次をすべて確かめる。1 つでも違えば何も書かず、完了判定を `ndf progress retry` で流し直して分割案を作り直す（判定していない版へ古いパッチを当てると、利用者が後から足した変更まで外すことがあるため）
+   - 今の作業場所に、コミットしていない変更が無い（`git status --porcelain` が空）
+   - 今の作業場所の `HEAD` が `split_plan.head` である
+   - PR の head（`gh pr view <PR> --json headRefOid`）が `split_plan.head` である
+4. 移す: `base` から 2 のブランチを作り、`move` を当ててコミットする。コミットの木（`git rev-parse HEAD^{tree}`）が `move_tree` であることを確かめてから push する。違えば push せず、ブランチを消して 1 からやり直す
+5. 外す: 今の作業場所で `unmove` を当てて打ち消しのコミットを作り、その木が `keep_tree` であることを確かめる。違えばコミットを捨てて（`git reset --hard split_plan.head`）1 からやり直す。合えば元の PR のブランチへ push し、PR の head が push したコミットになったことを `gh pr view <PR> --json headRefOid` で確かめる。push の前に PR の head が `split_plan.head` から動いていれば push は拒まれる（`--force` を使わない）ので、そのときも 3 からやり直す。起票した課題の本文に、打ち消しのコミットの SHA を書く
+6. 完了判定を `ndf progress retry` で流し直す。完了判定は更新した head で差分を読み直す。残った差分にまだ違う側の部分があれば、もう一度 `split` で止まる
+
+分けた課題のスプリントは、2 で決めて 4 で push したブランチから始める。計画を作る者は、課題の本文の印からブランチを読み、計画の行の `args` に `--from-branch <ブランチ>` を書く（対話の conductor も同じ引数で `ndf progress new` を打つ）。`ndf progress new --from-branch` は文脈に `from_branch` を置き、工程「作業場所の用意」は入力に `from_branch` を持ち、値があればブランチの名前を自分で決めずにその名前で `ndf worktree create <ブランチ>` を打つ。今の `create` は、リモートに同じ名前のブランチがあれば新しく切らずにそれを取り出して作業場所を作る（`domains/worktree/create.py`）ので、移した変更の上で作業が続く。ブランチがリモートに無ければ、ベースから切り直さずに `precondition` で止まる（`--from-branch` のときだけの確かめ）。
 
 #### `hotfix` に別の目的の変更が混ざったとき
 
@@ -522,7 +537,10 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 1. 工程 `design`・`deploy` の入力（`inputs`）に `mode_judgment` を足す
 2. `documentation` のスプリントの設計の工程は、構成案で作る・組み直す文書ごとに、出力 `documents: [{path, issues, doc_type}]` を書く。`issues` はその文書を変える課題の番号、`doc_type` はその文書のタイプである
 3. 文書のタイプは、その文書を変える課題の `doc_type` から決める。課題が 1 つならその課題のタイプ、2 つ以上で同じタイプならそのタイプである。違うタイプの課題が同じ文書を変えるときは、設計の工程はタイプを選ばずに `結果: 判断が要る` で止まり、文書を分けるか課題を分けるかを利用者に問う。1 つの文書に 2 つのタイプのガイドは当てられず、どちらかを選ぶと片方の読み手の問いが抜けるためである
-4. `check` と同じ規則で、`documents` の `doc_type` が `mode_judgment` のどれかの課題のタイプと同じであること、どの課題も 1 つ以上の文書に出ることを、設計の工程の出力の検査（`finish` の出力の確かめ）で確かめる
+4. 設計の工程の出力の検査（`finish` の出力の確かめ）で、`documents` の文書ごとに次を確かめる。どれかが違えば `refused` にする
+   - `issues` が空でなく、どの番号も `mode_judgment` の課題である
+   - `issues` のすべての課題の `doc_type` が、その文書の `doc_type` と同じである（どれか 1 つと同じでは足りない）
+   - スプリントのどの課題も、1 つ以上の文書の `issues` に出る
 5. 工程 `implement`・`document-rebuild` の入力に `documents` を足す。執筆と再構成は、処理するファイルのパスで `documents` を引き、その `doc_type` で使う参照を選ぶ。`documents` に無いファイルを作るときは、作業を止めて設計に戻す（構成案に無い文書だからである）
 
 各工程が文書のタイプで選ぶものは次のとおりである。
@@ -547,13 +565,13 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 | 2・3. 版の大小と版の更新 | 行わない。版を作らない |
 | 承認 | マージ先がプロジェクトの宣言で本番チャネル（`kind: auto` の行。ai-plugins では `main`）なら、工程のリリース承認ゲートで承認を得てからマージする。そうでなければ、今のコードのモードと同じくゲートの扱いは宣言に従う |
 | 4. マージ | 承認の取り方とマージする主体は、今のコードのモードと同じくブランチ戦略の設定の `approval` と `merge` に従う（`merge.actor: ndf` なら workflow の `merge` が入れ、会話のセッションはマージを打たない）。承認の対象はリポジトリの知識の PR そのもので、版上げのリリースの PR は作らない |
-| 5. 届いたことの確かめ | `gh pr view <PR> --json state,mergeCommit,baseRefName` で、状態が `MERGED` で、マージのコミットがベースブランチの履歴に入ったことを確かめる。版を作らないので、タグと GitHub Release は確かめない |
+| 5. 届いたことの確かめ | `gh pr view <PR> --json state,mergeCommit,baseRefName` で状態が `MERGED` であることと、マージのコミットと対象のブランチの名前を得る。次に `git fetch origin <対象のブランチ>` で対象のブランチの今の先端を取り、`git merge-base --is-ancestor <マージのコミット> origin/<対象のブランチ>` が成功したときだけ届いたとする。`gh pr view` の値だけでは、マージのコミットが今の対象のブランチに入っているかは分からないためである。版を作らないので、タグと GitHub Release は確かめない |
 | 生成と提出 | 通らない。体裁レビューも条件 `outside_reader` で無効になる |
 
 結果は `release-result` の形で返す。今の型は `outputs.product_version` を必須にしているので、版を作らない場合の値を決める。
 
 - `outputs.product_version` は `null`（版を作らない）。型は文字列か `null` を受け、`null` は `outputs.merge` があるときだけ受ける
-- `outputs.merge` は `{"pr": <番号>, "merge_commit": <SHA>, "base": <ベースブランチ>, "contained": true}` で、5 の確かめの結果である。`contained` が偽なら工程を失敗にする
+- `outputs.merge` は `{"pr": <番号>, "merge_commit": <SHA>, "base": <ベースブランチ>, "base_head": <確かめたときの対象のブランチの先端の SHA>, "contained": true}` で、5 の確かめの結果である。`contained` は `git merge-base --is-ancestor` が成功したときだけ真にする。`contained` が偽なら工程を失敗にする
 - 後の工程で `product_version` を読むのはリリース後テストで、リポジトリの知識では条件 `outside_reader` で無効になるので、`null` を読む工程は無い
 
 - 執筆の手引き `skills/document-drafting/references/type-repo-knowledge.md` を新設する。読み手（このリポジトリで作業するエンジニアと AI）・本体（仕組み・決まり・経緯）・構成案だけを書き体裁設計を作らないことを持つ
@@ -574,8 +592,8 @@ ndf progress new <元の名前>-rerun<回数> --mode <mode_check のモード> -
 | 工程の条件 | タイプ「リポジトリの知識」のスプリントで、素材の収集・体裁レビュー・確定仕様化・リリース後テストが無効になる | 提案のタイプでは 4 つとも有効のまま | — |
 | タイプの混在 | — | 今の 6 つのタイプどうし（`proposal` と `report`）の課題は 1 つのスプリントに入る | `repo-knowledge` と `proposal` の課題を、要求の工程の終わり（`check`）と計画の行の登録（`row_errors`）のどちらで渡しても断る |
 | タイプの値 | 判定の記録の `doc_type` が `repo-knowledge` なら `check` と `context.schema.json` の検査を通る | — | `repo_knowledge`（下線）は知らないタイプとして断る |
-| 文書ごとのタイプ | 提案と報告の課題を含むスプリントで、設計の出力 `documents` が文書ごとに 1 つのタイプを持ち、執筆と再構成がパスで引いたタイプのガイドを使う | 2 つの課題が同じタイプで同じ文書を変える → その文書のタイプは 1 つ | 違うタイプの課題が同じ文書を変える → 設計が `判断が要る` で止まる。`documents` に無いタイプ・どの文書にも出ない課題 → 出力の検査で断る |
-| デプロイ | リポジトリの知識のスプリントで差分が `docs/` だけでも、デプロイが工程を飛ばさずに PR のマージまで進み、結果の `product_version` が `null`、`merge.contained` が真 | 版の無い結果がデプロイの結果の型の検査を通る | `merge` の無い結果で `product_version` が `null` → 型の検査で断る |
+| 文書ごとのタイプ | 提案と報告の課題を含むスプリントで、設計の出力 `documents` が文書ごとに 1 つのタイプを持ち、執筆と再構成がパスで引いたタイプのガイドを使う | 2 つの課題が同じタイプで同じ文書を変える → その文書のタイプは 1 つ | 違うタイプの課題が同じ文書を変える → 設計が `判断が要る` で止まる。報告の課題だけを持つ文書の `doc_type` が `proposal`（スプリントに提案の課題はある）→ 出力の検査で断る。判定に無い課題番号・どの文書にも出ない課題 → 断る |
+| デプロイ | リポジトリの知識のスプリントで差分が `docs/` だけでも、デプロイが工程を飛ばさずに PR のマージまで進み、結果の `product_version` が `null`、`merge.contained` が真 | 版の無い結果がデプロイの結果の型の検査を通る | `merge` の無い結果で `product_version` が `null` → 型の検査で断る。マージのコミットが対象のブランチの今の先端の祖先でない → `contained` を真にせず工程を失敗にする |
 
 ## レーンの起動と計画の行
 
