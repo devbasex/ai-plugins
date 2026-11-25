@@ -104,18 +104,39 @@ CI の実行時間・JUnit の合計・ワークフローの一覧・言語ご�
 - ブランチ名とブランチ戦略（`branch_strategy`）は書かない。書くのは `ndf project branch-strategy` だけである
 - 解析の結果が前と同じなら、ファイルを書かない
 - 設定はメインディレクトリの `.ndf/` に書く。コミットするかは下の「`.ndf/` の追跡」に従う。`.gitignore` の対象なら、そのことが出力に出る
+- 設定の `analysis` には、項目ごとの書いた値の指紋（`analysis.written`）だけが残る。
+  この指紋は、次の `write` が項目を前の `write` の値のままか、人が書き換えたかを見分けるためにある。設定と一緒にコミットする
+- `ndf project check` が読む解析の記録は、設定とは別のファイル（メインディレクトリの `.ndf/analysis/project.json`）に書く。
+  中身は、解析器のバージョン・入力のファイルのハッシュ・ブランチの構成・記録に対応する設定の指紋である。
+  このファイルはコミットしない（下の「`.ndf/` の追跡」）。出力には差分を出さず、ファイルごとに `書いた: <パス>（<要約>）` の 1 行だけが出る
 
 設定の形は [../schemas/project.schema.json](../schemas/project.schema.json) にある（`ndf project schema` の生成物）。
 
 ## `.ndf/` の追跡
 
 **`.ndf/` は追跡する（コミットしてチームで共有する）のが標準である。** 設定（`project.json`・`worktree.json`・`mvv.md`・`mvv.json`・`glossary.json` など）は
-clone した全員と CI で同じ値のまま効き、変える Pull Request を承認ゲートで人が見る（共通原則の C7）。追跡から外すのは次の 2 種類だけである。
+clone した全員と CI で同じ値のまま効き、変える Pull Request を承認ゲートで人が見る（共通原則の C7）。追跡から外すのは次の 3 種類だけである。
 
 | 外すもの | 外し方 |
 | --- | --- |
 | 個人の値（`.ndf/worktree.local.json`） | `.ndf/.gitignore` に書く。`worktree` Skill の `ndf worktree init` が作る |
+| 解析の記録（`.ndf/analysis/project.json`） | `ndf project write` が、`.ndf/analysis/.gitignore`（中身は `*`）を無いときだけ作って外す。すでにある `.gitignore` は書き換えない |
 | 実行時の出力（`.ndf/handoff/` など） | コミットしない。`handoff/` は `.gitignore` にも書かない（[handoff.md](handoff.md)） |
+
+**旧い形の設定は、最初の `ndf project write` で新しい形へ移り、その差分を確かめてコミットする。**
+旧い形とは、解析の記録を設定の中に持っていた形である。`.ndf/project.json` に `analysis` の `written` 以外のキー・`test_duration`・
+`languages[].files`・`ci.workflows`・`ci.provider` のどれかが残っていると、`ndf project check` は `旧い形の値が設定にある` を理由に 3 で終わる。
+手順 0 の 3 手を通すと、`write` は次のように移す。
+
+1. 設定から旧い形のキーを取り除く。各項目を人が書いたか解析が書いたかの見分けは、移す前と変わらない
+2. `analysis.written` の指紋を、取り除いた後の値で書き直す
+3. 解析の記録を `.ndf/analysis/project.json` へ書き、`.ndf/analysis/.gitignore` が無ければ作る
+
+移行の後は、`.ndf/project.json` の差分を確かめてコミットする。差分には、旧い形のキーの削除・指紋の書き直し・解析で変わった項目が出る。
+`.ndf/analysis/` はコミットしない。`git status` に `.ndf/analysis/` が出たら、次のように直す。
+
+- 新しいファイルとして出る: 前からある `.ndf/analysis/.gitignore` が記録を外していない。`*` の行を書く
+- 変更として出る（すでに追跡している）: `git rm -r --cached .ndf/analysis` で追跡から外し、その削除をコミットする
 
 ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。
 設定を書くコマンド（`ndf project write`）は、設定が `.gitignore` の対象なら
