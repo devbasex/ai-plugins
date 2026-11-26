@@ -20,7 +20,7 @@ flowchart TB
 
 設計に要る、これまでの構造（`plugins/ndf/` からの相対パス。2026-11-26、main `25c97daed` で確かめた）:
 
-- 工程「実装」の定義（`contracts/workflow/stages/implement.json`）は、次の 2 ステップである。プラン（自動で順に実行する手順の定義。工程「計画」が書く実装計画とは別）`impl` を呼ぶステップと、`ndf progress gathered` のステップである。工程の定義には指定 `per_issue` もある。進め方 fast で工程を課題ごとの子の行に分ける指定である。ただしこれまでのコードはこの値を読み込むだけで、子の行を作る処理は無い（`plugins/ndf/src/ndf/progress/` を `per_issue` で引いた。2026-11-26）。そのため `impl` は、どの進め方でも、課題が複数でも、工程 1 回につき 1 回だけ呼ばれる
+- 工程「実装」の定義（`contracts/workflow/stages/implement.json`）は、次の 2 ステップである。プラン（自動で順に実行する手順の定義。工程「計画」が書く実装計画とは別）`impl` を呼ぶステップと、`ndf progress gathered` のステップである。工程の定義には指定 `per_issue` もある。進め方 fast で工程を課題ごとの子の行に分ける指定である。ただしこれまでのコードはこの値を読み込むだけで、子の行を作る処理は無い（`plugins/ndf/src/ndf/progress/` を `per_issue` で検索した。2026-11-26）。そのため `impl` は、どの進め方でも、課題が複数でも、工程 1 回につき 1 回だけ呼ばれる
 - `impl` の差し込み（テンプレートへ渡す値）は `progress/invoke.py` が組む。ブランチは作業場所が今いるブランチ、マージ先はブランチ戦略の設定のベースブランチになる
 - `impl` のテンプレート（`contracts/templates/impl.json`）は、次の処理を行い、マージはしない。worker の実装、受け入れ条件の確かめ、PR、レビュー、CI、未解決の指摘の確かめである
 - worker へ渡る入力は `issue`・`branch`・`acceptance` で、担当のタスクを絞る手段が無い
@@ -110,7 +110,7 @@ flowchart TB
 | 既定のレビューの起動（`src/ndf/core/route/__init__.py`） | 単位の PR の番号が環境変数 `NDF_UNIT_PR` にあれば、ブランチから番号を引かずにその番号を使う |
 | レビューの結果の出力（`src/ndf/domains/crossreview/cli.py`） | `ndf cross-review run` に `--target-out` を足す（「入出力のコントラクト」） |
 | 人の判断を待つ指摘の判定（`src/ndf/domains/crossreview/finish_decide.py`・`journal.py`） | `--target-out` を渡した起動では、人の判断を待つ指摘を欠けにして `incomplete` で終える。判定に使うのは 2 つである。見送りの区分が保留になるかを返す関数（`domains/records/mvv_decide.py` の `defer_holds`。MVV の承認の判定が使うもの）と、レッドラインのフラグである（決定 14） |
-| worker の作業の定義と読み手（`contracts/worker/kinds.json`・`src/ndf/contracts/worker_kinds.py`） | 作業の定義に、空でよい入力の欄 `optional_inputs` を足し、`impl`・`fix`・`ci-fix`・`fix-push`・`fix-base` に `unit_file` を置く。値があるときだけ起動指示の入力に載せ、欠けの検査（`kind_gaps`）は求めない。起動指示を書く `progress/gate/entry.py` は読み手の返す値をそのまま載せるので変えない |
+| worker の作業の定義と読み手（`contracts/worker/kinds.json`・`src/ndf/contracts/worker_kinds.py`） | 作業の定義に、空でよい入力の欄 `optional_inputs` を足し、`impl`・`fix`・`ci-fix`・`fix-push`・`fix-base` に `unit_file` を置く。値があるときだけ起動指示の入力に載せる。値が無くても、欠けの検査（`kind_gaps`）は不足にしない。起動指示を書く `progress/gate/entry.py` は、定義の読み手（`worker_kinds.py`）が返す値をそのまま載せるので変えない |
 | レビューの指示（`src/ndf/domains/crossreview/criteria_decide.py`） | `NDF_UNIT_PR` があれば、相手役と修正担当の指示に例外（決定 8）を足す。`NDF_UNIT_FILE` があれば、単位の範囲のセクションも足す |
 | 受け入れ条件の確かめ（`src/ndf/domains/loop/acceptance.py`） | 条件を持たない単位のための `--no-criteria` を足す |
 | 単位のマージ（`src/ndf/progress/units_merge.py`。新設。`src/ndf/adapters/github.py`・`git.py`） | 工程の保存先の記録から証跡を読んで確かめ、merge commit を作ってスプリントブランチへ push する。CLI のコマンドは持たない。`ndf ci merge` は変えない |
