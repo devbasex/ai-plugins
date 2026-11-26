@@ -289,7 +289,7 @@ def _filled_plan(tmp_path, monkeypatch, name):
     held = route.params()
     patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
     work.mkdir()
@@ -311,7 +311,7 @@ def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tm
     # 題と本文は代表の課題（番号の最も小さい #3）からコピーする（#3908 の決定 7）
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     run = _stage_run_of("impl", repo, [4, 3])
     run = replace(run, inputs={**run.inputs, "acceptance": ["--issue", "3", "--issue", "4"]})
@@ -388,7 +388,7 @@ def test_ci_only_ndf_settings_builds_the_impl_plan_without_local_tests(tmp_path,
     repo = _sprint_repo(tmp_path, project)
     held = route.params()
     monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=["ndf-worker"]) if n == "worker" else p for n, p in held.items()})
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"
     work.mkdir()
     argv = invoke.plan_argv(_stage_run_of("impl", repo, [3473]), work, None, repo)
@@ -563,7 +563,7 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_preconditio
     # 題と本文は欠けとして、信用しない出所を挙げて止まり、本文のファイルは書かない
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)  # 課題に依存しない差し込みがそろわないと課題を読まない
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: None)
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: None)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
     work.mkdir()
@@ -577,7 +577,7 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_preconditio
 def test_a_sprint_of_several_issues_takes_the_values_from_the_smallest_numbered_issue(tmp_path, monkeypatch):
     # #3908 の決定 7: 課題が 2 件以上なら、番号の最も小さい課題を代表にして title・body_file・issue をコピーする
     repo = _sprint_repo(tmp_path, PROJECT)
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"
     work.mkdir()
     got = issue_values.issue_values(_stage_run_of("impl", repo, [4211, 3908]).inputs, work, repo)
@@ -605,7 +605,7 @@ def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp
     repo = _sprint_repo(tmp_path, PROJECT)
     reads = []
 
-    def read(location, n):
+    def read(location, n, repo=None):
         reads.append(n)
         return (f"#{n} の題（{len(reads)} 回目）", f"#{n} の本文（{len(reads)} 回目）")
 
@@ -635,7 +635,7 @@ def test_a_failure_to_read_the_issue_stops_with_its_reason_not_as_missing_values
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)  # 課題に依存しない差し込みがそろわないと課題を読まない
 
-    def fail(location, n):
+    def fail(location, n, repo=None):
         raise error
 
     monkeypatch.setattr(issue_values, "issue_text", fail)

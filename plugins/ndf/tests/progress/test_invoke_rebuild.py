@@ -168,7 +168,7 @@ def test_design_plan_uses_one_base_and_one_remote(tmp_path, monkeypatch, remote:
     """
     _with_worker(monkeypatch)
     repo = _sprint_repo(tmp_path, {"ci": {"required_checks": ["test"]}})
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     reads = {"strategy": 0}
     held_of = branch_strategy.of_project
 

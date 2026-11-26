@@ -50,7 +50,7 @@ def _issue_repo(tmp_path: Path, monkeypatch) -> Path:
     """設定 `PROJECT` を持つ作業場所。worker の既定を置き、課題の題と本文は偽の課題からコピーする。"""
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     return repo
 
@@ -264,7 +264,7 @@ def test_prepare_plan_for_a_ci_only_project_leaves_local_tests_off(tmp_path, mon
     project = {**PROJECT, "test": {"ci": {"only": True}, "suites": [{"name": "lint", "kind": "lint", "command": "ruff check"}]}}
     repo = _sprint_repo(tmp_path, project)
     sprint_fixture.with_worker(monkeypatch)
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"
     got = invoke.prepare_plan(_stage_run_of("impl", repo, [3473]), work, repo)
     held = invoke.read_values(work)
