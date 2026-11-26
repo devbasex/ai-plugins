@@ -189,6 +189,8 @@ def test_the_start_of_the_run_is_used_only_without_a_start_from_the_record(tmp_p
 
 
 PASSES_PR = ["done-check", "work", "acceptance", "test", "fix", "test-repeat", "push", "pr", "fix-push", "base-sync", "fix-base"]
+# 番号を読まずに終わるステップ（保存した記録だけで完了を確かめる）
+NEVER_READS_PR = ["resolved"]
 
 
 def _impl_steps() -> list[str]:
@@ -201,7 +203,7 @@ def test_an_impl_without_the_saved_pr_number_goes_back_to_the_pr_step(tmp_path, 
     # PR の番号を保存する前に始めた実装は、PR を作った後で止まっていても番号を持たない
     work = tmp_path / "w"
     _record(work, "impl-sprint/s1", None if how == "止まった結果" else step, stopped_at=step if how == "止まった結果" else None)
-    assert invoke.plan_start(work) == (step if step in PASSES_PR else "pr")
+    assert invoke.plan_start(work) == (step if step in PASSES_PR + NEVER_READS_PR else "pr")
     (work / "pr-number").write_text("7\n", encoding="utf-8")
     assert invoke.plan_start(work) == step
 

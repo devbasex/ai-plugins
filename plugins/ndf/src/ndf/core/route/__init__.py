@@ -296,6 +296,36 @@ def without_steps(plan: Mapping[str, Any], ids: Iterable[str]) -> dict[str, Any]
     return {**plan, "steps": [_retarget(s, moved) for s in found if s["id"] not in drop]}
 
 
+def may_read_pr_number(plan: Mapping[str, Any], start: str, writer: str) -> bool:
+    """`start` から流すと、番号を保存する `writer` のステップを通らずに、PR の番号を読むステップへ進みうるか。
+
+    番号を読むのは、引数が `PR_NUMBER_FILE` を持つステップと、レビュー（`{{review}}`）のステップである。プランに無い
+    `start` は、読みうるとみなす。
+    """
+    ids = [str(s["id"]) for s in plan["steps"]]
+    if start not in ids:
+        return True
+    steps = dict(zip(ids, plan["steps"]))
+    following = dict(zip(ids, [*ids[1:], END]))
+    seen, todo = {writer}, [start]
+    while todo:
+        sid = todo.pop()
+        if sid in seen or sid not in steps:
+            continue
+        seen.add(sid)
+        step = steps[sid]
+        text = json.dumps(step, ensure_ascii=False)
+        if PR_NUMBER_FILE in text or "{{review}}" in text:
+            return True
+        todo.append(step["next"] if "next" in step else following[sid])
+        if "on_fail" in step:
+            todo.append(step["on_fail"])
+        for key in TARGET_TABLE_KEYS:
+            if key in step:
+                todo.extend(step[key].values())
+    return False
+
+
 def unit_template(t: Template, repo: str, drop: Collection[str]) -> Template:
     """単位の経路のテンプレート（#4369）: `use` を開いて `drop` のステップを外し、残る `ci` の引数の末尾に `--repo` を足す。
 

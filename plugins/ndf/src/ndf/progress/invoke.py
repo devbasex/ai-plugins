@@ -18,8 +18,8 @@
 差し込みの値（`--set`）でなく、埋めたプランの作業場所（プランの `worktree`）で渡す。差し込みの `worktree` はプランの
 実行が決まった名前として持ち、上書きを断るためである。止まったプランを打ち直すときは、前の回の結果の打ち直し（`next` の `--from`）と
 同じく止まったステップから新しい回を始め、差し込み `progress_attempt` に打ち直しの数を載せて回のキーを変える。同じ引数で
-打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。実装のプランが PR の番号の記録を持たずに PR の
-ステップより先で止まっていれば、PR のステップから始める（`plan_start`）。skill と script は入力の作業場所で打つ。
+打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。実装のプランが PR の番号の記録を持たずに、番号を読む
+ステップへ PR のステップを通らずに進む所で止まっていれば、PR のステップから始める（`plan_start`）。skill と script は入力の作業場所で打つ。
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
 テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の設定から読み（レビューは設定が
@@ -70,13 +70,9 @@ APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
 # プランの実行の保存先に残す、回の打ち直しの数（`plan_attempt`）と、それを渡す差し込みの名前
 ATTEMPT_FILE = "progress-attempt.json"
 ATTEMPT_SET = "progress_attempt"
-# 実装のプランの名前（`impl-<ブランチ>`）の頭と、打ち直しで開始点を変えないステップ（`pr` のステップを通ってから、保存した
-# PR の番号を読むステップへ進むもの。`plan_start`）
+# 実装のプランの名前（`impl-<ブランチ>`）の頭と、PR の番号を保存するステップ（`plan_start`）
 IMPL_PLAN_PREFIX = "impl-"
 PR_STEP = "pr"
-REACHES_PR_STEP = frozenset(
-    {"done-check", "work", "acceptance", "test", "fix", "test-repeat", "push", PR_STEP, "fix-push", "base-sync", "fix-base"}
-)
 
 
 class StageInputError(Exception):
@@ -650,14 +646,18 @@ def plan_start(work_dir: Path) -> Optional[str]:
 
 
 def _before_pr_number(work_dir: Path, record: Mapping[str, Any], start: str) -> str:
-    """実装のプランの開始点 `start` が `pr` のステップを通らず、保存先に PR の番号の記録が無ければ `pr`。ほかは `start`。
+    """保存先に PR の番号の記録が無い実装のプランが、`start` から `pr` のステップを通らずに番号を読むステップへ進みうるなら
+    `pr`。ほかは `start`（番号を読まずに終わる `resolved` は変えない）。進みうるかは実装のテンプレートの遷移から決める。
 
     番号を保存する前のバージョンで始めた実装は、PR を作った後で止まっていても番号を持たず、衝突の確かめ・レビュー・CI が番号を
     読めずに止まり続ける。`pr` のステップは開いた PR を探して番号を書き、続くステップを順に流す（#4369）。
     """
     impl = "name" in record and str(record["name"]).startswith(IMPL_PLAN_PREFIX)
     saved = Path(route.PR_NUMBER_FILE.replace("{state_dir}", str(work_dir)))
-    return PR_STEP if impl and start not in REACHES_PR_STEP and not saved.is_file() else start
+    if not impl or saved.is_file():
+        return start
+    plan = route.expanded(route.templates()["impl"])
+    return PR_STEP if route.may_read_pr_number(plan, start, PR_STEP) else start
 
 
 def stored_gate_routes(work_dir: Path) -> Optional[dict[str, Any]]:
