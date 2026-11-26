@@ -127,6 +127,9 @@ WORK_RULES = (
     "- closing keywords を書いてよいのは、工程が PR 本文に置く「閉じる課題」のセクションだけである。それ以外の文書・コメント・コミットには書かない",
     "- PR 本文の下書きを書くときは、本文をヒアドキュメントで `ndf worker draft --state-dir {state_dir}` へ渡して {pr_body_draft} に置く"
     "（`Write`・`Edit` の Tool とリダイレクトで書かない）。PR を作るステップがこの下書きを本文へ載せる",
+    # 書き方（--append・--edit の形と区切り語。178 字）は --help に置かず全起動に載せる。過去の worker の 331 起動のうち 31 起動
+    # （9.4%）が保存先の下のファイルを書いた。1 起動は中央値で 46 回呼び出し、文脈は中央値 10.5 万 token である。載せると
+    # キャッシュの読みで 1 起動あたり約 800 token 相当、--help に置くと書く起動ごとに呼び出しが 1 回（約 1.1 万 token 相当と数秒）増え、平均で約 1,000 token 相当になる
     "- 保存先 {state_dir} の下のファイルは `Write`・`Edit` の Tool で書かない（`.git` の下は拒まれる。#4590）。結果ファイルは"
     " `ndf contracts emit --out` で、ほかは本文を `ndf worker write --path <ファイル>` へ渡して書く（全文の置き換え）。足すだけなら"
     " `--append --op <操作ごとの新しい語>` で足す分を、一部の直しは `--edit --op <新しい語>` で"
@@ -709,10 +712,8 @@ def _cmd_run(a: argparse.Namespace) -> int:
             a.timeout if a.timeout is not None else work_timeout(),
             owned=a.result_dir_id is not None,
         )
-        try:
+        with worker_append.records_kept(worker_paths.dir_id(wd)):  # `ndf worker write` の操作の記録は、同じ保存先の起動の間だけ使う
             done, report = _deliver(handoff, system_prompt(handoff.kind, handoff.state_dir, root / SKILLS_DIR, handoff.sources), root, wd)
-        finally:
-            worker_append.clear_records(worker_paths.dir_id(wd))  # `ndf worker write` の済んだ操作の記録は、この起動の間だけ使う
     metrics: dict[str, Any] = {"attempts": done.attempts}
     if handoff.kind in RECORD_KINDS and done.cause is None:
         metrics[SEARCH_RECORD] = search_record(report)

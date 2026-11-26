@@ -695,8 +695,47 @@ def test_write_keeps_the_records_out_of_the_result_dir(tmp_path, capsys, monkeyp
     target = worker_append.write_target(str(material))
     with worker_append.area(target) as private:
         assert any(p.name.startswith("op-") for p in private.path.iterdir())
-    worker_append.clear_records(target.expected)
-    assert not (identity.load().state_dir / worker_append.AREA_DIR / f"{target.expected[0]}-{target.expected[1]}").exists()
+
+
+def test_write_keeps_the_records_while_another_run_uses_the_result_dir(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r4-2: 同じ保存先を使う別の起動が動いている間は、先に終えた起動が記録とロックを消さない。最後に終えた起動が消す
+    (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    target = worker_append.write_target(str(material))
+    held = identity.load().state_dir / worker_append.AREA_DIR / f"{target.expected[0]}-{target.expected[1]}"
+    with worker_append.records_kept(target.expected):
+        with worker_append.records_kept(target.expected):
+            _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+        code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+        assert code == 0 and "済んでいた" in out["summary"]
+    assert material.read_text(encoding="utf-8") == "1 行目\n2 行目\n" and not held.exists()
+
+
+def test_write_stops_when_it_cannot_tell_whether_an_op_was_published(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r4-3: 公開の前に止まった操作の後に別の書き込みが本文を変えたら、済んだと返さずに止める
+    (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    real = worker_paths.write_file
+
+    def fail_body(wd, name, text, **kw):
+        if name == "material.md":
+            raise OSError(28, "No space left on device")
+        return real(wd, name, text, **kw)
+
+    monkeypatch.setattr(worker_paths, "write_file", fail_body)
+    _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+    monkeypatch.setattr(worker_paths, "write_file", real)
+    assert _write(capsys, monkeypatch, material, "3 行目\n", "--append", "--op", "a2")[0] == 0
+    code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
+    assert material.read_text(encoding="utf-8") == "1 行目\n3 行目\n"
+
+
+def test_write_does_not_redo_an_op_a_later_write_undid(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r4-4: 公開済みの操作は、後の書き込みで本文が元に戻っても、打ち直しで組み直さない
+    (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+    _write(capsys, monkeypatch, material, "1 行目\n")
+    code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+    assert code == 0 and "済んでいた" in out["summary"] and material.read_text(encoding="utf-8") == "1 行目\n"
 
 
 def test_write_redoes_an_op_stopped_before_the_body_was_published(tmp_path, capsys, monkeypatch):
