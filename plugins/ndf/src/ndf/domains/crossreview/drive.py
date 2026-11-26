@@ -473,6 +473,7 @@ def _review_prompt(run: _Run, round_no: int, prep: _Prepared, remarks: Optional[
     if scope.unreviewed:
         lines.append("次のセクションはまだ詳細レビューを通っていない。1 セクションずつ読む: " + "・".join(scope.unreviewed))
     lines += criteria_decide.reviewer_block(run.cfg.settings.focus, run.snapshot)
+    lines += criteria_decide.unit_block(criteria_decide.REVIEWER, run.cfg.unit)
     lines += criteria_decide.document_block(criteria_decide.REVIEWER, run.documents, prep.previous)
     if run.cfg.handed:
         lines += ["組み直しが残した足すべき内容（足されたかを確かめる）:", *(f"- {h.id}: {h.text}" for h in run.cfg.handed)]

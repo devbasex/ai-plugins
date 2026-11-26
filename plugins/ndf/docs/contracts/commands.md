@@ -66,7 +66,7 @@
 | `ndf cross-review release` | `worktree`（string・必須・位置）<br>`--repo-dir`（string・必須） |
 | `ndf cross-review report` | `--state-dir`（string・必須）<br>`--pr`（integer・必須）<br>`--repo`（string・任意） |
 | `ndf cross-review review-scope` | `worktree`（string・必須・位置）<br>`--purpose`（string・必須）<br>`--base`（string・必須）<br>`--reviewer`（array of string・任意）<br>`--state-dir`（string・必須）<br>`--pr`（integer・必須） |
-| `ndf cross-review run` | `--pr`（integer・必須）<br>`--state-dir`（string・必須）<br>`--base`（string・必須）<br>`--worktree`（string・任意）<br>`--branch`（string・任意）<br>`--purpose`（string・任意・既定 `"cross-review"`）<br>`--reviewer`（array of string・任意）<br>`--max-rounds`（integer・任意・既定 `3`）<br>`--findings`（string・任意）<br>`--reviewed-out`（string・任意） |
+| `ndf cross-review run` | `--pr`（integer・必須）<br>`--state-dir`（string・必須）<br>`--base`（string・必須）<br>`--worktree`（string・任意）<br>`--branch`（string・任意）<br>`--purpose`（string・任意・既定 `"cross-review"`）<br>`--reviewer`（array of string・任意）<br>`--max-rounds`（integer・任意・既定 `3`）<br>`--findings`（string・任意）<br>`--reviewed-out`（string・任意）<br>`--repo`（string・任意）: 対象のリポジトリ（<所有者>/<リポジトリ>）。保存済みの状態と作業場所のリモートより優先する<br>`--stop-on-hold`（boolean・任意）: 人の判断を待つ指摘が残れば incomplete で終える<br>`--reviewed-pr-out`（string・任意）: --reviewed-out を書くときに、読んだ PR を <所有者>/<リポジトリ>#<番号> で書く |
 | `ndf cross-review state-file` | `--state-dir`（string・必須）<br>`--pr`（integer・必須）<br>`--current`（integer・任意） |
 | `ndf cross-review sync` | `worktree`（string・必須・位置）<br>`--branch`（string・必須） |
 | `ndf cross-review target-repo` | `--repo`（string・任意）<br>`--state-dir`（string・任意）<br>`--pr`（integer・任意） |
@@ -171,7 +171,7 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
-| `ndf loop acceptance check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（array of integer・必須）: 照らす課題（繰り返せる）<br>`--criteria`（array of string・任意）: '<課題>:<条件の番号>'。その課題はこの条件だけを照らす |
+| `ndf loop acceptance check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（array of integer・必須）: 照らす課題（繰り返せる）<br>`--criteria`（array of string・任意）: '<課題>:<条件の番号>'。その課題はこの条件だけを照らす<br>`--no-criteria`（boolean・任意）: 条件を持たないレビューの単位: 記録を調べずに ok |
 | `ndf loop acceptance record` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--pre-merge`（array of string・任意）: '<条件の番号>=<手段（テスト名・実行したコマンド）>'<br>`--post-release`（array of integer・任意）: リリースの後でしか確かめられない条件の番号<br>`--issue`（integer・必須） |
 | `ndf loop acceptance show` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（integer・必須） |
 | `ndf loop answer` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--pr`（integer・必須）<br>`--answer`（string・必須・値 `approved`・`request_changes`・`rejected`）<br>`--note`（string・任意・既定 `""`）: 変更要求の理由など |

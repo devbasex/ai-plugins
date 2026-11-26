@@ -29,6 +29,10 @@
             "type": "string"
           },
           "description": "'<課題>:<条件の番号>'。その課題はこの条件だけを照らす"
+        },
+        "--no-criteria": {
+          "type": "boolean",
+          "description": "条件を持たないレビューの単位: 記録を調べずに ok"
         }
       },
       "required": [

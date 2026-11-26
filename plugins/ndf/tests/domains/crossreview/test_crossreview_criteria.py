@@ -300,3 +300,50 @@ def test_runtimes_allowed_without_the_fixer_stops_before_any_launch(wt: Path, tm
     code, got = run_cli(capsys, "run", "--pr", str(PR), "--state-dir", str(fake.state_dir), "--base", "origin/main", "--worktree", str(wt))
     assert got["cause"]["kind"] == "precondition" and "claude" in got["cause"]["detail"]
     assert fake.calls == [] and checked == []
+
+
+@pytest.mark.parametrize("role", [criteria_decide.REVIEWER, criteria_decide.FIXER])
+def test_unit_block_carries_the_scope_and_the_text_for_the_role(role: str) -> None:
+    """#4369 の決定 8: 単位の範囲の中身と、役ごとの扱いの文を載せる。単位が無ければ行を足さない。"""
+    lines = criteria_decide.unit_block(role, "単位 u4: 条件 1・2\n")
+    text = criteria_decide._table()["unit"]
+    assert "単位 u4: 条件 1・2" in lines and lines[-1] == text[role]
+    assert text["fixer" if role == criteria_decide.REVIEWER else "reviewer"] not in lines
+    # 秘密などの指摘は、担当の単位を理由に後へ回さない
+    assert all(word in lines[-1] for word in ("秘密", "認証認可", "利用者のデータ", "戻せない操作"))
+    assert criteria_decide.unit_block(role, "") == []
+
+
+def test_the_unit_file_reaches_the_reviewer_and_the_fixer_prompts(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """NDF_UNIT_FILE の中身が、相手役と修正担当の指示にそれぞれの文と一緒に入る。"""
+    unit = tmp_path / "unit.md"
+    unit.write_text("単位 u4: 条件 1・2\n", encoding="utf-8")
+    monkeypatch.setenv("NDF_UNIT_FILE", str(unit))
+    major = {"text": "止まる", "severity": "major", "impact": IMPACT}
+    fake = Recording(tmp_path / "st", {"codex": [[major], []], "kiro": [[], []]})
+    _run(capsys, monkeypatch, fake, wt)
+    for agent, role in (("codex", criteria_decide.REVIEWER), ("claude", criteria_decide.FIXER)):
+        prompt = next(p for a, _, p in fake.prompts if a == agent)
+        assert "\n".join(criteria_decide.unit_block(role, unit.read_text(encoding="utf-8"))) in prompt
+
+
+def test_unit_text_is_empty_without_the_variable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from ndf.domains.crossreview import cli
+
+    monkeypatch.delenv("NDF_UNIT_FILE", raising=False)
+    assert cli._unit_text() == ""
+
+
+@pytest.mark.parametrize("content", [None, b"\xff\xfe\x00"])
+def test_an_unreadable_unit_file_stops_as_invalid_without_a_launch(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, content: bytes | None
+) -> None:
+    """範囲なしでレビューしない: 指されたファイルを読めなければ invalid。"""
+    unit = tmp_path / "unit.md"
+    if content is not None:
+        unit.write_bytes(content)
+    monkeypatch.setenv("NDF_UNIT_FILE", str(unit))
+    fake = Recording(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert got["cause"]["kind"] == "invalid" and str(unit) in got["cause"]["detail"]
+    assert fake.calls == []

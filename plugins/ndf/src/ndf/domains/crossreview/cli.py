@@ -32,7 +32,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable, ContextManager, NamedTuple, Optional, TypeVar
 
-from ndf import cli
+from ndf import cli, identity
 from ndf.adapters import agents, git, run_log
 from ndf.contracts import limits, result, writing
 from ndf.core import route
@@ -67,6 +67,8 @@ TOOL = cli.tool_of(__name__)
 CROSS_REVIEW = TOOL
 # PR の head を読むアダプター（依存の欠けを import の時点で見分ける。#2447）
 GITHUB_MODULE = "ndf.adapters.github"
+# `gh` が対象のリポジトリとして読む環境変数
+GH_REPO_ENV = identity.env_name("gh-repo")
 # 相手役と修正担当の起動（テストは偽物に差し替える）
 LAUNCH: fixer.Launcher = agents.run_agent
 
@@ -484,6 +486,17 @@ def _resolve(wt: Path, requested: Optional[list[str]]) -> Resolved:
     return Resolved(policy, seats, read_settings(policy.main, wt))
 
 
+def _unit_text() -> str:
+    """`NDF_UNIT_FILE` が指すレビューの単位の指示の中身。変数が無ければ空。読めなければ `ValueError`（範囲なしでレビューしない）。"""
+    path = os.environ.get("NDF_UNIT_FILE")
+    if not path:
+        return ""
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"NDF_UNIT_FILE のレビューの単位の指示 {path} を読めない: {exc}") from exc
+
+
 def _run_config(args: argparse.Namespace) -> RunConfig:
     # 子へ渡すパスの基準を打った場所の cwd にそろえる（相対の --state-dir と別の --worktree で基準が割れない）
     wt = (Path(args.worktree) if args.worktree else Path.cwd()).absolute()
@@ -502,6 +515,7 @@ def _run_config(args: argparse.Namespace) -> RunConfig:
         handed=_handed(args.findings),
         main=got.policy.main,
         settings=got.settings,
+        unit=_unit_text(),
     )
 
 
@@ -511,7 +525,7 @@ def _or_stop(resolve: Callable[[], T]) -> T | int:
         return resolve()
     except ValueError as exc:
         # 相手役の名指しの誤り・ランタイムの設定の外の名前（participants.UnknownParticipant）、足すべき内容の形の誤り、
-        # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）
+        # レビューの設定の形の誤り（criteria_decide.ReviewDeclInvalid）、読めない単位の指示（_unit_text）
         return _stop("invalid", str(exc))
     except (participants.FixerNotAllowed, PolicyUnresolved) as exc:
         # 修正担当を起動してよいと設定されていない・認可の設定の保存先を決められない（前提の欠け）。どの担当も起動する前に
@@ -610,6 +624,35 @@ def _ready(args: argparse.Namespace) -> tuple[RunConfig, Optional[str]] | int:
     return cfg, state_repo
 
 
+def _begin_run(args: argparse.Namespace) -> Optional[int]:
+    """前の起動が書いた `--reviewed-out`・`--reviewed-pr-out` を消し、`--repo` の対象のリポジトリを子の `gh` へ渡す。
+    `--repo` の形が違えば、止まった結果を出した終了コードを返す。"""
+    for stale in (args.reviewed_out, args.reviewed_pr_out):
+        if stale:
+            Path(stale).unlink(missing_ok=True)
+    if args.repo is not None:
+        try:
+            os.environ[GH_REPO_ENV] = repo.resolve_target_repo(args.repo, None, Path.cwd()).slug
+        except repo.RepoUnresolved as exc:
+            return _stop("invalid", str(exc))
+    return None
+
+
+def _write_reviewed(args: argparse.Namespace, cfg: RunConfig, state_repo: Optional[str], head: Optional[str]) -> Optional[int]:
+    """レビューした HEAD があれば `--reviewed-out` へ書き、そのときだけ読んだ PR（今の番号）を `--reviewed-pr-out` へ書く。
+    PR を書けなければ、止まった結果を出した終了コードを返す。"""
+    if not args.reviewed_out or head is None:
+        return None
+    Path(args.reviewed_out).write_text(head + "\n", encoding="utf-8")
+    if args.reviewed_pr_out:
+        try:
+            slug = repo.resolve_target_repo(args.repo, state_repo, cfg.worktree).slug
+            _write_reviewed_pr(Path(args.reviewed_pr_out), slug, store.state_pr(cfg.state_dir, cfg.pr).current_pr)
+        except (OSError, repo.RepoUnresolved) as exc:
+            return _stop("precondition", f"読んだ PR を {args.reviewed_pr_out} へ書けない: {exc}")
+    return None
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """収束ループを回して終わり方から結果を出す（`{{review}}` が打つ 1 本）。
 
@@ -622,16 +665,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     `GH_REPO` で渡す。`--stop-on-hold` は人の判断を待つ指摘が残れば incomplete にする。`--reviewed-pr-out` は
     `--reviewed-out` を書くときに、読んだ PR を `<所有者>/<リポジトリ>#<番号>` で書く（始めに消す）。
     """
-    out = Path(args.reviewed_out) if args.reviewed_out else None
-    pr_out = Path(args.reviewed_pr_out) if args.reviewed_pr_out else None
-    for stale in (out, pr_out):
-        if stale is not None:
-            stale.unlink(missing_ok=True)
-    if args.repo is not None:
-        try:
-            os.environ["GH_REPO"] = repo.resolve_target_repo(args.repo, None, Path.cwd()).slug
-        except repo.RepoUnresolved as exc:
-            return _stop("invalid", str(exc))
+    refused = _begin_run(args)
+    if refused is not None:
+        return refused
     ready = _ready(args)
     if isinstance(ready, int):
         return ready
@@ -656,14 +692,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         # 文書の基準の本文を読めない（指示を作る前。#4285）
         return _stop("invalid", str(exc))
     verdict = fin.finish(got.review, cfg.handed, record_failed=got.mvv_record_failed, stop_on_hold=args.stop_on_hold)
-    if out is not None and got.reviewed_head is not None:
-        out.write_text(got.reviewed_head + "\n", encoding="utf-8")
-        if pr_out is not None:
-            try:
-                slug = repo.resolve_target_repo(args.repo, state_repo, cfg.worktree).slug
-                _write_reviewed_pr(pr_out, slug, store.state_pr(cfg.state_dir, cfg.pr).current_pr)
-            except (OSError, repo.RepoUnresolved) as exc:
-                return _stop("precondition", f"読んだ PR を {pr_out} へ書けない: {exc}")
+    refused = _write_reviewed(args, cfg, state_repo, got.reviewed_head)
+    if refused is not None:
+        return refused
     items, warnings = _report(cfg, got, hub_once)
     metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
     return _emit_verdict(verdict, got.mvv, items=items, metrics=metrics, warnings=warnings, process=list(got.process))

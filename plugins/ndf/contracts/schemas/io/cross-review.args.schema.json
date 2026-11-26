@@ -293,6 +293,18 @@
         },
         "--reviewed-out": {
           "type": "string"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "対象のリポジトリ（<所有者>/<リポジトリ>）。保存済みの状態と作業場所のリモートより優先する"
+        },
+        "--stop-on-hold": {
+          "type": "boolean",
+          "description": "人の判断を待つ指摘が残れば incomplete で終える"
+        },
+        "--reviewed-pr-out": {
+          "type": "string",
+          "description": "--reviewed-out を書くときに、読んだ PR を <所有者>/<リポジトリ>#<番号> で書く"
         }
       },
       "required": [
