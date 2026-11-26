@@ -97,7 +97,7 @@
 
 ### Task 8: 工程の定義の `per_unit` と、工程から作業を呼ぶ層の準備
 - **対象ファイル:** `src/ndf/progress/{plan_runs,invoke,issue_values,stages,definition}.py`、`contracts/workflow/ndf.schema.json`、`contracts/schemas/internal/stage-snapshot.schema.json`、`contracts/schemas/project-workflow.schema.json`、`contracts/schemas/io/`、`tests/progress/test_invoke_per_unit.py`、`src/ndf/core/plan/steps.py`、`tests/core/plan/test_steps.py`、`tests/progress/test_invoke_issue_copies.py`、`tests/progress/test_definition.py`
-- **変更内容:** `StageRun` の追加の欄と `plain()`、上書きのテンプレートと値、PR の番号の書き戻し（`core/plan/steps.py`）、`issue_values` の課題とリポジトリの指定、`clear_values` の単位の掃除、`StageDef.per_unit`。`implement.json` はまだ変えない（既定の振る舞いは `pr-number` の書き戻しのほかは変わらない）
+- **変更内容:** `StageRun` の追加の欄と `plain()`、上書きのテンプレートと値、PR の番号の書き戻し（`core/plan/{model,steps}.py` と `impl.json` の `restore`）、`issue_values` の課題とリポジトリの指定、`clear_values` の単位の掃除、`StageDef.per_unit`。`implement.json` はまだ変えない（既定の振る舞いは `pr-number` の書き戻しのほかは変わらない）
 - **満たす受け入れ条件:** 1・2・6
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 

@@ -101,7 +101,7 @@ REVIEW_STATE = "{state_dir}/cross-review"
 REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
 # 実装のテンプレートの既定の `{{review}}`: ブランチから引き直さず、`pr` のステップが保存した番号（`$0` のファイル）を読む
 # （#4369。同じブランチから別のマージ先へ出した PR をレビューしない）
-PR_NUMBER_FILE = steps.PR_NUMBER_FILE
+PR_NUMBER_FILE = "{state_dir}/pr-number"
 REVIEW_WITH_SAVED_PR = 'n=$(cat "$0") && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
 # 単位の経路の `{{review}}`（#4369 の決定 6・14）: `$0` がリポジトリ、`$1` が保存先、残りがレビューの起動とステップが後ろに
 # 足す引数。保存した番号の PR を `--repo`・`--pr` で渡し、レビューが読んだ PR（`reviewed-pr`）が違うか無ければ、

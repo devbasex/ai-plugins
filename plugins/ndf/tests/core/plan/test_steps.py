@@ -109,8 +109,6 @@ class _Done:
 def _run_impl_step(tmp_path, monkeypatch, step_id: str, got: dict | None) -> tuple[dict, list[str], list[str]]:
     """テンプレート impl のステップ `step_id` を打ち、（結果、照会したステップ、打ったステップ）を返す。"""
     raw = route.expanded(route.templates()["impl"])
-    for found in raw["steps"]:
-        found["run"] = [route.PR_NUMBER_FILE if a == "{{review}}" else a for a in found["run"]]
     plan = model.parse({**raw, "name": "impl-sprint/s1"})
     asked: list[str] = []
     launched: list[str] = []
@@ -147,3 +145,28 @@ def test_the_step_stops_with_the_reason_when_the_pr_number_is_not_restored(tmp_p
     out, _, launched = _run_impl_step(tmp_path, monkeypatch, "review-delta", got)
     assert (out["status"], out["kind"], launched) == ("stopped", "precondition", [])
     assert reason in out["summary"]
+
+
+def test_a_step_without_restore_does_not_run_the_probe_of_another_step(tmp_path, monkeypatch):
+    # 同じパスを引数に持つ独自のプランでも、指定の無いステップは指定の順の外で `probe` を打たない
+    path = "{state_dir}/pr-number"
+    raw = [{"id": "w", "run": ["true", path], "probe": ["true", path]}, {"id": "r", "run": ["true", path]}]
+    plan = model.parse({"name": "p", "steps": raw})
+    monkeypatch.setattr(steps, "_probe", lambda *a: pytest.fail("打たない"))
+    monkeypatch.setattr(steps, "_launch", lambda ctx, step: _Done())
+    (tmp_path / steps.STEPS_DIR).mkdir()
+    assert steps.run(steps.StepContext(plan, tmp_path, {"state_dir": str(tmp_path)}), plan.step("r"))["status"] == "ok"
+
+
+@pytest.mark.parametrize(
+    "restore",
+    [
+        {"file": "f", "step": "無い", "missing": "m"},
+        {"file": "f", "step": "r", "missing": "m"},  # probe を持たないステップ
+        {"file": "f", "step": "w"},
+    ],
+)
+def test_a_restore_that_does_not_name_a_probe_step_is_refused(restore):
+    raw = [{"id": "w", "run": ["true"], "probe": ["true"]}, {"id": "r", "run": ["true"], "restore": restore}]
+    with pytest.raises(model.PlanError, match="restore"):
+        model.parse({"name": "p", "steps": raw})

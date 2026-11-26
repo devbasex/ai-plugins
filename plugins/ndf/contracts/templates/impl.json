@@ -20,9 +20,9 @@
       {"use": "test", "on_cause": {"test_failed": "test-repeat"}},
       {"use": "push", "on_fail": "fix-push"},
       {"use": "pr"},
-      {"use": "conflict-check", "run": ["sh", "-c", "stop() { printf '{\"status\": \"stopped\", \"cause\": {\"kind\": \"precondition\"}, \"summary\": \"%s\"}\\n' \"$1\"; exit 2; }; n=$(cat \"$0\") && [ -n \"$n\" ] || stop 'PR の番号の記録（実行の保存先の pr-number）を読めないか、空である'; s=$(gh pr view \"$n\" --json mergeStateStatus --jq .mergeStateStatus) && [ -n \"$s\" ] || stop \"PR #$n のマージ可否（mergeStateStatus）を取得できない\"; test \"$s\" != DIRTY", "{state_dir}/pr-number"], "exit_cause": {"1": "base_conflict", "2": "precondition"}},
+      {"use": "conflict-check", "restore": {"file": "{state_dir}/pr-number", "step": "pr", "missing": "このブランチからマージ先へ出した開いた PR が無い"}, "run": ["sh", "-c", "stop() { printf '{\"status\": \"stopped\", \"cause\": {\"kind\": \"precondition\"}, \"summary\": \"%s\"}\\n' \"$1\"; exit 2; }; n=$(cat \"$0\") && [ -n \"$n\" ] || stop 'PR の番号の記録（実行の保存先の pr-number）を読めないか、空である'; s=$(gh pr view \"$n\" --json mergeStateStatus --jq .mergeStateStatus) && [ -n \"$s\" ] || stop \"PR #$n のマージ可否（mergeStateStatus）を取得できない\"; test \"$s\" != DIRTY", "{state_dir}/pr-number"], "exit_cause": {"1": "base_conflict", "2": "precondition"}},
       {"id": "base-fetch", "run": ["git", "fetch", "{{remote}}", "{{base}}"]},
-      {"id": "review", "run": ["sh", "-c", "rm -f \"$1\" && if [ -e \"$2\" ]; then touch \"$3\"; else rm -f \"$4\"; fi && shift 4 && exec \"$@\" --reviewed-out \"$0\"", "{state_dir}/reviewed-head", "{state_dir}/unresolved", "{state_dir}/unresolved-delta", "{state_dir}/delta-recheck", "{state_dir}/delta-base", "{{review}}"], "on_cause": {"incomplete": "mark-unresolved"}},
+      {"id": "review", "restore": {"file": "{state_dir}/pr-number", "step": "pr", "missing": "このブランチからマージ先へ出した開いた PR が無い"}, "run": ["sh", "-c", "rm -f \"$1\" && if [ -e \"$2\" ]; then touch \"$3\"; else rm -f \"$4\"; fi && shift 4 && exec \"$@\" --reviewed-out \"$0\"", "{state_dir}/reviewed-head", "{state_dir}/unresolved", "{state_dir}/unresolved-delta", "{state_dir}/delta-recheck", "{state_dir}/delta-base", "{{review}}"], "on_cause": {"incomplete": "mark-unresolved"}},
       {"use": "push", "id": "push-reviewed", "on_fail": "fix-push"},
       {
         "id": "review-head",
@@ -30,7 +30,7 @@
         "exit_cause": {"1": "unreviewed"},
         "on_cause": {"unreviewed": "review-delta"}
       },
-      {"use": "ci", "pr_source": {"command": "cat \"$1\"", "arg": "{state_dir}/pr-number"}, "next": "head-reviewed"},
+      {"use": "ci", "restore": {"file": "{state_dir}/pr-number", "step": "pr", "missing": "このブランチからマージ先へ出した開いた PR が無い"}, "pr_source": {"command": "cat \"$1\"", "arg": "{state_dir}/pr-number"}, "next": "head-reviewed"},
       {
         "id": "head-reviewed",
         "run": ["sh", "-c", "r=$(cat \"$0\") && [ -n \"$r\" ] || exit 2; test \"$r\" = \"$(git rev-parse HEAD)\"", "{state_dir}/reviewed-head"],
@@ -54,6 +54,7 @@
       {"use": "fix-base"},
       {
         "id": "review-delta",
+        "restore": {"file": "{state_dir}/pr-number", "step": "pr", "missing": "このブランチからマージ先へ出した開いた PR が無い"},
         "run": ["sh", "-c", "r=$0 o=$1 d=$2 m=$4; rm -f \"$3\" && { [ -s \"$o\" ] || cp \"$r\" \"$o\"; } && b=$(cat \"$o\") && shift 4 && \"$@\" --base \"$b\" --state-dir \"$d\" --reviewed-out \"$r\"; c=$?; if [ \"$c\" -eq 0 ]; then rm -f \"$m\" && rm -f \"$o\" || { echo \"差分のレビューのクリーンアップ（$m と $o の削除）に失敗した\" >&2; printf '%s\\n' '{\"status\": \"stopped\", \"cause\": {\"kind\": \"precondition\"}, \"summary\": \"差分のレビューは通ったが、未解決のフラグか起点の記録を消せなかった\"}'; exit 3; }; fi; exit \"$c\"","{state_dir}/reviewed-head", "{state_dir}/delta-base", "{state_dir}/cross-review-delta", "{state_dir}/delta-recheck", "{state_dir}/unresolved-delta", "{{review}}"],
         "on_cause": {"incomplete": "mark-delta-unresolved"},
         "next": "push-reviewed"

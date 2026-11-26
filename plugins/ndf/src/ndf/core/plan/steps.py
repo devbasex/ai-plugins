@@ -18,8 +18,8 @@
 - ほか: 済んだかを確かめられない。`run` を打たずに、その種類（結果 JSON の種類か `exit_cause`、無ければ unknown）で止まる
   （結果 JSON の `gaps` はそのまま運ぶ）
 
-PR の番号の記録（`PR_NUMBER_FILE`）を読むステップは、記録が無ければ、打つ直前に番号を書くステップの `probe` で書き戻す。
-開いた PR が無いか、照会か保存に失敗すれば、ステップを打たずに止まる（#4369）。
+書き戻しの指定（`restore`）を持つステップは、指定のファイルが無ければ、打つ直前に指定のステップの `probe` で書き戻す。
+`probe` が対象を見つけないか、照会か保存に失敗すれば、ステップを打たずに止まる（#4369）。
 
 見本（ブランチの push。リモートの head が手元の head と同じなら済んでいる）:
 
@@ -49,8 +49,6 @@ STEPS_DIR = "steps"
 PID_SUFFIX = ".pid.json"
 LOG_SUFFIX = ".log"
 RUN_STEP_LIMIT = "supervise.run-step"
-# 実装のプランが PR の番号を残すファイル（`pr` のステップが書き、後のステップが読む。#4369）
-PR_NUMBER_FILE = "{state_dir}/pr-number"
 
 
 class StepRefused(Exception):
@@ -222,25 +220,22 @@ def _stopped(kind: str, summary: str) -> dict[str, Any]:
     return _plain(STOPPED, kind, summary, None)
 
 
-def _restore_pr_number(ctx: StepContext, step: Step) -> Optional[dict[str, Any]]:
-    """`step` が読む PR の番号の記録が保存先に無ければ、開いた PR の番号を書き戻す（#4369）。戻せなければ止まった結果。
+def _restore(ctx: StepContext, step: Step) -> Optional[dict[str, Any]]:
+    """`step` の `restore` のファイルが無いか空なら、指定のステップの `probe` で書き戻す。戻せなければ止まった結果。
 
-    番号を保存する前のバージョンで始めた実装は、PR を作った後で止まっていても番号を持たない。番号を `probe` が書くステップが
-    プランにあれば、その `probe` だけを打つ。番号を読むステップを打つ直前に呼ぶので、番号を読まずに終わる再開は照会しない。
+    ステップを打つ直前に呼ぶので、そのファイルを読まずに終わる再開では `probe` を打たない（#4369）。
     """
-    if PR_NUMBER_FILE not in step.run:
+    if step.restore is None:
         return None
-    writer = next((s for s in ctx.plan.steps if s.probe is not None and PR_NUMBER_FILE in s.probe), None)
-    if writer is None or writer.id == step.id:
-        return None
-    saved = Path(PR_NUMBER_FILE.replace("{state_dir}", str(ctx.state_dir)))
+    saved = Path(assemble_decide.fill((step.restore.file,), ctx.values)[0])
     if saved.is_file() and saved.stat().st_size:
         return None
+    writer = ctx.plan.step(step.restore.step)
     got = _probe(ctx, writer, _timeout_of(writer))
     if got is None:
-        return _stopped("precondition", "PR の番号を書き戻せない: このブランチからマージ先へ出した開いた PR が無い")
+        return _stopped("precondition", f"{saved.name} を書き戻せない: {step.restore.missing}")
     if got["status"] != OK:
-        return {**got, "summary": f"PR の番号を書き戻せない: {got['summary']}"}
+        return {**got, "summary": f"{saved.name} を書き戻せない: {got['summary']}"}
     return None
 
 
@@ -269,7 +264,7 @@ def run(ctx: StepContext, step: Step) -> dict[str, Any]:
         ensure_previous_stopped(ctx.state_dir, step.id)
     except StepRefused as exc:
         return _stopped("refused", str(exc))
-    unrestored = _restore_pr_number(ctx, step)
+    unrestored = _restore(ctx, step)
     if unrestored is not None:
         return run_log.redact(unrestored)
     timeout = _timeout_of(step)
