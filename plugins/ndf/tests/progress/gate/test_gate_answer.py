@@ -174,7 +174,7 @@ def test_reread_asks_again_with_a_new_question_after_the_reading_step(st, env, n
     after = _waiting(st, tid)
     assert out["status"] == "gate" and after.id != before.id and _readings(st, tid) == 2
     pushed = "c" * 40
-    again = {"commit": pushed, "docs": ["issues/issue-3092-design.md"]}
+    again = {"commit": pushed, "docs": ["issues/issue-9999-design.md"]}
     fixed = result.result("script", "ok", "文書を直した", outputs={"review_again": again})
     review = run.Env(
         **{

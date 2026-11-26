@@ -216,7 +216,7 @@ JUDGED = "a" * 40
 
 def _review_again(commit: str):
     """読み手役のステップが文書を直して push した偽の結果（outputs.review_again）。"""
-    again = {"commit": commit, "docs": ["issues/issue-3092-design.md"]}
+    again = {"commit": commit, "docs": ["issues/issue-9999-design.md"]}
     return lambda r: invoke.finished(r, result.result("script", "ok", "文書を直した", outputs={"review_again": again}))
 
 
