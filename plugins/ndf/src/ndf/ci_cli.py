@@ -74,7 +74,9 @@ def _parser() -> argparse.ArgumentParser:
     m.add_argument(
         "--pr",
         type=int,
-        help="PR の番号（単独なら作業場所が無くても打てる。マージ済みなら何もしない）。--branch・--base を添えると、違う PR をマージしない",
+        help="PR の番号（--branch が無ければ作業場所が無くても打てる。マージ済みなら何もしない）。"
+        "--branch を添えると PR の head のブランチ名が、--base を添えるとマージ先が指定どおりかを確かめ、違えばマージしない。"
+        "どちらかを添えると、フォークからの PR と、マージされずに閉じた PR もマージしない",
     )
     m.add_argument("--base", help="期待するマージ先。対象の PR のマージ先が違えばマージしない")
     m.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば作業場所の origin")
@@ -410,9 +412,9 @@ def _target(hub: GitHub, args: argparse.Namespace) -> Pull | dict:
     if args.base is None:
         pull = _open_pull(hub, args.branch)
         return pull if pull is not None else _no_open_pull(args.branch)
-    opened = hub.open_pulls_of_head(args.branch, sys.maxsize)
-    pull = next((p for p in opened if p.base_ref == args.base), None)
-    return pull if pull is not None else result.stopped(TOOL, "precondition", f"{args.branch} の {args.base} 宛ての開いた PR が無い")
+    # 同じリポジトリの head とマージ先が同じ開いた PR は 1 件だけなので、見つかった時点で読み終える
+    opened = hub.open_pulls_of_head(args.branch, enough=1, base=args.base)
+    return opened[0] if opened else result.stopped(TOOL, "precondition", f"{args.branch} の {args.base} 宛ての開いた PR が無い")
 
 
 def _worktree_head(args: argparse.Namespace) -> tuple[Optional[str], Optional[dict]]:

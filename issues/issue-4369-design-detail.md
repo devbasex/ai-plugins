@@ -548,7 +548,7 @@ contracts/
 | `--pr` | `--base` | 対象 |
 | --- | --- | --- |
 | 無し | 無し | 今のまま（`pulls_by_head` の開いた PR の先頭） |
-| 無し | あり | `open_pulls_of_head` のうち宛先が `--base` の PR |
+| 無し | あり | `open_pulls_of_head` に `--base` を渡して宛先を GitHub 側で絞り、見つかった 1 件 |
 | あり | 任意 | その番号の PR。head・宛先（`--base` があれば）・リポジトリ・状態を確かめる |
 
 ### 異常系の処理

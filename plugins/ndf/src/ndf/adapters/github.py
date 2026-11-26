@@ -418,14 +418,14 @@ class GitHub:
         got = self.aliased({b: selection.format(graphql_string(b), PULLS_PER_HEAD, PULL_FIELDS) for b in wanted})
         return {b: [Pull.from_graphql(p) for p in got[b]["nodes"]] if got[b] else [] for b in wanted}
 
-    def open_pulls_of_head(self, branch: str, enough: int) -> list[Pull]:
+    def open_pulls_of_head(self, branch: str, enough: int, base: Optional[str] = None) -> list[Pull]:
         """head のブランチが `branch` で、このリポジトリの開いた PR（フォークの同名ブランチを除く。新しい順）。
 
-        取得の時点で開いた PR に絞り、同じリポジトリの候補が `enough` 件そろうか一覧を読み終えるまでページを送る
+        取得の時点で開いた PR に絞り（`base` があればマージ先も GitHub 側で絞る）、同じリポジトリの候補が `enough` 件そろうか一覧を読み終えるまでページを送る
         （候補が 1 件だけかを、取得の範囲から外れた古い PR で取り違えない）。`github.list-pages` ページを超えたら `GitHubError`。
         """
         pages = _page_cap("github.list-pages")
-        variables: dict[str, Any] = {"head": branch, "after": None}
+        variables: dict[str, Any] = {"head": branch, "base": base, "after": None}
         found: list[Pull] = []
         for _ in range(pages):
             conn = self.repository(_OPEN_HEAD_PAGE, variables)["pullRequests"]
@@ -880,11 +880,11 @@ _ISSUE_PAGE = (
     " totalCount pageInfo { hasNextPage endCursor } nodes { number } } } }"
 )
 
-# head のブランチの開いた PR の 1 ページ（`GitHub.open_pulls_of_head`。新しい順）。1 ブランチ専用の照会なので、
+# head のブランチの開いた PR の 1 ページ（`GitHub.open_pulls_of_head`。新しい順。`$base` が null ならマージ先で絞らない）。1 ブランチ専用の照会なので、
 # フォークの同名ブランチが先に並んでも往復が増えないよう、上限の件数（`PER_PAGE`）で読む
 _OPEN_HEAD_PAGE = (
-    "query($owner: String!, $name: String!, $head: String!, $after: String) {"
-    f" repository(owner: $owner, name: $name) {{ pullRequests(headRefName: $head, states: [OPEN], first: {PER_PAGE},"
+    "query($owner: String!, $name: String!, $head: String!, $base: String, $after: String) {"
+    f" repository(owner: $owner, name: $name) {{ pullRequests(headRefName: $head, baseRefName: $base, states: [OPEN], first: {PER_PAGE},"
     f" after: $after, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {PULL_FIELDS} }} }} }} }}"
 )
 
