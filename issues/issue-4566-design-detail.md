@@ -2,6 +2,8 @@
 
 [設計文書](./issue-4566-design.md)の「構成要素」を、ファイルと関数の単位まで下ろした文書である。受け入れ条件の番号は[要求仕様](./issue-4566-requirements.md)を指す。パスは、特に書かなければ `plugins/ndf/` からの相対である。
 
+`--work` は `ndf refactor run` の今の引数で、対象のリポジトリの中の位置（呼び出し元の作業ツリー。既定は `.`）を渡す。担当の AI が書く作業場所（`rf<PR>/work`）とは別のものである。
+
 **この文書は、Issue #4566（ https://github.com/devbasex/ai-plugins/issues/4566 ）の実装が満たす仕様を定める。** 既存のコードを変える所は、表の「種類」の列の「変更」と、各セクションの説明で示す。
 
 ## 地図
@@ -166,7 +168,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `protected_of` | `protected_decide.py` | 新設 | `protected_of(tree: Mapping[str, str \| None], commands: Sequence[str], declared: Sequence[str], search: Sequence[str] = ()) -> Protected` | ツリー（パス → リンク先）から、保護するファイルの判定を組む |
+| `protected_of` | `protected_decide.py` | 新設 | `protected_of(tree: Mapping[str, str \| None], commands: Sequence[str], declared: Sequence[str], search: Sequence[str] = ()) -> Protected` | ツリー（パス → リンク先）から、保護するファイルの判定を組む。`declared` には設定 `test.protected_files` の指定を渡す |
 | `inside_work` | `protected_decide.py` | 新設 | `inside_work(commands: Sequence[str], roots: Sequence[str]) -> tuple[str, ...]` | `roots` の配下を指す絶対パスの語を返す |
 | `narrow` | `protected_decide.py` | 新設 | `narrow(scope: Sequence[str], tracked: Sequence[str], protected: Protected) -> tuple[str, ...]` | 保護しないファイルを 1 つも含まない指定を対象範囲から外す |
 | `verify_final_fix` | `final_gate_decide.py` | 変更 | `verify_final_fix(changed_by_commit, target_scope, excluded: Callable[[str], bool] \| None = None)` | `excluded` が真のファイルは、範囲の中でも範囲の外として扱う |
@@ -241,9 +243,9 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | 6 | 合格 | `git push <リモート> <SHA>:refs/heads/<ブランチ>`。受け付ければ終了 |
 | 7 | push の拒否で、取り直したリモートの先頭が変わっていて、周が残る | 次の周 |
 | 8 | push の拒否で、ほか | `push_rejected` |
-| 9 | 不合格の終了コードに 126・127 があり、取り込んだ先頭が合格の記録に無い（周が残らなくても当てる） | 先頭だけをテストする。126・127 なら `precondition`、ほかで落ちれば `test_failed`、合格なら記録して順 10 へ |
+| 9 | 不合格の終了コードに 126・127 があり、取り込んだ先頭が合格の記録に無い。周が残っていなくても、この行を適用する | 取り込んだ先頭（この実行のコミットを載せない状態）だけでテスト全体を打ち、失敗が元からあるかを見分ける。126・127 なら `precondition`、ほかで落ちれば `test_failed`、合格なら組を記録して順 10 へ |
 | 10 | 不合格で、周が残らない | `test_failed` |
-| 11 | 不合格で、取り込んだ先頭が合格の記録に無く、その先頭だけのテストも落ちる | 126・127 なら `precondition`、ほかは `test_failed`（どちらも直さない） |
+| 11 | 不合格（126・127 を含まない）で、周が残り、取り込んだ先頭が合格の記録に無い | 順 9 と同じく、取り込んだ先頭だけでテスト全体を打つ。落ちれば、126・127 なら `precondition`、ほかは `test_failed`（どちらも直さない）。合格なら組を記録して順 12 へ |
 | 12 | ほか | `fix_or_undo` で直し、`check_fix`（保護するファイルは範囲の外）で確かめて次の周 |
 
 - 繰り返しの終わる条件: 周は `max_fix + 1` 回まで
@@ -299,7 +301,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `drive` | ロックを取れない | 同じ PR の実行が動いている | 状態を読む前 | 止める | `precondition` | 何も変えない。終わってから打ち直す |
-| `protection_at` | テストのコマンドが `--work` の配下を絶対パスで指す | 検証用の作業場所ではないコードをテストする指定 | 提案の前と、取り込んだ先頭の設定を読むとき | 止める | `precondition`。`suite_label` の呼び名と、当たった設定のキー（`command` か `scope_command`）と、相対パスで書くこと。語そのものは載せない | 送らない。設定を直して打ち直す |
+| `protection_at` | テストのコマンドが `--work` の配下を絶対パスで指す | 検証用の作業場所ではないコードをテストする指定 | 提案の前と、取り込んだ先頭の設定を読むとき | 止める | `precondition`。停止の理由の文に、`suite_label` の呼び名、当たった設定のキー（`command` か `scope_command`）、「リポジトリの中のファイルは相対パスで指す」という直し方の案内を載せる。当たった語そのものは載せない | 送らない。設定を直して打ち直す |
 | `settings_at` | 設定が JSON でない | 設定の誤り | 読み取り | 止める | `precondition` | 直して打ち直す |
 | `verify_tree` | 作成か lock の失敗 | git の失敗 | `local_gate` | 呼び出し元へ返す | `precondition` | 記録に残り、次の実行が片付ける |
 | `verify_tree` | 取り除けない | ファイルの権限など | 終了時 | 理由を標準エラーへ出して続ける | 結果は変えない | 記録に残し、次の実行か `release` が片付ける |
@@ -405,7 +407,7 @@ s=$(cat "$2") && [ -n "$s" ] && git fetch -q -- "$1" "refs/heads/$0" && git merg
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `final_fix` | `prompt_decide.py` | 変更 | `final_fix(pr: int, scope: Sequence[str], failed: Sequence[str], *, local: bool = False) -> str` | `local` なら「手元で次のテストが落ちた」と書く。`local` の `failed` は `fix_excerpt` の結果で、載せる項目と上限は設計書の「テストのコマンドと出力の扱い」にある。`local` では、指示文全体を UTF-8 で 60,000 バイト（定数 `PROMPT_BYTES`、`prompt_decide.py`）以下にする。`failed` は順に、全体が収まる間だけ丸ごと載せ、収まらないものは載せずに「ほかに N 件が失敗した」と件数だけを書く。60,000 バイトは、Linux が引数 1 つに許す 131,072 バイトに、起動の側が後ろに足す文の余りを見込んだ値である。件数の文のほかに、`final_fix` は渡されたもの以外の情報を足さない |
+| `final_fix` | `prompt_decide.py` | 変更 | `final_fix(pr: int, scope: Sequence[str], failed: Sequence[str], *, local: bool = False) -> str` | `local` なら「手元で次のテストが落ちた」と書く。`local` の `failed` は `fix_excerpt` の結果で、載せる項目と上限は設計書の「テストのコマンドと出力の扱い」にある。`local` では、指示文全体を UTF-8 で 60,000 バイト（定数 `PROMPT_BYTES`、`prompt_decide.py`）以下にする。`failed` は先頭から順に 1 件ずつ丸ごと載せる。1 件でも収まらなければ、その件と以降の件は載せず、「ほかに N 件が失敗した」と件数だけを書く。60,000 バイトは、Linux が引数 1 つに許す 131,072 バイトから、起動の側が指示文の後ろに足す文の分の余裕を引いた値である。件数の文のほかに、`final_fix` は渡されたもの以外の情報を足さない |
 
 ### 単体テストの観点
 
