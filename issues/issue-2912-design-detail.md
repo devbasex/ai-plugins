@@ -1,6 +1,6 @@
 # #2912 の詳細設計: 設計の判断の検査と MVV 判定の表の確かめ
 
-設計文書 [issues/issue-2912-design.md](./issue-2912-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 2 つ以上あり、既存の関数のシグネチャも変える（`patch_material` に行数の引数を足す）ため、別ファイルにした。決定の中身と受け入れ条件の文は、設計文書と要求仕様（[issue-2912-requirements.md](./issue-2912-requirements.md)）を指す。
+設計文書 [issue-2912-design.md](./issue-2912-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 2 つ以上あり、既存の関数のシグネチャも変える（`patch_material` に行数の引数を足す）ため、別ファイルにした。決定の中身と受け入れ条件の文は、設計文書と要求仕様（[issue-2912-requirements.md](./issue-2912-requirements.md)）を指す。
 
 ## 地図
 
@@ -319,7 +319,7 @@ experimental/ndf/
 | 工程のステップ `design-review` の `with.plan` | 設定値 | `workflow/stages/design.json` | `cross-review` → `document-review` |
 | 工程のステップ `docs-review` の `with.plan` | 設定値 | `workflow/stages/document-review.json` | `cross-review` → `document-review` |
 
-コードレビューの工程のステップ（`subject: code`）と、テンプレート `cross-review` は変えない。工程から組むときの `review`・`worker` の差し込みは、今の `cross-review` と同じ経路（`progress.invoke.template_values` の `_fill_review`）で埋まり、`base` は `route.derived_locally` が埋める。
+コードレビューの工程のステップ（`subject: code`）と、テンプレート `cross-review` は変えない。工程から組むときの `review`・`worker` の差し込みは、今の `cross-review` と同じ経路（`progress.invoke.template_values` の `_fill_review`）で埋まる。`base` は `route.derived_locally` が埋める。
 
 ### 単体テストの観点
 

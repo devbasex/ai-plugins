@@ -38,7 +38,10 @@
 ### Task 1: 触る振る舞いを退行テストで縛る
 
 - **対象ファイル:** `plugins/ndf/tests/domains/records/test_mvv_material.py`・`plugins/ndf/tests/route/test_flows.py`・`plugins/ndf/tests/domains/records/test_mvv_gate.py`
-- **変更内容:** 変える前の振る舞いのうち、変えずに残すものをテストで縛る。`patch_material` が 200 行で切ること、`design` のプランの `ci-fix`・`base-sync`・`fix-base`・`fix-push-reviewed` の後が push へ進むこと（後のタスクで行き先だけを変える）、`gate` の省く判定が `target` を持ち、省かない判定が持たないこと。今あるテストで縛れていれば足さない
+- **変更内容:** 変える前の振る舞いのうち、変えずに残す次の 3 つをテストで縛る。今あるテストで縛れていれば足さない
+  - `patch_material` が 200 行で切ること
+  - `design` のプランの `ci-fix`・`base-sync`・`fix-base`・`fix-push-reviewed` の後が push へ進むこと（後のタスクで行き先だけを変える）
+  - `gate` の省く判定が `target` を持ち、省かない判定が持たないこと
 - **満たす受け入れ条件:** 8
 - **進め方:** 今のコードで通ることを確かめてからコミットする（機能追加の最初のタスク）
 
