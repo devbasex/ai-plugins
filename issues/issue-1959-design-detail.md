@@ -34,7 +34,7 @@ src/ndf/
 | パス | 種類 | 役割 | 依存する先 | クラスまたはモジュール | 新設（N）と変更（C） |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/adapters/launch_settings.py` | 新設 | 起動の設定を読んで検証し、起動 1 回の指定を返す | launch_approval・agents・git・contracts | `Settings`・`StepSpec`・`Grant` | N: `load`・`step_spec`・`check_definitions`・`approval_target`・`prepared`・`safety_args` |
-| `src/ndf/adapters/launch_approval.py` | 新設 | 承認のハッシュと記録を持つ | identity・git | モジュール | N: `repo_key`・`digest`・`approved`・`append`・`put_question`・`record_answer`・`approve_by_answer`・`pending_request`・`new_candidate`・`reflect`・`reflected` |
+| `src/ndf/adapters/launch_approval.py` | 新設 | 承認のハッシュと記録を持つ | identity・git | モジュール | N: `repo_key`・`digest`・`approved`・`append`・`put_question`・`record_answer`・`approve_by_answer`・`pending_request`・`new_candidate`・`reflect`・`recover`・`reflected` |
 | `src/ndf/adapters/secret_forms.py` | 新設 | 秘密の形の表と、当たる文字列を伏せる処理 | — | モジュール | N: `SECRET_VALUE`・`ASSIGNED_SECRET`・`MASK`・`redact`（`domains/project/secret.py` から移す） |
 | `src/ndf/domains/project/secret.py` | 変更 | 移した表と処理を `secret_forms` から読み込む | secret_forms | モジュール | C: 定義の移動 |
 | `src/ndf/adapters/claude.py` | 変更 | 起動の引数と結果 | launch_settings | `ClaudeCall`・`ClaudeReply`・`LaunchOptions`・`LaunchRecorder` | C: `permission_args`・`_full_args`・`call_claude`・`_precheck`・`_parse_reply`・`context_window`・`_accounted`。N: `main_model`・`set_launch_recorder`・`report_launch` |
@@ -99,7 +99,7 @@ src/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `load` | 読めない・形が違う | JSON でない、スキーマに合わない、`load` が英字だけの名前でない、`allow` の形か指定子が秘密の形（`secret_forms.redact` が伏せる値。代入の値が `$` で始まる参照は除く）、`mcp` が絶対パスか根の外 | 読んだ直後 | 呼び出し元へ返す | `stopped`・`precondition` | 後始末なし。直して再実行できる |
-| `load` | 反映の途中 | 反映先が無く `launch.json.reflecting` がある | 読む前 | 呼び出し元へ返す | `stopped`・`precondition`。`approve` の打ち直しを載せる | 打ち直しが戻してから反映する |
+| `load` | 反映の途中 | 反映先が無く `launch.json.reflecting` がある | 読む前 | 呼び出し元へ返す | `stopped`・`precondition`。`approve` の打ち直しを載せる | 打ち直しが退避を片付けてから照らす |
 | `check_definitions` | 定義ファイルの誤り | 無い、JSON のオブジェクトでない、`mcpServers` の形、`command` も `url` も無い | 読んだ直後 | 呼び出し元へ返す | 同上 | 同上 |
 | `approval_target` | ハッシュを計算できない | ほかの工程が指す定義ファイルが読めない | 定義を読むとき | 呼び出し元へ返す | 同上（そのファイルを示す） | 同上 |
 | `prepared` | 未承認 | 書き換え、このマシンで未承認、取り消し | `launch_approval.approved` | 止める | `precondition`。承認の対象の一覧と `/ndf:launch-config` を載せる | コピーを作らない。承認して再実行 |
@@ -147,7 +147,8 @@ src/ndf/
 | `approve_by_answer` | 同 | 新設 | `approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]` | `reflect` か自分が取ったロックの中で、依頼の答えを設計書の「人の確認」の条件の表で照らし、承認の行を足して承認者を返す。同じ依頼の承認の行があり承認済みなら、行を足さずに承認者を返す |
 | `pending_request` | 同 | 新設 | `pending_request(repo: str, target: Path) -> Optional[Mapping]` | その反映先で「承認する」と答えがあり、反映が済んでいない使える依頼を返す |
 | `new_candidate` | 同 | 新設 | `new_candidate(repo: str, target: Path) -> Path` | `launch-candidates/<キーのハッシュ>/<一意な値>/` に候補（反映先の写し）と、反映先・反映元の版の記録を作る。反映先の worktree が無い候補と完了の記録、「承認しない」の依頼の候補を消す |
-| `reflect` | 同 | 新設 | `reflect(candidate: Path, record: Callable[[], None]) -> bool` | 承認の記録のロックの中で、残った退避を戻してから、反映先を反映元の版と候補に照らす。版が同じなら `record` を呼び、設計書の「置き換えの手順」で置き、完了の記録を書いてから使えなくなった候補を消す。候補と同じなら完了の記録を書いて真、どちらでもないか途中で保存を見つけたら偽 |
+| `reflect` | 同 | 新設 | `reflect(candidate: Path, record: Callable[[], None]) -> bool` | 承認の記録のロックの中で、`recover` を呼んでから、反映先を反映元の版と候補に照らす。版が同じなら `record` を呼び、設計書の「置き換えの手順」で置き、完了の記録を書いてから使えなくなった候補を消す。候補と同じなら完了の記録を書いて真、どちらでもないか途中で保存を見つけたら偽 |
+| `recover` | 同 | 新設 | `recover(target: Path) -> Optional[Path]` | 承認の記録のロックの中で、設計書の「退避が残っている場合の判定」の表のとおりに退避と反映の途中の記録を片付ける。利用者の保存を別の名前で残した場合はそのパスを返す |
 | `reflected` | 同 | 新設 | `reflected(candidate: Path, sha256: str, request_id: Optional[str]) -> bool` | 候補が無い打ち直しで、完了の記録と反映先の中身を照らす。何も書かない |
 
 - このモジュールは hook から読むので、モジュールの頭では標準ライブラリと `identity` だけを読み込む
@@ -192,7 +193,7 @@ src/ndf/
 | `prepared` | `tempfile.mkdtemp` | 標準ライブラリ | 使う（状態の保存先の下に作る） |
 | `launch_costs`・`main_model` | `claude.context_window` の主モデルの選び方 | `adapters/claude.py` の 449 行の付近 | `main_model` に切り出して両方が使う |
 | `report_launch`・`set_launch_recorder` | `set_relay_checks` | `adapters/claude.py` | 同じ差し込みの形にする |
-| `step_spec`・`digest`・`approved`・`new_candidate`・`reflect`・`pending_request` | 起動の設定と承認を扱う関数 | `grep -rn "approval\|launch.json" src/ndf` | 同じ役割は無い（マージの承認の証跡 `core/merge_approval.py` は PR のコメントが対象）。新設する |
+| `step_spec`・`digest`・`approved`・`new_candidate`・`reflect`・`recover`・`pending_request` | 起動の設定と承認を扱う関数 | `grep -rn "approval\|launch.json" src/ndf` | 同じ役割は無い（マージの承認の証跡 `core/merge_approval.py` は PR のコメントが対象）。新設する |
 | `put_question`・`record_answer`・`check` | `guards/ask.py`・`ask_clear.py` | `ls src/ndf/domains/hooks/guards` | 質問の転送と後片付けで、答えは残さない。guard の形だけ使う |
 | `approve_by_answer` | `filelock.FileLock` | `domains/records/jsonl.py` の使い方 | 使う |
 | `main`・`_show`・`_approve`・`_confirm_terminal`・`_revoke`・`_draft` | `contracts.result`・`ndf.cli` のサブコマンドの形 | `src/ndf/cli.py` | 結果 JSON の組み立てを使う |
@@ -217,7 +218,7 @@ src/ndf/
 
 - `_approve`
   - 事前条件: `--sha256` が必須
-  - 事後条件: 候補（`--candidate`）があるときは `reflect` の中で承認の行を足し、設計書の「置き換えの手順」で反映する。反映先が変わっていれば、行を足さず、置き換えずに拒む。候補の承認の対象が空か承認済みなら、問いを求めず、承認の行も書かずに同じ照らし方で置き換える。`NDF_AI_CHILD` があれば、この場合も拒む。`--candidate` があるときは、今の `.ndf/launch.json` を設定として解析せず、版のハッシュだけを取る。候補のファイルが無ければ、`NDF_AI_CHILD` が無いことを確かめて `reflected` で判断し、人の確認を求めず、何も書かない
+  - 事後条件: 候補（`--candidate`）があるときは `reflect` の中で承認の行を足し、設計書の「置き換えの手順」で反映する。反映先が変わっていれば、行を足さず、置き換えずに拒む。候補の承認の対象が空か承認済みなら、問いを求めず、承認の行も書かずに同じ照らし方で置き換える。`NDF_AI_CHILD` があれば、この場合も拒む。`--candidate` があるときは、今の `.ndf/launch.json` を設定として解析せず、版のハッシュだけを取る。候補のファイルが無ければ、`NDF_AI_CHILD` が無いことを確かめて `reflected` で判断し、人の確認を求めず、何も書かない。`--candidate` が無いときも、承認の対象を読む前に `recover` を呼ぶ
   - 副作用: 承認の記録、`.ndf/launch.json`、候補の削除、標準入力の読み取り（端末のときだけ）
 - `delegate_run_cli.main`
   - 事後条件: 成功すると戻らず、CLI がこのプロセスを置き換える。失敗は `InternalError` をここで受け、標準エラーへ書いて 0 以外で終える（`ndf.cli` の結果 JSON が標準出力へ出ないようにする）
@@ -232,8 +233,8 @@ src/ndf/
 | `_approve` | 内容が違う | `--sha256` といまの対象の不一致 | 計算の直後 | 止める | `stopped`・`refused` | 記録も反映もしない |
 | `_approve` | 人の確認が無い | `NDF_AI_CHILD`、端末でなく答えも無い | 確認の順 | 止める | `stopped`・`refused` | 同上 |
 | `_approve` | 反映先が変わった | 候補を作った後の別の作業の保存 | `reflect` | 止める | `stopped`・`refused`。候補を作り直すよう載せる | 行も反映もしない。`draft` からやり直す |
-| `_approve` | 反映できない | `.ndf/launch.json` の名前の変更か書き込みの失敗 | `reflect` | 退避を戻して呼び出し元へ返す | `stopped`・`precondition`。承認の行は残る | 同じコマンドを打ち直すと、承認済みなので置き換える |
-| `_approve` | 置き換えの間に保存された | 利用者の手の保存 | `reflect` | 保存された中身を残して止める | `stopped`・`refused`。戻せなければ退避のパスを載せる | 承認の行は残る。`draft` からやり直す |
+| `_approve` | 反映できない | `.ndf/launch.json` の名前の変更か書き込みの失敗 | `reflect` | `recover` で片付けて呼び出し元へ返す | `stopped`・`precondition`。承認の行は残る | 同じコマンドを打ち直すと、承認済みなので置き換える |
+| `_approve` | 置き換えの間に保存された | 利用者の手の保存 | `reflect` | 保存された中身を残して止める | `stopped`・`refused`。別の名前で残した場合はそのパスを載せる | 承認の行は残る。`draft` からやり直す |
 | `_approve` | 候補が無く、反映も確かめられない | 完了の記録が無いか、反映の後に設定が変わった | `reflected` | 止める | `stopped`・`refused` | 何も書かない。`draft` からやり直す |
 | `_confirm_terminal` | 打ち間違い・中断 | ハッシュの不一致、EOF | 入力の比較 | None を返す | 呼び出し元が拒む | 打ち直せる |
 | `_revoke` | AI の中で呼ばれた | `NDF_AI_CHILD` | 頭 | 止める | `stopped`・`refused` | 記録しない |
@@ -247,7 +248,7 @@ src/ndf/
 | `_approve` | 端末の確認と、答えの確認 | 候補の対象が空 | 「承認しない」・使用済み・別のリポジトリ。拒んだ後に `.ndf/launch.json` が変わらない。同じ依頼で 2 回打つと行は 1 つで、2 回目も成功する。候補を作った後に反映先が変わると拒み、反映先を変えない |
 | `check` | 一致する問いの答えを記録 | 問いが無い | 4 つの環境変数のどれかがあれば記録しない |
 | `_draft`・`reflect` | 2 つの候補は別のファイル | 反映先のファイルが無い | 版が違う反映先は上書きしない |
-| `reflect`・`reflected` | 反映して候補を消した後の打ち直しが成功する | 退避だけが残った中断の後 | 照らした後の保存（名前の変更の前後に差し込む）が残る。反映の後に変えた設定の打ち直しは拒む |
+| `reflect`・`recover`・`reflected` | 反映して候補を消した後の打ち直しが成功する。候補を置いた直後の中断の後の打ち直しが成功する | 退避だけが残った中断、反映の途中の記録だけが残った中断 | 照らした後の保存（名前の変更の前後に差し込む）が残る。置いた直後の中断で退避の側が書き換わっていれば拒んで戻す。反映先と退避の両方が利用者の中身なら両方残る。反映の後に変えた設定の打ち直しは拒む |
 | `_show` | 続きのコマンドが出る | 依頼から長くたった答え | 4 つの環境変数があれば問いでなく端末のコマンド |
 | `delegate_run_cli.main`・`build_command` | `{args}` に引数が入り、子の環境に `NDF_AI_CHILD` がある（`exec` は差し替える） | 引数が 0 個 | 停止と読み直しの食い違いで `exec` を呼ばない。`{args}` が無い・別の CLI は拒む |
 

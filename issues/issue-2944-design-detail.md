@@ -69,7 +69,7 @@ src/ndf/
 | `contracts/domains/claude-failures.json` | `model_refused` の行（どの呼び出し元の停止理由も `precondition`） |
 | `contracts/domains/runtimes.json` | codex の `usage_args: ["--json", "-o", "{answer}"]`、モデルと effort の引数の形 |
 | `contracts/domains/env.json` | `NDF_UNIT_ID`・`NDF_CHARGE_TO`・`NDF_RETRY_CAUSE`・`NDF_LAUNCH_MODEL`・`NDF_LAUNCH_EFFORT`・`NDF_LAUNCH_CODEX_MODEL`・`NDF_LAUNCH_CODEX_EFFORT`・`CLAUDE_CODE_EFFORT_LEVEL` |
-| `contracts/domains/ndf-files.json` | `launch-experiments-<YYYY-MM>.jsonl`・`launch-weights.json`（保存先は使用量ログと同じ） |
+| `contracts/domains/ndf-files.json` | `launch-experiments-<YYYY-MM>.jsonl`・`launch-weights.json`・`launch-pruned`（保存先は使用量ログと同じ） |
 | `contracts/schemas/ndf-settings/launch.schema.json` | `experiments` のキー |
 | `contracts/schemas/internal/experiment.schema.json`（新設）・`usage.schema.json` | 実験の記録の行の形、使用量ログの足す欄 |
 | `contracts/schemas/io/models.*`・`docs/contracts/*.md` | 引数のスキーマと規約のページは生成し、結果のスキーマは手で書く |
@@ -95,7 +95,7 @@ src/ndf/
 | `read_rows` | 同 | 新設 | `read_rows(since: datetime, root: Optional[Path] = None) -> list[dict]` | `since` の月から今月までの実験の記録を読む（ロックを取らない） |
 | `ledger` | 同 | 新設 | `ledger(since: datetime, root: Optional[Path] = None) -> ContextManager[Ledger]` | 設計書の「読み書き」の順で、読んだ行（`rows`）と追記（`append`）を、実験の記録のロックの中で渡す |
 | `append_row` | 同 | 新設 | `append_row(row: Mapping) -> bool` | `ledger` を開いて 1 行足す |
-| `prune` | 同 | 新設 | `prune(now: datetime) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)に当たる月のファイルと出現率の項目を消す。呼ぶのは、`pick` が今月のファイルを排他的な作成で作れた場合（月に 1 回）だけである。失敗しても起動は続ける |
+| `prune` | 同 | 新設 | `prune(now: datetime) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)の月の掃除。`launch-pruned` の月が今月なら何もしない。違えば、古い月のファイルと出現率の項目を消し（出現率のファイルはロックの中で読み直してから変える）、全部成功したら今月を書く。`pick` が呼び、失敗しても起動は続ける |
 
 - `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm` を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄）を返す
 - `pick`
@@ -167,7 +167,7 @@ src/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `prune` | 古い月のファイルと項目が消える | 13 か月の境、年をまたぐ。今月のファイルがあれば呼ばれない | 消せなくても起動は続く |
+| `prune` | 古い月のファイルと項目が消え、`launch-pruned` が今月になる | 13 か月の境、年をまたぐ。今月のファイルが先にあっても掃除する。完了の記録が今月なら一覧を調べない | 削除に失敗すると `launch-pruned` を書かず、次の呼び出しがやり直す。起動は続く |
 | `table` | 工程とランタイムごとの置き換え | 選択肢 1 つ、`{}` の組 | 空の配列、同じ組、`floor` × 組の数 > 1、`min_units` 1、順位に無い effort |
 | `stage_of` | 表の各行 | 工程が「無し」の組 | 表に無い組 |
 | `pick` | 同じ単位は同じ組。並列でも 1 行 | `unit` なし、`enabled` 偽、片側の指定、割り付けの後の手動指定と選択肢の削除、月をまたぐ割り付け | 壊れた設定。記録を書けない場合 |
@@ -411,14 +411,14 @@ src/ndf/
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | 再開の処理が重なった `record_outcome` | 実験の記録 | 確認と追記を同じロックの中で行う | 指標の行は割り付け ID ごとに 1 つ。壊れて 2 行ある記録は、どの集計も先に書いた行だけを使う |
-| 複数の `refresh` | `launch-weights.json` | 計算はロックの外。書くときだけロックの中で読み直し、自分の項目を置き換える（一時ファイルから `os.replace`） | 後で書いた側が残る。同じ単位の集まりからは同じ値 |
+| 複数の `refresh` と `prune` | `launch-weights.json` | 計算はロックの外。書き換えるときは同じロックを取り、ロックの中で最新の内容を読み直してから変える（一時ファイルから `os.replace`） | 同じ項目の計算は後で書いた側が残る。掃除は期限を過ぎた項目だけを消すので、新しい項目は失われない |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `record_outcome` | 行が 1 つ、計算が呼ばれる | 前の計算から 1 時間以内。実際のモデルが項目と違えば 1 時間以内でも計算する | 2 回目は足さない。並べて呼んでも 1 行 |
-| `unit_values` | 手戻りの費用を含む | 費用 0 と不明は費用の平均から除き、効果は残す、期間を過ぎた割り付け直し | 別のリポジトリ、モデルが変わった単位 |
+| `unit_values` | 手戻りの費用を含む | 費用 0 と不明は費用の平均から除き、効果は残す、期間を過ぎた割り付け直し | 別のリポジトリ、モデルが変わった単位、モデルが切り替わって元に戻った場合の期限切れの境界 |
 | `probabilities` | 合計 1、下限以上 | `min_units` の前後、費用の分かる単位が 2 件未満 | 効果の下限を外れる安い組 |
 | `eliminated` | 0.99 を超える組 | 30 件の前後、期限の後に戻る | 基準は打ち切らない |
 | `judgement` | 4 つの表示 | 30 件ちょうど | そろって候補だった単位が無い |
