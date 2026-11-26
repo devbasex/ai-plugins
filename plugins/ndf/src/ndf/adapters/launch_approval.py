@@ -156,7 +156,9 @@ def _at_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def approval_row(repo: str, sha256: str, action: Action, approver: Optional[str] = None, request_id: Optional[str] = None) -> dict[str, Any]:
+def approval_row(
+    repo: str, sha256: str, action: Action, approver: Optional[str] = None, request_id: Optional[str] = None
+) -> dict[str, Any]:
     """承認の記録の 1 行。`approver` と `request_id` は承認の行にだけ置く。"""
     action = Action(action)
     row: dict[str, Any] = {"at": _at_now(), "repo": repo, "sha256": sha256, "action": str(action)}
@@ -272,7 +274,8 @@ def approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]:
     newer = any(r.get("target") == req.get("target") for r in requests[index + 1 :])
     moved = content_version(Path(req["target"])) not in (req.get("base"), req.get("candidate_version"))
     revoked = any(
-        r.get("action") == Action.REVOKE and r.get("repo") == repo and r.get("sha256") == sha256 and str(r.get("at")) >= req["at"] for r in approvals
+        r.get("action") == Action.REVOKE and r.get("repo") == repo and r.get("sha256") == sha256 and str(r.get("at")) >= req["at"]
+        for r in approvals
     )
     if answer != "approve" or newer or moved or revoked:
         return None
@@ -331,7 +334,13 @@ def reflect(candidate: Path, record: Callable[[], None], sha256: str, request_id
     with records_lock(state_file(APPROVALS)):
         recover(target)
         now, wanted = content_version(target), content_version(candidate)
-        rec = {"candidate": candidate.parent.name, "base": source.get("base"), "content": wanted, "sha256": sha256, "request_id": request_id}
+        rec = {
+            "candidate": candidate.parent.name,
+            "base": source.get("base"),
+            "content": wanted,
+            "sha256": sha256,
+            "request_id": request_id,
+        }
         if now == wanted:
             _after_reflect(target, candidate, rec)
             return True
@@ -343,7 +352,9 @@ def reflect(candidate: Path, record: Callable[[], None], sha256: str, request_id
             placed = _replace(target, candidate, rec["base"])
         except OSError as exc:
             recover(target)
-            raise internal.InternalError("precondition", f"{target} へ反映できない（{type(exc).__name__}）。同じコマンドを打ち直す") from None
+            raise internal.InternalError(
+                "precondition", f"{target} へ反映できない（{type(exc).__name__}）。同じコマンドを打ち直す"
+            ) from None
         if not placed:
             recover(target)
             return False

@@ -38,7 +38,12 @@ def check(ctx, svc) -> Verdict:
     request = _request(svc.state_dir / _state_path("launch-questions"), sha, ctx.session_id)
     if request is None or not isinstance(label, str):
         return passing()
-    row = {"at": datetime.now(UTC).isoformat(timespec="seconds"), "request_id": request, "label": label, "question_id": ctx.payload.get("tool_use_id")}
+    row = {
+        "at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "request_id": request,
+        "label": label,
+        "question_id": ctx.payload.get("tool_use_id"),
+    }
     _append_answer(svc.state_dir / _state_path("launch-answers"), row)
     return passing(launch_answer="recorded")
 

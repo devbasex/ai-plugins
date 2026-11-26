@@ -36,7 +36,7 @@ Claude Code・Codex から呼ばれる hook の入出力である。SSOT は `co
 
 | 読む入力のキー | 無くてよいキー | 公開か |
 | --- | --- | --- |
-| `session_id`・`cwd`・`hook_event_name`・`tool_name`・`tool_input` | `transcript_path`・`tool_response`・`tool_use_id`・`agent_id` | 内部（予告なく変えてよい） |
+| `session_id`・`cwd`・`hook_event_name`・`tool_name`・`tool_input` | `transcript_path`・`tool_response`・`tool_use_id`・`agent_id` | 公開 |
 
 判定 `advise` の出力:
 
@@ -192,7 +192,7 @@ Claude Code・Codex から呼ばれる hook の入出力である。SSOT は `co
 
 | 読む入力のキー | 無くてよいキー | 公開か |
 | --- | --- | --- |
-| `session_id`・`cwd`・`hook_event_name`・`tool_name`・`tool_input` | `transcript_path`・`turn_id`・`tool_response` | 内部（予告なく変えてよい） |
+| `session_id`・`cwd`・`hook_event_name`・`tool_name`・`tool_input` | `transcript_path`・`turn_id`・`tool_response` | 公開 |
 
 出力を持たない。
 

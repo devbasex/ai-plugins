@@ -8,7 +8,9 @@ from ndf.adapters import launch_approval as la
 
 from ._hooks import call_entry, sample
 
-QUESTION = {"questions": [{"question": "起動の設定を承認するか（リクエスト q1）", "header": "起動の承認", "options": [], "multiSelect": False}]}
+QUESTION = {
+    "questions": [{"question": "起動の設定を承認するか（リクエスト q1）", "header": "起動の承認", "options": [], "multiSelect": False}]
+}
 LABEL = la.APPROVE_LABEL.format("人")
 
 

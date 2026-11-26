@@ -24,7 +24,9 @@ def _worktree(tmp_path: Path, content: bytes | None = OLD) -> Path:
 
 
 def _question(request_id: str) -> dict:
-    return {"questions": [{"question": f"承認するか（リクエスト {request_id}）", "header": "起動の承認", "options": [], "multiSelect": False}]}
+    return {
+        "questions": [{"question": f"承認するか（リクエスト {request_id}）", "header": "起動の承認", "options": [], "multiSelect": False}]
+    }
 
 
 def _request(request_id: str, target: Path) -> dict:
@@ -33,7 +35,9 @@ def _request(request_id: str, target: Path) -> dict:
 
 def _answer(request_id: str, label: str) -> None:
     """hook `launch-answer` が書く行（リクエストの識別子・回答・質問の id）。"""
-    la.write_row(la.state_file(la.ANSWERS), {"at": "2026-11-26T00:00:00+00:00", "request_id": request_id, "label": label, "question_id": "toolu_1"})
+    la.write_row(
+        la.state_file(la.ANSWERS), {"at": "2026-11-26T00:00:00+00:00", "request_id": request_id, "label": label, "question_id": "toolu_1"}
+    )
 
 
 def _asked(target: Path, request_id: str = "q1", candidate: Path | None = None, label: str | None = la.APPROVE_LABEL.format("人")) -> None:
@@ -178,7 +182,13 @@ def _interrupted(tmp_path: Path) -> tuple[Path, Path, Path]:
     target = _worktree(tmp_path)
     candidate = _candidate(target)
     aside = target.with_name("launch.json.reflecting")
-    pending = {"candidate": candidate.parent.name, "base": la.content_version(target), "content": la.content_version(candidate), "sha256": SHA, "request_id": None}
+    pending = {
+        "candidate": candidate.parent.name,
+        "base": la.content_version(target),
+        "content": la.content_version(candidate),
+        "sha256": SHA,
+        "request_id": None,
+    }
     la.write_launch_record(la.reflected_file(target, la.PENDING), pending)
     os.rename(target, aside)
     target.write_bytes(NEW)
