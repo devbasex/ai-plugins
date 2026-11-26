@@ -4,6 +4,19 @@
 
 別ファイルにした理由: 新設する関数が 52（「関数の仕様」の表の `新設` の行から、型 13 とファイル 3 を除いて数えた）あり、シグネチャを変える既存の関数が 3 つ（`close_decide.verdict` の引数の名前と返り、`record.write_verification` の引数、`GitHub._read_permission` の返り）あるため（`requirements-design` の「詳細設計を別ファイルにする条件」）。型 `record_decide.Record` と `github.Authored` は項目を足すだけで、既定値を持つので今の呼び出しは変わらない。
 
+## 用語
+
+この文書は設計書の語をそのまま使う。読み違えやすい語を次に挙げる。
+
+| 用語 | 意味 |
+| --- | --- |
+| 本番の PR | 本番ブランチへマージした PR。`record --pr` に渡す |
+| 作業の PR | 本番の PR のマージに含まれた、個々の変更の PR |
+| 含めた PR | 本番の PR と作業の PR を合わせたもの（記録の `included`）。リリース記録はこのすべてのコメントに書く |
+| 記録の PR | 含めた PR のうち番号が最も小さい 1 本。リリース後テストの記録と対象の一覧の訂正の記録はここにだけ書き、閉じる判定もここを読む |
+| 正の `targets`（正の一覧） | 同じ値の記録が従う、今回の対象の配布先の一覧。記録の PR の、信用する書き手の最後の訂正の記録の一覧で、訂正が無ければ同じ値の最初の有効なリリース記録の一覧である（設計書の「正の `targets`」） |
+| 代表 | `records` が閉じる判定のために選ぶ 1 件のリリース記録。出力の `release` と、本文を読む PR の一覧（`included`）をこの記録から取る（設計書の「閉じる手順の読み取り」の手順 5） |
+
 構成要素は 2 回のリリース（設計書の決定 9）のどちらで出すかを、小見出しの最初の行の「出す回」に書く。1 回目は閉じる条件の除外と、バージョンの無いリリースとテストの記録、2 回目は種類の既定・モードごとの要否・設定の確かめ・流れの文書である。
 
 ## 地図
@@ -51,14 +64,14 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `plugins/ndf/src/ndf/domains/project/cli.py` | 変更 | 食い違いを `items` に足す | `progress.flow` | モジュール `cli` | `_check`（中身）・`_flow_items`（新設） |
 | `plugins/ndf/src/ndf/domains/records/close_decide.py` | 変更 | 条件ごとの扱い・`verified`・配布先ごとの判定 | `release.record_decide` | モジュール `close_decide` | `verdict`（返りを変える）・`Verdict`・`conditions_of`・`records_verdict`（新設） |
 | `plugins/ndf/src/ndf/domains/records/cli.py` | 変更 | `close-check` に `--records` と設定の読み取りを足す | `progress.flow`・`close_decide` | モジュール `cli` | `_close_check`（中身）・`_records_view`・`_add_close_check`（引数） |
-| `plugins/ndf/src/ndf/domains/release/record_decide.py` | 変更 | 記録の形・値と SHA の照合・対象の決め方・正の一覧・代表・判定に使う行・`to_test` | — | モジュール `record_decide` | `Record`（項目）・`Correction`・`Push`・`Confirmation` と下の「関数の仕様」の新設の関数 |
+| `plugins/ndf/src/ndf/domains/release/record_decide.py` | 変更 | 記録の形・値と SHA の照合・対象の決め方・正の一覧（同じ値の記録が従う対象の配布先の一覧）・代表（閉じる判定で `release` と `included` を取る 1 件のリリース記録）・判定に使う行・`to_test` | — | モジュール `record_decide` | `Record`（項目）・`Correction`・`Push`・`Confirmation` と下の「関数の仕様」の新設の関数 |
 | `plugins/ndf/src/ndf/domains/release/record.py` | 変更 | バージョンの無い記録の書き込みと訂正、閉じる手順の読み取り | `record_decide`・`adapters.github`・`adapters.git`・`httpx` | モジュール `record` | `write_unversioned`・`correct_targets`・`read_release`・`write_verification`（引数） ほか下の表 |
 | `plugins/ndf/src/ndf/domains/release/cli.py` | 変更 | 引数の受け口と結果の組み立て | `record` | モジュール `cli` | `cmd_record`・`cmd_records`・`cmd_verification_record`（中身）・`_record_args`（新設） |
 | `plugins/ndf/src/ndf/adapters/github.py` | 変更 | 照会できない権限を例外で返す読み方、push の記録・CD の実行の一覧・コメントの削除 | githubkit | クラス `GitHub`・`Authored` | `Authored.comment_id`（項目）・`permission`・`_read_permission`（中身）・`permission_strict`・`trusts_strict`・`branch_activity`・`workflow_runs`・`delete_comment` |
 | `scripts/contracts_lib/project_flow_doc.py` | 新設 | 流れの文書の生成した範囲を正本から作る | `contracts` のデータ | モジュール `project_flow_doc` | `render`・`replace_generated`・`mismatches` |
 | `scripts/check-ndf-contracts.py` | 変更 | `--write` で書き出し、引数なしで違いを違反にする | `project_flow_doc` | モジュール | `main`（引数）・`flow_doc_violations`（新設） |
 
-## 流れの設定の読み手
+## 流れの設定の読み取り
 
 満たす決定: 決定 1・2・4・8、受け入れ条件 1・3〜5・10・11・13、不変条件 I1・I4・I5
 
@@ -199,7 +212,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_check` | (a)〜(d) のそれぞれで箇所と理由が `items` に出る | 食い違いの無い設定で出ず、終了コードが変わらない | 形の誤りでも終了コードが変わらない |
+| `_check` | 受け入れ条件 10 の食い違いの 4 つ（(a) 知らない種類 `flow_unknown_kind`・(b) 無いモードか工程の名前 `flow_unknown_name`・(c) 閉じる条件の食い違い `flow_close_conflict`・(d) バージョンの食い違い `flow_version_conflict`）のそれぞれで箇所と理由が `items` に出る | 食い違いの無い設定で出ず、終了コードが変わらない | 形の誤りでも終了コードが変わらない |
 
 ## 閉じる判定
 
@@ -282,7 +295,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `production_deliveries` | `release/record_decide.py` | 新設 | `production_deliveries(rows: Sequence[Mapping]) -> list[Mapping]` | 決定 7 の「本番の配布先」の行 |
 | `glob_matches` | `release/record_decide.py` | 新設 | `glob_matches(pattern: str, path: str) -> bool` | git の pathspec の `:(glob)` と同じ一致（`**`・`*`・`?`・`[...]`、`*` は `/` を越えない） |
 | `targets_of` | `release/record_decide.py` | 新設 | `targets_of(rows: Sequence[Mapping], pr_paths: frozenset[str], push_paths: frozenset[str]) -> tuple[str, ...]` | 確かめ 3。`paths` を持たない配布先と、両方の差分に出るパスが当たる配布先 |
-| `push_of` | `release/record_decide.py` | 新設 | `push_of(activities: Iterable[Mapping], landed: frozenset[str]) -> Push \| None` | 「反映したコミットを含む push」の手順 2（`after` が集合にあり `before` が無い最初の更新。`after` が集合の外の更新で打ち切る） |
+| `push_of` | `release/record_decide.py` | 新設 | `push_of(activities: Iterable[Mapping], landed: frozenset[str]) -> Push \| None` | 「反映したコミットを含む push」の手順 2（アクティビティを新しい順に読み、`after` が集合にあり `before` が無い更新のうち最初に当たったもの。`after` が集合の外の更新に当たったら打ち切る） |
 | `authoritative_targets` | `release/record_decide.py` | 新設 | `authoritative_targets(found: Sequence[Record], corrections: Sequence[Correction], version: str) -> tuple[str, ...] \| None` | 「正の `targets`」。最後の訂正、無ければ同じ値の最初の記録の一覧。`found` は `--release`・`--unit` で絞る前の有効な記録を渡す |
 | `value_commit_conflict` | `release/record_decide.py` | 新設 | `value_commit_conflict(found: Sequence[Record], commit: str, version: str) -> tuple[str, str] \| None` | 確かめ 6。`value_pairs(found)` の組で、今回のコミットが別の値と組か、今回の値が別のコミットと組なら、その組の `(version, commit)` |
 | `value_pairs` | `release/record_decide.py` | 新設 | `value_pairs(found: Sequence[Record]) -> tuple[dict[str, str], list[Record]]` | 設計書の「値とコミットの組」。古い順にたどって値からコミットへの組と、有効な記録（組に合う記録とバージョン付きの記録）を返す。`authoritative_targets`・`has_unversioned`・`representative`・`complete_of` は有効な記録だけを受け取る |
@@ -451,7 +464,6 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `permission_strict` | `adapters/github.py` | 新設 | `permission_strict(self, login: str) -> str` | 上限でない 403・404 を `PermissionUnknown` にする。GitHub が 200 で返した値は `permission` と同じ保存（`_permissions`）に入れて 1 人 1 回にする |
 | `permission` | `adapters/github.py` | 変更 | 今と同じ | 返す値は今と同じ（403・404 は `none`）。ただし、403・404 で変換した `none` は `_permissions` に入れず、照会できなかった書き手の集合（`_unreadable`）に入れる。GitHub が返した `none` と、照会できずに `none` と読んだものを保存の上で分けるためである |
 | `_read_permission` | `adapters/github.py` | 変更 | `_read_permission(self, login: str) -> str \| None` | 上限でない 403・404 で `None` を返す（変換しない）。`none` への変換は `permission` が行う |
-
 | `trusts_strict` | `adapters/github.py` | 新設 | `trusts_strict(self, authored: Authored) -> bool` | `trusts` と同じ区分の扱いで、照会に `permission_strict` を使う |
 | `branch_activity` | `adapters/github.py` | 新設 | `branch_activity(self, branch: str) -> Iterator[dict]` | `GET /repos/{repo}/activity?ref=refs/heads/<branch>` を新しい順に 1 ページずつ返す（呼び出し元が打ち切れる） |
 | `workflow_runs` | `adapters/github.py` | 新設 | `workflow_runs(self, workflow: str, branch: str, commit: str, timeout: float \| None = None) -> list[dict]` | `GET /actions/workflows/<workflow>/runs?branch=&head_sha=`。`timeout` はこの照会の時間の上限（`None` は今の既定） |
