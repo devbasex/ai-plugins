@@ -284,7 +284,8 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `targets_of` | `release/record_decide.py` | 新設 | `targets_of(rows: Sequence[Mapping], pr_paths: frozenset[str], push_paths: frozenset[str]) -> tuple[str, ...]` | 確かめ 3。`paths` を持たない配布先と、両方の差分に出るパスが当たる配布先 |
 | `push_of` | `release/record_decide.py` | 新設 | `push_of(activities: Iterable[Mapping], landed: frozenset[str]) -> Push \| None` | 「反映したコミットを含む push」の手順 2（`after` が集合にあり `before` が無い最初の更新。`after` が集合の外の更新で打ち切る） |
 | `authoritative_targets` | `release/record_decide.py` | 新設 | `authoritative_targets(found: Sequence[Record], corrections: Sequence[Correction], version: str) -> tuple[str, ...] \| None` | 「正の `targets`」。最後の訂正、無ければ同じ値の最初の記録の一覧 |
-| `other_value_on_commit` | `release/record_decide.py` | 新設 | `other_value_on_commit(found: Sequence[Record], commit: str, version: str) -> str \| None` | 確かめ 6。同じコミットに別の値の記録があればその値 |
+| `value_commit_conflict` | `release/record_decide.py` | 新設 | `value_commit_conflict(found: Sequence[Record], corrections: Sequence[Correction], commit: str, version: str) -> tuple[str, str] \| None` | 確かめ 6。同じコミットに別の値の記録か、同じ値に別のコミットの記録があれば、その記録の `(version, commit)` |
+| `value_commit` | `release/record_decide.py` | 新設 | `value_commit(found: Sequence[Record], version: str) -> str \| None` | 値のコミット（同じ値の最初の記録の `commit`）。`authoritative_targets`・`has_unversioned`・`representative`・`complete_of` は、`commit` がこれと違う記録を数えない |
 | `has_unversioned` | `release/record_decide.py` | 新設 | `has_unversioned(found: Sequence[Record], version: str, environments: tuple[str, ...], targets: tuple[str, ...]) -> bool` | 重ねない判定（同じ値・同じ `environments`・正の `targets`） |
 | `confirm` | `release/record_decide.py` | 新設 | `confirm(delivery: Mapping, run: Mapping \| None, observed: Any, after: str) -> Confirmation` | 「配布先ごとの反映の確かめ」の表を 1 回評価する（`Confirmation(state, kind, reason, evidence: Evidence \| None)`。`state` は `ok`・`failed`・`pending`。`kind` が `observed` のときだけ `evidence` を持つ） |
 | `json_pointer` | `release/record_decide.py` | 新設 | `json_pointer(doc: Any, pointer: str) -> Any` | RFC 6901 の 1 つの値（無ければ `_MISSING`） |
@@ -312,6 +313,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
+| `value_commit_conflict` | 衝突の無い記録で None | 同じコミットを違う長さの SHA で書いた値で止まる | 2 つの SHA を含む同じ値を別のコミットで打つと止まる |
 | `value_matches` | `main abc1234` と SHA | 6 文字の語は数えない、大文字の 16 進 | 含まない値 |
 | `targets_of` | `paths` の無い配布先は常に入る | 移動の前のパスで当たる。push の差分に出ないパス（打ち消し）は入らない | 空の結果 |
 | `glob_matches` | `web/**` | `**/` が 0 段に当たる。`*` が `/` を越えない | — |
@@ -374,7 +376,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_confirm_delivery` | 未確定 | 実行が無い・未完了、`observe` で確かめられない、待ちの上限（`result.timeout_seconds`） | `confirm` | 呼び出し元へ返す（`pending`） | すべて未確定なら `precondition`（3）で `items` に理由 | その配布先だけで打ち直せる |
 | `_observe` | 読めない | 接続・HTTP の失敗、JSON でない | `httpx` の例外・`json` | 既定値で続ける（未確定の理由にする） | 上と同じ | 同上 |
 | `_write_one` | 投稿の失敗 | GitHub の失敗 | `Publisher.comment` | 止める（`GitHubError`） | `failed`（今の `release-steps` の失敗の形） | 打ち直すと、書けた PR は重ねない判定で飛ばす |
-| `_write_one` | 並行した書き込みに負けた | 手順 2 で正の `targets` か同じコミットの値が自分と違う | 読み直し | 自分のコメントを消して止める | `precondition`（3）。正の一覧か既にある値を載せる | 正しい引数で打ち直せる |
+| `_write_one` | 並行した書き込みに負けた | 手順 2 で正の `targets` か、値とコミットの対応が自分と違う | 読み直し | 自分のコメントを消して止める | `precondition`（3）。正の一覧か既にある値を載せる | 正しい引数で打ち直せる |
 | `_candidates`・`read_release` | 権限を照会できない | 403・404（上限でない） | `GitHub.permission_strict` | 止める（`PermissionUnknown`） | `failed`。照会できなかった書き手の名前を載せる | 閉じる手順は課題を閉じずに「失敗」と報告する |
 | `correct_targets` | 訂正できない | 宣言がある・同じ値の信用する記録が無い・引数の組の誤り | `correct_targets` | 止める | `precondition`（3） | 先に `record` を打つか、引数を直す |
 | `write_verification` | 書けない | `environments` が無い、反映の記録が無い配布先、記録の PR でない、不合格の組に `retest_reason` が無い | `write_verification` | 止める（`RecordError`・`RecordElsewhere`） | `precondition`（3）。記録の PR の番号か不合格の組を `items` に入れる | 直して打ち直せる |

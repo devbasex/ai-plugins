@@ -55,7 +55,7 @@
 
 #### Task 5: バージョンの無いリリース記録の確かめ（純粋な判定）
 
-- **対象ファイル:** `plugins/ndf/src/ndf/domains/release/record_decide.py`（`Push`・`value_matches`・`production_deliveries`・`glob_matches`・`targets_of`・`push_of`・`other_value_on_commit`・`has_unversioned`・`confirm`・`json_pointer`）、`test_release_record.py`
+- **対象ファイル:** `plugins/ndf/src/ndf/domains/release/record_decide.py`（`Push`・`value_matches`・`production_deliveries`・`glob_matches`・`targets_of`・`push_of`・`value_commit_conflict`・`value_commit`・`has_unversioned`・`confirm`・`json_pointer`）、`test_release_record.py`
 - **変更内容:** 確かめ 2・3・5・6・8 の判定と、`push` の決め方の手順 2。GitHub・git・HTTP を呼ばない
 - **満たす受け入れ条件:** 2・9（書く側の判定）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
