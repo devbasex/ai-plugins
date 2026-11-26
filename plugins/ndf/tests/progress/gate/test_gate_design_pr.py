@@ -129,7 +129,7 @@ def test_the_design_stage_finishes_with_the_design_pr_of_the_plan_items(st, env,
 
 
 def _old_approval(st, env, lane_sprint, flow):
-    """設計 PR を items から読まなかった版の承認（見た head が無い。課題 3092 を外した）を記録したスプリント。
+    """設計 PR を items から読まなかったバージョンの承認（見た head が無い。課題 3092 を外した）を記録したスプリント。
 
     （計画の ID, ステートマシンの ID, 回答の結果）を返す。"""
     pid, tid = lane_sprint("--issues", "3092", "5")
@@ -142,7 +142,7 @@ def _old_approval(st, env, lane_sprint, flow):
 
 
 def _consume_as_the_old_version(st, tid):
-    """前の版と同じく、承認を消費して承認ゲートのステップを済ませる（設計 PR のマージの前で止まった）。"""
+    """前のバージョンと同じく、承認を消費して承認ゲートのステップを済ませる（設計 PR のマージの前で止まった）。"""
     v = run.read(st, tid)
     m = run.decide(v)
     assert m.action == run.Action.CONSUME
@@ -169,7 +169,7 @@ def test_an_old_approval_without_the_design_pr_head_is_undone_and_asked_again(st
     assert "design-gate" not in done and "design-reading" not in done
     assert v.context()["issues"] == [3092, 5]
     assert _carried(st, pid, out["metrics"]["carried_row"]).state == lane.CANCELLED
-    # 読み手役の確認を今の設計 PR でやり直してから、設計 PR を載せて問い直す
+    # 読み手役の確認を今の設計 PR でやり直してから、設計 PR を載せて質問し直す
     flow.turn(tid, _like_the_plan(env))
     again = gate.waiting(run.read(st, tid))
     assert again is not None and again.gate == "design" and again.pr == DESIGN_PR

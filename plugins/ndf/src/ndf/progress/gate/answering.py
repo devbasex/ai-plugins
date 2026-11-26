@@ -78,10 +78,10 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
     資料は今の head を入れた質問の `material_path` で探す（資料は head ごとに別のファイル。#3959）。
 
     読み取りの回数（#4495 で設計承認ゲートも PR を持ち、増えた分）: 提示（`present`）と回答（`answer`）は PR 1 回とマージ先の
-    設定 1 回、回答を読む前の照合（`recheck`）は PR 1 回だけで、1 つの呼び出しの中で同じものを読み直さない。どれも承認を
+    設定 1 回、回答を読む前の確かめ（`recheck`）は PR 1 回だけで、1 つの呼び出しの中で同じものを読み直さない。どれも承認を
     設計 PR の head とマージ先に結び付け、本番へ反映されるかを決めるのに要る（無ければ対象の無い承認で設計 PR をマージする）。
     退けた代わりの案: (1) 提示で読んだ値を回答で使う — 提示の後に head かマージ先の設定が変わったことを回答で断れなくなる
-    （`_check_presented`）。(2) `ndf progress next` の照合で読んだ PR を同じコマンドの提示で使う — 間に流れるステップが PR へ
+    （`_check_presented`）。(2) `ndf progress next` の確かめで読んだ PR を同じコマンドの提示で使う — 間に流れるステップが PR へ
     push すると古い head を提示し、回答が必ず断られる。"""
     get_hub = shared_hub(cwd, hub)
 
@@ -468,7 +468,7 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     `ndf answer` が書いた回答（質問の id と見た対象を持つ）だけを比べる。どのサブコマンドでも、回答が読まれる前に打つ。待ちへ戻すのは承認ゲートのステップの
     待ちの記録で、回答はその後の回答だけが読まれる（`run.StepProgress`）。回答が課題を外していれば、同じトランザクションで
     文脈の `issues` を回答の前へ戻し、外した課題を入れたレーンの行を取り消す（回答し直しで同じ課題を外せる）。
-    設計 PR の head を見ずに記録した設計の承認（前の版の承認）は、対象と比べる前に、消費済みでもマージの前なら同じ取り消しで
+    設計 PR の head を見ずに記録した設計の承認（#4495 の直しの前のバージョンの承認）は、対象と比べる前に、消費済みでもマージの前なら同じ取り消しで
     待ちへ戻す（`_unbound_approval`・`_reopen_unbound`。#4495）。
     """
     v = run.read(st, machine_id)
@@ -518,7 +518,7 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
 
 
 # 対象に結び付かない設計の承認を待ちへ戻す理由（承認ゲートの待ちの記録に残る）
-UNBOUND_REASON = "設計 PR の head を見ずに記録した設計の承認（設計 PR を items から読まなかった版の承認）なので、今の設計 PR で承認し直す"
+UNBOUND_REASON = "設計 PR の head を見ずに記録した設計の承認（設計 PR を items から読まなかったバージョンの承認）なので、今の設計 PR で承認し直す"
 
 
 @dataclass(frozen=True)
@@ -533,12 +533,12 @@ class _Unbound:
 
 
 def _unbound_approval(v: run.View) -> Optional[_Unbound]:
-    """今の工程の設計承認ゲートの承認が、items から補った設計 PR の head を見ずに記録されたものなら、その承認（#4495 の前の版）。
+    """今の工程の設計承認ゲートの承認が、items から補った設計 PR の head を見ずに記録されたものなら、その承認（#4495 の直しの前のバージョン）。
 
-    今の版の回答は、設計 PR が特定できれば提示した対象（head を含む）を `seen` に記録する。items を読まなかった前の版は、
+    今のバージョンの回答は、設計 PR が特定できれば提示した対象（head を含む）を `seen` に記録する。items を読まなかった前のバージョンは、
     設計 PR が items にだけあると質問に PR が無く、head の無い承認を記録した。そのまま読むと対象に結び付かない承認で設計 PR の
     マージへ進むので、読む前（`run.Action.CONSUME`）と、消費して承認ゲートのステップが済んだ後でも後ろのステップ（マージ）が
-    済む前なら拾う。outputs に明示した設計 PR は前の版も質問に載せて head を記録したので、ここでは見ない。"""
+    済む前なら拾う。outputs に明示した設計 PR は前のバージョンも質問に載せて head を記録したので、ここでは見ない。"""
     m = run.decide(v)
     if m.stage is None or m.progress is None:
         return None
