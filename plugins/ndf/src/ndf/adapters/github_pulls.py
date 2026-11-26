@@ -1,8 +1,14 @@
-"""GitHub の PR と本文の読み取りの型（`ndf.adapters.github` が同じ名前で読み直す）。"""
+"""GitHub の PR と本文の読み取りの型と、マージ済みの PR の読み取り（型は `ndf.adapters.github` が同じ名前で読み直す）。"""
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple
+from collections.abc import Iterable
+from typing import Any, NamedTuple, Optional, Protocol
+
+from ndf.contracts import limits
+
+# 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は contracts/limits/ の github.check-runs・github.list-pages）
+PER_PAGE = 100
 
 PULL_FIELDS = (  # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
     "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation mergeCommit { oid }"
@@ -31,6 +37,25 @@ def account_id_of(raw: Any) -> int:
 def target_of(node: dict) -> tuple[str, str]:
     """GraphQL の PR の節点のマージ先のブランチと head の SHA（無ければ空文字）。"""
     return text_of(node.get("baseRefName")), text_of(node.get("headRefOid"))
+
+
+def graphql_string(value: str) -> str:
+    """GraphQL の文字列の値（JSON の文字列と同じ書き方）。"""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _from_fork(head: dict, base: dict) -> bool:
+    """REST の PR の head のブランチがほかのリポジトリ（フォーク）にあるか。head の `repo` のキーが無ければ偽。
+
+    head のリポジトリが null（消されたフォーク）なら真。
+    """
+    if "repo" not in head:
+        return False
+    if not isinstance(head["repo"], dict):
+        return True
+    ours = base.get("repo")
+    return isinstance(ours, dict) and text_of(head["repo"].get("full_name")).lower() != text_of(ours.get("full_name")).lower()
 
 
 class Authored(NamedTuple):
@@ -74,7 +99,7 @@ class Pull(NamedTuple):
     merge_sha: str = ""  # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
     queued: bool = False  # マージキューに入っているか（GraphQL で読んだときだけ分かる。REST では偽。#4409 の決定 8）
     title: str = ""  # PR の題（承認の質問の文を作る。#4446）
-    cross_repository: bool = False  # head のブランチがフォークにあるか（GraphQL で読んだときだけ埋める）
+    cross_repository: bool = False  # head のブランチがフォークにあるか
 
     @property
     def authored(self) -> Authored:
@@ -89,6 +114,7 @@ class Pull(NamedTuple):
             head_ref=text_of(head["ref"]), base_ref=text_of(base["ref"]), body=text_of(raw["body"]), title=text_of(raw.get("title")),
             merge_state=text_of(raw["mergeable_state"]).lower(), author=_login(raw["user"]),
             association=text_of(raw["author_association"]).upper(), merge_sha=text_of(raw.get("merge_commit_sha")) if raw["merged"] else "",
+            cross_repository=_from_fork(head, base),
         )  # fmt: skip
 
     @classmethod
@@ -101,3 +127,53 @@ class Pull(NamedTuple):
             merge_sha=text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
             cross_repository=bool(raw.get("isCrossRepository")),
         )  # fmt: skip
+
+
+class _Reader(Protocol):
+    """`merged_pulls` が使う読み取り（`ndf.adapters.github.GitHub` が満たす。import の輪を作らないための形）。"""
+
+    def aliased(self, selections: dict[str, str]) -> dict[str, Any]: ...
+    def repository(self, query: str, variables: dict[str, Any]) -> dict[str, Any]: ...
+    def too_many_pages(self, what: str, pages: int, name: str) -> Exception: ...
+
+
+# マージ済みの PR の 1 ページの中身（番号と、フォークから出たか）
+_MERGED_FIELDS = "pageInfo { hasNextPage endCursor } nodes { number isCrossRepository }"
+# head とマージ先で絞ったマージ済みの PR の続きのページ（新しい順）
+_MERGED_PAGE = (
+    "query($owner: String!, $name: String!, $head: String!, $base: String!, $after: String) {"
+    f" repository(owner: $owner, name: $name) {{ pullRequests(headRefName: $head, baseRefName: $base, states: [MERGED],"
+    f" first: {PER_PAGE}, after: $after, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ {_MERGED_FIELDS} }} }} }}"
+)
+
+
+def _merged_selection(head: str, base: str) -> str:
+    """`repository` の下の、最初のページの選択（`GitHub.aliased` へ渡す）。"""
+    return (
+        f"pullRequests(headRefName: {graphql_string(head)}, baseRefName: {graphql_string(base)}, states: [MERGED],"
+        f" first: {PER_PAGE}, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ {_MERGED_FIELDS} }}"
+    )
+
+
+def _own_number(hub: _Reader, head: str, base: str, conn: dict) -> Optional[int]:
+    """最初のページ `conn` から、このリポジトリのブランチから出た PR が見つかるか末尾に着くまで読んだ番号（無ければ None）。"""
+    pages = int(limits.value("github.list-pages", "count"))
+    for page in range(1, pages + 1):
+        number = next((int(n["number"]) for n in conn["nodes"] if not n["isCrossRepository"]), None)
+        if number is not None or not conn["pageInfo"]["hasNextPage"]:
+            return number
+        if page < pages:
+            variables = {"head": head, "base": base, "after": conn["pageInfo"]["endCursor"]}
+            conn = hub.repository(_MERGED_PAGE, variables)["pullRequests"]
+    raise hub.too_many_pages(f"ブランチ {head} のマージ済みの PR の一覧が", pages, "github.list-pages")
+
+
+def merged_pulls(hub: _Reader, heads: Iterable[str], base: str) -> dict[str, int]:
+    """head のブランチごとの、マージ先が `base` でフォークでないマージ済み PR の番号（新しいもの）。無い head はキーを持たない。
+
+    最初のページは head をまとめて読む。一覧はリポジトリで絞れないので、フォークの PR しか無い head は続きを読み、
+    `github.list-pages` ページを超えたら、未マージとは扱わずに失敗（`GitHubError`）にする。
+    """
+    first = hub.aliased({head: _merged_selection(head, base) for head in sorted(set(heads))})
+    found = {head: _own_number(hub, head, base, conn) for head, conn in first.items() if conn}
+    return {head: number for head, number in found.items() if number is not None}

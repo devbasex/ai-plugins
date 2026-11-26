@@ -73,11 +73,15 @@
         },
         "--branch": {
           "type": "string",
-          "description": "PR の head のブランチ（作業場所の HEAD を添える）"
+          "description": "PR の head のブランチ（作業場所の HEAD を添える）。--branch か --pr は必須"
         },
         "--pr": {
           "type": "integer",
-          "description": "PR の番号（作業場所が無くても打てる。マージ済みなら何もしない）"
+          "description": "PR の番号（単独なら作業場所が無くても打てる。マージ済みなら何もしない）。--branch・--base を添えると、違う PR をマージしない"
+        },
+        "--base": {
+          "type": "string",
+          "description": "期待するマージ先。対象の PR のマージ先が違えばマージしない"
         },
         "--repo": {
           "type": "string",

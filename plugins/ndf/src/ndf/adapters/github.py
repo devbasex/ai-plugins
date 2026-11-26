@@ -38,7 +38,7 @@ from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome,
 from ndf.adapters.github_merge import MERGE_COMMIT as MERGE_COMMIT
 
 # `Pull`・`Authored`・`text_of` は呼び手が github から読む名前でもある
-from ndf.adapters.github_pulls import PULL_FIELDS, Authored, Pull, account_id_of, target_of, text_of
+from ndf.adapters.github_pulls import PER_PAGE, PULL_FIELDS, Authored, Pull, account_id_of, graphql_string, target_of, text_of
 from ndf.adapters.github_rules import NO_RULES, RuleFacts, classic_facts_of, merge_facts, rule_facts_of
 from ndf.contracts import limits
 
@@ -46,8 +46,6 @@ T = TypeVar("T")
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")  # GraphQL のエイリアスで引ける番号つきの節点
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
-# 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は contracts/limits/ の github.check-runs・github.list-pages）
-PER_PAGE = 100
 # 認証の値を読む環境変数（先のものを優先する。利用者の手順へ渡さないときに消す名前も同じ）
 TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
 # GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く。#3506）
@@ -343,6 +341,9 @@ class GitHub:
                     raise
                 raise GitHubError.of(limited) from None
 
+    # ページの上限の失敗（このモジュールの外の一覧の読み手 `github_pulls.merged_pulls` も使う）
+    too_many_pages = staticmethod(_too_many_pages)
+
     def _owner_name(self) -> dict[str, str]:
         owner, name = self.repo.split("/", 1)
         return {"owner": owner, "name": name}
@@ -414,7 +415,7 @@ class GitHub:
         """head のブランチごとの PR（新しい順に 5 件まで）を 1 回のクエリ（100 件ごと）で読む。"""
         wanted = sorted(set(branches))
         selection = "pullRequests(headRefName: {}, first: {}, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ {} }} }}"
-        got = self.aliased({b: selection.format(_graphql_string(b), PULLS_PER_HEAD, PULL_FIELDS) for b in wanted})
+        got = self.aliased({b: selection.format(graphql_string(b), PULLS_PER_HEAD, PULL_FIELDS) for b in wanted})
         return {b: [Pull.from_graphql(p) for p in got[b]["nodes"]] if got[b] else [] for b in wanted}
 
     def open_pulls_of_head(self, branch: str, enough: int) -> list[Pull]:
@@ -893,7 +894,7 @@ def _visibility_query(repos: Sequence[str]) -> str:
     parts = []
     for i, repo in enumerate(repos):
         owner, name = repo.split("/", 1)
-        parts.append(f"{_alias(i)}: repository(owner: {_graphql_string(owner)}, name: {_graphql_string(name)}) {{ visibility }}")
+        parts.append(f"{_alias(i)}: repository(owner: {graphql_string(owner)}, name: {graphql_string(name)}) {{ visibility }}")
     return "query { " + " ".join(parts) + " }"
 
 
@@ -901,9 +902,3 @@ def _visibility_of(data: Any, i: int) -> str:
     """`_visibility_query` の応答の `i` 番目のリポジトリの公開範囲（大文字）。読めなければ `UNKNOWN`。"""
     node = data[_alias(i)] if isinstance(data, dict) and _alias(i) in data else None
     return text_of(node["visibility"]).upper() if isinstance(node, dict) else UNKNOWN
-
-
-def _graphql_string(value: str) -> str:
-    """GraphQL の文字列の値（JSON の文字列と同じ書き方）。"""
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
