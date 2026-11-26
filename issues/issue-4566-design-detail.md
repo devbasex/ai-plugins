@@ -185,7 +185,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | `refuse_dirty` | 同上 | 新設 | `refuse_dirty(g: git.Git) -> None` | 追跡ファイルに commit していない変更があれば `SyncRefused` |
 | `sync_worktree` | 同上 | 変更 | 今のまま | `refuse_dirty` → `fetch_tips` → `sync_fetched`。呼び出し元（cross-review と CI の経路）の振る舞いは変えない |
 | `write_private_log` | `workspace.py` | 新設 | `write_private_log(logs: Path, name: str, text: str) -> Path` | 実行ユーザーだけが読めるログを書く |
-| `sweep_gate_logs` | `workspace.py` | 新設 | `sweep_gate_logs(base: Path, keep: float, now: float) -> int` | 期限を過ぎた手元の最終ゲートのログを消し、件数を返す |
+| `sweep_gate_logs` | `workspace.py` | 新設 | `sweep_gate_logs(base: Path, repo_id: str, own: Path, keep: float, now: float) -> int` | 同じリポジトリの NDF が書いたと記録にある、期限を過ぎた手元の最終ゲートのログを消し、件数を返す |
 | `redact_output` | `local_gate.py` | 新設 | `redact_output(text: str) -> str` | コマンド、出力、suite の名前の認証情報を伏せる |
 | `suite_label` | `local_gate.py` | 新設 | `suite_label(index: int, name: str) -> str` | NDF の外や記録へ出す suite の呼び名を作る |
 | `fix_excerpt` | `local_gate.py` | 新設 | `fix_excerpt(failed: Sequence[Failed]) -> list[str]` | 指示文に載せる行を、伏せ字にして上限で切って作る |
@@ -210,8 +210,12 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
   - 異常: `logs/` がシンボリックリンクか、所有者が実行ユーザーでない、または権限を直せなければ、書かずに停止する
   - `run_suites` は、suite の出力をこの関数でだけ書く。渡すのは `redact_output` を掛けた文字列だけである。伏せる前のコマンドと出力はメモリの中だけで持ち、ファイルに書かない。担当の出力のログも同じ `logs/` に入るので、`workspace` の作成と再開で `logs/` を 0700 にする
 - `sweep_gate_logs`
-  - 事後条件: `base` の下の `rf<PR>/logs/` にある、名前が `local-gate-` で始まる通常のファイルのうち、更新時刻が `keep` 秒より古いものを消す。`rf<PR>/` か `logs/` がシンボリックリンクなら入らない。ほかのファイルには触れない。消せないファイルは残して続ける
-  - 呼ぶ所: `drive` と `_release` が、排他ロックを取った後に呼ぶ。`base` はリポジトリの作業場所の親ディレクトリ（`location.default_base`）で、ほかの PR のログも対象になる。`keep` は `contracts/limits/cross-refactoring.gate-log.keep.json` の `seconds` である
+  - シグネチャ: `sweep_gate_logs(base: Path, repo_id: str, own: Path, keep: float, now: float) -> int`。`repo_id` は自分のリポジトリの識別値（`git.Git.common_dir()` の実パス）、`own` は自分の `rf<PR>/` である
+  - 事前条件: `own` の排他ロックを持っている
+  - 事後条件: 消すのは、次をすべて満たすファイルだけである。`base` の直下の `rf<PR>/` の状態ファイルの `repo` が `repo_id` と一致する。ファイル名がその状態ファイルの `gate_logs` に記録されている。`rf<PR>/logs/` の直下にある、名前が `local-gate-` で始まる通常のファイルである。更新時刻が `keep` 秒より古い。消したファイル名は `gate_logs` から外して状態ファイルを書き直す
+  - 事後条件: `own` 以外の `rf<PR>/` は、その PR のロック（`hold`）を待たずに取れたときだけ扱い、扱い終えたら解く。取れなければ飛ばす。状態ファイルが無い・読めない・`repo` が無いか違う `rf<PR>/` には触れない。`rf<PR>/` か `logs/` がシンボリックリンクなら入らない。消せないファイルは残して続ける
+  - 呼ぶ所: `drive` と `_release` が、自分の排他ロックを取った後に呼ぶ。`base` は作業場所の親ディレクトリ（`location.default_base`）で、`NDF_WORKTREE_BASE` を通じてほかのリポジトリと共有されうる。`keep` は `contracts/limits/cross-refactoring.gate-log.keep.json` の `seconds` である
+  - 記録: `write_private_log` を呼ぶ側（`run_suites`）は、ログを書いた後にファイル名を状態ファイルの `gate_logs` に足す。`drive` は状態ファイルを作るときと再開のたびに `repo` を書く
 - `redact_output`
   - 事後条件: 次の順に掛ける。秘密鍵のブロックを最初に原文で探すのは、手順 3 の関数が `-----BEGIN` を含む行を丸ごと置き換え、その後では開始の行を見つけられないためである
     1. 原文で、`-----BEGIN` と `PRIVATE KEY` を含む行から、`-----END` と `PRIVATE KEY` を含む行まで（無ければ末尾まで）を、まとめて伏せる。開始の行に終わりもあれば、その行だけを伏せる
@@ -283,6 +287,8 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `TestBudget` | 型（累計の上限、使った秒、suite 1 つの上限） | `local_gate.py` | suite の上限は、上限の設定ファイル `contracts/limits/test-run.test.json` の `seconds` |
 | `local_passed` | 状態ファイルのキー（`{sha, digest, path_digest}` の並び。`path_digest` は `PATH` の値の SHA-256） | `state.json` | 空 |
 | `verify_trees` | 状態ファイルのキー（パスの並び） | `state.json` | 空 |
+| `repo` | 状態ファイルのキー（リポジトリの識別値。git の共通ディレクトリの実パス） | `state.json` | 無し |
+| `gate_logs` | 状態ファイルのキー（NDF が書いた手元の最終ゲートのログのファイル名の並び） | `state.json` | 空 |
 | `final` | 状態ファイルのキー。`status`・`rounds`・`head` に、`means` と、CI なら `checks`、手元なら `tests`（`passed`・`skipped`）と `digest` | `state.json` | — |
 | `done.digest` | 状態ファイルのキー（テストを打って完了したときだけ） | `state.json` | 無し |
 
@@ -347,7 +353,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `run_local_gate` | 合格して指定の SHA を送る。変更が無ければ打たない | 最後の周でテストが落ちる場合、PR のブランチが進んだために push が拒まれる場合 | 処理の手順の表の行ごと |
 | `run_suites` | 設定の順にすべて打つ | 累計の残りが suite の上限より小さい | 異常系の行ごと。時計と起動を差し替える |
 | `write_private_log` | ディレクトリ 0700・ファイル 0600 | umask 022、前からある 0755 の `logs/` と 0644 のログ | `logs/` がシンボリックリンク。同じ名前が別のファイルへのハードリンクかシンボリックリンク（リンク先の中身と権限が変わらない） |
-| `sweep_gate_logs` | 期限を過ぎたログと一時ファイルを消す | 期限の内のログは残す | 名前が `local-gate-` でないファイル、シンボリックリンクの `logs/` に触れない |
+| `sweep_gate_logs` | 期限を過ぎた、記録のあるログを消す。ほかの PR の `rf<PR>/` も同じリポジトリなら消す | 期限の内のログは残す。ほかの PR のロックが取られていれば飛ばす | 名前が `local-gate-` でないファイル、`gate_logs` に記録の無い同じ接頭辞のファイル、状態ファイルの `repo` が違うか無い `rf<PR>/`、シンボリックリンクの `logs/` に触れない |
 | `redact_output` | トークンの形と秘密の名前の環境変数の値を伏せる | 複数行の秘密鍵（終わりの行の有無、開始と終わりが同じ行） | 回帰テスト: `-----BEGIN … PRIVATE KEY-----` の行を行単位の伏せ字が置き換える場合でも、鍵の本体の行が結果に残らない |
 | `suite_label` | 順番と名前 | 100 文字を超える名前、`/` を含む名前 | 認証情報の形を含む名前は順番だけになる |
 | `run_suites`（ログ） | 伏せ字にしたログを書く | 同じ名前の suite が 2 つ、`/` を含む名前（別々のログになる） | 伏せる前の値がファイルに残らない |
