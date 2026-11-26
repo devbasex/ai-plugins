@@ -359,6 +359,25 @@ def keep_declared(declared: Iterable[str], outputs: Mapping[str, Any]) -> tuple[
     return kept, sorted(set(outputs) - set(kept))
 
 
+# 結果の items の PR で補う工程の出力のキー。プラン design は設計 PR を items にだけ載せ、outputs に design_pr を
+# 書かない（共通のステップ pr は番号を items に返す）。補わないと設計承認ゲートの質問が PR を持たず（#4495）、
+# 工程「設計」が「文脈のキー design_pr が無い」で失敗する（#4455）
+DESIGN_PR = "design_pr"
+ITEM_PR_OUTPUTS = (DESIGN_PR,)
+
+
+def step_outputs(declared: Iterable[str], report: Mapping[str, Any]) -> dict[str, Any]:
+    """済んだステップの結果の outputs。工程が `ITEM_PR_OUTPUTS` のキーを出力に持ち、outputs に無ければ、items の PR
+    （番号が 1 つに決まるときだけ）で補う。記録済みの結果（11.0.43 までに始めたステートマシン）にも効くよう、読む側で補う。"""
+    got = dict(report["outputs"]) if isinstance(report.get("outputs"), dict) else {}
+    items = report["items"] if isinstance(report.get("items"), list) else []
+    prs = {i["number"] for i in items if isinstance(i, dict) and i.get("kind") == "pr" and type(i.get("number")) is int}
+    if len(prs) == 1:
+        for key in set(declared) & set(ITEM_PR_OUTPUTS):
+            got.setdefault(key, next(iter(prs)))
+    return got
+
+
 def outputs_draft(stage: StageDef, rev: int, outputs: Mapping[str, Any], actor: str) -> tuple[Optional[model.EventDraft], list[str]]:
     """工程の出力を文脈へ書く事象の下書き。キーは工程の定義の `outputs` に列挙したものだけ。
 

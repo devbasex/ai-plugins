@@ -22,7 +22,7 @@ from filelock import FileLock
 from ndf import cli
 from ndf.contracts import limits, result
 from ndf.core import merge_approval
-from ndf.progress import lane, model, plan, run
+from ndf.progress import lane, model, plan, run, stages
 from ndf.progress.run_view import MATERIAL_DIR
 
 # 結果 JSON の tool（サブコマンドの表がこのパッケージを指す）
@@ -145,15 +145,14 @@ def pr_url(repo: Optional[str], number: Optional[int]) -> Optional[str]:
     return f"https://github.com/{repo}/pull/{number}" if repo and number else None
 
 
-def _waiting_context(v: run.View, prog: run.StepProgress) -> dict[str, Any]:
+def _waiting_context(v: run.View, prog: run.StepProgress, declared: tuple[str, ...]) -> dict[str, Any]:
     """待っている工程から見た文脈。スプリントの文脈に、その工程の終わったステップの出力を順に重ねる。
 
     工程の出力（`outputs_recorded`）は工程が終わる時にだけ書かれるため、工程の途中の承認ゲート（設計承認ゲートの
-    設計 PR など）はステップの記録（`step_recorded` の report.outputs）から読む。"""
+    設計 PR など）はステップの記録（`step_recorded` の report.outputs。設計 PR は items でも補う: `stages.step_outputs`）から読む。"""
     out = v.context()
     for report in prog.done.values():
-        if isinstance(report.get("outputs"), dict):
-            out.update(report["outputs"])
+        out.update(stages.step_outputs(declared, report))
     return out
 
 
@@ -161,8 +160,8 @@ def question(v: run.View, m: run.Move, *, repo: Optional[str] = None, target: Ta
     """待っている手 `m`（`run.Action.GATE`）の質問。PR は設計承認ゲートなら設計 PR、ほかはスプリントの PR。"""
     if m.action != run.Action.GATE or m.stage is None or m.step is None or m.progress is None:
         raise model.Refused("回答を待つ工程が無い")
-    ctx = _waiting_context(v, m.progress)
-    key = "design_pr" if m.step.gate == DESIGN_GATE else "pr"
+    ctx = _waiting_context(v, m.progress, m.stage.outputs)
+    key = stages.DESIGN_PR if m.step.gate == DESIGN_GATE else "pr"
     number = ctx[key] if isinstance(ctx.get(key), int) else None
     qid = question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
     return Question(qid, v.machine_id, m.stage.name, m.step.id, m.step.gate, tuple(run.choices(m)), number, pr_url(repo, number), target)
