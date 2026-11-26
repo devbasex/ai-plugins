@@ -363,6 +363,8 @@ def keep_declared(declared: Iterable[str], outputs: Mapping[str, Any]) -> tuple[
 # 書かない（共通のステップ pr は番号を items に返す）。補わないと設計承認ゲートの質問が PR を持たず（#4495）、
 # 工程「設計」が「文脈のキー design_pr が無い」で失敗する（#4455）
 DESIGN_PR = "design_pr"
+# 設計 PR を承認の対象にする承認ゲートの区分（コントラクト `workflow/progress.json` の gates の行）
+DESIGN_GATE = "design"
 ITEM_PR_OUTPUTS = (DESIGN_PR,)
 # items の PR で補う元のステップの種類（工程の定義の metadata.ndf.kind）。工程の成果物を作る作業のステップだけで、
 # レビュー・記録・マージのステップの items の PR は工程の出力にしない
@@ -375,6 +377,18 @@ def step_outputs(stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> dict
     工程が `ITEM_PR_OUTPUTS` のキーを出力に持ち、どのステップの outputs にも無ければ、種類が `ITEM_PR_SOURCE_KIND` の
     ステップの items の PR（番号が 1 つに決まるときだけ）で補う。outputs に明示した値は、どのステップのものでも補った値より
     優先する。記録済みの結果（11.0.43 までに始めたステートマシン）にも効くよう、読む側で補う。"""
+    explicit, filled = _split_outputs(stage, done)
+    return {**filled, **explicit}
+
+
+def item_only_outputs(stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """`step_outputs` のうち、どのステップの outputs にも無く items の PR から補った値だけ。"""
+    explicit, filled = _split_outputs(stage, done)
+    return {k: v for k, v in filled.items() if k not in explicit}
+
+
+def _split_outputs(stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """済んだステップの outputs に明示した値と、items の PR から補える値の組。"""
     explicit: dict[str, Any] = {}
     filled: dict[str, Any] = {}
     keys = set(stage.outputs) & set(ITEM_PR_OUTPUTS)
@@ -387,7 +401,7 @@ def step_outputs(stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> dict
         prs = set(result.pr_numbers(report)) if st.kind == ITEM_PR_SOURCE_KIND and keys else set()
         if len(prs) == 1:
             filled.update(dict.fromkeys(keys, next(iter(prs))))
-    return {**filled, **explicit}
+    return explicit, filled
 
 
 def outputs_draft(stage: StageDef, rev: int, outputs: Mapping[str, Any], actor: str) -> tuple[Optional[model.EventDraft], list[str]]:

@@ -141,15 +141,33 @@ def _last(events: Iterable[model.Event], kind: str) -> Optional[model.Event]:
     return found
 
 
-def _void_answer(v: View, ev: Optional[model.Event], gate: Optional[str]) -> bool:
-    """回答 `ev` が、回答として数えない MVV 判定の回答か（`model.mvv_answer_void`）。"""
-    return ev is not None and model.mvv_answer_void(event_payload(ev), gate)
+def _void_answer(v: View, s: stages.StageDef, prog: StepProgress, ev: Optional[model.Event], gate: Optional[str]) -> bool:
+    """回答 `ev` が、回答として数えない回答か。MVV 判定の回答（`model.mvv_answer_void`）と、対象に結び付かない設計の承認
+    （`_unbound_design_approval`）が当たる。"""
+    if ev is None:
+        return False
+    payload = event_payload(ev)
+    return model.mvv_answer_void(payload, gate) or _unbound_design_approval(payload, gate, stages.item_only_outputs(s, prog.done))
+
+
+def _unbound_design_approval(payload: Mapping[str, Any], gate: Optional[str], filled: Mapping[str, Any]) -> bool:
+    """設計承認ゲートの承認が、items から補った設計 PR（`filled`）の head を見ずに記録されたか（#4495 の前の版の承認）。
+
+    今の版の回答は、設計 PR が特定できれば提示した対象（head を含む）を `seen` に記録する。items を読まなかった前の版は、
+    設計 PR が items にだけあると質問に PR が無く、head の無い承認を記録した。そのまま読むと対象に結び付かない承認で
+    設計 PR のマージへ進むので、数えずに承認ゲートを待ちへ戻し、今の設計 PR を見て回答し直させる（消費した後でも
+    マージの前なら `_reopen` が開き直す）。outputs に明示した設計 PR は前の版も質問に載せたので、ここでは見ない。"""
+    if gate != stages.DESIGN_GATE or payload.get("answer") != APPROVED or payload.get("by") == model.MVV_SERVICE:
+        return False
+    seen = payload.get("seen") if isinstance(payload.get("seen"), dict) else {}
+    return seen.get("head") is None and type(filled.get(stages.DESIGN_PR)) is int
 
 
 def _reopen(v: View, s: stages.StageDef, prog: StepProgress) -> None:
-    """数えない MVV 判定の回答で済んだ承認ゲートのステップを、後ろのステップが済んでいなければ済んでいないものにする（#3959）。
+    """数えない回答（`_void_answer`）で済んだ承認ゲートのステップを、後ろのステップが済んでいなければ済んでいないものにする（#3959・#4495）。
 
-    更新前の NDF が `service:mvv` の回答を消費して済みにした承認ゲートを、再開の後に改めて人へ質問するためである。後ろのステップ（マージなど）
+    更新前の NDF が `service:mvv` の回答か、設計 PR の head を見ない設計の承認を消費して済みにした承認ゲートを、再開の後に
+    改めて人へ質問するためである。後ろのステップ（マージなど）
     が済んでいれば、承認を取り直しても戻せないので開き直さない。記録の事象は書き換えない。
     """
     last = next((st for st in reversed(s.steps) if st.id in prog.done), None)
@@ -158,7 +176,7 @@ def _reopen(v: View, s: stages.StageDef, prog: StepProgress) -> None:
     report = prog.done[last.id]
     metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
     by_seq = {ev.seq: ev for ev in v.row_events(s.name) if ev.draft.kind == ANSWERED}
-    if _void_answer(v, by_seq.get(metrics.get("seq")), last.gate):
+    if _void_answer(v, s, prog, by_seq.get(metrics.get("seq")), last.gate):
         del prog.done[last.id]
 
 
@@ -169,7 +187,7 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
     if step is None:
         return Move(Action.RESUME, s, None, prog)
     listen = invoke.is_listen(step)
-    answer = None if _void_answer(v, prog.answer, step.gate) else prog.answer
+    answer = None if _void_answer(v, s, prog, prog.answer, step.gate) else prog.answer
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
     held = prog.waiting is not None or step.id in prog.held
     skip = listen and not held and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None

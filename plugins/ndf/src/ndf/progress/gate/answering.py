@@ -482,8 +482,6 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     texts = replace(now, head=None, material=None).differs(seen)
     if p.get("by") == model.MVV_SERVICE:
         moved = _judged_elsewhere(p, q, seen, now)
-    elif _unbound_design_approval(q, p, seen, now):
-        moved = "承認した者が見た head（設計 PR を特定できなかった版の承認で、承認の対象に結び付いていない）"
     elif seen.head is None or now.head is None or seen.head == now.head:
         moved = _material_moved(st.root, q, seen)
     elif not seen.production and not texts and _docs_only_after(st.root, q, seen, now, docs_only):
@@ -513,15 +511,6 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
 
     run.append(st, machine_id, build, after)
     return why
-
-
-def _unbound_design_approval(q: Question, p: Mapping[str, Any], seen: Target, now: Target) -> bool:
-    """設計承認ゲートの承認が、今は読める設計 PR の head を見ずに記録されたか（#4495 の前の版の承認）。
-
-    今の版の回答は、設計 PR が読めれば提示した対象（head を含む）を `seen` に記録する。設計 PR を items から補う前の版は
-    質問に PR が無く head の無い承認を記録したので、そのまま読むと対象に結び付かない承認で設計 PR のマージへ進む。
-    待ちへ戻し、今の設計 PR を見て回答し直させる。"""
-    return q.gate == DESIGN_GATE and p.get("answer") == run.APPROVED and seen.head is None and now.head is not None
 
 
 def _no_report_draft(v: run.View, stage: str, step: str, status: str, generation: int, reason: str) -> model.EventDraft:

@@ -128,16 +128,36 @@ def test_the_design_stage_finishes_with_the_design_pr_of_the_plan_items(st, env,
     assert "設計" not in [p.name for p in v.snap.stages if run.step_progress(v, p.name).failed]
 
 
-def test_an_approval_recorded_without_the_design_pr_head_goes_back_to_waiting(st, env, repo, new_table, flow):
-    # 設計 PR を特定できなかった版の承認（見た head が無い）は、対象に結び付いていないのでマージへ進めず待ちへ戻す
+def _old_approval(st, env, new_table, flow):
+    """設計 PR を items から読まなかった版の承認（見た head が無い）を記録したステートマシンの ID と、そのときの質問。"""
     tid = new_table()
     flow.turn(tid, _like_the_plan(env))
     q = gate.waiting(run.read(st, tid))
     assert q is not None and q.gate == "design"
     gate.answer(st, tid, gate.Answer(q.id, "approved", "設計を承認", "human:reviewer", "k-old"))
-    why = gate.recheck(st, tid, gate.github_observe(repo, st.root, lambda: _hub("h1")))
-    assert why is not None and "head" in why
-    assert gate.waiting(run.read(st, tid)) is not None
+    return tid, q
+
+
+def test_an_old_approval_without_the_design_pr_head_is_not_consumed(st, env, new_table, flow):
+    # 対象に結び付いていない承認は数えず、設計 PR のマージへ進めずに設計承認ゲートで待つ
+    tid, q = _old_approval(st, env, new_table, flow)
+    assert run.decide(run.read(st, tid)).action == run.Action.GATE
+    flow.turn(tid, _like_the_plan(env))
+    again = gate.waiting(run.read(st, tid))
+    assert again is not None and again.gate == "design" and again.pr == DESIGN_PR
+
+
+def test_an_old_approval_consumed_before_the_merge_is_reopened(st, env, new_table, flow):
+    # 前の版が承認を消費して承認ゲートのステップを済ませ、設計 PR のマージの前に止まったスプリントも、待ちへ戻す
+    tid, _ = _old_approval(st, env, new_table, flow)
+    v = run.read(st, tid)
+    m = run.decide(v)
+    answered = next(ev for ev in reversed(v.events) if ev.draft.kind == run.ANSWERED)
+    payload = {"step": m.step.id, "status": run.FINISHED, "report": run.gate_report(m.step, answered), "generation": m.progress.generation}
+    run.append(st, tid, lambda now: [run.step_event(now, m.stage.name, payload)])
+    assert m.step.id in run.step_progress(run.read(st, tid), m.stage.name).done
+    after = run.decide(run.read(st, tid))
+    assert after.action == run.Action.GATE and after.step.id == m.step.id
 
 
 def _design_stage(*kinds):

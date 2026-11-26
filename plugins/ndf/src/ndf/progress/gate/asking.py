@@ -36,7 +36,7 @@ def _gate(word: str) -> str:
 
 
 # 承認ゲートの区分（設計承認ゲート・リリース承認ゲート）
-DESIGN_GATE = _gate("design")
+DESIGN_GATE = _gate(stages.DESIGN_GATE)
 RELEASE_GATE = _gate("release")
 # 質問の id（承認ゲートの回答と、MVV 判定で省いた回答が同じ id を持つため、定義は model）
 question_id = model.question_id
