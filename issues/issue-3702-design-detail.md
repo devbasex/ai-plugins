@@ -45,7 +45,7 @@ contracts/
 | --- | ---: | --- |
 | `progress/run.py` | 965 | 呼び出しだけを足す（25 行まで） |
 | `progress/command.py` | 987 | サブコマンドの登録だけを足す（10 行まで） |
-| `adapters/github.py` | 1,000 | #4369 が分ける |
+| `adapters/github.py` | 1,000 | #4369 がファイルを分ける。この変更は #4369 の実装の後に始めるので、分けた後のファイルへ足す |
 
 ### ファイルごとの役割
 
@@ -214,7 +214,7 @@ contracts/
 
 環境変数 `NDF_DESIGN_RECORD_DIR` があるとき（工程「ドキュメントレビュー」の `units-check`）は、次のように動く。
 
-- 読み元は作業ツリーではなく、保存先の `reviewed-head` のコミットにする。作業場所の HEAD がそのコミットと違えば `stopped`（`approval_stale`）
+- 読み元は作業ツリーではなく、`NDF_DESIGN_RECORD_DIR` が指す保存先（下の「承認の記録」で説明する工程「ドキュメントレビュー」の保存先）にある `reviewed-head` が示すコミットにする。作業場所の HEAD がそのコミットと違えば `stopped`（`approval_stale`）
 - 通ったら、保存先の `checked.json` に `{"head", "branch", "issues", "handling", "omitted", "limits", "criteria", "units"}` を書く。`branch` は入力の `branch`（スプリントブランチ）で、無ければ `stopped`（`precondition`）にする。`units` は結果の `items` と同じで、`criteria` は課題ごとの受け入れ条件の数である
 - 入力に `design_pr` があれば、保存先の `reviewed-pr` の番号と比べ、違えば `stopped`（`refused`）
 - 結果の `outputs.design_pr` に `reviewed-pr` の番号を返す。設計承認ゲートの質問は、文脈に `design_pr` が無くてもこの値を読む
@@ -235,7 +235,7 @@ contracts/
 工程「ドキュメントレビュー」の保存先は `<work_root>/document-review/record-g<世代>/` である。変更要求で世代が上がると新しい保存先になり、前の世代の値は混ざらない。
 
 - `invoke` は保存先を、環境変数 `NDF_DESIGN_RECORD_DIR` と差し込み `record_dir` で渡す。環境変数は `contracts/domains/env.json` に `set_by: ndf` で足す
-- `script` のステップは引数を定義に固定して持つ。そのため `run` は、同じステップの `StageRun.env_extra` に `NDF_MACHINE_ID`（ステートマシンの ID）も入れる。`env.json` には同じ形で足す
+- `script` のステップは引数を定義に固定して持つので、実行時の値を引数で渡せない。そのため `run` は、保存先を渡す `script` のステップ（`units-check` など）の `StageRun.env_extra` に、保存先と一緒に `NDF_MACHINE_ID`（ステートマシンの ID）も入れる。`env.json` には同じ形で足す
 - `invoke._call_script` も `env_extra` を子へ渡す
 
 | ファイル | 書く側 | 中身 |
@@ -265,7 +265,7 @@ contracts/
 | 場所 | 変える中身 |
 | --- | --- |
 | `gate/entry.present` | 設計承認ゲートで `required` なら、`build` して `stale` を見る。違いがあれば資料を出さず、`reset_drafts` を書いて `ndf progress next` を案内する。合えば承認資料に単位の表・警告・省いた課題を足す |
-| `gate/answering.answer` | 回答の確定の前に `stale` を見る。違いがあれば回答を書かず、`reset_drafts` を書く。承認なら payload に `design_target` を足す。工程「実装」の再承認では、待ちの結果が持つ `design_target` を payload に足す（`stale` は見ない） |
+| `gate/answering.answer` | 回答の確定の前に `stale` を見る。違いがあれば回答を書かず、`reset_drafts` を書く。承認なら payload に `design_target` を足す。工程「実装」の再承認（決定 10 の変換で求める承認。下の「この変更より前のスプリントの変換」）の回答では、その承認の待ちを返した `gate` の結果の `report.design_target` を payload に足す。設計 PR の照合ではないので `stale` は見ない |
 | `gate/answering.recheck` | 回答の後に head かマージ先が変わっていれば、待ちへ戻すかわりに `reset_drafts` を書く |
 | `run._consume` | MVV 判定が人の承認を省いて作る回答にも `design_target` を足す。判定の結果が持つ承認の対象（出力 `mvv_gate.target` の `repo`・`pr`・`base`・`head`。判定が読んだ PR の値）を、記録の `review` の 4 つと比べる。1 つでも違うか欠ければ、人の承認を省く回答を作らず、`reset_drafts` を書いてレビューへ戻す |
 | `run._step_draft` | `units-check`・`docs-ci`・`design-mvv`・`design-merge-approved` のどれかが `approval_stale` で止まれば、失敗のイベントに `reset_drafts` を続ける |
@@ -367,7 +367,7 @@ contracts/
   - 設計書を省いた課題は、設計 PR の実装計画の本文を変えずに、単位のファイルと 2 つの表だけを足す
   - 実装計画を省く課題の番号を `plan_omitted` に返す（無ければ空の配列）
 - 変換（決定 10）のときだけの指示を、4 つ目として分けて足す。作業の入力 `convert`（新しいテンプレート `implementation-plan-convert` が渡す。既定は空）が空でないときは、コミットまでで止めて push しない。上の 3 つと通常の「実装計画を書く」指示より優先して、既存の実装計画の本文を変えずに単位のファイルと 2 つの表だけを足す。`convert` が空なら、この指示は当たらない。設計を変えて計画し直すときは、今のとおり本文を書き直す
-- テンプレート `impl` の `guard` は、打ち直しのたびに先に実行する（`queue_decide.RESUME_ALWAYS` に足す）。`guard` が通った後は、通常の再開位置から流す。通常の再開位置は #4369 の `plan_start` が決め、`pr-number` が無く開始点が `pr` より後なら `pr` になる。`plan_start` の「開始点から `pr` を通る」の判定では、`guard` は `pr` より前のステップに数える。`guard` が失敗した回は `guard` から流し直し、飛ばさない
+- テンプレート `impl` の `guard` は、打ち直しのたびに先に実行する（`queue_decide.RESUME_ALWAYS` に足す）。`guard` が通った後は、通常の再開位置から流す。通常の再開位置は #4369 の `plan_start` が決める。`plan_start` は、PR の番号を記録したファイル（`pr-number`）が無いのに再開位置が PR を作るステップ（`pr`）より後なら、`pr` から流し直す。この判定では、`guard` を `pr` より前のステップとして扱う。`guard` が失敗した回は `guard` から流し直し、飛ばさない
 
 ### 異常系の処理
 
@@ -440,7 +440,7 @@ contracts/
 `prepare` は次の順に見る。上で止まれば下は見ない。
 
 1. `required(snap)` が真なら、`approved_of`。無ければ始めない
-2. #4369 の開始前の確かめを呼ぶ（取得・配布先として宣言したブランチでないこと・ff・push）。経路の判定は、単位の見出しに加えて単位のファイルも、手元と取得した先端の両方で調べる。承認が要るスプリントは、常に単位の経路にする。ここで決まった HEAD を `start_head` とし、3 より後の照合・読み込み・起動の判定は、すべてこのコミットを読む
+2. #4369 の開始前の確かめを呼ぶ（取得・配布先として宣言したブランチでないこと・ff・push）。単位ごとに流すか、#4369 のこれまでの経路（`impl` を 1 回）で流すかは、実装計画の「レビューの単位」の見出しか単位のファイルがあるかで決める。どちらも、手元と取得した先端の両方で調べる。承認が要るスプリントは、常に単位の経路にする。ここで決まった HEAD を `start_head` とし、3 より後の照合・読み込み・起動の判定は、すべてこのコミットを読む
 3. `required` が真なら、承認した文書が届いていることを確かめる。次のどちらかのコミットが、`start_head` と同じか `start_head` の祖先なら通る（`git merge-base --is-ancestor <コミット> <start_head>`）。どちらでもなければ始めない。SHA の一致は条件にしない。単位をマージするたびにスプリントブランチが進むためである
    - 記録の head
    - 取り込みのコミット（`design-sync.json` の、`record_head` が記録の head と同じもの）
@@ -477,7 +477,7 @@ contracts/
 - 単位のファイルの単位に、起動待ち・実行中・キューの待ちが無く、キューに残る PR も無い
 - 単位のファイルの単位が、`done`・失敗・先に要る単位の失敗で始められない、のどれかになっている
 
-単位のファイルの単位が失敗しても、この単位は始める。依存の指定が無いためである。ただしキューに残る PR がある間は始めない。その PR が後からマージされると、同じファイルを触っていた場合に競合するためである。この場合は手順 8 の `ci_pending` か `infra_wait` で終え、呼び手は別の作業へ進める。打ち直した実行で、補った単位を始めないというこの扱いをやめるのは、`ndf ci merge` の再送まで終えた後の PR の状態が、次の表の「解く」に当たる場合だけである。読み取った状態がキュー外でも、同じ実行で再送するなら、補った単位はまだ始めない。
+単位のファイルの単位が失敗しても、この単位は始める。依存の指定が無いためである。ただしキューに残る PR がある間は始めない。その PR が後からマージされると、同じファイルを触っていた場合に競合するためである。この場合は手順 8 の `ci_pending` か `infra_wait` で終え、呼び手は別の作業へ進める。このように、キューに残る PR がある間は補った単位の起動を止めておく（次の表の「保留」）。打ち直した実行では、`ndf ci merge` の再送まで終えた後の PR の状態で、保留を解くかを次の表で決める。読み取った状態がキュー外でも、同じ実行で再送したなら保留を続ける（表の最後の行）。
 
 | その起動の最後に分かった状態 | 保留 |
 | --- | --- |
@@ -493,7 +493,7 @@ contracts/
 
 | 失敗 | 扱い（停止理由の種類） | 利用者に見える理由 |
 | --- | --- | --- |
-| 承認の記録が無い | 始めない（`precondition`） | `ndf progress restore` で状態を戻すか、利用者に判断を求める。設計 PR のマージの後に「ドキュメントレビュー」を流し直さない |
+| 承認の記録が無い | 始めない（`precondition`） | `ndf progress restore` で状態を戻すか、利用者に判断を求める。工程「ドキュメントレビュー」を流し直す案内はしない（設計 PR はもうマージ済みのため） |
 | `mismatches` がある | 始めない（`refused`） | 違う項目ごとの記録の値と今の値 |
 | 単位の違反 | 始めない（`invalid`） | 規則の番号と単位 |
 | 上限の値が壊れている（`NamedCapError`） | 始めない（`invalid`） | 出所と値 |
@@ -723,7 +723,7 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 
 - 対象のスプリントは、終わっていないもののうち、文脈の `issues` に `--issue` があるか、文脈の `branch` が `--base` のものである
 - 「宛先がスプリントブランチ」は、`--base` が `model.branch_prefix("sprint")`（`sprint/`）で始まることである
-- 指示のファイル（`--unit-file` に渡すファイル。単位のファイルとは別）は、中身の sha256 を比べる。指示の無い単位は空文字である
+- 指示のファイル（`--unit-file` に渡すファイル。#4369 の `unit_file` で、`unit_run` が担当タスクの本文を足す `unit.md`。JSON の単位のファイルとは別のファイル）は、中身の sha256 を比べる。指示の無い単位は空文字である
 
 | 失敗 | 扱い |
 | --- | --- |
