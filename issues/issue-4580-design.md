@@ -288,8 +288,8 @@ graph TD
 | `conditions.retrospective_line.reason` | 文字列か `null` | 同上 |
 | `conditions.retrospective_line.enforced` | 真偽 | `excluded` の否定。真なら、最終工程が「振り返り」の経路で、手順書の AI が条件 3 の行を確かめる（行は `close-check` が読まない） |
 | `verified` | 真偽 | 下の規則 |
-| `release.complete` | 真偽か `null` | `--records` を渡したときだけ値を持つ。代表のリリース記録と `version` が同じリリース記録の `environments` の和集合が `targets` を覆えば真 |
-| `release.missing` | 名前の配列 | 反映の記録がまだ無い対象の配布先 |
+| `release.complete` | 真偽か `null` | `--records` を渡したときだけ値を持つ。数えるのは、代表のリリース記録と同じリリース・同じ配布単位の記録（`version`・`release`・`unit`・`commit` が代表と同じで、`targets` が正の一覧と同じ）だけである。その `environments` の和集合が `targets` を覆えば真。同じ値を使う別の配布単位や別の本番の PR の記録で、未反映の配布先を埋めないためである |
+| `release.missing` | 名前の配列 | 反映の記録がまだ無い対象の配布先（`complete` と同じ記録で数える） |
 | `release.unconfirmed` | 配布先の名前と区分（`observed`・`attested`）の配列 | 反映の記録が CD の結果でなく、実環境の確認か申告による対象の配布先（「配布先ごとの反映の確かめ」）。閉じる報告に載せる |
 
 条件 3 の扱いは、`conditions` から次のように決まる。最終工程が「リリース後テスト」の経路では、`conditions.release_verification.excluded` が真なら条件 3 の記録の存在を免除する。最終工程が「振り返り」の経路では、`conditions.retrospective_line.enforced` が偽なら「振り返り:」の行を確かめない。`light` のように `--require` を付けない経路では、`enforced` は偽なので、無い記録を求めて閉じられなくなることは無い。
@@ -388,7 +388,7 @@ SHA で絞るので、後に同じ workflow が何回動いても、取得の上
 | --- | --- | --- |
 | 結果を読む手段（`result`）を宣言していて、push の `after` の実行の結果が成功 | `cd` | 書く |
 | `result` を宣言していて、結果が失敗 | — | 書かず、`failed` に載せる |
-| `result` を宣言していて、結果が未確定。`--observed` でその配布先を指定し、その配布先の宣言の `observe.url` を `record` が読んだ応答の JSON の、`observe.pointer` が指す値が、push の `after` の SHA（先頭 7 文字以上の 16 進）と一致する | `observed` | 書き、読んだ URL と値をその配布先の記録に残す |
+| `result` を宣言していて、結果が未確定。`--observed` でその配布先を指定し、その配布先の宣言の `observe.url` を `record` が読んだ応答の JSON の、`observe.pointer` が指す値が、push の `after` の SHA（先頭 7 文字以上の 16 進）と一致する | `observed` | 書き、読んだ URL と値を、その配布先の記録の `evidence`（配布先の名前 → `url` と `value` の文字列）に残す |
 | `result` を宣言していて、結果が未確定。`--observed` が無い。宣言に `observe` が無い。URL を読めない。応答が JSON でない。`observe.pointer` の値が無いか、push の `after` と一致しない | — | 書かず、`pending` に載せる。理由を配布先ごとに載せる |
 | `result` を宣言していない（手動など） | `attested` | 打つ人が配布の結果を確かめた申告として書く |
 
@@ -796,7 +796,7 @@ CD の完了を待つ配布先が複数あるときは、配布先ごとの `rec
 
 ## 影響と危険
 
-- **働く範囲**: NDF を使うすべてのリポジトリ。流れの設定を書かなければ、変わるのは `release-steps record` の `--version`・`--environment`・`--correct-targets`、記録の `environments`・`targets`・`commit`・`push`・`confirmation`、テストの記録の `unit`・`retest_reason`、配布先の宣言の `paths`・`observe`（`url`・`pointer`）、`close-check` の `--records` と `records` の `--version`・`--release`・`--unit` を使える点と、`close-check` と `records` の結果に項目が増える点だけである
+- **働く範囲**: NDF を使うすべてのリポジトリ。流れの設定を書かなければ、変わるのは `release-steps record` の `--version`・`--environment`・`--correct-targets`、記録の `environments`・`targets`・`commit`・`push`・`confirmation`・`evidence`、テストの記録の `unit`・`retest_reason`、配布先の宣言の `paths`・`observe`（`url`・`pointer`）、`close-check` の `--records` と `records` の `--version`・`--release`・`--unit` を使える点と、`close-check` と `records` の結果に項目が増える点だけである
 - **プロジェクトごとに違うもの**: 種類・工程の要否・閉じる条件は `workflow` の設定で受ける。バージョンの有無は `branch_strategy` の設定、出したものを指す値は引数で受ける
 - **当たるモード**: 工程の要否は全モード。閉じる条件は課題を閉じる全経路
 - **壊れうる箇所**: `workflow.stages` の工程の名前に誤りがあるリポジトリは、次のスプリントの作成で止まる（要求が認めた変化）。後の工程が必ず読む出力を作る工程を `workflow.stages` で無効にしているリポジトリも、次のスプリントの作成で止まる。今は作成は通り、後の工程を起動するときに入力が無くて止まる（`progress/invoke.py` の、文脈から入力を取り出す処理）

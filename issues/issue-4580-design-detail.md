@@ -18,7 +18,7 @@ plugins/ndf/
 │   │   ├── project-workflow.schema.json
 │   │   ├── ndf-settings/project.schema.json
 │   │   ├── release-verification.schema.json
-│   │   └── io/{records,project,release-steps.args}.result|args.schema.json
+│   │   └── io/{records.result,project.result,release-steps.args,release-steps.result}.schema.json
 │   └── workflow/context.schema.json
 ├── skills/development-workflow/schemas/project.schema.json
 ├── src/ndf/
@@ -45,6 +45,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `plugins/ndf/contracts/schemas/io/records.result.schema.json` | 変更 | `close-check` の `outputs.conditions`・`verified`・`release` | — | スキーマ | — |
 | `plugins/ndf/contracts/schemas/io/project.result.schema.json` | 変更 | `project check` の `items` の `flow_*` と `summary` の件数 | — | スキーマ | — |
 | `plugins/ndf/contracts/schemas/io/release-steps.args.schema.json` | 変更 | `record`・`records`・`verification-record` の新しい引数 | — | スキーマ | — |
+| `plugins/ndf/contracts/schemas/io/release-steps.result.schema.json` | 変更 | `records` の `outputs` の形（`$defs.records_outputs`）。書き手の `cmd_records` と読み手の `_records_view` が同じ定義を使う | — | スキーマ | — |
 | `plugins/ndf/src/ndf/progress/flow.py` | 新設 | 流れの設定を読み、3 層を重ね、誤りと食い違いと閉じる条件を返す | `progress.stages`・`contracts` | モジュール `flow` | `Flow`・`FlowItem`・`CloseRule`・`read_flow`・`kind_defaults`・`merged_stages`・`creation_errors`・`input_missing`・`conflicts`・`close_rules` |
 | `plugins/ndf/src/ndf/progress/command.py` | 変更 | スプリントの作成で、重ねた指定を `resolve_enabled` へ渡し、誤りで作らない | `progress.flow` | モジュール `command` | `_declared`（削除）・`_flow_declared`（新設）・`_prepare_new`（中身） |
 | `plugins/ndf/src/ndf/domains/project/cli.py` | 変更 | 食い違いを `items` に足す | `progress.flow` | モジュール `cli` | `_check`（中身）・`_flow_items`（新設） |
@@ -214,12 +215,16 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `verdict` | `records/close_decide.py` | 変更 | `verdict(issue: int, verification: Optional[Iterable[Mapping]], enforced: bool) -> Verdict` | 今の判定に `verified`（渡した記録にその課題の行があり、すべて合格）を足す。第 3 引数は `require` から `enforced` に名前を変える |
 | `conditions_of` | `records/close_decide.py` | 新設 | `conditions_of(rules: Mapping[str, CloseRule], require: bool) -> dict[str, dict]` | 設計書の「close-check の結果」の `conditions` の 6 項目 |
 | `records_verdict` | `records/close_decide.py` | 新設 | `records_verdict(issue: int, view: Mapping[str, Any], enforced: bool) -> Verdict` | `records` の出力 1 つから、配布先と課題の組ごとに判定に使う行を選び、設計書の判定の表で決める |
-| `_records_view` | `records/cli.py` | 新設 | `_records_view(path: Path) -> tuple[dict \| None, str \| None]` | `--records` のファイルを読み、`records.result.schema.json` の `outputs` の形を確かめる |
+| `_records_view` | `records/cli.py` | 新設 | `_records_view(path: Path) -> tuple[dict \| None, str \| None]` | `--records` のファイルを読み、`release-steps records` の結果 JSON として確かめて `outputs` を返す（下の事後条件） |
 | `_close_check` | `records/cli.py` | 変更 | 今と同じ | 設定を読み、引数の組を確かめ、`verdict` か `records_verdict` を呼び、`outputs.conditions`・`verified`・`release` を返す |
 
 - `records_verdict`
   - 事前条件: `view` は `ndf release-steps records --version` の出力の `outputs`（代表・`releases`・`targets`・`verifications`）
   - 事後条件: `targets` を持たない代表（バージョン付き）では `release` が `null` で、テストの記録は代表と `version`・`unit` が同じ最後のものを `verdict` と同じに判定する
+  - 事後条件: `release.complete` と `release.missing` は、代表と `version`・`release`（本番の PR）・`unit`・`commit` が同じで、`targets` が正の一覧と同じリリース記録の `environments` だけで決める（絞るのは `complete_of`）。同じ値を使う別の配布単位や別の本番の PR の記録では、未反映の配布先を埋めない
+- `_records_view`
+  - 事後条件: 結果 JSON 全体を `release-steps.result.schema.json` で確かめる。通すのは、`tool` が `release-steps`、`status` が `ok`、`outputs.command` が `records` で、`outputs` が `$defs.records_outputs`（`command`・`selection`・`release`・`releases`・`targets`・`verifications`・`bodies`・`to_test`）に合う結果だけである。`cmd_records` は同じ `$defs.records_outputs` に合う `outputs` を書き、契約の検査（`check-ndf-contracts.py`）が書き手の出力の例をこの定義で確かめる。`records.result.schema.json` は `close-check` の結果の形で、入力の検証には使わない
+  - 失敗: どれかが合わなければ `(None, 理由)` を返し、`_close_check` が `precondition`（3）で止まる
 
 ### 異常系の処理
 
@@ -227,7 +232,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | --- | --- | --- | --- | --- | --- | --- |
 | `_close_check` | 流れの設定の形の誤り | `read_flow` の `ContractError` | `_close_check` | 止める | `precondition`（3）。閉じない | 直して打ち直せる |
 | `_close_check` | 引数の組の誤り | `--records` と `--verification` を両方渡した。保存先が `none` で `--verification` を渡した | `_close_check` | 止める | `precondition`（3）。`--records` を渡すよう示す | 同上 |
-| `_records_view` | 読めない・形が違う | ファイルが無い、JSON でない、`outputs` の形が違う | `_records_view` | 止める | `precondition`（3） | 同上 |
+| `_records_view` | 読めない・形が違う | ファイルが無い、JSON でない、`release-steps records` の成功の結果でない（`tool`・`status`・`outputs.command` が違う）、`outputs` が `$defs.records_outputs` に合わない | `_records_view` | 止める | `precondition`（3） | 同上 |
 | `records_verdict` | 反映がそろわない | リリース記録が無い、`release.complete` が偽 | `records_verdict` | 閉じない | `refused`（1）。`release.missing` を載せる | 残りの配布先へ反映して `record` を打ってから打ち直す |
 
 ### 処理の手順
@@ -266,8 +271,10 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Record` | `release/record_decide.py` | 変更 | `NamedTuple Record(version, release, included, unit=None, environments: tuple[str, ...] = (), targets: tuple[str, ...] \| None = None, commit: str \| None = None, push: Push \| None = None, confirmation: Mapping[str, str] \| None = None)` | バージョンの無い記録の項目を足す（バージョン付きの記録では足した項目を書かない） |
-| `parse_record` | `release/record_decide.py` | 変更 | 今と同じ | 足した項目を読む。形が違えば None（今と同じ） |
+| `Record` | `release/record_decide.py` | 変更 | `NamedTuple Record(version, release, included, unit=None, environments: tuple[str, ...] = (), targets: tuple[str, ...] \| None = None, commit: str \| None = None, push: Push \| None = None, confirmation: Mapping[str, str] \| None = None, evidence: Mapping[str, Evidence] \| None = None)` | バージョンの無い記録の項目を足す（バージョン付きの記録では足した項目を書かない） |
+| `Evidence` | `release/record_decide.py` | 新設 | `NamedTuple Evidence(url: str, value: str)` | 実環境の確認の証跡 1 つ。`url` は読んだ `observe.url`、`value` は `observe.pointer` が指した値（文字列） |
+| `render_record` | `release/record_decide.py` | 変更 | 今と同じ | 足した項目を記録の JSON に書く。`evidence` は JSON のキー `evidence`（配布先の名前 → `{"url": <文字列>, "value": <文字列>}`）で、`confirmation` が `observed` の配布先にだけ書く |
+| `parse_record` | `release/record_decide.py` | 変更 | 今と同じ | 足した項目を読む。形が違えば None（今と同じ）。`confirmation` が `observed` の配布先に `evidence` が無い記録、`observed` でない配布先に `evidence` がある記録、`url`・`value` が文字列でない記録も形の違いとして None にする |
 | `Push` | `release/record_decide.py` | 新設 | `NamedTuple Push(before: str, after: str)` | 反映したコミットを本番ブランチへ入れた 1 回の push |
 | `Correction` | `release/record_decide.py` | 新設 | `NamedTuple Correction(version: str, commit: str, targets: tuple[str, ...], previous: tuple[str, ...], reason: str)` | 対象の一覧の訂正の記録 |
 | `render_correction`・`parse_correction` | `release/record_decide.py` | 新設 | `render_correction(c: Correction) -> str`・`parse_correction(body: str) -> Correction \| None` | 訂正の記録のコメントの本文と読み取り（マーカー `CORRECTION_MARK`） |
@@ -279,12 +286,12 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `authoritative_targets` | `release/record_decide.py` | 新設 | `authoritative_targets(found: Sequence[Record], corrections: Sequence[Correction], version: str) -> tuple[str, ...] \| None` | 「正の `targets`」。最後の訂正、無ければ同じ値の最初の記録の一覧 |
 | `other_value_on_commit` | `release/record_decide.py` | 新設 | `other_value_on_commit(found: Sequence[Record], commit: str, version: str) -> str \| None` | 確かめ 6。同じコミットに別の値の記録があればその値 |
 | `has_unversioned` | `release/record_decide.py` | 新設 | `has_unversioned(found: Sequence[Record], version: str, environments: tuple[str, ...], targets: tuple[str, ...]) -> bool` | 重ねない判定（同じ値・同じ `environments`・正の `targets`） |
-| `confirm` | `release/record_decide.py` | 新設 | `confirm(delivery: Mapping, run: Mapping \| None, observed: Any, after: str) -> Confirmation` | 「配布先ごとの反映の確かめ」の表を 1 回評価する（`Confirmation(state, kind, reason)`。`state` は `ok`・`failed`・`pending`） |
+| `confirm` | `release/record_decide.py` | 新設 | `confirm(delivery: Mapping, run: Mapping \| None, observed: Any, after: str) -> Confirmation` | 「配布先ごとの反映の確かめ」の表を 1 回評価する（`Confirmation(state, kind, reason, evidence: Evidence \| None)`。`state` は `ok`・`failed`・`pending`。`kind` が `observed` のときだけ `evidence` を持つ） |
 | `json_pointer` | `release/record_decide.py` | 新設 | `json_pointer(doc: Any, pointer: str) -> Any` | RFC 6901 の 1 つの値（無ければ `_MISSING`） |
 | `representative` | `release/record_decide.py` | 新設 | `representative(found: Sequence[Record], targets: tuple[str, ...] \| None) -> Record \| None` | 読み取りの手順 5 |
 | `decisive_row` | `release/record_decide.py` | 新設 | `decisive_row(verifications: Sequence[Mapping], environment: str \| None, issue: int) -> Mapping \| None` | 「判定に使う行」。組の行を古い順にたどり、不合格の後は `retest_reason` のある行だけで置き換える |
 | `to_test` | `release/record_decide.py` | 新設 | `to_test(released: Sequence[str], issues: Sequence[int], verifications: Sequence[Mapping]) -> list[dict]` | 「テストする組の引き方」の表 |
-| `complete_of` | `release/record_decide.py` | 新設 | `complete_of(releases: Sequence[Record], targets: tuple[str, ...]) -> tuple[bool, tuple[str, ...]]` | `environments` の和集合が `targets` を覆うかと、まだの配布先 |
+| `complete_of` | `release/record_decide.py` | 新設 | `complete_of(releases: Sequence[Record], representative: Record, targets: tuple[str, ...]) -> tuple[bool, tuple[str, ...]]` | 代表と `version`・`release`・`unit`・`commit` が同じで `targets` が正の一覧と同じ記録だけについて、`environments` の和集合が `targets` を覆うかと、まだの配布先 |
 
 - `glob_matches`
   - 事後条件: 移動したファイルの前後のパスの両方を呼び出し元が渡す（`--no-renames` の出力）。大文字と小文字を区別する
@@ -309,6 +316,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `targets_of` | `paths` の無い配布先は常に入る | 移動の前のパスで当たる。push の差分に出ないパス（打ち消し）は入らない | 空の結果 |
 | `glob_matches` | `web/**` | `**/` が 0 段に当たる。`*` が `/` を越えない | — |
 | `push_of` | merge queue がまとめた途中の PR の push | 新しい順で `after` が集合の外に出たら打ち切る | 見つからなければ None |
+| `parse_record` | `evidence` つきの `observed` の記録を `render_record` の出力から読み戻す | バージョン付きの記録は足した項目なしで今と同じに読む | `observed` で `evidence` の無い記録、`evidence` の値が文字列でない記録は None |
 | `authoritative_targets` | 最初の記録の一覧 | 最後の訂正が勝つ | 記録が無ければ None |
 | `confirm` | `cd`・`observed`・`attested` | `pointer` の外の SHA は数えない | 失敗・`observe` 無し・不一致は `failed` か `pending` |
 | `decisive_row` | 後の行が前の行に代わる | 不合格の後の理由の無い行は飛ばす | — |
@@ -383,7 +391,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
 | `cmd_record` | `outputs` の `complete`・`missing`・`recorded`・`kept`・`failed`・`pending`、`items` に配布先ごとの未確定の理由 | 結果 JSON | token |
-| `_write_one` | 記録の JSON（`version`・`environments`・`targets`・`commit`・`push`・`confirmation`、`observed` なら読んだ URL と値） | PR のコメント | `observe.url` の応答の本文 |
+| `_write_one` | 記録の JSON（`version`・`environments`・`targets`・`commit`・`push`・`confirmation`、`observed` の配布先なら `evidence` に読んだ URL と値） | PR のコメント | `observe.url` の応答の本文。`evidence` に載せるのは、宣言にある認証の要らない URL と、`pointer` が指した 1 つの値（SHA）だけで、公開の PR に載せてよい |
 | `read_release` | `releases`・`targets`・`bodies`（`trusted` つき）・`to_test` | 結果 JSON | 信用しない書き手の本文から集めた課題 |
 
 ### 既存の部品の再利用
