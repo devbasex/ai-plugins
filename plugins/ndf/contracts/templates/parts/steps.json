@@ -26,13 +26,13 @@
       "id": "pr",
       "run": [
         "sh", "-c",
-        "gh pr create --base \"$1\" --head \"$0\" --title \"$2\" --body-file \"$3\" >&2 || exit 1; n=$(gh pr view \"$0\" --json number --jq .number) && [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
-        "{{branch}}", "{{base}}", "{{title}}", "{{body_file}}"
+        "u=$(gh pr create --base \"$1\" --head \"$0\" --title \"$2\" --body-file \"$3\") || exit 1; printf '%s\\n' \"$u\" >&2; n=${u##*/}; case $n in ''|*[!0-9]*) exit 1;; esac; printf '%s\\n' \"$n\" > \"$4\" || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
+        "{{branch}}", "{{base}}", "{{title}}", "{{body_file}}", "{state_dir}/pr-number"
       ],
       "probe": [
         "sh", "-c",
-        "n=$(gh pr list --head \"$0\" --state open --json number --jq '.[0].number // empty'); [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
-        "{{branch}}"
+        "n=$(gh pr list --head \"$0\" --base \"$1\" --state open --json number,isCrossRepository --jq 'map(select(.isCrossRepository | not)) | .[0].number // empty'); [ -n \"$n\" ] || exit 1; printf '%s\\n' \"$n\" > \"$2\" || exit 2; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
+        "{{branch}}", "{{base}}", "{state_dir}/pr-number"
       ]
     },
     "work-start": {

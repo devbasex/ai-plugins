@@ -22,7 +22,7 @@
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
 テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の設定から読み（レビューは設定が
-無ければ `ndf cross-review run` を、打つ時点のブランチの PR の番号で組む。`route.review_launch`）、worker と承認ゲートの
+無ければ `ndf cross-review run` を、打つ時点の PR の番号で組む。`route.review_launch`）、worker と承認ゲートの
 起動は `params.json` の既定を使う。どこからも決まらない差し込みは、名前と出所を挙げて invalid で止める。
 """
 

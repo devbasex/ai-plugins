@@ -53,7 +53,7 @@ import os
 import re
 import tempfile
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -95,6 +95,30 @@ LAUNCH_SOURCES = {"acceptance": ("issue",)}
 # プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
 REVIEW_STATE = "{state_dir}/cross-review"
 REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
+# 実装のテンプレートの既定の `{{review}}`: ブランチから引き直さず、`pr` のステップが保存した番号（`$0` のファイル）を読む
+# （#4369。同じブランチから別のマージ先へ出した PR をレビューしない）
+PR_NUMBER_FILE = "{state_dir}/pr-number"
+REVIEW_WITH_SAVED_PR = 'n=$(cat "$0") && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
+# 単位の経路の `{{review}}`（#4369 の決定 6・14）: `$0` がリポジトリ、`$1` が保存先、残りがレビューの起動とステップが後ろに
+# 足す引数。保存した番号の PR を `--repo`・`--pr` で渡し、レビューが読んだ PR（`reviewed-pr`）が違うか無ければ、
+# `--reviewed-out` のファイルを消して止める。終了コード 0 と 6（incomplete）のほかは、起動の理由を残してそのまま返す
+UNIT_REVIEW = """d=$1; shift
+n=$(cat "$d/pr-number") && [ -n "$n" ] || exit 2
+rm -f "$d/reviewed-pr" || exit 2
+out= prev=
+for a in "$@"; do [ "$prev" != --reviewed-out ] || out=$a; prev=$a; done
+"$@" --repo "$0" --pr "$n" --stop-on-hold --reviewed-pr-out "$d/reviewed-pr"
+c=$?
+case $c in
+  0|6)
+    [ "$(cat "$d/reviewed-pr" 2>/dev/null)" != "$0#$n" ] || exit "$c"
+    [ -z "$out" ] || rm -f "$out"
+    printf '{"status": "stopped", "cause": {"kind": "precondition"}, "summary": "レビューが読んだ PR が %s#%s でないか、記録が無い"}\\n' "$0" "$n"
+    exit 3;;
+esac
+[ -z "$out" ] || rm -f "$out"
+exit "$c"
+"""
 # 設定（`workflow.launch.refactor`）が無いときの `{{refactor}}`（#3908 の決定 7）: ブランチ（`$0`）の PR の番号と、起点
 # （`$1`）からの差分のファイルを打つ時点に読み、`--pr`・`--scope` に足して `ndf refactor run` を打つ。どちらも前の工程
 # （実装の PR の作成・push）が終わるまで決まらない。PR が無い・差分を読めない・差分が空なら、打たずに停止の結果 JSON を出す。
@@ -257,6 +281,16 @@ def without_steps(plan: Mapping[str, Any], ids: Iterable[str]) -> dict[str, Any]
     found = list(plan["steps"])
     moved = _successors(found, drop)
     return {**plan, "steps": [_retarget(s, moved) for s in found if s["id"] not in drop]}
+
+
+def unit_template(t: Template, repo: str, drop: Collection[str]) -> Template:
+    """単位の経路のテンプレート（#4369）: `use` を開いて `drop` のステップを外し、残る `ci` の引数の末尾に `--repo` を足す。
+
+    外した後のプランが使わない差し込みと作業は、`needed`・`kinds_of` がこのテンプレートから求めるので要らなくなる。
+    """
+    plan = without_steps(expanded(t), drop)
+    found = [{**s, "run": [*s["run"], "--repo", repo]} if s["id"] == "ci" else s for s in plan["steps"]]
+    return replace(t, plan={**plan, "steps": found})
 
 
 def used_names(value: Any) -> set[str]:
@@ -580,11 +614,21 @@ def _remote_of_repo(repo: Path) -> str:
 
 
 def review_launch(template_name: str, branch: str, base: str) -> list[str]:
-    """設定が無いときの `{{review}}` の値（`REVIEW_WITH_PR`）。PR の番号は打つ時点にブランチから読んで `--pr` に足す。"""
+    """設定が無いときの `{{review}}` の値。PR の番号は打つ時点に読んで `--pr` に足す。
+
+    実装のテンプレートは `pr` のステップが保存した番号（`REVIEW_WITH_SAVED_PR`）、ほかはブランチの PR（`REVIEW_WITH_PR`）。
+    """
     purpose = "design" if template_name == "design" else "code"
     entry = identity.FIXED_WORDS["entrypoint"]
     review = [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
+    if template_name == "impl":
+        return ["sh", "-c", REVIEW_WITH_SAVED_PR, PR_NUMBER_FILE, *review]
     return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
+
+
+def unit_review_launch(repo: str, command: Sequence[str]) -> list[str]:
+    """単位の経路の `{{review}}`: レビューの起動 `command`（`--pr` を持たない）を、読んだ PR を確かめる `UNIT_REVIEW` で打つ。"""
+    return ["sh", "-c", UNIT_REVIEW, repo, "{state_dir}", *command]
 
 
 def refactor_launch(branch: str, base_ref: str, required: Sequence[str]) -> list[str]:
