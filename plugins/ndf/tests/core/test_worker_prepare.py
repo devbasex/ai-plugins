@@ -531,9 +531,100 @@ def test_write_replaces_a_file_only_in_the_result_dir_worker_run_opened(tmp_path
         assert material.read_text(encoding="utf-8") == "前の資料\n"
 
 
-def test_write_refuses_a_parent_that_is_a_link(tmp_path, capsys, monkeypatch):
+def _hold(monkeypatch, state: Path) -> None:
+    st = state.stat()
+    monkeypatch.setenv(identity.WORKER_RESULT_DIR_ENV, f"{st.st_dev}:{st.st_ino}:{state}")
+
+
+def test_write_refuses_a_subdir_that_is_a_link(tmp_path, capsys, monkeypatch):
+    state = tmp_path / "state"
+    state.mkdir()
     (tmp_path / "far").mkdir()
-    (tmp_path / "state").symlink_to(tmp_path / "far")
+    (state / "sub").symlink_to(tmp_path / "far")
+    _hold(monkeypatch, state)
     monkeypatch.setattr("sys.stdin", io.StringIO("本文"))
-    code, out = _run(capsys, "write", "--path", str(tmp_path / "state" / "material.md"))
+    code, out = _run(capsys, "write", "--path", str(state / "sub" / "material.md"))
     assert _invalid(code, out) and list((tmp_path / "far").iterdir()) == []
+
+
+def test_write_refuses_outside_a_worker(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r1-1: 保存先の識別情報が無ければ書かない
+    material = tmp_path / "material.md"
+    material.write_text("前\n", encoding="utf-8")
+    monkeypatch.delenv(identity.WORKER_RESULT_DIR_ENV, raising=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO("後\n"))
+    code, out = _run(capsys, "write", "--path", str(material))
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
+    assert material.read_text(encoding="utf-8") == "前\n"
+
+
+@pytest.mark.parametrize("target", [".git/config", "state/../config", "state"])
+def test_write_refuses_a_path_outside_the_result_dir(tmp_path, capsys, monkeypatch, target):
+    # PR 4591 の r1-1: 保存先の外（.git の中のほかのファイルなど）は書かない
+    state = tmp_path / "state"
+    state.mkdir()
+    (tmp_path / ".git").mkdir()
+    for f in (tmp_path / ".git" / "config", tmp_path / "config"):
+        f.write_text("前\n", encoding="utf-8")
+    _hold(monkeypatch, state)
+    monkeypatch.setattr("sys.stdin", io.StringIO("後\n"))
+    code, out = _run(capsys, "write", "--path", str(tmp_path / target))
+    assert _invalid(code, out)
+    assert (tmp_path / ".git" / "config").read_text(encoding="utf-8") == "前\n"
+    assert (tmp_path / "config").read_text(encoding="utf-8") == "前\n"
+
+
+@pytest.mark.parametrize("swapped", [False, True])
+def test_write_checks_the_result_dir_before_a_file_in_a_subdir(tmp_path, capsys, monkeypatch, swapped):
+    # PR 4591 の r1-3: サブディレクトリの中のファイルも、保存先そのものの識別子を先に突き合わせてから書く
+    state = tmp_path / "state"
+    (state / "sub").mkdir(parents=True)
+    _hold(monkeypatch, state)
+    if swapped:
+        state.rename(tmp_path / "old")
+        (state / "sub").mkdir(parents=True)
+    material = state / "sub" / "material.md"
+    material.write_text("前\n", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", io.StringIO("後\n"))
+    code, out = _run(capsys, "write", "--path", str(material))
+    if swapped:
+        assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
+        assert material.read_text(encoding="utf-8") == "前\n"
+    else:
+        assert code == 0 and material.read_text(encoding="utf-8") == "後\n"
+
+
+def test_write_appends_only_the_added_text(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r1-5: 書き足すだけなら全文を渡さない
+    state = tmp_path / "state"
+    state.mkdir()
+    material = state / "material.md"
+    material.write_text("1 行目\n", encoding="utf-8")
+    _hold(monkeypatch, state)
+    monkeypatch.setattr("sys.stdin", io.StringIO("2 行目\n"))
+    code, _ = _run(capsys, "write", "--path", str(material), "--append")
+    assert code == 0 and material.read_text(encoding="utf-8") == "1 行目\n2 行目\n"
+
+
+@pytest.mark.parametrize(
+    ("edits", "after"),
+    [
+        ([{"old": "古い", "new": "新しい"}], "新しい文\n同じ\n同じ\n"),
+        ([{"old": "同じ", "new": "x"}], None),
+        ([{"old": "無い", "new": "x"}], None),
+        ({"old": "古い", "new": "x"}, None),
+    ],
+)
+def test_write_edits_one_place_at_a_time(tmp_path, capsys, monkeypatch, edits, after):
+    # PR 4591 の r1-5: 一部の直しは差分の JSON だけを渡す。1 か所に決まらない old と形の違う入力は書かない
+    state = tmp_path / "state"
+    state.mkdir()
+    material = state / "material.md"
+    material.write_text("古い文\n同じ\n同じ\n", encoding="utf-8")
+    _hold(monkeypatch, state)
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(edits, ensure_ascii=False)))
+    code, out = _run(capsys, "write", "--path", str(material), "--edit")
+    if after is None:
+        assert _invalid(code, out) and material.read_text(encoding="utf-8") == "古い文\n同じ\n同じ\n"
+    else:
+        assert code == 0 and material.read_text(encoding="utf-8") == after
