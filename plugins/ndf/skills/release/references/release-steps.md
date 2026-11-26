@@ -93,7 +93,7 @@ workflow の `assemble`（`ndf release-steps assemble --channel production`）�
 | workflow | `publish` | 本番ブランチへ入ったコミットのバージョンで、タグと GitHub Release のうち足りないものを作る |
 
 ```bash
-ndf release-steps materials --base <ベースブランチ> --production <本番ブランチ> --channel production --out <承認資料>
+ndf release-steps materials --base <ベースブランチ> --production <本番ブランチ> --channel production --out <承認資料>   # 版上げの PR では使わない（「承認資料の対象のコミットを合わせる」）
 ndf document-rebuild gate --gate release --pr <リリースの PR> --material <承認資料> --state-dir <保存先> --out <結果のファイル>   # 以後は outputs.material の資料を使う
 ndf release-steps present --pr <リリースの PR> --material <承認資料>   # routes が提示した HEAD と資料の SHA-256 を固定する
 ndf release-steps answer --pr <リリースの PR> --answer approved --presented <提示した HEAD> --material-sha256 <資料の SHA-256> --by user   # 承認を得てから
@@ -102,9 +102,16 @@ ndf release-steps records --pr <リリース記録の PR>
 
 **版上げのスプリント（モード `release-bump`）では、組み立てから提示までを工程が行う。** `ndf progress bump-assemble` が workflow の
 `assemble` を起動して版上げの PR の本文を承認資料にし、読み手役のステップが確かめ、`bump-present` が提示する。承認の後のリリースのステップは、
-承認の質問を出したときの資料の値を `answer` に渡す。`--material-sha256` は工程の入力の `material.file_sha256`、`--presented` は
-`material.path` のファイルの行 `提示したコミット:` の値である。版上げの PR の最後の提示のコメントからは取らない。承認の後に提示が足されていると、
-利用者が見ていない資料への承認が記録される。値が分からないときと、`answer` が最新の提示と違うと断ったときは、最新の資料への承認を取り直す。
+`bump-present` が提示した資料の値で `answer` を打つ。`--presented` は、工程の入力の `material.path` のファイルの行 `提示したコミット:` の値である。
+残りの引数は、回答した担い手で違う。
+
+| 承認の仕方 | 渡す引数 |
+| --- | --- |
+| 利用者が回答した | `--by user` と `--material-sha256 <工程の入力の material.file_sha256>` |
+| MVV 判定で進んだ | `--by mvv`。`--material-sha256` は渡さない（渡すと `answer` が断る） |
+
+値は版上げの PR の最後の提示のコメントから取らない。承認の後に提示が足されていると、利用者が見ていない資料への承認が記録される。
+値が分からないときと、`answer` が最新の提示と違うと断ったときは、最新の資料への承認を取り直す。
 `ndf release-steps open-releases --base <ベースブランチ> --production <本番ブランチ>` は、開いている版上げの PR の番号を返す。
 
 **`answer` は承認を得てから打つ。** `--by` は回答した担い手で、利用者が `user`、MVV 判定で通したときが `mvv` である。
@@ -113,10 +120,30 @@ ndf release-steps records --pr <リリース記録の PR>
 `user` の証跡だけを数える。却下は `--answer rejected` で書く。
 
 **承認の後に HEAD が動けば、マージされない。** `merge` は証跡を読み直し、今の HEAD が承認されていることを確かめてから入れる。
-承認の後にリリースブランチへコミットを足したら、`materials` から組み直して `present` で見せ直し、承認を取り直す。
+承認の後にリリースブランチへコミットを足したら、下の手順で承認資料を作り直し、`gate`・`present` で見せ直して、承認を取り直す。
 
 workflow を置かないリポジトリ（ほかの CI・手元）では、workflow の 4 つを同じ並びで手で打つ（[release-workflow.md](release-workflow.md) の
 「ほかの CI から呼ぶ」）。
+
+### 承認資料の対象のコミットを合わせる
+
+**承認資料の行 `提示したコミット:` は、承認するリリースの PR の今の HEAD にする。** 違うと `gate` と `present` が止まる。
+承認資料の用意の仕方は、リリースの PR の種類で違う。
+
+| リリースの PR | 承認資料の用意の仕方 |
+| --- | --- |
+| `assemble` が作った版上げの PR | `materials` は使わない（この PR の HEAD ではないコミットが書かれる）。下の 3 手順で用意する |
+| 承認の対象が本番の PR（`approval.target: production_pr`） | `materials` に `--pr <番号>` を足して打つ |
+| ベースブランチから本番ブランチへの、版上げをしない PR | ベースブランチの HEAD を取り出した作業ディレクトリで `materials` を打つ |
+
+版上げの PR の 3 手順は次のとおりである。
+
+1. `gh pr view <番号> --json body --jq .body > <承認資料>` で、`assemble` が PR の本文に書いた承認資料を写す
+2. `gh pr view <番号> --json headRefOid --jq .headRefOid` で今の HEAD を読み、行 `提示したコミット:` の SHA をその値に書き換える。
+   書き換える前の SHA は、次の手順で使う
+3. 書き換える前の SHA から今の HEAD までに変わったファイルを
+   `gh api repos/<所有者>/<リポジトリ>/compare/<書き換える前の SHA>...<今の HEAD> --jq '.files[].filename'` で読み、
+   承認資料の記述と違う点を書き直す
 
 ### CHANGELOG の本文
 

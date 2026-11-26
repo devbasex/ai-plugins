@@ -65,6 +65,8 @@ def test_judge_counts_user_answers_to_the_latest_material_and_mvv_answers_by_hea
     old_shown = ("octocat", f"{approval_decide.REQUEST_MARK}\n{approval_decide.HEAD_LINE} `{HEAD}`\n", True)
     assert judged([old_shown, user("approved", None)]).approved
     assert judged([old_shown, user("approved", None), shown]).state == approval_decide.STALE
+    # SHA-256 を持つ提示が一度でもあれば、後から行の無い提示が最新になっても旧い回答は数えない
+    assert judged([old_shown, user("approved", None), shown, old_shown]).state == approval_decide.STALE
 
 
 def test_judge_reports_stale_and_missing() -> None:

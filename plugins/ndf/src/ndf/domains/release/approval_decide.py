@@ -10,8 +10,8 @@
 数える回答は担い手で分ける（#4446）。利用者の回答は、今の HEAD への最新の提示より後に、その提示と同じ資料の SHA-256
 （行 `回答した資料:`）を持つものだけを数える。資料を差し替えて提示し直すと、前の資料への回答では進まない。MVV 判定の回答は
 人に資料を示さずに通す経路なので head だけで数えるが、同じ HEAD にその回答より後の提示があれば数えない（人に問うと決め直した）。
-資料の SHA-256 を持たない旧いバージョンの利用者の回答は、同じ HEAD に資料の SHA-256 を持つ提示が無い間だけ数える（旧いバージョンで済んだ
-承認を取り直させない）。
+資料の SHA-256 を持たない旧いバージョンの利用者の回答は、同じ HEAD に行 `提示した資料:` を持つ提示が 1 件も無い間だけ数える
+（旧いバージョンで済んだ承認を取り直させない）。行の値の形が違う提示も、行を持つ提示に数える。
 
 | 数える証跡 | 判定 |
 | --- | --- |
@@ -65,11 +65,13 @@ class Trail(NamedTuple):
 
 
 class Presentation(NamedTuple):
-    """読んだ提示 1 件（`order` はコメントの並び、`head` は提示したコミット、`material` は資料の SHA-256）。"""
+    """読んだ提示 1 件（`order` はコメントの並び、`head` は提示したコミット、`material` は資料の SHA-256。形が違えば None）。
+    `hashed` は行 `提示した資料:` を持つか（持たないのは旧いバージョンの提示だけ）。"""
 
     order: int
     head: str
     material: str | None
+    hashed: bool
 
 
 class Judgment(NamedTuple):
@@ -137,7 +139,9 @@ def parse_request(order: int, author: str, body: str) -> Presentation | None:
     if REQUEST_MARK not in body:
         return None
     head = material_head(body)
-    return Presentation(order, head, _sha256_of(body, MATERIAL_LINE)) if head is not None else None
+    if head is None:
+        return None
+    return Presentation(order, head, _sha256_of(body, MATERIAL_LINE), _line_value(body, MATERIAL_LINE) is not None)
 
 
 def trails(comments: Iterable[tuple[str, str, bool]]) -> list[Trail]:
@@ -166,22 +170,23 @@ def latest_presentation(presented: Sequence[Presentation], head: str) -> Present
     return max(on_head, key=lambda p: p.order) if on_head else None
 
 
-def _counted(t: Trail, latest: Presentation | None) -> bool:
+def _counted(t: Trail, latest: Presentation | None, legacy: bool) -> bool:
     """今の HEAD への回答 `t` を判定に数えるか（モジュールの説明の「数える回答」）。変更要求は担い手と資料を問わず数える
     （承認の後の変更要求を捨てて進めない）。"""
     if t.answer == REJECTED:
         return True
     if t.by == MVV:
         return latest is None or latest.order < t.order
-    if latest is None or latest.material is None:
-        return t.material is None  # 資料の SHA-256 の行を持たない旧いバージョンの提示と回答。人の回答はバージョンアップをまたいで数える
-    return t.material == latest.material and t.order > latest.order
+    if legacy:
+        return t.material is None  # 旧いバージョンの提示と回答だけの HEAD。人の回答はバージョンアップをまたいで数える
+    return latest is not None and latest.material is not None and t.material == latest.material and t.order > latest.order
 
 
 def judge(found: Sequence[Trail], presented: Sequence[Presentation], head: str) -> Judgment:
     """今の HEAD `head`（40 桁）への最新の、数える回答で判定する（担い手で分ける。#4446）。"""
     latest = latest_presentation(presented, head)
-    on_head = [t for t in found if t.sha == head and _counted(t, latest)]
+    legacy = not any(p.hashed for p in presented if p.head == head)
+    on_head = [t for t in found if t.sha == head and _counted(t, latest, legacy)]
     if on_head:
         last = max(on_head, key=lambda t: t.order)
         verb = "承認した" if last.answer == APPROVED else "変更を要求した"
