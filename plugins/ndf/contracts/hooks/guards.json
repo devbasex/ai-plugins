@@ -236,6 +236,20 @@
       "fail_closed": false
     },
     {
+      "name": "launch-answer",
+      "summary": "ndf launch-config show --question approve が残したリクエストと質問の中身と会話の id が一致する AskUserQuestion の回答を、launch-answers.jsonl へ追記する。NDF_AI_CHILD・NDF_FACTORY_RUN・NDF_RELAY_PLAN・NDF_ORGANIZER_DIR のある会話では書かない。止めない（#1959）",
+      "module": "ndf.domains.hooks.guards.launch_answer",
+      "events": ["PostToolUse"],
+      "tools": ["AskUserQuestion"],
+      "order": 61,
+      "strict": false,
+      "suggests": [],
+      "deny_key": "none",
+      "limits": [],
+      "params": {},
+      "fail_closed": false
+    },
+    {
       "name": "ask-closed",
       "summary": "中継の下で応答を終えた・人が入力を送ったら、回答されずに閉じた質問のファイルをロックの中で消す。hook の起動の ID が今の起動の記録と違えば消さない（#3814）",
       "module": "ndf.domains.hooks.guards.ask_clear",
