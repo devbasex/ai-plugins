@@ -451,6 +451,11 @@ def _reader_summary(
     return readers, found, warnings
 
 
+def not_run_detail(noun: str, names: Sequence[str]) -> str:
+    """読み手役を立てられなかったときの停止の文。`noun` は並べるものの呼び名（文書・対象）。"""
+    return f"{NOT_RUN_GAP}{noun}がある: {'・'.join(names)}。読み手役を立てられる環境に直してから打ち直す"
+
+
 def _checked(report: Mapping[str, Any], targets: Sequence[Target], skipped: Sequence[str]) -> dict[str, Any]:
     """worker の結果ファイルを確かめて `ok` か `stopped` の結果にする（確かめの順は足すべき内容が先）。"""
     try:
@@ -462,8 +467,7 @@ def _checked(report: Mapping[str, Any], targets: Sequence[Target], skipped: Sequ
     gaps = reader_gaps(raw, targets)
     not_run = [g["name"] for g in gaps if g["reason"].startswith(NOT_RUN_GAP)]
     if not_run:
-        detail = f"{NOT_RUN_GAP}文書がある: {'・'.join(not_run)}。読み手役を立てられる環境に直してから打ち直す"
-        return result.stopped(TOOL, "precondition", detail)
+        return result.stopped(TOOL, "precondition", not_run_detail("文書", not_run))
     if gaps:
         return result.stopped(TOOL, "incomplete", f"確かめの記録が欠けた文書が {len(gaps)} 件ある", gaps=gaps)
     readers, found, warnings = _reader_summary(raw, targets, skipped)

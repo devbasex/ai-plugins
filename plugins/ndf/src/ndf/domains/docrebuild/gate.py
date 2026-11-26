@@ -435,7 +435,7 @@ def verify_worker(run: Run, plan: Plan, report: Mapping[str, Any]) -> dict[str, 
     found = {r["name"]: r for r in raw if isinstance(r, Mapping) and isinstance(r.get("name"), str)}
     not_run = [t.name for t in plan.targets if t.name in found and found[t.name].get("verdict") == gd.NOT_RUN]
     if not_run:
-        raise Precondition(f"{drive.NOT_RUN_GAP}対象がある: {'・'.join(not_run)}。読み手役を立てられる環境に直してから打ち直す")
+        raise Precondition(drive.not_run_detail("対象", not_run))
     gaps = [g for g in (_target_gap(run, plan, t, found) for t in plan.targets) if g is not None]
     gaps.extend(_outside_fixable(run, plan))
     final = _file_text(plan.material)
