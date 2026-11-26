@@ -219,6 +219,11 @@ def _open_pull(hub: GitHub, branch: str) -> Optional[Pull]:
     return opened[0] if opened else None
 
 
+def _no_open_pull(branch: str) -> dict:
+    """ブランチの開いた PR が無いときの停止結果。"""
+    return result.stopped(TOOL, "precondition", f"{branch} の開いた PR が無い")
+
+
 def _pr_target(hub: GitHub, pull: Pull) -> merge_approval.MergeTarget:
     """読んだ PR の承認の対象（ベースリポジトリ・番号・マージ先・HEAD）。"""
     return merge_approval.MergeTarget(hub.repo, pull.number, pull.base_ref, pull.head_sha)
@@ -361,7 +366,7 @@ def _merge_pull(args: argparse.Namespace, hub: GitHub) -> tuple[Optional[Pull], 
         return pull, None
     pull = _open_pull(hub, args.branch)
     if pull is None:
-        return None, result.stopped(TOOL, "precondition", f"{args.branch} の開いた PR が無い")
+        return None, _no_open_pull(args.branch)
     return pull, None
 
 
@@ -481,7 +486,7 @@ def _ask_approval(args: argparse.Namespace) -> dict:
     hub = _hub(args)
     pull = _open_pull(hub, args.branch)
     if pull is None:
-        return result.stopped(TOOL, "precondition", f"{args.branch} の開いた PR が無い")
+        return _no_open_pull(args.branch)
     verdict, _ = _judge_pr(hub, pull)
     target = _pr_target(hub, pull)
     return _asking(target, verdict, args.presented_out, f"#{pull.number} のマージの承認の回答を待つ")
@@ -513,7 +518,7 @@ def _unchanged_target(args: argparse.Namespace, hub: GitHub, shown: dict) -> tup
     """今の PR の承認の対象。提示した承認の対象か「本番へ反映されるか」が今の PR と違えば、止まる結果。"""
     pull = _open_pull(hub, args.branch)
     if pull is None:
-        return None, result.stopped(TOOL, "precondition", f"{args.branch} の開いた PR が無い")
+        return None, _no_open_pull(args.branch)
     now = _pr_target(hub, pull)
     held = _held_target(shown)
     if held is None:
