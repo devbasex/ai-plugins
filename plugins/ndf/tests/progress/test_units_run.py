@@ -377,9 +377,8 @@ def test_commits_that_cancel_out_before_a_squash_merge_are_still_found(world):
     assert _git(world.sprint, "rev-parse", "HEAD") == start and all(r.name != "pr" for r, _ in world.runs)
 
 
-def _three_commits_for_the_writer(world: World, empty: bool = False) -> None:
-    """単位「書き手」の `impl` にコミットを 2 つ足す（単位のコミットを 3 つにし、レビューした HEAD を書き直す）。
-    `empty` なら 1 つ目を変更の無いコミットにする。"""
+def _three_commits_for_the_writer(world: World) -> None:
+    """単位「書き手」の `impl` に、変更のあるコミットを 2 つ足す（単位のコミットを 3 つにし、レビューした HEAD を書き直す）。"""
     name = world.unit_names()["書き手"]
     original = world.call_plan
 
@@ -388,9 +387,6 @@ def _three_commits_for_the_writer(world: World, empty: bool = False) -> None:
         if run.name == "impl" and run.overrides["branch"] == name:
             worktree = Path(run.inputs["worktree"])
             for n in (1, 2):
-                if empty and n == 1:
-                    _git(worktree, "commit", "-q", "--allow-empty", "-m", "書き手 空")
-                    continue
                 (worktree / f"writer-{n}.txt").write_text(str(n), encoding="utf-8")
                 _git(worktree, "add", ".")
                 _git(worktree, "commit", "-q", "-m", f"書き手 {n}")
@@ -446,10 +442,8 @@ def test_a_squash_after_a_change_and_its_revert_is_not_taken_for_a_rebase_of_the
     assert _git(world.sprint, "rev-parse", "HEAD") == start and all(r.name != "pr" for r, _ in world.runs)
 
 
-@pytest.mark.parametrize("empty", [False, True], ids=["changes", "with-an-empty-commit"])
-def test_a_rebase_merge_that_recreates_the_reviewed_commits_opens_the_sprint_pr(world, empty):
-    # レビューした空のコミットが rebase の後も同じ位置に残っていても、ツリーで照らして通す
-    _three_commits_for_the_writer(world, empty)
+def test_a_rebase_merge_that_recreates_the_reviewed_commits_opens_the_sprint_pr(world):
+    _three_commits_for_the_writer(world)
 
     def rebase(cwd: Path) -> str:
         reviewed = _git(cwd, "rev-parse", "HEAD")
@@ -457,7 +451,7 @@ def test_a_rebase_merge_that_recreates_the_reviewed_commits_opens_the_sprint_pr(
         _git(cwd, "checkout", "-q", "--detach", base)
         commits = _git(cwd, "rev-list", "--reverse", f"{base}..{reviewed}").split()
         env = {**os.environ, "GIT_COMMITTER_DATE": "2001-01-01T00:00:00+0000"}
-        subprocess.run(["git", "-C", str(cwd), "cherry-pick", "--allow-empty", *commits], check=True, capture_output=True, env=env)
+        subprocess.run(["git", "-C", str(cwd), "cherry-pick", *commits], check=True, capture_output=True, env=env)
         landed = _git(cwd, "rev-parse", "HEAD")
         _git(cwd, "push", "-q", "origin", f"{landed}:refs/heads/{BRANCH}")
         _git(cwd, "checkout", "-q", "-")

@@ -18,7 +18,8 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections import Counter
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -782,7 +783,7 @@ def _take_unit_merges(g: Git, ctx: Context, tip: str, landed: Sequence[tuple[str
         reviewed, base = records[branch]
         if not reviewed or base != point or trees.get(reviewed) is None:
             raise _unreviewed(ctx, point, tip)
-        if not _reviewed_merge(g, order, chain, point, sha, reviewed, base, trees[reviewed]):
+        if not _reviewed_merge(g, order, chain, point, sha, reviewed, trees[reviewed]):
             raise _unreviewed(ctx, point, tip)
         point = sha
     if point != tip:
@@ -821,16 +822,15 @@ def _trees(g: Git, commits: Sequence[str]) -> dict[str, str]:
     return {r[0]: r[1] for r in (line.split() for line in done.stdout.splitlines()) if len(r) == 2}
 
 
-def _reviewed_merge(
-    g: Git, order: Sequence[str], chain: Mapping[str, _Node], point: str, sha: str, reviewed: str, base: str, tree: str
-) -> bool:
+def _reviewed_merge(g: Git, order: Sequence[str], chain: Mapping[str, _Node], point: str, sha: str, reviewed: str, tree: str) -> bool:
     """単位のマージで入ったコミット `sha` が、`point` の上にレビューした HEAD（`reviewed`、ツリー `tree`）の変更だけを足したものか。
 
-    ツリーはオブジェクト ID で比べる（`git diff` と違い、サブモジュールを無視する設定に左右されない）。マージの方式ごとに、GitHub が
-    マージした時点の親を照らす。squash は親が `point` だけ、merge commit は親が `point` とレビューした HEAD である。どちらでもなければ
-    rebase とみなし、`point` から `sha` までのコミットが親 1 つの直線で、各コミットのツリーが単位のコミット（`base..reviewed` の
-    マージでないもの）のツリーと順に同じことを確かめる（`_same_trees`）。レビューの後に入ったコミットは、変更を打ち消して最終の
-    ツリーが戻っても、squash なら親が、rebase なら途中のツリーが合わずに見つかる。
+    呼び手は、単位が実装の前に取り込んだスプリントブランチの HEAD が `point` と同じことを確かめてある。ツリーはオブジェクト ID で
+    比べる（`git diff` と違い、サブモジュールを無視する設定に左右されない）。マージの方式ごとに、GitHub がマージした時点の親を照らす。
+    squash は親が `point` だけ、merge commit は親が `point` とレビューした HEAD である。どちらでもなければ rebase とみなし、
+    `point` から `sha` までのコミットが親 1 つの直線で、各コミットの変更が単位のコミットの変更と同じことを確かめる
+    （`rebased_as_reviewed`）。レビューの後に入ったコミットは、変更を打ち消して最終のツリーが戻っても、squash なら親が、
+    rebase なら変更が合わずに見つかる。
     """
     node = chain[sha]
     if node.tree != tree:
@@ -841,20 +841,61 @@ def _reviewed_merge(
     segment = order[start : order.index(sha) + 1]
     if not segment or chain[segment[0]].parents != (point,) or any(len(chain[c].parents) != 1 for c in segment):
         return False
-    return _same_trees(g, [chain[c].tree for c in segment], base, reviewed)
-
-
-def _same_trees(g: Git, landed: Sequence[str], base: str, reviewed: str) -> bool:
-    """rebase の区間のツリー（古い順の `landed`）が、単位のコミット（`base..reviewed` のマージでないもの）のツリーと順に同じか。
-
-    呼び手は `base` が区間の起点（直前の確認済みコミット）と同じことを確かめてある。同じ起点から同じ変更を順に足せば、各コミットの
-    ツリーのオブジェクト ID は一致する。ID で比べるので、空白だけの変更・空のコミット・サブモジュールの参照先の更新も、差分の表示の
-    設定によらず同じ結果になる。単位の側は `git log` を 1 回だけ起動して読み、区間の側は読み済みの履歴を使う。
-    """
+    # 単位のコミットと区間のコミットを 1 回で読む。各コミットの変更は、パスごとの変更の前と後の blob の ID（--raw）で、
+    # 差分の表示の設定（空白・サブモジュールの表示・外部ツール・名前の変更の検出）にも、パスの書き方の設定にも左右されない
     done = g.attempt(
-        "log", "--no-merges", "--topo-order", "--reverse", "--no-show-signature", "--format=%T", END_OF_OPTIONS, f"{base}..{reviewed}"
+        "-c",
+        "core.quotePath=true",
+        "log",
+        "--raw",
+        "-r",
+        "--no-abbrev",
+        "--no-renames",
+        "--ignore-submodules=none",
+        "--diff-merges=off",
+        "--no-show-signature",
+        "--format=commit %H %P",
+        END_OF_OPTIONS,
+        reviewed,
+        sha,
+        f"^{point}",
     )
-    return done.returncode == 0 and done.stdout.split() == list(landed)
+    return done.returncode == 0 and rebased_as_reviewed(done.stdout, reviewed, segment)
+
+
+def rebased_as_reviewed(log: str, reviewed: str, segment: Sequence[str]) -> bool:
+    """rebase の区間 `segment` のコミットの変更が、単位のコミット（`reviewed` から届く、マージでないもの）の変更と過不足なく同じか。
+
+    `log` は `--raw` と `--format=commit %H %P` の `git log` の出力で、単位のコミットと区間のコミットを含む。変更はコミットごとの
+    raw の行（パス・変更の前と後のモードと blob の ID）の並びで、変更の無いコミットは空の並びとして数える。
+    比べるのは並びの集まり（多重集合）で、順は問わない。単位のブランチの中でマージした分岐は、rebase で直線に並べ直され、
+    順が一意に決まらない。どの区間のコミットもレビューした変更と blob まで同じなので、レビューしていない内容は入らない。
+    分岐の両方が同じファイルを変えていれば、並べ直した後の blob が変わるので一致せず、確かめられないとする。
+    """
+    commits: dict[str, tuple[tuple[str, ...], list[str]]] = {}
+    changes: list[str] = []
+    for line in log.splitlines():
+        if line.startswith("commit "):
+            sha, *parents = line[len("commit ") :].split()
+            changes = []
+            commits[sha] = (tuple(parents), changes)
+        elif line.startswith(":"):
+            changes.append(line)
+    unit: set[str] = set()
+    stack = [reviewed]
+    while stack:
+        c = stack.pop()
+        if c in unit or c not in commits:
+            continue
+        unit.add(c)
+        stack.extend(commits[c][0])
+    if any(c not in commits for c in segment):
+        return False
+
+    def changed(cs: Iterable[str]) -> Counter[tuple[str, ...]]:
+        return Counter(tuple(commits[c][1]) for c in cs if len(commits[c][0]) <= 1)
+
+    return changed(unit) == changed(segment)
 
 
 def _unreviewed(ctx: Context, point: str, tip: str) -> UnitsStopped:
