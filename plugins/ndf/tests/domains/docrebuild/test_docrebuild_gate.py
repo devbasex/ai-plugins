@@ -16,6 +16,7 @@ from typing import Any, Optional
 import pytest
 
 from ndf.adapters import git
+from ndf.adapters import publish
 from ndf.domains.docrebuild import cli, gate, gate_decide
 from ndf.domains.records import reading
 from ndf.domains.records import reading_decide as rd
@@ -677,16 +678,22 @@ def test_check_on_the_material_route_and_a_renamed_title(tmp_path: Path, monkeyp
 
 
 def test_a_redacted_remained_quote_is_carried_without_keeping_the_original():
-    """記録は伏せた後の引用と印だけを持ち、次の確認は対象も伏せて、空白の数の違いを除いて探す。"""
-
-    def publish(text: str) -> str:
-        return text.replace("TOKEN-VALUE", "[伏せた]")
-
-    original = {"quote": "値は  TOKEN-VALUE を使う", "why": "w"}
-    stored = gate_decide.marked_redacted({"quote": publish(original["quote"]), "why": "w"}, original)
-    assert stored == {"quote": "値は  [伏せた] を使う", "why": "w", "redacted": True}
+    """記録の引用は伏せた後の文と `redacted` を持ち、次の確認は伏せた所に何が入っていてもよいものとして、空白の数の違いを除いて探す。"""
+    original = {"quote": "連絡は  a@example.co.jp へ送る", "why": "w"}
+    hidden = f"連絡は  {publish.EMAIL_TEXT} へ送る"
+    stored = gate_decide.marked_redacted({"quote": hidden, "why": "w"}, original)
+    assert stored == {"quote": hidden, "why": "w", "redacted": True}
     prev = [{"name": "docs/a.md", "quotes": [stored]}]
-    now = {"docs/a.md": "前\n値は\nTOKEN-VALUE を使う\n後"}
-    assert gate_decide.carried_quotes(prev, now, {}, {}, publish) == {"docs/a.md": [stored]}
-    assert gate_decide.carried_quotes(prev, {"docs/a.md": "書き直した"}, {}, {}, publish) == {}
-    assert gate_decide.carried_quotes(prev, now, {}, {"docs/a.md": [original]}, publish) == {}
+
+    def carried(now: str, part: Optional[str] = "", raised: tuple[dict[str, str], ...] = ()) -> dict[str, Any]:
+        parts = {} if part == "" else {"docs/a.md": part}
+        return gate_decide.carried_quotes(prev, {"docs/a.md": now}, parts, {"docs/a.md": raised}, publish.redacted_pattern)
+
+    first, other = "連絡は\na@example.co.jp へ送る", "連絡は b@example.co.jp へ送る"
+    assert carried(f"前\n{first}\n後") == {"docs/a.md": [stored]}
+    assert carried("書き直した") == {}
+    assert carried(first, first) == {} and carried(first, None) == {}
+    # 値だけが違う別の文を読ませても、読ませていない文の指摘は引き継ぐ
+    raised = ({"quote": hidden, "why": "別の理由"},)
+    assert carried(f"{first}\n\n{other}", other, raised) == {"docs/a.md": [stored]}
+    assert carried(f"{first}\n\n{other}", f"{first}\n\n{other}") == {}

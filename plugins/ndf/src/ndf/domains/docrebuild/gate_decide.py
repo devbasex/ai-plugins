@@ -89,7 +89,7 @@ def _squeezed(text: str) -> str:
 
 
 def marked_redacted(published: dict[str, Any], original: Mapping[str, Any]) -> dict[str, Any]:
-    """伏せて引用が変わったら、伏せたことの印を足した行の引用を返す（印を持つ引用はそのまま）。
+    """伏せて引用が変わったら、`redacted` を足した行の引用を返す（`redacted` を持つ引用はそのまま）。
 
     記録に残すのは伏せた後の引用だけで、元の引用も、元の引用から計算した値（ハッシュ・文字数）も残さない。
     """
@@ -98,12 +98,15 @@ def marked_redacted(published: dict[str, Any], original: Mapping[str, Any]) -> d
     return {**published, "redacted": True}
 
 
-def _found_in(q: Mapping[str, Any], text: str, publish: Callable[[str], str]) -> bool:
-    """引用が `text` に残っているか。伏せた引用がそのままの `text` に無ければ、`text` も同じように伏せて探す。"""
-    quote = _squeezed(q["quote"])
-    if quote in _squeezed(text):
-        return True
-    return "redacted" in q and quote in _squeezed(publish(text))
+PatternOf = Callable[[str], re.Pattern[str]]
+
+
+def _count_in(q: Mapping[str, Any], text: str, pattern_of: PatternOf) -> int:
+    """引用が `text` に当たる数。伏せていない引用は有無（0 か 1）、伏せた引用は同じ形の文の数。"""
+    quote, text = _squeezed(q["quote"]), _squeezed(text)
+    if "redacted" not in q:
+        return int(quote in text)
+    return len(pattern_of(quote).findall(text))
 
 
 def carried_quotes(
@@ -111,38 +114,40 @@ def carried_quotes(
     contents: Mapping[str, str],
     read_parts: Mapping[str, Optional[str]],
     raised: Mapping[str, Sequence[Mapping[str, str]]],
-    publish: Callable[[str], str],
+    pattern_of: PatternOf,
 ) -> dict[str, list[dict[str, str]]]:
     """前の確認で残った文のうち引き継ぐもの（設計書の「前に残った文の状態」と、計画で決めたこと (3)）。
 
     `contents` は対象の今の全体、`read_parts` は今回読ませた対象の名前から読ませた部分（全体を読ませたなら None）、`raised` は今回も
-    挙がった引用。`publish` は文を PR へ書くときの形にする関数。引用と対象は、連続する空白を半角スペース 1 つに置き換え、前後の空白を
-    除いて比べる。同じ引用かどうかは、PR へ書くときの形で比べる。
+    挙がった引用と理由（PR へ書くときの形）。`pattern_of` は伏せた引用を対象の中から探す正規表現を作る。引用と対象は、連続する空白を
+    半角スペース 1 つに置き換え、前後の空白を除いて比べる。伏せた引用は、値だけが違う別の文と区別できないので、理由も同じときだけ
+    同じ引用とする。
     """
-
-    def identity(q: Mapping[str, Any]) -> str:
-        return _squeezed(publish(q["quote"]))
-
     out: dict[str, list[dict[str, str]]] = {}
     for row in prev:
         name = row["name"]
-        seen = {identity(q) for q in [*(raised[name] if name in raised else ()), *(out[name] if name in out else ())]}
+        known = [*(raised[name] if name in raised else ()), *(out[name] if name in out else ())]
+        seen = {key for q in known for key in (_squeezed(q["quote"]), (_squeezed(q["quote"]), _squeezed(q["why"])))}
         for q in row["quotes"]:
-            if name not in contents or not _found_in(q, contents[name], publish) or identity(q) in seen:
+            key: object = _squeezed(q["quote"])
+            if "redacted" in q:
+                key = (key, _squeezed(q["why"]))
+            if name not in contents or key in seen:
                 continue
-            if _read_again(name, q, read_parts, publish):
+            count = _count_in(q, contents[name], pattern_of)
+            if not count or _read_again(name, q, count, read_parts, pattern_of):
                 continue
             out.setdefault(name, []).append(dict(q))
-            seen.add(identity(q))
+            seen.add(key)
     return out
 
 
-def _read_again(name: str, q: Mapping[str, Any], read_parts: Mapping[str, Optional[str]], publish: Callable[[str], str]) -> bool:
-    """引用した文を今回読ませたか（全体を読ませたか、読ませた部分に含まれる）。"""
+def _read_again(name: str, q: Mapping[str, Any], count: int, read_parts: Mapping[str, Optional[str]], pattern_of: PatternOf) -> bool:
+    """引用した文を今回読ませたか。全体を読ませたか、対象にある `count` 件の当たる文がすべて読ませた部分にあれば真。"""
     if name not in read_parts:
         return False
     part = read_parts[name]
-    return part is None or _found_in(q, part, publish)
+    return part is None or _count_in(q, part, pattern_of) >= count
 
 
 def row_verdict(round_no: int, passed: bool) -> str:

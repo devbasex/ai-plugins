@@ -126,6 +126,25 @@ def qualified_ref(origin: str, source_repo: str, target_repo: str, visibility: M
     return f"{m.group('label')}{source_repo}#{m.group('number')}"
 
 
+# 伏せた所の固定の文ごとの、元の文に一致する形。認証ヘッダーは行の残りを空白ごと伏せるので、秘密の伏せ字は空白も含める
+_HIDDEN_FORMS = {
+    **dict.fromkeys((PRIVATE_REF_TEXT, HOME_TEXT, EMAIL_TEXT, ACCOUNT_TEXT), "[!-~]+?"),
+    run_log.MASK: ".+?",
+}
+_HIDDEN = re.compile("(" + "|".join(map(re.escape, _HIDDEN_FORMS)) + ")")
+
+
+def redacted_pattern(text: str) -> re.Pattern[str]:
+    """伏せた後の文 `text` を、伏せる前の文の中から探す正規表現。伏せた所には、固定の文そのものか、伏せる前の値の形が一致する。
+
+    公開範囲を照会せず、伏せる前の値もそのハッシュも要らない。伏せた値だけが違う文には、どれにも一致する。
+    """
+    parts = _HIDDEN.split(text)
+    return re.compile(
+        "".join(f"(?:{re.escape(p)}|{_HIDDEN_FORMS[p]})" if i % 2 else re.escape(p) for i, p in enumerate(parts)),
+    )
+
+
 def _overlaps(span: tuple[int, int], spans: Sequence[tuple[int, int]]) -> bool:
     return any(start < span[1] and span[0] < end for start, end in spans)
 
@@ -350,10 +369,14 @@ class Publisher:
         made = self.hub.rest("POST", f"/repos/{self.hub.repo}/issues/{int(number)}/comments", {"body": safe})
         return Published(int(number), str(made["html_url"]), dropped)
 
-    def comment_unchanged(self, number: int, body: str) -> Optional[Published]:
+    def comment_unchanged(self, number: int, body: str, exposed_before: bool = False) -> Optional[Published]:
         """検査しても変わらない本文だけをコメントで足す。伏せる所があれば何も書かずに None（本文のハッシュを別に持つ呼び手が、
-        持っているハッシュと違う本文を書かないため）。検査は 1 回だけで、書き先と参照先の公開範囲もまとめて照会する。"""
-        self._read_with_target([body])
+        持っているハッシュと違う本文を書かないため）。検査は 1 回だけ。
+
+        `exposed_before` は、呼び手が同じ書き先を公開（か読めない）と先に確かめていれば真にする。このときは書き先と参照先の公開範囲を
+        1 回の照会で読む。偽なら書き先を先に読み、非公開・内部の書き先では本文の参照先の名前を照会に含めない。"""
+        if exposed_before:
+            self._read_with_target([body])
         (safe,), dropped = self.guarded(body)
         if safe != body:
             return None

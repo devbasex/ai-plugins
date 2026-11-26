@@ -21,7 +21,7 @@ from typing import Any, Optional
 from ndf import identity
 from ndf.adapters import git
 from ndf.adapters.github import GitHub, GitHubError
-from ndf.adapters.publish import Publisher
+from ndf.adapters.publish import Publisher, redacted_pattern
 from ndf.contracts import result
 from ndf.domains.docrebuild import drive
 from ndf.domains.docrebuild import gate_decide as gd
@@ -123,6 +123,10 @@ class Run:
     view: Optional[PullView] = None
     _publisher: Optional[Publisher] = None
     _published: dict[str, str] = field(default_factory=dict)
+
+    def exposed_before(self) -> bool:
+        """この実行で書き先を公開（か読めない）と確かめたか。確かめていなければ偽（照会しない）。"""
+        return self._publisher is not None and self._publisher.exposed()
 
     def publishable(self, text: str) -> str:
         """`text` を PR へ書くときの形（秘密などを伏せた後）。読み手役に読ませる本文とハッシュはこの形にする
@@ -539,7 +543,7 @@ def post_material(run: Run, now: PullView, final: str) -> None:
     if reading.comment_has(now.comments, reading.sha256(final)):
         return
     try:
-        posted = Publisher(run.hub).comment_unchanged(run.pr.number, final)
+        posted = Publisher(run.hub).comment_unchanged(run.pr.number, final, exposed_before=run.exposed_before())
     except GitHubError as exc:
         raise Precondition(f"承認資料を PR のコメントで足せない: {exc}") from None
     if posted is None:
@@ -655,8 +659,8 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
         # 承認資料は worker が書き足した後に変わった段落とその前後だけを読ませるので、読ませた部分は今の本文から切り出す
         parts[reading.MATERIAL] = gd.changed_part(_file_text(plan.previous), draft)
     prev = reading.remained_of(reading.doc_rows(), run.repo, run.args.gate, run.pr.number)
-    _publish_for_carry(run, prev, contents, parts, raised)
-    rows = gd.doc_rows_of(found, gd.carried_quotes(prev, contents, parts, raised, run.publishable), hashes)
+    carried = gd.carried_quotes(prev, contents, parts, _published_raised(run, prev, raised), redacted_pattern)
+    rows = gd.doc_rows_of(found, carried, hashes)
     _publish_quotes(run, rows)
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]
     section = reading.remained_section(remained)
@@ -683,26 +687,21 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
     return result.result(TOOL, result.OK, summary, items, {"reads": reads}, outputs=outputs)
 
 
-def _publish_for_carry(
-    run: Run,
-    prev: Sequence[Mapping[str, Any]],
-    contents: Mapping[str, str],
-    parts: Mapping[str, Optional[str]],
-    raised: Mapping[str, Sequence[Mapping[str, str]]],
-) -> None:
-    """残った文の引き継ぎで PR へ書くときの形にする文を、まとめて 1 回の検査に通す（公開範囲の照会を文ごとに分けない）。
-    対象の全体と読ませた部分は、伏せた引用がある対象のものだけを通す。"""
+def _published_raised(
+    run: Run, prev: Sequence[Mapping[str, Any]], raised: Mapping[str, Sequence[Mapping[str, str]]]
+) -> dict[str, list[dict[str, str]]]:
+    """今回も挙がった引用と理由を、前の記録と比べられるように PR へ書くときの形にする（前の記録が無ければ空）。
+    前の引用と理由も同じ 1 回の検査に通す。対象の文書は通さない（掲載しない参照先の公開範囲を照会しない）。"""
     if not prev:
-        return
-    hidden = {r["name"] for r in prev if any("redacted" in q for q in r["quotes"])}
-    texts = [t for name in hidden for t in (contents.get(name), parts.get(name)) if t is not None]
-    quotes = [q["quote"] for r in prev for q in r["quotes"]] + [q["quote"] for qs in raised.values() for q in qs]
-    run.publish_all([*quotes, *texts])
+        return {}
+    quotes = [q for qs in [*(r["quotes"] for r in prev), *raised.values()] for q in qs]
+    run.publish_all([q[k] for q in quotes for k in ("quote", "why")])
+    return {n: [{k: run.publishable(q[k]) for k in ("quote", "why")} for q in qs] for n, qs in raised.items()}
 
 
 def _publish_quotes(run: Run, rows: Sequence[dict[str, Any]]) -> None:
-    """残った文の引用と理由を PR へ書くときの形にする。伏せて変わった引用は元の文を残さず、伏せたことの印を持ち、
-    次の確認が対象も伏せてから探せるようにする。"""
+    """残った文の引用と理由を PR へ書くときの形にする。伏せて変わった引用は元の文を残さず、`redacted` を持つ
+    （次の確認は、伏せた所に何が入っていてもよいものとして対象の中を探す）。"""
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]
     run.publish_all([q[k] for r in remained for q in r["quotes"] for k in ("quote", "why")])
     for row in remained:
