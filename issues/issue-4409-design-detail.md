@@ -21,11 +21,11 @@ plugins/ndf/
 │   ├── checks/children.json
 │   ├── core/plan/{cli.py, runner.py}
 │   ├── ci_cli.py
-│   ├── adapters/github.py
+│   ├── adapters/{github.py, github_merge.py *}
 │   ├── domains/release/{trail.py, approval_decide.py, cli.py}
 │   ├── domains/records/mvv_gate.py
 │   ├── domains/hooks/strict.py
-│   └── progress/{invoke.py, run.py, gate/{asking.py, answering.py, entry.py}}
+│   └── progress/{invoke.py, issue_values.py *, run.py, run_view.py *, gate/{asking.py, answering.py, entry.py}}
 └── tests/ （設計文書の「設計の結果」のとおり）
 ```
 
@@ -36,6 +36,8 @@ plugins/ndf/
 | `src/ndf/core/production_merge.py` | 新設 | `branch_strategy` とマージ先から、本番へ自動で届くかの判定の値を返す | 標準ライブラリ | モジュール | `Verdict`・`judge`・`automatic_rows`・`needs_approval`・`reaches_production`（新設） |
 | `src/ndf/ci_cli.py` | 変更 | `ndf ci merge` に判定と証跡の確かめを足し、`ndf ci ask`・`ndf ci answer` を足す | `adapters.github`・`core.merge_approval`・`core.approval_words`・`core.production_merge`・`contracts.result` | モジュール | `_parser`・`_merge`（変更）、`_pr_target`・`_judge_pr`・`_unapproved`・`_ask_approval`・`_answer`・`_presented`（新設） |
 | `src/ndf/adapters/github.py` | 変更 | マージ先の設定の読み取り・token の利用者・直前の照合を足す | `githubkit` | `GitHub` | `merge`・`_merge_with`・`_enqueue`（変更）、`branch_file`・`viewer`・`_verify`（新設） |
+| `src/ndf/adapters/github_merge.py` | 新設 | `github.py` から分けたマージの部品（方式の選択・先の確認・マージの結果の型・照合の GraphQL の文） | 標準ライブラリ | モジュール | `MergeOutcome`・`FileAt`・`Verified`・`TARGET_MOVED`・`VERIFY_QUERY`・`MERGE_QUEUE_VERIFY_QUERY` など |
+| `src/ndf/progress/issue_values.py`・`run_view.py` | 新設 | `invoke.py` の課題の写しと、`run.py` の事象の種類・状態の読み取り・写しの移行を分けた | `progress` の部品 | モジュール | `migrated_order`・`migration_drafts`・`read_accepted_head` など |
 | `src/ndf/core/merge_approval.py` | 新設 | 承認の対象とマージの承認の証跡を組み、読み、判定し、書く | `adapters.github`・`adapters.publish`・`core.approval_words` | モジュール | `MergeTarget`・`MergeRow`・`render_merge_row`・`merge_rows`・`merge_judgment`・`write_merge_row`（新設）。`By`・`USER_BY`・`MVV_BY`・`BY_CHOICES`・`BY_LINE`・`TrailError`（`domains/release/trail.py` から移す） |
 | `src/ndf/core/approval_words.py` | 新設 | 回答の語と、承認資料が対象にしたコミットの行の見出し | 標準ライブラリ | モジュール | `APPROVED`・`REJECTED`・`ANSWERS`・`HEAD_LINE`（`domains/release/approval_decide.py` から移す） |
 | `src/ndf/core/actors.py` | 新設 | 回答した者の形 | 標準ライブラリ | モジュール | `ACTORS`・`HUMAN`（`progress/gate/answering.py` の `ACTORS` を移し、`ndf answer --by` と `ndf plan next --by` が共有する） |
@@ -49,7 +51,7 @@ plugins/ndf/
 | `src/ndf/domains/records/mvv_gate.py` | 変更 | MVV 判定の通過で、判定の記録のコメントに証跡の行を入れる | `core.merge_approval`・`core.approval_words` | モジュール | `_judged`・`_recorded`（変更） |
 | `src/ndf/domains/hooks/strict.py` | 変更 | 届け先の判定を部品から呼び、証跡のマーカーを含む Bash を止める | `core.production_merge` | モジュール | `_judge`・`_deliveries`（変更）、`_writes_merge_mark`（新設）。`_automatic_production` は削除 |
 | `src/ndf/progress/invoke.py` | 変更 | 工程から組むプランへ `production_gate`・`approved_head`・`approved_base` を入れる | `asking`・`core.production_merge` | モジュール | `template_values`（変更）、`_fill_production_gate`・`_approved_target`（新設） |
-| `src/ndf/progress/run.py` | 変更 | `approval_stale` の再試行の経路、MVV 通過の `seen`、工程の定義の写しの移行 | `stages`・`store` | モジュール | `_failed_report`・`_consume`・`view`・`advance`（変更）、`stale_routes`・`migrate_definition`・`_migrated_order`（新設） |
+| `src/ndf/progress/run.py` | 変更 | `approval_stale` の再試行の経路、MVV 通過の `seen`、工程の定義の写しの移行 | `stages`・`store` | モジュール | `_failed_report`・`_consume`・`view`・`advance`（変更）、`stale_routes`・`migrate_definition`・`migrated_order`（新設） |
 | `contracts/causes/approval_stale.json` | 新設 | 停止理由 `approval_stale` の定義 | — | — | — |
 | `contracts/workflow/context.schema.json` | 変更 | 出力 `mvv_gate` に `target` を足す | — | — | — |
 | `contracts/hooks/imports.json` | 変更 | hook の import の表に判定の部品を足す | — | — | — |
@@ -255,15 +257,15 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_ask` | `ci_cli.py` | 新設 | `(args: argparse.Namespace) -> dict` | `--branch` の PR を読み、判定し、承認資料と提示のファイルを書いて `gate`（終了コード 10）で止まる |
-| `_answer` | `ci_cli.py` | 新設 | `(args: argparse.Namespace) -> dict` | 回答の記録（`--answer-record`）と提示のファイル（`--presented`）を照らし、今の PR と同じなら証跡を書く |
-| `_presented` | `ci_cli.py` | 新設 | `(path: Path, target: merge_approval.MergeTarget, production: bool) -> str` | 提示の識別子（`uuid4` の 16 進）を作り、承認の対象と合わせてファイルへ書き、隣に承認資料（`production` が真なら「この承認で PR がマージされ、本番へ反映され得る」の行を含む）を書いて、識別子を返す。`_ask` と `_unapproved` の `stop` が使う |
+| `_ask_approval` | `ci_cli.py` | 新設 | `(args: argparse.Namespace) -> dict` | `--branch` の PR を読み、判定し、承認資料と提示のファイルを書いて `gate`（終了コード 10）で止まる |
+| `_answer` | `ci_cli.py` | 新設 | `(args: argparse.Namespace) -> dict` | `_answer_with_shown`（回答の記録と提示のファイル `--presented` の照合）・`_unchanged_target`（今の PR の承認の対象と「本番へ反映されるか」の照合）・`_write_answer`（証跡の書き込み）を順に呼ぶ |
+| `_presented` | `ci_cli.py` | 新設 | `(path: Path, target: merge_approval.MergeTarget, production: bool) -> tuple[str, Path]` | 提示の識別子（`uuid4` の 16 進）を作り、承認の対象と合わせてファイルへ書き、隣に承認資料（`production` が真なら「この承認で PR がマージされ、本番へ反映され得る」の行を含む）を書いて、識別子と資料のパスを返す。`_ask_approval` と `_unapproved` の `stop` が使う |
 
-- `_ask`
+- `_ask_approval`
   - 副作用: PR・設定の読み取り、`--presented-out` のファイルと承認資料の書き込み
 - `_answer`
   - 事前条件: 回答の記録はプランの実行（`runner._record_answer`）が書いた形である
-  - 事後条件: 証跡を書いたのは、回答した者が `human` で、記録の提示の識別子が提示のファイルの識別子と同じで、提示のファイルの承認の対象が今の PR と同じときだけである。担い手はいつも `user`
+  - 事後条件: 証跡を書いたのは、回答した者が `human` で、記録の提示の識別子が提示のファイルの識別子と同じで、提示のファイルの承認の対象と「本番へ反映されるか」が今の PR と同じときだけである。担い手はいつも `user`
   - 副作用: PR の読み取り、コメントの読み取り、投稿 1 回（`write_merge_row`）
 
 ### 異常系の処理
@@ -273,8 +275,8 @@ plugins/ndf/
 | `_answer` | 回答の記録が無い・読めない | 端末から直に打った | ファイルの読み取り | 止める | `stopped`（`refused`） | 書かない |
 | `_answer` | 回答した者が `human` でない | `conductor`・`organizer`・`service:*`・`--by` 無し | 記録の `by` | 止める | `stopped`（`refused`） | 書かない |
 | `_answer` | 提示の識別子が違う | 流し直しで提示が置き換わった | 記録と提示のファイルの比較 | 止める | `stopped`（`refused`） | プランを流し直して回答し直す |
-| `_answer` | 承認の対象が今の PR と違う | 質問の後に HEAD・マージ先が変わった | `_pr_target` との比較 | 止める | `stopped`（`refused`） | 同上 |
-| `_ask` | 提示のファイルを書けない | 保存先の権限 | `OSError` | 止める | `stopped`（`precondition`） | 再実行できる |
+| `_answer` | 承認の対象か「本番へ反映されるか」が今の PR と違う | 質問の後に HEAD・マージ先・マージ先の設定が変わった | `_unchanged_target` の比較 | 止める | `stopped`（`refused`） | 同上 |
+| `_ask_approval` | 提示のファイルを書けない | 保存先の権限 | `OSError` | 止める | `stopped`（`precondition`） | 再実行できる |
 
 ### 内部のデータと定数
 
@@ -287,7 +289,7 @@ plugins/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `_ask` | `progress/gate/entry.py` の `ask`（`ndf answer ask`） | `grep -n "^def ask" src/ndf/progress/gate/entry.py` | 使えない。PR を読まず、承認の対象を残さない |
+| `_ask_approval` | `progress/gate/entry.py` の `ask`（`ndf answer ask`） | `grep -n "^def ask" src/ndf/progress/gate/entry.py` | 使えない。PR を読まず、承認の対象を残さない |
 | `_answer` | `domains/release/cli.py` の `answer`（`ndf release-steps answer`） | `grep -n "\"--answer\"" src/ndf/domains/release/cli.py` | 使えない。`--answer` と `--by` を受けて書く形で、決定 7 で採らなかった |
 | `_presented` | `trail.present` | `grep -n "def present" src/ndf/domains/release/trail.py` | 使えない。PR へ資料を投稿する形で、提示の識別子を持たない |
 
@@ -295,7 +297,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_ask` | `gate` と `metrics.presented_id`、ファイルの識別子が同じ | 判定が `UNSET`・`UNKNOWN` でも資料に本番の行がある | 書けないと `precondition` |
+| `_ask_approval` | `gate` と `metrics.presented_id`、ファイルの識別子が同じ | 判定が `UNSET`・`UNKNOWN` でも資料に本番の行がある | 書けないと `precondition` |
 | `_answer` | 承認・却下のそれぞれで証跡を書く | 同じ記録で 2 回打っても投稿は 1 回 | 異常系の表の行ごとに `refused` で、投稿 0 回 |
 
 ## プランの実行
@@ -309,7 +311,8 @@ plugins/ndf/
 | `_parser` | `core/plan/cli.py` | 変更 | `() -> argparse.ArgumentParser` | `next` に `--by`（形は `answering.ACTORS`）を足す |
 | `_cmd_next` | `core/plan/cli.py` | 変更 | `(a: argparse.Namespace) -> int` | `a.by` を `runner.advance` へ渡す |
 | `advance` | `core/plan/runner.py` | 変更 | `(root: Path, inv: Invocation, answer: Optional[str], on_gate: Callable[[dict[str, Any]], None], url: Optional[str] = None, by: Optional[str] = None) -> dict[str, Any]` | 回答を送る前に、待っていたステップの回答の記録を書く。`by` が無ければ回答を受けない |
-| `_routes` | `core/plan/runner.py` | 変更 | `(inv: Invocation) -> dict[str, dict[str, dict[str, Any]]]` | 回答の経路を `ndf plan next <プラン> --answer <回答> --by human` にする |
+| `_routes`・`presented_routes` | `core/plan/runner.py` | 変更・新設 | `(inv: Invocation) -> dict[...]`・`(marker: dict[str, Any]) -> dict[str, Any]` | 回答の経路を `ndf plan next <プラン> --answer <回答> --by human` にし、待ちを示すときに今の待ち（`--waiting`）と提示の識別子（`--presented`）を足す |
+| `_pin_mismatch`・`_unconfirmed_stop` | `core/plan/runner.py` | 新設 | `(baseline, reply) -> Optional[str]`・`(inv, baseline) -> dict` | 今の待ちと提示に合わない回答は `approval_stale` で、同じ回の提示を確かめられない旧い形の待ちへの回答は `precondition` で、記録せずに止める |
 | `answer_path` | `core/plan/runner.py` | 新設 | `(state_dir: Path, step: str) -> Path` | 回答の記録のパス `{state_dir}/answer-records/<ステップ>.json`（保存先の名前は `runner.ANSWERS_DIR`。`answers` は結果 JSON の語 `result.ANSWERS` と同じ文字列になるので避ける） |
 | `_record_answer` | `core/plan/runner.py` | 新設 | `(inv: Invocation, baseline: dict[str, Any], answer: str, by: str) -> None` | 待ちのマーカーのステップと、そのステップの結果の `metrics.presented_id` を写して回答の記録を書く |
 
@@ -463,7 +466,7 @@ plugins/ndf/
 | `merge` | `adapters/github.py` | 変更 | `(self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None, require_method: bool = False, jump: bool = False, expect: Optional[MergeExpect] = None) -> MergeOutcome` | `expect` があれば、要求を送る直前に照らす |
 | `_merge_with` | `adapters/github.py` | 変更 | `(self, number: int, expect_head: Optional[str], method: Optional[str], route: _MergeRoute, expect: Optional[MergeExpect] = None) -> MergeOutcome` | 最初の PR の読み直しをやめ、方式の問い合わせの後・送る直前に `_verify` を呼ぶ。`expect` が無ければ今と同じ |
 | `_enqueue` | `adapters/github.py` | 変更 | `(self, pull: Pull, method: Optional[str], jump: bool = False, expect: Optional[MergeExpect] = None) -> Optional[MergeOutcome]` | キューの状態の問い合わせに `baseRefName`・HEAD・設定の oid と本文を足して照らし、投入の後に PR を読み直してマージ先が変わればキューから外す |
-| `_verify` | `adapters/github.py` | 新設 | `(self, fresh: Verified, expect: MergeExpect) -> Optional[MergeOutcome]` | 照合の応答と期待を比べ、マージ先か HEAD が違えば `github_merge.TARGET_MOVED`、ベースリポジトリが違えば `refused`。oid だけが違えば `expect.rejudge(本文)` の結果を返す |
+| `_verify`・`_verify_before_send` | `adapters/github.py` | 新設 | `(number: int, fresh: Verified, expect: MergeExpect, repo: str) -> Optional[MergeOutcome]`（モジュールの関数）・止めるときはキューから外すメソッド | 照合の応答と期待を比べ、マージ先か HEAD が違えば `github_merge.TARGET_MOVED`、ベースリポジトリが違えば `refused`。oid だけが違えば `expect.rejudge(本文)` の結果を返す |
 
 - `merge`
   - 事前条件: `expect.base`・`expect.head` は `ndf ci merge` が判定に使った値
@@ -484,10 +487,10 @@ plugins/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `FileAt` | 型 `NamedTuple` | `adapters/github.py` | `repo: str`・`text: Optional[str]`・`oid: Optional[str]` |
-| `MergeExpect` | 型 `NamedTuple` | `adapters/github.py` | `base: str`・`head: str`・`config_path: str`・`config_oid: Optional[str]`・`rejudge: Callable[[Optional[str]], Optional[MergeOutcome]]` |
-| `Verified` | 型 `NamedTuple` | `adapters/github.py` | `base: str`・`head: str`・`repo: str`・`config: FileAt`（照合の応答） |
-| `_VERIFY` | GraphQL の文 | `adapters/github.py` | PR の `baseRefName`・`headRefOid`・`baseRepository.nameWithOwner` と `object(expression: "<base>:<path>")` の `oid`・`text` |
+| `FileAt` | 型 `NamedTuple` | `adapters/github_merge.py` | `repo: str`・`text: Optional[str]`・`oid: Optional[str]` |
+| `MergeExpect` | 型 `NamedTuple` | `adapters/github.py` | `pull: Pull`・`base: str`・`head: str`・`config_path: str`・`config_oid: Optional[str]`・`rejudge: Callable[[Optional[str]], Optional[MergeOutcome]]` |
+| `Verified` | 型 `NamedTuple` | `adapters/github_merge.py` | `base: str`・`head: str`・`repo: str`・`config: FileAt`（照合の応答） |
+| `VERIFY_QUERY`・`MERGE_QUEUE_VERIFY_QUERY` | GraphQL の文 | `adapters/github_merge.py` | PR の `baseRefName`・`headRefOid`・`baseRepository.nameWithOwner` と `object(expression: "<base>:<path>")` の `oid`・`text` |
 
 ### 並行と排他
 
@@ -579,7 +582,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `template_values` | `progress/invoke.py` | 変更 | 今と同じ | 工程から組むときに `_fill_production_gate` と、`release` では `_approved_target` を通す |
 | `_fill_production_gate` | `progress/invoke.py` | 新設 | `(t: route.Template, run: StageRun) -> dict[str, route.Value]` | テンプレートの名前とステップから `production_gate` を決める。`merge`（`pr-merge`・`docs-merge`）と `plan-to-spec` は `defer`、`design-merge` と `release` は `stale`。工程が承認ゲートを持たない（`StageRun.gated` が偽。`light` の設計）なら `stale` を `defer` に替える。表に無いテンプレートは値を入れず、既定の `stop` のまま |
-| `_approved_target` | `progress/invoke.py` | 新設 | `(run: StageRun) -> dict[str, route.Value]` | リリース承認ゲートの最新の承認の回答の事象の `seen` から `approved_head`・`approved_base` を作る。`base` が無ければ空文字 |
+| `_approved_target` | `progress/invoke.py` | 新設 | `(run: StageRun) -> dict[str, route.Value]` | リリース承認ゲートの最新の承認の回答が見た対象（`StageRun.approved`。`run.approved_seen` が事象の `seen` に、本番へ反映されない承認で繰り上げた HEAD を重ねたもの）から `approved_head`・`approved_base` を作る。無ければ空文字 |
 
 - `_approved_target`
   - 事前条件: `run` は工程「デプロイ」の実行で、承認の回答がある（`release-gate` の後にだけ流れる）
@@ -621,8 +624,8 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `migrate_definition` | `progress/run.py` | 新設 | `(st: store.Store, machine_id: str) -> Optional[int]` | 写しが古い順で、デプロイが始まっておらず、クリーンアップが終わっていなければ、事象 `definition_migrated`（payload に新しい工程の順）を 1 回書き、その番号を返す |
-| `_migrated_order` | `progress/run.py` | 新設 | `(snap: stages.Snapshot, events: Sequence[model.Event]) -> stages.Snapshot` | 事象 `definition_migrated` があれば、その順に工程を並べ替えた写しを返す |
-| `view` | `progress/run.py` | 変更 | 今と同じ | `_migrated_order` を通した写しで `View` を作る |
+| `migrated_order`・`migration_drafts` | `progress/run_view.py` | 新設 | `(snap: stages.Snapshot, events: Sequence[model.Event]) -> stages.Snapshot` | 事象 `definition_migrated` があれば、その順に工程を並べ替えた写しを返す |
+| `view` | `progress/run.py` | 変更 | 今と同じ | `migrated_order` を通した写しで `View` を作る |
 | `advance` | `progress/run.py` | 変更 | 今と同じ | 駆動の前に `migrate_definition` を呼ぶ |
 
 - `migrate_definition`
@@ -634,7 +637,7 @@ plugins/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `migrate_definition` | 追記がぶつかる | 2 つの `next` が同時に打たれた | `store.Conflict` | 再試行（`retrying_transaction`）。読み直して既に事象があれば書かない | 無し | 冪等 |
-| `_migrated_order` | 事象の順が写しの工程と合わない | 手で書いた事象 | 工程の名前の集合の比較 | 既定値で続ける（写しのまま） | 無し | — |
+| `migrated_order` | 事象の順が写しの工程と合わない | 手で書いた事象 | 工程の名前の集合の比較 | 既定値で続ける（写しのまま） | 無し | — |
 
 ### 処理の手順
 
@@ -655,11 +658,11 @@ plugins/ndf/
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `migrate_definition` | `run.append`・`command.retrying_transaction` | `grep -n "def append\|def retrying_transaction" src/ndf/progress/run.py src/ndf/progress/command.py` | 使う |
-| `_migrated_order` | `store` の定義の書き込み | `grep -n "def .*definition" src/ndf/progress/store.py` | 書き込みの関数は無い（`read_definition` だけ）。写しは書き換えず、事象から並べ替える |
+| `migrated_order` | `store` の定義の書き込み | `grep -n "def .*definition" src/ndf/progress/store.py` | 書き込みの関数は無い（`read_definition` だけ）。写しは書き換えず、事象から並べ替える |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `migrate_definition` | 古い写しで 1 件書き、デプロイ → クリーンアップの順で進む | `precondition` で止まったクリーンアップでも移行する。2 回打っても 1 件 | 終わったクリーンアップ・始まったデプロイでは書かない |
-| `_migrated_order` | 事象の順に並ぶ | 事象が無ければ写しのまま | 名前の合わない事象では写しのまま |
+| `migrated_order` | 事象の順に並ぶ | 事象が無ければ写しのまま | 名前の合わない事象では写しのまま |
