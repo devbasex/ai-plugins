@@ -27,7 +27,10 @@ flowchart LR
 - **工程「計画」は実装のフェーズにある**（`stages/plan.json` の `phase: implement`）
 - **ステップはモードごとに流す・流さないを指定できる**（`metadata.ndf.modes`）
 - **マージは承認が見た HEAD とマージ先でだけ行う**（`ndf ci merge --approved-head --approved-base`。値は同じ工程の承認の回答から入る）
-- **単位を読むコードと、行数を数えるコードは main に無い。**
+- **工程「実装」には 2 つの経路がある。** ここでいうプランは、手順をステップの列にした実行の定義で、実装計画とは別である
+  - `ndf progress next` は工程の定義どおりに流す。実装のプランは工程 1 回につき 1 回呼び、単位には分けない
+  - supervisor（工程を回す AI）が回すときは、`agent-layers.md` の手順に沿って AI が実装計画の表を読み、単位ごとのプランを組んで流し、マージする
+- **どちらの経路にも、単位を読むコードと行数を数えるコードは無い。**
   - 単位の表を読み、単位を 1 つずつ流す処理は #4369 の設計にある（未実装）
   - #4369 の設計は、単位の並列と、承認した中身と同じかの確かめを #3702 に任せている
 - **`design_gaps`（1 つの課題が 2 つ以上の PR に分かれていると止める関数）は、テストのほかに呼び出し元が無い**
@@ -63,6 +66,7 @@ flowchart LR
 
 - 設計 PR には要求・設計書・詳細設計書・実装計画が載り、承認する人は分け方・実行順・並列と直列の表を見て承認する
 - 単位の SSOT は、実装計画と組の JSON ファイル（以下「単位のファイル」）にする。実装計画の 2 つの表はそこから作る
+- 工程「実装」の 2 つの経路は、同じ `check`（承認した中身との照合を含む）の結果から単位を得る。図の「実装」の並びは `ndf progress next` の流し方で、supervisor は同じ結果からプランを組んで流す（決定 12）
 - `ndf plan units check` が実行順を導き、400 行を超える単位に警告し、1,000 行を超える単位や組み方の誤りで止めて、分け方の案を返す
 - 工程「実装」は、同じ実行順の単位を並列に流し、すべてマージしてから次の実行順へ進む
 - こうする理由は、分け方の誤りを実装の前に人が直せるようにし、読み落とせる手順書の目安を機械の判定に置き換えるためである
@@ -93,8 +97,9 @@ flowchart LR
 | I2 | 単位の分け方 | 先に要る単位には理由がある | 確かめが止める |
 | I3 | 単位の分け方 | 同じ実行順の単位は、同じファイルを触る予定を持たない | 確かめが止める |
 | I4 | 単位の分け方 | 見込みの行数が上限を超える単位が無い | 確かめが止めて案を返す |
-| I5 | 単位の実行 | 流すのは、設計承認ゲートで承認した中身の分け方だけである | 実装を始めずに止まる |
+| I5 | 単位の実行 | 流すのは、設計承認ゲートで承認した中身の分け方だけである。承認が要るのに承認の記録が無ければ流さない | 実装を始めずに止まる |
 | I6 | 単位の実行 | 次の実行順は、前の実行順の単位をすべてマージした後に始める | 次を始めずに止まる |
+| I7 | 単位の分け方 | 確かめ・CI・MVV 判定・承認資料・承認の回答は、設計 PR の同じ HEAD に対応する | 資料を出さず、回答を確定せず、ドキュメントレビューをやり直す |
 
 ### ドメインイベント
 
@@ -115,14 +120,16 @@ flowchart LR
 | --- | --- |
 | 単位のファイルの形（`contracts/workflow/review-units.schema.json`。新設） | タスクと単位の形を決める |
 | 単位の判定（`src/ndf/core/plan/units_decide.py`。新設） | 実行順・触るファイル・行数を導き、違反・警告・分け方の案を返す。ファイルも git も読まない |
-| 単位の読み書き（`src/ndf/core/plan/units_files.py`。新設） | 単位のファイル・実装計画・上限の設定を読み、実装計画の表を作る |
-| コマンド（`ndf plan units check`・`render`。`core/plan/cli.py`） | 読み書きと判定を呼び、結果 JSON を返す |
+| 単位の読み書き（`src/ndf/core/plan/units_files.py`。新設） | 単位のファイル・実装計画・上限の設定を読み、実装計画の表を作る。承認した HEAD との照合と、承認したファイルの取り込みを持つ |
+| コマンド（`ndf plan units check`・`render`・`sync`。`core/plan/cli.py`） | 読み書きと判定を呼び、結果 JSON を返す |
 | 単位を流す処理（`progress/units_invoke.py`。#4369 が作る） | 単位の並びを表からでなく単位のファイルから得る。承認した中身と比べ、同じ実行順を並列に流す |
 | #4369 の、表を読むコード（`core/plan/review_units_decide.py`） | 削除する。同じ事実を読むコードを 2 つにしないため |
 | 工程の定義（`stages/design.json`・`document-review.json`） | `standard`・`legacy-refactor` のマージ・MVV 判定・ゲートを、設計からドキュメントレビューへ移す |
 | 工程「計画」の定義（`stages/plan-design.json`。新設） | `phase: design` の「計画」。`standard`・`legacy-refactor` の工程表が、詳細設計と再構成の間で呼ぶ |
 | CI を待つテンプレート（`contracts/templates/docs-ci.json`。新設） | 承認の前に、設計 PR の最後の HEAD の CI を待つ |
 | 承認した HEAD の引き渡し（`progress/run.py`・`invoke.py`） | ドキュメントレビューの承認の回答が見た HEAD を、工程「実装」へ渡す |
+| 承認の記録と HEAD の照合（`progress/gate/asking.py`・`answering.py`） | 承認資料を出す時点と回答を確定する時点で、記録の HEAD と設計 PR の HEAD を比べる |
+| 承認したファイルの取り込み（工程「ドキュメントレビュー」の最後のステップ `design-sync`。`ndf plan units sync`） | 設計 PR の宛先がベースブランチ（`branch_strategy.sprint.doc_prs: base`）のとき、承認した HEAD の単位のファイル・実装計画・設計文書をスプリントブランチへ取り込む |
 | 上限の既定（`contracts/limits/review-units.target-lines.json`・`review-units.max-lines.json`。新設） | 400 と 1,000 |
 | 手順書と worker の定義 | 単位のファイルの書き方、工程の並び、supervisor が単位を読む手順を書き直す |
 
@@ -151,25 +158,27 @@ flowchart TB
   "version": 1,
   "issues": [3672],
   "tasks": [
-    {"id": 1, "files": ["plugins/ndf/contracts/domains/branch-strategy-presets.json"], "lines": 320, "criteria": ["3672:2"], "after": []},
-    {"id": 2, "files": ["plugins/ndf/src/ndf/core/branch_strategy.py"], "lines": 380, "criteria": ["3672:1"], "after": [1]}
+    {"id": "T1", "title": "ブランチ戦略の既定の表を置く", "files": ["plugins/ndf/contracts/domains/branch-strategy-presets.json"], "lines": 320, "criteria": ["3672:2"], "after": []},
+    {"id": "T2", "title": "設定を読む部品を作る", "files": ["plugins/ndf/src/ndf/core/branch_strategy.py"], "lines": 380, "criteria": ["3672:1"], "after": ["T1"]}
   ],
   "units": [
-    {"name": "コントラクト", "tasks": [1], "after": []},
-    {"name": "読む部品", "tasks": [2], "after": [{"unit": "コントラクト", "reason": "読む部品が既定の表を読む"}]}
+    {"name": "コントラクト", "tasks": ["T1"], "after": []},
+    {"name": "読む部品", "tasks": ["T2"], "after": [{"unit": "コントラクト", "reason": "読む部品が既定の表を読む"}]}
   ]
 }
 ```
 
 | 値 | 持つ所 | 導く値（ファイルに書かない） |
 | --- | --- | --- |
-| タスクの触るファイル・見込みの行数・満たす受け入れ条件・先に要るタスク | `tasks[]` | 単位の触るファイル・行数・受け入れ条件（どれもタスクの和） |
+| タスクの題・触るファイル・見込みの行数・満たす受け入れ条件・先に要るタスク | `tasks[]` | 単位の触るファイル・行数・受け入れ条件（どれもタスクの和） |
 | 単位の含むタスク・先に要る単位と理由 | `units[]` | 実行順・マージの順 |
 | 実際の行数（任意） | `units[].actual_lines`（今の欄と同じく、実装の後に書き足す） | — |
 
-- タスクの `id` は実装計画の「タスク分解」の番号と同じにする
+- タスクの `id` は `T` と、実装計画の「タスク分解」の番号をつないだ文字列である（`Task 2` は `T2`）。`tasks[].after` と `units[].tasks` もこの文字列で指す
+- `title`（タスクの題）は必須である。`issues` が 2 つ以上のファイルでは、どの課題のタスクかを `issue` で書く
+- `criteria` は `<課題の番号>:<受け入れ条件の番号>` の文字列の配列である。`3672:2` は課題 #3672 の本文の「受け入れ条件」の 2 番を指す。範囲の指定は使わず、1 件ずつ書く。条件の無いタスクは空の配列にする
 - 別の単位のファイルの単位が先に要るときは、`after` に `issue`（そのファイルの課題の番号）を足す
-- 単位の受け入れ条件は無くてもよい（#4369 の決定 9 の `--no-criteria` で流す）
+- どのタスクにも条件の無い単位は、#4369 の決定 9 の `--no-criteria` で流す
 - 触るファイルは具体的なパスで書き、ディレクトリは書かない
 - プレリファクタリングの単位を先に流すときは、後の単位の `after` に理由つきで書く
 
@@ -179,8 +188,19 @@ flowchart TB
 
 | コマンド | 入力 | 結果 JSON |
 | --- | --- | --- |
-| `ndf plan units check [--issue N]... [<ファイル>...] [--docs]` | スプリントの課題の単位のファイルを 1 つのグラフにして確かめる。`--docs` は実装計画の表とタスクの番号も突き合わせる | 下の表のとおり |
+| `ndf plan units check [--issue N]... [--omitted N]... [<ファイル>...] [--docs]` | スプリントの課題の単位のファイルを 1 つのグラフにして確かめる。`--omitted` は実装計画を省いた課題である。`--docs` は承認の前の確かめで、実装計画の表とタスクの番号も突き合わせ、下の「欠落の確かめ」をする | 下の表のとおり |
+| `ndf plan units check ... --for-implement (--approved-head <SHA> \| --no-approval)` | 実装を始めるときの確かめ。承認した HEAD の単位のファイルと比べてから確かめる。`--approved-head` と `--no-approval` のどちらも無ければ止める | 同上。承認した中身と違えば `stopped` |
 | `ndf plan units render [--issue N]...` | 同上 | 実装計画の「レビューの単位」と「並列と直列」の表を書き直す |
+| `ndf plan units sync --approved-head <SHA> [--issue N]...` | 承認した HEAD の単位のファイル・実装計画・設計文書を、今の作業場所のブランチへ取り込んで push する | 取り込んだ内容が承認した HEAD と違えば、push せずに `stopped` |
+
+**欠落の確かめ（`--docs`）**: `--issue` で渡した課題を 1 件ずつ見る。工程は入力の `issues` と、工程「計画」が出す `plan_omitted`（実装計画を省いた課題の番号）を渡す。
+
+| 課題の状態 | 扱い |
+| --- | --- |
+| 設計の結果の扱いが「マージする」か「閉じる」 | 単位を持たない |
+| `--omitted` にある | 課題全体を 1 つの単位にする。承認資料に「実装計画を省いた課題（行数は確かめていない）」として載せる |
+| 上のどちらでもなく、単位のファイルがある | 確かめる |
+| 上のどちらでもなく、単位のファイルが無い | `stopped`（`invalid`）。1 件の欠落でも、全件の欠落でも承認へ進まない |
 
 `check` の結果 JSON は次の形である。
 
@@ -191,7 +211,7 @@ flowchart TB
 | 違反 | `stopped`（`invalid`）で `kind: violation`（`rule`・`unit`・`reason`） |
 | 行数の超過（目安と上限のどちらも） | `kind: split`（分け方の案）を添える |
 
-`--issue` は番号で単位のファイルを探す。引数でファイルを直に指すこともできる。引数の細部は詳細設計で決める。
+`--issue` は番号で単位のファイルを探す。引数でファイルを直に指すこともできる。単位に関して公開するコマンドは上の表のものだけで、単位を手で流すコマンドは作らない（決定 12）。引数の細部は詳細設計で決める。
 
 ### 実装計画の表
 
@@ -221,6 +241,11 @@ flowchart TB
 | ドキュメントレビュー | 設計 PR の cross-review → `check --docs` → CI → MVV 判定 → 設計承認ゲート → 承認した HEAD をマージ |
 
 - 承認資料には、`check` の `items` と `warnings` から作る単位の表を載せる
+- 承認ゲートの入力は、設計 PR の 1 つの HEAD に固定する
+  - レビューの後の HEAD に、`check --docs`・CI・MVV 判定・承認資料を当てる
+  - ゲートの記録（`design-target.json`）に、その HEAD と、読んだ単位のファイル・実装計画・設計文書の内容のハッシュを持つ
+  - 資料を出す時点と回答を確定する時点で、設計 PR の HEAD と記録を比べる。違えば資料を出さず、回答を確定せず、工程「ドキュメントレビュー」を初めから流し直す
+- `doc_prs: base` のプロジェクトは、承認した HEAD のマージ先がベースブランチになる。マージの後に `design-sync` が承認したファイルをスプリントブランチへ取り込み、承認した HEAD の内容と一致したときだけ工程「実装」へ進む
 - 承認で変更を求められたら、工程「ドキュメントレビュー」を初めから流し直す。求められた変更は cross-review の修正の対象に加える。直した後の `check` が大きさを数え直す（要求の前提 6）
 - `documentation` は今の 2 本の PR のまま、`light`・`operation` は今の工程「設計」のままである
 
@@ -228,21 +253,27 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-  A{"単位の欄か<br/>単位のファイルがある"} -->|どの課題にも無い| OLD["今と同じ（impl を 1 回）"]
-  A -->|ある| B{"承認した中身と同じ"}
-  B -->|違う| X["理由を示して始めない"]
-  B -->|"同じ、または承認の記録が無く比べない"| C["check"]
+  R{"承認が要る<br/>定義とモード"} -->|要る| H{"承認の記録がある"}
+  R -->|要らない| A{"単位の欄か<br/>単位のファイルがある"}
+  H -->|無い| X["理由を示して始めない"]
+  H -->|ある| B{"単位のファイルが<br/>承認した HEAD と同じ"}
+  B -->|違う| X
+  B -->|同じ| A
+  A -->|どの課題にも無い| OLD["今と同じ（impl を 1 回）"]
+  A -->|ある| C["check"]
   C -->|違反| X
-  C -->|通る| G["次の実行順の単位を<br/>同時実行の上限の本数まで取り出す"]
-  G --> W["作業場所を順に用意し<br/>impl のプラン（手順の定義）を並列に流す"]
-  W --> M["成功した単位を<br/>マージの順に 1 つずつマージ"]
+  C -->|通る| G["次の実行順の単位を<br/>すべて待ち行列に入れる"]
+  G --> W["作業場所を順に用意し、同時の上限まで<br/>impl のプランを並列に流す。<br/>枠が空けば次の単位を始める"]
+  W --> M["全部が終わったら、成功した単位を<br/>マージの順に 1 つずつマージ"]
   M --> Q{"全部マージできた"}
-  Q -->|いいえ| Y["次を始めずに止まる"]
+  Q -->|いいえ| Y["次の実行順を始めずに止まる"]
   Q -->|はい| N{"残りがある"}
   N -->|はい| G
   N -->|いいえ| P["スプリントの PR を開き<br/>gathered を記録"]
 ```
 
+- 図の「承認が要る」は、スプリントが保存した工程の定義で、工程「ドキュメントレビュー」の設計承認ゲートがそのモードに流れることをいう。`documentation` の設計承認ゲートは工程「設計」にあり、実装計画より前なので、当たらない
+- `gathered` は、すべての単位をスプリントブランチへ集めた時点の記録で、後のコードレビューの起点になる
 - 単位ごとの作業場所・プラン・レビュー・マージ・打ち直し（止まった後の流し直し）は #4369 の処理をそのまま呼ぶ
 - 単位の欄（実装計画の「レビューの単位」の欄）がある課題と無い課題が混ざるときは、欄の無い課題は、課題全体を 1 つの単位にする。この単位は触るファイルが分からないので、単位のファイルの単位が済んだ後に、課題の番号の順に 1 つずつ流す
 - 実装計画に単位の欄があるのに単位のファイルが無いときは、始めずに止まる
@@ -366,17 +397,20 @@ flowchart TB
 - 比べた候補: LIB1 / PRD2
 - 根拠: Value 3 / Value 9（MVV バージョン 11）
 
-### 決定 9: 打ち直しの扱いを変えずに並列にするため、#4369 の単位 1 つの処理を同じ実行順の分だけ同時に呼ぶ
+### 決定 9: 空いた枠を遊ばせずに並列にするため、同じ実行順の単位を待ち行列にして、#4369 の単位 1 つの処理を同時に呼ぶ
 
 - **質問**: 同じ実行順の単位をどう並列に流すか
-- **選んだ案**: 標準ライブラリの `concurrent.futures` で、実装のプランを同時に流す
+- **選んだ案**: 工程「実装」の単位を流す処理（`units_invoke`）が起動を担う。標準ライブラリの `concurrent.futures` に同じ実行順の単位をすべて渡し、実装のプランを同時に流す
+  - 同時の本数の上限は、マシンの同時実行の上限（`ndf.contracts.named_cap` が読む値）の 1 つだけである。レーンごとの上限は [#3989](https://github.com/devbasex/ai-plugins/issues/3989) で無くなった。承認の時点の本数は固定しない
+  - 上限を超える単位は同じ実行順のまま待ち、枠が空いた順に始める。実行順の番号とマージの順は変えない（要求の前提 1）
   - 作業場所の用意とマージは 1 つずつ行う
-  - 同時の本数は、マシンの同時実行の上限（`ndf.contracts.named_cap` が読む値）までにする。超える単位は次の回（次に同時に流すひとまとまり）へ送る（要求の前提 1）
-  - レーンごとの本数の上限は読まない。[#3989](https://github.com/devbasex/ai-plugins/issues/3989) で無くなったためである
-  - 1 つが失敗しても、同じ回の残りは終わりまで流してマージする。次の回は始めない
+  - 成否は単位ごとに判定する。1 つが失敗しても、同じ実行順の残りは始めて終わりまで流す。同じ実行順の単位は互いに依存しないためである
+  - 成功した単位は、ほかの単位の失敗に関わらずマージする
+  - 次の実行順は、前の実行順の単位がすべてマージされたときだけ始める（I6）
+- 採らなかった案: 上限の本数ずつの組に区切り、組ごとに待つ（先に終わった単位の枠が、いちばん遅い単位を待って空いたままになる）
 - 採らなかった案: プランのキュー（`ndf plan queue`）に渡す（単位ごとの環境変数と、打ち直しの開始ステップの選び方を、キューの側へ書き直すことになる）
-- 採らなかった案: 1 つが失敗したら同じ回の残りを止める（済んだ実装とレビューを捨てる）
-- **代償**: 同じ回の単位は、互いの変更を含まない状態でテストとレビューを通る。組み合わせの不具合は、スプリントの PR の CI とコードレビューで見つける
+- 採らなかった案: 1 つが失敗した時点で新しい単位を始めない（依存の無い単位の実装が、打ち直しまで遅れる）
+- **代償**: 同じ実行順の単位は、互いの変更を含まない状態でテストとレビューを通る。組み合わせの不具合は、スプリントの PR の CI とコードレビューで見つける。利用上限のように全単位に効く失敗でも、残りの単位を 1 回ずつ始める
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: LIB2 / LIB3
 - 根拠: Value 5 / Value 12（MVV バージョン 11）
@@ -385,25 +419,44 @@ flowchart TB
 
 - **質問**: 単位のファイルが無い・読めない・依存が循環するときと、この変更より前のスプリントをどう扱うか（要求の未決）
 - **選んだ案**: 実装計画に単位の欄があるのに単位のファイルが無いか読めない・違反があるときは、始めずに理由を返す。どの課題にも欄もファイルも無いときは今の流れにする。この変更より前に作ったスプリントは、保存した工程の定義の並びのまま流れ、単位のファイルを足せば実装に進める
+- **この変更より前に実装計画を書いたスプリント**:
+  - 単位のファイルは、AI（工程「計画」の担当）が実装計画の単位の表とタスク分解から作る。人は書かない
+  - 機械だけでは移せない。表はタスクごとの触るファイルと見込みの行数を持たないためである
+  - 実装計画を設計 PR で承認していた場合は、単位の名前・含むタスク・順を表のまま移す。確かめが違反を返すなどで変える必要があれば、変えた分け方を人に見せて再承認を取ってから流す
+  - 実装計画を設計の承認の後に書いた場合は、人が承認した分け方が無いので、再承認は要らない
 - 採らなかった案: 課題 1 つを 1 単位にして流す（#3698 と同じ 1 本の PR が気づかれずにできる。#4369 の決定 2 とも食い違う）
-- **代償**: 途中のスプリントは、単位のファイルを書き足すまで止まる
+- **代償**: 途中のスプリントは、単位のファイルを書き足すまで止まる。表のまま移したかは、手順書とレビューで確かめる
 - 根拠: Value 3 / Value 13（MVV バージョン 11）
 
 ### 決定 11: 承認していない分け方を流さないため、実装の開始で単位のファイルを承認した HEAD の中身と比べる
 
 - **質問**: 承認の後に分け方が変わった場合をどう見つけるか
-- **選んだ案**: 工程「実装」は、スプリントの単位のファイルの並びと中身（実際の行数を除く）を、ドキュメントレビューの承認が見た HEAD のものと比べる。違えば始めない。承認の回答が無いモードと、古い定義のスプリントでは比べない
+- **選んだ案**: `check --for-implement --approved-head <SHA>` が、スプリントの単位のファイルの並びと中身（実際の行数を除く）を、ドキュメントレビューの承認が見た HEAD のものと比べる。違えば始めない
+  - 比べるのは、単位の欄やファイルがあるかを見るより先である。承認の時点にあった単位のファイルが、作業場所から欄ごと消えても止まる。今までどおりの 1 回の実装へ進むのは、承認の時点にも単位のファイルが無かったときだけである
+  - 承認の回答が無い場合は 2 つに分ける
+
+    | 場合 | 扱い |
+    | --- | --- |
+    | 分け方を承認しないモード（`standard`・`legacy-refactor` 以外）と、古い定義のスプリント | 比べない（`--no-approval`） |
+    | 承認が要る定義とモードなのに、承認の記録を取れない | 実装を始めない。承認の記録を戻すか、工程「ドキュメントレビュー」を流し直して承認を取り直す |
 - 採らなかった案: 承認の記録に、読んだ全文書の指紋を持たせる（設計書の直しでも実装が止まる。守る対象は分け方である）
 - 採らなかった案: 比べない（設計の承認の後の変更が、人の目を通らずに実装される）
 - **代償**: 承認の後に分け方を直すには、承認を取り直す
+- **実装の途中の分け直し**: この変更では扱わない（要求の対象外）。承認の後の単位のファイルは、実際の行数の追記を除いて書き換えない。実装の途中で範囲が広がった分は、別の課題にする。`implementation-plan` の手順書の「実装の途中で単位を分け直す」も、この形に書き直す
 - 根拠: Value 1 / Value 13（MVV バージョン 11）
 
-### 決定 12: 手順書の表の読み落としを無くすため、supervisor も同じコマンドの結果から単位を組む
+### 決定 12: 承認していない分け方がどちらの経路でも流れないように、supervisor も同じ確かめのコマンドの結果から単位を組む
 
 - **質問**: supervisor が回す経路をどうするか
-- **選んだ案**: `agent-layers.md` の手順を、`check` の `items` の順と引数で実装のプランを組む形に書き直す。実行計画の実装の行も同じ `items` から置く。手で流す専用のコマンドは作らない
+- **選んだ案**: 承認した HEAD との照合と単位の確かめは、`ndf plan units check --for-implement` の 1 か所に置く。`units_invoke` は同じ関数を呼び、supervisor はこのコマンドを打つ
+  - `agent-layers.md` の手順を、`check` が `ok` で返した `items` の順と引数で実装のプランを組む形に書き直す。`stopped` なら `items` が無いので、プランは組めない
+  - 承認した HEAD は、設計 PR のマージに使った承認の回答の HEAD を渡す
+  - `doc_prs: base` では、どちらの経路も先に `ndf plan units sync` で取り込む
+  - 実行計画（スプリントの作業の順と進み具合の予定表）の実装の行も、同じ `items` から置く
+  - 単位を手で流すコマンドは作らない。supervisor は今のコマンド（プランの組み立て・`ndf plan queue`・`ndf ci merge`）で流し、同時の本数と、次の実行順へ進む条件は決定 9 と同じにする
 - 採らなかった案: 単位を手で流すコマンドを足す（`ndf progress next` の経路と同じことをするコマンドが 2 つになる）
-- **代償**: supervisor の経路では、承認した中身と同じかの確かめが手順書の指示にとどまる
+- 採らなかった案: 照合を `units_invoke` の中だけに置く（supervisor の経路が、承認の後に変わった分け方の抜け道になる）
+- **代償**: supervisor の経路では、確かめのコマンドを打つことと、渡す承認の HEAD の正しさは手順書の指示にとどまる
 - 根拠: Value 3 / Value 15（MVV バージョン 11）
 
 ## 影響と危険
@@ -414,7 +467,7 @@ flowchart TB
 - **壊れうる箇所**:
   - 工程「設計」の出力から `standard`・`legacy-refactor` の `mvv_gate` が無くなり、ドキュメントレビューが持つ。出力を読む側とテストを同じ単位で直す
   - 手順や変更の中には、工程「設計」の終わりに設計 PR がマージ済みだと仮定するものがある。これらは、ドキュメントレビューの後を前提にするように直す。[#4295](https://github.com/devbasex/ai-plugins/issues/4295) の設計は、触る範囲の置き換えをドキュメントレビューの後に置いていて合う
-  - 見込みの行数が外れても、この仕組みは実際の行数で止めない。実装の途中で分け直す（11.0.10 の決まり）
+  - 見込みの行数が外れても、この仕組みは実際の行数で止めない。実装の途中の分け直しは扱わない（決定 11）
 - **同じファイルを触る変更**（後からマージする側が合わせる）:
   - #4369 の実装: 決定 2 のとおり先に入れる
   - [テンプレートの書き直し（PR #4548）](https://github.com/devbasex/ai-plugins/pull/4548): 実装計画のテンプレートのファイルが変わる。単位の理由の行は、単位のファイルの理由と重ならないように合わせる
@@ -446,15 +499,18 @@ flowchart TB
 | --- | --- | --- |
 | 1 | `standard`・`legacy-refactor` で「計画」が詳細設計の後・再構成の前にあり、設計承認ゲートがドキュメントレビューに 1 つだけある。マージは承認した HEAD で行う。ほかのモードの流れるステップは変わらない | ゲートを設計に残す・2 つにする・承認の前にマージする・ほかのモードの並びを変えると落ちる |
 | 2・I2 | `render` が実行順・先に要る単位・マージの順と、並列と直列の理由を書く。理由の無い依存は止まる。`check --docs` は手で直した表を落とす | 理由が空でも通る・表の食い違いを見逃すと落ちる |
-| 3 | `check` の結果が単位・実行順・触るファイル・受け入れ条件を持つ。工程「実装」は同じ実行順の単位を同時に流し、全部マージしてから次を始める | 1 つずつ流す・マージの前に次を始める・上限の本数を超えて同時に流すと落ちる |
+| 3 | `check` の結果が単位・実行順・触るファイル・受け入れ条件を持つ。工程「実装」は同じ実行順の単位を同時に流し、上限を超える分は枠が空いたら始め、全部マージしてから次を始める | 1 つずつ流す・組ごとに区切って空いた枠を埋めない・マージの前に次を始める・上限の本数を超えて同時に流すと落ちる |
 | 4 | 単位の欄もファイルも無いスプリントは今と同じに流れ、欄の無い課題が混ざれば課題 1 つの 1 単位になる | 省いた課題で止まる・まとめると落ちる |
 | 5・I4 | 上限を超える単位で停止し、目安を超える単位で警告し、案を返す。案は依存の順で、案の単位は上限を超えない（超えるタスクは切り直しとして返す） | 超えても通る・案が無い・案が依存に逆らうと落ちる |
 | 6 | 設定が既定より先に効き、片方だけなら残りは既定。目安が上限以上なら止まる | 設定を読み捨てる・既定が 400 と 1,000 でないと落ちる |
 | 7 | #3698 と #3247 の大きさの単位で停止し、400 行以下の単位では警告も案も出ない | 大きい単位が通る・小さい単位で警告が出ると落ちる |
 | 8 | #3672 の詳細設計から作った単位のファイルを 1 単位にすると停止し、案が上限に収まる複数の単位になり、コントラクト → 読む部品と解析 → 読み手の付け替え → 削除とテストの移し替えの順になる | 案が 1 単位のまま・順が入れ替わると落ちる |
 | I1・I3 | U1〜U4 の違反（別のファイルどうしの重なりを含む）で、それぞれの規則の番号を返す | 輪・重なり・覆われない依存を見逃すと落ちる |
-| I5 | 承認の後に単位のファイルを足す・消す・変えると実装が始まらない。実際の行数だけの追記では始まる | 比べない・実際の行数で止めると落ちる |
-| I6 | 同じ回の 1 つが失敗すると、成功した単位はマージし、次の回を始めない。打ち直しはマージ済みを飛ばす | 次を始める・成功した単位を捨てると落ちる |
+| I5 | 承認の後に単位のファイルを足す・消す・変えると実装が始まらない（欄とファイルが共に消えた場合を含む）。承認が要るのに記録が無ければ始まらない。実際の行数だけの追記では始まる。`--for-implement` で承認の指定が無ければ止まる | 比べない・記録が無ければ比べずに流す・実際の行数で止めると落ちる |
+| I7 | 設計 PR の HEAD が記録と違えば、資料を出さず、回答を確定しない | 古い HEAD の資料で承認が通ると落ちる |
+| 欠落の確かめ | 省いていない課題の単位のファイルが 1 件でも無ければ、`check --docs` が止まる。省いた課題と「マージする」「閉じる」の課題では止まらない | 見つかったファイルだけを確かめると落ちる |
+| `doc_prs: base` | `sync` の後、承認した内容と同じときだけ実装が始まる | 取り込まずに進む・違う内容を push すると落ちる |
+| I6 | 同じ実行順の 1 つが失敗しても残りは流し、成功した単位はマージし、次の実行順を始めない。打ち直しはマージ済みを飛ばす | 次を始める・成功した単位を捨てると落ちる |
 | 決定 1 | 承認の変更要求の指摘が修正の対象に渡り、直した後に `check` が再び流れる | 指摘を捨てる・確かめを飛ばすと落ちる |
 | 決定 10 | 欄があるのにファイルが無い・読めないスプリントは始まらない | 1 単位にまとめると落ちる |
 
@@ -462,16 +518,18 @@ flowchart TB
 
 詳細設計は別ファイル: [issue-3702-design-detail.md](./issue-3702-design-detail.md)（新設する関数が 2 つ以上あるため）
 
+今の詳細設計と、実装計画（[issue-3702-plan.md](./issue-3702-plan.md) と単位のファイル）は、この書き直しより前の設計に沿っている。食い違う所はこの設計書が正である。工程「詳細設計」と「計画」で書き直すまで、実装の根拠にしない。
+
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3702 | 実装する | — | `plugins/ndf/contracts/workflow/review-units.schema.json`（新設）、`plugins/ndf/contracts/limits/review-units.target-lines.json`（新設）、`plugins/ndf/contracts/limits/review-units.max-lines.json`（新設）、`plugins/ndf/contracts/schemas/project-workflow.schema.json`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/src/ndf/core/plan/units_decide.py`（新設）、`plugins/ndf/src/ndf/core/plan/units_files.py`（新設）、`plugins/ndf/src/ndf/core/plan/cli.py`、`plugins/ndf/src/ndf/core/plan/review_units_decide.py`（削除）、`plugins/ndf/src/ndf/core/plan/inputs_decide.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/document-review.json`、`plugins/ndf/contracts/workflow/stages/plan-design.json`（新設）、`plugins/ndf/contracts/workflow/modes/standard.json`、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/templates/docs-ci.json`（新設）、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/tests/core/plan/test_units_decide.py`（新設）、`plugins/ndf/tests/core/plan/test_units_cli.py`（新設）、`plugins/ndf/tests/core/plan/fixtures/units/issue-3672.units.json`（新設）、`plugins/ndf/tests/core/plan/test_review_units.py`（削除）、`plugins/ndf/tests/core/plan/test_inputs.py`、`plugins/ndf/tests/progress/test_units_invoke.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_sprint_templates.py` |
+| #3702 | 実装する | — | `plugins/ndf/contracts/workflow/review-units.schema.json`（新設）、`plugins/ndf/contracts/limits/review-units.target-lines.json`（新設）、`plugins/ndf/contracts/limits/review-units.max-lines.json`（新設）、`plugins/ndf/contracts/schemas/project-workflow.schema.json`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/src/ndf/core/plan/units_decide.py`（新設）、`plugins/ndf/src/ndf/core/plan/units_files.py`（新設）、`plugins/ndf/src/ndf/core/plan/cli.py`、`plugins/ndf/src/ndf/core/plan/review_units_decide.py`（削除）、`plugins/ndf/src/ndf/core/plan/inputs_decide.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/contracts/workflow/stages/implement.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/document-review.json`、`plugins/ndf/contracts/workflow/stages/plan-design.json`（新設）、`plugins/ndf/contracts/workflow/modes/standard.json`、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/templates/docs-ci.json`（新設）、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/tests/core/plan/test_units_decide.py`（新設）、`plugins/ndf/tests/core/plan/test_units_cli.py`（新設）、`plugins/ndf/tests/core/plan/fixtures/units/issue-3672.units.json`（新設）、`plugins/ndf/tests/core/plan/test_review_units.py`（削除）、`plugins/ndf/tests/core/plan/test_inputs.py`、`plugins/ndf/tests/progress/test_units_invoke.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_sprint_templates.py` |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
 | #4369 の実装の形 | #4369 は未実装である。関数の分け方とファイル名は、詳細設計と実装の開始の時点で #4369 の実装に合わせる |
-| 並列の実装の資源 | 同じ回で複数の実装・レビュー・CI を同時に流したときの時間と利用上限は、リリース後の実測で分かる |
+| 並列の実装の資源 | 同じ実行順で複数の実装・レビュー・CI を同時に流したときの時間と利用上限は、リリース後の実測で分かる |
 | 承認の流れの通し | 設計 PR を開いたまま詳細設計・計画・再構成を書き足し、最後に承認してマージする流れは、定義とテストで確かめる。実際に最初から最後まで通るかは、リリース後テストで分かる |
 
 ## 外部の調査
