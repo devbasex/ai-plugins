@@ -1,6 +1,6 @@
 # #2944 の詳細設計: モデルと effort の実験
 
-設計文書 [issue-2944-design.md](./issue-2944-design.md) と [issue-2944-design-allocation.md](./issue-2944-design-allocation.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。パスは断りが無ければ `plugins/ndf/` からの相対で書く。#1959 を実装した後のコード（[issue-1959-design-detail.md](./issue-1959-design-detail.md)）を前提にする。
+設計文書 [issue-2944-design.md](./issue-2944-design.md) と [issue-2944-design-allocation.md](./issue-2944-design-allocation.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。パスは断りが無ければ `plugins/ndf/` からの相対で書く。#1959 を実装した後のコード（[issue-1959-design-detail.md](./issue-1959-design-detail.md)）を前提にする。語の意味は設計書の「解き方の全体像」と「用語」にある。この文書の `layer`（層）は起動の種類で、コードの層（adapters など）とは別である。
 
 ## 地図
 
@@ -30,7 +30,7 @@ src/ndf/
     crossreview/seats.py・fixer.py・journal.py・drive.py  シートの単位・修正担当・指摘の担当・効果指標
 ```
 
-依存の向き: contracts → adapters → core → progress → domains の順で、下の層は上の層を読まない。値を選ぶ処理は全部の層から呼ぶので adapters に置き、割り付けに要る実験の記録と出現率のファイルの読み書きもそこに置く。`experiments` はそれを読む。adapters と core から出現率の計算（domains）を呼ぶ所は、#1959 の起動記録のインターフェースに効果指標の関数を足して、差し込みで呼ぶ。
+依存の向き: 層は下から contracts・adapters・core・progress・domains の順で、下の層は上の層を読み込まない。値を選ぶ処理は全部の層から呼ぶので adapters に置き、割り付けに要る実験の記録と出現率のファイルの読み書きもそこに置く。`domains/records/experiments.py` は、adapters のこの読み書きを使って読む。adapters と core から出現率の計算（domains）を呼ぶ所は、下の層が上の層を読み込めないため、#1959 の起動記録のインターフェースに効果指標の関数を足して、差し込みで呼ぶ。
 
 | パス | 種類 | 役割 | 依存する先 | クラスまたはモジュール | 新設（N）と変更（C） |
 | --- | --- | --- | --- | --- | --- |
@@ -95,9 +95,9 @@ src/ndf/
 - `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm` を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄）を返す
 - `pick`
   - 事前条件: `layer` は `worker`・`skill`・`judge`・`seat`
-  - 事後条件: 引数か環境変数の指定が片方でもあれば割り付けず、無い側は基準の組の値。`unit` が無い場合、`enabled` が偽の場合、選択肢が 1 つの場合は、基準の組の値（出所は `base`、組が値を持たなければ `default`）で、割り付けの行を書かない。停止か固定で基準を使う単位に割り付けがあれば `halted` の行を足す。工程が無い組は引数を持たない
+  - 事後条件: 引数か環境変数で、モデルと effort の片方でも指定があれば割り付けず、無い側は基準の組の値。`unit` が無い場合、`enabled` が偽の場合、選択肢が 1 つの場合は、基準の組の値（出所は `base`、組が値を持たなければ `default`）で、割り付けの行を書かない。停止（`enabled` が偽）か固定（選択肢が 1 つ）で基準を使う単位に割り付けがあれば `halted` の行を足す。工程が無い層と作業の名前の起動は、引数を持たない
   - 副作用: 実験の記録のロックの中で、読み取り、割り付けの判定、1 行の追記をする
-- `append_row` はロックを取らない呼び出し（拒否・停止・`unpriced`）でも同じロックを使い、記録が改行で終わらなければ改行を先に足す
+- `append_row` は、呼び出し元がロックを取らない呼び出し（拒否・停止・`unpriced` の行）でも `pick` と同じロックを使い、記録が改行で終わらなければ改行を先に足す
 
 ### 異常系の処理
 
@@ -111,14 +111,21 @@ src/ndf/
 
 ### 処理の手順
 
-`pick` は、停止と固定を既存の割り付けより先に見て、次に切り替えか停止の記録、既存の割り付け、候補の抽選の順にする（[allocation の「割り付けの流れ」](./issue-2944-design-allocation.md#割り付けの流れ)）。`retry` があれば、決まった組に `raised` を 1 回だけ当てる。引数と環境変数の値は上げない。
+`pick` は次の順で見る（[allocation の「割り付けの流れ」](./issue-2944-design-allocation.md#割り付けの流れ)）。
+
+1. 実験の停止（`enabled` が偽）と固定（選択肢が 1 つ）
+2. この単位の、基準への切り替えか停止の記録
+3. この単位の既にある割り付け
+4. 候補の抽選
+
+`retry` があれば、決まった組に `raised` を 1 回だけ当てる。引数と環境変数の値は上げない。
 
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | 工程・選択肢・順位・指標・割り付けの値 | 設定値 | `contracts/domains/launch-experiments.json` | 設計書の表 |
-| 起動できない組の条件 | 定数 | 同上 | 直近 7 日に 2 件 |
+| 起動できない組の条件 | 定数 | 同上 | 直近 7 日に、モデルを理由にした拒否が 2 件 |
 | 実験の記録の行 | 型 | `contracts/schemas/internal/experiment.schema.json` | `assign`・`outcome`・`launch_error`・`halted`・`unpriced` |
 
 ### 並行と排他
@@ -169,7 +176,7 @@ src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `claude_launch` | `adapters/claude.py` | 変更 | 変えない | `ClaudeCall.effort` があれば `--effort` を足す |
-| `_error_reply` | 同 | 変更 | 変えない | 4 つの条件がそろう誤りを `Failure.MODEL_REFUSED` にする |
+| `_error_reply` | 同 | 変更 | 変えない | 4 つの条件（`is_error` が真、`api_error_status` が 404、4 つのトークン数が欄として在って 0、`modelUsage` が空）がそろう誤りを `Failure.MODEL_REFUSED` にする |
 | `report_outcome` | 同 | 新設 | `report_outcome(assign_id: str, quality: Optional[float], detail: Mapping) -> None` | 差し込まれた処理の `record_outcome` を呼ぶ |
 | `child_process_env` | `adapters/run_log.py` | 変更 | `child_process_env(extra: Optional[Mapping[str, Optional[str]]] = None)` | 値が None の名前を子の環境から外す |
 | `overlay_env` | 同 | 新設 | `overlay_env(changes: Mapping[str, Optional[str]]) -> ContextManager[None]` | このプロセスの環境を一時的に上書きし、戻す |
@@ -187,7 +194,7 @@ src/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_error_reply` | 404 と 4 つの 0 と空の `modelUsage` | トークンの欄の欠け | 利用上限、通信の誤り、基準でも同じ判定 |
+| `_error_reply` | 404 と 4 つのトークン数の 0 と空の `modelUsage` | トークンの欄の欠け | 利用上限、通信の誤り、基準でも同じ判定 |
 | `child_process_env` | None の名前が子に無い | 元から無い名前 | — |
 
 ## 判定の起動
@@ -200,7 +207,7 @@ src/ndf/
 | --- | --- | --- | --- | --- |
 | `ask` | `adapters/llm.py` | 変更 | 変えない | `request_id` を単位にして値を取得し、起動ごとに行を渡し、効果指標を書く |
 
-- 2 回目は `retry="invalid_answer"`。`MODEL_REFUSED` で `fallback` が値を返せば、回数に数えずに 1 回だけ打ち直し、`request_try` を 1 増やす。期限は残りの時間
+- 2 回目は `retry="invalid_answer"`。`MODEL_REFUSED` で `fallback` が値を返せば、判定の打ち直しの回数に数えずに 1 回だけ打ち直し、`request_try` を 1 増やす。期限は残りの時間
 - `outcome` は `valid`・`invalid`・`unknown`。効果指標は 1 回目が `valid` なら 1、`invalid` なら 0（2 回目で合っても 0）、`unknown` と起動できない場合は null
 - 値を取得する作業場所は `Path.cwd()`。stop-wait の判定（`judge_child`）は変えない
 
@@ -232,13 +239,13 @@ src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_add_run` | `core/worker.py` | 変更 | 変えない | `--unit`・`--mode` を足す |
-| `_cmd_run` | 同 | 変更 | 変えない | `--unit` が無ければ `NDF_UNIT_ID`、`--retry` は `NDF_RETRY_CAUSE` を使い、結果の `metrics.launch` に値・割り付け ID・実際のモデルを載せる |
+| `_cmd_run` | 同 | 変更 | 変えない | `--unit` が無ければ `NDF_UNIT_ID`、`--retry` の値には `NDF_RETRY_CAUSE` を使い、結果の `metrics.launch` に値・割り付け ID・実際のモデルを載せる |
 | `delegate` | 同 | 変更 | `delegate(handoff, system, *, wd, root, call, session)`（`Handoff` に `unit`・`mode`・`retry`・`charge_to`） | 会話の最初に値を決め、引数と環境を再開でも同じにする。拒否は 1 回だけ新しい会話で打ち直す |
 | `_resume_until_written` | 同 | 変更 | `_resume_until_written(…, choice: Choice)` | 子ごとに値と `outcome` を行にする |
 | `_call_skill` | `progress/invoke.py` | 変更 | 変えない | `pick("skill", run.name, unit=NDF_UNIT_ID)` の値で起動し、行にする |
 
 - 再開は、最初の起動の `--model`・`--effort`・割り付け ID・`CLAUDE_CODE_EFFORT_LEVEL` の扱いを保持して使う（設計書の「同じ会話を続ける起動」）。最初の起動の子にこの変数が無かった場合は、再開の子から外す
-- `charge_to` は、作業が `fix`・`ci-fix` のときの `NDF_CHARGE_TO`。ほかの作業は書かず、子の環境から外す
+- `charge_to`（費用を手戻りとして負う割り付け ID）は、作業が `fix`・`ci-fix` のときの `NDF_CHARGE_TO` の値である。ほかの作業は `charge_to` を書かず、子の環境から `NDF_CHARGE_TO` を外す
 - `outcome` は、結果ファイルがあればその `status`、無ければ `no_result`、起動の失敗の回答は `unknown`。基準へ切り替える打ち直しは `RESUMES` に数えない
 - `--mode` は、`ndf answer work` が作業の値に `mode` を持つ場合に渡す（`progress/gate/entry.py`）
 
@@ -267,7 +274,7 @@ src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `retry_reason` | `core/plan/transition_decide.py` | 新設 | `retry_reason(work: str, kind: Optional[str]) -> Optional[str]` | 修正の作業と停止理由から、`--retry` の値を返す |
-| `_run` | 同 | 変更 | 変えない | 修正ステップへ入った回数を理由ごとに数え、2 回目以降の手に理由を持たせる |
+| `_run` | 同 | 変更 | 変えない | 修正ステップへ入った回数を理由ごとに数え、2 回目以降の実行の指示に理由を持たせる |
 | `_step_env` | `core/plan/runner.py` | 新設 | `_step_env(spec, step, act) -> dict[str, Optional[str]]` | `NDF_UNIT_ID`・`NDF_CHARGE_TO`・`NDF_RETRY_CAUSE` を付けるか外す |
 | `_after_unit` | 同 | 新設 | `_after_unit(state_dir: Path, step, out: dict) -> None` | 割り付け ID を保持し、修正と作業場所の用意の効果指標を書く |
 | `run_step` | 同 | 変更 | `run_step(spec, step_id, attempt, nth=1, retry=None)` | 上の 2 つを呼ぶ |
@@ -277,7 +284,9 @@ src/ndf/
 
 - 作業の名前は、ステップの引数が `ndf answer work` で始まる場合の最後の語。単位は、`design`・`impl` が `<run_id>:<工程>`、`fix`・`mechanical` が `<run_id>:<ステップ>`
 - `retry_reason`: `fix-push` は `push_failed`、`fix-base` は `base_conflict`、`fix`・`ci-fix` は停止理由が `test_failed`・`check_failed`・`base_conflict` のときその値、ほかは None
-- `NDF_CHARGE_TO` は、この実行に `impl`（無ければ `design`）の割り付けがあれば、worker でないステップと、`fix`・`ci-fix` の worker に付ける。`fix`・`ci-fix` は `impl` の割り付けがある場合だけにする。ほかは外す
+- `NDF_CHARGE_TO` を付けるのは次の 2 つで、ほかは外す
+  - worker でないステップ。この実行に `impl`（無ければ `design`）の割り付けがある場合
+  - `fix`・`ci-fix` の worker。この実行に `impl` の割り付けがある場合
 - 修正の効果指標は、修正ステップが 1 回目に完了した直後のステップが `ok` なら 1、止まれば 0。修正ステップ自体が止まれば 0、承認ゲートは書かない。`worktree` は完了が 1、停止が 0
 
 ### 異常系の処理
@@ -292,7 +301,7 @@ src/ndf/
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 耐久ステップの回復 | `units.json`・`models.json` | 1 つのプランは 1 本ずつステップを打つ | 回数は遷移の状態が持つので回復で同じ値になる。効果指標は先の行だけが有効 |
+| 耐久ステップの回復 | `units.json`・`models.json` | 1 つのプランは 1 本ずつステップを打つ | 回数は遷移の状態が持つので回復で同じ値になる。同じ割り付け ID の効果指標は、先に書いた行だけが有効 |
 
 ### 単体テストの観点
 
@@ -323,7 +332,7 @@ src/ndf/
 
 - シートの単位は `<cross-review の実行の ID>:<シート>`。実行の ID は状態ファイルに 1 回だけ作り、打ち直しでも同じ値。1 ラウンド目で出た指摘の id も状態ファイルに残す（出し直しで行の `round` が変わるため）
 - 採用された指摘は見送りで終わらなかった指摘、重大は critical か major。review の指標は、同じレビューに 2 つ以上のシートがあり、採用が 1 件以上の場合だけ値を持つ
-- `_record_experiment` は、終わり方が収束かラウンドの上限のときに書く。読めないシートがある終わりと誤りでは書かない。design と impl の指標は `1 / (1 + 件数)`
+- `_record_experiment` は、終わり方が収束かラウンドの上限のときに書く。結果を読めないシートがあって終わった場合と、誤りで終わった場合は書かない。design と impl の指標は `1 / (1 + 1 ラウンド目の採用された重大な指摘の数)`
 - 修正担当は `pick("seat", "fix")`（工程が無いので実験の引数を足さない）。環境変数と引数の指定は効く
 - シートの子の環境から `NDF_CHARGE_TO` を外す
 - `codex exec --json` で、利用上限とサンドボックスの失敗が今の検出（`agents.usage_limit`・`sandbox_failed`。行頭の文字列を読む）に掛かるかは未確認である。実装で失敗する条件を 1 回起動し、掛からなければ検出を `--json` の出力の形に合わせる
@@ -409,7 +418,7 @@ src/ndf/
 | `report_rows` | 同 | 新設 | `report_rows(usage_rows, experiment_rows, since, until, stage) -> list[dict]` | 設計書の「集計」の順と区分で値を組む |
 | `main` | `domains/settings/delegate_args_cli.py` | 新設 | `main(argv: list[str]) -> int` | `pick("seat", "delegate", runtime)` と `safety_args(runtime, "delegate", cwd)` の引数を続けて出す |
 
-- 引数を出す 2 つは、`InternalError` を自分で受けて標準エラーへ書き、標準出力に何も出さずに 0 以外で終える。両方がそろってから 1 回で書き出す
+- 引数を出す 2 つ（`_pick` の `args` の形と、`delegate-args` の `main`）は、`InternalError` を自分で受けて標準エラーへ書き、標準出力に何も出さずに 0 以外で終える。`delegate-args` は、モデルと effort の引数と安全装置の引数の両方がそろってから、1 回で書き出す
 - `report` は呼ばれた時点で計算し直し、出現率のファイルを書き換えない
 
 ### 異常系の処理

@@ -1,6 +1,6 @@
 # #1959 の詳細設計: 起動の設定・承認と、full の起動の絞り込み
 
-設計文書 [issue-1959-design.md](./issue-1959-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。パスは断りが無ければ `plugins/ndf/` からの相対で書く。決定と受け入れ条件の中身は設計書と要求仕様（[issue-1959-requirements.md](./issue-1959-requirements.md)）が持つ。
+設計文書 [issue-1959-design.md](./issue-1959-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。パスは断りが無ければ `plugins/ndf/` からの相対で書く。決定と受け入れ条件の中身は設計書と要求仕様（[issue-1959-requirements.md](./issue-1959-requirements.md)）が持つ。この文書の「full の起動」は要求仕様の「全部入り」の起動、「相手役」はレビューなどを頼むほかの AI の CLI である。「工程」の名前は、worker の作業の名前か Skill の名前である。「安全装置」を外す指定の対象と条件は、設計書の「安全装置を外す指定」にある。
 
 ## 地図
 
@@ -24,10 +24,10 @@ src/ndf/
     records/usage.py・usage_decide.py   行の書き込み・費用の計算
     settings/launch_config_cli.py *     ndf launch-config
     hooks/guards/launch_answer.py *     承認の問いの答えの記録
-    crossreview/seats.py         読めなかった席の直し方の文
+    crossreview/seats.py         読めなかった担当の直し方の文
 ```
 
-依存の向き: contracts → adapters → core → progress → domains の順で、下の層は上の層を読まない。`launch_settings` は `launch_approval` と `agents` を読み、`launch_approval` は `launch_settings` を読まない（承認の対象は、読んだ値を引数で受ける）。`claude` は `launch_settings` の型を読み、`launch_settings` は `claude` を読まない。使用量ログへの書き込みは、`claude.py` が持つ差し込みのインターフェースを `__main__.py` が埋める。
+依存の向き: 層は下から contracts・adapters・core・progress・domains の順で、下の層は上の層を読み込まない。`launch_settings` は `launch_approval` と `agents` を読み、`launch_approval` は `launch_settings` を読まない（承認の対象は、読んだ値を引数で受ける）。`claude` は `launch_settings` の型を読み、`launch_settings` は `claude` を読まない。使用量ログへの書き込みは、`claude.py` が持つ差し込みのインターフェースを `__main__.py` が埋める。
 
 | パス | 種類 | 役割 | 依存する先 | クラスまたはモジュール | 新設（N）と変更（C） |
 | --- | --- | --- | --- | --- | --- |
@@ -45,7 +45,7 @@ src/ndf/
 | `src/ndf/domains/records/usage_decide.py` | 変更 | 起動 1 回の費用を求める | — | モジュール | N: `launch_costs` |
 | `src/ndf/domains/settings/launch_config_cli.py` | 新設 | `ndf launch-config` の 4 つのサブコマンド | launch_settings・launch_approval | モジュール | N: `main`・`_show`・`_approve`・`_confirm_terminal`・`_revoke`・`_safety_args` |
 | `src/ndf/domains/hooks/guards/launch_answer.py` | 新設 | 承認の問いの答えを記録する | launch_approval | モジュール | N: `check` |
-| `src/ndf/domains/crossreview/seats.py` | 変更 | サンドボックスで読めなかった席の直し方の文を、承認の手順にする | — | モジュール | C: `_unread_hint` |
+| `src/ndf/domains/crossreview/seats.py` | 変更 | サンドボックスでサンドボックスのためにファイルを読めなかったレビュー担当向けの直し方の文を、承認の手順にする | — | モジュール | C: `_unread_hint` |
 | `src/ndf/cli.py`・`src/ndf/__main__.py` | 変更 | サブコマンドの登録と差し込み | usage | `COMMANDS` | C: 行の追加 |
 | `contracts/domains/runtimes.json` | 変更 | `delegate_sandbox_args`・`sandbox_needs_userns` の列と、kiro・agy の引数 | — | 表 | — |
 | `contracts/domains/env.json` | 変更 | 子へ渡す環境変数の 4 行 | — | 表 | — |
@@ -134,7 +134,7 @@ src/ndf/
 | `digest` | 同 | 新設 | `digest(permissions: Mapping, files: Mapping[str, Any]) -> str` | キーの順にそろえた JSON の SHA-256 |
 | `approved` | 同 | 新設 | `approved(repo: str, sha256: str) -> bool` | 同じ組の最後の行が `approve` か |
 | `append` | 同 | 新設 | `append(repo: str, sha256: str, action: str, approver: Optional[str] = None) -> dict` | 承認の記録へ 1 行足す |
-| `put_question` | 同 | 新設 | `put_question(repo: str, action: str, sha256: str, question: Mapping) -> str` | 問いの中身のハッシュを、キー・操作・対象と一緒に残す |
+| `put_question` | 同 | 新設 | `put_question(repo: str, action: str, sha256: str, question: Mapping) -> str` | 問いの中身のハッシュを、リポジトリのキー・操作の種類・対象のハッシュと一緒に残す |
 | `record_answer` | 同 | 新設 | `record_answer(questions: Any, answers: Any, question_id: str) -> bool` | 残した問いと一致する場合だけ、答えを足す |
 | `approve_by_answer` | 同 | 新設 | `approve_by_answer(repo: str, sha256: str) -> Optional[str]` | 1 つのロックの中で、未使用の「承認する」の答えを照合・消費し、承認の行を足して承認者を返す |
 | `candidate_path` | 同 | 新設 | `candidate_path(repo: str) -> Path` | `launch-candidates/<キーのハッシュ>.json` |
@@ -159,7 +159,7 @@ src/ndf/
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 2 つの `approve`、`approve` と `revoke` | 承認の記録と答えの記録 | 承認の記録の 1 つのロック（`launch-approvals.jsonl.lock`）の中で、照合・使用済みの行・承認の行を続けて書く | 使用済みの行を先に書く。途中で落ちたら答えは使えず、問い直す |
+| 2 つの `approve`、`approve` と `revoke` | 承認の記録と答えの記録 | 承認の記録の 1 つのロック（`launch-approvals.jsonl.lock`）の中で、答えの照合、使用済みの行の追記、承認の行の追記を続けて行う | 使用済みの行を先に書く。途中で落ちたら答えは使えず、問い直す |
 | 起動の照らし直しと承認の書き込み | 承認の記録 | 読む側はロックを取らず、改行で終わる行だけを読む | — |
 
 ### ログと記録の出力
@@ -195,7 +195,7 @@ src/ndf/
 | --- | --- | --- | --- | --- |
 | `main` | `domains/settings/launch_config_cli.py` | 新設 | `main(argv: list[str]) -> int` | `show`・`approve`・`revoke`・`safety-args` を振り分ける |
 | `_show` | 同 | 新設 | `_show(a: Namespace) -> int` | 承認の対象と状態を結果 JSON で出す。`--question approve` は問いの中身を作って残す |
-| `_approve` | 同 | 新設 | `_approve(a: Namespace) -> int` | 設計書の「人の確認」を満たす場合だけ記録し、`--candidate` を反映する |
+| `_approve` | 同 | 新設 | `_approve(a: Namespace) -> int` | 設計書の「人の確認」（端末での入力か、承認の問いへの人の答え）を満たす場合だけ記録し、`--candidate` を反映する |
 | `_confirm_terminal` | 同 | 新設 | `_confirm_terminal(target: Target) -> Optional[str]` | 端末で名前とハッシュの先頭 8 文字を受ける |
 | `_revoke` | 同 | 新設 | `_revoke(a: Namespace) -> int` | `NDF_AI_CHILD` が無ければ取り消しの行を足す |
 | `_safety_args` | 同 | 新設 | `_safety_args(a: Namespace) -> int` | 引数を 1 行に 1 つ出す。失敗は標準エラーだけに出す |
@@ -203,12 +203,12 @@ src/ndf/
 
 - `_approve`
   - 事前条件: `--sha256` が必須
-  - 事後条件: 承認の行を足した後だけ、候補が `.ndf/launch.json` を置き換える（一時ファイルから `os.replace`）。候補の承認の対象が空か承認済みなら、問いを求めずに置き換える
+  - 事後条件: 承認の行を足した後だけ、候補（`--candidate` で渡す、直した後の起動の設定）が `.ndf/launch.json` を置き換える（一時ファイルから `os.replace`）。候補の承認の対象が空か承認済みなら、問いを求めずに置き換える
   - 副作用: 承認の記録、`.ndf/launch.json`、標準入力の読み取り（端末のときだけ）
 - `_safety_args`
   - 副作用: 標準出力へ引数の行を出す。結果 JSON は出さない。`InternalError` はここで受け、標準エラーへ書いて 0 以外で終える（`ndf.cli` の結果 JSON が標準出力へ出ないようにする）
 - `check`
-  - 副作用: `NDF_AI_CHILD`・`NDF_FACTORY_RUN`・`NDF_RELAY_PLAN`・`NDF_ORGANIZER_DIR` のどれかがあれば何も書かない。どれも無ければ `record_answer` を呼ぶ
+  - 副作用: `NDF_AI_CHILD`・`NDF_FACTORY_RUN`・`NDF_RELAY_PLAN`・`NDF_ORGANIZER_DIR` のどれかがあれば何も書かない。どれも無ければ `record_answer` を呼ぶ（記録しない理由は設計書の「人の確認」）
 
 ### 異常系の処理
 
@@ -220,7 +220,7 @@ src/ndf/
 | `_approve` | 反映できない | `.ndf/launch.json` の書き込みの失敗 | `os.replace` | 呼び出し元へ返す | `stopped`・`precondition`。承認の行は残る | 同じコマンドを打ち直すと、承認済みなので置き換える |
 | `_confirm_terminal` | 打ち間違い・中断 | ハッシュの不一致、EOF | 入力の比較 | None を返す | 呼び出し元が拒む | 打ち直せる |
 | `_revoke` | AI の中で呼ばれた | `NDF_AI_CHILD` | 頭 | 止める | `stopped`・`refused` | 記録しない |
-| `_safety_args` | 起動できない状況 | `safety_args` の停止 | 呼び出し | 止める | 標準出力は空、理由は標準エラー、終了コードは `precondition` | 再実行できる |
+| `_safety_args` | 起動できない状況 | `safety_args` の停止 | 呼び出し | 止める | 標準出力は空、理由は標準エラー、終了コードは停止理由 `precondition` のもの | 再実行できる |
 | `check` | 記録の失敗 | 権限・容量 | 書き込み | 通す（dispatch が例外を `pass` にする） | 出力なし。`approve` が拒む | 問いを出し直す |
 
 ### 単体テストの観点
@@ -296,7 +296,7 @@ src/ndf/
 - `Caller` と `SkillCaller` は 5 つ目の引数 `options: claude.LaunchOptions` を受ける形にする。テストの偽の呼び出しも直す
 - 行の `name` は作業の名前か Skill の名前、`repo` はリモートの URL を `git.repo_of_url` で読む。読めなければ欄を省く
 - `run_id`・`step`・`attempt` は、環境変数 `NDF_PLAN_RUN_ID`・`NDF_STEP_ID`・`NDF_STEP_ATTEMPT` があれば書く
-- 実装する worker は、PR を作る前に設計書の決定 3 の「数え直し」を行い、結果を PR の本文へ書く
+- 実装する worker は、PR を作る前に設計書の決定 3 の MCP の呼び出しの件数の「数え直し」を行い、結果を PR の本文へ書く
 
 ### 異常系の処理
 
@@ -321,8 +321,8 @@ src/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_run` | `core/plan/transition_decide.py` | 変更 | 変えない | ステップを打つ手に、そのステップの何回目かを持たせる |
-| `decide` | 同 | 変更 | 変えない | 打ち直し（待ちの後）の手でも回数を 1 増やす |
+| `_run` | `core/plan/transition_decide.py` | 変更 | 変えない | ステップを実行する指示（`RunStep`）に、そのステップの何回目かを持たせる |
+| `decide` | 同 | 変更 | 変えない | 打ち直し（待ちの後）の指示でも回数を 1 増やす |
 | `run_step` | `core/plan/runner.py` | 変更 | `run_step(spec, step_id, attempt, nth: int = 1)` | `run_id`・ステップの id・回数を子の環境にする |
 | `_launch` | `core/plan/steps.py` | 変更 | 変えない | `StepContext.env` を子の環境に重ねる |
 
@@ -354,7 +354,7 @@ src/ndf/
 | `_review_args` | 同 | 変更 | `_review_args(agent, row, worktree) -> tuple[str, ...]` | `{sandbox}` を上の値に広げる |
 | `_start` | `adapters/agents.py` | 変更 | 変えない | 相手役と修正担当の子の環境に `NDF_AI_CHILD=1` を足す |
 
-- `runtimes.json`: codex に `sandbox_needs_userns: true` と `delegate_sandbox_args: ["-s", "workspace-write"]`。kiro は `sandbox_args: ["--trust-tools=fs_read"]` を持たせ、`review_args` の同じ値を `{sandbox}` にする。kiro の `unsandboxed_args: ["--trust-all-tools"]`。agy は `unsandboxed_args: ["--dangerously-skip-permissions"]`
+- `runtimes.json`: codex に `sandbox_needs_userns: true` と `delegate_sandbox_args: ["-s", "workspace-write"]`。kiro は `sandbox_args: ["--trust-tools=fs_read"]` を持たせ、`review_args` に書いてある同じ値は `{sandbox}` に置き換える。kiro の `unsandboxed_args: ["--trust-all-tools"]`。agy は `unsandboxed_args: ["--dangerously-skip-permissions"]`
 - `_unread_hint`（`domains/crossreview/seats.py`）のサンドボックスの失敗の文は「NDF がサンドボックスを外して起動する」をやめ、`/ndf:launch-config` で承認する手順にする
 
 ### 異常系の処理
