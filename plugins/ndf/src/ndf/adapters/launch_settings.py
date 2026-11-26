@@ -18,7 +18,7 @@ from ndf.contracts import facts, internal
 
 SCHEMA = "schemas/ndf-settings/launch.schema.json"
 # 反映の途中で反映先を退避した名前（`launch_approval` の置き換えの手順）
-REFLECTING = ".reflecting"
+REFLECTING = launch_approval.REFLECTING
 ALL_STEPS = "*"
 INHERIT = "inherit"
 # `inherit` の起動で claude が尋ねずに読むリポジトリの MCP の設定
