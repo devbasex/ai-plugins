@@ -126,25 +126,6 @@ def qualified_ref(origin: str, source_repo: str, target_repo: str, visibility: M
     return f"{m.group('label')}{source_repo}#{m.group('number')}"
 
 
-# 伏せた所の固定の文ごとの、元の文に一致する形。認証ヘッダーは行の残りを空白ごと伏せるので、秘密の伏せ字は空白も含める
-_HIDDEN_FORMS = {
-    **dict.fromkeys((PRIVATE_REF_TEXT, HOME_TEXT, EMAIL_TEXT, ACCOUNT_TEXT), "[!-~]+?"),
-    run_log.MASK: ".+?",
-}
-_HIDDEN = re.compile("(" + "|".join(map(re.escape, _HIDDEN_FORMS)) + ")")
-
-
-def redacted_pattern(text: str) -> re.Pattern[str]:
-    """伏せた後の文 `text` を、伏せる前の文の中から探す正規表現。伏せた所には、固定の文そのものか、伏せる前の値の形が一致する。
-
-    公開範囲を照会せず、伏せる前の値もそのハッシュも要らない。伏せた値だけが違う文には、どれにも一致する。
-    """
-    parts = _HIDDEN.split(text)
-    return re.compile(
-        "".join(f"(?:{re.escape(p)}|{_HIDDEN_FORMS[p]})" if i % 2 else re.escape(p) for i, p in enumerate(parts)),
-    )
-
-
 def _overlaps(span: tuple[int, int], spans: Sequence[tuple[int, int]]) -> bool:
     return any(start < span[1] and span[0] < end for start, end in spans)
 
@@ -230,6 +211,14 @@ def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: 
             if n:
                 dropped[kind] = n
     return Scrubbed(text, dropped)
+
+
+def mask_all(text: str) -> str:
+    """公開範囲を照会せず、公開の書き先で伏せる対象になりうる所をすべて伏せる（リポジトリへの参照は公開のものも伏せる）。
+
+    伏せた後の文を伏せる前の文の中から探すときに、両方へかける。伏せる処理と同じ関数を使うので、対象にする文字がずれない。
+    """
+    return scrub(text, True, repo_refs(text), local_accounts()).text
 
 
 # 参照先の公開範囲を確かめられず、どこを伏せるかを決められなかった自由記述の代わりに出す文

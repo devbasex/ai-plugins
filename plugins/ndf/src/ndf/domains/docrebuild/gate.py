@@ -21,7 +21,7 @@ from typing import Any, Optional
 from ndf import identity
 from ndf.adapters import git
 from ndf.adapters.github import GitHub, GitHubError
-from ndf.adapters.publish import Publisher, redacted_pattern
+from ndf.adapters.publish import Publisher, mask_all
 from ndf.contracts import result
 from ndf.domains.docrebuild import drive
 from ndf.domains.docrebuild import gate_decide as gd
@@ -659,8 +659,7 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
         # 承認資料は worker が書き足した後に変わった段落とその前後だけを読ませるので、読ませた部分は今の本文から切り出す
         parts[reading.MATERIAL] = gd.changed_part(_file_text(plan.previous), draft)
     prev = reading.remained_of(reading.doc_rows(), run.repo, run.args.gate, run.pr.number)
-    carried = gd.carried_quotes(prev, contents, parts, _published_raised(run, prev, raised), redacted_pattern)
-    rows = gd.doc_rows_of(found, carried, hashes)
+    rows = gd.doc_rows_of(found, gd.carried_quotes(prev, contents, parts, raised, mask_all), hashes)
     _publish_quotes(run, rows)
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]
     section = reading.remained_section(remained)
@@ -687,21 +686,9 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
     return result.result(TOOL, result.OK, summary, items, {"reads": reads}, outputs=outputs)
 
 
-def _published_raised(
-    run: Run, prev: Sequence[Mapping[str, Any]], raised: Mapping[str, Sequence[Mapping[str, str]]]
-) -> dict[str, list[dict[str, str]]]:
-    """今回も挙がった引用と理由を、前の記録と比べられるように PR へ書くときの形にする（前の記録が無ければ空）。
-    前の引用と理由も同じ 1 回の検査に通す。対象の文書は通さない（掲載しない参照先の公開範囲を照会しない）。"""
-    if not prev:
-        return {}
-    quotes = [q for qs in [*(r["quotes"] for r in prev), *raised.values()] for q in qs]
-    run.publish_all([q[k] for q in quotes for k in ("quote", "why")])
-    return {n: [{k: run.publishable(q[k]) for k in ("quote", "why")} for q in qs] for n, qs in raised.items()}
-
-
 def _publish_quotes(run: Run, rows: Sequence[dict[str, Any]]) -> None:
     """残った文の引用と理由を PR へ書くときの形にする。伏せて変わった引用は元の文を残さず、`redacted` を持つ
-    （次の確認は、伏せた所に何が入っていてもよいものとして対象の中を探す）。"""
+    （次の確認は、対象の側も伏せてから探す）。"""
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]
     run.publish_all([q[k] for r in remained for q in r["quotes"] for k in ("quote", "why")])
     for row in remained:
