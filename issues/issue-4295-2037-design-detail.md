@@ -13,6 +13,7 @@
 ```text
 plugins/ndf/
 ├── src/ndf/
+│   ├── ci_cli.py
 │   ├── core/            design_results.py*  durable.py  plan/queue_decide.py  route/__init__.py
 │   ├── contracts/       limits.py
 │   ├── domains/         materials/collect.py
@@ -39,7 +40,8 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/core/route/__init__.py` | 変更 | 実装のプランの `touches` を設計の結果から補う | `core/design_results` | モジュール | 新設: `design_touches`。変更: `launch_values`・`needed`・`render`・`_one_template_errors` |
 | `plugins/ndf/contracts/templates/impl.json` | 変更 | プランに `touches` を差し込む | `params.json` | テンプレート | — |
 | `plugins/ndf/contracts/templates/params.json` | 変更 | 差し込み `touches`・`design_pr` を定義する | — | 設定 | — |
-| `plugins/ndf/contracts/templates/merge.json` | 変更 | マージした PR の番号を `outputs.pr` に返す | `parts/steps.json` | テンプレート | — |
+| `plugins/ndf/contracts/templates/merge.json` | 変更 | 打ち直しの `probe` を、head が同じマージ済みの PR に絞る | `parts/steps.json` | テンプレート | — |
+| `plugins/ndf/src/ndf/ci_cli.py` | 変更 | `merge` の成功の結果に `outputs.pr` を載せる | — | モジュール | 変更: `_merge` |
 | `plugins/ndf/src/ndf/progress/invoke.py` | 変更 | 差し込み `design_pr` の出所の説明を足す | `core/route` | モジュール | 変更なし（モジュールの説明だけ） |
 | `plugins/ndf/contracts/workflow/stages/implement.json` | 変更 | 工程「実装」が文脈の `design_pr` を受ける | — | 定義 | — |
 | `plugins/ndf/contracts/workflow/stages/document-review.json` | 変更 | 出力 `design_pr` を宣言し、`docs-merge` の出力の名前を付け替える | — | 定義 | — |
@@ -51,7 +53,7 @@ plugins/ndf/
 | `plugins/ndf/contracts/workflow/progress.json` | 変更 | 事象 `touches_found`・`touches_compared`・`touches_retry` を足す | — | 設定 | — |
 | `plugins/ndf/src/ndf/progress/lane/types.py` | 変更 | 行の触る場所と比較の状態の型を持つ | — | `LaneSpec`・`PlanView`・`LaneRow`・`RowTouches`・`ScopeChange`・`DEFAULT_MODE` | 新設: `mode_of` |
 | `plugins/ndf/src/ndf/progress/lane/fold.py` | 変更 | 新しい事象を畳み込む | `types` | モジュール | 新設: `_fold_touches`。変更: `_spec`・`_fold_plan_event`・`fold_plan`・`_row_from` |
-| `plugins/ndf/src/ndf/progress/lane/rules.py` | 変更 | I13 を行の単位で判定し、重なりの組と待ちを求める | `types`、`core/plan/queue_decide` | モジュール | 新設: `designing`・`row_scope`・`overlap_pairs`・`touches_wait`。変更: `_touch_hits`・`_touch_errors`・`plan_complete` |
+| `plugins/ndf/src/ndf/progress/lane/rules.py` | 変更 | I13 を行の単位で判定し、重なりの組と待ちを求める | `types`、`core/plan/queue_decide` | モジュール | 新設: `designing`・`row_scope`・`overlap_pairs`・`ordered_since`・`touches_wait`。変更: `_touch_hits`・`_touch_errors`・`plan_complete` |
 | `plugins/ndf/src/ndf/progress/lane/__init__.py` | 変更 | 工程 `document-review` を持つモードの名前を `PlanView` に載せる | `progress/definition` | モジュール | 変更: `read_plan` |
 | `plugins/ndf/src/ndf/progress/lane/machine.py` | 変更 | マシンのほかの計画の畳み込みを返す | `lane` | モジュール | 新設: `other_views` |
 | `plugins/ndf/src/ndf/progress/lane/launch.py` | 変更 | `DEFAULT_MODE` を `types` から読む | `types` | モジュール | — |
@@ -72,6 +74,7 @@ plugins/ndf/
 | `plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md` | 変更 | `touches_from_design` と `after` の書き方を書く | — | 手順書 | — |
 | `plugins/ndf/tests/core/test_design_results.py` | 新設 | 設計の読み方を縛る | — | テスト | — |
 | `plugins/ndf/tests/core/plan/test_queue.py` | 変更 | I5 を縛る | — | テスト | — |
+| `plugins/ndf/tests/adapters/test_ci_cli.py` | 変更 | `merge` の成功の結果の `outputs.pr` を縛る | — | テスト | — |
 | `plugins/ndf/tests/route/test_templates.py` | 変更 | `touches` の補いと省略、`merge` の出力を縛る | — | テスト | — |
 | `plugins/ndf/tests/progress/test_invoke_template_values.py` | 変更 | 工程の経路の `touches` を縛る | — | テスト | — |
 | `plugins/ndf/tests/domains/materials/test_materials_cli.py` | 変更 | 読み手を移した後も材料が同じことを縛る | — | テスト | — |
@@ -109,6 +112,7 @@ plugins/ndf/
   - `## 地図` の中で、見出しの行に「パス」を持つ最初の表を読む
   - 表が無い、列が無い、バッククォートの値が 1 つも無い行がある、のどれかで `None`。一部だけを返すと、地図だけに載ったファイルが落ちるためである
 - `scope_of`
+  - 地図のパスは、同じ文書の設計の結果の表のどの記載の触るファイル（`::` より前）にも無いものだけを足す。表の記載は `section_tables` で、単位の課題でない記載も含めて読む
   - 事後条件: `files` が `None` なら `reason` が空でない。すべての課題が `閉じる` なら `files` は `()`（`None` ではない）
   - `sources` は読んだ文書ごとに `path`・`role`（`design`・`detail`）・`issues`。`repo` と `commit` は呼び手が足す
   - 副作用: 無し（読み出しは `docs` が行う）
@@ -152,7 +156,7 @@ plugins/ndf/
 | `result_entry` | `::` 付きと無しのセル | `#78` は 7 と 8 に当たらない | 記載が無ければ `None` |
 | `design_files` | 複数の番号の名前を拾う | 戻り値に `::` が残らない | 読めない文書を飛ばす |
 | `map_paths` | 「（新設）」付きの行 | 「パス」の列が先頭でない表 | 表が無い、値の無い行で `None` |
-| `scope_of` | 詳細設計ありは和、無しは結果の表だけ | すべて `閉じる` で `()`。`マージする` は統合先 | 候補 0 と 2、空のセル、地図を読めない、`DocsUnreadable` |
+| `scope_of` | 詳細設計ありは和、無しは結果の表だけ。地図にパスがあっても、表の `a.py::f` はそのまま残り `a.py` は足されない。表に無い地図のパスは足される。別の課題の記載にだけあるパスは足されない | すべて `閉じる` で `()`。`マージする` は統合先 | 候補 0 と 2、空のセル、地図を読めない、`DocsUnreadable` |
 | `merge_commit` | マージ済みでコミット | 開いた PR で `None` | `gh` の失敗で `DocsUnreadable` |
 
 ## 触る範囲の判定
@@ -238,10 +242,11 @@ plugins/ndf/
 - `document-review.json`: 次の 2 つを書く。`metadata.ndf.outputs` には `design_pr` を書く。`docs-merge` のステップの `metadata.ndf` には `"outputs_as": {"pr": "design_pr"}` を書く。設計文書の `metadata.ndf.outputs_as` はこの位置を指す
 - `ndf.schema.json` の `$defs/step` に `outputs_as`（文字列から文字列への対応）を足す
 - `stages.StepDef` に `outputs_as: Mapping[str, str] = field(default_factory=dict)` を足す。`stage-snapshot.schema.json` の `$defs/step` にも足す。前に作ったステートマシンのスナップショットはこの項目を持たないので、既定の空で読む
-- `merge.json` は、共有のステップ `merge` の `run` と `probe` をこのテンプレートの中で上書きし、ステップの id と並びは変えない
-  - `run`: `ndf ci merge --branch <branch> --method <method>` を打つ。非 0 ならその出力と終了コードをそのまま返す。0 なら、マージ済みの PR を `gh pr list --head <branch> --state merged --json number,headRefOid` で引く。選ぶのは、head が `git rev-parse HEAD` と一致する PR である。`items` と `outputs.pr` を持つ結果 JSON を最後の行に出す
-  - `probe`: `gh pr view <branch> --json state,number` が `MERGED` なら、同じ形の結果 JSON を出して 0、そうでなければ非 0
-  - `--head` だけで引くと、同じブランチの前にマージした PR も返る。head のコミットで絞る
+- マージした PR の番号は、`ndf ci merge`（`ci_cli._merge`）が返す。成功の結果は今も `items` にマージした番号を持つので、同じ番号を `outputs: {"pr": <番号>}` にも載せる。共有のステップ `merge` の `run` は変えず、CLI の起動も API の呼び出しも増えない
+- `merge.json` は、共有のステップ `merge` の `probe` だけをこのテンプレートの中で上書きし、ステップの id と並びは変えない
+  - `gh pr list --head <branch> --state merged --json number,headRefOid` を 1 回打ち、`headRefOid` が `git rev-parse HEAD` と一致する PR を選ぶ
+  - 一致する PR があれば、`items` と `outputs.pr` にその番号を持つ結果 JSON を出して 0 で終える。無ければ、何も出さずに 1 で終える（まだ済んでいない）
+- `run` と `probe` は、同じ「head が作業場所の HEAD である PR」を指す。`ndf ci merge` は開いた PR を `expect_head`（作業場所の HEAD）を添えてマージする。`probe` は同じ HEAD でマージ済みの PR を探す。同じブランチで前にマージした PR は head が違うので、設計 PR を同じブランチで出し直しても、前の PR の番号は記録されない
 - この `outputs.pr` は工程「Pull Request」の `merge` からも出る。同じ PR の番号なので値は変わらない
 
 ### 関数の仕様
@@ -273,6 +278,8 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `_stage_output` | `docs-merge` の `pr` が `design_pr` になる | `docs-pr` の `pr` は残らない | 文脈に `pr` が書かれない |
 | `_outputs_as_errors` | 宣言した付け替え先は通る | `outputs_as` が無いステップ | 宣言に無い付け替え先は誤り |
+| `ci_cli._merge` | 成功の結果の `outputs.pr` が `items` の番号と同じ | — | 止まった結果は `outputs` を持たない |
+| `merge.json` の `probe` | head が同じマージ済みの PR の番号を返す | 同じブランチに head の違うマージ済みの PR があり、まだ済んでいないと返す | `gh` の失敗で結果を出さない |
 
 ## 事象のコントラクトと行の触る場所の畳み込み
 
@@ -293,12 +300,12 @@ plugins/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `LaneSpec.touches_from_design` | 型の項目 | `progress/lane/types.py` | `False` |
-| `RowTouches(design_seq, design, changed, read, final_seq)` | 型。`design` は `Optional[tuple]`（`files: null` は `None`）、`read` は読んだ（リポジトリ, PR, head）の集合 | 同上 | 空 |
-| `ScopeChange(seq, lane, row, files)` | 型。触る場所を変えた事象 1 件。`row` が `None` ならレーンの設定の変更 | 同上 | — |
+| `RowTouches(design_seq, design, changed, read, final_seq)` | 型。`design` は `Optional[tuple]`（`files: null` は `None`）、`read` は読んだ（リポジトリ, PR, マージ先, head）の集合 | 同上 | 空 |
+| `ScopeChange(seq, lane, row, files, after)` | 型。触る場所か `after` を変えた事象 1 件。`row` が `None` ならレーンの設定の変更。変えていない項目は `None` | 同上 | — |
 | `PlanView.touches` | （レーン, 行）→ `RowTouches` | 同上 | 空 |
 | `PlanView.scope_log` | `ScopeChange` の並び（事象の順） | 同上 | 空 |
 | `PlanView.retries` | （レーン, 行, `source`）→ 失敗の回数 | 同上 | 空 |
-| `PlanView.seen`・`PlanView.design_overlaps` | 最後の `touches_compared` の値 | 同上 | 空 |
+| `PlanView.seen`・`PlanView.design_overlaps`・`PlanView.places` | 最後の `touches_compared` の値。`places` はほかの計画の所在（`plan_id`・`cwd`・`plan`） | 同上 | 空 |
 | `PlanView.design_modes` | 工程 `document-review` を持つモードの名前の集まり | 同上 | 空 |
 | `LaneRow.added_seq`・`started_seq`・`started_at`・`ended_at` | 型の項目。レーンのステートマシンの事象の番号と時刻 | 同上 | 0 か `None` |
 | `DEFAULT_MODE` | 定数。`launch.py` から移す | 同上 | `standard` |
@@ -309,7 +316,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `mode_of` | `progress/lane/types.py` | 新設 | `(row: LaneRow) -> str` | 行の `args` の `--mode`（`--mode=` の形を含む）。無ければ `DEFAULT_MODE` |
 | `_fold_touches` | `progress/lane/fold.py` | 新設 | `(view: PlanView, ev: model.Event) -> PlanView` | 新しい 3 つの事象を畳み込む |
-| `_fold_plan_event` | 同上 | 変更 | `(view: PlanView, ev: model.Event) -> PlanView` | 下書きだけでなく番号を受け、`lane_added`・`lane_changed` の触る場所を `scope_log` に積む |
+| `_fold_plan_event` | 同上 | 変更 | `(view: PlanView, ev: model.Event) -> PlanView` | 下書きだけでなく番号を受け、`lane_added`・`lane_changed` の触る場所と `after` を `scope_log` に積む |
 | `fold_plan`・`_spec`・`_row_from` | 同上 | 変更 | 変えない | 上の新しい項目を埋める |
 | `read_plan` | `progress/lane/__init__.py` | 変更 | 変えない | `design_modes` に `definition.modes_with_stage("document-review")` を載せる |
 | `modes_with_stage` | `progress/definition.py` | 新設 | `(stage: str) -> frozenset[str]` | 工程の文書 `stage` を呼ぶモードの名前の集まり |
@@ -349,6 +356,7 @@ plugins/ndf/
 | `designing` | `progress/lane/rules.py` | 新設 | `(view: PlanView, lane: str, row: LaneRow) -> bool` | 設計中の行（I1 の 4 条件）か |
 | `row_scope` | 同上 | 新設 | `(view: PlanView, lane: str, row: LaneRow) -> tuple[str, ...]` | I1 の表で行の触る場所を返す |
 | `overlap_pairs` | 同上 | 新設 | `(own: PlanSide, others: Sequence[PlanSide], dirty: Collection[RowRef]) -> list[Overlap]` | 「重なりの知らせの組の規則」で、比べ直す組の重なりを求める |
+| `ordered_since` | 同上 | 新設 | `(view: PlanView, lanes: Lanes, a: RowRef, b: RowRef, seq: int) -> bool` | 事象 `seq` より後の `after` の変更を順に当て、途中で 2 つの行の間に前後の鎖があったかを返す |
 | `touches_wait` | 同上 | 新設 | `(view: PlanView, lanes: Lanes, lane: str, key: str) -> list[str]` | 行が実装の入口で待つ先を返す（I8・決定 3） |
 | `_touch_hits` | 同上 | 変更 | `(a: Sequence[str], b: Sequence[str]) -> list[str]` | レーンの型でなく、触る場所の並びを受ける |
 | `_touch_errors` | 同上 | 変更 | 変えない | 同時に動き得る行の組ごとに `row_scope` を比べ、設計中の行を外す。誤りの文の形は今のまま |
@@ -358,8 +366,10 @@ plugins/ndf/
 - `overlap_pairs`
   - 相手の行の範囲（同じ計画は前後の鎖の無い終わっていない行、別の計画は実行中の行、終わった行を残す条件と比べる期間）は設計文書の「重なりの知らせの組の規則」のとおり。終わった行の前後は事象の時刻（`started_at`・`ended_at`）で比べる
   - 同じ計画の組は名前の順で先の行を自分の行にして 1 件にする
+  - リポジトリは `PlanSide.repos` の名前が等しいかで比べる。クローンのパスは比べない
   - 重なりは `touch_hit` で見る。`files` に載せる名前は、当たった 2 つの値のうち長い方（同じ長さなら辞書順で後）にし、向きを入れ替えても同じにする
   - `Overlap.scope_files` は触る場所どうしの比べ方で当たった分。設計中の行は触る場所どうしの比べ方から外し、変えたファイルとの比べ方では設定の値を使う
+- `ordered_since` の鎖は `_order_graph` で作る。行の状態は今の値を使い、`after` だけを時点ごとの値にする。別の計画の組は偽
 - `touches_wait` の戻り値は次の 3 つを持つ。空なら待たない
   - `touches_design`: 設計中の行（記録が無い）
   - `touches_compare`: 設計中の行だった行で、`view.seen[view.machine_id]` が行の `design_seq` より小さい
@@ -380,7 +390,7 @@ plugins/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `RowRef(plan, lane, row)` | 型 | `progress/lane/rules.py` | — |
-| `PlanSide(view, lanes)` | 型 | 同上 | — |
+| `PlanSide(view, lanes, repos)` | 型。`repos` はレーンから `<所有者>/<リポジトリ>` への対応。読み手の `compare` が埋める | 同上 | 空 |
 | `Overlap(own, other, files, scope_files)` | 型 | 同上 | — |
 
 ### 既存の部品の再利用
@@ -388,7 +398,7 @@ plugins/ndf/
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `designing`・`row_scope` | 無し | `rules.py` の全関数を読んだ | 新設する |
-| `overlap_pairs` | `_order_graph`・`_concurrent`・`touch_hit`・`_same_repo` | 同上 | 4 つを使う |
+| `overlap_pairs` | `_order_graph`・`_concurrent`・`touch_hit`・`_same_repo` | 同上 | 前の 3 つを使う。`_same_repo` はクローンのパスを比べるので使わず、`PlanSide.repos` の名前を比べる |
 | `touches_wait` | `PlanView.open_requests` | `types.py` を読んだ | 使う |
 
 ### 単体テストの観点
@@ -397,9 +407,10 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `designing` | 印ありの既定のモード | `--mode light`、開発ループの行は偽 | 印なしは偽 |
 | `row_scope` | 記録の一覧 | 空の一覧は設定へ落とさない。記録の後の `set --touches` は設定 | `files: null` は設定 |
-| `overlap_pairs` | 3 つの比べ方 | 終わった行を相手に残す 2 条件。リポジトリ違いは比べない | 後で始まった行とは比べない |
+| `overlap_pairs` | 3 つの比べ方 | 終わった行を相手に残す 2 条件。リポジトリ違いは比べない。クローンのパスが違っても名前が同じなら比べる | 後で始まった行とは比べない |
 | `touches_wait` | 待つ 3 つの印 | `with` にだけ載る行 | `source: diff` の知らせだけなら空 |
 | `_touch_errors` | 記録のファイルが別なら通る | 設計中の行を外す | 印なしは `test_touch_overlap_errors_as_they_are_now` のまま |
+| `ordered_since` | `after` を足して外した組は真 | `seq` より前に外した順序は偽。間のレーンを通した鎖も真 | 別の計画の組は偽 |
 | `plan_complete` | `final_seq` があれば真 | 始まらずに中止した行は求めない | 無ければ偽 |
 
 ## 触る場所の観測
@@ -433,7 +444,7 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 | `record_touches` | 同上 | 新設 | `(conn, pid: str, drafts: list[model.EventDraft]) -> None` | 計画の排他を取り、観測の事象を追記する |
 | `other_views` | `progress/lane/machine.py` | 新設 | `(own_id: str, places: Iterable[tuple[str, str]]) -> list[PlanSide]` | ほかの計画の畳み込みを返す。読めない計画は飛ばす |
 | `observe_cycle` | `progress/plan/touches.py` | 新設 | `(spec: dict[str, Any], memory: Memory) -> dict[str, Any]` | 観測の 1 周（設計の記録 → 差分の記録 → 比較） |
-| `record_designs` | 同上 | 新設 | `(ctx: Cycle) -> None` | ドキュメントレビューが済み記録の無い行へ、設計の触る場所を記録する |
+| `record_designs` | 同上 | 新設 | `(ctx: Cycle) -> None` | 不変条件 I1 の 1〜3 を満たし、ドキュメントレビューが済んで記録の無い行へ、設計の触る場所を記録する |
 | `record_diffs` | 同上 | 新設 | `(ctx: Cycle) -> None` | PR の一覧の差分を読み、読み残しの組の変えたファイルを記録し、最後の観測を書く |
 | `compare` | 同上 | 新設 | `(ctx: Cycle) -> None` | 比べ直す組の知らせと比較済みの事象番号を 1 つのトランザクションで書く（I7） |
 | `gh_api` | 同上 | 新設 | `(cwd: Path, path: str, *flags: str) -> str` | `gh api` を打ち、標準出力を返す |
@@ -441,22 +452,26 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 | `pick` | 同上 | 新設 | `(pending: Sequence[Pending], limit: int) -> list[Pending]` | 終わった行を先に、残りは更新の古い順に、上限まで選ぶ |
 | `is_final` | 同上 | 新設 | `(listed: bool, since: Optional[datetime], ended_at: datetime, remaining: int) -> bool` | I6 の 3 条件。`since` はこの周で進める前の値 |
 | `counted` | 同上 | 新設 | `(failures: int, failed: bool, attempts: int) -> tuple[Optional[int], bool]` | 書く失敗の回数（書かなければ `None`）と、上限に届いたか（I9） |
-| `notices` | 同上 | 新設 | `(view: PlanView, overlaps: Sequence[Overlap], dirty: Collection[RowRef], reorderable: Mapping[RowRef, bool]) -> Notices` | I4 で閉じる知らせ・開く知らせの中身・`design_overlaps` を決める |
+| `notices` | 同上 | 新設 | `(view: PlanView, overlaps: Sequence[Overlap], dirty: Collection[RowRef], reorderable: Mapping[RowRef, bool], reordered: Collection[tuple[RowRef, RowRef]]) -> Notices` | I4 で閉じる知らせ・開く知らせの中身・`design_overlaps` を決める |
 
 - `observe_cycle`
   - 事前条件: 計画が動いている
   - 観測の対象は、`kind: sprint` でスプリントを持つ行のうち、実行中か「終わって `final_seq` が無い」もの
   - 行のスプリントの定義と事象を読み、工程「ドキュメントレビュー」が終了か、文脈の `branch`・`design_pr`、段階 `implement` の工程に入ったか（未着手と無効以外の行があるか）を得る
-  - 行のリポジトリは、レーンの `repo`（クローンの絶対パス）か、無ければ耐久ワークフローの作業ディレクトリ。`<所有者>/<リポジトリ>` は `gh repo view --json nameWithOwner` で 1 回だけ読み、`Memory` に持つ
+  - 行のリポジトリは、レーンの `repo`（クローンの絶対パス）か、無ければ耐久ワークフローの作業ディレクトリ。`<所有者>/<リポジトリ>` は `gh repo view --json nameWithOwner` でクローンのパスごとに 1 回だけ読み、`Memory` に持つ。`compare` はこの値をほかの計画のレーンのクローンにも使う。ほかの計画のレーンで `lane_repo` が無ければ、その計画の所在の `cwd` をクローンとする
   - 副作用: `gh`、計画のステートマシンへの追記
-- `record_diffs`: PR の一覧の読み方、読み残し、ファイルと head の読み直し、一覧の読み取り済み時刻は、設計文書の決定 6 のとおり。走査の開始の時刻は `gh api -i` の応答の `Date` ヘッダから取る。1 周の 1 リポジトリの追記は、行ごとに 1 件の `touches_found` にする
-- `compare`: ほかの計画は、マシンの索引と中継の登録簿の所在に、前の周までに見た所在（`Memory.places`）を足して読む。計画が完了すると索引から外れるため、終わった行の最後の観測を、比べる前に見失わないようにする
+- `record_designs`: 対象は、レーンに印があり、`kind: sprint` で、`mode_of(row)` が `design_modes` にある行（`designing` の条件のうち記録の有無を除いた 3 つ）。ほかの行は設計の資料を読まず、記録も書かないので、`row_scope` は設定の値を返す
+- `record_diffs`: PR の一覧の読み方、読み残し、ファイルの読み方と head・マージ先の読み直し、一覧の読み取り済み時刻は、設計文書の決定 6 のとおり。走査の開始の時刻は `gh api -i` の応答の `Date` ヘッダから取る。1 周の 1 リポジトリの追記は、行ごとに 1 件の `touches_found` にする
+- `compare`: ほかの計画は、マシンの索引と中継の登録簿の所在に、記録した所在（`PlanView.places`）を足して読む。計画が完了すると索引から外れるため、終わった行の最後の観測を、比べる前に見失わないようにする。再起動で消えないように、所在は `touches_compared` の `places` に書く
+  - `places` に無い計画を読んだ周は、重なりが無くても `touches_compared` を書く
+  - 完了した計画は、その最後の事象まで比べ終えた周の `places` から外す。読めない所在は残して次の周で読み直す
 - `notices`
   - 「新しく重なり始めたファイル」は、`overlaps` の `scope_files` のうち、次のどちらかに当たるもの
     - `view.design_overlaps` の同じ組に無い
     - `view.scope_log` の比較済みより後の変更を行ごとに順に当てると、途中のどこかで行の触る場所がそのファイルを含まなかった
-  - `reorderable` は、自分の計画の行のうち、未着手か、実行中で段階 `implement` に入っていない行のレーン
-  - 比べ直さなかった組の `design_overlaps` は引き継ぎ、重なりが無くなった組は `files: []` にする
+    - 比較済みより後に、組の間に前後の鎖があった時点がある（呼び手の `compare` が `ordered_since` で求め、`reordered` の組の集まりとして渡す）
+  - `reorderable` は、組の両端が同じ計画のときだけ、未着手か、実行中で段階 `implement` に入っていない行のレーンを載せる。別の計画の組は空にする
+  - 比べ直さなかった組の `design_overlaps` は引き継ぎ、重なりが無くなった組と、前後の鎖ができて相手から外れた組は `files: []` にする。`after` を変えた事象が比較済みより後にあれば、`compare` は自分の計画の行をすべて `dirty` にする
 
 ### 異常系の処理
 
@@ -465,7 +480,8 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 | `gh_api` | GitHub を読めない | `gh` の非 0 終了、出力が形に合わない | `gh_api` | `FetchError` を投げる | `run.log` に 1 行 | 次の周で読み直す |
 | `record_designs` | 取得の失敗 | `DocsUnreadable`・`FetchError` | `record_designs` | 再試行（`touches_retry`。上限で `files: null`） | 同上。`files: null` の理由は事象に残る | 回数は DB にあり、再起動をまたぐ |
 | `record_designs` | 必要な記載が無い、`design_pr` が無い、未マージ | `Scope.files` が `None` など | 同上 | `files: null` を 1 度だけ書く | 事象の `reason` | 同じ行は読み直さない |
-| `record_diffs` | 一覧・ファイル・head の読み直しの失敗、head の変化 | `FetchError`、head の不一致 | `record_diffs` | 読み残しに残して再試行。終わった行は I6 の表の区分で失敗に数える | `run.log` に 1 行 | 次の周で読み直す |
+| `record_diffs` | 一覧・ファイル・head とマージ先の読み直しの失敗、head かマージ先の変化 | `FetchError`、head かマージ先の不一致 | `record_diffs` | 読み残しに残して再試行。終わった行は I6 の表の区分で失敗に数える | `run.log` に 1 行 | 次の周で読み直す |
+| `compare` | クローンのリポジトリの名前を読めない | `gh repo view` の失敗（`FetchError`） | `compare` | 自分の計画のクローンなら `touches_compared` を書かない。ほかの計画のクローンならその計画を飛ばし、`seen` を進めない | `run.log` に 1 行 | 次の周で読み直す |
 | `compare` | ほかの計画を読めない | DB が無い・形が違う | `other_views` | その計画を飛ばして続ける | `run.log` に 1 行 | 次の周で読み直す。比較済みの事象番号を持たないので、読めた周に比べる |
 | `observe_cycle` | 書き込みの衝突・断り | `store.Conflict`・`store.StoreBusy`・`model.Refused`（計画が止まった） | `observe_cycle` | この周を打ち切る | `run.log` に 1 行 | 比較済みの事象番号が進まないので次の周で同じ比較をする |
 
@@ -476,7 +492,7 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `parallel-run.touches` | 設定 | `contracts/limits/parallel-run.touches.json` | `interval: 300`、`fetches: 20`、`attempts: 3`。`read_by` は `ndf.progress.plan.run`・`ndf.progress.plan.touches` |
-| `Memory` | 型。リポジトリごとの一覧の読み取り済み時刻、行ごとの読み残し、見た計画の所在、リポジトリの名前 | `progress/plan/touches.py`（モジュールの中の、計画の ID ごとの辞書） | 空。プロセスを起動し直すと消え、最初の周が決定 6 のとおり作り直す |
+| `Memory` | 型。リポジトリごとの一覧の読み取り済み時刻、行ごとの読み残し、クローンのパスごとのリポジトリの名前 | `progress/plan/touches.py`（モジュールの中の、計画の ID ごとの辞書） | 空。プロセスを起動し直すと消え、最初の周が決定 6 のとおり作り直す |
 | `ApiDocs(cwd, repo, commit)` | `Docs` の実装。`git/trees` で `issues` の一覧、`contents/<パス>?ref=<commit>` を `Accept: application/vnd.github.raw+json` で本文 | 同上 | — |
 | `Touches` | 手の型 | `progress/plan/run_decide.py` | — |
 | `RunState.observed` | 読み直しの回数 | 同上 | 0 |
@@ -490,7 +506,7 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 | --- | --- | --- | --- |
 | 観測と、オーガナイザーの `ndf lanes set`・`request close` | 計画のステートマシン | 追記は `lane.lock_plan` と事象の番号の確かめ（`append_events`）。`compare` は同じトランザクションで読み直してから書く | 読んだ後に変わっていれば衝突になり、次の周でやり直す |
 | 観測と、レーンの conductor の行の開始・終了 | レーンのステートマシン | 観測は読むだけ | 比較の後に始まった行は、`seen` に無い番号なので次の周で比べる |
-| 観測の途中の中断 | 事象の追記 | — | `from` に載った（リポジトリ, PR, head）は読み直さない。知らせは I4 の突き合わせで重ならない |
+| 観測の途中の中断 | 事象の追記 | — | `from` に載った（リポジトリ, PR, マージ先, head）は読み直さない。知らせは I4 の突き合わせで重ならない |
 
 ### ログと記録の出力
 
@@ -518,9 +534,9 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 | `decide` | 5 回に 1 回 `Touches` | `touches_every` が 0 なら返さない | 止めた計画では返さない |
 | `snapshot_of`・`complete_plan` | `final` があれば完了 | 入力に `touches_every` が無ければ求めない | 無ければ完了しない |
 | `observe_cycle` | `gh` を差し替えて 1 周の記録と知らせ | 打ち直しで知らせが増えない | 追記の衝突で打ち切り、次の周で比べる |
-| `record_designs` | 設定を置き換える | 上限の 1 回前の失敗と再起動 | 記載が無ければ 1 度だけ `files: null` |
-| `record_diffs` | ファイルと名前を変えた元のパス | 101 件の一覧、取得の上限 | head の変化、ページの失敗 |
-| `compare` | 知らせと `seen` が同じトランザクション | 完了して索引から消えた計画を読む | 読めない計画を飛ばす |
+| `record_designs` | 設定を置き換える。印の無い行は、設計 PR がマージ済みでも読まず、比較は設定の値になる | 上限の 1 回前の失敗と再起動 | 記載が無ければ 1 度だけ `files: null` |
+| `record_diffs` | ファイルと名前を変えた元のパス | 101 件の一覧、取得の上限 | head の変化、読む間のマージ先の変化、記録の後にマージ先だけが変わった PR は読み直す、ページの失敗 |
+| `compare` | 知らせと `seen` が同じトランザクション | 相手を 1 回読んだ後に `Memory` を空にし（再起動）、相手が完了して索引から消えても、記録の所在から最後の観測を読んで知らせを開く | 読めない計画を飛ばす |
 | `gh_api` | 標準出力を返す | `-i` のヘッダと本文の分離 | 非 0 で `FetchError` |
 | `record_touches` | 追記する | — | 番号が違えば `Conflict` |
 | `other_views` | 自分の計画を除く | 同じ計画の 2 つの所在は 1 回 | DB の無い所在を飛ばす |
@@ -528,7 +544,7 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 | `pick` | 終わった行が先 | 上限ちょうど | — |
 | `is_final` | 3 条件で真 | `since` が `ended_at` と同じなら偽 | 一覧を読めない周は偽 |
 | `counted` | 失敗で 1 増える | 成功は、前に失敗があるときだけ 0 を書く | 上限で真 |
-| `notices` | 新規・追加・開き直し | 観測を挟まない再発、回答済みの継続 | 同じ重なりでは何も書かない |
+| `notices` | 新規・追加・開き直し。別の計画の組は `reorderable` が空 | 観測を挟まない再発、回答済みの継続 | 同じ重なりでは何も書かない |
 
 ## 計画の書き方・規約と、オーガナイザーの手順
 
