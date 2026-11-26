@@ -32,6 +32,8 @@ REQUIRED_COLUMNS = (NAME_COLUMN, TASKS_COLUMN, CRITERIA_COLUMN)
 NO_CRITERIA = "無し"
 
 _MARKDOWN = MarkdownIt("commonmark").enable("table")
+# インラインコード。開きと同じ数の ` で閉じる
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
 _NOTE = re.compile(r"（[^（）]*）|\([^()]*\)")
 _SEPARATOR = re.compile(r"[・、,]")
 _TASK_ITEM = re.compile(r"(?P<prefix>Task |T)?(?P<first>[0-9]+)(?:〜(?:Task |T)?(?P<last>[0-9]+))?")
@@ -84,7 +86,7 @@ class _Heading(NamedTuple):
 class _Table(NamedTuple):
     """表 1 つ。`rows` は (見出しの行, データ行...) のセル。
 
-    `stop` は `rows` の次の行の番号（1 始まり）。`rest` は、そこから後で Markdown が同じ表とする行のうち、`|` のある行のセル。
+    `stop` は `rows` の次の行の番号（1 始まり）。`rest` は、そこから後で Markdown が同じ表とする行のうち、`|` のある行のセル（インラインコードの中の `|` では分けない）。
     """
 
     at: int
@@ -125,7 +127,8 @@ def _parse(text: str) -> _Doc:
             data = list(takewhile(inputs_decide.has_cell_separator, lines[start + 2 : end]))
             stop = start + 2 + len(data)
             rows = [inputs_decide.split_row(line) for line in (lines[start], *data)]
-            rest = [inputs_decide.split_row(line) for line in lines[stop:end] if inputs_decide.has_cell_separator(line)]
+            after = filter(inputs_decide.has_cell_separator, lines[stop:end])
+            rest = [inputs_decide.split_row(_CODE_SPAN.sub("code", line)) for line in after]
             tables.append(_Table(start, rows, stop + 1, rest))
     return _Doc(tuple(headings), tuple(tables))
 

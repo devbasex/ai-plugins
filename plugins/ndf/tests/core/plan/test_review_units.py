@@ -141,7 +141,15 @@ def test_lineup_reads_a_table_without_the_outer_pipes(table: str) -> None:
     assert _names(_plan(_text(table))) == ["A", "B"]
 
 
-@pytest.mark.parametrize("note", ["補足です。", "a \\| b は区切りでない。", "確認には次のコマンドを使う。\n`git diff | less`"])
+@pytest.mark.parametrize(
+    "note",
+    [
+        "補足です。",
+        "a \\| b は区切りでない。",
+        "確認には次のコマンドを使う。\n`git diff | less`",
+        "説明。\n`git diff | sed -n '1,80p' | less`",
+    ],
+)
 def test_lineup_ends_the_table_at_a_line_without_a_cell_separator(note: str) -> None:
     table = _table(HEAD, "| A | Task 1・2 | 無し |") + "\n" + note
     assert _names(_plan(_text(table))) == ["A"]
@@ -155,7 +163,7 @@ def test_lineup_rejects_rows_after_a_line_without_a_cell_separator(first: list[s
     assert f"{line} 行目" in "\n".join(_reasons(text))
 
 
-@pytest.mark.parametrize("row", ["| C | Tasks 1 | 無し |", "| C | Task 2 |"])
+@pytest.mark.parametrize("row", ["| C | Tasks 1 | 無し |", "| `a | b` | Tasks 1 | 無し |", "| C | Task 2 |"])
 def test_lineup_rejects_a_unit_like_row_after_a_line_without_a_cell_separator(row: str) -> None:
     table = _table(HEAD, "| A | Task 1・2 | 無し |", "B", row)
     assert "表の途中" in "\n".join(_reasons(_text(table)))
