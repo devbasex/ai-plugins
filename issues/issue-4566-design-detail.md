@@ -397,10 +397,12 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 `follow` のステップは `parts/steps.json` に足す。引数は順にブランチ、リモート、SHA のファイルである。失敗はどれも終了コード 1 にそろえ、`exit_cause` を `precondition` にする。
 
 ```bash
-s=$(cat "$2") && [ -n "$s" ] && git fetch -q -- "$1" "refs/heads/$0" && git merge -q --ff-only --no-overwrite-ignore "$s" && [ "$(git rev-parse HEAD)" = "$s" ] || exit 1
+s=$(cat "$2") && [ -n "$s" ] && { [ "$(git rev-parse HEAD)" = "$s" ] || { git fetch -q -- "$1" "refs/heads/$0" && git merge -q --ff-only --no-overwrite-ignore "$s" && [ "$(git rev-parse HEAD)" = "$s" ]; }; } || exit 1
 ```
 
-2026-11-26 に一時リポジトリで打ち、終了コードは次のとおりだった。呼び出し元の worktree の `HEAD` が指定の SHA より古い場合と、一致する場合は 0 である。指定の SHA より先に進んでいる場合と、ファイルが無い場合は 1 である。
+最初に呼び出し元の `HEAD` を指定の SHA と照合し、一致すれば取得も merge もせずに終える。変更が残らず、呼び出し元がすでに取り込んだ先頭にいる通常の実行で、リモートの取得 1 回と merge の起動 1 回を省くためである。
+
+2026-11-26 に git 2.53.0 の一時リポジトリで打ち、終了コードは次のとおりだった。呼び出し元の worktree の `HEAD` が指定の SHA より古い場合は 0 で、`HEAD` が指定の SHA へ進んだ。一致する場合は、リモートの URL を存在しないパスに変えても 0 で、取得を打たないことを確かめた。指定の SHA より先に進んでいる場合と、ファイルが無い場合は 1 である。
 
 `--no-overwrite-ignore` を付けるのは、利用者のファイルを守るためである。既定の `git merge --ff-only` は、git の無視の対象（`.gitignore` など）のファイルが更新先で追跡されるパスにあると、黙って上書きする。2026-11-26 に git 2.53.0 で打つと、既定では終了コード 0 で中身が置き換わり、このオプションを付けると終了コード 1 でファイルが残った。
 
