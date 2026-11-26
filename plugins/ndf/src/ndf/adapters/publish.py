@@ -68,7 +68,7 @@ _VALUE_SHAPES = {
     run_log.MASK: r"[!-~]+?",
     PRIVATE_REF_TEXT: r"[!-~]*?/[!-~]+?",
     HOME_TEXT: r"""/(?:home|Users)/[^/\s)\]>"'`]+?""",
-    EMAIL_TEXT: r"[A-Za-z0-9_.+-]+?@[A-Za-z0-9.-]+?",
+    EMAIL_TEXT: r"[\w.+-]+?@[A-Za-z0-9.-]+?",  # 手元の部分は `_EMAIL` と同じ文字（日本語を含む）
     ACCOUNT_TEXT: r"[A-Za-z0-9_.-]{3,}?",
 }
 _PLACEHOLDER = re.compile("(" + "|".join(map(re.escape, _VALUE_SHAPES)) + ")")

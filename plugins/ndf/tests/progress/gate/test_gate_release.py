@@ -202,8 +202,10 @@ def test_current_the_file_request_returns_its_path_and_is_the_same_when_sent_aga
     q = _now_at_release(st, tid, flow)
     env = {"NDF_ORGANIZER_DIR": str(tmp_path / "org"), **ORG_ENV}
     first = gate.request_release(st, run.read(st, tid), q, env)
-    again = gate.request_release(st, run.read(st, tid), q, env)
     path = tmp_path / "org" / "requests" / f"{gate.request_id(q)}.json"
+    # 打ち直しが秒をまたいでも、書いた時刻だけの違いは同じリクエストとみなす
+    path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "at": "2000-01-01T00:00:00+00:00"}), encoding="utf-8")
+    again = gate.request_release(st, run.read(st, tid), q, env)
     assert first == {"kind": "file", "id": gate.request_id(q), "path": str(path)}
     assert again == first
     body = json.loads(path.read_text(encoding="utf-8"))
