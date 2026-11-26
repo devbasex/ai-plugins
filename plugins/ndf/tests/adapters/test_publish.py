@@ -183,6 +183,12 @@ def test_references_overlapping_secrets_are_not_looked_up_and_are_masked(monkeyp
     assert stub.asked == [[PUBLIC_REPO], ["other/public"]]
 
 
+def test_comment_unchanged_reads_the_target_and_references_in_one_query() -> None:
+    stub = StubHub(PUBLIC_REPO, {PUBLIC_REPO: "PUBLIC", "other/public": "PUBLIC"})
+    assert publish.Publisher(stub, ACCOUNTS).comment_unchanged(1, "other/public#2") is not None  # type: ignore[arg-type]
+    assert stub.asked == [sorted([PUBLIC_REPO, "other/public"])]
+
+
 def test_assume_public_scrubs_without_reading_the_target_visibility() -> None:
     stub = StubHub(PRIVATE_REPO, {PRIVATE_REPO: "PRIVATE"})
     (text,), dropped = publish.Publisher(stub, ACCOUNTS).guarded("/home/alice-local と alice@example.co.jp", assume_public=True)  # type: ignore[arg-type]

@@ -277,6 +277,12 @@ class Publisher:
         """
         if not exposed:
             return set()
+        asked, tainted = self._sort_refs(texts, assume_public)
+        self._read_refs(asked)
+        return tainted | {r for r in asked if self._seen.get(r.lower()) != PUBLIC}
+
+    def _sort_refs(self, texts: Sequence[str], assume_public: bool) -> tuple[set[str], set[str]]:
+        """本文の参照を、公開範囲を照会するものと、秘密を含むので照会しないものに分ける（`_private_refs` の対象）。"""
         clean: set[str] = set()
         tainted: set[str] = set()
 
@@ -295,11 +301,21 @@ class Publisher:
                     sort(self.hub.repo, m.span(), secrets)
         # 照会の直前に same_repo と同じ規則（大文字・小文字を区別しない）で名前をまとめ、同じリポジトリを 1 回だけ問う
         dirty = {t.lower() for t in tainted}
-        asked = set({r.lower(): r for r in sorted(clean) if r.lower() not in dirty}.values())
-        unread = {r for r in asked if r.lower() not in self._seen}
+        return set({r.lower(): r for r in sorted(clean) if r.lower() not in dirty}.values()), tainted
+
+    def _read_refs(self, refs: set[str]) -> None:
+        unread = {r for r in refs if r.lower() not in self._seen}
         if unread:
             self._seen.update({r.lower(): v for r, v in self.hub.visibilities(unread).items()})
-        return tainted | {r for r in asked if self._seen.get(r.lower()) != PUBLIC}
+
+    def _read_with_target(self, texts: Sequence[str]) -> None:
+        """書き先の公開範囲をまだ読んでいなければ、本文の参照先と同じ 1 回の照会で読む。"""
+        if self._visibility is not None:
+            return
+        refs, _ = self._sort_refs(texts, False)
+        got = self.hub.visibilities({self.hub.repo, *(r for r in refs if r.lower() not in self._seen)})
+        self._visibility = got[self.hub.repo]
+        self._seen.update({r.lower(): v for r, v in got.items()})
 
     def guarded(self, *texts: str, assume_public: bool = False) -> tuple[list[str], dict[str, int]]:
         """書く本文（題と本文など）を検査した結果と、落とした所の種類ごとの件数の和。
@@ -336,7 +352,8 @@ class Publisher:
 
     def comment_unchanged(self, number: int, body: str) -> Optional[Published]:
         """検査しても変わらない本文だけをコメントで足す。伏せる所があれば何も書かずに None（本文のハッシュを別に持つ呼び手が、
-        持っているハッシュと違う本文を書かないため）。検査は 1 回だけ。"""
+        持っているハッシュと違う本文を書かないため）。検査は 1 回だけで、書き先と参照先の公開範囲もまとめて照会する。"""
+        self._read_with_target([body])
         (safe,), dropped = self.guarded(body)
         if safe != body:
             return None

@@ -677,11 +677,16 @@ def test_check_on_the_material_route_and_a_renamed_title(tmp_path: Path, monkeyp
 
 
 def test_a_redacted_remained_quote_is_carried_without_keeping_the_original():
-    original = "値は  TOKEN-VALUE を使う"
-    stored = {"quote": "値は [伏せた] を使う", "why": "w", **gate_decide.fingerprint_of(original)}
+    """記録は伏せた後の引用と印だけを持ち、次の確認は対象も伏せて、空白の数の違いを除いて探す。"""
+
+    def publish(text: str) -> str:
+        return text.replace("TOKEN-VALUE", "[伏せた]")
+
+    original = {"quote": "値は  TOKEN-VALUE を使う", "why": "w"}
+    stored = gate_decide.marked_redacted({"quote": publish(original["quote"]), "why": "w"}, original)
+    assert stored == {"quote": "値は  [伏せた] を使う", "why": "w", "redacted": True}
     prev = [{"name": "docs/a.md", "quotes": [stored]}]
-    assert "TOKEN-VALUE" not in json.dumps(stored, ensure_ascii=False)
-    assert gate_decide.carried_quotes(prev, {"docs/a.md": "前\n値は TOKEN-VALUE を使う\n後"}, {}, {}) == {"docs/a.md": [stored]}
-    assert gate_decide.carried_quotes(prev, {"docs/a.md": "書き直した"}, {}, {}) == {}
-    raised = {"docs/a.md": [{"quote": original, "why": "w"}]}
-    assert gate_decide.carried_quotes(prev, {"docs/a.md": original}, {}, raised) == {}
+    now = {"docs/a.md": "前\n値は\nTOKEN-VALUE を使う\n後"}
+    assert gate_decide.carried_quotes(prev, now, {}, {}, publish) == {"docs/a.md": [stored]}
+    assert gate_decide.carried_quotes(prev, {"docs/a.md": "書き直した"}, {}, {}, publish) == {}
+    assert gate_decide.carried_quotes(prev, now, {}, {"docs/a.md": [original]}, publish) == {}

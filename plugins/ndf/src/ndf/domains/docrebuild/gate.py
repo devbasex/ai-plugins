@@ -655,7 +655,8 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
         # 承認資料は worker が書き足した後に変わった段落とその前後だけを読ませるので、読ませた部分は今の本文から切り出す
         parts[reading.MATERIAL] = gd.changed_part(_file_text(plan.previous), draft)
     prev = reading.remained_of(reading.doc_rows(), run.repo, run.args.gate, run.pr.number)
-    rows = gd.doc_rows_of(found, gd.carried_quotes(prev, contents, parts, raised), hashes)
+    _publish_for_carry(run, prev, contents, parts, raised)
+    rows = gd.doc_rows_of(found, gd.carried_quotes(prev, contents, parts, raised, run.publishable), hashes)
     _publish_quotes(run, rows)
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]
     section = reading.remained_section(remained)
@@ -682,9 +683,26 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
     return result.result(TOOL, result.OK, summary, items, {"reads": reads}, outputs=outputs)
 
 
+def _publish_for_carry(
+    run: Run,
+    prev: Sequence[Mapping[str, Any]],
+    contents: Mapping[str, str],
+    parts: Mapping[str, Optional[str]],
+    raised: Mapping[str, Sequence[Mapping[str, str]]],
+) -> None:
+    """残った文の引き継ぎで PR へ書くときの形にする文を、まとめて 1 回の検査に通す（公開範囲の照会を文ごとに分けない）。
+    対象の全体と読ませた部分は、伏せた引用がある対象のものだけを通す。"""
+    if not prev:
+        return
+    hidden = {r["name"] for r in prev if any("redacted" in q for q in r["quotes"])}
+    texts = [t for name in hidden for t in (contents.get(name), parts.get(name)) if t is not None]
+    quotes = [q["quote"] for r in prev for q in r["quotes"]] + [q["quote"] for qs in raised.values() for q in qs]
+    run.publish_all([*quotes, *texts])
+
+
 def _publish_quotes(run: Run, rows: Sequence[dict[str, Any]]) -> None:
-    """残った文の引用と理由を PR へ書くときの形にする。伏せて変わった引用は元の文を残さず、指紋と長さを持ち、
-    次の確認が伏せていない対象の中から探せるようにする（承認資料には載せない）。"""
+    """残った文の引用と理由を PR へ書くときの形にする。伏せて変わった引用は元の文を残さず、伏せたことの印を持ち、
+    次の確認が対象も伏せてから探せるようにする。"""
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]
     run.publish_all([q[k] for r in remained for q in r["quotes"] for k in ("quote", "why")])
     for row in remained:
