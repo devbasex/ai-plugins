@@ -391,7 +391,8 @@ def reread(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[st
 def _reread_direct(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[str, Any]:
     """読み手役のステップの無い古い定義のスプリントで、`ndf document-rebuild gate` を直接打つ（#4446 の計画の (7)）。
 
-    引数は工程の記録とゲートの名前から `run.reading_args` と同じ規則で作る。`outputs.review_again` が返ったら、同じ工程の
+    保存先・結果ファイルと工程の記録から作る引数は、読み手役のステップと同じ `run._reading_run` で足す。
+    `outputs.review_again` が返ったら、同じ工程の
     設計のレビューと MVV 判定を未了に戻して流し直す（`run.review_again_drafts`）。"""
     v = run.read(st, machine_id)
     m = run.decide(v)
@@ -400,13 +401,13 @@ def _reread_direct(st: store.Store, machine_id: str, cwd: Path, env: run.Env) ->
     work_dir = run.work_root(st.root, machine_id) / m.stage.id / f"reading-{q.id}"
     work_dir.mkdir(parents=True, exist_ok=True)
     pr = ["--pr", str(q.pr)] if q.pr is not None else []
-    argv = [invoke.PACKAGE, "document-rebuild", "gate", "--gate", str(m.step.gate), *pr, "--state-dir", str(work_dir),
-            "--out", str(work_dir / stages.READING_OUT), *run.reading_args(v, m.stage, m.step.gate)]  # fmt: skip
+    argv = [invoke.PACKAGE, "document-rebuild", "gate", "--gate", str(m.step.gate), *pr]
     try:
         inputs = invoke.resolve_inputs(m.stage, v.context())
     except invoke.StageInputError as exc:
         return result.stopped(TOOL, exc.kind, str(exc), items=exc.items)
     call = invoke.StageRun(invoke.SCRIPT, invoke.PACKAGE, inputs, m.stage.outputs, "none", "reading", {"argv": argv})
+    call = run._reading_run(v, m.stage, m.step, call, work_dir)
     res = env.invoker(call, cwd, work_dir, None)
     if res.status != result.OK:
         return res.report
