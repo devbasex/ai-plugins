@@ -3,15 +3,24 @@
 読むのはリポジトリの根の設定と、工程が指す MCP の定義ファイルである。壊れた指定は黙って捨てず、ファイルとキーの位置を載せた
 `precondition` で止める。文には定義の値（引数・`env`・`headers`・URL）も `allow` の指定子も載せない。資格情報が書かれうるためである。
 承認の対象は `permissions` の全体と定義ファイルの中身で、ハッシュと承認の記録は `launch_approval` が持つ。
+
+full の起動 1 回の指定は `prepared` が解く。許可を広げる指定（`load`・`allow`・`mcp`）があれば承認を確かめ、`mcp` の定義ファイルは
+確かめた中身のコピーを渡す（元のパスを渡すと、確かめた後の書き換えがそのまま読まれる）。承認は全工程の定義ファイルをまとめたハッシュと照らすので、
+どれか 1 つが読めなければ、承認の要る起動はすべて止まる（設計書の「受け入れる限界」）。止まった文は読めなかったファイルを示す。
 """
 
 from __future__ import annotations
 
+import contextlib
+import json
+import os
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Union
+from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Union
 
-from ndf import contracts
+from ndf import contracts, identity
 from ndf.adapters import launch_approval
 from ndf.adapters.secret_forms import holds_secret
 from ndf.contracts import facts, internal
@@ -24,6 +33,8 @@ INHERIT = "inherit"
 # `inherit` の起動で claude が尋ねずに読むリポジトリの MCP の設定
 REPO_MCP = ".mcp.json"
 SPEC_KEYS = ("load", "allow", "mcp")
+# MCP の定義のコピーを置く保存先の行（表 ndf-files。`<id>` は `<PID>-<一意な値>`）
+COPIES = "launch-mcp"
 
 Mcp = Union[None, str, tuple[str, ...]]
 
@@ -160,19 +171,30 @@ def _mcp_definition(path: Path, rel: str) -> dict[str, Any]:
 
 def approval_target(settings: Settings) -> Target:
     """承認の対象（`permissions`・全工程の定義ファイル・`inherit` があれば `.mcp.json`）のハッシュと一覧。"""
+    files = _target_files(settings)
+    sha = launch_approval.target_digest(settings.permissions, files)
+    return Target(sha, _listing(settings, files, sha))
+
+
+def _target_files(settings: Settings) -> dict[str, Any]:
+    """承認の対象の定義ファイル（リポジトリの根からの相対パスから中身への対応。`inherit` の `.mcp.json` が無ければ None）。"""
     steps = _given_object(settings.permissions, "steps")
     files: dict[str, Any] = check_definitions(settings, sorted({rel for spec in steps.values() for rel in _mcp_files(spec)}))
     if any(spec.get("mcp") == INHERIT for spec in steps.values()):
         repo_mcp = _in_root(settings.root, REPO_MCP, REPO_MCP)  # リンクの先が根の外なら、読む前に止める
         files[REPO_MCP] = _mcp_definition(repo_mcp, REPO_MCP) if repo_mcp.exists() else None
-    sha = launch_approval.target_digest(settings.permissions, files)
-    listing = {
+    return files
+
+
+def _listing(settings: Settings, files: Mapping[str, Any], sha: str) -> dict[str, Any]:
+    """承認の対象の、出してよい一覧（定義の中身を含まない）。"""
+    steps = _given_object(settings.permissions, "steps")
+    return {
         "sha256": sha,
         "steps": {name: {k: spec[k] for k in SPEC_KEYS if k in spec} for name, spec in steps.items()},
         "unsandboxed": list(_given_words(settings.permissions, "unsandboxed")),
         "files": [_file_listing(rel, raw) for rel, raw in files.items()],
     }
-    return Target(sha, listing)
 
 
 def _file_listing(rel: str, raw: Optional[Mapping[str, Any]]) -> dict[str, Any]:
@@ -190,3 +212,144 @@ def _command_name(server: Mapping[str, Any]) -> str:
         return "url"
     words = command.split()
     return Path(words[0]).name if words else ""
+
+
+# ---------------------------------------------------------------- 起動 1 回の指定（prepared）
+
+
+@dataclass(frozen=True)
+class Grant:
+    """full の起動 1 回の指定。`sha256` は承認を確かめた対象のハッシュで、指定が空なら None（承認を調べていない）。
+
+    `mcp_files` は確かめた中身のコピー（`prepared` を抜けると消える）。`inherit` なら環境の MCP をそのまま読む。
+    """
+
+    load: tuple[str, ...] = ()
+    allow: tuple[str, ...] = ()
+    inherit: bool = False
+    mcp_files: tuple[Path, ...] = ()
+    sha256: Optional[str] = None
+    root: Optional[Path] = None
+    repo: Optional[str] = None
+
+    def verify(self) -> Optional[str]:
+        """承認の対象を読み直し、確かめた後に変わったか取り消されていれば理由の 1 行。同じなら None。"""
+        if self.sha256 is None or self.root is None or self.repo is None:
+            return None
+        try:
+            now = approval_target(load(self.root)).sha256
+        except internal.InternalError as exc:
+            return f"起動の直前に起動の設定を読み直せない: {exc}"
+        if now != self.sha256:
+            return f"起動の設定か MCP の定義ファイルが、承認を確かめた後に変わった（確かめたハッシュ {self.sha256[:8]}）。{_approval_hint(self.root)}"
+        if not launch_approval.is_approved(self.repo, self.sha256):
+            return f"起動の設定の承認が、確かめた後に取り消された（ハッシュ {self.sha256[:8]}）。{_approval_hint(self.root)}"
+        return None
+
+    @property
+    def verifier(self) -> Optional[Callable[[], Optional[str]]]:
+        """子プロセスを起動する直前に打つ照らし直し。承認を調べていない（指定が空の）起動は None。"""
+        return self.verify if self.sha256 is not None else None
+
+
+def launch_root(cwd: Path) -> Path:
+    """`cwd` から親へたどって最初に `.git`（ディレクトリかファイル）を持つディレクトリ。無ければ `cwd`。git は起動しない。"""
+    here = cwd.absolute()
+    for place in (here, *here.parents):
+        if (place / ".git").exists():
+            return place
+    return here
+
+
+def _approval_hint(root: Path, sha256: Optional[str] = None) -> str:
+    """承認の手順の文（Skill と、端末で打つコマンド）。コマンドは `ndf` の絶対パスで出す（利用者の PATH に無くても打てる）。"""
+    ident = identity.load()
+    command = f"cd {root} && {identity.entrypoint(ident.root)} launch-config approve" + (f" --sha256 {sha256}" if sha256 else "")
+    return f"/{ident.prefix}launch-config で承認するか、端末で `{command}` を打ってから打ち直す"
+
+
+@contextlib.contextmanager
+def prepared(name: str, cwd: Path) -> Iterator[Grant]:
+    """工程 `name` の full の起動 1 回の指定を解き、承認を確かめ、MCP の定義のコピーを作って渡す。抜けるときにコピーを消す。
+
+    指定が空（`load`・`allow`・`mcp` が無い）なら承認を調べず、git も起動しない。壊れた指定・未承認・承認の対象を読めない場合は
+    `precondition` で止まる（起動しない）。
+    """
+    root = launch_root(cwd)
+    settings = load(root)
+    spec = step_spec(settings, name)
+    if spec.empty:
+        yield Grant(root=root)
+        return
+    try:
+        files = _target_files(settings)
+    except internal.InternalError as exc:
+        raise _precondition(
+            f"工程 {name} の起動を止めた。承認の要る起動は、すべての工程の MCP の定義ファイルをまとめて承認と照らすため、"
+            f"どれか 1 つでも読めないと止まる: {exc}"
+        ) from None
+    sha = launch_approval.target_digest(settings.permissions, files)
+    repo = launch_approval.repo_key(root)
+    if not launch_approval.is_approved(repo, sha):
+        listing = json.dumps(_listing(settings, files, sha), ensure_ascii=False)
+        raise _precondition(
+            f"工程 {name} の起動の設定（{settings.path}）は、このマシンで承認されていない（承認の後の書き換え・このマシンで未承認・取り消しの後）。"
+            f"承認の対象: {listing}。{_approval_hint(root, sha)}"
+        )
+    if not isinstance(spec.mcp, tuple):
+        yield Grant(spec.load, spec.allow, spec.mcp == INHERIT, (), sha, root, repo)
+        return
+    with _copies([files[rel] for rel in spec.mcp]) as copies:
+        yield Grant(spec.load, spec.allow, False, copies, sha, root, repo)
+
+
+def copies_dir() -> Path:
+    """MCP の定義のコピーを置く保存先（状態の保存先の下。表 ndf-files の行 `launch-mcp`）。"""
+    return identity.load().state_dir / Path(facts.value("ndf-files", COPIES, "path")).parent
+
+
+@contextlib.contextmanager
+def _copies(definitions: list[Any]) -> Iterator[tuple[Path, ...]]:
+    """確かめた定義の中身を、所有者だけが読めるコピー（0700 のディレクトリの 0600 のファイル）にして渡し、抜けるときに消す。"""
+    base = copies_dir()
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        _sweep_copies(base)
+        where = Path(tempfile.mkdtemp(prefix=f"{os.getpid()}-", dir=base))  # mkdtemp は 0700 で作る
+    except OSError as exc:
+        raise _precondition(f"MCP の定義のコピーの保存先 {base} を作れない（{type(exc).__name__}）") from None
+    try:
+        paths = tuple(_write_copy(where / f"{i}.json", raw) for i, raw in enumerate(definitions))
+    except OSError as exc:
+        shutil.rmtree(where, ignore_errors=True)
+        raise _precondition(f"MCP の定義のコピーを {where} に書けない（{type(exc).__name__}）") from None
+    try:
+        yield paths
+    finally:
+        shutil.rmtree(where, ignore_errors=True)
+
+
+def _write_copy(path: Path, raw: Any) -> Path:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(raw, f, ensure_ascii=False)
+    return path
+
+
+def _sweep_copies(base: Path) -> None:
+    """オーナーのプロセスが無いコピーのディレクトリ（`<PID>-<一意な値>`）を消す（落ちた起動の消し残り）。"""
+    for place in base.iterdir():
+        pid = place.name.partition("-")[0]
+        if place.is_dir() and pid.isdigit() and not _pid_alive(int(pid)):
+            shutil.rmtree(place, ignore_errors=True)
+
+
+def _pid_alive(pid: int) -> bool:
+    """`pid` のプロセスが生きているか（`process_group.group_alive` と同じ確かめ方）。"""
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, OverflowError):  # noqa: NDF401 外部コマンド: プロセスが無い・pid の範囲の外
+        return False
+    except PermissionError:  # noqa: NDF401 外部コマンド: 送る権限の無いプロセスが残っている（生きている）
+        return True
+    return True

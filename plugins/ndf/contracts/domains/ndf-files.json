@@ -52,6 +52,7 @@
     {"id": "approval", "location": "issues", "path": "approval-<id>.md", "kind": "document", "tracked": false, "writer": "承認ゲート（P2）", "ends": "cleanup"},
     {"id": "archived-docs", "location": "issues-old", "path": "<name>.md", "kind": "document", "tracked": true, "writer": "クリーンアップの工程", "ends": "kept"},
     {"id": "launch-approvals", "location": "state-root", "path": "launch-approvals.jsonl", "kind": "record", "tracked": false, "writer": "起動の承認と取り消し（#1959。追記だけ・所有者だけが読める）", "ends": "kept"},
+    {"id": "launch-mcp", "location": "state-root", "path": "launch-mcp/<id>/", "kind": "exchange", "tracked": false, "writer": "full の起動の準備（#1959。<id> は <PID>-<一意な値>。承認を確かめた MCP の定義のコピーで、所有者だけが読める）", "ends": "run"},
     {"id": "worker-append-lock", "location": "state-root", "path": "worker-append.lock", "kind": "exchange", "tracked": false, "writer": "worker の報告の追記（C5）", "ends": "kept"},
     {"id": "relay-hub-state", "location": "relay-hub", "path": "hub.json", "kind": "exchange", "tracked": false, "writer": "中継（M3）", "ends": "replaced"},
     {"id": "relay-hub-registry", "location": "relay-hub", "path": "registry.json", "kind": "exchange", "tracked": false, "writer": "中継（M3）", "ends": "replaced"},

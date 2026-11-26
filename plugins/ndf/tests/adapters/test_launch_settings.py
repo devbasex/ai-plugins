@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -203,3 +204,147 @@ def test_inherit_refuses_a_repository_mcp_file_linked_outside_the_root(tmp_path:
 def test_a_definition_only_another_step_points_to_still_stops_the_target(tmp_path: Path) -> None:
     s = _settings(tmp_path, {"impl": {"mcp": [".ndf/mcp/gone.json"]}})
     assert ".ndf/mcp/gone.json" in _stopped(ls.approval_target, s)
+
+
+# ---------------------------------------------------------------- prepared（full の起動 1 回の指定）
+
+
+@pytest.fixture
+def repo(tmp_path: Path, monkeypatch) -> Path:
+    """`.git` を持つリポジトリの根。リポジトリのキーは git を打たずに根のパスにする。"""
+    root = tmp_path / "repo"
+    (root / ".git").mkdir(parents=True)
+    monkeypatch.setattr(ls.launch_approval, "repo_key", lambda r: str(r))
+    return root
+
+
+def _approve(root: Path) -> str:
+    sha = ls.approval_target(ls.load(root)).sha256
+    ls.launch_approval.append(str(root), sha, ls.launch_approval.Action.APPROVE, approver="人")
+    return sha
+
+
+def _prepare_stops(name: str, cwd: Path) -> str:
+    def enter() -> None:
+        with ls.prepared(name, cwd):
+            raise AssertionError("止まらずに起動の指定を返した")
+
+    return _stopped(enter)
+
+
+def test_an_empty_spec_launches_without_looking_for_an_approval_or_running_git(tmp_path: Path, monkeypatch) -> None:
+    """起動の費用: 指定の無いリポジトリの準備は、承認を調べず git を起動しない。照らし直しも置かない。"""
+
+    def no_git(root):
+        raise AssertionError("git を打った")
+
+    monkeypatch.setattr(ls.launch_approval, "repo_key", no_git)
+    with ls.prepared("impl", tmp_path) as grant:
+        assert grant.sha256 is None and grant.verifier is None and grant.mcp_files == () and not grant.inherit
+    _write(tmp_path, {"version": 1, "permissions": {"steps": {"design": {"load": ["LSP"]}}}})
+    with ls.prepared("impl", tmp_path) as grant:  # ほかの工程だけの指定は、この工程の起動に承認を求めない
+        assert grant.sha256 is None
+
+
+def test_the_root_is_the_nearest_directory_with_git_seen_from_the_work_place(repo: Path) -> None:
+    (repo / "sub").mkdir()
+    assert ls.launch_root(repo / "sub") == repo
+    (repo / "wt").mkdir()
+    (repo / "wt" / ".git").write_text("gitdir: elsewhere", encoding="utf-8")  # リンクされた worktree は .git がファイル
+    assert ls.launch_root(repo / "wt") == repo / "wt"
+
+
+def test_an_unapproved_spec_stops_with_the_listing_and_how_to_approve(repo: Path) -> None:
+    """条件 11: このマシンで承認していない指定は起動せず、承認の対象と `/ndf:launch-config`・端末のコマンドを示す。コピーを作らない。"""
+    _write(repo, {"version": 1, "permissions": {"steps": {"impl": {"mcp": [".ndf/mcp/a.json"]}}}})
+    _write(repo, {"mcpServers": {"search": SERVER}}, ".ndf/mcp/a.json")
+    sha = ls.approval_target(ls.load(repo)).sha256
+    text = _prepare_stops("impl", repo)
+    assert "launch-config" in text and f"--sha256 {sha}" in text and ".ndf/mcp/a.json" in text and HIDDEN not in text
+    assert not ls.copies_dir().exists() or not any(ls.copies_dir().iterdir())
+
+
+def test_an_approved_spec_gives_private_copies_of_what_was_checked_and_removes_them(repo: Path) -> None:
+    """条件 5・11・I8: 承認した定義は、確かめた中身のコピー（0700 のディレクトリの 0600 のファイル）を渡し、抜けると消える。"""
+    _write(
+        repo, {"version": 1, "permissions": {"steps": {"impl": {"mcp": [".ndf/mcp/a.json"], "load": ["LSP"], "allow": ["mcp__search__q"]}}}}
+    )
+    _write(repo, {"mcpServers": {"search": SERVER}}, ".ndf/mcp/a.json")
+    sha = _approve(repo)
+    (repo / "sub").mkdir()
+    with ls.prepared("impl", repo / "sub") as grant:  # 作業場所の親の根の設定を読む
+        (copy,) = grant.mcp_files
+        assert grant.sha256 == sha and grant.load == ("LSP",) and grant.allow == ("mcp__search__q",) and not grant.inherit
+        assert copy != repo / ".ndf/mcp/a.json" and json.loads(copy.read_text(encoding="utf-8")) == {"mcpServers": {"search": SERVER}}
+        assert stat_mode(copy) == 0o600 and stat_mode(copy.parent) == 0o700
+        assert grant.verifier is not None and grant.verify() is None
+    assert not copy.exists() and not copy.parent.exists()
+
+
+def stat_mode(path: Path) -> int:
+    return path.stat().st_mode & 0o777
+
+
+def test_copies_are_removed_when_the_launch_fails(repo: Path) -> None:
+    _write(repo, {"version": 1, "permissions": {"steps": {"*": {"mcp": [".ndf/mcp/a.json"]}}}})
+    _write(repo, {"mcpServers": {}}, ".ndf/mcp/a.json")
+    _approve(repo)
+    with pytest.raises(RuntimeError):
+        with ls.prepared("impl", repo) as grant:
+            raise RuntimeError("起動の失敗")
+    assert not grant.mcp_files[0].parent.exists()
+
+
+def test_copies_left_by_a_process_that_is_gone_are_removed(repo: Path) -> None:
+    gone = ls.copies_dir() / "4194399-left"
+    gone.mkdir(parents=True)
+    mine = ls.copies_dir() / f"{os.getpid()}-running"
+    mine.mkdir()
+    _write(repo, {"version": 1, "permissions": {"steps": {"*": {"mcp": [".ndf/mcp/a.json"]}}}})
+    _write(repo, {"mcpServers": {}}, ".ndf/mcp/a.json")
+    _approve(repo)
+    with ls.prepared("impl", repo):
+        assert not gone.exists() and mine.exists()
+
+
+@pytest.mark.parametrize("change", ["settings", "definition", "revoke"])
+def test_the_check_before_each_child_sees_a_change_after_the_approval(repo: Path, change: str) -> None:
+    """条件 11・I5: 確かめた後に設定・定義ファイルを書き換えるか取り消すと、照らし直しが理由を返す（次の子は起動しない）。"""
+    _write(repo, {"version": 1, "permissions": {"steps": {"impl": {"mcp": [".ndf/mcp/a.json"]}}}})
+    _write(repo, {"mcpServers": {"search": SERVER}}, ".ndf/mcp/a.json")
+    sha = _approve(repo)
+    with ls.prepared("impl", repo) as grant:
+        if change == "settings":
+            _write(repo, {"version": 1, "permissions": {"steps": {"impl": {"mcp": [".ndf/mcp/a.json"], "load": ["LSP"]}}}})
+        elif change == "definition":
+            _write(repo, {"mcpServers": {"search": {**SERVER, "args": ["other"]}}}, ".ndf/mcp/a.json")
+        else:
+            ls.launch_approval.append(str(repo), sha, ls.launch_approval.Action.REVOKE)
+        reason = grant.verify()
+        assert reason is not None and "launch-config" in reason and HIDDEN not in reason
+        assert json.loads(grant.mcp_files[0].read_text(encoding="utf-8")) == {"mcpServers": {"search": SERVER}}
+
+
+def test_inherit_reads_the_environment_mcp_without_copies(repo: Path) -> None:
+    _write(repo, {"version": 1, "permissions": {"steps": {"design": {"mcp": "inherit"}}}})
+    _approve(repo)
+    with ls.prepared("design", repo) as grant:
+        assert grant.inherit and grant.mcp_files == () and grant.sha256 is not None
+    _write(repo, {"mcpServers": {"search": SERVER}}, ".mcp.json")  # inherit の承認は .mcp.json の書き換えで外れる
+    assert "launch-config" in _prepare_stops("design", repo)
+
+
+def test_a_definition_of_another_step_that_cannot_be_read_stops_every_approved_launch(repo: Path) -> None:
+    """受け入れる限界: 承認は全工程の定義ファイルをまとめて照らすので、ほかの工程の定義が読めなくても止まる。文はそのファイルを示す。
+    指定の無い工程は承認を調べないので起動する。"""
+    _write(repo, {"version": 1, "permissions": {"steps": {"impl": {"load": ["LSP"]}, "design": {"mcp": [".ndf/mcp/gone.json"]}}}})
+    text = _prepare_stops("impl", repo)
+    assert ".ndf/mcp/gone.json" in text and "すべての工程" in text
+    with ls.prepared("release", repo) as grant:
+        assert grant.sha256 is None
+
+
+def test_a_broken_settings_file_stops_the_launch(repo: Path) -> None:
+    """条件 5: 指定が壊れていれば、黙って指定なしで起動せずに止まる。"""
+    _write(repo, "{壊れた")
+    assert str(repo / ".ndf" / "launch.json") in _prepare_stops("impl", repo)
