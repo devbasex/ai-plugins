@@ -483,7 +483,7 @@ def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     if payload_of(m.event)["answer"] == APPROVED or m.step.on_reject is not None:
         passed = stages.passed_gate(m.stage, m.step, gate_report(m.step, m.event), payload_of(m.event)["answer"] == APPROVED)
         payloads = [{"step": i, "report": rep, "status": FINISHED, "generation": m.progress.generation} for i, rep in passed]
-        d.write(*[model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=p, rev=v.rev) for p in payloads])
+        d.write(*[step_event(v, m.stage.name, p) for p in payloads])
         return None
     detail = f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）"
     d.write(_failed(m.stage, m.step.id, v.rev, "refused", detail))
@@ -678,6 +678,11 @@ def _failed(s: stages.StageDef, step: Optional[str], rev: int, kind: str, detail
     return _failed_with(s, step, rev, causes.cause(kind, detail))
 
 
+def step_event(v: View, stage: str, payload: dict[str, Any]) -> model.EventDraft:
+    """工程 `stage` のステップ記録の事象の下書き。"""
+    return model.EventDraft(STEP_EVENT, ACTOR, stage, payload=payload, rev=v.rev)
+
+
 def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepProgress, res: invoke.StageResult) -> list[model.EventDraft]:
     """ステップの結果を事象にする。終われば出力の規約で照らし、承認ゲートで止まれば待ちを残し、止まれば失敗にする。
 
@@ -692,7 +697,7 @@ def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepPro
         return [_failed(s, step.id, v.rev, "bad_report", f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")]
     status = FINISHED if res.status == result.OK else "waiting"
     payload = {"step": step.id, "status": status, "report": res.report, "generation": prog.generation, "warnings": list(res.warnings)}
-    done = model.EventDraft(STEP_EVENT, ACTOR, s.name, payload=payload, rev=v.rev)
+    done = step_event(v, s.name, payload)
     again = review_again_drafts(v, s, step.gate, res.report) if status == FINISHED and step.kind == stages.READING_KIND else []
     return [done, *again]
 
@@ -708,7 +713,7 @@ def review_again_drafts(v: View, s: stages.StageDef, gate: Optional[str], report
         {"step": i, "status": stages.RESET, "report": None, "generation": gen, "reason": why} for i in stages.review_again_steps(s, gate)
     ]
     drafts[0].update({stages.REVIEW_AGAIN: again, "gate": gate})
-    return [model.EventDraft(STEP_EVENT, ACTOR, s.name, payload=p, rev=v.rev) for p in drafts]
+    return [step_event(v, s.name, p) for p in drafts]
 
 
 def reading_args(v: View, s: stages.StageDef, gate: Optional[str]) -> list[str]:
@@ -733,7 +738,7 @@ def _reading_skipped(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef
     why = "計画のレーンの行にあるスプリントなので" if in_lane else "直前の MVV 判定が承認ゲートを省くので"
     rep = result.result(TOOL, result.OK, f"{why}、読み手役のステップ {step.id} を打たずに済ませた")
     payload = {"step": step.id, "status": FINISHED, "report": rep, "generation": prog.generation, "warnings": []}
-    return [model.EventDraft(STEP_EVENT, ACTOR, s.name, payload=payload, rev=v.rev)]
+    return [step_event(v, s.name, payload)]
 
 
 def step_location(step: str, prog: StepProgress) -> str:
@@ -790,7 +795,7 @@ def _finish_stage(d: Drive, v: View, s: stages.StageDef) -> None:
         d.write(_failed(s, None, v.rev, "bad_report", f"工程 {s.name} の出力が規約に合わない: {'; '.join(errs)}"))
         return
     draft, warnings = stages.outputs_draft(s, v.rev, merged, ACTOR)
-    done = model.EventDraft("finished", ACTOR, s.name, reason=out["summary"], payload={"steps": len(out["steps"])}, rev=v.rev)
+    done = model.EventDraft(FINISHED, ACTOR, s.name, reason=out["summary"], payload={"steps": len(out["steps"])}, rev=v.rev)
     d.write(*([draft] if draft is not None else []), done)
     d.warnings.extend(warnings)
 
