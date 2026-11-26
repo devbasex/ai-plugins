@@ -171,6 +171,8 @@ def test_lineup_rejects_rows_after_a_line_without_a_cell_separator(first: list[s
         "| C | Task 2 |",
         # エスケープした ` はインラインコードを開かないので、3 セルの行である
         "| B \\`版 | Tasks 2 | 無し\\` |",
+        # リンク先の ` もインラインコードを開かない
+        "| [B](a`) | Task 2 | [補足](b`) |",
     ],
 )
 def test_lineup_rejects_a_unit_like_row_after_a_line_without_a_cell_separator(row: str) -> None:

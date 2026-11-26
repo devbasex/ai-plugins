@@ -15,7 +15,7 @@ from itertools import takewhile
 from typing import NamedTuple, Optional
 
 from markdown_it import MarkdownIt
-from markdown_it.rules_inline import StateInline, backtick, escape
+from markdown_it.rules_inline import StateInline, backtick
 
 from ndf.core.plan import inputs_decide
 
@@ -110,18 +110,29 @@ class _Scope(NamedTuple):
     sprint: frozenset[int]
 
 
+def _record_code_span(state: StateInline, silent: bool) -> bool:
+    """markdown-it の `backticks` の規則に、コードと判定した範囲の記録を足したもの。"""
+    start = state.pos
+    found = backtick(state, silent)
+    # 閉じの無い ` の並びは、` だけを読み進める
+    if found and not silent and state.src[start : state.pos].strip("`"):
+        state.env["code_spans"].append((start, state.pos))
+    return found
+
+
+# インラインコードの範囲を調べる解析器。画像の規則は代替テキストを切り出して解析し、位置が行とずれるので外す
+# （外すと `!` とリンクとして、行の位置のまま読む）
+_INLINE = MarkdownIt("commonmark").disable("image")
+_INLINE.inline.ruler.at("backticks", _record_code_span)
+
+
 def _mask_code_spans(line: str) -> str:
-    """行のインラインコードを `code` に置き換える。範囲とエスケープは markdown-it の規則で読む。"""
-    state = StateInline(line, _MARKDOWN, {}, [])
-    out = []
-    while state.pos < state.posMax:
-        start = state.pos
-        if not (escape(state, True) or backtick(state, True)):
-            state.pos += 1
-        piece = line[start : state.pos]
-        # 閉じの無い ` の並びは ` だけが返る
-        out.append("code" if piece.startswith("`") and piece.strip("`") else piece)
-    return "".join(out)
+    """行のインラインコードを `code` に置き換える。リンク先などの ` は markdown-it がコードにしない。"""
+    spans: list[tuple[int, int]] = []
+    _INLINE.inline.parse(line, _INLINE, {"code_spans": spans}, [])
+    for start, end in reversed(spans):
+        line = f"{line[:start]}code{line[end:]}"
+    return line
 
 
 def _parse(text: str) -> _Doc:
