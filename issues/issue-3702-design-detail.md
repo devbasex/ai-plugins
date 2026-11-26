@@ -65,7 +65,7 @@ contracts/
 | `src/ndf/progress/units_guard.py` | 新設 | 実装のプランを通すかを決める | `store`・`design_record` | `record_launch`・`guard` |
 | `src/ndf/progress/units_cli.py` | 新設 | `ndf progress units run`・`sync`・`guard` | 上の 5 つ | `add_parsers`・`dispatch` |
 | `src/ndf/progress/invoke.py` | 変更 | 承認の記録の値と保存先を差し込み、単位の経路を呼ぶ | `design_record` | `template_values`・`_approved_target`（変更） |
-| `src/ndf/progress/run.py`・`folding.py` | 変更 | MVV 判定で人の承認を省いた回答に記録を付け、記録が古ければステップを未了に戻す | `design_record` | `_consume`・`_step_draft`・`approved_seen`（変更） |
+| `src/ndf/progress/run.py`・`folding.py` | 変更 | MVV 判定で人の承認を省いた回答に記録を付け、記録が古ければステップを未了に戻す。`run.py` は `units run` が使う 2 つの関数を公開名にする | `design_record` | `_consume`・`_step_draft`・`approved_seen`（変更）・`play_move`・`launching`（改名） |
 | `src/ndf/progress/definition.py` | 変更 | そのモードに判定のステップが無い工程の出力から `mvv_gate` を外す | — | `_stage_def`（変更） |
 | `src/ndf/progress/store.py` | 変更 | リポジトリのスプリントの一覧を読む | — | `read_machines`（新設） |
 | `src/ndf/progress/gate/entry.py`・`answering.py` | 変更 | 資料を出す前と回答の確定の前に記録と照らす | `design_record` | `present`・`answer`・`recheck`（変更） |
@@ -214,7 +214,7 @@ contracts/
 環境変数 `NDF_DESIGN_RECORD_DIR` があるとき（工程「ドキュメントレビュー」の `units-check`）は、次のように動く。
 
 - 読み元は作業ツリーではなく、保存先の `reviewed-head` のコミットにする。作業場所の HEAD がそのコミットと違えば `stopped`（`approval_stale`）
-- 通ったら、保存先の `checked.json` に `{"head", "issues", "handling", "omitted", "limits", "criteria", "units"}` を書く。`units` は結果の `items` と同じで、`criteria` は課題ごとの受け入れ条件の数である
+- 通ったら、保存先の `checked.json` に `{"head", "branch", "issues", "handling", "omitted", "limits", "criteria", "units"}` を書く。`branch` は入力の `branch`（スプリントブランチ）で、無ければ `stopped`（`precondition`）にする。`units` は結果の `items` と同じで、`criteria` は課題ごとの受け入れ条件の数である
 - 入力に `design_pr` があれば、保存先の `reviewed-pr` の番号と比べ、違えば `stopped`（`refused`）
 - 結果の `outputs.design_pr` に `reviewed-pr` の番号を返す。設計承認ゲートの質問は、文脈に `design_pr` が無くてもこの値を読む
 - `reviewed-pr` などのファイルが無く、`workflow.launch.review` が指定されていれば、理由にこのキーと直し方（設計書の「影響と危険」）を書く
@@ -241,7 +241,7 @@ contracts/
 | --- | --- | --- |
 | `reviewed-pr`・`reviewed-head`・`reviewed-base` | `ndf cross-review run`（テンプレート `design-pr-review`） | `<所有者>/<リポジトリ>#<番号>`、SHA、ブランチ名 |
 | `checked.json` | `ndf plan units check` | 上の「コマンド」 |
-| `design-target.json` | `build` | `{"version": 1, "review": {"repo","pr","head","base"}, "targets": {"issues","handling","omitted"}, "limits": {"target","max"}, "criteria": {"<課題>": 数}, "units": [...]}` |
+| `design-target.json` | `build` | `{"version": 1, "review": {"repo","pr","head","base"}, "sprint_branch": "<ブランチ>", "targets": {"issues","handling","omitted"}, "limits": {"target","max"}, "criteria": {"<課題>": 数}, "units": [...]}` |
 
 承認の回答のイベント（`answered`）の payload に、`design-target.json` の中身をキー `design_target` で持つ。回答の SSOT はイベントで、ファイルは資料を作るための作業用である。
 
@@ -256,7 +256,7 @@ contracts/
 | `approved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「ドキュメントレビュー」の最新の回答が承認なら、その `design_target`。後の変更要求があれば None |
 | `mismatches` | 同上 | 新設 | `(record, tree, context) -> list[str]` | 決定 11 の表の 4 つの比較。両側とも記録の `targets.issues` に絞る |
 | `without` | 同上 | 新設 | `(record, drop, files) -> dict` | 課題を外す回答の記録の絞り込み。外せない形なら `Refused` |
-| `converted` | 同上 | 新設 | `(repo, head, branch, context, limits, report) -> dict` | 変換の再承認の記録。`design-target.json` と同じ形で、`review.pr` は null、`head` は単位のファイルを含むコミット |
+| `converted` | 同上 | 新設 | `(repo, head, branch, context, limits, report) -> dict` | 変換の再承認の記録。`design-target.json` と同じ形で、`sprint_branch` は `branch`、`review.pr` は null、`head` は単位のファイルを含むコミット |
 | `reapproved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「実装」の最新の回答が承認なら、その `design_target` |
 
 ### 承認ゲートとのつなぎ
@@ -477,6 +477,7 @@ contracts/
 | 単位の `impl` どうし | 重い起動のスロット（メモリを多く使う起動の同時数の上限） | 今の `ndf.slot_pool` | 回ごとの保存先（#4369） |
 | 作業場所の作成・マージ | git の共有ディレクトリ・マージ先 | 主のスレッドだけが打つ | マージ済みの PR の一覧 |
 | 2 つの `ndf progress units run` | 同じスプリント | ステートマシンの `run_lock` | — |
+| `ndf progress units run` と `ndf progress next` が起動した作業 | 同じスプリント | `run_lock` の中で起動マーカー（`run.launching`）も確かめる | 工程のイベント |
 
 ### 単体テストの観点
 
@@ -503,7 +504,7 @@ contracts/
 - 照合が違えば、先に `design_record.reapproved_of` の記録を読む。`mismatches` が空なら有効で、None を返す
 - 有効な記録が無ければ、旧い表と新しい分け方を並べた `reapproval.md` を作業の保存先に書き、`design_record.converted` の記録を `report.design_target` に持つ `gate` の結果（選択肢は承認と却下）を返す
 - 回答は `ndf answer` が工程「実装」のイベントに書き、payload の `design_target` が記録になる。別のファイルは持たない
-- `ndf progress units run` は回答を受けない。`convert` が `gate` を返したら `stopped`（`precondition`）にし、`ndf progress next <ID>` で再承認を受けるよう理由に書く
+- `ndf progress units run` は回答を引数で受けない。`convert` が `gate` を返したら、`next` と同じく回答の待ちをイベントに書いて返す
 
 | 失敗 | 扱い |
 | --- | --- |
@@ -527,7 +528,7 @@ contracts/
 
 | 関数 | 定義するファイル | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `destination_errors` | `units_sync.py` | 新設 | `(git, record, context, machine_repo: str) -> list[str]` | 送り先のリポジトリとブランチが、スプリントの記録と違う点 |
+| `destination_errors` | `units_sync.py` | 新設 | `(git, record, context, machine_repo: str) -> list[str]` | 送り先のリポジトリとブランチが、ゲートの記録とスプリントの状態に合わない点 |
 | `sync` | 同上 | 新設 | `(st, machine_id, cwd, hub) -> dict` | 確かめてから取り込み、照合して push する |
 
 ### 送り先の確かめ
@@ -538,10 +539,10 @@ contracts/
 | --- | --- | --- |
 | 送り先のリポジトリ | `git remote get-url --push --all <remote>` の全行を `git.repo_of_url` に通す | 全行が、記録の `review.repo` と大文字小文字を区別せずに同じ |
 | スプリントのリポジトリ | ステートマシンの `repo`（作成の時点のリモートの URL）を `repo_of_url` に通す | 記録の `review.repo` と同じ |
-| 送り先のブランチ | 文脈の `branch`（工程「作業場所の用意」が書く） | 値があり、文脈の `worktree` の今のブランチと同じ |
+| 送り先のブランチ | 記録の `sprint_branch`。突き合わせる相手は、文脈の `branch`（工程「作業場所の用意」が書く）と、文脈の `worktree` の今のブランチ | 3 つがすべて同じ。記録に `sprint_branch` が無ければ合わない |
 | 配布先として宣言したブランチでないこと | #4369 の `released_branches`（`.ndf/project.json` の `branch_strategy` の `branches.base`・`branches.production`・`channels[].ref`・`release.deliveries[].branch`） | 含まれない |
 
-- push は `git push -- <remote> <照合した HEAD の SHA>:refs/heads/<文脈の branch>` で打ち、upstream の設定を使わない
+- push は `git push -- <remote> <照合した HEAD の SHA>:refs/heads/<記録の sprint_branch>` で打ち、upstream の設定を使わない
 - リモート名は `Git.remote()` である
 - URL は認証の値を含みうるので、理由には `<所有者>/<リポジトリ>` だけを出す
 - push 先は取得先と別の URL を設定できるので、取得先の URL では確かめない。`git remote get-url --push --all` は、`pushurl` の全部を 1 行ずつ返す（git 2.53.0 で実行して確かめた）
@@ -580,7 +581,8 @@ contracts/
 
 - 別のリポジトリの push 先（`pushurl` が 2 つのうち 1 つだけ違う場合を含む）
 - 別のブランチに切り替えた作業場所
-- 文脈に `branch` が無い
+- 文脈の `branch` と作業場所がそろって、記録の `sprint_branch` と別のブランチ
+- 文脈に `branch` が無いか、記録に `sprint_branch` が無い
 - 取り込むファイルに未コミットの編集がある（編集が残ることも確かめる）
 - コミットの中身が承認した head と違う（commit のフックが書き換える形）
 
@@ -617,23 +619,39 @@ contracts/
 
 | サブコマンド | 引数 | 呼ぶ関数 |
 | --- | --- | --- |
-| `ndf progress units run` | `<ステートマシンの ID>`・`--cwd` | ステートマシンの `run_lock` の中で `run.decide(v)` を呼び、下の「始められる手」に当たらなければ `stopped`（`precondition`）。当たれば、保存した定義の工程「実装」の `StageRun` を組み、`units_invoke.run_stage`。工程のイベントは書かない（supervisor は今のとおり `ndf progress finish` を打つ） |
+| `ndf progress units run` | `<ステートマシンの ID>`・`--cwd` | 下の「実装を流す手順」。工程「実装」だけを、`ndf progress next` と同じ処理で流す |
 | `ndf progress units sync` | `[<ID>]`・`--cwd`。`<ID>` を省けば環境変数 `NDF_MACHINE_ID`（工程のステップ `design-sync`）。取り込みは文脈の `worktree` で行う | `units_sync.sync` |
 | `ndf progress units guard` | `--issue`・`--base`・`--branch`・`--unit-file` | `units_guard.guard` |
 
-**始められる手**: `units run` は、`Move` の工程名とアクションの両方を照合する。工程名だけでは、失敗した工程「実装」も当たるためである。
+**実装を流す手順**: `units run` は、工程「実装」を `ndf progress next` と同じ処理で流し、同じ工程のイベントを書く。別の流し方を持つと、失敗や回答の待ちが記録に残らず、開始前の検査も抜けるためである。違いは、別のプロセスを起動せずその場で流すことと、工程「実装」の外へ進まないことの 2 つである。
 
-| `run.decide` の結果 | `units run` |
+1. ステートマシンの `run_lock` を取る
+2. 同じロックの中で `run.launching` を見る。`next` が起動マーカーを書き、起動した作業がまだロックを取っていなければ、何も流さず、`next` と同じ「作業が動いている」結果（`ok`。次は `ndf progress wait <ID>`）を返す
+3. `run.migrate_definition` を呼び、`ndf progress next` と同じ `Env` で `run.Drive`（`inline=True`）を組む
+4. `run.decide` が工程「実装」の `Action.START` か `Action.RESUME` を返す間、`run.play_move` を打つ。`play_move` が結果を返したら、その結果で終わる
+5. 繰り返しを抜けたら、下の表の結果を返す
+
+| 抜けた時点の `run.decide` | 結果 |
 | --- | --- |
-| 工程「実装」の `Action.START` | 流す |
-| 工程「実装」の `Action.RESUME` で、次のステップが実装のプランのステップ（`implement`） | 流す |
-| 工程「実装」の `Action.FAILED` | 流さない。`ndf progress next` が出す失敗の経路（再試行など）を結果に添える。再試行を選んだ後に打ち直す |
-| 工程「実装」の `Action.GATE` | 流さない。`ndf progress next` で回答の待ちを確かめるよう理由に書く |
-| 上のどれでもない（別の工程、次のステップが `gathered`、全ステップが済んだ `RESUME`、`DONE`、`COMPLETE`） | 流さない。次の 1 手の工程とアクションを理由に書く |
+| 工程「実装」の `Action.FAILED` | `run.report`。`next` と同じ失敗の結果で、再試行などの経路を持つ。再試行を選ぶまで、打ち直しても流さない |
+| 工程「実装」の `Action.GATE` | `run.report`。`next` と同じ回答の待ちの結果。回答は `ndf answer` で返す |
+| 別の工程・`DONE`・`COMPLETE` で、この実行で工程「実装」を流した | `ok`。次は `ndf progress next <ID>` |
+| 同じで、1 手も流していない | `stopped`（`precondition`）。次の 1 手の工程とアクションを理由に書く |
 
-`test_units_invoke.py` では、この表の行ごとに、実装のプランが起動するかしないかを確かめる。
+- `START` は `play_move` が `_start_once` を通る。工程の `when`・入力・プランの差し込みの検査は `next` と同じで、`when` が偽なら工程を飛ばすイベントを書き、実装は起動しない。この場合の結果は `ok` で、飛ばした条件を書く
+- 実装のステップの失敗と再承認の待ちは、`_run_step` が `next` と同じイベントに書く。そのため、次の `units run` と `next` は同じ `FAILED`・`GATE` を読む
+- `run.py` では、今の `_step` を `play_move`、`_launching` を `launching` に改名して公開する（行は増えない）。繰り返しは `units_cli.py` に置く
+- supervisor は工程「実装」に `ndf progress finish` を打たない。ステップ `gathered` と工程の終わりまで `units run` が流す
 
-承認した HEAD、承認の要否、送り先、再承認の回答を渡す引数は作らない。承認の回答だけがあって設計 PR のマージや `design-sync` が残るときは、次の工程が「ドキュメントレビュー」なので始まらない。このことも同じテストで確かめる。`units run` は、単位の経路でないスプリント（欄もファイルも無い）では `precondition` で止まる。`ndf check --write-spec` で `docs/contracts/commands.md`・`env.md`・`contracts/schemas/io/` を生成し直す。
+`test_units_invoke.py` では、次を確かめる。本物の別プロセスは起動せず、起動マーカーと作業の生死は差し替える。
+
+- 上の表の行ごとに、実装のプランが起動するかしないか
+- 起動マーカーがあり作業がロックを取る前は、実装を起動しない
+- `units run` で実装が失敗した後に同じコマンドを打つと、実装を起動せず、失敗の結果を返す
+- `units run` で再承認が要ると、回答の待ちが記録され、`ndf progress next` が同じ質問を返す
+- 工程の `when` が偽なら、実装を起動しない
+
+承認した HEAD、承認の要否、送り先、再承認の回答を渡す引数は作らない。承認の回答だけがあって設計 PR のマージや `design-sync` が残るときは、次の工程が「ドキュメントレビュー」なので始まらない。このことも同じテストで確かめる。単位の経路でないスプリント（欄もファイルも無い）では、`next` と同じく `impl` を 1 回流す。`ndf check --write-spec` で `docs/contracts/commands.md`・`env.md`・`contracts/schemas/io/` を生成し直す。
 
 ## 手順書
 
@@ -645,7 +663,7 @@ contracts/
 | `skills/design/SKILL.md` | 手順 7 の設計 PR の流れ（承認とマージは「ドキュメントレビュー」の終わり） |
 | `skills/requirements-design/references/document-roles.md` | 実装計画の順序と、設計 PR に載ること |
 | `skills/development-workflow/SKILL.md` | 工程表の順序と承認ゲートの位置 |
-| `skills/development-workflow/references/agent-layers.md` | 単位ごとにプランを組む手順を `ndf progress units run` に置き換え、設定が `doc_prs: base`（承認した HEAD のマージ先がベースブランチ）のときの `sync` を書く |
+| `skills/development-workflow/references/agent-layers.md` | 単位ごとにプランを組む手順を `ndf progress units run` に置き換え（工程「実装」に `ndf progress finish` は打たない）、設定が `doc_prs: base`（承認した HEAD のマージ先がベースブランチ）のときの `sync` を書く |
 | `skills/development-workflow/references/{approval-request,stage-notes}.md` | 承認資料の単位の表、設計 PR の流れ |
 | `skills/issue-plan-strategy/references/execution-plan.md` | 実行計画の実装の行は `check` の `items` から置く |
 
