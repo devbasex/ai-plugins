@@ -33,12 +33,14 @@
 - **変更内容:** `draft`・`show`・`approve`・`revoke`、承認の問いと答えの hook、手順書
 - **満たす受け入れ条件:** 9・10・14
 - **進め方:** CLI と hook はテストを先に書く。手順書に書くコマンドは打って確かめる
+- **設計承認で持ち越した項目:** `.ndf/launch.json` の書き換えは毎回利用者に確認する（承認の対象が空か承認済みでも問う。利用者の答え）。限界として「書き換え中の手の保存が消えうる」を設計書に書く
 
 ### Task 4: full の起動を承認した内容に絞る
 
 - **対象ファイル:** `adapters/claude.py`・`adapters/launch_settings.py`（`prepared`）・`core/worker.py`・`progress/invoke.py`、`contracts/domains/cli-floors.json`、`tests/progress/test_invoke.py` ほか
 - **変更内容:** `--tools`・`--strict-mcp-config`・`--mcp-config`、MCP の定義のコピー、起動の直前の照らし直し。`plugins/ndf/skills/` の本文を検索し、工程の中で使う Tool が一覧に無ければ足す（設計書の「壊れうる箇所」）。設計書の決定 3 の数え直しを行い、結果を PR の本文に書く
 - **満たす受け入れ条件:** 1・2・4・5・6・7・8・11・12
+- **設計承認で持ち越した項目:** プランの実行は工程のモードを子へ環境変数で渡す。ある工程の MCP 定義が読めないと承認の要る起動がすべて止まることを限界に書き、停止の文でそのファイルを示す
 - **進め方:** 引数と停止はテストを先に書く。実際の起動の `system/init` と MCP の呼び出し、Skill・サブエージェント・編集は手で確かめ、最低バージョンの `claude` でも打つ
 
 ### Task 5: 起動 1 回ごとに使用量ログへ 1 行書く
@@ -46,6 +48,7 @@
 - **対象ファイル:** `adapters/claude.py`・`core/worker.py`・`progress/invoke.py`・`__main__.py`・`domains/records/usage.py`・`usage_decide.py`・`core/plan/runner.py`・`steps.py`・`transition_decide.py`、`contracts/schemas/internal/usage.schema.json`、`tests/domains/records/test_usage.py`・`tests/core/plan/`
 - **変更内容:** 詳細設計の「起動の引数の組み立てと起動の結果」の結果の欄と記録、「プランの実行」、「使用量ログの書き込みと費用」。再開した起動の `usage` と `modelUsage` が累計かを 1 回測る（設計書の「未確認のまま残ること」）
 - **満たす受け入れ条件:** 3
+- **設計承認で持ち越した項目:** 一部の短い起動（応答の終わりの判定・cross-refactoring の相手役・疎通確認）は使用量の行が残らないことを限界に書く
 - **進め方:** 失敗するテスト → 実装。前後の費用は、設計書の決定 6 の比較元で手で測って残す
 
 ### Task 6: 安全装置を外すのは承認がある場合だけにする
@@ -53,6 +56,7 @@
 - **対象ファイル:** `adapters/launch_settings.py`（`safety_args`）・`domains/settings/delegate_run_cli.py`（新設）・`cli.py`・`core/converge/participants.py`・`adapters/agents.py`（`Launch.verify`）・`domains/crossreview/seats.py`、`contracts/domains/runtimes.json`、`skills/external-ai/`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md`・`skills/cross-review/SKILL.md`
 - **変更内容:** 詳細設計の「相手役の起動の引数」と「手順書」。`-s workspace-write` の委譲を 1 回起動して確かめる
 - **満たす受け入れ条件:** 13
+- **設計承認で持ち越した項目:** `delegate-run` は cwd と違う `-C` を拒む（手順書は移動してから `-C "$PWD"`）。`build_command` は安全装置の引数との競合を拒む。読むだけの委譲に `review` の用途を指定できるようにする。限界として「承認の保存先を共有する別の環境でも安全装置を外す承認が効く」を設計書に書く
 - **進め方:** 判定表の各行のテストを先に書く
 
 ## レビューの単位

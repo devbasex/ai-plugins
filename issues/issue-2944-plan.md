@@ -32,6 +32,7 @@
 - **対象ファイル:** `domains/records/experiments.py`・`allocation_decide.py`（新設）・`models_cli.py`（`report`）・`usage.py`（`record_outcome`）、`tests/domains/records/test_experiments.py`・`test_allocation.py`・`test_models_report.py`（新設）
 - **変更内容:** 詳細設計の「効果指標と出現率」と `report`
 - **満たす受け入れ条件:** 6・9・11・17・18・20
+- **設計承認で持ち越した項目:** 実験の記録の保持を 13 か月の固定から「選択の計算に使う期間の設定値（`window_days`。既定 60 日、最長 365 日）＋約 30 日」へ変え、確認なしに自動で削除する（利用者の訂正、2026-11-27）。設計書の条件 17・`issue-2944-design-allocation.md` の「保持する期間」・詳細設計の `prune`・要求仕様の値も同じ単位で直す
 - **進め方:** 計算は純粋な関数のテストを先に書く。記録の行は `experiment.schema.json` の形の見本で作る
 
 ### Task 4: worker・Skill・判定の起動に値を当て、行に残す
@@ -46,6 +47,7 @@
 - **対象ファイル:** `core/plan/transition_decide.py`・`runner.py`・`steps.py`・`records.py`・`model.py`、`contracts/templates/parts/steps.json`、`tests/core/plan/`
 - **変更内容:** 詳細設計の「プランの実行」
 - **満たす受け入れ条件:** 8・9・10・15・16
+- **設計承認で持ち越した項目:** プランの外の Skill の起動は実験に入れず基準の組で動くことと、I8 は `outcome` の表の呼び出し元に限ることを限界に書く
 - **進め方:** 遷移の判断は純粋な関数のテストを先に書く。`impl` と `check` のプランのテンプレートで遷移を通す
 
 ### Task 6: 相手役のシートを単位にし、レビューから効果指標を書く
