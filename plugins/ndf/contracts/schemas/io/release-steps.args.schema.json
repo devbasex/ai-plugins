@@ -91,6 +91,32 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "approval-state",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--pr": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "assemble",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
@@ -420,6 +446,36 @@
       "required": [
         "subcommand",
         "--revision"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "pull-checks",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--included": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "含む PR の番号"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--included"
       ]
     },
     {

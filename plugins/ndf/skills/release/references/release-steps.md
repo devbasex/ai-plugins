@@ -88,6 +88,8 @@ workflow の `assemble`（`ndf release-steps assemble --channel production`）�
 | 会話のセッション | `verification-record` | リリース後テストの記録をリリース記録と同じ PR へ書く（`release-verification`） |
 | workflow | `assemble` | リリースブランチを組み立て（版上げ・CHANGELOG・設定の手順）、リリースの PR を作る |
 | workflow | `approval-check` | 証跡を読んで判定し、PR の HEAD へ commit status `ndf/release-approval` を付ける |
+| 会話のセッション | `approval-state` | `merge` と同じ承認の条件で証跡を判定する。何も書かない |
+| 会話のセッション | `pull-checks` | 含む PR の最新の CI の結果を 1 回で読み、承認資料のセクションの形で出す |
 | workflow | `merge` | 証跡と必須のチェックの後に、ブランチ戦略の設定の `merge` の主体と方式で入れる。要ればベースブランチへ戻す PR も |
 | workflow | `record` | 本番ブランチへのマージの後に、含めた PR の各々へリリース記録を書く |
 | workflow | `publish` | 本番ブランチへ入ったコミットのバージョンで、タグと GitHub Release のうち足りないものを作る |
@@ -119,10 +121,11 @@ ndf release-steps records --pr <リリース記録の PR>
 （`pace: fast` と `pace: auto` だけ。条件は [pace.md](../../development-workflow/references/pace.md)）。管理者の迂回でマージする設定では、
 `user` の証跡だけを数える。却下は `--answer rejected` で書く。
 
-**承認を得たリリースを再開するときは、`present` の前に今の判定を読む。** `ndf release-steps approval-check --pr <リリースの PR> --production <本番ブランチ>` の
+**承認を得たリリースを再開するときは、`present` の前に今の判定を読む。** `ndf release-steps approval-state --pr <リリースの PR>` は、`merge` と
+同じ承認の条件で判定し、何も書かない（管理者の迂回でマージする場合は、MVV 判定の承認を数えない）。
 `outputs.state` が `approved` なら、`gate` と `present` を打たず、承認を取り直さずに続きへ進む。旧いバージョンで得た承認（提示に行 `提示した資料:` が無い）は、
 同じ資料を渡しても `present` が新しい形式で提示し直し、その時点で承認が数えられなくなる。
-承認者に見せる内容を差し替える必要があるときと、`approved` でないときだけ、承認資料を用意して `present` で提示し、回答を取り直す。
+承認者に見せる内容を差し替える必要があるときと、`approved` でないときだけ、承認資料を用意し、`gate` で確かめた資料を `present` で提示して、回答を取り直す。
 
 **承認の後に HEAD が動けば、マージされない。** `merge` は証跡を読み直し、今の HEAD が承認されていることを確かめてから入れる。
 承認の後にリリースブランチへコミットを足したら、下の手順で承認資料を作り直し、`gate`・`present` で見せ直して、承認を取り直す。
@@ -141,17 +144,21 @@ workflow を置かないリポジトリ（ほかの CI・手元）では、workf
 | 承認の対象が本番の PR（`approval.target: production_pr`） | `materials` に `--pr <番号>` を足して打つ |
 | ベースブランチから本番ブランチへの、版上げをしない PR | ベースブランチの HEAD を取り出した作業ディレクトリで `materials` を打つ |
 
-版上げの PR の 4 手順は次のとおりである。手順 3 は 2 つのコミットの間の差分から分かる項目を、手順 4 は検査の結果を確かめる。
+版上げの PR の 4 手順は次のとおりである。手順 3 は 2 つのコミットの間の差分から分かる項目を、手順 4 は含む PR と検査の結果を確かめる。
 
 1. `gh pr view <番号> --json body --jq .body > <承認資料>` で、`assemble` が PR の本文に書いた承認資料を写す
 2. `gh pr view <番号> --json headRefOid --jq .headRefOid` で今の HEAD を読み、行 `提示したコミット:` の SHA をその値に書き換える。
    書き換える前の SHA は、次の手順で使う
-3. 2 つのコミットの間の差分を確かめ、承認資料の版数、届き方、含む PR、利用者向けの変化、指示書と設定の変化を、今の HEAD の内容に合わせて
+3. 2 つのコミットの間の差分を確かめ、承認資料の版数、届き方、利用者向けの変化、指示書と設定の変化を、今の HEAD の内容に合わせて
    書き直す。確かめられない項目があれば、承認を求めずに止めて、その項目を報告する
-   - まず `gh api repos/<所有者>/<リポジトリ>/compare/<書き換える前の SHA>...<今の HEAD> --jq '.files[].filename'` で、変わったファイルを特定する
-   - 次に、承認資料の上の項目に関係するファイルだけ、同じ API の `--jq '.files[] | select(.filename == "<パス>") | .patch'` で差分の中身を読む
-4. 確定した HEAD に含まれる PR を確認し、`gh pr checks <含まれる PR の番号>` で各 PR の最新のチェック結果を取得して、「検査の結果」を更新する。
-   差分に変更が無くても行う（チェックの結果は、コミットを変えずに変わる）。取得できない場合は、承認を求めずに止めて理由を報告する
+   - `git fetch <リモート> <書き換える前の SHA> <今の HEAD>` で 2 つのコミットを 1 回で取得する。GitHub の比較 API は、変わったファイルを
+     300 件までしか返さないので使わない
+   - `git diff --name-only --no-renames <書き換える前の SHA>...<今の HEAD>` で、変わったファイルをすべて特定する
+   - `git diff <書き換える前の SHA>...<今の HEAD> -- <パス>...` で、承認資料の上の項目に関係するファイルだけ差分の中身を読む
+4. 確定した HEAD に含まれる PR を確かめる。承認資料の「含む PR」の番号に、
+   `git log --format=%s <書き換える前の SHA>..<今の HEAD>` で増えた PR の番号を足す。続けて `ndf release-steps pull-checks --included <番号>...` を
+   1 回打ち、出力の「含む PR」と「検査の結果」で承認資料の同じセクションを置き換える。差分に変更が無くても行う（チェックの結果は、コミットを
+   変えずに変わる）。取得できない場合は、承認を求めずに止めて理由を報告する
 
 ### CHANGELOG の本文
 

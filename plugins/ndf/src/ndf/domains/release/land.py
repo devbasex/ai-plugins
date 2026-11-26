@@ -332,6 +332,20 @@ class Gate(NamedTuple):
     pr: Optional[dict] = None
 
 
+def _bypasses(landing: route_decide.Landing, approvals: int) -> bool:
+    """管理者の迂回で入れるか（迂回の設定で、本番ブランチが承認を求める）。迂回なら利用者の証跡だけを数える（#3506 の I9）。"""
+    return landing.admin and approvals >= 1
+
+
+def approval_state(hub: GitHub, strategy: Strategy, number: int) -> trail.Read:
+    """`merge` と同じ承認の条件で証跡を読んで判定する（何も書かない。承認を得たリリースの再開の判断に使う）。
+    ruleset を読むのは迂回の設定だけで、読めなければ利用者の証跡だけを数える（厳しい側）。"""
+    landing = route_decide.landing_of(strategy)
+    rules = hub.rule_facts(strategy.production) if landing.admin else None
+    human_only = landing.admin and (rules is None or _bypasses(landing, rules.approvals))
+    return trail.read(hub, number, human_only)
+
+
 @dataclass(frozen=True)
 class Lander:
     """1 つのリポジトリのリリースの PR を、ブランチ戦略の設定 `strategy` の主体と方式で入れる。
@@ -549,7 +563,7 @@ class Lander:
             if why is not None:
                 return Gate(Landed(False, "refused", f"#{pull.number}: {why}"), rules=rules, pr=pr)
         # 本番ブランチが承認を求めるときだけ迂回する（承認数 0 なら普通のマージで入る。#3506 の I2b）
-        return Gate(None, landing.admin and rules.approvals >= 1, rules, pr)
+        return Gate(None, _bypasses(landing, rules.approvals), rules, pr)
 
     def _merge(self, pull: Pull, deadline: float, method: str, bypass: bool = False, jump: bool = False) -> Landed:
         """停止条件（`_blocker`）を確かめた後に、承認済みのコミットを添えて方式 `method` でマージする。待ちは時刻 `deadline`

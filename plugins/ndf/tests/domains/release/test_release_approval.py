@@ -410,8 +410,9 @@ def test_admin_ndf_settings_stops_like_the_plain_merge_without_merging() -> None
 
 
 def test_admin_ndf_settings_does_not_count_the_mvv_trail() -> None:
-    """I9: 利用者の証跡が無く MVV 判定の証跡だけなら refused で止まり、迂回しない。"""
+    """I9: 利用者の証跡が無く MVV 判定の証跡だけなら refused で止まり、迂回しない。再開の判断の判定（#4446）も同じで、何も書かない。"""
     hub = AdminHub(pulls={7: pull()}, comments_of={7: [_mvv_trail()]})
+    assert not land.approval_state(hub, _admin_lander(hub).strategy, 7).judgment.approved and hub.requests == []
     done = _admin_lander(hub).land(7)
     assert not done.merged and done.kind == "refused" and hub.admin_merged == [] and hub.merged == []
 

@@ -89,7 +89,7 @@
           "items": {"$ref": "#/$defs/gap"}
         },
         "product_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"},
-        "head": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "release-steps: 承認の対象の PR の HEAD（present・approval-check）。document-rebuild gate: 確かめた PR の head"},
+        "head": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "release-steps: 承認の対象の PR の HEAD（present・approval-check・approval-state）。document-rebuild gate: 確かめた PR の head"},
         "questions": {"type": "string", "minLength": 1, "description": "document-rebuild gate: 記録した承認の質問（AskUserQuestion の questions）のファイルのパス（#4446）"},
         "material": {
           "type": "object",
@@ -116,7 +116,7 @@
           "properties": {"commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "docs": {"type": "array", "items": {"type": "string", "minLength": 1}}},
           "description": "document-rebuild gate: 読み手役の直しで push したコミットと文書のパス。工程は設計のレビューから流し直す（#4446）"
         },
-        "state": {"type": "string", "minLength": 1, "description": "release-steps: 承認の判定（answer・approval-check。release-cd.yml の approval-check が読む）"},
+        "state": {"type": "string", "minLength": 1, "description": "release-steps: 承認の判定（answer・approval-check・approval-state。release-cd.yml の approval-check が読む）"},
         "writer": {"type": "string", "minLength": 1, "description": "release-steps present: 承認の証跡の書き手"},
         "records": {"type": "boolean", "description": "release-steps merge: 本番へ入った後にリリース記録を書くか（release-cd.yml が読む）"},
         "production_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "release-steps merge: 本番へ入ったコミット（release-cd.yml が読む）"},

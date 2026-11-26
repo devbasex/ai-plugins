@@ -81,7 +81,17 @@ def _instructions(paths: Sequence[str]) -> list[str]:
 
 def checks_green(facts: Facts) -> bool:
     """含む PR の CI がすべて通ったか（失敗も待ちも無い）。"""
-    return all(p.tally.green for p in facts.pulls)
+    return _green(facts.pulls)
+
+
+def _green(pulls: Sequence[PullFact]) -> bool:
+    return all(p.tally.green for p in pulls)
+
+
+def pull_sections(pulls: Sequence[PullFact]) -> list[str]:
+    """承認資料のセクション「含む PR」と「検査の結果」の行（`render` と `pull-checks` で同じ形）。"""
+    verdict = "すべて通った" if _green(pulls) else "通っていないものがある"
+    return ["## 含む PR", *_pulls(pulls), "", "## 検査の結果", f"- 含む PR の CI: {verdict}"]
 
 
 def render(facts: Facts) -> str:
@@ -97,11 +107,7 @@ def render(facts: Facts) -> str:
         *(forms_decide.delivery_line(d) for d in facts.deliveries),
         "",
         *versions,
-        "## 含む PR",
-        *_pulls(facts.pulls),
-        "",
-        "## 検査の結果",
-        f"- 含む PR の CI: {'すべて通った' if checks_green(facts) else '通っていないものがある'}",
+        *pull_sections(facts.pulls),
         "",
         "## 利用者向けの変化",
         *_distribution(facts.changes),
@@ -114,6 +120,11 @@ def render(facts: Facts) -> str:
 
 def items(facts: Facts) -> list[dict]:
     """機械が読む項目（含む PR ごとの CI の件数。分母は実行されたチェック）。"""
+    return pull_items(facts.pulls)
+
+
+def pull_items(pulls: Sequence[PullFact]) -> list[dict]:
+    """含む PR ごとの機械が読む項目。"""
     return [
         {
             "kind": "pull",
@@ -123,5 +134,5 @@ def items(facts: Facts) -> list[dict]:
             "checks_skipped": p.tally.skipped,
             "failed": list(p.tally.failed),
         }
-        for p in _ordered(facts.pulls)
+        for p in _ordered(pulls)
     ]
