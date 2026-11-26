@@ -2,7 +2,7 @@
 
 [設計書](./issue-3702-design.md)の構成要素を、ファイルと関数の粒度へ下ろした文書である。決定の番号、不変条件の番号（I1〜I8）、規則の番号（U1〜U6・W1）は設計書を指す。コマンドの引数の意味と結果、処理の流れ、単位のファイルの形は設計書が持つので、写さずにセクション名で指す。パスは `plugins/ndf/` からの相対である。
 
-この文書の「プラン」は、手順をステップの列にした実行の定義で、実装計画とは別である。「単位の欄」は、実装計画の「レビューの単位」の欄を指す。「MVV 判定」は、プロジェクトの方針に沿うかの AI の判定である。
+「supervisor」は、工程を回す AI である。この文書の「プラン」は、手順をステップの列にした実行の定義で、実装計画とは別である。「単位の欄」は、実装計画の「レビューの単位」の欄を指す。「MVV 判定」は、プロジェクトの方針に沿うかの AI の判定である。
 
 #4369 は、`ndf progress next` の工程「実装」が、単位の表を読んで単位を 1 つずつ流すようにする課題である。単位は、レビューの単位（1 本の PR として実装・レビュー・マージするタスクのまとまり）を指す。**前提にする #4369 の実装は、2026-11-27 の時点で `main` に無い。** この文書が「#4369 の」と書く関数とファイルは、[#4369 の設計](./issue-4369-design.md)と、レビュー中の[詳細設計の PR](https://github.com/devbasex/ai-plugins/pull/4567) の名前である。実装を始める時点で `main` の形が違えば、名前と引数を `main` に合わせる。
 
@@ -142,7 +142,7 @@ contracts/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `judge` | 依存の深さの実行順、別のファイルの依存、`whole` の単位 | 400・401・1,000・1,001 行、16,757 行と 24,008 行（受け入れ条件 7） | U1〜U6 の各形、別のファイルの同じ `T1` は通る、同じ単位の中のタスクの依存は通る |
+| `judge` | 依存の深さの実行順、別のファイルの依存、`whole` の単位 | 400・401・1,000・1,001 行、#3698 と #3247 の大きさの 16,757 行と 24,008 行（受け入れ条件 7） | U1〜U6 の各形、別のファイルの同じ `T1` は通る、同じ単位の中のタスクの依存は通る |
 | `split` | #3672 の fixture が上限に収まる複数の単位になり、依存の向きの順になる（受け入れ条件 8） | 区切りが 1 つ | 1 タスクで上限超え、当てた後に残る U4 |
 
 ## 単位のファイルの読み書き（`core/plan/units_files.py`）
@@ -157,7 +157,7 @@ contracts/
 | `load` | 同上 | 新設 | `(tree: Tree, path: str) -> UnitFile` | スキーマとパスを検査して `parse` する |
 | `limits_of` | 同上 | 新設 | `(project: Mapping) -> Limits` | `workflow.review_units` を既定より先に当てる |
 | `collect` | 同上 | 新設 | `(tree, issues, omitted) -> Collected` | 課題ごとの扱いを当て、読むファイルと欠落を返す |
-| `check` | 同上 | 新設 | `(tree, issues, omitted, limits, criteria, docs: bool) -> Report` | `judge` の結果に、欠落の確かめと、`docs` ならタスクの集合と表の一致を足す |
+| `check` | 同上 | 新設 | `(tree, issues, omitted, limits, criteria, docs: bool) -> Report` | `judge` の結果に、単位のファイルが無い課題の確かめ（欠落の確かめ）を足す。`docs` が真なら、実装計画と単位のファイルのタスクの集合の一致と、実装計画の 2 つの表の一致も足す |
 | `render_tables` | 同上 | 新設 | `(plan: str, views: Sequence[View]) -> str` | 実装計画の「レビューの単位」と「並列と直列」のセクションを書き直した全文 |
 | `differs` | 同上 | 新設 | `(a: UnitFile, b: UnitFile) -> bool` | `actual_lines` を除いて、並びと中身を比べる |
 | `design_handlings` | `inputs_decide.py` | 新設 | `(text: str) -> dict[int, tuple[str, Optional[int]]]` | 「設計の結果」の表の（扱い, 統合先） |
@@ -396,7 +396,7 @@ contracts/
 1. `required(snap)` が真なら、`approved_of`。無ければ始めない
 2. 記録があれば、`mismatches`。1 件でもあれば始めない。起動に使う課題・扱い・省いた課題・上限は記録の値にする
 3. `required` が偽で、単位の欄があるのに単位のファイルが無ければ、`units_convert.convert`（古い定義）か、始めない（この変更より後に作ったスプリント）
-4. 欄もファイルも無ければ、#4369 の「これまでの経路」
+4. 欄もファイルも無ければ、#4369 の「これまでの経路」（単位に分けず `impl` を 1 回）
 5. 単位のファイルを `units_files.check`（`docs` は偽）に通す。違反があれば始めない
 6. #4369 の開始前の確かめ（取得・配布先として宣言したブランチでないこと・push）
 
@@ -438,7 +438,7 @@ contracts/
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 中断からの再開 |
 | --- | --- | --- | --- |
-| 単位の `impl` どうし | 重い起動のスロット | 今の `ndf.slot_pool` | 回ごとの保存先（#4369） |
+| 単位の `impl` どうし | 重い起動のスロット（メモリを多く使う起動の同時数の上限） | 今の `ndf.slot_pool` | 回ごとの保存先（#4369） |
 | 作業場所の作成・マージ | git の共有ディレクトリ・マージ先 | 主のスレッドだけが打つ | マージ済みの PR の一覧 |
 | 2 つの `ndf progress units run` | 同じスプリント | ステートマシンの `run_lock` | — |
 
@@ -465,7 +465,7 @@ contracts/
 | 旧い承認の HEAD を読めない | 始めない（`precondition`） |
 | 却下 | 始めない（`refused`） |
 
-単体テストの観点: 再開点の 4 行、依存を足しただけは違いにしない、旧い表にあった待ちの関係が変換で消える場合は、承認の回答があるまで実装を流さない、承認の後にファイルを直すと再び問う。
+単体テストの観点: 再開点の 4 行、依存を足しただけは違いにしない、旧い表にあった単位の依存（先に要る単位）が変換で消える場合は、承認の回答があるまで実装を流さない、承認の後にファイルを直すと再び問う。
 
 ## 承認した文書の取り込み（`progress/units_sync.py`）
 
@@ -507,7 +507,7 @@ contracts/
 5. 取り込むファイルごとに、`merge-base` から両側の変更を調べる。スプリント側も変えていて中身が違うファイルがあれば `stopped`。取り込むファイルは次のとおりである
    - 単位のファイルと実装計画
    - 番号の並びが一致する `-requirements.md`・`-design.md`・`-design-detail.md`
-6. `git checkout <記録の head> -- <ファイル>` してコミットし、push する。コミットの SHA を `<work_root>/design-sync.json` に残し、打ち直しではそのコミットを含めば `ok`
+6. `git checkout <記録の head> -- <ファイル>` してコミットし、push する。コミットの SHA を `<work_root>/design-sync.json` に残し、打ち直しでは、スプリントブランチがそのコミットを含めば `ok`
 7. 取り込んだ内容が記録の head と同じことを確かめる
 
 `ndf progress next` の経路は、手順 4 で `ok` を返して終わる。設計 PR の head がスプリントブランチ自身だからである。
@@ -574,7 +574,7 @@ contracts/
 | `skills/design/SKILL.md` | 手順 7 の設計 PR の流れ（承認とマージは「ドキュメントレビュー」の終わり） |
 | `skills/requirements-design/references/document-roles.md` | 実装計画の順序と、設計 PR に載ること |
 | `skills/development-workflow/SKILL.md` | 工程表の順序と承認ゲートの位置 |
-| `skills/development-workflow/references/agent-layers.md` | 単位ごとにプランを組む手順を `ndf progress units run` に置き換え、設定が `doc_prs: base` のときの `sync` を書く |
+| `skills/development-workflow/references/agent-layers.md` | 単位ごとにプランを組む手順を `ndf progress units run` に置き換え、設定が `doc_prs: base`（承認した HEAD のマージ先がベースブランチ）のときの `sync` を書く |
 | `skills/development-workflow/references/{approval-request,stage-notes}.md` | 承認資料の単位の表、設計 PR の流れ |
 | `skills/issue-plan-strategy/references/execution-plan.md` | 実行計画の実装の行は `check` の `items` から置く |
 
