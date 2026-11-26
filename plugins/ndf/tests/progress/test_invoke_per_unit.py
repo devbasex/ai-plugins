@@ -4,8 +4,8 @@
 ブランチは作業場所が今いるものを使う（受け入れ条件 2）。文脈の `branch`（工程「作業場所の用意」が登録したブランチ）は
 差し込みに使わない。
 
-単位ごとに実装のプランを流すための、呼び出し（`StageRun`）の追加の欄と、PR の番号の無い古い実行の記録の打ち直しも
-ここで確かめる。
+単位ごとに実装のプランを流すための、呼び出し（`StageRun`）の追加の欄と、止まった実装の打ち直しの開始点も
+ここで確かめる。PR の番号の書き戻しは `tests/core/plan/test_steps.py` で確かめる。
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from ndf.contracts.worker_kinds import read_values, write_values
 from ndf.core import durable, route
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
-from ndf.core.plan import steps as plan_steps
 from ndf.progress import definition, invoke, issue_values, plan_runs
 
 PROJECT = {
@@ -187,73 +186,6 @@ def test_the_start_of_the_run_is_used_only_without_a_start_from_the_record(tmp_p
     _record(tmp_path, "design", "b", stopped_at="a")
     argv = invoke.plan_argv(run, tmp_path, None, tmp_path)
     assert argv[argv.index("--from") + 1] == "a"
-
-
-def _impl_plan(tmp_path: Path) -> Path:
-    """番号を `probe` が書くステップと読むステップを持つ、テンプレート impl と同じ形の小さなプラン。"""
-    steps = [
-        {"id": "test", "run": ["true"]},
-        {"id": "pr", "run": ["true", route.PR_NUMBER_FILE], "probe": ["true", route.PR_NUMBER_FILE]},
-        {"id": "ci", "run": ["true", route.PR_NUMBER_FILE]},
-    ]
-    path = tmp_path / "plan.json"
-    path.write_text(json.dumps({"name": "impl-sprint/s1", "steps": steps}), encoding="utf-8")
-    return path
-
-
-def _probed(monkeypatch, got: dict | None) -> list[str]:
-    calls: list[str] = []
-    monkeypatch.setattr(plan_steps, "probe", lambda ctx, step, timeout: calls.append(step.id) or got)
-    return calls
-
-
-@pytest.mark.parametrize(("start", "saved", "asked"), [("ci", False, ["pr"]), ("ci", True, []), ("pr", False, []), ("test", False, [])])
-def test_the_missing_pr_number_is_asked_with_the_probe_of_the_pr_step(tmp_path, monkeypatch, start, saved, asked):
-    # PR の番号を保存する前に始めた実装は、PR を作った後で止まっていても番号を持たない
-    calls = _probed(monkeypatch, {"status": "ok"})
-    if saved:
-        (tmp_path / "pr-number").write_text("7\n", encoding="utf-8")
-    invoke.restore_pr_number(_impl_plan(tmp_path), tmp_path, start)
-    assert calls == asked
-
-
-@pytest.mark.parametrize(("start", "asked"), [("resolved", []), ("head-reviewed", ["pr"]), ("fix-push", [])])
-def test_the_pr_number_is_asked_only_when_a_route_of_impl_reads_it(tmp_path, monkeypatch, start, asked):
-    # resolved は指摘の有無を確かめて終わる。head-reviewed は通れば終わるが、止まった先の差分のレビューが番号を読む
-    calls = _probed(monkeypatch, {"status": "ok"})
-    plan = route.expanded(route.templates()["impl"])
-    for step in plan["steps"]:
-        step["run"] = [route.PR_NUMBER_FILE if a == "{{review}}" else a for a in step["run"]]
-    path = tmp_path / "impl.json"
-    path.write_text(json.dumps({**plan, "name": "impl-sprint/s1"}), encoding="utf-8")
-    invoke.restore_pr_number(path, tmp_path, start)
-    assert calls == asked
-
-
-@pytest.mark.parametrize(
-    ("got", "kind", "reason"),
-    [
-        (None, "precondition", "開いた PR が無い"),
-        ({"status": "stopped", "kind": "precondition", "summary": "照会できない"}, "precondition", "照会できない"),
-    ],
-)
-def test_the_resume_stops_with_the_reason_when_the_pr_number_is_not_restored(tmp_path, monkeypatch, got, kind, reason):
-    _probed(monkeypatch, got)
-    with pytest.raises(plan_runs.PrNumberUnrestored) as stopped:
-        invoke.restore_pr_number(_impl_plan(tmp_path), tmp_path, "ci")
-    report = invoke.plan_failure("impl", stopped.value)
-    assert report["cause"]["kind"] == kind and reason in report["cause"]["detail"]
-
-
-def test_a_plan_that_does_not_read_the_pr_number_is_not_asked(tmp_path, monkeypatch):
-    calls = _probed(monkeypatch, None)
-    path = _impl_plan(tmp_path)
-    plan = json.loads(path.read_text(encoding="utf-8"))
-    # 番号を書くステップの後ろから始めても、読むステップが無ければ照会しない
-    steps = [plan["steps"][1], {"id": "after", "run": ["true"]}]
-    path.write_text(json.dumps({**plan, "steps": steps}), encoding="utf-8")
-    invoke.restore_pr_number(path, tmp_path, "after")
-    assert calls == []
 
 
 def test_an_impl_stopped_after_the_pr_keeps_its_start_without_the_pr_number(tmp_path):

@@ -10,6 +10,7 @@ from pathlib import Path
 import git_sandbox
 import pytest
 
+from ndf.core import route
 from ndf.core.plan import model, steps
 
 
@@ -90,3 +91,59 @@ def test_run_refuses_a_child_left_on_another_host(tmp_path):
     ctx = _ctx(tmp_path, run=["true"])
     out = steps.run(ctx, ctx.plan.steps[0])
     assert (out["status"], out["kind"]) == ("stopped", "refused")
+
+
+# --- PR の番号の書き戻し（#4369） -----------------------------------------------------------
+
+
+class _Done:
+    """通ったことにする子のプロセス（ステップのコマンドは起動しない）。"""
+
+    pid = 1
+    returncode = 0
+
+    def communicate(self, timeout=None):
+        return "", ""
+
+
+def _run_impl_step(tmp_path, monkeypatch, step_id: str, got: dict | None) -> tuple[dict, list[str], list[str]]:
+    """テンプレート impl のステップ `step_id` を打ち、（結果、照会したステップ、打ったステップ）を返す。"""
+    raw = route.expanded(route.templates()["impl"])
+    for found in raw["steps"]:
+        found["run"] = [route.PR_NUMBER_FILE if a == "{{review}}" else a for a in found["run"]]
+    plan = model.parse({**raw, "name": "impl-sprint/s1"})
+    asked: list[str] = []
+    launched: list[str] = []
+    monkeypatch.setattr(steps, "_probe", lambda ctx, step, timeout: asked.append(step.id) or got)
+    monkeypatch.setattr(steps, "_launch", lambda ctx, step: launched.append(step.id) or _Done())
+    (tmp_path / steps.STEPS_DIR).mkdir(exist_ok=True)
+    out = steps.run(steps.StepContext(plan, tmp_path, {"state_dir": str(tmp_path)}), plan.step(step_id))
+    return out, asked, launched
+
+
+@pytest.mark.parametrize(
+    ("step_id", "asked"),
+    [("head-reviewed", []), ("resolved", []), ("conflict-check", ["pr"]), ("review", ["pr"]), ("ci", ["pr"]), ("review-delta", ["pr"])],
+)
+def test_the_missing_pr_number_is_asked_only_by_a_step_that_reads_it(tmp_path, monkeypatch, step_id, asked):
+    # PR の番号を保存する前に始めた実装。head-reviewed が通る再開と resolved は、照会せずに保存済みの記録で終わる
+    out, got_asked, launched = _run_impl_step(tmp_path, monkeypatch, step_id, {"status": "ok"})
+    assert (out["status"], got_asked, launched) == ("ok", asked, [step_id])
+
+
+def test_the_saved_pr_number_is_not_asked_again(tmp_path, monkeypatch):
+    (tmp_path / "pr-number").write_text("7\n", encoding="utf-8")
+    assert _run_impl_step(tmp_path, monkeypatch, "ci", None)[1] == []
+
+
+@pytest.mark.parametrize(
+    ("got", "reason"),
+    [
+        (None, "開いた PR が無い"),
+        ({"status": "stopped", "kind": "precondition", "summary": "照会できない"}, "照会できない"),
+    ],
+)
+def test_the_step_stops_with_the_reason_when_the_pr_number_is_not_restored(tmp_path, monkeypatch, got, reason):
+    out, _, launched = _run_impl_step(tmp_path, monkeypatch, "review-delta", got)
+    assert (out["status"], out["kind"], launched) == ("stopped", "precondition", [])
+    assert reason in out["summary"]
