@@ -28,7 +28,6 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
-from ndf.adapters.github import GitHub, client
 from ndf.contracts import result, worker_paths
 from ndf.contracts.worker_kinds import kind_gaps, kind_values, values_in, work_dir_of, work_kinds
 from ndf.core import route
@@ -44,6 +43,7 @@ from ndf.progress.gate.answering import (
     lane_env,
     no_post,
     recheck,
+    shared_hub,
 )
 from ndf.progress.gate.asking import (
     RELEASE_GATE,
@@ -386,25 +386,10 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
     return 0
 
 
-def _shared_hub(cwd: Path) -> Callable[[], GitHub]:
-    """今の対象を読む口と証跡を書く口が共有する GitHub（初めに使うときに 1 つだけ作る）。
-
-    設定の読み取り（`branch_file`）が同じ要求で読んだ token の利用者の login を証跡の書き込みが使い、login の読み取りを増やさない。
-    """
-    made: list[GitHub] = []
-
-    def hub() -> GitHub:
-        if not made:
-            made.append(GitHub(Git(cwd).remote_repo(), client()))
-        return made[0]
-
-    return hub
-
-
 def _cmd_give(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
     seen = Target(a.head, a.material_sha256, presentation=a.presentation)
     given = Answer(a.gate, a.result, a.reason, a.by, a.key, Path(a.notes) if a.notes else None, seen, tuple(a.drop))
-    hub = _shared_hub(cwd)
+    hub = shared_hub(cwd)
     return answer(st, a.machine_id, given, github_observe(cwd, st.root, hub), github_post(cwd, hub))
 
 
@@ -464,7 +449,7 @@ def ask_parser() -> argparse.ArgumentParser:
 def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Optional[Observe] = None) -> dict[str, Any]:
     """`ndf progress` の工程を流すサブコマンド。レーンの行を終える `Env` で流し、回答を読む前に対象を見直し、承認ゲートの
     待ちは質問と回答ごとのルートの結果にする。"""
-    hub = _shared_hub(cwd)
+    hub = shared_hub(cwd)
     seen = observe if observe is not None else github_observe(cwd, st.root, hub)
     took = _took(st, a.machine_id, seen, github_post(cwd, hub) if observe is None else no_post)
     why = recheck(st, a.machine_id, seen, git_docs_only(cwd))

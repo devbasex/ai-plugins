@@ -54,22 +54,33 @@ def no_observe(q: Question, *, material: bool = True) -> Target:
     return Target()
 
 
+def shared_hub(cwd: Path, hub: Optional[Callable[[], GitHub]] = None) -> Callable[[], GitHub]:
+    """初めに使うときに GitHub を 1 つだけ作り、以後は同じものを返す口。`hub` があればそれで、無ければ `cwd` のリポジトリで作る。
+
+    今の対象を読む口と証跡を書く口が同じ口を共有すると、設定の読み取り（`branch_file`）が同じ要求で読んだ token の利用者の
+    login を証跡の書き込みが使い、login の読み取りを増やさない。
+    """
+    made: list[GitHub] = []
+
+    def get() -> GitHub:
+        if not made:
+            made.append(hub() if hub is not None else GitHub(Git(cwd).remote_repo(), client()))
+        return made[0]
+
+    return get
+
+
 def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = None) -> Observe:
     """今の対象を読む: PR の head の SHA（GitHub）と、その head の承認資料の sha256。読めなければ回答を受けない（`model.Refused`）。
 
     資料は今の head を入れた質問の `material_path` で探す（資料は head ごとに別のファイル。#3959）。"""
-    made: list[GitHub] = []
-
-    def _hub() -> GitHub:
-        if not made:
-            made.append(hub() if hub is not None else GitHub(Git(cwd).remote_repo(), client()))
-        return made[0]
+    get_hub = shared_hub(cwd, hub)
 
     def observe(q: Question, *, material: bool = True) -> Target:
         pull = found = None
         if q.pr is not None:
             try:
-                hub = _hub()
+                hub = get_hub()
                 pull = hub.pull(q.pr)
                 # head だけを読むときは、マージ先の設定を読まない
                 found = hub.branch_file(pull.base_ref, production_merge.PROJECT_FILE) if material else None
@@ -103,13 +114,12 @@ def github_post(cwd: Path, hub: Optional[Callable[[], GitHub]] = None) -> Post:
 
     `observe` と同じ GitHub を渡せば、設定の読み取りで読んだ利用者を使い、利用者の読み取りを増やさない。
     書けない（利用者のアカウント ID を読めない・値が不正）なら `model.Refused`（回答は記録しない）。"""
-    made: list[GitHub] = []
+    get_hub = shared_hub(cwd, hub)
 
     def post(row: merge_approval.MergeRow) -> bool:
-        if not made:
-            made.append(hub() if hub is not None else GitHub(Git(cwd).remote_repo(), client()))
+        made = get_hub()
         try:
-            return merge_approval.write_merge_row(made[0], row, made[0].viewer())
+            return merge_approval.write_merge_row(made, row, made.viewer())
         except merge_approval.TrailError as exc:
             raise model.Refused(f"マージの承認の証跡を書けないので、回答を記録しない: {exc}") from None
 
