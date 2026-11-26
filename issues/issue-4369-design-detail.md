@@ -103,7 +103,7 @@ contracts/
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `has_units`・`lineup` | `inputs_decide.split_row`・`criteria` | `inputs_decide.py` を読んだ | 使う |
-| `has_units`・`lineup` | markdown-it-py（見出し・表の範囲・コードブロック） | 依存の一覧と `rules.json` の `decide_forbidden_imports` | 使う（`inputs_decide.outside_fences` は行頭の囲みしか読まないので使わない） |
+| `has_units`・`lineup` | markdown-it-py（見出し・表の始まり・コードブロック） | 依存の一覧と `rules.json` の `decide_forbidden_imports` | 使う（`inputs_decide.outside_fences` は行頭の囲みしか読まないので使わない） |
 | `has_units`・`lineup` | `adapters/markdown.py` の `atx_headings` | `rules.json` の `decide_forbidden_imports` | 使えない（判断のモジュールは `ndf.adapters` を import できない） |
 | `acceptance_args` | `route.launch_values` | `core/route/__init__.py` を読んだ | 使えない（条件の指定と `--no-criteria` を組まない） |
 | `plan_issues` | `issue_docs.design_issues` | `issue_docs.py` を読んだ | 同じ形の正規表現を実装計画の側に足す |

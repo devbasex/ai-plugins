@@ -141,6 +141,12 @@ def test_lineup_reads_a_table_without_the_outer_pipes(table: str) -> None:
     assert _names(_plan(_text(table))) == ["A", "B"]
 
 
+@pytest.mark.parametrize("note", ["補足です。", "a \\| b は区切りでない。"])
+def test_lineup_ends_the_table_at_a_line_without_a_cell_separator(note: str) -> None:
+    table = _table(HEAD, "| A | Task 1・2 | 無し |") + "\n" + note
+    assert _names(_plan(_text(table))) == ["A"]
+
+
 def test_lineup_reads_indented_and_closed_headings() -> None:
     text = _text(_table(HEAD, "| A | Task 1・2 | 無し |"), heading="  ## レビューの単位 ##")
     assert _names(_plan(text.replace("## タスク分解", "## タスク分解 ##"))) == ["A"]

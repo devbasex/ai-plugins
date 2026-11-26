@@ -116,6 +116,11 @@ def split_row(line: str) -> list[str]:
     return [c.strip().replace("\\|", "|") for c in _CELL_SEP.split(inner)]
 
 
+def has_cell_separator(line: str) -> bool:
+    """セルを区切る `|`（`\\|` を除く）があるか。"""
+    return _CELL_SEP.search(line) is not None
+
+
 def cells(line: str) -> list[str]:
     """表の 1 行のセル（`cell` で書いた `\\|` と `<br>` は元の `|` と改行へ戻す）。"""
     return [c.replace(_CELL_BREAK, "\n") for c in split_row(line)]

@@ -2,7 +2,8 @@
 
 本文から単位の並びか、読めない理由を返す。ファイルも git も読まない。読み方は #4369 の設計書の「単位の表の読み方」と
 「順序」にあり、決めた形でない表は行を飛ばさず `UnitsUnreadable` で止める。実装計画の見出しの語もここが持つ。
-見出し・表の範囲・コードブロックは markdown-it-py で読む（判断のモジュールは `ndf.adapters.markdown` を読めない）。
+見出し・表の始まり・コードブロックは markdown-it-py で読む（判断のモジュールは `ndf.adapters.markdown` を読めない）。
+表は、セルを区切る `|` の無い行の手前で終える。
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Mapping, Sequence
+from itertools import takewhile
 from typing import NamedTuple, Optional
 
 from markdown_it import MarkdownIt
@@ -114,8 +116,9 @@ def _parse(text: str) -> _Doc:
         if token.type == "heading_open" and token.markup.startswith("#"):
             headings.append(_Heading(start, int(token.tag[1:]), tokens[i + 1].content))
         elif token.type == "table_open":
-            # 2 行目は区切りの行
-            tables.append(_Table(start, [inputs_decide.split_row(lines[at]) for at in (start, *range(start + 2, end))]))
+            # 2 行目は区切りの行。Markdown は空行の無い直後の本文も表の行にするので、`|` の無い行で終える
+            data = takewhile(inputs_decide.has_cell_separator, lines[start + 2 : end])
+            tables.append(_Table(start, [inputs_decide.split_row(line) for line in (lines[start], *data)]))
     return _Doc(tuple(headings), tuple(tables))
 
 
