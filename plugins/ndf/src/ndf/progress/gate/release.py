@@ -89,11 +89,17 @@ def _bump_body(v: run.View, q: Question, name: str) -> dict[str, Any]:
     return {**fields, model.MATERIAL_KEY: held, "release_requests": context["release_requests"]}
 
 
+def _bump_request_id(q: Question) -> str:
+    """版上げのリクエストの ID。"""
+    return f"{BUMP_KIND}-{q.id}"
+
+
 def _plan_request(st: store.Store, v: run.View, q: Question) -> Optional[dict[str, Any]]:
     """計画のステートマシンへリクエストの事象を書き（同じ質問のリクエストがあれば使い直す）、出した先を返す。レーンの外なら None。
 
     版上げのスプリントは種類 `bump-release` で書く。このリクエストはオーガナイザーが `ndf answer` で回答して閉じる。"""
     bump = v.snap.mode == model.RELEASE_BUMP_MODE
+    ident = _bump_request_id(q) if bump else request_id(q)
     with store.transaction(st) as conn:
         found = release_request_of(conn, q)
         if found is None:
@@ -101,13 +107,11 @@ def _plan_request(st: store.Store, v: run.View, q: Question) -> Optional[dict[st
         plan_id, name, held = found
         if bump:
             view, _ = lane.read_plan(conn, plan_id)
-            ident = f"{BUMP_KIND}-{q.id}"
             held = next((r for r in view.requests.values() if r.body.get("id") == ident), None)
         key = held.key if held is not None else None
         if key is None:
             body = _bump_body(v, q, name) if bump else {**_request_fields(v, q, name), "kind": RELEASE_KIND}
             key = plan.open_request(conn, plan_id, body, f"レーン {name} のリリースのリクエスト", run.ACTOR)
-    ident = f"{BUMP_KIND}-{q.id}" if bump else request_id(q)
     return {"kind": "plan", "id": ident, "plan": plan_id, "request": key}
 
 
