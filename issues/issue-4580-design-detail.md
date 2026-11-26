@@ -2,7 +2,7 @@
 
 設計文書 [issue-4580-design.md](./issue-4580-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。書き方と、別ファイルにする条件は `design` の `references/detailed-design.md` にある。
 
-別ファイルにした理由: 新設する関数が 51（「関数の仕様」の表の `新設` の行から、型 12 とファイル 3 を除いて数えた）あり、シグネチャを変える既存の関数が 3 つ（`close_decide.verdict` の引数の名前と返り、`record.write_verification` の引数、`GitHub._read_permission` の返り）あるため（`requirements-design` の「詳細設計を別ファイルにする条件」）。型 `record_decide.Record` と `github.Authored` は項目を足すだけで、既定値を持つので今の呼び出しは変わらない。
+別ファイルにした理由: 新設する関数が 52（「関数の仕様」の表の `新設` の行から、型 13 とファイル 3 を除いて数えた）あり、シグネチャを変える既存の関数が 3 つ（`close_decide.verdict` の引数の名前と返り、`record.write_verification` の引数、`GitHub._read_permission` の返り）あるため（`requirements-design` の「詳細設計を別ファイルにする条件」）。型 `record_decide.Record` と `github.Authored` は項目を足すだけで、既定値を持つので今の呼び出しは変わらない。
 
 構成要素は 2 回のリリース（設計書の決定 9）のどちらで出すかを、小見出しの最初の行の「出す回」に書く。1 回目は閉じる条件の除外と、バージョンの無いリリースとテストの記録、2 回目は種類の既定・モードごとの要否・設定の確かめ・流れの文書である。
 
@@ -342,6 +342,8 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_landed_commit` | `release/record.py` | 新設 | `_landed_commit(hub: GitHub, number: int, production: str, production_sha: str \| None) -> tuple[Pull, str]` | 確かめ 1。`released` の着地の部分を使い、head の名前を問わずに反映したコミットを返す |
 | `_changed_paths` | `release/record.py` | 新設 | `_changed_paths(repo_git: Git, pull: Pull, commit: str, push: Push) -> tuple[frozenset[str], frozenset[str]]` | 「対象を決める変更の範囲」の 2 つの差分（`git diff --name-only --no-renames`、起動 2 回） |
 | `_find_push` | `release/record.py` | 新設 | `_find_push(hub: GitHub, repo_git: Git, production: str, commit: str, known: Push \| None) -> Push` | 既存の記録の `push` があれば使い、無ければ `git rev-list --first-parent`（起動 1 回）と `branch_activity` で決める |
+| `_shared_prefix` | `release/record.py` | 新設 | `_shared_prefix(hub: GitHub, repo_git: Git, number: int, production: str, production_sha: str \| None, compute: Callable[[], Prefix]) -> Prefix` | 設計書の「処理の流れ」の共有の仕方。`<共通の git ディレクトリ>/ndf/release-record/<本番の PR>.json` を `filelock.FileLock` で取り、あれば反映したコミットを照らして使い、無いか違えば `compute` で作って書く |
+| `Prefix` | `release/record.py` | 新設 | `NamedTuple Prefix(commit: str, push: Push \| None, pr_paths: frozenset[str], push_paths: frozenset[str])` | 共有する前処理の結果（配布の結果によらず決まるものだけ） |
 | `_confirm_delivery` | `release/record.py` | 新設 | `_confirm_delivery(hub: GitHub, root: Path, delivery: Mapping, production: str, after: str, observed: bool, wait: bool, now: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep) -> Confirmation` | 「CD の結果の待ち」の 1〜4 を 1 つの配布先で行う。CD の結果は `result.workflow` なら `workflow_runs`、`result.command` なら `_command_result` で読む |
 | `_command_result` | `release/record.py` | 新設 | `_command_result(root: Path, command: str, after: str, deadline: float, now: Callable[[], float] = time.monotonic) -> Mapping` | `{revision}` を `after` に置き換えたコマンドをリポジトリの根で 1 回実行し、終了コード 0・75・1・それ以外を、成功・未完了・失敗・未確定の `run` の形（`status`・`conclusion`）にする（cd-setup.md の契約）。時間の上限は `deadline − now()`（期限までの残り）で、0 以下なら実行せずに未確定を返す |
 | `_observe` | `release/record.py` | 新設 | `_observe(delivery: Mapping, timeout: float) -> tuple[Any, str]` | `observe.url` を `httpx` で 1 回読み、`pointer` の値と読んだ URL を返す |
@@ -411,6 +413,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_write_one` | `Publisher.comment`・`record._require_trusted_writer` | `grep -n "def comment" adapters/publish.py` | 使う |
 | `_candidates` | `record._trusted_bodies` | 同上 | 使えない（全部のコメントの書き手を先に照会する）。手順を変えた別の関数にし、今の `read` は残す |
 | `_command_result` | `result.command` の既存の読み手 | `grep -rn "{revision}" plugins/ndf/src` | 無い（契約は cd-setup.md にだけある）。`subprocess.run` で新設する |
+| `_shared_prefix` | `filelock`（`plugins/ndf/pyproject.toml` の依存）・`Git.common_dir` | `grep -n filelock plugins/ndf/pyproject.toml`・`grep -n "def common_dir" adapters/git.py` | 使う |
 | `_observe` | `httpx`（`plugins/ndf/pyproject.toml` の依存） | `grep -n httpx plugins/ndf/pyproject.toml` | 使う |
 | `glob_matches` | `fnmatch`・`PurePath.full_match` | 標準ライブラリの説明 | 使えない（`fnmatch` の `*` は `/` を越える。`full_match` は 3.13 からで、下限は 3.11） |
 
@@ -421,6 +424,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `_command_result` | 終了コード 0 で成功、1 で失敗 | 75 で未完了、それ以外で未確定。期限までの残りが時間の上限として渡る。残りが 0 なら実行しない | 時間の上限で未確定（実行するのは偽の `subprocess.run`、時刻は偽の `now`。子のプロセスを起動せず、本物の時間を待たない） |
+| `_shared_prefix` | 置き場が無ければ `compute` を 1 回呼んで書き、2 回目は呼ばない | 置き場の反映したコミットが今と違えば作り直す。`complete` で消える | 壊れた置き場は作り直す（ロックとファイルは一時ディレクトリ。子のプロセスを起動しない） |
 | `_confirm_delivery` | 期限の前に CD が成功すれば `cd` | 期限の直前に始めた照会・コマンド・実環境の確認には残り時間だけが上限として渡り、待機は残り時間で切られる | 期限を過ぎたら次の照会をせず `pending`（時刻は偽の `now`、待機は偽の `sleep` で、本物の時間を待たない） |
 | `write_unversioned` | 含めた PR の各々へ書き、作業の PR が無ければ本番の PR へ書く | 同じ引数の打ち直しで CD を照会しない。2 つの配布先の一方だけ完了で `recorded` と `pending` に分ける。並行した同じ引数の 2 回で記録が 1 件に戻る | 確かめ 0〜6 の各行で何も書かない。すべて未確定で `precondition`、書けた配布先が無く失敗があれば `refused` |
 | `correct_targets` | 訂正の記録を足し、前の記録を消さない | 訂正の後、新しい一覧で打ち直した配布先では前のテストの記録が判定に使われる | 宣言がある・記録が無い値で止まる。信用されない token では書かない |

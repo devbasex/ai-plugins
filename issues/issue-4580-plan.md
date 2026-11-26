@@ -74,7 +74,7 @@
 
 #### Task 6: バージョンの無いリリース記録を書く・訂正する
 
-- **対象ファイル:** `plugins/ndf/src/ndf/adapters/github.py`（`branch_activity`・`workflow_runs`・`delete_comment`）、`plugins/ndf/src/ndf/domains/release/record.py`（`Unversioned`・`Outcome`・`write_unversioned`・`correct_targets`・`_landed_commit`・`_changed_paths`・`_find_push`・`_confirm_delivery`・`_command_result`・`_observe`・`_write_one`）、`plugins/ndf/src/ndf/domains/release/cli.py`（`cmd_record`・`_record_args`）、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`（`record` の引数）、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json` と写し（配布先の `paths`・`observe`）、`test_github.py`、`test_release_record.py`
+- **対象ファイル:** `plugins/ndf/src/ndf/adapters/github.py`（`branch_activity`・`workflow_runs`・`delete_comment`）、`plugins/ndf/src/ndf/domains/release/record.py`（`Unversioned`・`Outcome`・`write_unversioned`・`correct_targets`・`_landed_commit`・`_changed_paths`・`_find_push`・`Prefix`・`_shared_prefix`・`_confirm_delivery`・`_command_result`・`_observe`・`_write_one`）、`plugins/ndf/src/ndf/domains/release/cli.py`（`cmd_record`・`_record_args`）、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`（`record` の引数）、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json` と写し（配布先の `paths`・`observe`）、`test_github.py`、`test_release_record.py`
 - **変更内容:** 確かめ 0〜8・書く順の手順 1〜4・`record` の終わり方の表・対象の一覧の訂正
 - **満たす受け入れ条件:** 2・9（書く側）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理。並行した書き込みは偽の GitHub でコメントの順を作って確かめ、実際の待ちと子プロセスを使わない（`tdd-cycle`）
