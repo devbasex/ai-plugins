@@ -136,16 +136,18 @@ contracts/
 | `round_state` | 同上 | 新設 | `(unit_dir: Path) -> RoundState` | `run.json` を持つ最新の回の、結果・マージの結果・`reviewed-head`・`stopped-head` を読む |
 | `resume_of` | 同上 | 新設 | `(state: RoundState, head: str, has_sprint: bool, local_tests: bool) -> Resume` | 打ち直しの扱いを決める（純粋な関数）。`has_sprint` は、`head` がスプリントの作業場所の HEAD を含むか |
 | `unit_run` | 同上 | 新設 | `(ctx: Context, unit: Unit, worktree: Path, round_dir: Path, start: Optional[str]) -> StageRun` | 単位の指示のファイルを書き、`impl` の呼び出し（上書きの値・テンプレート・環境変数）を組む |
-| `merge_unit` | 同上 | 新設 | `(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports: Ports) -> dict` | `ndf ci merge` を打ち、結果の種類を `merge.json` に残す。成功を残してから `take_merged` を呼ぶ |
-| `take_merged` | 同上 | 新設 | `(ctx: Context, merge_sha: str, reviewed: str) -> None` | マージ結果のコミットまでを取り込み、工程の外の変更があれば止める |
+| `merge_unit` | 同上 | 新設 | `(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports: Ports) -> dict` | `pending-merge.json` を書いてから `ndf ci merge` を打ち、結果の種類を `merge.json` に残す。成功なら `take_merged` を呼ぶ |
+| `take_merged` | 同上 | 新設 | `(ctx: Context, merge_sha: str, reviewed: str) -> None` | 工程の外の変更が無いと確かめてから、マージ結果のコミットまでを取り込む |
+| `settle_pending` | 同上 | 新設 | `(ctx: Context) -> None` | `pending-merge.json` の単位がマージ済みなら、マージ結果を確かめて記録を消す |
 | `hold_unreviewed` | 同上 | 新設 | `(ctx: Context, base: str, tip: str) -> NoReturn` | 利用者の確認が要るコミットの範囲を `unreviewed.json` に残して止める |
-| `sprint_pr` | 同上 | 新設 | `(ctx: Context, ports: Ports) -> StageResult` | 先端を確かめ（違えば `hold_unreviewed`）、テンプレート `pr` を push のステップなしで流す |
+| `sprint_pr` | 同上 | 新設 | `(ctx: Context, ports: Ports) -> StageResult` | 先端を確かめ、テンプレート `pr` を push のステップなしで流し、先端をもう一度確かめる（どちらも違えば `hold_unreviewed`） |
 
 - `prepare`
   - 事前条件: `run.per_unit` が真
   - `unreviewed.json` があれば、作業場所を進める前に読む。条件は下の「利用者の確認が要るコミット」にある
+  - 続けて、作業場所を進める前に `settle_pending` を呼ぶ
   - 事後条件: 単位の経路なら、スプリントの作業場所の HEAD が選んだリモートのスプリントブランチと同じになり、`work_dir/units.json` に並びがある。これまでの経路なら `units.json` に経路だけを書き、作業場所は変えない
-  - 副作用: `git fetch`・`ls-remote`・`merge --ff-only`・`push`、課題の本文の一括読み取り（`GitHub.nodes`）
+  - 副作用: `git fetch`・`ls-remote`・`merge --ff-only`・`push`、課題の本文の一括読み取り（`GitHub.nodes`）。`pending-merge.json` があるときは、その単位の `merged_pulls`
 - `run_stage`
   - 事前条件: `units.json` が無いか、`unreviewed.json` があれば、`prepare` を先に呼ぶ
   - 事後条件: `ok` なら全単位がマージ済みの PR を持ち（I5）、スプリントの PR が開いている
@@ -173,6 +175,7 @@ contracts/
 | --- | --- |
 | `<work_dir>/units.json` | `prepare` |
 | `<work_dir>/unreviewed.json` | `hold_unreviewed`。消すのは `prepare` だけで、`clear_values` は残す |
+| `<work_dir>/pending-merge.json`（`branch`・`reviewed`） | `merge_unit`。消す条件は下の「利用者の確認が要るコミット」にある。`clear_values` は残す |
 | `<work_dir>/units/<単位のブランチ>/<回>/unit.md` | `unit_run`（流すたびに書き直す） |
 | 同じディレクトリの `pr-number`・`reviewed-head`・`reviewed-pr` | `impl` のプラン |
 | 同じディレクトリの `stopped-head` | `run_stage`（`impl` が返った直後の HEAD） |
@@ -185,7 +188,7 @@ contracts/
 
 単位 1 つは、次の順で扱う。
 
-1. マージ済みの一覧（開始時に `merged_pulls` で 1 回読む）にあれば、`already_merged` にして次へ進む。ただし最新の回の `merge.json` が `MERGE_ONLY` の単位は、工程がマージを要求した後に（マージキューなどで）マージされたものである。スプリントブランチを取得し、`merge.json` を成功に書き換えてから `take_merged` で確かめる。先に書き換えるのは、利用者が確かめた後の打ち直しで同じ停止を繰り返さないためである
+1. マージ済みの一覧（開始時に `merged_pulls` で 1 回読む）にあれば、`already_merged` にして次へ進む。ただし `pending-merge.json` がその単位を指していれば、先に `settle_pending` を呼ぶ。開始前の確かめの後に、マージキューがマージした場合である
 2. `unit_worktree` で作業場所を用意する。取得し直したスプリントブランチの先端がスプリントの作業場所の HEAD と違えば、`hold_unreviewed` で止まる。同じなら `round_state` を読む
 3. 取り込みの前の HEAD で `resume_of` が `merge` を返せば、手順 6 へ進む（HEAD を変えるとレビューした HEAD と合わなくなる）
 4. `include_sprint` の後の HEAD で `resume_of` を読み直し、`unit_run` を `ports.call_plan` で流す
@@ -194,7 +197,7 @@ contracts/
 
 ### 利用者の確認が要るコミット
 
-工程がスプリントブランチに入れてよいのは、開始時に取り込んだコミットと、単位の PR のマージ結果だけである。ほかの作業場所が足したコミットは単位のレビューを経ていないので、スプリントの PR を開く前に利用者へ判断を戻す。確かめる所は次の 4 つで、基準はスプリントの作業場所の HEAD である。
+工程がスプリントブランチに入れてよいのは、開始時に取り込んだコミットと、単位の PR のマージ結果だけである。ほかの作業場所が足したコミットは単位のレビューを経ていないので、スプリントの PR を開く前に利用者へ判断を戻す。確かめる所は次の 5 つで、基準はスプリントの作業場所の HEAD である。
 
 | 確かめる時点 | 止める条件 |
 | --- | --- |
@@ -202,17 +205,35 @@ contracts/
 | `merge_unit` がマージを打つ前 | 手元のリモート追跡参照（`refs/remotes/<リモート>/<スプリントブランチ>`）が HEAD と違う。`impl` の `base-fetch`・`base-sync` が取得した工程の外の変更を拾う。追加の取得はしない |
 | マージの後（`take_merged`） | リモートの先端がマージ結果のコミットと違う。または、マージ結果のコミットのツリーがレビューした HEAD のツリーと違う（マージの前に別の変更が入った） |
 | スプリントの PR を開く前 | リモートの先端が HEAD と違う |
+| スプリントの PR を作るか再利用した後（取得をもう一度行う） | リモートの先端が HEAD と違う。理由には PR の番号も書く。`gathered` は書かない |
 
-- `take_merged` は、`ndf ci merge` の結果の `merge_sha` まで `git merge --ff-only` で進める。取得した先端までは進めない
+- `take_merged` は、次の順に行う
+  1. スプリントブランチを取得する
+  2. 取得した先端を `merge_sha` と比べ、`merge_sha` のツリーをレビューした HEAD のツリーと比べる
+  3. どちらかが違えば、作業場所の HEAD を変えずに `hold_unreviewed` で止まる
+  4. 両方が一致したときだけ、`merge_sha` まで `git merge --ff-only` で進める
 - `merge_sha` を持たない成功の結果は、確かめられないので `precondition` で止める
-- 工程が後からマージを知った単位（手順 1）の `merge_sha` は `merged_pulls` が返し、`reviewed` はその回の `reviewed-head` である
-- 止めるときは `unreviewed.json` に `base`・`head`・`tip` を書く。`base` は止まる前に工程が確かめていたコミット（`take_merged` では進める前の HEAD）である。停止の理由には、各 SHA、確認するコミットの範囲（`base..tip`）、利用者が含めてよいと答えた後に打つ `ndf progress retry <スプリント> implement --reason <利用者の答え> --accept-tip <tip>` と、続けて打つ `ndf progress next` を書く
+- `settle_pending` が確かめる単位の `merge_sha` は `merged_pulls` が返し、`reviewed` は `pending-merge.json` の値である
+- 止めるときは `unreviewed.json` に `base`・`head`・`tip` を書く。`base` は止まる前に工程が確かめていたコミット（`take_merged` では作業場所の HEAD。進めていないので `head` と同じ）である。停止の理由には、各 SHA、確認するコミットの範囲（`base..tip`）、利用者が含めてよいと答えた後に打つ `ndf progress retry <スプリント> implement --reason <利用者の答え> --accept-tip <tip>` と、続けて打つ `ndf progress next` を書く
 - `prepare` は取得の後、作業場所を進める前に `unreviewed.json` を読む。次の 3 つがそろわなければ、作業場所を変えずに同じ理由で止まる。先端か HEAD が動いていれば、記録を新しい値に書き直して止まる
   - `StageRun.accept_tip` が記録の `tip` と同じ
   - リモートの先端が記録の `tip` と同じ
   - スプリントの作業場所の HEAD が記録の `head` と同じ
 - `prepare` は ff が済んでから記録を消す
 - conductor は利用者の答えを得ずに `--accept-tip` を打たない
+
+**マージの後の確かめが済んでいない単位**: `pending-merge.json` は、工程がマージを要求し、マージ結果をまだ確かめていない単位を表す。取得の失敗などで確かめの前に止まっても、次の打ち直しが確かめから始められるように残す。
+
+- `merge_unit` は `ndf ci merge` を打つ前に書く
+- `merge_unit` は、`ndf ci merge` が結果 JSON で停止を返し、その種類が `MERGE_ONLY` でなければ消す。マージされていないためである。結果 JSON が読めない場合は残す
+- `take_merged` が `merge_sha` まで進めたら消す
+- `settle_pending` は、次の表で扱う。`prepare` では、`unreviewed.json` の扱いの後、作業場所を進める前に呼ぶ
+
+| 記録の単位の状態 | 扱い |
+| --- | --- |
+| 未マージ | 記録を残して先へ進む（マージキューの待ち） |
+| マージ済みで、`merge_sha` が作業場所の HEAD に含まれる | 記録を消す。止まった後に、利用者が `--accept-tip` で確かめて取り込んだ場合である |
+| マージ済みで、上のどちらでもない | `take_merged` で確かめる。通れば記録を消す |
 
 `resume_of` の判定表（上の行を先に当てる）:
 
@@ -246,7 +267,7 @@ contracts/
 | `run_stage` | `impl` が `ok` でない | 止める（`impl` の種類のまま。`retry_after` も引き継ぐ） | 単位の名前・課題・PR の番号・`impl` の理由。ステップ `ci` なら待つチェックのキー | `stopped-head` を書く |
 | `merge_unit` | `pr-number` か `reviewed-head` が無い | 止める（`precondition`） | 単位の名前 | マージを打たない |
 | `merge_unit` | `ndf ci merge` が `ok` でない・結果 JSON が読めない | 止める（コマンドの種類。読めなければ `bad_report`） | 単位の名前・PR の番号・理由 | `merge.json` に種類を残す |
-| `merge_unit`・`sprint_pr` | 取得か ff の失敗 | 止める（`precondition`） | git の理由 | — |
+| `merge_unit`・`settle_pending`・`sprint_pr` | 取得か ff の失敗 | 止める（`precondition`） | git の理由 | `pending-merge.json` は残し、打ち直しで確かめ直す |
 | `prepare`・単位の手順 2・`merge_unit`・`take_merged` | 「利用者の確認が要るコミット」の条件に当たる | 止める（`precondition`） | 上のセクションの内容 | `unreviewed.json` を書く |
 | `sprint_pr` | リモートの先端が HEAD と違う | 止める（`precondition`） | 「利用者の確認が要るコミット」の内容。手元にだけあるコミットの範囲も書く | `unreviewed.json` を書く。取り込みも push もしない |
 | `sprint_pr` | テンプレート `pr` が `ok` でない | 止める（返った種類と `gaps`） | 理由 | 単位はやり直さない |
@@ -290,7 +311,8 @@ contracts/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `prepare` | 単位の経路・これまでの経路 | リモートにブランチが無い、手元が遅れてリモートに単位がある | 異常系の表の `prepare` の各行 |
-| `take_merged`・`hold_unreviewed` | マージ結果まで進む | squash のマージでもツリーが一致する | マージの後と前の工程の外のコミット、`merge_sha` が無い、`accept_tip` が無い・違う、確認の後に先端が動く |
+| `take_merged`・`hold_unreviewed` | 2 つの比較が一致すればマージ結果まで進む | squash のマージでもツリーが一致する | マージの後と前の工程の外のコミット（作業場所の HEAD は変わらない）、`merge_sha` が無い、`accept_tip` が無い・違う、確認の後に先端が動く |
+| `settle_pending` | マージ済みなら確かめて記録を消す | 未マージなら記録を残す、`merge_sha` が作業場所の HEAD に含まれる | 工程の外のコミットがあれば止まり、記録を残す |
 | `run_stage` | 順に流して `ok`、飛ばした単位は `already_merged` | 単位 1 つ | 途中の失敗で後を呼ばない |
 | `released_branches` | 4 つのキーから集める | `channels`・`deliveries` が無い | — |
 | `unit_branch` | 同じ入力は同じ名前 | 日本語の単位の名前 | — |
@@ -298,7 +320,7 @@ contracts/
 | `round_state`・`resume_of` | 判定表の各行 | `run.json` の無い空の回は数えない、`stopped_head` が無い | — |
 | `unit_run` | 上書きの値と環境変数 | 補った単位は `unit_file` が空 | 作成者を信用しない |
 | `merge_unit` | `--repo`・`--pr`・`--base`・`--reviewed` を渡す | マージキューの待ち | ファイルの欠け |
-| `sprint_pr` | `push`・`fix-push` の無いプラン、`GH_REPO` | 開いた PR がある | 先端の違い・`Refs` の欠け |
+| `sprint_pr` | `push`・`fix-push` の無いプラン、`GH_REPO` | 開いた PR がある | 開く前と後の先端の違い・`Refs` の欠け |
 
 ## 工程から作業を呼ぶ層
 
@@ -330,7 +352,7 @@ contracts/
 | `plan_start` | 同上 | 変更 | 変えない | `impl` で `pr-number` が無いときの開始点を `pr` にする（下の箇条書き） |
 | `plan_argv` | 同上 | 変更 | 変えない | `plan_start` が None なら `run.start` を使う |
 | `_call_plan` | 同上 | 変更 | 変えない | `run.env(run.env_extra)` で子を打つ。`plan_failure` は `UnitsStopped` を分ける |
-| `clear_values` | 同上 | 変更 | 変えない | `units.json` と、`units/` の下のすべての `values.json` も消す。回の記録と `merge.json` は残す |
+| `clear_values` | 同上 | 変更 | 変えない | `units.json` と、`units/` の下のすべての `values.json` も消す。回の記録、`merge.json`、`pending-merge.json` は残す |
 | `issue_text` | `progress/issue_copies.py` | 変更 | `(location: Path, number: int, repo: Optional[str] = None) -> Optional[tuple[str, str]]` | `repo` があればそのリポジトリから読み、権限もそこで確かめる |
 | `issue_values` | 同上 | 変更 | `(run, work_dir, location, *, number: Optional[int] = None, repo: Optional[str] = None) -> Optional[dict]` | 課題とリポジトリの組のコピーを使い回す。省けば今のとおり番号の最小の課題 |
 
