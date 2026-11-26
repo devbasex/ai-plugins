@@ -40,3 +40,7 @@ cross-review / cross-refactoring が参加者の CLI を選び、起動し、監
 | 既定のモデルへの切り替え | `default_models` | 引数で明示していないモデルを引けない CLI を、既定のモデルで担当に入れること（participants.default_models） | — | — | `docs/specifications/cross-participant-admission-check.md` |
 | 相手役 | — | cross-review のレビュー担当、cross-refactoring の提案・実装の担当として、ホストから CLI プロセスで起動されるランタイム（#2231） | — | — | `docs/specifications/ndf-distribution-runtimes.md` |
 | 下限（外部 CLI の） | — | NDF が動くために要る外部 CLI と本体（gh・claude・codex）の最も古いバージョン。NDF は起動の前に比べ、古ければ起動しない | — | — | `docs/specifications/dependency-updates-renovate-and-supply-chain.md` |
+| 起動の設定 | — | NDF が AI を起動するときの、リポジトリごとの指定を持つ .ndf/launch.json。工程ごとの MCP と追加の Tool を持つ | — | — | `issues/issue-1959-design.md` |
+| モデルと effort の対応表 | — | 層・名前・ランタイムから、起動のモデルと effort を引く NDF の表 | — | — | `issues/issue-2944-design.md` |
+| 値の出所 | — | 起動のモデルか effort を決めた元（引数・環境変数・リポジトリの設定・対応表・指定なし） | — | — | `issues/issue-2944-design.md` |
+| 値の引き上げ | — | 失敗の後の修正の起動で、モデルか effort を 1 つ上にすること | — | — | `issues/issue-2944-design.md` |
