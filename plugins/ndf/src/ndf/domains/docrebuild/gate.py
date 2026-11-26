@@ -591,9 +591,10 @@ def drive_gate(
         if plan.targets:
             out, result_file = drive.run_worker_at(args.state_dir, args.cwd, WORK_KIND, gate_prompt(run, plan, write_facts(run)), runner)
             log.info("読み手役の worker が終えた", extra={"worker_status": out.get("status")})
-            if out.get("status") != result.OK:
-                return drive._worker_stopped(out)
-            found = verify_worker(run, plan, drive._read_report(result_file))
+            stopped, report = drive.worker_report(out, result_file)
+            if stopped is not None:
+                return stopped
+            found = verify_worker(run, plan, report)
         return complete_check(run, plan, found)
     except Incomplete as exc:
         return result.stopped(TOOL, exc.kind, exc.detail, gaps=exc.gaps)

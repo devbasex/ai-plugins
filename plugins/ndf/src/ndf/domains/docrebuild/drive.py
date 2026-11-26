@@ -246,13 +246,11 @@ def _worker_result(done: subprocess.CompletedProcess[str]) -> dict[str, Any]:
     return got
 
 
-def run_worker(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]:
-    """起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と worker の結果ファイルのパスを返す。"""
-    return run_worker_at(args.state_dir, args.cwd, WORK_KIND, prompt, runner)
-
-
 def run_worker_at(state_dir: Path, cwd: Path, kind: str, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]:
-    """`run_worker` の本体。保存先 `state_dir` と `ndf worker run --kind` の値 `kind` を引数に取る（gate も使う）。"""
+    """起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と worker の結果ファイルのパスを返す。
+
+    保存先は `state_dir`、`ndf worker run --kind` の値は `kind`（gate も使う）。
+    """
     prompt_file = state_dir / f"{kind}.prompt.md"
     result_file = state_dir / f"{kind}.result.json"
     try:
@@ -429,6 +427,16 @@ def _read_report(path: Path) -> dict[str, Any]:
     return report
 
 
+def worker_report(out: Mapping[str, Any], result_file: Path) -> tuple[Optional[dict[str, Any]], dict[str, Any]]:
+    """worker の状態を確かめ、(`stopped` の結果, 結果ファイルの中身) を返す。
+
+    `ok` で終えていれば前者は None。そうでなければ結果ファイルは読まず後者は空。読めなければ `BadReport`。
+    """
+    if out.get("status") != result.OK:
+        return _worker_stopped(out), {}
+    return None, _read_report(result_file)
+
+
 def _reader_summary(
     raw: Any, targets: Sequence[Target], skipped: Sequence[str]
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]], list[str]]:
@@ -540,12 +548,12 @@ def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner:
             summary = f"組み直す文書が無い（種類: {'・'.join(args.kinds)}・起点: {ref}）"
             return result.result(TOOL, result.OK, summary, [], {"targets": []}, warnings=chosen.skipped)
         prompt = prompt_text(chosen.targets, requirements_of(args.cwd, chosen.targets), _root() / SKILL)
-        out, result_file = run_worker(args, prompt, runner)
+        out, result_file = run_worker_at(args.state_dir, args.cwd, WORK_KIND, prompt, runner)
         attempts = out["metrics"].get("attempts") if isinstance(out.get("metrics"), dict) else None
         log.info("組み直す worker が終えた", extra={"worker_status": out.get("status"), "attempts": attempts})
-        if out.get("status") != result.OK:
-            return _worker_stopped(out)
-        report = _read_report(result_file)
+        stopped, report = worker_report(out, result_file)
+        if stopped is not None:
+            return stopped
         got = _checked(report, chosen.targets, chosen.skipped)
         if got["status"] == result.OK:
             record_reads(g, checked_out(g), report, chosen.targets, remote=args.remote)
