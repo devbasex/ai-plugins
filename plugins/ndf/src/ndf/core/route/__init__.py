@@ -257,13 +257,17 @@ def expanded(t: Template, *, local_tests: bool = True) -> dict[str, Any]:
     return plan if local_tests else without_steps(plan, LOCAL_TEST_STEPS)
 
 
+def _plain_next(found: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+    """ステップの id → 通常の遷移先（そのステップの `next`、無ければ並びの次。末尾は終了）。"""
+    ids = [str(s["id"]) for s in found]
+    return {i: str(s["next"]) if "next" in s else after for i, s, after in zip(ids, found, [*ids[1:], END])}
+
+
 def _successors(found: Sequence[Mapping[str, Any]], drop: frozenset[str]) -> dict[str, str]:
     """外すステップの id → 代わりのルート（そのステップの `next`、無ければ並びの次。外すステップが続けば辿る）。"""
-    ids = [str(s["id"]) for s in found]
-    following = [*ids[1:], END]
-    plain = {i: str(s["next"]) if "next" in s else after for i, s, after in zip(ids, found, following)}
+    plain = _plain_next(found)
     out: dict[str, str] = {}
-    for i in (x for x in ids if x in drop):
+    for i in (x for x in plain if x in drop):
         target = plain[i]
         while target in drop and target != i:
             target = plain[target]
@@ -294,6 +298,35 @@ def without_steps(plan: Mapping[str, Any], ids: Iterable[str]) -> dict[str, Any]
     found = list(plan["steps"])
     moved = _successors(found, drop)
     return {**plan, "steps": [_retarget(s, moved) for s in found if s["id"] not in drop]}
+
+
+def may_read_pr_number(plan: Mapping[str, Any], start: str, writer: str) -> bool:
+    """`start` から流すと、番号を保存する `writer` のステップを通らずに、PR の番号を読むステップへ進みうるか。
+
+    番号を読むのは、引数が `PR_NUMBER_FILE` を持つステップと、レビュー（`{{review}}`）のステップである。プランに無い
+    `start` は、読みうるとみなす。
+    """
+    steps = {str(s["id"]): s for s in plan["steps"]}
+    if start not in steps:
+        return True
+    plain = _plain_next(plan["steps"])
+    seen, todo = {writer}, [start]
+    while todo:
+        sid = todo.pop()
+        if sid in seen or sid not in steps:
+            continue
+        seen.add(sid)
+        step = steps[sid]
+        text = json.dumps(step, ensure_ascii=False)
+        if PR_NUMBER_FILE in text or "{{review}}" in text:
+            return True
+        todo.append(plain[sid])
+        if "on_fail" in step:
+            todo.append(step["on_fail"])
+        for key in TARGET_TABLE_KEYS:
+            if key in step:
+                todo.extend(step[key].values())
+    return False
 
 
 def unit_template(t: Template, repo: str, drop: Collection[str]) -> Template:

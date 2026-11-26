@@ -54,6 +54,8 @@ class StageDef:
     optional_inputs: tuple[str, ...] = ()
     input_ref: Optional[str] = None
     output_ref: Optional[str] = None
+    # 実装計画のレビューの単位ごとに流す工程（#4369）
+    per_unit: bool = False
 
     @property
     def gates(self) -> tuple[str, ...]:

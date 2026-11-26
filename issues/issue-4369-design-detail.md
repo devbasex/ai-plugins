@@ -297,7 +297,7 @@ contracts/
 | `invoke` | 同上 | 変更 | 変えない | `per_unit` なら `units_invoke.run_stage` を呼び、None なら `run.plain()` で今のまま |
 | `template_values` | 同上 | 変更 | 変えない | `overrides` の名前は出所の表から求めない |
 | `plan_path` | 同上 | 変更 | 変えない | `_prepared` が返すテンプレートを描画する |
-| `plan_start` | 同上 | 変更 | 変えない | `impl` で `pr-number` が無いときの開始点を `pr` にする（下の箇条書き） |
+| `plan_start` | 同上 | 変更 | 変えない | `impl` で `pr-number` が無く、番号を読むステップへ `pr` を通らずに進みうる開始点を `pr` にする（下の箇条書き） |
 | `plan_argv` | 同上 | 変更 | 変えない | `plan_start` が None なら `run.start` を使う |
 | `_call_plan` | 同上 | 変更 | 変えない | `run.env(run.env_extra)` で子を打つ。`plan_failure` は `UnitsStopped` を分ける |
 | `clear_values` | 同上 | 変更 | 変えない | `units.json` と、`units/` の下のすべての `values.json` も消す。回の記録と `merge.json` は残す |
@@ -305,9 +305,11 @@ contracts/
 | `issue_values` | 同上 | 変更 | `(run, work_dir, location, *, number: Optional[int] = None, repo: Optional[str] = None) -> Optional[dict]` | 課題とリポジトリの組のコピーを使い回す。省けば今のとおり番号の最小の課題 |
 
 - 上書きのテンプレート: `prepare_plan`・`_prepared`・`plan_path` は、同じ 1 つのテンプレート（`run.template`、無ければ `template(run.name)`）を使う。差し込みの欠けの検査（`needed`）と作業の入力の検査（`kinds_of`）も、このテンプレートから求める。`_prepared` が `template(run.name)` を返すと、打ち直しで外した `done-check` や `ci` が戻る
-- `pr-number` の無い実行の記録: この変更より前に始めた `impl` は、PR を作った後で止まっていても番号を持たない。単位の経路でない `impl` も同じである。`plan_start` は、決めた開始点が `pr` を通らずに先へ進むステップで、保存先に `pr-number` が無ければ、`pr` を返す。`pr` の `probe` が開いた PR を探して番号を書き、続くステップを順に流す。レビューは 1 回やり直しになる
-  - `pr` を通るので開始点を変えないステップ: `done-check`・`work`・`acceptance`・`test`・`fix`・`test-repeat`・`push`・`pr`・`fix-push`・`base-sync`・`fix-base`
-  - 上のほかのステップ（`conflict-check`・`ci` など）は `pr` に置き換える
+- `pr-number` の無い実行の記録: この変更より前に始めた `impl` は、PR を作った後で止まっていても番号を持たない。単位の経路でない `impl` も同じである。`plan_start` は、保存先に `pr-number` が無く、決めた開始点から `pr` を通らずに番号を読むステップへ進みうるなら、`pr` を返す。`pr` の `probe` が開いた PR を探して番号を書き、続くステップを順に流す。レビューは 1 回やり直しになる
+  - 進みうるかは、`impl` のテンプレートの遷移を辿る `route.may_read_pr_number` で決める。ステップの一覧を `invoke.py` に写さない
+  - 開始点を変えないステップ: `pr` を通ってから番号を読むもの（`done-check`・`work`・`acceptance`・`test`・`fix`・`test-repeat`・`push`・`pr`・`fix-push`・`base-sync`・`fix-base`）と、番号を読まずに終わる `resolved`。`resolved` を `pr` に置き換えると、マージ済みのブランチに `pr` のステップが新しい PR を作ることがある
+  - 上のほかのステップ（`conflict-check`・`ci`・`head-reviewed` など）は `pr` に置き換える。`head-reviewed` は、HEAD がレビューした HEAD と違えば `review-delta` で番号を読む
+  - 採らない案: 番号の書き戻し（打ち直しの前やステップの直前に開いた PR を探して番号を書く）。プランの実行エンジンに新しいステップの機能が要り、対象はこの変更の前に始めて PR の作成後に止まった実行だけである。レビュー 1 回のやり直しで足りる
 - `issue_values`
   - 事後条件: 題のコピーは `{"title", "repo"}`。`repo` が違うコピーは使わない
   - 副作用: 読み直すときは、題のコピーを消す → 本文を書く → 題のコピーを書く、の順にする
@@ -329,7 +331,7 @@ contracts/
 | --- | --- | --- | --- |
 | `prepare_plan`・`invoke` | 経路の分かれ。これまでの経路の `values.json` と `--set` に `branch` が足されない | `per_unit` の無い定義 | `UnitsStopped` の結果 |
 | `plan_argv` | 記録が無ければ `--from <start>` | 止まった回は止まったステップから | — |
-| `plan_start` | `pr-number` があれば止まったステップから | `pr-number` が無く `conflict-check`・`ci` で止まった回は `pr` から。`test` で止まった回は `test` から | — |
+| `plan_start` | `pr-number` があれば止まったステップから | `pr-number` が無く `conflict-check`・`ci` で止まった回は `pr` から。`test` で止まった回は `test` から、`resolved` で止まった回は `resolved` から | — |
 | `_prepared` | `values.json` を使い回しても上書きのテンプレートを返す | 上書きが無ければ今のまま | — |
 | `clear_values` | 単位の `values.json` を消す | `units/` が無い | — |
 | `issue_values` | 指定した課題とリポジトリ | 別のリポジトリの同じ番号のコピー、題のコピーが無い中断 | 権限なし |
@@ -356,6 +358,7 @@ contracts/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `unit_template` | `core/route/__init__.py` | 新設 | `(t: Template, repo: str, drop: Collection[str]) -> Template` | `use` を開き、`drop` のステップを外し（`without_steps`）、残るステップ `ci` の引数の末尾に `--repo <repo>` を足したテンプレートを返す |
+| `may_read_pr_number` | 同上 | 新設 | `(plan: Mapping[str, Any], start: str, writer: str) -> bool` | `start` から `writer` を通らずに、PR の番号を読むステップ（引数が `pr-number` を持つものと、レビュー）へ進みうるか |
 | `unit_review_launch` | 同上 | 新設 | `(repo: str, command: Sequence[str]) -> list[str]` | レビューの起動を、照合するラッパー（`UNIT_REVIEW`）経由にする |
 | `review_launch` | 同上 | 変更 | 変えない | `impl` では、PR の番号をブランチから引かず `{state_dir}/pr-number` から読むラッパーにする |
 | `Outcome`・`_after_stop` | `core/plan/transition_decide.py` | 変更 | `Outcome` に `summary: Optional[str] = None` を足す | 停止の説明の末尾にステップの `summary` を足す |
@@ -375,7 +378,7 @@ contracts/
 
 | ファイル・ステップ | 変える中身 |
 | --- | --- |
-| `parts/steps.json` の `pr` | `run` は番号を `gh pr create` の出力の URL の末尾から取り、`{state_dir}/pr-number` へ書く。`probe` は head と `{{base}}` で絞り、`isCrossRepository` の PR を除き、見つけた番号を同じファイルへ書く |
+| `parts/steps.json` の `pr` | `run` は番号を `gh pr create` の出力の URL の末尾から取り、`{state_dir}/pr-number` へ書く。`probe` は head と `{{base}}` で絞り、`isCrossRepository` の PR を除き、見つけた番号を同じファイルへ書く。照会か書き込みに失敗すれば、理由を持つ結果 JSON を出して終了コード 2 で止まる。開いた PR が無いとき（終了コード 1）と分ける |
 | `parts/steps.json` の `ci` | PR の番号の取り方をキー `pr_source` に分ける。番号を出力するコマンド（`command`）と、その引数（`arg`）を持つ（決定 17） |
 | `impl.json` の `conflict-check`・`ci` | 番号を `{state_dir}/pr-number` から読む。`conflict-check` は `run` を上書きし、`ci` は `pr_source` だけを上書きする。失敗時の終わり方は表の下に示す |
 | `impl.json` のプランの最上位 | `"unit_file": "{{unit_file}}"` のキーを足す（`core/plan/model.parse` は知らないキーを読まない。差し込みを使わないとテンプレートの検査が落ちる） |

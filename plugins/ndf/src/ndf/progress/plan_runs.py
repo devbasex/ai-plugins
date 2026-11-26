@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Optional
 
 from ndf.contracts import result
-from ndf.core import durable
+from ndf.core import durable, route
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 
@@ -37,6 +37,21 @@ class StageRun:
     approved: Optional[dict[str, Any]] = None
     # 工程が承認ゲートを持つか（light の設計のように持たない工程のマージは、承認をデプロイへ先送りする。#4409）
     gated: bool = False
+    # 以下は工程を単位ごとに流すための欄（#4369）。既定のままの呼び出しは、欄が無いときと同じに動く
+    # 工程の定義の `per_unit`
+    per_unit: bool = False
+    # 出所の表（`invoke.FILL_SOURCES`）と工程の入力より先に置く差し込みの値
+    overrides: Mapping[str, route.Value] = field(default_factory=dict)
+    # `route.templates()` の `name` の代わりに描画するテンプレート
+    template: Optional[route.Template] = None
+    # プランの子の環境へ足す変数
+    env_extra: Mapping[str, str] = field(default_factory=dict)
+    # 前の回の開始点が無いときの `--from`
+    start: Optional[str] = None
+
+    def plain(self) -> StageRun:
+        """単位に分けない呼び出し。入力の `branch` は除く（残すと差し込みの `branch` になり、作業場所の今のブランチを使わない）。"""
+        return replace(self, per_unit=False, inputs={k: v for k, v in self.inputs.items() if k != "branch"})
 
     def env(self, extra: Mapping[str, str]) -> dict[str, str]:
         out = {**os.environ, **extra}

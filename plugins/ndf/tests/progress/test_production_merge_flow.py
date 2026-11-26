@@ -81,7 +81,7 @@ def _flow(repo: Path, monkeypatch, hub: merge_hub.MergeHub) -> SimpleNamespace:
     patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "merge")
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
 
     class FakeGit:
         def __init__(self, *_: object) -> None:

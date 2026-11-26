@@ -348,6 +348,15 @@ def test_pr_probe_does_not_take_a_pr_of_a_fork_alone(tmp_path):
     assert not (state / "pr-number").exists()
 
 
+def test_pr_probe_does_not_read_a_failed_listing_as_no_pr(tmp_path):
+    # 照会の失敗を「開いた PR が無い」（終了コード 1）にすると、プランの実行が PR を作りに進む
+    step = step_of(plan_of("implement"), "pr")
+    state = _state(tmp_path)
+    done = _probe_of(step, tmp_path, _recording_gh(tmp_path, "exit 1"), state)
+    assert (done.returncode, json.loads(done.stdout)["status"]) == (2, "stopped")
+    assert not (state / "pr-number").exists()
+
+
 def test_pull_request_template_probe_skips_fork_prs(tmp_path):
     step = step_of(plan_of("pull_request", refs=[]), "pr")
     done = _probe_of(step, tmp_path, _listing_gh(tmp_path, _PR_LIST), _state(tmp_path))

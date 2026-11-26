@@ -1,7 +1,7 @@
 """工程の差し込みのうち課題から写す値（`title`・`body_file`・`issue`）と、その写しの後始末（`ndf.progress.invoke` から分けた）。
 
 課題の題と本文は試行ごとにプランの実行の保存先へ初回に 1 度だけ写し、同じ試行の以後の呼び出しは写しを使う。
-新しい試行の始まりに `clear_values` が写しと差し込みの値を消す。
+新しい試行の始まりに `clear_values` が写しと差し込みの値（単位ごとの保存先の分と単位の並びを含む）を消す。
 """
 
 from __future__ import annotations
@@ -21,14 +21,17 @@ ISSUE_BODY_FILE = "issue-{number}-body.md"
 ISSUE_TITLE_FILE = "issue-{number}-title.json"
 # 試行の始まりに消す、前の試行が保存先に残した課題の題・本文のコピー（差し込みの値 `VALUES_FILE` と一緒に消す）
 ISSUE_COPIES = (ISSUE_BODY_FILE.format(number="*"), ISSUE_TITLE_FILE.format(number="*"))
+# 工程を単位ごとに流すときの、単位の並びのファイルと、単位ごとの実行の保存先を置くディレクトリ（工程の保存先の下。#4369）
+UNITS_FILE = "units.json"
+UNITS_DIR = "units"
 
 
-def issue_text(location: Path, number: int) -> Optional[tuple[str, str]]:
-    """課題の題と本文（作業場所のリモートの GitHub から読む）。テストが差し替える。
+def issue_text(location: Path, number: int, repo: Optional[str] = None) -> Optional[tuple[str, str]]:
+    """課題の題と本文（`repo`、省けば作業場所のリモートの GitHub から読み、書き手の権限もそこで確かめる）。テストが差し替える。
 
     書き手を信用しない（`GitHub.trusts` が偽。#3364）なら None。本文は作業の入力として指示に読まれるためである。
     """
-    hub = github.GitHub(git.Git(location).remote_repo(), github.client())
+    hub = github.GitHub(repo if repo is not None else git.Git(location).remote_repo(), github.client())
     title, authored = hub.issue_text(number)
     return (title, authored.body) if hub.trusts(authored) else None
 
@@ -39,8 +42,14 @@ def issue_numbers(inputs: Mapping[str, Any]) -> list[str]:
     return [str(n) for n in sorted(int(n) for n in issues)] if isinstance(issues, list) else []
 
 
-def issue_values(inputs: Mapping[str, Any], work_dir: Path, location: Path) -> Optional[dict[str, route.Value]]:
+def issue_values(
+    inputs: Mapping[str, Any], work_dir: Path, location: Path, *, number: Optional[int] = None, repo: Optional[str] = None
+) -> Optional[dict[str, route.Value]]:
     """代表の課題の題（title）・本文を書いたファイル（body_file）・番号（issue）。課題が 1 つも無ければ空。
+
+    `number`・`repo` を渡せば、その課題をそのリポジトリから読む（#4369）。題のコピーは読んだ `repo` も持ち、`repo` の違う
+    コピーは使わずに読み直す。読み直すときは題のコピーを消してから本文、題のコピーの順に書き、途中で止まっても前の題と
+    新しい本文を組にしない。
 
     課題が 2 件以上なら、番号の最も小さい課題を代表にする（#3908 の決定 7。実装のフェーズの単位の決まりと同じ選び方で、
     PR の題と本文は代表の課題のものになる）。受け入れ条件の確かめはすべての課題を検証する（`route.launch_values`）。
@@ -60,27 +69,30 @@ def issue_values(inputs: Mapping[str, Any], work_dir: Path, location: Path) -> O
     返す前に、コピーの名前と保存先から根までのどの項目もほかの利用者が差し替えられないことを確かめる
     （`worker_paths.check_unshared`。差し替えられれば `EntryUnsafe`（`shared`）で止め、確かめたコピーと別の本文を送らない）。
     """
-    issues = issue_numbers(inputs)
-    if not issues:
-        return {}
-    number = int(issues[0])
+    if number is None:
+        issues = issue_numbers(inputs)
+        if not issues:
+            return {}
+        number = int(issues[0])
     out_name, copy_name = ISSUE_BODY_FILE.format(number=number), ISSUE_TITLE_FILE.format(number=number)
     with worker_paths.open_or_create(work_dir) as wd:
         out = wd.path / out_name
-        title = _held_title(wd, copy_name, out_name)
+        title = _held_title(wd, copy_name, out_name, repo)
         if title is None:
-            found = issue_text(location, number)
+            found = issue_text(location, number, repo)
             if found is None:
                 return None
             title, body = found
+            worker_paths.remove_file(wd, copy_name)
             worker_paths.write_file(wd, out_name, body, private=True)
-            worker_paths.write_file(wd, copy_name, json.dumps({"title": title}, ensure_ascii=False), private=True)
+            worker_paths.write_file(wd, copy_name, json.dumps({"title": title, "repo": repo}, ensure_ascii=False), private=True)
         worker_paths.check_unshared(wd, out_name)
     return {"title": title, "body_file": str(out), "issue": str(number)}
 
 
-def _held_title(wd: worker_paths.WorkDir, copy_name: str, body_name: str) -> Optional[str]:
-    """同じ試行がコピーした題。題のコピーと本文のコピーがそろい、どちらも呼んだ利用者の私有のファイルなら題、そろわなければ None。
+def _held_title(wd: worker_paths.WorkDir, copy_name: str, body_name: str, repo: Optional[str]) -> Optional[str]:
+    """同じ試行が `repo` からコピーした題。題のコピーと本文のコピーがそろい、どちらも呼んだ利用者の私有のファイルなら題、
+    そろわないか、別のリポジトリのコピーなら None。
 
     私有でないコピー（別の利用者が持つ・書き込める・リンク）は `worker_paths.EntryUnsafe` を上げ、読み直して上書きしない。
     """
@@ -91,7 +103,9 @@ def _held_title(wd: worker_paths.WorkDir, copy_name: str, body_name: str) -> Opt
         held = json.loads(text)
     except json.JSONDecodeError:  # noqa: NDF401 ファイル: 書きかけ・壊れたコピーは無いものとして読み直す
         return None
-    return held["title"] if isinstance(held, dict) and isinstance(held.get("title"), str) else None
+    if not isinstance(held, dict) or held.get("repo") != repo:
+        return None
+    return held["title"] if isinstance(held.get("title"), str) else None
 
 
 def clear_values(state_dirs: Iterable[Path]) -> None:
@@ -101,10 +115,13 @@ def clear_values(state_dirs: Iterable[Path]) -> None:
     `issue_values` がコピーを優先し、新しい試行が GitHub で直した題・本文を使わず、作成者の権限も確かめ直さない
     （前の試行の後で write 権限を失った作成者の本文を worker に読ませる。PR 4289 の指摘）。
     マージの方式を決められずに止まった目印（`merge_pending.PENDING_FILE`）は消さない（打ち直しが方式を先に問うため）。
+    工程を単位ごとに流した保存先は、単位の並び（`UNITS_FILE`）と、`UNITS_DIR` の下のすべての単位の差し込みの値と課題の
+    コピーも消す。単位の回の記録とマージの結果は残す（打ち直しが再開の位置を決める。#4369）。
     消せなければ `OSError` をそのまま上げる（呼び手の `progress.run._prepare` が precondition にする）。
     """
     for state_dir in state_dirs:
-        for pattern in ISSUE_COPIES:
-            for found in state_dir.glob(pattern):
+        units = state_dir / UNITS_DIR
+        for pattern in (*ISSUE_COPIES, VALUES_FILE):
+            for found in (*state_dir.glob(pattern), *units.rglob(pattern)):
                 found.unlink(missing_ok=True)
-        (state_dir / VALUES_FILE).unlink(missing_ok=True)
+        (state_dir / UNITS_FILE).unlink(missing_ok=True)
