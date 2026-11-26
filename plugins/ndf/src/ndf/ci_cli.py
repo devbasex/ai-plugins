@@ -226,9 +226,7 @@ def _pr_target(hub: GitHub, pull: Pull) -> merge_approval.MergeTarget:
 
 def _verdict_of(hub: GitHub, base: str, text: Optional[str], repo: str) -> Verdict:
     """マージ先の設定の本文の判定。読めない・別のリポジトリから読んだなら `UNKNOWN`。"""
-    if not github_mod.same_repo(repo, hub.repo):
-        return Verdict.UNKNOWN
-    return production_merge.judge_project_text(text, base)
+    return production_merge.judge_project_text(text, base, source_repo=repo, repo=hub.repo)
 
 
 def _judge_pr(hub: GitHub, pull: Pull) -> tuple[Verdict, Optional[str]]:

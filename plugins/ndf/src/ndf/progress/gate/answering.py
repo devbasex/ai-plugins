@@ -82,8 +82,8 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
         sha = material_sha256(path) if path.exists() else None
         if pull is None or found is None:
             return Target(head, sha)
-        verdict = production_merge.judge_project_text(found.text, pull.base_ref) if found.repo.lower() == hub.repo.lower() else None
-        production = production_merge.reaches_production(verdict if verdict is not None else production_merge.Verdict.UNKNOWN)
+        verdict = production_merge.judge_project_text(found.text, pull.base_ref, source_repo=found.repo, repo=hub.repo)
+        production = production_merge.reaches_production(verdict)
         return Target(head, sha, hub.repo, pull.number, pull.base_ref, production)
 
     return observe

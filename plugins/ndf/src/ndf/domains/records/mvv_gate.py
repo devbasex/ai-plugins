@@ -460,8 +460,7 @@ def _target(hub: GitHub, pull: Pull) -> dict[str, Any]:
 
     マージ先の設定の読み取り（GraphQL 1 回）は、承認ゲートを省く判定でだけ打つ（設計の費用表の増分に記録する）。"""
     found = hub.branch_file(pull.base_ref, production_merge.PROJECT_FILE)
-    same = found.repo.lower() == hub.repo.lower()
-    verdict = production_merge.judge_project_text(found.text, pull.base_ref) if same else production_merge.Verdict.UNKNOWN
+    verdict = production_merge.judge_project_text(found.text, pull.base_ref, source_repo=found.repo, repo=hub.repo)
     production = production_merge.reaches_production(verdict)
     return {"repo": hub.repo, "pr": pull.number, "base": pull.base_ref, "head": pull.head_sha, "production": production}
 

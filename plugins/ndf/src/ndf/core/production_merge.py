@@ -75,9 +75,12 @@ def judge(section: object, base: str) -> Verdict:
     return automatic_rows(section)
 
 
-def judge_project_text(text: Optional[str], base: str) -> Verdict:
-    """マージ先のブランチの設定のファイルの本文 `text`（無ければ None）での `judge`。読めなければ `UNKNOWN`。"""
-    if text is None:
+def judge_project_text(text: Optional[str], base: str, *, source_repo: str, repo: str) -> Verdict:
+    """マージ先のブランチの設定のファイルの本文 `text`（無ければ None）での `judge`。読めなければ `UNKNOWN`。
+
+    本文を読んだリポジトリ `source_repo` が対象のリポジトリ `repo` と違うときも `UNKNOWN`（大文字小文字は区別しない）。
+    """
+    if source_repo.lower() != repo.lower() or text is None:
         return Verdict.UNKNOWN
     try:
         data = json.loads(text)
