@@ -126,10 +126,16 @@ plugins/ndf/
   - 事前条件: `v` は同じ工程の事象を持つステートマシンの読み取り
   - 事後条件: 設計文書の「記録済みの値の読み方」の手順 1〜4 の結果を返す。値が無ければ `None`
   - 副作用: 無し（読むだけ）
-- 選ぶ回答は `payload.kind == LISTEN` かつ `payload.gate == RELEASE_GATE`（`gate/asking.py`。値は `release`）の最後の `answered` である。worker の判断の求めへの回答は、プランを呼ぶステップ `release` への回答なので、`kind` が `plan` で `gate` を持たない。この条件で除ける。今の `approved_seen` は回答の `gate` を見ないので使わない
+- 選ぶのは、リリース承認ゲート（ステップ `release-gate`）への最後の回答である。その事象は `payload.kind == LISTEN` で、`payload.gate` に定数 `RELEASE_GATE`（`gate/asking.py`）を持つ。定数の値はステップ `release` の名前と同じ文字列 `release` だが、指すものは違う。worker の判断の求めへの回答はステップ `release` への回答で、`kind` が `plan` であり `gate` を持たないので、この条件で除ける。今の `approved_seen` は回答の `gate` を見ないので使わない
 - 回答の次の事象は、事象の番号（`seq`）が回答の `seq + 1` の事象を同じ工程の事象の並びから引く。種類が `stages.OUTPUTS_EVENT` のときだけ `payload.outputs.product_version` を読む
 
-`values.json` を作り直すのは `prepare_plan` で、同じ試行の中（承認の回答の後と、自動の打ち直し）で使い回すのは `_prepared` である。工程の retry の後の試行の始めは、`run._prepare` が `values.json` ごと消すので `prepare_plan` が作り直す。どちらの場合も、その後に `plan_path` が `write_released` を打つ。
+ここでの「試行」は、工程の retry から次の retry までの 1 回分を指す。1 つの試行の中でプランは何回か流れる（承認の回答の後・自動の打ち直し）。
+
+| 場面 | `values.json` を扱う関数 | 扱い |
+| --- | --- | --- |
+| 工程の retry の後の最初 | `run._prepare` が消し、`prepare_plan` が作る | 新しく作る |
+| 同じ試行の中でプランをもう一度流す | `_prepared` | 前に作ったものを使い回す |
+| どちらの場合も、プランを書く前に | `plan_path` が `write_released` を打つ | `released_version` だけを書き直す |
 
 ### 処理の手順
 
@@ -196,8 +202,8 @@ plugins/ndf/
   - 事後条件: `released_of(saved)` があり、`version_kind == "none"` で、作業の種類 `work` が `release` のときだけ、`status: ok` と `outputs` の `product_version`・`delivery` を持つ結果 JSON を返す。それ以外は `None`
   - 副作用: 無し（設定の行は呼ぶ側が渡す）
 - `delivery` は、`deliveries` のうち `reaches(row, "production")` の行が 1 つならその行の辞書をそのまま返す。0 か 2 つ以上なら、設計文書の固定のオブジェクトを返す。`deliveries_of` は行を 3 項目の `Delivery` に縮め、文脈の `delivery` が必須とする `versioned` を落とすので使わない。条件だけを `reaches` で共有する
-- `_version_kind` は `branch_strategy.load(root)` の `version_store["kind"]` を読む。`root` は `workdir` で `git rev-parse --show-toplevel` を打って決める（`progress/command.py` の `strategy` と同じ解き方）
-- `_cmd_work` で `work_argv` に渡す `version_number` は `_version_kind(...) != "none"` である。読めない（`None`）ときも真になる
+- `_cmd_work` は、`_work_dir(kind, saved, a.cwd)` が返す worker の作業場所（デプロイでは承認の対象のリポジトリ）を `_version_kind` に渡す。`_version_kind` はそのパスで `git rev-parse --show-toplevel` を打って根を決め、`branch_strategy.load(root)` の `version_store["kind"]` を読む（`progress/command.py` の `strategy` と同じ解き方）
+- `_cmd_work` で `work_argv` に渡す `version_number` は、その値が `"none"` でないときに真である。読めない（`None`）ときも真になる
 - `_outputs_of` の 1 行は、`version_number` が真なら「`product_version` はバージョン番号（例 `1.2.3`）」、偽なら「`product_version` は出したものを指す空白だけでない文字列（例 `main abc1234`）」とする
 
 ### 異常系の処理
@@ -216,6 +222,7 @@ plugins/ndf/
 | `_cmd_work` | 記録済みの値あり・`version_kind` が `none` 以外か読めない | worker を起動し、形を確かめる |
 | `_cmd_work` | 記録済みの値なし・`version_kind` が `none` | worker を起動し、形を確かめない |
 | `_cmd_work` | 記録済みの値なし・`version_kind` が `none` 以外か読めない | worker を起動し、形を確かめる（今と同じ） |
+| `_cmd_work` | 作業が `release` 以外 | 記録済みの値を見ずに worker を起動する。形の確かめは上の行と同じく `version_kind` で決める |
 
 ### ログと記録の出力
 
@@ -351,12 +358,12 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `answered_gap_detail` | `src/ndf/progress/invoke.py` | 新設 | `answered_gap_detail(names: Sequence[str], waited: str) -> str` | 足りない値の名前・回答を待っていた結果の要約・次の操作を 1 つの文にする |
+| `answered_gap_detail` | `src/ndf/progress/invoke.py` | 新設 | `answered_gap_detail(names: Sequence[str], waited: str) -> str` | 足りない値の名前・判断を求めて止まったステップの要約・次の操作を 1 つの文にする |
 | `_no_route` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 承認の回答を受けたとき、回答を待っていたプランの結果（承認ゲートで止まった結果）の `metrics.missing_outputs` が空でなければ `bad_report` を返す。空なら、その結果の要約を `metrics.waited` に入れて ok を返す |
 | `_step_draft` | `src/ndf/progress/run.py` | 変更 | 今のまま | `ok` の結果が `metrics.waited` を持ち、出力の規約に合わなければ、`required_outputs` から足りない名前を数えて `answered_gap_detail` の文で失敗にする |
 | `_finish_stage` | `src/ndf/progress/run.py` | 変更 | 今のまま | 工程の出力が規約に合わず、どれかのステップの結果が `metrics.waited` を持てば、`check_stage_output` の欠けた名前で `answered_gap_detail` の文にする |
 
-- `answered_gap_detail` の文は `足りない出力: {名前の並び}。回答を待っていた結果: {waited}。次の操作: ndf progress retry <ID> <工程> で worker を起動し直し、足りない値を返させる` の形にする。停止理由の種類は `bad_report` のままで、自動の打ち直しは入れない
+- `answered_gap_detail` の文は `足りない出力: {名前の並び}。判断を求めたステップの要約: {waited}。次の操作: ndf progress retry <ID> <工程> で工程を打ち直し、足りない値を返させる` の形にする。停止理由の種類は `bad_report` のままで、自動の打ち直しは入れない
 - 3 つの段で数える名前は設計文書の決定 4 の表に従う。`_step_draft` は「規約が必須とするキーのうち、そのステップの結果に無いもの」、`_finish_stage` は「工程の `outputs` のうち、どのステップの出力にも無いもの」である
 - `metrics.waited` が無い結果（承認の回答を経ない ok）は、今の文のままにする
 
