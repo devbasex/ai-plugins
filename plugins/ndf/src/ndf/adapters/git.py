@@ -275,19 +275,6 @@ class Git:
             raise GitError(f"{ref} をコミットへ解決できない: {sha!r}")
         return sha
 
-    def rev_parse_all(self, *refs: str) -> list[str]:
-        """複数の参照を 1 回の起動でコミットの完全な SHA へ解決する（並びは `refs` の順）。
-
-        `--verify` は参照を 1 つしか受けず、`--verify` の無い `rev-parse` は `--end-of-options` を出力に写すので、
-        `-` で始まる参照は option として読ませないよう起動の前に断る。
-        """
-        if any(r.startswith("-") for r in refs):
-            raise GitError(f"参照の名前が - で始まる: {refs!r}")
-        shas = self.run("rev-parse", *(f"{r}^{{commit}}" for r in refs)).split()
-        if len(shas) != len(refs) or not all(FULL_SHA.match(s) for s in shas):
-            raise GitError(f"{refs!r} をコミットへ解決できない: {shas!r}")
-        return shas
-
     def commit_or_none(self, ref: str) -> Optional[str]:
         """参照のコミットの完全な SHA。参照を読めなければ None（`rev-parse` の終了コード 1）、git の失敗は `GitError`（#4337）。"""
         args = ("rev-parse", "--verify", "--quiet", END_OF_OPTIONS, f"{ref}^{{commit}}")
@@ -317,7 +304,13 @@ class Git:
         return out
 
     def commits_of(self, *refs: str) -> list[str]:
-        """参照（`refs/` から始まる全体の名前）のコミットの完全な SHA を、何件でも git を 1 回だけ起動して返す。"""
+        """参照（`HEAD` か `refs/` から始まる全体の名前）のコミットの完全な SHA を、何件でも git を 1 回だけ起動して返す。
+
+        `--verify` は参照を 1 つしか受けず、`--verify` の無い `rev-parse` は `--end-of-options` を出力に写すので、
+        `-` で始まる参照は option として読ませないよう起動の前に断る。
+        """
+        if any(r.startswith("-") for r in refs):
+            raise GitError(f"参照の名前が - で始まる: {refs!r}")
         got = self.run("rev-parse", *(f"{r}^{{commit}}" for r in refs)).split()
         if len(got) != len(refs) or not all(FULL_SHA.match(sha) for sha in got):
             raise GitError(f"{', '.join(refs)} をコミットへ解決できない: {got!r}")

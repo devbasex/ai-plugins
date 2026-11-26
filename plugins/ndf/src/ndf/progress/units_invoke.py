@@ -105,16 +105,14 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
         raise UnitsStopped("precondition", detail)
     project = ndf_settings_in(root, PROJECT_FILE)
     branch = _checked_branch(run, branch, project)
-    plans = at_head
-    if tip is not None and _catch_up(g, remote, branch, head, tip):
-        plans = at_tip
-        if not any(has_units(p.text) for p in plans):
-            return _plain_route(work_dir)
+    moved = tip is not None and _catch_up(g, remote, branch, head, tip)
+    plans = at_tip if moved else at_head
+    if not any(has_units(p.text) for p in plans):
+        return _plain_route(work_dir)
+    if moved:
         # 単位の経路を続けるときだけ、取り込んだコミットの設定で配布先（I4）と単位の PR で待つチェックを決め直す
         project = ndf_settings_in(root, PROJECT_FILE)
         branch = _checked_branch(run, branch, project)
-    if not any(has_units(p.text) for p in plans):
-        return _plain_route(work_dir)
     units = _read_units(g, remote, plans, issues)
     pushed = g.attempt("push", "-q", "--", remote, f"HEAD:{HEADS}{branch}")
     if pushed.returncode != 0:
@@ -149,7 +147,7 @@ def _fetched_tip(g: Git, remote: str, branch: str) -> Optional[tuple[str, str]]:
     """
     fetched = g.fetch_branch(remote, branch)
     if fetched.returncode == 0:
-        head, tip = g.rev_parse_all("HEAD", f"refs/remotes/{remote}/{branch}")
+        head, tip = g.commits_of("HEAD", f"refs/remotes/{remote}/{branch}")
         return head, tip
     probe = g.attempt("ls-remote", "--exit-code", "--heads", remote, f"{HEADS}{branch}")
     if probe.returncode == LS_REMOTE_ABSENT:
