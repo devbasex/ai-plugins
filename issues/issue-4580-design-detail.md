@@ -446,7 +446,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | --- | --- | --- | --- | --- | --- | --- |
 | `permission_strict` | 照会できない | 上限でない 403・404 | `rest` の `GitHubError` | 止める（`PermissionUnknown`） | 呼び出し元が `failed` にする | 権限を直して打ち直せる |
 | `branch_activity` | ページの上限 | `github.list-pages` を超えた | ページ数 | 止める（`GitHubError`） | `failed` | 打ち直せる |
-| `delete_comment` | 消せない | 権限・ネットワーク | `rest` | 止める（`GitHubError`） | `failed`。消せなかったコメントの URL を載せる | 打ち直すと手順 4 がもう一度消す |
+| `delete_comment` | 消せない | 権限・ネットワーク | `rest` | 止める（`GitHubError`） | `failed`。消せなかったコメントの URL を `items` に載せる | 消せなかったコメントは残してよい。読み手は重複と正でない記録を数えない（設計書の「失敗や重なりの後の動き」）ので、判定は 1 回で書けたときと同じになる。打ち直すと確かめ 7 で `kept` になり、何も書かず消しもしない |
 
 ### 単体テストの観点
 
