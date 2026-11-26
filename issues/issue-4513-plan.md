@@ -16,10 +16,10 @@
 | `contracts/schemas/result.schema.json` | `product_version` を空白だけでない文字列にし、バージョン番号の形を `$defs/version_number` へ移す |
 | `contracts/schemas/release-verification.schema.json` | `version` を空白だけでない文字列にする |
 | `contracts/worker/kinds.json`・`contracts/workflow/context.schema.json` | `product_version` の説明 |
-| `src/ndf/contracts/worker_kinds.py` | `write_released`・`released_of`・`uses_released_of`（新設）、`write_values`（変更） |
+| `src/ndf/contracts/worker_kinds.py` | `write_released`・`released_of`（新設）、`write_values`（変更） |
 | `src/ndf/progress/definition.py` | `required_outputs`（新設） |
 | `src/ndf/progress/run.py` | `released_answer`（新設）、`_run_step`・`_step_draft`・`_finish_stage`（変更） |
-| `src/ndf/progress/invoke.py` | `StageRun.released`・`PreparedPlan.released`・`PreparedPlan.uses_released`・`answered_gap_detail`（新設）、`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
+| `src/ndf/progress/invoke.py` | `StageRun.released`・`PreparedPlan.released`・`PreparedPlan.uses_released`・`uses_released`・`answered_gap_detail`（新設）、`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
 | `src/ndf/progress/gate/entry.py` | `released_outcome`・`_strategy_at`・`Released`（新設）、`WorkHandoff`・`_cmd_work`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`（変更） |
 | `src/ndf/domains/release/forms_decide.py` | `reaches`（新設）、`deliveries_of`（変更） |
 | `src/ndf/core/worker.py`・`core/worker_outcome.py` | 引数 `--require-version-number`、`Checked`（新設）、`require_outputs`・`_output_gap`・`outcome_of`（変更） |
@@ -62,7 +62,7 @@
 
 ### Task 4: 記録済みの値を `values.json` で渡し、worker を起動せずに終える
 
-- **対象ファイル:** `contracts/worker_kinds.py`（`write_released`・`released_of`・`uses_released_of`・`write_values`）・`progress/run.py`（`released_answer`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`PreparedPlan.uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`domains/release/forms_decide.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
+- **対象ファイル:** `contracts/worker_kinds.py`（`write_released`・`released_of`・`write_values`）・`progress/run.py`（`released_answer`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`PreparedPlan.uses_released`・`uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`domains/release/forms_decide.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
 - **変更内容:** 詳細設計書の「値のファイル」「工程の進行: 記録済みの値の読み方」「worker の起動」の記録済みの値の分
 - **満たす受け入れ条件:** 1・2
 - **進め方:**
@@ -130,32 +130,103 @@
 
 - 単位ごとの PR を revert すれば戻る。前へ進めるときのデータの移行は無い
 - **現状の手順の問題:** U3 を戻すと、NDF は `outputs.json` を直す前の形（キーと値だけのオブジェクト）で読む。U3 の後に書いた要素の並びの形（`entries`）は、直す前の NDF には `entries` という名前の出力 1 つに見え、出力の形の確かめで落ちてプランの結果に載らない。これまでの案はそのファイルを消して打ち直す手順だったが、それでは進行中のプランがすでに返した出力（`pr`・`product_version` など）を失い、取り戻せない
-- **改める手順:** U3 を戻すときは、消さずに直す前の形へ変換する。変換しても結果の `outputs` は変わらない。直す前の形の値は、`entries` を先頭から重ねた値（U3 の後の NDF がプランの結果に載せる値）と同じだからである。ステップごとの区別は直す前の形に置けないので、原本を退避して残す
-  1. 進行中のプランの保存先ごとに、下のコマンドで `outputs.json` を変換する。コマンドは保存先ごとに次の順で処理する
-     - 先に形を見る。`entries` の並びを持たないファイルは変換済みなので、触らずに飛ばす
-     - 原本を同じディレクトリの `outputs.json.entries` へ退避する。退避先が既にあれば上書きせずに残す。U3 を入れ直すときは、これを `outputs.json` へ戻す
-     - `entries` の要素の `outputs` を先頭から順に重ねたオブジェクトを一時ファイルに書き、`os.replace` で `outputs.json` と置き換える。途中で止まっても、`outputs.json` は変換前か変換後のどちらかの形で残る
-  2. 途中で止まったときや、どこまで処理したか分からないときは、同じコマンドを同じ保存先の並びでもう一度打つ。処理済みの保存先は飛ばし、退避した原本は変わらないので、結果は 1 回打ったときと同じになる
-  3. U3 を revert した NDF でプランを打ち直す
+- **改める手順:** U3 を戻すときは、消さずに直す前の形へ変換する。変換しても結果の `outputs` は変わらない。直す前の形の値は、`entries` の要素ごとに旧い名前を読み替えてから先頭から重ねた値で、U3 の後の NDF がプランの結果に載せる値と同じだからである。ステップごとの区別は直す前の形に置けないので、原本を退避して残す
+  1. 進行中のプランを止める。工程を進めているプロセス（supervisor と、その下の `ndf progress`・`ndf plan next`・worker）を止め、手順 4 で打ち直すまで再開しない。止めずに変換すると、プランが読み込みと置き換えの間に出力を書き足し、変換がその出力を古い内容で上書きする。また、U3 を戻す前の NDF が変換の後に動くと、`outputs.json` を `entries` の形へ書き戻してしまう
+  2. 進行中のプランの保存先ごとに、下のコマンドで `outputs.json` を変換する。引数の 2 つのパスは例なので、実際の `outputs.json` のパスに置き換え、空白や記号を含んでもよいように引用符で囲む。コマンドは保存先ごとに次の順で処理する
+     - 保存先のディレクトリを開き、以後の読み書きはすべてその記述子を起点にする。自分が持ち主でない保存先や、ほかの利用者が書き込める保存先は変えずに止める。ファイルを開くときはシンボリックリンクをたどらない
+     - プランの実行が持つロック（保存先の `plan.lock`）を待たずに取る。取れなければ、プランがまだ動いているので変えずに止める。ロックは保存先の処理を終えるまで持ち続ける
+     - 形を見る。`entries` の並びを持たないファイルは変換済みなので、触らずに飛ばす
+     - 原本を同じディレクトリの `outputs.json.entries` へ退避する。退避は、乱数の名前の一時ファイルを排他的に作って書き、ディスクへ書き出してから、`os.link` で `outputs.json.entries` の名前を付けて公開する。`os.link` は名前が既にあれば失敗するので、途中で止まっても、書きかけのファイルが `outputs.json.entries` になることは無い。退避先が既にあれば、中身が今の `outputs.json` と同じときだけ、そのまま使って先へ進む。違えば変えずに止める
+     - `entries` の要素ごとに、旧い名前 `version` を `product_version` へ読み替える（`internal.stage_values` と同じ規則で、1 つの要素に両方あれば `product_version` を残す）。読み替えた `outputs` を先頭から順に重ね、乱数の名前の一時ファイルへ書き、`os.replace` で `outputs.json` と置き換える。途中で止まっても、`outputs.json` は変換前か変換後のどちらかの形で残る
+  3. コマンドが「止めた」と出した保存先は、理由を見て対処してから、同じコマンドを同じ保存先の並びでもう一度打つ。どこまで処理したか分からないときも同じである。処理済みの保存先は飛ばし、退避した原本は変わらないので、結果は 1 回打ったときと同じになる。理由ごとの対処は次のとおりである
+     - 「プランが動いている」: 手順 1 で止め損ねたプロセスを止める
+     - 「退避した原本が今の `outputs.json` と違う」: 前の切り戻しの退避が残っている。2 つのファイルを見比べ、残す方を決めてから、`outputs.json.entries` を別の名前へ移す
+     - 「自分だけが書ける保存先でない」・リンクの誤り: 保存先の持ち主と権限を確かめる。ほかの利用者が差し替えたファイルは開かない
+     - 保存先に残った `.outputs.json.<乱数>.tmp` は、途中で止まった回の一時ファイルなので消してよい
+  4. U3 を revert した NDF を入れ、止めたプランを打ち直す。U3 を入れ直すときは、`outputs.json.entries` を `outputs.json` へ戻す
 
-手元で、2 つの保存先に同じコマンドを 2 回打ち、2 回目で処理済みの保存先が飛ばされ、退避した原本が変わらないことを確かめた。
+2026-11-26 に手元の一時ディレクトリで、このコマンドを次の場面で流して確かめた。
+
+| 場面 | 結果 |
+| --- | --- |
+| 2 つの保存先に 2 回打つ。1 つ目は直す前の形の要素の `product_version` の後に、旧い名前 `version` の要素がある | 1 回目で両方を変換し、後の `version` の値が `product_version` に残った。退避は原本と一致した。2 回目は両方を飛ばした |
+| 退避先に原本と違う中身がある | 止まり、`outputs.json` も退避先も変わらなかった |
+| ほかのプロセスが `plan.lock` を持っている | 止まり、`outputs.json` は変わらなかった |
+| `outputs.json` がほかのファイルへのシンボリックリンク | 止まり、リンク先のファイルは変わらなかった |
+| 保存先がほかの利用者も書き込める権限（`777`） | 止まり、`outputs.json` は変わらなかった |
+
+止めた保存先が 1 つでもあれば、終了コードは 1 になる。
 
 ```sh
-python3 - <保存先 1>/outputs.json <保存先 2>/outputs.json <<'EOF'
-import json, os, shutil, sys
-for p in sys.argv[1:]:
-    held = json.load(open(p))
+python3 -I - '/path/to/state-1/outputs.json' '/path/to/state-2/outputs.json' <<'EOF'
+import fcntl, json, os, secrets, sys
+
+NAME, HELD = "outputs.json", "outputs.json.entries"
+
+def read(d, name):
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=d)
+    with os.fdopen(fd, "rb") as f:
+        return f.read()
+
+def put(d, data):
+    """保存先の中に乱数の名前で一時ファイルを排他的に作って書き、その名前を返す。"""
+    tmp = f".{NAME}.{secrets.token_hex(8)}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=d)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data); f.flush(); os.fsync(f.fileno())
+    return tmp
+
+def renamed(out):
+    """直す前の NDF と同じく、旧い名前 version を product_version へ読み替える。両方あれば product_version を残す。"""
+    return {("product_version" if k == "version" else k): v for k, v in out.items()
+            if not (k == "version" and "product_version" in out)}
+
+def convert(d, p):
+    st = os.fstat(d)
+    if st.st_uid != os.getuid() or st.st_mode & 0o022:
+        return f"止めた（自分だけが書ける保存先でない）: {p}"
+    lock = os.open("plan.lock", os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=d)
+    try:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return f"止めた（プランが動いている）: {p}"
+        return locked(d, p)
+    finally:
+        os.close(lock)
+
+def locked(d, p):
+    raw = read(d, NAME)
+    held = json.loads(raw)
     if not (isinstance(held, dict) and isinstance(held.get("entries"), list)):
-        print(f"飛ばす（変換済み）: {p}"); continue
-    if not os.path.exists(p + ".entries"):
-        shutil.copy2(p, p + ".entries")
+        return f"飛ばした（変換済み）: {p}"
+    try:
+        if read(d, HELD) != raw:
+            return f"止めた（退避した原本が今の outputs.json と違う）: {p}"
+    except FileNotFoundError:
+        tmp = put(d, raw)
+        os.link(tmp, HELD, src_dir_fd=d, dst_dir_fd=d, follow_symlinks=False)
+        os.unlink(tmp, dir_fd=d)
     merged = {}
     for e in held["entries"]:
-        merged.update(e["outputs"])
-    with open(p + ".tmp", "w") as f:
-        json.dump(merged, f, ensure_ascii=False)
-    os.replace(p + ".tmp", p)
-    print(f"変換した: {p}")
+        merged.update(renamed(e["outputs"]))
+    tmp = put(d, json.dumps(merged, ensure_ascii=False).encode())
+    os.replace(tmp, NAME, src_dir_fd=d, dst_dir_fd=d)
+    os.fsync(d)
+    return f"変換した: {p}"
+
+failed = False
+for p in sys.argv[1:]:
+    d = os.open(os.path.dirname(os.path.abspath(p)), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        msg = convert(d, p)
+    except OSError as exc:
+        msg = f"止めた（{exc}）: {p}"
+    finally:
+        os.close(d)
+    failed |= msg.startswith("止めた")
+    print(msg)
+sys.exit(1 if failed else 0)
 EOF
 ```
 
