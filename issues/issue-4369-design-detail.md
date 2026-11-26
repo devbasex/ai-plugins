@@ -470,11 +470,26 @@ contracts/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `finish` | `domains/crossreview/finish_decide.py` | 変更 | `(review, handed=(), record_failed=None, *, stop_on_hold: bool = False) -> Verdict` | 真なら、人の判断を待つ指摘を `held_finding` の欠けにする |
-| `_write_reviewed_pr` | `domains/crossreview/cli.py` | 新設 | `(path: Path, repo: str, pr: int) -> None` | `<repo>#<pr>` を書く |
+| `_write_reviewed_pr` | `domains/crossreview/cli.py` | 新設 | `(path: Path, ident: str) -> None` | 実際に読んだ PR（`<repo>#<pr>`）を書く |
 
 - `Finding` に `defer: Optional[str] = None` を最後の欄として足す。`journal.findings` は行の `REVIEW_DEFER` を渡し、`as_findings` は `defer` を読む
 - `cmd_run` は `--repo` があれば、`HUB` の第 1 引数に渡し、`GH_REPO` を環境に置く（相手役と修正担当の `gh` も同じリポジトリになる）
-- `--reviewed-pr-out` のファイルは始めに消し、`--reviewed-out` を書くときだけ書く。番号は状態ファイルの `current_pr` である
+- `--reviewed-pr-out` のファイルは始めに消し、`--reviewed-out` を書くときだけ書く。書く値は、スレッドの一覧と同じ応答から実際に読んだ PR（`drive.Outcome.reviewed_pr`）である。判定は `domains/crossreview/reviewed_pr.py` に置く
+- `--reviewed-pr-out` を渡した起動は、始めに PR を読めないか、読んだ head ブランチと head が下の 1 つ目の条件を満たさなければ、相手役を起動する前に `precondition` で止める。記録を出せないレビューに token と時間を使わないためである
+- `reviewed_pr`（記録する PR）を持つかは、`--reviewed-pr-out` を指定した起動だけで判定する。次の 2 つの条件を順に確かめる
+  1. 始めに読んだ PR の head ブランチがレビューするブランチで、その head が同期で取得した先頭か、送り直した後の先頭である。`--base` がコミットの起動は同期の前に PR を読むので、送り直す前の head になる
+  2. レビューした HEAD が、次の表のどちらかに当たる。レビューした HEAD は、次のように 1 つに決める。該当するラウンドが無ければ、PR を記録しない
+     - 通常の回: 今回の起動のラウンドのうち、レビュー担当の全員が差分を読めた最後のラウンドの HEAD。それより後に一部の担当しか読めなかったラウンドがあっても、その HEAD は使わない。後の差分レビューがそこを起点にすると、読んでいない変更を飛ばすためである
+     - 前回の収束結果を再利用する回: 再利用の条件（`drive._reusable`）を満たした、前回の最後のラウンドの HEAD
+
+     | レビューした HEAD | push の送り先 | PR を記録する条件 |
+     | --- | --- | --- |
+     | 条件 1 で読んだ head | 調べない | 追加の条件なし |
+     | この起動が送った修正のコミット（前の起動の分を送り直したものを含む） | 調べる | すべての送り先が PR の head のリポジトリと一致する。一致すると確かめられなければ記録せず、注意に載せる |
+
+- `--reviewed-pr-out` を指定しない起動と、条件を満たさない回は、`reviewed_pr` を持たず、`--reviewed-pr-out` のファイルを書かない
+- ラウンドの記録には、そのとき読んだ PR（`<repo>#<pr>`）を残す。`--reviewed-pr-out` を渡した起動は、同じ PR を読んだラウンドだけを差分の起点と収束の再利用に使う
+- 単位の指示の中身を見分ける値（`scope_decide.unit_id`）はラウンドの記録に残し、違えば前のラウンドを差分の起点にも収束の再利用にも使わない
 
 ### 処理の手順
 

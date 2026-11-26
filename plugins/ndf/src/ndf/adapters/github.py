@@ -44,6 +44,8 @@ from ndf.contracts import limits
 
 T = TypeVar("T")
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")  # GraphQL のエイリアスで引ける番号つきの節点
+# `issueOrPullRequest`（union）から本文を選ぶ選択。union なので、body は型ごとのインラインフラグメントで選ぶ（#3908 の r2-1）
+BODY_FIELDS = "... on Issue { body } ... on PullRequest { body }"
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
 # 認証の値を読む環境変数（先のものを優先する。利用者の手順へ渡さないときに消す名前も同じ）

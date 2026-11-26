@@ -37,7 +37,9 @@ class RunConfig:
     `base_commit` は起動の始めに `base` が指していたコミット（#4090。MVV を読むコミットとは違うことがある）。差分と
     前回の結果を再利用できるかはこれで決め、
     名前の `base` は取得と表示にだけ使う。`reviewers` は起動の前に決めた席（`participants.review_seats`。書き換えない）、
-    `may_fill` は席を埋めてよいか（名指しが 1 者なら偽）、`prefilled` は `allowed` のために起動の前に埋めた席（#3955）。"""
+    `may_fill` は席を埋めてよいか（名指しが 1 者なら偽）、`prefilled` は `allowed` のために起動の前に埋めた席（#3955）。
+    `unit` はレビューの単位の指示の中身（単位の経路でなければ空。#4369）。`check_pr` は読んだ PR の確認を呼び手が求めるか
+    （`--reviewed-pr-out`。真なら同じ PR を読んだラウンドだけを差分の起点と収束の再利用に使う。#4369）。"""
 
     worktree: Path
     branch: str
@@ -55,6 +57,8 @@ class RunConfig:
     base_commit: Optional[str] = None
     may_fill: bool = True
     prefilled: tuple[scope_decide.Filled, ...] = ()
+    unit: str = ""
+    check_pr: bool = False
 
 
 def settings_path(root: Path, file_id: str) -> Path:
