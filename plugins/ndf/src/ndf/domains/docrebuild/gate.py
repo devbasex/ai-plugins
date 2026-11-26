@@ -279,7 +279,7 @@ def working_material(run: Run, rows: Sequence[Mapping[str, Any]]) -> tuple[str, 
     expected = reading.remained_section(reading.remained_of(rows, run.repo, args.gate, pr.number))
     copy = _text_or_none(reading.materials_path(args.gate, pr.number)) if done is not None else None
     previous = None
-    if copy is not None and done is not None and reading.material_hashes(copy, expected) == (done[MATERIAL_SHA], done[MATERIAL_FILE_SHA]):
+    if copy is not None and done is not None and reading.material_matches(copy, expected, done):
         previous = reading.split_section(copy, expected)[0]
     if args.material is not None:
         source = _file_text(args.material)

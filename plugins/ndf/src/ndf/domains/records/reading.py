@@ -232,6 +232,11 @@ def material_hashes(text: str, expected: str) -> tuple[str, str]:
     return sha256(body), sha256(text)
 
 
+def material_matches(text: str, expected: str, done: Mapping[str, Any]) -> bool:
+    """承認資料の 2 つのハッシュ（`material_hashes`）が、完了の行 `done` とどちらも同じか。"""
+    return material_hashes(text, expected) == (done[MATERIAL_SHA], done[MATERIAL_FILE_SHA])
+
+
 def row_fingerprint(row: Mapping[str, Any]) -> str:
     """記録の行の指紋（キーの順を固定した JSON の SHA-256）。"""
     return sha256(json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
@@ -387,7 +392,7 @@ def _material_changed(
     if material is None:
         return not comment_has(view.comments, done[MATERIAL_FILE_SHA]) or sha256(view.body) != done[BODY_SHA]
     expected = remained_section(remained_in(docs, done["check"]))
-    return material_hashes(material.read_text(encoding="utf-8"), expected) != (done[MATERIAL_SHA], done[MATERIAL_FILE_SHA])
+    return not material_matches(material.read_text(encoding="utf-8"), expected, done)
 
 
 def _require_prompt(entry: Any) -> None:
