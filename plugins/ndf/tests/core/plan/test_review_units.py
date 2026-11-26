@@ -141,16 +141,17 @@ def test_lineup_reads_a_table_without_the_outer_pipes(table: str) -> None:
     assert _names(_plan(_text(table))) == ["A", "B"]
 
 
-@pytest.mark.parametrize("note", ["補足です。", "`git diff | less`"])
-def test_lineup_reads_a_line_right_after_the_table_as_a_row(note: str) -> None:
+@pytest.mark.parametrize(
+    ("note", "part"),
+    [
+        ("補足です。", "2 行目の含むタスクの形が違う: ''（表の直後の本文は空行で区切る）"),
+        ("`git diff | less`", "2 行目の含むタスクの形が違う"),
+    ],
+)
+def test_lineup_reads_a_line_right_after_the_table_as_a_row(note: str, part: str) -> None:
     table = _table(HEAD, "| A | Task 1・2 | 無し |") + "\n" + note
-    assert "2 行目の含むタスクの形が違う" in "\n".join(_reasons(_text(table)))
+    assert part in "\n".join(_reasons(_text(table)))
     assert _names(_plan(_text(table.replace("\n" + note, "\n\n" + note)))) == ["A"]
-
-
-def test_lineup_tells_to_leave_a_blank_line_when_the_task_cell_is_empty() -> None:
-    table = _table(HEAD, "| A | Task 1・2 | 無し |") + "\n補足です。"
-    assert "表の直後の本文は空行で区切る" in "\n".join(_reasons(_text(table)))
 
 
 def test_lineup_reads_indented_and_closed_headings() -> None:
