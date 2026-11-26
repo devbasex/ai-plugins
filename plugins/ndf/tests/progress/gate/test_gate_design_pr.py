@@ -14,7 +14,7 @@ import pytest
 
 from ndf.adapters.github import FileAt
 from ndf.contracts import result
-from ndf.progress import gate, invoke, model, run, stages
+from ndf.progress import gate, invoke, lane, model, run, stages, store
 
 DESIGN_PR = 4565
 
@@ -128,36 +128,52 @@ def test_the_design_stage_finishes_with_the_design_pr_of_the_plan_items(st, env,
     assert "設計" not in [p.name for p in v.snap.stages if run.step_progress(v, p.name).failed]
 
 
-def _old_approval(st, env, new_table, flow):
-    """設計 PR を items から読まなかった版の承認（見た head が無い）を記録したステートマシンの ID と、そのときの質問。"""
-    tid = new_table()
+def _old_approval(st, env, lane_sprint, flow):
+    """設計 PR を items から読まなかった版の承認（見た head が無い。課題 3092 を外した）を記録したスプリント。
+
+    （計画の ID, ステートマシンの ID, 回答の結果）を返す。"""
+    pid, tid = lane_sprint("--issues", "3092", "5")
     flow.turn(tid, _like_the_plan(env))
     q = gate.waiting(run.read(st, tid))
     assert q is not None and q.gate == "design"
-    gate.answer(st, tid, gate.Answer(q.id, "approved", "設計を承認", "human:reviewer", "k-old"))
-    return tid, q
+    out = gate.answer(st, tid, gate.Answer(q.id, "approved", "設計を承認", "human:reviewer", "k-old", drop=(3092,)))
+    assert run.read(st, tid).context()["issues"] == [5]
+    return pid, tid, out
 
 
-def test_an_old_approval_without_the_design_pr_head_is_not_consumed(st, env, new_table, flow):
-    # 対象に結び付いていない承認は数えず、設計 PR のマージへ進めずに設計承認ゲートで待つ
-    tid, q = _old_approval(st, env, new_table, flow)
-    assert run.decide(run.read(st, tid)).action == run.Action.GATE
+def _consume_as_the_old_version(st, tid):
+    """前の版と同じく、承認を消費して承認ゲートのステップを済ませる（設計 PR のマージの前で止まった）。"""
+    v = run.read(st, tid)
+    m = run.decide(v)
+    assert m.action == run.Action.CONSUME
+    report = run.gate_report(m.step, m.event)
+    payload = {"step": m.step.id, "status": run.FINISHED, "report": report, "generation": m.progress.generation}
+    run.append(st, tid, lambda now: [run.step_event(now, m.stage.name, payload)])
+    assert m.step.id in run.step_progress(run.read(st, tid), m.stage.name).done
+
+
+def _carried(st, pid, key):
+    with store.transaction(st) as conn:
+        return next(r for r in lane.read_view(conn, pid)[1]["a"] if r.key == key)
+
+
+@pytest.mark.parametrize("consumed", [False, True], ids=["before_consuming", "consumed_before_the_merge"])
+def test_an_old_approval_without_the_design_pr_head_is_undone_and_asked_again(st, env, lane_sprint, flow, consumed):
+    # 対象に結び付いていない承認は、読む前でも、消費した後のマージの前でも、外した課題・繰越の行・読み手役の確認ごと取り消す
+    pid, tid, out = _old_approval(st, env, lane_sprint, flow)
+    if consumed:
+        _consume_as_the_old_version(st, tid)
+    assert gate.recheck(st, tid, gate.no_observe) is not None
+    v = run.read(st, tid)
+    done = run.step_progress(v, "設計").done
+    assert "design-gate" not in done and "design-reading" not in done
+    assert v.context()["issues"] == [3092, 5]
+    assert _carried(st, pid, out["metrics"]["carried_row"]).state == lane.CANCELLED
+    # 読み手役の確認を今の設計 PR でやり直してから、設計 PR を載せて問い直す
     flow.turn(tid, _like_the_plan(env))
     again = gate.waiting(run.read(st, tid))
     assert again is not None and again.gate == "design" and again.pr == DESIGN_PR
-
-
-def test_an_old_approval_consumed_before_the_merge_is_reopened(st, env, new_table, flow):
-    # 前の版が承認を消費して承認ゲートのステップを済ませ、設計 PR のマージの前に止まったスプリントも、待ちへ戻す
-    tid, _ = _old_approval(st, env, new_table, flow)
-    v = run.read(st, tid)
-    m = run.decide(v)
-    answered = next(ev for ev in reversed(v.events) if ev.draft.kind == run.ANSWERED)
-    payload = {"step": m.step.id, "status": run.FINISHED, "report": run.gate_report(m.step, answered), "generation": m.progress.generation}
-    run.append(st, tid, lambda now: [run.step_event(now, m.stage.name, payload)])
-    assert m.step.id in run.step_progress(run.read(st, tid), m.stage.name).done
-    after = run.decide(run.read(st, tid))
-    assert after.action == run.Action.GATE and after.step.id == m.step.id
+    assert gate.recheck(st, tid, gate.no_observe) is None
 
 
 def _design_stage(*kinds):

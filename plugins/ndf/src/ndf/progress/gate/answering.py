@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
@@ -468,8 +468,12 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     `ndf answer` が書いた回答（質問の id と見た対象を持つ）だけを比べる。どのサブコマンドでも、回答が読まれる前に打つ。待ちへ戻すのは承認ゲートのステップの
     待ちの記録で、回答はその後の回答だけが読まれる（`run.StepProgress`）。回答が課題を外していれば、同じトランザクションで
     文脈の `issues` を回答の前へ戻し、外した課題を入れたレーンの行を取り消す（回答し直しで同じ課題を外せる）。
+    設計 PR の head を見ずに記録した設計の承認（前の版の承認）は、対象と比べる前に、消費済みでもマージの前なら同じ取り消しで
+    待ちへ戻す（`_unbound_approval`・`_reopen_unbound`。#4495）。
     """
     v = run.read(st, machine_id)
+    if _unbound_approval(v) is not None:
+        return _reopen_unbound(st, machine_id)
     m = run.decide(v)
     if m.action != run.Action.CONSUME or m.event is None or m.stage is None or m.step is None or m.progress is None:
         return None
@@ -511,6 +515,84 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
 
     run.append(st, machine_id, build, after)
     return why
+
+
+# 対象に結び付かない設計の承認を待ちへ戻す理由（承認ゲートの待ちの記録に残る）
+UNBOUND_REASON = "設計 PR の head を見ずに記録した設計の承認（設計 PR を items から読まなかった版の承認）なので、今の設計 PR で承認し直す"
+
+
+@dataclass(frozen=True)
+class _Unbound:
+    """対象に結び付かない設計の承認と、その承認ゲート。`consumed` なら承認ゲートのステップは済んでいる（マージの前）。"""
+
+    stage: stages.StageDef
+    step: stages.StepDef
+    generation: int
+    answered: model.Event
+    consumed: bool
+
+
+def _unbound_approval(v: run.View) -> Optional[_Unbound]:
+    """今の工程の設計承認ゲートの承認が、items から補った設計 PR の head を見ずに記録されたものなら、その承認（#4495 の前の版）。
+
+    今の版の回答は、設計 PR が特定できれば提示した対象（head を含む）を `seen` に記録する。items を読まなかった前の版は、
+    設計 PR が items にだけあると質問に PR が無く、head の無い承認を記録した。そのまま読むと対象に結び付かない承認で設計 PR の
+    マージへ進むので、読む前（`run.Action.CONSUME`）と、消費して承認ゲートのステップが済んだ後でも後ろのステップ（マージ）が
+    済む前なら拾う。outputs に明示した設計 PR は前の版も質問に載せて head を記録したので、ここでは見ない。"""
+    m = run.decide(v)
+    if m.stage is None or m.progress is None:
+        return None
+    s, prog = m.stage, m.progress
+    at = s.gate_index(DESIGN_GATE)
+    if at is None:
+        return None
+    step = s.steps[at]
+    if m.action == run.Action.CONSUME and m.step is not None and m.step.id == step.id and m.event is not None:
+        answered, consumed = m.event, False
+    elif step.id in prog.done and not any(st.id in prog.done for st in s.steps[at + 1 :]):
+        report = prog.done[step.id]
+        seq = report["metrics"].get("seq") if isinstance(report.get("metrics"), dict) else None
+        found = [ev for ev in v.row_events(s.name) if ev.draft.kind == run.ANSWERED and ev.seq == seq]
+        if not found:
+            return None
+        answered, consumed = found[0], True
+    else:
+        return None
+    p = run.event_payload(answered)
+    if p.get("answer") != run.APPROVED or p.get("by") == model.MVV_SERVICE:
+        return None
+    seen = p.get("seen") if isinstance(p.get("seen"), dict) else {}
+    filled = stages.item_only_outputs(s, prog.done)
+    if seen.get("head") is not None or type(filled.get(stages.DESIGN_PR)) is not int:
+        return None
+    return _Unbound(s, step, prog.generation, answered, consumed)
+
+
+def _reopen_unbound(st: store.Store, machine_id: str) -> Optional[str]:
+    """対象に結び付かない設計の承認（`_unbound_approval`）を取り消し、設計承認ゲートの待ちへ戻す。
+
+    対象が変わったときに待ちへ戻す経路（`recheck`）と同じく、1 回のトランザクションで、承認ゲートの待ち・読み手役の
+    ステップを未了に戻す事象・回答が外した課題を文脈の `issues` へ戻す事象を書き、外した課題を入れたレーンの行を取り消す。
+    消費済みなら承認ゲートのステップを先に未了に戻す。書く時点で同じ承認でなくなっていれば何も書かない。"""
+    held: list[_Unbound] = []
+
+    def build(now: run.View) -> list[model.EventDraft]:
+        held.clear()
+        got = _unbound_approval(now)
+        if got is None:
+            return []
+        held.append(got)
+        name, step = got.stage.name, got.step
+        reset = [_no_report_draft(now, name, step.id, stages.RESET, got.generation, UNBOUND_REASON)] if got.consumed else []
+        wait = _no_report_draft(now, name, step.id, "waiting", got.generation, UNBOUND_REASON)
+        return [*reset, wait, *_reading_reset(now, name, step.gate), *_undropped(now, name, got.answered)]
+
+    def after(conn: Any) -> None:
+        if held:
+            _uncarry(conn, machine_id, run.event_payload(held[0].answered).get("carried_row"), UNBOUND_REASON)
+
+    run.append(st, machine_id, build, after)
+    return UNBOUND_REASON if held else None
 
 
 def _no_report_draft(v: run.View, stage: str, step: str, status: str, generation: int, reason: str) -> model.EventDraft:
