@@ -32,7 +32,7 @@
         },
         "--no-criteria": {
           "type": "boolean",
-          "description": "条件を持たないレビューの単位: 記録を調べずに ok"
+          "description": "受け入れ条件を持たないレビュー単位では、記録を確認せずに ok を返す。--criteria と同時には指定できない"
         }
       },
       "required": [

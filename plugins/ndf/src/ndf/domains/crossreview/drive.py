@@ -24,7 +24,7 @@
 確かめてから `summary.json`（`finish_decide` が読む形）を書き、MVV に反するとした指摘を MVV の記録に残す（#4076）。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
 前の起動が残した修正の結果ファイルを読み込む（#2770）。別の保存先で始めた起動は、前の実行が PR に開いたまま残した
 自分の指摘のスレッドと、最新の記録のコメントに残ったスレッドの無い未解決の指摘を引き継ぐ（#3941）。最後のラウンドが収束で、その head と比較基点（`--base` と HEAD の
-merge-base の SHA）と MVV が今と同じで、今回の相手役が全員そのラウンドを読んでいれば、相手役を起動せずに前回の結果を返す（#3941）。修正の結果は状態ファイルへ書いてから結果ファイルを
+merge-base の SHA）と MVV とレビューの単位の指示が今と同じで、今回の相手役が全員そのラウンドを読んでいれば、相手役を起動せずに前回の結果を返す（#3941）。修正の結果は状態ファイルへ書いてから結果ファイルを
 ラウンドの名前へ移し、送る（push が例外で止まっても、次の起動が記録から再開できる）。前の起動が送れなかった修正の
 コミットが残っていれば、始めに送ってから進む。
 """
@@ -105,7 +105,8 @@ class Outcome(NamedTuple):
     ラウンドが無ければ None。一部の相手役が読めなかったラウンドの HEAD は出さない。PR 3944 の r2-3）。`reused` は
     相手役を起動せずに前回の収束を返したか（記録のコメントを書き直さない。PR 3944 の r2-10）。`mvv` は結果 JSON の `outputs.mvv`
     （承認済みのプロジェクト MVV が無ければ None。#4076）。`mvv_record_failed` は承認ゲートの判定に要る記録の行を書けなかったとき
-    の、書けなかった行（`key`・`outcome`）と固定の注意（`finish_decide.finish` の `record_failed`。#3959）。"""
+    の、書けなかった行（`key`・`outcome`）と固定の注意（`finish_decide.finish` の `record_failed`。#3959）。`reviewed_pr` は
+    `reviewed_head` を head に持つと確かめた、実際に読んだ PR（`<所有者>/<リポジトリ>#<番号>`。確かめられなければ None。#4369）。"""
 
     review: fin.Review
     summary_path: Path
@@ -115,6 +116,7 @@ class Outcome(NamedTuple):
     reused: bool = False
     mvv: Optional[dict[str, Any]] = None
     mvv_record_failed: Optional[dict[str, Any]] = None
+    reviewed_pr: Optional[str] = None
 
 
 @dataclass
@@ -138,6 +140,8 @@ class _Run:
     mvv_branch: Optional[str] = None
     # PR に届いたと分かっている最後のコミット（始めの同期で取得した先頭か、この起動で送ったコミット）
     sent: str = ""
+    # 始めに読めて、head ブランチとその先頭がレビューするブランチの取得した先頭と一致した PR
+    read_pr: Optional[threads.ReadPr] = None
     # PR が足した根拠の記述の確かめ（`changes.CitationRun`）
     checked_head: Optional[str] = None
     last_target: Optional[changes.Target] = None
@@ -215,10 +219,11 @@ def _resend(run: _Run, synced: worktree.SyncResult) -> None:
 
 
 class _Prior(NamedTuple):
-    """起動の始めに PR から読んだ、引き継ぎの確かめに要るもの（スレッドと PR コメント）。読めなければ空。"""
+    """起動の始めに PR から読んだ、引き継ぎの確かめに要るもの（スレッドと PR コメント）と、スレッドと同じ応答から読んだ PR。読めなければ空。"""
 
     threads: Sequence[prior_decide.Thread] = ()
     comments: Sequence[prior_decide.Remark] = ()
+    pr: Optional[threads.ReadPr] = None
 
 
 def _merge_target(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> str:
@@ -327,8 +332,10 @@ def _read_prior(prs: Optional[threads.Reader], warnings: list[str]) -> _Prior:
     """引き継ぎの確かめに要るもの（PR のスレッドと PR コメント。1 回の起動で 1 回だけ読む）。読めなければ注意に載せて空。"""
     if prs is None:
         return _Prior()
+    read = None
     try:
         left = list(prs.open_threads())
+        read = prs.read_pr()
     except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
         warnings.append(f"PR のスレッドを読めない（前の実行が残した未解決の指摘を引き継がない）: {exc}")
         left = []
@@ -337,7 +344,7 @@ def _read_prior(prs: Optional[threads.Reader], warnings: list[str]) -> _Prior:
     except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
         warnings.append(f"PR のコメントを読めない（既存の指摘を相手役へ渡さず、記録のコメントの未解決の指摘を引き継がない）: {exc}")
         comments = []
-    return _Prior(left, comments)
+    return _Prior(left, comments, read)
 
 
 def _read_reviews(prs: Optional[threads.Reader], warnings: list[str]) -> list[prior_decide.Remark]:
@@ -567,6 +574,16 @@ def _read_by_all_this_run(run: _Run, rounds: int) -> Optional[str]:
     return None
 
 
+def _reviewed_pr(run: _Run, head: Optional[str], rounds: int, reused: bool) -> Optional[str]:
+    """レビューした `head` が、始めに読んだ PR の head か、この起動がその PR のブランチへ送った修正のコミットなら、その PR。
+    読めなかった PR と、PR に無い手元のコミットを読んだ回は None（読んだ PR の記録を出さない。#4369）。"""
+    if run.read_pr is None or head is None:
+        return None
+    this_run = [] if reused else store.list_of(run.data, store.ROUNDS)[-rounds:]
+    pushed = {r["fix"].get("pushed") for r in this_run if isinstance(r, dict) and isinstance(r.get("fix"), dict)}
+    return run.read_pr.ident if head == run.read_pr.head or head in pushed else None
+
+
 def _ingest_citations(run: _Run, errors: Optional[list[dict[str, Any]]], round_no: int, recorded: bool = True) -> bool:
     """根拠の記述の確かめの結果をジャーナルへ入れる。ジャーナルが変わったら真。"""
     wrote = run.journal.ingest_citations(errors, run.mvv, round_no, recorded=recorded)
@@ -720,7 +737,8 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
     results, failed = _mvv_results(run)
     read = _read_by_all_this_run(run, rounds)
-    return Outcome(review, path, tuple(run.warnings), tuple(run.process), read, reused, results, failed)
+    pr = _reviewed_pr(run, read, rounds, reused)
+    return Outcome(review, path, tuple(run.warnings), tuple(run.process), read, reused, results, failed, pr)
 
 
 class _Prepared(NamedTuple):
@@ -802,7 +820,8 @@ def _merge_base(run: _Run, head: str) -> str:
 
 def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
     """前のラウンドを差分の起点や収束の再利用に使える条件（今回の値。席は今の席）。"""
-    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in)
+    unit = scope_decide.unit_id(run.cfg.unit)
+    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit)
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
@@ -843,6 +862,8 @@ def _round_record(run: _Run, round_no: int, prep: _Prepared) -> dict[str, Any]:
         fin.MVV_CHECKED: _mvv_checked(run, prep.head),
         "scope": prep.scope.kind,
     }
+    if run.cfg.unit:
+        record[scope_decide.UNIT] = scope_decide.unit_id(run.cfg.unit)
     if run.filled:
         # 埋めた後のすべてのラウンドに書く（#3955）
         record[scope_decide.FILLED] = [f.record() for f in run.filled]
@@ -897,7 +918,8 @@ def _reusable(run: _Run) -> bool:
     """前回の結果をそのまま返せるか（最後のラウンドが収束で、その head が今の HEAD、比較基点が今の `--base` と HEAD の
     merge-base の SHA と同じで、今回の相手役が全員そのラウンドを読んでいて、未解決の指摘も決めていない足すべき内容も無い）。
     比較基点が違えば PR の全差分が変わっている（PR 3944 の r2-1）。読んでいない相手役がいれば全差分から読ませる（r2-2）。
-    そのラウンドと今の重点が違えば、足した重点でまだ読んでいないので回し直す（r4-3）。MVV が違えば、今の MVV に反しないかを
+    そのラウンドと今の重点が違えば、足した重点でまだ読んでいないので回し直す（r4-3）。単位の指示の中身が違えば、今の範囲で
+    まだ読んでいないので回し直す（#4369）。MVV が違えば、今の MVV に反しないかを
     まだ確かめていないので回し直す（#4076）。"""
     if store.last_round(run.data).get("verdict") != fin.CONVERGED:
         return False
@@ -938,6 +960,9 @@ def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[ReaderFor]) 
     cfg = run.cfg
     prs = _reader(cfg, reader_for, run.warnings)
     prior = _read_prior(prs, run.warnings)
+    # `run.sent` はこの時点では取得した PR のブランチの先頭。読んだ PR のブランチと head が違えば、読んだ PR として扱わない
+    if prior.pr is not None and (prior.pr.branch, prior.pr.head) == (cfg.branch, run.sent):
+        run.read_pr = prior.pr
     _carry(run, prior)
     _restate(run)
     if _reusable(run):

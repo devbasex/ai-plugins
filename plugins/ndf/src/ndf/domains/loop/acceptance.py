@@ -221,6 +221,10 @@ def add_parsers(sub: Any) -> None:
     c.add_argument("--issue", action="append", type=int, required=True, help="照らす課題（繰り返せる）")
     only = c.add_mutually_exclusive_group()
     only.add_argument("--criteria", action="append", default=[], help="'<課題>:<条件の番号>'。その課題はこの条件だけを照らす")
-    only.add_argument("--no-criteria", action="store_true", help="条件を持たないレビューの単位: 記録を調べずに ok")
+    only.add_argument(
+        "--no-criteria",
+        action="store_true",
+        help="受け入れ条件を持たないレビュー単位では、記録を確認せずに ok を返す。--criteria と同時には指定できない",
+    )
     for name in ("record", "show"):
         inner.choices[name].add_argument("--issue", type=int, required=True)

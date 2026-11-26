@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from ndf.contracts import facts
-from ndf.domains.crossreview import criteria_decide, report_decide, store, threads
+from ndf.domains.crossreview import cli, criteria_decide, drive, fixer, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records.mvv import Snapshot
 from ndf.domains.records.mvv_decide import State
@@ -268,7 +269,6 @@ def test_runtimes_allowed_narrows_the_reviewers(wt: Path, tmp_path: Path, capsys
     """メインディレクトリの .ndf/runtimes.json の allowed の外の相手役は選ばず、名指せば invalid。形が違えば invalid。"""
     from ndf.core.converge import location
     from ndf.adapters import git
-    from ndf.domains.crossreview import cli
 
     main = location.main_dir(git.Git(wt))
     (main / ".ndf").mkdir(exist_ok=True)
@@ -288,7 +288,6 @@ def test_runtimes_allowed_without_the_fixer_stops_before_any_launch(wt: Path, tm
     """PR 3944 の r1-4: 修正担当（claude）が allowed の外なら、どの担当も起動せず（学習の設定の確かめもせず）precondition で止まる。"""
     from ndf.adapters import git, training
     from ndf.core.converge import location
-    from ndf.domains.crossreview import cli
 
     main = location.main_dir(git.Git(wt))
     (main / ".ndf").mkdir(exist_ok=True)
@@ -314,36 +313,54 @@ def test_unit_block_carries_the_scope_and_the_text_for_the_role(role: str) -> No
     assert criteria_decide.unit_block(role, "") == []
 
 
-def test_the_unit_file_reaches_the_reviewer_and_the_fixer_prompts(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """NDF_UNIT_FILE の中身が、相手役と修正担当の指示にそれぞれの文と一緒に入る。"""
+def test_the_unit_file_reaches_the_reviewer_and_the_fixer_prompts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """NDF_UNIT_FILE の中身が、相手役と修正担当の指示にそれぞれの文と一緒に入る（git も相手役も起動しない）。"""
     unit = tmp_path / "unit.md"
     unit.write_text("単位 u4: 条件 1・2\n", encoding="utf-8")
     monkeypatch.setenv("NDF_UNIT_FILE", str(unit))
-    major = {"text": "止まる", "severity": "major", "impact": IMPACT}
-    fake = Recording(tmp_path / "st", {"codex": [[major], []], "kiro": [[], []]})
-    _run(capsys, monkeypatch, fake, wt)
-    for agent, role in (("codex", criteria_decide.REVIEWER), ("claude", criteria_decide.FIXER)):
-        prompt = next(p for a, _, p in fake.prompts if a == agent)
+    # 修正担当の指示が読むテストの設定は、Git の境界の先にあるので差し替える
+    monkeypatch.setattr(fixer.declared, "test_section", lambda worktree: {})
+    cfg = SimpleNamespace(worktree=tmp_path, unit=cli._unit_text(), handed=(), settings=SimpleNamespace(focus=()))
+    run = SimpleNamespace(
+        cfg=cfg,
+        ref=SimpleNamespace(current_pr=PR, origin_pr=PR),
+        journal=SimpleNamespace(skipped_texts=lambda identity: []),
+        snapshot=None,
+        mvv=None,
+        documents=False,
+    )
+    prep = SimpleNamespace(scope=scope_decide.Scope(scope_decide.FULL, None, ()), diff=tmp_path / "round1.diff", previous=None)
+    prompts = {
+        criteria_decide.REVIEWER: drive._review_prompt(run, 1, prep),
+        criteria_decide.FIXER: fixer._fix_prompt(run, [], (), tmp_path / "fix.json"),
+    }
+    for role, prompt in prompts.items():
         assert "\n".join(criteria_decide.unit_block(role, unit.read_text(encoding="utf-8"))) in prompt
 
 
-def test_unit_text_is_empty_without_the_variable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from ndf.domains.crossreview import cli
-
+def test_unit_text_is_empty_without_the_variable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("NDF_UNIT_FILE", raising=False)
     assert cli._unit_text() == ""
 
 
 @pytest.mark.parametrize("content", [None, b"\xff\xfe\x00"])
-def test_an_unreadable_unit_file_stops_as_invalid_without_a_launch(
-    wt: Path, tmp_path: Path, capsys, monkeypatch, content: bytes | None
+def test_an_unreadable_unit_file_stops_as_invalid(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, content: bytes | None
 ) -> None:
-    """範囲なしでレビューしない: 指されたファイルを読めなければ invalid。"""
+    """範囲なしでレビューしない: 指されたファイルを読めなければ、起動の前のエントリポイントが invalid で止める。"""
     unit = tmp_path / "unit.md"
     if content is not None:
         unit.write_bytes(content)
     monkeypatch.setenv("NDF_UNIT_FILE", str(unit))
-    fake = Recording(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt)
-    assert got["cause"]["kind"] == "invalid" and str(unit) in got["cause"]["detail"]
-    assert fake.calls == []
+    code = cli._or_stop(cli._unit_text)
+    got = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert code != 0 and got["cause"]["kind"] == "invalid" and str(unit) in got["cause"]["detail"]
+
+
+def test_a_changed_unit_scope_reads_the_whole_diff_again() -> None:
+    """#4369: 単位の指示の中身が違えば、前のラウンドの head を差分の起点にも収束の再利用にも使わない。"""
+    first, second = scope_decide.unit_id("条件 1\n"), scope_decide.unit_id("条件 2\n")
+    for record, same, other in (({}, "", first), ({scope_decide.UNIT: first}, first, second)):
+        state = {store.ROUNDS: [{"head": "h1", **record}]}
+        assert scope_decide.read_by_all_head(state, scope_decide.Basis(unit=same)) == "h1"
+        assert scope_decide.read_by_all_head(state, scope_decide.Basis(unit=other)) is None

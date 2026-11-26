@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from ndf.contracts import result
-from ndf.domains.crossreview import cli, drive, journal, store
+from ndf.domains.crossreview import cli, drive, journal, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.settings import RunConfig
 
@@ -234,7 +235,12 @@ def test_the_defer_kind_reaches_the_verdict_through_the_journal_and_the_summary(
 
 
 def _in_process_run(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, *extra: str, head: str | None = "a" * 40
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    *extra: str,
+    head: str | None = "a" * 40,
+    read: str | None = "o/r#9",
 ) -> tuple[int, dict, list]:
     """駆動と PR への記録を差し替えて `run` を打つ（git も相手役も起動しない）。HUB に渡った引数も返す。"""
     state = tmp_path / "state"
@@ -245,7 +251,7 @@ def _in_process_run(
 
     def fake_drive(cfg_, launch, reader, clean):
         reader(7)
-        return drive.Outcome(review, state / "summary.json", (), (), head)
+        return drive.Outcome(review, state / "summary.json", (), (), head, reviewed_pr=read)
 
     monkeypatch.setattr(cli, "_ready", lambda args: (cfg, "saved/repo"))
     monkeypatch.setattr(cli.drive, "drive", fake_drive)
@@ -259,11 +265,8 @@ def _in_process_run(
 def test_run_takes_the_given_repository_over_the_saved_state(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`--repo` は保存済みの状態より優先して HUB と子の `gh` へ渡り、読んだ PR は今の番号で書く。"""
+    """`--repo` は保存済みの状態より優先して HUB と子の `gh` へ渡り、読んだ PR は駆動の結果の値で書く。"""
     monkeypatch.setenv("GH_REPO", "before/repo")
-    state = tmp_path / "state"
-    state.mkdir()
-    store.write_object(state / store.STATE_NAME.format(pr=7), {store.ORIGIN_KEY: 7, store.CURRENT_KEY: 9})
     pr_out = tmp_path / "reviewed-pr"
     head_out = tmp_path / "reviewed-head"
     code, got, made = _in_process_run(
@@ -323,3 +326,35 @@ def test_run_stops_when_the_reviewed_pr_cannot_be_written(
         str(tmp_path / "head"),
     )
     assert got["cause"]["kind"] == "precondition"
+
+
+def test_run_writes_no_reviewed_pr_when_the_review_did_not_confirm_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR を読めないか head が一致しない回は、HEAD だけを書く。"""
+    pr_out, head_out = tmp_path / "reviewed-pr", tmp_path / "head"
+    _in_process_run(monkeypatch, capsys, tmp_path, "--reviewed-pr-out", str(pr_out), "--reviewed-out", str(head_out), read=None)
+    assert head_out.exists() and not pr_out.exists()
+
+
+@pytest.mark.parametrize(
+    ("head", "reused", "want"),
+    [("h0", False, "o/r#9"), ("h1", False, "o/r#9"), ("h1", True, None), ("local", False, None), (None, False, None)],
+)
+def test_the_reviewed_pr_needs_the_reviewed_head_to_be_in_the_pull_request(head: str | None, reused: bool, want: str | None) -> None:
+    """始めに読んだ head と、この起動が送った修正のコミットだけを PR の head と認める。"""
+    data = {store.ROUNDS: [{"head": "h0", "fix": {"pushed": "h1"}}]}
+    run = SimpleNamespace(read_pr=threads.ReadPr("o/r#9", "feat/x", "h0"), data=data)
+    assert drive._reviewed_pr(run, head, 1, reused) == want
+    run.read_pr = None
+    assert drive._reviewed_pr(run, head, 1, reused) is None
+
+
+def test_the_port_reports_the_pull_request_read_with_the_threads() -> None:
+    page = {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": []}
+    pull = {"baseRefName": "main", "headRefName": "feat/x", "headRefOid": "h0", "reviewThreads": page}
+    hub = SimpleNamespace(repo="o/r", repository=lambda query, variables: {"pullRequest": pull})
+    port = threads.GitHubPort(hub, None, 9, RuntimeError)
+    assert port.read_pr() is None
+    port.open_threads()
+    assert port.read_pr() == threads.ReadPr("o/r#9", "feat/x", "h0")

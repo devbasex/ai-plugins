@@ -304,7 +304,7 @@
         },
         "--reviewed-pr-out": {
           "type": "string",
-          "description": "--reviewed-out を書くときに、読んだ PR を <所有者>/<リポジトリ>#<番号> で書く"
+          "description": "読んだ PR の head がレビューした HEAD と一致すれば <所有者>/<リポジトリ>#<番号> を書く（--reviewed-out と併用）"
         }
       },
       "required": [

@@ -373,7 +373,8 @@ def _local_scope(wt: Path, args: argparse.Namespace, data: dict[str, Any], resol
         # 全差分に決まっているので、範囲を変えない MVV を読まない
         return scope_decide.Scope(scope_decide.FULL, None, ()), [unread]
     now, unsure = _local_mvv(wt, based.mvv_ref)
-    basis = scope_decide.Basis(merge_base, resolved.seats.names, resolved.settings.focus, now)
+    unit = scope_decide.unit_id(resolved.unit)
+    basis = scope_decide.Basis(merge_base, resolved.seats.names, resolved.settings.focus, now, unit=unit)
     prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_of(data, basis.mvv)
     found = scope_decide.review_scope(_every_section(args.purpose), len(rounds) + 1, prev, sections, reviewed)
     got = round_scope.descended(g, found, "HEAD")
@@ -385,8 +386,8 @@ def cmd_scope(args: argparse.Namespace) -> int:
     data = store.read_state(ref)
     rounds = store.list_of(data, store.ROUNDS)
     wt = Path(args.worktree)
-    # `run` と同じ担当の指定と既定・重点で決める（担当を足した打ち直しで `run` と違う範囲を返さない。重点を変えた打ち直しは
-    # 全差分。PR 3944 の r3-4・r4-3）
+    # `run` と同じ担当の指定と既定・重点・単位の指示で決める（担当を足した打ち直しで `run` と違う範囲を返さない。重点か単位の
+    # 指示を変えた打ち直しは全差分。PR 3944 の r3-4・r4-3、#4369）
     resolved = _or_stop(lambda: _resolve(wt, args.reviewer))
     if isinstance(resolved, int):
         return resolved
@@ -476,14 +477,15 @@ class Resolved(NamedTuple):
     policy: Policy
     seats: participants.Seats
     settings: ReviewSettings
+    unit: str
 
 
 def _resolve(wt: Path, requested: Optional[list[str]]) -> Resolved:
-    """メインディレクトリと `allowed`、今回の相手役、レビューの設定を求める。"""
+    """メインディレクトリと `allowed`、今回の相手役、レビューの設定、レビューの単位の指示を求める。"""
     policy = _policy(wt)
     seats = _reviewers(requested, policy)
     # 同期の前に読む（`--worktree` がメインディレクトリそのものでも、PR のコミットの設定を実行者の設定にしない。PR 3944 の r4-1）
-    return Resolved(policy, seats, read_settings(policy.main, wt))
+    return Resolved(policy, seats, read_settings(policy.main, wt), _unit_text())
 
 
 def _unit_text() -> str:
@@ -515,7 +517,7 @@ def _run_config(args: argparse.Namespace) -> RunConfig:
         handed=_handed(args.findings),
         main=got.policy.main,
         settings=got.settings,
-        unit=_unit_text(),
+        unit=got.unit,
     )
 
 
@@ -638,17 +640,16 @@ def _begin_run(args: argparse.Namespace) -> Optional[int]:
     return None
 
 
-def _write_reviewed(args: argparse.Namespace, cfg: RunConfig, state_repo: Optional[str], head: Optional[str]) -> Optional[int]:
-    """レビューした HEAD があれば `--reviewed-out` へ書き、そのときだけ読んだ PR（今の番号）を `--reviewed-pr-out` へ書く。
-    PR を書けなければ、止まった結果を出した終了コードを返す。"""
-    if not args.reviewed_out or head is None:
+def _write_reviewed(args: argparse.Namespace, got: drive.Outcome) -> Optional[int]:
+    """レビューした HEAD があれば `--reviewed-out` へ書く。その HEAD を head に持つと確かめた PR を読めていれば、続けて
+    `--reviewed-pr-out` へ書く。PR を書けなければ、止まった結果を出した終了コードを返す。"""
+    if not args.reviewed_out or got.reviewed_head is None:
         return None
-    Path(args.reviewed_out).write_text(head + "\n", encoding="utf-8")
-    if args.reviewed_pr_out:
+    Path(args.reviewed_out).write_text(got.reviewed_head + "\n", encoding="utf-8")
+    if args.reviewed_pr_out and got.reviewed_pr is not None:
         try:
-            slug = repo.resolve_target_repo(args.repo, state_repo, cfg.worktree).slug
-            _write_reviewed_pr(Path(args.reviewed_pr_out), slug, store.state_pr(cfg.state_dir, cfg.pr).current_pr)
-        except (OSError, repo.RepoUnresolved) as exc:
+            _write_reviewed_pr(Path(args.reviewed_pr_out), got.reviewed_pr)
+        except OSError as exc:
             return _stop("precondition", f"読んだ PR を {args.reviewed_pr_out} へ書けない: {exc}")
     return None
 
@@ -663,7 +664,8 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     単位の経路の引数（#4369）: `--repo` は保存済みの状態と作業場所のリモートより優先する対象のリポジトリで、子の `gh` にも
     `GH_REPO` で渡す。`--stop-on-hold` は人の判断を待つ指摘が残れば incomplete にする。`--reviewed-pr-out` は
-    `--reviewed-out` を書くときに、読んだ PR を `<所有者>/<リポジトリ>#<番号>` で書く（始めに消す）。
+    `--reviewed-out` を書くときに、実際に読めてその head がレビューした HEAD と一致した PR を `<所有者>/<リポジトリ>#<番号>` で
+    書く（始めに消す。読めなかったか一致しなければ書かない）。
     """
     refused = _begin_run(args)
     if refused is not None:
@@ -692,7 +694,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         # 文書の基準の本文を読めない（指示を作る前。#4285）
         return _stop("invalid", str(exc))
     verdict = fin.finish(got.review, cfg.handed, record_failed=got.mvv_record_failed, stop_on_hold=args.stop_on_hold)
-    refused = _write_reviewed(args, cfg, state_repo, got.reviewed_head)
+    refused = _write_reviewed(args, got)
     if refused is not None:
         return refused
     items, warnings = _report(cfg, got, hub_once)
@@ -700,9 +702,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     return _emit_verdict(verdict, got.mvv, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
 
 
-def _write_reviewed_pr(path: Path, slug: str, pr: int) -> None:
-    """レビューが読んだ PR を `<所有者>/<リポジトリ>#<番号>` で書く。"""
-    path.write_text(f"{slug}#{pr}\n", encoding="utf-8")
+def _write_reviewed_pr(path: Path, ident: str) -> None:
+    """レビューが読んだ PR（`<所有者>/<リポジトリ>#<番号>`）を書く。"""
+    path.write_text(f"{ident}\n", encoding="utf-8")
 
 
 def _report(cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -778,7 +780,10 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--reviewed-out")
     r.add_argument("--repo", help="対象のリポジトリ（<所有者>/<リポジトリ>）。保存済みの状態と作業場所のリモートより優先する")
     r.add_argument("--stop-on-hold", action="store_true", help="人の判断を待つ指摘が残れば incomplete で終える")
-    r.add_argument("--reviewed-pr-out", help="--reviewed-out を書くときに、読んだ PR を <所有者>/<リポジトリ>#<番号> で書く")
+    r.add_argument(
+        "--reviewed-pr-out",
+        help="読んだ PR の head がレビューした HEAD と一致すれば <所有者>/<リポジトリ>#<番号> を書く（--reviewed-out と併用）",
+    )
 
 
 def _with_branch(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
