@@ -342,7 +342,7 @@ graph TD
 - NDF が非対話で起動した AI（`NDF_AI_CHILD` がある）と、人のいない実行（`NDF_FACTORY_RUN` がある）
 - 質問をオーガナイザー（複数の作業をまとめる AI の会話）が受けうる会話（`NDF_RELAY_PLAN` か `NDF_ORGANIZER_DIR` がある）
 
-これらの場合と、`AskUserQuestion` の無いランタイム（Codex など）では、人が端末で打つ。端末を作って入力を代行する、答えの記録を直接書くなど、AI が意図して確認を偽る操作は防がない（「文脈と制約」）。マージの承認も、人の回答の記録がある場合にだけ書く形を採っている（[#4409 の設計](./issue-4409-design.md)）。
+これらの場合と、`AskUserQuestion` の無いランタイム（Codex など）では、人が端末で打つ。端末を作って入力を代行する、答えの記録を直接書くなど、AI が意図して確認を偽る操作は防がない（「文脈と制約」）。マージの承認も、人の回答の記録がある場合にだけ書く形を採っている（[#4409 の確定仕様](../docs/specifications/ndf-production-merge-approval.md)）。
 
 **リポジトリのキー**は、git の共通管理ディレクトリ（`git rev-parse --git-common-dir`）の実体の絶対パスである。今の `adapters/git.py` の `common_dir` を使う。
 
