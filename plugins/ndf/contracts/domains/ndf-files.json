@@ -52,8 +52,6 @@
     {"id": "approval", "location": "issues", "path": "approval-<id>.md", "kind": "document", "tracked": false, "writer": "承認ゲート（P2）", "ends": "cleanup"},
     {"id": "archived-docs", "location": "issues-old", "path": "<name>.md", "kind": "document", "tracked": true, "writer": "クリーンアップの工程", "ends": "kept"},
     {"id": "launch-approvals", "location": "state-root", "path": "launch-approvals.jsonl", "kind": "record", "tracked": false, "writer": "起動の承認と取り消し（#1959。追記だけ・所有者だけが読める）", "ends": "kept"},
-    {"id": "launch-questions", "location": "state-root", "path": "launch-questions.jsonl", "kind": "record", "tracked": false, "writer": "起動の承認のリクエストと、利用者へ出す質問の中身のハッシュ（#1959）", "ends": "kept"},
-    {"id": "launch-answers", "location": "state-root", "path": "launch-answers.jsonl", "kind": "record", "tracked": false, "writer": "起動の承認の質問への人の回答（#1959。hook が書く）", "ends": "kept"},
     {"id": "worker-append-lock", "location": "state-root", "path": "worker-append.lock", "kind": "exchange", "tracked": false, "writer": "worker の報告の追記（C5）", "ends": "kept"},
     {"id": "relay-hub-state", "location": "relay-hub", "path": "hub.json", "kind": "exchange", "tracked": false, "writer": "中継（M3）", "ends": "replaced"},
     {"id": "relay-hub-registry", "location": "relay-hub", "path": "registry.json", "kind": "exchange", "tracked": false, "writer": "中継（M3）", "ends": "replaced"},
