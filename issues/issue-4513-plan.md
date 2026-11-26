@@ -132,17 +132,18 @@
 - 単位ごとの PR を revert すれば戻る。前へ進めるときのデータの移行は無い
 - **現状の手順の問題:** U3 を戻すと、NDF は `outputs.json` を直す前の形（キーと値だけのオブジェクト）で読む。U3 の後に書いた要素の並びの形（`entries`）は、直す前の NDF には `entries` という名前の出力 1 つに見え、出力の形の確かめで落ちてプランの結果に載らない。これまでの案はそのファイルを消して打ち直す手順だったが、それでは進行中のプランがすでに返した出力（`pr`・`product_version` など）を失い、取り戻せない
 - **改める手順:** U3 を戻すときは、消さずに直す前の形へ変換する。変換しても結果の `outputs` は変わらない。直す前の形の値は、`entries` の要素ごとに旧い名前を読み替えてから先頭から重ねた値で、U3 の後の NDF がプランの結果に載せる値と同じだからである。ステップごとの区別は直す前の形に置けないので、原本を退避して残す
-  1. 進行中のプランを止める。工程を進めているプロセス（supervisor と、その下の `ndf progress`・`ndf plan next`・worker）を止め、手順 4 で打ち直すまで再開しない。止めずに変換すると、プランが読み込みと置き換えの間に出力を書き足し、変換がその出力を古い内容で上書きする。また、U3 を戻す前の NDF が変換の後に動くと、`outputs.json` を `entries` の形へ書き戻してしまう
-  2. 進行中のプランの保存先ごとに、下のコマンドで `outputs.json` を変換する。引数の 2 つのパスは例なので、実際の `outputs.json` のパスに置き換え、空白や記号を含んでもよいように引用符で囲む。コマンドは保存先ごとに次の順で処理する
-     - 保存先のディレクトリを開き、以後の読み書きはすべてその記述子を起点にする。自分が持ち主でない保存先や、ほかの利用者が書き込める保存先は変えずに止める。ファイルを開くときはシンボリックリンクをたどらない
+  1. 変換する保存先のプランだけを止める。変換する保存先とは、`outputs.json` が `entries` の並びを持つ保存先である。止めるのは、その保存先へ書き込むプロセス（そのプランの supervisor と、その下の `ndf progress`・`ndf plan next`・worker）と、そのプランを再開するプロセス（conductor による再開と自動の打ち直し）である。手順 4 で打ち直すまで再開しない。ほかのプランは止めずに走らせ続けてよい。ただし、走らせ続けたプランが手順 4 より前に `entries` の形の `outputs.json` を書いたら、その保存先も変換の対象に加え、手順 1 から行う。止めずに変換すると、プランが読み込みと置き換えの間に出力を書き足し、変換がその出力を古い内容で上書きする。また、U3 を戻す前の NDF が変換の後に動くと、`outputs.json` を `entries` の形へ書き戻してしまう
+  2. 手順 1 で止めた、変換する保存先ごとに、下のコマンドで `outputs.json` を変換する。引数の 2 つのパスは例なので、実際の `outputs.json` のパスに置き換え、空白や記号を含んでもよいように引用符で囲む。コマンドは保存先ごとに次の順で処理する
+     - 保存先のディレクトリを、根から 1 要素ずつシンボリックリンクをたどらずに開き、以後の読み書きはすべてその記述子を起点にする。パスの途中にリンクがある、または祖先のディレクトリをほかの利用者が書き換えられる（`worker_paths.check_unshared` と同じ規則）と、ほかの利用者がパスを差し替えて別のプランの保存先を開かせられるので、変えずに止める。自分が持ち主でない保存先や、ほかの利用者が書き込める保存先も止める。ファイルを開くときもリンクをたどらない
      - プランの実行が持つロック（保存先の `plan.lock`）を待たずに取る。取れなければ、プランがまだ動いているので変えずに止める。ロックは保存先の処理を終えるまで持ち続ける
      - 形を見る。`entries` の並びを持たないファイルは変換済みなので、触らずに飛ばす
      - 原本を同じディレクトリの `outputs.json.entries` へ退避する。退避は、乱数の名前の一時ファイルを排他的に作って書き、ディスクへ書き出してから、`os.link` で `outputs.json.entries` の名前を付けて公開する。`os.link` は名前が既にあれば失敗するので、途中で止まっても、書きかけのファイルが `outputs.json.entries` になることは無い。退避先が既にあれば、中身が今の `outputs.json` と同じときだけ、そのまま使って先へ進む。違えば変えずに止める
      - `entries` の要素ごとに、旧い名前 `version` を `product_version` へ読み替える（`internal.stage_values` と同じ規則で、1 つの要素に両方あれば `product_version` を残す）。読み替えた `outputs` を先頭から順に重ね、乱数の名前の一時ファイルへ書き、`os.replace` で `outputs.json` と置き換える。途中で止まっても、`outputs.json` は変換前か変換後のどちらかの形で残る
-  3. コマンドが「止めた」と出した保存先は、理由を見て対処してから、同じコマンドを同じ保存先の並びでもう一度打つ。どこまで処理したか分からないときも同じである。処理済みの保存先は飛ばし、退避した原本は変わらないので、結果は 1 回打ったときと同じになる。理由ごとの対処は次のとおりである
-     - 「プランが動いている」: 手順 1 で止め損ねたプロセスを止める
+  3. 1 つの保存先で止めても、コマンドは残りの保存先の処理を続け、保存先ごとに結果を 1 行ずつ出す。保存先が見つからない、`outputs.json` を JSON として読めないといった失敗も、その保存先の「止めた」として出す。コマンドが「止めた」と出した保存先は、理由を見て対処してから、同じコマンドを同じ保存先の並びでもう一度打つ。どこまで処理したか分からないときも同じである。処理済みの保存先は飛ばし、退避した原本は変わらないので、結果は 1 回打ったときと同じになる。理由ごとの対処は次のとおりである
+     - 「プランが動いている」: その保存先のプランのプロセスのうち、手順 1 で止め損ねたものを止める。ほかのプランは止めない
      - 「退避した原本が今の `outputs.json` と違う」: 前の切り戻しの退避が残っている。2 つのファイルを見比べ、残す方を決めてから、`outputs.json.entries` を別の名前へ移す
-     - 「自分だけが書ける保存先でない」・リンクの誤り: 保存先の持ち主と権限を確かめる。ほかの利用者が差し替えたファイルは開かない
+     - 「自分だけが書ける保存先でない」・「親をほかの利用者が書き換えられる」・リンクを開けない: 保存先とその祖先の持ち主と権限を確かめる。ほかの利用者が差し替えたファイルは開かない。パスの途中のリンクは、リンク先を確かめてから、リンクを含まないパスで打ち直す
+     - 保存先が見つからない・JSON を読めない・`entries` の要素の形が違う: パスと `outputs.json` の中身を確かめる
      - 保存先に残った `.outputs.json.<乱数>.tmp` は、途中で止まった回の一時ファイルなので消してよい
   4. U3 を revert した NDF を入れ、止めたプランを打ち直す。U3 を入れ直すときは、`outputs.json.entries` を `outputs.json` へ戻す
 
@@ -155,14 +156,65 @@
 | ほかのプロセスが `plan.lock` を持っている | 止まり、`outputs.json` は変わらなかった |
 | `outputs.json` がほかのファイルへのシンボリックリンク | 止まり、リンク先のファイルは変わらなかった |
 | 保存先がほかの利用者も書き込める権限（`777`） | 止まり、`outputs.json` は変わらなかった |
+| パスの途中のディレクトリがシンボリックリンク | 止まり、リンク先の `outputs.json` は変わらなかった |
+| 祖先のディレクトリがほかの利用者も書き込める権限（`777`、sticky bit なし） | 止まり、`outputs.json` は変わらなかった |
+| 3 つの保存先を並べ、1 つ目は無く、2 つ目の `outputs.json` は JSON として読めず、3 つ目は直す前の形 | 1 つ目と 2 つ目は止まり、3 つ目は変換した。結果は 3 行出た |
+| `entries` の要素に `outputs` が無い | 止まり、退避先も作らなかった |
 
 止めた保存先が 1 つでもあれば、終了コードは 1 になる。
 
 ```sh
 python3 -I - '/path/to/state-1/outputs.json' '/path/to/state-2/outputs.json' <<'EOF'
-import fcntl, json, os, secrets, sys
+import fcntl, grp, json, os, pwd, secrets, stat, sys
 
 NAME, HELD = "outputs.json", "outputs.json.entries"
+ME = os.geteuid()
+
+class Stop(Exception):
+    """この保存先を変えずに止める理由。"""
+
+def private_group(gid):
+    """gid が実行者だけの個人グループ（主グループで、実行者と同じ名前で、ほかの利用者を項目に持たない）なら真。"""
+    if gid != os.getegid():
+        return False
+    names = [u.pw_name for u in pwd.getpwall() if u.pw_uid == ME]
+    groups = [g for g in grp.getgrall() if g.gr_gid == gid]
+    return bool(names and groups) and groups[0].gr_name == names[0] and set(groups[0].gr_mem) <= {names[0]}
+
+def others_write(st):
+    return bool(st.st_mode & 0o002 or (st.st_mode & 0o020 and not private_group(st.st_gid)))
+
+def fixed(parent, child):
+    """parent の直下の child を、実行者と root のほかが消す・差し替えることができないなら真（worker_paths の _entry_fixed と同じ規則）。"""
+    if parent.st_uid not in (0, ME):
+        return False
+    if not others_write(parent):
+        return True
+    return bool(parent.st_mode & stat.S_ISVTX) and child.st_uid in (0, ME)
+
+def open_dir(path):
+    """根から 1 要素ずつリンクをたどらずに開き、どの祖先もほかの利用者が次の要素を差し替えられないことを確かめる。"""
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in [x for x in path.split("/") if x]:
+            if part in (".", ".."):
+                raise Stop("パスに . か .. がある")
+            try:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except OSError as exc:
+                raise Stop(f"{part} をリンクをたどらずに開けない（無いかリンク）: {exc}") from None
+            if not fixed(os.fstat(fd), os.fstat(child)):
+                os.close(child)
+                raise Stop(f"{part} の親をほかの利用者が書き換えられる")
+            os.close(fd)
+            fd = child
+        st = os.fstat(fd)
+        if st.st_uid != ME or others_write(st):
+            raise Stop("自分だけが書ける保存先でない")
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
 
 def read(d, name):
     fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=d)
@@ -182,51 +234,54 @@ def renamed(out):
     return {("product_version" if k == "version" else k): v for k, v in out.items()
             if not (k == "version" and "product_version" in out)}
 
-def convert(d, p):
-    st = os.fstat(d)
-    if st.st_uid != os.getuid() or st.st_mode & 0o022:
-        return f"止めた（自分だけが書ける保存先でない）: {p}"
+def convert(d):
     lock = os.open("plan.lock", os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=d)
     try:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            return f"止めた（プランが動いている）: {p}"
-        return locked(d, p)
+            raise Stop("プランが動いている") from None
+        return locked(d)
     finally:
         os.close(lock)
 
-def locked(d, p):
+def locked(d):
     raw = read(d, NAME)
     held = json.loads(raw)
     if not (isinstance(held, dict) and isinstance(held.get("entries"), list)):
-        return f"飛ばした（変換済み）: {p}"
+        return "飛ばした（変換済み）"
+    entries = held["entries"]
+    if not all(isinstance(e, dict) and isinstance(e.get("outputs"), dict) for e in entries):
+        raise Stop("entries の要素の形が違う")
     try:
         if read(d, HELD) != raw:
-            return f"止めた（退避した原本が今の outputs.json と違う）: {p}"
+            raise Stop("退避した原本が今の outputs.json と違う")
     except FileNotFoundError:
         tmp = put(d, raw)
         os.link(tmp, HELD, src_dir_fd=d, dst_dir_fd=d, follow_symlinks=False)
         os.unlink(tmp, dir_fd=d)
     merged = {}
-    for e in held["entries"]:
+    for e in entries:
         merged.update(renamed(e["outputs"]))
     tmp = put(d, json.dumps(merged, ensure_ascii=False).encode())
     os.replace(tmp, NAME, src_dir_fd=d, dst_dir_fd=d)
     os.fsync(d)
-    return f"変換した: {p}"
+    return "変換した"
 
 failed = False
 for p in sys.argv[1:]:
-    d = os.open(os.path.dirname(os.path.abspath(p)), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        msg = convert(d, p)
-    except OSError as exc:
-        msg = f"止めた（{exc}）: {p}"
-    finally:
-        os.close(d)
+        d = open_dir(os.path.dirname(os.path.abspath(p)))
+        try:
+            msg = convert(d)
+        finally:
+            os.close(d)
+    except Stop as exc:
+        msg = f"止めた（{exc}）"
+    except (OSError, ValueError) as exc:  # JSON の解析の誤りと文字コードの誤りは ValueError
+        msg = f"止めた（{type(exc).__name__}: {exc}）"
     failed |= msg.startswith("止めた")
-    print(msg)
+    print(f"{msg}: {p}")
 sys.exit(1 if failed else 0)
 EOF
 ```
