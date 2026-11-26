@@ -149,6 +149,7 @@ graph TD
 | 起動記録のインターフェース（新設） | 呼び出し元（worker の起動と Skill を回す起動）から、上の層にある使用量ログの書き込み処理を呼べるよう、エントリポイントで差し込む |
 | 使用量ログの書き込み処理（変更） | `claude -p` の行を書く。行の欄を足す。起動で増えた費用を求め、費用のジャーナルへ足す |
 | 起動の費用を求める関数（新設） | 同じ会話の行の累計から、起動 1 回の費用と区間の合計を求める。ジャーナルへの追記と集計が同じ関数を使う |
+| ステータスラインの費用の表示（変更） | ジャーナルの同じ `launch_id` を 1 回だけ数え、1 時間の境をまたぐ区間を別に表示する |
 
 ```mermaid
 graph TD
@@ -223,7 +224,8 @@ graph TD
 | `launch_id` | 呼び出し元が子プロセスごとに作る一意な値 | 同じ |
 | `name`（足す） | 工程の名前（`.ndf/launch.json` の `steps` のキーと同じ） | 同じ |
 | `run_id`・`step`・`attempt` | プランの実行の id・ステップの id・試行の番号。プランの外の起動では無し | 同じ |
-| `session_id`・`resumed`（足す） | 会話の id と、再開かどうか。取得元は下の「会話の id」 | 呼び出し元が id を指定していなければ `session_id` の欄を置かない |
+| `session_id` | 会話の id。取得元は下の「会話の id と順番」 | 呼び出し元が id を指定していなければ欄を置かない |
+| `session_seq`・`session_started_at`（足す） | その会話の中で何番目の起動か（最初が 0）と、会話の最初の起動の時刻 | 同じ |
 | `usage` | 結果の使用量 | `unknown` |
 | `session_cost_usd`（足す） | 結果の `total_cost_usd` | 欄を置かない |
 | `model` | 主モデルの名前。決め方は下の「モデルの欄」 | 欄を置かない |
@@ -232,45 +234,60 @@ graph TD
 
 子プロセスを起動できなかった場合（CLI のバージョンが下限より古い、起動の枠が取れないなど）は、使った量が無いので行を書かない。
 
-**会話の id。** worker の起動は呼び出し元が id を指定する（`--session-id`、再開は `--resume`）ので、その値を書く。Skill を回す起動は id を指定しないので、結果の JSON の `session_id` を書く。どちらからも取得できなければ欄を省く。`resumed` は `--resume` で起動したときだけ真で、新しい会話の起動は偽である。
+**会話の id と順番。** worker の起動は呼び出し元が id を指定する（`--session-id`、再開は `--resume`）ので、その値を書く。Skill を回す起動は id を指定しないので、結果の JSON の `session_id` を書く。どちらからも取得できなければ欄を省く。
+
+`session_seq` は呼び出し元が数えて渡す。#1959 の範囲で同じ会話を再開するのは worker の再開ループだけで、このループは会話の最初の起動から順に回数を持っている。Skill を回す起動は常に 0 である。番号が 1 つ飛べば、ログへの追記に失敗した起動があると分かる。
 
 **モデルの欄。** 1 回の起動で複数のモデルが動くことがある。`model` は、結果の `modelUsage` のうち、`inputTokens`・`outputTokens`・`cacheReadInputTokens`・`cacheCreationInputTokens` の和が最も大きいモデルである。同じ和なら `contextWindow` が小さいほうを選ぶ。`claude.py` の `context_window` が主モデルを選ぶ規則と同じなので、1 つの関数を両方が使う。`modelUsage` が無いか空なら、欄を省く。`model_usage` には、モデルごとに上の 4 つの値を入れる。
 
 #### 起動の費用の求め方
 
-`session_cost_usd` は、同じ会話の起動をまたいだ累計である。費用は累計の差で求める。差が起動 1 回分になるのは、前の起動の累計がそろう場合だけである。直前の起動が失敗や期限切れで値を持たなければ、差は複数の起動の合計になる。
+`session_cost_usd` は、同じ会話の起動をまたいだ累計である。費用は累計の差で求める。差が起動 1 回分になるのは、番号が 1 つ前の起動の累計がある場合だけである。その起動が失敗して値を持たないか、ログへの追記に失敗して行が無い場合、差は複数の起動の合計（区間の合計）になる。
 
-行は `session_id` ごとに `launched_at` の順に並べる。前の行は、集計期間より前のものも参照する。
+行は `session_id` ごとに `session_seq` の順に並べる。下の表の「前の行」は、番号がより小さく値を持つ行のうち最後の 1 行で、集計期間より前の行も参照する。
 
-| 行 | 起動 1 回の費用 | 区間の合計（複数の起動の合計） |
-| --- | --- | --- |
-| 値があり、`resumed` が偽 | その行の値 | — |
-| 値があり、`resumed` が真で、直前の行に値がある | その行の値 − 直前の行の値 | — |
-| 値があり、`resumed` が真で、直前の行に値が無い。それより前に値のある行がある | 不明 | その行の値 − 値のある最後の行の値 |
-| 値があり、`resumed` が真で、前に値のある行が 1 つも無い。`resumed` が偽の行は使用量ログに残っている | 不明 | その行の値（比較の基準はゼロ） |
-| 値があり、`resumed` が真で、前に値のある行も `resumed` が偽の行も使用量ログに無い | 不明 | — |
-| 値の無い行（`unknown`） | 不明 | — |
-| 差が負 | 不明 | — |
+| 行 | 前の行 | 起動 1 回の費用 | 区間の合計 |
+| --- | --- | --- | --- |
+| 値があり、`session_seq` が 0 | — | その行の値 | — |
+| 値があり、`session_seq` が 1 以上 | 番号が 1 つ前 | その行の値 − 前の行の値 | — |
+| 値があり、`session_seq` が 1 以上 | 番号が 2 つ以上前 | 不明 | その行の値 − 前の行の値 |
+| 値があり、`session_seq` が 1 以上 | 無い | 不明 | その行の値（会話の最初からの累計） |
+| 値の無い行（`unknown`） | — | 不明 | — |
+| 差が負 | — | 不明 | — |
+
+区間には両端の時刻がある。始まりは前の行の `at`（前の行が無ければ `session_started_at`）、終わりはその行の `at` である。
 
 - 不明の起動は 0 として足さず、件数を数える
-- 区間の合計は、どの起動の費用にも割り当てない。区間の起動がすべて集計期間の中にあり、`name` が同じ場合は、工程の費用に足す。worker の再開はこの場合に当たる。期間の境をまたぐ区間は期間の費用に足さず、別に表示する
-- `session_id` の無い行は、`resumed` が偽なのでその行の値を使う
+- 区間の合計は、どの起動の費用にも割り当てない。区間の両端が集計期間の中にあれば、工程の費用に足す。worker の再開は同じ工程なので、これに当たる。期間の境をまたぐ区間は期間の費用に足さず、別に表示する
+- `session_id` の無い行は、`session_seq` が 0 なのでその行の値を使う
 - 同じ `launch_id` の行が複数ある場合は、値を持つ行のうち最初に書かれた 1 行を数える。値を持つ行が無ければ、最初の 1 行を数える
 
 #### ステータスラインの費用との関係
 
-起動の費用の元になる記録は使用量ログの 1 つにする。
+起動の費用の元になる記録は使用量ログの 1 つにし、ステータスラインが読む費用のジャーナル（`print-costs.jsonl`）には、使用量ログから求めた値を写す。
 
-今は、`claude -p` を起動するたびに、`adapters/run_log.py` の `record_cost` が結果の `total_cost_usd` を費用のジャーナル（`print-costs.jsonl`）に追記する。ステータスラインは、その値をそのまま足して直近 1 時間の費用を表示する。再開した起動では累計を足すため、前の起動の分が重複する。
+今は、`claude -p` を起動するたびに、`adapters/run_log.py` の `record_cost` が結果の `total_cost_usd` をジャーナルに追記する。ステータスラインは、直近 1 時間の行をそのまま足して表示する。再開した起動では累計を足すため、前の起動の分が重複する。
 
-full の起動（worker と Skill を回す起動）は、次のように変える。
+full の起動（worker と Skill を回す起動）は、次のように変える。判定と相手役の起動は #1959 では変えず、使用量ログに行を書くようになる [#2944 の設計](./issue-2944-design.md)で同じ処理に移す。
 
-- 起動の関数は、費用のジャーナルへ書かない
-- 使用量ログの書き込み処理が、行を追記するのと同じ錠の中で、上の表の規則で増えた分を求め、その値をジャーナルへ足す
-- ステータスラインは使った金額の合計を表示するので、区間の合計もそのまま足す。不明の場合は何も足さない
-- 使用量ログへ書けなかった起動は、ジャーナルにも足さず、警告を出す
+| 項目 | コントラクト |
+| --- | --- |
+| 書く側 | 起動の関数はジャーナルへ書かない。使用量ログの書き込み処理が、行の追記と同じ錠の中で上の表の規則を当て、ジャーナルへ 1 行足す |
+| ジャーナルの行 | 今の欄に `launch_id` を足す。`usd` は起動 1 回の費用か区間の合計。区間の合計の行は、区間の始まりの時刻 `from` も持つ（終わりは `at`） |
+| 不明の起動 | ジャーナルに何も足さない |
+| 同じ起動の記録を打ち直した場合 | 使用量ログに同じ `launch_id` の行があれば追記しない。ジャーナルの行はその行から求め直して足す。ステータスラインは同じ `launch_id` を 1 回だけ数えるので、使用量ログだけ書けた後の打ち直しでも、費用は 1 回分になる |
+| 区間の合計の表示 | `from` と `at` が直近 1 時間に収まれば、表示額に足す。1 時間の境をまたぐ区間は、そのうち直近 1 時間の金額が分からないので表示額に足さず、`（ほかに区間 $<額>）` と別に表示する |
+| 使用量ログへ書けない | ジャーナルにも足さず、警告を出す。次の起動の番号が飛ぶので、その分は区間の合計に入る |
 
-判定と相手役の起動は #1959 では変えない。使用量ログに行を書くようになる [#2944 の設計](./issue-2944-design.md)で、同じ処理に移す。
+**ジャーナルに写す理由。** ステータスラインは費用の合計を 30 秒ごとに数え直す。使用量ログは削除せずに増え続けるが、ジャーナルは 5 MB を超えると直近 1 日の行だけに切り詰める。2026-11-26 に、合成した行で両方の読み方の処理時間を測った（8 コアの Linux、7 回の中央値）。
+
+| 行数 | ジャーナルを jq で合計（写す案） | 使用量ログから求める（Python の起動を含む。写さない案） |
+| ---: | ---: | ---: |
+| 1,000 | 5 ms（62 KB） | 23 ms（0.7 MB） |
+| 10,000 | 34 ms（0.6 MB） | 72 ms（6.8 MB） |
+| 100,000 | 293 ms（6.2 MB） | 535 ms（68 MB） |
+
+写さない案は、対話の費用を持つジャーナルの読み取りに加えて、使用量ログの読み取りが毎回かかる。その時間は使用量ログとともに増え続ける。写す案で増えるのは、起動の終了ごとに 1 回の使用量ログの読み取りである。起動は分単位かかるので、この読み取りは影響しない。
 
 ## 入出力のコントラクト
 
@@ -438,15 +455,17 @@ sequenceDiagram
 | 条件 7 | 手動: MCP の無い設定ディレクトリで起動して終わる | — |
 | 条件 8・I3 | 起動の前後で設定のファイルが変わらない | 指定を設定ファイルへ書く実装にすると落ちる |
 | I4 | 使用量ログへ書けないとき、工程の結果は変わらず警告が出る | 例外を外へ出すと落ちる |
-| 条件 3 | 失敗（値なし）の後に再開した行は、起動 1 回の費用が不明になり、差は区間の合計になる。同じ `launch_id` の行は 1 回だけ数える | 差を後の起動に割り当てると落ちる |
+| 条件 3 | 失敗（値なし）の後に再開した行と、`session_seq` が飛んだ行は、起動 1 回の費用が不明になり、差は区間の合計になる。同じ `launch_id` の行は 1 回だけ数える | 直前の行との差をそのまま起動 1 回分にすると落ちる |
 | 条件 3 | 再開した full の起動で、費用のジャーナルに足す値が累計でなく増えた分になる | 起動の関数が累計をそのまま足すと落ちる |
+| 条件 3 | 同じ起動の記録を 2 回打っても、使用量ログは 1 行で、ステータスラインの合計は 1 回分になる | `launch_id` を見ずに足すと落ちる |
+| 条件 3 | 1 時間の境をまたぐ区間の行は、ステータスラインの合計に足されず、別に表示される | 終了の時刻だけで足すと落ちる |
 | 条件 3 | 呼び出し元が id を指定しない起動は結果の `session_id` を書き、複数のモデルがある結果はトークンの和が最大のモデルを `model` にする | 指定値だけを書くか、先頭のモデルを選ぶと落ちる |
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1959 | 実装する | — | `plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`（新設）、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/__main__.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/records/usage_decide.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`（新設）、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/entrypoints.json`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/worktree/references/ndf-settings.md`、`plugins/ndf/tests/adapters/test_claude_args.py`、`plugins/ndf/tests/adapters/test_launch_settings.py`（新設）、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py` |
+| #1959 | 実装する | — | `plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`（新設）、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/__main__.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/records/usage_decide.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`（新設）、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/entrypoints.json`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/worktree/references/ndf-settings.md`、`plugins/ndf/tests/adapters/test_claude_args.py`、`plugins/ndf/tests/adapters/test_launch_settings.py`（新設）、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py` |
 
 ## 未確認のまま残ること
 
