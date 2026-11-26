@@ -8,6 +8,8 @@
 
 ## 地図
 
+### ディレクトリと依存の向き
+
 ```text
 src/ndf/
 ├── core/plan/{units_decide*, units_files*, cli, inputs_decide, queue_decide, review_units_decide}.py
@@ -31,6 +33,7 @@ contracts/
 `*` は新設するファイルである。
 
 依存の向きは、層の決まり（`contracts` → `adapters` → `core` → `progress` → `domains`。後ろが前を読む）のとおりで、循環は無い。
+
 - `units_decide` は標準ライブラリだけを読む
 - `units_files` は `units_decide`・`inputs_decide`・`adapters` を読む
 - `progress/design_record` は `core` と `progress/model`・`folding` だけを読む。読む側は `run`・`gate`・`units_invoke` である
@@ -43,6 +46,8 @@ contracts/
 | `progress/run.py` | 965 | 呼び出しだけを足す（25 行まで） |
 | `progress/command.py` | 987 | サブコマンドの登録だけを足す（10 行まで） |
 | `adapters/github.py` | 1,000 | #4369 が分ける |
+
+### ファイルごとの役割
 
 | パス | 種類 | 役割 | 依存する先 | 最上位の関数 |
 | --- | --- | --- | --- | --- |
@@ -464,10 +469,14 @@ contracts/
 
 満たす決定: 決定 1・11、I8。
 
+### 関数の仕様
+
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `destination_errors` | `units_sync.py` | 新設 | `(git, record, context, machine_repo: str) -> list[str]` | 送り先のリポジトリとブランチが、スプリントの記録と違う点 |
 | `sync` | 同上 | 新設 | `(st, machine_id, cwd, hub) -> dict` | 確かめてから取り込み、push する |
+
+### 送り先の確かめ
 
 `destination_errors` は次の 4 つを見る。1 つでも違えば、取り込みもコミットも push もしない。
 
@@ -483,7 +492,9 @@ contracts/
 - URL は認証の値を含みうるので、理由には `<所有者>/<リポジトリ>` だけを出す
 - push 先は取得先と別の URL を設定できるので、取得先の URL では確かめない。`git remote get-url --push --all` は、`pushurl` の全部を 1 行ずつ返す（git 2.53.0 で実行して確かめた）
 
-`sync` の手順:
+### 処理の手順
+
+`sync` の手順は次のとおりである。
 
 1. `approved_of`。無ければ `stopped`
 2. `destination_errors`。1 件でもあれば `stopped`（`refused`）
@@ -499,6 +510,8 @@ contracts/
 
 `ndf progress next` の経路は、手順 4 で `ok` を返して終わる。設計 PR の head がスプリントブランチ自身だからである。
 
+### 異常系の処理
+
 | 失敗 | 扱い（停止理由の種類） |
 | --- | --- |
 | 承認の記録が無い | `precondition` |
@@ -507,7 +520,9 @@ contracts/
 | 競合 | `base_conflict`。ファイル名 |
 | push の拒否 | `precondition`。強制しない |
 
-単体テストの観点: 次のどれでもコミットと push が起きないことを、リモートの ref で確かめる。
+### 単体テストの観点
+
+次のどれでもコミットと push が起きないことを、リモートの ref で確かめる。
 
 - 別のリポジトリの push 先（`pushurl` が 2 つのうち 1 つだけ違う場合を含む）
 - 別のブランチに切り替えた作業場所
