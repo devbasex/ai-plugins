@@ -4,8 +4,8 @@
 ブランチは作業場所が今いるものを使う（受け入れ条件 2）。文脈の `branch`（工程「作業場所の用意」が登録したブランチ）は
 差し込みに使わない。
 
-単位ごとに実装のプランを流すための、呼び出し（`StageRun`）の追加の欄と、止まった実装の打ち直しの開始点も
-ここで確かめる。PR の番号の書き戻しは `tests/core/plan/test_steps.py` で確かめる。
+単位ごとに実装のプランを流すための、呼び出し（`StageRun`）の追加の欄と、PR の番号の無い古い実行の記録の打ち直しも
+ここで確かめる。
 """
 
 from __future__ import annotations
@@ -188,9 +188,32 @@ def test_the_start_of_the_run_is_used_only_without_a_start_from_the_record(tmp_p
     assert argv[argv.index("--from") + 1] == "a"
 
 
-def test_an_impl_stopped_after_the_pr_keeps_its_start_without_the_pr_number(tmp_path):
-    _record(tmp_path, "impl-sprint/s1", None, stopped_at="ci-fix")
-    assert invoke.plan_start(tmp_path) == "ci-fix"
+PASSES_PR = ["done-check", "work", "acceptance", "test", "fix", "test-repeat", "push", "pr", "fix-push", "base-sync", "fix-base"]
+
+
+def _impl_steps() -> list[str]:
+    return [s["id"] for s in route.expanded(route.templates()["impl"])["steps"]]
+
+
+@pytest.mark.parametrize("step", _impl_steps())
+@pytest.mark.parametrize("how", ["止まった結果", "回の記録"])
+def test_an_impl_without_the_saved_pr_number_goes_back_to_the_pr_step(tmp_path, step, how):
+    # PR の番号を保存する前に始めた実装は、PR を作った後で止まっていても番号を持たない
+    work = tmp_path / "w"
+    _record(work, "impl-sprint/s1", None if how == "止まった結果" else step, stopped_at=step if how == "止まった結果" else None)
+    assert invoke.plan_start(work) == (step if step in PASSES_PR else "pr")
+    (work / "pr-number").write_text("7\n", encoding="utf-8")
+    assert invoke.plan_start(work) == step
+
+
+def test_an_impl_that_started_from_the_beginning_stays_there_without_the_pr_number(tmp_path):
+    _record(tmp_path, "impl-sprint/s1", None)
+    assert invoke.plan_start(tmp_path) is None
+
+
+def test_other_plans_keep_their_start_without_the_pr_number(tmp_path):
+    _record(tmp_path, "design-design/s1", None, stopped_at="conflict-check")
+    assert invoke.plan_start(tmp_path) == "conflict-check"
 
 
 # --- 前の試行の値と設定 ---------------------------------------------------------------------

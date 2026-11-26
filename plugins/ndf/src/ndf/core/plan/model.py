@@ -4,9 +4,6 @@
 前のステップの承認ゲートを人へ届ける役（`accepts_gate`）と、PR を `{queue_prs}` に入れないリリースのプラン（`release`）を持てる。
 ステップは打つコマンド（`run`）と、止まったときのルート（`on_cause`・`on_fail`）・承認の回答のルート（`on_answer`）を持つ。
 外部への操作のステップは、済んだかを相手の状態から確かめるコマンド（`probe`）を持てる（B9）。
-前のステップが書くファイルを読むステップは、ファイルが無いときに書き戻す指定を持てる。指定はプランの `restores`
-（名前 → `file`（読むファイル）・`step`（書き戻しに `probe` を使うステップ）・`missing`（`probe` が対象を見つけないときの理由の文））
-に 1 度だけ書き、ステップは `restore` にその名前を書く。`restore` の無いステップは書き戻さない。
 ルートの値はプランのステップの id か `end`・`stop`・`retry` のどれかで、`on_cause` の種類は停止理由の表にある（IS3）。
 `on_answer` の回答は回答の語彙（`contracts/facts/answers.json`。結果 JSON の `routes` のキーになる）にある。
 """
@@ -16,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -37,15 +34,6 @@ class PlanError(Exception):
 
 
 @dataclass(frozen=True)
-class Restore:
-    """ステップを打つ前に、`file` が無いか空なら、ステップ `step` の `probe` で書き戻す指定。"""
-
-    file: str
-    step: str
-    missing: str
-
-
-@dataclass(frozen=True)
 class Step:
     """プランのステップ 1 つ。"""
 
@@ -60,7 +48,6 @@ class Step:
     timeout: Optional[float] = None
     location: str = IN_WORKTREE
     probe: Optional[tuple[str, ...]] = None
-    restore: Optional[Restore] = None
 
 
 @dataclass(frozen=True)
@@ -133,29 +120,7 @@ def _command(sid: str, raw: Mapping[str, Any], key: str, required: bool) -> Opti
     return tuple(value)
 
 
-def _restores(raw: Mapping[str, Any]) -> dict[str, Restore]:
-    """プランの `restores`（名前 → 指定）。指定が `Restore` の欄だけを空でない文字列で持たなければ `PlanError`。"""
-    held = _opt(raw, "restores", {})
-    if not isinstance(held, Mapping):
-        raise PlanError("restores は名前と指定の対応にする")
-    keys = [f.name for f in fields(Restore)]
-    for name, value in held.items():
-        if not isinstance(value, Mapping) or set(value) != set(keys) or not all(isinstance(v, str) and v for v in value.values()):
-            raise PlanError(f"restores の {name} は {'・'.join(keys)} を空でない文字列で持つ")
-    return {name: Restore(**value) for name, value in held.items()}
-
-
-def _restore(sid: str, raw: Mapping[str, Any], restores: Mapping[str, Restore]) -> Optional[Restore]:
-    """ステップの `restore`（`restores` の名前）が指す指定。無ければ None、知らない名前なら `PlanError`。"""
-    if "restore" not in raw:
-        return None
-    name = raw["restore"]
-    if not isinstance(name, str) or name not in restores:
-        raise PlanError(f"ステップ {sid} の restore が restores に無い: {name}")
-    return restores[name]
-
-
-def _step(raw: Mapping[str, Any], restores: Mapping[str, Restore]) -> Step:
+def _step(raw: Mapping[str, Any]) -> Step:
     if not isinstance(raw, Mapping) or not isinstance(raw.get("id"), str) or not raw["id"]:
         raise PlanError(f"ステップに id が無い: {raw!r}")
     sid = raw["id"]
@@ -174,7 +139,6 @@ def _step(raw: Mapping[str, Any], restores: Mapping[str, Restore]) -> Step:
         timeout=raw.get("timeout"),
         location=_opt(raw, "in", IN_WORKTREE),
         probe=probe,
-        restore=_restore(sid, raw, restores),
     )
 
 
@@ -204,24 +168,15 @@ def _answer_errors(step: Step, answers: set[str]) -> list[str]:
     return [f"ステップ {step.id} の on_answer.{a} は回答の語彙に無い" for a in step.on_answer if a not in answers]
 
 
-def _restore_errors(step: Step, probed: set[str]) -> list[str]:
-    """書き戻しに使うステップが、`probe` を持つステップでない誤り。"""
-    if step.restore is None or step.restore.step in probed:
-        return []
-    return [f"ステップ {step.id} の restore.step は probe を持つステップにする: {step.restore.step}"]
-
-
 def errors(plan: Plan) -> list[str]:
     """プランの形の誤り。空なら流せる。"""
     ids = [s.id for s in plan.steps]
     errs = [f"ステップの id が重なる: {i}" for i in sorted({i for i in ids if ids.count(i) > 1})]
     answers = set(facts.ids(result.ANSWERS))
-    probed = {s.id for s in plan.steps if s.probe is not None}
     for step in plan.steps:
         errs += _target_errors(step, set(ids))
         errs += _kind_errors(step)
         errs += _answer_errors(step, answers)
-        errs += _restore_errors(step, probed)
         if step.location not in LOCATIONS:
             errs.append(f"ステップ {step.id} の in は {' か '.join(LOCATIONS)}: {step.location}")
     if plan.limit < 1:
@@ -255,8 +210,7 @@ def parse(raw: Any) -> Plan:
     held = worker_kinds.plan_values_error(raw)
     if held is not None:
         raise PlanError(f"プラン {raw['name']} の {held}")
-    restores = _restores(raw)
-    steps = tuple(_step(s, restores) for s in steps_raw)
+    steps = tuple(_step(s) for s in steps_raw)
     needs = _strings(raw, "needs")
     plan = Plan(
         name=raw["name"],

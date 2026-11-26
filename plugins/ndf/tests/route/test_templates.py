@@ -348,6 +348,15 @@ def test_pr_probe_does_not_take_a_pr_of_a_fork_alone(tmp_path):
     assert not (state / "pr-number").exists()
 
 
+def test_pr_probe_does_not_read_a_failed_listing_as_no_pr(tmp_path):
+    # 照会の失敗を「開いた PR が無い」（終了コード 1）にすると、プランの実行が PR を作りに進む
+    step = step_of(plan_of("implement"), "pr")
+    state = _state(tmp_path)
+    done = _probe_of(step, tmp_path, _recording_gh(tmp_path, "exit 1"), state)
+    assert (done.returncode, json.loads(done.stdout)["status"]) == (2, "stopped")
+    assert not (state / "pr-number").exists()
+
+
 def test_pull_request_template_probe_skips_fork_prs(tmp_path):
     step = step_of(plan_of("pull_request", refs=[]), "pr")
     done = _probe_of(step, tmp_path, _listing_gh(tmp_path, _PR_LIST), _state(tmp_path))
@@ -382,20 +391,6 @@ def test_impl_conflict_check_and_ci_stop_without_a_pr_number(tmp_path, step_id, 
     got = run_step(step, tmp_path, bindir, {"state_dir": str(state)})
     assert (got["status"], got["code"]) == ("stopped", code)
     assert not seen.exists()
-
-
-@pytest.mark.parametrize(
-    ("review", "restored"),
-    [
-        (route.review_launch("impl", "u1", "origin/develop"), True),
-        (route.unit_review_launch("o/r", ["my-review"]), True),
-        (["my-review"], False),  # 設定で差し替えた起動は番号を読まない
-    ],
-)
-def test_impl_review_steps_restore_the_pr_number_only_when_the_launch_reads_it(review, restored):
-    found = model.parse(plan_of("implement", review=review))
-    kept = {s.id for s in found.steps if s.restore is not None}
-    assert kept == {"conflict-check", "ci"} | ({"review", "review-delta"} if restored else set())
 
 
 def test_impl_default_review_reads_the_saved_pr_number(tmp_path):

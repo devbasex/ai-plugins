@@ -18,7 +18,8 @@
 差し込みの値（`--set`）でなく、埋めたプランの作業場所（プランの `worktree`）で渡す。差し込みの `worktree` はプランの
 実行が決まった名前として持ち、上書きを断るためである。止まったプランを打ち直すときは、前の回の結果の打ち直し（`next` の `--from`）と
 同じく止まったステップから新しい回を始め、差し込み `progress_attempt` に打ち直しの数を載せて回のキーを変える。同じ引数で
-打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。skill と script は入力の作業場所で打つ。
+打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。実装のプランが PR の番号の記録を持たずに PR の
+ステップより先で止まっていれば、PR のステップから始める（`plan_start`）。skill と script は入力の作業場所で打つ。
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
 テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の設定から読み（レビューは設定が
@@ -69,6 +70,13 @@ APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
 # プランの実行の保存先に残す、回の打ち直しの数（`plan_attempt`）と、それを渡す差し込みの名前
 ATTEMPT_FILE = "progress-attempt.json"
 ATTEMPT_SET = "progress_attempt"
+# 実装のプランの名前（`impl-<ブランチ>`）の頭と、打ち直しで開始点を変えないステップ（`pr` のステップを通ってから、保存した
+# PR の番号を読むステップへ進むもの。`plan_start`）
+IMPL_PLAN_PREFIX = "impl-"
+PR_STEP = "pr"
+REACHES_PR_STEP = frozenset(
+    {"done-check", "work", "acceptance", "test", "fix", "test-repeat", "push", PR_STEP, "fix-push", "base-sync", "fix-base"}
+)
 
 
 class StageInputError(Exception):
@@ -629,14 +637,27 @@ def plan_start(work_dir: Path) -> Optional[str]:
     """プランを打ち直す開始点。前の回が止まっていれば、その結果の打ち直し（`next`）の `--from`（止まったステップ）。
 
     止まっていなければ前の回の開始点（承認の回答を渡すときも同じ回に届く）。前の回が無ければ None（初めから）。
+    実装のプランは、PR の番号の記録の無い保存先を、番号を読むステップから流さない（`_before_pr_number`）。
     """
     record, done = plan_runs.previous(work_dir)
     if record is None:
         return None
     again = plan_runs.from_of(done["next"]) if done is not None and done["status"] == result.STOPPED and "next" in done else None
     if again is not None:
-        return again
-    return record["start"] if "start" in record and isinstance(record["start"], str) else None
+        return _before_pr_number(work_dir, record, again)
+    start = record["start"] if "start" in record else None
+    return _before_pr_number(work_dir, record, start) if isinstance(start, str) else None
+
+
+def _before_pr_number(work_dir: Path, record: Mapping[str, Any], start: str) -> str:
+    """実装のプランの開始点 `start` が `pr` のステップを通らず、保存先に PR の番号の記録が無ければ `pr`。ほかは `start`。
+
+    番号を保存する前のバージョンで始めた実装は、PR を作った後で止まっていても番号を持たず、衝突の確かめ・レビュー・CI が番号を
+    読めずに止まり続ける。`pr` のステップは開いた PR を探して番号を書き、続くステップを順に流す（#4369）。
+    """
+    impl = "name" in record and str(record["name"]).startswith(IMPL_PLAN_PREFIX)
+    saved = Path(route.PR_NUMBER_FILE.replace("{state_dir}", str(work_dir)))
+    return PR_STEP if impl and start not in REACHES_PR_STEP and not saved.is_file() else start
 
 
 def stored_gate_routes(work_dir: Path) -> Optional[dict[str, Any]]:
@@ -684,9 +705,10 @@ def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -
     else:
         start = plan_start(work_dir)
         start = start if start is not None else run.start
-    plan_file = plan_path(run, work_dir, cwd)
     attempt = plan_attempt(run, work_dir)
-    argv = ndf_command(PLAN, "next", str(plan_file), *(["--from", start] if start else []), "--state-dir", str(work_dir))
+    argv = ndf_command(
+        PLAN, "next", str(plan_path(run, work_dir, cwd)), *(["--from", start] if start else []), "--state-dir", str(work_dir)
+    )
     for key, value in run.inputs.items():
         if key != "worktree":
             argv += ["--set", f"{key}={_set_value(value)}"]
@@ -741,16 +763,7 @@ PLAN_FAILURES = (
     worker_paths.EntryError,
     internal.InternalError,
     plan_runs.UnitsStopped,
-    durable.StoreStopped,
 )
-
-
-def _carried_failure(name: str, exc: Exception) -> dict[str, Any]:
-    """停止理由の語を例外が持つ失敗の `stopped` の結果 JSON。"""
-    if isinstance(exc, plan_runs.UnitsStopped):
-        # 工程のステートマシンは `cause` だけを残すので、理由は `detail` の文に持たせる（#4369）
-        return result.stopped(PLAN, exc.kind, f"プラン {name} を単位ごとに流せない: {exc.detail}", items=exc.items)
-    return exc.stopped(PLAN)
 
 
 def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
@@ -760,8 +773,9 @@ def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
     し、名前と出所を `items` に並べる（決定 4）。ほかの分類は工程から呼ぶ経路（`_call_plan`）と起動の前の確かめ
     （`progress.run._start`）で同じである。
     """
-    if isinstance(exc, (plan_runs.UnitsStopped, durable.StoreStopped)):
-        return _carried_failure(name, exc)
+    if isinstance(exc, plan_runs.UnitsStopped):
+        # 工程のステートマシンは `cause` だけを残すので、理由は `detail` の文に持たせる（#4369）
+        return result.stopped(PLAN, exc.kind, f"プラン {name} を単位ごとに流せない: {exc.detail}", items=exc.items)
     if isinstance(exc, (TemplateValuesMissing, KindInputsMissing)):
         detail = f"プラン {name} の差し込み {', '.join(exc.missing)} を決められない"
         return result.stopped(PLAN, "precondition", detail, items=exc.items)

@@ -18,9 +18,6 @@
 - ほか: 済んだかを確かめられない。`run` を打たずに、その種類（結果 JSON の種類か `exit_cause`、無ければ unknown）で止まる
   （結果 JSON の `gaps` はそのまま運ぶ）
 
-書き戻しの指定（`restore`）を持つステップは、指定のファイルが無ければ、打つ直前に指定のステップの `probe` で書き戻す。
-`probe` が対象を見つけないか、照会か保存に失敗するか、ファイルが書かれなければ、ステップを打たずに止まる（#4369）。
-
 見本（ブランチの push。リモートの head が手元の head と同じなら済んでいる）:
 
     {"id": "push", "run": ["git", "push", "origin", "HEAD:refs/heads/feat/x"],
@@ -193,11 +190,6 @@ def _gate_reaches_production(found: dict[str, Any]) -> Optional[bool]:
     return got if found["status"] == GATE and isinstance(got, bool) else None
 
 
-def _timeout_of(step: Step) -> float:
-    """ステップと `probe` を打つ上限の秒（ステップの `timeout`、無ければ方針の値）。"""
-    return step.timeout if step.timeout is not None else limits.seconds(RUN_STEP_LIMIT)
-
-
 def _probe(ctx: StepContext, step: Step, timeout: float) -> Optional[dict[str, Any]]:
     """`probe` を打ち、済んでいれば ok の結果、確かめられなければ止まった結果、まだなら None を返す（B9）。"""
     args = assemble_decide.fill(step.probe if step.probe is not None else (), ctx.values)
@@ -218,35 +210,6 @@ def _probe(ctx: StepContext, step: Step, timeout: float) -> Optional[dict[str, A
 
 def _stopped(kind: str, summary: str) -> dict[str, Any]:
     return _plain(STOPPED, kind, summary, None)
-
-
-def _has_content(path: Path) -> bool:
-    return path.is_file() and path.stat().st_size > 0
-
-
-def _restore(ctx: StepContext, step: Step) -> Optional[dict[str, Any]]:
-    """`step` の `restore` のファイルが無いか空なら、指定のステップの `probe` で書き戻す。戻せなければ止まった結果。
-
-    ステップを打つ直前に呼ぶので、そのファイルを読まずに終わる再開では `probe` を打たない（#4369）。相対パスは、読むステップの
-    コマンドと同じく、そのステップの作業ディレクトリから解く。`probe` が通ってもファイルが無いか空なら、書き戻せていない。
-    """
-    if step.restore is None:
-        return None
-    saved = Path(assemble_decide.fill((step.restore.file,), ctx.values)[0])
-    base = workdir(ctx.plan, step)
-    if base is not None:
-        saved = Path(base) / saved
-    if _has_content(saved):
-        return None
-    writer = ctx.plan.step(step.restore.step)
-    got = _probe(ctx, writer, _timeout_of(writer))
-    if got is None:
-        return _stopped("precondition", f"{saved.name} を書き戻せない: {step.restore.missing}")
-    if got["status"] != OK:
-        return {**got, "summary": f"{saved.name} を書き戻せない: {got['summary']}"}
-    if not _has_content(saved):
-        return _stopped("precondition", f"{saved.name} を書き戻せない: ステップ {writer.id} の probe は通ったが、ファイルが無いか空")
-    return None
 
 
 def _log_path(ctx: StepContext, step: Step) -> Path:
@@ -274,10 +237,7 @@ def run(ctx: StepContext, step: Step) -> dict[str, Any]:
         ensure_previous_stopped(ctx.state_dir, step.id)
     except StepRefused as exc:
         return _stopped("refused", str(exc))
-    unrestored = _restore(ctx, step)
-    if unrestored is not None:
-        return run_log.redact(unrestored)
-    timeout = _timeout_of(step)
+    timeout = step.timeout if step.timeout is not None else limits.seconds(RUN_STEP_LIMIT)
     if step.probe is not None:
         checked = _probe(ctx, step, timeout)
         if checked is not None:
