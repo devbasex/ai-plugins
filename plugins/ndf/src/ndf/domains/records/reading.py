@@ -89,8 +89,13 @@ def materials_path(gate: str, number: int) -> Path:
 
 def append_doc(row: Mapping[str, Any]) -> dict[str, Any]:
     """読ませたものの記録へ 1 行足し、書いた行を返す。形が違えば書かずに `ReadingInvalid`。"""
+    return _append_checked(docs_path, row, kind="reading-docs")
+
+
+def _append_checked(path: Callable[[], Path], row: Mapping[str, Any], *, kind: str) -> dict[str, Any]:
+    """記録へ 1 行足し、書いた行を返す。形が違えば書かずに `ReadingInvalid`。"""
     try:
-        return jsonl.append_locked(docs_path(), row, kind="reading-docs")
+        return jsonl.append_locked(path(), row, kind=kind)
     except internal.InternalError as exc:
         if exc.kind != "invalid":
             raise
@@ -322,12 +327,7 @@ def add(entry: Mapping[str, Any], root: Path, repo: Optional[str] = None) -> dic
     row = {"repo": repo if repo is not None else Git(root).remote_repo(), "question_key": key, "prs": entry["prs"], "reads": entry["reads"]}
     if not rd.has_used_keys(row):
         raise ReadingInvalid("prs は、number（整数）・branch（1 つのブランチの名前）・head（SHA）を持つオブジェクトの配列にする")
-    try:
-        return jsonl.append_locked(checks_path(), row, kind="reading-check")
-    except internal.InternalError as exc:
-        if exc.kind != "invalid":
-            raise
-        raise ReadingInvalid(str(exc)) from exc
+    return _append_checked(checks_path, row, kind="reading-check")
 
 
 def rows() -> list[dict[str, Any]]:
