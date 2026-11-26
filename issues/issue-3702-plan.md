@@ -122,7 +122,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/src/ndf/core/plan/review_units_decide.py`
   - `plugins/ndf/src/ndf/progress/units_invoke.py`
   - `plugins/ndf/tests/progress/test_units_invoke.py`
-- **変更内容:** `Unit` の欄、`lineup_from_files`、`prepare` の「始める前」の 1〜5、`unit.md` の担当タスクの本文、代表の課題。分け方の承認が要らず単位のファイルの無いスプリントは、#4369 の表の経路のままにする（Task 16 が変換に置き換える）（先に要る: Task 6・8）
+- **変更内容:** `Unit` の欄、`lineup_from_files`、`prepare` の「始める前」の 1〜5 と、6 の実装計画を省いた課題を課題ごとの単位にする分岐、`unit.md` の担当タスクの本文、代表の課題。分け方の承認が要らず単位のファイルの無いスプリントは、#4369 の表の経路のままにする（Task 16 が変換に置き換える）（先に要る: Task 6・8）
 - **満たす受け入れ条件:** 3・4
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -192,12 +192,13 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/src/ndf/progress/invoke.py`
   - `plugins/ndf/contracts/worker/kinds.json`
   - `plugins/ndf/contracts/templates/implementation-plan.json`
+  - `plugins/ndf/contracts/templates/implementation-plan-convert.json`
   - `plugins/ndf/tests/progress/test_units_convert.py`
 - **変更内容:**（先に要る: Task 10）
   - `units_convert`
   - `prepare` の 3
   - `per_unit` の無い定義で単位の欄があるときの分岐
-  - テンプレート `implementation-plan` の差し込み `convert` と、作業の定義の変換のときだけの指示
+  - push しないテンプレート `implementation-plan-convert`（差し込み `convert`）と、作業の定義の変換のときだけの指示
   - 変換はこの単位のマージの時点から、単位の欄を持つ今のスプリントに働く。単位の欄が無いスプリントが今のまま流れることと、変換の再開の各段階をテストで縛る
 - **満たす受け入れ条件:** 3・4
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
@@ -216,7 +217,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/tests/progress/test_sprint_templates.py`
   - `plugins/ndf/docs/contracts/env.md`
 - **変更内容:**（先に要る: Task 4・5・9）
-  - `definition._stage_def` の `mvv_gate` の出力
+  - `definition._stage_def` の `mvv_gate` の出力と、モードごとの必須の入力
   - `_env_inputs`
   - テンプレート `design-pr-review`・`docs-ci`・`design-merge-approved`
   - `invoke` の記録の保存先・指摘のファイル・承認の値・`PRODUCTION_GATE`
@@ -235,7 +236,12 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/contracts/workflow/modes/legacy-refactor.json`
   - `plugins/ndf/contracts/workflow/context.schema.json`
   - `plugins/ndf/contracts/worker/kinds.json`
-  - `plugins/ndf/contracts/schemas/io/`
+  - `plugins/ndf/contracts/schemas/io/plan.args.schema.json`
+  - `plugins/ndf/contracts/schemas/io/plan.result.schema.json`
+  - `plugins/ndf/contracts/schemas/io/progress.args.schema.json`
+  - `plugins/ndf/contracts/schemas/io/progress.result.schema.json`
+  - `plugins/ndf/contracts/schemas/io/ci.args.schema.json`
+  - `plugins/ndf/contracts/schemas/io/cross-review.args.schema.json`
   - `plugins/ndf/tests/progress/test_definition.py`
 - **変更内容:** 工程の定義 4 つと新設の `plan-design`、2 つのモード、文脈の `plan_omitted`、作業の定義の単位のファイルと `plan_omitted`。入出力の規約を生成し直す。#4420 の条件 1・2 のテストを足す（先に要る: Task 7・14・15・16・17）
 - **満たす受け入れ条件:** 1・4
