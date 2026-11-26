@@ -27,6 +27,7 @@ PR 1 件ごとに、メインディレクトリの排他（`mainlock`）を取�
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional, Protocol
@@ -40,6 +41,8 @@ from ndf.domains.worktree import mainlock, merged_decide, ndf_settings, outcomes
 
 # 未コミットの変更を理由に並べるパスの上限
 LISTED = 5
+# 消してよい承認資料のコピーの名前（<gate>-<PR の番号>.md）。ほかの名前のファイルは NDF が作ったものと扱わない
+MATERIAL_COPY = re.compile(r"(?:design|release)-([0-9]+)\.md")
 
 
 class PullsReader(Protocol):
@@ -188,10 +191,10 @@ def _material_copies(repo: str) -> dict[int, list[Path]]:
     base = Path(os.environ[var]) if os.environ.get(var) else identity.load().state_dir / facts.value("locations", "mvv-state", "path")
     pattern = facts.value("ndf-files", "reading-materials", "path")
     found: dict[int, list[Path]] = {}
-    for path in sorted((base / pattern.replace("<repo>", repo.replace("/", "__"))).parent.glob("*-*.md")):
-        number = path.stem.rpartition("-")[2]
-        if number.isdecimal():
-            found.setdefault(int(number), []).append(path)
+    for path in sorted((base / pattern.replace("<repo>", repo.replace("/", "__"))).parent.glob("*.md")):
+        named = MATERIAL_COPY.fullmatch(path.name)
+        if named:
+            found.setdefault(int(named.group(1)), []).append(path)
     return found
 
 

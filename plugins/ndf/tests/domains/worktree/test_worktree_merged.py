@@ -60,6 +60,8 @@ def test_after_merge_removes_worktree_and_branch_then_fast_forwards(main_repo: P
     closed.parent.mkdir(parents=True, exist_ok=True)
     closed.write_text("x", encoding="utf-8")
     still_open.write_text("x", encoding="utf-8")
+    other = closed.parent / "notes-5.md"  # 承認資料のコピーの名前でないファイルは、番号が閉じた PR でも消さない
+    other.write_text("x", encoding="utf-8")
     hub = FakeHub(
         {
             5: _pull(5, "feat/z", False),
@@ -71,7 +73,7 @@ def test_after_merge_removes_worktree_and_branch_then_fast_forwards(main_repo: P
 
     rec = merged.after_merge(main_repo, [7, 8, 9], hub)
 
-    assert not closed.exists() and still_open.exists()
+    assert not closed.exists() and still_open.exists() and other.exists()
 
     assert not wt.exists() and not run_git(main_repo, "branch", "--list", "feat/a").strip()
     got = {(i["kind"], i["name"]): i for i in rec.items}
