@@ -1,6 +1,6 @@
 # 工程「実装」: 実装計画のレビューの単位ごとに PR とレビューを経てスプリントブランチへ集める（#4369）
 
-これまで `ndf progress next` で流す工程「実装」は実装計画の「レビューの単位」を読まず、分けるはずの変更をスプリントブランチの上で 1 本のまま実装していた。この設計では、工程「実装」が単位の表を読み、単位ごとに作業場所・実装のプラン（PR とレビューまで）・マージを順に流し、すべてマージしてから集めた時点（`gathered`。すべての単位をマージしたコミット）を記録する。レビューで人の判断を待つ指摘が 1 件でも残った単位は、この設計ではマージせずにそこで止める。[PR の単位を機械が読むファイルにする課題](https://github.com/devbasex/ai-plugins/issues/3702)（#3702。設計は承認済みで未実装）との先後と、[同じ内容の #3905](https://github.com/devbasex/ai-plugins/issues/3905) の扱いは、決定 1〜3 にある。
+これまで `ndf progress next` で流す工程「実装」は、実装計画の「レビューの単位」を読まなかった。そのため、分けるはずの変更をスプリントブランチの上で 1 本のまま実装していた。この設計では、工程「実装」が単位の表を読み、単位ごとに作業場所・実装のプラン（PR とレビューまで）・マージを順に流し、すべてマージしてから集めた時点（`gathered`。すべての単位をマージしたコミット）を記録する。レビューで人の判断を待つ指摘が 1 件でも残った単位は、この設計ではマージせずにそこで止める。[PR の単位を機械が読むファイルにする課題](https://github.com/devbasex/ai-plugins/issues/3702)（#3702。設計は承認済みで未実装）との先後と、[同じ内容の #3905](https://github.com/devbasex/ai-plugins/issues/3905) の扱いは、決定 1〜3 にある。
 
 ## 今の姿
 
@@ -22,10 +22,10 @@ flowchart TB
 
 - 工程「実装」の定義（`contracts/workflow/stages/implement.json`）は、次の 2 ステップである。プラン（自動で順に実行する手順の定義。工程「計画」が書く実装計画とは別）`impl` を呼ぶステップと、`ndf progress gathered` のステップである。工程の定義には指定 `per_issue` もある。進め方 fast で工程を課題ごとの子の行に分ける指定である。ただしこれまでのコードはこの値を読み込むだけで、子の行を作る処理は無い（`plugins/ndf/src/ndf/progress/` を `per_issue` で引いた。2026-11-26）。そのため `impl` は、どの進め方でも、課題が複数でも、工程 1 回につき 1 回だけ呼ばれる
 - `impl` の差し込み（テンプレートへ渡す値）は `progress/invoke.py` が組む。ブランチは作業場所が今いるブランチ、マージ先はブランチ戦略の設定のベースブランチになる
-- `impl` のテンプレート（`contracts/templates/impl.json`）が行うのは、worker の実装・受け入れ条件の確かめ・PR・レビュー・CI・未解決の指摘の確かめまでである。マージはしない
+- `impl` のテンプレート（`contracts/templates/impl.json`）は、次の処理を行い、マージはしない。worker の実装、受け入れ条件の確かめ、PR、レビュー、CI、未解決の指摘の確かめである
 - worker へ渡る入力は `issue`・`branch`・`acceptance` で、担当のタスクを絞る手段が無い
 - これまでの経路では `impl` がスプリントの PR（ベースブランチ宛て）を作る。後の工程「リファクタリング」「コードレビュー」はその PR を読む
-- supervisor の手順（`skills/development-workflow/references/agent-layers.md` の「実装のフェーズの単位」）は、単位ごとに `impl` を組む。マージは `ndf ci merge --reviewed` で行う。この設計では同じ順の手順をコードにする。変えるのは 2 点で、マージの打ち方を変え、人の判断を待つ指摘が残る単位を止める（決定 11・14）
+- supervisor の手順は、単位ごとに `impl` を組む。手順は `skills/development-workflow/references/agent-layers.md` の「実装のフェーズの単位」にある。マージは `ndf ci merge --reviewed` で行う。この設計では同じ順の手順をコードにする。変えるのは 2 点で、マージの打ち方を変え、人の判断を待つ指摘が残る単位を止める（決定 11・14）
 
 ## 文脈と制約
 
@@ -113,7 +113,7 @@ flowchart TB
 | worker の作業の定義と読み手（`contracts/worker/kinds.json`・`src/ndf/contracts/worker_kinds.py`） | 作業の定義に、空でよい入力の欄 `optional_inputs` を足し、`impl`・`fix`・`ci-fix`・`fix-push`・`fix-base` に `unit_file` を置く。値があるときだけ起動指示の入力に載せ、欠けの検査（`kind_gaps`）は求めない。起動指示を書く `progress/gate/entry.py` は読み手の返す値をそのまま載せるので変えない |
 | レビューの指示（`src/ndf/domains/crossreview/criteria_decide.py`） | `NDF_UNIT_PR` があれば、相手役と修正担当の指示に例外（決定 8）を足す。`NDF_UNIT_FILE` があれば、単位の範囲のセクションも足す |
 | 受け入れ条件の確かめ（`src/ndf/domains/loop/acceptance.py`） | 条件を持たない単位のための `--no-criteria` を足す |
-| 単位のマージ（`src/ndf/progress/units_merge.py`。新設。`src/ndf/adapters/github.py`・`git.py`） | 工程の保存先の記録から証跡を読んで確かめ、merge commit を作ってスプリントブランチへ push する。CLI の入口は持たない。`ndf ci merge` は変えない |
+| 単位のマージ（`src/ndf/progress/units_merge.py`。新設。`src/ndf/adapters/github.py`・`git.py`） | 工程の保存先の記録から証跡を読んで確かめ、merge commit を作ってスプリントブランチへ push する。CLI のコマンドは持たない。`ndf ci merge` は変えない |
 | 宛先の保護の読み取り（`src/ndf/adapters/github.py`） | スプリントブランチに当たる ruleset の規則と、従来のブランチ保護の有無を読む |
 | 単位の PR で待つチェックの宣言（`contracts/schemas/project-workflow.schema.json`・`src/ndf/progress/invoke.py`） | 設定の `workflow.unit_required_checks` を読む（決定 13） |
 | コマンドの一覧（`docs/contracts/commands.md`） | 上の新しい引数を載せる（`ndf check --write-spec` で生成し直す。手で直さない） |
@@ -177,7 +177,13 @@ flowchart TB
 --issue 3905 --criteria 3905:1 --issue 4369 --criteria 4369:1 --criteria 4369:2
 ```
 
-代表の課題は、`impl` の `issue`（PR の題と本文はこの課題から作る）、`--no-criteria` に渡す課題、単位のブランチ名の `<課題>` の 3 つに同じ値を使う。条件の書き方を直してもブランチ名が変わらないように、条件の課題ではなく実装計画のファイル名から決める。
+代表の課題の値は、次の 3 つに同じものを使う。
+
+- `impl` の `issue`（PR の題と本文はこの課題から作る）
+- `--no-criteria` に渡す課題
+- 単位のブランチ名の `<課題>`
+
+条件の書き方を直してもブランチ名が変わらないように、条件の課題ではなく実装計画のファイル名から決める。
 
 ## 処理の流れ
 
@@ -380,4 +386,4 @@ CI が通った後にスプリントブランチが動くと、単位のマー�
 
 ## 外部の調査
 
-省く: 既存の形の延長である。これまでの supervisor の手順（単位ごとのプランとレビューした HEAD でのマージ）を、同じ部品で自動の経路から呼ぶ（大きさと分け方の外部の調査は #3702 の設計書にある）
+省く: 既存の形の延長である。これまでの supervisor の手順（単位ごとのプランとレビューした HEAD でのマージ）を、同じ部品で自動の経路から呼ぶ。大きさと分け方の外部の調査は #3702 の設計書にある。
