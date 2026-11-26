@@ -37,6 +37,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `KIRO_PLUGIN_ROOT` | runtime | path | — | Kiro のプラグインの根（ホストの推定） | 内部（予告なく変えてよい） |
 | `NDF_ACCOUNTS_DIR` | user | path | — | アカウントの登録の保存先（ndf relay account の登録のサブコマンド）。無ければ <共有の設定ディレクトリ>/ndf/accounts（旧いプラグインと同じ保存先） | 内部（予告なく変えてよい） |
 | `NDF_ACCOUNT_GENERATION` | ndf | string | — | 登録済みアカウントの子で、起動を確かめた登録の世代（空文字は世代の無い登録）。子の ndf plan がリースと上限の後の替え先の判断に使う。従量の接続と API キーの子には渡さない | 内部（予告なく変えてよい） |
+| `NDF_AI_CHILD` | ndf | flag | — | NDF が非対話で起動した AI の子（worker・Skill を回す起動・判定・相手役・修正担当・委譲）のマーカー。起動の承認と取り消しはこの値があれば拒む（#1959）。無ければ NDF が起動した AI の中ではない。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_API_KEY_CHECK_MODEL` | user | string | — | API キーの確かめに使うモデル。無ければ claude-haiku-4-5 | 内部（予告なく変えてよい） |
 | `NDF_CALLER_PATH` | ndf | string | — | bin/ndf が子へ自分の値を入れる前に写した、呼び出し元の PATH（無ければ写しを持たない）。bin/start.py が自分のパッケージを呼ぶ前に呼び出し元の値へ戻して消す（#4029）。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `NDF_CALLER_PLUGIN_ROOT` | ndf | path | — | bin/ndf が子へ自分の根を渡す前に写した、呼び出し元の CLAUDE_PLUGIN_ROOT（空なら無かった）。bin/start.py が自分のパッケージを呼ぶ前に CLAUDE_PLUGIN_ROOT へ戻して消す（#4029）。残っていれば（bin/ndf を通らずに打った子）ほかのプラグインの根のとき旧い状態の保存先を退避しない。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |

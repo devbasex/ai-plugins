@@ -23,7 +23,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
 
-from ndf import process_group
+from ndf import identity, process_group
 from ndf.adapters import cli_floor, launch_slot
 from ndf.adapters.run_log import child_process_env, diag, record, record_cost_file
 from ndf.contracts import limits
@@ -290,7 +290,9 @@ def watch(proc: subprocess.Popen, spec: Launch, poll: Optional[float] = None) ->
 
 
 def _start(spec: Launch) -> subprocess.Popen:
-    env = child_process_env(spec.env)
+    """相手役と修正担当の子を起動する。子の環境には NDF が起動した AI のマーカー（`NDF_AI_CHILD`）を足す（#1959）。"""
+    child = {identity.env_name("ai-child"): "1"}
+    env = child_process_env(child if spec.env is None else {**spec.env, **child})
     spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
     with open(spec.paths.out, "wb") as out, open(spec.paths.err, "wb") as err:
         return subprocess.Popen(

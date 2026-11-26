@@ -578,11 +578,11 @@ def call_claude(
     学習に使わない設定と確かめられていなければ起動せず `Failure.REFUSED`、重い起動のスロットが空かなければ
     `Failure.NO_SLOT` を返す。2 つを通った後、claude が下限より古ければ起動せず `Failure.REFUSED`（`cli_floor`）。期限を超えたら組ごと止めて回収する
     （claude が動かした Tool の子孫を残さない）。中継の起動先を継いだ起動は、確かめ（`begin`・`retry`）で確定した起動ごとの
-    環境と起動引数でこの前置きを打つ。
+    環境と起動引数でこの前置きを打つ。子の環境には NDF が起動した AI のマーカー（`NDF_AI_CHILD`）を足す（#1959。子は起動の承認を書けない）。
 
     `options`（`LaunchOptions`）は前置きの選び方で、スロットを待つ上限・プロセスの組・下限の確かめの有無を決める。
     """
-    env = child_process_env()
+    env = child_process_env({identity.env_name("ai-child"): "1"})
     base = AccountRun(env, list(argv))
     if relay_checks is None or not _inherited(env):
         return _prefaced(base, prompt, timeout, cwd, options)

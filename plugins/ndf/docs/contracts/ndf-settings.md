@@ -134,6 +134,20 @@ Issue の種類ごとの記載項目（必須・該当時・不要）と水準�
 
 例: `{"version": 1, "kinds": ["不具合", "機能"], "items": [{"id": "purpose", "name": "目的", "need": {"不具合": "必須", "機能": "必須"}, "level": "何を良くするかを 1〜2 文で書く"}]}`
 
+## `.ndf/launch.json`（launch）
+
+worktree・チーム・内部（予告なく変えてよい）・[launch.schema.json](../../contracts/schemas/ndf-settings/launch.schema.json)。読む工程: `工程: full の起動`（worker と Skill を回す起動が、工程の指定と承認を確かめるとき）
+
+full の起動で読み込む Tool と MCP、尋ねずに使ってよい指定、安全装置を外してよいランタイム（#1959）。permissions の全体と、そこから読む MCP の定義ファイルの中身が承認の対象で、利用者のマシンで承認した内容だけが起動に使われる。置かなくてよい
+
+| キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
+| --- | --- | --- | --- | --- | --- |
+| `$schema` | string | — | — | 任意 | 編集のときの補完に使うスキーマの位置。読み手は参照しない |
+| `permissions` | object | — | — | 任意 | 許可を広げる指定。この下だけが承認の対象である |
+| `version` | integer | — | `1` | 必須 | 設定の形のバージョン。読み手は知らないバージョンを読まない |
+
+例: `{"version": 1, "permissions": {"steps": {"*": {"load": ["LSP"]}, "design": {"mcp": "inherit"}, "impl": {"mcp": [".ndf/mcp/search.json"], "allow": ["mcp__search__query"]}}, "unsandboxed": ["codex"]}}`
+
 ## `.ndf/mvv.json`（mvv）
 
 worktree・チーム・公開・[mvv.schema.json](../../contracts/schemas/ndf-settings/mvv.schema.json)。読む工程: `ndf records mvv`（MVV 判定と改訂の提案のとき）・`ndf records preflight`（工程の前の確かめで本文の保存先を読むとき）・`ndf answer`（承認ゲートで MVV のバージョンを照らすとき）
