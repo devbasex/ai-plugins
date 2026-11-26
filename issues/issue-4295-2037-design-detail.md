@@ -461,6 +461,7 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
   - 行のリポジトリは、レーンの `repo`（クローンの絶対パス）か、無ければ耐久ワークフローの作業ディレクトリ。`<所有者>/<リポジトリ>` は `gh repo view --json nameWithOwner` でクローンのパスごとに 1 回だけ読み、`Memory` に持つ。`compare` はこの値をほかの計画のレーンのクローンにも使う。ほかの計画のレーンで `lane_repo` が無ければ、その計画の所在の `cwd` をクローンとする
   - 副作用: `gh`、計画のステートマシンへの追記
 - `record_designs`: 対象は、レーンに印があり、`kind: sprint` で、`mode_of(row)` が `design_modes` にある行（`designing` の条件のうち記録の有無を除いた 3 つ）。ほかの行は設計の資料を読まず、記録も書かないので、`row_scope` は設定の値を返す
+- `assign`: 渡された行（観測の対象の行）の `pulls` にある PR は、その行だけに振り分ける。どの行の `pulls` にも無い PR だけを、base と head のブランチで振り分ける
 - `record_diffs`: `assign` の結果のうち `PlanView` の行の `pulls` に無い PR は、ファイルを読めたかに依らず、その周の `touches_found` の `pulls` に載せる。読み終えた組が無ければ `files: []`・`from: []` で書く
 - `record_diffs`: PR の一覧の読み方、読み残し、ファイルの読み方と head・マージ先の読み直し、一覧の読み取り済み時刻は、設計文書の決定 6 のとおり。走査の開始の時刻は `gh api -i` の応答の `Date` ヘッダから取る。1 周の 1 リポジトリの追記は、行ごとに 1 件の `touches_found` にする
 - `compare`: ほかの計画は、マシンの索引と中継の登録簿の所在に、記録した所在（`PlanView.places`）を足して読む。計画が完了すると索引から外れるため、終わった行の最後の観測を、比べる前に見失わないようにする。再起動で消えないように、所在は `touches_compared` の `places` に書く
@@ -541,7 +542,7 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 | `gh_api` | 標準出力を返す | `-i` のヘッダと本文の分離 | 非 0 で `FetchError` |
 | `record_touches` | 追記する | — | 番号が違えば `Conflict` |
 | `other_views` | 自分の計画を除く | 同じ計画の 2 つの所在は 1 回 | DB の無い所在を飛ばす |
-| `assign` | base と head の振り分け。振り分け済みの PR は、マージ先を変えても同じ行 | `doc_prs: base` の設計 PR | フォークの同名ブランチは振り分けない |
+| `assign` | base と head の振り分け。振り分け済みの PR は、マージ先を変えても同じ行。観測の対象の別の行のブランチへ付け替えても元の行だけ。元の行が `rows` に無ければブランチで振り分ける | `doc_prs: base` の設計 PR | フォークの同名ブランチは振り分けない |
 | `pick` | 終わった行が先 | 上限ちょうど | — |
 | `is_final` | 3 条件で真 | `since` が `ended_at` と同じなら偽 | 一覧を読めない周は偽 |
 | `counted` | 失敗で 1 増える | 成功は、前に失敗があるときだけ 0 を書く | 上限で真 |
