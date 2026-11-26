@@ -433,9 +433,9 @@ src/ndf/
 | `_pick` | 同 | 新設 | `_pick(a: Namespace) -> int` | `json` は結果 JSON、`args` は 1 行 1 引数 |
 | `_report` | 同 | 新設 | `_report(a: Namespace) -> int` | 使用量ログと実験の記録を読んで結果を出す |
 | `report_rows` | 同 | 新設 | `report_rows(usage_rows, experiment_rows, since, until, stage) -> list[dict]` | 設計書の「集計」の順と区分で値を組む |
-| `main` | `domains/settings/delegate_args_cli.py` | 新設 | `main(argv: list[str]) -> int` | `pick("seat", "delegate", runtime)` と `safety_args(runtime, "delegate", cwd)` の引数を続けて出す |
+| `main` | `domains/settings/delegate_args_cli.py` | 新設 | `main(argv: list[str]) -> int` | `--runtime` は `codex`・`kiro`・`agy` の 3 つ。codex は `pick("seat", "delegate", "codex")` と `safety_args("codex", "delegate", cwd)` の引数を続けて出す。kiro と agy は `pick` を呼ばず、`safety_args(runtime, "delegate", cwd)` の引数だけを出す |
 
-- 引数を出す 2 つ（`_pick` の `args` の形と、`delegate-args` の `main`）は、`InternalError` を自分で受けて標準エラーへ書き、標準出力に何も出さずに 0 以外で終える。`delegate-args` は、モデルと effort の引数と安全装置の引数の両方がそろってから、1 回で書き出す
+- 引数を出す 2 つ（`_pick` の `args` の形と、`delegate-args` の `main`）は、`InternalError` を自分で受けて標準エラーへ書き、標準出力に何も出さずに 0 以外で終える。`delegate-args` は、出す引数がすべてそろってから 1 回で書き出す（codex はモデルと effort の引数と安全装置の引数、kiro と agy は安全装置の引数）
 - `report` は呼ばれた時点で計算し直し、出現率のファイルを書き換えない
 
 ### 異常系の処理
@@ -444,7 +444,7 @@ src/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `_pick` | 設定の誤り | `pick` | 呼び出し | 止める | `json` は `stopped`、`args` は標準エラーだけ | 再実行できる |
 | `_report` | 記録が無い | 初回 | 読み取り | 続ける | 「記録なし」 | — |
-| `main`（delegate-args） | 片方の失敗 | 設定・承認 | 呼び出し | 止める | 標準出力は空、終了コードは `precondition` | 再実行できる |
+| `main`（delegate-args） | 呼んだ処理の失敗か、表に無い `--runtime` | 設定・承認・引数 | 呼び出しと引数の解析 | 止める | 標準出力は空、終了コードは `precondition` | 再実行できる |
 
 ### ログと記録の出力
 
@@ -457,4 +457,4 @@ src/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `report_rows` | 依頼・ステップ・単位にまとめてから区分へ入れる | 期間の境をまたぐ依頼 | すべて拒否された依頼、重なった `launch_id` |
-| `main`（delegate-args） | モデルと安全装置の引数が続く | 引数 0 個 | 安全装置の停止で標準出力が空 |
+| `main`（delegate-args） | codex はモデルと安全装置の引数が続く。kiro と agy は安全装置の引数だけで、`pick` を呼ばない | 引数 0 個。`pick` が止まる `experiments` の誤りがあっても kiro と agy は引数を出す | 安全装置の停止で標準出力が空。表に無い `--runtime` |
