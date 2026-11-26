@@ -496,12 +496,10 @@ def _read_rows(rec: Mapping[str, Any]) -> list[dict[str, Any]]:
     """確かめ 1 件の記録を、回ごとの行（回・合否・残った文の引用）にする。2 回目の不合格は `remained`。"""
     out: list[dict[str, Any]] = []
     for i, check in enumerate(rec["checks"], 1):
-        if check["verdict"] == "pass":
-            out.append({"round": i, "verdict": "passed"})
-        elif i == 2:
-            out.append({"round": 2, "verdict": reading.REMAINED, "quotes": [{"quote": check["reason"], "why": ""}]})
-        else:
-            out.append({"round": i, "verdict": "failed"})
+        row: dict[str, Any] = {"round": i, "verdict": gate_decide.row_verdict(i, check["verdict"] == "pass")}
+        if row["verdict"] == reading.REMAINED:
+            row["quotes"] = [{"quote": check["reason"], "why": ""}]
+        out.append(row)
     return out
 
 

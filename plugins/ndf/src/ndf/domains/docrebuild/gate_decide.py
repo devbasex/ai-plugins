@@ -123,17 +123,21 @@ def _read_again(name: str, quote: str, read_parts: Mapping[str, Optional[str]]) 
     return part is None or quote in _squeezed(part)
 
 
+def row_verdict(round_no: int, passed: bool) -> str:
+    """確かめの回と合否から、読ませた行の verdict を返す。2 回目の不合格は remained。"""
+    if passed:
+        return "passed"
+    return reading.REMAINED if round_no == 2 else "failed"
+
+
 def rows_of_record(name: str, rec: Mapping[str, Any]) -> list[dict[str, Any]]:
     """worker の記録 1 件を、回ごとの読ませた行にする。2 回目の不合格は remained（引用付き）。"""
     out: list[dict[str, Any]] = []
     for i, check in enumerate(rec["checks"], 1):
         row: dict[str, Any] = {"name": name, "reader": reading.reader_of(name), "round": i, "hash": check["hash"]}
-        if check["verdict"] == PASS:
-            row["verdict"] = "passed"
-        elif i == 2:
-            row.update(verdict=reading.REMAINED, quotes=quotes_of(check))
-        else:
-            row["verdict"] = "failed"
+        row["verdict"] = row_verdict(i, check["verdict"] == PASS)
+        if row["verdict"] == reading.REMAINED:
+            row["quotes"] = quotes_of(check)
         out.append(row)
     return out
 
