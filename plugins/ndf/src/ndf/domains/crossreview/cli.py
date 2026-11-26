@@ -14,6 +14,7 @@
     ndf cross-review finish --summary F [--findings F2]            # 終わり方から結果（#2370・#2444）
     ndf cross-review run --pr N --state-dir D --base B [--worktree W] [--branch B2] [--purpose P]
         [--reviewer R ...] [--max-rounds 3] [--findings F] [--reviewed-out F3]
+        [--repo R] [--stop-on-hold] [--reviewed-pr-out F4]
                                                                    # 収束ループを 1 回の起動で回して終わり方から結果。指摘のスレッドと記録を PR へ書く（#3939）
     ndf cross-review report --state-dir D --pr N [--repo R]       # 状態ファイルから指摘のスレッドと記録を PR へ書く（#3939）
 
@@ -26,6 +27,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import importlib
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable, ContextManager, NamedTuple, Optional, TypeVar
@@ -615,10 +617,21 @@ def cmd_run(args: argparse.Namespace) -> int:
     読めなかったラウンドの HEAD は書かない。PR 3944 の r2-3）。最後のラウンドの
     修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。始めに消すので、
     書けなかった起動の後に前の起動の値が残らない。
+
+    単位の経路の引数（#4369）: `--repo` は保存済みの状態と作業場所のリモートより優先する対象のリポジトリで、子の `gh` にも
+    `GH_REPO` で渡す。`--stop-on-hold` は人の判断を待つ指摘が残れば incomplete にする。`--reviewed-pr-out` は
+    `--reviewed-out` を書くときに、読んだ PR を `<所有者>/<リポジトリ>#<番号>` で書く（始めに消す）。
     """
     out = Path(args.reviewed_out) if args.reviewed_out else None
-    if out is not None:
-        out.unlink(missing_ok=True)
+    pr_out = Path(args.reviewed_pr_out) if args.reviewed_pr_out else None
+    for stale in (out, pr_out):
+        if stale is not None:
+            stale.unlink(missing_ok=True)
+    if args.repo is not None:
+        try:
+            os.environ["GH_REPO"] = repo.resolve_target_repo(args.repo, None, Path.cwd()).slug
+        except repo.RepoUnresolved as exc:
+            return _stop("invalid", str(exc))
     ready = _ready(args)
     if isinstance(ready, int):
         return ready
@@ -628,7 +641,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     def hub_once() -> Hub:
         # 読む口と書く口で同じクライアントを使う（`gh auth token` の起動などの認証を 1 回の run で 1 回にする）
         if not made:
-            made.append(HUB(None, state_repo, cfg.worktree))
+            made.append(HUB(args.repo, state_repo, cfg.worktree))
         return made[0]
 
     try:
@@ -642,12 +655,23 @@ def cmd_run(args: argparse.Namespace) -> int:
     except writing.CriteriaBroken as exc:
         # 文書の基準の本文を読めない（指示を作る前。#4285）
         return _stop("invalid", str(exc))
-    verdict = fin.finish(got.review, cfg.handed, record_failed=got.mvv_record_failed)
+    verdict = fin.finish(got.review, cfg.handed, record_failed=got.mvv_record_failed, stop_on_hold=args.stop_on_hold)
     if out is not None and got.reviewed_head is not None:
         out.write_text(got.reviewed_head + "\n", encoding="utf-8")
+        if pr_out is not None:
+            try:
+                slug = repo.resolve_target_repo(args.repo, state_repo, cfg.worktree).slug
+                _write_reviewed_pr(pr_out, slug, store.state_pr(cfg.state_dir, cfg.pr).current_pr)
+            except (OSError, repo.RepoUnresolved) as exc:
+                return _stop("precondition", f"読んだ PR を {pr_out} へ書けない: {exc}")
     items, warnings = _report(cfg, got, hub_once)
     metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
     return _emit_verdict(verdict, got.mvv, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
+
+
+def _write_reviewed_pr(path: Path, slug: str, pr: int) -> None:
+    """レビューが読んだ PR を `<所有者>/<リポジトリ>#<番号>` で書く。"""
+    path.write_text(f"{slug}#{pr}\n", encoding="utf-8")
 
 
 def _report(cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -721,6 +745,9 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--max-rounds", type=int, default=int(limits.value(MAX_ROUNDS, "count")))
     r.add_argument("--findings")
     r.add_argument("--reviewed-out")
+    r.add_argument("--repo", help="対象のリポジトリ（<所有者>/<リポジトリ>）。保存済みの状態と作業場所のリモートより優先する")
+    r.add_argument("--stop-on-hold", action="store_true", help="人の判断を待つ指摘が残れば incomplete で終える")
+    r.add_argument("--reviewed-pr-out", help="--reviewed-out を書くときに、読んだ PR を <所有者>/<リポジトリ>#<番号> で書く")
 
 
 def _with_branch(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:

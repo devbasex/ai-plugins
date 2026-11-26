@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
 from ndf.contracts import result
+from ndf.domains.crossreview import cli, drive, journal, store
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.crossreview.settings import RunConfig
 
 from ._repos import run_cli
 
@@ -170,3 +173,153 @@ def test_unknown_words_are_invalid_and_an_error_before_any_round_is_work_stopped
 def test_malformed_summary_is_invalid(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     code, got = run_cli(capsys, "finish", "--summary", str(_summary(tmp_path, fin.CONVERGED, 1, ["x"])))
     assert code != 0 and got["cause"]["kind"] == "invalid"
+
+
+def _held(outcome: str, defer: str | None = None, *, fid: str = "F1", redline: bool = False) -> fin.Finding:
+    reason = "理由" if outcome == fin.SKIPPED else None
+    return fin.Finding(fid, f"指摘 {fid}", outcome, reason, "major", redline=redline, defer=defer)
+
+
+@pytest.mark.parametrize(
+    ("found", "held"),
+    [
+        (_held(fin.SKIPPED, "needs_user"), True),
+        (_held(fin.SKIPPED), True),
+        (_held(fin.SKIPPED, "later"), True),
+        (_held(fin.SKIPPED, "filed"), False),
+        (_held(fin.SKIPPED, "not_applicable"), False),
+        (_held(fin.UNRESOLVED, redline=True), True),
+        (_held(fin.SKIPPED, "filed", redline=True), True),
+        (_held(fin.FIXED, redline=True), False),
+        (_held(fin.FIXED), False),
+    ],
+)
+def test_stop_on_hold_turns_findings_waiting_for_a_person_into_gaps(found: fin.Finding, held: bool) -> None:
+    """#4369 の決定 14: 直していないレッドラインと、区分が needs_user・無い・知らない値の見送りで incomplete になる。"""
+    review = fin.Review(fin.CONVERGED, 1, (found,))
+    assert fin.finish(review).status == "ok"
+    got = fin.finish(review, stop_on_hold=True)
+    assert (got.status == "ok", got.kind) == (not held, "incomplete" if held else None)
+    assert list(got.gaps) == ([{"kind": "held_finding", "name": "F1", "reason": "指摘 F1"}] if held else [])
+
+
+def test_stop_on_hold_adds_only_missing_names_and_leaves_other_endings() -> None:
+    """incomplete には同じ名前の欠けが無い指摘だけを足し、ほかの停止は変えない。記録の失敗はその後に当てる。"""
+    open_one = fin.Finding("F1", "止まる", fin.UNRESOLVED, None, "major")
+    red = _held(fin.UNRESOLVED, fid="F2", redline=True)
+    no_reason = fin.Finding("F3", "名前", fin.SKIPPED, None)
+    got = fin.finish(fin.Review(fin.MAX_ROUNDS, 2, (open_one, red, no_reason)), stop_on_hold=True)
+    assert [(g["kind"], g["name"]) for g in got.gaps] == [
+        (fin.GAP_UNRESOLVED, "F1"),
+        (fin.GAP_NO_REASON, "F3"),
+        (fin.GAP_HELD, "F2"),
+    ]
+    limit = fin.finish(fin.Review(fin.MAX_ROUNDS, 2, (red,)), stop_on_hold=True)
+    assert limit.kind == "incomplete" and not limit.decisions and not limit.warnings
+    for review in (
+        fin.Review(fin.INCOMPLETE_REVIEWERS, 1, (red,)),
+        fin.Review(fin.CONVERGED, 1, (red, fin.Finding("F4", "反する", fin.UNRESOLVED, None, "major", "Value 5"))),
+    ):
+        assert fin.finish(review, stop_on_hold=True) == fin.finish(review)
+    failed = fin.finish(fin.Review(fin.CONVERGED, 1, (red,)), record_failed=FAILED, stop_on_hold=True)
+    assert failed.kind == fin.RECORD_FAILED and [g["name"] for g in failed.gaps] == ["F2"]
+
+
+def test_the_defer_kind_reaches_the_verdict_through_the_journal_and_the_summary() -> None:
+    """ジャーナルの行の区分は、要約を経ても残る。"""
+    rows = [{"id": "F1", "text": "止まる", "outcome": fin.SKIPPED, "reason": "後で", "defer": "filed"}]
+    found = journal.FindingJournal(rows).findings()
+    summary = fin.summary_of(fin.Review(fin.CONVERGED, 1, found), 7)
+    assert [f.defer for f in fin.as_review(summary).findings] == ["filed"]
+
+
+def _in_process_run(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, *extra: str, head: str | None = "a" * 40
+) -> tuple[int, dict, list]:
+    """駆動と PR への記録を差し替えて `run` を打つ（git も相手役も起動しない）。HUB に渡った引数も返す。"""
+    state = tmp_path / "state"
+    state.mkdir(exist_ok=True)
+    cfg = RunConfig(tmp_path, "feat/x", "origin/main", 7, state, False, ("codex",))
+    made: list = []
+    review = fin.Review(fin.CONVERGED, 1, (_held(fin.SKIPPED, "needs_user"),))
+
+    def fake_drive(cfg_, launch, reader, clean):
+        reader(7)
+        return drive.Outcome(review, state / "summary.json", (), (), head)
+
+    monkeypatch.setattr(cli, "_ready", lambda args: (cfg, "saved/repo"))
+    monkeypatch.setattr(cli.drive, "drive", fake_drive)
+    monkeypatch.setattr(cli, "_report", lambda *a: ([], []))
+    monkeypatch.setattr(cli, "HUB", lambda *a: made.append(a) or cli.Hub(None, None, lambda pr: None))
+    code, got = run_cli(capsys, "run", "--pr", "7", "--state-dir", str(state), "--base", "origin/main", *extra)
+    assert result.errors(got, code) == []
+    return code, got, made
+
+
+def test_run_takes_the_given_repository_over_the_saved_state(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--repo` は保存済みの状態より優先して HUB と子の `gh` へ渡り、読んだ PR は今の番号で書く。"""
+    monkeypatch.setenv("GH_REPO", "before/repo")
+    state = tmp_path / "state"
+    state.mkdir()
+    store.write_object(state / store.STATE_NAME.format(pr=7), {store.ORIGIN_KEY: 7, store.CURRENT_KEY: 9})
+    pr_out = tmp_path / "reviewed-pr"
+    head_out = tmp_path / "reviewed-head"
+    code, got, made = _in_process_run(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        "--repo",
+        "o/r",
+        "--stop-on-hold",
+        "--reviewed-pr-out",
+        str(pr_out),
+        "--reviewed-out",
+        str(head_out),
+    )
+    assert (code, got["cause"]["kind"]) == (6, "incomplete") and got["gaps"][0]["kind"] == fin.GAP_HELD
+    assert made == [("o/r", "saved/repo", tmp_path)] and os.environ["GH_REPO"] == "o/r"
+    assert pr_out.read_text(encoding="utf-8") == "o/r#9\n" and head_out.read_text(encoding="utf-8") == "a" * 40 + "\n"
+
+
+def test_run_removes_the_previous_reviewed_pr_and_writes_it_only_with_the_head(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """前の起動のファイルは消し、HEAD を書かない起動は PR も書かない。引数が無ければ結果は今のまま。"""
+    pr_out = tmp_path / "reviewed-pr"
+    pr_out.write_text("o/r#1\n", encoding="utf-8")
+    code, got, made = _in_process_run(
+        monkeypatch, capsys, tmp_path, "--reviewed-pr-out", str(pr_out), "--reviewed-out", str(tmp_path / "head"), head=None
+    )
+    assert (code, got["status"]) == (0, "ok") and not pr_out.exists()
+    assert made == [(None, "saved/repo", tmp_path)]
+
+
+@pytest.mark.parametrize("slug", ["norepo", "a/b/c", "/r"])
+def test_run_refuses_a_malformed_repository_and_removes_the_previous_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, slug: str
+) -> None:
+    monkeypatch.setenv("GH_REPO", "before/repo")
+    pr_out = tmp_path / "reviewed-pr"
+    pr_out.write_text("o/r#1\n", encoding="utf-8")
+    code, got, made = _in_process_run(monkeypatch, capsys, tmp_path, "--repo", slug, "--reviewed-pr-out", str(pr_out))
+    assert got["cause"]["kind"] == "invalid" and not made and not pr_out.exists()
+    assert os.environ["GH_REPO"] == "before/repo"
+
+
+def test_run_stops_when_the_reviewed_pr_cannot_be_written(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, got, _ = _in_process_run(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        "--repo",
+        "o/r",
+        "--reviewed-pr-out",
+        str(tmp_path / "no-such-dir" / "reviewed-pr"),
+        "--reviewed-out",
+        str(tmp_path / "head"),
+    )
+    assert got["cause"]["kind"] == "precondition"
