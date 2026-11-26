@@ -143,11 +143,16 @@ def latest_read(rows: Sequence[Mapping[str, Any]], key: tuple[Any, ...]) -> Opti
     return found
 
 
+def _same_gate(row: Mapping[str, Any], repo: str, gate: str, number: int) -> bool:
+    """行のリポジトリ・ゲート・PR が引数と同じか。"""
+    return row["repo"] == repo and row["gate"] == gate and row["pr"] == number
+
+
 def last_done(rows: Sequence[Mapping[str, Any]], repo: str, gate: str, number: int) -> Optional[Mapping[str, Any]]:
     """同じ PR とゲートで最後に完了した確認の完了の行。"""
     found = None
     for row in rows:
-        if row.get("kind") == "done" and row["repo"] == repo and row["gate"] == gate and row["pr"] == number:
+        if row.get("kind") == "done" and _same_gate(row, repo, gate, number):
             found = row
     return found
 
@@ -178,7 +183,7 @@ def pending_review(rows: Iterable[Mapping[str, Any]], repo: str, branch: str) ->
 
 def sent_back(rows: Iterable[Mapping[str, Any]], repo: str, gate: str, number: int) -> bool:
     """同じ PR とゲートに変更要求の行があるか（変更要求で工程を止めるのは 1 回まで）。"""
-    return any(r.get("kind") == "sent_back" and r["repo"] == repo and r["gate"] == gate and r["pr"] == number for r in rows)
+    return any(r.get("kind") == "sent_back" and _same_gate(r, repo, gate, number) for r in rows)
 
 
 def select_reads(
