@@ -147,7 +147,8 @@ graph TD
 | worker の起動（変更） | 作業の名前と作業場所を渡して指定を取得し、起動の後に使用量ログの行を書かせる |
 | Skill を回す起動（変更） | 工程の名前で同じことをする |
 | 起動記録のインターフェース（新設） | 呼び出し元（worker の起動と Skill を回す起動）から、上の層にある使用量ログの書き込み処理を呼べるよう、エントリポイントで差し込む |
-| 使用量ログの書き込み処理（変更） | `claude -p` の行を書く。行の欄を足す |
+| 使用量ログの書き込み処理（変更） | `claude -p` の行を書く。行の欄を足す。起動で増えた費用を求め、費用のジャーナルへ足す |
+| 起動の費用を求める関数（新設） | 同じ会話の行の累計から、起動 1 回の費用と区間の合計を求める。ジャーナルへの追記と集計が同じ関数を使う |
 
 ```mermaid
 graph TD
@@ -222,24 +223,54 @@ graph TD
 | `launch_id` | 呼び出し元が子プロセスごとに作る一意な値 | 同じ |
 | `name`（足す） | 工程の名前（`.ndf/launch.json` の `steps` のキーと同じ） | 同じ |
 | `run_id`・`step`・`attempt` | プランの実行の id・ステップの id・試行の番号。プランの外の起動では無し | 同じ |
-| `session_id`・`resumed`（足す） | 呼び出し元が指定した会話の id と、再開かどうか | 同じ |
+| `session_id`・`resumed`（足す） | 会話の id と、再開かどうか。取得元は下の「会話の id」 | 呼び出し元が id を指定していなければ `session_id` の欄を置かない |
 | `usage` | 結果の使用量 | `unknown` |
 | `session_cost_usd`（足す） | 結果の `total_cost_usd` | 欄を置かない |
-| `model`・`model_usage` | 結果のモデルごとの使用量 | 欄を置かない |
+| `model` | 主モデルの名前。決め方は下の「モデルの欄」 | 欄を置かない |
+| `model_usage` | 結果の `modelUsage` の、モデルごとのトークン数 | 欄を置かない |
 | `seconds`・`launched_at`・`repo` | 呼び出し元が測る値 | 同じ |
 
 子プロセスを起動できなかった場合（CLI のバージョンが下限より古い、起動の枠が取れないなど）は、使った量が無いので行を書かない。
 
-`session_cost_usd` は、同じ会話の起動をまたいだ累計である。起動 1 回の費用は、費用を集計する側が次のように求める。
+**会話の id。** worker の起動は呼び出し元が id を指定する（`--session-id`、再開は `--resume`）ので、その値を書く。Skill を回す起動は id を指定しないので、結果の JSON の `session_id` を書く。どちらからも取得できなければ欄を省く。`resumed` は `--resume` で起動したときだけ真で、新しい会話の起動は偽である。
 
-| 行 | 起動 1 回の費用 |
-| --- | --- |
-| `resumed` が偽（新しい会話の最初の起動） | その行の値（比較の基準はゼロ） |
-| `resumed` が真 | その行の値 − 同じ `session_id` の直前の値。直前の行は、集計期間より前の行も参照する |
-| `resumed` が真で、直前の値が使用量ログに無い | 不明。0 にも累計にも数えず、不明の件数に数える |
-| 値の無い行（`unknown`） | 不明。その起動の費用は、同じ会話の次の行の差に含まれる |
-| 同じ `launch_id` の行が複数 | 1 行だけを数える |
-| 差が負 | 不明 |
+**モデルの欄。** 1 回の起動で複数のモデルが動くことがある。`model` は、結果の `modelUsage` のうち、`inputTokens`・`outputTokens`・`cacheReadInputTokens`・`cacheCreationInputTokens` の和が最も大きいモデルである。同じ和なら `contextWindow` が小さいほうを選ぶ。`claude.py` の `context_window` が主モデルを選ぶ規則と同じなので、1 つの関数を両方が使う。`modelUsage` が無いか空なら、欄を省く。`model_usage` には、モデルごとに上の 4 つの値を入れる。
+
+#### 起動の費用の求め方
+
+`session_cost_usd` は、同じ会話の起動をまたいだ累計である。費用は累計の差で求める。差が起動 1 回分になるのは、前の起動の累計がそろう場合だけである。直前の起動が失敗や期限切れで値を持たなければ、差は複数の起動の合計になる。
+
+行は `session_id` ごとに `launched_at` の順に並べる。前の行は、集計期間より前のものも参照する。
+
+| 行 | 起動 1 回の費用 | 区間の合計（複数の起動の合計） |
+| --- | --- | --- |
+| 値があり、`resumed` が偽 | その行の値 | — |
+| 値があり、`resumed` が真で、直前の行に値がある | その行の値 − 直前の行の値 | — |
+| 値があり、`resumed` が真で、直前の行に値が無い。それより前に値のある行がある | 不明 | その行の値 − 値のある最後の行の値 |
+| 値があり、`resumed` が真で、前に値のある行が 1 つも無い。`resumed` が偽の行は使用量ログに残っている | 不明 | その行の値（比較の基準はゼロ） |
+| 値があり、`resumed` が真で、前に値のある行も `resumed` が偽の行も使用量ログに無い | 不明 | — |
+| 値の無い行（`unknown`） | 不明 | — |
+| 差が負 | 不明 | — |
+
+- 不明の起動は 0 として足さず、件数を数える
+- 区間の合計は、どの起動の費用にも割り当てない。区間の起動がすべて集計期間の中にあり、`name` が同じ場合は、工程の費用に足す。worker の再開はこの場合に当たる。期間の境をまたぐ区間は期間の費用に足さず、別に表示する
+- `session_id` の無い行は、`resumed` が偽なのでその行の値を使う
+- 同じ `launch_id` の行が複数ある場合は、値を持つ行のうち最初に書かれた 1 行を数える。値を持つ行が無ければ、最初の 1 行を数える
+
+#### ステータスラインの費用との関係
+
+起動の費用の元になる記録は使用量ログの 1 つにする。
+
+今は、`claude -p` を起動するたびに、`adapters/run_log.py` の `record_cost` が結果の `total_cost_usd` を費用のジャーナル（`print-costs.jsonl`）に追記する。ステータスラインは、その値をそのまま足して直近 1 時間の費用を表示する。再開した起動では累計を足すため、前の起動の分が重複する。
+
+full の起動（worker と Skill を回す起動）は、次のように変える。
+
+- 起動の関数は、費用のジャーナルへ書かない
+- 使用量ログの書き込み処理が、行を追記するのと同じ錠の中で、上の表の規則で増えた分を求め、その値をジャーナルへ足す
+- ステータスラインは使った金額の合計を表示するので、区間の合計もそのまま足す。不明の場合は何も足さない
+- 使用量ログへ書けなかった起動は、ジャーナルにも足さず、警告を出す
+
+判定と相手役の起動は #1959 では変えない。使用量ログに行を書くようになる [#2944 の設計](./issue-2944-design.md)で、同じ処理に移す。
 
 ## 入出力のコントラクト
 
@@ -291,7 +322,7 @@ sequenceDiagram
 - **代償**: 工程の中で MCP を使っていた利用先は、指定を足すまで使えない
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: STD1 / STD2 / PRD1
-- 根拠: 使わない定義の費用を減らすため、Claude Code の起動の引数で読み込みを絞る（Value 2「安く使える」）。絞り方は自作せず、CLI が持つ引数を使う（Value 12「調べて分析した、実績のある最新のやり方で作られる」）
+- 根拠: Value 2 / Value 12（MVV バージョン 11）。使わない定義の費用を減らすため（Value 2「安く使える」）、Claude Code の起動の引数で読み込みを絞る。絞り方は自作せず、CLI が持つ引数を使う（Value 12「調べて分析した、実績のある最新のやり方で作られる」）
 
 ### 決定 2: claude.ai のコネクタも使い続けられるよう、MCP の指定は定義ファイルの列か「環境をすべて読む」にする
 
@@ -303,7 +334,7 @@ sequenceDiagram
 - **代償**: コネクタを使う工程は `"inherit"` になり、その工程では削減が `--tools` の分だけになる。1 つのコネクタだけを選べない
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: STD1 / STD3
-- 根拠: どの利用先の MCP も指定して使えるようにする（Value 4「どのプロジェクトでもそのまま使える」）
+- 根拠: Value 4（MVV バージョン 11）。どの利用先の MCP も指定して使えるようにする（Value 4「どのプロジェクトでもそのまま使える」）
 
 ### 決定 3: 実測に合わせるため、NDF の既定はどの工程にも MCP を指定しない
 
@@ -322,7 +353,7 @@ sequenceDiagram
 - 採らなかった案: 10 系の記録の工程（design・requirements・実装）を `"inherit"` にする（費用の大きい工程の削減がほぼ無くなる。呼ばれたのは、今は入っていないプラグインと、2 件の課題が指した文書だけである）
 - 採らなかった案: claude.ai の Claude Docs を NDF の既定で読ませる（定義ファイルで渡せず、利用者のアカウントに依存する）
 - **代償**: 課題が claude.ai の文書を指す場合、指定が無いと worker はその文書を読めない
-- 根拠: 使わない定義の費用を払わない（Value 2「安く使える」）。使うかどうかは実測で決める（Value 13「確かめたことだけが済んだとされる」）
+- 根拠: Value 2 / Value 13（MVV バージョン 11）。使わない定義の費用を払わない（Value 2「安く使える」）。使うかどうかは実測で決める（Value 13「確かめたことだけが済んだとされる」）
 
 ### 決定 4: 許可の管理元を増やさないため、NDF は MCP の読み込みだけを決め、呼ぶ許可は Claude Code の設定に任せる
 
@@ -330,7 +361,7 @@ sequenceDiagram
 - **選んだ案**: 足さない。許可は今と同じく利用者とリポジトリの `permissions` が決める
 - 採らなかった案: 指定したサーバを自動で許可する（リポジトリの設定の 1 行で、尋ねずに呼べる操作が増える）
 - **代償**: 指定しても `permissions` に無い Tool は拒否される。手順書にこのことを書く
-- 根拠: 誰が何をできるかは人が決める（C2「認証・認可を変える」、Value 1「人の判断を、読み切れる量の大事な所だけにする」の「必ず人の承認が要る操作は人の手に残る」）
+- 根拠: C2 / Value 1（MVV バージョン 11）。誰が何をできるかは人が決める（C2「認証・認可を変える」）。「必ず人の承認が要る操作」は人の手に残す（Value 1「人の判断を、読み切れる量の大事な所だけにする」）
 
 ### 決定 5: 工程ができることを保つため、利用先が組み込みの Tool も足せるようにする
 
@@ -339,7 +370,7 @@ sequenceDiagram
 - 採らなかった案: 記録で呼ばれた Tool をすべて一覧に入れる（残る `ScheduleWakeup` は、非対話の起動では予約する次の回が無い）
 - 採らなかった案: 一覧を固定して足す手段を持たない（`LSP` などを使う利用先が工程の中で使えなくなる）
 - **代償**: Claude Code に新しい Tool が増えても、一覧に足すまで工程では使えない
-- 根拠: どの利用先の工程でも、今できることを保つ（Value 4「どのプロジェクトでもそのまま使える」）
+- 根拠: Value 4（MVV バージョン 11）。どの利用先の工程でも、今できることを保つ（Value 4「どのプロジェクトでもそのまま使える」）
 
 ### 決定 6: 費用を前後で比べられるよう、起動の呼び出し元が使用量ログへ 1 行書く
 
@@ -356,7 +387,7 @@ sequenceDiagram
 - **代償**: 直す前の行は使用量ログに無い
 - 作り方: 自前で作る
 - 比べた候補: PRD1 / LIB1
-- 根拠: 費用の下がり幅は実測で示す（Value 13「確かめたことだけが済んだとされる」）。記録の置き場は今の使用量ログの 1 か所にする（Value 11「重複と冗長が無い」）
+- 根拠: Value 13 / Value 11（MVV バージョン 11）。費用の下がり幅は実測で示す（Value 13「確かめたことだけが済んだとされる」）。記録の置き場は今の使用量ログの 1 か所にする（Value 11「重複と冗長が無い」）
 
 ## 影響と危険
 
@@ -407,12 +438,15 @@ sequenceDiagram
 | 条件 7 | 手動: MCP の無い設定ディレクトリで起動して終わる | — |
 | 条件 8・I3 | 起動の前後で設定のファイルが変わらない | 指定を設定ファイルへ書く実装にすると落ちる |
 | I4 | 使用量ログへ書けないとき、工程の結果は変わらず警告が出る | 例外を外へ出すと落ちる |
+| 条件 3 | 失敗（値なし）の後に再開した行は、起動 1 回の費用が不明になり、差は区間の合計になる。同じ `launch_id` の行は 1 回だけ数える | 差を後の起動に割り当てると落ちる |
+| 条件 3 | 再開した full の起動で、費用のジャーナルに足す値が累計でなく増えた分になる | 起動の関数が累計をそのまま足すと落ちる |
+| 条件 3 | 呼び出し元が id を指定しない起動は結果の `session_id` を書き、複数のモデルがある結果はトークンの和が最大のモデルを `model` にする | 指定値だけを書くか、先頭のモデルを選ぶと落ちる |
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1959 | 実装する | — | `plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`（新設）、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/__main__.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`（新設）、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/entrypoints.json`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/worktree/references/ndf-settings.md`、`plugins/ndf/tests/adapters/test_claude_args.py`、`plugins/ndf/tests/adapters/test_launch_settings.py`（新設）、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py` |
+| #1959 | 実装する | — | `plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`（新設）、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/__main__.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/records/usage_decide.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`（新設）、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/entrypoints.json`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/worktree/references/ndf-settings.md`、`plugins/ndf/tests/adapters/test_claude_args.py`、`plugins/ndf/tests/adapters/test_launch_settings.py`（新設）、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py` |
 
 ## 未確認のまま残ること
 
@@ -420,6 +454,7 @@ sequenceDiagram
 | --- | --- |
 | 1 工程あたりの費用の下がり幅 | 往復の回数に依る。リリース後の工程の使用量ログと、直す前の実測を比べて分かる |
 | 削減の目標値 | 要求に合否の値が無い。前後の値を残すだけにする |
+| 再開した起動の `usage` と `modelUsage` | 起動 1 回分か会話の累計かを確認していない（`total_cost_usd` が累計になることは [#2944 の設計](./issue-2944-design.md)の実測で分かっている）。実装で再開の起動を 1 回測り、累計なら費用と同じ求め方にする |
 | 利用先の MCP の使い方 | このマシンの記録からは分からない。リリース後の不具合の報告で分かる |
 | `inherit` の工程で最初の応答の前に MCP の接続が間に合うか | Claude Code は非対話でも接続を待たないことがある。2.1.332 では 2 回目の応答から使えた |
 

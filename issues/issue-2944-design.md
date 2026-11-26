@@ -292,7 +292,7 @@ CLI の子プロセスを起動できなかった場合（監視の `refused`・
 
 | 指標 | 数える単位 | 分子 | 分母 |
 | --- | --- | --- | --- |
-| 成功率 | 依頼 1 回（`run_id`・`step`・`attempt` の組。プランの外では `session_id`）。同じ会話の再開は 1 回にまとめ、最後の行の `outcome` を使う | 成功の単位 | 成功と失敗の単位 |
+| 成功率 | 依頼 1 回（`run_id`・`step`・`attempt` の組。プランの外では `session_id`、それも無ければ `launch_id`）。同じ会話の再開は 1 回にまとめ、最後の行の `outcome` を使う | 成功の単位 | 成功と失敗の単位 |
 | やり直し率 | ステップ（`run_id`・`step` の組） | `attempt` が 2 つ以上あるステップ | `run_id` のあるすべてのステップ |
 | 判定のやり直し率 | 判定の依頼 1 回 | 1 回目が `invalid` で起動し直した依頼。2 回とも形に合わず人へ戻した件数（judge の stop）も別に並べる | すべての判定の依頼 |
 
@@ -387,7 +387,7 @@ graph TD
 - **代償**: 表を直すには NDF のリリースが要る。すぐ変える手段はリポジトリの設定と環境変数である
 - 作り方: 自前で作る・標準に倣う
 - 比べた候補: STD1 / PRD1 / PRD2 / LIB1
-- 根拠: 値の置き場を 1 か所にする（Value 11「重複と冗長が無い」）。同じ作業はいつも同じ値で動く（Value 3「同じ手順は毎回同じ結果になる」）。CLI が持つ指定の手段を使う（Value 12「調べて分析した、実績のある最新のやり方で作られる」）
+- 根拠: Value 11 / Value 3 / Value 12（MVV バージョン 11）。値の置き場を 1 か所にする（Value 11「重複と冗長が無い」）。同じ作業はいつも同じ値で動く（Value 3「同じ手順は毎回同じ結果になる」）。CLI が持つ指定の手段を使う（Value 12「調べて分析した、実績のある最新のやり方で作られる」）
 
 ### 決定 2: 利用者が設定を足さずに費用が下がるよう、初期値は設定の無いリポジトリにも効かせる
 
@@ -413,7 +413,7 @@ Codex のレビューの費用が増える量と、代わりの案は次のと�
 
 `high` で起動するのは通常のレビューのすべてで、`light` のモードでは 1 つ下げて `medium` にする。元に戻すには、リポジトリの設定に `{"models": {"seat": {"review": {"codex": {"effort": "low"}}}}}` を足す。一時的には `NDF_LAUNCH_CODEX_EFFORT=low` を使う（Codex のすべての起動に効く）。この値は受け入れ条件 6 の測定で見直し、設計承認ゲートで利用者が確かめる。
 
-- 根拠: 設定を足さない利用者の費用も下げる（Value 2「安く使える」。費用が増える Codex のレビューは、上に理由と代わりの案を示した）。どの利用先も同じ表で動き、設定で変えられる（Value 4「どのプロジェクトでもそのまま使える」）
+- 根拠: Value 2 / Value 4（MVV バージョン 11）。設定を足さない利用者の費用も下げる（Value 2「安く使える」。費用が増える Codex のレビューは、上に理由と代わりの案を示した）。どの利用先も同じ表で動き、設定で変えられる（Value 4「どのプロジェクトでもそのまま使える」）
 
 ### 決定 3: 利用者の対話を変えないため、レーンの conductor の行は値を持たない
 
@@ -421,7 +421,7 @@ Codex のレビューの費用が増える量と、代わりの案は次のと�
 - **選んだ案**: 値を書かず、利用者の Claude Code の既定のまま起動する。オーガナイザーは `--role organizer` で起動したときだけ `sonnet / medium` にする
 - 採らなかった案: `opus / medium` を書く（利用者が選んだモデルを、対話の起動のたびに上書きする）
 - **代償**: レーンの費用は下がらない。オーガナイザーは起動の手順に `--role organizer` を足す
-- 根拠: どの利用者の対話も、選んだモデルのまま使える（Value 4「どのプロジェクトでもそのまま使える」）
+- 根拠: Value 4（MVV バージョン 11）。どの利用者の対話も、選んだモデルのまま使える（Value 4「どのプロジェクトでもそのまま使える」）
 
 ### 決定 4: 値の保存先を 1 か所にするため、サブエージェントの定義の `model` を消し、起動の hook で足す
 
@@ -437,7 +437,7 @@ Codex のレビューの費用が増える量と、代わりの案は次のと�
 - **代償**: hook が動かない環境では、サブエージェントが呼び出し元のモデルを継ぐ。ほかのプラグインや組み込みのサブエージェントには効かない
 - 作り方: ライブラリやサービスを使う
 - 比べた候補: STD2 / STD3
-- 根拠: 起動のたびに同じ値になる（Value 3「同じ手順は毎回同じ結果になる」）。値の置き場を対応表の 1 か所にする（Value 11「重複と冗長が無い」）
+- 根拠: Value 3 / Value 11（MVV バージョン 11）。起動のたびに同じ値になる（Value 3「同じ手順は毎回同じ結果になる」）。値の置き場を対応表の 1 か所にする（Value 11「重複と冗長が無い」）
 
 ### 決定 5: 黙って別の値で動かさないため、effort の値は NDF が起動の前に検証する
 
@@ -445,7 +445,7 @@ Codex のレビューの費用が増える量と、代わりの案は次のと�
 - **選んだ案**: 表の `ranks` に無い effort は起動しない。モデルの名前は検証せず、CLI の起動の失敗を理由として残す
 - 採らなかった案: CLI に任せる（Claude Code は無い effort を警告だけで無視する）
 - **代償**: CLI が effort の値を増やしたら、表を直すまで指定できない
-- 根拠: 指定した effort で動いたと、確かめずに扱わない（Value 13「確かめたことだけが済んだとされる」）。CLI の動きは STD1
+- 根拠: Value 13（MVV バージョン 11）。指定した effort で動いたと、確かめずに扱わない（Value 13「確かめたことだけが済んだとされる」）。CLI の動きは「外部の調査」の STD1
 
 ### 決定 6: 手戻りを減らすため、失敗の後の修正の作業を 1 つ上の値で起動する
 
@@ -454,16 +454,16 @@ Codex のレビューの費用が増える量と、代わりの案は次のと�
 - 採らなかった案: 同じステップを 2 回目に実行するときだけ上げる（失敗の直後の最初の修正が、実装と同じ値で動く）
 - 採らなかった案: 常にモデルから上げる（`low` の作業がいきなり高いモデルになる）
 - **代償**: 軽い失敗（書式の指摘など）の修正にも上の値を払う。やり直しの回数は変えない
-- 根拠: 安い値で始めて失敗したときだけ上げる（Value 2「安く使える」）。同じ値のやり直しで時間を使わない（Value 5「速く届く」）
+- 根拠: Value 2 / Value 5（MVV バージョン 11）。安い値で始めて失敗したときだけ上げる（Value 2「安く使える」）。同じ値のやり直しで時間を使わない（Value 5「速く届く」）
 
 ### 決定 7: 費用と成功率を追えるよう、呼び出し元が結果を添えて使用量ログへ 1 行書く
 
 - **質問**: 成功率の元になる結果を、どこに記録するか
-- **選んだ案**: 起動の呼び出し元が、結果が分かってから値・出所・結果を 1 行に書く。#1959 で作る、`claude -p` の行を使用量ログへ書くインターフェースを、判定・相手役（Codex を含む）・中継の起動まで広げる。中継は、ラッパーが子の終了時に 1 行書く。取れない値は「取得できる値は呼び手によって違う」の表のとおり不明にする。プランの記録には、ステップの結果の `metrics` から指定した値と実際のモデルを集める
+- **選んだ案**: 起動の呼び出し元が、結果が分かってから値・出所・結果を 1 行に書く。#1959 で作る、`claude -p` の行を使用量ログへ書くインターフェースを、判定・相手役（Codex を含む）・中継の起動まで広げる。中継は、ラッパーが子の終了時に 1 行書く。取れない値は「取得できる値は呼び手によって違う」の表のとおり不明にする。プランの記録には、ステップの結果の `metrics` から指定した値と実際のモデルを集める。行を書くようになる `claude -p` の起動は、#1959 の設計の「ステータスラインの費用との関係」と同じく、費用のジャーナルへ足す値も使用量ログの書き込み処理が決める
 - 採らなかった案: 結果を別のファイルに残して集計で突き合わせる（突き合わせの鍵と片付けが増える）
 - 採らなかった案: プランの記録だけから成功率を出す（プランの記録は作業の終わりに片付く。プランを通らない起動は記録に残らない）
 - **代償**: 呼び出し元が結果を受ける前に落ちた起動は行が残らない
-- 根拠: 起動の事実を追記だけで持ち、集計はそこから作る（Value 8「正しいデータ構造で作られる」）。費用と成功率は実測で示す（Value 13「確かめたことだけが済んだとされる」）
+- 根拠: Value 8 / Value 13（MVV バージョン 11）。起動の事実を追記だけで持ち、集計はそこから作る（Value 8「正しいデータ構造で作られる」）。費用と成功率は実測で示す（Value 13「確かめたことだけが済んだとされる」）
 
 ## 影響と危険
 
@@ -523,7 +523,7 @@ Codex のレビューの費用が増える量と、代わりの案は次のと�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2944 | 実装する | — | `plugins/ndf/contracts/domains/launch-models.json`（新設）、`plugins/ndf/src/ndf/adapters/model_choice.py`（新設）、`plugins/ndf/src/ndf/domains/records/models_cli.py`（新設）、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/llm.py`、`plugins/ndf/src/ndf/adapters/agents.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/hooks/judge_child.py`、`plugins/ndf/src/ndf/domains/hooks/verdict.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/hooks/guards/launch_model.py`（新設）、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/src/ndf/domains/crossreview/seats.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/src/ndf/domains/crossrefactor/launch.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/contracts/domains/runtimes.json`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/limits/hook.stop-wait.judge.json`、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/schemas/io/models.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/models.result.schema.json`（生成）、`plugins/ndf/agents/code-reviewer.md`、`plugins/ndf/agents/corder.md`、`plugins/ndf/agents/data-analyst.md`、`plugins/ndf/agents/debugger.md`、`plugins/ndf/agents/devops-engineer.md`、`plugins/ndf/agents/director.md`、`plugins/ndf/agents/qa.md`、`plugins/ndf/agents/researcher.md`、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/external-ai/references/cli-codex.md`、`plugins/ndf/skills/qa-security-scan/03-report-template.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/tests/adapters/test_model_choice.py`（新設）、`plugins/ndf/tests/domains/records/test_models_report.py`（新設）、`plugins/ndf/tests/domains/hooks/test_launch_model_guard.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py`、`plugins/ndf/tests/adapters/test_llm.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py`、`plugins/ndf/tests/domains/relay/test_relay_cli.py` |
+| #2944 | 実装する | — | `plugins/ndf/contracts/domains/launch-models.json`（新設）、`plugins/ndf/src/ndf/adapters/model_choice.py`（新設）、`plugins/ndf/src/ndf/domains/records/models_cli.py`（新設）、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/llm.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/adapters/agents.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/lane/launch.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/hooks/judge_child.py`、`plugins/ndf/src/ndf/domains/hooks/verdict.py`、`plugins/ndf/src/ndf/domains/hooks/dispatch.py`、`plugins/ndf/src/ndf/domains/hooks/guards/launch_model.py`（新設）、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/src/ndf/domains/crossreview/seats.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/src/ndf/domains/crossrefactor/launch.py`、`plugins/ndf/src/ndf/domains/relay/cli.py`、`plugins/ndf/src/ndf/domains/relay/wrapper.py`、`plugins/ndf/src/ndf/domains/relay/hub.py`、`plugins/ndf/contracts/domains/runtimes.json`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/limits/hook.stop-wait.judge.json`、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/schemas/io/models.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/models.result.schema.json`（生成）、`plugins/ndf/agents/code-reviewer.md`、`plugins/ndf/agents/corder.md`、`plugins/ndf/agents/data-analyst.md`、`plugins/ndf/agents/debugger.md`、`plugins/ndf/agents/devops-engineer.md`、`plugins/ndf/agents/director.md`、`plugins/ndf/agents/qa.md`、`plugins/ndf/agents/researcher.md`、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/external-ai/references/cli-codex.md`、`plugins/ndf/skills/qa-security-scan/03-report-template.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/tests/adapters/test_model_choice.py`（新設）、`plugins/ndf/tests/domains/records/test_models_report.py`（新設）、`plugins/ndf/tests/domains/hooks/test_launch_model_guard.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py`、`plugins/ndf/tests/adapters/test_llm.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py`、`plugins/ndf/tests/domains/relay/test_relay_cli.py` |
 
 ## 未確認のまま残ること
 
