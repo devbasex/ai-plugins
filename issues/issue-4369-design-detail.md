@@ -28,9 +28,11 @@ contracts/
 └── domains/env.json
 ```
 
-依存の向きは一方向である。`invoke.py` → `units_invoke.py` → `plan_runs.py`・`issue_copies.py` → `core/` → `adapters/` の順に読み、逆向きの import は置かない。`units_invoke.py` がプランやコマンドを打つときは、`invoke.py` が渡す関数（`Ports`）を呼ぶ。`progress/` は `domains/` を import できない（`src/ndf/checks/rules.json` の層の並び）。そのため作業場所の用意は `ndf worktree create`、マージは `ndf ci merge` を子プロセスで打つ。
+図の `*` は新設するファイルである。依存の向きは一方向である。読む順は `invoke.py` → `units_invoke.py` → `plan_runs.py`・`issue_copies.py` → `core/` → `adapters/` である。逆向きの import は置かない。`units_invoke.py` がプランやコマンドを打つときは、`invoke.py` が渡す関数（`Ports`）を呼ぶ。`progress/` は `domains/` を import できない（`src/ndf/checks/rules.json` の層の並び）。そのため作業場所の用意は `ndf worktree create`、マージは `ndf ci merge` を子プロセスで打つ。
 
-同じファイルの規則は、1 ファイル 1,000 行以下も求める。`invoke.py` は 985 行あるので、型とプランの実行の記録の読み取りを `plan_runs.py` へ、課題の題と本文のコピーを `issue_copies.py` へ先に移す（振る舞いを変えない移動）。
+`src/ndf/checks/rules.json` の規則は、1 ファイル 1,000 行以下も求める。`invoke.py` は 985 行あるので、先に次の 2 つを移す（振る舞いを変えない移動）。型とプランの実行の記録の読み取りは `plan_runs.py` へ移す。課題の題と本文のコピーは `issue_copies.py` へ移す。
+
+### ファイルごとの役割
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -91,7 +93,7 @@ contracts/
 | 条件 | 結果 |
 | --- | --- |
 | 単位の見出しがある実装計画 | 表の行を単位にする。並びの鍵はファイル名の番号の最小 |
-| どの単位の見出しの実装計画の番号にも入らないスプリントの課題 | 課題 1 つを補った単位にする。名前は `issue-<番号>`、並びの鍵はその番号 |
+| 単位の見出しがある実装計画の、どのファイル名の番号にも入らないスプリントの課題 | 課題 1 つを補った単位にする。名前は `issue-<番号>`、並びの鍵はその番号 |
 | 「実行順」の列がある | 計画の中を値の順（同じ値は表の順） |
 | 列が無く、時機が「実装の前」で始まる行の対象が「しない」で始まらない | 「タスク分解」の最初の `### Task` を含む単位を先頭にする |
 | 上のどれでもない | 表の順 |
@@ -152,7 +154,7 @@ contracts/
 | `Ports` | 型 | `units_invoke.py` | `call_plan(run, work_dir) -> StageResult`、`command(argv, cwd, env) -> CompletedProcess` |
 | `Context` | 型 | 同上 | 工程の呼び出し・保存先・スプリントの作業場所とブランチ・リモート・`<所有者>/<リポジトリ>`・設定・待つチェックとそのキー |
 | `Lineup` | 型 | 同上 | `units: tuple[Unit, ...]`。`units.json` は `{"route": "units" か "plain", "units": [...]}` |
-| `RoundState` | 型 | 同上 | `round_dir`・`done`（結果のバックアップ。無ければ None）・`merge`・`reviewed`・`stopped_head` |
+| `RoundState` | 型 | 同上 | `round_dir`・`done`（その回に保存した結果。無ければ None）・`merge`・`reviewed`・`stopped_head` |
 | `Resume` | 型 | 同上 | `action`（`run`・`merge`）・`new_round: bool`・`start: Optional[str]` |
 | `REVIEW_STEPS` | 定数 | 同上 | `review`・`review-delta`・`resolved` |
 | `BEFORE_TEST` | 定数 | 同上 | `work`・`acceptance`・`test`・`test-repeat`・`fix` |
@@ -324,7 +326,7 @@ contracts/
 
 満たす決定: 決定 4・13、受け入れ条件 1・2
 
-関数のシグネチャは変えない。`StageDef` に `per_unit: bool = False` を足し、`definition._stage_def` が `metadata.ndf.per_unit` から読む（`per_issue` と同じ形）。`_stage_dict` と `_stage_from` は欄をそのまま写すので変えない。欄の無い保存済みのスナップショットは偽になる。
+関数のシグネチャは変えない。`StageDef` に `per_unit: bool = False` を足す。`definition._stage_def` が `metadata.ndf.per_unit` から読む（`per_issue` と同じ形）。`_stage_dict` と `_stage_from` は欄をそのまま写すので変えない。欄の無い保存済みのスナップショットは偽になる。
 
 | ファイル | 足すもの |
 | --- | --- |
@@ -342,8 +344,8 @@ contracts/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `unit_template` | `core/route/__init__.py` | 新設 | `(t: Template, repo: str, drop: Collection[str]) -> Template` | `use` を開き、`drop` のステップを外し、残るステップ `ci` の引数の末尾に `--repo <repo>` を足したテンプレートを返す |
-| `unit_review_launch` | 同上 | 新設 | `(repo: str, command: Sequence[str]) -> list[str]` | レビューの起動を、照合する包み（`UNIT_REVIEW`）で包む |
-| `review_launch` | 同上 | 変更 | 変えない | `impl` では、PR の番号をブランチから引かず `{state_dir}/pr-number` から読む包みにする |
+| `unit_review_launch` | 同上 | 新設 | `(repo: str, command: Sequence[str]) -> list[str]` | レビューの起動を、照合するラッパー（`UNIT_REVIEW`）経由にする |
+| `review_launch` | 同上 | 変更 | 変えない | `impl` では、PR の番号をブランチから引かず `{state_dir}/pr-number` から読むラッパーにする |
 
 `drop` は `done-check` で、待つチェックが空の並びなら `ci` も入れる。単位の経路の `{{review}}` は `unit_review_launch(repo, 設定の起動か、--pr を持たない既定の ndf cross-review run)` である。
 
@@ -370,15 +372,15 @@ contracts/
 | 関数 | 失敗 | 扱い |
 | --- | --- | --- |
 | `unit_template` | 外すステップがテンプレートに無い | 何もしない（`without_steps` の今の振る舞い） |
-| `unit_review_launch` の包み | 番号が読めない・照合が違う | 上の手順 1・4 |
-| `review_launch` の包み（`impl`） | `pr-number` が無い | 終了コード 1。`pr` のステップを通る回から打ち直す |
+| `unit_review_launch` のラッパー | 番号が読めない・照合が違う | 上の手順 1・4 |
+| `review_launch` のラッパー（`impl`） | `pr-number` が無い | 終了コード 1。`pr` のステップを通る回から打ち直す |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `unit_template` | `expanded`・`without_steps` | `core/route/__init__.py` | 使う |
-| `unit_review_launch` | `REVIEW_WITH_PR`・`REVIEW_STATE` | 同上 | 同じ「`sh -c` の包み」の形にする。照合は持たないので足す |
+| `unit_review_launch` | `REVIEW_WITH_PR`・`REVIEW_STATE` | 同上 | 同じ「`sh -c` のラッパー」の形にする。照合は持たないので足す |
 
 ### 単体テストの観点
 
@@ -403,7 +405,12 @@ contracts/
 
 `RunConfig`（`settings.py`）に `unit: str = ""` を足し、`_run_config` が `_unit_text()` を入れる。`drive._review_prompt` と `fixer._fix_prompt` は `unit_block` の行を足す。`unit_block` の相手役向けの文には、後の単位の条件を未達にしないことと、秘密・認証認可・利用者のデータ・戻せない操作の指摘は必ず出すことを書く。修正担当向けの文には、後の単位を理由に見送るときは区分 `not_applicable` と担当の単位を書くことと、同じ例外は見送らないことを書く。
 
-`contracts/worker/kinds.json` は、`impl`・`fix`・`ci-fix`・`fix-push`・`fix-base` に `"optional_inputs": ["unit_file"]` を足し、`summary` に「入力 `unit_file` があれば、そのファイルを読んで単位の範囲に従う」を足す。起動指示は入力の値をデータとして扱うので、ファイルに従うことは作業の定義の側に書く必要がある。
+`contracts/worker/kinds.json` は、`impl`・`fix`・`ci-fix`・`fix-push`・`fix-base` の 5 つに次の 2 つを足す。
+
+- `"optional_inputs": ["unit_file"]`
+- `summary` の文「入力 `unit_file` があれば、そのファイルを読んで単位の範囲に従う」
+
+起動指示は入力の値をデータとして扱うので、ファイルに従うことは作業の定義の側に書く必要がある。
 
 `contracts/domains/env.json` に `NDF_UNIT_FILE`（`set_by` は `ndf`）の行を足し、`docs/contracts/env.md` を生成し直す。
 
@@ -563,4 +570,6 @@ contracts/
 満たす決定: 決定 4・7、受け入れ条件 1
 
 - `ndf check --write-spec` で `docs/contracts/commands.md`・`docs/contracts/env.md`・`contracts/schemas/io/` を生成し直す
-- `skills/development-workflow/references/agent-layers.md` の「実装のフェーズの単位」に、`ndf progress next` の自動の経路も単位を読むことと、単位の表の読み方を書く
+- `skills/development-workflow/references/agent-layers.md` の「実装のフェーズの単位」に、次の 2 つを書く
+  - `ndf progress next` の自動の経路も単位を読むこと
+  - 単位の表の読み方
