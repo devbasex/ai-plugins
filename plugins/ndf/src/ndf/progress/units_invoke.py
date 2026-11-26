@@ -25,7 +25,7 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
 from ndf.adapters import github, github_pulls
-from ndf.adapters.git import HEADS, Git, mask_urls
+from ndf.adapters.git import END_OF_OPTIONS, HEADS, Git, mask_urls
 from ndf.cli import ndf_command
 from ndf.contracts import facts, result, worker_paths
 from ndf.core import branch_strategy, json_pointer, route
@@ -744,14 +744,20 @@ def sprint_pr(ctx: Context, ports: Ports, landed: Sequence[tuple[str, str]]) -> 
     return ports.call_plan(run, ctx.work_dir / SPRINT_PR_DIR)
 
 
+class _Node(NamedTuple):
+    """スプリントブランチの first-parent の履歴の 1 コミット。`tree` はツリーのオブジェクト ID、`parents` は親の SHA の並び。"""
+
+    tree: str
+    parents: tuple[str, ...]
+
+
 def _take_unit_merges(g: Git, ctx: Context, tip: str, landed: Sequence[tuple[str, str]]) -> None:
     """手元の HEAD からリモートの HEAD（`tip`）までが、単位のレビューを経たマージ結果だけでできていれば、手元を `tip` へ進める。
 
-    手元の HEAD から始め、手元にまだ無い単位のマージを表の順にたどる。単位ごとに、実装の前に取り込んだスプリントブランチの HEAD
-    （`base-head`）が直前の点と同じで、マージで入ったコミットのツリーがレビューした HEAD のツリーと同じことを確かめる。こう確かめると、
-    マージの方式（squash・merge commit・rebase）によらず、単位のマージの間に入った別の変更を見つけられる。最後の点が `tip` と
-    違うか、どれかの単位を確かめられなければ、手元を動かさずに止める。手元の HEAD に入っているコミットは確かめ済みとして扱う
-    （利用者が確かめて取り込んだものを含む）。
+    手元の HEAD から始め、手元にまだ無い単位のマージを表の順にたどり、各単位のマージが直前の点の上に単位の変更だけを足したことを
+    `_reviewed_merge` で確かめる。最後の点が `tip` と違うか、どれかの単位を確かめられなければ、手元を動かさずに止める。
+    手元の HEAD に入っているコミットは確かめ済みとして扱う（利用者が確かめて取り込んだものを含む）。
+    履歴（コミット・ツリー・親）は `git log` を 1 回、レビューした HEAD のツリーはまとめて 1 回で読む。
     """
     head = g.rev_parse("HEAD")
     if head == tip:
@@ -763,11 +769,20 @@ def _take_unit_merges(g: Git, ctx: Context, tip: str, landed: Sequence[tuple[str
             "手元とリモートを揃え、その変更をスプリントの PR に含めてよいと確かめてから ndf progress next を打ち直す"
         )
         raise UnitsStopped("precondition", detail)
+    order, chain = _first_parents(g, head, tip)
+    records = {b: _unit_record(ctx, b) for b, sha in landed if sha in chain}
+    trees = _trees(g, sorted({r for r, _ in records.values() if r}))
     point = head
     for branch, sha in landed:
-        if sha and g.commit_or_none(sha) is not None and g.is_ancestor(sha, point):
-            continue
-        if not _reviewed_merge(g, ctx, branch, sha, point):
+        if sha not in chain:
+            # 手元にまだ無い単位のマージを確かめ始めた後に履歴に無いマージが来たら、確かめられない
+            if point == head:
+                continue
+            raise _unreviewed(ctx, point, tip)
+        reviewed, base = records[branch]
+        if not reviewed or base != point or trees.get(reviewed) is None:
+            raise _unreviewed(ctx, point, tip)
+        if not _reviewed_merge(g, order, chain, point, sha, reviewed, base, trees[reviewed]):
             raise _unreviewed(ctx, point, tip)
         point = sha
     if point != tip:
@@ -781,15 +796,50 @@ def _take_unit_merges(g: Git, ctx: Context, tip: str, landed: Sequence[tuple[str
         raise UnitsStopped("precondition", f"スプリントの作業場所を {ctx.branch} の HEAD へ進められない: {mask_urls(moved.stderr.strip())}")
 
 
-def _reviewed_merge(g: Git, ctx: Context, branch: str, sha: str, point: str) -> bool:
-    """単位のマージで入ったコミット `sha` が、`point` の上に単位のレビューを経た変更だけを足したものか。"""
+def _first_parents(g: Git, head: str, tip: str) -> tuple[list[str], dict[str, _Node]]:
+    """`head` から `tip` までの first-parent の履歴（古い順の SHA と、SHA ごとのツリーと親）。`head` 自身は含まない。"""
+    rows = [line.split() for line in g.log_of(f"{head}..{tip}", "--first-parent", "--format=%H %T %P").splitlines() if line.strip()]
+    chain = {r[0]: _Node(r[1], tuple(r[2:])) for r in rows}
+    return [r[0] for r in reversed(rows)], chain
+
+
+def _unit_record(ctx: Context, branch: str) -> tuple[Optional[str], Optional[str]]:
+    """単位の最新の回の、レビューした HEAD と、実装の前に取り込んだスプリントブランチの HEAD（`base-head`）。"""
     state = round_state(ctx.work_dir / UNITS_DIR / branch)
-    reviewed, base = state.reviewed, _saved_base(state.round_dir)
-    if not sha or not reviewed or base != point:
+    return state.reviewed, _saved_base(state.round_dir)
+
+
+def _trees(g: Git, commits: Sequence[str]) -> dict[str, str]:
+    """コミットごとのツリーのオブジェクト ID（1 回の `git log --no-walk` で読む）。読めなければ空（呼び手は確かめられないとする）。"""
+    if not commits:
+        return {}
+    done = g.attempt("log", "--no-walk=unsorted", "--format=%H %T", END_OF_OPTIONS, *commits)
+    if done.returncode != 0:
+        return {}
+    return {r[0]: r[1] for r in (line.split() for line in done.stdout.splitlines()) if len(r) == 2}
+
+
+def _reviewed_merge(
+    g: Git, order: Sequence[str], chain: Mapping[str, _Node], point: str, sha: str, reviewed: str, base: str, tree: str
+) -> bool:
+    """単位のマージで入ったコミット `sha` が、`point` の上にレビューした HEAD（`reviewed`、ツリー `tree`）の変更だけを足したものか。
+
+    ツリーはオブジェクト ID で比べる（`git diff` と違い、サブモジュールを無視する設定に左右されない）。マージの方式ごとに、GitHub が
+    マージした時点の親を照らす。squash は親が `point` だけ、merge commit は親が `point` とレビューした HEAD である。どちらでもなければ
+    rebase とみなし、`point` から `sha` までのコミットが親 1 つの直線で、数が単位のコミット（`base..reviewed` のマージでないもの）と
+    同じことを確かめる。レビューの後に入ったコミットは、変更を打ち消してツリーが戻っても、親か数が合わずに見つかる。
+    """
+    node = chain[sha]
+    if node.tree != tree:
         return False
-    if g.commit_or_none(sha) is None or g.commit_or_none(reviewed) is None or not g.is_ancestor(point, sha):
+    if node.parents in ((point,), (point, reviewed)):
+        return True
+    start = order.index(point) + 1 if point in chain else 0
+    segment = order[start : order.index(sha) + 1]
+    if not segment or chain[segment[0]].parents != (point,) or any(len(chain[c].parents) != 1 for c in segment):
         return False
-    return g.attempt("diff", "--quiet", "--no-ext-diff", sha, reviewed, "--").returncode == 0
+    counted = g.attempt("rev-list", "--count", "--no-merges", END_OF_OPTIONS, f"{base}..{reviewed}")
+    return counted.returncode == 0 and counted.stdout.strip() == str(len(segment))
 
 
 def _unreviewed(ctx: Context, point: str, tip: str) -> UnitsStopped:

@@ -348,6 +348,34 @@ def test_a_commit_outside_the_units_stops_before_the_sprint_pr_and_a_rerun_takes
     assert world.runs[-1][0].name == "pr" and world.impl_runs() == []
 
 
+def test_commits_that_cancel_out_before_a_squash_merge_are_still_found(world):
+    # レビューの後に別のコミットとその打ち消しが入り、ツリーが元に戻ってから squash でマージされても、親で見つける
+    names = world.unit_names()
+    original = world.command
+
+    def squash_the_second(argv, cwd, env):
+        words = argv[argv.index("ci") :] if "ci" in argv and "worktree" not in argv else []
+        if words[:2] != ["ci", "merge"] or _flags(words)["--branch"] != names["書き手"]:
+            return original(argv, cwd, env)
+        world.push_other("別の変更")
+        world.push_other("別の変更を打ち消す")
+        _git(cwd, "fetch", "-q", "origin")
+        squashed = _git(cwd, "commit-tree", "HEAD^{tree}", "-p", f"origin/{BRANCH}", "-m", "squash")
+        _git(cwd, "push", "-q", "origin", f"{squashed}:refs/heads/{BRANCH}")
+        number = int(_flags(words)["--pr"])
+        world.merged[names["書き手"]] = github_pulls.MergedPull(number, squashed)
+        out = result.result("ci", result.OK, "マージした", items=[{"kind": "pr", "number": number, "merge_sha": squashed}])
+        return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
+
+    world.command = squash_the_second
+    start = _git(world.sprint, "rev-parse", "HEAD")
+
+    got = world.run()
+
+    assert got.status == "stopped" and "レビューを経たと確かめられない" in got.cause["detail"]
+    assert _git(world.sprint, "rev-parse", "HEAD") == start and all(r.name != "pr" for r, _ in world.runs)
+
+
 def test_a_commit_after_the_last_unit_stops_without_moving_the_sprint_worktree(world, monkeypatch):
     original = units_invoke.merge_unit
 
