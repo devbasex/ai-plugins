@@ -798,7 +798,9 @@ def _take_unit_merges(g: Git, ctx: Context, tip: str, landed: Sequence[tuple[str
 
 def _first_parents(g: Git, head: str, tip: str) -> tuple[list[str], dict[str, _Node]]:
     """`head` から `tip` までの first-parent の履歴（古い順の SHA と、SHA ごとのツリーと親）。`head` 自身は含まない。"""
-    rows = [line.split() for line in g.log_of(f"{head}..{tip}", "--first-parent", "--format=%H %T %P").splitlines() if line.strip()]
+    # 署名の検証結果（log.showSignature）が標準出力に混ざると履歴の行に数えるので、設定によらず出さない
+    log = g.log_of(f"{head}..{tip}", "--first-parent", "--no-show-signature", "--format=%H %T %P")
+    rows = [line.split() for line in log.splitlines() if line.strip()]
     chain = {r[0]: _Node(r[1], tuple(r[2:])) for r in rows}
     return [r[0] for r in reversed(rows)], chain
 
@@ -813,7 +815,7 @@ def _trees(g: Git, commits: Sequence[str]) -> dict[str, str]:
     """コミットごとのツリーのオブジェクト ID（1 回の `git log --no-walk` で読む）。読めなければ空（呼び手は確かめられないとする）。"""
     if not commits:
         return {}
-    done = g.attempt("log", "--no-walk=unsorted", "--format=%H %T", END_OF_OPTIONS, *commits)
+    done = g.attempt("log", "--no-walk=unsorted", "--no-show-signature", "--format=%H %T", END_OF_OPTIONS, *commits)
     if done.returncode != 0:
         return {}
     return {r[0]: r[1] for r in (line.split() for line in done.stdout.splitlines()) if len(r) == 2}
