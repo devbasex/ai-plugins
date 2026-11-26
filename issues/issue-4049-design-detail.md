@@ -34,7 +34,7 @@ plugins/ndf/
 | `src/ndf/domains/hooks/guards/relay_mark.py` | 変更 | Stop で子の会話の背景の作業の件数を書いてから、今のマーカーの扱いへ進む | `relay.signals` | モジュール `relay_mark` | `check`（変更） |
 | `src/ndf/domains/relay/signals.py` | 変更 | 背景の作業の記録の読み書きと、子の会話の ID の環境変数を足す | 標準ライブラリ | モジュール `signals` | `write_busy`・`read_busy`・`drop_other_busy`・`relay_session`（新設）、`launch_env`（変更）、定数 `SESSION_ENV`・`BUSY_PREFIX`・`LAUNCH_ID_RE` |
 | `src/ndf/domains/relay/switch_decide.py` | 変更 | 背景の作業の件数で引継ぎと止まりの判定を待つ | `account_decide` | `SectionState`・`Background`・モジュール `switch_decide` | `needs_background`・`_over`・`_stalled`（新設）、`_alive`（変更）、`SectionState.background`（項目を足す）、定数 `BACKGROUND_WAIT`・`BACKGROUND_LEAST`・`BACKGROUND_UNKNOWN`・`ACTIVE` |
-| `src/ndf/domains/relay/wrapper.py` | 変更 | 起動の前に 0 件を書き、要るときだけ記録を読み、待ちと動きを状態に書く | `signals`・`switch_decide` | `Wrapper` | `_on_active`（新設）、`_start`・`_state`（変更）、`_ACTIONS`（行を足す） |
+| `src/ndf/domains/relay/wrapper.py` | 変更 | 起動の前に 0 件を書き、要るときだけ記録を読み、待ちと動きを状態に書く | `signals`・`switch_decide` | `Wrapper` | `_on_active`（新設）、`_start`・`_state`・`_end`（変更）、`_ACTIONS`（行を足す） |
 | `contracts/hooks/guards.json` | 変更 | guard `relay-busy` の行を足し、`relay-marker` の `summary` を直す | — | — | — |
 | `contracts/hooks/runtimes.json` | 変更 | Codex の `skipped` に `relay-busy` を足す | — | — | — |
 | `contracts/domains/ndf-files.json` | 変更 | `relay-busy`（`<名前>/busy-<起動>.json`）の行を足す | — | — | — |
@@ -54,7 +54,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `write_busy` | `src/ndf/domains/relay/signals.py` | 新設 | `write_busy(directory: Path, launch: str, session_id: str, count: int, source: str) -> bool` | `busy-<launch>.json` を `{"launch", "session_id", "count", "source", "at"}` で置き換え、書けたら真 |
 | `read_busy` | 同上 | 新設 | `read_busy(directory: Path, launch: str, session_id: str) -> Optional[tuple[int, str, str]]` | `busy-<launch>.json` が今の会話の記録で形が合えば `(count, source, at)`、ほかは None（不明） |
-| `drop_other_busy` | 同上 | 新設 | `drop_other_busy(directory: Path, launch: str) -> None` | `busy-*.json` のうち `launch` のもの以外を消す |
+| `drop_other_busy` | 同上 | 新設 | `drop_other_busy(directory: Path, launch: Optional[str]) -> None` | `busy-*.json` のうち `launch` のもの以外と、書きかけの一時ファイルを消す。`launch` が None ならすべて消す |
 | `relay_session` | 同上 | 新設 | `relay_session(env: Mapping[str, str]) -> Optional[str]` | 環境の `NDF_RELAY_SESSION`。無い・空なら None |
 | `launch_env` | 同上 | 変更 | `launch_env(directory: Path, launch: str, session_id: str) -> dict[str, str]` | 今の 2 つに `NDF_RELAY_SESSION` を足して返す |
 
@@ -63,9 +63,9 @@ plugins/ndf/
   - 事後条件: 真を返したとき、`busy-<launch>.json` は引数の値と書いた時刻 `at`（`now_iso`）を持つ。偽を返したとき、ファイルは呼ぶ前のまま
   - 副作用: `launch` が `LAUNCH_ID_RE` に合わなければファイルの名前を作らずに偽。合えば `replace_json` で一時の名前に書いて名前を変える。`OSError` は偽にして外へ出さない。排他は取らない
 - `read_busy`
-  - 副作用: 無し（読むだけ）。`launch` が `LAUNCH_ID_RE` に合わない・ファイルが無い・`OSError`・`UnicodeDecodeError`・JSON が壊れた・`session_id` が違う・`count` が `bool` か負か整数でない・`source` が 3 つのどれでもないときは None。例外を外へ出さない（見回りの `SignalError` の止まり（`_halt_broken`）へ流さない）
+  - 副作用: 無し（読むだけ）。`launch` が `LAUNCH_ID_RE` に合わない・ファイルが無い・`OSError`・`UnicodeDecodeError`・JSON が壊れた・JSON の `launch` が引数の `launch` と違う・`session_id` が違う・`at` が無いか ISO 8601 の時刻として読めない文字列・`count` が `bool` か負か整数でない・`source` が 3 つのどれでもないときは None。例外を外へ出さない（見回りの `SignalError` の止まり（`_halt_broken`）へ流さない）
 - `drop_other_busy`
-  - 副作用: 中継の保存先の `busy-*.json` を `glob` で拾い、名前が `busy-<launch>.json` でないものを消す。消せないもの（`OSError`）は残して続ける
+  - 副作用: 中継の保存先の `busy-*.json` を `glob` で拾い、名前が `busy-<launch>.json` でないもの（`launch` が None ならすべて）を消す。`replace_json` の書き込みが中断して残った一時ファイル（`.busy-*.json.*.tmp`）も消す。消せないもの（`OSError`）は残して続ける
 
 ### 異常系の処理
 
@@ -110,8 +110,9 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `write_busy`・`read_busy` | 書いた件数 2・`stop` を同じ起動と会話で読み返せる。0・`launch` も読み返せる | `count` が 0 と 1 | `replace_json` を失敗させると偽で前の中身が残る。起動の ID が `../x`・空・大文字なら偽でファイルを作らない。別の会話の記録・壊れた JSON・`count` が文字列か負か `true`・`source` が別の値・ファイルが無い・権限で読めない・不正な UTF-8 のときは `read_busy` が None で例外を上げない |
+| `write_busy`・`read_busy` | 書いた件数 2・`stop` を同じ起動と会話で読み返せる。0・`launch` も読み返せる | `count` が 0 と 1 | `replace_json` を失敗させると偽で前の中身が残る。起動の ID が `../x`・空・大文字なら偽でファイルを作らない。別の起動の ID を中に持つ記録・別の会話の記録・`at` が無いか時刻として読めない記録・壊れた JSON・`count` が文字列か負か `true`・`source` が別の値・ファイルが無い・権限で読めない・不正な UTF-8 のときは `read_busy` が None で例外を上げない |
 | `drop_other_busy` | 起動 A・B のファイルがあるとき B を渡すと A だけが消える | ファイルが無くても例外を上げない | 消せないファイルがあっても残りを消す |
+| `drop_other_busy`（実行の終わり） | `launch` が None ならすべての記録を消す | `.busy-<起動>.json.<pid>.tmp` も消し、`busy` で始まらないファイルは残す | — |
 | `launch_env`・`relay_session` | `launch_env` の返りに 3 つの変数があり、`relay_session` が会話の ID を返す | 空の `NDF_RELAY_SESSION` は None | — |
 
 ## guard `relay-busy`
@@ -128,7 +129,7 @@ plugins/ndf/
 
 - `check`
   - 事前条件: 表の行の `events` は `["PreToolUse"]`、`tools` は `["Agent", "Monitor", "Bash"]`
-  - 事後条件: 背景の作業の開始でない・中継の外（`relay_dir` が None）・`relay_launch` か `relay_session` が None・入力の `session_id` が `relay_session` と違う（入れ子の claude）ときは、ファイルに触れずに None。これらの判定は例外を上げない形で最初に行う（`fail_closed` の例外の拒否に、ほかの Bash・Agent・Monitor を巻き込まない）。子の会話の開始なら `write_busy(directory, launch, session, 1, "start")` を書き、真ならこの実行の payload をモジュールの `_recorded` に残して None、偽なら `deny(BUSY_START_FAILED)`
+  - 事後条件: 背景の作業の開始でない・中継の外（`relay_dir` が None）・`relay_launch` か `relay_session` が None・入力の `session_id` が `relay_session` と違う（入れ子の claude）ときは、ファイルに触れずに None。これらの判定は例外を上げない形で最初に行う。`dispatch` は `fail_closed` の guard から出た例外をすべて拒否にするので、ほかの Bash・Agent・Monitor を巻き込まないと保証できるのは、例外が判定より後で起きる場合である。モジュールの読み込みや判定そのものが壊れた場合は、表の `tools` の呼び出しがすべて拒否される（単体テストで防ぐ）。子の会話の開始なら `write_busy(directory, launch, session, 1, "start")` を書き、真ならこの実行の payload をモジュールの `_recorded` に残して None、偽なら `deny(BUSY_START_FAILED)`
   - 副作用: `busy-<起動>.json` を書く
 - `on_deadline`
   - 事後条件: `check` と同じ条件で子の会話の背景の作業の開始であり、`_recorded is not payload`（この実行の `check` が書き終えていない）ときだけ `BUSY_START_FAILED` を返す。ほかは None（通す）。`ask.on_deadline` と同じ型
@@ -178,7 +179,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `check` | 中継の下の子の会話で Agent・Monitor・`run_in_background: true` の Bash の PreToolUse が「1 件以上」を書いて None。`agent_id` のある Agent（サブエージェントの中）でも書く | `run_in_background` が偽か無い Bash は触れずに None。`run_in_background` が文字列 `"true"` の Bash も触れない | 中継の外・`NDF_RELAY_SESSION` が無い・入力の `session_id` が違う（入れ子の claude）ときは触れずに None。書き込みを失敗させると `deny`。`check` を例外にする差し替えでも、背景でない Bash は通る（入口から流して確かめる）。続けて 3 回失敗させても 3 回とも `deny` |
+| `check` | 中継の下の子の会話で Agent・Monitor・`run_in_background: true` の Bash の PreToolUse が「1 件以上」を書いて None。`agent_id` のある Agent（サブエージェントの中）でも書く | `run_in_background` が偽か無い Bash は触れずに None。`run_in_background` が文字列 `"true"` の Bash も触れない | 中継の外・`NDF_RELAY_SESSION` が無い・入力の `session_id` が違う（入れ子の claude）ときは触れずに None。書き込みを失敗させると `deny`。`signals.write_busy` を例外にする差し替えを入口から流すと、背景の作業の開始は拒否され、背景でない Bash は通る（`check` そのものを例外にすると、`dispatch` が `fail_closed` の guard として背景でない Bash も拒否するので、例外は判定の後で起こす）。続けて 3 回失敗させても 3 回とも `deny` |
 | `on_deadline` | 記録し終えていない子の会話の Agent の payload で `BUSY_START_FAILED` | 書き終えた同じ payload では None | 背景でない Bash・Read・中継の外・入れ子の claude では None。予算を使い切った後と締め切りの後の両方で、入口から流した Agent は拒否、Read と背景でない Bash は空の出力 |
 
 ## 中継のマーカーの guard（`relay_mark`）
@@ -270,11 +271,12 @@ plugins/ndf/
 | `Wrapper._start` | `src/ndf/domains/relay/wrapper.py` | 変更 | `_start(self, req: Launch) -> Optional[Ended]`（変えない） | `signals.set_launch(self.dir, launch)` の直後、`spawn` の前に `write_busy(self.dir, launch, req.session_id, 0, "launch")` と `drop_other_busy(self.dir, launch)` を打ち、子の環境を `launch_env(self.dir, launch, req.session_id)` で組む |
 | `Wrapper._state` | 同上 | 変更 | `_state(self) -> switch_decide.SectionState`（変えない） | 今のとおり状態を組み、`needs_background(state)` が真のときだけ `read_busy(self.dir, sec.launch, sec.session_id)` を読み、`Background` に詰めて `dataclasses.replace` で足す |
 | `Wrapper._on_active` | 同上 | 新設 | `_on_active(self, step: Step, sec: Section) -> Optional[Ended]` | 状態のファイルを `running` と `step.reason` で書いて None を返す（同じ状態と理由は `_write_state` が書き直さない） |
+| `Wrapper._end` | 同上 | 変更 | `_end(self, ended: Ended) -> Ended`（変えない） | 今の状態と記録の行を書くのに加えて、`signals.drop_other_busy(self.dir, None)` で背景の作業の記録を片付ける |
 | `Wrapper._ACTIONS` | 同上 | 変更（行を足す） | `"wait_background": _on_wait_like`・`"active": _on_active` | 待ちは `waiting`、動きは `running` を状態に書く |
 
 - `Wrapper._start`
   - 事後条件: 子を起こす前に、今の起動の記録が 0 件で、ほかの起動の記録が無い（消せなかったものは残る）。0 件を書けなければ記録が無く、読む側は不明として扱う
-  - 副作用: 記録を書き、消す。`spawn` が失敗して `set_launch(None)` で起動を外したときは、書いた 0 件を消さない（次の起動の `drop_other_busy` が消す）
+  - 副作用: 記録を書き、消す。`spawn` が失敗して `set_launch(None)` で起動を外したときは、`_start` は書いた 0 件を消さない（実行の終わりの `_end` が消す）
 
 ### 異常系の処理
 
@@ -295,7 +297,8 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `_start` | 起動すると、差し替えた `spawn` が呼ばれる時点で今の起動の記録が 0 件で、前の起動の記録が無く、子の環境に `NDF_RELAY_SESSION` がある。Stop を流さない起動でも、運用上限で静かになれば `handover` | 起動し直した後、前の起動の 1 件を読まない | `write_busy` を失敗させても子は起動し、運用上限で静かでも `handover` を返さない |
-| `_state` | 子の環境で Stop を流して書いた件数が `background` に入る | 運用上限 − 1 で静か・運用上限で静かでない・求め済み・止まりの秒の手前の見回りでは `read_busy` の呼び出しが 0 回、条件がそろった見回りでは 1 回（差し替えて数える） | 1 件で出力が止まった見回りを差し替えた時計で 0.5 秒ずつ 7,200 回回しても、判定はずっと `wait_background` で `restart` が 0 回 |
+| `_end` | 実行が終わると、中継の保存先に `busy-*.json` と一時ファイルが残らない | 子を起動できずに終わる実行でも残らない | — |
+| `_state` | 子の環境で Stop を流して書いた件数が `background` に入る | 運用上限 − 1 で静か・運用上限で静かでない・求め済み・止まりの秒の手前の見回りでは `read_busy` の呼び出しが 0 回、条件がそろった見回りでは 1 回（差し替えて数える） | 記録が 1 件、文脈の量が運用上限 − 1、子の出力と端末の入力が止まりの秒（1,800 秒）以上無い状態を最初の見回りにし、そこから差し替えた時計を 0.5 秒ずつ進めて 7,200 回回しても、判定はずっと `wait_background` で `restart` が 0 回 |
 | `_on_wait_like`・`_on_active` | 1 件で待つ見回りで状態のファイルが `waiting` と件数・時刻の理由を持つ。待ちの後に子が出力を出した見回りで `running` と「子が動いている」に戻る | 同じ理由の見回りを続けても状態のファイルを書き直さない | — |
 | 旧い起動の遅れた hook | 起動 A を止めて B を起動した後、A の環境の Stop（0 件）と PreToolUse を流しても B の記録は変わらない | A の環境の hook が A を照らした後に止まり、B の記録の後に書いても、B の記録は変わらない（A のファイルに書く） | — |
 | 背景の作業の終わりの後 | B が Agent の PreToolUse で 1 件以上、Stop で 1 件を書いて静かになると `wait_background`。次の Stop で 0 件を書いた後の静かな見回りで `handover` を 1 度だけ返す | Stop の 0 件の書き込みを失敗させると `wait_background` のまま、次の成功した Stop で解ける | — |
