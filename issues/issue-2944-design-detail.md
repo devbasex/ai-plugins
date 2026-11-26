@@ -8,7 +8,7 @@
 
 ```text
 src/ndf/
-  cli.py                              models・delegate-args の行
+  cli.py                              models の行
   adapters/
     model_choice.py *                 値の取得・割り付け・引き上げ・実験の記録の読み書き
     launch_settings.py                experiments のキー
@@ -26,7 +26,7 @@ src/ndf/
     records/experiments.py *          効果指標の記録と出現率の更新
     records/allocation_decide.py *    出現率の計算（純粋な関数）
     records/models_cli.py *           ndf models
-    settings/delegate_args_cli.py *   ndf delegate-args
+    settings/delegate_run_cli.py     ndf delegate-run
     crossreview/seats.py・fixer.py・journal.py・drive.py  シートの単位・修正担当・指摘の担当・効果指標
 ```
 
@@ -53,7 +53,7 @@ src/ndf/
 | `src/ndf/domains/records/experiments.py` | 新設 | 効果指標と出現率 | model_choice・allocation_decide | `UnitValue` | N: `record_outcome`・`unit_values`・`refresh` |
 | `src/ndf/domains/records/allocation_decide.py` | 新設 | 計算 | — | `Entry`・`Judgement` | N: `weighted`・`eliminated`・`probabilities`・`judgement` |
 | `src/ndf/domains/records/models_cli.py` | 新設 | `ndf models` | model_choice・experiments・usage | モジュール | N: `main`・`_pick`・`_report`・`report_rows` |
-| `src/ndf/domains/settings/delegate_args_cli.py` | 新設 | 委譲の引数 | model_choice・launch_settings | モジュール | N: `main` |
+| `src/ndf/domains/settings/delegate_run_cli.py` | 変更 | 委譲の起動にモデルと effort を足す | model_choice・launch_settings | モジュール | C: `main` |
 | `src/ndf/domains/crossreview/seats.py` | 変更 | シートの単位 | model_choice・usage | `SeatRun` | C: `launch_reviewers`・`_seat_launch`・`_seat_result` |
 | `src/ndf/domains/crossreview/fixer.py` | 変更 | 修正担当の値 | model_choice・usage | `FixRun` | C: `_fixer_launch`・`_launch_fixer`・`_keep_fixer` |
 | `src/ndf/domains/crossreview/journal.py` | 変更 | 挙げた担当を全員持つ | — | `FindingJournal` | C: `enter`。N: `experiment_values` |
@@ -72,8 +72,8 @@ src/ndf/
 | `contracts/domains/ndf-files.json` | `launch-experiments-<YYYY-MM>.jsonl`・`launch-weights.json`（保存先は使用量ログと同じ） |
 | `contracts/schemas/ndf-settings/launch.schema.json` | `experiments` のキー |
 | `contracts/schemas/internal/experiment.schema.json`（新設）・`usage.schema.json` | 実験の記録の行の形、使用量ログの足す欄 |
-| `contracts/schemas/io/models.*`・`delegate-args.*`・`docs/contracts/*.md` | 引数のスキーマと規約のページは生成し、結果のスキーマは手で書く |
-| `skills/external-ai/SKILL.md`・`references/cli-codex.md`・`cli-agy.md`・`cli-kiro.md`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md` | 固定の `medium` と、#1959 が置いた `safety-args` を `ndf delegate-args` にする。委譲の通常の経路に `safety-args` の直接の呼び出しを残さない |
+| `contracts/schemas/io/models.*`・`docs/contracts/*.md` | 引数のスキーマと規約のページは生成し、結果のスキーマは手で書く |
+| `skills/external-ai/SKILL.md`・`references/cli-codex.md`・`cli-agy.md`・`cli-kiro.md`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md` | 固定の `medium` を消す。起動の例の `ndf delegate-run`（#1959）は変えない |
 | `contracts/templates/parts/steps.json` | 検査のステップに `verifies`（そのステップが確かめる修正の作業の名前）を足す |
 | `skills/launch-config/SKILL.md` | `experiments` の書き方。承認の対象ではないこと |
 
@@ -90,11 +90,12 @@ src/ndf/
 | `pick` | 同 | 新設 | `pick(layer: str, name: str, runtime: str = "claude", *, cwd: Path, unit: Optional[str] = None, charge_to: Optional[str] = None, retry: Optional[str] = None, mode: Optional[str] = None, argument: tuple[Optional[str], Optional[str]] = (None, None), environ: Optional[Mapping] = None) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる |
 | `raised` | 同 | 新設 | `raised(runtime: str, model: Optional[str], effort: Optional[str]) -> tuple[Optional[str], Optional[str]]` | 設計書の「引き上げる起動」の上げ方の表を当てる |
 | `fallback` | 同 | 新設 | `fallback(choice: Choice, reason: str) -> Optional[Choice]` | 切り替える条件に当たれば `launch_error` の行を書き、基準の組の値を返す。当たらなければ None |
-| `candidates` | 同 | 新設 | `candidates(arms: Sequence, rows: Sequence, entry: Optional[Mapping], now: datetime) -> list[int]` | 打ち切った組と起動できない組を除いた添字 |
+| `candidates` | 同 | 新設 | `candidates(arms: Sequence, rows: Sequence, entry: Optional[Mapping], now: datetime, *, repo: str, stage: str, runtime: str, key: str) -> list[int]` | 打ち切った組と起動できない組を除いた添字。`launch_error` は割り付け ID で割り付けの行を引き、`repo`・`stage`・`runtime`・`key` が同じものだけを数える |
 | `compatibility_key` | 同 | 新設 | `compatibility_key(arms: Sequence, metric: str) -> str` | 選択肢の並びと指標のハッシュ |
 | `read_rows` | 同 | 新設 | `read_rows(since: datetime, root: Optional[Path] = None) -> list[dict]` | `since` の月から今月までの実験の記録を読む（ロックを取らない） |
 | `ledger` | 同 | 新設 | `ledger(since: datetime, root: Optional[Path] = None) -> ContextManager[Ledger]` | 設計書の「読み書き」の順で、読んだ行（`rows`）と追記（`append`）を、実験の記録のロックの中で渡す |
 | `append_row` | 同 | 新設 | `append_row(row: Mapping) -> bool` | `ledger` を開いて 1 行足す |
+| `prune` | 同 | 新設 | `prune(now: datetime) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)に当たる月のファイルと出現率の項目を消す。ファイルの中身は読まない（出現率のファイルを除く）。`pick` が毎回呼び、失敗しても起動は続ける |
 
 - `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm` を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄）を返す
 - `pick`
@@ -131,7 +132,7 @@ src/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | 工程・選択肢・順位・指標・割り付けの値 | 設定値 | `contracts/domains/launch-experiments.json` | 設計書の表 |
-| 起動できない組の条件 | 定数 | 同上 | 直近 7 日に、モデルを理由にした拒否が 2 件 |
+| 起動できない組の条件 | 定数 | 同上 | 同じリポジトリ・工程・ランタイム・互換性のキー・組で、直近 7 日に、モデルを理由にした拒否が 2 件 |
 | 実験の記録の行 | 型 | `contracts/schemas/internal/experiment.schema.json` | `assign`・`outcome`・`launch_error`・`halted`・`observed`・`unpriced` |
 
 ### 並行と排他
@@ -166,11 +167,12 @@ src/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
+| `prune` | 古い月のファイルと項目が消える | 13 か月の境、年をまたぐ | 消せなくても起動は続く |
 | `table` | 工程とランタイムごとの置き換え | 選択肢 1 つ、`{}` の組 | 空の配列、同じ組、`floor` × 組の数 > 1、`min_units` 1、順位に無い effort |
 | `stage_of` | 表の各行 | 工程が「無し」の組 | 表に無い組 |
 | `pick` | 同じ単位は同じ組。並列でも 1 行 | `unit` なし、`enabled` 偽、片側の指定、割り付けの後の手動指定と選択肢の削除、月をまたぐ割り付け | 壊れた設定。記録を書けない場合 |
 | `raised` | 表の各行 | `opus` の `xhigh` は変えない | 順位に無いモデル名 |
-| `fallback` | 基準へ切り替え、行が 1 つ | 基準の組の拒否は None | 2 件で候補から外れ、7 日で戻る |
+| `fallback` | 基準へ切り替え、行が 1 つ | 基準の組の拒否は None | 2 件で候補から外れ、7 日で戻る。別のリポジトリと別のキーの行は数えない |
 | `candidates` | 打ち切りの期限の後に戻る | 全部の非基準が外れると基準だけ | — |
 
 ## claude の起動と拒否の判定
@@ -214,7 +216,7 @@ src/ndf/
 | `ask` | `adapters/llm.py` | 変更 | 変えない | `request_id` を単位にして値を取得し、起動ごとに行を渡し、効果指標を書く |
 
 - 2 回目は `retry="invalid_answer"`。`MODEL_REFUSED` で `fallback` が値を返せば、判定の打ち直しの回数に数えずに 1 回だけ打ち直し、`request_try` を 1 増やす。期限は残りの時間
-- `outcome` は `valid`・`invalid`・`unknown`。効果指標は 1 回目が `valid` なら 1、`invalid` なら 0（2 回目で合っても 0）、`unknown` と起動できない場合は null
+- `outcome` は `valid`・`invalid`・`timeout`・`unknown`。`timeout` は、子プロセスを起動した後の期限切れ（`Failure.TIMEOUT`）である。効果指標は 1 回目が `valid` なら 1、`invalid` か `timeout` なら 0（2 回目で合っても、2 回目が期限切れでも 0 は変わらない）、`unknown` と起動できない場合は null
 - 値を取得する作業場所は `Path.cwd()`。stop-wait の判定（`judge_child`）は変えない
 
 ### 異常系の処理
@@ -234,7 +236,7 @@ src/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `ask` | 起動の引数に組がある。行と指標が 1 つ | 2 回目で合うと指標は 0 | 拒否で基準へ 1 回、`request_try` が増える。`unknown` は null |
+| `ask` | 起動の引数に組がある。行と指標が 1 つ | 2 回目で合うと指標は 0 | 拒否で基準へ 1 回、`request_try` が増える。起動の後の期限切れは 0、`unknown` と起動できない場合は null |
 
 ## worker の起動と Skill を回す起動
 
@@ -416,12 +418,12 @@ src/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `record_outcome` | 行が 1 つ、計算が呼ばれる | 前の計算から 1 時間以内。実際のモデルが項目と違えば 1 時間以内でも計算する | 2 回目は足さない。並べて呼んでも 1 行 |
-| `unit_values` | 手戻りの費用を含む | 費用 0 と不明は除く、期間を過ぎた割り付け直し | 別のリポジトリ、モデルが変わった単位 |
-| `probabilities` | 合計 1、下限以上 | `min_units` の前後 | 効果の下限を外れる安い組 |
+| `unit_values` | 手戻りの費用を含む | 費用 0 と不明は費用の平均から除き、効果は残す、期間を過ぎた割り付け直し | 別のリポジトリ、モデルが変わった単位 |
+| `probabilities` | 合計 1、下限以上 | `min_units` の前後、費用の分かる単位が 2 件未満 | 効果の下限を外れる安い組 |
 | `eliminated` | 0.99 を超える組 | 30 件の前後、期限の後に戻る | 基準は打ち切らない |
 | `judgement` | 4 つの表示 | 30 件ちょうど | そろって候補だった単位が無い |
 
-## `ndf models` と `ndf delegate-args`
+## `ndf models` と `ndf delegate-run`
 
 満たす決定: 決定 1・8、受け入れ条件 3・4・6・8・9・11
 
@@ -433,9 +435,9 @@ src/ndf/
 | `_pick` | 同 | 新設 | `_pick(a: Namespace) -> int` | `json` は結果 JSON、`args` は 1 行 1 引数 |
 | `_report` | 同 | 新設 | `_report(a: Namespace) -> int` | 使用量ログと実験の記録を読んで結果を出す |
 | `report_rows` | 同 | 新設 | `report_rows(usage_rows, experiment_rows, since, until, stage) -> list[dict]` | 設計書の「集計」の順と区分で値を組む |
-| `main` | `domains/settings/delegate_args_cli.py` | 新設 | `main(argv: list[str]) -> int` | `--runtime` は `codex`・`kiro`・`agy` の 3 つ。codex は `pick("seat", "delegate", "codex")` と `safety_args("codex", "delegate", cwd)` の引数の並びを続け、引数を 1 つずつ 1 行に出す（行数は固定ではない）。kiro と agy は `pick` を呼ばず、`safety_args(runtime, "delegate", cwd)` の引数だけを出す |
+| `main` | `domains/settings/delegate_run_cli.py` | 変更 | 引数は #1959 のまま | codex は `pick("seat", "delegate", "codex")` の引数と `safety_args("codex", "delegate", cwd)` の引数の並びを続けて `{args}` に入れる。kiro と agy は `pick` を呼ばず、`safety_args` の引数だけを入れる |
 
-- 引数を出す 2 つ（`_pick` の `args` の形と、`delegate-args` の `main`）は、`InternalError` を自分で受けて標準エラーへ書き、標準出力に何も出さずに 0 以外で終える。`delegate-args` は、出す引数がすべてそろってから 1 回で書き出す（codex はモデルと effort の引数と安全装置の引数、kiro と agy は安全装置の引数）
+- `_pick` の `args` の形は、`InternalError` を自分で受けて標準エラーへ書き、標準出力に何も出さずに 0 以外で終える。`delegate-run` の失敗の扱いは #1959 の詳細設計のとおりで、`pick` の失敗も CLI を起動せずに同じ形で終える
 - `report` は呼ばれた時点で計算し直し、出現率のファイルを書き換えない
 
 ### 異常系の処理
@@ -444,7 +446,7 @@ src/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `_pick` | 設定の誤り | `pick` | 呼び出し | 止める | `json` は `stopped`、`args` は標準エラーだけ | 再実行できる |
 | `_report` | 記録が無い | 初回 | 読み取り | 続ける | 「記録なし」 | — |
-| `main`（delegate-args） | 呼んだ処理の失敗か、表に無い `--runtime` | 設定・承認・引数 | 呼び出しと引数の解析 | 止める | 標準出力は空、終了コードは `precondition` | 再実行できる |
+| `main`（delegate-run） | `pick` の失敗 | 設定 | 呼び出し | CLI を起動せずに止める | 標準出力は空、終了コードは `precondition` | 再実行できる |
 
 ### ログと記録の出力
 
@@ -457,4 +459,4 @@ src/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `report_rows` | 依頼・ステップ・単位にまとめてから区分へ入れる | 期間の境をまたぐ依頼 | すべて拒否された依頼、重なった `launch_id` |
-| `main`（delegate-args） | codex はモデルと安全装置の引数が続く。kiro と agy は安全装置の引数だけで、`pick` を呼ばない | 引数 0 個。`pick` が止まる `experiments` の誤りがあっても kiro と agy は引数を出す | 安全装置の停止で標準出力が空。表に無い `--runtime` |
+| `main`（delegate-run） | codex はモデルと安全装置の引数が `{args}` に続けて入る。kiro と agy は安全装置の引数だけで、`pick` を呼ばない | 引数 0 個。`pick` が止まる `experiments` の誤りがあっても kiro と agy は起動する | `pick` の失敗と安全装置の停止で `exec` を呼ばない |

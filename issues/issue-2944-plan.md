@@ -55,10 +55,10 @@
 - **満たす受け入れ条件:** 3・4・13・15・16
 - **進め方:** 実際の出力を見本にしてテストを先に書く
 
-### Task 7: 委譲の引数を `ndf delegate-args` にする
+### Task 7: 委譲の起動にモデルと effort の選択を足す
 
-- **対象ファイル:** `domains/settings/delegate_args_cli.py`（新設）・`cli.py`、`contracts/schemas/io/delegate-args.*`、`skills/external-ai/SKILL.md`・`references/cli-codex.md`・`references/cli-agy.md`・`references/cli-kiro.md`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md`
-- **変更内容:** 詳細設計の「`ndf models` と `ndf delegate-args`」（`--runtime` は codex・kiro・agy。kiro と agy は `pick` を呼ばない）と手順書の固定の `medium` の削除。#1959 の実装が手順書に置いた `safety-args` の呼び出しは、CLI ごとの参照手順（Codex・agy・Kiro）を含めてすべて `delegate-args` に置き換え、通常の委譲の経路に残さない（`grep -rn safety-args plugins/ndf/skills plugins/ndf/agents` で確かめる）
+- **対象ファイル:** `domains/settings/delegate_run_cli.py`、`skills/external-ai/SKILL.md`・`references/cli-codex.md`・`references/cli-agy.md`・`references/cli-kiro.md`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md`
+- **変更内容:** 詳細設計の「`ndf models` と `ndf delegate-run`」（`--runtime` は codex・kiro・agy。kiro と agy は `pick` を呼ばない）と手順書の固定の `medium` の削除
 - **満たす受け入れ条件:** 3
 - **進め方:** CLI はテストを先に書く。手順書の起動の例は打って確かめる
 
