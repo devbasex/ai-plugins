@@ -23,7 +23,7 @@ flowchart TB
 - `impl` のテンプレート（`contracts/templates/impl.json`）が行うのは、worker の実装・受け入れ条件の確かめ・PR・レビュー・CI・未解決の指摘の確かめまでである。マージはしない
 - worker へ渡る入力は `issue`・`branch`・`acceptance` で、担当のタスクを絞る手段が無い
 - 今の経路では `impl` がスプリントの PR（ベースブランチ宛て）を作る。後の工程「リファクタリング」「コードレビュー」はその PR を読む
-- supervisor の手順（`skills/development-workflow/references/agent-layers.md` の「実装のフェーズの単位」）は、単位ごとに `impl` を組む。マージは `ndf ci merge --reviewed` で行う。この設計は同じ手順をコードにする
+- supervisor の手順（`skills/development-workflow/references/agent-layers.md` の「実装のフェーズの単位」）は、単位ごとに `impl` を組む。マージは `ndf ci merge --reviewed` で行う。この設計は同じ順の手順をコードにする（マージの打ち方だけを変える。決定 11）
 
 ## 文脈と制約
 
@@ -87,7 +87,7 @@ flowchart TB
 | E1 | 実装計画の単位を読んだ | 単位の表の読み手 | 単位を流す処理 |
 | E2 | 単位のブランチと作業場所を用意した | 単位を流す処理 | `impl` のプラン |
 | E3 | 単位の PR のレビューが収束した | `impl` のプラン | 単位を流す処理 |
-| E4 | 単位の PR をマージした | `ndf ci merge` | 次の単位 |
+| E4 | 単位の PR をマージした | 単位を流す処理 | 次の単位 |
 | E5 | 集めた時点を記録した | `ndf progress gathered` | 工程「コードレビュー」 |
 
 ## 構成要素
@@ -96,7 +96,7 @@ flowchart TB
 | --- | --- |
 | 単位の表の読み手（`src/ndf/core/plan/review_units_decide.py`。新設） | 実装計画の本文と、課題ごとの受け入れ条件の番号の集合から、単位の並び（名前・代表の課題・タスク・条件・順）か、読めない理由を返す。タスク分解のタスクが単位に過不足なく割り当てられているかも確かめる。ファイルも git も読まない |
 | 実装計画のパス（`src/ndf/core/issue_docs.py`） | ファイル名 `issue-<番号の並び>-plan.md` から番号の並びを読む（設計書と同じ形） |
-| 単位を流す処理（`src/ndf/progress/units_invoke.py`。新設） | 開始前の確かめ、単位ごとの作業場所・指示のファイル・保存先・`impl`・人の承認の依頼・マージ・取り消しの検出・後片付け、スプリントの PR |
+| 単位を流す処理（`src/ndf/progress/units_invoke.py`。新設） | 開始前の確かめ、単位ごとの作業場所・指示のファイル・保存先・`impl`・人の承認の依頼・取り消しの検出・後片付け、スプリントの PR |
 | 工程から作業を呼ぶ層（`src/ndf/progress/invoke.py`） | `per_unit` の工程で単位の見出しがあれば、開始前の確かめと実行を上の処理へ渡す。無ければ今のまま。試行の始まりに値を消す処理（`clear_values`）は、単位とスプリントの PR の保存先の差し込みの値と課題のコピーも消し、ほかの記録は残す（「単位ごとの保存先」） |
 | 工程の定義の読み手（`src/ndf/progress/stages.py`・`definition.py`） | 工程の型に `per_unit`（既定は偽）を足し、定義とスナップショットから読む |
 | 工程の定義とスキーマ（`contracts/workflow/stages/implement.json`・`contracts/workflow/ndf.schema.json`・`contracts/schemas/internal/stage-snapshot.schema.json`） | `per_unit` を足す。ステップの並びは変えない |
@@ -107,7 +107,7 @@ flowchart TB
 | worker の作業の定義と読み手（`contracts/worker/kinds.json`・`src/ndf/contracts/worker_kinds.py`） | 作業の定義に、空でよい入力の欄 `optional_inputs` を足し、`impl`・`fix`・`ci-fix`・`fix-push`・`fix-base` に `unit_file` を置く。値があるときだけ起動指示の入力に載せ、欠けの検査（`kind_gaps`）は求めない。起動指示を書く `progress/gate/entry.py` は読み手の返す値をそのまま載せるので変えない |
 | レビューの指示（`src/ndf/domains/crossreview/criteria_decide.py`） | `NDF_UNIT_PR` があれば、相手役と修正担当の指示に例外と人の承認の扱い（決定 8）を足す。`NDF_UNIT_FILE` があれば、単位の範囲のセクションも足す |
 | 受け入れ条件の確かめ（`src/ndf/domains/loop/acceptance.py`） | 条件を持たない単位のための `--no-criteria` を足す |
-| マージ（`src/ndf/ci_cli.py`・`src/ndf/adapters/github.py`・`git.py`） | `ndf ci merge` に、対象の PR の番号と宛先と取り込みコミットの記録を指定する `--pr`・`--base`・`--trailer` を足す。この指定では、GitHub の PR のマージを呼ばず、merge commit を手元で作って宛先ブランチへ push する |
+| 単位のマージ（`src/ndf/progress/units_merge.py`。新設。`src/ndf/adapters/github.py`・`git.py`） | 工程の保存先の記録と進行の記録から証跡を読んで確かめ、merge commit を作ってスプリントブランチへ push する。CLI の入口は持たない。`ndf ci merge` は変えない |
 | 宛先の保護の読み取り（`src/ndf/adapters/github.py`） | スプリントブランチに当たる ruleset の規則と、従来のブランチ保護の有無を読む |
 | 単位の承認の依頼（`src/ndf/progress/gate/asking.py`・`answering.py`） | 工程の承認ゲートの形で、単位の PR を対象にした質問を出す。回答の時点の HEAD と承認資料の照合は、今の仕組みを使う |
 | 単位の PR で待つチェックの宣言（`contracts/schemas/project-workflow.schema.json`・`src/ndf/progress/invoke.py`） | 設定の `workflow.unit_required_checks` を読む（決定 13） |
@@ -118,12 +118,11 @@ flowchart TB
 
 ## 入出力のコントラクト
 
-コマンドの引数の追加は 4 つ、設定のキーの追加は 1 つ（決定 13）である。工程の入力と出力（`gathered`）は変えない。
+コマンドの引数の追加は 3 つ、設定のキーの追加は 1 つ（決定 13）である。工程の入力と出力（`gathered`）は変えない。単位のマージはコマンドにせず、工程「実装」（`ndf progress next`）の中だけで行う（決定 11）。
 
 | 対象 | 変える前 | 変えた後 |
 | --- | --- | --- |
 | `ndf loop acceptance check --no-criteria` | 無い | 渡した `--issue` の条件を 1 件も照らさず `ok`。`--criteria` と一緒には受けない |
-| `ndf ci merge --pr <番号> --base <ブランチ> --trailer <キー: 値>` | `--branch` を head に持つ開いた PR の先頭を、PR の宛先へマージする | `--pr`・`--base`・`--reviewed` は組で渡し、`--trailer` は繰り返せる。指定した番号の PR と宛先の保護を確かめ、親が宛先の先端と `--reviewed` の 2 つで、本文の末尾に `--trailer` を持つ merge commit を作り、`<リモート> <コミット>:refs/heads/<--base>` へ push する（強制しない）。開いていない、head が `--branch` でない、宛先が `--base` でない、HEAD が違う、本文に決めていない残リスクがある、宛先に保護があるときは、push せずに `refused`。宛先の先端が `--reviewed` の祖先でないときと、push が先端の進行で断られたときは `base_conflict`。`--method` とは一緒に受けない。省けば今のまま |
 | `ndf cross-review run --target-out <ファイル>` | 無い（`--reviewed-out` は HEAD だけを書く） | レビューが完了した証拠を書く。始めにファイルを消し、レビューを完了したときだけ `{"pr": <番号>, "head": <SHA>}` を書く。`head` は `--reviewed-out` と同じ値。完了とは、直していない指摘が残らないか、残るのが `--waiting-out` に書いた指摘だけの状態である。このときは成功で返す |
 | `ndf cross-review run --waiting-out <ファイル>` | 無い | 人の承認を待つ指摘を書き足す。始めにも終わりにもファイルを消さない。書く時点と条件は決定 8 |
 | 工程「実装」のステップ `implement` の結果 | `impl` の結果 | 単位の経路では、`ok` は全単位のマージとスプリントの PR の後に返し、`items` に単位ごとの名前・PR の番号・状態・取り込みコミットを持つ。人の承認が要る単位では承認ゲートの結果（`gate`）を返す。`stopped` は止まった単位の名前・課題・理由を持つ。`run_id` は持たない（自動の打ち直しが「同じ回の結果」と読んで打ち切らないため） |
@@ -176,10 +175,11 @@ flowchart TB
 flowchart TB
   A["開始前: 各課題の実装計画を読む"] --> B{"単位の見出し"}
   B -->|どれにも無い| C["今の経路（impl を 1 回）"]
-  B -->|ある| D{"全部読めて、宛先が本番へ<br/>届かず、保護も無い"}
+  B -->|ある| D{"全部読めて<br/>宛先が本番へ届かない"}
   D -->|いいえ| E["止まる（始めない）"]
-  D -->|はい| F["スプリントブランチを<br/>リモートへ揃える"]
-  F --> H{"次の単位の<br/>取り込みがある"}
+  D -->|はい| F["スプリントブランチを<br/>リモートへ揃える<br/>（無ければ作る）"]
+  F -->|保護がある| E
+  F -->|保護が無い| H{"次の単位の<br/>取り込みがある"}
   H -->|はい| V
   H -->|いいえ・取り消した| W["作業場所を用意（あれば使う）"]
   W --> P["impl を流す"]
@@ -188,8 +188,9 @@ flowchart TB
   S -->|ある| A2["利用者の承認を待つ"]
   A2 -->|却下| X
   A2 -->|承認| M
-  S -->|無い| M["ndf ci merge<br/>--pr --base --reviewed"]
-  M -->|宛先が進んだ（1 回目）| B2["宛先を単位のブランチへ取り込み<br/>差分のレビューと CI"]
+  S -->|無い| M["証跡と宛先を確かめ<br/>merge commit を push"]
+  M -->|先端が祖先へ進んだ（1 回目）| M
+  M -->|先端がほかへ進んだ（1 回目）| B2["宛先を単位のブランチへ取り込み<br/>差分のレビューと CI"]
   B2 --> P
   M -->|マージできない| X
   M -->|マージした| V{"マージ済みの単位の<br/>確かめ"}
@@ -232,7 +233,13 @@ flowchart TB
 | `impl` が終わり、作業場所の HEAD が `reviewed-head` より先へ進んだ | その単位の保存先を使い、`impl` を `push-reviewed` のステップから新しい回で流す。push の後、`reviewed-head` からの差分のレビュー（`review-delta`）と CI を通してからマージする |
 | `impl` が終わり、`reviewed-head` が無いか、作業場所の HEAD の祖先でない | 止まる。2 つのコミットを結果に出す |
 
-- **宛先が進んだとき**: CI が通った後にスプリントブランチへ別のコミットが入ると、`ndf ci merge` は `base_conflict` を返す（打ち直しでマージへ進んだ場合も同じ）。工程はスプリントブランチを単位の作業場所へ取り込み、HEAD が進んだ単位として差分のレビューと CI を通し直す。これは 1 回の起動につき 1 回だけで、取り込みが衝突するか、再び進んでいれば止まる。利用者が手で解いた場合は、コミットして打ち直す
+- **宛先が進んだとき**: CI が通った後にスプリントブランチが動くと、単位のマージは送らずに終わるか、push が断られる。工程はスプリントブランチの先端を読み直して、次の表のとおりにする。やり直しは 1 回の起動につき 1 回だけで、再び動いていれば止まる
+
+| 読み直した先端 | 扱い |
+| --- | --- |
+| レビューした HEAD の祖先 | 読み直した先端を親にして merge commit を作り直し、送る |
+| 祖先でない | スプリントブランチを単位の作業場所へ取り込み、HEAD が進んだ単位として差分のレビューと CI を通し直す。取り込みが衝突すれば止まる。利用者が手で解いた場合は、コミットして打ち直す |
+
 - **承認待ち**: 承認ゲートを返すのは、単位のプランと、工程の単位の承認（決定 8）の 2 つである。工程はどちらもそのまま返し、人の回答は質問を出した側へ渡す
 
 ## 決定の記録
@@ -290,19 +297,22 @@ flowchart TB
 | `Ndf-Unit` | 単位のブランチ名 |
 | `Ndf-Pr` | レビューした PR の番号 |
 | `Ndf-Def` | 単位の定義（含むタスクの番号と展開した条件）から作る短いハッシュ値（定義の指紋） |
-| `Ndf-Approval` | 利用者が承認した承認資料の sha256。人の承認が要った単位だけが持つ |
+| `Ndf-Findings` | 人の承認を待つ指摘の記録の sha256。指摘が無ければ `none` |
+| `Ndf-Approval` | 利用者が承認した承認資料の sha256。承認が要らなければ `none` |
 
 - レビューした HEAD は取り込みコミットの 2 番目の親で、宛先はコミットが載っているブランチである
 - **記録を作れる主体**: 記録を作れるのは、スプリントブランチへコードを push できる者（`Contents: write`）だけである。この権限があれば記録と無関係にコードを書き換えられるので、記録を受け付けても権限は広がらない。commit status・PR の本文・コメントを書ける権限だけでは、完了の記録は作れない
-- **書く条件**: 工程は、`impl` が最後まで通り（レビューの完了と CI を含む）、`review-target` の番号と HEAD が `unit-pr` と `reviewed-head` に一致するときだけ取り込みコミットを作る。人の承認が要る単位は、承認の記録の照合も通す（決定 8）
+- **書く条件**: 工程は、`impl` が最後まで通り（レビューの完了と CI を含む）、`review-target` の番号と HEAD が `unit-pr` と `reviewed-head` に一致するときだけ取り込みコミットを作る。人の承認が要る単位は、承認の記録の照合も通す（決定 8）。記録の中身は工程が保存先と進行の記録から組み、呼び出し側が選ぶ入力は無い
 - **マージ済みの単位の確かめ**: 次の 3 つがそろえば、単位を完了とする。打ち直しと工程のマージの後で同じ確かめを使う
-  1. ベースブランチに無くスプリントブランチにあるコミットの中に、親を 2 つ持ち、`Ndf-Unit` がこの単位のコミットがある
-  2. `Ndf-Def` が今の定義の指紋と同じである。保存先に人の承認を待つ指摘の記録があれば、`Ndf-Approval` がその承認資料の sha256 と同じである
+  1. スプリントブランチの先端から第 1 親だけをたどった、ベースブランチに無いコミットの中に、親を 2 つ持ち、`Ndf-Unit` がこの単位のコミットがある。単位のブランチの中の merge commit は第 1 親の列に無いので、数えない
+  2. 上の表の 5 行がすべてあり、`Ndf-Def` が今の定義の指紋と同じである。`Ndf-Findings` と `Ndf-Approval` は、両方が `none` か、両方が sha256 である。別の作業場所で打ち直しても、承認が要ったかと承認があったかをコミットだけで確かめられる
   3. そのコミットが打ち消されていない
-- **工程の外のマージ**: 利用者が GitHub で単位の PR をマージしても、記録が無いので完了にしない。工程は、単位のブランチを head、スプリントブランチを base とするマージ済みの PR を読んでこれを見つけ、取り消しを頼んで止まる。rebase merge では複数のコミットが入るので、そのすべてを取り消すよう案内する
+- **工程の外のマージ**: 利用者が GitHub で単位の PR をマージしても、記録が無いので完了にしない。工程は、単位のブランチを head、スプリントブランチを base とするマージ済みの PR を読む。その番号が、第 1 親の列のどの `Ndf-Pr` にも無ければ、工程の外のマージとして止まる
+  - 工程は、工程の外のマージで入ったコミットの範囲を特定せず、取り消されたかも判定しない。マージの方式で範囲の形が違い、rebase merge ではコミットが書き直されるためである。何をどこまで打ち消しても、同じブランチ名では先へ進まない
+  - 利用者への案内は、PR の URL を示し、次の 2 つを頼む。PR の画面と `git log` で入ったコミットを確かめて、すべて取り消すこと。実装計画の単位の名前を変えて打ち直すこと
 - **取り消しの扱い**: 単位の変更を取り消すときは、利用者がスプリントブランチで取り込みコミットを `git revert -m 1` する。工程は次のように読む
   - 取り込みコミットより後に、本文に `This reverts commit <取り込みコミットの SHA>` を持つコミットがあれば、打ち消されている。その打ち消しがさらに打ち消されていれば、取り込みは残っている
-  - 履歴の書き換えで、マージ済みの PR のコミットがスプリントブランチから消えた場合も、取り消しと読む
+  - 履歴の書き換えで取り込みコミットがスプリントブランチから消えた場合は、取り込みが無いと読む。同じブランチ名にマージ済みの PR が残っていれば、工程の外のマージと同じく止まる
   - 取り消した単位は未実装として扱い、次の番号のブランチをスプリントブランチから切って、実装とレビューを最初から通す。単位の名前は変えなくてよい。単位の指示のファイルには、取り消されたコミットと取り消したコミットを書く
 - **単位のブランチ名**: `<スプリントブランチ>-u<代表の課題>-<単位の名前の短いハッシュ>`。この単位の取り込みが取り消されていれば、後ろに `-r<取り消された回数>` を付ける
 - **最後の照合**: すべての単位をマージした後にも、取り込んだ実装計画を読み直して同じ確かめをする。読み直しで増えていた単位や、途中で取り消された単位があれば、未実装なので止まり、打ち直しで流す
@@ -386,20 +396,28 @@ flowchart TB
 ### 決定 11: 本番へ届くブランチや保護を越えて取り込まないよう、工程だけがマージし、保護の無いスプリントブランチへ merge commit を push する
 
 - **質問**: PR のマージの要求は宛先も宛先の先端も条件にできず、保護を迂回できる資格情報の要求は保護を越える。単位のマージと、レビュー・CI の対象をどう縛るか
-- **選んだ案**: GitHub の PR のマージもマージキューも使わない。`ndf ci merge` が、親がスプリントブランチの先端とレビューした HEAD の 2 つで、中身が HEAD と同じ merge commit を作り、`refs/heads/<スプリントブランチ>` を指定して強制せずに push する
+- **選んだ案**: GitHub の PR のマージもマージキューも使わない。工程が、親がスプリントブランチの先端とレビューした HEAD の 2 つで、中身が HEAD と同じ merge commit を作り、`refs/heads/<スプリントブランチ>` を指定して push する。push には、親にした先端の SHA を更新の条件として付ける（`--force-with-lease=refs/heads/<スプリントブランチ>:<先端の SHA>`）。merge commit はその先端を第 1 親に持つので、更新は常に fast-forward で、履歴は書き換わらない
 
 | 守ること | どう守るか |
 | --- | --- |
+| 証跡 | 単位のマージの入口は工程の中だけにあり、`review-target`・`reviewed-head`・承認の回答を工程が自分で読む |
 | 宛先 | push が宛先を指定するので、PR の宛先がいつ変わっても、ほかのブランチには入らない |
 | CI を通した組み合わせ | 送る前に、スプリントブランチの先端がレビューした HEAD の祖先かを確かめる。祖先なら、取り込んだ結果の中身は CI が確かめた HEAD と同じである |
-| 確かめた後の先端の進行 | merge commit の親が古い先端なので、GitHub が強制でない push を断る |
+| 確かめた後の先端の移動 | リモートの先端が、親にした SHA と違えば GitHub が更新しない。レビューした HEAD の祖先へ進んだだけの場合も同じである。古い第 1 親のまま入ると、`revert -m 1` がほかの人の先に入れた変更まで打ち消すためである |
 | 取り込みの範囲 | 単位の取り込みは、常に merge commit 1 つである |
 
-- **保護の確かめ（I6）**: 開始前の確かめと、push の直前に、スプリントブランチの保護を読む。次のどちらかなら、工程はマージしない
+- **保護の確かめ（I6）**: 開始前と、push の直前に、スプリントブランチの保護を読む。次のどちらかなら、工程はマージしない
   - 当たる ruleset に、削除の禁止・強制 push の禁止・作成の制限以外の規則（PR の必須、マージキュー、必須のチェックなど）がある
   - 従来のブランチ保護が有効である
 
   読めない場合もマージしない。保護を迂回できる権限かは調べず、迂回も使わない（リポジトリの指示書が管理者の迂回を禁じる場合にも合う）。開始前に当たれば、理由に保護の内容を書いて始めずに止まる
+- **新しいスプリント**: 開始前の時点で、スプリントブランチがリモートに無いことがある。ブランチ名はスプリントの作業場所が今いるブランチから取り、次の順に確かめる
+  1. `git ls-remote` でリモートにあるかを調べる
+  2. ブランチ名に当たる ruleset の規則を読む（`rules/branches/<名前>` は、無いブランチにも空の並びや当たる規則を返す）
+  3. リモートに無ければ、作業場所の HEAD でブランチを作る（同じ名前が無いことを条件にした push）
+  4. 実在するブランチの従来の保護を読む（`branches/<名前>`。無いブランチには 404 `Branch not found` が返るので、作る前には読まない）
+
+  4 で保護があれば、作ったブランチは残して止まる。ほかの読み取りの失敗は「読めない」と扱う
 - 今の経路の `impl` もスプリントブランチへ直接 push するので、そこに PR の必須などを掛けたリポジトリは、今も自動の実装を流せない
 - 単位の PR は 1 つに決め、同じ番号を後のすべての段階に渡す。番号を取り直す照会は足さない
 
@@ -409,16 +427,17 @@ flowchart TB
 | PR を決める（`pr` のステップ） | 開いた PR は head と宛先の両方で選ぶ。新しく作った場合は、作成の出力の番号を使う。番号は今と同じくステップの結果の `items[].number` で返し、同じステップが単位の保存先の `unit-pr` にも書く |
 | 衝突の確かめ（`conflict-check`）と CI の完了の確認（`ci`） | ブランチ名から PR を引き直さず、`unit-pr` の番号を使う。`ci` が番号を引いていた照会は無くなる |
 | 初回のレビューと差分のレビュー | `unit-pr` の番号を `NDF_UNIT_PR` で渡す。後ろに `--target-out <保存先>/review-target` と `--waiting-out <保存先>/approval-waiting` を足す |
-| マージ | `review-target` の番号が `unit-pr` と、HEAD が `reviewed-head` と一致するときだけ、`ndf ci merge --branch <単位のブランチ> --pr <番号> --base <スプリントブランチ> --reviewed <レビューした HEAD>` に記録の `--trailer` を足して打つ |
+| マージ | `review-target` の番号が `unit-pr` と、HEAD が `reviewed-head` と一致するときだけ進む。PR を 1 回読み、開いていること、head が単位のブランチ、宛先がスプリントブランチ、HEAD がレビューした HEAD、本文に決めていない残リスクが無いことを確かめて push する |
 
-番号・head・宛先・HEAD のどれかが違うか、`review-target` が無ければマージしない。
+番号・head・宛先・HEAD のどれかが違うか、`review-target` が無ければマージしない。公開のコマンド `ndf ci merge` に単位のマージを足すと、レビュー・CI・承認の有無と記録の中身を呼び出し側が指定できるので、足さない。
 
-- push した HEAD は宛先から到達できるので、GitHub は単位の PR をマージ済みにする（[間接的なマージ](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/about-pull-request-merges#indirect-merges)）。工程の完了の判定は、この表示を待たない
+- **push の後の PR**: 工程の完了の判定は、PR の表示を使わない。GitHub は、head のコミットがベースブランチから到達できると PR をマージ済みにすることがある（[間接的なマージ](https://docs.github.com/en/pull-requests/reference/pull-request-merges#indirect-merges)）。公式の説明が直接の push の例に挙げるのは既定ブランチで、スプリントブランチ宛てで同じになるかは確かめていない。工程は push の後に PR を 1 回読み、開いたままなら、取り込みコミットの SHA を書いたコメントを付けて閉じる
 - 採らなかった案: PR のマージの前に PR を読んで宛先を確かめる（読んでから要求を送るまでの間に宛先が変わると、本番へ届くブランチへ取り込む）
 - 採らなかった案: `POST /repos/{repo}/merges` で宛先とコミットを指定する（宛先の先端を条件にできず、CI を通していない組み合わせが入る）
 - 採らなかった案: 保護のあるスプリントブランチでは利用者にマージを頼む（手のマージは宛先を固定できず、方式によって取り込みが複数のコミットになる）
 - 採らなかった案: 資格情報が保護を迂回できるかを調べ、できなければ送る（従来のブランチ保護の詳細は管理者しか読めず、迂回できるかを確かめきれない）
 - 採らなかった案: レビューや CI がブランチから番号を引き直す今の形のままにする（同じ head の PR が複数あると、別の PR のレビューや CI の結果で進むか止まる）
+- 採らなかった案: 条件を付けない push にする（先端がレビューした HEAD の祖先へ進んだ場合も fast-forward になり、古い第 1 親の merge commit が入る）
 - **レビューを差し替えたリポジトリ**: 設定のレビューの起動は、`NDF_UNIT_PR` の PR をレビューし、`--target-out` を書く必要がある。書かない起動では単位はマージされず、止まる
 - **代償**: 単位の取り込みは、リポジトリのマージの方式の指定に関わらず merge commit になる。スプリントブランチに保護を掛けたリポジトリは、単位の表を持つ実装計画を自動では流せない。強制 push の禁止だけでも、従来のブランチ保護で掛けていれば止まる（ruleset へ移せば流せる）。PR の画面の承認やマージの制限は、単位の PR には効かない
 - 根拠: Value 3 / Value 13（MVV バージョン 11）
@@ -466,12 +485,31 @@ flowchart TB
 | worker の実装、単位のレビュー、CI の完了の確認、作業場所の用意 | 各 1 回 | 各 N 回（修正による追加は、今と同じく落ちた分だけ） |
 | マージ | 無し | N 回 |
 | スプリントの PR を開く処理 | 無し（`impl` の PR がそれに当たる） | 1 回 |
-| GitHub への照会の追加 | 無し | 開始時と最後にマージ済みの PR をまとめて 1 回ずつ読む。宛先の保護の読み取り（規則とブランチの 2 回）が、開始時に 1 回と単位のマージごとに 1 回。単位ごとに、後片付けの前の PR の状態の読み取り 1 回。`ci` のステップが PR の番号を引く照会は、単位ごとに 1 回減る |
+| GitHub への照会と書き込みの追加 | 無し | 下の表 |
+
+照会と書き込みの内訳は次のとおりである。git の通信（`ls-remote` と push）は数えない。
+
+| 時点 | 回数 |
+| --- | --- |
+| 開始時 | マージ済みの PR の一覧 1 回、保護の読み取り 2 回（規則とブランチ） |
+| 単位のマージの試行ごと | 指定した PR の読み取り 1 回、保護の読み取り 2 回。宛先が動いてやり直すと、もう 3 回 |
+| 単位のマージの後 | PR の状態の読み取り 1 回。開いたままならコメント 1 回と閉じる操作 1 回 |
+| 最後 | マージ済みの PR の一覧 1 回 |
+| 単位ごとの削減 | `ci` のステップが PR の番号を引く照会が 1 回減る |
+
+全 N 単位が初回の試行でマージできれば、マージの前後の読み取りは 4N 回である。打ち直しでマージへ進むたびに、試行の 3 回が増える。
 
 - **PR で走る CI**: CI の完了の確認（呼び出しの回数）とは別に、PR で実際に走る CI の回数はリポジトリの設定で決まる。多くの設定では、単位の PR N 本とスプリントの PR 1 本で走る
 - **同じファイルを触る変更**: #3702 の実装が `progress/`・`contracts/` を触る。後に入る側が取り込む
 - **壊れうる箇所**: 待つと宣言したチェックがスプリントブランチ宛ての PR で起動しない設定では、単位がマージできずに止まる（理由に宣言のキーを出す。決定 13）。スプリントブランチに保護がある設定では、始めずに止まる（決定 11）。流している間にほかの者がスプリントブランチへ push すると、その単位の差分のレビューと CI が 1 回増える
-- **後片付け**: 単位の作業場所とブランチは、マージを確かめた後に消す。リモートのブランチは、GitHub が PR をマージ済みにしたことを 1 回読んで確かめてから消す（先に消すと、PR が閉じただけになる）。まだなら残して警告する。消せない場合も警告して続ける
+- **後片付け**: 単位の作業場所とブランチは、マージを確かめた後に、取り込んだ内容しか無いものだけを消す。条件に合わないものと消せなかったものは残し、警告して続ける
+
+| 対象 | 消す条件 | 消し方 |
+| --- | --- | --- |
+| 作業場所 | HEAD がレビューした HEAD で、未コミットの変更も追跡していないファイルも無い | `git worktree remove`（`--force` を付けない） |
+| 手元の単位のブランチ | 作業場所を消した後で、先端がレビューした HEAD | `git update-ref -d` に今の値の条件を付ける |
+| リモートの単位のブランチ | PR がマージ済みか閉じていて（決定 11）、先端がレビューした HEAD | `--force-with-lease=<ref>:<レビューした HEAD>` を付けた削除の push。先端が違えば GitHub が断る |
+
 
 ### 代表のリポジトリでの振る舞い
 
@@ -493,14 +531,17 @@ flowchart TB
 | 順序 | 実行順の列があるとき・無いとき、準備のリファクタリングをする・しないの順。列があれば準備の単位も列の値に従う。実装計画の単位と補った単位が混ざるときは、課題番号の順（課題 10、`20-40` の単位、課題 30） | 列の値より準備を優先する、補った単位を先頭か末尾へ固めると落ちる |
 | 条件 2 | どの実装計画にも見出しが無い複数課題のスプリントで、今と同じプランの呼び出しが 1 回になる。見出しのある計画と混ざると、残りの課題が 1 単位ずつ並ぶ | 課題ごとに `impl` を呼ぶ、単位の経路へ入るようにすると落ちる |
 | 条件 3・I5 | 全単位のマージの後にステップが `ok` を返し、`gathered` が書かれる。未完了の単位があれば書かれない | 途中の単位の後に `ok` を返すと落ちる |
-| 条件 4・I2・I3 | merge commit の親は宛先の先端とレビューした HEAD で、push は宛先の ref を指定し、強制しない。番号・head・宛先のどれかが違う PR と、宛先の先端が HEAD の祖先でない場合は送らない。次の作業場所はその取り込みを含むコミットから切られる | PR のマージや取り込みの API を呼ぶ、強制 push する、照合を外す、マージの前に次を切ると落ちる |
+| 条件 4・I2・I3 | merge commit の親は宛先の先端とレビューした HEAD で、push は宛先の ref を指定し、その先端の SHA を条件にする。番号・head・宛先のどれかが違う PR と、宛先の先端が HEAD の祖先でない場合は送らない。次の作業場所はその取り込みを含むコミットから切られる。`ndf ci merge` から単位はマージできる形にならない | PR のマージや取り込みの API を呼ぶ、更新の条件を外す、親でない先端へ送る、照合を外す、マージの前に次を切ると落ちる |
 | 決定 11 | 同じ head の開いた PR が複数あっても、衝突の確かめ・CI・レビュー・マージは宛先がスプリントブランチの同じ番号を使う。`review-target` の番号か HEAD が違う・無いときはマージしない。課題全体を補った単位（`unit_file` が空）でも `unit-pr` と `review-target` ができてマージする。単位でない経路の `impl` のステップと呼び出しの回数は今と同じ | 番号をブランチから引き直す、照合を外す、`unit_file` の有無で分ける、ステップを増やすと落ちる |
 | 条件 5 | 単位のプランの失敗とマージの拒否で、後の単位を呼ばず、結果に単位の名前と理由がある | 失敗の後も次を呼ぶと落ちる |
 | 条件 6 | 打ち直しで、マージ済みの単位はプランもマージも呼ばれない。プランが終わった未マージの単位はマージだけになる | 先頭から流し直すと落ちる |
 | 打ち直し（HEAD の違い） | 作業場所が進んだ単位は `push-reviewed` から流し直し、`reviewed-head` が祖先でない・無いときは止まる | 前の回の結果をそのまま返す、そのままマージすると落ちる |
 | 決定 6 | マージ済みの単位にタスクか条件を足すと、打ち直しと最後の読み直しで止まる。PR の本文・commit status・PR のマージ済みの表示は完了の根拠にならず、工程の外のマージでは止まる。`git revert` した単位と履歴から消えた単位は次の番号のブランチで流し直し、打ち消しを打ち消せば完了に戻る | 名前や PR の状態だけで完了とみなす、取り込みの残りを見ないと落ちる |
 | I6 | スプリントブランチに PR の必須・マージキュー・必須のチェックの規則か従来の保護があれば始めない。読めない場合も同じ。流し始めた後に付いた保護では push しない。削除と強制 push の禁止の規則だけなら流れる | 迂回できる権限を理由に送る、読めないときに送ると落ちる |
-| 宛先が進んだとき | `base_conflict` の後、宛先を単位へ取り込み、差分のレビューと CI の後にマージする。2 回目は止まる | そのままマージする、繰り返し続けると落ちる |
+| 宛先が進んだとき | 先端が HEAD の祖先へ進めば merge commit を作り直し、祖先でなければ単位へ取り込んで差分のレビューと CI の後にマージする。2 回目は止まる | 古い親のまま送る、そのままマージする、繰り返し続けると落ちる |
+| 第 1 親と記録（決定 6） | 単位のブランチの中の merge commit と、5 行の揃わないコミットは完了にしない。指摘の記録が手元に無い作業場所でも、`Ndf-Findings` が sha256 で `Ndf-Approval` が `none` なら完了にしない。工程の外のマージは、打ち消しがあっても同じ名前では止まる | 全コミットから探す、手元の記録だけで照らす、外のマージを取り消し済みと読むと落ちる |
+| 後片付けと PR | push の後に PR が開いたままなら閉じる。マージ後に足したコミット・未コミットの変更がある作業場所とブランチは残る | 無条件に消す、`--force` で作業場所を消すと落ちる |
+| 新しいスプリント | リモートにブランチが無ければ、規則の確かめ、作成、従来の保護の確かめの順になる | 作る前にブランチの保護を必須にすると落ちる |
 | 条件 7・I1 | 読めない表の各形（行 0、列が無い、含むタスクが見出しに無い、未割当のタスク、重複した割り当て、条件の形、課題の無い範囲、番号の無い条件、スプリントの外の課題）で、工程が始まらず理由が返る。課題付きの範囲は展開される。`implementation-plan` の手順書の例と同じ行（`Task 1・2`。空欄の単位の名前だけ埋める）は読める | 読めない行を飛ばす、未割当のタスクを通す、接頭辞の省略を断ると落ちる |
 | I4 | スプリントブランチがベースブランチか本番ブランチのとき、始めずに止まる | 確かめを外すと落ちる |
 | 決定 8 | `unit_file` があるとき、5 つの作業の起動指示とレビューの指示に単位の範囲が入る。無いときは範囲を足さず、欠けの検査に掛からない | 修正の経路に渡さない、必須の入力にすると落ちる |
@@ -515,7 +556,7 @@ flowchart TB
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4369 | 実装する | — | `plugins/ndf/src/ndf/core/plan/review_units_decide.py`（新設）、`plugins/ndf/src/ndf/core/issue_docs.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`（新設）、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/contracts/workflow/stages/implement.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/schemas/internal/stage-snapshot.schema.json`、`plugins/ndf/contracts/templates/impl.json`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/contracts/schemas/project-workflow.schema.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/schemas/io/`（生成し直す）、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/contracts/worker_kinds.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/src/ndf/ci_cli.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/adapters/git.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/domains/loop/acceptance.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/tests/core/plan/test_review_units.py`（新設）、`plugins/ndf/tests/progress/test_units_invoke.py`（新設）、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/domains/loop/test_loop_acceptance.py`、マージ・worker の入力・レビューの指示の既存のテスト |
+| #4369 | 実装する | — | `plugins/ndf/src/ndf/core/plan/review_units_decide.py`（新設）、`plugins/ndf/src/ndf/core/issue_docs.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`（新設）、`plugins/ndf/src/ndf/progress/units_merge.py`（新設）、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/contracts/workflow/stages/implement.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/schemas/internal/stage-snapshot.schema.json`、`plugins/ndf/contracts/templates/impl.json`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/contracts/schemas/project-workflow.schema.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/schemas/io/`（生成し直す）、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/contracts/worker_kinds.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/adapters/git.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/domains/loop/acceptance.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/tests/core/plan/test_review_units.py`（新設）、`plugins/ndf/tests/progress/test_units_invoke.py`（新設）、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/domains/loop/test_loop_acceptance.py`、worker の入力・レビューの指示の既存のテスト |
 | #3905 | マージする | #4369 | — |
 
 ## 未確認のまま残ること
@@ -526,6 +567,7 @@ flowchart TB
 | 工程 1 回の長さ | 単位を 1 つずつ流すので、単位が多いスプリントで工程「実装」が何時間になるかは、リリース後の実測で分かる |
 | 受け入れ条件 4 の文言 | 条件 4 は、人の承認が要る場合を「利用者がマージする場合」と書く。この設計では利用者が承認して工程がマージする。要求仕様と #4369 の本文を合わせて直すかは、設計の承認で決める |
 | GitHub の画面の取り消しボタン | ボタンが作るコミットの本文に `This reverts commit <SHA>` が入ること。確かめるまで、手順の案内は `git revert` とする |
+| 直接の push の後の PR の状態 | 既定でないブランチ宛ての PR を、GitHub がマージ済みにするか。実装の最初に実際のリポジトリで確かめる。ならない場合は工程が閉じる（決定 11） |
 | タスクの重複の割り当て | 今ある実装計画に、1 つのタスクを 2 つ以上の単位に書いたものがあるかは調べていない。あればその計画は直すまで止まる |
 
 ## 外部の調査
