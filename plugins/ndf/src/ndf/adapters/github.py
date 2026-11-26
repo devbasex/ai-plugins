@@ -869,9 +869,8 @@ class GitHub:
             return github_merge.method_refusal(pull, number, method, allowed)
         if expect is not None:
             state = self.repository(github_merge.VERIFY_QUERY, {"number": int(number), "expr": f"{expect.base}:{expect.config_path}"})
-            stop = _verify(number, _verified(state), expect, self.repo)
+            stop = self._verify_before_send(number, state, expect)
             if stop is not None:
-                self._leave_queue(state)
                 return stop
         try:
             route.send(number, pull, chosen)
@@ -902,9 +901,7 @@ class GitHub:
         node = repo["pullRequest"]
         if not isinstance(node, dict) or not node["isMergeQueueEnabled"]:
             return None
-        stop = _verify(pull.number, _verified(repo), expect, self.repo) if expect is not None else None
-        if stop is not None:  # 確かめで止めるとき（設定が変わり承認が要るようになった等）は、キューにある PR も外す
-            self._leave_queue(repo)
+        stop = self._verify_before_send(pull.number, repo, expect) if expect is not None else None
         if stop is None and method is not None:
             stop = github_merge.queue_method_refusal(pull, method, github_merge.queue_merge_method(repo.get("mergeQueue")))
         if stop is None and not node["isInMergeQueue"]:
@@ -920,11 +917,18 @@ class GitHub:
         variables = {"number": int(pull.number), "branch": pull.base_ref, "expr": f"{expect.base}:{expect.config_path}"}
         return self.repository(github_merge.MERGE_QUEUE_VERIFY_QUERY, variables)
 
-    def _leave_queue(self, repo: dict[str, Any]) -> None:
-        """確かめの応答 `repo` で PR がマージキューにあれば外す（止めた PR をキューがマージしない。読み直しの要求を足さない）。"""
+    def _verify_before_send(self, number: int, repo: dict[str, Any], expect: MergeExpect) -> Optional[MergeOutcome]:
+        """確かめの応答 `repo` を `_verify` で照らす。止めるとき（設定が変わり承認が要るようになった等）は、PR が
+        マージキューにあれば外す（止めた PR をキューがマージしない。読み直しの要求を足さない）。"""
+        stop = _verify(number, _verified(repo), expect, self.repo)
         node = repo.get("pullRequest")
-        if isinstance(node, dict) and node.get("isInMergeQueue") is True:
-            self.graphql(github_merge.DEQUEUE_MUTATION, {"id": node["id"]})
+        if stop is not None and isinstance(node, dict) and node.get("isInMergeQueue") is True:
+            self._leave_queue(node["id"])
+        return stop
+
+    def _leave_queue(self, node_id: Any) -> None:
+        """ノード ID `node_id` の PR をマージキューから外す要求を打つ（キューにあるかは呼び手が確かめる）。"""
+        self.graphql(github_merge.DEQUEUE_MUTATION, {"id": node_id})
 
     def _put_in_queue(self, pull: Pull, node_id: Any, jump: bool, expect: Optional[MergeExpect]) -> Optional[MergeOutcome]:
         """PR を HEAD のままキューへ入れる。`expect` があれば入れた後に読み直し、マージ先が変わっていれば外して
@@ -935,7 +939,7 @@ class GitHub:
         after = self.pull(pull.number)
         if after.base_ref == expect.base:
             return None
-        self.graphql(github_merge.DEQUEUE_MUTATION, {"id": node_id})
+        self._leave_queue(node_id)
         detail = f"#{pull.number} のマージ先がキューへ入れた後に {expect.base} から {after.base_ref} へ変わった。キューから外した"
         return MergeOutcome(False, github_merge.TARGET_MOVED, detail, after.head_sha)
 
@@ -948,7 +952,7 @@ class GitHub:
         """PR `number` をマージキューから外す（入っていなければ何もしない）。"""
         node = self.repository(github_merge.IN_MERGE_QUEUE_QUERY, {"number": int(number)})["pullRequest"]
         if isinstance(node, dict) and node["isInMergeQueue"]:
-            self.graphql(github_merge.DEQUEUE_MUTATION, {"id": node["id"]})
+            self._leave_queue(node["id"])
 
 
 def _issue_filter(labels: Sequence[str], state: str) -> dict[str, Any]:
