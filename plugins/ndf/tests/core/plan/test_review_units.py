@@ -147,6 +147,14 @@ def test_lineup_ends_the_table_at_a_line_without_a_cell_separator(note: str) -> 
     assert _names(_plan(_text(table))) == ["A"]
 
 
+@pytest.mark.parametrize("first", [["A | Task 1 | 無し"], []])
+def test_lineup_rejects_rows_after_a_line_without_a_cell_separator(first: list[str]) -> None:
+    table = "\n".join([HEAD, "--- | --- | ---", *first, "B", "C | Task 2 | 無し"])
+    text = _text(table)
+    line = text.split("\n").index("B") + 1
+    assert f"{line} 行目" in "\n".join(_reasons(text))
+
+
 def test_lineup_reads_indented_and_closed_headings() -> None:
     text = _text(_table(HEAD, "| A | Task 1・2 | 無し |"), heading="  ## レビューの単位 ##")
     assert _names(_plan(text.replace("## タスク分解", "## タスク分解 ##"))) == ["A"]

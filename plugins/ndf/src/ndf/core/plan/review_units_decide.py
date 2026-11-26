@@ -3,7 +3,7 @@
 本文から単位の並びか、読めない理由を返す。ファイルも git も読まない。読み方は #4369 の設計書の「単位の表の読み方」と
 「順序」にあり、決めた形でない表は行を飛ばさず `UnitsUnreadable` で止める。実装計画の見出しの語もここが持つ。
 見出し・表の始まり・コードブロックは markdown-it-py で読む（判断のモジュールは `ndf.adapters.markdown` を読めない）。
-表は、セルを区切る `|` の無い行の手前で終える。
+表は、セルを区切る `|` の無い行の手前で終える。単位の表で、その後ろに `|` のある行が同じ表として続けば読めないとする。
 """
 
 from __future__ import annotations
@@ -82,10 +82,14 @@ class _Heading(NamedTuple):
 
 
 class _Table(NamedTuple):
-    """表 1 つ。`rows` は (見出しの行, データ行...) のセル。"""
+    """表 1 つ。`rows` は (見出しの行, データ行...) のセル。
+
+    `broken` は、後ろに `|` のある行が続くのに `rows` がそこで終わった行の番号（1 始まり）。無ければ None。
+    """
 
     at: int
     rows: list[list[str]]
+    broken: Optional[int]
 
 
 class _Doc(NamedTuple):
@@ -117,8 +121,10 @@ def _parse(text: str) -> _Doc:
             headings.append(_Heading(start, int(token.tag[1:]), tokens[i + 1].content))
         elif token.type == "table_open":
             # 2 行目は区切りの行。Markdown は空行の無い直後の本文も表の行にするので、`|` の無い行で終える
-            data = takewhile(inputs_decide.has_cell_separator, lines[start + 2 : end])
-            tables.append(_Table(start, [inputs_decide.split_row(line) for line in (lines[start], *data)]))
+            data = list(takewhile(inputs_decide.has_cell_separator, lines[start + 2 : end]))
+            stop = start + 2 + len(data)
+            broken = stop + 1 if any(map(inputs_decide.has_cell_separator, lines[stop:end])) else None
+            tables.append(_Table(start, [inputs_decide.split_row(line) for line in (lines[start], *data)], broken))
     return _Doc(tuple(headings), tuple(tables))
 
 
@@ -139,9 +145,9 @@ def _named_section(doc: _Doc, title: str) -> range:
     return range(0) if found is None else _section(doc, found)
 
 
-def _first_table(doc: _Doc, section: range) -> Optional[list[list[str]]]:
-    """セクションの最初の表の (見出しの行, データ行...) のセル。表が無ければ None。"""
-    return next((table.rows for table in doc.tables if table.at in section), None)
+def _first_table(doc: _Doc, section: range) -> Optional[_Table]:
+    """セクションの最初の表。表が無ければ None。"""
+    return next((table for table in doc.tables if table.at in section), None)
 
 
 def _cell_elements(cell: str) -> list[str]:
@@ -232,7 +238,9 @@ def _unit_rows(doc: _Doc) -> list[dict[str, str]]:
     table = _first_table(doc, _section(doc, headings[0]))
     if table is None:
         raise _Bad(f"「{UNITS_HEADING}」のセクションに表が無い")
-    head, *rows = table
+    if table.broken is not None:
+        raise _Bad(f"単位の表の途中に、セルを区切る `|` の無い行がある（実装計画の {table.broken} 行目）")
+    head, *rows = table.rows
     lack = [column for column in REQUIRED_COLUMNS if column not in head]
     if lack:
         raise _Bad(f"単位の表に列が無い: {'、'.join(lack)}")
@@ -260,7 +268,7 @@ def _assignment_lacks(tasks: Sequence[int], found: Sequence[Unit]) -> list[str]:
 def _pre_refactoring(doc: _Doc) -> bool:
     """「リファクタリングの時機」の表で、実装の前の行の対象が「しない」で始まらないか。表か行が無ければ偽。"""
     table = _first_table(doc, _named_section(doc, TIMING_HEADING))
-    rows = [] if table is None else table[1:]
+    rows = [] if table is None else table.rows[1:]
     return any(len(row) > 1 and row[0].startswith(BEFORE_IMPL) and not row[1].startswith(NO_TARGET) for row in rows)
 
 
