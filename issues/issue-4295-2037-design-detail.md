@@ -300,7 +300,7 @@ plugins/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `LaneSpec.touches_from_design` | 型の項目 | `progress/lane/types.py` | `False` |
-| `RowTouches(design_seq, design, changed, read, pulls, final_seq)` | 型。`design` は `Optional[tuple]`（`files: null` は `None`）、`read` は読んだ（リポジトリ, PR, マージ先, head）の集合。`pulls` は行へ振り分けた（リポジトリ, PR）の集合 | 同上 | 空 |
+| `RowTouches(design_seq, design, changed, read, final_seq)` | 型。`design` は `Optional[tuple]`（`files: null` は `None`）、`read` は読んだ（リポジトリ, PR, head）の集合 | 同上 | 空 |
 | `ScopeChange(seq, lane, row, files, after)` | 型。触る場所か `after` を変えた事象 1 件。`row` が `None` ならレーンの設定の変更。変えていない項目は `None` | 同上 | — |
 | `PlanView.touches` | （レーン, 行）→ `RowTouches` | 同上 | 空 |
 | `PlanView.scope_log` | `ScopeChange` の並び（事象の順） | 同上 | 空 |
@@ -322,7 +322,7 @@ plugins/ndf/
 | `modes_with_stage` | `progress/definition.py` | 新設 | `(stage: str) -> frozenset[str]` | 工程の文書 `stage` を呼ぶモードの名前の集まり |
 | `lane_payload` | `progress/plan/__init__.py` | 変更 | 変えない | 印があれば `lane_added` の値に `touches_from_design` を載せる |
 
-- `_fold_touches`: `source: design` は行の `design`・`design_seq` を置き換え、`scope_log` に積む。`source: diff` は `files` の和を `changed` に、`from` を `read` に、`pulls` を `RowTouches.pulls` に足し、`final: true` の記録（`files: null` を含む）で `final_seq` を入れる。`files: null` の `diff` は `changed` を消さない
+- `_fold_touches`: `source: design` は行の `design`・`design_seq` を置き換え、`scope_log` に積む。`source: diff` は `files` の和を `changed` に、`from` を `read` に足し、`final: true` の記録（`files: null` を含む）で `final_seq` を入れる。`files: null` の `diff` は `changed` を消さない
 
 ### 異常系の処理
 
@@ -448,7 +448,7 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 | `record_diffs` | 同上 | 新設 | `(ctx: Cycle) -> None` | PR の一覧の差分を読み、読み残しの組の変えたファイルを記録し、最後の観測を書く |
 | `compare` | 同上 | 新設 | `(ctx: Cycle) -> None` | 比べ直す組の知らせと比較済みの事象番号を 1 つのトランザクションで書く（I7） |
 | `gh_api` | 同上 | 新設 | `(cwd: Path, path: str, *flags: str) -> str` | `gh api` を打ち、標準出力を返す |
-| `assign` | `progress/plan/touches_decide.py` | 新設 | `(pulls: Sequence[Pull], rows: Mapping[RowKey, RowTarget]) -> dict[RowKey, list[Pull]]` | base か（同じリポジトリの）head のブランチか、行へ振り分け済みの番号（`RowTarget` が持つ `pulls`）で、PR を行へ振り分ける |
+| `assign` | `progress/plan/touches_decide.py` | 新設 | `(pulls: Sequence[Pull], rows: Mapping[RowKey, RowTarget]) -> dict[RowKey, list[Pull]]` | base か（同じリポジトリの）head のブランチで PR を行へ振り分ける |
 | `pick` | 同上 | 新設 | `(pending: Sequence[Pending], limit: int) -> list[Pending]` | 終わった行を先に、残りは更新の古い順に、上限まで選ぶ |
 | `is_final` | 同上 | 新設 | `(listed: bool, since: Optional[datetime], ended_at: datetime, remaining: int) -> bool` | I6 の 3 条件。`since` はこの周で進める前の値 |
 | `counted` | 同上 | 新設 | `(failures: int, failed: bool, attempts: int) -> tuple[Optional[int], bool]` | 書く失敗の回数（書かなければ `None`）と、上限に届いたか（I9） |
@@ -461,9 +461,7 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
   - 行のリポジトリは、レーンの `repo`（クローンの絶対パス）か、無ければ耐久ワークフローの作業ディレクトリ。`<所有者>/<リポジトリ>` は `gh repo view --json nameWithOwner` でクローンのパスごとに 1 回だけ読み、`Memory` に持つ。`compare` はこの値をほかの計画のレーンのクローンにも使う。ほかの計画のレーンで `lane_repo` が無ければ、その計画の所在の `cwd` をクローンとする
   - 副作用: `gh`、計画のステートマシンへの追記
 - `record_designs`: 対象は、レーンに印があり、`kind: sprint` で、`mode_of(row)` が `design_modes` にある行（`designing` の条件のうち記録の有無を除いた 3 つ）。ほかの行は設計の資料を読まず、記録も書かないので、`row_scope` は設定の値を返す
-- `assign`: 渡された行（観測の対象の行）の `pulls` にある PR は、その行だけに振り分ける。どの行の `pulls` にも無い PR だけを、base と head のブランチで振り分ける
-- `record_diffs`: `assign` の結果のうち `PlanView` の行の `pulls` に無い PR は、ファイルを読めたかに依らず、その周の `touches_found` の `pulls` に載せる。読み終えた組が無ければ `files: []`・`from: []` で書く
-- `record_diffs`: PR の一覧の読み方、読み残し、ファイルの読み方と head・マージ先の読み直し、一覧の読み取り済み時刻は、設計文書の決定 6 のとおり。走査の開始の時刻は `gh api -i` の応答の `Date` ヘッダから取る。1 周の 1 リポジトリの追記は、行ごとに 1 件の `touches_found` にする
+- `record_diffs`: PR の一覧の読み方、読み残し、ファイルと head の読み直し、一覧の読み取り済み時刻は、設計文書の決定 6 のとおり。走査の開始の時刻は `gh api -i` の応答の `Date` ヘッダから取る。1 周の 1 リポジトリの追記は、行ごとに 1 件の `touches_found` にする
 - `compare`: ほかの計画は、マシンの索引と中継の登録簿の所在に、記録した所在（`PlanView.places`）を足して読む。計画が完了すると索引から外れるため、終わった行の最後の観測を、比べる前に見失わないようにする。再起動で消えないように、所在は `touches_compared` の `places` に書く
   - `places` に無い計画を読んだ周は、重なりが無くても `touches_compared` を書く
   - 完了した計画は、その最後の事象まで比べ終えた周の `places` から外す。読めない所在は残して次の周で読み直す
@@ -482,7 +480,7 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 | `gh_api` | GitHub を読めない | `gh` の非 0 終了、出力が形に合わない | `gh_api` | `FetchError` を投げる | `run.log` に 1 行 | 次の周で読み直す |
 | `record_designs` | 取得の失敗 | `DocsUnreadable`・`FetchError` | `record_designs` | 再試行（`touches_retry`。上限で `files: null`） | 同上。`files: null` の理由は事象に残る | 回数は DB にあり、再起動をまたぐ |
 | `record_designs` | 必要な記載が無い、`design_pr` が無い、未マージ | `Scope.files` が `None` など | 同上 | `files: null` を 1 度だけ書く | 事象の `reason` | 同じ行は読み直さない |
-| `record_diffs` | 一覧・ファイル・head とマージ先の読み直しの失敗、head かマージ先の変化 | `FetchError`、head かマージ先の不一致 | `record_diffs` | 読み残しに残して再試行。終わった行は I6 の表の区分で失敗に数える | `run.log` に 1 行 | 次の周で読み直す |
+| `record_diffs` | 一覧・ファイル・head の読み直しの失敗、head の変化 | `FetchError`、head の不一致 | `record_diffs` | 読み残しに残して再試行。終わった行は I6 の表の区分で失敗に数える | `run.log` に 1 行 | 次の周で読み直す |
 | `compare` | クローンのリポジトリの名前を読めない | `gh repo view` の失敗（`FetchError`） | `compare` | 自分の計画のクローンなら `touches_compared` を書かない。ほかの計画のクローンならその計画を飛ばし、`seen` を進めない | `run.log` に 1 行 | 次の周で読み直す |
 | `compare` | ほかの計画を読めない | DB が無い・形が違う | `other_views` | その計画を飛ばして続ける | `run.log` に 1 行 | 次の周で読み直す。比較済みの事象番号を持たないので、読めた周に比べる |
 | `observe_cycle` | 書き込みの衝突・断り | `store.Conflict`・`store.StoreBusy`・`model.Refused`（計画が止まった） | `observe_cycle` | この周を打ち切る | `run.log` に 1 行 | 比較済みの事象番号が進まないので次の周で同じ比較をする |
@@ -508,7 +506,7 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 | --- | --- | --- | --- |
 | 観測と、オーガナイザーの `ndf lanes set`・`request close` | 計画のステートマシン | 追記は `lane.lock_plan` と事象の番号の確かめ（`append_events`）。`compare` は同じトランザクションで読み直してから書く | 読んだ後に変わっていれば衝突になり、次の周でやり直す |
 | 観測と、レーンの conductor の行の開始・終了 | レーンのステートマシン | 観測は読むだけ | 比較の後に始まった行は、`seen` に無い番号なので次の周で比べる |
-| 観測の途中の中断 | 事象の追記 | — | `from` に載った（リポジトリ, PR, マージ先, head）は読み直さない。知らせは I4 の突き合わせで重ならない |
+| 観測の途中の中断 | 事象の追記 | — | `from` に載った（リポジトリ, PR, head）は読み直さない。知らせは I4 の突き合わせで重ならない |
 
 ### ログと記録の出力
 
@@ -537,12 +535,12 @@ GitHub の読み出しと DB の書き込みは `plan/touches.py`、判断は `p
 | `snapshot_of`・`complete_plan` | `final` があれば完了 | 入力に `touches_every` が無ければ求めない | 無ければ完了しない |
 | `observe_cycle` | `gh` を差し替えて 1 周の記録と知らせ | 打ち直しで知らせが増えない | 追記の衝突で打ち切り、次の周で比べる |
 | `record_designs` | 設定を置き換える。印の無い行は、設計 PR がマージ済みでも読まず、比較は設定の値になる | 上限の 1 回前の失敗と再起動 | 記載が無ければ 1 度だけ `files: null` |
-| `record_diffs` | ファイルと名前を変えた元のパス | 101 件の一覧、取得の上限 | head の変化、読む間のマージ先の変化、記録の後にマージ先だけが変わった PR は読み直す、読み残しの間にマージ先を変えて `Memory` を空にしても同じ行で読む、ページの失敗 |
+| `record_diffs` | ファイルと名前を変えた元のパス | 101 件の一覧、取得の上限 | head の変化、ページの失敗 |
 | `compare` | 知らせと `seen` が同じトランザクション | 相手を 1 回読んだ後に `Memory` を空にし（再起動）、相手が完了して索引から消えても、記録の所在から最後の観測を読んで知らせを開く | 読めない計画を飛ばす |
 | `gh_api` | 標準出力を返す | `-i` のヘッダと本文の分離 | 非 0 で `FetchError` |
 | `record_touches` | 追記する | — | 番号が違えば `Conflict` |
 | `other_views` | 自分の計画を除く | 同じ計画の 2 つの所在は 1 回 | DB の無い所在を飛ばす |
-| `assign` | base と head の振り分け。振り分け済みの PR は、マージ先を変えても同じ行。観測の対象の別の行のブランチへ付け替えても元の行だけ。元の行が `rows` に無ければブランチで振り分ける | `doc_prs: base` の設計 PR | フォークの同名ブランチは振り分けない |
+| `assign` | base と head の振り分け | `doc_prs: base` の設計 PR | フォークの同名ブランチは振り分けない |
 | `pick` | 終わった行が先 | 上限ちょうど | — |
 | `is_final` | 3 条件で真 | `since` が `ended_at` と同じなら偽 | 一覧を読めない周は偽 |
 | `counted` | 失敗で 1 増える | 成功は、前に失敗があるときだけ 0 を書く | 上限で真 |
