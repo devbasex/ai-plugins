@@ -313,8 +313,7 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     if not changed:
         return None
     why = "回答した後に対象が変わった: " + " / ".join(changed)
-    payload = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
-    draft = model.EventDraft(run.STEP_EVENT, run.ACTOR, m.stage.name, payload=payload, rev=v.rev)
+    draft = _step_draft(v, m.stage.name, m.step.id, "waiting", m.progress.generation, why)
     # 比べた後に回答が読まれていれば（同じ回答の事象が今も読む回答でなければ）書かない
     answered, stage = m.event, m.stage.name
     undo: list[bool] = []
@@ -334,6 +333,12 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     return why
 
 
+def _step_draft(v: run.View, stage: str, step: str, status: str, generation: int, reason: str) -> model.EventDraft:
+    """報告を持たないステップ記録の事象の下書き（待ちへの書き直しと、未了への戻し）。"""
+    payload = {"step": step, "status": status, "report": None, "generation": generation, "reason": reason}
+    return model.EventDraft(run.STEP_EVENT, run.ACTOR, stage, payload=payload, rev=v.rev)
+
+
 def _reading_reset(v: run.View, stage: str, gate: Optional[str]) -> list[model.EventDraft]:
     """同じ工程の、承認ゲート `gate` の前の読み手役のステップを未了に戻す事象（#4446）。待ちへ戻すときと同じトランザクションで書く。
 
@@ -341,12 +346,11 @@ def _reading_reset(v: run.View, stage: str, gate: Optional[str]) -> list[model.E
     読み手役のステップの無い古い定義と、まだ済んでいない読み手役のステップでは何も書かない。"""
     prog = run.step_progress(v, stage)
     why = "承認ゲートの待ちへ戻したので、読み手役のステップから今の対象で打ち直す"
-    payloads = [
-        {"step": i, "status": stages.RESET, "report": None, "generation": prog.generation, "reason": why}
+    return [
+        _step_draft(v, stage, i, stages.RESET, prog.generation, why)
         for i in v.snap.stage(stage).from_reading(gate)  # 資料の提示のように、読み手役の後ろのステップも打ち直す
         if i in prog.done
     ]
-    return [model.EventDraft(run.STEP_EVENT, run.ACTOR, stage, payload=p, rev=v.rev) for p in payloads]
 
 
 # 承認の前の確認をやり直して待ちを出し直す理由（承認ゲートの待ちの記録に残る）
@@ -371,8 +375,7 @@ def reread(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[st
         same = n.action == run.Action.GATE and n.step is not None and n.step.id == step.id and n.progress is not None
         if not same or n.progress is None or n.progress.anchor != anchor:
             return []
-        payload = {"step": step.id, "status": "waiting", "report": None, "generation": n.progress.generation, "reason": REREAD_REASON}
-        wait = model.EventDraft(run.STEP_EVENT, run.ACTOR, stage.name, payload=payload, rev=now.rev)
+        wait = _step_draft(now, stage.name, step.id, "waiting", n.progress.generation, REREAD_REASON)
         return [wait, *_reading_reset(now, stage.name, step.gate)]
 
     if not run.append(st, machine_id, build):
