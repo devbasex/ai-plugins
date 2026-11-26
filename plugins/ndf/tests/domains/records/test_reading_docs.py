@@ -98,7 +98,8 @@ def test_the_records_are_read_by_completed_checks(state: Path) -> None:
         with pytest.raises(reading.ReadingInvalid):
             reading.append_doc(wrong)
     assert [r["name"] for r in reading.doc_rows()] == ["issues/x.md"] and reading.docs_path().parent == state
-    assert reading.materials_path("design", 7) == state / "reading-materials" / "design-7.md"
+    assert reading.materials_path("o/r", "design", 7) == state / "reading-materials" / "o__r" / "design-7.md"
+    assert reading.materials_path("o/other", "design", 7) != reading.materials_path("o/r", "design", 7)
     rows = [
         _read("k1", "issues/x.md", "b1"),
         _read("k1", reading.MATERIAL, "m1", 2, "remained"),

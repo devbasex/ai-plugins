@@ -184,7 +184,7 @@ plugins/ndf/
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | 別のレーンの `gate`・`run`・`check` | `reading-docs.jsonl`・`reading-checks.jsonl` | 今の `jsonl.append_locked` のロックで 1 行ずつ追記する | 確認の id と完了の行で、途中で止まった確認を使わない（設計書の「確認の id と完了の行」） |
-| 同じ PR への `gate` の 2 本 | コピーのファイル `reading-materials/<ゲート>-<PR>.md` | 一時ファイルへ書いてから `os.replace` で置き換える | コピーは最後の完了の行の 2 つのハッシュと合うときだけ差分の元にする |
+| 同じ PR への `gate` の 2 本 | コピーのファイル `reading-materials/<リポジトリ>/<ゲート>-<PR>.md` | 一時ファイルへ書いてから `os.replace` で置き換える | コピーは最後の完了の行の 2 つのハッシュと合うときだけ差分の元にする |
 | `gate` と人の PR の編集 | PR の題と本文（`gate` は書き換えない） | `refetch_check` が head・題・本文を固定した値と比べる | 動いていれば止めて打ち直す |
 
 ### ログと記録の出力
@@ -367,7 +367,7 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `docs_path` | `records/reading.py` | 新設 | `docs_path() -> Path` | `reading-docs.jsonl` のパス（表 `ndf-files` の行 `reading-docs`） |
-| `materials_path` | `records/reading.py` | 新設 | `materials_path(gate: str, number: int) -> Path` | コピーのパス（表 `ndf-files` の行 `reading-materials`） |
+| `materials_path` | `records/reading.py` | 新設 | `materials_path(repo: str, gate: str, number: int) -> Path` | コピーのパス（表 `ndf-files` の行 `reading-materials`） |
 | `append_doc` | `records/reading.py` | 新設 | `append_doc(row: Mapping[str, Any]) -> dict[str, Any]` | 1 行を `jsonl.append_locked` で追記する。形は `reading-docs.schema.json` |
 | `completed` | `records/reading.py` | 新設 | `completed(rows: Iterable[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]` | 確認の id から完了の行 |
 | `latest_read` | `records/reading.py` | 新設 | `latest_read(rows: Sequence[Mapping[str, Any]], key: tuple[Any, ...]) -> Optional[Mapping[str, Any]]` | 設計書の「読ませるものの決め方」のキーで、完了した確認の最後の読ませた行を引く |

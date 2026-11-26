@@ -277,7 +277,7 @@ def working_material(run: Run, rows: Sequence[Mapping[str, Any]]) -> tuple[str, 
     args, pr = run.args, run.pr
     done = reading.last_done(rows, run.repo, args.gate, pr.number)
     expected = reading.remained_section(reading.remained_of(rows, run.repo, args.gate, pr.number))
-    copy = _text_or_none(reading.materials_path(args.gate, pr.number)) if done is not None else None
+    copy = _text_or_none(reading.materials_path(run.repo, args.gate, pr.number)) if done is not None else None
     previous = None
     if copy is not None and done is not None and reading.material_matches(copy, expected, done):
         previous = reading.split_section(copy, expected)[0]
@@ -548,7 +548,7 @@ def write_records(run: Run, plan: Plan, final: Final, head: str, pushed: bool) -
     hashes = {MATERIAL_SHA: final.sha256, MATERIAL_FILE_SHA: final.file_sha256, BODY_SHA: body_sha}
     for row in final.rows:
         reading.append_doc({"kind": "read", **base, **row})
-    _replace(reading.materials_path(run.args.gate, run.pr.number), final.text)
+    _replace(reading.materials_path(run.repo, run.args.gate, run.pr.number), final.text)
     if pushed:
         reading.append_doc(reading.done_row(base, **hashes))
         return {"id": run.check, "fingerprint": None}

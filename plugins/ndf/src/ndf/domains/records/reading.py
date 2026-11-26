@@ -81,10 +81,10 @@ def docs_path() -> Path:
     return mvv.record_path("reading-docs")
 
 
-def materials_path(gate: str, number: int) -> Path:
-    """承認資料のコピー（表 ndf-files の reading-materials。PR とゲートごとに 1 つ）。"""
+def materials_path(repo: str, gate: str, number: int) -> Path:
+    """承認資料のコピー（表 ndf-files の reading-materials。リポジトリ `repo`（owner/name）の PR とゲートごとに 1 つ）。"""
     pattern = facts.value("ndf-files", "reading-materials", "path")
-    return mvv.record_path("reading-docs").parent / pattern.replace("<gate>", gate).replace("<n>", str(number))
+    return mvv.record_path("reading-docs").parent / pattern.replace("<repo>", repo.replace("/", "__")).replace("<gate>", gate).replace("<n>", str(number))
 
 
 def append_doc(row: Mapping[str, Any]) -> dict[str, Any]:
