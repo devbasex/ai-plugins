@@ -2,7 +2,7 @@
 
 [設計文書](./issue-4566-design.md)の「構成要素」を、ファイルと関数の単位まで下ろした文書である。受け入れ条件の番号は[要求仕様](./issue-4566-requirements.md)を指す。パスは、特に書かなければ `plugins/ndf/` からの相対である。
 
-**この文書の表と本文は、この PR で実装した後の姿を書いている。** これまでのコードと違う所は、「種類」の列の「変更」と、各セクションの「これまで」の文で示す。
+**この文書は、#4566 の実装の後に実現する仕様を定める。** 既存のコードを変える所は、表の「種類」の列の「変更」と、各セクションの説明で示す。
 
 ## 地図
 
@@ -38,7 +38,7 @@ docs/specifications/
 | `src/ndf/domains/crossrefactor/drive.py` | 変更 | 経路の分岐、排他、再利用、SHA の書き出し | `local_gate`・`workspace` | `drive` | △`RunConfig`・`drive`・`_reused`・`_init`・`_final`・`_summary`、＋`_write_pushed` |
 | `src/ndf/domains/crossrefactor/workspace.py` | 変更 | PR ごとの排他ロック | `ndf.slot_pool` | `workspace` | ＋`hold` |
 | `src/ndf/domains/crossrefactor/local_gate.py` | 新設 | 手元の最終ゲート | `final_gate`・`protected_decide`・`testing.slots`・`core.converge.worktree` | `local_gate` | ＋`settings_at`・`protection_at`・`run_local_gate`・`run_suites`・`verify_tree`・`sweep_verify_trees` |
-| `src/ndf/domains/crossrefactor/protected_decide.py` | 新設 | テストの定義のファイルの判定 | `testing.scoped`・`testing.weight` | `protected_decide` | ＋`protected_of`・`narrow` |
+| `src/ndf/domains/crossrefactor/protected_decide.py` | 新設 | テストの定義のファイルの判定 | `testing.scoped`・`testing.weight` | `protected_decide` | ＋`protected_of`・`narrow`・`inside_work` |
 | `src/ndf/domains/crossrefactor/final_gate.py` | 変更 | 直しが対象範囲の外を変えていないかを調べる関数を、2 つの経路から呼べるようにする。CI の記録にチェックの名前を載せる | `final_gate_decide` | `final_gate` | △`check_fix`（旧 `_check_fix`）・`fix_or_undo`（旧 `_fix_or_undo`）・`run_gate` |
 | `src/ndf/domains/crossrefactor/final_gate_decide.py` | 変更 | 直しの範囲の判定に、除くファイルを足す | `testing.scoped` | `final_gate_decide` | △`verify_final_fix` |
 | `src/ndf/domains/crossrefactor/prompt_decide.py` | 変更 | 手元で落ちたときの指示文 | — | `prompt_decide` | △`final_fix` |
@@ -69,7 +69,7 @@ docs/specifications/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `Kind` | 型（`required_checks`・`local_test`・`none`） | `means.py` | — |
-| `Means` | 型。`kind`、`required`（チェックの名前）、`suites`（名前とコマンドの組）、`commands`（保護の判定に使う `command` と `scope_command`）、`digest`（テストの設定の識別値）、`protected`（`test.protected_files`） | `means.py` | — |
+| `Means` | 型。`kind`、`required`（チェックの名前）、`suites`（名前とコマンドの組）、`declarations`（テストの suite の宣言そのもの）、`commands`（保護の判定に使う `command` と `scope_command`）、`digest`（テストの設定の識別値）、`protected`（`test.protected_files`） | `means.py` | — |
 
 `digest` は、テストの suite ごとの `name`・`command`・`scope_command`・`paths` を設定の順に並べた JSON の SHA-256 である。
 
@@ -161,17 +161,18 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `protected_of` | `protected_decide.py` | 新設 | `protected_of(tree: Mapping[str, str \| None], commands: Sequence[str], declared: Sequence[str]) -> Protected` | ツリー（パス → リンク先）から、保護するファイルの判定を組む |
+| `protected_of` | `protected_decide.py` | 新設 | `protected_of(tree: Mapping[str, str \| None], commands: Sequence[str], declared: Sequence[str], search: Sequence[str] = ()) -> Protected` | ツリー（パス → リンク先）から、保護するファイルの判定を組む |
+| `inside_work` | `protected_decide.py` | 新設 | `inside_work(commands: Sequence[str], roots: Sequence[str]) -> tuple[str, ...]` | `roots` の配下を指す絶対パスの語を返す |
 | `narrow` | `protected_decide.py` | 新設 | `narrow(scope: Sequence[str], tracked: Sequence[str], protected: Protected) -> tuple[str, ...]` | 保護しないファイルを 1 つも含まない指定を対象範囲から外す |
 | `verify_final_fix` | `final_gate_decide.py` | 変更 | `verify_final_fix(changed_by_commit, target_scope, excluded: Callable[[str], bool] \| None = None)` | `excluded` が真のファイルは、範囲の中でも範囲の外として扱う |
 | `check_fix` | `final_gate.py` | 変更 | `check_fix(g, before: str, failed: Sequence[str], scope: Sequence[str], excluded=None) -> None` | 直しが範囲の外を変えていれば `before` へ戻して `refused`。2 つの経路で使う |
 | `fix_or_undo` | `final_gate.py` | 変更 | 今のまま（名前の `_` を外す） | 担当が結果を出さなければ戻す |
 | `run_gate` | `final_gate.py` | 変更 | 今のまま | 合格の記録に、手段と通ったチェックの名前を足す |
 | `settings_at` | `local_gate.py` | 新設 | `settings_at(g: git.Git, commit: str, repo_work: Path) -> dict[str, Any]` | そのコミットのルートの `.ndf/project.json` を読む。コミットに無ければ `--work` の設定 |
-| `protection_at` | `local_gate.py` | 新設 | `protection_at(g: git.Git, commit: str, project: Mapping[str, Any]) -> Protected` | `git ls-tree -r -z` と、リンクの中身を読んで `protected_of` を呼ぶ |
+| `protection_at` | `local_gate.py` | 新設 | `protection_at(g: git.Git, commit: str, project: Mapping[str, Any], repo_work: Path) -> Protected` | コマンドが `--work` の配下を絶対パスで指せば停止する（`inside_work`）。`git ls-tree -r -z` と、リンクの中身を読んで `protected_of` を呼ぶ |
 | `verify_tree` | `local_gate.py` | 新設 | `verify_tree(repo, root: Path, pr: int, commit: str, state, save)`（コンテキストマネージャ。`Path` を渡す） | 検証用の作業場所を作り、打ち終えたら取り除く |
 | `sweep_verify_trees` | `local_gate.py` | 新設 | `sweep_verify_trees(repo, state, save) -> list[str]` | 中断で残った作業場所を取り除き、残した理由を返す |
-| `run_suites` | `local_gate.py` | 新設 | `run_suites(tree: Path, means: Means, budget: TestBudget) -> tuple[Failed, ...]` | テストの suite の `command` を順に打ち、落ちた suite を返す |
+| `run_suites` | `local_gate.py` | 新設 | `run_suites(tree: Path, means: Means, budget: TestBudget) -> tuple[Failed, ...]` | テストの suite の `command` を順に打ち、落ちた suite を返す。起動できなければ停止する |
 | `run_local_gate` | `local_gate.py` | 新設 | `run_local_gate(g, cfg: LocalGateConfig, state, save, fix: FixLauncher) -> dict[str, Any]` | 取り込み → テスト → push か直し、を周の上限まで回し、最終ゲートの記録を返す |
 | `hold` | `workspace.py` | 新設 | `hold(root: Path) -> FileLock \| None` | `rf<PR>/run.lock` を待たずに取る。取れなければ None |
 | `RunConfig` | `drive.py` | 変更 | `local_test: bool = False`・`pushed_out: Path \| None = None` を足す | `args()` は、手元の経路では `--required …`・`--ci-test …` の代わりに `--local-test` を並べる。`pushed_out` は並べない |
@@ -192,7 +193,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
   - 事後条件: 状態の `verify_trees` に記録があるパスだけを対象にする。git worktree lock の理由の文字列が NDF の付けたものでなければ（利用者が掛けた lock なら）残す。git の作業場所として登録の無いディレクトリも残す
 - `run_suites`
   - 事後条件: テストの後、作業場所の `HEAD` が対象のコミットのままで、追跡ファイルに変更が無い
-  - 副作用: 設定のコマンドの起動（`slots.run_command`）
+  - 副作用: 設定のコマンドの起動（`slots.run_command`）。引数 `suites` には、対象の SHA の判定に使った設定の宣言（`means.declarations`）を渡す。重い処理かの判定が、検証用の作業場所の置き場所に左右されないようにする
 
 ### 処理の手順
 
@@ -200,7 +201,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 
 | 順 | 条件 | 結果 |
 | --- | --- | --- |
-| 1 | `worktree.sync_worktree` が衝突 | `base_conflict` |
+| 1 | リモートの先頭を `worktree.fetch_tips` で取得する。先頭が `HEAD` の祖先（同じを含む）でなければ `worktree.sync_worktree` で載せ直し、衝突する。祖先なら載せ直さず、`HEAD` の SHA を保つ | 衝突は `base_conflict` |
 | 2 | 取り込んだ先頭の設定の手段が手元のテストでない | `precondition` |
 | 3 | `HEAD` が取り込んだ先頭と同じ（送るコミットが無い） | テストを打たずに合格（`tests: skipped`） |
 | 4 | 取り込んだ先頭から `HEAD` までの変更（`git diff --name-only --no-renames -z`）が保護するファイルに当たる | `refused` |
@@ -218,10 +219,13 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 
 - どこかの階層が `.ndf`
 - 名前が、決まった名前の一覧に当たる（`fnmatch`）
-- テストのコマンドを分けた単語をパスとして正規化し、そのパスに当たる。パスがシンボリックリンクなら、リンクとリンク先の両方が当たる
+- テストのコマンドを分けた単語をパスとして正規化し、そのパスか、その親のパス（ディレクトリがファイルやリンクに置き換わった場合）に当たる。ツリーに無いパスも当てる。パスがシンボリックリンクなら、リンクとリンク先の両方が当たる
+- `search`（`PATH` の相対の要素。空と `.` はルート）のどれかの下の、`/` を含まない単語と同じ名前に当たる。`search` は `protection_at` が、テストを打つ環境の `PATH` から作る
 - `test.protected_files` の指定の中（`scoped.in_scope`）
 
-コマンドの語は `weight.split_commands` で分け、`=` を含む単語は、`=` より後ろの部分もパスとして照らす。正規化は `posixpath.normpath` で、ルートの外を指す結果（`..` で始まる）は捨てる。絶対パスは、`--work` のリポジトリのルート配下を指すものだけを相対へ直す。リンクはコミットのツリーの中だけでたどり、ツリーの外を指せばリンク自体だけを保護する。
+コマンドの語は `weight.split_commands` で分け、`=` を含む単語は、`=` より後ろの部分もパスとして照らす。正規化は `posixpath.normpath` で、ルートの外を指す結果（`..` で始まる）は捨てる。リンクはコミットのツリーの中だけでたどり、ツリーの外を指せばリンク自体だけを保護する。
+
+テストのコマンドは書かれたとおりに打つので、`--work` のリポジトリのルート配下を指す絶対パスは、検証用の作業場所ではなく `--work` のコードを指す。`inside_work` はそのような語を返し、`protection_at` は 1 つでもあれば `precondition` で停止する。ルートは、`--work` に渡されたパスと、シンボリックリンクを解いたパスの両方で照らす。リポジトリの中のファイルは相対パスで指す。
 
 ### 内部のデータと定数
 
@@ -251,10 +255,12 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `drive` | ロックを取れない | 同じ PR の実行が動いている | 状態を読む前 | 止める | `precondition` | 何も変えない。終わってから打ち直す |
+| `protection_at` | テストのコマンドが `--work` の配下を絶対パスで指す | 検証用の作業場所ではないコードをテストする指定 | 提案の前と、取り込んだ先頭の設定を読むとき | 止める | `precondition`。当たった語と、相対パスで書くこと | 送らない。設定を直して打ち直す |
 | `settings_at` | 設定が JSON でない | 設定の誤り | 読み取り | 止める | `precondition` | 直して打ち直す |
 | `verify_tree` | 作成か lock の失敗 | git の失敗 | `local_gate` | 呼び出し元へ返す | `precondition` | 記録に残り、次の実行が片付ける |
 | `verify_tree` | 取り除けない | ファイルの権限など | 終了時 | 理由を標準エラーへ出して続ける | 結果は変えない | 記録に残し、次の実行か `release` が片付ける |
-| `run_suites` | suite が落ちる、1 本の上限を超える | テストの失敗 | 終了コード、`TimeoutExpired` | 呼び出し元へ返す | 直しの後も落ちれば `test_failed` | コミットは作業場所に残る |
+| `run_suites` | suite のコマンドを起動できない | テストランナーが無い、実行の権限が無い | 終了コード 126・127、起動の `OSError` | 残りの suite を打たずに止める（直さない） | `precondition`。suite の名前、コマンド、終了コード、出力の末尾 | 送らない。コマンドか環境を直して打ち直す |
+| `run_suites` | suite が落ちる（126・127 以外の非ゼロ）、1 本の上限を超える | テストの失敗 | 終了コード、`TimeoutExpired` | 呼び出し元へ返す | 直しの後も落ちれば `test_failed` | コミットは作業場所に残る |
 | `run_suites` | 累計の時間が上限に達する。または、残り時間が suite 1 本の上限より短いので残り時間を上限にした実行が、それを超える | テストが重い | 起動の前と `TimeoutExpired` | 止める | `fix_limit`。停止の理由の文に、使った累計、上限の値、キー名 `test.local_total_minutes` | 打ち直すと累計は 0 から |
 | `run_suites` | 追跡ファイルか `HEAD` が変わる | テストが書き換える | テストの後 | 止める | `precondition`。書き換わったファイル | 送らない |
 | `run_suites` | テストの実行枠が空くのを待ちきれない、空きメモリが足りずにテストを止める | マシンの混雑 | `slots.Stopped` | 呼び出し元へ返す | 今の停止理由のまま | 打ち直せる |
@@ -273,8 +279,8 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `run_local_gate` | `final_gate.send`・`final_gate.run_gate` | `final_gate.py` を読んだ | `send` は取り込み直して `HEAD` を送るので使わない。`GateStopped`・直しの確かめは使う |
-| `run_local_gate` | `worktree.sync_worktree` | `core/converge/worktree.py` を読んだ | 使う。PR のブランチの先頭の SHA は、`sync_worktree` の取得で更新されるリモート追跡参照から読む（改めて取得しない） |
-| `run_suites` | `verify.failing`・`slots.run_command` | `verify.py`・`slots.py` を読んだ | `verify.failing` は変えたファイルに対応するテストだけを打つので使わない。起動は `run_command` |
+| `run_local_gate` | `worktree.fetch_tips`・`worktree.sync_worktree` | `core/converge/worktree.py` を読んだ | 使う。`sync_worktree` はリモートの先頭が同じでも `reset --hard` と `cherry-pick` を打つので、先頭が `HEAD` に含まれていないときだけ呼ぶ。呼ばない周も、追跡ファイルに commit していない変更があれば同じく止める |
+| `run_suites` | `verify.failing`・`slots.run_command` | `verify.py`・`slots.py` を読んだ | `verify.failing` は変えたファイルに対応するテストだけを打つので使わない。起動は `run_command` で、`suites=means.declarations` を渡す。省くと実行ディレクトリから設定を読み直し、`--work` の設定で補ったリポジトリでは、検証用の作業場所から同じ宣言が見つかるとは限らない |
 | `verify_tree`・`sweep_verify_trees` | `worktree.lock_review_worktree`・`lock_of`・`release`・`sweep_orphans` | 同上 | 前の 2 つを使う。`worktree.release` は lock の無い作業場所を `--force` で消さず、`worktree.sweep_orphans` はディレクトリが残っている作業場所の lock を外さない。中断で残ったものを回収できないので、片付けは新しく書く |
 | `hold` | `slot_pool.try_lock` | `grep -rn "FileLock" src/ndf` | 使う |
 | `protected_of` | `weight.split_commands`・`scoped.in_scope` | `testing/` を読んだ | 使う |
@@ -284,7 +290,8 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `protected_of` | 決まった名前、コマンドが名指すスクリプト、宣言のディレクトリ | `./` や `..` を含む表記、`--config=` の形、リンク | ツリーの外を指すリンク |
+| `protected_of` | 決まった名前、コマンドが名指すスクリプト、宣言のディレクトリ | `./` や `..` を含む表記、`--config=` の形、リンク、ツリーに無いパスの新設、親がリンクに置き換わる、`PATH` の `.` と相対の要素 | ツリーの外を指すリンク |
+| `inside_work` | 相対パスと、ルートの外の絶対パスは返さない | `--config=<ルート>/x` の形、ルートそのもの | `scripts/../` を含む絶対パス |
 | `narrow` | 保護するファイルの指定が消える | 保護するファイルとほかを含むディレクトリは残る | すべて保護なら空 |
 | `run_local_gate` | 合格して指定の SHA を送る。変更が無ければ打たない | 最後の周でテストが落ちる場合、PR のブランチが進んだために push が拒まれる場合 | 処理の手順の表の行ごと |
 | `run_suites` | 設定の順にすべて打つ | 累計の残りが suite の上限より小さい | 異常系の行ごと。時計と起動を差し替える |

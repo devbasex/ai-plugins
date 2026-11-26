@@ -105,7 +105,9 @@
 
 ## 完了の定義
 
-- [ ] 受け入れ条件 1〜12 をすべて満たし、条件ごとに検証手段と結果が対応している
+- [ ] 受け入れ条件 1〜3 と 6〜12 を満たし、条件ごとに検証手段と結果が対応している
+- [ ] 受け入れ条件 4・5 は、工程の単位で満たし、検証手段と結果が対応している。条件 4 は `ndf refactor run --local-test` の直接の実行と同じ経路のテスト、条件 5 は工程の判定の単位のテストである（設計書の決定 8）
+- スプリントが必須のチェックの無いリポジトリで条件 4・5 まで自動で進むことの確認は、#4472（ https://github.com/devbasex/ai-plugins/issues/4472 ）を直した後に行う。この実装計画の完了の条件には含めない
 - [ ] PR の CI が通る（テストは手元で打たない。このリポジトリは CI テストの設定がある）
 - [ ] `bash scripts/check-lint.sh`・`python3 scripts/check-ndf-contracts.py`・`python3 scripts/check-script-structure.py`・`python3 scripts/check-markdown-links.py --root .` が通る
 - [ ] レビューの単位の実際の行数を書き足した
