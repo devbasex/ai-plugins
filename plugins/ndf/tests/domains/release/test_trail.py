@@ -91,6 +91,8 @@ def _judgment_needs_the_same_target(now):
 
 def _judgment_ignores_rows_without_production_and_compares_repo_case_insensitively():
     assert merge_approval.merge_judgment([_row(production=False)], TARGET) is None
+    # 本番へ反映されない期間の却下は、先の本番の承認を取り消す
+    assert merge_approval.merge_judgment([_row(), _row("rejected", record="q2", production=False)], TARGET) is None
     assert merge_approval.merge_judgment([_row()], TARGET._replace(repo="O/R")) == _row()
 
 

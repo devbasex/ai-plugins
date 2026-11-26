@@ -57,6 +57,15 @@ class MergeHub:
     files_at_merge: Optional[dict[str, tuple[Optional[str], Optional[str]]]] = None
     # 確かめで見せる PR（判定の後に変わった PR）。無ければ `pulls_of`
     pull_at_merge: Optional[Pull] = None
+    # コミット → 必須のチェック `pytest` の結論。無いコミットは success
+    conclusions: dict[str, str] = field(default_factory=dict)
+    checked: list[str] = field(default_factory=list)
+
+    def check_runs(self, sha: str) -> list[dict]:
+        self.calls.append("check_runs")
+        self.checked.append(sha)
+        conclusion = self.conclusions.get(sha, "success")
+        return [{"id": 1, "name": "pytest", "status": "completed", "conclusion": conclusion, "started_at": "", "completed_at": "t"}]
 
     def pulls_by_head(self, branches: Any) -> dict[str, list[Pull]]:
         self.calls.append("pulls_by_head")

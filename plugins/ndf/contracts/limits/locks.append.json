@@ -1,8 +1,9 @@
 {
-  "summary": "排他つきで 1 行足すときのロックの待ちの上限",
+  "summary": "排他つきで短い書き込み（1 行の追記・承認資料の書き込み）をするときのロックの待ちの上限",
   "seconds": 5,
   "read_by": [
     "ndf.domains.loop.acceptance",
-    "ndf.domains.records.jsonl"
+    "ndf.domains.records.jsonl",
+    "ndf.progress.gate.asking"
   ]
 }

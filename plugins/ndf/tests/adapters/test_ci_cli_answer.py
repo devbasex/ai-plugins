@@ -127,9 +127,7 @@ def test_answer_writes_the_trail_row_of_the_record_and_the_current_pr(hub, tmp_p
     shown = _shown(repo=merge_hub.REPO.upper(), number="7", production=production)
     results = [_answer(tmp_path, capsys, last_result, _record(answer=answer), shown) for _ in range(2)]
     assert [code for code, _ in results] == [0, 0]
-    # 本番へ反映されない回答は、1 回目も書かない
-    assert [found["metrics"] for _, found in results] == [{"answer": answer, "written": production}, {"answer": answer, "written": False}]
+    assert [found["metrics"] for _, found in results] == [{"answer": answer, "written": True}, {"answer": answer, "written": False}]
     assert results[0][1]["items"] == [{"kind": "pr", "number": 7}]
     target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
-    expected = [merge_approval.MergeRow(answer, "user", target, True, RECORD_ID)] if production else []
-    assert merge_approval.merge_rows(hub, 7, hub.viewer()) == expected
+    assert merge_approval.merge_rows(hub, 7, hub.viewer()) == [merge_approval.MergeRow(answer, "user", target, production, RECORD_ID)]

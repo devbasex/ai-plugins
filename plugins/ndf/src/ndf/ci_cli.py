@@ -32,6 +32,7 @@ from ndf.adapters.ci import (
     files_of,
     is_test_check,
     read,
+    watch_head,
 )
 from ndf.adapters.github import GitHub, MergeExpect, MergeOutcome, Pull
 from ndf.contracts import result
@@ -84,6 +85,14 @@ def _parser() -> argparse.ArgumentParser:
     m.add_argument("--approved-head", help="工程の承認ゲートで承認した HEAD（--approved-base と組で渡す）")
     m.add_argument("--approved-base", help="工程の承認ゲートで承認したマージ先")
     m.add_argument("--presented-out", help="stop で止まるときに承認の対象を書くファイル（ndf ci answer が読む）")
+    m.add_argument(
+        "--required",
+        action="append",
+        default=[],
+        help="マージの前に、マージする HEAD の結論を待つ必須のチェック。渡さなければ待たない",
+    )
+    m.add_argument("--test", action="append", default=[], help="--required で待つときのテストのチェックの名前")
+    m.add_argument("--budget", type=float, help="--required で待つ合計の秒")
     m.set_defaults(run=_merge)
     a = sub.add_parser("ask", help="ブランチの PR の承認の対象を承認資料に載せ、承認の回答を待つ（終了コード 10）")
     a.add_argument("--branch", required=True, help="PR の head のブランチ")
@@ -204,8 +213,8 @@ def _report(args: argparse.Namespace, pull: github_mod.Pull, hub: GitHub, watche
         metrics.update(_failed_metrics(hub, watched.reading, Path.cwd()))
     items = _items(watched.reading, args.test)
     if kind is None:
-        return result.result(TOOL, result.OK, f"#{args.pr} の必須のチェックが通った", items=items, metrics=metrics)
-    detail = f"#{args.pr}（{pull.head_sha[:12]}）の CI: {watched.reading.verdict}"
+        return result.result(TOOL, result.OK, f"#{pull.number} の必須のチェックが通った", items=items, metrics=metrics)
+    detail = f"#{pull.number}（{pull.head_sha[:12]}）の CI: {watched.reading.verdict}"
     return result.stopped(TOOL, kind, detail, instance=pull.head_sha, items=items, metrics=metrics)
 
 
@@ -418,6 +427,19 @@ def _approved_by(
     return None, unreadable if unreadable is not None else _unapproved(args, target, verdict)
 
 
+def _failed_checks(args: argparse.Namespace, hub: GitHub, pull: Pull) -> Optional[dict]:
+    """`--required` を受けたら、マージする HEAD のチェックの結論を待つ。通らなければ止まる結果。
+
+    読むのは、今の PR と同じだと確かめた HEAD のコミットそのもので、待つ間に PR の HEAD が動いて戻っても別のコミットの結果を読まない。
+    """
+    if not args.required:
+        return None
+    watch = Watch(watch_head(hub, pull.head_sha, list(args.required), list(args.test)), args.budget, on_round=_progress)
+    watched = watch.run()
+    kind = watched.cause_by(Classifier(args.test))
+    return None if kind is None else _report(args, pull, hub, watched, kind)
+
+
 def _merged(
     args: argparse.Namespace, target: merge_approval.MergeTarget, outcome: MergeOutcome, verdict: Verdict, approved_by: Optional[str]
 ) -> dict:
@@ -447,9 +469,13 @@ def _merge(args: argparse.Namespace) -> dict:
     `--approved-head`・`--approved-base` を受けたら、判定の前に今の PR と照らし、違えば判定によらず `approval_stale` で止まる。
     マージ先が自動反映の本番チャネル（判定の値が `automatic`・`unset`・`unknown`）なら、今の承認の対象への証跡があるときだけ
     マージし、無ければ `--production-gate` の形で終える。
+    `--required` を受けたら、承認した対象を今の PR と照らした後に、マージする HEAD のチェックを待つ。マージ済みの PR は待たない。
+    待つ間に HEAD かマージ先が変われば、`GitHub.merge` の直前の確かめが止める。
     """
     if (args.approved_head is None) != (args.approved_base is None):
         return result.stopped(TOOL, "invalid", "--approved-head と --approved-base は組で渡す")
+    if args.required and args.budget is None:
+        return result.stopped(TOOL, "invalid", "--required を渡すときは --budget も渡す")
     head, refused = _worktree_head(args)
     if refused is not None:
         return refused
@@ -462,6 +488,9 @@ def _merge(args: argparse.Namespace) -> dict:
     if stopped is not None:
         _dequeue_queued(hub, pull)
         return stopped
+    failed = _failed_checks(args, hub, pull)
+    if failed is not None:
+        return failed
     if args.approved_head is not None:
         head = args.approved_head
     verdict, oid = _judge_pr(hub, pull)
@@ -548,8 +577,10 @@ def _unchanged_target(args: argparse.Namespace, hub: GitHub, shown: dict) -> tup
 def _write_answer(hub: GitHub, record: dict, shown: dict, target: merge_approval.MergeTarget) -> dict:
     """確かめを通った回答をマージの承認の証跡に書き、結果 JSON を組む。"""
     answer = record.get("answer")
-    # 本番へ反映されないマージは証跡を読む側が無いので、コメントを読まず投稿もしない
-    if shown.get("production") is not True:
+    production = shown.get("production") is True
+    # 本番へ反映されないマージの承認は読む側が無いので、コメントを読まず投稿もしない。
+    # 却下は書く（同じ対象への先の承認を、設定が自動反映へ戻った後も取り消す）
+    if not production and answer == approval_words.APPROVED:
         summary = f"#{target.number} は本番へ反映されないので、回答 {answer} の証跡は書かない"
         metrics = {"answer": answer, "written": False}
         return result.result(TOOL, result.OK, summary, items=_pr_item_list(target.number), metrics=metrics)
@@ -557,7 +588,7 @@ def _write_answer(hub: GitHub, record: dict, shown: dict, target: merge_approval
         str(answer),
         merge_approval.USER_BY,
         target,
-        True,
+        production,
         f"{record.get('run')}:{record.get('step')}:{record.get('presented_id')}",
     )
     written = merge_approval.write_merge_row(hub, row, hub.viewer())
@@ -567,7 +598,7 @@ def _write_answer(hub: GitHub, record: dict, shown: dict, target: merge_approval
 
 def _answer(args: argparse.Namespace) -> dict:
     """プランの実行が書いた回答の記録を、提示した承認の対象と今の PR に照らしてから、マージの承認の証跡に書く
-    （本番へ反映されないマージは、照らすだけで書かない）。
+    （本番へ反映されないマージの承認は、照らすだけで書かない）。
 
     書くのは、回答した者が利用者（`human`）で、記録の提示の識別子が提示のファイルの識別子と同じで、提示した承認の対象と
     「本番へ反映されるか」が今の PR と同じときだけで、担い手はいつも `user` である。端末から直に打っても、回答の記録が無ければ書かない（決定 7）。

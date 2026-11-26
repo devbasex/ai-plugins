@@ -146,7 +146,7 @@ def _material_of(out):
 
 @pytest.mark.parametrize("private", [True, False])
 def test_the_plan_material_carries_the_verdict_of_the_head_it_was_made_for(st, env, repo, new_table, flow, monkeypatch, private):
-    from ndf.progress.gate import entry
+    from ndf.progress.gate import asking
 
     st.private = private
     tid = new_table()
@@ -159,11 +159,10 @@ def test_the_plan_material_carries_the_verdict_of_the_head_it_was_made_for(st, e
     else:
         assert "理由 2 件・レッドライン 1 件" in text and f"コメント {JUDGED['note_url']} で読めます" in text
         assert not any(w in text for w in FREE) and model.MVV_WITHHELD not in text
-    # 同じ head で表示し直す: 資料を書き直さず、observe が返したハッシュを使う（observe は 1 回だけ）
+    # 同じ head で表示し直す: 資料を書き直さず、同じハッシュを返す（observe は 1 回だけ）
     sha, calls = first["metrics"]["gate"]["material_sha256"], []
     with monkeypatch.context() as m:
-        m.setattr(entry, "write_material", lambda *a, **k: pytest.fail("書き直した"))
-        m.setattr(entry, "material_sha256", lambda *a: pytest.fail("読み直した"))
+        m.setattr(asking.os, "link", lambda *a: pytest.fail("書き直した"))
         again = _asked(st, repo, tid, lambda q, **kw: calls.append(kw) or gate.Target(head="h1", material=sha))
     assert (
         len(calls) == 1 and again["metrics"]["gate"]["material_sha256"] == sha and again["presentation_path"] == first["presentation_path"]

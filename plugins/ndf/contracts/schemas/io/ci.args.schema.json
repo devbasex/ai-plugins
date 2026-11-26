@@ -112,6 +112,24 @@
         "--presented-out": {
           "type": "string",
           "description": "stop で止まるときに承認の対象を書くファイル（ndf ci answer が読む）"
+        },
+        "--required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "マージの前に、マージする HEAD の結論を待つ必須のチェック。渡さなければ待たない"
+        },
+        "--test": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "--required で待つときのテストのチェックの名前"
+        },
+        "--budget": {
+          "type": "number",
+          "description": "--required で待つ合計の秒"
         }
       },
       "required": [

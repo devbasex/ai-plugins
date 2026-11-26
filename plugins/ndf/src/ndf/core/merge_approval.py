@@ -137,8 +137,9 @@ def merge_rows(hub: GitHub, number: int, viewer: Viewer) -> list[MergeRow]:
 
 
 def merge_judgment(rows: Sequence[MergeRow], now: MergeTarget) -> MergeRow | None:
-    """今の承認の対象 `now` への、「本番へ反映される: はい」の証跡の最新の 1 件が承認ならその行。無いか却下なら None。"""
-    kept = [r for r in rows if r.production and r.target.same(now)]
+    """今の承認の対象 `now` への、「本番へ反映される: はい」の承認とすべての却下のうち、最新の 1 件が承認ならその行。
+    無いか却下なら None。却下は本番へ反映されない期間のものも先の承認を取り消す。"""
+    kept = [r for r in rows if r.target.same(now) and (r.production or r.answer != APPROVED)]
     if not kept or kept[-1].answer != APPROVED:
         return None
     return kept[-1]

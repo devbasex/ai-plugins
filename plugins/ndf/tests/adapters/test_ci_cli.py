@@ -547,6 +547,24 @@ def _merge_dequeues_a_queued_pr_whose_approved_target_moved(monkeypatch, capsys,
     assert hub.merged == [] and hub.dequeued == [7]
 
 
+def _merge_waits_for_the_checks_of_the_approved_head(monkeypatch, capsys, last_result, conclusion):
+    """--required があれば、承認した HEAD のチェックが通ったときだけマージする。"""
+    hub = _use(monkeypatch, merge_hub.MergeHub(conclusions={merge_hub.HEAD: conclusion}))
+    _approve(hub)
+    args = ["merge", "--pr", "7", "--production-gate", "stale", "--approved-head", merge_hub.HEAD, "--approved-base", "main"]
+    code = ci_cli.main([*args, "--required", "pytest", "--budget", "60"])
+    assert hub.checked == [merge_hub.HEAD]
+    assert (code == 0) is (conclusion == "success") and (hub.merged == [7]) is (conclusion == "success")
+
+
+def _merge_reads_no_checks_for_a_merged_or_moved_pr(monkeypatch, capsys, last_result, merged):
+    """マージ済みの PR と、承認した HEAD と違う PR は、チェックを読まない。"""
+    hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(merged=merged)}))
+    args = ["merge", "--pr", "7", "--production-gate", "stale", "--approved-head", merge_hub.OTHER, "--approved-base", "main"]
+    ci_cli.main([*args, "--required", "pytest", "--budget", "60"])
+    assert hub.checked == [] and hub.merged == []
+
+
 def _ask_writes_the_presented_target_and_material(monkeypatch, capsys, last_result, tmp_path, text, production):
     """受け入れ条件 6: ndf ci ask の承認資料は、判定が automatic・unset・unknown のときだけ本番へ反映され得る行を持つ。"""
     _use(monkeypatch, merge_hub.MergeHub(files={"main": (text, "c1")}))
@@ -743,6 +761,14 @@ def _a_new_presentation_refuses_the_answer_to_the_old_one(monkeypatch, capsys, l
         scenes.scene(_merge_by_pr_with_the_approved_target_merges, id="merge_by_pr_with_the_approved_target_merges"),
         scenes.scene(_merge_dequeues_a_queued_pr_that_now_needs_approval, id="merge_dequeues_a_queued_pr_that_now_needs_approval"),
         scenes.scene(_merge_dequeues_a_queued_pr_whose_approved_target_moved, id="merge_dequeues_a_queued_pr_whose_approved_target_moved"),
+        *[
+            scenes.scene(_merge_waits_for_the_checks_of_the_approved_head, id=f"merge_waits_for_the_checks-{v}", conclusion=v)
+            for v in ("success", "failure")
+        ],
+        *[
+            scenes.scene(_merge_reads_no_checks_for_a_merged_or_moved_pr, id=f"merge_reads_no_checks-{label}", merged=v)
+            for label, v in (("merged", True), ("moved", False))
+        ],
         *[
             scenes.scene(
                 _ask_writes_the_presented_target_and_material,

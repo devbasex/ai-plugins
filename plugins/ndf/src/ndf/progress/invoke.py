@@ -337,6 +337,7 @@ FILL_SOURCES = {
     "issue": FROM_ISSUE,
     "test_command": FROM_PROJECT,
     "required": FROM_PROJECT,
+    "release_required": FROM_PROJECT,
     "review": FROM_PROJECT,
     "rebuild": FROM_PROJECT,
     "refactor": FROM_PROJECT,
@@ -347,6 +348,7 @@ FILL_SOURCES = {
 # `.ndf/project.json` の設定のうち、差し込みの値を持つキーの道（test_command は `test.suites` のテストの suite の command を設定の順に ` && ` でつなぐ）
 PROJECT_KEYS = {
     "required": ("ci", "required_checks"),
+    "release_required": ("ci", "required_checks"),
     "review": ("workflow", "launch", "review"),
     "rebuild": rebuild_values.SETTING_PATH,
     "refactor": ("workflow", "launch", "refactor"),

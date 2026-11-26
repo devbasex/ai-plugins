@@ -415,12 +415,31 @@ def write_material(root: Path, v: run.View, q: Question, *, private: bool = True
     承認の対象を持つ質問は、資料と提示した対象の書き込みを質問ごとに排他にする。同時に走った 2 つの呼び出しの片方の
     資料と、もう片方の対象（本番へ反映されるかが違い得る）が組にならないためである。
     """
-    if q.target.binding() is None:
+    with _question_lock(root, q):
         return _write_pair(root, v, q, private)
+
+
+def present_material(root: Path, v: run.View, q: Question, *, private: bool = True) -> tuple[Path, str, Target]:
+    """`write_material` と同じに書き（書いてあれば使い直す）、承認資料のパス・sha256・提示した対象を返す。
+
+    3 つを同じ排他の中で読む。解放した後に別々に読むと、同時に走った別の呼び出しの書き直しをはさんで、古いハッシュと
+    新しい提示の識別子が同じ回答のルートに入る。
+    """
+    with _question_lock(root, q):
+        path = _write_pair(root, v, q, private)
+        return path, material_sha256(path), read_presented(root, q)
+
+
+@contextlib.contextmanager
+def _question_lock(root: Path, q: Question) -> Iterator[None]:
+    """質問の承認資料と提示した対象の排他。承認の対象を持たない質問は提示した対象を書かないので取らない。"""
+    if q.target.binding() is None:
+        yield
+        return
     held = presented_path(root, q)
     held.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with FileLock(str(held) + ".lock", timeout=limits.seconds("locks.append")):
-        return _write_pair(root, v, q, private)
+        yield
 
 
 def _write_pair(root: Path, v: run.View, q: Question, private: bool) -> Path:
