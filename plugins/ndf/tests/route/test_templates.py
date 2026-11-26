@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 
 import pytest
@@ -214,6 +215,50 @@ def test_refactor_launch_wraps_the_refactor_run_with_the_branch_and_the_base():
     got = route.refactor_launch("sprint/s1", "origin/develop", ["test", "lint"])
     assert got[:5] == ["bash", "-c", route.REFACTOR_WITH_PR, "sprint/s1", "origin/develop"]
     assert got[5:] == ["ndf", "refactor", "run", "--branch", "sprint/s1", "--base", "origin/develop", "--required", "test", "lint"]
+
+
+def _run_refactor_wrap(tmp_path, gh_body: str) -> list[str]:
+    """偽の gh と偽のエントリポイントで `{{refactor}}` の包みを打ち、エントリポイントが受けた引数を返す。"""
+
+    def script(name: str, body: str):
+        path = tmp_path / "bin" / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
+    script("gh", gh_body)
+    entry = script("entry", 'printf "%s\\n" "$@" > "$ARGS_FILE"')
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=repo, check=True, capture_output=True)
+
+    git("init", "-q")
+    git("commit", "-q", "--allow-empty", "-m", "base")
+    git("branch", "start")
+    (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
+    git("add", "a.py")
+    git("commit", "-q", "-m", "add")
+    argv = route.refactor_launch("sprint/s1", "start", ["test"])
+    argv[argv.index("ndf")] = str(entry)
+    args = tmp_path / "args"
+    env = {**os.environ, "PATH": f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}", "ARGS_FILE": str(args)}
+    subprocess.run(argv, cwd=repo, env=env, check=True, capture_output=True)
+    return args.read_text(encoding="utf-8").splitlines()
+
+
+def test_refactor_wrap_passes_only_the_number_when_gh_writes_to_stderr(tmp_path):
+    # gh は AI_AGENT・CLAUDECODE があると成功しても標準エラーに hint を出す。番号に混ぜない
+    got = _run_refactor_wrap(tmp_path, "echo 'hint: use gh event listen' >&2\necho 42")
+    assert got[got.index("--pr") + 1 :] == ["42", "--scope", "./a.py"]
+
+
+def test_refactor_wrap_keeps_the_gh_message_in_the_stopped_result_without_a_pr(tmp_path):
+    got = _run_refactor_wrap(tmp_path, "echo 'no pull requests found' >&2\nexit 1")
+    assert got[:6] == ["contracts", "emit", "--tool", "refactor", "--status", "stopped"]
+    assert got[-1] == "gh: no pull requests found"
 
 
 def test_impl_acceptance_of_several_issues_repeats_the_issue_flag():
