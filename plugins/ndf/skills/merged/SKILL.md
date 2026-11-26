@@ -115,7 +115,7 @@ ndf worktree --cwd <メインディレクトリ> merged <PR番号>...
 - worktree を外す直前に開いた公開を閉じ、テスト環境を破棄する（ボリュームも既定で消す。`.ndf/worktree.json` の `testenv.discard_volumes` が `false` なら残す）。公開を閉じられなければ `kept` で、`reason` に環境名・URL・打ち直しのコマンドが載る。破棄できなければ worktree は外れ、`reason` に環境名が載る
 - 片付けの最後に、worktree の消えた割り当てのテスト環境を回収する（全体で 300 秒まで。ボリュームは上の破棄と同じ設定に従う）。結果は `swept` が `true` の行で `items` に載る（`result` は `reclaimed` / `released` / `failed` / `foreign` / `exposed` / `deferred` / `unseen`）。回収の失敗で `status` と終了コードは変わらない。結果の読み方は `worktree` の `references/test-execution.md` の「クリーンアップ」にある
 - 外す worktree は、PR の head のブランチを checkout したものだけである。レビュー worktree（`cross-review` / `cross-refactoring` が使う一時の worktree）はこのコマンドの対象に入らない
-- 読み手役に読ませた承認資料のコピー（NDF の状態の保存先の `reading-materials/`）は、同じリポジトリの閉じた PR のものを消す（引数で渡していない PR も対象）。`items` には載らない
+- 読み手役に読ませた承認資料のコピー（NDF の状態の保存先の `reading-materials/`）は、同じリポジトリの閉じた PR のものを消す（引数で渡していない PR も対象）。渡していない PR の状態は、GitHub の呼び出しを増やさない範囲で確かめる。確かめられなかった PR のコピーは残し、次のクリーンアップで確かめる。消したコピーは `items` に載らない
 - 片付けの後に、PR が閉じる課題の本文へ工程「クリーンアップ」の記録を付けるときは `ndf records cleanup-stage <PR番号>...` を打つ（記録済みの課題は打ち直さない）
 
 ### マージから行うとき

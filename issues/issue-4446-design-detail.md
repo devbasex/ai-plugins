@@ -27,6 +27,7 @@ plugins/ndf/
 │       ├── modes/release-bump.json             *
 │       └── stages/{design,deploy}.json, stages/release-bump.json *
 ├── src/ndf/
+│   ├── adapters/github.py
 │   ├── domains/
 │   │   ├── docrebuild/{cli.py, drive.py, gate.py *, gate_decide.py *}
 │   │   ├── records/{reading.py, cli.py}
@@ -52,6 +53,7 @@ plugins/ndf/
 | `src/ndf/domains/docrebuild/cli.py` | 変更 | サブコマンド `gate` の引数を受ける | `docrebuild.gate` | モジュール | `_parser`・`_gate_args`・`main`（変更） |
 | `src/ndf/domains/docrebuild/drive.py` | 変更 | 組み直しで読ませた文書を読ませたものの記録へ書き、`not_run` で止める | `records.reading` | モジュール | `_checked`・`_reader_gap`（変更）、`record_reads`・`regular_file`・`run_worker_at`・`worker_report`・`not_run_detail`（新設） |
 | `src/ndf/domains/records/reading.py` | 変更 | 承認の質問の組み立て・読ませたものの記録の読み書き・`check` の照合 | `reading_decide`・`records.pull_view`・`release.forms_decide`・`adapters.github` | モジュール | `gate_questions`・`material_hashes`・`docs_path`・`materials_path`・`append_doc`・`completed`・`latest_read`・`remained_of`・`pending_review`・`select_reads`・`remained_section`・`split_section`・`comment_has`・`row_fingerprint`（新設）、`add`・`check`（変更） |
+| `src/ndf/adapters/github.py` | 変更 | PR の読み取りに、ついでに読む番号を受ける | — | `GitHub` | `GitHub.pulls`（変更） |
 | `src/ndf/domains/worktree/merged.py` | 変更 | クリーンアップで、閉じた PR の承認資料のコピーを消す | `contracts.facts`・`identity` | モジュール | `after_merge`（変更） |
 | `src/ndf/domains/records/cli.py` | 変更 | `reading check` に `--gate`・`--pr`・`--material`・`--questions-out` を足す | `records.reading` | モジュール | `_add_reading`・`_reading_check`（変更） |
 | `src/ndf/domains/hooks/guards/reading_check.py` | 変更 | 止める理由の文の案内を、読み手役のステップの打ち直しに変える | — | モジュール | `denial`（変更） |
@@ -371,7 +373,8 @@ plugins/ndf/
 | `docs_path` | `records/reading.py` | 新設 | `docs_path() -> Path` | `reading-docs.jsonl` のパス（表 `ndf-files` の行 `reading-docs`） |
 | `materials_path` | `records/reading.py` | 新設 | `materials_path(repo: str, gate: str, number: int) -> Path` | コピーのパス（表 `ndf-files` の行 `reading-materials`） |
 | `_material_copies` | `worktree/merged.py` | 新設 | `_material_copies(repo: str) -> dict[int, list[Path]]` | リポジトリのコピーを PR の番号ごとに返す。保存先は表 `locations` と `ndf-files` から引く（`worktree` は子の表の依存の向きで `records.reading` を読めない） |
-| `after_merge` | `worktree/merged.py` | 変更 | 今のまま（`hub` は `repo` も持つ） | `_material_copies` の PR の状態を、渡した PR と同じ `pulls` の 1 回の取得で読み、閉じた PR のコピーを消す（開いている PR と読めない番号は残す） |
+| `after_merge` | `worktree/merged.py` | 変更 | 今のまま（`hub` は `repo` も持つ） | `_material_copies` の番号を `pulls` の `spare` に渡し、閉じた PR のコピーを消す（開いている PR と読めない番号は残す） |
+| `GitHub.pulls` | `adapters/github.py` | 変更 | `pulls(numbers: Iterable[int], spare: Iterable[int] = ()) -> dict[int, Optional[Pull]]` | `spare` の番号は、`numbers` を読む GraphQL のクエリが 100 件に満たない残りの分だけを読む。REST へ読み替えたときは読まない |
 | `append_doc` | `records/reading.py` | 新設 | `append_doc(row: Mapping[str, Any]) -> dict[str, Any]` | 1 行を `jsonl.append_locked` で追記する。形は `reading-docs.schema.json` |
 | `completed` | `records/reading.py` | 新設 | `completed(rows: Iterable[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]` | 確認の id から完了の行 |
 | `latest_read` | `records/reading.py` | 新設 | `latest_read(rows: Sequence[Mapping[str, Any]], key: tuple[Any, ...]) -> Optional[Mapping[str, Any]]` | 設計書の「読ませるものの決め方」のキーで、完了した確認の最後の読ませた行を引く |

@@ -528,14 +528,18 @@ class GitHub:
         got = self.aliased({str(n): f"{node}(number: {n}) {{ {fields} }}" for n in wanted}, batch)
         return {n: got[str(n)] if isinstance(got[str(n)], dict) else {} for n in wanted}
 
-    def pulls(self, numbers: Iterable[int]) -> dict[int, Optional[Pull]]:
+    def pulls(self, numbers: Iterable[int], spare: Iterable[int] = ()) -> dict[int, Optional[Pull]]:
         """番号ごとの PR を 1 回のクエリ（100 件ごと）で読む。PR でない・無い番号は None。
 
         GraphQL のスロットが一次の上限なら、`github.rest-fallback` 件までは REST のスロットで読み替える（不足 g。二次レート制限は読み替えない）。
+        `spare` は、ついでに読めればよい番号である。`numbers` を読むクエリが 100 件に満たない残りの分だけを読み、呼び出しの回数と
+        読み替えの可否を変えない。残りに入らない番号と、REST へ読み替えたときの番号は、返す辞書に載らない。
         """
         wanted = sorted({int(n) for n in numbers})
+        free = -len(wanted) % int(limits.value("github.graphql-batch", "count"))
+        extra = sorted({int(n) for n in spare} - set(wanted))[:free]
         try:
-            raw = self.nodes(wanted, "pullRequest", PULL_FIELDS)
+            raw = self.nodes([*wanted, *extra], "pullRequest", PULL_FIELDS)
         except GitHubError as exc:
             if exc.quota != GRAPHQL or exc.secondary or len(wanted) > int(limits.value("github.rest-fallback", "count")):
                 raise

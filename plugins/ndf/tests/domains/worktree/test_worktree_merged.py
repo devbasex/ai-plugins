@@ -26,8 +26,8 @@ class FakeHub:
     def __init__(self, pulls: dict[int, Optional[Pull]]) -> None:
         self.by_number = pulls
 
-    def pulls(self, numbers: Iterable[int]) -> dict[int, Optional[Pull]]:
-        return {n: self.by_number[n] if n in self.by_number else None for n in numbers}
+    def pulls(self, numbers: Iterable[int], spare: Iterable[int] = ()) -> dict[int, Optional[Pull]]:
+        return {n: self.by_number[n] if n in self.by_number else None for n in [*numbers, *spare]}
 
 
 def _land(main_repo: Path, run_git: Callable, branch: str) -> Path:
