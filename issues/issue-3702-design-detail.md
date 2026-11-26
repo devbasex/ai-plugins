@@ -16,7 +16,7 @@ src/ndf/
 ├── progress/{design_record*, units_invoke, units_queue*, units_convert*, units_sync*, units_guard*, units_cli*}.py
 ├── progress/{invoke, run, folding, definition, command, store}.py
 ├── progress/gate/{entry, answering}.py
-├── adapters/github.py
+├── adapters/{git, github}.py
 ├── ci_cli.py
 └── domains/{crossreview/{cli,drive,settings}.py, records/{cli,mvv_gate}.py}
 contracts/
@@ -70,6 +70,7 @@ contracts/
 | `src/ndf/progress/store.py` | 変更 | リポジトリのスプリントの一覧を読む | — | `read_machines`（新設） |
 | `src/ndf/progress/gate/entry.py`・`answering.py` | 変更 | 資料を出す前と回答の確定の前に記録と照らす | `design_record` | `present`・`answer`・`recheck`（変更） |
 | `src/ndf/ci_cli.py` | 変更 | `ndf ci merge --verify-merged`・`ndf ci watch --head` | — | `_merge_pull`・`_watch`（変更） |
+| `src/ndf/adapters/git.py` | 変更 | push の URL を読み、解析し、git がもう一度書き換えるかを返す | — | `github_target`・`Git.push_urls`・`Git.rewrites_again` |
 | `src/ndf/adapters/github.py` | 変更 | `pulls` に REST への読み替えを止める指定 | — | `pulls`（変更） |
 | `src/ndf/domains/crossreview/{cli,drive,settings}.py` | 変更 | `--reviewed-base-out` | — | `_sync`・`_reusable`・`cmd_run`（変更） |
 | `src/ndf/domains/records/{cli,mvv_gate}.py` | 変更 | 設計の判定の入力を、2 つの工程のどちらの形でも受ける | — | `_env_inputs`（変更） |
@@ -179,9 +180,9 @@ contracts/
 - 扱いの決め方: `collect` は、番号の並びに課題を含む設計書（`issues/issue-<番号の並び>-design.md`。`-design-detail.md` は含めない）の「設計の結果」の表を読む。設計書の無い課題（設計書を省いた課題）の扱いは「実装する」である
 - `render_tables`: 「含むタスク」は `Task 1・2` の形で書く（#4369 の表の読み手が読める形）。「先に要る単位」は `名前（理由）`、別のファイルの単位は `名前（#<課題>。理由）`。「並列と直列」は実行順の昇順に 1 行ずつ。「実際の行数」の列は `View.actual_lines`（ファイルと単位の名前の組で引いた JSON の値）だけから作り、今の表の値は読まない。セクションが無ければ「タスク分解」の後に足す
 - 受け入れ条件の数は、`check` の呼び手が課題の本文を 1 回の一括読み取り（`GitHub.nodes`）で読み、`inputs_decide.criteria` で数える。実装の開始で承認の記録があるときは、読まずに記録の `criteria` を使う
-- 受け入れ条件を読む課題は、次の和である。判定器へ渡す `criteria` のキーもこの集合にする
-  - スプリントの課題（`--issue`。扱いが「マージする」の統合元を含む）
-  - ファイルを引数で直に指して `--issue` が無いときは、読んだファイルの `issues` と、タスクの `criteria` が指すすべての課題
+- 受け入れ条件を読む課題は、場合で決まる。判定器へ渡す `criteria` のキーもこの集合にする
+  - `--issue` があるとき: その課題（扱いが「マージする」の統合元を含む）
+  - `--issue` が無く、ファイルを引数で直に指したとき: 読んだファイルの `issues` と、タスクの `criteria` が指すすべての課題
 - 取得の失敗は GitHub の失敗として止め、違反にしない。集合に無い課題を指すタスクは、判定器が U2（対象外の参照）にする
 
 ### 異常系の処理
@@ -200,7 +201,7 @@ contracts/
 | `find`・`load` | 番号の並び `7-8` | `78` と `7` を取り違えない | 同じ課題が 2 ファイル、パスの各形 |
 | `limits_of` | 宣言なし・片方だけ | `target == max` | 型の違い |
 | `check` | 省いた課題・「マージする」「閉じる」は欠落にしない | 全課題が省略 | 1 件の欠落、片側だけのタスク、番号が重なる見出し、手で直した表 |
-| `render_tables` | 2 回打って同じ | 実際の行数を残す | セクションが無い |
+| `render_tables` | 2 回打って同じ | JSON の `actual_lines` が表に出る。表だけに手で書いた値は残らない | セクションが無い |
 
 ## コマンド `ndf plan units`
 
@@ -476,7 +477,7 @@ contracts/
 - 単位のファイルの単位に、起動待ち・実行中・キューの待ちが無く、キューに残る PR も無い
 - 単位のファイルの単位が、`done`・失敗・先に要る単位の失敗で始められない、のどれかになっている
 
-単位のファイルの単位が失敗しても、この単位は始める。依存の指定が無いためである。ただしキューに残る PR がある間は始めない。その PR が後からマージされると、同じファイルを触っていた場合に競合するためである。この場合は手順 8 の `ci_pending` か `infra_wait` で終え、呼び手は別の作業へ進める。この保留を打ち直しで解くのは、その起動で `ndf ci merge` の打ち直しまで終えた後の状態が、次の表の「解く」に当たる場合だけである。読み取りがキュー外でも、同じ起動で再送するなら、まだ解かない。
+単位のファイルの単位が失敗しても、この単位は始める。依存の指定が無いためである。ただしキューに残る PR がある間は始めない。その PR が後からマージされると、同じファイルを触っていた場合に競合するためである。この場合は手順 8 の `ci_pending` か `infra_wait` で終え、呼び手は別の作業へ進める。打ち直した実行で、補った単位を始めないというこの扱いをやめるのは、`ndf ci merge` の再送まで終えた後の PR の状態が、次の表の「解く」に当たる場合だけである。読み取った状態がキュー外でも、同じ実行で再送するなら、補った単位はまだ始めない。
 
 | その起動の最後に分かった状態 | 保留 |
 | --- | --- |
@@ -537,7 +538,7 @@ contracts/
 
 - 変換の担当は、新しいテンプレート `implementation-plan-convert` を `ports.call_plan` で流す。今のテンプレート `implementation-plan` は push のステップを持つので使わない。差し込み `convert` を渡し、担当への指示は上の「テンプレート」の変換のときの指示になる。旧い表の「実際の行数」の値は、担当が `units[].actual_lines` へ移す
 - 旧い承認の表は、実装計画を `git show` で読んで `review_units_decide.lineup` に通す。読むコミットは `records.approved_head(v, "design")` の head である
-- 担当の作業場所は、push の URL から読んだスプリントブランチの先端から作る一時の作業場所（detached HEAD）である。手元のスプリントブランチからは作らない。手元が送り先より古いと、変換し直しても同じ古いコミットが起点になり、cherry-pick の競合を繰り返すためである。push の URL が複数あって先端が違えば、担当を呼ばずに `stopped`（`precondition`）にする。コミットは `refs/ndf/convert/<ステートマシンの ID>` で持ち、作業場所は消す。反映の前の照合と `mismatches` は、このコミットを読む
+- 担当の作業場所は、`units_sync.push_url` を通った URL から読んだスプリントブランチの先端から作る一時の作業場所（detached HEAD）である。通らなければ、取得も担当の起動もせずに `stopped`（`refused`）にする。期待するリポジトリは、ステートマシンの `repo` を解析した値である。手元のスプリントブランチからは作らない。手元が送り先より古いと、変換し直しても同じ古いコミットが起点になり、cherry-pick の競合を繰り返すためである。コミットは `refs/ndf/convert/<ステートマシンの ID>` で持ち、作業場所は消す。反映の前の照合と `mismatches` は、このコミットを読む
 - ref は、反映して push した後か、却下の回答を読んだ時点で消す
 - 照合が違えば、先に `design_record.reapproved_of` の記録を読む。`mismatches` が空なら有効で、下の「反映」へ進む
 - 有効な記録が無ければ、下の「再承認の資料」の内容を持つ `reapproval.md` を作業の保存先に書き、`design_record.converted` の記録を `report.design_target` に持つ `gate` の結果（選択肢は承認と却下）を返す
@@ -559,7 +560,7 @@ contracts/
 
 持っておいたコミットが無い打ち直し（反映済み）では、push するものが無いので、次の順を通らない。
 
-1. push の URL から、スプリントブランチの先端を読む（「送るコミットの確かめ」と同じ読み方）
+1. `units_sync.push_url` で URL を照合し、その URL からスプリントブランチの先端を読む（「送るコミットの確かめ」と同じ読み方）。以後の手順は同じ URL を使い、読み直さない
 2. 送るコミットを一時の作業場所で作る。持っておいたコミットの親がその先端なら、そのまま使う。違えば、先端へ cherry-pick する。競合すれば、持っておいたコミットを捨て、手順 1 の先端から一時の作業場所を作り直して変換し直す
 3. 送るコミットを読み元にして、変換が変えた範囲を確かめる。違反があれば、捨てて変換し直す
    - 実装計画で変えてよいのは、「レビューの単位」と「並列と直列」の 2 つのセクションだけである。この 2 つを除いた本文が、親のコミットと同じでなければ違反である
@@ -567,8 +568,8 @@ contracts/
 4. 同じコミットで、承認した内容を確かめる。次のどちらかに当たれば push せず、ref を送るコミットに置き換えて、再承認の `gate` を返す
    - 再承認の記録がある場合: 記録との `mismatches` に違いがあるか、実装計画の中身が記録の `head` と違う。`compare` の結果にはよらず確かめる。実装計画の全体を比べるのは、この push の前だけである
    - 再承認の記録が無い場合: 旧い表との照合 `compare` が違う
-5. `units_sync.destination_errors` と `units_sync.outgoing_errors` を通す。渡す記録は `design_record.converted` の値で、変えてよいファイルは、スプリントの課題の単位のファイルと実装計画である。`outgoing_errors` には手順 1 で読んだ先端を渡し、読み直さない。違えば push せず `stopped`（`refused`）
-6. `git push -- <remote> <送るコミットの SHA>:refs/heads/<スプリントブランチ>` を打つ。強制はしない。送るコミットの親は手順 1 の先端なので、その後に送り先が進めば、git が拒否する
+5. `units_sync.destination_errors` と `units_sync.outgoing_errors` を通す。`destination_errors` には手順 1 の URL を渡す。渡す記録は `design_record.converted` の値で、変えてよいファイルは、スプリントの課題の単位のファイルと実装計画である。`outgoing_errors` には手順 1 で読んだ先端を渡し、読み直さない。違えば push せず `stopped`（`refused`）
+6. `git push --no-follow-tags --recurse-submodules=no -- <手順 1 の URL> <送るコミットの SHA>:refs/heads/<スプリントブランチ>` を打つ。強制はしない。送るコミットの親は手順 1 の先端なので、その後に送り先が進めば、git が拒否する
 7. push が通ったら、スプリントの作業場所を `git merge --ff-only` でそのコミットへ進める
 
 | 失敗 | 扱い |
@@ -588,8 +589,9 @@ contracts/
 - 承認を待つ間に先端で実装計画か扱いが変わると、単位の分け方が旧い表と一致していても、push せずに再び問う
 - 実装計画の 2 つのセクションの外を変えた変換は push しない
 - 手元より送り先が進んで cherry-pick が競合すると、送り先の先端から変換し直す
-- 反映の 1 回の試行で、push の URL ごとの `git fetch` は 1 回である
+- 反映の 1 回の試行で、送り先の URL への `git fetch` は 1 回である
 - push が拒否された後は、手元のスプリントブランチが変わらず、打ち直しは新しい先端へ載せ直して反映する
+- push の URL が「送り先の確かめ」の拒否の例に当たれば、変換の担当の起動の前の取得も push も起きない
 - 手元だけのコミットは送らない。送り先の違いと、対象外のファイルを含む変換のコミットは push しない
 - ファイルを作った直後の中断（未コミット・未 push・未再承認）は、打ち直しで続きから進み、実装を始めない
 
@@ -601,32 +603,53 @@ contracts/
 
 | 関数 | 定義するファイル | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `destination_errors` | `units_sync.py` | 新設 | `(git, record, context, machine_repo: str) -> list[str]` | 送り先のリポジトリとブランチが、ゲートの記録とスプリントの状態に合わない点 |
-| `outgoing_errors` | 同上 | 新設 | `(git, tips: Sequence[str], head: str, allowed: Sequence[str]) -> list[str]` | 下の「送るコミットの確かめ」に合わない点。変換の反映も使う |
+| `github_target` | `adapters/git.py` | 新設 | `(url: str) -> Optional[GitHubTarget]` | URL の全体が 3 つの形に合えば `repo`（`<所有者>/<リポジトリ>`）と `secret`（認証情報を含むか）。合わなければ None |
+| `Git.push_urls` | 同上 | 新設 | `(remote: str) -> list[str]` | `git remote get-url --push --all` の行 |
+| `Git.rewrites_again` | 同上 | 新設 | `(url: str) -> bool` | 引数に渡した URL を git が別の値に読み替えうるか |
+| `push_url` | `units_sync.py` | 新設 | `(git, repo: str, url: Optional[str] = None) -> tuple[Optional[str], list[str]]` | 下の表の「送り先の URL」の条件。通れば URL を返す。`url` を渡せば読み直さずに同じ値を確かめる |
+| `destination_errors` | 同上 | 新設 | `(git, record, context, machine_repo: str, url: Optional[str] = None) -> tuple[Optional[str], list[str]]` | 照合した URL と、送り先のリポジトリとブランチがゲートの記録とスプリントの状態に合わない点 |
+| `outgoing_errors` | 同上 | 新設 | `(git, tip: str, head: str, allowed: Sequence[str]) -> list[str]` | 下の「送るコミットの確かめ」に合わない点。変換の反映も使う |
 | `sync` | 同上 | 新設 | `(st, machine_id, cwd, hub) -> dict` | 確かめてから取り込み、照合して push する |
 
 ### 送り先の確かめ
 
-`destination_errors` は次の 4 つを見る。1 つでも違えば、取り込みもコミットも push もしない。
+`destination_errors` は次の 4 つを見る。リポジトリの比較は大文字小文字を区別しない。1 つでも違えば、取り込みもコミットも push もしない。
 
 | 確かめる値 | 取り方 | 合う条件 |
 | --- | --- | --- |
-| 送り先のリポジトリ | `git remote get-url --push --all <remote>` の全行を `git.repo_of_url` に通す | 全行が、記録の `review.repo` と大文字小文字を区別せずに同じ |
-| スプリントのリポジトリ | ステートマシンの `repo`（作成の時点のリモートの URL）を `repo_of_url` に通す | 記録の `review.repo` と同じ |
+| 送り先の URL | `push_url`（下の手順） | 手順のすべてを通り、リポジトリが記録の `review.repo` と同じ |
+| スプリントのリポジトリ | ステートマシンの `repo`（作成の時点のリモートの URL）を `github_target` に通す。送らない値なので `secret` は問わない | 解析でき、記録の `review.repo` と同じ |
 | 送り先のブランチ | 記録の `sprint_branch`。突き合わせる相手は、文脈の `branch`（工程「作業場所の用意」が書く）と、文脈の `worktree` の今のブランチ | 3 つがすべて同じ。記録に `sprint_branch` が無ければ合わない |
 | 配布先として宣言したブランチでないこと | #4369 の `released_branches`（`.ndf/project.json` の `branch_strategy` の `branches.base`・`branches.production`・`channels[].ref`・`release.deliveries[].branch`） | 含まれない |
 
-- push は `git push -- <remote> <照合した HEAD の SHA>:refs/heads/<記録の sprint_branch>` で打ち、upstream の設定を使わない
-- リモート名は `Git.remote()` である
-- URL は認証の値を含みうるので、理由には `<所有者>/<リポジトリ>` だけを出す
-- push 先は取得先と別の URL を設定できるので、取得先の URL では確かめない。`git remote get-url --push --all` は、`pushurl` の全部を 1 行ずつ返す（git 2.53.0 で実行して確かめた）
+- push は `git push --no-follow-tags --recurse-submodules=no -- <照合した URL> <照合した HEAD の SHA>:refs/heads/<記録の sprint_branch>` で打つ。upstream の設定を使わない。2 つの指定は、手元の設定がタグやサブモジュールを一緒に送るのを止める
+- リモート名は `Git.remote()` である。使うのは URL を読む時だけで、`git fetch`・`git push` には渡さない
+- URL は認証の値を含みうるので、理由には `<所有者>/<リポジトリ>` と当たった条件だけを出す
+- push 先は取得先と別の URL を設定できるので、取得先の URL では確かめない
+
+`push_url` は次の順に確かめる。1 つでも当たれば、URL を使う通信をせずに返す。認証情報の確かめは、URL をコマンドの引数に渡すより前にある。
+
+1. `git remote get-url --push --all -- <remote>` が 1 行である（`url` を渡されたときは読まない）
+2. `github_target` が None でない。次の 3 つの正規表現の全体一致（`fullmatch`）で、方式とホスト名は大文字小文字を区別しない。所有者とリポジトリは `[A-Za-z0-9_.-]+`（`.`・`..` を除く）で、末尾の `.git` と `/` は 1 つずつ許す。クエリ・`#`・空白・`%`・余分なパスの要素があれば合わない
+   - `https://[<利用者の情報>@]github.com[:443]/<所有者>/<リポジトリ>`
+   - `ssh://git[:<パスワード>]@github.com[:22]/<所有者>/<リポジトリ>`
+   - `git@github.com:<所有者>/<リポジトリ>`
+3. `secret` が偽である。理由に、直し方（`git remote set-url --push` と credential helper）を書く
+4. `repo` が期待するリポジトリと同じである
+5. `rewrites_again` が偽である。`git config --null --get-regexp '^url\..*\.(insteadof|pushinsteadof)$'` の値のどれかが URL の先頭に一致するか（終了コード 1 は設定が無い）、`git remote` の一覧に URL と同じ名前があれば真
+
+git 2.53.0 で実行して確かめたことは次のとおりである。
+
+- `insteadOf` は連鎖せず 1 回だけ当たる。`get-url` の返す値を引数に渡すと、もう一度当たる
+- 引数の URL への push には、`pushurl` の有無によらず `pushInsteadOf` が当たる。取得には当たらないが、同じ URL で送るので両方の規則を見る
+- `remote.<URL>.url` があると、引数の URL はそのリモートとして読まれる
 
 ### 送るコミットの確かめ
 
 push は、手元の HEAD までのコミットをすべて公開する。そのため、送り先から読んだ先端と比べて、新しく送るコミットを限る。
 
-- 送り先の先端は、push の URL ごとに `git fetch --no-tags -- <URL> refs/heads/<記録の sprint_branch>` を打ち、`FETCH_HEAD` から読む。取得先の URL と remote-tracking ref は使わない。読めなければ `stopped`（`precondition`）
-- どの URL の先端についても、`git rev-list <先端>..<HEAD>` が空か 1 コミットである
+- 送り先の先端は、照合した URL に `git fetch --no-tags -- <URL> refs/heads/<記録の sprint_branch>` を打ち、`FETCH_HEAD` から読む。取得先の URL と remote-tracking ref は使わない。読めなければ `stopped`（`precondition`）
+- `git rev-list <先端>..<HEAD>` が空か 1 コミットである
 - 1 コミットある場合、そのコミットはマージのコミットでなく、変えたファイル（`git diff-tree`）がすべて呼び手の渡す対象のファイルである
 - `sync` の対象は取り込むファイルで、中身が記録の head と同じことも確かめる
 
@@ -639,16 +662,16 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 `sync` の手順は次のとおりである。取り込むファイルは、単位のファイルと実装計画と、番号の並びが一致する `-requirements.md`・`-design.md`・`-design-detail.md` である。
 
 1. `approved_of`。無ければ `stopped`
-2. `destination_errors`。1 件でもあれば `stopped`（`refused`）
+2. `destination_errors`。1 件でもあれば `stopped`（`refused`）。返った URL を、手順 3 以降の取得と push のすべてに使う
 3. `<work_root>/design-sync.json`（`{"record_head", "commit"}`）の `record_head` が記録の head と同じで、手元に `commit` があれば、送り先の先端を読む（上の「送るコミットの確かめ」の読み方）。ここで読んだ値を、手順 6 と 8 でも使う
-   - すべての URL の先端が `commit` を含めば `ok`
+   - 先端が `commit` を含めば `ok`
    - 手元の HEAD だけが含めば（push の失敗の後）、手順 8 へ進む
 4. 手元のスプリントブランチが記録の head を祖先に持てば、取り込むものは無いので、PR を読まずに `ok`。`ndf progress next` の経路は、設計 PR の head がスプリントブランチ自身なので、ここで終わる
 5. 記録の PR を読み、マージ済み・head が記録の head・base が記録の base を確かめる。base の正しい宛先は、通常は `pr_target("doc", <branch>)`、設計 PR の head がスプリントブランチ自身なら `pr_target("sprint")` である
 6. 作業場所を検査する。取り込むファイルに未コミットの変更があるか（`git status --porcelain --untracked-files=all -- <ファイル>` が空でない）、マージの途中（`MERGE_HEAD` がある）なら `stopped`（`precondition`）。ファイルを書き換えない。次に `merge-base` から両側の変更を調べる。スプリント側も変えていて中身が違うファイルがあれば `stopped`。送り先の先端を読み（手順 3 で読んでいればその値を使い）、手元の HEAD で「送るコミットの確かめ」を通す。手元だけの別のコミットがあれば、取り込みのコミットを作らずに止まる
 7. `git checkout <記録の head> -- <ファイル>` し、差があれば `git commit -- <ファイル>` でそのファイルだけをコミットする（ほかのステージ済みの変更は含めない）。差が無ければ（コミットの直後に中断した打ち直し）コミットしない。HEAD の SHA を `design-sync.json` に書く
 8. 照合する。HEAD の各ファイルの blob が記録の head の同じファイルと同じでなければ、push せずに `stopped`。手順 6 で使った先端で「送るコミットの確かめ」を通し、通らなければ push せずに `stopped`
-9. 照合した HEAD の SHA を push する。送り先の先端を読み直し、すべての URL の先端がその SHA を含めば `ok`。push が拒否されれば `precondition`。理由には、取り込みのコミットを送り先の先端の上へ載せ直して（`git rebase`）打ち直すと書く。マージのコミットを作ると「送るコミットの確かめ」を通らないためである
+9. 照合した HEAD の SHA を push する。同じ URL から先端を読み直し、その SHA を含めば `ok`。push が拒否されれば `precondition`。理由には、取り込みのコミットを送り先の先端の上へ載せ直して（`git rebase`）打ち直すと書く。マージのコミットを作ると「送るコミットの確かめ」を通らないためである
 
 ### 異常系の処理
 
@@ -666,7 +689,12 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 
 次のどれでもコミットと push が起きないことを、リモートの ref で確かめる。
 
-- 別のリポジトリの push 先（`pushurl` が 2 つのうち 1 つだけ違う場合を含む）
+- 別のリポジトリの push 先
+- 別ホストで所有者名とリポジトリ名が同じ push 先（`https://notgithub.com/o/r`・`https://github.com.example.com/o/r`・`https://example.com/github.com/o/r`・`git@notgithub.com:o/r`）
+- 解析できない形（`file://`・ローカルのパス・`http://`・ssh の別名）
+- 認証情報を含む URL（`https://<token>@github.com/o/r`）。理由の文にも git の引数にも token が現れないことも確かめる
+- push の URL が 2 つ以上（どちらも同じリポジトリでも拒否する）
+- `insteadOf` か `pushInsteadOf` がもう一度当たる設定と、URL と同じ名前のリモート
 - 別のブランチに切り替えた作業場所
 - 文脈の `branch` と作業場所がそろって、記録の `sprint_branch` と別のブランチ
 - 文脈に `branch` が無いか、記録に `sprint_branch` が無い
@@ -679,6 +707,9 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 - 取り込みと関係ないステージ済みの変更は、コミットに入らない
 - push が拒否された後の打ち直しは、競合にせず送り直し、リモートに届くまで `ok` にしない
 - 取得先と push 先の URL が違うリモートでは、push 先に届けば `ok` にする
+- `git fetch` と `git push` の引数は照合した URL で、リモート名でない
+
+テストのリモートの URL は `git@github.com:o/r.git` にし、環境変数 `GIT_SSH_COMMAND` の偽の ssh が手元の bare リポジトリで受ける。`insteadOf` で手元へ向けると、上の拒否に当たるためである。この形で push と取得ができることは、git 2.53.0 で実行して確かめた。URL の 3 つの形と拒否の例は、`github_target` の単体テスト（`tests/adapters/test_git.py`）でも縛る
 
 ## 実装のプランの確かめ（`progress/units_guard.py`）
 
@@ -764,6 +795,6 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 | `find`・`design_handlings` | `issue_docs.design_issues`、`inputs_decide.split_row`・`section_lines`、`collect.design_rows` | 3 つのファイルを読んだ | 使う。`design_rows` は触るファイルだけを読むので変えない |
 | `build`・`stale` | `gate.Target`・`merge_approval.MergeTarget` | `gate/asking.py` を読んだ | `Target` の値と比べる。単位と扱いは持たないので記録を足す |
 | `reset_drafts` | `run.review_again_drafts`・`stages.RESET` | `run.py` を読んだ | 同じイベントの形を使う。戻す範囲が違う |
-| `destination_errors` | `git.repo_of_url`・`Git.remote`、#4369 の `released_branches` | `adapters/git.py` を読み、`git remote get-url --push --all` を実行した | 使う。`remote_repo` は取得先の URL を読むので使えない |
+| `destination_errors`・`push_url`・`github_target` | `git.repo_of_url`・`Git.remote`・`Git.remote_url`、#4369 の `released_branches` | `adapters/git.py` を読み、git の URL の書き換えを実行した | `Git.remote` を使う。`repo_of_url` は部分一致なので使わず、全体を解析する読み手を足す。ほかの呼び手の `repo_of_url` は変えない |
 | `units_queue.read` | `GitHub.pulls` | `adapters/github.py` を読んだ | 読み替えを止める指定を足して使う |
 | `read_machines` | `store.read_machine` | `store.py` を読んだ | 1 件ずつの読み取りだけなので足す |
