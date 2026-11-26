@@ -610,7 +610,7 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `render_request` | `release/approval_decide.py` | 変更 | `render_request(material: str, head: str, material_sha256: str) -> str` | 行 `提示した資料: <SHA-256>` を足す |
-| `render_trail` | `release/approval_decide.py` | 変更 | `render_trail(answer: str, sha: str, by: str, material_sha256: Optional[str]) -> str` | 担い手が利用者のときだけ行 `回答した資料:` を足す |
+| `render_trail` | `release/approval_decide.py` | 変更 | `render_trail(answer: str, sha: str, by: str, material_sha256: Optional[str] = None) -> str` | 担い手が利用者で、資料のハッシュが渡されたときだけ行 `回答した資料:` を足す。ハッシュを必須にする検査はしない（3 引数の呼び出しは旧い形式と MVV 判定の証跡を作る）。新しい利用者の回答にハッシュを必須にするのは `trail.answer` である |
 | `parse_request` | `release/approval_decide.py` | 新設 | `parse_request(order: int, author: str, body: str) -> Optional[Presentation]` | 提示のコメントを、順・head・資料のハッシュ・行 `提示した資料:` の有無（`hashed`）として読む |
 | `parse` | `release/approval_decide.py` | 変更 | 今のまま | `Trail` に担い手と資料のハッシュを足して読む |
 | `judge` | `release/approval_decide.py` | 変更 | `judge(found: Sequence[Trail], presented: Sequence[Presentation], head: str) -> Judgment` | 設計書の表の「判定」の行のとおり、担い手で分けて判定する |
