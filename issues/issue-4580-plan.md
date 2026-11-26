@@ -57,14 +57,14 @@
 
 #### Task 4: 閉じる手順の読み取り（権限を照会できない書き手で止まる）
 
-- **対象ファイル:** `plugins/ndf/src/ndf/adapters/github.py`（`Authored.comment_id`・`PermissionUnknown`・`permission_strict`・`trusts_strict`）、`plugins/ndf/src/ndf/domains/release/record_decide.py`（`Record` の項目・`parse_record`・`Correction`・`render_correction`・`parse_correction`・`authoritative_targets`・`representative`・`decisive_row`・`to_test`・`complete_of`）、`plugins/ndf/src/ndf/domains/release/record.py`（`Selection`・`_candidates`・`read_release`・`pr_body_only`）、`plugins/ndf/src/ndf/domains/release/cli.py`（`cmd_records`）、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`（`records` の引数）、`plugins/ndf/tests/adapters/test_github.py`、`test_release_record.py`
-- **変更内容:** 設計書の「閉じる手順の読み取り」の手順 1〜6 と、`--version`・`--release`・`--unit`・`--bodies`・`--issues`・`--pr-body-only`
+- **対象ファイル:** `plugins/ndf/src/ndf/adapters/github.py`（`Authored.comment_id`・`PermissionUnknown`・`permission_strict`・`trusts_strict`）、`plugins/ndf/src/ndf/domains/release/record_decide.py`（`Record` の項目・`parse_record`・`Correction`・`render_correction`・`parse_correction`・`value_pairs`・`authoritative_targets`・`representative`・`decisive_row`・`to_test`・`complete_of`）、`plugins/ndf/src/ndf/domains/release/record.py`（`Selection`・`_candidates`・`read_release`・`pr_body_only`）、`plugins/ndf/src/ndf/domains/release/cli.py`（`cmd_records`）、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`（`records` の引数）、`plugins/ndf/tests/adapters/test_github.py`、`test_release_record.py`
+- **変更内容:** 設計書の「閉じる手順の読み取り」の手順 1〜6 と、`--version`・`--release`・`--unit`・`--bodies`・`--issues`・`--pr-body-only`。値とコミットの組（`value_pairs`）は読み取りの手順 3 が最初に使うので、関数とそのテストをこのタスクに置き、Task 5 の確かめ 6（`value_commit_conflict`）はこれを呼ぶ
 - **満たす受け入れ条件:** 9（読む側）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 #### Task 5: バージョンの無いリリース記録の確かめ（純粋な判定）
 
-- **対象ファイル:** `plugins/ndf/src/ndf/domains/release/record_decide.py`（`Push`・`value_matches`・`production_deliveries`・`glob_matches`・`targets_of`・`push_of`・`value_commit_conflict`・`value_commit`・`has_unversioned`・`confirm`・`json_pointer`）、`test_release_record.py`
+- **対象ファイル:** `plugins/ndf/src/ndf/domains/release/record_decide.py`（`Push`・`value_matches`・`production_deliveries`・`glob_matches`・`targets_of`・`push_of`・`value_commit_conflict`・`has_unversioned`・`confirm`・`json_pointer`）、`test_release_record.py`
 - **変更内容:** 確かめ 2・3・5・6・8 の判定と、`push` の決め方の手順 2。GitHub・git・HTTP を呼ばない
 - **満たす受け入れ条件:** 2・9（書く側の判定）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
