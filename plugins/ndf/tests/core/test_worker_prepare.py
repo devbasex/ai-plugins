@@ -522,6 +522,7 @@ def test_write_replaces_a_file_only_in_the_result_dir_worker_run_opened(tmp_path
     material.write_text("前の資料\n", encoding="utf-8")
     st = (state if same else tmp_path).stat()
     monkeypatch.setenv(identity.WORKER_RESULT_DIR_ENV, f"{st.st_dev}:{st.st_ino}:{state}")
+    monkeypatch.setenv(worker_append.RUN_ENV, RUN)
     monkeypatch.setattr("sys.stdin", io.StringIO("直した資料\n"))
     code, out = _run(capsys, "write", "--path", str(material))
     if same:
@@ -531,9 +532,13 @@ def test_write_replaces_a_file_only_in_the_result_dir_worker_run_opened(tmp_path
         assert material.read_text(encoding="utf-8") == "前の資料\n"
 
 
+RUN = "0" * 32
+
+
 def _hold(monkeypatch, state: Path) -> None:
     st = state.stat()
     monkeypatch.setenv(identity.WORKER_RESULT_DIR_ENV, f"{st.st_dev}:{st.st_ino}:{state}")
+    monkeypatch.setenv(worker_append.RUN_ENV, RUN)
 
 
 def test_write_refuses_a_subdir_that_is_a_link(tmp_path, capsys, monkeypatch):
@@ -650,8 +655,10 @@ def test_write_refuses_the_same_op_with_another_body(tmp_path, capsys, monkeypat
 @contextlib.contextmanager
 def _another_write(path: Path):
     """別の書き込みが `path` の書き先ごとのロックを排他で持つ。"""
-    with worker_append.area(worker_append.write_target(str(path))) as private:
-        fd = worker_paths.open_lock(private, worker_append.WRITE_LOCK_FILE)
+    to = worker_append.write_target(str(path))
+    key = worker_append._op_digest(f"{to.expected[0]}:{to.expected[1]}:{'/'.join(to.parts)}")
+    with worker_paths.open_or_create(identity.load().state_dir / worker_append.AREA_DIR / "locks") as locks:
+        fd = worker_paths.open_lock(locks, f"{key}.lock")
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             yield
@@ -687,32 +694,56 @@ def test_write_reads_and_publishes_under_the_lock_of_the_target(tmp_path, capsys
     assert other.read_text(encoding="utf-8") == "1 行目\n2 行目\n"
 
 
+def _runs() -> Path:
+    return identity.load().state_dir / worker_append.AREA_DIR / "runs"
+
+
 def test_write_keeps_the_records_out_of_the_result_dir(tmp_path, capsys, monkeypatch):
-    # PR 4591 の r3-3: 記録は利用者ごとの状態の保存先に置き、共有の保存先のほかの利用者が消せない。起動の終わりに消す
+    # PR 4591 の r3-3: 記録は利用者ごとの状態の保存先に置き、共有の保存先のほかの利用者が消せない
     (material,) = _state_with(tmp_path, monkeypatch, "material.md")
     _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
     assert sorted(p.name for p in material.parent.iterdir()) == ["material.md"]
-    target = worker_append.write_target(str(material))
-    with worker_append.area(target) as private:
-        assert any(p.name.startswith("op-") for p in private.path.iterdir())
+    assert list((_runs() / RUN).rglob(worker_append.OPS_FILE))
 
 
-def test_write_keeps_the_records_while_another_run_uses_the_result_dir(tmp_path, capsys, monkeypatch):
-    # PR 4591 の r4-2: 同じ保存先を使う別の起動が動いている間は、先に終えた起動が記録とロックを消さない。最後に終えた起動が消す
+def test_run_records_removes_only_its_own_records(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r4-2・r5-2・r5-4: 記録は起動ごとの保存先に置き、終えた起動は自分の保存先だけを消す。
+    # 同じ保存先を使う別の起動の記録は残り、新しい起動は前の起動の記録を読まない
     (material,) = _state_with(tmp_path, monkeypatch, "material.md")
-    target = worker_append.write_target(str(material))
-    held = identity.load().state_dir / worker_append.AREA_DIR / f"{target.expected[0]}-{target.expected[1]}"
-    with worker_append.records_kept(target.expected):
-        with worker_append.records_kept(target.expected):
-            _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
-        code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
-        assert code == 0 and "済んでいた" in out["summary"]
-    assert material.read_text(encoding="utf-8") == "1 行目\n2 行目\n" and not held.exists()
+    _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+    with worker_append.run_records():
+        run = os.environ[worker_append.RUN_ENV]
+        _write(capsys, monkeypatch, material, "3 行目\n", "--append", "--op", "a1")
+        assert (_runs() / run).exists()
+    assert not (_runs() / run).exists() and (_runs() / RUN).exists()
+    code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+    assert code == 0 and "済んでいた" in out["summary"]
+    assert material.read_text(encoding="utf-8") == "1 行目\n2 行目\n3 行目\n"
 
 
-def test_write_stops_when_it_cannot_tell_whether_an_op_was_published(tmp_path, capsys, monkeypatch):
-    # PR 4591 の r4-3: 公開の前に止まった操作の後に別の書き込みが本文を変えたら、済んだと返さずに止める
+def test_write_needs_the_run_of_worker_run(tmp_path, capsys, monkeypatch):
     (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    monkeypatch.delenv(worker_append.RUN_ENV)
+    code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
+    assert material.read_text(encoding="utf-8") == "1 行目\n"
+
+
+def _published_then_lost(monkeypatch):
+    """本文の公開の直後に止まった（応答を受け取れなかった）書き込みを真似る。元の `write_file` を返す。"""
+    real = worker_paths.write_file
+
+    def lose_reply(wd, name, text, **kw):
+        real(wd, name, text, **kw)
+        if name == "material.md":
+            raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(worker_paths, "write_file", lose_reply)
+    return real
+
+
+def _fail_body(monkeypatch):
+    """本文の公開の前に止まった書き込みを真似る。元の `write_file` を返す。"""
     real = worker_paths.write_file
 
     def fail_body(wd, name, text, **kw):
@@ -721,21 +752,55 @@ def test_write_stops_when_it_cannot_tell_whether_an_op_was_published(tmp_path, c
         return real(wd, name, text, **kw)
 
     monkeypatch.setattr(worker_paths, "write_file", fail_body)
+    return real
+
+
+def test_write_does_not_redo_an_op_a_later_write_undid(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r4-4・r5-5: 公開の直後に止まった操作も、後の書き込みで本文が元に戻った後の打ち直しで組み直さない
+    (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    real = _published_then_lost(monkeypatch)
+    _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+    monkeypatch.setattr(worker_paths, "write_file", real)
+    _write(capsys, monkeypatch, material, "1 行目\n")
+    code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+    assert code == 0 and "済んでいた" in out["summary"] and material.read_text(encoding="utf-8") == "1 行目\n"
+
+
+def test_write_creates_a_file_an_empty_append_stopped_before(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r5-6: 無いファイルへの空の追記が公開の前に止まったら、打ち直すと空のファイルを作る
+    state = tmp_path / "result"
+    state.mkdir()
+    _hold(monkeypatch, state)
+    material = state / "material.md"
+    real = _fail_body(monkeypatch)
+    _write(capsys, monkeypatch, material, "", "--append", "--op", "a1")
+    monkeypatch.setattr(worker_paths, "write_file", real)
+    code, out = _write(capsys, monkeypatch, material, "", "--append", "--op", "a1")
+    assert code == 0 and "済んでいた" not in out["summary"] and material.read_text(encoding="utf-8") == ""
+
+
+def test_write_redoes_an_op_stopped_before_others_wrote(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r4-3: 公開の前に止まった操作は、後に別の追記が済んでも、打ち直すと今の本文へ 1 回だけ足す
+    (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    real = _fail_body(monkeypatch)
     _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
     monkeypatch.setattr(worker_paths, "write_file", real)
     assert _write(capsys, monkeypatch, material, "3 行目\n", "--append", "--op", "a2")[0] == 0
     code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
-    assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
-    assert material.read_text(encoding="utf-8") == "1 行目\n3 行目\n"
+    assert code == 0 and material.read_text(encoding="utf-8") == "1 行目\n3 行目\n2 行目\n"
 
 
-def test_write_does_not_redo_an_op_a_later_write_undid(tmp_path, capsys, monkeypatch):
-    # PR 4591 の r4-4: 公開済みの操作は、後の書き込みで本文が元に戻っても、打ち直しで組み直さない
+def test_write_stops_when_it_cannot_tell_whether_an_op_was_published(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r5-7: 公開の直後に止まった操作の後に、ndf worker write の外でファイルが変わったら、済んだと返さずに止める
     (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    real = _published_then_lost(monkeypatch)
     _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
-    _write(capsys, monkeypatch, material, "1 行目\n")
+    monkeypatch.setattr(worker_paths, "write_file", real)
+    material.write_text("手で直した\n", encoding="utf-8")
+    assert _write(capsys, monkeypatch, material, "3 行目\n", "--append", "--op", "a2")[0] == 0
     code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
-    assert code == 0 and "済んでいた" in out["summary"] and material.read_text(encoding="utf-8") == "1 行目\n"
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
+    assert material.read_text(encoding="utf-8") == "手で直した\n3 行目\n"
 
 
 def test_write_redoes_an_op_stopped_before_the_body_was_published(tmp_path, capsys, monkeypatch):

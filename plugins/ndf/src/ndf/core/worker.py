@@ -712,7 +712,7 @@ def _cmd_run(a: argparse.Namespace) -> int:
             a.timeout if a.timeout is not None else work_timeout(),
             owned=a.result_dir_id is not None,
         )
-        with worker_append.records_kept(worker_paths.dir_id(wd)):  # `ndf worker write` の操作の記録は、同じ保存先の起動の間だけ使う
+        with worker_append.run_records():  # `ndf worker write` の操作の記録は、この起動の間だけ使う
             done, report = _deliver(handoff, system_prompt(handoff.kind, handoff.state_dir, root / SKILLS_DIR, handoff.sources), root, wd)
     metrics: dict[str, Any] = {"attempts": done.attempts}
     if handoff.kind in RECORD_KINDS and done.cause is None:

@@ -463,7 +463,7 @@
 | `ndf worker plan-edits` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意） |
 | `ndf worker prepare` | `--dir`（string・必須）<br>`--name`（string・必須） |
 | `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--timeout`（number・任意）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意） |
-| `ndf worker write` | `--path`（string・必須）: 書くファイル。本文は標準入力に渡し、既定では全文を置き換える<br>`--append`（boolean・任意）: 本文を末尾へ追記する。--op が必須で、--edit と同時に指定できない<br>`--edit`（boolean・任意）: 本文の [{"old": ..., "new": ...}] で一部を置き換える。--op が必須で、--append と同時に指定できない<br>`--op`（string・任意）: --append・--edit の操作ごとに新しくする識別子（同じ識別子で打ち直しても重ねて書かない） |
+| `ndf worker write` | `--path`（string・必須）: `ndf worker run` で起動された worker の中で使う。その起動に渡された結果の保存先の配下のファイルを指定する。本文は標準入力に渡し、既定では全文を置き換える<br>`--append`（boolean・任意）: 本文を末尾へ追記する。--op が必須で、--edit と同時に指定できない<br>`--edit`（boolean・任意）: 標準入力で、`old` と `new` の文字列を持つオブジェクトの空でない JSON 配列を渡す。配列の順に置き換え、各 `old` はその時点の本文にちょうど 1 か所ある空でない文字列にする。--op が必須で、--append と同時に指定できない<br>`--op`（string・任意）: --append・--edit の操作ごとに新しくする識別子（同じ識別子で打ち直しても重ねて書かない） |
 
 結果の `metrics`: `attempts`（integer）・`attention`（integer）・`edits`（integer）・`expectation_search`（object か null）・`paths`（object）・`report`（string）。`items` の要素: `action`（string）・`at`（—）・`backup`（string）・`diff`（string か null）・`kind`（string）・`path`（string）・`plan`（string か null）・`reason`（string か null）・`result_file`（string）・`session`（string か null）・`sha`（string）・`state`（string）・`subject`（string）・`text`（—）・`words`（array of string）
 

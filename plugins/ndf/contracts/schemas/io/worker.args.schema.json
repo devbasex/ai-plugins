@@ -229,7 +229,7 @@
         },
         "--path": {
           "type": "string",
-          "description": "書くファイル。本文は標準入力に渡し、既定では全文を置き換える"
+          "description": "`ndf worker run` で起動された worker の中で使う。その起動に渡された結果の保存先の配下のファイルを指定する。本文は標準入力に渡し、既定では全文を置き換える"
         },
         "--append": {
           "type": "boolean",
@@ -237,7 +237,7 @@
         },
         "--edit": {
           "type": "boolean",
-          "description": "本文の [{\"old\": ..., \"new\": ...}] で一部を置き換える。--op が必須で、--append と同時に指定できない"
+          "description": "標準入力で、`old` と `new` の文字列を持つオブジェクトの空でない JSON 配列を渡す。配列の順に置き換え、各 `old` はその時点の本文にちょうど 1 か所ある空でない文字列にする。--op が必須で、--append と同時に指定できない"
         },
         "--op": {
           "type": "string",

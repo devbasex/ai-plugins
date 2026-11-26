@@ -17,19 +17,29 @@
   保存先やその親の名前を差し替えられても、起動時に確かめた保存先の外へ書かない
 - 既定は全文の置き換え。`append` は末尾へ足し、`edit` は `{"old": ..., "new": ...}` の配列で 1 か所ずつ置き換える。
   一部の直しに全文を出し直させない（MVV の Value 2。出力の token は利用者の費用である）
-- 済んだ操作の記録とロックは、利用者ごとの状態の保存先の下の、書き先ごとのディレクトリ
-  （`area`。`worker-write/<保存先の st_dev>-<st_ino>/<書き先の要約>`）に置く。共有の保存先に置くと、名前を変えられる
-  ほかの利用者が記録を消して打ち直しを重ねさせられ、1 つのロックを全部の書き込みで分け合うと別のレーンの書き込みまで待つ
-- 読み取りから公開までを書き先ごとのロックで直列にする（並べて打った書き込みどうしで同じ旧い本文から組んで、先の変更を消さない）
-- `append`・`edit` は操作の識別子（`op`）を持つ。操作ごとに 1 つの記録（`op-<識別子の要約>.json`）を作るので、済んだかは
-  名前を 1 つ引いて分かり、新しい操作は自分の記録だけを書く。記録は入力の要約と、組む前・組んだ後の本文の要約と、公開の
-  状態（`state`）を持つ。本文を公開する前に「公開前」（`pending`）で書き、公開した後に「公開済み」（`done`）へ書き換える
-- 打ち直しでは、公開済みなら本文を見ずに済んだと返す（後の書き込みで本文が組む前と同じに戻っても、取り消された操作を
-  組み直さない）。公開前なら、本文が組んだ後と同じなら公開済みへ書き換えて済んだと返し、組む前と同じなら組み直して書く。
-  どちらでもなければ、公開したかを本文から決められないので書かずに止める（MVV の Value 3・13。重ねず、確かめずに済んだと
+- 読み取りから公開までを、書き先ごとのロック（`_target_lock`。`worker-write/locks/<書き先の要約>.lock`）で直列にする。
+  並べて打った書き込みどうしが同じ旧い本文から組んで、先の変更を消さないため。ロックは利用者ごとの状態の保存先に置く
+  （共有の保存先に置くと、名前を変えられるほかの利用者が消せる）。ロックの名前は消さない。消すと、消す前に開いた書き込みと
+  後に作った書き込みが別の inode でロックを取り、直列にならないためである（書き先ごとに空のファイルが 1 つ残る）
+- `append`・`edit` は操作の識別子（`op`）を持つ。済んだ操作の記録は起動ごとの保存先（`worker-write/runs/<起動の識別子>/`）
+  の、書き先ごとの 1 つのファイル（`OPS_FILE`）に置く。起動の識別子は `ndf worker run` が起動ごとに作って子へ渡し
+  （`RUN_ENV`）、終えるときにその保存先だけを消す（`run_records`）。同じ保存先を使う別の起動の記録は消さず、強制終了した
+  起動の記録を新しい起動は読まない（強制終了した起動の保存先は残る）
+- 記録のファイルは、済んだ操作（`done`）、公開したかを決められなかった操作（`unknown`）、公開の前の 1 つの操作
+  （`pending`。組む前と組んだ後の書き先の状態の要約を持つ）を持つ。状態の要約は、ファイルが無いことと空のファイルとを
+  分ける（`_target_state`）
+- 書き込みはどれも、自分の変更の前に、残っている `pending` を今の書き先の状態で確定する（`_settle_pending`）。組んだ後と同じなら
+  公開した（`done`）、組む前と同じなら公開していない（記録から外し、打ち直すと書く）、どちらでもなければ `unknown` にする。
+  ロックで直列にしているので、`pending` の後に書き先を変えられるのは確定を通らない手（Tool やほかのコマンド）だけである。
+  後の書き込みが本文を組む前に戻しても、その書き込みが先に確定しているので、打ち直しで取り消された操作を組み直さない
+  記録は起動ごとなので、同じ書き先へ別の起動が書いても、この起動の `pending` は確定されない。別の起動が書き先を変えれば、
+  この起動の打ち直しは `unknown` で止まる。ただし、別の起動が書き先をちょうど組む前の状態へ戻したときだけは、組み直す
+- 打ち直しは、`done` なら書かずに済んだと返し、`unknown` なら書かずに止める（MVV の Value 3・13。重ねず、確かめずに済んだと
   返さない）。同じ識別子で入力が違えば拒む
-- 記録とロックは、同じ保存先を使う `ndf worker run` のどれかが動いている間は残し、最後に終えた起動が消す（`records_kept`）。
-  起動ごとに、保存先ごとのディレクトリの起動のロック（`RUN_LOCK_FILE`）を共有で持ち、終えるときに排他へ替えられた起動だけが消す
+- 費用: 追記・一部の置き換えの成功 1 回あたり、記録の公開が 1 回と本文の公開が 1 回で、ロックはその 2 回の間だけ持つ。
+  公開の後に `done` を書く方式は記録の公開が 2 回になる。本文の一時ファイルの名前を記録して公開を名前の有無で見分ける方式は
+  記録の公開が 1 回で済むが、`worker_paths.write_file` の一時ファイルを外へ出す必要がある。記録のファイルは起動の間の、
+  その書き先の操作の数だけ大きくなる（1 件はおよそ 140 バイト）
 """
 
 from __future__ import annotations
@@ -41,6 +51,7 @@ import functools
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import sys
 from collections.abc import Iterator
@@ -59,12 +70,16 @@ MODES = {"overwrite": "全文の置き換え", "append": "末尾への追記", "
 OP_MODES = frozenset({"append", "edit"})
 # 記録とロックを置く、利用者ごとの状態の保存先の下のディレクトリ
 AREA_DIR = "worker-write"
-# 書き先ごとのロックの名前
-WRITE_LOCK_FILE = "worker-write.lock"
-# 保存先ごとのディレクトリの、動いている `ndf worker run` が共有で持つロックの名前
-RUN_LOCK_FILE = "worker-run.lock"
-# 操作の記録の公開の状態: 本文を公開する前・公開した後
-PENDING, DONE = "pending", "done"
+# 起動の識別子のバイト数
+RUN_TOKEN_BYTES = 16
+# `ndf worker run` が起動ごとに作り、子の `ndf worker write` へ渡す起動の識別子の環境変数（16 バイトの 16 進）
+RUN_ENV = "NDF_WORKER_WRITE_RUN"
+# 書き先ごとの、済んだ操作の記録のファイルの名前
+OPS_FILE = "ops.json"
+# 書き先の状態の要約で、ファイルが無いことを表す値（sha256 の 16 進と重ならない）
+ABSENT = "no-file"
+# 公開の前の操作の記録が持つ値
+PENDING_KEYS = ("op", "digest", "before", "after")
 
 
 class WorkerError(Exception):
@@ -133,13 +148,19 @@ def add_write(sub: Any, tool: str) -> None:
         description=WRITE_HELP,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    wr.add_argument("--path", required=True, help="書くファイル。本文は標準入力に渡し、既定では全文を置き換える")
+    wr.add_argument(
+        "--path",
+        required=True,
+        help="`ndf worker run` で起動された worker の中で使う。その起動に渡された結果の保存先の配下のファイルを指定する。"
+        "本文は標準入力に渡し、既定では全文を置き換える",
+    )
     how = wr.add_mutually_exclusive_group()
     how.add_argument("--append", action="store_true", help="本文を末尾へ追記する。--op が必須で、--edit と同時に指定できない")
     how.add_argument(
         "--edit",
         action="store_true",
-        help='本文の [{"old": ..., "new": ...}] で一部を置き換える。--op が必須で、--append と同時に指定できない',
+        help="標準入力で、`old` と `new` の文字列を持つオブジェクトの空でない JSON 配列を渡す。配列の順に置き換え、各 `old` は"
+        "その時点の本文にちょうど 1 か所ある空でない文字列にする。--op が必須で、--append と同時に指定できない",
     )
     wr.add_argument("--op", help="--append・--edit の操作ごとに新しくする識別子（同じ識別子で打ち直しても重ねて書かない）")
     wr.set_defaults(fn=functools.partial(_cmd_write, tool=tool))
@@ -196,147 +217,140 @@ def write_target(raw: str) -> Target:
 def write(to: Target, body: str, mode: str, op: Optional[str]) -> bool:
     """`body` を書き方 `mode` で書く。同じ操作が済んでいれば書かずに偽、書いたら真。
 
-    `append`・`edit` に `op` が無い・同じ `op` で入力が違うなら `WorkerError`（invalid）。
+    `append`・`edit` に `op` が無い・同じ `op` で入力が違うなら `WorkerError`（invalid）。公開したかを決められなかった
+    操作の打ち直しと、起動の識別子が無い（`ndf worker run` の外）呼び出しは `WorkerError`（precondition）。
     """
     if mode in OP_MODES and not op:
         raise WorkerError("invalid", f"--{mode} には操作の識別子 --op を渡す（打ち直しても重ねて書かないため）")
     name = to.parts[-1]
-    with _opened(to) as wd, area(to) as private, _held(private, WRITE_LOCK_FILE, to.path, "書き込み"):
+    key = _op_digest(f"{to.expected[0]}:{to.expected[1]}:{'/'.join(to.parts)}")
+    with _opened(to) as wd, _target_lock(key, to.path), _run_area(key) as private:
+        current = worker_paths.read_file(wd, name)
+        ops = _load_ops(private, to.path)
+        settled = _settle_pending(ops, _target_state(current))
         if mode not in OP_MODES:
+            if settled:
+                _save_ops(private, ops)
             worker_paths.write_file(wd, name, body)
             return True
-        current = worker_paths.read_file(wd, name)
-        text = "" if current is None else current
-        record = f"op-{_op_digest(str(op))}.json"
-        seen = worker_paths.read_file(private, record, owned=True)
-        digest = _op_digest(f"{mode}\0{body}")
-        if seen is not None and not _redo(seen, digest, text, op, to.path):
-            row = json.loads(seen)
-            if row["state"] != DONE:  # 公開した後に止まった。公開済みへ書き換え、後に本文が戻っても組み直さない
-                _mark(private, record, row | {"state": DONE})
+        op_key, digest = _op_digest(str(op)), _op_digest(f"{mode}\0{body}")
+        if _op_done(ops, op_key, digest, op, to.path):
+            if settled:
+                _save_ops(private, ops)
             return False
-        changed = _composed(text, current is None, body, mode, to.path)
-        row = {"op": op, "digest": digest, "before": _op_digest(text), "after": _op_digest(changed), "state": PENDING}
-        _mark(private, record, row)
+        changed = _composed("" if current is None else current, current is None, body, mode, to.path)
+        ops["pending"] = {"op": op_key, "digest": digest, "before": _target_state(current), "after": _target_state(changed)}
+        _save_ops(private, ops)
         worker_paths.write_file(wd, name, changed)
-        _mark(private, record, row | {"state": DONE})
     return True
 
 
-def _mark(private: worker_paths.WorkDir, record: str, row: dict[str, Any]) -> None:
-    worker_paths.write_file(private, record, json.dumps(row, ensure_ascii=False), private=True)
+def _target_state(text: Optional[str]) -> str:
+    """書き先の状態の要約。ファイルが無ければ `ABSENT`、あれば本文の sha256（空のファイルと無いファイルを分ける）。"""
+    return ABSENT if text is None else _op_digest(text)
+
+
+def _settle_pending(ops: dict[str, Any], now: str) -> bool:
+    """残っている `pending` を今の書き先の状態 `now` で確定し、記録を変えたら真。
+
+    組んだ後と同じなら `done`、組む前と同じなら外す（公開していないので打ち直しで書く）、どちらでもなければ `unknown`。
+    """
+    pending = ops.pop("pending", None)
+    if pending is None:
+        return False
+    if now == pending["after"]:
+        ops["done"][pending["op"]] = pending["digest"]
+    elif now != pending["before"]:
+        ops["unknown"][pending["op"]] = pending["digest"]
+    return True
+
+
+def _op_done(ops: dict[str, Any], op_key: str, digest: str, op: Optional[str], path: Path) -> bool:
+    """操作が済んでいれば真、記録に無ければ偽。入力が違えば invalid、公開したかを決められなかった操作なら precondition。"""
+    for bucket in ("done", "unknown"):
+        if op_key not in ops[bucket]:
+            continue
+        if ops[bucket][op_key] != digest:
+            raise WorkerError("invalid", f"操作 {op!r} は {path} へ別の入力で打たれている（新しい操作には別の --op を渡す）")
+        if bucket == "done":
+            return True
+        raise WorkerError(
+            "precondition",
+            f"操作 {op!r} を {path} へ公開したかを決められない（公開の前か直後に止まり、その後に ndf worker write の外でファイルが"
+            "変わった）。ファイルを読んで変更が載っていないと確かめたときだけ、別の --op で打ち直す",
+        )
+    return False
+
+
+def _load_ops(private: worker_paths.WorkDir, path: Path) -> dict[str, Any]:
+    """書き先の記録を読む。無ければ空。形の違う記録は、済んだかを決められないので `WorkerError`（invalid）で止める。"""
+    raw = worker_paths.read_file(private, OPS_FILE, owned=True)
+    if raw is None:
+        return {"done": {}, "unknown": {}}
+    try:
+        ops = json.loads(raw)
+    except json.JSONDecodeError:
+        ops = None
+    pending = ops.get("pending") if isinstance(ops, dict) else None
+    if not (
+        isinstance(ops, dict)
+        and isinstance(ops.get("done"), dict)
+        and isinstance(ops.get("unknown"), dict)
+        and (pending is None or (isinstance(pending, dict) and all(isinstance(pending.get(k), str) for k in PENDING_KEYS)))
+    ):
+        raise WorkerError("invalid", f"{path} への操作の記録を読めない")
+    return ops
+
+
+def _save_ops(private: worker_paths.WorkDir, ops: dict[str, Any]) -> None:
+    worker_paths.write_file(private, OPS_FILE, json.dumps(ops, ensure_ascii=False), private=True)
+
+
+def _area_root() -> Path:
+    return identity.load().state_dir / AREA_DIR
 
 
 @contextlib.contextmanager
-def area(to: Target) -> Iterator[worker_paths.WorkDir]:
-    """書き先の記録とロックを置く、利用者ごとの状態の保存先の下のディレクトリを開く（無ければ作る）。
+def _target_lock(key: str, target: Path) -> Iterator[None]:
+    """書き先 `key` のロックを排他で持つ（`_held`）。ロックの保存先がほかの利用者に変えられるなら `EntryUnsafe`。"""
+    with worker_paths.open_or_create(_area_root() / "locks") as locks:
+        worker_paths.check_unshared(locks)
+        with _held(locks, f"{key}.lock", target, "書き込み"):
+            yield
 
-    ほかの利用者が名前を作る・差し替えることのできるディレクトリなら `EntryUnsafe`（`shared`。`check_unshared`）。
-    """
-    key = _op_digest(f"{to.expected[0]}:{to.expected[1]}:{'/'.join(to.parts)}")
-    with worker_paths.open_or_create(_held_area(to.expected) / key) as wd:
+
+@contextlib.contextmanager
+def _run_area(key: str) -> Iterator[worker_paths.WorkDir]:
+    """この起動の、書き先 `key` の記録の保存先を開く（無ければ作る）。起動の識別子が無ければ `WorkerError`（precondition）。"""
+    run = os.environ.get(RUN_ENV, "")
+    if len(run) != RUN_TOKEN_BYTES * 2 or any(c not in "0123456789abcdef" for c in run):
+        raise WorkerError("precondition", "ndf worker run の起動の識別子が無い（ndf worker run が起動した worker の中でだけ書ける）")
+    with worker_paths.open_or_create(_area_root() / "runs" / run / key) as wd:
         worker_paths.check_unshared(wd)
         yield wd
 
 
 @contextlib.contextmanager
-def records_kept(held: tuple[int, int]) -> Iterator[None]:
-    """`ndf worker run` の間、保存先 `held`（`(st_dev, st_ino)`）の書き込みの記録とロックを残し、最後に終えた起動が消す。
+def run_records() -> Iterator[None]:
+    """`ndf worker run` の間、子へ起動の識別子（`RUN_ENV`）を渡し、終えたらこの起動の記録の保存先だけを消す。
 
-    同じ保存先を、別の結果ファイルを指定した起動が並んで使うことがある。先に終えた起動が消すと、動いている worker の打ち直しが
-    記録を失って本文を重ねて書く。使用中のロックの名前が消えると、次の書き込みが別の inode でロックを取り、直列にならない。
-    そこで起動ごとに起動のロックを共有で持ち、終えるときに排他へ替えられた（ほかに動いている起動が無い）ときだけ、排他を
-    持ったまま消す。消している間に始めた起動は、共有を取れた後にロックの名前がまだ同じ inode を指すかを確かめ、消されて
-    いれば作り直して取り直す。
+    保存先を起動ごとに分けるので、同じ保存先を使う別の起動の記録を消さず、強制終了した起動の記録を後の起動が読まない。
     """
-    root = _held_area(held)
-    try:
-        fd = _join(root)
-    except worker_paths.EntryError as exc:
-        raise WorkerError("precondition", f"書き込みの記録の保存先 {root} を使えない: {exc}") from None
-    except OSError as exc:  # 利用者の環境: 作れない・開けない状態の保存先は、worker を起動する前に止める
-        raise WorkerError("precondition", f"書き込みの記録の保存先 {root} を使えない: {exc.strerror or exc}") from None
-    except durable_locks.StoreInUse as exc:
-        raise WorkerError(exc.kind, f"書き込みの記録の保存先 {root} を使えない: {exc}") from None
+    run = secrets.token_hex(RUN_TOKEN_BYTES)
+    before = os.environ.get(RUN_ENV)
+    os.environ[RUN_ENV] = run
     try:
         yield
     finally:
-        try:
-            if _try_lock(fd, fcntl.LOCK_EX):  # 共有から排他へ替える。取れなければ共有も外れるが、このまま閉じる
-                shutil.rmtree(root, ignore_errors=True)
-        finally:
-            os.close(fd)
-
-
-def _join(root: Path) -> int:
-    """`root` を開いて（無ければ作って）起動のロックを共有で持ち、その記述子を返す。上限まで待てば `durable_locks.StoreInUse`。"""
-    while True:
-        fd = _join_once(root)
-        if fd is not None:
-            return fd
-
-
-def _join_once(root: Path) -> Optional[int]:
-    """起動のロックを共有で持てたら記述子を、待つ間に最後の起動が `root` を消していたら None（作り直して取り直す）を返す。"""
-    with worker_paths.open_or_create(root) as wd:
-        worker_paths.check_unshared(wd)
-        fd = worker_paths.open_lock(wd, RUN_LOCK_FILE)
-        try:
-            durable_locks.wait_lock(
-                lambda: _try_lock(fd, fcntl.LOCK_SH), root, lambda limit: f"起動のロックを {limit:g} 秒待っても取れない: {root}"
-            )
-            linked = _still_linked(wd, root, fd)
-        except BaseException:
-            os.close(fd)
-            raise
-        if linked:
-            return fd
-        os.close(fd)
-        return None
-
-
-def _still_linked(wd: worker_paths.WorkDir, root: Path, fd: int) -> bool:
-    """開いた `wd` が今も `root` の名前で、そのロックの名前が `fd` の inode を指すなら真。"""
-    try:
-        here, lock = os.stat(root, follow_symlinks=False), os.stat(RUN_LOCK_FILE, dir_fd=wd.fd, follow_symlinks=False)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 消されていれば作り直す側へ返す
-        return False
-    opened, held = os.fstat(wd.fd), os.fstat(fd)
-    return (here.st_dev, here.st_ino) == (opened.st_dev, opened.st_ino) and (lock.st_dev, lock.st_ino) == (held.st_dev, held.st_ino)
-
-
-def _held_area(held: tuple[int, int]) -> Path:
-    return identity.load().state_dir / AREA_DIR / f"{held[0]}-{held[1]}"
+        if before is None:
+            os.environ.pop(RUN_ENV, None)
+        else:
+            os.environ[RUN_ENV] = before
+        shutil.rmtree(_area_root() / "runs" / run, ignore_errors=True)
 
 
 def _op_digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
-
-
-def _redo(seen: str, digest: str, text: str, op: Optional[str], path: Path) -> bool:
-    """記録のある操作 `op` の打ち直しで、組み直して書くなら真、済んでいるなら偽。
-
-    公開済みなら本文を見ずに偽。公開前なら、本文が組んだ後と同じなら偽（公開した後に止まった）、組む前と同じなら真（公開の
-    前に止まった）。どちらでもなければ、公開した後に別の書き込みが変えたのか公開の前に止まったのかを決められないので
-    `WorkerError`（precondition）で止める。同じ `op` で入力の要約が違う・読めない記録は `WorkerError`（invalid）。
-    """
-    try:
-        row = json.loads(seen)
-    except json.JSONDecodeError:
-        row = None
-    if not isinstance(row, dict) or row.get("state") not in (PENDING, DONE) or not isinstance(row.get("before"), str):
-        raise WorkerError("invalid", f"操作 {op!r} の記録を読めない（新しい操作には別の --op を渡す）")
-    if row.get("digest") != digest:
-        raise WorkerError("invalid", f"操作 {op!r} は {path} へ別の入力で済んでいる（新しい操作には別の --op を渡す）")
-    if row["state"] == DONE or _op_digest(text) == row.get("after"):
-        return False
-    if _op_digest(text) == row["before"]:
-        return True
-    raise WorkerError(
-        "precondition",
-        f"操作 {op!r} は {path} への公開の前に止まり、その後に別の書き込みがファイルを変えたので、載ったかを決められない"
-        "（ファイルを読んで確かめ、要るなら別の --op で打ち直す）",
-    )
 
 
 @contextlib.contextmanager
@@ -344,17 +358,15 @@ def _held(private: worker_paths.WorkDir, lock: str, target: Path, what: str) -> 
     """`private` のロック `lock` を排他で持つ。上限まで待っても取れなければ `durable_locks.StoreInUse`。"""
     fd = worker_paths.open_lock(private, lock)
     try:
-        durable_locks.wait_lock(
-            lambda: _try_lock(fd, fcntl.LOCK_EX), target, lambda limit: f"{what}のロックを {limit:g} 秒待っても取れない: {target}"
-        )
+        durable_locks.wait_lock(lambda: _try_lock(fd), target, lambda limit: f"{what}のロックを {limit:g} 秒待っても取れない: {target}")
         yield
     finally:
         os.close(fd)
 
 
-def _try_lock(fd: int, kind: int) -> bool:
+def _try_lock(fd: int) -> bool:
     try:
-        fcntl.flock(fd, kind | fcntl.LOCK_NB)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:  # noqa: NDF401 ファイル: 別の書き込みが持っていれば取れなかったと返す
         return False
     return True
