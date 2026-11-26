@@ -74,9 +74,10 @@ def _parser() -> argparse.ArgumentParser:
     m.add_argument(
         "--pr",
         type=int,
-        help="PR の番号（--branch が無ければ作業場所が無くても打てる。マージ済みなら何もしない）。"
-        "--branch を添えると PR の head のブランチ名が、--base を添えるとマージ先が指定どおりかを確かめ、違えばマージしない。"
-        "どちらかを添えると、フォークからの PR と、マージされずに閉じた PR もマージしない",
+        help="PR の番号。--branch か --base を添えると、まず PR が指定に合うかを確かめる。"
+        "head のブランチ名かマージ先が指定と違う PR、フォークからの PR、マージされずに閉じた PR は refused で止まる。"
+        "確かめを通った PR（番号だけを渡したときはどの PR も）がマージ済みなら、何もせず ok を返す。"
+        "作業場所が無いときは、--branch を省き、--pr と --repo を渡す",
     )
     m.add_argument("--base", help="期待するマージ先。対象の PR のマージ先が違えばマージしない")
     m.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば作業場所の origin")
