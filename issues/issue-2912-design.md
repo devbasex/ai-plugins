@@ -57,7 +57,7 @@ graph TD
 ```
 
 - 設計の検査（`ndf records design check`）が、番号の無い委ね方の行を指摘して終了コード 1 で止める。プランを使わずに設計するときは、設計者が同じコマンドを手で打つ
-- 設計のプラン（ステップの定義は `plugins/ndf/contracts/templates/design.json`）は、プランが打つ push の前に、この検査を打つ。レビュー（cross-review）がラウンドの途中で送る修正は、レビューの後の検査でまとめて確かめる
+- 設計文書を push するプラン（設計・詳細設計・レビュー）は、プランが打つ push の前に、この検査を打つ。レビュー（cross-review）がラウンドの途中で送る修正は、レビューの後の検査でまとめて確かめる
 - MVV 判定の指示文は、扱い（受け入れ条件・前提・含まない・採らない）の書かれた起票者の推定を理由に止めない。人へ残す判断の表の番号は、必ずレッドラインとして挙げる
 - 効果は、固定した過去の設計 PR を判定し直す実験版で数える。先に、レッドラインを含む対照（当時の判定がレッドラインを挙げた設計）で、期待する番号が挙がることを確かめる
 
@@ -65,7 +65,7 @@ graph TD
 
 | # | 機能 | 誰が使うか |
 | --- | --- | --- |
-| F1 | 番号の無い委ね方を検査で見つける | 設計者（AI）と設計のプラン |
+| F1 | 番号の無い委ね方を検査で見つける | 設計者（AI）と、設計文書を push するプラン |
 | F2 | 起票者の推定だけでは人へ戻らず、残した判断の番号は必ず挙がる | `pace: fast` / `pace: auto` の利用者 |
 | F3 | 指示文の変更の前と後で、挙がるレッドラインと承認を省ける件数を比べる | このリポジトリの開発者 |
 
@@ -76,7 +76,7 @@ graph TD
 | 設計の検査の判定ロジック（新設） | 文書の本文を受け、番号の無い委ね方の行を返す。ファイルと git を読まない |
 | Markdown のアダプター（変更） | 既存の `ndf.adapters.markdown`（markdown-it-py）に、表の行と欄を読む関数を足す |
 | `records` のサブコマンド（変更） | 検査する文書を集め（引数のファイル、またはマージ先との差分の `.md`）、結果を統一 JSON で返す |
-| 設計のプランのテンプレート（変更） | push の前に検査のステップを置き、指摘があれば直しのステップへ回し、繰り返しは上限で止める |
+| 設計・詳細設計・レビューのプランのテンプレート（変更） | `design`・`design-detail`・`cross-review` の push の前に検査のステップを置き、指摘があれば直しのステップへ回し、繰り返しは上限で止める |
 | worker の作業の定義（変更） | 検査の指摘を直す作業 1 件 |
 | MVV 判定の指示文（変更） | 起票者の推定の扱いと、人へ残す判断の表の番号の扱いを定める |
 | 設計の手順書と決定の書き方（変更） | 手順 5 の確認を、読んで確かめる形からコマンドを打つ形へ変える |
@@ -148,7 +148,9 @@ ndf records design check [--result <ファイル>] --base <ref>
 
 ## 処理の流れ
 
-設計のプランの順は次のとおりである。MVV 判定のステップは変えない。
+検査のステップは、設計文書を push する 3 つのプランに置く。MVV 判定のステップは変えない。
+
+### 設計のプラン（`design`）
 
 ```mermaid
 graph TD
@@ -179,8 +181,40 @@ graph TD
 | `push` | `rebuild` の次、`fix-push` の次 | `design-check` |
 | `push-reviewed` | `review` の次（完了しない `incomplete` を含む）、`ci-fix`、`base-sync`、`fix-base`、`fix-push-reviewed` の次 | `design-check-reviewed` |
 
+### 詳細設計とレビューのプラン（`design-detail`・`cross-review`）
+
+設計のプランが終わった後も、設計文書は書き足され、直される。`standard` では、詳細設計、ドキュメント再構成、ドキュメントレビュー（`cross-review` のプラン）の順に工程が続く。
+
+```mermaid
+graph TD
+    w["design-detail: 詳細設計を作成・追記"] --> k1["design-check"] -->|"指摘なし"| u1["push"]
+    k1 -->|"check_failed"| x1["回数を数える → 直し"] --> k1
+    v["cross-review: レビュー（incomplete を含む）"] --> k2["design-check"] -->|"指摘なし"| u2["push"]
+    k2 -->|"check_failed"| x2["回数を数える → 直し"] --> k2
+```
+
+| プラン | 検査するもの | 順序 |
+| --- | --- | --- |
+| `design-detail` | 詳細設計書と、詳細設計を追記した設計書（`standard` で別ファイルにしない場合） | worker の詳細設計の後、push の前。`fix-push` の後もこの検査へ戻る |
+| `cross-review` | 詳細設計、ドキュメント再構成、レビューの修正を含む HEAD の文書 | レビューのステップの後、push の前。`fix-push` の後もこの検査へ戻る。設計 PR のマージより前に終わる |
+
+- 2 つのテンプレートは、`--base` に渡すマージ先を受ける値（`base`）を足す
+- `cross-review` のプランは、設計のレビュー、ドキュメントレビュー、コードレビューで共通である。工程は見分けず、どれでも打つ。対象の見出しを持つ `.md` が差分に無ければ 0 で通る
+- ドキュメント再構成のプラン（`document-rebuild`）には置かない。直後のドキュメントレビューの検査が、組み直した後の同じ文書を読む
+- プランを使わずに詳細設計を書く場合は、設計者が追記の後、push の前にコマンドを打つ
+
+### 3 つのプランに共通の決まり
+
 - CI の直しや衝突の解消で設計文書が変わりうるため、本文が同じかは調べず、毎回打ち直す。検査は言語モデルを呼ばない手元のコマンドなので、結果は再利用しない
-- 繰り返しの打ち切りは、CI の落ちと同じ `ndf route repeat` を使う。同じ検査の `check_failed` が 3 回目（`supervise.step-rerun` の `same_cause` = 2 を超える。間に検査が通っても数え直さない）になると、`fix_limit` で止まって人へ戻る。最後の指摘は `--result` のファイルに、理由は止まった結果に残る。記録のファイルは 2 つの検査で分ける
+- 繰り返しの打ち切りは、CI の落ちと同じ `ndf route repeat` を使う。同じ検査の `check_failed` が 3 回目（`supervise.step-rerun` の `same_cause` = 2 を超える。間に検査が通っても数え直さない）になると、`fix_limit` で止まって人へ戻る。最後の指摘は `--result` のファイルに、理由は止まった結果に残る。記録のファイルは検査のステップごとに分ける
+- 不合格 1 回あたりに増える起動は、次の表のとおりである。push が拒まれたときの打ち直しとは別に数える
+
+| 同じ検査の不合格 | `ndf route repeat` | 直しの worker（言語モデルのセッション） | 再検査 |
+| --- | --- | --- | --- |
+| 1 回目・2 回目 | 1 回ずつ | 1 回ずつ | 1 回ずつ |
+| 3 回目 | 1 回（`fix_limit` で止まる） | 起動しない | 打たない |
+
+- 上限は検査のステップ 1 つあたり、検査 3 回、`ndf route repeat` 3 回、直しの worker 2 回である。`design` のプランは検査のステップが 2 つあるので直しの worker は最大 4 回、`design-detail` と `cross-review` は最大 2 回である
 - `precondition` と `invalid` は文書の直しでは解けないため、直しへ回さず、その原因でプランを止める
 
 ## 非機能の実現方式
@@ -206,17 +240,19 @@ graph TD
 - 比べた候補: LIB1 / LIB2 / LIB3
 - 根拠: Value 3「同じ手順は毎回同じ結果になる」 / Value 12「調べて分析した、実績のある最新のやり方で作られる」 / Value 15「人も AI も同じ入口から使える」（MVV バージョン 11）
 
-### 決定 2: 打ち忘れと直しによる戻りを防ぐため、設計のプランは自分が打つ push の前に毎回検査を打つ
+### 決定 2: 打ち忘れと直しによる戻りを防ぐため、設計文書を push するプランは自分が打つ push の前に毎回検査を打つ
 
 - **質問**: 検査を手順書の指示だけにするか、プランのステップにもするか
-- **選んだ案**: 設計のプランの最初の push の前と、レビューの後の push の前にステップを置く。指摘は worker の直しの作業へ回し、直した内容はコミットして終える。レビュー中の cross-review の push には置かず、レビューの後の検査で確かめる（「処理の流れ」）
-  - 手順書の手順 5 は、起動の経路で分ける。設計のプランから呼ばれた設計者はコマンドを打たず、プランの検査が手順 5 の実行になる。プランを使わずに設計する設計者だけがコマンドを打つ。同じ push の前に 2 回は打たない
+- **選んだ案**: 設計のプランの最初の push の前とレビューの後の push の前、詳細設計のプランの push の前、レビューのプランの push の前にステップを置く。指摘は worker の直しの作業へ回し、直した内容はコミットして終える。レビュー中の cross-review の push には置かず、レビューの後の検査で確かめる（「処理の流れ」）
+  - 手順書の手順 5 と手順 6（詳細設計）は、起動の経路で分ける。プランから呼ばれた設計者はコマンドを打たず、プランの検査がその実行になる。プランを使わずに書く設計者だけがコマンドを打つ。同じ push の前に 2 回は打たない
 - 採らなかった案: 手順書の指示だけ（打たなくても PR が出る）
+- 採らなかった案: 設計のプランだけに置く（詳細設計の追記と、ドキュメントレビューの修正が検査を通らない）
+- 採らなかった案: 承認ゲートの直前に 1 回だけ打つ（指摘を直す分岐を工程の定義に足すことになり、詳細設計のプランの push は検査されない）
 - 採らなかった案: cross-review の修正の push の前にも打つ（cross-review に設計だけの検査と、落ちた修正を直させる分岐を足すことになる。承認ゲートの前の版はレビューの後の検査で確かめられる）
 - 採らなかった案: 最初の push の前の 1 回だけ（レビューや CI の直しで委ね方が戻ると、承認ゲートまで気付かない）
 - 採らなかった案: 設計文書が変わった push の前だけ打つ（変わったかを調べる仕組みが要り、手元のコマンド 1 回より高い）
 - 採らなかった案: CI の検査にする（利用先のリポジトリごとに CI の設定を足させる）
-- **代償**: 直しの無い設計 1 件で、手元のコマンドの起動が 2 回増える。push し直すたびに 1 回増える。レビュー中の設計 PR には、検査していない版が載りうる。別に流す詳細設計のプラン（`design-detail`）には置かないため、そのプランで書く文書は設計者が手順で確かめる
+- **代償**: 直しが無い場合、検査の起動は `design` のプランで 2 回、`design-detail` と `cross-review` のプランで 1 回ずつ増える。push し直すたびに 1 回増える。不合格の場合の起動回数と上限は「処理の流れ」の表のとおりで、直しの worker は言語モデルの費用がかかる。コードレビューでも `cross-review` のプランの検査が打たれる。レビュー中の設計 PR には、検査していない版が載りうる
 - 根拠: Value 3「同じ手順は毎回同じ結果になる」 / Value 2「安く使える」（MVV バージョン 11）
 
 ### 決定 3: 推定だけで人へ戻らず守りも落とさないよう、緩和は verdict にだけ掛ける 1 行と、表の番号を挙げる 1 句を足す
@@ -357,7 +393,7 @@ graph TD
 
 - **働く範囲**: 設計の検査・プランのステップ・指示文は、NDF を使うすべてのリポジトリで働く。判定の比較はこのリポジトリだけ
 - **プロジェクトごとに違うもの**: マージ先とリモート名はプランの値で受ける。レッドラインは番号の形だけを見るので、プロジェクトが足す番号も設定なしで通る
-- **検査が働く条件**: 設計のプラン（`design` テンプレート）を流せば、モードを問わず自動で働く。流さなければ、手順 5 でコマンドを手で打つ
+- **検査が働く条件**: `design`・`design-detail`・`cross-review` のプランを流せば、モードを問わず自動で働く。流さなければ、手順書に沿ってコマンドを手で打つ
 
 | モード | 設計の工程と設計 PR | 検査の打ち方 |
 | --- | --- | --- |
@@ -367,7 +403,7 @@ graph TD
 
 - **壊れうる箇所**:
   - 説明のつもりで委ねる語を地の文に書くと指摘される（インラインコードで囲めば指摘されない）
-  - 設計のプランの流れを固定するテストは、ステップが増える分を直す
+  - 3 つのプランの流れを固定するテストは、ステップと値（`base`）が増える分を直す
 - **効果の限界**: 差分の上限で人へ戻る設計には、指示文の変更は効かない。直近の設計 PR の多くがこれに当たるため、運用で人を待つ件数を減らすには、別の変更が要る
 - **同じ所を触る別の変更**: #3664 は詳細設計の検査を足す。同じサブコマンドの下に規則を足せる形にする
 
@@ -389,7 +425,7 @@ graph TD
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 設計の検査 | 設計文書を書いた後に走らせる、言語モデルを呼ばない決まった検査（`ndf records design check`。設計のプランのステップ `design-check`） | 意味の変更 |
+| 設計の検査 | 設計文書を書いた後に走らせる、言語モデルを呼ばない決まった検査（`ndf records design check`。設計・詳細設計・レビューのプランのステップ `design-check`） | 意味の変更 |
 
 ## テスト設計
 
@@ -402,7 +438,7 @@ graph TD
 | 4 | 人へ残す判断の表で、番号の欄が空か `要確認` だけの行、理由の欄が空か `—` だけの行は指摘する。番号の欄の `` `C2` `` は通る | 欄が空かだけを見る。行全体の番号の有無だけを見る。インラインコードを除いてから番号を探す |
 | 4 | `--base` は分岐点からの変更を作業ツリーで読む。未コミットと未追跡を含み、削除したファイルとマージ先だけの変更は除く。`issues/` の外の `.md` も見る | 先端どうしを比べる。HEAD の内容を読む。ディレクトリで絞る |
 | 4 | 入力が無い・両方ある呼び出しは 2、読めないファイルや ref は 3 | 対象 0 件として 0 を返す |
-| 決定 2 | 設計のプランは、`push`・`push-reviewed` へ入るどの分岐でも先に検査を通る。指摘は直しの後に検査へ戻り、上限で止まる。`precondition` は直しへ回さない | 直し・衝突の解消の後に検査を通らず push する。直しを上限なく繰り返す |
+| 決定 2 | `design`・`design-detail`・`cross-review` のプランは、push のステップへ入るどの分岐でも先に検査を通る。指摘は直しの後に検査へ戻り、上限で止まる。`precondition` は直しへ回さない | 直し・衝突の解消の後に検査を通らず push する。直しを上限なく繰り返す |
 | 5・6 | 決定 6 の順で、実物の LLM に判定させる（単体テストで縛らない） | — |
 | 6 | 判定がレッドラインを返せば省かない（今あるテストで確かめる） | `may_skip` が boundary を見なくなる |
 | 7 | 決定 4・6 の件数・割合・費用・打ったコマンドをリリース後テストの記録に残す | — |
@@ -412,7 +448,7 @@ graph TD
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2912 | 実装する | — | `plugins/ndf/src/ndf/domains/records/design_check_decide.py`（新設）、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/__init__.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/adapters/markdown.py`、`plugins/ndf/contracts/templates/design.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/decisions.md`、`experimental/ndf/mvv_replay.py`（新設）、`experimental/ndf/mvv_replay_cases/`（新設）、`plugins/ndf/tests/domains/records/test_design_check.py`（新設）、`plugins/ndf/tests/route/test_flows.py` |
+| #2912 | 実装する | — | `plugins/ndf/src/ndf/domains/records/design_check_decide.py`（新設）、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/__init__.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/adapters/markdown.py`、`plugins/ndf/contracts/templates/design.json`、`plugins/ndf/contracts/templates/design-detail.json`、`plugins/ndf/contracts/templates/cross-review.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/decisions.md`、`experimental/ndf/mvv_replay.py`（新設）、`experimental/ndf/mvv_replay_cases/`（新設）、`plugins/ndf/tests/domains/records/test_design_check.py`（新設）、`plugins/ndf/tests/route/test_flows.py` |
 
 ## 人へ残す判断
 
