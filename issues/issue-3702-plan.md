@@ -132,7 +132,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/src/ndf/progress/command.py`
   - `plugins/ndf/tests/progress/test_units_invoke.py`
   - `plugins/ndf/docs/contracts/commands.md`
-- **変更内容:** `ndf progress units run` を `units_cli.py` に置き、`command.py` に登録する。次の工程が「実装」でなければ始めない。コマンドの一覧を生成し直す（先に要る: Task 10）
+- **変更内容:** `ndf progress units run` を `units_cli.py` に置き、`command.py` に登録する。次の 1 手が工程「実装」で、実装のプランを流すアクションでなければ始めない（失敗・回答の待ちでは始めない）。コマンドの一覧を生成し直す（先に要る: Task 10）
 - **満たす受け入れ条件:** 3
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 

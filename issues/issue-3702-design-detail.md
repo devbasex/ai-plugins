@@ -428,7 +428,9 @@ contracts/
 
 1. `required(snap)` が真なら、`approved_of`。無ければ始めない
 2. #4369 の開始前の確かめを呼ぶ（取得・配布先として宣言したブランチでないこと・ff・push）。経路の判定は、単位の見出しに加えて単位のファイルも、手元と取得した先端の両方で調べる。承認が要るスプリントは、常に単位の経路にする。ここで決まった HEAD を `start_head` とし、3 より後の照合・読み込み・起動の判定は、すべてこのコミットを読む
-3. `required` が真なら、承認した文書が届いていることを確かめる。`start_head` が記録の head か、取り込みのコミット（`design-sync.json` の、記録の head が同じもの）を含まなければ始めない
+3. `required` が真なら、承認した文書が届いていることを確かめる。次のどちらかのコミットが、`start_head` と同じか `start_head` の祖先なら通る（`git merge-base --is-ancestor <コミット> <start_head>`）。どちらでもなければ始めない。SHA の一致は条件にしない。単位をマージするたびにスプリントブランチが進むためである
+   - 記録の head
+   - 取り込みのコミット（`design-sync.json` の、`record_head` が記録の head と同じもの）
 4. 記録があれば、`mismatches`。1 件でもあれば始めない。起動に使う課題・扱い・省いた課題・上限・受け入れ条件の数は記録の値にする
 5. 古い定義で単位の欄があれば、単位のファイルの有無にかかわらず `units_convert.convert` を呼ぶ。変換が完了して承認も要らなければ、`convert` は None を返す。変換がコミットを足したら `start_head` を取り直す。この変更より後に作ったスプリントで、欄があるのに単位のファイルが無ければ始めない
 6. 欄もファイルも無ければ、#4369 の「これまでの経路」（単位に分けず `impl` を 1 回）
@@ -485,6 +487,7 @@ contracts/
 - キューでマージした先行の単位は、作業場所が進んだ後にだけ後の単位を始める
 - 打ち直しをまたいでも、キューから外れた PR の再送は 1 回だけである
 - 取得で作業場所が進んだときは、進んだ後のコミットと承認の記録を比べる
+- 設計 PR の head がスプリントブランチ自身の経路（`design-sync.json` が無い）では、最初の単位をマージしてスプリントブランチが記録の head より先へ進んだ後の打ち直しも、手順 3 を通って残りの単位を流す
 
 ## この変更より前のスプリントの変換（`progress/units_convert.py`）
 
@@ -614,11 +617,23 @@ contracts/
 
 | サブコマンド | 引数 | 呼ぶ関数 |
 | --- | --- | --- |
-| `ndf progress units run` | `<ステートマシンの ID>`・`--cwd` | 最初に `run.decide(v)` を呼び、次の 1 手の工程が「実装」でなければ `stopped`（`precondition`。残る工程の名前）。通れば、保存した定義の工程「実装」の `StageRun` を組み、`units_invoke.run_stage`。工程のイベントは書かない（supervisor は今のとおり `ndf progress finish` を打つ） |
+| `ndf progress units run` | `<ステートマシンの ID>`・`--cwd` | ステートマシンの `run_lock` の中で `run.decide(v)` を呼び、下の「始められる手」に当たらなければ `stopped`（`precondition`）。当たれば、保存した定義の工程「実装」の `StageRun` を組み、`units_invoke.run_stage`。工程のイベントは書かない（supervisor は今のとおり `ndf progress finish` を打つ） |
 | `ndf progress units sync` | `[<ID>]`・`--cwd`。`<ID>` を省けば環境変数 `NDF_MACHINE_ID`（工程のステップ `design-sync`）。取り込みは文脈の `worktree` で行う | `units_sync.sync` |
 | `ndf progress units guard` | `--issue`・`--base`・`--branch`・`--unit-file` | `units_guard.guard` |
 
-承認した HEAD、承認の要否、送り先、再承認の回答を渡す引数は作らない。承認の回答だけがあって設計 PR のマージや `design-sync` が残るときは、次の工程が「ドキュメントレビュー」なので始まらない。このことは `test_units_invoke.py` で確かめる。`units run` は、単位の経路でないスプリント（欄もファイルも無い）では `precondition` で止まる。`ndf check --write-spec` で `docs/contracts/commands.md`・`env.md`・`contracts/schemas/io/` を生成し直す。
+**始められる手**: `units run` は、`Move` の工程名とアクションの両方を照合する。工程名だけでは、失敗した工程「実装」も当たるためである。
+
+| `run.decide` の結果 | `units run` |
+| --- | --- |
+| 工程「実装」の `Action.START` | 流す |
+| 工程「実装」の `Action.RESUME` で、次のステップが実装のプランのステップ（`implement`） | 流す |
+| 工程「実装」の `Action.FAILED` | 流さない。`ndf progress next` が出す失敗の経路（再試行など）を結果に添える。再試行を選んだ後に打ち直す |
+| 工程「実装」の `Action.GATE` | 流さない。`ndf progress next` で回答の待ちを確かめるよう理由に書く |
+| 上のどれでもない（別の工程、次のステップが `gathered`、全ステップが済んだ `RESUME`、`DONE`、`COMPLETE`） | 流さない。次の 1 手の工程とアクションを理由に書く |
+
+`test_units_invoke.py` では、この表の行ごとに、実装のプランが起動するかしないかを確かめる。
+
+承認した HEAD、承認の要否、送り先、再承認の回答を渡す引数は作らない。承認の回答だけがあって設計 PR のマージや `design-sync` が残るときは、次の工程が「ドキュメントレビュー」なので始まらない。このことも同じテストで確かめる。`units run` は、単位の経路でないスプリント（欄もファイルも無い）では `precondition` で止まる。`ndf check --write-spec` で `docs/contracts/commands.md`・`env.md`・`contracts/schemas/io/` を生成し直す。
 
 ## 手順書
 
