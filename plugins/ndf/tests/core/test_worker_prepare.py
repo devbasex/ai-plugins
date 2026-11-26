@@ -13,7 +13,7 @@ import pytest
 
 from ndf import identity
 from ndf.contracts import causes, worker_paths
-from ndf.core import durable_locks, worker, worker_append
+from ndf.core import durable_locks, worker, worker_append, worker_write
 
 
 def _run(capsys, *argv: str) -> tuple[int, dict]:
@@ -647,20 +647,83 @@ def test_write_refuses_the_same_op_with_another_body(tmp_path, capsys, monkeypat
     assert _invalid(code, out) and material.read_text(encoding="utf-8") == "1 行目\n2 行目\n"
 
 
-def test_write_reads_and_publishes_under_the_write_lock(tmp_path, capsys, monkeypatch, clock):
-    # PR 4591 の r2-1: 読み取りから公開までをロックで直列にする。ほかの書き込みが持つ間は旧い本文から組んで書かない
+@contextlib.contextmanager
+def _another_write(path: Path):
+    """別の書き込みが `path` の書き先ごとのロックを排他で持つ。"""
+    with worker_write.area(worker_write.target(str(path))) as private:
+        fd = worker_paths.open_lock(private, worker_write.LOCK_FILE)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            yield
+        finally:
+            os.close(fd)
+
+
+def _state_with(tmp_path, monkeypatch, *names: str) -> list[Path]:
     state = tmp_path / "state"
     state.mkdir()
-    material = state / "material.md"
-    material.write_text("1 行目\n", encoding="utf-8")
+    for name in names:
+        (state / name).write_text("1 行目\n", encoding="utf-8")
     _hold(monkeypatch, state)
-    monkeypatch.setattr("sys.stdin", io.StringIO("2 行目\n"))
-    _run(capsys, "write", "--path", str(material), "--append", "--op", "a1")
+    return [state / name for name in names]
+
+
+def _write(capsys, monkeypatch, path: Path, body: str, *flags: str) -> tuple[int, dict]:
+    monkeypatch.setattr("sys.stdin", io.StringIO(body))
+    return _run(capsys, "write", "--path", str(path), *flags)
+
+
+def test_write_reads_and_publishes_under_the_lock_of_the_target(tmp_path, capsys, monkeypatch, clock):
+    # PR 4591 の r2-1・r3-5: 読み取りから公開までを書き先ごとのロックで直列にする。別の書き先の書き込みは待たない
+    material, other = _state_with(tmp_path, monkeypatch, "material.md", "other.md")
     monkeypatch.setattr(durable_locks, "lock_wait_seconds", lambda: 0.0)
-    with _another_append():
-        monkeypatch.setattr("sys.stdin", io.StringIO("3 行目\n"))
-        code, out = _run(capsys, "write", "--path", str(material), "--append", "--op", "a2")
-    assert out["cause"]["kind"] == "store_in_use" and code == causes.exit_code("store_in_use")
+    with _another_write(material):
+        code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+        assert out["cause"]["kind"] == "store_in_use" and code == causes.exit_code("store_in_use")
+        code, _ = _write(capsys, monkeypatch, other, "2 行目\n", "--append", "--op", "a1")
+        assert code == 0
+    assert material.read_text(encoding="utf-8") == "1 行目\n"
+    assert other.read_text(encoding="utf-8") == "1 行目\n2 行目\n"
+
+
+def test_write_keeps_the_records_out_of_the_result_dir(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r3-3: 記録は利用者ごとの状態の保存先に置き、共有の保存先のほかの利用者が消せない。起動の終わりに消す
+    (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+    assert sorted(p.name for p in material.parent.iterdir()) == ["material.md"]
+    target = worker_write.target(str(material))
+    with worker_write.area(target) as private:
+        assert any(p.name.startswith("op-") for p in private.path.iterdir())
+    worker_write.clear(target.expected)
+    assert not (identity.load().state_dir / worker_write.AREA_DIR / f"{target.expected[0]}-{target.expected[1]}").exists()
+
+
+def test_write_redoes_an_op_stopped_before_the_body_was_published(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r3-1: 記録を本文より先に書く。本文の公開の前に止まった操作は、打ち直すと 1 回だけ書く
+    (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    real = worker_paths.write_file
+
+    def fail_body(wd, name, text, **kw):
+        if name == "material.md":
+            raise OSError(28, "No space left on device")
+        return real(wd, name, text, **kw)
+
+    monkeypatch.setattr(worker_paths, "write_file", fail_body)
+    code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+    assert _invalid(code, out) and material.read_text(encoding="utf-8") == "1 行目\n"
+    monkeypatch.setattr(worker_paths, "write_file", real)
+    for _ in range(2):
+        code, _ = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+        assert code == 0
+    assert material.read_text(encoding="utf-8") == "1 行目\n2 行目\n"
+
+
+def test_write_does_not_reapply_an_op_with_a_line_separator(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r3-4: 識別子に Unicode の行区切りがあっても、打ち直しで重ねない
+    (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    for _ in range(2):
+        code, _ = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a\u2028b")
+        assert code == 0
     assert material.read_text(encoding="utf-8") == "1 行目\n2 行目\n"
 
 
