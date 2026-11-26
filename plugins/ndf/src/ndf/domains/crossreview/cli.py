@@ -518,6 +518,7 @@ def _run_config(args: argparse.Namespace) -> RunConfig:
         main=got.policy.main,
         settings=got.settings,
         unit=got.unit,
+        check_pr=args.reviewed_pr_out is not None,
     )
 
 
@@ -664,8 +665,8 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     単位の経路の引数（#4369）: `--repo` は保存済みの状態と作業場所のリモートより優先する対象のリポジトリで、子の `gh` にも
     `GH_REPO` で渡す。`--stop-on-hold` は人の判断を待つ指摘が残れば incomplete にする。`--reviewed-pr-out` は
-    `--reviewed-out` を書くときに、実際に読めてその head がレビューした HEAD と一致した PR を `<所有者>/<リポジトリ>#<番号>` で
-    書く（始めに消す。読めなかったか一致しなければ書かない）。
+    `--reviewed-out` を書くときに、実際に読めた PR を `<所有者>/<リポジトリ>#<番号>` で書く（始めに消す）。書くのは、レビューした
+    HEAD が読んだ head か、この起動がその PR の head のリポジトリのブランチへ送った修正のコミットのときだけである。
     """
     refused = _begin_run(args)
     if refused is not None:
@@ -782,7 +783,9 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--stop-on-hold", action="store_true", help="人の判断を待つ指摘が残れば incomplete で終える")
     r.add_argument(
         "--reviewed-pr-out",
-        help="読んだ PR の head がレビューした HEAD と一致すれば <所有者>/<リポジトリ>#<番号> を書く（--reviewed-out と併用）",
+        help="起動時に対象 PR の head ブランチ名と SHA を確かめる。レビューした HEAD がその SHA、または同じ起動でその PR のブランチへ "
+        "push した修正コミットなら、--reviewed-out とともに PR のリポジトリと番号を書く。"
+        "渡した起動は、同じ PR を読んだラウンドだけを差分の起点と収束の再利用に使う",
     )
 
 

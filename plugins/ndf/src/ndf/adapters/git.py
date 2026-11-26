@@ -396,6 +396,11 @@ class Git:
             raise GitError(f"リモート {remote} の URL は GitHub のリポジトリでない")
         return repo
 
+    def push_repos(self, remote: str) -> list[Optional[str]]:
+        """`git push <remote>` の送り先ごとの `<所有者>/<リポジトリ>`（`pushurl`・`pushInsteadOf` を反映する。GitHub の URL で
+        なければ None）。"""
+        return [repo_of_url(url) for url in self.run("remote", "get-url", "--push", "--all", "--", remote).splitlines()]
+
     def remote_default_branch(self, remote: Optional[str] = None) -> Optional[str]:
         """リモートの既定ブランチ（取得済みの `refs/remotes/<remote>/HEAD` の指す先から `<remote>/` を外した名前）。
 

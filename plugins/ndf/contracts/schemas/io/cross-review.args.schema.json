@@ -304,7 +304,7 @@
         },
         "--reviewed-pr-out": {
           "type": "string",
-          "description": "読んだ PR の head がレビューした HEAD と一致すれば <所有者>/<リポジトリ>#<番号> を書く（--reviewed-out と併用）"
+          "description": "起動時に対象 PR の head ブランチ名と SHA を確かめる。レビューした HEAD がその SHA、または同じ起動でその PR のブランチへ push した修正コミットなら、--reviewed-out とともに PR のリポジトリと番号を書く。渡した起動は、同じ PR を読んだラウンドだけを差分の起点と収束の再利用に使う"
         }
       },
       "required": [

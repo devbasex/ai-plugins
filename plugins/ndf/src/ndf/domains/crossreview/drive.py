@@ -49,6 +49,7 @@ from ndf.domains.crossreview import (
     fixgate_decide,
     prior_decide,
     report_decide,
+    reviewed_pr,
     resume_decide,
     round_scope,
     scope_decide,
@@ -142,6 +143,10 @@ class _Run:
     sent: str = ""
     # 始めに読めて、head ブランチとその先頭がレビューするブランチの取得した先頭と一致した PR
     read_pr: Optional[threads.ReadPr] = None
+    # 取得と送信に使うリモート名・始めの同期で取得した先頭・この起動で送った（送り直した分を含む）コミット
+    remote: str = ""
+    synced_head: str = ""
+    pushed: set[str] = field(default_factory=set)
     # PR が足した根拠の記述の確かめ（`changes.CitationRun`）
     checked_head: Optional[str] = None
     last_target: Optional[changes.Target] = None
@@ -210,6 +215,8 @@ def _resend(run: _Run, synced: worktree.SyncResult) -> None:
     remote = run.g.rev_parse(f"refs/remotes/{run.g.remote()}/{run.cfg.branch}")
     # 載せ直しでコミットの SHA が変わるので、報告されたコミットとの検証はしない
     sent = fixer.send_fix(run, round_no, remote, fix, check_commit=False)
+    if "pushed" in fix:
+        run.pushed.add(run.sent)
     if sent:
         # 前の起動が送れずに未解決へ戻した指摘は、PR へ届いたので直したへ戻す（修正担当へ渡し直さない）
         run.journal.restore_fixed(store.list_of(fix, "fixed"))
@@ -242,11 +249,12 @@ def _merge_target(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> str:
 
 
 class _Based(NamedTuple):
-    """起動の始めの同期の結果と、MVV を読むブランチ・差分の比較元のコミット。"""
+    """起動の始めの同期の結果と、MVV を読むブランチ・差分の比較元のコミット・使ったリモート名。"""
 
     synced: worktree.SyncResult
     branch: str
     commit: str
+    remote: str
 
 
 def _sync(cfg: RunConfig, g: git.Git, reader_for: Optional[ReaderFor]) -> _Based:
@@ -261,7 +269,7 @@ def _sync(cfg: RunConfig, g: git.Git, reader_for: Optional[ReaderFor]) -> _Based
         return worktree.sync_worktree(g, cfg.branch, remote, base_branch=branch)
 
     synced, base = worktree.fetch_base(g, cfg.base, remote, sync, lambda: _merge_target(cfg, reader_for))
-    return _Based(synced, base.branch, base.commit if base.commit is not None else synced.base)
+    return _Based(synced, base.branch, base.commit if base.commit is not None else synced.base, remote)
 
 
 def _snapshot(cfg: RunConfig, based: _Based) -> mvv.Snapshot:
@@ -305,6 +313,8 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide
         mvv=snap.identity,
         mvv_branch=based.branch,
         sent=synced.remote,
+        remote=based.remote,
+        synced_head=synced.remote,
         clean=clean,
         seats=list(cfg.reviewers),
         filled=list(cfg.prefilled),
@@ -562,28 +572,6 @@ def _save(run: _Run) -> None:
     store.write_object(run.ref.path, run.data)
 
 
-def _read_by_all_this_run(run: _Run, rounds: int) -> Optional[str]:
-    """今回の起動の `rounds` 件のラウンドのうち、相手役の全員が読めた最後のラウンドの head（無ければ None）。
-    今回の起動で回答を得たラウンドが無ければ（全員が無回答など）、前の起動のラウンドの head を出さない（PR 3888 の r2-1）。
-    一部の相手役が読めなかったラウンドの head は、次の差分レビューの起点にすると読んでいない差分を飛ばすので出さない（PR 3944 の r2-3）。"""
-    this_run = store.list_of(run.data, store.ROUNDS)[-rounds:] if rounds > 0 else []
-    for r in reversed(this_run):
-        if isinstance(r, dict) and r.get("verdict") != fin.INCOMPLETE_REVIEWERS:
-            head = r.get("head")
-            return head if isinstance(head, str) and head else None
-    return None
-
-
-def _reviewed_pr(run: _Run, head: Optional[str], rounds: int, reused: bool) -> Optional[str]:
-    """レビューした `head` が、始めに読んだ PR の head か、この起動がその PR のブランチへ送った修正のコミットなら、その PR。
-    読めなかった PR と、PR に無い手元のコミットを読んだ回は None（読んだ PR の記録を出さない。#4369）。"""
-    if run.read_pr is None or head is None:
-        return None
-    this_run = [] if reused else store.list_of(run.data, store.ROUNDS)[-rounds:]
-    pushed = {r["fix"].get("pushed") for r in this_run if isinstance(r, dict) and isinstance(r.get("fix"), dict)}
-    return run.read_pr.ident if head == run.read_pr.head or head in pushed else None
-
-
 def _ingest_citations(run: _Run, errors: Optional[list[dict[str, Any]]], round_no: int, recorded: bool = True) -> bool:
     """根拠の記述の確かめの結果をジャーナルへ入れる。ジャーナルが変わったら真。"""
     wrote = run.journal.ingest_citations(errors, run.mvv, round_no, recorded=recorded)
@@ -736,8 +724,9 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
     review = fin.Review(final, rounds, run.journal.findings(), check.checked, check.unsent)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
     results, failed = _mvv_results(run)
-    read = _read_by_all_this_run(run, rounds)
-    pr = _reviewed_pr(run, read, rounds, reused)
+    read = reviewed_pr.read_by_all_this_run(run.data, rounds)
+    # 注意を足すことがあるので、`run.warnings` を写す前に確かめる
+    pr = reviewed_pr.confirmed(run, read)
     return Outcome(review, path, tuple(run.warnings), tuple(run.process), read, reused, results, failed, pr)
 
 
@@ -821,7 +810,10 @@ def _merge_base(run: _Run, head: str) -> str:
 def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
     """前のラウンドを差分の起点や収束の再利用に使える条件（今回の値。席は今の席）。"""
     unit = scope_decide.unit_id(run.cfg.unit)
-    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit)
+    pr = None
+    if run.cfg.check_pr:
+        pr = "" if run.read_pr is None else run.read_pr.ident
+    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr)
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
@@ -864,6 +856,8 @@ def _round_record(run: _Run, round_no: int, prep: _Prepared) -> dict[str, Any]:
     }
     if run.cfg.unit:
         record[scope_decide.UNIT] = scope_decide.unit_id(run.cfg.unit)
+    if run.read_pr is not None:
+        record[scope_decide.PR] = run.read_pr.ident
     if run.filled:
         # 埋めた後のすべてのラウンドに書く（#3955）
         record[scope_decide.FILLED] = [f.record() for f in run.filled]
@@ -911,7 +905,11 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     record["fix"] = fix
     _save(run)
     fixer.consume(store.fix_result_path(run.cfg.state_dir, run.ref), round_no)
-    return None if fixer.send_fix(run, round_no, prep.head, fix) else fin.ERROR
+    if not fixer.send_fix(run, round_no, prep.head, fix):
+        return fin.ERROR
+    if "pushed" in fix:
+        run.pushed.add(run.sent)
+    return None
 
 
 def _reusable(run: _Run) -> bool:
@@ -919,7 +917,7 @@ def _reusable(run: _Run) -> bool:
     merge-base の SHA と同じで、今回の相手役が全員そのラウンドを読んでいて、未解決の指摘も決めていない足すべき内容も無い）。
     比較基点が違えば PR の全差分が変わっている（PR 3944 の r2-1）。読んでいない相手役がいれば全差分から読ませる（r2-2）。
     そのラウンドと今の重点が違えば、足した重点でまだ読んでいないので回し直す（r4-3）。単位の指示の中身が違えば、今の範囲で
-    まだ読んでいないので回し直す（#4369）。MVV が違えば、今の MVV に反しないかを
+    まだ読んでいないので回し直す（#4369）。読んだ PR の確認を求める起動は、そのラウンドが読んだ PR が違えば回し直す（#4369）。MVV が違えば、今の MVV に反しないかを
     まだ確かめていないので回し直す（#4076）。"""
     if store.last_round(run.data).get("verdict") != fin.CONVERGED:
         return False
@@ -960,9 +958,7 @@ def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[ReaderFor]) 
     cfg = run.cfg
     prs = _reader(cfg, reader_for, run.warnings)
     prior = _read_prior(prs, run.warnings)
-    # `run.sent` はこの時点では取得した PR のブランチの先頭。読んだ PR のブランチと head が違えば、読んだ PR として扱わない
-    if prior.pr is not None and (prior.pr.branch, prior.pr.head) == (cfg.branch, run.sent):
-        run.read_pr = prior.pr
+    run.read_pr = reviewed_pr.seen(run, prior.pr)
     _carry(run, prior)
     _restate(run)
     if _reusable(run):

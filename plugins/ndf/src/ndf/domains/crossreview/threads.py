@@ -89,11 +89,12 @@ class Port(Protocol):
 
 class ReadPr(NamedTuple):
     """スレッドと同じ応答から実際に読んだ PR。`ident` は `<所有者>/<リポジトリ>#<番号>`、`branch`・`head` は head ブランチと
-    その先頭のコミット。"""
+    その先頭のコミット、`head_repo` は head ブランチのあるリポジトリ（応答に無ければ空）。"""
 
     ident: str
     branch: str
     head: str
+    head_repo: str
 
 
 class Reader(Protocol):
@@ -459,8 +460,8 @@ class GitHubPort:
         self._files: Optional[frozenset[str]] = None
         self._threads: Optional[dict[int, tuple[str, bool]]] = None
         self._base: Optional[str] = None
-        # スレッドと同じ応答から読んだ head ブランチとその先頭
-        self._read: tuple[str, str] = ("", "")
+        # スレッドと同じ応答から読んだ head ブランチ・その先頭・head のリポジトリ
+        self._read: tuple[str, str, str] = ("", "", "")
         # `base` が先に読んだスレッド（次の `open_threads` が 1 回だけ使う）
         self._ahead: Optional[list[prior_decide.Thread]] = None
 
@@ -528,8 +529,8 @@ class GitHubPort:
 
     def read_pr(self) -> Optional[ReadPr]:
         """スレッドの一覧と同じ応答から読んだ PR（読んでいないか、応答に head が無ければ None。要求を足さない）。"""
-        branch, head = self._read
-        return ReadPr(f"{self.hub.repo}#{self.pr}", branch, head) if branch and head else None
+        branch, head, head_repo = self._read
+        return ReadPr(f"{self.hub.repo}#{self.pr}", branch, head, head_repo) if branch and head else None
 
     def changed(self) -> frozenset[str]:
         """PR の変更ファイル（1 回だけ読み、`open_thread` と共有する）。"""
@@ -660,7 +661,9 @@ class GitHubPort:
             repo = self.hub.repository(THREADS_QUERY, {"pr": self.pr, "after": after})
             pull = repo["pullRequest"]
             self._base, head = target_of(pull)
-            self._read = _text(pull.get("headRefName")), head
+            fork = pull.get("headRepository")
+            head_repo = _text(fork.get("nameWithOwner")) if isinstance(fork, Mapping) else ""
+            self._read = _text(pull.get("headRefName")), head, head_repo
             page = pull["reviewThreads"]
             for node in page["nodes"]:
                 first = node["comments"]["nodes"]
@@ -702,7 +705,7 @@ FILES_PAGE = 100
 # 一覧を読み切るページの上限の方針
 LIST_PAGES = "github.list-pages"
 THREADS_QUERY = """query($owner:String!,$name:String!,$pr:Int!,$after:String){repository(owner:$owner,name:$name){
-pullRequest(number:$pr){baseRefName headRefName headRefOid reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}
+pullRequest(number:$pr){baseRefName headRefName headRefOid headRepository{nameWithOwner} reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}
 nodes{id isResolved path line comments(first:1){nodes{databaseId body author{login}}}
 replies:comments(last:20){nodes{databaseId body author{login}}}}}}}}"""
 # 行の位置の誤りの理由（1 件ずつなら書ける。`pull_request_review_thread.path` の `could not be resolved` を含む）

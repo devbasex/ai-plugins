@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from ndf.contracts import result
-from ndf.domains.crossreview import cli, drive, journal, store, threads
+from ndf.domains.crossreview import cli, drive, journal, reviewed_pr, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.settings import RunConfig
 
@@ -337,24 +337,59 @@ def test_run_writes_no_reviewed_pr_when_the_review_did_not_confirm_it(
     assert head_out.exists() and not pr_out.exists()
 
 
+def _reading_run(targets: list[str | None], pushed: set[str]) -> SimpleNamespace:
+    """読んだ PR を持つ起動（push の送り先は Git の境界を差し替える）。"""
+    pr = threads.ReadPr("o/r#9", "feat/x", "h0", "o/r")
+    g = SimpleNamespace(push_repos=lambda remote: targets)
+    return SimpleNamespace(read_pr=pr, pushed=pushed, g=g, remote="origin", warnings=[])
+
+
 @pytest.mark.parametrize(
-    ("head", "reused", "want"),
-    [("h0", False, "o/r#9"), ("h1", False, "o/r#9"), ("h1", True, None), ("local", False, None), (None, False, None)],
+    ("head", "targets", "want"),
+    [
+        ("h0", ["other/r"], "o/r#9"),
+        ("h1", ["O/R"], "o/r#9"),
+        ("h1", ["other/r"], None),
+        ("h1", ["o/r", None], None),
+        ("h1", [], None),
+        ("local", ["o/r"], None),
+        (None, ["o/r"], None),
+    ],
 )
-def test_the_reviewed_pr_needs_the_reviewed_head_to_be_in_the_pull_request(head: str | None, reused: bool, want: str | None) -> None:
-    """始めに読んだ head と、この起動が送った修正のコミットだけを PR の head と認める。"""
-    data = {store.ROUNDS: [{"head": "h0", "fix": {"pushed": "h1"}}]}
-    run = SimpleNamespace(read_pr=threads.ReadPr("o/r#9", "feat/x", "h0"), data=data)
-    assert drive._reviewed_pr(run, head, 1, reused) == want
+def test_the_reviewed_pr_needs_the_reviewed_head_to_be_in_the_pull_request(
+    head: str | None, targets: list[str | None], want: str | None
+) -> None:
+    """読んだ head か、PR の head のリポジトリへ送った修正のコミットだけを PR の head と認める。"""
+    run = _reading_run(targets, {"h1"})
+    assert reviewed_pr.confirmed(run, head) == want
+    assert bool(run.warnings) == (head == "h1" and want is None)
     run.read_pr = None
-    assert drive._reviewed_pr(run, head, 1, reused) is None
+    assert reviewed_pr.confirmed(run, head) is None
+
+
+@pytest.mark.parametrize(("read", "seen"), [("before", True), ("resent", True), ("elsewhere", False)])
+def test_the_pull_request_read_before_a_resend_is_still_the_reviewed_one(read: str, seen: bool) -> None:
+    """同期の前に読んだ head も、送り直した後に読んだ head も、同じ PR として扱う。"""
+    run = SimpleNamespace(cfg=SimpleNamespace(branch="feat/x"), synced_head="before", sent="resent")
+    pr = threads.ReadPr("o/r#9", "feat/x", read, "o/r")
+    assert reviewed_pr.seen(run, pr) == (pr if seen else None)
+    assert reviewed_pr.seen(run, pr._replace(branch="feat/y")) is None
+
+
+def test_a_round_of_another_pull_request_is_not_reused() -> None:
+    """読んだ PR の確認を求める起動は、同じ PR を読んだラウンドだけを使う。読めなければどのラウンドも使わない。"""
+    state = {store.ROUNDS: [{"head": "h1", scope_decide.PR: "o/r#9"}]}
+    for pr, want in (("o/r#9", "h1"), ("o/r#10", None), ("", None), (None, "h1")):
+        assert scope_decide.read_by_all_head(state, scope_decide.Basis(pr=pr)) == want
+    assert scope_decide.read_by_all_head({store.ROUNDS: [{"head": "h1"}]}, scope_decide.Basis(pr="")) is None
 
 
 def test_the_port_reports_the_pull_request_read_with_the_threads() -> None:
     page = {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": []}
     pull = {"baseRefName": "main", "headRefName": "feat/x", "headRefOid": "h0", "reviewThreads": page}
+    pull["headRepository"] = {"nameWithOwner": "fork/r"}
     hub = SimpleNamespace(repo="o/r", repository=lambda query, variables: {"pullRequest": pull})
     port = threads.GitHubPort(hub, None, 9, RuntimeError)
     assert port.read_pr() is None
     port.open_threads()
-    assert port.read_pr() == threads.ReadPr("o/r#9", "feat/x", "h0")
+    assert port.read_pr() == threads.ReadPr("o/r#9", "feat/x", "h0", "fork/r")

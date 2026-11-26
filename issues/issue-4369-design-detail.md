@@ -473,8 +473,11 @@ contracts/
 
 - `Finding` に `defer: Optional[str] = None` を最後の欄として足す。`journal.findings` は行の `REVIEW_DEFER` を渡し、`as_findings` は `defer` を読む
 - `cmd_run` は `--repo` があれば、`HUB` の第 1 引数に渡し、`GH_REPO` を環境に置く（相手役と修正担当の `gh` も同じリポジトリになる）
-- `--reviewed-pr-out` のファイルは始めに消し、`--reviewed-out` を書くときだけ書く。書く値は、スレッドの一覧と同じ応答から実際に読んだ PR（`drive.Outcome.reviewed_pr`）である
-- `reviewed_pr` を持つのは次の 2 つを満たす回だけで、ほかの回はファイルを書かない。始めに読んだ PR の head ブランチと head が、レビューするブランチの取得した先頭と一致する。レビューした HEAD が、その head か、この起動が送った修正のコミットである
+- `--reviewed-pr-out` のファイルは始めに消し、`--reviewed-out` を書くときだけ書く。書く値は、スレッドの一覧と同じ応答から実際に読んだ PR（`drive.Outcome.reviewed_pr`）である。判定は `domains/crossreview/reviewed_pr.py` に置く
+- `reviewed_pr` を持つのは次の 2 つを満たす回だけで、ほかの回はファイルを書かない
+  - 始めに読んだ PR の head ブランチがレビューするブランチで、head が同期で取得した先頭か、送り直した後の先頭である。`--base` がコミットの起動は同期の前に PR を読むので、送り直す前の head になる
+  - レビューした HEAD が、読んだ head か、この起動が送った修正のコミット（前の起動の分を送り直したものを含む）である。修正のコミットの場合は、push の送り先がすべて PR の head のリポジトリであることも確かめる。違えば注意に載せる
+- ラウンドの記録には、そのとき読んだ PR（`<repo>#<pr>`）を残す。`--reviewed-pr-out` を渡した起動は、同じ PR を読んだラウンドだけを差分の起点と収束の再利用に使う
 - 単位の指示の中身を見分ける値（`scope_decide.unit_id`）はラウンドの記録に残し、違えば前のラウンドを差分の起点にも収束の再利用にも使わない
 
 ### 処理の手順
