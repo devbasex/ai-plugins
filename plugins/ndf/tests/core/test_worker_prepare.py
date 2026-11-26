@@ -602,8 +602,66 @@ def test_write_appends_only_the_added_text(tmp_path, capsys, monkeypatch):
     material.write_text("1 行目\n", encoding="utf-8")
     _hold(monkeypatch, state)
     monkeypatch.setattr("sys.stdin", io.StringIO("2 行目\n"))
-    code, _ = _run(capsys, "write", "--path", str(material), "--append")
+    code, _ = _run(capsys, "write", "--path", str(material), "--append", "--op", "a1")
     assert code == 0 and material.read_text(encoding="utf-8") == "1 行目\n2 行目\n"
+
+
+@pytest.mark.parametrize("flag", ["--append", "--edit"])
+def test_write_needs_an_op_to_append_or_edit(tmp_path, capsys, monkeypatch, flag):
+    state = tmp_path / "state"
+    state.mkdir()
+    material = state / "material.md"
+    material.write_text("前\n", encoding="utf-8")
+    _hold(monkeypatch, state)
+    monkeypatch.setattr("sys.stdin", io.StringIO('[{"old": "前", "new": "後"}]'))
+    code, out = _run(capsys, "write", "--path", str(material), flag)
+    assert _invalid(code, out) and material.read_text(encoding="utf-8") == "前\n"
+
+
+@pytest.mark.parametrize(("flag", "body"), [("--append", "2 行目\n"), ("--edit", '[{"old": "1 行目", "new": "一行目"}]')])
+def test_write_does_not_reapply_the_same_op(tmp_path, capsys, monkeypatch, flag, body):
+    # PR 4591 の r2-2: 応答を受け取れずに同じ操作を打ち直しても、結果は 1 回打ったときと変わらない
+    state = tmp_path / "state"
+    state.mkdir()
+    material = state / "material.md"
+    material.write_text("1 行目\n", encoding="utf-8")
+    _hold(monkeypatch, state)
+    outs = []
+    for _ in range(2):
+        monkeypatch.setattr("sys.stdin", io.StringIO(body))
+        outs.append(_run(capsys, "write", "--path", str(material), flag, "--op", "o1"))
+    once = material.read_text(encoding="utf-8")
+    assert [code for code, _ in outs] == [0, 0] and "済んでいた" in outs[1][1]["summary"]
+    assert once == ("1 行目\n2 行目\n" if flag == "--append" else "一行目\n")
+
+
+def test_write_refuses_the_same_op_with_another_body(tmp_path, capsys, monkeypatch):
+    state = tmp_path / "state"
+    state.mkdir()
+    material = state / "material.md"
+    material.write_text("1 行目\n", encoding="utf-8")
+    _hold(monkeypatch, state)
+    for body in ("2 行目\n", "3 行目\n"):
+        monkeypatch.setattr("sys.stdin", io.StringIO(body))
+        code, out = _run(capsys, "write", "--path", str(material), "--append", "--op", "o1")
+    assert _invalid(code, out) and material.read_text(encoding="utf-8") == "1 行目\n2 行目\n"
+
+
+def test_write_reads_and_publishes_under_the_write_lock(tmp_path, capsys, monkeypatch, clock):
+    # PR 4591 の r2-1: 読み取りから公開までをロックで直列にする。ほかの書き込みが持つ間は旧い本文から組んで書かない
+    state = tmp_path / "state"
+    state.mkdir()
+    material = state / "material.md"
+    material.write_text("1 行目\n", encoding="utf-8")
+    _hold(monkeypatch, state)
+    monkeypatch.setattr("sys.stdin", io.StringIO("2 行目\n"))
+    _run(capsys, "write", "--path", str(material), "--append", "--op", "a1")
+    monkeypatch.setattr(durable_locks, "lock_wait_seconds", lambda: 0.0)
+    with _another_append():
+        monkeypatch.setattr("sys.stdin", io.StringIO("3 行目\n"))
+        code, out = _run(capsys, "write", "--path", str(material), "--append", "--op", "a2")
+    assert out["cause"]["kind"] == "store_in_use" and code == causes.exit_code("store_in_use")
+    assert material.read_text(encoding="utf-8") == "1 行目\n2 行目\n"
 
 
 @pytest.mark.parametrize(
@@ -623,7 +681,7 @@ def test_write_edits_one_place_at_a_time(tmp_path, capsys, monkeypatch, edits, a
     material.write_text("古い文\n同じ\n同じ\n", encoding="utf-8")
     _hold(monkeypatch, state)
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(edits, ensure_ascii=False)))
-    code, out = _run(capsys, "write", "--path", str(material), "--edit")
+    code, out = _run(capsys, "write", "--path", str(material), "--edit", "--op", "e1")
     if after is None:
         assert _invalid(code, out) and material.read_text(encoding="utf-8") == "古い文\n同じ\n同じ\n"
     else:
