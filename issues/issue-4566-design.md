@@ -174,8 +174,8 @@ graph TB
 
 | 項目 | 内容 |
 | --- | --- |
-| 入力 | `--required <チェック>...`（1 件以上）と `--local-test`（値を持たない）のどちらか 1 つが必須。ほかの引数は今のまま |
-| 手元のテストのコマンド | 呼び手は渡さない。テストを打つ対象のコミットの設定から読む（「合格をコミットに結び付ける条件」） |
+| 入力 | `--required <チェック>...`（1 件以上）と `--local-test`（値を持たない）のどちらか 1 つが必須。手元の経路は `--pushed-out <ファイル>`（任意）で、合格して送った SHA を書き出す。結果を変えないので、引数の記録には入れない。ほかの引数は今のまま |
+| 手元のテストのコマンド | 呼び手は渡さない。この実行のコミットを含まない側の PR の先頭の設定から読む（「合格をコミットに結び付ける条件」） |
 | 出力 | 今の結果 JSON のまま。最終ゲートの記録に、手段（手元かどうか）が載る |
 | 失敗の形 | 下の 2 つの表のとおり |
 | 互換性 | `--required` を渡す今の呼び方は、設定の手段に関わらずそのまま使える |
@@ -200,9 +200,12 @@ graph TB
 | 終わりのテスト全体が直しの上限でも落ちる | `test_failed` |
 | 取り込んだ PR のブランチの先頭が、この実行の変更を載せる前からテストに落ちる | `test_failed`（最終ゲート修正をしない） |
 | テスト全体の実行の累計が上限に達する | `fix_limit` |
-| 対象のコミットの設定では、手段が手元のテストでなくなる | `precondition`（push しない） |
+| この実行のコミットが `.ndf/` を変える | `refused`（push しない） |
+| 同じ PR の別の `run` か `release` が動いている（CI の経路も同じ） | `precondition`（何も変えない） |
+| 取り込んだ PR の先頭の設定では、手段が手元のテストでなくなる | `precondition`（push しない） |
 | テストが追跡ファイルを書き換えた、または HEAD を動かした | `precondition` |
-| 手元の経路のプランで、呼び出し元の worktree を PR のブランチへ早送りできない | `precondition` |
+| 手元の経路のプランで、呼び出し元の worktree を検証済みの SHA へ早送りできない | `precondition` |
+| 手元の経路の起動で、まとめた検証のプラン（`check.json`）を組もうとする | `precondition`（プランを組まない） |
 | 対象範囲の外の直し | `refused` |
 | `--branch` のリモートの先頭を取り込むと衝突する | `base_conflict` |
 | push の拒否（PR のブランチが進んでいない、または取り込み直す周が残っていない） | `push_rejected` |
@@ -249,14 +252,15 @@ graph TB
     U -->|拒まれた| R{"PR のブランチが進み、周が残る"}
     R -->|はい| S
     R -->|いいえ| Q["push_rejected で停止"]
-    W -->|落ちる| C{"取り込んだ先頭だけで合格する"}
+    W -->|落ちる| L{"次の周が残る"}
+    L -->|残らない| Y["push せず test_failed で停止"]
+    L -->|残る| C{"取り込んだ先頭だけで合格する"}
     C -->|落ちる| Y0["test_failed で停止（直さない）"]
     C -->|合格| F["最終ゲート修正（対象範囲の中だけ）"]
-    F -->|周が残る| S
-    F -->|上限| Y["push せず test_failed で停止"]
+    F --> S
 ```
 
-「周」は、取り込み・テスト・push か直し、のひとまとまりで、今の最終ゲートと同じく 1 回の実行で `--max-fix` + 1 回（既定 3 回）までである。
+「周」は、取り込み・テスト・push か直し、のひとまとまりで、今の最終ゲートと同じく 1 回の実行で `--max-fix` + 1 回（既定 3 回）までである。最後の周でテストが落ちたら、原因の確認も最終ゲート修正の担当の起動もせずに停止する。直しても確かめ直す周が無いためである。
 
 ### push するコミット
 
@@ -269,35 +273,60 @@ graph TB
 
 ### 落ちた原因を分ける
 
-取り込んだ PR のブランチの先頭が着手前に合格した SHA と違うときは、テストが落ちても、この実行の変更が原因とは限らない。このときは最終ゲート修正の前に、取り込んだ先頭だけ（この実行のコミットを載せない状態）でテスト全体を打つ。
+テストが落ちて次の周が残るときは、この実行の変更が原因かを先に確かめる。使うのは「合格の記録」である。合格の記録は、テスト全体に合格した SHA と、そのとき使ったテストの設定の識別値の組で、状態ファイルに保存する。着手前の合格も、原因の確認の合格も記録する。
 
-- そこでも落ちれば、並行して入った変更が原因である。担当に直させず、理由にその SHA を載せて `test_failed` で停止する
-- そこで合格すれば、この実行の変更を載せたことで落ちたので、最終ゲート修正へ進む
-- 取り込んだ先頭が着手前に合格した SHA と同じなら、打ち直さずに最終ゲート修正へ進む
+- 取り込んだ PR のブランチの先頭と、今のテストの設定の識別値の組が記録にあれば、打ち直さずに最終ゲート修正へ進む
+- 組が記録に無ければ（先頭が進んだか、設定が変わった）、最終ゲート修正の前に、取り込んだ先頭だけ（この実行のコミットを載せない状態）を同じ検証条件でテストする
+  - そこでも落ちれば、この実行の変更が原因ではない。担当に直させず、理由にその SHA を載せて `test_failed` で停止する
+  - そこで合格すれば、組を記録して最終ゲート修正へ進む。次の周で先頭と設定が同じなら、打ち直さない
 
 ### テストを打つ場所
 
-テスト全体は、毎回、対象の SHA から新しく作る検証用の作業場所で打つ。着手前も終わりも、原因を分ける実行も同じである。
+テスト全体は、毎回、対象の SHA から新しく作る検証用の作業場所で打つ。着手前も終わりも、原因の確認も同じである。
 
-- 検証用の作業場所は、リファクタリングの保存先（`rf<PR>/`）の下に、実行のたびに別の名前で作る。作る前にパスを状態ファイルに記録し、NDF の lock を掛ける
-- 打ち終えたら取り除く。中断で残ったものは、次の実行と `ndf refactor release` が取り除く。取り除くのは、状態ファイルに記録があり NDF の lock が掛かったパスだけである
+- 検証用の作業場所は、リファクタリングの保存先（`rf<PR>/`）の下に、実行のたびに別の名前で作る。作る前にパスを状態ファイルに記録し、作った後に NDF の git worktree lock を掛ける
+- 打ち終えたら取り除く
 - `--work` に渡された利用者の作業ツリーは、リポジトリを特定して設定を読むためだけに使う。そこではテストを打たず、ファイルを消さない
 - 前のテストが作ったビルド成果物（無視の設定に当たるファイルを含む）は、次のテストへ持ち越さない。依存の取得やビルドは、テストのコマンドかコンテナが毎回用意する。リポジトリの外のキャッシュは今のまま使える
 
+中断で残った作業場所を、使用中のものと取り違えないために、PR ごとの排他ロックを置く。
+
+- `ndf refactor run` と `ndf refactor release` は、始めに `rf<PR>/` のロックファイルの排他ロック（`filelock`）を待たずに取り、終わるまで持つ。プロセスが終われば、中断でもロックは解ける
+- ロックを取れなければ、同じ PR の別の実行が動いている。何も変えずに `precondition` で停止する
+- ロックを取れた実行だけが、残った作業場所を取り除く。対象は、状態ファイルに記録のあるパスである。作成の途中で中断したものも回収できるように、git worktree lock の有無は問わない。利用者が掛けた git worktree lock があれば残す
+
 ### 合格をコミットに結び付ける条件
 
-テストの設定は、対象の SHA に含まれる `.ndf/project.json` から読む。起動の後に PR のブランチがテストのコマンドを変えれば、新しいコマンドで確かめる。`.ndf/project.json` がコミットに含まれないリポジトリでは、`--work` の設定を使う。対象の SHA の設定で手段が手元のテストでなくなれば（必須のチェックか CI テストの設定が足された、テストの suite が無くなった）、push せずに `precondition` で停止する。
+テストの設定は、この実行のコミットを含まない側の `.ndf/project.json` から読む。着手前は着手時の PR の先頭、それより後は取り込んだ PR のブランチの先頭である。
+
+- 並行して入った変更がテストのコマンドを変えれば、新しいコマンドで確かめる
+- この実行の変更は、自分を合格させる基準にならない。この実行のコミットが `.ndf/` を変えていれば、利用者の設定の書き換えになるので、push せずに `refused` で停止する
+- `.ndf/project.json` がコミットに含まれないリポジトリでは、`--work` の設定を使う
+- 読んだ設定で手段が手元のテストでなくなれば（必須のチェックか CI テストの設定が足された、テストの suite が無くなった）、push せずに `precondition` で停止する
 
 テストの後に、検証用の作業場所の `HEAD` が対象の SHA のままで、追跡ファイルに変更が無いことを確かめる。満たさなければ、書き換わったファイルを理由に載せて `precondition` で停止する。テストが作る未追跡の生成物は問わない。
+
+テストのコマンドが読むほかのファイル（`package.json` の scripts、`Makefile` など）は、設定からは特定できないので、この条件の対象にしない（「未確認のまま残ること」）。
 
 ### テストの打ち方と時間の上限
 
 - テスト全体は、テストの suite の `command` を設定の順にすべて打つ。1 つでも落ちるか時間の上限を超えれば不合格である
-- suite のコマンド 1 つの上限は、方針 `test-run.test`（900 秒）である。項目ごとの検証（`verify.py`）と同じ単位で、値は方針のファイルから読む。テストのスロットを待つ時間は数えない
-- テスト全体の実行の累計にも上限を置く。値は今の安全網の上限（`--safety-net-minutes`、無ければ実効の予算 × 方針の倍率）を使い、コードを書く工程の累計とは別に数える。累計は状態ファイルに保存し、再開しても引き継ぐ
-- 各 suite には、900 秒と累計の残りの小さい方を渡す。残りが無くなるか、残りで縮めた上限に当たれば `fix_limit` で停止する（テストの失敗には数えない）。安全網を大きくして打ち直すと続きから進む
-- 方針の説明にある「実測の所要の 3 倍まで延ばす」は使わない。今の読み手（`verify.py`）は 900 秒だけを使っていて、設定の `test_duration` は廃止予定で読み手が無い
-- 取り込んだ後の SHA とテストの設定の識別値が、着手前に合格した記録と両方同じ（項目が 1 件も残らず、PR のブランチも動いていない）なら、テスト全体を打ち直さない
+- 取り込んだ後の SHA とテストの設定の識別値の組が合格の記録にあれば（項目が 1 件も残らず、PR のブランチも動いていないなど）、テスト全体を打ち直さない
+- suite のコマンド 1 つの上限は、方針 `test-run.test` から読む秒数（今の値は 900 秒）である。項目ごとの検証（`verify.py`）と同じ単位である
+- テスト全体の実行の累計にも上限を置く。値は今の安全網の上限（`--safety-net-minutes`、無ければ実効の予算 × 方針の倍率）を使い、コードを書く工程の累計とは別に数える
+- 各 suite には、方針から読んだ秒数と、累計の残りの小さい方を渡す。残りが無くなるか、残りで縮めた上限に当たれば `fix_limit` で停止する（テストの失敗には数えない）
+- 累計に足すのは、suite のコマンドが実行されていた時間だけである。起動の関数（`slots.run_command`）はスロットの待ちを含むので、呼び出しの経過時間から `slots.waited_since` が返す待ちの秒を引く。上限の秒数は、スロットを取った後の実行にだけ掛かる
+- 方針の説明にある「実測の所要の 3 倍まで延ばす」は使わない。今の読み手（`verify.py`）は `seconds` の値だけを使っていて、設定の `test_duration` は廃止予定で読み手が無い
+
+上限で停止した後の再開は、次のとおりである。
+
+| 残るもの | 扱い |
+| --- | --- |
+| 累計の秒 | suite を 1 つ打つたびに状態ファイルへ保存する。着手前で引数をまだ記録していなくても保存し、打ち直しに引き継ぐ |
+| 合格の記録 | テスト全体に合格した組だけが残り、打ち直さない |
+| 途中で止まったテスト全体 | 済んだ suite は引き継がず、新しい作業場所で最初の suite から打つ。後の suite が、先の suite の生成物を使うことがあるためである |
+
+打ち直しでは、安全網を、使った累計とテスト全体 1 回分の合計より大きくする。`fix_limit` の理由には、使った累計と上限を載せる。
 
 ### 手元の経路のプラン
 
@@ -308,7 +337,9 @@ graph TB
 | CI | `push` → 終了（今のまま） |
 | 手元 | `follow` → 終了。`push`・`fix-push` は持たない。`refactor` が停止すればプランもそこで停止する |
 
-`follow` は、PR のブランチを取得して呼び出し元の worktree を早送りするだけのステップ（`git merge --ff-only`）で、何も送らない。早送りできなければ `precondition` で停止する。まとめた検証のプラン（`check.json`）も、手元の経路では `refactor` の直後に `follow` を入れる。ステップの出し入れは、手元のテストのステップを外す今の仕組み（`ndf.core.route` の `without_steps`）を使う。
+`follow` は何も送らず、呼び出し元の worktree を検証済みの SHA へ早送りするだけのステップである。`refactor` が `--pushed-out` で状態ディレクトリに書いた SHA を読み、取得した後に `git merge --ff-only <その SHA>` を打つ。完了した結果を再利用する実行でも、同じ SHA を書く。送った後に PR のブランチが進んでいても、その先頭は取り込まない。早送りできなければ `precondition` で停止する。ステップの出し入れは、手元のテストのステップを外す今の仕組み（`ndf.core.route` の `without_steps`）を使う。
+
+まとめた検証のプラン（`check.json`）は、この変更では手元の経路に対応させない。このプランは `ci` ステップが必須のチェックの名前（`required`）を要り、必須のチェックが無いリポジトリでは今も組めない（#4472）。名前を手で渡して組もうとしても、起動の引数に `--local-test` があれば組まずに `precondition` で停止する。後段の `push`・`fix-push`・`ci` の組み替えは、#4472 で扱う。
 
 ## 非機能の実現方式
 
@@ -426,7 +457,7 @@ graph TB
 - 採らなかった案: 担当が書く作業場所で打ち、前に未追跡ファイルを消す（利用者が置いたファイルまで消しうる。無視の設定に当たる古いビルド成果物は残り、変更後のコードを確かめないまま合格しうる）
 - 採らなかった案: 同じ場所で未追跡ファイルがあれば停止する（テストが生成物を作るリポジトリは毎回止まり、古いビルド成果物の問題も残る）
 - 採らなかった案: 無視の設定に当たるファイルもすべて消して使い回す（消してよいものを NDF が作ったものに限れない）
-- **代償**: 依存の取得物を持ち越さないので、テストのコマンドが依存を用意する場合は毎回その時間が掛かる。作ったばかりの作業場所でテストが通らないリポジトリは、着手前に停止する
+- **代償**: 依存の取得物を持ち越さないので、テストのコマンドが依存を用意する場合は毎回その時間が掛かる。作ったばかりの作業場所でテストが通らないリポジトリは、着手前に停止する。同じ PR の実行は同時に 1 つになる
 - 根拠: Value 13 / Value 6（MVV バージョン 11）。確かめていないものを済んだとせず、自動で片付けるのは NDF が作ったものだけにする
 
 ### 決定 10: 所要が際限なく延びないようにするため、テスト全体の累計にも安全網の上限を当てる
@@ -436,7 +467,7 @@ graph TB
 - 採らなかった案: suite ごとの 900 秒だけにする（suite の数 × 周の数だけ積み上がる）
 - 採らなかった案: コードを書く工程と同じ累計に足す（テストが重いリポジトリでは、実装に使える時間が減って項目が途中で止まる）
 - 採らなかった案: 新しい上限の引数と方針を足す（打ち直しで大きくする手段が 2 つになる）
-- **代償**: 1 回の実行は、最大で安全網の上限の 2 倍（コードを書く工程とテスト全体）まで掛かる。テストのスロットの待ちは別に掛かる
+- **代償**: コードを書く工程と、テスト全体の suite のコマンド実行には、それぞれ安全網の上限が掛かる。提案と計画の担当、項目ごとの検証、スロットの待ち、git の取得、作業場所の作成と削除を含めた全体の経過時間には、この上限は掛からない
 - 根拠: Value 2 / Value 3（MVV バージョン 11）。費用の上限に当たれば止め、手元の経路でも同じ手順で再開できる
 
 ## 影響と危険
@@ -455,7 +486,7 @@ graph TB
 | 手元のテストが外のサービスを要る、suite 1 つが 900 秒を超える、追跡ファイルを書き換える、または作ったばかりの作業場所で通らない | 着手前の 1 回で `test_failed`（書き換えは `precondition`）になる。失敗した工程の行は `ndf progress disable` で外せる。以後のスプリントは `workflow.stages` で無効にする |
 | 工程「実装」など、ほかの工程のプラン | 必須のチェックが無いと差し込み `required` が埋まらず、プランを組めない（決定 8。#4472） |
 | `development-workflow` の `SKILL.md` は 499 行で、文書の行数の上限が近い | 工程の表の「リファクタリング」の行の中を書き換え、行を増やさない |
-| 検査のプラン（テンプレート `check.json`。要求仕様の「まとめた検証のプラン」と同じもの）の説明 | 工程の表の「設定の無いリポジトリの検査のプランは `assess`（差分が文書だけかを見る最初のステップ）と `refactor`（リファクタリングのステップ）を持たない」は、テンプレートの形と合わないので消す。テンプレートは変えない |
+| 検査のプラン（テンプレート `check.json`。要求仕様の「まとめた検証のプラン」と同じもの）の説明 | 工程の表の「設定の無いリポジトリの検査のプランは `assess`（差分が文書だけかを見る最初のステップ）と `refactor`（リファクタリングのステップ）を持たない」は、テンプレートの形と合わないので消す。テンプレートは変えない（手元の経路は「手元の経路のプラン」のとおり組まない） |
 
 ### 代表のリポジトリでの振る舞い
 
@@ -495,17 +526,17 @@ graph TB
 | I4・I5 | 必須のチェックか CI テストの設定がある設定で `--local-test` を打つと `invalid` になる。CI テストの設定があれば、`--ci-test` を省いても手元でテストの suite を打たない | 設定との突き合わせを外すと落ちる |
 | 引数と手段の表 | 設定の手段が手元のテストか無しでも、`--required` は受けて引数の名前を待つ | `--required` を設定で断る、または待つ名前を設定から取ると落ちる |
 | 引数の記録 | テストの suite の `command` を変えると、完了した結果を再利用しない。CI の経路の並びは今のまま | 識別値を記録から外すと落ちる |
-| 時間の上限 | suite のコマンドごとに方針 `test-run.test` の秒を渡す | 全 suite で 1 つの上限にすると落ちる |
+| 時間の上限 | suite のコマンドごとに方針 `test-run.test` から読んだ秒を渡す。スロットの待ちは累計に足さない | 全 suite で 1 つの上限にする、秒数を固定で書く、または待ちを含めて数えると落ちる |
 | 決定 5 | 着手前のテストが落ちれば、担当を起動せずに `test_failed` になる | 提案を先に流すと落ちる |
 | 決定 6 | 最終ゲート修正が対象範囲の外を変えれば、戻して `refused` になり、送らない | 範囲の検査を手元の経路で省くと落ちる |
 | 決定 6（送る SHA） | テストの間に PR のブランチが進むと、取り込み直してテストに合格してから送る。周が残らなければ `push_rejected`。進んでいない拒否は、すぐ `push_rejected` | 合格の後にテストせず `HEAD` を送る、または拒否の理由を分けないと落ちる |
-| 決定 6（プラン） | `--local-test` の起動で組んだ `cross-refactoring` と `check` のプランは、`refactor` の直後が `follow` で、`cross-refactoring` は `push`・`fix-push` を持たない。CI の経路のプランは今のまま | プランに `push` を残すと落ちる |
+| 決定 6（プラン） | `--local-test` の起動で組んだ `cross-refactoring` のプランは、`refactor` の直後が `follow` で、`push`・`fix-push` を持たない。`follow` は検証済みの SHA へだけ早送りする。`check` のプランは組まない。CI の経路のプランは今のまま | `push` を残す、`follow` が最新の先頭を取り込む、または `check` を組むと落ちる |
 | 手段の判定（`kind` の省略） | `kind` を省いた suite だけの設定で、手段が手元のテストになる | `kind` が `test` の文字列だけを数えると落ちる |
-| 設定の読み先 | 取り込んだコミットがテストのコマンドを変えていれば、新しいコマンドを打つ | 起動時に読んだコマンドを使い回すと落ちる |
+| 設定の読み先 | 取り込んだ先頭がテストのコマンドを変えていれば新しいコマンドを打つ。この実行のコミットが `.ndf/` を変えれば `refused` で送らない | テストしたコミットの設定を読む、または起動時のコマンドを使い回すと落ちる |
 | 再開 | 最終ゲートで停止した実行を打ち直すと、着手前のテストを打たずに取り込みと最終ゲートから進む | 着手前の合格の記録を保存しないと落ちる |
-| 原因の分離 | 取り込んだ先頭だけでも落ちる場合は、最終ゲート修正を起動せず `test_failed` | 原因を分けずに担当を起動すると落ちる |
-| 決定 9 | テスト全体は新しい検証用の作業場所で打ち、`--work` の未追跡ファイルは残る | 担当の作業場所や `--work` で打つ、または消すと落ちる |
-| 決定 10 | 累計の残りが suite に渡り、尽きれば `fix_limit`。時計は差し替えて確かめる | 累計を渡さないと落ちる |
+| 原因の分離 | 取り込んだ先頭だけでも落ちる場合は、最終ゲート修正を起動せず `test_failed`。合格した組は次の周で打ち直さない。設定の識別値が変われば打ち直す。最後の周で落ちたら、原因の確認も担当の起動もしない | 原因を分けずに担当を起動する、SHA だけで再利用する、または上限の判定を後にすると落ちる |
+| 決定 9 | テスト全体は新しい検証用の作業場所で打ち、`--work` の未追跡ファイルは残る。PR の排他ロックが取られていれば、`run` と `release` は何も取り除かずに停止する。ロックが空けば、記録のある残った作業場所を取り除く | 担当の作業場所や `--work` で打つ、またはロックを見ずに取り除くと落ちる |
+| 決定 10 | 累計の残りが suite に渡り、尽きれば `fix_limit`。打ち直すと累計を引き継ぎ、途中で止まったテスト全体は最初の suite から打つ。時計は差し替えて確かめる | 累計を渡さない、または打ち直しで 0 に戻すと落ちる |
 | 合格の条件 | テストが追跡ファイルを書き換えると `precondition` になり、送らない | テストの後の照合を外すと落ちる |
 | 決定 7 | `ci_declared` を持つ古い定義の行が、停止せずに今と同じ判定になる | 語の値を求める処理を消すと落ちる |
 
@@ -515,7 +546,7 @@ graph TB
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4566 | 実装する | — | `plugins/ndf/src/ndf/testing/means.py`（新設）、`plugins/ndf/contracts/workflow/stages/refactor.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/limits/test-run.test.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/refactor_values.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/contracts/templates/cross-refactoring.json`、`plugins/ndf/contracts/templates/check.json`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/src/ndf/domains/crossrefactor/workspace.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/src/ndf/domains/crossrefactor/cli.py`、`plugins/ndf/src/ndf/domains/crossrefactor/drive.py`、`plugins/ndf/src/ndf/domains/crossrefactor/final_gate.py`、`plugins/ndf/src/ndf/domains/crossrefactor/prompt_decide.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/testing/test_means.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_invoke_refactor.py`、`plugins/ndf/tests/domains/crossrefactor/test_drive.py`、`plugins/ndf/tests/domains/crossrefactor/test_refactor_cli.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`docs/specifications/ndf-ci-only-tests.md`、`docs/specifications/ndf-review-units-and-refactoring-timing.md`、`docs/specifications/ndf-stage-plan-work-prompts.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-ci-test.md` |
+| #4566 | 実装する | — | `plugins/ndf/src/ndf/testing/means.py`（新設）、`plugins/ndf/contracts/workflow/stages/refactor.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/limits/test-run.test.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/refactor_values.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/contracts/templates/cross-refactoring.json`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/src/ndf/domains/crossrefactor/workspace.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/src/ndf/domains/crossrefactor/cli.py`、`plugins/ndf/src/ndf/domains/crossrefactor/drive.py`、`plugins/ndf/src/ndf/domains/crossrefactor/final_gate.py`、`plugins/ndf/src/ndf/domains/crossrefactor/prompt_decide.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/testing/test_means.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_invoke_refactor.py`、`plugins/ndf/tests/domains/crossrefactor/test_drive.py`、`plugins/ndf/tests/domains/crossrefactor/test_refactor_cli.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`docs/specifications/ndf-ci-only-tests.md`、`docs/specifications/ndf-review-units-and-refactoring-timing.md`、`docs/specifications/ndf-stage-plan-work-prompts.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-ci-test.md` |
 
 ## 未確認のまま残ること
 
@@ -525,6 +556,7 @@ graph TB
 | CI テストの設定が無い利用先での実行 | 項目ごとの手元の検証と手元の最終ゲートを、実機のリポジトリで通していない。リリースの後の確認の計画（次のスプリント）で分かる |
 | 手元のテストの時間の上限が足りるか | suite のコマンド 1 つが 900 秒を超える利用先と、累計が安全網の上限を超える利用先の有無は、使われるまで分からない |
 | 作ったばかりの作業場所でテストが通る利用先の割合 | 依存の用意をコマンドに含めていない利用先は、着手前に停止する。どれだけあるかは、使われるまで分からない |
+| テストのコマンドが読むファイルを、この実行が変える場合 | `.ndf/` 以外のファイル（`package.json` の scripts、`Makefile` など）の変更は検出しない。対象範囲に含まれていれば、変えた内容で合否が決まる。後の工程のコードレビューで見る |
 
 ## 外部の調査
 
