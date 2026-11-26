@@ -4,7 +4,9 @@
 
 - 要求仕様: [issue-3702-requirements.md](./issue-3702-requirements.md)（正は https://github.com/devbasex/ai-plugins/issues/3702 の本文）。受け入れ条件は番号で指す
 - 設計書: [issue-3702-design.md](./issue-3702-design.md)・詳細設計書: [issue-3702-design-detail.md](./issue-3702-design-detail.md)
-- 単位の正本: [issue-3702-plan.units.json](./issue-3702-plan.units.json)。下の「レビューの単位」と「並列と直列」の表は、この変更の実装の後は `ndf plan units render` が作る。今はコマンドが無いので、同じ規則（U1・U3・U4、実行順、行数）を確かめるスクリプトで作った
+- 単位の SSOT: [issue-3702-plan.units.json](./issue-3702-plan.units.json)
+  - 下の「レビューの単位」と「並列と直列」の表は、この変更の実装の後は `ndf plan units render` が作る
+  - 今はコマンドが無いので、同じ規則（U1・U3・U4、実行順、行数）を確かめるスクリプトで作った
 - モード: `standard`（公開インタフェース（コマンド・宣言・工程の並び）が変わり、関数を新設する）
 
 ## 着手の前提
@@ -20,115 +22,231 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
 依存の順に並べる。最初のタスクは、今の振る舞いを縛る退行テストを含む。
 
 ### Task 1: 今の工程の並びを縛る退行テストと、単位のファイルの形・上限・設計の結果の読み手
-- **対象ファイル:** `plugins/ndf/contracts/workflow/review-units.schema.json`、`plugins/ndf/contracts/limits/review-units.target-lines.json`、`plugins/ndf/contracts/limits/review-units.max-lines.json`、`plugins/ndf/contracts/schemas/project-workflow.schema.json`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/src/ndf/core/plan/inputs_decide.py`、`plugins/ndf/tests/core/plan/test_inputs.py`、`plugins/ndf/tests/progress/test_definition.py`
-- **変更内容:** 今の工程の並び（モードごとの流れるステップと設計承認ゲートの位置）を縛る退行テストを足してから、単位のファイルのスキーマ、上限の 2 つの設定と宣言 `workflow.review_units`、「設計の結果」の表の扱いと統合先の読み手 `design_handlings` を足す。呼び出し元の無い `design_gaps` とそのテストを消す
+- **対象ファイル:**
+  - `plugins/ndf/contracts/workflow/review-units.schema.json`
+  - `plugins/ndf/contracts/limits/review-units.target-lines.json`
+  - `plugins/ndf/contracts/limits/review-units.max-lines.json`
+  - `plugins/ndf/contracts/schemas/project-workflow.schema.json`
+  - `plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`
+  - `plugins/ndf/src/ndf/core/plan/inputs_decide.py`
+  - `plugins/ndf/tests/core/plan/test_inputs.py`
+  - `plugins/ndf/tests/progress/test_definition.py`
+- **変更内容:**
+  - 先に、今の工程の並び（モードごとの流れるステップと設計承認ゲートの位置）を縛る退行テストを足す
+  - そのあとで、次の 3 つを足す。単位のファイルのスキーマ、上限の 2 つの設定と宣言 `workflow.review_units`、「設計の結果」の表の扱いと統合先の読み手 `design_handlings`
+  - 呼び出し元の無い `design_gaps` とそのテストを消す
 - **満たす受け入れ条件:** 6
 - **進め方:** 退行テストは今のまま通る形で足す。ほかは失敗するテスト → 通す最小実装 → 整理
 
 ### Task 2: 実行順と確かめの規則
-- **対象ファイル:** `plugins/ndf/src/ndf/core/plan/units_decide.py`、`plugins/ndf/tests/core/plan/test_units_decide.py`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/core/plan/units_decide.py`
+  - `plugins/ndf/tests/core/plan/test_units_decide.py`
 - **変更内容:** 詳細設計の「単位の判定」の型と `parse`・`judge`（U1〜U6・W1、実行順、導く値、マージの順）・`single`。400・401・1,000・1,001 行と、16,757 行・24,008 行の単位を入力にする
 - **満たす受け入れ条件:** 2・3・5・7
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 3: 分け方の案と #3698・#3247・#3672 の入力
-- **対象ファイル:** `plugins/ndf/src/ndf/core/plan/units_decide.py`、`plugins/ndf/tests/core/plan/test_units_decide.py`、`plugins/ndf/tests/core/plan/fixtures/units/issue-3672.units.json`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/core/plan/units_decide.py`
+  - `plugins/ndf/tests/core/plan/test_units_decide.py`
+  - `plugins/ndf/tests/core/plan/fixtures/units/issue-3672.units.json`
 - **変更内容:** `split` と `judge` の `proposals`。#3672 の詳細設計の地図の行をタスクにした 1 単位の fixture を作り、案が上限に収まる複数の単位になり、依存の向きの順になることを縛る（先に要る: Task 2）
 - **満たす受け入れ条件:** 5・7・8
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 4: cross-review が比較元をマージ先に合わせて書き出す
-- **対象ファイル:** `plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/docs/contracts/commands.md`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/domains/crossreview/cli.py`
+  - `plugins/ndf/src/ndf/domains/crossreview/drive.py`
+  - `plugins/ndf/src/ndf/domains/crossreview/settings.py`
+  - `plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`
+  - `plugins/ndf/docs/contracts/commands.md`
 - **変更内容:** `--reviewed-base-out` と `RunConfig.follow_base`。ラウンドの記録の `base_branch`、マージ先が変わったときの全差分。コマンドの一覧を生成し直す
 - **満たす受け入れ条件:** 1
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 5: マージ済みの PR も承認と照らす指定と、REST へ読み替えない読み取り
-- **対象ファイル:** `plugins/ndf/src/ndf/ci_cli.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/tests/adapters/test_ci_cli.py`、`plugins/ndf/tests/adapters/test_github.py`、`plugins/ndf/docs/contracts/commands.md`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/ci_cli.py`
+  - `plugins/ndf/src/ndf/adapters/github.py`
+  - `plugins/ndf/tests/adapters/test_ci_cli.py`
+  - `plugins/ndf/tests/adapters/test_github.py`
+  - `plugins/ndf/docs/contracts/commands.md`
 - **変更内容:** `ndf ci merge --verify-merged` と `GitHub.pulls` の `rest_fallback`。指定の無い呼び出しの振る舞いは変えない。コマンドの一覧を生成し直す
 - **満たす受け入れ条件:** 1
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 6: 単位のファイルの読み書きと欠落の確かめ
-- **対象ファイル:** `plugins/ndf/src/ndf/core/plan/units_files.py`、`plugins/ndf/tests/core/plan/test_units_files.py`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/core/plan/units_files.py`
+  - `plugins/ndf/tests/core/plan/test_units_files.py`
 - **変更内容:** 詳細設計の「単位のファイルの読み書き」の `find`・`load`・`limits_of`・`collect`・`check`・`render_tables`・`differs`（先に要る: Task 1・2）
 - **満たす受け入れ条件:** 3・4・6
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 7: ndf plan units render・check
-- **対象ファイル:** `plugins/ndf/src/ndf/core/plan/cli.py`、`plugins/ndf/src/ndf/core/plan/units_files.py`、`plugins/ndf/tests/core/plan/test_units_files.py`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/docs/contracts/env.md`、`plugins/ndf/docs/contracts/commands.md`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/core/plan/cli.py`
+  - `plugins/ndf/src/ndf/core/plan/units_files.py`
+  - `plugins/ndf/tests/core/plan/test_units_files.py`
+  - `plugins/ndf/contracts/domains/env.json`
+  - `plugins/ndf/docs/contracts/env.md`
+  - `plugins/ndf/docs/contracts/commands.md`
 - **変更内容:** `ndf plan units render`・`check`。`NDF_STAGE_INPUT` と `NDF_DESIGN_RECORD_DIR` を受ける形と `checked.json`。環境変数の一覧に `NDF_DESIGN_RECORD_DIR`・`NDF_MACHINE_ID` を足し、2 つの文書を生成し直す（先に要る: Task 3・6）
 - **満たす受け入れ条件:** 2・3・5・6
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 8: 承認の記録を組み、比べる
-- **対象ファイル:** `plugins/ndf/src/ndf/progress/design_record.py`、`plugins/ndf/tests/progress/test_design_record.py`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/progress/design_record.py`
+  - `plugins/ndf/tests/progress/test_design_record.py`
 - **変更内容:** `progress/design_record.py` の `required`・`build`・`stale`・`reset_drafts`・`approved_of`・`mismatches`。まだどこからも呼ばない（先に要る: Task 6）
 - **満たす受け入れ条件:** 1
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 9: 承認ゲートと承認の記録をつなぐ
-- **対象ファイル:** `plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/tests/progress/gate/test_gate_design_record.py`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/progress/gate/entry.py`
+  - `plugins/ndf/src/ndf/progress/gate/answering.py`
+  - `plugins/ndf/src/ndf/progress/run.py`
+  - `plugins/ndf/src/ndf/progress/folding.py`
+  - `plugins/ndf/src/ndf/progress/invoke.py`
+  - `plugins/ndf/tests/progress/gate/test_gate_design_record.py`
 - **変更内容:** 詳細設計の「承認ゲートとのつなぎ」の表の 7 か所と、課題を外す回答の扱い。`required` が偽の定義では今の振る舞いのまま（先に要る: Task 8）
 - **満たす受け入れ条件:** 1
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 10: 単位のファイルから流し、承認と照らす
-- **対象ファイル:** `plugins/ndf/src/ndf/core/plan/review_units_decide.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/tests/progress/test_units_invoke.py`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/core/plan/review_units_decide.py`
+  - `plugins/ndf/src/ndf/progress/units_invoke.py`
+  - `plugins/ndf/tests/progress/test_units_invoke.py`
 - **変更内容:** `Unit` の欄、`lineup_from_files`、`prepare` の「始める前」の 1〜5、`unit.md` の担当タスクの本文、代表の課題。分け方の承認が要らず単位のファイルの無いスプリントは、#4369 の表の経路のままにする（Task 16 が変換に置き換える）（先に要る: Task 6・8）
 - **満たす受け入れ条件:** 3・4
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 11: 実装を流すコマンド（ndf progress units run）
-- **対象ファイル:** `plugins/ndf/src/ndf/progress/units_cli.py`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/tests/progress/test_units_invoke.py`、`plugins/ndf/docs/contracts/commands.md`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/progress/units_cli.py`
+  - `plugins/ndf/src/ndf/progress/command.py`
+  - `plugins/ndf/tests/progress/test_units_invoke.py`
+  - `plugins/ndf/docs/contracts/commands.md`
 - **変更内容:** `ndf progress units run` を `units_cli.py` に置き、`command.py` に登録する。コマンドの一覧を生成し直す（先に要る: Task 10）
 - **満たす受け入れ条件:** 3
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 12: 依存の順に並列で流す
-- **対象ファイル:** `plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/tests/progress/test_units_parallel.py`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/progress/units_invoke.py`
+  - `plugins/ndf/tests/progress/test_units_parallel.py`
 - **変更内容:** `run_stage` を `graphlib` と `ThreadPoolExecutor` の形にする。本数の上限、マージを 1 つずつ、依存する単位だけを止める失敗、利用上限（先に要る: Task 10）
 - **満たす受け入れ条件:** 3
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理。時計と待ちは差し替える
 
 ### Task 13: マージキューの待ちの状態を読み、後の単位を始める
-- **対象ファイル:** `plugins/ndf/src/ndf/progress/units_queue.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/tests/progress/test_units_parallel.py`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/progress/units_queue.py`
+  - `plugins/ndf/src/ndf/progress/units_invoke.py`
+  - `plugins/ndf/tests/progress/test_units_parallel.py`
 - **変更内容:** `units_queue.read`・`action` と、`run_stage` の待ちの一覧、打ち直しの前の状態の読み取り（先に要る: Task 5・12）
 - **満たす受け入れ条件:** 3
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 14: 実装のプランの最初の確かめ（guard）
-- **対象ファイル:** `plugins/ndf/src/ndf/progress/units_guard.py`、`plugins/ndf/src/ndf/progress/units_cli.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/plan/queue_decide.py`、`plugins/ndf/contracts/templates/impl.json`、`plugins/ndf/tests/progress/test_units_guard.py`、`plugins/ndf/docs/contracts/commands.md`
-- **変更内容:** `units_guard`・`store.read_machines`・`ndf progress units guard`、テンプレート `impl` の `guard`、`RESUME_ALWAYS` と `plan_start`、起動の記録。承認が要らないスプリントと単発の実装は通る（先に要る: Task 11・13）
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/progress/units_guard.py`
+  - `plugins/ndf/src/ndf/progress/units_cli.py`
+  - `plugins/ndf/src/ndf/progress/units_invoke.py`
+  - `plugins/ndf/src/ndf/progress/store.py`
+  - `plugins/ndf/src/ndf/progress/invoke.py`
+  - `plugins/ndf/src/ndf/core/plan/queue_decide.py`
+  - `plugins/ndf/contracts/templates/impl.json`
+  - `plugins/ndf/tests/progress/test_units_guard.py`
+  - `plugins/ndf/docs/contracts/commands.md`
+- **変更内容:**（先に要る: Task 11・13）
+  - `units_guard`・`store.read_machines`・`ndf progress units guard`
+  - テンプレート `impl` の `guard`
+  - `RESUME_ALWAYS` と `plan_start`
+  - 起動の記録
+  - 承認が要らないスプリントと単発の実装は通る
 - **満たす受け入れ条件:** 3
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 15: 送り先を確かめて承認した文書を取り込む（sync）
-- **対象ファイル:** `plugins/ndf/src/ndf/progress/units_sync.py`、`plugins/ndf/src/ndf/progress/units_cli.py`、`plugins/ndf/tests/progress/test_units_sync.py`、`plugins/ndf/docs/contracts/commands.md`
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/progress/units_sync.py`
+  - `plugins/ndf/src/ndf/progress/units_cli.py`
+  - `plugins/ndf/tests/progress/test_units_sync.py`
+  - `plugins/ndf/docs/contracts/commands.md`
 - **変更内容:** `units_sync.destination_errors`・`sync` と `ndf progress units sync`。送り先が違うときにコミットも push も起きないことを、リモートの ref で縛る（先に要る: Task 8・11）
 - **満たす受け入れ条件:** 1
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 16: この変更より前のスプリントの変換
-- **対象ファイル:** `plugins/ndf/src/ndf/progress/units_convert.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/tests/progress/test_units_convert.py`
-- **変更内容:** `units_convert`、`prepare` の 3、`per_unit` の無い定義で単位の欄があるときの分岐、作業の定義の「実装計画があれば本文を変えずに単位のファイルを足す」（先に要る: Task 10）
+- **対象ファイル:**
+  - `plugins/ndf/src/ndf/progress/units_convert.py`
+  - `plugins/ndf/src/ndf/progress/units_invoke.py`
+  - `plugins/ndf/src/ndf/progress/invoke.py`
+  - `plugins/ndf/contracts/worker/kinds.json`
+  - `plugins/ndf/tests/progress/test_units_convert.py`
+- **変更内容:**（先に要る: Task 10）
+  - `units_convert`
+  - `prepare` の 3
+  - `per_unit` の無い定義で単位の欄があるときの分岐
+  - 作業の定義の「実装計画があれば本文を変えずに単位のファイルを足す」
 - **満たす受け入れ条件:** 3・4
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 17: 工程の出力と判定の入力の受け方と、新しい 3 つのテンプレート
-- **対象ファイル:** `plugins/ndf/contracts/templates/design-pr-review.json`、`plugins/ndf/contracts/templates/docs-ci.json`、`plugins/ndf/contracts/templates/design-merge-approved.json`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/docs/contracts/env.md`
-- **変更内容:** `definition._stage_def` の `mvv_gate` の出力、`_env_inputs`、テンプレート `design-pr-review`・`docs-ci`・`design-merge-approved`、`invoke` の記録の保存先・指摘のファイル・承認の値・`PRODUCTION_GATE`。工程の定義はまだ呼ばない（先に要る: Task 4・5・9）
+- **対象ファイル:**
+  - `plugins/ndf/contracts/templates/design-pr-review.json`
+  - `plugins/ndf/contracts/templates/docs-ci.json`
+  - `plugins/ndf/contracts/templates/design-merge-approved.json`
+  - `plugins/ndf/contracts/templates/params.json`
+  - `plugins/ndf/contracts/domains/env.json`
+  - `plugins/ndf/src/ndf/progress/definition.py`
+  - `plugins/ndf/src/ndf/progress/invoke.py`
+  - `plugins/ndf/src/ndf/domains/records/cli.py`
+  - `plugins/ndf/src/ndf/domains/records/mvv_gate.py`
+  - `plugins/ndf/tests/progress/test_sprint_templates.py`
+  - `plugins/ndf/docs/contracts/env.md`
+- **変更内容:**（先に要る: Task 4・5・9）
+  - `definition._stage_def` の `mvv_gate` の出力
+  - `_env_inputs`
+  - テンプレート `design-pr-review`・`docs-ci`・`design-merge-approved`
+  - `invoke` の記録の保存先・指摘のファイル・承認の値・`PRODUCTION_GATE`
+  - 工程の定義はまだ呼ばない
 - **満たす受け入れ条件:** 1
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 18: 設計のフェーズの工程の並びを切り替える
-- **対象ファイル:** `plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/document-review.json`、`plugins/ndf/contracts/workflow/stages/plan.json`、`plugins/ndf/contracts/workflow/stages/plan-design.json`、`plugins/ndf/contracts/workflow/stages/implement.json`、`plugins/ndf/contracts/workflow/modes/standard.json`、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/contracts/schemas/io/`、`plugins/ndf/tests/progress/test_definition.py`
+- **対象ファイル:**
+  - `plugins/ndf/contracts/workflow/stages/design.json`
+  - `plugins/ndf/contracts/workflow/stages/document-review.json`
+  - `plugins/ndf/contracts/workflow/stages/plan.json`
+  - `plugins/ndf/contracts/workflow/stages/plan-design.json`
+  - `plugins/ndf/contracts/workflow/stages/implement.json`
+  - `plugins/ndf/contracts/workflow/modes/standard.json`
+  - `plugins/ndf/contracts/workflow/modes/legacy-refactor.json`
+  - `plugins/ndf/contracts/workflow/context.schema.json`
+  - `plugins/ndf/contracts/worker/kinds.json`
+  - `plugins/ndf/contracts/schemas/io/`
+  - `plugins/ndf/tests/progress/test_definition.py`
 - **変更内容:** 工程の定義 4 つと新設の `plan-design`、2 つのモード、文脈の `plan_omitted`、作業の定義の単位のファイルと `plan_omitted`。入出力の規約を生成し直す。#4420 の条件 1・2 のテストを足す（先に要る: Task 7・14・15・16・17）
 - **満たす受け入れ条件:** 1・4
 - **進め方:** `standard`・`legacy-refactor` の新しい並びの失敗するテスト → 定義の変更。Task 1 の退行テストのうちほかのモードの分はそのまま通る
 
 ### Task 19: 手順書を新しい流れに合わせる
-- **対象ファイル:** `plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`
+- **対象ファイル:**
+  - `plugins/ndf/skills/implementation-plan/SKILL.md`
+  - `plugins/ndf/skills/design/SKILL.md`
+  - `plugins/ndf/skills/requirements-design/references/document-roles.md`
+  - `plugins/ndf/skills/development-workflow/SKILL.md`
+  - `plugins/ndf/skills/development-workflow/references/agent-layers.md`
+  - `plugins/ndf/skills/development-workflow/references/approval-request.md`
+  - `plugins/ndf/skills/development-workflow/references/stage-notes.md`
+  - `plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`
 - **変更内容:** 詳細設計の「手順書」の表の 8 ファイル（先に要る: Task 18）
 - **満たす受け入れ条件:** 1・2・4
 - **進め方:** テスト駆動を適用しない（`.md` の文言を照合するテストは書かない）。`ndf check` で確かめる
