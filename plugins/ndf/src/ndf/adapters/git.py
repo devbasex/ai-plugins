@@ -126,13 +126,13 @@ def run_git(args: list[str], cwd: Optional[Path], env: Optional[Mapping[str, str
     return Completed(proc.returncode, proc.stdout, proc.stderr)
 
 
-def _mask_urls(text: str) -> str:
+def mask_urls(text: str) -> str:
     """git の誤りの文から、URL の認証情報とクエリを伏せる（結果 JSON・ログに出すため）。"""
     return _URL_QUERY.sub(r"\1***", _URL_USERINFO.sub("***@", text))
 
 
 def _failed(args: tuple[str, ...], returncode: int, stderr: str) -> GitError:
-    return GitError(_mask_urls(f"git {' '.join(args)} が失敗（終了コード {returncode}）: {stderr.strip()}"))
+    return GitError(mask_urls(f"git {' '.join(args)} が失敗（終了コード {returncode}）: {stderr.strip()}"))
 
 
 def sha_matches(expected: str, actual: str) -> bool:
@@ -304,7 +304,13 @@ class Git:
         return out
 
     def commits_of(self, *refs: str) -> list[str]:
-        """参照（`refs/` から始まる全体の名前）のコミットの完全な SHA を、何件でも git を 1 回だけ起動して返す。"""
+        """参照（`HEAD` か `refs/` から始まる全体の名前）のコミットの完全な SHA を、何件でも git を 1 回だけ起動して返す。
+
+        `--verify` は参照を 1 つしか受けず、`--verify` の無い `rev-parse` は `--end-of-options` を出力に写すので、
+        `-` で始まる参照は option として読ませないよう起動の前に断る。
+        """
+        if any(r.startswith("-") for r in refs):
+            raise GitError(f"参照の名前が - で始まる: {refs!r}")
         got = self.run("rev-parse", *(f"{r}^{{commit}}" for r in refs)).split()
         if len(got) != len(refs) or not all(FULL_SHA.match(sha) for sha in got):
             raise GitError(f"{', '.join(refs)} をコミットへ解決できない: {got!r}")
@@ -458,4 +464,4 @@ class Git:
         """`fetch_branch` を打ち、マージできなければ `GitError`（`<remote> の <name> をマージできない`）。"""
         done = self.fetch_branch(remote, name)
         if done.returncode != 0:
-            raise GitError(f"{remote} の {name} をマージできない: {_mask_urls(done.stderr.strip())}")
+            raise GitError(f"{remote} の {name} をマージできない: {mask_urls(done.stderr.strip())}")
