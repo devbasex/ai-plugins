@@ -42,7 +42,7 @@ flowchart TB
 | 1 | `done-check` | 作業場所の HEAD が、マージ済みの PR の head の SHA と一致すれば、何もせずに終える。調べる PR は下の箇条書きのとおり絞る |
 | 2 | `work`・`acceptance`・`test` | worker が実装し、受け入れ条件の確認の記録を調べ、手元のテストを打つ |
 | 3 | `push`・`pr`・`conflict-check`・`base-fetch` | push して PR を作り、マージ先との衝突を調べ、マージ先を取得する |
-| 4 | `review` | マージ先を起点に PR の変更の全体を cross-review（AI による相互レビュー）し、読んだ HEAD を `reviewed-head` に書く。指摘が残れば `unresolved` を置いて先へ進む |
+| 4 | `review` | マージ先を起点に PR の変更の全体を cross-review（AI による相互レビュー）し、`reviewed-head` を書く。指摘が残れば `unresolved` を置いて先へ進む |
 | 5 | `push-reviewed`・`review-head` | レビューの修正のコミットを push する。HEAD が `reviewed-head` と違うか、`delta-recheck` があれば、`review-delta` へ進む |
 | 6 | `ci`・`head-reviewed` | CI の完了を確かめる。CI の修正などで HEAD が `reviewed-head` と違えば `review-delta` へ進む |
 | — | `review-delta` | 差分だけをレビューし、`reviewed-head` を書き直して `push-reviewed` へ戻る。指摘が残れば `unresolved-delta` を置いて、同じく戻る |
@@ -51,10 +51,12 @@ flowchart TB
 表の `unresolved` などは、`impl` の保存先に置くファイルである。
 
 - **`done-check` が調べる PR**: 対象のリポジトリの `impl` のブランチから、マージ先宛てに出した PR である。フォークの PR は除く。単位の経路では、単位のブランチからスプリントブランチ宛ての PR になる。宛先とフォークの絞り込みは、この変更で足す（決定 6）
+- **`reviewed-head` に書く HEAD**: `review` も `review-delta` も、相手役（レビューする AI）の全員が読めた最後のラウンドの HEAD を書く。レビューが終わった時点の作業場所の HEAD ではない。最後のラウンドの後に増えた修正のコミットは誰も読んでいないので、HEAD の不一致として次の `review-delta` で確かめる
+- **`unresolved` を消すとき**: `review` は始めに `unresolved` を消し、今回のレビューが `incomplete` で終われば置き直す。同じ保存先でレビューをやり直して指摘が解消すれば、`resolved` は通る
 - **差分のレビューの起点**: 最初の `review-delta` は、その時点の `reviewed-head` を `delta-base` に保存して起点にする。指摘が残った後の再試行は、同じ起点と同じ cross-review の状態ディレクトリを使う
 - **差分のレビューが通ったとき**: `unresolved-delta` を消し、その後で `delta-base` を消す
 - **初回のレビューをやり直すとき**: `unresolved-delta` が残っていれば、`review` は `delta-recheck` を置く。HEAD が `reviewed-head` と同じでも、差分の指摘を `review-delta` で確かめ直すためである。`review-delta` は始めに `delta-recheck` を消す
-- **差分のレビューは `review` の代わりではない**: `unresolved` は、後の `review-delta` が通っても消えず、`resolved` が止める
+- **差分のレビューは `review` の代わりではない**: `review-delta` は `unresolved` を消さない。後の差分のレビューが通っても、`unresolved` が残っていれば `resolved` が止める
 
 ## 文脈と制約
 
