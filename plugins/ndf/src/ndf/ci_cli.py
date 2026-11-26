@@ -394,18 +394,18 @@ def _approved_by(
     token の利用者のアカウント ID を読めなければ、マージキューから外して `precondition`（`merge_approval.NO_LOGIN`）。"""
     if not production_merge.needs_approval(verdict):
         return None, None
+    unreadable: Optional[dict] = None
     try:
         row = _approval(hub, target)
     except merge_approval.TrailError as exc:
         # token の利用者を読めず証跡を数えられない。承認し直しても変わらないので approval_stale にせず precondition で止まる
-        if pull.queued:
-            hub.dequeue(pull.number)
-        return None, result.stopped(TOOL, "precondition", str(exc), instance=target.head, items=_pr_item_list(target.number))
+        row = None
+        unreadable = result.stopped(TOOL, "precondition", str(exc), instance=target.head, items=_pr_item_list(target.number))
     if row is not None:
         return row.by, None
     if pull.queued:
         hub.dequeue(pull.number)
-    return None, _unapproved(args, target, verdict)
+    return None, unreadable if unreadable is not None else _unapproved(args, target, verdict)
 
 
 def _merged(
