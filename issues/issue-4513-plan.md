@@ -19,7 +19,8 @@
 | `src/ndf/contracts/worker_kinds.py` | `write_released`・`released_of`（新設）、`write_values`（変更） |
 | `src/ndf/progress/definition.py` | `required_outputs`（新設） |
 | `src/ndf/progress/run.py` | `released_answer`（新設）、`_run_step`・`_step_draft`・`_finish_stage`（変更） |
-| `src/ndf/progress/invoke.py` | `StageRun.released`・`PreparedPlan.released`・`PreparedPlan.uses_released`・`uses_released`・`answered_gap_detail`（新設）、`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
+| `src/ndf/progress/invoke.py` | `StageRun.released`・`PreparedPlan.released`・`uses_released`・`answered_gap_detail`（新設）、`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
+| `src/ndf/core/route/__init__.py` | `rendered`（新設）、`render`（変更） |
 | `src/ndf/progress/gate/entry.py` | `released_outcome`・`_strategy_at`・`Released`（新設）、`WorkHandoff`・`_cmd_work`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`（変更） |
 | `src/ndf/domains/release/forms_decide.py` | `reaches`（新設）、`deliveries_of`（変更） |
 | `src/ndf/core/worker.py`・`core/worker_outcome.py` | 引数 `--require-version-number`、`Checked`（新設）、`require_outputs`・`_output_gap`・`outcome_of`（変更） |
@@ -62,7 +63,7 @@
 
 ### Task 4: 記録済みの値を `values.json` で渡し、worker を起動せずに終える
 
-- **対象ファイル:** `contracts/worker_kinds.py`（`write_released`・`released_of`・`write_values`）・`progress/run.py`（`released_answer`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`PreparedPlan.uses_released`・`uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`domains/release/forms_decide.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
+- **対象ファイル:** `contracts/worker_kinds.py`（`write_released`・`released_of`・`write_values`）・`progress/run.py`（`released_answer`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`core/route/__init__.py`（`rendered`・`render`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`domains/release/forms_decide.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
 - **変更内容:** 詳細設計書の「値のファイル」「工程の進行: 記録済みの値の読み方」「worker の起動」の記録済みの値の分
 - **満たす受け入れ条件:** 1・2
 - **進め方:**

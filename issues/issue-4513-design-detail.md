@@ -49,7 +49,8 @@ plugins/ndf/
 | `src/ndf/contracts/worker_kinds.py` | 変更 | `values.json` の形と読み書き | — | モジュール | `write_released`（新設）・`released_of`（新設）・`write_values`（変更） |
 | `src/ndf/progress/definition.py` | 変更 | 工程の定義と規約の読み手 | `contracts` | モジュール | `required_outputs`（新設） |
 | `src/ndf/progress/run.py` | 変更 | 工程の進行 | `invoke`・`definition`・`stages` | モジュール | `released_answer`（新設）・`_run_step`・`_step_draft`・`_finish_stage`（変更） |
-| `src/ndf/progress/invoke.py` | 変更 | ステップの呼び出し | `worker_kinds`・`plan` | `StageRun`・`PreparedPlan`・モジュール | `StageRun.released`（新設の欄）・`PreparedPlan.released`・`PreparedPlan.uses_released`（新設の欄）・`uses_released`（新設）・`answered_gap_detail`（新設）・`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
+| `src/ndf/progress/invoke.py` | 変更 | ステップの呼び出し | `worker_kinds`・`plan` | `StageRun`・`PreparedPlan`・モジュール | `StageRun.released`（新設の欄）・`PreparedPlan.released`（新設の欄）・`uses_released`（新設）・`answered_gap_detail`（新設）・`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
+| `src/ndf/core/route/__init__.py` | 変更 | テンプレートからプランを組む | — | モジュール | `rendered`（新設）・`render`（変更） |
 | `src/ndf/progress/gate/entry.py` | 変更 | `ndf answer work` | `worker_kinds`・`branch_strategy`・`forms_decide` | `Released`（新設）・`WorkHandoff`・モジュール | `released_outcome`（新設）・`_strategy_at`（新設）・`WorkHandoff.version_number`（新設の欄）・`_cmd_work`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`（変更） |
 | `src/ndf/domains/release/forms_decide.py` | 変更 | 届け先の選び方 | — | モジュール | `reaches`（新設）・`deliveries_of`（変更） |
 | `src/ndf/core/worker.py` | 変更 | `ndf worker run` | `worker_outcome` | モジュール | `_add_run`・`_cmd_run`（引数を 1 つ足すだけ） |
@@ -120,20 +121,32 @@ plugins/ndf/
 | `released_answer` | `src/ndf/progress/run.py` | 新設 | `released_answer(v: View, stage: str) -> Optional[str]` | リリース承認ゲートへのオーガナイザーの承認が書いた `product_version` を返す |
 | `StageRun.released` | `src/ndf/progress/invoke.py` | 新設 | `released: Optional[str] = None`（データクラスの欄） | ステップの呼び出しへ記録済みの値を渡す |
 | `_run_step` | `src/ndf/progress/run.py` | 変更 | 今のまま | `approved_seen` と並べて `released_answer` を読み、`StageRun` に入れる |
-| `PreparedPlan` | `src/ndf/progress/invoke.py` | 変更 | 欄 `released: Optional[str]` と `uses_released: bool` を足す | 組んだか読んだ `values.json` が今持つ `released_version` と、今のテンプレートから求めた、記録済みの値を使うプランかの判定を渡す |
-| `prepare_plan` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 入力の検査で回している作業の一覧（`route.kinds_of`）を `uses_released` に渡して判定し、`PreparedPlan.uses_released` に入れる。使うプランなら `write_values` に `run.released` を渡し、最初の書き込みで `released_version` まで書く |
-| `_prepared` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 使い回す `values.json` から `released_of` で読んだ値を `PreparedPlan.released` に入れる。判定は `values.json` に残さず、今読んだテンプレートの `route.kinds_of` を `uses_released` に渡して毎回求める |
-| `plan_path` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | `PreparedPlan.uses_released` が真で、`PreparedPlan.released` と `run.released` が違うときだけ、プランを書く前に `write_released(work_dir, run.released)` を打つ。作業の一覧は自分では回さない |
+| `PreparedPlan` | `src/ndf/progress/invoke.py` | 変更 | 欄 `released: Optional[str]` を足す | 組んだか読んだ `values.json` が今持つ `released_version` を渡す |
+| `prepare_plan` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 入力の検査で回している作業の一覧（`route.kinds_of`）を `uses_released` に渡して判定する。使うプランなら `write_values` に `run.released` を渡し、最初の書き込みで `released_version` まで書く |
+| `_prepared` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 使い回す `values.json` から `released_of` で読んだ値を `PreparedPlan.released` に入れる。判定はしない |
+| `plan_path` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | `route.render` の代わりに `route.rendered` でプランを組み、一緒に返る作業の一覧を `uses_released` に渡して判定する。真で、`PreparedPlan.released` と `run.released` が違うときだけ、プランを書く前に `write_released(work_dir, run.released)` を打つ |
+| `rendered` | `src/ndf/core/route/__init__.py` | 新設 | `rendered(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> tuple[dict[str, Any], list[str]]` | 今の `render` の中身を移し、埋める前に開いたプランの形（`expanded` の戻り値）から `work_names` で作業の名前（重なりを除く）を取り、組んだプランと一緒に返す |
+| `render` | `src/ndf/core/route/__init__.py` | 変更 | 今のまま | `rendered` の 1 つ目の値を返す |
 | `write_values` | `src/ndf/contracts/worker_kinds.py` | 変更 | `write_values(..., released: Optional[str] = None)` | `released` が `None` でなければ `released_version` も書く |
 | `uses_released` | `src/ndf/progress/invoke.py` | 新設 | `uses_released(kinds: Iterable[str]) -> bool` | 作業の名前の並びに、作業の定義（`worker_kinds.work_kinds()`）の `outputs` が `product_version` を持つ作業があるかを返す |
 
-**記録済みの値を使うプラン**とは、プランが流す作業（`route.kinds_of(template, local_tests)`）に、出力に `product_version` を持つ作業（今は `release` だけ）を含むプランである。ほかのプランでは、`values.json` の `released_version` を読む者がいないので書かない。
+**記録済みの値を使うプラン**とは、プランが流す作業（`route.kinds_of(template, local_tests)` と同じ一覧）に、出力に `product_version` を持つ作業（今は `release` だけ）を含むプランである。ほかのプランでは、`values.json` の `released_version` を読む者がいないので書かない。
 
 判定は `values.json` に残さず、プランを書くたびに今のテンプレートから求める。判定を残すと、NDF を更新して同じ名前のプランに `release` の作業が加わったとき、進行中の工程を再開しても前の NDF が残した判定が使われる。その結果、承認済みの配布識別子が渡らないまま worker が起動してしまう。
 
-求め直しても、工程の所要時間はほぼ変わらない。工程の初回は `prepare_plan` とその直後の `_prepared` で 2 回求めるので、判定を残す場合より 1 回多い。その 1 回の費用を測った。2026-11-26 に手元（8 コア、Python 3.14.4）で、今あるテンプレート 24 個のそれぞれについて、`route.kinds_of` と作業の定義の照合を 200 回ずつ流して 1 回あたりの時間を測った。読み込み済みのテンプレートでは平均 0.075 ms、最大 0.32 ms（テンプレート `check`）だった。CLI が `ndf.progress.invoke` を読み込むだけで 618 ms かかるのに比べて、無視できる大きさである。テンプレートと作業の定義は `cached_reader` で 1 回だけ読むので、ファイルを読む回数も増えない。
+判定には、プランを組むときに開いたテンプレートの形をそのまま使い、判定のためにテンプレートを開き直さない。`route.render` は差し込みを埋める前に、テンプレートの `use` を開いた形（`route.expanded`）を作る。作業の名前はこの形から取れるので、`route.rendered` が組んだプランと一緒に返す。これで、`values.json` を使い回す回も、判定のための展開と作業の一覧の走査が増えない。工程の初回は、`prepare_plan` が入力の検査のために作業の一覧をすでに回しているので、その一覧を判定にも使う。
 
-判定を `values.json` に残して変更を検知する案も比べた。変更を検知するには、テンプレートと作業の定義から作った指紋を残して比べる必要がある。指紋を求める費用は判定を求める費用と変わらないので、キャッシュする利点が無い。そのため採らなかった。
+判定の求め方として、次の 3 つを比べた。費用は 2026-11-26 に手元（8 コア、Python 3.14.4）で、今あるテンプレート 24 個のそれぞれについて、`route.kinds_of` と作業の定義の照合を 200 回ずつ流して測った。読み込み済みのテンプレートでは、1 回あたり平均 0.075 ms、最大 0.32 ms（テンプレート `check`）だった。
+
+| 案 | 判定のために増える処理 | NDF を更新してプランに `release` が加わった後の再開 | 採否 |
+| --- | --- | --- | --- |
+| `route.render` と同じ展開から作業の一覧を受け取る（`route.rendered`） | 無い | 今のテンプレートで判定する | 採る |
+| `plan_path` の前に `route.kinds_of` で判定し直す | プランを組むたびに展開と走査が各 1 回（上の費用） | 今のテンプレートで判定する | 採らない。同じ結果を得るのに展開を 1 回余分に回す |
+| 判定を `values.json` に残す | 無い | 前の NDF が残した判定を使い、承認済みの配布識別子が渡らない | 採らない。理由は表の 2 つ前の段落 |
+
+`rendered` を足すと `route` の公開の関数が 1 つ増えるが、`render` は `rendered` の 1 つ目の値を返すだけにするので、ほかの呼び出し元は変えない。
+
+判定を `values.json` に残して変更を検知する案も比べた。変更を検知するには、テンプレートと作業の定義から作った指紋を残して比べる必要がある。指紋を求めるにはテンプレートを開く必要があり、採った案（判定のために増える処理が無い）より費用が増えるので、キャッシュする利点が無い。そのため採らなかった。
 
 値が前と同じなら書き直さない。そのため、`values.json` を書き直すのは、試行の中で記録済みの値が変わったとき（承認の回答で値が入った、または消えた）だけになる。
 
@@ -170,7 +183,8 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `released_answer` | オーガナイザーの承認の後の値を返す | 後に worker の判断の求めへの `approved` があっても前者を返す | 利用者か MVV 判定の承認・却下・出力の事象が隣に無いときは `None` |
 | `plan_path` | 前の試行の `values.json` が残っていても、今の値で書き直す | 値が無い回は `released_version` を消す。値が前と同じ回と、記録済みの値を使わないプランでは `write_released` が呼ばれない | — |
-| `_prepared` | 前の NDF が `release` の無いテンプレートで書いた `values.json` が残っていても、今のテンプレートに `release` があれば判定が真になる（同じ名前のプランが変わった後の再開） | 今のテンプレートに `release` が無ければ、`values.json` に `released_version` が残っていても判定は偽 | — |
+| `plan_path`（判定） | 前の NDF が `release` の無いテンプレートで書いた `values.json` が残っていても、今のテンプレートに `release` があれば `write_released` を打つ（同じ名前のプランが変わった後の再開） | 今のテンプレートに `release` が無ければ、`values.json` に `released_version` が残っていても `write_released` を打たない | — |
+| `rendered` | 組んだプランが `render` と同じで、作業の名前が `kinds_of` と同じ並び | `{{worker}}` の無いテンプレートでは空の並び | 組んだプランの誤りは `render` と同じ `RouteError` |
 | `uses_released` | `release` を含む並びで真 | 空の並びで偽 | 作業の定義に無い名前は `KeyError`（`kind_gaps` と同じ） |
 
 ## 工程の定義の読み手
