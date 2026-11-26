@@ -842,9 +842,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
 def _stage_output(s: stages.StageDef, prog: StepProgress) -> tuple[dict[str, Any], dict[str, Any]]:
     """工程の出力（ステップの結果の並び・要約・定義したキーの出力）と、ステップが出した出力のすべて。"""
     reports = [prog.done[st.id] for st in s.steps]
-    merged: dict[str, Any] = {}
-    for rep in reports:
-        merged.update(stages.step_outputs(s.outputs, rep))
+    merged = stages.step_outputs(s, prog.done)
     out: dict[str, Any] = {"steps": reports, "summary": f"{s.name} の {len(reports)} ステップが終わった"}
     kept, _ = stages.keep_declared(s.outputs, merged)
     if kept:

@@ -14,7 +14,7 @@ import pytest
 
 from ndf.adapters.github import FileAt
 from ndf.contracts import result
-from ndf.progress import gate, invoke, model, run
+from ndf.progress import gate, invoke, model, run, stages
 
 DESIGN_PR = 4565
 
@@ -49,7 +49,13 @@ def _hub(head, production=True):
     )
 
 
-_FLAGS = {"--head": "head", "--material-sha256": "material", "--body-sha256": "body", "--title-sha256": "title", "--presentation": "presentation"}
+_FLAGS = {
+    "--head": "head",
+    "--material-sha256": "material",
+    "--body-sha256": "body",
+    "--title-sha256": "title",
+    "--presentation": "presentation",
+}
 
 
 def _seen(shown):
@@ -120,3 +126,37 @@ def test_the_design_stage_finishes_with_the_design_pr_of_the_plan_items(st, env,
     v = run.read(st, tid)
     assert v.context()["design_pr"] == DESIGN_PR
     assert "設計" not in [p.name for p in v.snap.stages if run.step_progress(v, p.name).failed]
+
+
+def test_an_approval_recorded_without_the_design_pr_head_goes_back_to_waiting(st, env, repo, new_table, flow):
+    # 設計 PR を特定できなかった版の承認（見た head が無い）は、対象に結び付いていないのでマージへ進めず待ちへ戻す
+    tid = new_table()
+    flow.turn(tid, _like_the_plan(env))
+    q = gate.waiting(run.read(st, tid))
+    assert q is not None and q.gate == "design"
+    gate.answer(st, tid, gate.Answer(q.id, "approved", "設計を承認", "human:reviewer", "k-old"))
+    why = gate.recheck(st, tid, gate.github_observe(repo, st.root, lambda: _hub("h1")))
+    assert why is not None and "head" in why
+    assert gate.waiting(run.read(st, tid)) is not None
+
+
+def _design_stage(*kinds):
+    steps = tuple(stages.StepDef(id=f"s{i}", stage="設計", call="ndf.plan", kind=k, range="none") for i, k in enumerate(kinds))
+    return stages.StageDef(id="design", name="設計", phase="design", steps=steps, outputs=("design_pr",))
+
+
+def _report(prs=(), outputs=None):
+    rep = {"items": [{"kind": "pr", "number": n} for n in prs]}
+    return {**rep, "outputs": outputs} if outputs is not None else rep
+
+
+def test_the_design_pr_is_filled_only_from_the_work_step_items():
+    stage = _design_stage("work", "review", "merge")
+    done = {"s0": _report([DESIGN_PR]), "s1": _report([9001]), "s2": _report([9002])}
+    assert stages.step_outputs(stage, done) == {"design_pr": DESIGN_PR}
+
+
+def test_an_explicit_design_pr_wins_over_the_filled_one():
+    stage = _design_stage("work", "work")
+    done = {"s0": _report(outputs={"design_pr": 7}), "s1": _report([DESIGN_PR])}
+    assert stages.step_outputs(stage, done) == {"design_pr": 7}
