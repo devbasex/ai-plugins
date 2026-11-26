@@ -39,7 +39,7 @@ docs/specifications/
 | `src/ndf/progress/invoke.py` | 変更 | 対象外の組み合わせを `precondition` にする | `core.route` | `invoke` | △`plan_failure` |
 | `contracts/templates/cross-refactoring.json`・`contracts/templates/parts/steps.json` | 変更 | `follow` のステップを足す | — | — | — |
 | `src/ndf/domains/crossrefactor/cli.py` | 変更 | 引数と手段の組み合わせを確かめる | `testing.means` | `cli` | △`run_config`・`_drive_parsers`・`_release`・`main`、＋`_check_gate` |
-| `src/ndf/domains/crossrefactor/drive.py` | 変更 | 経路の分岐、排他、再利用、SHA の書き出し、再開時の保護の判定し直し | `local_gate`・`workspace`・`protected_decide` | `drive` | △`RunConfig`・`drive`・`_reused`・`_init`・`_final`・`_summary`、＋`_write_pushed`・`_resume_protection` |
+| `src/ndf/domains/crossrefactor/drive.py` | 変更 | 経路の分岐、排他、再利用、SHA の書き出し、再開時の保護の判定し直し | `local_gate`・`workspace`・`protected_decide` | `drive` | △`RunConfig`・`drive`・`_open`・`_reused`・`_init`・`_final`・`_summary`、＋`_write_pushed`・`_resume_protection` |
 | `src/ndf/domains/crossrefactor/workspace.py` | 変更 | PR ごとの排他ロック、権限を絞ったログの書き込みと期限での削除 | `ndf.slot_pool`・`ndf.contracts.limits` | `workspace` | ＋`hold`・`write_private_log`・`sweep_gate_logs` |
 | `src/ndf/domains/crossrefactor/local_gate.py` | 新設 | 手元の最終ゲート | `final_gate`・`protected_decide`・`testing.slots`・`core.converge.worktree` | `local_gate` | ＋`settings_at`・`protection_at`・`run_local_gate`・`run_suites`・`redact_output`・`suite_label`・`fix_excerpt`・`verify_tree`・`sweep_verify_trees` |
 | `src/ndf/core/converge/worktree.py` | 変更 | 取得済みの先頭を受け取る同期を分け、`sync_worktree` もそれを呼ぶ | — | `worktree` | △`sync_worktree`、＋`sync_fetched`・`refuse_dirty` |
@@ -192,9 +192,10 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | `hold` | `workspace.py` | 新設 | `hold(root: Path) -> FileLock \| None` | `rf<PR>/run.lock` を待たずに取る。取れなければ None |
 | `RunConfig` | `drive.py` | 変更 | `local_test: bool = False`・`pushed_out: Path \| None = None` を足す | `args()` は、手元の経路では `--required …`・`--ci-test …` の代わりに `--local-test` を並べる。`pushed_out` は並べない |
 | `drive` | `drive.py` | 変更 | 今のまま | 始めに `hold`、終わりに解く。ロックを取った後に `sweep_gate_logs` を呼ぶ。手元の経路で対象範囲が空なら、次を行わずに最終ゲートへ進む: 担当の AI を起動できるかの確認、プロジェクトの判断基準の文書（MVV）の読み込み、改善の提案、項目ごとの実装と検証 |
+| `_open` | `drive.py` | 変更 | 今のまま | 今は、`_reused` が結果を返さず状態に `done` があれば、状態を空にして新しく始める。手元の経路で、`done` がテストを打って完了した記録で、PR のブランチのリモートの先頭が `done.head` と同じで、引数の並びも同じなら、状態を捨てない。この場合は、提案・計画・項目の実装と検証を通らずに最終ゲート（`run_local_gate`）へ進み、順 3 の「送った SHA」の分岐で再検証する。先頭か引数が違えば、今と同じく状態を空にする |
 | `_reused` | `drive.py` | 変更 | 今のまま | 手元の経路でテストを打って完了した実行は、今の PR の先頭の設定から求めた識別値と今の `PATH` の SHA-256 が、どちらも記録の値と同じときだけ、前の結果を再利用する。合格の記録を引くときと同じ組で判定する |
 | `_init` | `drive.py` | 変更 | 今のまま | 手元の経路では、保護するファイルを、対象範囲と、実装が変えた関数とファイルの一覧（状態ファイルの `touched`。提案はこの中から出る）の両方から除く |
-| `_resume_protection` | `drive.py` | 新設 | `_resume_protection(g, cfg: RunConfig, state, save) -> None` | 手元の経路の再開で、担当を起動する前に呼ぶ。リモートの先頭の設定から保護を求め直し、状態の `onto`（載せ直しの起点）から作業場所の `HEAD` までの変更が保護に当たれば `refused`（理由に当たったファイルと復旧の手順）。当たらなければ `target_scope`・`touched`・未実装の項目の範囲を `narrow` で絞り直し、範囲が空になった項目を見送りにする |
+| `_resume_protection` | `drive.py` | 新設 | `_resume_protection(g, cfg: RunConfig, state, save) -> None` | 手元の経路の再開で、担当を起動する前に呼ぶ。始めに、状態に `rebasing` が残っていれば載せ直しの途中で中断している。作業場所の cherry-pick の途中の状態を `git cherry-pick --abort` で捨て、`git reset --hard <rebasing.head>` で載せ直す前へ戻し、`onto` を変えずに `rebasing` を消して保存する（取り込みは最終ゲートの順 1 でやり直す）。その後、リモートの先頭の設定から保護を求め直し、状態の `onto`（載せ直しの起点）から作業場所の `HEAD` までの変更が保護に当たれば `refused`（理由に当たったファイルと復旧の手順）。当たらなければ `target_scope`・`touched`・未実装の項目の範囲を `narrow` で絞り直し、範囲が空になった項目を見送りにする |
 | `_final` | `drive.py` | 変更 | 今のまま | 経路で `run_gate` か `run_local_gate` を呼ぶ |
 | `_summary` | `drive.py` | 変更 | 今のまま | 「通ったチェックの名前」「手元のテスト全体が通った」「変更が無いのでテストは打っていない」を書き分ける |
 | `_write_pushed` | `drive.py` | 新設 | `_write_pushed(cfg: RunConfig, head: str) -> None` | `--pushed-out` があれば SHA を 1 行で書く。再利用した結果でも書く。既存のファイルとリンクの扱いは下の箇条のとおり |
@@ -214,7 +215,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
   - 事後条件: 前からあるファイルは開かず、書き換えない。同じ名前がハードリンクやシンボリックリンクでも、リンク先の中身と権限は変わらない
   - シグネチャ: `write_private_log(logs: Path, name: str, text: str, state, save) -> Path`。所有の記録を状態ファイルへ書くために `state` と `save` を受ける
   - 手順: ファイルを作る前に所有を記録し、どこで中断しても、残ったファイルが記録から見つかるようにする
-    1. 一時ファイルの名前を `local-gate-<uuid4>.tmp` に決め、`gate_logs` に `{name, tmp}` を足して状態ファイルを保存する。同じ `name` の古い記録は、この記録で置き換える
+    1. 一時ファイルの名前を `local-gate-<uuid4>.tmp` に決め、`gate_logs` に `{name, tmp}` を足して状態ファイルを保存する。記録は一時ファイルごとに 1 件で、同じ `name` の古い記録があっても置き換えずに残す。前の実行が置き換えの前に中断していれば、古い記録だけがその一時ファイルを指しているので、掃除が片付け終えるまで記録を消さない
     2. 一時ファイルを `os.open(O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY, 0o600)` で作り、`fchmod` で 0600 にしてから内容を書き、`fsync` する
     3. `fstat` の `st_dev` と `st_ino` を同じ記録へ書き、状態ファイルを保存する
     4. `os.replace` でログの名前へ置き換える。名前が変わってもファイルは同じなので、記録した `st_dev`・`st_ino` のまま照合できる
@@ -258,7 +259,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 
 | 順 | 条件 | 結果 |
 | --- | --- | --- |
-| 1 | リモートの先頭を `worktree.fetch_tips` で取得する。取得した先頭が `HEAD` の祖先（同じ SHA を含む）なら載せ直さず、`HEAD` の SHA を保つ。祖先でなければ、取得した先頭を `worktree.sync_fetched` へ渡して載せ直す。以後の順は、ここで取得した先頭を「取り込んだ先頭」として使う。直前の周が順 7 で取得していれば、その先頭を使い、取得し直さない | 載せ直しが衝突したら `base_conflict` |
+| 1 | リモートの先頭を `worktree.fetch_tips` で取得する。取得した先頭が `HEAD` の祖先（同じ SHA を含む）なら載せ直さず、`HEAD` の SHA を保つ。祖先でなければ、`rebasing` を保存してから、取得した先頭を `worktree.sync_fetched` へ渡して載せ直し、`onto` の書き換えと `rebasing` の削除を 1 回の保存で行う。以後の順は、ここで取得した先頭を「取り込んだ先頭」として使う。直前の周が順 7 で取得していれば、その先頭を使い、取得し直さない | 載せ直しが衝突したら `base_conflict` |
 | 2 | 取り込んだ先頭の設定の手段が手元のテストでない | `precondition` |
 | 3 | `HEAD` が取り込んだ先頭と同じ（送るコミットが無い） | 取り込んだ先頭が「この実行が送った SHA」（状態の `pushing` の SHA か、テストを打って完了した `done` の `head`）でなければ、テストを打たずに合格（`tests: skipped`）。送った SHA なら、今の組（その SHA・今の先頭の設定の識別値・今の `PATH` の SHA-256）が `local_passed` にあれば、テストを打たずに送った結果（`tests: passed`、送った SHA、識別値）を復元して完了する。無ければ、その SHA でテスト全体を打ち直す。合格なら組を記録して同じ結果で完了し、落ちれば `test_failed`（送った後なので直さない） |
 | 4 | 取り込んだ先頭から `HEAD` までの変更（`git diff --name-only --no-renames -z`）が保護するファイルに当たる | `refused` |
@@ -267,7 +268,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | 7 | push の拒否で、取り直したリモートの先頭が変わっていて、周が残る | 次の周 |
 | 8 | push の拒否で、ほか | `push_rejected` |
 | 9 | 不合格 | 基準側の結果が要るかを決める。周が残るか、変更後に 126・127 を返した suite があれば順 10 へ。どちらも無ければ `test_failed` |
-| 10 | 順 9 で基準側が要る | 基準側の結果を見つける。取り込んだ先頭の組が `local_passed` にあれば全 suite 合格とする。組が `local_base_failed` にあり、その記録の `run` が今の起動の識別値と同じなら、その記録を使う。どちらでもなければ、取り込んだ先頭（この実行のコミットを載せない状態）だけでテスト全体を打って記録する。記録を使った場合も打った場合も順 11 へ |
+| 10 | 順 9 で基準側が要る | 基準側の結果を見つける。取り込んだ先頭の組が `local_passed` にあれば全 suite 合格とする。ただし、変更後に 126・127 を返した suite があるときは、今の起動の識別値（`run`）を持つ記録だけを使う。組が `local_base_failed` にあり、その記録の `run` が今の起動の識別値と同じなら、その記録を使う。どちらでもなければ、取り込んだ先頭（この実行のコミットを載せない状態）だけでテスト全体を打って記録する。記録を使った場合も打った場合も順 11 へ |
 | 11 | 順 10 の後 | 基準側と変更後を比べる。比べ方は表の下の箇条のとおりで、上から順に当てる。直しへ進むのは、最後の箇条に当たり、周が残る場合だけである |
 | 12 | 順 11 で直しへ進む | `fix_or_undo` で直し、`check_fix`（保護するファイルは範囲の外）で確かめて次の周 |
 
@@ -277,7 +278,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
   - H から B を引いた集合が空: `test_failed`（直さない）。理由に B と H の両方の呼び名と終了コードを載せ、「suite の単位では原因を見分けていない」と書く
   - H から B を引いた集合が空でなく、周が残らない: `test_failed`（担当を起動しない）
   - H から B を引いた集合が空でなく、周が残る: 順 12 へ。`fix_excerpt` に渡すのはその差の suite だけである
-- 基準側の結果は、合格なら `local_passed` に、不合格なら `local_base_failed` に組と今の起動の識別値とともに残す。`local_passed` は起動をまたいで使う。`local_base_failed` は、利用者が環境を直して打ち直した場合に古い失敗で分けないよう、同じ起動の中でだけ使う。欠けていた依存を同じ `PATH` の上に入れた場合も、打ち直せば基準側を新しく打つ
+- 基準側の結果は、合格なら `local_passed` に、不合格なら `local_base_failed` に組と今の起動の識別値とともに残す。`local_passed` は起動をまたいで使う。ただし、変更後の 126・127 が環境の問題かを分けるときは、別の起動の合格を使わない。同じ `PATH` のディレクトリからランナーが消えるなど、`PATH` の文字列が同じでも環境が変わっていることがあり、前の起動の合格は今の環境の証拠にならないためである。この場合は、今の起動の記録が無ければ基準側を打ち直す。`local_base_failed` は、利用者が環境を直して打ち直した場合に古い失敗で分けないよう、同じ起動の中でだけ使う。欠けていた依存を同じ `PATH` の上に入れた場合も、打ち直せば基準側を新しく打つ
 
 `protected_of` の判定は、パスが次のどれかに当たれば真である。保護するファイルは、設計文書の「テストの定義のファイル」にあるファイルと同じで、一覧はそのセクションにある。
 
@@ -310,9 +311,10 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `Failed` | 型（落ちた suite の呼び名 `label`、終了コードか時間切れの別、コマンド、出力） | `local_gate.py` | コマンドと出力は伏せる前の値で、メモリの中だけで持つ |
 | `LocalGateConfig` | 型（`pr`・`branch`・`scope`・`max_fix`・`repo_work`・`root`・`total_seconds`） | `local_gate.py` | `total_seconds` は `test.local_total_minutes` を秒に直した値。未設定なら安全網の上限（`budget_decide.SafetyNet` の `limit_minutes`）を秒に直した値 |
 | `TestBudget` | 型（累計の上限、使った秒、suite 1 つの上限） | `local_gate.py` | suite の上限は、`test.local_total_minutes` が無ければ上限の設定ファイル `contracts/limits/test-run.test.json` の `seconds`。あれば None で、累計の残りだけを掛ける |
-| `local_passed` | 状態ファイルのキー（`{sha, digest, path_digest}` の並び。`path_digest` は `PATH` の値の SHA-256） | `state.json` | 空 |
+| `local_passed` | 状態ファイルのキー（`{sha, digest, path_digest, run}` の並び。`path_digest` は `PATH` の値の SHA-256、`run` は記録した起動の識別値） | `state.json` | 空 |
 | `verify_trees` | 状態ファイルのキー（パスの並び） | `state.json` | 空 |
 | `onto` | 状態ファイルのキー（載せ直しの起点の SHA）。この実行のコミットの直前のコミットで、着手時の先頭で始まる。順 1 で載せ直すか、取り込んだ先頭が `HEAD` の祖先と分かるたびに、その取り込んだ先頭へ書き換える | `state.json` | 着手時の先頭 |
+| `rebasing` | 状態ファイルのキー（`{head, tip}`。載せ直す前の `HEAD` と載せる先の先頭）。順 1 で `sync_fetched` を呼ぶ前に保存し、載せ直しの後に `onto` を `tip` へ書き換えるのと同じ保存で消す | `state.json` | 無し |
 | `pushing` | 状態ファイルのキー（`{sha, digest, path_digest}`。push を打つ直前に書き、`done` を保存した後に消す） | `state.json` | 無し |
 | `local_base_failed` | 状態ファイルのキー（`{sha, digest, path_digest, failed, run}` の並び。`failed` は基準側で落ちた suite の順番と終了コード、`run` は記録した起動の識別値。起動のたびに新しく作るランダムな値で、別の起動の記録は使わない） | `state.json` | 空 |
 | `repo` | 状態ファイルのキー（リポジトリの識別値。git の共通ディレクトリの実パス） | `state.json` | 無し |
@@ -389,8 +391,8 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `run_suites`（ログ） | 伏せ字にしたログを書く | 同じ名前の suite が 2 つ、`/` を含む名前（別々のログになる） | 伏せる前の値がファイルに残らない |
 | `fix_excerpt` | 伏せ字の後に切る | 100 行と 8,000 文字の境、境をまたぐトークンと秘密鍵、短い出力は全体 | 出力が空 |
 | `sweep_verify_trees` | 記録のあるパスだけ消す | lock が無いもの、NDF の lock、利用者の lock の 3 つで扱いが分かれる | 記録の無いディレクトリに触れない |
-| `_resume_protection` | 保護が変わらなければ何も変えない。他者の `.ndf/` の変更を取り込んで載せ直した後でも、この実行のコミットが当たらなければ止まらない | 宣言を広げると未実装の項目の範囲が絞られ、空の項目は見送り。実装済みの項目は変えない | 作業コミットが新しい保護に当たれば、担当を起動せず `refused` |
-| `drive`・`_reused` | 同じ SHA・設定・`PATH` なら再利用し、`--pushed-out` を書く。`PATH` だけが違えば再利用しない | 対象範囲が空 | ロック中は何も変えない |
+| `_resume_protection` | 保護が変わらなければ何も変えない。載せ直しの途中か、`onto` の保存の前に中断した後でも、載せ直す前の `HEAD` へ戻してから照合するので、取り込んだ他者の `.ndf/` の変更では止まらない。他者の `.ndf/` の変更を取り込んで載せ直した後でも、この実行のコミットが当たらなければ止まらない | 宣言を広げると未実装の項目の範囲が絞られ、空の項目は見送り。実装済みの項目は変えない | 作業コミットが新しい保護に当たれば、担当を起動せず `refused` |
+| `drive`・`_reused`・`_open` | 同じ SHA・設定・`PATH` なら再利用し、`--pushed-out` を書く。`PATH` だけが違えば再利用せず、状態を捨てずに、担当を起動しないまま送った SHA を再検証する。先頭が進んでいれば状態を空にして新しく始める | 対象範囲が空 | ロック中は何も変えない |
 | `_write_pushed` | 無いパスに書く。前の実行が書いた SHA 1 行のファイルを置き換える | 同じファイルへのハードリンクがあっても、リンクの側の中身は変わらない | シンボリックリンク、ディレクトリ、ほかの中身の既存のファイルは `precondition` で、中身もリンク先も変わらない |
 
 実の git の作業場所と bare のリモートは、今ある `tests/domains/crossrefactor/_drive_world.py` を使う。
@@ -447,7 +449,7 @@ s=$(cat "$2") && [ -n "$s" ] && { [ "$(git rev-parse HEAD)" = "$s" ] || { git fe
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `final_fix` | `prompt_decide.py` | 変更 | `final_fix(pr: int, scope: Sequence[str], failed: Sequence[str], *, local: bool = False) -> str` | `local` なら「手元で次のテストが落ちた」と書く。`local` の `failed` は `fix_excerpt` の結果で、載せる項目と上限は設計書の「テストのコマンドと出力の扱い」にある。`local` では、指示文全体を UTF-8 で 60,000 バイト（定数 `PROMPT_BYTES`、`prompt_decide.py`）以下にする。`failed` は先頭から順に 1 件ずつ丸ごと載せる。1 件でも収まらなければ、その件と以降の件は載せず、「ほかに N 件が失敗した」と件数だけを書く。60,000 バイトは、Linux が引数 1 つに許す 131,072 バイトから、起動の側が指示文の後ろに足す文の分の余裕を引いた値である。件数の文のほかに、`final_fix` は渡されたもの以外の情報を足さない |
+| `final_fix` | `prompt_decide.py` | 変更 | `final_fix(pr: int, scope: Sequence[str], failed: Sequence[str], *, local: bool = False) -> str` | `local` なら「手元で次のテストが落ちた」と書き、それらの suite が取り込んだ先頭では合格したこと、原因がこの実行の変更と確定していないこと（非決定的なテストや外部の状態の変化でも同じ結果になる）を書く。`local` の `failed` は `fix_excerpt` の結果で、載せる項目と上限は設計書の「テストのコマンドと出力の扱い」にある。`local` では、指示文全体を UTF-8 で 60,000 バイト（定数 `PROMPT_BYTES`、`prompt_decide.py`）以下にする。`failed` は先頭から順に 1 件ずつ丸ごと載せる。1 件でも収まらなければ、その件と以降の件は載せず、「ほかに N 件が失敗した」と件数だけを書く。60,000 バイトは、Linux が引数 1 つに許す 131,072 バイトから、起動の側が指示文の後ろに足す文の分の余裕を引いた値である。件数の文と、上の「基準側では合格した・原因は未確定」の文のほかに、`final_fix` は渡されたもの以外の情報を足さない |
 
 ### 単体テストの観点
 
