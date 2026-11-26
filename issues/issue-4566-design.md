@@ -365,7 +365,7 @@ graph TB
 {"test": {"protected_files": ["package-lock.json", "tests/support"], "local_total_minutes": 240}}
 ```
 
-- 手元の経路では、担当を起動する前に、これらを対象範囲から外す。担当が書き換えた場合は、今ある対象範囲の外の検査が元に戻す
+- 手元の経路では、担当を起動する前に、これらを対象範囲から外す。最終ゲート修正の担当が書き換えた場合は、今ある対象範囲の外の検査が元に戻す（これらは範囲の外として扱う）。項目ごとの工程にはこの検査が無いので、そこで書き換えたコミットは次の push の前の確かめで止まる
 - push の前にも、この実行のコミットがこれらを変えていないかを確かめる。変えていれば、テストも push もせず、ファイル名を理由に載せて `refused` で停止する。コミットは作業場所に残る
 - 外した結果、対象範囲が空になれば、担当を起動せずに取り込みへ進み、変更が無い実行として完了する（「処理の流れ」）
 - 名指しされたスクリプトがさらに読むファイルのように、この表で当てられないものは残る（「未確認のまま残ること」）
@@ -626,13 +626,23 @@ graph TB
 | 合格の条件 | テストが追跡ファイルを書き換えると `precondition` になり、送らない | テストの後の照合を外すと落ちる |
 | 決定 7 | `ci_declared` を持つ古い定義の行が、停止せずに今と同じ判定になる | 語の値を求める処理を消すと落ちる |
 
-詳細設計は、別のファイル `issues/issue-4566-design-detail.md` に書く。新設する関数が 2 つ以上あり、既存の関数のシグネチャも変えるためである。
+ファイルと関数の単位の設計は、[詳細設計](./issue-4566-design-detail.md)に分けた。新設する関数が 2 つ以上あり、既存の関数のシグネチャも変えるためである。
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4566 | 実装する | — | `plugins/ndf/src/ndf/testing/means.py`（新設）、`plugins/ndf/contracts/workflow/stages/refactor.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/limits/test-run.test.json`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/refactor_values.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/contracts/templates/cross-refactoring.json`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/src/ndf/domains/crossrefactor/workspace.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/src/ndf/domains/crossrefactor/cli.py`、`plugins/ndf/src/ndf/domains/crossrefactor/drive.py`、`plugins/ndf/src/ndf/domains/crossrefactor/final_gate.py`、`plugins/ndf/src/ndf/domains/crossrefactor/prompt_decide.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/testing/test_means.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_invoke_refactor.py`、`plugins/ndf/tests/domains/crossrefactor/test_drive.py`、`plugins/ndf/tests/domains/crossrefactor/test_refactor_cli.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`docs/specifications/ndf-ci-only-tests.md`、`docs/specifications/ndf-review-units-and-refactoring-timing.md`、`docs/specifications/ndf-stage-plan-work-prompts.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-ci-test.md` |
+| #4566 | 実装する | — | `plugins/ndf/src/ndf/testing/means.py`（新設）、`plugins/ndf/contracts/workflow/stages/refactor.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/limits/test-run.test.json`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/refactor_values.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/contracts/templates/cross-refactoring.json`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/src/ndf/domains/crossrefactor/workspace.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/src/ndf/domains/crossrefactor/cli.py`、`plugins/ndf/src/ndf/domains/crossrefactor/drive.py`、`plugins/ndf/src/ndf/domains/crossrefactor/final_gate.py`、`plugins/ndf/src/ndf/domains/crossrefactor/prompt_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/final_gate_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/local_gate.py`（新設）、`plugins/ndf/src/ndf/domains/crossrefactor/protected_decide.py`（新設）、`plugins/ndf/contracts/schemas/io/refactor.args.schema.json`、`plugins/ndf/contracts/version.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/tests/domains/crossrefactor/test_local_gate.py`（新設）、`plugins/ndf/tests/domains/crossrefactor/test_protected.py`（新設）、`plugins/ndf/tests/domains/crossrefactor/test_prompt_decide.py`、`plugins/ndf/tests/route/test_templates.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/testing/test_means.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_invoke_refactor.py`、`plugins/ndf/tests/domains/crossrefactor/test_drive.py`、`plugins/ndf/tests/domains/crossrefactor/test_refactor_cli.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`docs/specifications/ndf-ci-only-tests.md`、`docs/specifications/ndf-review-units-and-refactoring-timing.md`、`docs/specifications/ndf-stage-plan-work-prompts.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-ci-test.md` |
+
+## 人へ残す判断
+
+NDF の共通原則は、必ず人の承認が要る操作を C1〜C8 の番号で定めている。この PR のレビューで、次の 3 件が秘密に触れる（C1）、戻せない操作（C4）、利用者の設定と指示書の書き換え（C7）に当たると指摘され、人の判断を待つため未解決にしている。下の表の「この設計の扱い」のまま実装してよいかを、承認する人が決める。
+
+| 番号 | 判断 | なぜ当たるか | この設計の扱い（推奨） | 変える場合の案と代償 |
+| --- | --- | --- | --- | --- |
+| C1（秘密に触れる） | 手元の経路は、PR のブランチの先頭の設定にあるテストのコマンドを、NDF を動かすシェルの環境変数のまま実行する | 起動の後に他者が PR のブランチへコマンドを足すと、そのコマンドが秘密を読める | このまま。項目ごとの検証（`verify.py`）は、これまでも作業場所の設定のコマンドを同じ環境で実行している。PR のブランチへ書ける人は、テストのコードを書き換えれば、同じように秘密を読める | 起動の後にコマンドが変わったら実行せずに `precondition` で停止する。並行の更新でテストの設定が変わると、利用者が打ち直すことになる。認証情報を読めない実行環境で動かす案は、NDF に隔離の仕組みが無いので新しく作ることになる |
+| C4（戻せない操作） | 検証用の作業場所を、テストの生成物ごと `git worktree remove --force` で取り除く。中断で残ったものも次の実行が取り除く | データの削除に `--force` を使う | このまま。対象は NDF がコミットから新しく作り、状態ファイルに記録したパスだけで、利用者が作業している worktree は消さない。利用者が `git worktree lock` を掛けたものも残す。今の cross-refactoring の作業場所の片付けも同じ形である | 変更や生成物が残る作業場所は消さずに残し、利用者が片付ける。テストが生成物を作るリポジトリでは、実行のたびに作業場所が増える |
+| C7（利用者の設定と指示書を書き換える） | 担当の AI による書き換えを拒むのはテストの定義のファイル（`.ndf/` を含む）だけで、`AGENTS.md`・`CLAUDE.md` は拒まない | 対象範囲に指示書が入れば、担当が書き換えて送れる | このまま。担当が提案できるのは、スプリントの実装が変えた関数とファイルだけなので、指示書が対象に入るのは実装が指示書を変えた場合に限られる。送った変更は、後のコードレビューと、リリースの承認で人が見る。必須のチェックの経路でも、これまで同じ扱いである | 指示書を保護するファイルに足し、変えていれば `refused` にする。指示書を直す課題では、この工程がその分を直せない |
 
 ## 未確認のまま残ること
 
