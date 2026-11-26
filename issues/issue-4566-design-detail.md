@@ -246,10 +246,10 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | --- | --- | --- |
 | 1 | リモートの先頭を `worktree.fetch_tips` で取得する。取得した先頭が `HEAD` の祖先（同じ SHA を含む）なら載せ直さず、`HEAD` の SHA を保つ。祖先でなければ、取得した先頭を `worktree.sync_fetched` へ渡して載せ直す。以後の順は、ここで取得した先頭を「取り込んだ先頭」として使う。直前の周が順 7 で取得していれば、その先頭を使い、取得し直さない | 載せ直しが衝突したら `base_conflict` |
 | 2 | 取り込んだ先頭の設定の手段が手元のテストでない | `precondition` |
-| 3 | `HEAD` が取り込んだ先頭と同じ（送るコミットが無い） | テストを打たずに合格（`tests: skipped`） |
+| 3 | `HEAD` が取り込んだ先頭と同じ（送るコミットが無い） | 状態の `pushing` の SHA が取り込んだ先頭と同じで、その組が `local_passed` にあれば、前の実行が送った後に中断している。テストを打たずに、送った結果（`tests: passed`、送った SHA、その識別値）を復元して完了する。当たらなければ、テストを打たずに合格（`tests: skipped`） |
 | 4 | 取り込んだ先頭から `HEAD` までの変更（`git diff --name-only --no-renames -z`）が保護するファイルに当たる | `refused` |
 | 5 | テスト全体が要るかを調べる | `HEAD`・識別値・`PATH` の組が合格の記録に無ければテスト全体を打つ。記録にあれば打たずに順 6 へ進む |
-| 6 | 合格 | `git push <リモート> <SHA>:refs/heads/<ブランチ>`。受け付ければ終了 |
+| 6 | 合格 | push の前に、送る SHA と合格の組を状態の `pushing` に保存する。続けて `git push <リモート> <SHA>:refs/heads/<ブランチ>` を打つ。受け付ければ終了し、`done` を保存した後に `pushing` を消す |
 | 7 | push の拒否で、取り直したリモートの先頭が変わっていて、周が残る | 次の周 |
 | 8 | push の拒否で、ほか | `push_rejected` |
 | 9 | 不合格の終了コードに 126・127 があり、取り込んだ先頭が合格の記録にも基準側の不合格の記録にも無い。周が残っていなくても、この行を適用する | 取り込んだ先頭（この実行のコミットを載せない状態）だけでテスト全体を打ち、結果を記録する。比べ方は順 9 の下の箇条のとおり。直しへ進む場合は順 10 へ |
@@ -297,6 +297,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `TestBudget` | 型（累計の上限、使った秒、suite 1 つの上限） | `local_gate.py` | suite の上限は、上限の設定ファイル `contracts/limits/test-run.test.json` の `seconds` |
 | `local_passed` | 状態ファイルのキー（`{sha, digest, path_digest}` の並び。`path_digest` は `PATH` の値の SHA-256） | `state.json` | 空 |
 | `verify_trees` | 状態ファイルのキー（パスの並び） | `state.json` | 空 |
+| `pushing` | 状態ファイルのキー（`{sha, digest, path_digest}`。push を打つ直前に書き、`done` を保存した後に消す） | `state.json` | 無し |
 | `local_base_failed` | 状態ファイルのキー（`{sha, digest, path_digest, failed}` の並び。`failed` は基準側で落ちた suite の順番と終了コード） | `state.json` | 空 |
 | `repo` | 状態ファイルのキー（リポジトリの識別値。git の共通ディレクトリの実パス） | `state.json` | 無し |
 | `gate_logs` | 状態ファイルのキー（NDF が書いた手元の最終ゲートのログのファイル名の並び） | `state.json` | 空 |
