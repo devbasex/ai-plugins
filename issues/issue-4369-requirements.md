@@ -1,6 +1,6 @@
 ## 何が起きたか
 
-2026-11-24、中継のラッパーの課題（ https://github.com/devbasex/ai-plugins/issues/4049 ）の開発で、conductor（スプリントの工程を進める AI）が、工程を自動で進めるコマンド `ndf progress next` を打った。作業場所の用意と計画に続けて、工程「実装」が止まらずに始まった。
+2026-11-24、長くなった AI の会話を新しい会話へ引き継ぐ仕組みを直す課題（ https://github.com/devbasex/ai-plugins/issues/4049 ）の開発で、conductor（スプリントの工程を進める AI）が、工程を自動で進めるコマンド `ndf progress next` を打った。作業場所の用意と計画に続けて、工程「実装」が止まらずに始まった。
 
 計画の工程が書いた実装計画は、変更を 7 つのレビューの単位（U1〜U7、見込み約 3,400 行）に分けていた。ところが自動のプランは、課題 1 つを 1 本の worker（実装を担当する AI）に渡し、スプリントブランチの作業場所で直接実装した。実装のプランに渡った値は、ブランチがスプリントブランチ、マージ先が `main`、受け入れ条件が課題全体（`--issue 4049`）である。
 
@@ -17,7 +17,7 @@ conductor は worker を止め、単位ごとの実装を supervisor（フェー
 自動のプランは単位を読まない（2026-11-25、main の 11.0.39 のコードを読んで確かめた。`ndf progress next` を流しての確認はしていない）。
 
 - 工程「実装」の定義（[implement.json](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/contracts/workflow/stages/implement.json)）は、実装のプランを呼び、続けて集めた時点（`gathered`）を記録する。プランは工程 1 回につき 1 本で、課題が複数でも 1 本である（定義には課題ごとに分ける指定 `per_issue` があるが、分ける処理はまだ無い。2026-11-26 にコードを読んで確かめた）
-- そのプランのブランチは、工程の作業場所が今いるブランチ（スプリントブランチ）になる（`plugins/ndf/src/ndf/progress/invoke.py` の差し込みの出所の表 `FILL_SOURCES`）
+- そのプランのブランチは、工程の作業場所が今いるブランチ（スプリントブランチ）になる（`plugins/ndf/src/ndf/progress/invoke.py` の、プランを実行するときに埋める値をどこから取るかを決める表 `FILL_SOURCES`）
 - 工程のプランを組むコード（`plugins/ndf/src/ndf/progress/`）に、実装計画の単位を読む処理は無い（`git grep` で `レビューの単位`・`units` を引いて 0 件）
 - 実行中の工程には `disable` も `finish` も書けないので、止めるには worker のプロセスを止めて工程を失敗にするしかない
 
@@ -127,7 +127,7 @@ conductor は worker を止め、単位ごとの実装を supervisor（フェー
 
 ## 由来
 
-- 中継のラッパーの課題（ https://github.com/devbasex/ai-plugins/issues/4049 ）の実装の工程（2026-11-24、並列の計画 p9）
+- 長くなった AI の会話を新しい会話へ引き継ぐ仕組みを直す課題（ https://github.com/devbasex/ai-plugins/issues/4049 ）の実装の工程（2026-11-24）
 
 ## リクエスト（原文）
 
