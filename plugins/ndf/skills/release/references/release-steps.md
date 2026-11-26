@@ -141,9 +141,9 @@ workflow を置かないリポジトリ（ほかの CI・手元）では、workf
 1. `gh pr view <番号> --json body --jq .body > <承認資料>` で、`assemble` が PR の本文に書いた承認資料を写す
 2. `gh pr view <番号> --json headRefOid --jq .headRefOid` で今の HEAD を読み、行 `提示したコミット:` の SHA をその値に書き換える。
    書き換える前の SHA は、次の手順で使う
-3. 書き換える前の SHA から今の HEAD までに変わったファイルを
-   `gh api repos/<所有者>/<リポジトリ>/compare/<書き換える前の SHA>...<今の HEAD> --jq '.files[].filename'` で読み、
-   承認資料の記述と違う点を書き直す
+3. `gh api -H "Accept: application/vnd.github.diff" repos/<所有者>/<リポジトリ>/compare/<書き換える前の SHA>...<今の HEAD>` で、
+   2 つのコミットの間の差分を中身まで読む。承認資料の版数、届き方、含む PR、検査の結果、利用者向けの変化、指示書と設定の変化を、
+   今の HEAD の内容に合わせて書き直す。確かめられない項目があれば、承認を求めずに止めて、その項目を報告する
 
 ### CHANGELOG の本文
 

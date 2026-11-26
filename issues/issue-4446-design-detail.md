@@ -581,7 +581,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `render_request` | `release/approval_decide.py` | 変更 | `render_request(material: str, head: str, material_sha256: str) -> str` | 行 `提示した資料: <SHA-256>` を足す |
 | `render_trail` | `release/approval_decide.py` | 変更 | `render_trail(answer: str, sha: str, by: str, material_sha256: Optional[str]) -> str` | 担い手が利用者のときだけ行 `回答した資料:` を足す |
-| `parse_request` | `release/approval_decide.py` | 新設 | `parse_request(order: int, author: str, body: str) -> Optional[Presentation]` | 提示のコメントを、順・head・資料のハッシュとして読む |
+| `parse_request` | `release/approval_decide.py` | 新設 | `parse_request(order: int, author: str, body: str) -> Optional[Presentation]` | 提示のコメントを、順・head・資料のハッシュ・行 `提示した資料:` の有無（`hashed`）として読む |
 | `parse` | `release/approval_decide.py` | 変更 | 今のまま | `Trail` に担い手と資料のハッシュを足して読む |
 | `judge` | `release/approval_decide.py` | 変更 | `judge(found: Sequence[Trail], presented: Sequence[Presentation], head: str) -> Judgment` | 設計書の表の「判定」の行のとおり、担い手で分けて判定する |
 | `present` | `release/trail.py` | 変更 | 今のまま | 最新の提示の資料のハッシュが同じで回答があるときだけ提示しない |
@@ -595,7 +595,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `answer` | `--by user` で資料のハッシュが無い・最新の提示と違う | 提示し直した資料への回答でない | 最新の提示との比較 | 呼び出し元へ返す（`TrailError`） | `stopped`（今の `TrailError` と同じ形） | 書かない。新しい資料に回答を取り直す |
 | `answer` | `--by mvv` に資料のハッシュが渡された | 呼ぶ側の誤り | 引数 | 呼び出し元へ返す（`TrailError`） | `stopped` | 書かない |
-| `judge` | この変更の前の形式で書かれた利用者の証跡（資料のハッシュの行が無い） | 変更の前の回答 | `Trail` の資料のハッシュが None | 数えない | `post_status` が承認済みにしない | 提示し直して回答を取り直す |
+| `judge` | この変更の前の形式で書かれた利用者の証跡（資料のハッシュの行が無い）があり、同じ head に行 `提示した資料:` を持つ提示もある | 変更の後に提示し直した | `Presentation` の `hashed` が真の提示がある | 数えない（提示が 1 件も無ければ数えて、承認を引き継ぐ） | `post_status` が承認済みにしない | 新しい資料への回答を取り直す |
 
 ### 既存の部品の再利用
 
