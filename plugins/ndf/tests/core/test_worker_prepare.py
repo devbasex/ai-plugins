@@ -652,13 +652,17 @@ def test_write_refuses_the_same_op_with_another_body(tmp_path, capsys, monkeypat
     assert _invalid(code, out) and material.read_text(encoding="utf-8") == "1 行目\n2 行目\n"
 
 
-@contextlib.contextmanager
-def _another_write(path: Path):
-    """別の書き込みが `path` の書き先ごとのロックを排他で持つ。"""
+def _lock_name(path: Path) -> str:
     to = worker_append.write_target(str(path))
     key = worker_append._op_digest(f"{to.expected[0]}:{to.expected[1]}:{'/'.join(to.parts)}")
+    return f"{int(key[:8], 16) % worker_append.LOCK_STRIPES}.lock"
+
+
+@contextlib.contextmanager
+def _another_write(path: Path):
+    """別の書き込みが `path` の書き先のロックを排他で持つ。"""
     with worker_paths.open_or_create(identity.load().state_dir / worker_append.AREA_DIR / "locks") as locks:
-        fd = worker_paths.open_lock(locks, f"{key}.lock")
+        fd = worker_paths.open_lock(locks, _lock_name(path))
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             yield
@@ -682,8 +686,13 @@ def _write(capsys, monkeypatch, path: Path, body: str, *flags: str) -> tuple[int
 
 
 def test_write_reads_and_publishes_under_the_lock_of_the_target(tmp_path, capsys, monkeypatch, clock):
-    # PR 4591 の r2-1・r3-5: 読み取りから公開までを書き先ごとのロックで直列にする。別の書き先の書き込みは待たない
-    material, other = _state_with(tmp_path, monkeypatch, "material.md", "other.md")
+    # PR 4591 の r2-1・r3-5・r6-7: 読み取りから公開までを書き先のロックで直列にする。別のロックに当たる書き先は待たない。
+    # ロックのファイルは書き先の数によらず LOCK_STRIPES 個を超えない
+    (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    other = next(
+        material.parent / f"other{i}.md" for i in range(1000) if _lock_name(material.parent / f"other{i}.md") != _lock_name(material)
+    )
+    other.write_text("1 行目\n", encoding="utf-8")
     monkeypatch.setattr(durable_locks, "lock_wait_seconds", lambda: 0.0)
     with _another_write(material):
         code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
@@ -692,6 +701,8 @@ def test_write_reads_and_publishes_under_the_lock_of_the_target(tmp_path, capsys
         assert code == 0
     assert material.read_text(encoding="utf-8") == "1 行目\n"
     assert other.read_text(encoding="utf-8") == "1 行目\n2 行目\n"
+    names = {f"{i}.lock" for i in range(worker_append.LOCK_STRIPES)}
+    assert {p.name for p in (identity.load().state_dir / worker_append.AREA_DIR / "locks").iterdir()} <= names
 
 
 def _runs() -> Path:
@@ -703,7 +714,7 @@ def test_write_keeps_the_records_out_of_the_result_dir(tmp_path, capsys, monkeyp
     (material,) = _state_with(tmp_path, monkeypatch, "material.md")
     _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
     assert sorted(p.name for p in material.parent.iterdir()) == ["material.md"]
-    assert list((_runs() / RUN).rglob(worker_append.OPS_FILE))
+    assert list((_runs() / RUN).rglob("op-*.json"))
 
 
 def test_run_records_removes_only_its_own_records(tmp_path, capsys, monkeypatch):
@@ -729,38 +740,50 @@ def test_write_needs_the_run_of_worker_run(tmp_path, capsys, monkeypatch):
     assert material.read_text(encoding="utf-8") == "1 行目\n"
 
 
-def _published_then_lost(monkeypatch):
-    """本文の公開の直後に止まった（応答を受け取れなかった）書き込みを真似る。元の `write_file` を返す。"""
-    real = worker_paths.write_file
+def test_write_replaces_a_file_that_is_not_utf8(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r6-4: 全文の置き換えは前の本文を読まないので、UTF-8 でないファイルも作り直せる
+    (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    material.write_bytes("前の資料\n".encode("shift_jis"))
+    code, _ = _write(capsys, monkeypatch, material, "直した資料\n")
+    assert code == 0 and material.read_text(encoding="utf-8") == "直した資料\n"
 
+
+def _published_then_lost(monkeypatch):
+    """本文を公開した直後に失敗した（応答を受け取れなかった）書き込みを真似る。元の `staged_write` を返す。"""
+    real = worker_paths.staged_write
+
+    @contextlib.contextmanager
     def lose_reply(wd, name, text, **kw):
-        real(wd, name, text, **kw)
+        with real(wd, name, text, **kw) as out:
+            yield out
         if name == "material.md":
             raise OSError(5, "Input/output error")
 
-    monkeypatch.setattr(worker_paths, "write_file", lose_reply)
+    monkeypatch.setattr(worker_paths, "staged_write", lose_reply)
     return real
 
 
 def _fail_body(monkeypatch):
-    """本文の公開の前に止まった書き込みを真似る。元の `write_file` を返す。"""
-    real = worker_paths.write_file
+    """本文を公開する前に失敗した書き込みを真似る。元の `staged_write` を返す。"""
+    real = worker_paths.staged_write
 
+    @contextlib.contextmanager
     def fail_body(wd, name, text, **kw):
-        if name == "material.md":
-            raise OSError(28, "No space left on device")
-        return real(wd, name, text, **kw)
+        with real(wd, name, text, **kw) as out:
+            if name == "material.md":
+                raise OSError(28, "No space left on device")
+            yield out
 
-    monkeypatch.setattr(worker_paths, "write_file", fail_body)
+    monkeypatch.setattr(worker_paths, "staged_write", fail_body)
     return real
 
 
 def test_write_does_not_redo_an_op_a_later_write_undid(tmp_path, capsys, monkeypatch):
-    # PR 4591 の r4-4・r5-5: 公開の直後に止まった操作も、後の書き込みで本文が元に戻った後の打ち直しで組み直さない
+    # PR 4591 の r4-4・r5-5・r6-2: 公開の直後に失敗した操作も、後の書き込みで本文が元に戻った後の打ち直しで組み直さない
     (material,) = _state_with(tmp_path, monkeypatch, "material.md")
     real = _published_then_lost(monkeypatch)
     _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
-    monkeypatch.setattr(worker_paths, "write_file", real)
+    monkeypatch.setattr(worker_paths, "staged_write", real)
     _write(capsys, monkeypatch, material, "1 行目\n")
     code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
     assert code == 0 and "済んでいた" in out["summary"] and material.read_text(encoding="utf-8") == "1 行目\n"
@@ -774,49 +797,63 @@ def test_write_creates_a_file_an_empty_append_stopped_before(tmp_path, capsys, m
     material = state / "material.md"
     real = _fail_body(monkeypatch)
     _write(capsys, monkeypatch, material, "", "--append", "--op", "a1")
-    monkeypatch.setattr(worker_paths, "write_file", real)
+    monkeypatch.setattr(worker_paths, "staged_write", real)
     code, out = _write(capsys, monkeypatch, material, "", "--append", "--op", "a1")
     assert code == 0 and "済んでいた" not in out["summary"] and material.read_text(encoding="utf-8") == ""
 
 
-def test_write_redoes_an_op_stopped_before_others_wrote(tmp_path, capsys, monkeypatch):
-    # PR 4591 の r4-3: 公開の前に止まった操作は、後に別の追記が済んでも、打ち直すと今の本文へ 1 回だけ足す
+def test_write_redoes_an_op_failed_before_the_same_text_was_written(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r4-3・r6-3: 公開の前に失敗した操作は、後にほかの書き込みが組んだ後と同じ本文を書いても済んだとせず、
+    # 打ち直すと今の本文へ 1 回だけ足す
+    (material,) = _state_with(tmp_path, monkeypatch, "material.md")
+    real = _fail_body(monkeypatch)
+    code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+    assert _invalid(code, out) and material.read_text(encoding="utf-8") == "1 行目\n"
+    monkeypatch.setattr(worker_paths, "staged_write", real)
+    assert _write(capsys, monkeypatch, material, "1 行目\n2 行目\n")[0] == 0
+    for _ in range(2):
+        code, _ = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
+        assert code == 0
+    assert material.read_text(encoding="utf-8") == "1 行目\n2 行目\n2 行目\n"
+
+
+def test_write_refuses_another_body_for_an_op_that_failed(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r6-5: 公開の前に失敗した操作の識別子を、別の入力に使えば拒む
     (material,) = _state_with(tmp_path, monkeypatch, "material.md")
     real = _fail_body(monkeypatch)
     _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
-    monkeypatch.setattr(worker_paths, "write_file", real)
-    assert _write(capsys, monkeypatch, material, "3 行目\n", "--append", "--op", "a2")[0] == 0
-    code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
-    assert code == 0 and material.read_text(encoding="utf-8") == "1 行目\n3 行目\n2 行目\n"
+    monkeypatch.setattr(worker_paths, "staged_write", real)
+    code, out = _write(capsys, monkeypatch, material, "3 行目\n", "--append", "--op", "a1")
+    assert _invalid(code, out) and material.read_text(encoding="utf-8") == "1 行目\n"
 
 
 def test_write_stops_when_it_cannot_tell_whether_an_op_was_published(tmp_path, capsys, monkeypatch):
-    # PR 4591 の r5-7: 公開の直後に止まった操作の後に、ndf worker write の外でファイルが変わったら、済んだと返さずに止める
+    # PR 4591 の r5-7: 公開の後に記録を書き換えられずに止まり、その後にファイルが置き換わったら、済んだと返さずに止める
     (material,) = _state_with(tmp_path, monkeypatch, "material.md")
-    real = _published_then_lost(monkeypatch)
+    real_mark = worker_append._mark
+
+    def no_done(private, record, row):
+        if row["state"] != worker_append.PENDING:
+            raise OSError(28, "No space left on device")
+        real_mark(private, record, row)
+
+    monkeypatch.setattr(worker_append, "_mark", no_done)
     _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
-    monkeypatch.setattr(worker_paths, "write_file", real)
+    monkeypatch.setattr(worker_append, "_mark", real_mark)
+    material.unlink()
     material.write_text("手で直した\n", encoding="utf-8")
-    assert _write(capsys, monkeypatch, material, "3 行目\n", "--append", "--op", "a2")[0] == 0
     code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
     assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
-    assert material.read_text(encoding="utf-8") == "手で直した\n3 行目\n"
+    assert material.read_text(encoding="utf-8") == "手で直した\n"
 
 
 def test_write_redoes_an_op_stopped_before_the_body_was_published(tmp_path, capsys, monkeypatch):
-    # PR 4591 の r3-1: 記録を本文より先に書く。本文の公開の前に止まった操作は、打ち直すと 1 回だけ書く
+    # PR 4591 の r3-1: 本文の公開の前に止まった操作は、打ち直すと 1 回だけ書く
     (material,) = _state_with(tmp_path, monkeypatch, "material.md")
-    real = worker_paths.write_file
-
-    def fail_body(wd, name, text, **kw):
-        if name == "material.md":
-            raise OSError(28, "No space left on device")
-        return real(wd, name, text, **kw)
-
-    monkeypatch.setattr(worker_paths, "write_file", fail_body)
+    real = _fail_body(monkeypatch)
     code, out = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
     assert _invalid(code, out) and material.read_text(encoding="utf-8") == "1 行目\n"
-    monkeypatch.setattr(worker_paths, "write_file", real)
+    monkeypatch.setattr(worker_paths, "staged_write", real)
     for _ in range(2):
         code, _ = _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
         assert code == 0

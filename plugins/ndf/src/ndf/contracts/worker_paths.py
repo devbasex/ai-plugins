@@ -15,7 +15,7 @@ import re
 import secrets
 import stat
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Literal, NamedTuple, Optional
 
@@ -95,6 +95,8 @@ DONE_SUFFIX = ".done"
 
 
 RESULT_SUFFIX = ".result.json"
+# 一時ディレクトリの中の、公開する前の一時ファイルの名前（`staged_write`・`_publish_lock`）
+STAGED_NAME = "data"
 
 
 class NameInvalid(ValueError):
@@ -344,12 +346,12 @@ def _publish_lock(wd: WorkDir, name: str) -> None:
     try:
         owned = _tmp_owned(tmp, tmp_fd)
         _drop_inherited_acl(tmp_fd, tmp)
-        fd = os.open("data", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=tmp_fd)
+        fd = os.open(STAGED_NAME, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=tmp_fd)
         created = True
         with os.fdopen(fd, "wb"):
             _drop_inherited_acl(fd, name)
         with contextlib.suppress(FileExistsError):  # noqa: NDF402 ファイル: 間に別の追記が公開したロックを使う
-            os.link("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd, follow_symlinks=False)
+            os.link(STAGED_NAME, name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd, follow_symlinks=False)
     finally:
         _clean_tmp(wd, tmp_fd, tmp, owned, created=created, published=True)
 
@@ -441,7 +443,15 @@ def write_file(wd: WorkDir, name: str, text: str, *, private: bool = False) -> N
 
 
 @contextlib.contextmanager
-def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (), private: bool = False) -> Iterator[dict[str, str]]:
+def staged_write(
+    wd: WorkDir,
+    name: str,
+    text: str,
+    *,
+    retire: Iterable[str] = (),
+    private: bool = False,
+    on_staged: Optional[Callable[[str, os.stat_result], None]] = None,
+) -> Iterator[dict[str, str]]:
     """`write_file` の一時ファイルを作ってアクセス権まで設定し、`retire` の名前を退けてから本体を走らせ、本体が終えたら `name` へ公開する。
 
     置き換えを拒む条件（読み取り専用・`EntryUnsafe`（`owner`・`acl`）など）は退ける前に上がる。`retire` の名前は
@@ -451,6 +461,8 @@ def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (
     元の名前が空いているときだけ元へ戻し（`_restore_retired`）、一時ファイルを片付けて上げ直す。元の名前が埋まっている
     （退けた後に別の手が同じ名前へ書いた）などで戻せなかった名前があれば、上書きせずに一時ディレクトリごと残し、
     元の例外を原因にした `RetiredKept`（回収先のパスを持つ）を上げる。`private` は `write_file` と同じ。
+    `on_staged` は、中身を書き終えた一時ファイルの、作業ディレクトリからの相対パス（`<一時ディレクトリ>/data`）と `stat` を
+    受け取る。公開の前に呼ぶので、呼び手は公開した inode を公開の前に記録できる（`ndf worker write` の打ち直しの見分け）。
     """
     existing = check_writable(wd, name)
     data = text.encode("utf-8")
@@ -463,11 +475,13 @@ def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (
     kept_error: Optional[RetiredKept] = None
     try:
         owned = _tmp_owned(tmp, tmp_fd)
-        fd = os.open("data", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=tmp_fd)
+        fd = os.open(STAGED_NAME, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=tmp_fd)
         created = True
         _fill_data(wd, fd, name, data, existing, private=private)
+        if on_staged is not None:
+            on_staged(f"{tmp}/{STAGED_NAME}", os.stat(STAGED_NAME, dir_fd=tmp_fd, follow_symlinks=False))
         yield _retire_all(wd, tmp_fd, retire, retired)
-        os.replace("data", name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
+        os.replace(STAGED_NAME, name, src_dir_fd=tmp_fd, dst_dir_fd=wd.fd)
         created = False
         published = True
     except BaseException as exc:
@@ -710,7 +724,7 @@ def _clean_tmp(wd: WorkDir, tmp_fd: int, tmp: str, owned: Optional[os.stat_resul
     try:
         if created:
             with contextlib.suppress(FileNotFoundError):  # noqa: NDF402 ファイル: 公開できなかった一時ファイルの後始末。元の失敗を上げる
-                os.unlink("data", dir_fd=tmp_fd)
+                os.unlink(STAGED_NAME, dir_fd=tmp_fd)
         if owned is not None:
             _drop_tmp_dir(wd, tmp_fd, tmp, owned, published=published)
     finally:

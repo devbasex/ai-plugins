@@ -17,29 +17,29 @@
   保存先やその親の名前を差し替えられても、起動時に確かめた保存先の外へ書かない
 - 既定は全文の置き換え。`append` は末尾へ足し、`edit` は `{"old": ..., "new": ...}` の配列で 1 か所ずつ置き換える。
   一部の直しに全文を出し直させない（MVV の Value 2。出力の token は利用者の費用である）
-- 読み取りから公開までを、書き先ごとのロック（`_target_lock`。`worker-write/locks/<書き先の要約>.lock`）で直列にする。
-  並べて打った書き込みどうしが同じ旧い本文から組んで、先の変更を消さないため。ロックは利用者ごとの状態の保存先に置く
-  （共有の保存先に置くと、名前を変えられるほかの利用者が消せる）。ロックの名前は消さない。消すと、消す前に開いた書き込みと
-  後に作った書き込みが別の inode でロックを取り、直列にならないためである（書き先ごとに空のファイルが 1 つ残る）
-- `append`・`edit` は操作の識別子（`op`）を持つ。済んだ操作の記録は起動ごとの保存先（`worker-write/runs/<起動の識別子>/`）
-  の、書き先ごとの 1 つのファイル（`OPS_FILE`）に置く。起動の識別子は `ndf worker run` が起動ごとに作って子へ渡し
-  （`RUN_ENV`）、終えるときにその保存先だけを消す（`run_records`）。同じ保存先を使う別の起動の記録は消さず、強制終了した
-  起動の記録を新しい起動は読まない（強制終了した起動の保存先は残る）
-- 記録のファイルは、済んだ操作（`done`）、公開したかを決められなかった操作（`unknown`）、公開の前の 1 つの操作
-  （`pending`。組む前と組んだ後の書き先の状態の要約を持つ）を持つ。状態の要約は、ファイルが無いことと空のファイルとを
-  分ける（`_target_state`）
-- 書き込みはどれも、自分の変更の前に、残っている `pending` を今の書き先の状態で確定する（`_settle_pending`）。組んだ後と同じなら
-  公開した（`done`）、組む前と同じなら公開していない（記録から外し、打ち直すと書く）、どちらでもなければ `unknown` にする。
-  ロックで直列にしているので、`pending` の後に書き先を変えられるのは確定を通らない手（Tool やほかのコマンド）だけである。
-  後の書き込みが本文を組む前に戻しても、その書き込みが先に確定しているので、打ち直しで取り消された操作を組み直さない
-  記録は起動ごとなので、同じ書き先へ別の起動が書いても、この起動の `pending` は確定されない。別の起動が書き先を変えれば、
-  この起動の打ち直しは `unknown` で止まる。ただし、別の起動が書き先をちょうど組む前の状態へ戻したときだけは、組み直す
-- 打ち直しは、`done` なら書かずに済んだと返し、`unknown` なら書かずに止める（MVV の Value 3・13。重ねず、確かめずに済んだと
-  返さない）。同じ識別子で入力が違えば拒む
-- 費用: 追記・一部の置き換えの成功 1 回あたり、記録の公開が 1 回と本文の公開が 1 回で、ロックはその 2 回の間だけ持つ。
-  公開の後に `done` を書く方式は記録の公開が 2 回になる。本文の一時ファイルの名前を記録して公開を名前の有無で見分ける方式は
-  記録の公開が 1 回で済むが、`worker_paths.write_file` の一時ファイルを外へ出す必要がある。記録のファイルは起動の間の、
-  その書き先の操作の数だけ大きくなる（1 件はおよそ 140 バイト）
+- 読み取りから公開までを書き先のロックで直列にする。並べて打った書き込みが同じ旧い本文から組んで、先の変更を消さないため。
+  ロックは利用者ごとの状態の保存先（`worker-write/locks`）に置く（共有の保存先に置くと、ほかの利用者が名前を消せる）。
+  ロックは書き先の要約で選ぶ固定の数（`LOCK_STRIPES`）のファイルで、名前は消さない。消すと、消す前に開いた書き込みと後に
+  作った書き込みが別の inode でロックを取るためである。数を固定するので、保存先と書き先がいくつ増えてもファイルは増えない
+  （同じロックに当たった別の書き先どうしは待ち合う）
+- 全文の置き換えは、打ち直しても結果が同じなので、記録を書かず、前の本文も読まない
+- `append`・`edit` は操作の識別子（`op`）を持つ。識別子は 1 回の `ndf worker run` の中だけで通じる。記録は起動ごとの
+  保存先（`worker-write/runs/<起動の識別子>/<書き先の要約>/op-<識別子の要約>.json`）に置き、別の起動へは引き継がない。
+  起動の識別子は `ndf worker run` が起動ごとに作って子へ渡し（`RUN_ENV`）、終えるときにその保存先だけを消す
+  （`run_records`。強制終了した起動の保存先は残るが、後の起動は読まない）。記録は操作ごとの 1 ファイルなので、済んだかは
+  名前を 1 つ引いて分かり、過去の操作の数によらない
+- 公開したかは、本文の一致ではなく公開した inode で決める。`worker_paths.staged_write` が中身を書いた一時ファイルの
+  inode（番号と更新時刻）を公開の前に知らせるので、記録を「公開の前」（`pending`）で書いてから公開し、公開した後に
+  「公開した」（`done`）へ書き換える。公開に失敗したら「失敗」（`failed`）にする。どの状態も入力の要約を持つので、同じ
+  識別子を別の入力に使えば拒む
+- 打ち直しは、`done` なら書かずに済んだと返し、`failed` なら組み直して書く。`pending`（記録を書き換える前に止まった）なら、
+  書き先の名前が記録した inode を指していれば公開した、一時ファイルが記録した inode のまま残っていれば公開していない。
+  どちらでもなければ、公開した後に置き換えられたのかを決められないので、書かずに止める（MVV の Value 3・13）
+- 費用: 追記・一部の置き換えの成功 1 回あたり、記録の公開が 2 回（公開の前と後）と本文の公開が 1 回で、ロックはその間だけ
+  持つ。記録の大きさは操作の数によらない。比べた方式は次のとおり
+  - 記録を 1 回だけ書き、公開の確定を次の書き込みに任せる: 記録の公開は 1 回だが、書き先ごとの記録が操作の数だけ大きくなり
+    （累積の読み書きは操作の数の 2 乗）、別の起動の書き込みが確定しないと本文の一致に頼ることになる
+  - 本文の一致で決める: 記録の公開は 1 回だが、ほかの書き込みが同じ本文を公開した場合と見分けられない
 """
 
 from __future__ import annotations
@@ -51,6 +51,7 @@ import functools
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import sys
@@ -74,12 +75,14 @@ AREA_DIR = "worker-write"
 RUN_TOKEN_BYTES = 16
 # `ndf worker run` が起動ごとに作り、子の `ndf worker write` へ渡す起動の識別子の環境変数（16 バイトの 16 進）
 RUN_ENV = "NDF_WORKER_WRITE_RUN"
-# 書き先ごとの、済んだ操作の記録のファイルの名前
-OPS_FILE = "ops.json"
-# 書き先の状態の要約で、ファイルが無いことを表す値（sha256 の 16 進と重ならない）
-ABSENT = "no-file"
-# 公開の前の操作の記録が持つ値
-PENDING_KEYS = ("op", "digest", "before", "after")
+# 操作の記録の状態: 公開の前・公開した・公開の前に失敗した（打ち直すと書く）
+PENDING, DONE, FAILED = "pending", "done", "failed"
+# 操作の記録が持つ値
+RECORD_KEYS = ("op", "digest", "staged", "ino", "mtime_ns", "after")
+# 書き先のロックの数。書き先の要約から 1 つを選ぶので、ロックのファイルは書き先がいくつあってもこの数を超えない
+LOCK_STRIPES = 64
+# `worker_paths.staged_write` の一時ディレクトリの名前
+STAGED_DIR = re.compile(r"\.ndf-[0-9a-f]{16}")
 
 
 class WorkerError(Exception):
@@ -134,7 +137,7 @@ WRITE_HELP = """\
                    [{"old": "<1 か所に決まる元の文>", "new": "<直した文>"}]
 
 全文を渡すのは作り直すときだけにし、書き足すなら --append、一部を直すなら --edit で差分だけを渡す。
---op は操作ごとに新しい語にする。応答を受け取れずに同じ --op と本文で打ち直しても、重ねて書かずに済んだと返す。
+--op は操作ごとに新しい語にする。同じ起動の中で、応答を受け取れずに同じ --op と本文で打ち直しても、重ねて書かずに済んだと返す。
 区切り語は引用符で囲む（囲まないと本文の $(...)・$変数・バッククォートがシェルに解釈される）。
 PR 本文・Issue から写した文を含むことがあるので、本文に区切り語だけの行が無い語を選ぶ。
 """
@@ -162,7 +165,11 @@ def add_write(sub: Any, tool: str) -> None:
         help="標準入力で、`old` と `new` の文字列を持つオブジェクトの空でない JSON 配列を渡す。配列の順に置き換え、各 `old` は"
         "その時点の本文にちょうど 1 か所ある空でない文字列にする。--op が必須で、--append と同時に指定できない",
     )
-    wr.add_argument("--op", help="--append・--edit の操作ごとに新しくする識別子（同じ識別子で打ち直しても重ねて書かない）")
+    wr.add_argument(
+        "--op",
+        help="--append・--edit の操作ごとに新しくする識別子。同じ ndf worker run の起動の中で、応答を受け取れなかった操作を"
+        "同じ識別子と本文で打ち直すと、重ねて書かない。操作の記録は別の起動へ引き継がないので、新しい起動での打ち直しには効かない",
+    )
     wr.set_defaults(fn=functools.partial(_cmd_write, tool=tool))
 
 
@@ -224,86 +231,137 @@ def write(to: Target, body: str, mode: str, op: Optional[str]) -> bool:
         raise WorkerError("invalid", f"--{mode} には操作の識別子 --op を渡す（打ち直しても重ねて書かないため）")
     name = to.parts[-1]
     key = _op_digest(f"{to.expected[0]}:{to.expected[1]}:{'/'.join(to.parts)}")
-    with _opened(to) as wd, _target_lock(key, to.path), _run_area(key) as private:
-        current = worker_paths.read_file(wd, name)
-        ops = _load_ops(private, to.path)
-        settled = _settle_pending(ops, _target_state(current))
+    with _opened(to) as wd, _target_lock(key, to.path):
         if mode not in OP_MODES:
-            if settled:
-                _save_ops(private, ops)
-            worker_paths.write_file(wd, name, body)
+            worker_paths.write_file(wd, name, body)  # 全文の置き換えは打ち直しても結果が同じなので、記録も前の本文も要らない
             return True
-        op_key, digest = _op_digest(str(op)), _op_digest(f"{mode}\0{body}")
-        if _op_done(ops, op_key, digest, op, to.path):
-            if settled:
-                _save_ops(private, ops)
-            return False
-        changed = _composed("" if current is None else current, current is None, body, mode, to.path)
-        ops["pending"] = {"op": op_key, "digest": digest, "before": _target_state(current), "after": _target_state(changed)}
-        _save_ops(private, ops)
-        worker_paths.write_file(wd, name, changed)
-    return True
+        with _run_area(key) as private:
+            return _write_once(wd, private, to, Request(body, mode, str(op)))
 
 
-def _target_state(text: Optional[str]) -> str:
-    """書き先の状態の要約。ファイルが無ければ `ABSENT`、あれば本文の sha256（空のファイルと無いファイルを分ける）。"""
-    return ABSENT if text is None else _op_digest(text)
+class Request(NamedTuple):
+    """`append`・`edit` の 1 回の操作の入力。"""
+
+    body: str
+    mode: str
+    op: str
 
 
-def _settle_pending(ops: dict[str, Any], now: str) -> bool:
-    """残っている `pending` を今の書き先の状態 `now` で確定し、記録を変えたら真。
-
-    組んだ後と同じなら `done`、組む前と同じなら外す（公開していないので打ち直しで書く）、どちらでもなければ `unknown`。
-    """
-    pending = ops.pop("pending", None)
-    if pending is None:
+def _write_once(wd: worker_paths.WorkDir, private: worker_paths.WorkDir, to: Target, req: Request) -> bool:
+    """操作 `req.op` を 1 回だけ公開する。記録の状態で打ち直しを見分け、済んでいれば偽、書いたら真。"""
+    name, path, body, mode, op = to.parts[-1], to.path, req.body, req.mode, req.op
+    record = f"op-{_op_digest(op)}.json"
+    digest = _op_digest(f"{mode}\0{body}")
+    row = _load_record(private, record, digest, op, path)
+    if row is not None and row["state"] == DONE:
         return False
-    if now == pending["after"]:
-        ops["done"][pending["op"]] = pending["digest"]
-    elif now != pending["before"]:
-        ops["unknown"][pending["op"]] = pending["digest"]
+    current = worker_paths.read_file(wd, name)
+    if row is not None and row["state"] == PENDING:
+        evidence = _published(wd, name, current, row)
+        if evidence is None:
+            raise WorkerError(
+                "precondition",
+                f"操作 {op!r} を {path} へ公開したかを決められない（公開の直前か直後に止まり、その後にファイルが置き換わった）。"
+                "ファイルを読み、変更が載っていないと確かめたときだけ、別の --op で打ち直す",
+            )
+        if evidence:
+            _mark(private, record, row | {"state": DONE})
+            return False
+        _drop_staged(wd, row)  # 公開の前に止まった一時ファイルを片付けてから組み直す
+    changed = _composed("" if current is None else current, current is None, body, mode, path)
+    staged: dict[str, Any] = {}
+
+    def note(rel: str, st: os.stat_result) -> None:
+        staged.update({"op": op, "digest": digest, "staged": rel, "ino": st.st_ino, "mtime_ns": st.st_mtime_ns})
+        staged["after"] = _op_digest(changed)
+        _mark(private, record, staged | {"state": PENDING})
+
+    try:
+        with worker_paths.staged_write(wd, name, changed, on_staged=note):
+            pass
+    except BaseException:
+        if staged:  # 公開した inode が名前に載っていれば済んだ、載っていなければ打ち直せる
+            # 確かめられない・記録を書けないときは公開の前の記録のまま残し、打ち直しが公開した inode から決める
+            with contextlib.suppress(OSError, ValueError):  # noqa: NDF402 ファイル: 元の失敗を上げる
+                done = _published(wd, name, worker_paths.read_file(wd, name), staged) is True
+                _mark(private, record, staged | {"state": DONE if done else FAILED})
+        raise
+    _mark(private, record, staged | {"state": DONE})
     return True
 
 
-def _op_done(ops: dict[str, Any], op_key: str, digest: str, op: Optional[str], path: Path) -> bool:
-    """操作が済んでいれば真、記録に無ければ偽。入力が違えば invalid、公開したかを決められなかった操作なら precondition。"""
-    for bucket in ("done", "unknown"):
-        if op_key not in ops[bucket]:
-            continue
-        if ops[bucket][op_key] != digest:
-            raise WorkerError("invalid", f"操作 {op!r} は {path} へ別の入力で打たれている（新しい操作には別の --op を渡す）")
-        if bucket == "done":
-            return True
-        raise WorkerError(
-            "precondition",
-            f"操作 {op!r} を {path} へ公開したかを決められない（公開の前か直後に止まり、その後に ndf worker write の外でファイルが"
-            "変わった）。ファイルを読んで変更が載っていないと確かめたときだけ、別の --op で打ち直す",
-        )
-    return False
+def _load_record(private: worker_paths.WorkDir, record: str, digest: str, op: str, path: Path) -> Optional[dict[str, Any]]:
+    """操作の記録を読む。無ければ None。読めない記録・同じ `op` で入力が違う記録は `WorkerError`（invalid）。
 
-
-def _load_ops(private: worker_paths.WorkDir, path: Path) -> dict[str, Any]:
-    """書き先の記録を読む。無ければ空。形の違う記録は、済んだかを決められないので `WorkerError`（invalid）で止める。"""
-    raw = worker_paths.read_file(private, OPS_FILE, owned=True)
+    公開の前に失敗した操作（`FAILED`）の記録も入力の要約を持つので、同じ識別子を別の入力に使えば拒む。
+    """
+    raw = worker_paths.read_file(private, record, owned=True)
     if raw is None:
-        return {"done": {}, "unknown": {}}
+        return None
     try:
-        ops = json.loads(raw)
+        row = json.loads(raw)
     except json.JSONDecodeError:
-        ops = None
-    pending = ops.get("pending") if isinstance(ops, dict) else None
-    if not (
-        isinstance(ops, dict)
-        and isinstance(ops.get("done"), dict)
-        and isinstance(ops.get("unknown"), dict)
-        and (pending is None or (isinstance(pending, dict) and all(isinstance(pending.get(k), str) for k in PENDING_KEYS)))
-    ):
-        raise WorkerError("invalid", f"{path} への操作の記録を読めない")
-    return ops
+        row = None
+    if not (isinstance(row, dict) and row.get("state") in (PENDING, DONE, FAILED) and all(k in row for k in RECORD_KEYS)):
+        raise WorkerError("invalid", f"操作 {op!r} の記録を読めない（新しい操作には別の --op を渡す）")
+    if row["digest"] != digest:
+        raise WorkerError("invalid", f"操作 {op!r} は {path} へ別の入力で打たれている（新しい操作には別の --op を渡す）")
+    return row
 
 
-def _save_ops(private: worker_paths.WorkDir, ops: dict[str, Any]) -> None:
-    worker_paths.write_file(private, OPS_FILE, json.dumps(ops, ensure_ascii=False), private=True)
+def _published(wd: worker_paths.WorkDir, name: str, current: Optional[str], row: dict[str, Any]) -> Optional[bool]:
+    """公開の前の記録 `row` の操作が公開したかを、公開した inode で決める。公開したなら真、していないなら偽、決められなければ None。
+
+    書き先の名前が記録した inode（番号と更新時刻）を指し、本文が組んだ後の要約と同じなら、この操作が公開した。一時ファイルが
+    記録した inode のまま残っていれば、公開の前に止まった。どちらでもなければ、公開した後に置き換えられたのか、公開の前に
+    止まって一時ファイルを片付けた後に記録を書けなかったのかを決められない。本文の一致だけでは、ほかの書き込みが同じ本文を
+    公開した場合と見分けられないので使わない。
+    """
+    try:
+        st = os.stat(name, dir_fd=wd.fd, follow_symlinks=False)
+    except FileNotFoundError:
+        st = None
+    if st is not None and (st.st_ino, st.st_mtime_ns) == (row["ino"], row["mtime_ns"]) and current is not None:
+        if _op_digest(current) == row["after"]:
+            return True
+    left = _staged_left(wd, row)
+    return False if left else None
+
+
+def _staged_left(wd: worker_paths.WorkDir, row: dict[str, Any]) -> bool:
+    """記録した一時ファイルが、記録した inode のまま残っていれば真。一時ディレクトリはリンクをたどらずに開く。"""
+    tmp, _, leaf = str(row["staged"]).partition("/")
+    if not STAGED_DIR.fullmatch(tmp) or leaf != worker_paths.STAGED_NAME:
+        return False
+    try:
+        fd = os.open(tmp, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=wd.fd)
+    except OSError:  # noqa: NDF401 ファイル: 開けない一時ディレクトリは残っていないと見る
+        return False
+    try:
+        st = os.stat(leaf, dir_fd=fd, follow_symlinks=False)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 無ければ残っていない
+        return False
+    finally:
+        os.close(fd)
+    return (st.st_ino, st.st_mtime_ns) == (row["ino"], row["mtime_ns"])
+
+
+def _drop_staged(wd: worker_paths.WorkDir, row: dict[str, Any]) -> None:
+    """公開の前に止まった操作の一時ファイルと一時ディレクトリを消す（記録した inode のときだけ）。消せなければそのまま残す。"""
+    tmp, _, leaf = str(row["staged"]).partition("/")
+    with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 片付けられなくても組み直しは進める（残るのは私有の一時ディレクトリ）
+        fd = os.open(tmp, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=wd.fd)
+        try:
+            st = os.stat(leaf, dir_fd=fd, follow_symlinks=False)
+            if (st.st_ino, st.st_mtime_ns) == (row["ino"], row["mtime_ns"]):
+                os.unlink(leaf, dir_fd=fd)
+        finally:
+            os.close(fd)
+        os.rmdir(tmp, dir_fd=wd.fd)
+
+
+def _mark(private: worker_paths.WorkDir, record: str, row: dict[str, Any]) -> None:
+    worker_paths.write_file(private, record, json.dumps(row, ensure_ascii=False), private=True)
 
 
 def _area_root() -> Path:
@@ -312,10 +370,10 @@ def _area_root() -> Path:
 
 @contextlib.contextmanager
 def _target_lock(key: str, target: Path) -> Iterator[None]:
-    """書き先 `key` のロックを排他で持つ（`_held`）。ロックの保存先がほかの利用者に変えられるなら `EntryUnsafe`。"""
+    """書き先 `key` の、固定の数（`LOCK_STRIPES`）に分けたロックの 1 つを排他で持つ（`_held`）。ロックの保存先がほかの利用者に変えられるなら `EntryUnsafe`。"""
     with worker_paths.open_or_create(_area_root() / "locks") as locks:
         worker_paths.check_unshared(locks)
-        with _held(locks, f"{key}.lock", target, "書き込み"):
+        with _held(locks, f"{int(key[:8], 16) % LOCK_STRIPES}.lock", target, "書き込み"):
             yield
 
 
