@@ -364,7 +364,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 - `write_unversioned`
   - 事前条件: 保存先が `none`。`args.environments` が 1 つ以上
   - 事後条件: 確かめ 0〜6 で止まれば、どの PR にも書いていない。書いた配布先ごとに、含めた PR の各々に、同じ値・同じ `environments`・正の `targets` の信用する記録がちょうど 1 件ある
-  - 副作用: GitHub のコメントの読み取り・書き込み・自分が書いたコメントの削除、git の起動 3 回、CD の実行の照会、`observe.url` の HTTP の読み取り
+  - 副作用: GitHub のコメントの読み取り・書き込み・自分が書いたコメントの削除、git の起動 3 回（共有の置き場を使えたときは 0 回）、共有の置き場の読み書きと削除、CD の実行の照会、`observe.url` の HTTP の読み取り
 - `read_release`
   - 事後条件: 照会できない書き手が候補か本文にいれば、何も選ばずに `PermissionUnknown` を投げる。候補でないコメントの書き手は照会しない
   - 副作用: GitHub の読み取りだけ
