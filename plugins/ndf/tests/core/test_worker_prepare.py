@@ -511,3 +511,29 @@ def test_draft_refuses_a_draft_dir_that_is_a_link(tmp_path, capsys, monkeypatch)
     monkeypatch.setattr("sys.stdin", io.StringIO("本文"))
     code, out = _run(capsys, "draft", "--state-dir", str(state))
     assert _invalid(code, out) and list((tmp_path / "far").iterdir()) == []
+
+
+@pytest.mark.parametrize("same", [True, False])
+def test_write_replaces_a_file_only_in_the_result_dir_worker_run_opened(tmp_path, capsys, monkeypatch, same):
+    # #4590: Write・Edit の Tool が .git の下を拒むので、承認資料の作業用のファイルは Bash からこのサブコマンドで書く
+    state = tmp_path / "state"
+    state.mkdir()
+    material = state / "material.md"
+    material.write_text("前の資料\n", encoding="utf-8")
+    st = (state if same else tmp_path).stat()
+    monkeypatch.setenv(identity.WORKER_RESULT_DIR_ENV, f"{st.st_dev}:{st.st_ino}:{state}")
+    monkeypatch.setattr("sys.stdin", io.StringIO("直した資料\n"))
+    code, out = _run(capsys, "write", "--path", str(material))
+    if same:
+        assert code == 0 and material.read_text(encoding="utf-8") == "直した資料\n"
+    else:
+        assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
+        assert material.read_text(encoding="utf-8") == "前の資料\n"
+
+
+def test_write_refuses_a_parent_that_is_a_link(tmp_path, capsys, monkeypatch):
+    (tmp_path / "far").mkdir()
+    (tmp_path / "state").symlink_to(tmp_path / "far")
+    monkeypatch.setattr("sys.stdin", io.StringIO("本文"))
+    code, out = _run(capsys, "write", "--path", str(tmp_path / "state" / "material.md"))
+    assert _invalid(code, out) and list((tmp_path / "far").iterdir()) == []
