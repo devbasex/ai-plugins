@@ -163,9 +163,9 @@ graph TD
 | `ndf progress new` | 流れの設定を重ねて工程の要否を決める | 知らない種類・無いモードか工程の名前（下の「名前の照合」）・承認の工程の無効化は、箇所と理由を示して作らない（`invalid`） | 流れの設定が無ければ同じ。今と違い、`stages` の工程の名前の誤りでも止まる |
 | `ndf project check` | `items` に食い違いを足し、`summary` に件数を足す | 終了コードは設定の新しさだけで決め、食い違いでは変えない | 食い違いが無ければ同じ |
 | `ndf records close-check` | 任意の引数 `--records <ndf release-steps records の出力の JSON>` を足す。結果に、条件ごとの扱い（`outputs.conditions`）と、テストで確認できたか（`outputs.verified`）を足す（下の「close-check の結果」） | 流れの設定が形に合わなければ閉じない（`precondition`）。`--records` と `--verification` を両方渡すと `precondition` | 流れの設定が無く `--records` を渡さなければ判定は同じ |
-| `ndf release-steps record` | 任意の引数 `--version <出したものを指す値>` と `--environment <反映した本番の配布先の名前>`（複数回指定できる）を足す。`--production-sha` は今と同じく受ける | 何も書かずに `precondition` で止まる場合は、下の「バージョンの無いリリース記録の書き方」の確かめのどれかに当たったときである。本番ブランチへ入っていない PR は今と同じく書かない | 引数が無ければ同じ |
+| `ndf release-steps record` | 任意の引数 `--version <出したものを指す値>`、`--environment <反映した本番の配布先の名前>`、`--target <今回の対象の配布先の名前>`、`--observed <配布先の名前>=<実環境で確かめた証跡>` を足す（`--version` 以外は複数回指定できる）。`--production-sha` は今と同じく受ける。結果の `outputs` に、対象の配布先の反映がそろったか（`complete`）と、まだの配布先（`missing`）を入れる | 何も書かずに `precondition` で止まる場合は、下の「バージョンの無いリリース記録の書き方」の確かめのどれかに当たったときである。本番ブランチへ入っていない PR は今と同じく書かない | 引数が無ければ同じ |
 | `ndf release-steps verification-record` | 記録に任意の `environments`（確かめた本番の配布先の名前の一覧）を持てる。同じ値に、配布先ごとの記録を何件でも書ける | バージョンの保存先が `none` で、次のどれかに当たれば書かない（`precondition`）。`environments` が無い。反映の記録が無い配布先を含む。`--pr` が記録の PR（リリース記録の `included` の最小の番号）でない。最後の場合は、正しい記録の PR の番号を `items` に入れて返す | バージョンを持つリポジトリは同じ |
-| `ndf release-steps records` | 出力に、最後のリリース記録と同じ `version` の全リリース記録（`releases`）を足す | 今と同じ。書き手の権限を読めないときは失敗で返す | 今の出力の項目は変えない |
+| `ndf release-steps records` | 出力に、最後のリリース記録と同じ `version` の全リリース記録（`releases`）と、PR の本文（`body`）を足す | 書き手の権限を照会できない書き手が 1 人でもいれば、記録を選ばずに失敗で返す（下の「閉じる手順の読み取り」） | 今の出力の項目は変えない |
 
 ### 名前の照合
 
@@ -196,12 +196,12 @@ graph TD
 | `release_verification` | 条件 2 の記録の存在。最終工程が「リリース後テスト」なら、条件 3 の記録の存在も免除する | リリース記録（条件 1）、渡した記録の不合格と保留、ほかの有効な条件 |
 | `retrospective_line` | 条件 3 の「振り返り:」の行だけ | リリース記録（条件 1）、条件 2、ほかの有効な条件 |
 
-閉じる手順は、リリース記録とテストの記録を、書き手の権限を確かめるコマンドで 1 回だけ読み、その出力をそのまま `close-check` に渡す。手順書（`progress-tracking` の「スプリントを閉じる」）の手順 1・2 を次のように変える。条件を外していても同じである。
+閉じる手順は、記録の PR のコメントと本文を、書き手の権限を確かめるコマンドで 1 回だけ読み、その出力をそのまま `close-check` に渡す。手順書（`progress-tracking` の「スプリントを閉じる」）の手順 1〜3 を次のように変える。条件を外していても同じである。
 
-- 手順 1 は、記録の PR のコメントを `gh pr view --json body,comments` でなく `ndf release-steps records --pr <記録の PR>` で読み、出力をファイルに保存する。このコマンドは、今の `GitHub.trusts` で書き手が対象のリポジトリで write 以上の権限を持つかを確かめ、信用する書き手のコメントだけからリリース記録とテストの記録を選ぶ。所属の区分（`author_association`）だけでは判定しない
-- 手順 2 は、`included` の PR ごとに `gh pr view <PR> --json body` で本文を 1 回ずつ読む。記録の PR もここで 1 回だけ読む。手順 1 は本文を取らないので、同じ PR を 2 回読むことは無い
+- 手順 1 は、記録の PR を `gh pr view --json body,comments` でなく `ndf release-steps records --pr <記録の PR>` で読み、出力をファイルに保存する。このコマンドは、書き手が対象のリポジトリで write 以上の権限を持つかを確かめ、信用する書き手のコメントだけからリリース記録とテストの記録を選ぶ。所属の区分（`author_association`）だけでは判定しない。出力には記録の PR の本文も入る
+- 手順 2 は、記録の PR については手順 1 の出力の本文を使い、`gh` で取り直さない。記録の PR 以外の `included` の PR は、`gh pr view <PR> --json body` で本文を 1 回ずつ取得する
 - 手順 3 は、手順 1 で保存したファイルを `close-check --records` に渡す。今回のリリースと `version` が同じテストの記録を選ぶのは `close-check` で、手順書の AI は選ばない
-- 手順 1 のコマンドが失敗したとき（書き手の権限を読めないときを含む）は、記録が無いとは扱わず、課題を閉じずに「失敗」と報告する
+- 手順 1 のコマンドが失敗したときは、記録が無いとは扱わず、課題を閉じずに「失敗」と報告する
 
 受け入れ条件のチェック（`[x]`）の付け方は、経路で変わる。
 
@@ -211,7 +211,31 @@ graph TD
 | バージョンを持つ経路で `release_verification.required: false`（両方の条件を外した場合を含む） | 同上 |
 | バージョンを持つ経路で、上に当たらない | 今と同じ |
 
-バージョンの保存先が `none` の経路で設定を問わないのは、配布先ごとの記録のうち、別の課題の行しか持たない記録でも、今の判定（条件 2）は閉じることを妨げないためである。`verified` が真になるのは、その課題の行が、今回の対象の配布先のすべてで合格したときだけである（下の「close-check の結果」）。
+バージョンの保存先が `none` の経路で設定を問わないのは、記録を必須にしない呼び出し（`enforced` が偽）では、課題の行が無い配布先があっても閉じることを妨げないためである。たとえば別の課題の行しか持たない記録しか無くても、課題は閉じられる。そのため、チェックは `verified` で別に決める。`verified` が真になるのは、その課題の行が、今回の対象の配布先のすべてで合格したときだけである（下の「close-check の結果」）。
+
+### 閉じる手順の読み取り
+
+閉じる判定に使う記録は、権限を照会できなかった書き手を「権限が無い」と扱わずに、読み取りの失敗として止める。今の `GitHub.permission` は、上限でない 403・404 を `none` に変え、`GitHub.trusts` はその書き手のコメントを除いて続ける。この扱いのままでは、照会に失敗した書き手の新しい不合格の記録が落ち、古い合格の記録で課題を閉じてしまう。
+
+| 照会の結果 | 今の `trusts` | `records` の扱い |
+| --- | --- | --- |
+| 200 で `admin`・`maintain`・`write` | 信用する | 信用する |
+| 200 で `read`・`triage`・`none` | 信用しない | 信用しない（権限が足りない） |
+| 403・404（上限でない） | 信用しない（`none` と同じ） | 照会できない。記録を選ばず、照会できなかった書き手の名前を載せて失敗で返す |
+| 上限・ほかの失敗 | 例外 | 失敗で返す（今と同じ） |
+
+`GitHub` に、照会できないことを例外で返す読み方（`permission_strict`）を足し、`records` はこれを使う。ほかの読み手（承認の記録の読み取りなど）の扱いは変えない。
+
+照会の回数は次のとおりである。
+
+| 読み方 | 記録の PR への取得 | 権限の照会 | `gh`・`ndf` の起動 |
+| --- | --- | --- | --- |
+| 今（`gh pr view --json body,comments` と、手順 2 の本文の取得） | GraphQL 1 回 + 手順 2 で本文 1 回 | 無し（権限を確かめていない） | 含めた PR が N 本なら N + 1 回 |
+| この設計（`records` が本文も返す） | REST でコメント 1 回（ページ送りを除く）+ 本文 1 回 | MEMBER・COLLABORATOR の書き手 1 人につき 1 回（同じ実行の中では 1 人 1 回。OWNER は照会しない） | N 回 |
+| 採らなかった案: `records` はコメントだけを返し、手順 2 で記録の PR の本文も取る | REST 1 回 + 手順 2 で本文 1 回 | 同上 | N + 1 回 |
+| 採らなかった案: 対象のリポジトリの collaborators を一覧で読む | 同上 | 一覧のページ数だけ（書き手の数によらない） | N 回 |
+
+本文を同じ読み取りに入れたので、記録の PR への取得は今と同じ 2 回で、起動は 1 回減る。増えるのは権限の照会だけで、これは write 以上の書き手の記録だけを使うために要る。collaborators の一覧を読む案は、一覧を読む権限（push 以上）が token に要り、大きな組織のリポジトリではページ送りが書き手の数より多くなるので採らない。
 
 ### close-check の結果
 
@@ -221,7 +245,7 @@ graph TD
 | --- | --- | --- |
 | `conditions.release_verification.excluded` | 真偽 | `close.release_verification.required` が `false` なら真 |
 | `conditions.release_verification.reason` | 文字列か `null` | 外したときの理由。外していなければ `null` |
-| `conditions.release_verification.enforced` | 真偽 | `--require` があり、`excluded` が偽のときだけ真。真なら、テストの記録が無い課題を閉じない |
+| `conditions.release_verification.enforced` | 真偽 | `--require` があり、`excluded` が偽のときだけ真。真なら、その課題の行を持つテストの記録が無い課題を閉じない。`--records` では、対象の配布先のどれか 1 つでもその課題の行が無ければ閉じない（配布先ごとの記録があるだけでは足りない） |
 | `conditions.retrospective_line.excluded` | 真偽 | `close.retrospective_line.required` が `false` なら真 |
 | `conditions.retrospective_line.reason` | 文字列か `null` | 同上 |
 | `conditions.retrospective_line.enforced` | 真偽 | `excluded` の否定。真なら、最終工程が「振り返り」の経路で、手順書の AI が条件 3 の行を確かめる（行は `close-check` が読まない） |
@@ -234,39 +258,58 @@ graph TD
 `verified` は次のときだけ真である。
 
 - `--verification` を渡したとき: 渡した記録にその課題の行があり、すべて合格
-- `--records` を渡したとき: `release.complete` が真で、対象の配布先のそれぞれについて、その配布先を含む最後のテストの記録にその課題の行があり、合格
+- `--records` を渡したとき: `release.complete` が真で、対象の配布先のそれぞれについて、その配布先とその課題の行の両方を含む最後のテストの記録の行が合格
 
-`--records` を渡したときの判定は次のとおりである。リリース記録が無いか `release.complete` が偽なら、閉じない（条件 1）。どれかの対象の配布先で、最後の記録のその課題の行が不合格なら閉じない。不合格が無く保留があれば人が決める。課題の行が無い配布先が残るときは、`enforced` が真なら閉じず、偽なら閉じることを妨げない（チェックは付けない）。
+`--records` を渡したときは、配布先と課題の組ごとに、その配布先とその課題の行の両方を含む最後のテストの記録を選ぶ。配布先を含む最後の記録を先に選ぶと、同じ配布先で別の課題だけを再テストした記録が、その課題の不合格を覆い隠すためである。その課題の行を持たない記録は、その課題の判定に使わない。
+
+判定は次のとおりである。
+
+| 状態 | 判定 |
+| --- | --- |
+| リリース記録が無いか、`release.complete` が偽 | 閉じない（条件 1） |
+| どれかの対象の配布先で、選んだ行が不合格 | 閉じない |
+| 不合格が無く、どれかの対象の配布先で選んだ行が保留 | 人が決める |
+| その課題の行が無い対象の配布先があり、`enforced` が真 | 閉じない |
+| その課題の行が無い対象の配布先があり、`enforced` が偽 | 閉じることを妨げない。`verified` は偽で、チェックは付けない |
+| すべての対象の配布先で選んだ行が合格 | 閉じてよい。`verified` は真 |
 
 バージョンを持つリポジトリの記録（`targets` を持たない）を `--records` で渡したときは、反映の判定をせず、`release.complete` は `null` になる。テストの記録は、最後のリリース記録と `version` が同じ最後のものを選び、`--verification` に渡したときと同じに判定する。
 
 ### バージョンの無いリリース記録の書き方
 
-`record --version` は、渡された値と配布先を、本番ブランチに入ったコミットと配布の結果で確かめてから書く。リリース記録は配布先ごとの反映の記録で、同じ値に何件でも書ける（決定 7）。
+`record --version` は、渡された値と配布先を、本番ブランチに入ったコミットと配布の結果で確かめてから書く。リリース記録は配布先ごとの反映の記録で、同じ値に何件でも書ける（決定 7）。どのリリース記録も、今回の対象の配布先の一覧（`targets`）を持つ。
 
 ```bash
-ndf release-steps record --pr <本番の PR> --version "main abc1234" --environment web --environment worker [--production-sha <SHA>]
+ndf release-steps record --pr <本番の PR> --version "main abc1234" --environment web [--target web --target worker] [--observed web=<証跡>] [--production-sha <SHA>]
 ```
 
 `record` は次の順に確かめる。どれかに当たれば、どの PR にも書かずに `precondition` で止まる。
 
 | # | 確かめること | 止まるとき |
 | --- | --- | --- |
-| 0 | 引数の組。`--version` と `--environment`（1 つ以上）はそろえて渡し、バージョンの保存先が `none` のリポジトリでだけ受ける | 保存先が `none` でないのにどちらかを渡した。片方だけを渡した |
+| 0 | 引数の組。`--version` と `--environment`（1 つ以上）はそろえて渡し、バージョンの保存先が `none` のリポジトリでだけ受ける。配布先の宣言が無いリポジトリでは `--target` が 1 つ以上要り、宣言があるリポジトリでは `--target` を受けない | 保存先が `none` でないのに `--version` か `--environment` を渡した。片方だけを渡した。宣言が無いのに `--target` が無い。宣言があるのに `--target` を渡した |
 | 1 | 本番の PR が本番ブランチへ入ったか。今の `record` と同じく、PR がマージ済みでなければ、`--production-sha` のコミットを `landed_squash` で正規の squash と確かめ、その PR をマージしたものとして読む | マージ済みでなく、`--production-sha` が無いか、正規の squash でない |
 | 2 | 反映したコミット（マージのコミット、`strict` の squash では `--production-sha`）が値と対応するか。値の中に、そのコミットの SHA の先頭 7 文字以上と一致する 16 進の語があること | 一致する語が無い。止まる文に、反映したコミットの SHA を載せる |
-| 3 | 今回の対象の配布先（`targets`）を決める。宣言（`branch_strategy.release.deliveries`）がある場合は、本番の配布先（決定 7）のうち、`paths` を持たないものと、反映したコミットで変わったファイル（`git diff --name-only <コミット>^1 <コミット>`）が `paths` のどれかに当たるものである。宣言が無い場合は、この値の記録の PR にある最初のリリース記録の `targets`、それも無ければ `--environment` の集合である | 宣言があって `targets` が空 |
+| 3 | 今回の対象の配布先（`targets`）を決める。宣言（`branch_strategy.release.deliveries`）がある場合は、本番の配布先（決定 7）のうち、`paths` を持たないものと、反映したコミットで変わったファイル（`git diff --name-only <コミット>^1 <コミット>`）が `paths` のどれかに当たるものである。宣言が無い場合は `--target` の集合である。どちらの場合も、毎回の `record` が反映した配布先によらず同じ `targets` を求める | 宣言があって `targets` が空 |
 | 4 | `--environment` が `targets` の部分集合か | 宣言に無い名前か、`targets` の外の名前がある |
-| 5 | `--environment` の配布先のうち、結果を読む手段（`result`）を宣言したものは、今の CD の結果の読み方（[release-steps.md](../plugins/ndf/skills/release/references/release-steps.md) の「CD の結果」）で、反映したコミットの結果が成功か。`result` の無い配布先（手動など）は、打つ人が配布の結果を確かめた申告として受ける | 成功でない、または未確定 |
-| 6 | 含めた PR の全部の既存の記録と照らす。同じ値のリリース記録の `targets` が今回の `targets` と同じか | 1 本でも違う。止まる文に、食い違う PR と一覧を載せる |
+| 5 | `--environment` の配布先のうち、結果を読む手段（`result`）を宣言したものは、今の CD の結果の読み方（[release-steps.md](../plugins/ndf/skills/release/references/release-steps.md) の「CD の結果」）で、反映したコミットの結果が成功か。結果が未確定（実行が見つからない・待ちの上限に当たった）の配布先は、`--observed` で実環境での確認の証跡を渡せば受け、証跡をその配布先の記録に残す。`result` の無い配布先（手動など）は、打つ人が配布の結果を確かめた申告として受ける | 結果が失敗。または未確定で `--observed` が無い |
+| 6 | 正の `targets` と照らす。正は、記録の PR にある、同じ値の最初のリリース記録の `targets` である。記録の PR にまだ記録が無ければ、今回の `targets` が正の候補になる | 今回の `targets` が正と違う。止まる文に、正の一覧を載せる |
 
-書く順は次のとおりである。確かめ 6 を全部の含めた PR について済ませてから書き始めるので、後の PR で食い違いが見つかって先の PR にだけ記録が残ることは無い。
+「正の `targets`」は、確かめ 6・重ねない判定・読み取りの 3 か所で同じものを使う。記録の PR にある、同じ値の最初のリリース記録の `targets` である。正と違う `targets` の記録は、どの PR にあっても、重ねない判定にも、`verification-record`・`close-check` の判定にも、`record` の結果の `complete` にも数えない。
 
-1. 記録の PR（`included` の最小の番号）へ書く
-2. 記録の PR を読み直し、同じ値の最初のリリース記録の `targets` を正とする。宣言が無いリポジトリで、違う `--environment` の `record` が並行して打たれた場合に、一覧を 1 つに決めるためである。自分の `targets` が正と違えば、ほかの PR へは書かずに止まり、正の一覧を示す。止まった側が記録の PR に残した記録は、`targets` が正と違うので、`verification-record` と `close-check` は反映の記録に数えない
-3. 残りの含めた PR へ書く
+書く順は次のとおりである。確かめ 0〜6 を済ませてから書き始める。
 
-同じ値で、同じ `environments` のリリース記録が既にある PR には重ねて書かない。打ち直しても結果は変わらない。
+1. 記録の PR に、同じ値・同じ `environments`・正の `targets` の記録が無ければ書く
+2. 記録の PR を読み直し、正の `targets` を決め直す。並行して打たれた `record` のどちらかが先に書いた記録が正になる。自分の `targets` が正と違えば、ほかの PR へは書かずに止まり、正の一覧を示す
+3. 残りの含めた PR のうち、同じ値・同じ `environments`・正の `targets` の記録が無い PR へ書く
+
+このため、次のどの場合も、正しい引数で打ち直せば残りの PR へ書いて終わる。結果は 1 回で書けたときと同じになる。
+
+| 場合 | 打ち直したときの動き |
+| --- | --- |
+| 一部の PR への投稿が失敗した | 書けた PR は重ねない判定で飛ばし、書けなかった PR だけへ書く |
+| 並行して打たれ、自分の `targets` が正でなかった | 記録の PR に残った自分の記録は正と違うので数えない。正の `targets` で打ち直せば、確かめ 6 を通り、残りの PR へ書く |
+| 同じ引数で 2 回打った | すべての PR で重ねない判定に当たり、何も書かない |
 
 ### 設定の確かめが示す食い違い
 
@@ -324,10 +367,12 @@ sequenceDiagram
 
 「リリースの担当」は、進め方で次のように変わる。
 
-| 進め方 | 記録する人 | 記録の後にすること |
-| --- | --- | --- |
-| スプリントを 1 つだけ進める | デプロイ担当の実行役（worker。作業を 1 つ受け持つ AI） | デプロイの工程を終える |
-| 複数のスプリントを別々の作業単位（レーン）で進め、まとめて本番へ出す | 並列作業の取りまとめ役（オーガナイザー） | `ndf lanes release` で各レーンへリリース結果を知らせる |
+| 進め方 | 記録する人 | `record` の結果の `complete` が偽のとき | `complete` が真のとき |
+| --- | --- | --- | --- |
+| スプリントを 1 つだけ進める | デプロイ担当の実行役（worker。作業を 1 つ受け持つ AI） | 反映した配布先のリリース後テストを始める。デプロイの工程は終えず、残りの配布先の反映を続ける | デプロイの工程を終える |
+| 複数のスプリントを別々の作業単位（レーン）で進め、まとめて本番へ出す | 並列作業の取りまとめ役（オーガナイザー） | 反映した配布先のリリース後テストを始める。`ndf lanes release` は打たない | `ndf lanes release` で各レーンへリリース結果を知らせる |
+
+知らせは 2 つあり、発火の条件が違う。配布先ごとのテストを始めてよいのは、その配布先の `record` が成功したときである。デプロイの工程を終えること、レーンへのリリース結果の知らせは、`record` の結果の `complete` が真になったとき（対象の配布先のすべてに反映の記録がそろったとき）だけ行う。`complete` が偽のままでデプロイの工程を終えたりレーンへ知らせたりすると、残りの配布先が未反映のままレーンが最終工程へ進むためである。配布先ごとに始めたテストの記録は、デプロイの工程が終わった後のリリース後テストの工程が引き継ぎ、まだ記録の無い配布先だけをテストする。
 
 レーンを進める役は、スプリントの進行担当（conductor）である。役割の説明は [3 層で工程を通す](../plugins/ndf/skills/development-workflow/references/agent-layers.md) と [並列開発のオーガナイザー](../plugins/ndf/skills/development-workflow/references/parallel.md) にある。
 
@@ -436,13 +481,14 @@ sequenceDiagram
 - **質問**: 反映した本番の配布先を対象にしたテストの結果を、どう表すか。どの配布先がそろえば、リリースを済んだとするか
 - **選んだ案**: リリース記録とテストの記録のスキーマに任意の `environments`（配布先の名前の一覧）を足し、バージョンの保存先が `none` のリポジトリでは必須にする。リリース記録は、加えて今回の対象の配布先の一覧（`targets`）を持つ。1 つの値（`version`）について、配布先へ反映するたびにリリース記録を 1 件足し、反映した配布先ですぐにテストして記録を 1 件足す。リリース全体の判定は、`close-check` が、`targets` のすべてに反映とテストの結果がそろった時点で確定させる
 - **本番の配布先**: `branch_strategy.release.deliveries` の要素のうち、`channel` が `production`・省略・`null` で、`production` が `false` でないものをいう。手動の配布先（`kind: manual`）も含む。`channel` を省いた検証環境は、`production: false` の指定で本番から外れる
-- **今回の対象の配布先（`targets`）**: 配布先の宣言に任意の `paths`（その配布先が配るファイルの glob の一覧。git の pathspec の `:(glob)` と同じ書き方）を足す。`paths` を持たない配布先はどのリリースでも対象で、`paths` を持つ配布先は、反映したコミットで変わったファイルが当たるときだけ対象になる。独立した複数のサービスを配るリポジトリは、サービスごとに `paths` を書けば、変えたサービスの配布だけで課題を閉じられる。宣言が無いプロジェクトでは、最初に打った `record` の `--environment` が `targets` になる
+- **今回の対象の配布先（`targets`）**: 配布先の宣言に任意の `paths`（その配布先が配るファイルの glob の一覧。git の pathspec の `:(glob)` と同じ書き方）を足す。`paths` を持たない配布先はどのリリースでも対象で、`paths` を持つ配布先は、反映したコミットで変わったファイルが当たるときだけ対象になる。独立した複数のサービスを配るリポジトリは、サービスごとに `paths` を書けば、変えたサービスの配布だけで課題を閉じられる。宣言が無いプロジェクトでは、打つ人が `--target` で今回の対象の配布先をすべて渡す。毎回の `record` に同じ一覧を渡すので、段階的に配っても、最初の配布先だけで反映がそろったことにはならない
 - **`record` の確かめ**: 「バージョンの無いリリース記録の書き方」の表のとおりである。`--environment` は `targets` の部分集合でよい。結果を読む手段を宣言した配布先は、配布の結果が成功でなければ書かない
-- **打つ時点**: デプロイの担当は、配布先へ反映したことを配布の結果（CD の実行の結果か、手で実行した手順の結果）で確かめたら、その配布先の `record` をすぐに打つ。段階的に配るときも、最後の配布先を待たない
-- **打ち直しと並行**: 含めた PR の全部を照らしてから書き始める。同じ値・同じ `environments` の記録があれば重ねない。`targets` が既存の記録と違えば書かずに止まる。宣言があれば `targets` は宣言と反映したコミットから決まるので、並行して打っても同じになる。宣言が無いときは、記録の PR にある同じ値の最初の記録の `targets` を正とし、違う一覧で打った側は残りの PR へ書かずに止まる
-- **テストと閉じる判定**: `verification-record` は、`environments` のすべてに同じ値のリリース記録（反映の記録）があるときだけ、記録の PR へ書く。テストをする人は、反映した配布先ごとに、反映の直後にテストして記録する。課題を閉じてよいかは `close-check --records` が決める。`targets` のどれかに反映の記録が無ければ閉じない。配布先ごとに、その配布先を含む最後のテストの記録を読み、1 つでも不合格なら閉じない。すべての対象の配布先で合格したときだけ、テストで確認できた（`verified`）とする。テストの記録を条件から外した設定でも、反映の記録がそろうまでは閉じない。検証環境だけの合格では、本番の課題は確認済みにならない
+- **打つ時点**: デプロイの担当は、配布先へ反映したことを配布の結果（CD の実行の結果か、手で実行した手順の結果）で確かめたら、その配布先の `record` をすぐに打つ。段階的に配るときも、最後の配布先を待たない。CD の照会で結果が未確定のときは、実環境でその配布先が反映したコミットを出していることを確かめ、その証跡を `--observed` で渡して記録する。照会が後で直れば、同じ配布をやり直さずに、`--observed` なしで `record` を打ち直してもよい（重ねない判定で、すでに書いた PR は飛ばす）
+- **打ち直しと並行**: 記録の PR にある同じ値の最初の記録の `targets` を正とし、確かめ・重ねない判定・読み取りの 3 か所で同じ正を使う（「バージョンの無いリリース記録の書き方」）。宣言があれば `targets` は宣言と反映したコミットから決まるので、並行して打っても同じになる。宣言が無いときに違う `--target` で並行して打つと、後に書いた側は残りの PR へ書かずに止まり、正の一覧で打ち直せば終わる
+- **テストと閉じる判定**: `verification-record` は、`environments` のすべてに同じ値のリリース記録（反映の記録）があるときだけ、記録の PR へ書く。テストをする人は、反映した配布先ごとに、反映の直後にテストして記録する。課題を閉じてよいかは `close-check --records` が決める。`targets` のどれかに反映の記録が無ければ閉じない。配布先と課題の組ごとに、その両方を含む最後のテストの記録を読み、1 つでも不合格なら閉じない。すべての対象の配布先で合格したときだけ、テストで確認できた（`verified`）とする。テストの記録を条件から外した設定でも、反映の記録がそろうまでは閉じない。検証環境だけの合格では、本番の課題は確認済みにならない
 - 採らなかった案: 全部の配布先へ反映した後に、リリース記録を 1 回だけ書く（段階的に配るとき、先に反映した配布先で独立にできるテストまで最後の配布先を待ち、不具合の発見が遅れる）
 - 採らなかった案: 反映のたびに、環境の一覧を足したリリース記録で前の記録を置き換える（先の配布先の不合格が新しい一覧の判定から落ちる。並行して足すと片方の配布先が消える。配布先ごとに記録を足す形なら、どちらも起きない）
+- 採らなかった案: 宣言が無いとき、最初の `record` の `--environment` を `targets` にする（段階的に配ると、最初の配布先だけで反映がそろったことになり、残りの配布先を確かめないまま課題が閉じる）
 - 採らなかった案: 宣言された本番の配布先のすべてを、毎回のリリースの対象にする（独立したサービスを配るリポジトリでは、変えていないサービスを同じ変更で配り直さないと課題を閉じられない）
 - 採らなかった案: 対象の配布先を `close-check` が閉じる時点で決める（決める時点が書く時点と閉じる時点の 2 つになる。`targets` を記録に書けば、`close-check` は記録どうしを照らすだけでよい）
 - 採らなかった案: バージョンの無いリポジトリ向けの別の記録を作る（閉じる判定の読み手が 2 つになる）
@@ -540,9 +586,10 @@ sequenceDiagram
 | 5・I1 | `stages`・`modes` のどちらで承認の工程を無効にしても作らない。別の層で有効に戻しても作らない。保護する工程は、テスト用の工程定義の `StageDef.gates` で決まる | 重ねた後の値だけを見る、または工程の名前を固定すると落ちる |
 | 6 | テストの記録を外すと、記録なしで `--require` を付けても閉じてよいと返し、`conditions.release_verification` の `excluded` が真・`enforced` が偽で理由が載り、`verified` は偽である。省略と `required: true` では、`--require` の有無どおりに判定し、`enforced` もそれに従う | 外した条件を結果に載せない、`required: true` で `--require` を足す、記録なしで `verified` を真にすると落ちる |
 | 7 | 振り返りの行を外すと、結果がその条件を求めないと返し、理由が載る | 常に求めると返すと落ちる |
+| 閉じる手順の読み取り | 書き手の権限の照会が 403・404 になると、`records` は記録を選ばずに失敗で返す。200 で `read` の書き手のコメントは除いて続ける | 照会の失敗を `none` と同じに扱うと落ちる |
 | 8・I2 | 両方の条件を外した設定で、`close-check --require --verification <不合格の記録>` と、不合格の記録を含む `--records` が閉じないと返す。手順書が記録を取得して渡すことは文言のテストで縛らず、コードレビューと振る舞いの確認で見る | 条件を外したときに `--verification` を読み飛ばすと落ちる |
-| 9 | バージョンの無い値と `environments` のテストの記録を書け、`close-check --records` が読む。`environments` が無いか、反映の記録が無い配布先を含めば書かない。記録の PR でない含めた PR を渡すと書かずに記録の PR を返す。別の課題の行しかない記録では `verified` が偽で、チェックの対象にならない | `environments` を必須にしない、リリース記録と照らさない、書き先を制限しない、または課題の行を見ずに `verified` を真にすると落ちる |
-| 決定 7 | `production: false` の配布先か、宣言に無い名前か、`targets` の外の名前を渡した `record` は何も書かない。`paths` に当たらない配布先は `targets` に入らない。結果を読む手段を持つ配布先は、結果が成功でなければ書かない。含めた PR のどれかの `targets` が違えば、どの PR にも書かない。同じ組の打ち直しは重ねない。段階的に配ると、先の配布先のテストの記録を後の配布先の反映の前に書け、`close-check` は全対象の反映と合格がそろうまで閉じないか `verified` を偽にする | `production: false` を本番に数える、`paths` を見ない、照らす前に書き始める、反映がそろう前に `verified` を真にすると落ちる |
+| 9 | バージョンの無い値と `environments` のテストの記録を書け、`close-check --records` が読む。`environments` が無いか、反映の記録が無い配布先を含めば書かない。記録の PR でない含めた PR を渡すと書かずに記録の PR を返す。別の課題の行しかない記録では `verified` が偽で、チェックの対象にならない。全部の対象の配布先に記録があっても、その課題の行が無い配布先があれば `--require` で閉じない。同じ配布先で別の課題だけを再テストした記録が後にあっても、その課題の不合格の行で閉じない | `environments` を必須にしない、リリース記録と照らさない、書き先を制限しない、または課題の行を見ずに `verified` を真にする、配布先を含む最後の記録を課題より先に選ぶと落ちる |
+| 決定 7 | `production: false` の配布先か、宣言に無い名前か、`targets` の外の名前を渡した `record` は何も書かない。`paths` に当たらない配布先は `targets` に入らない。結果を読む手段を持つ配布先は、結果が成功でなければ書かない。含めた PR のどれかの `targets` が違えば、どの PR にも書かない。同じ組の打ち直しは重ねない。並行して打った後と、一部の PR への投稿が失敗した後に、正の一覧で打ち直すと残りの PR へ書ける。宣言が無いのに `--target` が無ければ書かない。CD の結果が未確定でも `--observed` があれば書ける。`complete` は全対象の反映がそろったときだけ真である。段階的に配ると、先の配布先のテストの記録を後の配布先の反映の前に書け、`close-check` は全対象の反映と合格がそろうまで閉じないか `verified` を偽にする | `production: false` を本番に数える、`paths` を見ない、照らす前に書き始める、正と違う記録を重ねない判定に数える、反映がそろう前に `verified` を真にすると落ちる |
 | 10 | (a)〜(d) のそれぞれで、箇所と理由が `items` に出る。食い違いの無い設定では出ず、終了コードは変わらない。工程表に無い工程と `when` で省く工程は (c) にしない。(d) は種類と `deliveries` の `versioned` の両方で出る | 判定のどれか 1 つを外す、または工程の無いモードを (c) にすると落ちる |
 | 11 | 知らない種類か無い名前があると、ステートマシンを作らずに理由を示す。共通の `stages` に別のモードだけの工程があっても作れる | 無い名前を読み飛ばす、または共通の `stages` を作るモードだけと照らすと落ちる |
 | 12 | 参照文書の生成した範囲が、正本（データと「閉じる条件」のセクション）から生成し直した内容と同じである（`check-ndf-contracts.py`）。参照文書へのリンクが切れていない（文言は照合しない） | データか「閉じる条件」のセクションだけを変えると生成の確かめが落ちる。文書を消すとリンクの検査が落ちる |
@@ -556,7 +603,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4580 | 実装する | — | `plugins/ndf/contracts/data/workflow-kinds.json`（新設）、`plugins/ndf/contracts/schemas/project-workflow.schema.json`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/schemas/release-verification.schema.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/schemas/io/records.result.schema.json`、`plugins/ndf/contracts/schemas/io/project.result.schema.json`、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`、`plugins/ndf/src/ndf/progress/flow.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/domains/project/cli.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/domains/release/cli.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/project-flow.md`（新設）、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-workflow.md`、`plugins/ndf/tests/progress/test_flow.py`（新設）、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/domains/project/test_project_cli.py`、`plugins/ndf/tests/domains/records/test_cli.py`、`plugins/ndf/tests/domains/records/test_close.py`、`plugins/ndf/tests/domains/release/test_release_record.py`、`scripts/check-ndf-contracts.py`、`scripts/contracts_lib/project_flow_doc.py`（新設） |
+| #4580 | 実装する | — | `plugins/ndf/contracts/data/workflow-kinds.json`（新設）、`plugins/ndf/contracts/schemas/project-workflow.schema.json`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/schemas/release-verification.schema.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/schemas/io/records.result.schema.json`、`plugins/ndf/contracts/schemas/io/project.result.schema.json`、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`、`plugins/ndf/src/ndf/progress/flow.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/domains/project/cli.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/domains/release/cli.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/project-flow.md`（新設）、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-workflow.md`、`plugins/ndf/tests/progress/test_flow.py`（新設）、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/domains/project/test_project_cli.py`、`plugins/ndf/tests/domains/records/test_cli.py`、`plugins/ndf/tests/domains/records/test_close.py`、`plugins/ndf/tests/domains/release/test_release_record.py`、`plugins/ndf/tests/adapters/test_github.py`、`scripts/check-ndf-contracts.py`、`scripts/contracts_lib/project_flow_doc.py`（新設） |
 
 ## 未確認のまま残ること
 
