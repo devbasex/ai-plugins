@@ -249,7 +249,6 @@ def test_refactor_launch_without_a_pr_stops_with_the_reason_of_gh(tmp_path):
     assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
     assert "no pull requests found" in done.stdout
 
-
 def test_impl_acceptance_of_several_issues_repeats_the_issue_flag():
     # #3908 の決定 7: 課題をまとめた単位は、課題ごとの --issue で全部の課題の条件を検証する（代表の課題だけにしない）
     t = route.choose("implement")
