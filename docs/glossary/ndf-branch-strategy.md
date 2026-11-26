@@ -20,7 +20,7 @@
 | レビューの単位 | — | 1 本の PR にまとめ、1 回のコードレビューを掛ける変更のまとまり。実装計画の欄が決め、実行計画の実装の行 1 つ・実装のプラン 1 本・単位の PR 1 本になる（旧い意味の PR の種類ごとのレビューの組は #3881 が扱う） | — | — | `docs/specifications/ndf-review-units-and-refactoring-timing.md` |
 | 単位の PR | — | レビューの単位 1 つを載せ、スプリントブランチへ出す PR。実装のプランがこの PR に cross-review を収束まで掛ける | — | — | `docs/specifications/ndf-review-units-and-refactoring-timing.md` |
 | 単位のファイル | — | 実装計画と組の JSON ファイル。タスクとレビューの単位の SSOT で、実装計画の単位の表はここから作る | — | — | `issues/issue-3702-design.md` |
-| 実行順 | — | レビューの単位を始める順の番号。先に要る単位の実行順の最大に 1 を足した値で、同じ値の単位は並列に流せる | — | — | `issues/issue-3702-design.md` |
+| 実行順 | — | レビューの単位の依存の深さを表す番号。先に要る単位の実行順の最大に 1 を足した値である。単位は、先に要る単位をすべてマージしたら始める | — | — | `issues/issue-3702-design.md` |
 | 分け方の案 | — | 大きさの目安や上限を超えたレビューの単位を、タスクの依存の順に区切り直した案 | — | — | `issues/issue-3702-design.md` |
 | つなぎ目 | — | スプリントの PR の差分のうち、すべての単位の PR をスプリントブランチへマージした時点（集めた時点）の後に入ったコミット。工程「コードレビュー」はここだけをレビューし、ここにコードのファイルが無ければ工程を飛ぶ | — | — | `docs/specifications/ndf-review-units-and-refactoring-timing.md` |
 | 集めた時点 | `gathered` | すべての単位の PR をスプリントブランチへマージした時点のスプリントブランチのコミット。工程「実装」の出力 `gathered` に書き、工程「コードレビュー」の起点になる | — | — | `docs/specifications/ndf-review-units-and-refactoring-timing.md` |
