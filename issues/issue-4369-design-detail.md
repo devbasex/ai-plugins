@@ -13,11 +13,12 @@ src/ndf/
 ├── progress/issue_copies.py           *
 ├── progress/units_invoke.py           *
 ├── progress/invoke.py
-├── progress/stages.py・definition.py・refactor_values.py
+├── progress/stages.py・definition.py・refactor_values.py・command.py・run.py
 ├── adapters/github.py
 ├── ci_cli.py
 ├── contracts/worker_kinds.py
 ├── domains/loop/acceptance.py
+├── domains/worktree/{create,cli}.py
 └── domains/crossreview/{cli,settings,drive,fixer,criteria_decide,finish_decide,journal}.py
 contracts/
 ├── workflow/stages/implement.json・workflow/ndf.schema.json
@@ -41,9 +42,11 @@ contracts/
 | `src/ndf/progress/plan_runs.py` | 新設 | 工程の呼び出しと結果の型、プランの実行の記録の読み取りを持つ | `core.plan`・`core.route` | `StageRun`・`StageResult`・`UnitsStopped` | `previous`・`from_of`・`read_report`（移動） |
 | `src/ndf/progress/issue_copies.py` | 新設 | 課題の題と本文を保存先へコピーする | `adapters.github`・`worker_paths` | モジュール | `issue_text`・`issue_values`（移動して変更） |
 | `src/ndf/progress/units_invoke.py` | 新設 | 開始前の確かめ、単位ごとの実行とマージ、スプリントの PR を流す | 上の 3 つ・`git`・`github`・`branch_strategy` | `Ports`・`Lineup`・`RoundState`・`Resume` | `prepare`・`run_stage`・`resume_of` ほか（下の表） |
-| `src/ndf/progress/invoke.py` | 変更 | `per_unit` の工程を単位を流す処理へ渡す | `units_invoke` | モジュール | `stage_run`・`prepare_plan`・`plan_path`・`plan_argv`・`_call_plan`・`invoke`・`template_values`・`clear_values`（変更） |
+| `src/ndf/progress/invoke.py` | 変更 | `per_unit` の工程を単位を流す処理へ渡す | `units_invoke` | モジュール | `stage_run`・`prepare_plan`・`_prepared`・`plan_path`・`plan_start`・`plan_argv`・`_call_plan`・`invoke`・`template_values`・`clear_values`（変更） |
 | `src/ndf/progress/stages.py`・`definition.py` | 変更 | 工程の型に `per_unit` を足して読む | — | `StageDef` | `_stage_def`（変更） |
 | `src/ndf/progress/refactor_values.py` | 変更 | 見出しの定数を単位の表の読み手から読む | `review_units_decide` | モジュール | — |
+| `src/ndf/progress/command.py`・`run.py` | 変更 | 利用者が確かめたスプリントブランチの先端を、打ち直しの指示から工程の呼び出しへ渡す | — | モジュール | `_cmd_retry`・`_run_step`（変更） |
+| `src/ndf/domains/worktree/create.py`・`cli.py` | 変更 | 取得せずに作業場所を作れるようにする | — | モジュール | `create`・`_create`（変更） |
 | `src/ndf/core/route/__init__.py` | 変更 | `impl` のレビューの起動と、単位の経路のテンプレートを組む | — | モジュール | `unit_template`・`unit_review_launch`（新設）、`review_launch`（変更） |
 | `src/ndf/adapters/github.py` | 変更 | マージ済みの単位の PR を読み、マージの宛先を確かめる | — | `Pull`・`GitHub` | `merged_pulls`（新設）、`merge`・`_merge_with`・`_preflight`・`Pull.from_rest`（変更） |
 | `src/ndf/ci_cli.py` | 変更 | `--base`・`--pr` でマージの対象を決める | `github` | モジュール | `_target`（新設）、`_merge`（変更） |
@@ -128,24 +131,27 @@ contracts/
 | `run_stage` | 同上 | 新設 | `(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optional[StageResult]` | 全単位を順に流し、スプリントの PR を開く。これまでの経路なら None |
 | `released_branches` | 同上 | 新設 | `(section: Mapping) -> frozenset[str]` | ブランチ戦略の設定から配布先のブランチを集める（I4） |
 | `unit_branch` | 同上 | 新設 | `(sprint: str, unit: Unit) -> str` | `<sprint>-u<issue>-<名前の sha256 の先頭 8 字>` |
-| `unit_worktree` | 同上 | 新設 | `(ctx: Context, branch: str, ports: Ports) -> Path` | 取得し直し、設計書の「単位のブランチと保存先」の表で作業場所を用意する |
+| `unit_worktree` | 同上 | 新設 | `(ctx: Context, branch: str, ports: Ports) -> Path` | 取得し直し、設計書の「単位のブランチと保存先」の表で作業場所を用意する。未コミットの変更がある作業場所は使わない |
 | `include_sprint` | 同上 | 新設 | `(ctx: Context, worktree: Path) -> None` | スプリントブランチの先端を含まなければ `git merge --no-edit` で取り込む |
 | `round_state` | 同上 | 新設 | `(unit_dir: Path) -> RoundState` | `run.json` を持つ最新の回の、結果・マージの結果・`reviewed-head`・`stopped-head` を読む |
-| `resume_of` | 同上 | 新設 | `(state: RoundState, head: str, local_tests: bool) -> Resume` | 打ち直しの扱いを決める（純粋な関数） |
+| `resume_of` | 同上 | 新設 | `(state: RoundState, head: str, has_sprint: bool, local_tests: bool) -> Resume` | 打ち直しの扱いを決める（純粋な関数）。`has_sprint` は、`head` がスプリントの作業場所の HEAD を含むか |
 | `unit_run` | 同上 | 新設 | `(ctx: Context, unit: Unit, worktree: Path, round_dir: Path, start: Optional[str]) -> StageRun` | 単位の指示のファイルを書き、`impl` の呼び出し（上書きの値・テンプレート・環境変数）を組む |
-| `merge_unit` | 同上 | 新設 | `(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports: Ports) -> dict` | `ndf ci merge` を打ち、結果の種類を `merge.json` に残し、成功ならスプリントの作業場所を ff で進める |
-| `sprint_pr` | 同上 | 新設 | `(ctx: Context, ports: Ports) -> StageResult` | 先端を確かめ、テンプレート `pr` を push のステップなしで流す |
+| `merge_unit` | 同上 | 新設 | `(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports: Ports) -> dict` | `ndf ci merge` を打ち、結果の種類を `merge.json` に残す。成功を残してから `take_merged` を呼ぶ |
+| `take_merged` | 同上 | 新設 | `(ctx: Context, merge_sha: str, reviewed: str) -> None` | マージ結果のコミットまでを取り込み、工程の外の変更があれば止める |
+| `hold_unreviewed` | 同上 | 新設 | `(ctx: Context, base: str, tip: str) -> NoReturn` | 利用者の確認が要るコミットの範囲を `unreviewed.json` に残して止める |
+| `sprint_pr` | 同上 | 新設 | `(ctx: Context, ports: Ports) -> StageResult` | 先端を確かめ（違えば `hold_unreviewed`）、テンプレート `pr` を push のステップなしで流す |
 
 - `prepare`
   - 事前条件: `run.per_unit` が真
+  - `unreviewed.json` があれば、作業場所を進める前に読む。条件は下の「利用者の確認が要るコミット」にある
   - 事後条件: 単位の経路なら、スプリントの作業場所の HEAD が選んだリモートのスプリントブランチと同じになり、`work_dir/units.json` に並びがある。これまでの経路なら `units.json` に経路だけを書き、作業場所は変えない
   - 副作用: `git fetch`・`ls-remote`・`merge --ff-only`・`push`、課題の本文の一括読み取り（`GitHub.nodes`）
 - `run_stage`
-  - 事前条件: `units.json` が無ければ `prepare` を先に呼ぶ
+  - 事前条件: `units.json` が無いか、`unreviewed.json` があれば、`prepare` を先に呼ぶ
   - 事後条件: `ok` なら全単位がマージ済みの PR を持ち（I5）、スプリントの PR が開いている
   - 副作用: 作業場所の作成、プランの実行、PR のマージ、保存先のファイル
 - `unit_worktree`・`include_sprint`・`merge_unit`・`sprint_pr`
-  - 副作用: git と GitHub の読み書き。`unit_worktree` は `ndf worktree create <ブランチ> --from <スプリントブランチ>` を打つ
+  - 副作用: git と GitHub の読み書き。`unit_worktree` は `ndf worktree create <ブランチ> --from <スプリントブランチ> --no-fetch` を打つ。直前に取得した参照を使い、同じ取得を繰り返さないためである
 
 ### 内部のデータと定数
 
@@ -156,6 +162,7 @@ contracts/
 | `Lineup` | 型 | 同上 | `units: tuple[Unit, ...]`。`units.json` は `{"route": "units" か "plain", "units": [...]}` |
 | `RoundState` | 型 | 同上 | `round_dir`・`done`（その回に保存した結果。無ければ None）・`merge`・`reviewed`・`stopped_head` |
 | `Resume` | 型 | 同上 | `action`（`run`・`merge`）・`new_round: bool`・`start: Optional[str]` |
+| `Unreviewed` | 型 | 同上 | `base`（確認する範囲の起点。工程が最後に確かめたコミット）・`head`（止まった時のスプリントの作業場所の HEAD）・`tip`（リモートの先端） |
 | `REVIEW_STEPS` | 定数 | 同上 | `review`・`review-delta`・`resolved` |
 | `BEFORE_TEST` | 定数 | 同上 | `work`・`acceptance`・`test`・`test-repeat`・`fix` |
 | `MERGE_ONLY` | 定数 | 同上 | `ci_pending`・`infra_wait` |
@@ -165,6 +172,7 @@ contracts/
 | ファイル | 書く側 |
 | --- | --- |
 | `<work_dir>/units.json` | `prepare` |
+| `<work_dir>/unreviewed.json` | `hold_unreviewed`。消すのは `prepare` だけで、`clear_values` は残す |
 | `<work_dir>/units/<単位のブランチ>/<回>/unit.md` | `unit_run`（流すたびに書き直す） |
 | 同じディレクトリの `pr-number`・`reviewed-head`・`reviewed-pr` | `impl` のプラン |
 | 同じディレクトリの `stopped-head` | `run_stage`（`impl` が返った直後の HEAD） |
@@ -177,19 +185,41 @@ contracts/
 
 単位 1 つは、次の順で扱う。
 
-1. マージ済みの一覧（開始時に `merged_pulls` で 1 回読む）にあれば、`already_merged` にして次へ進む
-2. `unit_worktree` で作業場所を用意し、`round_state` を読む
+1. マージ済みの一覧（開始時に `merged_pulls` で 1 回読む）にあれば、`already_merged` にして次へ進む。ただし最新の回の `merge.json` が `MERGE_ONLY` の単位は、工程がマージを要求した後に（マージキューなどで）マージされたものである。スプリントブランチを取得し、`merge.json` を成功に書き換えてから `take_merged` で確かめる。先に書き換えるのは、利用者が確かめた後の打ち直しで同じ停止を繰り返さないためである
+2. `unit_worktree` で作業場所を用意する。取得し直したスプリントブランチの先端がスプリントの作業場所の HEAD と違えば、`hold_unreviewed` で止まる。同じなら `round_state` を読む
 3. 取り込みの前の HEAD で `resume_of` が `merge` を返せば、手順 6 へ進む（HEAD を変えるとレビューした HEAD と合わなくなる）
 4. `include_sprint` の後の HEAD で `resume_of` を読み直し、`unit_run` を `ports.call_plan` で流す
 5. `stopped-head` を書く。`ok` でなければ止まる
 6. `merge_unit` を打つ。`ok` でなければ止まる
+
+### 利用者の確認が要るコミット
+
+工程がスプリントブランチに入れてよいのは、開始時に取り込んだコミットと、単位の PR のマージ結果だけである。ほかの作業場所が足したコミットは単位のレビューを経ていないので、スプリントの PR を開く前に利用者へ判断を戻す。確かめる所は次の 4 つで、基準はスプリントの作業場所の HEAD である。
+
+| 確かめる時点 | 止める条件 |
+| --- | --- |
+| 単位の作業場所を用意するための取得の直後 | リモートの先端が HEAD と違う |
+| `merge_unit` がマージを打つ前 | 手元のリモート追跡参照（`refs/remotes/<リモート>/<スプリントブランチ>`）が HEAD と違う。`impl` の `base-fetch`・`base-sync` が取得した工程の外の変更を拾う。追加の取得はしない |
+| マージの後（`take_merged`） | リモートの先端がマージ結果のコミットと違う。または、マージ結果のコミットのツリーがレビューした HEAD のツリーと違う（マージの前に別の変更が入った） |
+| スプリントの PR を開く前 | リモートの先端が HEAD と違う |
+
+- `take_merged` は、`ndf ci merge` の結果の `merge_sha` まで `git merge --ff-only` で進める。取得した先端までは進めない
+- `merge_sha` を持たない成功の結果は、確かめられないので `precondition` で止める
+- 工程が後からマージを知った単位（手順 1）の `merge_sha` は `merged_pulls` が返し、`reviewed` はその回の `reviewed-head` である
+- 止めるときは `unreviewed.json` に `base`・`head`・`tip` を書く。`base` は止まる前に工程が確かめていたコミット（`take_merged` では進める前の HEAD）である。停止の理由には、各 SHA、確認するコミットの範囲（`base..tip`）、利用者が含めてよいと答えた後に打つ `ndf progress retry <スプリント> implement --reason <利用者の答え> --accept-tip <tip>` と、続けて打つ `ndf progress next` を書く
+- `prepare` は取得の後、作業場所を進める前に `unreviewed.json` を読む。次の 3 つがそろわなければ、作業場所を変えずに同じ理由で止まる。先端か HEAD が動いていれば、記録を新しい値に書き直して止まる
+  - `StageRun.accept_tip` が記録の `tip` と同じ
+  - リモートの先端が記録の `tip` と同じ
+  - スプリントの作業場所の HEAD が記録の `head` と同じ
+- `prepare` は ff が済んでから記録を消す
+- conductor は利用者の答えを得ずに `--accept-tip` を打たない
 
 `resume_of` の判定表（上の行を先に当てる）:
 
 | 回の状態 | HEAD | 結果 |
 | --- | --- | --- |
 | 回が無い | — | `run`。1 回目の保存先、最初から |
-| 結果が `ok`、`merge` が `MERGE_ONLY` | `reviewed` と同じ | `merge` |
+| 結果が `ok`、`merge` が `MERGE_ONLY` | `reviewed` と同じで、`has_sprint` が真 | `merge` |
 | 結果が `ok`、または止まったステップが `REVIEW_STEPS` | `stopped_head` と違うか、無い | `run`。次の回、`test` から（手元のテストを外す設定は `push`） |
 | 同上 | 同じ | `run`。次の回、`push` から |
 | 止まったステップが `BEFORE_TEST` の外 | 違うか、無い | `run`。次の回、`test` から（外す設定は `push`） |
@@ -199,7 +229,7 @@ contracts/
 
 ### 異常系の処理
 
-「止める」は `stopped` を返して後の単位を始めないことをいう。終了コードは停止理由の種類で `contracts/facts/exit-codes.json` が決める。どれも原因を直して `ndf progress next` を打ち直せる。
+「止める」は `stopped` を返して後の単位を始めないことをいう。終了コードは停止理由の種類で `contracts/facts/exit-codes.json` が決める。どれも原因を直して `ndf progress next` を打ち直せる。`unreviewed.json` を書いた停止だけは、打ち直しの指示に `--accept-tip` が要る（上の「利用者の確認が要るコミット」）。
 
 | 関数 | 失敗 | 扱い（停止理由の種類） | 利用者に見える理由に書くこと | 後始末 |
 | --- | --- | --- | --- | --- |
@@ -210,13 +240,15 @@ contracts/
 | `prepare` | 表が読めない | 始めない（`invalid`） | `UnitsUnreadable.reasons` | — |
 | `prepare` | 課題の本文が読めない | 始めない（`github.GitHubError` を `plan_failure` が分ける） | GitHub の理由 | — |
 | `unit_worktree` | 手元とリモートが分かれる・`ndf worktree create` の失敗 | 止める（`precondition`） | 単位の名前と理由 | — |
-| `include_sprint` | 取り込みの衝突 | 止める（`base_conflict`） | 単位の名前とブランチ | `git merge --abort` |
+| `unit_worktree` | 既にある単位の作業場所に、未コミットの変更（追跡していないファイルを含む）か進行中のマージ（`MERGE_HEAD`）がある | 止める（`precondition`）。取り込みも `impl` もしない | 単位の名前、作業場所、変更のパス、コミットか取り消しをしてから打ち直すこと | 利用者の変更とマージには触れない。前の回の worker が残した変更も見分けられないので同じに扱う |
+| `include_sprint` | 取り込みの衝突 | 止める（`base_conflict`） | 単位の名前とブランチ | この関数が始めたマージだけを `git merge --abort` で取り消す。呼ぶ前からあるマージは `unit_worktree` が先に止めるので、ここには来ない |
 | `unit_run` | 代表の課題の作成者に書き込み権限が無い | 止める（`precondition`） | 単位の名前と課題 | プランを流さない |
 | `run_stage` | `impl` が `ok` でない | 止める（`impl` の種類のまま。`retry_after` も引き継ぐ） | 単位の名前・課題・PR の番号・`impl` の理由。ステップ `ci` なら待つチェックのキー | `stopped-head` を書く |
 | `merge_unit` | `pr-number` か `reviewed-head` が無い | 止める（`precondition`） | 単位の名前 | マージを打たない |
 | `merge_unit` | `ndf ci merge` が `ok` でない・結果 JSON が読めない | 止める（コマンドの種類。読めなければ `bad_report`） | 単位の名前・PR の番号・理由 | `merge.json` に種類を残す |
 | `merge_unit`・`sprint_pr` | 取得か ff の失敗 | 止める（`precondition`） | git の理由 | — |
-| `sprint_pr` | リモートの先端が HEAD と違う | 止める（`precondition`） | 両方の SHA、片方にだけあるコミットの範囲、利用者が確認してから打ち直すこと | 取り込みも push もしない |
+| `prepare`・単位の手順 2・`merge_unit`・`take_merged` | 「利用者の確認が要るコミット」の条件に当たる | 止める（`precondition`） | 上のセクションの内容 | `unreviewed.json` を書く |
+| `sprint_pr` | リモートの先端が HEAD と違う | 止める（`precondition`） | 「利用者の確認が要るコミット」の内容。手元にだけあるコミットの範囲も書く | `unreviewed.json` を書く。取り込みも push もしない |
 | `sprint_pr` | テンプレート `pr` が `ok` でない | 止める（返った種類と `gaps`） | 理由 | 単位はやり直さない |
 | `run_stage` | git・GitHub の例外 | 呼び出し元へ返す（`invoke.plan_failure`） | 今の分類の文 | — |
 
@@ -244,7 +276,7 @@ contracts/
 | `prepare` | `Git.fetch_branch`・`merge_ff`・`status_paths`・`blobs`、`branch_strategy.load` | `adapters/git.py`・`core/branch_strategy.py` を読んだ | 使う。`ls-remote --exit-code` は不存在で終了コード 2（git 2.53.0 で実行して確かめた） |
 | `released_branches` | `Strategy` の属性 | `core/branch_strategy.py` | `section` から読む（`channels`・`deliveries` の属性が無い） |
 | `unit_branch` | — | `git grep` で `-u<番号>` を組む処理を探した | 無し |
-| `unit_worktree` | `domains/worktree/create.create` | `rules.json` の層の並び | import できないので `ndf worktree create` を打つ |
+| `unit_worktree` | `domains/worktree/create.create` | `rules.json` の層の並び、`create.py` を読んだ | import できないので `ndf worktree create` を打つ。`create` はブランチを調べる前に必ず取得するので、`--no-fetch`（`create(..., fetch=False)`）を足す |
 | `unit_worktree` | `Git.fetch`（`--prune` と `refs/heads/<sprint>-u*`） | 一時リポジトリで実行（git 2.53.0）。一致する ref が無くても終了コード 0、消えた ref は掃除される | 使う |
 | `include_sprint` | `Git.is_ancestor` | `adapters/git.py` | 使う |
 | `round_state`・`resume_of` | `invoke` の `_previous`・`_from_of`・`plan_start` | `progress/invoke.py` | 前の 2 つを `plan_runs.py` へ移して使う。回をまたぐ判断は無い |
@@ -258,10 +290,11 @@ contracts/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `prepare` | 単位の経路・これまでの経路 | リモートにブランチが無い、手元が遅れてリモートに単位がある | 異常系の表の `prepare` の各行 |
+| `take_merged`・`hold_unreviewed` | マージ結果まで進む | squash のマージでもツリーが一致する | マージの後と前の工程の外のコミット、`merge_sha` が無い、`accept_tip` が無い・違う、確認の後に先端が動く |
 | `run_stage` | 順に流して `ok`、飛ばした単位は `already_merged` | 単位 1 つ | 途中の失敗で後を呼ばない |
 | `released_branches` | 4 つのキーから集める | `channels`・`deliveries` が無い | — |
 | `unit_branch` | 同じ入力は同じ名前 | 日本語の単位の名前 | — |
-| `unit_worktree`・`include_sprint` | 設計書の表の 6 行 | 作業場所が既にある | 分かれている・衝突 |
+| `unit_worktree`・`include_sprint` | 設計書の表の 6 行 | 作業場所が既にある | 分かれている・衝突・未コミットの変更・進行中のマージ |
 | `round_state`・`resume_of` | 判定表の各行 | `run.json` の無い空の回は数えない、`stopped_head` が無い | — |
 | `unit_run` | 上書きの値と環境変数 | 補った単位は `unit_file` が空 | 作成者を信用しない |
 | `merge_unit` | `--repo`・`--pr`・`--base`・`--reviewed` を渡す | マージキューの待ち | ファイルの欠け |
@@ -280,6 +313,7 @@ contracts/
 | `template` | `Optional[route.Template] = None` | `prepare_plan`・`plan_path` が `templates()` の代わりに使う |
 | `env_extra` | `Mapping[str, str]`（空） | `_call_plan` が子の環境へ足す（`GH_REPO`・`NDF_UNIT_FILE`） |
 | `start` | `Optional[str] = None` | 回の記録が無いときの `--from` |
+| `accept_tip` | `Optional[str] = None` | `ndf progress retry --accept-tip` の値。`run.py` の `_run_step` と差し込みを組む呼び出しが写す。`prepare` が `unreviewed.json` と照らす |
 
 `StageRun.plain()` は、`per_unit` を偽にし、入力から `branch` を除いた呼び出しを返す。工程の入力に `branch` を足すと、`template_values` がその値を差し込み `branch` にするためである。これまでの経路は、今のとおり作業場所の今のブランチを使う。
 
@@ -289,15 +323,21 @@ contracts/
 | --- | --- | --- | --- | --- |
 | `stage_run` | `progress/invoke.py` | 変更 | 変えない | `StageRun.per_unit` を `stage.per_unit` にする |
 | `prepare_plan` | 同上 | 変更 | `(run, work_dir, cwd) -> Optional[PreparedPlan]` | `per_unit` なら `units_invoke.prepare` を呼び、単位の経路なら None。ほかは `run.plain()` で今のまま |
+| `_prepared` | 同上 | 変更 | 変えない | `values.json` を使い回すときも、返すテンプレートは `run.template`（無ければ `template(run.name)`） |
 | `invoke` | 同上 | 変更 | 変えない | `per_unit` なら `units_invoke.run_stage` を呼び、None なら `run.plain()` で今のまま |
 | `template_values` | 同上 | 変更 | 変えない | `overrides` の名前は出所の表から求めない |
-| `plan_path` | 同上 | 変更 | 変えない | `run.template` があればそれを描画する |
+| `plan_path` | 同上 | 変更 | 変えない | `_prepared` が返すテンプレートを描画する |
+| `plan_start` | 同上 | 変更 | 変えない | `impl` で `pr-number` が無いときの開始点を `pr` にする（下の箇条書き） |
 | `plan_argv` | 同上 | 変更 | 変えない | `plan_start` が None なら `run.start` を使う |
 | `_call_plan` | 同上 | 変更 | 変えない | `run.env(run.env_extra)` で子を打つ。`plan_failure` は `UnitsStopped` を分ける |
 | `clear_values` | 同上 | 変更 | 変えない | `units.json` と、`units/` の下のすべての `values.json` も消す。回の記録と `merge.json` は残す |
 | `issue_text` | `progress/issue_copies.py` | 変更 | `(location: Path, number: int, repo: Optional[str] = None) -> Optional[tuple[str, str]]` | `repo` があればそのリポジトリから読み、権限もそこで確かめる |
 | `issue_values` | 同上 | 変更 | `(run, work_dir, location, *, number: Optional[int] = None, repo: Optional[str] = None) -> Optional[dict]` | 課題とリポジトリの組のコピーを使い回す。省けば今のとおり番号の最小の課題 |
 
+- 上書きのテンプレート: `prepare_plan`・`_prepared`・`plan_path` は、同じ 1 つのテンプレート（`run.template`、無ければ `template(run.name)`）を使う。差し込みの欠けの検査（`needed`）と作業の入力の検査（`kinds_of`）も、このテンプレートから求める。`_prepared` が `template(run.name)` を返すと、打ち直しで外した `done-check` や `ci` が戻る
+- `pr-number` の無い実行の記録: この変更より前に始めた `impl` は、PR を作った後で止まっていても番号を持たない。単位の経路でない `impl` も同じである。`plan_start` は、決めた開始点が `pr` を通らずに先へ進むステップで、保存先に `pr-number` が無ければ、`pr` を返す。`pr` の `probe` が開いた PR を探して番号を書き、続くステップを順に流す。レビューは 1 回やり直しになる
+  - `pr` を通るので開始点を変えないステップ: `done-check`・`work`・`acceptance`・`test`・`fix`・`test-repeat`・`push`・`pr`・`fix-push`・`base-sync`・`fix-base`
+  - 上のほかのステップ（`conflict-check`・`ci` など）は `pr` に置き換える
 - `issue_values`
   - 事後条件: 題のコピーは `{"title", "repo"}`。`repo` が違うコピーは使わない
   - 副作用: 読み直すときは、題のコピーを消す → 本文を書く → 題のコピーを書く、の順にする
@@ -319,6 +359,8 @@ contracts/
 | --- | --- | --- | --- |
 | `prepare_plan`・`invoke` | 経路の分かれ。これまでの経路の `values.json` と `--set` に `branch` が足されない | `per_unit` の無い定義 | `UnitsStopped` の結果 |
 | `plan_argv` | 記録が無ければ `--from <start>` | 止まった回は止まったステップから | — |
+| `plan_start` | `pr-number` があれば止まったステップから | `pr-number` が無く `conflict-check`・`ci` で止まった回は `pr` から。`test` で止まった回は `test` から | — |
+| `_prepared` | `values.json` を使い回しても上書きのテンプレートを返す | 上書きが無ければ今のまま | — |
 | `clear_values` | 単位の `values.json` を消す | `units/` が無い | — |
 | `issue_values` | 指定した課題とリポジトリ | 別のリポジトリの同じ番号のコピー、題のコピーが無い中断 | 権限なし |
 
@@ -343,11 +385,11 @@ contracts/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `unit_template` | `core/route/__init__.py` | 新設 | `(t: Template, repo: str, drop: Collection[str]) -> Template` | `use` を開き、`drop` のステップを外し、残るステップ `ci` の引数の末尾に `--repo <repo>` を足したテンプレートを返す |
+| `unit_template` | `core/route/__init__.py` | 新設 | `(t: Template, repo: str, drop: Collection[str]) -> Template` | `use` を開き、`drop` のステップを外し（`without_steps`）、残るステップ `ci` の引数の末尾に `--repo <repo>` を足したテンプレートを返す |
 | `unit_review_launch` | 同上 | 新設 | `(repo: str, command: Sequence[str]) -> list[str]` | レビューの起動を、照合するラッパー（`UNIT_REVIEW`）経由にする |
 | `review_launch` | 同上 | 変更 | 変えない | `impl` では、PR の番号をブランチから引かず `{state_dir}/pr-number` から読むラッパーにする |
 
-`drop` は `done-check` で、待つチェックが空の並びなら `ci` も入れる。単位の経路の `{{review}}` は `unit_review_launch(repo, 設定の起動か、--pr を持たない既定の ndf cross-review run)` である。
+`drop` は `done-check` である。待つチェックが空の並びなら、`ci` と、`ci` の失敗からしか到達しない `repeat-check`・`ci-fix`・`ci-local`・`push-fixed` も入れる。`without_steps` は指定したステップを外して行き先を付け替えるだけで、到達できなくなったステップは消さないためである。外した後のテンプレートが使わない差し込み（`required`・`ci_budget`・`tests` など）は求めず、外した作業（`ci-fix`）の入力も検査しない（「工程から作業を呼ぶ層」の上書きのテンプレート）。単位の経路の `{{review}}` は `unit_review_launch(repo, 設定の起動か、--pr を持たない既定の ndf cross-review run)` である。
 
 `UNIT_REVIEW` は `sh -c` で打つ。`$0` はリポジトリ、`$1` は `{state_dir}`、残りがレビューの起動と、ステップが後ろに足す引数である。
 
@@ -386,7 +428,7 @@ contracts/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `unit_template` | `done-check` が無く、`ci` に `--repo` | `ci` を外すと、`ci` を指すルートが残らず `ci.required_checks` なしで組める | — |
+| `unit_template` | `done-check` が無く、`ci` に `--repo` | `ci` を外すと、`repeat-check`・`ci-fix`・`ci-local`・`push-fixed` も無く、`ci` を指すルートが残らない。`required`・`ci_budget`・`tests` と `ci-fix` の入力なしで組める | — |
 | `unit_review_launch` | 照合が合えば起動の終了コード | 後ろに足した `--base`・`--state-dir` が通る | 番号かリポジトリの違い・ファイルなし |
 | `review_launch` | `impl` は `pr-number` を使う | ほかのテンプレートは今のまま | — |
 | `pr` のステップ | 作成と検索で同じファイル | 別の宛先とフォークの PR を拾わない | URL の末尾が番号でない |
@@ -403,7 +445,7 @@ contracts/
 | `unit_block` | `domains/crossreview/criteria_decide.py` | 新設 | `(role: str, unit: str) -> list[str]` | 単位の範囲と例外の指示の行。`unit` が空なら空 |
 | `_unit_text` | `domains/crossreview/cli.py` | 新設 | `() -> str` | `NDF_UNIT_FILE` のファイルの中身。変数が無ければ空 |
 
-`RunConfig`（`settings.py`）に `unit: str = ""` を足し、`_run_config` が `_unit_text()` を入れる。`drive._review_prompt` と `fixer._fix_prompt` は `unit_block` の行を足す。`unit_block` の相手役向けの文には、後の単位の条件を未達にしないことと、秘密・認証認可・利用者のデータ・戻せない操作の指摘は必ず出すことを書く。修正担当向けの文には、後の単位を理由に見送るときは区分 `not_applicable` と担当の単位を書くことと、同じ例外は見送らないことを書く。
+`RunConfig`（`settings.py`）に `unit: str = ""` を足し、`_run_config` が `_unit_text()` を入れる。`drive._review_prompt` と `fixer._fix_prompt` は `unit_block` の行を足す。`unit_block` の相手役向けの文には、次の内容を書く。「後続の単位が担当する受け入れ条件は、現在の単位で満たしていなくても未達として指摘しない。秘密・認証認可・利用者のデータ・戻せない操作に関する指摘は、担当する単位にかかわらず報告する」。修正担当向けの文には、後の単位を理由に見送るときは区分 `not_applicable` と担当の単位を書くことと、同じ例外は見送らないことを書く。
 
 `contracts/worker/kinds.json` は、`impl`・`fix`・`ci-fix`・`fix-push`・`fix-base` の 5 つに次の 2 つを足す。
 
@@ -523,16 +565,19 @@ contracts/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `merged_pulls` | `adapters/github.py` | 新設 | `(self, heads: Iterable[str], base: str) -> dict[str, int]` | head ごとの、宛先が `base` でフォークでないマージ済み PR の番号。無い head はキーを持たない |
+| `merged_pulls` | `adapters/github.py` | 新設 | `(self, heads: Iterable[str], base: str) -> dict[str, Pull]` | head ごとの、宛先が `base` でフォークでないマージ済み PR（番号とマージ結果のコミットを使う）。無い head はキーを持たない |
 | `merge` | 同上 | 変更 | `(..., jump: bool = False, expect_base: Optional[str] = None) -> MergeOutcome` | 読み直した PR の宛先が違えば要求を送らない |
 | `_merge_with`・`_preflight` | 同上 | 変更 | `expect_base` を足す | 宛先の確かめは、マージ済みの確かめより先にする |
 | `Pull.from_rest` | 同上 | 変更 | 変えない | head と base のリポジトリが違うか、head のリポジトリが null なら `cross_repository` を真にする。キーが無ければ偽 |
 | `_target` | `ci_cli.py` | 新設 | `(hub: GitHub, args: Namespace) -> Pull \| dict` | `--pr`・`--base` からマージの対象を決める。決められなければ停止の結果を返す |
-| `_merge` | 同上 | 変更 | 変えない | `_target` の PR を、`expect_base=args.base` でマージする |
+| `_merge` | 同上 | 変更 | 変えない | `_target` の PR を、`expect_base=args.base` でマージする。成功の結果の `items` に `merge_sha` を足す |
+| `MergeOutcome`・`_send_rest_merge` | `adapters/github.py` | 変更 | `MergeOutcome` に `merge_sha: str = ""` | マージの要求の応答の `sha` を返す。追加の照会はしない |
 
 `github.py` は 964 行ある。足した後に 1,000 行を超える場合は、PR の読み取りを別のファイルへ分ける。
 
 ### 処理の手順
+
+`merged_pulls` のページの読み方: GitHub の一覧は head と宛先と状態で絞れるが、リポジトリでは絞れないので、フォークの PR が混ざる。head ごとに最初のページをまとめて読み、フォークでない PR が無く次のページがある head は、見つかるか末尾に着くまで読み続ける。`github.list-pages` ページを超えたら、未マージとは扱わずに `GitHubError` にする（`open_pulls_of_head` と同じ）。
 
 | `--pr` | `--base` | 対象 |
 | --- | --- | --- |
@@ -553,14 +598,14 @@ contracts/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `merged_pulls` | `pulls_by_head`・`open_pulls_of_head`・`aliased` | `adapters/github.py` | `aliased` と `Pull.from_graphql` を使い、`baseRefName`・`states: MERGED` で絞る |
+| `merged_pulls` | `pulls_by_head`・`open_pulls_of_head`・`aliased` | `adapters/github.py` | 最初のページは `aliased` と `Pull.from_graphql` を使い、`baseRefName`・`states: MERGED` で絞る。続きのページは `open_pulls_of_head` と同じ形で読む |
 | `_target` | `open_pulls_of_head`・`hub.pull` | 同上 | 使う |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `merged_pulls` | 宛先の合う PR | head が 0 件 | 別の宛先・フォークを除く |
+| `merged_pulls` | 宛先の合う PR | head が 0 件、同じリポジトリの PR が 2 ページ目にある | 別の宛先・フォークを除く、ページの上限 |
 | `merge` | 宛先が合えば今のまま | `expect_base` なし | 読み直しで変わった宛先（直接・キュー） |
 | `Pull.from_rest` | 同じリポジトリ | head のリポジトリが null | — |
 | `_target`・`_merge` | 番号の PR へ要求する | 引数なし | 異常系の表の各行 |
