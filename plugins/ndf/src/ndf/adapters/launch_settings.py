@@ -293,7 +293,8 @@ def prepared(name: str, cwd: Path) -> Iterator[Grant]:
     if not launch_approval.is_approved(repo, sha):
         listing = json.dumps(_listing(settings, files, sha), ensure_ascii=False)
         raise _precondition(
-            f"工程 {name} の起動の設定（{settings.path}）は、このマシンで承認されていない（承認の後の書き換え・このマシンで未承認・取り消しの後）。"
+            f"工程 {name} の起動の承認の対象（起動の設定 {settings.path} と、全工程の MCP の定義ファイル）は、このマシンで承認されていない"
+            "（どれかの承認の後の書き換え・このマシンで未承認・取り消しの後。書き換えた定義ファイルは承認の対象の files のハッシュで分かる）。"
             f"承認の対象: {listing}。{_approval_hint(root, sha)}"
         )
     if not isinstance(spec.mcp, tuple):
