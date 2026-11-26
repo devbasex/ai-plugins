@@ -109,18 +109,18 @@ graph TD
 | --- | --- | --- | --- | --- |
 | 選択肢の設定 | NDF の開発者（同梱）、利用者（リポジトリの設定） | 工程の定義 | 組 | モデル・effort・指標の名前・割り付けの値 |
 | 実験の単位 | 割り付けの処理と、指標を記録する処理 | 単位 | 割り付け・効果指標 | 組・確率・効果の値 |
-| 出現率 | 出現率を計算し直す処理 | 工程 × ランタイム × 互換性のキーの行 | — | 組ごとの確率・計算に使った件数 |
+| 出現率 | 出現率を計算し直す処理 | 工程 × ランタイム × 互換性のキー × 方針のキーの行 | — | 組ごとの確率・計算に使った件数 |
 | 使用量ログ | 使用量ログの書き込み処理 | 行 | — | 起動の値・使用量・費用・単位 |
 
 ### 不変条件
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 実験の単位 | 1 つの単位の割り付けは 1 つ。同じ単位の起動は、再実行と再開も同じ組を使う（引き上げは除く） | — |
+| I1 | 実験の単位 | 1 つの単位の割り付けは 1 つ。同じ単位の起動は、再実行と再開も同じ組を使う（引き上げと、起動できない組から基準の組への切り替えは除く） | — |
 | I2 | 実験の単位 | 引数と環境変数の値で起動した単位は、実験に数えない | — |
 | I3 | 実験の単位 | 効果指標を取れなかった単位は、成功にも失敗にも数えない（起動の誤りで続けて失敗する組は、「起動できない組」の規則で割り付けから外す） | — |
 | I4 | 実験の単位 | 効果と費用は、割り付けた組に帰属する。引き上げと手戻りの起動の費用も、割り付けた組に含める | — |
-| I5 | 出現率 | 打ち切っていない組の確率は下限以上で、合計は 1 である | — |
+| I5 | 出現率 | 調整の段階では、打ち切っても外してもいない組の確率は下限以上で、合計は 1 である | — |
 | I6 | 出現率 | 出現率は実験の記録と使用量ログからいつでも作り直せる。壊れた・古い出現率のファイルは作り直す | — |
 | I7 | 選択肢の設定 | 読めない・形が違う・ランタイムに無い effort を持つ・下の「値の制約」に合わないときは起動しない。上位の指定で上書きされて使わない値でも同じ | 理由と直す場所を示して止まる |
 | I8 | 使用量ログ | NDF のコードが起動する `claude -p` と Codex の子プロセス 1 つにつき 1 行 | 書けなければ警告を出し、工程は止めない |
@@ -160,7 +160,8 @@ graph TD
 | プランの実行（変更） | 単位の ID を子へ渡し、修正と作業場所の用意の単位の効果指標を記録する |
 | cross-review（変更） | 相手役のシートを単位にし、相手役の効果指標と、評価した設計と実装の単位の効果指標を記録する |
 | 相手役と修正担当の起動（変更） | シートの役割で値を取得する。Codex は `-c model_reasoning_effort=` を足し、使用量を取れる出力の形にする |
-| `external-ai` と `corder` の手順（変更） | 固定の `medium` をやめ、`ndf models pick` の返す引数を使う |
+| `external-ai` と `corder` の手順（変更） | 固定の `medium` をやめ、`ndf delegate-args` の返す引数を使う |
+| `ndf delegate-args`（新設） | 委譲の引数の入口。選ぶ処理と #1959 の安全装置の引数の処理を、同じプロセスで呼ぶ |
 | プランの記録（変更） | ステップごとの、指定した値と実際に動いたモデルを残す |
 
 ### 値の取得と記録の関係
@@ -177,6 +178,7 @@ graph TD
     end
     subgraph 取得する側
         M[ndf models]
+        D[ndf delegate-args]
         W[worker・Skill・判定の起動]
         S[相手役と修正担当の起動]
         E[external-ai と corder の手順]
@@ -188,7 +190,8 @@ graph TD
     end
     T & P & F --> R
     M & W & S --> R
-    E --> M
+    E --> D
+    D --> R
     R --> X
     W & S --> U
     W & S --> X
@@ -267,11 +270,13 @@ graph TD
 | `worker` | `worktree` | `mechanical` |
 | `skill`（工程から Skill を回す起動。名前は Skill の名前） | `requirements-design`・`design` | `design` |
 | `judge`（`adapters/llm.py` の判定） | `ask`（質問の中身によらず 1 つ） | `judge` |
-| `seat` | `review` | `review` |
-| `seat` | `delegate` | `delegate` |
+| `seat`（cross-review の相手役） | `review` | `review` |
+| `seat`（cross-review の修正担当） | `fix` | 無し（実験の引数を足さない） |
+| `seat`（`external-ai`・`corder` の委譲） | `delegate` | `delegate` |
 
 - `--layer` の値は `worker`・`skill`・`judge`・`seat` の 4 つで、ほかは `precondition` で止める
-- 表に無い組（ほかの worker の作業、cross-review の修正担当 `seat`・`fix`、cross-refactoring の相手役など）は、引数を足さずに起動する。環境変数と起動の引数の指定は効く
+- 表に無い組と、工程が「無し」の組（ほかの worker の作業、cross-review の修正担当など）は、引数を足さずに起動する。環境変数と起動の引数の指定は効く
+- cross-refactoring の相手役は `pick` を呼ばない
 - 応答の終わりの判定（`stop-wait`）は自分の設定で起動し、`pick` を呼ばない
 
 ### 実験の記録と出現率
@@ -287,7 +292,7 @@ graph TD
 | `stage`・`runtime`・`repo`・`mode` | 工程・ランタイム・リポジトリのキー・モード |
 | `arms`・`probs`・`chosen` | そのときの選択肢、それぞれの確率、選んだ組 |
 | `key` | 互換性のキー（下の「出現率の再利用」） |
-| `phase` | `burn_in`（件数を集める間）か `adaptive`（調整の後） |
+| `phase` | `burn_in`（件数を集める間）・`adaptive`（調整の後）・`uniform`（費用を計算できず、均等に抽選する） |
 
 確率を残すのは、出現率が途中で変わるためである。後から偏りを重み付けで直して比べられる。
 
@@ -302,9 +307,11 @@ graph TD
 
 起動の誤りの行（`kind` は `launch_error`）は、単位を持つ起動が誤りで終えたときに、日時・単位の ID・工程・ランタイム・組・理由を書く（「起動できない組」）。
 
-**出現率の再利用。** 互換性のキーは、工程の選択肢の並び（先頭が基準）と、指標の名前とバージョンから作るハッシュである。出現率の計算と件数に使うのは、今の設定と同じキーの行だけである。候補・基準・指標のどれかが変われば別のキーになり、件数を集め直す。別のリポジトリでも、キーが同じなら同じ記録を使う。`floor`・`margin` などの割り付けの値はキーに含めない（記録の意味を変えないため）。
+**出現率の再利用。** 互換性のキーは、工程の選択肢の並び（先頭が基準）と、指標の名前とバージョンから作るハッシュである。出現率の計算と件数に使うのは、今の設定と同じキーの行だけである。候補・基準・指標のどれかが変われば別のキーになり、件数を集め直す。別のリポジトリでも、キーが同じなら同じ記録を使う。`floor`・`margin` などの割り付けの値はこのキーに含めない（記録の意味を変えないため）。
 
-出現率のファイル `launch-weights.json` は、工程 × ランタイム × キーごとの確率と、組ごとの計算に使った件数・日時を持つ。記録とログからいつでも作り直せるコピーで、起動のたびにログ全体を読まないために置く（#1959 の設計の実測で、使用量ログ 10 万行の読み取りは約 0.5 秒）。
+**計算の結果は、割り付けの方針ごとに持つ。** 方針のキーは、`floor`・`margin`・`min_units`・`window_days` の値から作るハッシュである。出現率のファイルの項目は互換性のキーと方針のキーの組で引く。記録は同じでも、方針の違うリポジトリは別の項目を使う。
+
+出現率のファイル `launch-weights.json` は、工程 × ランタイム × 互換性のキー × 方針のキーごとに、段階（`burn_in`・`adaptive`・`uniform`）、確率（`adaptive` のときだけ）、組ごとの計算に使った件数、日時を持つ。記録とログからいつでも作り直せるコピーで、起動のたびにログ全体を読まないために置く（#1959 の設計の実測で、使用量ログ 10 万行の読み取りは約 0.5 秒）。
 
 ### 使用量ログの行に足す欄
 
@@ -336,7 +343,7 @@ CLI の子プロセスを起動できなかった場合は、行を書かず、�
 | `claude -p`（worker・Skill・判定・Claude のシート） | あり | あり | あり | 結果の JSON。得られなければ不明 |
 | Codex のシート | あり（会話の記録から） | あり | 単価表から計算 | `codex exec --json` の使用量の行と、会話の記録（rollout）の `turn_context`。回答は `-o` のファイルから読む |
 
-Codex の費用は、同梱の単価表（`contracts/data/codex-prices.json`、新設。公式の価格を書き取り、取得日を持つ）とトークン数から計算する。単価表に無いモデルは費用を不明とし、その工程の出現率は調整せずに均等にする。
+Codex の費用は、同梱の単価表（`contracts/data/codex-prices.json`、新設。公式の価格を書き取り、取得日を持つ）とトークン数から計算する。単価表に無いモデルは費用を不明とし、その工程の出現率は調整せず、均等な確率で抽選する（「割り付けの流れ」の `uniform`）。
 
 **Codex の実際のモデル。** 同梱のレビューの選択肢は effort だけを指定するので、引数からはモデルが分からず、費用を計算できない。そのため Codex のシートは `--ephemeral` を外して起動し、`--json` の出力の会話の ID で `$CODEX_HOME/sessions` の記録を特定して、`turn_context` の行のモデルと effort を読む。読み終えたら（起動が失敗した場合も）、NDF はその起動の記録 1 ファイルだけを消す。記録を特定できなければ、費用を不明とする。
 
@@ -370,22 +377,25 @@ graph TD
     C -- ある --> D[同じ組を使う]
     C -- 無い --> E{選択肢が 2 つ以上で、実験が有効}
     E -- いいえ --> F[先頭の組を使う]
-    E -- はい --> G{効果と費用がそろった単位が min_units に満たない組がある}
+    E -- はい --> Y{費用を計算できないモデルの単位がある}
+    Y -- ある --> V[均等な確率で 1 つを引く]
+    Y -- 無い --> G{効果と費用がそろった単位が min_units に満たない組がある}
     G -- ある --> H[満たない組のうち、そろった単位と直近 7 日の未評価の割り付けの和が最も少ない組]
     G -- 無い --> I[出現率の確率で 1 つを引く]
-    H & I --> J[割り付けの行を追記する]
+    V & H & I --> J[割り付けの行を追記する]
 ```
 
 - 調整を始めるかは、効果と費用がそろった単位の数だけで決める。結果の届いていない割り付けは数えない
 - 件数を集める間（`burn_in`）に次の組を選ぶときは、そろった単位に、7 日以内に割り付けて効果指標がまだ無い単位を足した数が最も少ない組を選ぶ。並列に流すと結果の前に次の割り付けが来るためである
 - 最も少ない組が複数あれば、その中から均等な確率で無作為に 1 つ選ぶ。割り付けの行の `probs` は、同数の組が `1 / 同数の組の数`、ほかの組が 0 である
-- 「起動できない組」で外した組は、`burn_in` でも選ばず、`probs` を 0 にする
+- 「起動できない組」で外した組は、どの段階でも選ばず、`probs` を 0 にする
+- 費用を計算できないモデル（単価表に無いモデル、会話の記録から特定できないモデル）の単位が、期間内の同じキーの単位に 1 つでもあれば、その工程は均等な確率で抽選する（段階は `uniform`）。そろった単位が増えない組を `burn_in` の規則で選ぶと、その組に偏るためである
 - 割り付けの行の確認と追記は、実験の記録のロックの中で行う。同じ単位が 2 回割り付けられないためである
 - 記録を書けないときは指定なしで起動し、その単位は実験に数えない
 
 ### 計算の方法
 
-効果指標を書いた後、その工程 × ランタイム × キーの出現率のファイルが無いか、前の計算から 1 時間以上たっていれば、出現率を計算し直す。使うのは、直近 `window_days` 日に割り付けて、効果指標と費用がそろった、同じキーの単位である。
+効果指標を書いた後、その工程 × ランタイム × 互換性のキー × 方針のキーの項目が無いか、前の計算から 1 時間以上たっていれば、出現率を計算し直す。割り付けの時に項目が無い場合は、その場で 1 回計算して作る（同じ記録を別の方針で使い始めたときに当たる）。使うのは、直近 `window_days` 日に割り付けて、効果指標と費用がそろった、同じ互換性のキーの単位である。
 
 更新の経路は次の 3 つを比べて選んだ。読み取りの時間は、#1959 の設計の実測（使用量ログ 10 万行で約 0.5 秒）による。
 
@@ -397,9 +407,9 @@ graph TD
 
 まとめる分、出現率の反映は最大で 1 時間と次の効果指標まで遅れる。件数を集め終えたかの判定も、このファイルの組ごとの件数で行う。`report` は呼ばれた時点で計算し直す。
 
-乱数の種は、工程・ランタイム・キーと、計算に使う単位（単位の ID の順に並べる）の ID・効果・費用の SHA-256 から作る。同じ単位の集まりから計算した出現率と「最良である確率」は、何度計算しても同じになる。割り付けの抽選には、この種を使わない。
+乱数の種は、工程・ランタイム・2 つのキーと、計算に使う単位（単位の ID の順に並べる）の ID・効果・費用の SHA-256 から作る。同じ単位の集まりから計算した出現率と「最良である確率」は、何度計算しても同じになる。割り付けの抽選には、この種を使わない。
 
-1. 打ち切っていないすべての組の件数が `min_units` 以上でなければ、均等にする
+1. 打ち切っても外してもいない組のどれかの件数が `min_units` に満たなければ、出現率は計算しない（段階は `burn_in`）。割り付けは「割り付けの流れ」の少ない組を優先する規則で選び、`report` の出現率の欄は「件数を集めている」と組ごとの件数を出す。費用を計算できない単位があれば段階は `uniform` で、`report` は均等な確率を出す。以下の 2〜5 は、どちらでもない場合（`adaptive`）の計算である
 2. 組ごとに 2,000 回の標本を引く
    - 効果 q: ベータ分布 `Beta(1 + 効果の合計, 1 + 件数 − 効果の合計)`
    - 費用 c: 費用の対数の平均の事後分布（正規分布。標準偏差は `標本の標準偏差 ÷ √件数`）から引き、指数に戻す
@@ -411,7 +421,23 @@ graph TD
 
 **打ち切り**: 件数が 30 以上で、基準の組より効果が `margin` を超えて低い確率が 0.99 を超える組は、出現率を 0 にする。打ち切りの根拠になった単位が `window_days` を過ぎて数えられなくなると、件数が足りなくなって再び割り付ける。モデルや作業の中身が変わった後にやり直すためである。基準の組は打ち切らない。
 
-**起動できない組。** 使えないモデルを指定した単位はレビューまで進まず、効果指標が無い。効果 0 とは数えず（I3）、次の規則で割り付けから外す。
+**起動できない組。** 使えないモデルに当たっても、基準の組で作業を続け、利用者の操作は求めない。そのうえで、起動できない組を割り付けから外す。効果 0 とは数えない（I3）。
+
+基準の組で続ける条件と扱いは次のとおりである。
+
+| 項目 | 内容 |
+| --- | --- |
+| 切り替える起動 | 抽選か `burn_in` で選んだ基準でない組の、会話の最初の起動が、モデルの回答を 1 つも返さず（使ったトークンが無い）誤りで終えた。利用上限・期限切れ・起動の枠の待ち・CLI を起動できない場合は切り替えない |
+| 切り替え方 | 呼び出し元が同じステップの中で、基準の組と新しい会話で 1 回だけ起動し直す。それまでに作業は進んでいないので、二重に実行されるものは無い |
+| その単位の残りの起動 | 基準の組を使う（出所は `base`） |
+| 実験の扱い | `launch_error` の行に切り替えたことを書き、その単位は効果と費用の計算に数えない |
+| 利用者へ | 止めない。警告に、起動できなかった組と、基準の組で続けたことを出す |
+
+起動し直しは、モデルを選ぶ前の振る舞い（基準の組）に戻る 1 回で、失敗した作業の打ち直しの回数には数えない。利用者の判断が要るのは、基準の組も起動できない場合だけである。
+
+要求の受け入れ条件 15 の「その単位の起動はすべて同じ組を使う」は、この切り替えを除くと読む（設計承認ゲートで確かめる）。
+
+割り付けから外す規則は次のとおりである。
 
 | 項目 | 内容 |
 | --- | --- |
@@ -419,7 +445,7 @@ graph TD
 | 外す条件 | 同じ工程 × ランタイム × 組で、この誤りが 2 回続き、その間に同じ組の成功した起動が無い |
 | 外す期間 | 最後の誤りから 7 日。過ぎたら再び割り付ける |
 | 外した組の扱い | 出現率 0。残りの組で下限と合計 1 を満たす。`report` に理由と期限を出す |
-| 基準の組 | 外さない。基準が起動できなければ、理由と直す場所（`.ndf/launch.json`）を示して止まる |
+| 基準の組 | 外さない。基準が起動できなければ（切り替えた先を含む）、理由と直す場所（`.ndf/launch.json`）を示して止まる |
 | 費用 | その単位は効果指標が無いので、費用の平均にも入らない |
 
 2 回と 7 日は実測で決めた値ではない。通信の障害が 2 回続いた場合も外れるが、7 日で戻る。
@@ -444,13 +470,14 @@ graph TD
 | 0.9 と 0.75 | 100 |
 | 0.9 と 0.8 | 199 |
 
-実装の単位が 1 週間に約 40 件（「実測: 作業の件数」）で組が 3 つなら、`min_units` の 10 件は約 1 週間、100 件は約 8 週間で集まる。件数の少ないリポジトリでは、調整が均等のまま続くことがある。その場合も、起動は選択肢のどれかで正しく動く。
+実装の単位が 1 週間に約 40 件（「実測: 作業の件数」）で組が 3 つなら、`min_units` の 10 件は約 1 週間、100 件は約 8 週間で集まる。件数の少ないリポジトリでは、件数を集める段階のまま続くことがある。その場合も、起動は選択肢のどれかで正しく動く。
 
 ## 入出力のコントラクト
 
 | 名前 | 入力 | 出力 | 失敗の形 |
 | --- | --- | --- | --- |
 | `ndf models pick` | `--layer`・`--name`・`--runtime`（省けば claude）・`--unit`（省けば割り付けない）・`--retry <失敗の理由>`（省けば引き上げない。値は「引き上げる起動」）・`--format json\|args` | `json` は値と出所を結果の JSON で返す。`args` は CLI に渡す引数を 1 行に 1 つずつ出す | 設定が壊れていれば `precondition` |
+| `ndf delegate-args` | `--runtime` | 委譲の CLI に渡す引数（モデル・effort と安全装置）を 1 行に 1 つずつ | 設定が壊れているか、安全装置の引数を返せない状況なら `precondition` |
 | `ndf models report` | `--since`・`--until`・`--stage` | 工程 × ランタイム × 組ごとの、単位の数・効果の平均と区間・費用の平均・ROI・最良である確率・出現率・判断できるか。モードごとの内訳。起動の数・所要時間・トークン・成功率・やり直し率・指定と実際のモデルの食い違い | 行が無い組は「記録なし」 |
 | 環境変数 | `NDF_LAUNCH_MODEL`・`NDF_LAUNCH_EFFORT`（claude）、`NDF_LAUNCH_CODEX_MODEL`・`NDF_LAUNCH_CODEX_EFFORT` | すべての層に効く一時的な上書き | 無い effort は起動しない |
 | `ndf worker run` | `--unit`・`--mode` を足す | 結果の `metrics` に起動の値と実際のモデル | — |
@@ -481,20 +508,18 @@ graph TD
 
 `--format args` の標準出力は引数の配列で、1 行が引数 1 つである。引用符もエスケープも付けない。Codex で effort とモデルの指定があれば `-c`・`model_reasoning_effort=high`・`-m`・`<モデル>` の 4 行になる。改行を含むモデル名は、形の違いとして `precondition` にする。失敗したときは標準出力に何も出さず、理由を標準エラーに出して 0 以外で終える。
 
-`external-ai` と `corder` の手順は、次の形を 1 回の Bash の呼び出しにまとめて書く。出力を変数に受けてから配列にするのは、`pick` の失敗を見落として CLI の既定で起動しないためである。安全装置の引数は #1959 の `safety-args` から取る。配列にする形の、引数の区切り・指定なし・失敗の 3 通りは、2026-11-26 に `pick` の代わりの関数を使って bash で確かめた。
+`external-ai` と `corder` の手順は、次の形を 1 回の Bash の呼び出しにまとめて書く。引数は、委譲の起動を組み立てる入口 `ndf delegate-args --runtime <名前>` から 1 回で取る。出力を変数に受けてから配列にするのは、失敗を見落として CLI の既定で起動しないためである。配列にする形の、引数の区切り・指定なし・失敗の 3 通りは、2026-11-26 に引数を出す関数を仮のものにして bash で確かめた。
 
 ```bash
-out=$(ndf models pick --layer seat --name delegate --runtime codex --format args) || exit 1
-safe=$(ndf launch-config safety-args --runtime codex --use delegate) || exit 1
+out=$(ndf delegate-args --runtime codex) || exit 1
 ARGS=()
 while IFS= read -r a; do [ -n "$a" ] && ARGS+=("$a"); done <<<"$out"
-while IFS= read -r a; do [ -n "$a" ] && ARGS+=("$a"); done <<<"$safe"
-timeout 1320 codex exec "${ARGS[@]}" -C "$PWD" < "$TMP/prompt.md"
+NDF_AI_CHILD=1 timeout 1320 codex exec "${ARGS[@]}" -C "$PWD" < "$TMP/prompt.md"
 ```
 
-この形では、委譲 1 回ごとに `ndf` の起動が 2 回増える。2026-11-26 に同じエントリポイントの軽いサブコマンドを測ると 306〜372 ms（8 コアの Linux、11 回の中央値）だった。委譲 1 回は数分かかるので、増える時間は 1% 未満である。
+`ndf delegate-args` は、1 つのプロセスの中で、モデルと effort を選ぶ処理（`pick --layer seat --name delegate` と同じ）と、安全装置の引数を返す処理（#1959 の `safety-args --use delegate` と同じ）を呼び、2 つの引数を続けて出す。モデルの選択と承認の確認は別の部品のままで、入口はつなぐだけである。どちらかが失敗すれば、何も出さずに 0 以外で終える。
 
-2 つを 1 回の呼び出しで返す案（`pick` に安全装置の引数も出させる）は、起動が 1 回（約 0.3〜0.4 秒）減るが採らない。モデルの選択に承認の確認が混ざり、`safety-args` だけを使うレビューの経路と同じ処理への入口が 2 つになるためである。
+委譲は実験せず効果も測らないので、`ndf` の起動は 1 回にする。同じエントリポイントの軽いサブコマンドは、2026-11-26 の測定で 306〜372 ms（8 コアの Linux、11 回の中央値）だった。2 つのコマンドを別々に打つ形は、この時間が委譲 1 回ごとに余分にかかるため採らない。
 
 互換性: 今の入力で読めなくなるものは無い。NDF を更新すると、指定の無いリポジトリでも、実験の対象の工程の一部が基準と違う組で動く（要求の前提 2）。
 
@@ -566,13 +591,13 @@ sequenceDiagram
 | cross-review の修正担当の会話の再開 | 会話の ID と一緒に状態ファイルへ値を残して使う。使用量ログの `session_seq`・`session_started_at` も同じ状態ファイルに残す。費用を求めるのに使う「前の行」の値（#1959 の設計の「起動の費用の求め方」）も残す |
 | 利用者の `--resume` | 何も足さない |
 
-worker の再開と修正担当の会話の再開は、中断の後に利用者が環境変数を変えていても、次のとおりにする。
+worker の再開と修正担当の会話の再開は、中断の後に利用者が環境変数を変えていても、最初の起動の状態に戻す。そのため、最初の起動の子にこの変数が無かったことも保存する。
 
 | 会話の最初の起動の effort | 再開の子の `CLAUDE_CODE_EFFORT_LEVEL` |
 | --- | --- |
 | `--effort` を渡した | 外す |
 | この変数の値を引き継いだ | 最初の値を設定する |
-| 指定なし | 今の環境のまま（ランタイムの決め方に任せる） |
+| 指定なし（変数も `--effort` も無し） | 外す。effort はランタイムの決め方に任せる |
 
 ## 集計
 
@@ -721,7 +746,7 @@ worker の再開と修正担当の会話の再開は、中断の後に利用者�
 - **プロジェクトごとに違うもの**: 選択肢・固定・停止は `.ndf/launch.json` の `experiments` と環境変数で受ける。出現率はマシンごとの記録から決まる
 - **当たるモード**: すべて
 - **壊れうる箇所**:
-  - 使えるモデルが限られる利用者（API キーや従量の接続）は、選択肢のモデルで起動に失敗しうる。失敗の文に直す場所（`.ndf/launch.json`）を載せる。失敗した単位は効果に数えず、誤りが続いた組は 7 日の間割り付けから外す（「起動できない組」）。基準の組が起動できない場合は、直すまで止まる
+  - 使えるモデルが限られる利用者（API キーや従量の接続）は、選択肢のモデルで起動に失敗しうる。基準でない組が起動できなければ、基準の組で起動し直して続け、誤りが続いた組は 7 日の間割り付けから外す（「起動できない組」）。基準の組が起動できない場合は、理由と直す場所（`.ndf/launch.json`）を示して止まる
   - 件数を集める間は、費用の高い組にも割り付けるので、費用が増えることがある
   - 弱い組を割り付けた実装は指摘が増え、完了まで長くかかることがある。引き上げと打ち切りで幅を抑える
   - Haiku 5.5 は入力が 10 万トークンを超えると単価が上がる。選択肢の haiku は `mechanical` と `judge` に限る
@@ -736,7 +761,7 @@ worker の再開と修正担当の会話の再開は、中断の後に利用者�
 | --- | --- | --- | --- |
 | Web サービス | 指定なし | 件数が多く、数週間で出現率が動く | 無し |
 | モバイルアプリ | ビルドの失敗の修正が多い | 修正の工程の件数が多く、成功する組へ寄る | 無し |
-| 業務文書だけ | `light`・`documentation` が多く件数が少ない | 均等のまま続くことがある。固定したければ選択肢を 1 つにする | 無し |
+| 業務文書だけ | `light`・`documentation` が多く件数が少ない | 件数を集める段階のまま続くことがある。固定したければ選択肢を 1 つにする | 無し |
 
 ### このリポジトリだけの事情
 
@@ -774,9 +799,11 @@ worker の再開と修正担当の会話の再開は、中断の後に利用者�
 | 条件 16・I4 | 手戻りの起動の費用が、`charge_to` の単位の費用になる | 手戻りを数えないと落ちる |
 | 条件 17 | 未評価の割り付けが多くても、効果と費用がそろった単位が `min_units` に満たない間は `burn_in` のまま。同数の組の `probs` は均等で、ほかは 0 | 割り付けた数で調整を始めるか、固定の順で選ぶと落ちる |
 | 条件 17 | 起動の誤りが 2 回続いた基準でない組は 7 日の間 0 になり、利用上限と期限切れは数えない。基準は外れない | 誤りを効果 0 にするか、何度でも割り付けると落ちる |
+| 条件 17 | 基準でない組の起動が回答なしの誤りで終えると、同じステップが基準の組で 1 回起動し直して続き、その単位は計算に入らない。トークンを使った後の失敗と利用上限では切り替えない。基準の失敗は止まる | 工程を止めるか、作業の途中の失敗でも起動し直すと落ちる |
 | 条件 14・17 | `floor × 組の数 > 1` と空の `arms` で起動しない。費用の合計が 0 の単位は計算に入らない | 検証を省くと確率の合計が 1 を超える |
+| 条件 17 | `floor`・`margin`・`min_units`・`window_days` のどれかが違う 2 つの設定は、同じ記録を使っても別の出現率の項目を持つ | 互換性のキーだけで出現率を引くと落ちる |
 | 条件 17 | 候補か指標が変わるとキーが変わり、前の記録を使わない。前の計算から 1 時間以内の効果指標では計算し直さない | キーを工程 × ランタイムだけにすると落ちる |
-| 条件 17・I5 | 件数が `min_units` に満たない間は均等。満たした後は、効果が同じで費用の安い組の確率が上がり、どの組も `floor` 以上で合計 1 | 下限を足さないか、件数を待たずに寄せると落ちる |
+| 条件 17・I5 | 件数が `min_units` に満たない間は、そろった単位と直近 7 日の未評価の和が最も少ない組を選び、`report` は出現率を出さず「件数を集めている」と出す。満たした後は、効果が同じで費用の安い組の確率が上がり、どの組も `floor` 以上で合計 1 | 下限を足さないか、件数を待たずに寄せると落ちる |
 | 条件 17 | 打ち切りの条件を満たす組の確率が 0 になり、期間を過ぎた記録を外すと再び割り付く。基準は打ち切らない | 打ち切りを永久にするか、基準を打ち切ると落ちる |
 | 条件 18 | 単価の安い効果の低い組は、`q / c` が最大でも下限の出現率を超えない | 効果の下限を外すと落ちる |
 | 条件 17・I6 | 種を渡さなくても、同じ単位の集まりから同じ出現率になる。出現率のファイルを消しても作り直せる | ファイルを状態の正として持つと落ちる |
@@ -788,10 +815,11 @@ worker の再開と修正担当の会話の再開は、中断の後に利用者�
 | 条件 20 | 手動: 件数・下限の出現率・打ち切りの条件・割り付けの方法・記録の形と、比べた方法とライブラリの出典が、この文書にあることを設計レビューで確かめる | — |
 | 条件 10 | 同じステップに失敗の遷移で 2 回目に入った修正が、表のとおりに上がり `raised` が立つ。1 回目・引数の値・上限の値は変わらない。`test-repeat`・`repeat-check` のどちらを通る遷移でも同じ。`NDF_RETRY_CAUSE` は 2 回目以降の子にだけある | 作業の名前だけで 1 回目から上げるか、片方の集計ステップで理由を失うと落ちる |
 | 条件 8 | プランの結果の記録に、ステップごとの指定した値と実際のモデルがある | ステップの結果の値を捨てると落ちる |
-| 条件 13 | worker と修正担当の会話の再開の引数と `CLAUDE_CODE_EFFORT_LEVEL` の扱いが初回と同じで、後から変えた出現率と環境変数に影響されない | 再開のたびに選び直すと落ちる |
+| 条件 13 | worker と修正担当の会話の再開の引数と `CLAUDE_CODE_EFFORT_LEVEL` の扱いが初回と同じで、後から変えた出現率と環境変数に影響されない。effort 指定なしで始めた会話は、再開の時に変数があっても子へ渡らない | 再開のたびに選び直すと落ちる |
 | 条件 14・I7 | 壊れた設定・effort で起動の呼び出しが 0 回になり、直す場所が文にある | 空の値として続けると落ちる |
 | 条件 4・9 | `report` は、同じ `launch_id` の行を 1 回だけ数え、区間の合計を区分の費用に入れない。30 件未満は「件数が足りない」、30 件以上で拮抗する組は「優劣を判定できない」と出す | 重なった行を足すと落ちる |
-| 条件 3（手順書） | 手動: `external-ai`・`corder` の本文から固定の `medium` が消え、`pick` の呼び出しになっていることをレビューで読んで確かめる（`.md` の文言のテストは置かない） | — |
+| 条件 3 | `delegate-args` は、選んだ組の引数と安全装置の引数を 1 回で出し、安全装置が停止の状況では何も出さずに失敗する | 片方の失敗を無視して残りを出すと落ちる |
+| 条件 3（手順書） | 手動: `external-ai`・`corder` の本文から固定の `medium` が消え、`delegate-args` の呼び出しになっていることをレビューで読んで確かめる（`.md` の文言のテストは置かない） | — |
 | 条件 5 | 手動: stream-json で、会話の途中の切り替えの cache の作成と読み込みを測り、確定仕様に書く | — |
 | 条件 6 | 手動（リリース後）: 2 スプリント以上の後の `report` を確定仕様に書く。判断できる件数に達していない組は、そう書く | — |
 
@@ -799,7 +827,7 @@ worker の再開と修正担当の会話の再開は、中断の後に利用者�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2944 | 実装する | — | `plugins/ndf/contracts/domains/launch-experiments.json`（新設）、`plugins/ndf/contracts/data/codex-prices.json`（新設）、`plugins/ndf/src/ndf/adapters/model_choice.py`（新設）、`plugins/ndf/src/ndf/domains/records/experiments.py`（新設）、`plugins/ndf/src/ndf/domains/records/allocation_decide.py`（新設）、`plugins/ndf/src/ndf/domains/records/models_cli.py`（新設）、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/llm.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/adapters/agents.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/crossreview/seats.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/contracts/domains/runtimes.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/schemas/internal/experiment.schema.json`（新設）、`plugins/ndf/contracts/schemas/io/models.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/models.result.schema.json`（生成）、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/external-ai/references/cli-codex.md`、`plugins/ndf/skills/qa-security-scan/03-report-template.md`、`plugins/ndf/agents/corder.md`、`plugins/ndf/skills/launch-config/SKILL.md`、`plugins/ndf/tests/adapters/test_model_choice.py`（新設）、`plugins/ndf/tests/domains/records/test_allocation.py`（新設）、`plugins/ndf/tests/domains/records/test_experiments.py`（新設）、`plugins/ndf/tests/domains/records/test_models_report.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py`、`plugins/ndf/tests/adapters/test_llm.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py` |
+| #2944 | 実装する | — | `plugins/ndf/contracts/domains/launch-experiments.json`（新設）、`plugins/ndf/contracts/data/codex-prices.json`（新設）、`plugins/ndf/src/ndf/adapters/model_choice.py`（新設）、`plugins/ndf/src/ndf/domains/records/experiments.py`（新設）、`plugins/ndf/src/ndf/domains/records/allocation_decide.py`（新設）、`plugins/ndf/src/ndf/domains/records/models_cli.py`（新設）、`plugins/ndf/src/ndf/domains/settings/delegate_args_cli.py`（新設）、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/llm.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/adapters/agents.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/crossreview/seats.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/contracts/domains/runtimes.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/schemas/internal/experiment.schema.json`（新設）、`plugins/ndf/contracts/schemas/io/models.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/models.result.schema.json`（生成）、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/external-ai/references/cli-codex.md`、`plugins/ndf/skills/qa-security-scan/03-report-template.md`、`plugins/ndf/agents/corder.md`、`plugins/ndf/skills/launch-config/SKILL.md`、`plugins/ndf/tests/adapters/test_model_choice.py`（新設）、`plugins/ndf/tests/domains/records/test_allocation.py`（新設）、`plugins/ndf/tests/domains/records/test_experiments.py`（新設）、`plugins/ndf/tests/domains/records/test_models_report.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py`、`plugins/ndf/tests/adapters/test_llm.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py` |
 
 ## 未確認のまま残ること
 
@@ -809,8 +837,9 @@ worker の再開と修正担当の会話の再開は、中断の後に利用者�
 | `codex exec --json` の使用量の行の欄 | 引数があることは `--help` で確かめた。欄の名前と、`-o` との併用は実装で 1 回起動して確かめる |
 | レビューの指摘の挙げた担当 | 今の指摘のジャーナルは、同じ文の指摘では最初に挙げた担当だけを持つ。挙げた担当を全員持つ形に直す。別の文で挙げた同じ内容は分けて数える |
 | 効果指標と作業の大きさ | 指摘の数は差分の大きさに左右される。差分の行数は記録するが、割り付けと計算には使わない |
-| 件数の少ないリポジトリ | 60 日で `min_units` に届かない工程は均等のまま続く |
+| 件数の少ないリポジトリ | 60 日で `min_units` に届かない工程は、件数を集める段階のまま続く |
 | 実際に効いた effort | Claude は取得する経路を確認できていない |
+| 回答なしの誤りの見分け方 | 使えないモデルで終えた `claude -p` と `codex exec` の出力に、使ったトークンが無いことを、実装で 1 回起動して確かめる |
 | Codex の会話の記録の特定 | `--json` の出力の会話の ID の欄と、記録のファイルとの対応は、実装で 1 回起動して確かめる |
 | 選択肢の効果と費用 | リリース後の記録で分かる。この設計では組の優劣を主張しない |
 
