@@ -502,7 +502,7 @@ def refetch_check(run: Run, head: str) -> PullView:
 
 def post_material(run: Run, now: PullView, final: str) -> None:
     """承認資料の最終版を PR のコメントとして 1 件足す。同じ中身のコメントがあれば足さない（設計書の手順 8）。"""
-    if gd.comment_has(now.comments, reading.sha256(final)):
+    if reading.comment_has(now.comments, reading.sha256(final)):
         return
     try:
         pull_view.add_comment(run.hub, run.pr.number, final)
@@ -513,7 +513,7 @@ def post_material(run: Run, now: PullView, final: str) -> None:
 def send_back(run: Run, plan: Plan, targets: Sequence[str], raised: Mapping[str, Sequence[Mapping[str, str]]]) -> dict[str, Any]:
     """変更要求の行を書き、記録を書かずに `stopped`（precondition）で止める（変更要求。設計書の決定 10）。"""
     reading.append_doc({"kind": "sent_back", **run.base(), "targets": list(targets)})
-    said = "・".join(f"{gd.label(n)}: {q['quote']}（{q['why']}）" for n, qs in raised.items() for q in qs) or "無し"
+    said = "・".join(f"{reading.target_label(n)}: {q['quote']}（{q['why']}）" for n, qs in raised.items() for q in qs) or "無し"
     where = [*([str(plan.title_file)] if TITLE in targets else []), str(plan.material)]
     names = "と".join(TARGET_NAMES[t] for t in targets)
     return result.stopped(

@@ -17,7 +17,6 @@ import pytest
 
 from ndf.adapters import git
 from ndf.domains.docrebuild import cli, gate
-from ndf.domains.docrebuild import gate_decide as gd
 from ndf.domains.records import reading
 from ndf.domains.records import reading_decide as rd
 
@@ -282,7 +281,7 @@ def test_design_gate_reads_records_and_comments_once(tmp_path: Path) -> None:
     assert got["outputs"]["check"]["fingerprint"] == reading.row_fingerprint(row)
     assert row["question_key"] == rd.question_key(json.loads(Path(got["outputs"]["questions"]).read_text(encoding="utf-8"))["questions"])
     assert {r["name"] for r in row["reads"]} == {reading.QUESTION, reading.MATERIAL, DESIGN} and row["prs"][0]["head"] == H1
-    assert gd.comment_has(w.hub.comments, got["outputs"]["material"]["file_sha256"])
+    assert reading.comment_has(w.hub.comments, got["outputs"]["material"]["file_sha256"])
     facts = json.loads((tmp_path / "state" / gate.FACTS_FILE).read_text(encoding="utf-8"))
     assert facts["head"] == H1 and facts["mvv_gate"] == "MVV なし"
     again = w.run(worker)

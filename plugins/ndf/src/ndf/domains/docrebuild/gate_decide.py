@@ -22,9 +22,6 @@ _SPACE = re.compile(r"\s+")
 _PARAGRAPH = re.compile(r"\n\s*\n")
 
 
-label = reading.target_label
-
-
 def strip_marks(text: str, expected: str) -> str:
     """末尾の 1 組のマーカーの範囲が `expected` と同じならそれを除き、違えばマーカーの行だけを消す（設計書の手順 2）。"""
     body, cut = reading.split_section(text, expected)
@@ -165,13 +162,10 @@ def doc_rows_of(
     return rows
 
 
-comment_has = reading.comment_has
-
-
 def remained_items(prefix: str, remained: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     """2 回目にも残った文を、結果の最上位の `items`（`<prefix>-<番号>`）にする。"""
     pairs = [(r, q) for r in remained for q in r["quotes"]]
     return [
-        {"id": f"{prefix}-{i}", "doc": r["name"], "text": f"{label(r['name'])}: {q['quote']}（{q['why']}）"}
+        {"id": f"{prefix}-{i}", "doc": r["name"], "text": f"{reading.target_label(r['name'])}: {q['quote']}（{q['why']}）"}
         for i, (r, q) in enumerate(pairs, 1)
     ]
