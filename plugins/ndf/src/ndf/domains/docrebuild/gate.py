@@ -21,7 +21,7 @@ from typing import Any, Optional
 from ndf import identity
 from ndf.adapters import git
 from ndf.adapters.github import GitHub, GitHubError
-from ndf.adapters.publish import Publisher, mask_all
+from ndf.adapters.publish import Publisher, redacted_pattern
 from ndf.contracts import result
 from ndf.domains.docrebuild import drive
 from ndf.domains.docrebuild import gate_decide as gd
@@ -659,7 +659,7 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
         # 承認資料は worker が書き足した後に変わった段落とその前後だけを読ませるので、読ませた部分は今の本文から切り出す
         parts[reading.MATERIAL] = gd.changed_part(_file_text(plan.previous), draft)
     prev = reading.remained_of(reading.doc_rows(), run.repo, run.args.gate, run.pr.number)
-    rows = gd.doc_rows_of(found, gd.carried_quotes(prev, contents, parts, raised, mask_all), hashes)
+    rows = gd.doc_rows_of(found, gd.carried_quotes(prev, contents, parts, raised, redacted_pattern), hashes)
     _publish_quotes(run, rows)
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]
     section = reading.remained_section(remained)
@@ -688,7 +688,7 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
 
 def _publish_quotes(run: Run, rows: Sequence[dict[str, Any]]) -> None:
     """残った文の引用と理由を PR へ書くときの形にする。伏せて変わった引用は元の文を残さず、`redacted` を持つ
-    （次の確認は、対象の側も伏せてから探す）。"""
+    （次の確認は、固定の文の所を任意の文字として探す）。"""
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]
     run.publish_all([q[k] for r in remained for q in r["quotes"] for k in ("quote", "why")])
     for row in remained:

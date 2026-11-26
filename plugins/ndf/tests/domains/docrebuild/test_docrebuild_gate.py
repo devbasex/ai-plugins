@@ -16,7 +16,7 @@ from typing import Any, Optional
 import pytest
 
 from ndf.adapters import git
-from ndf.adapters import publish
+from ndf.adapters import publish, run_log
 from ndf.domains.docrebuild import cli, gate, gate_decide
 from ndf.domains.records import reading
 from ndf.domains.records import reading_decide as rd
@@ -678,7 +678,7 @@ def test_check_on_the_material_route_and_a_renamed_title(tmp_path: Path, monkeyp
 
 
 def test_a_redacted_remained_quote_is_carried_without_keeping_the_original():
-    """記録の引用は伏せた後の文と `redacted` を持ち、次の確認は対象の側も伏せて、空白の数の違いを除いて探す。"""
+    """記録の引用は伏せた後の文と `redacted` を持ち、次の確認は固定の文の所を任意の文字として、空白の数の違いを除いて探す。"""
     original = {"quote": "連絡は  山田@example.co.jp へ送る", "why": "w"}
     hidden = f"連絡は  {publish.EMAIL_TEXT} へ送る"
     stored = gate_decide.marked_redacted({"quote": hidden, "why": "w"}, original)
@@ -687,7 +687,7 @@ def test_a_redacted_remained_quote_is_carried_without_keeping_the_original():
 
     def carried(now: str, part: Optional[str] = "", raised: tuple[dict[str, str], ...] = ()) -> dict[str, Any]:
         parts = {} if part == "" else {"docs/a.md": part}
-        return gate_decide.carried_quotes(prev, {"docs/a.md": now}, parts, {"docs/a.md": raised}, publish.mask_all)
+        return gate_decide.carried_quotes(prev, {"docs/a.md": now}, parts, {"docs/a.md": raised}, publish.redacted_pattern)
 
     first, other = "連絡は\n山田@example.co.jp へ送る", "連絡は b@example.co.jp へ送る"
     assert carried(f"前\n{first}\n後") == {"docs/a.md": [stored]}
@@ -697,3 +697,20 @@ def test_a_redacted_remained_quote_is_carried_without_keeping_the_original():
     raised = ({"quote": other, "why": "w"},)
     assert carried(f"{first}\n\n{other}", other, raised) == {"docs/a.md": [stored]}
     assert carried(f"{first}\n\n{other}", f"{first}\n\n{other}", raised) == {}
+
+
+@pytest.mark.parametrize(
+    ("quote", "document"),
+    [
+        # 前の確認のアカウント名・秘密の値は、今の実行の環境からは分からない
+        (f"担当は {publish.ACCOUNT_TEXT} が承認する", "担当は demoaccount が承認する"),
+        (f"鍵は {run_log.MASK} を使う", "鍵は old rotated value を使う"),
+        # 引用の外の文字（認証ヘッダー）まで伏せる範囲が広がる文書
+        (f"承認先は {publish.EMAIL_TEXT} にする", "Authorization: Bearer demo # 承認先は a@example.org にする"),
+    ],
+)
+def test_a_redacted_quote_is_found_without_masking_the_document_again(quote: str, document: str) -> None:
+    stored = {"quote": quote, "why": "w", "redacted": True}
+    prev = [{"name": "docs/a.md", "quotes": [stored]}]
+    got = gate_decide.carried_quotes(prev, {"docs/a.md": document}, {}, {}, publish.redacted_pattern)
+    assert got == {"docs/a.md": [stored]}

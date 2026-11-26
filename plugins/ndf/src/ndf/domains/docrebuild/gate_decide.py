@@ -98,14 +98,14 @@ def marked_redacted(published: dict[str, Any], original: Mapping[str, Any]) -> d
     return {**published, "redacted": True}
 
 
-Mask = Callable[[str], str]
+Pattern = Callable[[str], re.Pattern[str]]
 
 
-def _count_in(q: Mapping[str, Any], text: str, mask: Mask) -> int:
-    """引用が `text` に当たる数。伏せていない引用は有無（0 か 1）、伏せた引用は引用と `text` の両方を伏せて一致する数。"""
+def _count_in(q: Mapping[str, Any], text: str, pattern: Pattern) -> int:
+    """引用が `text` に当たる数。伏せていない引用は有無（0 か 1）、伏せた引用は `pattern` の正規表現に一致する数。"""
     if "redacted" not in q:
         return int(_squeezed(q["quote"]) in _squeezed(text))
-    return _squeezed(mask(text)).count(_squeezed(mask(q["quote"])))
+    return len(pattern(_squeezed(q["quote"])).findall(_squeezed(text)))
 
 
 def carried_quotes(
@@ -113,12 +113,12 @@ def carried_quotes(
     contents: Mapping[str, str],
     read_parts: Mapping[str, Optional[str]],
     raised: Mapping[str, Sequence[Mapping[str, str]]],
-    mask: Mask,
+    pattern: Pattern,
 ) -> dict[str, list[dict[str, str]]]:
     """前の確認で残った文のうち引き継ぐもの（設計書の「前に残った文の状態」と、計画で決めたこと (3)）。
 
     `contents` は対象の今の全体、`read_parts` は今回読ませた対象の名前から読ませた部分（全体を読ませたなら None）、`raised` は今回も
-    挙がった引用。`mask` は、伏せる対象になりうる所をすべて伏せる関数。引用と対象は、連続する空白を半角スペース 1 つに置き換え、
+    挙がった引用。`pattern` は、伏せた引用を伏せる前の文の中から探す正規表現を作る関数。引用と対象は、連続する空白を半角スペース 1 つに置き換え、
     前後の空白を除いて比べる。伏せていない引用は、今回も挙がっていれば引き継がない。伏せた引用は値だけが違う別の文と区別できないので、
     今回挙がった引用では省かず、読ませていない文があれば引き継ぐ。
     """
@@ -134,19 +134,19 @@ def carried_quotes(
                 duplicate = _squeezed(q["quote"]) in {_squeezed(k["quote"]) for k in known}
             if name not in contents or duplicate:
                 continue
-            count = _count_in(q, contents[name], mask)
-            if not count or _read_again(name, q, count, read_parts, mask):
+            count = _count_in(q, contents[name], pattern)
+            if not count or _read_again(name, q, count, read_parts, pattern):
                 continue
             out.setdefault(name, []).append(dict(q))
     return out
 
 
-def _read_again(name: str, q: Mapping[str, Any], count: int, read_parts: Mapping[str, Optional[str]], mask: Mask) -> bool:
+def _read_again(name: str, q: Mapping[str, Any], count: int, read_parts: Mapping[str, Optional[str]], pattern: Pattern) -> bool:
     """引用した文を今回読ませたか。全体を読ませたか、対象にある `count` 件の当たる文がすべて読ませた部分にあれば真。"""
     if name not in read_parts:
         return False
     part = read_parts[name]
-    return part is None or _count_in(q, part, mask) >= count
+    return part is None or _count_in(q, part, pattern) >= count
 
 
 def row_verdict(round_no: int, passed: bool) -> str:

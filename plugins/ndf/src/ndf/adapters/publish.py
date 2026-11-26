@@ -63,6 +63,8 @@ _EMAIL = re.compile(r"(?<![\w.+-])(?P<local>[\w.+-]+)@(?P<domain>[A-Za-z0-9-]+(?
 _BARE_REF = re.compile(r"^(?P<label>(?:issue|PR|pr|Issue)\s*)#(?P<number>\d+)$")
 # 公開の書き先へ、非公開のリポジトリの由来を書くときの固定の文（3391-2）。完全な参照は手元の引継ぎ文書だけに置く
 PRIVATE_ORIGIN = "非公開のリポジトリの課題"
+# `scrub` が落とした所へ置く固定の文のどれか（`redacted_pattern`）
+_PLACEHOLDER = re.compile("(" + "|".join(map(re.escape, (run_log.MASK, PRIVATE_REF_TEXT, HOME_TEXT, EMAIL_TEXT, ACCOUNT_TEXT))) + ")")
 
 
 class DropKind(StrEnum):
@@ -213,12 +215,16 @@ def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: 
     return Scrubbed(text, dropped)
 
 
-def mask_all(text: str) -> str:
-    """公開範囲を照会せず、公開の書き先で伏せる対象になりうる所をすべて伏せる（リポジトリへの参照は公開のものも伏せる）。
+def redacted_pattern(redacted: str) -> re.Pattern[str]:
+    """伏せた後の文 `redacted` を伏せる前の文の中から探す正規表現。固定の文の所は、任意の文字の並びに一致させる
+    （秘密の固定の文は空白をまたぎ、ほかは空白を含まない）。
 
-    伏せた後の文を伏せる前の文の中から探すときに、両方へかける。伏せる処理と同じ関数を使うので、対象にする文字がずれない。
+    探す側は伏せ直さない。伏せる対象は実行する環境（アカウント名・秘密の環境変数）と前後の文字で変わり、
+    伏せ直すと前と同じ形にならないためである。
     """
-    return scrub(text, True, repo_refs(text), local_accounts()).text
+    parts = _PLACEHOLDER.split(redacted)
+    gaps = (".+?" if mark == run_log.MASK else r"\S+?" for mark in parts[1::2])
+    return re.compile("".join([re.escape(parts[0]), *(gap + re.escape(rest) for gap, rest in zip(gaps, parts[2::2]))]))
 
 
 # 参照先の公開範囲を確かめられず、どこを伏せるかを決められなかった自由記述の代わりに出す文
