@@ -27,7 +27,7 @@
 | --- | --- |
 | [結果 JSON の定義](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/contracts/schemas/result.schema.json) | `outputs.product_version` は `1.2.3` の形（semver）しか受け付けない。工程の文脈の定義と食い違う |
 | デプロイを担当する worker への入力 | 承認の対象の Pull Request だけを受け取り、工程の文脈に書かれた `product_version` は受け取らない（[作業の定義](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/contracts/worker/kinds.json)） |
-| worker が判断を求めた後の `approved` | デプロイは worker のステップ 1 つなので、続きが無く、その時点の出力で工程のステップが終わった扱いになる。出力に `product_version` が無いため `bad_report` になる |
+| worker が判断を求めた後の `approved` | デプロイの最後の作業で、配布を担当する AI（worker）が判断を求める。`approved` で先へ進めるとその後の作業が無いため、その時点で結果を検査し、必要な値が無ければ `bad_report` で失敗する |
 
 ## 事象
 
@@ -102,7 +102,7 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 ## 前提
 
 - 前提 1: 「バージョン番号を持たないリポジトリ」は、ブランチ戦略の設定が `release.version_store.kind: none` のリポジトリを指す
-- 前提 2: 出したものを指す値は空でない文字列で、形は問わない。まとめたリリースでは、オーガナイザーが `--version` で渡した値がそれに当たる
+- 前提 2: 前提 1 のリポジトリでは、出したものを指す値は空でない文字列で、形は問わない。空白だけの文字列は空と同じ扱いにする。まとめたリリースでは、オーガナイザーが `--version` で渡した値がそれに当たる
 
 ## 受け入れ条件
 
@@ -116,7 +116,7 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
       操作: デプロイの工程で、出したものを指す値（例: コミットの短いハッシュ）を返す
       結果: 結果 JSON が形の誤りにならず、工程が終わり、その値が `product_version` になる
 - [ ] 4. `product_version` がバージョン番号の形でないスプリントで、デプロイより後の工程（リリース後テスト・体裁レビュー・振り返り・課題を閉じる処理）が、値の形を理由に止まらない
-- [ ] 5. `product_version` が空文字列の結果は、受け付けられない
+- [ ] 5. `product_version` が空文字列か空白だけの結果は、受け付けられない
 
 出力がそろわないとき（リポジトリの種類を問わない）:
 
@@ -145,6 +145,7 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 | --- | --- |
 | まとめたリリース | オーガナイザーが複数のレーンの Pull Request を 1 つのバージョンとして出すリリース |
 | レーン | 並列の計画の下で進める開発の流れの 1 本 |
+| conductor | 開発の流れを進める AI の会話。承認や判断の求めに回答する |
 | オーガナイザー | 並列の計画の全体をまとめる conductor の役割 |
 | 承認ゲート | 人手の承認を求める点 |
 
@@ -153,8 +154,8 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 | # | イベント | 引き金 | 失敗したとき | 順序の前提 |
 | --- | --- | --- | --- | --- |
 | E1 | 出したものを指す値が工程の文脈に書かれた | リリース承認ゲートへのまとめたリリースの回答 | 値の無い回答では書かれない。デプロイの工程が値を返す（条件 3） | — |
-| E2 | デプロイの worker が出力を返した | デプロイの工程の開始 | 判断を求めて止まる、または結果の形の誤りになる | E1（まとめたリリースのとき） |
-| E3 | 判断の求めに回答した | conductor の回答 | 出力がそろわなければ理由を示して失敗する（条件 6） | E2 |
+| E2 | デプロイの出力がそろった | まとめたリリースで記録済みの値を使う（worker を起動しない）か、起動した worker が出力を返す | worker が判断を求めて止まる、または結果の形の誤りになる | E1（まとめたリリースのとき） |
+| E3 | 判断の求めに回答した | conductor の回答 | 出力がそろわなければ理由を示して失敗する（条件 6） | worker が起動され、判断を求めている |
 | E4 | デプロイの工程が終わった | 出力の確かめの合格 | `bad_report` で失敗する | E2 |
 | E5 | 後の工程が `product_version` を読んだ | 後の工程の開始 | 値の形で止まらない（条件 4） | E4 |
 
@@ -189,7 +190,7 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 | S2 | バージョン番号を持つリポジトリの値の確かめは緩めない | 本文には無い。今の振る舞いを守るために足した | 受け入れ条件 8 |
 | S3 | まとめたリリースを使わない場合も、出したものを指す値で終われる | 本文には無い。release の手順書の「版数を持たないリリース」から足した | 受け入れ条件 3 |
 | S4 | 「同じゲートを繰り返さずに止まる」は、理由を示して失敗で止まり、自動で出し直さないことを指す。conductor が自分で打つ retry は禁じない | 本文の「期待」の 2 つ目を解釈した | 受け入れ条件 6・7 |
-| S5 | 値の形は問わず、空でなければよい | 本文の「`minLength: 1` の文字列で、semver を求めていない」 | 前提 2、受け入れ条件 5 |
+| S5 | 値の形は問わず、空（空白だけを含む）でなければよい | 本文の「`minLength: 1` の文字列で、semver を求めていない」 | 前提 2、受け入れ条件 5 |
 
 ## リクエスト（原文）
 
