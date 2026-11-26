@@ -2,6 +2,15 @@
 
 設計文書 [issue-2912-design.md](./issue-2912-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。新設する関数が 2 つ以上あり、既存の関数のシグネチャも変える（`patch_material` に行数の引数を足す）ため、別ファイルにした。決定の中身と受け入れ条件の文は、設計文書と要求仕様（[issue-2912-requirements.md](./issue-2912-requirements.md)）を指す。
 
+この文書で使う語の意味は、設計文書のとおりである。
+
+| 語 | 意味 |
+| --- | --- |
+| レッドライン | 必ず人の承認が要る操作。番号は `C<数>` / `P<数>` / `R<数>` の形をとる |
+| 番号の無い委ね方 | レッドラインの番号を示さずに、判断を人に任せる行 |
+| 起票者の推定 | 課題の題と本文のうち、利用者の指示の原文に無く、起票者が推して足した条件 |
+| 省ける判定 | MVV 判定が設計承認ゲートを省ける結果（出力 `skip` が真）。省く結果だけが承認の対象 `target` を持つ |
+
 ## 地図
 
 パッケージ・モジュール構成（触るファイルだけ。`*` は新設）:
@@ -18,7 +27,7 @@ plugins/ndf/
 │           ├── cli.py                           サブコマンド design check
 │           ├── design_check.py *                検査する文書を集める（git とファイルを読む口）
 │           ├── design_check_decide.py *         番号の無い委ね方と表の行の判定（副作用なし）
-│           ├── mvv_gate.py                      省ける判定のときだけ表を読む
+│           ├── mvv_gate.py                      承認ゲートを省ける判定のときだけ表を読む
 │           └── mvv_material_decide.py           指示文の箇条・差分を切る行数の引数
 ├── contracts/
 │   ├── templates/design.json                    検査と直しのステップ
@@ -53,8 +62,8 @@ experimental/ndf/
 | `plugins/ndf/src/ndf/adapters/markdown.py` | 変更 | 表の見出しと行の欄を、markdown-it-py のトークンから読む | markdown-it-py | モジュール `markdown`（`Table`・`TableRow`） | `tables`（新設） |
 | `plugins/ndf/src/ndf/core/start_point.py` | 新設 | ベースブランチとリモート名から起点の参照と SHA を決める | `ndf.adapters.git` | モジュール `start_point`（`StartPointError`） | `resolve`（新設） |
 | `plugins/ndf/src/ndf/domains/docrebuild/drive.py` | 変更 | 起点の解決を `start_point.resolve` へ任せ、失敗を `Precondition` に包む | `ndf.core.start_point` | モジュール `drive` | `start_and_changes`（変更）、`start_point`・`_resolve`（削除） |
-| `plugins/ndf/src/ndf/domains/records/mvv_gate.py` | 変更 | 省ける判定のときだけ、差分の設計成果物の head の表を読んで省かない側へ倒す | `design_check_decide`・`ndf.core.issue_docs` | モジュール `mvv_gate` | `_tabled`・`_table_numbers`（新設）、`_judged`（変更） |
-| `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` | 変更 | 指示文に起票者の推定の扱いを足し、差分を切る行数を引数にする | — | モジュール `mvv_material_decide` | `patch_material`（変更）、定数 `SYSTEM`（変更） |
+| `plugins/ndf/src/ndf/domains/records/mvv_gate.py` | 変更 | 設計承認ゲートを省ける判定のときだけ、差分の設計成果物の head の表を読む。番号を持つ行があれば、人の承認を求める側（`skip` が偽）へ倒す | `design_check_decide`・`ndf.core.issue_docs` | モジュール `mvv_gate` | `_tabled`・`_table_numbers`（新設）、`_judged`（変更） |
+| `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` | 変更 | 判定者への指示文に、起票者の推定の扱いの箇条を足す。差分を切る行数を引数にする | — | モジュール `mvv_material_decide` | `patch_material`（変更）、定数 `SYSTEM`（変更） |
 | `plugins/ndf/contracts/templates/design.json` | 変更 | 2 つの push の前に検査と直しを置く | `ndf records design check`・`ndf route repeat` | プランのテンプレート | — |
 | `plugins/ndf/contracts/templates/design-detail.json` | 変更 | push の前に検査と直しを置き、値 `base` を受ける | 同上 | プランのテンプレート | — |
 | `plugins/ndf/contracts/templates/document-review.json` | 新設 | レビューの後、push の前に検査を置き、直した版を再レビューする | 同上 | プランのテンプレート | — |
@@ -215,7 +224,7 @@ experimental/ndf/
 - `_design_check`
   - 副作用: `--result` のファイルを書く（親のディレクトリを作る）
 
-`from_base` が起動する git は次の 5 種類で、ファイルの数によらない（4 は対象のファイルごとに 1 回）。
+`from_base` が起動する git は次の 5 種類である。4 だけは対象のファイルごとに 1 回起動し、ほかはファイルの数によらない。
 
 | 順 | 起動 | 目的 |
 | --- | --- | --- |
@@ -450,7 +459,7 @@ worker は検査の結果のファイルを受け取らず、同じコマンド�
 | --- | --- | --- | --- |
 | `SYSTEM` | 定数（判定者へ渡す指示文） | `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` | 設計文書の「MVV 判定の指示文」の変更後の箇条。ほかの箇条と結果の形は変えない |
 
-指示文の変更は、実装の完了の前に決定 6 の順 1・2 に合格してから入れる。合格しなければ `SYSTEM` を変えずに止まる（実装計画のタスクの順序）。
+指示文の変更は、実装の完了の前に、決定 6 の順 1（対照 20 件と設計 PR #4583 を変更後の指示文で判定する）と順 2（推定の扱いの有無だけが違う材料の対を判定する）に合格してから入れる。合格の条件は設計文書の決定 6 にある。合格しなければ `SYSTEM` を変えずに止まる（実装計画のタスクの順序）。
 
 ## 設計の手順書と決定の書き方
 
@@ -460,7 +469,7 @@ worker は検査の結果のファイルを受け取らず、同じコマンド�
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| 手順 5 の 2 段落目 | 手順の文 | `plugins/ndf/skills/design/SKILL.md` | 「検査のサブコマンドは無いため…読んで確かめる」のうち、人へ残す判断の確かめを `ndf records design check --base <マージ先のブランチ名>`（または、受け入れ条件のファイル・実行の記録をファイルで指定）を打つ形へ変える。プランから呼ばれた設計者は打たない。自前で作る決定の比べた候補は、今のとおり読んで確かめる |
+| 手順 5 の 2 段落目 | 手順の文 | `plugins/ndf/skills/design/SKILL.md` | 「検査のサブコマンドは無いため…読んで確かめる」の段落を、次の 3 点へ変える。(1) 人へ残す判断は `ndf records design check --base <マージ先のブランチ名>` を打って確かめる。受け入れ条件のファイルや実行の記録は、そのパスを引数に渡す。(2) プランから呼ばれた設計者は打たない。(3) 自前で作る決定に書いた「比べた候補」は、今のとおり読んで確かめる |
 | 手順 6 の確かめ | 手順の文 | 同上 | プランを使わずに詳細設計を書いた設計者は、追記の後、push の前に同じコマンドを打つ |
 | 「人へ委ねない」の最後の段落 | 書き方の文 | `plugins/ndf/skills/design/references/decisions.md` | 委ねる行は、表の「判断」の欄の文と番号を同じ行に書く。番号の直後に「に当たらない」と書いた番号は数えない。確かめは手順 5 のコマンドが行う |
 
@@ -496,7 +505,7 @@ worker は検査の結果のファイルを受け取らず、同じコマンド�
 | `prompt_at` | `mvv_replay.py` | 新設 | `(repo: Path, commit: Optional[str]) -> str` | 指示文を返す。`commit` があれば `git show <commit>:plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` を読み込んで `SYSTEM` を取り、無ければ読み込んだ `ndf` の `SYSTEM` |
 | `material_of` | `mvv_replay.py` | 新設 | `(hub: GitHub, g: Git, number: int) -> Optional[str]` | 決定 5 の 4 つの順で、PR の材料の全文を組む。全文を取れなければ None |
 | `judge_once` | `mvv_replay.py` | 新設 | `(question: str, material: str, model: str) -> dict[str, Any]` | `llm.ask` を、`--model` を足した `call` で 1 回呼び、回答と実行の情報（モデル ID・Claude Code のバージョン・指示文のコミット・材料のハッシュ）を返す |
-| `gate_once` | `mvv_replay.py` | 新設 | `(root: Path, answer: str, result: Path) -> int` | 導入した版の `mvv_gate.gate` を、`hub` を `CapturingHub` で包み、`NDF_MVV_STATE_DIR` を一時ディレクトリにして呼ぶ。`answer` が `stand-in` なら `ask` を代役にする |
+| `gate_once` | `mvv_replay.py` | 新設 | `(root: Path, answer: str, result: Path) -> int` | 導入した版の `mvv_gate.gate` を、`hub` を `CapturingHub` で包み、`NDF_MVV_STATE_DIR` を一時ディレクトリにして呼ぶ。`answer` が `stand-in` なら、判定の呼び出し `ask` を、`follow` で `boundary` が空の回答を返す代役に差し替える |
 | `CapturingHub` | `mvv_replay.py` | 新設 | クラス（`GitHub` を包む。読み取りは委ね、書き込みのメソッドは記録して送らない） | PR のコメントなどの書き込みを捕まえ、結果のファイルへ書く |
 
 - `gate_once`
