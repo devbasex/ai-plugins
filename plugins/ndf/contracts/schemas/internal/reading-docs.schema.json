@@ -19,7 +19,7 @@
     "reader": {"type": "string", "minLength": 1, "description": "読み手の立場"},
     "round": {"enum": [1, 2], "description": "その立場で何回目の読みか（確認ごとに 1 から数える）"},
     "verdict": {"enum": ["passed", "failed", "remained"], "description": "合格・不合格（直して次の回へ）・2 回目にも残った"},
-    "quotes": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["quote", "why"], "properties": {"quote": {"type": "string", "minLength": 1, "description": "残った文の引用"}, "why": {"type": "string", "description": "読み手がつまずく理由"}, "source": {"type": "string", "minLength": 1, "description": "PR へ書く前に伏せて quote が変わったときの元の引用。次の確認で対象の中から探すのに使い、承認資料には載せない"}}}, "description": "verdict が remained の行の、残った文の引用と理由"},
+    "quotes": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["quote", "why"], "properties": {"quote": {"type": "string", "minLength": 1, "description": "残った文の引用"}, "why": {"type": "string", "description": "読み手がつまずく理由"}, "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "PR へ書く前に伏せて quote が変わったときの、伏せる前の引用（空白を 1 つにそろえた文）の SHA-256。元の文は残さない。次の確認で対象の中から探すのに使い、承認資料には載せない"}, "source_length": {"type": "integer", "minimum": 1, "description": "source_sha256 を取った文の文字数"}}}, "description": "verdict が remained の行の、残った文の引用と理由"},
     "question_key": {"type": ["string", "null"], "description": "done の行: 記録した質問のキー"},
     "head": {"type": ["string", "null"], "description": "done の行: 基準の head"},
     "material_sha256": {"type": ["string", "null"], "description": "done の行: 承認資料の、読ませた本文のハッシュ（残した文のセクションを除く）"},

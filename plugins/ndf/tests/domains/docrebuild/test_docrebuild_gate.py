@@ -16,7 +16,7 @@ from typing import Any, Optional
 import pytest
 
 from ndf.adapters import git
-from ndf.domains.docrebuild import cli, gate
+from ndf.domains.docrebuild import cli, gate, gate_decide
 from ndf.domains.records import reading
 from ndf.domains.records import reading_decide as rd
 
@@ -674,3 +674,14 @@ def test_check_on_the_material_route_and_a_renamed_title(tmp_path: Path, monkeyp
     w.hub.title = "別の題"
     missing, _ = reading.check("release", 7, final, w.cwd, lambda repo: w.hub)  # type: ignore[arg-type]
     assert missing == [rd.NO_RECORD]
+
+
+def test_a_redacted_remained_quote_is_carried_without_keeping_the_original():
+    original = "値は  TOKEN-VALUE を使う"
+    stored = {"quote": "値は [伏せた] を使う", "why": "w", **gate_decide.fingerprint_of(original)}
+    prev = [{"name": "docs/a.md", "quotes": [stored]}]
+    assert "TOKEN-VALUE" not in json.dumps(stored, ensure_ascii=False)
+    assert gate_decide.carried_quotes(prev, {"docs/a.md": "前\n値は TOKEN-VALUE を使う\n後"}, {}, {}) == {"docs/a.md": [stored]}
+    assert gate_decide.carried_quotes(prev, {"docs/a.md": "書き直した"}, {}, {}) == {}
+    raised = {"docs/a.md": [{"quote": original, "why": "w"}]}
+    assert gate_decide.carried_quotes(prev, {"docs/a.md": original}, {}, raised) == {}

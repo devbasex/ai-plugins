@@ -683,7 +683,7 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
 
 
 def _publish_quotes(run: Run, rows: Sequence[dict[str, Any]]) -> None:
-    """残った文の引用と理由を PR へ書くときの形にする。伏せて変わった引用は元の文を `source` に残し、
+    """残った文の引用と理由を PR へ書くときの形にする。伏せて変わった引用は元の文を残さず、指紋と長さを持ち、
     次の確認が伏せていない対象の中から探せるようにする（承認資料には載せない）。"""
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]
     run.publish_all([q[k] for r in remained for q in r["quotes"] for k in ("quote", "why")])
@@ -691,9 +691,7 @@ def _publish_quotes(run: Run, rows: Sequence[dict[str, Any]]) -> None:
         quotes = []
         for q in row["quotes"]:
             out = {**q, "quote": run.publishable(q["quote"]), "why": run.publishable(q["why"])}
-            if out["quote"] != q["quote"]:
-                out.setdefault("source", q["quote"])
-            quotes.append(out)
+            quotes.append(gd.marked_redacted(out, q))
         row["quotes"] = quotes
 
 

@@ -88,9 +88,31 @@ def _squeezed(text: str) -> str:
     return _SPACE.sub(" ", text).strip()
 
 
-def _source(q: Mapping[str, str]) -> str:
-    """引用の、対象の中から探すときの文（伏せて変わった引用は元の文を `source` に持つ）。"""
-    return q["source"] if "source" in q else q["quote"]
+def fingerprint_of(quote: str) -> dict[str, Any]:
+    """伏せる前の引用の指紋と長さ。元の文は秘密を含みうるので記録に残さない。"""
+    text = _squeezed(quote)
+    return {"source_sha256": reading.sha256(text), "source_length": len(text)}
+
+
+def marked_redacted(published: dict[str, Any], original: Mapping[str, Any]) -> dict[str, Any]:
+    """伏せて引用が変わったら、伏せる前の引用の指紋を足した行の引用を返す（すでに指紋を持つ引用はそのまま）。"""
+    if published["quote"] == original["quote"] or "source_sha256" in published:
+        return published
+    return {**published, **fingerprint_of(original["quote"])}
+
+
+def _quote_identity(q: Mapping[str, Any]) -> str:
+    """同じ引用かを比べる値（伏せて変わった引用は、伏せる前の引用の指紋）。"""
+    return str(q["source_sha256"] if "source_sha256" in q else fingerprint_of(q["quote"])["source_sha256"])
+
+
+def _found_in(q: Mapping[str, Any], text: str) -> bool:
+    """引用が `text` に残っているか。伏せて変わった引用は、同じ長さの部分の指紋が伏せる前の引用と同じかで探す。"""
+    squeezed = _squeezed(text)
+    if "source_sha256" not in q:
+        return _squeezed(q["quote"]) in squeezed
+    size = q["source_length"]
+    return any(reading.sha256(squeezed[i : i + size]) == q["source_sha256"] for i in range(len(squeezed) - size + 1))
 
 
 def carried_quotes(
@@ -107,22 +129,21 @@ def carried_quotes(
     out: dict[str, list[dict[str, str]]] = {}
     for row in prev:
         name = row["name"]
-        seen = {_squeezed(_source(q)) for q in [*(raised[name] if name in raised else ()), *(out[name] if name in out else ())]}
+        seen = {_quote_identity(q) for q in [*(raised[name] if name in raised else ()), *(out[name] if name in out else ())]}
         for q in row["quotes"]:
-            quote = _squeezed(_source(q))
-            if name not in contents or quote not in _squeezed(contents[name]) or quote in seen or _read_again(name, quote, read_parts):
+            if name not in contents or not _found_in(q, contents[name]) or _quote_identity(q) in seen or _read_again(name, q, read_parts):
                 continue
             out.setdefault(name, []).append(dict(q))
-            seen.add(quote)
+            seen.add(_quote_identity(q))
     return out
 
 
-def _read_again(name: str, quote: str, read_parts: Mapping[str, Optional[str]]) -> bool:
+def _read_again(name: str, q: Mapping[str, Any], read_parts: Mapping[str, Optional[str]]) -> bool:
     """引用した文を今回読ませたか（全体を読ませたか、読ませた部分に含まれる）。"""
     if name not in read_parts:
         return False
     part = read_parts[name]
-    return part is None or quote in _squeezed(part)
+    return part is None or _found_in(q, part)
 
 
 def row_verdict(round_no: int, passed: bool) -> str:
