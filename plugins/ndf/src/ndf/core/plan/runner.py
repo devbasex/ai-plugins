@@ -120,6 +120,11 @@ def waiting_path(state_dir: Path, run: str) -> Path:
     return state_dir / f"{WAITING_PREFIX}{run}.json"
 
 
+def _pick_shown(source: dict[str, Any]) -> dict[str, Any]:
+    """`source` から提示の写しの欄（`SHOWN_KEYS`）を抜き出す。無い欄は None。"""
+    return {k: source.get(k) for k in SHOWN_KEYS}
+
+
 def read_marker(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
     """回 `run` の承認の回答を待つ目印。無ければ None。
 
@@ -136,7 +141,7 @@ def read_marker(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
     if not isinstance(marker.get("shown"), dict):
         saved = read_json(step_presented_path(state_dir, str(marker["step"])))
         if isinstance(saved, dict) and saved.get("run") == run:
-            marker = {**marker, "shown": {k: saved.get(k) for k in SHOWN_KEYS}}
+            marker = {**marker, "shown": _pick_shown(saved)}
         else:
             marker = {**marker, "shown": {}, UNCONFIRMED: True}
     return marker
@@ -181,7 +186,7 @@ def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]
     out = steps.run(ctx, plan.step(step_id))
     out["attempt"] = attempt
     if out["status"] == GATE:
-        shown = {k: out.get(k) for k in SHOWN_KEYS}
+        shown = _pick_shown(out)
         write_json(step_presented_path(ctx.state_dir, step_id), {"step": step_id, "run": spec.get("run_id"), **shown})
     if out["prs"]:
         _add_prs(ctx.state_dir, out["prs"])
@@ -210,7 +215,7 @@ def mark_waiting(path: str, step_id: str, seq: int, routes: dict[str, dict[str, 
     結果の資料・回答コマンドと、回答を照らす値をこの一組から作り、別々に読んだ写しを混ぜない（#4409）。
     """
     shown = read_json(step_presented_path(Path(state_dir), step_id))
-    held = {k: shown.get(k) for k in SHOWN_KEYS} if isinstance(shown, dict) else {}
+    held = _pick_shown(shown) if isinstance(shown, dict) else {}
     write_json(Path(path), {"step": step_id, "seq": seq, "run": run_id, "shown": held, "routes": routes})
 
 
