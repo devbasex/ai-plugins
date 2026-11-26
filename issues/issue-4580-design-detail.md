@@ -337,7 +337,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `Unversioned` | `release/record.py` | 新設 | `NamedTuple Unversioned(version: str, environments: tuple[str, ...], targets: tuple[str, ...], observed: frozenset[str], production_sha: str \| None)` | `record --version` の引数 |
 | `Outcome` | `release/record.py` | 新設 | `NamedTuple Outcome(record: Record, recorded: tuple[str, ...], kept: tuple[str, ...], failed: dict[str, str], pending: dict[str, str], complete: bool, missing: tuple[str, ...], written: list[Written])` | `record` の結果の `outputs` の元 |
 | `write_unversioned` | `release/record.py` | 新設 | `write_unversioned(hub: GitHub, repo_git: Git, number: int, production: str, release: Mapping[str, Any], args: Unversioned) -> Outcome` | 設計書の確かめ 0〜8 と書く順の手順 1〜4 |
-| `correct_targets` | `release/record.py` | 新設 | `correct_targets(hub: GitHub, number: int, production: str, version: str, targets: tuple[str, ...], reason: str, production_sha: str \| None) -> str` | 確かめ 1・2・6 と訂正だけの確かめを通し、記録の PR へ訂正の記録を 1 件書く。書いたコメントの URL を返す |
+| `correct_targets` | `release/record.py` | 新設 | `correct_targets(hub: GitHub, number: int, production: str, version: str, targets: tuple[str, ...], reason: str, production_sha: str \| None) -> str` | 確かめ 1・2・6 と訂正だけの確かめを通し、書く token の書き手を `_require_trusted_writer` で確かめてから、記録の PR へ訂正の記録を 1 件書く。書いたコメントの URL を返す |
 | `_landed_commit` | `release/record.py` | 新設 | `_landed_commit(hub: GitHub, number: int, production: str, production_sha: str \| None) -> tuple[Pull, str]` | 確かめ 1。`released` の着地の部分を使い、head の名前を問わずに反映したコミットを返す |
 | `_changed_paths` | `release/record.py` | 新設 | `_changed_paths(repo_git: Git, pull: Pull, commit: str, push: Push) -> tuple[frozenset[str], frozenset[str]]` | 「対象を決める変更の範囲」の 2 つの差分（`git diff --name-only --no-renames`、起動 2 回） |
 | `_find_push` | `release/record.py` | 新設 | `_find_push(hub: GitHub, repo_git: Git, production: str, commit: str, known: Push \| None) -> Push` | 既存の記録の `push` があれば使い、無ければ `git rev-list --first-parent`（起動 1 回）と `branch_activity` で決める |
@@ -379,6 +379,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_write_one` | 並行した書き込みに負けた | 手順 2 で正の `targets` か、値とコミットの対応が自分と違う | 読み直し | 自分のコメントを消して止める | `precondition`（3）。正の一覧か既にある値を載せる | 正しい引数で打ち直せる |
 | `_candidates`・`read_release` | 権限を照会できない | 403・404（上限でない） | `GitHub.permission_strict` | 止める（`PermissionUnknown`） | `failed`。照会できなかった書き手の名前を載せる | 閉じる手順は課題を閉じずに「失敗」と報告する |
 | `correct_targets` | 訂正できない | 宣言がある・同じ値の信用する記録が無い・引数の組の誤り | `correct_targets` | 止める | `precondition`（3） | 先に `record` を打つか、引数を直す |
+| `correct_targets` | 書く token が信用されない | 書く token の書き手が write 以上の権限を持たない | `_require_trusted_writer` | 止める（`RecordError`） | `precondition`（3）。今の `record` と同じ文 | 何も書いていない。利用者の token で打ち直す |
 | `write_verification` | 書けない | `environments` が無い、反映の記録が無い配布先、記録の PR でない、不合格の組に `retest_reason` が無い | `write_verification` | 止める（`RecordError`・`RecordElsewhere`） | `precondition`（3）。記録の PR の番号か不合格の組を `items` に入れる | 直して打ち直せる |
 
 ### 並行と排他
@@ -417,7 +418,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | --- | --- | --- | --- |
 | `_command_result` | 終了コード 0 で成功、1 で失敗 | 75 で未完了、それ以外で未確定 | 時間の上限で未確定（実行するのは偽の `subprocess.run`。子のプロセスを起動しない） |
 | `write_unversioned` | 含めた PR の各々へ書き、作業の PR が無ければ本番の PR へ書く | 同じ引数の打ち直しで CD を照会しない。2 つの配布先の一方だけ完了で `recorded` と `pending` に分ける。並行した同じ引数の 2 回で記録が 1 件に戻る | 確かめ 0〜6 の各行で何も書かない。すべて未確定で `precondition`、書けた配布先が無く失敗があれば `refused` |
-| `correct_targets` | 訂正の記録を足し、前の記録を消さない | 訂正の後、新しい一覧で打ち直した配布先では前のテストの記録が判定に使われる | 宣言がある・記録が無い値で止まる |
+| `correct_targets` | 訂正の記録を足し、前の記録を消さない | 訂正の後、新しい一覧で打ち直した配布先では前のテストの記録が判定に使われる | 宣言がある・記録が無い値で止まる。信用されない token では書かない |
 | `read_release` | `--version` の値の記録を代表にし、`--unit` の単位だけを使う。同じ記録が 2 件残っていても 1 件として数える | 正と違う記録が最後にあっても正の記録が代表。別のリリースの記録の書き手の照会が 403 でも読める | 候補の書き手の照会が 403 で失敗。`read` の書き手の本文は `trusted` が偽 |
 | `_candidates` | 信用したリリース記録のコミットの訂正を残す | 信用されない書き手のリリース記録にだけ対応する訂正は、書き手を照会せずに除く（照会が 403 でも止まらない） | 信用したリリース記録のコミットの訂正の書き手が 403 で `PermissionUnknown` |
 | `pr_body_only` | その PR の本文だけを返す | 別のリリース記録を持つ PR | — |
