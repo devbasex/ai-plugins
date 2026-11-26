@@ -46,7 +46,9 @@ AI が決める例:
 ## 質問の前に調べること
 
 `AskUserQuestion` の直前に、hook の guard `reading-check` が、読み手役が確認した記録（`ndf records reading add` の記録）を調べる。
-文の良し悪しは判定しない。記録を作る手順は [approval-request.md の「読み手役の確認」](approval-request.md#読み手役の確認) にある。
+文の良し悪しは判定しない。記録は、承認ゲートの質問では `ndf document-rebuild gate`（工程の読み手役のステップか、工程の外の承認では質問を出す AI が打つ）が、判断の質問では質問を出す AI が
+作る（[approval-request.md の「読み手役の確認」](approval-request.md#読み手役の確認)）。承認ゲートの質問が止められたら、`ndf records reading check --gate` で
+確かめ、合わなければ `ndf progress reread` か `ndf document-rebuild gate` を打ち直す。質問の文を直して出し直さない。
 
 | 区分 | hook が調べること |
 | --- | --- |

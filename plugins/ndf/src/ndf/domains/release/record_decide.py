@@ -205,6 +205,17 @@ def approved_included(commits: Sequence[Mapping[str, Any]], head: str) -> list[i
     return included_from_message(message) if message is not None else None
 
 
+def subjects_after_approved(commits: Sequence[Mapping[str, Any]], head: str) -> list[str] | None:
+    """組み立てのリリースのコミット（`_approved_message`）より後に first-parent へ積んだコミットの件名（新しい順）。
+    「含む PR」の行を持つコミットが無ければ None。"""
+    out: list[str] = []
+    for message in _first_parent_messages(commits, head):
+        if included_from_message(message) is not None:
+            return out
+        out.append(message.partition("\n")[0])
+    return None
+
+
 def approved_units(commits: Sequence[Mapping[str, Any]], head: str) -> list[tuple[str, str, tuple[int, ...]]]:
     """組み立てのリリースのコミット（`_approved_message`）の単位ごとの行。無ければ空（単位が 1 つ・行の無いコミット）。"""
     message = _approved_message(commits, head)

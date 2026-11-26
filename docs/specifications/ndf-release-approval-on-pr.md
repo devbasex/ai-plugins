@@ -172,7 +172,8 @@ CD のある場合（`cd-no-review`・`cd-review`）の検査のプランは、�
 ```
 
 - 印 `<!-- ndf:release-approval -->` を持つコメントだけを証跡として読む。`承認したコミット:` の行の 40 桁の 16 進が 0 か 2 つ以上なら数えない
-- `担い手:`（`user` か `mvv`）は MVV 判定で通したかを後から読むための記述で、判定に使わない
+- `担い手:`（`user` か `mvv`）は MVV 判定で通したかを後から読むための記述で、10 系では判定に使わなかった
+- `ndf release-steps` の判定は担当と承認資料の SHA-256 の行を読む。提示と回答の書式と判定の規則は [ndf-reading-check-before-approval-gate.md の「会話のセッションのリリースの証跡」](ndf-reading-check-before-approval-gate.md#会話のセッションのリリースの証跡) が扱う
 - 承認資料のコメントは別の印 `<!-- ndf:release-approval-request -->` と `先端のコミット:` の行を持ち、証跡に数えない
 - 承認をやり直すときは、編集せずに新しい証跡を置く
 

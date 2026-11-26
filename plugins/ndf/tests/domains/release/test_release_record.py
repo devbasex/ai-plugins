@@ -77,6 +77,12 @@ def test_records_read_the_trailer_below_fix_commits() -> None:
     ]
     made, _ = record.write(hub, RELEASE, "main")
     assert made.included == (3, 11)
+    # #4446: 承認資料を取り直すときの含む PR も同じ行の番号で、行に無い PR が後から積まれていれば止まる
+    formats = names_decide.NameFormats(None)
+    assert record.pinned_included(hub, RELEASE, "main", formats) == [3, 11]
+    hub.commits_of["r" * 40][0] = _commit("r" * 40, "fix: 直し (#77)", "q" * 40)
+    with pytest.raises(record.RecordError, match="#77"):
+        record.pinned_included(hub, RELEASE, "main", formats)
 
 
 def _closed_by_squash(message: str, status: str = "behind", tree: str = "t1") -> FakeHub:

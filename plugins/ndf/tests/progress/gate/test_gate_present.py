@@ -60,28 +60,44 @@ def _hub(head, text=None):
     config = text if text is not None else json.dumps({"branch_strategy": {"branches": {"base": "develop", "production": "main"}}})
     return SimpleNamespace(
         repo="o/r",
-        pull=lambda n: SimpleNamespace(head_sha=head, base_ref="develop", number=n),
+        pull=lambda n: SimpleNamespace(head_sha=head, base_ref="develop", number=n, body="本文", title="題"),
         branch_file=lambda base, path: FileAt("o/r", config, "c1"),
     )
 
 
-def _answered(st, tid, head):
-    q = gate.waiting(run.read(st, tid))
-    assert q is not None
-    gate.answer(st, tid, gate.Answer(q.id, "approved", "見た", BY, "k-1", seen=gate.Target(head=head)))
-    return q
+def _readings(st, tid) -> int:
+    """設計の工程で読み手役のステップが済んだ回数（未了に戻した後に打ち直すと増える）。"""
+    events = run.read(st, tid).events
+    done = [e for e in events if e.draft.kind == "step_recorded" and e.draft.payload["status"] == "finished"]
+    return sum(1 for e in done if e.draft.payload["step"] == "design-reading")
 
 
-def test_an_answer_whose_target_moved_before_it_is_read_goes_back_to_waiting(st, new_table, flow):
+@pytest.mark.parametrize(
+    "now",
+    [
+        gate.Target("h2", body="b1", title="t1"),  # head が動いた
+        gate.Target("h1", body="b2", title="t1"),  # 本文だけが変わった（#4446）
+        gate.Target("h1", body="b1", title="t2"),  # 題だけが変わった（#4446）
+    ],
+)
+def test_an_answer_whose_target_moved_before_it_is_read_goes_back_to_waiting(st, new_table, flow, now):
     tid = new_table()
     flow.turn(tid)
-    old = _answered(st, tid, "h1")
-    assert gate.recheck(st, tid, lambda q, **_: gate.Target(head="h1")) is None
+    q = gate.waiting(run.read(st, tid))
+    assert q is not None and _readings(st, tid) == 1
+    seen = gate.Target("h1", body="b1", title="t1")
+    gate.answer(st, tid, gate.Answer(q.id, "approved", "見た", BY, "k-1", seen=seen))
+    assert gate.recheck(st, tid, lambda _q, **_: seen) is None
     assert run.decide(run.read(st, tid)).action == run.Action.CONSUME
-    why = gate.recheck(st, tid, lambda q, **_: gate.Target(head="h2"))
-    assert why is not None and "h2" in why
+    why = gate.recheck(st, tid, lambda _q, **_: now)
+    assert why is not None and "見た値" in why
+    # #4446: 待ちへ戻すときに同じトランザクションで読み手役のステップを未了に戻し、次の駆動が今の対象で打ち直してから待つ
+    assert "design-reading" not in run.step_progress(run.read(st, tid), "設計").done
+    flow.turn(tid)
     new = gate.waiting(run.read(st, tid))
-    assert new is not None and new.id != old.id and new.stage == "設計"
+    assert new is not None and new.id != q.id and new.stage == "設計" and _readings(st, tid) == 2
+    # MVV 判定で省いた回答は head だけを見るので、本文と題の値が無い見た対象は本文と題で断らない
+    assert now.differs(gate.Target(now.head)) == []
 
 
 def test_the_design_gate_asks_about_the_design_pr_of_the_finished_step(st, repo, new_table, flow):
@@ -99,7 +115,9 @@ def test_github_observe_reads_the_head_and_refuses_when_it_cannot(st, repo, new_
     flow.turn(tid)
     q = gate.waiting(run.read(st, tid))
     assert q is not None and q.pr == 7
-    assert gate.github_observe(repo, st.root, lambda: _hub("abc"))(q) == gate.Target("abc", None, "o/r", 7, "develop", False)
+    # 同じ 1 回の取得で本文と題の sha256 も読む（#4446）
+    texts = {"body": gate.text_sha256("本文"), "title": gate.text_sha256("題")}
+    assert gate.github_observe(repo, st.root, lambda: _hub("abc"))(q) == gate.Target("abc", None, "o/r", 7, "develop", False, **texts)
     # マージ先が本番チャネルで設定を読めなければ、本番へ反映され得るとして読む（#4409）
     assert gate.github_observe(repo, st.root, lambda: _hub("abc", "壊れた"))(q).production is True
 

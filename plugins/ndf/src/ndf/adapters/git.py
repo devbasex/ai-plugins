@@ -33,6 +33,8 @@ _URL_QUERY = re.compile(r"(://[^\s?#]*[?#])\S+")
 # `git log --format` で各コミットの行の先頭に置くマーカー（差分の統計の行と見分ける）
 _COMMIT_MARK = "@"
 # ブランチの参照の接頭辞（`git worktree list --porcelain` の branch の行）
+# Git のツリーで通常のファイルを表すモード（実行できるファイルを含む）
+REGULAR_MODES = ("100644", "100755")
 HEADS = "refs/heads/"
 # タグの参照の接頭辞
 TAGS = "refs/tags/"

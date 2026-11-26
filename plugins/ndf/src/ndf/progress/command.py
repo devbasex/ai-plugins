@@ -868,6 +868,9 @@ def parser() -> argparse.ArgumentParser:
     )
     gathered.add_argument("--branch", help="スプリントブランチ（省けば worktree のブランチ）")
     gathered.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
+    sub.add_parser("reread", help="承認の前の確認をやり直し、承認ゲートの待ちを出し直す").add_argument(
+        "machine_id"
+    )  # 受けるのは gate.entry
     add_cwd(sub.choices.values())
     return ap
 

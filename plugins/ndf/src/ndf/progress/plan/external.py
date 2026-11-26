@@ -73,8 +73,10 @@ def request_body(fields: Mapping[str, Any], ndf_version: str) -> dict[str, Any]:
 
 
 def _same_body(path: Path, body: Mapping[str, Any]) -> bool:
+    """既にあるリクエストと中身が同じか。書いた時刻（`at`）は打ち直すたびに変わるので比べない。"""
     try:
-        return bool(json.loads(path.read_text(encoding="utf-8")) == dict(body))
+        held = json.loads(path.read_text(encoding="utf-8"))
+        return isinstance(held, dict) and {**held, "at": None} == {**body, "at": None}
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない既存のリクエストは別の中身として断る
         return False
 

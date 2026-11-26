@@ -51,6 +51,8 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `project-measured` | `measured` state:measured | `<repo>/project.json` | measured | — | 解析とテストの実行（M7） | replaced | 内部（予告なく変えてよい） |
 | `projects` | `ndf` repo:.ndf | `projects.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `reading-checks` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `reading-checks.jsonl` | record | — | 読み手役が確認した記録（#4285） | kept | 内部（予告なく変えてよい） |
+| `reading-docs` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `reading-docs.jsonl` | record | — | 読み手役に読ませたものの記録（#4446） | kept | 内部（予告なく変えてよい） |
+| `reading-materials` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `reading-materials/<repo>/<gate>-<n>.md` | record | — | 読み手役に読ませた承認資料のコピー（#4446。PR ごとに最後の 1 つ） | cleanup | 内部（予告なく変えてよい） |
 | `relay-auth-held` | `relay-accounts` state:relay/accounts | `held.json` | measured | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |
 | `relay-busy` | `relay-wrappers` state:relay/wrappers | `<名前>/busy-<起動>.json` | exchange | — | 子の会話の SessionStart・PreToolUse・Stop の hook（M3a）。中継のラッパーはほかの起動のものを消す | run | 内部（予告なく変えてよい） |
 | `relay-cache-log` | `relay-wrappers` state:relay/wrappers | `<名前>/cache-log.jsonl` | record | — | 子の会話の Stop の起床の hook と UserPromptSubmit の guard（#4068） | cleanup | 内部（予告なく変えてよい） |

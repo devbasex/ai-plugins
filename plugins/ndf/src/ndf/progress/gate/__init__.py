@@ -34,6 +34,7 @@ from ndf.progress.gate.answering import (
     no_observe,
     no_post,
     recheck,
+    reread,
     seen_material,
 )
 from ndf.progress.gate.asking import (
@@ -54,6 +55,7 @@ from ndf.progress.gate.asking import (
     question_id,
     request_id,
     routes,
+    text_sha256,
     unconfirmed,
     waiting,
     write_material,
@@ -131,6 +133,7 @@ __all__ = [
     "question_id",
     "recheck",
     "record_answer",
+    "reread",
     "refusals",
     "rejection_row",
     "rejections",
@@ -141,6 +144,7 @@ __all__ = [
     "sections",
     "seen_material",
     "take_reply",
+    "text_sha256",
     "unconfirmed",
     "waiting",
     "well_formed",

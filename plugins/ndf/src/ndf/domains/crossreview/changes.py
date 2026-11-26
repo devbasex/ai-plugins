@@ -38,7 +38,7 @@ def _regular_blobs(g: git.Git, paths: Sequence[str]) -> dict[str, str]:
             continue
         meta, path = entry.split("\t", 1)
         mode, kind, oid = meta.split()
-        if kind == "blob" and mode in settings.REGULAR_MODES:
+        if kind == "blob" and mode in git.REGULAR_MODES:
             out[path] = oid
     return out
 
