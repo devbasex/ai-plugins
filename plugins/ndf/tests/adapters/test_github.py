@@ -72,6 +72,16 @@ def test_merge_resolves_short_expected_head_and_sends_full_sha() -> None:
     assert json.loads(server.sent("PUT")[0].content) == {"sha": HEAD, "merge_method": "squash"}
 
 
+def test_merge_returns_the_merge_commit_from_the_response() -> None:
+    # #4369: 単位を流す処理は、マージの応答のマージコミットで履歴を照合する（問い合わせを増やさない）
+    landed = "c" * 40
+    server = Server({
+        ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
+        ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(200, json={"merged": True, "sha": landed})],
+    })  # fmt: skip
+    assert _hub(server).merge(7).merge_sha == landed
+
+
 def test_merge_refuses_moved_head_without_sending_merge() -> None:
     server = Server({("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())]})
     out = _hub(server).merge(7, expect_head="deadbeef1")
@@ -874,6 +884,16 @@ def test_merge_as_admin_sends_merge_pull_request_with_the_head(method: str | Non
     assert "pullRequest(number: $number) { id }" in first["query"]
     assert "mergePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: $method})" in second["query"]
     assert second["variables"] == {"id": "PR_1", "head": HEAD, "method": chosen}
+
+
+def test_merge_as_admin_returns_the_merge_commit_from_the_mutation() -> None:
+    landed = {"data": {"mergePullRequest": {"pullRequest": {"merged": True, "mergeCommit": {"oid": "d" * 40}}}}}
+    server = Server({
+        _PULL_PATH: [httpx.Response(200, json=_pull())],
+        ("POST", "/graphql"): [httpx.Response(200, json=_PULL_ID_ANSWER), httpx.Response(200, json=landed)],
+    })  # fmt: skip
+    assert _hub(server).merge_as_admin(7, HEAD).merge_sha == "d" * 40
+    assert "mergeCommit { oid }" in _graphql_sent(server)[1]["query"]
 
 
 @pytest.mark.parametrize(

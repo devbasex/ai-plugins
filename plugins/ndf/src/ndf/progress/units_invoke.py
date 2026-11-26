@@ -40,9 +40,11 @@ from ndf.progress.issue_values import UNITS_DIR, UNITS_FILE
 from ndf.progress.plan_runs import StageResult, StageRun, UnitsStopped
 from ndf.testing import scoped
 
-# 単位の回の保存先のファイル（`reviewed-head` は `impl` のプラン、`stopped-head` と `merge.json` は単位を流す処理が書く）
+# 単位の回の保存先のファイル（`reviewed-head` は `impl` のプラン、`stopped-head`・`base-head`・`merge.json` は単位を流す処理が書く）。
+# `base-head` は、その回の実装の前に単位の作業場所が取り込んだスプリントブランチの HEAD（スプリントの PR の前の照合に使う）
 REVIEWED_HEAD_FILE = "reviewed-head"
 STOPPED_HEAD_FILE = "stopped-head"
+BASE_HEAD_FILE = "base-head"
 MERGE_FILE = "merge.json"
 # 打ち直しの判定の、レビューのステップ（ほかのステップと停止理由の語は `resume_of` が持つ。定数にすると同じ語の別の事実と重なる）
 REVIEW_STEPS = frozenset({"review", "review-delta", "resolved"})
@@ -344,6 +346,15 @@ def _own_records(round_dir: Path) -> tuple[Optional[str], Optional[str]]:
     return (kind if isinstance(kind, str) else None), (stopped.strip() if stopped is not None else None)
 
 
+def _saved_base(round_dir: Path) -> Optional[str]:
+    """この処理が書いた `base-head` の値（呼んだ利用者が持ち、ほかが書き込めないものだけを読む）。無ければ None。"""
+    if not round_dir.is_dir():
+        return None
+    with worker_paths.open_or_create(round_dir) as wd:
+        held = worker_paths.read_file(wd, BASE_HEAD_FILE, owned=True)
+    return held.strip() if held is not None else None
+
+
 def _write_record(round_dir: Path, name: str, text: str) -> None:
     """回の保存先へ記録を書く。既存のファイルを開いて切り詰めず、ほかの利用者が名前を差し替えられない保存先にだけ書く。"""
     with worker_paths.open_or_create(round_dir) as wd:
@@ -407,8 +418,9 @@ def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optiona
 
     並びは `units.json` から読み、無ければ `prepare` で作る。マージ済みの単位は開始時に 1 回読んだ一覧で飛ばす（`already_merged`）。
     単位が止まれば後の単位を始めず、止まった単位の名前・課題・PR の番号・理由を結果に持たせる（受け入れ条件 5）。
-    スプリントの作業場所は、スプリントの PR を開く直前に最後の単位の PR のマージコミットまで進める。前の実行でマージされた単位
-    （マージキューの待ちで止まった後にマージされたもの、マージの後の取得に失敗したもの）も、打ち直しで同じように進む。
+    スプリントの作業場所は、スプリントの PR を開く直前に、単位のマージ結果だけでできたリモートの履歴まで進める（`sprint_pr`）。
+    前の実行でマージされた単位（マージキューの待ちで止まった後にマージされたものなど）も、打ち直しで同じように照合して進む。
+    マージコミットは、開始時にマージ済みの単位は開始時の一覧から、この実行でマージした単位は `ndf ci merge` の結果から得る。
     """
     held = plan_files.read_json(work_dir / UNITS_FILE)
     found = _held_lineup(held) if held is not None else prepare(run, work_dir, cwd)
@@ -420,27 +432,23 @@ def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optiona
     hub = github.GitHub(ctx.repo, github.client())
     merged = github_pulls.merged_pulls(hub, [b for _, b in pairs], ctx.branch)
     items: list[dict[str, Any]] = []
+    landed: dict[str, str] = {}
     for unit, branch in pairs:
         if branch in merged:
             items.append(_unit_item(unit, merged[branch].number, "already_merged"))
+            landed[branch] = merged[branch].merge_sha
             continue
         try:
-            items.append(_one_unit(ctx, unit, branch, ports))
+            item, landed[branch] = _one_unit(ctx, unit, branch, ports)
         except UnitsStopped as exc:
             return _unit_stopped(ctx, items, unit, branch, exc)
-    last = pairs[-1][1] if pairs else None
-    landed = merged.get(last) if last is not None and last in merged else _landed(hub, ctx, last)
-    return _after_units(ctx, items, ports, landed)
-
-
-def _landed(hub: github.GitHub, ctx: Context, branch: Optional[str]) -> Optional[github_pulls.MergedPull]:
-    """この実行でマージした最後の単位の PR（マージコミットを持つ）。単位が無ければ None。"""
-    if branch is None:
-        return None
-    found = github_pulls.merged_pulls(hub, [branch], ctx.branch)
-    if branch not in found:
-        raise UnitsStopped("precondition", f"単位のブランチ {branch} の、{ctx.branch} へマージ済みの PR を GitHub から読めない")
-    return found[branch]
+        items.append(item)
+    unknown = [b for _, b in pairs if not landed[b]]
+    if unknown:
+        # GitHub がマージの応答でマージコミットを返さなかったときだけ読み直す（通常の経路では問い合わせを増やさない）
+        again = github_pulls.merged_pulls(hub, unknown, ctx.branch)
+        landed.update({b: again[b].merge_sha for b in unknown if b in again})
+    return _after_units(ctx, items, ports, [(b, landed[b]) for _, b in pairs])
 
 
 def _held_lineup(held: Mapping[str, Any]) -> Optional[Lineup]:
@@ -483,25 +491,27 @@ def _unit_item(unit: Unit, pr: Optional[int], status: str) -> dict[str, Any]:
     return {"kind": "unit", "name": unit.name, "issue": unit.issue, "pr": pr, "status": status}
 
 
-def _one_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> dict[str, Any]:
+def _one_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> tuple[dict[str, Any], str]:
     """単位 1 つを、作業場所の用意 → 打ち直しの判定 → スプリントブランチの HEAD のマージ → `impl` → マージの順に流す。
 
     マージだけを打ち直す判定はスプリントブランチをマージする前の HEAD で行う（マージするとレビューした HEAD と合わなくなる）。
+    返すのは単位の項目と、マージで入ったコミット（`ndf ci merge` が返さなければ空）。
     """
     worktree = unit_worktree(ctx, branch, ports)
     state = round_state(ctx.work_dir / UNITS_DIR / branch)
     g = Git(worktree)
     round_dir = state.round_dir
     if resume_of(state, g.rev_parse("HEAD"), ctx.local_tests).action != "merge":
-        include_sprint(ctx, worktree)
+        base = include_sprint(ctx, worktree)
         resume = resume_of(state, g.rev_parse("HEAD"), ctx.local_tests)
         round_dir = _next_round(state) if resume.new_round else state.round_dir
+        _write_record(round_dir, BASE_HEAD_FILE, base + "\n")
         got = ports.call_plan(unit_run(ctx, unit, worktree, round_dir, resume.start), round_dir)
         _write_record(round_dir, STOPPED_HEAD_FILE, g.rev_parse("HEAD") + "\n")
         if got.status != result.OK:
             raise _unit_stop_of(got.report, "impl が止まった", _ci_note(ctx, got.report))
-    merge_unit(ctx, branch, worktree, round_dir, ports)
-    return _unit_item(unit, _pr_number(round_dir), "merged")
+    landed = merge_unit(ctx, branch, worktree, round_dir, ports)
+    return _unit_item(unit, _pr_number(round_dir), "merged"), landed
 
 
 def _next_round(state: RoundState) -> Path:
@@ -545,7 +555,7 @@ def _unit_stopped(ctx: Context, items: list[dict[str, Any]], unit: Unit, branch:
     return StageResult(report, {})
 
 
-def _after_units(ctx: Context, items: list[dict[str, Any]], ports: Ports, landed: Optional[github_pulls.MergedPull]) -> StageResult:
+def _after_units(ctx: Context, items: list[dict[str, Any]], ports: Ports, landed: Sequence[tuple[str, str]]) -> StageResult:
     """すべての単位がマージ済みになった後に、スプリントの PR を開いた結果。開けなければ止まった単位を持たない `stopped`。"""
     metrics = {"unit_ci": ctx.unit_ci}
     try:
@@ -626,20 +636,21 @@ def _check_clean(path: Path) -> None:
         raise UnitsStopped("precondition", f"単位の作業場所 {path} に{what}がある。コミットするか取り消してから打ち直す")
 
 
-def include_sprint(ctx: Context, worktree: Path) -> None:
-    """単位の作業場所がスプリントブランチの HEAD（取得済み）を含まなければ `git merge --no-edit` でマージする（I3）。
+def include_sprint(ctx: Context, worktree: Path) -> str:
+    """単位の作業場所がスプリントブランチの HEAD（取得済み）を含まなければ `git merge --no-edit` でマージし、その HEAD を返す（I3）。
 
     衝突すれば、この関数が始めたマージだけを取り消して止める（呼ぶ前からあるマージは `unit_worktree` が先に止める）。
     """
     g = Git(worktree)
     tip = g.rev_parse(f"refs/remotes/{ctx.remote}/{ctx.branch}")
     if g.is_ancestor(tip, "HEAD"):
-        return
+        return tip
     done = g.attempt("merge", "--no-edit", "-q", tip)
     if done.returncode != 0:
         g.attempt("merge", "--abort")
         detail = f"{ctx.branch} の HEAD をマージすると衝突するので、そのマージを取り消した: {mask_urls(done.stderr.strip() or done.stdout.strip())}"
         raise UnitsStopped("base_conflict", detail)
+    return tip
 
 
 def unit_run(ctx: Context, unit: Unit, worktree: Path, round_dir: Path, start: Optional[str]) -> StageRun:
@@ -693,8 +704,8 @@ def _write_unit_file(round_dir: Path, unit: Unit) -> Path:
         return wd.path / UNIT_FILE
 
 
-def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports: Ports) -> dict[str, Any]:
-    """`ndf ci merge` で単位の PR をマージし、結果の種類を `merge.json` に残す。
+def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports: Ports) -> str:
+    """`ndf ci merge` で単位の PR をマージし、結果の種類を `merge.json` に残して、マージで入ったコミット（返されなければ空）を返す。
 
     PR の番号とレビューした HEAD は、同じ回の保存先から読む。どちらかが無ければマージを打たずに止める。
     スプリントの作業場所はここでは進めない（次の単位の作業場所はリモートのスプリントブランチから切る。進めるのは `sprint_pr`）。
@@ -714,51 +725,78 @@ def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports
         raise UnitsStopped("bad_report", f"ndf ci merge が結果 JSON を返さない（終了コード {done.returncode}）")
     if not ok:
         raise _unit_stop_of(report, f"PR #{number} をマージできない")
-    return report
+    rows = report["items"] if isinstance(report.get("items"), list) else []
+    sha = next((r.get("merge_sha") for r in rows if isinstance(r, Mapping) and r.get("kind") == "pr"), None)
+    return sha if isinstance(sha, str) else ""
 
 
-def sprint_pr(ctx: Context, ports: Ports, landed: Optional[github_pulls.MergedPull]) -> StageResult:
-    """スプリントの作業場所を最後の単位のマージコミット（`landed`）まで進め、リモートのスプリントブランチの HEAD と同じことを
-    確かめてから、テンプレート `pr` を push のステップなしで流す。
+def sprint_pr(ctx: Context, ports: Ports, landed: Sequence[tuple[str, str]]) -> StageResult:
+    """スプリントの作業場所をリモートのスプリントブランチの HEAD へ揃えてから、テンプレート `pr` を push のステップなしで流す。
 
-    進めるのは、自分でマージした単位の結果までである。リモートの HEAD がそれと違えば、マージも push もせずに止める。
-    違うコミットは単位のレビューを経ていないので、利用者が確かめてから打ち直す。
+    `landed` は表の順の（単位のブランチ, マージで入ったコミット）。手元から進めてよいのは、リモートの履歴が単位のレビューを経た
+    マージ結果だけでできていると確かめられたときである（`_take_unit_merges`）。確かめられなければ、手元を動かさずに止める。
     """
     g = Git(ctx.sprint)
-    tip = _fetch_sprint(g, ctx)
-    head = _catch_up_to(g, ctx, landed)
-    if tip != head:
-        detail = (
-            f"{ctx.remote} の {ctx.branch} の HEAD（{tip}）がスプリントの作業場所の HEAD（{head}）と違う。"
-            f"リモートにだけあるコミットは {head}..{tip}、手元にだけあるコミットは {tip}..{head} である。"
-            "その変更をスプリントの PR に含めてよいと確かめてから ndf progress next を打ち直す"
-        )
-        raise UnitsStopped("precondition", detail)
+    _take_unit_merges(g, ctx, _fetch_sprint(g, ctx), landed)
     t = route.templates()["pr"]
     template = replace(t, plan=route.without_steps(route.expanded(t), SPRINT_PR_DROP))
     run = replace(ctx.run.plain(), name=t.name, template=template, overrides={"remote": ctx.remote}, env_extra={GH_REPO_ENV: ctx.repo})
     return ports.call_plan(run, ctx.work_dir / SPRINT_PR_DIR)
 
 
-def _catch_up_to(g: Git, ctx: Context, landed: Optional[github_pulls.MergedPull]) -> str:
-    """スプリントの作業場所が単位のマージコミットの祖先なら、そこまで fast-forward で進め、進めた後の HEAD を返す。
+def _take_unit_merges(g: Git, ctx: Context, tip: str, landed: Sequence[tuple[str, str]]) -> None:
+    """手元の HEAD からリモートの HEAD（`tip`）までが、単位のレビューを経たマージ結果だけでできていれば、手元を `tip` へ進める。
 
-    マージコミットを手元で読めないか、手元がその祖先でなければ進めない（違いは呼び手が利用者に知らせる）。進める直前に、
-    作業場所が今もスプリントブランチにいることを確かめる（別のブランチをスプリントのマージ結果まで進めない）。
+    手元の HEAD から始め、手元にまだ無い単位のマージを表の順にたどる。単位ごとに、実装の前に取り込んだスプリントブランチの HEAD
+    （`base-head`）が直前の点と同じで、マージで入ったコミットのツリーがレビューした HEAD のツリーと同じことを確かめる。こう確かめると、
+    マージの方式（squash・merge commit・rebase）によらず、単位のマージの間に入った別の変更を見つけられる。最後の点が `tip` と
+    違うか、どれかの単位を確かめられなければ、手元を動かさずに止める。手元の HEAD に入っているコミットは確かめ済みとして扱う
+    （利用者が確かめて取り込んだものを含む）。
     """
     head = g.rev_parse("HEAD")
-    if landed is None:
-        return head
-    sha = landed.merge_sha
-    if not sha or sha == head or g.commit_or_none(sha) is None or not g.is_ancestor(head, sha):
-        return head
+    if head == tip:
+        return
+    if not g.is_ancestor(head, tip):
+        detail = (
+            f"{ctx.remote} の {ctx.branch} の HEAD（{tip}）がスプリントの作業場所の HEAD（{head}）と違う。"
+            f"リモートにだけあるコミットは {head}..{tip}、手元にだけあるコミットは {tip}..{head} である。"
+            "手元とリモートを揃え、その変更をスプリントの PR に含めてよいと確かめてから ndf progress next を打ち直す"
+        )
+        raise UnitsStopped("precondition", detail)
+    point = head
+    for branch, sha in landed:
+        if sha and g.commit_or_none(sha) is not None and g.is_ancestor(sha, point):
+            continue
+        if not _reviewed_merge(g, ctx, branch, sha, point):
+            raise _unreviewed(ctx, point, tip)
+        point = sha
+    if point != tip:
+        raise _unreviewed(ctx, point, tip)
     current = _current_branch(g)
     if current != ctx.branch:
         detail = f"スプリントの作業場所のブランチ {current or '（ブランチに居ない）'} が {ctx.branch} と違う。{ctx.branch} へ切り替えてから打ち直す"
         raise UnitsStopped("precondition", detail)
-    moved = g.merge_ff(sha)
+    moved = g.merge_ff(tip)
     if moved.returncode != 0:
-        raise UnitsStopped(
-            "precondition", f"スプリントの作業場所を PR #{landed.number} のマージ結果へ進められない: {mask_urls(moved.stderr.strip())}"
-        )
-    return g.rev_parse("HEAD")
+        raise UnitsStopped("precondition", f"スプリントの作業場所を {ctx.branch} の HEAD へ進められない: {mask_urls(moved.stderr.strip())}")
+
+
+def _reviewed_merge(g: Git, ctx: Context, branch: str, sha: str, point: str) -> bool:
+    """単位のマージで入ったコミット `sha` が、`point` の上に単位のレビューを経た変更だけを足したものか。"""
+    state = round_state(ctx.work_dir / UNITS_DIR / branch)
+    reviewed, base = state.reviewed, _saved_base(state.round_dir)
+    if not sha or not reviewed or base != point:
+        return False
+    if g.commit_or_none(sha) is None or g.commit_or_none(reviewed) is None or not g.is_ancestor(point, sha):
+        return False
+    return g.attempt("diff", "--quiet", "--no-ext-diff", sha, reviewed, "--").returncode == 0
+
+
+def _unreviewed(ctx: Context, point: str, tip: str) -> UnitsStopped:
+    """単位のレビューを経たと確かめられないコミットがリモートにあるときの停止（手元は動かさない）。"""
+    detail = (
+        f"{ctx.remote} の {ctx.branch} に、単位の PR のレビューを経たと確かめられないコミット（{point}..{tip}）がある。"
+        f"その変更をスプリントの PR に含めてよければ、スプリントの作業場所 {ctx.sprint} で git merge --ff-only {tip} を打って"
+        "手元へ取り込んでから ndf progress next を打ち直す（手元へ取り込んだコミットは確かめ済みとして扱う）"
+    )
+    return UnitsStopped("precondition", detail)

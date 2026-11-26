@@ -80,6 +80,7 @@ class World:
         self.fail: dict[str, dict] = {}
         self.merge: list[dict] = []
         self.merged: dict[str, github_pulls.MergedPull] = {}
+        self.queries: list[list[str]] = []
 
     def stage_run(self) -> StageRun:
         stage = definition.load_definition("standard").stage("実装")
@@ -115,14 +116,25 @@ class World:
         flag = _flags(words)
         out = self.merge.pop(0) if self.merge else None
         if out is None:
-            self.land(cwd, flag["--branch"], int(flag["--pr"]))
-            out = result.result("ci", result.OK, "マージした", metrics={"merge": "merged"})
+            landed = self.land(cwd, flag["--branch"], int(flag["--pr"]))
+            item = {"kind": "pr", "number": landed.number, "merge_sha": landed.merge_sha}
+            out = result.result("ci", result.OK, "マージした", items=[item], metrics={"merge": "merged"})
         return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
 
-    def land(self, worktree: Path, branch: str, number: int) -> None:
+    def land(self, worktree: Path, branch: str, number: int) -> github_pulls.MergedPull:
         """単位の作業場所の HEAD をリモートのスプリントブランチへ送り、マージ済みの PR として残す（GitHub のマージの代わり）。"""
         _git(worktree, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
         self.merged[branch] = github_pulls.MergedPull(number, _git(worktree, "rev-parse", "HEAD"))
+        return self.merged[branch]
+
+    def push_other(self, message: str) -> None:
+        """単位の PR を経ないコミットを、別の作業場所からリモートのスプリントブランチへ送る。"""
+        other = self.tmp / "other"
+        if not other.exists():
+            subprocess.run(["git", "clone", "-q", "-b", BRANCH, str(self.remote), str(other)], check=True)
+        _git(other, "pull", "-q", "--ff-only")
+        _git(other, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", message)
+        _git(other, "push", "-q", "origin", "HEAD")
 
     def _create(self, branch: str, cwd: Path) -> subprocess.CompletedProcess[str]:
         path = self.tmp / "wt" / branch
@@ -165,7 +177,12 @@ def world(tmp_path, monkeypatch) -> World:
     monkeypatch.setattr(git.Git, "remote_repo", lambda self, remote=None: "o/r")
     monkeypatch.setattr(github, "GitHub", _Hub)
     monkeypatch.setattr(github, "client", lambda *a, **k: None)
-    monkeypatch.setattr(github_pulls, "merged_pulls", lambda hub, heads, base: {h: m for h, m in w.merged.items() if h in set(heads)})
+
+    def merged_pulls(hub, heads, base):
+        w.queries.append(list(heads))
+        return {h: m for h, m in w.merged.items() if h in set(heads)}
+
+    monkeypatch.setattr(github_pulls, "merged_pulls", merged_pulls)
     monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     return w
 
@@ -213,6 +230,8 @@ def test_units_run_in_order_on_their_own_branches_and_each_is_cut_after_the_prev
     assert pr.name == "pr" and pr_dir == world.work / units_invoke.SPRINT_PR_DIR
     assert {"push", "fix-push"}.isdisjoint(s["id"] for s in pr.template.plan["steps"]) and pr.env_extra == {"GH_REPO": "o/r"}
     assert _git(world.sprint, "rev-parse", "HEAD") == _git(world.sprint, "rev-parse", f"origin/{BRANCH}")
+    # マージ済みの PR は開始時に 1 回だけ読み、マージコミットは ndf ci merge の結果から得る
+    assert len(world.queries) == 1
 
 
 def test_the_ci_steps_are_dropped_when_the_unit_waits_for_no_checks(world):
@@ -297,6 +316,54 @@ def test_the_sprint_pr_is_not_opened_when_the_sprint_worktree_differs_from_the_r
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
     assert f"{tip}..{head}" in got.cause["detail"] and "ndf progress next" in got.cause["detail"]
     assert all(r.name != "pr" for r, _ in world.runs) and [i["status"] for i in got.report["items"]] == ["merged"] * 3
+
+
+def test_a_commit_outside_the_units_stops_before_the_sprint_pr_and_a_rerun_takes_it_once_taken_in(world, monkeypatch):
+    original = units_invoke.merge_unit
+
+    def with_another_change(ctx, branch, worktree, round_dir, ports):
+        landed = original(ctx, branch, worktree, round_dir, ports)
+        if branch == world.unit_names()["読み手"]:
+            world.push_other("単位の PR を経ない変更")
+        return landed
+
+    monkeypatch.setattr(units_invoke, "merge_unit", with_another_change)
+    start = _git(world.sprint, "rev-parse", "HEAD")
+
+    got = world.run()
+
+    tip = _git(world.sprint, "rev-parse", f"origin/{BRANCH}")
+    assert got.status == "stopped" and got.cause["kind"] == "precondition"
+    assert "レビューを経たと確かめられない" in got.cause["detail"] and f"git merge --ff-only {tip}" in got.cause["detail"]
+    assert all(r.name != "pr" for r, _ in world.runs) and [i["status"] for i in got.report["items"]] == ["merged"] * 3
+    # 止まる前に手元を進めない
+    assert _git(world.sprint, "rev-parse", "HEAD") == start
+    # 利用者が確かめて手元へ取り込めば、打ち直しでスプリントの PR へ進む
+    _git(world.sprint, "merge", "-q", "--ff-only", tip)
+    world.runs.clear()
+
+    again = world.run()
+
+    assert again.status == "ok", again.report
+    assert world.runs[-1][0].name == "pr" and world.impl_runs() == []
+
+
+def test_a_commit_after_the_last_unit_stops_without_moving_the_sprint_worktree(world, monkeypatch):
+    original = units_invoke.merge_unit
+
+    def with_a_later_change(ctx, branch, worktree, round_dir, ports):
+        landed = original(ctx, branch, worktree, round_dir, ports)
+        if branch == world.unit_names()["issue-4"]:
+            world.push_other("後から入った変更")
+        return landed
+
+    monkeypatch.setattr(units_invoke, "merge_unit", with_a_later_change)
+    start = _git(world.sprint, "rev-parse", "HEAD")
+
+    got = world.run()
+
+    assert got.status == "stopped" and "レビューを経たと確かめられない" in got.cause["detail"]
+    assert _git(world.sprint, "rev-parse", "HEAD") == start and all(r.name != "pr" for r, _ in world.runs)
 
 
 # --- 打ち直し（受け入れ条件 6） ---------------------------------------------------------------------
