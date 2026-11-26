@@ -58,7 +58,7 @@ src/ndf/
 | `contracts/schemas/internal/usage.schema.json` | 変更 | `name`・`session_seq`・`session_cost_usd` の欄 | — | スキーマ | — |
 | `contracts/schemas/io/launch-config.args.schema.json`・`launch-config.result.schema.json`・`docs/contracts/*.md` | 新設 / 変更 | 引数のスキーマと規約のページは生成し、結果のスキーマは手で書く | — | スキーマ | — |
 
-手順書の変更（`skills/launch-config/SKILL.md`・`skills/external-ai/`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md`・`skills/cross-review/SKILL.md`・`skills/worktree/references/ndf-settings.md`）は、「手順書」の節にまとめる。
+手順書の変更（`skills/launch-config/SKILL.md`・`skills/external-ai/`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md`・`skills/cross-review/SKILL.md`・`skills/worktree/references/ndf-settings.md`）は、「手順書」のセクションにまとめる。
 
 ## 起動の設定の読み取り
 
@@ -76,7 +76,7 @@ src/ndf/
 | `safety_args` | 同 | 新設 | `safety_args(runtime: str, use: str, cwd: Path) -> list[str]` | 設計書の「安全装置を外す指定」の表のとおりに引数を返す |
 
 - `Settings` は `root`・`permissions`（辞書。ファイルが無ければ空）を持つ。`StepSpec` は `load: tuple[str, ...]`・`allow: tuple[str, ...]`・`mcp: None | "inherit" | tuple[str, ...]`。`Target` は `sha256`・`listing`（サーバ名・コマンド名・定義ファイルの場所・ハッシュ・`load`・`allow`・`unsandboxed`）
-- `Grant` は `load`・`allow`・`inherit: bool`・`mcp_files: tuple[Path, ...]`・`sha256: Optional[str]` と、`verify() -> Optional[str]`（内容を読み直し、違うか取り消されていれば理由の 1 行）を持つ
+- `Grant` は `load`・`allow`・`inherit: bool`・`mcp_files: tuple[Path, ...]`・`sha256: Optional[str]` を持つ。`verify() -> Optional[str]` も持ち、内容を読み直して、違うか取り消されていれば理由の 1 行を返す
 - `prepared`
   - 事前条件: `cwd` は起動する作業場所。リポジトリの根は `git rev-parse --show-toplevel`、git の外は `cwd`
   - 事後条件: 指定が空（`load`・`allow`・`mcp` が無い）なら承認を調べず、`sha256` が None の `Grant` を返す。空でなければ承認済みのハッシュを持つ。抜けた後、コピーのディレクトリは無い
@@ -254,7 +254,7 @@ src/ndf/
 - `ClaudeCall` に `grant`（full 以外で渡すと `ValueError`）、`ClaudeReply` に `session_id`・`usage`・`model_usage`・`session_cost_usd`・`launched: bool`・`launched_at`・`seconds`・`earlier`、`LaunchOptions` に `verify: Optional[Callable[[], Optional[str]]]` を足す。どれも省略できる
 - `LaunchRecorder` は `record_cli(usage, meta)` を持つ
 - `report_launch`
-  - 事後条件: `launched` が偽の子（CLI が古い、枠が取れない、起動できない、照らし直しで停止）は行を渡さない。`launch_id` は子ごとに作る
+  - 事後条件: `launched` が偽の子（CLI が古い、同時起動のスロットが取れない、起動できない、照らし直しで停止）は行を渡さない。`launch_id` は子ごとに作る
   - 副作用: 差し込まれた書き込み処理の呼び出し
 
 ### 異常系の処理
@@ -354,7 +354,7 @@ src/ndf/
 | `_review_args` | 同 | 変更 | `_review_args(agent, row, worktree) -> tuple[str, ...]` | `{sandbox}` を上の値に広げる |
 | `_start` | `adapters/agents.py` | 変更 | 変えない | 相手役と修正担当の子の環境に `NDF_AI_CHILD=1` を足す |
 
-- `runtimes.json`: codex に `sandbox_needs_userns: true` と `delegate_sandbox_args: ["-s", "workspace-write"]`。kiro は `sandbox_args: ["--trust-tools=fs_read"]` を持たせて `review_args` の同じ値を `{sandbox}` にし、`unsandboxed_args: ["--trust-all-tools"]`。agy は `unsandboxed_args: ["--dangerously-skip-permissions"]`
+- `runtimes.json`: codex に `sandbox_needs_userns: true` と `delegate_sandbox_args: ["-s", "workspace-write"]`。kiro は `sandbox_args: ["--trust-tools=fs_read"]` を持たせ、`review_args` の同じ値を `{sandbox}` にする。kiro の `unsandboxed_args: ["--trust-all-tools"]`。agy は `unsandboxed_args: ["--dangerously-skip-permissions"]`
 - `_unread_hint`（`domains/crossreview/seats.py`）のサンドボックスの失敗の文は「NDF がサンドボックスを外して起動する」をやめ、`/ndf:launch-config` で承認する手順にする
 
 ### 異常系の処理

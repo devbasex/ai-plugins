@@ -92,7 +92,7 @@ src/ndf/
 | `compatibility_key` | 同 | 新設 | `compatibility_key(arms: Sequence, metric: str) -> str` | 選択肢の並びと指標のハッシュ |
 | `read_rows`・`append_row` | 同 | 新設 | `read_rows(path: Optional[Path] = None) -> list[dict]`・`append_row(row: Mapping) -> bool` | 実験の記録を読む・形を確かめて足す |
 
-- `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm` を持ち、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄）を返す
+- `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm` を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄）を返す
 - `pick`
   - 事前条件: `layer` は `worker`・`skill`・`judge`・`seat`
   - 事後条件: 引数か環境変数の指定が片方でもあれば割り付けず、無い側は基準の組の値。`unit` が無い場合、`enabled` が偽の場合、選択肢が 1 つの場合は、基準の組の値（出所は `base`、組が値を持たなければ `default`）で、割り付けの行を書かない。停止か固定で基準を使う単位に割り付けがあれば `halted` の行を足す。工程が無い組は引数を持たない
