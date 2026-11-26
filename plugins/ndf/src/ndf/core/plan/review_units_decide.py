@@ -2,8 +2,8 @@
 
 本文から単位の並びか、読めない理由を返す。ファイルも git も読まない。読み方は #4369 の設計書の「単位の表の読み方」と
 「順序」にあり、決めた形でない表は行を飛ばさず `UnitsUnreadable` で止める。実装計画の見出しの語もここが持つ。
-見出し・表の始まり・コードブロックは markdown-it-py で読む（判断のモジュールは `ndf.adapters.markdown` を読めない）。
-表は、セルを区切る `|` の無い行の手前で終える。単位の表で、その後ろに単位の行の形をした行が同じ表として続けば読めないとする。
+見出し・表の範囲・コードブロックは markdown-it-py で読む（判断のモジュールは `ndf.adapters.markdown` を読めない）。
+表の範囲は Markdown の表のままで、行を打ち切らず飛ばさない。表の後ろの本文は空行で区切る。
 """
 
 from __future__ import annotations
@@ -11,11 +11,9 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Mapping, Sequence
-from itertools import takewhile
 from typing import NamedTuple, Optional
 
 from markdown_it import MarkdownIt
-from markdown_it.token import Token
 
 from ndf.core.plan import inputs_decide
 
@@ -83,15 +81,10 @@ class _Heading(NamedTuple):
 
 
 class _Table(NamedTuple):
-    """表 1 つ。`rows` は (見出しの行, データ行...) のセル。
-
-    `stop` は `rows` の次の行の番号（1 始まり）。`rest` は、そこから後で Markdown が同じ表とする行のうち、`|` のある行のセル（インラインコードの中の `|` では分けない）。
-    """
+    """表 1 つ。`rows` は (見出しの行, データ行...) のセル。"""
 
     at: int
     rows: list[list[str]]
-    stop: int
-    rest: list[list[str]]
 
 
 class _Doc(NamedTuple):
@@ -110,42 +103,9 @@ class _Scope(NamedTuple):
     sprint: frozenset[int]
 
 
-def _inline(pieces: Sequence[str], references: Mapping) -> list[Token]:
-    """`|` で分けた区間をつないで markdown-it でインライン解析する。区切りだった所は NUL にして見分ける。"""
-    return _MARKDOWN.inline.parse("\0".join(pieces), _MARKDOWN, {"references": references}, [])
-
-
-def _cell_width(pieces: Sequence[str], references: Mapping) -> int:
-    """先頭のセルになる区間の数。区間をつないだ所がすべてインラインコードの中なら、1 つのセルである。"""
-    # 先頭の区間に閉じていない ` が残らなければ、後ろの区間へ続くコードは無い。
-    # 行全体を一度に解析すると、リンクや参照ラベルの ` どうしがセルをまたいでコードになる
-    if not any(t.type == "text" and "`" in t.content for t in _inline(pieces[:1], references)):
-        return 1
-    widths = (
-        n
-        for n in range(2, len(pieces) + 1)
-        if sum(t.content.count("\0") for t in _inline(pieces[:n], references) if t.type == "code_inline") == n - 1
-    )
-    return max(widths, default=1)
-
-
-def _code_aware_cells(line: str, references: Mapping) -> list[str]:
-    """表の 1 行のセル。インラインコードの中の `|` では分けない。"""
-    pieces = inputs_decide.split_row(line)
-    cells = []
-    while pieces:
-        width = _cell_width(pieces, references)
-        cells.append("|".join(pieces[:width]))
-        pieces = pieces[width:]
-    return cells
-
-
 def _parse(text: str) -> _Doc:
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    env: dict = {}
-    tokens = _MARKDOWN.parse("\n".join(lines), env)
-    # 文書の参照リンク定義。行だけを解析するときも、参照リンクをリンクと読む
-    references = env.get("references", {})
+    tokens = _MARKDOWN.parse("\n".join(lines))
     headings: list[_Heading] = []
     tables: list[_Table] = []
     for i, token in enumerate(tokens):
@@ -155,13 +115,9 @@ def _parse(text: str) -> _Doc:
         if token.type == "heading_open" and token.markup.startswith("#"):
             headings.append(_Heading(start, int(token.tag[1:]), tokens[i + 1].content))
         elif token.type == "table_open":
-            # 2 行目は区切りの行。Markdown は空行の無い直後の本文も表の行にするので、`|` の無い行で終える
-            data = list(takewhile(inputs_decide.has_cell_separator, lines[start + 2 : end]))
-            stop = start + 2 + len(data)
-            rows = [inputs_decide.split_row(line) for line in (lines[start], *data)]
-            after = filter(inputs_decide.has_cell_separator, lines[stop:end])
-            rest = [_code_aware_cells(line, references) for line in after]
-            tables.append(_Table(start, rows, stop + 1, rest))
+            # 2 行目は区切りの行
+            rows = [inputs_decide.split_row(line) for line in (lines[start], *lines[start + 2 : end])]
+            tables.append(_Table(start, rows))
     return _Doc(tuple(headings), tuple(tables))
 
 
@@ -215,7 +171,9 @@ def _task_items(cell: str) -> Optional[list[re.Match[str]]]:
 def _tasks_cell(cell: str, known: Sequence[int]) -> tuple[int, ...]:
     items = _task_items(cell)
     if items is None:
-        raise _Bad(f"{TASKS_COLUMN}の形が違う: {cell!r}")
+        # 表の直後に空行の無い本文は表の行になり、このセルが空になる
+        hint = "" if cell else "（表の直後の本文は空行で区切る）"
+        raise _Bad(f"{TASKS_COLUMN}の形が違う: {cell!r}{hint}")
     out: dict[int, None] = {}
     for found in items:
         # 大きな範囲を展開しない。見出しに無い最初の番号で止める
@@ -294,10 +252,6 @@ def _unit_rows(doc: _Doc) -> list[dict[str, str]]:
     repeated = [column for column in (*REQUIRED_COLUMNS, ORDER_COLUMN) if head.count(column) > 1]
     if repeated:
         raise _Bad(f"単位の表に同じ列が 2 つ以上ある: {'、'.join(repeated)}")
-    # 列の数も含むタスクの形も合わない行は、表の後ろの補足（インラインコードのパイプなど）
-    at = head.index(TASKS_COLUMN)
-    if any(len(cells) == len(head) or (len(cells) > at and _task_items(cells[at]) is not None) for cells in table.rest):
-        raise _Bad(f"単位の表の途中に、セルを区切る `|` の無い行がある（実装計画の {table.stop} 行目）")
     if not rows:
         raise _Bad("単位の表に行が無い")
     return [dict(zip(head, [*cells, *[""] * len(head)])) for cells in rows]

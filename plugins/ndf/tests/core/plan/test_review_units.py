@@ -141,46 +141,16 @@ def test_lineup_reads_a_table_without_the_outer_pipes(table: str) -> None:
     assert _names(_plan(_text(table))) == ["A", "B"]
 
 
-@pytest.mark.parametrize(
-    "note",
-    [
-        "補足です。",
-        "a \\| b は区切りでない。",
-        "確認には次のコマンドを使う。\n`git diff | less`",
-        "説明。\n`git diff | sed -n '1,80p' | less`",
-    ],
-)
-def test_lineup_ends_the_table_at_a_line_without_a_cell_separator(note: str) -> None:
+@pytest.mark.parametrize("note", ["補足です。", "`git diff | less`"])
+def test_lineup_reads_a_line_right_after_the_table_as_a_row(note: str) -> None:
     table = _table(HEAD, "| A | Task 1・2 | 無し |") + "\n" + note
-    assert _names(_plan(_text(table))) == ["A"]
+    assert "2 行目の含むタスクの形が違う" in "\n".join(_reasons(_text(table)))
+    assert _names(_plan(_text(table.replace("\n" + note, "\n\n" + note)))) == ["A"]
 
 
-@pytest.mark.parametrize("first", [["A | Task 1 | 無し"], []])
-def test_lineup_rejects_rows_after_a_line_without_a_cell_separator(first: list[str]) -> None:
-    table = "\n".join([HEAD, "--- | --- | ---", *first, "B", "C | Task 2 | 無し"])
-    text = _text(table)
-    line = text.split("\n").index("B") + 1
-    assert f"{line} 行目" in "\n".join(_reasons(text))
-
-
-@pytest.mark.parametrize(
-    "row",
-    [
-        "| C | Tasks 1 | 無し |",
-        "| `a | b` | Tasks 1 | 無し |",
-        "| C | Task 2 |",
-        # エスケープした ` はインラインコードを開かないので、3 セルの行である
-        "| B \\`版 | Tasks 2 | 無し\\` |",
-        # リンク先の ` もインラインコードを開かない
-        "| [B](a`) | Task 2 | [補足](b`) |",
-        "| [![B](img.png)](a`) | Task 2 | [補足](b`) |",
-        # 参照ラベルの ` も同じ。参照の定義は表より後ろにある
-        "| [B][a`] | Task 2 | [補足][b`] |",
-    ],
-)
-def test_lineup_rejects_a_unit_like_row_after_a_line_without_a_cell_separator(row: str) -> None:
-    table = _table(HEAD, "| A | Task 1・2 | 無し |", "B", row) + "\n\n[a`]: /a\n[b`]: /b"
-    assert "表の途中" in "\n".join(_reasons(_text(table)))
+def test_lineup_tells_to_leave_a_blank_line_when_the_task_cell_is_empty() -> None:
+    table = _table(HEAD, "| A | Task 1・2 | 無し |") + "\n補足です。"
+    assert "表の直後の本文は空行で区切る" in "\n".join(_reasons(_text(table)))
 
 
 def test_lineup_reads_indented_and_closed_headings() -> None:

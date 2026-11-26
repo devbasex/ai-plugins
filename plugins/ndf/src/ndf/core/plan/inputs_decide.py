@@ -116,11 +116,6 @@ def split_row(line: str) -> list[str]:
     return [c.strip().replace("\\|", "|") for c in _CELL_SEP.split(inner)]
 
 
-def has_cell_separator(line: str) -> bool:
-    """セルを区切る `|`（`\\|` を除く）があるか。"""
-    return _CELL_SEP.search(line) is not None
-
-
 def cells(line: str) -> list[str]:
     """表の 1 行のセル（`cell` で書いた `\\|` と `<br>` は元の `|` と改行へ戻す）。"""
     return [c.replace(_CELL_BREAK, "\n") for c in split_row(line)]
@@ -157,7 +152,7 @@ def _table_line(line: str, after_row: bool) -> bool:
 
     区切りの行で表を分けると、見出しとデータ行が別の表になり、データ行を先頭の表の列の順で読み違える（#3886 の r7-1）。"""
     stripped = line.strip()
-    return stripped.startswith("|") or (after_row and "|" in stripped and is_rule(stripped))
+    return stripped.startswith("|") or (after_row and "|" in stripped and _is_rule(stripped))
 
 
 def checks_table_span(lines: Sequence[str]) -> Optional[tuple[int, int]]:
@@ -169,7 +164,7 @@ def checks_table_span(lines: Sequence[str]) -> Optional[tuple[int, int]]:
     return spans[0] if spans else None
 
 
-def is_rule(line: str) -> bool:
+def _is_rule(line: str) -> bool:
     """表の見出しの下の区切りの行（`| :--- | ---: |` のようにすべてのセルが `-` と `:` だけ）か。"""
     found = cells(line)
     return bool(found) and all(_RULE_CELL.match(c) for c in found)
@@ -215,7 +210,7 @@ def _check_tables(lines: Sequence[str], head: Sequence[str]) -> list[tuple[list[
     for k, rows in enumerate(tables):
         # 見出しは、次の行が区切りで列数も同じときだけ。見出しの無い表のデータ行の直後の区切り（列数が違う）を見出しと
         # 取り違えると、表全体を読み飛ばす（#3886 の r8-1）
-        headed = k == 0 or (len(rows) >= 2 and is_rule(rows[1]) and len(cells(rows[1])) == len(cells(rows[0])))
+        headed = k == 0 or (len(rows) >= 2 and _is_rule(rows[1]) and len(cells(rows[1])) == len(cells(rows[0])))
         found_head = cells(rows[0])
         if headed and any(h not in found_head for h in head):
             continue
