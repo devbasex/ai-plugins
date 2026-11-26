@@ -912,10 +912,10 @@ class GitHub:
 
     def _queue_state(self, pull: Pull, expect: Optional[MergeExpect]) -> dict[str, Any]:
         """マージキューの状態の問い合わせ。`expect` があれば確かめの項目を足して同じ 1 回で読む。"""
+        variables: dict[str, Any] = {"number": int(pull.number), "branch": pull.base_ref}
         if expect is None:
-            return self.repository(github_merge.MERGE_QUEUE_STATE_QUERY, {"number": int(pull.number), "branch": pull.base_ref})
-        variables = {"number": int(pull.number), "branch": pull.base_ref, "expr": f"{expect.base}:{expect.config_path}"}
-        return self.repository(github_merge.MERGE_QUEUE_VERIFY_QUERY, variables)
+            return self.repository(github_merge.MERGE_QUEUE_STATE_QUERY, variables)
+        return self.repository(github_merge.MERGE_QUEUE_VERIFY_QUERY, {**variables, "expr": f"{expect.base}:{expect.config_path}"})
 
     def _verify_before_send(self, number: int, repo: dict[str, Any], expect: MergeExpect) -> Optional[MergeOutcome]:
         """確かめの応答 `repo` を `_verify` で照らす。止めるとき（設定が変わり承認が要るようになった等）は、PR が
