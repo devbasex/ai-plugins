@@ -23,14 +23,14 @@
 ### Task 2: 起動の設定を読み、承認のハッシュと記録を持つ
 
 - **対象ファイル:** `adapters/launch_settings.py`・`adapters/launch_approval.py`・`adapters/secret_forms.py`（新設）、`domains/project/secret.py`（秘密の形の表の移動）、`contracts/schemas/ndf-settings/launch.schema.json`（新設）、`contracts/domains/ndf-files.json`・`locations.json`・`env.json`、`adapters/claude.py`・`adapters/agents.py`（`NDF_AI_CHILD`）、`tests/adapters/test_launch_settings.py`・`test_launch_approval.py`（新設）
-- **変更内容:** 詳細設計の「起動の設定の読み取り」と「起動の承認」。`safety_args` は Task 6 で足す
+- **変更内容:** 詳細設計の「起動の設定の読み取り」と「起動の承認」。`safety_args` は Task 6 で足す。承認の質問・回答・候補の反映の 8 関数（`put_question`・`record_answer`・`approve_by_answer`・`pending_request`・`new_candidate`・`reflect`・`recover`・`reflected`）とその記録の保存先の行は Task 3 へ移した（使うのは Task 3 だけで、A1 が 1,000 行を超える見込みになったため）
 - **満たす受け入れ条件:** 5・9・11・12・14
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 3: Skill と `ndf launch-config` で承認を取る
 
 - **対象ファイル:** `domains/settings/launch_config_cli.py`・`domains/hooks/guards/launch_answer.py`・`skills/launch-config/SKILL.md`（新設）、`cli.py`、`contracts/hooks/guards.json`、`contracts/domains/entrypoints.json`・`skill-io.json`、`manifests/skills.json`、`.codex-plugin/plugin.json`、`contracts/schemas/io/launch-config.*`、`docs/contracts/`、`skills/worktree/references/ndf-settings.md`
-- **変更内容:** `draft`・`show`・`approve`・`revoke`、承認の問いと答えの hook、手順書
+- **変更内容:** `draft`・`show`・`approve`・`revoke`、承認の問いと答えの hook、手順書。Task 2 から移した `adapters/launch_approval.py` の 8 関数（`put_question`・`record_answer`・`approve_by_answer`・`pending_request`・`new_candidate`・`reflect`・`recover`・`reflected`）と、その記録（`launch-questions`・`launch-answers`・`launch-candidates`・`launch-reflected`）の `contracts/domains/ndf-files.json` の行。詳細設計の「起動の承認」の該当の関数の仕様に従う
 - **満たす受け入れ条件:** 9・10・14
 - **進め方:** CLI と hook はテストを先に書く。手順書に書くコマンドは打って確かめる
 - **設計承認で持ち越した項目:** `.ndf/launch.json` の書き換えは毎回利用者に確認する（承認の対象が空か承認済みでも問う。利用者の答え）。限界として「書き換え中の手の保存が消えうる」を設計書に書く
@@ -65,15 +65,15 @@
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 先に要る単位 | 実際の行数 |
 | --- | --- | --- | --- | --- | --- |
-| A1 起動の設定と承認の土台 | Task 1・2 | 1959:5・1959:9・1959:11・1959:12・1959:14 | 約 800 | — | |
-| A2 承認を取る Skill とコマンド | Task 3 | 1959:9・1959:10・1959:14 | 約 600 | A1 | |
+| A1 起動の設定と承認の土台 | Task 1・2（承認の質問・回答・候補の反映の 8 関数を除く。A2 へ移した） | 1959:5・1959:9・1959:11・1959:12・1959:14 | 約 800 | — | 875 行足し 36 行消した（設計書と計画の追補を含む） |
+| A2 承認を取る Skill とコマンド | Task 3（Task 2 から移した `launch_approval` の 8 関数を含む） | 1959:9・1959:10・1959:14 | 約 900 | A1 | |
 | A3 full の起動の絞り込み | Task 4 | 1959:1・1959:2・1959:4・1959:5・1959:6・1959:7・1959:8・1959:11・1959:12 | 約 450 | A1 | |
 | A4 使用量ログの行 | Task 5 | 1959:3 | 約 600 | A3 | |
 | A5 安全装置の承認 | Task 6 | 1959:13 | 約 400 | A2 | |
 
 - 順序: A1 → （A2 と A3 は並列）→ A4 は A3 の後、A5 は A2 の後。A4 と A5 は並列にできる
 - A2 と A3 は、触るファイルが重ならない。A3 だけが先に入ると、指定を書いたリポジトリは承認の手段が無く起動が止まるので、A2 と A3 は同じスプリントブランチにそろえてから `main` へ出す
-- A1 が 400 行を超えるのは、読み取り・承認の記録・テストが互いに無しでは読めないためである。実装の途中で 1,000 行を超えそうなら、設定の読み取りと承認の記録で 2 つに分ける
+- A1 が 400 行を超えるのは、読み取り・承認の記録・テストが互いに無しでは読めないためである。実装の途中で 1,000 行を超えそうなら、設定の読み取りと承認の記録で 2 つに分ける。実装では 840 行の時点で残りの 8 関数を足すと超える見込みになり、使う側の Task 3（A2）へ移した
 
 ## リファクタリングの時機
 
