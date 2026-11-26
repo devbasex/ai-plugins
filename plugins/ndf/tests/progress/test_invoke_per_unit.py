@@ -217,6 +217,19 @@ def test_the_missing_pr_number_is_asked_with_the_probe_of_the_pr_step(tmp_path, 
     assert calls == asked
 
 
+@pytest.mark.parametrize(("start", "asked"), [("resolved", []), ("head-reviewed", ["pr"]), ("fix-push", [])])
+def test_the_pr_number_is_asked_only_when_a_route_of_impl_reads_it(tmp_path, monkeypatch, start, asked):
+    # resolved は指摘の有無を確かめて終わる。head-reviewed は通れば終わるが、止まった先の差分のレビューが番号を読む
+    calls = _probed(monkeypatch, {"status": "ok"})
+    plan = route.expanded(route.templates()["impl"])
+    for step in plan["steps"]:
+        step["run"] = [route.PR_NUMBER_FILE if a == "{{review}}" else a for a in step["run"]]
+    path = tmp_path / "impl.json"
+    path.write_text(json.dumps({**plan, "name": "impl-sprint/s1"}), encoding="utf-8")
+    invoke.restore_pr_number(path, tmp_path, start)
+    assert calls == asked
+
+
 @pytest.mark.parametrize(
     ("got", "kind", "reason"),
     [

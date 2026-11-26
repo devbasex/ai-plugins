@@ -18,9 +18,9 @@
 差し込みの値（`--set`）でなく、埋めたプランの作業場所（プランの `worktree`）で渡す。差し込みの `worktree` はプランの
 実行が決まった名前として持ち、上書きを断るためである。止まったプランを打ち直すときは、前の回の結果の打ち直し（`next` の `--from`）と
 同じく止まったステップから新しい回を始め、差し込み `progress_attempt` に打ち直しの数を載せて回のキーを変える。同じ引数で
-打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。PR の番号を書くステップより後から始めるプランに
-番号の記録が無ければ、開始点は変えずに、先に開いた PR の番号を書き戻す（`restore_pr_number`）。skill と script は入力の
-作業場所で打つ。
+打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。PR の番号の記録が無く、開始点から番号を書く前に
+読むステップへ進みうるプランは、開始点は変えずに、先に開いた PR の番号を書き戻す（`restore_pr_number`）。skill と script は
+入力の作業場所で打つ。
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
 テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の設定から読み（レビューは設定が
@@ -648,14 +648,13 @@ def restore_pr_number(plan_file: Path, work_dir: Path, start: str) -> None:
 
     番号を保存する前のバージョンで始めた実装は、PR を作った後で止まっていても番号を持たない。照会は番号を書くステップ自身の
     `probe` を打つだけで、開始点は変えない（レビューや CI の修正をやり直さない）。対象は、番号を `probe` が書くステップがあり、
-    ほかのステップの `run` が読むプランだけである。開始点から番号を書くステップを通るなら、番号はそのステップに任せる。
+    開始点からそのステップを通らずに、番号を `run` が読むステップへ進みうるプランだけである（`_reads_before_writing`）。
     照会と書き込みはプランの実行と同じロックの内側で行う（同時の打ち直しが、書きかけの記録を読まない）。
     開いた PR が無いか、照会か保存に失敗すれば、理由を持つ `PrNumberUnrestored`。
     """
     plan = plan_model.load(plan_file)
     writers = [s for s in plan.steps if s.probe is not None and route.PR_NUMBER_FILE in s.probe]
-    read = any(route.PR_NUMBER_FILE in s.run for s in plan.steps if s not in writers)
-    if not writers or not read or _passes_writer(plan, writers, start):
+    if not writers or not _reads_before_writing(plan, writers, start):
         return
     saved = Path(route.PR_NUMBER_FILE.replace("{state_dir}", str(work_dir)))
     ctx = plan_steps.StepContext(plan, work_dir, {"state_dir": str(work_dir)})
@@ -669,18 +668,20 @@ def restore_pr_number(plan_file: Path, work_dir: Path, start: str) -> None:
         raise plan_runs.PrNumberUnrestored(str(got["kind"]), str(got["summary"]))
 
 
-def _passes_writer(plan: plan_model.Plan, writers: Sequence[plan_model.Step], start: str) -> bool:
-    """`start` から通った場合の経路（`next`、無ければ並びの次）が、番号を読むステップより先に番号を書くステップに着くか。"""
+def _reads_before_writing(plan: plan_model.Plan, writers: Sequence[plan_model.Step], start: str) -> bool:
+    """`start` からのルート（通った場合と、止まった場合・回答のルート）に、番号を書くステップを通らず読むステップへ着くものがあるか。"""
     seen: set[str] = set()
-    step = plan.step(start)
-    while step is not None and step.id not in seen:
-        if step in writers:
-            return True
+    pending = [start]
+    while pending:
+        step = plan.step(pending.pop())
+        if step is None or step.id in seen or step in writers:
+            continue
         if route.PR_NUMBER_FILE in step.run:
-            return False
+            return True
         seen.add(step.id)
-        target = step.next if step.next is not None else plan.following(step.id)
-        step = plan.step(target) if target is not None else None
+        passed = step.next if step.next is not None else plan.following(step.id)
+        targets = (passed, step.on_fail, *step.on_cause.values(), *step.on_answer.values())
+        pending += [t for t in targets if t is not None]
     return False
 
 

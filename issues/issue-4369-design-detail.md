@@ -296,7 +296,7 @@ contracts/
 | `invoke` | 同上 | 変更 | 変えない | `per_unit` なら `units_invoke.run_stage` を呼び、None なら `run.plain()` で今のまま |
 | `template_values` | 同上 | 変更 | 変えない | `overrides` の名前は出所の表から求めない |
 | `plan_path` | 同上 | 変更 | 変えない | `_prepared` が返すテンプレートを描画する |
-| `restore_pr_number` | 同上 | 新設 | `(plan_file, work_dir, start) -> None` | PR の作成後から再開するプランで `pr-number` が無ければ、開いた PR の番号を書き戻す。開始点は変えない（下の箇条書き） |
+| `restore_pr_number` | 同上 | 新設 | `(plan_file, work_dir, start) -> None` | 再開した先で番号を読むことがあり `pr-number` が無ければ、開いた PR の番号を書き戻す。開始点は変えない（下の箇条書き） |
 | `plan_argv` | 同上 | 変更 | 変えない | `plan_start` が None なら `run.start` を使う |
 | `_call_plan` | 同上 | 変更 | 変えない | `run.env(run.env_extra)` で子を打つ。`plan_failure` は `UnitsStopped` を分ける |
 | `clear_values` | 同上 | 変更 | 変えない | `units.json` と、`units/` の下のすべての `values.json` も消す。回の記録と `merge.json` は残す |
@@ -305,8 +305,10 @@ contracts/
 
 - 上書きのテンプレート: `prepare_plan`・`_prepared`・`plan_path` は、同じ 1 つのテンプレート（`run.template`、無ければ `template(run.name)`）を使う。差し込みの欠けの検査（`needed`）と作業の入力の検査（`kinds_of`）も、このテンプレートから求める。`_prepared` が `template(run.name)` を返すと、打ち直しで外した `done-check` や `ci` が戻る
 - `pr-number` の無い実行の記録: この変更より前に始めた `impl` は、PR を作った後で止まっていても番号を持たない。単位の経路でない `impl` も同じである。開始点は止まったステップのまま変えず、`plan_argv` が先に `restore_pr_number` を呼ぶ。これはステップ `pr` の `probe` だけを打ち、開いた PR を探して番号を書く。レビューや CI の修正はやり直さない
-  - 対象のプランはテンプレートのステップの中身から決める。`probe` が `pr-number` を書くステップがあり、ほかのステップの `run` がそれを読むプランである。ステップの id の一覧は持たない
-  - 開始点から成功時の経路（`next`、無ければ並びの次）をたどり、番号を読むステップより先に `pr` に着くなら照会しない。番号はプランの実行が `pr` で書く。PR を作る前の `test`・`push` からの再開がこれに当たる
+  - 照会するかはテンプレートのステップの中身から決め、ステップの id の一覧は持たない。`probe` が `pr-number` を書くステップ（`pr`）を通らずに、`run` が `pr-number` を読むステップへ着く経路が開始点からあれば照会する
+  - 経路は、成功のルート（`next`、無ければ並びの次）に加え、停止と回答のルート（`on_fail`・`on_cause`・`on_answer`）もたどる。たとえば `head-reviewed` は、通れば番号を読まずに終わるが、止まった先の `review-delta` が番号を読むので照会する
+  - 番号を読む前に必ず `pr` に着く開始点は照会しない。番号はプランの実行が `pr` で書く。PR を作る前の `test`・`push` からの再開がこれに当たる
+  - 番号を読まずに終わる開始点は照会せず、開いた PR が無くても再開する。`resolved` は保存済みの未解決の指摘の記録だけを確かめて終わるので、これに当たる
   - 番号の有無の確認と書き込みは、`ndf plan next` が取るものと同じ `plan.lock` の内側で行う
   - 開いた PR が無いか、照会か保存に失敗すれば、プランを流さずに、理由を持つ `stopped` を返す。次の打ち直しでもう一度照会する
 - `issue_values`
@@ -333,7 +335,7 @@ contracts/
 | --- | --- | --- | --- |
 | `prepare_plan`・`invoke` | 経路の分かれ。これまでの経路の `values.json` と `--set` に `branch` が足されない | `per_unit` の無い定義 | `UnitsStopped` の結果 |
 | `plan_argv` | 記録が無ければ `--from <start>` | 止まった回は止まったステップから | — |
-| `restore_pr_number` | `pr-number` があれば照会しない。無ければ開始点を変えずにステップ `pr` の `probe` を打つ | `pr` に着く開始点と、番号を読むステップの無いプランは打たない | 開いた PR が無い・照会の失敗は理由を持つ `stopped` |
+| `restore_pr_number` | `pr-number` があれば照会しない。無ければ開始点を変えずにステップ `pr` の `probe` を打つ | 番号を読む前に `pr` に着く開始点、`resolved`、番号を読むステップの無いプランは打たない。`head-reviewed` は打つ | 開いた PR が無い・照会の失敗は理由を持つ `stopped` |
 | `_prepared` | `values.json` を使い回しても上書きのテンプレートを返す | 上書きが無ければ今のまま | — |
 | `clear_values` | 単位の `values.json` を消す | `units/` が無い | — |
 | `issue_values` | 指定した課題とリポジトリ | 別のリポジトリの同じ番号のコピー、題のコピーが無い中断 | 権限なし |
