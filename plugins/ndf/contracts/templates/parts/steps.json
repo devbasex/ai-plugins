@@ -31,7 +31,7 @@
       ],
       "probe": [
         "sh", "-c",
-        "n=$(gh pr list --head \"$0\" --base \"$1\" --state open --json number,isCrossRepository --jq 'map(select(.isCrossRepository | not)) | .[0].number // empty'); [ -n \"$n\" ] || exit 1; printf '%s\\n' \"$n\" > \"$2\" || exit 2; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
+        "n=$(gh pr list --head \"$0\" --base \"$1\" --state open --json number,isCrossRepository --jq 'map(select(.isCrossRepository | not)) | .[0].number // empty') || { printf '{\"status\": \"stopped\", \"cause\": {\"kind\": \"precondition\"}, \"summary\": \"開いた PR を照会できない（gh pr list が失敗した）\"}\\n'; exit 2; }; [ -n \"$n\" ] || exit 1; printf '%s\\n' \"$n\" > \"$2\" || { printf '{\"status\": \"stopped\", \"cause\": {\"kind\": \"precondition\"}, \"summary\": \"PR の番号を実行の保存先に書けない\"}\\n'; exit 2; }; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
         "{{branch}}", "{{base}}", "{state_dir}/pr-number"
       ]
     },

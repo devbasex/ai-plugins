@@ -296,7 +296,7 @@ contracts/
 | `invoke` | 同上 | 変更 | 変えない | `per_unit` なら `units_invoke.run_stage` を呼び、None なら `run.plain()` で今のまま |
 | `template_values` | 同上 | 変更 | 変えない | `overrides` の名前は出所の表から求めない |
 | `plan_path` | 同上 | 変更 | 変えない | `_prepared` が返すテンプレートを描画する |
-| `restore_pr_number` | 同上 | 新設 | `(plan_file, work_dir, start) -> None` | 途中から始めるプランで `pr-number` が無ければ、開いた PR の番号を書き戻す。開始点は変えない（下の箇条書き） |
+| `restore_pr_number` | 同上 | 新設 | `(plan_file, work_dir, start) -> None` | PR の作成後から再開するプランで `pr-number` が無ければ、開いた PR の番号を書き戻す。開始点は変えない（下の箇条書き） |
 | `plan_argv` | 同上 | 変更 | 変えない | `plan_start` が None なら `run.start` を使う |
 | `_call_plan` | 同上 | 変更 | 変えない | `run.env(run.env_extra)` で子を打つ。`plan_failure` は `UnitsStopped` を分ける |
 | `clear_values` | 同上 | 変更 | 変えない | `units.json` と、`units/` の下のすべての `values.json` も消す。回の記録と `merge.json` は残す |
@@ -306,8 +306,9 @@ contracts/
 - 上書きのテンプレート: `prepare_plan`・`_prepared`・`plan_path` は、同じ 1 つのテンプレート（`run.template`、無ければ `template(run.name)`）を使う。差し込みの欠けの検査（`needed`）と作業の入力の検査（`kinds_of`）も、このテンプレートから求める。`_prepared` が `template(run.name)` を返すと、打ち直しで外した `done-check` や `ci` が戻る
 - `pr-number` の無い実行の記録: この変更より前に始めた `impl` は、PR を作った後で止まっていても番号を持たない。単位の経路でない `impl` も同じである。開始点は止まったステップのまま変えず、`plan_argv` が先に `restore_pr_number` を呼ぶ。これはステップ `pr` の `probe` だけを打ち、開いた PR を探して番号を書く。レビューや CI の修正はやり直さない
   - 対象のプランはテンプレートのステップの中身から決める。`probe` が `pr-number` を書くステップがあり、ほかのステップの `run` がそれを読むプランである。ステップの id の一覧は持たない
-  - 開始点が `pr` なら、プランの実行が同じ `probe` を打つので何もしない
-  - 開いた PR が無いか照会できなければ書かない。番号を読むステップが理由を出して止まり、次の打ち直しでもう一度照会する
+  - 開始点から成功時の経路（`next`、無ければ並びの次）をたどり、番号を読むステップより先に `pr` に着くなら照会しない。番号はプランの実行が `pr` で書く。PR を作る前の `test`・`push` からの再開がこれに当たる
+  - 番号の有無の確認と書き込みは、`ndf plan next` が取るものと同じ `plan.lock` の内側で行う
+  - 開いた PR が無いか、照会か保存に失敗すれば、プランを流さずに、理由を持つ `stopped` を返す。次の打ち直しでもう一度照会する
 - `issue_values`
   - 事後条件: 題のコピーは `{"title", "repo"}`。`repo` が違うコピーは使わない
   - 副作用: 読み直すときは、題のコピーを消す → 本文を書く → 題のコピーを書く、の順にする
@@ -320,6 +321,9 @@ contracts/
 | --- | --- | --- |
 | `prepare_plan`・`invoke` | `UnitsStopped`（`kind`・`detail`・`items`） | `plan_failure` が `stopped` にする。工程は始まらないか失敗する |
 | `clear_values` | 消せない | `OSError` を上げる（今のとおり `precondition`） |
+| `restore_pr_number` | 開いた PR が無い | `PrNumberUnrestored`（`precondition`）。`plan_failure` が理由を持つ `stopped` にする |
+| `restore_pr_number` | 照会か番号の保存の失敗 | `PrNumberUnrestored`（`probe` の停止理由の種類と文）。同上 |
+| `restore_pr_number` | `plan.lock` を取れない | `StoreInUse`。`plan_failure` が `stopped` にする |
 | `issue_values` | 書き込み権限の無い作成者 | None を返す。呼び元が止める |
 | `issue_values` | 私有でないコピー | `worker_paths.EntryUnsafe`（今のとおり） |
 
@@ -329,7 +333,7 @@ contracts/
 | --- | --- | --- | --- |
 | `prepare_plan`・`invoke` | 経路の分かれ。これまでの経路の `values.json` と `--set` に `branch` が足されない | `per_unit` の無い定義 | `UnitsStopped` の結果 |
 | `plan_argv` | 記録が無ければ `--from <start>` | 止まった回は止まったステップから | — |
-| `restore_pr_number` | `pr-number` があれば照会しない | 無ければ開始点を変えずにステップ `pr` の `probe` を打つ。開始点が `pr` のプランと、番号を読むステップの無いプランは打たない | — |
+| `restore_pr_number` | `pr-number` があれば照会しない。無ければ開始点を変えずにステップ `pr` の `probe` を打つ | `pr` に着く開始点と、番号を読むステップの無いプランは打たない | 開いた PR が無い・照会の失敗は理由を持つ `stopped` |
 | `_prepared` | `values.json` を使い回しても上書きのテンプレートを返す | 上書きが無ければ今のまま | — |
 | `clear_values` | 単位の `values.json` を消す | `units/` が無い | — |
 | `issue_values` | 指定した課題とリポジトリ | 別のリポジトリの同じ番号のコピー、題のコピーが無い中断 | 権限なし |
@@ -375,7 +379,7 @@ contracts/
 
 | ファイル・ステップ | 変える中身 |
 | --- | --- |
-| `parts/steps.json` の `pr` | `run` は番号を `gh pr create` の出力の URL の末尾から取り、`{state_dir}/pr-number` へ書く。`probe` は head と `{{base}}` で絞り、`isCrossRepository` の PR を除き、見つけた番号を同じファイルへ書く |
+| `parts/steps.json` の `pr` | `run` は番号を `gh pr create` の出力の URL の末尾から取り、`{state_dir}/pr-number` へ書く。`probe` は head と `{{base}}` で絞り、`isCrossRepository` の PR を除き、見つけた番号を同じファイルへ書く。照会か書き込みに失敗すれば、理由を持つ結果 JSON を出して終了コード 2 で止まる。開いた PR が無いとき（終了コード 1）と分ける |
 | `parts/steps.json` の `ci` | PR の番号の取り方をキー `pr_source` に分ける。番号を出力するコマンド（`command`）と、その引数（`arg`）を持つ（決定 17） |
 | `impl.json` の `conflict-check`・`ci` | 番号を `{state_dir}/pr-number` から読む。`conflict-check` は `run` を上書きし、`ci` は `pr_source` だけを上書きする。失敗時の終わり方は表の下に示す |
 | `impl.json` のプランの最上位 | `"unit_file": "{{unit_file}}"` のキーを足す（`core/plan/model.parse` は知らないキーを読まない。差し込みを使わないとテンプレートの検査が落ちる） |

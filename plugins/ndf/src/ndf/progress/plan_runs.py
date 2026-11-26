@@ -88,6 +88,19 @@ class UnitsStopped(Exception):
         self.items = [dict(i) for i in items]
 
 
+class PrNumberUnrestored(Exception):
+    """再開に要る PR の番号を書き戻せずに止める。`kind` は停止理由の語、`detail` は理由の文。"""
+
+    def __init__(self, kind: str, detail: str) -> None:
+        super().__init__(detail)
+        self.kind = kind
+        self.detail = detail
+
+    def stopped(self, tool: str) -> dict[str, Any]:
+        """止まった結果 JSON。工程のステートマシンは `cause` だけを残すので、理由は `detail` の文に持たせる。"""
+        return result.stopped(tool, self.kind, f"再開できない（PR の番号を書き戻せない）: {self.detail}")
+
+
 # --- プランの実行の記録 ---------------------------------------------------------------------
 
 

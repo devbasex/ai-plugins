@@ -18,8 +18,8 @@
 差し込みの値（`--set`）でなく、埋めたプランの作業場所（プランの `worktree`）で渡す。差し込みの `worktree` はプランの
 実行が決まった名前として持ち、上書きを断るためである。止まったプランを打ち直すときは、前の回の結果の打ち直し（`next` の `--from`）と
 同じく止まったステップから新しい回を始め、差し込み `progress_attempt` に打ち直しの数を載せて回のキーを変える。同じ引数で
-打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。途中のステップから始めるプランが PR の番号の記録を
-読むのに記録が無ければ、開始点は変えずに、先に開いた PR の番号を書き戻す（`restore_pr_number`）。skill と script は入力の
+打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。PR の番号を書くステップより後から始めるプランに
+番号の記録が無ければ、開始点は変えずに、先に開いた PR の番号を書き戻す（`restore_pr_number`）。skill と script は入力の
 作業場所で打つ。
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
@@ -648,19 +648,40 @@ def restore_pr_number(plan_file: Path, work_dir: Path, start: str) -> None:
 
     番号を保存する前のバージョンで始めた実装は、PR を作った後で止まっていても番号を持たない。照会は番号を書くステップ自身の
     `probe` を打つだけで、開始点は変えない（レビューや CI の修正をやり直さない）。対象は、番号を `probe` が書くステップがあり、
-    ほかのステップの `run` が読むプランだけである。開始点が番号を書くステップなら、プランの実行が同じ `probe` を打つので何もしない。
-    開いた PR が無いか照会できなければ書かずに戻り、番号を読むステップが理由を出して止まる。
+    ほかのステップの `run` が読むプランだけである。開始点から番号を書くステップを通るなら、番号はそのステップに任せる。
+    照会と書き込みはプランの実行と同じロックの内側で行う（同時の打ち直しが、書きかけの記録を読まない）。
+    開いた PR が無いか、照会か保存に失敗すれば、理由を持つ `PrNumberUnrestored`。
     """
-    if Path(route.PR_NUMBER_FILE.replace("{state_dir}", str(work_dir))).is_file():
-        return
     plan = plan_model.load(plan_file)
     writers = [s for s in plan.steps if s.probe is not None and route.PR_NUMBER_FILE in s.probe]
     read = any(route.PR_NUMBER_FILE in s.run for s in plan.steps if s not in writers)
-    if not read or any(s.id == start for s in writers):
+    if not writers or not read or _passes_writer(plan, writers, start):
         return
+    saved = Path(route.PR_NUMBER_FILE.replace("{state_dir}", str(work_dir)))
     ctx = plan_steps.StepContext(plan, work_dir, {"state_dir": str(work_dir)})
-    for step in writers:
-        plan_steps.probe(ctx, step, plan_steps.timeout_of(step))
+    with plan_runner.plan_lock(work_dir):
+        if saved.is_file() and saved.stat().st_size:
+            return
+        got = plan_steps.probe(ctx, writers[0], plan_steps.timeout_of(writers[0]))
+    if got is None:
+        raise plan_runs.PrNumberUnrestored("precondition", "このブランチからマージ先へ出した開いた PR が無い")
+    if got["status"] != result.OK:
+        raise plan_runs.PrNumberUnrestored(str(got["kind"]), str(got["summary"]))
+
+
+def _passes_writer(plan: plan_model.Plan, writers: Sequence[plan_model.Step], start: str) -> bool:
+    """`start` から通った場合の経路（`next`、無ければ並びの次）が、番号を読むステップより先に番号を書くステップに着くか。"""
+    seen: set[str] = set()
+    step = plan.step(start)
+    while step is not None and step.id not in seen:
+        if step in writers:
+            return True
+        if route.PR_NUMBER_FILE in step.run:
+            return False
+        seen.add(step.id)
+        target = step.next if step.next is not None else plan.following(step.id)
+        step = plan.step(target) if target is not None else None
+    return False
 
 
 def stored_gate_routes(work_dir: Path) -> Optional[dict[str, Any]]:
@@ -708,10 +729,10 @@ def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -
     else:
         start = plan_start(work_dir)
         start = start if start is not None else run.start
-    attempt = plan_attempt(run, work_dir)
     plan_file = plan_path(run, work_dir, cwd)
     if start:
         restore_pr_number(plan_file, work_dir, start)
+    attempt = plan_attempt(run, work_dir)
     argv = ndf_command(PLAN, "next", str(plan_file), *(["--from", start] if start else []), "--state-dir", str(work_dir))
     for key, value in run.inputs.items():
         if key != "worktree":
@@ -767,7 +788,17 @@ PLAN_FAILURES = (
     worker_paths.EntryError,
     internal.InternalError,
     plan_runs.UnitsStopped,
+    plan_runs.PrNumberUnrestored,
+    durable.StoreStopped,
 )
+
+
+def _carried_failure(name: str, exc: Exception) -> dict[str, Any]:
+    """停止理由の語を例外が持つ失敗の `stopped` の結果 JSON。"""
+    if isinstance(exc, plan_runs.UnitsStopped):
+        # 工程のステートマシンは `cause` だけを残すので、理由は `detail` の文に持たせる（#4369）
+        return result.stopped(PLAN, exc.kind, f"プラン {name} を単位ごとに流せない: {exc.detail}", items=exc.items)
+    return exc.stopped(PLAN)
 
 
 def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
@@ -777,9 +808,8 @@ def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
     し、名前と出所を `items` に並べる（決定 4）。ほかの分類は工程から呼ぶ経路（`_call_plan`）と起動の前の確かめ
     （`progress.run._start`）で同じである。
     """
-    if isinstance(exc, plan_runs.UnitsStopped):
-        # 工程のステートマシンは `cause` だけを残すので、理由は `detail` の文に持たせる（#4369）
-        return result.stopped(PLAN, exc.kind, f"プラン {name} を単位ごとに流せない: {exc.detail}", items=exc.items)
+    if isinstance(exc, (plan_runs.UnitsStopped, plan_runs.PrNumberUnrestored, durable.StoreStopped)):
+        return _carried_failure(name, exc)
     if isinstance(exc, (TemplateValuesMissing, KindInputsMissing)):
         detail = f"プラン {name} の差し込み {', '.join(exc.missing)} を決められない"
         return result.stopped(PLAN, "precondition", detail, items=exc.items)
