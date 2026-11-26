@@ -8,3 +8,8 @@ import re
 ACTORS = re.compile(r"^(human|conductor|organizer|service):[A-Za-z0-9._@/-]+$|^(human|conductor|organizer)$")
 # 利用者が直に回答たときの値
 HUMAN = "human"
+
+
+def invalid_message(by: str) -> str:
+    """回答した者の形が違うときの文面。"""
+    return f"回答した者 {by} の形が違う（human・conductor・organizer か service:<主体>）"

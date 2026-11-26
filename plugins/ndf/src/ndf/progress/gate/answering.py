@@ -279,7 +279,7 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
     決定 7）。証跡を書けなければ回答を記録せず、同じ回答を送り直すと続きから回復する。同じ冪等のキーの回答が既に
     記録されていても、証跡が無ければ書いてから戻る。"""
     if not ACTORS.match(a.by):
-        raise model.Refused(f"回答した者 {a.by} の形が違う（human・conductor・organizer か service:<主体>）")
+        raise model.Refused(actors.invalid_message(a.by))
     text = run.notes_text(a.value, a.notes)
     with store.transaction(st) as conn:
         v = run.view(conn, machine_id)
