@@ -41,7 +41,11 @@ def test_worker_resumes_with_the_same_full_arguments_and_only_the_session_change
     ("agent", "namespaces", "expected"),
     [
         ("codex", True, ["codex", "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-C", "{wt}", "質問"]),
-        ("codex", False, ["codex", "exec", "--skip-git-repo-check", "--ephemeral", "--dangerously-bypass-approvals-and-sandbox", "-C", "{wt}", "質問"]),
+        (
+            "codex",
+            False,
+            ["codex", "exec", "--skip-git-repo-check", "--ephemeral", "--dangerously-bypass-approvals-and-sandbox", "-C", "{wt}", "質問"],
+        ),
         ("kiro", True, ["kiro-cli", "chat", "--no-interactive", "--trust-tools=fs_read", "質問"]),
     ],
 )
