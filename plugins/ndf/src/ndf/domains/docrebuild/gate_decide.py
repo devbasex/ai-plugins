@@ -88,6 +88,11 @@ def _squeezed(text: str) -> str:
     return _SPACE.sub(" ", text).strip()
 
 
+def _source(q: Mapping[str, str]) -> str:
+    """引用の、対象の中から探すときの文（伏せて変わった引用は元の文を `source` に持つ）。"""
+    return q["source"] if "source" in q else q["quote"]
+
+
 def carried_quotes(
     prev: Iterable[Mapping[str, Any]],
     contents: Mapping[str, str],
@@ -102,9 +107,9 @@ def carried_quotes(
     out: dict[str, list[dict[str, str]]] = {}
     for row in prev:
         name = row["name"]
-        seen = {_squeezed(q["quote"]) for q in [*(raised[name] if name in raised else ()), *(out[name] if name in out else ())]}
+        seen = {_squeezed(_source(q)) for q in [*(raised[name] if name in raised else ()), *(out[name] if name in out else ())]}
         for q in row["quotes"]:
-            quote = _squeezed(q["quote"])
+            quote = _squeezed(_source(q))
             if name not in contents or quote not in _squeezed(contents[name]) or quote in seen or _read_again(name, quote, read_parts):
                 continue
             out.setdefault(name, []).append(dict(q))

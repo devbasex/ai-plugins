@@ -126,16 +126,22 @@ class Run:
 
     def publishable(self, text: str) -> str:
         """`text` を PR へ書くときの形（秘密などを伏せた後）。読み手役に読ませる本文とハッシュはこの形にする
-        （提示のコメントと違う本文への承認を数えない）。同じ文は 1 回だけ調べる。"""
-        if text not in self._published:
+        （提示のコメントと違う本文への承認を数えない）。"""
+        return self.publish_all([text])[0]
+
+    def publish_all(self, texts: Sequence[str]) -> list[str]:
+        """`publishable` をまとめて行う。まだ調べていない文を 1 回の検査に通し、同じ文は 1 回だけ調べる。"""
+        new = [t for t in dict.fromkeys(texts) if t not in self._published]
+        if new:
             if self._publisher is None:
                 self._publisher = Publisher(self.hub)
             try:
-                (safe,), _ = self._publisher.guarded(text)
+                safe, _ = self._publisher.guarded(*new)
             except GitHubError as exc:
                 raise Precondition(f"承認資料を公開先に合わせて整えられない: {exc}") from None
-            self._published[text] = self._published[safe] = safe
-        return self._published[text]
+            for text, got in zip(new, safe, strict=True):
+                self._published[text] = self._published[got] = got
+        return [self._published[t] for t in texts]
 
     @property
     def pr(self) -> PullView:
@@ -644,9 +650,7 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
         parts[reading.MATERIAL] = gd.changed_part(_file_text(plan.previous), draft)
     prev = reading.remained_of(reading.doc_rows(), run.repo, run.args.gate, run.pr.number)
     rows = gd.doc_rows_of(found, gd.carried_quotes(prev, contents, parts, raised), hashes)
-    for row in rows:
-        if row["verdict"] == reading.REMAINED:
-            row["quotes"] = [{k: run.publishable(v) if v else v for k, v in q.items()} for q in row["quotes"]]
+    _publish_quotes(run, rows)
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]
     section = reading.remained_section(remained)
     final = Final(draft + section, section, rows)
@@ -670,6 +674,21 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
     reads = [{k: r[k] for k in ("name", "reader", "round", "verdict")} for r in rows]
     summary = f"承認の前の確認を記録した（読ませた対象 {len(plan.targets)} 件・残った文 {len(items)} 件）"
     return result.result(TOOL, result.OK, summary, items, {"reads": reads}, outputs=outputs)
+
+
+def _publish_quotes(run: Run, rows: Sequence[dict[str, Any]]) -> None:
+    """残った文の引用と理由を PR へ書くときの形にする。伏せて変わった引用は元の文を `source` に残し、
+    次の確認が伏せていない対象の中から探せるようにする（承認資料には載せない）。"""
+    remained = [r for r in rows if r["verdict"] == reading.REMAINED]
+    run.publish_all([q[k] for r in remained for q in r["quotes"] for k in ("quote", "why")])
+    for row in remained:
+        quotes = []
+        for q in row["quotes"]:
+            out = {**q, "quote": run.publishable(q["quote"]), "why": run.publishable(q["why"])}
+            if out["quote"] != q["quote"]:
+                out.setdefault("source", q["quote"])
+            quotes.append(out)
+        row["quotes"] = quotes
 
 
 def _send_back_targets(run: Run, plan: Plan, draft: str) -> list[str]:

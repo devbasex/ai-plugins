@@ -255,6 +255,8 @@ class Publisher:
     hub: GitHub
     accounts: frozenset[str] = field(default_factory=local_accounts)
     _visibility: Optional[str] = field(default=None, init=False)
+    # 参照先の公開範囲（小文字の名前ごと）。同じエントリポイントでは同じリポジトリを 1 回だけ問う
+    _seen: dict[str, str] = field(default_factory=dict, init=False)
 
     def visibility(self) -> str:
         """書き先の公開範囲（1 つのエントリポイントで 1 回だけ読む）。"""
@@ -294,8 +296,10 @@ class Publisher:
         # 照会の直前に same_repo と同じ規則（大文字・小文字を区別しない）で名前をまとめ、同じリポジトリを 1 回だけ問う
         dirty = {t.lower() for t in tainted}
         asked = set({r.lower(): r for r in sorted(clean) if r.lower() not in dirty}.values())
-        seen = self.hub.visibilities(asked) if asked else {}
-        return tainted | {r for r, v in seen.items() if v != PUBLIC}
+        unread = {r for r in asked if r.lower() not in self._seen}
+        if unread:
+            self._seen.update({r.lower(): v for r, v in self.hub.visibilities(unread).items()})
+        return tainted | {r for r in asked if self._seen.get(r.lower()) != PUBLIC}
 
     def guarded(self, *texts: str, assume_public: bool = False) -> tuple[list[str], dict[str, int]]:
         """書く本文（題と本文など）を検査した結果と、落とした所の種類ごとの件数の和。
@@ -328,6 +332,15 @@ class Publisher:
     def comment(self, number: int, body: str) -> Published:
         (safe,), dropped = self.guarded(body)
         made = self.hub.rest("POST", f"/repos/{self.hub.repo}/issues/{int(number)}/comments", {"body": safe})
+        return Published(int(number), str(made["html_url"]), dropped)
+
+    def comment_unchanged(self, number: int, body: str) -> Optional[Published]:
+        """検査しても変わらない本文だけをコメントで足す。伏せる所があれば何も書かずに None（本文のハッシュを別に持つ呼び手が、
+        持っているハッシュと違う本文を書かないため）。検査は 1 回だけ。"""
+        (safe,), dropped = self.guarded(body)
+        if safe != body:
+            return None
+        made = self.hub.rest("POST", f"/repos/{self.hub.repo}/issues/{int(number)}/comments", {"body": body})
         return Published(int(number), str(made["html_url"]), dropped)
 
     def edit_body(self, number: int, body: str) -> Published:
