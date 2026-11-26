@@ -106,10 +106,10 @@ flowchart TB
 | 工程から作業を呼ぶ層（`src/ndf/progress/invoke.py`） | `per_unit` の工程で単位の見出しがあれば、開始前の確かめと実行を上の処理へ渡す。無ければこれまでのまま。試行の始まりに値を消す処理（`clear_values`）は、単位の保存先とスプリントの PR の保存先についても、差し込みの値と課題のコピーを消す。ほかの記録は残す（「単位ごとの保存先」） |
 | 工程の定義の読み手（`src/ndf/progress/stages.py`・`definition.py`） | 工程の型に `per_unit`（既定は偽）を足し、定義とスナップショットから読む |
 | 工程の定義とスキーマ（`contracts/workflow/stages/implement.json`・`contracts/workflow/ndf.schema.json`・`contracts/schemas/internal/stage-snapshot.schema.json`） | `per_unit` を足す。ステップの並びは変えない |
-| `impl` のテンプレートと差し込みの定義（`contracts/templates/impl.json`・`parts/steps.json`・`params.json`） | 任意の差し込み `unit`（単位のブランチ名）と `unit_file`（単位の範囲の指示のファイル）を足す。どちらも既定は空で、ステップは増やさない。`unit` があれば、`done-check`・`pr`・`conflict-check`・`ci` のステップとレビューの 2 つのステップ（`review`・`review-delta`）が決定 8・11 のとおりに振る舞う。`unit` は、課題全体を補った単位（「単位の無い課題」）を含むすべての単位に渡す。`unit_file` は範囲の指示だけに使い、補った単位では空である |
+| `impl` のテンプレートと差し込みの定義（`contracts/templates/impl.json`・`parts/steps.json`・`params.json`） | 任意の差し込み `unit`（単位のブランチ名）と `unit_file`（単位の範囲の指示のファイル）を足す。どちらも既定は空で、ステップは増やさない。`unit` があれば、`done-check`・`pr`・`conflict-check`・`ci` のステップとレビューの 2 つのステップ（`review`・`review-delta`）が決定 8・11 のとおりに振る舞う。`unit` は、課題全体を 1 単位として補ったもの（「単位の無い課題」のセクション）を含む、すべての単位に渡す。`unit_file` は範囲の指示だけに使い、補った単位では空である |
 | 既定のレビューの起動（`src/ndf/core/route/__init__.py`） | 単位の PR の番号が環境変数 `NDF_UNIT_PR` にあれば、ブランチから番号を引かずにその番号を使う |
 | レビューの結果の出力（`src/ndf/domains/crossreview/cli.py`） | `ndf cross-review run` に `--target-out` を足す（「入出力のコントラクト」） |
-| 人の判断を待つ指摘の判定（`src/ndf/domains/crossreview/finish_decide.py`・`journal.py`） | `--target-out` を渡した起動では、人の判断を待つ指摘を欠けにして `incomplete` で終える。判定に使うのは 2 つである。見送りの区分が保留になるかを返す関数（`domains/records/mvv_decide.py` の `defer_holds`。MVV の承認の判定が使うもの）と、レッドラインのフラグである（決定 14） |
+| 人の判断を待つ指摘の判定（`src/ndf/domains/crossreview/finish_decide.py`・`journal.py`） | `--target-out` を渡した起動では、人の判断を待つ指摘が残れば、その指摘を結果の欠けに載せて `incomplete` で終える。判定に使うのは 2 つである。見送りの区分が保留になるかを返す関数（`domains/records/mvv_decide.py` の `defer_holds`。MVV の承認の判定が使うもの）と、レッドラインのフラグである（決定 14） |
 | worker の作業の定義と読み手（`contracts/worker/kinds.json`・`src/ndf/contracts/worker_kinds.py`） | 作業の定義に、空でよい入力の欄 `optional_inputs` を足し、`impl`・`fix`・`ci-fix`・`fix-push`・`fix-base` に `unit_file` を置く。値があるときだけ起動指示の入力に載せる。値が無くても、欠けの検査（`kind_gaps`）は不足にしない。起動指示を書く `progress/gate/entry.py` は、定義の読み手（`worker_kinds.py`）が返す値をそのまま載せるので変えない |
 | レビューの指示（`src/ndf/domains/crossreview/criteria_decide.py`） | `NDF_UNIT_PR` があれば、相手役と修正担当の指示に例外（決定 8）を足す。`NDF_UNIT_FILE` があれば、単位の範囲のセクションも足す |
 | 受け入れ条件の確かめ（`src/ndf/domains/loop/acceptance.py`） | 条件を持たない単位のための `--no-criteria` を足す |
