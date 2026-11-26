@@ -190,7 +190,12 @@ def _gate_reaches_production(found: dict[str, Any]) -> Optional[bool]:
     return got if found["status"] == GATE and isinstance(got, bool) else None
 
 
-def _probe(ctx: StepContext, step: Step, timeout: float) -> Optional[dict[str, Any]]:
+def timeout_of(step: Step) -> float:
+    """ステップと `probe` を打つ上限の秒（ステップの `timeout`、無ければ方針の値）。"""
+    return step.timeout if step.timeout is not None else limits.seconds(RUN_STEP_LIMIT)
+
+
+def probe(ctx: StepContext, step: Step, timeout: float) -> Optional[dict[str, Any]]:
     """`probe` を打ち、済んでいれば ok の結果、確かめられなければ止まった結果、まだなら None を返す（B9）。"""
     args = assemble_decide.fill(step.probe if step.probe is not None else (), ctx.values)
     try:
@@ -237,9 +242,9 @@ def run(ctx: StepContext, step: Step) -> dict[str, Any]:
         ensure_previous_stopped(ctx.state_dir, step.id)
     except StepRefused as exc:
         return _stopped("refused", str(exc))
-    timeout = step.timeout if step.timeout is not None else limits.seconds(RUN_STEP_LIMIT)
+    timeout = timeout_of(step)
     if step.probe is not None:
-        checked = _probe(ctx, step, timeout)
+        checked = probe(ctx, step, timeout)
         if checked is not None:
             return run_log.redact(checked)
     try:

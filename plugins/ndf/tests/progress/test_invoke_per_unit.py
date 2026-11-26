@@ -24,6 +24,7 @@ from ndf.contracts.worker_kinds import read_values, write_values
 from ndf.core import durable, route
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
+from ndf.core.plan import steps as plan_steps
 from ndf.progress import definition, invoke, issue_values, plan_runs
 
 PROJECT = {
@@ -188,32 +189,41 @@ def test_the_start_of_the_run_is_used_only_without_a_start_from_the_record(tmp_p
     assert argv[argv.index("--from") + 1] == "a"
 
 
-PASSES_PR = ["done-check", "work", "acceptance", "test", "fix", "test-repeat", "push", "pr", "fix-push", "base-sync", "fix-base"]
+def _impl_plan(tmp_path: Path) -> Path:
+    """番号を `probe` が書くステップと読むステップを持つ、テンプレート impl と同じ形の小さなプラン。"""
+    steps = [
+        {"id": "pr", "run": ["true", route.PR_NUMBER_FILE], "probe": ["true", route.PR_NUMBER_FILE]},
+        {"id": "ci", "run": ["true", route.PR_NUMBER_FILE]},
+    ]
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps({"name": "impl-sprint/s1", "steps": steps}), encoding="utf-8")
+    return path
 
 
-def _impl_steps() -> list[str]:
-    return [s["id"] for s in route.expanded(route.templates()["impl"])["steps"]]
-
-
-@pytest.mark.parametrize("step", _impl_steps())
-@pytest.mark.parametrize("how", ["止まった結果", "回の記録"])
-def test_an_impl_without_the_saved_pr_number_goes_back_to_the_pr_step(tmp_path, step, how):
+@pytest.mark.parametrize(("start", "saved", "asked"), [("ci", False, ["pr"]), ("ci", True, []), ("pr", False, [])])
+def test_the_missing_pr_number_is_asked_with_the_probe_of_the_pr_step(tmp_path, monkeypatch, start, saved, asked):
     # PR の番号を保存する前に始めた実装は、PR を作った後で止まっていても番号を持たない
-    work = tmp_path / "w"
-    _record(work, "impl-sprint/s1", None if how == "止まった結果" else step, stopped_at=step if how == "止まった結果" else None)
-    assert invoke.plan_start(work) == (step if step in PASSES_PR else "pr")
-    (work / "pr-number").write_text("7\n", encoding="utf-8")
-    assert invoke.plan_start(work) == step
+    calls: list[str] = []
+    monkeypatch.setattr(plan_steps, "probe", lambda ctx, step, timeout: calls.append(step.id))
+    if saved:
+        (tmp_path / "pr-number").write_text("7\n", encoding="utf-8")
+    invoke.restore_pr_number(_impl_plan(tmp_path), tmp_path, start)
+    assert calls == asked
 
 
-def test_an_impl_that_started_from_the_beginning_stays_there_without_the_pr_number(tmp_path):
-    _record(tmp_path, "impl-sprint/s1", None)
-    assert invoke.plan_start(tmp_path) is None
+def test_a_plan_that_does_not_read_the_pr_number_is_not_asked(tmp_path, monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(plan_steps, "probe", lambda ctx, step, timeout: calls.append(step.id))
+    path = _impl_plan(tmp_path)
+    plan = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps({**plan, "steps": plan["steps"][:1]}), encoding="utf-8")
+    invoke.restore_pr_number(path, tmp_path, "ci")
+    assert calls == []
 
 
-def test_other_plans_keep_their_start_without_the_pr_number(tmp_path):
-    _record(tmp_path, "design-design/s1", None, stopped_at="conflict-check")
-    assert invoke.plan_start(tmp_path) == "conflict-check"
+def test_an_impl_stopped_after_the_pr_keeps_its_start_without_the_pr_number(tmp_path):
+    _record(tmp_path, "impl-sprint/s1", None, stopped_at="ci-fix")
+    assert invoke.plan_start(tmp_path) == "ci-fix"
 
 
 # --- 前の試行の値と設定 ---------------------------------------------------------------------

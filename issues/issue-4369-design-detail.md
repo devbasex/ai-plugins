@@ -42,7 +42,7 @@ contracts/
 | `src/ndf/progress/plan_runs.py` | 新設 | 工程の呼び出しと結果の型、プランの実行の記録の読み取りを持つ | `core.plan`・`core.route` | `StageRun`・`StageResult`・`UnitsStopped` | `previous`・`from_of`・`read_report`（移動） |
 | `src/ndf/progress/issue_copies.py` | 新設 | 課題の題と本文を保存先へコピーする | `adapters.github`・`worker_paths` | モジュール | `issue_text`・`issue_values`（移動して変更） |
 | `src/ndf/progress/units_invoke.py` | 新設 | 開始前の確かめ、単位ごとの実行とマージ、スプリントの PR を流す | 上の 3 つ・`git`・`github`・`branch_strategy` | `Ports`・`Lineup`・`RoundState`・`Resume` | `prepare`・`run_stage`・`resume_of` ほか（下の表） |
-| `src/ndf/progress/invoke.py` | 変更 | `per_unit` の工程を単位を流す処理へ渡す | `units_invoke` | モジュール | `stage_run`・`prepare_plan`・`_prepared`・`plan_path`・`plan_start`・`plan_argv`・`_call_plan`・`invoke`・`template_values`・`clear_values`（変更） |
+| `src/ndf/progress/invoke.py` | 変更 | `per_unit` の工程を単位を流す処理へ渡す | `units_invoke` | モジュール | `stage_run`・`prepare_plan`・`_prepared`・`plan_path`・`restore_pr_number`（新設）・`plan_argv`・`_call_plan`・`invoke`・`template_values`・`clear_values`（変更） |
 | `src/ndf/progress/stages.py`・`definition.py` | 変更 | 工程の型に `per_unit` を足して読む | — | `StageDef` | `_stage_def`（変更） |
 | `src/ndf/progress/refactor_values.py` | 変更 | 見出しの定数を単位の表の読み手から読む | `review_units_decide` | モジュール | — |
 | `src/ndf/core/route/__init__.py` | 変更 | `impl` のレビューの起動と、単位の経路のテンプレートを組む | — | モジュール | `unit_template`・`unit_review_launch`（新設）、`review_launch`（変更） |
@@ -296,7 +296,7 @@ contracts/
 | `invoke` | 同上 | 変更 | 変えない | `per_unit` なら `units_invoke.run_stage` を呼び、None なら `run.plain()` で今のまま |
 | `template_values` | 同上 | 変更 | 変えない | `overrides` の名前は出所の表から求めない |
 | `plan_path` | 同上 | 変更 | 変えない | `_prepared` が返すテンプレートを描画する |
-| `plan_start` | 同上 | 変更 | 変えない | `impl` で `pr-number` が無いときの開始点を `pr` にする（下の箇条書き） |
+| `restore_pr_number` | 同上 | 新設 | `(plan_file, work_dir, start) -> None` | 途中から始めるプランで `pr-number` が無ければ、開いた PR の番号を書き戻す。開始点は変えない（下の箇条書き） |
 | `plan_argv` | 同上 | 変更 | 変えない | `plan_start` が None なら `run.start` を使う |
 | `_call_plan` | 同上 | 変更 | 変えない | `run.env(run.env_extra)` で子を打つ。`plan_failure` は `UnitsStopped` を分ける |
 | `clear_values` | 同上 | 変更 | 変えない | `units.json` と、`units/` の下のすべての `values.json` も消す。回の記録と `merge.json` は残す |
@@ -304,9 +304,10 @@ contracts/
 | `issue_values` | 同上 | 変更 | `(run, work_dir, location, *, number: Optional[int] = None, repo: Optional[str] = None) -> Optional[dict]` | 課題とリポジトリの組のコピーを使い回す。省けば今のとおり番号の最小の課題 |
 
 - 上書きのテンプレート: `prepare_plan`・`_prepared`・`plan_path` は、同じ 1 つのテンプレート（`run.template`、無ければ `template(run.name)`）を使う。差し込みの欠けの検査（`needed`）と作業の入力の検査（`kinds_of`）も、このテンプレートから求める。`_prepared` が `template(run.name)` を返すと、打ち直しで外した `done-check` や `ci` が戻る
-- `pr-number` の無い実行の記録: この変更より前に始めた `impl` は、PR を作った後で止まっていても番号を持たない。単位の経路でない `impl` も同じである。`plan_start` は、決めた開始点が `pr` を通らずに先へ進むステップで、保存先に `pr-number` が無ければ、`pr` を返す。`pr` の `probe` が開いた PR を探して番号を書き、続くステップを順に流す。レビューは 1 回やり直しになる
-  - `pr` を通るので開始点を変えないステップ: `done-check`・`work`・`acceptance`・`test`・`fix`・`test-repeat`・`push`・`pr`・`fix-push`・`base-sync`・`fix-base`
-  - 上のほかのステップ（`conflict-check`・`ci` など）は `pr` に置き換える
+- `pr-number` の無い実行の記録: この変更より前に始めた `impl` は、PR を作った後で止まっていても番号を持たない。単位の経路でない `impl` も同じである。開始点は止まったステップのまま変えず、`plan_argv` が先に `restore_pr_number` を呼ぶ。これはステップ `pr` の `probe` だけを打ち、開いた PR を探して番号を書く。レビューや CI の修正はやり直さない
+  - 対象のプランはテンプレートのステップの中身から決める。`probe` が `pr-number` を書くステップがあり、ほかのステップの `run` がそれを読むプランである。ステップの id の一覧は持たない
+  - 開始点が `pr` なら、プランの実行が同じ `probe` を打つので何もしない
+  - 開いた PR が無いか照会できなければ書かない。番号を読むステップが理由を出して止まり、次の打ち直しでもう一度照会する
 - `issue_values`
   - 事後条件: 題のコピーは `{"title", "repo"}`。`repo` が違うコピーは使わない
   - 副作用: 読み直すときは、題のコピーを消す → 本文を書く → 題のコピーを書く、の順にする
@@ -328,7 +329,7 @@ contracts/
 | --- | --- | --- | --- |
 | `prepare_plan`・`invoke` | 経路の分かれ。これまでの経路の `values.json` と `--set` に `branch` が足されない | `per_unit` の無い定義 | `UnitsStopped` の結果 |
 | `plan_argv` | 記録が無ければ `--from <start>` | 止まった回は止まったステップから | — |
-| `plan_start` | `pr-number` があれば止まったステップから | `pr-number` が無く `conflict-check`・`ci` で止まった回は `pr` から。`test` で止まった回は `test` から | — |
+| `restore_pr_number` | `pr-number` があれば照会しない | 無ければ開始点を変えずにステップ `pr` の `probe` を打つ。開始点が `pr` のプランと、番号を読むステップの無いプランは打たない | — |
 | `_prepared` | `values.json` を使い回しても上書きのテンプレートを返す | 上書きが無ければ今のまま | — |
 | `clear_values` | 単位の `values.json` を消す | `units/` が無い | — |
 | `issue_values` | 指定した課題とリポジトリ | 別のリポジトリの同じ番号のコピー、題のコピーが無い中断 | 権限なし |

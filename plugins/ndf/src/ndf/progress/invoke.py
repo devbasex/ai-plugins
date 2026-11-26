@@ -18,8 +18,9 @@
 差し込みの値（`--set`）でなく、埋めたプランの作業場所（プランの `worktree`）で渡す。差し込みの `worktree` はプランの
 実行が決まった名前として持ち、上書きを断るためである。止まったプランを打ち直すときは、前の回の結果の打ち直し（`next` の `--from`）と
 同じく止まったステップから新しい回を始め、差し込み `progress_attempt` に打ち直しの数を載せて回のキーを変える。同じ引数で
-打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。実装のプランが PR の番号の記録を持たずに PR の
-ステップより先で止まっていれば、PR のステップから始める（`plan_start`）。skill と script は入力の作業場所で打つ。
+打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。途中のステップから始めるプランが PR の番号の記録を
+読むのに記録が無ければ、開始点は変えずに、先に開いた PR の番号を書き戻す（`restore_pr_number`）。skill と script は入力の
+作業場所で打つ。
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
 テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の設定から読み（レビューは設定が
@@ -45,7 +46,9 @@ from ndf.contracts.worker_kinds import VALUES_FILE, kind_gaps, read_values, writ
 from ndf.core import durable, production_merge, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
+from ndf.core.plan import model as plan_model
 from ndf.core.plan import runner as plan_runner
+from ndf.core.plan import steps as plan_steps
 from ndf.progress import definition, issue_values, merge_pending, model, plan_runs, rebuild_values, refactor_values, stages
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.progress.plan_runs import StageResult, StageRun
@@ -70,13 +73,6 @@ APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
 # プランの実行の保存先に残す、回の打ち直しの数（`plan_attempt`）と、それを渡す差し込みの名前
 ATTEMPT_FILE = "progress-attempt.json"
 ATTEMPT_SET = "progress_attempt"
-# 実装のプランの名前（`impl-<ブランチ>`）の頭と、打ち直しで開始点を変えないステップ（`pr` のステップを通ってから、保存した
-# PR の番号を読むステップへ進むもの。`plan_start`）
-IMPL_PLAN_PREFIX = "impl-"
-PR_STEP = "pr"
-REACHES_PR_STEP = frozenset(
-    {"done-check", "work", "acceptance", "test", "fix", "test-repeat", "push", PR_STEP, "fix-push", "base-sync", "fix-base"}
-)
 
 
 class StageInputError(Exception):
@@ -637,27 +633,34 @@ def plan_start(work_dir: Path) -> Optional[str]:
     """プランを打ち直す開始点。前の回が止まっていれば、その結果の打ち直し（`next`）の `--from`（止まったステップ）。
 
     止まっていなければ前の回の開始点（承認の回答を渡すときも同じ回に届く）。前の回が無ければ None（初めから）。
-    実装のプランは、PR の番号の記録の無い保存先を、番号を読むステップから流さない（`_before_pr_number`）。
     """
     record, done = plan_runs.previous(work_dir)
     if record is None:
         return None
     again = plan_runs.from_of(done["next"]) if done is not None and done["status"] == result.STOPPED and "next" in done else None
     if again is not None:
-        return _before_pr_number(work_dir, record, again)
-    start = record["start"] if "start" in record else None
-    return _before_pr_number(work_dir, record, start) if isinstance(start, str) else None
+        return again
+    return record["start"] if "start" in record and isinstance(record["start"], str) else None
 
 
-def _before_pr_number(work_dir: Path, record: Mapping[str, Any], start: str) -> str:
-    """実装のプランの開始点 `start` が `pr` のステップを通らず、保存先に PR の番号の記録が無ければ `pr`。ほかは `start`。
+def restore_pr_number(plan_file: Path, work_dir: Path, start: str) -> None:
+    """開始点 `start` から流すプランが読む PR の番号の記録が保存先に無ければ、開いた PR の番号を書き戻す（#4369）。
 
-    番号を保存する前のバージョンで始めた実装は、PR を作った後で止まっていても番号を持たず、衝突の確かめ・レビュー・CI が番号を
-    読めずに止まり続ける。`pr` のステップは開いた PR を探して番号を書き、続くステップを順に流す（#4369）。
+    番号を保存する前のバージョンで始めた実装は、PR を作った後で止まっていても番号を持たない。照会は番号を書くステップ自身の
+    `probe` を打つだけで、開始点は変えない（レビューや CI の修正をやり直さない）。対象は、番号を `probe` が書くステップがあり、
+    ほかのステップの `run` が読むプランだけである。開始点が番号を書くステップなら、プランの実行が同じ `probe` を打つので何もしない。
+    開いた PR が無いか照会できなければ書かずに戻り、番号を読むステップが理由を出して止まる。
     """
-    impl = "name" in record and str(record["name"]).startswith(IMPL_PLAN_PREFIX)
-    saved = Path(route.PR_NUMBER_FILE.replace("{state_dir}", str(work_dir)))
-    return PR_STEP if impl and start not in REACHES_PR_STEP and not saved.is_file() else start
+    if Path(route.PR_NUMBER_FILE.replace("{state_dir}", str(work_dir))).is_file():
+        return
+    plan = plan_model.load(plan_file)
+    writers = [s for s in plan.steps if s.probe is not None and route.PR_NUMBER_FILE in s.probe]
+    read = any(route.PR_NUMBER_FILE in s.run for s in plan.steps if s not in writers)
+    if not read or any(s.id == start for s in writers):
+        return
+    ctx = plan_steps.StepContext(plan, work_dir, {"state_dir": str(work_dir)})
+    for step in writers:
+        plan_steps.probe(ctx, step, plan_steps.timeout_of(step))
 
 
 def stored_gate_routes(work_dir: Path) -> Optional[dict[str, Any]]:
@@ -706,9 +709,10 @@ def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -
         start = plan_start(work_dir)
         start = start if start is not None else run.start
     attempt = plan_attempt(run, work_dir)
-    argv = ndf_command(
-        PLAN, "next", str(plan_path(run, work_dir, cwd)), *(["--from", start] if start else []), "--state-dir", str(work_dir)
-    )
+    plan_file = plan_path(run, work_dir, cwd)
+    if start:
+        restore_pr_number(plan_file, work_dir, start)
+    argv = ndf_command(PLAN, "next", str(plan_file), *(["--from", start] if start else []), "--state-dir", str(work_dir))
     for key, value in run.inputs.items():
         if key != "worktree":
             argv += ["--set", f"{key}={_set_value(value)}"]

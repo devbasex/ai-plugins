@@ -41,7 +41,7 @@
 | `src/ndf/domains/loop/acceptance.py` | `--no-criteria` |
 | `src/ndf/core/route/__init__.py` | `unit_template`・`unit_review_launch`・`review_launch` |
 | `contracts/templates/{impl,pr,params}.json`・`contracts/templates/parts/steps.json` | PR の番号の保存、フォークの除外、`unit_file` |
-| `src/ndf/progress/invoke.py` | `StageRun` の欄の利用、`plan_start` の `pr` への置き換え、単位を流す処理への分かれ |
+| `src/ndf/progress/invoke.py` | `StageRun` の欄の利用、`restore_pr_number`（PR の番号の書き戻し）、単位を流す処理への分かれ |
 | `src/ndf/progress/issue_values.py` | 課題とリポジトリを指定できるコピー、単位の `values.json` の掃除 |
 | `src/ndf/progress/{stages,definition}.py` | `per_unit` |
 | `contracts/workflow/ndf.schema.json`・`contracts/schemas/{internal/stage-snapshot,project-workflow}.schema.json`・`contracts/schemas/io/` | `per_unit`・`unit_required_checks`（`io/` は生成し直す） |
@@ -97,7 +97,7 @@
 
 ### Task 8: 工程の定義の `per_unit` と、工程から作業を呼ぶ層の準備
 - **対象ファイル:** `src/ndf/progress/{plan_runs,invoke,issue_values,stages,definition}.py`、`contracts/workflow/ndf.schema.json`、`contracts/schemas/internal/stage-snapshot.schema.json`、`contracts/schemas/project-workflow.schema.json`、`contracts/schemas/io/`、`tests/progress/test_invoke_per_unit.py`、`tests/progress/test_invoke_issue_copies.py`、`tests/progress/test_definition.py`
-- **変更内容:** `StageRun` の追加の欄と `plain()`、上書きのテンプレートと値、`plan_start` の `pr` への置き換え、`issue_values` の課題とリポジトリの指定、`clear_values` の単位の掃除、`StageDef.per_unit`。`implement.json` はまだ変えない（既定の振る舞いは `pr-number` の置き換えのほかは変わらない）
+- **変更内容:** `StageRun` の追加の欄と `plain()`、上書きのテンプレートと値、`restore_pr_number`、`issue_values` の課題とリポジトリの指定、`clear_values` の単位の掃除、`StageDef.per_unit`。`implement.json` はまだ変えない（既定の振る舞いは `pr-number` の書き戻しのほかは変わらない）
 - **満たす受け入れ条件:** 1・2・6
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
