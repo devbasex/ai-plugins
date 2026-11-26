@@ -54,7 +54,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `plugins/ndf/src/ndf/domains/release/record_decide.py` | 変更 | 記録の形・値と SHA の照合・対象の決め方・正の一覧・代表・判定に使う行・`to_test` | — | モジュール `record_decide` | `Record`（項目）・`Correction`・`Push`・`Confirmation` と下の「関数の仕様」の新設の関数 |
 | `plugins/ndf/src/ndf/domains/release/record.py` | 変更 | バージョンの無い記録の書き込みと訂正、閉じる手順の読み取り | `record_decide`・`adapters.github`・`adapters.git`・`httpx` | モジュール `record` | `write_unversioned`・`correct_targets`・`read_release`・`write_verification`（引数） ほか下の表 |
 | `plugins/ndf/src/ndf/domains/release/cli.py` | 変更 | 引数の受け口と結果の組み立て | `record` | モジュール `cli` | `cmd_record`・`cmd_records`・`cmd_verification_record`（中身）・`_record_args`（新設） |
-| `plugins/ndf/src/ndf/adapters/github.py` | 変更 | 照会できない権限を例外で返す読み方、push の記録・CD の実行の一覧・コメントの削除 | githubkit | クラス `GitHub`・`Authored` | `Authored.comment_id`（項目）・`permission_strict`・`trusts_strict`・`branch_activity`・`workflow_runs`・`delete_comment` |
+| `plugins/ndf/src/ndf/adapters/github.py` | 変更 | 照会できない権限を例外で返す読み方、push の記録・CD の実行の一覧・コメントの削除 | githubkit | クラス `GitHub`・`Authored` | `Authored.comment_id`（項目）・`permission`・`_read_permission`（中身）・`permission_strict`・`trusts_strict`・`branch_activity`・`workflow_runs`・`delete_comment` |
 | `scripts/contracts_lib/project_flow_doc.py` | 新設 | 流れの文書の生成した範囲を正本から作る | `contracts` のデータ | モジュール `project_flow_doc` | `render`・`replace_generated`・`mismatches` |
 | `scripts/check-ndf-contracts.py` | 変更 | `--write` で書き出し、引数なしで違いを違反にする | `project_flow_doc` | モジュール | `main`（引数）・`flow_doc_violations`（新設） |
 
@@ -345,7 +345,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_command_result` | `release/record.py` | 新設 | `_command_result(root: Path, command: str, after: str, timeout: int) -> Mapping` | `{revision}` を `after` に置き換えたコマンドをリポジトリの根で 1 回実行し、終了コード 0・75・1・それ以外を、成功・未完了・失敗・未確定の `run` の形（`status`・`conclusion`）にする（cd-setup.md の契約） |
 | `_observe` | `release/record.py` | 新設 | `_observe(delivery: Mapping) -> tuple[Any, str]` | `observe.url` を `httpx` で 1 回読み、`pointer` の値と読んだ URL を返す |
 | `_write_one` | `release/record.py` | 新設 | `_write_one(hub: GitHub, made: Record, holder: int, others: Sequence[int]) -> list[Written]` | 1 つの配布先の記録を書く順の手順 1〜4 で書き、重なりを自分のコメントの削除で戻す |
-| `_candidates` | `release/record.py` | 新設 | `_candidates(hub: GitHub, number: int, select: Selection) -> tuple[list[Authored], list[Record], list[Correction], list[dict]]` | 読み取りの手順 1〜3（マーカーで候補にし、JSON で今回のリリースに絞り、残りの書き手だけを `trusts_strict` で照会する） |
+| `_candidates` | `release/record.py` | 新設 | `_candidates(hub: GitHub, number: int, select: Selection) -> tuple[list[Authored], list[Record], list[Correction], list[dict]]` | 読み取りの手順 1〜3（マーカーで候補にし、JSON で今回のリリースに絞り、リリース記録とテストの記録の書き手を `trusts_strict` で照会してから、信用したリリース記録の値のコミットに一致する訂正だけを照会する） |
 | `Selection` | `release/record.py` | 新設 | `NamedTuple Selection(version: str \| None, release: int \| None, unit: str \| None)` | `records` の絞り込みの引数 |
 | `read_release` | `release/record.py` | 新設 | `read_release(hub: GitHub, number: int, select: Selection, bodies: bool, issues: Sequence[int] \| None) -> dict[str, Any]` | 読み取りの手順 1〜6 と `to_test`。`records` の新しい `outputs` を返す |
 | `pr_body_only` | `release/record.py` | 新設 | `pr_body_only(hub: GitHub, number: int) -> dict[str, Any]` | `--pr-body-only`。その PR の本文と `trusted` だけを返す |
@@ -419,6 +419,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `write_unversioned` | 含めた PR の各々へ書き、作業の PR が無ければ本番の PR へ書く | 同じ引数の打ち直しで CD を照会しない。2 つの配布先の一方だけ完了で `recorded` と `pending` に分ける。並行した同じ引数の 2 回で記録が 1 件に戻る | 確かめ 0〜6 の各行で何も書かない。すべて未確定で `precondition`、書けた配布先が無く失敗があれば `refused` |
 | `correct_targets` | 訂正の記録を足し、前の記録を消さない | 訂正の後、新しい一覧で打ち直した配布先では前のテストの記録が判定に使われる | 宣言がある・記録が無い値で止まる |
 | `read_release` | `--version` の値の記録を代表にし、`--unit` の単位だけを使う。同じ記録が 2 件残っていても 1 件として数える | 正と違う記録が最後にあっても正の記録が代表。別のリリースの記録の書き手の照会が 403 でも読める | 候補の書き手の照会が 403 で失敗。`read` の書き手の本文は `trusted` が偽 |
+| `_candidates` | 信用したリリース記録のコミットの訂正を残す | 信用されない書き手のリリース記録にだけ対応する訂正は、書き手を照会せずに除く（照会が 403 でも止まらない） | 信用したリリース記録のコミットの訂正の書き手が 403 で `PermissionUnknown` |
 | `pr_body_only` | その PR の本文だけを返す | 別のリリース記録を持つ PR | — |
 | `write_verification` | `environments` つきで書ける | `retest_reason` のある不合格のテストし直し | `environments` 無し・反映の記録の無い配布先・記録の PR でない・理由の無いテストし直しで書かない |
 
