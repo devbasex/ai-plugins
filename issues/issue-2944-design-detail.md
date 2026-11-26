@@ -433,7 +433,7 @@ src/ndf/
 | `_pick` | 同 | 新設 | `_pick(a: Namespace) -> int` | `json` は結果 JSON、`args` は 1 行 1 引数 |
 | `_report` | 同 | 新設 | `_report(a: Namespace) -> int` | 使用量ログと実験の記録を読んで結果を出す |
 | `report_rows` | 同 | 新設 | `report_rows(usage_rows, experiment_rows, since, until, stage) -> list[dict]` | 設計書の「集計」の順と区分で値を組む |
-| `main` | `domains/settings/delegate_args_cli.py` | 新設 | `main(argv: list[str]) -> int` | `--runtime` は `codex`・`kiro`・`agy` の 3 つ。codex は `pick("seat", "delegate", "codex")` と `safety_args("codex", "delegate", cwd)` の引数を続けて出す。kiro と agy は `pick` を呼ばず、`safety_args(runtime, "delegate", cwd)` の引数だけを出す |
+| `main` | `domains/settings/delegate_args_cli.py` | 新設 | `main(argv: list[str]) -> int` | `--runtime` は `codex`・`kiro`・`agy` の 3 つ。codex は `pick("seat", "delegate", "codex")` と `safety_args("codex", "delegate", cwd)` の引数の並びを続け、引数を 1 つずつ 1 行に出す（行数は固定ではない）。kiro と agy は `pick` を呼ばず、`safety_args(runtime, "delegate", cwd)` の引数だけを出す |
 
 - 引数を出す 2 つ（`_pick` の `args` の形と、`delegate-args` の `main`）は、`InternalError` を自分で受けて標準エラーへ書き、標準出力に何も出さずに 0 以外で終える。`delegate-args` は、出す引数がすべてそろってから 1 回で書き出す（codex はモデルと effort の引数と安全装置の引数、kiro と agy は安全装置の引数）
 - `report` は呼ばれた時点で計算し直し、出現率のファイルを書き換えない

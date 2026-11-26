@@ -380,7 +380,14 @@ while IFS= read -r a; do [ -n "$a" ] && ARGS+=("$a"); done <<<"$out"
 NDF_AI_CHILD=1 timeout 1320 codex exec "${ARGS[@]}" -C "$PWD" < "$TMP/prompt.md"
 ```
 
-`--runtime codex` の `ndf delegate-args` は、1 つのプロセスの中で次の 2 つの処理を呼び、2 つの引数を続けて出す。1 つは、モデルと effort を選ぶ処理（`pick --layer seat --name delegate` と同じ）である。もう 1 つは、安全装置の引数を返す処理（#1959 の `safety-args --use delegate` と同じ）である。モデルの選択と承認の確認は別の部品のままで、エントリポイントはつなぐだけである。どちらかが失敗すれば、何も出さずに 0 以外で終える。
+`--runtime codex` の `ndf delegate-args` は、モデルと effort の引数の並びに、安全装置の引数の並びを続け、引数を 1 つずつ 1 行に出力する。どちらの並びも引数の数は決まっていないので、出力の行数は固定ではない。たとえば effort だけの指定と `-s workspace-write` なら、`-c`・`model_reasoning_effort=medium`・`-s`・`workspace-write` の 4 行になる。
+
+2 つの並びは、1 つのプロセスの中で次の 2 つの処理を呼んで作る。
+
+- モデルと effort を選ぶ処理（`pick --layer seat --name delegate` と同じ）
+- 安全装置の引数を返す処理（#1959 の `safety-args --use delegate` と同じ）
+
+モデルの選択と承認の確認は別の部品のままで、エントリポイントはつなぐだけである。どちらかが失敗すれば、何も出さずに 0 以外で終える。
 
 #1959 の実装は、手順書の委譲をいったん `safety-args` にする。この設計の実装の後は、通常の委譲の経路（Codex・Kiro・agy。CLI ごとの参照手順を含む）をすべて `delegate-args` にし、手順書に `safety-args` の直接の呼び出しを残さない。**Kiro・agy の委譲では `pick` を呼ばず、`safety_args` の結果だけを返す。** `delegate` の工程の選択肢は Codex にしか無く、モデルと effort の指定を足す先が無いためである。
 
