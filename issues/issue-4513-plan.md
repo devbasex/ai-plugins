@@ -16,14 +16,15 @@
 | `contracts/schemas/result.schema.json` | `product_version` を空白だけでない文字列にし、バージョン番号の形を `$defs/version_number` へ移す |
 | `contracts/schemas/release-verification.schema.json` | `version` を空白だけでない文字列にする |
 | `contracts/worker/kinds.json`・`contracts/workflow/context.schema.json` | `product_version` の説明。文脈の `product_version` を改行を含まない 1 行に限る |
-| `src/ndf/contracts/worker_kinds.py` | `write_released`・`released_of`（新設）、`write_values`（変更） |
+| `src/ndf/contracts/worker_kinds.py` | `Recorded`・`write_released`・`released_of`（新設）、`write_values`（変更） |
 | `src/ndf/progress/definition.py` | `required_outputs`（新設） |
 | `src/ndf/progress/plan/__init__.py` | `record_release`（`--version` を文脈の `product_version` の定義で確かめる） |
 | `src/ndf/progress/run.py` | `released_answer`（新設）、`_prepare`・`_run_step`・`_step_draft`・`_finish_stage`（変更） |
 | `src/ndf/progress/invoke.py` | `StageRun.released`・`PreparedPlan.released`・`uses_released`・`answered_gap_detail`（新設）、`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
 | `src/ndf/core/route/__init__.py` | `_built`・`rendered`（新設）、`render`（変更） |
 | `src/ndf/progress/gate/entry.py` | `released_outcome`・`_strategy_at`・`Released`（新設）、`WorkHandoff`・`_cmd_work`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`（変更） |
-| `src/ndf/domains/release/forms_decide.py` | `reaches`（新設）、`deliveries_of`（変更） |
+| `src/ndf/progress/gate/release.py` | `_released`・`take_reply`（変更。オーガナイザーの承認と一緒に届け先を記録する） |
+| `src/ndf/domains/release/forms_decide.py` | `reaches`・`production_delivery`（新設）、`deliveries_of`（変更） |
 | `src/ndf/core/worker.py`・`core/worker_outcome.py` | 引数 `--require-version-number`、`Checked`（新設）、`require_outputs`・`_output_gap`・`outcome_of`（変更） |
 | `src/ndf/core/plan/steps.py`・`transition_decide.py`・`runner.py`・`records.py` | `missing_outputs` と要約の引き継ぎ、`outputs.json` の要素の並び |
 | `skills/` の 5 ファイル | `product_version` の意味と、出力の足りない承認の読み方 |
@@ -66,12 +67,12 @@
 
 ### Task 4: 記録済みの値を `values.json` で渡し、worker を起動せずに終える
 
-- **対象ファイル:** `contracts/worker_kinds.py`（`write_released`・`released_of`・`write_values`）・`progress/run.py`（`released_answer`・`_prepare`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`core/route/__init__.py`（`_built`・`rendered`・`render`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`domains/release/forms_decide.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
-- **変更内容:** 詳細設計書の「値のファイル」「工程の進行: 記録済みの値の読み方」「worker の起動」の記録済みの値の分
+- **対象ファイル:** `contracts/worker_kinds.py`（`Recorded`・`write_released`・`released_of`・`write_values`）・`progress/run.py`（`released_answer`・`_prepare`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`core/route/__init__.py`（`_built`・`rendered`・`render`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`progress/gate/release.py`（`_released`・`take_reply`）・`domains/release/forms_decide.py`（`reaches`・`production_delivery`）・`tests/progress/gate/test_gate_release.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
+- **変更内容:** 詳細設計書の「値のファイル」「工程の進行: 記録済みの値の読み方」「worker の起動」の記録済みの値の分と、「オーガナイザーの承認と一緒に届け先を記録する」
 - **満たす受け入れ条件:** 1・2
 - **進め方:**
   1. Task 3 のテストを通す
-  2. 設計書のテスト設計の決定 2・3 と条件 1 の行を足して通す。届け先の選び方（1 行に決まらないか文脈の形に合わなければ、worker を起動せずに `stopped`）、利用者の承認の回で worker を起動すること、前の `values.json` が残った retry、ハイフンと波括弧を含む値である
+  2. 設計書のテスト設計の決定 2・3 と条件 1 の行を足して通す。届け先の記録（承認を記録した時点で 1 行に決まって文脈の形に合うときだけ記録し、記録が無ければ worker を起動せずに `stopped`。止まった後に設定を直して retry しても `stopped` のまま）、利用者の承認の回で worker を起動すること、前の `values.json` が残った retry、ハイフンと波括弧を含む値である
   3. 整理
 
 ### Task 5: 値をそろえた判断の求めへの承認で終わることを再現し、`gate` の出力を引き継ぐ

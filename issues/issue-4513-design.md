@@ -85,10 +85,11 @@ graph TD
 | 文脈の定義（`context.schema.json`） | `product_version` を配布識別子の共通の定義にし、改行を含まない、空白だけでない 1 行に限る |
 | まとめたリリースの回答の記録（`progress/plan/__init__.py` の `record_release`） | `ndf lanes release --version` の値を、記録する前に文脈の `product_version` の定義で確かめる |
 | リリース後テストの記録の定義（`release-verification.schema.json`） | `version` は改行を含まない、空白だけでない 1 行の文字列を受け付ける |
-| 実行の保存先の値のファイル（`values.json`。形の定義は `src/ndf/contracts/worker_kinds.py`） | 差し込みの値とは別に、任意のキー `released_version` で記録済みの値を持つ |
-| 工程の進行（`progress/invoke.py`・`progress/run.py`） | 直近のリリース承認ゲートの回答がオーガナイザーの承認なら、その回答が書いた `product_version` を `values.json` に書く（選び方は「記録済みの値の読み方」）。出力の足りない承認の失敗の理由を組み立てる |
+| 実行の保存先の値のファイル（`values.json`。形の定義は `src/ndf/contracts/worker_kinds.py`） | 差し込みの値とは別に、任意のキー `released_version`・`released_delivery` で記録済みの値（配布識別子と、承認と一緒に記録した届け先）を持つ |
+| 工程の進行（`progress/invoke.py`・`progress/run.py`） | 直近のリリース承認ゲートの回答がオーガナイザーの承認なら、その回答が書いた `product_version` と `delivery` を `values.json` に書く（選び方は「記録済みの値の読み方」）。出力の足りない承認の失敗の理由を組み立てる |
 | 工程の定義の読み手（`progress/definition.py`） | ステップの出力の規約が `outputs` に必須とするキーの名前を返す |
-| worker の起動（`progress/gate/entry.py`・`domains/release/forms_decide.py`） | バージョンの保存先の種類を読む。記録済みの値があり種類が `none` なら、worker を起動せずに記録済みの値で終える。それ以外は、返す値の形を起動指示と確かめの引数に入れて worker を起動する |
+| オーガナイザーの承認の記録（`progress/gate/release.py`・`domains/release/forms_decide.py`） | オーガナイザーの承認をリリース承認ゲートの回答として書くとき、バージョンの保存先が `none` なら、その時点の設定から本番の届け先を 1 行に決めて `delivery` も書く（「`delivery` は、その配布の記録から読み」の段落） |
+| worker の起動（`progress/gate/entry.py`） | バージョンの保存先の種類を読む。記録済みの値があり種類が `none` なら、worker を起動せずに記録済みの値で終える。それ以外は、返す値の形を起動指示と確かめの引数に入れて worker を起動する |
 | worker の結果の確かめ（`core/worker.py`・`core/worker_outcome.py`） | 必須の `outputs` を、結果 JSON の定義に加えて文脈の定義でも確かめる。指定されたときだけ、`product_version` がバージョン番号の形かも確かめ、違えば欠けにする。判断を求めた結果（`gate`）にも、確かめを通った必須の `outputs` を引き継ぎ、足りない必須の名前を `metrics.missing_outputs` に載せる |
 | プランの遷移（`core/plan/steps.py`・`transition_decide.py`・`runner.py`） | 承認ゲートで終わる結果の要約に止まったステップの要約を含め、そのステップの `metrics.missing_outputs` を結果に引き継ぐ |
 | プランの出力の記録（`core/plan/records.py`・`runner.py`） | 実行の保存先の `outputs.json` を、ステップごとの出力の並びにし、プランの結果の出力はそこから組む（「プランの出力の記録」） |
@@ -101,30 +102,42 @@ graph TD
 | 文脈の `product_version`（`context.schema.json`） | 出したものを指す値（配布識別子）の共通の定義にする。改行を含まず、空白だけでない 1 行の文字列を受け付ける | 改行を含む値と空白だけの値は形の誤り | 今受け付ける 1 行の値はそのまま通る |
 | 結果 JSON の `outputs.product_version` | バージョン番号の形でない文字列も受け付ける | 空文字列と空白だけの文字列は形の誤り。改行を含む値は、`ndf worker run` が文脈の定義で確かめて欠けにする | 今受け付ける値はそのまま通る |
 | `ndf lanes release --version` | 記録する前に、値を文脈の `product_version` の定義で確かめる | 改行を含む値と空白だけの値は、記録せずに断る | 1 行の値はそのまま記録する |
-| `ndf answer work` | `values.json` の任意のキー `released_version` を読む。引数は増やさない。`released_version` が無いか空なら今と同じ | バージョンの保存先を読めないときは、バージョン番号を持つ扱いにする | キーを持たない `values.json`（単発のプラン・直す前の NDF が書いたもの）は今と同じ |
+| `ndf answer work` | `values.json` の任意のキー `released_version`・`released_delivery` を読む。引数は増やさない。`released_version` が無いか空なら今と同じ。`released_version` があり `released_delivery` が無ければ、worker を起動せずに止める | バージョンの保存先を読めないときは、バージョン番号を持つ扱いにする | キーを持たない `values.json`（単発のプラン・直す前の NDF が書いたもの）は今と同じ |
 | `ndf worker run` | バージョン番号の形を確かめる任意の引数を足す。結果ファイルが `gate` のときも、必須の `outputs` のうち確かめを通った値を結果の `outputs` に載せ、残りの名前を `metrics.missing_outputs` に載せる | `ok` の結果で `product_version` の形が違えば、結果は `status: stopped`、停止理由は `incomplete` とし、欠けた値に `product_version` を示す。`gate` の結果の無い値と違う形の値は載せず、`gate` のままにする。形は、結果 JSON の定義と文脈の定義（`context.schema.json`）の両方で確かめる | バージョン番号の形の引数が無ければ形は確かめない |
 | プランの結果の `outputs` | 判断を求めた（`gate`）ステップについては、今回の結果の値だけを使う。同じステップが前の回に残した値は使わず、ほかのステップが同じキーに残した値は残る | — | `ok` と `stopped` の値の重ね方（後に書いた値が勝つ）は変わらない |
 | 工程の失敗の理由（`bad_report`） | 承認の回答の後の誤りは、足りない値の名前（決め方は決定 4）・worker が判断を求めた理由の要約・次の操作を含む | 終了の仕方と停止理由の種類は変わらない | 文だけが変わる |
 | リリース後テストの記録の `version` | バージョン番号の形でない文字列も受け付ける | 空白だけは形の誤り | 今受け付ける値はそのまま通る |
 
-**値の渡し方**: 工程の進行は、記録済みの値をプランの argv や差し込みに載せず、実行の保存先の `values.json` に `released_version` として書く。`ndf answer work` は起動指示の材料と同じこのファイルから読む。argv に載せないのは、出したものを指す値の形を問わないためである。プランの実行（`core/plan/steps.py`）は、ステップを打つ直前に argv の各要素の `{repo}`・`{state_dir}` などを `assemble_decide.fill` で置き換える。値を argv に載せると、`{repo}` を含む識別子がリポジトリのパスに変わる。ハイフンで始まる値を `argparse` がオプションと読む心配も、ファイルで渡せば無くなる。
+**値の渡し方**: 工程の進行は、記録済みの値をプランの argv や差し込みに載せず、実行の保存先の `values.json` に `released_version`（と、記録した届け先 `released_delivery`）として書く。`ndf answer work` は起動指示の材料と同じこのファイルから読む。argv に載せないのは、出したものを指す値の形を問わないためである。プランの実行（`core/plan/steps.py`）は、ステップを打つ直前に argv の各要素の `{repo}`・`{state_dir}` などを `assemble_decide.fill` で置き換える。値を argv に載せると、`{repo}` を含む識別子がリポジトリのパスに変わる。ハイフンで始まる値を `argparse` がオプションと読む心配も、ファイルで渡せば無くなる。
 
 記録済みの値で終えるとき、`ndf answer work` が返す出力は次の 2 つである。3 つ目の `mvv_gate` は返さない（`release-mvv` が記録済み）。
 
 | キー | 値 |
 | --- | --- |
 | `product_version` | オーガナイザーが `--version` で渡した値のまま |
-| `delivery` | 下の規則で設定から選ぶ届け先の 1 行 |
+| `delivery` | オーガナイザーの承認と一緒に記録した届け先の 1 行（下の規則） |
 
-**`delivery` は、設定から 1 行に決まり、文脈の形に合うときだけ返す。** 決まらなければ、実際と違う配布方法を記録しないように、worker も起動せずに止める。設定の配列 `branch_strategy.release.deliveries` から本番に届く要素を選ぶ。本番に届く要素は、`channel` が `production` か、省略か `null` の要素である（承認資料の `forms_decide.deliveries_of` が本番チャネルを選ぶ条件と同じ）。配列の順番は使わない。選んだ要素は、文脈の `delivery` の形で確かめる。確かめるときは文脈のスキーマ（`context.schema.json`）の全体へ `{"delivery": 要素}` を渡し、`$defs/delivery` だけを指定しない（理由は詳細設計の「worker の起動」）。設定の形は `target`・`trigger` に空文字列を許すが、文脈の形は 1 文字以上を求めるためである。
+**`delivery` は、その配布の記録から読み、デプロイの工程の時点の設定からは選ばない。** 設定は後から直せるので、今の設定は、過去にどこへ配布したかを確かめた根拠にならないためである（Value 13）。たとえば、配布の時点で本番の届け先が A と B の 2 つあり、止まった後に設定から B を外して retry すると、今の設定から選ぶ形では、同じ配布識別子に A だけが実績として残ってしまう。
 
-| 本番に届く要素 | `ndf answer work` の結果 |
+そこで、届け先は、オーガナイザーの承認をリリース承認ゲートの回答として書くとき（`gate/release.py` の `take_reply`）に 1 度だけ決め、`product_version` と同じ出力の事象に `delivery` として書く。決め方は次のとおりである。
+
+1. 回答を書く時点の設定（ステートマシンの保存先のリポジトリの `.ndf/project.json`）を `branch_strategy.load` で読む。バージョンの保存先の種類が `none` のときだけ決める（`none` 以外は worker が `delivery` を返す）
+2. 配列 `branch_strategy.release.deliveries` から本番に届く要素を選ぶ。本番に届く要素は、`channel` が `production` か、省略か `null` の要素である（承認資料の `forms_decide.deliveries_of` が本番チャネルを選ぶ条件と同じ）。配列の順番は使わない
+3. 本番に届く要素が 1 つで、文脈の `delivery` の形に合うときだけ記録する。確かめるときは文脈のスキーマ（`context.schema.json`）の全体へ `{"delivery": 要素}` を渡し、`$defs/delivery` だけを指定しない（理由は詳細設計の「worker の起動」）。設定の形は `target`・`trigger` に空文字列を許すが、文脈の形は 1 文字以上を求める
+4. 0 か 2 つ以上か、形に合わないか、設定を読めないときは、`delivery` を記録しない。承認の回答そのものは断らない
+
+`ndf answer work` は、この記録を `values.json` 経由で受け取る（「記録済みの値の読み方」）。
+
+| 承認と一緒に記録した `delivery` | `ndf answer work` の結果 |
 | --- | --- |
-| 1 つで、文脈の形に合う | `ok`。その要素をそのまま `outputs.delivery` にする |
-| 1 つで、文脈の形に合わない | `stopped`（`precondition`）。合わないキーと設定の場所を示す |
-| 0（配列が無い・空を含む）か 2 つ以上 | `stopped`（`precondition`）。どの届け先へ出したかが設定から 1 つに決まらないことを示す |
+| ある | `ok`。記録した行をそのまま `outputs.delivery` にする |
+| 無い | `stopped`（`precondition`）。この配布の届け先が記録から確かめられないことと、次の操作を示す |
 
-止めるときに worker を起動しないのは、オーガナイザーがすでに出した後なので、起動すると同じものをもう一度出すことになるためである（決定 2）。固定の値で `delivery` を埋めることもしない。埋めると、配布実績に実際とは違う配布方法が残る。設定を直して工程を retry すると、同じ記録済みの値で終わる。
+記録が無いときは、設定を直して retry しても完了しない。記録は承認の回答と一緒に書いた事象にあり、retry では変わらないためである。次の操作は、利用者が実際の届け先を確かめ、`ndf progress finish` で `delivery` と `product_version` を渡して工程を手で終えることである。
+
+止めるときに worker を起動しないのは、オーガナイザーがすでに出した後なので、起動すると同じものをもう一度出すことになるためである（決定 2）。固定の値で `delivery` を埋めることもしない。埋めると、配布実績に実際とは違う配布方法が残る。
+
+**エンジニア向けの補足**: 回答を書く時点の設定も、配布そのものを観測した結果ではない。ただし、オーガナイザーが配布を済ませて回答を記録した時点の値で、回答と同じトランザクションで 1 度だけ書く。そのため、後の設定の修正では変わらない。オーガナイザーが出した配布物の中身と届け先を本番リリース記録で確かめる仕組みは、#4586（ https://github.com/devbasex/ai-plugins/issues/4586 ）で設計する。
 
 ### プランの出力の記録
 
@@ -155,11 +168,11 @@ sequenceDiagram
   participant W as worker run
   P->>P: release-mvv の出力 mvv_gate を記録する
   P->>P: 直近のリリース承認ゲートの回答を読む（回答した者と書いた値）
-  P->>P: 記録済みの値を values.json の released_version に書く
+  P->>P: 記録済みの値を values.json の released_version・released_delivery に書く
   P->>T: 差し込みを組んで流す
   T->>T: release-merge
   T->>E: work
-  E->>E: values.json の released_version とバージョンの保存先の種類を読む
+  E->>E: values.json の released_version・released_delivery とバージョンの保存先の種類を読む
   alt 値があり kind が none
     E-->>T: ok と product_version・delivery
   else それ以外
@@ -176,10 +189,10 @@ sequenceDiagram
 
 1. デプロイの工程の事象 `answered` のうち、リリース承認ゲートへの回答の最後の 1 件を選ぶ。リリース承認ゲートへの回答は、`kind` が `listen`（承認ゲートへの回答）で、`gate` がゲートの名前 `release` である。この `release` はステップ `release` の名前と同じ文字列だが、ゲートの名前であり、ステップ `release-gate` で出す承認ゲートを指す。worker の判断の求めへの回答は `kind` が `plan` で `gate` を持たないので、選ばれない
 2. その回答の `answer` が `approved` で、回答した者（`by`）が `organizer` であることを確かめる
-3. 回答の事象の番号（`seq`）の次（`seq + 1`）にある事象が、同じ工程の出力の事象（種類が `stages.OUTPUTS_EVENT`）なら、その `payload.outputs` の `product_version` を読む。次の事象がそれ以外なら、値は無い。`answered` の事象そのものは値を持たない。書く側（`gate/answering.py`）は、回答が値を運ぶとき、回答の事象と出力の事象をこの順に続けて 1 つのトランザクションで追記するので、番号は必ず隣り合う
-4. 2 か 3 が成り立たないか、値が空白だけなら、記録済みの値は無いものとする（worker を起動する）
+3. 回答の事象の番号（`seq`）の次（`seq + 1`）にある事象が、同じ工程の出力の事象（種類が `stages.OUTPUTS_EVENT`）なら、その `payload.outputs` の `product_version` と `delivery` を読む。`delivery` は、回答を書いたときに届け先が 1 行に決まった場合だけある。次の事象がそれ以外なら、値は無い。`answered` の事象そのものは値を持たない。書く側（`gate/answering.py`）は、回答が値を運ぶとき、回答の事象と出力の事象をこの順に続けて 1 つのトランザクションで追記するので、番号は必ず隣り合う
+4. 2 か 3 が成り立たないか、`product_version` が空白だけなら、記録済みの値は無いものとする（worker を起動する）。`product_version` があり `delivery` が無い場合は、記録済みの値はあり、届け先は記録されていないものとする（`ndf answer work` は止まる）
 
-工程の進行は、プランを流す直前に毎回この手順で値を読み、`values.json` の `released_version` を今の値に合わせる（値が無ければキーを消す）。値を読んで書くのは、`release` の作業のように `product_version` を出力に持つ作業を流すプランだけである。プランがそうした作業を流すかは、プランを組むときの作業の一覧で分かる。そのため、この手順は、作業の一覧でそうと分かった後に初めて打つ。ほかのプランでは、リリース承認ゲートの回答を探さない（詳細設計の「工程の進行: 記録済みの値の読み方」）。値が `values.json` に残っている値と同じなら書き直さない。同じ試行の中（承認の回答の後・自動の打ち直し）では前の `values.json` を使い回すが、このキーだけは残った値を使わない。工程の retry の後の試行の始めは、`values.json` ごと消えてから書き直される。
+工程の進行は、プランを流す直前に毎回この手順で値を読み、`values.json` の `released_version`・`released_delivery` を今の値に合わせる（値が無ければキーを消す）。値を読んで書くのは、`release` の作業のように `product_version` を出力に持つ作業を流すプランだけである。プランがそうした作業を流すかは、プランを組むときの作業の一覧で分かる。そのため、この手順は、作業の一覧でそうと分かった後に初めて打つ。ほかのプランでは、リリース承認ゲートの回答を探さない（詳細設計の「工程の進行: 記録済みの値の読み方」）。値が `values.json` に残っている値と同じなら書き直さない。同じ試行の中（承認の回答の後・自動の打ち直し）では前の `values.json` を使い回すが、このキーだけは残った値を使わない。工程の retry の後の試行の始めは、`values.json` ごと消えてから書き直される。
 
 ## 決定の記録
 
@@ -196,8 +209,9 @@ sequenceDiagram
 ### 決定 2: 出したものをもう一度出さないため、まとめたリリースの後は worker を起動せずにスクリプトが出力を返す
 
 - **質問**: オーガナイザーが出した後のデプロイの工程で、worker に何をさせるか
-- **選んだ案**: バージョンの保存先が `none` で、直近のリリース承認ゲートの回答がオーガナイザーの承認で空白だけでない `product_version` を書いていれば、`ndf answer work` は worker を起動せずに ok の結果を返す。届け先が設定から 1 行に決まらないときは、worker を起動せずに止める（「入出力のコントラクト」の `delivery` の表）。完了の根拠は今と同じく、オーガナイザーの記録（`ndf lanes release --result released`）とリリース承認ゲートの承認である。`release-merge` は残す（マージ済みなら何もしない）
+- **選んだ案**: バージョンの保存先が `none` で、直近のリリース承認ゲートの回答がオーガナイザーの承認で空白だけでない `product_version` を書いていれば、`ndf answer work` は worker を起動せずに ok の結果を返す。`delivery` は、オーガナイザーの承認と一緒に記録した届け先を返し、記録が無いときは worker を起動せずに止める（「入出力のコントラクト」の `delivery` の表）。完了の根拠は今と同じく、オーガナイザーの記録（`ndf lanes release --result released`）とリリース承認ゲートの承認である。`release-merge` は残す（マージ済みなら何もしない）
 - 採らなかった案: 記録済みの値を worker の入力に足し、手順書で「もう出さずに返す」と指示する（判断の要らない手順でも、LLM に任せると同じ入力で判断を求めて止まることがある。受け入れ条件 1・2 を毎回は満たせない）
+- 採らなかった案: `delivery` を、デプロイの工程の時点の設定から選ぶ（止まった後に設定を直して retry すると、過去の配布先を確かめないまま、直した設定の届け先が実績として残る。Value 13 に反する）
 - 採らなかった案: デプロイのプランごと飛ばす（承認した PR がマージされていない場合を拾えない）
 - 採らなかった案: バージョン番号を持つリポジトリでも worker を起動しない（そのリポジトリの手順を変えることになる。要求の対象範囲の外である）
 - 採らなかった案: worker を省く前に、本番リリース記録（本番へ出した値と含めた PR を、機械が読む形で書いた PR のコメント）で、承認した PR の変更が、オーガナイザーが出した配布物に含まれると確かめる。手動の配布で記録を置くコマンドと、確かめで止まったレーンを承認を取り直さずに指し直すコマンドも足す。この課題では採らず、#4586（ https://github.com/devbasex/ai-plugins/issues/4586 ）で設計し直す。理由は次の 3 つである
@@ -211,7 +225,7 @@ sequenceDiagram
 ### 決定 3: 進行中のスプリントにも効き、値が書き換わらないように、記録済みの値は実行の保存先の `values.json` で渡す
 
 - **質問**: 記録済みの値を、何を通して `ndf answer work` へ渡すか
-- **選んだ案**: 工程の進行が、リリース承認ゲートの回答から読んだ値を `values.json` の `released_version` に書く。承認した HEAD とマージ先（`approved_head`・`approved_base`）と同じく、承認の記録を出所にする。値は、その回答と一緒に文脈へ書いた `product_version` で、回答した者がオーガナイザーのときだけ入れる（「記録済みの値の読み方」）
+- **選んだ案**: 工程の進行が、リリース承認ゲートの回答から読んだ値を `values.json` の `released_version` に書く。承認した HEAD とマージ先（`approved_head`・`approved_base`）と同じく、承認の記録を出所にする。値は、その回答と一緒に文脈へ書いた `product_version` と `delivery` で、回答した者がオーガナイザーのときだけ入れる（「記録済みの値の読み方」）
 - 採らなかった案: 工程の定義の `optional_inputs` に `product_version` を足す（定義はスプリントに保存される。止まっているスプリントには効かない）
 - 採らなかった案: テンプレートの差し込みにして `ndf answer work` の引数で渡す（プランの実行が argv の中の `{repo}` などを置き換え、記録した値と違う値になる。置き換えを避ける書き方を足すと、全プランの argv の扱いが変わる）
 - 採らなかった案: 文脈に `product_version` があれば記録済みとみなす（やり直す前のデプロイが書いた値でも、人が承認した回に worker を飛ばしてしまう）
@@ -263,7 +277,7 @@ sequenceDiagram
 - **当たるモード**: デプロイの工程を持つモード。出力の足りない承認の理由の文は、すべての工程に当たる
 - **配布物に含まれない変更**: まとめたリリースの後、`release-merge` がこの工程で初めてマージした変更も、今と同じく完了になる。本番リリース記録で確かめる仕組みは #4586 で扱い、それまではリリース後テストが拾う
 - **手動の配布**: 機械が読む本番リリース記録を置く手段が無いので、手動で配布したスプリントは、リリース後テストの記録と課題を閉じる判定で記録を見つけられず止まる（今と同じ）。#4586 で扱う。受け入れ条件 4 は、同じ識別子の本番リリース記録を読める場合に限った条件で、この経路は含まない
-- **届け先が 1 つに決まらない設定**: `none` のリポジトリで、本番に届く届け先が設定に無いか 2 つ以上あるか、その行が文脈の形に合わないと、まとめたリリースの後のデプロイの工程は理由を示して止まる。設定を直して retry すれば終わる
+- **届け先が 1 つに決まらない設定**: `none` のリポジトリで、オーガナイザーの承認を記録した時点で、本番に届く届け先が設定に無いか 2 つ以上あるか、その行が文脈の形に合わないと、届け先は記録されない。まとめたリリースの後のデプロイの工程は理由を示して止まる。設定を直して retry しても終わらない。利用者が実際の届け先を確かめ、`ndf progress finish` で工程を手で終える
 - **壊れうる箇所**: 結果 JSON の定義を緩める。そのため、`product_version` を書く経路が worker の確かめを通らないと、形が守られない。NDF の中で書くほかの経路（バージョンアップの組み立てと `release-steps`）は、バージョンの保存先から値を作る
 
 ### 代表のリポジトリでの振る舞い
@@ -298,7 +312,8 @@ sequenceDiagram
 | 決定 4 | 上と同じプランで、値なしの判断の求めに `approved` と回答すると、先のステップが同じキーを返していても、足りない名前を示して失敗する | 合成した出力だけを確かめると落ちる |
 | 決定 6 | 同じステップが同じキーを 3 回返しても、`outputs.json` の要素は増えない | 返った出力をすべて足すと落ちる |
 | 決定 4 | プラン `release` で `work` が必須の出力の無い判断を求めると、`release-merge` を打った後でも、`approved` の後に失敗する | `release-merge` の結果や前の回の値で必須の出力を埋めると落ちる |
-| 決定 2 | 配列の先頭が `channel: base` の要素で、次が `production` の要素なら、`delivery` は後者になる。`branch: main` を書いた有効な本番の要素も、そのまま `delivery` になる。本番に届く要素が 0 か 2 つ以上か、その要素の `target` が空文字列なら、`stopped`（`precondition`）で止まり、worker は起動されない | 配列の 1 番目を返すと落ちる。固定の値で `delivery` を埋めると落ちる。文脈の形で確かめずに返すと落ちる。`$defs/delivery` だけで確かめると、`branch` の参照が解けずに落ちる |
+| 決定 2 | オーガナイザーの承認を記録するとき、配列の先頭が `channel: base` の要素で、次が `production` の要素なら、記録する `delivery` は後者になる。`branch: main` を書いた有効な本番の要素も、そのまま記録される。本番に届く要素が 0 か 2 つ以上か、その要素の `target` が空文字列なら、`delivery` は記録されず、承認の回答は書かれる。そのときデプロイの工程は `stopped`（`precondition`）で止まり、worker は起動されない | 配列の 1 番目を記録すると落ちる。固定の値で `delivery` を埋めると落ちる。文脈の形で確かめずに記録すると落ちる。`$defs/delivery` だけで確かめると、`branch` の参照が解けずに落ちる |
+| 決定 2 | 承認を記録した時点で本番の届け先が 2 つあり、止まった後に設定から 1 つを外して retry しても、デプロイの工程は `stopped` のままで、`delivery` は文脈に書かれない | デプロイの工程の時点の設定から届け先を選ぶと落ちる |
 | 決定 4 | `gate` の結果ファイルの `delivery` が文脈の必須キー（`versioned` など）を欠くと、`ndf worker run` の結果は `gate` のままで、`delivery` を `outputs` に載せず、`metrics.missing_outputs` に `delivery` を載せる。工程の進行は承認の回答を待つ | 結果 JSON の定義だけで確かめると落ちる（工程の進行が承認を聞く前に `bad_report` にする） |
 | 決定 4 | 判断を求めるステップの後にもステップがあるプランで、値なしの判断の求めに `approved` と回答すると、後のステップを打たずに失敗する。後のステップが同じキーを返すプランでも同じである | 続きのある承認を欠けの確かめなしにプランへ渡すと落ちる |
 | 決定 5 | 改行を含む配布識別子は、`ndf lanes release --version` で記録されずに断られ、`ndf worker run` の `ok` の結果では `product_version` の欠けになる | 入口で文脈の定義を当てないと落ちる |
@@ -312,7 +327,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4513 | 実装する | — | `plugins/ndf/contracts/schemas/result.schema.json`、`plugins/ndf/contracts/schemas/release-verification.schema.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/contracts/worker_kinds.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/plan/__init__.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/worker_outcome.py`、`plugins/ndf/src/ndf/core/plan/transition_decide.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/domains/release/forms_decide.py`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/gate/test_gate_work.py`、`plugins/ndf/tests/progress/gate/test_gate_release.py`、`plugins/ndf/tests/core/test_worker_outcome.py`、`plugins/ndf/tests/core/plan/test_transition.py`、`plugins/ndf/tests/core/plan/test_runner.py`、`plugins/ndf/tests/contracts/test_result.py`、`plugins/ndf/tests/contracts/test_worker_kinds_shape.py`、`plugins/ndf/tests/progress/test_invoke_values.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/core/plan/test_steps.py`、`plugins/ndf/tests/domains/release/test_release_forms.py`、`plugins/ndf/tests/domains/release/test_release_record.py` |
+| #4513 | 実装する | — | `plugins/ndf/contracts/schemas/result.schema.json`、`plugins/ndf/contracts/schemas/release-verification.schema.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/contracts/worker_kinds.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/plan/__init__.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/release.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/worker_outcome.py`、`plugins/ndf/src/ndf/core/plan/transition_decide.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/domains/release/forms_decide.py`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/progress/gate/test_gate_work.py`、`plugins/ndf/tests/progress/gate/test_gate_release.py`、`plugins/ndf/tests/core/test_worker_outcome.py`、`plugins/ndf/tests/core/plan/test_transition.py`、`plugins/ndf/tests/core/plan/test_runner.py`、`plugins/ndf/tests/contracts/test_result.py`、`plugins/ndf/tests/contracts/test_worker_kinds_shape.py`、`plugins/ndf/tests/progress/test_invoke_values.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/core/plan/test_steps.py`、`plugins/ndf/tests/domains/release/test_release_forms.py`、`plugins/ndf/tests/domains/release/test_release_record.py` |
 
 ## 未確認のまま残ること
 
