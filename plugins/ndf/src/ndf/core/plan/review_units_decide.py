@@ -31,7 +31,6 @@ _SEPARATOR = re.compile(r"[・、,]")
 _TASK_ITEM = re.compile(r"(?P<prefix>Task |T)?(?P<first>[0-9]+)(?:〜(?:Task |T)?(?P<last>[0-9]+))?")
 _CRITERIA_ITEM = re.compile(r"(?:(?P<issue>[0-9]+):)?(?P<first>[0-9]+)(?:〜(?P<last>[0-9]+))?")
 _TASK_TITLE = re.compile(r"Task ([0-9]+)(?![0-9])")
-_RULE_CELL = re.compile(r":?-+:?")
 
 
 class PlanDoc(NamedTuple):
@@ -121,10 +120,9 @@ def _first_table(section: Sequence[_Line]) -> Optional[list[list[str]]]:
             break
         if piped:
             rows.append(line)
-    cells = [inputs_decide.split_row(line.text) for line in rows]
-    if len(cells) < 2 or not all(_RULE_CELL.fullmatch(c) for c in cells[1]):
+    if len(rows) < 2 or not inputs_decide.is_rule(rows[1].text):
         return None
-    return [cells[0], *cells[2:]]
+    return [inputs_decide.split_row(line.text) for line in (rows[0], *rows[2:])]
 
 
 def _cell_elements(cell: str) -> list[str]:
