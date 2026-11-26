@@ -704,11 +704,11 @@ def test_a_redacted_remained_quote_is_carried_without_keeping_the_original():
     [
         # 前の確認のアカウント名・秘密の値は、今の実行の環境からは分からない
         (f"担当は {publish.ACCOUNT_TEXT} が承認する", "担当は demoaccount が承認する"),
-        (f"鍵は {run_log.MASK} を使う", "鍵は old-rotated-value を使う"),
+        (f"キーは {run_log.MASK} を使う", "キーは old-rotated-value を使う"),
         (f"Authorization: {run_log.MASK}", "Authorization: Bearer old rotated value"),
         (
-            f"置き場は {publish.HOME_TEXT}/work と {publish.PRIVATE_REF_TEXT} の {publish.EMAIL_TEXT}",
-            "置き場は /home/someone/work と acme/secret#3 の a@example.org",
+            f"保存先は {publish.HOME_TEXT}/work と {publish.PRIVATE_REF_TEXT} の {publish.EMAIL_TEXT}",
+            "保存先は /home/someone/work と acme/secret#3 の a@example.org",
         ),
         # 引用の外の文字（認証ヘッダー）まで伏せる範囲が広がる文書
         (f"承認先は {publish.EMAIL_TEXT} にする", "Authorization: Bearer demo # 承認先は a@example.org にする"),
@@ -726,7 +726,7 @@ def test_a_redacted_quote_is_found_without_masking_the_document_again(quote: str
     [
         (f"連絡先: {publish.EMAIL_TEXT}", "連絡先: 未定"),
         (f"担当は {publish.ACCOUNT_TEXT} が承認する", "担当は 未定 が承認する"),
-        (f"鍵は {run_log.MASK} を使う", "鍵は 使わないことにした値 を使う"),
+        (f"キーは {run_log.MASK} を使う", "キーは 使わないことにした値 を使う"),
     ],
 )
 def test_a_redacted_quote_is_dropped_when_the_value_was_replaced_by_other_words(quote: str, document: str) -> None:
