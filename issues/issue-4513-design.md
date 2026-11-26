@@ -112,7 +112,7 @@ graph TD
 | `product_version` | オーガナイザーが `--version` で渡した値のまま |
 | `delivery` | 下の規則で設定から選ぶ届け先の 1 行 |
 
-**`delivery` は、設定から 1 行に決まり、文脈の形に合うときだけ返す。** 決まらなければ、実際と違う配布方法を記録しないように、worker も起動せずに止める。設定の配列 `branch_strategy.release.deliveries` から本番に届く要素を選ぶ。本番に届く要素は、`channel` が `production` か、省略か `null` の要素である（承認資料の `forms_decide.deliveries_of` が本番チャネルを選ぶ条件と同じ）。配列の順番は使わない。選んだ要素は、文脈の `delivery` の形（`context.schema.json` の `$defs/delivery`）で確かめる。設定の形は `target`・`trigger` に空文字列を許すが、文脈の形は 1 文字以上を求めるためである。
+**`delivery` は、設定から 1 行に決まり、文脈の形に合うときだけ返す。** 決まらなければ、実際と違う配布方法を記録しないように、worker も起動せずに止める。設定の配列 `branch_strategy.release.deliveries` から本番に届く要素を選ぶ。本番に届く要素は、`channel` が `production` か、省略か `null` の要素である（承認資料の `forms_decide.deliveries_of` が本番チャネルを選ぶ条件と同じ）。配列の順番は使わない。選んだ要素は、文脈の `delivery` の形で確かめる。確かめるときは文脈のスキーマ（`context.schema.json`）の全体へ `{"delivery": 要素}` を渡し、`$defs/delivery` だけを指定しない（理由は詳細設計の「worker の起動」）。設定の形は `target`・`trigger` に空文字列を許すが、文脈の形は 1 文字以上を求めるためである。
 
 | 本番に届く要素 | `ndf answer work` の結果 |
 | --- | --- |
@@ -293,7 +293,7 @@ sequenceDiagram
 | 決定 4 | 上と同じプランで、値なしの判断の求めに `approved` と回答すると、先のステップが同じキーを返していても、足りない名前を示して失敗する | 合成した出力だけを確かめると落ちる |
 | 決定 6 | 同じステップが同じキーを 3 回返しても、`outputs.json` の要素は増えない | 返った出力をすべて足すと落ちる |
 | 決定 4 | プラン `release` で `work` が必須の出力の無い判断を求めると、`release-merge` を打った後でも、`approved` の後に失敗する | `release-merge` の結果や前の回の値で必須の出力を埋めると落ちる |
-| 決定 2 | 配列の先頭が `channel: base` の要素で、次が `production` の要素なら、`delivery` は後者になる。本番に届く要素が 0 か 2 つ以上か、その要素の `target` が空文字列なら、`stopped`（`precondition`）で止まり、worker は起動されない | 配列の 1 番目を返すと落ちる。固定の値で `delivery` を埋めると落ちる。文脈の形で確かめずに返すと落ちる |
+| 決定 2 | 配列の先頭が `channel: base` の要素で、次が `production` の要素なら、`delivery` は後者になる。`branch: main` を書いた有効な本番の要素も、そのまま `delivery` になる。本番に届く要素が 0 か 2 つ以上か、その要素の `target` が空文字列なら、`stopped`（`precondition`）で止まり、worker は起動されない | 配列の 1 番目を返すと落ちる。固定の値で `delivery` を埋めると落ちる。文脈の形で確かめずに返すと落ちる。`$defs/delivery` だけで確かめると、`branch` の参照が解けずに落ちる |
 | 決定 4 | `gate` の結果ファイルの `delivery` が文脈の必須キー（`versioned` など）を欠くと、`ndf worker run` の結果は `gate` のままで、`delivery` を `outputs` に載せず、`metrics.missing_outputs` に `delivery` を載せる。工程の進行は承認の回答を待つ | 結果 JSON の定義だけで確かめると落ちる（工程の進行が承認を聞く前に `bad_report` にする） |
 | 決定 4 | 判断を求めるステップの後にもステップがあるプランで、値なしの判断の求めに `approved` と回答すると、後のステップを打たずに失敗する。後のステップが同じキーを返すプランでも同じである | 続きのある承認を欠けの確かめなしにプランへ渡すと落ちる |
 | 決定 5 | 改行を含む `version`（末尾の改行だけのものを含む）はリリース後テストの記録の形の誤りになる。1 行の `main abc1234` の記録を `render_verification` で描き、`verifications` で読み直すと、`version` と `issues` が元と同じである | スキーマを `^…$` の 1 つの正規表現にすると落ちる（末尾の改行が通る）。読み取りが別のブロックを拾うと落ちる |

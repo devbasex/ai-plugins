@@ -260,7 +260,7 @@ plugins/ndf/
   - 事前条件: `saved` は `values_in` で読んだ `values.json`
   - 事後条件: `released_of(saved)` があり、`strategy` が `None` でなく、その `version_store["kind"]` が `"none"` で、作業 `work` の定義の `outputs` が `product_version` と `delivery` を持つ（今は `release` だけ）ときだけ、結果 JSON を返す。届け先が下の規則で 1 行に決まれば `status: ok` と `outputs` の `product_version`・`delivery`、決まらなければ `status: stopped`（停止理由 `precondition`）である。どちらも worker を起動しない。それ以外は `None`
   - 副作用: 無し（設定は呼ぶ側が読んで渡す）
-- `delivery` は、`strategy.section["release"]` の `deliveries` のうち `reaches(row, "production")` の行から決める。行が 1 つなら、その行の辞書を文脈の形（`contracts/workflow/context.schema.json` の `#/$defs/delivery`。`contracts.schema_errors` で確かめる）で確かめ、合えばそのまま返す。合わなければ、誤りの文と設定の場所（`branch_strategy.release.deliveries`）を停止の理由に書いて `stopped` を返す。行が 0 か 2 つ以上なら、どの届け先へ出したかが設定から 1 つに決まらないことを停止の理由に書いて `stopped` を返す。固定の値で `delivery` を埋めない（設計文書の「入出力のコントラクト」の `delivery` の表）。`deliveries_of` は行を 3 項目の `Delivery` に縮め、文脈の `delivery` が必須とする `versioned` を落とすので使わない。条件だけを `reaches` で共有する
+- `delivery` は、`strategy.section["release"]` の `deliveries` のうち `reaches(row, "production")` の行から決める。行が 1 つなら、その行を文脈の形で確かめ、合えばそのまま返す。確かめ方は、worker の結果の確かめ（下の「worker の結果の確かめ」）と同じく、文脈のスキーマ全体（`contracts.internal.CONTEXT`）へ `{"delivery": 行}` を渡す（`contracts.schema_errors`）。`#/$defs/delivery` だけを指定しない。今の検証器（`contracts._shipped_validator`）は、`$defs` を指定すると `$defs` だけを残してルートの `properties` を捨てる。`$defs/delivery` の `branch` は `#/properties/branch` を参照するので、`branch` を書いた有効な行が参照の誤りで止まる。合わなければ、誤りの文と設定の場所（`branch_strategy.release.deliveries`）を停止の理由に書いて `stopped` を返す。行が 0 か 2 つ以上なら、どの届け先へ出したかが設定から 1 つに決まらないことを停止の理由に書いて `stopped` を返す。固定の値で `delivery` を埋めない（設計文書の「入出力のコントラクト」の `delivery` の表）。`deliveries_of` は行を 3 項目の `Delivery` に縮め、文脈の `delivery` が必須とする `versioned` を落とすので使わない。条件だけを `reaches` で共有する
 - `_outputs_of` の 1 行は、`version_number` が真なら「`product_version` はバージョン番号（例 `1.2.3`）」、偽なら「`product_version` は出したものを指す空白だけでない文字列（例 `main abc1234`）」とする。作業の出力に `product_version` が無ければ、この行を書かない
 
 **工程が読んだ設定を使い回さない理由**: プランを組む `prepare_plan` も、1 回の試行に 1 回 `.ndf/project.json` を読む（`invoke._project`）。ただし、読む場所は工程の入力の作業場所（`work_location`）で、worker が動く承認の対象のリポジトリ（`_work_dir`）と同じとは限らない。また、`_project` は `.ndf/project.json` をそのまま読むだけで、`branch_strategy.load` が行う旧いキーとスキーマの検査をしない。そのため、worker の作業場所で `branch_strategy.load` を読む。工程の側で読んで `values.json` へ写す案は、写した値が正本の外のキャッシュになり（Value 8）、作業場所が同じかを確かめるにはやはり根を解く必要があるので採らない。増える処理は、`release` の作業を 1 回起動するごとに設定の読み込み 1 回である。`git rev-parse` は、作業場所が設定を持つリポジトリの根でないときだけ 1 回打つ。ほかの作業では、設定の読み込みも `git` の起動も増えない
@@ -305,7 +305,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `released_outcome` | `none` と記録済みの値で ok と 2 つの出力 | 本番に届く行が 0・2 つで `stopped`（`precondition`）。先頭が `channel: base` の行でも本番の行を返す。本番の行の `target` が空文字列なら `stopped` | 版の種類が `none` 以外・設定が `None`・値なしで `None` |
+| `released_outcome` | `none` と記録済みの値で ok と 2 つの出力。`branch: main` を書いた有効な本番の行も ok で、その行をそのまま返す | 本番に届く行が 0・2 つで `stopped`（`precondition`）。先頭が `channel: base` の行でも本番の行を返す。本番の行の `target` が空文字列なら `stopped` | 版の種類が `none` 以外・設定が `None`・値なしで `None` |
 | `_strategy_at` | 設定を返す。作業場所に `.ndf/project.json` があれば `Git.run` が呼ばれない | 作業場所が根でないときだけ `Git.run` が 1 回呼ばれる | 設定が無い・`git` が `GitError` を上げると `None`（`Git.run` を差し替えて確かめ、`git` を起動しない） |
 | `_work_handoff` | `release` で、起動指示の 1 行と `version_number` が同じ値から決まる | 出力に `product_version` の無い作業では `_strategy_at` が呼ばれない | — |
 | `_cmd_work` | 記録済みの値で worker を起動しない（`exec_` が呼ばれない） | `--candidate`・`rev {repo} {state_dir}` の値がそのまま出力になる | `values.json` が無いと `precondition` |
