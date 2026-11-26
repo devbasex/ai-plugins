@@ -384,6 +384,20 @@ def test_impl_conflict_check_and_ci_stop_without_a_pr_number(tmp_path, step_id, 
     assert not seen.exists()
 
 
+@pytest.mark.parametrize(
+    ("review", "restored"),
+    [
+        (route.review_launch("impl", "u1", "origin/develop"), True),
+        (route.unit_review_launch("o/r", ["my-review"]), True),
+        (["my-review"], False),  # 設定で差し替えた起動は番号を読まない
+    ],
+)
+def test_impl_review_steps_restore_the_pr_number_only_when_the_launch_reads_it(review, restored):
+    found = model.parse(plan_of("implement", review=review))
+    kept = {s.id for s in found.steps if s.restore is not None}
+    assert kept == {"conflict-check", "ci"} | ({"review", "review-delta"} if restored else set())
+
+
 def test_impl_default_review_reads_the_saved_pr_number(tmp_path):
     got = route.review_launch("impl", "u1", "origin/develop")
     assert "u1" not in got and "{state_dir}/pr-number" in got

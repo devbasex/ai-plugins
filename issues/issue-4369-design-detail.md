@@ -305,14 +305,16 @@ contracts/
 
 - 上書きのテンプレート: `prepare_plan`・`_prepared`・`plan_path` は、同じ 1 つのテンプレート（`run.template`、無ければ `template(run.name)`）を使う。差し込みの欠けの検査（`needed`）と作業の入力の検査（`kinds_of`）も、このテンプレートから求める。`_prepared` が `template(run.name)` を返すと、打ち直しで外した `done-check` や `ci` が戻る
 - `pr-number` の無い実行の記録: この変更より前に始めた `impl` は、PR を作った後で止まっていても番号を持たない。単位の経路でない `impl` も同じである。番号は、実際に読むステップを打つ直前に、プランの実行（`core/plan/steps.py` の `run`）が、ステップの指定（`restore`）に従って書き戻す。ステップ `pr` の `probe` だけを打ち、開いた PR を探して番号を書く。開始点は止まったステップのまま変えないので、レビューや CI の修正はやり直さない
-  - 指定は `impl.json` の `conflict-check`・`review`・`ci`・`review-delta` が持つ。キーは `file`（`{state_dir}/pr-number`）、`step`（`probe` を使うステップ `pr`）、`missing`（開いた PR が無いときの理由の文）の 3 つである
+  - 定義は `impl.json` のプランの `restores` の `pr-number` の 1 か所に置く。キーは `file`（`{state_dir}/pr-number`）、`step`（`probe` を使うステップ `pr`）、`missing`（開いた PR が無いときの理由の文）の 3 つである。ステップは `"restore": "pr-number"` で参照する
+  - テンプレートで参照を持つのは `conflict-check`・`review`・`ci`・`review-delta` である。`review` と `review-delta` の参照は、組んだレビューの起動が `REVIEW_WITH_SAVED_PR` か `UNIT_REVIEW` を含まなければ、`route.render` が外す
+  - `file` が相対パスなら、読むステップの作業ディレクトリ（`workdir`）から解く
   - プランの実行は、指定のあるステップで `file` が無いか空のときだけ照会する。引数の中身からは判断しないので、同じパスを引数に持つ独自のプランには影響しない
-  - `review` と `review-delta` は、設定で差し替えた起動でも指定を持つ。どちらも通れば番号を読む `ci` へ進む
+  - 単位の経路でない `impl` の、設定で差し替えたレビューは番号を読まないので、レビューの前には照会しない。単位の経路のレビューは、`ci` を外す場合も対象の PR の照合に番号を使うので、参照を持つ
   - 再開の前には照会しない。この先で番号を読むかもしれないというだけで照会すると、使わない `gh pr list` が増え、開いた PR が無いときに番号の要らない照合まで止まるためである
   - たとえば `head-reviewed` と `resolved` は、保存済みの記録だけで終わるので照会しない。`head-reviewed` が通らずに `review-delta` へ進めば、そこで照会する
   - PR を作る前の `test`・`push` からの再開は、書き戻しの照会をしない。`pr` ステップ自身は通常どおり `probe` で既存の PR を探し、見つけた PR か新しく作った PR の番号を書く
   - 書き込みは、`ndf plan next` が持つ `plan.lock` の内側になる
-  - 開いた PR が無いか、照会か保存に失敗すれば、そのステップを打たずに、理由を持つ `stopped` で止まる。次の打ち直しは同じステップから始まり、もう一度照会する
+  - 開いた PR が無いか、照会か保存に失敗するか、`probe` が通っても `file` が無いか空なら、そのステップを打たずに、理由を持つ `stopped` で止まる。次の打ち直しは同じステップから始まり、もう一度照会する
 - `issue_values`
   - 事後条件: 題のコピーは `{"title", "repo"}`。`repo` が違うコピーは使わない
   - 副作用: 読み直すときは、題のコピーを消す → 本文を書く → 題のコピーを書く、の順にする
@@ -364,7 +366,8 @@ contracts/
 | `review_launch` | 同上 | 変更 | 変えない | `impl` では、PR の番号をブランチから引かず `{state_dir}/pr-number` から読むラッパーにする |
 | `Outcome`・`_after_stop` | `core/plan/transition_decide.py` | 変更 | `Outcome` に `summary: Optional[str] = None` を足す | 停止の説明の末尾にステップの `summary` を足す |
 | `_perform` | `core/plan/runner.py` | 変更 | 変えない | ステップの `summary` を `Outcome` に渡す |
-| `Restore`・`parse` | `core/plan/model.py` | 変更 | `Step.restore: Optional[Restore]` を足す | `restore` の 3 つのキーを読む。キーが違うか、`step` が `probe` を持つステップでなければ `PlanError` |
+| `Restore`・`parse` | `core/plan/model.py` | 変更 | `Step.restore: Optional[Restore]` を足す | プランの `restores` を読み、ステップの `restore` の名前で引く。指定のキーが違うか、名前が `restores` に無いか、`step` が `probe` を持つステップでなければ `PlanError` |
+| `render` | `core/route/__init__.py` | 変更 | 変えない | レビューの起動が保存した番号を読まなければ、`{{review}}` を打つステップの `restore` を外す |
 | `_restore` | `core/plan/steps.py` | 新設 | `(ctx, step) -> Optional[dict]` | `step.restore` のファイルが無ければ書き戻す。書き戻せなければ停止の結果を返す（「工程から作業を呼ぶ層」の箇条書き） |
 | `run` | 同上 | 変更 | 変えない | ステップを打つ前に `_restore` を呼び、停止の結果があればステップを打たない |
 
@@ -417,7 +420,7 @@ contracts/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_restore` | 記録が無ければ、指定のあるステップの前にステップ `pr` の `probe` を打つ | 記録がある、指定の無いステップ（`head-reviewed`・`resolved`・独自のプラン）は打たない | 開いた PR が無い・照会の失敗は、ステップを打たずに理由を持つ `stopped` |
+| `_restore` | 記録が無ければ、指定のあるステップの前にステップ `pr` の `probe` を打つ。相対パスはステップの作業ディレクトリから解く | 記録がある、指定の無いステップ（`head-reviewed`・`resolved`・独自のプラン・差し替えたレビュー）は打たない | 開いた PR が無い・照会の失敗・`probe` が通ってもファイルが無いときは、ステップを打たずに理由を持つ `stopped` |
 | `unit_template` | `done-check` が無く、`ci` に `--repo` | `ci` を外すと、`repeat-check`・`ci-fix`・`ci-local`・`push-fixed` も無く、`ci` を指すルートが残らない。`required`・`ci_budget`・`tests` と `ci-fix` の入力なしで組める | — |
 | `unit_review_launch` | 照合が合えば起動の終了コード | 後ろに足した `--base`・`--state-dir` が通る | 番号かリポジトリの違い・ファイルなし |
 | `review_launch` | `impl` は `pr-number` を使う | ほかのテンプレートは今のまま | — |

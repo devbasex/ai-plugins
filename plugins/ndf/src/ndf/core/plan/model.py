@@ -4,8 +4,9 @@
 前のステップの承認ゲートを人へ届ける役（`accepts_gate`）と、PR を `{queue_prs}` に入れないリリースのプラン（`release`）を持てる。
 ステップは打つコマンド（`run`）と、止まったときのルート（`on_cause`・`on_fail`）・承認の回答のルート（`on_answer`）を持つ。
 外部への操作のステップは、済んだかを相手の状態から確かめるコマンド（`probe`）を持てる（B9）。
-前のステップが書くファイルを読むステップは、ファイルが無いときに書き戻す指定（`restore`）を持てる: `file`（読むファイル）・
-`step`（書き戻しに `probe` を使うステップ）・`missing`（`probe` が対象を見つけないときの理由の文）。指定の無いステップは書き戻さない。
+前のステップが書くファイルを読むステップは、ファイルが無いときに書き戻す指定を持てる。指定はプランの `restores`
+（名前 → `file`（読むファイル）・`step`（書き戻しに `probe` を使うステップ）・`missing`（`probe` が対象を見つけないときの理由の文））
+に 1 度だけ書き、ステップは `restore` にその名前を書く。`restore` の無いステップは書き戻さない。
 ルートの値はプランのステップの id か `end`・`stop`・`retry` のどれかで、`on_cause` の種類は停止理由の表にある（IS3）。
 `on_answer` の回答は回答の語彙（`contracts/facts/answers.json`。結果 JSON の `routes` のキーになる）にある。
 """
@@ -132,18 +133,29 @@ def _command(sid: str, raw: Mapping[str, Any], key: str, required: bool) -> Opti
     return tuple(value)
 
 
-def _restore(sid: str, raw: Mapping[str, Any]) -> Optional[Restore]:
-    """ステップの `restore`。無ければ None、`Restore` の欄だけを空でない文字列で持たなければ `PlanError`。"""
+def _restores(raw: Mapping[str, Any]) -> dict[str, Restore]:
+    """プランの `restores`（名前 → 指定）。指定が `Restore` の欄だけを空でない文字列で持たなければ `PlanError`。"""
+    held = _opt(raw, "restores", {})
+    if not isinstance(held, Mapping):
+        raise PlanError("restores は名前と指定の対応にする")
+    keys = [f.name for f in fields(Restore)]
+    for name, value in held.items():
+        if not isinstance(value, Mapping) or set(value) != set(keys) or not all(isinstance(v, str) and v for v in value.values()):
+            raise PlanError(f"restores の {name} は {'・'.join(keys)} を空でない文字列で持つ")
+    return {name: Restore(**value) for name, value in held.items()}
+
+
+def _restore(sid: str, raw: Mapping[str, Any], restores: Mapping[str, Restore]) -> Optional[Restore]:
+    """ステップの `restore`（`restores` の名前）が指す指定。無ければ None、知らない名前なら `PlanError`。"""
     if "restore" not in raw:
         return None
-    value = raw["restore"]
-    keys = [f.name for f in fields(Restore)]
-    if not isinstance(value, Mapping) or set(value) != set(keys) or not all(isinstance(v, str) and v for v in value.values()):
-        raise PlanError(f"ステップ {sid} の restore は {'・'.join(keys)} を空でない文字列で持つ")
-    return Restore(**value)
+    name = raw["restore"]
+    if not isinstance(name, str) or name not in restores:
+        raise PlanError(f"ステップ {sid} の restore が restores に無い: {name}")
+    return restores[name]
 
 
-def _step(raw: Mapping[str, Any]) -> Step:
+def _step(raw: Mapping[str, Any], restores: Mapping[str, Restore]) -> Step:
     if not isinstance(raw, Mapping) or not isinstance(raw.get("id"), str) or not raw["id"]:
         raise PlanError(f"ステップに id が無い: {raw!r}")
     sid = raw["id"]
@@ -162,7 +174,7 @@ def _step(raw: Mapping[str, Any]) -> Step:
         timeout=raw.get("timeout"),
         location=_opt(raw, "in", IN_WORKTREE),
         probe=probe,
-        restore=_restore(sid, raw),
+        restore=_restore(sid, raw, restores),
     )
 
 
@@ -243,7 +255,8 @@ def parse(raw: Any) -> Plan:
     held = worker_kinds.plan_values_error(raw)
     if held is not None:
         raise PlanError(f"プラン {raw['name']} の {held}")
-    steps = tuple(_step(s) for s in steps_raw)
+    restores = _restores(raw)
+    steps = tuple(_step(s, restores) for s in steps_raw)
     needs = _strings(raw, "needs")
     plan = Plan(
         name=raw["name"],

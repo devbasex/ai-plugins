@@ -19,7 +19,7 @@
   （結果 JSON の `gaps` はそのまま運ぶ）
 
 書き戻しの指定（`restore`）を持つステップは、指定のファイルが無ければ、打つ直前に指定のステップの `probe` で書き戻す。
-`probe` が対象を見つけないか、照会か保存に失敗すれば、ステップを打たずに止まる（#4369）。
+`probe` が対象を見つけないか、照会か保存に失敗するか、ファイルが書かれなければ、ステップを打たずに止まる（#4369）。
 
 見本（ブランチの push。リモートの head が手元の head と同じなら済んでいる）:
 
@@ -220,15 +220,23 @@ def _stopped(kind: str, summary: str) -> dict[str, Any]:
     return _plain(STOPPED, kind, summary, None)
 
 
+def _has_content(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 0
+
+
 def _restore(ctx: StepContext, step: Step) -> Optional[dict[str, Any]]:
     """`step` の `restore` のファイルが無いか空なら、指定のステップの `probe` で書き戻す。戻せなければ止まった結果。
 
-    ステップを打つ直前に呼ぶので、そのファイルを読まずに終わる再開では `probe` を打たない（#4369）。
+    ステップを打つ直前に呼ぶので、そのファイルを読まずに終わる再開では `probe` を打たない（#4369）。相対パスは、読むステップの
+    コマンドと同じく、そのステップの作業ディレクトリから解く。`probe` が通ってもファイルが無いか空なら、書き戻せていない。
     """
     if step.restore is None:
         return None
     saved = Path(assemble_decide.fill((step.restore.file,), ctx.values)[0])
-    if saved.is_file() and saved.stat().st_size:
+    base = workdir(ctx.plan, step)
+    if base is not None:
+        saved = Path(base) / saved
+    if _has_content(saved):
         return None
     writer = ctx.plan.step(step.restore.step)
     got = _probe(ctx, writer, _timeout_of(writer))
@@ -236,6 +244,8 @@ def _restore(ctx: StepContext, step: Step) -> Optional[dict[str, Any]]:
         return _stopped("precondition", f"{saved.name} を書き戻せない: {step.restore.missing}")
     if got["status"] != OK:
         return {**got, "summary": f"{saved.name} を書き戻せない: {got['summary']}"}
+    if not _has_content(saved):
+        return _stopped("precondition", f"{saved.name} を書き戻せない: ステップ {writer.id} の probe は通ったが、ファイルが無いか空")
     return None
 
 

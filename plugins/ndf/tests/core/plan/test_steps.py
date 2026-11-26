@@ -106,13 +106,20 @@ class _Done:
         return "", ""
 
 
-def _run_impl_step(tmp_path, monkeypatch, step_id: str, got: dict | None) -> tuple[dict, list[str], list[str]]:
+def _run_impl_step(tmp_path, monkeypatch, step_id: str, got: dict | None, *, writes: bool = True) -> tuple[dict, list[str], list[str]]:
     """テンプレート impl のステップ `step_id` を打ち、（結果、照会したステップ、打ったステップ）を返す。"""
     raw = route.expanded(route.templates()["impl"])
     plan = model.parse({**raw, "name": "impl-sprint/s1"})
     asked: list[str] = []
     launched: list[str] = []
-    monkeypatch.setattr(steps, "_probe", lambda ctx, step, timeout: asked.append(step.id) or got)
+
+    def probe(ctx, step, timeout):
+        asked.append(step.id)
+        if writes and got is not None and got["status"] == "ok":
+            (tmp_path / "pr-number").write_text("7\n", encoding="utf-8")
+        return got
+
+    monkeypatch.setattr(steps, "_probe", probe)
     monkeypatch.setattr(steps, "_launch", lambda ctx, step: launched.append(step.id) or _Done())
     (tmp_path / steps.STEPS_DIR).mkdir(exist_ok=True)
     out = steps.run(steps.StepContext(plan, tmp_path, {"state_dir": str(tmp_path)}), plan.step(step_id))
@@ -147,6 +154,25 @@ def test_the_step_stops_with_the_reason_when_the_pr_number_is_not_restored(tmp_p
     assert reason in out["summary"]
 
 
+def test_the_step_stops_when_the_probe_passes_without_writing_the_file(tmp_path, monkeypatch):
+    out, _, launched = _run_impl_step(tmp_path, monkeypatch, "ci", {"status": "ok"}, writes=False)
+    assert (out["status"], out["kind"], launched) == ("stopped", "precondition", [])
+
+
+def test_a_relative_restore_file_is_read_from_the_working_directory_of_the_step(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "f").write_text("7\n", encoding="utf-8")
+    raw = [{"id": "w", "run": ["true"], "probe": ["true"]}, {"id": "r", "run": ["true"], "restore": "f"}]
+    restores = {"f": {"file": "f", "step": "w", "missing": "m"}}
+    plan = model.parse({"name": "p", "repo": str(root), "restores": restores, "steps": raw})
+    monkeypatch.setattr(steps, "_probe", lambda *a: pytest.fail("打たない"))
+    monkeypatch.setattr(steps, "_launch", lambda ctx, step: _Done())
+    state = tmp_path / "state"
+    (state / steps.STEPS_DIR).mkdir(parents=True)
+    assert steps.run(steps.StepContext(plan, state, {}), plan.step("r"))["status"] == "ok"
+
+
 def test_a_step_without_restore_does_not_run_the_probe_of_another_step(tmp_path, monkeypatch):
     # 同じパスを引数に持つ独自のプランでも、指定の無いステップは指定の順の外で `probe` を打たない
     path = "{state_dir}/pr-number"
@@ -159,14 +185,15 @@ def test_a_step_without_restore_does_not_run_the_probe_of_another_step(tmp_path,
 
 
 @pytest.mark.parametrize(
-    "restore",
+    ("restore", "name"),
     [
-        {"file": "f", "step": "無い", "missing": "m"},
-        {"file": "f", "step": "r", "missing": "m"},  # probe を持たないステップ
-        {"file": "f", "step": "w"},
+        ({"file": "f", "step": "無い", "missing": "m"}, "f"),
+        ({"file": "f", "step": "r", "missing": "m"}, "f"),  # probe を持たないステップ
+        ({"file": "f", "step": "w"}, "f"),
+        ({"file": "f", "step": "w", "missing": "m"}, "無い"),  # restores に無い名前
     ],
 )
-def test_a_restore_that_does_not_name_a_probe_step_is_refused(restore):
-    raw = [{"id": "w", "run": ["true"], "probe": ["true"]}, {"id": "r", "run": ["true"], "restore": restore}]
+def test_a_restore_that_does_not_name_a_probe_step_is_refused(restore, name):
+    raw = [{"id": "w", "run": ["true"], "probe": ["true"]}, {"id": "r", "run": ["true"], "restore": name}]
     with pytest.raises(model.PlanError, match="restore"):
-        model.parse({"name": "p", "steps": raw})
+        model.parse({"name": "p", "restores": {"f": restore}, "steps": raw})

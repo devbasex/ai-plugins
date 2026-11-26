@@ -403,12 +403,26 @@ def render(t: Template, given: Mapping[str, Value], *, local_tests: bool = True)
     `local_tests` が偽（CI テストの設定 `test.ci.only` があるリポジトリ）なら、手元でテストを打つステップ
     （`LOCAL_TEST_STEPS`）を外して組む。テストは CI の結果で確かめる。
     """
-    plan = _fill(expanded(t, local_tests=local_tests), resolve(t, given, local_tests=local_tests))
+    values = resolve(t, given, local_tests=local_tests)
+    shape = expanded(t, local_tests=local_tests)
+    if "review" in values:
+        shape["steps"] = _review_restores(shape["steps"], values["review"])
+    plan = _fill(shape, values)
     try:
         model.parse(plan)
     except model.PlanError as exc:
         raise RouteError(f"テンプレート {t.name} から組んだプランが誤り: {exc}") from None
     return plan
+
+
+def _review_restores(found: Sequence[dict[str, Any]], review: Value) -> list[dict[str, Any]]:
+    """レビューの起動 `review` が保存した PR の番号を読まなければ、レビューのステップから書き戻しの指定を外す（#4369）。
+
+    番号を読むのは、実装の既定の起動と単位の経路の起動である。設定で差し替えた起動は読まないので、後で番号を読むステップが書き戻す。
+    """
+    if REVIEW_WITH_SAVED_PR in review or UNIT_REVIEW in review:
+        return list(found)
+    return [{k: v for k, v in s.items() if k != "restore"} if "{{review}}" in s["run"] else s for s in found]
 
 
 # テンプレートの中で、作業の名前を後ろに置く worker の起動の差し込み
