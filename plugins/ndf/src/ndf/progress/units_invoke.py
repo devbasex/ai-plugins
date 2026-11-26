@@ -27,7 +27,7 @@ from ndf.core.plan import inputs_decide
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, has_units, lineup
 from ndf.progress import plan_runs, refactor_values
-from ndf.progress.command import PROJECT_FILE, ndf_settings
+from ndf.progress.command import PROJECT_FILE, ndf_settings_in
 from ndf.progress.issue_values import UNITS_FILE
 from ndf.progress.plan_runs import StageRun, UnitsStopped
 
@@ -91,25 +91,28 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
     issues = sorted({int(n) for n in run.inputs["issues"]})
     branch = _current_branch(g)
     remote = g.remote()
-    tip = _fetched_tip(g, remote, branch) if branch is not None else None
+    fetched = _fetched_tip(g, remote, branch) if branch is not None else None
     uncommitted = _uncommitted_plans(g, issues)
-    head = g.rev_parse("HEAD")
-    read: dict[str, list[PlanDoc]] = {}  # コミットの SHA ごとの実装計画（同じコミットを 2 度読まない）
-    commits = [head] if tip is None or tip == head else [head, tip]
-    seen = [*(p for c in commits for p in _plans_once(g, c, issues, read)), *_worktree_plans(root, uncommitted)]
+    # 各コミットの実装計画は 1 度だけ読む（手元と取得先が同じコミットなら取得先を読まず、進めた後も読み直さない）
+    head, tip = fetched if fetched is not None else ("HEAD", None)
+    at_head = _plans_at(g, head, issues)
+    at_tip = at_head if tip is None or tip == head else _plans_at(g, tip, issues)
+    seen = [*at_head, *(at_tip if at_tip is not at_head else []), *_worktree_plans(root, uncommitted)]
     if not any(has_units(p.text) for p in seen):
         return _plain_route(work_dir)
     if uncommitted:
         detail = f"未コミットの実装計画がある: {', '.join(uncommitted)}。コミットするか取り消してから打ち直す"
         raise UnitsStopped("precondition", detail)
-    project = ndf_settings(location, PROJECT_FILE)
+    project = ndf_settings_in(root, PROJECT_FILE)
     branch = _checked_branch(run, branch, project)
+    plans = at_head
     if tip is not None and _catch_up(g, remote, branch, head, tip):
-        # 取り込んだコミットの設定で、配布先（I4）と単位の PR で待つチェックを決め直す
-        head = tip
-        project = ndf_settings(location, PROJECT_FILE)
+        plans = at_tip
+        if not any(has_units(p.text) for p in plans):
+            return _plain_route(work_dir)
+        # 単位の経路を続けるときだけ、取り込んだコミットの設定で配布先（I4）と単位の PR で待つチェックを決め直す
+        project = ndf_settings_in(root, PROJECT_FILE)
         branch = _checked_branch(run, branch, project)
-    plans = _plans_once(g, head, issues, read)
     if not any(has_units(p.text) for p in plans):
         return _plain_route(work_dir)
     units = _read_units(g, remote, plans, issues)
@@ -139,11 +142,15 @@ def _current_branch(g: Git) -> Optional[str]:
     return name if done.returncode == 0 and name != "" else None
 
 
-def _fetched_tip(g: Git, remote: str, branch: str) -> Optional[str]:
-    """リモートから取得したブランチの HEAD。リモートにブランチが無いと確かめられれば None、ほかの失敗は止める。"""
+def _fetched_tip(g: Git, remote: str, branch: str) -> Optional[tuple[str, str]]:
+    """手元の HEAD と、リモートから取得したブランチの HEAD の SHA（1 回の起動で解決する）。
+
+    リモートにブランチが無いと確かめられれば None、ほかの失敗は止める。
+    """
     fetched = g.fetch_branch(remote, branch)
     if fetched.returncode == 0:
-        return g.rev_parse(f"refs/remotes/{remote}/{branch}")
+        head, tip = g.rev_parse_all("HEAD", f"refs/remotes/{remote}/{branch}")
+        return head, tip
     probe = g.attempt("ls-remote", "--exit-code", "--heads", remote, f"{HEADS}{branch}")
     if probe.returncode == LS_REMOTE_ABSENT:
         return None
@@ -161,13 +168,6 @@ def _plans_at(g: Git, commit: str, issues: Sequence[int]) -> list[PlanDoc]:
     paths = [p for p in names if _is_sprint_plan(p, issues)]
     blobs = g.blobs(*(f"{commit}:{p}" for p in paths)) if paths else []
     return [PlanDoc(p, plan_issues(p), b.decode("utf-8")) for p, b in zip(paths, blobs) if b is not None]
-
-
-def _plans_once(g: Git, commit: str, issues: Sequence[int], read: dict[str, list[PlanDoc]]) -> list[PlanDoc]:
-    """コミットの SHA の実装計画。`read` に読んだ結果があれば読み直さない。"""
-    if commit not in read:
-        read[commit] = _plans_at(g, commit, issues)
-    return read[commit]
 
 
 def _uncommitted_plans(g: Git, issues: Sequence[int]) -> list[str]:
@@ -220,13 +220,16 @@ def _checked_branch(run: StageRun, branch: Optional[str], project: Mapping[str, 
 
 
 def _catch_up(g: Git, remote: str, branch: str, head: str, tip: str) -> bool:
-    """手元（`head`）が遅れていればリモートの HEAD（`tip`）まで進め、進めたかを返す。分かれていれば止める（強制しない）。"""
+    """手元（`head`）が遅れていればリモートの HEAD（`tip`）まで進め、進めたかを返す。分かれていれば止める（強制しない）。
+
+    進める先は確かめた `tip` の SHA である（追跡の ref は別の作業場所の fetch で動くので、検査と違うコミットへ進めない）。
+    """
     if head == tip or g.is_ancestor(tip, head):
         return False
     if not g.is_ancestor(head, tip):
         detail = f"手元の {branch}（{head}）と {remote} の {branch}（{tip}）が分かれている。揃えてから打ち直す"
         raise UnitsStopped("precondition", detail)
-    done = g.merge_ff(f"refs/remotes/{remote}/{branch}")
+    done = g.merge_ff(tip)
     if done.returncode != 0:
         raise UnitsStopped("precondition", f"{branch} を {remote} の HEAD へ進められない: {done.stderr.strip()}")
     return True
