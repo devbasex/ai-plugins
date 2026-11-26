@@ -533,13 +533,19 @@ def refetch_check(run: Run, head: str) -> PullView:
 
 
 def post_material(run: Run, now: PullView, final: str) -> None:
-    """承認資料の最終版を PR のコメントとして 1 件足す。同じ中身のコメントがあれば足さない（設計書の手順 8）。"""
+    """承認資料の最終版を PR のコメントとして 1 件足す。同じ中身のコメントがあれば足さない（設計書の手順 8）。
+
+    足す直前に、参照先の公開範囲を照会し直す（読み手役の実行の前に照会した結果を使わない）。伏せる所ができていれば足さずに止める。"""
     if reading.comment_has(now.comments, reading.sha256(final)):
         return
     try:
-        pull_view.add_comment(run.hub, run.pr.number, final)
+        posted = Publisher(run.hub).comment_unchanged(run.pr.number, final)
     except GitHubError as exc:
         raise Precondition(f"承認資料を PR のコメントで足せない: {exc}") from None
+    if posted is None:
+        raise Precondition(
+            "承認資料に、PR へ書く前に伏せる値がある（確認の間に参照先が非公開へ変わった場合を含む）。打ち直すと伏せた本文を読ませる"
+        )
 
 
 def send_back(run: Run, plan: Plan, targets: Sequence[str], raised: Mapping[str, Sequence[Mapping[str, str]]]) -> dict[str, Any]:

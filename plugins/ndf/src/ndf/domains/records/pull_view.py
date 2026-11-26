@@ -1,4 +1,4 @@
-"""承認の前の確認が 1 回の取得で読む PR の値と、承認資料のコメントの追記（#4446）。
+"""承認の前の確認が 1 回の取得で読む PR の値（#4446）。
 
 `GitHub.repository` の 1 回の問い合わせで、題・本文・head・変更量・コメントの本文を読む。`ndf document-rebuild gate` と
 `ndf records reading check` が同じ口を使う。
@@ -60,8 +60,3 @@ def pull_view(hub: GitHub, number: Optional[int], branch: Optional[str]) -> Opti
         nodes = got["nodes"]
         got = nodes[0] if nodes else None
     return PullView.from_graphql(got) if isinstance(got, dict) else None
-
-
-def add_comment(hub: GitHub, number: int, body: str) -> None:
-    """Issue か PR にコメントを 1 件足す。失敗は `GitHubError`。"""
-    hub.rest("POST", f"/repos/{hub.repo}/issues/{int(number)}/comments", {"body": body})

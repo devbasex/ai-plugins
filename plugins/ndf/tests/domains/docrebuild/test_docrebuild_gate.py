@@ -131,6 +131,7 @@ class FakeHub:
     posted: list[str] = field(default_factory=list)
     on_fetch: Optional[Callable[[FakeHub], None]] = None
     repo: str = REPO
+    visibility: dict[str, str] = field(default_factory=dict)
 
     def repository(self, query: str, variables: Optional[dict] = None) -> dict[str, Any]:
         self.fetches += 1
@@ -144,12 +145,13 @@ class FakeHub:
         return {"found": {"nodes": [node]} if "pullRequests(" in query else node}
 
     def visibilities(self, repos: Any) -> dict[str, str]:
-        return {r: "PRIVATE" for r in repos}
+        return {r: self.visibility.get(r, "PRIVATE") for r in repos}
 
-    def rest(self, method: str, path: str, payload: Any = None) -> None:
+    def rest(self, method: str, path: str, payload: Any = None) -> dict[str, str]:
         assert (method, path) == ("POST", "/repos/o/r/issues/7/comments")
         self.posted.append(payload["body"])
         self.comments.append(payload["body"])
+        return {"html_url": "https://example.invalid/comment"}
 
 
 Behave = Callable[[Path, list[tuple[str, Path]]], list[dict[str, Any]]]
@@ -387,6 +389,16 @@ def test_stops_when_the_pr_or_the_tree_does_not_match(tmp_path: Path) -> None:
     w.hub.fetches = 0
     got = w.run(FakeWorker(), "design", material=tmp_path / "m.md")
     assert got["cause"]["kind"] == "precondition" and "--pr" in got["cause"]["detail"] and w.hub.fetches == 0
+
+
+def test_a_reference_made_private_while_reading_is_not_posted(tmp_path: Path) -> None:
+    """読み手役の実行中に参照先が非公開へ変わったら、投稿の直前の再照会で止め、コメントも記録も残さない。"""
+    w = world(tmp_path)
+    w.hub.body = BODY + "\n- 参考: https://github.com/acme/tool/issues/1\n"
+    w.hub.visibility = {REPO: "PUBLIC", "acme/tool": "PUBLIC"}
+    got = w.run(FakeWorker(edit=lambda state_dir: w.hub.visibility.update({"acme/tool": "PRIVATE"})))
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "precondition", got
+    assert w.hub.posted == [] and checks_rows() == []
 
 
 # --- 変更要求（決定 10） ------------------------------------------------------------------------------------
