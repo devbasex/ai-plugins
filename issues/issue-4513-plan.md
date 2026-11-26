@@ -20,7 +20,7 @@
 | `src/ndf/progress/definition.py` | `required_outputs`（新設） |
 | `src/ndf/progress/run.py` | `released_answer`（新設）、`_run_step`・`_step_draft`・`_finish_stage`（変更） |
 | `src/ndf/progress/invoke.py` | `StageRun.released`・`answered_gap_detail`（新設）、`plan_path`・`_no_route`（変更） |
-| `src/ndf/progress/gate/entry.py` | `released_outcome`・`_version_kind`（新設）、`_cmd_work`・`work_argv`・`_outputs_of`（変更） |
+| `src/ndf/progress/gate/entry.py` | `released_outcome`・`_strategy_at`・`Released`（新設）、`WorkHandoff`・`_cmd_work`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`（変更） |
 | `src/ndf/domains/release/forms_decide.py` | `reaches`（新設）、`deliveries_of`（変更） |
 | `src/ndf/core/worker.py`・`core/worker_outcome.py` | 引数 `--require-version-number`、`Checked`（新設）、`require_outputs`・`_output_gap`・`outcome_of`（変更） |
 | `src/ndf/core/plan/steps.py`・`transition_decide.py`・`runner.py`・`records.py` | `missing_outputs` と要約の引き継ぎ、`outputs.json` の要素の並び |
@@ -41,21 +41,28 @@
 
 ### Task 2: 形の確かめを結果の定義から `ndf worker run` へ移す
 
-- **対象ファイル:** `result.schema.json`・`release-verification.schema.json`・`kinds.json`・`context.schema.json`・`core/worker.py`・`core/worker_outcome.py`・`progress/gate/entry.py`（`_version_kind`・`work_argv`・`_outputs_of`）・`skills/release-verification/SKILL.md`
-- **変更内容:** 詳細設計書の「結果 JSON とリリース後テストの記録の定義」と「worker の結果の確かめ」の `ok` の分。`gate` の引き継ぎは Task 5 に回す
+- **対象ファイル:** `result.schema.json`・`release-verification.schema.json`・`kinds.json`・`context.schema.json`・`core/worker.py`・`core/worker_outcome.py`・`progress/gate/entry.py`（`_strategy_at`・`WorkHandoff.version_number`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`・`_cmd_work`）・`skills/release-verification/SKILL.md`・`tests/domains/release/test_release_record.py`
+- **変更内容:** 詳細設計書の「結果 JSON とリリース後テストの記録の定義」と「worker の結果の確かめ」の `ok` の分。`ndf answer work` は、`_work_handoff` が決めた `version_number` を起動指示と `work_argv` の両方へ渡す。記録済みの値で終える `Released` は Task 4 で足す。`gate` の引き継ぎは Task 5 に回す
 - **満たす受け入れ条件:** 3・4・5・8
-- **進め方:** Task 1 のテストを通す → `none` 以外と設定を読めないときに `ndf v11.0.0` が欠けになるテスト（条件 8）を足して通す → 整理
+- **進め方:**
+  1. Task 1 のテストを通す
+  2. `none` 以外と設定を読めないとき（`git` の `GitError` を含む）に `ndf v11.0.0` が欠けになるテスト（条件 8）を足して通す
+  3. 条件 4 の経路のテストを `test_release_record.py` に足して通す。対象 PR に、配布識別子 `main abc1234` を持つ本番リリース記録を `ndf release-steps record`（リリースのワークフローが打つ `record.write`）で作る。同じ識別子のリリース後テストの結果を `ndf release-steps verification-record` でその PR に記録し、`ndf records close-check` が読み取れることを確かめる。GitHub は `tests/domains/release/_fakes.py` の偽物で差し替える
+  4. 整理
 
 ### Task 3: オーガナイザーの承認の後にデプロイの工程が止まることを再現する
 
-- **対象ファイル:** `tests/progress/test_sprint_templates.py`・`tests/progress/gate/test_gate_work.py`
+- **対象ファイル:** `tests/progress/test_run.py`・`tests/progress/gate/test_gate_work.py`
 - **変更内容:** `none` の設定で、オーガナイザーが `main abc1234` を記録して承認した後のデプロイの工程が、判断の求めで止まらず完了し、worker を起動しないことを期待で書く（今は落ちる）
+- **テストの組み方:** ケースごとに Git の子プロセスを増やさない。`test_sprint_templates.py` の `sprint` フィクスチャ（ケースごとに `symbolic-ref`・`commit` などを打つ）は使わない
+  - `test_gate_work.py`: 保存先に `values.json` を書き、`_strategy_at` を `version_store.kind: none` の設定を返す関数に差し替え、`exec_` を記録するだけの関数にする。worker を起動しないことは `exec_` が呼ばれないことで確かめる
+  - `test_run.py`: 今ある `st` フィクスチャ（`git init` を 1 回打つ。今の `test_run.py` のケースと同じ）を使う。承認の履歴は、リリース承認ゲートへのオーガナイザーの承認と出力の事象をステートマシンへ追記して作る。プランを流す境界（`invoke` のプランの実行）と `_strategy_at` を差し替え、`git` も worker も起動しない
 - **満たす受け入れ条件:** 1・2（再現）
 - **進め方:** 失敗するテストを先に書くだけ。実装は Task 4
 
 ### Task 4: 記録済みの値を `values.json` で渡し、worker を起動せずに終える
 
-- **対象ファイル:** `contracts/worker_kinds.py`・`progress/run.py`（`released_answer`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`plan_path`）・`progress/gate/entry.py`（`released_outcome`・`_cmd_work`）・`domains/release/forms_decide.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
+- **対象ファイル:** `contracts/worker_kinds.py`（`write_released`・`released_of`・`write_values`）・`progress/run.py`（`released_answer`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`prepare_plan`・`_prepared`・`plan_path`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`domains/release/forms_decide.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
 - **変更内容:** 詳細設計書の「値のファイル」「工程の進行: 記録済みの値の読み方」「worker の起動」の記録済みの値の分
 - **満たす受け入れ条件:** 1・2
 - **進め方:**
@@ -65,20 +72,26 @@
 
 ### Task 5: 値をそろえた判断の求めへの承認で終わることを再現し、`gate` の出力を引き継ぐ
 
-- **対象ファイル:** `core/worker_outcome.py`・`core/plan/records.py`・`core/plan/runner.py`（`run_step`）・`tests/core/test_worker_outcome.py`・`tests/core/plan/test_runner.py`・`tests/progress/test_invoke.py`
-- **変更内容:** 再現のテスト（`gate` で `delivery`・`product_version` を持つ結果ファイルの後の `approved` で工程が完了する。今は落ちる）を先に書く。続けて、詳細設計書の「worker の結果の確かめ」の `gate` の分と「プランの出力の記録」を実装する
+- **対象ファイル:** `core/worker_outcome.py`・`core/plan/records.py`（`_add_outputs`・`_stored_entries`・`recorded_outputs`・`_keep_step_missing`・`recorded_step_missing`）・`core/plan/steps.py`（`outcome_of`）・`core/plan/runner.py`（`run_step`・`final_result`）・`progress/invoke.py`（`_no_route` の欠けの判定）・`tests/core/test_worker_outcome.py`・`tests/core/plan/test_runner.py`・`tests/progress/test_invoke.py`
+- **変更内容:** 再現のテスト（`gate` で `delivery`・`product_version` を持つ結果ファイルの後の `approved` で工程が完了する。今は落ちる）を先に書く。続けて、詳細設計書の「worker の結果の確かめ」の `gate` の分と「プランの出力の記録」を実装する。部分の出力を引き継ぐのと同じ単位で、判断を求めたステップ自身の `metrics.missing_outputs` が空でなければ承認の後に `bad_report` で止める判定も入れる。この単位だけを取り込んだときに、先のステップの同じキーで欠けが埋まって完了するのを防ぐためである。この単位の失敗の文は今の文のままでよく、足りない名前と worker の理由を入れた文は Task 6 で足す
 - **満たす受け入れ条件:** 9、8（`gate` の値の形）
-- **進め方:** 失敗するテスト → `require_outputs` の `gate` → `outputs.json` の要素の並び → 設計書のテスト設計の決定 6 の行と、却下して retry した後の前の回の値の行を足して通す → 整理
+- **進め方:**
+  1. 失敗するテスト
+  2. `require_outputs` の `gate`
+  3. `outputs.json` の要素の並び
+  4. `metrics.missing_outputs` の引き継ぎ（`steps.outcome_of`・`_keep_step_missing`・`final_result`）と、`_no_route` の欠けの判定
+  5. テストを足して通す。設計書のテスト設計の決定 6 の行、却下して retry した後の前の回の値の行、先のステップが同じキーを返すプランで値なしの判断の求めに `approved` と回答すると失敗する行（決定 4）である
+  6. 整理
 
 ### Task 6: 出力の足りない承認を、名前と理由を示して失敗にする
 
-- **対象ファイル:** `progress/definition.py`・`progress/invoke.py`（`answered_gap_detail`・`_no_route`）・`progress/run.py`（`_step_draft`・`_finish_stage`）・`core/plan/steps.py`・`transition_decide.py`・`runner.py`（`_perform`・`final_result`）・`records.py`（`_keep_step_missing`・`recorded_step_missing`）・`skills/progress-tracking/SKILL.md`
-- **変更内容:** 詳細設計書の「工程の定義の読み手」「プランの遷移と結果の要約」「失敗の理由」
+- **対象ファイル:** `progress/definition.py`・`progress/invoke.py`（`answered_gap_detail`・`_no_route` の失敗の文と `metrics.waited`）・`progress/run.py`（`_step_draft`・`_finish_stage`）・`core/plan/transition_decide.py`・`runner.py`（`_perform`）・`skills/progress-tracking/SKILL.md`
+- **変更内容:** 詳細設計書の「工程の定義の読み手」「プランの遷移と結果の要約」「失敗の理由」のうち、Task 5 に入れた欠けの判定を除く分。失敗の理由に、足りない名前・worker の理由・次の操作を入れる
 - **満たす受け入れ条件:** 6・7
 - **進め方:**
   1. 失敗するテスト: 出力の無い判断の求めに `approved` と回答すると、理由に `product_version` と worker の要約が入る（今は落ちる）
   2. 実装して通す
-  3. テストを足して通す: 失敗の後に `ndf progress next` を打っても worker が起動されない（条件 7）。先のステップが同じキーを返すプランでも欠けが隠れない
+  3. テストを足して通す: 失敗の後に `ndf progress next` を打っても worker が起動されない（条件 7）。先のステップが同じキーを返すプランでも、失敗の文に足りない名前が入る
   4. 整理
 
 ## レビューの単位
@@ -89,12 +102,13 @@
 | --- | --- | --- | --- | --- |
 | U1 形の確かめの移し替え | Task 1・2 | 4513:3・4513:4・4513:5・4513:8 | 約 300 | （実装の後に書き足す） |
 | U2 記録済みの値で終える | Task 3・4 | 4513:1・4513:2 | 約 400 | （実装の後に書き足す） |
-| U3 判断の求めの出力の引き継ぎ | Task 5 | 4513:9 | 約 350 | （実装の後に書き足す） |
-| U4 出力の足りない承認の理由 | Task 6 | 4513:6・4513:7 | 約 400 | （実装の後に書き足す） |
+| U3 判断の求めの出力の引き継ぎと欠けの判定 | Task 5 | 4513:9 | 約 450 | （実装の後に書き足す） |
+| U4 出力の足りない承認の理由 | Task 6 | 4513:6・4513:7 | 約 300 | （実装の後に書き足す） |
 
-- 順序は U1 → U2 → U3 → U4 にする。U2 は U1 の `_version_kind` と緩めた結果の定義を使う。U4 は U3 の `metrics.missing_outputs` を使う
+- 順序は U1 → U2 → U3 → U4 にする。U2 は U1 の `_strategy_at` と緩めた結果の定義を使う。U4 は U3 の `metrics.missing_outputs` を使う
 - U2 を 2 番目に置くのは、他のプロジェクトの進行を止めている事象（オーガナイザーの承認の後に工程が終わらない）を直す単位だからである
 - U3 と U4 を分けるのは、合わせると約 750 行で 400 行の目安を超え、U3 だけで受け入れ条件 9 が単独で通るためである
+- 判断を求めたステップ自身の欠けで止める判定は、U4 でなく U3 に入れる。U3 は `gate` の部分の出力を引き継ぐので、判定が無いと、U3 だけを取り込んだ時点で、値を返さなかった判断の求めが先のステップの値で補われて完了する。そのため U3 は目安を約 50 行超える。U4 には失敗の文を詳しくする分だけを残す
 
 ## リファクタリングの時機
 

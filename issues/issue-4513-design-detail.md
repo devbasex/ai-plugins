@@ -2,7 +2,7 @@
 
 設計文書 [issue-4513-design.md](./issue-4513-design.md) の構成要素と決定 1〜6 を、ファイルと関数の粒度へ下ろした文書である。受け入れ条件の中身は要求仕様 [issue-4513-requirements.md](./issue-4513-requirements.md) にある。書き方は `design` の `references/detailed-design.md` に従う。
 
-**別ファイルにした理由**: 別ファイルにする条件は「新設する関数が 2 つ以上」か「シグネチャを変える関数がある」で、この設計は両方に当たる。新設は 11（`required_outputs`・`released_answer`・`released_outcome` など）、シグネチャの変更は 7（`require_outputs`・`_add_outputs`・`work_argv` など）である。条件は `requirements-design` の `document-roles.md` の「詳細設計を別ファイルにする条件」にある。
+**別ファイルにした理由**: 別ファイルにする条件は「新設する関数が 2 つ以上」か「シグネチャを変える関数がある」で、この設計は両方に当たる。新設は 11（`required_outputs`・`released_answer`・`released_outcome` など）、シグネチャの変更は 10（`require_outputs`・`_add_outputs`・`work_argv`・`work_prompt`・`_work_handoff`・`write_values` など）である。条件は `requirements-design` の `document-roles.md` の「詳細設計を別ファイルにする条件」にある。
 
 ## 地図
 
@@ -34,8 +34,8 @@ plugins/ndf/
 └── tests/
     ├── contracts/{test_result.py, test_worker_kinds_shape.py}
     ├── core/{test_worker_outcome.py, plan/test_steps.py, plan/test_transition.py, plan/test_runner.py}
-    ├── domains/release/test_release_forms.py
-    └── progress/{test_definition.py, test_invoke.py, test_invoke_values.py, test_run.py, test_sprint_templates.py, gate/test_gate_work.py, gate/test_gate_release.py}
+    ├── domains/release/{test_release_forms.py, test_release_record.py}
+    └── progress/{test_definition.py, test_invoke.py, test_invoke_values.py, test_run.py, gate/test_gate_work.py, gate/test_gate_release.py}
 ```
 
 依存の向き: 工程の進行（`progress/run.py`・`invoke.py`）が、定義の読み手（`definition.py`）と値のファイル（`contracts/worker_kinds.py`）を読む。`ndf answer work`（`gate/entry.py`）は値のファイル・ブランチ戦略（`core/branch_strategy.py`）・届け先の選び方（`domains/release/forms_decide.py`）を読み、`ndf worker run`（`core/worker.py`）へ引数で渡す。プラン（`core/plan/`）は `ndf worker run` の結果 JSON を標準出力から読むだけで、工程の進行を読まない。今ある依存の向きは変えない。足す依存は `entry.py` → `forms_decide.py` と `entry.py` → `branch_strategy.py` の 2 本で、どちらも循環を作らない。
@@ -46,11 +46,11 @@ plugins/ndf/
 | `contracts/schemas/release-verification.schema.json` | 変更 | リリース後テストの記録の形 | — | `version` | — |
 | `contracts/worker/kinds.json` | 変更 | 作業 `release` の説明 | — | `release` | — |
 | `contracts/workflow/context.schema.json` | 変更 | 文脈の `product_version` の説明 | — | `product_version` | — |
-| `src/ndf/contracts/worker_kinds.py` | 変更 | `values.json` の形と読み書き | — | モジュール | `write_released`（新設）・`released_of`（新設） |
+| `src/ndf/contracts/worker_kinds.py` | 変更 | `values.json` の形と読み書き | — | モジュール | `write_released`（新設）・`released_of`（新設）・`write_values`（変更） |
 | `src/ndf/progress/definition.py` | 変更 | 工程の定義と規約の読み手 | `contracts` | モジュール | `required_outputs`（新設） |
 | `src/ndf/progress/run.py` | 変更 | 工程の進行 | `invoke`・`definition`・`stages` | モジュール | `released_answer`（新設）・`_run_step`・`_step_draft`・`_finish_stage`（変更） |
-| `src/ndf/progress/invoke.py` | 変更 | ステップの呼び出し | `worker_kinds`・`plan` | `StageRun`・モジュール | `StageRun.released`（新設の欄）・`answered_gap_detail`（新設）・`plan_path`・`_no_route`（変更） |
-| `src/ndf/progress/gate/entry.py` | 変更 | `ndf answer work` | `worker_kinds`・`branch_strategy`・`forms_decide` | モジュール | `released_outcome`（新設）・`_version_kind`（新設）・`_cmd_work`・`work_argv`・`_outputs_of`（変更） |
+| `src/ndf/progress/invoke.py` | 変更 | ステップの呼び出し | `worker_kinds`・`plan` | `StageRun`・`PreparedPlan`・モジュール | `StageRun.released`（新設の欄）・`PreparedPlan.released`（新設の欄）・`answered_gap_detail`（新設）・`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
+| `src/ndf/progress/gate/entry.py` | 変更 | `ndf answer work` | `worker_kinds`・`branch_strategy`・`forms_decide` | `Released`（新設）・`WorkHandoff`・モジュール | `released_outcome`（新設）・`_strategy_at`（新設）・`WorkHandoff.version_number`（新設の欄）・`_cmd_work`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`（変更） |
 | `src/ndf/domains/release/forms_decide.py` | 変更 | 届け先の選び方 | — | モジュール | `reaches`（新設）・`deliveries_of`（変更） |
 | `src/ndf/core/worker.py` | 変更 | `ndf worker run` | `worker_outcome` | モジュール | `_add_run`・`_cmd_run`（引数を 1 つ足すだけ） |
 | `src/ndf/core/worker_outcome.py` | 変更 | worker の結果の確かめ | `contracts` | `Checked`（新設）・モジュール | `require_outputs`・`_output_gap`・`outcome_of`（変更） |
@@ -60,7 +60,7 @@ plugins/ndf/
 | `src/ndf/core/plan/records.py` | 変更 | プランの記録のファイル | — | モジュール | `_add_outputs`・`recorded_outputs`（変更）・`_stored_entries`・`_keep_step_missing`・`recorded_step_missing`（新設）・`_stored_outputs`（削除） |
 | `skills/` の 5 ファイル | 変更 | 手順書の説明 | — | — | — |
 
-`forms_decide.py` と、テストの `test_invoke_values.py`・`test_worker_kinds_shape.py`・`test_steps.py`・`test_release_forms.py`・`test_definition.py` も、設計文書の「設計の結果」の触るファイルに入れた（届け先の条件を 1 か所にするためと、変える関数の既存のテストがそこにあるため）。
+`forms_decide.py` と、テストの `test_invoke_values.py`・`test_worker_kinds_shape.py`・`test_steps.py`・`test_release_forms.py`・`test_release_record.py`・`test_definition.py` も、設計文書の「設計の結果」の触るファイルに入れた（届け先の条件を 1 か所にするためと、変える関数の既存のテストがそこにあるため。`test_release_record.py` は受け入れ条件 4 の記録の経路を確かめる）。
 
 ## 結果 JSON とリリース後テストの記録の定義
 
@@ -120,7 +120,13 @@ plugins/ndf/
 | `released_answer` | `src/ndf/progress/run.py` | 新設 | `released_answer(v: View, stage: str) -> Optional[str]` | リリース承認ゲートへのオーガナイザーの承認が書いた `product_version` を返す |
 | `StageRun.released` | `src/ndf/progress/invoke.py` | 新設 | `released: Optional[str] = None`（データクラスの欄） | ステップの呼び出しへ記録済みの値を渡す |
 | `_run_step` | `src/ndf/progress/run.py` | 変更 | 今のまま | `approved_seen` と並べて `released_answer` を読み、`StageRun` に入れる |
-| `plan_path` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | `_prepared` の後、プランを書く前に毎回 `write_released(work_dir, run.released)` を打つ |
+| `PreparedPlan` | `src/ndf/progress/invoke.py` | 変更 | 欄 `released: Optional[str]` を足す | 組んだか読んだ `values.json` が今持つ `released_version` を渡す |
+| `prepare_plan` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 記録済みの値を使うプランなら、`write_values` に `run.released` を渡し、最初の書き込みで `released_version` まで書く |
+| `_prepared` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 使い回す `values.json` から `released_of` で読んだ値を `PreparedPlan.released` に入れる |
+| `plan_path` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 記録済みの値を使うプランで、`PreparedPlan.released` と `run.released` が違うときだけ、プランを書く前に `write_released(work_dir, run.released)` を打つ |
+| `write_values` | `src/ndf/contracts/worker_kinds.py` | 変更 | `write_values(..., released: Optional[str] = None)` | `released` が `None` でなければ `released_version` も書く |
+
+**記録済みの値を使うプラン**とは、プランが流す作業（`route.kinds_of(template, local_tests)`）に、出力に `product_version` を持つ作業（今は `release` だけ）を含むプランである。ほかのプランでは、`values.json` の `released_version` を読む者がいないので書かない。値が前と同じなら書き直さない。そのため、`values.json` を書き直すのは、試行の中で記録済みの値が変わったとき（承認の回答で値が入った、または消えた）だけになる。
 
 - `released_answer`
   - 事前条件: `v` は同じ工程の事象を持つステートマシンの読み取り
@@ -133,9 +139,9 @@ plugins/ndf/
 
 | 場面 | `values.json` を扱う関数 | 扱い |
 | --- | --- | --- |
-| 工程の retry の後の最初 | `run._prepare` が消し、`prepare_plan` が作る | 新しく作る |
+| 工程の retry の後の最初 | `run._prepare` が消し、`prepare_plan` が作る | 新しく作る。記録済みの値を使うプランなら、同じ書き込みで `released_version` も書く |
 | 同じ試行の中でプランをもう一度流す | `_prepared` | 前に作ったものを使い回す |
-| どちらの場合も、プランを書く前に | `plan_path` が `write_released` を打つ | `released_version` だけを書き直す |
+| 使い回す回で、記録済みの値が前と違う | `plan_path` が `write_released` を打つ | `released_version` だけを書き直す。同じなら書かない |
 
 ### 処理の手順
 
@@ -154,7 +160,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `released_answer` | オーガナイザーの承認の後の値を返す | 後に worker の判断の求めへの `approved` があっても前者を返す | 利用者か MVV 判定の承認・却下・出力の事象が隣に無いときは `None` |
-| `plan_path` | 前の試行の `values.json` が残っていても、今の値で書き直す | 値が無い回は `released_version` を消す | — |
+| `plan_path` | 前の試行の `values.json` が残っていても、今の値で書き直す | 値が無い回は `released_version` を消す。値が前と同じ回と、記録済みの値を使わないプランでは `write_released` が呼ばれない | — |
 
 ## 工程の定義の読み手
 
@@ -189,52 +195,69 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_version_kind` | `src/ndf/progress/gate/entry.py` | 新設 | `_version_kind(workdir: Path) -> Optional[str]` | 作業場所のリポジトリの `release.version_store.kind` を返し、読めなければ `None` |
-| `released_outcome` | `src/ndf/progress/gate/entry.py` | 新設 | `released_outcome(work: str, saved: Mapping[str, Any], version_kind: Optional[str], deliveries: Sequence[Mapping[str, Any]]) -> Optional[dict]` | worker を起動せずに返す結果 JSON を組む。起動するときは `None` |
+| `_strategy_at` | `src/ndf/progress/gate/entry.py` | 新設 | `_strategy_at(workdir: Path) -> Optional[branch_strategy.Strategy]` | 作業場所のリポジトリのブランチ戦略の設定を返し、読めなければ `None` |
+| `released_outcome` | `src/ndf/progress/gate/entry.py` | 新設 | `released_outcome(work: str, saved: Mapping[str, Any], strategy: Optional[branch_strategy.Strategy]) -> Optional[dict]` | worker を起動せずに返す結果 JSON を組む。起動するときは `None` |
+| `Released` | `src/ndf/progress/gate/entry.py` | 新設 | `class Released(NamedTuple): outcome: dict` | worker を起動せずに終えるときの結果を `_cmd_work` へ渡す |
 | `reaches` | `src/ndf/domains/release/forms_decide.py` | 新設 | `reaches(row: Mapping[str, Any], channel: str) -> bool` | 届け先の行が承認資料のチャネルに当たるか |
 | `deliveries_of` | `src/ndf/domains/release/forms_decide.py` | 変更 | 今のまま | 条件を `reaches` で読む（振る舞いは変えない） |
-| `_cmd_work` | `src/ndf/progress/gate/entry.py` | 変更 | 今のまま | `_work_handoff` の前に `released_outcome` を打ち、結果があれば出して 0 で終える |
+| `WorkHandoff` | `src/ndf/progress/gate/entry.py` | 変更 | 欄 `version_number: bool` を足す | 起動指示を組んだときの値の形を、`work_argv` へ同じ値で渡す |
+| `_work_handoff` | `src/ndf/progress/gate/entry.py` | 変更 | `_work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff \| Released` | 作業場所を決めた後に設定を読み、記録済みの値で終えるなら起動指示を書かずに `Released` を返す。それ以外は値の形を決めて起動指示を組む |
+| `work_prompt` | `src/ndf/progress/gate/entry.py` | 変更 | `work_prompt(kind, saved, workdir, paths, *, version_number: bool = False) -> str` | `version_number` を `_outputs_of` へ渡す |
+| `_cmd_work` | `src/ndf/progress/gate/entry.py` | 変更 | 今のまま | `_work_handoff` が `Released` を返したら、その結果を出して 0 で終える。`WorkHandoff` なら `handoff.version_number` を `work_argv` へ渡す |
 | `work_argv` | `src/ndf/progress/gate/entry.py` | 変更 | `work_argv(kind, state_dir, cwd, *, prompt_file=None, result_dir_id=None, version_number: bool = False) -> list[str]` | `version_number` が真なら `--require-version-number` を足す |
 | `_outputs_of` | `src/ndf/progress/gate/entry.py` | 変更 | `_outputs_of(kind: str, result_file: Path, version_number: bool) -> str` | 起動指示に、`product_version` に返す値の形を 1 行で書く |
 
+設定を読むのは、`product_version` を出力に持つ作業（今の作業の定義では `release` だけ）に限る。ほかの作業（実装・CI の修正・レビューなど）では `git rev-parse` も設定の読み込みもせず、今と同じく起動する。`product_version` を出力に持つかは、作業の定義（`kinds.json`）の `outputs` で決め、作業の名前を文字列リテラルで比べない。
+
+起動指示と `work_argv` の値の形は、`_work_handoff` が 1 回だけ決めた `version_number` から得る。起動指示を組む経路と終了時に確かめる経路で、別々に決め直さない。
+
+- `_work_handoff` の手順は次のとおり。保存先を開き、`values.json` を読み、作業場所を決めるところまでは今と同じである
+  1. 作業の定義の `outputs` に `product_version` があれば、`strategy = _strategy_at(workdir)` を読む。無ければ `strategy = None` とし、手順 2 を飛ばす（手順 3 の `version_number` は偽になる）
+  2. `released_outcome(kind, saved, strategy)` が結果を返せば、`Released(結果)` を返す。起動指示も、報告の初期化も、記述子の用意もしない
+  3. `version_number` は、`product_version` を出力に持つ作業で、`strategy` が `None` か、`strategy.version_store["kind"]` が `"none"` でないときに真である。それ以外は偽である
+  4. `work_prompt(kind, saved, workdir, paths, version_number=version_number)` で起動指示を組み、`WorkHandoff(..., version_number)` を返す
+- `_strategy_at` は、`workdir` で `git rev-parse --show-toplevel` を打って根を決め、`branch_strategy.load(root)` を読む（`progress/command.py` の `strategy` と同じ解き方）。版の種類と届け先を同じ 1 回の読み込みから得る
 - `released_outcome`
   - 事前条件: `saved` は `values_in` で読んだ `values.json`
-  - 事後条件: `released_of(saved)` があり、`version_kind == "none"` で、作業の種類 `work` が `release` のときだけ、`status: ok` と `outputs` の `product_version`・`delivery` を持つ結果 JSON を返す。それ以外は `None`
-  - 副作用: 無し（設定の行は呼ぶ側が渡す）
-- `delivery` は、`deliveries` のうち `reaches(row, "production")` の行が 1 つならその行の辞書をそのまま返す。0 か 2 つ以上なら、設計文書の固定のオブジェクトを返す。`deliveries_of` は行を 3 項目の `Delivery` に縮め、文脈の `delivery` が必須とする `versioned` を落とすので使わない。条件だけを `reaches` で共有する
-- `_cmd_work` は、`_work_dir(kind, saved, a.cwd)` が返す worker の作業場所（デプロイでは承認の対象のリポジトリ）を `_version_kind` に渡す。`_version_kind` はそのパスで `git rev-parse --show-toplevel` を打って根を決め、`branch_strategy.load(root)` の `version_store["kind"]` を読む（`progress/command.py` の `strategy` と同じ解き方）
-- `_cmd_work` で `work_argv` に渡す `version_number` は、その値が `"none"` でないときに真である。読めない（`None`）ときも真になる
-- `_outputs_of` の 1 行は、`version_number` が真なら「`product_version` はバージョン番号（例 `1.2.3`）」、偽なら「`product_version` は出したものを指す空白だけでない文字列（例 `main abc1234`）」とする
+  - 事後条件: `released_of(saved)` があり、`strategy` が `None` でなく、その `version_store["kind"]` が `"none"` で、作業 `work` の定義の `outputs` が `product_version` と `delivery` を持つ（今は `release` だけ）ときだけ、`status: ok` と `outputs` の `product_version`・`delivery` を持つ結果 JSON を返す。それ以外は `None`
+  - 副作用: 無し（設定は呼ぶ側が読んで渡す）
+- `delivery` は、`strategy.section["release"]` の `deliveries` のうち `reaches(row, "production")` の行が 1 つならその行の辞書をそのまま返す。0 か 2 つ以上なら、設計文書の固定のオブジェクトを返す。`deliveries_of` は行を 3 項目の `Delivery` に縮め、文脈の `delivery` が必須とする `versioned` を落とすので使わない。条件だけを `reaches` で共有する
+- `_outputs_of` の 1 行は、`version_number` が真なら「`product_version` はバージョン番号（例 `1.2.3`）」、偽なら「`product_version` は出したものを指す空白だけでない文字列（例 `main abc1234`）」とする。作業の出力に `product_version` が無ければ、この行を書かない
+
+**工程が読んだ設定を使い回さない理由**: プランを組む `prepare_plan` も、1 回の試行に 1 回 `.ndf/project.json` を読む（`invoke._project`）。ただし、読む場所は工程の入力の作業場所（`work_location`）で、worker が動く承認の対象のリポジトリ（`_work_dir`）と同じとは限らない。また、`_project` は `.ndf/project.json` をそのまま読むだけで、`branch_strategy.load` が行う旧いキーとスキーマの検査をしない。そのため、worker の作業場所で `branch_strategy.load` を読む。増える処理は、`release` の作業を 1 回起動するごとに `git rev-parse` 1 回と設定の読み込み 1 回である
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_version_kind` | 設定が無い・読めない・`git` が失敗する | 設定の誤り・リポジトリの外 | `branch_strategy.load` の `StrategyError`・`OSError` | 既定値で続ける（`None`。バージョン番号を持つ扱い） | 無し。worker を起動し、形を確かめる | — |
+| `_strategy_at` | 設定が無い・読めない | 設定の誤り | `branch_strategy.load` の `StrategyError`・`OSError` | 既定値で続ける（`None`。バージョン番号を持つ扱い） | 無し。worker を起動し、形を確かめる | — |
+| `_strategy_at` | `git rev-parse` が失敗する・`git` を起動できない | リポジトリの外・`git` の誤り | `Git.run` の `GitError`（`git` を起動できないときの `OSError` を含む） | 既定値で続ける（`None`。バージョン番号を持つ扱い） | 無し。worker を起動し、形を確かめる | — |
 | `released_outcome` | 届け先の設定が配列でない | 設定の誤り | 関数の中 | 既定値で続ける（固定のオブジェクト） | 無し | — |
 | `_cmd_work` | `values.json` が無い | 試行の始め前に打った | `values_in` | 止める（今の `WorkUnready`） | `stopped`（`precondition`）。終了コードは今のまま | retry で打ち直せる |
 
 ### 処理の手順
 
+表の「版の種類」は、`_strategy_at` が返した設定の `version_store["kind"]` である。
+
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `_cmd_work` | 記録済みの値あり・`version_kind` が `none`・作業 `release` | worker を起動せず ok を出す |
-| `_cmd_work` | 記録済みの値あり・`version_kind` が `none` 以外か読めない | worker を起動し、形を確かめる |
-| `_cmd_work` | 記録済みの値なし・`version_kind` が `none` | worker を起動し、形を確かめない |
-| `_cmd_work` | 記録済みの値なし・`version_kind` が `none` 以外か読めない | worker を起動し、形を確かめる（今と同じ） |
-| `_cmd_work` | 作業が `release` 以外 | 記録済みの値を見ずに worker を起動する。形の確かめは上の行と同じく `version_kind` で決める |
+| `_work_handoff` | 記録済みの値あり・版の種類が `none`・作業の出力が `product_version` と `delivery` を持つ（`release`） | worker を起動せず `Released` を返す。`_cmd_work` が ok を出す |
+| `_work_handoff` | 記録済みの値あり・版の種類が `none` 以外か設定を読めない | worker を起動し、形を確かめる |
+| `_work_handoff` | 記録済みの値なし・版の種類が `none` | worker を起動し、形を確かめない |
+| `_work_handoff` | 記録済みの値なし・版の種類が `none` 以外か設定を読めない | worker を起動し、形を確かめる（今と同じ） |
+| `_work_handoff` | 作業の出力に `product_version` が無い | 設定を読まず、記録済みの値も見ずに worker を起動する。形は確かめない（今と同じ） |
 
 ### ログと記録の出力
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `_cmd_work` | worker を起動せずに終えたこと（作業の種類と `version_kind`） | ログの `info` と結果 JSON の要約 | 記録済みの値の中身（ログには載せない。結果 JSON の `outputs` にだけ載る） |
+| `_cmd_work` | worker を起動せずに終えたこと（作業の種類と版の種類） | ログの `info` と結果 JSON の要約 | 記録済みの値の中身（ログには載せない。結果 JSON の `outputs` にだけ載る） |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `_version_kind` | `progress/command.py` の `strategy`、`domains/release/route_decide.py` の `route_of` | `grep -rn 'version_store' src/ndf --include=*.py` | 使えない。`strategy` は読めないと `FactUnknown` を上げ、`route_of` は配布の経路全体を組む。`branch_strategy.load` を使う |
+| `_strategy_at` | `progress/command.py` の `strategy`、`domains/release/route_decide.py` の `route_of`、`progress/invoke.py` の `_project` | `grep -rn 'version_store' src/ndf --include=*.py`、`grep -n 'def _project' src/ndf/progress/invoke.py` | 使えない。`strategy` は読めないと `FactUnknown` を上げ、`route_of` は配布の経路全体を組む。`_project` は読む場所が違い、スキーマの検査をしない（上の「工程が読んだ設定を使い回さない理由」）。`branch_strategy.load` を使う |
 | `released_outcome` | `forms_decide.deliveries_of` | `grep -rn 'def deliveries_of'` | 条件だけを `reaches` に切り出して使う。返す形は行を縮めるので使わない |
 | `reaches` | `deliveries_of` の中の条件式 | 同上 | 式を移す |
 
@@ -242,8 +265,9 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `released_outcome` | `none` と記録済みの値で ok と 2 つの出力 | 本番に届く行が 0・2 つで固定のオブジェクト。先頭が `channel: base` の行でも本番の行を返す | `version_kind` が `none` 以外・値なしで `None` |
-| `_version_kind` | `none` を返す | — | 設定が無いと `None` |
+| `released_outcome` | `none` と記録済みの値で ok と 2 つの出力 | 本番に届く行が 0・2 つで固定のオブジェクト。先頭が `channel: base` の行でも本番の行を返す | 版の種類が `none` 以外・設定が `None`・値なしで `None` |
+| `_strategy_at` | 設定を返す | — | 設定が無い・`git` が `GitError` を上げると `None`（`Git.run` を差し替えて確かめ、`git` を起動しない） |
+| `_work_handoff` | `release` で、起動指示の 1 行と `version_number` が同じ値から決まる | 出力に `product_version` の無い作業では `_strategy_at` が呼ばれない | — |
 | `_cmd_work` | 記録済みの値で worker を起動しない（`exec_` が呼ばれない） | `--candidate`・`rev {repo} {state_dir}` の値がそのまま出力になる | `values.json` が無いと `precondition` |
 | `reaches` | `channel: production` と省略で真 | `null` で真 | `base` で偽 |
 
