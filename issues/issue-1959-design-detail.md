@@ -45,7 +45,7 @@ src/ndf/
 | `src/ndf/domains/records/usage_decide.py` | 変更 | 起動 1 回の費用を求める | — | モジュール | N: `launch_costs` |
 | `src/ndf/domains/settings/launch_config_cli.py` | 新設 | `ndf launch-config` の 4 つのサブコマンド | launch_settings・launch_approval | モジュール | N: `main`・`_show`・`_approve`・`_confirm_terminal`・`_revoke`・`_safety_args` |
 | `src/ndf/domains/hooks/guards/launch_answer.py` | 新設 | 承認の問いの答えを記録する | launch_approval | モジュール | N: `check` |
-| `src/ndf/domains/crossreview/seats.py` | 変更 | サンドボックスでサンドボックスのためにファイルを読めなかったレビュー担当向けの直し方の文を、承認の手順にする | — | モジュール | C: `_unread_hint` |
+| `src/ndf/domains/crossreview/seats.py` | 変更 | サンドボックスのためにファイルを読めなかったレビュー担当向けの直し方の文を、承認の手順にする | — | モジュール | C: `_unread_hint` |
 | `src/ndf/cli.py`・`src/ndf/__main__.py` | 変更 | サブコマンドの登録と差し込み | usage | `COMMANDS` | C: 行の追加 |
 | `contracts/domains/runtimes.json` | 変更 | `delegate_sandbox_args`・`sandbox_needs_userns` の列と、kiro・agy の引数 | — | 表 | — |
 | `contracts/domains/env.json` | 変更 | 子へ渡す環境変数の 4 行 | — | 表 | — |
@@ -108,8 +108,8 @@ src/ndf/
 | agy / review | — | 停止 |
 | `sandbox_needs_userns` が偽で `sandbox_args` を持つ行 / review（kiro） | — | `sandbox_args` |
 | codex / review・delegate | 名前空間を作れる | `sandbox_args`（review）・`delegate_sandbox_args`（delegate） |
-| codex / review・delegate | 作れず、`unsandboxed` にあり承認済み | `unsandboxed_args` |
-| kiro・agy / delegate | `unsandboxed` にあり承認済み（サンドボックスの有無を見ない） | `unsandboxed_args` |
+| codex / review・delegate | 作れず、`permissions.unsandboxed` にそのランタイムがあり承認済み | `unsandboxed_args` |
+| kiro・agy / delegate | `permissions.unsandboxed` にそのランタイムがあり承認済み（サンドボックスの有無を見ない） | `unsandboxed_args` |
 | 上のどれでもない | — | 停止 |
 
 ### 単体テストの観点
@@ -160,7 +160,7 @@ src/ndf/
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | 2 つの `approve`、`approve` と `revoke` | 承認の記録と答えの記録 | 承認の記録の 1 つのロック（`launch-approvals.jsonl.lock`）の中で、答えの照合、使用済みの行の追記、承認の行の追記を続けて行う | 使用済みの行を先に書く。途中で落ちたら答えは使えず、問い直す |
-| 起動の照らし直しと承認の書き込み | 承認の記録 | 読む側はロックを取らず、改行で終わる行だけを読む | — |
+| 起動の直前の照らし直し（`Grant.verify`）と承認の書き込み | 承認の記録 | 読む側はロックを取らず、改行で終わる行だけを読む | — |
 
 ### ログと記録の出力
 
@@ -254,7 +254,7 @@ src/ndf/
 - `ClaudeCall` に `grant`（full 以外で渡すと `ValueError`）、`ClaudeReply` に `session_id`・`usage`・`model_usage`・`session_cost_usd`・`launched: bool`・`launched_at`・`seconds`・`earlier`、`LaunchOptions` に `verify: Optional[Callable[[], Optional[str]]]` を足す。どれも省略できる
 - `LaunchRecorder` は `record_cli(usage, meta)` を持つ
 - `report_launch`
-  - 事後条件: `launched` が偽の子（CLI が古い、同時起動のスロットが取れない、起動できない、照らし直しで停止）は行を渡さない。`launch_id` は子ごとに作る
+  - 事後条件: `launched` が偽の子（CLI が古い、同時起動のスロットが取れない、起動できない、起動の直前の照らし直し（`Grant.verify`）で停止）は行を渡さない。`launch_id` は子ごとに作る
   - 副作用: 差し込まれた書き込み処理の呼び出し
 
 ### 異常系の処理

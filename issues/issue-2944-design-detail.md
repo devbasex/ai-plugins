@@ -95,7 +95,7 @@ src/ndf/
 - `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm` を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄）を返す
 - `pick`
   - 事前条件: `layer` は `worker`・`skill`・`judge`・`seat`
-  - 事後条件: 引数か環境変数で、モデルと effort の片方でも指定があれば割り付けず、無い側は基準の組の値。`unit` が無い場合、`enabled` が偽の場合、選択肢が 1 つの場合は、基準の組の値（出所は `base`、組が値を持たなければ `default`）で、割り付けの行を書かない。停止（`enabled` が偽）か固定（選択肢が 1 つ）で基準を使う単位に割り付けがあれば `halted` の行を足す。工程が無い層と作業の名前の起動は、引数を持たない
+  - 事後条件: 引数か環境変数で、モデルと effort の片方でも指定があれば割り付けず、無い側は基準の組の値。`unit` が無い場合、`enabled` が偽の場合、選択肢が 1 つの場合は、基準の組の値（出所は `base`、組が値を持たなければ `default`）で、割り付けの行を書かない。停止（`enabled` が偽）か固定（選択肢が 1 つ）で基準を使う単位に割り付けがあれば `halted` の行を足す。工程が無い層と作業の名前の起動には、引数を足さない（環境変数と起動の引数の指定は効く）
   - 副作用: 実験の記録のロックの中で、読み取り、割り付けの判定、1 行の追記をする
 - `append_row` は、呼び出し元がロックを取らない呼び出し（拒否・停止・`unpriced` の行）でも `pick` と同じロックを使い、記録が改行で終わらなければ改行を先に足す
 
@@ -132,7 +132,7 @@ src/ndf/
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 並列の起動の割り付け | `launch-experiments.jsonl` | ファイルのロックの中で読んで足す。ロックの中で出現率を計算しない | 同じ単位と期間内は同じ組を返すので、打ち直しても行は増えない |
+| 並列の起動の割り付け | `launch-experiments.jsonl` | ファイルのロックの中で読んで足す。ロックの中で出現率を計算しない | `window_days` の期間の中の同じ単位には同じ組を返すので、打ち直しても行は増えない |
 
 ### 既存の部品の再利用
 
@@ -239,7 +239,7 @@ src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_add_run` | `core/worker.py` | 変更 | 変えない | `--unit`・`--mode` を足す |
-| `_cmd_run` | 同 | 変更 | 変えない | `--unit` が無ければ `NDF_UNIT_ID`、`--retry` の値には `NDF_RETRY_CAUSE` を使い、結果の `metrics.launch` に値・割り付け ID・実際のモデルを載せる |
+| `_cmd_run` | 同 | 変更 | 変えない | `--unit` が無ければ `NDF_UNIT_ID`、`pick` の `retry` には `NDF_RETRY_CAUSE` の値を渡し、結果の `metrics.launch` に値・割り付け ID・実際のモデルを載せる |
 | `delegate` | 同 | 変更 | `delegate(handoff, system, *, wd, root, call, session)`（`Handoff` に `unit`・`mode`・`retry`・`charge_to`） | 会話の最初に値を決め、引数と環境を再開でも同じにする。拒否は 1 回だけ新しい会話で打ち直す |
 | `_resume_until_written` | 同 | 変更 | `_resume_until_written(…, choice: Choice)` | 子ごとに値と `outcome` を行にする |
 | `_call_skill` | `progress/invoke.py` | 変更 | 変えない | `pick("skill", run.name, unit=NDF_UNIT_ID)` の値で起動し、行にする |
@@ -307,7 +307,7 @@ src/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `retry_reason`・`_run` | `test-repeat` と `repeat-check` のどちらを通っても同じ理由 | 1 回目は理由なし | 表に無い停止理由 |
+| `retry_reason`・`_run` | テストの失敗の集計ステップ `test-repeat` と CI の失敗の集計ステップ `repeat-check` のどちらを通っても同じ理由 | 1 回目は理由なし | 表に無い停止理由 |
 | `_step_env` | 単位の ID と `charge_to` | `impl` の無いプラン | 親から継いだ値が外れる |
 | `_after_unit` | 次の検査の成否が指標 | 承認ゲート | 書けなくても結果が同じ |
 
