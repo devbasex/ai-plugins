@@ -226,11 +226,6 @@
           "number": {
             "type": "integer",
             "description": "PR の番号（pr）"
-          },
-          "merge_sha": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{40}$",
-            "description": "マージで本流へ入ったコミット（pr。merge がマージした・既にマージ済みだったときに、GitHub が返した場合だけ）"
           }
         },
         "required": [

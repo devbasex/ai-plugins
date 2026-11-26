@@ -55,8 +55,7 @@ MERGE_REFUSED_STATUS = (405, 409, 422)
 PULL_ID_QUERY = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } } }"
 ADMIN_MERGE_MUTATION = (
     "mutation($id: ID!, $head: GitObjectID!, $method: PullRequestMergeMethod!) {"
-    " mergePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: $method})"
-    " { pullRequest { merged mergeCommit { oid } } } }"
+    " mergePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: $method}) { pullRequest { merged } } }"
 )
 # マージの方式が基底で許されていない断りの停止理由の種類（方式を渡した呼び手が、ほかの断りと分けて方式を決め直す）
 METHOD_REFUSED = "merge_method"
@@ -113,21 +112,15 @@ class PullFacts(Protocol):
     def base_ref(self) -> str: ...
     @property
     def body(self) -> str: ...
-    @property
-    def merge_sha(self) -> str: ...
 
 
 class MergeOutcome(NamedTuple):
-    """マージの結果。`kind` は断りの停止理由の種類（`refused`・`METHOD_REFUSED`・`base_conflict`・`not_ci`・`unknown`）か待ち（`MERGE_QUEUE_PENDING`）。
-
-    `merge_sha` はマージで本流へ入ったコミット（GitHub がマージの応答か PR の欄で返したときだけ。ほかは空）。
-    """
+    """マージの結果。`kind` は断りの停止理由の種類（`refused`・`METHOD_REFUSED`・`base_conflict`・`not_ci`・`unknown`）か待ち（`MERGE_QUEUE_PENDING`）。"""
 
     merged: bool
     kind: Optional[str]
     detail: str
     head_sha: str
-    merge_sha: str = ""
 
 
 class FileAt(NamedTuple):
@@ -193,7 +186,7 @@ def queue_merge_method(queue: Any) -> Optional[str]:
 def preflight(pull: PullFacts, number: int, expect_head: Optional[str]) -> Optional[MergeOutcome]:
     """マージの要求を送らずに返す結果（マージ済み・HEAD の食い違い・決めていない残リスク）。送ってよければ None。"""
     if pull.merged:
-        return MergeOutcome(True, None, f"#{number} は既にマージ済み", pull.head_sha, pull.merge_sha)
+        return MergeOutcome(True, None, f"#{number} は既にマージ済み", pull.head_sha)
     if expect_head and not git.sha_matches(expect_head, pull.head_sha):
         return MergeOutcome(False, "refused", f"#{number} の HEAD が {expect_head} でない（今は {pull.head_sha}）", pull.head_sha)
     risks = premerge_risks(pull.body)

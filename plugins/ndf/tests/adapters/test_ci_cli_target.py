@@ -81,13 +81,10 @@ def test_either_option_alone_checks_the_numbered_pull(use, option) -> None:
     assert hub.merged == []
 
 
-def test_a_merged_numbered_pull_that_matches_is_ok_and_hands_over_the_merge_commit(use, capsys, last_result) -> None:
-    hub = use(_pull(state="closed", merged=True, merge_sha="e" * 40))
+def test_a_merged_numbered_pull_that_matches_is_ok(use, capsys, last_result) -> None:
+    hub = use(_pull(state="closed", merged=True))
     assert ci_cli.main(UNIT) == 0
-    found = last_result(capsys.readouterr().out)
-    assert found["metrics"]["merge"] == "already" and hub.merged == []
-    # 単位を流す処理は、この値で履歴を照合する（GitHub へ読み直さない。#4369）
-    assert found["items"] == [{"kind": "pr", "number": 7, "merge_sha": "e" * 40}]
+    assert last_result(capsys.readouterr().out)["metrics"]["merge"] == "already" and hub.merged == []
 
 
 def test_the_number_alone_keeps_treating_a_closed_pull_as_a_precondition(use) -> None:

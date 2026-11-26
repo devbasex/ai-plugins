@@ -307,9 +307,8 @@ def _held_target(shown: dict) -> Optional[merge_approval.MergeTarget]:
         return None
 
 
-def _pr_item_list(number: int, merge_sha: str = "") -> list[dict]:
-    """PR の項目。マージした・マージ済みだった PR は、GitHub が返したマージコミットを持つ（単位を流す処理が履歴の照合に使う。#4369）。"""
-    return [{"kind": "pr", "number": number, **({"merge_sha": merge_sha} if merge_sha else {})}]
+def _pr_item_list(number: int) -> list[dict]:
+    return [{"kind": "pr", "number": number}]
 
 
 def _asking(target: merge_approval.MergeTarget, verdict: Verdict, out: Optional[str], summary: str) -> dict:
@@ -398,7 +397,7 @@ def _numbered_target(hub: GitHub, args: argparse.Namespace) -> Pull | dict:
         return result.stopped(TOOL, "refused", detail, instance=pull.head_sha, items=_pr_item_list(pull.number))
     if pull.merged:
         summary = f"#{pull.number} は既にマージ済み"
-        return result.result(TOOL, result.OK, summary, items=_pr_item_list(pull.number, pull.merge_sha), metrics={"merge": "already"})
+        return result.result(TOOL, result.OK, summary, items=_pr_item_list(pull.number), metrics={"merge": "already"})
     if pull.state != "open":
         return result.stopped(TOOL, "precondition", f"#{pull.number} は閉じている")
     return pull
@@ -496,7 +495,7 @@ def _merged(
         metrics: dict[str, Any] = {"merge": "merged", "verdict": verdict.value}
         if approved_by is not None:
             metrics["approved_by"] = approved_by
-        return result.result(TOOL, result.OK, outcome.detail, items=_pr_item_list(target.number, outcome.merge_sha), metrics=metrics)
+        return result.result(TOOL, result.OK, outcome.detail, items=items, metrics=metrics)
     kind = outcome.kind if outcome.kind is not None else "unknown"
     return result.stopped(TOOL, kind, outcome.detail, instance=outcome.head_sha, items=items)
 
