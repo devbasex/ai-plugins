@@ -688,7 +688,7 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
 
 def _publish_quotes(run: Run, rows: Sequence[dict[str, Any]]) -> None:
     """残った文の引用と理由を PR へ書くときの形にする。伏せて変わった引用は元の文を残さず、`redacted` を持つ
-    （次の確認は、固定の文の所を任意の文字として探す）。"""
+    （次の確認は、固定の文の所をその種類の値の形として探す）。"""
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]
     run.publish_all([q[k] for r in remained for q in r["quotes"] for k in ("quote", "why")])
     for row in remained:

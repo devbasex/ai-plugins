@@ -63,8 +63,19 @@ _EMAIL = re.compile(r"(?<![\w.+-])(?P<local>[\w.+-]+)@(?P<domain>[A-Za-z0-9-]+(?
 _BARE_REF = re.compile(r"^(?P<label>(?:issue|PR|pr|Issue)\s*)#(?P<number>\d+)$")
 # 公開の書き先へ、非公開のリポジトリの由来を書くときの固定の文（3391-2）。完全な参照は手元の引継ぎ文書だけに置く
 PRIVATE_ORIGIN = "非公開のリポジトリの課題"
-# `scrub` が落とした所へ置く固定の文のどれか（`redacted_pattern`）
-_PLACEHOLDER = re.compile("(" + "|".join(map(re.escape, (run_log.MASK, PRIVATE_REF_TEXT, HOME_TEXT, EMAIL_TEXT, ACCOUNT_TEXT))) + ")")
+# `scrub` が落とした所へ置く固定の文ごとの、落とす前の値の形（`redacted_pattern`）。どれも短い側から一致させる
+_VALUE_SHAPES = {
+    run_log.MASK: r"[!-~]+?",
+    PRIVATE_REF_TEXT: r"[!-~]*?/[!-~]+?",
+    HOME_TEXT: r"""/(?:home|Users)/[^/\s)\]>"'`]+?""",
+    EMAIL_TEXT: r"[A-Za-z0-9_.+-]+?@[A-Za-z0-9.-]+?",
+    ACCOUNT_TEXT: r"[A-Za-z0-9_.-]{3,}?",
+}
+_PLACEHOLDER = re.compile("(" + "|".join(map(re.escape, _VALUE_SHAPES)) + ")")
+# 認証ヘッダーの値は行末まで伏せるので、空白をまたぐ
+_HEADER_BEFORE = re.compile(r"(?i)authorization\s*[:=]\s*$")
+# 固定の文で始まる・終わる引用は、値の途中を候補にしない
+_VALUE_START, _VALUE_END = r"(?<![A-Za-z0-9_-])", r"(?![A-Za-z0-9_-])"
 
 
 class DropKind(StrEnum):
@@ -216,15 +227,24 @@ def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: 
 
 
 def redacted_pattern(redacted: str) -> re.Pattern[str]:
-    """伏せた後の文 `redacted` を伏せる前の文の中から探す正規表現。固定の文の所は、任意の文字の並びに一致させる
-    （秘密の固定の文は空白をまたぎ、ほかは空白を含まない）。
+    """伏せた後の文 `redacted` を伏せる前の文の中から探す正規表現。固定の文の所は、その種類の値の形（`_VALUE_SHAPES`）に一致させる。
 
     探す側は伏せ直さない。伏せる対象は実行する環境（アカウント名・秘密の環境変数）と前後の文字で変わり、
-    伏せ直すと前と同じ形にならないためである。
+    伏せ直すと前と同じ形にならないためである。値とその後ろの文字は 1 組ずつ確定し（アトミックグループ）、後ろが一致しなくても
+    前の値の長さを選び直さない。固定の文が多い引用で、割り当ての総当たりにならないようにする。
     """
     parts = _PLACEHOLDER.split(redacted)
-    gaps = (".+?" if mark == run_log.MASK else r"\S+?" for mark in parts[1::2])
-    return re.compile("".join([re.escape(parts[0]), *(gap + re.escape(rest) for gap, rest in zip(gaps, parts[2::2]))]))
+    out = [re.escape(parts[0]) if parts[0] else _VALUE_START if len(parts) > 1 else ""]
+    pending = ""
+    for before, mark, after in zip(parts[::2], parts[1::2], parts[2::2]):
+        header = mark == run_log.MASK and _HEADER_BEFORE.search(before)
+        pending += (".+?" if header else _VALUE_SHAPES[mark]) + re.escape(after)
+        if after:
+            out.append(f"(?>{pending})")
+            pending = ""
+    if len(parts) > 1 and not parts[-1]:
+        pending += _VALUE_END
+    return re.compile("".join([*out, pending]))
 
 
 # 参照先の公開範囲を確かめられず、どこを伏せるかを決められなかった自由記述の代わりに出す文
