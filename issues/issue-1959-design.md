@@ -1,6 +1,6 @@
 # claude -p の full の起動と起動の許可: 承認した Tool と MCP だけで起動できる（#1959）
 
-これまで、工程を流す `claude -p` は使わない Tool と MCP の定義を毎回読み直し、どの Tool を使えるかと安全装置を外すかは、手順書とコードが決め打ちしていた。この設計の改善の案では、full の起動は読み込む組み込みの Tool を一覧に絞り、MCP の読み込みを止める。Tool と MCP を足す指定と安全装置を外す指定は、設定を作る・直す Skill が利用者の承認を取り、承認した内容と一致する起動は都度の承認なしで動く。
+これまで、工程を流す `claude -p` は使わない Tool と MCP の定義を毎回読み直し、どの Tool を使えるかと安全装置を外すかは、手順書とコードが決め打ちしていた。この設計の改善の案では、full の起動は読み込む組み込みの Tool を一覧に絞り、MCP の読み込みを止める。Tool と MCP を足す指定と安全装置を外す指定は、設定を作る・直す Skill が利用者の承認を取り、承認した内容と一致する起動は都度の承認なしで動く。採らなかった案は「決定の記録」に、調べた標準・製品・ライブラリは末尾の「外部の調査」にある。
 
 ## 今の姿
 
@@ -43,6 +43,18 @@ graph TD
 - `--disallowed-tools "mcp__*"` は Tool を外すが、MCP のサーバの指示文が文脈に残る
 - 利用者の設定・プラグイン・Skill・サブエージェントの数は、3 つの形で同じだった（Skill 79・サブエージェント 17）
 - **`--tools` は、知らない名前と許可の記法を黙って捨てる。** 2026-11-27 に Claude Code 2.1.332 を `--tools "Read,NoSuchTool,Bash(ls:*)"` で起動した。終了コード 0 で、`system/init` の Tool は `Read` だけだった
+
+### 実測: 空白を含む許可の指定の渡し方
+
+2026-11-26 に Claude Code 2.1.332 を、作り物の git リポジトリで 3 回起動した。引数は `-p --setting-sources "" --strict-mcp-config --permission-mode acceptEdits --tools "Bash,Read"` で、依頼は `git commit --allow-empty -m probe` と `git tag probe-tag` を 1 回ずつ打つことである。
+
+| `--allowed-tools` の渡し方 | `git commit` | `git tag` |
+| --- | --- | --- |
+| 1 つの引数 `"Read,Bash(git commit --allow-empty:*)"` | 実行された | 拒否された |
+| 2 つの引数 `"Read"` `"Bash(git commit --allow-empty:*)"` | 実行された | 拒否された |
+| `"Read"` だけ（比較） | 拒否された | 拒否された |
+
+どちらの渡し方でも、空白を含む指定は 1 件の指定として効き、指定の外の操作は許可されない。
 
 ### 安全装置を外す指定の今の姿
 
@@ -139,7 +151,7 @@ graph TD
 | 集約 | オーナー（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | 起動の設定 | 利用者（Skill `launch-config` を通すか手で書く。起動の処理は読むだけ） | 設定のファイル | 工程の指定 | MCP の指定・読み込む Tool・尋ねずに使ってよい Tool・安全装置を外すランタイム |
-| 起動の承認 | `ndf launch-config approve`・`revoke` | 承認の記録の行（追記だけ） | — | リポジトリのキー・内容のハッシュ |
+| 起動の承認 | `ndf launch-config approve`・`revoke` | 承認の記録の行（追記だけ） | — | リポジトリのキー・内容のハッシュ・承認した人・承認の経路 |
 | 使用量ログ | 使用量ログの書き込み処理 | 行 | — | 使用量・費用 |
 
 ### 不変条件
@@ -153,6 +165,7 @@ graph TD
 | I5 | 起動の承認 | 許可を広げる指定を使う起動と、安全装置を外す起動は、いまの内容のハッシュが承認の記録にある場合だけ動く | 起動せずに `precondition` で止まる |
 | I6 | 起動の承認 | 承認の記録は、利用者の NDF の状態の保存先にだけ置く。リポジトリのファイルは承認の根拠にしない | — |
 | I7 | 起動の承認 | NDF が起動した AI の中からは、承認の記録を書けない | コマンドが拒む |
+| I8 | 起動の設定 | MCP の定義のコピーは所有者だけが読め、そのコピーを使う起動が終われば残らない | 次の起動が、持ち主のプロセスが無いコピーを消す |
 
 ### ドメインイベント
 
@@ -177,8 +190,8 @@ graph TD
 | `external-ai`・`corder`・`qa-security-scan` の手順（変更） | 決め打ちの安全装置を外す指定を、`safety-args` の出力に置き換える |
 | 起動の引数の組み立て（変更） | full の起動に `--tools` を付け、指定に応じて `--strict-mcp-config`・`--mcp-config` を付ける。起動の結果に、使用量・モデルごとの使用量・累計の費用を持たせて呼び出し元へ返す |
 | 前の行の引き継ぎ（変更。worker の起動の再開ループ） | 使用量ログに書けた行のうち、累計の費用を持つ最後の行を覚えておく。次の起動を記録するときに、その行の `session_seq`・`session_cost_usd`・`at` を渡す |
-| プランの実行（変更） | `run_id`・ステップの id・そのステップの何回目の実行かを、環境変数で子へ渡す。回数はステップごとに数える |
-| worker の起動（変更） | 作業の名前と作業場所を渡して指定を取得し、子の環境に、NDF が起動したことを示すフラグを付け、起動の後に使用量ログの行を書かせる |
+| プランの実行（変更） | `run_id`・ステップの id・そのステップの何回目の実行かを、環境変数（「子へ渡す環境変数」）で子へ渡す。回数はステップごとに数える |
+| worker の起動（変更） | 作業の名前と作業場所を渡して指定を取得し、子の環境に NDF が起動した印（「子へ渡す環境変数」）を付け、起動の後に使用量ログの行を書かせる。MCP の定義のコピーを持ち、起動の終わりに消す |
 | Skill を回す起動（変更） | 工程の名前で同じことをする |
 | 起動記録のインターフェース（新設） | 呼び出し元（worker の起動と Skill を回す起動）から、上の層にある使用量ログの書き込み処理を呼べるよう、エントリポイントで差し込む |
 | 使用量ログの書き込み処理（変更） | `claude -p` の行を書く。行の欄を足す。呼び出し元が渡す前の行の値から起動で増えた費用を求め、費用のジャーナルへ足す。使用量ログは読まない |
@@ -246,6 +259,7 @@ graph TD
 
 - 工程の指定にあるキーは、`*` の指定の同じキーを置き換える。無いキーは `*` の指定を使う
 - **読み込む指定と、尋ねずに使ってよい指定は別である。** `load` に足した Tool は、`allow` にも書くか Claude Code の `permissions` が許すまで、非対話の起動では使えない場合がある。読むだけの Tool は許可なしで動く
+- 要求の受け入れ条件 12 の「読み込みに足しただけでは、尋ねずに使えるようにならない」は、**NDF が許可を足さない**ことを指すと読む（設計承認ゲートで確かめる）。`load` の名前は `--allowed-tools` に入れない。Claude Code が元から尋ねずに動かす読むだけの Tool と、利用者とリポジトリの `permissions` が許す操作は、この指定と関係なくそのまま動き、NDF は止めない
 - 工程の名前が実在するかは検証しない。利用先の独自の Skill の名前も書けるようにするためである
 
 #### 起動の前の検証
@@ -276,13 +290,27 @@ graph TD
 
 **承認の記録**は、利用者の NDF の状態の保存先の `launch-approvals.jsonl`（追記だけ。所有者だけが読める）に置く。
 
+保存先は、今の NDF が状態を置く所（`identity.load().state_dir`）である。保存先の根は、環境変数 `NDF_STATE_HOME`、`XDG_STATE_HOME`、`~/.local/state` の順に最初に値があるもので、ファイルは `<根>/ndf/launch-approvals.jsonl` になる。
+
 | 欄 | 中身 |
 | --- | --- |
 | `at` | 日時 |
-| `repo` | リポジトリのキー（同じリポジトリの worktree は同じキー） |
+| `repo` | リポジトリのキー（下の「リポジトリのキー」） |
 | `sha256` | 承認の対象のハッシュ |
 | `action` | `approve` か `revoke` |
-| `items` | 承認した指定の要約（後から何を許したかを読むため） |
+| `items` | 承認・取り消しの対象の指定の要約（後から何を許したかを読むため） |
+| `user` | 承認・取り消しをした人。コマンドを打った OS のユーザー名（ファイルの所有者から推さず、行に書く） |
+| `via` | 経路。`skill`（Skill `launch-config` が利用者の承認を取って打った）か `terminal`（人が端末で打った） |
+
+`via` はコマンドの `--via` で受け、指定が無ければ記録せずに拒む。`user` と `via` は後から経緯を読むための記録で、本人の認証ではない（なりすましは「文脈と制約」のとおり扱わない）。
+
+**リポジトリのキー**は、git の共通管理ディレクトリ（`git rev-parse --git-common-dir`）の実体の絶対パスである。今の `adapters/git.py` の `common_dir` を使う。
+
+- リンクされた worktree は同じキーになる
+- 別のクローンと別のリポジトリは、同じリモートや同じ名前でも別のキーになる。承認はほかへ流用されない
+- リモートの有無は関係しない
+- git の外では、`.ndf/launch.json` を置いたディレクトリの実体の絶対パスをキーにする
+- クローンを移すか作り直してパスが変わると、承認し直しになる
 
 同じ `repo` と `sha256` の最後の行が `approve` なら承認済みである。ハッシュごとに持つので、指定の違うブランチを行き来しても、承認し直さなくてよい。
 
@@ -296,20 +324,52 @@ graph TD
 
 MCP の定義は、確認で読んだ中身を NDF の状態の保存先へ書き出し、そのファイルを `--mcp-config` に渡す。`claude` が起動する時に作業場所の定義ファイルを読み直すと、確認の後の書き換えが承認を通らずに効くためである。定義の中の `${VAR}` は展開せずに渡す。
 
-`ndf launch-config approve --sha256 <値>` は、次のどちらかで拒む。
+定義には接続情報や資格情報が書かれうるので、コピーは次のとおり扱う。
+
+| 項目 | 内容 |
+| --- | --- |
+| 置き場 | 状態の保存先の `launch-mcp/<起動の呼び出し元の PID>-<一意な値>/`。リポジトリと共有の一時ディレクトリには置かない |
+| 権限 | ディレクトリは 0700、ファイルは 0600 |
+| 持ち主 | 起動の呼び出し元（worker の起動か Skill を回す起動）。worker の再開ループは、全部の子プロセスで同じコピーを使う |
+| 消す時点 | 呼び出し元が起動を終える時。成功・失敗・期限切れ・例外のどれでも消す。後で会話を再開する場合は、定義を読み直して確かめ、コピーを作り直す |
+| 消し残り | 呼び出し元が強制終了された分は、次にコピーを作る処理が、持ち主の PID が生きていないディレクトリを消す |
+
+`ndf launch-config approve --sha256 <値> --via <経路>` は、次のどれかで拒む。
 
 - いまの内容のハッシュが `<値>` と違う（利用者に示した内容と違うものを承認しない）
-- NDF が起動した AI の中で呼ばれた（NDF は子の環境に、自分が起動したことを示すフラグを付ける。worker がうっかり自分の指定を承認しないため）
+- NDF が起動した AI の中で呼ばれた（環境変数 `NDF_AI_CHILD` がある。worker がうっかり自分の指定を承認しないため）
+- `--via` が無い
+
+`revoke` も、NDF が起動した AI の中で呼ばれた場合と `--via` が無い場合は拒む。
+
+#### 子へ渡す環境変数
+
+名前は次の表で固定し、`contracts/domains/env.json` に足す。書く側と読む側は、名前をこの表から引く。どれも中継が起動する対話のセッションへは渡さない。
+
+| 名前 | 値 | 付ける側と条件 | 読む側 | 無いとき |
+| --- | --- | --- | --- | --- |
+| `NDF_AI_CHILD` | `1`（読む側は空でないかだけを見る） | NDF が非対話で起動する AI の子すべて（worker・Skill を回す起動・判定・相手役・修正担当）。手順書の委譲の起動の例は、コマンドの前に `NDF_AI_CHILD=1` を書く | `approve`・`revoke` | NDF が起動した AI の中ではない |
+| `NDF_RUN_ID` | プランの実行の id | プランの実行が、ステップの子へ | 使用量ログの `run_id` | プランの外。欄を省く |
+| `NDF_STEP_ID` | ステップの id | 同上 | 同 `step` | 同上 |
+| `NDF_STEP_ATTEMPT` | 1 以上の整数（「使用量ログの行」の `attempt`） | 同上 | 同 `attempt` | 同上 |
+
+`NDF_AI_CHILD` はうっかりを防ぐ印である。AI が意図して外すことは防がない（「文脈と制約」）。
 
 ### 安全装置を外す指定
 
-相手役の起動と委譲は、`ndf launch-config safety-args --runtime <名前>` と同じ処理で、安全装置の引数を取得する。
+相手役の起動と委譲は、`ndf launch-config safety-args --runtime <名前> --use review|delegate` と同じ処理で、安全装置の引数を取得する。`review` は cross 系の相手役（読むだけの起動）、`delegate` は手順書に従う作業の委譲である。引数の値は、ランタイムの表 `contracts/domains/runtimes.json` の行が持つ（外す引数は `unsandboxed_args`、サンドボックスの引数は `sandbox_args`。委譲の引数の欄はこの表に足す）。
 
-| 状況 | 引数 |
-| --- | --- |
-| `unsandboxed` にあり、承認済み | ランタイムの表の外す引数（codex は `--dangerously-bypass-approvals-and-sandbox`） |
-| 承認が無く、codex のサンドボックスが動く | サンドボックスの引数（相手役は `-s read-only`、委譲は `-s workspace-write`） |
-| 承認が無く、サンドボックスが動かない（ユーザー名前空間を作れない）か、外さないと非対話で動かないランタイム（kiro・agy の委譲） | 起動せずに `precondition` で止まり、承認の手順を示す |
+下の表の「承認あり」は、`unsandboxed` にランタイムがあり、いまの内容が承認済みであることを指す。「停止」は、起動せずに `precondition` で止まり、承認の手順を示すことである。
+
+| ランタイム | 使い方 | 承認あり | 承認なし |
+| --- | --- | --- | --- |
+| codex | `review` | `--dangerously-bypass-approvals-and-sandbox` | サンドボックスが動けば `-s read-only`。動かなければ（ユーザー名前空間を作れない）停止 |
+| codex | `delegate` | 同上 | サンドボックスが動けば `-s workspace-write`。動かなければ停止 |
+| kiro | `review` | 今の読むだけの指定 `--trust-tools=fs_read`（承認の有無で変えず、外す指定は付けない） | 同左。承認なしで起動する |
+| kiro | `delegate` | `--trust-all-tools` | 停止（外さないと非対話で動かない） |
+| agy | `review` | 停止（ランタイムの表に読むだけの起動が無く、今も相手役にしない） | 同左 |
+| agy | `delegate` | `--dangerously-skip-permissions` | 停止（外さないと非対話で動かない） |
+| claude | どちらも | 引数なし | 引数なし |
 
 Claude Code の安全装置を外す指定は、NDF は今も使わない。
 
@@ -398,9 +458,9 @@ Claude Code の安全装置を外す指定は、NDF は今も使わない。
 
 | 名前 | 入力 | 出力 | 失敗の形 |
 | --- | --- | --- | --- |
-| full の起動の引数 | 工程の名前・作業場所 | `--tools <読み込む一覧> --allowed-tools <許可の一覧> --strict-mcp-config`。`mcp` が配列なら `--mcp-config <書き出した定義>...` を足し、`inherit` なら `--strict-mcp-config` を付けない | 壊れた指定か未承認なら起動せず、`precondition` の停止 |
+| full の起動の引数 | 工程の名前・作業場所 | `--tools <読み込む一覧> --allowed-tools <指定 1> <指定 2> … --strict-mcp-config`。許可の指定は 1 件を 1 つの引数にし、カンマで連結しない。最後の指定の後ろには、別のオプションを置く。`mcp` が配列なら `--mcp-config <書き出した定義>...` を足し、`inherit` なら `--strict-mcp-config` を付けない | 壊れた指定か未承認なら起動せず、`precondition` の停止 |
 | `ndf launch-config show` | 作業場所 | 結果の JSON。承認の対象の一覧（MCP のコマンドは全文）、ハッシュ、承認済みか、前に承認した内容との違い | 読めなければ `precondition` |
-| `ndf launch-config approve --sha256 <値>`・`revoke` | ハッシュ | 承認の記録へ 1 行 | 上の「起動の承認」の 2 つで拒む |
+| `ndf launch-config approve`・`revoke` | `--sha256 <値> --via skill\|terminal` | 承認の記録へ 1 行 | 上の「起動の承認」の条件で拒む |
 | `ndf launch-config safety-args --runtime <名前> --use review\|delegate` | ランタイムと使い方 | CLI に渡す引数を 1 行に 1 つ | 起動できない状況なら `precondition` |
 
 | 一覧 | 中身 |
@@ -446,7 +506,7 @@ sequenceDiagram
 1. `ndf launch-config show` で、いまの指定と承認の状態を読む
 2. 利用者の依頼に合わせて `.ndf/launch.json` と MCP の定義ファイルを直す
 3. もう一度 `show` を打ち、承認の対象の一覧（MCP のコマンドと引数の全文、`allow` の指定、安全装置を外すランタイム）と、前の承認との違いを利用者に示す
-4. 利用者が承認すれば `approve --sha256` を打つ。承認しなければ記録せず、ファイルの内容は未承認のまま残ることを伝える
+4. 利用者が承認すれば `approve --sha256 <値> --via skill` を打つ。承認しなければ記録せず、ファイルの内容は未承認のまま残ることを伝える
 
 外で隔離されていないマシンで `unsandboxed` を承認すると、AI がそのマシンの任意のコマンドを確認なしで打てる。Skill は、承認の問いにこの 1 文を必ず含める。
 
@@ -625,7 +685,12 @@ CI やコンテナのように状態の保存先が作り直される環境で�
 | 条件 12 | `load` の名前は `--tools` だけに、`allow` の指定は `--allowed-tools` だけに入る。`load` に `Bash(...)` や `mcp__` の名前を書くと起動を呼ばずに止まる | `load` を許可の一覧にも足すか、記法を通すと落ちる |
 | 条件 9・10・11・I5・I6 | 承認の記録が無い・`permissions` を書き換えた・定義ファイルを書き換えた・`inherit` で `.mcp.json` を書き換えた起動は、起動を呼ばずに止まる。字下げとキーの順だけの変更と、指定を使わない工程は起動する。別のブランチへ移って戻っても承認は残る | ファイルの更新日時で判定するか、定義ファイルをハッシュに含めないと落ちる |
 | 条件 11 | `--mcp-config` に渡るのは、確認で読んだ中身のコピーである。確認の後に元のファイルを書き換えても、渡る中身は変わらない | 元のパスを渡すと落ちる |
-| 条件 14・I7 | 示したハッシュと違う内容の `approve` と、NDF が起動した子の環境の `approve` は拒まれ、記録が増えない | どちらかの確認を外すと落ちる |
+| 条件 14・I7 | 示したハッシュと違う内容の `approve` と、`NDF_AI_CHILD` がある環境の `approve`・`revoke` は拒まれ、記録が増えない。NDF の起動の子の環境に `NDF_AI_CHILD` がある | どちらかの確認を外すか、書く側と読む側で名前がずれると落ちる |
+| 条件 9 | 承認と取り消しの行に `user` と `via` がある。`--via` が無ければ記録が増えない | 欄を省くか、`via` に既定値を入れると落ちる |
+| I5・I6 | 同じクローンの worktree では承認が効き、同じ内容の別のクローンでは止まる | 作業場所のパスかリモートの URL をキーにすると落ちる |
+| I8 | MCP の定義のコピーは 0700 のディレクトリの 0600 のファイルで、起動の成功・失敗・例外の後に残らない。持ち主の PID が無い消し残りは次の起動で消える | 後片付けを成功の経路だけに置くと落ちる |
+| 条件 12 | 手動: `load` にだけ書いた書き込みの Tool は、非対話の起動で拒否される。`load` にだけ書いた読むだけの Tool の扱いを、起動して記録する | `load` を許可の一覧へ足すと、書き込みが通る |
+| 条件 13 | kiro の `review` は承認の有無に関わらず `--trust-tools=fs_read` で起動し、agy の `review` は停止する | 委譲の停止の規則をレビューに当てると落ちる |
 | 条件 13 | 承認が無いと相手役の引数に安全装置を外す指定が無く、サンドボックスの動かない環境では起動を呼ばずに止まる。承認があれば付く | これまでの自動の切り替えのままだと落ちる |
 | 条件 9 | 手動: Skill `launch-config` が MCP のコマンドの全文と違いを示し、承認の後の起動が動き、手で書き換えると止まる | — |
 | 条件 6 | 引数に `--setting-sources` が無く、一覧に `Skill`・`Agent`・`Edit`・`Write` がある。手動で Skill とサブエージェントの数を比べる | 最小構成へ寄せると落ちる |
@@ -643,7 +708,7 @@ CI やコンテナのように状態の保存先が作り直される環境で�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1959 | 実装する | — | `plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`（新設）、`plugins/ndf/src/ndf/adapters/launch_approval.py`（新設）、`plugins/ndf/src/ndf/domains/settings/launch_config_cli.py`（新設）、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/contracts/domains/runtimes.json`、`plugins/ndf/contracts/domains/locations.json`、`plugins/ndf/manifests/skills.json`、`plugins/ndf/skills/launch-config/SKILL.md`（新設）、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/external-ai/references/cli-codex.md`、`plugins/ndf/skills/external-ai/references/cli-agy.md`、`plugins/ndf/skills/external-ai/references/cli-kiro.md`、`plugins/ndf/skills/qa-security-scan/03-report-template.md`、`plugins/ndf/agents/corder.md`、`plugins/ndf/tests/adapters/test_launch_approval.py`（新設）、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/__main__.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/records/usage_decide.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`（新設）、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/entrypoints.json`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/worktree/references/ndf-settings.md`、`plugins/ndf/tests/adapters/test_claude_args.py`、`plugins/ndf/tests/adapters/test_launch_settings.py`（新設）、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py` |
+| #1959 | 実装する | — | `plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`（新設）、`plugins/ndf/src/ndf/adapters/launch_approval.py`（新設）、`plugins/ndf/src/ndf/domains/settings/launch_config_cli.py`（新設）、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/contracts/domains/runtimes.json`、`plugins/ndf/contracts/domains/locations.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/src/ndf/adapters/agents.py`、`plugins/ndf/manifests/skills.json`、`plugins/ndf/skills/launch-config/SKILL.md`（新設）、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/external-ai/references/cli-codex.md`、`plugins/ndf/skills/external-ai/references/cli-agy.md`、`plugins/ndf/skills/external-ai/references/cli-kiro.md`、`plugins/ndf/skills/qa-security-scan/03-report-template.md`、`plugins/ndf/agents/corder.md`、`plugins/ndf/tests/adapters/test_launch_approval.py`（新設）、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/__main__.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/records/usage_decide.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/domains/statusline/statusline.sh`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`（新設）、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/entrypoints.json`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/worktree/references/ndf-settings.md`、`plugins/ndf/tests/adapters/test_claude_args.py`、`plugins/ndf/tests/adapters/test_launch_settings.py`（新設）、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py` |
 
 ## 未確認のまま残ること
 
@@ -653,7 +718,6 @@ CI やコンテナのように状態の保存先が作り直される環境で�
 | 削減の目標値 | 要求に合否の値が無い。前後の値を残すだけにする |
 | 再開した起動の `usage` と `modelUsage` | 起動 1 回分か会話の累計かを確認していない（`total_cost_usd` が累計になることは [#2944 の設計](./issue-2944-design.md)の実測で分かっている）。実装で再開の起動を 1 回測り、累計なら費用と同じ求め方にする |
 | 利用先の MCP の使い方 | このマシンの記録からは分からない。リリース後の不具合の報告で分かる |
-| `--allowed-tools` の同梱の一覧に、空白を含む指定子（`Bash(git log:*)`）を別の引数で足せるか | `claude --help` はカンマか空白で区切ると書く。実装で起動して確かめる |
 | サンドボックスの引数（`-s workspace-write`）の委譲が、利用者の環境で手順どおり終わるか | サンドボックスが動く環境で、実装で 1 回起動して確かめる |
 | `inherit` の工程で最初の応答の前に MCP の接続が間に合うか | Claude Code は非対話でも接続を待たないことがある。2.1.332 では 2 回目の応答から使えた |
 
