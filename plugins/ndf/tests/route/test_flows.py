@@ -449,10 +449,11 @@ def _single_plans_wait_at_merge_then_write_the_answer(purpose, answer, tail):
 
 
 def _release_merges_the_sprint_pr_first_without_a_merge_method():
-    """決定 5: デプロイのプランは最初にスプリントの PR を、承認した HEAD とマージ先を添えてマージし、方式を渡さない。"""
+    """決定 5: デプロイのプランは PR の HEAD の必須のチェックを確かめてから、承認した HEAD とマージ先を添えてマージし、方式を渡さない。"""
     steps = plan_of("release", pr="12", approved_head="h", approved_base="main")["steps"]
-    assert [s["id"] for s in steps] == ["release-merge", "work"]
-    run = steps[0]["run"]
+    assert [s["id"] for s in steps] == ["release-ci", "release-merge", "work"]
+    assert steps[0]["run"][:5] == ["ndf", "ci", "watch", "--pr", "12"]
+    run = steps[1]["run"]
     assert run == ["ndf", "ci", "merge", "--pr", "12", "--production-gate", "stale", "--approved-head", "h", "--approved-base", "main"]
 
 

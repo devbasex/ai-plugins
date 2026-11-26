@@ -233,21 +233,20 @@ MVV_BY = model.MVV_SERVICE
 def _trail_by(conn: Any, q: Question, a: Answer, seen: Target) -> Optional[str]:
     """回答した者から証跡の担い手を決める。書かないなら None、断るなら `model.Refused`（#4409 の決定 7）。
 
-    承認の対象がそろった（`seen.binding()`）PR を持つ承認ゲートでだけ書く。利用者（`human`）と、利用者の回答を中継したと
-    確かめられた `organizer` は `user`。`service:mvv` は書かない。ほかの回答した者（`conductor`・ほかの `service:<主体>`）は、
-    承認でマージが本番へ反映され得るなら断り（AI の判断で担い手 `user` の証跡を作らない）、反映されないなら書かない。
+    承認の対象がそろった（`seen.binding()`）PR を持つ承認ゲートで、承認でマージが本番へ反映され得るときだけ書く
+    （反映されないマージは証跡を読む側が無い）。利用者（`human`）と、利用者の回答を中継したと確かめられた `organizer` は
+    `user`。`service:mvv` は書かない。ほかの回答した者（`conductor`・ほかの `service:<主体>`）は断る
+    （AI の判断で担い手 `user` の証跡を作らない）。
     """
-    if seen.binding() is None or q.gate not in (DESIGN_GATE, RELEASE_GATE) or a.by == MVV_BY:
+    if seen.binding() is None or not seen.production or q.gate not in (DESIGN_GATE, RELEASE_GATE) or a.by == MVV_BY:
         return None
     role = a.by.split(":", 1)[0]
     if role == actors.HUMAN or (role == "organizer" and _relayed_by_organizer(conn, q, a)):
         return merge_approval.USER_BY
-    if seen.production:
-        raise model.Refused(
-            f"回答した者 {a.by} の承認は、本番へ反映されるマージの証跡にならない（利用者が --by human で回答する。"
-            "オーガナイザーはリクエストに記録された利用者の回答だけを中継する）"
-        )
-    return None
+    raise model.Refused(
+        f"回答した者 {a.by} の承認は、本番へ反映されるマージの証跡にならない（利用者が --by human で回答する。"
+        "オーガナイザーはリクエストに記録された利用者の回答だけを中継する）"
+    )
 
 
 def _relayed_by_organizer(conn: Any, q: Question, a: Answer) -> bool:
@@ -268,14 +267,14 @@ def _post_trail(q: Question, a: Answer, seen: Target, by: str, post: Post) -> No
     if target is None or a.value not in _TRAIL_ANSWERS:
         return
     record = presented_id(replace(q, target=seen))
-    post(merge_approval.MergeRow(_TRAIL_ANSWERS[a.value], by, target, seen.production is True, record))
+    post(merge_approval.MergeRow(_TRAIL_ANSWERS[a.value], by, target, True, record))
 
 
 def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_observe, post: Post = no_post) -> dict[str, Any]:
     """回答を事象 `answered` に残す（外した課題の行と、今のスプリントの課題から外す事象も同じトランザクション）。
     同じ冪等のキーは書かずに同じ結果を返す。
 
-    承認の対象を持つ質問への承認・却下は、記録の前にマージの承認の証跡を PR へ書く（`_trail_by`・`_post_trail`。#4409 の
+    本番へ反映され得る承認の対象を持つ質問への承認・却下は、記録の前にマージの承認の証跡を PR へ書く（`_trail_by`・`_post_trail`。#4409 の
     決定 7）。証跡を書けなければ回答を記録せず、同じ回答を送り直すと続きから回復する。同じ冪等のキーの回答が既に
     記録されていても、証跡が無ければ書いてから戻る。"""
     if not ACTORS.match(a.by):

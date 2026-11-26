@@ -539,6 +539,14 @@ def _merge_dequeues_a_queued_pr_that_now_needs_approval(monkeypatch, capsys, las
     assert hub.dequeued == [7]
 
 
+def _merge_dequeues_a_queued_pr_whose_approved_target_moved(monkeypatch, capsys, last_result):
+    """承認した HEAD と違って approval_stale で止まるときも、キューに入っている PR は外す。"""
+    hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(queued=True)}))
+    args = ["merge", "--pr", "7", "--production-gate", "stale", "--approved-head", merge_hub.OTHER, "--approved-base", "main"]
+    assert ci_cli.main(args) == causes.exit_code("approval_stale")
+    assert hub.merged == [] and hub.dequeued == [7]
+
+
 def _ask_writes_the_presented_target_and_material(monkeypatch, capsys, last_result, tmp_path, text, production):
     """受け入れ条件 6: ndf ci ask の承認資料は、判定が automatic・unset・unknown のときだけ本番へ反映され得る行を持つ。"""
     _use(monkeypatch, merge_hub.MergeHub(files={"main": (text, "c1")}))
@@ -734,6 +742,7 @@ def _a_new_presentation_refuses_the_answer_to_the_old_one(monkeypatch, capsys, l
         ],
         scenes.scene(_merge_by_pr_with_the_approved_target_merges, id="merge_by_pr_with_the_approved_target_merges"),
         scenes.scene(_merge_dequeues_a_queued_pr_that_now_needs_approval, id="merge_dequeues_a_queued_pr_that_now_needs_approval"),
+        scenes.scene(_merge_dequeues_a_queued_pr_whose_approved_target_moved, id="merge_dequeues_a_queued_pr_whose_approved_target_moved"),
         *[
             scenes.scene(
                 _ask_writes_the_presented_target_and_material,

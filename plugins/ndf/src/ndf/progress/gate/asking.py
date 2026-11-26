@@ -17,8 +17,10 @@ from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, Optional
 
+from filelock import FileLock
+
 from ndf import cli
-from ndf.contracts import result
+from ndf.contracts import limits, result
 from ndf.core import merge_approval
 from ndf.progress import lane, model, plan, run
 from ndf.progress.run_view import MATERIAL_DIR
@@ -409,7 +411,20 @@ def write_material(root: Path, v: run.View, q: Question, *, private: bool = True
     `q.target` で書き直す。資料の sha256 が変わるので、古い資料を見て打った回答は断られる。
     提示した対象を書くたびに、新しい提示の識別子（`presentation`）を発行して一緒に書く。承認の対象が A → B → A と
     戻っても、最後の提示は最初の提示と別の識別子になる（リクエスト・回答・証跡を最初の提示と取り違えない）。
+
+    承認の対象を持つ質問は、資料と提示した対象の書き込みを質問ごとに排他にする。同時に走った 2 つの呼び出しの片方の
+    資料と、もう片方の対象（本番へ反映されるかが違い得る）が組にならないためである。
     """
+    if q.target.binding() is None:
+        return _write_pair(root, v, q, private)
+    held = presented_path(root, q)
+    held.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with FileLock(str(held) + ".lock", timeout=limits.seconds("locks.append")):
+        return _write_pair(root, v, q, private)
+
+
+def _write_pair(root: Path, v: run.View, q: Question, private: bool) -> Path:
+    """`write_material` の本体（承認資料と提示した対象の組を書く）。"""
     path = material_path(root, q)
     shown = presented_path(root, q)
     if presented_stale(root, q):

@@ -116,7 +116,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `_parser` | `ci_cli.py` | 変更 | `() -> argparse.ArgumentParser` | `merge` に `--pr`（`--branch` と排他で必須）・`--production-gate {stop,defer,stale}`（既定 `stop`）・`--approved-head`・`--approved-base`・`--presented-out` を足し、`ask`・`answer` を足す |
 | `_merge` | `ci_cli.py` | 変更 | `(args: argparse.Namespace) -> dict` | 設計文書の「`ndf ci merge` がマージするかを決める順序」の図のとおりに、PR を読み、照合・判定・証跡の確かめを通してからマージする |
-| `_worktree_head`・`_held_mismatch`・`_approved_by`・`_merged` | `ci_cli.py` | 新設 | `_worktree_head(args) -> (head, 結果)`・`_held_mismatch(args, pull, target) -> Optional[dict]`・`_approved_by(args, hub, pull, target, verdict) -> (担い手, 結果)`・`_merged(args, target, outcome, verdict, approved_by) -> dict` | `_merge` の分岐を順序の段ごとに分けた部品（分岐の多い関数の検査 PLR0912）。順に、作業場所の HEAD と `--reviewed` の照合、承認の時点と `--pr` のレビューを経た HEAD の照合、承認が要るときの証跡の担い手（無ければキューから外して `--production-gate` の結果）、`GitHub.merge` の結果からの結果 JSON。振る舞いは `_merge` と同じ |
+| `_worktree_head`・`_held_mismatch`・`_approved_by`・`_merged` | `ci_cli.py` | 新設 | `_worktree_head(args) -> (head, 結果)`・`_held_mismatch(args, pull, target) -> Optional[dict]`・`_approved_by(args, hub, pull, target, verdict) -> (担い手, 結果)`・`_merged(args, target, outcome, verdict, approved_by) -> dict` | `_merge` の分岐を順序の段ごとに分けた部品（分岐の多い関数の検査 PLR0912）。順に、作業場所の HEAD と `--reviewed` の照合、承認の時点と `--pr` のレビューを経た HEAD の照合（違えば、読んだ PR がキューに入っていれば `_dequeue_queued` で外す）、承認が要るときの証跡の担い手（無ければキューから外して `--production-gate` の結果）、`GitHub.merge` の結果からの結果 JSON。振る舞いは `_merge` と同じ |
 | `_pr_target` | `ci_cli.py` | 新設 | `(hub: GitHub, pull: Pull) -> merge_approval.MergeTarget` | 読んだ PR から承認の対象（ベースリポジトリ・番号・マージ先・HEAD）を作る |
 | `_judge_pr` | `ci_cli.py` | 新設 | `(hub: GitHub, pull: Pull) -> tuple[Verdict, Optional[str]]` | PR のベースリポジトリのマージ先から設定を読み（`GitHub.branch_file`）、判定と設定の blob の oid を返す |
 | `_unapproved` | `ci_cli.py` | 新設 | `(args: argparse.Namespace, target: merge_approval.MergeTarget, verdict: Verdict) -> dict` | 承認が要って有効な証跡が無いときの結果を、`--production-gate` の値で作る（設計文書の `--production-gate` の表） |
@@ -258,7 +258,7 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_ask_approval` | `ci_cli.py` | 新設 | `(args: argparse.Namespace) -> dict` | `--branch` の PR を読み、判定し、承認資料と提示のファイルを書いて `gate`（終了コード 10）で止まる |
-| `_answer` | `ci_cli.py` | 新設 | `(args: argparse.Namespace) -> dict` | `_answer_with_shown`（回答の記録と提示のファイル `--presented` の照合）・`_unchanged_target`（今の PR の承認の対象と「本番へ反映されるか」の照合）・`_write_answer`（証跡の書き込み）を順に呼ぶ |
+| `_answer` | `ci_cli.py` | 新設 | `(args: argparse.Namespace) -> dict` | `_answer_with_shown`（回答の記録と提示のファイル `--presented` の照合）・`_unchanged_target`（今の PR の承認の対象と「本番へ反映されるか」の照合）・`_write_answer`（証跡の書き込み。提示の「本番へ反映されるか」が偽なら書かない）を順に呼ぶ |
 | `_presented` | `ci_cli.py` | 新設 | `(path: Path, target: merge_approval.MergeTarget, production: bool) -> tuple[str, Path]` | 提示の識別子（`uuid4` の 16 進）を作り、承認の対象と合わせてファイルへ書き、隣に承認資料（`production` が真なら「この承認で PR がマージされ、本番へ反映され得る」の行を含む）を書いて、識別子と資料のパスを返す。`_ask_approval` と `_unapproved` の `stop` が使う |
 
 - `_ask_approval`
@@ -357,7 +357,7 @@ plugins/ndf/
 | `Target.as_dict`・`from_dict` | `progress/gate/asking.py` | 変更 | 今と同じ | `repo`・`pr`・`base`・`production` を足す。旧版の形（無いキー）は `None` で読む |
 | `presented_path` | `progress/gate/asking.py` | 新設 | `(root: Path, q: Question) -> Path` | 提示した対象のパス（承認資料の隣の `<質問の id>.target.json`） |
 | `read_presented` | `progress/gate/asking.py` | 新設 | `(root: Path, q: Question) -> Target` | 提示した対象を読む。無ければ空の `Target` |
-| `write_material` | `progress/gate/asking.py` | 変更 | `(root: Path, v: run.View, q: Question) -> Path` | 承認資料と同時に、`q.target` を提示した対象として書く（書いてあれば書き直さない） |
+| `write_material` | `progress/gate/asking.py` | 変更 | `(root: Path, v: run.View, q: Question) -> Path` | 承認資料と同時に、`q.target` を提示した対象として書く（書いてあれば書き直さない）。承認の対象を持つ質問は、質問ごとのファイルロックを取って 2 つを書く。同時に走った別の呼び出しの資料と対象が組にならない |
 | `material` | `progress/gate/asking.py` | 変更 | `(v: run.View, q: Question) -> str` | マージ先を載せ、`q.target.production` が真なら「この承認で PR がマージされ、本番へ反映され得る」の行を書く |
 | `github_observe` | `progress/gate/answering.py` | 変更 | 今と同じ | PR の HEAD に加えて、ベースリポジトリ・番号・マージ先と、判定の部品で決めた `production` を返す |
 | `Post` | `progress/gate/answering.py` | 新設 | `Callable[[merge_approval.MergeRow], bool]` | 証跡を書く口 |
@@ -365,7 +365,7 @@ plugins/ndf/
 | `no_post` | `progress/gate/answering.py` | 新設 | `(row: merge_approval.MergeRow) -> bool` | 書かない口（PR を持たないテスト用）。PR を持つ質問に渡されたら `model.Refused` |
 | `answer` | `progress/gate/answering.py` | 変更 | `(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_observe, post: Post = no_post) -> dict[str, Any]` | 設計文書の「回答の記録と証跡の書き込みの順」の 1〜4 で、証跡を書いてから回答を記録する |
 | `_refusal` | `progress/gate/answering.py` | 変更 | `(root: Path, v: run.View, a: Answer, observe: Observe) -> tuple[Question, Target]` | 今の確かめに加え、提示した対象の `binding()` と今の `binding()` が違えば断る。照らした対象を返す |
-| `_trail_by` | `progress/gate/answering.py` | 新設 | `(conn: Any, q: Question, a: Answer) -> Optional[str]` | 回答した者から担い手を決める。`human` と中継を確かめた `organizer` は `user`、`service:mvv` は `None`（書かない）。ほかは、承認でマージが本番へ反映され得る（`seen.production` が真）ときだけ断り、反映されないなら `None`（書かずに回答を記録する。既存の Factory の `service:factory` の回答を壊さない） |
+| `_trail_by` | `progress/gate/answering.py` | 新設 | `(conn: Any, q: Question, a: Answer) -> Optional[str]` | 回答した者から担い手を決める。反映され得るなら、`human` と中継を確かめた `organizer` は `user`、`service:mvv` は `None`（書かない）、ほかは断る。承認でマージが本番へ反映されない（`seen.production` が偽）なら、回答した者によらず `None`（証跡を読みも書きもせず、回答を記録する。既存の Factory の `service:factory` の回答を壊さない） |
 | `_post_trail` | `progress/gate/answering.py` | 新設 | `(q: Question, a: Answer, seen: Target, by: str, post: Post) -> None` | 照らした対象と質問の id で `MergeRow` を作り、`post` で書く |
 | `_same` | `progress/gate/answering.py` | 変更 | `(held: model.Event, a: Answer, machine_id: str, ensure: Callable[[], None]) -> dict[str, Any]` | 早期の戻りの前に `ensure`（証跡があるかを確かめ、無ければ書く）を呼ぶ |
 | `recheck` | `progress/gate/answering.py` | 変更 | 今と同じ | 回答の `seen.production` が真なら、文書だけの変更でも HEAD を繰り上げずに待ちへ戻す |
@@ -413,7 +413,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `answer` | 承認・却下のどちらでも証跡を書いてから記録する | 送り直しで投稿は 1 回。記録の後に証跡が無いと書く | 投稿の失敗で記録しない |
 | `_refusal` | 同じ対象で受ける | 旧版の `seen`（キーが無い）を `None` として読む | マージ先が変わると断る |
-| `_trail_by` | `human` で `user` | `service:mvv` で書かない。本番へ反映されない承認の対象への `service:factory` は書かずに記録する | 本番へ反映され得る承認の対象への `conductor`・`service:foo`・中継の無い `organizer` を断る |
+| `_trail_by` | `human` で `user` | `service:mvv` で書かない。本番へ反映されない承認の対象への回答は、`human` でも `service:factory` でも書かずに記録する | 本番へ反映され得る承認の対象への `conductor`・`service:foo`・中継の無い `organizer` を断る |
 | `material` | `production` が真で本番の行がある | `production` が `None`（PR を持たない質問）で行が無い | — |
 | `recheck` | 本番へ反映されない PR は今と同じく繰り上げる | — | 本番へ反映される PR は文書だけでも待ちへ戻す |
 
@@ -564,7 +564,7 @@ plugins/ndf/
 | `contracts/templates/parts/steps.json` | `merge` の `run` に `--production-gate {{production_gate}} --presented-out {{state_dir}}/presented-merge.json` を足し、`on_answer` を `{"approved": "approve-merge", "rejected": "reject-merge"}` にする。`approve-merge`・`reject-merge`・`approve-gate`・`reject-gate` を足す。`run` は `ndf ci answer --branch {{branch}} --answer-record {state_dir}/answer-records/<merge か merge-gate>.json --presented {{state_dir}}/presented-<merge か merge-gate>.json`。`approve-*` の `next` は `merge`、`reject-*` は終わり。`merge-gate` の `on_answer` を `{"approved": "approve-gate", "rejected": "reject-gate"}` にする |
 | `contracts/templates/params.json` | `production_gate`（既定 `stop`）・`approved_head`・`approved_base`・`pr` を足す。`gate` の既定を `["ndf", "ci", "ask", "--branch", "{{branch}}", "--presented-out", "{{state_dir}}/presented-merge-gate.json"]` にする |
 | `contracts/templates/{merge,plan-to-spec,close,fix,check,design-merge}.json` | `params` に `production_gate` を足し、`steps` に `approve-*`・`reject-*` を足す（`merge-gate` を持つ `check`・`design-merge` は `*-gate`、ほかは `*-merge`） |
-| `contracts/templates/release.json` | `params` に `pr`・`approved_head`・`approved_base` を足す。最初のステップ `release-merge` は `["ndf", "ci", "merge", "--pr", "{{pr}}", "--production-gate", "stale", "--approved-head", "{{approved_head}}", "--approved-base", "{{approved_base}}"]`、その後に今の `work` |
+| `contracts/templates/release.json` | `params` に `pr`・`approved_head`・`approved_base` を足す。`ci_budget`・`required`・`tests` も足す。最初のステップ `release-ci` は `["ndf", "ci", "watch", "--pr", "{{pr}}", "--budget", "{{ci_budget}}", "--required={{required}}", "--test={{tests}}"]`。次のステップ `release-merge` は `["ndf", "ci", "merge", "--pr", "{{pr}}", "--production-gate", "stale", "--approved-head", "{{approved_head}}", "--approved-base", "{{approved_base}}"]`、その後に今の `work` |
 | `contracts/causes/approval_stale.json` | 停止理由の定義を足す |
 
 単体テストの観点（`tests/progress/test_sprint_templates.py`）: テンプレートを組んだプランで、次の 2 つを確かめる。

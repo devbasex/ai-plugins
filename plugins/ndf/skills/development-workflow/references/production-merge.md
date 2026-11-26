@@ -53,8 +53,8 @@ CD のある場合のマージの後は、CD の workflow がタグと GitHub Re
 手元の clone の設定は読まない（マージする PR 自身が設定を書き換えても判定を外せない）。人の手によるマージ（端末・GitHub の画面）は止めない。
 
 **当たるマージは、PR に残ったマージの承認の証跡（マーカー `ndf:merge-approval`）があるときだけ `ndf ci merge` がマージする。**
-証跡は承認した PR・HEAD・マージ先に結び付き、承認の後に HEAD かマージ先が変われば使わない。証跡を書くのは次の 3 つの経路だけで、
-エージェントが `gh pr comment`・`gh api` で書く操作は hook が止める。
+証跡は承認した PR・HEAD・マージ先に結び付き、承認の後に HEAD かマージ先が変われば使わない。本番へ反映されないマージの回答は証跡を書かない。
+証跡を書くのは次の 3 つの経路だけで、エージェントが `gh pr comment`・`gh api` で書く操作は hook が止める。
 
 | 回答の取り方 | 証跡を書く側 | 担い手 |
 | --- | --- | --- |
@@ -66,7 +66,7 @@ CD のある場合のマージの後は、CD の workflow がタグと GitHub Re
 
 | プラン | 終え方 | 承認を取る所 |
 | --- | --- | --- |
-| 工程の Pull Request（`pr-merge`）・ドキュメントレビュー（`docs-merge`）・確定仕様化・承認ゲートの無い設計（light） | `defer`: マージせずに `ok`（`metrics.merge: deferred`）で工程を先へ進める。PR は開いたまま | デプロイのリリース承認ゲート。承認の後、テンプレート `release` の最初のステップ `release-merge` が同じ PR をマージする |
+| 工程の Pull Request（`pr-merge`）・ドキュメントレビュー（`docs-merge`）・確定仕様化・承認ゲートの無い設計（light） | `defer`: マージせずに `ok`（`metrics.merge: deferred`）で工程を先へ進める。PR は開いたまま | デプロイのリリース承認ゲート。承認の後、テンプレート `release` が PR の HEAD の必須のチェックを確かめ（`release-ci`）、ステップ `release-merge` が同じ PR をマージする |
 | 工程の設計 PR のマージ（`design-merge`）・デプロイの `release-merge` | `stale`: 承認の後に対象が変わった・証跡が無いときは `approval_stale` で止まる | 工程の結果の `routes.retry`（工程を最初から流し直す記録）と `next`（工程を流す）のコマンドを順に打ち、同じ工程の承認ゲートが今の対象で質問し直す |
 | 単発のプラン（`ndf route run` の `fix`・`close`・`merge`） | `stop`: 承認待ち（終了コード 10、`metrics.gate: production-merge`）で止まる | 結果の `routes` の `ndf plan next ... --answer approved --by human` を打つと、`approve-merge` が証跡を書いて `merge` を打ち直す |
 

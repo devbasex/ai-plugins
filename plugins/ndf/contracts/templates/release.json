@@ -1,13 +1,14 @@
 {
   "template": "release",
   "purpose": "release",
-  "summary": "デプロイ: リリース承認ゲートで承認した HEAD とマージ先のまま、承認済みの PR（入力の pr）をマージする（マージ済みなら何もしない。承認の後に変わっていれば approval_stale で止まる）→ worker が本番へ出し、結果の outputs に delivery と product_version を返す",
-  "params": ["repo", "worker", "pr", "approved_head", "approved_base"],
+  "summary": "デプロイ: PR の HEAD の必須のチェックを確かめる → リリース承認ゲートで承認した HEAD とマージ先のまま、承認済みの PR（入力の pr）をマージする（マージ済みなら何もしない。承認の後に変わっていれば approval_stale で止まる）→ worker が本番へ出し、結果の outputs に delivery と product_version を返す",
+  "params": ["repo", "worker", "pr", "approved_head", "approved_base", "ci_budget", "required", "tests"],
   "plan": {
     "name": "release",
     "repo": "{{repo}}",
     "release": true,
     "steps": [
+      {"id": "release-ci", "run": ["ndf", "ci", "watch", "--pr", "{{pr}}", "--budget", "{{ci_budget}}", "--required={{required}}", "--test={{tests}}"]},
       {"id": "release-merge", "run": ["ndf", "ci", "merge", "--pr", "{{pr}}", "--production-gate", "stale", "--approved-head", "{{approved_head}}", "--approved-base", "{{approved_base}}"]},
       {"id": "work", "run": ["{{worker}}", "release"]}
     ]

@@ -120,7 +120,7 @@ def _flow(repo: Path, monkeypatch, hub: merge_hub.MergeHub) -> SimpleNamespace:
 
     def step_outcome(plan: model.Plan, step_id: str, work_dir: Path) -> Outcome:
         argv = [str(a).replace("{state_dir}", str(work_dir)) for a in plan.step(step_id).run]
-        if argv[:2] == ["ndf", "ci"]:
+        if argv[:2] == ["ndf", "ci"] and argv[2] != "watch":
             got = _ci(argv[2:], monkeypatch)
             kind = got["cause"]["kind"] if got["status"] == STOPPED else None
             return Outcome(got["status"], kind)

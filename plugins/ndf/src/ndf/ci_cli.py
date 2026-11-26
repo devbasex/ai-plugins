@@ -392,6 +392,12 @@ def _held_mismatch(args: argparse.Namespace, pull: Pull, target: merge_approval.
     return None
 
 
+def _dequeue_queued(hub: GitHub, pull: Pull) -> None:
+    """読んだ PR がマージキューに入っていれば外す（止まると返した後に、GitHub のキューがマージしないようにする）。"""
+    if pull.queued:
+        hub.dequeue(pull.number)
+
+
 def _approved_by(
     args: argparse.Namespace, hub: GitHub, pull: Pull, target: merge_approval.MergeTarget, verdict: Verdict
 ) -> tuple[Optional[str], Optional[dict]]:
@@ -408,8 +414,7 @@ def _approved_by(
         unreadable = result.stopped(TOOL, "precondition", str(exc), instance=target.head, items=_pr_item_list(target.number))
     if row is not None:
         return row.by, None
-    if pull.queued:
-        hub.dequeue(pull.number)
+    _dequeue_queued(hub, pull)
     return None, unreadable if unreadable is not None else _unapproved(args, target, verdict)
 
 
@@ -455,6 +460,7 @@ def _merge(args: argparse.Namespace) -> dict:
     target = _pr_target(hub, pull)
     stopped = _held_mismatch(args, pull, target)
     if stopped is not None:
+        _dequeue_queued(hub, pull)
         return stopped
     if args.approved_head is not None:
         head = args.approved_head
@@ -542,11 +548,16 @@ def _unchanged_target(args: argparse.Namespace, hub: GitHub, shown: dict) -> tup
 def _write_answer(hub: GitHub, record: dict, shown: dict, target: merge_approval.MergeTarget) -> dict:
     """確かめを通った回答をマージの承認の証跡に書き、結果 JSON を組む。"""
     answer = record.get("answer")
+    # 本番へ反映されないマージは証跡を読む側が無いので、コメントを読まず投稿もしない
+    if shown.get("production") is not True:
+        summary = f"#{target.number} は本番へ反映されないので、回答 {answer} の証跡は書かない"
+        metrics = {"answer": answer, "written": False}
+        return result.result(TOOL, result.OK, summary, items=_pr_item_list(target.number), metrics=metrics)
     row = merge_approval.MergeRow(
         str(answer),
         merge_approval.USER_BY,
         target,
-        shown.get("production") is True,
+        True,
         f"{record.get('run')}:{record.get('step')}:{record.get('presented_id')}",
     )
     written = merge_approval.write_merge_row(hub, row, hub.viewer())
@@ -555,7 +566,8 @@ def _write_answer(hub: GitHub, record: dict, shown: dict, target: merge_approval
 
 
 def _answer(args: argparse.Namespace) -> dict:
-    """プランの実行が書いた回答の記録を、提示した承認の対象と今の PR に照らしてから、マージの承認の証跡に書く。
+    """プランの実行が書いた回答の記録を、提示した承認の対象と今の PR に照らしてから、マージの承認の証跡に書く
+    （本番へ反映されないマージは、照らすだけで書かない）。
 
     書くのは、回答した者が利用者（`human`）で、記録の提示の識別子が提示のファイルの識別子と同じで、提示した承認の対象と
     「本番へ反映されるか」が今の PR と同じときだけで、担い手はいつも `user` である。端末から直に打っても、回答の記録が無ければ書かない（決定 7）。

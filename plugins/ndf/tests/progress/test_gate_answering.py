@@ -150,6 +150,14 @@ def _service_mvv_and_non_production_answers_write_no_trail(repo, st, env, capsys
     assert posts.rows == [] and len(_answered(st, q)) == 1
 
 
+def _a_user_answer_to_a_non_production_merge_writes_no_trail(repo, st, env, capsys):
+    """本番へ反映されないマージは、利用者の回答でも証跡を読み書きしない。"""
+    q = _asked(st, repo, env, capsys, production=False)
+    posts = Posts()
+    _give(st, q, post=posts, observe=lambda _q: _target(False))
+    assert posts.rows == [] and len(_answered(st, q)) == 1
+
+
 def _a_base_changed_after_the_question_is_refused(repo, st, env, capsys):
     """受け入れ条件 5（質問の後にマージ先が変わった）: 提示した承認の対象と今の対象が違えば、証跡を書かずに断る。"""
     q = _asked(st, repo, env, capsys)
@@ -276,6 +284,9 @@ def _stale_routes_carry_the_retry_and_the_next(repo, st, env, capsys):
             _a_resend_by_another_actor_is_refused_and_writes_no_trail, id="a_resend_by_another_actor_is_refused_and_writes_no_trail"
         ),
         scenes.scene(_service_mvv_and_non_production_answers_write_no_trail, id="service_mvv_and_non_production_answers_write_no_trail"),
+        scenes.scene(
+            _a_user_answer_to_a_non_production_merge_writes_no_trail, id="a_user_answer_to_a_non_production_merge_writes_no_trail"
+        ),
         scenes.scene(_a_base_changed_after_the_question_is_refused, id="a_base_changed_after_the_question_is_refused"),
         scenes.scene(
             _a_head_moved_while_waiting_refuses_the_old_material_and_rewrites_it,
