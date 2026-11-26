@@ -116,7 +116,8 @@ def pinned_included(hub: GitHub, number: int, production: str, formats: names_de
     if added or merged:
         found = ", ".join([*(f"#{n}" for n in added), *merged])
         steps = (
-            "assemble の後に足した変更のうち次のリリースに含めるものだけを退避し（版上げのコミットや CHANGELOG などの生成物は含めない。組み立て直した後に作り直す）、"
+            "組み立ての対象のブランチに入れる変更（機能の修正など）だけを、ファイル名でなく変更の目的で選んで退避し"
+            "（版上げのコミット・CHANGELOG の本文・guide に従った追記など、このバージョンのために作った内容は退避せず、組み立て直した後に作り直す）、"
             "版上げの PR を閉じてそのブランチを消し（-D や --force が要るときは実行の前に人の承認を得る）、"
             "退避した変更を組み立ての対象のブランチ宛ての PR にしてプロジェクトの手順でレビュー・マージし（直接コミットや直接の push はしない）、"
             "マージを確かめてから assemble で組み立て直す"
