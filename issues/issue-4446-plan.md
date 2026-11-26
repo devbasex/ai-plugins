@@ -72,6 +72,16 @@ GitHub の PR の更新には、前の版を条件にした書き換えが無い
 | 手順書の命令の検査と `ndf progress` の引数の表 | `reread`・`bump-assemble`・`bump-present`・`bump-record` を `command.parser` にも宣言した（受けるのは `ndf.progress.gate`） | 引数の表に無い命令を手順書に書くと、`ndf check` の `spec-skill` が落ちる |
 | 結果の規約の `outputs` | `questions`・`material`・`check`・`review_again` を閉じた語彙に足した | gate のサブコマンドが返す `outputs` が語彙に無く、CLI が結果を `stopped`（invalid）に差し替えていた（単位「gate のサブコマンド」の取りこぼし） |
 
+設計 PR の文書を実装と突き合わせて見つけた、この計画の記述と実装の違いは次のとおりである（2026-11-26、PR #4547 のドキュメントレビュー）。上の本文とタスクは、実装の前の記録として書き換えない。
+
+| 計画の記述 | 実装 |
+| --- | --- |
+| 計画で決めたこと (2) と Task 4 の `render_remained` | `records.reading.remained_section`。`gate.complete_check` が、`gate_decide.doc_rows_of` の行のうち `verdict` が `remained` のものを渡す |
+| Task 4 の `record` と、`run_worker` を広げる | `gate.write_records`。worker の起動は `drive.run_worker_at`、結果の読み取りは `drive.worker_report` |
+| Task 3 の「`_checked` が `ok` を返す前に打つ」 | `drive.drive` が、`_checked` の結果が `ok` のときに `record_reads` を打つ |
+| Task 12 の `gh pr comment` | `records.pull_view.add_comment`（REST の `POST .../issues/<番号>/comments`） |
+| リスクと対処の「読み取りを 1 回の実行で 1 回にまとめる」 | まとめていない。通常の `gate` の 1 回は `reading-docs.jsonl` を最大 4 回読む |
+
 ## タスク分解
 
 依存の向き（記録 `records` ← サブコマンド `docrebuild` ← 工程を進める仕組み `progress` ← 手順書）の順に並べる。工程の定義に読み手役のステップを足すのは、gate のサブコマンドができた後にする。先に足すと、マージした時点のスプリントブランチで、設計のプランが知らないコマンドで落ちるためである。手順書は、書いたコマンドが動く単位でまとめて直す。
