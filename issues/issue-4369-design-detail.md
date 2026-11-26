@@ -346,7 +346,7 @@ contracts/
 
 ## テンプレートとレビューの起動
 
-満たす決定: 決定 6・11・13・14、受け入れ条件 4
+満たす決定: 決定 6・11・13・14・17、受け入れ条件 4
 
 ### 関数の仕様
 
@@ -371,10 +371,18 @@ contracts/
 | ファイル・ステップ | 変える中身 |
 | --- | --- |
 | `parts/steps.json` の `pr` | `run` は番号を `gh pr create` の出力の URL の末尾から取り、`{state_dir}/pr-number` へ書く。`probe` は head と `{{base}}` で絞り、`isCrossRepository` の PR を除き、見つけた番号を同じファイルへ書く |
-| `impl.json` の `conflict-check`・`ci` | 番号を `{state_dir}/pr-number` から読む。`conflict-check` は `run` を上書きし、`ci` は共有のステップの番号の取り方（`pr_source`）だけを差し替える。番号が読めなければ `conflict-check` は終了コード 2、`ci` は 1。`conflict-check` は PR の状態を問い合わせられないか応答が空でも終了コード 2（`precondition`） |
+| `parts/steps.json` の `ci` | PR の番号の取り方をキー `pr_source` に分ける。番号を出力するコマンド（`command`）と、その引数（`arg`）を持つ（決定 17） |
+| `impl.json` の `conflict-check`・`ci` | 番号を `{state_dir}/pr-number` から読む。`conflict-check` は `run` を上書きし、`ci` は `pr_source` だけを上書きする。失敗時の終わり方は表の下に示す |
 | `impl.json` のプランの最上位 | `"unit_file": "{{unit_file}}"` のキーを足す（`core/plan/model.parse` は知らないキーを読まない。差し込みを使わないとテンプレートの検査が落ちる） |
 | `params.json` | `unit_file`（既定は空文字列） |
 | `pr.json` の `pr` の `probe` | `isCrossRepository` の PR を除く |
+
+`impl` の 2 つのステップは、次のように終わる。
+
+- `conflict-check` は、`pr-number` を読めないか空なら、終了コード 2（`precondition`）で止まる
+- 番号を読めたら、`conflict-check` は `gh pr view` で `mergeStateStatus`（マージ先と競合するかの状態）を取得する。コマンドが失敗するか、取得した値が空なら、終了コード 2（`precondition`）で止まる。値が `DIRTY` なら、終了コード 1（`base_conflict`）で止まる
+- 終了コード 2 で止まる場合は、停止結果の `summary` に理由を出す。番号の記録を読めないのか、どの PR の `mergeStateStatus` を取得できないのかが分かる
+- `ci` は、`pr-number` を読めないか空なら、終了コード 1 で終わる
 
 ### 異常系の処理
 

@@ -439,7 +439,7 @@ ndf ci merge --repo <所有者>/<リポジトリ> --pr <番号> --branch <単位
 
 ## 決定の記録
 
-決定の記録（決定 1〜16）は [issue-4369-design-decisions.md](./issue-4369-design-decisions.md) にある。
+決定の記録（決定 1〜17）は [issue-4369-design-decisions.md](./issue-4369-design-decisions.md) にある。
 
 ## 影響と危険
 

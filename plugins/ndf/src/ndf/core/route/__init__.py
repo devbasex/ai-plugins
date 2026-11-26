@@ -6,8 +6,8 @@
   （プランの形。`ndf.core.plan.model` が読む形に `{{名前}}` と `{"use": ...}` を足したもの）を持つ
 - `params.json`: 差し込みの名前ごとの意味・既定・並びか（`list`）。意味と既定はここだけが持つ
 - `parts/steps.json`: テンプレートどうしで共有するステップ。テンプレートのステップは `{"use": "<名前>", ...}` で 1 つを引き、
-  並べたキーでキーごとに上書きする。値が null のキーは消す。`pr_source` は run の要素 `@pr_source` へ差し込むキーで、
-  共有の `ci` は番号の取り方だけをこれで差し替える
+  並べたキーでキーごとに上書きする。値が null のキーは消す。`pr_source` は PR の番号の取り方を持つキーで、
+  展開の時点で run へ差し込む。共有の `ci` は番号の取り方だけをこれで差し替える
 
 差し込み `{{名前}}` はここで埋める。実行のときの差し込み `{名前}`（`{state_dir}` など）はプランの実行（`runner`）が
 埋めるので触らない。並びの名前は引数の要素ごとに展開する: 要素がその名前だけなら並びを差し込み、ほかの字を含めば
@@ -76,7 +76,8 @@ PARAMS_FILE = "params.json"
 PARTS_FILE = "parts/steps.json"
 # テンプレートのステップで共有のステップを引くキー
 USE = "use"
-# 共有のステップの一部だけを差し替えるキー: 値の並びを run の要素 `@<キー>` の位置へ差し込む
+# 共有のステップの PR の番号の取り方のキー: `command`（番号を出力するコマンド。引数は `$1` で読む）を run の要素の中の
+# `@pr_command` へ、`arg` を run の要素 `@pr_arg` へ差し込む。展開の時点で組み込み、実行時にシェルを増やさない
 PR_SOURCE = "pr_source"
 # 手元でテストを打つステップの id。CI テストの設定（`test.ci.only`）があるリポジトリのプランからは外す（#3473）
 LOCAL_TEST_STEPS = ("test", "test-all", "ci-local")
@@ -241,11 +242,11 @@ def _expand_step(raw: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _splice(step: dict[str, Any]) -> dict[str, Any]:
-    """`pr_source` の並びを run の `@pr_source` の位置へ差し込み、キーを消す。無いステップはそのまま。"""
+    """`pr_source` を run の `@pr_command`・`@pr_arg` へ差し込み、キーを消す。無いステップはそのまま。"""
     if PR_SOURCE not in step:
         return step
-    source, slot = step.pop(PR_SOURCE), f"@{PR_SOURCE}"
-    step["run"] = [x for item in step["run"] for x in (source if item == slot else [item])]
+    source = step.pop(PR_SOURCE)
+    step["run"] = [source["arg"] if x == "@pr_arg" else x.replace("@pr_command", source["command"]) for x in step["run"]]
     return step
 
 

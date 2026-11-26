@@ -20,7 +20,7 @@
       {"use": "test", "on_cause": {"test_failed": "test-repeat"}},
       {"use": "push", "on_fail": "fix-push"},
       {"use": "pr"},
-      {"use": "conflict-check", "run": ["sh", "-c", "n=$(cat \"$0\") && [ -n \"$n\" ] || exit 2; s=$(gh pr view \"$n\" --json mergeStateStatus --jq .mergeStateStatus) && [ -n \"$s\" ] || exit 2; test \"$s\" != DIRTY", "{state_dir}/pr-number"], "exit_cause": {"1": "base_conflict", "2": "precondition"}},
+      {"use": "conflict-check", "run": ["sh", "-c", "stop() { printf '{\"status\": \"stopped\", \"cause\": {\"kind\": \"precondition\"}, \"summary\": \"%s\"}\\n' \"$1\"; exit 2; }; n=$(cat \"$0\") && [ -n \"$n\" ] || stop 'PR の番号の記録（実行の保存先の pr-number）を読めないか、空である'; s=$(gh pr view \"$n\" --json mergeStateStatus --jq .mergeStateStatus) && [ -n \"$s\" ] || stop \"PR #$n のマージ可否（mergeStateStatus）を取得できない\"; test \"$s\" != DIRTY", "{state_dir}/pr-number"], "exit_cause": {"1": "base_conflict", "2": "precondition"}},
       {"id": "base-fetch", "run": ["git", "fetch", "{{remote}}", "{{base}}"]},
       {"id": "review", "run": ["sh", "-c", "rm -f \"$1\" && if [ -e \"$2\" ]; then touch \"$3\"; else rm -f \"$4\"; fi && shift 4 && exec \"$@\" --reviewed-out \"$0\"", "{state_dir}/reviewed-head", "{state_dir}/unresolved", "{state_dir}/unresolved-delta", "{state_dir}/delta-recheck", "{state_dir}/delta-base", "{{review}}"], "on_cause": {"incomplete": "mark-unresolved"}},
       {"use": "push", "id": "push-reviewed", "on_fail": "fix-push"},
@@ -30,7 +30,7 @@
         "exit_cause": {"1": "unreviewed"},
         "on_cause": {"unreviewed": "review-delta"}
       },
-      {"use": "ci", "pr_source": ["cat \"$0\"", "{state_dir}/pr-number"], "next": "head-reviewed"},
+      {"use": "ci", "pr_source": {"command": "cat \"$1\"", "arg": "{state_dir}/pr-number"}, "next": "head-reviewed"},
       {
         "id": "head-reviewed",
         "run": ["sh", "-c", "r=$(cat \"$0\") && [ -n \"$r\" ] || exit 2; test \"$r\" = \"$(git rev-parse HEAD)\"", "{state_dir}/reviewed-head"],
