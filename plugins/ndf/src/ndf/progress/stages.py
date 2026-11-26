@@ -80,8 +80,12 @@ class StageDef:
         """承認ゲート `gate` の読み手役のステップから承認ゲートの直前までのステップの id。読み手役のステップが無ければ空（#4446）。"""
         ids = [st.id for st in self.steps]
         reading = self.reading_for(gate)
-        at = next((i for i, st in enumerate(self.steps) if st.kind == GATE_KIND and st.gate == gate), None)
+        at = self.gate_index(gate)
         return ids[ids.index(reading.id) : at] if reading is not None and at is not None else []
+
+    def gate_index(self, gate: Optional[str]) -> Optional[int]:
+        """承認ゲート `gate` のステップの、工程の中の位置。無ければ None。"""
+        return next((i for i, st in enumerate(self.steps) if st.kind == GATE_KIND and st.gate == gate), None)
 
     def reading_for(self, gate: Optional[str]) -> Optional[StepDef]:
         """同じ工程で、承認ゲート `gate` の前の読み手役のステップ。無ければ None（読み手役のステップの無い古い定義）。"""
@@ -226,7 +230,8 @@ def review_again_steps(stage: StageDef, gate: Optional[str]) -> list[str]:
     """設計のレビューへ戻すときに未了に戻すステップ。承認ゲート `gate` の前の最後のレビューから、ゲートの直前（読み手役か、
     読み手役の無い古い定義では MVV 判定）まで。"""
     ids = [st.id for st in stage.steps]
-    at = next((i for i, st in enumerate(stage.steps) if st.kind == GATE_KIND and st.gate == gate), len(ids))
+    found = stage.gate_index(gate)
+    at = len(ids) if found is None else found
     reviews = [i for i, st in enumerate(stage.steps[:at]) if st.kind == "review"]
     return ids[reviews[-1] if reviews else max(at - 1, 0) : at]
 
