@@ -19,14 +19,14 @@
 | `src/ndf/contracts/worker_kinds.py` | `write_released`・`released_of`（新設） |
 | `src/ndf/progress/definition.py` | `required_outputs`（新設） |
 | `src/ndf/progress/run.py` | `released_answer`（新設）、`_run_step`・`_step_draft`・`_finish_stage`（変更） |
-| `src/ndf/progress/invoke.py` | `StageRun.released`・`answered_gap_detail`（新設）、`plan_path`・`_no_route`（変更） |
+| `src/ndf/progress/invoke.py` | `StageRun.released`・`PreparedPlan.released`・`PreparedPlan.uses_released`・`answered_gap_detail`（新設）、`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
 | `src/ndf/progress/gate/entry.py` | `released_outcome`・`_strategy_at`・`Released`（新設）、`WorkHandoff`・`_cmd_work`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`（変更） |
 | `src/ndf/domains/release/forms_decide.py` | `reaches`（新設）、`deliveries_of`（変更） |
 | `src/ndf/core/worker.py`・`core/worker_outcome.py` | 引数 `--require-version-number`、`Checked`（新設）、`require_outputs`・`_output_gap`・`outcome_of`（変更） |
 | `src/ndf/core/plan/steps.py`・`transition_decide.py`・`runner.py`・`records.py` | `missing_outputs` と要約の引き継ぎ、`outputs.json` の要素の並び |
 | `skills/` の 5 ファイル | `product_version` の意味と、出力の足りない承認の読み方 |
 
-テストは詳細設計書の地図の `tests/` の 13 ファイルに足す。
+テストは詳細設計書の地図の `tests/` のファイルに足す。数を書かないのは、地図とこの文の 2 か所で数を持つと、地図を直したときに食い違うためである。
 
 ## タスク分解
 
@@ -124,12 +124,16 @@
 | --- | --- |
 | 結果 JSON の定義を緩め、`product_version` を書く経路が worker の確かめを通らないと、バージョン番号の形が守られない | U1 で `none` 以外と設定を読めないときの `ndf v11.0.0` のテスト（条件 8）を置く。NDF の中のほかの書き手（バージョンアップの組み立て・`release-steps`）は保存先から値を作るので変えない |
 | `outputs.json` の形を変え、直す前の形を読む実行がある | 直す前の形をステップの分からない要素 1 つとして読むテストを U3 に置く |
-| 進行中のスプリントで、直す前の NDF が書いた `values.json` が残る | `plan_path` が毎回 `released_version` を書き直す。U2 の retry のテストで確かめる |
+| 進行中のスプリントで、直す前の NDF が書いた `values.json` が残る | 記録済みの値を使うプランでは、`plan_path` が `values.json` の `released_version` と今の記録済みの値を比べ、違えば書き直す（直す前の NDF が書いた `values.json` には `released_version` が無いので、値があれば書かれる）。U2 の retry のテストで確かめる |
 
 ## 切り戻し手順
 
-- 単位ごとの PR を revert すれば戻る。データの移行は無い
-- U3 を戻すと `outputs.json` は直す前の形に戻るが、U3 の後に書いた要素の並びの形は直す前の NDF が読めない。U3 を戻すときは、進行中のプランの保存先の `outputs.json` を消してから打ち直す
+- 単位ごとの PR を revert すれば戻る。前へ進めるときのデータの移行は無い
+- **現状の手順の問題:** U3 を戻すと、NDF は `outputs.json` を直す前の形（キーと値だけのオブジェクト）で読む。U3 の後に書いた要素の並びの形（`entries`）は、直す前の NDF には `entries` という名前の出力 1 つに見え、出力の形の確かめで落ちてプランの結果に載らない。これまでの案はそのファイルを消して打ち直す手順だったが、それでは進行中のプランがすでに返した出力（`pr`・`product_version` など）を失い、取り戻せない
+- **改める手順:** U3 を戻すときは、消さずに直す前の形へ変換する。変換しても結果の `outputs` は変わらない。直す前の形の値は、`entries` を先頭から重ねた値（U3 の後の NDF がプランの結果に載せる値）と同じだからである。ステップごとの区別は直す前の形に置けないので、原本を退避して残す
+  1. 進行中のプランの保存先ごとに、`outputs.json` を同じディレクトリの `outputs.json.entries` へ写す（原本の退避。U3 を入れ直すときはこれを `outputs.json` へ戻す）
+  2. `outputs.json` を、`entries` の要素の `outputs` を先頭から順に重ねたオブジェクトで書き直す。手元で試したコマンドは `python3 -c 'import json, shutil, sys; p = sys.argv[1]; shutil.copy2(p, p + ".entries"); merged = {}; [merged.update(e["outputs"]) for e in json.load(open(p))["entries"]]; json.dump(merged, open(p, "w"), ensure_ascii=False)' <保存先>/outputs.json` で、1 と 2 を続けて行う
+  3. U3 を revert した NDF でプランを打ち直す
 
 ## 完了の定義
 
