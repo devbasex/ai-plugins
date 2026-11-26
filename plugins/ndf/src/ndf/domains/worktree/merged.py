@@ -18,29 +18,39 @@ PR 1 件ごとに、メインディレクトリの排他（`mainlock`）を取�
 
 片付けの前に、メインディレクトリがベースブランチにいれば、`git fetch` で `refs/remotes/<リモート名>/<ベースブランチ>` を
 更新してから `git merge --ff-only <リモート名>/<ベースブランチ>` でマージする（`git branch -d` は HEAD に含まれたブランチだけを消す）。
+読み手役に読ませた承認資料のコピー（表 ndf-files の reading-materials）は、渡した PR に限らず、閉じた PR のものを消す。渡していない PR の状態は、渡した PR を読むクエリが
+100 件に満たない残りの分で読む。読めなかった PR のコピーは残し、次のクリーンアップで確かめる（#4446）。
 最後に `git worktree prune` を打ち、worktree の消えた割り当てのテスト環境を回収する（`testenv.reclaim`）。
 `git pull` は使わない（`FETCH_HEAD` をほかのセッションの fetch と取り合い、マージが止まる。#3317）。
 """
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional, Protocol
 
+from ndf import identity
 from ndf.adapters.git import Git
 from ndf.adapters.github import Pull
+from ndf.contracts import facts
 from ndf.core.branch_strategy import Strategy
 from ndf.domains.worktree import mainlock, merged_decide, ndf_settings, outcomes, removal, repo, testenv, trash
 
 # 未コミットの変更を理由に並べるパスの上限
 LISTED = 5
+# 消してよい承認資料のコピーの名前（<gate>-<PR の番号>.md）。ほかの名前のファイルは NDF が作ったものと扱わない
+MATERIAL_COPY = re.compile(r"(?:design|release)-([0-9]+)\.md")
 
 
 class PullsReader(Protocol):
     """番号ごとの PR を読むもの（`adapters.github.GitHub` が満たす。テストは差し替える）。"""
 
-    def pulls(self, numbers: Iterable[int]) -> dict[int, Optional[Pull]]: ...
+    repo: str
+
+    def pulls(self, numbers: Iterable[int], spare: Iterable[int] = ()) -> dict[int, Optional[Pull]]: ...
 
 
 @dataclass
@@ -171,12 +181,40 @@ def strategy_of(main_dir: Path, snapshot: Optional[Path]) -> Strategy:
     return ndf_settings.read_snapshot(snapshot) if snapshot is not None else ndf_settings.strategy(main_dir)
 
 
+def _material_copies(repo: str) -> dict[int, list[Path]]:
+    """リポジトリ `repo` の承認資料のコピーを PR の番号ごとに返す。
+
+    保存先は表（locations の mvv-state と ndf-files の reading-materials）から引く。このパッケージは、書く側の
+    `ndf.domains.records.reading` を読めない（子の表の依存の向き）。
+    """
+    var = facts.value("locations", "mvv-state", "env")
+    base = Path(os.environ[var]) if os.environ.get(var) else identity.load().state_dir / facts.value("locations", "mvv-state", "path")
+    pattern = facts.value("ndf-files", "reading-materials", "path")
+    found: dict[int, list[Path]] = {}
+    for path in sorted((base / pattern.replace("<repo>", repo.replace("/", "__"))).parent.glob("*.md")):
+        named = MATERIAL_COPY.fullmatch(path.name)
+        if named:
+            found.setdefault(int(named.group(1)), []).append(path)
+    return found
+
+
+def _drop_closed_copies(copies: dict[int, list[Path]], pulls: dict[int, Optional[Pull]]) -> None:
+    """閉じた PR（マージせずに閉じたものを含む）の承認資料のコピーを消す。開いている PR と読めない番号は残す。"""
+    for number, paths in copies.items():
+        pull = pulls.get(number)
+        if pull is not None and pull.state == "closed":
+            for path in paths:
+                path.unlink(missing_ok=True)
+
+
 def after_merge(main_dir: Path, numbers: list[int], hub: PullsReader, snapshot: Optional[Path] = None) -> Record:
     """マージの後のクリーンアップを行い、記録を返す。"""
     main = Git(main_dir)
     ndf_settings.load(main_dir)  # 旧いキーの残る worktree の設定では片付けない
     strategy = strategy_of(main_dir, snapshot)
-    pulls = hub.pulls(numbers)
+    copies = _material_copies(hub.repo)
+    pulls = hub.pulls(numbers, spare=copies)
+    _drop_closed_copies(copies, pulls)
     rec = Record()
     base = strategy.base
     remote = main.remote()  # エントリポイントで 1 回だけ求める（PR ごとに `git worktree list` を打たない）

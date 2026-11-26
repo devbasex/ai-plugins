@@ -47,7 +47,7 @@ def test_run_is_one_entrypoint_for_immediate_fix(tmp_path, monkeypatch):
     assert route.main(["run", *_fix_args(out, tmp_path)]) == 0
     assert called == [["next", str(out)]]
     ids = [s["id"] for s in json.loads(out.read_text())["steps"]]
-    assert ids == ["test", "push", "pr", "conflict-check", "ci", "merge"]
+    assert ids == ["test", "push", "pr", "conflict-check", "ci", "merge", "approve-merge", "reject-merge"]
 
 
 def _impl_args(out: Path, repo: Path, *extra: str) -> list[str]:

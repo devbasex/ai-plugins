@@ -13,7 +13,7 @@ from sprint_fixture import sprint_repo as _sprint_repo
 from ndf.adapters import github
 from ndf.contracts import worker_paths
 from ndf.core import route
-from ndf.progress import definition, invoke
+from ndf.progress import definition, invoke, issue_values
 
 # 設計と実装は issues・worktree・mode を工程の入力に持つ
 STAGE_INPUTS = {"design": ("issues", "worktree", "mode"), "impl": ("issues", "worktree", "mode"), "design-merge": ("issues", "worktree")}
@@ -50,7 +50,7 @@ def _issue_repo(tmp_path: Path, monkeypatch) -> Path:
     """設定 `PROJECT` を持つ作業場所。worker の既定を置き、課題の題と本文は偽の課題からコピーする。"""
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     return repo
 
@@ -161,7 +161,7 @@ def test_values_others_can_write_are_refused_on_the_stage_path_too(tmp_path):
 def test_clear_values_removes_the_file_from_each_dir_and_skips_dirs_without_it(tmp_path):
     held, bare = tmp_path / "a", tmp_path / "b"
     invoke.write_values(held, "design", {}, {}, True)
-    invoke.clear_values([held, bare])
+    issue_values.clear_values([held, bare])
     assert not (held / invoke.VALUES_FILE).exists() and not bare.exists()
 
 
@@ -171,22 +171,22 @@ def test_clear_values_removes_the_issue_copies_with_or_without_the_values(tmp_pa
     done, stopped = tmp_path / "a", tmp_path / "b"
     for d in (done, stopped):
         d.mkdir()
-        (d / invoke.ISSUE_BODY_FILE.format(number=7)).write_text("本文", encoding="utf-8")
-        (d / invoke.ISSUE_TITLE_FILE.format(number=7)).write_text("{}", encoding="utf-8")
+        (d / issue_values.ISSUE_BODY_FILE.format(number=7)).write_text("本文", encoding="utf-8")
+        (d / issue_values.ISSUE_TITLE_FILE.format(number=7)).write_text("{}", encoding="utf-8")
     invoke.write_values(done, "close", {}, {}, True)
-    invoke.clear_values([done, stopped])
+    issue_values.clear_values([done, stopped])
     assert list(done.iterdir()) == [] and list(stopped.iterdir()) == []
 
 
-def _counting(monkeypatch, name: str) -> list:
-    """`invoke.<name>` を、呼ばれた回数を数えて元へ渡す見張りにする。"""
-    held, calls = getattr(invoke, name), []
+def _counting(monkeypatch, name: str, module=invoke) -> list:
+    """`<module>.<name>`（既定は `invoke`）を、呼ばれた回数を数えて元へ渡す見張りにする。"""
+    held, calls = getattr(module, name), []
 
     def watch(*a, **k):
         calls.append(a)
         return held(*a, **k)
 
-    monkeypatch.setattr(invoke, name, watch)
+    monkeypatch.setattr(module, name, watch)
     return calls
 
 
@@ -203,14 +203,14 @@ def test_plan_path_leaves_the_values_it_built_the_plan_with(tmp_path, monkeypatc
 
 def test_plan_path_draws_from_the_values_already_built_and_does_not_build_again(tmp_path, monkeypatch):
     repo = _issue_repo(tmp_path, monkeypatch)
-    built, read = _counting(monkeypatch, "template_values"), _counting(monkeypatch, "issue_text")
+    built, read = _counting(monkeypatch, "template_values"), _counting(monkeypatch, "issue_text", issue_values)
     work = tmp_path / "w"
     run = _stage_run_of("design", repo, [3092])
     invoke.prepare_plan(run, work, repo)
     first = json.loads(invoke.plan_path(run, work, repo).read_text())
     again = json.loads(invoke.plan_path(run, work, repo).read_text())
     assert len(built) == 1 and len(read) == 1 and first == again
-    assert (work / invoke.ISSUE_BODY_FILE.format(number=3092)).is_file()
+    assert (work / issue_values.ISSUE_BODY_FILE.format(number=3092)).is_file()
 
 
 def test_plan_path_builds_again_over_the_values_of_another_plan(tmp_path, monkeypatch):
@@ -227,7 +227,7 @@ def test_plan_path_builds_again_over_the_values_of_another_plan(tmp_path, monkey
 def test_prepare_plan_leaves_no_values_when_a_value_cannot_be_decided(tmp_path, monkeypatch):
     repo = _sprint_repo(tmp_path)
     sprint_fixture.without_worker(monkeypatch)
-    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題からコピーしない"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda *a: pytest.fail("課題が 2 つなら課題からコピーしない"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
     with pytest.raises(invoke.TemplateValuesMissing):
@@ -264,7 +264,7 @@ def test_prepare_plan_for_a_ci_only_project_leaves_local_tests_off(tmp_path, mon
     project = {**PROJECT, "test": {"ci": {"only": True}, "suites": [{"name": "lint", "kind": "lint", "command": "ruff check"}]}}
     repo = _sprint_repo(tmp_path, project)
     sprint_fixture.with_worker(monkeypatch)
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"
     got = invoke.prepare_plan(_stage_run_of("impl", repo, [3473]), work, repo)
     held = invoke.read_values(work)

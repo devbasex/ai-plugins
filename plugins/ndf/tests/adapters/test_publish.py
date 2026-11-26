@@ -183,6 +183,17 @@ def test_references_overlapping_secrets_are_not_looked_up_and_are_masked(monkeyp
     assert stub.asked == [[PUBLIC_REPO], ["other/public"]]
 
 
+@pytest.mark.parametrize(
+    ("target", "before", "asked"),
+    [("PUBLIC", True, [sorted([PUBLIC_REPO, "other/public"])]), ("PRIVATE", False, [[PUBLIC_REPO]])],
+)
+def test_comment_unchanged_queries(target: str, before: bool, asked: list[list[str]]) -> None:
+    # 先に公開と確かめた書き先は参照先とまとめて 1 回で照会し、非公開の書き先では参照先の名前を送らない
+    stub = StubHub(PUBLIC_REPO, {PUBLIC_REPO: target, "other/public": "PUBLIC"})
+    assert publish.Publisher(stub, ACCOUNTS).comment_unchanged(1, "other/public#2", exposed_before=before) is not None  # type: ignore[arg-type]
+    assert stub.asked == asked
+
+
 def test_assume_public_scrubs_without_reading_the_target_visibility() -> None:
     stub = StubHub(PRIVATE_REPO, {PRIVATE_REPO: "PRIVATE"})
     (text,), dropped = publish.Publisher(stub, ACCOUNTS).guarded("/home/alice-local と alice@example.co.jp", assume_public=True)  # type: ignore[arg-type]

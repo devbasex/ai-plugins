@@ -218,6 +218,13 @@ def _write_verified(path: Path, data: bytes, sha256: str) -> Path:
     return path
 
 
+def write_private(path: Path, text: str) -> Path:
+    """`path` を所有者だけが読める（0600）中身 `text` のファイルにする。排他的に作った一時ファイルから置き換えるので、
+    `path` がシンボリックリンクでも先のファイルへは書かない。"""
+    data = text.encode("utf-8")
+    return _write_verified(path, data, _sha256(data))
+
+
 def mismatch_detail(blobs: Mapping[str, str]) -> str:
     """本文が承認の後に変わったことを伝える文。`blobs` は `Snapshot.blobs`（最後が本文）。"""
     return f"ベースの MVV の本文が承認の記録と合わない: {list(blobs)[-1]}"
@@ -507,6 +514,12 @@ def _private_lock(path: Path) -> Any:
     """`path` の親を無ければ 0700 で作り（既にあれば権限を変えない）、記録の錠を返す。"""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     return jsonl.lock(path)
+
+
+def append_private(path: Path, row: Mapping[str, Any], kind: str) -> dict[str, Any]:
+    """錠を取り、種類 `kind` の 1 行を所有者だけが読めるファイル（0600）へ足して、書いた行を返す。"""
+    with _private_lock(path):
+        return _append_record(path, row, kind)
 
 
 def record_failure(row: Mapping[str, Any]) -> str:

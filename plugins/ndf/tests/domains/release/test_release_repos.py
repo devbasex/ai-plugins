@@ -451,6 +451,8 @@ def test_release_steps_outputs_fit_the_result_contract(outputs: dict) -> None:
 
 def test_present_routes_fit_the_result_contract() -> None:
     # 11.0.1 の present は ask に "--by" を渡し、結果の形の誤りで終了コード 2 になった（#3804）
-    got = result.result("release-steps", result.GATE, "x", routes=release_cli.present_routes(3803, "a" * 40), outputs={"head": "a" * 40})
+    got = result.result(
+        "release-steps", result.GATE, "x", routes=release_cli.present_routes(3803, "a" * 40, "b" * 64), outputs={"head": "a" * 40}
+    )
     assert result.errors(got) == []
     assert all(route["ask"] == ["by"] for route in got["routes"].values())

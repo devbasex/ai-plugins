@@ -2,6 +2,8 @@
 
 ndf answer <ステートマシン> --gate <質問の id> --result <回答> --reason <理由> --by <回答した者> --key <冪等のキー>
            [--notes <指摘ファイル>] [--head <見た head の SHA>] [--material-sha256 <見た承認資料の sha256>]
+           [--body-sha256 <見た PR の本文の sha256>] [--title-sha256 <見た PR の題の sha256>]
+           [--presentation <見た資料の提示の識別子>]
            [--drop <課題の番号>...]
 ndf answer ask [--gate design|release]   # プランの中の承認ゲート（テンプレートの {{gate}}）。回答を待つ結果 JSON を返す
 ndf answer list <ステートマシン>                 # 書いた回答（選択肢・指摘・理由・回答した者・時刻）を古い順に返す
@@ -31,16 +33,27 @@ from ndf.contracts import result, worker_paths
 from ndf.contracts.worker_kinds import kind_gaps, kind_values, values_in, work_dir_of, work_kinds
 from ndf.core import route
 from ndf.progress import command, invoke, model, run, store
-from ndf.progress.gate.answering import Answer, Observe, answer, git_docs_only, github_observe, lane_env, recheck
+from ndf.progress.gate.answering import (
+    Answer,
+    Observe,
+    Post,
+    answer,
+    git_docs_only,
+    github_observe,
+    github_post,
+    lane_env,
+    no_post,
+    recheck,
+    reread,
+    shared_hub,
+)
 from ndf.progress.gate.asking import (
     RELEASE_GATE,
     TOOL,
     Target,
     gate_result,
-    material_path,
-    material_sha256,
+    present_material,
     question,
-    write_material,
 )
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
@@ -60,16 +73,14 @@ def present(
         repo: Optional[str] = Git(cwd).remote_repo()
     except GitError:
         repo = None
-    asked = question(v, m, repo=repo)
-    # 資料を書く前に PR の今の head を読み、その head の資料があれば書かずにハッシュも使い直す（#3959）
-    seen = observe(asked)
-    q = replace(asked, target=Target(seen.head))
-    if seen.material is None:
-        path = write_material(st.root, v, q, private=st.private)
-        seen = Target(seen.head, material_sha256(path))
-    else:
-        path = material_path(st.root, q)
-    q = replace(q, target=seen)
+    # 対象（承認の対象と本番へ反映されるか）を承認資料の前に読み、承認資料と提示した対象に載せる（#4409 の決定 7）。
+    # その head の資料があり、提示した対象も変わっていなければ、書き直さない（#3959）
+    first = question(v, m, repo=repo)
+    seen = observe(first)
+    asked = replace(first, target=replace(seen, material=None))
+    # 資料・そのハッシュ・提示の識別子（リリースのリクエストの ID に使う）は、同じ排他の中でまとめて受け取る
+    path, sha, held = present_material(st.root, v, asked, private=st.private)
+    q = replace(asked, target=replace(seen, material=sha, presentation=held.presentation))
     metrics = dict(out["metrics"]) if isinstance(out.get("metrics"), dict) else {}
     warned = list(out["warnings"]) if "warnings" in out else []
     try:
@@ -369,9 +380,10 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
 
 
 def _cmd_give(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    seen = Target(a.head, a.material_sha256)
+    seen = Target(a.head, a.material_sha256, presentation=a.presentation, body=a.body_sha256, title=a.title_sha256)
     given = Answer(a.gate, a.result, a.reason, a.by, a.key, Path(a.notes) if a.notes else None, seen, tuple(a.drop))
-    return answer(st, a.machine_id, given, github_observe(cwd, st.root))
+    hub = shared_hub(cwd)
+    return answer(st, a.machine_id, given, github_observe(cwd, st.root, hub), github_post(cwd, hub))
 
 
 def parser() -> argparse.ArgumentParser:
@@ -385,6 +397,12 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--notes", help="変更要求（request_changes）の指摘ファイル")
     ap.add_argument("--head", help="見た PR の head の SHA")
     ap.add_argument("--material-sha256", help="見た承認資料の sha256")
+    ap.add_argument("--body-sha256", help="見た PR の本文の sha256（#4446）")
+    ap.add_argument("--title-sha256", help="見た PR の題の sha256（承認の質問の文は題から作る。#4446）")
+    ap.add_argument(
+        "--presentation",
+        help="利用者に示した承認資料を識別する値。提示時に承認対象の PR が特定され、routes にこの値が入っている場合は必須。提示時のコマンドから値をそのまま渡す（資料を出し直すと変わる）",
+    )
     ap.add_argument("--drop", type=int, nargs="*", default=[], help="設計承認ゲートで外す課題の番号")
     return ap
 
@@ -426,20 +444,34 @@ def ask_parser() -> argparse.ArgumentParser:
 def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Optional[Observe] = None) -> dict[str, Any]:
     """`ndf progress` の工程を流すサブコマンド。レーンの行を終える `Env` で流し、回答を読む前に対象を見直し、承認ゲートの
     待ちは質問と回答ごとのルートの結果にする。"""
-    seen = observe if observe is not None else github_observe(cwd, st.root)
-    took = _took(st, a.machine_id, seen)
+    hub = shared_hub(cwd)
+    seen = observe if observe is not None else github_observe(cwd, st.root, hub)
+    took = _took(st, a.machine_id, seen, github_post(cwd, hub) if observe is None else no_post)
     why = recheck(st, a.machine_id, seen, git_docs_only(cwd))
     out = run.COMMANDS[a.action](run.with_env(a, lane_env(run.Env(facts=command.facts_of))), cwd, st)
     return command.with_warnings(present(st, a.machine_id, cwd, out, seen), before=[w for w in (took, why) if w])
 
 
-def _took(st: store.Store, machine_id: str, observe: Observe) -> Optional[str]:
+def _took(st: store.Store, machine_id: str, observe: Observe, post: Post = no_post) -> Optional[str]:
     """リリースのリクエストへの回答を承認ゲートの回答として書く。書けなければ理由を警告に返す（待ちは残る）。"""
     try:
-        got = take_reply(st, machine_id, os.environ, observe)
+        got = take_reply(st, machine_id, os.environ, observe, post)
     except (model.Refused, external.ExchangeError) as exc:
         return f"リリースのリクエストへの回答を承認ゲートの回答にできなかった: {exc}"
     return got["summary"] if got is not None else None
+
+
+def _cmd_reread(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Optional[Observe] = None) -> dict[str, Any]:
+    """`ndf progress reread <ID>`: 承認の前の確認をやり直し、承認ゲートの待ちを今の対象（head・本文・題）で出し直す（#4446）。"""
+    seen = observe if observe is not None else github_observe(cwd, st.root)
+    out = reread(st, a.machine_id, cwd, lane_env(run.Env(facts=command.facts_of)))
+    return present(st, a.machine_id, cwd, out, seen)
+
+
+def reread_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog=f"{result.ENTRY} progress reread", description="承認の前の確認をやり直し、承認ゲートの待ちを出し直す")
+    ap.add_argument("machine_id", help="承認ゲートで人の回答を待っているスプリントのステートマシンの ID")
+    return ap
 
 
 Dispatch = Callable[[argparse.Namespace, Path], dict[str, Any]]
@@ -469,9 +501,11 @@ def main(argv: list[str]) -> int:
 def progress_main(argv: list[str]) -> int:
     """サブコマンド `ndf progress`（サブコマンドの表の `progress` の行が `ndf.progress.gate.progress_cli` を指す）。
 
-    工程を流すサブコマンド（next・wait・answer・resync・work・show）は、スプリントの完了と同じトランザクションでレーンの行を
+    `reread` は承認ゲートの待ちの出し直し（#4446）。工程を流すサブコマンド（next・wait・answer・resync・work・show）は、スプリントの完了と同じトランザクションでレーンの行を
     終える `Env`（`lane_env`。決定 17）で流す。ほか（new・disable など）は `command` へ渡す。P1b（`run`）はレーンを読まない
     """
     if argv and argv[0] in run.COMMANDS:
         return command.run_main(run.parser(), lambda a, cwd: command.with_store(cwd, _progress, a), argv)
+    if argv and argv[0] == "reread":
+        return command.run_main(reread_parser(), lambda a, cwd: command.with_store(cwd, _cmd_reread, a), argv[1:])
     return command.main(argv)

@@ -12,6 +12,7 @@ import os
 import stat
 import string
 import subprocess
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +22,9 @@ from ndf import cli, contracts, identity
 from ndf.adapters import git
 from ndf.contracts import result
 from ndf.core import issue_docs
+from ndf.domains.docrebuild import gate_decide
 from ndf.domains.docrebuild import select_decide as sd
+from ndf.domains.records import mvv, reading
 from ndf.domains.docrebuild.select_decide import Inspection, Target
 
 log = logging.getLogger(__name__)
@@ -40,6 +43,10 @@ WORKTREE_REMOTE = f"{git.WORKTREE_NDF_SETTINGS} の remote"
 # 確かめの記録の verdict（すべて）と、読み手役の確かめの verdict
 VERDICTS = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/verdict")
 CHECKED = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/checks/items/properties/verdict")
+
+# 読み手役を立てられなかった記録の verdict と、その欠けの理由の頭（#4446 の決定 5。ok で進めずに止める）
+NOT_RUN = gate_decide.NOT_RUN
+NOT_RUN_GAP = "読み手役を立てられなかった"
 
 Runner = Callable[[list[str], Path], "subprocess.CompletedProcess[str]"]
 
@@ -190,10 +197,16 @@ def requirements_of(cwd: Path, targets: Sequence[Target]) -> dict[str, list[str]
     return out
 
 
+def regular_file(cwd: Path, rel: str) -> bool:
+    """作業場所の `rel` が、途中のディレクトリを含めてシンボリックリンクを経由しない通常ファイルか。"""
+    linked = any(os.path.islink(cwd / p) for p in Path(rel).parents if p != Path("."))
+    return not linked and _is_regular(cwd / rel)
+
+
 def _is_regular(path: Path) -> bool:
     try:
         return stat.S_ISREG(os.lstat(path).st_mode)
-    except OSError:  # noqa: NDF401 ファイル: 無い・確かめられない要求仕様は起動指示に載せない
+    except OSError:  # noqa: NDF401 ファイル: 無い・確かめられないものは通常ファイルと扱わない
         return False
 
 
@@ -233,13 +246,16 @@ def _worker_result(done: subprocess.CompletedProcess[str]) -> dict[str, Any]:
     return got
 
 
-def run_worker(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]:
-    """起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と worker の結果ファイルのパスを返す。"""
-    prompt_file = args.state_dir / f"{WORK_KIND}.prompt.md"
-    result_file = args.state_dir / f"{WORK_KIND}.result.json"
+def run_worker_at(state_dir: Path, cwd: Path, kind: str, prompt: str, runner: Runner) -> tuple[dict[str, Any], Path]:
+    """起動指示を保存先へ書き、`ndf worker run` を 1 回打ち、標準出力の結果 JSON と worker の結果ファイルのパスを返す。
+
+    保存先は `state_dir`、`ndf worker run --kind` の値は `kind`（gate も使う）。
+    """
+    prompt_file = state_dir / f"{kind}.prompt.md"
+    result_file = state_dir / f"{kind}.result.json"
     try:
-        args.state_dir.mkdir(parents=True, exist_ok=True)
-        prompt_file.write_text(prompt, encoding="utf-8")
+        state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        mvv.write_private(prompt_file, prompt)
     except OSError as exc:
         raise Precondition(f"起動指示を保存先 {prompt_file} へ書けない: {exc.strerror or exc}") from None
     argv = [
@@ -247,17 +263,17 @@ def run_worker(args: RunArgs, prompt: str, runner: Runner) -> tuple[dict[str, An
         "worker",
         "run",
         "--kind",
-        WORK_KIND,
+        kind,
         "--prompt-file",
         str(prompt_file),
         "--result-file",
         str(result_file),
         "--cwd",
-        str(args.cwd),
+        str(cwd),
         "--state-dir",
-        str(args.state_dir),
+        str(state_dir),
     ]
-    return _worker_result(runner(argv, args.cwd)), result_file
+    return _worker_result(runner(argv, cwd)), result_file
 
 
 def added_items(raw: Any, targets: Sequence[Target]) -> list[dict[str, str]]:
@@ -309,6 +325,9 @@ def _record_gap(rec: Mapping[str, Any], kind: str) -> Optional[str]:
     usable_kind = kind == "manuscript" or (kind == "plan") == (verdict == "self")
     if not usable_kind:
         return f"{kind} に {verdict} は使えない"
+    if verdict == NOT_RUN:
+        why = rec.get("reason") if _filled(rec.get("reason")) else "理由なし"
+        return f"{NOT_RUN_GAP}（{why}）"
     if verdict not in CHECKED:
         if checks:
             return f"{verdict} の checks が空でない"
@@ -408,6 +427,16 @@ def _read_report(path: Path) -> dict[str, Any]:
     return report
 
 
+def worker_report(out: Mapping[str, Any], result_file: Path) -> tuple[Optional[dict[str, Any]], dict[str, Any]]:
+    """worker の状態を確かめ、(`stopped` の結果, 結果ファイルの中身) を返す。
+
+    `ok` で終えていれば前者は None。そうでなければ結果ファイルは読まず後者は空。読めなければ `BadReport`。
+    """
+    if out.get("status") != result.OK:
+        return _worker_stopped(out), {}
+    return None, _read_report(result_file)
+
+
 def _reader_summary(
     raw: Any, targets: Sequence[Target], skipped: Sequence[str]
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]], list[str]]:
@@ -422,6 +451,11 @@ def _reader_summary(
     return readers, found, warnings
 
 
+def not_run_detail(noun: str, names: Sequence[str]) -> str:
+    """読み手役を立てられなかったときの停止の文。`noun` は並べるものの呼び名（文書・対象）。"""
+    return f"{NOT_RUN_GAP}{noun}がある: {'・'.join(names)}。読み手役を立てられる環境に直してから打ち直す"
+
+
 def _checked(report: Mapping[str, Any], targets: Sequence[Target], skipped: Sequence[str]) -> dict[str, Any]:
     """worker の結果ファイルを確かめて `ok` か `stopped` の結果にする（確かめの順は足すべき内容が先）。"""
     try:
@@ -431,12 +465,62 @@ def _checked(report: Mapping[str, Any], targets: Sequence[Target], skipped: Sequ
     metrics = report.get("metrics")
     raw = metrics.get("readers") if isinstance(metrics, dict) else None
     gaps = reader_gaps(raw, targets)
+    not_run = [g["name"] for g in gaps if g["reason"].startswith(NOT_RUN_GAP)]
+    if not_run:
+        return result.stopped(TOOL, "precondition", not_run_detail("文書", not_run))
     if gaps:
         return result.stopped(TOOL, "incomplete", f"確かめの記録が欠けた文書が {len(gaps)} 件ある", gaps=gaps)
     readers, found, warnings = _reader_summary(raw, targets, skipped)
     paths = [t.path for t in targets]
     summary = f"{len(paths)} 件の文書を組み直した（足すべき内容 {len(added)} 件・読み手役の不合格 {len(found)} 件）"
     return result.result(TOOL, result.OK, summary, [*added, *found], {"targets": paths, "readers": readers}, warnings=warnings)
+
+
+def new_check_id() -> str:
+    """確認の id（1 回の実行ごと）。"""
+    return uuid.uuid4().hex
+
+
+def record_reads(g: git.Git, branch: str, report: Mapping[str, Any], targets: Sequence[Target], *, remote: str) -> None:
+    """読み手役が読んだ文書を読ませたものの記録へ追記し、完了の行を書く（#4446 の Task 3。受け入れ条件 1）。
+
+    文書は作業場所のブランチで引けるよう `branch` を付け、中身は `git hash-object` の blob の SHA で持つ。worker 自身が読み直した
+    文書（`self`）は書かない。書けなければ `Precondition`（完了の行が無いので、次の gate は全体を読ませる）。
+    """
+    metrics = report.get("metrics")
+    raw = metrics.get("readers") if isinstance(metrics, dict) else []
+    read = [(t.path, _records_of(raw, t.path)[0]) for t in targets]
+    read = [(path, rec) for path, rec in read if rec["verdict"] in CHECKED]
+    try:
+        repo = g.remote_repo(remote)
+        blobs = g.run("hash-object", "--", *(path for path, _ in read)).split() if read else []
+        check = new_check_id()
+        base = {"repo": repo, "check": check, "branch": branch, "gate": None, "pr": None}
+        for (path, rec), blob in zip(read, blobs, strict=True):
+            for row in _read_rows(rec):
+                reading.append_doc({"kind": "read", **base, "name": path, "hash": blob, "reader": reading.ENGINEER, **row})
+        reading.append_doc(reading.done_row(base))
+    except (git.GitError, OSError, ValueError, reading.ReadingInvalid) as exc:
+        raise Precondition(f"読ませた文書を記録できない: {exc}") from None
+
+
+def _read_rows(rec: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """確かめ 1 件の記録を、回ごとの行（回・合否・残った文の引用）にする。2 回目の不合格は `remained`。"""
+    out: list[dict[str, Any]] = []
+    for i, check in enumerate(rec["checks"], 1):
+        row: dict[str, Any] = {"round": i, "verdict": gate_decide.row_verdict(i, check["verdict"] == "pass")}
+        if row["verdict"] == reading.REMAINED:
+            row["quotes"] = [{"quote": check["reason"], "why": ""}]
+        out.append(row)
+    return out
+
+
+def checked_out(g: git.Git) -> str:
+    """作業場所のブランチの名前。読めなければ `Precondition`。"""
+    try:
+        return g.run("branch", "--show-current").strip()
+    except git.GitError as exc:
+        raise Precondition(f"作業場所のブランチを読めない: {exc}") from None
 
 
 def start_and_changes(g: git.Git, base: str, remote: str) -> tuple[str, list[str]]:
@@ -458,8 +542,9 @@ def start_and_changes(g: git.Git, base: str, remote: str) -> tuple[str, list[str
 
 def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner: Runner = _run) -> dict[str, Any]:
     """起点 → 差分 → 選択 → 起動 → 確かめの順に進め、結果 JSON を返す。"""
+    g = git_of(args.cwd)
     try:
-        ref, changed = start_and_changes(git_of(args.cwd), args.base, args.remote)
+        ref, changed = start_and_changes(g, args.base, args.remote)
         found = sd.candidates(changed, args.issues, args.kinds)
         chosen = sd.select(found, inspect(args.cwd, found))
         log.info("組み直す文書を選んだ", extra={"start_ref": ref, "candidates": len(found), "targets": len(chosen.targets)})
@@ -467,12 +552,15 @@ def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner:
             summary = f"組み直す文書が無い（種類: {'・'.join(args.kinds)}・起点: {ref}）"
             return result.result(TOOL, result.OK, summary, [], {"targets": []}, warnings=chosen.skipped)
         prompt = prompt_text(chosen.targets, requirements_of(args.cwd, chosen.targets), _root() / SKILL)
-        out, result_file = run_worker(args, prompt, runner)
+        out, result_file = run_worker_at(args.state_dir, args.cwd, WORK_KIND, prompt, runner)
         attempts = out["metrics"].get("attempts") if isinstance(out.get("metrics"), dict) else None
         log.info("組み直す worker が終えた", extra={"worker_status": out.get("status"), "attempts": attempts})
-        if out.get("status") != result.OK:
-            return _worker_stopped(out)
-        report = _read_report(result_file)
+        stopped, report = worker_report(out, result_file)
+        if stopped is not None:
+            return stopped
+        got = _checked(report, chosen.targets, chosen.skipped)
+        if got["status"] == result.OK:
+            record_reads(g, checked_out(g), report, chosen.targets, remote=args.remote)
     except Stop as exc:
         return result.stopped(TOOL, exc.kind, exc.detail)
-    return _checked(report, chosen.targets, chosen.skipped)
+    return got

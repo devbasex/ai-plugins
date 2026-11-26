@@ -14,7 +14,9 @@ import pytest
 import strategy_fixture
 
 from ndf.core import route
-from ndf.progress import invoke, merge_pending
+from ndf.progress import invoke, issue_values, merge_pending
+
+import scenes
 
 # 設定（`.ndf/project.json`）のうち、実装のプランの差し込みを埋める値（review の起動は持たない。既定の起動を補わせる）
 PROJECT = {
@@ -42,7 +44,7 @@ def filled(monkeypatch):
     held = route.params()
     monkeypatch.setattr(route, "params", lambda: {**held, "worker": replace(held["worker"], default=["ndf-worker"])})
     read: list[int] = []
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: read.append(n) or (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: read.append(n) or (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: read.append("merge_method") or "squash")
     return read
 
@@ -160,7 +162,7 @@ def test_a_failed_issue_read_does_not_ask_github_for_the_merge_method(tmp_path, 
     def fail(location, n):
         raise invoke.github.GitHubError("読めない")
 
-    monkeypatch.setattr(invoke, "issue_text", fail)
+    monkeypatch.setattr(issue_values, "issue_text", fail)
     with pytest.raises(invoke.github.GitHubError):
         _close(tmp_path, local)
     assert filled == []
@@ -175,7 +177,7 @@ def test_a_retry_after_an_unknown_merge_method_asks_the_merge_method_before_the_
         with pytest.raises(invoke.TemplateValuesMissing) as got:
             _close(tmp_path, local)
         assert set(got.value.missing) == {"merge_method"}
-        invoke.clear_values([tmp_path / "w"])
+        issue_values.clear_values([tmp_path / "w"])
     got = _close(tmp_path, local)
     assert filled == [3092, "merge_method", "merge_method", "merge_method", 3092]
     assert got["merge_method"] == "squash" and not (tmp_path / "w" / merge_pending.PENDING_FILE).exists()
@@ -199,10 +201,10 @@ def test_a_retry_whose_issue_read_fails_after_the_merge_method_does_not_ask_it_a
         raise invoke.github.GitHubError("読めない", status=502)
 
     with monkeypatch.context() as m:
-        m.setattr(invoke, "issue_text", fail)
+        m.setattr(issue_values, "issue_text", fail)
         with pytest.raises(invoke.github.GitHubError):
             _close(tmp_path, local)
-    invoke.clear_values([tmp_path / "w"])
+    issue_values.clear_values([tmp_path / "w"])
     got = _close(tmp_path, local)
     assert filled == ["merge_method", 3092]
     assert got["merge_method"] == "squash" and not pending.exists()
@@ -223,3 +225,70 @@ def test_a_rate_limit_on_the_merge_method_is_a_transient_stop_with_the_wait(tmp_
     stopped = invoke.plan_failure("close", got.value)
     assert stopped["cause"]["kind"] == "transient" and stopped["cause"]["retry_after"] == 60.0
     assert filled == [] and pending.exists()
+
+
+# --- 工程から組むプランの production_gate と承認の対象（#4409 の決定 4・5） ---
+
+from ndf.core import route as _route  # noqa: E402
+from ndf.progress import invoke as _invoke  # noqa: E402
+from ndf.progress import model as _model  # noqa: E402
+
+
+def _stage_run(name: str, gated: bool = True, approved=None) -> _invoke.StageRun:
+    return _invoke.StageRun("plan", name, {}, (), "none", "s", {}, approved=approved, gated=gated)
+
+
+def _stage_plans_choose_how_an_unapproved_production_merge_ends(name, gated, want):
+    t = _route.templates()[name]
+    assert _invoke._fill_production_gate(t, _stage_run(name, gated))["production_gate"] == want
+
+
+def _templates_outside_the_table_keep_the_stop_default():
+    assert "production_gate" not in _invoke._fill_production_gate(_route.templates()["fix"], _stage_run("fix"))
+
+
+def _release_takes_the_approved_head_and_base_from_the_answer():
+    """利用者の回答と MVV 判定が通した回答（`service:mvv`）のどちらの seen からも同じ値を作る。旧版の回答は空。"""
+    t = _route.templates()["release"]
+    user = {"head": "h", "material_sha256": "m", "repo": "o/r", "pr": 8, "base": "main", "production": True}
+    held = {
+        "gate": "release",
+        "skip": True,
+        "head": "h",
+        "target": {"repo": "o/r", "pr": 8, "base": "main", "head": "h", "production": True},
+    }
+    mvv, _ = _model.mvv_answer("release-gate", "listen", "approved", held, "q")
+    for seen in (user, mvv["seen"]):
+        got = _invoke._fill_production_gate(t, _stage_run("release", approved=seen))
+        assert (got["approved_head"], got["approved_base"]) == ("h", "main")
+    old = _invoke._fill_production_gate(t, _stage_run("release", approved={"head": "h", "material_sha256": None}))
+    assert (old["approved_head"], old["approved_base"]) == ("h", "")
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        *[
+            scenes.scene(
+                _stage_plans_choose_how_an_unapproved_production_merge_ends,
+                id=scenes.label("stage_plans_choose_how_an_unapproved_production_merge_ends", i, v),
+                **dict(zip(("name", "gated", "want"), v)),
+            )
+            for i, v in enumerate(
+                [
+                    ("merge", False, "defer"),
+                    ("plan-to-spec", False, "defer"),
+                    ("design-merge", True, "stale"),
+                    ("design-merge", False, "defer"),
+                ]
+            )
+        ],
+        scenes.scene(_templates_outside_the_table_keep_the_stop_default, id="templates_outside_the_table_keep_the_stop_default"),
+        scenes.scene(
+            _release_takes_the_approved_head_and_base_from_the_answer, id="release_takes_the_approved_head_and_base_from_the_answer"
+        ),
+    ],
+)
+def test_production_gate_value_scenes(request, scene, values):
+    """工程のプランが渡す本番チャネルの承認の終え方と承認した対象の場面（#4409）。"""
+    scenes.play(request, scene, values)

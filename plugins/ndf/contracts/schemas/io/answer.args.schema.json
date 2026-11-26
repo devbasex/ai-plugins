@@ -44,6 +44,18 @@
           "type": "string",
           "description": "見た承認資料の sha256"
         },
+        "--body-sha256": {
+          "type": "string",
+          "description": "見た PR の本文の sha256（#4446）"
+        },
+        "--title-sha256": {
+          "type": "string",
+          "description": "見た PR の題の sha256（承認の質問の文は題から作る。#4446）"
+        },
+        "--presentation": {
+          "type": "string",
+          "description": "利用者に示した承認資料を識別する値。提示時に承認対象の PR が特定され、routes にこの値が入っている場合は必須。提示時のコマンドから値をそのまま渡す（資料を出し直すと変わる）"
+        },
         "--drop": {
           "type": "array",
           "items": {

@@ -58,7 +58,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from ndf import cli, contracts, identity
-from ndf.adapters import git, github
+from ndf.adapters import git, github, github_merge
 from ndf.contracts import causes, exit_codes, limits, result, worker_kinds
 from ndf.contracts.exit_codes import OK
 from ndf.contracts.routing import END
@@ -98,15 +98,17 @@ REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ]
 # 設定（`workflow.launch.refactor`）が無いときの `{{refactor}}`（#3908 の決定 7）: ブランチ（`$0`）の PR の番号と、起点
 # （`$1`）からの差分のファイルを打つ時点に読み、`--pr`・`--scope` に足して `ndf refactor run` を打つ。どちらも前の工程
 # （実装の PR の作成・push）が終わるまで決まらない。PR が無い・差分を読めない・差分が空なら、打たずに停止の結果 JSON を出す。
+# 番号は gh の標準出力だけから読み、標準エラー（成功しても hint が出る）は停止の結果に載せるためだけに取る。
 # 差分を読めないか（起点が無いなど）は `git diff` 自身の終了コードで見て、空の差分と分ける（#3908 の r2-5）。
 # macOS 標準の Bash 3.2 でも動くよう `mapfile`・`wait $!`（プロセス置換の終了コード）を使わない（#3908 の r2-1）。
 # NUL 区切りのパスをプロセス置換から `read -d ''` で 1 つずつ読み、パスの後ろに空の区切り（パスは空にならない）と
 # `git diff` の終了コードを流して受け取る。配列を使うので包みは `sh` でなく `bash` で打つ。先頭がハイフンのパスを
 # オプションと取り違えないよう、パスには `./` を前置して渡す（`ndf refactor run` がリポジトリ相対へ戻す。#3908 の r2-4）
 REFACTOR_WITH_PR = """ref=$1; shift
-if ! n=$(gh pr view "$0" --json number --jq .number 2>&1) || [ -z "$n" ]; then
+err=$(mktemp); n=$(gh pr view "$0" --json number --jq .number 2>"$err"); got=$?; msg=$(cat "$err"); rm -f "$err"
+if [ "$got" != 0 ] || [ -z "$n" ]; then
   exec "$1" contracts emit --tool refactor --status stopped \\
-    --summary "ブランチ $0 の PR が無い（工程「実装」の PR を作ってから打ち直す）" --cause precondition "gh: $n"
+    --summary "ブランチ $0 の PR が無い（工程「実装」の PR を作ってから打ち直す）" --cause precondition "gh: $msg"
 fi
 files=() rc=1 end=
 while IFS= read -r -d '' f; do
@@ -539,7 +541,7 @@ def default_base(repo: Path) -> str:
 
 
 def default_merge_method(repo: Path, base: str, remote: Optional[str] = None, *, raise_passing: bool = False) -> Optional[str]:
-    """マージの方式の既定: 基底のブランチ `base` で許された方式の先頭（`github.pick_merge_method`）。読めなければ None。
+    """マージの方式の既定: 基底のブランチ `base` で許された方式の先頭（`github_merge.pick_merge_method`）。読めなければ None。
 
     `remote` はリポジトリを読むリモート名（`--set remote=` で渡した値）。省けばこの作業場所のリモート名。
     `raise_passing` が真なら、打ち直せば通りうる GitHub の失敗（`GitHubError.passing`。上限・不達・5xx）は None にせず
@@ -554,7 +556,7 @@ def default_merge_method(repo: Path, base: str, remote: Optional[str] = None, *,
         return None
     except git.GitError:  # noqa: NDF401 外部コマンド: リモートを読めない
         return None
-    return github.pick_merge_method(None, allowed)
+    return github_merge.pick_merge_method(None, allowed)
 
 
 def _given_remote(out: Mapping[str, Value]) -> Optional[str]:

@@ -96,12 +96,33 @@
     "merge-gate": {
       "id": "merge-gate",
       "run": ["{{gate}}"],
-      "on_answer": {"approved": "merge", "rejected": "end"}
+      "on_answer": {"approved": "approve-gate", "rejected": "reject-gate"}
     },
     "merge": {
       "id": "merge",
-      "run": ["ndf", "ci", "merge", "--branch", "{{branch}}", "--method", "{{merge_method}}"],
-      "probe": ["sh", "-c", "test \"$(gh pr view \"$0\" --json state --jq .state)\" = MERGED", "{{branch}}"]
+      "run": ["ndf", "ci", "merge", "--branch", "{{branch}}", "--method", "{{merge_method}}", "--production-gate", "{{production_gate}}", "--presented-out", "{state_dir}/presented-merge.json"],
+      "probe": ["sh", "-c", "test \"$(gh pr view \"$0\" --json state --jq .state)\" = MERGED", "{{branch}}"],
+      "on_answer": {"approved": "approve-merge", "rejected": "reject-merge"}
+    },
+    "approve-merge": {
+      "id": "approve-merge",
+      "run": ["ndf", "ci", "answer", "--branch", "{{branch}}", "--answer-record", "{state_dir}/answer-records/merge.json", "--presented", "{state_dir}/presented-merge.json"],
+      "next": "merge"
+    },
+    "reject-merge": {
+      "id": "reject-merge",
+      "run": ["ndf", "ci", "answer", "--branch", "{{branch}}", "--answer-record", "{state_dir}/answer-records/merge.json", "--presented", "{state_dir}/presented-merge.json"],
+      "next": "end"
+    },
+    "approve-gate": {
+      "id": "approve-gate",
+      "run": ["ndf", "ci", "answer", "--branch", "{{branch}}", "--answer-record", "{state_dir}/answer-records/merge-gate.json", "--presented", "{state_dir}/presented-merge-gate.json"],
+      "next": "merge"
+    },
+    "reject-gate": {
+      "id": "reject-gate",
+      "run": ["ndf", "ci", "answer", "--branch", "{{branch}}", "--answer-record", "{state_dir}/answer-records/merge-gate.json", "--presented", "{state_dir}/presented-merge-gate.json"],
+      "next": "end"
     }
   }
 }

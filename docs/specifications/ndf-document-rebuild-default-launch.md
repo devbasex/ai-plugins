@@ -181,7 +181,9 @@ flowchart TD
 
 **読み手役の起動の例外**: worker は別のサブエージェントを起動しない（[agent-layers.md](../../plugins/ndf/skills/development-workflow/references/agent-layers.md)）。この原則の例外は、`ndf document-rebuild run` が `ndf worker run` で起動した組み直しの worker だけである。読み手役の対象の文書 1 件につき最大 2 回（1 回目が不合格のときだけ 2 回目）、読み手役のサブエージェントを立ててよい。`ndf worker run` は `Permission.FULL` で起動し、許す Tool に `Agent` を含む。supervisor がサブエージェントとして起動する `ndf:worker` は、定義（`agents/worker.md`）が `Agent` を外しているので立てられず、例外は当たらない。組み直しの起動指示は、規則 1 で起動を禁じる `contracts/worker/prompt.md` からは作らない。
 
-立てられなかったときは、`document-rebuild` の「立てられないとき」の扱いになる。worker は理由を残し、書いた経緯を知らない読み手のつもりで自分で読み直し、記録に `not_run` と理由を書く。ステップは `ok` で進む。コードが止めるのは記録が欠けたか形が違うときだけで、記録の中身が事実かどうか（本当に読ませたか）は確かめない。
+立てられなかったときは、worker は自分で読み直して代えず、記録に `not_run` と理由を書く。ステップは `stopped`（`precondition`）で止まる。従来は、自分で読み直して `ok` で進んでいた。記録の中身が事実かどうか（本当に読ませたか）は、コードは確かめない。
+
+`ok` のときは、読み手役が読んだ文書を、作業場所のブランチと blob を付けて `reading-docs.jsonl` に記録する。承認の前の確認が、この記録と比べて変わった部分だけを読ませる（[ndf-reading-check-before-approval-gate.md](ndf-reading-check-before-approval-gate.md)）。
 
 ### worker の結果の読み方
 
@@ -203,7 +205,7 @@ flowchart TD
 | `verdict` | 意味 | 使える種類 | `checks` の数と `reason` |
 | --- | --- | --- | --- |
 | `pass`・`fail` | 読み手役の最後の結果（最後の `checks` の `verdict` と同じ） | `design`・`manuscript` | 1 回目が合格なら 1。不合格で直して読み直したら 2 で、先頭は `fail`。`fail` で 2 回目を行えなければ 1 と、行えなかった理由 |
-| `not_run` | 読み手役の対象だが、1 回も立てられなかった | `design`・`manuscript` | 0（空の並び）。立てられなかった理由 |
+| `not_run` | 読み手役の対象だが、1 回も立てられなかった。ステップは `stopped`（`precondition`）になる | `design`・`manuscript` | 0（空の並び）。立てられなかった理由 |
 | `self` | 読み手役の対象でない文書を、worker 自身が読み直した | `plan`・`manuscript` | 0（空の並び）。文書の種類（例: `実装計画`・`AI への手順書`） |
 
 `checks` の要素は `{"verdict": "pass か fail", "restatements": [空でない言い直しの文…], "reason": "不合格の質問と理由（fail のとき必須）"}` である。上限の 2 は、`document-rebuild` の手順の「回数」（1 回の確認につき立場ごとに 2 回まで）から決まる。設計書と原稿は読み手の立場が 1 つに決まるからである。`self` は `items` にも `warnings` にも足さず、記録にだけ残す。読み手役が確かめたことにはしない。
@@ -264,6 +266,7 @@ flowchart TD
 | worker が `stopped`・`gate` で終えた | `stopped`（I7） |
 | 足すべき内容の形が違う | `stopped`（`bad_report`） |
 | 確かめの記録が欠けた・形が違う | `stopped`（`incomplete`）。欠けた文書を `gaps` に |
+| 読み手役を立てられなかった文書がある（`not_run`）・読ませた文書を記録できない | `stopped`（`precondition`） |
 | 読み手役が不合格とした文書がある | `ok`。`items`（`reader-<番号>`）と `warnings` に残す |
 | 想定外の例外 | `stopped`（`unknown`）を `--out` と標準出力へ書く |
 | `--out` へ書けない | 標準出力に `stopped`（`precondition`） |
@@ -304,10 +307,11 @@ flowchart TD
 - 起点の参照がどちらも読めない・分岐点が無い・ほかの名前のリモートだけがあるとき、`stopped`（`precondition`）と参照の名前が返る。名前が登録済みでリモート追跡ブランチが無いときと、リモートが 1 つも無いときは手元の参照を使う
 - `--out` の `items` が `id` と `text` を持ち、レビューの読み取り（`as_handed`）が読む。`text` の無い項目と、`doc` が対象に無い項目は `bad_report` になる。worker の `id` が重なっても、全件が残り `id` が重ならない
 - サブコマンドが起動する子は git の読み取りと `ndf worker run` だけで、push も `git commit` も含まない
-- 確かめの記録の欠け（記録が無い・2 件ある・言い直しが無い・`checks` の数が合わない・`not_run` や `self` に理由が無い・種類に使えない `verdict`）は `incomplete` になる。使える組み合わせは欠けにならない
+- 確かめの記録の欠け（記録が無い・2 件ある・言い直しが無い・`checks` の数が合わない・`self` に理由が無い・種類に使えない `verdict`）は `incomplete` になる。使える組み合わせは欠けにならない
 - `fail` の文書は `ok` のまま `reader-1` の項目と `warnings` に出る。対象の外の記録は結果に出ない
 - worker が `stopped`・`gate` なら結果ファイルを読まずに `stopped` になる。`ok` なら標準出力のセッション情報でなく結果ファイルの `items` が渡る
-- 人が見る観点: 実物の worker で設計書 1 本に既定のコマンドを打ち、`--out` の `metrics.readers` に読み手役の確かめの結果か、立てられなかった理由が残る
+- `not_run` の文書があれば `precondition` で止まり、`ok` なら読ませた文書が `reading-docs.jsonl` に残る
+- 人が見る観点: 実物の worker で設計書 1 本に既定のコマンドを打ち、`--out` の `metrics.readers` に読み手役の確かめの結果が残るか、立てられなかった理由で止まる
 - 人が見る観点: リリースした NDF を隔離した設定ディレクトリへ導入し、`workflow.launch.rebuild` の無いリポジトリで 2 つの工程が流れる
 
 ## 関連リンク

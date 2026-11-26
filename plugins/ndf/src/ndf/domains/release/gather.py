@@ -23,9 +23,11 @@ from ndf.domains.release.ndf_settings import NdfSettings
 
 # 含む PR から読む項目（題と、最後のコミットのチェックの結論）
 PULL_SELECTION = (
-    "number title commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {"
+    "number title commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage } nodes {"
     " __typename ... on CheckRun { name status conclusion startedAt } ... on StatusContext { context state } } } } } } }"
 )
+# `contexts` の 1 ページで読み切れなかった PR に足すチェックの名前（結論は空で、終わっていないと数える）
+UNREAD_CHECKS = "100 件を超えて読めていないチェック"
 # first-parent の各コミットを読む形（SHA・親・件名を NUL で区切る）
 _LOG_FORMAT = "--format=%H%x00%P%x00%s"
 
@@ -79,12 +81,17 @@ def _context(node: dict) -> tuple[str, str, str]:
 
 
 def _contexts(raw: dict) -> list[tuple[str, str]]:
-    """最後のコミットのチェックを (名前, 結論) にする。同じ名前のチェックは最後に始まったものだけを残す。"""
+    """最後のコミットのチェックを (名前, 結論) にする。同じ名前のチェックは最後に始まったものだけを残す。
+    続きのページがあれば `UNREAD_CHECKS` を足す（読めていないチェックがある PR を、通ったと数えない）。"""
     commits = raw["commits"]["nodes"] if isinstance(raw.get("commits"), dict) else []
     rollup = commits[-1]["commit"]["statusCheckRollup"] if commits else None
     if not isinstance(rollup, dict):
         return []
-    return checks_decide.latest_per_name(_context(n) for n in rollup["contexts"]["nodes"] if isinstance(n, dict) and "__typename" in n)
+    page = rollup["contexts"]
+    got = checks_decide.latest_per_name(_context(n) for n in page["nodes"] if isinstance(n, dict) and "__typename" in n)
+    if "pageInfo" in page and page["pageInfo"]["hasNextPage"]:
+        got.append((UNREAD_CHECKS, ""))
+    return got
 
 
 def pull_facts(hub: GitHub, numbers: Sequence[int]) -> list[materials_decide.PullFact]:

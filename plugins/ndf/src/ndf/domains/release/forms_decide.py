@@ -29,6 +29,8 @@ class Form(NamedTuple):
     reach: str
     supported: bool
     why: Optional[str]
+    # 承認の質問で問う操作（#4446。扱う形の行だけが持つ）
+    approve: Optional[str] = None
 
 
 def _where() -> str:
@@ -42,7 +44,7 @@ def form_of(name: str) -> Form:
     if name not in known:
         raise FormUnsupported(f"リリースの形 {name!r} はリリースの形の表（{_where()}）に無い。取れる形: {', '.join(known)}")
     row = facts.row(TABLE, name)
-    form = Form(row["id"], row["label"], row["reach"], row["supported"], facts.column(TABLE, "why").get(name))
+    form = Form(row["id"], row["label"], row["reach"], row["supported"], facts.column(TABLE, "why").get(name), row.get("approve"))
     if not form.supported:
         raise FormUnsupported(f"リリースの形 {name}（{form.label}）は release-steps が扱わない（{_where()}）: {form.why}")
     return form
