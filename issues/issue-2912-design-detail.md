@@ -59,7 +59,7 @@ experimental/ndf/
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `plugins/ndf/src/ndf/domains/records/design_check_decide.py` | 新設 | 文書の本文から、番号の無い委ね方の行と「人へ残す判断」の表の行を判定する | `ndf.adapters.markdown` | モジュール `design_check_decide`（`DecisionRow`・`Finding`） | `decision_rows`・`redline_rows`・`findings`・`anchors_lost`・`added_lines`・`delegates`・`named`・`numbers_in`・`blank`（新設） |
+| `plugins/ndf/src/ndf/domains/records/design_check_decide.py` | 新設 | 文書の本文から、番号の無い委ね方の行と「人へ残す判断」の表の行を判定する | `ndf.adapters.markdown` | モジュール `design_check_decide`（`DecisionRow`・`Finding`） | `decision_rows`・`redline_rows`・`findings`・`anchors_lost`・`added_lines`・`heading_touched`・`delegates`・`named`・`numbers_in`・`blank`（新設） |
 | `plugins/ndf/src/ndf/domains/records/design_check.py` | 新設 | 検査する文書を引数のファイルか分岐点からの差分で集め、判定を通して結果 JSON を作る | `design_check_decide`・`ndf.core.start_point`・`ndf.adapters.git`・`ndf.core.issue_docs` | モジュール `design_check`（`Target`・`DesignCheckError`） | `from_files`・`from_base`・`check`（新設） |
 | `plugins/ndf/src/ndf/domains/records/cli.py` | 変更 | `ndf records design check` の引数を受け、結果を出して `--result` へも書く | `design_check` | モジュール `cli` | `_design_check`・`_add_design`（新設）、`_parser`（変更） |
 | `plugins/ndf/src/ndf/domains/records/__init__.py` | 変更 | 責務の表に設計の検査の行を足す | — | パッケージの説明 | — |
@@ -77,8 +77,8 @@ experimental/ndf/
 | `plugins/ndf/contracts/worker/kinds.json` | 変更 | 検査の指摘を直す作業を足す | — | worker の作業の定義 | — |
 | `plugins/ndf/skills/design/SKILL.md` | 変更 | 手順 5・6 の委ね方の確かめを、読む形からコマンドへ変える | — | Skill の本文 | — |
 | `plugins/ndf/skills/design/references/decisions.md` | 変更 | 委ねる行の書き方（表の「判断」の文と番号を同じ行に書く）を定める | — | 参照文書 | — |
-| `experimental/ndf/mvv_replay.py` | 新設 | 過去の PR を指定の指示文で判定して数える。導入した版のゲートを、書き込みを捕まえて打つ | `ndf`（`--plugin-root` の下か、このリポジトリの `plugins/ndf/src`） | スクリプト | `main`・`judge_once`・`material_of`・`prompt_at`・`gate_once`・`CapturingHub`（新設） |
-| `experimental/ndf/mvv_replay_cases/` | 新設 | 推定の扱いの有無だけが違う作り物の要求と設計の 2 組 | — | 材料のファイル | — |
+| `experimental/ndf/mvv_replay.py` | 新設 | 過去の PR を指定の指示文で判定して数える。導入した版のゲートを、書き込みを捕まえて打つ | `ndf`（`--plugin-root` の下か、このリポジトリの `plugins/ndf/src`） | スクリプト | `main`・`judge_once`・`material_of`・`prompt_at`・`gate_once`・`GuardedApi`・`guarded_hub`・`guard_check`（新設） |
+| `experimental/ndf/mvv_replay_cases/` | 新設 | 推定の扱いの有無だけが違う作り物の材料の対（要求仕様と設計書を 1 組にした材料を 2 つ） | — | 材料のファイル | — |
 | `plugins/ndf/tests/domains/records/test_design_check.py` | 新設 | 設計の検査の判定と集め方を縛る | `design_check_decide`・`design_check` | テスト | — |
 | `plugins/ndf/tests/domains/records/test_mvv_gate.py` | 変更 | 表の確かめの振る舞いを縛る | `mvv_gate` | テスト | — |
 | `plugins/ndf/tests/domains/records/test_mvv_material.py` | 変更 | `patch_material` の行数の引数を縛る | `mvv_material_decide` | テスト | — |
@@ -99,7 +99,8 @@ experimental/ndf/
 | `redline_rows` | `design_check_decide.py` | 新設 | `(text: str) -> list[DecisionRow]` | `decision_rows` のうち、番号の欄にレッドラインの番号を 1 つ以上持つ行だけを返す（MVV 判定の表の確かめが使う） |
 | `findings` | `design_check_decide.py` | 新設 | `(text: str, path: str, lines: Optional[frozenset[int]] = None) -> list[Finding]` | 見る範囲のセクションで、番号の無い委ね方の行と、欄を欠く表の行を返す。`lines` があれば、その行番号（1 始まり）の行だけを返す |
 | `anchors_lost` | `design_check_decide.py` | 新設 | `(before: str, after: str) -> bool` | 分岐点の本文 `before` の表で対応付けに使えた行が、作業ツリーの本文 `after` の表から失われたか |
-| `added_lines` | `design_check_decide.py` | 新設 | `(patch: str) -> frozenset[int]` | `git diff -U0` の 1 ファイル分の出力から、足した・変えた行の新しい側の行番号を返す |
+| `added_lines` | `design_check_decide.py` | 新設 | `(patch: str) -> Optional[frozenset[int]]` | `git diff -U0` の 1 ファイル分の出力から、足した・変えた行の新しい側の行番号を返す。読めない hunk の見出しが 1 つでもあれば None（全行を見る） |
+| `heading_touched` | `design_check_decide.py` | 新設 | `(before: str, after: str, patch: str) -> bool` | 差分が見出しの行を足した・変えた・消したか。新しい側の変えた行に `after` の見出しの行があるか、古い側の消した・変えた行に `before` の見出しの行があれば真 |
 | `delegates` | `design_check_decide.py` | 新設 | `(line: str) -> bool` | インラインコードを除いた行が委ねる語（設計文書の正規表現）に当たるか |
 | `named` | `design_check_decide.py` | 新設 | `(line: str, rows: Sequence[DecisionRow]) -> bool` | 委ねる行 `line` が、表の行 `rows` のどれか 1 行の「判断」の文と、その表の行と同じ番号（打ち消されていないもの）を両方含むか。相手にする表の行は、「判断」と「なぜ当たるか」が `blank` でない行だけ |
 | `numbers_in` | `design_check_decide.py` | 新設 | `(text: str, *, negatable: bool) -> tuple[str, ...]` | 文のレッドラインの番号（`C<数>` / `P<数>` / `R<数>`）。`negatable` が真なら、直後に打ち消しが続く番号を除く。インラインコードの中も数える |
@@ -118,7 +119,7 @@ experimental/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `decision_rows` | 欄の見出しが無い表 | 「人へ残す判断」の表が「当たるレッドライン」などの列を持たない | 見出しの行の照合 | 既定値で続ける（欠けた欄を空の文として扱う） | `findings` が番号と理由を欠く行として指摘する（終了コード 1） | 書き直して打ち直せる |
-| `added_lines` | 読めない hunk の見出し | `@@` の行が `-a,b +c,d` の形でない | 正規表現の照合 | 既定値で続ける（その hunk を飛ばす） | 無し | 再実行できる |
+| `added_lines`・`heading_touched` | 読めない hunk の見出し | `@@` の行が `@@ -a[,b] +c[,d] @@` の形でない | 正規表現 `^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@` の照合 | 指摘なしにしない。`added_lines` は None を返し、`from_base` がそのファイルの全行を見る。`heading_touched` は真を返す | 全行を見た結果（指摘があれば終了コード 1） | 再実行できる |
 
 ### 処理の手順
 
@@ -132,6 +133,8 @@ experimental/ndf/
 | `named` | 行の番号のどれかが、`blank` でない「判断」と「なぜ当たるか」を持つ表の行の番号と同じで、その表の行の正規化した「判断」が、正規化した委ねる行に含まれる | 真 |
 | `named` | 番号の直後が「に当たらない」「には当たらない」「に該当しない」 | その番号を数えない |
 
+- hunk の見出しの件数: `git diff -U0` は、範囲が 1 行のとき件数を省く（1 行の置き換えは `@@ -a +c @@`、1 行の追加は `@@ -a,0 +c @@`）。省いた件数は 1 として読む。件数が 0 の側は行を返さない
+- 見出しの行: `heading_touched` は `atx_headings` の行番号（0 始まり）に 1 を足して、hunk の行番号（1 始まり）と比べる
 - 見る範囲: `atx_headings` の見出しのうち、題が「決定の記録」「未確認のまま残ること」「人へ残す判断」で始まるもの。範囲はその見出しから、同じか浅い深さの次の見出しの手前まで
 - 正規化: 空白と記号 `` ` `` `*` `_` を除く。`blank` はさらに `-` `—` も除く
 - 計算量の注意: 1 行ごとに表の全行と照らすので、行の数 × 表の行の数になる。表は数行なので打ち切りを置かない
@@ -171,7 +174,8 @@ experimental/ndf/
 | `decision_rows` | 3 欄の表を読む | 欄が `**` だけ・`—` だけ・`要確認` だけ。番号が `` `C2` `` | 欄の見出しの無い表は欠けた欄として指摘される |
 | `redline_rows` | 番号を持つ行だけを返す | 番号の欄が空 | 表が無ければ空 |
 | `anchors_lost` | 行を消す・「判断」か番号を書き換える・「なぜ当たるか」を `—` にすると真 | 行を足すだけ、「なぜ当たるか」を別の文にするだけは偽 | 分岐点に表が無ければ偽 |
-| `added_lines` | 追加と変更の行番号を返す | 削除だけの hunk（`+c,0`）は行を返さない | 形の違う見出しを飛ばす |
+| `added_lines` | 追加と変更の行番号を返す | 1 行の追加（`@@ -a,0 +c @@`）と 1 行の置き換え（`@@ -a +c @@`）は行 c を返す。削除だけの hunk（`+c,0`）は行を返さない | 形の違う見出しがあれば None |
+| `heading_touched` | 見出しを足す・題を変える・消すと真 | 見出しの無い行だけを変えると偽。1 行の置き換えで見出しを変えても真 | 形の違う見出しがあれば真 |
 | `delegates`・`named`・`numbers_in` | 設計文書の「行の例」の表 | 「本人」「個人」の「人」、疑問の「か」 | 打ち消した番号・表に無い番号・別の判断の番号を借りた行 |
 
 ## Markdown のアダプター
@@ -222,8 +226,13 @@ experimental/ndf/
 
 - `from_base`
   - 事前条件: `root` は git の作業ツリーの中。`remote` は呼び手が決める（引数が無ければ `_design_check` が `Git(root).remote()` で `.ndf/worktree.json` の `remote` を読む）
-  - 事後条件: 返す `Target` は、名前が `issue_docs.DESIGN_FILE` に当たり、作業ツリーにある（削除していない）ファイルだけ。新規と未追跡のファイル、または `anchors_lost` が真のファイルは `lines` が None（全行）、ほかは `added_lines` の行
+  - 事後条件: 返す `Target` は、名前が `issue_docs.DESIGN_FILE` に当たり、作業ツリーにある（削除していない）ファイルだけ。次のどれかに当たるファイルは `lines` が None（全行）、ほかは `added_lines` の行である
+    - 新規と未追跡のファイル
+    - `anchors_lost` が真のファイル
+    - `heading_touched` が真のファイル
+    - `added_lines` が None を返したファイル（読めない hunk の見出しがある）
   - 副作用: git を起動する（下の表）。取得（fetch）はしない
+  - 差分の形の固定: 解析する差分の出力は、利用者とプロジェクトの Git の設定に左右されない形に固定する。`git diff` には、既存の `mvv.LOCAL_DIFF` と同じく `--no-color`・`--no-ext-diff`・`--no-textconv`・`--src-prefix=a/`・`--dst-prefix=b/` を必ず付け、`-c core.quotePath=false` で起動する。外部 diff や textconv が働くと、hunk の行番号が作業ツリーの本文と合わなくなり、変えた行が検査から漏れるためである
 - `check`
   - 事後条件: 指摘が無ければ `status: ok`（対象 0 件も含む）。あれば `stopped`（`check_failed`）で、`items` は `{"name": "<パス>:<行>", "rule": "unnamed_redline", "text": "<行の文>"}`。`metrics` に `failed_tests` を置かないので、`ndf route repeat` の同じ原因のキーは指摘の中身によらず `["check_failed", []]` になる
 - `_design_check`
@@ -235,9 +244,9 @@ experimental/ndf/
 | --- | --- | --- |
 | 1 | `start_point.resolve` の `rev-parse`（と、読めなければ `git remote`） | 起点の参照と SHA |
 | 2 | `Git.merge_base(<起点>, "HEAD")` | 分岐点 |
-| 3 | `git diff --name-status -z --find-renames <分岐点> --` と `git ls-files --others --exclude-standard -z` | 足した・変えた・名前を変えたパスと未追跡のパス |
-| 4 | 対象ごとに `git diff -U0 <分岐点> -- <パス>` | 足した・変えた行 |
-| 5 | `Git.blobs` に `<分岐点>:<前のパス>` をまとめて 1 回 | `anchors_lost` に渡す分岐点の本文 |
+| 3 | `git diff --name-status -z --find-renames --no-ext-diff --no-textconv <分岐点> --` と `git ls-files --others --exclude-standard -z` | 足した・変えた・名前を変えたパスと未追跡のパス |
+| 4 | 対象ごとに `git -c core.quotePath=false diff -U0 --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ <分岐点> -- <パス>` | 足した・変えた行と、見出しに触れたか |
+| 5 | `Git.blobs` に `<分岐点>:<前のパス>` をまとめて 1 回 | `anchors_lost` と `heading_touched` に渡す分岐点の本文 |
 
 ### 異常系の処理
 
@@ -280,7 +289,9 @@ experimental/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `from_base` | 一時リポジトリで、分岐点からの追加・変更・名前の変更と、未コミット・未追跡のファイルを対象にし、削除とマージ先だけの変更を除く | 対象 0 件。表の行を未コミットで消したファイルが全行になる。表に行を足しただけのファイルは足した行だけ | 起点が無いと `precondition`（ローカルブランチが無いだけでは失敗しない） |
+| `from_base` | Git のアダプターを差し替えた偽物（`git diff --name-status`・`ls-files`・`diff -U0`・`blobs` の出力を文字列で返す）で、追加・変更・名前の変更と、未コミット・未追跡のファイルを対象にし、削除のファイルを除く | 対象 0 件。表の行を消したファイル・見出しを足したファイル・読めない hunk の見出しを返したファイルが全行になる。表に行を足しただけのファイルは足した行だけ。`diff` に渡す引数が `--no-ext-diff`・`--no-textconv`・`--no-color` を含む | 起点が無いと `precondition`（ローカルブランチが無いだけでは失敗しない）。`GitError` で `precondition` |
+
+単体テストでは git を起動しない。`from_base` は起点の解決から差分の取得まで git を何度も起動するので、一時リポジトリで打つと、テストのケースごとに子のプロセスが増えるためである。テストは Git のアダプター（`ndf.adapters.git.Git`）を差し替え、実際の `git` の出力の形は、`added_lines` と `heading_touched` に渡す文字列の例（1 行の追加・置き換え、件数を省いた見出し）で縛る。実際の `git` との接続（未コミット・未追跡・マージ先だけの変更が期待どおりに集まるか）は、実装の後に手元の一時リポジトリで打って確かめ、単体テストに置かない（実装計画の Task 8）。
 | `from_files` | 設計成果物でない名前のファイルも全行を見る | 空のファイル | 無いファイルで `precondition` |
 | `check` | 指摘なしは `ok` | 対象 0 件で `ok` | 指摘ありは `check_failed` と `items` の 3 つの欄 |
 | `_design_check` | `--result` に標準出力と同じ結果を書く | — | 入力が無い・両方ある組で `invalid` |
@@ -298,7 +309,7 @@ experimental/ndf/
 | ステップ `design-check` | 設定値（`run`: `["ndf", "records", "design", "check", "--result", "{state_dir}/design-check.json", "--base", "{{base}}", "--remote", "{{remote}}"]`、`on_cause`: `{"check_failed": "design-check-repeat"}`、`next`: `push`） | `templates/design.json`・`templates/design-detail.json` | — |
 | ステップ `design-check-repeat` | 設定値（`run`: `["ndf", "route", "repeat", "--result", "{state_dir}/design-check.json", "--log", "{state_dir}/design-check-causes.jsonl"]`、`next`: `design-check-fix`） | 同上 | — |
 | ステップ `design-check-fix` | 設定値（`run`: `["{{worker}}", "design-check-fix"]`、`next`: `design-check`） | 同上 | — |
-| ステップ `design-check-reviewed` と、その `-repeat`・`-fix` | 設定値（上の 3 つと同じ形。結果は `{state_dir}/design-check-reviewed.json`、記録は `{state_dir}/design-check-reviewed-causes.jsonl`。`design-check-reviewed-fix` の `next` は `review-fixed`、`design-check-reviewed` の `next` は `push-reviewed`） | `templates/design.json` | — |
+| ステップ `design-check-reviewed` と、その `-repeat`・`-fix` | 設定値（上の 3 つと同じ形。結果は同じ `{state_dir}/design-check.json` に上書きし、直しの作業が直前の検査の結果を同じパスで読めるようにする。繰り返しの記録は分けて `{state_dir}/design-check-reviewed-causes.jsonl`。`design-check-reviewed-fix` の `next` は `review-fixed`、`design-check-reviewed` の `next` は `push-reviewed`） | `templates/design.json` | — |
 | ステップ `review-fixed` | 設定値（`run` は `review` のステップと同じ、`next`: `design-check-reviewed`。`on_cause` を持たないので、`incomplete` を含め完了しなければプランが止まる） | `templates/design.json` | — |
 | 値 `base` | 設定値（`params` に足す） | `templates/design-detail.json` | `route.derived_locally` の `default_base` |
 
@@ -347,6 +358,8 @@ experimental/ndf/
 | `push` | 拒まれた | `fix-push` |
 | `fix-push` | 完了 | `design-check` |
 
+ドキュメントレビューの工程の最初の項目 `docs-pr`（テンプレート `pr`）と、その前の工程のドキュメント再構成（テンプレート `document-rebuild`）は、検査を打たずに最初のステップで push する。この 2 つは変えない。その版は次の `docs-review` の `design-check` を通り、合格するまで工程は `docs-merge` へ進まない。直した版は上の表のとおり `design-check-fix` → `review-fixed` → `design-check` → `push`（拒まれたら `fix-push` → `design-check`）の順に送る（設計文書の「詳細設計と文書レビューのプラン」）。
+
 コードレビューの工程のステップ（`subject: code`）と、テンプレート `cross-review` は変えない。工程から組むときの `review`・`worker` の差し込みは、今の `cross-review` と同じ経路（`progress.invoke.template_values` の `_fill_review`）で埋まる。`base` は `route.derived_locally` が埋める。
 
 ### 単体テストの観点
@@ -354,7 +367,7 @@ experimental/ndf/
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `document-review` のプラン | `review` → `design-check` → `push` | `review` の `incomplete` は検査へ進む。1 回落ちると直し → `review-fixed` → 検査 | `review-fixed` の `incomplete` で止まる。3 回目の `check_failed` で `fix_limit` |
-| 工程の定義 | 設計レビューとドキュメントレビューが `document-review` を組む | — | コードレビューの工程が検査を打たない |
+| 工程の定義 | 設計レビューとドキュメントレビューが `document-review` を組む | ドキュメントレビューの工程で、`docs-review` の検査が落ちたまま止まると `docs-merge` へ進まない | コードレビューの工程が検査を打たない |
 | テンプレートの一覧 | `route.templates()` が `document-review` を含み、`model.parse` を通る | — | — |
 
 ## MVV 判定のステップ
@@ -366,27 +379,27 @@ experimental/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_tabled` | `plugins/ndf/src/ndf/domains/records/mvv_gate.py` | 新設 | `(j: _Judging, rows: Sequence[Mapping[str, Any]], outcome: dict[str, Any]) -> dict[str, Any]` | 省く結果のときだけ、差分の設計成果物の head の表にレッドラインの番号を持つ行か、読めないファイルがあれば、`skip` を偽にし `target` を取り除いて `why` に理由を足す |
-| `_table_numbers` | `mvv_gate.py` | 新設 | `(hub: GitHub, head: str, path: str) -> Optional[tuple[str, ...]]` | `hub.branch_file(head, path)` で本文を読み、`design_check_decide.redline_rows` の番号を出てくる順に重複なく返す。本文が無ければ（`FileAt.text` が None）None を返し、GitHub の失敗は `GitHubError` をそのまま送出する |
+| `_table_numbers` | `mvv_gate.py` | 新設 | `(hub: GitHub, head: str, paths: Sequence[str]) -> dict[str, Optional[tuple[str, ...]]]` | `paths` の本文を `hub.aliased` の 1 回の要求（件数が `github.graphql-batch` を超えた分だけ次の要求）で読み、パスごとに `design_check_decide.redline_rows` の番号を出てくる順に重複なく返す。本文が無いパス（Blob でない・応答に無い）は None にする。GitHub の失敗は `GitHubError` をそのまま送出する |
 | `_judged` | `mvv_gate.py` | 変更 | 変えない | 最後の `j.posted_if_current(_bound(j, …))` を `j.posted_if_current(_tabled(j, rows, _bound(j, …)))` にする |
 
 - `_tabled`
   - 事前条件: `outcome` は `_bound` を通した結果。`rows` は `_diff` が返した変えたファイル（GitHub の files の行の形）
-  - 事後条件: 入力の `outcome["skip"]` が偽なら、何も読まずに同じ値を返す。真なら、`filename` が `issue_docs.DESIGN_FILE` に当たり `status` が `removed` でない行のパスを、出てくる順に 1 件ずつ読む。番号のあるファイルと読めないファイルが 1 つも無ければ同じ値を返し、あれば `skip` が偽で `target` を持たない値を返す。`verdict` と `holds` は変えない
-  - 読み方: 差分の設計成果物をすべて読み、最初に番号か読めないファイルが見つかっても止めない。省かない理由をパスごとに `why` の 1 項目にして、人が承認の場で全部を見られるようにするためである。設計成果物は差分の中でも数件なので、読み切っても読み取りは数回で済む
-  - 副作用: 差分の設計成果物 1 件につき GitHub の GraphQL を 1 回（`branch_file`）。省けない判定と、差分に設計成果物が無い判定では 0 回
-  - `why` の形: 番号を持つファイル 1 件につき `TABLE_KEPT + "<パス>（<番号>・<番号>）"`、読めないファイル 1 件につき `TABLE_UNREADABLE + "<パス>（<理由>）"` を、差分の順に今の `why` の後ろへ足す。`<理由>` は、本文が無いときは「本文が無い」、`GitHubError` のときは `j.text("table_unreadable", exc)`（`failure_text` の定型文と診断の記録の識別子）である
+  - 事後条件: 入力の `outcome["skip"]` が偽なら、何も読まずに同じ値を返す。真なら、`filename` が `issue_docs.DESIGN_FILE` に当たり `status` が `removed` でない行のパスを、出てくる順に並べ、`_table_numbers` でまとめて読む。番号のあるファイルと読めないファイルが 1 つも無ければ同じ値を返し、あれば `skip` が偽で `target` を持たない値を返す。`verdict` と `holds` は変えない
+  - 読み方: 差分の設計成果物をすべて 1 回の要求で読み、パスごとの結果を見る。1 件ずつ読む形にしないのは、1 件目で省かないと決まっても残りを直列に待つことになるためである。すべてを読むので、省かない理由をパスごとに `why` の 1 項目にして、人が承認の場で全部を見られる
+  - 副作用: GitHub の GraphQL を 1 回（`aliased`。設計成果物が `github.graphql-batch` 件を超えれば、超えた分ごとに 1 回増える）。省けない判定と、差分に設計成果物が無い判定では 0 回
+  - `why` の形: 番号を持つファイル 1 件につき `TABLE_KEPT + "<パス>（<番号>・<番号>）"`、読めないファイル 1 件につき `TABLE_UNREADABLE + "<パス>（<理由>）"` を、差分の順に今の `why` の後ろへ足す。`<理由>` は、本文が無いときは「本文が無い」、`GitHubError` のときは `j.text("table_unreadable", exc)`（`failure_text` の定型文と診断の記録の識別子）である。`GitHubError` は要求の全体の失敗なので、そのときはすべてのパスを読めないファイルとして並べる
 - `_table_numbers`
   - 事前条件: `head` は判定した PR の head の SHA（`j.pull.head_sha`）
-  - 事後条件: `branch_file` の式は `<SHA>:<パス>` になる。ブランチ名でなく SHA を渡すので、判定の間に PR が進んでも判定した版を読む
+  - 事後条件: パスごとの選択は `object(expression: "<SHA>:<パス>") { ... on Blob { oid text } }` になる（式の文字列は JSON の文字列として引用する）。ブランチ名でなく SHA を渡すので、判定の間に PR が進んでも判定した版を読む
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_table_numbers` | 本文を読めない | GitHub の失敗・上限・権限 | `branch_file` の `GitHubError` | 送出する（`_tabled` が受ける） | 無し（`_tabled` が `why` に載せる） | 再実行できる |
-| `_table_numbers` | 本文が無い | パスが blob でない（`FileAt.text` が None） | `text is None` | None を戻り値で返す | 無し（`_tabled` が `why` に載せる） | 再実行できる |
-| `_tabled` | 本文を読めないファイルがある | `_table_numbers` が None を返すか `GitHubError` を送出した | 戻り値と `except GitHubError` | 省かない側へ倒して続ける | 出力 `mvv_gate.skip` が偽、`why` に「設計文書の本文を読めないため、『人へ残す判断』の表を確かめられない: <パス>（<理由>）」。`<理由>` は「本文が無い」か `failure_text` の定型文と診断の記録の識別子で、GitHub の例外の文は載せない（全文は手元の診断の記録へ書く）。終了コードは今の `ndf records mvv gate` と同じ | 次の判定で読み直す |
-| `_tabled` | 番号を持つ行がある | 設計者が判断を人へ残した | `_table_numbers` の戻り値が空でない | 省かない | `skip` が偽、`why` に「設計文書の『人へ残す判断』の表に、レッドラインに当たる判断がある: <パス>（<番号>）」。`target` を持たない | 人の承認を待つ |
+| `_table_numbers` | 本文を読めない | GitHub の失敗・上限・権限 | `aliased` の `GitHubError` | 送出する（`_tabled` が受ける） | 無し（`_tabled` が `why` に載せる） | 再実行できる |
+| `_table_numbers` | 本文が無い | パスが blob でない・応答に無い | 応答の `text` が文字列でない | そのパスの値を None にして返す | 無し（`_tabled` が `why` に載せる） | 再実行できる |
+| `_tabled` | 本文を読めないファイルがある | `_table_numbers` がそのパスに None を返すか、`GitHubError` を送出した | 戻り値と `except GitHubError` | 省かない側へ倒して続ける | 出力 `mvv_gate.skip` が偽、`why` に「設計文書の本文を読めないため、『人へ残す判断』の表を確かめられない: <パス>（<理由>）」。`<理由>` は「本文が無い」か `failure_text` の定型文と診断の記録の識別子で、GitHub の例外の文は載せない（全文は手元の診断の記録へ書く）。終了コードは今の `ndf records mvv gate` と同じ | 次の判定で読み直す |
+| `_tabled` | 番号を持つ行がある | 設計者が判断を人へ残した | `_table_numbers` のそのパスの値が空でない | 省かない | `skip` が偽、`why` に「設計文書の『人へ残す判断』の表に、レッドラインに当たる判断がある: <パス>（<番号>）」。`target` を持たない | 人の承認を待つ |
 
 承認の対象を読めない場合は `_bound` が先に `skip` を偽にするので、`_tabled` は表を読まずに返す。今の止まり方は変わらない。
 
@@ -408,7 +421,7 @@ experimental/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `_table_numbers` | `GitHub.branch_file` | `grep -n "def branch_file" -A10 plugins/ndf/src/ndf/adapters/github.py` | 使う。式 `{base}:{path}` の `base` に SHA を渡す |
+| `_table_numbers` | `GitHub.aliased`・`_file_at`・`GitHub.branch_file` | `grep -n "def aliased\|def _file_at\|def branch_file" -A10 plugins/ndf/src/ndf/adapters/github.py` | `aliased` を使う（件数の上限で分ける処理を持つ）。`branch_file` は 1 件を 1 回で読むので使わない。応答の読み方は `_file_at` と同じ形にそろえる |
 | `_table_numbers` | `design_check_decide.redline_rows` | 本書の「設計の検査の判定ロジック」 | 使う |
 | `_tabled` | `_bound` の `target` の外し方、`_recorded` の失敗時の `kept` | `sed -n '/def _bound/,/^def _target/p' plugins/ndf/src/ndf/domains/records/mvv_gate.py` | 同じ書き方（`target` を除いた辞書に `skip`・`why` を重ねる）にそろえる |
 | `_tabled` | `issue_docs.DESIGN_FILE` | `cat plugins/ndf/src/ndf/core/issue_docs.py` | 使う |
@@ -417,7 +430,7 @@ experimental/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_tabled`（`gate` を通して見る） | 回答が `follow` で boundary が空でも、表に番号を持つ行があれば `skip` が偽、`target` が無く、`why` にパスと番号。番号の無い表・表の無い設計成果物・差分に設計成果物の無い PR は省ける | 表の行が差分の外にある。番号が `` `C2` ``。同じ行がマージ先にもある（前に人が承認した行）でも省かない。削除した設計成果物は読まない | 本文を読めない（`GitHubError`・`text` が None）と省かない。省けない判定では `branch_file` を呼ばない。承認の対象を読めないときは表を読まない。`branch_file` に渡す式が head の SHA であること |
+| `_tabled`（`gate` を通して見る） | 回答が `follow` で boundary が空でも、表に番号を持つ行があれば `skip` が偽、`target` が無く、`why` にパスと番号。番号の無い表・表の無い設計成果物・差分に設計成果物の無い PR は省ける | 表の行が差分の外にある。番号が `` `C2` ``。同じ行がマージ先にもある（前に人が承認した行）でも省かない。削除した設計成果物は読まない | 本文を読めない（`GitHubError`・`text` が None）と省かない。設計成果物が 2 件でも GitHub の要求は 1 回。省けない判定では表を読む要求を送らない。承認の対象を読めないときは表を読まない。選択の式が head の SHA であること |
 
 ## 起点の解決
 
@@ -468,9 +481,9 @@ experimental/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | 作業 `design-check-fix` | 設定値（`work`: `修正`、`skills`: `["design", "document-style"]`、`excerpt`: null、`inputs`: `["branch", "base", "remote"]`、`cwd`: `worktree`、`outputs`: `[]`） | `contracts/worker/kinds.json` | — |
-| 作業 `design-check-fix` の `summary` | 設定値 | 同上 | 「`ndf records design check --base <base> --remote <remote>` を打って指摘を読み、design の決定の書き方に従って直し、作業場所でコミットする。判断は設計者が決めて決定の記録へ書き直すか、レッドラインに当たるものだけを番号となぜ当たるかを添えて『人へ残す判断』の表へ移す。指摘の無い行は書き換えない」 |
+| 作業 `design-check-fix` の `summary` | 設定値 | 同上 | 「プランの保存先（起動指示の state_dir）の `design-check.json` の `items` を読み、design の決定の書き方に従って直し、作業場所でコミットする。検査は打ち直さない。保存先を受け取っていなければ `ndf records design check --base <base> --remote <remote>` を 1 回打って指摘を読む。判断は設計者が決めて決定の記録へ書き直すか、レッドラインに当たるものだけを番号となぜ当たるかを添えて『人へ残す判断』の表へ移す。指摘の無い行は書き換えない」 |
 
-worker は検査の結果のファイルを受け取らず、同じコマンドを自分で打って指摘を読む。worker の結果の保存先はプランの保存先と別で、ファイルの位置を渡す差し込みの値が無いためである。
+直しの作業は、直前の検査の結果のファイルを読み、検査を自分で打ち直さない。既定の worker（`ndf answer work --state-dir {state_dir}`）はプランの保存先を受け取り、起動指示（`worker.system_prompt`）にもそのパスが載る。どちらの検査のステップも結果を `{state_dir}/design-check.json` へ書くので、作業は同じパスを読めばよい。直した後に合格したかは、プランの次の検査が確かめる。利用者が `worker` を差し替えて保存先を渡さない場合に限り、作業は結果のファイルを読めないので、`ndf records design check --base <base> --remote <remote>` を 1 回打って指摘を読む。
 
 ## MVV 判定の指示文
 
@@ -524,18 +537,31 @@ worker は検査の結果のファイルを受け取らず、同じコマンド�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `main` | `experimental/ndf/mvv_replay.py` | 新設 | `(argv: list[str]) -> int` | サブコマンド `judge`（PR か材料のファイルを指定の指示文で判定して数える）と `gate`（導入した版のゲートを打つ）を受ける |
+| `main` | `experimental/ndf/mvv_replay.py` | 新設 | `(argv: list[str]) -> int` | サブコマンド `material`（PR の材料を 1 回組んで保存する）、`judge`（保存した材料のファイルを指定の指示文で判定して数える）、`gate`（導入した版のゲートを打つ）、`guard-check`（GitHub へ送らずに差し替えの働きを確かめる）を受ける |
 | `prompt_at` | `mvv_replay.py` | 新設 | `(repo: Path, commit: Optional[str]) -> str` | 指示文を返す。`commit` があれば `git show <commit>:plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` を読み込んで `SYSTEM` を取り、無ければ読み込んだ `ndf` の `SYSTEM` |
-| `material_of` | `mvv_replay.py` | 新設 | `(hub: GitHub, g: Git, number: int) -> Optional[str]` | 決定 5 の 4 つの順で、PR の材料の全文を組む。全文を取れなければ None |
-| `judge_once` | `mvv_replay.py` | 新設 | `(question: str, material: str, model: str) -> dict[str, Any]` | `llm.ask` を、`--model` を足した `call` で 1 回呼び、回答と実行の情報（モデル ID・Claude Code のバージョン・指示文のコミット・材料のハッシュ）を返す |
-| `gate_once` | `mvv_replay.py` | 新設 | `(root: Path, answer: Literal["llm", "stand-in"], result: Path) -> int` | 導入した版の `mvv_gate.gate` を、`hub` を `CapturingHub` で包み、`NDF_MVV_STATE_DIR` を一時ディレクトリにして呼ぶ。`answer` は引数 `--answer` の値で、`llm` なら判定の呼び出し `ask` を差し替えず導入した版の `llm.ask` で実物の LLM に判定させ（設計文書の決定 6 の順 3 の 1 回目）、`stand-in` なら `follow` で `boundary` が空の回答を返す代役に差し替える（2 回目） |
-| `CapturingHub` | `mvv_replay.py` | 新設 | クラス（`GitHub` を包む。読み取りは委ね、書き込みのメソッドは記録して送らない） | PR のコメントなどの書き込みを捕まえ、結果のファイルへ書く |
+| `material_of` | `mvv_replay.py` | 新設 | `(hub: GitHub, g: Git, number: int) -> Optional[Material]` | 決定 5 の 4 つの順で、PR の材料の全文を組む。読んだベースと head の SHA、全文、全文の SHA-256 を返す。全文を取れなければ None。サブコマンド `material` が結果をファイルへ保存し、`judge` はこのファイルだけを読む（PR から組み直さない） |
+| `judge_once` | `mvv_replay.py` | 新設 | `(question: str, material: Material, model: str) -> dict[str, Any]` | `llm.ask` を、`--model` を足した `call` で 1 回呼び、回答と実行の情報（モデル ID・Claude Code のバージョン・指示文のコミット・材料のベースと head の SHA・材料のハッシュ）を返す |
+| `gate_once` | `mvv_replay.py` | 新設 | `(root: Path, answer: Literal["llm", "stand-in"], result: Path) -> int` | 導入した版の `mvv_gate.gate` を、`hub` の送る口を `guarded_hub` で差し替え、`NDF_MVV_STATE_DIR` を一時ディレクトリにして呼ぶ。`answer` は引数 `--answer` の値で、`llm` なら判定の呼び出し `ask` を差し替えず導入した版の `llm.ask` で実物の LLM に判定させ（設計文書の決定 6 の順 3 の 1 回目）、`stand-in` なら `follow` で `boundary` が空の回答を返す代役に差し替える（2 回目） |
+| `GuardedApi` | `mvv_replay.py` | 新設 | クラス（`GitHub.api` に差し替える、GitHub へ要求を送る口。`request` と `graphql._request` を持つ） | すべての要求を送る前に許可の一覧に照らす。読み取り（REST の `GET`、`mutation` と `subscription` を含まない GraphQL）だけを本物へ送る。確認用 PR へのコメントの投稿だけを捕まえて作り物の応答を返し、ほかの要求はすべて送らずに記録して `Refused` を送出する。要求を送らない属性（`config` など。`GitHub.__post_init__` が読む）は元の口へ委ねる |
+| `guarded_hub` | `mvv_replay.py` | 新設 | `(hub: GitHub, pr: int) -> tuple[GitHub, GuardedApi]` | `dataclasses.replace(hub, api=GuardedApi(hub.api, hub.repo, pr))` で、送る口だけを差し替えた `GitHub` を作る。高水準のメソッド（`branch_file`・`visibilities`・`artifact_zip` など）も、どれもこの口を通る |
+| `guard_check` | `mvv_replay.py` | 新設 | `(result: Path) -> int` | 送る口の先を、要求が届いたら記録して失敗する作り物にして `GuardedApi` を作り、書き込みの経路を順に通す。GitHub へは何も送らない |
 
 - `gate_once`
-  - 事前条件: 環境変数 `NDF_STAGE_INPUT` に工程の入力（`issues`・`worktree`・`mode`・`pace`・`mvv_ref`）がある
-  - 事後条件: 結果のファイルに、ゲートの出力・捕まえた書き込みの本文と件数・読み込んだ置き場とバージョンがある
+  - 事前条件: 環境変数 `NDF_STAGE_INPUT` に工程の入力（`issues`・`worktree`・`mode`・`pace`・`mvv_ref`）がある。同じ版で `guard-check` が合格している
+  - 処理: `mvv_gate.gate` の引数 `hub` に、本物の `GitHub` を開いてから `guarded_hub` で送る口を差し替えたものを返す関数を渡す。確認用 PR の番号は、worktree のブランチの開いた PR を読み取りで引いて決め、`GuardedApi` に渡す
+  - 事後条件: 結果のファイルに、ゲートの出力・捕まえたコメントの本文と件数・拒んだ要求（方法・パス、GraphQL は操作の種類）と件数・読み込んだ置き場とバージョンがある
   - 副作用: GitHub を読む。書き込まない。判定の記録は一時ディレクトリにだけ書く
+- `GuardedApi` の許可の一覧
+  - 送る: REST の `GET`。GraphQL は、文の先頭の操作（コメントと空白を除いた最初の語）が `query` か、操作の語が無い `{` で始まる文で、文のどこにも語 `mutation`・`subscription` が無いもの
+  - 捕まえる: REST の `POST` で、パスが `/repos/<hub.repo>/issues/<確認用 PR の番号>/comments` に一致するもの。本文を記録し、`{"id": 0, "html_url": "<PR の URL>#capture"}` の形の作り物の応答を返す
+  - 拒む: 上に当たらないものすべて。方法が `GET` でない REST、別の番号やリポジトリへのコメント、GraphQL の `mutation`、読めない文。送らずに記録し、`Refused` を送出する。ゲートが `Refused` を受けて別の経路で続けても、拒んだ件数が結果に残る
+- `guard_check`
+  - 通す経路: `Publisher.comment`（確認用 PR）、別の番号へのコメント、`Publisher` の課題の作成、`PATCH` による本文の書き換え、ラベルの付け替え（`POST .../labels`）、`mutation` を含む GraphQL、`artifact_zip` と同じく `api.request` を直接呼ぶ `GET`、`branch_file` の GraphQL の `query`
+  - 合格: 作り物まで届いたのが `GET` と `query` の 2 件だけで、コメントの投稿は捕まり、ほかの書き込みはすべて `Refused` で拒まれた。合格しなければ終了コード 1 で、`gate` を打たない
+- `material_of`
+  - 表で止まる件: 材料を組むときに、差分の設計成果物を head の SHA で読み、読み込んだ `ndf` の `mvv_gate._table_numbers` と同じ読み方で番号を求めて `Material.tabled` に入れる。番号があれば、その件は判定が `follow` で `boundary` が空でも、変更後のゲートでは省かれない（設計文書の決定 6 の順 4）。指示文に依らないので、材料と一緒に 1 回だけ求める
 - `main`
+  - 集計: `follow` で `boundary` が空の件のうち、`Material.tabled` が空でない件を「表で止まる件」として、両方の指示文の側の確認後の件数から引く
   - 副作用: `--plugin-root` があれば、`<置き場>/src` を `sys.path` の先頭へ足してから `ndf` を読み込む。無ければこのリポジトリの `plugins/ndf/src` を足す
 
 ### 異常系の処理
@@ -544,8 +570,11 @@ worker は検査の結果のファイルを受け取らず、同じコマンド�
 | --- | --- | --- | --- | --- | --- | --- |
 | `material_of` | 全文を取れない | API の応答に差分が無く、手元でも読み直せない | 戻り値 | 既定値で続ける（LLM を呼ばず「材料が欠けた」と記録する） | 結果のファイルの件ごとの行 | 再実行できる |
 | `judge_once` | 回答が無い・形が違う | 期限切れ・利用上限・2 回とも形が違う | `llm.ask` の `JudgeAnswer` | 既定値で続ける（読めない回答として分母に残す） | 結果のファイルの件ごとの行 | 再実行できる |
-| `main` | 比較に使えない組 | 比べる 2 つの判定でモデル ID か Claude Code のバージョンが違う | 結果の集計 | 止める（その組を比較に使わない） | 標準エラーと終了コード 1 | 揃えて打ち直す |
-| `gate_once` | 捕まえた書き込みが 0 件 | 包み方が働かない | 捕まえた件数 | 止める（「未確認」と記録する） | 結果のファイルと終了コード 1 | 直して打ち直す |
+| `main` | 比較に使えない組 | 比べる 2 つの判定でモデル ID か Claude Code のバージョンか材料のハッシュが違う | 結果の集計 | 止める（その組を比較に使わない） | 標準エラーと終了コード 1 | 揃えて打ち直す |
+| `gate_once` | 捕まえたコメントが 0 件 | 差し替えが働かない | 捕まえた件数 | 止める（「未確認」と記録する） | 結果のファイルと終了コード 1 | 直して打ち直す |
+| `gate_once` | 拒んだ要求が 1 件以上 | ゲートが想定の外の書き込みを試みた・許可の一覧が足りない | 拒んだ件数 | 止める（「未確認」と記録する）。拒んだ要求は GitHub へ届いていない | 結果のファイルと終了コード 1 | 一覧を見直し、`guard-check` から打ち直す |
+| `guard_check` | 書き込みが作り物まで届いた・コメントを捕まえない | 差し替えの抜け | 作り物が記録した要求 | 止める | 結果のファイルと終了コード 1 | 直して打ち直す |
+| `main` | 材料が前の回と違う | 保存した材料のハッシュか、ベースと head の SHA が前の回と違う | 結果の集計 | その件を前の回と比べない | 標準エラーと結果のファイルの件ごとの行 | 同じ材料のファイルで打ち直す |
 | `prompt_at` | 指定のコミットを読めない | コミットが無い | `git show` の失敗 | 止める | 標準エラーと終了コード 2 | 取得してから打ち直す |
 
 ### 内部のデータと定数
@@ -555,7 +584,8 @@ worker は検査の結果のファイルを受け取らず、同じコマンド�
 | 前の指示文のコミット | 引数（`--prompt-commit`） | 実験版へ渡す。値は設計文書の決定 4 | `c93e690ed` |
 | 比べる PR の番号と、対照で挙がるべき番号 | 引数（`--prs`・`--expect`） | 実験版へ渡す。値は設計文書の決定 4・6 | — |
 | モデル | 引数（`--model`） | 実験版へ渡す | — |
-| 作り物の材料の対 | ファイル | `experimental/ndf/mvv_replay_cases/` | 要求と設計の 2 組 |
+| 作り物の材料の対 | ファイル | `experimental/ndf/mvv_replay_cases/` | 対は 1 つ。「扱いあり」と「扱いなし」の 2 つの材料で、それぞれ要求仕様と設計書の 2 ファイル（設計書は同じ） |
+| `Material` | 型（NamedTuple: `base_sha: str`・`head_sha: str`・`text: str`・`sha256: str`・`tabled: tuple[str, ...]`） | `mvv_replay.py` | — |
 
 ### 既存の部品の再利用
 
@@ -565,12 +595,12 @@ worker は検査の結果のファイルを受け取らず、同じコマンド�
 | `judge_once` | `llm.ask` の差し替え口 `call`（型 `Caller`） | `grep -n "def ask" -A8 plugins/ndf/src/ndf/adapters/llm.py` | 使う。`--model` を足す `call` を渡す |
 | `gate_once` | `mvv_gate.gate` の引数 `hub`（`OpenHub`）・`ask` と、環境変数 `NDF_MVV_STATE_DIR`（表 locations の `mvv-state`） | `grep -n "def gate(" -A8 plugins/ndf/src/ndf/domains/records/mvv_gate.py`・`grep -n "mvv-state" plugins/ndf/contracts/domains/locations.json` | 使う。書き込みの捕まえと記録の隔離を、ゲートを変えずに引数と環境変数で行う |
 | `prompt_at` | `mvv_material_decide.SYSTEM` | `grep -n "^SYSTEM" plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` | 使う。前の指示文はコミットの本文から同じ名前で取る |
-| `main`・`CapturingHub` | 10 系の `mvv-gate-replay.py` | 設計文書の「手元で数えた事実」 | 選び方だけを使う。11 系の部品の名前と違うので、コードは写さない |
+| `main` | 10 系の `mvv-gate-replay.py` | 設計文書の「手元で数えた事実」 | 選び方だけを使う。11 系の部品の名前と違うので、コードは写さない |
+| `GuardedApi`・`guarded_hub` | `GitHub.rest`・`GitHub.graphql`・`GitHub.artifact_zip` が送る口（`self.api.request`・`self.api.graphql._request`）、`Publisher.comment` の `hub.rest("POST", …)` | `grep -n "self\.api\." plugins/ndf/src/ndf/adapters/github.py`・`grep -n "hub.rest" plugins/ndf/src/ndf/adapters/publish.py` | GitHub への要求はすべてこの 2 つの口を通るので、メソッドごとではなく口で照らす。`GitHub` は凍結した dataclass なので `dataclasses.replace` で `api` だけを替える |
 
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
 | --- | --- |
-| `GitHub` の書き込みのメソッドの一覧 | `CapturingHub` が捕まえる書き込みのメソッドの名前（コメントの投稿・ラベルなど）は、`mvv_gate.gate` が呼ぶ経路（`publish.Publisher` から先）を実装の着手のときに読んで決める。捕まえた件数が 0 なら `gate_once` が止まるので、取りこぼしは手元の 1 回目で分かる |
 | 導入した版の依存ライブラリ | `--plugin-root` の `src` を読み込むとき、依存ライブラリ（markdown-it-py など）はこのリポジトリの venv のものを使う。導入した版の `uv.lock` と版が違う場合に動くかは、順 3 を打つまで分からない |
 </content>

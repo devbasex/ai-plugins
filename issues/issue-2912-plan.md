@@ -13,10 +13,10 @@
 | ファイル | 変える中身 |
 | --- | --- |
 | `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` | `patch_material` に行数の引数 `limit`。指示文 `SYSTEM` に起票者の推定の扱いの箇条 |
-| `experimental/ndf/mvv_replay.py`（新設） | サブコマンド `judge`・`gate`（`main`・`prompt_at`・`material_of`・`judge_once`・`gate_once`・`CapturingHub`） |
-| `experimental/ndf/mvv_replay_cases/`（新設） | 推定の扱いの有無だけが違う作り物の要求と設計の 2 組 |
+| `experimental/ndf/mvv_replay.py`（新設） | サブコマンド `material`・`judge`・`gate`・`guard-check`（`main`・`prompt_at`・`material_of`・`judge_once`・`gate_once`・`GuardedApi`・`guarded_hub`・`guard_check`） |
+| `experimental/ndf/mvv_replay_cases/`（新設） | 推定の扱いの有無だけが違う作り物の材料の対（要求仕様と設計書を 1 組にした材料を 2 つ） |
 | `plugins/ndf/src/ndf/adapters/markdown.py` | `tables`（`Table`・`TableRow`） |
-| `plugins/ndf/src/ndf/domains/records/design_check_decide.py`（新設） | `decision_rows`・`redline_rows`・`findings`・`anchors_lost`・`added_lines`・`delegates`・`named`・`numbers_in`・`blank` と定数 |
+| `plugins/ndf/src/ndf/domains/records/design_check_decide.py`（新設） | `decision_rows`・`redline_rows`・`findings`・`anchors_lost`・`added_lines`・`heading_touched`・`delegates`・`named`・`numbers_in`・`blank` と定数 |
 | `plugins/ndf/src/ndf/core/start_point.py`（新設） | `resolve`・`StartPointError`（`docrebuild.drive.start_point` から移す） |
 | `plugins/ndf/src/ndf/domains/docrebuild/drive.py` | `start_and_changes` が `start_point.resolve` を呼ぶ。`start_point`・`_resolve` を消す |
 | `plugins/ndf/src/ndf/domains/records/design_check.py`（新設） | `from_files`・`from_base`・`check`・`Target`・`DesignCheckError` |
@@ -56,9 +56,9 @@
 ### Task 3: 判定の比較の実験版と、対照の当たる操作を決める
 
 - **対象ファイル:** `experimental/ndf/mvv_replay.py`・`experimental/ndf/mvv_replay_cases/`・`issues/issue-2912-design.md`（決定 6 の対照の表の「当たる操作」の欄）
-- **変更内容:** サブコマンド `judge` を作る（`prompt_at`・`material_of`・`judge_once`）。推定の対の 2 組を置く。10 系の判定の記録の boundary から、対照 20 件の番号ごとに当たる操作を決めて設計書の表へ書く。2524 は元の差分から操作と番号を決め、当たらなければ根拠を #3017 に記録して対照から外す
+- **変更内容:** サブコマンド `material` と `judge` を作る（`prompt_at`・`material_of`・`judge_once`）。材料は PR ごとに 1 回組んで保存し、比べる判定には同じファイルを渡す。推定の対を 1 つ（扱いありと扱いなしの 2 つの材料）置く。10 系の判定の記録の boundary から、対照 20 件の番号ごとに当たる操作を決めて設計書の表へ書く。2524 は元の差分から操作と番号を決め、当たらなければ根拠を #3017 に記録して対照から外す
 - **満たす受け入れ条件:** 5・6・7 の確かめの手段
-- **進め方:** 実験版は単体テストを持たない（設計書の決定 5）。手元で 1 件を判定して、結果のファイルにモデル ID・Claude Code のバージョン・指示文のコミット・材料のハッシュが載ることを確かめる
+- **進め方:** 実験版は単体テストを持たない（設計書の決定 5）。手元で 1 件を判定して、結果のファイルにモデル ID・Claude Code のバージョン・指示文のコミット・材料のベースと head の SHA・材料のハッシュが載ることを確かめる
 
 ### Task 4: 指示文を変え、対照で守りを確かめてから入れる（決定 6 の順 1・2）
 
@@ -77,7 +77,7 @@
 ### Task 6: 番号の無い委ね方と表の行を判定する
 
 - **対象ファイル:** `plugins/ndf/src/ndf/domains/records/design_check_decide.py`・`plugins/ndf/tests/domains/records/test_design_check.py`
-- **変更内容:** 詳細設計書の「設計の検査の判定ロジック」の 9 関数と定数。委ねる語の式は設計書の「入出力のコントラクト」の式をそのまま置く
+- **変更内容:** 詳細設計書の「設計の検査の判定ロジック」の 10 関数と定数。委ねる語の式は設計書の「入出力のコントラクト」の式をそのまま置く
 - **満たす受け入れ条件:** 4
 - **進め方:** 設計書の「行の例」の 2 つの表と、テスト設計の受け入れ条件 4 の行を、先に失敗するテストにする → 最小実装 → 整理
 
@@ -93,7 +93,7 @@
 - **対象ファイル:** `plugins/ndf/src/ndf/domains/records/design_check.py`・`cli.py`・`__init__.py`・`plugins/ndf/tests/domains/records/test_design_check.py`
 - **変更内容:** `from_files`・`from_base`・`check` と CLI の登録。`--result` に同じ結果を書く
 - **満たす受け入れ条件:** 4
-- **進め方:** 一時リポジトリで、未コミット・未追跡・削除・名前の変更・マージ先だけの変更・表の行を消したファイルの場合を先に失敗するテストにする → 最小実装 → 整理。書き終えたら、このリポジトリの設計書とこの計画で `ndf records design check --base main` を打ち、結果を確かめる
+- **進め方:** Git のアダプターを差し替えた偽物で、未コミット・未追跡・削除・名前の変更・表の行を消したファイル・見出しを足したファイル・読めない hunk の見出しの場合を先に失敗するテストにする → 最小実装 → 整理。単体テストでは git を起動しない（詳細設計書の「`records` のサブコマンド」の単体テストの観点）。書き終えたら、実際の git との接続を手元で確かめる。一時リポジトリで、未コミット・未追跡・マージ先だけの変更・1 行の置き換え・外部 diff と textconv を設定した場合を作って打ち、続けてこのリポジトリの設計書とこの計画で `ndf records design check --base main` を打って、結果を確かめる
 
 ### Task 9: 設計文書を push するプランに検査を置く
 
@@ -119,9 +119,20 @@
 ### Task 12: 導入した版のゲートを打つモードを作る
 
 - **対象ファイル:** `experimental/ndf/mvv_replay.py`
-- **変更内容:** サブコマンド `gate`（`gate_once`・`CapturingHub`）と、引数 `--plugin-root`。捕まえる書き込みのメソッドは、`mvv_gate.gate` から `publish.Publisher` の先を読んで決める（詳細設計書の「未確認のまま残ること」）
+- **変更内容:** サブコマンド `gate`・`guard-check`（`gate_once`・`GuardedApi`・`guarded_hub`・`guard_check`）と、引数 `--plugin-root`。GitHub へ送る口を差し替え、読み取りだけを送り、確認用 PR へのコメントの投稿だけを捕まえ、ほかの要求は送る前に拒む（詳細設計書の「判定の比較（実験版）」）
 - **満たす受け入れ条件:** 5・6（リリース後テストの手段）
-- **進め方:** このリポジトリの作業ツリーを `--plugin-root` にして、確認用の開いた PR 1 件で 2 回打ち、捕まえたコメントが 1 件ずつで証跡の行が無いことを確かめる。確認が終わったら PR を閉じてブランチを消す
+- **進め方:** 捕まえる経路だけを試す。表の確かめ（Task 10）に依らない
+  1. `guard-check` を打ち、GitHub へ何も送らずに、書き込みの経路がすべて捕まるか拒まれることを確かめる
+  2. このリポジトリの作業ツリーを `--plugin-root` にして、確認用の開いた PR 1 件で `--answer stand-in` を 1 回打つ。設計書には「人へ残す判断」の表を置かない。省く結果になるので、捕まえたコメントは 1 件で、その本文に証跡の行があり、拒んだ要求は 0 件で、確認用 PR に新しいコメントが付いていないことを確かめる。証跡の行がある本文が GitHub へ届かないことが、この手順で確かめたい点である
+  3. 確認用 PR とブランチは Task 13 で使うので残す
+
+### Task 13: 表による停止を、導入する形のゲートで確かめる
+
+- **対象ファイル:** 無し（確認だけ）
+- **変更内容:** 無し。Task 10 の表の確かめと Task 12 のゲートのモードを合わせて打つ
+- **満たす受け入れ条件:** 5c・6（リリース後テストの手段が働くことの確認）
+- **依存:** Task 10 と Task 12。Task 10 を含む作業ツリーを `--plugin-root` に渡す。Task 10 の前に打つと、表の確かめを持たない版で打つことになり、表による停止を確かめられない
+- **進め方:** Task 12 の確認用 PR の設計書に「人へ残す判断」の表（番号 `C7` の行）を足して push し、`--answer stand-in` で打つ。`skip` が偽で、`why` に表の理由と設計書のパスと `C7` があり、捕まえたコメントが 1 件で証跡の行が無く、拒んだ要求が 0 件であることを確かめる。確認が終わったら PR を閉じてブランチを消す
 
 決定 6 の順 3・4 は、リリースの後にリリース後テストの担当が Task 3・12 の実験版で打つ。実装のタスクには含めない。
 
@@ -135,15 +146,15 @@
 | 設計の検査の判定 | Task 5・6 | 2912:4 | 約 550（判定 約 200、アダプター 約 40、テスト 約 310） | （実装の後に書き足す） |
 | 検査のコマンドと起点の解決 | Task 7・8 | 2912:4・2912:8 | 約 400（集め方と CLI 約 150、起点の移動 約 80、テスト 約 170） | （実装の後に書き足す） |
 | プランと手順書 | Task 9・11 | 2912:1〜4 | 約 350（テンプレートと工程と作業の定義 約 120、手順書 約 30、テスト 約 200） | （実装の後に書き足す） |
-| MVV 判定の表の確かめ | Task 10 | 2912:5c・2912:6 | 約 250（ゲート 約 50、テスト 約 200） | （実装の後に書き足す） |
+| MVV 判定の表の確かめ | Task 10・13 | 2912:5c・2912:6 | 約 250（ゲート 約 50、テスト 約 200。Task 13 は確認だけで差分を持たない） | （実装の後に書き足す） |
 
-依存の向き: 「設計の検査の判定」の `redline_rows` を「MVV 判定の表の確かめ」が、「検査のコマンドと起点の解決」のコマンドを「プランと手順書」が使う。流す順は表の上から下で、「判定の比較と指示文」は残りの単位と依存しない。Task 4 が合格しないときも、Task 4 の `SYSTEM` の変更だけを外して単位を出す。
+依存の向き: 「設計の検査の判定」の `redline_rows` を「MVV 判定の表の確かめ」が、「検査のコマンドと起点の解決」のコマンドを「プランと手順書」が使う。「MVV 判定の表の確かめ」の Task 13 は、「判定の比較と指示文」の Task 12 のゲートのモードと、同じ単位の Task 10 を使う。流す順は表の上から下で、「判定の比較と指示文」はほかの単位に依存しない。Task 4 が合格しないときも、Task 4 の `SYSTEM` の変更だけを外して単位を出す。
 
 ## リファクタリングの時機
 
 | 時機 | 対象 | 理由 |
 | --- | --- | --- |
-| 実装の前（プレリファクタリング） | しない | 触るファイルの行数は `docrebuild/drive.py` 566・`records/cli.py` 549・`records/mvv_gate.py` 528・`records/mvv_material_decide.py` 283・`adapters/markdown.py` 124 で、どれも 600 行以下。別のタスクと同じファイルを触るタスクは 12 件中 9 件だが、1 つのファイルに集まるタスクは最大 2 件である（Task 1 と後のタスクのテストのファイル、`mvv_material_decide.py` の Task 2・4、`mvv_replay.py` の Task 3・12、`test_design_check.py` の Task 6・8）。判定と集め方の本体は新しいファイルに入る。覆うテストは `test_mvv_gate.py` 48・`test_docrebuild_run.py` 33・`test_flows.py` 31・`test_mvv_material.py` 8・`test_markdown.py` 5。起点の解決の移動は、移動先が新しいファイルなので Task 7 の中で行う |
+| 実装の前（プレリファクタリング） | しない | 触るファイルの行数は `docrebuild/drive.py` 566・`records/cli.py` 549・`records/mvv_gate.py` 528・`records/mvv_material_decide.py` 283・`adapters/markdown.py` 124 で、どれも 600 行以下。別のタスクと同じファイルを触るタスクは 13 件中 9 件（Task 13 はファイルを触らない）だが、1 つのファイルに集まるタスクは最大 2 件である（Task 1 と後のタスクのテストのファイル、`mvv_material_decide.py` の Task 2・4、`mvv_replay.py` の Task 3・12、`test_design_check.py` の Task 6・8）。判定と集め方の本体は新しいファイルに入る。覆うテストは `test_mvv_gate.py` 48・`test_docrebuild_run.py` 33・`test_flows.py` 31・`test_mvv_material.py` 8・`test_markdown.py` 5。起点の解決の移動は、移動先が新しいファイルなので Task 7 の中で行う |
 | 実装の中 | 各タスクで行う | `tdd-cycle` のリファクタリングのステップ |
 | スプリントの終わり（cross-refactoring） | `design_check_decide` と `mvv_material_decide` の番号の正規表現（文中の番号と、MVV の表の行頭の番号）、3 つのテンプレートで同じ形の検査・繰り返しの数え・直しのステップ | 単位をまたいで同じ形の処理が 2 か所以上にできる。共通のステップへ寄せるか（`templates/parts/steps.json`）は、3 つのテンプレートがそろった後に比べる |
 
