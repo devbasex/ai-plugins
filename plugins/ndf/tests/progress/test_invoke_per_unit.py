@@ -39,8 +39,11 @@ def _git(repo: Path, *args: str) -> None:
 
 
 def _sprint(tmp_path: Path, plan_text: str | None) -> Path:
-    """ブランチ sprint/s1 に居る作業場所。`plan_text` があれば、課題 3・4 の実装計画としてコミットする。"""
+    """ブランチ sprint/s1 に居る作業場所と、そのリモート（origin。裸のリポジトリ）。`plan_text` があれば、課題 3・4 の
+    実装計画としてコミットする。工程「実装」は単位を調べるために開始時にリモートからブランチを取得する（#4369）。"""
     repo = sprint_fixture.sprint_repo(tmp_path, PROJECT)
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "start")
+    sprint_fixture.with_remote(repo)
     if plan_text is not None:
         (repo / "issues").mkdir()
         (repo / "issues" / "issue-3-4-plan.md").write_text(plan_text, encoding="utf-8")

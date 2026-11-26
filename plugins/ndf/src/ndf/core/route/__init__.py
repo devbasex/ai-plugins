@@ -664,12 +664,17 @@ def review_launch(template_name: str, branch: str, base: str) -> list[str]:
 
     実装のテンプレートは `pr` のステップが保存した番号（`REVIEW_WITH_SAVED_PR`）、ほかはブランチの PR（`REVIEW_WITH_PR`）。
     """
-    purpose = "design" if template_name == "design" else "code"
-    entry = identity.FIXED_WORDS["entrypoint"]
-    review = [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
+    review = review_command(template_name, base)
     if template_name == "impl":
         return ["sh", "-c", REVIEW_WITH_SAVED_PR, PR_NUMBER_FILE, *review]
     return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
+
+
+def review_command(template_name: str, base: str) -> list[str]:
+    """設定が無いときのレビューの起動そのもの（`--pr` を持たない `ndf cross-review run`）。設計のテンプレートは purpose design。"""
+    purpose = "design" if template_name == "design" else "code"
+    entry = identity.FIXED_WORDS["entrypoint"]
+    return [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
 
 
 def unit_review_launch(repo: str, command: Sequence[str]) -> list[str]:

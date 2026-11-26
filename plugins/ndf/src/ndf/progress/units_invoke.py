@@ -1,35 +1,43 @@
 """工程「実装」を実装計画のレビューの単位ごとに流す処理（#4369 の詳細設計の「単位を流す処理」）。
 
-ここにあるのは、開始前の確かめ（`prepare`）と、打ち直しで単位の回をどう続けるかの判定（`round_state`・`resume_of`）である。
+ここにあるのは、開始前の確かめ（`prepare`）、打ち直しで単位の回をどう続けるかの判定（`round_state`・`resume_of`）と、
+単位を順に流す処理（`run_stage`。作業場所の用意・`impl`・マージ・スプリントの PR）である。
 開始前の確かめは、作業場所が今いるブランチをリモートから取得し、コミットされた実装計画に単位の見出しがあるかで経路を決める。
 単位の経路なら、手元をリモートに揃え、表をすべて読み、ブランチをリモートへ送ってから並びを `units.json` に書く。
 読み方と順序は設計書の「開始前の確かめ」、打ち直しの表は詳細設計書の「`resume_of` の判定表」にある。
 
-`ndf.progress.invoke` を import しない（`invoke` がこのモジュールを呼ぶので、型は `plan_runs` が持つ）。
+`ndf.progress.invoke` を import しない（`invoke` がこのモジュールを呼ぶので、型は `plan_runs` が持つ）。プランを流すのと
+コマンドを打つのは `invoke` が渡す `Ports` を通す。`domains/` を import できないので、作業場所の用意は `ndf worktree create`、
+マージは `ndf ci merge` を子プロセスで打つ。
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
+import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-from ndf import contracts
-from ndf.adapters import github
+from ndf import contracts, identity
+from ndf.adapters import github, github_pulls
 from ndf.adapters.git import HEADS, Git, mask_urls
-from ndf.contracts import facts, result
-from ndf.core import branch_strategy, json_pointer
+from ndf.cli import ndf_command
+from ndf.contracts import facts, result, worker_paths
+from ndf.core import branch_strategy, json_pointer, route
 from ndf.core.issue_docs import plan_issues
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import inputs_decide
 from ndf.core.plan import runner as plan_runner
-from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, has_units, lineup
-from ndf.progress import plan_runs, refactor_values
+from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, acceptance_args, has_units, lineup
+from ndf.progress import issue_values, plan_runs, refactor_values
 from ndf.progress.command import PROJECT_FILE, ndf_settings_in
-from ndf.progress.issue_values import UNITS_FILE
-from ndf.progress.plan_runs import StageRun, UnitsStopped
+from ndf.progress.issue_values import UNITS_DIR, UNITS_FILE
+from ndf.progress.plan_runs import StageResult, StageRun, UnitsStopped
+from ndf.testing import scoped
 
 # 単位の回の保存先のファイル（`reviewed-head` は `impl` のプラン、`stopped-head` と `merge.json` は単位を流す処理が書く）
 REVIEWED_HEAD_FILE = "reviewed-head"
@@ -43,6 +51,17 @@ UNIT_CHECKS = "unit_required_checks"
 LS_REMOTE_ABSENT = 2
 # 単位のブランチ名に付ける、単位の名前の sha256 の先頭の字数
 UNIT_HASH_CHARS = 8
+# 単位の回の保存先の、PR の番号（`impl` の `pr` のステップが書く）と単位の範囲の指示（`unit_run` が書く）のファイル
+PR_NUMBER_FILE = Path(route.PR_NUMBER_FILE).name
+UNIT_FILE = "unit.md"
+# 単位の PR で待つチェックが空のとき、`impl` から外すステップ（`ci` と、その失敗からしか行かないもの。#4369 の決定 13）
+CI_STEPS = ("ci", "repeat-check", "ci-fix", "ci-local", "push-fixed")
+# スプリントの PR を開くプランの保存先（工程の保存先の下）と、そのプランから外すステップ（単位の変更はマージで送り済み）
+SPRINT_PR_DIR = "sprint-pr"
+SPRINT_PR_DROP = ("push", "fix-push")
+# 単位のプランの子へ渡す、`gh` の対象のリポジトリと単位の範囲の指示のファイル（`contracts/domains/env.json`）
+GH_REPO_ENV = identity.env_name("gh-repo")
+UNIT_FILE_ENV = identity.env_name("unit-file")
 
 
 class Lineup(NamedTuple):
@@ -74,6 +93,31 @@ class Resume(NamedTuple):
     action: str
     new_round: bool
     start: Optional[str]
+
+
+class Ports(NamedTuple):
+    """単位を流す処理が外へ出す呼び出し（`invoke` が渡し、テストが差し替える）。
+
+    `call_plan` は呼び出しを保存先でプランとして流し、`command` は argv を作業ディレクトリと環境で打つ。
+    """
+
+    call_plan: Callable[[StageRun, Path], StageResult]
+    command: Callable[[list[str], Path, dict[str, str]], "subprocess.CompletedProcess[str]"]
+
+
+class Context(NamedTuple):
+    """単位を流す間に変わらない値。`sprint` はスプリントの作業場所、`branch` はスプリントブランチ、`repo` は選んだリモートの
+    `<所有者>/<リポジトリ>`、`review` は単位の PR のレビューの起動（`--pr` を持たない）、`local_tests` は手元のテストを打つか。"""
+
+    run: StageRun
+    work_dir: Path
+    sprint: Path
+    branch: str
+    remote: str
+    repo: str
+    unit_ci: dict[str, Any]
+    review: tuple[str, ...]
+    local_tests: bool
 
 
 # --- 開始前の確かめ -----------------------------------------------------------------------------
@@ -342,3 +386,324 @@ def resume_of(state: RoundState, head: str, local_tests: bool) -> Resume:
     if step is not None and step not in before_test and moved:
         return Resume("run", True, retest)
     return Resume("run", False, None)
+
+
+# --- 単位を流す -----------------------------------------------------------------------------------
+
+
+def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optional[StageResult]:
+    """単位を表の順に流し、すべてマージしたらスプリントの PR を開く。これまでの経路なら None。
+
+    並びは `units.json` から読み、無ければ `prepare` で作る。マージ済みの単位は開始時に 1 回読んだ一覧で飛ばす（`already_merged`）。
+    単位が止まれば後の単位を始めず、止まった単位の名前・課題・PR の番号・理由を結果に持たせる（受け入れ条件 5）。
+    """
+    held = plan_files.read_json(work_dir / UNITS_FILE)
+    found = _held_lineup(held) if held is not None else prepare(run, work_dir, cwd)
+    if found is None:
+        return None
+    ctx = _unit_context(run, work_dir, cwd, found)
+    branches = {u.name: unit_branch(ctx.branch, u) for u in found.units}
+    merged = github_pulls.merged_pulls(github.GitHub(ctx.repo, github.client()), branches.values(), ctx.branch)
+    items: list[dict[str, Any]] = []
+    for unit in found.units:
+        branch = branches[unit.name]
+        if branch in merged:
+            items.append(_unit_item(unit, merged[branch], "already_merged"))
+            continue
+        try:
+            items.append(_one_unit(ctx, unit, branch, ports))
+        except UnitsStopped as exc:
+            return _unit_stopped(ctx, items, unit, branch, exc)
+    return _after_units(ctx, items, ports)
+
+
+def _held_lineup(held: Mapping[str, Any]) -> Optional[Lineup]:
+    """`prepare` が書いた並び。これまでの経路なら None。"""
+    if held["route"] != "units":
+        return None
+    units = tuple(
+        Unit(**{**u, "tasks": tuple(u["tasks"]), "criteria": tuple((int(i), int(n)) for i, n in u["criteria"])}) for u in held["units"]
+    )
+    return Lineup(units, dict(held["unit_ci"]))
+
+
+def _unit_context(run: StageRun, work_dir: Path, cwd: Path, found: Lineup) -> Context:
+    g = Git(_work_location(run, cwd))
+    root = Path(g.run("rev-parse", "--show-toplevel").strip())
+    project = ndf_settings_in(root, PROJECT_FILE)
+    remote, branch = g.remote(), str(found.unit_ci["base"])
+    test = project["test"] if isinstance(project.get("test"), Mapping) else {}
+    review = _review_command(project, f"{remote}/{branch}")
+    return Context(run, work_dir, root, branch, remote, g.remote_repo(remote), found.unit_ci, review, not scoped.ci_only(test))
+
+
+def _review_command(project: Mapping[str, Any], base: str) -> tuple[str, ...]:
+    """単位の PR のレビューの起動。設定（`workflow.launch.review`）があればそれ、無ければ `--pr` を持たない既定の起動。"""
+    workflow = project["workflow"] if isinstance(project.get("workflow"), Mapping) else {}
+    launch = workflow["launch"] if isinstance(workflow.get("launch"), Mapping) else {}
+    held = launch["review"] if "review" in launch else None
+    if isinstance(held, list) and held and all(isinstance(a, str) and a for a in held):
+        return tuple(held)
+    return tuple(route.review_command("impl", base))
+
+
+def _unit_item(unit: Unit, pr: Optional[int], status: str) -> dict[str, Any]:
+    return {"kind": "unit", "name": unit.name, "issue": unit.issue, "pr": pr, "status": status}
+
+
+def _one_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> dict[str, Any]:
+    """単位 1 つを、作業場所の用意 → 打ち直しの判定 → スプリントブランチの HEAD のマージ → `impl` → マージの順に流す。
+
+    マージだけを打ち直す判定はスプリントブランチをマージする前の HEAD で行う（マージするとレビューした HEAD と合わなくなる）。
+    """
+    worktree = unit_worktree(ctx, branch, ports)
+    state = round_state(ctx.work_dir / UNITS_DIR / branch)
+    g = Git(worktree)
+    round_dir = state.round_dir
+    if resume_of(state, g.rev_parse("HEAD"), ctx.local_tests).action != "merge":
+        include_sprint(ctx, worktree)
+        resume = resume_of(state, g.rev_parse("HEAD"), ctx.local_tests)
+        round_dir = _next_round(state) if resume.new_round else state.round_dir
+        got = ports.call_plan(unit_run(ctx, unit, worktree, round_dir, resume.start), round_dir)
+        round_dir.mkdir(parents=True, exist_ok=True)
+        (round_dir / STOPPED_HEAD_FILE).write_text(g.rev_parse("HEAD") + "\n", encoding="utf-8")
+        if got.status != result.OK:
+            raise _unit_stop_of(got.report, "impl が止まった", _ci_note(ctx, got.report))
+    merge_unit(ctx, branch, worktree, round_dir, ports)
+    return _unit_item(unit, _pr_number(round_dir), "merged")
+
+
+def _next_round(state: RoundState) -> Path:
+    return state.round_dir.parent / str(int(state.round_dir.name) + 1)
+
+
+def _pr_number(round_dir: Path) -> Optional[int]:
+    held = _saved_head(round_dir / PR_NUMBER_FILE)
+    return int(held) if held is not None and held.isdigit() else None
+
+
+def _ci_note(ctx: Context, report: Mapping[str, Any]) -> str:
+    """CI のステップで止まった単位の理由に足す、待つチェックの名前を読んだ設定のキー。"""
+    if _stopped_step(report) != "ci":
+        return ""
+    return f"（待つチェック {', '.join(ctx.unit_ci['required'])} は {ctx.unit_ci['key']} の設定）"
+
+
+def _unit_stop_of(report: Mapping[str, Any], what: str, note: str = "") -> UnitsStopped:
+    """作業の止まった結果 JSON を、同じ停止理由の種類と `retry_after` のまま単位の停止にする。"""
+    cause = report["cause"] if isinstance(report.get("cause"), Mapping) else {}
+    kind = str(cause["kind"]) if "kind" in cause else "unknown"
+    detail = cause["detail"] if isinstance(cause.get("detail"), str) else str(report["summary"])
+    wait = cause.get("retry_after")
+    return UnitsStopped(kind, f"{what}: {detail}{note}", retry_after=float(wait) if isinstance(wait, (int, float)) else None)
+
+
+def _unit_stopped(ctx: Context, items: list[dict[str, Any]], unit: Unit, branch: str, exc: UnitsStopped) -> StageResult:
+    """単位で止まった結果。工程のステートマシンは `cause` だけを残すので、単位の名前と理由は説明の文に書く。"""
+    pr = _pr_number(round_state(ctx.work_dir / UNITS_DIR / branch).round_dir)
+    where = f"単位 {unit.name}（課題 #{unit.issue}{f'、PR #{pr}' if pr is not None else ''}）"
+    row = {**_unit_item(unit, pr, "stopped"), "reason": exc.detail}
+    report = result.stopped(
+        plan_runner.TOOL,
+        exc.kind,
+        f"{where}で止まった: {exc.detail}",
+        retry_after=exc.retry_after,
+        items=[*items, row],
+        metrics={"unit_ci": ctx.unit_ci},
+    )
+    return StageResult(report, {})
+
+
+def _after_units(ctx: Context, items: list[dict[str, Any]], ports: Ports) -> StageResult:
+    """すべての単位がマージ済みになった後に、スプリントの PR を開いた結果。開けなければ止まった単位を持たない `stopped`。"""
+    metrics = {"unit_ci": ctx.unit_ci}
+    try:
+        opened = sprint_pr(ctx, ports)
+    except UnitsStopped as exc:
+        return StageResult(result.stopped(plan_runner.TOOL, exc.kind, exc.detail, items=items, metrics=metrics), {})
+    if opened.status != result.OK:
+        stop = _unit_stop_of(opened.report, "スプリントの PR を開けない")
+        gaps = opened.report["gaps"] if isinstance(opened.report.get("gaps"), list) else None
+        report = result.stopped(
+            plan_runner.TOOL, stop.kind, stop.detail, retry_after=stop.retry_after, items=items, metrics=metrics, gaps=gaps
+        )
+        return StageResult(report, {})
+    summary = f"単位 {len(items)} 個をスプリントブランチ {ctx.branch} へマージし、スプリントの PR を開いた"
+    return StageResult(result.result(plan_runner.TOOL, result.OK, summary, items=items, metrics=metrics), {})
+
+
+def _fetch_sprint(g: Git, ctx: Context) -> str:
+    """スプリントブランチを取得し、リモートの HEAD の SHA を返す。取得できなければ止める。"""
+    done = g.fetch_branch(ctx.remote, ctx.branch)
+    if done.returncode != 0:
+        raise UnitsStopped("precondition", f"{ctx.remote} の {ctx.branch} を取得できない: {mask_urls(done.stderr.strip())}")
+    return g.rev_parse(f"refs/remotes/{ctx.remote}/{ctx.branch}")
+
+
+def unit_worktree(ctx: Context, branch: str, ports: Ports) -> Path:
+    """単位の作業場所。スプリントブランチと単位のブランチを取得し直し、設計書の「単位のブランチと保存先」の表で用意する。
+
+    既にある作業場所に未コミットの変更か進行中のマージがあれば、スプリントブランチのマージも `impl` もせずに止める（利用者の変更に触れない）。
+    """
+    g = Git(ctx.sprint)
+    tracking = f"refs/remotes/{ctx.remote}/{ctx.branch}"
+    refspecs = (f"+{HEADS}{ctx.branch}:{tracking}", f"+{HEADS}{ctx.branch}-u*:{tracking}-u*")
+    fetched = g.attempt("fetch", "-q", "--no-tags", "--prune", "--", ctx.remote, *refspecs)
+    if fetched.returncode != 0:
+        raise UnitsStopped(
+            "precondition", f"{ctx.remote} の {ctx.branch} と単位のブランチを取得できない: {mask_urls(fetched.stderr.strip())}"
+        )
+    local, remote = g.commit_or_none(f"{HEADS}{branch}"), g.commit_or_none(f"refs/remotes/{ctx.remote}/{branch}")
+    behind = local is not None and remote is not None and local != remote and not g.is_ancestor(remote, local)
+    if behind and not g.is_ancestor(str(local), str(remote)):
+        raise UnitsStopped(
+            "precondition", f"手元の {branch}（{local}）と {ctx.remote} の {branch}（{remote}）が分かれている。揃えてから打ち直す"
+        )
+    path = next((e.path for e in g.worktrees() if e.branch == branch and not e.prunable), None)
+    if path is None:
+        path = _created(ctx, branch, ports)
+    else:
+        _check_clean(path)
+    if behind:
+        moved = Git(path).merge_ff(str(remote))
+        if moved.returncode != 0:
+            raise UnitsStopped("precondition", f"{branch} を {ctx.remote} の HEAD へ進められない: {mask_urls(moved.stderr.strip())}")
+    return path
+
+
+def _created(ctx: Context, branch: str, ports: Ports) -> Path:
+    """`ndf worktree create <単位のブランチ> --from <スプリントブランチ>` で作った作業場所。"""
+    done = ports.command(ndf_command("worktree", "create", branch, "--from", ctx.branch), ctx.sprint, dict(os.environ))
+    report = result.last_line(done.stdout)
+    if report is None or report["status"] != result.OK:
+        reason = (
+            _unit_stop_of(report, "作業場所を作れない").detail
+            if report is not None
+            else f"作業場所を作れない（終了コード {done.returncode}）"
+        )
+        raise UnitsStopped("precondition", reason)
+    return Path(str(report["outputs"]["worktree"]))
+
+
+def _check_clean(path: Path) -> None:
+    """作業場所に未コミットの変更（追跡していないファイルを含む）か進行中のマージがあれば止める。"""
+    g = Git(path)
+    changed = g.status_paths()
+    merging = g.commit_or_none("MERGE_HEAD") is not None
+    if changed or merging:
+        what = f"未コミットの変更（{', '.join(changed[:5])}）" if changed else "進行中のマージ"
+        raise UnitsStopped("precondition", f"単位の作業場所 {path} に{what}がある。コミットするか取り消してから打ち直す")
+
+
+def include_sprint(ctx: Context, worktree: Path) -> None:
+    """単位の作業場所がスプリントブランチの HEAD（取得済み）を含まなければ `git merge --no-edit` でマージする（I3）。
+
+    衝突すれば、この関数が始めたマージだけを取り消して止める（呼ぶ前からあるマージは `unit_worktree` が先に止める）。
+    """
+    g = Git(worktree)
+    tip = g.rev_parse(f"refs/remotes/{ctx.remote}/{ctx.branch}")
+    if g.is_ancestor(tip, "HEAD"):
+        return
+    done = g.attempt("merge", "--no-edit", "-q", tip)
+    if done.returncode != 0:
+        g.attempt("merge", "--abort")
+        detail = f"{ctx.branch} の HEAD をマージすると衝突するので、そのマージを取り消した: {mask_urls(done.stderr.strip() or done.stdout.strip())}"
+        raise UnitsStopped("base_conflict", detail)
+
+
+def unit_run(ctx: Context, unit: Unit, worktree: Path, round_dir: Path, start: Optional[str]) -> StageRun:
+    """単位の範囲の指示を書き、単位の `impl` の呼び出し（上書きの値・テンプレート・環境変数）を組む。
+
+    代表の課題の題と本文は、選んだリポジトリから工程の保存先へ写す。作成者を信用しなければ止める。補った単位は指示を書かない。
+    """
+    issued = issue_values.issue_values(ctx.run.inputs, ctx.work_dir, worktree, number=unit.issue, repo=ctx.repo)
+    if issued is None:
+        raise UnitsStopped("precondition", f"課題 #{unit.issue} の作成者に書き込み権限が無く、題と本文を作業へ渡さない")
+    unit_file = "" if unit.supplemented else str(_write_unit_file(round_dir, unit))
+    overrides: dict[str, route.Value] = {
+        **issued,
+        "branch": unit_branch(ctx.branch, unit),
+        "base": ctx.branch,
+        "remote": ctx.remote,
+        "acceptance": acceptance_args(unit),
+        "review": route.unit_review_launch(ctx.repo, ctx.review),
+        "unit_file": unit_file,
+    }
+    drop = ["done-check"]
+    if ctx.unit_ci["required"]:
+        overrides["required"] = [str(c) for c in ctx.unit_ci["required"]]
+    else:
+        drop += CI_STEPS
+    env = {GH_REPO_ENV: ctx.repo, **({UNIT_FILE_ENV: unit_file} if unit_file else {})}
+    plain = ctx.run.plain()
+    template = route.unit_template(route.templates()["impl"], ctx.repo, drop)
+    inputs = {**plain.inputs, "worktree": str(worktree)}
+    return replace(plain, inputs=inputs, overrides=overrides, template=template, env_extra=env, start=start)
+
+
+def _write_unit_file(round_dir: Path, unit: Unit) -> Path:
+    """単位の範囲の指示（決定 8）を回の保存先へ書き直す。条件は番号だけを書き、課題の本文は写さない。"""
+    criteria = "、".join(f"課題 #{i} の {n}" for i, n in unit.criteria) if unit.criteria else "無し"
+    text = f"""# レビューの単位: {unit.name}
+
+- 実装計画: {unit.plan}
+- 含むタスク: {"、".join(f"Task {t}" for t in unit.tasks)}
+- 満たす受け入れ条件: {criteria}
+
+この PR は、上の単位のタスクだけを実装する。後の単位のタスクは実装しない。
+
+- 単位の外を変えてよいのは、今の単位の変更が原因でテスト・CI が失敗するか、レビューで指摘を受け、直すのに単位の外の変更が要る場合だけである。変更は最小にし、コミットメッセージに理由を書く
+- 今の単位の変更が原因でない失敗（変更の前からある失敗、原因を確かめられない失敗）は直さない。直さない失敗が残る場合と、後の単位のタスクを実装しないと通らない場合は、理由を返して止まる
+- 例外: 今の差分に含まれる秘密・認証認可・利用者のデータ・戻せない操作の問題は、担当の単位にかかわらず指摘し、直す。後の単位を理由に見送らない
+"""
+    round_dir.mkdir(parents=True, exist_ok=True)
+    with worker_paths.open_or_create(round_dir) as wd:
+        worker_paths.write_file(wd, UNIT_FILE, text, private=True)
+        return wd.path / UNIT_FILE
+
+
+def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports: Ports) -> dict[str, Any]:
+    """`ndf ci merge` で単位の PR をマージし、結果の種類を `merge.json` に残し、スプリントの作業場所を ff で進める。
+
+    PR の番号とレビューした HEAD は、同じ回の保存先から読む。どちらかが無ければマージを打たずに止める。
+    """
+    number, reviewed = _pr_number(round_dir), _saved_head(round_dir / REVIEWED_HEAD_FILE)
+    if number is None or not reviewed:
+        raise UnitsStopped("precondition", f"回の保存先 {round_dir} に PR の番号かレビューした HEAD の記録が無いので、マージしない")
+    argv = ndf_command(
+        "ci", "merge", "--repo", ctx.repo, "--pr", str(number), "--branch", branch, "--base", ctx.branch, f"--reviewed={reviewed}"
+    )
+    done = ports.command(argv, worktree, dict(os.environ))
+    report = result.last_line(done.stdout)
+    ok = report is not None and report["status"] == result.OK
+    kind = "merged" if ok else ("bad_report" if report is None else _unit_stop_of(report, "").kind)
+    plan_files.write_json(round_dir / MERGE_FILE, {"kind": kind})
+    if report is None:
+        raise UnitsStopped("bad_report", f"ndf ci merge が結果 JSON を返さない（終了コード {done.returncode}）")
+    if not ok:
+        raise _unit_stop_of(report, f"PR #{number} をマージできない")
+    g = Git(ctx.sprint)
+    moved = g.merge_ff(_fetch_sprint(g, ctx))
+    if moved.returncode != 0:
+        raise UnitsStopped("precondition", f"スプリントの作業場所を {ctx.branch} の HEAD へ進められない: {mask_urls(moved.stderr.strip())}")
+    return report
+
+
+def sprint_pr(ctx: Context, ports: Ports) -> StageResult:
+    """リモートのスプリントブランチの HEAD がスプリントの作業場所の HEAD と同じことを確かめ、テンプレート `pr` を push のステップなしで流す。
+
+    違えば、マージも push もせずに止める。違うコミットは単位のレビューを経ていないので、利用者が確かめてから打ち直す。
+    """
+    g = Git(ctx.sprint)
+    tip, head = _fetch_sprint(g, ctx), g.rev_parse("HEAD")
+    if tip != head:
+        detail = (
+            f"{ctx.remote} の {ctx.branch} の HEAD（{tip}）がスプリントの作業場所の HEAD（{head}）と違う。"
+            f"リモートにだけあるコミットは {head}..{tip}、手元にだけあるコミットは {tip}..{head} である。"
+            "その変更をスプリントの PR に含めてよいと確かめてから ndf progress next を打ち直す"
+        )
+        raise UnitsStopped("precondition", detail)
+    t = route.templates()["pr"]
+    template = replace(t, plan=route.without_steps(route.expanded(t), SPRINT_PR_DROP))
+    run = replace(ctx.run.plain(), name=t.name, template=template, overrides={"remote": ctx.remote}, env_extra={GH_REPO_ENV: ctx.repo})
+    return ports.call_plan(run, ctx.work_dir / SPRINT_PR_DIR)

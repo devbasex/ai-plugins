@@ -79,13 +79,15 @@ class StageResult:
 
 
 class UnitsStopped(Exception):
-    """工程を単位ごとに流せずに止める。`kind` は停止理由の語、`detail` は理由の文、`items` は結果 JSON の項目。"""
+    """工程を単位ごとに流せずに止める。`kind` は停止理由の語、`detail` は理由の文、`items` は結果 JSON の項目、
+    `retry_after` は打ち直してよくなるまでの秒（止まった作業が返したもの。無ければ None）。"""
 
-    def __init__(self, kind: str, detail: str, items: Sequence[Mapping[str, Any]] = ()) -> None:
+    def __init__(self, kind: str, detail: str, items: Sequence[Mapping[str, Any]] = (), *, retry_after: Optional[float] = None) -> None:
         super().__init__(detail)
         self.kind = kind
         self.detail = detail
         self.items = [dict(i) for i in items]
+        self.retry_after = retry_after
 
 
 # --- プランの実行の記録 ---------------------------------------------------------------------
