@@ -42,8 +42,8 @@
 
 ### Task 3: 手元の最終ゲートを作る
 
-- **対象ファイル:** `local_gate.py`、`final_gate.py`、`final_gate_decide.py`、`prompt_decide.py`、`core/converge/worktree.py`、`test-run.test.json`、`tests/domains/crossrefactor/test_local_gate.py`、`test_prompt_decide.py`
-- **変更内容:** 取り込み → テスト全体 → 指定の SHA の push か直し。検証用の作業場所、合格の記録、累計の上限。CI の記録に通ったチェックの名前を足す
+- **対象ファイル:** `local_gate.py`、`final_gate.py`、`final_gate_decide.py`、`prompt_decide.py`、`core/converge/worktree.py`、`workspace.py`、`test-run.test.json`、`tests/domains/crossrefactor/test_local_gate.py`、`test_prompt_decide.py`
+- **変更内容:** 取り込み → テスト全体 → 指定の SHA の push か直し。権限を絞ったログと、指示文へ渡す出力の伏せ字と上限（`workspace.py`）。検証用の作業場所、合格の記録、累計の上限。CI の記録に通ったチェックの名前を足す
 - **満たす受け入れ条件:** 3・4
 - **進め方:** 詳細設計の「処理の手順」の表の行ごとに、失敗するテスト → 通す実装。git は一時の bare リモートを使い、テストの起動と時計は差し替える
 

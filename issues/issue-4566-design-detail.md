@@ -38,8 +38,8 @@ docs/specifications/
 | `contracts/templates/cross-refactoring.json`・`contracts/templates/parts/steps.json` | 変更 | `follow` のステップを足す | — | — | — |
 | `src/ndf/domains/crossrefactor/cli.py` | 変更 | 引数と手段の組み合わせを確かめる | `testing.means` | `cli` | △`run_config`・`_drive_parsers`・`_release`・`main`、＋`_check_gate` |
 | `src/ndf/domains/crossrefactor/drive.py` | 変更 | 経路の分岐、排他、再利用、SHA の書き出し | `local_gate`・`workspace` | `drive` | △`RunConfig`・`drive`・`_reused`・`_init`・`_final`・`_summary`、＋`_write_pushed` |
-| `src/ndf/domains/crossrefactor/workspace.py` | 変更 | PR ごとの排他ロック | `ndf.slot_pool` | `workspace` | ＋`hold` |
-| `src/ndf/domains/crossrefactor/local_gate.py` | 新設 | 手元の最終ゲート | `final_gate`・`protected_decide`・`testing.slots`・`core.converge.worktree` | `local_gate` | ＋`settings_at`・`protection_at`・`run_local_gate`・`run_suites`・`verify_tree`・`sweep_verify_trees` |
+| `src/ndf/domains/crossrefactor/workspace.py` | 変更 | PR ごとの排他ロック、権限を絞ったログの書き込み | `ndf.slot_pool` | `workspace` | ＋`hold`・`write_private_log` |
+| `src/ndf/domains/crossrefactor/local_gate.py` | 新設 | 手元の最終ゲート | `final_gate`・`protected_decide`・`testing.slots`・`core.converge.worktree` | `local_gate` | ＋`settings_at`・`protection_at`・`run_local_gate`・`run_suites`・`fix_excerpt`・`verify_tree`・`sweep_verify_trees` |
 | `src/ndf/core/converge/worktree.py` | 変更 | 取得済みの先頭を受け取る同期を分け、`sync_worktree` もそれを呼ぶ | — | `worktree` | △`sync_worktree`、＋`sync_fetched`・`refuse_dirty` |
 | `src/ndf/testing/weight.py` | 変更 | リダイレクト先も含む語の並びを返す関数を足す | — | `weight` | ＋`all_words` |
 | `src/ndf/domains/crossrefactor/protected_decide.py` | 新設 | テストの定義のファイルの判定 | `testing.scoped`・`testing.weight` | `protected_decide` | ＋`protected_of`・`narrow`・`inside_work` |
@@ -176,11 +176,13 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | `protection_at` | `local_gate.py` | 新設 | `protection_at(g: git.Git, commit: str, project: Mapping[str, Any], repo_work: Path) -> Protected` | コマンドが `--work` の配下を絶対パスで指せば停止する（`inside_work`）。`git ls-tree -r -z` と、リンクの中身を読んで `protected_of` を呼ぶ |
 | `verify_tree` | `local_gate.py` | 新設 | `verify_tree(repo, root: Path, pr: int, commit: str, state, save)`（コンテキストマネージャ。`Path` を渡す） | 検証用の作業場所を作り、打ち終えたら取り除く |
 | `sweep_verify_trees` | `local_gate.py` | 新設 | `sweep_verify_trees(repo, state, save) -> list[str]` | 中断で残った作業場所を取り除き、残した理由を返す |
-| `run_suites` | `local_gate.py` | 新設 | `run_suites(tree: Path, means: Means, budget: TestBudget) -> tuple[Failed, ...]` | テストの suite の `command` を順に打ち、落ちた suite を終了コードとともに返す。プロセスを起動できなければ停止する |
+| `run_suites` | `local_gate.py` | 新設 | `run_suites(tree: Path, means: Means, budget: TestBudget, logs: Path, label: str) -> tuple[Failed, ...]` | テストの suite の `command` を順に打ち、落ちた suite を終了コードとともに返す。プロセスを起動できなければ停止する |
 | `run_local_gate` | `local_gate.py` | 新設 | `run_local_gate(g, cfg: LocalGateConfig, state, save, fix: FixLauncher) -> dict[str, Any]` | 取り込み → テスト → push か直し、を周の上限まで回し、最終ゲートの記録を返す |
 | `sync_fetched` | `core/converge/worktree.py` | 新設 | `sync_fetched(g: git.Git, tip: str, base: str = "") -> SyncResult` | 取得済みの先頭 `tip` へ合わせ、送っていないコミットを載せ直す。取得はしない。今の `sync_worktree` の取得より後の処理を移したもの |
 | `refuse_dirty` | 同上 | 新設 | `refuse_dirty(g: git.Git) -> None` | 追跡ファイルに commit していない変更があれば `SyncRefused` |
 | `sync_worktree` | 同上 | 変更 | 今のまま | `refuse_dirty` → `fetch_tips` → `sync_fetched`。呼び出し元（cross-review と CI の経路）の振る舞いは変えない |
+| `write_private_log` | `workspace.py` | 新設 | `write_private_log(logs: Path, name: str, text: str) -> Path` | 実行ユーザーだけが読めるログを書く |
+| `fix_excerpt` | `local_gate.py` | 新設 | `fix_excerpt(failed: Sequence[Failed]) -> list[str]` | 指示文に載せる行を、伏せ字にして上限で切って作る |
 | `hold` | `workspace.py` | 新設 | `hold(root: Path) -> FileLock \| None` | `rf<PR>/run.lock` を待たずに取る。取れなければ None |
 | `RunConfig` | `drive.py` | 変更 | `local_test: bool = False`・`pushed_out: Path \| None = None` を足す | `args()` は、手元の経路では `--required …`・`--ci-test …` の代わりに `--local-test` を並べる。`pushed_out` は並べない |
 | `drive` | `drive.py` | 変更 | 今のまま | 始めに `hold`、終わりに解く。手元の経路で対象範囲が空なら、次を行わずに最終ゲートへ進む: 担当の AI を起動できるかの確認、プロジェクトの判断基準の文書（MVV）の読み込み、改善の提案、項目ごとの実装と検証 |
@@ -195,6 +197,12 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 - `verify_tree`
   - 事後条件: 作る前にパスを状態の `verify_trees` へ保存し、取り除いた後に消す。名前は `rf<PR>/verify-<ランダム>` で、実行のたびに違う
   - 副作用: `git worktree add --detach`、`worktree.lock_review_worktree`、取り除きは `git worktree unlock` と `git worktree remove --force`
+- `write_private_log`
+  - 事後条件: `logs/` は 0700、ログファイルは 0600。umask に頼らない。ディレクトリは `mkdir(mode=0o700, exist_ok=True)` の後に `chmod` し、ファイルは `os.open(…, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0o600)` の後に `fchmod` して、権限を直してから内容を書く。前からあるディレクトリとファイルも同じに直す
+  - 異常: `logs/` がシンボリックリンクか、所有者が実行ユーザーでない、または権限を直せなければ、書かずに停止する
+  - `run_suites` は、suite の出力をこの関数でだけ書く。担当の出力のログも同じ `logs/` に入るので、`workspace` の作成と再開で `logs/` を 0700 にする
+- `fix_excerpt`
+  - 事後条件: 行の中身は、suite の名前、終了コードか時間切れの別、コマンド、出力の末尾である。コマンドと出力の全文に `ndf.adapters.run_log.redact` を掛け、行ごとに `ndf.domains.project.secret.redact` を掛け、`PRIVATE KEY` を含む `-----BEGIN` の行から `-----END` の行まで（無ければ末尾まで）を伏せてから切る。コマンドは先頭の 500 文字、出力は末尾の 100 行かつ末尾の 8,000 文字までにする。上限は定数 `COMMAND_CHARS`・`OUTPUT_LINES`・`OUTPUT_CHARS`（`local_gate.py`）に置く
 - `sweep_verify_trees`
   - 事前条件: 排他ロックを持っている
   - 事後条件: 状態の `verify_trees` に記録があるパスだけを対象にする。git worktree lock の理由の文字列が NDF の付けたものでなければ（利用者が掛けた lock なら）残す。git の作業場所として登録の無いディレクトリも残す
@@ -281,6 +289,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `run_local_gate` | 取り込んだ先頭だけのテストが 126・127 を返す | テストランナーが無い、実行の権限が無い | 「処理の手順」の順 9・11 | 止める（直さない） | `precondition`。suite の名前と終了コード | 送らない。コマンドか環境を直して打ち直す |
 | `run_suites` | suite が落ちる（非ゼロ。126・127 を含む）、1 本の上限を超える | テストの失敗 | 終了コード、`TimeoutExpired` | 呼び出し元へ返す | 直しの後も落ちれば `test_failed` | コミットは作業場所に残る |
 | `run_suites` | 累計の時間が上限に達する。または、残り時間が suite 1 本の上限より短いので残り時間を上限にした実行が、それを超える | テストが重い | 起動の前と `TimeoutExpired` | 止める | `fix_limit`。停止の理由の文に、使った累計、上限の値、キー名 `test.local_total_minutes` | 打ち直すと累計は 0 から |
+| `write_private_log` | `logs/` の権限を直せない、所有者が違う、シンボリックリンク | 保存先の権限や置き換え | ログを書く前 | 止める | `precondition`。保存先のパス | 出力を書かず、送らない。保存先を直して打ち直す |
 | `run_suites` | 追跡ファイルか `HEAD` が変わる | テストが書き換える | テストの後 | 止める | `precondition`。書き換わったファイル | 送らない |
 | `run_suites` | テストの実行枠が空くのを待ちきれない、空きメモリが足りずにテストを止める | マシンの混雑 | `slots.Stopped` | 呼び出し元へ返す | 今の停止理由のまま | 打ち直せる |
 | `run_local_gate` | 設計文書の「停止する場面と停止理由」の表の場面（`test_failed`・`refused`・`push_rejected` など） | 同じ表の「場面」の列のとおり | 上の「処理の手順」の表の順 | 止める（`final_gate.GateStopped`） | 同じ表の「停止理由」の列の値を持つ結果 JSON | 状態ファイルを残し、打ち直せる |
@@ -290,7 +299,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `run_suites` | suite ごとのコマンドと出力の全文。取り込んだ先頭だけのテストは名前に `base` を足す | `rf<PR>/logs/local-gate-<周>-<suite>.log` | 結果 JSON、状態ファイル、PR のコメント、標準出力と標準エラーには、コマンドも出力も載せない |
+| `run_suites` | suite ごとのコマンドと出力の全文。取り込んだ先頭だけのテストは名前に `base` を足す | `rf<PR>/logs/local-gate-<周>-<suite>.log`（`write_private_log` で書く） | 結果 JSON、状態ファイル、PR のコメント、標準出力と標準エラーには、コマンドも出力も載せない |
 | `run_local_gate` | 落ちた suite の名前と終了コード（起動できなければエラーの種別）、使った秒と上限 | 結果 JSON の `summary`、最終ゲートの記録 | 環境変数 |
 
 ### 既存の部品の再利用
@@ -301,6 +310,8 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `run_local_gate` | `worktree.fetch_tips`・`worktree.sync_worktree` の同期の処理 | `core/converge/worktree.py` を読んだ | `sync_worktree` は呼ばない。内部で `fetch_tips` をもう一度打ち、リモートの先頭が同じでも `reset --hard` と `cherry-pick` を打つためである。`fetch_tips` の結果を、先頭が `HEAD` に含まれていないときだけ `sync_fetched` へ渡す。どの周も、始めに `refuse_dirty` を打つ |
 | `run_suites` | `verify.failing`・`slots.run_command` | `verify.py`・`slots.py` を読んだ | `verify.failing` は変えたファイルに対応するテストだけを打つので使わない。起動は `run_command` で、`suites=means.declarations` を渡す。省くと実行ディレクトリから設定を読み直し、`--work` の設定で補ったリポジトリでは、検証用の作業場所から同じ宣言が見つかるとは限らない |
 | `verify_tree`・`sweep_verify_trees` | `worktree.lock_review_worktree`・`lock_of`・`release`・`sweep_orphans` | 同上 | 前の 2 つを使う。`worktree.release` は lock の無い作業場所を `--force` で消さず、`worktree.sweep_orphans` はディレクトリが残っている作業場所の lock を外さない。中断で残ったものを回収できないので、片付けは新しく書く |
+| `fix_excerpt` | `run_log.redact`・`project.secret.redact` | `run_log.py`・`secret.py` を読んだ | 両方使う。前者はキーの形の一部を、後者は環境変数の値を持たない |
+| `write_private_log` | `hooks/outbox.py` の保存先の用意（0700 に直す） | `grep -rn "0o600" src/ndf` | 同じ形にする。`outbox` の関数は送信の保存先に固有なので呼ばない |
 | `hold` | `slot_pool.try_lock` | `grep -rn "FileLock" src/ndf` | 使う |
 | `protected_of` | `weight.split_commands`・`scoped.in_scope` | `testing/` を読んだ | 使う |
 | `inside_work` | `weight.split_commands` | `weight.py` を読んだ | リダイレクト先を捨てるので使わず、同じ字句の分け方の `all_words` を足す |
@@ -315,6 +326,8 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `narrow` | 保護するファイルの指定が消える | 保護するファイルとほかを含むディレクトリは残る | すべて保護なら空 |
 | `run_local_gate` | 合格して指定の SHA を送る。変更が無ければ打たない | 最後の周でテストが落ちる場合、PR のブランチが進んだために push が拒まれる場合 | 処理の手順の表の行ごと |
 | `run_suites` | 設定の順にすべて打つ | 累計の残りが suite の上限より小さい | 異常系の行ごと。時計と起動を差し替える |
+| `write_private_log` | ディレクトリ 0700・ファイル 0600 | umask 022、前からある 0755 と 0644 | `logs/` がシンボリックリンク |
+| `fix_excerpt` | 伏せ字の後に切る | 100 行と 8,000 文字の境、境をまたぐトークン、複数行の秘密鍵（終わりの行の有無）、短い出力は全体 | 出力が空 |
 | `sweep_verify_trees` | 記録のあるパスだけ消す | 利用者の lock は残す | 記録の無いディレクトリに触れない |
 | `drive`・`_reused` | 同じ SHA と設定なら再利用し、`--pushed-out` を書く | 対象範囲が空 | ロック中は何も変えない |
 
@@ -368,7 +381,7 @@ s=$(cat "$2") && [ -n "$s" ] && git fetch -q -- "$1" "refs/heads/$0" && git merg
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `final_fix` | `prompt_decide.py` | 変更 | `final_fix(pr: int, scope: Sequence[str], failed: Sequence[str], *, local: bool = False) -> str` | `local` なら「手元で次のテストが落ちた」と書く。`failed` の各行は、suite の名前、コマンド、出力の末尾である |
+| `final_fix` | `prompt_decide.py` | 変更 | `final_fix(pr: int, scope: Sequence[str], failed: Sequence[str], *, local: bool = False) -> str` | `local` なら「手元で次のテストが落ちた」と書く。`local` の `failed` は `fix_excerpt` の結果で、載せる項目と上限は設計書の「テストのコマンドと出力の扱い」にある。`final_fix` は渡されたもの以外を足さない |
 
 ### 単体テストの観点
 
