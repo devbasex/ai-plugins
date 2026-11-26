@@ -51,7 +51,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/src/ndf/core/plan/units_decide.py`
   - `plugins/ndf/tests/core/plan/test_units_decide.py`
   - `plugins/ndf/tests/core/plan/fixtures/units/issue-3672.units.json`
-- **変更内容:** `split` と `judge` の `proposals`。#3672 の詳細設計の地図の行をタスクにした 1 単位の fixture を作り、案が上限に収まる複数の単位になり、依存の向きの順になることを縛る（先に要る: Task 2）
+- **変更内容:** `split` と `judge` の `proposals`。#3672 の詳細設計の「ファイル配置」の表からタスクを作った 1 単位の fixture を、設計書の「テスト設計」の表の下の作り方（群の分け方・依存・行数の根拠）で作り、案が上限に収まる複数の単位になり、依存の向きの順になることを縛る（先に要る: Task 2）
 - **満たす受け入れ条件:** 5・7・8
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -73,7 +73,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/tests/adapters/test_ci_cli.py`
   - `plugins/ndf/tests/adapters/test_github.py`
   - `plugins/ndf/docs/contracts/commands.md`
-- **変更内容:** `ndf ci merge --verify-merged` と `GitHub.pulls` の `rest_fallback`。指定の無い呼び出しの振る舞いは変えない。コマンドの一覧を生成し直す
+- **変更内容:** `ndf ci merge --verify-merged`・`ndf ci watch --head` と `GitHub.pulls` の `rest_fallback`。指定の無い呼び出しの振る舞いは変えない。コマンドの一覧を生成し直す
 - **満たす受け入れ条件:** 1
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -101,7 +101,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
 - **対象ファイル:**
   - `plugins/ndf/src/ndf/progress/design_record.py`
   - `plugins/ndf/tests/progress/test_design_record.py`
-- **変更内容:** `progress/design_record.py` の `required`・`build`・`stale`・`reset_drafts`・`approved_of`・`mismatches`。まだどこからも呼ばない（先に要る: Task 6）
+- **変更内容:** `progress/design_record.py` の `required`・`build`・`stale`・`reset_drafts`・`approved_of`・`mismatches`・`without`・`converted`・`reapproved_of`。まだどこからも呼ばない（先に要る: Task 6）
 - **満たす受け入れ条件:** 1
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -113,7 +113,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/src/ndf/progress/folding.py`
   - `plugins/ndf/src/ndf/progress/invoke.py`
   - `plugins/ndf/tests/progress/gate/test_gate_design_record.py`
-- **変更内容:** 詳細設計の「承認ゲートとのつなぎ」の表の 7 か所と、課題を外す回答の扱い。`required` が偽の定義では今の振る舞いのまま（先に要る: Task 8）
+- **変更内容:** 詳細設計の「承認ゲートとのつなぎ」の表の 7 か所（変換の再承認の記録を回答に添える分を含む）と、課題を外す回答の扱い。`required` が偽の定義では今の振る舞いのまま（先に要る: Task 8）
 - **満たす受け入れ条件:** 1
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -132,7 +132,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/src/ndf/progress/command.py`
   - `plugins/ndf/tests/progress/test_units_invoke.py`
   - `plugins/ndf/docs/contracts/commands.md`
-- **変更内容:** `ndf progress units run` を `units_cli.py` に置き、`command.py` に登録する。コマンドの一覧を生成し直す（先に要る: Task 10）
+- **変更内容:** `ndf progress units run` を `units_cli.py` に置き、`command.py` に登録する。次の工程が「実装」でなければ始めない。コマンドの一覧を生成し直す（先に要る: Task 10）
 - **満たす受け入れ条件:** 3
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -170,6 +170,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `RESUME_ALWAYS` と `plan_start`
   - 起動の記録
   - 承認が要らないスプリントと単発の実装は通る
+  - `guard` はこの単位のマージの時点から働くので、今の経路（単発の実装・保存した状態にあるスプリント宛ての手で組んだプラン）が通ることをテストで縛る
 - **満たす受け入れ条件:** 3
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -189,12 +190,14 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/src/ndf/progress/units_invoke.py`
   - `plugins/ndf/src/ndf/progress/invoke.py`
   - `plugins/ndf/contracts/worker/kinds.json`
+  - `plugins/ndf/contracts/templates/implementation-plan.json`
   - `plugins/ndf/tests/progress/test_units_convert.py`
 - **変更内容:**（先に要る: Task 10）
   - `units_convert`
   - `prepare` の 3
   - `per_unit` の無い定義で単位の欄があるときの分岐
-  - 作業の定義の「実装計画があれば本文を変えずに単位のファイルを足す」
+  - テンプレート `implementation-plan` の差し込み `convert` と、作業の定義の変換のときだけの指示
+  - 変換はこの単位のマージの時点から、単位の欄を持つ今のスプリントに働く。単位の欄が無いスプリントが今のまま流れることと、変換の再開の各段階をテストで縛る
 - **満たす受け入れ条件:** 3・4
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -253,14 +256,20 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
 
 ## レビューの単位
 
-見込みは追加と削除の和で、テストと生成する文書を含む。合計は約 6,250 行である。数えないパスは無い。どの単位も 1,000 行以下で、400 行を超える単位は無い。どの単位も、終えた時点で今の流れが動く。新しい流れは「工程の並びの切り替え」で初めて働く。
+見込みは追加と削除の和で、テストと生成する文書を含む。合計は約 6,250 行である。数えないパスは無い。どの単位も 1,000 行以下で、400 行を超える単位は無い。どの単位も、終えた時点で今の流れが動く。工程の並び（設計承認ゲートの位置）が新しくなるのは「工程の並びの切り替え」からである。ただし次の 3 つは、切り替えより前のマージの時点から今のスプリントに働く。それぞれのタスクで、今の経路が通ることをテストする。
+
+| 単位 | 先に働くもの | 当たる条件 |
+| --- | --- | --- |
+| 単位のファイルから流す | 単位のファイルがあれば、単位の並びをそこから読む | 実装計画に単位のファイルがあるスプリント |
+| 実装のプランの確かめ | テンプレート `impl` の `guard` | すべての実装のプラン。保存した状態を読めないときと、保存した状態に無いスプリントブランチ宛てのときは止まる |
+| 前のスプリントの変換 | 単位のファイルへの変換と、必要なら再承認 | 実装計画に単位の欄を持つ、切り替えより前のスプリント |
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実行順 | 先に要る単位 | マージの順 | 実際の行数 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 単位の形と上限 | Task 1 | 3702:6 | 320 | 1 | 無し | 1 | |
 | 実行順と規則 | Task 2 | 3702:2・3702:3・3702:5・3702:7 | 390 | 1 | 無し | 2 | |
 | 分け方の案 | Task 3 | 3702:5・3702:7・3702:8 | 330 | 2 | 実行順と規則（案は実行順と規則の判定を使う） | 4 | |
-| レビューとマージの引数 | Task 4・5 | 3702:1 | 380 | 1 | 無し | 3 | |
+| レビューとマージの引数 | Task 4・5 | 3702:1 | 400 | 1 | 無し | 3 | |
 | 単位のファイルの読み書き | Task 6 | 3702:3・3702:4・3702:6 | 390 | 2 | 単位の形と上限（読み手が形・上限・設計の結果の読み手を使う）、実行順と規則（読んだファイルを判定へ渡す） | 5 | |
 | 単位のコマンド | Task 7 | 3702:2・3702:3・3702:5・3702:6 | 340 | 3 | 分け方の案（check の結果に分け方の案を載せる）、単位のファイルの読み書き（コマンドが読み書きを呼ぶ）、レビューとマージの引数（コマンドの一覧の同じファイルを生成し直す） | 6 | |
 | 承認の記録 | Task 8 | 3702:1 | 380 | 3 | 単位のファイルの読み書き（記録の照合が単位のファイルの比較を使う） | 7 | |

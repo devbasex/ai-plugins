@@ -57,8 +57,8 @@ contracts/
 | `src/ndf/core/plan/inputs_decide.py` | 変更 | 「設計の結果」の表の「扱い」と「統合先」の列を読む。`design_gaps` を消す | — | `design_handlings`（新設） |
 | `src/ndf/core/plan/queue_decide.py` | 変更 | `RESUME_ALWAYS` に `guard` を足す | — | — |
 | `src/ndf/core/plan/review_units_decide.py` | 変更 | #4369 の `Unit` に並列で使う欄を足す | — | — |
-| `src/ndf/progress/design_record.py` | 新設 | 承認の記録を組む・照らす・読む | `units_files`・`folding` | `build`・`stale`・`reset_drafts`・`approved_of`・`required`・`mismatches` |
-| `src/ndf/progress/units_invoke.py` | 変更 | 単位の読み元を単位のファイルにし、承認と照らし、並列に流す | 下の 3 つ・`units_files` | `prepare`・`run_stage`（変更） |
+| `src/ndf/progress/design_record.py` | 新設 | 承認の記録を組む・照らす・読む | `units_files`・`folding` | `build`・`stale`・`reset_drafts`・`approved_of`・`required`・`mismatches`・`without`・`converted`・`reapproved_of` |
+| `src/ndf/progress/units_invoke.py` | 変更 | 単位の読み元を単位のファイルにし、承認と照らし、並列に流す | 下の 3 つ・`units_files` | `prepare`・`run_stage`（変更）・`advance`（新設） |
 | `src/ndf/progress/units_queue.py` | 新設 | マージキューで待つ単位の状態を読む | `github` | `read`・`action` |
 | `src/ndf/progress/units_convert.py` | 新設 | この変更より前の表を単位のファイルへ変換する | `review_units_decide`・`units_files` | `convert`・`compare` |
 | `src/ndf/progress/units_sync.py` | 新設 | 送り先を確かめ、承認した文書をスプリントブランチへ取り込む | `git`・`github`・`design_record` | `destination_errors`・`sync` |
@@ -69,7 +69,7 @@ contracts/
 | `src/ndf/progress/definition.py` | 変更 | そのモードに判定のステップが無い工程の出力から `mvv_gate` を外す | — | `_stage_def`（変更） |
 | `src/ndf/progress/store.py` | 変更 | リポジトリのスプリントの一覧を読む | — | `read_machines`（新設） |
 | `src/ndf/progress/gate/entry.py`・`answering.py` | 変更 | 資料を出す前と回答の確定の前に記録と照らす | `design_record` | `present`・`answer`・`recheck`（変更） |
-| `src/ndf/ci_cli.py` | 変更 | `ndf ci merge --verify-merged` | — | `_merge_pull`（変更） |
+| `src/ndf/ci_cli.py` | 変更 | `ndf ci merge --verify-merged`・`ndf ci watch --head` | — | `_merge_pull`・`_watch`（変更） |
 | `src/ndf/adapters/github.py` | 変更 | `pulls` に REST への読み替えを止める指定 | — | `pulls`（変更） |
 | `src/ndf/domains/crossreview/{cli,drive,settings}.py` | 変更 | `--reviewed-base-out` | — | `_sync`・`_reusable`・`cmd_run`（変更） |
 | `src/ndf/domains/records/{cli,mvv_gate}.py` | 変更 | 設計の判定の入力を、2 つの工程のどちらの形でも受ける | — | `_env_inputs`（変更） |
@@ -82,12 +82,12 @@ contracts/
 
 | 型 | 欄 |
 | --- | --- |
-| `Task` | `id`（`T<n>`）・`title`・`issue`・`files: tuple[str, ...]`・`lines: Optional[int]`・`criteria: tuple[str, ...]`・`after: tuple[str, ...]` |
+| `Task` | `id`（`T<n>`）・`title`・`issue`・`files: tuple[str, ...]`・`lines: Optional[int]`（無いのは `single` が作る合成のタスクだけ）・`criteria: tuple[str, ...]`・`after: tuple[str, ...]` |
 | `Edge` | `unit`・`reason`・`issue: Optional[int]`（別のファイルの単位を指すとき） |
 | `UnitDef` | `name`・`tasks: tuple[str, ...]`・`after: tuple[Edge, ...]`・`actual_lines: Optional[int]` |
 | `UnitFile` | `path`・`issues: tuple[int, ...]`・`tasks: tuple[Task, ...]`・`units: tuple[UnitDef, ...]`・`whole: bool`（実装計画を省いた課題を 1 単位にしたかのフラグ） |
 | `Limits` | `target`・`max` |
-| `View` | `file`・`name`・`order`・`merge`・`after`（解決済みの `(file, name, reason)`）・`issues`・`tasks`・`criteria`・`lines`・`touches` |
+| `View` | `file`・`name`・`order`・`merge`・`after`（解決済みの `(file, name, reason)`）・`issues`・`tasks`・`criteria`・`lines`・`actual_lines`・`touches` |
 | `Finding` | `rule`・`unit`・`reason` |
 | `Proposal` | `unit`・`units: tuple[UnitDef, ...]`・`resplit: tuple[str, ...]`（切り直すタスク）・`remaining: tuple[Finding, ...]` |
 | `Judgement` | `views`・`violations`・`warnings`・`proposals` |
@@ -99,7 +99,7 @@ contracts/
 | 関数 | 定義するファイル | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `parse` | `units_decide.py` | 新設 | `(doc: Mapping, path: str) -> UnitFile` | スキーマを通った辞書を型にする。`issue` を省いたタスクはファイルの唯一の課題 |
-| `judge` | 同上 | 新設 | `(files: Sequence[UnitFile], limits: Limits, criteria: Mapping[int, int]) -> Judgement` | 全ファイルを 1 つのグラフにし、違反・警告・導く値・案を返す |
+| `judge` | 同上 | 新設 | `(files: Sequence[UnitFile], limits: Limits, criteria: Mapping[int, int]) -> Judgement` | 全ファイルを 1 つのグラフにし、違反・警告・導く値・案を返す。`criteria` のキーは、受け入れ条件を指してよい課題のすべてである |
 | `split` | 同上 | 新設 | `(files, key: tuple[str, str], limits) -> Proposal` | 超えた単位を、依存の順の直列の単位に区切る |
 | `single` | 同上 | 新設 | `(issue: int) -> UnitFile` | 課題全体を 1 つの単位にする。名前は `issue-<番号>`、`lines` は無し、`touches` は空、`whole` は真 |
 
@@ -118,11 +118,11 @@ contracts/
 | 規則 | 判定の式 |
 | --- | --- |
 | U1 | ファイルの中でタスクの `id` か単位の名前が重なる。1 つの課題を 2 つのファイルの `issues` が持つ。`after`・`units[].tasks` の指す先が無い。グラフに輪がある |
-| U2 | タスクが 0 個か 2 個以上の単位にある。タスクの `issue` がファイルの `issues` に無い。`criteria` の番号が 1 未満か、`criteria[課題]`（本文の受け入れ条件の数）より大きい |
+| U2 | タスクが 0 個か 2 個以上の単位にある。タスクの `issue` がファイルの `issues` に無い。`criteria` が指す課題が引数 `criteria` のキーに無い（対象外の参照）。番号が 1 未満か、`criteria[課題]`（本文の受け入れ条件の数）より大きい |
 | U3 | タスク B の `after` のタスク A の単位が、B の単位でも B の単位の閉包の中でもない |
 | U4 | 互いに相手を閉包に持たない 2 単位の `touches` が重なる。`touches` はタスクの `files` の和で、文字列の一致で比べる |
 | U5 | `Edge.reason` が前後の空白を除くと空 |
-| U6・W1 | `lines`（タスクの `lines` の和）が `max` を超える（U6）。`target` を超え `max` 以下（W1）。`lines` が無ければどちらも当てない |
+| U6・W1 | `lines`（タスクの `lines` の和）が `max` を超える（U6）。`target` を超え `max` 以下（W1）。`lines` が無い単位（`whole` が真）にはどちらも当てない |
 
 `split` の手順（決定 8）:
 
@@ -171,14 +171,18 @@ contracts/
 | `Report` | 同上 | `judgement`・`missing`・`task_gaps`・`stale_tables` |
 | `review-units.target-lines.json`・`max-lines.json` | `contracts/limits/` | `{"summary", "count": 400 / 1000, "read_by": ["ndf.core.plan.units_files"]}` |
 
-`review-units.schema.json` は設計書の「データ構造」の例の形で、`additionalProperties: false`、`version` は定数 1 にする。`tasks[].files` の各値は、先頭と末尾の `/`、`//`、`.` と `..` の区切り、`*?[]` を断る `pattern` を持つ。`title` は必須である。宣言 `workflow.review_units` は `{"target_lines", "max_lines"}`（1 以上の整数。どちらも任意）で、`project-workflow.schema.json` と `ndf-settings/project.schema.json` の両方に足す。
+`review-units.schema.json` は設計書の「データ構造」の例の形で、`additionalProperties: false`、`version` は定数 1 にする。`tasks[].files` の各値は、先頭と末尾の `/`、`//`、`.` と `..` の区切り、`*?[]` を断る `pattern` を持つ。`title` と `lines`（0 以上の整数）は必須である。行数の無い通常のタスクは `load` が `invalid` で止める。宣言 `workflow.review_units` は `{"target_lines", "max_lines"}`（1 以上の整数。どちらも任意）で、`project-workflow.schema.json` と `ndf-settings/project.schema.json` の両方に足す。
 
 ### 処理の手順
 
 - 扱いの値の「マージする」は他の課題へ統合すること、「閉じる」は実装せずに閉じることである
 - 扱いの決め方: `collect` は、番号の並びに課題を含む設計書（`issues/issue-<番号の並び>-design.md`。`-design-detail.md` は含めない）の「設計の結果」の表を読む。設計書の無い課題（設計書を省いた課題）の扱いは「実装する」である
-- `render_tables`: 「含むタスク」は `Task 1・2` の形で書く（#4369 の表の読み手が読める形）。「先に要る単位」は `名前（理由）`、別のファイルの単位は `名前（#<課題>。理由）`。「並列と直列」は実行順の昇順に 1 行ずつ。「実際の行数」の列は、今の表の同じ名前の行の値を残す。セクションが無ければ「タスク分解」の後に足す
-- 受け入れ条件の数は、`check` の呼び手が課題の本文を 1 回の一括読み取り（`GitHub.nodes`）で読み、`inputs_decide.criteria` で数える
+- `render_tables`: 「含むタスク」は `Task 1・2` の形で書く（#4369 の表の読み手が読める形）。「先に要る単位」は `名前（理由）`、別のファイルの単位は `名前（#<課題>。理由）`。「並列と直列」は実行順の昇順に 1 行ずつ。「実際の行数」の列は `View.actual_lines`（ファイルと単位の名前の組で引いた JSON の値）だけから作り、今の表の値は読まない。セクションが無ければ「タスク分解」の後に足す
+- 受け入れ条件の数は、`check` の呼び手が課題の本文を 1 回の一括読み取り（`GitHub.nodes`）で読み、`inputs_decide.criteria` で数える。実装の開始で承認の記録があるときは、読まずに記録の `criteria` を使う
+- 受け入れ条件を読む課題は、次の和である。判定器へ渡す `criteria` のキーもこの集合にする
+  - スプリントの課題（`--issue`。扱いが「マージする」の統合元を含む）
+  - ファイルを引数で直に指して `--issue` が無いときは、読んだファイルの `issues` と、タスクの `criteria` が指すすべての課題
+- 取得の失敗は GitHub の失敗として止め、違反にしない。集合に無い課題を指すタスクは、判定器が U2（対象外の参照）にする
 
 ### 異常系の処理
 
@@ -210,7 +214,10 @@ contracts/
 環境変数 `NDF_DESIGN_RECORD_DIR` があるとき（工程「ドキュメントレビュー」の `units-check`）は、次のように動く。
 
 - 読み元は作業ツリーではなく、保存先の `reviewed-head` のコミットにする。作業場所の HEAD がそのコミットと違えば `stopped`（`approval_stale`）
-- 通ったら、保存先の `checked.json` に `{"head", "issues", "handling", "omitted", "limits", "units"}` を書く。`units` は結果の `items` と同じである
+- 通ったら、保存先の `checked.json` に `{"head", "issues", "handling", "omitted", "limits", "criteria", "units"}` を書く。`units` は結果の `items` と同じで、`criteria` は課題ごとの受け入れ条件の数である
+- 入力に `design_pr` があれば、保存先の `reviewed-pr` の番号と比べ、違えば `stopped`（`refused`）
+- 結果の `outputs.design_pr` に `reviewed-pr` の番号を返す。設計承認ゲートの質問は、文脈に `design_pr` が無くてもこの値を読む
+- `reviewed-pr` などのファイルが無く、`workflow.launch.review` が指定されていれば、理由にこのキーと直し方（設計書の「影響と危険」）を書く
 
 単体テストの観点は次のとおりである。
 
@@ -234,7 +241,7 @@ contracts/
 | --- | --- | --- |
 | `reviewed-pr`・`reviewed-head`・`reviewed-base` | `ndf cross-review run`（テンプレート `design-pr-review`） | `<所有者>/<リポジトリ>#<番号>`、SHA、ブランチ名 |
 | `checked.json` | `ndf plan units check` | 上の「コマンド」 |
-| `design-target.json` | `build` | `{"version": 1, "review": {"repo","pr","head","base"}, "targets": {"issues","handling","omitted"}, "limits": {"target","max"}, "units": [...]}` |
+| `design-target.json` | `build` | `{"version": 1, "review": {"repo","pr","head","base"}, "targets": {"issues","handling","omitted"}, "limits": {"target","max"}, "criteria": {"<課題>": 数}, "units": [...]}` |
 
 承認の回答のイベント（`answered`）の payload に、`design-target.json` の中身をキー `design_target` で持つ。回答の SSOT はイベントで、ファイルは資料を作るための作業用である。
 
@@ -247,21 +254,37 @@ contracts/
 | `stale` | 同上 | 新設 | `(record: Mapping, repo, pr, head, base) -> list[str]` | 今の PR と記録の違い |
 | `reset_drafts` | 同上 | 新設 | `(v, stage: stages.StageDef, why: str) -> list[EventDraft]` | 工程の先頭から設計承認ゲートまでを未了に戻すイベント |
 | `approved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「ドキュメントレビュー」の最新の回答が承認なら、その `design_target`。後の変更要求があれば None |
-| `mismatches` | 同上 | 新設 | `(record, tree, context) -> list[str]` | 決定 11 の表の 4 つの比較 |
+| `mismatches` | 同上 | 新設 | `(record, tree, context) -> list[str]` | 決定 11 の表の 4 つの比較。両側とも記録の `targets.issues` に絞る |
+| `without` | 同上 | 新設 | `(record, drop, files) -> dict` | 課題を外す回答の記録の絞り込み。外せない形なら `Refused` |
+| `converted` | 同上 | 新設 | `(repo, head, branch, context, limits, report) -> dict` | 変換の再承認の記録。`design-target.json` と同じ形で、`review.pr` は null、`head` は単位のファイルを含むコミット |
+| `reapproved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「実装」の最新の回答が承認なら、その `design_target` |
 
 ### 承認ゲートとのつなぎ
 
 | 場所 | 変える中身 |
 | --- | --- |
 | `gate/entry.present` | 設計承認ゲートで `required` なら、`build` して `stale` を見る。違いがあれば資料を出さず、`reset_drafts` を書いて `ndf progress next` を案内する。合えば承認資料に単位の表・警告・省いた課題を足す |
-| `gate/answering.answer` | 回答の確定の前に `stale` を見る。違いがあれば回答を書かず、`reset_drafts` を書く。承認なら payload に `design_target` を足す |
+| `gate/answering.answer` | 回答の確定の前に `stale` を見る。違いがあれば回答を書かず、`reset_drafts` を書く。承認なら payload に `design_target` を足す。工程「実装」の再承認では、待ちの結果が持つ `design_target` を payload に足す（`stale` は見ない） |
 | `gate/answering.recheck` | 回答の後に head かマージ先が変わっていれば、待ちへ戻すかわりに `reset_drafts` を書く |
 | `run._consume` | MVV 判定が人の承認を省いて作る回答にも `design_target` を足す。判定の head が記録の head と違えば、人の承認を省かない |
-| `run._step_draft` | `design-merge-approved` が `approval_stale` で止まれば、失敗のイベントに `reset_drafts` を続ける |
+| `run._step_draft` | `docs-ci` か `design-merge-approved` が `approval_stale` で止まれば、失敗のイベントに `reset_drafts` を続ける |
 | `run.approved_seen` | 返す辞書に `design_target` を含める |
 | `folding.StepProgress._recorded` | 未了に戻すイベントの対象が待ちのステップなら、`waiting` を消す |
 
-**課題を外す回答**（`--drop`）: 記録の `targets.issues` から外した課題を除く。除いた後の単位のファイルを `judge` に通し、違反があるか、1 つのファイルが外す課題と残す課題の両方を持てば、回答を `Refused` にする。理由には「変更を求めて実装計画を分け直す」と書く。つまり、残る課題の分け方が承認した表のまま成り立つときだけ、外して承認できる。
+**課題を外す回答**（`--drop`）: `without` が記録を残る課題へ絞り、承認の回答の `design_target` にする。
+
+| 記録の欄 | 絞り方 |
+| --- | --- |
+| `targets.issues`・`handling`・`omitted`・`criteria` | 外した課題の要素とキーを除く |
+| `units` | 残る課題の単位のファイルと、残る省いた課題の単位だけを残し、`judge` で実行順とマージの順を求め直す |
+
+次のどれかなら、回答を `Refused` にする。理由には当たった条件と「変更を求めて実装計画を分け直す」を書く。
+
+- 1 つのファイルが、外す課題と残す課題の両方を持つ
+- 扱いが「マージする」の課題と統合先の、片方だけを外す
+- 絞った後の `judge` に違反がある（残る単位が外した単位を先に要る、など）
+
+実装の側（`mismatches`・`collect`・`lineup_from_files`）は、記録の `targets.issues` の課題だけを読む。今の `_dropped` は文脈の `issues` だけを変えるので、文脈の `plan_omitted` と設計書の「設計の結果」の表も、比べる前に同じ課題へ絞る。
 
 ### 異常系の処理
 
@@ -279,7 +302,7 @@ contracts/
 | `required` | `standard`・`legacy-refactor` が真 | 古い保存した定義は偽 | — |
 | `build`・`stale` | 記録の形 | head だけ違う、base だけ違う | ファイルの欠け |
 | `approved_of` | 承認 | 承認の後の変更要求、MVV の回答 | payload に記録が無い |
-| ゲートとのつなぎ | 違えば未了へ戻る、承認の payload に記録 | 課題を外せる形 | 混ざったファイルの課題を外す |
+| ゲートとのつなぎ | 違えば未了へ戻る、承認の payload に記録 | 省いた課題・統合元と統合先の両方を外し、残りが照合を通る | 混ざったファイルの課題を外す、統合元か統合先の片方を外す |
 
 ## 工程の定義とテンプレート
 
@@ -316,26 +339,30 @@ contracts/
 | テンプレート | 差し込み | ステップ |
 | --- | --- | --- |
 | `design-pr-review`（新設） | `repo`・`worktree`・`branch`・`remote`・`review`・`record_dir` | `review`（`{{review}} --reviewed-out <record_dir>/reviewed-head --reviewed-pr-out <record_dir>/reviewed-pr --reviewed-base-out <record_dir>/reviewed-base --findings <record_dir>/findings.json`。`incomplete` は `push` へ）・`push` |
-| `docs-ci`（新設） | `repo`・`design_pr`・`required`・`tests`・`ci_budget` | `ci`（`ndf ci watch --pr {{design_pr}} --required={{required}} --test={{tests}} --budget {{ci_budget}}`）。CI の失敗は直さずに工程を止める |
+| `docs-ci`（新設） | `repo`・`reviewed_pr`・`reviewed_head`・`required`・`tests`・`ci_budget` | `ci`（`ndf ci watch --pr {{reviewed_pr}} --head {{reviewed_head}} --required={{required}} --test={{tests}} --budget {{ci_budget}}`）。CI の失敗は直さずに工程を止める |
 | `design-merge-approved`（新設） | `repo`・`approved_repo`・`approved_pr`・`approved_head`・`approved_base`・`merge_method`・`production_gate` | `merge`（`ndf ci merge --repo --pr --approved-head --approved-base --method --production-gate --verify-merged`）。`probe` を置かない |
 | `impl`（変更） | 変えない | 先頭に `guard`（`ndf progress units guard --issue {{issue}} --base {{base}} --branch {{branch}} --unit-file={{unit_file}}`）を足す |
 | `implementation-plan`（変更） | 変えない | 変えない（指示は `kinds.json` が持つ） |
 
-- 設定で差し替えたレビューの起動（`workflow.launch.review`）にも、`design-pr-review` の 3 つの出力の引数を後ろへ足す。受けない起動はレビューのステップで止まる
-- `invoke.template_values` は、`<record_dir>/findings.json` に `{"items": [...]}` を書く。変更要求の指摘（`StageRun.notes`）があればその本文を 1 件入れ、無ければ空にする。cross-review は渡された項目を「足すべき内容」として扱い、決め終えるまで収束にしない
-- `invoke.PRODUCTION_GATE` に `design-merge-approved`（`stale`）を足す
+- `reviewed_pr`・`reviewed_head` は、`invoke.template_values` が保存先の `reviewed-pr`・`reviewed-head` から入れる。文脈の `design_pr` は使わない
+- 設定で差し替えたレビューの起動（`workflow.launch.review`）にも、`design-pr-review` の 3 つの出力の引数と `--findings` を後ろへ足す。受けない起動はレビューのステップで止まる。この契約と直し方は、`params.json` の `review` の説明と変更履歴に書く。旧い形の起動を受ける互換の処理は持たない
+- `invoke.template_values` は、`<record_dir>/findings.json` に `{"items": [...]}` を書く。変更要求の指摘（`StageRun.notes`）があればその本文を 1 件入れ、無ければ空にする。cross-review は渡された項目を「足すべき内容」として扱う。修正担当が全項目に「直した」か「見送り（理由つき）」の結果を付けるまで、収束にしない
+- 変更要求の項目の本文には「利用者の変更要求である。反映して直したと記録する。反映できないときは、区分 `needs_user` の見送りにして理由を書く」を添える。`needs_user` の見送りがあるレビューは承認を自動で省かず、承認資料に反映していない要求と理由が載る。ほかの補足と同じ扱いで見送って、直していない設計を承認へ出さないためである
+- `invoke.PRODUCTION_GATE` に `design-merge-approved` を足し、値は `design-merge` と同じ `STALE` にする。この値は `ndf ci merge --production-gate` に渡る。マージ先が本番へ自動で反映され、承認の記録が無いときに、`approval_stale` で止める指定である
 - `invoke._approved_target` は、`approved["design_target"]["review"]` があれば、承認の値を記録の値で埋める。無ければ空文字にし、`ndf ci merge` が断る。承認の値は `approved_repo`・`approved_pr`・`approved_head`・`approved_base` である
 - `kinds.json` の `implementation-plan` は、`outputs` に `plan_omitted` を足し、指示に次の 3 つを足す
   - 単位のファイルを書いて `ndf plan units render` を打ち、通るまで直してコミットする
   - 設計書を省いた課題は、設計 PR の実装計画の本文を変えずに、単位のファイルと 2 つの表だけを足す
   - 実装計画を省く課題の番号を `plan_omitted` に返す（無ければ空の配列）
-- テンプレート `impl` の `guard` は、#4369 の `plan_start` が持つ「`pr` を通るので開始点を変えないステップ」の一覧にも足す。`queue_decide.RESUME_ALWAYS` にも足す
+- 変換（決定 10）のときだけの指示を、4 つ目として分けて足す。テンプレート `implementation-plan` の任意の差し込み `convert`（既定は空）が空でないときは、上の 3 つと通常の「実装計画を書く」指示より優先して、既存の実装計画の本文を変えずに単位のファイルと 2 つの表だけを足す。`convert` が空なら、この指示は当たらない。設計を変えて計画し直すときは、今のとおり本文を書き直す
+- テンプレート `impl` の `guard` は、打ち直しのたびに先に実行する（`queue_decide.RESUME_ALWAYS` に足す）。`guard` が通った後は、通常の再開位置から流す。通常の再開位置は #4369 の `plan_start` が決め、`pr-number` が無く開始点が `pr` より後なら `pr` になる。`plan_start` の「開始点から `pr` を通る」の判定では、`guard` は `pr` より前のステップに数える。`guard` が失敗した回は `guard` から流し直し、飛ばさない
 
 ### 異常系の処理
 
 | 場所 | 失敗 | 扱い |
 | --- | --- | --- |
 | `design-pr-review` | 3 つのファイルを書かない起動 | `record_dir` に無いので、次の `units-check` が `precondition` で止まる |
+| `docs-ci` | PR の HEAD が `reviewed_head` と違う（開始と成功の確定の時点） | `approval_stale`。ステップを未了に戻し、レビューから流し直す |
 | `docs-ci` | 必須のチェックの失敗 | 工程を止める。直して push すると head が変わるので、打ち直しは記録の照合でレビューからになる |
 | `design-merge-approved` | head か base が承認と違う（未マージ） | `approval_stale`。ステップを未了に戻し、レビューから流し直す |
 | 同 | マージ済みで head か base が承認と違う | `refused`。流し直さない（[#4420](https://github.com/devbasex/ai-plugins/issues/4420) の条件 2。人が確かめる） |
@@ -358,6 +385,7 @@ contracts/
 | `_reusable` | 同上 | 変更 | 変えない | `follow_base` で、前のラウンドの記録の `base_branch` が今と違えば偽 |
 | `cmd_run` | `domains/crossreview/cli.py` | 変更 | 変えない | `--reviewed-base-out` を受け、始めに消し、`--reviewed-out` を書くときに最後のラウンドの `base_branch` を書く |
 | `_merge_pull` | `ci_cli.py` | 変更 | 変えない | `--verify-merged` があり、マージ済みの PR の head か base が承認の値と違えば `refused` |
+| `_watch` | 同上 | 変更 | 変えない | `--head <SHA>` があれば、読んだ PR の HEAD が違う時点（開始と成功の確定）で `approval_stale` |
 | `pulls` | `adapters/github.py` | 変更 | `(numbers, spare=(), *, rest_fallback: bool = True)` | 偽なら REST へ読み替えない |
 
 - `RunConfig`（`settings.py`）に `follow_base: bool = False` を足し、`--reviewed-base-out` を渡した起動だけ真にする。ラウンドの記録に `base_branch` を足す
@@ -369,7 +397,7 @@ contracts/
 | PR のマージ先を読めない | 今の `_merge_target` と同じく `precondition` |
 | `--reviewed-base-out` を書けない | `precondition` |
 
-単体テストの観点: 起動の間にマージ先が変われば全差分を読み直して新しい名前を書く。`--verify-merged` なしのマージ済みは今のまま `ok`。`rest_fallback=False` は利用枠の失敗をそのまま上げる。
+単体テストの観点: 起動の間にマージ先が変われば全差分を読み直して新しい名前を書く。`--verify-merged` なしのマージ済みは今のまま `ok`。`ndf ci watch --head` は、待つ間に HEAD が変われば成功にしない。`rest_fallback=False` は利用枠の失敗をそのまま上げる。
 
 ## 単位を流す処理（`progress/units_invoke.py`・`units_queue.py`）
 
@@ -386,6 +414,11 @@ contracts/
 | `unit_run` | 同上 | 変更 | 変えない | `unit.md` に担当タスクの本文を足し、`units_guard.record_launch` を打ってからプランを返す |
 | `read` | `units_queue.py` | 新設 | `(hub, numbers) -> dict[int, State]` | `pulls(rest_fallback=False)` で `merged`・`queued`・`open`・`closed`・`unknown` にする |
 | `action` | 同上 | 新設 | `(state: State, resent: bool) -> str` | 設計書の決定 9 の表（`done`・`wait`・`resend`・`fail`） |
+| `advance` | `units_invoke.py` | 新設 | `(ctx, merge_sha) -> None` | スプリントブランチを取得し、作業場所を ff で進め、HEAD がマージのコミットを含むことを確かめる |
+
+`State` は、状態の種類と、マージ済みならマージのコミット（`Pull.merge_sha`）を持つ。
+
+再送の記録は、単位ごとの保存先の `queue.json`（`{"pr": <番号>, "resent": <真偽>}`）に持つ。`resend` では、`ndf ci merge` を打つ前に `resent` を真にして書く。打つ途中で中断しても回数が戻らない。起動のたびにこのファイルを読み、PR の番号が同じなら値を引き継ぐ。
 
 **代表の課題**は、単位のタスクの所属の課題のうち番号が最も小さいものにする。`ndf plan units` の結果の `issues` の最小値で、課題全体を 1 単位にしたものはその課題である。実装のフェーズの手順書の決まり（`issue` には単位の課題のうち番号の最も小さいもの）と、#4369 の決定 9（番号の最小）に合わせるためである。実装計画のファイル名の番号から選ぶと、単位にタスクの無い課題の題が単位の PR に付くことがある。ブランチ名、PR の題と本文、`guard` の照合がこの値を使う。
 
@@ -394,27 +427,28 @@ contracts/
 `prepare` は次の順に見る。上で止まれば下は見ない。
 
 1. `required(snap)` が真なら、`approved_of`。無ければ始めない
-2. 記録があれば、`mismatches`。1 件でもあれば始めない。起動に使う課題・扱い・省いた課題・上限は記録の値にする
-3. `required` が偽で、単位の欄があるのに単位のファイルが無ければ、`units_convert.convert`（古い定義）か、始めない（この変更より後に作ったスプリント）
-4. 欄もファイルも無ければ、#4369 の「これまでの経路」（単位に分けず `impl` を 1 回）
-5. 単位のファイルを `units_files.check`（`docs` は偽）に通す。違反があれば始めない
-6. #4369 の開始前の確かめ（取得・配布先として宣言したブランチでないこと・push）
+2. #4369 の開始前の確かめを呼ぶ（取得・配布先として宣言したブランチでないこと・ff・push）。経路の判定は、単位の見出しに加えて単位のファイルも、手元と取得した先端の両方で調べる。承認が要るスプリントは、常に単位の経路にする。ここで決まった HEAD を `start_head` とし、3 より後の照合・読み込み・起動の判定は、すべてこのコミットを読む
+3. `required` が真なら、承認した文書が届いていることを確かめる。`start_head` が記録の head か、取り込みのコミット（`design-sync.json` の、記録の head が同じもの）を含まなければ始めない
+4. 記録があれば、`mismatches`。1 件でもあれば始めない。起動に使う課題・扱い・省いた課題・上限・受け入れ条件の数は記録の値にする
+5. 古い定義で単位の欄があれば、単位のファイルの有無にかかわらず `units_convert.convert` を呼ぶ。変換が完了して承認も要らなければ、`convert` は None を返す。変換がコミットを足したら `start_head` を取り直す。この変更より後に作ったスプリントで、欄があるのに単位のファイルが無ければ始めない
+6. 欄もファイルも無ければ、#4369 の「これまでの経路」（単位に分けず `impl` を 1 回）
+7. 単位のファイルを `units_files.check`（`docs` は偽）に通す。違反があれば始めない
 
-「この変更より後に作ったスプリント」は、保存した定義の工程「実装」の `optional_inputs` に `plan_omitted` があることで見分ける。この変更が足すキーだからである。
+「この変更より後に作ったスプリント」は、保存した定義の工程「実装」の `optional_inputs` に `plan_omitted` があることで見分ける。無いものが「古い定義」である。この変更が足すキーだからである。
 
 スプリントは、保存した工程の定義の並びのまま流れる。`per_unit` は、単位ごとに流すことを表す工程の指定で、#4369 が足す。
 
-**工程の定義に `per_unit` が無いスプリント**（#4369 より前に作ったもの）: 実装計画に単位の欄があれば、`invoke` は単位を流す処理へ渡し、上の 3 の変換を通す。#4369 の決定 4（定義に `per_unit` が無ければ `impl` を 1 回）は、単位の欄が無いスプリントにだけ残る。設計書の決定 10 が、分けたはずの変更を 1 本にしないことを求めるためである。
+**工程の定義に `per_unit` が無いスプリント**（#4369 より前に作ったもの）: 実装計画に単位の欄があれば、`invoke` は単位を流す処理へ渡し、上の 5 の変換を通す。#4369 の決定 4（定義に `per_unit` が無ければ `impl` を 1 回）は、単位の欄が無いスプリントにだけ残る。設計書の決定 10 が、分けたはずの変更を 1 本にしないことを求めるためである。
 
 ### 処理の手順
 
 `run_stage` は、起動・マージ・GitHub の読み取りを主のスレッドで 1 つずつ行い、`impl` のプランだけを `ThreadPoolExecutor` で流す。
 
-1. 開始時の一覧でマージ済みの単位を `graphlib.TopologicalSorter` の `done` にする
-2. `get_ready()` の単位を、`merge` の順に、空いた本数だけ起動する。本数の上限は `named_cap.read(os.environ, <状態の保存先>).value`
+1. 開始時の一覧でマージ済みの単位を除いて、`graphlib.TopologicalSorter` のグラフを組む。マージ済みの単位を指す依存も除く（`done` は `get_ready` が返す前の単位に呼べないためである）
+2. `get_ready()` が返した単位を、すべて起動待ちのキューに入れる（`get_ready` は同じ単位を二度返さない）。空いた本数だけ、キューから `merge` の順に取り出して起動する。本数の上限は `named_cap.read(os.environ, <状態の保存先>).value`
 3. `concurrent.futures.wait(FIRST_COMPLETED)` で待つ。待ちの PR があれば、間隔（`test-triage.check-wait`）を上限にして待ち、`units_queue.read` を打つ
 4. 終わったプランが同時に複数あれば、`merge` の順に `merge_unit` を打つ。`ci_pending` で PR がキューにあれば、待ちの一覧へ入れて次へ進む
-5. マージできた単位を `done` にし、2 へ戻る
+5. `merge_unit` が `ok`（直接のマージ）か、`units_queue.read` が `merged`（キューでのマージ）になった単位は、先に `advance` でスプリントの作業場所をマージのコミットを含む先端へ進める。進められた単位だけを `done` にして、2 へ戻る。`advance` の失敗は止める（`precondition`）
 6. 失敗した単位は `done` にしない（後に続く単位は `get_ready` に出ない）。`cause.kind` が `usage_limit` なら、以後は起動せず、実行中を待って結果を保存し、成功した単位はマージする
 7. 起動できる単位も実行中も無くなったら、待ちがあれば `ci_budget` まで読み続ける。待ちが `ci_budget` を超えれば `ci_pending` で止まる。GitHub の利用枠が戻る時刻がこの上限より後なら `infra_wait` で止まる
 8. 全単位がマージ済みなら #4369 の `sprint_pr`。残りがあれば `stopped` で、残りの単位と理由を `cause.detail` に書く
@@ -444,7 +478,13 @@ contracts/
 
 ### 単体テストの観点
 
-`tests/progress/test_units_invoke.py`（#4369 が作る。1,000 行を超えるなら `test_units_parallel.py` に分ける）。時計・待ち・`Ports` を差し替え、本物の時間を待たない。観点は設計書のテスト設計の受け入れ条件 3・4、I5・I6、利用上限の行である。
+`tests/progress/test_units_invoke.py`（#4369 が作る。1,000 行を超えるなら `test_units_parallel.py` に分ける）。時計・待ち・`Ports` を差し替え、本物の時間を待たない。観点は設計書のテスト設計の受け入れ条件 3・4、I5・I6、利用上限の行である。次も確かめる。
+
+- 依存の無い単位が上限より多いとき、初回に枠へ入らなかった単位も、枠が空けば起動する
+- 依存のある複数の単位をマージした後の打ち直しは、例外を出さず、残りだけを流す
+- キューでマージした先行の単位は、作業場所が進んだ後にだけ後の単位を始める
+- 打ち直しをまたいでも、キューから外れた PR の再送は 1 回だけである
+- 取得で作業場所が進んだときは、進んだ後のコミットと承認の記録を比べる
 
 ## この変更より前のスプリントの変換（`progress/units_convert.py`）
 
@@ -452,12 +492,15 @@ contracts/
 
 | 関数 | 定義するファイル | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `convert` | `units_convert.py` | 新設 | `(ctx, ports, answer: Optional[str]) -> Optional[StageResult]` | 設計書の決定 10 の「再開点」の表の順に進め、実装へ進めるなら None |
+| `convert` | `units_convert.py` | 新設 | `(ctx, ports, answer: Optional[str]) -> Optional[StageResult]` | 設計書の決定 10 の「再開点」の表の順に進め、照合か再承認まで確かめる。実装へ進めるなら None。単位のファイルがある打ち直しでも毎回通る |
 | `compare` | 同上 | 新設 | `(old: Sequence[Unit], new: Sequence[View]) -> list[str]` | 単位の名前・含むタスク・旧い先に要る単位の違い |
 
-- 変換の担当は、テンプレート `implementation-plan` を `ports.call_plan` で流す。担当への指示は、`kinds.json` の作業 `implementation-plan` の指示の文に足す「実装計画があれば、本文を変えずに単位のファイルを足す」の一文である
+- 変換の担当は、テンプレート `implementation-plan` を `ports.call_plan` で流す。差し込み `convert` を渡し、担当への指示は上の「テンプレート」の変換のときの指示になる。旧い表の「実際の行数」の値は、担当が `units[].actual_lines` へ移す
 - 旧い承認の表は、実装計画を `git show` で読んで `review_units_decide.lineup` に通す。読むコミットは `records.approved_head(v, "design")` の head である
-- 照合が違えば、旧い表と新しい分け方を並べた `reapproval.md` を作業の保存先に書き、`gate` の結果（選択肢は承認と却下）を返す。回答は `{"head", "files", "answer"}` を `reapproval.json` に残し、`files` の中身が今の単位のファイルと同じときだけ有効にする
+- 照合が違えば、先に `design_record.reapproved_of` の記録を読む。`mismatches` が空なら有効で、None を返す
+- 有効な記録が無ければ、旧い表と新しい分け方を並べた `reapproval.md` を作業の保存先に書き、`design_record.converted` の記録を `report.design_target` に持つ `gate` の結果（選択肢は承認と却下）を返す
+- 回答は `ndf answer` が工程「実装」のイベントに書き、payload の `design_target` が記録になる。別のファイルは持たない
+- `ndf progress units run` は回答を受けない。`convert` が `gate` を返したら `stopped`（`precondition`）にし、`ndf progress next <ID>` で再承認を受けるよう理由に書く
 
 | 失敗 | 扱い |
 | --- | --- |
@@ -470,7 +513,8 @@ contracts/
 - 再開点の 4 行
 - 依存を足しただけは違いにしない
 - 旧い表にあった単位の依存（先に要る単位）が変換で消える場合は、承認の回答があるまで実装を流さない
-- 承認の後にファイルを直すと再び問う
+- 承認の後にファイルを直すか、実行対象が変わると再び問う
+- ファイルを作った直後の中断（未コミット・未 push・未再承認）は、打ち直しで続きから進み、実装を始めない
 
 ## 承認した文書の取り込み（`progress/units_sync.py`）
 
@@ -481,7 +525,7 @@ contracts/
 | 関数 | 定義するファイル | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `destination_errors` | `units_sync.py` | 新設 | `(git, record, context, machine_repo: str) -> list[str]` | 送り先のリポジトリとブランチが、スプリントの記録と違う点 |
-| `sync` | 同上 | 新設 | `(st, machine_id, cwd, hub) -> dict` | 確かめてから取り込み、push する |
+| `sync` | 同上 | 新設 | `(st, machine_id, cwd, hub) -> dict` | 確かめてから取り込み、照合して push する |
 
 ### 送り先の確かめ
 
@@ -492,30 +536,28 @@ contracts/
 | 送り先のリポジトリ | `git remote get-url --push --all <remote>` の全行を `git.repo_of_url` に通す | 全行が、記録の `review.repo` と大文字小文字を区別せずに同じ |
 | スプリントのリポジトリ | ステートマシンの `repo`（作成の時点のリモートの URL）を `repo_of_url` に通す | 記録の `review.repo` と同じ |
 | 送り先のブランチ | 文脈の `branch`（工程「作業場所の用意」が書く） | 値があり、文脈の `worktree` の今のブランチと同じ |
-| 配布先として宣言したブランチでないこと | #4369 の `released_branches` | 含まれない |
+| 配布先として宣言したブランチでないこと | #4369 の `released_branches`（`.ndf/project.json` の `branch_strategy` の `branches.base`・`branches.production`・`channels[].ref`・`release.deliveries[].branch`） | 含まれない |
 
-- push は `git push -- <remote> HEAD:refs/heads/<文脈の branch>` で打ち、upstream の設定を使わない
+- push は `git push -- <remote> <照合した HEAD の SHA>:refs/heads/<文脈の branch>` で打ち、upstream の設定を使わない
 - リモート名は `Git.remote()` である
 - URL は認証の値を含みうるので、理由には `<所有者>/<リポジトリ>` だけを出す
 - push 先は取得先と別の URL を設定できるので、取得先の URL では確かめない。`git remote get-url --push --all` は、`pushurl` の全部を 1 行ずつ返す（git 2.53.0 で実行して確かめた）
 
 ### 処理の手順
 
-`sync` の手順は次のとおりである。
+`sync` の手順は次のとおりである。取り込むファイルは、単位のファイルと実装計画と、番号の並びが一致する `-requirements.md`・`-design.md`・`-design-detail.md` である。
 
 1. `approved_of`。無ければ `stopped`
 2. `destination_errors`。1 件でもあれば `stopped`（`refused`）
-3. 記録の PR を読み、マージ済み・head が記録の head・base が記録の base を確かめる。base の正しい宛先は次のとおりである
-   - 通常は `pr_target("doc", <branch>)`
-   - 設計 PR の head がスプリントブランチ自身のとき（`ndf progress next` の経路）は、スプリントの PR の宛先（`pr_target("sprint")`）
-4. スプリントブランチが記録の head を祖先に持てば、何もせず `ok`
-5. 取り込むファイルごとに、`merge-base` から両側の変更を調べる。スプリント側も変えていて中身が違うファイルがあれば `stopped`。取り込むファイルは次のとおりである
-   - 単位のファイルと実装計画
-   - 番号の並びが一致する `-requirements.md`・`-design.md`・`-design-detail.md`
-6. `git checkout <記録の head> -- <ファイル>` してコミットし、push する。コミットの SHA を `<work_root>/design-sync.json` に残し、打ち直しでは、スプリントブランチがそのコミットを含めば `ok`
-7. 取り込んだ内容が記録の head と同じことを確かめる
-
-`ndf progress next` の経路は、手順 4 で `ok` を返して終わる。設計 PR の head がスプリントブランチ自身だからである。
+3. `<work_root>/design-sync.json`（`{"record_head", "commit"}`）の `record_head` が記録の head と同じで、手元に `commit` があれば、リモートのスプリントブランチを取得する
+   - リモートが `commit` を含めば `ok`
+   - 手元の HEAD だけが含めば（push の失敗の後）、手順 8 へ進む
+4. 手元のスプリントブランチが記録の head を祖先に持てば、取り込むものは無いので、PR を読まずに `ok`。`ndf progress next` の経路は、設計 PR の head がスプリントブランチ自身なので、ここで終わる
+5. 記録の PR を読み、マージ済み・head が記録の head・base が記録の base を確かめる。base の正しい宛先は、通常は `pr_target("doc", <branch>)`、設計 PR の head がスプリントブランチ自身なら `pr_target("sprint")` である
+6. 作業場所を検査する。取り込むファイルに未コミットの変更があるか（`git status --porcelain --untracked-files=all -- <ファイル>` が空でない）、マージの途中（`MERGE_HEAD` がある）なら `stopped`（`precondition`）。ファイルを書き換えない。次に `merge-base` から両側の変更を調べる。スプリント側も変えていて中身が違うファイルがあれば `stopped`
+7. `git checkout <記録の head> -- <ファイル>` し、差があれば `git commit -- <ファイル>` でそのファイルだけをコミットする（ほかのステージ済みの変更は含めない）。差が無ければ（コミットの直後に中断した打ち直し）コミットしない。HEAD の SHA を `design-sync.json` に書く
+8. 照合する。HEAD の各ファイルの blob が記録の head の同じファイルと同じでなければ、push せずに `stopped`
+9. 照合した HEAD の SHA を push する。リモートのスプリントブランチを取得し、`design-sync.json` の `commit` を含めば `ok`。push が拒否されれば `precondition`。利用者がリモートを取り込んで打ち直すと、手順 3 から手順 8 へ進む
 
 ### 異常系の処理
 
@@ -524,7 +566,9 @@ contracts/
 | 承認の記録が無い | `precondition` |
 | 送り先の違い | `refused`。項目ごとの記録の値と今の値 |
 | 未マージ・head か base の違い | `precondition`（未マージ）・`refused` |
+| 取り込むファイルの未コミットの変更・マージの途中 | `precondition`。ファイル名 |
 | 競合 | `base_conflict`。ファイル名 |
+| コミットの中身が承認と違う | `refused`。push しない |
 | push の拒否 | `precondition`。強制しない |
 
 ### 単体テストの観点
@@ -534,6 +578,13 @@ contracts/
 - 別のリポジトリの push 先（`pushurl` が 2 つのうち 1 つだけ違う場合を含む）
 - 別のブランチに切り替えた作業場所
 - 文脈に `branch` が無い
+- 取り込むファイルに未コミットの編集がある（編集が残ることも確かめる）
+- コミットの中身が承認した head と違う（commit のフックが書き換える形）
+
+次も確かめる。
+
+- 取り込みと関係ないステージ済みの変更は、コミットに入らない
+- push が拒否された後の打ち直しは、競合にせず送り直し、リモートに届くまで `ok` にしない
 
 ## 実装のプランの確かめ（`progress/units_guard.py`）
 
@@ -563,11 +614,11 @@ contracts/
 
 | サブコマンド | 引数 | 呼ぶ関数 |
 | --- | --- | --- |
-| `ndf progress units run` | `<ステートマシンの ID>`・`--cwd` | 保存した定義の工程「実装」の `StageRun` を組み、`units_invoke.run_stage`。工程のイベントは書かない（supervisor は今のとおり `ndf progress finish` を打つ） |
+| `ndf progress units run` | `<ステートマシンの ID>`・`--cwd` | 最初に `run.decide(v)` を呼び、次の 1 手の工程が「実装」でなければ `stopped`（`precondition`。残る工程の名前）。通れば、保存した定義の工程「実装」の `StageRun` を組み、`units_invoke.run_stage`。工程のイベントは書かない（supervisor は今のとおり `ndf progress finish` を打つ） |
 | `ndf progress units sync` | `[<ID>]`・`--cwd`。`<ID>` を省けば環境変数 `NDF_MACHINE_ID`（工程のステップ `design-sync`）。取り込みは文脈の `worktree` で行う | `units_sync.sync` |
 | `ndf progress units guard` | `--issue`・`--base`・`--branch`・`--unit-file` | `units_guard.guard` |
 
-承認した HEAD、承認の要否、送り先を渡す引数は作らない。`units run` は、単位の経路でないスプリント（欄もファイルも無い）では `precondition` で止まる。`ndf check --write-spec` で `docs/contracts/commands.md`・`env.md`・`contracts/schemas/io/` を生成し直す。
+承認した HEAD、承認の要否、送り先、再承認の回答を渡す引数は作らない。承認の回答だけがあって設計 PR のマージや `design-sync` が残るときは、次の工程が「ドキュメントレビュー」なので始まらない。このことは `test_units_invoke.py` で確かめる。`units run` は、単位の経路でないスプリント（欄もファイルも無い）では `precondition` で止まる。`ndf check --write-spec` で `docs/contracts/commands.md`・`env.md`・`contracts/schemas/io/` を生成し直す。
 
 ## 手順書
 
