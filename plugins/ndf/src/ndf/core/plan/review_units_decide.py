@@ -3,7 +3,7 @@
 本文から単位の並びか、読めない理由を返す。ファイルも git も読まない。読み方は #4369 の設計書の「単位の表の読み方」と
 「順序」にあり、決めた形でない表は行を飛ばさず `UnitsUnreadable` で止める。実装計画の見出しの語もここが持つ。
 見出し・表の始まり・コードブロックは markdown-it-py で読む（判断のモジュールは `ndf.adapters.markdown` を読めない）。
-表は、セルを区切る `|` の無い行の手前で終える。単位の表で、その後ろに `|` のある行が同じ表として続けば読めないとする。
+表は、セルを区切る `|` の無い行の手前で終える。単位の表で、その後ろに単位の行の形をした行が同じ表として続けば読めないとする。
 """
 
 from __future__ import annotations
@@ -84,12 +84,13 @@ class _Heading(NamedTuple):
 class _Table(NamedTuple):
     """表 1 つ。`rows` は (見出しの行, データ行...) のセル。
 
-    `broken` は、後ろに `|` のある行が続くのに `rows` がそこで終わった行の番号（1 始まり）。無ければ None。
+    `stop` は `rows` の次の行の番号（1 始まり）。`rest` は、そこから後で Markdown が同じ表とする行のうち、`|` のある行のセル。
     """
 
     at: int
     rows: list[list[str]]
-    broken: Optional[int]
+    stop: int
+    rest: list[list[str]]
 
 
 class _Doc(NamedTuple):
@@ -123,8 +124,9 @@ def _parse(text: str) -> _Doc:
             # 2 行目は区切りの行。Markdown は空行の無い直後の本文も表の行にするので、`|` の無い行で終える
             data = list(takewhile(inputs_decide.has_cell_separator, lines[start + 2 : end]))
             stop = start + 2 + len(data)
-            broken = stop + 1 if any(map(inputs_decide.has_cell_separator, lines[stop:end])) else None
-            tables.append(_Table(start, [inputs_decide.split_row(line) for line in (lines[start], *data)], broken))
+            rows = [inputs_decide.split_row(line) for line in (lines[start], *data)]
+            rest = [inputs_decide.split_row(line) for line in lines[stop:end] if inputs_decide.has_cell_separator(line)]
+            tables.append(_Table(start, rows, stop + 1, rest))
     return _Doc(tuple(headings), tuple(tables))
 
 
@@ -164,12 +166,23 @@ def _span(found: re.Match[str]) -> range:
     return range(first, int(found["last"] or found["first"]) + 1)
 
 
-def _tasks_cell(cell: str, known: Sequence[int]) -> tuple[int, ...]:
-    out: dict[int, None] = {}
-    for i, element in enumerate(_cell_elements(cell)):
+def _task_items(cell: str) -> Optional[list[re.Match[str]]]:
+    """「含むタスク」の形のセルの要素。形が違えば None。"""
+    out: list[re.Match[str]] = []
+    for element in _cell_elements(cell):
         found = _TASK_ITEM.fullmatch(element)
-        if not found or (i == 0 and not found["prefix"]) or not _span(found):
-            raise _Bad(f"{TASKS_COLUMN}の形が違う: {cell!r}")
+        if not found or (not out and not found["prefix"]) or not _span(found):
+            return None
+        out.append(found)
+    return out
+
+
+def _tasks_cell(cell: str, known: Sequence[int]) -> tuple[int, ...]:
+    items = _task_items(cell)
+    if items is None:
+        raise _Bad(f"{TASKS_COLUMN}の形が違う: {cell!r}")
+    out: dict[int, None] = {}
+    for found in items:
         # 大きな範囲を展開しない。見出しに無い最初の番号で止める
         for number in _span(found):
             if number not in known:
@@ -238,8 +251,6 @@ def _unit_rows(doc: _Doc) -> list[dict[str, str]]:
     table = _first_table(doc, _section(doc, headings[0]))
     if table is None:
         raise _Bad(f"「{UNITS_HEADING}」のセクションに表が無い")
-    if table.broken is not None:
-        raise _Bad(f"単位の表の途中に、セルを区切る `|` の無い行がある（実装計画の {table.broken} 行目）")
     head, *rows = table.rows
     lack = [column for column in REQUIRED_COLUMNS if column not in head]
     if lack:
@@ -248,6 +259,10 @@ def _unit_rows(doc: _Doc) -> list[dict[str, str]]:
     repeated = [column for column in (*REQUIRED_COLUMNS, ORDER_COLUMN) if head.count(column) > 1]
     if repeated:
         raise _Bad(f"単位の表に同じ列が 2 つ以上ある: {'、'.join(repeated)}")
+    # `|` のある行でも、含むタスクの形でなければ表の後ろの補足（インラインコードのパイプなど）
+    at = head.index(TASKS_COLUMN)
+    if any(len(cells) > at and _task_items(cells[at]) is not None for cells in table.rest):
+        raise _Bad(f"単位の表の途中に、セルを区切る `|` の無い行がある（実装計画の {table.stop} 行目）")
     if not rows:
         raise _Bad("単位の表に行が無い")
     return [dict(zip(head, [*cells, *[""] * len(head)])) for cells in rows]
