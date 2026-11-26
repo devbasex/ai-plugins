@@ -137,8 +137,15 @@ class _Reader(Protocol):
     def too_many_pages(self, what: str, pages: int, name: str) -> Exception: ...
 
 
-# マージ済みの PR の 1 ページの中身（番号と、フォークから出たか）
-_MERGED_FIELDS = "pageInfo { hasNextPage endCursor } nodes { number isCrossRepository }"
+class MergedPull(NamedTuple):
+    """マージ済みの PR の番号と、マージで本流へ入ったコミット（GitHub が返さなければ空）。"""
+
+    number: int
+    merge_sha: str
+
+
+# マージ済みの PR の 1 ページの中身（番号・フォークから出たか・マージで本流へ入ったコミット）
+_MERGED_FIELDS = "pageInfo { hasNextPage endCursor } nodes { number isCrossRepository mergeCommit { oid } }"
 # head とマージ先で絞ったマージ済みの PR の続きのページ（新しい順）
 _MERGED_PAGE = (
     "query($owner: String!, $name: String!, $head: String!, $base: String!, $after: String) {"
@@ -155,25 +162,30 @@ def _merged_selection(head: str, base: str) -> str:
     )
 
 
-def _own_number(hub: _Reader, head: str, base: str, conn: dict) -> Optional[int]:
-    """最初のページ `conn` から、このリポジトリのブランチから出た PR が見つかるか末尾に着くまで読んだ番号（無ければ None）。"""
+def _merged_of(node: dict) -> MergedPull:
+    commit = node.get("mergeCommit")
+    return MergedPull(int(node["number"]), text_of(commit.get("oid")) if isinstance(commit, dict) else "")
+
+
+def _own_pull(hub: _Reader, head: str, base: str, conn: dict) -> Optional[MergedPull]:
+    """最初のページ `conn` から、このリポジトリのブランチから出た PR が見つかるか末尾に着くまで読んだ PR（無ければ None）。"""
     pages = int(limits.value("github.list-pages", "count"))
     for page in range(1, pages + 1):
-        number = next((int(n["number"]) for n in conn["nodes"] if not n["isCrossRepository"]), None)
-        if number is not None or not conn["pageInfo"]["hasNextPage"]:
-            return number
+        found = next((_merged_of(n) for n in conn["nodes"] if not n["isCrossRepository"]), None)
+        if found is not None or not conn["pageInfo"]["hasNextPage"]:
+            return found
         if page < pages:
             variables = {"head": head, "base": base, "after": conn["pageInfo"]["endCursor"]}
             conn = hub.repository(_MERGED_PAGE, variables)["pullRequests"]
     raise hub.too_many_pages(f"ブランチ {head} のマージ済みの PR の一覧が", pages, "github.list-pages")
 
 
-def merged_pulls(hub: _Reader, heads: Iterable[str], base: str) -> dict[str, int]:
-    """head のブランチごとの、マージ先が `base` でフォークでないマージ済み PR の番号（新しいもの）。無い head はキーを持たない。
+def merged_pulls(hub: _Reader, heads: Iterable[str], base: str) -> dict[str, MergedPull]:
+    """head のブランチごとの、マージ先が `base` でフォークでないマージ済み PR（新しいもの）。無い head はキーを持たない。
 
     最初のページは head をまとめて読む。一覧はリポジトリで絞れないので、フォークの PR しか無い head は続きを読み、
     `github.list-pages` ページを超えたら、未マージとは扱わずに失敗（`GitHubError`）にする。
     """
     first = hub.aliased({head: _merged_selection(head, base) for head in sorted(set(heads))})
-    found = {head: _own_number(hub, head, base, conn) for head, conn in first.items() if conn}
-    return {head: number for head, number in found.items() if number is not None}
+    found = {head: _own_pull(hub, head, base, conn) for head, conn in first.items() if conn}
+    return {head: pull for head, pull in found.items() if pull is not None}

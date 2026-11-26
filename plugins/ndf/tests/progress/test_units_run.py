@@ -2,7 +2,7 @@
 
 git は手元の作業場所と裸のリモートで本物を打つ。プランの実行（`Ports.call_plan`）とコマンド（`ndf worktree create`・
 `ndf ci merge`）は偽にする。偽の `impl` は単位の作業場所にコミットを足し、回の保存先へ実行の記録・PR の番号・レビューした
-HEAD を書く。偽のマージは単位のブランチをリモートのスプリントブランチへ fast-forward で送る。
+HEAD を書く。偽のマージは単位のブランチをリモートのスプリントブランチへ fast-forward で送り、マージ済みの PR として残す。
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ class _Hub:
 
 class World:
     """スプリントの作業場所・リモートと、偽のプランとコマンドの記録。`fail` は単位の名前 → `impl` が返す止まった結果、
-    `merge` はマージが返す結果の並び（先頭から使い、尽きれば ok）、`merged` は開始時にマージ済みと読む head → PR の番号。"""
+    `merge` はマージが返す結果の並び（先頭から使い、尽きれば ok）、`merged` はマージ済みと読む head → PR（偽のマージが足す）。"""
 
     def __init__(self, tmp_path: Path) -> None:
         self.tmp = tmp_path
@@ -79,7 +79,7 @@ class World:
         self.commands: list[list[str]] = []
         self.fail: dict[str, dict] = {}
         self.merge: list[dict] = []
-        self.merged: dict[str, int] = {}
+        self.merged: dict[str, github_pulls.MergedPull] = {}
 
     def stage_run(self) -> StageRun:
         stage = definition.load_definition("standard").stage("実装")
@@ -115,9 +115,14 @@ class World:
         flag = _flags(words)
         out = self.merge.pop(0) if self.merge else None
         if out is None:
-            _git(cwd, "push", "-q", "origin", f"HEAD:refs/heads/{flag['--base']}")
+            self.land(cwd, flag["--branch"], int(flag["--pr"]))
             out = result.result("ci", result.OK, "マージした", metrics={"merge": "merged"})
         return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
+
+    def land(self, worktree: Path, branch: str, number: int) -> None:
+        """単位の作業場所の HEAD をリモートのスプリントブランチへ送り、マージ済みの PR として残す（GitHub のマージの代わり）。"""
+        _git(worktree, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+        self.merged[branch] = github_pulls.MergedPull(number, _git(worktree, "rev-parse", "HEAD"))
 
     def _create(self, branch: str, cwd: Path) -> subprocess.CompletedProcess[str]:
         path = self.tmp / "wt" / branch
@@ -160,7 +165,7 @@ def world(tmp_path, monkeypatch) -> World:
     monkeypatch.setattr(git.Git, "remote_repo", lambda self, remote=None: "o/r")
     monkeypatch.setattr(github, "GitHub", _Hub)
     monkeypatch.setattr(github, "client", lambda *a, **k: None)
-    monkeypatch.setattr(github_pulls, "merged_pulls", lambda hub, heads, base: {h: n for h, n in w.merged.items() if h in set(heads)})
+    monkeypatch.setattr(github_pulls, "merged_pulls", lambda hub, heads, base: {h: m for h, m in w.merged.items() if h in set(heads)})
     monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     return w
 
@@ -301,7 +306,6 @@ def test_a_rerun_skips_merged_units_and_reviews_the_stopped_unit_again_from_push
     world.fail["書き手"] = _stopped_at("review")
     assert world.run().status == "stopped"
     names = world.unit_names()
-    world.merged = {names["読み手"]: 101}
     world.fail.clear()
     world.runs.clear()
 
@@ -323,6 +327,46 @@ def test_a_rerun_after_a_merge_wait_only_merges_again(world):
     assert got.status == "ok", got.report
     assert [r.overrides["branch"] for r, _ in world.impl_runs()] == list(world.unit_names().values())[1:]
     assert json.loads((world.work / "units" / world.unit_names()["読み手"] / "1" / units_invoke.MERGE_FILE).read_text())["kind"] == "merged"
+
+
+def test_a_rerun_after_the_queue_merged_the_last_unit_moves_the_sprint_worktree_and_opens_the_sprint_pr(world):
+    names = world.unit_names()
+    original = world.command
+    pending = {"count": 0}
+
+    def queue_waits_on_the_last(argv, cwd, env):
+        words = argv[argv.index("ci") :] if "ci" in argv and "worktree" not in argv else []
+        if words[:2] == ["ci", "merge"] and _flags(words)["--branch"] == names["issue-4"]:
+            pending["count"] += 1
+            pending["cwd"] = cwd
+            out = result.stopped("ci", "ci_pending", "マージキューで待つ")
+            return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
+        return original(argv, cwd, env)
+
+    world.command = queue_waits_on_the_last
+    assert world.run().status == "stopped"
+    # 止まった後に、マージキューが最後の単位の PR をマージした
+    world.land(pending["cwd"], names["issue-4"], 103)
+    world.runs.clear()
+
+    got = world.run()
+
+    assert got.status == "ok", got.report
+    assert [i["status"] for i in got.report["items"]] == ["already_merged"] * 3 and world.impl_runs() == []
+    assert world.runs[-1][0].name == "pr" and pending["count"] == 1
+    assert _git(world.sprint, "rev-parse", "HEAD") == _git(world.sprint, "rev-parse", f"origin/{BRANCH}")
+
+
+def test_a_rerun_from_another_branch_stops_before_any_unit(world):
+    world.fail["書き手"] = _stopped_at("review")
+    assert world.run().status == "stopped"
+    _git(world.sprint, "switch", "-q", "-c", "other")
+    world.runs.clear()
+
+    got = world.run()
+
+    assert got.status == "stopped" and got.cause["kind"] == "precondition" and "other" in got.cause["detail"]
+    assert world.runs == []
 
 
 # --- 単位の作業場所 ---------------------------------------------------------------------------------

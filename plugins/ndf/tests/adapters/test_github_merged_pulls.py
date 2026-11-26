@@ -17,11 +17,15 @@ BASE = "sprint/x"
 
 
 def _conn(*nodes: tuple[int, bool], after: str | None = None) -> dict:
-    """マージ済みの PR の 1 ページ。節点は (番号, フォークから出たか)。`after` があれば次のページがある。"""
+    """マージ済みの PR の 1 ページ。節点は (番号, フォークから出たか)。マージコミットは番号から作る。`after` があれば次のページがある。"""
     return {
         "pageInfo": {"hasNextPage": after is not None, "endCursor": after},
-        "nodes": [{"number": n, "isCrossRepository": fork} for n, fork in nodes],
+        "nodes": [{"number": n, "isCrossRepository": fork, "mergeCommit": {"oid": _sha(n)}} for n, fork in nodes],
     }
+
+
+def _sha(number: int) -> str:
+    return f"{number:040x}"
 
 
 class _Server:
@@ -42,7 +46,7 @@ class _Server:
 
 def test_merged_pulls_reads_the_heads_at_once_and_drops_forks_and_unmerged_heads() -> None:
     server = _Server({"a": _conn((12, True), (11, False), (9, False)), "b": _conn((13, True)), "c": _conn()})
-    assert github_pulls.merged_pulls(hub(REPO, server), ["c", "b", "a", "a"], BASE) == {"a": 11}
+    assert github_pulls.merged_pulls(hub(REPO, server), ["c", "b", "a", "a"], BASE) == {"a": github_pulls.MergedPull(11, _sha(11))}
     (sent,) = server.sent
     # マージ先と状態は GitHub 側で絞る
     assert sent["query"].count(f'baseRefName: "{BASE}", states: [MERGED]') == 3
@@ -57,7 +61,7 @@ def test_merged_pulls_of_no_heads_sends_nothing() -> None:
 
 def test_merged_pulls_reads_on_until_a_pull_of_this_repository() -> None:
     server = _Server({"a": _conn((20, True), after="p2")}, [_conn((19, True), after="p3"), _conn((5, False), after="p4")])
-    assert github_pulls.merged_pulls(hub(REPO, server), ["a"], BASE) == {"a": 5}
+    assert github_pulls.merged_pulls(hub(REPO, server), ["a"], BASE) == {"a": github_pulls.MergedPull(5, _sha(5))}
     assert [s["variables"].get("after") for s in server.sent] == [None, "p2", "p3"]
     assert server.sent[1]["variables"]["head"] == "a" and server.sent[1]["variables"]["base"] == BASE
 
