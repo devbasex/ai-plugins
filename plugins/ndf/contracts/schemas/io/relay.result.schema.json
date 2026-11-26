@@ -43,7 +43,7 @@
         },
         "skipped": {
           "type": "integer",
-          "description": "読めずに飛ばした判定の記録の行の数（context calibrate・report）"
+          "description": "読めずに飛ばした判定の記録の行の数（context calibrate・report）か、起床の記録の行の数（cache report）"
         },
         "usage_skipped": {
           "type": "integer",
@@ -69,6 +69,171 @@
             "limits"
           ],
           "description": "上限の出所。マシンの設定・環境変数 NDF_RELAY_MAX_NAMED・上限の設定 relay.max-named（cap）"
+        },
+        "logs": {
+          "type": "integer",
+          "description": "読んだ起床の記録（ラッパーごとの cache-log.jsonl）の数（cache report）"
+        },
+        "waits": {
+          "type": "integer",
+          "description": "集計した待ちの数（cache report）"
+        },
+        "limit_stopped_waits": {
+          "type": "integer",
+          "description": "起床の回数の上限で止めた待ちの数（cache report）"
+        },
+        "unmatched_stopped_waits": {
+          "type": "integer",
+          "description": "起床の応答を突き合わせられずに止めた待ちの数（cache report）"
+        },
+        "wakes": {
+          "type": "integer",
+          "description": "起床の回数。wake と wake_result の wake_id の重複を除いた数（cache report）"
+        },
+        "hit_rate_by_age": {
+          "type": "object",
+          "description": "起床の age の幅（30m・45m・50m・55m・60m・60m+）ごとの、結べた組の数・当たりの数・当たりの率（cache report）",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "wakes",
+              "hits",
+              "rate"
+            ],
+            "properties": {
+              "wakes": {
+                "type": "integer"
+              },
+              "hits": {
+                "type": "integer"
+              },
+              "rate": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "d_median": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "起床の書き込みと出力の費用 d の中央値。費用の分かる起床が無ければ null（cache report）"
+        },
+        "wake_cost_median": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "起床 1 回の実費（読み出しを含む）の中央値（cache report）"
+        },
+        "wait_seconds": {
+          "type": "object",
+          "description": "待ちの長さ（待ちの始まりの応答から待ちを終えた入力まで）の秒の p50・p75・p90（cache report）",
+          "additionalProperties": false,
+          "properties": {
+            "p50": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "p75": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "p90": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          }
+        },
+        "estimated_avoided_rewrites": {
+          "type": "integer",
+          "description": "避けた書き直しの回数の推定（1 つの待ちで最大 1 回。cache report）"
+        },
+        "estimated_avoided_tokens": {
+          "type": "number",
+          "description": "避けた書き直しの token の推定（cache report）"
+        },
+        "estimated_avoided_cost": {
+          "type": "number",
+          "description": "避けた書き直しの費用の差の推定（(w − r) × token − 起床の実費。cache report）"
+        },
+        "voided_waits": {
+          "type": "integer",
+          "description": "取り消した待ち（wait_void）の数。どの集計にも入れない（cache report）"
+        },
+        "partial_waits": {
+          "type": "integer",
+          "description": "wait_start が --since より前か無い待ちの数。どの集計にも入れない（cache report）"
+        },
+        "unmatched_wakes": {
+          "type": "integer",
+          "description": "wake_result の無い wake の数（cache report）"
+        },
+        "orphan_results": {
+          "type": "integer",
+          "description": "wake の無い wake_result の数（cache report）"
+        },
+        "preempted_wakes": {
+          "type": "integer",
+          "description": "割り込みで起床の呼び出しが無かった wake_result の数（cache report）"
+        },
+        "unpriced_waits": {
+          "type": "integer",
+          "description": "費用の分からない起床を持ち、避けた書き直しに入れなかった待ちの数（cache report）"
+        },
+        "by_version": {
+          "type": "object",
+          "description": "claude のバージョン（不明は unknown）ごとの、作業を待つ Stop の数と、取り合いか到着による失効で起床させられなくなった数と率（cache report）",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "contests": {
+                "type": "integer"
+              },
+              "arrivals": {
+                "type": "integer"
+              },
+              "work_stops": {
+                "type": "integer"
+              },
+              "lost_work_stops": {
+                "type": "integer"
+              },
+              "contested_work_stops": {
+                "type": "integer"
+              },
+              "arrival_work_stops": {
+                "type": "integer"
+              },
+              "lost_ratio": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "arrival_work_stops",
+              "arrivals",
+              "contested_work_stops",
+              "contests",
+              "lost_ratio",
+              "lost_work_stops",
+              "work_stops"
+            ]
+          }
         }
       }
     },
@@ -429,6 +594,20 @@
               "null"
             ],
             "description": "使用率のキャッシュの使用率（account list。読めていなければ null）"
+          },
+          "five_hour": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "5 時間の窓の使用率（account list。窓が無い・読めていなければ null）"
+          },
+          "seven_day": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "7 日の窓の使用率（モデル別の週の窓を含む最大。account list。窓が無い・読めていなければ null）"
           },
           "capacity_declared": {
             "type": "object",

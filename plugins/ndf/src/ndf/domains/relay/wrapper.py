@@ -153,7 +153,7 @@ class Launch:
 
 @dataclass
 class Section:
-    """今のセグメント。`screen` は子の画面の末尾、`limit_at` は利用上限の行を見た時刻（壁時計）。
+    """今のセグメント。`screen` は子の画面の末尾、`limit_at` は上限として判断を始めた時刻（壁時計）。
 
     `eof` は擬似端末が終わりを返したマーカー（子が終わった後は読める状態が続くため、見回りの待ちから外す）。
     `launch` はこの子の起動の ID（`NDF_RELAY_LAUNCH`。#3814）。`pending` はこの見回りで読んだ回答待ちの質問、
@@ -173,6 +173,9 @@ class Section:
     last_output: float = 0.0
     handover_asked: bool = False
     limit_at: Optional[float] = None
+    # 画面の上限の行を見て使用率の取り直しを頼んだ時刻（壁時計）と、取り直した API の結果がその行を上限でないと確かめたか（#4404）
+    limit_asked: Optional[float] = None
+    limit_refuted: bool = False
     eof: bool = False
     pending: Optional[dict[str, Any]] = None
     broken: bool = False
@@ -547,15 +550,17 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySte
         return ended
 
     def _cut_choice(self, sec: Section) -> Choice:
-        """カットポイントの起動の要求。`P`（`_pinned_or` を当てた判断の結果）→ `order` の残り。`P` が None なら既定のログイン。"""
+        """カットポイントの起動の要求（`account_decide.choose` の `running`）。替えなければ今のアカウント → 並びの残り。
+
+        今が既定のログイン（None）なら既定のログイン。
+        """
         now = self.wall.now()
-        rows, candidates = self._inputs(now, True).usage.rows, self._candidates(now)
-        pick = account_decide.before_limit(sec.account, rows, candidates, self.s.guards)
-        first = self._pinned_or(pick.account, "cut", sec.account, now)
-        if first is None:
-            return Choice(())
-        rest = account_decide.order(sec.account, rows, candidates, self.s.guards)
-        return Choice((first, *[n for n in rest if n != first]))
+        inputs = self._inputs(now, True)
+        rows = inputs.usage.rows if inputs.usage is not None else []
+        pick = account_decide.choose(
+            "running", sec.account, rows, account_decide.Pool(inputs.candidates(), explicit=self._explicit()), self.s.guards
+        )
+        return Choice(pick.order)
 
     def _on_resume(self, step: switch_decide.Step, sec: Section) -> Optional[Ended]:
         if step.kind == "account" and not sec.must_end:
@@ -654,7 +659,9 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySte
         if req.prompt:
             markers.mark(self.s.state_dir, req.session_id)
         signals.set_launch(self.dir, launch)
+        self.rewake_used = {}  # 今の起動の記録は登録なし。登録を渡す候補だけが `_rewake_child` で書き直す
         signals.drop_other_busy(self.dir, launch)  # 今の起動の記録は子の SessionStart の hook が書く（#4049）
+        self.rewake = self._rewake_plan(self._env_for(None, launch, req.session_id))  # 起床の hook の登録の前提（#4068）
         try:
             got = self._launch_target(req, [CLAUDE, *head, *self.s.args, *once], launch)
         except Halt as halt:
@@ -680,9 +687,8 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySte
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": target.account, "resume": req.resume}
         self._log(log)
         prev_account = prev.account if prev is not None else None
-        self._log(
-            {"kind": "account", "from": prev_account, "account": target.account, "reason": target.reason, "skipped": list(target.skipped)}
-        )
+        row = {"kind": "account", "from": prev_account, "account": target.account, "reason": target.reason, "skipped": list(target.skipped)}
+        self._log({**row, **self.rewake_used})
         return None
 
     def _spin_line(self) -> str:
@@ -704,12 +710,10 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySte
         """再登録が要らず、外した間でなく、`ready` に通る登録済みアカウント（キャッシュのスタンプが変わった名前だけ確かめ直す）。"""
         return self._inputs(now, True).candidates()
 
-    def _pinned_or(self, account: Optional[str], reason: str, current: Optional[str], now: float) -> Optional[str]:
-        """判断の結果 `account` より指定を先に使うか（決定 7。`Inputs.pin_first`）。壊れた指定は `AccountError`。"""
+    def _explicit(self) -> tuple[str, ...]:
+        """明示の名前（指定）。並びで同じ側の先に置く。壊れた指定は `AccountError`。"""
         pin = accounts.pinned(self.s.state_dir)
-        if pin is None or reason in ("guard", "auth", "revoked") and pin == current:
-            return account
-        return pin if self._inputs(now, True).pin_first(pin, self.s.guards) else account
+        return (pin,) if pin else ()
 
     def _tell_at_start(self) -> None:
         """再登録が要るアカウントを 1 つにつき 1 行、従量の接続の設定が壊れているか環境変数の設定を使えなければ 1 行出す（画面だけ）。"""

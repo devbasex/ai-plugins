@@ -1,6 +1,6 @@
 """説明文書の記載を崩すとチェックが失敗することを確かめる。
 
-記号（A〜F）は `issues/old/issue-178-doc-staleness-checks.md` の受け入れ条件に、
+記号（A〜F）は https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/old/issue-178-doc-staleness-checks.md の受け入れ条件に、
 記号（G〜M）は `issues/parallel-batch-03/04-issue-209.md` の「チェックする記載」に対応する。
 """
 

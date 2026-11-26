@@ -22,7 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Iterator, Mapping
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from jsonschema import Draft202012Validator
 
@@ -190,9 +190,34 @@ def validate_stage_output(stage: stages.StageDef, obj: Any) -> list[str]:
     return check_stage_output(stage, obj)[0]
 
 
+class StageInputErrors(NamedTuple):
+    """工程の入力の誤り。`schema` は入力の規約（`stage-in`）と工程の定義に無いキーの誤り、`missing` は足りない `inputs` のキー。"""
+
+    schema: list[str]
+    missing: list[str]
+
+
+def stage_input_errors(stage: stages.StageDef, obj: Any) -> StageInputErrors:
+    """工程の入力（文脈のキーを平らに並べた object。`invoke.resolve_inputs` の形）の誤りを 2 種類に分けて返す（#3959 の決定 10）。
+
+    `schema` は、規約の参照での誤りと、工程の `inputs`・`optional_inputs` に無いキー（文脈のスキーマにあっても拒む）。
+    `missing` は、object のときだけ、工程の `inputs` のうち無いキー。
+    """
+    if stage.input_ref is None:
+        schema = [f"工程 {stage.name} に入力の規約が無い"]
+    else:
+        schema = validate_io(stage.input_ref, obj)
+    if not isinstance(obj, dict):
+        return StageInputErrors(schema, [])
+    known = {*stage.inputs, *stage.optional_inputs}
+    schema += [f"工程 {stage.name} の入力の定義に無いキー {k}" for k in obj if k not in known]
+    return StageInputErrors(schema, [f"文脈のキー {k} が無い" for k in stage.inputs if k not in obj])
+
+
 def validate_stage_input(stage: stages.StageDef, obj: Any) -> list[str]:
-    """工程の入力を、工程の入力の規約と、工程が読む文脈のキー（`inputs`）で確かめる。"""
-    return _validate_stage(stage, obj, stage.input_ref, stage.inputs, "context", "入力")[0]
+    """工程の入力を、工程の入力の規約と、工程が読む文脈のキー（`inputs`）で確かめる（規則は `stage_input_errors` の 1 つ）。"""
+    got = stage_input_errors(stage, obj)
+    return got.schema + got.missing
 
 
 # --- 文書の検査 --------------------------------------------------------------------------
@@ -440,6 +465,24 @@ def load_definition(mode: str) -> stages.Snapshot:
     if mode not in modes():
         raise WorkflowDefError([f"モード {mode} の定義が無い（あるのは {', '.join(modes())}）"])
     return build(contracts.load_json(f"{MODES_DIR}/{mode}.json"), _stage_docs())
+
+
+def stage_io(name: str) -> stages.StageDef:
+    """工程の文書 `name`（`stages/<name>.json`）の入力の規則だけを持つ定義（ステップを持たない）。
+
+    入力の規則（`metadata.ndf.inputs` と入力の規約の参照）はモードに依らないので、モードを読まずに作る（#3959 の `_env_inputs`）。
+    """
+    doc = contracts.load_json(f"{STAGES_DIR}/{name}.json")
+    meta = _ndf_meta(doc)
+    return stages.StageDef(
+        id=doc["document"]["name"],
+        name=meta["stage"],
+        phase=meta["phase"],
+        steps=(),
+        inputs=tuple(meta["inputs"]) if "inputs" in meta else (),
+        optional_inputs=tuple(meta["optional_inputs"]) if "optional_inputs" in meta else (),
+        input_ref=_endpoint(doc, "input"),
+    )
 
 
 def mode_heights() -> dict[str, int]:

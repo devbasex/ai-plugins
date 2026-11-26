@@ -5,7 +5,6 @@
     "ndf.adapters.github",
     "ndf.domains.backlog.issues_gh",
     "ndf.domains.backlog.settle",
-    "ndf.domains.crossreview.threads",
-    "ndf.domains.records.mvv"
+    "ndf.domains.crossreview.threads"
   ]
 }

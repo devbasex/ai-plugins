@@ -35,13 +35,12 @@ from relay_children import (
 def test_next_block_starts_a_new_session_with_the_block_and_a_relay_mark(tmp_path):
     def prepare(d, state):
         register(tmp_path, "team", "main")
-        put_usage(tmp_path, "team", 95.0)
-        put_usage(tmp_path, "main", 10.0)
         accounts.use(state, "team")
 
-    ended, spawn, w = run_wrapper(
-        tmp_path, [FakeChild([b"working\r\n"], None), FakeChild([], 0)], prepare, markers={0: "/goal 次のセグメント"}
-    )
+    first = FakeChild([b"working\r\n"], None)
+    # 使用率は team で起動した後に取れた（最初の起動は記録の無い並びで指定の team）
+    first.started = lambda *_: (put_usage(tmp_path, "team", 95.0), put_usage(tmp_path, "main", 10.0))
+    ended, spawn, w = run_wrapper(tmp_path, [first, FakeChild([], 0)], prepare, markers={0: "/goal 次のセグメント"})
     assert ended.cause == "" and "書かずに終わった" in ended.reason
     (first, first_env), (second, second_env) = spawn.calls
     assert first[:2] == [wrapper.CLAUDE, "--session-id"] and first[3:] == ["--model", "x", "最初の 1 行"]
@@ -335,13 +334,21 @@ def test_i15_short_switches_back_to_launched_accounts_end_on_the_third_return(tm
 
 def test_i15_short_switches_to_first_time_accounts_are_not_counted(tmp_path):
     # 決定 13（替えの扱い）: 初めての起動先への替え（team→main→gmail）は数えず、戻る替え 1 つでは止まらない
-    # 選ぶ順の組で main（余裕）→ gmail（B 越え）→ team（使い切り）の順に並べる
+    # 指定は置かない。最初は余裕の最も大きい team（1%）で起動し、起動の後の取得で team は 50% になる。上限の後は
+    # 今を除いた余裕の大きい順で main（5%）→ gmail（10%）→ main と替える
     rows = [
-        Usage("team", 86.0, 86.0, None, None, False),
+        Usage("team", 50.0, 50.0, None, None, False),
         Usage("main", 5.0, 5.0, None, None, False),
-        Usage("gmail", 75.0, 5.0, 75.0, None, False),
+        Usage("gmail", 10.0, 10.0, None, None, False),
     ]
-    prepare, children = _toggling(tmp_path, rows, [FakeChild([LIMIT_LINE], None) for _ in range(3)] + [FakeChild([], 0)])
+    store = register(tmp_path, "team", "main", "gmail")
+
+    def prepare(d, state):
+        put_usages(store, [rows[0]._replace(percent=1.0, five=1.0), *rows[1:]])
+
+    children = [FakeChild([LIMIT_LINE], None) for _ in range(3)] + [FakeChild([], 0)]
+    for c in children:
+        c.started = lambda *_: put_usages(store, rows)
     ended, spawn, w, _ = _spin_run(tmp_path, children, Clock(), prepare=prepare)
     assert [env["NDF_CLAUDE_ACCOUNT"] for _, env in spawn.calls] == ["team", "main", "gmail", "main"]
     assert ended.cause == "" and rows_of(w, "stop") == []
@@ -369,8 +376,10 @@ def test_state_file_records_the_wrapper_and_the_section(tmp_path):
     }
     assert "NDF_CLAUDE_ACCOUNT" not in env
     rows = log_rows(w)
-    assert [r["kind"] for r in rows] == ["section", "account", "finish", "end"]
-    assert rows[0] == {"at": rows[0]["at"], "section": 1, "kind": "section", "session_id": argv[2], "account": None, "resume": False}
+    # 最初の起動先の判断（#4527）。登録済みアカウントが無いので既定のログイン
+    assert [r["kind"] for r in rows] == ["account_choice", "section", "account", "finish", "end"]
+    assert (rows[0]["scene"], rows[0]["account"]) == ("start", None)
+    assert rows[1] == {"at": rows[1]["at"], "section": 1, "kind": "section", "session_id": argv[2], "account": None, "resume": False}
     assert rows[-1] == {"at": rows[-1]["at"], "section": 1, "kind": "end", "cause": "", "reason": ended.reason}
 
 

@@ -231,7 +231,7 @@ def fixer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[st
         "どの基準にも当たらない理由を添えて見送る（deferred）。",
         *criteria_lines(focus, mvv),
         f"当たらないもの: {'・'.join(t['not_written'])}",
-        t["out_of_scope"],
+        t["out_of_scope"] + t["defer"],
         *_mvv_lines("fixer", mvv),
     ]
 

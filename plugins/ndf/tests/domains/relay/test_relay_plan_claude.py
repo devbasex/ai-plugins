@@ -322,7 +322,7 @@ def _metered_parent(fake: Fake, decl: str = BEDROCK_DECL) -> dict[str, str]:
     # 親の環境はラッパーのもの（`ndf plan` はこの子の環境をそのまま継ぐ。手元の AWS_PROFILE なども親の値のまま入る）
     environ = {**os.environ, "CLAUDE_CONFIG_DIR": str(fake.tmp / "claude"), "NDF_SUPERVISE_CLAUDE_FALLBACK": decl}
     child = session_env.child_env(environ, _state(), reg.METERED, decided=True)
-    built = account_choice.target_env(child, reg.METERED, fake.store, _state(), fake.cwd, [str(fake.exe), *FULL])
+    built = account_choice.target_env(child, reg.METERED, fake.store, _state(), account_choice.LaunchArgs(fake.cwd, [str(fake.exe), *FULL]))
     assert isinstance(built, account_choice.Built), built
     assert built.pin is not None and built.env["NDF_RELAY_PIN"] == built.pin
     return built.env
@@ -423,7 +423,9 @@ def test_d12_a_metered_api_key_parent_does_not_launch(tmp_path, monkeypatch):
 def _key_env(fake: Fake) -> dict[str, str]:
     environ = {"CLAUDE_CONFIG_DIR": str(fake.tmp / "claude")}
     child = session_env.child_env(environ, _state(), "key:key-main", decided=True)
-    built = account_choice.target_env(child, "key:key-main", fake.store, _state(), fake.cwd, [str(fake.exe), *FULL])
+    built = account_choice.target_env(
+        child, "key:key-main", fake.store, _state(), account_choice.LaunchArgs(fake.cwd, [str(fake.exe), *FULL])
+    )
     assert isinstance(built, account_choice.Built), built
     assert built.pin == "key:key-main:gen-1"
     for path in (built.settings_file, built.pin_file):

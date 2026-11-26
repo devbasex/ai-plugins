@@ -210,14 +210,17 @@ def locations(tmp_path, monkeypatch):
 
 
 def _expect(copy, entry, states, warnings=None, wrote_version=False) -> dict:
-    items = [{"path": str(copy), "state": states[0]}, {"path": str(entry), "state": states[1]}]
+    ndf = entry.parent / "ndf"
+    if len(states) == 2:
+        states = (*states, states[1])
+    items = [{"path": str(copy), "state": states[0]}, {"path": str(entry), "state": states[1]}, {"path": str(ndf), "state": states[2]}]
     if wrote_version:
         # 複製を置き換えたときは relay.version に自分のバージョンを書いた行が足される（#3341 の規則 P3）
         items.append({"path": str(copy.parent / "relay.version"), "version": identity.version_of(identity.load().root)})
     out = {
         "tool": "relay",
         "status": "ok",
-        "summary": f"複製: {states[0]}（{copy}）・エントリポイント: {states[1]}（{entry}）",
+        "summary": f"複製: {states[0]}（{copy}）・エントリポイント: {states[1]}（{entry}）・ndf: {states[2]}（{ndf}）",
         "items": items,
         "metrics": {},
     }
@@ -240,7 +243,20 @@ def test_install_status_uninstall_report_both_locations(locations, monkeypatch, 
     assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours"))
     assert cli.main(["uninstall"]) == 0
     assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("absent", "absent"))
-    assert not copy.exists() and not entry.exists()
+    assert not copy.exists() and not entry.exists() and not (entry.parent / "ndf").exists()
+
+
+def test_install_leaves_a_users_own_ndf_and_status_reports_it_as_foreign(locations, monkeypatch, capsys, last_result):
+    copy, entry = locations
+    monkeypatch.setenv("PATH", str(entry.parent))
+    mine = entry.parent / "ndf"
+    mine.parent.mkdir(parents=True)
+    mine.write_text("#!/bin/sh\necho mine\n", encoding="utf-8")
+    assert cli.main(["install"]) == 0
+    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("ours", "ours", "foreign"), wrote_version=True)
+    assert cli.main(["uninstall"]) == 0
+    assert last_result(capsys.readouterr().out) == _expect(copy, entry, ("absent", "absent", "foreign"))
+    assert mine.read_text(encoding="utf-8") == "#!/bin/sh\necho mine\n"
 
 
 def test_install_keeps_an_old_copy_and_replace_old_refuses_while_an_old_wrapper_runs(locations, tmp_path, monkeypatch, capsys, last_result):

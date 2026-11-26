@@ -9,6 +9,10 @@
 動いていれば `store_in_use`、退避先が既にあれば `precondition`、ほかは `config_broken`）。
 使い方の表示（サブコマンドなし・`--help`）と知らないサブコマンドは保存先に触れない。
 
+結果の形の明示 `--output-format=json|text`（`--output-format json` も可）は、サブコマンドの名前より前に置いたものだけをエントリポイントで
+1 回読み、`result.choose_format` へ渡す（#4003）。サブコマンドの後ろは読まない（`ndf relay claude` などは後ろの引数を子の
+`claude` へそのまま渡し、`claude` も同じ名前の引数を持つ）。明示が無ければ、標準出力が端末のときは文、ほかは結果 JSON で出す。
+
 どのサブコマンドも結果 JSON を 1 行出して終わる。内部データの読み書きの例外は `stopped`（種類は `InternalError.kind`）、ほかの
 サブコマンドが捕まえない例外は `stopped`（種類 `unknown`）、使い方の誤り
 （argparse の終了コード 2 の `SystemExit`）は `stopped`（種類 `invalid`）の結果 JSON をここで出す（#3394）。
@@ -118,19 +122,45 @@ def tool_of(module: str) -> str:
     return _TOOL_OF[module]
 
 
+# 結果の形を明示する引数（サブコマンドの名前より前にだけ置ける）の使い方の書き方
+FORMAT_USAGE = "[--output-format=json|text]"
+
+
 def _usage(name: str) -> str:
-    lines = [f"使い方: {name} <サブコマンド> [引数...]", "サブコマンド:"]
+    lines = [f"使い方: {name} {FORMAT_USAGE} <サブコマンド> [引数...]", "サブコマンド:"]
     lines += [f"  {cmd}" for cmd in sorted(COMMANDS) if cmd not in DEVELOPER_COMMANDS]
     return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    fmt, args, bad = _output_format(args)
+    result.choose_format(fmt)
     try:
+        if bad is not None:
+            return _stop(TOOL, "invalid", bad)
         return _run(args)
     except contracts.ContractError as exc:
         # コントラクトの表（停止理由・終了コード）そのものが読めないときは、表を使わずに config_broken を出す
         return result.emit_unchecked(TOOL, "config_broken", f"コントラクトのファイルが読めない: {exc}")
+    finally:
+        result.choose_format(None)
+
+
+def _output_format(args: list[str]) -> tuple[str | None, list[str], str | None]:
+    """サブコマンドの名前より前の `--output-format` を読む。明示の形（無ければ None）・残りの引数・誤りの文（無ければ None）。
+
+    名前は `claude` の同じ名前の引数とそろえたが、NDF の引数で別の事実なので、`adapters.claude` の定数とは共有しない。"""
+    option = "--output-format"
+    fmt: str | None = None
+    rest = list(args)
+    while rest and rest[0].partition("=")[0] == option:
+        head = rest.pop(0)
+        value = head.partition("=")[2] if "=" in head else (rest.pop(0) if rest else "")
+        if value not in result.FORMATS:
+            return None, rest, f"{option} の値は {' か '.join(result.FORMATS)}（渡された値: {value or '無し'}）"
+        fmt = value
+    return fmt, rest, None
 
 
 def _stop(tool: str, kind: str, detail: str, items: list[dict[str, str]] | None = None) -> int:

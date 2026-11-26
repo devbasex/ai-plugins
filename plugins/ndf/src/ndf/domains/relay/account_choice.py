@@ -142,6 +142,16 @@ def candidates(env: Mapping[str, str], store: Path, state_dir: Path, now: float,
 Decl = tuple[dict[str, str], bool]  # 従量の接続の設定（変数の組、保存した設定か）
 
 
+class LaunchArgs(NamedTuple):
+    """替え先を用意する起動の作業ディレクトリと起動引数。`decl` は呼び手が読んだ従量の接続の設定（`metered_of` の値）で、
+    在れば読み直さない（ラッパーがバージョンの判定と起動に同じ設定を使う。#4068）。
+    """
+
+    cwd: Path
+    argv: list[str]
+    decl: Union[Decl, str, None] = None
+
+
 def metered_decl(store: Path, environ: Mapping[str, str]) -> Union[Decl, str, None]:
     """従量の接続の設定。無ければ None、使えなければ値を含まない理由の符号（詳細設計書の「従量の接続の設定の検証」）。
 
@@ -164,11 +174,15 @@ def _is_key(decl: Decl) -> bool:
     return not decl[1] and reg.metered_kind(decl[0]) == reg.API_KEY_KIND
 
 
-def key_child(env: Mapping[str, str], target: str, store: Path) -> bool:
-    """キーの子か（登録簿の API キーの子と、環境変数の設定が API キーの設定の従量の接続。別冊の「キーの子」）。"""
+def key_child(env: Mapping[str, str], target: str, store: Path, decl: Optional[Decl] = None) -> bool:
+    """キーの子か（登録簿の API キーの子と、環境変数の設定が API キーの設定の従量の接続。別冊の「キーの子」）。
+
+    `decl` は呼び手が候補ごとに 1 回だけ読んだ従量の接続の設定（在れば読み直さない。#4068）。
+    """
     if target.startswith(KEY_PREFIX):
         return True
-    decl = metered_decl(store, env) if target == reg.METERED else None
+    if decl is None:
+        decl = metered_decl(store, env) if target == reg.METERED else None
     return isinstance(decl, tuple) and _is_key(decl)
 
 
@@ -322,13 +336,52 @@ def _key_build(
     return got if isinstance(got, str) else got._replace(generation=gen)
 
 
-def _decl_of(store: Path, env: Mapping[str, str]) -> Union[Decl, str]:
+def metered_of(store: Path, env: Mapping[str, str]) -> Union[Decl, str]:
+    """従量の接続の設定。無い・読めない・検証に外れれば理由の符号。ラッパーは候補ごとに 1 回だけ読んで用意とバージョンの判定へ渡す（#4068）。"""
     decl = metered_decl(store, env)
     if decl is None:
         return "metered_unavailable"
     if isinstance(decl, str):
         return "metered_unclassified" if decl in ("unclassified", "headers") else "metered_unavailable"
     return decl
+
+
+_decl_of = metered_of
+
+
+def _decl_or_read(store: Path, env: Mapping[str, str], decl: Union[Decl, str, None]) -> Union[Decl, str]:
+    """呼び手が読んだ従量の接続の設定（`LaunchArgs.decl`）。無ければ `metered_of` で読み直す。"""
+    return metered_of(store, env) if decl is None else decl
+
+
+def with_settings(argv: list[str], settings: str) -> list[str]:
+    """起動の引数の頭（`claude` と `--session-id`・`--resume` の 2 語）の直後に `--settings <JSON>` を差し込む。"""
+    return [*argv[:3], "--settings", settings, *argv[3:]]
+
+
+def merged_settings(argv: list[str], settings: str) -> list[str]:
+    """キーの子の 1 つの `--settings` の JSON の `hooks.Stop` に、起床の hook の登録を足す（`--settings` を 2 つにしない）。"""
+    at = argv.index("--settings") + 1
+    got = json.loads(argv[at])
+    hooks = got.setdefault("hooks", {})
+    hooks["Stop"] = [*hooks.get("Stop", []), *json.loads(settings)["hooks"]["Stop"]]  # noqa: NDF502 利用者の入力: Stop の無い設定は空の並び
+    return [*argv[:at], json.dumps(got), *argv[at + 1 :]]
+
+
+def has_settings(args: Sequence[str]) -> bool:
+    """受け継ぐ引数に利用者の `--settings`（`--settings <値>` と `--settings=<値>`）があるか。"""
+    return any(a == "--settings" or a.startswith("--settings=") for a in args)
+
+
+def version_env(env: Mapping[str, str], decl: Optional[Decl]) -> dict[str, str]:
+    """起動する claude のバージョンを読む環境（#4068）。従量の接続なら親の認証の変数と比べる変数を外し、設定の `PATH` だけを重ねる。
+
+    設定の資格情報と接続先は重ねない（`--version` は認証も接続も要らない）。従量の接続でなければ `env` のまま。
+    """
+    if decl is None:
+        return dict(env)
+    extra, _ = decl
+    return session_env.metered_env(env, {k: v for k, v in extra.items() if k == "PATH"}, saved=True)
 
 
 def build(
@@ -629,29 +682,29 @@ def _write_new(path: Path, text: str) -> None:
         os.close(fd)
 
 
-def _launch_made(
-    env: Mapping[str, str], store: Path, cwd: Path, argv: list[str], pin: Path, record: Optional[tuple[Path, str]]
-) -> Union[Made, str]:
-    """起動するキーの子の `Made`（(b) の形の起動引数）。登録簿のキーか従量の接続かは `env` の `NDF_CLAUDE_ACCOUNT` で決める。"""
+def _launch_made(env: Mapping[str, str], store: Path, args: LaunchArgs, tail: list[str]) -> Union[Made, str]:
+    """起動するキーの子の `Made`（(b) の形の起動引数）。登録簿のキーか従量の接続かは `env` の `NDF_CLAUDE_ACCOUNT` で決める。
+    `tail` は `_tail` の末尾の引数。"""
     target = env.get("NDF_CLAUDE_ACCOUNT") or ""  # noqa: NDF501 利用者の入力: 名前の無い環境は従量の接続として扱う
     if target.startswith(KEY_PREFIX):
-        return _key_build(env, target[len(KEY_PREFIX) :], _book(store), argv, _tail(pin, record), _source(argv, cwd))
-    decl = _decl_of(store, env)
-    return decl if isinstance(decl, str) else _build(env, decl, cwd, argv, _tail(pin, record))
+        return _key_build(env, target[len(KEY_PREFIX) :], _book(store), args.argv, tail, _source(args.argv, args.cwd))
+    decl = _decl_or_read(store, env, args.decl)
+    return decl if isinstance(decl, str) else _build(env, decl, args.cwd, args.argv, tail)
 
 
 def key_target(
-    env: Mapping[str, str], store: Path, state_dir: Path, cwd: Path, argv: list[str], record: Optional[tuple[Path, str]]
+    env: Mapping[str, str], store: Path, state_dir: Path, args: LaunchArgs, record: Optional[tuple[Path, str]]
 ) -> Union[Built, str]:
     """キーの子（API キーの設定の従量の接続）の替え先。固定のファイルのパスを決めて (b) の形の起動引数で確かめ、通れば
     `Resolved.pins` を固定のファイルへ書く（別冊の「確かめた設定への固定」）。`record` はラッパーの払い出しの記録先と helper の ID
     （`ndf plan` は None）。キーの子でなければ `target_env` と同じ。登録簿のキーの子かは `env` の `NDF_CLAUDE_ACCOUNT` で決める
-    （引数の上限のため。`child_env(…, account=target, decided=True)` の出力が持つ）。
+    （引数の上限のため。`child_env(…, account=target, decided=True)` の出力が持つ）。`args.decl` は `LaunchArgs` のとおり。
     """
     registry = (env.get("NDF_CLAUDE_ACCOUNT") or "").startswith(KEY_PREFIX)  # noqa: NDF501 利用者の入力: 名前の無い環境は従量の接続
-    decl = _decl_of(store, env)
+    decl = _decl_of(store, env) if args.decl is None else args.decl
+    cwd, argv = args.cwd, args.argv
     if not registry and (isinstance(decl, str) or not _is_key(decl)):
-        return target_env(env, reg.METERED, store, state_dir, cwd, argv)
+        return target_env(env, reg.METERED, store, state_dir, LaunchArgs(cwd, argv, decl))
     start = reg.proc_start(os.getpid())
     try:
         d = _settings_dir(state_dir)
@@ -662,7 +715,7 @@ def key_target(
     _sweep(d)
     stem = f"{os.getpid()}-{start:.2f}-{secrets.token_hex(8)}"
     pin_file = d / f"{stem}{PIN_SUFFIX}"
-    got = _launch_made(env, store, cwd, argv, pin_file, record)
+    got = _launch_made(env, store, LaunchArgs(cwd, argv, None if registry else decl), _tail(pin_file, record))
     if isinstance(got, str):
         return got
     child, final, helper, from_file, gen, pin = got
@@ -682,23 +735,24 @@ def key_target(
     return reason
 
 
-def target_env(env: Mapping[str, str], target: str, store: Path, state_dir: Path, cwd: Path, argv: list[str]) -> Union[Built, str]:
+def target_env(env: Mapping[str, str], target: str, store: Path, state_dir: Path, args: LaunchArgs) -> Union[Built, str]:
     """確定した替え先の子の環境と最終の起動引数。使えなければ値を含まない理由の符号を返す。
 
     登録済みアカウントは `prepare` の後に `account_env`（`Built.resolved` は `Prepared.resolved`。理由は `prepare` の
     `Prepared.reason`）。`metered` は `build` の後に `verify` を当て、外れれば `metered_overridden`・`key_gate` を返す。キーの子は
     確かめた設定への固定のファイル（`Built.pin_file`）と、元の `--settings` がファイルなら合成の一時ファイル（`Built.settings_file`）を
     書く（払い出しの記録先を helper へ渡す起動は `key_target`）。
-    `env` は `child_env(…, account=target, decided=True)` の出力。
+    `env` は `child_env(…, account=target, decided=True)` の出力。`args.decl` は `LaunchArgs` のとおり。
     """
+    cwd, argv = args.cwd, args.argv
     if target.startswith(KEY_PREFIX):
-        return key_target({**env, "NDF_CLAUDE_ACCOUNT": target}, store, state_dir, cwd, argv, None)
+        return key_target({**env, "NDF_CLAUDE_ACCOUNT": target}, store, state_dir, LaunchArgs(cwd, argv), None)
     if target == reg.METERED:
-        decl = _decl_of(store, env)
+        decl = _decl_of(store, env) if args.decl is None else args.decl
         if isinstance(decl, str):
             return decl
         if _is_key(decl):
-            return key_target(env, store, state_dir, cwd, argv, None)
+            return key_target(env, store, state_dir, LaunchArgs(cwd, argv, decl), None)
         got = _build(env, decl, cwd, argv, [])
         if isinstance(got, str):
             return got
@@ -725,17 +779,13 @@ def reverify(built: Built, cwd: Path) -> Optional[str]:
 
 
 def guards() -> account_decide.Guards:
-    """閾値 A・B・C（`relay.five-hour-guard`・`relay.weekly-prefer`・`relay.weekly-guard`）。"""
-    return account_decide.Guards(
-        limits.value("relay.five-hour-guard", "count"),
-        limits.value("relay.weekly-prefer", "count"),
-        limits.value("relay.weekly-guard", "count"),
-    )
+    """閾値 A・C（`relay.five-hour-guard`・`relay.weekly-guard`）。"""
+    return account_decide.Guards(limits.value("relay.five-hour-guard", "count"), limits.value("relay.weekly-guard", "count"))
 
 
 def _limited_rows(store: Path, now: float, name: str) -> list[account_decide.Usage]:
     """今のアカウントを上限とした使用率の行（上限を見た直後で、取得の記録はまだ上限を写していないことがある）。"""
-    rows, _ = accounts.usage_rows(store, now, {n: a.generation for n, a in registered(store).items()}, {})
+    rows, _ = accounts.usage_rows(store, now, {n: a.generation for n, a in registered(store).items()})
     mine = account_decide.Usage(name, None, None, None, None, True)
     return [r._replace(limited=True) if r.name == name else r for r in rows] + ([] if any(r.name == name for r in rows) else [mine])
 
@@ -751,7 +801,7 @@ def retry_env(
 ) -> Optional[tuple[Built, str]]:
     """`ndf plan` の上限での打ち直しの替え先（決定 9）。返りは（`target_env` の `Built`、替え先の名前）か None。
 
-    `env` の `NDF_CLAUDE_ACCOUNT` を上限として `after_limit` を呼び、`switch` なら `target_env` を打つ。`keys` が偽なら
+    `env` の `NDF_CLAUDE_ACCOUNT` を上限（`claude -p` が受けた API の上限の応答）として `choose` の `limit` を呼び、`switch` なら `target_env` を打つ。`keys` が偽なら
     キーの子（API キーの設定の従量の接続と登録簿の API キー）を替え先にしない（`call_claude` の起動の形がキーを渡せないとき）。
     登録済みアカウントの名前でない・`wait_reset`・`target_env` が理由の符号を返したら None（符号は標準エラーの 1 行）。
     """
@@ -765,11 +815,13 @@ def retry_env(
     decl = metered_decl(store, env)
     probes = fallbacks(read, env, decl if isinstance(decl, tuple) else None, cwd, argv, frozenset())
     usable = [p.name for p in probes if p.reason is None]
-    pick = account_decide.after_limit(account.name, rows, candidates(env, store, state_dir, now, cwd, argv), usable, guards())
+    pick = account_decide.choose(
+        "limit", account.name, rows, account_decide.Pool(candidates(env, store, state_dir, now, cwd, argv), usable), guards()
+    )
     if pick.kind != "switch" or pick.account is None:
         return None
     child = session_env.child_env(env, state_dir, pick.account, decided=True)
-    got = target_env(child, pick.account, store, state_dir, cwd, argv)
+    got = target_env(child, pick.account, store, state_dir, LaunchArgs(cwd, argv))
     if isinstance(got, str):
         print(f"ndf plan: 替え先 {pick.account} を用意できない（{got}）。打ち直さない", file=sys.stderr)
         return None

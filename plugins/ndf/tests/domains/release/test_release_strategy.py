@@ -14,7 +14,8 @@ from typing import Any
 
 import pytest
 
-from ndf.adapters.github import Authored, RuleFacts
+from ndf.adapters.github import Authored
+from ndf.adapters.github_rules import RuleFacts
 from ndf.core.branch_strategy import Strategy
 from ndf.domains.release import approval_decide, land, route_decide, trail
 

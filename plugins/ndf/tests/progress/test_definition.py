@@ -200,9 +200,47 @@ def test_output_that_breaks_the_contract_is_caught():
 
 
 def test_input_needs_the_declared_context_keys():
+    # #3959 受け入れ条件 9: 工程の入力は、プランが組むのと同じ平らな object（文脈のキーを並べたもの）
     stage = definition.load_definition("standard").stage("作業場所の用意")
-    assert definition.validate_stage_input(stage, {"context": {"issues": [1]}}) == []
-    assert definition.validate_stage_input(stage, {"context": {}}) == ["context: 文脈のキー issues が無い"]
+    assert definition.validate_stage_input(stage, {"issues": [1]}) == []
+    assert definition.validate_stage_input(stage, {}) == ["文脈のキー issues が無い"]
+
+
+DESIGN_INPUT = {"issues": [1], "worktree": "/work/a", "mode": "standard", "pace": "normal", "mvv_ref": "a" * 64}
+
+
+def test_a_nested_context_is_both_a_schema_error_and_missing_keys():
+    stage = definition.load_definition("standard").stage("設計")
+    got = definition.stage_input_errors(stage, {"context": DESIGN_INPUT})
+    assert got.schema and got.missing
+    assert definition.validate_stage_input(stage, {"context": DESIGN_INPUT}) == got.schema + got.missing
+
+
+def test_the_flat_design_input_passes_and_a_key_not_declared_by_the_stage_is_refused():
+    stage = definition.load_definition("standard").stage("設計")
+    assert definition.stage_input_errors(stage, DESIGN_INPUT) == ([], [])
+    # 文脈のスキーマにあるキーでも、工程の inputs・optional_inputs に無ければ拒む（resolve_inputs が渡さないキー）
+    got = definition.stage_input_errors(stage, {**DESIGN_INPUT, "design_pr": 4})
+    assert got.schema == ["工程 設計 の入力の定義に無いキー design_pr"] and got.missing == []
+
+
+def test_a_non_object_input_is_only_a_schema_error():
+    stage = definition.load_definition("standard").stage("設計")
+    got = definition.stage_input_errors(stage, [DESIGN_INPUT])
+    assert got.schema and got.missing == []
+
+
+@pytest.mark.parametrize(("name", "mode"), [("design", "standard"), ("deploy", "standard")])
+def test_stage_io_reads_the_inputs_of_the_stage_without_the_mode(name, mode):
+    loaded = next(s for s in definition.load_definition(mode).stages if s.id == name)
+    got = definition.stage_io(name)
+    assert (got.name, got.inputs, got.optional_inputs, got.input_ref, got.steps) == (
+        loaded.name,
+        loaded.inputs,
+        loaded.optional_inputs,
+        loaded.input_ref,
+        (),
+    )
 
 
 @pytest.mark.parametrize("key", ["delivery", "mvv_gate"])

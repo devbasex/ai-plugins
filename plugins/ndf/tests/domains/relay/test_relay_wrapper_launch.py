@@ -1,7 +1,7 @@
 """ラッパーの候補を試す起動・指定の読み直し・書き戻し・知らせ（U8。#3604 #3864）。
 
 設計書の「テスト設計」の 3604:1・3604:3・3604:7・3604:8・3604:9・3864:8・3864:11 の行と、詳細設計書の「ラッパー」の
-「単体テストの観点」の `_start`・`_launch_target`・`_initial`・`_on_switch`・`_pinned_or`・`account` の行・`_settle`・
+「単体テストの観点」の `_start`・`_launch_target`・`_initial`・`_on_switch`・`account` の行・`_settle`・
 `_tell_at_start` と、「共有の替え先」の `build`・`verify`・`target_env` の従量の接続の行を縛る。
 値はすべて偽の値で、実のアカウントを使わない。
 """
@@ -61,8 +61,8 @@ def test_3604_1_pinned_account_runs_in_its_config_dir_through_the_gate(tmp_path)
 
 
 def test_3604_3_default_login_child_env_is_the_plain_child_env(tmp_path):
-    # 受け入れ条件 #3604 の 3: 指定も環境変数も無い既定のログインの子の環境は今の child_env と同じ（関所を通さない）
-    register(tmp_path, "work1")
+    # 受け入れ条件 #3604 の 3: 登録済みアカウントの無い既定のログインの子の環境は今の child_env と同じ（関所を通さない）
+    register(tmp_path)
     ended, spawn, w, _ = _run(tmp_path, [FakeChild([], 0)])
     (_, env) = spawn.calls[0]
     s = make_settings(tmp_path)
@@ -71,10 +71,10 @@ def test_3604_3_default_login_child_env_is_the_plain_child_env(tmp_path):
     assert spawn.gated == [] and rows_of(w, "account")[0]["account"] is None
 
 
-def test_3604_3_a_child_that_fell_back_to_the_default_login_has_no_account_name(tmp_path):
+def test_3604_3_a_child_that_fell_back_to_the_default_login_has_no_account_name(tmp_path, monkeypatch):
     # 受け入れ条件 #3604 の 3: 環境変数の work1 の用意に落ちて既定のログインへ移った子は NDF_CLAUDE_ACCOUNT が無い
     store = register(tmp_path, "work1")
-    (store / "work1" / reg.CRED_FILE).unlink()
+    _break_after_initial(monkeypatch, store, "no_credentials")
     environ = {**make_settings(tmp_path).environ, "NDF_CLAUDE_ACCOUNT": "work1"}
     ended, spawn, w, _ = _run(tmp_path, [FakeChild([], 0)], environ=environ)
     (_, env) = spawn.calls[0]
@@ -99,18 +99,31 @@ def _break(store, how):
         (acc / reg.CRED_FILE).symlink_to(outside)
 
 
+def _break_after_initial(monkeypatch, store, how):
+    """最初の起動先を決めた後（候補を確かめた後）に work1 を壊す（用意の前に壊れた名前を飛ばす配線を確かめる）。"""
+    real = wrapper.Wrapper._initial
+
+    def initial(self, now):
+        choice = real(self, now)
+        _break(store, how)
+        return choice
+
+    monkeypatch.setattr(wrapper.Wrapper, "_initial", initial)
+
+
 @pytest.mark.parametrize("how", ["no_credentials", "no_refresh", "identity_mismatch", "legacy_config", account_dir.NOT_LOCAL])
 def test_3604_8_each_reason_skips_the_name_with_one_line_and_starts_the_next(tmp_path, monkeypatch, how):
     # 受け入れ条件 #3604 の 8: 理由ごとに子を起動せず、画面に 1 行と log.jsonl に 1 行が出て、次の候補（指定の work2）で起動する。
     # 外した名前へは prepare を打たない
     store = register(tmp_path, "work1", "work2")
-    _break(store, how)
+    _break_after_initial(monkeypatch, store, how)
     prepared = []
     real = account_dir.prepare
     monkeypatch.setattr(account_dir, "prepare", lambda st, n, *a: (prepared.append(n), real(st, n, *a))[1])
     environ = {**make_settings(tmp_path).environ, "NDF_CLAUDE_ACCOUNT": "work1"}
     ended, spawn, w, shown = _run(tmp_path, [FakeChild([], 0)], lambda state: accounts.use(state, "work2"), environ=environ)
-    assert _envs(spawn) == ["work2"] and prepared == ["work2"]
+    # 旧い形の設定ファイルは起動の前の確かめ（ready）が見ないので、用意（prepare）が落として飛ばす
+    assert _envs(spawn) == ["work2"] and prepared == (["work1", "work2"] if how == "legacy_config" else ["work2"])
     line = launch_target.SKIP_LINE.format(name="work1", why=account_dir.REASONS[how].format(name="work1"))
     assert shown.count(line) == 1
     assert [r["reason"] for r in rows_of(w, "account_dir") if r["account"] == "work1"] == [how]
@@ -177,57 +190,23 @@ def test_3604_7_settle_runs_at_each_section_end_and_at_the_wrapper_end(tmp_path,
     assert not list(reg.lease_dir(store, "work1").glob("*.json"))
 
 
-def test_3864_8_a_pin_changed_while_running_applies_to_the_next_section(tmp_path):
-    # 受け入れ条件 #3864 の 8: 動いているラッパーで指定を work2 にすると、次のセグメントが work2 で起動する
-    register(tmp_path, "work1", "work2")
-
-    class Repin(Spawner):
-        def __call__(self, argv, env, cwd, pass_fds=()):
-            child = super().__call__(argv, env, cwd, pass_fds)
-            accounts.use(tmp_path / "state", "work2")
-            return child
-
-    children, markers = _two()
-    ended, spawn, w, _ = _run(tmp_path, children, lambda state: accounts.use(state, "work1"), markers, spawner=Repin)
-    assert _envs(spawn) == ["work1", "work2"]
-    assert [(r["from"], r["account"], r["reason"]) for r in rows_of(w, "account")] == [(None, "work1", "first"), ("work1", "work2", "cut")]
-
-
-def _cut(tmp_path, usages):
-    register(tmp_path, *usages)
-    for n, five in usages.items():
-        put_usage(tmp_path, n, five)
-    environ = {**make_settings(tmp_path).environ, "NDF_CLAUDE_ACCOUNT": "work1"}
-    children, markers = _two()
-    return _run(tmp_path, children, lambda state: accounts.use(state, "work2"), markers, environ=environ)
-
-
-def test_3864_8_a_pin_in_the_used_up_group_yields_to_a_roomy_candidate(tmp_path):
-    # 受け入れ条件 #3864 の 8: 指定の work2 が使える（上限でも外した間でもない）が組 3（5 時間 86%）で、work3 が組 0（10%）なら work3
-    _, spawn, _, _ = _cut(tmp_path, {"work1": 92.0, "work2": 86.0, "work3": 10.0})
-    assert _envs(spawn) == ["work1", "work3"]
-
-
-def test_3864_8_a_pin_wins_when_every_candidate_is_in_the_used_up_group(tmp_path):
-    # 受け入れ条件 #3864 の 8: work2 もほかの候補もすべて組 3 なら work2
-    _, spawn, _, _ = _cut(tmp_path, {"work1": 92.0, "work2": 86.0, "work3": 90.0})
-    assert _envs(spawn) == ["work1", "work2"]
-
-
-def test_3864_8_a_limited_pin_is_not_used_and_the_pick_runs(tmp_path):
-    # 受け入れ条件 #3864 の 8: 指定の work2 が上限なら判断の関数の結果（work3）で起動する
-    _, spawn, _, _ = _cut(tmp_path, {"work1": 92.0, "work2": 100.0, "work3": 10.0})
-    assert _envs(spawn) == ["work1", "work3"]
-
-
-@pytest.mark.parametrize("names", [(), ("work1",), ("work1", "work2")], ids=["none", "one", "two"])
-def test_3864_11_without_env_or_pin_the_default_login_stays_and_prepare_is_never_called(tmp_path, monkeypatch, names):
-    # 受け入れ条件 #3864 の 11 と #3864 の 8: 環境変数も指定も無ければ、登録の数によらず最初も区切りの後も既定のログインで、prepare を打たない
-    register(tmp_path, *names)
+def test_3864_11_without_a_registered_account_the_default_login_stays_and_prepare_is_never_called(tmp_path, monkeypatch):
+    # 受け入れ条件 #3864 の 11: 登録済みアカウントが無ければ、最初も区切りの後も既定のログインで、prepare を打たない
+    register(tmp_path)
     monkeypatch.setattr(account_dir, "prepare", lambda *a: pytest.fail("prepare を打った"))
     children, markers = _two()
     ended, spawn, w, _ = _run(tmp_path, children, markers=markers)
     assert _envs(spawn) == [None, None] and spawn.gated == [] and ended.cause == ""
+
+
+def test_4527_the_first_launch_skips_a_limited_account(tmp_path):
+    # #4527: 最初の起動は使用率の並びの先頭。取得の記録で上限の work1 を飛ばし（名前の順で先でも）、work2 で起動する
+    register(tmp_path, "work1", "work2")
+    put_usage(tmp_path, "work1", 100.0)
+    put_usage(tmp_path, "work2", 50.0)
+    ended, spawn, w, _ = _run(tmp_path, [FakeChild([], 0)])
+    assert _envs(spawn) == ["work2"]
+    assert [r["account"] for r in rows_of(w, "account_choice") if r.get("scene") == "start"] == ["work2"]
 
 
 def _limited_then(tmp_path, monkeypatch, failing: set):
@@ -340,7 +319,7 @@ def _metered(tmp_path, settings_env=None):
         (tmp_path / "claude" / "settings.json").write_text(json.dumps({"env": settings_env}))
     s = make_settings(tmp_path)
     env = session_env.child_env(s.environ, s.state_dir, reg.METERED, decided=True)
-    return account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, [wrapper.CLAUDE])
+    return account_choice.target_env(env, reg.METERED, store, s.state_dir, account_choice.LaunchArgs(tmp_path, [wrapper.CLAUDE]))
 
 
 def test_target_env_builds_the_metered_child_on_the_shared_config_dir(tmp_path):
@@ -358,7 +337,7 @@ def test_target_env_without_a_metered_setting_is_unavailable(tmp_path):
     store = register(tmp_path)
     s = make_settings(tmp_path)
     env = session_env.child_env(s.environ, s.state_dir, reg.METERED, decided=True)
-    assert account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, []) == "metered_unavailable"
+    assert account_choice.target_env(env, reg.METERED, store, s.state_dir, account_choice.LaunchArgs(tmp_path, [])) == "metered_unavailable"
 
 
 def test_target_env_refuses_a_declared_key_with_custom_headers_before_building_the_child(tmp_path):
@@ -368,7 +347,9 @@ def test_target_env_refuses_a_declared_key_with_custom_headers_before_building_t
     environ = {**s.environ, "NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=sk-x ANTHROPIC_CUSTOM_HEADERS=X-A:1"}
     env = session_env.child_env(environ, s.state_dir, reg.METERED, decided=True)
     assert not account_choice.key_child(env, reg.METERED, store)
-    assert account_choice.target_env(env, reg.METERED, store, s.state_dir, tmp_path, []) == "metered_unclassified"
+    assert (
+        account_choice.target_env(env, reg.METERED, store, s.state_dir, account_choice.LaunchArgs(tmp_path, [])) == "metered_unclassified"
+    )
 
 
 def test_candidates_are_the_registered_accounts_that_pass_ready_and_are_not_held(tmp_path):

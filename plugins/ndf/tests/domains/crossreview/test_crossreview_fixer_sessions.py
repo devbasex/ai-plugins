@@ -14,6 +14,7 @@ from ndf.adapters import agents, claude, git
 from ndf.core.converge import participants
 from ndf.domains.crossreview import cli, criteria_decide, drive, fixer, resume_decide, settings, store
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.records.mvv_decide import REVIEW_FIXED_AT
 
 from ._repos import BRANCH, Repos, run_cli
 from .test_crossreview_run import PR, Fake, _run, _state
@@ -59,7 +60,9 @@ def test_issue_4013_fixer_without_saved_sessions_never_keeps_a_conversation(
     assert [f["outcome"] for f in state["findings"]] == [fin.FIXED, fin.FIXED]
     assert all(
         set(f)
+        # 直した指摘は直した時刻を持つ（見送りの記録との前後を照らす。#3959）
         == {"by", "id", "key", "outcome", "reason", "round", "section", "text", "severity", "impact", "raised_severity", "occurrence"}
+        | {REVIEW_FIXED_AT}
         for f in state["findings"]
     )
     # 相手役の引数は質問のほかは participants が組んだとおり（受け入れ条件 5）

@@ -1,6 +1,6 @@
 """`ndf relay` のサブコマンド。
 
-    ndf relay install [--replace-old] | uninstall | status   # 複製 ~/.claude/ndf/relay.py と PATH のエントリポイント ndf-relay
+    ndf relay install [--replace-old] | uninstall | status   # 複製 ~/.claude/ndf/relay.py と PATH のエントリポイント ndf-relay・ndf
     ndf relay account use <名前> | show | clear               # 子の claude を起動するアカウントの指定（#2464）
     ndf relay account add | add-bedrock | add-api-key | api-key-monthly | api-key-use | list | capacity | remove | check
                                                               # アカウントと従量の接続の登録（旧い保存先と同じ。#3569）
@@ -10,13 +10,14 @@
     ndf relay restart <名前> | stop <名前> | stop --all | ls   # リレーハブへのリクエストと一覧
     ndf relay notice                                          # カットポイントのアナウンス（ラッパーの直接の子か）
     ndf relay context resolve | record | calibrate | report   # 文脈の切り替えの 2 つの値・判定の記録・見込み・作業ごとの集計
+    ndf relay cache report [--since <日時>]                   # 起床の記録の集計（#4068）
     ndf relay pending                                         # 再起動の前に載せる、待ちを抱えた実行の一覧
                                                               # （docs/specifications/ndf-rebuild.md の決定 86）
     ndf relay mark <session_id>                               # 子へ入力を送る前に中継のマーカーを立てる
                                                               # （docs/specifications/ndf-rebuild.md の決定 92）
     ndf relay decide < セグメントの状態の JSON                       # セグメントを切り替えるかの判断（#2962）
 
-サブコマンドの説明は `COMMANDS` と `cli_account` の `ACCOUNT_COMMANDS`・`ACCOUNT_REGISTRY`、`cli_context` の `CONTEXT_COMMANDS` の表から作り、`--help` の一覧と実装が食い違わない（#2898）。
+サブコマンドの説明は `COMMANDS` と `cli_account` の `ACCOUNT_COMMANDS`・`ACCOUNT_REGISTRY`、`cli_context` の `CONTEXT_COMMANDS`・`cli_cache` の `CACHE_COMMANDS` の表から作り、`--help` の一覧と実装が食い違わない（#2898）。
 """
 
 from __future__ import annotations
@@ -56,7 +57,7 @@ from ndf.domains.relay import (
     switch_decide,
     wrapper,
 )
-from ndf.domains.relay import account_registry, cli_account, cli_context
+from ndf.domains.relay import account_registry, cli_account, cli_cache, cli_context
 from ndf.domains.relay.tmux import Tmux
 
 # 結果 JSON の tool の名前はサブコマンドの名前（SSOT は `cli.COMMANDS`）
@@ -81,6 +82,7 @@ COMMANDS = {
     "decide": "セグメントの状態の JSON（標準入力）から次の手を出す",
     "notice": "カットポイントのアナウンスの 1 文を出す（呼び手がラッパーの直接の子か）",
     "context": "文脈の切り替えの 2 つの値・判定の記録・費用の見込み・作業ごとの集計",
+    "cache": "起床の記録（待ち・起床・当たり・費用・避けた書き直しの推定・取り合い）の集計",
 }
 
 
@@ -89,7 +91,7 @@ def plugin_version(root: Path) -> str:
 
 
 def _status_items(got: install.Installed) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = [{"path": str(s.path), "state": s.state} for s in (got.copy, got.entry)]
+    items: list[dict[str, Any]] = [{"path": str(s.path), "state": s.state} for s in (got.copy, got.entry, got.ndf)]
     if got.version is not None:
         items.append({"path": str(got.copy.path.parent / install.VERSION_FILE), "version": got.version})
     return items
@@ -115,7 +117,10 @@ def _do_install(replace_old: bool, code: int) -> install.Installed | int:
 
 def _emit_installed(got: install.Installed, foreign_warning: bool) -> int:
     """保存先の状態の結果を出す。`foreign_warning` が真なら、旧い NDF の複製が残ったことも警告する。"""
-    summary = f"複製: {got.copy.state}（{got.copy.path}）・エントリポイント: {got.entry.state}（{got.entry.path}）"
+    summary = (
+        f"複製: {got.copy.state}（{got.copy.path}）・エントリポイント: {got.entry.state}（{got.entry.path}）"
+        f"・{install.NDF_NAME}: {got.ndf.state}（{got.ndf.path}）"
+    )
     warnings = [] if got.on_path else [f'{got.entry.path.parent} が PATH に無い。export PATH="{got.entry.path.parent}:$PATH" を足す']
     if foreign_warning and got.copy.state == "foreign":
         warnings.append("旧い NDF の複製がある。旧いラッパーを止めてから ndf relay install --replace-old で置き換える")
@@ -313,11 +318,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         stall=limits.seconds("relay.stall"),
         spin=hub.spin_of(environ),
         context_limit=context_thresholds.thresholds(environ, limits.value).limit,
-        guards=account_decide.Guards(
-            limits.value("relay.five-hour-guard", "count"),
-            limits.value("relay.weekly-prefer", "count"),
-            limits.value("relay.weekly-guard", "count"),
-        ),
+        guards=account_decide.Guards(limits.value("relay.five-hour-guard", "count"), limits.value("relay.weekly-guard", "count")),
         transcript_bytes=int(limits.value("relay.transcript-tail", "count")),
         ask_plan=lane_question.plan_asker(environ, name, cwd, ident.root, limits.seconds("relay.lanes-ask")),
         update=updater,
@@ -378,8 +379,13 @@ def _ended(ended: wrapper.Ended) -> int:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="中継（セグメントの切り替え・レーンの起動）")
     sub = parser.add_subparsers(dest="action", required=True)
-    p = {name: sub.add_parser(name, help=text, description=text) for name, text in COMMANDS.items() if name not in ("account", "context")}
+    p = {
+        name: sub.add_parser(name, help=text, description=text)
+        for name, text in COMMANDS.items()
+        if name not in ("account", "context", "cache")
+    }
     cli_context.parser(sub, COMMANDS["context"])
+    cli_cache.parser(sub, COMMANDS["cache"])
     p["install"].add_argument("--replace-old", action="store_true", help="旧い NDF の複製を置き換える（旧いラッパーが動いていれば断る）")
     cli_account.parser(sub, COMMANDS["account"])
     for name in ("run", "spawn"):
@@ -475,6 +481,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "decide": lambda a: _decide(),
     "notice": lambda a: _notice(),
     "context": lambda a: cli_context.CONTEXT_HANDLERS[a.context_action](a),
+    "cache": lambda a: cli_cache.CACHE_HANDLERS[a.cache_action](a),
 }
 
 

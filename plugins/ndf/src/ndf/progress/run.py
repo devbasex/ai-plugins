@@ -35,6 +35,19 @@ from ndf.contracts import causes, facts, limits, result
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
 from ndf.progress import command, definition, invoke, model, stages, store
+from ndf.progress.folding import (
+    ANSWERED,
+    FAILED,
+    FINISHED,
+    REQUEST_CHANGES,
+    STARTED,
+    STEP_EVENT,
+    StepProgress,
+    View,
+    answer_word,
+    payload_of,
+    step_progress,
+)
 from ndf.progress.records import Records, github_records, sync_records
 
 TOOL = __package__.rpartition(".")[2]
@@ -43,26 +56,9 @@ ACTOR = invoke.ACTOR
 CONDUCTOR, ORGANIZER = "conductor", "organizer"
 
 
-def _event(kind: str) -> str:
-    """進行の事象の種類（コントラクト `workflow/progress.json` のスプリントの行）。表に無ければ import の時点で `KeyError`。"""
-    return model.rules()[("sprint", kind)].kind
-
-
-def _answer(word: str) -> str:
-    """回答の語（表 answers の行）。表に無ければ import の時点で `FactsError`。"""
-    return str(facts.row(result.ANSWERS, word)["id"])
-
-
-# 事象の種類。行を終える事象の種類は、終えた行の状態とステップの記録の status にも使う
-STARTED = _event("started")
-STEP_EVENT = _event("step_recorded")
-ANSWERED = _event("answered")
-FAILED = _event("failed")
-FINISHED = _event("finished")
 # 回答の語（承認・変更要求・承認しない）
 APPROVED = invoke.APPROVED
-REQUEST_CHANGES = _answer("request_changes")
-REJECTED = _answer("rejected")
+REJECTED = answer_word("rejected")
 # 外から待つ問い合わせの間隔と、作業が排他を取るまでの待ちの間隔（どちらも設定の値）
 WAIT_POLL = plan_cli.WAIT_POLL
 LOCK_POLL = durable.POLL
@@ -72,37 +68,6 @@ LAUNCH_FILE = "launched.json"
 
 
 # --- ステートマシンの読み書き ---------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class View:
-    """1 つのトランザクションで読んだステートマシン（最新の改訂・定義・事象）。"""
-
-    machine_id: str
-    rev: int
-    snap: stages.Snapshot
-    doc: dict[str, Any]
-    events: list[model.Event]
-
-    @property
-    def rows(self) -> dict[str, model.RowState]:
-        return model.fold(self.events, self.rev)
-
-    @property
-    def whole(self) -> Optional[str]:
-        return model.table_state("sprint", self.events)
-
-    def row_events(self, stage: str) -> list[model.Event]:
-        return [e for e in self.events if e.draft.row_key == stage and e.draft.rev == self.rev]
-
-    def context(self) -> dict[str, Any]:
-        """スプリントの文脈。作成の時点の値に、工程が書いた出力（`outputs_recorded`）を順に重ねる。"""
-        return stages.compose_context(self.doc["context"], stages.recorded_outputs(self.events, self.rev))
-
-
-def payload_of(ev: model.Event) -> dict[str, Any]:
-    """事象の payload。無ければ空。"""
-    return ev.draft.payload if ev.draft.payload is not None else {}
 
 
 def view(conn: Any, machine_id: str) -> View:
@@ -132,106 +97,6 @@ def append(
 
 def _write(st: store.Store, machine_id: str, *drafts: model.EventDraft) -> list[int]:
     return append(st, machine_id, lambda _v: list(drafts))
-
-
-# --- 工程の中のステップの進み ---------------------------------------------------------------
-
-
-@dataclass
-class StepProgress:
-    """実行中の行のステップの進み。`generation` は変更要求の回数で、変更を要求するとステップを初めから流し直す。
-
-    `anchor` は回答を数え始める事象の番号（行の開始・ステップの記録・変更要求の後の回答だけを使う）。
-    `retries` は行の打ち直し（失敗の後の開始）の回数で、作業へ渡す（プランは打ち直すたびに新しい回を始める。同じ回のキーで
-    打つと、プランは終わった回のバックアップの結果を返すだけだからである）。`redo` は工程全体の出力が規約に合わずに行が失敗したか。
-    真なら次の開始（`retry` の後）で終わったステップの記録を無効にし、ステップを初めから流し直す（同じ出力を照らし直すだけにしない）。
-    """
-
-    generation: int = 0
-    retries: int = 0
-    done: dict[str, dict[str, Any]] = field(default_factory=dict)
-    waiting: Optional[dict[str, Any]] = None
-    anchor: int = 0
-    answer: Optional[model.Event] = None
-    notes: Optional[str] = None
-    failed: bool = False
-    redo: bool = False
-    carries: frozenset[str] = frozenset()  # 承認されなくても流し直さず先へ進む承認ゲート（定義の on_reject。#4446）
-    # #4446: 待ちの記録を持ったステップ（MVV 判定はゲートを省かない）・未了に戻した回数・終わりの事象の番号・設計のレビューへ戻した記録
-    held: set[str] = field(default_factory=set)
-    resets: dict[str, int] = field(default_factory=dict)
-    finished_at: dict[str, int] = field(default_factory=dict)
-    again: list[dict[str, Any]] = field(default_factory=list)
-
-    def next_step(self, stage: stages.StageDef) -> Optional[stages.StepDef]:
-        for st in stage.steps:
-            if st.id not in self.done:
-                return st
-        return None
-
-    def answer_value(self) -> Optional[str]:
-        return str(payload_of(self.answer)["answer"]) if self.answer is not None else None
-
-    def see(self, ev: model.Event) -> None:
-        """事象 1 つを読んで進みを書き換える。変更要求（承認ゲートの request_changes）なら世代を上げてステップを初めから流し直す。"""
-        handle = _SEES.get(ev.draft.kind)
-        if handle is not None:
-            handle(self, ev, payload_of(ev))
-
-    def _started(self, ev: model.Event, _p: dict[str, Any]) -> None:
-        """行の開始。数え始めをここへ移し、失敗の後の開始なら打ち直しを数える（出力の失敗なら済んだステップも捨てる）。"""
-        self.anchor, self.answer, self.waiting = ev.seq, None, None
-        if self.failed:
-            self.retries += 1
-            self.done = {} if self.redo else self.done
-            self.failed = self.redo = False
-
-    def _failed(self, _ev: model.Event, p: dict[str, Any]) -> None:
-        """行の失敗。止まったステップが無い（工程全体の出力が規約に合わない）なら、次の開始で初めから流し直す。"""
-        self.failed = True
-        self.redo = "step" in p and p["step"] is None
-
-    def _recorded(self, ev: model.Event, p: dict[str, Any]) -> None:
-        """ステップの記録。終わったなら結果を残し、未了に戻す記録（`stages.RESET`）なら結果を捨て、ほかは待ちにする。数え始めをここへ移す。"""
-        step = p["step"]
-        if p["status"] == FINISHED:
-            self.done[step], self.waiting = p["report"], None
-            self.finished_at[step] = ev.seq
-        elif p["status"] == stages.RESET:
-            self.done.pop(step, None)
-            self.resets[step] = (self.resets[step] if step in self.resets else 0) + 1
-            if isinstance(p.get(stages.REVIEW_AGAIN), dict):
-                self.again.append({"seq": ev.seq, "gate": p.get("gate"), **p[stages.REVIEW_AGAIN]})
-        else:
-            self.waiting = p
-            self.held.add(step)
-        self.anchor, self.answer = ev.seq, None
-
-    def _answered(self, ev: model.Event, p: dict[str, Any]) -> None:
-        """回答。承認ゲートの変更要求なら世代を上げて初めから流し直し、ほかは数え始めの後の回答だけを残す。"""
-        if p["answer"] == REQUEST_CHANGES and p["kind"] == invoke.LISTEN and p["step"] not in self.carries:
-            self.generation += 1
-            self.done, self.waiting, self.answer, self.anchor = {}, None, None, ev.seq
-            self.held, self.again = set(), []
-            self.notes = p["notes"]
-        elif ev.seq > self.anchor:
-            self.answer = ev
-
-
-# 事象の種類 → 進みを書き換える StepProgress のメソッド（表に無い種類は進みを変えない）
-_SEES: dict[str, Callable[[StepProgress, model.Event, dict[str, Any]], None]] = {
-    ANSWERED: StepProgress._answered,
-    STARTED: StepProgress._started,
-    FAILED: StepProgress._failed,
-    STEP_EVENT: StepProgress._recorded,
-}
-
-
-def step_progress(v: View, stage: str) -> StepProgress:
-    prog = StepProgress(carries=frozenset(st.id for s in v.snap.stages if s.name == stage for st in s.steps if st.on_reject))
-    for ev in v.row_events(stage):
-        prog.see(ev)
-    return prog
 
 
 # --- 次の 1 手（純粋な判断） ----------------------------------------------------------------
@@ -268,18 +133,41 @@ def _last(events: Iterable[model.Event], kind: str) -> Optional[model.Event]:
     return found
 
 
+def _void_answer(v: View, ev: Optional[model.Event], gate: Optional[str]) -> bool:
+    """回答 `ev` が、回答として数えない MVV 判定の回答か（`model.mvv_answer_void`）。"""
+    return ev is not None and model.mvv_answer_void(payload_of(ev), gate)
+
+
+def _reopen(v: View, s: stages.StageDef, prog: StepProgress) -> None:
+    """数えない MVV 判定の回答で済んだ承認ゲートのステップを、後ろのステップが済んでいなければ済んでいないものにする（#3959）。
+
+    更新前の NDF が `service:mvv` の回答を消費して済みにした承認ゲートを、再開の後に改めて人へ質問するためである。後ろのステップ（マージなど）
+    が済んでいれば、承認を取り直しても戻せないので開き直さない。記録の事象は書き換えない。
+    """
+    last = next((st for st in reversed(s.steps) if st.id in prog.done), None)
+    if last is None or not invoke.is_listen(last):
+        return
+    report = prog.done[last.id]
+    metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+    by_seq = {ev.seq: ev for ev in v.row_events(s.name) if ev.draft.kind == ANSWERED}
+    if _void_answer(v, by_seq.get(metrics.get("seq")), last.gate):
+        del prog.done[last.id]
+
+
 def _running_move(v: View, s: stages.StageDef) -> Move:
     prog = step_progress(v, s.name)
+    _reopen(v, s, prog)
     step = prog.next_step(s)
     if step is None:
         return Move(Action.RESUME, s, None, prog)
     listen = invoke.is_listen(step)
+    answer = None if _void_answer(v, prog.answer, step.gate) else prog.answer
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
     held = prog.waiting is not None or step.id in prog.held
     skip = listen and not held and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None
-    if waiting and prog.answer is None and not skip:
+    if waiting and answer is None and not skip:
         return Move(Action.GATE, s, step, prog)
-    return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, prog.answer)
+    return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, answer)
 
 
 def decide(v: View) -> Move:
@@ -577,10 +465,16 @@ def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
 
     省いた回答を書いたら、同じ駆動では読まずに `next` を返して止まる。回答を読む前の検証（`gate.recheck`）はサブコマンドの
     エントリポイントでだけ打つため、続けて読むと判定の後に進んだ PR の head でも承認ゲートを省いてしまう。次の `next` が検証を通してから読む。
+    数えない MVV 判定の回答（`model.mvv_answer_void`）と、省けると決めた判定の無い手は、事象を書かずに承認ゲートの待ちを返す（#3959）。
     """
     assert m.stage is not None and m.step is not None and m.progress is not None
+    waiting = replace(m, action=Action.GATE, event=None)
+    if m.event is not None and model.mvv_answer_void(payload_of(m.event), m.step.gate):
+        return report(v, waiting)
     if m.event is None:
         held = model.mvv_skip(m.progress.done, m.stage.mvv_before(m.step.id), m.step.gate)
+        if held is None:
+            return report(v, waiting)
         qid = model.question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
         payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, held, qid)
         d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))

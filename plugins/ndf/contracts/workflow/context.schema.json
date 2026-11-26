@@ -50,7 +50,21 @@
         "skip": {"type": "boolean", "description": "承認ゲートを省けるか（ndf.progress.gate.checks.may_skip）"},
         "verdict": {"type": ["object", "null"], "description": "LLM の判定の応答（verdict・reasons・boundary・basis）。判定を打たなかったら null"},
         "why": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "省かない理由。省けるなら空"},
-        "head": {"type": "string", "minLength": 1, "description": "判定した PR の head の SHA。省いた回答が見た対象（seen）に持ち、後に進んだ head は回答の検証とマージが断る。PR を読む前に止めたら無い"}
+        "pr": {"type": "integer", "minimum": 1, "description": "判定した PR の番号。承認資料が質問の PR と照らし、違えば判定を載せない（#3959）。PR を特定する前に止めたら無い"},
+        "head": {"type": "string", "minLength": 1, "description": "判定した PR の head の SHA。省いた回答が見た対象（seen）に持ち、後に進んだ head は回答の検証とマージが断る。PR を読む前に止めたら無い"},
+        "holds": {"type": ["array", "null"], "items": {"type": "string", "minLength": 1}, "description": "レビューの保留。読んで無ければ空の配列、保留を読まなかったら null。空の配列のときだけ承認ゲートを省ける（ndf.progress.model.hold_checked。#3959）"},
+        "noted": {"type": "boolean", "description": "今回の判定を PR のコメントに書いたか（書かなかった・書けなかったら偽）"},
+        "note_url": {"type": "string", "minLength": 1, "description": "今回書いた判定のコメントの URL。noted が真のときだけ"},
+        "stopped_by": {
+          "type": "object",
+          "description": "verdict が null のときだけ置く、判定できなかった理由の種類と定型文（ndf.domains.records.mvv_material_decide.STOP_REASONS）",
+          "additionalProperties": false,
+          "required": ["kind", "text"],
+          "properties": {
+            "kind": {"enum": ["no_gate", "no_pr", "mvv_unapproved", "base_unreadable", "diff_unreadable", "pr_moved", "pr_reread_failed", "incomplete_patches", "llm_no_answer"], "description": "判定できなかった理由の種類"},
+            "text": {"type": "string", "minLength": 1, "description": "承認する人が次に確かめることを書いた定型文（PR から取った値と例外の文を含めない）"}
+          }
+        }
       }
     },
     "delivery": {

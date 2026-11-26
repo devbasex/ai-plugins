@@ -3,6 +3,7 @@
   "count": 262144,
   "read_by": [
     "ndf.domains.hooks.main",
+    "ndf.domains.hooks.rewake",
     "ndf.domains.relay.hub"
   ]
 }

@@ -82,10 +82,10 @@ class SectionState:
     - `idle_seconds`・`quiet_seconds`・`stall_seconds`: 子の出力が止まってからの秒・切り替えに要る静かな秒・止まりとみなす秒
     - `context_tokens`・`context_limit`・`handover_asked`: 文脈の量・切り替える量・このセグメントで既に引継ぎを頼んだか（#2595）
     - `limit_pick`: 利用上限に当たったときの替える先の判断（当たっていなければ None。#3337）
-    - `auth_pick`: 認証の失敗を確かめたときの替え先の判断（`account_decide.after_auth`。確かめていなければ None。#3864 の決定 6）
+    - `auth_pick`: 認証の失敗を確かめたときの替え先の判断（`account_decide.choose` の `auth`。確かめていなければ None。#3864 の決定 6）
     - `spin`・`spin_seen`・`spin_held`: 今のセグメントを終えて数える手で次を始めると再起動ループの検出に当たるか・
       続きの中で起動した起動先・検出に当たった後の保持（#3864 の決定 13）
-    - `guard_pick`・`safe`: 見回りの判断（`account_decide.guard` の `switch`）と、止めてよい時点か（#3864 の決定 11・I13）
+    - `guard_pick`・`safe`: 見回りの判断（`account_decide.choose` の `running` の `switch`）と、止めてよい時点か（#3864 の決定 11・I13）
     - `must_end`・`end_ready`・`drift_pick`: API キーの子で止める必要が立ったか・この見回りで旧子の終わりを確かめたか・
       止めた後に取り直した替え先の判断（`end_ready` が偽の間は None。#3864 の決定 12）
     - `metered`: 今の起動先が従量の接続か（見回りで戻るときの 1 行を選ぶ。#3864 の決定 8）

@@ -9,11 +9,29 @@
 from __future__ import annotations
 
 import dataclasses
+import json
+import os
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Union
 
+from ndf import identity
+from ndf.adapters import cli_floor
+from ndf.adapters.claude import CLAUDE
 from ndf.contracts import limits
-from ndf.domains.relay import account_choice, account_dir, accounts, key_helper, launch_inputs, launch_target, stop_signal, switch_decide
+from ndf.domains.hooks import registration, tables
+from ndf.domains.relay import (
+    account_choice,
+    account_decide,
+    account_dir,
+    accounts,
+    key_helper,
+    launch_inputs,
+    launch_target,
+    signals,
+    stop_signal,
+    switch_decide,
+)
+from ndf.domains.relay import account_registry as reg
 from ndf.domains.relay.launch_target import RUN_AGAIN, SETTLE_LINE, SKIP_LINE, UNAVAILABLE, Choice, Target, why_of
 
 # `wrapper` の `Settings`・`Launch`・`Section`（import の輪を作らないよう型の名前だけで受ける）
@@ -42,6 +60,41 @@ class Launched(NamedTuple):
     child: Any
 
 
+class RewakePlan(NamedTuple):
+    """起動ごとの起床の hook の登録の判定の前提（#4068 の詳細設計の「ラッパー」の 1）。
+
+    `ready` は利用者の `--settings` が無く、起床の時点が届く起動か。`settings` は一覧が空でないときの登録の JSON、
+    `floor_exe` は `_start` の下限の確かめが解いた実パス（同じ実行ファイルならバージョンを記録から読む）。
+    """
+
+    ready: bool = False
+    versions: tuple[str, ...] = ()
+    settings: Optional[str] = None
+    floor_exe: Optional[str] = None
+
+
+# 起床の hook の登録を渡した子にだけ渡す環境変数
+REWAKE_ENV = identity.env_name("relay-rewake")
+
+
+def recorded_version(exe: Optional[str], env: Mapping[str, str], cwd: Path) -> Optional[str]:
+    """`--version` の記録に在れば読んだバージョン。記録に無ければ None（打たない）。"""
+    found = cli_floor.version_record_key(exe)
+    return cli_floor.version_at("claude", exe, env, cwd) if found is not None and found[1] else None
+
+
+class Gate(NamedTuple):
+    """候補 1 つの起床の hook の登録の判定に使う値（実行ファイルとそのバージョン）。"""
+
+    name: Optional[str]
+    section: int
+    env: Mapping[str, str]
+    decl: Any
+    exe: Optional[str]
+    same: bool
+    version: Optional[str]
+
+
 class Halt(Exception):
     """候補を試す途中で、次の候補へ進まずに止まる（起動の直前の停止要求・起動先によらない起動の失敗）。"""
 
@@ -68,6 +121,87 @@ class LaunchSteps:
     _env_for: Callable[[Optional[str], str, str], dict[str, str]]
     _inputs: Callable[[float, bool], launch_inputs.Inputs]
     _length: Callable[[Section, float], float]
+    rewake: RewakePlan = RewakePlan()
+    rewake_used: dict[str, Any] = {}
+
+    def _rewake_plan(self, env: Mapping[str, str]) -> RewakePlan:
+        """起動ごとに、起床の hook の登録を渡してよい前提をそろえる（`--version` は打たない）。"""
+        user = account_choice.has_settings((*self.s.args, *self.s.first_args))
+        why = registration.rewake_unreachable()
+        if why is not None:
+            self._log({"kind": "rewake_off", "reason": why})
+        if user or why is not None:
+            return RewakePlan()
+        versions = limits.texts("cache.rewake", *limits.TEXT_KEYS)
+        root = getattr(self, "launched_root", None) or tables.PLUGIN_ROOT
+        settings = json.dumps(registration.rewake_settings(root)) if versions else None
+        return RewakePlan(True, versions, settings, cli_floor.resolve(CLAUDE, env, self.s.cwd))
+
+    def _gate_before(self, name: Optional[str], req: Launch, env: Mapping[str, str], decl: Any) -> Gate:
+        """候補の実行ファイルを解き、下限の確かめと同じ実行ファイルなら記録からバージョンを読む。前提が無ければ何も解かない。"""
+        if not self.rewake.ready:
+            return Gate(name, req.number, env, decl, None, False, None)
+        venv = account_choice.version_env(env, decl)
+        exe = cli_floor.resolve(CLAUDE, venv, self.s.cwd)
+        same = exe is not None and exe == self.rewake.floor_exe
+        return Gate(name, req.number, env, decl, exe, same, recorded_version(exe, venv, self.s.cwd) if same else None)
+
+    def _gated(self, name: str, req: Launch, env: Mapping[str, str]) -> Union[tuple[Gate, Any], str]:
+        """候補の判定の値と、キーの子なら払い出しの記録の helper。用意できなければ理由の符号。
+
+        従量の接続の設定は候補ごとに 1 回だけ読み、キーの子の判定・バージョンの判定・起動先の用意（`Gate.decl`）に同じ値を渡す
+        （途中で `ndf relay accounts` が設定を替えても、判定と起動で別の実行ファイルを使わない）。記録の無いキーの子は起動しない
+        （払い出しを数えられない）。
+        """
+        decl = account_choice.metered_of(self.store, env) if name == reg.METERED else None
+        if isinstance(decl, str):
+            return decl
+        helper = None
+        if account_choice.key_child(env, name, self.store, decl):
+            try:
+                helper = key_helper.create(self.dir)
+            except OSError:  # noqa: NDF401 ファイル: 払い出しの記録を作れないキーの子は起動しない
+                return "key_record"
+        return self._gate_before(name, req, env, decl), helper
+
+    def _listed(self, g: Gate) -> bool:
+        """下限の確かめと同じ実行ファイルで、その記録のバージョンが一覧と完全に一致するか。"""
+        return g.same and self.rewake.settings is not None and g.version in self.rewake.versions
+
+    def _gate_after(self, g: Gate, key: bool) -> Optional[str]:
+        """用意の後にバージョンを読む候補（別の実行ファイルを指す従量の接続）のバージョン。キーでない子は `version_probe` の行を書く。"""
+        venv = account_choice.version_env(g.env, g.decl)
+        found = cli_floor.version_record_key(g.exe)
+        cached = found is not None and found[1]
+        if not key and found is not None:
+            row = {"kind": "version_probe", "pid": os.getpid(), "section": g.section, "account": g.name, "claude_path": g.exe}
+            ran = bool(self.rewake.versions) and not cached
+            self._log({**row, "mtime_ns": found[0][1], "size": found[0][2], "cached": cached, "ran": ran})
+        if self.rewake.versions and not key:
+            return cli_floor.version_at("claude", g.exe, venv, self.s.cwd)
+        return recorded_version(g.exe, venv, self.s.cwd) if cached else None
+
+    def _gate_built(self, g: Gate, built: list[str], key: bool) -> tuple[list[str], bool, Optional[str]]:
+        """用意した起動の引数に、用意の後にバージョンを読む候補だけ登録を足す。（起動の引数, 登録したか, バージョン）。"""
+        if not self.rewake.ready or g.exe is None or g.same or g.decl is None:
+            return built, self._listed(g), g.version
+        version = self._gate_after(g, key)
+        if self.rewake.settings is None or version not in self.rewake.versions:
+            return built, False, version
+        return (account_choice.merged_settings if key else account_choice.with_settings)(built, self.rewake.settings), True, version
+
+    def _rewake_child(self, launch: str, env: Mapping[str, str], on: bool, version: Optional[str]) -> dict[str, str]:
+        """子の環境の `NDF_RELAY_REWAKE` を登録の有無にそろえ、バージョンを起動の行のために残す。
+
+        今の起動の記録は `_start` が候補を試す前に登録なし（`rewake` 偽・バージョンなし）で書いてある。書き直すのは、登録を渡す候補と、
+        同じ起動の前の候補に登録を渡した記録を戻す候補だけである（起床を無効にした既定の設定では書き直さない）。記録のバージョンを読むのは
+        登録を渡した子の起床の記録だけなので、登録の無い起動のバージョンは起動の行（`rewake_used`）にだけ残す。
+        """
+        if on or self.rewake_used.get("rewake") is True:
+            signals.set_launch(self.dir, launch, rewake=on, claude_version=version)
+        self.rewake_used = {"rewake": on, "claude_version": version, "rewake_ready": self.rewake.ready}
+        child = {k: v for k, v in env.items() if k != REWAKE_ENV}
+        return {**child, REWAKE_ENV: "1"} if on else child
 
     def _metered(self) -> Optional[tuple[dict[str, str], bool]]:
         """従量の接続の設定（変数の組と、保存した設定か）。無い・読めない・検証に外れれば None（詳細設計書の「従量の接続の設定の検証」）。"""
@@ -123,8 +257,12 @@ class LaunchSteps:
                 return SPUN if spun else None
         if self._spins(req.kind, None):
             return SPUN
+        env = self._env_for(None, launch, req.session_id)
+        gate = self._gate_before(None, req, env, None)
+        on = self._listed(gate)
+        argv = account_choice.with_settings(argv, self.rewake.settings) if on else argv
         full = [*argv, req.prompt] if req.prompt else argv
-        target = Target(None, None, "", req.reason, skipped, None, self._env_for(None, launch, req.session_id), full, None)
+        target = Target(None, None, "", req.reason, skipped, None, self._rewake_child(launch, env, on, gate.version), full, None)
         return Launched(target, self._spawn_target(target))
 
     def _skip(self, name: str, code: str) -> None:
@@ -135,34 +273,37 @@ class LaunchSteps:
         """1 つの名前を `account_choice.target_env` で用意して起動する。用意できない・関所の子が claude になれなければ、
         理由の文を `last_skip` に置いて None（届けは解除済み）。キーの子は払い出しの記録を作り、記録先と ID を helper に渡す。"""
         env = self._env_for(name, launch, req.session_id)
-        helper = None
-        if account_choice.key_child(env, name, self.store):
-            try:  # 記録の無いキーの子を起動しない（払い出しを数えられない）
-                helper = key_helper.create(self.dir)
-            except OSError:
-                self._skip(name, "key_record")
-                return None
+        found = self._gated(name, req, env)
+        if isinstance(found, str):
+            self._skip(name, found)
+            return None
+        gate, helper = found
+        use = account_choice.with_settings(argv, self.rewake.settings) if self._listed(gate) else argv
         if helper is not None:
-            got = account_choice.key_target(env, self.store, self.s.state_dir, self.s.cwd, argv, (helper.path, helper.helper_id))
+            got = account_choice.key_target(
+                env, self.store, self.s.state_dir, account_choice.LaunchArgs(self.s.cwd, use, gate.decl), (helper.path, helper.helper_id)
+            )
         else:
-            got = account_choice.target_env(env, name, self.store, self.s.state_dir, self.s.cwd, argv)
+            got = account_choice.target_env(env, name, self.store, self.s.state_dir, account_choice.LaunchArgs(self.s.cwd, use, gate.decl))
         if isinstance(got, str):
             self._skip(name, got)
             return None
+        built, on, version = self._gate_built(gate, got.argv, helper is not None)
+        child = self._rewake_child(launch, got.env, on, version)
         reason, held = req.reason, req.prompt if helper is not None and req.prompt else None
-        final = got.argv if held is not None or not req.prompt else [*got.argv, req.prompt]
+        final = built if held is not None or not req.prompt else [*built, req.prompt]
         p = got.prepared
         if p is None:
             gen = got.generation
-            version = account_choice.claude_version(got.env, self.s.cwd) if helper is not None else None  # `cli_floor` の記録から読む
+            floor = account_choice.claude_version(got.env, self.s.cwd) if helper is not None else None  # `cli_floor` の記録から読む
             target = Target(
-                name, None, gen, reason, (), None, got.env, final, got.resolved, helper, got.settings_file, got.pin_file, held, version
+                name, None, gen, reason, (), None, child, final, got.resolved, helper, got.settings_file, got.pin_file, held, floor
             )
         else:
             links = p.links
             row = {"kind": "account_dir", "account": name, "reason": p.sync, "local_only": links.local_only, "skipped": links.skipped}
             self._log({**row, "added": links.added})
-            target = Target(name, p.config_dir, p.generation, reason, (), p.lease, got.env, final, got.resolved)
+            target = Target(name, p.config_dir, p.generation, reason, (), p.lease, child, final, got.resolved)
         try:
             return Launched(target, self._spawn_target(target))
         except launch_target.GateFailed as exc:
@@ -219,20 +360,33 @@ class LaunchSteps:
         return switch_decide.hit(nxt, self.s.spin)
 
     def _initial(self, now: float) -> Choice:
-        """最初のセグメントの要求。環境変数 `NDF_CLAUDE_ACCOUNT` の名前 → 指定の順（登録を列挙しない）。
+        """最初のセグメントの要求（`account_decide.choose` の `start`。#4527）。
 
-        環境変数の名前が事前の確かめを通っても、用意や関所で落ちたときのために指定を続けて試す。環境変数の名前が使えるときは、
-        壊れた指定で止めずに環境変数の名前だけで試す。
+        候補を使用率の並びで選び、明示（環境変数 `NDF_CLAUDE_ACCOUNT` → 指定）を同じ側の先に置く。候補が無ければ既定のログイン。
+        環境変数の名前が使えるときは、壊れた指定で止めずに環境変数の名前だけを明示にする。環境変数で明示した従量の接続
+        （`metered`）は登録済みの候補の外なので、並びの前に試す。
         """
         env = self.s.environ.get("NDF_CLAUDE_ACCOUNT")
         env = env if env and accounts.NAME_RE.match(env) else None
+        inputs = self._inputs(now, True)
         try:
             pin = accounts.pinned(self.s.state_dir)
         except accounts.AccountError:
-            if env is None or self._inputs(now, True).excluded(env) is not None:
+            if env is None or inputs.excluded(env) is not None:
                 raise
             pin = None
-        return Choice(tuple(dict.fromkeys(n for n in (env, pin) if n is not None)))
+        rows = inputs.usage.rows if inputs.usage is not None else []
+        pick = account_decide.choose(
+            "start",
+            None,
+            rows,
+            account_decide.Pool(inputs.candidates(), explicit=tuple(n for n in (env, pin) if n is not None)),
+            self.s.guards,
+        )
+        self._log({"kind": "account_choice", "scene": "start", "account": pick.account, "reason": pick.reason})
+        # 環境変数で明示した従量の接続は登録済みの候補の外なので、並びの前に試す（使えなければ 1 行で飛ばして並びへ進む）
+        first = (env,) if env is not None and account_decide.metered(env) else ()
+        return Choice((*first, *pick.order))
 
     def _settle(self, sec: Section) -> None:
         """終わった子のアカウントが登録済みなら 1 回だけ書き戻す（`account_dir.settle`）。書き戻せなければ 1 行を出して続ける。

@@ -9,7 +9,8 @@
     ndf records mvv current --base <ブランチ> [--allow-mismatch]   # ベースブランチの承認済みの MVV を読み、本文をファイルに書く
     ndf records mvv signals --base <ブランチ>       # ベースブランチの MVV のバージョンで改訂の兆候を数える
     ndf records mvv answer [--version <バージョン>]         # 承認ゲートの回答（標準入力の JSON）を覆しの記録へ写す
-    ndf records mvv gate --gate design|release     # 承認ゲートの直前の MVV 判定（工程の入力は環境変数 NDF_STAGE_INPUT）
+    ndf records mvv gate --gate design|release [--machine <ID>] [--expect-pr <番号>]   # 承認ゲートの直前の MVV 判定（工程の入力は環境変数 NDF_STAGE_INPUT か --machine）
+    ndf records mvv cite --gate design|release --base <ブランチ> <ファイル>...   # 承認資料の根拠の行を承認済みの MVV で確かめる
     ndf records preflight                          # 手順 0 の 3 つの確かめ（worktree の設定・設定・MVV）
     ndf records cleanup-stage <PR番号>...           # クリーンアップを終えた PR が閉じる課題に工程の記録を付ける
     ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか
@@ -32,12 +33,16 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
+import sqlalchemy as sa
+
 from ndf import cli, contracts
 from ndf.adapters import github as github_mod
+from ndf.adapters import publish
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
 from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, reading, spec, usage
-from ndf.progress import invoke, model
+from ndf.core import durable
+from ndf.progress import command, definition, invoke, model, stage_inputs
 from ndf.progress.invoke import INPUT_ENV
 from ndf.domains.records import glossary_decide as gd
 from ndf.domains.records import spec_decide as sd
@@ -53,8 +58,9 @@ def _root(args: argparse.Namespace) -> Path:
     return Path(Git(where).run("rev-parse", "--show-toplevel").strip())
 
 
-def _hub(root: Path) -> github_mod.GitHub:
-    return _repo_hub(Git(root).remote_repo())
+def _hub(root: Path, remote: str | None = None) -> github_mod.GitHub:
+    """`root` のリモート（`remote` を省けば解く）の GitHub。解き済みのリモート名を渡すと解き直さない。"""
+    return _repo_hub(Git(root).remote_repo(remote))
 
 
 def _repo_hub(repo: str) -> github_mod.GitHub:
@@ -146,13 +152,18 @@ def _usage_report(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"使用量: {got['since']}..{got['until']}", [got])
 
 
-def _mvv_current(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+def _base_mvv(root: Path, base: str, allow_mismatch: bool = False) -> mvv.Snapshot:
+    """ベースブランチ `base` を取得し、その MVV を読む（`mvv.current`）。取得できなければ `GitError`。"""
     g = Git(root)
     remote = g.remote()
+    # 取得先の参照まで指定して取得する。別のブランチだけを clone した作業場所でも、直前にリモートで承認された MVV を読む
+    g.fetch_branch_or_raise(remote, base)
+    return mvv.current(root, f"refs/remotes/{remote}/{base}", allow_mismatch=allow_mismatch)
+
+
+def _mvv_current(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     try:
-        # 取得先の参照まで指定して取得する。別のブランチだけを clone した作業場所でも、直前にリモートで承認された MVV を読む
-        g.fetch_branch_or_raise(remote, args.base)
-        snap = mvv.current(root, f"refs/remotes/{remote}/{args.base}", allow_mismatch=args.allow_mismatch)
+        snap = _base_mvv(root, args.base, args.allow_mismatch)
     except GitError as exc:
         return result.stopped(TOOL, "precondition", f"MVV を読むベースブランチを取得できない: {exc}")
     except (mvv.MvvError, OSError) as exc:
@@ -188,14 +199,123 @@ def _mvv_answer(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, f"覆しの記録: {kinds}" if rows else "覆しではないので書かなかった", rows)
 
 
+class _InputError(Exception):
+    """判定の入力を決められない。`kind` は停止理由の語（`invalid`・`input_missing`・`refused`）。
+
+    `stopped` があれば、その止まった結果をそのまま返す（保存先・DB の例外を `ndf progress` と同じ形に変えたもの）。
+    """
+
+    def __init__(self, kind: str, summary: str, stopped: dict[str, Any] | None = None) -> None:
+        super().__init__(summary)
+        self.kind, self.summary, self.stopped = kind, summary, stopped
+
+
+def _env_inputs(gate: str, inputs: Any) -> dict[str, Any]:
+    """`NDF_STAGE_INPUT` の値を、プランが組むのと同じ規則（工程の入力の規約 `stage-in` と工程の入力のキー）で確かめて返す。
+
+    工程の入力の規則はモードに依らないので、判定のステップを持つ工程の文書から `mode` を読まずに定義を作る。規約の誤りが
+    1 件でもあれば `invalid`（`{"context": {...}}` の形もここで落ちる）、無くてキーが足りなければ `input_missing`。
+    """
+    stage = definition.stage_io(mvv_gate.GATE_STAGES[gate])
+    got = definition.stage_input_errors(stage, inputs)
+    if got.schema:
+        raise _InputError("invalid", f"工程の入力（環境変数 {INPUT_ENV}）の形が合わない: " + "; ".join(got.schema))
+    if got.missing:
+        raise _InputError("input_missing", f"工程の入力（環境変数 {INPUT_ENV}）にキーが足りない: " + "; ".join(got.missing))
+    return dict(inputs)
+
+
+def _mvv_inputs(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    """判定の入力。`NDF_STAGE_INPUT`（プランの経路）か `--machine`（ステートマシンの ID）のどちらか一方から決める。"""
+    raw = os.environ.get(INPUT_ENV)
+    if raw is not None and args.machine is not None:
+        raise _InputError("invalid", f"判定の入力の出所が 2 つある（環境変数 {INPUT_ENV} と --machine）。どちらか一方にする")
+    if args.machine is not None:
+        try:
+            return stage_inputs.stage_inputs_of(root, args.machine, mvv_gate.GATE_STEPS[args.gate])
+        except model.Refused as exc:
+            raise _InputError("refused", str(exc)) from exc
+        except invoke.StageInputError as exc:
+            raise _InputError(exc.kind, str(exc)) from exc
+        except sa.exc.SQLAlchemyError as exc:
+            # 本文は SQL・バインド値・接続先を含みうるので、ndf progress と同じく種類の名前だけを出す
+            raise _InputError("", "", command.stopped_db(TOOL, exc)) from exc
+        except durable.StoreStopped as exc:
+            raise _InputError("", "", exc.stopped(TOOL)) from exc
+    if raw is None:
+        raise _InputError("invalid", f"工程の入力（環境変数 {INPUT_ENV} の JSON object か --machine <ステートマシンの ID>）が無い")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise _InputError("invalid", f"工程の入力（環境変数 {INPUT_ENV}）を JSON として読めない") from exc
+    return _env_inputs(args.gate, parsed)
+
+
+# --expect-pr の番号が判定する PR と違うときの要約。どちらの PR の番号も載せない（結果は承認資料へ写されうる）
+OTHER_PR = "判定する PR が承認する PR と違うので判定しない"
+
+
 def _mvv_gate(args: argparse.Namespace, root: Path) -> dict[str, Any]:
-    inputs = invoke.stage_inputs(os.environ)
-    if inputs is None:
-        return result.stopped(TOOL, "invalid", f"工程の入力（環境変数 {INPUT_ENV} の JSON object）が無い")
+    if args.expect_pr is not None and args.gate != mvv_gate.RELEASE:
+        return result.stopped(TOOL, "invalid", f"--expect-pr は --gate {mvv_gate.RELEASE} のときだけ渡せる")
+    try:
+        inputs = _mvv_inputs(args, root)
+    except _InputError as exc:
+        return exc.stopped if exc.stopped is not None else result.stopped(TOOL, exc.kind, exc.summary)
+    if args.expect_pr is not None:
+        # 判定に使う入力そのものと比べる（gate の中は変えない）。比べるだけなので GitHub へつながない
+        try:
+            judged: int | None = mvv_gate.release_pr(inputs)
+        except mvv_gate.GateError:
+            judged = None  # 判定する PR を決められなければ、今どおり gate が停止理由を返す
+        if judged is not None and judged != args.expect_pr:
+            return result.stopped(TOOL, "not_applicable", OTHER_PR)
     warnings: list[dict[str, Any]] = []
     out = mvv_gate.gate(root, args.gate, inputs, _hub, warnings=warnings)
     summary = "MVV 判定で承認ゲートを省く" if out["skip"] else "承認ゲートを人へ問う: " + " / ".join(out["why"])
     return result.result(TOOL, result.OK, summary, warnings, outputs={model.MVV_KEY: out})
+
+
+# 根拠の行の誤りの自由記述を伏せられなかったときの注意の頭（後ろに failure_text の定型文と診断の記録の識別子）
+CITE_WITHHELD = "根拠の行の誤りの自由記述を伏せた（参照先の公開範囲を照会できない）: "
+
+
+def _cite_shown(root: Path, errors: list[dict[str, Any]], where: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """根拠の行の誤りの自由記述（`path`・`cited`・`unknown` の要素）を 1 回の伏せる処理に通した誤りと、注意。
+
+    伏せ方は判定するリポジトリの公開範囲を照会せず、公開の書き先と同じにする（結果の受け手はその閲覧者と限らない。#3959）。
+    照会に失敗したら各欄を `WITHHELD` にし、注意の原因は `failure_text` の定型文と診断の記録の識別子にする。
+    """
+    seen = publish.Once(lambda texts: publish.Publisher(_hub(root)).guarded(*texts, assume_public=True)[0])
+    shown = iter(seen([t for e in errors for t in (e["path"], e["cited"], *e["unknown"])]))
+    items = [{**e, "path": next(shown), "cited": next(shown), "unknown": [next(shown) for _ in e["unknown"]]} for e in errors]
+    if seen.failure is None:
+        return items, []
+    cause = seen.error if seen.error is not None else seen.failure
+    return items, [CITE_WITHHELD + mvv_gate.failure_text("cite_lookup_failed", cause, where)]
+
+
+def _mvv_cite(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    where = {"gate": args.gate}
+    # 相対パスは対象のリポジトリ（--cwd）の根から解く（引継ぎ文書と同じ）
+    files = [root / f.expanduser() for f in args.files]
+    try:
+        snap = _base_mvv(root, args.base)
+        got = mvv.cite(snap, files, require_basis=args.gate == mvv_gate.DESIGN)
+    except (GitError, mvv.MvvError, OSError, UnicodeDecodeError) as exc:
+        # 例外の文は認証情報の付いた URL・社内のホスト名・手元のパスを含みうるので、定型文と診断の記録の識別子だけを出す
+        return result.stopped(TOOL, "precondition", mvv_gate.failure_text("cite_precondition", exc, where))
+    if snap.state != State.APPROVED:
+        return result.result(TOOL, result.OK, "承認済みの MVV が無いので確かめていない")
+    metrics = got.metrics(snap)
+    if not got.errors:
+        return result.result(
+            TOOL, result.OK, f"根拠の行の誤り 0 件（MVV バージョン {snap.version}・{len(files)} ファイル）", metrics=metrics
+        )
+    items, warnings = _cite_shown(root, got.errors, where)
+    first = items[0]
+    summary = f"根拠の行の誤り {len(items)} 件（最初: {first['path']}:{first['line']} {first['cited']}）"
+    return result.stopped(TOOL, "refused", summary, items=items, metrics=metrics, warnings=warnings)
 
 
 def _cleanup_stage(args: argparse.Namespace, root: Path) -> dict[str, Any]:
@@ -343,7 +463,28 @@ def _add_mvv(sub: Any) -> None:
     answer.set_defaults(handler=_mvv_answer)
     gate = m.add_parser("gate")
     gate.add_argument("--gate", required=True, choices=(mvv_gate.DESIGN, mvv_gate.RELEASE), help="承認ゲートの区分")
+    gate.add_argument(
+        "--machine",
+        default=None,
+        help="ステートマシンの ID（プランの外で打つとき。環境変数 NDF_STAGE_INPUT の代わりに文脈から入力を組み、両方は渡せない）。"
+        "NDF_STAGE_INPUT は工程の入力の規約 stage-in の平らな形で、外れれば invalid、キーが足りなければ input_missing で止まる",
+    )
+    gate.add_argument(
+        "--expect-pr",
+        type=int,
+        default=None,
+        help="承認する PR の番号（--gate release のときだけ）。判定に使う入力の PR と違えば、PR を読まず判定もコメントもせずに"
+        " not_applicable で止まる",
+    )
     gate.set_defaults(handler=_mvv_gate)
+    cite = m.add_parser("cite")
+    cite.add_argument(
+        "--gate", required=True, choices=(mvv_gate.DESIGN, mvv_gate.RELEASE),
+        help="資料を返す承認ゲートの区分（design なら「目指す姿の根拠」のセクションと、決定ごとの根拠の行の有無も確かめる）",
+    )  # fmt: skip
+    cite.add_argument("--base", required=True, help="ベースブランチ（取得して承認済みの MVV を読む）")
+    cite.add_argument("files", nargs="+", type=Path, metavar="ファイル", help="確かめる承認資料")
+    cite.set_defaults(handler=_mvv_cite)
 
 
 def _add_reading(sub: Any) -> None:

@@ -172,9 +172,11 @@ def test_d12_settings_that_bring_other_credentials_refuse_the_registry_key(tmp_p
 def test_d12_target_env_refuses_a_missing_or_off_key(tmp_path):
     store = register(tmp_path)
     s, _, env = _child(tmp_path)
-    assert account_choice.target_env(env, "key:key-main", store, s.state_dir, tmp_path, ["claude"]) == "key_missing"
+    assert (
+        account_choice.target_env(env, "key:key-main", store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude"])) == "key_missing"
+    )
     put_book(store, use="off")
-    assert account_choice.target_env(env, "key:key-main", store, s.state_dir, tmp_path, ["claude"]) == "key_off"
+    assert account_choice.target_env(env, "key:key-main", store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude"])) == "key_off"
 
 
 def _launched(tmp_path, monkeypatch):
@@ -185,7 +187,7 @@ def _launched(tmp_path, monkeypatch):
     d.mkdir(mode=0o700)
     os.chmod(d, 0o700)
     rec = key_helper.create(d)
-    got = account_choice.key_target(env, store, s.state_dir, tmp_path, ["claude"], (rec.path, rec.helper_id))
+    got = account_choice.key_target(env, store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude"]), (rec.path, rec.helper_id))
     assert isinstance(got, account_choice.Built), got
     assert got.generation == "gen-1" and got.pin_file is not None and got.pin_file.is_file()
     for k, v in got.env.items():
@@ -241,19 +243,6 @@ def test_r1_1_the_helper_reads_the_key_inside_the_record_lock(tmp_path, monkeypa
     monkeypatch.setattr(key_helper, "pay", pay)
     assert cli.main(["account", "api-key-helper", "key-main", "--generation", "gen-1", *tail]) == 0
     assert capsys.readouterr().out == KEY_MAIN and seen == [True]
-
-
-def test_r1_4_the_fallbacks_follow_the_accounts_after_a_limit(tmp_path):
-    # 先頭の従量の接続の用意が落ちても、残りの API キーを試せるように起動順の後ろへ並べる（今の接続先と tried は除く）
-    g = wrapper_guard.GuardSteps()
-    g.s = SimpleNamespace(guards=account_decide.Guards(80.0, 50.0, 90.0))
-    g._pinned_or = lambda pick, reason, current, now: pick
-    ok = launch_inputs.LaunchCache({}, None)
-    inputs = launch_inputs.Inputs(fallback={reg.METERED: ok, "key:k1": ok, "key:k2": ok}, tried=frozenset({"key:k2"}))
-    sec = SimpleNamespace(account="work1", limit_at=None, target=None, auth_at=None)
-    pick = account_decide.Pick("switch", reg.METERED, "")
-    assert g._names(sec, pick, "limit", inputs, 0.0) == [reg.METERED, "key:k1"]
-    assert g._names(sec, pick, "guard", inputs, 0.0) == [reg.METERED]
 
 
 def test_r1_5_off_after_the_choice_is_caught_before_the_old_child_stops(tmp_path):
@@ -403,7 +392,10 @@ def test_r4_5_a_row_without_a_usable_key_is_not_a_candidate(tmp_path, value):
     s, environ, child = _child(tmp_path)
     probes = account_choice.fallbacks(account_choice.read_before(store), environ, None, tmp_path, ["claude"], frozenset())
     assert [(p.name, p.reason) for p in probes] == [("key:key-main", "key_missing")]
-    assert account_choice.target_env(child, "key:key-main", store, s.state_dir, tmp_path, ["claude"]) == "key_missing"
+    assert (
+        account_choice.target_env(child, "key:key-main", store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude"]))
+        == "key_missing"
+    )
     reader = launch_inputs.Reader(store, s.state_dir, environ, tmp_path, ["claude"])
     assert "key:key-main" not in reader.read(0.0, True).fallbacks()
     with pytest.raises(reg.AccountError):
@@ -413,15 +405,11 @@ def test_r4_5_a_row_without_a_usable_key_is_not_a_candidate(tmp_path, value):
 def test_r4_4_a_reregistered_key_stays_in_the_order_behind_another_first(tmp_path):
     # 同じ名前の登録し直しで止めたキーの子は、別の候補が先頭に立っても新しい世代のその名前を起動順に残す（先頭の用意が落ちても続ける）
     g = wrapper_guard.GuardSteps()
-    g.s = SimpleNamespace(guards=account_decide.Guards(80.0, 50.0, 90.0))
-    g._pinned_or = lambda pick, reason, current, now: pick
-    ok = launch_inputs.LaunchCache({}, None)
-    inputs = launch_inputs.Inputs(fallback={"key:k1": ok, "key:k2": ok})
-    pick = account_decide.Pick("switch", "key:k2", "")
+    pick = account_decide.Pick("switch", "key:k2", "", ("key:k2",))
     sec = SimpleNamespace(account="key:k1", limit_at=None, target=None, auth_at=None, rekeyed=True)
-    assert g._names(sec, pick, "revoked", inputs, 0.0) == ["key:k2", "key:k1"]
+    assert g._names(sec, pick, "revoked") == ["key:k2", "key:k1"]
     sec.rekeyed = False
-    assert g._names(sec, pick, "revoked", inputs, 0.0) == ["key:k2"]
+    assert g._names(sec, pick, "revoked") == ["key:k2"]
 
 
 def test_r5_2_a_metered_key_declaration_with_its_own_path_is_judged_with_that_path(tmp_path, monkeypatch):
@@ -477,7 +465,7 @@ def test_r6_3_the_watch_reads_the_version_checked_at_launch(tmp_path, monkeypatc
     store = register(tmp_path)
     put_book(store)
     s, _, child = _child(tmp_path)
-    built = account_choice.target_env(child, "key:key-main", store, s.state_dir, tmp_path, ["claude"])
+    built = account_choice.target_env(child, "key:key-main", store, s.state_dir, account_choice.LaunchArgs(tmp_path, ["claude"]))
     monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd, exe_of=None: None)
     started = account_choice.Started("gen-1", built.resolved.helper, "2.1.330")
     assert account_choice.drift("key:key-main", built.env, built.argv, tmp_path, store, started)[:2] == (None, None)

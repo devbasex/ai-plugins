@@ -117,6 +117,7 @@ KINDS: dict[str, Kind] = {
     "loop-event": Kind(contracts.schema_path("internal/loop-event"), (_loop_event_v1,)),
     "reading-check": Kind(contracts.schema_path("internal/reading-check"), (dict,)),
     "reading-docs": Kind(contracts.schema_path("internal/reading-docs"), (dict,)),
+    "mvv-gate-failure": Kind(contracts.schema_path("internal/mvv-gate-failure"), (dict,)),
 }
 
 

@@ -615,6 +615,8 @@ def test_list_rows_states_saved_metered_and_key_rows(tmp_path):
             "org_name": "Org",
             "pinned": False,
             "percent": 5.0,
+            "five_hour": 5.0,
+            "seven_day": None,
             "capacity_declared": {"five_hour": 10.0, "seven_day": None},
             "state": "再登録が要る",
         },
@@ -625,6 +627,8 @@ def test_list_rows_states_saved_metered_and_key_rows(tmp_path):
             "org_name": None,
             "pinned": False,
             "percent": None,
+            "five_hour": None,
+            "seven_day": None,
             "capacity_declared": {"five_hour": None, "seven_day": None},
             "state": "残量不明",
         },
@@ -635,6 +639,8 @@ def test_list_rows_states_saved_metered_and_key_rows(tmp_path):
             "org_name": None,
             "pinned": False,
             "percent": 100.0,
+            "five_hour": 100.0,
+            "seven_day": None,
             "capacity_declared": {"five_hour": None, "seven_day": None},
             "state": "上限",
         },
@@ -646,8 +652,8 @@ def test_list_rows_states_saved_metered_and_key_rows(tmp_path):
             "details": {"region": "us-east-1"},
             "state": "保存した設定",
         },
-        {"name": "k1", "kind": "api_key", "account": None, "monthly_usd": None, "state": "月の額が未設定"},
-        {"name": "k2", "kind": "api_key", "account": "x", "monthly_usd": None, "state": "月の額が未設定"},
+        {"name": "k1", "kind": "api_key", "account": None, "monthly_usd": 200.0, "state": "使える"},
+        {"name": "k2", "kind": "api_key", "account": "x", "monthly_usd": 200.0, "state": "使える"},
     ]
 
 
@@ -703,3 +709,12 @@ FAKE_KEY = "sk-ant-api03-fake-test-key-not-real"
 def test_metered_kind_settles_the_provider_or_the_api_key(env, kind):
     # 別冊の「設定の提供元の確定」: 提供元の選択が 1 つか、API キーの設定か、どちらでもなければ None
     assert reg.metered_kind(env) == kind
+
+
+@pytest.mark.parametrize("end", ["\x07", "\x1b\\"], ids=["bel", "st"])
+def test_read_url_strips_terminal_hyperlink(tmp_path, end):
+    # claude auth login は URL を端末のリンク（OSC 8）で包んで出す。包みの URL と表示の URL を 1 本につなげない
+    url = "https://claude.ai/oauth/authorize?z-abc"
+    out = tmp_path / "login.out"
+    out.write_text(f"If the browser didn't open, visit:\n\x1b]8;;{url}{end}{url}\x1b]8;;{end}\nPaste code here if prompted > ")
+    assert account_login._read_url(out, None) == url

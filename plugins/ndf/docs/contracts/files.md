@@ -34,6 +34,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `loop-record` | `ndf-loop` main:.ndf/loop | `<loop>/loop.json` | record | — | 開発ループとスプリント（M1） | cleanup | 公開 |
 | `mvv` | `ndf` repo:.ndf | `mvv.json` | ndf_settings | 追跡 | 人の承認（M7） | kept | 内部（予告なく変えてよい） |
 | `mvv-body` | `ndf` repo:.ndf | `mvv.md` | ndf_settings | 追跡 | 人の承認（M7） | kept | 内部（予告なく変えてよい） |
+| `mvv-gate-failures` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `mvv-gate-failures.jsonl` | record | — | MVV 判定の失敗の診断の記録（#3959） | kept | 内部（予告なく変えてよい） |
 | `mvv-signals` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `mvv-signals.jsonl` | record | — | 承認ゲートの回答の写し（M7） | kept | 内部（予告なく変えてよい） |
 | `mvv-validation` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `mvv-validation.jsonl` | record | — | MVV 判定（M7） | kept | 内部（予告なく変えてよい） |
 | `organizer-answer` | `organizer` env:.（NDF_ORGANIZER_DIR で差し替え） | `answers/<id>.json` | exchange | — | 外のオーガナイザー（サービス） | kept | 公開 |
@@ -54,6 +55,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `reading-materials` | `mvv-state` state:.（NDF_MVV_STATE_DIR で差し替え） | `reading-materials/<gate>-<n>.md` | record | — | 読み手役に読ませた承認資料のコピー（#4446。PR ごとに最後の 1 つ） | cleanup | 内部（予告なく変えてよい） |
 | `relay-auth-held` | `relay-accounts` state:relay/accounts | `held.json` | measured | — | 中継のラッパー（M3b） | replaced | 内部（予告なく変えてよい） |
 | `relay-busy` | `relay-wrappers` state:relay/wrappers | `<名前>/busy-<起動>.json` | exchange | — | 子の会話の SessionStart・PreToolUse・Stop の hook（M3a）。中継のラッパーはほかの起動のものを消す | run | 内部（予告なく変えてよい） |
+| `relay-cache-log` | `relay-wrappers` state:relay/wrappers | `<名前>/cache-log.jsonl` | record | — | 子の会話の Stop の起床の hook と UserPromptSubmit の guard（#4068） | cleanup | 内部（予告なく変えてよい） |
 | `relay-copy-launcher` | `relay-copy` config:ndf | `relay.py` | exchange | — | 人（ndf relay install） | replaced | 内部（予告なく変えてよい） |
 | `relay-copy-root` | `relay-copy` config:ndf | `relay.root` | exchange | — | 中継（M3b）・SessionStart hook（更新後の向け直し） | replaced | 内部（予告なく変えてよい） |
 | `relay-hub-log` | `relay-hub` state:relay/hub | `hub-log.jsonl` | record | — | 中継のリレーハブ（M3） | cleanup | 内部（予告なく変えてよい） |
@@ -61,6 +63,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `relay-hub-request` | `relay-hub` state:relay/hub | `requests-v2/<id>.json` | exchange | — | 中継の頼む側（M3） | run | 内部（予告なく変えてよい） |
 | `relay-hub-result` | `relay-hub` state:relay/hub | `results/<id>.json` | exchange | — | 中継のリレーハブ（M3） | run | 内部（予告なく変えてよい） |
 | `relay-hub-state` | `relay-hub` state:relay/hub | `hub.json` | exchange | — | 中継（M3） | replaced | 内部（予告なく変えてよい） |
+| `relay-keep` | `relay-wrappers` state:relay/wrappers | `<名前>/keep-<会話>.json` | exchange | — | 子の会話の Stop の起床の hook と UserPromptSubmit の guard（#4068） | cleanup | 内部（予告なく変えてよい） |
 | `relay-marker` | `relay-markers` state:relay/markers | `<id>.json` | exchange | — | 中継のラッパー（M3b） | run | 内部（予告なく変えてよい） |
 | `relay-next` | `relay-wrappers` state:relay/wrappers | `<名前>/next.json` | exchange | — | Stop の hook（M3a） | run | 内部（予告なく変えてよい） |
 | `relay-pinned-account` | `relay-accounts` state:relay/accounts | `pinned.json` | ndf_settings | — | 人（ndf relay account use） | replaced | 内部（予告なく変えてよい） |

@@ -2,8 +2,8 @@
   "$schema": "../schemas/internal-names.schema.json",
   "summary": "内部データの名前の対応表。意味ごとに、使う 1 つの名前（key）・消した別名（aliases_removed）・使ってよい種類（where）を持つ。意味の違う値が同じ名前を使うときは、別の行に書く",
   "names": {
-    "形のバージョン": {"key": "version", "aliases_removed": ["schema"], "where": ["usage", "mvv-signals", "mvv-validation", "context-records", "loop-event", "context", "stage-snapshot", "reading-check", "result", "reading-docs"]},
-    "書いた時刻": {"key": "at", "aliases_removed": ["created_at", "updated_at", "started_at", "ts"], "where": ["usage", "mvv-signals", "mvv-validation", "context-records", "loop-event", "reading-check", "reading-docs"]},
+    "形のバージョン": {"key": "version", "aliases_removed": ["schema"], "where": ["usage", "mvv-signals", "mvv-validation", "context-records", "loop-event", "context", "stage-snapshot", "reading-check", "result", "reading-docs", "mvv-gate-failure"]},
+    "書いた時刻": {"key": "at", "aliases_removed": ["created_at", "updated_at", "started_at", "ts"], "where": ["usage", "mvv-signals", "mvv-validation", "context-records", "loop-event", "reading-check", "reading-docs", "mvv-gate-failure"]},
     "結果": {"key": "status", "aliases_removed": ["result", "outcome"], "where": ["result"]},
     "製品のバージョン": {"key": "product_version", "aliases_removed": [], "where": ["loop-event", "context"]},
     "MVV の設定のバージョン": {"key": "mvv_version", "aliases_removed": [], "where": ["mvv-signals", "mvv-validation"]},

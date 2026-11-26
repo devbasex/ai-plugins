@@ -392,4 +392,4 @@ kiro の席である。kiro の記録はターンに時刻を持たず、記録�
 - [ndf-instruction-files-check.md](ndf-instruction-files-check.md) — 同じ置き方の設定 `.ndf/instructions.json`
 - [versioning-and-distribution.md](../versioning-and-distribution.md) — 版とリリースの正本（「正式版を出す」）
 - [metrics/ndf-token-usage/README.md](../metrics/ndf-token-usage/README.md) — 記録の読み方と読み取りの手引き
-- 要求と設計の元の文書は `issues/old/issue-893-release-snapshot-requirements.md` と `issues/old/issue-893-release-snapshot-design.md` にある
+- 要求と設計の元の文書は [`issues/old/issue-893-release-snapshot-requirements.md`](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/old/issue-893-release-snapshot-requirements.md) と [`issues/old/issue-893-release-snapshot-design.md`](https://github.com/devbasex/ai-plugins/blob/eb4d652deeb08105ef65a4353aa3c58a6c92e289/issues/old/issue-893-release-snapshot-design.md) にある

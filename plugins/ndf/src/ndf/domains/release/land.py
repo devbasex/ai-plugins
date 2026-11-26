@@ -33,7 +33,8 @@ from typing import NamedTuple, Optional
 from urllib.parse import quote
 
 from ndf.adapters import ci, merge_queue
-from ndf.adapters.github import BYPASS_ORDER, MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull, RuleFacts, text_of
+from ndf.adapters.github import MERGE_COMMIT, MERGE_QUEUE_PENDING, GitHub, GitHubError, MergeOutcome, Pull, text_of
+from ndf.adapters.github_rules import BYPASS_ORDER, RuleFacts
 from ndf.adapters.publish import Publisher
 from ndf.contracts import facts
 from ndf.core import json_pointer

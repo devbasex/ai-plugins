@@ -52,6 +52,12 @@ def test_scaled_follows_long_measurements():
         ("a.b.json", lambda _: {"summary": "x", "seconds": 1, "interval": 1}),
         ("a.b.json", lambda _: {"summary": "x", "read_by": [], "seconds": 1}),
         ("a.b.json", lambda _: {"summary": "x", "read_by": ["os.path"], "seconds": 1}),
+        # #4068: 倍率は 0 より大きく、割合は 1 以下、バージョンは「数.数.数」で重複なし
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], "ratios": {"1h": 0}}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], "default": -0.05}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], "ratio": 1.5}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], "versions": ["2.1"]}),
+        ("a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], "versions": ["2.1.330", "2.1.330"]}),
     ],
 )
 def test_wrong_shape_stops(contracts_copy, rel, change):
@@ -98,9 +104,14 @@ _SCHEMA_VALUE_KEYS = (
     "rounds",
     "retries",
     "max_bytes",
+    "default",
+    "ratio",
+    "calls",
+    "start",
 )
-# 数でない値（`hook.stop-wait.judge` の model・runtimes・auth_markers・endpoint と `samples.fetch` の peers）。`limits.value` では引かない
-_SCHEMA_OTHER_KEYS = ("model", "runtimes", "auth_markers", "endpoint", "peers")
+# 数でない値（`hook.stop-wait.judge` の model・runtimes・auth_markers・endpoint と `samples.fetch` の peers と `cache.*` の ratios・versions）。
+# `limits.value` では引かない
+_SCHEMA_OTHER_KEYS = ("model", "runtimes", "auth_markers", "endpoint", "peers", "ratios", "versions")
 
 
 def test_value_keys_match_policy_fields_and_schema():
@@ -123,9 +134,10 @@ def test_the_stop_wait_judge_row_is_read_from_the_shipped_settings():
 
 @pytest.mark.parametrize("key", _SCHEMA_VALUE_KEYS)
 def test_value_reads_every_value_key(contracts_copy, key):
-    contracts_copy("limits/a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], key: 7})
-    assert limits.value("a.b", key) == 7
-    assert getattr(limits.policy("a.b"), key) == 7
+    got = 1 if key == "ratio" else 7  # 割合（ratio）は 1 以下
+    contracts_copy("limits/a.b.json", lambda _: {"summary": "x", "read_by": ["ndf.a"], key: got})
+    assert limits.value("a.b", key) == got
+    assert getattr(limits.policy("a.b"), key) == got
     others = [k for k in _SCHEMA_VALUE_KEYS if k != key]
     assert all(getattr(limits.policy("a.b"), k) is None for k in others)
 
@@ -151,3 +163,23 @@ def test_table_keeps_representative_values():
     fetch = limits.policy("samples.fetch")
     assert (fetch.seconds, fetch.retries, fetch.max_bytes, fetch.peers) == (60, 0, 64 * 1024 * 1024, {"github": 2})
     assert table["test-run.test"].name == "test-run.test"
+
+
+def test_cache_policies_are_read_and_text_lists_come_only_from_texts():
+    # #4068 の受け入れ条件 13: 値は上限の設定に置き、バージョンの一覧は `texts`、数は `value` で引く
+    assert limits.texts("cache.rewake", "versions") == ()
+    assert limits.value("cache.wake", "seconds") == 600 and limits.value("cache.wake", "interval") == 60
+    assert limits.value("cache.hit", "ratio") == 0.9 and limits.value("cache.wake-cost", "count") == 2000
+    assert limits.policy("cache.read-ratio").ratios["claude-opus-5-5"] == 0.05
+    for name, key in (("cache.write-ratio", "ratios"), ("cache.rewake", "versions")):
+        with pytest.raises(limits.LimitsError):
+            limits.value(name, key)
+    with pytest.raises(limits.LimitsError):
+        limits.texts("cache.wake", "seconds")
+
+
+def test_swapped_cache_policies_are_what_the_readers_return(contracts_copy):
+    contracts_copy("limits/cache.rewake.json", lambda d: {**d, "versions": ["2.1.330", "2.1.332"]})
+    contracts_copy("limits/cache.write-ratio.json", lambda d: {**d, "ratios": {"1h": 3.0, "5m": 1.5}})
+    assert limits.texts("cache.rewake", "versions") == ("2.1.330", "2.1.332")
+    assert limits.policy("cache.write-ratio").ratios == {"1h": 3.0, "5m": 1.5}

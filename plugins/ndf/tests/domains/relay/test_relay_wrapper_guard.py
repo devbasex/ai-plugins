@@ -1,9 +1,9 @@
 """見回りの替えと最後の砦（U9。#3604 #3864 の決定 4・8・11、I12・I13・I14）。
 
-- 見回り: 今のアカウントが使い切りの組で閾値の内側の候補があれば、止めてよい時点で子を止めて同じ会話を続ける
+- 見回り: 今のアカウントが閾値の外側で替える先があれば、止めてよい時点で子を止めて同じ会話を続ける
 - 止めてよい時点: 静かな時間・回答待ちの質問が無い・会話の記録の最後が終わった応答で、それが最後の入力より後
-- 上限の後: 今のアカウントを取り直し、上限を見た後の取得が届くまで今のアカウントを上限として扱う。替え先を順に試す
-  （次点まで届く）。待つ間も取得の記録を読み直し、解けたアカウントで続ける
+- 上限の後: 使用率を取るラッパーは画面の上限の行で今のアカウントを取り直し、取り直した記録が上限のときだけ替える（#4404）。
+  替え先を順に試す（次点まで届く）。待つ間も取得の記録を読み直し、解けたアカウントで続ける
 - 取得のスレッド: 見回りと中継を止めず、形の変化を 1 回だけ知らせる
 値はすべて偽の値で、実のアカウントとネットワークを使わない。
 """
@@ -89,11 +89,11 @@ def _guarded(tmp_path, usages, turn=60.0, tool=False, outputs=None, exit_code=No
 
     def prepare(d, state):
         register(tmp_path, *usages)
-        for n, (five, seven) in usages.items():
-            put_usage(tmp_path, n, five, seven)
         accounts.use(state, "work1")
 
-    def on_start(session_id):
+    def on_start(session_id):  # 使用率は work1 で起動した後に取れた（最初の起動は記録の無い並びで指定の work1）
+        for n, (five, seven) in usages.items():
+            put_usage(tmp_path, n, five, seven)
         if turn is not None:
             put_turn(tmp_path, session_id, time.time() + turn, tool)
 
@@ -101,33 +101,14 @@ def _guarded(tmp_path, usages, turn=60.0, tool=False, outputs=None, exit_code=No
     return run_wrapper(tmp_path, [first, FakeChild([], 0)], prepare)
 
 
-@pytest.mark.parametrize(
-    "work1",
-    [(86.0, None), (10.0, 91.0)],
-    ids=["five-hour-over-a", "weekly-over-c"],
-)
-def test_d11_i12_3864_4_guard_switches_at_the_safe_point_and_resumes_the_same_conversation(tmp_path, work1):
-    # 決定 11・I12・受け入れ条件 #3864 の 4（見回り）: 5 時間 86% か 7 日 91% の work1 は、止めてよい時点で余裕の work2 へ替える
-    ended, spawn, w = _guarded(tmp_path, {"work1": work1, "work2": (10.0, None)})
+def test_d11_i12_3864_4_guard_switches_at_the_safe_point_and_resumes_the_same_conversation(tmp_path):
+    # 決定 11・I12・受け入れ条件 #3864 の 4（見回り）: 閾値の外側の work1 は、止めてよい時点で work2 へ替えて同じ会話を続ける
+    # （どの使用率で替えるかは test_relay_decide.py の choose のテストが持つ）
+    ended, spawn, w = _guarded(tmp_path, {"work1": (86.0, None), "work2": (10.0, None)})
     (first, _), (second, _) = spawn.calls
     assert _envs(spawn) == ["work1", "work2"] and ended.cause == ""
     assert second[:3] == [wrapper.CLAUDE, "--resume", first[2]] and second[-1].startswith(switch_decide.GUARD_RESUME_PROMPT)
     assert [(r["from"], r["account"], r["reason"]) for r in rows_of(w, "account") if "from" in r][-1] == ("work1", "work2", "guard")
-
-
-@pytest.mark.parametrize(
-    "usages",
-    [
-        {"work1": (10.0, 75.0), "work2": (10.0, None)},  # B 越え・C より下は途中で替えない
-        {"work1": (86.0, None), "work2": (86.0, None)},  # 閾値の内側の候補が無ければ使い切る
-    ],
-    ids=["weekly-b-only", "no-inner-candidate"],
-)
-def test_i12_guard_keeps_the_account_without_an_inner_candidate_or_below_c(tmp_path, usages):
-    outputs = [b"working\r\n"] + [b""] * 8
-    ended, spawn, w = _guarded(tmp_path, usages, outputs=outputs, exit_code=0)
-    assert _envs(spawn) == ["work1"] and "書かずに終わった" in ended.reason
-    assert switch_decide.GUARD_POINT not in [r["reason"] for r in rows_of(w, "active")]
 
 
 @pytest.mark.parametrize(
@@ -169,23 +150,6 @@ def test_d8_a_spent_window_and_a_quiet_child_count_as_the_limit_without_the_line
     assert _envs(spawn) == ["work1", "work2"] and spawn.calls[1][0][-1] == switch_decide.RESUME_PROMPT
 
 
-@pytest.mark.parametrize(
-    "others, expect",
-    [({"work2": None, "work3": (10.0, 95.0)}, "work2"), ({"work3": (10.0, 95.0)}, "work3")],
-    ids=["unknown-usage-first", "spent-group-too"],
-)
-def test_3864_5_d8_after_the_limit_an_unknown_usage_account_comes_before_the_spent_group(tmp_path, others, expect):
-    # 受け入れ条件 #3864 の 5・決定 8: 使用率の分からない work2 で続け、無ければ使い切りの組（7 日 95%）の work3 へも替える
-    def on_start(_sid):
-        put_usage(tmp_path, "work1", 50.0)
-        for n, u in others.items():
-            if u is not None:
-                put_usage(tmp_path, n, *u)
-
-    ended, spawn, w = _limited(tmp_path, ("work1", *others), on_start)
-    assert _envs(spawn) == ["work1", expect] and spawn.calls[1][0][1] == "--resume"
-
-
 def test_r2_1_a_limit_target_that_fails_after_the_stop_falls_to_the_next_candidate(tmp_path, monkeypatch):
     # U8 の cross-review の r2-1: 上限の後に最上位の替え先（gmail）の用意が止めた後に落ちたら、次点の main で再開する（元の team へ戻らない）
     calls = []
@@ -221,32 +185,6 @@ class JumpWall:
         self.jumped = True
 
 
-def test_i14_after_the_limit_the_same_account_waits_for_a_fetch_newer_than_the_limit(tmp_path, monkeypatch):
-    # 決定 8・I14: 上限の行を見たら work1 をすぐ取り直す（force）。上限を見た時刻より前の記録（10%）では work1 へ戻らず
-    # wait_reset で待ち、上限を見た後の取得が届いて上限が解けていれば、同じアカウントで同じ会話を続ける
-    store, release, forced = _store(tmp_path), threading.Event(), []
-
-    def fetch(target, now, force, gate):
-        if not force:
-            return None
-        forced.append(target.name)
-        release.wait(10)  # 最初の wait_reset を見届けてから取得を返す
-        got = claude_usage.Usage(five_hour=(10.0, time.time() + 18000))
-        accounts.write_fetch(accounts.fetch_path(store, target.name, target.generation), got, time.time())
-        return got
-
-    def prepare(d, state):
-        register(tmp_path, "work1")
-        put_fetch(tmp_path, "work1", (10.0, time.time() + 3600), at=time.time() - 60)  # 上限を見る前の取得
-        accounts.use(state, "work1")
-
-    picks = on_first_wait(monkeypatch, release.set)
-    ended, spawn, w = run_wrapper(tmp_path, [Hooked([BARE_LIMIT], None), FakeChild([], 0)], prepare, fetch=fetch)
-    (first, _), (second, _) = spawn.calls
-    assert forced == ["work1"] and picks[0].kind == "wait_reset" and picks[-1].kind == "switch"
-    assert _envs(spawn) == ["work1", "work1"] and second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
-
-
 def test_3864_10_i14_while_waiting_the_account_that_resets_first_takes_the_conversation(tmp_path, monkeypatch):
     # 受け入れ条件 #3864 の 10・I14: 従量の接続も API キーも無く、work2 の 5 時間の窓が work1 より先に解けると work2 で続ける
     base = time.time()
@@ -264,16 +202,15 @@ def test_3864_10_i14_while_waiting_the_account_that_resets_first_takes_the_conve
 def test_d8_d11_a_fetch_that_returns_100_keeps_the_patrol_on_metered(tmp_path, monkeypatch):
     # 決定 8・11（2026-11-22 の team の事例の再発防止）: 上限で従量の接続へ替えた後、取り直した記録が team を 100% と返す間は、
     # 見回りが従量の接続から team へ戻らない。上限の前の記録は 55%、取り直した応答はリセットの時刻が 0.6 秒早い
-    base, release, wrote = time.time(), threading.Event(), threading.Event()
+    base, wrote = time.time(), threading.Event()
     store = _store(tmp_path)
-    picks = on_first_wait(monkeypatch, release.set, kind="switch")  # 上限の後の最初の判断は取り直す前の記録で決める
+    picks = on_first_wait(monkeypatch, lambda: None, kind="switch")
     monkeypatch.setattr(account_choice, "claude_version", lambda env, cwd, exe_of=None: "2.1.330")
     monkeypatch.setattr(wrapper.Wrapper, "_safe_point", lambda self, sec, idle: True)
 
     def fetch(target, now, force, gate):
         if not force:
             return None
-        release.wait(10)
         got = claude_usage.Usage(five_hour=(100.0, base + 3600 - 0.6))
         accounts.write_fetch(accounts.fetch_path(store, target.name, target.generation), got, time.time())
         wrote.set()
@@ -300,6 +237,59 @@ def test_d8_d11_a_fetch_that_returns_100_keeps_the_patrol_on_metered(tmp_path, m
     assert picks[0].account == reg.METERED and wrote.is_set()
     assert _envs(spawn) == ["team", reg.METERED] and "書かずに終わった" in ended.reason
     assert not [r for r in rows_of(w, "account") if r.get("from") == reg.METERED]
+
+
+def _refetched(tmp_path, five):
+    """使用率を取るラッパーで、登録済みの work1 の画面に上限の行が出る。取り直しは work1 の 5 時間を `five` と返す。
+
+    上限の行を見る前の記録は 10%（1 分前）。work2 は余裕のある替え先。返りは（終わり, 起動の手, ラッパー, 取り直した名前）。
+    """
+    store, forced, wrote = _store(tmp_path), [], threading.Event()
+
+    def fetch(target, now, force, gate):
+        if not force:
+            return None
+        forced.append(target.name)
+        got = claude_usage.Usage(five_hour=(five, time.time() + 3600))
+        accounts.write_fetch(accounts.fetch_path(store, target.name, target.generation), got, time.time())
+        wrote.set()
+        return got
+
+    class UntilFetched(FakeChild):
+        """取り直しの記録が書かれるまで生き、その後の 20 回の見回りで終わる（上限なら替えるときに止められる）。"""
+
+        def __init__(self):
+            super().__init__([LIMIT_LINE], 0)
+            self.after = 0
+
+        def isalive(self):
+            if self.outputs:
+                return super().isalive()
+            self.after += 1 if wrote.is_set() else 0
+            return super().isalive() if self.after > 20 else self.alive
+
+    def prepare(d, state):
+        register(tmp_path, "work1", "work2")
+        put_fetch(tmp_path, "work1", (10.0, time.time() + 3600), at=time.time() - 60)
+        put_fetch(tmp_path, "work2", (20.0, time.time() + 3600), at=time.time() - 60)
+
+    ended, spawn, w = run_wrapper(tmp_path, [UntilFetched(), FakeChild([], 0)], prepare, fetch=fetch)
+    return ended, spawn, w, forced
+
+
+def test_4404_a_limit_line_refuted_by_the_refetch_keeps_the_account(tmp_path):
+    # #4404（再開の往復の再現）: 画面に上限の行が出ても、取り直した記録が上限でなければ替えず、limit_refuted を残す
+    ended, spawn, w, forced = _refetched(tmp_path, 30.0)
+    assert forced == ["work1"] and _envs(spawn) == ["work1"] and "書かずに終わった" in ended.reason
+    assert [r["account"] for r in rows_of(w, "limit_refuted")] == ["work1"]
+
+
+def test_4404_a_limit_line_confirmed_by_the_refetch_switches(tmp_path):
+    # #4404: 取り直した記録が上限なら、上限として work2 へ替えて同じ会話を続ける
+    ended, spawn, w, forced = _refetched(tmp_path, 100.0)
+    (first, _), (second, _) = spawn.calls
+    assert forced == ["work1"] and _envs(spawn) == ["work1", "work2"] and second[:3] == [wrapper.CLAUDE, "--resume", first[2]]
+    assert not rows_of(w, "limit_refuted")
 
 
 # ---------------------------------------------------------------- 取得のスレッド（決定 4）

@@ -105,3 +105,8 @@ def test_context_resolve_refuses_the_removed_options(tail, capsys):
 def test_main_turns_a_refused_combination_into_the_invalid_exit_code(argv, capsys):
     assert cli.main(argv) == causes.exit_code("invalid")
     assert capsys.readouterr().out == ""
+
+
+def test_cache_report_takes_an_optional_since():
+    assert (cli._parse(["cache", "report"]).cache_action, cli._parse(["cache", "report"]).since) == ("report", None)
+    assert cli._parse(["cache", "report", "--since", "2026-11-24"]).since == "2026-11-24"

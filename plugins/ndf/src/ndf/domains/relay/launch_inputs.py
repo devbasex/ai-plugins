@@ -77,16 +77,6 @@ class Inputs:
         rows = self.usage.rows if self.usage is not None else []
         return "limited" if any(u.name == name and u.limited for u in rows) else None
 
-    def pin_first(self, pin: str, g: account_decide.Guards) -> bool:
-        """使える指定（候補にあり上限でない）が、閾値の内側（組 0〜2）か、指定を除いた `order` に組 0〜2 の候補が無いか（決定 7）。"""
-        if self.excluded(pin) is not None:
-            return False
-        rows = self.usage.rows if self.usage is not None else []
-        by = {u.name: u for u in rows}
-        inside = (0, 1, 2)
-        rest = account_decide.order(pin, rows, self.candidates(), g)
-        return account_decide.group(by.get(pin), g) in inside or all(account_decide.group(by.get(n), g) not in inside for n in rest)
-
 
 def _stat(key: str) -> Optional[tuple]:
     lstat = key.endswith(LSTAT)
@@ -107,13 +97,11 @@ def _usage_sources(state_dir: Path, store: Path, generations: Mapping[str, str])
     return [accounts.held_path(state_dir), *(accounts.fetch_path(store, n, g) for n, g in sorted(generations.items()))]
 
 
-def _usage(
-    state_dir: Path, store: Path, now: float, generations: Mapping[str, str], stamp: tuple, seen: Mapping[str, tuple[str, float]]
-) -> UsageCache:
-    """使用率を読み直す。`valid_until` は過ぎていない窓のリセット・外した間の終わりの最小。`seen` は `Reader.seen`。"""
+def _usage(state_dir: Path, store: Path, now: float, generations: Mapping[str, str], stamp: tuple) -> UsageCache:
+    """使用率を読み直す。`valid_until` は過ぎていない窓のリセット・外した間の終わりの最小。"""
     ends = [r for n, g in generations.items() for _, r in accounts.windows_of(store, n, g).values() if r > now]
     ends += list(accounts.held(state_dir, now, generations).values())
-    rows, spent = accounts.usage_rows(store, now, generations, seen)
+    rows, spent = accounts.usage_rows(store, now, generations)
     return UsageCache(stamp, min(ends, default=math.inf), rows, spent, dict(generations))
 
 
@@ -124,8 +112,6 @@ class Reader:
         self.store, self.state_dir, self.environ, self.cwd, self.argv = store, state_dir, environ, cwd, list(argv)
         self.inputs = Inputs()
         self.tried: set[str] = set()  # この続きで認証に失敗した接続先（ラッパーの `Wrapper.tried` と同じ集合）
-        # 上限を見た登録済みアカウント（名前 → (世代, 見た時刻)）。その後の取得が成功するまで上限として読む。セグメントをまたいで持つ
-        self.seen: dict[str, tuple[str, float]] = {}
         self._accs: Optional[tuple[tuple, dict[str, reg.Account]]] = None  # 登録簿のスタンプと読んだ登録
         self._held: Optional[tuple[tuple, dict[str, float]]] = None  # 外した間の記録のスタンプと世代と、終わりの時刻
         # 従量の接続の設定のスタンプ（保存した設定の `metered.json`。環境変数の設定は起動の間に変わらないので空）と、そのときの判定と、
@@ -191,13 +177,10 @@ class Reader:
         """
         accs = self._registered()
         generations = {n: a.generation for n, a in accs.items()}
-        stamp = (
-            *((str(p), _stat(str(p))) for p in _usage_sources(self.state_dir, self.store, generations)),
-            tuple(sorted(self.seen.items())),
-        )
+        stamp = tuple((str(p), _stat(str(p))) for p in _usage_sources(self.state_dir, self.store, generations))
         old = self.inputs.usage
         if old is None or old.stamp != stamp or now >= old.valid_until:
-            self.inputs.usage = _usage(self.state_dir, self.store, now, generations, stamp, self.seen)
+            self.inputs.usage = _usage(self.state_dir, self.store, now, generations, stamp)
         if need_candidates:
             held = self._held_until(generations, now)
             usable = {n: a for n, a in accs.items() if not a.needs_relogin and n not in held}
