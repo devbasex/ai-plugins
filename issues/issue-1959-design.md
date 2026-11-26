@@ -1,6 +1,6 @@
 # claude -p の full の起動と起動の許可: 承認した Tool と MCP だけで起動できる（#1959）
 
-これまで、工程を流す `claude -p` は使わない Tool と MCP の定義を毎回読み直し、どの Tool を使えるかと安全装置を外すかは、手順書とコードが決め打ちしていた。この設計の改善の案では、full の起動（要求仕様の「全部入り」）は読み込む組み込みの Tool を一覧に絞り、MCP の読み込みを止める。Tool と MCP を足す指定と安全装置を外す指定は、設定を作る・直す Skill が利用者の承認を取り、承認した内容と一致する起動は都度の承認なしで動く。採らなかった案は「決定の記録」に、調べた標準・製品・ライブラリは末尾の「外部の調査」にある。
+これまで、工程を流す `claude -p` は使わない Tool と MCP の定義を毎回読み直し、どの Tool を使えるかと安全装置を外すかは、手順書とコードが決め打ちしていた。この文書の「full の起動」は、利用者の設定・プラグイン・hook をそのまま読み込み、Skill とサブエージェントが使える `claude -p` の起動である（要求仕様の「全部入り」）。この設計の改善の案では、full の起動は読み込む組み込みの Tool を一覧に絞り、MCP の読み込みを止める。Tool と MCP を足す指定と安全装置を外す指定は、設定を作る・直す Skill が利用者の承認を取り、承認した内容と一致する起動は都度の承認なしで動く。採らなかった案は「決定の記録」に、調べた標準・製品・ライブラリは末尾の「外部の調査」にある。
 
 ## 今の姿
 
@@ -228,7 +228,7 @@ graph TD
     K -. 呼ぶ .-> U
 ```
 
-層は下から contracts・adapters・core・progress・domains の順で、下の層は上の層を読まない。起動記録のインターフェースは、中継のチェック（`set_relay_checks`）と同じ差し込みの形にする。
+層は下から contracts・adapters・core・progress・domains の順で、下の層は上の層を読まない。起動記録のインターフェースは、中継のチェック（`set_relay_checks`）と同じ差し込みの形にする。中継（`ndf relay`）は、対話の Claude Code のセッションを NDF が子プロセスとして起動し、会話の切れ目で次のセッションに切り替える仕組みである。中継のチェックは、その中継が `claude` の起動の前に確かめる処理を差し込んだものである。
 
 ## データ構造
 
@@ -300,6 +300,15 @@ graph TD
 
 定義の形の誤りを知らせる文にも、値は載せずファイルとキーの位置だけを載せる。Skill は MCP の定義ファイルと `.mcp.json` を読まず、作成も編集もしない。利用者が自分で書く。
 
+**`allow` の指定子は、照合に使う値と表示に使う値を分ける。** `Bash(...)` の指定子はコマンドの文字列なので、資格情報が書かれうる。
+
+| 使い道 | 値 |
+| --- | --- |
+| ハッシュの計算、起動の引数（`--allowed-tools`） | 書かれたままの指定子 |
+| `show` の JSON、承認の問い（残す問いの中身を含む）、端末の表示、停止の文、ログ | 秘密の形に当たる指定子は、指定子の全体を `Bash(（伏せた）)` のように置き換える。当たらない指定子はそのまま |
+
+秘密の形の判定は、`ndf project` が出力を伏せるときの表（トークンの形と、`token=…` のような代入の形）を使う。伏せた指定があるときは、`.ndf/launch.json` を開いて読むよう添える。表に無い形の秘密は伏せられない。そのため、指定子に資格情報を書かず、コマンドに要る資格情報は環境変数で渡すことを、Skill の手順に書く。
+
 **承認の記録**は、利用者の NDF の状態の保存先（`identity.load().state_dir`）の `launch-approvals.jsonl`（追記だけ。所有者だけが読める）に置く。保存先の根は、環境変数 `NDF_STATE_HOME`、`XDG_STATE_HOME`、`~/.local/state` の順に最初に値があるものである。ファイルは `<根>/ndf/launch-approvals.jsonl` になる。
 
 | 欄 | 中身 |
@@ -309,6 +318,7 @@ graph TD
 | `sha256` | 承認の対象のハッシュ |
 | `action` | `approve` か `revoke` |
 | `approver` | 承認を確定した人の名前（下の「人の確認」で得る）。`revoke` の行には置かない |
+| `request_id` | 承認の問いで確認した場合の、承認の依頼の識別子。この行がある依頼の答えは使用済みである。端末の確認と `revoke` の行には置かない |
 
 `approver` はコマンドの引数では受けない。人が確認した事実の記録で、本人の認証ではない（なりすましは「文脈と制約」のとおり扱わない）。
 
@@ -319,7 +329,7 @@ graph TD
 1. Skill は、直した後の `.ndf/launch.json` の全体を、状態の保存先の `launch-candidates/<リポジトリのキーのハッシュ>.json` に書く。リポジトリのファイルはこの時点で変えない
 2. `show`・`show --question approve`・`approve` は、`--candidate <候補>` を受けると、候補の `permissions` を承認の対象にする。MCP の定義ファイルはリポジトリのものを読む
 3. `approve --candidate` は、承認の行を書いた後に、候補で `.ndf/launch.json` を置き換える。承認されなければ置き換えない
-4. 候補の承認の対象が空か承認済みなら、`approve --candidate` は問いを求めずに置き換える。許可は広がらないためである
+4. 候補の承認の対象が空か承認済みなら、`approve --candidate` は問いを求めずに置き換える。許可は広がらないためである。この場合は承認の行を書かない。`NDF_AI_CHILD` がある環境では、この場合も拒む（NDF が起動した AI に、起動の設定を書き換えさせないためである）
 
 利用者は `.ndf/launch.json` を手で直してもよい。その内容は、`--candidate` を付けない `approve` で承認するまで、許可を広げる起動に使えない。
 
@@ -334,10 +344,20 @@ graph TD
 
 Skill の問いの経路は次のとおり動く。
 
-1. `ndf launch-config show --question approve` が、問いの中身を作る。中身は、リポジトリ、操作（承認）、承認の対象の一覧、ハッシュと、2 つの選択肢である。選択肢は「承認する（承認者: <名前>）」と「承認しない」で、名前の候補は `git config user.name` である。コマンドは問いの中身のハッシュを、リポジトリのキー・操作の種類・対象のハッシュと一緒に状態の保存先に残す
-2. Skill はその中身のまま `AskUserQuestion` を呼ぶ。利用者が、承認者の名前が違うと答えたら、名前を替えて問いを作り直す
-3. 新設の hook が `AskUserQuestion` の後（PostToolUse）に動く。問いの中身が 1 で作ったものと一致する場合だけ、`launch-answers.jsonl`（所有者だけが読める）に追記する。追記するのは、答え・名前・問いの id と、1 で残したリポジトリのキー・操作の種類・対象のハッシュである
-4. `approve` は、**同じリポジトリのキー・操作の種類・対象のハッシュ**の最新の答えが「承認する」で、使用済みでない場合にだけ記録する。照合、使用済みの行の追記、承認の行の追記は、承認の記録の 1 つのロックの中で行う。1 つの答えは 1 回だけ使え、別のリポジトリや別の操作へ流用できない
+1. `ndf launch-config show --question approve` が、**承認の依頼**を 1 件作る。依頼は、一意な識別子、リポジトリのキー、操作の種類、対象のハッシュ、問いを出す会話の id（`CLAUDE_CODE_SESSION_ID`）、作った日時を持つ。問いの中身は、依頼の識別子、リポジトリ、操作（承認）、承認の対象の一覧、ハッシュと、2 つの選択肢である。選択肢は「承認する（承認者: <名前>）」と「承認しない」で、名前の候補は `git config user.name` である。コマンドは依頼と問いの中身のハッシュを状態の保存先に残す。会話の id が取れない場合は問いを作らず、端末の経路を案内する
+2. Skill はその中身のまま `AskUserQuestion` を呼ぶ。利用者が、承認者の名前が違うと答えたら、名前を替えて依頼を作り直す
+3. 新設の hook が `AskUserQuestion` の後（PostToolUse）に動く。問いの中身が 1 で作ったものと一致し、hook が受け取る会話の id が依頼の会話の id と同じ場合だけ、`launch-answers.jsonl`（所有者だけが読める）に追記する。追記するのは、依頼の識別子・答え・名前・問いの id である
+4. `approve --sha256 <値> --request <依頼の識別子>` は、下の表の条件がすべて成り立つ場合にだけ承認の行を書く。承認の行には依頼の識別子を残す
+
+| 条件 | 無効にするもの |
+| --- | --- |
+| その依頼の識別子の答えが「承認する」である | 未回答と「承認しない」 |
+| 依頼のリポジトリのキー・操作の種類・対象のハッシュが、いまの承認と一致する | 別のリポジトリ・操作・内容への流用 |
+| 同じリポジトリに、より新しい依頼が無い | 前の設定変更で使わずに残った答え |
+| 依頼を作ってから 24 時間以内である | 古い未使用の答え。24 時間は実測で決めた値ではなく、中断の翌日に打ち直せる長さとして置く |
+| 依頼の後に、同じ内容の `revoke` が無い | 取り消しの前の答え |
+
+**答えを使ったことは、承認の行そのもので表す。** 使用済みの行を別に書くと、2 つの書き込みの間で中断したときに答えだけが失われる。同じ依頼の識別子の承認の行がすでにあり、その内容が承認済みなら、`approve` は行を足さずに、残りの処理（候補の反映）を行う。そのため、版上げ・再起動・セッションの入れ替えで中断しても、同じコマンドを打ち直せば続きから終わる。会話の id を照らすのは hook が答えを記録するときだけで、`approve` を打つ会話は問わない。
 
 次の場合、hook は答えを記録しない。答えを人でなく AI が返しうるためである。
 
@@ -372,6 +392,20 @@ Skill の問いの経路は次のとおり動く。
 | 指定があり、承認済みでない（書き換え・作業ブランチでだけ NDF の起動の設定を変えた・このマシンで未承認） | 起動せずに `precondition` で止まる。文に、承認の対象の一覧と、`/ndf:launch-config` を呼ぶことを載せる |
 
 **起動の直前の照らし直し。** 承認の確認の後、子プロセスを起動する直前に（worker の会話の再開を含めて子プロセスごとに）、承認の対象を読み直してハッシュを取る。最初の確認の値と違うか、承認が取り消されていれば、起動せずに `precondition` で止まる。`inherit` の起動では `claude` が `.mcp.json` を自分で読むので、照らし直しから読み込みまでの短い間の書き換えは見分けられない。
+
+**読み直しの回数と費用。** 指定を使う起動は、最初の確認で 1 回、子プロセスごとに 1 回、承認の対象（`.ndf/launch.json`、全工程の定義ファイル、`inherit` があれば `.mcp.json`）を読む。子が N 個なら N+1 回で、指定が空の起動は定義ファイルを読まない。2026-11-26 に、作り物の定義ファイルの読み取り・解析・ハッシュの計算を 101 回ずつ測った（8 コアの Linux、Python 3.14.4）。
+
+| 定義ファイル | 合計の大きさ | 1 回の中央値 |
+| ---: | ---: | ---: |
+| 1 | 約 1 KB | 0.02 ms |
+| 5 | 約 12 KB | 0.14 ms |
+| 20 | 約 229 KB | 2.4 ms |
+
+| 読み直しを減らす案 | 減る量 | 採否 |
+| --- | --- | --- |
+| 毎回すべて読み直す | — | 採る。増える時間は `claude -p` の 1 回の起動（秒の単位）に比べて小さい |
+| 更新日時と大きさが同じファイルは前の値を使う | 2 回目以降の読み取りと解析 | 採らない。中身を変えて日時を戻した書き換えを見分けられない |
+| その工程が使う定義ファイルだけを読む | 使わないファイルの分 | 採らない。承認は対象全体の 1 つのハッシュなので、承認の記録をファイルごとのハッシュに分ける必要がある。減る時間は上の表の一部である |
 
 `mcp` の配列の定義は、確認で読んだ中身を状態の保存先へ書き出し、そのファイルを `--mcp-config` に渡す。定義の中の `${VAR}` は展開せずに渡す。定義には接続情報や資格情報が書かれうるので、コピーは次のとおり扱う。
 
@@ -415,6 +449,8 @@ Skill の問いの経路は次のとおり動く。
 | claude | どちらも | 引数なし | 引数なし | 引数なし |
 
 Claude Code の安全装置を外す指定は、NDF は今も使わない。
+
+**安全装置を外す起動も、子プロセスを起動する直前に照らし直す。** cross-review は担当全員の起動の引数を先に組んでから並べて起動し、同時起動の枠が空くまで待つこともある。そのため、引数を組んだ時点の確認だけでは、待っている間の取り消しを見分けられない。安全装置を外す引数を持つ起動は、確認で読んだハッシュを持ち、相手役を起動する処理が起動の直前に承認の対象を読み直す。内容が違うか承認が取り消されていれば、起動せず、その担当は結果の無い担当になる。手順書の委譲はシェルから直接起動するので、この照らし直しを持たない（「受け入れる限界」）。
 
 ### 使用量ログの行
 
@@ -461,9 +497,9 @@ Claude Code の安全装置を外す指定は、NDF は今も使わない。
 
 | 名前 | 入力 | 出力 | 失敗の形 |
 | --- | --- | --- | --- |
-| full の起動の引数 | 工程の名前・作業場所 | `--tools <読み込む一覧> --allowed-tools <指定 1> <指定 2> … --strict-mcp-config`。許可の指定は 1 件を 1 つの引数にし、カンマで連結しない。最後の指定の後ろには、別のオプションを置く。`mcp` が配列なら `--mcp-config <書き出した定義>...` を足し、`inherit` なら `--strict-mcp-config` を付けない | 壊れた指定か未承認なら起動せず、`precondition` の停止 |
+| full の起動の引数 | 工程の名前・作業場所 | `--tools <読み込む一覧> --allowed-tools <指定 1> <指定 2> … --strict-mcp-config`。許可の指定は 1 件を 1 つの引数にし、カンマで連結しない。`--allowed-tools` は複数の値を取る。後に続くプロンプトを値として読ませないよう、プラグインの引数が空のときも、後ろに `--append-system-prompt` を置く。`mcp` が配列なら `--mcp-config <書き出した定義>...` を足し、`inherit` なら `--strict-mcp-config` を付けない | 壊れた指定か未承認なら起動せず、`precondition` の停止 |
 | `ndf launch-config show` | 作業場所。`--candidate <候補>`・`--question approve` を足せる | 結果の JSON。承認の対象の一覧（MCP はサーバ名・コマンド名・定義ファイルの場所・ハッシュ）、全体のハッシュ、承認済みか | 読めなければ `precondition` |
-| `ndf launch-config approve` | `--sha256 <値>`。`--candidate <候補>` を足せる | 承認の記録へ 1 行。候補があれば起動の設定へ反映 | 上の「人の確認」の条件で拒む |
+| `ndf launch-config approve` | `--sha256 <値>`。承認の問いで確認した場合は `--request <依頼の識別子>`。`--candidate <候補>` を足せる | 承認の記録へ 1 行。候補があれば起動の設定へ反映 | 上の「人の確認」の条件で拒む |
 | `ndf launch-config revoke` | `--sha256 <値>` | 承認の記録へ 1 行 | `NDF_AI_CHILD` があれば拒む |
 | `ndf launch-config safety-args --runtime <名前> --use review\|delegate` | ランタイムと使い方 | CLI に渡す引数を 1 行に 1 つ | 起動できない状況なら `precondition` |
 
@@ -508,10 +544,10 @@ sequenceDiagram
 
 ### 承認を取る（Skill `launch-config`）
 
-1. `ndf launch-config show` で、いまの指定と承認の状態を読む
+1. `ndf launch-config show` で、いまの指定と承認の状態を読む。起動の設定か定義ファイルが壊れていると `precondition` で止まるが、手順はそこで終えない。止まった文のファイルと位置を利用者に伝え、元のファイルは変えずに次へ進む。壊れているのが `.ndf/launch.json` なら、Skill がその中身を読んで直した候補を作る。MCP の定義ファイルか `.mcp.json` なら、利用者が直してから 1 をやり直す。`--candidate` を付けた `show` と `approve` は、今の `.ndf/launch.json` を読まないので、壊れていても候補を検証して承認を取れる
 2. 利用者の依頼に合わせて、設定の候補を状態の保存先に作る。MCP の定義ファイルは利用者が書く
 3. `show --candidate` を打ち、承認の対象の一覧（MCP はサーバ名・コマンド名・定義ファイルの場所・ハッシュ、`load`・`allow` の指定、安全装置を外すランタイム）を利用者に示す。MCP の定義の中身は、ファイルを開いて読むよう伝える
-4. `show --question approve --candidate` の中身で承認の問いを出す。利用者が承認すれば `approve --sha256 <値> --candidate <候補>` を打ち、起動の設定へ反映する。承認しなければ記録も反映もせず、設定は変わっていないことを伝える
+4. `show --question approve --candidate` の中身で承認の問いを出す。利用者が承認すれば `approve --sha256 <値> --request <依頼の識別子> --candidate <候補>` を打ち、起動の設定へ反映する。承認しなければ記録も反映もせず、設定は変わっていないことを伝える
 
 外で隔離されていないマシンで `unsandboxed` を承認すると、サンドボックスが使えないときに、AI がそのマシンの任意のコマンドを確認なしで打てる。Skill は、承認の問いにこの 1 文を必ず含める。
 
@@ -655,6 +691,9 @@ CI やコンテナのように状態の保存先が作り直される環境で�
 | 作業ブランチの `.claude/settings.json` の hook と許可は、NDF の承認の対象外 | Claude Code がこれまでどおり読み、ブランチの hook と許可がそのまま効く。受け入れ条件 11 の「作業ブランチだけの変更」は、NDF の起動の設定の変更を指す |
 | `inherit` の起動は `claude` が定義を自分で読む | 直前の照らし直しから読み込みまでの短い間の書き換えは、そのまま起動する |
 | 承認の画面に MCP の引数を出さない | 利用者がファイルを開かずに承認すると、引数の中身を読まないまま承認する |
+| `allow` の指定子の伏せ方は、秘密の形の表による | 表に無い形の資格情報を指定子に書くと、承認の画面とツールの出力にそのまま出る。起動の設定を AI が直接読む場合も出る |
+| 承認の問いの答えは、依頼を作ってから 24 時間で使えなくなる | 24 時間を超える中断の後は、もう一度問う |
+| 手順書の委譲は、`safety-args` を打った後の照らし直しをしない | 引数の取得と CLI の起動の間の短い間に取り消すと、そのまま起動する。起動の例は 2 つを 1 回の Bash の呼び出しにまとめる |
 | MCP の定義ファイルを読ませないのは Skill の手順である | Skill の外で AI がファイルを読むことは、NDF は止めない |
 | 取り消し（`revoke`）に人の確認が無い | 対話の AI が取り消せる。起きるのは起動の停止で、許可は広がらない |
 | ステータスラインの費用の表示は変えない | 再開した起動は会話の累計をそのまま足すので、表示額に重複が出る（今と同じ） |
@@ -708,6 +747,9 @@ CI やコンテナのように状態の保存先が作り直される環境で�
 | 条件 3 | 実行ログを開いたプランの実行の子でも、使用量ログの `run_id` はプランの実行の id になり、実行ログの `parent_id` は変わらない | プランの id を `NDF_RUN_ID` で渡すと落ちる |
 | 条件 14・I7 | 示したハッシュと違う内容の `approve` と、`NDF_AI_CHILD` がある環境の `approve`・`revoke` は拒まれ、記録が増えない。NDF の起動の子の環境に `NDF_AI_CHILD` がある | どちらかの確認を外すか、書く側と読む側で名前がずれると落ちる |
 | 条件 9・I7 | 端末でなく、答えの記録も無い `approve` は拒まれる。答えが「承認しない」、問いの中身が違う、ハッシュが違う、別のリポジトリの答え、使用済みの答えでも拒まれる。同じ答えで 2 つの `approve` を並べて打つと、承認の行は 1 つだけになる | 引数で名前を受けるか、照合と消費を別のロックにすると落ちる |
+| 条件 9 | 秘密の形を持つ `Bash(...)` の指定子は、`show` の出力・承認の問い・停止の文に出ず、起動の引数とハッシュには書かれたままの値が使われる | 表示の値をハッシュか引数に使うか、指定子を出力へ渡すと落ちる |
+| 条件 9・I7 | 別の会話の答えは記録されない。より新しい依頼がある、24 時間を過ぎた、取り消しの前の依頼の答えでは承認の行が増えない。承認の行を書いた後の打ち直しは、行を足さずに候補を反映する | 依頼の識別子を照らさないか、使用済みの行を承認の行より先に書くと落ちる |
+| 条件 11・13・I5 | 引数を組んだ後、起動の前に承認を取り消すと、安全装置を外す相手役は起動しない | 引数を組む時点でだけ確かめると落ちる |
 | 条件 14・I7 | hook は、`NDF_AI_CHILD`・`NDF_FACTORY_RUN`・`NDF_RELAY_PLAN`・`NDF_ORGANIZER_DIR` のある会話の答えを記録しない | AI が返した答えを記録すると落ちる |
 | 条件 9 | MCP の定義の引数・`env`・`headers`・URL の値が、`show` の出力・承認の問い・止まったときの文に出ない。その値だけを変えるとハッシュが変わる | 定義の中身を出力へ渡すか、出す 4 項目からハッシュを取ると落ちる |
 | I5・I6 | 同じクローンの worktree では承認が効き、同じ内容の別のクローンでは止まる | 作業場所のパスかリモートの URL をキーにすると落ちる |
@@ -727,7 +769,7 @@ CI やコンテナのように状態の保存先が作り直される環境で�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #1959 | 実装する | — | `plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`（新設）、`plugins/ndf/src/ndf/adapters/launch_approval.py`（新設）、`plugins/ndf/src/ndf/domains/hooks/guards/launch_answer.py`（新設。hook の登録の定義も足す）、`plugins/ndf/src/ndf/domains/settings/launch_config_cli.py`（新設）、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/contracts/domains/runtimes.json`、`plugins/ndf/contracts/domains/locations.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/src/ndf/adapters/agents.py`、`plugins/ndf/manifests/skills.json`、`plugins/ndf/skills/launch-config/SKILL.md`（新設）、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/external-ai/references/cli-codex.md`、`plugins/ndf/skills/external-ai/references/cli-agy.md`、`plugins/ndf/skills/external-ai/references/cli-kiro.md`、`plugins/ndf/skills/qa-security-scan/03-report-template.md`、`plugins/ndf/agents/corder.md`、`plugins/ndf/tests/adapters/test_launch_approval.py`（新設）、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/__main__.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/records/usage_decide.py`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`（新設）、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/entrypoints.json`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/worktree/references/ndf-settings.md`、`plugins/ndf/tests/adapters/test_claude_args.py`、`plugins/ndf/tests/adapters/test_launch_settings.py`（新設）、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/core/plan/transition_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/seats.py`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/domains/skill-io.json`、`plugins/ndf/.codex-plugin/plugin.json`（生成）、`plugins/ndf/contracts/schemas/io/launch-config.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/launch-config.result.schema.json`（新設）、`plugins/ndf/docs/contracts/`（生成）、`plugins/ndf/skills/cross-review/SKILL.md` |
+| #1959 | 実装する | — | `plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`（新設）、`plugins/ndf/src/ndf/adapters/launch_approval.py`（新設）、`plugins/ndf/src/ndf/adapters/secret_forms.py`（新設）、`plugins/ndf/src/ndf/domains/project/secret.py`、`plugins/ndf/src/ndf/domains/hooks/guards/launch_answer.py`（新設。hook の登録の定義も足す）、`plugins/ndf/src/ndf/domains/settings/launch_config_cli.py`（新設）、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/contracts/domains/runtimes.json`、`plugins/ndf/contracts/domains/locations.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/src/ndf/adapters/agents.py`、`plugins/ndf/manifests/skills.json`、`plugins/ndf/skills/launch-config/SKILL.md`（新設）、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/external-ai/references/cli-codex.md`、`plugins/ndf/skills/external-ai/references/cli-agy.md`、`plugins/ndf/skills/external-ai/references/cli-kiro.md`、`plugins/ndf/skills/qa-security-scan/03-report-template.md`、`plugins/ndf/agents/corder.md`、`plugins/ndf/tests/adapters/test_launch_approval.py`（新設）、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/__main__.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/records/usage_decide.py`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`（新設）、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/entrypoints.json`、`plugins/ndf/contracts/domains/cli-floors.json`、`plugins/ndf/skills/worktree/references/ndf-settings.md`、`plugins/ndf/tests/adapters/test_claude_args.py`、`plugins/ndf/tests/adapters/test_launch_settings.py`（新設）、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/core/plan/transition_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/seats.py`、`plugins/ndf/contracts/hooks/guards.json`、`plugins/ndf/contracts/domains/skill-io.json`、`plugins/ndf/.codex-plugin/plugin.json`（生成）、`plugins/ndf/contracts/schemas/io/launch-config.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/launch-config.result.schema.json`（新設）、`plugins/ndf/docs/contracts/`（生成）、`plugins/ndf/skills/cross-review/SKILL.md` |
 
 ## 未確認のまま残ること
 

@@ -43,7 +43,7 @@
 
 ### Task 5: プランの実行が単位・引き上げの理由・修正の指標を扱う
 
-- **対象ファイル:** `core/plan/transition_decide.py`・`runner.py`・`steps.py`・`records.py`、`tests/core/plan/`
+- **対象ファイル:** `core/plan/transition_decide.py`・`runner.py`・`steps.py`・`records.py`・`model.py`、`contracts/templates/parts/steps.json`、`tests/core/plan/`
 - **変更内容:** 詳細設計の「プランの実行」
 - **満たす受け入れ条件:** 8・9・10・15・16
 - **進め方:** 遷移の判断は純粋な関数のテストを先に書く。`impl` と `check` のプランのテンプレートで遷移を通す
@@ -57,8 +57,8 @@
 
 ### Task 7: 委譲の引数を `ndf delegate-args` にする
 
-- **対象ファイル:** `domains/settings/delegate_args_cli.py`（新設）・`cli.py`、`contracts/schemas/io/delegate-args.*`、`skills/external-ai/`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md`
-- **変更内容:** 詳細設計の「`ndf models` と `ndf delegate-args`」と手順書の固定の `medium` の削除
+- **対象ファイル:** `domains/settings/delegate_args_cli.py`（新設）・`cli.py`、`contracts/schemas/io/delegate-args.*`、`skills/external-ai/SKILL.md`・`references/cli-codex.md`・`references/cli-agy.md`・`references/cli-kiro.md`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md`
+- **変更内容:** 詳細設計の「`ndf models` と `ndf delegate-args`」と手順書の固定の `medium` の削除。#1959 の実装が手順書に置いた `safety-args` の呼び出しは、CLI ごとの参照手順（Codex・agy・Kiro）を含めてすべて `delegate-args` に置き換え、通常の委譲の経路に残さない（`grep -rn safety-args plugins/ndf/skills plugins/ndf/agents` で確かめる）
 - **満たす受け入れ条件:** 3
 - **進め方:** CLI はテストを先に書く。手順書の起動の例は打って確かめる
 

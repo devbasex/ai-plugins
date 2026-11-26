@@ -22,7 +22,7 @@
 
 ### Task 2: 起動の設定を読み、承認のハッシュと記録を持つ
 
-- **対象ファイル:** `adapters/launch_settings.py`・`adapters/launch_approval.py`（新設）、`contracts/schemas/ndf-settings/launch.schema.json`（新設）、`contracts/domains/ndf-files.json`・`locations.json`・`env.json`、`adapters/claude.py`・`adapters/agents.py`（`NDF_AI_CHILD`）、`tests/adapters/test_launch_settings.py`・`test_launch_approval.py`（新設）
+- **対象ファイル:** `adapters/launch_settings.py`・`adapters/launch_approval.py`・`adapters/secret_forms.py`（新設）、`domains/project/secret.py`（秘密の形の表の移動）、`contracts/schemas/ndf-settings/launch.schema.json`（新設）、`contracts/domains/ndf-files.json`・`locations.json`・`env.json`、`adapters/claude.py`・`adapters/agents.py`（`NDF_AI_CHILD`）、`tests/adapters/test_launch_settings.py`・`test_launch_approval.py`（新設）
 - **変更内容:** 詳細設計の「起動の設定の読み取り」と「起動の承認」。`safety_args` は Task 6 で足す
 - **満たす受け入れ条件:** 5・9・11・12・14
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
@@ -50,7 +50,7 @@
 
 ### Task 6: 安全装置を外すのは承認がある場合だけにする
 
-- **対象ファイル:** `adapters/launch_settings.py`（`safety_args`）・`domains/settings/launch_config_cli.py`（`safety-args`）・`core/converge/participants.py`・`domains/crossreview/seats.py`、`contracts/domains/runtimes.json`、`skills/external-ai/`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md`・`skills/cross-review/SKILL.md`
+- **対象ファイル:** `adapters/launch_settings.py`（`safety_args`）・`domains/settings/launch_config_cli.py`（`safety-args`）・`core/converge/participants.py`・`adapters/agents.py`（`Launch.verify`）・`domains/crossreview/seats.py`、`contracts/domains/runtimes.json`、`skills/external-ai/`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md`・`skills/cross-review/SKILL.md`
 - **変更内容:** 詳細設計の「相手役の起動の引数」と「手順書」。`-s workspace-write` の委譲を 1 回起動して確かめる
 - **満たす受け入れ条件:** 13
 - **進め方:** 判定表の各行のテストを先に書く

@@ -90,7 +90,7 @@ graph TD
 | 呼び名 | 指すもの |
 | --- | --- |
 | conductor・レーン・オーガナイザー | 開発の全体を指揮する会話が conductor。並列に流す開発の 1 本分がレーン。複数のレーンをまとめる会話がオーガナイザー |
-| シート（`seat`） | 1 回のレビューや提案などで、1 人の担当（ほかの AI の CLI の起動）に割り当てるスロット。レビュー・提案・実装はスロットの役割である。同じレビューに 2 人の担当がいれば、シートは 2 つになる |
+| シート（`seat`） | 1 回のレビューや提案などで、1 人の担当（ほかの AI の CLI の起動）に割り当てるスロット。レビュー・提案・実装はスロットの役割である。同じレビューに 2 人の担当がいれば、シートは 2 つになる。起動の層の名前としての `seat` は、レビューの担当のほかに、cross-review の修正担当と、外部の AI への委譲（`external-ai`・`corder`）の起動も含む |
 
 ## ドメインモデル
 
@@ -116,8 +116,8 @@ graph TD
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 実験の単位 | 1 つの単位の割り付けは 1 つ。同じ単位の起動は、再実行と再開も同じ組を使う（引き上げ、起動できない組から基準の組への切り替え、実験の停止や固定の後の新しい起動、期間を過ぎた単位の割り付け直しは除く） | — |
-| I2 | 実験の単位 | 引数と環境変数の値で起動した単位は、実験に数えない | — |
+| I1 | 実験の単位 | 1 つの単位の割り付けは 1 つ。同じ単位の起動は、再実行と再開も同じ組を使う（引き上げ、起動できない組から基準の組への切り替え、実験の停止・固定・手動指定・選択肢の変更の後の新しい起動、期間を過ぎた単位の割り付け直しは除く） | — |
+| I2 | 実験の単位 | 引数と環境変数の値で起動した単位は、実験に数えない。割り付けた後の起動で指定した場合も、その単位と、費用を負う先の単位（`charge_to`）を数えない | — |
 | I3 | 実験の単位 | 効果指標を取れなかった単位は、成功にも失敗にも数えない（起動を拒否される組は、「起動できない組」の規則で割り付けから外す） | — |
 | I4 | 実験の単位 | 効果と費用は、割り付けた組に帰属する。引き上げと手戻りの起動の費用も、割り付けた組に含める | — |
 | I5 | 出現率 | 調整の段階では、打ち切っても外してもいない組の確率は下限以上で、合計は 1 である | — |
@@ -245,14 +245,15 @@ graph TD
 | --- | --- | --- | --- | --- |
 | `design` | `requirements`・`design`・`design-detail`（Skill で回す同じ名前の起動を含む） | 1 回のプランの実行の、この工程 | `1 / (1 + 設計レビューの 1 ラウンド目で挙がって採用された重大な指摘の数)` | 指定なし、opus / high、sonnet / high |
 | `impl` | `impl` | 同上 | `1 / (1 + その単位が作った PR のレビューの 1 ラウンド目で挙がって採用された重大な指摘の数)` | 指定なし、sonnet / medium、sonnet / high |
-| `fix` | `fix`・`ci-fix`・`fix-push`・`fix-base` | 1 回のプランの実行の、このステップ 1 つ | 1 回目の修正の次の検査が通れば 1、通らなければ 0 | 指定なし、sonnet / medium、sonnet / high |
+| `fix` | `fix`・`ci-fix`・`fix-push`・`fix-base` | 1 回のプランの実行の、このステップ 1 つ | 1 回目の修正を確かめる検査が通れば 1、通らなければ 0（どのステップが検査かは詳細設計の「プランの実行」） | 指定なし、sonnet / medium、sonnet / high |
 | `mechanical` | `worktree` | 同上 | ステップが完了すれば 1、止まれば 0 | 指定なし、haiku / low |
 | `judge` | 判定の層の起動（`stop-wait` を除く） | 質問 1 つ | 1 回目の回答が形に合えば 1、合わなければ 0。回答を得られなければ null | 指定なし、haiku / medium、sonnet / medium |
 | `review` | レビューのシート | 1 回の cross-review の、シート 1 つ | そのレビューで採用された重大な指摘のうち、このシートが挙げた割合。採用が 0 件なら null | Codex: low、medium、high。Claude: 指定なし、sonnet / high |
 | `delegate` | `external-ai`・`corder` の委譲 | なし | なし（取れない） | Codex: medium の 1 つ |
 
-- 「重大な指摘」は重要度が critical か major の指摘、「採用された」は見送りで終わらなかった指摘である
+- 「重大な指摘」は重要度が critical か major の指摘、「採用された」は、修正担当が採用して直した指摘である。見送った指摘と、ラウンドの上限で終わって修正担当が裁定していない指摘は含めない
 - 設計と実装の効果指標は、**修正の前の 1 ラウンド目の指摘だけ**を数える。後のラウンドの指摘は修正の作業の結果が混ざり、どの起動の成果か分からないためである
+- 設計と実装の指標は、1 ラウンド目の重大な指摘に裁定していないものが 1 件でもあれば null にする（採用が確定せず、数えないと指標が高く出るためである）
 - `review` の指標は、同じレビューに 2 つ以上のシートがある場合にだけ記録する。1 つだけなら割合が必ず 1 になるためである。採用された重大な指摘が 0 件のレビューは、割合の分母が無いので null（欠測）にする。効果 0 にも 1 にもせず、I3 のとおり数えない。割合は相手のシートにも左右される。ただし相手の組も無作為なので、長い期間では自分の組の差が残る
 - 判定の指標は、起動を 3 つに分ける。1 回目の回答が形に合えば 1。回答はあるが形に合わなければ（`invalid`）0 で、2 回目で合っても 0 のままである。回答を得られない（`unknown`・期限切れ・利用上限）か、CLI を起動できない場合は null にする
 - 上に無い作業（確定仕様化・振り返り・棚卸し・リリースなど）は実験しない。成果の良し悪しを機械で取れないためで、引数を足さない
@@ -282,7 +283,7 @@ graph TD
 
 ### 実験の記録と出現率
 
-利用者の NDF の状態の保存先に、追記だけの実験の記録（割り付け・効果指標・拒否・停止・費用を計算できないモデル）と、そこから作り直せる出現率のファイルを置く。欄、割り付け ID の引き継ぎ、読み書きの規則は [issue-2944-design-allocation.md](./issue-2944-design-allocation.md) にある。
+利用者の NDF の状態の保存先に、追記だけの実験の記録（割り付け・効果指標・拒否・停止・実際のモデル・費用を計算できないモデル。月ごとのファイル）と、そこから作り直せる出現率のファイルを置く。欄、割り付け ID の引き継ぎ、読み書きの規則は [issue-2944-design-allocation.md](./issue-2944-design-allocation.md) にある。
 
 ### 使用量ログの行に足す欄
 
@@ -348,7 +349,7 @@ Codex のシートは、今と同じく `--ephemeral` で起動し、会話の�
 
 モデルと effort は別々に、次の表の上から最初に値があるものを使う。
 
-順 1〜3 でモデルか effort の片方でも指定があれば、その単位は割り付けない。指定の無い側は、基準の組（先頭の組）の値を使う（出所は `base`）。基準の組がその側を持たなければ指定なし（`default`）になる。片側だけを抽選すると、割り付けた組と実際に使う組が食い違うためである。
+順 1〜3 でモデルか effort の片方でも指定があれば、その単位は割り付けない。すでに割り付けた単位でも、その起動から実験の対象外にする（停止の行を追記する。[allocation の「割り付けの流れ」](./issue-2944-design-allocation.md#割り付けの流れ)）。指定の無い側は、基準の組（先頭の組）の値を使う（出所は `base`）。基準の組がその側を持たなければ指定なし（`default`）になる。片側だけを抽選すると、割り付けた組と実際に使う組が食い違うためである。
 
 | 順 | 出所 | 実験に数えるか |
 | ---: | --- | --- |
@@ -380,6 +381,8 @@ NDF_AI_CHILD=1 timeout 1320 codex exec "${ARGS[@]}" -C "$PWD" < "$TMP/prompt.md"
 ```
 
 `ndf delegate-args` は、1 つのプロセスの中で次の 2 つの処理を呼び、2 つの引数を続けて出す。1 つは、モデルと effort を選ぶ処理（`pick --layer seat --name delegate` と同じ）である。もう 1 つは、安全装置の引数を返す処理（#1959 の `safety-args --use delegate` と同じ）である。モデルの選択と承認の確認は別の部品のままで、エントリポイントはつなぐだけである。どちらかが失敗すれば、何も出さずに 0 以外で終える。
+
+#1959 の実装は、手順書の委譲をいったん `safety-args` にする。この設計の実装の後は、通常の委譲の経路（Codex・Kiro・agy。CLI ごとの参照手順を含む）をすべて `delegate-args` にし、手順書に `safety-args` の直接の呼び出しを残さない。Kiro と agy は選択肢が無いので、`delegate-args` は安全装置の引数だけを返す。
 
 今の委譲の手順は、固定の引数で CLI を直接起動し、`ndf` を起動しない。比べると次のとおりである。同じエントリポイントの軽いサブコマンドは、2026-11-26 の測定で 306〜372 ms（8 コアの Linux、11 回の中央値）だった。
 
@@ -571,7 +574,7 @@ worker の再開と修正担当の会話の再開は、中断の後に利用者�
 ### 決定 5: 少ない件数でも費用を抑えながら学ぶため、費用つきのトンプソンサンプリングを標準ライブラリの乱数で作る
 
 - **質問**: 出現率をどう調整するか。ライブラリを使うか
-- **選んだ案**: 効果と費用の事後分布から標本を引き、標本を引くたびに比が最大の組を数えるトンプソンサンプリング（予算つきの方式。ALG2）に、効果の下限と下限の出現率を足す。分布の乱数は Python の標準ライブラリ（`random.betavariate`・`random.gauss`）を使う
+- **選んだ案**: 効果と費用の事後分布から標本を引き、標本を引くたびに比が最大の組を数えるトンプソンサンプリング（予算つきの方式。ALG2）に、効果の下限と下限の出現率を足す。事後分布に使う平均は、各単位を割り付けた時の確率の逆数で重み付けする。分布の乱数は Python の標準ライブラリ（`random.betavariate`・`random.gauss`）を使う
 - 採らなかった案: 固定の割合の A/B テストを決めた件数まで行い、勝者に固定する（件数が集まるまで劣る組にも同じ数を払う。モデルが入れ替わると、やり直しを人が始める）
 - 採らなかった案: ε-greedy（上位の組が僅差でも、片方に寄せる量を調整できない）
 - 採らなかった案: MABWiser（LIB1。費用との比と効果の下限を持たず、pandas・scikit-learn・seaborn を利用者の環境へ足す）
@@ -607,7 +610,7 @@ worker の再開と修正担当の会話の再開は、中断の後に利用者�
 - 採らなかった案: 効果指標を書くたびに計算し直す（判定の依頼ごとに全体を読む）
 - 採らなかった案: 割り付けに要る事実を、記録から作る状態ファイルにコピーして持つ（速くなるが、追記と置き換えのずれを直す仕組みが要る。方針が求めていない）
 - 採らなかった案: プランの記録だけから集計する（プランの記録は作業の終わりに削除される。プランを通らない起動は残らない）
-- **代償**: 呼び出し元が結果を受ける前に落ちた起動は行が残らない。割り付けは記録を毎回全部読むので、記録とともに遅くなる
+- **代償**: 呼び出し元が結果を受ける前に落ちた起動は行が残らない。割り付けは期間（`window_days`）に当たる月の記録を毎回読むので、期間の中の記録が増えるほど遅くなる
 - 根拠: Value 8 / Value 13（MVV バージョン 11）。事実を追記だけで持ち、コピーは作り直せる出現率の 1 つにする（Value 8）。費用と効果は実測で示す（Value 13）
 
 ### 決定 8: 黙って別の値で動かさないため、effort の値は NDF が起動の前に検証する
@@ -637,7 +640,7 @@ worker の再開と修正担当の会話の再開は、中断の後に利用者�
 | 限界 | 起きうること |
 | --- | --- |
 | Codex の実際のモデルを取得しない | 既定のモデルが変わっても見分けず、前後の単位が混ざる。利用者の既定が単価表の `default_model` と違えば、USD の表示はずれる。モデルを指定する組と指定しない組を混ぜた工程では、組の費用の比もずれうる |
-| 割り付けは実験の記録を毎回全部読む | 記録 10 万行・並列度 8 で、起動の前の時間が中央値で約 2.5 秒増える |
+| 割り付けは期間に当たる月の実験の記録を毎回読む | 期間の中の記録が 10 万行なら、読み取りで起動の前の時間が約 0.26 秒増える（測定は並列度 1）。並列に起動したときの値は未測定で、実装で同じ条件で測る |
 | 出現率のファイルは、割り付けの値（`floor` など）が違っても項目を分けて持たない | `floor` などが違うブランチを行き来すると、次の計算まで均等な抽選になる |
 | 出現率は効果指標を書いた後にだけ計算する | 候補が変わった後は、次の効果指標まで均等な抽選になる |
 | 同じ項目の計算が重なることを防がない | 使用量ログを 2 回読むことがある |
@@ -683,6 +686,9 @@ worker の再開と修正担当の会話の再開は、中断の後に利用者�
 | --- | --- | --- |
 | 条件 1 | 「層と作業の名前から工程を引く対応」の組は工程が引け、表に無い組は引数を足さない | Skill の名前を worker の名前と同じとみなすと落ちる |
 | 条件 12・I2 | 片方だけを指定した起動は割り付けず、指定の無い側は基準の組の値になる | 片側を抽選すると落ちる |
+| 条件 12・I2 | 割り付けた後の起動で手動指定すると、その単位と `charge_to` の単位が計算に入らない | 前の割り付け ID のまま数えると落ちる |
+| 条件 17・19 | 割り付けた後に選択肢を削除すると、その単位の新しい会話は先頭の組で起動する | 期間だけを見て前の組を使うと落ちる |
+| 条件 17 | `observed` の行の実際のモデルが項目と違えば、保存した確率と打ち切りを使わない。件数の不足と `unpriced` の両方に当たる割り付けは `uniform` になる | 候補と設定だけを比べるか、件数を先に見ると落ちる |
 | 条件 1・7 | 同梱の選択肢がリポジトリの設定で工程とランタイムごとに置き換わる。選択肢が 1 つの工程は割り付けずにその値、どちらにも無い作業は引数を足さない | 同梱と設定を混ぜて並べると落ちる |
 | 条件 2・3 | worker と Codex のシートの起動の引数に、割り付けた組の `--model`・`--effort`（Codex は `-c`）がある | 引数に足さないと落ちる |
 | 条件 15・I1 | 同じ単位の 2 回目の起動と再開は、同じ組になる。並列の割り付けでも 1 単位に 1 行 | ロックを外すか毎回引き直すと落ちる |
@@ -734,7 +740,7 @@ worker の再開と修正担当の会話の再開は、中断の後に利用者�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2944 | 実装する | — | `plugins/ndf/contracts/domains/launch-experiments.json`（新設）、`plugins/ndf/contracts/data/codex-prices.json`（新設）、`plugins/ndf/src/ndf/adapters/model_choice.py`（新設）、`plugins/ndf/src/ndf/domains/records/experiments.py`（新設）、`plugins/ndf/src/ndf/domains/records/allocation_decide.py`（新設）、`plugins/ndf/src/ndf/domains/records/models_cli.py`（新設）、`plugins/ndf/src/ndf/domains/settings/delegate_args_cli.py`（新設）、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/contracts/domains/claude-failures.json`、`plugins/ndf/src/ndf/adapters/llm.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/adapters/agents.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/crossreview/seats.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/contracts/domains/runtimes.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/schemas/internal/experiment.schema.json`（新設）、`plugins/ndf/contracts/schemas/io/models.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/models.result.schema.json`（生成）、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/external-ai/references/cli-codex.md`、`plugins/ndf/skills/qa-security-scan/03-report-template.md`、`plugins/ndf/agents/corder.md`、`plugins/ndf/skills/launch-config/SKILL.md`、`plugins/ndf/tests/adapters/test_model_choice.py`（新設）、`plugins/ndf/tests/domains/records/test_allocation.py`（新設）、`plugins/ndf/tests/domains/records/test_experiments.py`（新設）、`plugins/ndf/tests/domains/records/test_models_report.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py`、`plugins/ndf/tests/adapters/test_llm.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py`、`plugins/ndf/src/ndf/core/plan/transition_decide.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/contracts/schemas/io/delegate-args.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/delegate-args.result.schema.json`（新設）、`plugins/ndf/docs/contracts/`（生成） |
+| #2944 | 実装する | — | `plugins/ndf/contracts/domains/launch-experiments.json`（新設）、`plugins/ndf/contracts/data/codex-prices.json`（新設）、`plugins/ndf/src/ndf/adapters/model_choice.py`（新設）、`plugins/ndf/src/ndf/domains/records/experiments.py`（新設）、`plugins/ndf/src/ndf/domains/records/allocation_decide.py`（新設）、`plugins/ndf/src/ndf/domains/records/models_cli.py`（新設）、`plugins/ndf/src/ndf/domains/settings/delegate_args_cli.py`（新設）、`plugins/ndf/src/ndf/cli.py`、`plugins/ndf/src/ndf/adapters/launch_settings.py`、`plugins/ndf/contracts/schemas/ndf-settings/launch.schema.json`、`plugins/ndf/src/ndf/adapters/claude.py`、`plugins/ndf/contracts/domains/claude-failures.json`、`plugins/ndf/src/ndf/adapters/llm.py`、`plugins/ndf/src/ndf/adapters/run_log.py`、`plugins/ndf/src/ndf/adapters/agents.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/converge/participants.py`、`plugins/ndf/src/ndf/core/plan/records.py`、`plugins/ndf/src/ndf/core/plan/runner.py`、`plugins/ndf/src/ndf/core/plan/steps.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/domains/records/usage.py`、`plugins/ndf/src/ndf/domains/crossreview/seats.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/contracts/domains/runtimes.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/schemas/internal/usage.schema.json`、`plugins/ndf/contracts/schemas/internal/experiment.schema.json`（新設）、`plugins/ndf/contracts/schemas/io/models.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/models.result.schema.json`（生成）、`plugins/ndf/skills/external-ai/SKILL.md`、`plugins/ndf/skills/external-ai/references/cli-codex.md`、`plugins/ndf/skills/external-ai/references/cli-agy.md`、`plugins/ndf/skills/external-ai/references/cli-kiro.md`、`plugins/ndf/src/ndf/core/plan/model.py`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/skills/qa-security-scan/03-report-template.md`、`plugins/ndf/agents/corder.md`、`plugins/ndf/skills/launch-config/SKILL.md`、`plugins/ndf/tests/adapters/test_model_choice.py`（新設）、`plugins/ndf/tests/domains/records/test_allocation.py`（新設）、`plugins/ndf/tests/domains/records/test_experiments.py`（新設）、`plugins/ndf/tests/domains/records/test_models_report.py`（新設）、`plugins/ndf/tests/domains/records/test_usage.py`、`plugins/ndf/tests/adapters/test_llm.py`、`plugins/ndf/tests/progress/test_invoke.py`、`plugins/ndf/tests/core/test_worker_launch.py`、`plugins/ndf/src/ndf/core/plan/transition_decide.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/contracts/schemas/io/delegate-args.args.schema.json`（生成）、`plugins/ndf/contracts/schemas/io/delegate-args.result.schema.json`（新設）、`plugins/ndf/docs/contracts/`（生成） |
 
 ## 未確認のまま残ること
 
