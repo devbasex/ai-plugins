@@ -131,9 +131,33 @@
 - 単位ごとの PR を revert すれば戻る。前へ進めるときのデータの移行は無い
 - **現状の手順の問題:** U3 を戻すと、NDF は `outputs.json` を直す前の形（キーと値だけのオブジェクト）で読む。U3 の後に書いた要素の並びの形（`entries`）は、直す前の NDF には `entries` という名前の出力 1 つに見え、出力の形の確かめで落ちてプランの結果に載らない。これまでの案はそのファイルを消して打ち直す手順だったが、それでは進行中のプランがすでに返した出力（`pr`・`product_version` など）を失い、取り戻せない
 - **改める手順:** U3 を戻すときは、消さずに直す前の形へ変換する。変換しても結果の `outputs` は変わらない。直す前の形の値は、`entries` を先頭から重ねた値（U3 の後の NDF がプランの結果に載せる値）と同じだからである。ステップごとの区別は直す前の形に置けないので、原本を退避して残す
-  1. 進行中のプランの保存先ごとに、`outputs.json` を同じディレクトリの `outputs.json.entries` へ写す（原本の退避。U3 を入れ直すときはこれを `outputs.json` へ戻す）
-  2. `outputs.json` を、`entries` の要素の `outputs` を先頭から順に重ねたオブジェクトで書き直す。手元で試したコマンドは `python3 -c 'import json, shutil, sys; p = sys.argv[1]; shutil.copy2(p, p + ".entries"); merged = {}; [merged.update(e["outputs"]) for e in json.load(open(p))["entries"]]; json.dump(merged, open(p, "w"), ensure_ascii=False)' <保存先>/outputs.json` で、1 と 2 を続けて行う
+  1. 進行中のプランの保存先ごとに、下のコマンドで `outputs.json` を変換する。コマンドは保存先ごとに次の順で処理する
+     - 先に形を見る。`entries` の並びを持たないファイルは変換済みなので、触らずに飛ばす
+     - 原本を同じディレクトリの `outputs.json.entries` へ退避する。退避先が既にあれば上書きせずに残す。U3 を入れ直すときは、これを `outputs.json` へ戻す
+     - `entries` の要素の `outputs` を先頭から順に重ねたオブジェクトを一時ファイルに書き、`os.replace` で `outputs.json` と置き換える。途中で止まっても、`outputs.json` は変換前か変換後のどちらかの形で残る
+  2. 途中で止まったときや、どこまで処理したか分からないときは、同じコマンドを同じ保存先の並びでもう一度打つ。処理済みの保存先は飛ばし、退避した原本は変わらないので、結果は 1 回打ったときと同じになる
   3. U3 を revert した NDF でプランを打ち直す
+
+手元で、2 つの保存先に同じコマンドを 2 回打ち、2 回目で処理済みの保存先が飛ばされ、退避した原本が変わらないことを確かめた。
+
+```sh
+python3 - <保存先 1>/outputs.json <保存先 2>/outputs.json <<'EOF'
+import json, os, shutil, sys
+for p in sys.argv[1:]:
+    held = json.load(open(p))
+    if not (isinstance(held, dict) and isinstance(held.get("entries"), list)):
+        print(f"飛ばす（変換済み）: {p}"); continue
+    if not os.path.exists(p + ".entries"):
+        shutil.copy2(p, p + ".entries")
+    merged = {}
+    for e in held["entries"]:
+        merged.update(e["outputs"])
+    with open(p + ".tmp", "w") as f:
+        json.dump(merged, f, ensure_ascii=False)
+    os.replace(p + ".tmp", p)
+    print(f"変換した: {p}")
+EOF
+```
 
 ## 完了の定義
 
