@@ -278,6 +278,14 @@ def _presented(path: Path, target: merge_approval.MergeTarget, production: bool)
     return presented_id, material
 
 
+def _held_target(shown: dict) -> Optional[merge_approval.MergeTarget]:
+    """承認の対象のファイルの中身（`_presented` が書く形）から読んだ承認の対象。形が違えば None。"""
+    try:
+        return merge_approval.MergeTarget(str(shown["repo"]), int(shown["number"]), str(shown["base"]), str(shown["head"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _pr_item_list(number: int) -> list[dict]:
     return [{"kind": "pr", "number": number}]
 
@@ -483,57 +491,79 @@ def _refused_answer(detail: str, number: Optional[int] = None) -> dict:
     return result.stopped(TOOL, "refused", detail, items=_pr_item_list(number) if number is not None else [])
 
 
+def _answered(args: argparse.Namespace) -> tuple[Optional[tuple[dict, dict]], Optional[dict]]:
+    """回答の記録と、その回答先の提示（承認の対象のファイルの中身）。利用者の今の提示への回答でなければ、断る結果。"""
+    record = _read_json(args.answer_record)
+    if record is None:
+        return None, _refused_answer(f"回答の記録 {args.answer_record} が無い（ndf plan next --answer <回答> --by human で回答する）")
+    if record.get("by") != actors.HUMAN:
+        detail = f"回答した者 {record.get('by')} は利用者（{actors.HUMAN}）でないので、マージの承認の証跡を書かない"
+        return None, _refused_answer(detail)
+    answer = record.get("answer")
+    if answer not in approval_words.ANSWERS:
+        return None, _refused_answer(f"回答 {answer} は {' / '.join(approval_words.ANSWERS)} のどれでもない")
+    shown = _read_json(args.presented)
+    presented_id = record.get("presented_id")
+    if shown is None or not presented_id or shown.get("presented_id") != presented_id:
+        return None, _refused_answer("回答の記録が今の提示（承認の対象のファイル）への回答でない（プランを流し直して回答し直す）")
+    return (record, shown), None
+
+
+def _unchanged_target(args: argparse.Namespace, hub: GitHub, shown: dict) -> tuple[Optional[merge_approval.MergeTarget], Optional[dict]]:
+    """今の PR の承認の対象。提示した承認の対象か「本番へ反映されるか」が今の PR と違えば、止まる結果。"""
+    pull = _open_pull(hub, args.branch)
+    if pull is None:
+        return None, result.stopped(TOOL, "precondition", f"{args.branch} の開いた PR が無い")
+    now = _pr_target(hub, pull)
+    held = _held_target(shown)
+    if held is None:
+        return None, _refused_answer(f"承認の対象のファイル {args.presented} の形が違う", pull.number)
+    if not held.same(now):
+        detail = f"#{pull.number} の承認の対象が質問の後に変わった（今は {now.base} 宛て、HEAD {now.head[:12]}）"
+        return None, _refused_answer(detail, pull.number)
+    # 本番へ反映されるかも提示から変わっていないかを照らす（工程の承認ゲートと同じ。設定の読み取りは利用者も同じ要求で読む）
+    verdict, _ = _judge_pr(hub, pull)
+    production = production_merge.reaches_production(verdict)
+    if shown.get("production") is not production:
+        reach = "反映される" if production else "反映されない"
+        return None, _refused_answer(
+            f"#{pull.number} は質問の後にマージ先の設定が変わり、このマージは本番へ{reach}ようになった"
+            "（プランを流し直し、出し直した資料で回答し直す）",
+            pull.number,
+        )
+    return now, None
+
+
+def _write_answer(hub: GitHub, record: dict, shown: dict, target: merge_approval.MergeTarget) -> dict:
+    """確かめを通った回答をマージの承認の証跡に書き、結果 JSON を組む。"""
+    answer = record.get("answer")
+    row = merge_approval.MergeRow(
+        str(answer),
+        merge_approval.USER_BY,
+        target,
+        shown.get("production") is True,
+        f"{record.get('run')}:{record.get('step')}:{record.get('presented_id')}",
+    )
+    written = merge_approval.write_merge_row(hub, row, hub.viewer())
+    summary = f"#{target.number} へ回答 {answer} のマージの承認の証跡を{'書いた' if written else '既に書いてあった'}"
+    return result.result(TOOL, result.OK, summary, items=_pr_item_list(target.number), metrics={"answer": answer, "written": written})
+
+
 def _answer(args: argparse.Namespace) -> dict:
     """プランの実行が書いた回答の記録を、提示した承認の対象と今の PR に照らしてから、マージの承認の証跡に書く。
 
     書くのは、回答した者が利用者（`human`）で、記録の提示の識別子が提示のファイルの識別子と同じで、提示した承認の対象と
     「本番へ反映されるか」が今の PR と同じときだけで、担い手はいつも `user` である。端末から直に打っても、回答の記録が無ければ書かない（決定 7）。
     """
-    record = _read_json(args.answer_record)
-    if record is None:
-        return _refused_answer(f"回答の記録 {args.answer_record} が無い（ndf plan next --answer <回答> --by human で回答する）")
-    if record.get("by") != actors.HUMAN:
-        return _refused_answer(f"回答した者 {record.get('by')} は利用者（{actors.HUMAN}）でないので、マージの承認の証跡を書かない")
-    answer = record.get("answer")
-    if answer not in approval_words.ANSWERS:
-        return _refused_answer(f"回答 {answer} は {' / '.join(approval_words.ANSWERS)} のどれでもない")
-    shown = _read_json(args.presented)
-    presented_id = record.get("presented_id")
-    if shown is None or not presented_id or shown.get("presented_id") != presented_id:
-        return _refused_answer("回答の記録が今の提示（承認の対象のファイル）への回答でない（プランを流し直して回答し直す）")
+    answered, refused = _answered(args)
+    if answered is None:
+        return refused
+    record, shown = answered
     hub = _hub(args)
-    pull = _open_pull(hub, args.branch)
-    if pull is None:
-        return result.stopped(TOOL, "precondition", f"{args.branch} の開いた PR が無い")
-    now = _pr_target(hub, pull)
-    try:
-        held = merge_approval.MergeTarget(str(shown["repo"]), int(shown["number"]), str(shown["base"]), str(shown["head"]))
-    except (KeyError, TypeError, ValueError):
-        return _refused_answer(f"承認の対象のファイル {args.presented} の形が違う", pull.number)
-    if not held.same(now):
-        return _refused_answer(
-            f"#{pull.number} の承認の対象が質問の後に変わった（今は {now.base} 宛て、HEAD {now.head[:12]}）", pull.number
-        )
-    # 本番へ反映されるかも提示から変わっていないかを照らす（工程の承認ゲートと同じ。設定の読み取りは利用者も同じ要求で読む）
-    verdict, _ = _judge_pr(hub, pull)
-    production = production_merge.reaches_production(verdict)
-    if shown.get("production") is not production:
-        reach = "反映される" if production else "反映されない"
-        return _refused_answer(
-            f"#{pull.number} は質問の後にマージ先の設定が変わり、このマージは本番へ{reach}ようになった"
-            "（プランを流し直し、出し直した資料で回答し直す）",
-            pull.number,
-        )
-    row = merge_approval.MergeRow(
-        str(answer),
-        merge_approval.USER_BY,
-        now,
-        shown.get("production") is True,
-        f"{record.get('run')}:{record.get('step')}:{presented_id}",
-    )
-    written = merge_approval.write_merge_row(hub, row, hub.viewer())
-    summary = f"#{pull.number} へ回答 {answer} のマージの承認の証跡を{'書いた' if written else '既に書いてあった'}"
-    return result.result(TOOL, result.OK, summary, items=_pr_item_list(pull.number), metrics={"answer": answer, "written": written})
+    target, stopped = _unchanged_target(args, hub, shown)
+    if target is None:
+        return stopped
+    return _write_answer(hub, record, shown, target)
 
 
 def main(argv: list[str]) -> int:
