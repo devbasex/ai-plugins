@@ -126,13 +126,13 @@ def run_git(args: list[str], cwd: Optional[Path], env: Optional[Mapping[str, str
     return Completed(proc.returncode, proc.stdout, proc.stderr)
 
 
-def _mask_urls(text: str) -> str:
+def mask_urls(text: str) -> str:
     """git の誤りの文から、URL の認証情報とクエリを伏せる（結果 JSON・ログに出すため）。"""
     return _URL_QUERY.sub(r"\1***", _URL_USERINFO.sub("***@", text))
 
 
 def _failed(args: tuple[str, ...], returncode: int, stderr: str) -> GitError:
-    return GitError(_mask_urls(f"git {' '.join(args)} が失敗（終了コード {returncode}）: {stderr.strip()}"))
+    return GitError(mask_urls(f"git {' '.join(args)} が失敗（終了コード {returncode}）: {stderr.strip()}"))
 
 
 def sha_matches(expected: str, actual: str) -> bool:
@@ -464,4 +464,4 @@ class Git:
         """`fetch_branch` を打ち、マージできなければ `GitError`（`<remote> の <name> をマージできない`）。"""
         done = self.fetch_branch(remote, name)
         if done.returncode != 0:
-            raise GitError(f"{remote} の {name} をマージできない: {_mask_urls(done.stderr.strip())}")
+            raise GitError(f"{remote} の {name} をマージできない: {mask_urls(done.stderr.strip())}")

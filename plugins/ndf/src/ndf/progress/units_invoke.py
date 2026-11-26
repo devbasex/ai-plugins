@@ -18,7 +18,7 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
 from ndf.adapters import github
-from ndf.adapters.git import HEADS, Git
+from ndf.adapters.git import HEADS, Git, mask_urls
 from ndf.contracts import facts, result
 from ndf.core import branch_strategy, json_pointer
 from ndf.core.issue_docs import plan_issues
@@ -110,13 +110,13 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
     if not any(has_units(p.text) for p in plans):
         return _plain_route(work_dir)
     if moved:
-        # 単位の経路を続けるときだけ、取り込んだコミットの設定で配布先（I4）と単位の PR で待つチェックを決め直す
+        # 単位の経路を続けるときだけ、進めた先のコミットの設定でリリース先（I4）と単位の PR で待つチェックを決め直す
         project = ndf_settings_in(root, PROJECT_FILE)
         branch = _checked_branch(run, branch, project)
     units = _read_units(g, remote, plans, issues)
-    pushed = g.attempt("push", "-q", "--", remote, f"HEAD:{HEADS}{branch}")
+    pushed = g.attempt("push", "-q", "--no-follow-tags", "--", remote, f"HEAD:{HEADS}{branch}")
     if pushed.returncode != 0:
-        raise UnitsStopped("precondition", f"{remote} の {branch} へ送れない: {pushed.stderr.strip()}")
+        raise UnitsStopped("precondition", f"{remote} の {branch} へ送れない: {mask_urls(pushed.stderr.strip())}")
     found = Lineup(units, _unit_ci(project, branch))
     print(
         f"ndf progress: 単位の PR のマージ先 {branch}、待つチェック {', '.join(found.unit_ci['required']) or '無し'}"
@@ -152,7 +152,7 @@ def _fetched_tip(g: Git, remote: str, branch: str) -> Optional[tuple[str, str]]:
     probe = g.attempt("ls-remote", "--exit-code", "--heads", remote, f"{HEADS}{branch}")
     if probe.returncode == LS_REMOTE_ABSENT:
         return None
-    raise UnitsStopped("precondition", f"{remote} の {branch} を取得できない: {fetched.stderr.strip() or probe.stderr.strip()}")
+    raise UnitsStopped("precondition", f"{remote} の {branch} を取得できない: {mask_urls(fetched.stderr.strip() or probe.stderr.strip())}")
 
 
 def _is_sprint_plan(path: str, issues: Sequence[int]) -> bool:
@@ -162,7 +162,9 @@ def _is_sprint_plan(path: str, issues: Sequence[int]) -> bool:
 
 def _plans_at(g: Git, commit: str, issues: Sequence[int]) -> list[PlanDoc]:
     """コミットにあるスプリントの課題の実装計画。"""
-    names = [p for p in g.run("ls-tree", "-z", "--name-only", commit, "--", f"{facts.value('locations', 'issues', 'path')}/").split("\0") if p]
+    names = [
+        p for p in g.run("ls-tree", "-z", "--name-only", commit, "--", f"{facts.value('locations', 'issues', 'path')}/").split("\0") if p
+    ]
     paths = [p for p in names if _is_sprint_plan(p, issues)]
     blobs = g.blobs(*(f"{commit}:{p}" for p in paths)) if paths else []
     return [PlanDoc(p, plan_issues(p), b.decode("utf-8")) for p, b in zip(paths, blobs) if b is not None]
@@ -203,7 +205,9 @@ def _checked_branch(run: StageRun, branch: Optional[str], project: Mapping[str, 
     """作業場所が今いるブランチが、登録されたスプリントブランチで、リリース先でないことを確かめて返す（I4）。"""
     registered = run.inputs["branch"] if "branch" in run.inputs else None
     if not isinstance(registered, str) or not registered:
-        raise UnitsStopped("precondition", "スプリントに登録されたブランチ（文脈の branch）が無い。工程「作業場所の用意」を流してから打ち直す")
+        raise UnitsStopped(
+            "precondition", "スプリントに登録されたブランチ（文脈の branch）が無い。工程「作業場所の用意」を流してから打ち直す"
+        )
     if branch != registered:
         detail = f"作業場所のブランチ {branch or '（ブランチに居ない）'} が、スプリントに登録されたブランチ {registered} と違う。{registered} へ切り替えてから打ち直す"
         raise UnitsStopped("precondition", detail)
@@ -212,7 +216,9 @@ def _checked_branch(run: StageRun, branch: Optional[str], project: Mapping[str, 
     except contracts.ContractError as exc:
         raise UnitsStopped("precondition", f"ブランチ戦略の設定を読めない: {exc}") from None
     if branch in released:
-        detail = f"ブランチ {branch} は {PROJECT_FILE} の branch_strategy がリリース先に挙げている。単位はスプリントブランチの作業場所で流す"
+        detail = (
+            f"ブランチ {branch} は {PROJECT_FILE} の branch_strategy がリリース先に挙げている。単位はスプリントブランチの作業場所で流す"
+        )
         raise UnitsStopped("precondition", detail)
     return registered
 
@@ -229,7 +235,7 @@ def _catch_up(g: Git, remote: str, branch: str, head: str, tip: str) -> bool:
         raise UnitsStopped("precondition", detail)
     done = g.merge_ff(tip)
     if done.returncode != 0:
-        raise UnitsStopped("precondition", f"{branch} を {remote} の HEAD へ進められない: {done.stderr.strip()}")
+        raise UnitsStopped("precondition", f"{branch} を {remote} の HEAD へ進められない: {mask_urls(done.stderr.strip())}")
     return True
 
 
@@ -285,7 +291,9 @@ def _saved_head(path: Path) -> Optional[str]:
 def round_state(unit_dir: Path) -> RoundState:
     """`run.json` を持つ最新の回の、結果・マージの結果・`reviewed-head`・`stopped-head`。記録の無い空の回は数えない。"""
     rounds = sorted(
-        (n, p) for p in (unit_dir.iterdir() if unit_dir.is_dir() else []) if (n := _round_number(p)) is not None and (p / plan_runner.RUN_FILE).is_file()
+        (n, p)
+        for p in (unit_dir.iterdir() if unit_dir.is_dir() else [])
+        if (n := _round_number(p)) is not None and (p / plan_runner.RUN_FILE).is_file()
     )
     if not rounds:
         return RoundState(unit_dir / "1", False, None, None, None, None)
@@ -294,7 +302,12 @@ def round_state(unit_dir: Path) -> RoundState:
     merged = plan_files.read_json(path / MERGE_FILE)
     kind = merged.get("kind") if merged is not None else None
     return RoundState(
-        path, True, done, kind if isinstance(kind, str) else None, _saved_head(path / REVIEWED_HEAD_FILE), _saved_head(path / STOPPED_HEAD_FILE)
+        path,
+        True,
+        done,
+        kind if isinstance(kind, str) else None,
+        _saved_head(path / REVIEWED_HEAD_FILE),
+        _saved_head(path / STOPPED_HEAD_FILE),
     )
 
 
