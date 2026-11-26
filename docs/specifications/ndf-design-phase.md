@@ -5,10 +5,10 @@
 **手順と表は [`design` の SKILL.md](../../plugins/ndf/skills/design/SKILL.md) が正である。**
 ここに書き写さない。この文書が扱うのは、そこに書かない決定の理由と、工程表での位置と、設計 Pull Request の
 題を作るスクリプトの契約である。承認する人が読む欄（題・目的・適用範囲・目指す姿・目指す姿の根拠・用語・決定の見出し）の
-書き方は [design-template.md の「承認する人が読む欄」](../../plugins/ndf/skills/design/references/design-template.md#承認する人が読む欄)、
+書き方は [design-writing.md の「承認する人が読む欄」](../../plugins/ndf/skills/design/references/design-writing.md#承認する人が読む欄)、
 承認資料への載せ方は [approval-request.md](../../plugins/ndf/skills/development-workflow/references/approval-request.md) が正である。
 **「目指す姿」の欄は 11.0 から入る。** 10 系の上の 2 つの文書には無く、11.0 では
-[11.0 の design-template.md の「承認する人が読む欄」](../../plugins/ndf/skills/design/references/design-template.md#承認する人が読む欄) と
+[11.0 の design-writing.md の「承認する人が読む欄」](../../plugins/ndf/skills/design/references/design-writing.md#承認する人が読む欄) と
 [11.0 の approval-request.md](../../plugins/ndf/skills/development-workflow/references/approval-request.md) が正である。
 
 **設計書のセクションの順・承認する人が読む欄の中身（`standard`）・承認資料の項目の出所は #3868 で変わった。** 変わった点と理由は [ndf-development-document-roles.md](ndf-development-document-roles.md) が正で、この文書の該当する記述より優先する。
@@ -72,7 +72,7 @@ AI ごとに変わり、文書の分割単位・記載項目・粒度をその�
 | 既存の規則の判定は突き合わせの対に入れず、設計文書を書く手順に置く | 対は同じ文書の中だけで確かめられるものに限り、外部を要するものはレビューが拾う、という境界がある。検索を要する判定を対へ混ぜると境界が崩れる |
 | 突き合わせを機械で確かめるチェックは作らない | `design` は配る Skill で、設計文書は利用者のリポジトリで書かれる。導ける値の記述は形が決まらず、どの表のどの列から導いたかは本文の意味を読まないと決まらない |
 | 承認する人が問う項目（題・目的・用語・適用範囲・目指す姿の根拠・決定の見出し）を、設計文書の雛形の欄にする | 設計承認ゲートの差し戻しの理由は、設計の中身より欄の欠けだった。v10.15.0 では用語・適用範囲・目指す姿の根拠の 3 点で問いが 9 回になり、マイルストーン 13 では題が仕組みの語だけで設計 PR 3 本が題から書き直しになった |
-| 欄の規約の本文は `design-template.md` の「承認する人が読む欄」の 1 か所に置き、雛形のコードブロックの外に書く | 雛形のコードブロックは設計文書ごとに写されるため、中に規約の文を置くと文書の数だけ写しが増える。承認資料と他の Skill はこの節を指すだけにする |
+| 欄の規約の本文は `design-writing.md` の「承認する人が読む欄」の 1 か所に置き、雛形のコードブロックの外に書く | 雛形のコードブロックは設計文書ごとに写されるため、中に規約の文を置くと文書の数だけ写しが増える。承認資料と他の Skill はこの節を指すだけにする |
 | 欄の順を H1 → 目的 → 適用範囲 → 目指す姿 → 目指す姿の根拠 → 管理上の注記 → ドメインモデルにする | 承認する人が最初に問うのは「何が壊れていて何が成り立つか」である。ドメインモデルを先頭に置く規約は機能一覧より先にモデルを決めるためのもので、欄の次でも目的は保たれる |
 | 欠けた欄は承認資料に「無し（理由）」と出し、承認ゲートを止めない | 欄の充足を機械が止めると、人の手が承認ゲートの外で止まる。用語を確定するために設計より前に人へ問うと、問いの回数が増える |
 | 設計 PR を出すときは `legacy-refactor` でも欄を書く | 設計承認ゲートはどのモードでも同じ承認資料を組むため、欄が無いとこのモードの設計 PR だけ 4 行が「無し」になる |
@@ -207,7 +207,7 @@ push-glossary-gate は push-glossary の `cmd` をそのまま使う。
 | pr のステップが H1 で PR を作り、読めなければ `title` で出す。既存の PR は H1 を読めたときだけ題も書き直す | 同上（`test_new_pr_takes_the_h1_as_its_title` / `test_unreadable_h1_falls_back_to_the_step_title` / `test_existing_pr_*`） |
 | `sync-title` が違うときだけ書き直し、読めないときと `gh` の失敗では書かずに 0 で終わる | 同上（`test_sync_title_*`） |
 | 設計のプランが `title_doc` を渡し、push-glossary と push-glossary-gate の両方が送りの後に `sync-title` を打つ | 同上（`test_sprint_design_pr_reads_the_design_doc_and_falls_back` / `test_both_design_pushes_of_the_mvv_plan_sync_the_title`） |
-| 欄の規約の本文が `design-template.md` の 1 か所にだけあり、承認資料・`decisions.md`・`pr`・`requirements-design`・`document-rebuild`・`agent-layers.md` は節を指す | 文書を読んで確かめる（文言を照合するテストは書かない） |
+| 欄の規約の本文が `design-writing.md` の 1 か所にだけあり、承認資料・`decisions.md`・`pr`・`requirements-design`・`document-rebuild`・`agent-layers.md` は節を指す | 文書を読んで確かめる（文言を照合するテストは書かない） |
 
 ## 運用
 
@@ -223,5 +223,5 @@ push-glossary-gate は push-glossary の `cmd` をそのまま使う。
 - [issue #526](https://github.com/devbasex/ai-plugins/issues/526) / [PR #574](https://github.com/devbasex/ai-plugins/pull/574)（設計） / [PR #587](https://github.com/devbasex/ai-plugins/pull/587)（実装） — 表から導ける値の数え直しと、値を足す設計での既存の規則の判定
 - [issue #1289](https://github.com/devbasex/ai-plugins/issues/1289)（子は [#772](https://github.com/devbasex/ai-plugins/issues/772) / [#785](https://github.com/devbasex/ai-plugins/issues/785)） — 承認する人が読む欄と設計 Pull Request の題
 - [`design` Skill](../../plugins/ndf/skills/design/SKILL.md)
-- [設計文書の雛形の「進む前に突き合わせる対」](../../plugins/ndf/skills/design/references/design-template.md)
+- [設計文書の書き方の「進む前に突き合わせる対」](../../plugins/ndf/skills/design/references/design-writing.md)
 - [開発ワークフローの振り分け](../../plugins/ndf/skills/development-workflow/SKILL.md)

@@ -101,10 +101,10 @@ Skill を呼べるランタイムでは `document-style` を Skill として起�
 
 **別の Skill が固定した章は動かさない**（共通ルール K3）。設計文書の承認する人が読む欄（H1・要約の段落・今の姿・
 解き方の全体像・決定の見出し・影響と危険）は、`design` の
-[design-template.md の「承認する人が読む欄」](../design/references/design-template.md#承認する人が読む欄) が決める。
+[design-writing.md の「承認する人が読む欄」](../design/references/design-writing.md#承認する人が読む欄) が決める。
 `legacy-refactor`（既存コードを振る舞いを変えずに組み替えるモード）の設計文書では、H1 と、H1 の直後の「目的」から
 「目指す姿の根拠」までの章を、同じファイルの
-[「`legacy-refactor` の書き方」](../design/references/design-template.md#legacy-refactor-の書き方) が決める。
+[「`legacy-refactor` の書き方」](../design/references/design-writing.md#legacy-refactor-の書き方) が決める。
 要求のテンプレート・Pull Request の本文の形・`type-*.md` の必ず書くセクション・`document-sources` の出典のセクションも同じ扱いで、
 目的別の構成は固定されていない章の中だけに当てる。
 

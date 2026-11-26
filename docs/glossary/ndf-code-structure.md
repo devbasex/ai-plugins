@@ -30,7 +30,7 @@ NDF のスクリプトの構造・エントリポイントとコントラクト�
 | 兆候 | — | AI が陥りやすい作り（7 種類）に当たる箇所の候補。直す対象とは限らない | — | — | `docs/specifications/ndf-rebuild-data-and-smells.md` |
 | 兆候の基準ファイル | — | `scripts/ai-smells-baseline/` に元のファイル 1 本につき 1 つ置く、規則ごとの許す数の JSON | — | — | `docs/specifications/ndf-rebuild-data-and-smells.md` |
 | 抑制コメント | `suppressions` | 握りつぶし・フォールバック・ループの中の呼び出しを許す行に付ける `noqa` コメント `# noqa: <規則> <境界の種類>: <理由>`。ループの中の呼び出し（`NDF201`）は `# noqa: NDF201 上限: <件数と根拠>` も使える | 印（単独） | — | `docs/specifications/ndf-rebuild-data-and-smells.md` |
-| 判定データ | — | 分岐の多い判定を置き換える「キー → 値か判定の関数」のデータと、それを引く 1 つの関数。要求（#1142 の本文）の「判定表（データ）」はこれを指す。用語集の「判定表」（モードを判定する順の表）と、詳細設計のテンプレートの「処理の手順」に書く判定表（条件の組み合わせと結果の表）とは別 | — | — | `docs/specifications/ndf-rebuild-data-and-smells.md` |
+| 判定データ | — | 分岐の多い判定を置き換える「キー → 値か判定の関数」のデータと、それを引く 1 つの関数。要求（#1142 の本文）の「判定表（データ）」はこれを指す。用語集の「判定表」（モードを判定する順の表）と、詳細設計のテンプレートの「分岐の条件と結果」に書く判定表（条件の組み合わせと結果の表）とは別 | — | — | `docs/specifications/ndf-rebuild-data-and-smells.md` |
 | ラチェット | — | 基準ファイルの数より増やす変更を CI で落とし、減らした変更では基準を下げる検査。数は減る向きにしか動かない | — | — | `docs/specifications/ndf-contract-fact-checks.md` |
 | アダプター | — | 外部ライブラリを呼ぶ唯一の `lib/` のモジュール（`lib/md.py`・`lib/pathmatch.py` など）。ほかのモジュールはライブラリを直に import せず、これを呼ぶ。relay の意味の「ラッパー」とは別 | — | — | `docs/specifications/ndf-rebuild-libraries.md` |
 | 事実の表 | — | 1 つの事実（例: ランタイムの一覧）を行と列で持つコントラクトの JSON。`contracts/facts/` の 1 ファイル | — | — | `docs/specifications/ndf-rebuild-data-and-smells.md` |

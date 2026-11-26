@@ -27,7 +27,7 @@
 
 ステージの結果の表・`rewrite` が触る項目・指示文の項目の正本は
 [ndf-supervise-impl-prompt-format-and-transient-failures.md](ndf-supervise-impl-prompt-format-and-transient-failures.md) にある。
-設計文書の「設計の結果」の書き方は `design` の `references/design-template.md` が正である。
+設計文書の「設計の結果」の書き方は `design` の `references/design-writing.md` が正である。
 この文書が扱うのは、セルの書式・設計文書の一覧の組み方・止まったときのメッセージの形・決定の理由である。
 
 ## コンテキスト
@@ -230,4 +230,4 @@ sequenceDiagram
 
 - [ndf-supervise-impl-prompt-format-and-transient-failures.md](ndf-supervise-impl-prompt-format-and-transient-failures.md): ステージの結果の表と指示文の項目
 - [ndf-design-external-survey.md](ndf-design-external-survey.md): `design_docs.py` の名前の規則と `design-survey.py`
-- [design-template.md](../../plugins/ndf/skills/design/references/design-template.md): 「設計の結果」の書き方
+- [design-writing.md](../../plugins/ndf/skills/design/references/design-writing.md): 「設計の結果」の書き方

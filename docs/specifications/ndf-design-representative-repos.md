@@ -19,7 +19,7 @@ NDF を変える設計が、そのうちのある種類のリポジトリを NDF
 
 | 中身 | 正本 |
 | --- | --- |
-| 振る舞いの表と「このリポジトリだけの事情」の欄の書き方 | [design-template.md](../../plugins/ndf/skills/design/references/design-template.md) の「適用範囲」 |
+| 振る舞いの表と「このリポジトリだけの事情」の欄の書き方 | [design-writing.md](../../plugins/ndf/skills/design/references/design-writing.md) の「承認する人が読む欄」の表の「代表のリポジトリでの振る舞い」と「このリポジトリだけの事情」の行と、[design-template.md](../../plugins/ndf/skills/design/references/design-template.md) の「影響と危険」 |
 | 要求の「方針の分け方」の節 | [spec-template.md](../../plugins/ndf/skills/requirements-design/references/spec-template.md) |
 | 設計の検査の引数・規則・終了コード | [`design-survey.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/design-survey.py) の冒頭の説明 |
 | 代表のリポジトリの設定の形 | [design.schema.json](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/skills/design/schemas/design.schema.json) |
