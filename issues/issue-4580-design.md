@@ -109,10 +109,10 @@ graph TD
 
 | 要素 | 責務 |
 | --- | --- |
-| 流れの設定の読み手（`progress/flow.py`、新設） | 3 層の工程の指定を 1 つに重ねる。誤りと食い違いの一覧を返す。閉じる条件の要否と理由を返す |
+| 流れの設定の読み手（`progress/flow.py`、新設） | 工程の指定の 3 層（種類の既定・`stages`・`modes.<モード>.stages`）を 1 つに重ねる。誤りと食い違いの一覧を返す。閉じる条件の要否と理由を返す |
 | 種類の既定（`contracts/data/workflow-kinds.json`、新設） | `workflow.kind` に書ける名前と、種類ごとに行わない工程と理由 |
 | 設定のスキーマ（2 つの `project.schema.json` と `project-workflow.schema.json`） | `workflow` に `kind`・`modes`・`close` を足す |
-| スプリントの作成（`progress/command.py`） | 重ねた指定を `resolve_enabled` へ渡し、止める種類の誤りがあれば作らない |
+| スプリントの作成（`progress/command.py`） | 重ねた指定を `resolve_enabled` へ渡し、作成を止める誤りがあれば作らない |
 | 設定の確かめ（`domains/project/cli.py`） | 食い違いを結果の `items` に並べる |
 | 閉じる判定（`domains/records/cli.py`） | 設定を読み、外した条件と理由を返す |
 | リリースの記録（`domains/release` の `record`・`record_decide`・`cli`） | バージョン番号を持たないリポジトリのリリース記録を書く。テストの記録に反映した環境を持たせる |
