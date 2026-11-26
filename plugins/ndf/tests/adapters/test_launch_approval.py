@@ -84,6 +84,26 @@ def test_a_revoke_retried_after_a_torn_write_takes_effect() -> None:
     assert not la.is_approved("/r", SHA)
 
 
+def test_a_row_torn_inside_a_multibyte_character_does_not_hide_the_other_rows() -> None:
+    """日本語の承認者名の途中で切れた行があっても、前後の行とほかのリポジトリの承認は読める。"""
+    path = la.state_file(la.APPROVALS)
+    la.append("/a", SHA, la.Action.APPROVE, approver="人")
+    with path.open("ab") as f:
+        f.write('{"repo": "/c", "approver": "承'.encode("utf-8")[:-1])
+    la.append("/b", SHA, la.Action.APPROVE, approver="承認者")
+    assert la.is_approved("/a", SHA) and la.is_approved("/b", SHA)
+
+
+def test_a_complete_row_left_without_its_newline_stays_ineffective_after_another_append() -> None:
+    """JSON を書き終えて改行の前で中断した取り消しは、別のリポジトリの追記の後も反映されない（打ち直すまで承認は有効）。"""
+    path = la.state_file(la.APPROVALS)
+    la.append("/a", SHA, la.Action.APPROVE, approver="人")
+    with path.open("a", encoding="utf-8") as f:
+        f.write('{"repo": "/a", "sha256": "' + SHA + '", "action": "revoke"}')
+    la.append("/b", SHA, la.Action.APPROVE, approver="人")
+    assert la.is_approved("/a", SHA) and la.is_approved("/b", SHA)
+
+
 def test_a_record_file_readable_by_others_is_neither_written_nor_trusted() -> None:
     """既存の記録の権限が広ければ追記せず（`PermissionError`）、読む側も承認済みと扱わない。"""
     path = la.state_file(la.APPROVALS)
