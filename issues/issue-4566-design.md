@@ -262,27 +262,33 @@ CI の経路では、手元でテストを打つかどうかを引数ではな�
 
 ### テストのコマンドと出力の扱い
 
-テストのコマンドは、コミットしていない手元の設定の値を含むことがあり、出力は認証情報を含むことがある。コマンドと出力の全文は手元のログにだけ保存する。コマンドと出力のうち外部へ送るのは、修正担当の AI（外部の LLM のサービス）への指示文に載せる分だけで、伏せ字にしてから上限で切る。指示文のほかに、どの項目をどこへ出すかは下の表のとおりである。この扱いは、テストの不合格と起動の失敗の両方に当てる。
+テストのコマンドは、コミットしていない手元の設定の値を含むことがあり、出力は認証情報を含むことがある。NDF は、伏せる前のコマンドと出力をファイルに書かない。手元のログに保存するのは、伏せ字にした全文である。修正担当の AI（外部の LLM のサービス）は NDF と同じユーザーで動き、ファイルを読みコマンドを打てるので、ログの権限では担当から隠せないためである。コマンドと出力のうち NDF が外部へ送るのは、担当への指示文に載せる分だけで、伏せ字にしてから上限で切る。この扱いは、テストの不合格と起動の失敗の両方に当てる。
 
 | 情報 | 保存する所・渡す先 |
 | --- | --- |
-| suite の名前、終了コード、起動できないときのエラーの種別（`OSError` の型名） | 結果 JSON、状態ファイル、PR のコメント、標準出力と標準エラー |
-| コマンドと出力の全文（伏せ字にしない） | 手元の `rf<PR>/logs/` のログファイル。実行ユーザーだけが読める権限で作る。NDF は送らない。`ndf refactor release` はログを消さない（今の担当のログと同じ） |
+| suite の呼び名（下の項目）、終了コード、起動できないときのエラーの種別（`OSError` の型名） | 結果 JSON、状態ファイル、PR のコメント、標準出力と標準エラー |
+| コマンドと出力の全文（伏せ字にする） | 手元の `rf<PR>/logs/` のログファイル。実行ユーザーだけが読める権限で作る。NDF は送らない |
 | 修正担当への指示文に載せる情報（下の表） | 最終ゲート修正の担当の AI |
 
 指示文に載せてよいのは次の項目だけである。上限は落ちた suite 1 件あたりの値である。
 
 | 項目 | 上限 | 伏せ字 |
 | --- | --- | --- |
-| suite の名前、終了コードか時間切れの別 | — | しない |
+| suite の呼び名 | 名前の先頭の 100 文字 | する |
+| 終了コードか時間切れの別 | — | しない |
 | コマンド | 先頭の 500 文字 | する |
 | 出力（標準出力と標準エラー） | 末尾の 100 行、かつ 8,000 文字 | する |
 
+- suite の呼び名は、設定の順番と名前（`#2 unit`）である。設定の名前は任意の文字列なので、認証情報の形を含む名前は載せず、順番だけで呼ぶ
+- 指示文全体は UTF-8 で 60,000 バイト以下にする。指示文は担当の CLI へ 1 つの引数で渡るので、落ちた suite が多いと引数の上限を超えて担当を起動できなくなる。収まらない suite は件数だけを知らせる
 - 出力が上限より短ければ、伏せ字の後の全体が送られる
 - 伏せ字は、字数を切る前の全文に掛ける。切った後では、途中で切れた認証情報が形に当たらずに残るためである
 - 伏せるのは、NDF の今の判定に当たるものである。秘密を示す名前の環境変数の値、GitHub のトークン、URL に埋めた認証情報、認証ヘッダー（`ndf.adapters.run_log.redact`）と、代表的なクラウドや LLM のキー、JWT、秘密鍵、`password=` などの代入の行（`ndf.domains.project.secret.redact`。当たる行を丸ごと伏せる）である
-- 秘密鍵は複数の行にわたり、今の判定は開始の行にしか当たらない。指示文を作るときは、`PRIVATE KEY` を含む `-----BEGIN` の行から `-----END` の行まで（終わりの行が無ければ末尾まで）を伏せる
+- 秘密鍵は複数の行にわたり、今の判定は開始の行にしか当たらない。`PRIVATE KEY` を含む `-----BEGIN` の行から `-----END` の行まで（終わりの行が無ければ末尾まで）を伏せる。この処理は、行ごとの伏せ字が開始の行を置き換える前に、原文に掛ける
 - この形に当たらない認証情報や、手元の設定の値は伏せられずに送られる。送りたくない利用者は、直しの回数を 0 にする引数 `--max-fix 0` で起動するか（項目の検証の直しも行わなくなる）、`workflow.stages` で工程を無効にする
+- 上の上限と伏せ字が掛かるのは、NDF が渡す指示文とログだけである。担当が自分でテストを打ち直すか、手元の設定ファイルを読めば、伏せていない内容が外部の LLM のサービスへ渡る。NDF はこれを遮断できない
+
+ログは、調査が終わった後に残り続けないように期限で消す。`ndf refactor run` と `ndf refactor release` は、同じリポジトリのすべての PR について、30 日を過ぎた手元の最終ゲートのログを始めに消す。`release` は、期限の内のログを残す（今の担当のログと同じ）。どちらも打たれないリポジトリでは、次に打つまで残る。
 
 ## 処理の流れ
 
@@ -595,7 +601,7 @@ graph TB
 ### 決定 11: 認証情報の流出を抑えて直せるようにするため、修正担当へ渡す出力は伏せ字にして上限で切る
 
 - **質問**: 最終ゲート修正の担当に、落ちたテストの何を渡すか
-- **選んだ案**: suite の名前、終了コード、コマンド、出力の末尾を渡す。コマンドと出力は、今ある伏せ字を掛けてから上限で切る（「テストのコマンドと出力の扱い」）。新しい設定は足さない
+- **選んだ案**: suite の呼び名、終了コード、コマンド、出力の末尾を渡す。コマンドと出力は、今ある伏せ字を掛けてから上限で切る（「テストのコマンドと出力の扱い」）。新しい設定は足さない
 - 採らなかった案: 伏せ字を掛けずに渡す（テストが出力した認証情報が、そのまま外部の LLM のサービスへ渡る）
 - 採らなかった案: suite の名前と終了コードだけを渡す（担当は何が落ちたかを知るためにテストを打ち直すことになり、時間と token が増える）
 - 採らなかった案: 渡すことを止める専用の設定を足す（`--max-fix 0` と `workflow.stages` の無効化で止められる）
@@ -612,7 +618,7 @@ graph TB
 
 | 壊れうる箇所 | 扱い |
 | --- | --- |
-| テストの出力やコマンドが認証情報を含むリポジトリ | 手元のログは実行ユーザーだけが読める。最終ゲート修正の指示文へは伏せ字を掛けて渡すが、形に当たらない値は外部の LLM のサービスへ渡る（決定 11） |
+| テストの出力やコマンドが認証情報を含むリポジトリ | 手元のログは伏せ字にして、実行ユーザーだけが読める権限で書き、30 日を過ぎたら消す。最終ゲート修正の指示文へも伏せ字を掛けて渡すが、形に当たらない値は外部の LLM のサービスへ渡る（決定 11） |
 | 必須のチェックはあるがテストを含まないリポジトリ（lint だけが必須など） | 手段は必須のチェックになる（要求の前提 2）。CI テストの設定が無ければ項目ごとの対応するテストは手元で打つが、最終ゲートはテスト全体を確かめない。結果には通ったチェックの名前だけを載せる（「テストを確かめる手段」） |
 | 起動の設定（`workflow.launch.refactor`）に必須のチェックの名前を直に書き、`ci.required_checks` が空のリポジトリ | `workflow.stages` で工程の有効・無効を指定していなければ、手段は「無し」になり工程を飛ばす（今も条件が偽なら飛ぶ）。工程を有効と指定していれば、`workflow.launch.refactor` に書いたコマンドをそのまま打つ（「起動の指定と手段の優先順位」） |
 | 工程を設定で有効にし、手段が無いリポジトリ | 今と同じく定義の条件を見ずに始める。起動の指定があれば打ち、無ければ起動が組めず `precondition` で止まる（受け入れ条件 8） |
@@ -686,8 +692,12 @@ graph TB
 | 決定 10 | 累計の残りが suite に渡り、尽きれば `fix_limit`。同じ引数で打ち直すと累計は 0 から始まり、途中で止まったテスト全体は最初の suite から打つ。`test.local_total_minutes` があれば安全網の値より先に使う。上限で停止した実行は、同じ SHA・設定・上限のまま打ち直してもテストを起動する。時計は差し替えて確かめる | 停止の記録を持って打ち直しを断る、累計を渡さない、または累計を状態ファイルから引き継ぐと落ちる |
 | 起動の失敗 | 取り込んだ先頭も終了コード 126・127 なら `precondition` で、直しの担当を起動しない。取り込んだ先頭が合格して対象の SHA だけが 127 なら、最終ゲート修正へ進む。最後の周でも同じく分ける | 127 をすぐ環境の問題にする、または比べずに直しへ進むと落ちる |
 | コマンドと出力の扱い | テストの不合格と起動の失敗のどちらでも、結果 JSON・状態ファイル・PR のコメントに、コマンドと出力の文字列が現れない | 停止の理由にコマンドか出力の末尾を載せると落ちる |
-| 指示文へ渡す量と伏せ字 | 指示文に載る出力は末尾の 100 行かつ 8,000 文字まで、コマンドは 500 文字まで。トークンの形と秘密の名前の環境変数の値は伏せられる。上限の境で切れるトークンも残らない | 伏せ字を省く、切ってから伏せる、または全文を渡すと落ちる |
-| ログの権限 | umask が 022 でも、`logs/` は 0700、ログファイルは 0600 になる。前からある 0755 の `logs/` と 0644 のログも直してから書く | 通常の書き込みで作る、または作る時だけ権限を指定すると落ちる |
+| 指示文へ渡す量と伏せ字 | 指示文に載る出力は末尾の 100 行かつ 8,000 文字まで、コマンドは 500 文字まで。トークンの形と秘密の名前の環境変数の値は伏せられる。上限の境で切れるトークンも残らない。複数行の秘密鍵は、開始の行を行ごとの伏せ字が置き換える場合でも本体が残らない | 伏せ字を省く、切ってから伏せる、秘密鍵のブロックを行ごとの伏せ字の後に探す、または全文を渡すと落ちる |
+| 指示文全体の上限 | 落ちた suite が多くても指示文は UTF-8 で 60,000 バイト以下で、載せなかった suite の件数が書かれる | suite ごとの上限だけにすると落ちる |
+| suite の呼び名 | 認証情報の形を含む suite の名前は、結果 JSON・状態ファイル・PR のコメント・指示文のどれにも現れず、順番で呼ぶ | 設定の名前をそのまま出すと落ちる |
+| ログの名前と中身 | 同じ名前の suite と `/` を含む名前の suite が別々のログになる。ログに伏せる前の秘密が無い | ファイル名に suite の名前を使う、または原文を書くと落ちる |
+| ログの期限 | 30 日を過ぎた手元の最終ゲートのログは、次の `run` か `release` で消える。ほかのファイルは残る。時刻は引数で渡して確かめる | 削除を呼ばない、または `logs/` を丸ごと消すと落ちる |
+| ログの権限 | umask が 022 でも、`logs/` は 0700、ログファイルは 0600 になる。前からある 0755 の `logs/` は直してから書き、前からあるログは新しいファイルで置き換える。前のログの名前が別のファイルへのハードリンクでも、そのファイルの中身と権限は変わらない | 通常の書き込みで作る、または前からあるファイルを `O_TRUNC` で開くと落ちる |
 | 合格の条件 | テストが追跡ファイルを書き換えると `precondition` になり、送らない | テストの後の照合を外すと落ちる |
 | 決定 7 | 条件に `ci_declared` を使う古い工程定義でも、停止せずに今と同じ判定になる | `ci_declared` の値を求める処理を消すと落ちる |
 
@@ -697,7 +707,7 @@ graph TB
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4566 | 実装する | — | `plugins/ndf/src/ndf/testing/means.py`（新設）、`plugins/ndf/contracts/workflow/stages/refactor.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/limits/test-run.test.json`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/refactor_values.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/src/ndf/core/converge/worktree.py`、`plugins/ndf/src/ndf/testing/weight.py`、`plugins/ndf/contracts/templates/cross-refactoring.json`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/src/ndf/domains/crossrefactor/workspace.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/src/ndf/domains/crossrefactor/cli.py`、`plugins/ndf/src/ndf/domains/crossrefactor/drive.py`、`plugins/ndf/src/ndf/domains/crossrefactor/final_gate.py`、`plugins/ndf/src/ndf/domains/crossrefactor/prompt_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/final_gate_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/local_gate.py`（新設）、`plugins/ndf/src/ndf/domains/crossrefactor/protected_decide.py`（新設）、`plugins/ndf/contracts/schemas/io/refactor.args.schema.json`、`plugins/ndf/contracts/version.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/tests/domains/crossrefactor/test_local_gate.py`（新設）、`plugins/ndf/tests/domains/crossrefactor/test_protected.py`（新設）、`plugins/ndf/tests/domains/crossrefactor/test_prompt_decide.py`、`plugins/ndf/tests/route/test_templates.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/testing/test_means.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_invoke_refactor.py`、`plugins/ndf/tests/domains/crossrefactor/test_drive.py`、`plugins/ndf/tests/domains/crossrefactor/test_refactor_cli.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`docs/specifications/ndf-ci-only-tests.md`、`docs/specifications/ndf-review-units-and-refactoring-timing.md`、`docs/specifications/ndf-stage-plan-work-prompts.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-ci-test.md` |
+| #4566 | 実装する | — | `plugins/ndf/src/ndf/testing/means.py`（新設）、`plugins/ndf/contracts/workflow/stages/refactor.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/limits/test-run.test.json`、`plugins/ndf/contracts/limits/cross-refactoring.gate-log.keep.json`（新設）、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/refactor_values.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/src/ndf/core/converge/worktree.py`、`plugins/ndf/src/ndf/testing/weight.py`、`plugins/ndf/contracts/templates/cross-refactoring.json`、`plugins/ndf/contracts/templates/parts/steps.json`、`plugins/ndf/src/ndf/domains/crossrefactor/workspace.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/src/ndf/domains/crossrefactor/cli.py`、`plugins/ndf/src/ndf/domains/crossrefactor/drive.py`、`plugins/ndf/src/ndf/domains/crossrefactor/final_gate.py`、`plugins/ndf/src/ndf/domains/crossrefactor/prompt_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/final_gate_decide.py`、`plugins/ndf/src/ndf/domains/crossrefactor/local_gate.py`（新設）、`plugins/ndf/src/ndf/domains/crossrefactor/protected_decide.py`（新設）、`plugins/ndf/contracts/schemas/io/refactor.args.schema.json`、`plugins/ndf/contracts/version.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/tests/domains/crossrefactor/test_local_gate.py`（新設）、`plugins/ndf/tests/domains/crossrefactor/test_protected.py`（新設）、`plugins/ndf/tests/domains/crossrefactor/test_prompt_decide.py`、`plugins/ndf/tests/route/test_templates.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/testing/test_means.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_run.py`、`plugins/ndf/tests/progress/test_invoke_refactor.py`、`plugins/ndf/tests/domains/crossrefactor/test_drive.py`、`plugins/ndf/tests/domains/crossrefactor/test_refactor_cli.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/cross-refactoring/SKILL.md`、`docs/specifications/ndf-ci-only-tests.md`、`docs/specifications/ndf-review-units-and-refactoring-timing.md`、`docs/specifications/ndf-stage-plan-work-prompts.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-ci-test.md` |
 
 ## 人へ残す判断
 
@@ -706,7 +716,7 @@ NDF の共通原則は、必ず人の承認が要る操作を C1〜C8 の番号�
 | 番号 | 判断 | なぜ当たるか | この設計の扱い（推奨） | 変える場合の案と代償 |
 | --- | --- | --- | --- | --- |
 | C1（秘密に触れる） | 手元の経路は、PR のブランチの先頭の設定にあるテストのコマンドを、NDF を動かすシェルの環境変数のまま実行する | 起動の後に他者が PR のブランチへコマンドを足すと、そのコマンドが秘密を読める | このまま。項目ごとの検証（`verify.py`）は、これまでも作業場所の設定のコマンドを同じ環境で実行している。PR のブランチへ書ける人は、テストのコードを書き換えれば、同じように秘密を読める | 起動の後にコマンドが変わったら実行せずに `precondition` で停止する。並行の更新でテストの設定が変わると、利用者が打ち直すことになる。認証情報を読めない実行環境で動かす案は、NDF に隔離の仕組みが無いので新しく作ることになる |
-| C1（秘密に触れる） | テストが落ちて直すときは、コマンドと出力の末尾を、外部の LLM のサービスである修正担当の AI へ送る | 出力は認証情報を含むことがある | 伏せ字を掛け、上限で切って送る（決定 11）。形に当たらない認証情報は送られうる | suite の名前と終了コードだけを送る。担当がテストを打ち直して原因を調べるので、時間と token が増える |
+| C1（秘密に触れる） | テストが落ちて直すときは、コマンドと出力の末尾を、外部の LLM のサービスである修正担当の AI へ送る | 出力は認証情報を含むことがある | 伏せ字を掛け、上限で切って送る（決定 11）。形に当たらない認証情報は送られうる。担当は NDF と同じユーザーで動くので、テストの打ち直しや手元のファイルの読み取りで、伏せていない内容を読むことも防げない | suite の名前と終了コードだけを送る。担当がテストを打ち直して原因を調べるので、時間と token が増える |
 | C3（利用者のデータを変える） | 手元の経路で打つテスト全体は隔離しないので、テストが検証用の作業場所の外へ書くことを防げない | 変数で組んだパスや、テストのプログラムが内部で書くパスは、利用者のファイルを書き換えうる | このまま。防ぐのは、テストのコマンドに `--work` の配下の絶対パスがそのまま書かれた場合だけである。テストを手元で打つこと自体は、項目ごとの検証でこれまでも行っている | テストの実行を隔離する。NDF に仕組みが無いので新しく作ることになる |
 | C4（戻せない操作） | 検証用の作業場所を、テストの生成物ごと `git worktree remove --force` で取り除く。中断で残ったものも次の実行が取り除く | データの削除に `--force` を使う | このまま。対象は NDF がコミットから新しく作り、状態ファイルに記録したパスだけで、利用者が作業している worktree は消さない。利用者が `git worktree lock` を掛けたものも残す。今の cross-refactoring の作業場所の片付けも同じ形である | 変更や生成物が残る作業場所は消さずに残し、利用者が片付ける。テストが生成物を作るリポジトリでは、実行のたびに作業場所が増える |
 | C7（利用者の設定と指示書を書き換える） | 担当の AI による書き換えを拒むのはテストの定義のファイル（`.ndf/` を含む）だけで、`AGENTS.md`・`CLAUDE.md` は拒まない | 対象範囲に指示書が入れば、担当が書き換えて送れる | このまま。担当が提案できるのは、スプリントの実装が変えた関数とファイルだけなので、指示書が対象に入るのは実装が指示書を変えた場合に限られる。送った変更は、後のコードレビューと、リリースの承認で人が見る。必須のチェックの経路でも、これまで同じ扱いである | 指示書を保護するファイルに足し、変えていれば `refused` にする。指示書を直す課題では、この工程がその分を直せない |
@@ -721,6 +731,7 @@ NDF の共通原則は、必ず人の承認が要る操作を C1〜C8 の番号�
 | 作ったばかりの作業場所でテストが通る利用先の割合 | 依存の用意をコマンドに含めていない利用先は、最終ゲートで停止する。どれだけあるかは、使われるまで分からない |
 | `PATH` 以外の環境の変化 | 同じ `PATH` で実行ファイルの中身を入れ替えた場合や、ほかの環境変数を変えた場合は、合格の記録を無効にしない |
 | 修正担当への指示文が、同じマシンのほかの利用者に見えるか | 担当の CLI には指示文を引数で渡す起動の形があり、プロセスの一覧から読めうる。ログの権限では防げない。指示文の渡し方はこの設計で変えない |
+| 修正担当が、指示文に無い秘密を自分で読む場合 | 担当は NDF と同じユーザーで動き、テストの打ち直しと手元のファイルの読み取りができる。NDF に担当を隔離する仕組みは無く、防げない |
 | テストが検証用の作業場所の外を読み書きする場合 | 変数やコマンド置換で組むパス、引用符の中の別のシェル、テストのプログラム内部のアクセスは検出せず、書き込みも防がない。`--work` のファイルを上書きしうるし、`--work` のコードをテストしうる。NDF にテストの実行を隔離する仕組みは無い |
 | テストの定義のファイルの表の条件に当たらないファイルを、この実行が変える場合 | 利用先が `test.protected_files` に宣言していなければ、名指しされたスクリプトがさらに読むファイル、`conftest.py` のようなテストの支援コード、一覧に無い名前の定義ファイルは検出しない。後の工程のコードレビューで見る |
 

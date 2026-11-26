@@ -18,7 +18,7 @@
 | `src/ndf/domains/crossrefactor/{cli.py, drive.py, workspace.py, final_gate.py, final_gate_decide.py, prompt_decide.py}` | 引数、経路の分岐、排他ロック、記録、指示文 |
 | `src/ndf/progress/{command.py, refactor_values.py, invoke.py}`・`src/ndf/core/route/__init__.py` | 条件の語、起動の組み立て、プランの形 |
 | `contracts/workflow/{stages/refactor.json, ndf.schema.json}`・`contracts/templates/{cross-refactoring.json, parts/steps.json}` | 工程の条件、`follow` のステップ |
-| `contracts/{schemas/ndf-settings/project.schema.json, schemas/io/refactor.args.schema.json, version.json, limits/test-run.test.json}`・`docs/contracts/commands.md`・`skills/development-workflow/schemas/project.schema.json` | 設定のキーとコントラクト |
+| `contracts/{schemas/ndf-settings/project.schema.json, schemas/io/refactor.args.schema.json, version.json, limits/test-run.test.json, limits/cross-refactoring.gate-log.keep.json}`・`docs/contracts/commands.md`・`skills/development-workflow/schemas/project.schema.json` | 設定のキーとコントラクト |
 | `skills/{development-workflow, cross-refactoring}/SKILL.md`・`docs/specifications/` の 3 本 | 手順書と確定仕様 |
 | `tests/` の下 | 詳細設計の「地図」のテストの行 |
 
@@ -42,8 +42,8 @@
 
 ### Task 3: 手元の最終ゲートを作る
 
-- **対象ファイル:** `local_gate.py`、`final_gate.py`、`final_gate_decide.py`、`prompt_decide.py`、`core/converge/worktree.py`、`workspace.py`、`test-run.test.json`、`tests/domains/crossrefactor/test_local_gate.py`、`test_prompt_decide.py`
-- **変更内容:** 取り込み → テスト全体 → 指定の SHA の push か直し。権限を絞ったログと、指示文へ渡す出力の伏せ字と上限（`workspace.py`）。検証用の作業場所、合格の記録、累計の上限。CI の記録に通ったチェックの名前を足す
+- **対象ファイル:** `local_gate.py`、`final_gate.py`、`final_gate_decide.py`、`prompt_decide.py`、`core/converge/worktree.py`、`workspace.py`、`test-run.test.json`、`cross-refactoring.gate-log.keep.json`、`tests/domains/crossrefactor/test_local_gate.py`、`test_prompt_decide.py`
+- **変更内容:** 取り込み → テスト全体 → 指定の SHA の push か直し。権限を絞ったログの書き込みと期限での削除（`workspace.py`）、ログと指示文の伏せ字と上限（`local_gate.py`・`prompt_decide.py`）。検証用の作業場所、合格の記録、累計の上限。CI の記録に通ったチェックの名前を足す
 - **満たす受け入れ条件:** 3・4
 - **進め方:** 詳細設計の「処理の手順」の表の行ごとに、失敗するテスト → 通す実装。git は一時の bare リモートを使い、テストの起動と時計は差し替える
 
