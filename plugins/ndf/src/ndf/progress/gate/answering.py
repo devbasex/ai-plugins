@@ -518,7 +518,9 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
 
 
 # 対象に結び付かない設計の承認を待ちへ戻す理由（承認ゲートの待ちの記録に残る）
-UNBOUND_REASON = "設計 PR の head を見ずに記録した設計の承認（設計 PR を items から読まなかったバージョンの承認）なので、今の設計 PR で承認し直す"
+UNBOUND_REASON = (
+    "設計 PR の head を見ずに記録した設計の承認（設計 PR を items から読まなかったバージョンの承認）なので、今の設計 PR で承認し直す"
+)
 
 
 @dataclass(frozen=True)
