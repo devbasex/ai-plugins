@@ -8,6 +8,7 @@
 src/ndf/
 ├── core/issue_docs.py
 ├── core/plan/review_units_decide.py   *
+├── core/plan/transition_decide.py・runner.py
 ├── core/route/__init__.py
 ├── progress/plan_runs.py              *
 ├── progress/issue_copies.py           *
@@ -45,6 +46,7 @@ contracts/
 | `src/ndf/progress/stages.py`・`definition.py` | 変更 | 工程の型に `per_unit` を足して読む | — | `StageDef` | `_stage_def`（変更） |
 | `src/ndf/progress/refactor_values.py` | 変更 | 見出しの定数を単位の表の読み手から読む | `review_units_decide` | モジュール | — |
 | `src/ndf/core/route/__init__.py` | 変更 | `impl` のレビューの起動と、単位の経路のテンプレートを組む | — | モジュール | `unit_template`・`unit_review_launch`（新設）、`review_launch`（変更） |
+| `src/ndf/core/plan/transition_decide.py`・`runner.py` | 変更 | 停止したステップの理由をプランの停止結果へ引き継ぐ | — | `Outcome` | `_after_stop`・`_perform`（変更） |
 | `src/ndf/adapters/github.py` | 変更 | マージ済みの単位の PR を読み、マージの宛先を確かめる | — | `Pull`・`GitHub` | `merged_pulls`（新設）、`merge`・`_merge_with`・`_preflight`・`Pull.from_rest`（変更） |
 | `src/ndf/ci_cli.py` | 変更 | `--base`・`--pr` でマージの対象を決める | `github` | モジュール | `_target`（新設）、`_merge`（変更） |
 | `src/ndf/contracts/worker_kinds.py` | 変更 | 作業の定義の空でよい入力を渡す | — | モジュール | `kind_values`（変更） |
@@ -346,7 +348,7 @@ contracts/
 
 ## テンプレートとレビューの起動
 
-満たす決定: 決定 6・11・13・14、受け入れ条件 4
+満たす決定: 決定 6・11・13・14・17、受け入れ条件 4
 
 ### 関数の仕様
 
@@ -355,6 +357,8 @@ contracts/
 | `unit_template` | `core/route/__init__.py` | 新設 | `(t: Template, repo: str, drop: Collection[str]) -> Template` | `use` を開き、`drop` のステップを外し（`without_steps`）、残るステップ `ci` の引数の末尾に `--repo <repo>` を足したテンプレートを返す |
 | `unit_review_launch` | 同上 | 新設 | `(repo: str, command: Sequence[str]) -> list[str]` | レビューの起動を、照合するラッパー（`UNIT_REVIEW`）経由にする |
 | `review_launch` | 同上 | 変更 | 変えない | `impl` では、PR の番号をブランチから引かず `{state_dir}/pr-number` から読むラッパーにする |
+| `Outcome`・`_after_stop` | `core/plan/transition_decide.py` | 変更 | `Outcome` に `summary: Optional[str] = None` を足す | 停止の説明の末尾にステップの `summary` を足す |
+| `_perform` | `core/plan/runner.py` | 変更 | 変えない | ステップの `summary` を `Outcome` に渡す |
 
 `drop` は `done-check` である。待つチェックが空の並びなら、`ci` と、`ci` の失敗からしか到達しない `repeat-check`・`ci-fix`・`ci-local`・`push-fixed` も入れる。`without_steps` は指定したステップを外して行き先を付け替えるだけで、到達できなくなったステップは消さないためである。外した後のテンプレートが使わない差し込み（`required`・`ci_budget`・`tests` など）は求めず、外した作業（`ci-fix`）の入力も検査しない（「工程から作業を呼ぶ層」の上書きのテンプレート）。単位の経路の `{{review}}` は `unit_review_launch(repo, 設定の起動か、--pr を持たない既定の ndf cross-review run)` である。
 
@@ -371,10 +375,20 @@ contracts/
 | ファイル・ステップ | 変える中身 |
 | --- | --- |
 | `parts/steps.json` の `pr` | `run` は番号を `gh pr create` の出力の URL の末尾から取り、`{state_dir}/pr-number` へ書く。`probe` は head と `{{base}}` で絞り、`isCrossRepository` の PR を除き、見つけた番号を同じファイルへ書く |
-| `impl.json` の `conflict-check`・`ci` | 共有のステップの `run` を上書きし、番号を `{state_dir}/pr-number` から読む。読めなければ `conflict-check` は終了コード 2、`ci` は 1 |
+| `parts/steps.json` の `ci` | PR の番号の取り方をキー `pr_source` に分ける。番号を出力するコマンド（`command`）と、その引数（`arg`）を持つ（決定 17） |
+| `impl.json` の `conflict-check`・`ci` | 番号を `{state_dir}/pr-number` から読む。`conflict-check` は `run` を上書きし、`ci` は `pr_source` だけを上書きする。失敗時の終わり方は表の下に示す |
 | `impl.json` のプランの最上位 | `"unit_file": "{{unit_file}}"` のキーを足す（`core/plan/model.parse` は知らないキーを読まない。差し込みを使わないとテンプレートの検査が落ちる） |
 | `params.json` | `unit_file`（既定は空文字列） |
 | `pr.json` の `pr` の `probe` | `isCrossRepository` の PR を除く |
+
+`impl` の 2 つのステップは、次のように終わる。
+
+- `conflict-check` は、`pr-number` を読めないか空なら、終了コード 2（`precondition`）で止まる
+- 番号を読めたら、`conflict-check` は `gh pr view` で `mergeStateStatus`（マージ先と競合するかの状態）を取得する。コマンドが失敗するか、取得した値が空なら、終了コード 2（`precondition`）で止まる。値が `DIRTY` なら、終了コード 1（`base_conflict`）で止まる
+- 終了コード 2 で止まる場合、`conflict-check` はステップの結果 JSON の `summary` に理由を出す。番号の記録を読めないのか、どの PR の `mergeStateStatus` を取得できないのかを書き分ける
+- `ci` は、`pr-number` を読めないか空なら、終了コード 1 で終わる
+
+ステップが書いた理由は、プランの停止結果で利用者に届ける。プランは、停止したステップの `summary` を停止結果の説明の末尾に足す（例: `ステップ conflict-check が precondition で止まった: <理由>`）。`conflict-check` に限らず、すべてのステップに同じく適用する。次に進むステップは停止理由の種類だけで選び、`summary` は使わない。
 
 ### 異常系の処理
 

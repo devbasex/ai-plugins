@@ -1,5 +1,5 @@
 {
-  "summary": "テンプレートどうしで共有するステップ。テンプレートのステップは {\"use\": \"<名前>\"} で 1 つを引き、並べたキーで上書きする（上書きはキーごとに置き換える）",
+  "summary": "テンプレートどうしで共有するステップ。テンプレートのステップは {\"use\": \"<名前>\"} で 1 つを引き、並べたキーで上書きする（上書きはキーごとに置き換える）。`pr_source`（PR の番号を出力するコマンド `command` と、その引数 `arg`）は、展開の時点で run の @pr_command と @pr_arg へ差し込む",
   "steps": {
     "test": {
       "id": "test",
@@ -26,13 +26,13 @@
       "id": "pr",
       "run": [
         "sh", "-c",
-        "gh pr create --base \"$1\" --head \"$0\" --title \"$2\" --body-file \"$3\" >&2 || exit 1; n=$(gh pr view \"$0\" --json number --jq .number) && [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
-        "{{branch}}", "{{base}}", "{{title}}", "{{body_file}}"
+        "u=$(gh pr create --base \"$1\" --head \"$0\" --title \"$2\" --body-file \"$3\") || exit 1; printf '%s\\n' \"$u\" >&2; n=${u##*/}; case $n in ''|*[!0-9]*) exit 1;; esac; printf '%s\\n' \"$n\" > \"$4\" || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
+        "{{branch}}", "{{base}}", "{{title}}", "{{body_file}}", "{state_dir}/pr-number"
       ],
       "probe": [
         "sh", "-c",
-        "n=$(gh pr list --head \"$0\" --state open --json number --jq '.[0].number // empty'); [ -n \"$n\" ] || exit 1; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
-        "{{branch}}"
+        "n=$(gh pr list --head \"$0\" --base \"$1\" --state open --json number,isCrossRepository --jq 'map(select(.isCrossRepository | not)) | .[0].number // empty'); [ -n \"$n\" ] || exit 1; printf '%s\\n' \"$n\" > \"$2\" || exit 2; printf '{\"status\": \"ok\", \"summary\": \"PR #%s\", \"items\": [{\"kind\": \"pr\", \"number\": %s}]}\\n' \"$n\" \"$n\"",
+        "{{branch}}", "{{base}}", "{state_dir}/pr-number"
       ]
     },
     "work-start": {
@@ -53,10 +53,11 @@
     },
     "ci": {
       "id": "ci",
+      "pr_source": {"command": "gh pr view \"$1\" --json number --jq .number", "arg": "{{branch}}"},
       "run": [
         "bash", "-c",
-        "set -o pipefail; pr=$(gh pr view \"$1\" --json number --jq .number) || exit 1; out=$2; shift 2; ndf ci watch --pr \"$pr\" \"$@\" | tee \"$out\"",
-        "ci", "{{branch}}", "{state_dir}/ci.json", "--budget", "{{ci_budget}}", "--required={{required}}", "--test={{tests}}"
+        "set -o pipefail; pr=$(@pr_command) && [ -n \"$pr\" ] || exit 1; out=$2; shift 2; ndf ci watch --pr \"$pr\" \"$@\" | tee \"$out\"",
+        "ci", "@pr_arg", "{state_dir}/ci.json", "--budget", "{{ci_budget}}", "--required={{required}}", "--test={{tests}}"
       ],
       "on_cause": {"test_failed": "repeat-check", "base_conflict": "base-sync"}
     },
