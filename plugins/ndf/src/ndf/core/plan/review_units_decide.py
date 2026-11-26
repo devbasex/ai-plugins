@@ -259,9 +259,9 @@ def _unit_rows(doc: _Doc) -> list[dict[str, str]]:
     repeated = [column for column in (*REQUIRED_COLUMNS, ORDER_COLUMN) if head.count(column) > 1]
     if repeated:
         raise _Bad(f"単位の表に同じ列が 2 つ以上ある: {'、'.join(repeated)}")
-    # `|` のある行でも、含むタスクの形でなければ表の後ろの補足（インラインコードのパイプなど）
+    # 列の数も含むタスクの形も合わない行は、表の後ろの補足（インラインコードのパイプなど）
     at = head.index(TASKS_COLUMN)
-    if any(len(cells) > at and _task_items(cells[at]) is not None for cells in table.rest):
+    if any(len(cells) == len(head) or (len(cells) > at and _task_items(cells[at]) is not None) for cells in table.rest):
         raise _Bad(f"単位の表の途中に、セルを区切る `|` の無い行がある（実装計画の {table.stop} 行目）")
     if not rows:
         raise _Bad("単位の表に行が無い")
