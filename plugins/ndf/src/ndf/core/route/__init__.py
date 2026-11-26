@@ -257,13 +257,17 @@ def expanded(t: Template, *, local_tests: bool = True) -> dict[str, Any]:
     return plan if local_tests else without_steps(plan, LOCAL_TEST_STEPS)
 
 
+def _plain_next(found: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+    """ステップの id → 通常の遷移先（そのステップの `next`、無ければ並びの次。末尾は終了）。"""
+    ids = [str(s["id"]) for s in found]
+    return {i: str(s["next"]) if "next" in s else after for i, s, after in zip(ids, found, [*ids[1:], END])}
+
+
 def _successors(found: Sequence[Mapping[str, Any]], drop: frozenset[str]) -> dict[str, str]:
     """外すステップの id → 代わりのルート（そのステップの `next`、無ければ並びの次。外すステップが続けば辿る）。"""
-    ids = [str(s["id"]) for s in found]
-    following = [*ids[1:], END]
-    plain = {i: str(s["next"]) if "next" in s else after for i, s, after in zip(ids, found, following)}
+    plain = _plain_next(found)
     out: dict[str, str] = {}
-    for i in (x for x in ids if x in drop):
+    for i in (x for x in plain if x in drop):
         target = plain[i]
         while target in drop and target != i:
             target = plain[target]
@@ -302,11 +306,10 @@ def may_read_pr_number(plan: Mapping[str, Any], start: str, writer: str) -> bool
     番号を読むのは、引数が `PR_NUMBER_FILE` を持つステップと、レビュー（`{{review}}`）のステップである。プランに無い
     `start` は、読みうるとみなす。
     """
-    ids = [str(s["id"]) for s in plan["steps"]]
-    if start not in ids:
+    steps = {str(s["id"]): s for s in plan["steps"]}
+    if start not in steps:
         return True
-    steps = dict(zip(ids, plan["steps"]))
-    following = dict(zip(ids, [*ids[1:], END]))
+    plain = _plain_next(plan["steps"])
     seen, todo = {writer}, [start]
     while todo:
         sid = todo.pop()
@@ -317,7 +320,7 @@ def may_read_pr_number(plan: Mapping[str, Any], start: str, writer: str) -> bool
         text = json.dumps(step, ensure_ascii=False)
         if PR_NUMBER_FILE in text or "{{review}}" in text:
             return True
-        todo.append(step["next"] if "next" in step else following[sid])
+        todo.append(plain[sid])
         if "on_fail" in step:
             todo.append(step["on_fail"])
         for key in TARGET_TABLE_KEYS:
