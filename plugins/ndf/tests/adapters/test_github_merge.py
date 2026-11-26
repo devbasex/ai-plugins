@@ -226,7 +226,7 @@ def _a_queue_state_stop_leaves_the_queue_only_when_queued(in_queue, dequeued):
 
 
 def _a_queue_method_refusal_keeps_a_queued_pr_in_the_queue(verified):
-    """キューから外すのは直前の照合の停止だけ。方式の違いの断りは、キューにある PR を外さない。"""
+    """キューから外すのは直前の確かめの停止だけ。方式の違いの断りは、キューにある PR を外さない。"""
     wire = Wire(queue=_queue_data(in_queue=True), put=_queue_refusal())
     out = _hub(wire).merge(7, expect_head=HEAD, method="merge", require_method=True, expect=_expect() if verified else None)
     assert (out.merged, out.kind) == (False, "refused")

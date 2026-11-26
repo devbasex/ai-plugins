@@ -287,7 +287,7 @@ def _held_target(shown: dict) -> Optional[merge_approval.MergeTarget]:
     """承認の対象のファイルの中身（`_presented` が書く形）から読んだ承認の対象。形が違えば None。"""
     try:
         return merge_approval.MergeTarget(str(shown["repo"]), int(shown["number"]), str(shown["base"]), str(shown["head"]))
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError):  # noqa: NDF401 ファイル: 形の違う中身は承認の対象が無いとして呼び手が扱う
         return None
 
 
@@ -496,7 +496,7 @@ def _refused_answer(detail: str, number: Optional[int] = None) -> dict:
     return result.stopped(TOOL, "refused", detail, items=_pr_item_list(number) if number is not None else [])
 
 
-def _answered(args: argparse.Namespace) -> tuple[Optional[tuple[dict, dict]], Optional[dict]]:
+def _answer_with_shown(args: argparse.Namespace) -> tuple[Optional[tuple[dict, dict]], Optional[dict]]:
     """回答の記録と、その回答先の提示（承認の対象のファイルの中身）。利用者の今の提示への回答でなければ、断る結果。"""
     record = _read_json(args.answer_record)
     if record is None:
@@ -560,7 +560,7 @@ def _answer(args: argparse.Namespace) -> dict:
     書くのは、回答した者が利用者（`human`）で、記録の提示の識別子が提示のファイルの識別子と同じで、提示した承認の対象と
     「本番へ反映されるか」が今の PR と同じときだけで、担い手はいつも `user` である。端末から直に打っても、回答の記録が無ければ書かない（決定 7）。
     """
-    answered, refused = _answered(args)
+    answered, refused = _answer_with_shown(args)
     if answered is None:
         return refused
     record, shown = answered

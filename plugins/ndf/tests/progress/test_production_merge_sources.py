@@ -1,4 +1,4 @@
-"""マージ先の設定の取得元リポジトリの照合と本文の判定を、`ndf ci merge`・承認の対象の読み取り・MVV 判定の対象で確かめる（#4409）。"""
+"""マージ先の設定の取得元リポジトリの確かめと本文の判定を、`ndf ci merge`・承認の対象の読み取り・MVV 判定の対象で確かめる（#4409）。"""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def test_github_observe_reads_production_by_the_source_repo_and_the_text(
 ) -> None:
     from ndf.progress.gate import answering
 
-    # 承認資料の置き場は見ない（資料の無い質問と同じ）
+    # 承認資料の保存先は見ない（資料の無い質問と同じ）
     monkeypatch.setattr(answering, "replace", lambda q, **_: q)
     monkeypatch.setattr(answering, "material_path", lambda root, q: tmp_path / "none.md")
     hub = _hub(base, text, file_repo)
