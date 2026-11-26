@@ -2,9 +2,11 @@
 
 ## 概要
 
-**承認ゲートで示す承認資料と質問の文は、承認ゲートより前にある読み手役のステップ（種類 `reading`）が用意し、読み手役に読ませて記録する。** 読み手役は、文書を書いた経緯を知らずに、想定した読み手の立場で文書を読む AI である。このステップでは `ndf document-rebuild gate` を実行する。読み手役のステップと同じ工程の承認ゲートの間に置けるのは、記録のステップ（種類 `record`。資料の提示など）だけである。
+**承認ゲートで示す承認資料と質問の文は、承認ゲートより前にある読み手役のステップ（種類 `reading`）が用意し、読み手役に読ませて記録する。** 読み手役は、文書を書いた経緯を知らずに、想定した読み手の立場で文書を読む AI である。このステップでは `ndf document-rebuild gate` を実行する。読み手役のステップは、同じ工程の承認ゲートの直前に置く。
 
-人に承認を求める担当は、資料も質問の文も書かず、読み手役も起動しない。提示の前に `ndf records reading check` で記録と突き合わせ、成功した場合に、そのコマンドが書き出した質問をそのまま出す。この担当は AI で、並列の計画（複数の開発の流れ = レーンを同時に進める仕組み）の下ではオーガナイザー、それ以外ではスプリントを進める AI（conductor）である。
+工程の承認ゲートでは、人に承認を求める担当は、資料も質問の文も書かず、読み手役も起動しない。提示の前に `ndf records reading check` で記録と突き合わせ、成功した場合に、そのコマンドが書き出した質問をそのまま出す。この担当は AI で、並列の計画（複数の開発の流れ = レーンを同時に進める仕組み）の下ではオーガナイザー、それ以外ではスプリントを進める AI（conductor）である。
+
+工程の外の承認（会話のセッションのリリースと、まとめたリリース）では、承認を求める担当が承認資料の元を用意し、承認を問う直前に `gate` を実行する。読み手役は `gate` の中で起動される（下の「まとめたリリース」）。
 
 例: 設計のステージは次の順に進む。
 
@@ -23,7 +25,7 @@
 | 読み手役の対象・渡すもの・合否・回数・直し方、worker が承認資料を書いて読ませる手順 | [document-rebuild の SKILL.md](../../plugins/ndf/skills/document-rebuild/SKILL.md#承認の前の確認) |
 | 承認を求める担当の手順、承認資料に載せる項目 | [approval-request.md](../../plugins/ndf/skills/development-workflow/references/approval-request.md#読み手役の確認) |
 | オーガナイザーの質問とまとめたリリースの手順 | [parallel.md](../../plugins/ndf/skills/development-workflow/references/parallel.md) |
-| 会話のセッションのリリースと、版上げのスプリントの承認の手順 | [release-steps.md](../../plugins/ndf/skills/release/references/release-steps.md) |
+| 会話のセッションのリリースの承認の手順 | [release-steps.md](../../plugins/ndf/skills/release/references/release-steps.md) |
 | 読み手役の worker への指示 | [document-rebuild-gate.md](../../plugins/ndf/contracts/worker/document-rebuild-gate.md) |
 | 読み手役に読ませた記録（`reading-docs.jsonl`）の行のスキーマ | [reading-docs.schema.json](../../plugins/ndf/contracts/schemas/internal/reading-docs.schema.json) |
 
@@ -31,7 +33,7 @@
 
 ## 用語
 
-「読み手役」「承認資料」「承認ゲート」「版上げの PR」「オーガナイザー」「conductor」「一時レーン」「MVV 判定」の定義は、用語集（[docs/glossary.md](../glossary.md)）にある。この文書では、次の語を次の意味で使う。
+「読み手役」「承認資料」「承認ゲート」「版上げの PR」「まとめたリリース」「オーガナイザー」「conductor」「一時レーン」「MVV 判定」の定義は、用語集（[docs/glossary.md](../glossary.md)）にある。この文書では、次の語を次の意味で使う。
 
 | 語 | 意味 |
 | --- | --- |
@@ -39,11 +41,10 @@
 | 読み手役のステップ | 工程の定義の種類 `reading` のステップ（`design-reading`・`release-reading`） |
 | 承認を求める担当 | 人に承認を尋ねる AI。並列の計画の下ではオーガナイザー、それ以外では conductor |
 | PR の本文の経路 | `--material` を渡さない実行。承認資料は PR の本文を元に作る |
-| `--material` の経路 | 承認資料のファイルを引数か工程の入力で受ける実行（会話のセッションのリリースと版上げのスプリント） |
+| `--material` の経路 | 承認資料のファイルを引数で受ける実行（会話のセッションのリリースとまとめたリリース） |
 | 確認 | gate か組み直し（`ndf document-rebuild run`）の 1 回の実行で読ませたまとまり。id を持ち、終えると完了の行が付く |
 | 残った文 | 読み手役が 2 回目の確認で「判断や作業を誤らせる文」として挙げた文（1 回目に挙げたかは問わない）と、前の確認から引き継いだ文 |
 | 変更要求（`sent_back`） | PR の題か本文を直さないと通じないときに、gate が承認を求めずに工程を止めること。承認する人が回答として返す変更要求（`request_changes`）とは別である |
-| 版上げのスプリント | モード `release-bump` のスプリント。複数のレーンのリリースを 1 本の版上げの PR にまとめる |
 
 ## 背景
 
@@ -51,7 +52,7 @@
 
 ## 対象範囲
 
-含む: 設計承認ゲートとリリース承認ゲートの承認資料と質問の文の確認、その記録と突き合わせ、版上げのスプリント、会話のセッションのリリースの承認の証跡。
+含む: 設計承認ゲートとリリース承認ゲートの承認資料と質問の文の確認、その記録と突き合わせ、まとめたリリースの承認の経路、会話のセッションのリリースの承認の証跡。
 
 含まない: 判断の質問（`ndf-ask:`）の確認（質問を出す AI が読ませる）、読み手役の合否と回数の決まり、hook の判定の条件、承認ゲートの数と位置、PR を伴わない承認。
 
@@ -68,7 +69,6 @@
 | `src/ndf/domains/records/reading.py` | 承認の質問の組み立て、2 つの記録の読み書き、`check` の突き合わせ |
 | `src/ndf/domains/records/pull_view.py` | PR の題・本文・head・変更量・コメントを 1 回の問い合わせで読み、コメントを足す（gate と `check` が使う） |
 | `src/ndf/progress/`（`stages.py`・`model.py`・`run.py`・`folding.py`・`gate/`） | 読み手役のステップを実行するか決め、設計のレビューへの戻しと待ちの出し直しを行う |
-| `src/ndf/progress/gate/bump.py` | 版上げのスプリントのステップ |
 | `src/ndf/domains/release/approval_decide.py`・`trail.py` | 会話のセッションのリリースの提示と回答を、資料のハッシュで結び付ける |
 
 依存の向きは `docrebuild` → `records.reading` → `release.forms_decide` の一方向で、`ndf.progress` は gate を子プロセスのコマンドとして実行する（`reread` が古い定義で直接実行する場合も同じ）。
@@ -79,16 +79,14 @@
 | --- | --- | --- | --- |
 | 設計のステージ | `design-reading` | `design-mvv` と `design-gate` の間 | `standard`・`legacy-refactor`・`documentation` |
 | デプロイのステージ | `release-reading` | `release-mvv` と `release-gate` の間 | すべて |
-| 版上げ | `release-reading` | `release-mvv` と `bump-present` の間 | `release-bump` |
 
 工程を進める仕組みは、次の表を上から順に調べて、読み手役のステップを実行するか決める。省略したステップには出力が無い。
 
 | 順 | 条件 | 扱い |
 | ---: | --- | --- |
 | 1 | 直前の MVV 判定が設計承認ゲートを省くと決め（下の条件）、そのゲートに待ちの記録が無い | 省略する |
-| 2 | リリース承認ゲートの前で、モードが `release-bump` | 実行する |
-| 3 | リリース承認ゲートの前で、スプリントが並列の計画のレーンの行にある（一時レーンの行を含む） | 省略する。そのリリースはまとめたリリースに入り、オーガナイザーが人に尋ねるのは版上げの PR の質問だけである |
-| 4 | ほか（レーンのスプリントの設計承認ゲートの前を含む） | 実行する |
+| 2 | リリース承認ゲートの前で、スプリントが並列の計画のレーンの行にある（一時レーンの行を含む） | 省略する。そのリリースはまとめたリリースに入り、オーガナイザーが承認を問う直前に、版上げの PR を読み手役に読ませる（下の「まとめたリリース」） |
+| 3 | ほか（レーンのスプリントの設計承認ゲートの前を含む） | 実行する |
 
 - 「MVV 判定が省くと決めた」は、直前のステップの出力 `mvv_gate` が次のすべてを満たすことである: `gate` がこれから処理する承認ゲートと同じ、`skip` が `true`、レビューの保留 `holds` が空の配列。省けるのは設計承認ゲートだけで、リリース承認ゲートは MVV 判定では省かない
 - 「待ちの記録」は、承認ゲートのステップが一度でも回答待ちになった記録である（回答の後に対象が変わって待ちへ戻した場合や `reread` を含む）。承認する人が変更要求を返して工程を最初から実行し直すと、数え直す
@@ -100,8 +98,7 @@
 | --- | --- | --- | --- |
 | `design-reading` | 作業場所のブランチの開いた PR（`--pr` があればそれ） | PR の本文のコピー | PR のコメント（gate が足す） |
 | デプロイのステージの `release-reading` | 工程の入力の `pr`（`--pr` があればそれ） | 同上 | 同上 |
-| 会話のセッションのリリース | `--pr` | `--material` のファイル | `ndf release-steps present` |
-| 版上げのスプリントの `release-reading` | 工程の入力の `pr` | 工程の入力の `material.path` のファイル | `bump-present` |
+| 会話のセッションのリリースとまとめたリリース | `--pr` | `--material` のファイル | `ndf release-steps present` |
 
 gate は PR の題と本文を書き換えない。`--material` の経路では入力のファイルも変えず、`--state-dir` の下の `material.md` を直す。
 
@@ -149,7 +146,7 @@ sequenceDiagram
 2. **承認資料の作業用のファイルを作る。** PR の本文の経路では、前の確認が記録した本文のハッシュと今の本文が同じなら、前に読ませた資料のコピーを使う。違えば本文のコピーから始める。`--material` の経路では、ファイルの最初の `提示したコミット:` の行を読み、固定した head と違えば止める（2 行目以降は読まない。行が無いか、値が 40 桁の SHA で始まらない場合も止める）
 3. **読ませるものを決める。** 下の「読ませるもの」の表による。worker が直してよいファイルもここで決める
 4. **worker に書かせて読ませる。** worker は素材のファイル `approval-facts.json`（URL・題・ベースと head・変更量・直前の MVV 判定）を使って判断の材料を書き足し、読み手役に読ませる。対象 1 件につき最大 2 回である。読ませる対象が無ければ worker を起動せず、手順 7 へ進む。この場合も、今回の確認として `reading-checks.jsonl` の行と完了の行を追記する
-5. **確かめる。** 対象ごとに、最後に読ませた後で中身が変わっていないこと、直してよいファイルの外が変わっていないことを確かめる
+5. **確かめる。** 対象ごとに、最後に読ませた後で中身が変わっていないこと、worker が直してよいファイルの外を変えていないことを確かめる。worker の起動の前からある未コミットの変更は、中身が同じなら数えない
 6. **直した設計 PR の文書を push する。** 再レビュー待ちの行を書いてから、コミットして push し（強制しない）、`ndf ci watch` で CI を待つ
 7. **PR を読み直す。** 期待する head は、手順 6 で push していなければ手順 1 で固定した head、push していれば gate が push したコミットである。head が期待と違うか、題か本文が手順 1 から変わっていれば、止める
 8. **変更要求にするか、コメントを足す。** 変更要求の条件に当たれば止まる。当たらず、PR の本文の経路で文書を push していなければ、承認資料の最終版（残った文があれば末尾に載る）をコメントで足す。直近の 100 件に同じ中身のコメントがあれば足さない
@@ -256,44 +253,24 @@ ndf records reading check --gate <design|release> --pr <番号> [--material <フ
 1. 承認ゲートがまだ同じ回答待ちであることを確かめ、新しい質問の id の待ちに書き直す。同じトランザクションで読み手役のステップを未完了に戻す。この時点で回答が書かれていれば、何も書かず、gate も実行しない
 2. 読み手役のステップを実行し直し、今の対象の待ちの知らせを返す。1 より後は、古い質問の id への回答は断られる
 
-- 読み手役のステップの後ろに `bump-present` が残る場合は、作業を起動して待ち（`wait`）を案内する
 - `outputs.review_again` が返れば、設計のレビューから再開する
 - 読み手役のステップの無い定義で始めたスプリントでは、gate を直接実行する
 
 質問を止める hook は、承認ゲートの質問を止めた理由の文で、この `reread` を案内する。hook の判定の条件は、同じ質問の記録の有無と PR の head の一致である。
 
-### 版上げのスプリント
+### まとめたリリース
 
-オーガナイザーは版上げの PR を作らず、承認資料も作らない。次の順で版上げのスプリントが起動する。
+**まとめたリリース（複数のレーンのリリースを 1 本の版上げの PR にまとめて出すこと）は、会話のセッションのリリースと同じ経路で承認を取る。** まとめるリリースが 1 本だけでも同じである。
 
-1. 各レーンのスプリントがリリース承認ゲートに着くと、並列の計画にリリースのリクエスト（承認を求める 1 件のメッセージ）が書かれる
-2. オーガナイザーは一時レーンを足し、その順番表の行の入力を `{"kind": "release", "requests": [<キー>...]}` にする。`<キー>` はまとめるリリースのリクエストのキーである
-3. 耐久ワークフロー（`ndf lanes run`。並列の計画を進めるプログラム）がこの行を読み、`ndf progress new <名前> --mode release-bump --release-requests <キー>... --parent <レーンのステートマシンの ID>` でスプリントを作る
+1. 各レーンのスプリントがリリース承認ゲートに着くと、並列の計画にリリースのリクエスト（承認を求める 1 件のメッセージ）が書かれる。レーンのスプリントは個別の `release-reading` を省略する
+2. オーガナイザーが、版上げの PR（workflow の `assemble` が作る）と承認資料を用意する
+3. 承認を問う直前に `ndf document-rebuild gate --gate release --pr <番号> --material <承認資料>` を実行する。この中で読み手役が起動され、質問と資料が記録される
+4. `ndf records reading check` で突き合わせ、`ndf release-steps present` で提示し、記録した質問をそのまま尋ねる。回答は `ndf release-steps answer` で記録する
+5. 結果を `ndf lanes release` と `ndf lanes answered` で各レーンへ届ける
 
-| ステップ | すること |
-| --- | --- |
-| `bump-assemble` | 設定の `release.cd.workflow` の `assemble` を起動し、成功を待って、版上げの PR の本文を承認資料のファイルへコピーする。出力は `pr` と `material` |
-| `release-mvv` | リリースの MVV 判定 |
-| `release-reading` | gate を `--material` の経路で実行する |
-| `bump-present` | 確かめた資料を `ndf release-steps present` で提示する |
-| `release-gate` | 並列の計画へ種類 `bump-release` の承認のリクエストを書き、オーガナイザーの回答（`ndf answer`）を待つ |
-| `release` | 承認の後にリリースし、出したバージョンを出力 `product_version` に書く |
-| `bump-record` | `release` ステップの出力 `product_version` があれば `released`、無ければ（承認されず `release` を省略した）`rejected` と判断し、まとめたリクエストと各スプリントのレーンの行へ 1 回のトランザクションで書く |
+打つコマンドと引数は [parallel.md の「まとめたリリース」](../../plugins/ndf/skills/development-workflow/references/parallel.md#まとめたリリース) にある。
 
-- 後ろのステップは、同じ工程の済んだステップの出力（工程の `outputs` のキー）を文脈に重ねて受ける。`bump-present` は `release-reading` が直した資料を受ける
-- 承認されなければ（却下・変更要求）、`release` を実行せずに `bump-record` へ進む（定義の `on_reject`）
-- まとめるレーンのスプリントは、個別の `release-reading` を実行しない。レーンの外で PR が要る作業を一時レーンの行（`kind: sprint`）で流す場合も、並列の計画のレーンの行にあるので同じである。この省略は設計承認ゲートの前には当てない
-
-`bump-assemble` は、起動した workflow の実行の id と版上げの PR の番号を保存する。確かめる条件は時点で違う。
-
-| 時点 | 条件と扱い |
-| --- | --- |
-| 最初に | 承認の対象が `production_pr` の設定なら止まる（版上げの PR を作らない） |
-| 保存した PR がある | その PR が開いていれば使う。閉じていれば保存を捨てて、下の起動からやり直す |
-| `assemble` を起動する前（保存が無い） | 開いている版上げの PR が既にあれば止まる |
-| 実行の id だけを保存している | 起動し直さずに、同じ実行を待つ。自分の実行が作った PR は停止の理由にしない |
-| `assemble` が成功で終わらない | 保存を消して止まる（実行し直すと起動し直す）。待ちの上限を超えた場合は保存を残す |
-| `assemble` の成功の後 | 開いている版上げの PR が 1 件でなければ、保存を消して止まる。1 件ならその番号を保存する |
+要求の受け入れ条件 4（リリース承認の資料と質問の文を工程のステップで読ませ、承認を問う直前には読み手役を起動しない）は、まとめたリリースでは満たさない。読み手役は承認を問う直前に起動される。版上げの PR・承認資料・質問を工程で自動で用意する手順は作っていない。https://github.com/devbasex/ai-plugins/issues/4564 で作る。
 
 ### 会話のセッションのリリースの証跡
 
@@ -314,7 +291,6 @@ ndf records reading check --gate <design|release> --pr <番号> [--material <フ
 | `answer` | `--by user` は `--material-sha256` が最新の提示と一致することを求める。`--by mvv` はこの引数を受けない |
 | `approval-state` | `merge` と同じ条件の判定を、何も書かずに読む |
 | `pull-checks` | 版上げの PR に含まれる各 PR の最新の CI の結果を取得して出力する。版上げの PR を作った後に対象の PR が増えていれば停止する |
-| `open-releases` | 本番ブランチ宛ての開いている版上げの PR の番号を返す |
 
 ## データ・設定
 
@@ -350,7 +326,7 @@ ndf document-rebuild gate --gate <design|release> [--pr <番号>] [--material <�
 | 設計 PR の文書が、固定した head か作業場所で通常ファイルでない | `stopped`（`precondition`） |
 | `--material` のファイルを読めない、`提示したコミット:` の行が無いか head と違う | `stopped`（`precondition`） |
 | 読み手役を起動できない、worker が `ok` 以外で終えた | `stopped`。記録は書かない |
-| 確かめの記録の欠け、読ませた後の中身の変化、直してよいファイルの外の変更、worker による `提示したコミット:` の行の変更 | `stopped`（`incomplete`。`gaps`） |
+| 確かめの記録の欠け、読ませた後の中身の変化、worker による直してよいファイルの外の変更、worker による `提示したコミット:` の行の変更 | `stopped`（`incomplete`。`gaps`） |
 | 読ませている間の head・題・本文の変化、push の失敗 | `stopped`（`precondition`） |
 | 直した文書の CI の失敗 | `stopped`（`check_failed`）。再レビュー待ちの行は残る |
 | 変更要求 | `stopped`（`precondition`） |
@@ -367,7 +343,7 @@ ndf document-rebuild gate --gate <design|release> [--pr <番号>] [--material <�
 
 | # | 条件 |
 | --- | --- |
-| I1 | 承認ゲートの質問と資料の読み手役は gate だけが起動し、承認を求める担当は起動しない |
+| I1 | 承認ゲートの質問と資料の読み手役は gate の中だけで起動し、承認を求める担当は自分で起動しない |
 | I2 | 読み手役を起動できなければ、「読ませていない」まま承認へ進まない |
 | I3 | `reading-checks.jsonl` には、読み直した時点で head が固定した値のままで、題と本文も同じ確認だけを書く |
 | I4 | 読み手役の指摘で push した文書のコミットは、設計のレビューを通るまで承認の記録を持たない |
@@ -382,13 +358,11 @@ ndf document-rebuild gate --gate <design|release> [--pr <番号>] [--material <�
 | gate を `ndf document-rebuild` のサブコマンドにし、手順を `document-rebuild` の Skill に置く | 読み手役の決まりと worker の起動の部品が 1 か所にある |
 | 読ませたものを中身のハッシュごとに追記する | PR の本文だけを直すと head が動かないので、head では変化を見分けられない |
 | PR の本文の経路では承認資料を PR のコメントで足し、題と本文の直しは工程を止めて求める | ほかの人の編集を上書きしない |
-| 版上げの承認資料は、版上げのスプリントの工程が作る | 承認資料を作る作業で、オーガナイザーの文脈を使わない |
 
 ### 分かっている制約
 
 | 制約 | 内容 |
 | --- | --- |
-| 版上げのスプリントのリリース記録の PR | `ndf progress bump-record` は、リリース記録の PR の値（`release_pr`）に版上げの PR の番号を記録する。workflow でリリースする形では、版上げの PR はリリース記録を持たず、記録は含めた PR の各々にある。コードで確認した内容で、実行では確かめていない |
 | 回答の前のコメントの変更 | `check` の後から回答までに承認資料のコメントが編集・削除されても、回答を適用する前の確かめは見つけない。この確かめは head・PR の本文と題・`gate-materials/` の資料を比べ、コメントを読まない |
 | 閉じた PR のコピーの確認の上限 | 引数で渡していない PR の状態は、GitHub の 1 回の取得（100 件）の、渡した PR で埋まらない残りの件数だけを、番号の小さい順に読む。REST へ切り替えたときは読まない。読まなかった PR のコピーは残る |
 | 記録が事実か | 読み手役に本当に読ませたかは、記録からは分からない |
@@ -402,12 +376,12 @@ ndf document-rebuild gate --gate <design|release> [--pr <番号>] [--material <�
 | gate が資料と質問を読ませて記録する。変わった部分だけを読ませる。読み手役を起動できなければ止まる。設計のレビューへの戻しと変更要求。残った文の引き継ぎとコメントの追記 | `domains/docrebuild/test_docrebuild_gate.py` |
 | 組み直しで読ませた文書が記録に残り、`not_run` で止まる | `domains/docrebuild/test_docrebuild_run.py`・`test_docrebuild_checked.py` |
 | 質問の決まった形、読ませた行の選び方、`check` が本文・題・コメントの変化を見つける | `domains/records/test_reading_docs.py`・`test_reading.py` |
-| 工程の定義の順序、読み手役のステップを省略する条件、前のステップの出力の受け渡し | `progress/test_definition.py`・`progress/test_run.py` |
-| 本文と題の変化で待ちへ戻る、`reread`、版上げのステップ | `progress/gate/test_gate_answer.py`・`test_gate_reread_direct.py`・`test_gate_bump.py` |
+| 工程の定義の順序、読み手役のステップを省略する条件 | `progress/test_definition.py`・`progress/test_run.py` |
+| 本文と題の変化で待ちへ戻る、`reread` | `progress/gate/test_gate_answer.py`・`test_gate_reread_direct.py` |
 | 提示と回答が資料のハッシュで結び付く | `domains/release/test_release_approval.py` |
 | 閉じた PR の承認資料のコピーを消し、ほかを残す | `domains/worktree/test_worktree_merged.py` |
 
-実行環境での確認（この文書を書いた時点では未実施）: 設計のプランとリリースを 1 回ずつ流し、承認ゲートで人に尋ねる直前に読み手役が起動されず、hook が質問を止めないことを実行の記録で確かめる。
+実行環境での確認（この文書を書いた時点では未実施）: 設計のプランと、並列の計画に入らない 1 つのスプリントのリリースを 1 回ずつ流し、承認ゲートで人に尋ねる直前に読み手役が起動されず、hook が質問を止めないことを実行の記録で確かめる。
 
 ## 関連リンク
 
