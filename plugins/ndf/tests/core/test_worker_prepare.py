@@ -13,7 +13,7 @@ import pytest
 
 from ndf import identity
 from ndf.contracts import causes, worker_paths
-from ndf.core import durable_locks, worker, worker_append, worker_write
+from ndf.core import durable_locks, worker, worker_append
 
 
 def _run(capsys, *argv: str) -> tuple[int, dict]:
@@ -650,8 +650,8 @@ def test_write_refuses_the_same_op_with_another_body(tmp_path, capsys, monkeypat
 @contextlib.contextmanager
 def _another_write(path: Path):
     """別の書き込みが `path` の書き先ごとのロックを排他で持つ。"""
-    with worker_write.area(worker_write.target(str(path))) as private:
-        fd = worker_paths.open_lock(private, worker_write.LOCK_FILE)
+    with worker_append.area(worker_append.write_target(str(path))) as private:
+        fd = worker_paths.open_lock(private, worker_append.WRITE_LOCK_FILE)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             yield
@@ -660,7 +660,8 @@ def _another_write(path: Path):
 
 
 def _state_with(tmp_path, monkeypatch, *names: str) -> list[Path]:
-    state = tmp_path / "state"
+    # 状態の保存先（XDG_STATE_HOME の tmp_path / "state"）と別のディレクトリにする
+    state = tmp_path / "result"
     state.mkdir()
     for name in names:
         (state / name).write_text("1 行目\n", encoding="utf-8")
@@ -691,11 +692,11 @@ def test_write_keeps_the_records_out_of_the_result_dir(tmp_path, capsys, monkeyp
     (material,) = _state_with(tmp_path, monkeypatch, "material.md")
     _write(capsys, monkeypatch, material, "2 行目\n", "--append", "--op", "a1")
     assert sorted(p.name for p in material.parent.iterdir()) == ["material.md"]
-    target = worker_write.target(str(material))
-    with worker_write.area(target) as private:
+    target = worker_append.write_target(str(material))
+    with worker_append.area(target) as private:
         assert any(p.name.startswith("op-") for p in private.path.iterdir())
-    worker_write.clear(target.expected)
-    assert not (identity.load().state_dir / worker_write.AREA_DIR / f"{target.expected[0]}-{target.expected[1]}").exists()
+    worker_append.clear_records(target.expected)
+    assert not (identity.load().state_dir / worker_append.AREA_DIR / f"{target.expected[0]}-{target.expected[1]}").exists()
 
 
 def test_write_redoes_an_op_stopped_before_the_body_was_published(tmp_path, capsys, monkeypatch):

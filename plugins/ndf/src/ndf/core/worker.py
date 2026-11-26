@@ -70,9 +70,10 @@ from ndf import cli, identity
 from ndf.adapters import claude, git
 from ndf.contracts import causes, exit_codes, facts, limits, result, worker_kinds, worker_paths, writing
 from ndf.contracts.exit_codes import OK
-from ndf.core import durable_locks, worker_append, worker_write
+from ndf.core import durable_locks, worker_append
 from ndf.core.plan import model, runner
 from ndf.core.plan.records import PROGRESS_FILE
+from ndf.core.worker_append import WorkerError, check_held
 from ndf.core.worker_outcome import outcome_of, require_outputs
 
 log = logging.getLogger(__name__)
@@ -173,15 +174,6 @@ RECORD_PROMPT = (
 
 # 報告の見出し。`collect` は行全体がこの見出しの最後の行から末尾までを返す（`## 作業の報告の補足` は選ばない）
 REPORT_HEADING = re.compile(r"^## 作業の報告[ \t]*\r?$", re.MULTILINE)
-
-
-class WorkerError(Exception):
-    """受け渡しの前提が無い・呼び出しの誤り。`kind` は停止理由の種類。"""
-
-    def __init__(self, kind: str, detail: str) -> None:
-        super().__init__(detail)
-        self.kind = kind
-        self.detail = detail
 
 
 # --- 規則文 -----------------------------------------------------------------------------------
@@ -720,7 +712,7 @@ def _cmd_run(a: argparse.Namespace) -> int:
         try:
             done, report = _deliver(handoff, system_prompt(handoff.kind, handoff.state_dir, root / SKILLS_DIR, handoff.sources), root, wd)
         finally:
-            worker_write.clear(worker_paths.dir_id(wd))  # `ndf worker write` の済んだ操作の記録は、この起動の間だけ使う
+            worker_append.clear_records(worker_paths.dir_id(wd))  # `ndf worker write` の済んだ操作の記録は、この起動の間だけ使う
     metrics: dict[str, Any] = {"attempts": done.attempts}
     if handoff.kind in RECORD_KINDS and done.cause is None:
         metrics[SEARCH_RECORD] = search_record(report)
@@ -852,26 +844,12 @@ def _cmd_prepare(a: argparse.Namespace) -> int:
     return result.emit(result.result(TOOL, OK, summary, items, {"paths": shown}))
 
 
-def _check_held(wd: worker_paths.WorkDir, doing: str) -> None:
-    """worker の中なら `wd` を `ndf worker run` が開いた保存先と、`ndf contracts emit --out` と同じ識別子で突き合わせる（`held_dir_id`）。
-
-    違えば `WorkerError`（precondition）。共有の保存先の名前を差し替えられても、起動時に確かめた保存先の外へ書かない。
-    """
-    expected = worker_paths.held_dir_id(wd.path)
-    if expected is None:
-        return
-    try:
-        worker_paths.check_dir_id(wd, expected)
-    except worker_paths.EntryUnsafe:
-        raise WorkerError("precondition", f"{wd.path} で{doing}: 起動時に確かめた保存先と違う（差し替えられた）") from None
-
-
 def _cmd_append(a: argparse.Namespace) -> int:
     """標準入力の本文を報告の末尾へ足す。`--done` なら続けて完了マーカーを作る（報告を書けなければ作らない。排他は `worker_append`）。"""
     paths = _report_paths(a.report)
     body = sys.stdin.read()
     with _workdir(paths, "報告を書けない") as wd:
-        _check_held(wd, "報告を書けない")
+        check_held(wd, "報告を書けない")
         try:
             found = worker_append.append(wd, paths, body, done=a.done)
         except durable_locks.StoreInUse as exc:
@@ -885,7 +863,7 @@ def _cmd_append(a: argparse.Namespace) -> int:
 def _cmd_draft(a: argparse.Namespace) -> int:
     """標準入力の本文を PR 本文の下書き（`pr_body_draft`）として書く。
 
-    保存先はリンクをたどらずに開き（`open_workdir`）、worker の中なら `ndf worker run` が開いた保存先と突き合わせ（`_check_held`）、
+    保存先はリンクをたどらずに開き（`open_workdir`）、worker の中なら `ndf worker run` が開いた保存先と突き合わせ（`check_held`）、
     下書きの保存先（`PR_BODY_DRAFT` の親）は開いた記述子から開いて（作って）書く。名前を根から解き直さないので、突き合わせの
     後に保存先の名前を差し替えられても、起動時に確かめた保存先の外へ書かない。
     """
@@ -893,7 +871,7 @@ def _cmd_draft(a: argparse.Namespace) -> int:
     draft = pr_body_draft(Path(a.state_dir).absolute())
     try:
         with worker_paths.open_workdir(draft.parent.parent) as wd:
-            _check_held(wd, "PR 本文の下書きを書けない")
+            check_held(wd, "PR 本文の下書きを書けない")
             with worker_paths.open_subdir(wd, PR_BODY_DRAFT.parent.name, create=True) as sub:
                 worker_paths.write_file(sub, PR_BODY_DRAFT.name, body)
     except worker_paths.EntryError as exc:
@@ -901,28 +879,6 @@ def _cmd_draft(a: argparse.Namespace) -> int:
     except OSError as exc:  # 利用者の入力: 作れない・書けない保存先は呼び出しの誤り
         raise WorkerError("invalid", f"PR 本文の下書き {draft} を書けない: {exc.strerror or exc}") from None
     return result.emit(result.result(TOOL, OK, f"PR 本文の下書き {draft} を書いた", [{"kind": "draft", "path": str(draft)}]))
-
-
-def _cmd_write(a: argparse.Namespace) -> int:
-    """標準入力の本文で、`ndf worker run` が渡した保存先の配下の `--path` のファイルを書く（`worker_write`。#4590）。"""
-    body = sys.stdin.read()
-    try:
-        to = worker_write.target(a.path)
-        try:
-            wrote = worker_write.write(to, body, a.mode, a.op)
-        except worker_paths.EntryError as exc:
-            raise WorkerError("invalid", f"ファイル {to.path} を書けない: {exc}") from None
-        except durable_locks.StoreInUse as exc:
-            raise WorkerError(exc.kind, f"ファイル {to.path} を書けない: {exc}") from None
-        except OSError as exc:  # 利用者の入力: 無い・書けない保存先は呼び出しの誤り
-            raise WorkerError("invalid", f"ファイル {to.path} を書けない: {exc.strerror or exc}") from None
-    except worker_write.WriteRefused as exc:
-        raise WorkerError(exc.kind, exc.detail) from None
-    how = worker_write.MODES[a.mode]
-    summary = (
-        f"ファイル {to.path} を書いた（{how}）" if wrote else f"ファイル {to.path} への操作 {a.op} は済んでいた（{how}。書き直していない）"
-    )
-    return result.emit(result.result(TOOL, OK, summary))
 
 
 def _cmd_collect(a: argparse.Namespace) -> int:
@@ -1000,39 +956,7 @@ def _add_draft(sub: Any) -> None:
     dr = sub.add_parser("draft", help="標準入力の本文を PR 本文の下書きとして書く")
     dr.add_argument("--state-dir", required=True)
     dr.set_defaults(fn=_cmd_draft)
-
-
-# `ndf worker write --help` の説明。書き方の詳細は規則文に載せずここに置く（全 worker の起動に載る token を増やさない）
-WRITE_HELP = """\
-標準入力の本文で、worker に渡した保存先（.git の下）の配下のファイルを書く（Write・Edit の Tool の代わり）。
-
-  全文の置き換え:  ndf worker write --path <ファイル> <<'NDF_BODY_7f3a'
-  末尾への追記:    ndf worker write --path <ファイル> --append --op <識別子> <<'NDF_BODY_7f3a'
-  一部の置き換え:  ndf worker write --path <ファイル> --edit --op <識別子> <<'NDF_BODY_7f3a'
-                   [{"old": "<1 か所に決まる元の文>", "new": "<直した文>"}]
-
-全文を渡すのは作り直すときだけにし、書き足すなら --append、一部を直すなら --edit で差分だけを渡す。
---op は操作ごとに新しい語にする。応答を受け取れずに同じ --op と本文で打ち直しても、重ねて書かずに済んだと返す。
-区切り語は引用符で囲む（囲まないと本文の $(...)・$変数・バッククォートがシェルに解釈される）。
-PR 本文・Issue から写した文を含むことがあるので、本文に区切り語だけの行が無い語を選ぶ。
-"""
-
-
-def _add_write(sub: Any) -> None:
-    wr = sub.add_parser(
-        "write",
-        help="標準入力の本文で保存先の配下のファイルを書く（Write・Edit の Tool の代わり）",
-        description=WRITE_HELP,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    wr.add_argument("--path", required=True)
-    how = wr.add_mutually_exclusive_group()
-    how.add_argument("--append", dest="mode", action="store_const", const="append", help="末尾へ足す")
-    how.add_argument(
-        "--edit", dest="mode", action="store_const", const="edit", help='標準入力の [{"old": ..., "new": ...}] で 1 か所ずつ置き換える'
-    )
-    wr.add_argument("--op", help="--append・--edit の操作の識別子（打ち直しても重ねて書かない）")
-    wr.set_defaults(mode="replace", fn=_cmd_write)
+    worker_append.add_write(sub, TOOL)  # `ndf worker write`（#4590）
 
 
 def _add_collect(sub: Any) -> None:
@@ -1042,18 +966,7 @@ def _add_collect(sub: Any) -> None:
 
 
 # サブコマンドの解析器を足す関数（`ndf worker <サブコマンド>` の並び）
-ADDERS = (
-    _add_run,
-    _add_prepare,
-    _add_append,
-    _add_draft,
-    _add_write,
-    _add_collect,
-    _add_closing,
-    _add_plan_edit,
-    _add_plan_edits,
-    _add_attention,
-)
+ADDERS = (_add_run, _add_prepare, _add_append, _add_draft, _add_collect, _add_closing, _add_plan_edit, _add_plan_edits, _add_attention)
 
 
 def _parser() -> argparse.ArgumentParser:

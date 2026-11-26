@@ -218,6 +218,43 @@
         "--cwd",
         "--state-dir"
       ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "write",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--path": {
+          "type": "string"
+        },
+        "--append": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": "overwrite",
+          "description": "末尾へ足す"
+        },
+        "--edit": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": "overwrite",
+          "description": "標準入力の [{\"old\": ..., \"new\": ...}] で 1 か所ずつ置き換える"
+        },
+        "--op": {
+          "type": "string",
+          "description": "--append・--edit の操作の識別子（打ち直しても重ねて書かない）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--path"
+      ]
     }
   ]
 }
