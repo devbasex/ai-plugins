@@ -2,7 +2,7 @@
 
 [設計文書](./issue-4566-design.md)の「構成要素」を、ファイルと関数の単位まで下ろした文書である。受け入れ条件の番号は[要求仕様](./issue-4566-requirements.md)を指す。パスは、特に書かなければ `plugins/ndf/` からの相対である。
 
-**この文書は、#4566 の実装の後に実現する仕様を定める。** 既存のコードを変える所は、表の「種類」の列の「変更」と、各セクションの説明で示す。
+**この文書は、Issue #4566（ https://github.com/devbasex/ai-plugins/issues/4566 ）の実装が満たす仕様を定める。** 既存のコードを変える所は、表の「種類」の列の「変更」と、各セクションの説明で示す。
 
 ## 地図
 
@@ -202,10 +202,14 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
   - 異常: `logs/` がシンボリックリンクか、所有者が実行ユーザーでない、または権限を直せなければ、書かずに停止する
   - `run_suites` は、suite の出力をこの関数でだけ書く。担当の出力のログも同じ `logs/` に入るので、`workspace` の作成と再開で `logs/` を 0700 にする
 - `fix_excerpt`
-  - 事後条件: 行の中身は、suite の名前、終了コードか時間切れの別、コマンド、出力の末尾である。コマンドと出力の全文に `ndf.adapters.run_log.redact` を掛け、行ごとに `ndf.domains.project.secret.redact` を掛け、`PRIVATE KEY` を含む `-----BEGIN` の行から `-----END` の行まで（無ければ末尾まで）を伏せてから切る。コマンドは先頭の 500 文字、出力は末尾の 100 行かつ末尾の 8,000 文字までにする。上限は定数 `COMMAND_CHARS`・`OUTPUT_LINES`・`OUTPUT_CHARS`（`local_gate.py`）に置く
+  - 事後条件: 行の中身は、suite の名前、終了コードか時間切れの別、コマンド、出力の末尾である。伏せてから切る。順は下のとおりである。コマンドは先頭の 500 文字、出力は末尾の 100 行かつ末尾の 8,000 文字までにする。上限は定数 `COMMAND_CHARS`・`OUTPUT_LINES`・`OUTPUT_CHARS`（`local_gate.py`）に置く
+    1. コマンドと出力の全文に `ndf.adapters.run_log.redact` を掛ける
+    2. 行ごとに `ndf.domains.project.secret.redact` を掛ける
+    3. `PRIVATE KEY` を含む `-----BEGIN` の行から `-----END` の行まで（無ければ末尾まで）を伏せる
+    4. 上限で切る
 - `sweep_verify_trees`
   - 事前条件: 排他ロックを持っている
-  - 事後条件: 状態の `verify_trees` に記録があるパスだけを対象にする。git worktree lock の理由の文字列が NDF の付けたものでなければ（利用者が掛けた lock なら）残す。git の作業場所として登録の無いディレクトリも残す
+  - 事後条件: 状態の `verify_trees` に記録があるパスだけを対象にする。git worktree lock の状態で扱いを分ける。lock が無いもの（作成の後、lock を掛ける前に中断した）と、理由の文字列が NDF の付けたものは取り除く。理由の文字列がほかのもの（利用者が掛けた lock）は残す。`worktree.lock_of` は lock が無ければ None を返す。git の作業場所として登録の無いディレクトリも残す
 - `run_suites`
   - 事後条件: テストの後、作業場所の `HEAD` が対象のコミットのままで、追跡ファイルに変更が無い
   - 副作用: 設定のコマンドの起動（`slots.run_command`）。引数 `suites` には、対象の SHA の判定に使った設定の宣言（`means.declarations`）を渡す。重い処理かの判定が、検証用の作業場所の置き場所に左右されないようにする
@@ -216,11 +220,11 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 
 | 順 | 条件 | 結果 |
 | --- | --- | --- |
-| 1 | リモートの先頭を `worktree.fetch_tips` で取得する。先頭が `HEAD` の祖先（同じを含む）でなければ、取得した先頭を `worktree.sync_fetched` へ渡して載せ直し、衝突する。祖先なら載せ直さず、`HEAD` の SHA を保つ。以後の順は、ここで取得した先頭を「取り込んだ先頭」として使う。直前の周が順 7 で取得していれば、その先頭を使い、取得し直さない | 衝突は `base_conflict` |
+| 1 | リモートの先頭を `worktree.fetch_tips` で取得する。取得した先頭が `HEAD` の祖先（同じ SHA を含む）なら載せ直さず、`HEAD` の SHA を保つ。祖先でなければ、取得した先頭を `worktree.sync_fetched` へ渡して載せ直す。以後の順は、ここで取得した先頭を「取り込んだ先頭」として使う。直前の周が順 7 で取得していれば、その先頭を使い、取得し直さない | 載せ直しが衝突したら `base_conflict` |
 | 2 | 取り込んだ先頭の設定の手段が手元のテストでない | `precondition` |
 | 3 | `HEAD` が取り込んだ先頭と同じ（送るコミットが無い） | テストを打たずに合格（`tests: skipped`） |
 | 4 | 取り込んだ先頭から `HEAD` までの変更（`git diff --name-only --no-renames -z`）が保護するファイルに当たる | `refused` |
-| 5 | `HEAD`・識別値・`PATH` の組が合格の記録に無い | テスト全体。在れば打たない |
+| 5 | テスト全体が要るかを調べる | `HEAD`・識別値・`PATH` の組が合格の記録に無ければテスト全体を打つ。記録にあれば打たずに順 6 へ進む |
 | 6 | 合格 | `git push <リモート> <SHA>:refs/heads/<ブランチ>`。受け付ければ終了 |
 | 7 | push の拒否で、取り直したリモートの先頭が変わっていて、周が残る | 次の周 |
 | 8 | push の拒否で、ほか | `push_rejected` |
@@ -235,7 +239,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 
 - どこかの階層が `.ndf`
 - 名前が、決まった名前の一覧に当たる（`fnmatch`）
-- テストのコマンドを分けた単語をパスとして正規化し、そのパスか、その親のパス（ディレクトリがファイルやリンクに置き換わった場合）に当たる。ツリーに無いパスも当てる。パスがシンボリックリンクなら、リンクとリンク先の両方が当たる
+- テストのコマンドを分けた単語をパスとして正規化し、そのパスか、その親のパス（ディレクトリがファイルやリンクに置き換わった場合）に当たる。ツリーに無いパスも当たる。パスがシンボリックリンクなら、リンクとリンク先の両方が当たる
 - `search`（`PATH` の相対の要素。空と `.` はルート）のどれかの下の、`/` を含まない単語と同じ名前に当たる。`search` は `protection_at` が、テストを打つ環境の `PATH` から作る
 - `test.protected_files` の指定の中（`scoped.in_scope`）
 
@@ -287,8 +291,8 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `verify_tree` | 取り除けない | ファイルの権限など | 終了時 | 理由を標準エラーへ出して続ける | 結果は変えない | 記録に残し、次の実行か `release` が片付ける |
 | `run_suites` | プロセスを起動できない | シェルや作業場所が使えない | 起動の `OSError` | 残りの suite を打たずに止める | `precondition`。suite の名前とエラーの種別 | 送らない。環境を直して打ち直す |
 | `run_local_gate` | 取り込んだ先頭だけのテストが 126・127 を返す | テストランナーが無い、実行の権限が無い | 「処理の手順」の順 9・11 | 止める（直さない） | `precondition`。suite の名前と終了コード | 送らない。コマンドか環境を直して打ち直す |
-| `run_suites` | suite が落ちる（非ゼロ。126・127 を含む）、1 本の上限を超える | テストの失敗 | 終了コード、`TimeoutExpired` | 呼び出し元へ返す | 直しの後も落ちれば `test_failed` | コミットは作業場所に残る |
-| `run_suites` | 累計の時間が上限に達する。または、残り時間が suite 1 本の上限より短いので残り時間を上限にした実行が、それを超える | テストが重い | 起動の前と `TimeoutExpired` | 止める | `fix_limit`。停止の理由の文に、使った累計、上限の値、キー名 `test.local_total_minutes` | 打ち直すと累計は 0 から |
+| `run_suites` | suite が落ちる（非ゼロ。126・127 を含む）、1 本の上限を超える | テストの失敗 | 終了コード、`TimeoutExpired` | 呼び出し元へ返す | 直しの後も落ちれば `test_failed` | コミットは担当が書く作業場所（`rf<PR>/work`）に残る |
+| `run_suites` | 累計の時間が上限に達する。または、累計の残りが suite 1 つの上限より短いときは残りを上限にして打ち、その実行が上限を超える | テストが重い | 起動の前と `TimeoutExpired` | 止める | `fix_limit`。停止の理由の文に、使った累計、上限の値、キー名 `test.local_total_minutes` | 打ち直すと累計は 0 から |
 | `write_private_log` | `logs/` の権限を直せない、所有者が違う、シンボリックリンク | 保存先の権限や置き換え | ログを書く前 | 止める | `precondition`。保存先のパス | 出力を書かず、送らない。保存先を直して打ち直す |
 | `run_suites` | 追跡ファイルか `HEAD` が変わる | テストが書き換える | テストの後 | 止める | `precondition`。書き換わったファイル | 送らない |
 | `run_suites` | テストの実行枠が空くのを待ちきれない、空きメモリが足りずにテストを止める | マシンの混雑 | `slots.Stopped` | 呼び出し元へ返す | 今の停止理由のまま | 打ち直せる |
@@ -310,7 +314,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `run_local_gate` | `worktree.fetch_tips`・`worktree.sync_worktree` の同期の処理 | `core/converge/worktree.py` を読んだ | `sync_worktree` は呼ばない。内部で `fetch_tips` をもう一度打ち、リモートの先頭が同じでも `reset --hard` と `cherry-pick` を打つためである。`fetch_tips` の結果を、先頭が `HEAD` に含まれていないときだけ `sync_fetched` へ渡す。どの周も、始めに `refuse_dirty` を打つ |
 | `run_suites` | `verify.failing`・`slots.run_command` | `verify.py`・`slots.py` を読んだ | `verify.failing` は変えたファイルに対応するテストだけを打つので使わない。起動は `run_command` で、`suites=means.declarations` を渡す。省くと実行ディレクトリから設定を読み直し、`--work` の設定で補ったリポジトリでは、検証用の作業場所から同じ宣言が見つかるとは限らない |
 | `verify_tree`・`sweep_verify_trees` | `worktree.lock_review_worktree`・`lock_of`・`release`・`sweep_orphans` | 同上 | 前の 2 つを使う。`worktree.release` は lock の無い作業場所を `--force` で消さず、`worktree.sweep_orphans` はディレクトリが残っている作業場所の lock を外さない。中断で残ったものを回収できないので、片付けは新しく書く |
-| `fix_excerpt` | `run_log.redact`・`project.secret.redact` | `run_log.py`・`secret.py` を読んだ | 両方使う。前者はキーの形の一部を、後者は環境変数の値を持たない |
+| `fix_excerpt` | `run_log.redact`・`project.secret.redact` | `run_log.py`・`secret.py` を読んだ | 両方使う。`run_log.redact` は一部の形のキーを伏せられず、`secret.redact` は環境変数の値を伏せられないためである |
 | `write_private_log` | `hooks/outbox.py` の保存先の用意（0700 に直す） | `grep -rn "0o600" src/ndf` | 同じ形にする。`outbox` の関数は送信の保存先に固有なので呼ばない |
 | `hold` | `slot_pool.try_lock` | `grep -rn "FileLock" src/ndf` | 使う |
 | `protected_of` | `weight.split_commands`・`scoped.in_scope` | `testing/` を読んだ | 使う |
@@ -328,7 +332,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `run_suites` | 設定の順にすべて打つ | 累計の残りが suite の上限より小さい | 異常系の行ごと。時計と起動を差し替える |
 | `write_private_log` | ディレクトリ 0700・ファイル 0600 | umask 022、前からある 0755 と 0644 | `logs/` がシンボリックリンク |
 | `fix_excerpt` | 伏せ字の後に切る | 100 行と 8,000 文字の境、境をまたぐトークン、複数行の秘密鍵（終わりの行の有無）、短い出力は全体 | 出力が空 |
-| `sweep_verify_trees` | 記録のあるパスだけ消す | 利用者の lock は残す | 記録の無いディレクトリに触れない |
+| `sweep_verify_trees` | 記録のあるパスだけ消す | lock が無いもの、NDF の lock、利用者の lock の 3 つで扱いが分かれる | 記録の無いディレクトリに触れない |
 | `drive`・`_reused` | 同じ SHA と設定なら再利用し、`--pushed-out` を書く | 対象範囲が空 | ロック中は何も変えない |
 
 実の git の作業場所と bare のリモートは、今ある `tests/domains/crossrefactor/_drive_world.py` を使う。
@@ -354,10 +358,12 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 `follow` のステップは `parts/steps.json` に足す。引数は順にブランチ、リモート、SHA のファイルである。失敗はどれも終了コード 1 にそろえ、`exit_cause` を `precondition` にする。
 
 ```bash
-s=$(cat "$2") && [ -n "$s" ] && git fetch -q -- "$1" "refs/heads/$0" && git merge -q --ff-only "$s" && [ "$(git rev-parse HEAD)" = "$s" ] || exit 1
+s=$(cat "$2") && [ -n "$s" ] && git fetch -q -- "$1" "refs/heads/$0" && git merge -q --ff-only --no-overwrite-ignore "$s" && [ "$(git rev-parse HEAD)" = "$s" ] || exit 1
 ```
 
 2026-11-26 に一時リポジトリで打ち、終了コードは次のとおりだった。呼び出し元の worktree の `HEAD` が指定の SHA より古い場合と、一致する場合は 0 である。指定の SHA より先に進んでいる場合と、ファイルが無い場合は 1 である。
+
+`--no-overwrite-ignore` を付けるのは、利用者のファイルを守るためである。既定の `git merge --ff-only` は、git の無視の対象（`.gitignore` など）のファイルが更新先で追跡されるパスにあると、黙って上書きする。2026-11-26 に git 2.53.0 で打つと、既定では終了コード 0 で中身が置き換わり、このオプションを付けると終了コード 1 でファイルが残った。
 
 ### 異常系の処理
 
