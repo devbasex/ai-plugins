@@ -2,13 +2,17 @@
 
 本文から単位の並びか、読めない理由を返す。ファイルも git も読まない。読み方は #4369 の設計書の「単位の表の読み方」と
 「順序」にあり、決めた形でない表は行を飛ばさず `UnitsUnreadable` で止める。実装計画の見出しの語もここが持つ。
+見出し・表の範囲・コードブロックは markdown-it-py で読む（判断のモジュールは `ndf.adapters.markdown` を読めない）。
 """
 
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Mapping, Sequence
 from typing import NamedTuple, Optional
+
+from markdown_it import MarkdownIt
 
 from ndf.core.plan import inputs_decide
 
@@ -25,7 +29,7 @@ ORDER_COLUMN = "実行順"
 REQUIRED_COLUMNS = (NAME_COLUMN, TASKS_COLUMN, CRITERIA_COLUMN)
 NO_CRITERIA = "無し"
 
-_HEADING = re.compile(r"^(#{1,6})[ \t]+(.*?)[ \t]*$")
+_MARKDOWN = MarkdownIt("commonmark").enable("table")
 _NOTE = re.compile(r"（[^（）]*）|\([^()]*\)")
 _SEPARATOR = re.compile(r"[・、,]")
 _TASK_ITEM = re.compile(r"(?P<prefix>Task |T)?(?P<first>[0-9]+)(?:〜(?:Task |T)?(?P<last>[0-9]+))?")
@@ -67,13 +71,26 @@ class _Bad(Exception):
     """表の 1 か所が読めない理由。"""
 
 
-class _Line(NamedTuple):
-    """コードブロックの外の 1 行。`level` は見出しのレベル（見出しでなければ 0）、`title` は見出しの文。"""
+class _Heading(NamedTuple):
+    """ATX の見出し 1 つ。`at` は 0 始まりの行の番号。"""
 
     at: int
-    text: str
     level: int
     title: str
+
+
+class _Table(NamedTuple):
+    """表 1 つ。`rows` は (見出しの行, データ行...) のセル。"""
+
+    at: int
+    rows: list[list[str]]
+
+
+class _Doc(NamedTuple):
+    """本文の最上位（コードブロック・引用・箇条の外）の見出しと表。"""
+
+    headings: tuple[_Heading, ...]
+    tables: tuple[_Table, ...]
 
 
 class _Scope(NamedTuple):
@@ -85,44 +102,43 @@ class _Scope(NamedTuple):
     sprint: frozenset[int]
 
 
-def _lines(text: str) -> list[_Line]:
-    out = []
-    for at, line in inputs_decide.outside_fences(inputs_decide.body_lines(text)):
-        found = _HEADING.match(line)
-        out.append(_Line(at, line, len(found.group(1)), found.group(2)) if found else _Line(at, line, 0, ""))
-    return out
+def _parse(text: str) -> _Doc:
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    tokens = _MARKDOWN.parse("\n".join(lines))
+    headings: list[_Heading] = []
+    tables: list[_Table] = []
+    for i, token in enumerate(tokens):
+        if token.level != 0 or token.map is None:
+            continue
+        start, end = token.map
+        if token.type == "heading_open" and token.markup.startswith("#"):
+            headings.append(_Heading(start, int(token.tag[1:]), tokens[i + 1].content))
+        elif token.type == "table_open":
+            # 2 行目は区切りの行
+            tables.append(_Table(start, [inputs_decide.split_row(lines[at]) for at in (start, *range(start + 2, end))]))
+    return _Doc(tuple(headings), tuple(tables))
 
 
-def _unit_headings(lines: Sequence[_Line]) -> list[int]:
-    """単位の見出し（`##` 以下）の、`lines` の中の位置。"""
-    return [i for i, line in enumerate(lines) if line.level >= 2 and UNITS_HEADING in line.title]
+def _unit_headings(doc: _Doc) -> list[_Heading]:
+    """単位の見出し（`##` 以下）。"""
+    return [h for h in doc.headings if h.level >= 2 and UNITS_HEADING in h.title]
 
 
-def _section(lines: Sequence[_Line], at: int) -> Sequence[_Line]:
-    """`at` の見出しのセクション（次の同じか上のレベルの見出しの手前まで）。"""
-    level = lines[at].level
-    end = next((i for i in range(at + 1, len(lines)) if 0 < lines[i].level <= level), len(lines))
-    return lines[at + 1 : end]
+def _section(doc: _Doc, heading: _Heading) -> range:
+    """見出しのセクションの行の番号（次の同じか上のレベルの見出しの手前まで）。"""
+    end = next((h.at for h in doc.headings if h.at > heading.at and h.level <= heading.level), sys.maxsize)
+    return range(heading.at + 1, end)
 
 
-def _named_section(lines: Sequence[_Line], title: str) -> Sequence[_Line]:
+def _named_section(doc: _Doc, title: str) -> range:
     """見出しの文が `title` の最初のセクション。無ければ空。"""
-    at = next((i for i, line in enumerate(lines) if line.level >= 2 and line.title == title), None)
-    return () if at is None else _section(lines, at)
+    found = next((h for h in doc.headings if h.level >= 2 and h.title == title), None)
+    return range(0) if found is None else _section(doc, found)
 
 
-def _first_table(section: Sequence[_Line]) -> Optional[list[list[str]]]:
-    """セクションの最初の表の (見出しの行, データ行...) のセル。区切りの行を持つ表が無ければ None。"""
-    rows: list[_Line] = []
-    for line in section:
-        piped = line.text.lstrip().startswith("|")
-        if rows and (not piped or line.at != rows[-1].at + 1):
-            break
-        if piped:
-            rows.append(line)
-    if len(rows) < 2 or not inputs_decide.is_rule(rows[1].text):
-        return None
-    return [inputs_decide.split_row(line.text) for line in (rows[0], *rows[2:])]
+def _first_table(doc: _Doc, section: range) -> Optional[list[list[str]]]:
+    """セクションの最初の表の (見出しの行, データ行...) のセル。表が無ければ None。"""
+    return next((table.rows for table in doc.tables if table.at in section), None)
 
 
 def _cell_elements(cell: str) -> list[str]:
@@ -205,18 +221,22 @@ def _row_unit(row: Mapping[str, str], scope: _Scope) -> tuple[int, Unit]:
     return _order_cell(row), unit
 
 
-def _unit_rows(lines: Sequence[_Line]) -> list[dict[str, str]]:
+def _unit_rows(doc: _Doc) -> list[dict[str, str]]:
     """単位の表のデータ行を {列の名前: セル} にしたもの。足りないセルは空。"""
-    headings = _unit_headings(lines)
+    headings = _unit_headings(doc)
     if len(headings) > 1:
         raise _Bad(f"「{UNITS_HEADING}」の見出しが 2 つ以上ある")
-    table = _first_table(_section(lines, headings[0]))
+    table = _first_table(doc, _section(doc, headings[0]))
     if table is None:
         raise _Bad(f"「{UNITS_HEADING}」のセクションに表が無い")
     head, *rows = table
     lack = [column for column in REQUIRED_COLUMNS if column not in head]
     if lack:
         raise _Bad(f"単位の表に列が無い: {'、'.join(lack)}")
+    # 同じ名前の列は、行を辞書にすると後のセルが前のセルを上書きする
+    repeated = [column for column in (*REQUIRED_COLUMNS, ORDER_COLUMN) if head.count(column) > 1]
+    if repeated:
+        raise _Bad(f"単位の表に同じ列が 2 つ以上ある: {'、'.join(repeated)}")
     if not rows:
         raise _Bad("単位の表に行が無い")
     return [dict(zip(head, [*cells, *[""] * len(head)])) for cells in rows]
@@ -234,31 +254,32 @@ def _assignment_lacks(tasks: Sequence[int], found: Sequence[Unit]) -> list[str]:
     return out
 
 
-def _pre_refactoring(lines: Sequence[_Line]) -> bool:
+def _pre_refactoring(doc: _Doc) -> bool:
     """「リファクタリングの時機」の表で、実装の前の行の対象が「しない」で始まらないか。表か行が無ければ偽。"""
-    table = _first_table(_named_section(lines, TIMING_HEADING))
+    table = _first_table(doc, _named_section(doc, TIMING_HEADING))
     rows = [] if table is None else table[1:]
     return any(len(row) > 1 and row[0].startswith(BEFORE_IMPL) and not row[1].startswith(NO_TARGET) for row in rows)
 
 
-def _ordered(lines: Sequence[_Line], tasks: Sequence[int], rows: Sequence[tuple[int, Unit]], by_column: bool) -> list[Unit]:
+def _ordered(doc: _Doc, tasks: Sequence[int], rows: Sequence[tuple[int, Unit]], by_column: bool) -> list[Unit]:
     """実装計画の中の流す順。"""
     if by_column:
         return [unit for _, unit in sorted(rows, key=lambda row: row[0])]
     found = [unit for _, unit in rows]
-    if tasks and _pre_refactoring(lines):
+    if tasks and _pre_refactoring(doc):
         found.sort(key=lambda unit: tasks[0] not in unit.tasks)
     return found
 
 
 def _plan_units(plan: PlanDoc, criteria: Mapping[int, int], sprint: frozenset[int]) -> tuple[list[Unit], list[str]]:
     """実装計画 1 つの (流す順の単位, 読めない理由)。"""
-    lines = _lines(plan.text)
-    titles = (_TASK_TITLE.match(line.title) for line in _named_section(lines, TASKS_HEADING) if line.level == 3)
+    doc = _parse(plan.text)
+    section = _named_section(doc, TASKS_HEADING)
+    titles = (_TASK_TITLE.match(h.title) for h in doc.headings if h.at in section and h.level == 3)
     tasks = list(dict.fromkeys(int(m.group(1)) for m in titles if m))
     scope = _Scope(plan, tasks, criteria, sprint)
     try:
-        table = _unit_rows(lines)
+        table = _unit_rows(doc)
     except _Bad as exc:
         return [], [str(exc)]
     rows: list[tuple[int, Unit]] = []
@@ -276,12 +297,12 @@ def _plan_units(plan: PlanDoc, criteria: Mapping[int, int], sprint: frozenset[in
     # 行が欠けた状態で割り当てを数えると、読めない行のタスクが「どの単位にも無い」と重ねて出る
     if len(rows) == len(table):
         reasons += _assignment_lacks(tasks, [unit for _, unit in rows])
-    return _ordered(lines, tasks, rows, ORDER_COLUMN in table[0]), reasons
+    return _ordered(doc, tasks, rows, ORDER_COLUMN in table[0]), reasons
 
 
 def has_units(text: str) -> bool:
     """コードブロックの外に単位の見出しがあるか。"""
-    return bool(_unit_headings(_lines(text)))
+    return bool(_unit_headings(_parse(text)))
 
 
 def lineup(plans: Sequence[PlanDoc], criteria: Mapping[int, int], issues: Sequence[int]) -> tuple[Unit, ...]:

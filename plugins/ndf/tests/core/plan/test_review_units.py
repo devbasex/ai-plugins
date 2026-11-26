@@ -62,6 +62,10 @@ def _reasons(text: str, *numbers: int) -> tuple[str, ...]:
         ("```markdown\n## レビューの単位\n```\n", False),
         ("~~~\n## レビューの単位\n~~~\n", False),
         ("本文のレビューの単位\n", False),
+        ("   ## レビューの単位 ##\n", True),
+        ("  ```markdown\n## レビューの単位\n  ```\n", False),
+        ("````markdown\n```\n## レビューの単位\n```\n````\n", False),
+        ("```\n~~~\n## レビューの単位\n```\n", False),
     ],
 )
 def test_has_units_looks_for_a_heading_outside_code_blocks(text: str, found: bool) -> None:
@@ -126,6 +130,22 @@ def test_lineup_reads_only_the_first_table_of_a_deeper_section() -> None:
     assert _names(_plan(_text(table, heading="### レビューの単位"))) == ["本体"]
 
 
+@pytest.mark.parametrize(
+    "table",
+    [
+        "単位 | 含むタスク | 満たす受け入れ条件\n--- | --- | ---\nA | Task 1 | 無し\nB | Task 2 | 無し",
+        "\n".join([HEAD, "--- | --- | ---", "| A | Task 1 | 無し |", "B | Task 2 | 無し |"]),
+    ],
+)
+def test_lineup_reads_a_table_without_the_outer_pipes(table: str) -> None:
+    assert _names(_plan(_text(table))) == ["A", "B"]
+
+
+def test_lineup_reads_indented_and_closed_headings() -> None:
+    text = _text(_table(HEAD, "| A | Task 1・2 | 無し |"), heading="  ## レビューの単位 ##")
+    assert _names(_plan(text.replace("## タスク分解", "## タスク分解 ##"))) == ["A"]
+
+
 GOOD = "| A | Task 1・2 | 1 |"
 
 
@@ -153,6 +173,8 @@ GOOD = "| A | Task 1・2 | 1 |"
         (_table(HEAD, "| A | Task 1・2 | 0 |"), "0"),
         (_table(HEAD, "| A | Task 1・2 | 1〜999999999 |"), "999999999"),
         (_table(HEAD, "| A | Task 1・2 | 9:1 |"), "#9"),
+        (_table(f"{HEAD} 満たす受け入れ条件 |", "| A | Task 1・2 | 1 | 無し |"), "同じ列"),
+        (_table(f"{ORDERED} 実行順 |", "| A | 1 | Task 1・2 | 1 | 2 |"), "同じ列"),
         (_table(ORDERED, "| A |  | Task 1・2 | 1 |"), "実行順"),
         (_table(ORDERED, "| A | 0 | Task 1・2 | 1 |"), "実行順"),
         (_table(ORDERED, "| A | -1 | Task 1・2 | 1 |"), "実行順"),

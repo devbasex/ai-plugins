@@ -36,7 +36,7 @@ contracts/
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/core/plan/review_units_decide.py` | 新設 | 実装計画の本文から単位の並びか読めない理由を返す | `inputs_decide` | `Unit`・`PlanDoc`・`UnitsUnreadable` | `has_units`・`lineup`・`acceptance_args`（新設） |
+| `src/ndf/core/plan/review_units_decide.py` | 新設 | 実装計画の本文から単位の並びか読めない理由を返す | `inputs_decide`・markdown-it-py | `Unit`・`PlanDoc`・`UnitsUnreadable` | `has_units`・`lineup`・`acceptance_args`（新設） |
 | `src/ndf/core/issue_docs.py` | 変更 | 実装計画のパスから課題の番号を読む | — | モジュール | `plan_issues`（新設） |
 | `src/ndf/progress/plan_runs.py` | 新設 | 工程の呼び出しと結果の型、プランの実行の記録の読み取りを持つ | `core.plan`・`core.route` | `StageRun`・`StageResult`・`UnitsStopped` | `previous`・`from_of`・`read_report`（移動） |
 | `src/ndf/progress/issue_copies.py` | 新設 | 課題の題と本文を保存先へコピーする | `adapters.github`・`worker_paths` | モジュール | `issue_text`・`issue_values`（移動して変更） |
@@ -102,7 +102,8 @@ contracts/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `has_units`・`lineup` | `inputs_decide.outside_fences`・`split_row`・`criteria` | `inputs_decide.py` を読んだ | 使う |
+| `has_units`・`lineup` | `inputs_decide.split_row`・`criteria` | `inputs_decide.py` を読んだ | 使う |
+| `has_units`・`lineup` | markdown-it-py（見出し・表の範囲・コードブロック） | 依存の一覧と `rules.json` の `decide_forbidden_imports` | 使う（`inputs_decide.outside_fences` は行頭の囲みしか読まないので使わない） |
 | `has_units`・`lineup` | `adapters/markdown.py` の `atx_headings` | `rules.json` の `decide_forbidden_imports` | 使えない（判断のモジュールは `ndf.adapters` を import できない） |
 | `acceptance_args` | `route.launch_values` | `core/route/__init__.py` を読んだ | 使えない（条件の指定と `--no-criteria` を組まない） |
 | `plan_issues` | `issue_docs.design_issues` | `issue_docs.py` を読んだ | 同じ形の正規表現を実装計画の側に足す |
