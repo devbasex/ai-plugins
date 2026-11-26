@@ -294,7 +294,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `Protected` | 型（`covers(path) -> bool`） | `protected_decide.py` | — |
 | `Failed` | 型（落ちた suite の呼び名 `label`、終了コードか時間切れの別、コマンド、出力） | `local_gate.py` | コマンドと出力は伏せる前の値で、メモリの中だけで持つ |
 | `LocalGateConfig` | 型（`pr`・`branch`・`scope`・`max_fix`・`repo_work`・`root`・`total_seconds`） | `local_gate.py` | `total_seconds` は `test.local_total_minutes` を秒に直した値。未設定なら安全網の上限（`budget_decide.SafetyNet` の `limit_minutes`）を秒に直した値 |
-| `TestBudget` | 型（累計の上限、使った秒、suite 1 つの上限） | `local_gate.py` | suite の上限は、上限の設定ファイル `contracts/limits/test-run.test.json` の `seconds` |
+| `TestBudget` | 型（累計の上限、使った秒、suite 1 つの上限） | `local_gate.py` | suite の上限は、`test.local_total_minutes` が無ければ上限の設定ファイル `contracts/limits/test-run.test.json` の `seconds`。あれば None で、累計の残りだけを掛ける |
 | `local_passed` | 状態ファイルのキー（`{sha, digest, path_digest}` の並び。`path_digest` は `PATH` の値の SHA-256） | `state.json` | 空 |
 | `verify_trees` | 状態ファイルのキー（パスの並び） | `state.json` | 空 |
 | `pushing` | 状態ファイルのキー（`{sha, digest, path_digest}`。push を打つ直前に書き、`done` を保存した後に消す） | `state.json` | 無し |
