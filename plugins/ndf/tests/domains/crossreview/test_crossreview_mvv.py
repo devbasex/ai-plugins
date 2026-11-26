@@ -99,17 +99,18 @@ def test_approved_mvv_of_the_base_reaches_both_prompts_as_snapshots(
     fake = _fixing(tmp_path)
     code, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
     assert (code, got["status"]) == (0, "ok")
-    for agent in ("codex", "kiro", "claude"):
-        body, principles = _criterion_paths(_prompt(fake, agent), mvv_state)
-        assert "バージョン 11" in _prompt(fake, agent)
+    prompts = {agent: _prompt(fake, agent) for agent in ("codex", "kiro", "claude")}
+    for prompt in prompts.values():
+        body, principles = _criterion_paths(prompt, mvv_state)
+        assert "バージョン 11" in prompt
         assert (body.read_text(encoding="utf-8"), principles.read_bytes()) == (BODY, mvv.principles())
-    assert '"mvv"' in _prompt(fake, "codex").splitlines()[-1]
+    assert '"mvv"' in prompts["codex"].splitlines()[-1]
     table = criteria_decide._table()
     writing_of_criterion_5 = table["mvv"]["reviewer"].format(number=table["mvv_number"])
     for agent in ("codex", "kiro"):
-        assert writing_of_criterion_5 in _prompt(fake, agent)
+        assert writing_of_criterion_5 in prompts[agent]
         # 指示へ渡すのは本文の場所だけで、本文はコピーしない
-        assert "**一つ目**" not in _prompt(fake, agent)
+        assert "**一つ目**" not in prompts[agent]
 
 
 def test_unapproved_mvv_adds_nothing_to_the_prompts(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, mvv_state: Path) -> None:
