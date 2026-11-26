@@ -18,9 +18,9 @@
 - 承認を求める前の「読み手役の確認」を、承認の 1 つ前の工程へ移した（#4547、課題 #4446）。読み手役は、書いた経緯を知らない AI で、承認する人の立場で資料と質問の文を読み、判断を誤らせる文を挙げる
   - 11.0.42 までは承認を問う直前に起動していたため、通じない文が直前に見つかり、承認の依頼と変更の要求の往復が増えていた
   - 11.0.43 からは、設計の工程とデプロイの工程で、承認の前のステップが読み手役を起動し、承認資料と質問を用意する（新しいコマンド `ndf document-rebuild gate`）。承認する人の操作は変わらない
-  - 読み手役を起動できないときは、先へ進まず工程が止まる。承認の後ではなく前に、題や本文の直しが必要になると差し戻す
+  - 読み手役を起動できないときは、先へ進まず工程が止まる。Pull Request の題か本文の直しが必要になると、承認を問う前に工程が止まる。NDF は題と本文を書き換えないので、利用者（か作業を進める AI）が直してから打ち直す
   - 確かめた承認資料は Pull Request のコメントに足す。秘密やメールアドレスなどは伏せる。Pull Request の題と本文は NDF が書き換えない
-  - 複数の作業の Pull Request をまとめて出すリリースは、これまでどおり承認を問う直前に読ませる（自動の用意は #4564）
+  - 会話の中で行うリリース（複数の作業の Pull Request をまとめて出すリリースを含む）は、読ませる時期はこれまでどおり承認を問う直前だが、手順が変わった。`ndf document-rebuild gate --gate release` を打ち、`ndf records reading check` で突き合わせてから、gate が返した資料で `ndf release-steps present` を打つ（まとめたリリースの自動の用意は #4564）
 - `ndf records reading check` の引数が `--file` から `--gate`・`--pr`・`--questions-out`（会話のセッションのリリースでは `--material` も）に変わった
 - `ndf release-steps answer --by user` は、回答した承認資料のハッシュ `--material-sha256` が必須になった。`ndf release-steps present` は、秘密などを伏せる必要がある資料を提示せずに止める
 - 追加したコマンド: `ndf document-rebuild gate`、`ndf progress reread`、`ndf release-steps approval-state`・`pull-checks`
@@ -29,8 +29,10 @@
 
 ### 移行の手順
 
-- 11.0.42 までに始めて承認を待っている作業は、`ndf progress reread <ステートマシンの ID>` を 1 回打って、承認の待ちを出し直す
-- 11.0.42 までに得たリリースの承認は、`ndf release-steps approval-state` が `approved` を返せばそのまま使える。同じ資料でも `present` を打ち直すと、承認を取り直すことになる
+- 11.0.42 までに始めて承認を待っている作業は、待ち方に合わせて出し直す
+  - 工程の承認ゲートで待っている場合は、`ndf progress reread <ステートマシンの ID>` を 1 回打つ
+  - 会話の中で行うリリースで回答を待っている場合は、`ndf document-rebuild gate --gate release` を打ち、返った資料で `ndf release-steps present` を打ち直してから承認を取る
+- 11.0.42 までに得たリリースの承認は、`ndf release-steps approval-state --pr <番号>` が `approved` を返せばそのまま使える。同じ資料でも `present` を打ち直すと、承認を取り直すことになる
 
 ## [ndf 11.0.42] - 2026-11-26
 
