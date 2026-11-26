@@ -194,7 +194,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | `drive` | `drive.py` | 変更 | 今のまま | 始めに `hold`、終わりに解く。ロックを取った後に `sweep_gate_logs` を呼ぶ。手元の経路で対象範囲が空なら、次を行わずに最終ゲートへ進む: 担当の AI を起動できるかの確認、プロジェクトの判断基準の文書（MVV）の読み込み、改善の提案、項目ごとの実装と検証 |
 | `_reused` | `drive.py` | 変更 | 今のまま | 手元の経路でテストを打って完了した実行は、今の PR の先頭の設定から求めた識別値と今の `PATH` の SHA-256 が、どちらも記録の値と同じときだけ、前の結果を再利用する。合格の記録を引くときと同じ組で判定する |
 | `_init` | `drive.py` | 変更 | 今のまま | 手元の経路では、保護するファイルを、対象範囲と、実装が変えた関数とファイルの一覧（状態ファイルの `touched`。提案はこの中から出る）の両方から除く |
-| `_resume_protection` | `drive.py` | 新設 | `_resume_protection(g, cfg: RunConfig, state, save) -> None` | 手元の経路の再開で、担当を起動する前に呼ぶ。リモートの先頭の設定から保護を求め直し、作業コミットが保護に当たれば `refused`（理由に当たったファイルと復旧の手順）。当たらなければ `target_scope`・`touched`・未実装の項目の範囲を `narrow` で絞り直し、範囲が空になった項目を見送りにする |
+| `_resume_protection` | `drive.py` | 新設 | `_resume_protection(g, cfg: RunConfig, state, save) -> None` | 手元の経路の再開で、担当を起動する前に呼ぶ。リモートの先頭の設定から保護を求め直し、状態の `onto`（載せ直しの起点）から作業場所の `HEAD` までの変更が保護に当たれば `refused`（理由に当たったファイルと復旧の手順）。当たらなければ `target_scope`・`touched`・未実装の項目の範囲を `narrow` で絞り直し、範囲が空になった項目を見送りにする |
 | `_final` | `drive.py` | 変更 | 今のまま | 経路で `run_gate` か `run_local_gate` を呼ぶ |
 | `_summary` | `drive.py` | 変更 | 今のまま | 「通ったチェックの名前」「手元のテスト全体が通った」「変更が無いのでテストは打っていない」を書き分ける |
 | `_write_pushed` | `drive.py` | 新設 | `_write_pushed(cfg: RunConfig, head: str) -> None` | `--pushed-out` があれば SHA を 1 行で書く。再利用した結果でも書く。既存のファイルとリンクの扱いは下の箇条のとおり |
@@ -299,6 +299,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `TestBudget` | 型（累計の上限、使った秒、suite 1 つの上限） | `local_gate.py` | suite の上限は、`test.local_total_minutes` が無ければ上限の設定ファイル `contracts/limits/test-run.test.json` の `seconds`。あれば None で、累計の残りだけを掛ける |
 | `local_passed` | 状態ファイルのキー（`{sha, digest, path_digest}` の並び。`path_digest` は `PATH` の値の SHA-256） | `state.json` | 空 |
 | `verify_trees` | 状態ファイルのキー（パスの並び） | `state.json` | 空 |
+| `onto` | 状態ファイルのキー（載せ直しの起点の SHA）。この実行のコミットの直前のコミットで、着手時の先頭で始まる。順 1 で載せ直すか、取り込んだ先頭が `HEAD` の祖先と分かるたびに、その取り込んだ先頭へ書き換える | `state.json` | 着手時の先頭 |
 | `pushing` | 状態ファイルのキー（`{sha, digest, path_digest}`。push を打つ直前に書き、`done` を保存した後に消す） | `state.json` | 無し |
 | `local_base_failed` | 状態ファイルのキー（`{sha, digest, path_digest, failed, run}` の並び。`failed` は基準側で落ちた suite の順番と終了コード、`run` は記録した起動の識別値。起動のたびに新しく作るランダムな値で、別の起動の記録は使わない） | `state.json` | 空 |
 | `repo` | 状態ファイルのキー（リポジトリの識別値。git の共通ディレクトリの実パス） | `state.json` | 無し |
@@ -373,7 +374,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `run_suites`（ログ） | 伏せ字にしたログを書く | 同じ名前の suite が 2 つ、`/` を含む名前（別々のログになる） | 伏せる前の値がファイルに残らない |
 | `fix_excerpt` | 伏せ字の後に切る | 100 行と 8,000 文字の境、境をまたぐトークンと秘密鍵、短い出力は全体 | 出力が空 |
 | `sweep_verify_trees` | 記録のあるパスだけ消す | lock が無いもの、NDF の lock、利用者の lock の 3 つで扱いが分かれる | 記録の無いディレクトリに触れない |
-| `_resume_protection` | 保護が変わらなければ何も変えない | 宣言を広げると未実装の項目の範囲が絞られ、空の項目は見送り。実装済みの項目は変えない | 作業コミットが新しい保護に当たれば、担当を起動せず `refused` |
+| `_resume_protection` | 保護が変わらなければ何も変えない。他者の `.ndf/` の変更を取り込んで載せ直した後でも、この実行のコミットが当たらなければ止まらない | 宣言を広げると未実装の項目の範囲が絞られ、空の項目は見送り。実装済みの項目は変えない | 作業コミットが新しい保護に当たれば、担当を起動せず `refused` |
 | `drive`・`_reused` | 同じ SHA・設定・`PATH` なら再利用し、`--pushed-out` を書く。`PATH` だけが違えば再利用しない | 対象範囲が空 | ロック中は何も変えない |
 | `_write_pushed` | 無いパスに書く。前の実行が書いた SHA 1 行のファイルを置き換える | 同じファイルへのハードリンクがあっても、リンクの側の中身は変わらない | シンボリックリンク、ディレクトリ、ほかの中身の既存のファイルは `precondition` で、中身もリンク先も変わらない |
 
