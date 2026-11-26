@@ -192,7 +192,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | `hold` | `workspace.py` | 新設 | `hold(root: Path) -> FileLock \| None` | `rf<PR>/run.lock` を待たずに取る。取れなければ None |
 | `RunConfig` | `drive.py` | 変更 | `local_test: bool = False`・`pushed_out: Path \| None = None` を足す | `args()` は、手元の経路では `--required …`・`--ci-test …` の代わりに `--local-test` を並べる。`pushed_out` は並べない |
 | `drive` | `drive.py` | 変更 | 今のまま | 始めに `hold`、終わりに解く。ロックを取った後に `sweep_gate_logs` を呼ぶ。手元の経路で対象範囲が空なら、次を行わずに最終ゲートへ進む: 担当の AI を起動できるかの確認、プロジェクトの判断基準の文書（MVV）の読み込み、改善の提案、項目ごとの実装と検証 |
-| `_reused` | `drive.py` | 変更 | 今のまま | 手元の経路でテストを打って完了した実行は、今の PR の先頭の設定から求めた識別値が記録の値と同じときだけ、前の結果を再利用する |
+| `_reused` | `drive.py` | 変更 | 今のまま | 手元の経路でテストを打って完了した実行は、今の PR の先頭の設定から求めた識別値と今の `PATH` の SHA-256 が、どちらも記録の値と同じときだけ、前の結果を再利用する。合格の記録を引くときと同じ組で判定する |
 | `_init` | `drive.py` | 変更 | 今のまま | 手元の経路では、保護するファイルを、対象範囲と、実装が変えた関数とファイルの一覧（状態ファイルの `touched`。提案はこの中から出る）の両方から除く |
 | `_final` | `drive.py` | 変更 | 今のまま | 経路で `run_gate` か `run_local_gate` を呼ぶ |
 | `_summary` | `drive.py` | 変更 | 今のまま | 「通ったチェックの名前」「手元のテスト全体が通った」「変更が無いのでテストは打っていない」を書き分ける |
@@ -301,7 +301,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `repo` | 状態ファイルのキー（リポジトリの識別値。git の共通ディレクトリの実パス） | `state.json` | 無し |
 | `gate_logs` | 状態ファイルのキー（NDF が書いた手元の最終ゲートのログのファイル名の並び） | `state.json` | 空 |
 | `final` | 状態ファイルのキー。`status`・`rounds`・`head` に、`means` と、CI なら `checks`、手元なら `tests`（`passed`・`skipped`）と `digest`、落ちた場合は `base_failed` と `head_failed`（それぞれ suite の呼び名と終了コードの並び） | `state.json` | — |
-| `done.digest` | 状態ファイルのキー（テストを打って完了したときだけ） | `state.json` | 無し |
+| `done.digest`・`done.path_digest` | 状態ファイルのキー（テストを打って完了したときだけ。合格に使った識別値と `PATH` の SHA-256） | `state.json` | 無し |
 
 `state.json` のキーの表は `store.py` の説明にあるので、同じ変更で書き足す。
 
@@ -370,7 +370,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `run_suites`（ログ） | 伏せ字にしたログを書く | 同じ名前の suite が 2 つ、`/` を含む名前（別々のログになる） | 伏せる前の値がファイルに残らない |
 | `fix_excerpt` | 伏せ字の後に切る | 100 行と 8,000 文字の境、境をまたぐトークンと秘密鍵、短い出力は全体 | 出力が空 |
 | `sweep_verify_trees` | 記録のあるパスだけ消す | lock が無いもの、NDF の lock、利用者の lock の 3 つで扱いが分かれる | 記録の無いディレクトリに触れない |
-| `drive`・`_reused` | 同じ SHA と設定なら再利用し、`--pushed-out` を書く | 対象範囲が空 | ロック中は何も変えない |
+| `drive`・`_reused` | 同じ SHA・設定・`PATH` なら再利用し、`--pushed-out` を書く。`PATH` だけが違えば再利用しない | 対象範囲が空 | ロック中は何も変えない |
 | `_write_pushed` | 無いパスに書く。前の実行が書いた SHA 1 行のファイルを置き換える | 同じファイルへのハードリンクがあっても、リンクの側の中身は変わらない | シンボリックリンク、ディレクトリ、ほかの中身の既存のファイルは `precondition` で、中身もリンク先も変わらない |
 
 実の git の作業場所と bare のリモートは、今ある `tests/domains/crossrefactor/_drive_world.py` を使う。
