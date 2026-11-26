@@ -359,6 +359,18 @@ def test_stops_without_records(tmp_path: Path, worker: FakeWorker, on_fetch: Any
     assert checks_rows() == [] and not any(r["kind"] == "done" for r in reading.doc_rows()) and w.hub.posted == []
 
 
+def test_not_run_stop_names_every_target_not_run(tmp_path: Path) -> None:
+    """読み手役を立てられなかった対象は読ませる順に並べて、停止の文にする。"""
+    w = world(tmp_path)
+    worker = FakeWorker(_not_run)
+    got = w.run(worker)
+    names = [line.split("`")[1] for line in worker.prompts[0].splitlines() if line.startswith("- `") and "`: `" in line]
+    assert len(names) > 1
+    detail = f"読み手役を立てられなかった対象がある: {'・'.join(names)}。読み手役を立てられる環境に直してから打ち直す"
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "precondition", got
+    assert got["cause"]["detail"] == got["summary"] == detail
+
+
 def test_stops_when_the_pr_or_the_tree_does_not_match(tmp_path: Path) -> None:
     """PR が無い・作業場所の HEAD が PR の head と違う・--material の経路で --pr が無い: 読ませる前に止める。"""
     w = world(tmp_path)
