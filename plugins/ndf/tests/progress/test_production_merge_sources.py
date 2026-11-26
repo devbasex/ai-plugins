@@ -55,10 +55,11 @@ def test_github_observe_reads_production_by_the_source_repo_and_the_text(
     from ndf.progress.gate import answering
 
     # 承認資料の保存先は見ない（資料の無い質問と同じ）
-    monkeypatch.setattr(answering, "replace", lambda q, **_: q)
     monkeypatch.setattr(answering, "material_path", lambda root, q: tmp_path / "none.md")
     hub = _hub(base, text, file_repo)
-    seen = gate.github_observe(tmp_path, tmp_path, lambda: hub)(SimpleNamespace(pr=7))
+    # 読み取った値は `dataclasses.replace` で対象に重ねるので、質問は実物を渡す
+    q = gate.Question("q", "t", "デプロイ", "release-gate", "release", ("approved",), 7)
+    seen = gate.github_observe(tmp_path, tmp_path, lambda: hub)(q)
     empty = gate.text_sha256("")  # 偽の PR の本文と題は空（#4446 の本文と題の sha256 も同じ取得で読む）
     assert seen == gate.Target(merge_hub.HEAD, None, merge_hub.REPO, 7, base, production, body=empty, title=empty)
 

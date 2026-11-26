@@ -40,6 +40,7 @@ def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new
     why = gate.recheck(st, tid, moved, lambda seen, now: (seen, now) == ("h1", "h2"))
     if injected is None:
         assert why is not None and "対象が変わった" in why
+        flow.turn(tid)  # 未了に戻した読み手役のステップを打ち直してから待つ（#4446）
         new = gate.waiting(run.read(st, tid))
         assert new is not None and new.id != q.id and new.gate == "release"
         assert gate.approved_head(run.read(st, tid), "release", st.root) == "h1"
