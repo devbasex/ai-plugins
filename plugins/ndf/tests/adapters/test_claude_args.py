@@ -212,3 +212,19 @@ def test_issue_3955_readable_places_restrict_the_launch(tmp_path):
     assert argv[argv.index("--add-dir") + 1] == str(tmp_path) and argv[-2:] == ["--permission-mode", "dontAsk"]
     with pytest.raises(ValueError):
         claude.ClaudeCall(system="s", readable=(tmp_path,))
+
+
+# ---------------------------------------------------------------- #1959 Task 1: 今の full の起動の形を固定する
+
+
+@pytest.mark.parametrize("resume", [True, False])
+def test_issue_1959_full_launch_keeps_the_user_settings_and_the_thirteen_tools(tmp_path, monkeypatch, resume):
+    """#1959: full の起動は利用者の設定を読み（`--setting-sources` を付けない）、同梱の 13 個を尋ねずに許し、会話の指定を最後に置く。"""
+    monkeypatch.setattr(claude, "list_plugins", lambda **_: [])
+    session = claude.Session("abc", resume)
+    argv = claude.claude_args(claude.ClaudeCall(system="sys", permission=claude.Permission.FULL, session=session), root=tmp_path)
+
+    assert "--setting-sources" not in argv and "--strict-mcp-config" not in argv and "--tools" not in argv
+    assert len(claude.FULL_TOOLS.split(",")) == 13
+    assert argv[1:8] == [*claude.PRINT_JSON, "--permission-mode", "acceptEdits", "--allowed-tools", claude.FULL_TOOLS]
+    assert argv[-4:] == ["--append-system-prompt", "sys", *claude.session_args(session)]
