@@ -15,7 +15,7 @@ NDF は、AI が書いた文書（要求仕様書・設計書など）と質問�
 | 1 | 設計書を書いた AI が起動した読み手役 | 設計書を読み、「判断や作業を誤らせる文」を 2 件挙げる。1 件でもあるので不合格である |
 | 2 | 設計書を書いた AI | 2 件の文を書き直す |
 | 3 | 別の読み手役 | 設計書の全体をもう一度読む。誤らせる文が無く、要点の言い直しも合っているので合格である |
-| 4 | 質問を出す AI | 質問の文と承認資料も読み手役に読ませ、`ndf records reading add` で記録する。`ndf records reading check` で、記録が今の PR に合うことを確かめる |
+| 4 | 承認ゲートの 1 つ前の工程のステップ | 質問の文と承認資料も読み手役に読ませて記録する（[ndf-reading-check-before-approval-gate.md](ndf-reading-check-before-approval-gate.md)）。承認を問う AI は `ndf records reading check` で、記録が今の PR に合うことを確かめる |
 | 5 | hook の `reading-check` | 同じ質問の文の記録があり、PR の head（ブランチの先頭のコミット）も記録と同じなので、質問を通す |
 
 手順と書き方の基準の本文は、次のファイルが正である。この文書には書き写さない。この文書が扱うのは、複数のファイルにまたがる振る舞い、そう決めた理由、既知の限界である。
@@ -81,32 +81,33 @@ NDF は、AI が書いた文書（要求仕様書・設計書など）と質問�
 
 - 読み手役は合否を決めない。起動した担当が決める。「判断や作業を誤らせる文」が 1 件も無く、要点の言い直しが文書の内容と合えば合格である。「読みにくいだけの文」は合否に関わらない
 - 1 回の確認で、読み手の立場ごとに 2 回まで読ませる。2 回目の読みで「判断や作業を誤らせる文」が挙がれば、1 回目に挙がらなかった文でも「2 回目にも残った文」として扱う。書いた担当はその文を引用し、2 回目の後に直したならそのことを、直せなかったならその理由を添える。引用する場所は、承認を求める文書なら承認の文、承認を求めずに PR で出す文書なら PR の本文である。残っていても、そこで確認を終えて承認へ進んでよい。そのまま進めるかは、承認する人か PR をマージする側が決める
-- 読ませる時点は 2 つある。1 つは、文書の組み直し（Skill `document-rebuild` で、書き上げた文書の構成と文を整える作業）の後で、文書の全体を読ませる。もう 1 つは、承認を求める前である
+- 読ませる時点は 2 つある。1 つは、文書の組み直し（Skill `document-rebuild` で、書き上げた文書の構成と文を整える作業）の後で、文書の全体を読ませる。もう 1 つは、承認を求める前である。承認ゲートでは、承認を問う AI ではなく、承認ゲートの 1 つ前の工程のステップが読ませる（[ndf-reading-check-before-approval-gate.md](ndf-reading-check-before-approval-gate.md)）。判断の質問では、質問を出す AI が読ませる
 - 承認を求める前に読ませる文書は、まだ読ませていない文書、1 回目が不合格だった文書、確認の後にレビューなどで直した部分である。直した部分は、前後の段落と一緒に、新しい確認の 1 回目として読ませる。レビューのラウンドごとには読ませない
-- 質問の文と、その前に示す材料（承認では承認資料）は、承認を求める質問でも、判断を求める質問でも読ませる。MVV（プロジェクトの判断基準）に照らした自動の承認で、人に尋ねないときは読ませない
-- 読み手役の指摘で直した後は、質問を出す担当が差分を 1 回読み、事実（数・日付・条件・決定など）が変わっていないことを確かめる。レビューはやり直さない
+- 質問の文と、その前に示す材料（承認では承認資料）は、承認を求める質問でも、判断を求める質問でも読み手役が読む。MVV（プロジェクトの判断基準）に照らした自動の承認で、人に尋ねないときは読ませない
+- 読み手役の指摘で直した後は、直した担当（承認ゲートでは読み手役のステップの worker、判断の質問では質問を出す AI）が差分を 1 回読み、事実（数・日付・条件・決定など）が変わっていないことを確かめる。承認の前の確認で設計 PR の文書を直した場合は、設計のレビューへ戻す
 
 ### 記録と 3 つのコマンド
 
-`ndf records reading` の 3 つのコマンドは、どれも `--file` で JSON のファイルを 1 つ受け取る。複数行の文を引数に載せないためである。入力のキーの意味と例は、`prompt` が [document-rebuild の「読み手役に読ませる」](../../plugins/ndf/skills/document-rebuild/SKILL.md#読み手役に読ませる)、`add` と `check` が [approval-request.md の「読み手役の確認」](../../plugins/ndf/skills/development-workflow/references/approval-request.md#読み手役の確認) にある。
+`ndf records reading` の `prompt` と `add` は、`--file` で JSON のファイルを 1 つ受け取る。複数行の文を引数に載せないためである。`check` は引数でゲートと PR を受け、承認の質問を自分で作り直す。入力のキーの意味と例は、`prompt` が [document-rebuild の「読み手役に読ませる」](../../plugins/ndf/skills/document-rebuild/SKILL.md#読み手役に読ませる)、`add` と `check` が [approval-request.md の「読み手役の確認」](../../plugins/ndf/skills/development-workflow/references/approval-request.md#読み手役の確認) にある。
 
-| コマンド | 入力のキー | すること | 終わり方 |
+| コマンド | 入力 | すること | 終わり方 |
 | --- | --- | --- | --- |
 | `prompt` | `files`・`reader`・`questions_kind` | 読み手役への指示を作る。文書は加工しない | `ok`。指示は結果の `metrics.prompt` |
 | `add` | `questions`・`prs`・`reads` | 記録を 1 行追記する。GitHub は読まない | `ok`。形が違えば `stopped`（`invalid`）で、追記しない |
-| `check` | `questions`・`prs`（承認する PR の番号） | 承認の質問の前に、記録と今の PR を比べる | `ok`。質問を出せない理由があれば `stopped`（`precondition`）で、`items` に下の表のコードを返す。GitHub を読めなければ `stopped`（`unknown`）。GitHub を読めても head を得られない PR があれば、ほかに質問を出せない理由が無いときだけ `stopped`（`unknown`）になる。head を得られた別の PR が `head_moved` に当たれば、`precondition` を返す。`unknown` のときは、調べられなかったことを承認資料に書いて、質問を出してよい |
+| `check` | `--gate`・`--pr`・`--material`（省ける）・`--questions-out` | 承認の質問の前に、PR から質問を作り直して書き出し、記録と今の PR・承認資料を比べる | `ok`。質問を出せない理由があれば `stopped`（`precondition`）で、`items` に下の表のコードを返す。PR を GitHub から読めなければ `stopped`（`unknown`）。`unknown` のときは、調べられなかったことを承認資料に書いて、質問を出してよい |
 
-hook と `check` は、同じリポジトリ・同じ質問の記録のうち、最後の行を使う（以下「使う記録」）。`check` は、使う記録に書かれた PR のブランチを先に `git fetch` で取り込む。後で動く hook が、手元のリモート追跡ブランチ（`refs/remotes/`）を読むためである。記録だけで質問を出せないと決まれば、fetch も GitHub の読み取りもしない。
+hook と `check` は、同じリポジトリ・同じ質問の記録のうち、最後の行を使う（以下「使う記録」）。`check` は PR を 1 回読んだ後、使う記録に書かれた PR のブランチを `git fetch` で取り込む。後で動く hook が、手元のリモート追跡ブランチ（`refs/remotes/`）を読むためである。使う記録が無ければ fetch しない。
 
 | 質問を出せない理由のコード | 条件 | 出るところ |
 | --- | --- | --- |
 | `no_record` | 同じリポジトリで、同じ質問の記録が無い | hook と `check` |
 | `no_pr` | 承認する PR が、使う記録に書かれていない | `check` だけ |
 | `head_moved` | 使う記録に書かれた PR の head が、今の head と違う | hook と `check` |
+| `material_changed` | 承認資料か PR の本文が、確認した時点と違う（条件は [ndf-reading-check-before-approval-gate.md](ndf-reading-check-before-approval-gate.md)） | `check` だけ |
 
 記録は `reading-checks.jsonl` に 1 行ずつ追記し、消さない。保存先はリポジトリの外で、環境変数 `NDF_MVV_STATE_DIR` があればそこ、無ければ NDF の状態の保存先（既定は `~/.local/state/ndf`）である。
 
-- 1 行は `version`・`at`・`repo`・`question_key`・`prs`・`reads` を持つ。文書の本文、質問の文、残った文の引用は書かない
+- 1 行は `version`・`at`・`repo`・`question_key`・`prs`・`reads` を持つ。文書の本文、質問の文、残った文の引用は書かない。残った文の引用は、承認の前の確認が別の記録 `reading-docs.jsonl` に持つ
 - `question_key` は、1 回の `AskUserQuestion` で出すすべての質問の「質問の文・複数選択か・選択肢の名前と説明」を 1 つの JSON にまとめ、全体から 1 つ作った SHA-256 である。JSON のキーの名前と並び、文字列への直し方は、[reading_decide.py](../../plugins/ndf/src/ndf/domains/records/reading_decide.py) の `question_key` が正で、ほかで作り直さずにこの関数を使う。質問の見出し（`header`）と、質問の区分（次の節）は含めない。文字列の前後の空白は除く。質問を 1 つ、選択肢の説明を 1 文字変えただけでも、別の質問になる
 - 記録に期限は無い
 - 配列 `reads` には、質問の文を読ませたことを表す要素（`name` が `question`）が 1 つ以上要る。結果は `passed`（合格）か `remained`（2 回目にも残った）で、`remained` は 2 回目にだけ書ける。どちらの結果でも質問を出せる
@@ -165,10 +166,10 @@ guard（hook の中で、1 つの条件を調べて止めるか通すかを決�
 
 | 項目 | 内容 |
 | --- | --- |
-| 記録が事実かは確かめられない | 読み手役に本当に読ませたかは、記録からは分からない。PR を記録に書き忘れても hook では分からず、承認の手順の `check` で `no_pr` になる |
+| 記録が事実かは確かめられない | 読み手役に本当に読ませたかは、記録からは分からない。承認する PR が記録に無くても hook では分からず、承認の手順の `check` で `no_pr` になる |
 | 2 回止めた後 | 同じ区分・同じ理由の別の質問も、記録が無いまま通る。そのたびに、注意が会話に残る |
 | 指示に書き方の基準が入らない起動 | `ndf worker run` を通さずに起動した worker（サブエージェントの `ndf:worker` など）の指示には、本文が自動では入らない。起動する側は、手順書 `document-style` を読むように指示する。worker は、その中のリンクから書き方の基準を読む |
-| PR の題と本文 | 読み手役の対象ではない。head が同じまま書き換えても、記録は有効なままである |
+| PR の題と本文 | hook は比べないので、head が同じまま書き換えても hook は質問を通す。承認ゲートの質問では、`check` が見つける（題は `no_record`、本文は `material_changed`） |
 | 指示に従わない AI | 2 ラウンド目以降の制限は指示だけなので、外れた major の指摘はそのまま残る。ラウンドの上限（既定 3 回）で終わる |
 
 ### 費用と揺れの実測（2026-11-24）
@@ -190,13 +191,14 @@ Codex のほうが重い重要度を付けた。この違いがほかの PR で�
 | 文書を含む PR では、レビューする AI と直す AI の指示に書き方の基準が入り、含まない PR の指示は変わらない。文書があるかは PR の全体の差分で決める。基準を読めなければ起動しない | `domains/crossreview/test_crossreview_documents.py` |
 | major を限る指示が、比較元のあるラウンドにだけ入る。レビューする AI を加えたときと、head が前のラウンドの head の子孫でなくなったときは入らない。比較元からの差分を読ませるラウンドは差分のファイルを 1 つだけ作り、比較元があって全差分を読ませるラウンドは比較元からの差分をもう 1 つ作って、全員に同じものを渡す | 同上 |
 | `document-style` を読む作業の worker にだけ書き方の基準が入り、読めなければ起動しない | `worker/test_rules.py` |
-| 読み手役への指示に、読み手と 4 つの型が入り、経緯を受け取らない。記録の形の違いを拒み、文を残さない。`check` が GitHub の head と比べ、読めなければ `unknown` になる | `domains/records/test_reading.py` |
+| 読み手役への指示に、読み手と 4 つの型が入り、経緯を受け取らない。記録の形の違いを拒み、文を残さない。`check` が GitHub の head・本文・コメントと比べ、読めなければ `unknown` になる | `domains/records/test_reading.py`・`test_reading_docs.py` |
 | hook が、区分の無い質問・人のいない実行・開けない記録・git の失敗で通し、記録が無いときと head が違うときに止める。3 回目は注意を付けて通す。止めた質問を転送しない | `domains/hooks/test_reading_check.py` |
 
 ## 関連リンク
 
 - 要求と受け入れ条件: https://github.com/devbasex/ai-plugins/issues/4285
 - 実装: https://github.com/devbasex/ai-plugins/pull/4422
+- [ndf-reading-check-before-approval-gate.md](ndf-reading-check-before-approval-gate.md) — 承認ゲートの承認資料と質問の文を、工程のステップで確かめる
 - [ndf-document-rebuild.md](ndf-document-rebuild.md) — 文書の組み直し（読み手役に読ませる手順を持つ Skill）
 - [ndf-development-document-roles.md](ndf-development-document-roles.md) — 開発の文書の役割と、読み手役に要点を言い直させるための質問
 - [cross-review-impact-severity.md](cross-review-impact-severity.md) — 指摘の重要度と `impact`
