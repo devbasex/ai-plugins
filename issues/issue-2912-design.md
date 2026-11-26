@@ -614,11 +614,15 @@ PR で変えた設計書は 2 つの両方に入るので、先にパスで重�
 | 7 | 決定 4・6 の件数・割合・費用・打ったコマンドをリリース後テストの記録に残す | — |
 | 8 | 全体のテストを PR の CI で読む | — |
 
+## どこを変えるか
+
+新設する関数が 2 つ以上あり、既存の関数のシグネチャも変える（`patch_material`）ため、詳細設計は別ファイル [issue-2912-design-detail.md](./issue-2912-design-detail.md) に書いた。
+
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2912 | 実装する | — | `plugins/ndf/src/ndf/domains/records/design_check_decide.py`（新設）、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/__init__.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`、`plugins/ndf/src/ndf/core/`（起点の解決の移し先）、`plugins/ndf/src/ndf/adapters/markdown.py`、`plugins/ndf/contracts/templates/design.json`、`plugins/ndf/contracts/templates/design-detail.json`、`plugins/ndf/contracts/templates/document-review.json`（新設）、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/document-review.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/decisions.md`、`experimental/ndf/mvv_replay.py`（新設）、`experimental/ndf/mvv_replay_cases/`（新設）、`plugins/ndf/tests/domains/records/test_design_check.py`（新設）、`plugins/ndf/tests/domains/records/test_mvv_gate.py`、`plugins/ndf/tests/domains/records/test_mvv.py`、`plugins/ndf/tests/route/test_flows.py` |
+| #2912 | 実装する | — | `plugins/ndf/src/ndf/domains/records/design_check_decide.py`（新設）、`plugins/ndf/src/ndf/domains/records/design_check.py`（新設）、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/__init__.py`、`plugins/ndf/src/ndf/domains/records/mvv_material_decide.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`、`plugins/ndf/src/ndf/core/start_point.py`（新設。起点の解決の移し先）、`plugins/ndf/src/ndf/adapters/markdown.py`、`plugins/ndf/contracts/templates/design.json`、`plugins/ndf/contracts/templates/design-detail.json`、`plugins/ndf/contracts/templates/document-review.json`（新設）、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/document-review.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/decisions.md`、`experimental/ndf/mvv_replay.py`（新設）、`experimental/ndf/mvv_replay_cases/`（新設）、`plugins/ndf/tests/domains/records/test_design_check.py`（新設）、`plugins/ndf/tests/domains/records/test_mvv_gate.py`、`plugins/ndf/tests/domains/records/test_mvv_material.py`、`plugins/ndf/tests/adapters/test_markdown.py`、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py`、`plugins/ndf/tests/route/test_flows.py`、`plugins/ndf/tests/route/test_templates.py` |
 
 ## 人へ残す判断
 
