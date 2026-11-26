@@ -191,7 +191,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | `RunConfig` | `drive.py` | 変更 | `local_test: bool = False`・`pushed_out: Path \| None = None` を足す | `args()` は、手元の経路では `--required …`・`--ci-test …` の代わりに `--local-test` を並べる。`pushed_out` は並べない |
 | `drive` | `drive.py` | 変更 | 今のまま | 始めに `hold`、終わりに解く。ロックを取った後に `sweep_gate_logs` を呼ぶ。手元の経路で対象範囲が空なら、次を行わずに最終ゲートへ進む: 担当の AI を起動できるかの確認、プロジェクトの判断基準の文書（MVV）の読み込み、改善の提案、項目ごとの実装と検証 |
 | `_reused` | `drive.py` | 変更 | 今のまま | 手元の経路でテストを打って完了した実行は、今の PR の先頭の設定から求めた識別値が記録の値と同じときだけ、前の結果を再利用する |
-| `_init` | `drive.py` | 変更 | 今のまま | 手元の経路では、保護するファイルを、対象範囲と、提案の対象の一覧（実装が変えた関数とファイル。状態ファイルの `touched`）の両方から除く |
+| `_init` | `drive.py` | 変更 | 今のまま | 手元の経路では、保護するファイルを、対象範囲と、実装が変えた関数とファイルの一覧（状態ファイルの `touched`。提案はこの中から出る）の両方から除く |
 | `_final` | `drive.py` | 変更 | 今のまま | 経路で `run_gate` か `run_local_gate` を呼ぶ |
 | `_summary` | `drive.py` | 変更 | 今のまま | 「通ったチェックの名前」「手元のテスト全体が通った」「変更が無いのでテストは打っていない」を書き分ける |
 | `_write_pushed` | `drive.py` | 新設 | `_write_pushed(cfg: RunConfig, head: str) -> None` | `--pushed-out` があれば SHA を 1 行で書く。再利用した結果でも書く |
@@ -277,7 +277,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `PROTECTED_NAMES` | 定数（決まった名前の一覧） | `protected_decide.py` | 設計文書の表のとおり |
 | `Protected` | 型（`covers(path) -> bool`） | `protected_decide.py` | — |
 | `Failed` | 型（落ちた suite の呼び名 `label`、終了コードか時間切れの別、コマンド、出力） | `local_gate.py` | コマンドと出力は伏せる前の値で、メモリの中だけで持つ |
-| `LocalGateConfig` | 型（`pr`・`branch`・`scope`・`max_fix`・`repo_work`・`root`・`total_seconds`） | `local_gate.py` | `total_seconds` は `test.local_total_minutes`、無ければ安全網の上限 |
+| `LocalGateConfig` | 型（`pr`・`branch`・`scope`・`max_fix`・`repo_work`・`root`・`total_seconds`） | `local_gate.py` | `total_seconds` は `test.local_total_minutes` を秒に直した値。未設定なら安全網の上限（`budget_decide.SafetyNet` の `limit_minutes`）を秒に直した値 |
 | `TestBudget` | 型（累計の上限、使った秒、suite 1 つの上限） | `local_gate.py` | suite の上限は、上限の設定ファイル `contracts/limits/test-run.test.json` の `seconds` |
 | `local_passed` | 状態ファイルのキー（`{sha, digest, path_digest}` の並び。`path_digest` は `PATH` の値の SHA-256） | `state.json` | 空 |
 | `verify_trees` | 状態ファイルのキー（パスの並び） | `state.json` | 空 |
@@ -306,7 +306,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `run_suites` | プロセスを起動できない | シェルや作業場所が使えない | 起動の `OSError` | 残りの suite を打たずに止める | `precondition`。`suite_label` の呼び名とエラーの種別 | 送らない。環境を直して打ち直す |
 | `run_local_gate` | 取り込んだ先頭だけのテストが 126・127 を返す | テストランナーが無い、実行の権限が無い | 「処理の手順」の順 9・11 | 止める（直さない） | `precondition`。`suite_label` の呼び名と終了コード | 送らない。コマンドか環境を直して打ち直す |
 | `run_suites` | suite が落ちる（非ゼロ。126・127 を含む）、1 本の上限を超える | テストの失敗 | 終了コード、`TimeoutExpired` | 呼び出し元へ返す | 直しの後も落ちれば `test_failed` | コミットは担当が書く作業場所（`rf<PR>/work`）に残る |
-| `run_suites` | 累計の時間が上限に達する。または、累計の残りが suite 1 つの上限より短いときは残りを上限にして打ち、その実行が上限を超える | テストが重い | 起動の前と `TimeoutExpired` | 止める | `fix_limit`。停止の理由の文に、使った累計、上限の値、キー名 `test.local_total_minutes` | 打ち直すと累計は 0 から |
+| `run_suites` | 次のどちらか。(a) 累計の時間が累計の上限に達した。(b) 累計の残りが suite 1 つの上限より短いので、残りを制限時間にして打ち、その時間を超えた | テストが重い | 起動の前と `TimeoutExpired` | 止める | `fix_limit`。停止の理由の文に、使った累計、上限の値、キー名 `test.local_total_minutes` | 打ち直すと累計は 0 から |
 | `write_private_log` | `logs/` の権限を直せない、所有者が違う、シンボリックリンク | 保存先の権限や置き換え | ログを書く前 | 止める | `precondition`。保存先のパス | 出力を書かず、送らない。保存先を直して打ち直す |
 | `run_suites` | 追跡ファイルか `HEAD` が変わる | テストが書き換える | テストの後 | 止める | `precondition`。書き換わったファイル | 送らない |
 | `run_suites` | テストの実行枠が空くのを待ちきれない、空きメモリが足りずにテストを止める | マシンの混雑 | `slots.Stopped` | 呼び出し元へ返す | 今の停止理由のまま | 打ち直せる |
