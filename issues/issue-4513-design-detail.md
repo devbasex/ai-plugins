@@ -46,7 +46,7 @@ plugins/ndf/
 | `contracts/schemas/release-verification.schema.json` | 変更 | リリース後テストの記録の形 | — | `version` | — |
 | `contracts/worker/kinds.json` | 変更 | 作業 `release` の説明 | — | `release` | — |
 | `contracts/workflow/context.schema.json` | 変更 | 文脈の `product_version` の説明 | — | `product_version` | — |
-| `src/ndf/contracts/worker_kinds.py` | 変更 | `values.json` の形と読み書き | — | モジュール | `write_released`（新設）・`released_of`（新設）・`write_values`（変更） |
+| `src/ndf/contracts/worker_kinds.py` | 変更 | `values.json` の形と読み書き | — | モジュール | `write_released`（新設）・`released_of`（新設）・`uses_released_of`（新設）・`write_values`（変更） |
 | `src/ndf/progress/definition.py` | 変更 | 工程の定義と規約の読み手 | `contracts` | モジュール | `required_outputs`（新設） |
 | `src/ndf/progress/run.py` | 変更 | 工程の進行 | `invoke`・`definition`・`stages` | モジュール | `released_answer`（新設）・`_run_step`・`_step_draft`・`_finish_stage`（変更） |
 | `src/ndf/progress/invoke.py` | 変更 | ステップの呼び出し | `worker_kinds`・`plan` | `StageRun`・`PreparedPlan`・モジュール | `StageRun.released`（新設の欄）・`PreparedPlan.released`・`PreparedPlan.uses_released`（新設の欄）・`answered_gap_detail`（新設）・`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
@@ -93,7 +93,7 @@ plugins/ndf/
   - 事前条件: `state_dir` に `write_values` が書いた `values.json` がある
   - 事後条件: `values.json` の `released_version` が `value`（`None` ならキーが無い）で、ほかのキーは元のまま
   - 副作用: `values.json` を書き直す。書き方は `write_values` と同じで、保存先のディレクトリをファイル記述子で開き、そこを起点に所有者だけが書ける権限で書く
-- 形の定義 `VALUES_SHAPE` には足さない。`_has_shape` は決まったキーだけを見て、ほかのキーを残すので、キーを持たない `values.json`（直す前の NDF が書いたもの・単発のプラン）もそのまま読める
+- `released_version` と `uses_released` は、形の定義 `VALUES_SHAPE` には足さない。`_has_shape` は決まったキーだけを見て、ほかのキーを残すので、キーを持たない `values.json`（直す前の NDF が書いたもの・単発のプラン）もそのまま読める
 
 ### 異常系の処理
 
@@ -121,12 +121,17 @@ plugins/ndf/
 | `StageRun.released` | `src/ndf/progress/invoke.py` | 新設 | `released: Optional[str] = None`（データクラスの欄） | ステップの呼び出しへ記録済みの値を渡す |
 | `_run_step` | `src/ndf/progress/run.py` | 変更 | 今のまま | `approved_seen` と並べて `released_answer` を読み、`StageRun` に入れる |
 | `PreparedPlan` | `src/ndf/progress/invoke.py` | 変更 | 欄 `released: Optional[str]` と `uses_released: bool` を足す | 組んだか読んだ `values.json` が今持つ `released_version` と、記録済みの値を使うプランかの判定を渡す |
-| `prepare_plan` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 入力の検査で回している作業の一覧（`route.kinds_of`）から、記録済みの値を使うプランかを同じ走査で判定し、`PreparedPlan.uses_released` に入れる。使うプランなら、`write_values` に `run.released` を渡し、最初の書き込みで `released_version` まで書く |
-| `_prepared` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 使い回す `values.json` から `released_of` で読んだ値を `PreparedPlan.released` に入れる。`prepare_plan` を呼ばないこの経路でだけ、`route.kinds_of` を 1 回回して `uses_released` を決める |
+| `prepare_plan` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 入力の検査で回している作業の一覧（`route.kinds_of`）から、記録済みの値を使うプランかを同じ走査で判定する。判定を `write_values` の `uses_released` に渡して `values.json` に残し、`PreparedPlan.uses_released` にも入れる。使うプランなら `write_values` に `run.released` も渡し、最初の書き込みで `released_version` まで書く |
+| `_prepared` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 使い回す `values.json` から、`released_of` で読んだ値を `PreparedPlan.released` に、`uses_released_of` で読んだ判定を `PreparedPlan.uses_released` に入れる。テンプレートの展開も作業の一覧の走査もしない。`uses_released_of` が `None` を返したとき（直す前の NDF が書いた `values.json`）だけ、`route.kinds_of` を 1 回回して判定する |
 | `plan_path` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | `PreparedPlan.uses_released` が真で、`PreparedPlan.released` と `run.released` が違うときだけ、プランを書く前に `write_released(work_dir, run.released)` を打つ。作業の一覧は自分では回さない |
-| `write_values` | `src/ndf/contracts/worker_kinds.py` | 変更 | `write_values(..., released: Optional[str] = None)` | `released` が `None` でなければ `released_version` も書く |
+| `write_values` | `src/ndf/contracts/worker_kinds.py` | 変更 | `write_values(..., released: Optional[str] = None, uses_released: bool = False)` | `uses_released` をキー `uses_released` に書く。`released` が `None` でなければ `released_version` も書く |
+| `uses_released_of` | `src/ndf/contracts/worker_kinds.py` | 新設 | `uses_released_of(held: Mapping[str, Any]) -> Optional[bool]` | 読んだ `values.json` のキー `uses_released` を返す。キーが無い・真偽値でなければ `None` |
 
-**記録済みの値を使うプラン**とは、プランが流す作業（`route.kinds_of(template, local_tests)`）に、出力に `product_version` を持つ作業（今は `release` だけ）を含むプランである。ほかのプランでは、`values.json` の `released_version` を読む者がいないので書かない。判定は 1 回のプランの準備で 1 回だけ行う。初回は `prepare_plan` が入力の検査と同じ作業の一覧から判定し、使い回す回は `_prepared` が判定する。どちらも結果を `PreparedPlan.uses_released` で `plan_path` へ渡し、同じテンプレートの展開と作業の一覧の走査を重ねない。値が前と同じなら書き直さない。そのため、`values.json` を書き直すのは、試行の中で記録済みの値が変わったとき（承認の回答で値が入った、または消えた）だけになる。
+**記録済みの値を使うプラン**とは、プランが流す作業（`route.kinds_of(template, local_tests)`）に、出力に `product_version` を持つ作業（今は `release` だけ）を含むプランである。ほかのプランでは、`values.json` の `released_version` を読む者がいないので書かない。
+
+判定は、`values.json` を作るときに 1 回だけ行い、`values.json` に残す。工程の初回は、`run._prepare` がステップを起動する前に `prepare_plan` を呼んで `values.json` を書き、その直後の `plan_path` は保存済みの値を読む `_prepared` の分岐に入る。判定を `_prepared` でやり直すと、初回でもテンプレートの展開と作業の一覧の走査が 1 回ずつ増える。そのため、`prepare_plan` は入力の検査と同じ走査で判定してキー `uses_released` に書き、`_prepared` はそれを読むだけにする。展開をやり直すのは、キーの無い `values.json`（直す前の NDF が書いたもの）を読んだときだけである。
+
+値が前と同じなら書き直さない。そのため、`values.json` を書き直すのは、試行の中で記録済みの値が変わったとき（承認の回答で値が入った、または消えた）だけになる。
 
 - `released_answer`
   - 事前条件: `v` は同じ工程の事象を持つステートマシンの読み取り
@@ -139,8 +144,8 @@ plugins/ndf/
 
 | 場面 | `values.json` を扱う関数 | 扱い |
 | --- | --- | --- |
-| 工程の retry の後の最初 | `run._prepare` が消し、`prepare_plan` が作る | 新しく作る。記録済みの値を使うプランなら、同じ書き込みで `released_version` も書く |
-| 同じ試行の中でプランをもう一度流す | `_prepared` | 前に作ったものを使い回す |
+| 工程の retry の後の最初 | `run._prepare` が消し、`prepare_plan` が作る | 新しく作る。判定を `uses_released` に書き、記録済みの値を使うプランなら、同じ書き込みで `released_version` も書く |
+| 同じ試行の中でプランを流す（初回の `prepare_plan` の直後を含む） | `_prepared` | 前に作ったものを使い回す。判定も `values.json` から読む |
 | 使い回す回で、記録済みの値が前と違う | `plan_path` が `write_released` を打つ | `released_version` だけを書き直す。同じなら書かない |
 
 ### 処理の手順
@@ -161,6 +166,8 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `released_answer` | オーガナイザーの承認の後の値を返す | 後に worker の判断の求めへの `approved` があっても前者を返す | 利用者か MVV 判定の承認・却下・出力の事象が隣に無いときは `None` |
 | `plan_path` | 前の試行の `values.json` が残っていても、今の値で書き直す | 値が無い回は `released_version` を消す。値が前と同じ回と、記録済みの値を使わないプランでは `write_released` が呼ばれない | — |
+| `_prepared` | `uses_released` を持つ `values.json` では `route.kinds_of` を呼ばない（`prepare_plan` の直後の `plan_path` で確かめる） | キーの無い `values.json` では `route.kinds_of` を 1 回呼んで判定する | — |
+| `uses_released_of` | 真偽値をそのまま返す | キーが無いと `None` | 文字列・数値は `None` |
 
 ## 工程の定義の読み手
 
