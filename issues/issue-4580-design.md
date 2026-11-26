@@ -582,7 +582,7 @@ sequenceDiagram
 
 CD の完了を待つ配布先が複数あるときは、配布先ごとの `record` を並べて打つ（「CD の結果の待ち」）。それぞれが返った時点で、その配布先のテストを始める。
 
-オーガナイザーとレーンの conductor の分担は次のとおりである。オーガナイザーは、`record` を打ち、`complete` が真になったら `ndf lanes release` で各レーンへリリース結果を知らせるところまでを受け持ち、レーンの工程は進めない。知らせを受けたレーンの工程（リリース後テスト・振り返り・課題を閉じる）を進めるのは、そのレーンのスプリントの進行担当（conductor）である。役割の説明は [3 層で工程を通す](../plugins/ndf/skills/development-workflow/references/agent-layers.md) と [並列開発のオーガナイザー](../plugins/ndf/skills/development-workflow/references/parallel.md) にある。
+オーガナイザーとレーンの conductor の分担は次のとおりである。オーガナイザーは、`record` を打つところから、レーンへリリース結果を知らせるところまでを受け持ち、レーンの工程は進めない。知らせるのは、`complete` が真になり、デプロイ中に始めたテストがすべて記録を書いた後で、`ndf lanes release` で各レーンへ知らせる。知らせを受けたレーンの工程（リリース後テスト・振り返り・課題を閉じる）を進めるのは、そのレーンのスプリントの進行担当（conductor）である。役割の説明は [3 層で工程を通す](../plugins/ndf/skills/development-workflow/references/agent-layers.md) と [並列開発のオーガナイザー](../plugins/ndf/skills/development-workflow/references/parallel.md) にある。
 
 `record` は、本番の PR ごとに、反映を確かめた時点ごとに打つ。対象の配布先へまとめて反映したなら 1 回で、段階的に配るなら配布先ごとに打つ。含めた PR の全部へ 1 回で書くので、N 本のレーンの変更を 1 本の本番の PR にまとめたときも、配布先ごとに 1 回で済む。レーンの PR を 1 本ずつ本番ブランチへマージしたときは、本番の PR が N 本あるので、その N 倍になる。ある配布先の `record` を打ち忘れると、その配布先の `verification-record` が「反映の記録が無い」で止まり、`close-check` は「反映がそろっていない」で閉じない。
 
