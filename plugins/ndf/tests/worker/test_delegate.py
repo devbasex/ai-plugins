@@ -28,7 +28,7 @@ class FakeClaude:
         self.write_on = write_on
         self.failure = failure
 
-    def __call__(self, argv, prompt, timeout, cwd):
+    def __call__(self, argv, prompt, timeout, cwd, options=None):
         self.calls.append((argv, prompt))
         if self.failure is not None:
             return claude.ClaudeReply.failed("", "上限", 0.1, self.failure)
@@ -77,7 +77,7 @@ def test_the_launch_passes_the_work_kind_only_while_it_runs(tmp_path, monkeypatc
     h = _handoff(tmp_path)
     seen = []
 
-    def fake(argv, prompt, timeout, cwd):
+    def fake(argv, prompt, timeout, cwd, options=None):
         seen.append(os.environ.get(identity.WORKER_KIND_ENV))
         h.result_file.write_text("{}", encoding="utf-8")
         return claude.ClaudeReply(True, None, "終えた", 0.5)
@@ -237,7 +237,7 @@ def _replies(h, *bodies):
     """呼び出しごとに `bodies` の順で結果ファイルを書く worker（None は書かない）。"""
     calls = []
 
-    def fake(argv, prompt, timeout, cwd):
+    def fake(argv, prompt, timeout, cwd, options=None):
         calls.append(prompt)
         body = bodies[len(calls) - 1]
         if body is not None:
@@ -341,7 +341,7 @@ def _run_with(work, monkeypatch, call, kind="impl"):
 
 
 def _ok_writer(work, body, calls):
-    def fake(argv, prompt, timeout, cwd):
+    def fake(argv, prompt, timeout, cwd, options=None):
         calls.append(prompt)
         (work / "out.json").write_text(json.dumps(body), encoding="utf-8")
         return claude.ClaudeReply(True, None, "終えた", 0.5)
@@ -389,7 +389,7 @@ def test_run_stops_as_bad_report_when_the_result_turns_into_a_link_during_the_ca
     work, outside = _outside(tmp_path)
     calls = []
 
-    def fake(argv, prompt, timeout, cwd):
+    def fake(argv, prompt, timeout, cwd, options=None):
         calls.append(prompt)
         (work / "out.json").symlink_to(outside)
         return claude.ClaudeReply(True, None, "終えた", 0.5)
@@ -403,7 +403,7 @@ def test_run_stops_as_bad_report_when_the_result_turns_into_a_link_during_the_ca
 
 @pytest.mark.parametrize("kind", ["impl", "ci-fix"])
 def test_run_stops_as_bad_report_on_a_result_that_is_not_utf8(tmp_path, monkeypatch, capsys, kind):
-    def fake(argv, prompt, timeout, cwd):
+    def fake(argv, prompt, timeout, cwd, options=None):
         (tmp_path / "out.json").write_bytes(b'{"status": "ok", "summary": "\xff"}')
         return claude.ClaudeReply(True, None, "終えた", 0.5)
 
@@ -446,7 +446,7 @@ def test_the_launch_passes_the_opened_result_dir_only_while_it_runs(tmp_path, mo
     h = _handoff(tmp_path)
     seen = []
 
-    def fake(argv, prompt, timeout, cwd):
+    def fake(argv, prompt, timeout, cwd, options=None):
         seen.append(os.environ.get(identity.WORKER_RESULT_DIR_ENV))
         h.result_file.write_text('{"status": "ok"}', encoding="utf-8")
         return claude.ClaudeReply(True, None, "終えた", 0.5)
@@ -553,7 +553,7 @@ def test_run_from_answer_work_takes_only_a_private_result_file(tmp_path, monkeyp
     monkeypatch.chdir(work)
     real = worker.delegate
 
-    def writer(argv, prompt, timeout, cwd):
+    def writer(argv, prompt, timeout, cwd, options=None):
         (work / "out.json").write_text(json.dumps({"status": "ok", "summary": "済んだ"}), encoding="utf-8")
         (work / "out.json").chmod(mode)
         return claude.ClaudeReply(True, None, "終えた", 0.5)

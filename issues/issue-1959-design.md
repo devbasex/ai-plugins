@@ -868,6 +868,8 @@ CI やコンテナのように状態の保存先が作り直される環境で�
 | `S1e` | `needs` | `X0`〜`B1` の 15 個 | `LC1` を足す（`domains/project/secret.py` が秘密の形の表を `secret_forms` から読む） |
 | `M3a` | `needs` | `M3b`・`D2`・`AD1`・`AD2`・`AD3`・`T1`・`PM1` | `LC1` を足す（表 `contracts/limits/` へ両方が書くための順序。A2 の hook `domains/hooks/guards/launch_answer.py` も `LC1` を読む） |
 | 表 `contracts/limits/` | 書き手 | `D1`・`T1+`・`M3a` | `LC1` を足す（`launch.approvals-lock.json`） |
+| `C5` | `needs` | `C2`・`AD3`・`AD3+` | `LC1` を足す（A3。worker の起動 `core/worker.py` が `launch_settings.prepared` を読む） |
+| `P1b` | `needs` | `P1a`・`C2`・`C3`・`AD3`・`AD3+`・`PM1` | `LC1` を足す（A3。Skill を回す起動 `progress/invoke.py` が `launch_settings.prepared` を読む） |
 
 `docs/specifications/ndf-rebuild.md` の「子の記号」の表には載せない。表は作り直しの子だけを持ち、#4409 の子 `PM1` も載っていない。
 

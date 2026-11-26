@@ -1,13 +1,15 @@
-"""#1959 Task 1: 起動の設定を足す前の、worker の再開の呼び出しと読むだけの相手役の引数を固定する。"""
+"""#1959: worker の再開の呼び出し・起動の設定の指定と承認・読むだけの相手役の引数。"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import json
+
 import pytest
 
-from ndf.adapters import agents, claude
-from ndf.contracts import worker_paths
+from ndf.adapters import agents, claude, launch_settings
+from ndf.contracts import internal, worker_paths
 from ndf.core import worker
 from ndf.core.converge import participants
 
@@ -22,8 +24,9 @@ def test_worker_resumes_with_the_same_full_arguments_and_only_the_session_change
     h = worker.Handoff("fix", "直す", tmp_path / "result.json", tmp_path, tmp_path / "state")
     calls: list[tuple[list[str], Path | None]] = []
 
-    def fake(argv, prompt, timeout, cwd):
+    def fake(argv, prompt, timeout, cwd, options):
         calls.append((list(argv), cwd))
+        assert options.verify is None  # 指定の無いリポジトリは照らし直しを置かない
         if len(calls) == 2:
             h.result_file.write_text('{"status": "ok"}', encoding="utf-8")
         return claude.ClaudeReply(True, None, "終えた", 0.0)
@@ -35,6 +38,47 @@ def test_worker_resumes_with_the_same_full_arguments_and_only_the_session_change
     assert done.cause is None and [cwd for _, cwd in calls] == [tmp_path, tmp_path]
     assert calls[0][0] == [*full, "--session-id", "s-1"]
     assert calls[1][0] == [*full, "--resume", "s-1"]
+
+
+def _repo_with_mcp(tmp_path: Path, monkeypatch) -> Path:
+    root = tmp_path / "repo"
+    (root / ".git").mkdir(parents=True)
+    (root / ".ndf" / "mcp").mkdir(parents=True)
+    (root / ".ndf" / "launch.json").write_text(json.dumps({"version": 1, "permissions": {"steps": {"fix": {"mcp": [".ndf/mcp/a.json"]}}}}))
+    (root / ".ndf" / "mcp" / "a.json").write_text(json.dumps({"mcpServers": {"search": {"command": "search-mcp"}}}))
+    monkeypatch.setattr(launch_settings.launch_approval, "repo_key", lambda r: str(r))
+    return root
+
+
+def test_an_unapproved_spec_stops_the_worker_before_any_launch(tmp_path: Path, monkeypatch) -> None:
+    """条件 11: 作業種別の指定が未承認なら、worker を 1 度も起動せずに precondition で止まる。"""
+    root = _repo_with_mcp(tmp_path, monkeypatch)
+    h = worker.Handoff("fix", "直す", tmp_path / "result.json", root, tmp_path / "state")
+    calls: list[list[str]] = []
+    with worker_paths.open_workdir(tmp_path) as wd, pytest.raises(internal.InternalError) as got:
+        worker.delegate(h, "規則", root=tmp_path, wd=wd, call=lambda argv, *a: calls.append(argv))
+    assert got.value.kind == "precondition" and calls == []
+
+
+def test_an_approved_spec_launches_with_the_copy_and_checks_again_before_each_resume(tmp_path: Path, monkeypatch) -> None:
+    """条件 5・11: 承認した指定の MCP の定義はコピーを渡し、再開を含む子ごとに照らし直しを渡す。確かめた後の書き換えは次の子で見つかる。"""
+    root = _repo_with_mcp(tmp_path, monkeypatch)
+    sha = launch_settings.approval_target(launch_settings.load(root)).sha256
+    launch_settings.launch_approval.append(str(root), sha, launch_settings.launch_approval.Action.APPROVE, approver="人")
+    h = worker.Handoff("fix", "直す", tmp_path / "result.json", root, tmp_path / "state")
+    seen: list[tuple[list[str], str | None]] = []
+
+    def fake(argv, prompt, timeout, cwd, options):
+        seen.append((list(argv), options.verify()))
+        copy = Path(argv[argv.index("--mcp-config") + 1])
+        assert copy.exists() and copy != root / ".ndf" / "mcp" / "a.json"
+        (root / ".ndf" / "mcp" / "a.json").write_text(json.dumps({"mcpServers": {}}))  # 1 回目の子の後に書き換える
+        return claude.ClaudeReply(True, None, "終えた", 0.0)
+
+    with worker_paths.open_workdir(tmp_path) as wd:
+        worker.delegate(h, "規則", root=tmp_path, wd=wd, call=fake, session="s-1")
+    assert seen[0][1] is None and seen[1][1] is not None and "--strict-mcp-config" in seen[0][0]
+    assert not Path(seen[0][0][seen[0][0].index("--mcp-config") + 1]).exists()
 
 
 @pytest.mark.parametrize(
