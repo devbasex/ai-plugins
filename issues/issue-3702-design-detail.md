@@ -144,7 +144,7 @@ contracts/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `judge` | 依存の深さの実行順、別のファイルの依存、`whole` の単位 | 400・401・1,000・1,001 行、#3698 と #3247 の大きさの 16,757 行と 24,008 行（受け入れ条件 7） | U1〜U6 の各形、別のファイルの同じ `T1` は通る、同じ単位の中のタスクの依存は通る |
-| `split` | #3672 の fixture が上限に収まる複数の単位になり、依存の向きの順になる（受け入れ条件 8） | 区切りが 1 つ | 1 タスクで上限超え、当てた後に残る U4 |
+| `split` | #3672 の fixture（`tests/core/plan/fixtures/units/issue-3672.units.json`。Task 3 で新設する単位のファイルで、`issues/issue-3672-design-detail.md` の「ファイル配置」の表から、設計書の「テスト設計」の表の下の作り方で全タスクを 1 単位にまとめる）が上限に収まる複数の単位になり、依存の向きの順になる（受け入れ条件 8） | 区切りが 1 つ | 1 タスクで上限超え、当てた後に残る U4 |
 
 ## 単位のファイルの読み書き（`core/plan/units_files.py`）
 
@@ -255,7 +255,7 @@ contracts/
 | `stale` | 同上 | 新設 | `(record: Mapping, repo, pr, head, base) -> list[str]` | 今の PR と記録の違い |
 | `reset_drafts` | 同上 | 新設 | `(v, stage: stages.StageDef, why: str) -> list[EventDraft]` | 工程の先頭から設計承認ゲートまでを未了に戻すイベント |
 | `approved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「ドキュメントレビュー」の最新の回答が承認なら、その `design_target`。後の変更要求があれば None |
-| `mismatches` | 同上 | 新設 | `(record, tree, context) -> list[str]` | 決定 11 の表の 4 つの比較。スプリントの課題は全体を比べ、ほかの比較は記録の `targets.issues` に絞る |
+| `mismatches` | 同上 | 新設 | `(record, tree, context) -> list[str]` | 設計書の決定 11 の表の 4 つの比較（単位のファイル・スプリントの課題・課題ごとの扱いと統合先・実装計画を省いた課題）。スプリントの課題は全体を比べ、ほかの比較は記録の `targets.issues` に絞る |
 | `without` | 同上 | 新設 | `(record, drop, files) -> dict` | 課題を外す回答の記録の絞り込み。外せない形なら `Refused` |
 | `converted` | 同上 | 新設 | `(repo, head, branch, context, limits, report) -> dict` | 変換の再承認の記録。`design-target.json` と同じ形で、`sprint_branch` は `branch`、`review.pr` は null、`head` は単位のファイルを含むコミット |
 | `reapproved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「実装」の最新の回答が承認なら、その `design_target` |
@@ -568,7 +568,7 @@ contracts/
 4. 同じコミットで、承認した内容を確かめる。次のどちらかに当たれば push せず、ref を送るコミットに置き換えて、再承認の `gate` を返す
    - 再承認の記録がある場合: 記録との `mismatches` に違いがあるか、実装計画の中身が記録の `head` と違う。`compare` の結果にはよらず確かめる。実装計画の全体を比べるのは、この push の前だけである
    - 再承認の記録が無い場合: 旧い表との照合 `compare` が違う
-5. `units_sync.destination_errors` と `units_sync.outgoing_errors` を通す。`destination_errors` には手順 1 の URL を渡す。渡す記録は `design_record.converted` の値で、変えてよいファイルは、スプリントの課題の単位のファイルと実装計画である。`outgoing_errors` には手順 1 で読んだ先端を渡し、読み直さない。違えば push せず `stopped`（`refused`）
+5. `units_sync.destination_errors` と `units_sync.outgoing_errors` を通す。`destination_errors` には、引数 `url` に手順 1 の URL を、引数 `record` に `design_record.converted` の値を渡す。`outgoing_errors` には、引数 `tip` に手順 1 で読んだ先端を渡して読み直さず、引数 `allowed`（変えてよいファイル）にスプリントの課題の単位のファイルと実装計画を渡す。違えば push せず `stopped`（`refused`）
 6. `git push --no-follow-tags --recurse-submodules=no -- <手順 1 の URL> <送るコミットの SHA>:refs/heads/<スプリントブランチ>` を打つ。強制はしない。送るコミットの親は手順 1 の先端なので、その後に送り先が進めば、git が拒否する
 7. push が通ったら、スプリントの作業場所を `git merge --ff-only` でそのコミットへ進める
 
@@ -666,6 +666,7 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 3. `<work_root>/design-sync.json`（`{"record_head", "commit"}`）の `record_head` が記録の head と同じで、手元に `commit` があれば、送り先の先端を読む（上の「送るコミットの確かめ」の読み方）。ここで読んだ値を、手順 6 と 8 でも使う
    - 先端が `commit` を含めば `ok`
    - 手元の HEAD だけが含めば（push の失敗の後）、手順 8 へ進む
+   - どちらも含まなければ（取り込みのコミットを手元で消した後など）、`design-sync.json` を使わずに手順 4 から進める。記録が今の手元を表さないためである。手順 6 と 8 の確かめは同じに通るので、手元だけの別のコミットは送らない
 4. 手元のスプリントブランチが記録の head を祖先に持てば、取り込むものは無いので、PR を読まずに `ok`。`ndf progress next` の経路は、設計 PR の head がスプリントブランチ自身なので、ここで終わる
 5. 記録の PR を読み、マージ済み・head が記録の head・base が記録の base を確かめる。base の正しい宛先は、通常は `pr_target("doc", <branch>)`、設計 PR の head がスプリントブランチ自身なら `pr_target("sprint")` である
 6. 作業場所を検査する。取り込むファイルに未コミットの変更があるか（`git status --porcelain --untracked-files=all -- <ファイル>` が空でない）、マージの途中（`MERGE_HEAD` がある）なら `stopped`（`precondition`）。ファイルを書き換えない。次に `merge-base` から両側の変更を調べる。スプリント側も変えていて中身が違うファイルがあれば `stopped`。送り先の先端を読み（手順 3 で読んでいればその値を使い）、手元の HEAD で「送るコミットの確かめ」を通す。手元だけの別のコミットがあれば、取り込みのコミットを作らずに止まる
@@ -706,6 +707,7 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 
 - 取り込みと関係ないステージ済みの変更は、コミットに入らない
 - push が拒否された後の打ち直しは、競合にせず送り直し、リモートに届くまで `ok` にしない
+- `design-sync.json` の `commit` を送り先の先端も手元の HEAD も含まない打ち直しは、手順 4 から進め、取り込みのコミットを作り直す
 - 取得先と push 先の URL が違うリモートでは、push 先に届けば `ok` にする
 - `git fetch` と `git push` の引数は照合した URL で、リモート名でない
 
