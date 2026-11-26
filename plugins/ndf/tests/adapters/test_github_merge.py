@@ -37,6 +37,7 @@ class Wire:
         viewer: Optional[dict] = None,
     ) -> None:
         self.seen: list[tuple[str, str]] = []
+        self.dequeued_ids: list[str] = []
         self.verify = verify if verify is not None else _verify_data()
         self.queue = queue
         self.put = put
@@ -71,6 +72,8 @@ class Wire:
         elif name == "query":
             name = "file"
         self.seen.append(("GRAPHQL", name))
+        if name == "dequeue":
+            self.dequeued_ids.append(variables["id"])
         if name == "queue":
             return {"repository": self.queue}
         if name == "verify":
@@ -205,6 +208,46 @@ def _queue_dequeues_when_the_base_changed_after_enqueue():
     assert ("GRAPHQL", "dequeue") in wire.seen
 
 
+def _a_verify_stop_takes_a_queued_pr_out_of_the_queue(changed, kind):
+    """判定のやり直しに限らず、直前の確かめのどの停止でも、キューにある PR は確かめの応答の ID で外す。"""
+    wire = Wire(verify=_verify_data(in_queue=True, **changed))
+    out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect())
+    assert (out.merged, out.kind) == (False, kind)
+    assert [s for s in wire.seen if s[0] == "GRAPHQL"] == [("GRAPHQL", "verify"), ("GRAPHQL", "dequeue")]
+    assert wire.dequeued_ids == ["PR_7"]
+
+
+def _a_queue_state_stop_leaves_the_queue_only_when_queued(in_queue, dequeued):
+    wire = Wire(queue=_queue_data(base="release", in_queue=in_queue), put=_queue_refusal())
+    out = _hub(wire).merge(7, expect_head=HEAD, expect=_expect())
+    assert (out.merged, out.kind) == (False, github.github_merge.TARGET_MOVED)
+    assert wire.dequeued_ids == dequeued
+    assert ("GRAPHQL", "enqueue") not in wire.seen
+
+
+def _a_queue_method_refusal_keeps_a_queued_pr_in_the_queue(verified):
+    """キューから外すのは直前の照合の停止だけ。方式の違いの断りは、キューにある PR を外さない。"""
+    wire = Wire(queue=_queue_data(in_queue=True), put=_queue_refusal())
+    out = _hub(wire).merge(7, expect_head=HEAD, method="merge", require_method=True, expect=_expect() if verified else None)
+    assert (out.merged, out.kind) == (False, "refused")
+    assert wire.dequeued_ids == []
+    assert ("GRAPHQL", "enqueue") not in wire.seen
+
+
+def _the_dequeue_after_enqueue_uses_the_queue_state_id():
+    wire = Wire(queue=_queue_data(), put=_queue_refusal(), after=_pull(base="release"))
+    _hub(wire).merge(7, expect_head=HEAD, expect=_expect())
+    assert [s for s in wire.seen if s[0] == "GRAPHQL"][-2:] == [("GRAPHQL", "enqueue"), ("GRAPHQL", "dequeue")]
+    assert wire.dequeued_ids == ["PR_7"]
+
+
+def _dequeue_takes_out_only_a_queued_pr(verify, dequeued):
+    wire = Wire(verify=verify)
+    _hub(wire).dequeue(7)
+    assert wire.dequeued_ids == dequeued
+    assert wire.seen == [("GRAPHQL", "verify"), *[("GRAPHQL", "dequeue")] * len(dequeued)]
+
+
 def _branch_file_reads_text_and_oid_with_the_repository_name():
     wire = Wire()
     got = _hub(wire).branch_file("main", PATH)
@@ -264,6 +307,50 @@ def _viewer_after_branch_file_sends_no_request(viewer, want):
         ),
         scenes.scene(_queue_refuses_when_the_base_changed_before_enqueue, id="queue_refuses_when_the_base_changed_before_enqueue"),
         scenes.scene(_queue_dequeues_when_the_base_changed_after_enqueue, id="queue_dequeues_when_the_base_changed_after_enqueue"),
+        *[
+            scenes.scene(
+                _a_verify_stop_takes_a_queued_pr_out_of_the_queue,
+                id=f"a_verify_stop_takes_a_queued_pr_out_of_the_queue-{label}",
+                changed=c,
+                kind=k,
+            )
+            for label, c, k in [
+                ("base-changed", {"base": "release"}, github.github_merge.TARGET_MOVED),
+                ("head-changed", {"head": OTHER}, github.github_merge.TARGET_MOVED),
+                ("other-repo", {"repo": "o/other"}, "refused"),
+            ]
+        ],
+        *[
+            scenes.scene(
+                _a_queue_state_stop_leaves_the_queue_only_when_queued,
+                id=f"a_queue_state_stop_leaves_the_queue_only_when_queued-{label}",
+                in_queue=q,
+                dequeued=d,
+            )
+            for label, q, d in [("queued", True, ["PR_7"]), ("not-queued", False, [])]
+        ],
+        *[
+            scenes.scene(
+                _a_queue_method_refusal_keeps_a_queued_pr_in_the_queue,
+                id=f"a_queue_method_refusal_keeps_a_queued_pr_in_the_queue-{label}",
+                verified=v,
+            )
+            for label, v in [("with-expect", True), ("without-expect", False)]
+        ],
+        scenes.scene(_the_dequeue_after_enqueue_uses_the_queue_state_id, id="the_dequeue_after_enqueue_uses_the_queue_state_id"),
+        *[
+            scenes.scene(
+                _dequeue_takes_out_only_a_queued_pr,
+                id=f"dequeue_takes_out_only_a_queued_pr-{label}",
+                verify=v,
+                dequeued=d,
+            )
+            for label, v, d in [
+                ("queued", _verify_data(in_queue=True), ["PR_7"]),
+                ("not-queued", _verify_data(), []),
+                ("no-pr", {"pullRequest": None}, []),
+            ]
+        ],
         scenes.scene(
             _branch_file_reads_text_and_oid_with_the_repository_name, id="branch_file_reads_text_and_oid_with_the_repository_name"
         ),
