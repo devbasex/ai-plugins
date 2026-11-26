@@ -467,7 +467,7 @@ def test_release_material_route(tmp_path: Path, line_head: str, edit: Any, kind:
     material = tmp_path / "materials.md"
     material.write_text(f"# リリース\n\n提示したコミット: `{line_head}`\n\n- 中身\n", encoding="utf-8")
     worker = FakeWorker(edit=edit)
-    # 版上げの工程は PR の番号を引数でなく工程の入力で渡し、直前の MVV 判定は素材のファイルに載る
+    # PR の番号は引数でなく工程の入力でも渡せ、直前の MVV 判定は素材のファイルに載る
     mvv = {"gate": "release", "skip": False, "verdict": None, "why": ["進め方 normal"]}
     got = w.run(worker, "release", material=material, inputs={"pr": 7, "mvv_gate": mvv})
     if kind is not None:
@@ -478,6 +478,17 @@ def test_release_material_route(tmp_path: Path, line_head: str, edit: Any, kind:
     questions = json.loads(Path(got["outputs"]["questions"]).read_text(encoding="utf-8"))["questions"]
     assert questions[0]["question"].endswith("アプリをストアの審査に提出してよいですか")
     assert reading.rows()[-1]["question_key"] == rd.question_key(questions)
+
+
+@pytest.mark.parametrize(("edit", "status"), [(None, "ok"), (_touch_plan, "stopped")], ids=["left-as-is", "changed-by-worker"])
+def test_a_change_left_before_the_worker_is_not_counted(tmp_path: Path, edit: Any, status: str) -> None:
+    """メインディレクトリから打つリリースでは、起動の前からある未コミットの変更で止めない。worker がその中身を変えたら止める。"""
+    w = world(tmp_path)
+    (tmp_path / PLAN).write_text("# 起動の前からの変更\n", encoding="utf-8")
+    material = tmp_path / "materials.md"
+    material.write_text(f"# リリース\n\n提示したコミット: `{H1}`\n", encoding="utf-8")
+    got = w.run(FakeWorker(edit=edit), "release", pr=7, material=material)
+    assert got["status"] == status, got
 
 
 # --- 通常ファイルだけを開く -----------------------------------------------------------------------------------

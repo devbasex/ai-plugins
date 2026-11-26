@@ -8,6 +8,7 @@ PR のコメントとして足す。判断の部品は `gate_decide` にある�
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -428,7 +429,23 @@ def current_hash(run: Run, plan: Plan, name: str) -> str:
         raise Precondition(f"{name} の blob を読めない: {exc}") from None
 
 
-def verify_worker(run: Run, plan: Plan, report: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+def dirty_files(run: Run) -> dict[str, Optional[str]]:
+    """作業場所の未コミットの変更のパスと、その中身の SHA-256（ファイルとして読めないパスは None）。"""
+    try:
+        paths = run.g.status_paths()
+    except git.GitError as exc:
+        raise Precondition(f"作業場所の変更を読めない: {exc}") from None
+    return {p: _digest(run.args.cwd / p) for p in paths}
+
+
+def _digest(path: Path) -> Optional[str]:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:  # noqa: NDF401 ファイル: 消したファイルとディレクトリは「中身なし」として比べる
+        return None
+
+
+def verify_worker(run: Run, plan: Plan, report: Mapping[str, Any], before: Mapping[str, Optional[str]]) -> dict[str, Mapping[str, Any]]:
     """設計書の手順 5 の確かめ。対象の名前から記録を返す。`not_run` は `Precondition`、欠けは `Incomplete`。"""
     metrics = report["metrics"] if isinstance(report.get("metrics"), Mapping) else {}
     raw = metrics["readers"] if isinstance(metrics.get("readers"), list) else []
@@ -437,7 +454,7 @@ def verify_worker(run: Run, plan: Plan, report: Mapping[str, Any]) -> dict[str, 
     if not_run:
         raise Precondition(drive.not_run_detail("対象", not_run))
     gaps = [g for g in (_target_gap(run, plan, t, found) for t in plan.targets) if g is not None]
-    gaps.extend(_outside_fixable(run, plan))
+    gaps.extend(_outside_fixable(run, plan, before))
     final = _file_text(plan.material)
     if not run.body_route and approval_decide.material_head(final) != run.pr.head_sha:
         gaps.append({"kind": reading.MATERIAL, "name": reading.MATERIAL, "reason": f"行 {approval_decide.HEAD_LINE} が変わった"})
@@ -458,12 +475,10 @@ def _target_gap(run: Run, plan: Plan, t: Read, found: Mapping[str, Mapping[str, 
     return None if why is None else {"kind": "reader", "name": t.name, "reason": why}
 
 
-def _outside_fixable(run: Run, plan: Plan) -> list[dict[str, str]]:
-    """作業場所で、直してよいファイルの外が変わっていれば、その欠け。"""
-    try:
-        changed = run.g.status_paths()
-    except git.GitError as exc:
-        raise Precondition(f"作業場所の変更を読めない: {exc}") from None
+def _outside_fixable(run: Run, plan: Plan, before: Mapping[str, Optional[str]]) -> list[dict[str, str]]:
+    """worker が、直してよいファイルの外を変えていれば、その欠け。起動の前からある変更（`before`）は、中身が同じなら数えない。"""
+    after = dirty_files(run)
+    changed = sorted(p for p in {*before, *after} if p not in before or p not in after or before[p] != after[p])
     return [{"kind": "outside", "name": p, "reason": "直してよいファイルの外を変えた"} for p in changed if p not in plan.fixable]
 
 
@@ -589,12 +604,13 @@ def drive_gate(
         log.info("承認の前の確認で読ませるものを決めた", extra={"head": run.pr.head_sha, "targets": len(plan.targets)})
         found: dict[str, Mapping[str, Any]] = {}
         if plan.targets:
+            before = dirty_files(run)
             out, result_file = drive.run_worker_at(args.state_dir, args.cwd, WORK_KIND, gate_prompt(run, plan, write_facts(run)), runner)
             log.info("読み手役の worker が終えた", extra={"worker_status": out.get("status")})
             stopped, report = drive.worker_report(out, result_file)
             if stopped is not None:
                 return stopped
-            found = verify_worker(run, plan, report)
+            found = verify_worker(run, plan, report, before)
         return complete_check(run, plan, found)
     except Incomplete as exc:
         return result.stopped(TOOL, exc.kind, exc.detail, gaps=exc.gaps)
