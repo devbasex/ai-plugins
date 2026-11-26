@@ -14,6 +14,7 @@
 | --- | --- |
 | `src/ndf/testing/means.py`（新設） | テストを確かめる手段の判定 |
 | `src/ndf/domains/crossrefactor/protected_decide.py`・`local_gate.py`（新設） | テストの定義のファイルの判定、手元の最終ゲート |
+| `src/ndf/core/converge/worktree.py`・`src/ndf/testing/weight.py` | 取得済みの先頭を受け取る同期、リダイレクト先も含む語の並び |
 | `src/ndf/domains/crossrefactor/{cli.py, drive.py, workspace.py, final_gate.py, final_gate_decide.py, prompt_decide.py}` | 引数、経路の分岐、排他ロック、記録、指示文 |
 | `src/ndf/progress/{command.py, refactor_values.py, invoke.py}`・`src/ndf/core/route/__init__.py` | 条件の語、起動の組み立て、プランの形 |
 | `contracts/workflow/{stages/refactor.json, ndf.schema.json}`・`contracts/templates/{cross-refactoring.json, parts/steps.json}` | 工程の条件、`follow` のステップ |
@@ -34,14 +35,14 @@
 
 ### Task 2: 設定から、テストを確かめる手段とテストの定義のファイルを判定する
 
-- **対象ファイル:** `means.py`、`protected_decide.py`、`project.schema.json` とそのコピー、`tests/testing/test_means.py`、`tests/domains/crossrefactor/test_protected.py`
-- **変更内容:** `means.decide`・`means.total_minutes`・`protected_of`・`narrow`。設定のキー `test.protected_files`・`test.local_total_minutes`
+- **対象ファイル:** `means.py`、`protected_decide.py`、`weight.py`、`project.schema.json` とそのコピー、`tests/testing/test_means.py`、`tests/domains/crossrefactor/test_protected.py`
+- **変更内容:** `means.decide`・`means.total_minutes`・`protected_of`・`narrow`・`inside_work`・`weight.all_words`。設定のキー `test.protected_files`・`test.local_total_minutes`
 - **満たす受け入れ条件:** 4・5・6（判定の部分）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理。解析の書き出し（`ndf` のプロジェクトの解析）が、手で足した 2 つのキーを消さないこともテストで確かめる
 
 ### Task 3: 手元の最終ゲートを作る
 
-- **対象ファイル:** `local_gate.py`、`final_gate.py`、`final_gate_decide.py`、`prompt_decide.py`、`test-run.test.json`、`tests/domains/crossrefactor/test_local_gate.py`、`test_prompt_decide.py`
+- **対象ファイル:** `local_gate.py`、`final_gate.py`、`final_gate_decide.py`、`prompt_decide.py`、`core/converge/worktree.py`、`test-run.test.json`、`tests/domains/crossrefactor/test_local_gate.py`、`test_prompt_decide.py`
 - **変更内容:** 取り込み → テスト全体 → 指定の SHA の push か直し。検証用の作業場所、合格の記録、累計の上限。CI の記録に通ったチェックの名前を足す
 - **満たす受け入れ条件:** 3・4
 - **進め方:** 詳細設計の「処理の手順」の表の行ごとに、失敗するテスト → 通す実装。git は一時の bare リモートを使い、テストの起動と時計は差し替える
