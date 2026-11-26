@@ -76,7 +76,7 @@ def _parser() -> argparse.ArgumentParser:
         type=int,
         help="PR の番号。--branch か --base を添えると、まず PR が指定に合うかを確かめる。"
         "head のブランチ名かマージ先が指定と違う PR、フォークからの PR、マージされずに閉じた PR は refused で止まる。"
-        "確かめを通った PR（番号だけを渡したときはどの PR も）がマージ済みなら、何もせず ok を返す。"
+        "--branch と --base を両方省くと、この確かめをしない。確かめを通った PR か、確かめをしなかった PR がマージ済みなら、何もせず ok を返す。"
         "作業場所が無いときは、--branch を省き、--pr と --repo を渡す",
     )
     m.add_argument("--base", help="期待するマージ先。対象の PR のマージ先が違えばマージしない")
