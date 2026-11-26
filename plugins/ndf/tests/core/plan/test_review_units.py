@@ -173,10 +173,13 @@ def test_lineup_rejects_rows_after_a_line_without_a_cell_separator(first: list[s
         "| B \\`版 | Tasks 2 | 無し\\` |",
         # リンク先の ` もインラインコードを開かない
         "| [B](a`) | Task 2 | [補足](b`) |",
+        "| [![B](img.png)](a`) | Task 2 | [補足](b`) |",
+        # 参照ラベルの ` も同じ。参照の定義は表より後ろにある
+        "| [B][a`] | Task 2 | [補足][b`] |",
     ],
 )
 def test_lineup_rejects_a_unit_like_row_after_a_line_without_a_cell_separator(row: str) -> None:
-    table = _table(HEAD, "| A | Task 1・2 | 無し |", "B", row)
+    table = _table(HEAD, "| A | Task 1・2 | 無し |", "B", row) + "\n\n[a`]: /a\n[b`]: /b"
     assert "表の途中" in "\n".join(_reasons(_text(table)))
 
 

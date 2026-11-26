@@ -15,7 +15,7 @@ from itertools import takewhile
 from typing import NamedTuple, Optional
 
 from markdown_it import MarkdownIt
-from markdown_it.rules_inline import StateInline, backtick
+from markdown_it.token import Token
 
 from ndf.core.plan import inputs_decide
 
@@ -110,34 +110,42 @@ class _Scope(NamedTuple):
     sprint: frozenset[int]
 
 
-def _record_code_span(state: StateInline, silent: bool) -> bool:
-    """markdown-it の `backticks` の規則に、コードと判定した範囲の記録を足したもの。"""
-    start = state.pos
-    found = backtick(state, silent)
-    # 閉じの無い ` の並びは、` だけを読み進める
-    if found and not silent and state.src[start : state.pos].strip("`"):
-        state.env["code_spans"].append((start, state.pos))
-    return found
+def _inline(pieces: Sequence[str], references: Mapping) -> list[Token]:
+    """`|` で分けた区間をつないで markdown-it でインライン解析する。区切りだった所は NUL にして見分ける。"""
+    return _MARKDOWN.inline.parse("\0".join(pieces), _MARKDOWN, {"references": references}, [])
 
 
-# インラインコードの範囲を調べる解析器。画像の規則は代替テキストを切り出して解析し、位置が行とずれるので外す
-# （外すと `!` とリンクとして、行の位置のまま読む）
-_INLINE = MarkdownIt("commonmark").disable("image")
-_INLINE.inline.ruler.at("backticks", _record_code_span)
+def _cell_width(pieces: Sequence[str], references: Mapping) -> int:
+    """先頭のセルになる区間の数。区間をつないだ所がすべてインラインコードの中なら、1 つのセルである。"""
+    # 先頭の区間に閉じていない ` が残らなければ、後ろの区間へ続くコードは無い。
+    # 行全体を一度に解析すると、リンクや参照ラベルの ` どうしがセルをまたいでコードになる
+    if not any(t.type == "text" and "`" in t.content for t in _inline(pieces[:1], references)):
+        return 1
+    widths = (
+        n
+        for n in range(2, len(pieces) + 1)
+        if sum(t.content.count("\0") for t in _inline(pieces[:n], references) if t.type == "code_inline") == n - 1
+    )
+    return max(widths, default=1)
 
 
-def _mask_code_spans(line: str) -> str:
-    """行のインラインコードを `code` に置き換える。リンク先などの ` は markdown-it がコードにしない。"""
-    spans: list[tuple[int, int]] = []
-    _INLINE.inline.parse(line, _INLINE, {"code_spans": spans}, [])
-    for start, end in reversed(spans):
-        line = f"{line[:start]}code{line[end:]}"
-    return line
+def _code_aware_cells(line: str, references: Mapping) -> list[str]:
+    """表の 1 行のセル。インラインコードの中の `|` では分けない。"""
+    pieces = inputs_decide.split_row(line)
+    cells = []
+    while pieces:
+        width = _cell_width(pieces, references)
+        cells.append("|".join(pieces[:width]))
+        pieces = pieces[width:]
+    return cells
 
 
 def _parse(text: str) -> _Doc:
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    tokens = _MARKDOWN.parse("\n".join(lines))
+    env: dict = {}
+    tokens = _MARKDOWN.parse("\n".join(lines), env)
+    # 文書の参照リンク定義。行だけを解析するときも、参照リンクをリンクと読む
+    references = env.get("references", {})
     headings: list[_Heading] = []
     tables: list[_Table] = []
     for i, token in enumerate(tokens):
@@ -152,7 +160,7 @@ def _parse(text: str) -> _Doc:
             stop = start + 2 + len(data)
             rows = [inputs_decide.split_row(line) for line in (lines[start], *data)]
             after = filter(inputs_decide.has_cell_separator, lines[stop:end])
-            rest = [inputs_decide.split_row(_mask_code_spans(line)) for line in after]
+            rest = [_code_aware_cells(line, references) for line in after]
             tables.append(_Table(start, rows, stop + 1, rest))
     return _Doc(tuple(headings), tuple(tables))
 
