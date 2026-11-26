@@ -172,7 +172,12 @@ def test_current_the_seen_file_keeps_the_target_of_the_first_request(st, lane_sp
     q = replace(_now_at_release(st, tid, flow), target=gate.Target(head="h1", material="m1"))
     gate.request_release(st, run.read(st, tid), q, {})
     gate.request_release(st, run.read(st, tid), replace(q, target=gate.Target(head="h2", material="m2")), {})
-    assert json.loads(_seen(st, q).read_text(encoding="utf-8")) == {"head": "h1", "material_sha256": "m1"}
+    assert json.loads(_seen(st, q).read_text(encoding="utf-8")) == {
+        "head": "h1",
+        "material_sha256": "m1",
+        "body_sha256": None,
+        "title_sha256": None,
+    }
 
 
 def test_current_the_plan_request_returns_where_it_was_sent_and_holds_the_request_fields(st, lane_sprint, flow):
@@ -189,7 +194,7 @@ def test_current_a_sprint_outside_a_lane_still_leaves_the_seen_file(st, new_tabl
     tid = new_table()
     q = _now_at_release(st, tid, flow)
     assert gate.request_release(st, run.read(st, tid), q, {}) is None
-    assert json.loads(_seen(st, q).read_text(encoding="utf-8")) == {"head": q.target.head, "material_sha256": q.target.material}
+    assert json.loads(_seen(st, q).read_text(encoding="utf-8")) == q.target.as_dict()
 
 
 def test_current_the_file_request_returns_its_path_and_is_the_same_when_sent_again(st, new_table, flow, tmp_path):
@@ -197,8 +202,10 @@ def test_current_the_file_request_returns_its_path_and_is_the_same_when_sent_aga
     q = _now_at_release(st, tid, flow)
     env = {"NDF_ORGANIZER_DIR": str(tmp_path / "org"), **ORG_ENV}
     first = gate.request_release(st, run.read(st, tid), q, env)
-    again = gate.request_release(st, run.read(st, tid), q, env)
     path = tmp_path / "org" / "requests" / f"{gate.request_id(q)}.json"
+    # 打ち直しが秒をまたいでも、書いた時刻だけの違いは同じリクエストとみなす
+    path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "at": "2000-01-01T00:00:00+00:00"}), encoding="utf-8")
+    again = gate.request_release(st, run.read(st, tid), q, env)
     assert first == {"kind": "file", "id": gate.request_id(q), "path": str(path)}
     assert again == first
     body = json.loads(path.read_text(encoding="utf-8"))

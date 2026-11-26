@@ -2000,7 +2000,9 @@ def test_age_stops_on_wrong_arguments(age_tree, base, head):
 def test_main_age_renovate_version(age_tree, monkeypatch, capsys, days_old, code, status):
     """main の age --renovate-version（renovate-config のジョブと renovate.yml が打つ形）は結果 JSON を 1 行出す。"""
     root = age_tree({}, {})
-    fetch = Registry(npm={"renovate": {"44.239.1": stamp_ago(days=days_old)}})
+    # main は実際の現在時刻で判定するので、公開の時刻も固定の AGE_NOW でなく現在から数える
+    published = deps.datetime.now(deps.timezone.utc) - deps.timedelta(days=days_old)
+    fetch = Registry(npm={"renovate": {"44.239.1": published.isoformat().replace("+00:00", "Z")}})
     monkeypatch.setattr(deps, "fetch_url", fetch)
     assert deps.main(["age", "--root", str(root), "--renovate-version", "44.239.1"]) == code
     result = json.loads(capsys.readouterr().out)

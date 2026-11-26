@@ -31,6 +31,7 @@ from ndf.progress.gate.asking import (
     presented_id,
     question,
     read_presented,
+    text_sha256,
     release_request_of,
     waiting,
 )
@@ -44,7 +45,7 @@ ACTORS = actors.ACTORS
 
 
 class Observe(Protocol):
-    """今の対象を読む口（質問を渡し、PR の head と承認資料の sha256 を返す）。`material` が偽なら head だけを読む。"""
+    """今の対象を読む口（質問を渡し、PR の head・本文と題の sha256 と承認資料の sha256 を返す）。`material` が偽なら資料を読まない。"""
 
     def __call__(self, q: Question, *, material: bool = True) -> Target: ...
 
@@ -71,7 +72,8 @@ def shared_hub(cwd: Path, hub: Optional[Callable[[], GitHub]] = None) -> Callabl
 
 
 def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = None) -> Observe:
-    """今の対象を読む: PR の head の SHA（GitHub）と、その head の承認資料の sha256。読めなければ回答を受けない（`model.Refused`）。
+    """今の対象を読む: PR の head の SHA・本文と題の sha256（GitHub の同じ 1 回の取得。#4446）、その head の承認資料の
+    sha256、承認の対象（ベースリポジトリ・番号・マージ先）と本番へ反映されるか（#4409）。読めなければ回答を受けない（`model.Refused`）。
 
     資料は今の head を入れた質問の `material_path` で探す（資料は head ごとに別のファイル。#3959）。"""
     get_hub = shared_hub(cwd, hub)
@@ -86,16 +88,18 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
                 found = hub.branch_file(pull.base_ref, production_merge.PROJECT_FILE) if material else None
             except (GitHubError, GitError) as exc:
                 raise model.Refused(f"PR #{q.pr} の head を読めない（マージ先も読めない）ので、回答と対象を照らせない: {exc}") from None
-        head = pull.head_sha if pull is not None else None
+        seen = Target()
+        if pull is not None:
+            seen = Target(pull.head_sha, body=text_sha256(pull.body), title=text_sha256(pull.title))
         if not material:
-            return Target(head, None)
-        path = material_path(root, replace(q, target=Target(head)))
-        sha = material_sha256(path) if path.exists() else None
+            return seen
+        path = material_path(root, replace(q, target=Target(seen.head)))
+        seen = replace(seen, material=material_sha256(path) if path.exists() else None)
         if pull is None or found is None:
-            return Target(head, sha)
+            return seen
         verdict = production_merge.judge_project_text(found.text, pull.base_ref, source_repo=found.repo, repo=hub.repo)
         production = production_merge.reaches_production(verdict)
-        return Target(head, sha, hub.repo, pull.number, pull.base_ref, production)
+        return replace(seen, repo=hub.repo, pr=pull.number, base=pull.base_ref, production=production)
 
     return observe
 
@@ -159,7 +163,8 @@ def _refusal(v: run.View, a: Answer, observe: Observe, root: Optional[Path] = No
     if shown.binding() is None:
         return q, shown.presented(a.seen if a.seen.head is not None else now)
     _check_presented(shown, now, a.seen)
-    return q, replace(shown, material=now.material if now.material is not None else a.seen.material)
+    material = now.material if now.material is not None else a.seen.material
+    return q, replace(shown, material=material, body=a.seen.body, title=a.seen.title)
 
 
 def _check_presented(shown: Target, now: Target, seen: Target) -> None:
@@ -377,8 +382,16 @@ def _same(held: model.Event, a: Answer, machine_id: str, ensure: Callable[[], No
 
 
 def lane_env(env: run.Env) -> run.Env:
-    """スプリントの完了と同じトランザクションで、スプリントを持つレーンの行を終える `Env`（決定 17。レーンの外なら何もしない）。"""
-    return replace(env, ended=lambda conn, machine_id: lane.end_row(conn, machine_id, lane.COMPLETED, run.ACTOR))
+    """スプリントの完了と同じトランザクションで、スプリントを持つレーンの行を終える `Env`（決定 17。レーンの外なら何もしない）。
+
+    あわせて、スプリントが計画のレーンの行にあるかを読む口（読み手役のステップを済ませる判定。#4446）を足す。"""
+    return replace(env, ended=lambda conn, machine_id: lane.end_row(conn, machine_id, lane.COMPLETED, run.ACTOR), in_lane=in_lane)
+
+
+def in_lane(st: store.Store, machine_id: str) -> bool:
+    """スプリントが計画のレーンの行にあるか（`release_request_of` と同じ `lane.sprint_row` で決める）。"""
+    with store.transaction(st) as conn:
+        return lane.sprint_row(conn, machine_id) is not None
 
 
 # 承認の後に加わった範囲（見た head → 今の head）が文書だけか。分からなければ False（出し直す側に倒す）
@@ -457,24 +470,23 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     if "gate_id" not in p:
         return None
     q = question(v, replace(m, action=run.Action.GATE))
-    # head を先に照らし、資料はその結論に要る 1 つだけを読む（#3959）
+    # head を先に照らし、資料はその結論に要る 1 つだけを読む（#3959）。本文と題は head と同じ 1 回の取得で比べる（#4446）
     seen, now = Target.from_dict(p.get("seen")), observe(q, material=False)
+    texts = replace(now, head=None, material=None).differs(seen)
     if p.get("by") == model.MVV_SERVICE:
-        changed = _judged_elsewhere(p, q, seen, now)
-        if changed is None:
-            return None
+        moved = _judged_elsewhere(p, q, seen, now)
     elif seen.head is None or now.head is None or seen.head == now.head:
-        changed = _material_moved(st.root, q, seen)
-        if changed is None:
-            return None
-    elif not seen.production and _docs_only_after(st.root, q, seen, now, docs_only):
+        moved = _material_moved(st.root, q, seen)
+    elif not seen.production and not texts and _docs_only_after(st.root, q, seen, now, docs_only):
         _accept(st.root, q, now)
         return f"承認の後に加わった範囲（{seen.head} → {now.head}）は文書だけなので、リリース承認ゲートを出し直さずに新しい範囲で進める"
     else:
-        changed = f"head の SHA（見た値 {seen.head}・今の値 {now.head}）"
-    why = "回答した後に対象が変わった: " + changed
-    payload = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
-    draft = model.EventDraft(run.STEP_EVENT, run.ACTOR, m.stage.name, payload=payload, rev=v.rev)
+        moved = f"head の SHA（見た値 {seen.head}・今の値 {now.head}）"
+    changed = [*([moved] if moved else []), *texts]
+    if not changed:
+        return None
+    why = "回答した後に対象が変わった: " + " / ".join(changed)
+    draft = _no_report_draft(v, m.stage.name, m.step.id, "waiting", m.progress.generation, why)
     # 比べた後に回答が読まれていれば（同じ回答の事象が今も読む回答でなければ）書かない
     answered, stage = m.event, m.stage.name
     undo: list[bool] = []
@@ -484,7 +496,7 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
         if not _still(now, answered):
             return []
         undo.append(True)
-        return [draft, *_undropped(now, stage, answered)]
+        return [draft, *_reading_reset(now, stage, q.gate), *_undropped(now, stage, answered)]
 
     def after(conn: Any) -> None:
         if undo:
@@ -492,6 +504,110 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
 
     run.append(st, machine_id, build, after)
     return why
+
+
+def _no_report_draft(v: run.View, stage: str, step: str, status: str, generation: int, reason: str) -> model.EventDraft:
+    """報告を持たないステップ記録の事象の下書き（待ちへの書き直しと、未了への戻し）。"""
+    payload = {"step": step, "status": status, "report": None, "generation": generation, "reason": reason}
+    return run.step_event(v, stage, payload)
+
+
+def _reading_reset(v: run.View, stage: str, gate: Optional[str]) -> list[model.EventDraft]:
+    """同じ工程の、承認ゲート `gate` の前の読み手役のステップを未了に戻す事象（#4446）。待ちへ戻すときと同じトランザクションで書く。
+
+    戻すと工程を進める仕組みが読み手役のステップを打ち直し、今の PR の題・本文・head で記録を作り直してから承認ゲートの待ちに入る。
+    読み手役のステップの無い古い定義と、まだ済んでいない読み手役のステップでは何も書かない。"""
+    prog = run.step_progress(v, stage)
+    reading = v.snap.stage(stage).reading_for(gate)
+    if reading is None or reading.id not in prog.done:
+        return []
+    why = "承認ゲートの待ちへ戻したので、読み手役のステップから今の対象で打ち直す"
+    return [_no_report_draft(v, stage, reading.id, stages.RESET, prog.generation, why)]
+
+
+# 承認の前の確認をやり直して待ちを出し直す理由（承認ゲートの待ちの記録に残る）
+REREAD_REASON = "ndf progress reread: 承認の前の確認をやり直し、承認ゲートの待ちを今の対象で出し直す"
+
+
+def reread(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[str, Any]:
+    """`ndf progress reread`: 承認ゲートの待ちを新しい質問の id で書き直し、読み手役のステップを打ち直す（#4446 の待ちの出し直し）。
+
+    待ちの書き直しと読み手役のステップを未了に戻す事象は、`recheck` と同じく 1 回のトランザクションで、読んだ時点の待ちが
+    今も同じときだけ書く（その間に回答が書かれていれば何も書かない）。読み手役のステップの無い古い定義では
+    `ndf document-rebuild gate` を直接打つ（`_reread_direct`）。結果の待ちの知らせは、呼び手（`entry`）が今の対象で作る。
+    """
+    v = run.read(st, machine_id)
+    m = run.decide(v)
+    if m.action != run.Action.GATE or m.stage is None or m.step is None or m.progress is None or not invoke.is_listen(m.step):
+        return result.stopped(TOOL, "precondition", f"ステートマシン {machine_id} の承認ゲートは人の回答を待っていない")
+    stage, step, anchor = m.stage, m.step, m.progress.anchor
+
+    def build(now: run.View) -> list[model.EventDraft]:
+        n = run.decide(now)
+        same = n.action == run.Action.GATE and n.step is not None and n.step.id == step.id and n.progress is not None
+        if not same or n.progress is None or n.progress.anchor != anchor:
+            return []
+        wait = _no_report_draft(now, stage.name, step.id, "waiting", n.progress.generation, REREAD_REASON)
+        return [wait, *_reading_reset(now, stage.name, step.gate)]
+
+    if not run.append(st, machine_id, build):
+        summary = "確認をやり直す前に回答が書かれた。書かれた回答は ndf progress next で読む"
+        return result.result(
+            TOOL, result.OK, summary, metrics={"machine_id": machine_id}, next=result.command("progress", "next", machine_id)
+        )
+    if stage.reading_for(step.gate) is None:
+        return _reread_direct(st, machine_id, cwd, env)
+    return _step_once(st, machine_id, cwd, env)
+
+
+def _reread_direct(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[str, Any]:
+    """読み手役のステップの無い古い定義のスプリントで、`ndf document-rebuild gate` を直接打つ（#4446 の計画の (7)）。
+
+    保存先・結果ファイルと工程の記録から作る引数は、読み手役のステップと同じ `run._reading_run` で足す。
+    `outputs.review_again` が返ったら、同じ工程の
+    設計のレビューと MVV 判定を未了に戻して流し直す（`run.review_again_drafts`）。"""
+    v = run.read(st, machine_id)
+    m = run.decide(v)
+    assert m.stage is not None and m.step is not None and m.progress is not None
+    q = question(v, m)
+    work_dir = run.work_root(st.root, machine_id) / m.stage.id / f"reading-{q.id}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    pr = ["--pr", str(q.pr)] if q.pr is not None else []
+    argv = [invoke.PACKAGE, "document-rebuild", "gate", "--gate", str(m.step.gate), *pr]
+    try:
+        inputs = invoke.resolve_inputs(m.stage, v.context())
+    except invoke.StageInputError as exc:
+        return result.stopped(TOOL, exc.kind, str(exc), items=exc.items)
+    call = invoke.StageRun(invoke.SCRIPT, invoke.PACKAGE, inputs, m.stage.outputs, "none", "reading", {"argv": argv})
+    call = run._reading_run(v, m.stage, m.step, call, work_dir)
+    res = env.invoker(call, cwd, work_dir, None)
+    if res.status != result.OK:
+        return res.report
+    stage, gate = m.stage, m.step.gate
+    run.append(st, machine_id, lambda now: run.review_again_drafts(now, stage, gate, res.report))
+    return _step_once(st, machine_id, cwd, env) if stages.review_again_of(res.report) is None else run.advance(st, machine_id, cwd, env)
+
+
+def _step_once(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[str, Any]:
+    """排他を取り、次の 1 手が実行中の行のステップ（読み手役）なら同じプロセスで 1 つだけ流す。承認ゲート・失敗・終わりなら
+    その結果を返し、続き（設計のレビューへ戻したときなど）があれば作業を起動して `wait` を返す（#4446）。"""
+    if run.is_live(st, machine_id):
+        summary = f"ステートマシン {machine_id} を流す作業が動いている。終わりは wait で待つ"
+        return result.result(
+            TOOL, result.OK, summary, metrics={"machine_id": machine_id}, next=result.command("progress", "wait", machine_id)
+        )
+    with store.run_lock(st, machine_id):
+        d = run.Drive(st, machine_id, cwd, env, inline=True)
+        v = run.read(st, machine_id)
+        m = run.decide(v)
+        if m.action == run.Action.RESUME and m.stage is not None and m.step is not None:
+            d.write(*run._run_step(d, v, m.stage, m.step))
+            d.synced()
+        v = run.read(st, machine_id)
+        m = run.decide(v)
+        if m.action in (run.Action.GATE, run.Action.FAILED, run.Action.DONE):
+            return command.with_warnings(run.report(v, m), before=d.warnings)
+    return run.advance(st, machine_id, cwd, env)
 
 
 def _judged_elsewhere(p: Mapping[str, Any], q: Question, seen: Target, now: Target) -> Optional[str]:

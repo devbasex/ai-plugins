@@ -6,14 +6,15 @@
     "label": {"type": "string", "summary": "形の名前（承認資料に出す）"},
     "reach": {"type": "string", "summary": "利用者へ届く仕組み（承認資料の届き方の 1 行）"},
     "supported": {"type": "boolean", "summary": "release-steps が扱うか"},
-    "why": {"type": "string", "summary": "扱わない理由と、扱う予定のバージョン（supported が偽の行だけ）", "optional": true}
+    "why": {"type": "string", "summary": "扱わない理由と、扱う予定のバージョン（supported が偽の行だけ）", "optional": true},
+    "approve": {"type": "string", "summary": "承認の質問で問う操作（「リリースの Pull Request #<番号>（<題>）を承認し、<approve>してよいですか」。supported が真の行だけ。#4446）", "optional": true}
   },
   "rows": [
-    {"id": "package-plugin", "label": "パッケージ・プラグイン", "reach": "タグと GitHub Release を作り、パッケージの登録先やマーケットプレイスから利用者が取得する", "supported": true},
-    {"id": "service", "label": "サービス", "reach": "本番ブランチへのマージの後に、設定の deliveries が指す CD が環境へ反映する", "supported": true},
+    {"id": "package-plugin", "label": "パッケージ・プラグイン", "reach": "タグと GitHub Release を作り、パッケージの登録先やマーケットプレイスから利用者が取得する", "supported": true, "approve": "タグと GitHub Release を作って公開"},
+    {"id": "service", "label": "サービス", "reach": "本番ブランチへのマージの後に、設定の deliveries が指す CD が環境へ反映する", "supported": true, "approve": "本番ブランチへマージして環境へ反映"},
     {"id": "desktop", "label": "デスクトップアプリ", "reach": "署名・公証したインストーラーを配り、自動更新で届ける", "supported": false, "why": "署名と公証の確認、自動更新の配信の確かめを release-steps が持たず、届いたことを確かめる手段が決まっていない。11.x で扱う"},
-    {"id": "mobile", "label": "モバイルアプリ", "reach": "ストアへ提出し、審査の後に公開する（提出は deliveries の手動の行）", "supported": true},
-    {"id": "procedure", "label": "手順・設定", "reach": "設定の deliveries の手動の行の手順で配る", "supported": true},
-    {"id": "document", "label": "文書（スライド・文書・表計算・ページ）", "reach": "置き先のシステムへ提出する（deliveries の行）", "supported": true}
+    {"id": "mobile", "label": "モバイルアプリ", "reach": "ストアへ提出し、審査の後に公開する（提出は deliveries の手動の行）", "supported": true, "approve": "アプリをストアの審査に提出"},
+    {"id": "procedure", "label": "手順・設定", "reach": "設定の deliveries の手動の行の手順で配る", "supported": true, "approve": "設定の手順で配る"},
+    {"id": "document", "label": "文書（スライド・文書・表計算・ページ）", "reach": "置き先のシステムへ提出する（deliveries の行）", "supported": true, "approve": "置き先のシステムへ提出"}
   ]
 }

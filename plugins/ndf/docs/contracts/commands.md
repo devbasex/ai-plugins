@@ -10,7 +10,7 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
-| `ndf answer` | `machine_id`（string・必須・位置）: 回答するステートマシンの ID<br>`--gate`（string・必須）: 質問の id（承認ゲートの結果の metrics.gate.id）<br>`--result`（string・必須）: 回答の語（承認ゲートの結果の routes のキー）<br>`--reason`（string・必須）<br>`--by`（string・必須）: 回答した者（human・conductor・organizer か service:<主体>）<br>`--key`（string・必須）: 冪等のキー（同じキーの回答し直しは書かない）<br>`--notes`（string・任意）: 変更要求（request_changes）の指摘ファイル<br>`--head`（string・任意）: 見た PR の head の SHA<br>`--material-sha256`（string・任意）: 見た承認資料の sha256<br>`--presentation`（string・任意）: 利用者に示した承認資料を識別する値。提示時に承認対象の PR が特定され、routes にこの値が入っている場合は必須。提示時のコマンドから値をそのまま渡す（資料を出し直すと変わる）<br>`--drop`（array of integer・任意）: 設計承認ゲートで外す課題の番号 |
+| `ndf answer` | `machine_id`（string・必須・位置）: 回答するステートマシンの ID<br>`--gate`（string・必須）: 質問の id（承認ゲートの結果の metrics.gate.id）<br>`--result`（string・必須）: 回答の語（承認ゲートの結果の routes のキー）<br>`--reason`（string・必須）<br>`--by`（string・必須）: 回答した者（human・conductor・organizer か service:<主体>）<br>`--key`（string・必須）: 冪等のキー（同じキーの回答し直しは書かない）<br>`--notes`（string・任意）: 変更要求（request_changes）の指摘ファイル<br>`--head`（string・任意）: 見た PR の head の SHA<br>`--material-sha256`（string・任意）: 見た承認資料の sha256<br>`--body-sha256`（string・任意）: 見た PR の本文の sha256（#4446）<br>`--title-sha256`（string・任意）: 見た PR の題の sha256（承認の質問の文は題から作る。#4446）<br>`--presentation`（string・任意）: 利用者に示した承認資料を識別する値。提示時に承認対象の PR が特定され、routes にこの値が入っている場合は必須。提示時のコマンドから値をそのまま渡す（資料を出し直すと変わる）<br>`--drop`（array of integer・任意）: 設計承認ゲートで外す課題の番号 |
 
 結果の `metrics`: `carried_row`（string か null）・`gate`（object か string）・`gate_id`（string）・`head`（string）・`machine_id`（string）・`move`（string）・`release_request`（object）・`replayed`（boolean）・`rev`（integer）・`seqs`（array of integer）・`stage`（string）・`state`（string か null）・`step`（string）。`items` の要素: `answer`（string）・`at`（string）・`by`（string）・`gate`（string か null）・`gate_id`（string か null）・`head`（string か null）・`key`（string）・`notes`（string か null）・`reason`（string か null）・`seq`（integer）・`source`（string）・`stage`（string か null）・`step`（string か null）
 
@@ -79,9 +79,10 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
+| `ndf document-rebuild gate` | `--gate`（string・必須・値 `design`・`release`）: 承認ゲートの種類<br>`--pr`（integer・任意）: 承認する PR の番号（省けば、設計は作業場所のブランチの PR、リリースは工程の入力の pr）<br>`--material`（string・任意）: リリースの承認資料のファイル（ndf release-steps materials の出力。--gate release だけ）<br>`--reviewed`（string・任意）: 設計のレビューを済ませた再レビュー待ちのコミット<br>`--no-doc-fix`（boolean・任意）: 文書を直させず、残った文として承認資料に書かせる<br>`--state-dir`（string・必須）: 起動指示・承認資料の作業用のコピー・worker の結果ファイルの保存先<br>`--out`（string・必須）: 結果 JSON を書くファイル |
 | `ndf document-rebuild run` | `--base`（string・必須）: ベースブランチの名前（スプリントの PR のマージ先）<br>`--remote`（string・必須）: 起点の参照を探すリモートの名前<br>`--issue`（array of integer・必須）: 工程が扱う課題の番号（1 回以上）<br>`--kind`（array of string・必須・値 `design`・`plan`・`manuscript`）: 選ぶ文書の種類（1 回以上）<br>`--state-dir`（string・必須）: 起動指示と worker の結果ファイルの保存先<br>`--out`（string・必須）: 結果 JSON を書くファイル |
 
-結果の `metrics`: `readers`（array of reader）・`targets`（array of string）。`items` の要素: `doc`（string）・`id`（string）・`text`（string）
+結果の `metrics`: `readers`（array of reader）・`reads`（array of object）・`targets`（array of string）。`items` の要素: `doc`（string）・`id`（string）・`text`（string）
 
 ## `ndf gws`
 
@@ -249,6 +250,7 @@
 | `ndf progress finish` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--output`（string・必須）: 工程の出力の規約に合う JSON のファイル<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress gathered` | `--branch`（string・任意）: スプリントブランチ（省けば worktree のブランチ）<br>`--remote`（string・任意）: リモート名（省けば worktree の設定の remote か既定）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress new` | `name`（string・必須・位置）: スプリント名<br>`--mode`（string・任意）<br>`--issues`（array of integer・任意）<br>`--loop`（string・任意）: 開発ループの行のステートマシンを作る（工程なし。ループの名前）<br>`--pace`（string・任意・既定 `"normal"`）<br>`--disable`（array of string・任意）: <工程>=<理由><br>`--requirements`（string・任意）: 要求と受け入れ条件の出力（工程の出力の規約に合う JSON）<br>`--parent`（string・任意）: 親のステートマシン（レーンのステートマシン）の ID<br>`--carry`（string・任意）: 無効にした工程の出力のキーを、中止したこのステートマシンの文脈から写す<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
+| `ndf progress reread` | `machine_id`（string・必須・位置）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress restore` | `--from`（string・必須）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress retry` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress show` | `machine_id`（string・必須・位置）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
@@ -288,7 +290,7 @@
 | `ndf records mvv signals` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--base`（string・必須）: ベースブランチ |
 | `ndf records preflight` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf records reading add` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--file`（string・必須）: 入力の JSON のファイル |
-| `ndf records reading check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--file`（string・必須）: 入力の JSON のファイル |
+| `ndf records reading check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--gate`（string・必須・値 `design`・`release`）: 承認ゲートの種類<br>`--pr`（integer・必須）: 承認する PR の番号<br>`--material`（string・任意）: 会話のセッションのリリースで present に渡す承認資料のファイル<br>`--questions-out`（string・必須）: 作り直した承認の質問（questions）を書くファイル |
 | `ndf records reading prompt` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--file`（string・必須）: 入力の JSON のファイル |
 | `ndf records spec finalize` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--spec`（array of string・必須）: 溶かした先の確定仕様（複数可）<br>`--remove`（array of string・任意）: 消す設計（複数可）<br>`--source-of`（array of string・任意）: <語>=<ファイル> で語の SSOT を明示する<br>`--message（-m）`（string・任意）: コミットの件名。無ければコミットせずパスだけを出す |
 | `ndf records usage report` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--since`（string・必須）<br>`--until`（string・必須） |
@@ -359,8 +361,9 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
-| `ndf release-steps answer` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--answer`（string・必須・値 `approved`・`rejected`）<br>`--presented`（string・必須）: 提示した HEAD の SHA（present の outputs.head）<br>`--by`（string・必須・値 `user`・`mvv`）: 回答した担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える） |
+| `ndf release-steps answer` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--answer`（string・必須・値 `approved`・`rejected`）<br>`--presented`（string・必須）: 提示した HEAD の SHA（present の outputs.head）<br>`--material-sha256`（string・任意）: 回答した承認資料のファイル全体の SHA-256（--by user で必須。present の routes が固定する。#4446）<br>`--by`（string・必須・値 `user`・`mvv`）: 回答した担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える） |
 | `ndf release-steps approval-check` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--production`（string・必須） |
+| `ndf release-steps approval-state` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須） |
 | `ndf release-steps assemble` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--base`（string・必須）: ベースブランチ（設定 project.json の branch_strategy.branches.base）<br>`--production`（string・必須）: 本番ブランチ（設定 project.json の branch_strategy.branches.production）<br>`--channel`（string・必須・値 `production`・`dev`）<br>`--level`（string・任意・既定 `"patch"`・値 `major`・`minor`・`patch`）<br>`--plugin`（string・任意）: ブランチの名前にバージョンを使う単位（省けば単位の順の先頭）<br>`--units`（array of string・任意）: 集めるスプリントブランチ（release_branch の設定で必須）<br>`--pr`（integer・任意）: 本番の PR の番号（承認の対象が production_pr の設定で必須） |
 | `ndf release-steps cleanup` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--branch`（array of string・必須） |
 | `ndf release-steps config-check` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--before`（string・必須） |
@@ -369,6 +372,7 @@
 | `ndf release-steps merge` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--budget`（number・必須）: 必須のチェックを待つ秒 |
 | `ndf release-steps present` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--material`（string・任意）: 承認資料のファイル（省けば PR の本文） |
 | `ndf release-steps publish` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--revision`（string・必須）<br>`--since`（string・任意）: 前の push の先頭。祖先なら --revision までの first-parent のコミットを古い順にすべて公開する |
+| `ndf release-steps pull-checks` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須） |
 | `ndf release-steps record` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--production`（string・必須）<br>`--production-sha`（string・任意）: 本番へ入れたコミット（strict の squash で閉じた PR の記録に要る） |
 | `ndf release-steps records` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須） |
 | `ndf release-steps sync-base` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--main-dir`（string・必須）<br>`--base`（string・必須） |

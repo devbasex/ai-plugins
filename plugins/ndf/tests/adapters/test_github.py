@@ -262,6 +262,10 @@ def test_pulls_batches_numbers_into_one_query_per_hundred() -> None:
     assert len(queries) == 2
     assert [len(_aliases(q)) for q in queries] == [100, 50]
     assert got[150] is not None and got[150].head_ref == "b150" and got[150].state == "open"
+    # ついでに読む番号は、クエリの残りに入る分だけを足し、呼び出しの回数を変えない
+    queries.clear()
+    got = hub.pulls(range(1, 100), spare=[1, 200, 201])
+    assert len(queries) == 1 and 200 in got and 201 not in got
 
 
 def test_nodes_keeps_read_numbers_when_only_not_found_errors() -> None:

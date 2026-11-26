@@ -5,6 +5,7 @@ git と `ndf worker run` は偽物に替える。
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -20,6 +21,7 @@ from ndf.adapters import git
 from ndf.contracts import causes
 from ndf.domains.crossreview import finish_decide
 from ndf.domains.docrebuild import cli, drive
+from ndf.domains.records import reading
 from ndf.domains.docrebuild.select_decide import Target
 
 HEAD = "a" * 40
@@ -30,6 +32,13 @@ OTHER_DESIGN = "issues/issue-4000-design.md"
 REQ = "issues/issue-75-requirements.md"
 PLAN = "issues/issue-75-plan.md"
 OMITTED_PLAN = "# 計画\n\n省いた文書: 設計書（課題 1・公開インタフェース 変わらない）\n\n## 修正対象\n"
+
+
+@pytest.fixture(autouse=True)
+def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """読ませたものの記録の保存先（テストごと）。"""
+    monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
+    return tmp_path / "mvv-state"
 
 
 class FakeGit:
@@ -56,6 +65,13 @@ class FakeGit:
             return git.Completed(0, sha + "\n", "") if sha else git.Completed(1, "", "")
         if args == ["remote"]:
             return git.Completed(0, "".join(f"{r}\n" for r in self.remotes), "")
+        if args[:2] == ["remote", "get-url"]:
+            return git.Completed(0, "https://github.com/o/r.git\n", "")
+        if args == ["branch", "--show-current"]:
+            return git.Completed(0, "design/x\n", "")
+        if args[0] == "hash-object":
+            paths = args[args.index("--") + 1 :]
+            return git.Completed(0, "".join(blob_of(p) + "\n" for p in paths), "")
         if args[0] == "diff":
             if self.diff_code:
                 return git.Completed(self.diff_code, "", "fatal: no merge base\n")
@@ -64,6 +80,11 @@ class FakeGit:
 
     def git_of(self, cwd: Path) -> git.Git:
         return git.Git(cwd, self)
+
+
+def blob_of(path: str) -> str:
+    """偽の git が返す、文書の blob の SHA（HEAD の SHA と違う値）。"""
+    return hashlib.sha1(path.encode()).hexdigest()
 
 
 def _write(root: Path, rel: str, text: str = "# 文書\n") -> None:
@@ -129,56 +150,53 @@ def _run(cwd: Path, fake_git: FakeGit, worker: FakeWorker, **kw: Any) -> dict[st
 # --- 起点と差分 ---
 
 
-def test_start_point_uses_the_remote_tracking_branch(tmp_path: Path) -> None:
-    fake = FakeGit({"refs/remotes/origin/main": BASE_SHA, "refs/heads/main": LOCAL_SHA})
-    assert drive.start_point(fake.git_of(tmp_path), "main", "origin") == ("refs/remotes/origin/main", BASE_SHA)
-    assert not any(c == ["remote"] for c in fake.calls)
-
-
-def test_start_point_follows_the_given_names(tmp_path: Path) -> None:
-    """条件 5: ベースブランチが `trunk`、リモートが `up` でも同じ規則で起点を決める。"""
-    fake = FakeGit({"refs/remotes/up/trunk": BASE_SHA}, remotes=("up",))
-    assert drive.start_point(fake.git_of(tmp_path), "trunk", "up") == ("refs/remotes/up/trunk", BASE_SHA)
-
-
-@pytest.mark.parametrize("remotes", [("origin",), ()])
-def test_start_point_falls_back_to_the_local_branch(tmp_path: Path, remotes: tuple[str, ...]) -> None:
-    """登録済みでリモート追跡が無いときと、リモートが 1 つも無いときは手元の参照を使う。"""
-    fake = FakeGit({"refs/heads/main": LOCAL_SHA}, remotes=remotes)
-    assert drive.start_point(fake.git_of(tmp_path), "main", "origin") == ("refs/heads/main", LOCAL_SHA)
-
-
-def test_start_point_stops_when_only_other_remotes_exist(tmp_path: Path) -> None:
-    fake = FakeGit({"refs/heads/main": LOCAL_SHA}, remotes=("upstream",))
+@pytest.mark.parametrize(
+    ("refs", "remotes", "base", "remote", "wanted"),
+    [
+        (
+            {"refs/remotes/origin/main": BASE_SHA, "refs/heads/main": LOCAL_SHA},
+            ("origin",),
+            "main",
+            "origin",
+            ("refs/remotes/origin/main", BASE_SHA),
+        ),
+        # 条件 5: ベースブランチが `trunk`、リモートが `up` でも同じ規則で起点を決める
+        ({"refs/remotes/up/trunk": BASE_SHA}, ("up",), "trunk", "up", ("refs/remotes/up/trunk", BASE_SHA)),
+        # 登録済みでリモート追跡が無いときと、リモートが 1 つも無いときは手元の参照を使う
+        ({"refs/heads/main": LOCAL_SHA}, ("origin",), "main", "origin", ("refs/heads/main", LOCAL_SHA)),
+        ({"refs/heads/main": LOCAL_SHA}, (), "main", "origin", ("refs/heads/main", LOCAL_SHA)),
+        ({"refs/heads/main": LOCAL_SHA}, ("upstream",), "main", "origin", ["origin", ".ndf/worktree.json の remote"]),
+        # 条件 11: 起点の参照がどちらも読めなければ、参照の名前を示して止まる
+        ({}, ("origin",), "main", "origin", ["refs/remotes/origin/main", "refs/heads/main"]),
+    ],
+    ids=["tracking", "given-names", "local-registered", "local-no-remote", "other-remotes", "neither"],
+)
+def test_start_point(tmp_path: Path, refs: dict, remotes: tuple, base: str, remote: str, wanted: Any) -> None:
+    """起点はリモート追跡ブランチ、無ければ手元の参照。決められなければ理由（並びの語）を示して止まる。"""
+    fake = FakeGit(refs, remotes=remotes)
+    if isinstance(wanted, tuple):
+        assert drive.start_point(fake.git_of(tmp_path), base, remote) == wanted
+        assert wanted[0].startswith("refs/heads/") or not any(c == ["remote"] for c in fake.calls)
+        return
     with pytest.raises(drive.Precondition) as caught:
-        drive.start_point(fake.git_of(tmp_path), "main", "origin")
-    assert "origin" in caught.value.detail and ".ndf/worktree.json の remote" in caught.value.detail
+        drive.start_point(fake.git_of(tmp_path), base, remote)
+    assert all(w in caught.value.detail for w in wanted)
 
 
-def test_start_point_stops_when_neither_ref_is_readable(tmp_path: Path) -> None:
-    """条件 11: 起点の参照がどちらも読めなければ、参照の名前を示して止まる。"""
-    fake = FakeGit({}, remotes=("origin",))
-    with pytest.raises(drive.Precondition) as caught:
-        drive.start_point(fake.git_of(tmp_path), "main", "origin")
-    assert "refs/remotes/origin/main" in caught.value.detail and "refs/heads/main" in caught.value.detail
-
-
-def test_changed_paths_reads_nul_separated_names(tmp_path: Path) -> None:
-    fake = FakeGit({}, diff=["docs/日本語 の 文書.md", DESIGN])
-    assert drive.diff_paths(fake.git_of(tmp_path), BASE_SHA, HEAD) == ["docs/日本語 の 文書.md", DESIGN]
-    diff = next(c for c in fake.calls if c[0] == "diff")
-    assert "--diff-filter=d" in diff and "-z" in diff and f"{BASE_SHA}...{HEAD}" in diff
-
-
-def test_changed_paths_empty(tmp_path: Path) -> None:
-    assert drive.diff_paths(FakeGit({}).git_of(tmp_path), BASE_SHA, HEAD) == []
-
-
-def test_changed_paths_stops_without_a_merge_base(tmp_path: Path) -> None:
-    fake = FakeGit({}, diff_code=128)
-    with pytest.raises(drive.Precondition):
-        drive.diff_paths(fake.git_of(tmp_path), BASE_SHA, HEAD)
-    assert not any(c[0] == "merge-base" for c in fake.calls)
+@pytest.mark.parametrize(
+    ("diff", "code"), [(["docs/日本語 の 文書.md", DESIGN], 0), ([], 0), ([], 128)], ids=["nul", "empty", "no-merge-base"]
+)
+def test_changed_paths(tmp_path: Path, diff: list, code: int) -> None:
+    """差分は NUL 区切りで読み、消したパスを除く。分岐点が無ければ merge-base を打たずに止まる。"""
+    fake = FakeGit({}, diff=diff, diff_code=code)
+    if code:
+        with pytest.raises(drive.Precondition):
+            drive.diff_paths(fake.git_of(tmp_path), BASE_SHA, HEAD)
+        assert not any(c[0] == "merge-base" for c in fake.calls)
+        return
+    assert drive.diff_paths(fake.git_of(tmp_path), BASE_SHA, HEAD) == diff
+    called = next(c for c in fake.calls if c[0] == "diff")
+    assert "--diff-filter=d" in called and "-z" in called and f"{BASE_SHA}...{HEAD}" in called
 
 
 # --- 作業場所の確かめ ---
@@ -265,11 +283,6 @@ FAIL_THEN_PASS = [{"verdict": "fail", "restatements": ["x"], "reason": "質問 1
     "readers",
     [
         [_reader(DESIGN), _reader(PLAN, "self", reason="実装計画"), _reader("docs/a.md", "self", reason="AI への手順書")],
-        [
-            _reader(DESIGN, "not_run", reason="Tool が無い"),
-            _reader(PLAN, "self", reason="実装計画"),
-            _reader("docs/a.md", "not_run", reason="Tool が無い"),
-        ],
         [_reader(DESIGN, "pass", FAIL_THEN_PASS), _reader(PLAN, "self", reason="実装計画"), _reader("docs/a.md")],
         [
             _reader(DESIGN, "fail", [FAIL_THEN_PASS[0]], reason="2 回目を立てられない"),
@@ -308,6 +321,8 @@ def _gap_for(readers: list, target: Target = Target(DESIGN, "design")) -> list[d
             Target(DESIGN, "design"),
         ),
         ([_reader(DESIGN, "not_run")], Target(DESIGN, "design")),
+        ([_reader(DESIGN, "not_run", reason="Tool が無い")], Target(DESIGN, "design")),
+        ([_reader("docs/a.md", "not_run", reason="Tool が無い")], Target("docs/a.md", "manuscript")),
         ([_reader("docs/a.md", "self")], Target("docs/a.md", "manuscript")),
         ([_reader(DESIGN, "not_run", checks=[{"verdict": "pass", "restatements": ["a"]}], reason="x")], Target(DESIGN, "design")),
         ([_reader(DESIGN, "fail", [{"verdict": "fail", "restatements": ["a"], "reason": "r"}])], Target(DESIGN, "design")),
@@ -428,7 +443,7 @@ def test_drive_launches_only_git_reads_and_worker_run(tmp_path: Path) -> None:
     fake = FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN])
     worker = FakeWorker(_report())
     _run(tmp_path, fake, worker)
-    assert {c[0] for c in fake.calls} <= {"rev-parse", "remote", "diff"}
+    assert {c[0] for c in fake.calls} <= {"rev-parse", "remote", "diff", "branch", "hash-object"}
     assert len(worker.argv) == 1 and worker.argv[0][1:4] == ["worker", "run", "--kind"]
     assert "push も Pull Request の作成・更新もしない" in worker.prompt
 
@@ -587,48 +602,42 @@ def test_drive_names_why_the_start_or_diff_failed(tmp_path: Path, fake: FakeGit,
     assert worker.argv == []
 
 
-def test_drive_stops_before_diff_when_the_start_fails(tmp_path: Path) -> None:
-    """起点を決められなければ差分を読まない。"""
+def test_drive_names_the_start_ref_and_diffs_from_its_sha(tmp_path: Path) -> None:
+    """起点を決められなければ差分を読まない。選んだ文書が無いときの要約は種類と起点の参照の名前を載せ、差分は起点の SHA から HEAD の SHA までの 3 ドット差分で読む。"""
     fake = FakeGit({"HEAD": HEAD}, remotes=("upstream",))
     _run(tmp_path, fake, FakeWorker())
     assert all(c[0] != "diff" for c in fake.calls)
-
-
-def test_drive_names_the_start_ref_when_nothing_is_chosen(tmp_path: Path) -> None:
-    """選んだ文書が無いときの要約は、種類と決めた起点の参照の名前を載せる。"""
     fake = FakeGit({"HEAD": HEAD, "refs/heads/main": LOCAL_SHA}, remotes=())
     got = _run(tmp_path, fake, FakeWorker(), kinds=("design", "plan"))
     assert got["status"] == "ok" and got["items"] == []
     assert got["summary"] == "組み直す文書が無い（種類: design・plan・起点: refs/heads/main）"
-
-
-def test_drive_diffs_from_the_start_sha_to_head(tmp_path: Path) -> None:
-    """差分は起点の SHA から HEAD の SHA までの 3 ドット差分で読む。"""
     fake = FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA})
     _run(tmp_path, fake, FakeWorker())
     diffs = [c for c in fake.calls if c[0] == "diff"]
     assert len(diffs) == 1 and f"{BASE_SHA}...{HEAD}" in diffs[0]
 
 
-def test_drive_stops_when_the_prompt_template_is_unreadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """起動指示のテンプレートを読めなければ worker を起動せず `stopped`（precondition）。"""
-    _write(tmp_path, DESIGN)
+def _no_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     monkeypatch.setattr(drive, "_root", lambda: tmp_path / "no-root")
-    worker = FakeWorker(_report())
-    got = _run(tmp_path, FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN]), worker)
-    assert got["status"] == "stopped" and got["cause"]["kind"] == "precondition"
-    assert got["cause"]["detail"].startswith(f"起動指示のテンプレート {tmp_path / 'no-root' / drive.PROMPT_TEMPLATE} を読めない: ")
-    assert worker.argv == []
+    return f"起動指示のテンプレート {tmp_path / 'no-root' / drive.PROMPT_TEMPLATE} を読めない: "
 
 
-def test_drive_stops_when_the_state_dir_is_unwritable(tmp_path: Path) -> None:
-    """起動指示を保存先へ書けなければ worker を起動せず `stopped`（precondition）。"""
-    _write(tmp_path, DESIGN)
+def _state_is_a_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     (tmp_path / "state").write_text("ファイル", encoding="utf-8")
+    return "起動指示を保存先 "
+
+
+@pytest.mark.parametrize("breaks", [_no_template, _state_is_a_file], ids=["template-unreadable", "state-dir-unwritable"])
+def test_drive_stops_before_launching_when_the_prompt_cannot_be_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, breaks: Any
+) -> None:
+    """起動指示のテンプレートを読めない・保存先へ書けないときは、worker を起動せず `stopped`（precondition）。"""
+    _write(tmp_path, DESIGN)
+    head = breaks(tmp_path, monkeypatch)
     worker = FakeWorker(_report())
     got = _run(tmp_path, FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN]), worker)
     assert got["status"] == "stopped" and got["cause"]["kind"] == "precondition"
-    assert got["cause"]["detail"].startswith("起動指示を保存先 ")
+    assert got["cause"]["detail"].startswith(head)
     assert worker.argv == []
 
 
@@ -691,7 +700,7 @@ def _main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, got: dict[str, Any]) 
 
 
 def test_main_writes_the_same_result_to_out_and_stdout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """条件 12: `--out` の `items` は `id` と `text` を持ち、設計のレビューの読み取り（`as_handed`）が読める。"""
+    """条件 12: `--out` の `items` は `id` と `text` を持ち、設計のレビューの読み取り（`as_handed`）が読める。形の違う結果は差し替えを両方へ書く。"""
     got = {
         "tool": "document-rebuild",
         "status": "ok",
@@ -702,9 +711,6 @@ def test_main_writes_the_same_result_to_out_and_stdout(tmp_path: Path, monkeypat
     code, written, last = _main(tmp_path, monkeypatch, got)
     assert code == 0 and written == got and json.loads(last) == written
     assert [(h.id, h.text) for h in finish_decide.as_handed(written["items"])] == [("add-1", "t")]
-
-
-def test_main_writes_the_replacement_to_both(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     bad = {"tool": "document-rebuild", "status": "ok", "summary": "s", "items": [{"id": "add-1", "text": "t"}], "metrics": {}}
     code, written, last = _main(tmp_path, monkeypatch, bad)
     assert code == causes.exit_code("invalid")
@@ -719,3 +725,49 @@ def test_main_rejects_bad_arguments(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(
         ["run", "--base", "main", "--remote", "o", "--issue", "1", "--kind", "other", "--state-dir", "s", "--out", "o"]
     ) == causes.exit_code("invalid")
+
+
+# --- 読ませた文書の記録（#4446 の Task 3。受け入れ条件 1・5） ---
+
+TWICE = [FAIL_THEN_PASS[0], {"verdict": "fail", "restatements": ["z"], "reason": "質問 2 が誤読された"}]
+
+
+@pytest.mark.parametrize(
+    ("readers", "kinds", "wanted"),
+    [
+        ([_reader(DESIGN, "pass", FAIL_THEN_PASS)], ("design",), [(1, "failed", None), (2, "passed", None)]),
+        (
+            [_reader(DESIGN, "fail", TWICE)],
+            ("design",),
+            [(1, "failed", None), (2, "remained", [{"quote": "質問 2 が誤読された", "why": ""}])],
+        ),
+        # worker 自身が読み直した実装計画は書かない
+        ([_reader(DESIGN), _reader(PLAN, "self", reason="実装計画")], ("design", "plan"), [(1, "passed", None)]),
+        # 条件 5: 読み手役を立てられなければ ok に進まず、記録も書かない
+        ([_reader(DESIGN, "not_run", reason="Tool が無い")], ("design",), "precondition"),
+    ],
+)
+def test_drive_records_each_read_document_by_its_blob(tmp_path: Path, readers: list, kinds: tuple, wanted: Any) -> None:
+    """条件 1: 読み手役が読んだ文書を、確認の id・ブランチ・パス・blob・立場・回・合否で追記し、完了の行を書く。"""
+    _write(tmp_path, DESIGN)
+    _write(tmp_path, PLAN, OMITTED_PLAN)
+    fake = FakeGit({"HEAD": HEAD, "refs/remotes/origin/main": BASE_SHA}, diff=[DESIGN, PLAN])
+    got = _run(tmp_path, fake, FakeWorker(_report(readers=readers)), kinds=kinds)
+    rows = reading.doc_rows()
+    if wanted == "precondition":
+        assert got["status"] == "stopped" and got["cause"]["kind"] == "precondition" and DESIGN in got["cause"]["detail"], got
+        assert rows == []
+        return
+    assert got["status"] == "ok", got
+    reads = [r for r in rows if r["kind"] == "read"]
+    assert [(r["round"], r["verdict"], r.get("quotes")) for r in reads] == wanted
+    assert {(r["repo"], r["branch"], r["gate"], r["pr"], r["name"], r["hash"], r["reader"]) for r in reads} == {
+        ("o/r", "design/x", None, None, DESIGN, blob_of(DESIGN), reading.ENGINEER)
+    }
+    (done,) = [r for r in rows if r["kind"] == "done"]
+    assert done["check"] == reads[0]["check"] and done["question_key"] is None and done["fingerprint"] is None
+    # 記録を書けなければ ok にしない
+    (tmp_path / "mvv-state").rename(tmp_path / "moved")
+    (tmp_path / "mvv-state").write_text("ディレクトリにできない", encoding="utf-8")
+    again = _run(tmp_path, fake, FakeWorker(_report(readers=readers)), kinds=kinds)
+    assert again["status"] == "stopped" and again["cause"]["kind"] == "precondition", again

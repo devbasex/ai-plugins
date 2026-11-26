@@ -63,6 +63,19 @@ _EMAIL = re.compile(r"(?<![\w.+-])(?P<local>[\w.+-]+)@(?P<domain>[A-Za-z0-9-]+(?
 _BARE_REF = re.compile(r"^(?P<label>(?:issue|PR|pr|Issue)\s*)#(?P<number>\d+)$")
 # 公開の書き先へ、非公開のリポジトリの由来を書くときの固定の文（3391-2）。完全な参照は手元の引継ぎ文書だけに置く
 PRIVATE_ORIGIN = "非公開のリポジトリの課題"
+# `scrub` が落とした所へ置く固定の文ごとの、落とす前の値の形（`redacted_pattern`）。どれも短い側から一致させる
+_VALUE_SHAPES = {
+    run_log.MASK: r"[!-~]+?",
+    PRIVATE_REF_TEXT: r"[!-~]*?/[!-~]+?",
+    HOME_TEXT: r"""/(?:home|Users)/[^/\s)\]>"'`]+?""",
+    EMAIL_TEXT: r"[\w.+-]+?@[A-Za-z0-9.-]+?",  # 手元の部分は `_EMAIL` と同じ文字（日本語を含む）
+    ACCOUNT_TEXT: r"[A-Za-z0-9_.-]{3,}?",
+}
+_PLACEHOLDER = re.compile("(" + "|".join(map(re.escape, _VALUE_SHAPES)) + ")")
+# 認証ヘッダーの値は行末まで伏せるので、空白をまたぐ
+_HEADER_BEFORE = re.compile(r"(?i)authorization\s*[:=]\s*$")
+# 固定の文で始まる・終わる引用は、値の途中を候補にしない
+_VALUE_START, _VALUE_END = r"(?<![A-Za-z0-9_-])", r"(?![A-Za-z0-9_-])"
 
 
 class DropKind(StrEnum):
@@ -213,6 +226,27 @@ def scrub(text: str, public: bool, private_repos: Iterable[str] = (), accounts: 
     return Scrubbed(text, dropped)
 
 
+def redacted_pattern(redacted: str) -> re.Pattern[str]:
+    """伏せた後の文 `redacted` を伏せる前の文の中から探す正規表現。固定の文の所は、その種類の値の形（`_VALUE_SHAPES`）に一致させる。
+
+    探す側は伏せ直さない。伏せる対象は実行する環境（アカウント名・秘密の環境変数）と前後の文字で変わり、
+    伏せ直すと前と同じ形にならないためである。値とその後ろの文字は 1 組ずつ確定し（アトミックグループ）、後ろが一致しなくても
+    前の値の長さを選び直さない。固定の文が多い引用で、割り当ての総当たりにならないようにする。
+    """
+    parts = _PLACEHOLDER.split(redacted)
+    out = [re.escape(parts[0]) if parts[0] else _VALUE_START if len(parts) > 1 else ""]
+    pending = ""
+    for before, mark, after in zip(parts[::2], parts[1::2], parts[2::2]):
+        header = mark == run_log.MASK and _HEADER_BEFORE.search(before)
+        pending += (".+?" if header else _VALUE_SHAPES[mark]) + re.escape(after)
+        if after:
+            out.append(f"(?>{pending})")
+            pending = ""
+    if len(parts) > 1 and not parts[-1]:
+        pending += _VALUE_END
+    return re.compile("".join([*out, pending]))
+
+
 # 参照先の公開範囲を確かめられず、どこを伏せるかを決められなかった自由記述の代わりに出す文
 WITHHELD = "（参照先の公開範囲を確かめられず伏せた）"
 
@@ -255,6 +289,8 @@ class Publisher:
     hub: GitHub
     accounts: frozenset[str] = field(default_factory=local_accounts)
     _visibility: Optional[str] = field(default=None, init=False)
+    # 参照先の公開範囲（小文字の名前ごと）。同じエントリポイントでは同じリポジトリを 1 回だけ問う
+    _seen: dict[str, str] = field(default_factory=dict, init=False)
 
     def visibility(self) -> str:
         """書き先の公開範囲（1 つのエントリポイントで 1 回だけ読む）。"""
@@ -275,6 +311,12 @@ class Publisher:
         """
         if not exposed:
             return set()
+        asked, tainted = self._sort_refs(texts, assume_public)
+        self._read_refs(asked)
+        return tainted | {r for r in asked if self._seen.get(r.lower()) != PUBLIC}
+
+    def _sort_refs(self, texts: Sequence[str], assume_public: bool) -> tuple[set[str], set[str]]:
+        """本文の参照を、公開範囲を照会するものと、秘密を含むので照会しないものに分ける（`_private_refs` の対象）。"""
         clean: set[str] = set()
         tainted: set[str] = set()
 
@@ -293,9 +335,21 @@ class Publisher:
                     sort(self.hub.repo, m.span(), secrets)
         # 照会の直前に same_repo と同じ規則（大文字・小文字を区別しない）で名前をまとめ、同じリポジトリを 1 回だけ問う
         dirty = {t.lower() for t in tainted}
-        asked = set({r.lower(): r for r in sorted(clean) if r.lower() not in dirty}.values())
-        seen = self.hub.visibilities(asked) if asked else {}
-        return tainted | {r for r, v in seen.items() if v != PUBLIC}
+        return set({r.lower(): r for r in sorted(clean) if r.lower() not in dirty}.values()), tainted
+
+    def _read_refs(self, refs: set[str]) -> None:
+        unread = {r for r in refs if r.lower() not in self._seen}
+        if unread:
+            self._seen.update({r.lower(): v for r, v in self.hub.visibilities(unread).items()})
+
+    def _read_with_target(self, texts: Sequence[str]) -> None:
+        """書き先の公開範囲をまだ読んでいなければ、本文の参照先と同じ 1 回の照会で読む。"""
+        if self._visibility is not None:
+            return
+        refs, _ = self._sort_refs(texts, False)
+        got = self.hub.visibilities({self.hub.repo, *(r for r in refs if r.lower() not in self._seen)})
+        self._visibility = got[self.hub.repo]
+        self._seen.update({r.lower(): v for r, v in got.items()})
 
     def guarded(self, *texts: str, assume_public: bool = False) -> tuple[list[str], dict[str, int]]:
         """書く本文（題と本文など）を検査した結果と、落とした所の種類ごとの件数の和。
@@ -328,6 +382,20 @@ class Publisher:
     def comment(self, number: int, body: str) -> Published:
         (safe,), dropped = self.guarded(body)
         made = self.hub.rest("POST", f"/repos/{self.hub.repo}/issues/{int(number)}/comments", {"body": safe})
+        return Published(int(number), str(made["html_url"]), dropped)
+
+    def comment_unchanged(self, number: int, body: str, exposed_before: bool = False) -> Optional[Published]:
+        """検査しても変わらない本文だけをコメントで足す。伏せる所があれば何も書かずに None（本文のハッシュを別に持つ呼び手が、
+        持っているハッシュと違う本文を書かないため）。検査は 1 回だけ。
+
+        `exposed_before` は、呼び手が同じ書き先を公開（か読めない）と先に確かめていれば真にする。このときは書き先と参照先の公開範囲を
+        1 回の照会で読む。偽なら書き先を先に読み、非公開・内部の書き先では本文の参照先の名前を照会に含めない。"""
+        if exposed_before:
+            self._read_with_target([body])
+        (safe,), dropped = self.guarded(body)
+        if safe != body:
+            return None
+        made = self.hub.rest("POST", f"/repos/{self.hub.repo}/issues/{int(number)}/comments", {"body": body})
         return Published(int(number), str(made["html_url"]), dropped)
 
     def edit_body(self, number: int, body: str) -> Published:

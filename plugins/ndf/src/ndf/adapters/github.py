@@ -40,11 +40,10 @@ from ndf.adapters.github_rules import NO_RULES, RuleFacts, classic_facts_of, mer
 from ndf.contracts import limits
 
 T = TypeVar("T")
-# GraphQL のエイリアスで引ける番号つきの節点
-NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")
+NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")  # GraphQL のエイリアスで引ける番号つきの節点
 PULL_FIELDS = (  # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
     "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation mergeCommit { oid }"
-    " isInMergeQueue isCrossRepository"
+    " title isInMergeQueue isCrossRepository"
 )
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
@@ -207,8 +206,8 @@ class Pull(NamedTuple):
     author: str
     association: str
     merge_sha: str = ""  # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
-    # マージキューに入っているか（GraphQL で読んだときだけ分かる。REST では偽。#4409 の決定 8）
-    queued: bool = False
+    queued: bool = False  # マージキューに入っているか（GraphQL で読んだときだけ分かる。REST では偽。#4409 の決定 8）
+    title: str = ""  # PR の題（承認の質問の文を作る。#4446）
     cross_repository: bool = False  # head のブランチがフォークにあるか（GraphQL で読んだときだけ埋める）
 
     @property
@@ -220,21 +219,21 @@ class Pull(NamedTuple):
     def from_rest(cls, raw: dict) -> Pull:
         head, base = raw["head"], raw["base"]
         return cls(
-            int(raw["number"]), text_of(raw["state"]).lower(), bool(raw["merged"]), text_of(head["sha"]),
-            text_of(head["ref"]), text_of(base["ref"]), text_of(raw["body"]), text_of(raw["mergeable_state"]).lower(),
-            _login(raw["user"]), text_of(raw["author_association"]).upper(),
-            text_of(raw.get("merge_commit_sha")) if raw["merged"] else "",
+            number=int(raw["number"]), state=text_of(raw["state"]).lower(), merged=bool(raw["merged"]), head_sha=text_of(head["sha"]),
+            head_ref=text_of(head["ref"]), base_ref=text_of(base["ref"]), body=text_of(raw["body"]), title=text_of(raw.get("title")),
+            merge_state=text_of(raw["mergeable_state"]).lower(), author=_login(raw["user"]),
+            association=text_of(raw["author_association"]).upper(), merge_sha=text_of(raw.get("merge_commit_sha")) if raw["merged"] else "",
         )  # fmt: skip
 
     @classmethod
     def from_graphql(cls, raw: dict) -> Pull:
-        state = text_of(raw["state"]).lower()
         return cls(
-            int(raw["number"]), "open" if state == "open" else "closed", bool(raw["merged"]), text_of(raw["headRefOid"]),
-            text_of(raw["headRefName"]), text_of(raw["baseRefName"]), text_of(raw["body"]), text_of(raw["mergeStateStatus"]).lower(),
-            _login(raw["author"]), text_of(raw["authorAssociation"]).upper(),
-            text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
-            raw.get("isInMergeQueue") is True, bool(raw.get("isCrossRepository")),
+            number=int(raw["number"]), state="open" if text_of(raw["state"]).lower() == "open" else "closed", merged=bool(raw["merged"]),
+            head_sha=text_of(raw["headRefOid"]), head_ref=text_of(raw["headRefName"]), base_ref=text_of(raw["baseRefName"]),
+            body=text_of(raw["body"]), title=text_of(raw.get("title")), merge_state=text_of(raw["mergeStateStatus"]).lower(),
+            author=_login(raw["author"]), association=text_of(raw["authorAssociation"]).upper(), queued=raw.get("isInMergeQueue") is True,
+            merge_sha=text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
+            cross_repository=bool(raw.get("isCrossRepository")),
         )  # fmt: skip
 
 
@@ -470,14 +469,18 @@ class GitHub:
         got = self.aliased({str(n): f"{node}(number: {n}) {{ {fields} }}" for n in wanted}, batch)
         return {n: got[str(n)] if isinstance(got[str(n)], dict) else {} for n in wanted}
 
-    def pulls(self, numbers: Iterable[int]) -> dict[int, Optional[Pull]]:
+    def pulls(self, numbers: Iterable[int], spare: Iterable[int] = ()) -> dict[int, Optional[Pull]]:
         """番号ごとの PR を 1 回のクエリ（100 件ごと）で読む。PR でない・無い番号は None。
 
         GraphQL のスロットが一次の上限なら、`github.rest-fallback` 件までは REST のスロットで読み替える（不足 g。二次レート制限は読み替えない）。
+        `spare`（ついでに読めればよい番号）は、`numbers` を読むクエリの 100 件に満たない残りの分だけを読み、呼び出しの回数と読み替えの
+        可否を変えない。残りに入らない番号と、REST へ読み替えたときの番号は、返す辞書に載らない。
         """
         wanted = sorted({int(n) for n in numbers})
+        free = -len(wanted) % int(limits.value("github.graphql-batch", "count"))
+        extra = sorted({int(n) for n in spare} - set(wanted))[:free]
         try:
-            raw = self.nodes(wanted, "pullRequest", PULL_FIELDS)
+            raw = self.nodes([*wanted, *extra], "pullRequest", PULL_FIELDS)
         except GitHubError as exc:
             if exc.quota != GRAPHQL or exc.secondary or len(wanted) > int(limits.value("github.rest-fallback", "count")):
                 raise

@@ -33,6 +33,7 @@ def test_subcommands_keep_their_order():
         "restore",
         "docs-only",
         "gathered",
+        "reread",
     ]
 
 
