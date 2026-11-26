@@ -47,7 +47,7 @@
 - **進め方:**
   1. Task 1 のテストを通す
   2. `none` 以外と設定を読めないとき（`git` の `GitError` を含む）に `ndf v11.0.0` が欠けになるテスト（条件 8）を足して通す
-  3. 条件 4 の経路のテストを `test_release_record.py` に足して通す。対象 PR に、配布識別子 `main abc1234` を持つ本番リリース記録を `ndf release-steps record`（リリースのワークフローが打つ `record.write`）で作る。同じ識別子のリリース後テストの結果を `ndf release-steps verification-record` でその PR に記録し、`ndf records close-check` が読み取れることを確かめる。GitHub は `tests/domains/release/_fakes.py` の偽物で差し替える
+  3. 条件 4 の経路のテストを `test_release_record.py` に足して通す。配布識別子 `main abc1234` を持つ本番リリース記録（`record_decide.render_record` の本文）を、信頼する書き手のコメントとして偽の GitHub の対象 PR に置く。本番リリース記録の書き込み（`ndf release-steps record`・`record.write`）はリリースブランチの名前からバージョン番号を読むのでこの記録を作れず、この課題では変えない。同じ識別子のリリース後テストの結果を `ndf release-steps verification-record` でその PR に記録し、`ndf records close-check` が読み取れることを確かめる。GitHub は `tests/domains/release/_fakes.py` の偽物で差し替える
   4. 整理
 
 ### Task 3: オーガナイザーの承認の後にデプロイの工程が止まることを再現する
@@ -56,13 +56,13 @@
 - **変更内容:** `none` の設定で、オーガナイザーが `main abc1234` を記録して承認した後のデプロイの工程が、判断の求めで止まらず完了し、worker を起動しないことを期待で書く（今は落ちる）
 - **テストの組み方:** ケースごとに Git の子プロセスを増やさない。`test_sprint_templates.py` の `sprint` フィクスチャ（ケースごとに `symbolic-ref`・`commit` などを打つ）は使わない
   - `test_gate_work.py`: 保存先に `values.json` を書き、`_strategy_at` を `version_store.kind: none` の設定を返す関数に差し替え、`exec_` を記録するだけの関数にする。worker を起動しないことは `exec_` が呼ばれないことで確かめる
-  - `test_run.py`: 今ある `st` フィクスチャ（`git init` を 1 回打つ。今の `test_run.py` のケースと同じ）を使う。承認の履歴は、リリース承認ゲートへのオーガナイザーの承認と出力の事象をステートマシンへ追記して作る。プランを流す境界（`invoke` のプランの実行）と `_strategy_at` を差し替え、`git` も worker も起動しない
+  - `test_run.py`: `repo`・`st`・`env` のフィクスチャは使わない。`repo` は `git init` と、後始末で保存先を探す `git rev-parse` を打ち、`st` も保存先を探すのに `git rev-parse` を打つので、ケースごとに Git の子プロセスが 3 回増えるためである。代わりに、`conftest.py` の `root` フィクスチャ（`tmp_path` の下に保存先のディレクトリを作るだけで、後始末でロックを放す）を使う。保存先を探す `command.store_root_of` を `root` を返す関数に差し替え、`durable.prepare_store(root)` の後に `store.open_store(store.default_url(root), root)` でステートマシンを開く。`run.Env` はケースの中で組む。承認の履歴は、リリース承認ゲートへのオーガナイザーの承認と出力の事象をステートマシンへ追記して作る。プランを流す境界（`invoke` のプランの実行）と `_strategy_at` を差し替え、Git も worker も起動しない
 - **満たす受け入れ条件:** 1・2（再現）
 - **進め方:** 失敗するテストを先に書くだけ。実装は Task 4
 
 ### Task 4: 記録済みの値を `values.json` で渡し、worker を起動せずに終える
 
-- **対象ファイル:** `contracts/worker_kinds.py`（`write_released`・`released_of`・`write_values`）・`progress/run.py`（`released_answer`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`prepare_plan`・`_prepared`・`plan_path`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`domains/release/forms_decide.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
+- **対象ファイル:** `contracts/worker_kinds.py`（`write_released`・`released_of`・`write_values`）・`progress/run.py`（`released_answer`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`PreparedPlan.uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`domains/release/forms_decide.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
 - **変更内容:** 詳細設計書の「値のファイル」「工程の進行: 記録済みの値の読み方」「worker の起動」の記録済みの値の分
 - **満たす受け入れ条件:** 1・2
 - **進め方:**
