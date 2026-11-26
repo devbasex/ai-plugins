@@ -56,7 +56,7 @@ issue のことではない。
 
 | 触る領域 | 読む参照 |
 | --- | --- |
-| すべての変更 | [references/design-template.md](references/design-template.md) / [references/design-writing.md](references/design-writing.md) / [references/deliverables.md](references/deliverables.md) / [references/decisions.md](references/decisions.md) / [references/external-survey.md](references/external-survey.md) |
+| すべての変更 | [references/design-template.md](references/design-template.md) / [references/deliverables.md](references/deliverables.md) / [references/decisions.md](references/decisions.md) / [references/external-survey.md](references/external-survey.md) |
 | 構成要素を追加・変更する、または配置・依存・反映先を変える | [references/system-architecture.md](references/system-architecture.md) |
 | 型・クラスを追加または変更する、または型を変えずに状態遷移か処理の順序を変える | [references/structure-behavior.md](references/structure-behavior.md) |
 | 永続データを持つ、またはスキーマを変える | [references/data-structure.md](references/data-structure.md) |
@@ -67,6 +67,15 @@ issue のことではない。
 | **読み手へ渡す文書を作る**（`documentation`） | 共通の [references/layout-common.md](references/layout-common.md) と、出力の形に当たる参照 1 つ（[slide](references/layout-slide.md) / [document](references/layout-document.md) / [spreadsheet](references/layout-spreadsheet.md) / [page](references/layout-page.md)） |
 
 触らない領域の参照は読まない。
+
+[references/design-writing.md](references/design-writing.md) は通読せず、次のセクションを当たるときに読む。
+
+| 当たるとき | 読むセクション |
+| --- | --- |
+| 設計 Pull Request を出す（`legacy-refactor` 以外） | 「承認する人が読む欄」 |
+| 設計 Pull Request を出す `legacy-refactor` | 「`legacy-refactor` の書き方」（そこから指す「承認する人が読む欄」の行を含む） |
+| 「設計の結果」を書く | 「設計の結果の書き方」 |
+| 手順 5（全モード） | 「進む前に突き合わせる対」 |
 
 **`documentation` で形態固有の参照を決めるのは、触る領域ではなく出力の形である。**
 
@@ -92,8 +101,8 @@ issue のことではない。
 
 ### 3. 設計文書を書く
 
-テンプレートは [references/design-template.md](references/design-template.md)、書き方と、各節が `implementation-plan` の
-どのタスクへつながるかは [references/design-writing.md](references/design-writing.md) にある。セクションの並びは `requirements-design` の
+テンプレートは [references/design-template.md](references/design-template.md) にある。書き方は
+[references/design-writing.md](references/design-writing.md) のうち、手順 1 の表で当たるセクションを読む。セクションの並びは `requirements-design` の
 [document-roles.md](../requirements-design/references/document-roles.md)（文書の役割の表）の設計書の行が決め、承認する人が頭から読み、決定で立ち止まる順である。
 
 **次の順に書く。** ［ ］は当たるときだけ書き、当たらなければ見出しごと消す（「無し」と書かない。外部の調査だけは省くときも `省く: <理由>` の 1 行を残す）。

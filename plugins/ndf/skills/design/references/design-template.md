@@ -2,7 +2,7 @@
 
 設計書は、要求仕様の受け入れ条件を「どう解くか」と「なぜその解き方か」を書く文書である。読み手（承認する人・実装する人・レビューする人）は頭から読み、「この解き方でよいか。採らなかった案より良いか」を判断する。
 
-- 書き方: [design-writing.md](design-writing.md)（承認する人が読む欄・設計の結果・テスト設計・書いた後の突き合わせ・`legacy-refactor` の書き方）。領域ごとの書き方は各欄が指す
+- 書き方: [design-writing.md](design-writing.md)（承認する人が読む欄・設計の結果・テスト設計・書いた後の突き合わせ・`legacy-refactor` の書き方）。通読せず、当たるセクションだけを読む。領域ごとの書き方は各欄が指す
 - どの文書にも当たる決まり（記入欄の読み方・当たらない欄の扱いなど）: [document-roles.md の「どの文書にも当たる書き方」](../../requirements-design/references/document-roles.md#どの文書にも当たる書き方)
 - `legacy-refactor` は下の本体でなく、[design-writing.md の「`legacy-refactor` の書き方」](design-writing.md#legacy-refactor-の書き方) の欄を書く
 
