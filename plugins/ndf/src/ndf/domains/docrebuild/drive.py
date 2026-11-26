@@ -197,10 +197,16 @@ def requirements_of(cwd: Path, targets: Sequence[Target]) -> dict[str, list[str]
     return out
 
 
+def regular_file(cwd: Path, rel: str) -> bool:
+    """作業場所の `rel` が、途中のディレクトリを含めてシンボリックリンクを経由しない通常ファイルか。"""
+    linked = any(os.path.islink(cwd / p) for p in Path(rel).parents if p != Path("."))
+    return not linked and _is_regular(cwd / rel)
+
+
 def _is_regular(path: Path) -> bool:
     try:
         return stat.S_ISREG(os.lstat(path).st_mode)
-    except OSError:  # noqa: NDF401 ファイル: 無い・確かめられない要求仕様は起動指示に載せない
+    except OSError:  # noqa: NDF401 ファイル: 無い・確かめられないものは通常ファイルと扱わない
         return False
 
 

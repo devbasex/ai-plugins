@@ -51,6 +51,7 @@ class FakeGit:
         self.pushed: list[str] = []
         self.push_code = 0
         self.local: set[str] = {head}
+        self.modes: dict[str, str] = {}
         for path, text in docs.items():
             self._put(path, text)
 
@@ -68,10 +69,7 @@ class FakeGit:
     def rev_parse(self, ref: str) -> str:
         if ref == "HEAD":
             return self.head
-        sha, _, path = ref.partition(":")
-        if path:
-            return blob(self.trees[sha][path])
-        return sha
+        return ref
 
     def commit_or_none(self, ref: str) -> Optional[str]:
         if ref.startswith("refs/remotes/origin/"):
@@ -104,6 +102,9 @@ class FakeGit:
             return "origin\n"
         if args[:2] == ("branch", "--show-current"):
             return BRANCH + "\n"
+        if args[0] == "ls-tree":
+            tree, paths = self.trees[args[2]], args[args.index("--") + 1 :]
+            return "".join(f"{self.modes.get(p, '100644')} blob {blob(tree[p])}\t{p}\0" for p in paths)
         if args[0] == "hash-object":
             return "".join(blob((self.cwd / p).read_text(encoding="utf-8")) + "\n" for p in args[args.index("--") + 1 :])
         if args[0] == "add":
@@ -368,6 +369,10 @@ def test_stops_when_the_pr_or_the_tree_does_not_match(tmp_path: Path) -> None:
     got = w.run(FakeWorker(), "release", material=tmp_path / "m.md")
     assert got["cause"]["kind"] == "precondition" and "--pr" in got["cause"]["detail"]
     assert w.run(FakeWorker(), "release")["cause"]["detail"].startswith("工程の入力にスプリントの PR")
+    # material があって PR の番号が決まらなければ、どのゲートでもチェックアウト中のブランチから引かない
+    w.hub.fetches = 0
+    got = w.run(FakeWorker(), "design", material=tmp_path / "m.md")
+    assert got["cause"]["kind"] == "precondition" and "--pr" in got["cause"]["detail"] and w.hub.fetches == 0
 
 
 # --- 変更要求（決定 10） ------------------------------------------------------------------------------------
@@ -462,6 +467,40 @@ def test_release_material_route(tmp_path: Path, line_head: str, edit: Any, kind:
     questions = json.loads(Path(got["outputs"]["questions"]).read_text(encoding="utf-8"))["questions"]
     assert questions[0]["question"].endswith("アプリをストアの審査に提出してよいですか")
     assert reading.rows()[-1]["question_key"] == rd.question_key(questions)
+
+
+# --- 通常ファイルだけを開く -----------------------------------------------------------------------------------
+
+
+def _linked_file(root: Path) -> None:
+    """文書を、同じ中身の作業場所の外のファイルを指すシンボリックリンクに替える。"""
+    outside = root / "outside.md"
+    (root / DESIGN).rename(outside)
+    (root / DESIGN).symlink_to(outside)
+
+
+def _linked_dir(root: Path) -> None:
+    """途中のディレクトリをシンボリックリンクに替える。"""
+    (root / "issues").rename(root / "moved")
+    (root / "issues").symlink_to(root / "moved")
+
+
+@pytest.mark.parametrize(
+    ("mode", "link", "after_read"),
+    [("120000", None, False), (None, _linked_file, False), (None, _linked_dir, False), (None, _linked_file, True)],
+    ids=["git-symlink", "worktree-symlink", "symlinked-parent", "replaced-by-the-worker"],
+)
+def test_a_document_that_is_not_a_plain_file_is_not_opened(tmp_path: Path, mode: Optional[str], link: Any, after_read: bool) -> None:
+    """Git 上で通常ファイルでない文書と、作業場所でシンボリックリンクを経由する文書は開かずに止める。"""
+    w = world(tmp_path)
+    if mode is not None:
+        w.git.modes[DESIGN] = mode
+    if link is not None and not after_read:
+        link(tmp_path)
+    worker = FakeWorker(edit=(lambda state_dir: link(state_dir.parent)) if after_read else None)
+    got = w.run(worker)
+    assert got["status"] == "stopped" and got["cause"]["kind"] == "precondition" and "通常ファイル" in got["cause"]["detail"], got
+    assert worker.calls == (1 if after_read else 0) and checks_rows() == [] and w.hub.posted == []
 
 
 # --- 設計のレビューへ戻す（条件 6、Task 5） -------------------------------------------------------------------

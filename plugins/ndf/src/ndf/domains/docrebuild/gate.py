@@ -186,6 +186,8 @@ def fix_head(run: Run) -> None:
     """PR を 1 回取得して head・題・本文を固定する。PR が決まらない・読めなければ `Precondition`。"""
     args = run.args
     number = args.pr if args.pr is not None else _input_pr(args)
+    if number is None and args.material is not None:
+        raise Precondition("--material の経路は PR の番号が要る。--pr か工程の入力の pr で渡す")
     branch = None if number is not None else drive.checked_out(run.g)
     try:
         run.view = pull_view.pull_view(run.hub, number, branch)
@@ -292,12 +294,28 @@ def working_material(run: Run, rows: Sequence[Mapping[str, Any]]) -> tuple[str, 
 
 
 def gate_docs(run: Run) -> dict[str, str]:
-    """設計 PR の文書と、固定した head の blob の SHA。"""
+    """設計 PR の文書と、固定した head の blob の SHA。head か作業場所で通常ファイルでない文書があれば `Precondition`。"""
     _, changed = drive.start_and_changes(run.g, run.pr.base_ref, run.remote)
+    paths = sorted(p for p in changed if GATE_DOCS.match(p))
+    if not paths:  # パスを渡さない ls-tree は根の全件を返す
+        return {}
     try:
-        return {p: run.g.rev_parse(f"{run.pr.head_sha}:{p}") for p in sorted(p for p in changed if GATE_DOCS.match(p))}
+        listed = run.g.run("ls-tree", "-z", run.pr.head_sha, "--", *paths)
     except git.GitError as exc:
         raise Precondition(f"文書の blob を読めない: {exc}") from None
+    entries = {path: meta.split() for meta, _, path in (e.partition("\t") for e in listed.split("\0") if e)}
+    for path in paths:
+        if path not in entries or entries[path][0] not in git.REGULAR_MODES:
+            raise Precondition(f"文書 {path} が PR の head で通常ファイルでないので読ませない")
+        doc_file(run, path)
+    return {path: entries[path][2] for path in paths}
+
+
+def doc_file(run: Run, path: str) -> Path:
+    """作業場所の文書 `path` の、開いてよいパス。通常ファイルでないかシンボリックリンクを経由すれば `Precondition`。"""
+    if not drive.regular_file(run.args.cwd, path):
+        raise Precondition(f"文書 {path} が作業場所で通常ファイルでない（無いか、シンボリックリンクを経由する）ので開かない")
+    return run.args.cwd / path
 
 
 def plan_reads(run: Run, rows: Sequence[Mapping[str, Any]], form: Optional[str]) -> Plan:
@@ -403,6 +421,7 @@ def current_hash(run: Run, plan: Plan, name: str) -> str:
         return plan.key
     if name == reading.MATERIAL:
         return reading.sha256(_file_text(plan.material))
+    doc_file(run, name)
     try:
         return run.g.run("hash-object", "--", name).strip()
     except git.GitError as exc:
@@ -590,7 +609,7 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
     raised = {name: gd.quotes_of(rec["checks"][-1]) for name, rec in found.items() if rec["verdict"] == gd.FAIL}
     hashes = {reading.QUESTION: plan.key, reading.MATERIAL: reading.sha256(draft), **_doc_hashes(run, plan)}
     contents = {reading.QUESTION: gd.question_text(plan.questions), reading.MATERIAL: draft}
-    contents.update({path: _file_text(run.args.cwd / path) for path in plan.docs})
+    contents.update({path: _file_text(doc_file(run, path)) for path in plan.docs})
     parts = {t.name: _file_text(t.file) if t.partial else None for t in plan.targets}
     if reading.MATERIAL in parts and plan.previous is not None:
         # 承認資料は worker が書き足した後に変わった段落とその前後だけを読ませるので、読ませた部分は今の本文から切り出す

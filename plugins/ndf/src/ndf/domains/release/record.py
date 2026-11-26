@@ -115,7 +115,11 @@ def pinned_included(hub: GitHub, number: int, production: str, formats: names_de
     merged = [s for s in after if included_decide.is_unit_merge(s, formats.is_release_branch)]
     if added or merged:
         found = ", ".join([*(f"#{n}" for n in added), *merged])
-        raise RecordError(f"#{number} に組み立ての後で含む PR が増えた（{found}）。版上げの PR を閉じて組み立て直す")
+        steps = (
+            "版上げのブランチにしかない変更を退避し、版上げの PR を閉じてそのブランチを消し（-D や --force が要るときは実行の前に人の承認を得る）、"
+            "退避した変更を組み立ての対象のブランチに入れてから assemble で組み立て直す"
+        )
+        raise RecordError(f"#{number} に組み立ての後で含む PR が増えた（{found}）。{steps}")
     return approved
 
 

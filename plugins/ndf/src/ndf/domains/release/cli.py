@@ -9,7 +9,7 @@
 | `answer` | 会話のセッション | `trail.answer`（回答を証跡に書き、届いたかを確かめる） |
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
 | `approval-state` | 会話のセッション | `land.approval_state`（`merge` と同じ承認の条件の判定を読むだけ） |
-| `pull-checks` | 会話のセッション | `record.pinned_included` と `gather.pull_facts`（版上げの PR の含む PR と最新の CI の結果を、承認資料のセクションの形で出す） |
+| `pull-checks` | 会話のセッション | `record.pinned_included` と `gather.pull_facts`（版上げの PR に含まれる各 PR の最新の CI の結果を取得し、対象の PR と検査の結果を承認資料に貼れる形で出力する） |
 | `merge` | workflow | `land`（証跡の後に、ブランチ戦略の設定の主体と方式で入れ、要ればベースブランチへ戻す PR） |
 | `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後） |
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く。リリースの PR なら記録を持つ PR を示して止まる） |
