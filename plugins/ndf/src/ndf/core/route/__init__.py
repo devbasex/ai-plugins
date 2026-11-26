@@ -103,16 +103,10 @@ REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ]
 # NUL 区切りのパスをプロセス置換から `read -d ''` で 1 つずつ読み、パスの後ろに空の区切り（パスは空にならない）と
 # `git diff` の終了コードを流して受け取る。配列を使うので包みは `sh` でなく `bash` で打つ。先頭がハイフンのパスを
 # オプションと取り違えないよう、パスには `./` を前置して渡す（`ndf refactor run` がリポジトリ相対へ戻す。#3908 の r2-4）
-# PR の番号は gh の標準出力だけから取る。gh は AI エージェントの環境で、成功しても標準エラーに案内（`hint: ...`）を出す。
-# 標準エラーは一時ファイルに分けて受け、止まったときの理由に載せる（`exec` の後は trap が働かないので、その前に消す）
 REFACTOR_WITH_PR = """ref=$1; shift
-errf=$(mktemp "${TMPDIR:-/tmp}/ndf-gh.XXXXXX") || errf=/dev/null
-n=$(gh pr view "$0" --json number --jq .number 2>"$errf"); rc=$?
-why=$(cat "$errf")
-[ "$errf" = /dev/null ] || rm -f "$errf"
-if [ "$rc" != 0 ] || [ -z "$n" ]; then
+if ! n=$(gh pr view "$0" --json number --jq .number 2>&1) || [ -z "$n" ]; then
   exec "$1" contracts emit --tool refactor --status stopped \\
-    --summary "ブランチ $0 の PR が無い（工程「実装」の PR を作ってから打ち直す）" --cause precondition "gh: $why"
+    --summary "ブランチ $0 の PR が無い（工程「実装」の PR を作ってから打ち直す）" --cause precondition "gh: $n"
 fi
 files=() rc=1 end=
 while IFS= read -r -d '' f; do
