@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ndf-settings/launch.schema.json",
+  "title": "起動の設定（.ndf/launch.json）",
+  "description": "full の起動で読み込む Tool と MCP、尋ねずに使ってよい指定、安全装置を外してよいランタイム（#1959）。permissions の全体と、そこから読む MCP の定義ファイルの中身が承認の対象で、利用者のマシンで承認した内容だけが起動に使われる。置かなくてよい",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "編集のときの補完に使うスキーマの位置。読み手は参照しない"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "設定の形のバージョン。読み手は知らないバージョンを読まない"
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "許可を広げる指定。この下だけが承認の対象である",
+      "properties": {
+        "steps": {
+          "type": "object",
+          "description": "工程（worker の作業の名前か Skill の名前。* はすべての工程）ごとの指定。工程の名前が実在するかは確かめない",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "1 つの工程の指定。あるキーは * の同じキーを置き換え、無いキーは * の値を使う",
+            "properties": {
+              "mcp": {
+                "description": "読み込む MCP。inherit は環境の MCP をすべて読む。配列は --mcp-config の形（mcpServers）の定義ファイルの、リポジトリの根からの相対パス",
+                "oneOf": [
+                  {
+                    "const": "inherit"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true
+                  }
+                ]
+              },
+              "load": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z]+$"
+                },
+                "uniqueItems": true,
+                "description": "読み込みに足す組み込みの Tool の名前（--tools）。英字だけの名前で、許可の記法・mcp__ の名前・カンマは書けない。足しただけでは尋ねずに使えない"
+              },
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_-]*(\\(.+\\))?$"
+                },
+                "uniqueItems": true,
+                "description": "尋ねずに使ってよい許可の指定（--allowed-tools）。Tool の名前・名前(指定子)・mcp__<サーバ>__<Tool>。指定子に資格情報を書かず、環境変数の参照（$名前）だけを書く"
+              }
+            }
+          }
+        },
+        "unsandboxed": {
+          "type": "array",
+          "description": "サンドボックスが使えない環境で、安全装置を外して起動してよいランタイム。承認する人は、このマシンが外側で隔離されていることを確かめる",
+          "items": {
+            "type": "string",
+            "enum": [
+              "codex",
+              "agy",
+              "kiro"
+            ]
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  },
+  "x-ndf-location": "worktree",
+  "x-ndf-read-by": [
+    {
+      "by": "工程: full の起動",
+      "when": "worker と Skill を回す起動が、工程の指定と承認を確かめるとき"
+    }
+  ],
+  "examples": [
+    {
+      "version": 1,
+      "permissions": {
+        "steps": {
+          "*": {
+            "load": [
+              "LSP"
+            ]
+          },
+          "design": {
+            "mcp": "inherit"
+          },
+          "impl": {
+            "mcp": [
+              ".ndf/mcp/search.json"
+            ],
+            "allow": [
+              "mcp__search__query"
+            ]
+          }
+        },
+        "unsandboxed": [
+          "codex"
+        ]
+      }
+    }
+  ]
+}

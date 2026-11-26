@@ -287,6 +287,12 @@ def broken_rule(error: ValidationError) -> str:
     return f"{rule}: {error.message}" if error.validator == "required" else rule
 
 
+def broken_places(instance: Any, rel: str) -> list[str]:
+    """`instance` が破った `contracts/<rel>` のスキーマの、入力の場所と規則の名前（`<場所>（<規則>）`・昇順）。値を含まない。"""
+    found = _schema_validator(rel).iter_errors(instance)
+    return sorted(f"{'/'.join(str(p) for p in e.absolute_path) or '(最上位)'}（{e.validator}）" for e in found)
+
+
 def require_schema(instance: Any, rel: str, error_cls: type[ContractError], label: str) -> None:
     """`instance` が `contracts/<rel>` のスキーマに合わなければ `error_cls`（`<label> の形が違う: <誤り>`）を投げる。"""
     _refuse(schema_errors(instance, rel), error_cls, label)
