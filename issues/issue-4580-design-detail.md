@@ -70,7 +70,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | --- | --- | --- | --- | --- |
 | `Flow` | `progress/flow.py` | 新設 | `@dataclass(frozen=True) Flow(kind: str \| None, stages: Mapping[str, Mapping], modes: Mapping[str, Mapping[str, Mapping]], close: Mapping[str, CloseRule], declared: bool)` | 読んだ流れの設定。`declared` は `workflow` のどれかの項目を書いたか |
 | `CloseRule` | `progress/flow.py` | 新設 | `NamedTuple CloseRule(required: bool, reason: str \| None)` | 閉じる条件 1 つの要否と理由 |
-| `FlowItem` | `progress/flow.py` | 新設 | `NamedTuple FlowItem(kind: str, where: str, reason: str)` | 誤りか食い違いの 1 件（`kind` は設計書の「設定の確かめが示す食い違い」の 6 つ） |
+| `FlowItem` | `progress/flow.py` | 新設 | `NamedTuple FlowItem(kind: str, where: str, reason: str)` | 誤りか食い違いの 1 件（`kind` は設計書の「設定の確かめが示す食い違い」の 6 つと、形の誤りの `flow_invalid`） |
 | `read_flow` | `progress/flow.py` | 新設 | `read_flow(root: Path) -> Flow` | `.ndf/project.json` の `workflow` を読み、形を確かめて `Flow` にする |
 | `close_rules` | `progress/flow.py` | 新設 | `close_rules(flow: Flow) -> dict[str, CloseRule]` | `release_verification`・`retrospective_line` の 2 つを、省略を `required: true` で埋めて返す |
 | `kind_defaults` | `progress/flow.py` | 新設 | `kind_defaults(kind: str) -> dict[str, dict]` | 種類の既定の工程の指定（理由は「種類 <名前> の既定: …」で始める） |
@@ -138,7 +138,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | --- | --- | --- | --- |
 | `read_flow` | 4 項目を読む | ファイル無し・`workflow` 無しで `declared` が偽 | 理由の無い `required: false` で `ContractError`、構文の誤りで `ContractError` |
 | `close_rules` | 外した条件の理由を返す | 省略と `required: true` が同じ | — |
-| `merged_stages` | 3 層の順に勝つ | 同じ工程を有効に戻す層がある | — |
+| `merged_stages` | 同じ工程の指定が複数の層にあるとき、後の層（種類の既定 → `stages` → `modes.<モード>.stages` の順）の指定で丸ごと置き換える | 同じ工程を有効に戻す層がある | — |
 | `creation_errors` | 誤りの無い設定で空 | 共通の `stages` に別のモードだけの工程があっても空 | 知らない種類・無いモード・モードに無い工程・承認ゲートを別の層で有効に戻しても `flow_gate_disabled`（テスト用の工程定義の `gates` で決まる） |
 | `input_missing` | 前の有効な工程が作るキーは誤りにしない | `optional_inputs` だけを作る工程・`when` で省く工程 | 唯一の作り手を無効にすると `flow_input_missing` |
 | `conflicts` | 食い違いの無い設定で空 | 工程表に無い工程・`when` で省く工程は `flow_close_conflict` にしない | 無効にしたリリース後テストと `release_verification` の要求で `flow_close_conflict`、`none` と `versioned: true` で `flow_version_conflict` |
@@ -191,7 +191,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_flow_items` | 流れの設定の形の誤り | `read_flow` の `ContractError` | `_flow_items` | 既定値で続ける（`flow_unknown_name` と同じ並びに、形の誤りの 1 件として載せる） | 終了コードは変えない（決定 8） | 読み取りだけ。再実行できる |
+| `_flow_items` | 流れの設定の形の誤り | `read_flow` の `ContractError` | `_flow_items` | 既定値で続ける（`kind` が `flow_invalid` の 1 件として載せる。`flow_invalid` は `project.result.schema.json` の `flow_*` の一覧に、設計書の 6 つと並べて足す） | 終了コードは変えない（決定 8） | 読み取りだけ。再実行できる |
 
 ### 単体テストの観点
 
@@ -452,13 +452,14 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `permission` | `adapters/github.py` | 変更 | 今と同じ | 返す値は今と同じ（403・404 は `none`）。ただし、403・404 で変換した `none` は `_permissions` に入れず、照会できなかった書き手の集合（`_unreadable`）に入れる。GitHub が返した `none` と、照会できずに `none` と読んだものを保存の上で分けるためである |
 | `_read_permission` | `adapters/github.py` | 変更 | `_read_permission(self, login: str) -> str \| None` | 上限でない 403・404 で `None` を返す（変換しない）。`none` への変換は `permission` が行う |
 
-- `permission_strict`
-  - 事後条件: `login` が `_unreadable` にあれば、照会し直さずに `PermissionUnknown` を投げる。同じ実行で `permission` が先に照会に失敗していても、照会できなかった書き手を権限が無い書き手として除かない
-  - 事後条件: `_permissions` にある値は、`none` を含めて GitHub が 200 で返した値だけで、そのまま返す
 | `trusts_strict` | `adapters/github.py` | 新設 | `trusts_strict(self, authored: Authored) -> bool` | `trusts` と同じ区分の扱いで、照会に `permission_strict` を使う |
 | `branch_activity` | `adapters/github.py` | 新設 | `branch_activity(self, branch: str) -> Iterator[dict]` | `GET /repos/{repo}/activity?ref=refs/heads/<branch>` を新しい順に 1 ページずつ返す（呼び出し元が打ち切れる） |
 | `workflow_runs` | `adapters/github.py` | 新設 | `workflow_runs(self, workflow: str, branch: str, commit: str, timeout: float \| None = None) -> list[dict]` | `GET /actions/workflows/<workflow>/runs?branch=&head_sha=`。`timeout` はこの照会の時間の上限（`None` は今の既定） |
 | `delete_comment` | `adapters/github.py` | 新設 | `delete_comment(self, comment_id: int) -> None` | `DELETE /issues/comments/<id>` |
+
+- `permission_strict`
+  - 事後条件: `login` が `_unreadable` にあれば、照会し直さずに `PermissionUnknown` を投げる。同じ実行で `permission` が先に照会に失敗していても、照会できなかった書き手を権限が無い書き手として除かない
+  - 事後条件: `_permissions` にある値は、`none` を含めて GitHub が 200 で返した値だけで、そのまま返す
 
 ### 異常系の処理
 
