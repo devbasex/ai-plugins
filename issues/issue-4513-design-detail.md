@@ -10,7 +10,7 @@
 | 工程・試行・プラン・ステップ | 工程（デプロイなど）は retry の単位である。試行は、工程の retry から次の retry までの 1 回分を指す。1 つの試行の中で、プランは何回か流れる（承認の回答の後・自動の打ち直し）。プランはステップを順に流す |
 | 判断の求め | worker が `status: gate` の結果を返して、conductor の判断を待つこと |
 
-**別ファイルにした理由**: 別ファイルにする条件は「新設する関数が 2 つ以上」か「シグネチャを変える関数がある」で、この設計は両方に当たる。新設は 10 を超える（`required_outputs`・`approvals`・`released_outcome` など）。シグネチャの変更は 10（`require_outputs`・`_add_outputs`・`work_argv`・`work_prompt`・`_work_handoff`・`write_values` など）である。条件は `requirements-design` の `document-roles.md` の「詳細設計を別ファイルにする条件」にある。
+**別ファイルにした理由**: 別ファイルにする条件は「新設する関数が 2 つ以上」か「シグネチャを変える関数がある」で、この設計は両方に当たる。新設は 10 を超える（`required_outputs`・`released_answer`・`released_outcome` など）。シグネチャの変更は 10（`require_outputs`・`_add_outputs`・`work_argv`・`work_prompt`・`_work_handoff`・`write_values` など）である。条件は `requirements-design` の `document-roles.md` の「詳細設計を別ファイルにする条件」にある。
 
 ## 地図
 
@@ -57,7 +57,7 @@ plugins/ndf/
 | `src/ndf/contracts/worker_kinds.py` | 変更 | `values.json` の形と読み書き | — | モジュール | `write_released`（新設）・`released_of`（新設）・`write_values`（変更） |
 | `src/ndf/progress/definition.py` | 変更 | 工程の定義と規約の読み手 | `contracts` | モジュール | `required_outputs`（新設） |
 | `src/ndf/progress/plan/__init__.py` | 変更 | まとめたリリースの回答の記録 | `definition` | モジュール | `record_release`（変更） |
-| `src/ndf/progress/run.py` | 変更 | 工程の進行 | `invoke`・`definition`・`stages` | `Approvals`（新設）・モジュール | `approvals`（新設）・`approved_seen`・`_prepare`・`_run_step`・`_step_draft`・`_finish_stage`（変更） |
+| `src/ndf/progress/run.py` | 変更 | 工程の進行 | `invoke`・`definition`・`stages` | モジュール | `released_answer`（新設）・`_prepare`・`_run_step`・`_step_draft`・`_finish_stage`（変更） |
 | `src/ndf/progress/invoke.py` | 変更 | ステップの呼び出し | `worker_kinds`・`plan` | `StageRun`・`PreparedPlan`・モジュール | `StageRun.released`（新設の欄）・`PreparedPlan.released`（新設の欄）・`uses_released`（新設）・`answered_gap_detail`（新設）・`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
 | `src/ndf/core/route/__init__.py` | 変更 | テンプレートからプランを組む | — | モジュール | `rendered`・`_built`（新設）・`render`（変更） |
 | `src/ndf/progress/gate/entry.py` | 変更 | `ndf answer work` | `worker_kinds`・`branch_strategy`・`forms_decide` | `Released`（新設）・`WorkHandoff`・モジュール | `released_outcome`（新設）・`_strategy_at`（新設）・`WorkHandoff.version_number`（新設の欄）・`_cmd_work`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`（変更） |
@@ -137,15 +137,13 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Approvals` | `src/ndf/progress/run.py` | 新設 | `class Approvals(NamedTuple): seen: Optional[dict[str, Any]]; released: Optional[str]` | 承認の履歴から読んだ 2 つの値を渡す |
-| `approvals` | `src/ndf/progress/run.py` | 新設 | `approvals(v: View, stage: str, root: Path, *, released: bool) -> Approvals` | 工程の事象を新しい順に 1 回だけたどり、今の `approved_seen` の値（`seen`）と、`released` が真ならリリース承認ゲートへのオーガナイザーの承認が書いた `product_version`（`released`）を返す |
-| `approved_seen` | `src/ndf/progress/run.py` | 変更 | 今のまま | `approvals(v, stage, root, released=False).seen` を返す（ほかの呼び出し元は変えない） |
-| `StageRun.released` | `src/ndf/progress/invoke.py` | 新設 | `released: Optional[str] = None`（データクラスの欄） | ステップの呼び出しへ記録済みの値を渡す |
-| `_run_step`・`_prepare` | `src/ndf/progress/run.py` | 変更 | 今のまま | `approved_seen` の代わりに `approvals` を 1 回呼び、`seen` と `released` を `StageRun` に入れる。`released` は、ステップがプランのとき（`invoke.kind_of(step) == invoke.PLAN`）だけ真にする |
+| `released_answer` | `src/ndf/progress/run.py` | 新設 | `released_answer(v: View, stage: str) -> Optional[str]` | 工程の事象を新しい順にたどり、リリース承認ゲートへの最後の回答で止まる。その回答がオーガナイザーの承認で、値を書いていれば `product_version` を返す |
+| `StageRun.released` | `src/ndf/progress/invoke.py` | 新設 | `released: Callable[[], Optional[str]] = _no_released`（データクラスの欄。既定は `None` を返す関数） | 記録済みの値を読む関数を、ステップの呼び出しへ渡す。呼ばれるまで履歴をたどらない |
+| `_run_step`・`_prepare` | `src/ndf/progress/run.py` | 変更 | 今のまま | `approved_seen` は今のまま呼ぶ。ステップがプランのとき（`invoke.kind_of(step) == invoke.PLAN`）は、`released_answer(v, stage)` を初回の呼び出しで 1 回だけ打つ関数（`functools.cache` で包む）を `StageRun.released` に入れる。ここでは呼ばない |
 | `PreparedPlan` | `src/ndf/progress/invoke.py` | 変更 | 欄 `released: Optional[str]` を足す | 組んだか読んだ `values.json` が今持つ `released_version` を渡す |
-| `prepare_plan` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 入力の検査で回している作業の一覧（`route.kinds_of`）を `uses_released` に渡して判定する。使うプランなら `write_values` に `run.released` を渡し、最初の書き込みで `released_version` まで書く |
+| `prepare_plan` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 入力の検査で回している作業の一覧（`route.kinds_of`）を `uses_released` に渡して判定する。使うプランのときだけ `run.released()` を呼び、`write_values` に渡して最初の書き込みで `released_version` まで書く。使わないプランでは呼ばない |
 | `_prepared` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 使い回す `values.json` から `released_of` で読んだ値を `PreparedPlan.released` に入れる。判定はしない |
-| `plan_path` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | `route.render` の代わりに `route.rendered` でプランを組み、一緒に返る作業の一覧を `uses_released` に渡して判定する。`uses_released` が真で、かつ `PreparedPlan.released` と `run.released` が違うときだけ、プランを書く前に `write_released(work_dir, run.released)` を打つ |
+| `plan_path` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | `route.render` の代わりに `route.rendered` でプランを組み、一緒に返る作業の一覧を `uses_released` に渡して判定する。`uses_released` が真のときだけ `run.released()` を呼ぶ。その値が `PreparedPlan.released` と違うときだけ、プランを書く前に `write_released(work_dir, 値)` を打つ。偽なら `run.released()` を呼ばない |
 | `_built` | `src/ndf/core/route/__init__.py` | 新設 | `_built(t: Template, given: Mapping[str, Value], local_tests: bool) -> tuple[dict[str, Any], dict[str, Any]]` | 今の `render` の中身を移し、組んだプランと、埋める前に開いたプランの形（`expanded` の戻り値）を返す |
 | `rendered` | `src/ndf/core/route/__init__.py` | 新設 | `rendered(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> tuple[dict[str, Any], list[str]]` | `_built` が返した開いた形から `work_names` で作業の名前（重なりを除く）を取り、組んだプランと一緒に返す |
 | `render` | `src/ndf/core/route/__init__.py` | 変更 | 今のまま | `_built` の 1 つ目の値を返す。`work_names` は打たない |
@@ -172,11 +170,13 @@ plugins/ndf/
 
 値が前と同じなら書き直さない。そのため、`values.json` を書き直すのは、試行の中で記録済みの値が変わったとき（承認の回答で値が入った、または消えた）だけになる。
 
-- `approvals`
+**リリース承認ゲートの回答は、プランが配布識別子を使うと分かってから探す。** プランが配布識別子を使うかは、作業の一覧（`prepare_plan` の入力の検査の一覧と、`plan_path` の `route.rendered` の一覧）を見るまで分からない。工程の進行は、プランを呼ぶ前に探すかどうかを決めない。探す関数を `StageRun.released` に入れて渡し、`prepare_plan` と `plan_path` が `uses_released` を真と判定したときだけ呼ぶ。`approved_seen` は、今と同じく直近の承認で探索を終える。そのため、配布識別子を使わないプランでは、リリース承認が無くても残りの履歴をたどらない。
+
+- `released_answer`
   - 事前条件: `v` は同じ工程の事象を持つステートマシンの読み取り
-  - 事後条件: `seen` は今の `approved_seen` と同じ値である。`released` は、引数 `released` が真なら設計文書の「記録済みの値の読み方」の手順 1〜4 の結果で、値が無いか引数が偽なら `None`
+  - 事後条件: 設計文書の「記録済みの値の読み方」の手順 1〜4 の結果を返す。値が無ければ `None`
   - 副作用: 無し（読むだけ）
-- `released` に選ぶのは、リリース承認ゲート（ステップ `release-gate`）への最後の回答である。その事象は `payload.kind == LISTEN` で、`payload.gate` に定数 `RELEASE_GATE`（`gate/asking.py`）を持つ。定数の値はステップ `release` の名前と同じ文字列 `release` だが、指すものは違う。worker の判断の求めへの回答はステップ `release` への回答で、`kind` が `plan` であり `gate` を持たないので、この条件で除ける。`seen` を選ぶ条件（工程の最新の承認）は回答の `gate` を見ないので、`released` には別の条件で当てる
+- `released_answer` が選ぶのは、リリース承認ゲート（ステップ `release-gate`）への最後の回答である。その事象は `payload.kind == LISTEN` で、`payload.gate` に定数 `RELEASE_GATE`（`gate/asking.py`）を持つ。定数の値はステップ `release` の名前と同じ文字列 `release` だが、指すものは違う。worker の判断の求めへの回答はステップ `release` への回答で、`kind` が `plan` であり `gate` を持たないので、この条件で除ける。`approved_seen` が選ぶ条件（工程の最新の承認）は回答の `gate` を見ないので、`released_answer` は別の条件で当てる
 - 回答の次の事象（事象の番号 `seq` が回答の `seq + 1` の事象）は、新しい順にたどる途中で 1 つ前に見た事象である。たどり直さずに、見た事象を 1 つ覚えておいて引く。種類が `stages.OUTPUTS_EVENT` のときだけ `payload.outputs.product_version` を読む
 
 ここでの「試行」は、工程の retry から次の retry までの 1 回分を指す。1 つの試行の中でプランは何回か流れる（承認の回答の後・自動の打ち直し）。
@@ -191,21 +191,21 @@ plugins/ndf/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `approvals`（`released`） | 引数 `released` が偽 | `None`。リリース承認ゲートの回答を探さない |
-| `approvals`（`released`） | 該当の回答が無い | `None` |
-| `approvals`（`released`） | 回答が `approved` でない、または `by` が `organizer` でない | `None` |
-| `approvals`（`released`） | 次の事象が出力の事象でない、または `product_version` が無い・空白だけ | `None` |
-| `approvals`（`released`） | 上のどれでもない | `product_version` の文字列をそのまま |
+| `StageRun.released` を呼ぶか | 作業の一覧に配布識別子を使う作業が無い（`uses_released` が偽）、またはプランでないステップ | 呼ばない。リリース承認ゲートの回答を探さない |
+| `released_answer` | 該当の回答が無い | `None` |
+| `released_answer` | 回答が `approved` でない、または `by` が `organizer` でない | `None` |
+| `released_answer` | 次の事象が出力の事象でない、または `product_version` が無い・空白だけ | `None` |
+| `released_answer` | 上のどれでもない | `product_version` の文字列をそのまま |
 
-- 繰り返しの終わる条件: 事象を新しい順にたどり、`seen` と（引数 `released` が真なら）`released` の両方が決まった所で終える
-- 計算量の注意: 1 つの工程の事象の数に比例する。今の `_run_step` は `approved_seen` で 1 回たどる。直した後もたどるのは `approvals` の 1 回だけで、たどる長さは 2 つの回答のうち古い方までである。プランでないステップ（skill・script・承認ゲートなど）では、リリース承認ゲートの回答を探さないので、今と同じ所で終わる
+- 繰り返しの終わる条件: 事象を新しい順にたどり、リリース承認ゲートへの最後の回答を見た所で終える
+- 計算量の注意: 1 つの工程の事象の数に比例する。`approved_seen` のたどり方は今と同じである。配布識別子を使うプランでは、`released_answer` がリリース承認ゲートへの最後の回答まで 1 回たどる。1 回のプランの呼び出しの中で `prepare_plan` と `plan_path` が両方とも値を求めても、`functools.cache` で包むので、たどるのは 1 回である。配布識別子を使わないプランとプランでないステップ（skill・script・承認ゲートなど）では、`released_answer` を呼ばないので、今と同じ所で終わる
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `approvals` | オーガナイザーの承認の後の値を `released` に返し、`seen` が今の `approved_seen` と同じ | 後に worker の判断の求めへの `approved` があっても前者を返す。引数 `released` が偽なら `released` は `None` | 次のどれかなら `released` は `None`: (a) 承認したのがオーガナイザーでなく、利用者か MVV 判定である (b) 回答が却下である (c) 回答の直後の事象が出力の事象でない |
-| `plan_path` | 前の試行の `values.json` が残っていても、今の値で書き直す | 値が無い回は `released_version` を消す。値が前と同じ回と、記録済みの値を使わないプランでは `write_released` が呼ばれない | — |
+| `released_answer` | オーガナイザーの承認の後の値を返す | 後に worker の判断の求めへの `approved` があっても前者を返す | 次のどれかなら `None`: (a) 承認したのがオーガナイザーでなく、利用者か MVV 判定である (b) 回答が却下である (c) 回答の直後の事象が出力の事象でない |
+| `plan_path` | 前の試行の `values.json` が残っていても、今の値で書き直す | 値が無い回は `released_version` を消す。値が前と同じ回と、記録済みの値を使わないプランでは `write_released` が呼ばれない | 記録済みの値を使わないプランでは `run.released` が呼ばれない（呼ぶと失敗する関数を渡して確かめる） |
 | `plan_path`（判定） | 前の NDF が `release` の無いテンプレートで書いた `values.json` が残っていても、今のテンプレートに `release` があれば `write_released` を打つ（同じ名前のプランが変わった後の再開） | 今のテンプレートに `release` が無ければ、`values.json` に `released_version` が残っていても `write_released` を打たない | — |
 | `rendered` | 組んだプランが `render` と同じで、作業の名前が `kinds_of` と同じ並び | `{{worker}}` の無いテンプレートでは空の並び | 組んだプランの誤りは `render` と同じ `RouteError` |
 | `uses_released` | `release` を含む並びで真 | 空の並びで偽 | 作業の定義に無い名前は `KeyError`（`kind_gaps` と同じ） |
