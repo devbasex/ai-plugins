@@ -36,15 +36,14 @@ from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome,
 
 # 呼び手（`ndf.domains.release.land`）が github から読む、github_merge の名前
 from ndf.adapters.github_merge import MERGE_COMMIT as MERGE_COMMIT
+
+# `Pull`・`Authored`・`text_of` は呼び手が github から読む名前でもある
+from ndf.adapters.github_pulls import PULL_FIELDS, Authored, Pull, account_id_of, target_of, text_of
 from ndf.adapters.github_rules import NO_RULES, RuleFacts, classic_facts_of, merge_facts, rule_facts_of
 from ndf.contracts import limits
 
 T = TypeVar("T")
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")  # GraphQL のエイリアスで引ける番号つきの節点
-PULL_FIELDS = (  # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
-    "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation mergeCommit { oid }"
-    " title isInMergeQueue isCrossRepository"
-)
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
 # 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は contracts/limits/ の github.check-runs・github.list-pages）
@@ -142,99 +141,11 @@ def client(
     return Client(auth if auth is not None else token(), http_cache=True, auto_retry=retry, transport=transport, **options)
 
 
-def text_of(value: Any) -> str:
-    """文字列ならそのまま、ほかの値（None など）は空文字。"""
-    return value if isinstance(value, str) else ""
-
-
-def _login(user: Any) -> str:
-    """書き手の login。消えたアカウント（REST の `user`・GraphQL の `author` が null）は空文字。"""
-    return text_of(user["login"]) if isinstance(user, dict) else ""
-
-
-def _account_id(raw: Any) -> int:
-    """GitHub が発行するアカウント ID（REST の `user.id`・GraphQL の `databaseId`）。無い・読めなければ 0。"""
-    if not isinstance(raw, dict):
-        return 0
-    got = raw["id"] if "id" in raw else raw["databaseId"] if "databaseId" in raw else None
-    return got if isinstance(got, int) and not isinstance(got, bool) and got > 0 else 0
-
-
 class Viewer(NamedTuple):
     """token の利用者。`account_id` は GitHub が発行するアカウント ID で、読めなければ 0（`login` は表示に使うだけ）。"""
 
     login: str
     account_id: int
-
-
-class Authored(NamedTuple):
-    """書き手の付いた本文（Issue・PR・コメント）。`association` は GitHub の author_association（大文字）。
-
-    信用の区分は対象リポジトリでの権限で決まるため、`GitHub.trusts` が判定する（#3364）。
-    """
-
-    author: str
-    association: str
-    body: str
-    # コメントの URL（REST の `html_url`。迂回の記録が照らした証跡を指す。#3506）。無ければ空
-    url: str = ""
-    # 作成の後に編集されたか（REST の `updated_at` が `created_at` と違う）。編集された証跡は承認に数えない（#3506）
-    edited: bool = False
-    # 書き手のアカウント ID（REST の `user.id`）。同じ名前の別のアカウントを分けるのに使う（#4409）。無ければ 0
-    author_id: int = 0
-
-    @classmethod
-    def from_rest(cls, raw: dict) -> Authored:
-        url = text_of(raw["html_url"]) if isinstance(raw.get("html_url"), str) else ""
-        created, updated = raw.get("created_at"), raw.get("updated_at")
-        edited = isinstance(created, str) and isinstance(updated, str) and updated != created
-        user = raw["user"]
-        return cls(_login(user), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited, _account_id(user))
-
-
-class Pull(NamedTuple):
-    """PR の状態。`state` は `open`・`closed`、`merge_state` は GitHub の mergeStateStatus の小文字。"""
-
-    number: int
-    state: str
-    merged: bool
-    head_sha: str
-    head_ref: str
-    base_ref: str
-    body: str
-    merge_state: str
-    author: str
-    association: str
-    merge_sha: str = ""  # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
-    queued: bool = False  # マージキューに入っているか（GraphQL で読んだときだけ分かる。REST では偽。#4409 の決定 8）
-    title: str = ""  # PR の題（承認の質問の文を作る。#4446）
-    cross_repository: bool = False  # head のブランチがフォークにあるか（GraphQL で読んだときだけ埋める）
-
-    @property
-    def authored(self) -> Authored:
-        """PR の本文と書き手（信用の区分は `GitHub.trusts`）。"""
-        return Authored(self.author, self.association, self.body)
-
-    @classmethod
-    def from_rest(cls, raw: dict) -> Pull:
-        head, base = raw["head"], raw["base"]
-        return cls(
-            number=int(raw["number"]), state=text_of(raw["state"]).lower(), merged=bool(raw["merged"]), head_sha=text_of(head["sha"]),
-            head_ref=text_of(head["ref"]), base_ref=text_of(base["ref"]), body=text_of(raw["body"]), title=text_of(raw.get("title")),
-            merge_state=text_of(raw["mergeable_state"]).lower(), author=_login(raw["user"]),
-            association=text_of(raw["author_association"]).upper(), merge_sha=text_of(raw.get("merge_commit_sha")) if raw["merged"] else "",
-        )  # fmt: skip
-
-    @classmethod
-    def from_graphql(cls, raw: dict) -> Pull:
-        return cls(
-            number=int(raw["number"]), state="open" if text_of(raw["state"]).lower() == "open" else "closed", merged=bool(raw["merged"]),
-            head_sha=text_of(raw["headRefOid"]), head_ref=text_of(raw["headRefName"]), base_ref=text_of(raw["baseRefName"]),
-            body=text_of(raw["body"]), title=text_of(raw.get("title")), merge_state=text_of(raw["mergeStateStatus"]).lower(),
-            author=_login(raw["author"]), association=text_of(raw["authorAssociation"]).upper(), queued=raw.get("isInMergeQueue") is True,
-            merge_sha=text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
-            cross_repository=bool(raw.get("isCrossRepository")),
-        )  # fmt: skip
 
 
 class MergeExpect(NamedTuple):
@@ -302,9 +213,7 @@ def _file_at(repo: dict, key: str) -> FileAt:
 
 def _verified(repo: dict) -> Verified:
     node = repo.get("pullRequest") if isinstance(repo.get("pullRequest"), dict) else {}
-    return Verified(
-        text_of(node.get("baseRefName")), text_of(node.get("headRefOid")), text_of(repo.get("nameWithOwner")), _file_at(repo, "config")
-    )
+    return Verified(*target_of(node), text_of(repo.get("nameWithOwner")), _file_at(repo, "config"))
 
 
 def _verify(number: int, fresh: Verified, expect: MergeExpect, repo: str) -> Optional[MergeOutcome]:
@@ -801,7 +710,7 @@ class GitHub:
         if self._viewer:
             return
         login = node.get("login") if isinstance(node, dict) else None
-        self._viewer.append(Viewer(login if isinstance(login, str) else "", _account_id(node)))
+        self._viewer.append(Viewer(login if isinstance(login, str) else "", account_id_of(node)))
 
     def viewer(self) -> Viewer:
         """この token の利用者（1 回だけ読む。`branch_file` が読んでいれば、空だったときも要求を送らない）。

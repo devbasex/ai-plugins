@@ -20,7 +20,7 @@ from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import records as plan_records
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, invoke, issue_values, model, stages
+from ndf.progress import definition, invoke, issue_values, model, plan_runs, stages
 
 
 # 定義の読み込みは工程の文書をスキーマで確かめるため 1 回 0.3 秒ほどかかる。スナップショットは不変なのでモードごとに 1 回だけ読む
@@ -119,10 +119,10 @@ def test_listen_step_is_not_invoked():
 
 def test_read_report_takes_the_last_line_and_refuses_bad_shapes():
     good = result.result("plan", "ok", "済んだ")
-    assert invoke.read_report(f"途中の行\n{json.dumps(good)}\n") == good
-    assert invoke.read_report("") is None
-    assert invoke.read_report("JSON でない") is None
-    assert invoke.read_report(json.dumps({"status": "ok"})) is None
+    assert plan_runs.read_report(f"途中の行\n{json.dumps(good)}\n") == good
+    assert plan_runs.read_report("") is None
+    assert plan_runs.read_report("JSON でない") is None
+    assert plan_runs.read_report(json.dumps({"status": "ok"})) is None
 
 
 def test_finished_keeps_only_declared_outputs_and_warns_about_the_rest():
@@ -851,7 +851,7 @@ def test_plan_is_run_with_the_package_on_the_import_path_and_the_notes(tmp_path,
     # #4029: src は子の argv（sys.path）で渡し、PYTHONPATH には入れない（プランのステップへ渡らない）
     assert seen["argv"][: len(cli.ndf_command())] == cli.ndf_command()
     assert seen["env"].get("PYTHONPATH") == os.environ.get("PYTHONPATH")
-    assert seen["env"][invoke.NOTES_ENV] == "直す所"
+    assert seen["env"][plan_runs.NOTES_ENV] == "直す所"
     assert (tmp_path / "w").is_dir()
 
 
