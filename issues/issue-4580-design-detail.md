@@ -2,7 +2,7 @@
 
 設計文書 [issue-4580-design.md](./issue-4580-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。書き方と、別ファイルにする条件は `design` の `references/detailed-design.md` にある。
 
-別ファイルにした理由: 新設する関数が 51（「関数の仕様」の表の `新設` の行から、型 11 とファイル 3 を除いて数えた）あり、シグネチャを変える既存の関数が 3 つ（`close_decide.verdict` の引数の名前と返り、`record.write_verification` の引数、`GitHub._read_permission` の返り）あるため（`requirements-design` の「詳細設計を別ファイルにする条件」）。型 `record_decide.Record` と `github.Authored` は項目を足すだけで、既定値を持つので今の呼び出しは変わらない。
+別ファイルにした理由: 新設する関数が 51（「関数の仕様」の表の `新設` の行から、型 12 とファイル 3 を除いて数えた）あり、シグネチャを変える既存の関数が 3 つ（`close_decide.verdict` の引数の名前と返り、`record.write_verification` の引数、`GitHub._read_permission` の返り）あるため（`requirements-design` の「詳細設計を別ファイルにする条件」）。型 `record_decide.Record` と `github.Authored` は項目を足すだけで、既定値を持つので今の呼び出しは変わらない。
 
 構成要素は 2 回のリリース（設計書の決定 9）のどちらで出すかを、小見出しの最初の行の「出す回」に書く。1 回目は閉じる条件の除外と、バージョンの無いリリースとテストの記録、2 回目は種類の既定・モードごとの要否・設定の確かめ・流れの文書である。
 
@@ -283,7 +283,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `glob_matches` | `release/record_decide.py` | 新設 | `glob_matches(pattern: str, path: str) -> bool` | git の pathspec の `:(glob)` と同じ一致（`**`・`*`・`?`・`[...]`、`*` は `/` を越えない） |
 | `targets_of` | `release/record_decide.py` | 新設 | `targets_of(rows: Sequence[Mapping], pr_paths: frozenset[str], push_paths: frozenset[str]) -> tuple[str, ...]` | 確かめ 3。`paths` を持たない配布先と、両方の差分に出るパスが当たる配布先 |
 | `push_of` | `release/record_decide.py` | 新設 | `push_of(activities: Iterable[Mapping], landed: frozenset[str]) -> Push \| None` | 「反映したコミットを含む push」の手順 2（`after` が集合にあり `before` が無い最初の更新。`after` が集合の外の更新で打ち切る） |
-| `authoritative_targets` | `release/record_decide.py` | 新設 | `authoritative_targets(found: Sequence[Record], corrections: Sequence[Correction], version: str) -> tuple[str, ...] \| None` | 「正の `targets`」。最後の訂正、無ければ同じ値の最初の記録の一覧 |
+| `authoritative_targets` | `release/record_decide.py` | 新設 | `authoritative_targets(found: Sequence[Record], corrections: Sequence[Correction], version: str) -> tuple[str, ...] \| None` | 「正の `targets`」。最後の訂正、無ければ同じ値の最初の記録の一覧。`found` は `--release`・`--unit` で絞る前の有効な記録を渡す |
 | `value_commit_conflict` | `release/record_decide.py` | 新設 | `value_commit_conflict(found: Sequence[Record], commit: str, version: str) -> tuple[str, str] \| None` | 確かめ 6。`value_pairs(found)` の組で、今回のコミットが別の値と組か、今回の値が別のコミットと組なら、その組の `(version, commit)` |
 | `value_pairs` | `release/record_decide.py` | 新設 | `value_pairs(found: Sequence[Record]) -> tuple[dict[str, str], list[Record]]` | 設計書の「値とコミットの組」。古い順にたどって値からコミットへの組と、有効な記録（組に合う記録とバージョン付きの記録）を返す。`authoritative_targets`・`has_unversioned`・`representative`・`complete_of` は有効な記録だけを受け取る |
 | `has_unversioned` | `release/record_decide.py` | 新設 | `has_unversioned(found: Sequence[Record], version: str, environments: tuple[str, ...], targets: tuple[str, ...]) -> bool` | 重ねない判定（同じ値・同じ `environments`・正の `targets`） |
@@ -346,7 +346,8 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_command_result` | `release/record.py` | 新設 | `_command_result(root: Path, command: str, after: str, deadline: float, now: Callable[[], float] = time.monotonic) -> Mapping` | `{revision}` を `after` に置き換えたコマンドをリポジトリの根で 1 回実行し、終了コード 0・75・1・それ以外を、成功・未完了・失敗・未確定の `run` の形（`status`・`conclusion`）にする（cd-setup.md の契約）。時間の上限は `deadline − now()`（期限までの残り）で、0 以下なら実行せずに未確定を返す |
 | `_observe` | `release/record.py` | 新設 | `_observe(delivery: Mapping) -> tuple[Any, str]` | `observe.url` を `httpx` で 1 回読み、`pointer` の値と読んだ URL を返す |
 | `_write_one` | `release/record.py` | 新設 | `_write_one(hub: GitHub, made: Record, holder: int, others: Sequence[int]) -> list[Written]` | 1 つの配布先の記録を書く順の手順 1〜4 で書き、重なりを自分のコメントの削除で戻す |
-| `_candidates` | `release/record.py` | 新設 | `_candidates(hub: GitHub, number: int, select: Selection) -> tuple[list[Authored], list[Record], list[Correction], list[dict]]` | 読み取りの手順 1〜3（マーカーで候補にし、JSON で `--version` の値とつながる記録に絞り、リリース記録とテストの記録の書き手を `trusts_strict` で照会する。信用した記録の全体で `value_pairs` を決めてから `--release`・`--unit` で絞り、組のコミットに一致する訂正だけを照会する） |
+| `_candidates` | `release/record.py` | 新設 | `_candidates(hub: GitHub, number: int, select: Selection) -> Candidates` | 設計書の読み取りの手順 1〜4。マーカーで候補にし、バージョン付きの記録とテストの記録は引数で絞る。バージョンの無いリリース記録は、起点（`--version` があればその値、無ければ `--release`・`--unit` の一致、どれも無ければ全部）から、信用を確かめた記録だけを元に値かコミットの同じ記録へ広げて照会する。集めた記録で `value_pairs` を決め、値ごとの正の `targets` を絞る前の有効な記録で決めてから、`--version`・`--release`・`--unit` のすべてで絞る。訂正は組のコミットに一致するものだけを照会する |
+| `Candidates` | `release/record.py` | 新設 | `NamedTuple Candidates(releases: list[Record], authoritative: dict[str, tuple[str, ...]], corrections: list[Correction], verifications: list[dict])` | `releases` は引数で絞った有効な記録、`authoritative` は値ごとの正の `targets`（絞る前の有効な記録と訂正で決めた） |
 | `Selection` | `release/record.py` | 新設 | `NamedTuple Selection(version: str \| None, release: int \| None, unit: str \| None)` | `records` の絞り込みの引数 |
 | `read_release` | `release/record.py` | 新設 | `read_release(hub: GitHub, number: int, select: Selection, bodies: bool, issues: Sequence[int] \| None) -> dict[str, Any]` | 読み取りの手順 1〜6 と `to_test`。`records` の新しい `outputs` を返す |
 | `pr_body_only` | `release/record.py` | 新設 | `pr_body_only(hub: GitHub, number: int) -> dict[str, Any]` | `--pr-body-only`。その PR の本文と `trusted` だけを返す |
@@ -425,6 +426,8 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `read_release` | `--version` の値の記録を代表にし、`--unit` の単位だけを使う。同じ記録が 2 件残っていても 1 件として数える | 正と違う記録が最後にあっても正の記録が代表。別のリリースの記録の書き手の照会が 403 でも読める | 候補の書き手の照会が 403 で失敗。`read` の書き手の本文は `trusted` が偽 |
 | `_candidates` | 信用したリリース記録のコミットの訂正を残す | 信用されない書き手のリリース記録にだけ対応する訂正は、書き手を照会せずに除く（照会が 403 でも止まらない） | 信用したリリース記録のコミットの訂正の書き手が 403 で `PermissionUnknown` |
 | `_candidates`（`--release` との順） | 並行した書き込みで負けた側の本番の PR を `--release` で渡すと、その記録は無効で代表にならない | 同じコミットに残った後の値の記録は、先の値の読み取りに影響しない | — |
+| `_candidates`（`--version` で絞る） | 古い順に `(A, X)`・`(B, X)`・`(B, Y)` の記録で `--version A` を渡すと、`releases` は `(A, X)` だけで、`(B, Y)` は代表にも `releases` にも入らない | `--version` を渡さず `--release` だけを渡すと、その本番の PR の記録を起点に組を決めて返す。`--unit` だけでも同じ | 同じ値・同じコミットで `targets` の違う後の記録が消されずに残り、その本番の PR を `--release` で渡しても、正の `targets` は先の記録の一覧で、後の記録は代表にならない |
+| `_candidates`（橋渡し） | 信用する記録と値かコミットを共有する記録の書き手を照会する | 信用しない書き手の記録とだけコミットを共有する、別の値の記録の書き手は照会しない（その書き手の照会が 403 でも止まらない） | 信用する記録と値を共有する記録の書き手が 403 なら `PermissionUnknown` |
 | `pr_body_only` | その PR の本文だけを返す | 別のリリース記録を持つ PR | — |
 | `write_verification` | `environments` つきで書ける | `retest_reason` のある不合格のテストし直し | `environments` 無し・反映の記録の無い配布先・記録の PR でない・理由の無いテストし直しで書かない |
 
