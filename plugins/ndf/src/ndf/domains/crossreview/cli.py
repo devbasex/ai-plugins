@@ -666,7 +666,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     単位の経路の引数（#4369）: `--repo` は保存済みの状態と作業場所のリモートより優先する対象のリポジトリで、子の `gh` にも
     `GH_REPO` で渡す。`--stop-on-hold` は人の判断を待つ指摘が残れば incomplete にする。`--reviewed-pr-out` は
     `--reviewed-out` を書くときに、実際に読めた PR を `<所有者>/<リポジトリ>#<番号>` で書く（始めに消す）。書くのは、レビューした
-    HEAD が読んだ head か、この起動がその PR の head のリポジトリのブランチへ送った修正のコミットのときだけである。
+    HEAD が読んだ head か、この起動がその PR の head のリポジトリのブランチへ送った修正のコミットのときだけである。この引数を
+    渡した起動は、始めに PR を読めないか head が取得した先頭と違えば、相手役を起動せずに `precondition` で止まる。
     """
     refused = _begin_run(args)
     if refused is not None:
@@ -783,9 +784,9 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--stop-on-hold", action="store_true", help="人の判断を待つ指摘が残れば incomplete で終える")
     r.add_argument(
         "--reviewed-pr-out",
-        help="起動時に対象 PR の head ブランチ名と SHA を確かめる。レビューした HEAD がその SHA、または同じ起動でその PR のブランチへ "
-        "push した修正コミットなら、--reviewed-out とともに PR のリポジトリと番号を書く。"
-        "渡した起動は、同じ PR を読んだラウンドだけを差分の起点と収束の再利用に使う",
+        help="--reviewed-out と併用する。対象 PR の HEAD（起動時の head か、同じ起動でその PR のブランチへ push した修正コミット）を"
+        "レビューしたと確認できた場合、指定ファイルに <所有者>/<リポジトリ>#<番号> を書く。指定した実行は、起動時に対象 PR を確認できなければ"
+        "レビューを始めずに precondition で停止し、同じ PR を読んだ記録だけを差分の起点や収束結果の再利用に使う",
     )
 
 

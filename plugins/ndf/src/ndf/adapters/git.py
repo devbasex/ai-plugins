@@ -15,6 +15,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
+from urllib.parse import urlsplit
 
 from ndf import identity
 
@@ -23,8 +24,11 @@ FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 SHORT_SHA = re.compile(r"^[0-9a-f]{7,40}$")
 # `git diff --shortstat` の 1 行（`N files changed, A insertions(+), D deletions(-)`）
 _SHORTSTAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
-# リモートの URL から `<所有者>/<リポジトリ>` を取る（https と ssh の両方）
-_REMOTE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
+# scp の形のリモートの URL（`[<利用者>@]<ホスト>:<パス>`）
+_SCP_URL = re.compile(r"^(?:[^@/:]+@)?(?P<host>[^/:]+):(?P<path>.+)$")
+# GitHub のリモートの URL のスキームと、そのスキームで GitHub を指すホスト（`ssh.github.com` は SSH を 443 番で使う接続先）
+_SSH_HOSTS = frozenset({"github.com", "ssh.github.com"})
+_GITHUB_HOSTS = {"https": frozenset({"github.com"}), "http": frozenset({"github.com"}), "git": frozenset({"github.com"}), "ssh": _SSH_HOSTS}
 # `git cat-file --batch` がオブジェクトごとに置く見出しの行（無い名前の行は `<名前> missing`）
 _BATCH_HEAD = re.compile(rb"^[0-9a-f]{40,64} (\S+) ([0-9]+)$")
 # git の誤りの文に出る URL の、伏せる部分（利用者の情報と、`?`・`#` から後ろ）。トークンを URL に埋めたリモートの誤りに出る
@@ -166,9 +170,25 @@ def first_parent_lines(log_text: str) -> dict[str, int]:
 
 
 def repo_of_url(url: str) -> Optional[str]:
-    """リモートの URL の `<所有者>/<リポジトリ>`。GitHub の URL でなければ None。"""
-    m = _REMOTE.search(url.strip())
-    return f"{m.group('owner')}/{m.group('name')}" if m else None
+    """リモートの URL の `<所有者>/<リポジトリ>`。GitHub の URL でなければ None。ホストとパスを分けて読むので、パスの中に
+    `github.com` を持つほかのホストの URL は GitHub とみなさない。"""
+    url = url.strip()
+    if "://" in url:
+        try:
+            parts = urlsplit(url)
+        except ValueError:  # noqa: NDF401 利用者の入力: 形の壊れた URL は GitHub のリポジトリと確かめられない
+            return None
+        scheme, host, path = parts.scheme, parts.hostname, parts.path
+    else:
+        m = _SCP_URL.match(url)
+        if m is None:
+            return None
+        scheme, host, path = "ssh", m.group("host").lower(), m.group("path")
+    if scheme not in _GITHUB_HOSTS or host not in _GITHUB_HOSTS[scheme]:
+        return None
+    owner, _, name = path.strip("/").partition("/")
+    name = name.removesuffix(".git")
+    return f"{owner}/{name}" if owner and name and "/" not in name else None
 
 
 class WorktreeEntry(NamedTuple):

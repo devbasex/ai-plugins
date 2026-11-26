@@ -341,7 +341,7 @@ def _reading_run(targets: list[str | None], pushed: set[str]) -> SimpleNamespace
     """読んだ PR を持つ起動（push の送り先は Git の境界を差し替える）。"""
     pr = threads.ReadPr("o/r#9", "feat/x", "h0", "o/r")
     g = SimpleNamespace(push_repos=lambda remote: targets)
-    return SimpleNamespace(read_pr=pr, pushed=pushed, g=g, remote="origin", warnings=[])
+    return SimpleNamespace(cfg=SimpleNamespace(check_pr=True), read_pr=pr, pushed=pushed, g=g, remote="origin", warnings=[])
 
 
 @pytest.mark.parametrize(
@@ -377,11 +377,38 @@ def test_the_pull_request_read_before_a_resend_is_still_the_reviewed_one(read: s
 
 
 def test_a_round_of_another_pull_request_is_not_reused() -> None:
-    """読んだ PR の確認を求める起動は、同じ PR を読んだラウンドだけを使う。読めなければどのラウンドも使わない。"""
+    """読んだ PR の確認を求める起動は、同じ PR を読んだラウンドだけを使う。"""
     state = {store.ROUNDS: [{"head": "h1", scope_decide.PR: "o/r#9"}]}
-    for pr, want in (("o/r#9", "h1"), ("o/r#10", None), ("", None), (None, "h1")):
+    for pr, want in (("o/r#9", "h1"), ("o/r#10", None), (None, "h1")):
         assert scope_decide.read_by_all_head(state, scope_decide.Basis(pr=pr)) == want
-    assert scope_decide.read_by_all_head({store.ROUNDS: [{"head": "h1"}]}, scope_decide.Basis(pr="")) is None
+    assert scope_decide.read_by_all_head({store.ROUNDS: [{"head": "h1"}]}, scope_decide.Basis(pr="o/r#9")) is None
+
+
+def test_without_the_request_the_push_targets_are_not_read() -> None:
+    """読んだ PR の確認を求めない起動は、git を起動せず、記録も出さない。"""
+    run = _reading_run(["o/r"], {"h1"})
+    run.cfg.check_pr = False
+    run.g.push_repos = lambda remote: pytest.fail("push の送り先を調べた")
+    assert reviewed_pr.confirmed(run, "h1") is None
+
+
+@pytest.mark.parametrize(
+    ("pr", "reason"),
+    [(None, "読めない"), (threads.ReadPr("o/r#9", "feat/x", "elsewhere", "o/r"), "elsewhere"[:9])],
+)
+def test_an_unconfirmed_pull_request_stops_before_the_reviewers(
+    monkeypatch: pytest.MonkeyPatch, pr: threads.ReadPr | None, reason: str
+) -> None:
+    """確認を求める起動は、PR を読めないか head が違えば、相手役を起動せずに理由を返す。"""
+    monkeypatch.setattr(drive, "_reader", lambda cfg, reader_for, warnings: None)
+    monkeypatch.setattr(drive, "_read_prior", lambda prs, warnings: drive._Prior(pr=pr))
+    cfg = SimpleNamespace(check_pr=True, branch="feat/x")
+    run = SimpleNamespace(cfg=cfg, synced_head="h0", sent="h0", read_pr=None, warnings=[])
+    with pytest.raises(drive.DriveStopped, match=reason) as stopped:
+        drive._drive_rounds(run, lambda spec: pytest.fail("相手役を起動した"), None)
+    assert stopped.value.kind == "precondition"
+    run.cfg.check_pr = False
+    assert reviewed_pr.why_unread(run, pr) is None
 
 
 def test_the_port_reports_the_pull_request_read_with_the_threads() -> None:

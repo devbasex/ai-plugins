@@ -49,11 +49,25 @@ def seen(run: Run, pr: Optional[threads.ReadPr]) -> Optional[threads.ReadPr]:
     return pr
 
 
+def why_unread(run: Run, pr: Optional[threads.ReadPr]) -> Optional[str]:
+    """読んだ PR の確認を求める起動で、読んだ `pr` を使えない理由（確認を求めないか、使えれば None）。呼び手は相手役を起動する
+    前に止める（記録を出せないレビューに token と時間を使わない）。"""
+    if not run.cfg.check_pr or run.read_pr is not None:
+        return None
+    if pr is None:
+        return "PR のスレッドと head を読めない"
+    return (
+        f"PR {pr.ident} の head（{pr.branch} の {pr.head[:9]}）が、レビューするブランチ {run.cfg.branch} の"
+        f"取得した先頭 {run.synced_head[:9]} と違う"
+    )
+
+
 def confirmed(run: Run, head: Optional[str]) -> Optional[str]:
     """レビューした `head` が、始めに読んだ PR の head か、この起動がその PR のブランチへ送った修正のコミットなら、その PR。
-    読めなかった PR と、PR に無い手元のコミットを読んだ回は None（読んだ PR の記録を出さない）。"""
+    読めなかった PR と、PR に無い手元のコミットを読んだ回は None（読んだ PR の記録を出さない）。読んだ PR の確認を求めない
+    起動も None（push の送り先を調べる git を起動しない）。"""
     pr = run.read_pr
-    if pr is None or head is None:
+    if not run.cfg.check_pr or pr is None or head is None:
         return None
     if head == pr.head:
         return pr.ident

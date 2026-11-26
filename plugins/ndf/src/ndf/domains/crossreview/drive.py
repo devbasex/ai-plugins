@@ -810,9 +810,8 @@ def _merge_base(run: _Run, head: str) -> str:
 def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
     """前のラウンドを差分の起点や収束の再利用に使える条件（今回の値。席は今の席）。"""
     unit = scope_decide.unit_id(run.cfg.unit)
-    pr = None
-    if run.cfg.check_pr:
-        pr = "" if run.read_pr is None else run.read_pr.ident
+    # 確認を求める起動は、読んだ PR が無ければラウンドの前に止まっている
+    pr = run.read_pr.ident if run.cfg.check_pr and run.read_pr is not None else None
     return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr)
 
 
@@ -959,6 +958,11 @@ def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[ReaderFor]) 
     prs = _reader(cfg, reader_for, run.warnings)
     prior = _read_prior(prs, run.warnings)
     run.read_pr = reviewed_pr.seen(run, prior.pr)
+    reason = reviewed_pr.why_unread(run, prior.pr)
+    if reason is not None:
+        # 読めなかった原因は注意にある。結果へ載る文なので秘密を伏せる
+        detail = [f"レビューを始める前に止めた。読んだ PR を確かめられない: {reason}", *run.warnings]
+        raise DriveStopped("precondition", "\n".join(str(line) for line in run_log.redact(detail)))
     _carry(run, prior)
     _restate(run)
     if _reusable(run):
