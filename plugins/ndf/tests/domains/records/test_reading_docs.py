@@ -130,12 +130,21 @@ def test_the_records_are_read_by_completed_checks(state: Path) -> None:
         _read("k2", "issues/x.md", "b1", 1, "passed"),
         _done("k2"),
         _read("k3", "issues/y.md", "y1"),
+        # 同じ名前と中身でも、別のリポジトリ・別のブランチ（文書）・別の PR とゲート（承認資料と質問）の行は使わない
+        _read("k4", "issues/z.md", "new", repo="o/other"),
+        _read("k4", "issues/z.md", "new", branch="other"),
+        _read("k4", reading.MATERIAL, "old-m", pr=8),
+        _read("k4", reading.QUESTION, "old-q", gate="release"),
+        _done("k4"),
     ]
     current = [_read("k9", reading.QUESTION, "q"), _read("k9", reading.MATERIAL, "m", 1, "failed"), _read("k9", reading.MATERIAL, "m", 2)]
     hashes = {"issues/x.md": "b1", "issues/y.md": "y1", "issues/z.md": "new", reading.QUESTION: "q", reading.MATERIAL: "m"}
-    got = reading.select_reads(current, past, hashes, {reading.MATERIAL})
+    base = {"repo": "o/r", "branch": "design/x", "gate": "design", "pr": 7}
+    got = reading.select_reads(current, past, hashes, {reading.MATERIAL}, base)
     assert got == [
         {"name": "issues/x.md", "reader": reading.ENGINEER, "round": 1, "result": "passed"},
         {"name": reading.QUESTION, "reader": reading.APPROVER, "round": 1, "result": "passed"},
         {"name": reading.MATERIAL, "reader": reading.APPROVER, "round": 2, "result": "remained"},
     ]
+    elsewhere = {reading.QUESTION: "old-q", reading.MATERIAL: "old-m"}
+    assert reading.select_reads([], past, elsewhere, set(), base) == []

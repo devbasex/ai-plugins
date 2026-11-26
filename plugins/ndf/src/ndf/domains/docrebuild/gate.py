@@ -555,7 +555,7 @@ def write_records(run: Run, plan: Plan, final: Final, head: str, pushed: bool) -
     now = {reading.QUESTION: plan.key, reading.MATERIAL: final.sha256, **plan.docs}
     carried = {r["name"] for r in final.rows if r["verdict"] == reading.REMAINED}
     current = [{"kind": "read", **base, **r} for r in final.rows]
-    reads = reading.select_reads(current, reading.doc_rows(), now, carried)
+    reads = reading.select_reads(current, reading.doc_rows(), now, carried, base)
     entry = {"questions": plan.questions, "prs": [{"number": run.pr.number, "branch": run.pr.head_ref, "head": head}], "reads": reads}
     fingerprint = reading.row_fingerprint(reading.add(entry, run.args.cwd, run.repo))
     reading.append_doc(reading.done_row(base, question_key=plan.key, head=head, fingerprint=fingerprint, **hashes))

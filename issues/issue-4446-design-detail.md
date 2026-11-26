@@ -373,7 +373,7 @@ plugins/ndf/
 | `latest_read` | `records/reading.py` | 新設 | `latest_read(rows: Sequence[Mapping[str, Any]], key: tuple[Any, ...]) -> Optional[Mapping[str, Any]]` | 設計書の「読ませるものの決め方」のキーで、完了した確認の最後の読ませた行を引く |
 | `remained_of` | `records/reading.py` | 新設 | `remained_of(rows: Sequence[Mapping[str, Any]], repo: str, gate: str, number: int) -> list[Mapping[str, Any]]` | 同じ PR とゲートで最後に完了した確認の `remained` の行 |
 | `pending_review` | `records/reading.py` | 新設 | `pending_review(rows, repo: str, branch: str) -> Optional[Mapping[str, Any]]` | 解消していない再レビュー待ちの行 |
-| `select_reads` | `records/reading.py` | 新設 | `select_reads(current: Sequence[Mapping[str, Any]], past: Sequence[Mapping[str, Any]], hashes: Mapping[str, str], carried: Iterable[str]) -> list[dict[str, Any]]` | 設計書の「`reads` の作り方」の 1〜4 で、`reads` の要素を作る |
+| `select_reads` | `records/reading.py` | 新設 | `select_reads(current: Sequence[Mapping[str, Any]], past: Sequence[Mapping[str, Any]], hashes: Mapping[str, str], carried: Iterable[str], base: Mapping[str, Any]) -> list[dict[str, Any]]` | 設計書の「`reads` の作り方」の 1〜4 で、`reads` の要素を作る |
 | `remained_section` | `records/reading.py` | 新設 | `remained_section(remained: Sequence[Mapping[str, Any]]) -> str` | 残った文から、印付きの「読み手役が残した文」のセクションを作る。同じ入力から同じ文字列を返し、残った文が 0 件なら空文字を返す |
 | `add` | `records/reading.py` | 変更 | 今のまま | 追記した行を返す（今と同じ）。`gate` が指紋を作るのに使う |
 
@@ -393,7 +393,7 @@ plugins/ndf/
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
 | `select_reads` | 今回の結果がある | 完了の行が無くても候補に入れる |
-| `select_reads` | 過去の結果だけ | 完了した確認の行で、ハッシュが今と同じものだけを候補にする |
+| `select_reads` | 過去の結果だけ | 完了した確認の行で、`base`（今回の確認のリポジトリ・ブランチ・ゲート・PR）から作るキーが同じで、ハッシュが今と同じものだけを候補にする |
 | `select_reads` | 候補が複数の確認にまたがる | 最も新しい確認を選び、その中の最後の回を使う（回（`round`）の値の大小で選ばない） |
 | `select_reads` | 対象が `carried` にある | `round: 2`・`result: remained` |
 

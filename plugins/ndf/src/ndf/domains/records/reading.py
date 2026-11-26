@@ -187,12 +187,17 @@ def sent_back(rows: Iterable[Mapping[str, Any]], repo: str, gate: str, number: i
 
 
 def select_reads(
-    current: Sequence[Mapping[str, Any]], past: Sequence[Mapping[str, Any]], hashes: Mapping[str, str], carried: Iterable[str]
+    current: Sequence[Mapping[str, Any]],
+    past: Sequence[Mapping[str, Any]],
+    hashes: Mapping[str, str],
+    carried: Iterable[str],
+    base: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     """`reading-checks.jsonl` の行の `reads`（設計書の「`reads` の作り方」の 1〜4）。
 
     `current` は今回読ませた行（完了の行が無くても使う）、`past` は記録の全行（完了した確認の行だけを使う）、`hashes` は対象の名前から
-    今の中身のハッシュ、`carried` は前に残った文を引き継いだ対象の名前。
+    今の中身のハッシュ、`carried` は前に残った文を引き継いだ対象の名前、`base` は今回の確認のリポジトリ・ブランチ・ゲート・PR。
+    候補は、`base` と対象の名前から作るキー（`read_row_key`）の行に限る。
     """
     done = completed(past)
     candidates = [r for r in [*past, *current] if r["kind"] == "read" and (r["check"] in done or r in current)]
@@ -200,7 +205,8 @@ def select_reads(
     out: list[dict[str, Any]] = []
     for name, now in hashes.items():
         reader = reader_of(name)
-        matched = [r for r in candidates if r["name"] == name and r["reader"] == reader and r["hash"] == now]
+        key = read_row_key({**base, "name": name})
+        matched = [r for r in candidates if read_row_key(r) == key and r["reader"] == reader and r["hash"] == now]
         if not matched:
             continue
         newest = matched[-1]["check"]
