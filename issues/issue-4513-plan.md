@@ -18,9 +18,9 @@
 | `contracts/worker/kinds.json`・`contracts/workflow/context.schema.json` | `product_version` の説明 |
 | `src/ndf/contracts/worker_kinds.py` | `write_released`・`released_of`（新設）、`write_values`（変更） |
 | `src/ndf/progress/definition.py` | `required_outputs`（新設） |
-| `src/ndf/progress/run.py` | `released_answer`（新設）、`_run_step`・`_step_draft`・`_finish_stage`（変更） |
+| `src/ndf/progress/run.py` | `Approvals`・`approvals`（新設）、`approved_seen`・`_prepare`・`_run_step`・`_step_draft`・`_finish_stage`（変更） |
 | `src/ndf/progress/invoke.py` | `StageRun.released`・`PreparedPlan.released`・`uses_released`・`answered_gap_detail`（新設）、`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
-| `src/ndf/core/route/__init__.py` | `rendered`（新設）、`render`（変更） |
+| `src/ndf/core/route/__init__.py` | `_built`・`rendered`（新設）、`render`（変更） |
 | `src/ndf/progress/gate/entry.py` | `released_outcome`・`_strategy_at`・`Released`（新設）、`WorkHandoff`・`_cmd_work`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`（変更） |
 | `src/ndf/domains/release/forms_decide.py` | `reaches`（新設）、`deliveries_of`（変更） |
 | `src/ndf/core/worker.py`・`core/worker_outcome.py` | 引数 `--require-version-number`、`Checked`（新設）、`require_outputs`・`_output_gap`・`outcome_of`（変更） |
@@ -48,8 +48,9 @@
 - **進め方:**
   1. Task 1 のテストを通す
   2. `none` 以外と設定を読めないとき（`git` の `GitError` を含む）に `ndf v11.0.0` が欠けになるテスト（条件 8）を足して通す
-  3. 条件 4 の経路のテストを `test_release_record.py` に足して通す。配布識別子 `main abc1234` を持つ本番リリース記録（`record_decide.render_record` の本文）を、信頼する書き手のコメントとして偽の GitHub の対象 PR に置く。本番リリース記録の書き込み（`ndf release-steps record`・`record.write`）はリリースブランチの名前からバージョン番号を読むのでこの記録を作れず、この課題では変えない。同じ識別子のリリース後テストの結果を `ndf release-steps verification-record` でその PR に記録する。`close-check` へは投稿前の入力ファイルでなく、投稿されたコメントから取り出した JSON を渡す。手順は設計書のテスト設計の条件 4 の行にある。GitHub は `tests/domains/release/_fakes.py` の偽物で差し替える
-  4. 整理
+  3. リリース後テストの記録の `version` が改行を含むと形の誤りになり、1 行の記録は描いて読み直しても `version` と `issues` が変わらないテスト（設計書のテスト設計の決定 5 の行）を足して通す
+  4. 条件 4 の経路のテストを `test_release_record.py` に足して通す。条件 4 は本番リリース記録を読める場合に限った条件なので、テストは記録が置かれた状態から始める。配布識別子 `main abc1234` を持つ本番リリース記録（`record_decide.render_record` の本文）を、信頼する書き手のコメントとして偽の GitHub の対象 PR に置く。本番リリース記録の書き込み（`ndf release-steps record`・`record.write`）はリリースブランチの名前からバージョン番号を読むのでこの記録を作れず、この課題では変えない。同じ識別子のリリース後テストの結果を `ndf release-steps verification-record` でその PR に記録する。`close-check` へは投稿前の入力ファイルでなく、投稿されたコメントから取り出した JSON を渡す。手順は設計書のテスト設計の条件 4 の行にある。GitHub は `tests/domains/release/_fakes.py` の偽物で差し替える
+  5. 整理
 
 ### Task 3: オーガナイザーの承認の後にデプロイの工程が止まることを再現する
 
@@ -63,12 +64,12 @@
 
 ### Task 4: 記録済みの値を `values.json` で渡し、worker を起動せずに終える
 
-- **対象ファイル:** `contracts/worker_kinds.py`（`write_released`・`released_of`・`write_values`）・`progress/run.py`（`released_answer`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`core/route/__init__.py`（`rendered`・`render`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`domains/release/forms_decide.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
+- **対象ファイル:** `contracts/worker_kinds.py`（`write_released`・`released_of`・`write_values`）・`progress/run.py`（`Approvals`・`approvals`・`approved_seen`・`_prepare`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`core/route/__init__.py`（`_built`・`rendered`・`render`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`domains/release/forms_decide.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
 - **変更内容:** 詳細設計書の「値のファイル」「工程の進行: 記録済みの値の読み方」「worker の起動」の記録済みの値の分
 - **満たす受け入れ条件:** 1・2
 - **進め方:**
   1. Task 3 のテストを通す
-  2. 設計書のテスト設計の決定 2・3 と条件 1 の行を足して通す。届け先の選び方、利用者の承認の回で worker を起動すること、前の `values.json` が残った retry、ハイフンと波括弧を含む値である
+  2. 設計書のテスト設計の決定 2・3 と条件 1 の行を足して通す。届け先の選び方（1 行に決まらないか文脈の形に合わなければ、worker を起動せずに `stopped`）、利用者の承認の回で worker を起動すること、前の `values.json` が残った retry、ハイフンと波括弧を含む値である
   3. 整理
 
 ### Task 5: 値をそろえた判断の求めへの承認で終わることを再現し、`gate` の出力を引き継ぐ
@@ -81,7 +82,7 @@
   2. `require_outputs` の `gate`
   3. `outputs.json` の要素の並び
   4. `metrics.missing_outputs` の引き継ぎ（`steps.outcome_of`・`_keep_step_missing`・`final_result`）と、`_no_route` の欠けの判定
-  5. テストを足して通す。設計書のテスト設計の決定 6 の行、却下して retry した後の前の回の値の行、先のステップが同じキーを返すプランで値なしの判断の求めに `approved` と回答すると失敗する行（決定 4）である
+  5. テストを足して通す。設計書のテスト設計の決定 6 の行、却下して retry した後の前の回の値の行、先のステップが同じキーを返すプランで値なしの判断の求めに `approved` と回答すると失敗する行、承認の後に続くステップがあるプランでも続けずに失敗する行、文脈の必須キーを欠く `delivery` の判断の求めが `gate` のまま届く行（どれも決定 4）である
   6. 整理
 
 ### Task 6: 出力の足りない承認を、名前と理由を示して失敗にする
@@ -130,8 +131,13 @@
 ## 切り戻し手順
 
 - 単位ごとの PR を revert すれば戻る。前へ進めるときのデータの移行は無い
-- **U3 だけは戻す時機を選ぶ。** U3 は実行の保存先の `outputs.json` を、キーと値だけのオブジェクトから、ステップごとの要素の並び（`entries`）へ変える。直す前の NDF は `entries` を読めない。そのため、`entries` の形の `outputs.json` を持つプランが走っている間に U3 を戻すと、そのプランの出力が結果に載らなくなる
-- **そこで、U3 は走っているプランが無いときにだけ戻す。** 走っているプランがあれば、そのプランを終えてから戻す。終わったプランの `outputs.json` は、工程の出力がすでにステートマシンへ写されているので、直す前の NDF が読まなくても困らない
+- **U3 だけは戻す時機を選ぶ。** U3 は実行の保存先の `outputs.json` を、キーと値だけのオブジェクトから、ステップごとの要素の並び（`entries`）へ変える。直す前の NDF は `entries` を読めない。そのため、`entries` の形の `outputs.json` を読むプランが残っている間に U3 を戻すと、そのプランの出力が結果に載らなくなる
+- **そこで、U3 は、`entries` の形の `outputs.json` を再開の後に読むプランが 1 つも無いときにだけ戻す。** プランのプロセスが動いていないだけでは足りない。承認ゲートで回答を待つプランと、失敗して retry を待つ工程のプランも、再開すると同じ保存先の `outputs.json` を読む（工程の retry が試行の始めに消すのは `values.json` と課題のコピーだけで、`outputs.json` は残る。`run._prepare`）
+- 戻す前の確かめは次のとおりである
+  1. 状態の保存先（`.git/ndf/state/progress-work/`）の下で、キー `entries` を持つ `outputs.json` を探す
+  2. 見つかった保存先ごとに、持ち主のステートマシンで `ndf progress show <ID>` を打ち、その保存先の工程が完了しているかを見る。回答を待っている・失敗して retry を待っている・まだ流れていない工程は、完了していない。`progress-work/` の直下のディレクトリの名前はステートマシンの ID の SHA-256 の先頭なので（`run.work_root`）、各スプリントの ID から同じ求め方で名前を出して照らす
+  3. 完了していない工程があれば、その工程を完了まで進めてから戻す（回答を待つなら回答し、retry を待つなら retry して終える）。進められなければ U3 を戻さない
+  4. 完了した工程だけになったら戻す。完了した工程の出力はステートマシンへ写されているので、直す前の NDF がその `outputs.json` を読まなくても困らない
 - **ファイルを変換・退避・消す手順は置かない。** これまでの案は、走っているプランの `outputs.json` を直す前の形へ変換する手順だった。しかし、変換の途中で書き足された出力の扱いや、入れ直したときの上書きで出力を失う経路が次々に見つかった（設計 PR の cross-review の C4 の指摘 4 件）。戻す時機を選べば、出力を失う操作そのものが要らない
 - U3 を入れ直すときも、ファイルに触らない。U3 は直す前の形の `outputs.json` を、ステップの分からない要素 1 つとして読む（リスクと対処の 2 行目のテスト）
 
