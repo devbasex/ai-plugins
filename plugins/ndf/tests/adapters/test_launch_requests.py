@@ -23,9 +23,14 @@ def _worktree(tmp_path: Path, content: bytes | None = OLD) -> Path:
     return target
 
 
+OPTIONS = [{"label": la.APPROVE_LABEL.format("人"), "description": ""}, {"label": la.DENY_LABEL, "description": ""}]
+
+
 def _question(request_id: str) -> dict:
     return {
-        "questions": [{"question": f"承認するか（リクエスト {request_id}）", "header": "起動の承認", "options": [], "multiSelect": False}]
+        "questions": [
+            {"question": f"承認するか（リクエスト {request_id}）", "header": "起動の承認", "options": OPTIONS, "multiSelect": False}
+        ]
     }
 
 
@@ -67,10 +72,13 @@ def test_an_approved_answer_adds_one_row_and_the_retry_reuses_it(tmp_path):
     assert la.is_approved("/r", SHA)
 
 
-@pytest.mark.parametrize("case", ["unanswered", "denied", "other_repo", "other_hash", "newer", "target_changed", "revoked"])
+@pytest.mark.parametrize(
+    "case", ["unanswered", "denied", "unlisted_name", "other_repo", "other_hash", "newer", "target_changed", "revoked"]
+)
 def test_an_answer_that_cannot_be_used_adds_no_row(tmp_path, case):
     target = _worktree(tmp_path)
-    _asked(target, label={"unanswered": None, "denied": la.DENY_LABEL}.get(case, la.APPROVE_LABEL.format("人")))
+    labels = {"unanswered": None, "denied": la.DENY_LABEL, "unlisted_name": la.APPROVE_LABEL.format("別の人")}
+    _asked(target, label=labels.get(case, la.APPROVE_LABEL.format("人")))
     repo, sha = ("/other" if case == "other_repo" else "/r"), ("b" * 64 if case == "other_hash" else SHA)
     if case == "newer":
         _asked(target, "q2", label=None)
@@ -81,6 +89,15 @@ def test_an_answer_that_cannot_be_used_adds_no_row(tmp_path, case):
     with la.records_lock(la.state_file(la.APPROVALS)):
         assert la.approve_by_answer(repo, sha, "q1") is None
     assert [r for r in _approvals() if r["action"] == "approve"] == []
+
+
+def test_a_revoke_written_before_the_request_does_not_cancel_its_answer(tmp_path):
+    """取り消しの直後（同じ秒でも）に作り直したリクエストへの回答は、承認の行を足す。"""
+    target = _worktree(tmp_path)
+    la.append("/r", SHA, la.Action.REVOKE)
+    _asked(target)
+    with la.records_lock(la.state_file(la.APPROVALS)):
+        assert la.approve_by_answer("/r", SHA, "q1") == "人"
 
 
 def test_an_answer_long_after_the_request_is_still_pending_until_reflected(tmp_path):
@@ -102,7 +119,9 @@ def test_two_candidates_are_separate_files_and_record_the_target_and_base(tmp_pa
     target = _worktree(tmp_path)
     first, second = la.new_candidate("/r", target), la.new_candidate("/r", target)
     assert first != second and first.read_bytes() == second.read_bytes() == OLD
-    assert json.loads((first.parent / la.SOURCE_NAME).read_text()) == {"target": str(target), "base": la.content_version(target)}
+    source = {"target": str(target), "base": la.content_version(target), "written": la.content_version(target)}
+    assert json.loads((first.parent / la.SOURCE_NAME).read_text()) == source
+    assert [p.name for p in first.parents[1].iterdir() if p.name.startswith(la.DRAFTING)] == []
     missing = _worktree(tmp_path / "x", content=None)
     assert json.loads(la.new_candidate("/r", missing).read_text()) == {"version": 1}
 
@@ -118,13 +137,28 @@ def test_draft_sweeps_candidates_of_a_removed_worktree_and_of_a_denied_request(t
     assert not stale.exists() and not denied.exists() and fresh.exists()
 
 
+def test_draft_keeps_edited_candidates_and_candidates_still_being_drafted(tmp_path):
+    gone, kept = _worktree(tmp_path / "a"), _worktree(tmp_path / "b")
+    edited, denied = _candidate(gone), la.new_candidate("/r", kept)
+    _asked(kept, candidate=denied, label=la.DENY_LABEL)
+    denied.write_bytes(NEW)  # 「承認しない」と回答した後に直した
+    drafting = denied.parents[1] / f"{la.DRAFTING}half"
+    drafting.mkdir()
+    (gone.parent / "launch.json").unlink()
+    gone.parent.rmdir()
+    gone.parents[1].rmdir()
+    la.new_candidate("/r", kept)
+    assert edited.exists() and denied.exists() and drafting.exists()
+
+
 def test_reflect_replaces_the_target_once_and_the_retry_succeeds_without_writing(tmp_path):
     target = _worktree(tmp_path)
-    candidate, other = _candidate(target), _candidate(target, b"{}\n")
+    candidate, edited, untouched = _candidate(target), _candidate(target, b"{}\n"), la.new_candidate("/r", target)
     calls: list[int] = []
     assert la.reflect(candidate, lambda: calls.append(1), SHA)
     assert target.read_bytes() == NEW and calls == [1]
-    assert not candidate.exists() and not other.exists()  # 反映元のバージョンが合わなくなった候補も消す
+    assert not candidate.exists() and not untouched.exists()  # 反映元のバージョンが合わなくなった、直していない候補は消す
+    assert edited.exists()  # 直した候補は、反映元のバージョンが合わなくなっても残す
     assert not target.with_name("launch.json.reflecting").exists()
     assert la.reflected(candidate, SHA, None)
     target.write_bytes(OLD)
@@ -141,7 +175,8 @@ def test_a_target_changed_after_the_draft_is_not_overwritten(tmp_path):
     target = _worktree(tmp_path)
     candidate = _candidate(target)
     target.write_bytes(b'{"version": 1, "mine": true}\n')
-    assert not la.reflect(candidate, lambda: pytest.fail("記録しない"), SHA)
+    result = la.reflect(candidate, lambda: pytest.fail("記録しない"), SHA)
+    assert not result and result.saved is None
     assert target.read_bytes() == b'{"version": 1, "mine": true}\n' and candidate.exists()
 
 
@@ -226,3 +261,12 @@ def test_recover_with_only_the_aside_or_only_the_pending_record(tmp_path, left):
     assert la.recover(target) is None
     assert (target.read_bytes() == OLD) if left == "aside" else not target.exists()
     assert not la.reflected_file(target, la.PENDING).exists()
+
+
+def test_reflect_tells_where_the_users_save_in_the_aside_was_kept(tmp_path):
+    """反映先と退避の両方に利用者の保存があれば、拒否の結果に退避を残したパスが入る。"""
+    target, candidate, aside = _interrupted(tmp_path)
+    target.write_bytes(b'{"version": 1, "a": 1}\n')
+    aside.write_bytes(b'{"version": 1, "b": 1}\n')
+    result = la.reflect(candidate, lambda: pytest.fail("記録しない"), SHA)
+    assert not result and result.saved.read_bytes() == b'{"version": 1, "b": 1}\n'

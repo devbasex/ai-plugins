@@ -11,32 +11,39 @@ import hashlib
 import json
 import os
 import shutil
-import stat
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
 from ndf import identity
+from ndf.adapters import launch_records as records
 
 APPROVALS = "launch-approvals"
 QUESTIONS = "launch-questions"
 ANSWERS = "launch-answers"
 CANDIDATES = "launch-candidates"
 REFLECTED = "launch-reflected"
-# 候補のディレクトリの中身: 候補（反映先の写し）と、反映先・反映元のバージョンの記録
+# 候補のディレクトリの中身: 候補（反映先の写し）と、反映先・反映元のバージョン・作った時の候補のバージョンの記録
 CANDIDATE_NAME = "candidate.json"
 SOURCE_NAME = "source.json"
+# 作成途中の候補のディレクトリの名前の頭。そろってから付け替えるまで、掃除はこの名前のディレクトリを見ない
+DRAFTING = "."
 # 反映の途中で反映先を退避した名前の後ろと、反映の途中の記録・完了の記録の名前の後ろ
 REFLECTING = ".reflecting"
 PENDING = ".pending.json"
 DONE = ".done.json"
-# 承認の質問の選択肢（hook `launch-answer` は選んだラベルをそのまま記録する）
+# 承認の質問の選択肢（hook `launch-answer` は、質問が示した選択肢と同じラベルだけを記録する）
 APPROVE_LABEL = "承認する（承認者: {}）"
 DENY_LABEL = "承認しない"
 # 反映が済んでいないリクエストの続きの approve に渡す欄（--sha256・--request・--candidate の順）
 CONTINUATION = ("sha256", "request_id", "candidate")
+# 記録の読み書きと質問のハッシュは hook と共有する（`launch_records`）
+canonical_sha = records.canonical_sha
+write_row = records.write_row
+TORN_END = records.TORN_END
 
 
 class Action(StrEnum):
@@ -44,12 +51,6 @@ class Action(StrEnum):
 
     APPROVE = "approve"
     REVOKE = "revoke"
-
-
-def canonical_sha(value: Any) -> str:
-    """キーの順にそろえた JSON の SHA-256。字下げとキーの順の違いでは変わらない。"""
-    text = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def target_digest(permissions: Mapping[str, Any], files: Mapping[str, Any]) -> str:
@@ -74,52 +75,10 @@ def state_file(file_id: str) -> Path:
     return identity.load().state_dir / facts.value("ndf-files", file_id, "path")
 
 
-def _private_to_me(fd: int) -> bool:
-    """開いた記録のファイルが、このユーザーの持ち物の普通のファイルで、ほかのユーザーが読み書きできないか。
-
-    `os.open` の `0o600` は作るときにしか効かないため、復元などで権限が広がった既存のファイルは開いた後に確かめる。
-    """
-    st = os.fstat(fd)
-    return stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid() and not st.st_mode & 0o077
-
-
-# 中断した追記の末尾を閉じるバイト列。UTF-8 として復号できない 1 バイトを含むので、閉じた行は JSON を書き終えていても読まれない
-TORN_END = b"\xff\n"
-
-
-def _whole_rows(path: Path) -> list[dict[str, Any]]:
-    """改行で終わる行だけを読み、壊れた行を飛ばす。読めないか所有者だけの形でなければ空（承認していないと扱う）。
-
-    バイト列のまま改行で区切り、行ごとに復号する。1 行の書きかけ（多バイト文字の途中で切れた行など）でほかの行を捨てないためである。
-    """
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return []
-    try:
-        with os.fdopen(fd, "rb") as f:
-            if not _private_to_me(f.fileno()):
-                return []
-            data = f.read()
-    except OSError:
-        return []
-    rows = (_parsed_row(line) for line in data.split(b"\n")[:-1])  # 最後の要素は改行で終わらない書きかけか空
-    return [row for row in rows if row is not None]
-
-
-def _parsed_row(line: bytes) -> Optional[dict[str, Any]]:
-    """1 行の JSON のオブジェクト。書きかけや壊れた行は None（読む側はロックを取らないため、追記の途中の行がありうる）。"""
-    try:
-        row = json.loads(line.decode("utf-8"))
-    except ValueError:  # noqa: NDF401 ファイル: 読む側はロックを取らないので、追記の途中の行・復号できない行・壊れた行は飛ばす
-        return None
-    return row if isinstance(row, dict) else None
-
-
 def is_approved(repo: str, sha256: str) -> bool:
     """同じリポジトリのキーとハッシュの最後の行が `approve` か。読む側はロックを取らない。"""
     last = None
-    for row in _whole_rows(state_file(APPROVALS)):
+    for row in records.whole_rows(state_file(APPROVALS)):
         if row.get("repo") == repo and row.get("sha256") == sha256:
             last = row.get("action")
     return last == Action.APPROVE
@@ -127,29 +86,9 @@ def is_approved(repo: str, sha256: str) -> bool:
 
 def records_lock(path: Path) -> Any:
     """記録のファイルの錠（`<ファイル>.lock`）。待ちの上限は `launch.approvals-lock`。"""
-    from filelock import FileLock
-
     from ndf.contracts import limits
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return FileLock(str(path) + ".lock", timeout=limits.seconds("launch.approvals-lock"))
-
-
-def write_row(path: Path, row: Mapping[str, Any]) -> None:
-    """1 行を追記する（錠は呼び手が持つ）。ファイルは所有者だけが読める（0600）。
-
-    既存のファイルが所有者だけの形でなければ書かずに `PermissionError` を投げる（承認者名とリポジトリのパスをほかのユーザーへ見せない）。
-    末尾が改行で終わらない書きかけ（中断した追記）が残っていれば、先に `TORN_END` で閉じて次の行と分ける。つなげると読み手が両方を捨て、
-    打ち直した操作が反映されない。改行だけで閉じると、JSON を書き終えたところで中断した行が、次の無関係な追記で有効になる。
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o600)
-    with os.fdopen(fd, "r+b") as f:
-        if not _private_to_me(f.fileno()):
-            raise PermissionError(f"{path} が所有者だけの読み書きでない。所有者を自分にし、`chmod 600` にしてから打ち直す")
-        size = os.fstat(f.fileno()).st_size
-        torn = size > 0 and os.pread(f.fileno(), 1, size - 1) != b"\n"
-        f.write((TORN_END if torn else b"") + (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8"))
+    return records.file_lock(path, limits.seconds("launch.approvals-lock"))
 
 
 def _at_now() -> str:
@@ -229,7 +168,8 @@ def reflected_file(target: Path, suffix: str) -> Path:
 def put_question(request: Mapping[str, Any], question: Mapping[str, Any], candidate: Optional[Path] = None) -> None:
     """承認のリクエスト（`request_id`・`repo`・`sha256`・反映先 `target`・会話の id `session`）と、質問の中身（`questions`）のハッシュを残す。
 
-    反映元のバージョンは候補の記録か、今の反映先のバージョン。
+    反映元のバージョンは候補の記録か、今の反映先のバージョン。質問が示した選択肢のラベル（`options`）と、その時点の承認の記録の行数
+    （`approvals_seen`。これより後ろの取り消しだけが、このリクエストの後の取り消し）も残す。
     """
     target = Path(request["target"])
     row = {
@@ -238,45 +178,64 @@ def put_question(request: Mapping[str, Any], question: Mapping[str, Any], candid
         "candidate": str(candidate) if candidate is not None else None,
         "candidate_version": content_version(candidate) if candidate is not None else None,
         "question_sha": canonical_sha(question["questions"]),
+        "options": records.option_labels(question["questions"]),
+        "approvals_seen": len(records.whole_rows(state_file(APPROVALS))),
     }  # fmt: skip
     _append_row(QUESTIONS, row)
 
 
+def _last_labels() -> dict[Any, Any]:
+    """リクエストの識別子ごとの最後の回答のラベル。回答の記録は 1 回だけ読む。"""
+    return {row.get("request_id"): row.get("label") for row in records.whole_rows(state_file(ANSWERS))}
+
+
+def _judged(label: Any, request: Mapping[str, Any]) -> tuple[Optional[str], Optional[str]]:
+    """回答のラベルを、リクエストの質問が示した選択肢と照らす（`approve`・`deny`・None と承認者の名前）。示していないラベルは None。"""
+    options = request.get("options")
+    if not isinstance(label, str) or not isinstance(options, list) or label not in options:
+        return None, None
+    if label == DENY_LABEL:
+        return "deny", None
+    head, _, tail = APPROVE_LABEL.partition("{}")
+    if label.startswith(head) and label.endswith(tail) and len(label) > len(head) + len(tail):
+        return "approve", label[len(head) : len(label) - len(tail)]
+    return None, None
+
+
+def _latest_request(requests: list[dict[str, Any]], request_id: str) -> Optional[int]:
+    return next((i for i in reversed(range(len(requests))) if requests[i].get("request_id") == request_id), None)
+
+
 def request_answer(request_id: str) -> tuple[Optional[str], Optional[str]]:
     """リクエストへの最後の回答（`approve`・`deny`・None）と承認者の名前。"""
-    label = None
-    for row in _whole_rows(state_file(ANSWERS)):
-        if row.get("request_id") == request_id:
-            label = row.get("label")
-    head, _, tail = APPROVE_LABEL.partition("{}")
-    if isinstance(label, str) and label.startswith(head) and label.endswith(tail) and len(label) > len(head) + len(tail):
-        return "approve", label[len(head) : len(label) - len(tail)]
-    return ("deny", None) if label == DENY_LABEL else (None, None)
+    requests = records.whole_rows(state_file(QUESTIONS))
+    index = _latest_request(requests, request_id)
+    return (None, None) if index is None else _judged(_last_labels().get(request_id), requests[index])
 
 
 def approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]:
     """承認の記録の錠の中で、リクエストの回答を設計書の「人の確認」の条件で照らし、承認の行を足して承認者を返す。使えなければ None。
 
-    同じリクエストの承認の行があり承認済みなら、行を足さずに承認者を返す（中断の後の打ち直し）。
+    同じリクエストの承認の行があり承認済みなら、行を足さずに承認者を返す（中断の後の打ち直し）。リクエストの後の取り消しは、
+    リクエストを作った時点の承認の記録の行数より後ろの行で見分ける（時刻は秒の単位なので、同じ秒の取り消しと区別できない）。
     """
-    requests = _whole_rows(state_file(QUESTIONS))
-    index = next((i for i in reversed(range(len(requests))) if requests[i].get("request_id") == request_id), None)
+    requests = records.whole_rows(state_file(QUESTIONS))
+    index = _latest_request(requests, request_id)
     if index is None:
         return None
     req = requests[index]
     if (req.get("repo"), req.get("action"), req.get("sha256")) != (repo, Action.APPROVE, sha256):
         return None
-    approvals = _whole_rows(state_file(APPROVALS))
+    approvals = records.whole_rows(state_file(APPROVALS))
     used = [r for r in approvals if r.get("request_id") == request_id and r.get("repo") == repo and r.get("sha256") == sha256]
     if used and is_approved(repo, sha256):
         return used[-1].get("approver")
-    answer, name = request_answer(request_id)
+    answer, name = _judged(_last_labels().get(request_id), req)
     newer = any(r.get("target") == req.get("target") for r in requests[index + 1 :])
     moved = content_version(Path(req["target"])) not in (req.get("base"), req.get("candidate_version"))
-    revoked = any(
-        r.get("action") == Action.REVOKE and r.get("repo") == repo and r.get("sha256") == sha256 and str(r.get("at")) >= req["at"]
-        for r in approvals
-    )
+    seen = req.get("approvals_seen")
+    after = approvals[seen:] if isinstance(seen, int) and not isinstance(seen, bool) and seen >= 0 else approvals
+    revoked = any(r.get("action") == Action.REVOKE and r.get("repo") == repo and r.get("sha256") == sha256 for r in after)
     if answer != "approve" or newer or moved or revoked:
         return None
     write_row(state_file(APPROVALS), approval_row(repo, sha256, Action.APPROVE, name, request_id))
@@ -285,14 +244,14 @@ def approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]:
 
 def pending_request(repo: str, target: Path) -> Optional[Mapping[str, Any]]:
     """その反映先の最新のリクエストで、「承認する」と回答があり、反映（候補が無ければ承認の行）が済んでいないもの。"""
-    rows = [r for r in _whole_rows(state_file(QUESTIONS)) if r.get("repo") == repo and r.get("target") == str(target)]
-    if not rows or request_answer(str(rows[-1].get("request_id")))[0] != "approve":
+    rows = [r for r in records.whole_rows(state_file(QUESTIONS)) if r.get("repo") == repo and r.get("target") == str(target)]
+    if not rows or _judged(_last_labels().get(rows[-1].get("request_id")), rows[-1])[0] != "approve":
         return None
     req = rows[-1]
     done = read_launch_record(reflected_file(target, DONE))
     if done.get("request_id") == req["request_id"]:
         return None
-    if req.get("candidate") is None and any(r.get("request_id") == req["request_id"] for r in _whole_rows(state_file(APPROVALS))):
+    if req.get("candidate") is None and any(r.get("request_id") == req["request_id"] for r in records.whole_rows(state_file(APPROVALS))):
         return None
     return req
 
@@ -302,37 +261,77 @@ def _worktree_gone(target: object) -> bool:
     return not isinstance(target, str) or not Path(target).parents[1].exists()
 
 
-def new_candidate(repo: str, target: Path) -> Path:
-    """反映先の写しの候補と、反映先・反映元のバージョンの記録を作り、候補のパスを返す。
+def _candidates(home: Path) -> list[Path]:
+    """そろった候補のディレクトリ。作成途中（名前の頭が `DRAFTING`）のものは含めない。"""
+    return sorted(made for made in home.glob("*") if not made.name.startswith(DRAFTING))
 
-    先に、反映先の worktree が無い候補と完了の記録、「承認しない」と回答たリクエストの候補を消す。
+
+def _untouched(made: Path, kept: Optional[str] = None) -> bool:
+    """候補が、作った時（`written`）か `kept` のバージョンのままか。作った後に直した候補（Skill か利用者が設定案を書いた候補）は掃除で消さない。"""
+    now = content_version(made / CANDIDATE_NAME)
+    return now is None or now in (read_launch_record(made / SOURCE_NAME).get("written"), kept)
+
+
+def new_candidate(repo: str, target: Path) -> Path:
+    """反映先の写しの候補と、反映先・反映元のバージョン・作った時の候補のバージョンの記録を作り、候補のパスを返す。
+
+    先に、反映先の worktree が無い候補と完了の記録、「承認しない」と回答したリクエストの候補を消す。候補は、作った時か
+    「承認しない」と回答した時の中身のままのものだけを消し、その後に直したものは残す。新しい候補は名前の頭が `DRAFTING` の
+    ディレクトリで候補と記録をそろえてから付け替える。ほかの `draft` の掃除が、記録の無い作成途中の候補を消さないためである。
     """
     home = _store(CANDIDATES) / _short_hash(repo)
-    denied = {r.get("candidate") for r in _whole_rows(state_file(QUESTIONS)) if request_answer(str(r.get("request_id")))[0] == "deny"}
-    for made in sorted(home.glob("*")):
-        if _worktree_gone(read_launch_record(made / SOURCE_NAME).get("target")) or str(made / CANDIDATE_NAME) in denied:
+    labels = _last_labels()
+    denied = {
+        r.get("candidate"): r.get("candidate_version")
+        for r in records.whole_rows(state_file(QUESTIONS))
+        if _judged(labels.get(r.get("request_id")), r)[0] == "deny"
+    }
+    for made in _candidates(home):
+        path = str(made / CANDIDATE_NAME)
+        gone = _worktree_gone(read_launch_record(made / SOURCE_NAME).get("target"))
+        if (gone and _untouched(made)) or (path in denied and _untouched(made, denied[path])):
             shutil.rmtree(made, ignore_errors=True)
     for record in _store(REFLECTED).glob("*" + DONE):
         if _worktree_gone(read_launch_record(record).get("target")):
             record.unlink(missing_ok=True)
-    made = home / uuid.uuid4().hex
-    _write_private(made / CANDIDATE_NAME, target.read_bytes() if target.exists() else b'{"version": 1}\n')
-    write_launch_record(made / SOURCE_NAME, {"target": str(target), "base": content_version(target)})
+    name = uuid.uuid4().hex
+    drafting, made = home / f"{DRAFTING}{name}", home / name
+    data = target.read_bytes() if target.exists() else b'{"version": 1}\n'
+    _write_private(drafting / CANDIDATE_NAME, data)
+    write_launch_record(
+        drafting / SOURCE_NAME, {"target": str(target), "base": content_version(target), "written": hashlib.sha256(data).hexdigest()}
+    )
+    os.rename(drafting, made)
     return made / CANDIDATE_NAME
 
 
-def reflect(candidate: Path, record: Callable[[], None], sha256: str, request_id: Optional[str] = None) -> bool:
-    """承認の記録の錠の中で候補を反映先へ置く。置いたか反映済みなら真、反映先が変わっていたか途中で保存を見つけたら偽。
+@dataclass(frozen=True)
+class Reflection:
+    """`reflect` の結果。`placed` は置いたか反映済みか。`saved` は、利用者の保存を別の名前で残したパス（残さなければ None）。
+
+    真偽は `placed` と同じ。偽（拒否）でも `saved` があれば、呼び手は拒否の文にそのパスを載せる。
+    """
+
+    placed: bool
+    saved: Optional[Path] = None
+
+    def __bool__(self) -> bool:
+        return self.placed
+
+
+def reflect(candidate: Path, record: Callable[[], None], sha256: str, request_id: Optional[str] = None) -> Reflection:
+    """承認の記録の錠の中で候補を反映先へ置く。置いたか反映済みなら真、反映先が変わっていたか途中で保存を見つけたら偽の結果を返す。
 
     先に `recover` で退避を片付け、反映先が反映元のバージョンと同じときだけ `record`（承認の行を書く）を呼んで置き換える。
-    書けなければ片付けてから `precondition` で止める（承認の行は残る）。
+    書けなければ片付けてから `precondition` で止める（承認の行は残る）。片付けで利用者の保存を別の名前で残したら、そのパスを
+    結果の `saved` か、止める文に載せる。
     """
     from ndf.contracts import internal
 
     source = read_launch_record(candidate.parent / SOURCE_NAME)
     target = Path(str(source.get("target")))
     with records_lock(state_file(APPROVALS)):
-        recover(target)
+        saved = recover(target)
         now, wanted = content_version(target), content_version(candidate)
         rec = {
             "candidate": candidate.parent.name,
@@ -343,23 +342,23 @@ def reflect(candidate: Path, record: Callable[[], None], sha256: str, request_id
         }
         if now == wanted:
             _after_reflect(target, candidate, rec)
-            return True
+            return Reflection(True, saved)
         if now != source.get("base"):
-            return False
+            return Reflection(False, saved)
         record()
         write_launch_record(reflected_file(target, PENDING), rec)
         try:
             placed = _replace(target, candidate, rec["base"])
         except OSError as exc:
-            recover(target)
+            saved = recover(target) or saved
+            kept = f"。利用者の保存を {saved} に残した" if saved is not None else ""
             raise internal.InternalError(
-                "precondition", f"{target} へ反映できない（{type(exc).__name__}）。同じコマンドを打ち直す"
+                "precondition", f"{target} へ反映できない（{type(exc).__name__}）{kept}。同じコマンドを打ち直す"
             ) from None
         if not placed:
-            recover(target)
-            return False
+            return Reflection(False, recover(target) or saved)
         _after_reflect(target, candidate, rec)
-        return True
+        return Reflection(True, saved)
 
 
 def _replace(target: Path, candidate: Path, base: Optional[str]) -> bool:
@@ -392,12 +391,15 @@ def _write_done(target: Path, rec: Mapping[str, Any]) -> None:
 
 
 def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> None:
-    """完了の記録を書いてから、候補と、反映元のバージョンが合わなくなった同じ反映先の候補を消す。"""
+    """完了の記録を書いてから、候補と、反映元のバージョンが合わなくなった同じ反映先の候補を消す。
+
+    ほかの候補は、作った時の中身のままのものだけを消す。作った後に直した候補は、反映元が変わっても残す（書いた設定案を失わないため）。
+    """
     _write_done(target, rec)
     now = content_version(target)
-    for made in candidate.parent.parent.glob("*"):
+    for made in _candidates(candidate.parent.parent):
         source = read_launch_record(made / SOURCE_NAME)
-        if made == candidate.parent or (source.get("target") == str(target) and source.get("base") != now):
+        if made == candidate.parent or (source.get("target") == str(target) and source.get("base") != now and _untouched(made)):
             shutil.rmtree(made, ignore_errors=True)
 
 
