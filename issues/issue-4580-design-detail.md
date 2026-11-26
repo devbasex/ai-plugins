@@ -434,7 +434,13 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | --- | --- | --- | --- | --- |
 | `Authored` | `adapters/github.py` | 変更 | 項目 `comment_id: int = 0` を足す（REST の `id`） | 自分が書いたコメントを消すため |
 | `PermissionUnknown` | `adapters/github.py` | 新設 | `class PermissionUnknown(GitHubError)`、属性 `login: str` | 照会できない書き手 |
-| `permission_strict` | `adapters/github.py` | 新設 | `permission_strict(self, login: str) -> str` | 上限でない 403・404 を `PermissionUnknown` にする。読めた値は `permission` と同じ保存に入れて 1 人 1 回にする |
+| `permission_strict` | `adapters/github.py` | 新設 | `permission_strict(self, login: str) -> str` | 上限でない 403・404 を `PermissionUnknown` にする。GitHub が 200 で返した値は `permission` と同じ保存（`_permissions`）に入れて 1 人 1 回にする |
+| `permission` | `adapters/github.py` | 変更 | 今と同じ | 返す値は今と同じ（403・404 は `none`）。ただし、403・404 で変換した `none` は `_permissions` に入れず、照会できなかった書き手の集合（`_unreadable`）に入れる。GitHub が返した `none` と、照会できずに `none` と読んだものを保存の上で分けるためである |
+| `_read_permission` | `adapters/github.py` | 変更 | `_read_permission(self, login: str) -> str \| None` | 上限でない 403・404 で `None` を返す（変換しない）。`none` への変換は `permission` が行う |
+
+- `permission_strict`
+  - 事後条件: `login` が `_unreadable` にあれば、照会し直さずに `PermissionUnknown` を投げる。同じ実行で `permission` が先に照会に失敗していても、照会できなかった書き手を権限が無い書き手として除かない
+  - 事後条件: `_permissions` にある値は、`none` を含めて GitHub が 200 で返した値だけで、そのまま返す
 | `trusts_strict` | `adapters/github.py` | 新設 | `trusts_strict(self, authored: Authored) -> bool` | `trusts` と同じ区分の扱いで、照会に `permission_strict` を使う |
 | `branch_activity` | `adapters/github.py` | 新設 | `branch_activity(self, branch: str) -> Iterator[dict]` | `GET /repos/{repo}/activity?ref=refs/heads/<branch>` を新しい順に 1 ページずつ返す（呼び出し元が打ち切れる） |
 | `workflow_runs` | `adapters/github.py` | 新設 | `workflow_runs(self, workflow: str, branch: str, commit: str) -> list[dict]` | `GET /actions/workflows/<workflow>/runs?branch=&head_sha=` |
@@ -454,7 +460,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `permission_strict` | 200 の権限を返し、2 回目は照会しない | — | 403・404 で `PermissionUnknown`、上限は今と同じ `GitHubError` |
+| `permission_strict` | 200 の権限を返し、2 回目は照会しない | 200 で返った `none` は `none` を返す。先に `permission` が 403 で `none` と読んだ書き手は、照会し直さずに `PermissionUnknown` | 403・404 で `PermissionUnknown`、上限は今と同じ `GitHubError` |
 | `trusts_strict` | OWNER は照会しない | ほかの区分は照会せずに偽 | 照会の失敗を偽にしない |
 | `branch_activity` | 1 ページずつ返す | 短いページで終わる | 上限で止まる |
 
