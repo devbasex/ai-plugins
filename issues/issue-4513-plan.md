@@ -15,9 +15,10 @@
 | --- | --- |
 | `contracts/schemas/result.schema.json` | `product_version` を空白だけでない文字列にし、バージョン番号の形を `$defs/version_number` へ移す |
 | `contracts/schemas/release-verification.schema.json` | `version` を空白だけでない文字列にする |
-| `contracts/worker/kinds.json`・`contracts/workflow/context.schema.json` | `product_version` の説明 |
+| `contracts/worker/kinds.json`・`contracts/workflow/context.schema.json` | `product_version` の説明。文脈の `product_version` を改行を含まない 1 行に限る |
 | `src/ndf/contracts/worker_kinds.py` | `write_released`・`released_of`（新設）、`write_values`（変更） |
 | `src/ndf/progress/definition.py` | `required_outputs`（新設） |
+| `src/ndf/progress/plan/__init__.py` | `record_release`（`--version` を文脈の `product_version` の定義で確かめる） |
 | `src/ndf/progress/run.py` | `Approvals`・`approvals`（新設）、`approved_seen`・`_prepare`・`_run_step`・`_step_draft`・`_finish_stage`（変更） |
 | `src/ndf/progress/invoke.py` | `StageRun.released`・`PreparedPlan.released`・`uses_released`・`answered_gap_detail`（新設）、`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
 | `src/ndf/core/route/__init__.py` | `_built`・`rendered`（新設）、`render`（変更） |
@@ -42,15 +43,16 @@
 
 ### Task 2: 形の確かめを結果の定義から `ndf worker run` へ移す
 
-- **対象ファイル:** `result.schema.json`・`release-verification.schema.json`・`kinds.json`・`context.schema.json`・`core/worker.py`・`core/worker_outcome.py`・`progress/gate/entry.py`（`_strategy_at`・`WorkHandoff.version_number`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`・`_cmd_work`）・`skills/release-verification/SKILL.md`・`tests/domains/release/test_release_record.py`
+- **対象ファイル:** `result.schema.json`・`release-verification.schema.json`・`kinds.json`・`context.schema.json`・`core/worker.py`・`core/worker_outcome.py`・`progress/gate/entry.py`（`_strategy_at`・`WorkHandoff.version_number`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`・`_cmd_work`）・`progress/plan/__init__.py`（`record_release`）・`skills/release-verification/SKILL.md`・`tests/domains/release/test_release_record.py`・`tests/progress/test_plan.py`
 - **変更内容:** 詳細設計書の「結果 JSON とリリース後テストの記録の定義」と「worker の結果の確かめ」の `ok` の分。`ndf answer work` は、`_work_handoff` が決めた `version_number` を起動指示と `work_argv` の両方へ渡す。記録済みの値で終える `Released` は Task 4 で足す。`gate` の引き継ぎは Task 5 に回す
 - **満たす受け入れ条件:** 3・4・5・8
 - **進め方:**
   1. Task 1 のテストを通す
   2. `none` 以外と設定を読めないとき（`git` の `GitError` を含む）に `ndf v11.0.0` が欠けになるテスト（条件 8）を足して通す
   3. リリース後テストの記録の `version` が改行を含むと形の誤りになり、1 行の記録は描いて読み直しても `version` と `issues` が変わらないテスト（設計書のテスト設計の決定 5 の行）を足して通す
-  4. 条件 4 の経路のテストを `test_release_record.py` に足して通す。条件 4 は本番リリース記録を読める場合に限った条件なので、テストは記録が置かれた状態から始める。配布識別子 `main abc1234` を持つ本番リリース記録（`record_decide.render_record` の本文）を、信頼する書き手のコメントとして偽の GitHub の対象 PR に置く。本番リリース記録の書き込み（`ndf release-steps record`・`record.write`）はリリースブランチの名前からバージョン番号を読むのでこの記録を作れず、この課題では変えない。同じ識別子のリリース後テストの結果を `ndf release-steps verification-record` でその PR に記録する。`close-check` へは投稿前の入力ファイルでなく、投稿されたコメントから取り出した JSON を渡す。手順は設計書のテスト設計の条件 4 の行にある。GitHub は `tests/domains/release/_fakes.py` の偽物で差し替える
-  5. 整理
+  4. 改行を含む配布識別子が、`ndf lanes release --version` では記録されずに断られ、`ndf worker run` の `ok` の結果では欠けになるテスト（設計書のテスト設計の決定 5 の行）を足して通す
+  5. 条件 4 の経路のテストを `test_release_record.py` に足して通す。条件 4 は本番リリース記録を読める場合に限った条件なので、テストは記録が置かれた状態から始める。配布識別子 `main abc1234` を持つ本番リリース記録（`record_decide.render_record` の本文）を、信頼する書き手のコメントとして偽の GitHub の対象 PR に置く。本番リリース記録の書き込み（`ndf release-steps record`・`record.write`）はリリースブランチの名前からバージョン番号を読むのでこの記録を作れず、この課題では変えない。同じ識別子のリリース後テストの結果を `ndf release-steps verification-record` でその PR に記録する。`close-check` へは投稿前の入力ファイルでなく、投稿されたコメントから取り出した JSON を渡す。手順は設計書のテスト設計の条件 4 の行にある。GitHub は `tests/domains/release/_fakes.py` の偽物で差し替える
+  6. 整理
 
 ### Task 3: オーガナイザーの承認の後にデプロイの工程が止まることを再現する
 

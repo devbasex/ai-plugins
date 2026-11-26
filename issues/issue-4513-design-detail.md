@@ -56,6 +56,7 @@ plugins/ndf/
 | `contracts/workflow/context.schema.json` | 変更 | 文脈の `product_version` の説明 | — | `product_version` | — |
 | `src/ndf/contracts/worker_kinds.py` | 変更 | `values.json` の形と読み書き | — | モジュール | `write_released`（新設）・`released_of`（新設）・`write_values`（変更） |
 | `src/ndf/progress/definition.py` | 変更 | 工程の定義と規約の読み手 | `contracts` | モジュール | `required_outputs`（新設） |
+| `src/ndf/progress/plan/__init__.py` | 変更 | まとめたリリースの回答の記録 | `definition` | モジュール | `record_release`（変更） |
 | `src/ndf/progress/run.py` | 変更 | 工程の進行 | `invoke`・`definition`・`stages` | `Approvals`（新設）・モジュール | `approvals`（新設）・`approved_seen`・`_prepare`・`_run_step`・`_step_draft`・`_finish_stage`（変更） |
 | `src/ndf/progress/invoke.py` | 変更 | ステップの呼び出し | `worker_kinds`・`plan` | `StageRun`・`PreparedPlan`・モジュール | `StageRun.released`（新設の欄）・`PreparedPlan.released`（新設の欄）・`uses_released`（新設）・`answered_gap_detail`（新設）・`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
 | `src/ndf/core/route/__init__.py` | 変更 | テンプレートからプランを組む | — | モジュール | `rendered`・`_built`（新設）・`render`（変更） |
@@ -69,7 +70,7 @@ plugins/ndf/
 | `src/ndf/core/plan/records.py` | 変更 | プランの記録のファイル | — | モジュール | `_add_outputs`・`recorded_outputs`（変更）・`_stored_entries`・`_keep_step_missing`・`recorded_step_missing`（新設）・`_stored_outputs`（削除） |
 | `skills/` の 5 ファイル | 変更 | 手順書の説明 | — | — | — |
 
-`forms_decide.py` と、テストの `test_invoke_values.py`・`test_worker_kinds_shape.py`・`test_steps.py`・`test_release_forms.py`・`test_release_record.py`・`test_definition.py` も、設計文書の「設計の結果」の触るファイルに入れた（届け先の条件を 1 か所にするためと、変える関数の既存のテストがそこにあるため。`test_release_record.py` は受け入れ条件 4 の記録の経路を確かめる）。
+`forms_decide.py`・`progress/plan/__init__.py` と、テストの `test_plan.py`・`test_invoke_values.py`・`test_worker_kinds_shape.py`・`test_steps.py`・`test_release_forms.py`・`test_release_record.py`・`test_definition.py` も、設計文書の「設計の結果」の触るファイルに入れた（届け先の条件を 1 か所にするためと、変える関数の既存のテストがそこにあるため。`test_release_record.py` は受け入れ条件 4 の記録の経路を確かめる）。
 
 ## 結果 JSON とリリース後テストの記録の定義
 
@@ -82,8 +83,16 @@ plugins/ndf/
 | `result.schema.json` の `$defs/outputs` の `product_version` | バージョン番号の正規表現を直に書く | `{"$ref": "#/$defs/text"}`（空白だけでない文字列。`$defs/text` は今ある） |
 | `result.schema.json` の `$defs/version_number`（新設） | — | 今の正規表現をそのまま移した `{"type": "string", "pattern": ...}`。バージョン番号の形の唯一の保存先 |
 | `release-verification.schema.json` の `version` | 先頭の 0 を断るバージョン番号の正規表現 | `{"type": "string", "allOf": [{"pattern": "\\S"}, {"not": {"pattern": "[\\r\\n]"}}]}`（改行を含まない、空白だけでない 1 行。理由は設計文書の決定 5）。説明の文も「出したものを指す 1 行の値」に直す |
-| `context.schema.json` の `product_version` の説明 | 手動の 3 行の `## リリース記録` の読み方を書く | バージョン番号を持たないリポジトリでは出したものを指す値であると足す |
+| `context.schema.json` の `product_version` | `{"type": "string", "minLength": 1}`。説明に手動の 3 行の `## リリース記録` の読み方を書く | `{"type": "string", "allOf": [{"pattern": "\\S"}, {"not": {"pattern": "[\\r\\n]"}}]}`（配布識別子の共通の定義。改行を含まない、空白だけでない 1 行）。説明に、バージョン番号を持たないリポジトリでは出したものを指す値であると足す |
 | `kinds.json` の `release` | — | 説明に、返す値の形は起動指示の 1 行に従うと足す |
+
+配布識別子を 1 行に限る制約は、文脈の `product_version` の定義の 1 か所に置く。値が入る入口は、どれもこの定義で確かめる。
+
+| 入口 | 確かめ方 | 合わないとき |
+| --- | --- | --- |
+| オーガナイザーの記録（`ndf lanes release --version`、`progress/plan/__init__.py` の `record_release`） | `released` の回答の `version` を `{"product_version": version}` として文脈のスキーマ全体（`definition.CONTEXT`）で確かめる | 記録せずに `model.Refused` で断る。誤りの文に `product_version` の形が出る |
+| リリース承認ゲートへの回答（`gate/answering.py` の `_outputs`） | 今のまま `invoke.value_errors` で確かめる | 今のまま断る |
+| worker の結果（`ndf worker run`） | 下の「worker の結果の確かめ」の文脈の形の確かめ | `ok` では欠け、`gate` では `missing` |
 
 `ndf worker run` がバージョン番号の形を確かめるときは、`$defs/version_number` を参照して確かめる（下の「worker の結果の確かめ」）。正規表現をコードに写さない。
 
@@ -349,7 +358,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `require_outputs` | `gate` で `delivery`・`product_version` がそろえば両方を返し、欠けは空 | `version_number` 偽で `main abc1234` が通る | `version_number` 真で `ndf v11.0.0` が `ok` では欠け、`gate` では `missing`。`versioned` の無い `delivery` が `ok` では欠け、`gate` では `outputs` に載らず `missing` に入る |
+| `require_outputs` | `gate` で `delivery`・`product_version` がそろえば両方を返し、欠けは空 | `version_number` 偽で `main abc1234` が通り、改行を含む値は欠けになる | `version_number` 真で `ndf v11.0.0` が `ok` では欠け、`gate` では `missing`。`versioned` の無い `delivery` が `ok` では欠け、`gate` では `outputs` に載らず `missing` に入る |
 | `outcome_of` | `gate` の結果に `outputs` と `metrics.missing_outputs` が載る | `missing` が空ならキーが無い | — |
 
 空文字・空白だけの `product_version`（受け入れ条件 5）は、結果 JSON のスキーマ（`$defs/text`）で形の誤りになり、`ndf contracts emit` が断る。テストは `tests/contracts/test_result.py` に置く。
