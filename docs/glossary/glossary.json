@@ -7717,6 +7717,12 @@
       "source": "docs/specifications/ndf-next-ci-failed-tests-junit.md"
     },
     {
+      "term": "テストを確かめる手段",
+      "context": "ndf-ci-test",
+      "meaning": "工程「リファクタリング」が変更の後のテストの合否を確かめる先。必須のチェックか、手元で打てるテストの設定のどちらか。どちらも無ければ工程を飛ばす",
+      "pending_source": "issues/issue-4566-requirements.md"
+    },
+    {
       "term": "収集の確かめ",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring が、足したテストを全体の実行が収集するかを suite の `collect_command` で確かめる工程。成功と読む終了コードは suite の設定から読み、設定が無ければ 0 だけ",
