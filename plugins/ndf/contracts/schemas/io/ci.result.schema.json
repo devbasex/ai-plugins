@@ -136,6 +136,59 @@
               "reason"
             ]
           }
+        },
+        "merge": {
+          "type": "string",
+          "enum": [
+            "merged",
+            "deferred",
+            "already"
+          ],
+          "description": "マージの結果（merge）。merged はマージした、deferred は本番チャネルへの承認の証跡が無いので先送りした、already は既にマージ済みだった"
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "not_production",
+            "automatic",
+            "manual",
+            "unset",
+            "unknown"
+          ],
+          "description": "マージ先が自動反映の本番チャネルかの判定（merge・ask。#4409 の判定の部品の値）"
+        },
+        "approved_by": {
+          "type": "string",
+          "enum": [
+            "user",
+            "mvv"
+          ],
+          "description": "マージに使った承認の証跡の担い手（merge が承認の要るマージをしたときだけ）"
+        },
+        "gate": {
+          "type": "string",
+          "const": "production-merge",
+          "description": "本番チャネルへのマージの承認で止まった・先送りした・待つ（merge・ask）"
+        },
+        "production": {
+          "type": "boolean",
+          "description": "承認資料に「本番へ反映され得る」を書いたか（承認を待つときだけ）"
+        },
+        "presented_id": {
+          "type": "string",
+          "description": "提示の識別子（承認を待つときだけ。--presented-out のファイルと同じ値で、ndf ci answer が回答の記録と照らす）"
+        },
+        "answer": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "rejected"
+          ],
+          "description": "証跡に書いた回答（answer）"
+        },
+        "written": {
+          "type": "boolean",
+          "description": "証跡を今回書いたか（answer。同じ回答の記録の証跡が既にあれば偽）"
         }
       }
     },

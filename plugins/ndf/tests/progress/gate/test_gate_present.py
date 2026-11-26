@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from ndf.adapters.github import GitHubError
+from ndf.adapters.github import FileAt, GitHubError
 from ndf.contracts import result
 from ndf.progress import gate, invoke, model, run
 
@@ -53,8 +55,14 @@ def test_a_result_that_is_not_a_listen_gate_is_left_as_it_is(st, repo, new_table
     assert gate.present(st, tid, repo, out, gate.no_observe) is out
 
 
-def _hub(head):
-    return SimpleNamespace(pull=lambda n: SimpleNamespace(head_sha=head, body="本文", title="題"))
+def _hub(head, text=None):
+    """PR（HEAD `head`・develop 宛て）とマージ先の設定（本文 `text`。省けば本番チャネルでない設定）を読む偽の GitHub。"""
+    config = text if text is not None else json.dumps({"branch_strategy": {"branches": {"base": "develop", "production": "main"}}})
+    return SimpleNamespace(
+        repo="o/r",
+        pull=lambda n: SimpleNamespace(head_sha=head, base_ref="develop", number=n, body="本文", title="題"),
+        branch_file=lambda base, path: FileAt("o/r", config, "c1"),
+    )
 
 
 def _readings(st, tid) -> int:
@@ -67,9 +75,9 @@ def _readings(st, tid) -> int:
 @pytest.mark.parametrize(
     "now",
     [
-        gate.Target("h2", None, "b1", "t1"),  # head が動いた
-        gate.Target("h1", None, "b2", "t1"),  # 本文だけが変わった（#4446）
-        gate.Target("h1", None, "b1", "t2"),  # 題だけが変わった（#4446）
+        gate.Target("h2", body="b1", title="t1"),  # head が動いた
+        gate.Target("h1", body="b2", title="t1"),  # 本文だけが変わった（#4446）
+        gate.Target("h1", body="b1", title="t2"),  # 題だけが変わった（#4446）
     ],
 )
 def test_an_answer_whose_target_moved_before_it_is_read_goes_back_to_waiting(st, new_table, flow, now):
@@ -77,7 +85,7 @@ def test_an_answer_whose_target_moved_before_it_is_read_goes_back_to_waiting(st,
     flow.turn(tid)
     q = gate.waiting(run.read(st, tid))
     assert q is not None and _readings(st, tid) == 1
-    seen = gate.Target("h1", None, "b1", "t1")
+    seen = gate.Target("h1", body="b1", title="t1")
     gate.answer(st, tid, gate.Answer(q.id, "approved", "見た", BY, "k-1", seen=seen))
     assert gate.recheck(st, tid, lambda _q, **_: seen) is None
     assert run.decide(run.read(st, tid)).action == run.Action.CONSUME
@@ -108,8 +116,10 @@ def test_github_observe_reads_the_head_and_refuses_when_it_cannot(st, repo, new_
     q = gate.waiting(run.read(st, tid))
     assert q is not None and q.pr == 7
     # 同じ 1 回の取得で本文と題の sha256 も読む（#4446）
-    sha = gate.Target(head="abc", body=gate.text_sha256("本文"), title=gate.text_sha256("題"))
-    assert gate.github_observe(repo, st.root, lambda: _hub("abc"))(q) == sha
+    texts = {"body": gate.text_sha256("本文"), "title": gate.text_sha256("題")}
+    assert gate.github_observe(repo, st.root, lambda: _hub("abc"))(q) == gate.Target("abc", None, "o/r", 7, "develop", False, **texts)
+    # マージ先が本番チャネルで設定を読めなければ、本番へ反映され得るとして読む（#4409）
+    assert gate.github_observe(repo, st.root, lambda: _hub("abc", "壊れた"))(q).production is True
 
     def broken():
         def pull(n):
@@ -154,7 +164,7 @@ def _material_of(out):
 
 @pytest.mark.parametrize("private", [True, False])
 def test_the_plan_material_carries_the_verdict_of_the_head_it_was_made_for(st, env, repo, new_table, flow, monkeypatch, private):
-    from ndf.progress.gate import entry
+    from ndf.progress.gate import asking
 
     st.private = private
     tid = new_table()
@@ -167,11 +177,10 @@ def test_the_plan_material_carries_the_verdict_of_the_head_it_was_made_for(st, e
     else:
         assert "理由 2 件・レッドライン 1 件" in text and f"コメント {JUDGED['note_url']} で読めます" in text
         assert not any(w in text for w in FREE) and model.MVV_WITHHELD not in text
-    # 同じ head で表示し直す: 資料を書き直さず、observe が返したハッシュを使う（observe は 1 回だけ）
+    # 同じ head で表示し直す: 資料を書き直さず、同じハッシュを返す（observe は 1 回だけ）
     sha, calls = first["metrics"]["gate"]["material_sha256"], []
     with monkeypatch.context() as m:
-        m.setattr(entry, "write_material", lambda *a, **k: pytest.fail("書き直した"))
-        m.setattr(entry, "material_sha256", lambda *a: pytest.fail("読み直した"))
+        m.setattr(asking.os, "link", lambda *a: pytest.fail("書き直した"))
         again = _asked(st, repo, tid, lambda q, **kw: calls.append(kw) or gate.Target(head="h1", material=sha))
     assert (
         len(calls) == 1 and again["metrics"]["gate"]["material_sha256"] == sha and again["presentation_path"] == first["presentation_path"]

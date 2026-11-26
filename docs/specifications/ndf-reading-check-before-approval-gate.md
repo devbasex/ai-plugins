@@ -245,9 +245,10 @@ ndf records reading check --gate <design|release> --pr <番号> [--material <フ
 | 進行の仕組みが承認ゲートで示した資料（`gate-materials/<質問の id>-<head>.md`）の SHA-256 | `--material-sha256` |
 | PR の本文の SHA-256 | `--body-sha256` |
 | PR の題の SHA-256 | `--title-sha256` |
+| 提示の識別子（承認の対象がそろう PR の場合。[ndf-production-merge-approval.md](ndf-production-merge-approval.md)） | `--presentation` |
 
 - 違いがあれば回答を断るか、承認ゲートを待ちへ戻し、読み手役のステップを実行し直す
-- 例外: リリース承認の後に文書だけを変えるコミットが加わり、資料・本文・題が同じなら、待ちへ戻さない
+- 例外: マージが本番へ反映されないリリース承認の後に文書だけを変えるコミットが加わり、資料・本文・題が同じなら、待ちへ戻さない
 - MVV 判定で設計承認ゲートを省いた回答は本文と題を持たず、判定した PR の番号と head を比べる
 
 `ndf progress reread <ステートマシンの ID>` は、人の回答を待っている承認ゲートだけで使える。次の順に進む。

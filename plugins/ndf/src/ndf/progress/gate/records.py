@@ -16,7 +16,8 @@ from typing import Any, Optional
 from ndf import identity
 from ndf.contracts import facts
 from ndf.progress import invoke, model, run
-from ndf.progress.gate.asking import REJECTING, Answer, Question, Target, accepted_path, sprint_issues
+from ndf.progress.gate.asking import REJECTING, Answer, Question, Target, sprint_issues
+from ndf.progress.run_view import read_accepted_head
 
 # --- 変更要求の記録 ---------------------------------------------------------------------------------
 
@@ -72,7 +73,7 @@ def record_answer(v: run.View, q: Question, a: Answer, where: Callable[[], Path]
 
 def rejections(events: Iterable[model.Event]) -> dict[str, int]:
     """承認しなかった回答（承認しない・変更要求）を承認ゲートの区分ごとに数える（gate-rejections の SSOT は事象）。"""
-    answered = (run.payload_of(ev) for ev in events if ev.draft.kind == run.ANSWERED)
+    answered = (run.event_payload(ev) for ev in events if ev.draft.kind == run.ANSWERED)
     unapproved = (p for p in answered if p.get("answer") in REJECTING and p.get("kind") == invoke.LISTEN)
     return dict(Counter(str(p["gate"]) if p.get("gate") else "plan" for p in unapproved))
 
@@ -86,7 +87,7 @@ def answers(v: run.View) -> list[dict[str, Any]]:
     for ev in v.events:
         if ev.draft.kind != run.ANSWERED:
             continue
-        p = run.payload_of(ev)
+        p = run.event_payload(ev)
         out.append(
             {
                 "seq": ev.seq,
@@ -112,13 +113,14 @@ def approved_head(v: run.View, kind: str, root: Optional[Path] = None) -> Option
     承認の後に文書だけが加わって出し直さなかった（#3020）なら、そのときの head を返す（`root` は状態の保存先）。
     最後の回答が数えない MVV 判定の回答（`model.mvv_answer_void`）なら、その前の回答へさかのぼらずに None を返す（#3959 の決定 3）。
     """
-    got = [ev for ev in v.events if ev.draft.kind == run.ANSWERED and run.payload_of(ev).get("gate") == kind]
-    if not got or model.mvv_answer_void(run.payload_of(got[-1]), kind):
+    got = [ev for ev in v.events if ev.draft.kind == run.ANSWERED and run.event_payload(ev).get("gate") == kind]
+    if not got or model.mvv_answer_void(run.event_payload(got[-1]), kind):
         return None
     last = next(a for a in answers(v) if a["seq"] == got[-1].seq)
     if last["answer"] != run.APPROVED:
         return None
-    accepted = accepted_path(root, v.machine_id, str(last["gate_id"])) if root is not None and last["gate_id"] else None
-    if accepted is not None and accepted.exists():
-        return str(json.loads(accepted.read_text(encoding="utf-8"))["head"])
+    if root is not None and last["gate_id"]:
+        carried = read_accepted_head(run.work_root(root, v.machine_id), str(last["gate_id"]))
+        if carried is not None:
+            return carried
     return str(last["head"]) if last["head"] else None

@@ -1,7 +1,7 @@
 """ステートマシンの事象の列を、工程の中のステップの進みへ畳み込む（純粋な処理。ファイルもプロセスも触らない）。
 
-事象の種類の定数・1 回の取得で読んだステートマシン（`View`）・行のステップの進み（`StepProgress`）を持つ。次の 1 手を
-決めて流すのは `ndf.progress.run` である。
+行のステップの進み（`StepProgress`）と回答の語を持つ。事象の種類の定数と、1 回の取得で読んだステートマシン（`View`）は
+`ndf.progress.run_view` が持つ。次の 1 手を決めて流すのは `ndf.progress.run` である。
 """
 
 from __future__ import annotations
@@ -12,11 +12,7 @@ from typing import Any, Optional
 
 from ndf.contracts import facts, result
 from ndf.progress import invoke, model, stages
-
-
-def _event(kind: str) -> str:
-    """進行の事象の種類（コントラクト `workflow/progress.json` のスプリントの行）。表に無ければ import の時点で `KeyError`。"""
-    return model.rules()[("sprint", kind)].kind
+from ndf.progress.run_view import ANSWERED, FAILED, FINISHED, STARTED, STEP_EVENT, View, event_payload
 
 
 def answer_word(word: str) -> str:
@@ -24,45 +20,8 @@ def answer_word(word: str) -> str:
     return str(facts.row(result.ANSWERS, word)["id"])
 
 
-# 事象の種類。行を終える事象の種類は、終えた行の状態とステップの記録の status にも使う
-STARTED = _event("started")
-STEP_EVENT = _event("step_recorded")
-ANSWERED = _event("answered")
-FAILED = _event("failed")
-FINISHED = _event("finished")
 # 回答の語（変更要求）
 REQUEST_CHANGES = answer_word("request_changes")
-
-
-@dataclass(frozen=True)
-class View:
-    """1 つのトランザクションで読んだステートマシン（最新の改訂・定義・事象）。"""
-
-    machine_id: str
-    rev: int
-    snap: stages.Snapshot
-    doc: dict[str, Any]
-    events: list[model.Event]
-
-    @property
-    def rows(self) -> dict[str, model.RowState]:
-        return model.fold(self.events, self.rev)
-
-    @property
-    def whole(self) -> Optional[str]:
-        return model.table_state("sprint", self.events)
-
-    def row_events(self, stage: str) -> list[model.Event]:
-        return [e for e in self.events if e.draft.row_key == stage and e.draft.rev == self.rev]
-
-    def context(self) -> dict[str, Any]:
-        """スプリントの文脈。作成の時点の値に、工程が書いた出力（`outputs_recorded`）を順に重ねる。"""
-        return stages.compose_context(self.doc["context"], stages.recorded_outputs(self.events, self.rev))
-
-
-def payload_of(ev: model.Event) -> dict[str, Any]:
-    """事象の payload。無ければ空。"""
-    return ev.draft.payload if ev.draft.payload is not None else {}
 
 
 @dataclass
@@ -98,13 +57,13 @@ class StepProgress:
         return None
 
     def answer_value(self) -> Optional[str]:
-        return str(payload_of(self.answer)["answer"]) if self.answer is not None else None
+        return str(event_payload(self.answer)["answer"]) if self.answer is not None else None
 
     def see(self, ev: model.Event) -> None:
         """事象 1 つを読んで進みを書き換える。変更要求（承認ゲートの request_changes）なら世代を上げてステップを初めから流し直す。"""
         handle = _SEES.get(ev.draft.kind)
         if handle is not None:
-            handle(self, ev, payload_of(ev))
+            handle(self, ev, event_payload(ev))
 
     def _started(self, ev: model.Event, _p: dict[str, Any]) -> None:
         """行の開始。数え始めをここへ移し、失敗の後の開始なら打ち直しを数える（出力の失敗なら済んだステップも捨てる）。"""

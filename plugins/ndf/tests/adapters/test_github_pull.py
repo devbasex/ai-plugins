@@ -35,6 +35,7 @@ _GRAPHQL = {
     "authorAssociation": "member",
     "mergeCommit": {"oid": "merge-sha"},
     "title": "題",
+    "isInMergeQueue": True,
     "isCrossRepository": True,
 }
 _EXPECTED = {
@@ -49,6 +50,7 @@ _EXPECTED = {
     "author": "writer",
     "association": "MEMBER",
     "merge_sha": "merge-sha",
+    "queued": False,
     "title": "題",
     "cross_repository": False,
 }
@@ -81,7 +83,7 @@ def test_from_rest_empties_null_values_and_allows_missing_optional_keys() -> Non
 
 
 def test_from_graphql_fills_every_field() -> None:
-    assert github.Pull.from_graphql(_GRAPHQL)._asdict() == {**_EXPECTED, "cross_repository": True}
+    assert github.Pull.from_graphql(_GRAPHQL)._asdict() == {**_EXPECTED, "queued": True, "cross_repository": True}
 
 
 @pytest.mark.parametrize(("state", "expected"), [("OPEN", "open"), ("CLOSED", "closed"), ("MERGED", "closed"), (None, "closed")])

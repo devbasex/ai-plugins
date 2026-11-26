@@ -482,15 +482,4 @@ Pull Request のコメントにある（PR の題と本文は書き換えない�
 
 ## 回答を記録する
 
-**利用者が承認ゲートで回答したら、承認も変更要求もスプリントのステートマシンへ `ndf answer` で 1 行書く。** pace と MVV 判定の
-有無を問わない。利用者へ新しい確認は求めない。書いた回答は `ndf answer list <ステートマシン>` で古い順に読める。
-
-| 進め方 | 承認 | 変更要求 |
-| --- | --- | --- |
-| `reject` のステップを持つプランで止まった | `ndf answer <ステートマシン> --gate <質問の id> --result approved --reason <要約> --by human --key <冪等のキー>` | 直してから `ndf plan next <プラン> --from reject`（`reject` が変更要求を書いて再提示する） |
-| スプリントのステートマシンがある（`reject` の無いプラン） | 同上 | `ndf answer <ステートマシン> --gate <質問の id> --result request_changes --reason <要約> --by human --key <冪等のキー> [--notes <指摘ファイル>]` |
-| ステートマシンが無い（単発の変更など） | 記録しない。回答と要約を conductor の報告に書く | 同じ |
-
-`--gate` は承認ゲートの結果の `metrics.gate.id`、`--result` はその結果の `routes` のキーから写す。`--key` は回答ごとに決め、
-同じキーで打ち直しても 2 行にならない。終了コードが 0 以外（記録を書けない）なら、書けなかったことと `summary` を conductor の報告に出して先へ進む。
-設計承認ゲートで起票者の推定が変更を要求されたときの仕様の直し方は `requirements-design` の手順 1a にある。
+**利用者が承認ゲートで回答したら、承認も変更要求も記録する。** 打つコマンドと補う引数は [approval-answer.md](approval-answer.md) にある。

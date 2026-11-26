@@ -17,13 +17,17 @@ from ndf.contracts.exit_codes import GATE, OK, STOPPED
 
 
 class Watched(NamedTuple):
-    """見回った 1 本。`status` は終わっていなければ None。`routes` は承認ゲートの回答ごとのコマンド。"""
+    """見回った 1 本。`status` は終わっていなければ None。`routes` は承認ゲートの回答ごとのコマンド。
+
+    `shown` は、承認待ちのステップが示した承認資料のパスと「本番へ反映され得るか」の、行へそのまま足す欄（示していなければ None）。
+    """
 
     name: str
     status: Optional[str]
     kind: Optional[str] = None
     detail: Optional[str] = None
     routes: Optional[Mapping[str, Optional[dict[str, Any]]]] = None
+    shown: Optional[Mapping[str, Any]] = None
 
 
 def _item(w: Watched) -> dict[str, Any]:
@@ -34,6 +38,9 @@ def _item(w: Watched) -> dict[str, Any]:
     if w.status == GATE:
         item["gate"] = True
         item["routes"] = dict(w.routes) if w.routes else {}
+        # 回答コマンドと同じ提示の承認資料と「本番へ反映され得るか」（取り次ぐ人が資料で本番への反映を説明する。#4409）
+        if w.shown is not None:
+            item.update(w.shown)
     return item
 
 

@@ -229,6 +229,9 @@ def mvv_answer(step: str, kind: str, answer: str, held: Optional[Mapping[str, An
     """
     gate = held.get("gate") if held is not None else None
     head = held.get("head") if held is not None else None
+    # 判定した PR の承認の対象（`mvv_gate.target`）を、人の回答と同じ形で見た対象に残す（デプロイのマージが読む。#4409）
+    target = held.get("target") if held is not None and isinstance(held.get("target"), dict) else {}
+    bound = {k: target[k] for k in ("repo", "pr", "base", "production") if k in target}
     payload = {
         "answer": answer,
         "step": step,
@@ -238,7 +241,7 @@ def mvv_answer(step: str, kind: str, answer: str, held: Optional[Mapping[str, An
         "gate": gate,
         "gate_id": gate_id,
         # 形は gate.Target.as_dict（承認資料は作らないので sha256 は無い）
-        "seen": {"head": head if isinstance(head, str) else None, "material_sha256": None},
+        "seen": {"head": head if isinstance(head, str) else None, "material_sha256": None, **bound},
         MVV_KEY: dict(held) if held is not None else None,
     }
     return payload, f"MVV 判定で承認ゲート {gate} を省いた"

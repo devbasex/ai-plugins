@@ -11,6 +11,8 @@ from ndf.domains.crossreview import changes
 
 from ._flow import fake_bin, gate, git, plan_of, repo_with_base, run_step, step_of, stopped, walk
 
+import scenes
+
 
 def test_fix_plan_runs_test_then_pr_then_merge_when_green():
     """C3-1（#1142 の要求の不足 a）: 即時修正のテンプレートは、テスト → PR → merge-when-green を順に流して終わる。"""
@@ -56,11 +58,11 @@ def test_push_rejected_twice_goes_to_fix_push():
     assert visited[i - 2 : i + 2] == ["push", "push", "fix-push", "push"]
 
 
-def test_design_merge_returns_to_base_sync_on_conflict():
+def _design_merge_returns_to_base_sync_on_conflict():
     """#2273: 設計 PR のマージのプランは、マージ先との衝突（DIRTY）で止まらず、マージ → 直し → push → 確かめ直しへ戻る。"""
     script = {"conflict-check": [stopped("base_conflict")], "base-sync": [stopped("base_conflict")], "merge-gate": [gate()]}
     visited, state = walk(plan_of("design_merge"), script, answers=["approved"])
-    assert visited == ["conflict-check", "base-sync", "fix-base", "push", "conflict-check", "merge-gate", "merge"]
+    assert visited == ["conflict-check", "base-sync", "fix-base", "push", "conflict-check", "merge-gate", "approve-gate", "merge"]
     assert state.status == OK
 
 
@@ -151,24 +153,31 @@ def test_same_ci_failure_streak_stops_to_human():
 
 # 現状固定（I-001）: 検査と設計 PR のマージのテンプレートが同じ形で持つマージの承認ゲートとマージ。
 # 部品へまとめても、埋めたプランのステップと遷移が変わらないことを確かめる。
-_MERGE_GATE = {"id": "merge-gate", "run": ["<gate>"], "on_answer": {"approved": "merge", "rejected": "end"}}
+# 回答の後は回答の証跡を書くステップ（approve-gate・reject-gate）を通る（#4409 の決定 7）
+_MERGE_GATE = {"id": "merge-gate", "run": ["<gate>"], "on_answer": {"approved": "approve-gate", "rejected": "reject-gate"}}
 
 
-def test_merge_gate_and_merge_steps_are_fixed_in_check_and_design_merge():
+def _merge_gate_and_merge_steps_are_fixed_in_check_and_design_merge():
     """現状固定: check と design_merge の merge-gate と merge は、埋めた後に同じステップになる。"""
     found = {p: [s for s in plan_of(p)["steps"] if s["id"] in ("merge-gate", "merge")] for p in ("check", "design_merge")}
     assert found["check"] == found["design_merge"]
     gate_step, merge = found["check"]
     assert gate_step == _MERGE_GATE
     assert (merge["run"], merge["next"]) == (
-        ["ndf", "ci", "merge", "--branch", "<branch>", "--method", "<merge_method>"],
+        [
+            "ndf", "ci", "merge", "--branch", "<branch>", "--method", "<merge_method>",
+            "--production-gate", "<production_gate>", "--presented-out", "{state_dir}/presented-merge.json",
+        ],
         "end",
-    )
+    )  # fmt: skip
 
 
-def test_merge_gate_rejected_ends_without_merge():
-    """現状固定: マージの承認ゲートで rejected と回答すると、merge を打たずに ok で終わる。"""
-    expected_tail = {"check": ["ci", "behavior-recheck", "merge-gate"], "design_merge": ["conflict-check", "merge-gate"]}
+def _merge_gate_rejected_ends_without_merge():
+    """現状固定: マージの承認ゲートで rejected と回答すると、却下の証跡を書いて（reject-gate）merge を打たずに ok で終わる。"""
+    expected_tail = {
+        "check": ["ci", "behavior-recheck", "merge-gate", "reject-gate"],
+        "design_merge": ["conflict-check", "merge-gate", "reject-gate"],
+    }
     for purpose, tail in expected_tail.items():
         visited, state = walk(plan_of(purpose), {"merge-gate": [gate()]}, answers=["rejected"])
         assert visited[-len(tail) :] == tail, purpose
@@ -176,11 +185,13 @@ def test_merge_gate_rejected_ends_without_merge():
         assert state.status == OK, purpose
 
 
-def test_merge_gate_approved_merges_then_ends():
-    """現状固定: マージの承認ゲートで approved と回答すると、merge を打って終わる。"""
+def _merge_gate_approved_merges_then_ends():
+    """現状固定: マージの承認ゲートで approved と回答すると、承認の証跡を書いて（approve-gate）merge を打って終わる。
+    merge は 1 回だけで、もう一度承認待ちにならない（受け入れ条件 6）。"""
     for purpose in ("check", "design_merge"):
         visited, state = walk(plan_of(purpose), {"merge-gate": [gate()]}, answers=["approved"])
-        assert visited[-2:] == ["merge-gate", "merge"], purpose
+        assert visited[-3:] == ["merge-gate", "approve-gate", "merge"], purpose
+        assert visited.count("merge") == 1, purpose
         assert state.status == OK, purpose
 
 
@@ -406,3 +417,94 @@ def test_cross_review_takes_a_remote_ref_or_a_commit_as_the_base(tmp_path):
     sha = git(repo, "rev-parse", "origin/develop").strip()
     for base in ("origin/develop", sha):
         assert changes.changed_sections(changes.git.Git(repo), base, repo) == ["doc.md#見出し"]
+
+
+# --- 本番チャネルへのマージの承認（#4409） ---
+
+_ANSWER_STEPS = ("approve-merge", "reject-merge", "approve-gate", "reject-gate")
+
+
+def _merge_ok_including_deferred_does_not_flow_into_the_answer_steps(purpose):
+    """受け入れ条件 2・6: merge の ok（先送りを含む）は今の next で終わり、approve-merge へ流れない。"""
+    visited, state = walk(plan_of(purpose), {"merge-gate": [gate()]}, answers=["approved"])
+    assert "merge" in visited and state.status == OK, purpose
+    assert not {"approve-merge", "reject-merge"} & set(visited), purpose
+
+
+def _answer_steps_are_reached_only_from_on_answer(purpose):
+    """approve-*・reject-* はどのステップの next・on_cause・on_fail からも到達せず、on_answer からだけ到達する。"""
+    steps = plan_of(purpose)["steps"]
+    for s in steps:
+        targets = [s.get("next"), s.get("on_fail"), *(s.get("on_cause") or {}).values()]
+        assert not set(_ANSWER_STEPS) & {t for t in targets if isinstance(t, str)}, (purpose, s["id"])
+    reached = {t for s in steps for t in (s.get("on_answer") or {}).values()}
+    assert {s["id"] for s in steps if s["id"] in _ANSWER_STEPS} <= reached, purpose
+
+
+def _single_plans_wait_at_merge_then_write_the_answer(purpose, answer, tail):
+    """受け入れ条件 4・5: 単発のプランは merge の承認待ちで止まり、承認なら証跡を書いて merge を打ち直し、却下なら証跡を書いて終わる。"""
+    visited, state = walk(plan_of(purpose), {"merge": [gate()]}, answers=[answer])
+    assert visited[-len(tail) :] == tail
+    assert state.status == OK
+
+
+def _release_merges_the_sprint_pr_first_without_a_merge_method():
+    """決定 5: デプロイのプランは最初に、承認した HEAD とマージ先を添えてマージし、方式を渡さない。必須のチェックの設定が無ければ渡さない。"""
+    steps = plan_of("release", pr="12", approved_head="h", approved_base="main")["steps"]
+    assert [s["id"] for s in steps] == ["release-merge", "work"]
+    run = steps[0]["run"]
+    assert run[:11] == ["ndf", "ci", "merge", "--pr", "12", "--production-gate", "stale", "--approved-head", "h", "--approved-base", "main"]
+    undeclared = plan_of("release", release_required=[], tests=[])["steps"][0]["run"]
+    assert not [a for a in undeclared if a.startswith(("--required", "--test"))]
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        scenes.scene(_design_merge_returns_to_base_sync_on_conflict, id="design_merge_returns_to_base_sync_on_conflict"),
+        scenes.scene(
+            _merge_gate_and_merge_steps_are_fixed_in_check_and_design_merge,
+            id="merge_gate_and_merge_steps_are_fixed_in_check_and_design_merge",
+        ),
+        scenes.scene(_merge_gate_rejected_ends_without_merge, id="merge_gate_rejected_ends_without_merge"),
+        scenes.scene(_merge_gate_approved_merges_then_ends, id="merge_gate_approved_merges_then_ends"),
+        *[
+            scenes.scene(
+                _merge_ok_including_deferred_does_not_flow_into_the_answer_steps,
+                id=scenes.label("merge_ok_including_deferred_does_not_flow_into_the_answer_steps", i, (v,)),
+                purpose=v,
+            )
+            for i, v in enumerate(["immediate_fix", "close", "merge", "plan_to_spec", "check", "design_merge"])
+        ],
+        *[
+            scenes.scene(
+                _answer_steps_are_reached_only_from_on_answer,
+                id=scenes.label("answer_steps_are_reached_only_from_on_answer", i, (v,)),
+                purpose=v,
+            )
+            for i, v in enumerate(["immediate_fix", "close", "merge", "plan_to_spec", "check", "design_merge"])
+        ],
+        *[
+            scenes.scene(
+                _single_plans_wait_at_merge_then_write_the_answer,
+                id=f"single_plans_wait_at_merge_then_write_the_answer-{label}",
+                **dict(zip(("purpose", "answer", "tail"), v)),
+            )
+            for label, v in zip(
+                ["approved-immediate_fix", "approved-close", "rejected-immediate_fix", "rejected-close"],
+                [
+                    (purpose, answer, tail)
+                    for answer, tail in [("approved", ["merge", "approve-merge", "merge"]), ("rejected", ["merge", "reject-merge"])]
+                    for purpose in ["immediate_fix", "close"]
+                ],
+                strict=True,
+            )
+        ],
+        scenes.scene(
+            _release_merges_the_sprint_pr_first_without_a_merge_method, id="release_merges_the_sprint_pr_first_without_a_merge_method"
+        ),
+    ],
+)
+def test_merge_answer_flow_scenes(request, scene, values):
+    """マージの承認待ちと回答のステップの流れの場面（#4409）。"""
+    scenes.play(request, scene, values)

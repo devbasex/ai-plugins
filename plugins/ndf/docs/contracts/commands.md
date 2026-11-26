@@ -10,7 +10,7 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
-| `ndf answer` | `machine_id`（string・必須・位置）: 回答するステートマシンの ID<br>`--gate`（string・必須）: 質問の id（承認ゲートの結果の metrics.gate.id）<br>`--result`（string・必須）: 回答の語（承認ゲートの結果の routes のキー）<br>`--reason`（string・必須）<br>`--by`（string・必須）: 回答した者（human・conductor・organizer か service:<主体>）<br>`--key`（string・必須）: 冪等のキー（同じキーの回答し直しは書かない）<br>`--notes`（string・任意）: 変更要求（request_changes）の指摘ファイル<br>`--head`（string・任意）: 見た PR の head の SHA<br>`--material-sha256`（string・任意）: 見た承認資料の sha256<br>`--body-sha256`（string・任意）: 見た PR の本文の sha256（#4446）<br>`--title-sha256`（string・任意）: 見た PR の題の sha256（承認の質問の文は題から作る。#4446）<br>`--drop`（array of integer・任意）: 設計承認ゲートで外す課題の番号 |
+| `ndf answer` | `machine_id`（string・必須・位置）: 回答するステートマシンの ID<br>`--gate`（string・必須）: 質問の id（承認ゲートの結果の metrics.gate.id）<br>`--result`（string・必須）: 回答の語（承認ゲートの結果の routes のキー）<br>`--reason`（string・必須）<br>`--by`（string・必須）: 回答した者（human・conductor・organizer か service:<主体>）<br>`--key`（string・必須）: 冪等のキー（同じキーの回答し直しは書かない）<br>`--notes`（string・任意）: 変更要求（request_changes）の指摘ファイル<br>`--head`（string・任意）: 見た PR の head の SHA<br>`--material-sha256`（string・任意）: 見た承認資料の sha256<br>`--body-sha256`（string・任意）: 見た PR の本文の sha256（#4446）<br>`--title-sha256`（string・任意）: 見た PR の題の sha256（承認の質問の文は題から作る。#4446）<br>`--presentation`（string・任意）: 利用者に示した承認資料を識別する値。提示時に承認対象の PR が特定され、routes にこの値が入っている場合は必須。提示時のコマンドから値をそのまま渡す（資料を出し直すと変わる）<br>`--drop`（array of integer・任意）: 設計承認ゲートで外す課題の番号 |
 
 結果の `metrics`: `carried_row`（string か null）・`gate`（object か string）・`gate_id`（string）・`head`（string）・`machine_id`（string）・`move`（string）・`release_request`（object）・`replayed`（boolean）・`rev`（integer）・`seqs`（array of integer）・`stage`（string）・`state`（string か null）・`step`（string）。`items` の要素: `answer`（string）・`at`（string）・`by`（string）・`gate`（string か null）・`gate_id`（string か null）・`head`（string か null）・`key`（string）・`notes`（string か null）・`reason`（string か null）・`seq`（integer）・`source`（string）・`stage`（string か null）・`step`（string か null）
 
@@ -30,10 +30,12 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
-| `ndf ci merge` | `--branch`（string・必須）: PR の head のブランチ<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--method`（string・任意）: マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭<br>`--reviewed`（string・任意）: レビューを経た HEAD。作業場所の HEAD と違えばマージしない |
+| `ndf ci answer` | `--branch`（string・必須）: PR の head のブランチ<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--answer-record`（string・必須）: ndf plan next --answer が書いた回答の記録<br>`--presented`（string・必須）: 承認待ちのステップが書いた承認の対象のファイル |
+| `ndf ci ask` | `--branch`（string・必須）: PR の head のブランチ<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--presented-out`（string・必須）: 承認の対象を書くファイル（ndf ci answer が読む） |
+| `ndf ci merge` | `--branch`（string・任意）: PR の head のブランチ（作業場所の HEAD を添える）<br>`--pr`（integer・任意）: PR の番号（作業場所が無くても打てる。マージ済みなら何もしない）<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--method`（string・任意）: マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭<br>`--reviewed`（string・任意）: レビューを経た HEAD。作業場所の HEAD と違えばマージしない<br>`--production-gate`（string・任意・既定 `"stop"`・値 `stop`・`defer`・`stale`）: 自動反映の本番チャネルへ承認の証跡が無いとき: stop は承認待ち、defer はマージせずに ok、stale は approval_stale<br>`--approved-head`（string・任意）: 工程の承認ゲートで承認した HEAD（--approved-base と組で渡す）<br>`--approved-base`（string・任意）: 工程の承認ゲートで承認したマージ先<br>`--presented-out`（string・任意）: stop で止まるときに承認の対象を書くファイル（ndf ci answer が読む）<br>`--required`（array of string・任意）: マージの前に、マージする HEAD の結論を待つ必須のチェック。渡さなければ待たない<br>`--test`（array of string・任意）: --required で待つときのテストのチェックの名前<br>`--budget`（number・任意）: --required で待つ合計の秒 |
 | `ndf ci watch` | `--pr`（integer・必須）<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--required`（array of string・必須）: 待つ必須のチェック（PR の HEAD の設定から渡す）<br>`--test`（array of string・任意）: テストのチェックの名前（分割ジョブも数える）<br>`--budget`（number・必須）: 待ちの合計の秒（ランナーの割り当ての待ちは数えない）<br>`--after-merge`（boolean・任意）: マージの段階が落ちた後の判定<br>`--merge-failed`（array of string・任意）: マージの段階が落ちたと読んだチェックの名前 |
 
-結果の `metrics`: `elapsed`（number）・`failed_test_reads`（array of object）・`failed_tests`（array of string）・`junit_artifacts`（string）・`log_error`（string）・`queued_for`（number）・`rounds`（integer）・`test_files`（array of string）。`items` の要素: `job`（integer）・`kind`（string）・`name`（string）・`number`（integer）・`result`（string）・`test`（boolean）
+結果の `metrics`: `answer`（string）・`approved_by`（string）・`elapsed`（number）・`failed_test_reads`（array of object）・`failed_tests`（array of string）・`gate`（const "production-merge"）・`junit_artifacts`（string）・`log_error`（string）・`merge`（string）・`presented_id`（string）・`production`（boolean）・`queued_for`（number）・`rounds`（integer）・`test_files`（array of string）・`verdict`（string）・`written`（boolean）。`items` の要素: `job`（integer）・`kind`（string）・`name`（string）・`number`（integer）・`result`（string）・`test`（boolean）
 
 ## `ndf contracts`
 
@@ -227,12 +229,12 @@
 | 呼び方 | 引数 |
 | --- | --- |
 | `ndf plan check` | `plans`（array of string・必須・位置） |
-| `ndf plan next` | `plan`（string・必須・位置）<br>`--from`（string・任意）<br>`--state-dir`（string・任意）<br>`--answer`（string・任意）<br>`--set`（array of string・任意）<br>`--fresh`（boolean・任意） |
+| `ndf plan next` | `plan`（string・必須・位置）<br>`--from`（string・任意）<br>`--state-dir`（string・任意）<br>`--answer`（string・任意）<br>`--by`（string・任意）: 回答した者（human・conductor・organizer か service:<主体>）。--answer と組で渡す<br>`--waiting`（string・任意）: 回答する待ち（<ステップ>:<待ちの番号>）。返された routes が持つ。今の待ちと違えば記録しない<br>`--presented`（string・任意）: 回答する提示の識別子。返された routes が持つ。今の提示と違えば記録しない<br>`--set`（array of string・任意）<br>`--fresh`（boolean・任意） |
 | `ndf plan pending` | 引数を受けない |
 | `ndf plan queue` | `plans`（array of string・必須・位置）<br>`--then`（array of array of string・任意）<br>`--from`（array of string・任意）<br>`--resume`（boolean・任意）<br>`--fresh`（boolean・任意）<br>`--max`（integer・任意）: 同時に流すプランの本数の上限（無ければ触るファイルの重ならない組の本数まで）<br>`--queue-dir`（string・任意） |
 | `ndf plan wait` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意）<br>`--timeout`（number・任意・既定 `3000.0`） |
 
-結果の `metrics`: `gates`（integer）・`ok`（integer）・`pending`（integer）・`plans`（integer）・`round`（integer）・`steps`（integer）・`stopped`（integer）・`waited_seconds`（number）・`waves`（integer）。`items` の要素: `cause`（object）・`detail`（string）・`gate`（boolean）・`kind`（string）・`name`（string）・`number`（integer）・`path`（string）・`plans`（array of string）・`reason`（string）・`routes`（object）・`run`（string）・`status`（string か null）・`step`（string か null）・`updated_at`（string か null）・`workflow`（string）
+結果の `metrics`: `gates`（integer）・`ok`（integer）・`pending`（integer）・`plans`（integer）・`production`（boolean）・`round`（integer）・`steps`（integer）・`stopped`（integer）・`waited_seconds`（number）・`waves`（integer）。`items` の要素: `cause`（object）・`detail`（string）・`gate`（boolean）・`kind`（string）・`name`（string）・`number`（integer）・`path`（string）・`plans`（array of string）・`presentation_path`（string）・`production`（boolean）・`reason`（string）・`routes`（object）・`run`（string）・`status`（string か null）・`step`（string か null）・`updated_at`（string か null）・`workflow`（string）
 
 ## `ndf progress`
 

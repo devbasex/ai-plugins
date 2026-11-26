@@ -29,26 +29,22 @@ from typing import NamedTuple
 
 from ndf import identity
 
+# 回答の語・担い手の語・提示したコミットの行（`core.approval_words`）。REJECTED は読む側（`trail`・`domains.loop.cli`）へ見せるために読む
+from ndf.core.approval_words import ANSWERS, APPROVED, BY_LINE, HEAD_LINE, MVV_BY, REJECTED, USER_BY  # noqa: F401
+
 _NS = identity.FIXED_WORDS["workflow_namespace"]
 # 証跡のマーカーと、承認資料の提示のマーカー（提示は証跡に数えない）
 TRAIL_MARK = f"<!-- {_NS}:release-approval -->"
 REQUEST_MARK = f"<!-- {_NS}:release-approval-request -->"
 # 承認の判定を PR の HEAD へ付ける commit status の名前
 STATUS_CONTEXT = f"{_NS}/release-approval"
-# 回答の語（事実の表 answers の語と同じ綴り）
-APPROVED, REJECTED = "approved", "rejected"
-ANSWERS = (APPROVED, REJECTED)
 # 判定
 STALE, MISSING = "stale", "missing"
 # 証跡の行の見出し
 ANSWER_LINE = "回答:"
 COMMIT_LINE = "承認したコミット:"
-HEAD_LINE = "提示したコミット:"
 MATERIAL_LINE = "提示した資料:"
 ANSWERED_LINE = "回答した資料:"
-BY_LINE = "担い手:"
-# 担い手（`trail.By` と同じ値）。資料のハッシュを持つのは利用者の回答だけ
-USER, MVV = "user", "mvv"
 _SHA = re.compile(r"\b([0-9a-f]{40})\b")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -92,7 +88,7 @@ def render_trail(answer: str, sha: str, by: str, material_sha256: str | None = N
         raise ValueError(f"回答は {', '.join(ANSWERS)} のどれか（渡された値: {answer!r}）")
     if not _SHA.fullmatch(sha):
         raise ValueError(f"承認したコミットは 40 桁の SHA（渡された値: {sha!r}）")
-    answered = f"{ANSWERED_LINE} `{material_sha256}`\n" if by == USER and material_sha256 else ""
+    answered = f"{ANSWERED_LINE} `{material_sha256}`\n" if by == USER_BY and material_sha256 else ""
     return f"{TRAIL_MARK}\n## リリースの承認\n\n{ANSWER_LINE} {answer}\n{COMMIT_LINE} `{sha}`\n{BY_LINE} {by}\n{answered}"
 
 
@@ -175,7 +171,7 @@ def _counted(t: Trail, latest: Presentation | None, legacy: bool) -> bool:
     （承認の後の変更要求を捨てて進めない）。"""
     if t.answer == REJECTED:
         return True
-    if t.by == MVV:
+    if t.by == MVV_BY:
         return latest is None or latest.order < t.order
     if legacy:
         return t.material is None  # 旧いバージョンの提示と回答だけの HEAD。人の回答はバージョンアップをまたいで数える

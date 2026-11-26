@@ -36,7 +36,7 @@ from ndf.adapters import git as git_mod
 from ndf.adapters import github as github_mod
 from ndf.adapters.github import GitHub
 from ndf.contracts import result
-from ndf.core import branch_strategy
+from ndf.core import branch_strategy, merge_approval
 from ndf.domains.release import (
     approval_decide,
     assemble,
@@ -350,7 +350,10 @@ def _answer_args(p: argparse.ArgumentParser) -> None:
         "--material-sha256", help="回答した承認資料のファイル全体の SHA-256（--by user で必須。present の routes が固定する。#4446）"
     )
     p.add_argument(
-        "--by", required=True, choices=trail.BY_CHOICES, help="回答した担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）"
+        "--by",
+        required=True,
+        choices=merge_approval.BY_CHOICES,
+        help="回答した担い手（利用者 user / MVV 判定 mvv。迂回は user だけを数える）",
     )
 
 

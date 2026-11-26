@@ -1,0 +1,7 @@
+{
+  "meaning": "承認の後に承認の対象（HEAD・マージ先）が変わった、または有効な承認が無い。承認ゲートを持つ工程を流し直して質問し直す",
+  "std_type": "validation",
+  "exit": "failed",
+  "route": "conductor",
+  "retry": null
+}
