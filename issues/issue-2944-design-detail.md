@@ -95,7 +95,7 @@ src/ndf/
 | `read_rows` | 同 | 新設 | `read_rows(since: datetime, root: Optional[Path] = None) -> list[dict]` | `since` の月から今月までの実験の記録を読む（ロックを取らない） |
 | `ledger` | 同 | 新設 | `ledger(since: datetime, root: Optional[Path] = None) -> ContextManager[Ledger]` | 設計書の「読み書き」の順で、読んだ行（`rows`）と追記（`append`）を、実験の記録のロックの中で渡す |
 | `append_row` | 同 | 新設 | `append_row(row: Mapping) -> bool` | `ledger` を開いて 1 行足す |
-| `prune` | 同 | 新設 | `prune(now: datetime) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)に当たる月のファイルと出現率の項目を消す。ファイルの中身は読まない（出現率のファイルを除く）。`pick` が毎回呼び、失敗しても起動は続ける |
+| `prune` | 同 | 新設 | `prune(now: datetime) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)に当たる月のファイルと出現率の項目を消す。呼ぶのは、`pick` が今月のファイルを排他的な作成で作れた場合（月に 1 回）だけである。失敗しても起動は続ける |
 
 - `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm` を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄）を返す
 - `pick`
@@ -167,7 +167,7 @@ src/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `prune` | 古い月のファイルと項目が消える | 13 か月の境、年をまたぐ | 消せなくても起動は続く |
+| `prune` | 古い月のファイルと項目が消える | 13 か月の境、年をまたぐ。今月のファイルがあれば呼ばれない | 消せなくても起動は続く |
 | `table` | 工程とランタイムごとの置き換え | 選択肢 1 つ、`{}` の組 | 空の配列、同じ組、`floor` × 組の数 > 1、`min_units` 1、順位に無い effort |
 | `stage_of` | 表の各行 | 工程が「無し」の組 | 表に無い組 |
 | `pick` | 同じ単位は同じ組。並列でも 1 行 | `unit` なし、`enabled` 偽、片側の指定、割り付けの後の手動指定と選択肢の削除、月をまたぐ割り付け | 壊れた設定。記録を書けない場合 |
@@ -386,7 +386,7 @@ src/ndf/
 | --- | --- | --- | --- | --- |
 | `record_outcome` | `domains/records/experiments.py` | 新設 | `record_outcome(assign_id: str, quality: Optional[float], detail: Mapping) -> bool` | 割り付けを引いて指標の行を足し、`refresh` を呼ぶ |
 | `unit_values` | 同 | 新設 | `unit_values(rows, usage_rows, *, repo: str, stage: str, runtime: str, key: str, now: datetime) -> list[UnitValue]` | 割り付け ID ごとに効果・費用・確率・組をまとめ、使えない単位を除く |
-| `refresh` | 同 | 新設 | `refresh(assign: Mapping) -> bool` | 計算し直す条件に当たれば、出現率の項目を置き換える |
+| `refresh` | 同 | 新設 | `refresh(assign: Mapping) -> bool` | 計算し直す条件に当たれば、出現率の項目を置き換える。書き換えるときに、期間を過ぎた項目も消す |
 | `record_outcome` | `domains/records/usage.py` | 新設 | 同じ引数 | 差し込みの受け口。`experiments.record_outcome` を呼ぶ |
 | `weighted` | `domains/records/allocation_decide.py` | 新設 | `weighted(units) -> Stats` | 重み付きの平均と有効な件数 |
 | `eliminated` | 同 | 新設 | `eliminated(units, arms, margin, window_days, seed) -> dict[int, datetime]` | 打ち切る組と期限 |
