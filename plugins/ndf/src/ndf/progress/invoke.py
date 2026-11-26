@@ -583,7 +583,7 @@ def _fill_production_gate(t: route.Template, run: StageRun) -> dict[str, route.V
     if "production_gate" in t.params and t.name in PRODUCTION_GATE:
         # 承認ゲートを持たない工程（light の設計）は質問し直す承認ゲートが無いので、承認をデプロイへ先送りする
         held = PRODUCTION_GATE[t.name]
-        out["production_gate"] = held if held != "stale" or run.gated else "defer"
+        out["production_gate"] = held if held != _STALE or run.gated else _DEFER
     if "approved_head" in t.params:
         out.update(_approved_target(run))
     return out
