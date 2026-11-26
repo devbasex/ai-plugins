@@ -2,7 +2,7 @@
 
 バージョン番号を持たないサービスのリポジトリで、並列の計画のレーンがスプリントの工程「デプロイ」を終えられなくなった（NDF 11.0.36）。
 
-1. オーガナイザーがまとめたリリースを出し、`ndf lanes release --result released --version "main <短いハッシュ>"` で記録した
+1. オーガナイザーがまとめたリリースを出し、`ndf lanes release --result released --version "main <短いハッシュ>" --release <PR番号>` で記録した（`<PR番号>` は本番のリリース記録を置いた Pull Request）
 2. レーンのリリース承認ゲートは回答 `approved` で通り、工程の文脈に `product_version: "main <短いハッシュ>"` が書かれた
 3. 続くステップで、デプロイを担当する worker が「semver の形の値を返せない。作り物の番号は書かない」と判断を求めて止まった
 4. conductor が `approved` と回答すると、工程は `bad_report`（結果の形が違う）で失敗した
@@ -57,7 +57,7 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 前の状態: `.ndf/project.json` のブランチ戦略が次の値のリポジトリ。`release_strategy: trunk`、`approval.target: production_pr`、`via: gate`、`release.version_store.kind: none`、`deliveries[0].kind: manual`・`versioned: false`。
 
 1. 並列の計画のレーンでスプリントを進め、リリース承認ゲートで待たせる
-2. オーガナイザーが `ndf lanes release <計画> <リクエスト> --result released --version "main <短いハッシュ>" --reason <理由>` を打つ
+2. オーガナイザーが、本番のリリース記録を置いた Pull Request の番号を `--release <PR番号>` に指定して、`ndf lanes release <計画> <リクエスト> --result released --version "main <短いハッシュ>" --release <PR番号> --reason <理由>` で、まとめたリリースの結果を記録する
 3. レーンでデプロイの工程を進める。worker が判断を求めて止まる
 4. 判断の求めに `approved` と回答する。工程が `bad_report` で失敗する
 5. retry する。3 に戻る
@@ -108,14 +108,14 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 
 前提 1 のリポジトリ:
 
-- [ ] 1. 前提: まとめたリリースを `--version "main abc1234"` で記録し、レーンのリリース承認ゲートが `approved` で通っている
+- [ ] 1. 前提: まとめたリリースを `--version "main abc1234"` で記録し、レーンのリリース承認ゲートが `approved` で通っている。`--release` の Pull Request には、同じ値でこのレーンの Pull Request を含む本番のリリース記録がある
       操作: デプロイの工程を進める
       結果: 判断の求めで止まらずに工程が終わり、工程の文脈の `product_version` が `main abc1234` のままである
 - [ ] 2. 条件 1 の流れで、デプロイの工程はオーガナイザーが出したものをもう一度出さない
 - [ ] 3. 前提: まとめたリリースを使わず、スプリントを 1 つだけ進めて出す
       操作: デプロイの工程で、出したものを指す値（例: コミットの短いハッシュ）を返す
       結果: 結果 JSON が形の誤りにならず、工程が終わり、その値が `product_version` になる
-- [ ] 4. `product_version` がバージョン番号の形でないスプリントで、デプロイより後の工程（リリース後テスト・体裁レビュー・振り返り・課題を閉じる処理）が、値の形を理由に止まらない
+- [ ] 4. `product_version` がバージョン番号の形でないスプリントで、デプロイより後の工程（リリース後テスト・体裁レビュー・振り返り・課題を閉じる処理）が、値の形を理由に止まらない。手動で配布した場合も、本番のリリース記録を置き、リリース後テストの記録を保存して、課題を閉じる判定まで進める
 - [ ] 5. `product_version` が空文字列か空白だけの結果は、受け付けられない
 
 出力がそろわないとき（リポジトリの種類を問わない）:
@@ -128,7 +128,15 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 退行しないこと:
 
 - [ ] 8. バージョン番号を持つリポジトリでは、デプロイの worker がバージョン番号の形でない値（例: `ndf v11.0.0`）を返しても、今と同じく工程は完了にならない
-- [ ] 9. 出力に `product_version` がそろった判断の求めに `approved` と回答すると、今と同じく工程が終わる
+- [ ] 9. 前提: 先行のステップが承認の判定（`mvv_gate`）を記録し、配布を担当する AI が配布先（`delivery`）と配布物の識別子（`product_version`）を添えて判断を求めている
+      操作: 続行を承認する（`approved` と回答する）
+      結果: デプロイの工程が完了する
+
+前提 1 のリポジトリで、配布を確かめられないとき:
+
+- [ ] 10. 前提: まとめたリリースを記録したが、`--release` の Pull Request に同じ値の本番のリリース記録が無いか、記録がこのレーンの Pull Request を含まない（Pull Request が未マージのまま始めた場合を含む）
+      操作: デプロイの工程を進める
+      結果: 工程は完了にならず、配布もしない。未配布か未確認であることと、次の操作が示される
 
 ## 影響
 
@@ -143,6 +151,7 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 
 | 用語 | 意味 |
 | --- | --- |
+| 本番のリリース記録 | 本番へ出した値と、含めた Pull Request の一覧を、NDF が読める形で書いた Pull Request のコメント |
 | まとめたリリース | オーガナイザーが複数のレーンの Pull Request を 1 つのバージョンとして出すリリース |
 | レーン | 並列の計画の下で進める開発の流れの 1 本 |
 | conductor | 開発の流れを進める AI の会話。承認や判断の求めに回答する |
@@ -154,7 +163,7 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 | # | イベント | 引き金 | 失敗したとき | 順序の前提 |
 | --- | --- | --- | --- | --- |
 | E1 | 出したものを指す値が工程の文脈に書かれた | リリース承認ゲートへのまとめたリリースの回答 | 値の無い回答では書かれない。デプロイの工程が値を返す（条件 3） | — |
-| E2 | デプロイの出力がそろった | まとめたリリースで記録済みの値を使う（worker を起動しない）か、起動した worker が出力を返す | worker が判断を求めて止まる、または結果の形の誤りになる | E1（まとめたリリースのとき） |
+| E2 | デプロイの出力がそろった | まとめたリリースの記録済みの値を本番のリリース記録で確かめて使う（worker を起動しない）か、起動した worker が出力を返す | 配布を記録で確かめられない（条件 10）、worker が判断を求めて止まる、または結果の形の誤りになる | E1（まとめたリリースのとき） |
 | E3 | 判断の求めに回答した | conductor の回答 | 出力がそろわなければ理由を示して失敗する（条件 6） | worker が起動され、判断を求めている |
 | E4 | デプロイの工程が終わった | 出力の確かめの合格 | `bad_report` で失敗する | E2 |
 | E5 | 後の工程が `product_version` を読んだ | 後の工程の開始 | 値の形で止まらない（条件 4） | E4 |
@@ -163,7 +172,7 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 
 | 項目 | 手段 |
 | --- | --- |
-| テスト | 前提 1 の設定を使う作り物のリポジトリで、条件 1〜9 の範囲テストを書く（`uv run --frozen --project . --all-extras pytest <対象> -q`） |
+| テスト | 前提 1 の設定を使う作り物のリポジトリで、条件 1〜10 の範囲テストを書く（`uv run --frozen --project . --all-extras pytest <対象> -q`） |
 | 静的解析・型検査 | `ndf check` と CI |
 | 手動確認 | 問題が起きたリポジトリと同じ設定で、デプロイの工程が手作業なしに終わることを利用者が確かめる。リリース後テストで行う |
 
