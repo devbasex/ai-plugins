@@ -61,7 +61,7 @@ plugins/ndf/
 | `src/ndf/progress/model.py` | 変更 | 読み手役のステップを省くかを決める | — | モジュール | `reading_skip`（新設） |
 | `src/ndf/progress/run.py` | 変更 | 読み手役のステップの省略・引数の足し方・設計のレビューへの戻しを流す | `model`・`invoke`・`stages` | モジュール | `_running_move`・`_consume`・`_run_step`・`_step_draft`（変更）、`reading_args`・`review_again_drafts`（新設） |
 | `src/ndf/progress/folding.py` | 新設 | 事象の列をステップの進みへ畳み込む（`run.py` から分けた） | `model`・`invoke`・`stages` | `View`・`StepProgress` | `payload_of`・`step_progress`（`run.py` から移す） |
-| `src/ndf/progress/gate/asking.py` | 変更 | 回答が固定する対象に本文のハッシュと質問のキーを足す | `run` | `Target` | `Target`・`Target.differs`・`Target.as_dict`・`Target.from_dict`（変更） |
+| `src/ndf/progress/gate/asking.py` | 変更 | 回答が固定する対象に PR の本文と題の SHA-256 を足す | `run` | `Target` | `Target`・`Target.differs`・`Target.as_dict`・`Target.from_dict`（変更） |
 | `src/ndf/progress/gate/answering.py` | 変更 | 待ちへ戻すときに読み手役のステップを未了に戻す。待ちの出し直しを足す | `run`・`asking` | モジュール | `github_observe`・`recheck`（変更）、`reread`・`_reading_reset`（新設） |
 | `src/ndf/progress/gate/release.py` | 変更 | 版上げのスプリントでは `bump-release` のリクエストを書く | `asking` | モジュール | `_plan_request`・`_request_fields`（変更） |
 | `src/ndf/progress/gate/entry.py` | 変更 | `ndf progress reread` を受ける | `answering` | モジュール | `progress_main`（変更）、`_cmd_reread`・`reread_parser`（新設） |
@@ -499,7 +499,7 @@ plugins/ndf/
 | `_run_step` | `progress/run.py` | 変更 | 今のまま | 種類 `reading` のステップの argv に `reading_args` を足す |
 | `review_again_drafts` | `progress/run.py` | 新設 | `review_again_drafts(v: View, s: stages.StageDef, gate: Optional[str], report: Mapping[str, Any]) -> list[model.EventDraft]` | `outputs.review_again` を受けて、設計のレビュー・MVV 判定・読み手役のステップを未了に戻す事象と、戻したことの記録を作る |
 | `_step_draft` | `progress/run.py` | 変更 | `_step_draft(...) -> list[model.EventDraft]`（1 件から並びへ変える） | `review_again` があれば `review_again_drafts` を続けて返す |
-| `Target` | `progress/gate/asking.py` | 変更 | `Target(head, material, body: Optional[str] = None, title: Optional[str] = None)` | 回答が固定する対象に PR の本文と題の sha256 を足す。`differs`・`as_dict`・`from_dict` も同じ項目を扱う |
+| `Target` | `progress/gate/asking.py` | 変更 | `Target(head, material, body: Optional[str] = None, title: Optional[str] = None)` | 回答が固定する対象に PR の本文と題の sha256 を足す。`differs` も同じ項目を比べ、`as_dict`・`from_dict` は `body_sha256`・`title_sha256` として記録し読み戻す |
 | `github_observe` | `progress/gate/answering.py` | 変更 | 今のまま | 同じ 1 回の取得で、head に加えて本文と題の sha256 を読む |
 | `recheck` | `progress/gate/answering.py` | 変更 | 今のまま | 待ちへ戻すとき、同じトランザクションで `_reading_reset` の事象を足す |
 | `_reading_reset` | `progress/gate/answering.py` | 新設 | `_reading_reset(v: run.View, stage: str, gate: Optional[str]) -> list[model.EventDraft]` | 同じ工程の、そのゲートの前の読み手役のステップから後ろを未了に戻す事象 |
@@ -594,7 +594,7 @@ plugins/ndf/
 | `parse` | `release/approval_decide.py` | 変更 | 今のまま | `Trail` に担い手と資料のハッシュを足して読む |
 | `judge` | `release/approval_decide.py` | 変更 | `judge(found: Sequence[Trail], presented: Sequence[Presentation], head: str) -> Judgment` | 設計書の表の「判定」の行のとおり、担い手で分けて判定する |
 | `present` | `release/trail.py` | 変更 | 今のまま | 最新の提示の資料のハッシュが同じで回答があるときだけ提示しない |
-| `answer` | `release/trail.py` | 変更 | `answer(hub: GitHub, number: int, value: str, by: str, presented: Shown, writer: str = WRITER_ANSWER)`（`Shown` は head と資料のハッシュ） | `--by user` は資料のハッシュを照合し、`--by mvv` は受けない |
+| `answer` | `release/trail.py` | 変更 | `answer(hub: GitHub, number: int, value: str, by: str, presented: Shown, writer: str = WRITER_ANSWER)`（`Shown` は head と資料のハッシュ） | `--by user` は回答した資料の SHA-256 を最新の提示と照合する。`--by mvv` は資料の SHA-256 を指定した場合に拒否する |
 | `judged`・`read` | `release/trail.py` | 変更 | 今のまま | 提示のコメントも読んで `judge` へ渡す |
 | `_answer_args`・`cmd_answer` | `release/cli.py` | 変更 | 今のまま | `--material-sha256` を足す |
 
