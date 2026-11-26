@@ -31,6 +31,7 @@ plugins/ndf/
 │   │   ├── docrebuild/{cli.py, drive.py, gate.py *, gate_decide.py *}
 │   │   ├── records/{reading.py, cli.py}
 │   │   ├── hooks/guards/reading_check.py
+│   │   ├── worktree/merged.py
 │   │   └── release/{forms_decide.py, approval_decide.py, trail.py, cli.py}
 │   └── progress/
 │       ├── stages.py, model.py, run.py, folding.py *, command.py
@@ -51,6 +52,7 @@ plugins/ndf/
 | `src/ndf/domains/docrebuild/cli.py` | 変更 | サブコマンド `gate` の引数を受ける | `docrebuild.gate` | モジュール | `_parser`・`_gate_args`・`main`（変更） |
 | `src/ndf/domains/docrebuild/drive.py` | 変更 | 組み直しで読ませた文書を読ませたものの記録へ書き、`not_run` で止める | `records.reading` | モジュール | `_checked`・`_reader_gap`（変更）、`record_reads`・`regular_file`・`run_worker_at`・`worker_report`・`not_run_detail`（新設） |
 | `src/ndf/domains/records/reading.py` | 変更 | 承認の質問の組み立て・読ませたものの記録の読み書き・`check` の照合 | `reading_decide`・`records.pull_view`・`release.forms_decide`・`adapters.github` | モジュール | `gate_questions`・`material_hashes`・`docs_path`・`materials_path`・`append_doc`・`completed`・`latest_read`・`remained_of`・`pending_review`・`select_reads`・`remained_section`・`split_section`・`comment_has`・`row_fingerprint`（新設）、`add`・`check`（変更） |
+| `src/ndf/domains/worktree/merged.py` | 変更 | クリーンアップで、閉じた PR の承認資料のコピーを消す | `contracts.facts`・`identity` | モジュール | `after_merge`（変更） |
 | `src/ndf/domains/records/cli.py` | 変更 | `reading check` に `--gate`・`--pr`・`--material`・`--questions-out` を足す | `records.reading` | モジュール | `_add_reading`・`_reading_check`（変更） |
 | `src/ndf/domains/hooks/guards/reading_check.py` | 変更 | 止める理由の文の案内を、読み手役のステップの打ち直しに変える | — | モジュール | `denial`（変更） |
 | `src/ndf/domains/release/forms_decide.py` | 変更 | 形の行に `approve` を持たせる | `contracts.facts` | `Form` | `Form`・`form_of`（変更） |
@@ -102,7 +104,7 @@ plugins/ndf/
 | `strip_marks` | `docrebuild/gate_decide.py` | 新設 | `strip_marks(text: str, expected: str) -> str` | 末尾の 1 組の印の内側が `expected` と 1 字も違わなければそれを除いた本文、違えば印の行だけを消した本文を返す |
 | `push_fixed` | `docrebuild/gate.py` | 新設 | `push_fixed(run: Run, docs: Sequence[str]) -> str` | 直した文書をコミットし、再レビュー待ちの行を書いてから push し、CI を待つ。push したコミットを返す |
 | `refetch_check` | `docrebuild/gate.py` | 新設 | `refetch_check(run: Run, head: str) -> PullView` | PR を 1 回取得し直し、head・題・本文が動いていないかを確かめる |
-| `send_back` | `docrebuild/gate.py` | 新設 | `send_back(run: Run, plan: Plan, targets: Sequence[str], raised: Mapping[str, Sequence[Mapping[str, str]]]) -> dict[str, Any]` | 題の案か PR の本文の行の直しがあるとき、変更要求（設計書の「差し戻し」。記録の行の種類は `sent_back`。承認する人が回答で返す変更要求とは別）の行を書き、記録を書かずに `stopped`（`precondition`）で止める（設計書の決定 10。PR の題と本文は書き換えない） |
+| `send_back` | `docrebuild/gate.py` | 新設 | `send_back(run: Run, plan: Plan, targets: Sequence[str], raised: Mapping[str, Sequence[Mapping[str, str]]]) -> dict[str, Any]` | 題の案か PR の本文の行の直しがあるとき、変更要求（設計書の「差し戻し」。承認する人が回答で返す変更要求とは別）として止める。`reading-docs.jsonl` に `sent_back` の行を追記する。確認の完了行と `reading-checks.jsonl` の行を書かずに `stopped`（`precondition`）を返す（設計書の決定 10。PR の題と本文は書き換えない） |
 | `post_material` | `docrebuild/gate.py` | 新設 | `post_material(run: Run, now: PullView, final: str) -> None` | 合格した承認資料の最終版を PR のコメントとして 1 件足す。同じ承認資料のコメントがあれば足さない（比べ方は `check` と同じ `reading.comment_has`） |
 | `write_records` | `docrebuild/gate.py` | 新設 | `write_records(run: Run, plan: Plan, final: Final, head: str, pushed: bool) -> dict[str, Any]` | 設計書の手順 9 の 1〜5 を順に書き、`outputs.check` の値を返す |
 | `_parser`・`main` | `docrebuild/cli.py` | 変更 | 今のまま | サブコマンド `gate` を足し、`run` と同じ `adopt` で結果 JSON を受ける |
@@ -368,6 +370,8 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `docs_path` | `records/reading.py` | 新設 | `docs_path() -> Path` | `reading-docs.jsonl` のパス（表 `ndf-files` の行 `reading-docs`） |
 | `materials_path` | `records/reading.py` | 新設 | `materials_path(repo: str, gate: str, number: int) -> Path` | コピーのパス（表 `ndf-files` の行 `reading-materials`） |
+| `_material_copies` | `worktree/merged.py` | 新設 | `_material_copies(repo: str) -> dict[int, list[Path]]` | リポジトリのコピーを PR の番号ごとに返す。保存先は表 `locations` と `ndf-files` から引く（`worktree` は子の表の依存の向きで `records.reading` を読めない） |
+| `after_merge` | `worktree/merged.py` | 変更 | 今のまま（`hub` は `repo` も持つ） | `_material_copies` の PR の状態を、渡した PR と同じ `pulls` の 1 回の取得で読み、閉じた PR のコピーを消す（開いている PR と読めない番号は残す） |
 | `append_doc` | `records/reading.py` | 新設 | `append_doc(row: Mapping[str, Any]) -> dict[str, Any]` | 1 行を `jsonl.append_locked` で追記する。形は `reading-docs.schema.json` |
 | `completed` | `records/reading.py` | 新設 | `completed(rows: Iterable[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]` | 確認の id から完了の行 |
 | `latest_read` | `records/reading.py` | 新設 | `latest_read(rows: Sequence[Mapping[str, Any]], key: tuple[Any, ...]) -> Optional[Mapping[str, Any]]` | 設計書の「読ませるものの決め方」のキーで、完了した確認の最後の読ませた行を引く |

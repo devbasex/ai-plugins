@@ -12,6 +12,7 @@ import strategy_fixture
 from ndf.adapters.git import Completed, Git
 from ndf.adapters.github import Pull
 from ndf.core import branch_strategy as bs
+from ndf.domains.records import reading
 from ndf.domains.worktree import create, ndf_settings, follow, merged, removal, setup, trash
 
 
@@ -20,6 +21,8 @@ def _pull(number: int, branch: str, merged_: bool) -> Pull:
 
 
 class FakeHub:
+    repo = "o/r"
+
     def __init__(self, pulls: dict[int, Optional[Pull]]) -> None:
         self.by_number = pulls
 
@@ -52,7 +55,23 @@ def test_after_merge_removes_worktree_and_branch_then_fast_forwards(main_repo: P
         main_repo, "update-ref", "refs/remotes/origin/develop", "develop"
     )  # 取得済みの参照を古くし、マージが fetch を読むことを確かめる
 
-    rec = merged.after_merge(main_repo, [7, 8, 9], FakeHub({7: _pull(7, "feat/a", True), 8: _pull(8, "feat/b", False)}))
+    # 承認資料のコピーは、渡していない PR でも閉じていれば消し、開いている PR のコピーは残す
+    closed, still_open = reading.materials_path("o/r", "design", 5), reading.materials_path("o/r", "release", 6)
+    closed.parent.mkdir(parents=True, exist_ok=True)
+    closed.write_text("x", encoding="utf-8")
+    still_open.write_text("x", encoding="utf-8")
+    hub = FakeHub(
+        {
+            5: _pull(5, "feat/z", False),
+            6: _pull(6, "feat/y", False)._replace(state="open"),
+            7: _pull(7, "feat/a", True),
+            8: _pull(8, "feat/b", False),
+        }
+    )
+
+    rec = merged.after_merge(main_repo, [7, 8, 9], hub)
+
+    assert not closed.exists() and still_open.exists()
 
     assert not wt.exists() and not run_git(main_repo, "branch", "--list", "feat/a").strip()
     got = {(i["kind"], i["name"]): i for i in rec.items}

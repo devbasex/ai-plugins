@@ -415,7 +415,7 @@ Pull Request のコメントにある（PR の題と本文は書き換えない�
 
    | 承認の待ち方 | やり直し方 |
    | --- | --- |
-   | 工程の承認ゲートで待っている | `ndf progress reread <ステートマシンの ID>`。`ndf document-rebuild gate` は直接打たない。読み手役のステップを打ち直し、承認ゲートの待ちを新しい質問の id と今の対象で出し直す。結果の `metrics.gate` から head と回答のコマンドを読み直す |
+   | 工程の承認ゲートで待っている | `ndf progress reread <ステートマシンの ID>`。`ndf document-rebuild gate` は直接打たない。読み手役のステップを打ち直し、承認ゲートの待ちを新しい質問の id と今の対象で出し直す。結果に `metrics.gate` があれば、そこから head と回答のコマンドを読み直す。次の操作が作業の待ち（`wait`）なら、結果の `next` のコマンドを打ち、待った後の結果の `metrics.gate` から読み直す |
    | 会話のセッションのリリース | head が動いていれば（`head_moved`）、先に今の head の承認資料を用意する。用意の仕方はリリースの PR の種類で違う（[release-steps.md の「承認資料の対象のコミットを合わせる」](../../release/references/release-steps.md#承認資料の対象のコミットを合わせる)）。続けて `ndf document-rebuild gate --gate release --pr <番号> --material <承認資料> --state-dir <保存先> --out <結果のファイル>` を打ち直し、`outputs.material.path` のファイルで `present` を打ち直す。資料か head が違えば提示し直される |
 
    `no_pr`（記録に無い Pull Request を承認しようとしている）は、その Pull Request を指定して `gate` を打つ。`unknown`（GitHub を読めない）なら、
