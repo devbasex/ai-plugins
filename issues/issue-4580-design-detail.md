@@ -339,7 +339,8 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_landed_commit` | `release/record.py` | 新設 | `_landed_commit(hub: GitHub, number: int, production: str, production_sha: str \| None) -> tuple[Pull, str]` | 確かめ 1。`released` の着地の部分を使い、head の名前を問わずに反映したコミットを返す |
 | `_changed_paths` | `release/record.py` | 新設 | `_changed_paths(repo_git: Git, pull: Pull, commit: str, push: Push) -> tuple[frozenset[str], frozenset[str]]` | 「対象を決める変更の範囲」の 2 つの差分（`git diff --name-only --no-renames`、起動 2 回） |
 | `_find_push` | `release/record.py` | 新設 | `_find_push(hub: GitHub, repo_git: Git, production: str, commit: str, known: Push \| None) -> Push` | 既存の記録の `push` があれば使い、無ければ `git rev-list --first-parent`（起動 1 回）と `branch_activity` で決める |
-| `_confirm_delivery` | `release/record.py` | 新設 | `_confirm_delivery(hub: GitHub, delivery: Mapping, production: str, after: str, observed: bool, wait: bool) -> Confirmation` | 「CD の結果の待ち」の 1〜4 を 1 つの配布先で行う |
+| `_confirm_delivery` | `release/record.py` | 新設 | `_confirm_delivery(hub: GitHub, root: Path, delivery: Mapping, production: str, after: str, observed: bool, wait: bool) -> Confirmation` | 「CD の結果の待ち」の 1〜4 を 1 つの配布先で行う。CD の結果は `result.workflow` なら `workflow_runs`、`result.command` なら `_command_result` で読む |
+| `_command_result` | `release/record.py` | 新設 | `_command_result(root: Path, command: str, after: str, timeout: int) -> Mapping` | `{revision}` を `after` に置き換えたコマンドをリポジトリの根で 1 回実行し、終了コード 0・75・1・それ以外を、成功・未完了・失敗・未確定の `run` の形（`status`・`conclusion`）にする（cd-setup.md の契約） |
 | `_observe` | `release/record.py` | 新設 | `_observe(delivery: Mapping) -> tuple[Any, str]` | `observe.url` を `httpx` で 1 回読み、`pointer` の値と読んだ URL を返す |
 | `_write_one` | `release/record.py` | 新設 | `_write_one(hub: GitHub, made: Record, holder: int, others: Sequence[int]) -> list[Written]` | 1 つの配布先の記録を書く順の手順 1〜4 で書き、重なりを自分のコメントの削除で戻す |
 | `_candidates` | `release/record.py` | 新設 | `_candidates(hub: GitHub, number: int, select: Selection) -> tuple[list[Authored], list[Record], list[Correction], list[dict]]` | 読み取りの手順 1〜3（マーカーで候補にし、JSON で今回のリリースに絞り、残りの書き手だけを `trusts_strict` で照会する） |
@@ -402,6 +403,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_changed_paths`・`_find_push` | `Git.changed_files`・`Git.log_of` | `grep -n "def changed_files\|def log_of" adapters/git.py` | 使う（`--no-renames` は `options` で渡す） |
 | `_write_one` | `Publisher.comment`・`record._require_trusted_writer` | `grep -n "def comment" adapters/publish.py` | 使う |
 | `_candidates` | `record._trusted_bodies` | 同上 | 使えない（全部のコメントの書き手を先に照会する）。手順を変えた別の関数にし、今の `read` は残す |
+| `_command_result` | `result.command` の既存の読み手 | `grep -rn "{revision}" plugins/ndf/src` | 無い（契約は cd-setup.md にだけある）。`subprocess.run` で新設する |
 | `_observe` | `httpx`（`plugins/ndf/pyproject.toml` の依存） | `grep -n httpx plugins/ndf/pyproject.toml` | 使う |
 | `glob_matches` | `fnmatch`・`PurePath.full_match` | 標準ライブラリの説明 | 使えない（`fnmatch` の `*` は `/` を越える。`full_match` は 3.13 からで、下限は 3.11） |
 
@@ -411,6 +413,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
+| `_command_result` | 終了コード 0 で成功、1 で失敗 | 75 で未完了、それ以外で未確定 | 時間の上限で未確定（実行するのは偽の `subprocess.run`。子のプロセスを起動しない） |
 | `write_unversioned` | 含めた PR の各々へ書き、作業の PR が無ければ本番の PR へ書く | 同じ引数の打ち直しで CD を照会しない。2 つの配布先の一方だけ完了で `recorded` と `pending` に分ける。並行した同じ引数の 2 回で記録が 1 件に戻る | 確かめ 0〜6 の各行で何も書かない。すべて未確定で `precondition`、書けた配布先が無く失敗があれば `refused` |
 | `correct_targets` | 訂正の記録を足し、前の記録を消さない | 訂正の後、新しい一覧で打ち直した配布先では前のテストの記録が判定に使われる | 宣言がある・記録が無い値で止まる |
 | `read_release` | `--version` の値の記録を代表にし、`--unit` の単位だけを使う | 正と違う記録が最後にあっても正の記録が代表。別のリリースの記録の書き手の照会が 403 でも読める | 候補の書き手の照会が 403 で失敗。`read` の書き手の本文は `trusted` が偽 |

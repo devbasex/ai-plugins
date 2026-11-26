@@ -62,7 +62,7 @@
 
 #### Task 6: バージョンの無いリリース記録を書く・訂正する
 
-- **対象ファイル:** `plugins/ndf/src/ndf/adapters/github.py`（`branch_activity`・`workflow_runs`・`delete_comment`）、`plugins/ndf/src/ndf/domains/release/record.py`（`Unversioned`・`Outcome`・`write_unversioned`・`correct_targets`・`_landed_commit`・`_changed_paths`・`_find_push`・`_confirm_delivery`・`_observe`・`_write_one`）、`plugins/ndf/src/ndf/domains/release/cli.py`（`cmd_record`・`_record_args`）、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`（`record` の引数）、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json` と写し（配布先の `paths`・`observe`）、`test_github.py`、`test_release_record.py`
+- **対象ファイル:** `plugins/ndf/src/ndf/adapters/github.py`（`branch_activity`・`workflow_runs`・`delete_comment`）、`plugins/ndf/src/ndf/domains/release/record.py`（`Unversioned`・`Outcome`・`write_unversioned`・`correct_targets`・`_landed_commit`・`_changed_paths`・`_find_push`・`_confirm_delivery`・`_command_result`・`_observe`・`_write_one`）、`plugins/ndf/src/ndf/domains/release/cli.py`（`cmd_record`・`_record_args`）、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`（`record` の引数）、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json` と写し（配布先の `paths`・`observe`）、`test_github.py`、`test_release_record.py`
 - **変更内容:** 確かめ 0〜8・書く順の手順 1〜4・`record` の終わり方の表・対象の一覧の訂正
 - **満たす受け入れ条件:** 2・9（書く側）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理。並行した書き込みは偽の GitHub でコメントの順を作って確かめ、実際の待ちと子プロセスを使わない（`tdd-cycle`）
@@ -135,7 +135,7 @@
 | --- | --- |
 | #4513 の直しより先に着手すると、記録のスキーマと手順書が衝突する | 1 回目の着手の前に #4513 のリリースを確かめる。まだなら U1 だけを先に進め、U2 以降は待つ |
 | GitHub のアクティビティに push が載るまでの遅れの大きさが分からない（設計書の「未確認のまま残ること」と同じ） | `record` は止まって打ち直しを示す。1 回目のリリースの後の確認で遅れを測り、遅すぎれば待ちを足す課題を起票する |
-| 配布先の宣言の `result.command`（コマンドで CD の結果を読む形）は、設計書の確かめ 8 が照会の手段を定めていない | U4 では `result.workflow` だけを照会し、`result.command` の配布先は未確定（`pending`）として理由を載せる。扱いを決める課題を U4 のレビューで起票する |
+| 配布先の宣言の `result.command`（コマンドで CD の結果を読む形）の配布先が、記録できずに課題を閉じられなくなる | U4 で `result.workflow` と同じく `result.command` も読む（設計書の「CD の結果の照会」。今の契約の cd-setup.md の終了コードのまま）。1 回目のリリースの条件に、`result.command` の配布先で `cd` の記録が書けることを入れ、Task 6 のテストで偽のコマンドの終了コード 0・75・1 を確かめる |
 | 閉じる手順の変更で、今動いているスプリントの閉じ方が変わる | 流れの設定が無くバージョンを持つリポジトリの判定は Task 1 の退行テストで縛る |
 
 ## 切り戻し手順
