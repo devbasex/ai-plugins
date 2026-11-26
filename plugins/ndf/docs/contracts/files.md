@@ -31,6 +31,8 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `instructions` | `ndf` repo:.ndf | `instructions.json` | ndf_settings | 追跡 | 人と解析（M7） | kept | 内部（予告なく変えてよい） |
 | `issue-items` | `ndf` repo:.ndf | `issue-items.json` | ndf_settings | 追跡 | 人 | kept | 内部（予告なく変えてよい） |
 | `issue-request` | `issue-request` env:.（NDF_ISSUE_REQUEST_FILE で差し替え） | `.` | exchange | — | 起票（M7） | kept | 公開 |
+| `launch` | `ndf` repo:.ndf | `launch.json` | ndf_settings | 追跡 | 人（Skill launch-config の承認の後の反映か、手の編集。#1959） | kept | 内部（予告なく変えてよい） |
+| `launch-approvals` | `state-root` state:. | `launch-approvals.jsonl` | record | — | 起動の承認と取り消し（#1959。追記だけ・所有者だけが読める） | kept | 内部（予告なく変えてよい） |
 | `loop-record` | `ndf-loop` main:.ndf/loop | `<loop>/loop.json` | record | — | 開発ループとスプリント（M1） | cleanup | 公開 |
 | `mvv` | `ndf` repo:.ndf | `mvv.json` | ndf_settings | 追跡 | 人の承認（M7） | kept | 内部（予告なく変えてよい） |
 | `mvv-body` | `ndf` repo:.ndf | `mvv.md` | ndf_settings | 追跡 | 人の承認（M7） | kept | 内部（予告なく変えてよい） |

@@ -108,10 +108,10 @@ def test_i010_without_recheck_the_floor_is_still_checked(seen, tmp_path):
 
 
 def test_i010_floor_gets_argv0_the_slot_env_and_cwd(seen, tmp_path):
-    """下限の確かめは argv[0]・スロットの環境を足した環境・作業ディレクトリで打つ。"""
+    """下限の確かめは argv[0]・スロットの環境と AI の子のマーカーを足した環境・作業ディレクトリで打つ。"""
     claude._prefaced(_run(seen, argv=("/opt/claude", "-p")), "q", 30, tmp_path, claude.DEFAULT_LAUNCH)
 
-    assert seen.floor == [("claude", "/opt/claude", {"A": "1", **SLOT_ENV}, tmp_path)]
+    assert seen.floor == [("claude", "/opt/claude", {"A": "1", **SLOT_ENV, "NDF_AI_CHILD": "1"}, tmp_path)]
 
 
 def test_i010_too_old_floor_refuses_without_launch(seen, tmp_path):

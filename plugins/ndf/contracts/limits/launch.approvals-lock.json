@@ -1,0 +1,7 @@
+{
+  "summary": "起動の承認の記録（launch-approvals.jsonl）へ 1 行足す排他の待ちの上限（#1959）",
+  "seconds": 5,
+  "read_by": [
+    "ndf.adapters.launch_approval"
+  ]
+}
