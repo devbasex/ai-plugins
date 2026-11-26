@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/launch.schema.json",
   "title": "起動の設定（.ndf/launch.json）",
-  "description": "full の起動で読み込む Tool と MCP、尋ねずに使ってよい指定、安全装置を外してよいランタイム（#1959）。permissions の全体と、そこから読む MCP の定義ファイルの中身が承認の対象で、利用者のマシンで承認した内容だけが起動に使われる。置かなくてよい",
+  "description": "NDF が非対話で起動する worker や Skill について、読み込む Tool と MCP サーバー、確認なしで使える操作を工程ごとに指定する（#1959）。相手役の起動と外部 AI への委譲については、サンドボックスが使えない環境で安全装置を外して起動してよいランタイムを指定できる。承認の対象は permissions の全体と、そこから読む MCP の定義ファイルの中身で、利用者のマシンで承認した内容だけが起動に使われる。置かなくてよい",
   "type": "object",
   "additionalProperties": false,
   "required": [

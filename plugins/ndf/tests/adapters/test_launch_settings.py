@@ -81,6 +81,24 @@ def test_an_environment_reference_in_an_assignment_is_not_a_secret(tmp_path: Pat
     assert ls.step_spec(s, "impl").allow == ("Bash(curl -H token=$API_TOKEN:*)",)
 
 
+@pytest.mark.parametrize("value", ["token=${PREFIX}" + HIDDEN, "token=$API_TOKEN:" + HIDDEN])
+def test_plain_text_joined_to_an_environment_reference_is_a_secret(tmp_path: Path, value: str) -> None:
+    """参照に平文をつないだ値は、平文が一覧とプロセスの一覧に出るので秘密の形として止める。"""
+    _write(tmp_path, {"version": 1, "permissions": {"steps": {"impl": {"allow": [f"Bash(curl -H {value})"]}}}})
+    text = _stopped(ls.load, tmp_path)
+    assert "permissions/steps/impl/allow/0" in text and HIDDEN not in text
+
+
+def test_duplicate_keys_stop_with_the_place_for_the_settings_and_a_definition(tmp_path: Path) -> None:
+    """同じキーが 2 つある起動の設定と MCP の定義ファイルは、どちらもファイルを示す precondition で止まる。"""
+    _write(tmp_path, '{"version": 1, "version": 1}')
+    assert str(tmp_path / ".ndf" / "launch.json") in _stopped(ls.load, tmp_path)
+    s = _settings(tmp_path, {})
+    _write(tmp_path, '{"mcpServers": {"x": {"command": "a"}, "x": {"command": "' + HIDDEN + '"}}}', ".ndf/mcp/a.json")
+    text = _stopped(ls.check_definitions, s, [".ndf/mcp/a.json"])
+    assert ".ndf/mcp/a.json" in text and HIDDEN not in text
+
+
 @pytest.mark.parametrize("rel", ["/etc/mcp.json", "../outside.json", "link/mcp.json"])
 def test_an_mcp_path_outside_the_root_stops(tmp_path: Path, rel: str) -> None:
     root, outside = tmp_path / "repo", tmp_path / "elsewhere"
@@ -169,6 +187,17 @@ def test_inherit_puts_the_repository_mcp_file_into_the_target(tmp_path: Path) ->
     assert missing.listing["files"] == [{"path": ".mcp.json", "sha256": None, "servers": []}]
     _write(tmp_path, {"mcpServers": {"search": SERVER}}, ".mcp.json")
     assert ls.approval_target(s).sha256 != missing.sha256
+
+
+def test_inherit_refuses_a_repository_mcp_file_linked_outside_the_root(tmp_path: Path) -> None:
+    """`inherit` が読む `.mcp.json` も、リンクの先が根の外なら読まずに止める（外の定義のサーバ名を一覧に出さない）。"""
+    root, outside = tmp_path / "repo", tmp_path / "home.mcp.json"
+    root.mkdir()
+    outside.write_text(json.dumps({"mcpServers": {HIDDEN: SERVER}}), encoding="utf-8")
+    (root / ".mcp.json").symlink_to(outside)
+    s = _settings(root, {"design": {"mcp": "inherit"}})
+    text = _stopped(ls.approval_target, s)
+    assert ".mcp.json" in text and HIDDEN not in text
 
 
 def test_a_definition_only_another_step_points_to_still_stops_the_target(tmp_path: Path) -> None:

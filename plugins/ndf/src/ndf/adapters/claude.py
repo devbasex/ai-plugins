@@ -578,11 +578,12 @@ def call_claude(
     学習に使わない設定と確かめられていなければ起動せず `Failure.REFUSED`、重い起動のスロットが空かなければ
     `Failure.NO_SLOT` を返す。2 つを通った後、claude が下限より古ければ起動せず `Failure.REFUSED`（`cli_floor`）。期限を超えたら組ごと止めて回収する
     （claude が動かした Tool の子孫を残さない）。中継の起動先を継いだ起動は、確かめ（`begin`・`retry`）で確定した起動ごとの
-    環境と起動引数でこの前置きを打つ。子の環境には NDF が起動した AI のマーカー（`NDF_AI_CHILD`）を足す（#1959。子は起動の承認を書けない）。
+    環境と起動引数でこの前置きを打つ。NDF が起動した AI のマーカー（`NDF_AI_CHILD`）は前置き（`_prefaced`）が子の最終の環境へ足す
+    （#1959。子は起動の承認を書けない）。中継の確かめは `child: drop` の指定でマーカーを除くため、確かめより前には足さない。
 
     `options`（`LaunchOptions`）は前置きの選び方で、スロットを待つ上限・プロセスの組・下限の確かめの有無を決める。
     """
-    env = child_process_env({identity.env_name("ai-child"): "1"})
+    env = child_process_env()
     base = AccountRun(env, list(argv))
     if relay_checks is None or not _inherited(env):
         return _prefaced(base, prompt, timeout, cwd, options)
@@ -636,13 +637,14 @@ def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path],
     """起動の前置き（学習の設定・スロット・下限）を `run` の環境と実行ファイルで打って起動し、どの終わり方でも `run.end` を 1 回だけ打つ。
 
     前置きの選び方は `options`（スロットを待つ上限・claude を置くプロセスの組・下限の確かめ）。関所の起動は今までどおり新しい組で起動する。
+    子の最終の環境には NDF が起動した AI のマーカー（`NDF_AI_CHILD`）を足す。中継の確かめが確定した環境（初回と替え先の打ち直し）にも足すためである（#1959）。
     """
     launched = False
     try:
         with launch_slot.gate(
             "claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=options.slot_wait, ensure=options.ensure_training
         ) as slot_env:
-            run = run._replace(env={**run.env, **slot_env})
+            run = run._replace(env={**run.env, **slot_env, identity.env_name("ai-child"): "1"})
             stopped = _precheck(run, cwd, options)
             if stopped is not None:
                 return stopped

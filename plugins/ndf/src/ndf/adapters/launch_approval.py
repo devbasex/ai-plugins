@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -55,10 +56,26 @@ def state_file(file_id: str) -> Path:
     return identity.load().state_dir / facts.value("ndf-files", file_id, "path")
 
 
+def _private_to_me(fd: int) -> bool:
+    """開いた記録のファイルが、このユーザーの持ち物の普通のファイルで、ほかのユーザーが読み書きできないか。
+
+    `os.open` の `0o600` は作るときにしか効かないため、復元などで権限が広がった既存のファイルは開いた後に確かめる。
+    """
+    st = os.fstat(fd)
+    return stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid() and not st.st_mode & 0o077
+
+
 def _whole_rows(path: Path) -> list[dict[str, Any]]:
-    """改行で終わる行だけを読み、壊れた行を飛ばす。読めなければ空（承認していないと扱う）。"""
+    """改行で終わる行だけを読み、壊れた行を飛ばす。読めないか所有者だけの形でなければ空（承認していないと扱う）。"""
     try:
-        text = path.read_text(encoding="utf-8")
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return []
+    try:
+        with os.fdopen(fd, "rb") as f:
+            if not _private_to_me(f.fileno()):
+                return []
+            text = f.read().decode("utf-8")
     except (OSError, UnicodeDecodeError):
         return []
     rows = (_parsed_row(line) for line in text.splitlines(keepends=True) if line.endswith("\n"))
@@ -94,11 +111,20 @@ def records_lock(path: Path) -> Any:
 
 
 def write_row(path: Path, row: Mapping[str, Any]) -> None:
-    """1 行を追記する（錠は呼び手が持つ）。ファイルは所有者だけが読める（0600）。"""
+    """1 行を追記する（錠は呼び手が持つ）。ファイルは所有者だけが読める（0600）。
+
+    既存のファイルが所有者だけの形でなければ書かずに `PermissionError` を投げる（承認者名とリポジトリのパスをほかのユーザーへ見せない）。
+    末尾が改行で終わらない書きかけ（中断した追記）が残っていれば、改行を先に書いて次の行と分ける。つなげると読み手が両方を捨て、
+    打ち直した操作が反映されないためである。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    with os.fdopen(fd, "a", encoding="utf-8") as f:
-        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "r+b") as f:
+        if not _private_to_me(f.fileno()):
+            raise PermissionError(f"{path} が所有者だけの読み書きでない。所有者を自分にし、`chmod 600` にしてから打ち直す")
+        size = os.fstat(f.fileno()).st_size
+        torn = size > 0 and os.pread(f.fileno(), 1, size - 1) != b"\n"
+        f.write((("\n" if torn else "") + json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8"))
 
 
 def append(repo: str, sha256: str, action: Action, approver: Optional[str] = None, request_id: Optional[str] = None) -> dict[str, Any]:

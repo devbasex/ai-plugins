@@ -88,7 +88,7 @@ def _launch_json(path: Path, label: str) -> Any:
         raise _precondition(f"{label} が無い") from None
     except (OSError, UnicodeDecodeError) as exc:
         raise _precondition(f"{label} の読み取りに失敗した（{type(exc).__name__}）") from None
-    except ValueError:
+    except (ValueError, contracts.ContractError):  # 同じキーが 2 つあれば parse_json は ContractError（ValueError の派生でない）を投げる
         raise _precondition(f"{label} が JSON でない（同じキーが 2 つある場合を含む）") from None
 
 
@@ -163,7 +163,7 @@ def approval_target(settings: Settings) -> Target:
     steps = _given_object(settings.permissions, "steps")
     files: dict[str, Any] = check_definitions(settings, sorted({rel for spec in steps.values() for rel in _mcp_files(spec)}))
     if any(spec.get("mcp") == INHERIT for spec in steps.values()):
-        repo_mcp = settings.root / REPO_MCP
+        repo_mcp = _in_root(settings.root, REPO_MCP, REPO_MCP)  # リンクの先が根の外なら、読む前に止める
         files[REPO_MCP] = _mcp_definition(repo_mcp, REPO_MCP) if repo_mcp.exists() else None
     sha = launch_approval.target_digest(settings.permissions, files)
     listing = {

@@ -74,15 +74,73 @@ def test_a_half_written_or_broken_row_is_skipped_and_an_unreadable_file_is_not_a
     assert not la.is_approved("/r", SHA)
 
 
+def test_a_revoke_retried_after_a_torn_write_takes_effect() -> None:
+    """中断で改行の無い書きかけが残っても、打ち直した取り消しは次の行として分かれて反映される。"""
+    path = la.state_file(la.APPROVALS)
+    la.append("/r", SHA, la.Action.APPROVE, approver="人")
+    with path.open("a", encoding="utf-8") as f:
+        f.write('{"repo": "/r", "sha256": "' + SHA + '", "act')
+    la.append("/r", SHA, la.Action.REVOKE)
+    assert not la.is_approved("/r", SHA)
+
+
+def test_a_record_file_readable_by_others_is_neither_written_nor_trusted() -> None:
+    """既存の記録の権限が広ければ追記せず（`PermissionError`）、読む側も承認済みと扱わない。"""
+    path = la.state_file(la.APPROVALS)
+    la.append("/r", SHA, la.Action.APPROVE, approver="人")
+    before = path.read_bytes()
+    path.chmod(0o644)
+    assert not la.is_approved("/r", SHA)
+    with pytest.raises(PermissionError):
+        la.append("/r", SHA, la.Action.REVOKE)
+    assert path.read_bytes() == before
+    path.chmod(0o600)
+    assert la.is_approved("/r", SHA)
+
+
 # ---------------------------------------------------------------- NDF が起動した AI の子のマーカー（承認を書けない）
 
 
-def test_claude_children_carry_the_ai_child_flag(monkeypatch) -> None:
-    seen = []
-    monkeypatch.setattr(claude, "_prefaced", lambda base, *a: seen.append(base.env) or claude.ClaudeReply(True, None, "", 0.0))
-    monkeypatch.setattr(claude, "relay_checks", None)
+class DroppingChecks:
+    """偽の中継の確かめ。`child: drop` の指定に従い、確定した環境からマーカーを除く（実プロセスを起動しない）。"""
+
+    @staticmethod
+    def _decided(argv, env):
+        return claude.AccountRun({k: v for k, v in env.items() if k != identity.env_name("ai-child")}, list(argv))
+
+    def begin(self, argv, env, cwd, keys):
+        return self._decided(argv, env)
+
+    def retry(self, argv, env, cwd, keys):
+        return self._decided(argv, env)
+
+
+@pytest.mark.parametrize("relayed", [False, True])
+def test_claude_children_carry_the_ai_child_flag_in_the_final_environment(monkeypatch, relayed) -> None:
+    """中継を通らない起動、中継経由の初回の起動、上限で替え先へ打ち直す起動のどれも、子の最終の環境にマーカーがある。"""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def slot(agent, *, cwd=None, env=None, wait=None, ensure=True):
+        yield {}
+
+    launched: list[dict] = []
+
+    def run(argv, prompt, timeout, cwd, env, new_group):
+        launched.append(dict(env))
+        if relayed and len(launched) == 1:
+            return claude.ClaudeReply.failed("", "上限", failure=claude.Failure.USAGE_LIMIT)
+        return claude.ClaudeReply(True, None, "", 0.0)
+
+    monkeypatch.setattr(claude.launch_slot, "gate", slot)
+    monkeypatch.setattr(claude.cli_floor, "require", lambda *a, **k: None)
+    monkeypatch.setattr(claude, "_run_claude", run)
+    monkeypatch.setattr(claude, "relay_checks", DroppingChecks() if relayed else None)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")
+    monkeypatch.setenv(identity.env_name("relay-dir"), "/tmp/relay")
     claude.call_claude(["claude", "-p"], "質問", 1.0)
-    assert seen[0][identity.env_name("ai-child")] == "1"
+    assert len(launched) == (2 if relayed else 1)
+    assert all(env[identity.env_name("ai-child")] == "1" for env in launched)
 
 
 def test_partner_children_carry_the_ai_child_flag(tmp_path: Path, monkeypatch) -> None:

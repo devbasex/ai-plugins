@@ -29,10 +29,19 @@ def redact(text: str) -> str:
     return MASK if SECRET_VALUE.search(text) or ASSIGNED_SECRET.search(text) else text
 
 
+# 環境変数の参照だけの値（`$API_TOKEN`・`${API_TOKEN}`、参照の間と後ろは英数字を含まない記号だけ。`$API_TOKEN:*)` を含む）
+ONLY_REFERENCES = re.compile(r"(?:\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)[^A-Za-z0-9$]*)+")
+
+
 def holds_secret(text: str) -> bool:
-    """秘密の形（`redact` が伏せる形）を含むか。代入の値が `$` で始まる環境変数の参照（`token=$API_TOKEN`）は値が現れないので当てない。"""
+    """秘密の形（`redact` が伏せる形）を含むか。
+
+    代入の値が環境変数の参照だけ（`token=$API_TOKEN`）なら値が現れないので当てない。参照に平文をつないだ値
+    （`token=${PREFIX}abcd1234`）は平文が承認の一覧とプロセスの一覧に出るため、秘密の形として当てる。
+    """
     if SECRET_VALUE.search(text):
         return True
     return any(
-        not re.split(r"[=:]", m.group(0), maxsplit=1)[1].lstrip().lstrip("\"'").startswith("$") for m in ASSIGNED_SECRET.finditer(text)
+        not ONLY_REFERENCES.fullmatch(re.split(r"[=:]", m.group(0), maxsplit=1)[1].lstrip().lstrip("\"'"))
+        for m in ASSIGNED_SECRET.finditer(text)
     )
