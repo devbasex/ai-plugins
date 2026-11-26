@@ -34,7 +34,7 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `launch` | `ndf` repo:.ndf | `launch.json` | ndf_settings | 追跡 | 人（Skill launch-config の承認の後の反映か、手の編集。#1959） | kept | 内部（予告なく変えてよい） |
 | `launch-answers` | `state-root` state:. | `launch-answers.jsonl` | record | — | 承認の質問への回答（hook launch-answer。#1959。追記だけ・所有者だけが読める） | kept | 公開 |
 | `launch-approvals` | `state-root` state:. | `launch-approvals.jsonl` | record | — | 起動の承認と取り消し（#1959。追記だけ・所有者だけが読める） | kept | 内部（予告なく変えてよい） |
-| `launch-candidates` | `state-root` state:. | `launch-candidates/<repo>/<id>/` | exchange | — | 起動の設定の候補と反映元のバージョン（ndf launch-config draft。#1959）。作成途中は名前の頭が . のディレクトリに置き、候補と記録がそろってから <id> へ付け替える | cleanup | 内部（予告なく変えてよい） |
+| `launch-candidates` | `state-root` state:. | `launch-candidates/<repo>/<id>/` | exchange | — | 起動の設定の候補と反映元のバージョン（ndf launch-config draft。#1959）。作成と掃除はリポジトリごとの錠（<repo>.lock）の中で行い、作成途中は .draft-<id>、消す途中は .removing-<id> の名前に置く。錠の中で見つかった作業中のディレクトリは次の draft が片付ける | cleanup | 内部（予告なく変えてよい） |
 | `launch-questions` | `state-root` state:. | `launch-questions.jsonl` | record | — | 起動の承認のリクエスト（ndf launch-config show --question approve。#1959。追記だけ・所有者だけが読める） | kept | 公開 |
 | `launch-reflected` | `state-root` state:. | `launch-reflected/<id>.done.json` | record | — | 候補の反映の記録（ndf launch-config approve。#1959）。反映先の絶対パスのハッシュを <id> とし、反映の途中の記録を <id>.pending.json、完了の記録を <id>.done.json に保存する。どちらも反映先ごとに 1 件 | replaced | 内部（予告なく変えてよい） |
 | `loop-record` | `ndf-loop` main:.ndf/loop | `<loop>/loop.json` | record | — | 開発ループとスプリント（M1） | cleanup | 公開 |
