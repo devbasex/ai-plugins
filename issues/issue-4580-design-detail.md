@@ -2,7 +2,7 @@
 
 設計文書 [issue-4580-design.md](./issue-4580-design.md) の構成要素と構造を、ファイルと関数の粒度へ下ろした文書である。書き方と、別ファイルにする条件は `design` の `references/detailed-design.md` にある。
 
-別ファイルにした理由: 新設する関数が 49（「関数の仕様」の表の `新設` の行から、型 10 とファイル 3 を除いて数えた）あり、シグネチャを変える既存の関数が 2 つ（`close_decide.verdict` の引数の名前と返り、`record.write_verification` の引数）あるため（`requirements-design` の「詳細設計を別ファイルにする条件」）。型 `record_decide.Record` と `github.Authored` は項目を足すだけで、既定値を持つので今の呼び出しは変わらない。
+別ファイルにした理由: 新設する関数が 51（「関数の仕様」の表の `新設` の行から、型 11 とファイル 3 を除いて数えた）あり、シグネチャを変える既存の関数が 3 つ（`close_decide.verdict` の引数の名前と返り、`record.write_verification` の引数、`GitHub._read_permission` の返り）あるため（`requirements-design` の「詳細設計を別ファイルにする条件」）。型 `record_decide.Record` と `github.Authored` は項目を足すだけで、既定値を持つので今の呼び出しは変わらない。
 
 構成要素は 2 回のリリース（設計書の決定 9）のどちらで出すかを、小見出しの最初の行の「出す回」に書く。1 回目は閉じる条件の除外と、バージョンの無いリリースとテストの記録、2 回目は種類の既定・モードごとの要否・設定の確かめ・流れの文書である。
 
