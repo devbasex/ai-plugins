@@ -1,8 +1,0 @@
-{
-  "summary": "版上げのスプリントが、workflow の assemble が版上げの PR を作るのを待つ上限と、実行の状態を読み直す間隔。assemble のジョブの上限（80 分）より長くとる（#4446）",
-  "seconds": 5400,
-  "interval": 30,
-  "read_by": [
-    "ndf.progress.gate.bump"
-  ]
-}

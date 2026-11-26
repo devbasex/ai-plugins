@@ -31,7 +31,7 @@ from ndf.core import approval_words, merge_approval, production_merge
 from ndf.domains.records import files, jsonfile, jsonl, mvv
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
-from ndf.progress import definition, model
+from ndf.progress import definition
 from ndf.progress.gate.checks import MvvFacts, judgeable, may_skip, note, refusals
 from ndf.progress.model import MVV_GATE_STEPS, MVV_PACES, MVV_SKIP_GATES
 
@@ -276,7 +276,7 @@ def judge_with(ask: Ask, before_retry: Optional[Callable[[], None]] = None) -> m
     schema = contracts.load_json(contracts.schema_path(VERDICT_SCHEMA))
 
     def judge(inputs: Mapping[str, str]) -> tuple[str, Mapping[str, Any]]:
-        got = ask(inputs["question"], inputs[model.MATERIAL_KEY], schema, limits.seconds(JUDGE_LIMIT), before_retry=before_retry)
+        got = ask(inputs["question"], inputs["material"], schema, limits.seconds(JUDGE_LIMIT), before_retry=before_retry)
         if not got.ok:
             raise GateError(f"MVV 判定の回答が無い: {got.cause}")
         return str(got.answer["verdict"]), {"usd": got.cost, **{k: got.answer[k] for k in md.VERDICT_DETAILS}}
@@ -420,7 +420,7 @@ def _judged(
         f"Pull Request #{number} の本文": facts.body if facts.body is not None else "",
         "変えたファイルと差分": mm.patch_material(rows),
     }
-    asked = {"gate": gate_name, "question": mm.SYSTEM, model.MATERIAL_KEY: mm.prompt(mm.redlines(shared, project), materials)}
+    asked = {"gate": gate_name, "question": mm.SYSTEM, "material": mm.prompt(mm.redlines(shared, project), materials)}
     # 手順 (7): 機械の検査 2〜6 が外れても判定は打つ（省かない理由として why に載る）。LLM の打ち直しを起動する直前に PR を
     # 照らし、動いていれば打ち直さない
     try:

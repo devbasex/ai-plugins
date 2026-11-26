@@ -55,16 +55,6 @@ def test_start_commands_create_the_sprint_under_the_lane_then_start_the_row():
     assert going == {"argv": [launch.result.ENTRY, "progress", "next"], "ask": ["sprint"]}
     new, *_ = launch.start_commands("p6", "a", "lane-id", _row(["--mode", "fast"]))
     assert new["argv"].count("--mode") == 1 and new["argv"][-2:] == ["--mode", "fast"]
-    # #4446: 版上げの行はリクエストをまとめる版上げのスプリントを起動し、Skill の引数もリクエストにする
-    bumped = LaneRow(key="r1", input={"kind": "release", "requests": ["q1", "q2"]}, state="pending")
-    new, start, going = launch.start_commands("p6", "rel", "lane-id", bumped)
-    name = launch.sprint_name("p6", "rel", "r1")
-    assert new["argv"][1:] == [
-        "progress", "new", name, "--mode", "release-bump", "--release-requests", "q1", "q2", "--parent", "lane-id"
-    ]  # fmt: skip
-    assert start["argv"][1:4] == ["lanes", "row", "start"] and going["argv"][1:] == ["progress", "next"]
-    assert launch.start_prompt("p6", "rel", "lane-id", bumped).startswith("/goal /ndf:development-workflow --release-requests q1 q2 -- ")
-    assert bumped.requests == ["q1", "q2"] and bumped.issues() == set() and _row().requests == []
 
 
 def test_the_start_prompt_sets_the_goal_and_goes_on_past_starting_the_row():

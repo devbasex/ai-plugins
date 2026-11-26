@@ -518,12 +518,11 @@ def _reading_reset(v: run.View, stage: str, gate: Optional[str]) -> list[model.E
     戻すと工程を進める仕組みが読み手役のステップを打ち直し、今の PR の題・本文・head で記録を作り直してから承認ゲートの待ちに入る。
     読み手役のステップの無い古い定義と、まだ済んでいない読み手役のステップでは何も書かない。"""
     prog = run.step_progress(v, stage)
+    reading = v.snap.stage(stage).reading_for(gate)
+    if reading is None or reading.id not in prog.done:
+        return []
     why = "承認ゲートの待ちへ戻したので、読み手役のステップから今の対象で打ち直す"
-    return [
-        _no_report_draft(v, stage, i, stages.RESET, prog.generation, why)
-        for i in v.snap.stage(stage).from_reading(gate)  # 資料の提示のように、読み手役の後ろのステップも打ち直す
-        if i in prog.done
-    ]
+    return [_no_report_draft(v, stage, reading.id, stages.RESET, prog.generation, why)]
 
 
 # 承認の前の確認をやり直して待ちを出し直す理由（承認ゲートの待ちの記録に残る）

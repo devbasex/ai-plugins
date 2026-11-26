@@ -34,9 +34,6 @@ def test_subcommands_keep_their_order():
         "docs-only",
         "gathered",
         "reread",
-        "bump-assemble",
-        "bump-present",
-        "bump-record",
     ]
 
 

@@ -396,14 +396,15 @@ ndf records mvv cite --gate <design か release> --base <ベースブランチ> 
 
 | 質問 | 読ませる担当 | 質問を出す AI がすること |
 | --- | --- | --- |
-| 承認ゲート（`ndf-gate:1`・`ndf-gate:2`） | 工程のステップ（`ndf document-rebuild gate`。工程の外の承認は同じコマンドを打つ） | 記録と突き合わせて、記録した質問をそのまま出す。読み手役は起動しない。承認資料と質問の文も自分で書かない |
+| 承認ゲート（`ndf-gate:1`・`ndf-gate:2`） | 工程のステップ（`ndf document-rebuild gate`。工程の外の承認は同じコマンドを打つ） | 記録と突き合わせて、記録した質問をそのまま出す。読み手役は自分で起動しない。判断の材料と質問の文も自分で書かない |
 | 判断の質問（`ndf-ask:`） | 質問を出す AI | 質問の文と、その直前に示す材料を読ませて記録する |
 
 ### 承認ゲートの質問
 
 承認資料と質問の文は、工程の承認ゲートの直前のステップ（`design-reading`・`release-reading`）が作り、読み手役に読ませて記録する。
 流れは [document-rebuild の「承認の前の確認」](../../document-rebuild/SKILL.md#承認の前の確認) にある。設計承認の資料は、承認する
-Pull Request のコメントにある（PR の題と本文は書き換えない）。会話のセッションのリリースと、状態を持たない単発の承認では、
+Pull Request のコメントにある（PR の題と本文は書き換えない）。会話のセッションのリリース（[parallel.md の「まとめたリリース」](parallel.md#まとめたリリース)を含む）と、
+状態を持たない単発の承認では、承認を問う直前に
 `ndf document-rebuild gate --gate <design か release> [--pr <番号>] [--material <承認資料>] --state-dir <保存先> --out <結果のファイル>`
 を打つ（`--material` はリリースだけで、直した資料は結果の `outputs.material` のパスにある）。
 

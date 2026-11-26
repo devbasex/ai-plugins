@@ -34,7 +34,7 @@ conductor へ伝えれば次のフェーズから反映する。
 **着手の判定は conductor が行う。** 課題の組み方・スプリントのモード・到達点の
 置き直しは、最初のプランを流す（または最初の supervisor を起動する）前に決める。課題が多く本文の読解が conductor の
 context window を埋めるときは、**読解だけを worker へ出す**。判定そのものは conductor が行う。
-**conductor が worker を直接起動してよいのは、この読解と、判断の質問の前の読み手役の 2 つだけである。** 承認ゲートの読み手役は工程のステップが起動し、conductor は起動しない。手順と `prompt` の決まりは [approval-request.md の「読み手役の確認」](approval-request.md#読み手役の確認) にある。
+**conductor が worker を直接起動してよいのは、この読解と、判断の質問の前の読み手役の 2 つだけである。** 承認ゲートの読み手役は工程のステップ（工程の外の承認は `ndf document-rebuild gate`）が起動し、conductor は自分で起動しない。手順と `prompt` の決まりは [approval-request.md の「読み手役の確認」](approval-request.md#読み手役の確認) にある。
 
 ## フェーズ
 

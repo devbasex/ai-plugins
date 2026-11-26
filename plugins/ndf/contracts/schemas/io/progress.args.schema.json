@@ -9,57 +9,6 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
-          "const": "bump-assemble",
-          "description": "下位の命令（入れ子は空白でつなぐ）"
-        },
-        "--cwd": {
-          "type": "string",
-          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
-        }
-      },
-      "required": [
-        "subcommand"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "subcommand": {
-          "const": "bump-present",
-          "description": "下位の命令（入れ子は空白でつなぐ）"
-        },
-        "--cwd": {
-          "type": "string",
-          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
-        }
-      },
-      "required": [
-        "subcommand"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "subcommand": {
-          "const": "bump-record",
-          "description": "下位の命令（入れ子は空白でつなぐ）"
-        },
-        "--cwd": {
-          "type": "string",
-          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
-        }
-      },
-      "required": [
-        "subcommand"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "subcommand": {
           "const": "cancel",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
@@ -291,13 +240,6 @@
         "--loop": {
           "type": "string",
           "description": "開発ループの行のステートマシンを作る（工程なし。ループの名前）"
-        },
-        "--release-requests": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "版上げのスプリントがまとめるリリースのリクエスト"
         },
         "--pace": {
           "type": "string",

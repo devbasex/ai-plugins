@@ -80,14 +80,7 @@ def test_standard_rows_run_from_requirements_to_backlog_and_hold_the_closing_sta
 
 def test_modes_are_ordered_by_height():
     heights = definition.mode_heights()
-    assert sorted(heights, key=heights.__getitem__) == [
-        "light",
-        "operation",
-        "legacy-refactor",
-        "standard",
-        "documentation",
-        "release-bump",
-    ]
+    assert sorted(heights, key=heights.__getitem__) == ["light", "operation", "legacy-refactor", "standard", "documentation"]
 
 
 def test_gate_steps_name_which_gate_they_are():
@@ -140,17 +133,6 @@ def test_reading_step_sits_between_the_mvv_judge_and_the_gate_and_is_not_counted
     # 読み手役のステップを承認ゲートの後ろへ入れ替えると、定義の検査で落ちる
     swapped = _stage_doc("x", "行", [_step("g", "gate", "none", gate="release"), _step("r", "reading", "none", gate="release")])
     assert any("I11:" in e for e in _errors(_mode_doc([("行", "x")]), {"x": swapped}))
-    # #4446 の決定 9: 版上げのスプリントは資料の提示を読み手役と承認ゲートの間に置き、承認されなくても記録のステップへ進む
-    bump = definition.load_definition("release-bump").stage("版上げ")
-    assert [st.id for st in bump.steps] == [
-        "bump-assemble", "release-mvv", "release-reading", "bump-present", "release-gate", "release", "bump-record"
-    ]  # fmt: skip
-    assert bump.mvv_before("release-gate") == "release-mvv" and bump.gates == ("release",)
-    assert next(st for st in bump.steps if st.id == "release-gate").on_reject == "bump-record"
-    back = _step("g", "gate", "none", gate="release")
-    back["g"]["metadata"]["ndf"]["on_reject"] = "r"
-    wrong = _stage_doc("x", "行", [_step("r", "record", "none"), back])
-    assert any("I12:" in e for e in _errors(_mode_doc([("行", "x")]), {"x": wrong}))
 
 
 def test_refactoring_suspension_is_not_a_code_constant():
@@ -402,9 +384,6 @@ def _code_review_reviews_the_seam_after_gathering(mode):
 def test_context_schema_holds_the_closed_vocabulary():
     keys = set(contracts.load_json(definition.CONTEXT)["properties"])
     assert keys == {
-        "release_requests",
-        "release_plan",
-        "material",
         "issues",
         "mode",
         "pace",

@@ -240,8 +240,8 @@ def test_a_reading_step_that_pushed_fixed_docs_runs_the_design_review_again(repo
 
 
 def test_a_sprint_in_a_lane_skips_only_the_release_reading(repo, st, env, capsys):
-    # #4446 の版上げのスプリントの判定表: 計画のレーンの行のスプリントはリリース承認ゲートの前の読み手役を済ませ、
-    # 設計承認ゲートの前はレーンでも打つ。版上げのスプリントのモードはレーンでも打つ（model.reading_skip）
+    # #4446: 計画のレーンの行のスプリントはリリース承認ゲートの前の読み手役を済ませ、設計承認ゲートの前はレーンでも打つ
+    # （model.reading_skip）
     tid = _new(capsys)
     lane = run.Env(**{**vars(env.env), "in_lane": lambda _st, _tid: True})
     assert lanes.turn(st, tid, repo, lane)["metrics"]["stage"] == "設計"
@@ -252,7 +252,6 @@ def test_a_sprint_in_a_lane_skips_only_the_release_reading(repo, st, env, capsys
     assert "design-reading" in called and "release-reading" not in called and called[-1] == "release-mvv"
     reading = run.step_progress(run.read(st, tid), "デプロイ").done["release-reading"]
     assert reading["status"] == "ok" and "レーン" in reading["summary"]
-    assert model.reading_skip({}, None, "release", False, True, model.RELEASE_BUMP_MODE) is False
 
 
 def _mvv(kind: str, skip: bool, why: list[str]):

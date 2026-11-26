@@ -361,38 +361,6 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
-          "const": "open-releases",
-          "description": "下位の命令（入れ子は空白でつなぐ）"
-        },
-        "--root": {
-          "type": "string",
-          "default": ".",
-          "description": "リポジトリの根"
-        },
-        "--repo": {
-          "type": "string",
-          "description": "<所有者>/<リポジトリ>。省けば origin"
-        },
-        "--base": {
-          "type": "string",
-          "description": "ベースブランチ（設定 project.json の branch_strategy.branches.base）"
-        },
-        "--production": {
-          "type": "string",
-          "description": "本番ブランチ（設定 project.json の branch_strategy.branches.production）"
-        }
-      },
-      "required": [
-        "subcommand",
-        "--base",
-        "--production"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "subcommand": {
           "const": "present",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },

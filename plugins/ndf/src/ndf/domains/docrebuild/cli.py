@@ -34,7 +34,7 @@ from ndf.core.plan import files
 from ndf.adapters import github
 from ndf.domains.docrebuild import drive, gate, select_decide
 from ndf.domains.records import reading
-from ndf.progress import invoke, model
+from ndf.progress import invoke
 
 TOOL = cli.tool_of(__name__)
 RESULT_SCHEMA = drive.RESULT_SCHEMA
@@ -100,11 +100,8 @@ def _gate_args(a: argparse.Namespace) -> gate.GateArgs:
         raise gate.Precondition("--material は --gate release だけで受ける")
     raw = invoke.stage_inputs(os.environ)
     inputs = raw if raw is not None else {}
-    # 版上げのスプリントは、前のステップが組んだ承認資料を工程の入力の material で受ける（引数が優先）
-    held = inputs[model.MATERIAL_KEY]["path"] if a.gate == gate.RELEASE and model.MATERIAL_KEY in inputs else None
-    material = a.material if a.material is not None else held
     return gate.GateArgs(
-        a.gate, a.pr, (cwd / material).resolve() if material else None, a.reviewed, a.no_doc_fix,
+        a.gate, a.pr, (cwd / a.material).resolve() if a.material else None, a.reviewed, a.no_doc_fix,
         (cwd / a.state_dir).resolve(), cwd, inputs,
     )  # fmt: skip
 

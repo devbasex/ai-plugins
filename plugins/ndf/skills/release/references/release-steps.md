@@ -102,20 +102,6 @@ ndf release-steps answer --pr <リリースの PR> --answer approved --presented
 ndf release-steps records --pr <リリース記録の PR>
 ```
 
-**版上げのスプリント（モード `release-bump`）では、組み立てから提示までを工程が行う。** `ndf progress bump-assemble` が workflow の
-`assemble` を起動して版上げの PR の本文を承認資料にし、読み手役のステップが確かめ、`bump-present` が提示する。承認の後のリリースのステップは、
-`bump-present` が提示した資料の値で `answer` を打つ。`--presented` は、工程の入力の `material.path` のファイルの行 `提示したコミット:` の値である。
-残りの引数は、回答した担い手で違う。
-
-| 承認の仕方 | 渡す引数 |
-| --- | --- |
-| 利用者が回答した | `--by user` と `--material-sha256 <工程の入力の material.file_sha256>` |
-| MVV 判定で進んだ | `--by mvv`。`--material-sha256` は渡さない（渡すと `answer` が断る） |
-
-値は版上げの PR の最後の提示のコメントから取らない。承認の後に提示が足されていると、利用者が見ていない資料への承認が記録される。
-値が分からないときと、`answer` が最新の提示と違うと断ったときは、最新の資料への承認を取り直す。
-`ndf release-steps open-releases --base <ベースブランチ> --production <本番ブランチ>` は、開いている版上げの PR の番号を返す。
-
 **`answer` は承認を得てから打つ。** `--by` は回答した担い手で、利用者が `user`、MVV 判定で通したときが `mvv` である。
 利用者の回答は `present` の routes が固定した `--material-sha256` を渡す。最新の提示の資料と違えば書かれない（資料を差し替えて提示し直したら、新しい資料に回答を取り直す）。`mvv` の回答には渡さない
 （`pace: fast` と `pace: auto` だけ。条件は [pace.md](../../development-workflow/references/pace.md)）。管理者の迂回でマージする設定では、

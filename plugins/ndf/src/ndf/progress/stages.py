@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ndf import contracts
-from ndf.contracts import internal, result
+from ndf.contracts import internal
 from ndf.progress import model
 
 
@@ -36,8 +36,6 @@ class StepDef:
     gate: Optional[str] = None
     args: dict[str, Any] = field(default_factory=dict)
     output_ref: Optional[str] = None
-    # 承認ゲートで承認されなかったときに進む先のステップ（承認ゲートだけ。#4446 の版上げのスプリント）
-    on_reject: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -54,8 +52,6 @@ class StageDef:
     outputs: tuple[str, ...] = ()
     # 文脈にあるときだけ読むキー（無くても工程を流す。#3879 の gathered）
     optional_inputs: tuple[str, ...] = ()
-    # `outputs` のうち、工程の終わりに無くてもよいキー（承認されずに打たずに済ませたステップが書く値。#4446）
-    optional_outputs: tuple[str, ...] = ()
     input_ref: Optional[str] = None
     output_ref: Optional[str] = None
 
@@ -75,13 +71,6 @@ class StageDef:
         gate = next((st.gate for st in self.steps if st.id == step_id), None)
         reading = self.reading_for(gate) if gate else None
         return self.before(reading.id if reading is not None else step_id)
-
-    def from_reading(self, gate: Optional[str]) -> list[str]:
-        """承認ゲート `gate` の読み手役のステップから承認ゲートの直前までのステップの id。読み手役のステップが無ければ空（#4446）。"""
-        ids = [st.id for st in self.steps]
-        reading = self.reading_for(gate)
-        at = self.gate_index(gate)
-        return ids[ids.index(reading.id) : at] if reading is not None and at is not None else []
 
     def gate_index(self, gate: Optional[str]) -> Optional[int]:
         """承認ゲート `gate` のステップの、工程の中の位置。無ければ None。"""
@@ -248,54 +237,18 @@ def reading_flags(stage: StageDef, again: Sequence[Mapping[str, Any]], finished_
 
 
 def _reading_errors(steps: list[StepDef]) -> list[str]:
-    """読み手役のステップは、同じ工程の同じ種類の承認ゲートの前に置き、間に置けるのは記録のステップ（資料の提示）だけ（#4446）。"""
+    """読み手役のステップの直後は、同じ工程の同じ種類の承認ゲートにする（#4446）。"""
     errs = []
     for at, st in enumerate(steps):
-        nxt = next((s for s in steps[at + 1 :] if s.kind != "record"), None)
+        nxt = steps[at + 1] if at + 1 < len(steps) else None
         if st.kind == READING_KIND and (nxt is None or nxt.stage != st.stage or nxt.kind != GATE_KIND or nxt.gate != st.gate):
             errs.append(f"I11: {_where(st)} の読み手役のステップの直後が、同じ工程の承認ゲート {st.gate} でない")
     return errs
 
 
-def _on_reject_errors(steps: list[StepDef]) -> list[str]:
-    """承認されなかったときに進む先は、承認ゲートが持ち、同じ工程の後ろのステップを指す（#4446）。"""
-    errs = []
-    for at, st in enumerate(steps):
-        later = {s.id for s in steps[at + 1 :] if s.stage == st.stage}
-        if st.on_reject is not None and (st.kind != GATE_KIND or st.on_reject not in later):
-            errs.append(f"I12: {_where(st)} の on_reject {st.on_reject} が、承認ゲートの後ろの同じ工程のステップでない")
-    return errs
-
-
-def step_context(context: Mapping[str, Any], stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
-    """ステップへ渡す文脈。スプリントの文脈の上へ、同じ工程の済んだステップの出力（定義の `outputs` のキーだけ）を
-    ステップの並び順に重ねる（#4446。後ろのステップが前のステップの出力を読む）。"""
-    out = dict(context)
-    for st in stage.steps:
-        held = done[st.id].get("outputs") if st.id in done else None
-        if isinstance(held, dict):
-            out.update(keep_declared(stage.outputs, held)[0])
-    return out
-
-
-def passed_gate(stage: StageDef, gate: StepDef, report: dict[str, Any], approved: bool) -> list[tuple[str, dict[str, Any]]]:
-    """回答を読んだ承認ゲートで済んだとするステップと、その結果。承認されずに `on_reject` へ進むときは、間のステップを
-    打たずに済んだとする（#4446）。"""
-    out = [(gate.id, report)]
-    if not approved:
-        ids = [st.id for st in stage.steps]
-        for i in ids[ids.index(gate.id) + 1 : ids.index(str(gate.on_reject))]:
-            out.append(
-                (i, result.result(__package__.rpartition(".")[2], result.OK, f"承認されなかったので、ステップ {i} は打たずに済ませた"))
-            )
-    return out
-
-
 def check_order(steps: list[StepDef]) -> list[str]:
     """モードの全ステップを並びの順に平らにした一覧で、順序・範囲・重複の決まりを確かめ、破った理由を返す。"""
-    return (
-        _range_errors(steps) + _after_release_errors(steps) + _duplicate_errors(steps) + _reading_errors(steps) + _on_reject_errors(steps)
-    )
+    return _range_errors(steps) + _after_release_errors(steps) + _duplicate_errors(steps) + _reading_errors(steps)
 
 
 def check_unique_stage_names(stages: Iterable[StageDef]) -> list[str]:

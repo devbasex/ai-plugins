@@ -452,9 +452,6 @@ def _prepare(d: Drive, v: View, s: stages.StageDef, inputs: dict[str, Any]) -> O
     step = s.steps[0] if prog.redo else prog.next_step(s)
     if step is None or invoke.kind_of(step) != invoke.PLAN:
         return None
-    if not prog.redo:
-        # 流すときの `_run_step` と同じく、同じ工程の済んだステップの出力を重ねる（版上げのスプリントの打ち直しは `pr` を読む。#4446）
-        inputs = invoke.resolve_inputs(s, stages.step_context(v.context(), s, prog.done))
     run = replace(invoke.stage_run(s, step, inputs), approved=approved_seen(v, s.name, d.st.root))
     if invoke.template(run.name) is None:
         return None  # テンプレートの無いプランは、流すときの _call_plan が precondition で止める
@@ -512,11 +509,10 @@ def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
         d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
         summary = f"{reason}。回答は検証を通してから読むので next を打つ"
         return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", d.machine_id))
-    if event_payload(m.event)["answer"] == APPROVED or m.step.on_reject is not None:
-        approved = event_payload(m.event)["answer"] == APPROVED
-        passed = stages.passed_gate(m.stage, m.step, gate_report(m.step, m.event), approved)
-        payloads = [{"step": i, "report": rep, "status": FINISHED, "generation": m.progress.generation} for i, rep in passed]
-        d.write(*[step_event(v, m.stage.name, p) for p in payloads])
+    if event_payload(m.event)["answer"] == APPROVED:
+        rep = gate_report(m.step, m.event)
+        payload = {"step": m.step.id, "status": FINISHED, "report": rep, "generation": m.progress.generation}
+        d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=payload, rev=v.rev))
         return None
     detail = f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）"
     d.write(_failed(m.stage, m.step.id, v.rev, "refused", detail))
@@ -767,7 +763,7 @@ def _reading_skipped(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef
     gate = next((st for st in s.steps if st.kind == stages.GATE_KIND and st.gate == step.gate), None)
     waiting_gate = gate is not None and gate.id in prog.held
     in_lane = step.gate == model.release_gate() and d.env.in_lane(d.st, v.machine_id)
-    if not model.reading_skip(prog.done, s.before(step.id), step.gate, waiting_gate, in_lane, v.snap.mode):
+    if not model.reading_skip(prog.done, s.before(step.id), step.gate, waiting_gate, in_lane):
         return None
     why = "計画のレーンの行にあるスプリントなので" if in_lane else "直前の MVV 判定が承認ゲートを省くので"
     rep = result.result(TOOL, result.OK, f"{why}、読み手役のステップ {step.id} を打たずに済ませた")
@@ -814,7 +810,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
     if skipped is not None:
         return skipped
     try:
-        inputs = invoke.resolve_inputs(s, stages.step_context(v.context(), s, prog.done))
+        inputs = invoke.resolve_inputs(s, v.context())
     except invoke.StageInputError as exc:
         return [_failed(s, step.id, v.rev, exc.kind, str(exc))]
     approved = approved_seen(v, s.name, d.st.root)

@@ -43,7 +43,6 @@ class StepProgress:
     notes: Optional[str] = None
     failed: bool = False
     redo: bool = False
-    carries: frozenset[str] = frozenset()  # 承認されなくても流し直さず先へ進む承認ゲート（定義の on_reject。#4446）
     # #4446: 待ちの記録を持ったステップ（MVV 判定はゲートを省かない）・未了に戻した回数・終わりの事象の番号・設計のレビューへ戻した記録
     held: set[str] = field(default_factory=set)
     resets: dict[str, int] = field(default_factory=dict)
@@ -96,7 +95,7 @@ class StepProgress:
 
     def _answered(self, ev: model.Event, p: dict[str, Any]) -> None:
         """回答。承認ゲートの変更要求なら世代を上げて初めから流し直し、ほかは数え始めの後の回答だけを残す。"""
-        if p["answer"] == REQUEST_CHANGES and p["kind"] == invoke.LISTEN and p["step"] not in self.carries:
+        if p["answer"] == REQUEST_CHANGES and p["kind"] == invoke.LISTEN:
             self.generation += 1
             self.done, self.waiting, self.answer, self.anchor = {}, None, None, ev.seq
             self.held, self.again = set(), []
@@ -115,7 +114,7 @@ _SEES: dict[str, Callable[[StepProgress, model.Event, dict[str, Any]], None]] = 
 
 
 def step_progress(v: View, stage: str) -> StepProgress:
-    prog = StepProgress(carries=frozenset(st.id for s in v.snap.stages if s.name == stage for st in s.steps if st.on_reject))
+    prog = StepProgress()
     for ev in v.row_events(stage):
         prog.see(ev)
     return prog

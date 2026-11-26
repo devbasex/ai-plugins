@@ -129,34 +129,35 @@ pace: fast
 
 ## モードごとに起動する Skill
 
-| 工程 | `light` | `operation` | `legacy-refactor` | `standard` | `documentation` | `release-bump` |
-| --- | --- | --- | --- | --- | --- | --- |
-| 要求と受け入れ条件 | `requirements-design` | `requirements-design` | — | `requirements-design` | `requirements-design` | — |
-| 作業場所の用意 | `worktree`（メインディレクトリで編集してよいパスだけなら不要） | `worktree`（メインディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` | `worktree` | — |
-| 設計 | `design`（該当時） | `design`（該当時） | `design` | `design` | `design` | — |
-| 詳細設計 | — | — | `design` | `design` | — | — |
-| 素材の収集と出典の確定 | — | — | — | — | `document-sources` | — |
-| ドキュメント再構成 | — | — | `document-rebuild`（設計 Pull Request を分けた場合） | `document-rebuild` | `document-rebuild` | — |
-| ドキュメントレビュー | — | — | `pr` → `cross-review` → `merged`（設計 Pull Request を分けた場合） | `pr` → `cross-review` → `merged` | `pr` → `cross-review` → `merged` | — |
-| 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` | `implementation-plan`（執筆を分担する場合） | — |
-| 実装 | 直接編集 | 実行 → [operation-run.md](references/operation-run.md) | `refactoring` | `tdd-cycle` | `document-drafting` | — |
-| `リファクタリング` | — | — | `cross-refactoring` | `cross-refactoring` | — | — |
-| `コードレビュー` | `cross-review` | `cross-review` | `pr-review` | `cross-review` | `cross-review` | — |
-| 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` | — |
-| Pull Request | `pr` | `pr` | `pr` | `pr` | `pr` | — |
-| 確定仕様化 | — | `plan-to-spec`（実行で決まった設定が以後の判断の前提になる場合） | — | `plan-to-spec` | `plan-to-spec`（確定版を残す場合） | — |
-| デプロイ | `release` | `release` | `release` | `release` | `release` | — |
-| クリーンアップ | `merged` | `merged` | `merged` | `merged` | `merged` | — |
-| 版上げ | — | — | — | — | — | `release` |
-| 体裁レビュー | — | — | — | — | `layout-review` | — |
-| リリース後テスト | — | `release-verification`（実行した経路とは別の経路で確かめられる場合） | `release-verification` | `release-verification` | `release-verification`（提出の後に確かめる経路がある場合） | — |
-| 振り返り | — | `retrospective`（実行の手順そのものを変えた場合） | `retrospective` | `retrospective` | `retrospective` | — |
-| 棚卸し | `backlog-refinement` | `backlog-refinement` | `backlog-refinement` | `backlog-refinement` | `backlog-refinement` | — |
+| 工程 | `light` | `operation` | `legacy-refactor` | `standard` | `documentation` |
+| --- | --- | --- | --- | --- | --- |
+| 要求と受け入れ条件 | `requirements-design` | `requirements-design` | — | `requirements-design` | `requirements-design` |
+| 作業場所の用意 | `worktree`（メインディレクトリで編集してよいパスだけなら不要） | `worktree`（メインディレクトリで編集してよいパスだけなら不要） | `worktree` | `worktree` | `worktree` |
+| 設計 | `design`（該当時） | `design`（該当時） | `design` | `design` | `design` |
+| 詳細設計 | — | — | `design` | `design` | — |
+| 素材の収集と出典の確定 | — | — | — | — | `document-sources` |
+| ドキュメント再構成 | — | — | `document-rebuild`（設計 Pull Request を分けた場合） | `document-rebuild` | `document-rebuild` |
+| ドキュメントレビュー | — | — | `pr` → `cross-review` → `merged`（設計 Pull Request を分けた場合） | `pr` → `cross-review` → `merged` | `pr` → `cross-review` → `merged` |
+| 計画 | — | `implementation-plan` | `implementation-plan` | `implementation-plan` | `implementation-plan`（執筆を分担する場合） |
+| 実装 | 直接編集 | 実行 → [operation-run.md](references/operation-run.md) | `refactoring` | `tdd-cycle` | `document-drafting` |
+| `リファクタリング` | — | — | `cross-refactoring` | `cross-refactoring` | — |
+| `コードレビュー` | `cross-review` | `cross-review` | `pr-review` | `cross-review` | `cross-review` |
+| 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
+| Pull Request | `pr` | `pr` | `pr` | `pr` | `pr` |
+| 確定仕様化 | — | `plan-to-spec`（実行で決まった設定が以後の判断の前提になる場合） | — | `plan-to-spec` | `plan-to-spec`（確定版を残す場合） |
+| デプロイ | `release` | `release` | `release` | `release` | `release` |
+| クリーンアップ | `merged` | `merged` | `merged` | `merged` | `merged` |
+| 体裁レビュー | — | — | — | — | `layout-review` |
+| リリース後テスト | — | `release-verification`（実行した経路とは別の経路で確かめられる場合） | `release-verification` | `release-verification` | `release-verification`（提出の後に確かめる経路がある場合） |
+| 振り返り | — | `retrospective`（実行の手順そのものを変えた場合） | `retrospective` | `retrospective` | `retrospective` |
+| 棚卸し | `backlog-refinement` | `backlog-refinement` | `backlog-refinement` | `backlog-refinement` | `backlog-refinement` |
 
 **表の行名は進捗記録の `stage` の値で、スクリプトが同じ字で読む。** 範囲外の課題の起票（`out-of-scope`）は
-この表に載らず、モードで要否を決めない（「範囲外の課題を見つけたとき」）。工程の全体像の図とモードごとの経路は[references/workflow-modes.md](references/workflow-modes.md) の「標準フロー」にある。
+この表に載らず、モードで要否を決めない（「範囲外の課題を見つけたとき」）。工程の全体像の図とモードごとの経路は
+[references/workflow-modes.md](references/workflow-modes.md) の「標準フロー」にある。
 
-**表の工程はスプリントの中で 1 回ずつ動き、中は並列にする。** 工程ごとの単位は[references/parallel-work.md](references/parallel-work.md) の「工程が動く単位」にある。
+**表の工程はスプリントの中で 1 回ずつ動き、中は並列にする。** 工程ごとの単位は
+[references/parallel-work.md](references/parallel-work.md) の「工程が動く単位」にある。
 
 | 工程 | 動く単位 | リファクタリングの時機 |
 | --- | --- | --- |
@@ -310,8 +311,6 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 止まるのは、レッドラインに当たったときと止まる条件（予算・同じ失敗・着手できる課題が無い・MVV の外の課題しか残らない・
 止める指示）に当たったときだけである。`--loop` が無い起動は今の 1 スプリントの進め方のままで、ループの記録を作らない。
 `--` から後ろ（`-- 終わり: ...`）は `/goal` の終わりの条件で、引数として読まない。
-
-**引数が `--release-requests` なら版上げのスプリントで、判定せずに渡されたコマンドを順に打つ**（[parallel.md](references/parallel.md) の「まとめたリリース」）。
 
 ## 人手の承認を求める承認ゲート
 

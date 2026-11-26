@@ -191,7 +191,7 @@ Skill を呼べるランタイムでは `document-style` を Skill として起�
 
 ## 承認の前の確認
 
-**承認ゲートの 1 つ前のステップ（`design-reading`・`release-reading`）は、`ndf document-rebuild gate` を打ち、承認資料を書いて読み手役に読ませる。** 承認を問う側（レーンの conductor・オーガナイザー）は資料も質問の文も書かず、このステップが記録した質問をそのまま出す。`gate` が `ndf worker run` で起動した worker は、次の順に進める。記録（`reading-docs.jsonl`・`reading-checks.jsonl`）と、PR へのコメントの追記は `gate` が行い、worker は行わない。
+**承認ゲートの 1 つ前のステップ（`design-reading`・`release-reading`）は、`ndf document-rebuild gate` を打ち、承認資料を書いて読み手役に読ませる。** 承認を問う側（レーンの conductor・オーガナイザー）は判断の材料も質問の文も書かず、記録した質問をそのまま出す。工程の外の承認（会話のセッションのリリースとまとめたリリース）では、承認を問う側が承認資料の元を用意し、問う直前に同じコマンドを打つ。`gate` が `ndf worker run` で起動した worker は、次の順に進める。記録（`reading-docs.jsonl`・`reading-checks.jsonl`）と、PR へのコメントの追記は `gate` が行い、worker は行わない。
 
 1. **承認資料の判断の材料を書く。** 素材のファイル（`approval-facts.json`。PR の URL・題・ベースと head・変更量・直前の MVV 判定）と、承認資料の作業用のファイル（PR の本文のコピー、または `ndf release-steps materials` の出力）を読み、作業用のファイルに判断の材料を書き足す。載せる項目と出所は [approval-request.md の「承認資料は 2 層に分ける」](../development-workflow/references/approval-request.md#承認資料は-2-層に分ける) と「承認ゲートごとの違い」のとおりで、ここに写さない
 2. **読み手役に読ませる。** 起動指示が挙げた対象（質問の文・承認資料・前に読ませた後で変わった文書の部分）を、上の「読み手役に読ませる」の決まりで読ませる。質問の文と承認資料は承認する人、文書はエンジニアの立場で読ませる。前に読ませた承認資料があるときは、変わった段落とその前後だけを読ませる

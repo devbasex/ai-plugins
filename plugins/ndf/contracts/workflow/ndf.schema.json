@@ -31,8 +31,7 @@
         "per_issue": {"const": true, "description": "進め方 fast で、課題ごとの子の行にする工程"},
         "inputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が読むスプリントの文脈のキー"},
         "optional_inputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が文脈にあるときだけ読むスプリントの文脈のキー（無くても工程を流す）"},
-        "outputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が書くスプリントの文脈のキー"},
-        "optional_outputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "outputs のうち、工程の終わりに無くてもよいキー（承認されずに打たずに済ませたステップが書く値。#4446）"}
+        "outputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が書くスプリントの文脈のキー"}
       }
     },
     "step": {
@@ -44,7 +43,6 @@
         "range": {"enum": ["sprint_diff", "issue_diff", "unreviewed_diff", "released", "lane", "none"], "description": "ステップの入力の範囲。review と test は sprint_diff・issue_diff・unreviewed_diff のどれか、verify は released だけ。unreviewed_diff はつなぎ目（文脈の gathered から後のコミット）で、sprint_diff の一部として同じリリースで届く"},
         "subject": {"enum": ["code", "docs", "design"], "description": "レビューの対象。kind が review のときだけ書く"},
         "gate": {"enum": ["design", "release"], "description": "承認ゲートの種類。kind が gate と reading のときだけ書く（reading はどのゲートの前か）。語の表示は progress.json の gates が持つ"},
-        "on_reject": {"type": "string", "minLength": 1, "description": "承認ゲートで承認されなかったとき（却下・変更要求）に、行を失敗にも流し直しにもせず進む先のステップ（同じ工程の後ろ）。間のステップは打たない。kind が gate のときだけ書く（版上げのスプリント。#4446）"},
         "modes": {"type": "array", "uniqueItems": true, "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "ステップを流すモードの名前（modes/ の文書の名前）。無ければすべてのモードで流す。承認ゲートが掛かるモードはここで決める"}
       },
       "allOf": [
