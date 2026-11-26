@@ -27,7 +27,7 @@
 | --- | --- |
 | [結果 JSON の定義](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/contracts/schemas/result.schema.json) | `outputs.product_version` は `1.2.3` の形（semver）しか受け付けない。工程の文脈の定義と食い違う |
 | デプロイを担当する worker への入力 | 承認の対象の Pull Request だけを受け取り、工程の文脈に書かれた `product_version` は受け取らない（[作業の定義](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/contracts/worker/kinds.json)） |
-| worker が判断を求めた後の `approved` | デプロイの最後の作業で、配布を担当する AI（worker）が判断を求める。`approved` で先へ進めるとその後の作業が無いため、その時点で結果を検査し、必要な値が無ければ `bad_report` で失敗する |
+| worker が判断を求めた後の `approved` | 配布を担当する AI（worker）は、デプロイの工程の最後のステップ `release` で動く。worker が `status: gate` の結果を返して判断を求め、それに `approved` と回答すると、続くステップが無いので、その時点でステップの出力を検査する。worker の結果の `outputs` はこの出力に引き継がれないので、`product_version` が無く `bad_report` で失敗する |
 
 ## 事象
 
@@ -54,7 +54,7 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 
 ## 再現手順
 
-前の状態: `.ndf/project.json` のブランチ戦略が次の値のリポジトリ。`release_strategy: trunk`、`approval.target: production_pr`、`via: gate`、`release.version_store.kind: none`、`deliveries[0].kind: manual`・`versioned: false`。
+前の状態: `.ndf/project.json` のブランチ戦略が次の値のリポジトリ。`release_strategy: trunk`、`approval.target: production_pr`、`approval.via: gate`、`release.version_store.kind: none`、`release.deliveries[0].kind: manual`、`release.deliveries[0].versioned: false`（キーは `branch_strategy` の下の位置）。
 
 1. 並列の計画のレーンでスプリントを進め、リリース承認ゲートで待たせる
 2. オーガナイザーが、本番のリリース記録を置いた Pull Request の番号を `--release <PR番号>` に指定して、`ndf lanes release <計画> <リクエスト> --result released --version "main <短いハッシュ>" --release <PR番号> --reason <理由>` で、まとめたリリースの結果を記録する
@@ -129,7 +129,7 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 退行しないこと:
 
 - [ ] 8. バージョン番号を持つリポジトリでは、デプロイの worker がバージョン番号の形でない値（例: `ndf v11.0.0`）を返しても、今と同じく工程は完了にならない
-- [ ] 9. 前提: 先行のステップが承認の判定（`mvv_gate`）を記録し、配布を担当する AI が配布先（`delivery`）と配布物の識別子（`product_version`）を添えて判断を求めている
+- [ ] 9. 前提: リリース承認ゲートより前のステップが MVV 判定の結果（`mvv_gate`）を記録している。そのうえで、配布を担当する AI が配布先（`delivery`）と配布物の識別子（`product_version`）をそろえた結果を返して判断を求めている
       操作: 続行を承認する（`approved` と回答する）
       結果: デプロイの工程が完了する
 
@@ -154,6 +154,10 @@ $ ndf contracts emit --tool worker --status ok --summary x --outputs '{"product_
 | conductor | 開発の流れを進める AI の会話。承認や判断の求めに回答する |
 | オーガナイザー | 並列の計画の全体をまとめる conductor の役割 |
 | 承認ゲート | 人手の承認を求める点 |
+| 工程・ステップ | デプロイの工程は、`release-mvv`・`release-reading`・`release-gate`・`release` のステップを順に流す。エラーに出る「ステップ release」は、この最後のステップで、worker が配布をする。オーガナイザーの「リリース」とは別のものである |
+| 判断の求め | worker が結果に `status: gate` を書き、conductor の判断を待って止まること |
+| MVV 判定（`mvv_gate`） | 承認ゲートの前に、プロジェクトの判断基準（MVV）に照らして人の承認を省けるかを AI が判定した結果。ステップ `release-mvv` が記録する |
+| `<計画>`・`<リクエスト>` | `ndf lanes release` の引数。`<計画>` は並列の計画の名前（例: `p9`）、`<リクエスト>` はまとめたリリースに含めるレーンのリリースの依頼（1 つ以上） |
 
 ## ドメインイベント
 
