@@ -58,7 +58,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from ndf import cli, contracts, identity
-from ndf.adapters import git, github
+from ndf.adapters import git, github, github_merge
 from ndf.contracts import causes, exit_codes, limits, result, worker_kinds
 from ndf.contracts.exit_codes import OK
 from ndf.contracts.routing import END
@@ -541,7 +541,7 @@ def default_base(repo: Path) -> str:
 
 
 def default_merge_method(repo: Path, base: str, remote: Optional[str] = None, *, raise_passing: bool = False) -> Optional[str]:
-    """マージの方式の既定: 基底のブランチ `base` で許された方式の先頭（`github.pick_merge_method`）。読めなければ None。
+    """マージの方式の既定: 基底のブランチ `base` で許された方式の先頭（`github_merge.pick_merge_method`）。読めなければ None。
 
     `remote` はリポジトリを読むリモート名（`--set remote=` で渡した値）。省けばこの作業場所のリモート名。
     `raise_passing` が真なら、打ち直せば通りうる GitHub の失敗（`GitHubError.passing`。上限・不達・5xx）は None にせず
@@ -556,7 +556,7 @@ def default_merge_method(repo: Path, base: str, remote: Optional[str] = None, *,
         return None
     except git.GitError:  # noqa: NDF401 外部コマンド: リモートを読めない
         return None
-    return github.pick_merge_method(None, allowed)
+    return github_merge.pick_merge_method(None, allowed)
 
 
 def _given_remote(out: Mapping[str, Value]) -> Optional[str]:

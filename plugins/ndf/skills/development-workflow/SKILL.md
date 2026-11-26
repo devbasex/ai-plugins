@@ -145,8 +145,8 @@ pace: fast
 | 完了判定 | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` | `quality-gates` |
 | Pull Request | `pr` | `pr` | `pr` | `pr` | `pr` |
 | 確定仕様化 | — | `plan-to-spec`（実行で決まった設定が以後の判断の前提になる場合） | — | `plan-to-spec` | `plan-to-spec`（確定版を残す場合） |
-| クリーンアップ | `merged` | `merged` | `merged` | `merged` | `merged` |
 | デプロイ | `release` | `release` | `release` | `release` | `release` |
+| クリーンアップ | `merged` | `merged` | `merged` | `merged` | `merged` |
 | 体裁レビュー | — | — | — | — | `layout-review` |
 | リリース後テスト | — | `release-verification`（実行した経路とは別の経路で確かめられる場合） | `release-verification` | `release-verification` | `release-verification`（提出の後に確かめる経路がある場合） |
 | 振り返り | — | `retrospective`（実行の手順そのものを変えた場合） | `retrospective` | `retrospective` | `retrospective` |
@@ -363,9 +363,10 @@ CI の結果の監視が読んだ結論と改修の回数は、プランの状�
 `release` の規則には、実装 Pull Request をマージする時点で読む `merged` と `pr` から辿れるようにしてある。
 
 **検証環境や開発版のチャネルへ入れるマージは取り消せるため、承認を求めない。**
-**Pull Request のマージ（実装・設計を問わない）がリリース承認ゲートに当たるのは、マージ先が自動反映の本番チャネルのときだけである。**
-自動反映の本番チャネルは、本番チャネルのうち、ブランチ戦略の設定の `release.deliveries` に `kind: auto` でそのブランチを
-`branch` に持つ行があるものである。マージで本番系への反映が自動で始まる。それ以外のマージ先へのマージは止めない。
+**Pull Request のマージ（実装・設計を問わない）は、本番へ届き得るときにリリース承認ゲートに当たる。** 本番へ届き得るのは次の 3 つの条件のいずれか一つに該当するときで、どれにも該当しなければ止めない。
+設定から本番チャネル（`branches.production`）を特定できない。本番チャネル宛てで本番に適用される自動反映の行（`release.deliveries` のうち `kind` が `manual` でなく、`channel` が `production`・省略・`null` の行）がある。
+本番チャネル宛てで `release.deliveries` が無いか配列でない。いずれか一つに該当し、現在の PR に有効な承認がない場合、Pull Request・ドキュメントレビュー・確定仕様化の工程はマージせずに先へ進む。
+デプロイの工程が承認を得てからマージする。単発のプラン（`fix`・`close`）は、同じ条件で承認待ちで止まる。
 判定の表・止める場所・承認の後の続け方は [references/production-merge.md](references/production-merge.md) にある。
 
 **マージからリリースまでの工程は、リリースの場合（CD の有無・レビュー必須の有無・迂回の設定）で 4 つに分かれる。**

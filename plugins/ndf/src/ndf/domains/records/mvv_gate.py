@@ -27,6 +27,7 @@ from ndf.adapters import llm, publish, run_log
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, Pull
 from ndf.contracts import internal, limits
+from ndf.core import approval_words, merge_approval, production_merge
 from ndf.domains.records import files, jsonfile, jsonl, mvv
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
@@ -440,7 +441,28 @@ def _judged(
         skip, why = False, [f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない", *why]
     if gate_name not in MVV_SKIP_GATES:
         skip, why = False, [*why, RELEASE_KEPT]
-    return j.posted_if_current(mm.gate_outcome(gate_name, verdict, skip, why, rec.holds, pull=(number, j.pull.head_sha)))
+    return j.posted_if_current(_bound(j, mm.gate_outcome(gate_name, verdict, skip, why, rec.holds, pull=(number, j.pull.head_sha))))
+
+
+def _bound(j: _Judging, outcome: dict[str, Any]) -> dict[str, Any]:
+    """承認ゲートを省く判定にだけ承認の対象 `target` を持たせる。マージ先の設定を読めなければ、判定を保ったまま省かない（#4409）。"""
+    if not outcome["skip"]:
+        return outcome
+    try:
+        return {**outcome, "target": _target(j.hub, j.pull)}
+    except (GitHubError, GitError) as exc:
+        why = [*outcome["why"], "マージ先の設定を読めない: " + j.text("base_unreadable", exc)]
+        return {**outcome, "skip": False, "why": why}
+
+
+def _target(hub: GitHub, pull: Pull) -> dict[str, Any]:
+    """判定した PR の承認の対象（出力 `mvv_gate.target`。承認ゲートを省くときだけ持つ）。マージ先の設定を読めなければ本番へ反映され得るとして扱う。
+
+    マージ先の設定の読み取り（GraphQL 1 回）は、承認ゲートを省く判定でだけ打つ（設計の費用表の増分に記録する）。"""
+    found = hub.branch_file(pull.base_ref, production_merge.PROJECT_FILE)
+    verdict = production_merge.judge_project_text(found.text, pull.base_ref, source_repo=found.repo, repo=hub.repo)
+    production = production_merge.reaches_production(verdict)
+    return {"repo": hub.repo, "pr": pull.number, "base": pull.base_ref, "head": pull.head_sha, "production": production}
 
 
 def post_note(hub: GitHub, number: int, text: str) -> publish.Published:
@@ -451,13 +473,24 @@ def post_note(hub: GitHub, number: int, text: str) -> publish.Published:
 def _recorded(hub: GitHub, number: int, outcome: dict[str, Any], where: Mapping[str, Any]) -> dict[str, Any]:
     """判定の結果（省く・省かないの両方）を PR へ載せ、人が後から確かめられるようにする。
 
+    承認ゲートを省くと決めたときだけ、判定の記録の本文の後ろに担い手 `mvv` のマージの承認の証跡の行を入れて 1 件で書く
+    （#4409 の決定 7。投稿は増えない）。レッドラインや省かない判定では証跡の行を入れない。
     書けなければ判定を保ったまま省かない側へ倒し、`noted` を偽にする（原因は `failure_text` の定型文と識別子だけ）。
     """
+    text = note(outcome["gate"], outcome["verdict"], outcome["why"], outcome["holds"], outcome.get("head"))
+    held = outcome.get("target")
+    if outcome["skip"] and isinstance(held, dict):
+        t = merge_approval.MergeTarget(held["repo"], held["pr"], held["base"], held["head"])
+        row = merge_approval.MergeRow(
+            approval_words.APPROVED, merge_approval.MVV_BY, t, bool(held["production"]), f"mvv:{outcome['gate']}:{t.head}"
+        )
+        text = f"{text}\n{merge_approval.render_merge_row(row)}"
     try:
-        made = post_note(hub, number, note(outcome["gate"], outcome["verdict"], outcome["why"], outcome["holds"], outcome.get("head")))
+        made = post_note(hub, number, text)
     except GitHubError as exc:
         why = [*outcome["why"], "判定の記録を PR に書けない: " + failure_text("note_unwritten", exc, where)]
-        return {**outcome, "skip": False, "why": why, "noted": False}
+        kept = {k: v for k, v in outcome.items() if k != "target"}
+        return {**kept, "skip": False, "why": why, "noted": False}
     return {**outcome, "noted": True, "note_url": made.url}
 
 

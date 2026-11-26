@@ -11,7 +11,7 @@ from sprint_fixture import with_worker as _with_worker
 
 from ndf.adapters import git
 from ndf.core import branch_strategy, route
-from ndf.progress import invoke, rebuild_values
+from ndf.progress import invoke, issue_values, rebuild_values
 
 PROJECT = {"branch_strategy": strategy_fixture.section("web-develop"), "ci": {"required_checks": ["test"]}}
 TRUNK = {**strategy_fixture.section("web-trunk"), "branches": {"production": "trunk", "base": "trunk"}}
@@ -153,7 +153,7 @@ def test_stage_without_branch_strategy_stops_with_the_setting_and_shape(tmp_path
     _with_worker(monkeypatch)
     repo = _sprint_repo(tmp_path)
     (repo / ".ndf" / "project.json").write_text('{"ci": {"required_checks": ["test"]}}', encoding="utf-8")
-    monkeypatch.setattr(invoke, "issue_text", lambda *a: pytest.fail("課題を読む前に止まる"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda *a: pytest.fail("課題を読む前に止まる"))
     got = invoke.invoke(_stage(name, repo), repo, tmp_path / "w", runner=lambda *a: pytest.fail("打たない"))
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
     row = next(i for i in got.report["items"] if i["key"] == "rebuild")
@@ -168,7 +168,7 @@ def test_design_plan_uses_one_base_and_one_remote(tmp_path, monkeypatch, remote:
     """
     _with_worker(monkeypatch)
     repo = _sprint_repo(tmp_path, {"ci": {"required_checks": ["test"]}})
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     reads = {"strategy": 0}
     held_of = branch_strategy.of_project
 

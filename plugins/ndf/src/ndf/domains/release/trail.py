@@ -33,6 +33,7 @@ from ndf.adapters.github import WRITE_PERMISSIONS, Authored, GitHub, GitHubError
 from ndf.adapters.publish import Publisher
 from ndf.contracts import facts
 from ndf.core.branch_strategy import Strategy
+from ndf.core.merge_approval import BY_LINE, USER_BY, TrailError
 from ndf.domains.release import approval_decide
 
 # 迂回の記録のマーカーと行の見出し（旧いプラグインと同じ文字列。作り直しは旧いプラグインを読み込まないため別に持つ）
@@ -43,18 +44,6 @@ HUMAN_SHA_LINE = "人がマージした HEAD:"
 
 ADMIN_SHA_LINE = "マージした HEAD:"
 ADMIN_TRAIL_LINE = "照らした承認の証跡:"
-# 証跡の担い手の行。迂回の前提に数えるのは利用者の証跡だけ（#3506 の I9）
-BY_LINE = "担い手:"
-
-
-class By(StrEnum):
-    """証跡の担い手（旧いプラグインの `approve --by` と同じ値）。"""
-
-    USER = "user"  # 利用者
-    MVV = "mvv"  # MVV 判定
-
-
-USER_BY, MVV_BY = By.USER.value, By.MVV.value
 
 
 class Writer(StrEnum):
@@ -66,7 +55,6 @@ class Writer(StrEnum):
 
 
 WRITER_ANSWER, WRITER_LAND, WRITER_GITHUB = Writer.ANSWER.value, Writer.LAND.value, Writer.GITHUB.value
-BY_CHOICES = tuple(b.value for b in By)
 _PROJECT_FILE = f"{identity.FIXED_WORDS['ndf_settings_dir']}/project.json"
 _SHA = re.compile(r"\b([0-9a-f]{40})\b")
 
@@ -75,10 +63,6 @@ APPROVAL_STATES = "approval-states"
 
 # レビューの判定を変える状態（COMMENTED は変えない。GitHub のレビューの判定と同じ）
 REVIEW_VERDICTS = frozenset({"APPROVED", "CHANGES_REQUESTED", "DISMISSED"})
-
-
-class TrailError(Exception):
-    """証跡を書けない・書いた回答が判定に届かない・HEAD が提示から動いた・書き手が回答の手順でない。"""
 
 
 def trail_writer(strategy: Strategy, merged_by_human: bool) -> str:

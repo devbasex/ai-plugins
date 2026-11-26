@@ -41,6 +41,7 @@
     {"level": "sprint", "kind": "manual_finished", "actors": ["conductor"], "scope": "row", "from": ["pending", "failed", "disabled"], "state": "finished"},
     {"level": "sprint", "kind": "scope_changed", "actors": ["conductor"], "scope": "table"},
     {"level": "sprint", "kind": "mode_raised", "actors": ["conductor"], "scope": "table"},
+    {"level": "sprint", "kind": "definition_migrated", "actors": ["workflow"], "scope": "table"},
     {"level": "sprint", "kind": "carried", "actors": ["conductor"], "scope": "row", "from": ["new"], "state": ["finished", "disabled"]},
     {"level": "sprint", "kind": "answered", "actors": ["organizer", "conductor"], "scope": "row", "from": ["running", "failed"]},
     {"level": "sprint", "kind": "cancelled", "actors": ["conductor"], "scope": "any", "from": ["pending", "running", "failed"], "state": "cancelled"},

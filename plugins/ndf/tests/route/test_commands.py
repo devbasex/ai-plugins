@@ -368,7 +368,15 @@ def _serve_pull(monkeypatch, head: str, body: str) -> list[dict]:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path == "/graphql":
-            aliases = re.findall(r"(a\d+): pullRequests", json.loads(request.content)["query"])
+            query = json.loads(request.content)["query"]
+            # マージ先（develop）の設定は本番チャネル（main）でないので、承認の証跡を求めない（#4409）
+            config = {"oid": "c1", "text": json.dumps({"branch_strategy": {"branches": {"base": "develop", "production": "main"}}})}
+            if "config: object" in query:
+                pr = {"baseRefName": "develop", "headRefOid": head}
+                return httpx.Response(200, json={"data": {"repository": {"nameWithOwner": _REPO, "pullRequest": pr, "config": config}}})
+            if "object(expression" in query:
+                return httpx.Response(200, json={"data": {"repository": {"nameWithOwner": _REPO, "object": config}}})
+            aliases = re.findall(r"(a\d+): pullRequests", query)
             return httpx.Response(200, json={"data": {"repository": {a: {"nodes": [node]} for a in aliases}}})
         if request.method == "PUT":
             sent.append(json.loads(request.content))
@@ -386,7 +394,7 @@ def _serve_pull(monkeypatch, head: str, body: str) -> list[dict]:
 
 def _merge_step(monkeypatch, tmp_path, body: str) -> tuple[int, list[dict], str]:
     """テンプレートの merge のステップの run を、feat/x の作業場所で打つ（GitHub は `_serve_pull` が回答する）。"""
-    step = step_of(plan_of("immediate_fix", branch="feat/x", merge_method="merge"), "merge")
+    step = step_of(plan_of("immediate_fix", branch="feat/x", merge_method="merge", production_gate="stop"), "merge")
     assert list(step.run[:3]) == ["ndf", "ci", "merge"]
     repo = repo_with_base(tmp_path, {"a.py": "a = 1\n"})
     git(repo, "remote", "add", "origin", f"https://github.com/{_REPO}.git")

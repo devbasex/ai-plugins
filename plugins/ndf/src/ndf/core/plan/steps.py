@@ -164,7 +164,30 @@ def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
         "prs": _prs(found),
         "outputs": outputs if isinstance(outputs, dict) and outputs else None,
         "gaps": gaps if found["status"] == STOPPED and isinstance(gaps, list) and gaps else None,
+        "presented_id": _presented_id(found),
+        "presentation_path": _presentation_path(found),
+        "production": _gate_reaches_production(found),
     }
+
+
+def _presented_id(found: dict[str, Any]) -> Optional[str]:
+    """承認待ちの結果の提示の識別子（`metrics.presented_id`。`ndf ci merge`・`ndf ci ask` が出す。#4409）。無ければ None。"""
+    metrics = found.get("metrics")
+    got = metrics.get("presented_id") if isinstance(metrics, dict) else None
+    return got if found["status"] == GATE and isinstance(got, str) and got else None
+
+
+def _presentation_path(found: dict[str, Any]) -> Optional[str]:
+    """承認待ちの結果の承認資料のパス（`presentation_path`）。無ければ None。"""
+    got = found.get("presentation_path")
+    return got if found["status"] == GATE and isinstance(got, str) and got else None
+
+
+def _gate_reaches_production(found: dict[str, Any]) -> Optional[bool]:
+    """承認待ちの結果の「この承認でマージが本番へ反映され得るか」（`metrics.production`）。無ければ None。"""
+    metrics = found.get("metrics")
+    got = metrics.get("production") if isinstance(metrics, dict) else None
+    return got if found["status"] == GATE and isinstance(got, bool) else None
 
 
 def _probe(ctx: StepContext, step: Step, timeout: float) -> Optional[dict[str, Any]]:

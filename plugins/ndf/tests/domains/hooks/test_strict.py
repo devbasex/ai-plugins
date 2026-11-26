@@ -12,6 +12,8 @@ from ndf.domains.hooks import boot, strict
 
 from ._hooks import AUTO, MANUAL, bash, call_entry, deny_reason, make_repo
 
+import scenes
+
 
 def _check(cwd, command):
     return strict.check(bash(cwd, command), str(cwd))
@@ -289,3 +291,109 @@ def test_gh_repo_in_the_hook_environment_is_the_initial_target(tmp_path, monkeyp
     got = deny_reason(call_entry("claude", "PreToolUse", bash(repo, "gh pr merge 1 --merge")))
     assert got is not None and "other/production" in got
     assert call_entry("claude", "PreToolUse", bash(repo, "unset GH_REPO; gh pr merge 1 --merge")) is None
+
+
+def _cd_key_missing_is_denied_like_an_unreadable_setting(tmp_path):
+    """#4409 の決定 2: `deliveries` も `cd` のキーも無い設定はスキーマに合わず、判定の部品が `unknown` を返して止める。"""
+    repo = make_repo(tmp_path / "r", deliveries=[])
+    decl = repo / ".ndf" / "project.json"
+    data = json.loads(decl.read_text(encoding="utf-8"))
+    del data["branch_strategy"]["release"]["deliveries"]
+    data["branch_strategy"]["release"].pop("cd", None)
+    decl.write_text(json.dumps(data), encoding="utf-8")
+    got = _check(repo, "gh pr merge 12 --merge")
+    assert got is not None and got.kind == "deny"
+
+
+def _hook_follows_the_shared_verdict(tmp_path, monkeypatch, value, denied):
+    """#4409 の決定 2: hook は判定の部品の値で決める。部品の戻り値を差し替えると hook の結果が変わる。"""
+    from ndf.core import production_merge
+
+    repo = make_repo(tmp_path / "r", deliveries=MANUAL)
+    monkeypatch.setattr(production_merge, "automatic_rows", lambda section: production_merge.Verdict(value))
+    got = _check(repo, "gh pr merge 12 --merge")
+    assert (got is not None and got.kind == "deny") is denied
+
+
+MARK = "<!-- ndf:merge-approval -->"
+
+
+def _comment_with_the_merge_approval_mark_is_denied(tmp_path, command):
+    """#4409 の決定 7: マージの承認の証跡のマーカーを含むコメントを、AI が Bash から書く操作を止める。"""
+    repo = make_repo(tmp_path / "r", deliveries=MANUAL)
+    got = _check(repo, command)
+    assert got is not None and got.kind == "deny" and "ndf:merge-approval" in got.reason
+
+
+def _comment_body_file_with_the_mark_is_denied(tmp_path, flag):
+    repo = make_repo(tmp_path / "r", deliveries=MANUAL)
+    (repo / "body.md").write_text(f"{MARK}\n回答: approved\n", encoding="utf-8")
+    verb = "api repos/o/r/issues/12/comments" if flag == "--input" else "pr comment 12"
+    got = _check(repo, f"gh {verb} {flag} body.md")
+    assert got is not None and got.kind == "deny"
+
+
+def _ordinary_comments_pass(tmp_path, command):
+    repo = make_repo(tmp_path / "r", deliveries=AUTO)
+    (repo / "plain.md").write_text("普通のコメント\n", encoding="utf-8")
+    assert _check(repo, command) is None
+    assert _check(repo, "gh pr comment 12 --body-file plain.md") is None
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        scenes.scene(_cd_key_missing_is_denied_like_an_unreadable_setting, id="cd_key_missing_is_denied_like_an_unreadable_setting"),
+        *[
+            scenes.scene(
+                _hook_follows_the_shared_verdict,
+                id=scenes.label("hook_follows_the_shared_verdict", i, v),
+                **dict(zip(("value", "denied"), v)),
+            )
+            for i, v in enumerate([("automatic", True), ("unknown", True), ("manual", False), ("unset", False)])
+        ],
+        *[
+            scenes.scene(
+                _comment_with_the_merge_approval_mark_is_denied,
+                id=f"comment_with_the_merge_approval_mark_is_denied-{label}",
+                command=v,
+            )
+            for label, v in zip(
+                ["pr-comment-body", "issue-comment-b", "api-body-field", "body-file-stdin", "after-cd"],
+                [
+                    f"gh pr comment 12 --body '{MARK}\n回答: approved'",
+                    f"gh issue comment 12 -b '{MARK}'",
+                    f"gh api repos/o/r/issues/12/comments -f body='{MARK}'",
+                    f"gh pr comment 12 --body-file - <<'X'\n{MARK}\nX",
+                    f'cd /tmp && gh pr comment 12 --body "{MARK}"',
+                ],
+                strict=True,
+            )
+        ],
+        *[
+            scenes.scene(
+                _comment_body_file_with_the_mark_is_denied,
+                id=scenes.label("comment_body_file_with_the_mark_is_denied", i, (v,)),
+                flag=v,
+            )
+            for i, v in enumerate(["--body-file", "-F", "--input"])
+        ],
+        *[
+            scenes.scene(_ordinary_comments_pass, id=f"ordinary_comments_pass-{label}", command=v)
+            for label, v in zip(
+                ["plain-body", "release-approval-mark", "body-file-stdin-without-mark", "missing-body-file", "echo-of-mark"],
+                [
+                    "gh pr comment 12 --body 'マージの前に見てください'",
+                    "gh pr comment 12 --body '<!-- ndf:release-approval -->'",
+                    "gh pr comment 12 --body-file -",
+                    "gh pr comment 12 --body-file missing.md",
+                    f"echo '{MARK}'",
+                ],
+                strict=True,
+            )
+        ],
+    ],
+)
+def test_production_merge_guard_scenes(request, scene, values):
+    """本番チャネルの判定と、マージの承認の証跡を手で書くコメントを止める場面（#4409）。"""
+    scenes.play(request, scene, values)
