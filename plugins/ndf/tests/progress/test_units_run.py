@@ -8,6 +8,7 @@ HEAD を書く。偽のマージは単位のブランチをリモートのスプ
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -374,6 +375,94 @@ def test_commits_that_cancel_out_before_a_squash_merge_are_still_found(world):
 
     assert got.status == "stopped" and "レビューを経たと確かめられない" in got.cause["detail"]
     assert _git(world.sprint, "rev-parse", "HEAD") == start and all(r.name != "pr" for r, _ in world.runs)
+
+
+def _three_commits_for_the_writer(world: World) -> None:
+    """単位「書き手」の `impl` に、変更のあるコミットを 2 つ足す（単位のコミットを 3 つにし、レビューした HEAD を書き直す）。"""
+    name = world.unit_names()["書き手"]
+    original = world.call_plan
+
+    def call_plan(run: StageRun, round_dir: Path) -> StageResult:
+        got = original(run, round_dir)
+        if run.name == "impl" and run.overrides["branch"] == name:
+            worktree = Path(run.inputs["worktree"])
+            for n in (1, 2):
+                (worktree / f"writer-{n}.txt").write_text(str(n), encoding="utf-8")
+                _git(worktree, "add", ".")
+                _git(worktree, "commit", "-q", "-m", f"書き手 {n}")
+            (round_dir / "reviewed-head").write_text(_git(worktree, "rev-parse", "HEAD") + "\n", encoding="utf-8")
+        return got
+
+    world.call_plan = call_plan
+
+
+def _merge_the_writer_by(world: World, land) -> None:
+    """単位「書き手」の `ndf ci merge` を、`land(作業場所)` がリモートへ送ったコミットのマージに替える。"""
+    names = world.unit_names()
+    original = world.command
+
+    def command(argv, cwd, env):
+        words = argv[argv.index("ci") :] if "ci" in argv and "worktree" not in argv else []
+        if words[:2] != ["ci", "merge"] or _flags(words)["--branch"] != names["書き手"]:
+            return original(argv, cwd, env)
+        landed = land(cwd)
+        number = int(_flags(words)["--pr"])
+        world.merged[names["書き手"]] = github_pulls.MergedPull(number, landed)
+        out = result.result("ci", result.OK, "マージした", items=[{"kind": "pr", "number": number, "merge_sha": landed}])
+        return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
+
+    world.command = command
+
+
+def test_a_squash_after_a_change_and_its_revert_is_not_taken_for_a_rebase_of_the_same_number_of_commits(world):
+    # 単位のコミットが 3 つで、単位外の変更とその打ち消しの後に squash されると、区間は 3 コミットの直線でツリーも合う。変更で見つける
+    _three_commits_for_the_writer(world)
+
+    def squash_after_a_revert(cwd: Path) -> str:
+        other = world.tmp / "other"
+        subprocess.run(["git", "clone", "-q", "-b", BRANCH, str(world.remote), str(other)], check=True)
+        for key, value in (("user.name", "t"), ("user.email", "t@example.com")):
+            _git(other, "config", key, value)
+        (other / "outside.txt").write_text("単位の外", encoding="utf-8")
+        _git(other, "add", ".")
+        _git(other, "commit", "-q", "-m", "単位の外の変更")
+        _git(other, "revert", "--no-edit", "HEAD")
+        _git(other, "push", "-q", "origin", "HEAD")
+        _git(cwd, "fetch", "-q", "origin")
+        squashed = _git(cwd, "commit-tree", "HEAD^{tree}", "-p", f"origin/{BRANCH}", "-m", "squash")
+        _git(cwd, "push", "-q", "origin", f"{squashed}:refs/heads/{BRANCH}")
+        return squashed
+
+    _merge_the_writer_by(world, squash_after_a_revert)
+    start = _git(world.sprint, "rev-parse", "HEAD")
+
+    got = world.run()
+
+    assert got.status == "stopped" and "レビューを経たと確かめられない" in got.cause["detail"]
+    assert _git(world.sprint, "rev-parse", "HEAD") == start and all(r.name != "pr" for r, _ in world.runs)
+
+
+def test_a_rebase_merge_that_recreates_the_reviewed_commits_opens_the_sprint_pr(world):
+    _three_commits_for_the_writer(world)
+
+    def rebase(cwd: Path) -> str:
+        reviewed = _git(cwd, "rev-parse", "HEAD")
+        base = _git(cwd, "rev-parse", f"origin/{BRANCH}")
+        _git(cwd, "checkout", "-q", "--detach", base)
+        commits = _git(cwd, "rev-list", "--reverse", f"{base}..{reviewed}").split()
+        env = {**os.environ, "GIT_COMMITTER_DATE": "2001-01-01T00:00:00+0000"}
+        subprocess.run(["git", "-C", str(cwd), "cherry-pick", *commits], check=True, capture_output=True, env=env)
+        landed = _git(cwd, "rev-parse", "HEAD")
+        _git(cwd, "push", "-q", "origin", f"{landed}:refs/heads/{BRANCH}")
+        _git(cwd, "checkout", "-q", "-")
+        return landed
+
+    _merge_the_writer_by(world, rebase)
+
+    got = world.run()
+
+    assert got.status == "ok", got.report
+    assert world.runs[-1][0].name == "pr"
 
 
 def test_a_commit_after_the_last_unit_stops_without_moving_the_sprint_worktree(world, monkeypatch):

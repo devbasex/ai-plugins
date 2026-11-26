@@ -828,8 +828,10 @@ def _reviewed_merge(
 
     ツリーはオブジェクト ID で比べる（`git diff` と違い、サブモジュールを無視する設定に左右されない）。マージの方式ごとに、GitHub が
     マージした時点の親を照らす。squash は親が `point` だけ、merge commit は親が `point` とレビューした HEAD である。どちらでもなければ
-    rebase とみなし、`point` から `sha` までのコミットが親 1 つの直線で、数が単位のコミット（`base..reviewed` のマージでないもの）と
-    同じことを確かめる。レビューの後に入ったコミットは、変更を打ち消してツリーが戻っても、親か数が合わずに見つかる。
+    rebase とみなし、`point` から `sha` までのコミットが親 1 つの直線で、各コミットの変更が単位のコミット（`base..reviewed` の
+    マージでないもの）の変更と順に同じことを確かめる（`_same_changes`）。レビューの後に入ったコミットは、変更を打ち消してツリーが
+    戻っても、squash なら親が、rebase なら変更が合わずに見つかる（数とツリーだけでは、単位外の変更と打ち消しの後の squash を
+    単位の 3 コミットの rebase と取り違える）。
     """
     node = chain[sha]
     if node.tree != tree:
@@ -840,8 +842,42 @@ def _reviewed_merge(
     segment = order[start : order.index(sha) + 1]
     if not segment or chain[segment[0]].parents != (point,) or any(len(chain[c].parents) != 1 for c in segment):
         return False
-    counted = g.attempt("rev-list", "--count", "--no-merges", END_OF_OPTIONS, f"{base}..{reviewed}")
-    return counted.returncode == 0 and counted.stdout.strip() == str(len(segment))
+    return _same_changes(g, segment, base, reviewed)
+
+
+# 変更を比べる `git log -p` の設定。利用者の設定（差分の外部ツール・テキスト変換・名前の変更の検出・サブモジュールを
+# 無視する設定・署名の表示）に左右されず、バイナリの変更も中身で比べる
+_PATCH_OPTIONS = (
+    "-p",
+    "--binary",
+    "--no-renames",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--ignore-submodules=none",
+    "--no-show-signature",
+    "--format=commit %H",
+)
+
+
+def _same_changes(g: Git, segment: Sequence[str], base: str, reviewed: str) -> bool:
+    """rebase の区間 `segment`（古い順）の各コミットの変更が、単位のコミット（`base..reviewed` のマージでないもの）の変更と順に同じか。
+
+    変更は `git patch-id --stable` の ID で比べる（rebase で変わる親と行番号に左右されない）。変更の無いコミットには ID が出ないので、
+    どちらかのコミットに ID が無ければ確かめられないとする。git は `git log` 2 回と `git patch-id` 1 回を起動する。
+    """
+    unit = g.run_bytes("log", "--no-merges", "--topo-order", "--reverse", *_PATCH_OPTIONS, END_OF_OPTIONS, f"{base}..{reviewed}")
+    landed = g.run_bytes("log", "--no-walk=unsorted", *_PATCH_OPTIONS, END_OF_OPTIONS, *segment)
+    commits = [line[len(b"commit ") :].decode("ascii") for line in unit.splitlines() if line.startswith(b"commit ")]
+    if len(commits) != len(segment):
+        return False
+    ids = {}
+    for line in g.run_bytes("patch-id", "--stable", stdin=unit + landed).decode("ascii").splitlines():
+        patch, _, commit = line.partition(" ")
+        ids[commit] = patch
+    if any(c not in ids for c in (*commits, *segment)):
+        return False
+    return [ids[c] for c in commits] == [ids[c] for c in segment]
 
 
 def _unreviewed(ctx: Context, point: str, tip: str) -> UnitsStopped:
