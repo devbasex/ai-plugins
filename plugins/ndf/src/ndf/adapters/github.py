@@ -249,22 +249,38 @@ class Pull(NamedTuple):
     def from_rest(cls, raw: dict) -> Pull:
         head, base = raw["head"], raw["base"]
         return cls(
-            int(raw["number"]), text_of(raw["state"]).lower(), bool(raw["merged"]), text_of(head["sha"]),
-            text_of(head["ref"]), text_of(base["ref"]), text_of(raw["body"]), text_of(raw["mergeable_state"]).lower(),
-            _login(raw["user"]), text_of(raw["author_association"]).upper(),
-            text_of(raw.get("merge_commit_sha")) if raw["merged"] else "", text_of(raw.get("title")),
-        )  # fmt: skip
+            number=int(raw["number"]),
+            state=text_of(raw["state"]).lower(),
+            merged=bool(raw["merged"]),
+            head_sha=text_of(head["sha"]),
+            head_ref=text_of(head["ref"]),
+            base_ref=text_of(base["ref"]),
+            body=text_of(raw["body"]),
+            merge_state=text_of(raw["mergeable_state"]).lower(),
+            author=_login(raw["user"]),
+            association=text_of(raw["author_association"]).upper(),
+            merge_sha=text_of(raw.get("merge_commit_sha")) if raw["merged"] else "",
+            title=text_of(raw.get("title")),
+        )
 
     @classmethod
     def from_graphql(cls, raw: dict) -> Pull:
         state = text_of(raw["state"]).lower()
         return cls(
-            int(raw["number"]), "open" if state == "open" else "closed", bool(raw["merged"]), text_of(raw["headRefOid"]),
-            text_of(raw["headRefName"]), text_of(raw["baseRefName"]), text_of(raw["body"]), text_of(raw["mergeStateStatus"]).lower(),
-            _login(raw["author"]), text_of(raw["authorAssociation"]).upper(),
-            text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "", text_of(raw.get("title")),
-            bool(raw.get("isCrossRepository")),
-        )  # fmt: skip
+            number=int(raw["number"]),
+            state="open" if state == "open" else "closed",
+            merged=bool(raw["merged"]),
+            head_sha=text_of(raw["headRefOid"]),
+            head_ref=text_of(raw["headRefName"]),
+            base_ref=text_of(raw["baseRefName"]),
+            body=text_of(raw["body"]),
+            merge_state=text_of(raw["mergeStateStatus"]).lower(),
+            author=_login(raw["author"]),
+            association=text_of(raw["authorAssociation"]).upper(),
+            merge_sha=text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
+            title=text_of(raw.get("title")),
+            cross_repository=bool(raw.get("isCrossRepository")),
+        )
 
 
 class MergeOutcome(NamedTuple):
