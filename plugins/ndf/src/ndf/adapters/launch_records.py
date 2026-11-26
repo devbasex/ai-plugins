@@ -76,25 +76,36 @@ def file_lock(path: Path, timeout: float) -> Any:
     return FileLock(str(path) + ".lock", timeout=timeout)
 
 
-def write_row(path: Path, row: Mapping[str, Any]) -> None:
-    """1 行を、1 回の `write` で追記する。ファイルは所有者だけが読める（0600）。
+# 1 行を書ききれなかったときに、同じ行を書き直す回数の上限（書き直しも 1 回の write で行う）
+WRITE_ATTEMPTS = 3
 
-    `O_APPEND` の 1 回の `write` はほかの追記と混ざらないので、読んでから書く判断を伴わない追記（hook の回答の記録）は錠を取らずに
-    呼べる。錠の待ちで回答を捨てないためである。読んでから書く呼び手（承認の行）は錠を持って呼ぶ。
+
+def write_row(path: Path, row: Mapping[str, Any], locked: bool = True) -> None:
+    """1 行を追記する。ファイルは所有者だけが読める（0600）。どの書き込みも、1 行分を 1 回の `write` で書く。
+
     既存のファイルが所有者だけの形でなければ書かずに `PermissionError` を投げる（承認者名とリポジトリのパスをほかのユーザーへ見せない）。
-    末尾が改行で終わらない書きかけ（中断した追記）が残っていれば、先に `TORN_END` で閉じて次の行と分ける。つなげると読み手が両方を捨て、
-    打ち直した操作が反映されない。改行だけで閉じると、JSON を書き終えたところで中断した行が、次の無関係な追記で有効になる。
-    錠の無い 2 つの追記が同じ書きかけを見て両方が閉じても、増えるのは読まれない `TORN_END` の行だけである。
+    書きかけの行（中断か書ききれなかった追記）は、次の追記が先頭に付ける `TORN_END` で閉じる。つなげると読み手が両方を捨て、打ち直した
+    操作が反映されない。改行だけで閉じると、JSON を書き終えたところで中断した行が、次の無関係な追記で有効になる。
+
+    - `locked` が真（呼び手が錠を持つ。承認の行とリクエスト）: 末尾が改行で終わらないときだけ `TORN_END` を付ける
+    - `locked` が偽（錠を取らない hook の回答）: 末尾を見ずに毎回 `TORN_END` を付ける。末尾を見てから書くまでの間に別の hook の
+      書きかけが入っても、その行と自分の行がつながらない。増えるのは読まれない `TORN_END` の行だけである
+
+    `O_APPEND` が追記を分ける単位は 1 回の `write` なので、書ききれなかった残りを続けて書かない（間に別の追記が入りうる）。
+    書きかけを残したまま、同じ行を先頭から新しい 1 回の `write` で書き直す。`WRITE_ATTEMPTS` 回で書ききれなければ `OSError`。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    line = (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
     fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o600)
     try:
         if not private_to_me(fd):
             raise PermissionError(f"{path} が所有者だけの読み書きでない。所有者を自分にし、`chmod 600` にしてから打ち直す")
-        size = os.fstat(fd).st_size
-        torn = size > 0 and os.pread(fd, 1, size - 1) != b"\n"
-        data = (TORN_END if torn else b"") + (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
-        while data:
-            data = data[os.write(fd, data) :]
+        for _ in range(WRITE_ATTEMPTS):
+            size = os.fstat(fd).st_size
+            torn = not locked or (size > 0 and os.pread(fd, 1, size - 1) != b"\n")
+            data = (TORN_END if torn else b"") + line
+            if os.write(fd, data) == len(data):
+                return
+        raise OSError(f"{path} へ 1 行を書ききれない（{WRITE_ATTEMPTS} 回）。空きを確かめてから打ち直す")
     finally:
         os.close(fd)

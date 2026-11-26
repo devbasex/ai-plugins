@@ -29,6 +29,8 @@ REFLECTED = "launch-reflected"
 # 候補のディレクトリの中身: 候補（反映先の写し）と、反映先・反映元のバージョン・作った時の候補のバージョンの記録
 CANDIDATE_NAME = "candidate.json"
 SOURCE_NAME = "source.json"
+# 退避した候補の中の、消してよいバージョン（「承認しない」と回答したリクエストの候補のバージョン）の記録
+DISCARD_NAME = "discard.json"
 # 候補のディレクトリの作業中の名前の頭。作成途中（DRAFTING）と、消す前に照らし直している途中（REMOVING）。
 # 作成と掃除は候補の錠の中だけで行うので、錠の中で見つかる作業中のディレクトリは中断の残りである
 DRAFTING = ".draft-"
@@ -171,8 +173,19 @@ def put_question(request: Mapping[str, Any], question: Mapping[str, Any], candid
     """承認のリクエスト（`request_id`・`repo`・`sha256`・反映先 `target`・会話の id `session`）と、質問の中身（`questions`）のハッシュを残す。
 
     反映元のバージョンは候補の記録か、今の反映先のバージョン。質問が示した選択肢のラベル（`options`）と、その時点の承認の記録の行数
-    （`approvals_seen`。これより後ろの取り消しだけが、このリクエストの後の取り消し）も残す。
+    （`approvals_seen`。これより後ろの取り消しだけが、このリクエストの後の取り消し）も残す。候補があれば、候補の錠の中で作る。
+    掃除（`_sweep`）がリクエストの一覧を読んでから退避を決めるまでの間に、同じ候補のリクエストが増えないためである。
+    掃除が退避していた候補は元の名前へ戻す。
     """
+    if candidate is None:
+        _put_request(request, question, None)
+        return
+    with records_lock(candidate.parents[1]):
+        _restore(candidate)
+        _put_request(request, question, candidate)
+
+
+def _put_request(request: Mapping[str, Any], question: Mapping[str, Any], candidate: Optional[Path]) -> None:
     target = Path(request["target"])
     row = {
         **request, "at": _at_now(), "action": str(Action.APPROVE), "target": str(target),
@@ -275,29 +288,37 @@ def _untouched(made: Path, kept: Optional[str] = None) -> bool:
 
 
 def _discard(made: Path, kept: Optional[str] = None) -> None:
-    """候補の錠の中で、直していない候補を消す。
+    """候補の錠の中で、直していない候補を、消す前の退避（`REMOVING` の名前）へ移す。中身はその場では消さない。
 
-    先に作業中の名前（`REMOVING`）へ変えてから照らし直す。名前を変えた後は、元のパスへの保存はディレクトリが無いので失敗し、
-    エディタの中の設定案は残る。変える前に保存されていれば、照らし直しで見つけて元の名前へ戻す。
+    名前を変えた後は、元のパスへの保存はディレクトリが無いので失敗し、エディタの中の設定案は残る。名前を変える前に保存された
+    中身と、変えた後も開いたままのファイルへ書かれた中身は退避の中に残り、次の掃除（`_settle`）が比べて元の名前へ戻す。
     """
+    if not _untouched(made, kept):
+        return
     aside = made.with_name(REMOVING + made.name)
     try:
         os.rename(made, aside)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 消す前に無くなった候補は、消すものが無い
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 退避の前に無くなった候補は、退避するものが無い
         return
-    _settle(aside, kept)
+    if kept is not None:
+        write_launch_record(aside / DISCARD_NAME, {"kept": kept})
 
 
-def _settle(aside: Path, kept: Optional[str] = None) -> None:
-    """消す途中の候補を、直していなければ消し、直していれば元の名前へ戻す。"""
-    if _untouched(aside, kept):
+def _settle(aside: Path) -> None:
+    """候補の錠の中で、前の掃除が退避した候補を、直されていなければ消し、直されていれば元の名前へ戻す。"""
+    if _untouched(aside, read_launch_record(aside / DISCARD_NAME).get("kept")):
         shutil.rmtree(aside, ignore_errors=True)
     else:
-        os.rename(aside, aside.with_name(aside.name[len(REMOVING) :]))
+        _put_back(aside)
+
+
+def _put_back(aside: Path) -> None:
+    (aside / DISCARD_NAME).unlink(missing_ok=True)
+    os.rename(aside, aside.with_name(aside.name[len(REMOVING) :]))
 
 
 def _reclaim(home: Path) -> None:
-    """候補の錠の中で、中断で残った作業中のディレクトリを片付ける。作成途中は消し、消す途中は `_settle` と同じに扱う。"""
+    """候補の錠の中で、作業中のディレクトリを片付ける。作成途中は中断の残りなので消し、退避した候補は `_settle` で扱う。"""
     for left in home.glob(".*"):
         if left.name.startswith(REMOVING):
             _settle(left)
@@ -305,11 +326,19 @@ def _reclaim(home: Path) -> None:
             shutil.rmtree(left, ignore_errors=True)
 
 
+def _restore(candidate: Path) -> None:
+    """候補の錠の中で、退避した候補を元の名前へ戻す（同じ候補でリクエストを作り直したとき）。"""
+    aside = candidate.parents[1] / f"{REMOVING}{candidate.parent.name}"
+    if not candidate.parent.exists() and aside.exists():
+        _put_back(aside)
+
+
 def _sweep(home: Path) -> None:
-    """候補の錠の中で、反映先の worktree が無い候補と、最新のリクエストに「承認しない」と回答した候補を消す（直したものは残す）。
+    """候補の錠の中で、反映先の worktree が無い候補と、最新のリクエストに「承認しない」と回答した候補を退避する（直したものは残す）。
 
     「承認しない」の判定は、候補ごとの最新のリクエストで行う。否認の後に同じ候補で作り直したリクエストが回答待ちか承認済みなら、
     その候補は消さない。比べるバージョンは、そのリクエストを作った時に記録した候補のバージョン（`candidate_version`）である。
+    リクエストは同じ錠の中で作るので（`put_question`）、ここで読んだリクエストの一覧は退避を決めるまで変わらない。
     """
     latest: dict[Any, dict[str, Any]] = {}
     for row in records.whole_rows(state_file(QUESTIONS)):
@@ -446,16 +475,18 @@ def _write_done(target: Path, rec: Mapping[str, Any]) -> None:
 
 
 def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> None:
-    """完了の記録を書いてから、候補と、反映元のバージョンが合わなくなった同じ反映先の候補を消す。
+    """完了の記録を書いてから、候補の錠の中で、反映した候補と、反映元のバージョンが合わなくなった同じ反映先の候補を退避する。
 
-    ほかの候補は、候補の錠の中で `_discard` を通し、作った時の中身のままのものだけを消す。作った後に直した候補は、反映元が
-    変わっても残す（書いた設定案を失わないため）。
+    先に前の掃除が退避した候補を片付ける（`_reclaim`）。反映した候補は、反映した中身か作った時の中身のままなら退避する。
+    ほかの候補は、作った時の中身のままのものだけを退避する。作った後に直した候補は、反映元が変わっても残す（書いた設定案を
+    失わないため）。退避した候補は次の掃除が比べ直してから消す。
     """
     _write_done(target, rec)
     now = content_version(target)
     home = candidate.parent.parent
     with records_lock(home):
-        shutil.rmtree(candidate.parent, ignore_errors=True)
+        _reclaim(home)
+        _discard(candidate.parent, rec.get("content"))
         for made in _candidates(home):
             source = read_launch_record(made / SOURCE_NAME)
             if source.get("target") == str(target) and source.get("base") != now:

@@ -159,6 +159,35 @@ def test_draft_keeps_a_denied_candidate_that_was_asked_again(tmp_path):
     assert candidate.exists()
 
 
+def _aside(candidate: Path) -> Path:
+    return candidate.parents[1] / f"{la.REMOVING}{candidate.parent.name}" / la.CANDIDATE_NAME
+
+
+def test_a_swept_candidate_is_set_aside_and_deleted_by_the_next_sweep_only_if_still_untouched(tmp_path):
+    """掃除は候補をその場で消さずに退避する。次の掃除で、直されていなければ消し、直されていれば元へ戻す。"""
+    target = _worktree(tmp_path)
+    kept, gone = la.new_candidate("/r", target), la.new_candidate("/r", target)
+    _asked(target, candidate=kept, label=la.DENY_LABEL)
+    _asked(target, "q2", candidate=gone, label=la.DENY_LABEL)
+    la.new_candidate("/r", target)
+    assert _aside(kept).exists() and _aside(gone).exists()
+    _aside(kept).write_bytes(NEW)  # 退避の後も開いていたファイルへの保存
+    la.new_candidate("/r", target)
+    assert kept.read_bytes() == NEW and not _aside(gone).parent.exists() and not gone.exists()
+
+
+def test_asking_again_with_a_set_aside_candidate_puts_it_back(tmp_path):
+    target = _worktree(tmp_path)
+    candidate = la.new_candidate("/r", target)
+    _asked(target, candidate=candidate, label=la.DENY_LABEL)
+    la.new_candidate("/r", target)
+    assert not candidate.exists()
+    _asked(target, "q2", candidate=candidate, label=None)
+    assert candidate.exists() and not (candidate.parent / la.DISCARD_NAME).exists()
+    la.new_candidate("/r", target)
+    assert candidate.exists()
+
+
 def test_draft_reclaims_what_an_interrupted_draft_or_sweep_left(tmp_path):
     """候補の錠の中で見つかる作業中のディレクトリは中断の残り。作成途中は消し、消す途中で直されていた候補は元へ戻す。"""
     target = _worktree(tmp_path)
@@ -291,3 +320,22 @@ def test_reflect_tells_where_the_users_save_in_the_aside_was_kept(tmp_path):
     aside.write_bytes(b'{"version": 1, "b": 1}\n')
     result = la.reflect(candidate, lambda: pytest.fail("記録しない"), SHA)
     assert not result and result.saved.read_bytes() == b'{"version": 1, "b": 1}\n'
+
+
+@pytest.mark.parametrize("locked", [True, False])
+def test_a_short_write_is_retried_as_a_whole_line_without_breaking_other_rows(tmp_path, monkeypatch, locked):
+    """書ききれなかった行は続きを足さず、同じ行を 1 回の write で書き直す。間に入った別の行も読める。"""
+    path = la.state_file(la.ANSWERS)
+    write, calls = os.write, []
+
+    def short_then_other(fd, data):
+        calls.append(data)
+        if len(calls) == 1:
+            written = write(fd, data[: len(data) // 2])
+            la.write_row(path, {"request_id": "other"}, locked=False)  # 書きかけの後に入った別の hook の追記
+            return written
+        return write(fd, data)
+
+    monkeypatch.setattr(os, "write", short_then_other)
+    la.write_row(path, {"request_id": "mine"}, locked=locked)
+    assert [row["request_id"] for row in la.records.whole_rows(path)] == ["other", "mine"]

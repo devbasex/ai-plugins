@@ -45,8 +45,8 @@ def check(ctx, svc) -> Verdict:
         "question_id": ctx.payload.get("tool_use_id"),
     }
     try:
-        # 錠を取らない（1 回の write の追記は混ざらない）。錠の待ちの上限で、利用者の選んだ回答を捨てないためである
-        records.write_row(svc.state_dir / _state_path("launch-answers"), row)
+        # 錠を取らない（錠の待ちの上限で、利用者の選んだ回答を捨てないため）。同時に動く hook の行と混ざらない書き方は write_row が持つ
+        records.write_row(svc.state_dir / _state_path("launch-answers"), row, locked=False)
     except OSError:  # ほかのユーザーが読める記録・書けない記録には書かずに通す（hook は止めない）
         return passing()
     return passing(launch_answer="recorded")
