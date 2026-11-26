@@ -24,7 +24,7 @@ from ndf.contracts import result
 from ndf.core import issue_docs
 from ndf.domains.docrebuild import gate_decide
 from ndf.domains.docrebuild import select_decide as sd
-from ndf.domains.records import reading
+from ndf.domains.records import mvv, reading
 from ndf.domains.docrebuild.select_decide import Inspection, Target
 
 log = logging.getLogger(__name__)
@@ -254,8 +254,8 @@ def run_worker_at(state_dir: Path, cwd: Path, kind: str, prompt: str, runner: Ru
     prompt_file = state_dir / f"{kind}.prompt.md"
     result_file = state_dir / f"{kind}.result.json"
     try:
-        state_dir.mkdir(parents=True, exist_ok=True)
-        prompt_file.write_text(prompt, encoding="utf-8")
+        state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        mvv.write_private(prompt_file, prompt)
     except OSError as exc:
         raise Precondition(f"起動指示を保存先 {prompt_file} へ書けない: {exc.strerror or exc}") from None
     argv = [

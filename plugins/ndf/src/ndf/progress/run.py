@@ -755,7 +755,21 @@ def reading_args(v: View, s: stages.StageDef, gate: Optional[str]) -> list[str]:
 def _reading_run(v: View, s: stages.StageDef, step: stages.StepDef, run: invoke.StageRun, work_dir: Path) -> invoke.StageRun:
     """読み手役のステップの argv に、保存先・結果ファイルと工程の記録から作る引数（`reading_args`）を足す。"""
     out = ["--state-dir", str(work_dir), "--out", str(work_dir / stages.READING_OUT)]
-    return replace(run, args={**run.args, "argv": [*run.args["argv"], *out, *reading_args(v, s, step.gate)]})
+    args = {**run.args, "argv": [*run.args["argv"], *out, *reading_args(v, s, step.gate)]}
+    return replace(run, inputs=_reading_inputs(v, s, step.gate, run.inputs), args=args)
+
+
+def _reading_inputs(v: View, s: stages.StageDef, gate: Optional[str], inputs: Mapping[str, Any]) -> dict[str, Any]:
+    """読み手役のステップの入力の MVV 判定を、同じ工程の判定のステップの記録に差し替える。文脈は工程が終わるまで
+    書かれず、前の工程の判定が残るためである。判定が無ければ渡さない。"""
+    got = {k: value for k, value in inputs.items() if k != model.MVV_KEY}
+    step = model.MVV_GATE_STEPS.get(gate) if gate else None
+    done = step_progress(v, s.name).done
+    outputs = done[step].get("outputs") if step in done else None
+    held = outputs.get(model.MVV_KEY) if isinstance(outputs, dict) else None
+    if isinstance(held, dict) and model.MVV_KEY in (*s.inputs, *s.optional_inputs):
+        got[model.MVV_KEY] = held
+    return got
 
 
 def _reading_skipped(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef, prog: StepProgress) -> Optional[list[model.EventDraft]]:

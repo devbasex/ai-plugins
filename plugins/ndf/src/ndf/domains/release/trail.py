@@ -154,7 +154,14 @@ def present(hub: GitHub, number: int, material: str) -> Presented:
     if shown != pull.head_sha:
         target = shown[:12] if shown else "（資料に無い）"
         raise TrailError(f"#{number} の承認資料が対象にしたコミット {target} が今の HEAD {pull.head_sha[:12]} でない（資料を組み直す）")
-    Publisher(hub).comment(number, approval_decide.render_request(material, pull.head_sha, sha))
+    publisher = Publisher(hub)
+    (safe,), _ = publisher.guarded(material)
+    if safe != material:
+        raise TrailError(
+            f"#{number} の承認資料に、PR へ書く前に伏せる値（秘密など）がある。示す本文と回答の資料が違わないように、"
+            "ndf document-rebuild gate が返した資料で提示し直す"
+        )
+    publisher.comment(number, approval_decide.render_request(material, pull.head_sha, sha))
     return Presented(pull.head_sha, True, got.judgment)
 
 

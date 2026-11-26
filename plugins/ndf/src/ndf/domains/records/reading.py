@@ -90,14 +90,21 @@ def materials_path(repo: str, gate: str, number: int) -> Path:
 
 
 def append_doc(row: Mapping[str, Any]) -> dict[str, Any]:
-    """読ませたものの記録へ 1 行足し、書いた行を返す。形が違えば書かずに `ReadingInvalid`。"""
-    return _append_checked(docs_path, row, kind="reading-docs")
+    """読ませたものの記録へ 1 行足し、書いた行を返す。形が違えば書かずに `ReadingInvalid`。
+    残った文の引用を持つので、所有者だけが読めるファイルにする。"""
+    return _append_checked(docs_path, row, kind="reading-docs", append=lambda p, r: mvv.append_private(p, r, "reading-docs"))
 
 
-def _append_checked(path: Callable[[], Path], row: Mapping[str, Any], *, kind: str) -> dict[str, Any]:
+def _append_checked(
+    path: Callable[[], Path],
+    row: Mapping[str, Any],
+    *,
+    kind: str,
+    append: Optional[Callable[[Path, Mapping[str, Any]], dict[str, Any]]] = None,
+) -> dict[str, Any]:
     """記録へ 1 行足し、書いた行を返す。形が違えば書かずに `ReadingInvalid`。"""
     try:
-        return jsonl.append_locked(path(), row, kind=kind)
+        return append(path(), row) if append is not None else jsonl.append_locked(path(), row, kind=kind)
     except internal.InternalError as exc:
         if exc.kind != "invalid":
             raise

@@ -143,6 +143,9 @@ class FakeHub:
         }  # fmt: skip
         return {"found": {"nodes": [node]} if "pullRequests(" in query else node}
 
+    def visibilities(self, repos: Any) -> dict[str, str]:
+        return {r: "PRIVATE" for r in repos}
+
     def rest(self, method: str, path: str, payload: Any = None) -> None:
         assert (method, path) == ("POST", "/repos/o/r/issues/7/comments")
         self.posted.append(payload["body"])
@@ -285,7 +288,7 @@ def test_design_gate_reads_records_and_comments_once(tmp_path: Path) -> None:
     facts = json.loads((tmp_path / "state" / gate.FACTS_FILE).read_text(encoding="utf-8"))
     assert facts["head"] == H1 and facts["mvv_gate"] == "MVV なし"
     again = w.run(worker)
-    assert again["status"] == "ok" and worker.calls == 1 and len(w.hub.posted) == 1 and w.hub.fetches == 4
+    assert again["status"] == "ok" and worker.calls == 1 and len(w.hub.posted) == 1 and w.hub.fetches == 3
     assert len(checks_rows()) == 2 and checks_rows()[-1]["reads"] == row["reads"]
 
 

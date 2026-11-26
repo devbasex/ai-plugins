@@ -94,7 +94,7 @@ NDF は、AI が書いた文書（要求仕様書・設計書など）と質問�
 | --- | --- | --- | --- |
 | `prompt` | `files`・`reader`・`questions_kind` | 読み手役への指示を作る。文書は加工しない | `ok`。指示は結果の `metrics.prompt` |
 | `add` | `questions`・`prs`・`reads` | 記録を 1 行追記する。GitHub は読まない | `ok`。形が違えば `stopped`（`invalid`）で、追記しない |
-| `check` | `--gate`・`--pr`・`--material`（省ける）・`--questions-out` | 承認の質問の前に、PR から質問を作り直して書き出し、記録と今の PR・承認資料を比べる | `ok`。質問を出せない理由があれば `stopped`（`precondition`）で、`items` に下の表のコードを返す。PR を GitHub から読めなければ `stopped`（`unknown`）。`unknown` のときは、調べられなかったことを承認資料に書いて、質問を出してよい |
+| `check` | `--gate`・`--pr`・`--material`（省ける）・`--questions-out` | 承認の質問の前に、PR から質問を作り直して書き出し、記録と今の PR・承認資料を比べる | `ok`。質問を出せない理由があれば `stopped`（`precondition`）で、`items` に下の表のコードを返す。PR を GitHub から読めなければ `stopped`（`unknown`）。`unknown` のときは質問を出さずに理由を報告し、PR を読めるようになってから `check` を打ち直す |
 
 hook と `check` は、同じリポジトリ・同じ質問の記録のうち、最後の行を使う（以下「使う記録」）。`check` は PR を 1 回読んだ後、使う記録に書かれた PR のブランチを `git fetch` で取り込む。後で動く hook が、手元のリモート追跡ブランチ（`refs/remotes/`）を読むためである。使う記録が無ければ fetch しない。
 

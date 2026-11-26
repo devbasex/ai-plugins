@@ -340,11 +340,27 @@ def _bypasses(landing: route_decide.Landing, approvals: int) -> bool:
 
 def approval_state(hub: GitHub, strategy: Strategy, number: int) -> trail.Read:
     """`merge` と同じ承認の条件で証跡を読んで判定する（何も書かない。承認を得たリリースの再開の判断に使う）。
-    ruleset を読むのは迂回の設定だけで、読めなければ利用者の証跡だけを数える（厳しい側）。"""
+    ruleset を読むのは迂回の設定だけで、読めなければ利用者の証跡だけを数える（厳しい側）。
+    `approval.via: review` では証跡でなく GitHub のレビューの承認（`trail.review_commit`）を読む。"""
+    if strategy.approval_via == "review":
+        return _review_state(hub, number)
     landing = route_decide.landing_of(strategy)
     rules = hub.rule_facts(strategy.production) if landing.admin else None
     human_only = landing.admin and (rules is None or _bypasses(landing, rules.approvals))
     return trail.read(hub, number, human_only)
+
+
+def _review_state(hub: GitHub, number: int) -> trail.Read:
+    """`approval.via: review` の判定。承認のレビューのコミットが今の HEAD と同じなら承認。"""
+    pull = hub.pull(number)
+    commit, head = trail.review_commit(hub, number), pull.head_sha
+    if commit == head.lower():
+        judgment = approval_decide.Judgment(approval_decide.APPROVED, f"GitHub のレビューが {head[:12]} を承認した")
+    elif commit is not None:
+        judgment = approval_decide.Judgment(approval_decide.STALE, f"承認のレビューは {commit[:12]} へのもので、今の HEAD は {head[:12]}")
+    else:
+        judgment = approval_decide.Judgment(approval_decide.MISSING, f"{head[:12]} を承認した GitHub のレビューが無い")
+    return trail.Read(pull, judgment)
 
 
 @dataclass(frozen=True)

@@ -88,7 +88,7 @@ workflow の `assemble`（`ndf release-steps assemble --channel production`）�
 | 会話のセッション | `verification-record` | リリース後テストの記録をリリース記録と同じ PR へ書く（`release-verification`） |
 | workflow | `assemble` | リリースブランチを組み立て（版上げ・CHANGELOG・設定の手順）、リリースの PR を作る |
 | workflow | `approval-check` | 証跡を読んで判定し、PR の HEAD へ commit status `ndf/release-approval` を付ける |
-| 会話のセッション | `approval-state` | `merge` と同じ承認の条件で証跡を判定する。何も書かない |
+| 会話のセッション | `approval-state` | `merge` と同じ承認の条件で判定する（`approval.via: review` では GitHub のレビューの承認を読む）。何も書かない |
 | 会話のセッション | `pull-checks` | 版上げの PR に含まれる各 PR の最新の CI の結果を取得し、対象の PR と検査の結果を承認資料に貼れる形で出力する |
 | workflow | `merge` | 証跡と必須のチェックの後に、ブランチ戦略の設定の `merge` の主体と方式で入れる。要ればベースブランチへ戻す PR も |
 | workflow | `record` | 本番ブランチへのマージの後に、含めた PR の各々へリリース記録を書く |

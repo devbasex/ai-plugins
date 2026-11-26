@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import re
 import string
 from collections.abc import Callable, Mapping, Sequence
@@ -22,11 +21,12 @@ from typing import Any, Optional
 from ndf import identity
 from ndf.adapters import git
 from ndf.adapters.github import GitHub, GitHubError
+from ndf.adapters.publish import Publisher
 from ndf.contracts import result
 from ndf.domains.docrebuild import drive
 from ndf.domains.docrebuild import gate_decide as gd
 from ndf.domains.docrebuild.drive import Precondition, Stop
-from ndf.domains.records import pull_view, reading
+from ndf.domains.records import mvv, pull_view, reading
 from ndf.domains.records.pull_view import PullView
 from ndf.domains.release import approval_decide
 
@@ -121,6 +121,21 @@ class Run:
     repo: str = ""
     remote: str = ""
     view: Optional[PullView] = None
+    _publisher: Optional[Publisher] = None
+    _published: dict[str, str] = field(default_factory=dict)
+
+    def publishable(self, text: str) -> str:
+        """`text` を PR へ書くときの形（秘密などを伏せた後）。読み手役に読ませる本文とハッシュはこの形にする
+        （提示のコメントと違う本文への承認を数えない）。同じ文は 1 回だけ調べる。"""
+        if text not in self._published:
+            if self._publisher is None:
+                self._publisher = Publisher(self.hub)
+            try:
+                (safe,), _ = self._publisher.guarded(text)
+            except GitHubError as exc:
+                raise Precondition(f"承認資料を公開先に合わせて整えられない: {exc}") from None
+            self._published[text] = self._published[safe] = safe
+        return self._published[text]
 
     @property
     def pr(self) -> PullView:
@@ -143,9 +158,12 @@ class Run:
 
 
 def _put_file(path: Path, text: str) -> Path:
+    """所有者だけが読めるファイルに書く。置き先がシンボリックリンクなら先へ書かずに置き換え、親がリンクなら止める。"""
+    if path.parent.is_symlink():
+        raise Precondition(f"{path.parent} がシンボリックリンクなので書かない")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        mvv.write_private(path, text)
     except OSError as exc:
         raise Precondition(f"{path} への書き込みに失敗した（{exc.strerror or exc}）") from None
     return path
@@ -167,17 +185,6 @@ def _file_text(path: Path) -> str:
     if text is None:
         raise Precondition(f"{path} が無い")
     return text
-
-
-def _replace(path: Path, text: str) -> None:
-    """一時ファイルへ書いてから置き換える（PR ごとに 1 つだけ残す）。"""
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, path)
-    except OSError as exc:
-        raise Precondition(f"承認資料のコピー {path} の置き換えに失敗した（{exc.strerror or exc}）") from None
 
 
 # --- 手順 1: head を固定する ---------------------------------------------------------------------------
@@ -274,6 +281,7 @@ def working_material(run: Run, rows: Sequence[Mapping[str, Any]]) -> tuple[str, 
     """承認資料の始めの本文を決める。（始めの本文, 基準のセクション, 前に読ませた本文, 基準の完了の行）を返す。
 
     前の確認のコピーは、2 つのハッシュが最後の完了の行とどちらも同じときだけ使う（設計書の「確認の id と完了の行」）。
+    PR の本文の経路で本文の代わりにコピーから始めるのは、head と本文が前の確認と同じときだけ。
     """
     args, pr = run.args, run.pr
     done = reading.last_done(rows, run.repo, args.gate, pr.number)
@@ -289,7 +297,7 @@ def working_material(run: Run, rows: Sequence[Mapping[str, Any]]) -> tuple[str, 
                 f"承認資料の {approval_decide.HEAD_LINE} が PR の head {pr.head_sha} と違う。materials を組み直してから打ち直す"
             )
         return gd.strip_marks(source, expected), expected, previous, done
-    if previous is not None and done is not None and done[BODY_SHA] == reading.sha256(pr.body):
+    if previous is not None and done is not None and done["head"] == pr.head_sha and done[BODY_SHA] == reading.sha256(pr.body):
         return previous, expected, previous, done
     return gd.strip_marks(pr.body, expected), expected, previous, done
 
@@ -328,13 +336,14 @@ def plan_reads(run: Run, rows: Sequence[Mapping[str, Any]], form: Optional[str])
         raise Precondition(str(exc)) from None
     _put_file(run.state(QUESTIONS_FILE), json.dumps({"questions": questions}, ensure_ascii=False, indent=2) + "\n")
     start, expected, previous, done = working_material(run, rows)
+    start = run.publishable(start)
     material = _put_file(run.state(MATERIAL_FILE), start)
     docs = gate_docs(run) if args.gate == DESIGN else {}
     plan = Plan(questions, reading.rd.question_key(questions), material, expected, start, docs)
     run.state(TITLE_FILE).unlink(missing_ok=True)
     if run.body_route:
         if reading.sent_back(rows, run.repo, args.gate, pr.number):
-            plan.frozen_body = gd.strip_marks(pr.body, expected)
+            plan.frozen_body = run.publishable(gd.strip_marks(pr.body, expected))
         else:
             plan.title_file = run.state(TITLE_FILE)
             plan.fixable.append(str(plan.title_file))
@@ -456,6 +465,8 @@ def verify_worker(run: Run, plan: Plan, report: Mapping[str, Any], before: Mappi
     gaps = [g for g in (_target_gap(run, plan, t, found) for t in plan.targets) if g is not None]
     gaps.extend(_outside_fixable(run, plan, before))
     final = _file_text(plan.material)
+    if run.publishable(final) != final:
+        gaps.append({"kind": reading.MATERIAL, "name": reading.MATERIAL, "reason": "PR へ書く前に伏せる値（秘密など）がある"})
     if not run.body_route and approval_decide.material_head(final) != run.pr.head_sha:
         gaps.append({"kind": reading.MATERIAL, "name": reading.MATERIAL, "reason": f"行 {approval_decide.HEAD_LINE} が変わった"})
     if plan.frozen_body is not None and gd.body_edited(plan.frozen_body, final):
@@ -563,7 +574,7 @@ def write_records(run: Run, plan: Plan, final: Final, head: str, pushed: bool) -
     hashes = {MATERIAL_SHA: final.sha256, MATERIAL_FILE_SHA: final.file_sha256, BODY_SHA: body_sha}
     for row in final.rows:
         reading.append_doc({"kind": "read", **base, **row})
-    _replace(reading.materials_path(run.repo, run.args.gate, run.pr.number), final.text)
+    _put_file(reading.materials_path(run.repo, run.args.gate, run.pr.number), final.text)
     if pushed:
         reading.append_doc(reading.done_row(base, **hashes))
         return {"id": run.check, "fingerprint": None}
@@ -633,13 +644,18 @@ def complete_check(run: Run, plan: Plan, found: Mapping[str, Mapping[str, Any]])
         parts[reading.MATERIAL] = gd.changed_part(_file_text(plan.previous), draft)
     prev = reading.remained_of(reading.doc_rows(), run.repo, run.args.gate, run.pr.number)
     rows = gd.doc_rows_of(found, gd.carried_quotes(prev, contents, parts, raised), hashes)
+    for row in rows:
+        if row["verdict"] == reading.REMAINED:
+            row["quotes"] = [{k: run.publishable(v) if v else v for k, v in q.items()} for q in row["quotes"]]
     remained = [r for r in rows if r["verdict"] == reading.REMAINED]
     section = reading.remained_section(remained)
     final = Final(draft + section, section, rows)
     fixed_docs = [p for p in plan.docs if p in plan.fixable and hashes[p] != plan.docs[p]]
     targets = _send_back_targets(run, plan, draft)
     head = push_fixed(run, fixed_docs) if fixed_docs else run.pr.head_sha
-    now = refetch_check(run, head)
+    # 読ませず、push も投稿もしないなら初回の取得を使う（最新の状態は提示の直前の突き合わせが確かめる）
+    posting = run.body_route and not reading.comment_has(run.pr.comments, reading.sha256(final.text))
+    now = run.pr if not (plan.targets or fixed_docs or posting) else refetch_check(run, head)
     if targets:
         return send_back(run, plan, targets, raised)
     if run.body_route and not fixed_docs:
@@ -662,7 +678,7 @@ def _send_back_targets(run: Run, plan: Plan, draft: str) -> list[str]:
         return []
     title = _text_or_none(plan.title_file) if plan.title_file is not None else None
     out = [TITLE] if title is not None and title.strip() else []
-    if gd.body_edited(gd.strip_marks(run.pr.body, plan.expected), draft):
+    if gd.body_edited(run.publishable(gd.strip_marks(run.pr.body, plan.expected)), draft):
         out.append(BODY)
     return out
 
