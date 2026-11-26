@@ -29,10 +29,9 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -46,8 +45,9 @@ from ndf.core import durable, production_merge, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, issue_values, merge_pending, model, rebuild_values, refactor_values, stages
+from ndf.progress import definition, issue_values, merge_pending, model, plan_runs, rebuild_values, refactor_values, stages
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
+from ndf.progress.plan_runs import StageResult, StageRun
 from ndf.testing import scoped, weight
 
 # 作業種別と、工程の定義の call → 作業種別（plan はサブコマンド `ndf plan` の名前）
@@ -60,7 +60,6 @@ CALLS = {"ndf.plan": PLAN, "ndf.skill": SKILL, "ndf.script": SCRIPT, definition.
 NAME_ARG = {PLAN: "plan", SKILL: "skill", SCRIPT: "argv"}
 # script の作業へ入力を渡す環境変数
 INPUT_ENV = "NDF_STAGE_INPUT"
-NOTES_ENV = "NDF_STAGE_NOTES"
 # skill の作業の上限（Skill 1 本を回す起動は実装の工程と同じ桁）
 SKILL_LIMIT = "monitor.phase.implement"
 SKILL_SYSTEM = "工程の作業を 1 つ行い、最後に結果 JSON（統一 JSON レポート）だけを回答する。"
@@ -139,52 +138,6 @@ class KindInputsMissing(route.RouteError):
     @property
     def items(self) -> list[dict[str, str]]:
         return [{"key": n, "source": s} for n, s in self.missing.items()]
-
-
-@dataclass(frozen=True)
-class StageRun:
-    """ステップ 1 つの呼び出し。`name` は呼ぶプラン・Skill の名前（script は argv の先頭）。"""
-
-    kind: str
-    name: str
-    inputs: dict[str, Any]
-    outputs: tuple[str, ...]
-    range: str
-    step: str
-    args: dict[str, Any] = field(default_factory=dict)
-    # 変更要求の指摘の本文（承認ゲートの request_changes の回答）。作業へは環境変数 NDF_STAGE_NOTES か質問の末尾で渡す
-    notes: Optional[str] = None
-    # 行の打ち直し（conductor の retry）の回数と、方針による自動の打ち直しか。プランはどちらでも新しい回を始める（`plan_attempt`）
-    retries: int = 0
-    again: bool = False
-    # 同じ工程の承認ゲートの最新の承認の回答が見た対象（事象の `seen`。`gate.Target.as_dict` の形）。無ければ None（#4409）
-    approved: Optional[dict[str, Any]] = None
-    # 工程が承認ゲートを持つか（light の設計のように持たない工程のマージは、承認をデプロイへ先送りする。#4409）
-    gated: bool = False
-
-    def env(self, extra: Mapping[str, str]) -> dict[str, str]:
-        out = {**os.environ, **extra}
-        if self.notes is not None:
-            out[NOTES_ENV] = self.notes
-        return out
-
-
-@dataclass(frozen=True)
-class StageResult:
-    """作業の結果。`report` は結果 JSON、`outputs` は工程の定義が書くと定義したキーだけの値。"""
-
-    report: dict[str, Any]
-    outputs: dict[str, Any]
-    warnings: tuple[str, ...] = ()
-
-    @property
-    def status(self) -> str:
-        return str(self.report["status"])
-
-    @property
-    def cause(self) -> Optional[dict[str, Any]]:
-        held = self.report["cause"] if "cause" in self.report else None
-        return held if isinstance(held, dict) else None
 
 
 # 外部のコマンドを打つ関数（argv・作業ディレクトリ・環境変数 → 終了した子プロセス）。テストが差し替える
@@ -267,11 +220,6 @@ def _named(kind: str, args: Mapping[str, Any]) -> str:
 
 
 # --- 作業の結果 ----------------------------------------------------------------------------
-
-
-def read_report(stdout: str) -> Optional[dict[str, Any]]:
-    """標準出力の最後の空でない行の結果 JSON（新しいバージョンなら代わりの `stopped`。`result.received`）。読めないか形が違えば None。"""
-    return result.last_line(stdout)
 
 
 def bad_report(run: StageRun, detail: str) -> StageResult:
@@ -667,29 +615,15 @@ def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
         return wd.path / name
 
 
-def _previous(work_dir: Path) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
-    """保存先の前の回の記録（`run.json`）と、その回の結果のバックアップ（終わっていなければ None。新しいバージョンなら `InternalError`）。"""
-    record = plan_files.read_json(work_dir / plan_runner.RUN_FILE)
-    if record is None:
-        return None, None
-    return record, plan_runner.stored_result(work_dir, durable.run_name(record["key"]))
-
-
-def _from_of(command: Any) -> Optional[str]:
-    """結果のコマンド（`next`・`routes` の値）の `--from` の値。無ければ None。"""
-    argv = command["argv"] if isinstance(command, dict) and isinstance(command.get("argv"), list) else []
-    return str(argv[argv.index("--from") + 1]) if "--from" in argv[:-1] else None
-
-
 def plan_start(work_dir: Path) -> Optional[str]:
     """プランを打ち直す開始点。前の回が止まっていれば、その結果の打ち直し（`next`）の `--from`（止まったステップ）。
 
     止まっていなければ前の回の開始点（承認の回答を渡すときも同じ回に届く）。前の回が無ければ None（初めから）。
     """
-    record, done = _previous(work_dir)
+    record, done = plan_runs.previous(work_dir)
     if record is None:
         return None
-    again = _from_of(done["next"]) if done is not None and done["status"] == result.STOPPED and "next" in done else None
+    again = plan_runs.from_of(done["next"]) if done is not None and done["status"] == result.STOPPED and "next" in done else None
     if again is not None:
         return again
     start = record["start"] if "start" in record else None
@@ -701,7 +635,7 @@ def stored_gate_routes(work_dir: Path) -> Optional[dict[str, Any]]:
 
     終わった回へ `--answer` を渡しても、プランはバックアップの結果を返すだけである。続きは routes の開始点から新しい回で流す。
     """
-    _, done = _previous(work_dir)
+    _, done = plan_runs.previous(work_dir)
     if done is None or done["status"] != result.GATE or not isinstance(done.get("routes"), dict):
         return None
     return dict(done["routes"])
@@ -717,7 +651,7 @@ def plan_attempt(run: StageRun, work_dir: Path) -> int:
     held = plan_files.read_json(path)
     attempt = int(held["attempt"]) if held is not None else 0
     seen = int(held["retries"]) if held is not None else 0
-    _, done = _previous(work_dir)
+    _, done = plan_runs.previous(work_dir)
     if (run.again or run.retries > seen) and done is not None:
         attempt += 1
     if held is None or attempt != held["attempt"] or run.retries > seen:
@@ -737,7 +671,7 @@ def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -
     """
     routes = stored_gate_routes(work_dir) if answer else None
     if routes is not None:
-        start, answer = _from_of(routes[answer] if answer in routes else None), None
+        start, answer = plan_runs.from_of(routes[answer] if answer in routes else None), None
     else:
         start = plan_start(work_dir)
     attempt = plan_attempt(run, work_dir)
@@ -756,10 +690,10 @@ def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -
 def _no_route(run: StageRun, work_dir: Path, answer: Optional[str]) -> Optional[StageResult]:
     """承認ゲートで終わった回への回答に続きが無いときの結果。承認ならプランは終わり、ほかは承認されなかった。続きがあれば None。"""
     routes = stored_gate_routes(work_dir) if answer else None
-    if routes is None or _from_of(routes[answer] if answer in routes else None) is not None:
+    if routes is None or plan_runs.from_of(routes[answer] if answer in routes else None) is not None:
         return None
     if answer == APPROVED:
-        _, done = _previous(work_dir)
+        _, done = plan_runs.previous(work_dir)
         assert done is not None
         outputs = done["outputs"] if isinstance(done.get("outputs"), dict) else {}
         return finished(run, result.result(PLAN, result.OK, f"プラン {run.name} の最後の承認ゲートが承認された", outputs=outputs))
@@ -773,7 +707,7 @@ def same_run(before: StageResult, after: StageResult) -> bool:
 
 
 def _from_process(run: StageRun, done: subprocess.CompletedProcess[str]) -> StageResult:
-    report = read_report(done.stdout)
+    report = plan_runs.read_report(done.stdout)
     if report is None:
         return bad_report(run, f"終了コード {done.returncode}")
     return finished(run, report)
