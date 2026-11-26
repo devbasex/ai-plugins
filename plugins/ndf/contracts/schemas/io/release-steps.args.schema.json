@@ -465,17 +465,13 @@
           "type": "string",
           "description": "<所有者>/<リポジトリ>。省けば origin"
         },
-        "--included": {
-          "type": "array",
-          "items": {
-            "type": "integer"
-          },
-          "description": "含む PR の番号"
+        "--pr": {
+          "type": "integer"
         }
       },
       "required": [
         "subcommand",
-        "--included"
+        "--pr"
       ]
     },
     {

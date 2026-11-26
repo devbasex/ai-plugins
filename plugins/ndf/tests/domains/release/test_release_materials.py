@@ -64,6 +64,10 @@ def test_issue_2655_check_results_come_from_each_pull() -> None:
     assert materials_decide.items(_facts(pulls, ()))[0] == {
         "kind": "pull", "number": 5, "checks_passed": 1, "checks": 1, "checks_skipped": 1, "failed": [],
     }  # fmt: skip
+    # #4446: 実行されたチェックの無い PR は通ったと数えず、含む PR が 0 件ならそう書く
+    unrun = (materials_decide.PullFact(7, "C", checks_decide.tally([])),)
+    assert "含む PR の CI: 実行されていない PR がある（#7）" in materials_decide.pull_sections(unrun)
+    assert "- 含む PR の CI: 対象の PR は無い" in materials_decide.pull_sections(())
 
 
 def test_issue_2601_3110_material_sections() -> None:

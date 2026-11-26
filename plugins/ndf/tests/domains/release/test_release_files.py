@@ -397,7 +397,7 @@ def test_release_steps_parser_current_behavior() -> None:
         ],
         "approval-check": common + [pr, req("--production")],
         "approval-state": common + [pr],
-        "pull-checks": common + [("--included", True, None, None, "+", "_StoreAction")],
+        "pull-checks": common + [pr],
         "merge": common + [pr, req("--budget", float)],
         "record": common + [pr, req("--production"), opt("--production-sha")],
         "verification-record": common + [pr, req("--record")],

@@ -9,7 +9,7 @@
 | `answer` | 会話のセッション | `trail.answer`（回答を証跡に書き、届いたかを確かめる） |
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
 | `approval-state` | 会話のセッション | `land.approval_state`（`merge` と同じ承認の条件の判定を読むだけ） |
-| `pull-checks` | 会話のセッション | `gather.pull_facts`（含む PR の最新の CI の結果を、承認資料のセクションの形で出す） |
+| `pull-checks` | 会話のセッション | `record.pinned_included` と `gather.pull_facts`（版上げの PR の含む PR と最新の CI の結果を、承認資料のセクションの形で出す） |
 | `merge` | workflow | `land`（証跡の後に、ブランチ戦略の設定の主体と方式で入れ、要ればベースブランチへ戻す PR） |
 | `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後） |
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く。リリースの PR なら記録を持つ PR を示して止まる） |
@@ -193,12 +193,15 @@ def cmd_approval_state(args: argparse.Namespace) -> dict:
 
 
 def cmd_pull_checks(args: argparse.Namespace) -> dict:
-    pulls = tuple(gather.pull_facts(_hub(args), args.included))
-    missing = sorted(set(args.included) - {p.number for p in pulls})
+    hub, strategy = _hub(args), _strategy(args)
+    formats = names_decide.formats_of(strategy.section["release"])
+    numbers = record.pinned_included(hub, args.pr, strategy.production, formats)
+    pulls = tuple(gather.pull_facts(hub, numbers))
+    missing = sorted(set(numbers) - {p.number for p in pulls})
     if missing:
         return result.stopped(TOOL, "precondition", f"CI の結果を読めない PR がある: {', '.join(f'#{n}' for n in missing)}")
     print("\n".join(materials_decide.pull_sections(pulls)))
-    return result.result(TOOL, result.OK, f"{len(pulls)} 件の PR の CI の結果を読んだ", materials_decide.pull_items(pulls))
+    return result.result(TOOL, result.OK, f"#{args.pr} の含む PR {len(pulls)} 件の CI の結果を読んだ", materials_decide.pull_items(pulls))
 
 
 def cmd_merge(args: argparse.Namespace) -> dict:
@@ -351,10 +354,6 @@ def _answer_args(p: argparse.ArgumentParser) -> None:
     )
 
 
-def _included_prs(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--included", type=int, nargs="+", required=True, help="含む PR の番号")
-
-
 def _materials_out(p: argparse.ArgumentParser) -> None:
     p.add_argument("--out", help="承認資料を書くファイル（省けば標準出力）")
 
@@ -409,7 +408,7 @@ ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.Argume
     cmd_answer: (_pr, _answer_args),
     cmd_approval_check: (_pr, _production),
     cmd_approval_state: (_pr,),
-    cmd_pull_checks: (_included_prs,),
+    cmd_pull_checks: (_pr,),
     cmd_merge: (_pr, _budget),
     cmd_record: (_pr, _production, _production_sha),
     cmd_verification_record: (_pr, _verification),

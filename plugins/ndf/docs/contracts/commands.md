@@ -372,7 +372,7 @@
 | `ndf release-steps open-releases` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--base`（string・必須）: ベースブランチ（設定 project.json の branch_strategy.branches.base）<br>`--production`（string・必須）: 本番ブランチ（設定 project.json の branch_strategy.branches.production） |
 | `ndf release-steps present` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--material`（string・任意）: 承認資料のファイル（省けば PR の本文） |
 | `ndf release-steps publish` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--revision`（string・必須）<br>`--since`（string・任意）: 前の push の先頭。祖先なら --revision までの first-parent のコミットを古い順にすべて公開する |
-| `ndf release-steps pull-checks` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--included`（array of integer・必須）: 含む PR の番号 |
+| `ndf release-steps pull-checks` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須） |
 | `ndf release-steps record` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--production`（string・必須）<br>`--production-sha`（string・任意）: 本番へ入れたコミット（strict の squash で閉じた PR の記録に要る） |
 | `ndf release-steps records` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須） |
 | `ndf release-steps sync-base` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--main-dir`（string・必須）<br>`--base`（string・必須） |

@@ -100,6 +100,25 @@ def _included(commits: Sequence[dict], pull: Pull, production: str, formats: nam
     return included_decide.numbers(record_decide.first_parent_subjects(commits, pull.head_sha), (production,), formats.is_release_branch)
 
 
+def pinned_included(hub: GitHub, number: int, production: str, formats: names_decide.NameFormats) -> list[int]:
+    """開いている版上げの PR `number` の今の HEAD の含む PR（リリース記録の書き先と同じ、組み立てのコミットの行の番号）。
+
+    組み立ての後に積んだコミットが、承認資料の収集の規則（`included_decide`）で行に無い PR かスプリントのマージを足して
+    いれば `RecordError`（行は書き換わらないので、承認資料と記録の書き先がずれる）。行が無いときも `RecordError`。"""
+    pull = hub.pull(number)
+    commits = hub.compare_commits(pull.base_ref, pull.head_sha)
+    approved = record_decide.approved_included(commits, pull.head_sha)
+    after = record_decide.subjects_after_approved(commits, pull.head_sha)
+    if approved is None or after is None:
+        raise RecordError(f"#{number} に組み立てが書いた含む PR の行が無い（版上げの PR を渡す）")
+    added = sorted(set(included_decide.numbers(after, (production,), formats.is_release_branch)) - set(approved))
+    merged = [s for s in after if included_decide.is_unit_merge(s, formats.is_release_branch)]
+    if added or merged:
+        found = ", ".join([*(f"#{n}" for n in added), *merged])
+        raise RecordError(f"#{number} に組み立ての後で含む PR が増えた（{found}）。版上げの PR を閉じて組み立て直す")
+    return approved
+
+
 def _tree(commit: Any) -> str:
     """git のコミットの REST の形の木の SHA（読めなければ空）。"""
     tree = commit.get("tree") if isinstance(commit, dict) else None

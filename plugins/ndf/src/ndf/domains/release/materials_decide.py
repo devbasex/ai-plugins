@@ -79,19 +79,23 @@ def _instructions(paths: Sequence[str]) -> list[str]:
     return [f"- `{p}`" for p in paths] if paths else ["- 無し"]
 
 
-def checks_green(facts: Facts) -> bool:
-    """含む PR の CI がすべて通ったか（失敗も待ちも無い）。"""
-    return _green(facts.pulls)
-
-
 def _green(pulls: Sequence[PullFact]) -> bool:
     return all(p.tally.green for p in pulls)
 
 
 def pull_sections(pulls: Sequence[PullFact]) -> list[str]:
     """承認資料のセクション「含む PR」と「検査の結果」の行（`render` と `pull-checks` で同じ形）。"""
-    verdict = "すべて通った" if _green(pulls) else "通っていないものがある"
-    return ["## 含む PR", *_pulls(pulls), "", "## 検査の結果", f"- 含む PR の CI: {verdict}"]
+    return ["## 含む PR", *_pulls(pulls), "", "## 検査の結果", f"- 含む PR の CI: {_verdict(pulls)}"]
+
+
+def _verdict(pulls: Sequence[PullFact]) -> str:
+    """「検査の結果」の 1 語。実行されたチェックの無い PR は、通ったと数えない。"""
+    if not pulls:
+        return "対象の PR は無い"
+    if not _green(pulls):
+        return "通っていないものがある"
+    unrun = [f"#{p.number}" for p in _ordered(pulls) if p.tally.ran == 0]
+    return f"実行されていない PR がある（{', '.join(unrun)}）" if unrun else "すべて通った"
 
 
 def render(facts: Facts) -> str:
