@@ -1,5 +1,5 @@
 {
-  "summary": "テンプレートどうしで共有するステップ。テンプレートのステップは {\"use\": \"<名前>\"} で 1 つを引き、並べたキーで上書きする（上書きはキーごとに置き換える）",
+  "summary": "テンプレートどうしで共有するステップ。テンプレートのステップは {\"use\": \"<名前>\"} で 1 つを引き、並べたキーで上書きする（上書きはキーごとに置き換える）。`pr_source`（PR の番号を出すシェルの 1 行と、その $0）は run の要素 \"@pr_source\" へ差し込む",
   "steps": {
     "test": {
       "id": "test",
@@ -53,10 +53,11 @@
     },
     "ci": {
       "id": "ci",
+      "pr_source": ["gh pr view \"$0\" --json number --jq .number", "{{branch}}"],
       "run": [
         "bash", "-c",
-        "set -o pipefail; pr=$(gh pr view \"$1\" --json number --jq .number) || exit 1; out=$2; shift 2; ndf ci watch --pr \"$pr\" \"$@\" | tee \"$out\"",
-        "ci", "{{branch}}", "{state_dir}/ci.json", "--budget", "{{ci_budget}}", "--required={{required}}", "--test={{tests}}"
+        "set -o pipefail; pr=$(sh -c \"$1\" \"$2\") && [ -n \"$pr\" ] || exit 1; out=$3; shift 3; ndf ci watch --pr \"$pr\" \"$@\" | tee \"$out\"",
+        "ci", "@pr_source", "{state_dir}/ci.json", "--budget", "{{ci_budget}}", "--required={{required}}", "--test={{tests}}"
       ],
       "on_cause": {"test_failed": "repeat-check", "base_conflict": "base-sync"}
     },

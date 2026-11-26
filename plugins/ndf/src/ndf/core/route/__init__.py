@@ -6,7 +6,8 @@
   （プランの形。`ndf.core.plan.model` が読む形に `{{名前}}` と `{"use": ...}` を足したもの）を持つ
 - `params.json`: 差し込みの名前ごとの意味・既定・並びか（`list`）。意味と既定はここだけが持つ
 - `parts/steps.json`: テンプレートどうしで共有するステップ。テンプレートのステップは `{"use": "<名前>", ...}` で 1 つを引き、
-  並べたキーでキーごとに上書きする。値が null のキーは消す
+  並べたキーでキーごとに上書きする。値が null のキーは消す。`pr_source` は run の要素 `@pr_source` へ差し込むキーで、
+  共有の `ci` は番号の取り方だけをこれで差し替える
 
 差し込み `{{名前}}` はここで埋める。実行のときの差し込み `{名前}`（`{state_dir}` など）はプランの実行（`runner`）が
 埋めるので触らない。並びの名前は引数の要素ごとに展開する: 要素がその名前だけなら並びを差し込み、ほかの字を含めば
@@ -75,6 +76,8 @@ PARAMS_FILE = "params.json"
 PARTS_FILE = "parts/steps.json"
 # テンプレートのステップで共有のステップを引くキー
 USE = "use"
+# 共有のステップの一部だけを差し替えるキー: 値の並びを run の要素 `@<キー>` の位置へ差し込む
+PR_SOURCE = "pr_source"
 # 手元でテストを打つステップの id。CI テストの設定（`test.ci.only`）があるリポジトリのプランからは外す（#3473）
 LOCAL_TEST_STEPS = ("test", "test-all", "ci-local")
 # ステップのルートのキー: 1 つのルートを持つキーと、場合 → ルートの対応表を持つキー（ステップを外すときに付け替える）
@@ -227,14 +230,23 @@ def choose(purpose: str) -> Template:
 
 
 def _expand_step(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """`use` の共有のステップに上書きを重ね、値が null のキーを消す。"""
+    """`use` の共有のステップに上書きを重ね、値が null のキーを消し、`pr_source` を run へ差し込む。"""
     if USE not in raw:
         return dict(raw)
     shared = parts()
     if raw[USE] not in shared:
         raise RouteError(f"共有のステップに {raw[USE]} が無い")
     merged = {**copy.deepcopy(shared[raw[USE]]), **{k: v for k, v in raw.items() if k != USE}}
-    return {k: v for k, v in merged.items() if v is not None}
+    return _splice({k: v for k, v in merged.items() if v is not None})
+
+
+def _splice(step: dict[str, Any]) -> dict[str, Any]:
+    """`pr_source` の並びを run の `@pr_source` の位置へ差し込み、キーを消す。無いステップはそのまま。"""
+    if PR_SOURCE not in step:
+        return step
+    source, slot = step.pop(PR_SOURCE), f"@{PR_SOURCE}"
+    step["run"] = [x for item in step["run"] for x in (source if item == slot else [item])]
+    return step
 
 
 def expanded(t: Template, *, local_tests: bool = True) -> dict[str, Any]:

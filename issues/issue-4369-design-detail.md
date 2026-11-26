@@ -371,7 +371,7 @@ contracts/
 | ファイル・ステップ | 変える中身 |
 | --- | --- |
 | `parts/steps.json` の `pr` | `run` は番号を `gh pr create` の出力の URL の末尾から取り、`{state_dir}/pr-number` へ書く。`probe` は head と `{{base}}` で絞り、`isCrossRepository` の PR を除き、見つけた番号を同じファイルへ書く |
-| `impl.json` の `conflict-check`・`ci` | 共有のステップの `run` を上書きし、番号を `{state_dir}/pr-number` から読む。読めなければ `conflict-check` は終了コード 2、`ci` は 1 |
+| `impl.json` の `conflict-check`・`ci` | 番号を `{state_dir}/pr-number` から読む。`conflict-check` は `run` を上書きし、`ci` は共有のステップの番号の取り方（`pr_source`）だけを差し替える。番号が読めなければ `conflict-check` は終了コード 2、`ci` は 1。`conflict-check` は PR の状態を問い合わせられないか応答が空でも終了コード 2（`precondition`） |
 | `impl.json` のプランの最上位 | `"unit_file": "{{unit_file}}"` のキーを足す（`core/plan/model.parse` は知らないキーを読まない。差し込みを使わないとテンプレートの検査が落ちる） |
 | `params.json` | `unit_file`（既定は空文字列） |
 | `pr.json` の `pr` の `probe` | `isCrossRepository` の PR を除く |
