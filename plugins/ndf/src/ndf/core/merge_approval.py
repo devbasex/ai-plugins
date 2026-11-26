@@ -36,7 +36,7 @@ BY_CHOICES = tuple(b.value for b in By)
 
 # マージの承認の証跡のマーカー（#4409 の決定 7）。リリースの PR の証跡（`ndf:release-approval`）と別で、`ndf ci merge` だけが読む。
 # CD の workflow の承認の検査はリリースのマーカーを含むコメントだけで起動するので、この文字列はそれを含まない
-MERGE_MARK = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:merge-approval -->"
+MERGE_MARK = f"<!-- {identity.MERGE_MARK_WORD} -->"
 MERGE_HEADING = "## マージの承認の証跡"
 ANSWER_LINE = "回答:"
 TARGET_LINE = "対象:"

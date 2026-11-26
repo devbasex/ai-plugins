@@ -37,12 +37,12 @@ from ndf.domains.hooks.verdict import Verdict, deny
 from ndf.testing import weight
 
 # マージ先のリポジトリの設定（ブランチ戦略の設定の届け先の行を読む）
-_PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
+_PROJECT_FILE = production_merge.PROJECT_FILE
 # ブランチ戦略の設定の保存先（`core.branch_strategy` は jsonschema に依るので、ここでは標準ライブラリで読む）
 _SECTION = identity.BRANCH_STRATEGY_SECTION
 _DELIVERIES_KEY = f"{_SECTION}.release.deliveries"
-# マージの承認の証跡のマーカーの語（`core.merge_approval.MERGE_MARK` の中身。hook は merge_approval を読めないので語だけを持つ）
-MERGE_MARK_WORD = f"{identity.FIXED_WORDS['workflow_namespace']}:merge-approval"
+# マージの承認の証跡のマーカーの語（`core.merge_approval.MERGE_MARK` の中身）
+MERGE_MARK_WORD = identity.MERGE_MARK_WORD
 # コメントの本文をファイルから読む引数（`gh pr comment`・`gh issue comment` の `--body-file`・`-F`、`gh api` の `--input`）
 _BODY_FILE_FLAGS = ("--body-file", "-F", "--input")
 
