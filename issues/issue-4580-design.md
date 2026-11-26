@@ -1,6 +1,6 @@
 # 開発の流れ: リポジトリの形に合わせて、プロジェクトが設定で選べるようにする（#4580）
 
-バージョン番号を持たないサービスのリポジトリでは、ai-plugins の形を前提にした手順がそのまま適用され、スプリントを手作業の回避なしに終えられない。今ある設定ファイルに、流れの項目（種類・モードごとの工程の要否・閉じる条件）を足す。バージョン番号の無いリリース記録とリリース後テストの記録も書けるようにする。急ぐ分（閉じる条件と記録）を先に出し、2 回に分けてリリースする。分け方と採らなかった案は「決定の記録」に、他の製品の解き方は「外部の調査」にある。
+バージョン番号を持たないサービスのリポジトリでは、ai-plugins の形を前提にした手順がそのまま適用される。工程が止まり、人が結果の記録を作り直さないと、スプリントを最後まで進められない。この設計は、その作り直しを無くす。今ある設定ファイルに、流れの項目（種類・モードごとの工程の要否・閉じる条件）を足す。バージョン番号の無いリリース記録とリリース後テストの記録も書けるようにする。急ぐ分（閉じる条件と記録）を先に出し、2 回に分けてリリースする。分け方と採らなかった案は「決定の記録」に、他の製品の解き方は「外部の調査」にある。
 
 ## 今の姿
 
@@ -79,11 +79,17 @@ graph TD
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | スプリントの工程の要否 | 承認ゲートを持つ工程は、どの層の設定でも無効にならない | スプリントを作らず、工程の名前と理由を示す |
+| I1 | スプリントの工程の要否 | 承認ゲートを持つ工程（下の「承認ゲートを持つ工程の判定」）は、どの層の設定でも無効にならない | スプリントを作らず、工程の名前と理由を示す |
 | I2 | リリースの記録 | 不合格の行がある課題は閉じない | `close-check` が閉じないと返す |
-| I3 | 流れの設定 | NDF のコマンドは `workflow` の `kind`・`modes`・`close` を書かない | テストが落ちる |
+| I3 | 流れの設定 | NDF のコマンドは、利用者が指定した `workflow.kind`・`workflow.stages`・`workflow.modes`・`workflow.close` を保持する | テストが落ちる |
 | I4 | 流れの設定 | 流れの設定が無ければ、工程の要否と閉じる条件は変更の前と同じである | テストが落ちる |
 | I5 | 流れの設定 | 工程の無効化と閉じる条件の除外は、理由を持つ | 形の誤りとして止まる |
+
+### 承認ゲートを持つ工程の判定
+
+工程定義（`contracts/workflow/stages/*.json`）を読み、`StageDef.gates` が空でない工程を保護する。`gates` は承認ゲートのステップだけを数え、承認の前の読み手役のステップは `gate` を持っていても数えない。今の定義で当たるのは「設計」と「デプロイ」である。工程の名前の一覧はコードに持たない。
+
+保護の確かめは、指定を重ねる前に層ごとに行う。`--disable` を拒否する今の振る舞いは変えない。
 
 ### ドメインイベント
 
@@ -117,6 +123,7 @@ graph TD
 | 閉じる判定（`domains/records/cli.py`） | 設定を読み、外した条件と理由を返す |
 | リリースの記録（`domains/release` の `record`・`record_decide`・`cli`） | バージョン番号を持たないリポジトリのリリース記録を書く。テストの記録に反映した環境を持たせる |
 | 手順書と文書 | 打ち方と、種類ごとの流れ（`development-workflow` の `references/project-flow.md`、新設） |
+| 流れの文書の生成（`scripts/check-ndf-contracts.py`） | 流れの文書の表をデータから書き出し、書き出した内容と違えば違反にする（決定 10） |
 
 ## 入出力のコントラクト
 
@@ -143,7 +150,7 @@ graph TD
 | `kind` | `web-develop`・`web-trunk`・`mobile`・`docs`・`plugin` | 種類の既定を当てない |
 | `stages` | 工程の名前 → `enabled` と理由（今と同じ） | 今と同じ |
 | `modes.<モード>.stages` | そのモードだけの工程の指定 | モードごとの指定なし |
-| `close.<条件>` | `required` の真偽。偽なら `reason` が要る。条件は `release_verification` と `retrospective_line` の 2 つ | 求める |
+| `close.<条件>` | `required` の真偽。偽なら `reason` が要る。条件は `release_verification` と `retrospective_line` の 2 つ | 今の手順書の経路ごとの指定に従う（`required: true` も同じ） |
 
 工程の指定が重なるときは、次の順に勝つ。
 
@@ -153,11 +160,40 @@ graph TD
 
 | コマンド | 変わる点 | 失敗の形 | 互換性 |
 | --- | --- | --- | --- |
-| `ndf progress new` | 流れの設定を重ねて工程の要否を決める | 知らない種類・無いモードか工程の名前・承認の工程の無効化は、箇所と理由を示して作らない（`invalid`） | 流れの設定が無ければ同じ。今と違い、`stages` の工程の名前の誤りでも止まる |
+| `ndf progress new` | 流れの設定を重ねて工程の要否を決める | 知らない種類・無いモードか工程の名前（下の「名前の照合」）・承認の工程の無効化は、箇所と理由を示して作らない（`invalid`） | 流れの設定が無ければ同じ。今と違い、`stages` の工程の名前の誤りでも止まる |
 | `ndf project check` | `items` に食い違いを足し、`summary` に件数を足す | 終了コードは設定の新しさだけで決め、食い違いでは変えない | 食い違いが無ければ同じ |
-| `ndf records close-check` | 結果に、求める条件と外した条件（理由つき）を足す。`release_verification` を外すと `--require` を当てない | 流れの設定が形に合わなければ閉じない（`precondition`） | 流れの設定が無ければ判定は同じ |
-| `ndf release-steps record` | 任意の引数 `--version <出したものを指す値>` を足す | バージョンの保存先が `none` でないリポジトリで渡すと `precondition`。本番ブランチへマージしていない PR は今と同じく書かない | 引数が無ければ同じ |
-| `ndf release-steps verification-record` | 記録に任意の `environment`（反映した環境の名前）を持てる | バージョンの保存先が `none` で `environment` が無ければ書かない（`precondition`） | バージョンを持つリポジトリは同じ |
+| `ndf records close-check` | 結果に、求める条件・外した条件（理由つき）・テストで確認できたか（`verified`）を足す（下の「閉じる条件を外したときの閉じ方」） | 流れの設定が形に合わなければ閉じない（`precondition`） | 流れの設定が無ければ判定は同じ |
+| `ndf release-steps record` | 任意の引数 `--version <出したものを指す値>` と `--environment <反映した環境の名前>` を足す | バージョンの保存先が `none` でないリポジトリでどちらかを渡すと `precondition`。2 つの片方だけでも `precondition`。本番ブランチへマージしていない PR は今と同じく書かない | 引数が無ければ同じ |
+| `ndf release-steps verification-record` | 記録に任意の `environment`（反映した環境の名前）を持てる | バージョンの保存先が `none` で、`environment` が無いか、同じ値のリリース記録の `environment` と違えば書かない（`precondition`） | バージョンを持つリポジトリは同じ |
+
+### 名前の照合
+
+工程の名前は、指定した場所ごとに次の定義と照合する。
+
+| 指定した場所 | 照合する定義 |
+| --- | --- |
+| `modes.<モード>.stages` | そのモードの工程の集合。モードの名前自体は、モードの定義の一覧と照合する |
+| `stages`（全モード共通）と種類の既定 | 全モードの工程の和集合 |
+
+共通の `stages` に、作ろうとするモードでは使わない工程があっても、ほかのモードにあれば誤りにしない。たとえば `stages` に「リファクタリング」の指定があっても、`light` のスプリントは作れる。
+
+### 閉じる条件を外したときの閉じ方
+
+`close-check` の `--require` は、リリース後テストの記録が無ければ課題を閉じない指定である。今の手順書は、リリース後テストを通る経路でだけ付ける。設定とこの引数の組み合わせは次のとおりである。
+
+| `close.release_verification` | 記録が無いとき | 記録を渡したとき |
+| --- | --- | --- |
+| 省略、または `required: true` | 今と同じ。`--require` があれば閉じない。無ければ閉じる | 今と同じ。不合格は閉じず、保留は人が決める |
+| `required: false` | `--require` があっても閉じる | 同上 |
+
+`required: true` は、`--require` を足さない。リリース後テストを通らない経路（`light` など）で記録を求めると、課題を閉じられなくなるためである。
+
+手順書（`progress-tracking` の「スプリントを閉じる」）は、条件を外していても次を守る。
+
+- 記録の PR から既存のリリース後テストの記録を取得し、あれば `--verification` に渡す
+- 取得に失敗したときは、記録が無いとは扱わず、課題を閉じずに「失敗」と報告する。コメントを読めて記録が 0 件のときだけ、`--verification` を省く
+- 条件を外した設定で閉じた課題は、結果の `verified` が真のときだけ、本文の受け入れ条件にチェック（`[x]`）を付ける。`verified` は、渡した記録にその課題の行があり、すべて合格のとき真である。偽なら、閉じる報告に「テストで未確認」と書き、チェックを変えない
+- 条件を外していないリポジトリのチェックの付け方は、今と同じである
 
 ### 設定の確かめが示す食い違い
 
@@ -168,34 +204,76 @@ graph TD
 | `flow_unknown_kind` | 知らない種類（10a） | 止まる |
 | `flow_unknown_name` | 無いモードか工程の名前。モードの下の指定では、そのモードに無い工程も誤りにする（10b） | 止まる |
 | `flow_gate_disabled` | 承認の工程の無効化（5） | 止まる |
-| `flow_close_conflict` | あるモードで工程が無効なのに、閉じる条件がその工程の記録を求める。対応は、リリース後テストと `release_verification`、振り返りと `retrospective_line`（10c） | 止まらない |
-| `flow_version_conflict` | バージョンの保存先が `none` なのに、バージョンを求める指定がある。該当する指定: バージョンを持つ種類の `workflow.kind`・`release.tag`・`release.github_release: true`・`deliveries` の `versioned: true` のどれか（10d） | 止まらない |
+| `flow_close_conflict` | 下の判定式に当たる（10c） | 止まらない |
+| `flow_version_conflict` | `branch_strategy.release.version_store.kind` が `none` なのに、下のバージョンを求める指定がある（10d） | 止まらない |
+
+`flow_close_conflict` は、モードごとに、次の 3 つがすべて成り立つときに示す。対応する組は、工程「リリース後テスト」と `release_verification`、工程「振り返り」と `retrospective_line` である。
+
+1. そのモードの工程の集合に、その工程がある
+2. 種類の既定・`stages`・`modes.<モード>.stages` を重ねた後の指定が `enabled: false` である
+3. 対応する `close.<条件>.required` が `false` でない
+
+モードの工程表に最初から無い工程と、実行時の条件（工程の定義の `when`）で省かれる工程は、無効に数えない。`--disable` はスプリントごとの指定なので、確かめの対象にしない。
+
+バージョンを求める指定は、次の 2 つである。
+
+| 指定 | 判定元 |
+| --- | --- |
+| `workflow.kind` が、バージョンを持つ種類である | `branch-strategy-presets.json` の `kinds.<種類>.section.release.version_store.kind` が `none` でない種類。今の値では `web-develop`・`mobile`・`plugin` |
+| 配布経路の 1 つ以上が `versioned: true` である | `branch_strategy.release.deliveries` の全要素の `versioned` |
+
+`release.tag` が `null` でない指定と `release.github_release: true` は、`version_store.kind: none` と組み合わせると設定のスキーマ（規則 R8）が形の誤りにする。食い違いとしては扱わない。
 
 ## 処理の流れ
 
-バージョン番号を持たないリポジトリで、マージから課題を閉じるまでは次の順になる。
+バージョン番号を持たないリポジトリでは、マージから課題を閉じるまでが次の順になる。「本番の PR」は本番ブランチへマージした PR、「作業の PR」はそのマージに含まれた変更の PR である。「含めた PR」はこの 2 つを合わせた、リリース記録を書く先である（決定 6）。
 
 ```mermaid
 sequenceDiagram
   participant R as リリースの担当
   participant S as release-steps
-  participant G as 本番の PR
+  participant G as 含めた PR
   participant V as release-verification
   participant C as close-check
-  R->>S: record（--version "main abc1234"）
-  S->>G: リリース記録を含めた PR へ書く
+  R->>S: record（--pr 本番の PR、--version、--environment）
+  S->>G: 含めた PR の各々へリリース記録を書く
   V->>V: 反映した環境で、出したものが動くことを確かめる
-  V->>S: verification-record（environment つき）
-  S->>G: リリース後テストの記録を書く
-  C->>C: 流れの設定の閉じる条件を読む
+  V->>S: verification-record（--pr 番号が最も小さい含めた PR）
+  S->>G: その 1 本へリリース後テストの記録を書く
+  G-->>C: 閉じる担当が同じ 1 本の記録を取得して渡す
   C-->>R: 閉じてよいか・外した条件と理由
 ```
 
 この図に含めない要素は、流れの設定の読み手・種類の既定・設定のスキーマ・スプリントの作成・設定の確かめ・流れの文書である。これらの関係は「解き方の全体像」の図にある。
 
-「リリースの担当」は、1 つのスプリントではデプロイの工程の worker、並列の計画のまとめたリリースではオーガナイザーである。オーガナイザーは、レーンの PR ごとに `record` を打つ。その後、その PR を `ndf lanes release --release` に渡す。`record` を打ち忘れると `verification-record` が「リリース記録を持たない」で止まる。
+「リリースの担当」は、進め方で次のように変わる。
+
+| 進め方 | 記録する人 | 記録の後にすること |
+| --- | --- | --- |
+| スプリントを 1 つだけ進める | デプロイ担当の実行役（worker。作業を 1 つ受け持つ AI） | デプロイの工程を終える |
+| 複数のスプリントを別々の作業単位（レーン）で進め、まとめて本番へ出す | 並列作業の取りまとめ役（オーガナイザー） | `ndf lanes release` で各レーンへリリース結果を知らせる |
+
+レーンを進める役は、スプリントの進行担当（conductor）である。役割の説明は [3 層で工程を通す](../plugins/ndf/skills/development-workflow/references/agent-layers.md) と [並列開発のオーガナイザー](../plugins/ndf/skills/development-workflow/references/parallel.md) にある。
+
+`record` は本番の PR ごとに 1 回打つ。含めた PR の全部へ 1 回で書くので、N 本のレーンの変更を 1 本の本番の PR にまとめたときは 1 回で済む。レーンの PR を 1 本ずつ本番ブランチへマージしたときは、本番の PR が N 本あるので N 回になる。`ndf lanes release --release` には、決定 6 の規則で選んだ記録の PR（番号が最も小さい含めた PR）を渡す。`record` を打ち忘れると、`verification-record` が「リリース記録を持たない」で止まる。
 
 ## 決定の記録
+
+各決定の「根拠」の番号は、[プロジェクトの判断基準（MVV）](../.ndf/mvv.md) の次の項目を指す。
+
+| 番号 | 項目 |
+| --- | --- |
+| Value 1 | 人の判断を、読み切れる量の大事な所だけにする |
+| Value 3 | 同じ手順は毎回同じ結果になる |
+| Value 4 | どのプロジェクトでもそのまま使える |
+| Value 5 | 速く届く |
+| Value 8 | 正しいデータ構造で作られる（同じ事実を 2 か所に持たない） |
+| Value 9 | 責務の分かれた設計で作られる |
+| Value 11 | 重複と冗長が無い（定義から作れるものは生成する） |
+| Value 12 | 調べて分析した、実績のある最新のやり方で作られる |
+| Value 13 | 確かめたことだけが済んだとされる |
+| Value 14 | 判断の理由が残り、語がそろっている |
+| Value 15 | 人も AI も同じ入口から使える |
 
 ### 決定 1: 同じ事実を 2 か所に持たないため、流れの設定を今の `.ndf/project.json` の `workflow` に足す
 
@@ -218,7 +296,7 @@ sequenceDiagram
 ### 決定 3: 確かめていないことを済んだと記録しないため、種類の既定は工程の無効化だけを持ち、閉じる条件はどの種類も外さない
 
 - **質問**: 種類ごとの既定に、何を持たせるか
-- **選んだ案**: `workflow-kinds.json` は行わない工程と理由だけを持つ。今の既定で当たるのは `docs` の「リファクタリング」である（業務文書だけのリポジトリは、直すコードの構造を持たない）。閉じる条件はどの種類も 2 つとも求め、外すのは利用者の `workflow.close` だけにする。リリースで求める結果の形は、ブランチ戦略の `release.version_store.kind` が決める（種類ごとの値は `branch-strategy-presets.json` にある）
+- **選んだ案**: `workflow-kinds.json` は行わない工程と理由だけを持つ。今の既定で当たるのは `docs` の「リファクタリング」である（業務文書だけのリポジトリは、直すコードの構造を持たない）。閉じる条件はどの種類も 2 つとも求め、外すのは利用者の `workflow.close` だけにする。リリースで求める結果（デプロイの工程の出力 `product_version` に入れる値が、バージョン番号か、反映した変更を特定する値か）は、ブランチ戦略の `release.version_store.kind` が決める（種類ごとの値は `branch-strategy-presets.json` にある）
 - 採らなかった案: `web-trunk` の既定で閉じる条件を外す（利用者が何も書かないのに、テストの記録の無い課題が閉じる）
 - 採らなかった案: バージョンの有無を `workflow-kinds.json` にも持つ（同じ事実が 2 か所になる）
 - **代償**: `web-trunk` を指定しただけでは何も省かれない。省くには `close` を書く
@@ -238,7 +316,7 @@ sequenceDiagram
 ### 決定 5: 閉じる条件の判定を実行ごとにぶれさせないため、外した条件は `close-check` が設定を読んで返す
 
 - **質問**: 閉じる条件の除外を、手順書を読む AI に任せるか、コマンドが返すか
-- **選んだ案**: `close-check` が `workflow.close` を読み、求める条件と外した条件（理由つき）を結果に入れる。閉じる報告には外した条件を転記する。外せるのは「テストの記録があること」と「振り返りの行があること」だけである。記録があれば不合格は閉じず、保留は人が決める（今と同じ）
+- **選んだ案**: `close-check` が `workflow.close` を読み、求める条件と外した条件（理由つき）を結果に入れる。閉じる報告には外した条件を転記する。外せるのは「テストの記録があること」と「振り返りの行があること」だけである。記録があれば不合格は閉じず、保留は人が決める（今と同じ）。テストの記録を外しても、手順書は既存の記録を取得して渡す。テストで確認できていない課題の受け入れ条件には、チェックを付けない（「閉じる条件を外したときの閉じ方」）
 - 採らなかった案: 手順書に「設定を読む」と書くだけにする（読み方が実行ごとに変わり、テストで確かめられない）
 - 採らなかった案: `close-check` が振り返りの行も GitHub から読んで判定する（今 AI が見ている条件をコマンドへ移すことになり、この要求の範囲の外である）
 - **代償**: 振り返りの行を見るのは今と同じく AI で、コマンドは「求めるか」までを返す
@@ -247,7 +325,18 @@ sequenceDiagram
 ### 決定 6: バージョンの無いリリースの後も課題を閉じられるようにするため、`release-steps record` に出したものを指す値を渡せるようにする
 
 - **質問**: バージョン番号を持たないリポジトリのリリース記録を、誰がどう書くか
-- **選んだ案**: `record --version <値>` を足す。バージョンの保存先が `none` のときだけ受ける。head の名前は問わない。本番ブランチへマージした PR と、その中の単位の PR を「含めた PR」にする。値はデプロイの工程の `product_version` と同じものを渡す
+- **選んだ案**: `record --version <値> --environment <環境の名前>` を足す。バージョンの保存先が `none` のときだけ受ける。head の名前は問わない。値には、デプロイの工程の出力 `product_version` と同じものを渡す。この値は、リリース記録とリリース後テストの記録では項目 `version` に入る
+
+  記録を書く先は次のとおりである。
+
+  | 項目 | 決め方 |
+  | --- | --- |
+  | 含めた PR（`included`） | `--pr` に渡した本番の PR と、そのマージに含まれた作業の PR。作業の PR は、今の `record` と同じ規則（リリースのコミットの「含む PR」の行、無ければ本番の PR のコミットの件名）で読む |
+  | 作業の PR が無い直接のマージ | 含めた PR は本番の PR の 1 本だけになる |
+  | リリース記録 | 含めた PR の各々のコメントに書く |
+  | リリース後テストの記録 | 含めた PR のうち番号が最も小さい 1 本に書く。閉じる担当も同じ規則で選んで読む |
+
+  単独のスプリントでも並列のまとめたリリースでも、決め方は同じである。信用する書き手のコメントだけを読む検査と、打ち直しで同じ記録を重ねない確かめは、今のまま使う
 - 採らなかった案: 手順書の人が読む形のコメントを手で書く（テストの記録と閉じる判定は機械が読むマーカーの記録を求める）
 - 採らなかった案: `verification-record` がリリース記録も書く（テストを外したリポジトリにリリース記録が残らない）
 - 採らなかった案: 値をマージのコミットからコマンドが作る（まとめたリリースでオーガナイザーが記録した値と食い違う）
@@ -261,6 +350,8 @@ sequenceDiagram
 
 - **質問**: 反映した環境を対象にしたテストの結果を、どう表すか
 - **選んだ案**: 記録のスキーマに任意の `environment` を足し、バージョンの保存先が `none` のリポジトリでは必須にする。対象は「出したものを指す値」と「環境の名前」の 2 つで決まる
+- **今回の反映の特定**: 本番の環境の名前は、リリース記録も持つ（`record --environment`。打つ人は、`branch_strategy.release.deliveries` の本番に届く要素が 1 つならその `target` を渡す）。`verification-record` は、同じ値のリリース記録と `environment` が一致する記録だけを書く。テストをする人は、`ndf release-steps records` でリリース記録の環境の名前を読んで使う。同じ変更を検証環境へ反映した結果は本番の PR に書けないので、閉じる側が検証環境の合格で本番の課題を閉じることは無い
+- 採らなかった案: `close-check` が環境を照合する（本番の環境の名前を閉じる時点でもう一度決めることになる。書く時点で断れば、読む側は今の「同じ値の最後の記録」の規則のままでよい）
 - 採らなかった案: バージョンの無いリポジトリ向けの別の記録を作る（閉じる判定の読み手が 2 つになる）
 - 採らなかった案: `version` の値に環境の名前を混ぜる（リリース記録の値と一致しなくなる）
 - **代償**: 必須かどうかはスキーマでなくコマンドが決める
@@ -292,18 +383,27 @@ sequenceDiagram
 - **代償**: リリースとレビューが 2 回になる。同じスキーマと手順書を 2 回触る
 - 根拠: Value 5（MVV バージョン 11）
 
-### 決定 10: 利用者が 1 か所で読めるように、種類ごとの流れは `development-workflow` の参照文書に書く
+### 決定 10: 利用者が 1 か所で読み、値がずれないように、種類ごとの流れの文書は定義から生成する
 
-- **質問**: 受け入れ条件 12 の文書を、どこに置くか
-- **選んだ案**: `skills/development-workflow/references/project-flow.md` を新設する。表にするのは、種類ごとの行わない工程、閉じる条件、本番の承認の場面、結果の形である。値の正本（`workflow-kinds.json` と `branch-strategy-presets.json`）も指す。モードごとの工程の並びと要否は、同じ Skill の工程表へのリンクの先で読み、種類で変わる分だけをこの文書に書く
+- **質問**: 受け入れ条件 12 の文書を、どこに置き、どう保つか
+- **選んだ案**: `skills/development-workflow/references/project-flow.md` を新設する。値の表はデータから生成し、手で書き写さない。閉じる条件はデータを持たないので、「どの種類でも変わらず、利用者が 2 つを外せる」ことを本文に書き、条件の本文は `progress-tracking` の「閉じる条件」を指す
+
+  | 生成する表 | 正本 |
+  | --- | --- |
+  | モードごとの工程の並びと、条件で省く工程 | `contracts/workflow/modes/*.json` と工程の定義 |
+  | 種類ごとに省く工程と理由 | `contracts/data/workflow-kinds.json` |
+  | 種類ごとの本番の承認の場面と、バージョンの保存先 | `contracts/data/branch-strategy-presets.json` |
+
+  生成と一致の確かめは、今ある `scripts/check-ndf-contracts.py` に足す（`--write` で書き出し、引数が無ければ違いを違反にする）。CI の job は増やさない。ページには、値が初期値であり、利用者の設定が優先することも書く
 - 採らなかった案: `docs/specifications/` に置く（プラグインと一緒に利用者へ届かない）
-- 採らなかった案: 表をコマンドで生成する（行が 5 つの表のために、生成の仕組みと検査が増える）
-- **代償**: 既定を変えたら、データと文書の両方を直す
-- 根拠: Value 11 / Value 4（MVV バージョン 11）
+- 採らなかった案: 表を手で書いて正本を指す（データと同じ値を 2 か所に持ち、更新漏れを検出できない）
+- 採らなかった案: 値を書かず正本へのリンクだけにする（利用者が 1 つの文書で読めず、受け入れ条件 12 を満たせない）
+- **代償**: 生成の部品が 1 つ増える。既定を変えたら、生成し直したファイルも差分に含める
+- 根拠: Value 11 / Value 8（MVV バージョン 11）
 
 ## 影響と危険
 
-- **働く範囲**: NDF を使うすべてのリポジトリ。流れの設定を書かなければ、変わるのは `release-steps record --version` と記録の `environment` を使える点だけである
+- **働く範囲**: NDF を使うすべてのリポジトリ。流れの設定を書かなければ、変わるのは `release-steps record` の `--version`・`--environment` と記録の `environment` を使える点、`close-check` の結果に項目が増える点だけである
 - **プロジェクトごとに違うもの**: 種類・工程の要否・閉じる条件は `workflow` の設定で受ける。バージョンの有無は `branch_strategy` の設定、出したものを指す値は引数で受ける
 - **当たるモード**: 工程の要否は全モード。閉じる条件は課題を閉じる全経路
 - **壊れうる箇所**: `workflow.stages` の工程の名前に誤りがあるリポジトリは、次のスプリントの作成で止まる（要求が認めた変化）
@@ -336,17 +436,17 @@ sequenceDiagram
 | 2 | バージョンの無い設定で、リリース記録・テストの記録・閉じる判定が続けて通る | `record --version` が head の名前を求めると落ちる |
 | 3 | `kind: docs` でスプリントを作ると、「リファクタリング」が理由つきで無効の行になる | 種類の既定を重ねないと落ちる |
 | 4 | モードの下の指定は、そのモードだけで工程を無効にする。理由が無ければ作らない | モードを見ずに重ねる、または理由の無い指定を通すと落ちる |
-| 5・I1 | `stages`・`modes` のどちらで承認の工程を無効にしても作らない。別の層で有効に戻しても作らない | 重ねた後の値だけを見ると落ちる |
-| 6 | テストの記録を外すと、記録なしで `--require` を付けても閉じてよいと返し、外した条件と理由が結果に載る | 外した条件を結果に載せないと落ちる |
+| 5・I1 | `stages`・`modes` のどちらで承認の工程を無効にしても作らない。別の層で有効に戻しても作らない。保護する工程は、テスト用の工程定義の `StageDef.gates` で決まる | 重ねた後の値だけを見る、または工程の名前を固定すると落ちる |
+| 6 | テストの記録を外すと、記録なしで `--require` を付けても閉じてよいと返し、外した条件と理由が結果に載り、`verified` は偽である。省略と `required: true` では、`--require` の有無どおりに判定する | 外した条件を結果に載せない、`required: true` で `--require` を足す、記録なしで `verified` を真にすると落ちる |
 | 7 | 振り返りの行を外すと、結果がその条件を求めないと返し、理由が載る | 常に求めると返すと落ちる |
-| 8・I2 | 両方の条件を外しても、不合格の行がある課題は閉じない | 外した条件の記録を読み飛ばすと落ちる |
-| 9 | バージョンの無い値と `environment` のテストの記録を書け、`close-check` が読む。`environment` が無ければ書かない | `environment` を必須にしないと落ちる |
-| 10 | (a)〜(d) のそれぞれで、箇所と理由が `items` に出る。食い違いの無い設定では出ず、終了コードは変わらない | 判定のどれか 1 つを外すと落ちる |
-| 11 | 知らない種類か無い名前があると、ステートマシンを作らずに理由を示す | 無い名前を読み飛ばすと落ちる |
-| 12 | 参照文書へのリンクが切れていない（文言は照合しない） | 文書を消すとリンクの検査が落ちる |
-| 13・I3 | 流れの設定を持つリポジトリで `project write` と `branch-strategy` の書き出しを打っても、`workflow` が変わらない | 書き出しが `workflow` を落とすと落ちる |
+| 8・I2 | 両方の条件を外した設定で、`close-check --require --verification <不合格の記録>` が閉じないと返す。手順書が記録を取得して渡すことは文言のテストで縛らず、コードレビューと振る舞いの確認で見る | 条件を外したときに `--verification` を読み飛ばすと落ちる |
+| 9 | バージョンの無い値と `environment` のテストの記録を書け、`close-check` が読む。`environment` が無いか、リリース記録と違えば書かない | `environment` を必須にしない、またはリリース記録と照らさないと落ちる |
+| 10 | (a)〜(d) のそれぞれで、箇所と理由が `items` に出る。食い違いの無い設定では出ず、終了コードは変わらない。工程表に無い工程と `when` で省く工程は (c) にしない。(d) は種類と `deliveries` の `versioned` の両方で出る | 判定のどれか 1 つを外す、または工程の無いモードを (c) にすると落ちる |
+| 11 | 知らない種類か無い名前があると、ステートマシンを作らずに理由を示す。共通の `stages` に別のモードだけの工程があっても作れる | 無い名前を読み飛ばす、または共通の `stages` を作るモードだけと照らすと落ちる |
+| 12 | 参照文書の生成した表がデータから生成し直した内容と同じである（`check-ndf-contracts.py`）。参照文書へのリンクが切れていない（文言は照合しない） | データだけを変えると生成の確かめが落ちる。文書を消すとリンクの検査が落ちる |
+| 13・I3 | `kind`・`stages`・`modes`・`close` を持つリポジトリで `project write` と `branch-strategy` の書き出しを打っても、4 つの指定が変わらない | 書き出しが `workflow` を落とすと落ちる |
 | I5 | 理由の無い `required: false` は形の誤りになる | 理由を任意にすると落ちる |
-| 決定 6 | バージョンを持つ設定で `--version` を渡すと書かずに止まる | 引数を常に受けると落ちる |
+| 決定 6 | バージョンを持つ設定で `--version` を渡すと書かずに止まる。含めた PR の各々へ書き、作業の PR が無ければ本番の PR へ書く。打ち直しで重ねない | 引数を常に受ける、または本番の PR にだけ書くと落ちる |
 
 ## 設計の結果
 
@@ -354,7 +454,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4580 | 実装する | — | `plugins/ndf/contracts/data/workflow-kinds.json`（新設）、`plugins/ndf/contracts/schemas/project-workflow.schema.json`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/schemas/release-verification.schema.json`、`plugins/ndf/contracts/schemas/io/records.result.schema.json`、`plugins/ndf/contracts/schemas/io/project.result.schema.json`、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`、`plugins/ndf/src/ndf/progress/flow.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/domains/project/cli.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/domains/release/cli.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/project-flow.md`（新設）、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-workflow.md`、`plugins/ndf/tests/progress/test_flow.py`（新設）、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/domains/project/test_project_cli.py`、`plugins/ndf/tests/domains/records/test_cli.py`、`plugins/ndf/tests/domains/records/test_close.py`、`plugins/ndf/tests/domains/release/test_release_record.py` |
+| #4580 | 実装する | — | `plugins/ndf/contracts/data/workflow-kinds.json`（新設）、`plugins/ndf/contracts/schemas/project-workflow.schema.json`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/schemas/release-verification.schema.json`、`plugins/ndf/contracts/schemas/io/records.result.schema.json`、`plugins/ndf/contracts/schemas/io/project.result.schema.json`、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`、`plugins/ndf/src/ndf/progress/flow.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/domains/project/cli.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/domains/release/cli.py`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/project-flow.md`（新設）、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-workflow.md`、`plugins/ndf/tests/progress/test_flow.py`（新設）、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/domains/project/test_project_cli.py`、`plugins/ndf/tests/domains/records/test_cli.py`、`plugins/ndf/tests/domains/records/test_close.py`、`plugins/ndf/tests/domains/release/test_release_record.py`、`scripts/check-ndf-contracts.py`、`scripts/contracts_lib/project_flow_doc.py`（新設） |
 
 ## 未確認のまま残ること
 
