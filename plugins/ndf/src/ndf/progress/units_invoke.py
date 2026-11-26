@@ -93,7 +93,10 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
     remote = g.remote()
     tip = _fetched_tip(g, remote, branch) if branch is not None else None
     uncommitted = _uncommitted_plans(g, issues)
-    seen = [*_plans_at(g, "HEAD", issues), *(_plans_at(g, tip, issues) if tip is not None else []), *_worktree_plans(root, uncommitted)]
+    head = g.rev_parse("HEAD")
+    read: dict[str, list[PlanDoc]] = {}  # コミットの SHA ごとの実装計画（同じコミットを 2 度読まない）
+    commits = [head] if tip is None or tip == head else [head, tip]
+    seen = [*(p for c in commits for p in _plans_once(g, c, issues, read)), *_worktree_plans(root, uncommitted)]
     if not any(has_units(p.text) for p in seen):
         return _plain_route(work_dir)
     if uncommitted:
@@ -101,9 +104,12 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
         raise UnitsStopped("precondition", detail)
     project = ndf_settings(location, PROJECT_FILE)
     branch = _checked_branch(run, branch, project)
-    if tip is not None:
-        _catch_up(g, remote, branch, tip)
-    plans = _plans_at(g, "HEAD", issues)
+    if tip is not None and _catch_up(g, remote, branch, head, tip):
+        # 取り込んだコミットの設定で、配布先（I4）と単位の PR で待つチェックを決め直す
+        head = tip
+        project = ndf_settings(location, PROJECT_FILE)
+        branch = _checked_branch(run, branch, project)
+    plans = _plans_once(g, head, issues, read)
     if not any(has_units(p.text) for p in plans):
         return _plain_route(work_dir)
     units = _read_units(g, remote, plans, issues)
@@ -157,6 +163,13 @@ def _plans_at(g: Git, commit: str, issues: Sequence[int]) -> list[PlanDoc]:
     return [PlanDoc(p, plan_issues(p), b.decode("utf-8")) for p, b in zip(paths, blobs) if b is not None]
 
 
+def _plans_once(g: Git, commit: str, issues: Sequence[int], read: dict[str, list[PlanDoc]]) -> list[PlanDoc]:
+    """コミットの SHA の実装計画。`read` に読んだ結果があれば読み直さない。"""
+    if commit not in read:
+        read[commit] = _plans_at(g, commit, issues)
+    return read[commit]
+
+
 def _uncommitted_plans(g: Git, issues: Sequence[int]) -> list[str]:
     """変更・削除がコミットされていないか、追跡されていない、スプリントの課題の実装計画のパス。"""
     return sorted({p for p in g.status_paths() if _is_sprint_plan(p, issues)})
@@ -206,17 +219,17 @@ def _checked_branch(run: StageRun, branch: Optional[str], project: Mapping[str, 
     return registered
 
 
-def _catch_up(g: Git, remote: str, branch: str, tip: str) -> None:
-    """手元が遅れていればリモートの HEAD まで進める。分かれていれば止める（強制しない）。"""
-    head = g.rev_parse("HEAD")
+def _catch_up(g: Git, remote: str, branch: str, head: str, tip: str) -> bool:
+    """手元（`head`）が遅れていればリモートの HEAD（`tip`）まで進め、進めたかを返す。分かれていれば止める（強制しない）。"""
     if head == tip or g.is_ancestor(tip, head):
-        return
+        return False
     if not g.is_ancestor(head, tip):
         detail = f"手元の {branch}（{head}）と {remote} の {branch}（{tip}）が分かれている。揃えてから打ち直す"
         raise UnitsStopped("precondition", detail)
     done = g.merge_ff(f"refs/remotes/{remote}/{branch}")
     if done.returncode != 0:
         raise UnitsStopped("precondition", f"{branch} を {remote} の HEAD へ進められない: {done.stderr.strip()}")
+    return True
 
 
 def _read_units(g: Git, remote: str, plans: Sequence[PlanDoc], issues: Sequence[int]) -> tuple[Unit, ...]:
