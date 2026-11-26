@@ -229,5 +229,6 @@
 | [ndf-mvv-current-and-stage-inputs.md](ndf-mvv-current-and-stage-inputs.md) | 承認済みのプロジェクト MVV をマージ先のブランチから読む `ndf records mvv current`、スナップショットと識別子、担当の AI へ渡す経路と渡さない担当、`--base` から MVV を読むブランチの決め方、cross-review の指摘の終わり方を残す MVV の記録と改訂の兆候 |
 | [ndf-mvv-gate-every-pace.md](ndf-mvv-gate-every-pace.md) | 承認ゲートの手前で進め方によらず打つ MVV 判定（#3959 #4055）。判定を打つ条件と省く条件の分離・出力 mvv_gate の終わり方と停止理由の定型文・レビューの保留の規則（review_holds）・cross-review の記録の欠落で止まる mvv_record_failed・リリース承認ゲートを省かない止めと数えない service:mvv の回答・承認資料の根拠の行の確かめ（ndf records mvv cite）・--machine と工程の入力（stage-in）の確かめ・失敗の原因と診断の記録・決定の理由・テスト観点。手順は development-workflow の references/pace.md と approval-request.md が正 |
 | [ndf-writing-criteria-and-reading-check.md](ndf-writing-criteria-and-reading-check.md) | 文書の種類ごとの読み手と、通じない文の見分け方をまとめた基準を、書く・レビューする・直す AI の指示に入れる仕組み。cross-review の基準 6 の重要度と 2 ラウンド目以降の範囲、読み手役の合否と 2 回まで、確認の記録 `reading-checks.jsonl` と `ndf records reading`、記録の無い質問を止める hook `reading-check`（2 回まで。`NDF_HOOK_OFF` で止められる）と、そう決めた理由 |
+| [ndf-production-merge-approval.md](ndf-production-merge-approval.md) | 自動反映の本番チャネルへのマージを、承認の記録が無ければマージのコマンド `ndf ci merge` が停止する仕組み（#4409）。承認の対象と証跡・判定の値・`--production-gate` の 3 つの終え方・証跡を書く 3 経路・デプロイの `release-merge`・直前の照合と、そう決めた理由。手順は `development-workflow` の `references/production-merge.md` が正 |
 
 Skill の挙動仕様はここに置かない。Skill に関する詳細は対象 Skill の `SKILL.md` を参照する。

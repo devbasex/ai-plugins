@@ -17,7 +17,6 @@ Issue・コメント・PR の本文を書く操作は、公開範囲を読むエ
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -31,9 +30,13 @@ import httpx
 from githubkit import GitHub as Client
 from githubkit.exception import GraphQLFailed, PrimaryRateLimitExceeded, RateLimitExceeded, RequestError, RequestFailed
 
-from ndf.adapters import cli_floor, git, github_limits, write_gate
+from ndf.adapters import cli_floor, git, github_limits, github_merge, write_gate
 from ndf.adapters.github_limits import GRAPHQL, REST, RetryWithin
-from ndf.adapters.github_rules import NO_RULES, PULL_REQUEST_RULE, RuleFacts, classic_facts_of, merge_facts, rule_facts_of
+from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome, Verified
+
+# 呼び手（`ndf.domains.release.land`）が github から読む、github_merge の名前
+from ndf.adapters.github_merge import MERGE_COMMIT as MERGE_COMMIT
+from ndf.adapters.github_rules import NO_RULES, RuleFacts, classic_facts_of, merge_facts, rule_facts_of
 from ndf.contracts import limits
 
 T = TypeVar("T")
@@ -41,7 +44,7 @@ T = TypeVar("T")
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")
 PULL_FIELDS = (  # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
     "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation mergeCommit { oid }"
-    " isCrossRepository"
+    " isInMergeQueue isCrossRepository"
 )
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
@@ -51,63 +54,16 @@ PER_PAGE = 100
 TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
 # GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く。#3506）
 BOT_SUFFIX = "[bot]"
-# マージの要求を GitHub が断ったときの HTTP の状態（405: 規則・衝突、409: HEAD が変わった、422: 形）
-MERGE_REFUSED_STATUS = (405, 409, 422)
-# PR の node の ID と、迂回のマージ（`gh pr merge --admin` が呼ぶのと同じ mergePullRequest を、HEAD を添えて打つ。#3506 の決定 5）
-_PULL_ID = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } } }"
-_ADMIN_MERGE = (
-    "mutation($id: ID!, $head: GitObjectID!, $method: PullRequestMergeMethod!) {"
-    " mergePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: $method}) { pullRequest { merged } } }"
-)
-# マージの方式が基底で許されていない断りの停止理由の種類（方式を渡した呼び手が、ほかの断りと分けて方式を決め直す）
-METHOD_REFUSED = "merge_method"
 # マージの拒否を、拒否の後に読み直した `mergeStateStatus` で種類へ分ける（SF4）。標準エラーの文は読まない
 _REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_ci", "draft": "not_ci"}
-# マージキューが必須の基底で直接のマージを断る状態（GitHub は 405 で返す）。このときはキューへ入れ、待ちとして返す
-MERGE_QUEUE_REFUSED_STATUS = 405
-# マージキューへ入れた後の停止理由の種類（実際のマージまでは CI の待ちとして扱う）
-MERGE_QUEUE_PENDING = "ci_pending"
-_MERGE_QUEUE_STATE = (
-    "query($owner: String!, $name: String!, $number: Int!, $branch: String!) { repository(owner: $owner, name: $name) {"
-    " pullRequest(number: $number) { id isMergeQueueEnabled isInMergeQueue }"
-    " mergeQueue(branch: $branch) { configuration { mergeMethod } } } }"
+# マージ先の設定の読み取りに、token の利用者の login とアカウント ID（`viewer`）も同じ 1 回の要求で載せる（承認の証跡の書き手を照らす。#4409）
+_BRANCH_FILE = (
+    "query($owner: String!, $name: String!, $expr: String!) { viewer { login databaseId } repository(owner: $owner, name: $name) {"
+    " nameWithOwner object(expression: $expr) { ... on Blob { oid text } } } }"
 )
-_IN_MERGE_QUEUE = (
-    "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {"
-    " pullRequest(number: $number) { id isInMergeQueue } } }"
-)
-# `jump` は版上げの PR をキューの先頭へ入れる指定（#3672 の決定 18。承認の範囲を版上げの PR の head に固定する）
-_ENQUEUE = (
-    "mutation($id: ID!, $head: GitObjectID!, $jump: Boolean) {"
-    " enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, jump: $jump}) { clientMutationId } }"
-)
-_DEQUEUE = "mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }"
-# マージの方式 → 「基底に含まれたか」の確かめ方（3378-2）。ancestry は head が基底の祖先か、merged は PR がマージ済み
-# （`merged_at` がある）か。squash と rebase は新しいコミットを作り、head は基底の祖先にならない。
-# 並びは、設定が無いときに許された方式から選ぶ順
-ANCESTRY, MERGED = "ancestry", "merged"
-# merge commit の方式の名前（祖先の関係を保つ方式。呼び出し側が方式を固定するときに参照する）
-MERGE_COMMIT = "merge"
-
-
-class _MergeMethod(NamedTuple):
-    """マージの方式 1 つ。`landing` は基底に含まれたかの確かめ方、`setting` はリポジトリの設定の許可のキー
-    （ruleset に許す方式の指定が無いときに読む）、`graphql` は GraphQL の mergePullRequest の方式（PullRequestMergeMethod。#3506）。"""
-
-    landing: str
-    setting: str
-    graphql: str
-
-
-# マージの方式の唯一の定義（並びは設定が無いときに選ぶ順）。`MERGE_METHODS` は方式 → 確かめ方
-_MERGE_METHOD_SPECS = {
-    "squash": _MergeMethod(MERGED, "allow_squash_merge", "SQUASH"),
-    MERGE_COMMIT: _MergeMethod(ANCESTRY, "allow_merge_commit", "MERGE"),
-    "rebase": _MergeMethod(MERGED, "allow_rebase_merge", "REBASE"),
-}
-MERGE_METHODS = {name: spec.landing for name, spec in _MERGE_METHOD_SPECS.items()}
-# GraphQL の mergePullRequest のマージの方式（REST の merge_method → GraphQL の PullRequestMergeMethod。#3506）
-GRAPHQL_MERGE_METHODS = {name: spec.graphql for name, spec in _MERGE_METHOD_SPECS.items()}
+# token の利用者の login だけを読む問い合わせ。REST の `/user` と違い、GitHub App のインストールトークンと Actions の
+# `GITHUB_TOKEN` でもボットの login を返す
+_VIEWER = "query { viewer { login databaseId } }"
 # 信用の区分（#3364）。OWNER はリポジトリのオーナーでそのまま信用する。MEMBER・COLLABORATOR は所属を表すだけで
 # write を保証しない（read・triage もある）ため、対象リポジトリでの権限を読んで write 以上のときだけ信用する。
 # ほかの値（CONTRIBUTOR・FIRST_TIME_CONTRIBUTOR・FIRST_TIMER・MANNEQUIN・NONE と知らない値）の本文は信用しない入力
@@ -117,9 +73,6 @@ PERMISSION_CHECKED_ASSOCIATIONS = frozenset({"MEMBER", "COLLABORATOR"})
 WRITE_PERMISSIONS = frozenset({"admin", "write"})
 # リポジトリの公開範囲（GraphQL の `visibility`）。読めないリポジトリは UNKNOWN で、公開でないとして扱う
 PUBLIC, UNKNOWN = "PUBLIC", "UNKNOWN"
-# PR 本文の「マージの前に決める」残リスクのマーカーと、決めたことを表すチェック済みの項目（#2602）
-PREMERGE_MARK = "マージの前に決める"
-_CHECKED_ITEM = re.compile(r"^\s*[-*+]\s+\[[xX]\]\s")
 
 
 class GitHubError(Exception):
@@ -200,6 +153,21 @@ def _login(user: Any) -> str:
     return text_of(user["login"]) if isinstance(user, dict) else ""
 
 
+def _account_id(raw: Any) -> int:
+    """GitHub が発行するアカウント ID（REST の `user.id`・GraphQL の `databaseId`）。無い・読めなければ 0。"""
+    if not isinstance(raw, dict):
+        return 0
+    got = raw["id"] if "id" in raw else raw["databaseId"] if "databaseId" in raw else None
+    return got if isinstance(got, int) and not isinstance(got, bool) and got > 0 else 0
+
+
+class Viewer(NamedTuple):
+    """token の利用者。`account_id` は GitHub が発行するアカウント ID で、読めなければ 0（`login` は表示に使うだけ）。"""
+
+    login: str
+    account_id: int
+
+
 class Authored(NamedTuple):
     """書き手の付いた本文（Issue・PR・コメント）。`association` は GitHub の author_association（大文字）。
 
@@ -213,13 +181,16 @@ class Authored(NamedTuple):
     url: str = ""
     # 作成の後に編集されたか（REST の `updated_at` が `created_at` と違う）。編集された証跡は承認に数えない（#3506）
     edited: bool = False
+    # 書き手のアカウント ID（REST の `user.id`）。同じ名前の別のアカウントを分けるのに使う（#4409）。無ければ 0
+    author_id: int = 0
 
     @classmethod
     def from_rest(cls, raw: dict) -> Authored:
         url = text_of(raw["html_url"]) if isinstance(raw.get("html_url"), str) else ""
         created, updated = raw.get("created_at"), raw.get("updated_at")
         edited = isinstance(created, str) and isinstance(updated, str) and updated != created
-        return cls(_login(raw["user"]), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited)
+        user = raw["user"]
+        return cls(_login(user), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited, _account_id(user))
 
 
 class Pull(NamedTuple):
@@ -236,6 +207,8 @@ class Pull(NamedTuple):
     author: str
     association: str
     merge_sha: str = ""  # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
+    # マージキューに入っているか（GraphQL で読んだときだけ分かる。REST では偽。#4409 の決定 8）
+    queued: bool = False
     cross_repository: bool = False  # head のブランチがフォークにあるか（GraphQL で読んだときだけ埋める）
 
     @property
@@ -260,22 +233,23 @@ class Pull(NamedTuple):
             int(raw["number"]), "open" if state == "open" else "closed", bool(raw["merged"]), text_of(raw["headRefOid"]),
             text_of(raw["headRefName"]), text_of(raw["baseRefName"]), text_of(raw["body"]), text_of(raw["mergeStateStatus"]).lower(),
             _login(raw["author"]), text_of(raw["authorAssociation"]).upper(),
-            text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "", bool(raw.get("isCrossRepository")),
+            text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
+            raw.get("isInMergeQueue") is True, bool(raw.get("isCrossRepository")),
         )  # fmt: skip
 
 
-class MergeOutcome(NamedTuple):
-    """マージの結果。`kind` は断りの停止理由の種類（`refused`・`METHOD_REFUSED`・`base_conflict`・`not_ci`・`unknown`）か待ち（`MERGE_QUEUE_PENDING`）。"""
+class MergeExpect(NamedTuple):
+    """`ndf ci merge` が判定に使った値（#4409 の決定 8）。`pull` は判定の前に読んだ PR で、先の確認と方式の選択に使う。
 
-    merged: bool
-    kind: Optional[str]
-    detail: str
-    head_sha: str
+    `rejudge` は確かめの応答の設定の本文（無ければ None）で判定をやり直し、送ってよければ None、止めるなら結果を返す。
+    """
 
-
-def premerge_risks(body: str) -> list[str]:
-    """PR 本文の「マージの前に決める」残リスクの行のうち、決めたマーカー（チェック済みの項目 `- [x]`）の無いもの（#2602）。"""
-    return [line.strip() for line in body.splitlines() if PREMERGE_MARK in line and not _CHECKED_ITEM.match(line)]
+    pull: "Pull"
+    base: str
+    head: str
+    config_path: str
+    config_oid: Optional[str]
+    rejudge: Callable[[Optional[str]], Optional["MergeOutcome"]]
 
 
 def same_repo(a: str, b: str) -> bool:
@@ -283,45 +257,14 @@ def same_repo(a: str, b: str) -> bool:
     return a.lower() == b.lower()
 
 
-def pick_merge_method(declared: Optional[str], allowed: Sequence[str]) -> Optional[str]:
-    """マージの方式を決める（3378-2）。設定の値があればそれ（許されていなければ None）、無ければ許された方式の先頭。"""
-    if declared is not None:
-        return declared if declared in allowed else None
-    return allowed[0] if allowed else None
-
-
-def ruleset_merge_methods(rules: Iterable[dict]) -> Optional[list[str]]:
-    """ブランチに当たる規則（`GET /repos/{repo}/rules/branches/{branch}`）が許すマージの方式（`MERGE_METHODS` の並び）。
-
-    PR の規則が許す方式を指定していなければ None（リポジトリの設定を読む）。規則が 2 つ以上なら、どれもが許す方式だけ。
-    """
-    found: Optional[set[str]] = None
-    for rule in rules:
-        if rule["type"] != PULL_REQUEST_RULE or "allowed_merge_methods" not in rule["parameters"]:
-            continue
-        methods = set(rule["parameters"]["allowed_merge_methods"])
-        found = methods if found is None else found & methods
-    return None if found is None else [m for m in MERGE_METHODS if m in found]
-
-
-def settings_merge_methods(raw: Any, named: Optional[Sequence[str]]) -> list[str]:
-    """リポジトリの設定（`GET /repos/{repo}` の生の応答）と ruleset が許す方式 `named` の両方が許すマージの方式。
-
-    設定の項目が無い方式は候補に残し、項目があれば値が True の方式だけを許す。`named` が None なら設定だけで決める。
-    """
-    settings = raw if isinstance(raw, dict) else {}
-    allowed = [m for m, spec in _MERGE_METHOD_SPECS.items() if spec.setting not in settings or settings[spec.setting] is True]
-    return allowed if named is None else [m for m in allowed if m in named]
-
-
 def landed(pull: Pull, method: str, base_ref: str, repo: git.Git) -> bool:
     """PR の head が基底 `base_ref`（`origin/develop` など）に含まれたかを、マージの方式ごとに確かめる（3378-2）。
 
     merge は head が基底の祖先か（git）、squash と rebase は PR がマージ済みか（`merged_at`）で読む。
     """
-    if method not in MERGE_METHODS:
-        raise ValueError(f"知らないマージの方式: {method}（{', '.join(MERGE_METHODS)}）")
-    if MERGE_METHODS[method] == ANCESTRY:
+    if method not in github_merge.MERGE_METHODS:
+        raise ValueError(f"知らないマージの方式: {method}（{', '.join(github_merge.MERGE_METHODS)}）")
+    if github_merge.MERGE_METHODS[method] == github_merge.ANCESTRY:
         return repo.is_ancestor(pull.head_sha, base_ref)
     return pull.merged
 
@@ -350,23 +293,37 @@ def _refused_by_graphql(exc: GitHubError) -> bool:
     return exc.status == 0 and not exc.unreached and exc.quota is None
 
 
-def _preflight(pull: Pull, number: int, expect_head: Optional[str]) -> Optional[MergeOutcome]:
-    """マージの要求を送らずに返す結果（マージ済み・HEAD の食い違い・決めていない残リスク）。送ってよければ None。"""
-    if pull.merged:
-        return MergeOutcome(True, None, f"#{number} は既にマージ済み", pull.head_sha)
-    if expect_head and not git.sha_matches(expect_head, pull.head_sha):
-        return MergeOutcome(False, "refused", f"#{number} の HEAD が {expect_head} でない（今は {pull.head_sha}）", pull.head_sha)
-    risks = premerge_risks(pull.body)
-    if risks:
-        return MergeOutcome(False, "refused", f"#{number} の本文にマージの前に決める残リスクがある: {' / '.join(risks)}", pull.head_sha)
+def _file_at(repo: dict, key: str) -> FileAt:
+    """`object(expression)` の応答（キー `key`）を `FileAt` にする。Blob でない・無いなら本文と oid が None。"""
+    node = repo.get(key)
+    blob = node if isinstance(node, dict) and isinstance(node.get("oid"), str) else None
+    text = blob.get("text") if blob is not None and isinstance(blob.get("text"), str) else None
+    return FileAt(text_of(repo.get("nameWithOwner")), text, blob["oid"] if blob is not None else None)
+
+
+def _verified(repo: dict) -> Verified:
+    node = repo.get("pullRequest") if isinstance(repo.get("pullRequest"), dict) else {}
+    return Verified(
+        text_of(node.get("baseRefName")), text_of(node.get("headRefOid")), text_of(repo.get("nameWithOwner")), _file_at(repo, "config")
+    )
+
+
+def _verify(number: int, fresh: Verified, expect: MergeExpect, repo: str) -> Optional[MergeOutcome]:
+    """確かめの応答 `fresh` と判定に使った値を比べる。マージ先・HEAD が違えば `github_merge.TARGET_MOVED`、
+    ベースリポジトリが違えば `refused`。設定の oid だけが違えば、同じ応答の本文で判定をやり直す（設定を読み直す要求を
+    足さない）。送ってよければ None。"""
+    moved = github_merge.TARGET_MOVED
+    if fresh.base != expect.base:
+        return MergeOutcome(
+            False, moved, f"#{number} のマージ先が判定した {expect.base} から {fresh.base} へ変わった（判定からやり直す）", fresh.head
+        )
+    if not git.sha_matches(expect.head, fresh.head):
+        return MergeOutcome(False, moved, f"#{number} の HEAD が判定した {expect.head[:12]} から {fresh.head[:12]} へ動いた", fresh.head)
+    if not same_repo(fresh.repo, repo):
+        return MergeOutcome(False, "refused", f"#{number} のベースリポジトリ {fresh.repo} が {repo} と違う", fresh.head)
+    if fresh.config.oid != expect.config_oid:
+        return expect.rejudge(fresh.config.text)
     return None
-
-
-def _method_refusal(pull: Pull, number: int, method: Optional[str], allowed: Sequence[str]) -> MergeOutcome:
-    """マージの方式が基底のブランチで許されていないときの、要求を送らずに返す断り（3378-2）。"""
-    want = method if method is not None else "（設定なし）"
-    detail = f"#{number} のマージの方式 {want} は {pull.base_ref} で許されていない（許す方式: {', '.join(allowed)}）"
-    return MergeOutcome(False, METHOD_REFUSED, detail, pull.head_sha)
 
 
 def _response_body(resp: Any) -> Any:
@@ -445,6 +402,8 @@ class GitHub:
     api: Client
     # 書き手の login → 対象リポジトリでの権限（`permission`）。1 つの書き手を 1 回だけ読む
     _permissions: dict[str, str] = field(default_factory=dict, compare=False, repr=False)
+    # token の利用者（`viewer`。1 回だけ読む。読んだら 1 件）
+    _viewer: list[Viewer] = field(default_factory=list, compare=False, repr=False)
     # 二次レート制限の待ちの終わりを知らせる先。省けば `api` の throttler の `WriteGate`（A5）
     gate: Optional[write_gate.WriteGate] = field(default=None, compare=False, repr=False)
 
@@ -482,7 +441,9 @@ class GitHub:
 
     def repository(self, query: str, variables: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         """`repository(owner, name)` の下を読むクエリの `repository` の値。null（読めない・無い）なら `GitHubError`（3394-6）。"""
-        data = self.graphql(query, {**self._owner_name(), **(variables if variables is not None else {})})
+        return self._repository_of(self.graphql(query, {**self._owner_name(), **(variables if variables is not None else {})}))
+
+    def _repository_of(self, data: Any) -> dict[str, Any]:
         repo = data["repository"] if isinstance(data, dict) and "repository" in data else None
         if not isinstance(repo, dict):
             raise GitHubError(f"{self.repo} を GraphQL で読めない（repository が null。リポジトリが無いか、権限が無い）")
@@ -759,7 +720,7 @@ class GitHub:
         return out
 
     def allowed_merge_methods(self, branch: str) -> list[str]:
-        """基底のブランチ `branch` で許されたマージの方式（`MERGE_METHODS` の並び。3378-2）。
+        """基底のブランチ `branch` で許されたマージの方式（`github_merge.MERGE_METHODS` の並び。3378-2）。
 
         ruleset の PR の規則の `allowed_merge_methods` とリポジトリの設定の両方を読み、両方が許す方式だけを返す
         （ruleset は方式を絞るだけで、リポジトリの設定で無効にした方式を有効にしない）。ruleset に指定が無ければ設定だけで決める。
@@ -767,10 +728,10 @@ class GitHub:
         不明なので候補に残し、要求を送って GitHub の拒否（405）に判定を任せる。項目があれば値が True の方式だけを許す。
         """
         rules = self.rest("GET", f"/repos/{self.repo}/rules/branches/{quote(branch, safe='')}")
-        named = ruleset_merge_methods(rules if isinstance(rules, list) else [])
+        named = github_merge.ruleset_merge_methods(rules if isinstance(rules, list) else [])
         if named == []:
             return []
-        return settings_merge_methods(self.rest("GET", f"/repos/{self.repo}"), named)
+        return github_merge.settings_merge_methods(self.rest("GET", f"/repos/{self.repo}"), named)
 
     def check_runs(self, sha: str) -> list[dict]:
         """コミットのチェックの生の一覧を `total_count` に届くまで読む（`github.check-runs` ページまで）。"""
@@ -823,8 +784,46 @@ class GitHub:
             resp = self.api.request("GET", path)
         return bytes(resp.content)
 
+    def branch_file(self, base: str, path: str) -> FileAt:
+        """ブランチ `base` のファイル `path` の本文と blob の oid を、応答のリポジトリ名と合わせて 1 回の GraphQL で読む（#4409 の決定 3）。
+
+        同じ要求で token の利用者も読み、`viewer` が要求を増やさずに返せるよう残す。応答の `viewer` が空でも、空として残す
+        （読めなかった結果を同じ実行の中で読み直さない）。
+        """
+        data = self.graphql(_BRANCH_FILE, {**self._owner_name(), "expr": f"{base}:{path}"})
+        self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
+        return _file_at(self._repository_of(data), "object")
+
+    def _remember_viewer(self, node: Any) -> None:
+        if self._viewer:
+            return
+        login = node.get("login") if isinstance(node, dict) else None
+        self._viewer.append(Viewer(login if isinstance(login, str) else "", _account_id(node)))
+
+    def viewer(self) -> Viewer:
+        """この token の利用者（1 回だけ読む。`branch_file` が読んでいれば、空だったときも要求を送らない）。
+
+        GraphQL の `viewer` で読むので、GitHub App のインストールトークンと Actions の `GITHUB_TOKEN` ではボットを返す。
+        読めなければアカウント ID が 0（呼び手は証跡を数えも書きもしない）。届かない・上限は投げ直す。
+        """
+        if not self._viewer:
+            try:
+                data = self.graphql(_VIEWER, {})
+            except GitHubError as exc:
+                if exc.quota is not None or exc.passing:
+                    raise
+                data = {}
+            self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
+        return self._viewer[0]
+
     def merge(
-        self, number: int, expect_head: Optional[str] = None, method: Optional[str] = None, require_method: bool = False, jump: bool = False
+        self,
+        number: int,
+        expect_head: Optional[str] = None,
+        method: Optional[str] = None,
+        require_method: bool = False,
+        jump: bool = False,
+        expect: Optional[MergeExpect] = None,
     ) -> MergeOutcome:
         """PR をマージする。HEAD の食い違い・決めていない残リスクは要求を送らずに断り、拒否は種類で返す（SF4）。
 
@@ -834,9 +833,11 @@ class GitHub:
         `require_method` が真の呼び手（merge commit を必須とする本番へのマージ）だけ、キューの方式が `method` と
         違えばキューへ入れずに断る。偽なら（プランの merge ステップ。方式は自動で決めた既定値）キューの方式に従う。
         `jump` はキューへ入れるときに先頭へ入れる（版上げの PR。#3672 の決定 18）。
+        `expect`（`ndf ci merge` の判定の値）があれば、PR を読み直さずに `expect.pull` で先の確認をし、要求を送る直前に
+        マージ先・HEAD・設定の oid を照らす（#4409 の決定 8）。
         """
-        route = _MergeRoute(self._send_rest_merge, lambda exc: exc.status in MERGE_REFUSED_STATUS, "", require_method, jump)
-        return self._merge_with(number, expect_head, method, route)
+        route = _MergeRoute(self._send_rest_merge, lambda exc: exc.status in github_merge.MERGE_REFUSED_STATUS, "", require_method, jump)
+        return self._merge_with(number, expect_head, method, route, expect)
 
     def merge_as_admin(self, number: int, expect_head: str, method: Optional[str] = None) -> MergeOutcome:
         """PR を管理者の迂回でマージする（#3506 の決定 5）。`merge` と同じ先の確認を通り、GraphQL の `mergePullRequest` を
@@ -848,35 +849,45 @@ class GitHub:
         self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
 
     def _send_admin_merge(self, number: int, pull: Pull, chosen: str) -> None:
-        node = self.repository(_PULL_ID, {"number": int(number)})["pullRequest"]
-        variables = {"id": text_of(node["id"]), "head": pull.head_sha, "method": GRAPHQL_MERGE_METHODS[chosen]}
-        self.graphql(_ADMIN_MERGE, variables)
+        node = self.repository(github_merge.PULL_ID_QUERY, {"number": int(number)})["pullRequest"]
+        variables = {"id": text_of(node["id"]), "head": pull.head_sha, "method": github_merge.GRAPHQL_MERGE_METHODS[chosen]}
+        self.graphql(github_merge.ADMIN_MERGE_MUTATION, variables)
 
-    def _merge_with(self, number: int, expect_head: Optional[str], method: Optional[str], route: "_MergeRoute") -> MergeOutcome:
+    def _merge_with(
+        self, number: int, expect_head: Optional[str], method: Optional[str], route: "_MergeRoute", expect: Optional[MergeExpect] = None
+    ) -> MergeOutcome:
         """`merge`・`merge_as_admin` の共通の手順。先の確認と方式の選択を通り、`route.send` で要求を打つ。`route.refused` が
-        真とみなした誤りは PR を読み直して種類を返し、ほかは投げ直す（`route` の各項目は `_MergeRoute`）。"""
-        pull = self.pull(number)
-        early = _preflight(pull, number, expect_head)
+        真とみなした誤りは PR を読み直して種類を返し、ほかは投げ直す（`route` の各項目は `_MergeRoute`）。
+        `expect` があれば最初の読み直しをやめ、方式の問い合わせの後・送る直前に照らす。"""
+        pull = expect.pull if expect is not None else self.pull(number)
+        early = github_merge.preflight(pull, number, expect_head)
         if early is not None:
             return early
         allowed = self.allowed_merge_methods(pull.base_ref)
-        chosen = pick_merge_method(method, allowed)
+        chosen = github_merge.pick_merge_method(method, allowed)
         if chosen is None:
-            return _method_refusal(pull, number, method, allowed)
+            return github_merge.method_refusal(pull, number, method, allowed)
+        if expect is not None:
+            state = self.repository(github_merge.VERIFY_QUERY, {"number": int(number), "expr": f"{expect.base}:{expect.config_path}"})
+            stop = self._verify_before_send(number, state, expect)
+            if stop is not None:
+                return stop
         try:
             route.send(number, pull, chosen)
         except GitHubError as exc:
             if not route.refused(exc):
                 raise
             required = chosen if route.require_method else None
-            queued = self._enqueue(pull, required, route.jump) if exc.status == MERGE_QUEUE_REFUSED_STATUS else None
+            queued = self._enqueue(pull, required, route.jump, expect) if exc.status == github_merge.MERGE_QUEUE_REFUSED_STATUS else None
             if queued is not None:
                 return queued
             after = self.pull(number)
             return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
         return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha)
 
-    def _enqueue(self, pull: Pull, method: Optional[str], jump: bool = False) -> Optional[MergeOutcome]:
+    def _enqueue(
+        self, pull: Pull, method: Optional[str], jump: bool = False, expect: Optional[MergeExpect] = None
+    ) -> Optional[MergeOutcome]:
         """基底がマージキューを持てば PR を HEAD のままキューへ入れ、待ち（`ci_pending`）を返す。持たなければ None。
 
         直接のマージを 405 で断られたときだけ読む（キューの無い基底の要求の回数を増やさない）。既にキューにあれば入れ直さない。
@@ -884,42 +895,64 @@ class GitHub:
         （読めないときも）キューへ入れずに断る（キューは自分の方式でマージし、merge commit を求めた呼び手の祖先の関係が壊れる）。
         `jump` は先頭へ入れる（版上げの PR。後ろへ並ぶと先に並んだ変更が承認の外で入る。#3672 の決定 18）。
         要求には読んだHEAD（`expectedHeadOid`）を添え、承認の後にHEADが動いていれば GitHub が断る。
+        `expect` があれば、キューの状態の問い合わせで照らしてから入れ、入れた後に PR を読み直してマージ先が変わっていれば外す。
         """
-        repo = self.repository(_MERGE_QUEUE_STATE, {"number": int(pull.number), "branch": pull.base_ref})
+        repo = self._queue_state(pull, expect)
         node = repo["pullRequest"]
         if not isinstance(node, dict) or not node["isMergeQueueEnabled"]:
             return None
-        if method is not None:
-            queue_method = _queue_merge_method(repo.get("mergeQueue"))
-            if queue_method != method:
-                return MergeOutcome(
-                    False,
-                    "refused",
-                    f"#{pull.number} の基底 {pull.base_ref} のマージキューは {queue_method or '（読めない）'} でマージし、"
-                    f"求めた {method} と違う。キューへ入れずに止める（キューのマージの方式を {method} にする）",
-                    pull.head_sha,
-                )
-        if not node["isInMergeQueue"]:
-            self.graphql(_ENQUEUE, {"id": node["id"], "head": pull.head_sha, "jump": bool(jump)})
+        stop = self._verify_before_send(pull.number, repo, expect) if expect is not None else None
+        if stop is None and method is not None:
+            stop = github_merge.queue_method_refusal(pull, method, github_merge.queue_merge_method(repo.get("mergeQueue")))
+        if stop is None and not node["isInMergeQueue"]:
+            stop = self._put_in_queue(pull, node["id"], jump, expect)
+        if stop is not None:
+            return stop
         return MergeOutcome(False, MERGE_QUEUE_PENDING, f"#{pull.number} をマージキューへ入れた（マージキューの待ち）", pull.head_sha)
+
+    def _queue_state(self, pull: Pull, expect: Optional[MergeExpect]) -> dict[str, Any]:
+        """マージキューの状態の問い合わせ。`expect` があれば確かめの項目を足して同じ 1 回で読む。"""
+        variables: dict[str, Any] = {"number": int(pull.number), "branch": pull.base_ref}
+        if expect is None:
+            return self.repository(github_merge.MERGE_QUEUE_STATE_QUERY, variables)
+        return self.repository(github_merge.MERGE_QUEUE_VERIFY_QUERY, {**variables, "expr": f"{expect.base}:{expect.config_path}"})
+
+    def _verify_before_send(self, number: int, repo: dict[str, Any], expect: MergeExpect) -> Optional[MergeOutcome]:
+        """確かめの応答 `repo` を `_verify` で照らす。止めるとき（設定が変わり承認が要るようになった等）は、PR が
+        マージキューにあれば外す（止めた PR をキューがマージしない。読み直しの要求を足さない）。"""
+        stop = _verify(number, _verified(repo), expect, self.repo)
+        node = repo.get("pullRequest")
+        if stop is not None and isinstance(node, dict) and node.get("isInMergeQueue") is True:
+            self._leave_queue(node["id"])
+        return stop
+
+    def _leave_queue(self, node_id: Any) -> None:
+        """ノード ID `node_id` の PR をマージキューから外す要求を打つ（キューにあるかは呼び手が確かめる）。"""
+        self.graphql(github_merge.DEQUEUE_MUTATION, {"id": node_id})
+
+    def _put_in_queue(self, pull: Pull, node_id: Any, jump: bool, expect: Optional[MergeExpect]) -> Optional[MergeOutcome]:
+        """PR を HEAD のままキューへ入れる。`expect` があれば入れた後に読み直し、マージ先が変わっていれば外して
+        `github_merge.TARGET_MOVED` で断る。"""
+        self.graphql(github_merge.ENQUEUE_MUTATION, {"id": node_id, "head": pull.head_sha, "jump": bool(jump)})
+        if expect is None:
+            return None
+        after = self.pull(pull.number)
+        if after.base_ref == expect.base:
+            return None
+        self._leave_queue(node_id)
+        detail = f"#{pull.number} のマージ先がキューへ入れた後に {expect.base} から {after.base_ref} へ変わった。キューから外した"
+        return MergeOutcome(False, github_merge.TARGET_MOVED, detail, after.head_sha)
 
     def in_merge_queue(self, number: int) -> bool:
         """PR `number` が今マージキューに入っているか（キューが外したら偽）。"""
-        node = self.repository(_IN_MERGE_QUEUE, {"number": int(number)})["pullRequest"]
+        node = self.repository(github_merge.IN_MERGE_QUEUE_QUERY, {"number": int(number)})["pullRequest"]
         return isinstance(node, dict) and node["isInMergeQueue"] is True
 
     def dequeue(self, number: int) -> None:
         """PR `number` をマージキューから外す（入っていなければ何もしない）。"""
-        node = self.repository(_IN_MERGE_QUEUE, {"number": int(number)})["pullRequest"]
+        node = self.repository(github_merge.IN_MERGE_QUEUE_QUERY, {"number": int(number)})["pullRequest"]
         if isinstance(node, dict) and node["isInMergeQueue"]:
-            self.graphql(_DEQUEUE, {"id": node["id"]})
-
-
-def _queue_merge_method(queue: Any) -> Optional[str]:
-    """`mergeQueue { configuration { mergeMethod } }` のマージの方式（`MERGE_METHODS` の名前。読めなければ None）。"""
-    config = queue.get("configuration") if isinstance(queue, dict) else None
-    got = config.get("mergeMethod") if isinstance(config, dict) else None
-    return got.lower() if isinstance(got, str) else None
+            self._leave_queue(node["id"])
 
 
 def _issue_filter(labels: Sequence[str], state: str) -> dict[str, Any]:

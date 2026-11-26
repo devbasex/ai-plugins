@@ -25,13 +25,13 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import cli
 from ndf.adapters import git
 from ndf.contracts import chosen, limits, result, routing, worker_kinds, worker_paths
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
-from ndf.core import durable, durable_locks, loop
+from ndf.core import actors, durable, durable_locks, loop
 from ndf.core.plan import assemble_decide, model, queue_decide, steps, transition_decide
 from ndf.core.plan.files import read_json, write_json
 from ndf.core.plan.records import (
@@ -56,6 +56,16 @@ RESULTS_DIR = "results"
 # 差し込み `{work_base}` の保存先（状態の保存先の隣。git の共通ディレクトリの中で、リポジトリと同じボリュームにある）
 WORK_DIR = "work"
 WAITING_PREFIX = "waiting-"
+# 承認待ちへの回答の記録と、承認待ちで止まったステップの提示の識別子の写しの保存先（状態の保存先の下）
+ANSWERS_DIR = "answer-records"
+PRESENTED_DIR = "presented"
+# 回答コマンドが固定する待ちと提示の識別子の引数（`ndf plan next` が受ける）
+WAITING_FLAG = "--waiting"
+# 承認待ちのステップの提示の写しの欄（提示の識別子・承認資料のパス・本番へ反映され得るか）
+SHOWN_KEYS = ("presented_id", "presentation_path", "production")
+PRESENTED_FLAG = "--presented"
+# 旧い形の目印で、同じ回の提示を確かめられなかったことを示すキー（`read_marker` が足す。目印のファイルには書かない）
+UNCONFIRMED = "unconfirmed"
 TOPIC_ANSWER = "gate-answer"
 TOPIC_RETRY = "retry-wait"
 # 承認の回答を 1 回に待つ秒の方針（contracts/limits/）。期限で回答が無ければ待ち直す（回答の来ない承認ゲートを打ち切らない）
@@ -110,9 +120,51 @@ def waiting_path(state_dir: Path, run: str) -> Path:
     return state_dir / f"{WAITING_PREFIX}{run}.json"
 
 
+def _pick_shown(source: dict[str, Any]) -> dict[str, Any]:
+    """`source` から提示の写しの欄（`SHOWN_KEYS`）を抜き出す。無い欄は None。"""
+    return {k: source.get(k) for k in SHOWN_KEYS}
+
+
+def read_marker(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
+    """回 `run` の承認の回答を待つ目印。無ければ None。
+
+    回の id か提示の写しを持たない旧い形の目印（この形より前のバージョンが書いた目印）は、目印のファイルの回 `run` で補う。
+    提示の写しは、状態の保存先に残った待っているステップの写しのうち、同じ回 `run` が書いたと確かめられるものだけで補う。
+    同じ保存先で `--fresh` から流した別の回が同じステップの写しを上書きし得るため、確かめられなければ提示を空にし、
+    `UNCONFIRMED` を真にする（`advance` はこの待ちへの回答を記録も送信もせずに止め、待ちを残す）。
+    """
+    marker = read_json(waiting_path(state_dir, run))
+    if marker is None:
+        return None
+    if "run" not in marker:
+        marker = {**marker, "run": run}
+    if not isinstance(marker.get("shown"), dict):
+        saved = read_json(step_presented_path(state_dir, str(marker["step"])))
+        if isinstance(saved, dict) and saved.get("run") == run:
+            marker = {**marker, "shown": _pick_shown(saved)}
+        else:
+            marker = {**marker, "shown": {}, UNCONFIRMED: True}
+    return marker
+
+
+def is_unconfirmed(marker: dict[str, Any]) -> bool:
+    """旧い形の目印で、待ちと同じ回が書いた提示を確かめられなかったか（`read_marker`）。"""
+    return marker.get(UNCONFIRMED) is True
+
+
 def result_path(state_dir: Path, run: str) -> Path:
     """回 `run`（キーの名前）の結果のバックアップ。"""
     return state_dir / RESULTS_DIR / f"{run}.json"
+
+
+def answer_path(state_dir: Path, step: str) -> Path:
+    """承認待ちのステップ `step` への回答の記録（`ndf ci answer` が読む。#4409 の決定 7）。"""
+    return state_dir / ANSWERS_DIR / f"{step}.json"
+
+
+def step_presented_path(state_dir: Path, step: str) -> Path:
+    """承認待ちで止まったステップ `step` の提示の識別子（ステップの結果の `metrics.presented_id`）の写し。"""
+    return state_dir / PRESENTED_DIR / f"{step}.json"
 
 
 def stored_result(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
@@ -125,11 +177,17 @@ def stored_result(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
 
 @durable.step
 def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]:
-    """ステップを 1 回打つ耐久ステップ。済んだ呼び出しは回復のときに打ち直さない。"""
+    """ステップを 1 回打つ耐久ステップ。済んだ呼び出しは回復のときに打ち直さない。
+
+    承認待ちで止まれば提示の写しを、書いた回の id と組で残す（旧い形の目印を補うとき、同じ回の写しかを確かめる）。
+    """
     plan = model.parse(spec["plan"])
     ctx = steps.StepContext(plan, Path(spec["state_dir"]), dict(spec["values"]))
     out = steps.run(ctx, plan.step(step_id))
     out["attempt"] = attempt
+    if out["status"] == GATE:
+        shown = _pick_shown(out)
+        write_json(step_presented_path(ctx.state_dir, step_id), {"step": step_id, "run": spec.get("run_id"), **shown})
     if out["prs"]:
         _add_prs(ctx.state_dir, out["prs"])
     if out["outputs"]:
@@ -150,9 +208,15 @@ def record_choices(path: str, run_id: str, choices: list[list[Any]]) -> int:
 
 
 @durable.step
-def mark_waiting(path: str, step_id: str, seq: int, routes: dict[str, dict[str, Any]]) -> None:
-    """承認の回答を待つ目印を書く（呼び手と `wait` が読む）。"""
-    write_json(Path(path), {"step": step_id, "seq": seq, "routes": routes})
+def mark_waiting(path: str, step_id: str, seq: int, routes: dict[str, dict[str, Any]], run_id: str, state_dir: str) -> None:
+    """承認の回答を待つ目印を書く（呼び手と `wait` が読む）。
+
+    回の id と、待っているステップの提示の写し（提示の識別子・承認資料のパス・本番へ反映され得るか）を同じ目印に入れる。
+    結果の資料・回答コマンドと、回答を照らす値をこの一組から作り、別々に読んだ写しを混ぜない（#4409）。
+    """
+    shown = read_json(step_presented_path(Path(state_dir), step_id))
+    held = _pick_shown(shown) if isinstance(shown, dict) else {}
+    write_json(Path(path), {"step": step_id, "seq": seq, "run": run_id, "shown": held, "routes": routes})
 
 
 @durable.step
@@ -170,7 +234,7 @@ def _perform(spec: dict[str, Any], act: Any) -> Outcome:
         durable.recv(TOPIC_RETRY, act.seconds)
         return Outcome(SLEPT)
     if isinstance(act, AwaitAnswer):
-        mark_waiting(spec["waiting"], act.step, act.seq, spec["routes"][act.step])
+        mark_waiting(spec["waiting"], act.step, act.seq, spec["routes"][act.step], spec["run_id"], spec["state_dir"])
         answer = durable.recv(TOPIC_ANSWER, limits.seconds(ANSWER_WAIT))
         if answer is not None:
             clear_waiting(spec["waiting"])
@@ -332,7 +396,140 @@ def _recorded_key(root: Path, key: str) -> bool:
 
 def _routes(inv: Invocation) -> dict[str, dict[str, dict[str, Any]]]:
     """承認の回答を待つステップごとの、回答 → 次に打つコマンド（結果 JSON の command の形）。"""
-    return {s.id: {a: result.command(TOOL, "next", *inv.again, "--answer", a) for a in s.on_answer} for s in inv.plan.steps if s.on_answer}
+    return {
+        s.id: {a: result.command(TOOL, "next", *inv.again, "--answer", a, "--by", actors.HUMAN) for a in s.on_answer}
+        for s in inv.plan.steps
+        if s.on_answer
+    }
+
+
+def waiting_token(marker: dict[str, Any]) -> str:
+    """待ちの目印の識別子（`<回の id>:<ステップ>:<待ちの番号>`）。回答コマンドの `--waiting` に載せ、回答のときに今の待ちと照らす。
+
+    回の id を含めるので、同じ保存先で `--fresh` から流した別の回の待ちと、ステップと番号が同じでも取り違えない。
+    """
+    return f"{marker.get('run')}:{marker['step']}:{marker['seq']}"
+
+
+def shown_of(marker: dict[str, Any]) -> dict[str, Any]:
+    """待ちの目印に入れた提示の写し（提示の識別子・承認資料のパス・本番へ反映され得るか）。無ければ空。"""
+    shown = marker.get("shown")
+    return shown if isinstance(shown, dict) else {}
+
+
+def presented_of(marker: dict[str, Any]) -> Optional[str]:
+    """待ちの目印の提示の識別子。提示が無ければ None。"""
+    presented = shown_of(marker).get("presented_id")
+    return presented if isinstance(presented, str) and presented else None
+
+
+def presented_routes(marker: dict[str, Any]) -> dict[str, Any]:
+    """待ちの目印の routes に、今の待ち（`--waiting`）と提示の識別子（`--presented`。提示があれば）を足す。
+
+    利用者に示した回答コマンドを、示した待ちと資料に固定する（前の承認コマンドを再送しても次の承認待ちへ届かない。#4409）。
+    """
+    pin = [WAITING_FLAG, waiting_token(marker)]
+    presented = presented_of(marker)
+    if presented is not None:
+        pin += [PRESENTED_FLAG, presented]
+    routes: dict[str, Any] = {}
+    for answer, cmd in dict(marker["routes"]).items():
+        routes[answer] = None if cmd is None else {**cmd, "argv": [*cmd["argv"], *pin]}
+    return routes
+
+
+def presentation_of(marker: dict[str, Any]) -> tuple[Optional[str], Optional[bool]]:
+    """待ちの目印の承認資料のパスと「本番へ反映され得るか」。示していなければ None。"""
+    shown = shown_of(marker)
+    material = shown.get("presentation_path")
+    production = shown.get("production")
+    return (material if isinstance(material, str) and material else None), (production if isinstance(production, bool) else None)
+
+
+def presentation_fields(marker: dict[str, Any]) -> dict[str, Any]:
+    """`presentation_of` の値を、結果の行へそのまま足す形（示していない値は持たない）。"""
+    material, production = presentation_of(marker)
+    fields: dict[str, Any] = {"presentation_path": material} if material is not None else {}
+    return fields if production is None else {**fields, "production": production}
+
+
+class Reply(NamedTuple):
+    """承認待ちへの回答。回答した者（`by`）と、回答コマンドが固定した待ち（`--waiting`）と提示の識別子（`--presented`）を持つ。"""
+
+    answer: str
+    by: Optional[str] = None
+    waiting: Optional[str] = None
+    presented: Optional[str] = None
+
+
+def _pin_mismatch(baseline: dict[str, Any], reply: Reply) -> Optional[str]:
+    """回答コマンドの固定が今の待ちと提示に合わなければ理由。利用者の回答は、提示があれば提示の識別子を必ず照らす。"""
+    if reply.waiting is not None and reply.waiting != waiting_token(baseline):
+        return f"回答した待ち {reply.waiting} は今の待ち {waiting_token(baseline)} でない"
+    presented = presented_of(baseline)
+    if presented is None:
+        return None
+    human = reply.by == actors.HUMAN
+    if reply.presented is None and not human:
+        return None
+    if reply.presented != presented:
+        return f"回答した提示 {reply.presented or '（無い）'} は今の提示でない"
+    return "回答した待ち（--waiting）が無い" if reply.waiting is None and human else None
+
+
+def _unconfirmed_stop(inv: Invocation, baseline: dict[str, Any]) -> dict[str, Any]:
+    """同じ回の提示を確かめられない旧い形の待ち（`unconfirmed`）への回答を、記録も送信もせずに止める結果。
+
+    待ちは解かず、ステップも打ち直さない。プランのステップは任意のコマンドで、資料だけを作り直す一般の経路が無く、
+    打ち直すとマージのステップが資料を出す前にマージまで進み得る。そのため打ち直しのコマンドは示さず、停止理由だけを返す。
+    待ちの確かめ（`--waiting`）は先に済ませてある。
+    """
+    step = str(baseline["step"])
+    detail = (
+        f"{inv.plan.name} のステップ {step} の待ちは更新前のバージョンが残したもので、示した資料がこの待ちのものか確かめられないため、"
+        "回答を記録しない。資料だけを作り直す経路が無く、ステップを打ち直すとマージなどの操作が資料を出す前に進み得るので、"
+        "打ち直しは案内しない。承認の対象を人が確かめ、プランをどう進めるかを決める"
+    )
+    return result.stopped(TOOL, "precondition", detail)
+
+
+def _deliver(inv: Invocation, baseline: Optional[dict[str, Any]], reply: Reply) -> Optional[dict[str, Any]]:
+    """待っている回へ回答を送る。送る前に照らして回答の記録を書き、送れないときは止まる結果を返す（送れば None）。"""
+    if baseline is None:
+        return result.stopped(TOOL, "invalid", f"{inv.plan.name} は承認の回答を待っていない")
+    if reply.by is None:
+        detail = f"{inv.plan.name} への回答に回答した者（--by）が無い。返された経路（--answer <回答> --by human）で打ち直す"
+        return result.stopped(TOOL, "invalid", detail)
+    mismatch = _pin_mismatch(baseline, reply)
+    if mismatch is not None:
+        detail = f"{inv.plan.name} への回答を記録しない: {mismatch}（ndf plan wait で今の承認待ちと資料を読み直して回答する）"
+        return result.stopped(TOOL, "approval_stale", detail)
+    if is_unconfirmed(baseline):
+        return _unconfirmed_stop(inv, baseline)
+    try:
+        _record_answer(inv, baseline, reply.answer, reply.by)
+    except OSError as exc:
+        return result.stopped(TOOL, "precondition", f"{inv.plan.name} の回答の記録を書けない: {exc}")
+    durable.send(inv.workflow_id, reply.answer, TOPIC_ANSWER)
+    return None
+
+
+def _record_answer(inv: Invocation, baseline: dict[str, Any], answer: str, by: str) -> None:
+    """待っていたステップへの回答の記録を書く（ステップ・回答・回答した者・時刻・回の id・提示の識別子）。
+
+    提示の識別子は、待ちの目印に入れた提示の写し（回答を照らしたのと同じ一組）から写す。無ければ null（`ndf ci answer` が断る）。
+    一時ファイルから置き換えて書く。書けなければ `OSError`。
+    """
+    step = str(baseline["step"])
+    record = {
+        "step": step,
+        "answer": answer,
+        "by": by,
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "run": inv.run_id,
+        "presented_id": presented_of(baseline),
+    }
+    write_json(answer_path(inv.state_dir, step), record)
 
 
 def _spec(inv: Invocation) -> dict[str, Any]:
@@ -366,7 +563,7 @@ def _watch(inv: Invocation, baseline: Optional[dict[str, Any]]) -> tuple[str, Op
     while True:
         if durable.status(inv.workflow_id) not in durable.WAITING:
             return "done", None
-        marker = read_json(inv.waiting_path)
+        marker = read_marker(inv.state_dir, inv.run_id)
         if marker is not None and marker != baseline:
             return GATE, marker
         time.sleep(interval)
@@ -383,17 +580,26 @@ def _run_item(inv: Invocation) -> dict[str, Any]:
 
 
 def gate_result(inv: Invocation, marker: dict[str, Any]) -> dict[str, Any]:
-    """承認の回答を待つ結果。`routes` は回答ごとに打つコマンド。"""
+    """承認の回答を待つ結果。`routes` は回答ごとに打つコマンド。
+
+    待っているステップが承認資料（`presentation_path`）と「本番へ反映され得るか」（`metrics.production`）を出していれば、
+    そのまま載せる（承認する人が資料を開き、本番へ反映されるマージかを知ってから回答する。#4409）。
+    """
     summary = f"{inv.plan.name} のステップ {marker['step']} が承認の回答を待っている"
     items = [{"kind": "plan", "name": inv.plan.name, "step": marker["step"], "gate": True}, *_pr_items(inv.state_dir)]
+    material, production = presentation_of(marker)
+    metrics: dict[str, Any] = {"round": inv.round_no}
+    if production is not None:
+        metrics["production"] = production
     return result.result(
         TOOL,
         GATE,
         summary,
         items,
-        {"round": inv.round_no},
-        routes=marker["routes"],
+        metrics,
+        routes=presented_routes(marker),
         next=result.command(TOOL, "wait", str(inv.plan_path), "--state-dir", str(inv.state_dir)),
+        presentation_path=material,
     )
 
 
@@ -483,13 +689,21 @@ def _finish(inv: Invocation) -> dict[str, Any]:
 
 
 def advance(
-    root: Path, inv: Invocation, answer: Optional[str], on_gate: Callable[[dict[str, Any]], None], url: Optional[str] = None
+    root: Path,
+    inv: Invocation,
+    reply: Optional[Reply],
+    on_gate: Callable[[dict[str, Any]], None],
+    url: Optional[str] = None,
 ) -> dict[str, Any]:
     """回を始めるか続け、終わるか承認の回答を待つ所まで進める。
 
     待つ所に来たら `on_gate(結果)` を DBOS を開いたまま呼ぶ。`on_gate` は結果を出してプロセスを抜ける（戻らない）。
     終わった回（retired/）なら流さずにバックアップの結果を返す（B4）。プランが worker の入力（`worker_kinds.PLAN_KEY`）を
     持てば、流す前にこの回の保存先の `values.json` へ書く（書けなければ流さずに precondition）。
+    承認の回答（`reply`）は回答した者と組で受け、送る前に回答の記録（`answer_path`）を書く。回答した者が無ければ
+    回答を送らずに invalid で止まる（承認待ちのステップの証跡は、回答した者の分かる回答の記録からだけ書く。#4409）。
+    回答コマンドが固定した待ちと提示が今の待ちと提示に合わなければ、回答を記録せずに approval_stale で止まる。
+    同じ回の提示を確かめられない旧い形の目印（`unconfirmed`）への回答は、待ちを照らした後、記録も送信もせずに precondition で止まる。
     """
     if _finished(root, inv.key):
         return _stored(inv)
@@ -501,13 +715,13 @@ def advance(
     _record_run(inv)
     with durable.session(root, inv.key, url):
         status = durable.status(inv.workflow_id)
-        baseline = read_json(inv.waiting_path)
+        baseline = read_marker(inv.state_dir, inv.run_id)
         if status is None:
             durable.spawn(plan_workflow, inv.workflow_id, _spec(inv))
-        elif answer is not None:
-            if baseline is None:
-                return result.stopped(TOOL, "invalid", f"{inv.plan.name} は承認の回答を待っていない")
-            durable.send(inv.workflow_id, answer, TOPIC_ANSWER)
+        elif reply is not None:
+            refused = _deliver(inv, baseline, reply)
+            if refused is not None:
+                return refused
         else:
             baseline = None
         reached, marker = _watch(inv, baseline)

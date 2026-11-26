@@ -9,12 +9,75 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
-          "const": "merge",
+          "const": "answer",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
         "--branch": {
           "type": "string",
           "description": "PR の head のブランチ"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば作業場所の origin"
+        },
+        "--answer-record": {
+          "type": "string",
+          "description": "ndf plan next --answer が書いた回答の記録"
+        },
+        "--presented": {
+          "type": "string",
+          "description": "承認待ちのステップが書いた承認の対象のファイル"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--branch",
+        "--answer-record",
+        "--presented"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "ask",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--branch": {
+          "type": "string",
+          "description": "PR の head のブランチ"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば作業場所の origin"
+        },
+        "--presented-out": {
+          "type": "string",
+          "description": "承認の対象を書くファイル（ndf ci answer が読む）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--branch",
+        "--presented-out"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "merge",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--branch": {
+          "type": "string",
+          "description": "PR の head のブランチ（作業場所の HEAD を添える）"
+        },
+        "--pr": {
+          "type": "integer",
+          "description": "PR の番号（作業場所が無くても打てる。マージ済みなら何もしない）"
         },
         "--repo": {
           "type": "string",
@@ -27,11 +90,50 @@
         "--reviewed": {
           "type": "string",
           "description": "レビューを経た HEAD。作業場所の HEAD と違えばマージしない"
+        },
+        "--production-gate": {
+          "type": "string",
+          "enum": [
+            "stop",
+            "defer",
+            "stale"
+          ],
+          "default": "stop",
+          "description": "自動反映の本番チャネルへ承認の証跡が無いとき: stop は承認待ち、defer はマージせずに ok、stale は approval_stale"
+        },
+        "--approved-head": {
+          "type": "string",
+          "description": "工程の承認ゲートで承認した HEAD（--approved-base と組で渡す）"
+        },
+        "--approved-base": {
+          "type": "string",
+          "description": "工程の承認ゲートで承認したマージ先"
+        },
+        "--presented-out": {
+          "type": "string",
+          "description": "stop で止まるときに承認の対象を書くファイル（ndf ci answer が読む）"
+        },
+        "--required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "マージの前に、マージする HEAD の結論を待つ必須のチェック。渡さなければ待たない"
+        },
+        "--test": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "--required で待つときのテストのチェックの名前"
+        },
+        "--budget": {
+          "type": "number",
+          "description": "--required で待つ合計の秒"
         }
       },
       "required": [
-        "subcommand",
-        "--branch"
+        "subcommand"
       ]
     },
     {

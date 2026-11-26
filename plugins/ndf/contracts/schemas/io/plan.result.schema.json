@@ -21,6 +21,10 @@
           "type": "integer",
           "description": "回の番号（next）"
         },
+        "production": {
+          "type": "boolean",
+          "description": "承認待ちのステップが示した、この承認でマージが本番へ反映され得るか（next の承認待ち。ステップが示したときだけ）"
+        },
         "steps": {
           "type": "integer",
           "description": "流したステップの数（next）"
@@ -100,6 +104,14 @@
           "routes": {
             "type": "object",
             "description": "回答ごとのコマンド（wait・queue の plan）"
+          },
+          "presentation_path": {
+            "type": "string",
+            "description": "承認待ちの routes と同じ提示の承認資料の絶対パス（wait の plan）"
+          },
+          "production": {
+            "type": "boolean",
+            "description": "この承認でマージが本番へ反映され得るか（wait の plan。ステップが示したときだけ）"
           },
           "number": {
             "type": "integer",

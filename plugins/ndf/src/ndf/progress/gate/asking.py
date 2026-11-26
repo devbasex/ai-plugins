@@ -8,16 +8,22 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import os
 import tempfile
-from dataclasses import dataclass, field
-from collections.abc import Iterable, Mapping
+import uuid
+from dataclasses import dataclass, field, replace
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, Optional
 
+from filelock import FileLock
+
 from ndf import cli
-from ndf.contracts import result
-from ndf.progress import lane, model, run
+from ndf.contracts import limits, result
+from ndf.core import merge_approval
+from ndf.progress import lane, model, plan, run
+from ndf.progress.run_view import MATERIAL_DIR
 
 # 結果 JSON の tool（サブコマンドの表がこのパッケージを指す）
 TOOL = cli.tool_of(__package__)
@@ -36,8 +42,6 @@ RELEASE_GATE = _gate("release")
 question_id = model.question_id
 # 承認しなかった回答（変更要求の記録に数える）
 REJECTING = (run.REQUEST_CHANGES, run.REJECTED)
-# 承認資料の保存先（ステートマシンごとの作業の保存先の下。名前は質問の id）
-MATERIAL_DIR = "gate-materials"
 
 
 # --- 質問 --------------------------------------------------------------------------------------
@@ -45,10 +49,26 @@ MATERIAL_DIR = "gate-materials"
 
 @dataclass(frozen=True)
 class Target:
-    """見る対象。`head` は PR の head の SHA、`material` は承認資料の sha256。分からなければ None。"""
+    """見る対象。`head` は PR の head の SHA、`material` は承認資料の sha256。分からなければ None。
+
+    `repo`・`pr`・`base` は承認の対象（ベースリポジトリ・PR の番号・マージ先）、`production` は承認でマージが本番へ
+    反映され得るか（判定の部品の `reaches_production`）。マージの承認の証跡はこの組に結び付ける（#4409 の決定 7）。
+    `presentation` は資料を書いた（出し直した）ときに発行した提示の識別子（`write_material`）。分からなければ None。
+    """
 
     head: Optional[str] = None
     material: Optional[str] = None
+    repo: Optional[str] = None
+    pr: Optional[int] = None
+    base: Optional[str] = None
+    production: Optional[bool] = None
+    presentation: Optional[str] = None
+
+    def binding(self) -> Optional[merge_approval.MergeTarget]:
+        """承認の対象の 4 つの値がそろえば `merge_approval.MergeTarget`、欠ければ None。"""
+        if not self.repo or self.pr is None or not self.base or not self.head:
+            return None
+        return merge_approval.MergeTarget(self.repo, int(self.pr), self.base, self.head)
 
     def differs(self, seen: Target) -> list[str]:
         """回答した者が見た対象 `seen` と今の対象の違い（今の側が分かる項目だけを比べる）。"""
@@ -58,16 +78,31 @@ class Target:
                 out.append(f"{name}（見た値 {then or '無し'}・今の値 {now}）")
         return out
 
-    def as_dict(self) -> dict[str, Optional[str]]:
-        """見た対象を記録する形（事象の payload の `seen` と、リクエストの隣の `.seen.json`）。"""
-        return {"head": self.head, "material_sha256": self.material}
+    def as_dict(self) -> dict[str, Any]:
+        """見た対象を記録する形（事象の payload の `seen` と、リクエストの隣の `.seen.json`）。承認の対象の値は分かるときだけ置く。"""
+        extra = {"repo": self.repo, "pr": self.pr, "base": self.base, "production": self.production, "presentation": self.presentation}
+        return {"head": self.head, "material_sha256": self.material, **{k: v for k, v in extra.items() if v is not None}}
 
     @classmethod
     def from_dict(cls, raw: Any) -> Target:
-        """`as_dict` の形から読み戻す。オブジェクトでなければ空の対象。"""
+        """`as_dict` の形から読み戻す。オブジェクトでなければ空の対象。旧版の形（無いキー）は None で読む。"""
         if not isinstance(raw, dict):
             return cls()
-        return cls(raw.get("head"), raw.get("material_sha256"))
+        pr = raw.get("pr")
+        production = raw.get("production")
+        return cls(
+            raw.get("head"),
+            raw.get("material_sha256"),
+            raw.get("repo") if isinstance(raw.get("repo"), str) else None,
+            pr if isinstance(pr, int) and not isinstance(pr, bool) else None,
+            raw.get("base") if isinstance(raw.get("base"), str) else None,
+            production if isinstance(production, bool) else None,
+            raw.get("presentation") if isinstance(raw.get("presentation"), str) and raw.get("presentation") else None,
+        )
+
+    def presented(self, now: "Target") -> "Target":
+        """提示した対象（承認の対象と本番へ反映されるか）に、回答した者が見た `now` の head と承認資料を重ねた対象。"""
+        return replace(self, head=now.head, material=now.material)
 
 
 @dataclass(frozen=True)
@@ -148,6 +183,8 @@ def routes(q: Question) -> dict[str, Any]:
         seen += ["--head", q.target.head]
     if q.target.material:
         seen += ["--material-sha256", q.target.material]
+    if q.target.presentation:
+        seen += ["--presentation", q.target.presentation]
     return {a: result.command(TOOL, q.machine_id, "--gate", q.id, "--result", a, *seen, ask=_asks(q, a)) for a in q.choices}
 
 
@@ -339,6 +376,10 @@ def material(v: run.View, q: Question, *, private: bool = True) -> str:
         lines.append(f"- PR: {q.pr_url or f'#{q.pr}'}")
     if q.target.head:
         lines.append(f"- 見る head: {q.target.head}")
+    if q.target.base:
+        lines.append(f"- マージ先: {q.target.base}")
+    if q.target.production:
+        lines.append(f"- {PRODUCTION_LINE}")
     if q.gate == RELEASE_GATE and isinstance(ctx.get("product_version"), str):
         lines.append(f"- 出すバージョン: {ctx['product_version']}")
     lines += ["", "## 未確認の点", "", *bullets(unconfirmed(v, q.stage))]
@@ -363,37 +404,140 @@ def write_material(root: Path, v: run.View, q: Question, *, private: bool = True
     """承認資料を所有者だけが読める 0600 で書く（書いてあれば書き直さない。回答した者が見た資料の sha256 を変えないため）。
 
     一時ファイルは呼び出しごとに別名・排他的・0600 で作り、`os.link` で置く。置き先が既にあれば（同時に走った別の呼び出しが
-    先に置いた）その資料を使い、上書きしない。資料のディレクトリは 0700 で作る（#3959）。"""
+    先に置いた）その資料を使い、上書きしない。資料のディレクトリは 0700 で作る（#3959）。
+
+    質問の対象（`q.target`）が承認の対象を持てば、提示した承認の対象として隣（`presented_path`）へ 1 度だけ書く
+    （#4409 の決定 7）。提示した対象を書き直す必要があれば（`presented_stale`）、同じ head の資料と提示した対象の両方を
+    `q.target` で書き直す。資料の sha256 が変わるので、古い資料を見て打った回答は断られる。
+    提示した対象を書くたびに、新しい提示の識別子（`presentation`）を発行して一緒に書く。承認の対象が A → B → A と
+    戻っても、最後の提示は最初の提示と別の識別子になる（リクエスト・回答・証跡を最初の提示と取り違えない）。
+
+    承認の対象を持つ質問は、資料と提示した対象の書き込みを質問ごとに排他にする。同時に走った 2 つの呼び出しの片方の
+    資料と、もう片方の対象（本番へ反映されるかが違い得る）が組にならないためである。
+    """
+    with _question_lock(root, q):
+        return _write_pair(root, v, q, private)
+
+
+def present_material(root: Path, v: run.View, q: Question, *, private: bool = True) -> tuple[Path, str, Target]:
+    """`write_material` と同じに書き（書いてあれば使い直す）、承認資料のパス・sha256・提示した対象を返す。
+
+    3 つを同じ排他の中で読む。解放した後に別々に読むと、同時に走った別の呼び出しの書き直しをはさんで、古いハッシュと
+    新しい提示の識別子が同じ回答のルートに入る。
+    """
+    with _question_lock(root, q):
+        path = _write_pair(root, v, q, private)
+        return path, material_sha256(path), read_presented(root, q)
+
+
+@contextlib.contextmanager
+def _question_lock(root: Path, q: Question) -> Iterator[None]:
+    """質問の承認資料と提示した対象の排他。承認の対象を持たない質問は提示した対象を書かないので取らない。"""
+    if q.target.binding() is None:
+        yield
+        return
+    held = presented_path(root, q)
+    held.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with FileLock(str(held) + ".lock", timeout=limits.seconds("locks.append")):
+        yield
+
+
+def _write_pair(root: Path, v: run.View, q: Question, private: bool) -> Path:
+    """`write_material` の本体（承認資料と提示した対象の組を書く）。"""
     path = material_path(root, q)
-    if path.exists():
-        return path
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(material(v, q, private=private))
-        with contextlib.suppress(FileExistsError):  # noqa: NDF402 ファイル: 同時に走った別の呼び出しが先に置いた資料を使う
-            os.link(tmp, path)
-    finally:
-        os.unlink(tmp)
+    shown = presented_path(root, q)
+    if presented_stale(root, q):
+        path.unlink(missing_ok=True)
+        shown.unlink(missing_ok=True)
+    if not path.exists():
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with _private_temp(path.parent, material(v, q, private=private)) as tmp:
+            with contextlib.suppress(FileExistsError):  # noqa: NDF402 ファイル: 同時に走った別の呼び出しが先に置いた資料を使う
+                os.link(tmp, path)
+    if q.target.binding() is not None and not shown.exists():
+        issued = replace(q.target, material=None, presentation=uuid.uuid4().hex[:12])
+        with _private_temp(shown.parent, json.dumps(issued.as_dict(), ensure_ascii=False) + "\n") as tmp:
+            os.replace(tmp, shown)
     return path
 
 
-# 承認の後に文書だけが加わって出し直さなかった head の保存先（承認資料の隣）
-ACCEPTED_SUFFIX = ".accepted.json"
+@contextlib.contextmanager
+def _private_temp(directory: Path, text: str) -> Iterator[str]:
+    """`directory` に別名・排他的・0600 で作って `text` を書いた一時ファイル。抜けるときに残っていれば消す。"""
+    fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        yield tmp
+    finally:
+        Path(tmp).unlink(missing_ok=True)
 
 
-def accepted_path(root: Path, machine_id: str, gate_id: str) -> Path:
-    return run.work_root(root, machine_id) / MATERIAL_DIR / f"{gate_id}{ACCEPTED_SUFFIX}"
+# 提示した承認の対象の保存先（承認資料の隣）
+PRESENTED_SUFFIX = ".target.json"
+# 承認資料の、本番へ反映され得ることを示す行（`ndf ci ask` の承認資料と同じ文）
+PRODUCTION_LINE = merge_approval.PRODUCTION_MATERIAL_LINE
 
 
+def _presented_target_moved(held: Target, now: Target) -> bool:
+    """提示した承認の対象 `held` と今の対象 `now` の、承認の対象か「本番へ反映されるか」が違うか（両方がそろうときだけ比べる）。"""
+    then, current = held.binding(), now.binding()
+    if then is None or current is None:
+        return False
+    return not then.same(current) or held.production != now.production
+
+
+def presented_stale(root: Path, q: Question) -> bool:
+    """質問の資料と提示した対象を `q.target` で書き直す必要があるか（承認の対象を持たない質問は書き直さない）。
+
+    提示した対象が無い（旧版で書いた資料・対象を書く前に落ちた資料は、何を示したかを確かめられない）か、提示した承認の
+    対象（マージ先・HEAD）か「本番へ反映されるか」が今と違えば真（待ちの間に PR が動いた）。"""
+    if q.target.binding() is None:
+        return False
+    return not presented_path(root, q).exists() or _presented_target_moved(read_presented(root, q), q.target)
+
+
+def presented_path(root: Path, q: Question) -> Path:
+    """質問で提示した承認の対象（`Target.as_dict` の形）の保存先。"""
+    return run.work_root(root, q.machine_id) / MATERIAL_DIR / f"{q.id}{PRESENTED_SUFFIX}"
+
+
+def read_presented(root: Path, q: Question) -> Target:
+    """質問で提示した承認の対象。無い・読めなければ空の対象（旧版で出した質問）。"""
+    try:
+        return Target.from_dict(json.loads(presented_path(root, q).read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        # 提示の記録の無い質問は、承認の対象の無い質問として扱う
+        return Target()
+
+
+# オーガナイザーのリリースの回答の語 → 承認ゲートの回答の語（`release.take_reply` と、中継を確かめる `answering` が共有する）
+ORGANIZER_ANSWERS = {plan.RELEASED: run.APPROVED, plan.REJECTED: run.REJECTED}
 # リクエストの中身の kind（計画のステートマシンのリクエスト。リクエストの ID の頭にも使う）
 RELEASE_KIND = "lane-release"
 
 
+def presentation_key(t: Target) -> str:
+    """提示の識別子（`write_material` が資料を書くたびに発行した `presentation`）。承認の対象か識別子が無ければ空。
+
+    値から作らないので、承認の対象が元へ戻って資料を出し直しても、前の提示と同じ値にならない。リリースのリクエストの
+    ID とマージの承認の証跡の記録の識別子に入れ、出し直す前の提示への回答と証跡を、出し直した提示に使わない（#4409）。
+    """
+    if t.binding() is None or not t.presentation:
+        return ""
+    return t.presentation
+
+
+def presented_id(q: Question) -> str:
+    """質問 `q` の、提示した承認の対象（`q.target`）ごとの識別子。承認の対象が無ければ質問の id のまま。"""
+    key = presentation_key(q.target)
+    return f"{q.id}-{key}" if key else q.id
+
+
 def request_id(q: Question) -> str:
-    """リリースのリクエストの ID（質問の id から作る。変更要求で流し直した質問は別のリクエストになる）。"""
-    return f"{RELEASE_KIND}-{q.id}"
+    """リリースのリクエストの ID（質問の id と提示した承認の対象から作る。変更要求で流し直した質問と、待ちの間に
+    資料を出し直した質問は別のリクエストになる）。`q.target` は提示した承認の対象（`read_presented`）を持たせて渡す。"""
+    return f"{RELEASE_KIND}-{presented_id(q)}"
 
 
 def plan_request(view: lane.PlanView, ident: str) -> Optional[lane.Request]:

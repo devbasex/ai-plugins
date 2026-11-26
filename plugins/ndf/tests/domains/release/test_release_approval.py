@@ -16,6 +16,7 @@ from typing import Any
 from ndf.adapters import ci
 from ndf.adapters.github import MERGE_QUEUE_PENDING, Authored, GitHubError, MergeOutcome, Pull
 from ndf.core.branch_strategy import Strategy
+from ndf.core import merge_approval
 from ndf.domains.release import approval_decide, land, trail
 from ndf.domains.release import cli as release_cli
 
@@ -328,7 +329,7 @@ def _admin_lander(hub: FakeHub, admin: bool = True, approvals: int = 1, failed: 
 
 
 def _mvv_trail(sha: str = HEAD) -> Authored:
-    return Authored("octocat", "OWNER", approval_decide.render_trail("approved", sha, trail.MVV_BY))
+    return Authored("octocat", "OWNER", approval_decide.render_trail("approved", sha, merge_approval.MVV_BY))
 
 
 def _records(hub: FakeHub, number: int = 7) -> list[str]:
@@ -373,7 +374,7 @@ def test_admin_ndf_settings_does_not_count_the_mvv_trail() -> None:
 @pytest.mark.parametrize(
     "rejection",
     [
-        Authored("octocat", "OWNER", approval_decide.render_trail("rejected", HEAD, trail.MVV_BY)),  # MVV 判定の変更要求
+        Authored("octocat", "OWNER", approval_decide.render_trail("rejected", HEAD, merge_approval.MVV_BY)),  # MVV 判定の変更要求
         Authored("octocat", "OWNER", approval_decide.render_trail("rejected", HEAD, trail.USER_BY).replace("担い手: user\n", "")),
     ],
 )

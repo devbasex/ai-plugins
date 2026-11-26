@@ -5,10 +5,10 @@
 作成者の権限を読み直さないためである（PR 4289 の指摘）。決まった方式は目印へ記録しておき（`remember`）、その後で
 課題を読めずに止まった打ち直しは問い合わせ直さない（`held_method`）。止まっている間に GitHub の許す方式が変わって
 マージが断られたら、組み立て済みの値を捨てて方式をもう一度問う（`refused`。PR 4289 の指摘）。目印は差し込みが
-そろった試行が消す（`invoke.clear_values` は消さない）。
+そろった試行が消す（`issue_values.clear_values` は消さない）。
 
 目印は同じ保存先の `values.json` と同じ決まりで読み書きする。保存先を開いた記述子から、呼んだ利用者が持ち、ほかの利用者が
-書き込めないファイルだけを読み（ほかは `worker_paths.EntryUnsafe`）、使う方式は知っている方式（`github.MERGE_METHODS`）だけである。
+書き込めないファイルだけを読み（ほかは `worker_paths.EntryUnsafe`）、使う方式は知っている方式（`github_merge.MERGE_METHODS`）だけである。
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.adapters import github
+from ndf.adapters import github, github_merge
 from ndf.contracts import result, worker_paths
 from ndf.core import route
 
@@ -59,8 +59,8 @@ def held_method(held: Mapping[str, Any], values: Mapping[str, route.Value]) -> O
 
 
 def _known(method: Any) -> bool:
-    """知っているマージの方式（`github.MERGE_METHODS`）か。"""
-    return isinstance(method, str) and method in github.MERGE_METHODS
+    """知っているマージの方式（`github_merge.MERGE_METHODS`）か。"""
+    return isinstance(method, str) and method in github_merge.MERGE_METHODS
 
 
 def remember(pending: Path, values: Mapping[str, route.Value], method: route.Value) -> None:
@@ -83,7 +83,7 @@ def ask(t: route.Template, values: Mapping[str, route.Value], pending: Path) -> 
 
 
 def refused(report: Mapping[str, Any], inputs: Mapping[str, Any]) -> bool:
-    """プランの結果 `report` がマージのステップで方式を断られて（`github.METHOD_REFUSED`）止まり、その方式が工程の入力 `inputs` で渡されずに問うて決めたものか。
+    """プランの結果 `report` がマージのステップで方式を断られて（`github_merge.METHOD_REFUSED`）止まり、その方式が工程の入力 `inputs` で渡されずに問うて決めたものか。
 
     真なら呼び手（`invoke._call_plan`）が組み立て済みの値を捨て、次の打ち直しが方式をもう一度 GitHub に問う。方式は
     課題を読めずに止まった打ち直しで記録した値を使い回す（`held_method`）ので、その間に GitHub の許す方式が変わると、
@@ -92,7 +92,7 @@ def refused(report: Mapping[str, Any], inputs: Mapping[str, Any]) -> bool:
     マージのステップはテンプレートの部品 `merge`、止まったステップはプランの結果の items の回の行（`kind` が `plan`）にある。
     """
     cause = report.get("cause")
-    if report.get("status") != result.STOPPED or not isinstance(cause, dict) or cause.get("kind") != github.METHOD_REFUSED:
+    if report.get("status") != result.STOPPED or not isinstance(cause, dict) or cause.get("kind") != github_merge.METHOD_REFUSED:
         return False
     return _stopped_at_merge(report) and "merge_method" not in inputs
 

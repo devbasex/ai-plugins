@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -42,11 +42,11 @@ from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
 from ndf.contracts import facts, internal, limits, result, worker_paths
 from ndf.contracts.worker_kinds import VALUES_FILE, kind_gaps, read_values, write_values
-from ndf.core import durable, route
+from ndf.core import durable, production_merge, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, merge_pending, model, rebuild_values, refactor_values, stages
+from ndf.progress import definition, issue_values, merge_pending, model, rebuild_values, refactor_values, stages
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.testing import scoped, weight
 
@@ -157,6 +157,10 @@ class StageRun:
     # 行の打ち直し（conductor の retry）の回数と、方針による自動の打ち直しか。プランはどちらでも新しい回を始める（`plan_attempt`）
     retries: int = 0
     again: bool = False
+    # 同じ工程の承認ゲートの最新の承認の回答が見た対象（事象の `seen`。`gate.Target.as_dict` の形）。無ければ None（#4409）
+    approved: Optional[dict[str, Any]] = None
+    # 工程が承認ゲートを持つか（light の設計のように持たない工程のマージは、承認をデプロイへ先送りする。#4409）
+    gated: bool = False
 
     def env(self, extra: Mapping[str, str]) -> dict[str, str]:
         out = {**os.environ, **extra}
@@ -247,7 +251,7 @@ def stage_run(stage: stages.StageDef, step: stages.StepDef, inputs: Mapping[str,
         raise model.Refused(f"工程 {stage.name} のステップ {step.id} の call {step.call} は呼べない")
     kind = kind_of(step)
     name = _named(kind, step.args)
-    return StageRun(kind, name, dict(inputs), stage.outputs, step.range, step.id, dict(step.args))
+    return StageRun(kind, name, dict(inputs), stage.outputs, step.range, step.id, dict(step.args), gated=bool(stage.gates))
 
 
 def _named(kind: str, args: Mapping[str, Any]) -> str:
@@ -320,12 +324,20 @@ FROM_STAGE = "工程の承認ゲート（モードが置く listen のステッ�
 # listen のステップ）が持つため、プランの中では待たずに通す（終了コード 0 で結果 JSON を出さない手は ok）。
 # `params.json` の既定（`ndf answer ask`）は工程の外でテンプレートを使うときの値で、工程から使うと承認待ちを足してしまう
 STAGE_GATE = ["true"]
+# 工程がプランへ回答を渡すときの回答した者（`ndf plan next --by`）
+PLAN_ANSWER_BY = "service:progress"
+# 工程から組むプランの `ndf ci merge --production-gate`（#4409 の決定 4・決定 5）。承認ゲートの無い工程（Pull Request・
+# ドキュメントレビュー・確定仕様化）は承認の無いマージをデプロイへ先送りし、承認ゲートを持つ工程（設計・デプロイ）は
+# 承認の後に対象が変わっていれば approval_stale で止めて質問し直す。表に無いテンプレートは既定の stop のまま組む
+_DEFER, _STALE = production_merge.DEFER, production_merge.STALE
+PRODUCTION_GATE = {"merge": _DEFER, "plan-to-spec": _DEFER, "design-merge": _STALE, "release": _STALE}
 FILL_SOURCES = {
     "title": FROM_ISSUE,
     "body_file": FROM_ISSUE,
     "issue": FROM_ISSUE,
     "test_command": FROM_PROJECT,
     "required": FROM_PROJECT,
+    "release_required": FROM_PROJECT,
     "review": FROM_PROJECT,
     "rebuild": FROM_PROJECT,
     "refactor": FROM_PROJECT,
@@ -336,25 +348,13 @@ FILL_SOURCES = {
 # `.ndf/project.json` の設定のうち、差し込みの値を持つキーの道（test_command は `test.suites` のテストの suite の command を設定の順に ` && ` でつなぐ）
 PROJECT_KEYS = {
     "required": ("ci", "required_checks"),
+    "release_required": ("ci", "required_checks"),
     "review": ("workflow", "launch", "review"),
     "rebuild": rebuild_values.SETTING_PATH,
     "refactor": ("workflow", "launch", "refactor"),
 }
 # 設定の `workflow`（launch・stages）の形。読む側が確かめる（#3473）
 WORKFLOW_SCHEMA = contracts.schema_path("project-workflow")
-# 課題の本文を書き出す保存先のファイルと、題の写し（プランの実行の保存先の下）
-ISSUE_BODY_FILE = "issue-{number}-body.md"
-ISSUE_TITLE_FILE = "issue-{number}-title.json"
-
-
-def issue_text(location: Path, number: int) -> Optional[tuple[str, str]]:
-    """課題の題と本文（作業場所のリモートの GitHub から読む）。テストが差し替える。
-
-    書き手を信用しない（`GitHub.trusts` が偽。#3364）なら None。本文は作業の入力として指示に読まれるためである。
-    """
-    hub = github.GitHub(git.Git(location).remote_repo(), github.client())
-    title, authored = hub.issue_text(number)
-    return (title, authored.body) if hub.trusts(authored) else None
 
 
 def _strings(value: Any) -> Optional[list[str]]:
@@ -392,67 +392,6 @@ def _project(location: Path) -> dict[str, Any]:
     except contracts.ContractError as exc:
         raise route.RouteError(str(exc)) from None
     return project
-
-
-def _issue_numbers(run: StageRun) -> list[str]:
-    """工程の入力の課題の番号（小さい順。先頭が代表の課題）。入力に課題が無ければ空。"""
-    issues = run.inputs["issues"] if "issues" in run.inputs else None
-    return [str(n) for n in sorted(int(n) for n in issues)] if isinstance(issues, list) else []
-
-
-def _issue_values(run: StageRun, work_dir: Path, location: Path) -> Optional[dict[str, route.Value]]:
-    """代表の課題の題（title）・本文を書いたファイル（body_file）・番号（issue）。課題が 1 つも無ければ空。
-
-    課題が 2 件以上なら、番号の最も小さい課題を代表にする（#3908 の決定 7。実装のフェーズの単位の決まりと同じ選び方で、
-    PR の題と本文は代表の課題のものになる）。受け入れ条件の確かめはすべての課題を検証する（`route.launch_values`）。
-    題と本文は試行ごとに保存先へ初回に 1 度だけコピーし（`ISSUE_BODY_FILE`・`ISSUE_TITLE_FILE`）、同じ試行の以後の呼び出し
-    （承認の回答・続き・プランの打ち直し）はそのコピーを使う。工程の新しい試行は `clear_values` がコピーを消し、課題と作成者の
-    権限を読み直す。同じ試行の中で読み直すと GitHub を毎回呼び、途中で題が直されるとプランが変わって、終わっていない回へ
-    届かず開始点から流れ直すためである（PR 3469 の指摘）。
-    書き手を信用しない課題は、本文を書き出さずに None（足りない値の出所を `FROM_UNTRUSTED_ISSUE` にする）。
-    読めない失敗（`GitError`・`github.GitHubError`）は捕まえずに `_call_plan` へ上げる。空にすると、打ち直せば通る
-    失敗が打ち直せない「値が無い」（invalid）に変わり、本当の理由も消えるためである。
-
-    コピーは `values.json` と同じく保存先を 1 回だけ開いた記述子から読み書きする（`_issue_copies`）。読むコピーは呼んだ利用者が
-    持ち、ほかの利用者が書き込めないものだけで、ほかは `worker_paths.EntryUnsafe`（`foreign` など。`plan_failure` が
-    precondition にする）。作成者の権限を確かめる前に、共有の保存先へ別の利用者が置いた題と本文を worker へ渡さない。
-    書くときもグループとほかの利用者の書き込み権限を外して公開し（`write_file(private=True)`）、`body_file` は開いて解いた
-    保存先のパスで返す（共有の領域のリンクを経ない）。PR を作るステップ（`gh pr create --body-file`）はこの名前を開き直すので、
-    返す前に、コピーの名前と保存先から根までのどの項目もほかの利用者が差し替えられないことを確かめる
-    （`worker_paths.check_unshared`。差し替えられれば `EntryUnsafe`（`shared`）で止め、確かめたコピーと別の本文を送らない）。
-    """
-    issues = _issue_numbers(run)
-    if not issues:
-        return {}
-    number = int(issues[0])
-    out_name, copy_name = ISSUE_BODY_FILE.format(number=number), ISSUE_TITLE_FILE.format(number=number)
-    with worker_paths.open_or_create(work_dir) as wd:
-        out = wd.path / out_name
-        title = _held_title(wd, copy_name, out_name)
-        if title is None:
-            found = issue_text(location, number)
-            if found is None:
-                return None
-            title, body = found
-            worker_paths.write_file(wd, out_name, body, private=True)
-            worker_paths.write_file(wd, copy_name, json.dumps({"title": title}, ensure_ascii=False), private=True)
-        worker_paths.check_unshared(wd, out_name)
-    return {"title": title, "body_file": str(out), "issue": str(number)}
-
-
-def _held_title(wd: worker_paths.WorkDir, copy_name: str, body_name: str) -> Optional[str]:
-    """同じ試行がコピーした題。題のコピーと本文のコピーがそろい、どちらも呼んだ利用者の私有のファイルなら題、そろわなければ None。
-
-    私有でないコピー（別の利用者が持つ・書き込める・リンク）は `worker_paths.EntryUnsafe` を上げ、読み直して上書きしない。
-    """
-    text = worker_paths.read_file(wd, copy_name, owned=True)
-    if text is None or worker_paths.read_file(wd, body_name, owned=True) is None:
-        return None
-    try:
-        held = json.loads(text)
-    except json.JSONDecodeError:  # noqa: NDF401 ファイル: 書きかけ・壊れたコピーは無いものとして読み直す
-        return None
-    return held["title"] if isinstance(held, dict) and isinstance(held.get("title"), str) else None
 
 
 def _branch_of(run: StageRun) -> Optional[str]:
@@ -497,7 +436,8 @@ def template_values(
     設定の出所の差し込みが同じものを使う（読み直すと git・ファイル・形の検査が 2 回ずつ走る。PR 3525 の指摘）。
     """
     names, values, wanted = _fill_from_sources(t, run, project=project, local_tests=local_tests)
-    filled = rebuild_values.fill(t, values, _issue_numbers(run), run.inputs.get("mode"), cwd, project=project)
+    values = {**values, **_fill_production_gate(t, run)}
+    filled = rebuild_values.fill(t, values, issue_values.issue_numbers(run.inputs), run.inputs.get("mode"), cwd, project=project)
     if filled.undecided is not None:
         raise TemplateValuesMissing(t.name, {"rebuild": FROM_PROJECT}, {"rebuild": filled.undecided.fields()})
     values = route.derived_locally(t, {**values, **filled.values}, cwd)
@@ -508,7 +448,7 @@ def template_values(
     values = _merge_method_first(t, names, values, pending)
     issued, untrusted = _fill_from_issue(run, work_dir, work_location(run, cwd), wanted)
     values = merge_pending.ask(t, {**values, **issued}, pending)
-    values, launched = route.launched(t, values, issues=_issue_numbers(run))
+    values, launched = route.launched(t, values, issues=issue_values.issue_numbers(run.inputs))
     values = {**values, **_fill_review(t, values, run, cwd, by_default="review" in launched)}
     missing = _missing(names, values, {**FILL_SOURCES, **untrusted})
     if "merge_method" in missing:
@@ -559,11 +499,11 @@ def _fill_refs(t: route.Template, values: Mapping[str, route.Value], run: StageR
     """PR の本文に `Refs #<番号>` で載せる課題（`{{refs}}`）を、工程の入力のすべての課題からコピーする（#3908 の r2-2）。
 
     スプリントの PR の本文はコミットから作る（`gh pr create --fill`）ため、まとめた課題のうちコミットに出ない課題を
-    「スプリントを閉じる」が本文から拾えない。設計の PR と共有する課題の本文のコピー（`_issue_values`）には足さない。
+    「スプリントを閉じる」が本文から拾えない。設計の PR と共有する課題の本文のコピー（`issue_values.issue_values`）には足さない。
     """
     if "refs" not in t.params or "refs" in values:
         return {}
-    issues = _issue_numbers(run)
+    issues = issue_values.issue_numbers(run.inputs)
     return {"refs": issues} if issues else {}
 
 
@@ -615,7 +555,7 @@ def _fill_from_issue(
     """課題の出所の差し込みの値と、出所の上書き（書き手を信用しない課題なら値を返さず、出所を FROM_UNTRUSTED_ISSUE にする）。"""
     if FROM_ISSUE not in wanted.values():
         return {}, {}
-    issued = _issue_values(run, work_dir, location)
+    issued = issue_values.issue_values(run.inputs, work_dir, location)
     if issued is None:
         return {}, {n: FROM_UNTRUSTED_ISSUE for n, s in wanted.items() if s == FROM_ISSUE}
     return {k: v for k, v in issued.items() if k in wanted}, {}
@@ -635,6 +575,30 @@ def _fill_branch(run: StageRun, wanted: Mapping[str, str]) -> dict[str, route.Va
     return {"branch": branch} if branch is not None else {}
 
 
+def _fill_production_gate(t: route.Template, run: StageRun) -> dict[str, route.Value]:
+    """工程から組むプランの `production_gate`（`PRODUCTION_GATE`）と、デプロイの `approved_head`・`approved_base`。
+
+    `production_gate` を使うテンプレートが表に無ければ値を入れず、既定の stop（承認待ちで止まる）のまま組む。
+    本番チャネルへのマージを承認の前に進めない側へ倒すためである。
+    """
+    out: dict[str, route.Value] = {}
+    if "production_gate" in t.params and t.name in PRODUCTION_GATE:
+        # 承認ゲートを持たない工程（light の設計）は質問し直す承認ゲートが無いので、承認をデプロイへ先送りする
+        held = PRODUCTION_GATE[t.name]
+        out["production_gate"] = held if held != _STALE or run.gated else _DEFER
+    if "approved_head" in t.params:
+        out.update(_approved_target(run))
+    return out
+
+
+def _approved_target(run: StageRun) -> dict[str, route.Value]:
+    """同じ工程の承認ゲートの最新の承認の回答が見た HEAD とマージ先。旧版の回答（マージ先が無い）は空文字で、
+    `ndf ci merge` がマージ先の違いとして approval_stale で止め、承認ゲートが質問し直す（#4409 の「影響と危険」）。"""
+    seen = run.approved if run.approved is not None else {}
+    head, base = seen.get("head"), seen.get("base")
+    return {"approved_head": head if isinstance(head, str) else "", "approved_base": base if isinstance(base, str) else ""}
+
+
 def _fill_gate(wanted: Mapping[str, str]) -> dict[str, route.Value]:
     """承認ゲートの差し込みの値（工程の承認ゲートが決めるので、プランの中では待たずに通す）。"""
     return {"gate": list(STAGE_GATE)} if "gate" in wanted else {}
@@ -644,26 +608,6 @@ def _missing(names: Sequence[str], values: Mapping[str, route.Value], sources: M
     """プランが使う差し込み `names` のうち、既定も無く決まらないもの → 出所（出所の表に無ければ工程の入力）。"""
     defs = route.params()
     return {n: (sources[n] if n in sources else FROM_INPUT) for n in names if n not in values and defs[n].default is None}
-
-
-# 試行の始まりに消す、前の試行が保存先に残した課題の題・本文のコピー（差し込みの値 `VALUES_FILE` と一緒に消す）
-ISSUE_COPIES = (ISSUE_BODY_FILE.format(number="*"), ISSUE_TITLE_FILE.format(number="*"))
-
-
-def clear_values(state_dirs: Iterable[Path]) -> None:
-    """渡された保存先から前の試行の値を消す（無ければ何もしない）。保存先は NDF の状態の保存先の下である。
-
-    差し込みの値（`VALUES_FILE`）と課題のコピー（`ISSUE_COPIES`）を消す。コピーは差し込みの値の有無によらず消す。残すと
-    `_issue_values` がコピーを優先し、新しい試行が GitHub で直した題・本文を使わず、作成者の権限も確かめ直さない
-    （前の試行の後で write 権限を失った作成者の本文を worker に読ませる。PR 4289 の指摘）。
-    マージの方式を決められずに止まった目印（`merge_pending.PENDING_FILE`）は消さない（打ち直しが方式を先に問うため）。
-    消せなければ `OSError` をそのまま上げる（呼び手の `progress.run._prepare` が precondition にする）。
-    """
-    for state_dir in state_dirs:
-        for pattern in ISSUE_COPIES:
-            for found in state_dir.glob(pattern):
-                found.unlink(missing_ok=True)
-        (state_dir / VALUES_FILE).unlink(missing_ok=True)
 
 
 class PreparedPlan(NamedTuple):
@@ -805,7 +749,8 @@ def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -
             argv += ["--set", f"{key}={_set_value(value)}"]
     if attempt:
         argv += ["--set", f"{ATTEMPT_SET}={attempt}"]
-    return argv + (["--answer", answer] if answer else [])
+    # 工程の承認ゲートが受けた回答をプランへ渡す（回答した者は工程の進行。プランの承認待ちの証跡は書かれない。#4409）
+    return argv + (["--answer", answer, "--by", PLAN_ANSWER_BY] if answer else [])
 
 
 def _no_route(run: StageRun, work_dir: Path, answer: Optional[str]) -> Optional[StageResult]:

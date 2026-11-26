@@ -67,6 +67,12 @@ FIXED_WORDS = {
     # 工程の定義の文書の名前空間（`metadata.ndf`・`document.namespace`）
     "workflow_namespace": "ndf",
 }
+# 利用先のリポジトリの設定（`.ndf/project.json`）のブランチ戦略のセクションの名前（最上位のキー）。標準ライブラリだけで
+# 読む hook（`domains.hooks.strict`）とコントラクトの改名表の振り分け（`contracts.settings_renames`）が、ここから引く
+BRANCH_STRATEGY_SECTION = "branch_strategy"
+# マージの承認の証跡のマーカーの語。証跡の行を組む `core.merge_approval` と、標準ライブラリだけで読む hook
+# （`domains.hooks.strict`）が、ここから引く
+MERGE_MARK_WORD = f"{FIXED_WORDS['workflow_namespace']}:merge-approval"
 # プラグインの根からの自分の定義（`plugin.json`）の保存先
 MANIFEST_REL = Path(".claude-plugin") / "plugin.json"
 # 状態の保存先の先頭に置く形のバージョンのファイル。無い保存先は旧い実装のものとみなす

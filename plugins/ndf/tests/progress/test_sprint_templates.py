@@ -19,7 +19,7 @@ import strategy_fixture
 from ndf.contracts import result, worker_kinds
 from ndf.core import durable, loop, route, worker_outcome
 from ndf.core.plan import records, runner, steps, transition_decide
-from ndf.progress import command, definition, gate, invoke, run, store
+from ndf.progress import command, definition, gate, invoke, issue_values, run, store
 
 ISSUE = 3474
 BRANCH = "sprint/s1"
@@ -71,7 +71,7 @@ def _sprint(repo: Path, monkeypatch, gathered: str, defaults: dict = DEFAULTS, p
     patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     values = {"worktree": str(repo), "branch": BRANCH, "design_pr": 7, "pr": 8, "product_version": "11.0.0", "gathered": gathered}
     values["delivery"] = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}
     # 承認ゲートの直前の MVV 判定は人へ問う側（省かない）に倒す（#3745）
@@ -311,7 +311,7 @@ def planned(repo, monkeypatch):
     patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
     return repo
 
 
