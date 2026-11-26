@@ -1,0 +1,413 @@
+# #1959 の詳細設計: 起動の設定・承認と、full の起動の絞り込み
+
+設計文書 [issue-1959-design.md](./issue-1959-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。パスは断りが無ければ `plugins/ndf/` からの相対で書く。決定と受け入れ条件の中身は設計書と要求仕様（[issue-1959-requirements.md](./issue-1959-requirements.md)）が持つ。
+
+## 地図
+
+パッケージ・モジュール構成（触るファイルのうちコードと表。`*` は新設）:
+
+```text
+src/ndf/
+  __main__.py                    使用量ログの書き込み処理を差し込む
+  cli.py                         サブコマンド launch-config の行
+  adapters/
+    claude.py                    full の引数・結果の欄・起動記録のインターフェース
+    agents.py                    相手役の子の環境
+    launch_settings.py *         起動の設定の読み取り・指定の解決・安全装置の引数
+    launch_approval.py *         ハッシュ・承認の記録・問いと答え
+  core/
+    worker.py                    指定の取得・子プロセスごとの記録
+    converge/participants.py     安全装置の引数の取得
+    plan/runner.py・steps.py・transition_decide.py  実行の回数と子へ渡す環境変数
+  progress/invoke.py             Skill の起動の指定と記録
+  domains/
+    records/usage.py・usage_decide.py   行の書き込み・費用の計算
+    settings/launch_config_cli.py *     ndf launch-config
+    hooks/guards/launch_answer.py *     承認の問いの答えの記録
+    crossreview/seats.py         読めなかった席の直し方の文
+```
+
+依存の向き: contracts → adapters → core → progress → domains の順で、下の層は上の層を読まない。`launch_settings` は `launch_approval` と `agents` を読み、`launch_approval` は `launch_settings` を読まない（承認の対象は、読んだ値を引数で受ける）。`claude` は `launch_settings` の型を読み、`launch_settings` は `claude` を読まない。使用量ログへの書き込みは、`claude.py` が持つ差し込みのインターフェースを `__main__.py` が埋める。
+
+| パス | 種類 | 役割 | 依存する先 | クラスまたはモジュール | 新設（N）と変更（C） |
+| --- | --- | --- | --- | --- | --- |
+| `src/ndf/adapters/launch_settings.py` | 新設 | 起動の設定を読んで検証し、起動 1 回の指定を返す | launch_approval・agents・git・contracts | `Settings`・`StepSpec`・`Grant` | N: `load`・`step_spec`・`check_definitions`・`approval_target`・`prepared`・`safety_args` |
+| `src/ndf/adapters/launch_approval.py` | 新設 | 承認のハッシュと記録を持つ | identity・git | モジュール | N: `repo_key`・`digest`・`approved`・`append`・`put_question`・`record_answer`・`approve_by_answer`・`candidate_path` |
+| `src/ndf/adapters/claude.py` | 変更 | 起動の引数と結果 | launch_settings | `ClaudeCall`・`ClaudeReply`・`LaunchOptions`・`LaunchRecorder` | C: `permission_args`・`_full_args`・`call_claude`・`_precheck`・`_parse_reply`・`context_window`・`_accounted`。N: `main_model`・`set_launch_recorder`・`report_launch` |
+| `src/ndf/adapters/agents.py` | 変更 | 相手役の起動 | identity | モジュール | C: `_start` |
+| `src/ndf/core/worker.py` | 変更 | worker の起動 | launch_settings・claude | `Caller` | C: `delegate`・`_args_for`・`_resume_until_written` |
+| `src/ndf/progress/invoke.py` | 変更 | Skill を回す起動 | launch_settings・claude | `SkillCaller` | C: `_call_skill` |
+| `src/ndf/core/plan/transition_decide.py` | 変更 | ステップごとの実行の回数を数える | — | `RunStep`・`StepState` | C: `_run`・`decide` |
+| `src/ndf/core/plan/runner.py` | 変更 | ステップの子へ渡す値を組む | steps | モジュール | C: `run_step`・`_perform` |
+| `src/ndf/core/plan/steps.py` | 変更 | 子の環境を重ねて起動する | run_log | `StepContext` | C: `_launch` |
+| `src/ndf/core/converge/participants.py` | 変更 | 相手役の引数 | launch_settings | モジュール | C: `_sandbox_args`・`_review_args` |
+| `src/ndf/domains/records/usage.py` | 変更 | `claude -p` の行を書く | jsonl | モジュール | C: `record_cli` |
+| `src/ndf/domains/records/usage_decide.py` | 変更 | 起動 1 回の費用を求める | — | モジュール | N: `launch_costs` |
+| `src/ndf/domains/settings/launch_config_cli.py` | 新設 | `ndf launch-config` の 4 つのサブコマンド | launch_settings・launch_approval | モジュール | N: `main`・`_show`・`_approve`・`_confirm_terminal`・`_revoke`・`_safety_args` |
+| `src/ndf/domains/hooks/guards/launch_answer.py` | 新設 | 承認の問いの答えを記録する | launch_approval | モジュール | N: `check` |
+| `src/ndf/domains/crossreview/seats.py` | 変更 | サンドボックスで読めなかった席の直し方の文を、承認の手順にする | — | モジュール | C: `_unread_hint` |
+| `src/ndf/cli.py`・`src/ndf/__main__.py` | 変更 | サブコマンドの登録と差し込み | usage | `COMMANDS` | C: 行の追加 |
+| `contracts/domains/runtimes.json` | 変更 | `delegate_sandbox_args`・`sandbox_needs_userns` の列と、kiro・agy の引数 | — | 表 | — |
+| `contracts/domains/env.json` | 変更 | 子へ渡す環境変数の 4 行 | — | 表 | — |
+| `contracts/domains/ndf-files.json`・`locations.json` | 変更 | 起動の設定・承認の記録・問いと答え・候補・MCP の定義のコピーの保存先 | — | 表 | — |
+| `contracts/domains/entrypoints.json` | 変更 | 承認の答えの hook の行（読む環境変数は `NDF_FACTORY_RUN`） | — | 表 | — |
+| `contracts/domains/cli-floors.json` | 変更 | 最低バージョンの確認で通らない場合に上げる | — | 表 | — |
+| `contracts/domains/skill-io.json`・`manifests/skills.json`・`.codex-plugin/plugin.json` | 変更 | Skill `launch-config` の追加（`plugin.json` は `ndf manifests render` が作る） | — | 表 | — |
+| `contracts/hooks/guards.json` | 変更 | guard の行（PostToolUse、`AskUserQuestion`） | — | 表 | — |
+| `contracts/schemas/ndf-settings/launch.schema.json` | 新設 | 起動の設定の形 | — | スキーマ | — |
+| `contracts/schemas/internal/usage.schema.json` | 変更 | `name`・`session_seq`・`session_cost_usd` の欄 | — | スキーマ | — |
+| `contracts/schemas/io/launch-config.args.schema.json`・`launch-config.result.schema.json`・`docs/contracts/*.md` | 新設 / 変更 | 引数のスキーマと規約のページは生成し、結果のスキーマは手で書く | — | スキーマ | — |
+
+手順書の変更（`skills/launch-config/SKILL.md`・`skills/external-ai/`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md`・`skills/cross-review/SKILL.md`・`skills/worktree/references/ndf-settings.md`）は、「手順書」の節にまとめる。
+
+## 起動の設定の読み取り
+
+満たす決定: 決定 1・2・4・5・8・9、受け入れ条件 5・8・11・12・13
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `load` | `adapters/launch_settings.py` | 新設 | `load(root: Path, source: Optional[Path] = None) -> Settings` | `<root>/.ndf/launch.json`（`source` があればそのファイル）を読み、ファイル全体を検証して、`permissions` と定義ファイルのパスを返す |
+| `step_spec` | 同 | 新設 | `step_spec(settings: Settings, name: str) -> StepSpec` | `*` の指定に工程の指定をキーごとに重ねる |
+| `check_definitions` | 同 | 新設 | `check_definitions(settings: Settings, paths: Sequence[str]) -> dict[str, Any]` | 定義ファイルを読み、MCP サーバの定義の形を検証して、解いた中身を返す |
+| `approval_target` | 同 | 新設 | `approval_target(settings: Settings) -> Target` | 承認の対象（`permissions`・全工程の定義ファイル・`inherit` があれば `.mcp.json`）のハッシュと、出力してよい一覧を返す |
+| `prepared` | 同 | 新設 | `prepared(name: str, cwd: Path) -> ContextManager[Grant]` | 起動 1 回の指定を解き、承認を確かめ、MCP の定義のコピーを作り、抜けるときに消す |
+| `safety_args` | 同 | 新設 | `safety_args(runtime: str, use: str, cwd: Path) -> list[str]` | 設計書の「安全装置を外す指定」の表のとおりに引数を返す |
+
+- `Settings` は `root`・`permissions`（辞書。ファイルが無ければ空）を持つ。`StepSpec` は `load: tuple[str, ...]`・`allow: tuple[str, ...]`・`mcp: None | "inherit" | tuple[str, ...]`。`Target` は `sha256`・`listing`（サーバ名・コマンド名・定義ファイルの場所・ハッシュ・`load`・`allow`・`unsandboxed`）
+- `Grant` は `load`・`allow`・`inherit: bool`・`mcp_files: tuple[Path, ...]`・`sha256: Optional[str]` と、`verify() -> Optional[str]`（内容を読み直し、違うか取り消されていれば理由の 1 行）を持つ
+- `prepared`
+  - 事前条件: `cwd` は起動する作業場所。リポジトリの根は `git rev-parse --show-toplevel`、git の外は `cwd`
+  - 事後条件: 指定が空（`load`・`allow`・`mcp` が無い）なら承認を調べず、`sha256` が None の `Grant` を返す。空でなければ承認済みのハッシュを持つ。抜けた後、コピーのディレクトリは無い
+  - 副作用: 状態の保存先の `launch-mcp/<PID>-<一意な値>/`（0700、中のファイルは 0600）を作って消す。作る前に、持ち主の PID が生きていないディレクトリを消す
+- `safety_args`
+  - 事前条件: `use` は `review` か `delegate`
+  - 副作用: サンドボックスの確認（`agents.user_namespaces`）と、承認の記録の読み取り
+
+### 異常系の処理
+
+どれも `internal.InternalError("precondition", <文>)` を上げる。文にはファイルとキーの位置だけを載せ、定義の値を載せない。
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `load` | 読めない・形が違う | JSON でない、スキーマに合わない、`load` が英字だけの名前でない、`allow` の形、`mcp` が絶対パスか根の外 | 読んだ直後 | 呼び出し元へ返す | `stopped`・`precondition` | 後始末なし。直して再実行できる |
+| `check_definitions` | 定義ファイルの誤り | 無い、JSON のオブジェクトでない、`mcpServers` の形、`command` も `url` も無い | 読んだ直後 | 呼び出し元へ返す | 同上 | 同上 |
+| `approval_target` | ハッシュを計算できない | ほかの工程が指す定義ファイルが読めない | 定義を読むとき | 呼び出し元へ返す | 同上（そのファイルを示す） | 同上 |
+| `prepared` | 未承認 | 書き換え、このマシンで未承認、取り消し | `launch_approval.approved` | 止める | `precondition`。承認の対象の一覧と `/ndf:launch-config` を載せる | コピーを作らない。承認して再実行 |
+| `prepared` | コピーを書けない | 状態の保存先の権限・容量 | 書き込み | 呼び出し元へ返す | `precondition` | 作りかけのディレクトリを消す |
+| `safety_args` | 起動できない状況 | サンドボックスが使えず承認が無い、agy の `review` | 表の判定 | 止める | `precondition`。承認の手順を載せる | 再実行できる |
+
+### 処理の手順
+
+`safety_args` の判定表:
+
+| runtime / use | 条件 | 結果 |
+| --- | --- | --- |
+| claude / どちらも | — | `[]` |
+| agy / review | — | 停止 |
+| `sandbox_needs_userns` が偽で `sandbox_args` を持つ行 / review（kiro） | — | `sandbox_args` |
+| codex / review・delegate | 名前空間を作れる | `sandbox_args`（review）・`delegate_sandbox_args`（delegate） |
+| codex / review・delegate | 作れず、`unsandboxed` にあり承認済み | `unsandboxed_args` |
+| kiro・agy / delegate | `unsandboxed` にあり承認済み（サンドボックスの有無を見ない） | `unsandboxed_args` |
+| 上のどれでもない | — | 停止 |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `load`・`step_spec` | 工程の指定が `*` をキーごとに置き換える | ファイルが無い、`permissions` が空 | `load` に `Bash(...)`・`mcp__` の名前・カンマ、根の外へ出るシンボリックリンク |
+| `check_definitions` | `command` のサーバと `url` のサーバ | `mcpServers` が空 | 形の誤りの文に値が出ない |
+| `approval_target` | 字下げとキーの順の違いで同じ値 | `inherit` で `.mcp.json` が無い | 定義の中身を変えると値が変わる。引数・`env`・`headers`・URL が一覧に出ない |
+| `prepared` | コピーの権限と、抜けた後の削除 | 指定が空なら記録が無くても通る | 例外でも削除される。持ち主の PID が無い残りを消す |
+| `safety_args` | 判定表の各行 | 承認があっても名前空間を作れれば外さない | 承認が無ければ停止 |
+
+## 起動の承認
+
+満たす決定: 決定 7・8、受け入れ条件 9・10・11・14
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `repo_key` | `adapters/launch_approval.py` | 新設 | `repo_key(root: Path) -> str` | git の共通ディレクトリの実体の絶対パス。git の外は `root` の実体 |
+| `digest` | 同 | 新設 | `digest(permissions: Mapping, files: Mapping[str, Any]) -> str` | キーの順にそろえた JSON の SHA-256 |
+| `approved` | 同 | 新設 | `approved(repo: str, sha256: str) -> bool` | 同じ組の最後の行が `approve` か |
+| `append` | 同 | 新設 | `append(repo: str, sha256: str, action: str, approver: Optional[str] = None) -> dict` | 承認の記録へ 1 行足す |
+| `put_question` | 同 | 新設 | `put_question(repo: str, action: str, sha256: str, question: Mapping) -> str` | 問いの中身のハッシュを、キー・操作・対象と一緒に残す |
+| `record_answer` | 同 | 新設 | `record_answer(questions: Any, answers: Any, question_id: str) -> bool` | 残した問いと一致する場合だけ、答えを足す |
+| `approve_by_answer` | 同 | 新設 | `approve_by_answer(repo: str, sha256: str) -> Optional[str]` | 1 つのロックの中で、未使用の「承認する」の答えを照合・消費し、承認の行を足して承認者を返す |
+| `candidate_path` | 同 | 新設 | `candidate_path(repo: str) -> Path` | `launch-candidates/<キーのハッシュ>.json` |
+
+- このモジュールは hook から読むので、モジュールの頭では標準ライブラリと `identity` だけを読み込む
+- `append`・`put_question`・`record_answer`
+  - 事後条件: 追記だけで、ファイルは所有者だけが読める（0600）
+  - 副作用: 状態の保存先の `launch-approvals.jsonl`・`launch-questions.jsonl`・`launch-answers.jsonl`
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `approved` | 記録が読めない・壊れた行 | 書きかけ | 行の解析 | 壊れた行を飛ばす。ファイルを読めなければ未承認 | 呼び出し元の `precondition` | 再実行できる |
+| `append` | 書けない | 権限・容量・ロックの待ちの超過 | 書き込み | 呼び出し元へ返す | `precondition` | 承認は成立しない。再実行 |
+| `put_question` | 書けない | 同上 | 書き込み | 呼び出し元へ返す | `precondition` | 問いを出さない。再実行 |
+| `record_answer` | 一致する問いが無い | ほかの問い、中身の書き換え | 照合 | 既定値（記録しない）で続ける | 出力なし | — |
+| `approve_by_answer` | 使える答えが無い | 未回答、「承認しない」、使用済み、別のリポジトリ・操作・ハッシュ | ロックの中の照合 | None を返す | 呼び出し元が拒む | 問いを出し直せる |
+| `repo_key` | git を打てない | git の外 | `git.GitError` | 既定値（`root` の実体）で続ける | 出力なし | — |
+
+### 並行と排他
+
+| 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
+| --- | --- | --- | --- |
+| 2 つの `approve`、`approve` と `revoke` | 承認の記録と答えの記録 | 承認の記録の 1 つのロック（`launch-approvals.jsonl.lock`）の中で、照合・使用済みの行・承認の行を続けて書く | 使用済みの行を先に書く。途中で落ちたら答えは使えず、問い直す |
+| 起動の照らし直しと承認の書き込み | 承認の記録 | 読む側はロックを取らず、改行で終わる行だけを読む | — |
+
+### ログと記録の出力
+
+| 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
+| --- | --- | --- | --- |
+| `append`・`record_answer` | 設計書の承認の記録の欄 | 状態の保存先の JSONL | MCP の定義の中身、引数、`env`、`headers`、URL |
+
+### 既存の部品の再利用
+
+| 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
+| --- | --- | --- | --- |
+| `repo_key` | `git.Git.common_dir` | `grep -n "def common_dir" src/ndf/adapters/git.py` | 使う |
+| `append`・`approve_by_answer` | `domains/records/jsonl.py` | 層の順序の確認（adapters は domains を読めない） | 使えない。`filelock` と `identity.load().state_dir` を直接使う |
+| `load` | `contracts.require_schema` | `core/converge/participants.py` の使い方 | 使う |
+| `check_definitions`・`approval_target` | `participants.setting_present` | 同ファイル | 使えない（core の層）。`Path` の確認を持つ |
+| `safety_args` | `agents.user_namespaces` | `grep -n user_namespaces src/ndf` | 使う |
+| `prepared` | `tempfile.mkdtemp` | 標準ライブラリ | 使う（状態の保存先の下に作る） |
+| `launch_costs`・`main_model` | `claude.context_window` の主モデルの選び方 | `adapters/claude.py` の 449 行の付近 | `main_model` に切り出して両方が使う |
+| `report_launch`・`set_launch_recorder` | `set_relay_checks` | `adapters/claude.py` | 同じ差し込みの形にする |
+| `step_spec`・`digest`・`approved`・`candidate_path` | 起動の設定と承認を扱う関数 | `grep -rn "approval\|launch.json" src/ndf` | 同じ役割は無い（マージの承認の証跡 `core/merge_approval.py` は PR のコメントが対象）。新設する |
+| `put_question`・`record_answer`・`check` | `guards/ask.py`・`ask_clear.py` | `ls src/ndf/domains/hooks/guards` | 質問の転送と後片付けで、答えは残さない。guard の形だけ使う |
+| `approve_by_answer` | `filelock.FileLock` | `domains/records/jsonl.py` の使い方 | 使う |
+| `main`・`_show`・`_approve`・`_confirm_terminal`・`_revoke`・`_safety_args` | `contracts.result`・`ndf.cli` のサブコマンドの形 | `src/ndf/cli.py` | 結果 JSON の組み立てを使う |
+
+## `ndf launch-config` と承認の答えの hook
+
+満たす決定: 決定 7・9、受け入れ条件 9・10・14
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `main` | `domains/settings/launch_config_cli.py` | 新設 | `main(argv: list[str]) -> int` | `show`・`approve`・`revoke`・`safety-args` を振り分ける |
+| `_show` | 同 | 新設 | `_show(a: Namespace) -> int` | 承認の対象と状態を結果 JSON で出す。`--question approve` は問いの中身を作って残す |
+| `_approve` | 同 | 新設 | `_approve(a: Namespace) -> int` | 設計書の「人の確認」を満たす場合だけ記録し、`--candidate` を反映する |
+| `_confirm_terminal` | 同 | 新設 | `_confirm_terminal(target: Target) -> Optional[str]` | 端末で名前とハッシュの先頭 8 文字を受ける |
+| `_revoke` | 同 | 新設 | `_revoke(a: Namespace) -> int` | `NDF_AI_CHILD` が無ければ取り消しの行を足す |
+| `_safety_args` | 同 | 新設 | `_safety_args(a: Namespace) -> int` | 引数を 1 行に 1 つ出す。失敗は標準エラーだけに出す |
+| `check` | `domains/hooks/guards/launch_answer.py` | 新設 | `check(ctx, svc) -> Verdict` | `AskUserQuestion` の答えを `record_answer` へ渡し、常に通す |
+
+- `_approve`
+  - 事前条件: `--sha256` が必須
+  - 事後条件: 承認の行を足した後だけ、候補が `.ndf/launch.json` を置き換える（一時ファイルから `os.replace`）。候補の承認の対象が空か承認済みなら、問いを求めずに置き換える
+  - 副作用: 承認の記録、`.ndf/launch.json`、標準入力の読み取り（端末のときだけ）
+- `_safety_args`
+  - 副作用: 標準出力へ引数の行を出す。結果 JSON は出さない。`InternalError` はここで受け、標準エラーへ書いて 0 以外で終える（`ndf.cli` の結果 JSON が標準出力へ出ないようにする）
+- `check`
+  - 副作用: `NDF_AI_CHILD`・`NDF_FACTORY_RUN`・`NDF_RELAY_PLAN`・`NDF_ORGANIZER_DIR` のどれかがあれば何も書かない。どれも無ければ `record_answer` を呼ぶ
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `_show` | 設定を読めない | 起動の設定の誤り | `load` | 呼び出し元へ返す | `stopped`・`precondition` | 直して再実行 |
+| `_approve` | 内容が違う | `--sha256` といまの対象の不一致 | 計算の直後 | 止める | `stopped`・`refused` | 記録も反映もしない |
+| `_approve` | 人の確認が無い | `NDF_AI_CHILD`、端末でなく答えも無い | 確認の順 | 止める | `stopped`・`refused` | 同上 |
+| `_approve` | 反映できない | `.ndf/launch.json` の書き込みの失敗 | `os.replace` | 呼び出し元へ返す | `stopped`・`precondition`。承認の行は残る | 同じコマンドを打ち直すと、承認済みなので置き換える |
+| `_confirm_terminal` | 打ち間違い・中断 | ハッシュの不一致、EOF | 入力の比較 | None を返す | 呼び出し元が拒む | 打ち直せる |
+| `_revoke` | AI の中で呼ばれた | `NDF_AI_CHILD` | 頭 | 止める | `stopped`・`refused` | 記録しない |
+| `_safety_args` | 起動できない状況 | `safety_args` の停止 | 呼び出し | 止める | 標準出力は空、理由は標準エラー、終了コードは `precondition` | 再実行できる |
+| `check` | 記録の失敗 | 権限・容量 | 書き込み | 通す（dispatch が例外を `pass` にする） | 出力なし。`approve` が拒む | 問いを出し直す |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `_approve` | 端末の確認と、答えの確認 | 候補の対象が空 | 「承認しない」・使用済み・別のリポジトリ。拒んだ後に `.ndf/launch.json` が変わらない。同じ答えで 2 回打つと行は 1 つ |
+| `check` | 一致する問いの答えを記録 | 問いが無い | 4 つの環境変数のどれかがあれば記録しない |
+| `_safety_args` | 1 行 1 引数 | 引数が 0 個 | 停止で標準出力が空 |
+
+## 起動の引数の組み立てと起動の結果
+
+満たす決定: 決定 1・4・5・6、受け入れ条件 2・3・6・7・8・12
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `permission_args` | `adapters/claude.py` | 変更 | `permission_args(permission, tools=None, readable=(), grant: Optional[Grant] = None) -> list[str]` | full は `--tools`・`--allowed-tools <1 件 1 引数>`・`--strict-mcp-config`・`--mcp-config` を組む |
+| `_precheck` | 同 | 変更 | 変えない | `options.verify` が理由を返せば `Failure.LAUNCH` にする |
+| `call_claude` | 同 | 変更 | 変えない | 子の環境に `NDF_AI_CHILD=1` を足す |
+| `_parse_reply` | 同 | 変更 | 変えない | 成功でも誤りでも、`session_id`・`usage`・`modelUsage`・`total_cost_usd` を回答に持たせる |
+| `_accounted` | 同 | 変更 | 変えない | アカウントを替えて打ち直した場合、前の子の回答を `earlier` に残す |
+| `main_model` | 同 | 新設 | `main_model(models: Mapping) -> Optional[tuple[str, Mapping]]` | トークンの和が最大（同じなら窓の小さい方）のモデルを返す |
+| `context_window` | 同 | 変更 | 変えない | 主モデルの選び方を `main_model` にする |
+| `set_launch_recorder` | 同 | 新設 | `set_launch_recorder(recorder: Optional[LaunchRecorder]) -> None` | 書き込み処理を差し込む |
+| `report_launch` | 同 | 新設 | `report_launch(reply: ClaudeReply, meta: Mapping, seq: int) -> int` | `earlier` と回答のうち起動した子ごとに 1 行を渡し、渡した数を返す |
+
+- `permission_args` の full の並び: `--permission-mode acceptEdits --tools <同梱の読み込む一覧 + grant.load をカンマで連結> --allowed-tools <同梱の許可 13 個> <grant.allow の各件> [--strict-mcp-config] [--mcp-config <コピー>...]`。`inherit` は後ろの 2 つを付けない。直後に `plugins.args`（別のオプション）が来る。`grant` が None なら指定なしと同じ
+- 定数: `LOAD_TOOLS`（16 個）を足し、`FULL_TOOLS`（許可の 13 個）は変えない。`load` の名前は `--allowed-tools` に入れない
+- `ClaudeCall` に `grant`（full 以外で渡すと `ValueError`）、`ClaudeReply` に `session_id`・`usage`・`model_usage`・`session_cost_usd`・`launched: bool`・`launched_at`・`seconds`・`earlier`、`LaunchOptions` に `verify: Optional[Callable[[], Optional[str]]]` を足す。どれも省略できる
+- `LaunchRecorder` は `record_cli(usage, meta)` を持つ
+- `report_launch`
+  - 事後条件: `launched` が偽の子（CLI が古い、枠が取れない、起動できない、照らし直しで停止）は行を渡さない。`launch_id` は子ごとに作る
+  - 副作用: 差し込まれた書き込み処理の呼び出し
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `_precheck` | 承認の対象が変わった | 起動の直前の書き換え・取り消し | `options.verify` | 呼び出し元へ返す | 呼び出し元の `precondition` | 子を起動しない。承認して再実行 |
+| `report_launch` | 書き込み処理が無い | エントリポイントを通らない呼び出し | None の判定 | 既定値（書かない）で続ける | 出力なし | — |
+| `_parse_reply` | 欄が無い・形が違う | CLI の出力の変化、JSON でない | 読み取り | 欄を None にして続ける | 行の `usage` が `unknown` | — |
+
+### ログと記録の出力
+
+| 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
+| --- | --- | --- | --- |
+| `report_launch` | 設計書の「使用量ログの行」の欄 | 使用量ログ | 質問の本文、回答の本文 |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `permission_args` | 指定なし、定義ファイルの指定、`inherit` | `load` と `allow` が空 | `load` の名前が `--allowed-tools` に入らない。`--setting-sources` が無い |
+| `_precheck` | `verify` が None を返せば起動 | — | 理由を返せば子を起動しない |
+| `report_launch` | 子 1 つで 1 行、打ち直しで 2 行 | `usage` が無い | `launched` が偽なら 0 行 |
+| `main_model` | 和が最大 | 同じ和は窓の小さい方 | `modelUsage` が空 |
+
+## worker の起動と Skill を回す起動
+
+満たす決定: 決定 3・6・8、受け入れ条件 3・4・5・7
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `delegate` | `core/worker.py` | 変更 | 変えない | `prepared(handoff.kind, handoff.cwd)` の中で引数を組み、再開まで流す |
+| `_args_for` | 同 | 変更 | `_args_for(system, root, cwd, grant) -> claude.PluginArgs` | 指定を持つ引数を組む |
+| `_resume_until_written` | 同 | 変更 | `_resume_until_written(handoff, wd, out, base, call, options)` | 子ごとに `verify` を渡し、`report_launch` を呼び、`session_seq` を進める |
+| `_call_skill` | `progress/invoke.py` | 変更 | 変えない | `prepared(run.name, cwd)` の中で起動し、記録する。`session_seq` は 0 から |
+
+- `Caller` と `SkillCaller` は 5 つ目の引数 `options: claude.LaunchOptions` を受ける形にする。テストの偽の呼び出しも直す
+- 行の `name` は作業の名前か Skill の名前、`repo` はリモートの URL を `git.repo_of_url` で読む。読めなければ欄を省く
+- `run_id`・`step`・`attempt` は、環境変数 `NDF_PLAN_RUN_ID`・`NDF_STEP_ID`・`NDF_STEP_ATTEMPT` があれば書く
+- 実装する worker は、PR を作る前に設計書の決定 3 の「数え直し」を行い、結果を PR の本文へ書く
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `delegate` | 指定が壊れているか未承認 | `prepared` の停止 | 起動の前 | 呼び出し元へ返す（`ndf.cli` が結果 JSON にする） | `stopped`・`precondition` | 起動しない。再実行できる |
+| `_resume_until_written` | 再開の直前の停止 | `verify` | `reply.failure` | 止める | `stopped`・`precondition` | コピーは `delegate` を抜けるときに消える |
+| `_call_skill` | 指定の停止 | `prepared` | `InternalError` を受ける | 呼び出し元へ返す | `StageResult` の `stopped`・`precondition` | 起動しない |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `delegate` | 指定の引数が起動に渡る。再開した子の数だけ行が増える | 指定が無いリポジトリ | 未承認で呼び出しが 0 回。JSON の無い失敗は `unknown` の行 |
+| `_call_skill` | 工程の名前が Skill の名前 | プランの外では `run_id` が無い | 停止で呼び出しが 0 回。使用量ログへ書けなくても結果は同じ |
+
+## プランの実行
+
+満たす決定: 決定 6、受け入れ条件 3
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `_run` | `core/plan/transition_decide.py` | 変更 | 変えない | ステップを打つ手に、そのステップの何回目かを持たせる |
+| `decide` | 同 | 変更 | 変えない | 打ち直し（待ちの後）の手でも回数を 1 増やす |
+| `run_step` | `core/plan/runner.py` | 変更 | `run_step(spec, step_id, attempt, nth: int = 1)` | `run_id`・ステップの id・回数を子の環境にする |
+| `_launch` | `core/plan/steps.py` | 変更 | 変えない | `StepContext.env` を子の環境に重ねる |
+
+- `RunStep` に `nth: int = 1`、`StepState` に `runs: Mapping[str, int]`、`StepContext` に `env: Mapping[str, str]` を足す。`attempt`（打ち直しの回数）の意味は変えない
+- `NDF_RUN_ID`・`NDF_RUN_LOG` は変えない
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `_launch` | 起動できない | 実行ファイルが無い | `OSError` | 今までと同じ（`precondition`） | 変えない | 変えない |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `decide`・`_run` | 遷移で戻ったステップと打ち直しで回数が増える | 最初は 1 | — |
+| `run_step`・`_launch` | 子の環境に 3 つの値がある | 実行ログを開いた実行でも `run_id` はプランの値 | — |
+
+## 相手役の起動の引数
+
+満たす決定: 決定 9、受け入れ条件 13
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `_sandbox_args` | `core/converge/participants.py` | 変更 | `_sandbox_args(agent: str, worktree: Path) -> list[str]` | `safety_args(agent, "review", worktree)` を返す |
+| `_review_args` | 同 | 変更 | `_review_args(agent, row, worktree) -> tuple[str, ...]` | `{sandbox}` を上の値に広げる |
+| `_start` | `adapters/agents.py` | 変更 | 変えない | 相手役と修正担当の子の環境に `NDF_AI_CHILD=1` を足す |
+
+- `runtimes.json`: codex に `sandbox_needs_userns: true` と `delegate_sandbox_args: ["-s", "workspace-write"]`。kiro は `sandbox_args: ["--trust-tools=fs_read"]` を持たせて `review_args` の同じ値を `{sandbox}` にし、`unsandboxed_args: ["--trust-all-tools"]`。agy は `unsandboxed_args: ["--dangerously-skip-permissions"]`
+- `_unread_hint`（`domains/crossreview/seats.py`）のサンドボックスの失敗の文は「NDF がサンドボックスを外して起動する」をやめ、`/ndf:launch-config` で承認する手順にする
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `_review_args` | 停止の状況 | `safety_args` | 起動の組み立て | 呼び出し元へ返す（cross-review と cross-refactoring は `ndf.cli` が結果 JSON にする） | `stopped`・`precondition` | どの担当も起動しないうちに止まる。承認して再実行 |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `_review_args` | codex は `-s read-only`、kiro は `--trust-tools=fs_read` | 承認があっても名前空間を作れれば外さない | 作れず承認が無ければ停止 |
+| `_start` | 子の環境に `NDF_AI_CHILD` | — | — |
+
+## 使用量ログの書き込みと費用
+
+満たす決定: 決定 6、受け入れ条件 3
+
+### 関数の仕様
+
+| 関数 | 保存先 | 種類 | シグネチャ | 責務 |
+| --- | --- | --- | --- | --- |
+| `record_cli` | `domains/records/usage.py` | 変更 | 変えない | `meta` の足した欄を書く。値が None の欄は置かない |
+| `launch_costs` | `domains/records/usage_decide.py` | 新設 | `launch_costs(rows: Iterable[Mapping]) -> dict[str, Optional[float]]` | 同じ会話の累計の差から、`launch_id` ごとの費用を返す。不明は None |
+
+- `__main__.py` は `claude.set_launch_recorder(usage)` を呼ぶ
+- `launch_costs` は設計書の「起動の費用の求め方」の表と、同じ `launch_id` の行の扱いに従う。期間で絞る前の全部の行を受ける
+
+### 異常系の処理
+
+| 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `record_cli` | 書けない | 権限・容量・ロックの待ち・行の形の誤り | 追記 | 既定値（None）で続ける | 標準エラーに警告 1 行。工程の結果は変えない | 行は残らない |
+| `launch_costs` | 値の欠け・番号の飛び・差が負 | 書けなかった起動 | 差の計算 | 不明（None） | 集計が件数を数える | — |
+
+### 単体テストの観点
+
+| 関数 | 正常 | 境界値 | 異常 |
+| --- | --- | --- | --- |
+| `record_cli` | 足した欄がスキーマに合う | `usage` が無い行は `unknown` | 書けなくても例外が出ない |
+| `launch_costs` | 再開は累計の差 | `session_seq` 0、`session_id` の無い行 | 番号の飛び、差が負、同じ `launch_id` の重なり |
+
+## 手順書
+
+満たす決定: 決定 7・9、受け入れ条件 9・13
+
+| ファイル | 変える中身 |
+| --- | --- |
+| `skills/launch-config/SKILL.md`（新設） | 設計書の「承認を取る」の 4 手順と、`unsandboxed` の問いに必ず含める 1 文。MCP の定義ファイルと `.mcp.json` を読まず、作らず、編集しない |
+| `skills/external-ai/SKILL.md`・`references/cli-codex.md`・`cli-agy.md`・`cli-kiro.md` | 決め打ちの安全装置の指定を `ndf launch-config safety-args` の出力に置き換え、起動の例の前に `NDF_AI_CHILD=1` を書く |
+| `skills/qa-security-scan/03-report-template.md`・`agents/corder.md` | 同上 |
+| `skills/cross-review/SKILL.md` | サンドボックスを自動で外す説明を、承認がある場合だけにする |
+| `skills/worktree/references/ndf-settings.md` | `.ndf/launch.json` の行 |
+
+起動の例は、引数を 1 行 1 つで受けて配列にしてから CLI を打つ（失敗を見落とさない形は [#2944 の設計](./issue-2944-design.md)の「`args` の受け取り方」と同じ）。書いた例は実行して確かめる。
