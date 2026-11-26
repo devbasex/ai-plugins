@@ -15,6 +15,7 @@ from itertools import takewhile
 from typing import NamedTuple, Optional
 
 from markdown_it import MarkdownIt
+from markdown_it.rules_inline import StateInline, backtick, escape
 
 from ndf.core.plan import inputs_decide
 
@@ -32,8 +33,6 @@ REQUIRED_COLUMNS = (NAME_COLUMN, TASKS_COLUMN, CRITERIA_COLUMN)
 NO_CRITERIA = "無し"
 
 _MARKDOWN = MarkdownIt("commonmark").enable("table")
-# インラインコード。開きと同じ数の ` で閉じる
-_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
 _NOTE = re.compile(r"（[^（）]*）|\([^()]*\)")
 _SEPARATOR = re.compile(r"[・、,]")
 _TASK_ITEM = re.compile(r"(?P<prefix>Task |T)?(?P<first>[0-9]+)(?:〜(?:Task |T)?(?P<last>[0-9]+))?")
@@ -111,6 +110,20 @@ class _Scope(NamedTuple):
     sprint: frozenset[int]
 
 
+def _mask_code_spans(line: str) -> str:
+    """行のインラインコードを `code` に置き換える。範囲とエスケープは markdown-it の規則で読む。"""
+    state = StateInline(line, _MARKDOWN, {}, [])
+    out = []
+    while state.pos < state.posMax:
+        start = state.pos
+        if not (escape(state, True) or backtick(state, True)):
+            state.pos += 1
+        piece = line[start : state.pos]
+        # 閉じの無い ` の並びは ` だけが返る
+        out.append("code" if piece.startswith("`") and piece.strip("`") else piece)
+    return "".join(out)
+
+
 def _parse(text: str) -> _Doc:
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     tokens = _MARKDOWN.parse("\n".join(lines))
@@ -128,7 +141,7 @@ def _parse(text: str) -> _Doc:
             stop = start + 2 + len(data)
             rows = [inputs_decide.split_row(line) for line in (lines[start], *data)]
             after = filter(inputs_decide.has_cell_separator, lines[stop:end])
-            rest = [inputs_decide.split_row(_CODE_SPAN.sub("code", line)) for line in after]
+            rest = [inputs_decide.split_row(_mask_code_spans(line)) for line in after]
             tables.append(_Table(start, rows, stop + 1, rest))
     return _Doc(tuple(headings), tuple(tables))
 
