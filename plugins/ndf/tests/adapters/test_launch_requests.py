@@ -137,18 +137,39 @@ def test_draft_sweeps_candidates_of_a_removed_worktree_and_of_a_denied_request(t
     assert not stale.exists() and not denied.exists() and fresh.exists()
 
 
-def test_draft_keeps_edited_candidates_and_candidates_still_being_drafted(tmp_path):
+def test_draft_keeps_edited_candidates(tmp_path):
     gone, kept = _worktree(tmp_path / "a"), _worktree(tmp_path / "b")
     edited, denied = _candidate(gone), la.new_candidate("/r", kept)
     _asked(kept, candidate=denied, label=la.DENY_LABEL)
     denied.write_bytes(NEW)  # 「承認しない」と回答した後に直した
-    drafting = denied.parents[1] / f"{la.DRAFTING}half"
-    drafting.mkdir()
     (gone.parent / "launch.json").unlink()
     gone.parent.rmdir()
     gone.parents[1].rmdir()
     la.new_candidate("/r", kept)
-    assert edited.exists() and denied.exists() and drafting.exists()
+    assert edited.exists() and denied.exists()
+
+
+def test_draft_keeps_a_denied_candidate_that_was_asked_again(tmp_path):
+    """否認の後に同じ候補で作り直したリクエストが回答待ちなら、否認と同じ中身でも消さない。"""
+    target = _worktree(tmp_path)
+    candidate = la.new_candidate("/r", target)
+    _asked(target, candidate=candidate, label=la.DENY_LABEL)
+    _asked(target, "q2", candidate=candidate, label=None)
+    la.new_candidate("/r", target)
+    assert candidate.exists()
+
+
+def test_draft_reclaims_what_an_interrupted_draft_or_sweep_left(tmp_path):
+    """候補の錠の中で見つかる作業中のディレクトリは中断の残り。作成途中は消し、消す途中で直されていた候補は元へ戻す。"""
+    target = _worktree(tmp_path)
+    edited = _candidate(target)
+    home = edited.parents[1]
+    drafting = home / f"{la.DRAFTING}half"
+    drafting.mkdir()
+    removing = home / f"{la.REMOVING}{edited.parent.name}"
+    edited.parent.rename(removing)
+    la.new_candidate("/r", target)
+    assert not drafting.exists() and not removing.exists() and edited.read_bytes() == NEW
 
 
 def test_reflect_replaces_the_target_once_and_the_retry_succeeds_without_writing(tmp_path):

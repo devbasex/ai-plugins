@@ -4,7 +4,7 @@
 残したリクエストと一致し、回答が質問の示した選択肢のどれかと同じときだけ、リクエストの識別子・選んだラベル・質問の id を
 `launch-answers.jsonl` へ追記する。選択肢に無い回答（自由入力の補足や訂正）は記録しない。回答を人でなく AI が返しうる会話
 （NDF が起動した AI・人のいない実行・オーガナイザーが質問を受けうる会話）でも書かない。回答の照らし合わせと承認の行は
-`ndf.adapters.launch_approval` が持つ。記録の読み書き（所有者だけの普通のファイルの確かめ・書きかけの末尾の閉じ方・錠）と
+`ndf.adapters.launch_approval` が持つ。記録の読み書き（所有者だけの普通のファイルの確かめ・書きかけの末尾の閉じ方）と
 質問のハッシュは、承認のコマンドと共有する `ndf.adapters.launch_records` を使う（hook の import の表に収まる）。
 """
 
@@ -44,11 +44,10 @@ def check(ctx, svc) -> Verdict:
         "label": label,
         "question_id": ctx.payload.get("tool_use_id"),
     }
-    path = svc.state_dir / _state_path("launch-answers")
     try:
-        with records.file_lock(path, tables.policy_value("launch.approvals-lock", "seconds")):
-            records.write_row(path, row)
-    except OSError:  # ほかのユーザーが読める記録・書けない記録・錠の待ちの超過は書かずに通す（hook は止めない）
+        # 錠を取らない（1 回の write の追記は混ざらない）。錠の待ちの上限で、利用者の選んだ回答を捨てないためである
+        records.write_row(svc.state_dir / _state_path("launch-answers"), row)
+    except OSError:  # ほかのユーザーが読める記録・書けない記録には書かずに通す（hook は止めない）
         return passing()
     return passing(launch_answer="recorded")
 

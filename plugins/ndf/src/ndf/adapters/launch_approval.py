@@ -29,8 +29,10 @@ REFLECTED = "launch-reflected"
 # 候補のディレクトリの中身: 候補（反映先の写し）と、反映先・反映元のバージョン・作った時の候補のバージョンの記録
 CANDIDATE_NAME = "candidate.json"
 SOURCE_NAME = "source.json"
-# 作成途中の候補のディレクトリの名前の頭。そろってから付け替えるまで、掃除はこの名前のディレクトリを見ない
-DRAFTING = "."
+# 候補のディレクトリの作業中の名前の頭。作成途中（DRAFTING）と、消す前に照らし直している途中（REMOVING）。
+# 作成と掃除は候補の錠の中だけで行うので、錠の中で見つかる作業中のディレクトリは中断の残りである
+DRAFTING = ".draft-"
+REMOVING = ".removing-"
 # 反映の途中で反映先を退避した名前の後ろと、反映の途中の記録・完了の記録の名前の後ろ
 REFLECTING = ".reflecting"
 PENDING = ".pending.json"
@@ -262,8 +264,8 @@ def _worktree_gone(target: object) -> bool:
 
 
 def _candidates(home: Path) -> list[Path]:
-    """そろった候補のディレクトリ。作成途中（名前の頭が `DRAFTING`）のものは含めない。"""
-    return sorted(made for made in home.glob("*") if not made.name.startswith(DRAFTING))
+    """そろった候補のディレクトリ。作業中の名前（頭が `.`）のものは含めない。"""
+    return sorted(made for made in home.glob("*") if not made.name.startswith("."))
 
 
 def _untouched(made: Path, kept: Optional[str] = None) -> bool:
@@ -272,36 +274,89 @@ def _untouched(made: Path, kept: Optional[str] = None) -> bool:
     return now is None or now in (read_launch_record(made / SOURCE_NAME).get("written"), kept)
 
 
+def _discard(made: Path, kept: Optional[str] = None) -> None:
+    """候補の錠の中で、直していない候補を消す。
+
+    先に作業中の名前（`REMOVING`）へ変えてから照らし直す。名前を変えた後は、元のパスへの保存はディレクトリが無いので失敗し、
+    エディタの中の設定案は残る。変える前に保存されていれば、照らし直しで見つけて元の名前へ戻す。
+    """
+    aside = made.with_name(REMOVING + made.name)
+    try:
+        os.rename(made, aside)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 消す前に無くなった候補は、消すものが無い
+        return
+    _settle(aside, kept)
+
+
+def _settle(aside: Path, kept: Optional[str] = None) -> None:
+    """消す途中の候補を、直していなければ消し、直していれば元の名前へ戻す。"""
+    if _untouched(aside, kept):
+        shutil.rmtree(aside, ignore_errors=True)
+    else:
+        os.rename(aside, aside.with_name(aside.name[len(REMOVING) :]))
+
+
+def _reclaim(home: Path) -> None:
+    """候補の錠の中で、中断で残った作業中のディレクトリを片付ける。作成途中は消し、消す途中は `_settle` と同じに扱う。"""
+    for left in home.glob(".*"):
+        if left.name.startswith(REMOVING):
+            _settle(left)
+        elif left.name.startswith(DRAFTING):
+            shutil.rmtree(left, ignore_errors=True)
+
+
+def _sweep(home: Path) -> None:
+    """候補の錠の中で、反映先の worktree が無い候補と、最新のリクエストに「承認しない」と回答した候補を消す（直したものは残す）。
+
+    「承認しない」の判定は、候補ごとの最新のリクエストで行う。否認の後に同じ候補で作り直したリクエストが回答待ちか承認済みなら、
+    その候補は消さない。比べるバージョンは、そのリクエストを作った時に記録した候補のバージョン（`candidate_version`）である。
+    """
+    latest: dict[Any, dict[str, Any]] = {}
+    for row in records.whole_rows(state_file(QUESTIONS)):
+        if row.get("candidate") is not None:
+            latest[row.get("candidate")] = row
+    labels = _last_labels()
+    for made in _candidates(home):
+        req = latest.get(str(made / CANDIDATE_NAME))
+        if req is not None and _judged(labels.get(req.get("request_id")), req)[0] == "deny":
+            _discard(made, req.get("candidate_version"))
+        elif _worktree_gone(read_launch_record(made / SOURCE_NAME).get("target")):
+            _discard(made)
+
+
+def _snapshot(target: Path) -> tuple[bytes, Optional[str]]:
+    """反映先の中身と、同じ読み取りから求めた反映元のバージョン。無ければ空の設定と None。"""
+    try:
+        data = target.read_bytes()
+    except FileNotFoundError:  # 無い反映先は「無し」のバージョンとして空の設定を写す
+        return b'{"version": 1}\n', None
+    return data, hashlib.sha256(data).hexdigest()
+
+
 def new_candidate(repo: str, target: Path) -> Path:
     """反映先の写しの候補と、反映先・反映元のバージョン・作った時の候補のバージョンの記録を作り、候補のパスを返す。
 
-    先に、反映先の worktree が無い候補と完了の記録、「承認しない」と回答したリクエストの候補を消す。候補は、作った時か
-    「承認しない」と回答した時の中身のままのものだけを消し、その後に直したものは残す。新しい候補は名前の頭が `DRAFTING` の
-    ディレクトリで候補と記録をそろえてから付け替える。ほかの `draft` の掃除が、記録の無い作成途中の候補を消さないためである。
+    リポジトリごとの候補の錠の中で、中断の残りを片付け、掃除（`_sweep`）をしてから作る。完了の記録も、反映先の worktree が
+    無ければ消す。候補は作成途中の名前（`DRAFTING`）のディレクトリで候補と記録をそろえてから付け替え、途中で失敗すれば消す。
+    写しと反映元のバージョンは反映先の同じ読み取りから作る（別に読むと、間の保存で古い写しに新しいバージョンが付く）。
     """
     home = _store(CANDIDATES) / _short_hash(repo)
-    labels = _last_labels()
-    denied = {
-        r.get("candidate"): r.get("candidate_version")
-        for r in records.whole_rows(state_file(QUESTIONS))
-        if _judged(labels.get(r.get("request_id")), r)[0] == "deny"
-    }
-    for made in _candidates(home):
-        path = str(made / CANDIDATE_NAME)
-        gone = _worktree_gone(read_launch_record(made / SOURCE_NAME).get("target"))
-        if (gone and _untouched(made)) or (path in denied and _untouched(made, denied[path])):
-            shutil.rmtree(made, ignore_errors=True)
-    for record in _store(REFLECTED).glob("*" + DONE):
-        if _worktree_gone(read_launch_record(record).get("target")):
-            record.unlink(missing_ok=True)
-    name = uuid.uuid4().hex
-    drafting, made = home / f"{DRAFTING}{name}", home / name
-    data = target.read_bytes() if target.exists() else b'{"version": 1}\n'
-    _write_private(drafting / CANDIDATE_NAME, data)
-    write_launch_record(
-        drafting / SOURCE_NAME, {"target": str(target), "base": content_version(target), "written": hashlib.sha256(data).hexdigest()}
-    )
-    os.rename(drafting, made)
+    with records_lock(home):
+        _reclaim(home)
+        _sweep(home)
+        for record in _store(REFLECTED).glob("*" + DONE):
+            if _worktree_gone(read_launch_record(record).get("target")):
+                record.unlink(missing_ok=True)
+        name = uuid.uuid4().hex
+        drafting, made = home / f"{DRAFTING}{name}", home / name
+        data, base = _snapshot(target)
+        try:
+            _write_private(drafting / CANDIDATE_NAME, data)
+            write_launch_record(drafting / SOURCE_NAME, {"target": str(target), "base": base, "written": hashlib.sha256(data).hexdigest()})
+            os.rename(drafting, made)
+        except BaseException:
+            shutil.rmtree(drafting, ignore_errors=True)
+            raise
     return made / CANDIDATE_NAME
 
 
@@ -393,14 +448,18 @@ def _write_done(target: Path, rec: Mapping[str, Any]) -> None:
 def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> None:
     """完了の記録を書いてから、候補と、反映元のバージョンが合わなくなった同じ反映先の候補を消す。
 
-    ほかの候補は、作った時の中身のままのものだけを消す。作った後に直した候補は、反映元が変わっても残す（書いた設定案を失わないため）。
+    ほかの候補は、候補の錠の中で `_discard` を通し、作った時の中身のままのものだけを消す。作った後に直した候補は、反映元が
+    変わっても残す（書いた設定案を失わないため）。
     """
     _write_done(target, rec)
     now = content_version(target)
-    for made in _candidates(candidate.parent.parent):
-        source = read_launch_record(made / SOURCE_NAME)
-        if made == candidate.parent or (source.get("target") == str(target) and source.get("base") != now and _untouched(made)):
-            shutil.rmtree(made, ignore_errors=True)
+    home = candidate.parent.parent
+    with records_lock(home):
+        shutil.rmtree(candidate.parent, ignore_errors=True)
+        for made in _candidates(home):
+            source = read_launch_record(made / SOURCE_NAME)
+            if source.get("target") == str(target) and source.get("base") != now:
+                _discard(made)
 
 
 def recover(target: Path) -> Optional[Path]:

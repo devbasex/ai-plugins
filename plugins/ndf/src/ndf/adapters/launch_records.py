@@ -69,7 +69,7 @@ def _parsed_row(line: bytes) -> Optional[dict[str, Any]]:
 
 
 def file_lock(path: Path, timeout: float) -> Any:
-    """記録のファイルの錠（`<ファイル>.lock`）。承認のコマンドと hook が同じ錠を取る。"""
+    """記録のファイルの錠（`<ファイル>.lock`）。読んでから書く操作（承認の行・リクエスト・候補の作成と掃除）が取る。"""
     from filelock import FileLock
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,17 +77,24 @@ def file_lock(path: Path, timeout: float) -> Any:
 
 
 def write_row(path: Path, row: Mapping[str, Any]) -> None:
-    """1 行を追記する（錠は呼び手が持つ）。ファイルは所有者だけが読める（0600）。
+    """1 行を、1 回の `write` で追記する。ファイルは所有者だけが読める（0600）。
 
+    `O_APPEND` の 1 回の `write` はほかの追記と混ざらないので、読んでから書く判断を伴わない追記（hook の回答の記録）は錠を取らずに
+    呼べる。錠の待ちで回答を捨てないためである。読んでから書く呼び手（承認の行）は錠を持って呼ぶ。
     既存のファイルが所有者だけの形でなければ書かずに `PermissionError` を投げる（承認者名とリポジトリのパスをほかのユーザーへ見せない）。
     末尾が改行で終わらない書きかけ（中断した追記）が残っていれば、先に `TORN_END` で閉じて次の行と分ける。つなげると読み手が両方を捨て、
     打ち直した操作が反映されない。改行だけで閉じると、JSON を書き終えたところで中断した行が、次の無関係な追記で有効になる。
+    錠の無い 2 つの追記が同じ書きかけを見て両方が閉じても、増えるのは読まれない `TORN_END` の行だけである。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o600)
-    with os.fdopen(fd, "r+b") as f:
-        if not private_to_me(f.fileno()):
+    try:
+        if not private_to_me(fd):
             raise PermissionError(f"{path} が所有者だけの読み書きでない。所有者を自分にし、`chmod 600` にしてから打ち直す")
-        size = os.fstat(f.fileno()).st_size
-        torn = size > 0 and os.pread(f.fileno(), 1, size - 1) != b"\n"
-        f.write((TORN_END if torn else b"") + (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8"))
+        size = os.fstat(fd).st_size
+        torn = size > 0 and os.pread(fd, 1, size - 1) != b"\n"
+        data = (TORN_END if torn else b"") + (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
+        while data:
+            data = data[os.write(fd, data) :]
+    finally:
+        os.close(fd)
