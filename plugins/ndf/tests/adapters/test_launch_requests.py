@@ -592,9 +592,11 @@ def _interrupted(tmp_path: Path) -> tuple[Path, Path, Path]:
         "approver": "山田",
         "route": "terminal",
     }
-    lc.write_launch_record(la.reflected_file(target, la.PENDING), pending)
     os.rename(target, aside)
     target.write_bytes(NEW)
+    placed = os.lstat(target)
+    pending["placed"] = [placed.st_dev, placed.st_ino]  # NDF が置いた候補のファイルの実体
+    lc.write_launch_record(la.reflected_file(target, la.PENDING), pending)
     return target, candidate, aside
 
 
@@ -635,16 +637,57 @@ def test_a_hand_saved_copy_of_the_candidate_still_asks_for_consent(tmp_path):
     assert _reflect(candidate, lambda: calls.append(1), SHA) and calls == [1]
 
 
-def test_after_an_interruption_a_save_into_the_aside_is_kept_under_another_name(tmp_path):
-    """置いた直後の中断で退避に利用者の保存があれば、反映先の候補を消さず、退避を別の名前で残す。完了の記録は人の同意の後に書く。"""
+@pytest.mark.parametrize("route", ["reflect", "finished"])
+def test_after_an_interruption_a_save_into_the_aside_is_kept_and_the_consent_carries_over(tmp_path, route):
+    """置いた直後の中断で退避に利用者の保存があれば、反映先の候補を消さず、退避を別の名前で残し、中断の前の同意から完了にする（Value 1・3）。"""
     target, candidate, aside = _interrupted(tmp_path)
     aside.write_bytes(b'{"version": 1, "saved": 1}\n')
     placed = target.read_bytes()
-    calls: list[int] = []
     kept: list[Path] = []
-    assert _reflect(candidate, lambda: calls.append(1), SHA, kept=kept) and calls == [1]
-    assert target.read_bytes() == placed
-    assert [p.read_bytes() for p in kept] == [b'{"version": 1, "saved": 1}\n'] and not aside.exists()
+    if route == "reflect":
+        assert _reflect(candidate, lambda: pytest.fail("確認を取り直した"), SHA, kept=kept)
+    else:  # 端末の経路は、名前とハッシュを求める前に完了を確かめる
+        assert la.finished(candidate, target, SHA, None, candidate.read_bytes(), kept)
+    assert target.read_bytes() == placed and not aside.exists()
+    assert [p.read_bytes() for p in kept] == [b'{"version": 1, "saved": 1}\n']
+    assert (_done(target)["approver"], _done(target)["saved"]) == ("山田", str(kept[0]))
+    assert la.saved_in_done(target) == kept[0]  # 結果を受け取る前に止まって打ち直しても、完了の記録から残したパスを返せる
+
+
+def test_an_interruption_after_removing_the_aside_still_reports_the_saved_path(tmp_path, monkeypatch):
+    """退避を別の名前で残し、退避を消した直後に中断しても、次の片付けがそのパスを返し、途中の記録の同意から完了にする。"""
+    target, candidate, aside = _interrupted(tmp_path)
+    aside.write_bytes(b'{"version": 1, "saved": 1}\n')
+    unlink = Path.unlink
+
+    def stop_after_the_aside(self, *args, **kwargs):
+        unlink(self, *args, **kwargs)
+        if self == aside:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(Path, "unlink", stop_after_the_aside)
+    with pytest.raises(KeyboardInterrupt):
+        la.recover(target)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    saved = la.recover(target)
+    assert saved is not None and saved.read_bytes() == b'{"version": 1, "saved": 1}\n'
+    assert _done(target)["approver"] == "山田"
+
+
+def test_a_hand_save_of_the_candidate_while_placing_is_not_taken_as_placed(tmp_path, monkeypatch):
+    """手順 4 の間に利用者が候補と同じ中身を手で保存したら、NDF が置いたものでないので反映済みにせず止める。"""
+    target = _worktree(tmp_path)
+    candidate = _candidate(target)
+    link = os.link
+
+    def hand_save_first(src, dst):
+        if Path(dst) == target:
+            target.write_bytes(candidate.read_bytes())
+        link(src, dst)
+
+    monkeypatch.setattr(la.os, "link", hand_save_first)
+    assert not _reflect(candidate, lambda: None, SHA)
+    assert target.read_bytes() == candidate.read_bytes() and _done(target) == {}
 
 
 def test_recover_keeps_both_when_target_and_aside_hold_the_users_contents(tmp_path):

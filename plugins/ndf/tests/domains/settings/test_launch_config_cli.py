@@ -348,6 +348,15 @@ def test_a_broken_setting_stops_show_but_a_candidate_can_still_be_shown(repo, ca
     assert _run(capsys, "show", "--candidate", str(candidate))["status"] == "ok"
 
 
+def test_approve_without_a_candidate_tells_the_saved_path_when_the_setting_is_broken(repo, capsys):
+    """候補なしの approve が退避を別の名前で残した後、設定を読めずに止まっても、止める文に残したパスを載せる。"""
+    target = _settings(repo, "{broken")
+    target.with_name("launch.json.reflecting").write_text('{"version": 1, "mine": 1}\n', encoding="utf-8")
+    got = _run(capsys, "approve", "--sha256", "a" * 64)
+    saved = next(repo.joinpath(".ndf").glob("launch.json.saved-*"))
+    assert got["cause"]["kind"] == "precondition" and str(saved) in got["summary"]
+
+
 def test_show_of_a_missing_candidate_stops(repo, capsys):
     candidate = _draft(capsys)
     candidate.unlink()

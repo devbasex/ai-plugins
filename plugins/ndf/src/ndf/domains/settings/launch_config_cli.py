@@ -292,8 +292,11 @@ def _before_approve(a: argparse.Namespace, cand: Optional[Path]) -> Optional[dic
         return _refused_config("NDF が起動した AI の中では承認できない。利用者が端末で打つ")
     if cand is not None and not cand.exists():
         # 今の作業場所の反映先の完了の記録だけを照らす（別の worktree の反映を、この作業場所の反映としない）
-        if la.reflected(cand, ls.launch_file(_worktree_root()), a.sha256, a.request):
-            return result.result(TOOL, result.OK, "反映は済んでいる", metrics={"sha256": a.sha256})
+        target = ls.launch_file(_worktree_root())
+        if la.reflected(cand, target, a.sha256, a.request):
+            # 反映のときに利用者の保存を別の名前で残していれば、打ち直しの結果にもそのパスを載せる
+            saved = la.saved_in_done(target)
+            return result.result(TOOL, result.OK, "反映は済んでいる" + _kept_note([saved] if saved else []), metrics={"sha256": a.sha256})
         return _refused_config("候補が無く、反映も確かめられない（反映の後に設定が変わったか、候補が別の内容）。draft からやり直す")
     if a.request is not None and la.request_answer(a.request)[0] == "deny":
         return _refused_config("このリクエストには「承認しない」と回答している。記録も反映もしない")
@@ -312,7 +315,10 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
     try:
         t, data = _approval_input(root, cand, target, kept)
     except _Refused as exc:
-        return _refused_config(str(exc))
+        return _refused_config(str(exc) + _kept_note(kept))
+    except internal.InternalError as exc:
+        # 退避を片付けた後の設定の読み込みで止まっても、別の名前で残した保存のパスを載せる
+        raise _with_kept(exc, kept) from None
     if t.sha256 != a.sha256:
         return _refused_config(f"示した内容（{a.sha256[:12]}…）と今の内容が違う。show で示し直して承認を取り直す" + _kept_note(kept))
     # 端末の経路だけ、名前とハッシュを求める前に中断の前の完了を確かめる（入れ直させないため）。質問の経路は入力が無いので、
@@ -342,9 +348,7 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
             + _kept_note(kept)
         )
     except internal.InternalError as exc:
-        if not kept:
-            raise
-        raise internal.InternalError(exc.kind, f"{exc}{_kept_note(kept)}") from None
+        raise _with_kept(exc, kept) from None
     if refused is not None:
         return _refused_config(refused + _kept_note(kept))
     summary = ("承認した" if needed else "承認の記録は要らない（許可が広がらないか承認済み）") + ("。候補を反映した" if cand else "")
@@ -395,6 +399,11 @@ def _record_approval(
 def _kept_note(kept: list[Path]) -> str:
     """利用者の保存を別の名前で残したときに、結果の文へ足す文（残していなければ空）。"""
     return f"。利用者の保存を {'、'.join(map(str, kept))} に残した" if kept else ""
+
+
+def _with_kept(exc: internal.InternalError, kept: list[Path]) -> internal.InternalError:
+    """止める例外の文に、別の名前で残した保存のパスを足したもの（残していなければ `exc` のまま）。"""
+    return internal.InternalError(exc.kind, f"{exc}{_kept_note(kept)}") if kept else exc
 
 
 def _approve_and_place(
