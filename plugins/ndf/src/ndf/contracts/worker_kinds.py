@@ -153,19 +153,24 @@ def _released_fields(value: Optional[Recorded]) -> dict[str, Any]:
     return fields
 
 
+def recorded_of(version: Any, delivery: Any, store: Optional[str]) -> Optional[Recorded]:
+    """記録済みの値の識別子と届け先を確かめた `Recorded`。`version` が空白だけでない文字列でなければ None。
+
+    `delivery` がオブジェクトでなければ届け先は記録されていないものとする。`store` は呼び手が確かめた種類をそのまま入れる。
+    """
+    if not (isinstance(version, str) and version.strip()):
+        return None
+    return Recorded(version, dict(delivery) if isinstance(delivery, dict) else None, store)
+
+
 def released_of(held: Mapping[str, Any]) -> Optional[Recorded]:
     """読んだ `values.json` の記録済みの値。`released_version` が空白だけでない文字列でなければ None。
 
     `released_delivery` がオブジェクトでなければ届け先は記録されていないものとし、`released_store` が 3 つの種類のどれでも
     なければ種類は記録されていないものとする（手で書き換えた値で worker の起動の判断を誤らない）。
     """
-    version = held.get("released_version")
-    if not (isinstance(version, str) and version.strip()):
-        return None
-    delivery = held.get("released_delivery")
     store = held.get("released_store")
-    known = store if store in STORE_KINDS else None
-    return Recorded(version, dict(delivery) if isinstance(delivery, dict) else None, known)
+    return recorded_of(held.get("released_version"), held.get("released_delivery"), store if store in STORE_KINDS else None)
 
 
 def write_released(state_dir: Path, value: Optional[Recorded]) -> None:

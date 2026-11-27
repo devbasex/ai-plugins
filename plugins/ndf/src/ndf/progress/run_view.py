@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.contracts.worker_kinds import DELIVERY, PRODUCT_VERSION, Recorded
+from ndf.contracts.worker_kinds import DELIVERY, PRODUCT_VERSION, Recorded, recorded_of
 from ndf.progress import invoke, model, stages
 
 ACTOR = invoke.ACTOR
@@ -206,9 +206,5 @@ def released_answer(answers: StageAnswers) -> Optional[Recorded]:
         return None
     q = event_payload(after)
     outputs = q.get("outputs") if isinstance(q.get("outputs"), dict) else {}
-    version = outputs.get(PRODUCT_VERSION)
-    if not (isinstance(version, str) and version.strip()):
-        return None
-    delivery = outputs.get(DELIVERY)
     store_kind = q.get("release_store")
-    return Recorded(version, dict(delivery) if isinstance(delivery, dict) else None, store_kind if isinstance(store_kind, str) else None)
+    return recorded_of(outputs.get(PRODUCT_VERSION), outputs.get(DELIVERY), store_kind if isinstance(store_kind, str) else None)
