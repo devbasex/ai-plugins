@@ -298,12 +298,14 @@ plugins/ndf/
   - 事前条件: `rows` は空でない。`run.input_dir`（この実行の資料のディレクトリ）に `diff` がある
   - 事後条件: 例外で駆動を止めない。起動し直さない
   - 指示の組み立て: `verify_decide.instruction` の `criteria` には、`criteria_decide.criteria_lines(run.cfg.settings.focus, run.snapshot)` の行の後に、`criteria_decide.document_line(run.documents, rows)` の戻り値を加えて渡す。`rows` は `_confirm` が `verify_decide.select` から受け取った指摘で、`run.documents` は PR の差分に Markdown のファイルがあるかである。`VerifyRun` はこの 3 つの値を持つ
+  - 基準 5 の参照先: MVV の本文と共通原則のスナップショットは、判定役が読める場所の外（利用者の状態の保存先）にある。承認済みの MVV があれば（`criteria_decide.approved(run.snapshot)`）、`ask` は起動の前に `path` と `principles_path` の 2 つのファイルを `run.input_dir` へ写し、`criteria_lines` には `run.snapshot._replace(path=<本文の写し>, principles_path=<共通原則の写し>)` を渡す。読める場所は増やさない
   - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は状態の保存先の `round<n>-verify.*` に書く。過程の行と注意を `run.note` で足す
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
+| `ask` | MVV の本文か共通原則を写せない | 写し元が無い・書けない | 写すときの `OSError` | 起動せず、既定値で続ける | `warnings` に 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
 | `ask` | 起動が終わらない | 利用上限・無進捗・監視の上限・起動の拒否 | `launch` の返す状態が `done` でない | 既定値で続ける（どの指摘も下げない） | `warnings` に状態を 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
 | `ask` | 差分を読めない | claude の `permission_denials` に差分のファイルがある | `participants.denied_reads` | 既定値で続ける | `warnings` に差分のファイル名（絶対パスは過程にだけ） | 同上 |
 | `ask` | 回答が読めない | 出力が無い・JSON でない・`verdicts` の配列が無い | `participants.claude_answer` と `listed_of` | 既定値で続ける | `warnings` に 1 行 | 同上 |
@@ -324,7 +326,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `ask` | 偽の起動が回答を返すと `Answers` になる。起動の引数が読むだけの Tool と読める場所の限定を持つ | `verdicts` が空の配列 | 起動の失敗・差分の読み取り拒否・JSON の無い出力で、`verdicts` が空で注意が 1 件。起動は 1 回だけ |
+| `ask` | 偽の起動が回答を返すと `Answers` になる。起動の引数が読むだけの Tool と読める場所の限定を持つ。承認済みの MVV があれば、指示の基準 5 が資料のディレクトリの写しを指す | `verdicts` が空の配列 | 起動の失敗・差分の読み取り拒否・JSON の無い出力で、`verdicts` が空で注意が 1 件。起動は 1 回だけ |
 
 ## ジャーナル（journal）
 
