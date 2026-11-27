@@ -31,7 +31,7 @@
           "items": {
             "type": "string"
           },
-          "description": "-- の後に CLI のコマンド（実行ファイルと決まった語のすぐ後に {args}）",
+          "description": "`--` の後に起動コマンドを指定する。{args} は `codex exec`、`agy`、`kiro-cli chat --no-interactive` の直後に置く",
           "x-ndf-positional": true
         }
       },

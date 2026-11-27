@@ -108,7 +108,8 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="外部 AI への委譲を、安全装置の引数を入れて起動する")
     p.add_argument("--runtime", required=True, choices=_delegates(), help="起動するランタイム")
     p.add_argument("--use", choices=ls.USES, default="delegate", help="用途（読むだけの委譲は review）")
-    p.add_argument("command", nargs=argparse.REMAINDER, help=f"-- の後に CLI のコマンド（実行ファイルと決まった語のすぐ後に {PLACE}）")
+    heads = "、".join(f"`{' '.join(_prefix(r, facts.row(RUNTIMES, r)))}`" for r in _delegates())
+    p.add_argument("command", nargs=argparse.REMAINDER, help=f"`--` の後に起動コマンドを指定する。{PLACE} は {heads} の直後に置く")
     return p
 
 
