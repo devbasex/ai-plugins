@@ -78,13 +78,13 @@ def _approver_name(root: Path) -> str:
 
 
 def _reading_recordable(root: Path) -> bool:
-    """読み手役の確認を記録できるか。記録（`ndf records reading add`）と hook の guard `reading-check` の照合は、
-    git の設定のリモートの URL から求める同じ識別子（`git.configured_remote_slug`）を使う。それを求められない作業場所では
-    質問の前の記録を作れないので、質問ではなく端末のコマンドを返す。
-
-    `root` はこの作業場所で、git を起動せずに、その `.git` から求めた共通ディレクトリの設定を読む。
-    """
-    return git.configured_remote_slug(root) is not None
+    """読み手役の確認を記録できるか。`ndf records reading add` は GitHub のリモートの `<所有者>/<リポジトリ>`
+    （`Git.remote_repo`）で記録するため、それを求められない作業場所では質問の前の記録を作れない（質問ではなく端末のコマンドを返す）。"""
+    try:
+        git.Git(root).remote_repo()
+    except (git.GitError, OSError):
+        return False
+    return True
 
 
 def _widens(t: ls.Target) -> bool:

@@ -124,7 +124,7 @@ ndf launch-config show --question approve --candidate <候補のパス>
 
 - NDF が起動した AI・人のいない実行・計画のレーン・外のオーガナイザーのレーン
 - `AskUserQuestion` の無いランタイム（Codex など）
-- git の設定からリモートの URL を読めない作業場所（リモートが無いなど）。質問の前の確認（`ndf records reading add`）は、そのリモートの `<所有者>/<リポジトリ>` で記録するため、記録を作れない
+- GitHub のリモートの `<所有者>/<リポジトリ>` を求められない作業場所（リモートが無い・GitHub のリモートでないなど）。質問の前の確認（`ndf records reading add`）は、その `<所有者>/<リポジトリ>` で記録するため、記録を作れない
 
 `metrics.terminal` は、候補の内容で `.ndf/launch.json` の置き換えを試みるコマンドである。確認の入力を求めるかと、置き換えるかは、
 コマンドを打った時点の内容と承認の状態で決まる。次の表は、手順 3 の結果の `metrics.required`（許可を広げる内容か）と

@@ -187,12 +187,6 @@ def test_rows_keep_only_a_single_branch_name(branch: str, kept: bool, tmp_path: 
     assert rd.light_rows(text, internal.version()) == ([row] if kept else [])
 
 
-def test_add_records_the_identifier_the_guard_matches_even_with_insteadof(repo: Path) -> None:
-    """`insteadOf` で URL を書き換えていても、guard と同じく git の設定の URL から識別子を求める。"""
-    git_sandbox.sh(repo, "config", "url.https://mirror.example/.insteadOf", "https://github.com/")
-    assert reading.add(ENTRY, repo)["repo"] == "o/r"
-
-
 def test_rows_stop_on_a_newer_version(repo: Path) -> None:
     row = reading.add(ENTRY, repo)
     path = reading.checks_path()

@@ -448,9 +448,22 @@ def _repo_root(here: Path) -> Optional[Path]:
 
 
 def _git_dir(repo_root: Path) -> Optional[Path]:
-    """設定を持つ git のディレクトリ。worktree の `.git` ファイルは共通のディレクトリまでたどる（`git_mod.git_dirs`）。"""
-    dirs = git_mod.git_dirs(repo_root)
-    return dirs.common if dirs is not None else None
+    """設定を持つ git のディレクトリ。worktree の `.git` ファイルは共通のディレクトリまでたどる。"""
+    dot = repo_root / ".git"
+    if dot.is_dir():
+        return dot
+    try:
+        line = dot.read_text(encoding="utf-8").strip()
+    except OSError:  # noqa: NDF401 ファイル: .git を読めなければ git のディレクトリは無い
+        return None
+    if not line.startswith("gitdir:"):
+        return None
+    gitdir = (repo_root / line[len("gitdir:") :].strip()).resolve()
+    try:
+        common = (gitdir / "commondir").read_text(encoding="utf-8").strip()
+    except OSError:
+        return gitdir
+    return (gitdir / common).resolve()
 
 
 def _remote_slug(repo_root: Path) -> Optional[str]:
@@ -458,7 +471,30 @@ def _remote_slug(repo_root: Path) -> Optional[str]:
 
     linked worktree からもメインディレクトリ（共通の git ディレクトリの親）の設定を読む（`Git.remote()` と同じ設定）。
     """
-    return git_mod.configured_remote_slug(repo_root)
+    git_dir = _git_dir(repo_root)
+    main_dir = git_dir.parent if git_dir else repo_root
+    try:
+        header = f'[remote "{git_mod.remote_of(main_dir)}"]'
+        text = (git_dir / "config").read_text(encoding="utf-8") if git_dir else ""
+    except (OSError, git_mod.RemoteError):  # noqa: NDF401 ファイル: 設定か設定を読めなければリモートは不明
+        return None
+    section = ""
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            section = line
+        elif section == header and line.replace(" ", "").startswith("url="):
+            return slug_of_url(line.split("=", 1)[1].strip())
+    return None
+
+
+def slug_of_url(url: str) -> Optional[str]:
+    """git の URL（https・ssh・scp の形）の `owner/repo`。"""
+    tail = url.rstrip("/")
+    if tail.endswith(".git"):
+        tail = tail[: -len(".git")]
+    parts = tail.replace(":", "/").split("/")
+    return "/".join(parts[-2:]) if len(parts) >= 2 and all(parts[-2:]) else None
 
 
 def _deliveries(repo_root: Path) -> object:
