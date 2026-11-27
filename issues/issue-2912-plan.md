@@ -214,3 +214,14 @@
 | 判定の関数を `design_check_decide.py` に置く（`markdown.tables`・`named`） | `design_check_rules.py` に置き、`markdown.gfm_tables`・`named_in_table` と名付けた | `_decide` で終わるモジュールは `ndf.adapters` を読まないというリポジトリの規則（`ndf check` の decide-pure）に、表を読むアダプターを使う判定が反するため。名前の変更は、重複の検査（copy-dup）に掛かる同名の関数を避けるため |
 | 新設の `ndf.core.start_point` の子の表の行を書いていない | 子の表（`plugins/ndf/src/ndf/checks/children.json`）の C3 に `ndf.core.start_point` を足した | 規則 child-deps が、表に無いパッケージを落とすため。表の規則は設計書の「子の表の変更」のセクションに行を書くよう求めるが、この設計書にそのセクションは無い |
 | 差分の形を固定する引数を、設計の検査が自分で持つ | `ndf.adapters.git.FIXED_DIFF` にまとめ、設計の検査・`mvv.LOCAL_DIFF`・cross-review の `changes` がそこから組む（値は同じ） | 同じ事実を 1 か所に置く規則（const-fact）に合わせるため |
+
+## 実装の前の確かめ（Task 4）の結果
+
+**決定 6 の順 1 は不合格で、指示文（`SYSTEM`）の変更は入れずに出す**（「完了の定義」の「順 1 か順 2 に合格せず、指示文を外して出す場合」）。順 2 は順 1 の合格が前提なので打っていない。件ごとの結果は [#3017 のコメント](https://github.com/devbasex/ai-plugins/issues/3017#issuecomment-7208992101) に記録した。
+
+- 打ったコマンド: `experimental/ndf/mvv_replay.py material --prs <21 件>`、`judge --model claude-opus-5-5 --expect ...`（作業ツリーの変更後の指示文）、落ちた 11 件に `judge --prompt-commit c93e690ed`（Claude Code 2.1.332）
+- 件数: 対照 19 件と #4583 の 20 件で判定し（#2524 は [対照から外した](https://github.com/devbasex/ai-plugins/issues/3017#issuecomment-7208848390)）、期待の番号がすべて挙がったのは 9 件。欠けた 11 件のうち 10 件は `c93e690ed` でも欠け、前から落ちていた。#2887 だけは変更前で挙がり変更後で欠けた（各 1 回で、揺れか変更の影響かは見分けられない）
+- 費用: 変更後 21 回で 10.26 USD、変更前 11 回で 5.00 USD
+- 判定を打てるようにするため、CLI が拒んでいた `--json-schema` の最上位の `$schema` を外す直しを入れた（7ed465748）
+
+このため、受け入れ条件 5a・5b・6・7 は未確認のまま残り、#2912 は閉じない。リリース後テストでは、`guard-check` の後に確認用 PR の表の無い head と表を足した head で代役のゲートを 1 回ずつ打ち、受け入れ条件 5c だけを確定する。Task 12 手順 2・Task 13 は、作業ツリーの `plugins/ndf` で確認用 PR（#4620、確認の後に閉じてブランチを消した）に打ち、表の無い head では `skip` が真で捕まえたコメント 1 件に証跡の行があり、表（`C7`）を足した head では `skip` が偽で `why` に表の理由・パス・`C7` があり証跡の行が無く、どちらも拒んだ要求が 0 件で、PR にコメントは付かなかった。
