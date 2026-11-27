@@ -271,7 +271,7 @@ class Git:
     def toplevel(self) -> Path:
         """作業場所の worktree の根（`git rev-parse --show-toplevel`。サブモジュールならそのworktree）。失敗は `GitError`。
 
-        設定を読むリポジトリの根の解き方はここだけに置く（`route.repo_root`・`progress.command.repo_root` が使う。#4513）。
+        設定を読むリポジトリの根の解き方はここだけに置く（`route.repo_root`・`progress.settings_roots.settings_root` が使う。#4513）。
         """
         return Path(self.run("rev-parse", "--show-toplevel").strip())
 

@@ -42,22 +42,23 @@ GATES = (STOP, DEFER, STALE)
 _NEEDS_APPROVAL = frozenset({Verdict.AUTOMATIC, Verdict.UNSET, Verdict.UNKNOWN})
 
 
-# 本番の届け先の行の `channel` の語
-PRODUCTION_CHANNEL = "production"
-
-
 def on_channel(row: object, channel: str) -> bool:
     """届け先の行がチャネルの語 `channel`（`production`・`base`）に当たるか。`channel` の省略・`null` の行はどのチャネルにも当たる。
 
     届け先の選び方の規則はここだけに置く。`ndf ci merge` と hook の判定、承認資料の届け先（`forms_decide.reaches`）、
-    配布の記録の届け先（`production_delivery`）が同じ規則を使う。
+    リリース記録の届け先（`production_delivery`）が同じ規則を使う。
     """
     return isinstance(row, Mapping) and row.get("channel") in (None, channel)
 
 
+def on_production_channel(row: object) -> bool:
+    """届け先の行が本番チャネル（`channel` の語 `production`）に当たるか。"""
+    return on_channel(row, "production")
+
+
 def _automatic_row(row: object) -> bool:
     """本番に適用される自動反映の行か。"""
-    return on_channel(row, PRODUCTION_CHANNEL) and isinstance(row, dict) and row.get("kind") != "manual"
+    return on_production_channel(row) and isinstance(row, dict) and row.get("kind") != "manual"
 
 
 def fits_context(row: Mapping[str, Any]) -> bool:
@@ -79,7 +80,7 @@ def production_delivery(section: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     その行（#4513）。ほかは None。"""
     release = section.get("release")
     rows = release.get("deliveries") if isinstance(release, Mapping) else None
-    found = [r for r in rows if on_channel(r, PRODUCTION_CHANNEL)] if isinstance(rows, list) else []
+    found = [r for r in rows if on_production_channel(r)] if isinstance(rows, list) else []
     if len(found) != 1:
         return None
     row = dict(found[0])

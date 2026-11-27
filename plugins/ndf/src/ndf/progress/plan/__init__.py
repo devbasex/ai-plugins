@@ -294,8 +294,8 @@ RELEASE_RESULTS = (RELEASED, REJECTED)
 class ReleaseAnswer:
     """まとめたリリースの回答。`result` は released か rejected、`version` と `release` は出したバージョンとリリース記録の PR。
 
-    `store` と `delivery` は、オーガナイザーが配布したリポジトリの設定から記録の時点に決めた、バージョンの保存先の種類
-    （`none`・`versioned`・`unknown`）と本番の届け先の 1 行（#4513）。レーンは回答を取り込む時点の設定で決め直さない。
+    `store` と `delivery` は、オーガナイザーがリリースしたリポジトリの設定から記録の時点に決めた、バージョンの保存先の種類
+    （`none`・`versioned`・`unknown`）と本番の届け先の 1 行（#4513）。レーンは回答を受け取る時点の設定で決め直さない。
     """
 
     result: str
@@ -307,7 +307,7 @@ class ReleaseAnswer:
 
 
 def released_where(strategy: Optional[branch_strategy.Strategy]) -> tuple[str, Optional[dict[str, Any]]]:
-    """配布したリポジトリの設定 `strategy`（読めなければ None）から決まる、バージョンの保存先の種類と本番の届け先の 1 行（#4513）。
+    """リリースしたリポジトリの設定 `strategy`（読めなければ None）から決まる、バージョンの保存先の種類と本番の届け先の 1 行（#4513）。
 
     届け先は種類が `none` で、本番に届く行が 1 つに決まるときだけ返す（`none` 以外は worker が `delivery` を返す）。
     """

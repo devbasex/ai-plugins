@@ -275,7 +275,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_strategy_at` | `src/ndf/progress/gate/entry.py` | 新設 | `_strategy_at(workdir: Path) -> Optional[branch_strategy.Strategy]` | 作業場所のリポジトリの根のブランチ戦略の設定を返し、読めなければ `None`。根は `command.repo_root` で決める |
+| `_strategy_at` | `src/ndf/progress/gate/entry.py` | 新設 | `_strategy_at(workdir: Path) -> Optional[branch_strategy.Strategy]` | 作業場所のリポジトリの根のブランチ戦略の設定を返し、読めなければ `None`。根は `command.settings_root`（`progress/settings_roots.py`） で決める |
 | `released_outcome` | `src/ndf/progress/gate/entry.py` | 新設 | `released_outcome(work: str, saved: Mapping[str, Any], strategy: Optional[branch_strategy.Strategy]) -> Optional[dict]` | worker を起動せずに返す結果 JSON（`ok` か `stopped`）を組む。起動するときは `None` |
 | `Released` | `src/ndf/progress/gate/entry.py` | 新設 | `class Released(NamedTuple): outcome: dict` | worker を起動せずに終えるときの結果を `_cmd_work` へ渡す |
 | `WorkHandoff` | `src/ndf/progress/gate/entry.py` | 変更 | 欄 `version_number: bool` を足す | 起動指示を組んだときの値の形を、`work_argv` へ同じ値で渡す |
@@ -294,7 +294,7 @@ plugins/ndf/
   2. `recorded = released_of(saved)` を読む。`recorded` が無いか、`recorded.store` が `None`（この変更の前に承認された）ときだけ、`strategy = _strategy_at(workdir)` を読む。`recorded.store` があれば、作業の時点の設定は読まない（`strategy = None`）
   3. `released_outcome(kind, saved, strategy)` が結果を返せば、`Released(結果)` を返す。起動指示も、報告の初期化も、記述子の用意もしない。返さなければ、`version_number` を決める。`recorded.store` が `versioned` なら真である。それ以外は、`strategy` が `None` か、`strategy.version_store["kind"]` が `"none"` でないときに真である
   4. `work_prompt(kind, saved, workdir, paths, version_number=version_number)` で起動指示を組み、`WorkHandoff(..., version_number)` を返す
-- `_strategy_at` は、`workdir` で `git rev-parse --show-toplevel` を 1 回打って根を決めてから、根の設定を `branch_strategy.load` で読む（`command.repo_root`。`progress/command.py` の `strategy` と同じ解き方）。`workdir` に `.ndf/project.json` があっても根とはみなさない。作業場所は `--cwd` で任意の場所を指せるので、サブディレクトリに別の設定を置いたリポジトリでは、根とみなすとリポジトリの設定と違う値を読むためである。ここで読むのは版の種類だけで、届け先は読まない（届け先は承認と一緒に記録した値を使う。下の「オーガナイザーの承認と一緒に届け先を記録する」）
+- `_strategy_at` は、`workdir` で `git rev-parse --show-toplevel` を 1 回打って根を決めてから、根の設定を `branch_strategy.load` で読む（`command.settings_root`（`progress/settings_roots.py`）。`progress/command.py` の `strategy` と同じ解き方）。`workdir` に `.ndf/project.json` があっても根とはみなさない。作業場所は `--cwd` で任意の場所を指せるので、サブディレクトリに別の設定を置いたリポジトリでは、根とみなすとリポジトリの設定と違う値を読むためである。ここで読むのは版の種類だけで、届け先は読まない（届け先は承認と一緒に記録した値を使う。下の「オーガナイザーの承認と一緒に届け先を記録する」）
 - `released_outcome`
   - 事前条件: `saved` は `values_in` で読んだ `values.json`
   - 事後条件: 作業 `work` の定義の `outputs` が `product_version` と `delivery` を持ち（今は `release` だけ）、`released_of(saved)` があるときだけ、下の表で結果 JSON を返す。それ以外は `None`
@@ -361,7 +361,7 @@ plugins/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `_strategy_at` | `progress/command.py` の `strategy`、`domains/release/route_decide.py` の `route_of`、`progress/invoke.py` の `_project` | `grep -rn 'version_store' src/ndf --include=*.py`、`grep -n 'def _project' src/ndf/progress/invoke.py` | 使えない。`strategy` は読めないと `FactUnknown` を上げ、`route_of` は配布の経路全体を組む。`_project` は読む場所が違い、スキーマの検査をしない（上の「工程が読んだ設定を使い回さない理由」）。`branch_strategy.load` を使う。根の解き方だけは `command.repo_root` を共有する |
+| `_strategy_at` | `progress/command.py` の `strategy`、`domains/release/route_decide.py` の `route_of`、`progress/invoke.py` の `_project` | `grep -rn 'version_store' src/ndf --include=*.py`、`grep -n 'def _project' src/ndf/progress/invoke.py` | 使えない。`strategy` は読めないと `FactUnknown` を上げ、`route_of` は配布の経路全体を組む。`_project` は読む場所が違い、スキーマの検査をしない（上の「工程が読んだ設定を使い回さない理由」）。`branch_strategy.load` を使う。根の解き方だけは `command.settings_root`（`progress/settings_roots.py`） を共有する |
 | `production_delivery` | `forms_decide.deliveries_of`、`production_merge._automatic_row` | `grep -rn 'def deliveries_of\|def _automatic_row'` | 条件だけを `on_channel` に切り出して 3 つで使う。`deliveries_of` が返す形は行を縮めるので使わない |
 | `on_channel` | `deliveries_of` と `_automatic_row` の中の条件式 | 同上 | 式を移す。`reaches` は開発版のチャネルの語を `base` に読み替えて `on_channel` を呼ぶ |
 
@@ -393,7 +393,7 @@ plugins/ndf/
 | `released_where` | `src/ndf/progress/plan/__init__.py` | 新設 | `released_where(strategy: Optional[branch_strategy.Strategy]) -> tuple[str, Optional[dict[str, Any]]]` | 種類を `none`・`versioned`・`unknown`（`strategy` が `None`）の 3 語で返す。種類が `none` なら `production_delivery` の行も返す |
 | `record_release` | `src/ndf/progress/plan/__init__.py` | 変更 | 今のまま | `released` の回答では、`store` と `delivery` を、`None` でなければ回答の記録に足す |
 | `_read_delivered` | `src/ndf/progress/plan/cli.py` | 新設 | `_read_delivered(a: argparse.Namespace, cwd: Path) -> None` | `released` の回答なら、打った作業ディレクトリの根の設定を `command.strategy(cwd)` で 1 回読み、`released_where` の結果を `a.delivered` に置く。DB のトランザクションを開く前に打つ |
-| `Git.toplevel` | `src/ndf/adapters/git.py` | 新設 | `Git.toplevel(self) -> Path` | `git rev-parse --show-toplevel` を 1 回打って作業場所の根を返す。根を解く `git` のコマンドはここだけに置く（Value 11）。`route.repo_root`・`command.repo_root` のほか、同じ意味で根を求めていた `records.cli._root`・`records.reading.release_form`・`loop.check_trigger.run`・`loop.design_tests.run`・`backlog.depth.ndf_settings_path`・`converge.location.main_worktree` もこれを使う。各入口の例外の扱いと、`main_worktree` が比べる前に `realpath` でパスをそろえる処理は、呼び出し側に残す |
+| `Git.toplevel` | `src/ndf/adapters/git.py` | 新設 | `Git.toplevel(self) -> Path` | `git rev-parse --show-toplevel` を 1 回打って作業場所の根を返す。根を解く `git` のコマンドはここだけに置く（Value 11）。`route.repo_root`・`command.settings_root`（`progress/settings_roots.py`） のほか、同じ意味で根を求めていた `records.cli._root`・`records.reading.release_form`・`loop.check_trigger.run`・`loop.design_tests.run`・`backlog.depth.ndf_settings_path`・`converge.location.main_worktree` もこれを使う。各入口の例外の扱いと、`main_worktree` が比べる前に `realpath` でパスをそろえる処理は、呼び出し側に残す |
 | `repo_root` | `src/ndf/progress/command.py` | 新設 | `repo_root(cwd: Path) -> Path` | 設定を読むリポジトリの根を `Git.toplevel` で決める。`cwd` に `.ndf/project.json` があっても根とはみなさない。`ndf_settings_path`・`strategy`・`_strategy_at` が根をこの関数で決める。`roots_once` の中では、同じ作業場所で先に求めた根を使う。範囲の外ではパスを解決せず、`Git.toplevel` を 1 回打つだけにする |
 | `roots_once` | `src/ndf/progress/command.py` | 新設 | `roots_once() -> Iterator[None]`（コンテキストマネージャー） | 範囲の中の `repo_root` が、同じ作業場所の根を 1 回だけ求める。入れ子なら外の範囲を引き継ぐ。`facts_of`・`sprint_diff_kinds`・`base_refs_once` が範囲を開く |
 | `_recorded_where` | `src/ndf/progress/gate/release.py` | 新設 | `_recorded_where(reply: Mapping[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]` | 回答に残った種類と届け先。種類が 3 語のどれでもなければ `None`。届け先は、種類が `none` で、`on_channel(行, "production")` が真で、`fits_context` が真のときだけ返す。外のオーガナイザーが `channel: base` の行を書いても本番の配布の実績にしない |

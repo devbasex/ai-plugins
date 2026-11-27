@@ -204,11 +204,11 @@ def _version_aware(kind: str) -> bool:
 def _strategy_at(workdir: Path) -> Optional[branch_strategy.Strategy]:
     """作業場所のリポジトリのブランチ戦略の設定。読めなければ None（バージョン番号を持つ扱い）。
 
-    根は `command.repo_root`（`git rev-parse --show-toplevel` を 1 回）で決める。作業場所（`--cwd` は任意の場所を指せる）に
+    根は `command.settings_root`（`git rev-parse --show-toplevel` を 1 回）で決める。作業場所（`--cwd` は任意の場所を指せる）に
     `.ndf/project.json` があっても根とはみなさない（#4513）。
     """
     try:
-        return branch_strategy.load(command.repo_root(workdir))
+        return branch_strategy.load(command.settings_root(workdir))
     except (branch_strategy.StrategyError, GitError, OSError) as exc:  # 設定: 読めなければバージョン番号を持つ扱いで形を確かめる
         log.info("ブランチ戦略の設定を読めないのでバージョン番号を持つ扱いにする", extra={"workdir": str(workdir), "error": str(exc)})
         return None
@@ -367,10 +367,10 @@ def released_outcome(work: str, saved: Mapping[str, Any], strategy: Optional[bra
     return result.stopped(TOOL, "precondition", detail)
 
 
-# 手で終える出力の例（`manual_finish_example`）の置き換える所の説明。正本はここで、詳細設計書は写さずにここを指す
+# 手で終える出力の例（`manual_finish_example`）の置き換える所の説明。SSOT はここで、詳細設計書は写さずにここを指す
 MANUAL_FINISH_FILL = (
-    "outputs.delivery は、実際の本番配布に対応する届け先のオブジェクト全体で置き換える"
-    "（.ndf/project.json の branch_strategy.release.deliveries の 1 行と同じ形）。"
+    "outputs.delivery は、実際にリリースした先に対応する届け先のオブジェクト全体で置き換える"
+    "（設定 project.json の branch_strategy.release.deliveries の 1 行と同じ形）。"
     "outputs.mvv_gate は、ndf progress show <ID> の metrics.history で payload.step が release-mvv の最後の記録から、"
     "payload.report.outputs.mvv_gate をそのままコピーする。"
 )
@@ -380,8 +380,8 @@ def manual_finish_example(version: str) -> dict[str, Any]:
     """届け先が記録から決まらずに止まったデプロイの工程を、`ndf progress finish` で手で終える出力の例（#4513）。
 
     工程の出力の規約（`stage-io.schema.json` の `stage-out`）が必須とする `summary`・`steps` と、デプロイの工程の `outputs` の
-    3 つ（`product_version`・`delivery`・`mvv_gate`）を持つ。`product_version` は記録済みの配布識別子を入れる。`delivery` と
-    `mvv_gate` は値全体を置き換える印にする（届け先の一部だけを固定値で示すと、利用者が実際と違う属性を残しうる）。
+    3 つ（`product_version`・`delivery`・`mvv_gate`）を持つ。`product_version` は記録済みのリリースの識別子を入れる。`delivery` と
+    `mvv_gate` は値全体を置き換える目印の文字列にする（届け先の一部だけを固定値で示すと、利用者が実際と違う属性を残しうる）。
     `finish` は文脈にある値で出力の欠けを補わないので、記録済みの `mvv_gate` も入れる。
     """
     return {
@@ -389,7 +389,7 @@ def manual_finish_example(version: str) -> dict[str, Any]:
         "steps": [],
         "outputs": {
             PRODUCT_VERSION: version,
-            DELIVERY: "<実際の本番配布に対応する届け先のオブジェクト>",
+            DELIVERY: "<実際にリリースした先に対応する届け先のオブジェクト>",
             "mvv_gate": "<記録済みの mvv_gate のオブジェクト>",
         },
     }

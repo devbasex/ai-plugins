@@ -136,17 +136,17 @@ RELEASE_STORES = (store_kind_of(False), store_kind_of(True), store_kind_of(None)
 
 
 def _recorded_where(reply: Mapping[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
-    """オーガナイザーが配布の記録に残した、バージョンの保存先の種類と本番の届け先の 1 行（#4513）。
+    """オーガナイザーがリリース記録に残した、バージョンの保存先の種類と本番の届け先の 1 行（#4513）。
 
-    レーンが回答を取り込む時点の設定で決め直さない（その間に設定が変わると、配布していない届け先を記録する）。種類が 3 つの語の
+    レーンが回答を受け取る時点の設定で決め直さない（その間に設定が変わると、リリースしていない届け先を記録する）。種類が 3 つの語の
     どれでもなければ記録されていないもの（None）とする。届け先は、種類が `none` で、本番に届く行（`production_delivery` と同じ
-    `on_channel` の条件）で、文脈の `delivery` の形に合うときだけ返す。外のオーガナイザーがベースブランチ向けの行を書いても、
-    本番の配布の実績にしない。
+    `on_production_channel` の条件）で、文脈の `delivery` の形に合うときだけ返す。外のオーガナイザーがベースブランチ向けの行を書いても、
+    リリースの実績にしない。
     """
     kind = reply.get("store")
     known = kind if kind in RELEASE_STORES else None
     row = reply.get("delivery")
-    production = production_merge.on_channel(row, production_merge.PRODUCTION_CHANNEL)
+    production = production_merge.on_production_channel(row)
     if known != store_kind_of(False) or not production or not isinstance(row, Mapping) or not production_merge.fits_context(row):
         return known, None
     return known, dict(row)
@@ -156,7 +156,7 @@ def _released(reply: Mapping[str, Any], value: str, row: Optional[dict[str, Any]
     """出した回答が持つバージョンとリリース記録の PR（文脈の `product_version`・`release_pr`）。後の工程（閉じ・リリース後テスト）は
     文脈から読み、リリースの PR を探さない（#2783）。承認しない回答や、値の無いキーは書かない。
 
-    オーガナイザーが配布の記録に残した届け先 `row`（`_recorded_where` が返したもの）があれば `delivery` として足す（バージョン番号を
+    オーガナイザーがリリース記録に残した届け先 `row`（`_recorded_where` が返したもの）があれば `delivery` として足す（バージョン番号を
     持たないリポジトリで、本番に届く行が 1 つに決まったときだけ残る）。デプロイの工程はこの記録だけから `delivery` を返し、worker を起動しない（#4513）。
     """
     if value != run.APPROVED:

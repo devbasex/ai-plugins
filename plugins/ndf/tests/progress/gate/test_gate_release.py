@@ -307,9 +307,9 @@ def _strategy(kind: str, rows=(ROW,)) -> branch_strategy.Strategy:
 
 
 def _organizer_released(st, lane_sprint, flow, monkeypatch, strategy, version=DIST):
-    """オーガナイザーが `version` を記録して承認するまで流す。配布したリポジトリの設定は `strategy`（例外なら読めない）。
+    """オーガナイザーが `version` を記録して承認するまで流す。リリースしたリポジトリの設定は `strategy`（例外なら読めない）。
 
-    届け先と保存先の種類はオーガナイザーが記録の時点に決める。レーンが回答を取り込むときは設定を読まない（#4513）。
+    届け先と保存先の種類はオーガナイザーが記録の時点に決める。レーンが回答を受け取るときは設定を読まない（#4513）。
     """
     pid, tid = lane_sprint()
     q = _at_release(st, tid, flow)
@@ -319,7 +319,7 @@ def _organizer_released(st, lane_sprint, flow, monkeypatch, strategy, version=DI
     with store.transaction(st) as conn:
         plan.record_release(conn, pid, [sent["request"]], answer)
     with monkeypatch.context() as m:
-        m.setattr(branch_strategy, "load", lambda _root: pytest.fail("回答を取り込む時点の設定を読まない"))
+        m.setattr(branch_strategy, "load", lambda _root: pytest.fail("回答を受け取る時点の設定を読まない"))
         assert gate.take_reply(st, tid, {})["status"] == "ok"
     return tid
 
@@ -452,5 +452,5 @@ def test_an_approval_without_the_value_fails_with_the_names_and_is_not_relaunche
     ],
 )
 def test_the_recorded_delivery_is_kept_only_when_it_reaches_production(reply, want):
-    # 外のオーガナイザーがベースブランチ向けの行を書いても、本番の配布の実績にしない
+    # 外のオーガナイザーがベースブランチ向けの行を書いても、リリースの実績にしない
     assert release._recorded_where({"result": "released", **reply}) == want

@@ -14,7 +14,7 @@ ndf lanes question <計画> --wrapper <ラッパーの名前> --question <questi
                                                  レーンの質問（AskUserQuestion）をリクエストとして載せる（中継のラッパーが打つ）
 ndf lanes release <計画> <リクエスト>... --result released|rejected --reason <理由> [--version <バージョン>] [--release <PR>]
                                                  まとめたリリースの回答を記録し、まとめたリクエストを閉じる。released なら、打った
-                                                 作業ディレクトリ（配布したリポジトリ）の設定から届け先と保存先の種類も記録する
+                                                 作業ディレクトリ（リリースしたリポジトリ）の設定から届け先と保存先の種類も記録する
 ndf lanes answered <スプリントのステートマシンの ID> --answer <回答>
 ndf lanes row add|move|cancel|carry|start|end|resumed ...   （レーンの conductor が打つ。レーンのステートマシン）
 
@@ -173,8 +173,8 @@ def _read_question(path: Path) -> dict[str, Any]:
 
 
 def _read_delivered(a: argparse.Namespace, cwd: Path) -> None:
-    """リリースした回答なら、打った作業ディレクトリ（配布したリポジトリ）の設定から届け先と保存先の種類を決めて `a.delivered` に置く
-    （#4513）。レーンが回答を取り込む時点の設定で決め直すと、その間に設定が変わったとき、配布していない届け先を記録する。
+    """リリースした回答なら、打った作業ディレクトリ（リリースしたリポジトリ）の設定から届け先と保存先の種類を決めて `a.delivered` に置く
+    （#4513）。レーンが回答を受け取る時点の設定で決め直すと、その間に設定が変わったとき、リリースしていない届け先を記録する。
     設定を読めなければ種類を `unknown` にし、届け先は記録しない（回答は断らない）。"""
     if a.result != RELEASED:
         a.delivered = (None, None)
