@@ -301,6 +301,13 @@ def test_issue_3702_sections_reviewed_against_another_target_are_reviewed_again(
     assert scope_decide.reviewed_of(state, APPROVED, now) == reviewed
 
 
+@pytest.mark.parametrize(("recorded", "kept"), [("main", [A, B]), ("sprint/y", [B]), (None, [B])])
+def test_issue_3702_sections_from_another_target_are_not_saved_under_the_current_one(recorded: str | None, kept: list[str]) -> None:
+    """PR 4638 の r2-2: 比較元が今と違う記録は、今の比較元の名前で残す集合へ引き継がない（今のラウンドで通ったものだけ残す）。"""
+    state = {store.REVIEWED: [A]} | ({store.REVIEWED_BASE_BRANCH: recorded} if recorded else {})
+    assert scope_decide.reviewed_after(state, {A}, [B], "main") == kept
+
+
 def test_branch_the_mvv_was_read_from_is_the_last_recorded_one() -> None:
     rounds = [{scope_decide.MVV: {"id": APPROVED, "mvv_branch": "main"}}, {"round": 2}, "壊れたラウンド"]
     assert scope_decide.mvv_branch({"rounds": rounds}) == "main"

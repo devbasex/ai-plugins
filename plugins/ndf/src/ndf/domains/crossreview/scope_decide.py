@@ -85,6 +85,14 @@ def reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None, base_branch
     return set(store.list_of(state, store.REVIEWED))
 
 
+def reviewed_after(state: Mapping[str, Any], reviewed: Collection[str], sections: Iterable[str], base_branch: str) -> list[str]:
+    """全差分のラウンドの後に残す、詳細レビューを通ったセクション（`base_branch` と比べて通ったものだけ）。前の記録 `reviewed` は、
+    記録の比較元が `base_branch` と同じときだけ引き継ぐ。比較元が違う記録を今の比較元の名前で残すと、後でマージ先に合わせる起動が
+    確かめていないセクションを通ったと読む（PR 4638 の r2-2。#3702）。"""
+    kept = set(reviewed) if state.get(store.REVIEWED_BASE_BRANCH) == base_branch else set()
+    return sorted(kept | set(sections))
+
+
 def _known(value: object) -> str:
     """記録された、MVV を見分ける値。記録が無ければ、MVV が無いときの値とみなす。"""
     return value if isinstance(value, str) and value else _NO_MVV

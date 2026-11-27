@@ -903,7 +903,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         )
         return fin.INCOMPLETE_REVIEWERS
     if prep.scope.kind == scope_decide.FULL:
-        run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
+        run.data[store.REVIEWED] = scope_decide.reviewed_after(run.data, prep.reviewed, prep.sections, run.base_branch)
         run.data.update({store.REVIEWED_MVV: run.mvv, store.REVIEWED_BASE_BRANCH: run.base_branch})
     open_, handed = run.journal.pending(run.cfg.handed)
     record["verdict"] = _verdict(run, open_, handed)
