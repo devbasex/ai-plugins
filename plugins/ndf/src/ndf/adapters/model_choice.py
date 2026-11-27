@@ -886,11 +886,16 @@ def launch_choice(
 ) -> Choice:
     """優先の順で値を決め、要れば割り付け、`retry` があれば引き上げる。値の誤り・壊れた設定は `precondition`。
 
+    `mode`（工程のモード。記録に残すだけで値は変えない）が無ければ、プランの実行が渡す環境変数から読む。
+
     `request` は `Request` の欄（`unit`・`charge_to`・`retry`・`mode`・`argument`・`argument_at`）。起動のたびに最初に月の掃除をする。
     `unit` の無い起動と工程の無い起動は、実験の記録を読み書きしない。`settings` は `table` へ渡す（渡されれば起動の設定を読み直さない）。
     """
     req = Request(**request)
     env = os.environ if environ is None else environ
+    held = identity.env_name("workflow-mode")
+    if req.mode is None and held in env and env[held] != "":
+        req = replace(req, mode=env[held])
     stage = stage_of(layer, name)
     root, got, manual = _checked(runtime, cwd, req, env, settings)
     arms = got.arms[stage][runtime] if stage is not None and runtime in got.arms[stage] else ()

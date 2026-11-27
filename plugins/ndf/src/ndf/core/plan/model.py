@@ -4,6 +4,7 @@
 前のステップの承認ゲートを人へ届ける役（`accepts_gate`）と、PR を `{queue_prs}` に入れないリリースのプラン（`release`）を持てる。
 ステップは打つコマンド（`run`）と、止まったときのルート（`on_cause`・`on_fail`）・承認の回答のルート（`on_answer`）を持つ。
 外部への操作のステップは、済んだかを相手の状態から確かめるコマンド（`probe`）を持てる（B9）。
+検査のステップは、確かめる修正の作業の名前（`verifies`）を持てる（修正の効果指標に使う。#2944）。
 ルートの値はプランのステップの id か `end`・`stop`・`retry` のどれかで、`on_cause` の種類は停止理由の表にある（IS3）。
 `on_answer` の回答は回答の語彙（`contracts/facts/answers.json`。結果 JSON の `routes` のキーになる）にある。
 """
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf import identity
 from ndf.contracts import causes, facts, limits, result, worker_kinds
 from ndf.contracts.routing import END, PLAN_TARGETS, STOP
 
@@ -27,6 +29,15 @@ LOCATIONS = (IN_WORKTREE, IN_REPO)
 LIMIT_PER_STEP = "supervise.limit-per-step"
 # 承認の回答のルートに書ける語（ステップの id のほか）
 ANSWER_TARGETS = (END, STOP)
+# 作業を worker に起動するステップの引数の始まり（差し込み `{{worker}}` の既定。作業の名前は最後の語）
+WORKER_COMMAND = (result.ENTRY, "answer", "work")
+# テストと CI の失敗を直す作業。入った元の停止理由を引き上げの理由にし、費用を実装の割り付けに手戻りとして負わせる（#2944）
+CHECK_FIXES = frozenset({"fix", "ci-fix"})
+
+
+def retry_cause_env() -> str:
+    """引き上げの理由を子へ渡す環境変数の名前。書き手（プランの実行）と読み手（worker）が引く。"""
+    return identity.env_name("retry-cause")
 
 
 class PlanError(Exception):
@@ -48,6 +59,13 @@ class Step:
     timeout: Optional[float] = None
     location: str = IN_WORKTREE
     probe: Optional[tuple[str, ...]] = None
+    verifies: tuple[str, ...] = ()
+
+    @property
+    def work(self) -> Optional[str]:
+        """このステップが worker に起動する作業の名前。worker のステップでなければ None。"""
+        size = len(WORKER_COMMAND)
+        return self.run[-1] if self.run[:size] == WORKER_COMMAND and len(self.run) > size else None
 
 
 @dataclass(frozen=True)
@@ -127,6 +145,7 @@ def _step(raw: Mapping[str, Any]) -> Step:
     run = _command(sid, raw, "run", True)
     retry = {kind: _policy(sid, kind, values) for kind, values in dict(_opt(raw, "retry", {})).items()}
     probe = _command(sid, raw, "probe", False)
+    verifies = _command(sid, raw, "verifies", False)
     return Step(
         id=sid,
         run=run,
@@ -139,6 +158,7 @@ def _step(raw: Mapping[str, Any]) -> Step:
         timeout=raw.get("timeout"),
         location=_opt(raw, "in", IN_WORKTREE),
         probe=probe,
+        verifies=() if verifies is None else verifies,
     )
 
 
