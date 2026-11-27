@@ -235,6 +235,16 @@
 
 結果の `metrics`: `gaps`（integer）・`issues`（integer）・`out`（string）。`items` の要素: `files`（array of object）・`files_found`（integer）・`kind`（string か null）・`number`（integer）・`public_interface`（object）
 
+## `ndf models`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/models.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/models.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf models pick` | `--layer`（string・必須）: 起動の層（worker・skill・judge・seat）<br>`--name`（string・必須）: 作業の名前（worker の作業の名前・Skill の名前など）<br>`--runtime`（string・任意・既定 `"claude"`）: ランタイム（claude か codex）<br>`--unit`（string・任意）: 単位の ID（省けば割り付けない）<br>`--retry`（string・任意）: 同じ失敗への 2 回目以降の起動の理由（省けば引き上げない）<br>`--format`（string・任意・既定 `"json"`・値 `json`・`args`）: json は結果 JSON、args は 1 行 1 引数 |
+
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `args`（array of string）・`assign_id`（string）・`effort`（string）・`effort_source`（string）・`layer`（string）・`mode`（string）・`model_source`（string）・`name`（string）・`raised`（boolean）・`requested_model`（string）・`runtime`（string）・`stage`（string）・`unit`（string）
+
 ## `ndf notify`
 
 内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/notify.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/notify.result.schema.json)
