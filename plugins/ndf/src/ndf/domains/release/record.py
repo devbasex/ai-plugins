@@ -173,6 +173,16 @@ def _landed_by(hub: GitHub, number: int, production: str, production_sha: Option
     return landed if landed is not None and landed.number == number else None
 
 
+def landed_commit(hub: GitHub, number: int, production: str, production_sha: Optional[str]) -> tuple[Pull, str]:
+    """確かめ 1。本番ブランチ `production` へ入った PR `number`（マージ済みか、`production_sha` が正規の squash）と、反映したコミット
+    （GitHub が返さなければ空）。head の名前は問わない。入っていなければ `NotReleased`。"""
+    pull = hub.pull(number)
+    landed = pull if pull.merged else _landed_by(hub, number, production, production_sha)
+    if landed is None or pull.base_ref != production:
+        raise NotReleased(f"#{number} は {production} へマージした PR でない（{pull.base_ref}・merged={pull.merged}）")
+    return landed, landed.merge_sha
+
+
 def released(
     hub: GitHub,
     number: int,
@@ -186,10 +196,7 @@ def released(
     `strict` の squash は PR を閉じる（マージ済みにならない）ので、本番へ入れたコミット `production_sha` が正規の squash
     （`landed_squash`）なら、マージしたものとして読む。単位ごとのリリース記録は、組み立てがリリースのコミットへ書いた単位ごとの
     行（単位が 2 つ以上のとき）から、その単位のバージョンとその単位の範囲の PR で組む（行が無ければ空）。"""
-    pull = hub.pull(number)
-    landed = pull if pull.merged else _landed_by(hub, number, production, production_sha)
-    if landed is None or pull.base_ref != production:
-        raise NotReleased(f"#{number} は {production} へマージしたリリースの PR でない（{pull.base_ref}・merged={pull.merged}）")
+    landed, _commit = landed_commit(hub, number, production, production_sha)
     version = formats.branch_version(landed.head_ref)
     if version is None:
         raise NotReleased(f"#{number} の head {landed.head_ref} はリリースブランチ（{formats.branch}）でない")
@@ -355,6 +362,8 @@ class Candidates(NamedTuple):
     authoritative: dict[str, tuple[str, ...]]
     corrections: list[record_decide.Correction]
     verifications: list[dict[str, Any]]
+    # 引数で絞る前の有効なリリース記録（古い順。値とコミットの組の確かめと重ねない判定が使う）
+    valid: list[record_decide.Record] = []
 
 
 class _Found(NamedTuple):
@@ -393,7 +402,9 @@ def _bridged(hub: GitHub, unversioned: Sequence[_Found], seeds: Sequence[_Found]
     return sorted(kept, key=lambda f: f.at)
 
 
-def _candidates(hub: GitHub, number: int, select: Selection) -> Candidates:
+def _candidates(
+    hub: GitHub, number: int, select: Selection, commit: Optional[str] = None, comments: Optional[Sequence[Authored]] = None
+) -> Candidates:
     """設計書の「閉じる手順の読み取り」の手順 1〜4。照会できない書き手がいれば `PermissionUnknown`。
 
     1. 記録の PR のコメントを 1 回だけ取得し、リリース記録・テストの記録・訂正の記録のマーカーを持つコメントを候補にする
@@ -401,12 +412,15 @@ def _candidates(hub: GitHub, number: int, select: Selection) -> Candidates:
     3. バージョン番号を持たないリポジトリの記録は、起点（`--version` の値、無ければ `--release`・`--unit` の一致、どちらも無ければすべて）から
        信用を確かめながら値かコミットの共有で広げ、値とコミットの組で無効な記録を除き、値ごとの正の一覧を決めてから引数で絞る
     4. 訂正は、値と組のコミットに合うものの書き手だけを照会し、信用する書き手の最後の訂正でその値の正の一覧を置き換える
+
+    `commit` を渡すと、そのコミットの記録も起点にする（書く側の確かめ 6 が、同じコミットの別の値の記録を見るため）。
+    `comments` を渡すと、PR のコメントを取得せずにそれを読む。
     """
     versioned: list[_Found] = []
     unversioned: list[_Found] = []
     checks: list[_Found] = []
     fixes: list[_Found] = []
-    for at, c in enumerate(hub.comments(number)):  # 手順 1・2
+    for at, c in enumerate(hub.comments(number) if comments is None else comments):  # 手順 1・2
         made = _read_marked(c.body, record_decide.parse_record)
         if made is not None:
             (versioned if made.commit is None else unversioned).append(_Found(at, c, made))
@@ -422,13 +436,13 @@ def _candidates(hub: GitHub, number: int, select: Selection) -> Candidates:
     kept_checks = [f.value for f in checks if select.takes_check(f.value) and hub.trusts_strict(f.authored)]
     # 手順 3
     by_value = select._replace(release=None, unit=None) if select.version is not None else select._replace(version=None)
-    kept = _bridged(hub, unversioned, [f for f in unversioned if by_value.takes(f.value)])
+    kept = _bridged(hub, unversioned, [f for f in unversioned if by_value.takes(f.value) or f.value.commit == commit])
     pairs, valid = record_decide.value_pairs([f.value for f in sorted([*kept_versioned, *kept], key=lambda f: f.at)])
     # 手順 4
     matching = [f for f in fixes if pairs.get(f.value.version) == f.value.commit and select.version in (None, f.value.version)]
     corrections = [f.value for f in matching if hub.trusts_strict(f.authored)]
     authoritative = {v: t for v in pairs if (t := record_decide.authoritative_targets(valid, corrections, v)) is not None}
-    return Candidates([r for r in valid if select.takes(r)], authoritative, corrections, kept_checks)
+    return Candidates([r for r in valid if select.takes(r)], authoritative, corrections, kept_checks, valid)
 
 
 def _body_view(hub: GitHub, number: int) -> dict[str, Any]:

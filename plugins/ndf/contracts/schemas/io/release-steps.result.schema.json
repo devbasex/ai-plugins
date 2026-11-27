@@ -27,7 +27,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "description": "項目の種類（pull・tag・release・path・config・worktree）"
+            "description": "項目の種類（pull・tag・release・path・config・worktree・delivery・comment）"
           },
           "number": {
             "type": "integer",
@@ -54,11 +54,11 @@
           },
           "result": {
             "type": "string",
-            "description": "書いた・作った・外した結果（リリース記録の pull・tag・release・worktree）"
+            "description": "書いた・作った・外した結果（リリース記録の pull・tag・release・worktree）。届け先の確かめの結果（delivery の failed・pending）"
           },
           "name": {
             "type": "string",
-            "description": "タグか GitHub Release の名前（tag・release）"
+            "description": "タグか GitHub Release の名前（tag・release）。届け先の名前（delivery）"
           },
           "path": {
             "type": "string",
@@ -70,7 +70,11 @@
           },
           "reason": {
             "type": "string",
-            "description": "worktree を残した理由（worktree）"
+            "description": "worktree を残した理由（worktree）。届け先を書かなかった理由（delivery）"
+          },
+          "url": {
+            "type": "string",
+            "description": "消せずに残った自分のコメントの URL（comment。#4580）"
           }
         },
         "required": [

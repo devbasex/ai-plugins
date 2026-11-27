@@ -37,8 +37,10 @@ CORRECTION_MARK = f"<!-- {_NS}:release-targets-correction -->"
 OBSERVED = "observed"
 # 値の 16 進の語と SHA の一致に要る最小の長さ（確かめ 2 と実環境の確認の両方が読む）
 SHA_PREFIX = 7
+# 設定の `release` の届け先の行のキー
+DELIVERIES = "deliveries"
 # JSON Pointer が指す値が無いこと（null の値と見分ける）
-_MISSING: Any = object()
+MISSING: Any = object()
 # 組み立てがリリースのコミットへ書く、承認資料の「含む PR」の行（git のトレーラーの形。値は `#<番号>` の空白区切りか `none`）
 INCLUDED_TRAILER = "Ndf-Included-Pulls"
 _INCLUDED_LINE = re.compile(rf"^{INCLUDED_TRAILER}: (?P<value>.*)$", re.MULTILINE)
@@ -473,6 +475,12 @@ def value_matches(value: str, sha: str) -> bool:
     return any(len(w) >= SHA_PREFIX and sha.startswith(w) and all(c in "0123456789abcdef" for c in w) for w in words)
 
 
+def declared_deliveries(release: Mapping[str, Any]) -> list[Any] | None:
+    """設定の `release` の届け先の行（`deliveries`）。無いか配列でなければ None（届け先の設定が無いリポジトリ）。"""
+    rows = release.get(DELIVERIES)
+    return rows if isinstance(rows, list) else None
+
+
 def production_deliveries(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     """届け先の設定の行のうち本番の届け先（`channel` が `production`・省略・null で、`production` が false でない。手動も含む）。"""
     return [r for r in rows if r.get("channel") in (None, "production") and r.get("production") is not False]
@@ -557,18 +565,18 @@ def push_of(activities: Iterable[Mapping[str, Any]], landed: frozenset[str]) -> 
 
 
 def json_pointer(doc: Any, pointer: str) -> Any:
-    """RFC 6901 の JSON Pointer `pointer` が `doc` の中で指す 1 つの値。無ければ `_MISSING`。"""
+    """RFC 6901 の JSON Pointer `pointer` が `doc` の中で指す 1 つの値。無ければ `MISSING`。"""
     if pointer == "":
         return doc
     if not pointer.startswith("/"):
-        return _MISSING
+        return MISSING
     for token in (t.replace("~1", "/").replace("~0", "~") for t in pointer[1:].split("/")):
         if isinstance(doc, dict) and token in doc:
             doc = doc[token]
         elif isinstance(doc, list) and re.fullmatch(r"0|[1-9][0-9]*", token) and int(token) < len(doc):
             doc = doc[int(token)]
         else:
-            return _MISSING
+            return MISSING
     return doc
 
 
@@ -576,7 +584,7 @@ def confirm(delivery: Mapping[str, Any], run: Mapping[str, Any] | None, observed
     """届け先 1 つの反映を何で確かめたか（設計書の届け先ごとの反映の確かめの表を 1 回評価する）。
 
     `run` は push の `after` の CD の結果（`gh run list` の `status`・`conclusion` の形。まだ無ければ None）、`observed` は
-    実環境の確認で `observe.pointer` が指した値（確かめを指定していないか、読めなければ `_MISSING`）、`after` は push の `after`。"""
+    実環境の確認で `observe.pointer` が指した値（確かめを指定していないか、読めなければ `MISSING`）、`after` は push の `after`。"""
     result = delivery.get("result")
     if not isinstance(result, Mapping) or not (result.get("workflow") or result.get("command")):
         return Confirmation("ok", "attested")
@@ -587,7 +595,7 @@ def confirm(delivery: Mapping[str, Any], run: Mapping[str, Any] | None, observed
     observe = delivery.get("observe")
     if not isinstance(observe, Mapping):
         return Confirmation("pending", reason="CD の結果が未確定で、届け先の設定に実環境の確認（observe）が無い")
-    if observed is _MISSING:
+    if observed is MISSING:
         return Confirmation("pending", reason="CD の結果が未確定で、実環境の確認を指定していないか、値を読めなかった")
     if not isinstance(observed, str) or not value_matches(observed, after):
         return Confirmation("pending", reason=f"CD の結果が未確定で、実環境の値が push の after（{after}）と一致しない")

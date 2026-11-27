@@ -886,7 +886,7 @@ def test_json_pointer_reads_one_value(pointer: str, value: object) -> None:
 
 @pytest.mark.parametrize("pointer", ["/foo/2", "/foo/-", "/foo/01", "/foo/x", "/none", "/foo/0/x", "foo"])
 def test_json_pointer_of_nothing_is_missing(pointer: str) -> None:
-    assert record_decide.json_pointer(DOC, pointer) is record_decide._MISSING
+    assert record_decide.json_pointer(DOC, pointer) is record_decide.MISSING
 
 
 AFTER = "c3" + "0" * 38  # push の after
@@ -898,13 +898,13 @@ RUNNING = {"status": "in_progress", "conclusion": None}
 
 
 def test_confirm_takes_cd_observed_and_attested() -> None:
-    assert record_decide.confirm(CD, SUCCESS, record_decide._MISSING, AFTER) == record_decide.Confirmation("ok", "cd", None, None)
+    assert record_decide.confirm(CD, SUCCESS, record_decide.MISSING, AFTER) == record_decide.Confirmation("ok", "cd", None, None)
     got = record_decide.confirm(CD, RUNNING, AFTER[:7], AFTER)
     assert got == record_decide.Confirmation("ok", "observed", None, record_decide.Evidence(OBSERVE["url"], AFTER[:7]))
     manual = {"target": WEB, "kind": "manual"}
-    assert record_decide.confirm(manual, None, record_decide._MISSING, AFTER) == record_decide.Confirmation("ok", "attested", None, None)
+    assert record_decide.confirm(manual, None, record_decide.MISSING, AFTER) == record_decide.Confirmation("ok", "attested", None, None)
     command = {"target": WEB, "result": {"command": "./status {revision}"}}
-    assert record_decide.confirm(command, SUCCESS, record_decide._MISSING, AFTER).kind == "cd"
+    assert record_decide.confirm(command, SUCCESS, record_decide.MISSING, AFTER).kind == "cd"
 
 
 def test_confirm_does_not_count_a_sha_outside_the_pointer() -> None:
@@ -918,8 +918,8 @@ def test_confirm_does_not_count_a_sha_outside_the_pointer() -> None:
     ("delivery", "run", "observed", "state"),
     [
         (CD, FAILURE, AFTER, "failed"),  # CD の失敗は実環境の確認で覆さない
-        (CD, RUNNING, record_decide._MISSING, "pending"),
-        (CD, None, record_decide._MISSING, "pending"),  # 実行がまだ無い
+        (CD, RUNNING, record_decide.MISSING, "pending"),
+        (CD, None, record_decide.MISSING, "pending"),  # 実行がまだ無い
         ({**CD, "observe": None}, RUNNING, AFTER, "pending"),  # 届け先の設定に observe が無い
         (CD, RUNNING, "b9" + "0" * 38, "pending"),  # pointer の値が after と一致しない
         (CD, RUNNING, 1234567, "pending"),  # 文字列でない値

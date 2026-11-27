@@ -468,6 +468,31 @@
         "--production-sha": {
           "type": "string",
           "description": "本番へ入れたコミット（strict の squash で閉じた PR の記録に要る）"
+        },
+        "--version": {
+          "type": "string",
+          "description": "出したものを指す値（例 'main abc1234'。バージョンの保存先が none のリポジトリだけ）"
+        },
+        "--environment": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "反映を確かめた届け先（繰り返せる。--version と一緒に）"
+        },
+        "--target": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "今回の対象の届け先（push の時点に届け先の設定が無いときだけ。繰り返せる）"
+        },
+        "--observed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "CD が未完了なら実環境の確認（設定の observe）で確かめる届け先（繰り返せる）"
         }
       },
       "required": [

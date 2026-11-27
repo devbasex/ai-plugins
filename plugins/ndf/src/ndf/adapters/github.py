@@ -16,6 +16,7 @@ Issue・コメント・PR の本文を書く操作は、公開範囲を読むエ
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import subprocess
 import time
@@ -252,6 +253,12 @@ def _response_body(resp: Any) -> Any:
     return resp.text
 
 
+def _next_cursor(resp: Any) -> Optional[str]:
+    """応答の Link の `next` の URL のカーソル（`after`）。次のページが無ければ None。"""
+    nxt = resp.raw_response.links.get("next")
+    return httpx.URL(nxt["url"]).params.get("after") if isinstance(nxt, dict) and "url" in nxt else None
+
+
 def _alias(i: int) -> str:
     """1 回のクエリの中の `i` 番目のエイリアスの名前（`a0`・`a1`…）。"""
     return f"a{i}"
@@ -274,7 +281,7 @@ def _only_not_found(exc: GraphQLFailed) -> bool:
     return bool(errors) and all(e.type == "NOT_FOUND" for e in errors)
 
 
-def _translated(exc: RequestFailed | RequestError | write_gate.Busy, label: str, detail_body: bool = False) -> GitHubError:
+def _as_github_error(exc: RequestFailed | RequestError | write_gate.Busy, label: str, detail_body: bool = False) -> GitHubError:
     """githubkit の失敗を `GitHubError` へ写す。`label` は要求の名前（`GET /path`・`graphql`）。写し方は `github_limits.failure_of`。"""
     return GitHubError.of(github_limits.failure_of(exc, label, detail_body, time.time()))
 
@@ -300,11 +307,11 @@ class _Counted(NamedTuple):
 
 @contextmanager
 def _translating(label: str, detail_body: bool = False, gate: Optional[write_gate.WriteGate] = None) -> Iterator[None]:
-    """失敗（順番の待ちの `write_gate.Busy` も）を `_translated` で `GitHubError` へ写して投げ直す。二次レート制限は `tell` で知らせる。"""
+    """失敗（順番の待ちの `write_gate.Busy` も）を `_as_github_error` で `GitHubError` へ写して投げ直す。二次レート制限は `tell` で知らせる。"""
     try:
         yield
     except (RateLimitExceeded, RequestFailed, RequestError, write_gate.Busy) as exc:
-        error = _translated(exc, label, detail_body)
+        error = _as_github_error(exc, label, detail_body)
         github_limits.tell(gate, error.secondary, error.retry_after, error.recorded)
         raise error from None
     except GitHubError as error:
@@ -539,6 +546,44 @@ class GitHub:
     def comments(self, number: int) -> list[Authored]:
         """Issue（か PR）のコメントを古い順にすべて読む（`github.list-pages` ページまで。超えたら `GitHubError`）。"""
         return [Authored.from_rest(c) for c in self._pages(f"/repos/{self.repo}/issues/{int(number)}/comments")]
+
+    def delete_comment(self, comment_id: int) -> None:
+        """コメント `comment_id` を消す（`DELETE /issues/comments/<id>`。#4580 で自分が書いたコメントを消す）。失敗は `GitHubError`。"""
+        self.rest("DELETE", f"/repos/{self.repo}/issues/comments/{int(comment_id)}")
+
+    def branch_activity(self, branch: str) -> Iterator[dict]:
+        """ブランチ `branch` の更新（`GET /activity?ref=refs/heads/<branch>`。`before`・`after`・`activity_type`）を新しい順に返す。
+
+        ページはページ番号でなく Link の `next` のカーソル（`after`）で送り、要るだけ 1 ページずつ読む（呼び手が打ち切れる）。
+        `github.list-pages` ページを超えたら途中で切らずに `GitHubError`。"""
+        pages = _page_cap("github.list-pages")
+        path = f"/repos/{self.repo}/activity"
+        params: dict[str, Any] = {"ref": f"refs/heads/{branch}", "per_page": PER_PAGE}
+        for _ in range(pages):
+            with _translating(f"GET {path}", detail_body=True, gate=self.gate):
+                resp = self.api.request("GET", path, params=params)
+            yield from _response_body(resp)
+            cursor = _next_cursor(resp)
+            if cursor is None:
+                return
+            params = {**params, "after": cursor}
+        raise _too_many_pages(f"{path} が", pages, "github.list-pages")
+
+    def workflow_runs(self, workflow: str, branch: str, commit: str, timeout: Optional[float] = None) -> list[dict]:
+        """workflow `workflow` のうち、ブランチ `branch` のコミット `commit` を push で起動した実行（新しい順。1 ページ 100 件）。
+
+        起動のイベントを push で絞り、同じコミットの手動の実行を数えない（#4580）。`timeout` はこの照会の時間の上限の秒（None は既定）。"""
+        path = f"/repos/{self.repo}/actions/workflows/{quote(workflow, safe='')}/runs"
+        params = {"branch": branch, "head_sha": commit, "event": "push", "per_page": PER_PAGE}
+        body = self._limited_to(timeout).rest("GET", path, params=params)
+        return list(body["workflow_runs"])
+
+    def _limited_to(self, timeout: Optional[float]) -> GitHub:
+        """時間の上限を `timeout` 秒にした同じリポジトリの読み書き（None なら自分）。"""
+        if timeout is None:
+            return self
+        config = dataclasses.replace(self.api.config, timeout=type(self.api.config.timeout)(timeout))
+        return GitHub(self.repo, Client(self.api.auth, config=config), gate=self.gate)
 
     def commit_parents(self, sha: str) -> list[str]:
         """コミット `sha` の親の SHA（第 1 親から順）。"""
