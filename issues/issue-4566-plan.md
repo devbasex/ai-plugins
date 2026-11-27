@@ -72,11 +72,16 @@
 
 1 つの課題で差分が 1,000 行を超える見込みなので、依存の向きで 3 つに分ける。単位 1 は呼び出し元の無い部品、単位 2 は直接打つコマンド、単位 3 はスプリントの自動の経路である。単位 3 をマージするまで、工程の振る舞いは変わらない。
 
-行数は単位ごとに、その単位の差分だけを数える。そのため、その単位の変更を載せる直前のコミットを変数 `base_ref` に入れてから、次のコマンドを打つ。前の単位を含むブランチで数えるときは、前の単位の先頭のコミットを入れる。`origin/main` を入れると、前の単位の変更まで数えてしまう。除くのは、生成して作るファイルとコピーである。
+行数は単位ごとに、その単位の差分だけを数える。`origin/main` と比べると、前の単位の変更まで数えてしまう。そこで、比較元を変数 `base_ref` に先に設定し、その後で下の `git diff` を打つ。
+
+| 単位 | `base_ref` に設定する値 | 設定の例 |
+| --- | --- | --- |
+| 1 | main との分岐点 | `base_ref="$(git merge-base origin/main HEAD)"` |
+| 2・3 | 前の単位の最後のコミット | `base_ref=<前の単位の最後のコミットの SHA>` の `<…>` を実際の SHA に置き換えて打つ |
+
+除くのは、生成して作るファイルとコピーである。
 
 ```bash
-# 単位 1 は main からの分岐点を使う。単位 2 と 3 では、前の単位の先頭のコミットの SHA を base_ref に入れ直す
-base_ref="$(git merge-base origin/main HEAD)"
 git diff --shortstat "${base_ref}...HEAD" -- . ':(exclude)issues' ':(exclude)plugins/ndf/docs/contracts/commands.md' ':(exclude)plugins/ndf/contracts/schemas/io' ':(exclude)plugins/ndf/skills/development-workflow/schemas'
 ```
 

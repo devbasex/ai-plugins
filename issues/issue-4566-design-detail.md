@@ -145,7 +145,7 @@ docs/{glossary.md, glossary/}
 | `_drive_parsers` | `src/ndf/domains/crossrefactor/cli.py` | 変更 | 今のまま | `--required` の必須を外し（`default=[]`）、`--local-test`（値なし）と `--pushed-out` を足す |
 | `_check_gate` | 同上 | 新設 | `_check_gate(a: argparse.Namespace) -> None` | 引数と手段の組み合わせを確かめ、合わなければ `ValueError` |
 | `run_config` | 同上 | 変更 | 今のまま | 先頭で `_check_gate` を呼び、`local_test` と `pushed_out` を渡す |
-| `_release` | 同上 | 変更 | 今のまま | 排他ロックを取り、記録に残る検証用の作業場所も片付ける。worktree をすべて外せたら、状態ファイルを `gate_logs` だけにして保存する。外せない worktree があれば状態ファイルを変えない。最後に `sweep_gate_logs` を呼ぶ（下の `sweep_gate_logs` の「所有の記録の置き場」） |
+| `_release` | 同上 | 変更 | 今のまま | 排他ロックを取り、記録に残る検証用の作業場所も片付ける。その後、`rf<PR>/` の下に残る worktree を `git worktree list --porcelain` で数える。0 件なら、状態ファイルを `gate_logs` だけにして保存する。`gate_logs` が空なら、状態ファイルを消して空のディレクトリも消す（下の `sweep_gate_logs` の「状態ファイルとディレクトリを消す条件」）。1 件以上残れば、再開のための記録を変えない。最後に `sweep_gate_logs` を呼ぶ |
 | `main` | 同上 | 変更 | 今のまま | `final_gate.GateStopped` の扱いは今のまま。ロックを取れないときの停止を足す |
 
 argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON を出さずに終わるためである。`_check_gate` の `ValueError` は、今の表（`STOP_KINDS`）で `invalid` になる。
@@ -188,13 +188,13 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | `refuse_dirty` | 同上 | 新設 | `refuse_dirty(g: git.Git) -> None` | 追跡ファイルに commit していない変更があれば `SyncRefused` |
 | `sync_worktree` | 同上 | 変更 | 今のまま | `refuse_dirty` → `fetch_tips` → `sync_fetched`。呼び出し元（cross-review と CI の経路）の振る舞いは変えない |
 | `write_private_log` | `workspace.py` | 新設 | `write_private_log(logs: Path, name: str, text: str, state, save) -> Path` | 実行ユーザーだけが読めるログを書き、ファイルを作る前に所有を状態ファイルへ記録する |
-| `repo_dir` | `workspace.py` | 新設 | `repo_dir(repo: git.Git) -> Path` | このリポジトリの PR の作業場所を置く親ディレクトリ（`<保存先>/<リポジトリの鍵>`）を返す |
-| `root_of` | `workspace.py` | 変更 | 今のまま | PR の作業場所の根を `repo_dir(repo) / f"rf{pr}"` にする。今は保存先の直下の `rf<PR>` |
+| `repo_dir` | `workspace.py` | 新設 | `repo_dir(repo: git.Git) -> Path` | このリポジトリの PR の作業場所を置く親ディレクトリを返す。`NDF_WORKTREE_BASE` が無ければ今の保存先、あれば `<保存先>/repo-<リポジトリの鍵>` |
+| `root_of` | `workspace.py` | 変更 | 今のまま | PR の作業場所の根を返す。ふだんは `repo_dir(repo) / f"rf{pr}"`。`NDF_WORKTREE_BASE` があり、前の版が保存先の直下に作った `rf<PR>/` がこのリポジトリのものと確かめられれば、その場所を返す |
 | `sweep_gate_logs` | `workspace.py` | 新設 | `sweep_gate_logs(parent: Path, own: Path, keep: float, now: float) -> int` | 同じリポジトリの PR について、NDF が書いたと記録にある、期限を過ぎた手元の最終ゲートのログを消し、件数を返す |
 | `redact_output` | `local_gate.py` | 新設 | `redact_output(text: str) -> str` | コマンド、出力、suite の名前の認証情報を伏せる |
 | `suite_label` | `local_gate.py` | 新設 | `suite_label(index: int, name: str) -> str` | NDF の外や記録へ出す suite の呼び名を作る |
 | `fix_excerpt` | `local_gate.py` | 新設 | `fix_excerpt(failed: Sequence[Failed]) -> list[str]` | 指示文に載せる行を、伏せ字にして上限で切って作る |
-| `hold` | `workspace.py` | 新設 | `hold(root: Path) -> FileLock \| None` | `rf<PR>/run.lock` を待たずに取る。取れなければ None |
+| `hold` | `workspace.py` | 新設 | `hold(parent: Path, pr: int) -> FileLock \| None` | `<parent>/locks/rf<PR>.lock` を待たずに取る。取れなければ None。ロックファイルは `rf<PR>/` の外に置き、消さない |
 | `RunConfig` | `drive.py` | 変更 | `local_test: bool = False`・`pushed_out: Path \| None = None` を足す | `args()` は、手元の経路では `--required …`・`--ci-test …` の代わりに `--local-test` を並べる。`pushed_out` は並べない |
 | `drive` | `drive.py` | 変更 | 今のまま | 始めに `hold`、終わりに解く。ロックを取った後に `sweep_gate_logs` を呼ぶ。手元の経路で対象範囲が空なら、次を行わずに最終ゲートへ進む: 担当の AI を起動できるかの確認、プロジェクトの判断基準の文書（MVV）の読み込み、改善の提案、項目ごとの実装と検証 |
 | `_open` | `drive.py` | 変更 | 今のまま | 今は、`_reused` が結果を返さず状態に `done` があれば、状態を空にして新しく始める。手元の経路で、`done` がテストを打って完了した記録で、PR のブランチのリモートの先頭が `done.head` と同じで、引数の並びも同じなら、状態を捨てない。この場合は、提案・計画・項目の実装と検証を通らずに最終ゲート（`run_local_gate`）へ進み、順 3 の「送った SHA」の分岐で再検証する。先頭か引数が違えば、今と同じく状態を空にする。空にするときも、片付けのための記録（`gate_logs` と `verify_trees`）は新しい状態へ引き継ぐ。前の起動が書いた期限内のログと、中断で残った検証用の作業場所を、後の掃除が見つけられるようにするためである |
@@ -228,21 +228,23 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
   - 異常: `logs/` がシンボリックリンクか、所有者が実行ユーザーでない、または権限を直せなければ、書かずに停止する
   - `run_suites` は、suite の出力をこの関数でだけ書く。渡すのは `redact_output` を掛けた文字列だけである。伏せる前のコマンドと出力はメモリの中だけで持ち、ファイルに書かない。担当の出力のログも同じ `logs/` に入るので、`workspace` の作成と再開で `logs/` を 0700 にする
 - `sweep_gate_logs`
-  - シグネチャ: `sweep_gate_logs(parent: Path, own: Path, keep: float, now: float) -> int`。`parent` は自分のリポジトリの作業場所の親（`repo_dir` の値）、`own` は自分の `rf<PR>/` である
+  - シグネチャ: `sweep_gate_logs(parent: Path, legacy: Path | None, repo_id: str, own: Path, keep: float, now: float) -> int`。`parent` は自分のリポジトリの作業場所の親（`repo_dir` の値）、`legacy` は前の版の場所を探す保存先（`NDF_WORKTREE_BASE` が無ければ None）、`repo_id` は共通ディレクトリの実パス、`own` は自分の `rf<PR>/` である
   - 事前条件: `own` の排他ロックを持っている
-  - 事後条件: 消すのは、次をすべて満たすファイルだけである。`parent` の直下の `rf<PR>/` にある。パスが、その状態ファイルの `gate_logs` の記録の `name` か `tmp` で、`rf<PR>/logs/` の直下にある。`lstat` で通常のファイルである。そのファイルが NDF の作ったものと同じである（下の照合）。更新時刻が `keep` 秒より古い
+  - 事後条件: 消すのは、次をすべて満たすファイルだけである。`parent` の直下の `rf<PR>/` にあるか、`root_of` が使い続けている前の版の `rf<PR>/`（下の `repo_dir`・`root_of` の箇条。状態ファイルの `repo` が自分と一致するもの）にある。パスが、その状態ファイルの `gate_logs` の記録の `name` か `tmp` で、`rf<PR>/logs/` の直下にある。`lstat` で通常のファイルである。そのファイルが NDF の作ったものと同じである（下の照合）。更新時刻が `keep` 秒より古い
   - 同じファイルかの照合: 記録に `st_dev`・`st_ino` があれば、`lstat` の値が両方一致するときだけ同じとする。ログを移した後に同じ名前へ置いた別のファイルは、名前が同じでも一致しないので消さない。記録に `st_dev`・`st_ino` が無ければ（手順 1 と 3 の間で中断した）、消してよいのは `tmp` のパスだけである。`tmp` は NDF が `O_EXCL` で作るランダムな名前なので、利用者のファイルと重ならない
   - 事後条件: `name` にも `tmp` にも同じファイルが無くなった記録は、`gate_logs` から外して状態ファイルを書き直す
-  - 事後条件: 外した結果 `gate_logs` が空になり、状態ファイルにほかのキーが無ければ（`_release` が片付けた後）、状態ファイルを消す。続けて `logs/` と `rf<PR>/` を、この順に `os.rmdir` で消す。空でないディレクトリは `OSError` で残り、そのまま続ける。ロックファイル（`run.lock`）は `rf<PR>/` を消す前に解いて消す
-  - 事後条件: `own` 以外の `rf<PR>/` は、その PR のロック（`hold`）を待たずに取れたときだけ扱い、扱い終えたら解く。取れなければ飛ばす。飛ばした PR は、その後の `run` か `release` で改めて確かめる。状態ファイルが無いか読めない `rf<PR>/` には触れない。`rf<PR>/` か `logs/` がシンボリックリンクなら入らない。消せないファイルは残して続ける。`parent` の外（保存先の直下や、ほかのリポジトリの鍵の下）は見ない
+  - 状態ファイルを書き換えてよいキー: 期限切れの掃除が書き換えるのは `gate_logs` だけである。worktree が残っていて `_release` が再開のための記録を残した `rf<PR>/` でも、消したログの記録は外す。ほかのキーは読むだけで変えない
+  - 状態ファイルとディレクトリを消す条件: 状態ファイルのキーが `gate_logs`（と前の版の場所の `repo`）だけで、`gate_logs` が空になったときに消す。`gate_logs` が初めから空の場合（CI の経路やテストを省いた実行）も同じで、`_release` が worktree をすべて外した直後にこの条件に当たる。続けて `logs/` と `rf<PR>/` を、この順に `os.rmdir` で消す。空でないディレクトリは `OSError` で残り、そのまま続ける。ロックファイルは `rf<PR>/` の外（`hold` の行）にあるので、この削除の間もロックを持ち続け、ロックファイルは消さない。ロックを持ったままファイルを消すと、その後に始まった `run` や `release` が新しく作ったファイルにロックを取り、消す前のファイルを開いていた実行と同時に動けてしまうためである。残るのは PR ごとに中身の無いファイル 1 つである
+  - 事後条件: `own` 以外の `rf<PR>/` は、その PR のロック（`hold`）を待たずに取れたときだけ扱い、扱い終えたら解く。取れなければ飛ばす。飛ばした PR は、その後の `run` か `release` で改めて確かめる。状態ファイルが無いか読めない `rf<PR>/` には触れない。`rf<PR>/` か `logs/` がシンボリックリンクなら入らない。消せないファイルは残して続ける。ほかのリポジトリの鍵の下と、`repo` が自分と一致しない前の版の場所は見ない
   - 呼ぶ所: `drive` と `_release` が、自分の排他ロックを取った後に呼ぶ。`keep` は `contracts/limits/cross-refactoring.gate-log.keep.json` の `seconds` である
   - 記録: `gate_logs` への記録は `write_private_log` の中で、ファイルを作る前に行う（上の手順）。ログの保存と所有の記録の間で中断しても、記録の無いログは残らない
   - 所有の記録の置き場: `gate_logs` は `rf<PR>/state.json` に置き、`_release` の後も残す。`workspace.release` が外すのは worktree だけで、`_release` は状態ファイルを `gate_logs` だけにし、`logs/` を消さない。そのため、`release` の後に打った `run` や `release` も、この PR の期限切れのログを記録から見つけて消せる。`_open` が状態を空にするときも引き継ぐ（関数の表の `_open` の行）。`gate_logs` から記録を外すのは、上の事後条件のとおり、記録したファイルが無くなった後だけである
-- `repo_dir`・`root_of`（作業場所をリポジトリごとに分ける）
-  - 保存先は `NDF_WORKTREE_BASE` で複数のリポジトリが共有できる。`rf<PR>/` を保存先の直下に置くと、2 つのリポジトリの同じ番号の PR が、同じ状態ファイル・作業場所・ロックを使ってしまう。そのため、リポジトリごとの親ディレクトリの下に置く
-  - 事後条件: `repo_dir` は `location.default_base(location.main_dir(repo)) / f"repo-{key}"` を返す。`key` は `repo.common_dir()` の実パスを UTF-8 にした SHA-256 の 16 進の先頭 16 文字で、同じリポジトリのどの worktree から呼んでも同じ値になる
-  - `root_of` は `repo_dir(repo) / f"rf{pr}"` を返す。ロックファイル（`run.lock`）もこの下にあるので、排他もリポジトリごとに分かれる。ほかのリポジトリの作業が残っていても止まらない
-  - この変更より前の NDF が保存先の直下に作った `rf<PR>/` は扱わない。進行中だった作業は、打ち直すと新しい場所で始まり直す。残ったディレクトリと worktree は、`git worktree list` で見つけて利用者が外す
+- `repo_dir`・`root_of`（保存先を共有するときだけ、作業場所をリポジトリごとに分ける）
+  - 既定の保存先（`<メインディレクトリ>/.worktrees/.ndf`）は、もともとリポジトリごとに分かれている。そのため、`NDF_WORKTREE_BASE` が無ければ置き場を変えない。版上げしても、進行中の作業はそのまま続く
+  - `NDF_WORKTREE_BASE` は複数のリポジトリが共有できる。`rf<PR>/` をその直下に置くと、2 つのリポジトリの同じ番号の PR が同じ状態ファイルと作業場所を使ってしまう。そのため、この場合だけリポジトリごとの親ディレクトリ `repo-<key>` の下に置く
+  - 事後条件: `repo_dir` は、`repo.common_dir()` を 1 回だけ呼び、その実パスを保存先とリポジトリの鍵の両方に使う。メインディレクトリはその親で、`location.main_dir` と同じ値である（`main_dir` を別に呼ぶと `git rev-parse --git-common-dir` が 2 回になる）。`key` は、実パスを UTF-8 にした SHA-256 の 16 進の先頭 16 文字で、同じリポジトリのどの worktree から呼んでも同じ値になる
+  - 前の版が作った場所の扱い（`NDF_WORKTREE_BASE` があるときだけ）: `root_of` は、新しい場所に `rf<PR>/` が無く、保存先の直下に前の版の `rf<PR>/` があれば、その持ち主を確かめる。`rf<PR>/work` の git の共通ディレクトリが自分と一致するか、状態ファイルの `repo` が自分と一致すれば、前の版の場所をそのまま返す。移さずに使い続けるので、途中で中断しても失うものが無い。保存済みの提案・計画・項目ごとの検証結果・作業コミットも使われる。使い始めるときに、状態ファイルへ `repo`（共通ディレクトリの実パス）を書く。`release` の後に `work` が無くなっても持ち主を確かめ、期限切れの掃除で片付けられるようにするためである。持ち主を確かめられない場所は、ほかのリポジトリのものかもしれないので使わず、触れない
+  - 移さずに使い続けることを選んだ理由: 新しい場所へ移すと、`work`・`read`・検証用の作業場所の worktree を `git worktree move` で 1 つずつ動かす必要がある。その途中で中断した場合の再開の手順も要る。使い続ければ、版上げのための処理は持ち主の確かめ（git の読み取り 1 回）だけで、担当の AI の起動も検証のやり直しも増えない。前の版の場所は、その PR の `release` と期限切れの掃除で、ほかの `rf<PR>/` と同じに片付く
 - `redact_output`
   - 事後条件: 次の順に掛ける。秘密鍵のブロックを最初に原文で探すのは、手順 3 の関数が `-----BEGIN` を含む行を丸ごと置き換え、その後では開始の行を見つけられないためである
     1. 原文で、`-----BEGIN` と `PRIVATE KEY` を含む行から、`-----END` と `PRIVATE KEY` を含む行まで（無ければ末尾まで）を、まとめて伏せる。開始の行に終わりもあれば、その行だけを伏せる
@@ -324,6 +326,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `rebasing` | 状態ファイルのキー（`{head, tip}`。載せ直す前の `HEAD` と載せる先の先頭）。順 1 で `sync_fetched` を呼ぶ前に保存し、載せ直しの後に `onto` を `tip` へ書き換えるのと同じ保存で消す | `state.json` | 無し |
 | `pushing` | 状態ファイルのキー（`{sha, digest, path_digest}`。push を打つ直前に書き、`done` を保存した後に消す） | `state.json` | 無し |
 | `local_base_failed` | 状態ファイルのキー（`{sha, digest, path_digest, failed, run}` の並び。`failed` は基準側で落ちた suite の順番と終了コード、`run` は記録した起動の識別値。起動のたびに新しく作るランダムな値で、別の起動の記録は使わない） | `state.json` | 空 |
+| `repo` | 状態ファイルのキー（git の共通ディレクトリの実パス）。`NDF_WORKTREE_BASE` があり、前の版が保存先の直下に作った `rf<PR>/` を使い続けるときだけ書く | `state.json` | 無し |
 | `gate_logs` | 状態ファイルのキー（NDF が書いた手元の最終ゲートのログの記録の並び。記録は `{name, tmp, st_dev, st_ino}`。`st_dev`・`st_ino` は一時ファイルを作った後に足す） | `state.json` | 空 |
 | `final` | 状態ファイルのキー。`status`・`rounds`・`head` に、`means` と、CI なら `checks`、手元なら `tests`（`passed`・`skipped`）と `digest`、落ちた場合は `base_failed` と `head_failed`（それぞれ suite の呼び名と終了コードの並び） | `state.json` | — |
 | `done.digest`・`done.path_digest` | 状態ファイルのキー（テストを打って完了したときだけ。合格に使った識別値と `PATH` の SHA-256） | `state.json` | 無し |
@@ -388,10 +391,11 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `narrow` | 保護するファイルの指定が消える | 保護するファイルとほかを含むディレクトリは残る | すべて保護なら空 |
 | `run_local_gate` | 合格して指定の SHA を送る。変更が無ければ打たない | 最後の周でテストが落ちる場合、PR のブランチが進んだために push が拒まれる場合 | 処理の手順の表の行ごと |
 | `run_suites` | 設定の順にすべて打つ | 累計の残りが suite の上限より小さい、等しい、suite の上限が None（どれも時間切れは `fix_limit`）。suite の上限が累計の残りより小さい場合の時間切れは不合格 | 異常系の行ごと。時計と起動を差し替える |
-| `_release` | worktree をすべて外せたら、状態ファイルが `gate_logs` だけになる | 外せない worktree が残る（状態ファイルが変わらない） | `gate_logs` の記録を消さない |
-| `repo_dir`・`root_of` | 同じリポジトリの別の worktree から呼んでも同じパスを返す | 2 つのリポジトリが同じ `NDF_WORKTREE_BASE` で同じ番号の PR を扱う（パスもロックも別になり、どちらも止まらない） | 保存先の直下の古い `rf<PR>/` を見ない |
+| `_release` | `rf<PR>/` の下の worktree が 0 件なら、状態ファイルが `gate_logs` だけになる。`gate_logs` が空なら状態ファイルと空のディレクトリが消える | 既定と違う担当で `run` した PR（その担当の読み取り用の worktree も数える）。外せない worktree が残る（再開のための記録が変わらず、期限切れのログの記録だけが外れる） | `gate_logs` の記録を消さない。ロックファイルを消さない |
+| `hold` | 同じ PR の 2 つ目の `run`・`release` は取れない | `rf<PR>/` を消した後も、同じロックファイルで排他が続く | ロックファイルを `rf<PR>/` の中に置かない |
+| `repo_dir`・`root_of` | `NDF_WORKTREE_BASE` が無ければ今と同じパス。あれば `repo-<key>` の下。同じリポジトリの別の worktree から呼んでも同じパス。`git rev-parse --git-common-dir` は 1 回 | 2 つのリポジトリが同じ `NDF_WORKTREE_BASE` で同じ番号の PR を扱う（パスが別になり、どちらも止まらない）。前の版の `rf<PR>/` が自分のものなら、その場所を使い続けて状態と作業コミットを引き継ぐ | 持ち主を確かめられない前の版の `rf<PR>/` を使わず、触れない |
 | `write_private_log` | ディレクトリ 0700・ファイル 0600 | umask 022、前からある 0755 の `logs/` と 0644 のログ | `logs/` がシンボリックリンク。同じ名前が別のファイルへのハードリンクかシンボリックリンク（リンク先の中身と権限が変わらない） |
-| `sweep_gate_logs` | 期限を過ぎた、記録のあるログを消す。同じリポジトリのほかの PR の `rf<PR>/` からも消す。所有の記録の後、置き換えの前に中断して残った一時ファイルも消す。`_open` が状態を空にした後の打ち直しでも、前の起動のログを消す。`_release` の後に最後の記録を外したら、状態ファイルと空の `logs/`・`rf<PR>/` を消す | 期限の内のログは残す。ほかの PR のロックが取られていれば飛ばし、次の呼び出しで消す。記録と同じ名前で `st_ino` の違うファイル（ログを移した後に置いたもの）は残す | 名前が `local-gate-` でないファイル、`gate_logs` に記録の無い同じ接頭辞のファイル、ほかのリポジトリの鍵の下の `rf<PR>/`、シンボリックリンクの `logs/` に触れない |
+| `sweep_gate_logs` | 期限を過ぎた、記録のあるログを消す。同じリポジトリのほかの PR の `rf<PR>/` からも消す。所有の記録の後、置き換えの前に中断して残った一時ファイルも消す。`_open` が状態を空にした後の打ち直しでも、前の起動のログを消す。`_release` の後に最後の記録を外したら、状態ファイルと空の `logs/`・`rf<PR>/` を消す。前の版の場所で `repo` が一致する `rf<PR>/` も同じに扱う | 期限の内のログは残す。ほかの PR のロックが取られていれば飛ばし、次の呼び出しで消す。記録と同じ名前で `st_ino` の違うファイル（ログを移した後に置いたもの）は残す | 名前が `local-gate-` でないファイル、`gate_logs` に記録の無い同じ接頭辞のファイル、ほかのリポジトリの鍵の下の `rf<PR>/`、シンボリックリンクの `logs/` に触れない |
 | `redact_output` | トークンの形と秘密の名前の環境変数の値を伏せる | 複数行の秘密鍵（終わりの行の有無、開始と終わりが同じ行） | 回帰テスト: `-----BEGIN … PRIVATE KEY-----` の行を行単位の伏せ字が置き換える場合でも、鍵の本体の行が結果に残らない |
 | `suite_label` | 順番と名前 | 100 文字を超える名前、`/` を含む名前 | 認証情報の形を含む名前は順番だけになる |
 | `run_suites`（ログ） | 伏せ字にしたログを書く | 同じ名前の suite が 2 つ、`/` を含む名前（別々のログになる） | 伏せる前の値がファイルに残らない |
@@ -473,7 +477,7 @@ s=$(cat "$2") && [ -n "$s" ] && { [ "$(git rev-parse HEAD)" = "$s" ] || { git fe
 | --- | --- |
 | `skills/development-workflow/SKILL.md` | 工程の表の「リファクタリング」の行を、行を増やさずに書き換える。実行の条件、`workflow.stages` で止める書き方（キー・`reason` が必須・新しく作るスプリントから効く）、`test.protected_files`・`test.local_total_minutes` への参照 |
 | `skills/cross-refactoring/SKILL.md` | 引数の表に `--local-test`・`--pushed-out`、手元の最終ゲートの流れと停止理由、必須のチェックの経路が確かめる範囲 |
-| `skills/cross-refactoring/docs/01-state-and-propose.md`、`crossrefactor/store.py` と `workspace.py` の説明 | 作業場所の根を `<保存先>/repo-<リポジトリの鍵>/rf<PR>` に書き直す |
+| `skills/cross-refactoring/docs/01-state-and-propose.md`、`crossrefactor/store.py` と `workspace.py` の説明 | `NDF_WORKTREE_BASE` があるときの作業場所の根（`<保存先>/repo-<リポジトリの鍵>/rf<PR>`）と、前の版の場所を使い続けることを書き足す |
 | `docs/specifications/` の 3 本 | 「CI テストの設定が無いリポジトリでは通さない」を今の振る舞いとして書いている所を直す |
 | `docs/glossary/glossary.json`・`docs/glossary.md`・`docs/glossary/ndf-ci-test.md` | 設計文書の「用語」の表の「テストを確かめる手段」を、領域 `ndf-ci-test` に足す |
 
