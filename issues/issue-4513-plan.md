@@ -62,7 +62,7 @@
 - **変更内容:** `none` の設定で、オーガナイザーが `main abc1234` を記録して承認した後のデプロイの工程が、判断の求めで止まらず完了し、worker を起動しないことを期待で書く（今は落ちる）
 - **テストの組み方:** ケースごとに Git の子プロセスを増やさない。`test_sprint_templates.py` の `sprint` フィクスチャ（ケースごとに `symbolic-ref`・`commit` などを打つ）は使わない
   - `test_gate_work.py`: 保存先に `values.json` を書き、`_strategy_at` を `version_store.kind: none` の設定を返す関数に差し替え、`exec_` を記録するだけの関数にする。worker を起動しないことは `exec_` が呼ばれないことで確かめる
-  - `test_run.py`: `repo`・`st`・`env` のフィクスチャは使わない。`repo` は `git init` と、後始末で保存先を探す `git rev-parse` を打ち、`st` も保存先を探すのに `git rev-parse` を打つので、ケースごとに Git の子プロセスが 3 回増えるためである。代わりに、`conftest.py` の `root` フィクスチャ（`tmp_path` の下に保存先のディレクトリを作るだけで、後始末でロックを放す）を使う。保存先を探す `command.store_root_of` を `root` を返す関数に差し替え、`durable.prepare_store(root)` の後に `store.open_store(store.default_url(root), root)` でステートマシンを開く。`run.Env` はケースの中で組む。承認の履歴は、リリース承認ゲートへのオーガナイザーの承認と出力の事象をステートマシンへ追記して作る。プランを流す境界（`invoke` のプランの実行）と `_strategy_at` を差し替え、Git も worker も起動しない
+  - `test_run.py`: `repo`・`st`・`env` のフィクスチャは使わない。`repo` は `git init` と、後始末で保存先を探す `git rev-parse` を打ち、`st` も保存先を探すのに `git rev-parse` を打つので、ケースごとに Git の子プロセスが 3 回増えるためである。代わりに、`conftest.py` の `root` フィクスチャ（`tmp_path` の下に保存先のディレクトリを作るだけで、後始末でロックを放す）を使う。保存先を探す `command.store_root_of` は、`root` を返す関数に差し替える。ステートマシンは、`durable.prepare_store(root)` の後に `store.open_store(store.default_url(root), root)` で開く。`run.Env` はケースの中で組む。承認の履歴は、リリース承認ゲートへのオーガナイザーの承認と出力の事象をステートマシンへ追記して作る。プランを流す境界（`invoke` のプランの実行）と `_strategy_at` を差し替え、Git も worker も起動しない
 - **満たす受け入れ条件:** 1・2（再現）
 - **進め方:** 失敗するテストを先に書くだけ。実装は Task 4
 
@@ -136,7 +136,7 @@
 
 - 単位ごとの PR を revert すれば戻る。前へ進めるときのデータの移行は無い
 - **U3 だけは戻す時機を選ぶ。** U3 は実行の保存先の `outputs.json` を、キーと値だけのオブジェクトから、ステップごとの要素の並び（`entries`）へ変える。直す前の NDF は `entries` を読めない。そのため、`entries` の形の `outputs.json` を読むプランが残っている間に U3 を戻すと、そのプランの出力が結果に載らなくなる
-- **そこで、U3 は、`entries` の形の `outputs.json` を再開の後に読むプランが 1 つも無いときにだけ戻す。** プランのプロセスが動いていないだけでは足りない。承認ゲートで回答を待つプランと、失敗して retry を待つ工程のプランも、再開すると同じ保存先の `outputs.json` を読む（工程の retry が試行の始めに消すのは `values.json` と課題のコピーだけで、`outputs.json` は残る。`run._prepare`）
+- **そこで、U3 は、`entries` の形の `outputs.json` を再開の後に読むプランが 1 つも無いときにだけ戻す。** プランのプロセスが動いていないだけでは足りない。承認ゲートで回答を待つプランと、失敗して retry を待つ工程のプランも、再開すると同じ保存先の `outputs.json` を読む。工程の retry が試行の始めに消すのは `values.json` と課題のコピーだけで、`outputs.json` は残る（`run._prepare`）。
 - **確かめてから戻し終えるまで、プランを起動も再開もさせない。** 確かめた後に新しいプランが起動するか、止まっていたプランが再開すると、そのプランが `entries` の形の `outputs.json` を書き、承認待ちへ進めるためである。調べた時点で `outputs.json` が無かったプランも同じである。その後に戻すと、利用者が旧版でそのプランを再開したとき、保存済みの出力が工程の結果から落ちる
 - **確かめる対象は、スプリントのプランと単発のプランの両方である。** U3 が変える `core/plan/records.py` は、スプリントの工程が流すプランだけでなく、利用者が `ndf plan next <プラン定義ファイル>` で単発で流すプランも使う。単発のプランの保存先は、`--state-dir` を渡したならその場所、渡さなければプラン定義ファイルの隣の `<プラン名>.state`（`assemble_decide.state_dir_for`）で、`.git/ndf/state/` の下とは限らない
 - 戻す手順は次のとおりである
@@ -148,7 +148,7 @@
      - 計画の外のスプリントを進める会話（conductor）も止め、`ndf progress next`・`ndf progress retry`・`ndf answer` を打たせない
      - 1 の単発のプランに `ndf plan next` を打たせない
   3. 1 の範囲で実行中の処理が終わるのを待つ。区切りで止めた計画でも、実行中の行は終わりまで流れる。プロセスの名前では探さない。`ndf progress next` が背景で起動する `progress work` は、`python -I -c … progress work` のコマンド行で動き（`cli.ndf_command`）、`bin/ndf` の名前では見つからないためである。また、範囲の外の処理（別のリポジトリや別の導入先の `progress wait`・`relay run`）まで待つことになるためでもある。代わりに、状態に書き込める処理が持つ排他を 1 つずつ確かめる
-     - スプリントは、ID ごとに `ndf progress show <ID>` を打ち、結果の `next` が `ndf progress wait` を指す間は待つ。`next` が `wait` になるのは、ほかの処理がそのステートマシンの実行の排他（`store.run_lock`）を持つときと、`next` が起動した作業が排他を取る前に置く起動のマーカー（作業の保存先の `launched.json`）の組が生きているときである（`run.is_live`）
+     - スプリントは、ID ごとに `ndf progress show <ID>` を打ち、結果の `next` が `ndf progress wait` を指す間は待つ。`next` が `wait` になるときは 2 つある（`run.is_live`）。1 つは、ほかの処理がそのステートマシンの実行の排他（`store.run_lock`）を持つときである。もう 1 つは、`next` が起動した作業が排他を取る前に置く起動のマーカー（作業の保存先の `launched.json`）の組が生きているときである
      - 単発のプランは、保存先の `plan.lock`（`runner.plan_lock` が流す間だけ持つ排他）を `flock -n <保存先>/plan.lock true` で取れるようになるまで待つ
   4. 止まった状態のまま、1 の保存先（スプリントは `.git/ndf/state/progress-work/` の下、単発のプランはそのプランの保存先）で、キー `entries` を持つ `outputs.json` を探す
   5. 見つかった保存先ごとに、完了しているかを見る

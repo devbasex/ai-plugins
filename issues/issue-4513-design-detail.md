@@ -1,16 +1,6 @@
 # #4513 の詳細設計: デプロイの工程をバージョン番号を持たないリポジトリでも終える
 
-設計文書 [issue-4513-design.md](./issue-4513-design.md) の構成要素と決定 1〜6 を、ファイルと関数の粒度へ下ろした文書である。受け入れ条件の中身は要求仕様 [issue-4513-requirements.md](./issue-4513-requirements.md) にある。書き方は `design` の `references/detailed-design.md` に従う。
-
-この文書で使う言葉のうち、設計文書の「この文書で使う言葉」に無いもの、または取り違えやすいものを次に置く。ほかの言葉（オーガナイザー・まとめたリリース・conductor・MVV 判定など）は、設計文書の表にある。
-
-| 言葉 | 意味 |
-| --- | --- |
-| 記録済みの値 | まとめたリリースで、オーガナイザーが `ndf lanes release --version` に渡し、リリース承認ゲートへの回答と一緒に文脈の `product_version` に書かれた値と、同じ事象に書かれた届け先 `delivery`（記録できたときだけ）と、承認を記録した時点のバージョンの保存先の種類 `release_store`。`values.json` には `released_version`・`released_delivery`・`released_store` として残す。「承認済みの配布識別子」も同じものを指す |
-| 工程・試行・プラン・ステップ | 工程（デプロイなど）は retry の単位である。試行は、工程の retry から次の retry までの 1 回分を指す。1 つの試行の中で、プランは何回か流れる（承認の回答の後・自動の打ち直し）。プランはステップを順に流す |
-| 判断の求め | worker が `status: gate` の結果を返して、conductor の判断を待つこと |
-
-**別ファイルにした理由**: 別ファイルにする条件は「新設する関数が 2 つ以上」か「シグネチャを変える関数がある」で、この設計は両方に当たる。新設は 10 を超える（`required_outputs`・`released_answer`・`released_outcome` など）。シグネチャの変更は 10（`require_outputs`・`_add_outputs`・`work_argv`・`work_prompt`・`_work_handoff`・`write_values` など）である。条件は `requirements-design` の `document-roles.md` の「詳細設計を別ファイルにする条件」にある。
+設計文書 [issue-4513-design.md](./issue-4513-design.md) の構成要素と決定 1〜6 を、ファイルと関数の粒度へ下ろした文書である。受け入れ条件の中身は要求仕様 [issue-4513-requirements.md](./issue-4513-requirements.md) にある。書き方は `design` の `references/detailed-design.md` に従う。この文書で使う言葉と、別ファイルにした理由は末尾にある。
 
 ## 地図
 
@@ -49,7 +39,7 @@ plugins/ndf/
     └── progress/{test_definition.py, test_invoke.py, test_invoke_values.py, test_run.py, test_plan.py, test_plan_external.py, gate/test_gate_work.py, gate/test_gate_release.py}
 ```
 
-依存の向き: 工程の進行（`progress/run.py`・`invoke.py`）が、定義の読み手（`definition.py`）と値のファイル（`contracts/worker_kinds.py`）を読む。`ndf answer work`（`gate/entry.py`）は値のファイルとブランチ戦略（`core/branch_strategy.py`）を読み、`ndf worker run`（`core/worker.py`）へ引数で渡す。オーガナイザーの承認を書く `gate/release.py` は、ブランチ戦略と届け先の選び方（`domains/release/forms_decide.py`）を読む。プラン（`core/plan/`）は `ndf worker run` の結果 JSON を標準出力から読むだけで、工程の進行を読まない。今ある依存の向きは変えない。足す依存は `entry.py` → `branch_strategy.py`、`gate/release.py` → `branch_strategy.py`、`gate/release.py` → `forms_decide.py` の 3 本で、どれも循環を作らない。
+依存の向き: 工程の進行（`progress/run.py`・`invoke.py`）が、定義の読み手（`definition.py`）と、`values.json` を読み書きするモジュール（`contracts/worker_kinds.py`）を読む。`ndf answer work`（`gate/entry.py`）は値のファイルとブランチ戦略（`core/branch_strategy.py`）を読み、`ndf worker run`（`core/worker.py`）へ引数で渡す。オーガナイザーの承認を書く `gate/release.py` は、ブランチ戦略と届け先の選び方（`domains/release/forms_decide.py`）を読む。プラン（`core/plan/`）は `ndf worker run` の結果 JSON を標準出力から読むだけで、工程の進行を読まない。今ある依存の向きは変えない。足す依存は `entry.py` → `branch_strategy.py`、`gate/release.py` → `branch_strategy.py`、`gate/release.py` → `forms_decide.py` の 3 本である。どれも循環を作らない。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -77,7 +67,7 @@ plugins/ndf/
 | `src/ndf/core/plan/records.py` | 変更 | プランの記録のファイル | — | モジュール | `_add_outputs`・`recorded_outputs`（変更）・`_stored_entries`・`_keep_step_missing`・`recorded_step_missing`（新設）・`_stored_outputs`（削除） |
 | `skills/` の 5 ファイル | 変更 | 手順書の説明 | — | — | — |
 
-`forms_decide.py`・`progress/plan/__init__.py` と、テストの `test_plan.py`・`test_invoke_values.py`・`test_worker_kinds_shape.py`・`test_steps.py`・`test_release_forms.py`・`test_release_record.py`・`test_definition.py` も、設計文書の「設計の結果」の触るファイルに入れた（届け先の条件を 1 か所にするためと、変える関数の既存のテストがそこにあるため。`test_release_record.py` は受け入れ条件 4 の記録の経路を確かめる）。`external.py`・`answering.py`・`contracts/__init__.py` と `test_plan_external.py` も同じく触るファイルに入れる（外のオーガナイザーの回答を同じ規則で確かめるため、承認の時点のバージョンの保存先の種類を記録するため、リリース後テストの記録の定義から文脈の定義を参照するため）。`core/route/__init__.py` と `tests/route/test_templates.py` も触るファイルに入れる（プランを組むときの展開から作業の一覧を返す `rendered` を足すため。「工程の進行: 記録済みの値の読み方」）。
+`forms_decide.py`・`progress/plan/__init__.py` と、テストの `test_plan.py`・`test_invoke_values.py`・`test_worker_kinds_shape.py`・`test_steps.py`・`test_release_forms.py`・`test_release_record.py`・`test_definition.py` も、設計文書の「設計の結果」の触るファイルに入れた。届け先の条件を 1 か所にするためと、変える関数の既存のテストがそこにあるためである（`test_release_record.py` は受け入れ条件 4 の記録の経路を確かめる）。`external.py`・`answering.py`・`contracts/__init__.py` と `test_plan_external.py` も同じく触るファイルに入れる。理由は、外のオーガナイザーの回答を同じ規則で確かめるため、承認の時点のバージョンの保存先の種類を記録するため、リリース後テストの記録の定義から文脈の定義を参照するためである。`core/route/__init__.py` と `tests/route/test_templates.py` も触るファイルに入れる（プランを組むときの展開から作業の一覧を返す `rendered` を足すため。「工程の進行: 記録済みの値の読み方」）。
 
 ## 結果 JSON とリリース後テストの記録の定義
 
@@ -107,7 +97,7 @@ plugins/ndf/
 | worker の結果（`ndf worker run`） | 下の「worker の結果の確かめ」の文脈の形の確かめ | `ok` では欠け、`gate` では `missing` |
 
 - `release_answer_errors(result: str, version: Optional[str]) -> list[str]` は、`result` が `released` のときだけ、`{"product_version": version}` を文脈のスキーマ全体（`contracts.internal.CONTEXT`）で確かめた誤りを返す。`rejected` の回答は `version` を持たなくてよいので空を返す。`progress/plan/__init__.py` に置くのは、`external.py` が既にこのモジュールから `RELEASE_RESULTS` を読んでおり、向きの逆の依存を足さずに済むためである
-- 外の回答を回答のファイルを読む時点で断るのは、承認の取り込み（`answering._outputs`）まで進んでから断ると、理由が「工程への回答が運ぶ値が文脈の形に合わない」になり、どのファイルのどの項目を直せばよいかが出ないためである。読む時点で断れば、`ndf lanes release` と同じ規則・同じ文で、回答のファイルの `version` の誤りとして出る
+- 外の回答は、回答のファイルを読む時点で断る。承認の取り込み（`answering._outputs`）まで進んでから断ると、理由が「工程への回答が運ぶ値が文脈の形に合わない」になり、どのファイルのどの項目を直せばよいかが出ないためである。読む時点で断れば、`ndf lanes release` と同じ規則・同じ文で、回答のファイルの `version` の誤りとして出る
 
 `ndf worker run` がバージョン番号の形を確かめるときは、`$defs/version_number` を参照して確かめる（下の「worker の結果の確かめ」）。正規表現をコードに写さない。
 
@@ -137,7 +127,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `write_released` | `values.json` が無い・形が違う | 呼ぶ順の誤り | `read_values` が `None` を返す | 止める（`OSError` を上げる）。`plan_path` の呼び出し元（`invoke` のプランを流す関数）が、今の `OSError` と同じく `precondition` の失敗に変える | 工程の失敗（`precondition`） | 書かない。retry で打ち直せる |
 | `released_of` | `released_version` が文字列でない・空白だけ | 手で書き換えた | 関数の中 | 既定値で続ける（`None`） | 無し。worker を起動する経路になる | — |
-| `released_of` | `released_delivery` がオブジェクトでない | 手で書き換えた | 関数の中 | 届け先は記録されていないものとする（`delivery` が `None`） | `ndf answer work` が `stopped`（`precondition`） | 利用者が実際の届け先を確かめて `ndf progress finish` で終える |
+| `released_of` | `released_delivery` がオブジェクトでない | 手で書き換えた | 関数の中 | 届け先は記録されていないものとする（`delivery` が `None`） | 承認の時点の種類で決まる（下の「worker の起動」の `released_outcome` の表）。たとえば `none` なら `ndf answer work` が `stopped`（`precondition`）、`versioned` なら worker を起動する | 利用者が実際の届け先を確かめて `ndf progress finish` で終える |
 
 ### 単体テストの観点
 
@@ -169,25 +159,15 @@ plugins/ndf/
 | `write_values` | `src/ndf/contracts/worker_kinds.py` | 変更 | `write_values(..., released: Optional[Recorded] = None)` | `released` が `None` でなければ `released_version` と（あれば）`released_delivery`・`released_store` も書く |
 | `uses_released` | `src/ndf/progress/invoke.py` | 新設 | `uses_released(kinds: Iterable[str]) -> bool` | 作業の名前の並びに、作業の定義（`worker_kinds.work_kinds()`）の `outputs` が `product_version` を持つ作業があるかを返す |
 
+#### 記録済みの値を使うプランの判定
+
 **記録済みの値を使うプラン**とは、プランが流す作業（`route.kinds_of(template, local_tests)` と同じ一覧）に、出力に `product_version` を持つ作業（今は `release` だけ）を含むプランである。ほかのプランでは、`values.json` の `released_version` を読む者がいないので書かない。
 
 判定は `values.json` に残さず、プランを書くたびに今のテンプレートから求める。判定を残すと、NDF を更新して同じ名前のプランに `release` の作業が加わったとき、進行中の工程を再開しても前の NDF が残した判定が使われる。その結果、承認済みの配布識別子が渡らないまま worker が起動してしまう。
 
 判定には、プランを組むときに開いたテンプレートの形をそのまま使い、判定のためにテンプレートを開き直さない。`route.render` は差し込みを埋める前に、テンプレートの `use` を開いた形（`route.expanded`）を作る。作業の名前はこの形から取れるので、`route.rendered` が組んだプランと一緒に返す。これで、`values.json` を使い回す回も、判定のための展開が増えない。作業の一覧の走査（`work_names`）は、判定の要る `plan_path` の 1 回だけになる。工程の初回は、`prepare_plan` が入力の検査のために作業の一覧をすでに回しているので、その一覧を判定にも使う。
 
-判定の求め方として、次の 3 つを比べた。費用は 2026-11-26 に手元（8 コア、Python 3.14.4）で、今あるテンプレート 24 個のそれぞれについて、`route.kinds_of` と作業の定義の照合を 200 回ずつ流して測った。読み込み済みのテンプレートでは、1 回あたり平均 0.075 ms、最大 0.32 ms（テンプレート `check`）だった。
-
-| 案 | 判定のために増える処理 | NDF を更新してプランに `release` が加わった後の再開 | 採否 |
-| --- | --- | --- | --- |
-| `route.render` と同じ展開から作業の一覧を受け取る（`route.rendered`） | `plan_path` で作業の一覧の走査が 1 回（展開は増えない） | 今のテンプレートで判定する | 採る |
-| `plan_path` の前に `route.kinds_of` で判定し直す | プランを組むたびに展開と走査が各 1 回（上の費用） | 今のテンプレートで判定する | 採らない。同じ結果を得るのに展開を 1 回余分に回す |
-| 判定を `values.json` に残す | 無い | 前の NDF が残した判定を使い、承認済みの配布識別子が渡らない | 採らない。理由は上の「判定は `values.json` に残さず」で始まる段落 |
-
-`rendered` を足すと `route` の公開の関数が 1 つ増える。`render` は `rendered` を経ずに `_built` を呼ぶので、作業の名前を使わないほかの呼び出し元の処理は今と同じで、走査も増えない。
-
-判定を `values.json` に残して変更を検知する案も比べた。変更を検知するには、テンプレートと作業の定義から作った指紋を残して比べる必要がある。指紋を求めるにはテンプレートを開く必要があり、採った案（展開が増えない）より費用が増えるので、キャッシュする利点が無い。そのため採らなかった。
-
-値が前と同じなら書き直さない。そのため、`values.json` を書き直すのは、試行の中で記録済みの値が変わったとき（承認の回答で値が入った、または消えた）だけになる。
+#### 履歴の走査
 
 **リリース承認ゲートの回答は、プランが配布識別子を使うと分かってから探す。** プランが配布識別子を使うかは、作業の一覧（`prepare_plan` の入力の検査の一覧と、`plan_path` の `route.rendered` の一覧）を見るまで分からない。工程の進行は、プランを呼ぶ前に探すかどうかを決めない。探す関数を `StageRun.released` に入れて渡し、`prepare_plan` と `plan_path` が `uses_released` を真と判定したときだけ呼ぶ。`approved_seen` は、今と同じく直近の承認で探索を終える。そのため、配布識別子を使わないプランでは、リリース承認が無くても残りの履歴をたどらない。
 
@@ -210,13 +190,31 @@ plugins/ndf/
 - `StageAnswers.release_gate` が選ぶのは、リリース承認ゲート（ステップ `release-gate`）への最後の回答である。その事象は `payload.kind == LISTEN` で、`payload.gate` に定数 `RELEASE_GATE`（`gate/asking.py`）を持つ。定数の値はステップ `release` の名前と同じ文字列 `release` だが、指すものは違う。worker の判断の求めへの回答はステップ `release` への回答で、`kind` が `plan` であり `gate` を持たないので、この条件で除ける。`approved()` の条件（工程の最新の承認）は回答の `gate` を見ないので、`release_gate()` は別の条件で当てる
 - 回答の次の事象（事象の番号 `seq` が回答の `seq + 1` の事象）は、新しい順にたどる途中で 1 つ前に見た事象である。たどり直さずに、見た事象を 1 つ覚えておいて引く。`released_answer` は、種類が `stages.OUTPUTS_EVENT` のときだけ `payload.outputs` の `product_version` と `delivery`、`payload.release_store` を読む
 
+#### 試行ごとの `values.json` の扱い
+
 ここでの「試行」は、工程の retry から次の retry までの 1 回分を指す。1 つの試行の中でプランは何回か流れる（承認の回答の後・自動の打ち直し）。
+
+値が前と同じなら書き直さない。そのため、`values.json` を書き直すのは、試行の中で記録済みの値が変わったとき（承認の回答で値が入った、または消えた）だけになる。
 
 | 場面 | `values.json` を扱う関数 | 扱い |
 | --- | --- | --- |
 | 工程の retry の後の最初 | `run._prepare` が消し、`prepare_plan` が作る | 新しく作る。記録済みの値を使うプランなら、同じ書き込みで `released_version`・`released_delivery`・`released_store` も書く |
 | 同じ試行の中でプランを流す（初回の `prepare_plan` の直後を含む） | `_prepared` | 前に作ったものを使い回す。判定は今のテンプレートから求める |
 | 使い回す回で、記録済みの値が前と違う | `plan_path` が `write_released` を打つ | `released_version`・`released_delivery`・`released_store` だけを書き直す。同じなら書かない |
+
+#### 判定の求め方を比べた結果
+
+判定の求め方として、次の 3 つを比べた。費用は 2026-11-26 に手元（8 コア、Python 3.14.4）で、今あるテンプレート 24 個のそれぞれについて、`route.kinds_of` と作業の定義の照合を 200 回ずつ流して測った。読み込み済みのテンプレートでは、1 回あたり平均 0.075 ms、最大 0.32 ms（テンプレート `check`）だった。
+
+| 案 | 判定のために増える処理 | NDF を更新してプランに `release` が加わった後の再開 | 採否 |
+| --- | --- | --- | --- |
+| `route.render` と同じ展開から作業の一覧を受け取る（`route.rendered`） | `plan_path` で作業の一覧の走査が 1 回（展開は増えない） | 今のテンプレートで判定する | 採る |
+| `plan_path` の前に `route.kinds_of` で判定し直す | プランを組むたびに展開と走査が各 1 回（上の費用） | 今のテンプレートで判定する | 採らない。同じ結果を得るのに展開を 1 回余分に回す |
+| 判定を `values.json` に残す | 無い | 前の NDF が残した判定を使い、承認済みの配布識別子が渡らない | 採らない。理由は上の「判定は `values.json` に残さず」で始まる段落 |
+
+`rendered` を足すと `route` の公開の関数が 1 つ増える。`render` は `rendered` を経ずに `_built` を呼ぶので、作業の名前を使わないほかの呼び出し元の処理は今と同じで、走査も増えない。
+
+判定を `values.json` に残して変更を検知する案も比べた。変更を検知するには、テンプレートと作業の定義から作った指紋を残して比べる必要がある。指紋を求めるにはテンプレートを開く必要があり、採った案（展開が増えない）より費用が増えるので、キャッシュする利点が無い。そのため採らなかった。
 
 ### 処理の手順
 
@@ -307,7 +305,7 @@ plugins/ndf/
     | 記録が無い（`None`。この変更の前に承認された） | `strategy` があり、その `version_store["kind"]` が `"none"` なら、`none` の行と同じ（記録に届け先が無いので `stopped`）。それ以外は `None` |
   - 副作用: 無し（設定は呼ぶ側が読んで渡す）
 - **承認の時点の種類を記録から読み、作業の時点の設定で決め直さない。** `none` の配布はオーガナイザーが済ませている。作業の時点で設定を読めないからといってバージョン番号を持つ扱いに落とすと、worker が起動して同じものをもう一度出す（設計文書の決定 2）。承認の時点で設定を読めなかった（`unknown`）ときも、同じ理由で worker を起動せずに止める。これで、承認を記録する側の異常系（下の「オーガナイザーの承認と一緒に届け先を記録する」の `take_reply` の行）と、この関数の結果が食い違わない
-- `released_outcome` は、デプロイの工程の時点の設定から届け先を選ばない。設定は後から直せるので、今の設定は過去の配布先を確かめた根拠にならないためである（設計文書の「`delivery` は、その配布の記録から読み」の段落）。`stopped` の理由には、この配布の届け先が記録から確かめられないこと、設定を直して retry しても終わらないこと、次の操作（実際の届け先を確かめ、`ndf progress finish` で `delivery` と `product_version` を渡して工程を手で終える）を書く。固定の値で `delivery` を埋めない
+- `released_outcome` は、デプロイの工程の時点の設定から届け先を選ばない。設定は後から直せるので、今の設定は過去の配布先を確かめた根拠にならないためである（設計文書の「`delivery` は、その配布の記録から読み」の段落）。`stopped` の理由には、次の 3 つを書く。この配布の届け先が記録から確かめられないこと、設定を直して retry しても終わらないこと、次の操作（実際の届け先を確かめ、`ndf progress finish` で `delivery` と `product_version` を渡して工程を手で終える）である。固定の値で `delivery` を埋めない
 - `_outputs_of` の 1 行は、`version_number` が真なら「`product_version` はバージョン番号（例 `1.2.3`）」、偽なら「`product_version` は出したものを指す空白だけでない文字列（例 `main abc1234`）」とする。作業の出力に `product_version` が無ければ、この行を書かない
 
 **工程が読んだ設定を使い回さない理由**: プランを組む `prepare_plan` も、1 回の試行に 1 回 `.ndf/project.json` を読む（`invoke._project`）。ただし、読む場所は工程の入力の作業場所（`work_location`）で、worker が動く承認の対象のリポジトリ（`_work_dir`）と同じとは限らない。また、`_project` は `.ndf/project.json` をそのまま読むだけで、`branch_strategy.load` が行う旧いキーとスキーマの検査をしない。そのため、worker の作業場所で `branch_strategy.load` を読む。工程の側で読んで `values.json` へ写す案は、写した値が正本の外のキャッシュになり（Value 8）、作業場所が同じかを確かめるにはやはり根を解く必要があるので採らない。増える処理は、`release` の作業を 1 回起動するごとに設定の読み込み 1 回である。`git rev-parse` は、作業場所が設定を持つリポジトリの根でないときだけ 1 回打つ。ほかの作業では、設定の読み込みも `git` の起動も増えない
@@ -548,3 +546,17 @@ plugins/ndf/
 | `skills/release-verification/SKILL.md` | リリース後テストの記録の `version` は、バージョン番号の形でない値も受け付ける |
 | `skills/progress-tracking/SKILL.md` | 出力の足りない承認の失敗の理由の読み方と、次の操作（retry） |
 | `skills/development-workflow/references/parallel.md` | まとめたリリースの後のレーンのデプロイの工程は、`ndf lanes release --result released --version` の値で終わる |
+
+## この文書で使う言葉
+
+この文書で使う言葉のうち、設計文書の「この文書で使う言葉」に無いもの、または取り違えやすいものを次に置く。ほかの言葉（オーガナイザー・まとめたリリース・conductor・MVV 判定など）は、設計文書の表にある。
+
+| 言葉 | 意味 |
+| --- | --- |
+| 記録済みの値 | まとめたリリースで、オーガナイザーが `ndf lanes release --version` に渡し、リリース承認ゲートへの回答と一緒に文脈の `product_version` に書かれた値と、同じ事象に書かれた届け先 `delivery`（記録できたときだけ）と、承認を記録した時点のバージョンの保存先の種類 `release_store`。`values.json` には `released_version`・`released_delivery`・`released_store` として残す。「承認済みの配布識別子」も同じものを指す |
+| 工程・試行・プラン・ステップ | 工程（デプロイなど）は retry の単位である。試行は、工程の retry から次の retry までの 1 回分を指す。1 つの試行の中で、プランは何回か流れる（承認の回答の後・自動の打ち直し）。プランはステップを順に流す |
+| 判断の求め | worker が `status: gate` の結果を返して、conductor の判断を待つこと |
+
+## 別ファイルにした理由
+
+別ファイルにする条件は「新設する関数が 2 つ以上」か「シグネチャを変える関数がある」で、この設計は両方に当たる。新設は 10 を超える（`required_outputs`・`released_answer`・`released_outcome` など）。シグネチャの変更は 10（`require_outputs`・`_add_outputs`・`work_argv`・`work_prompt`・`_work_handoff`・`write_values` など）である。条件は `requirements-design` の `document-roles.md` の「詳細設計を別ファイルにする条件」にある。
