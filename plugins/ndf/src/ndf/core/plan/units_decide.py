@@ -193,7 +193,7 @@ def _task_rules(
         bad.append(Finding("U2", "", f"{f.path}: 単位が無い"))
     bad += [Finding("U2", u.name, f"{f.path}: 単位にタスクが無い") for u in f.units if not u.tasks]
     for t in f.tasks:
-        count = len(member.get((at, t.id), ()))
+        count = len(member[(at, t.id)]) if (at, t.id) in member else 0
         if count != 1:
             bad.append(Finding("U2", "", f"{f.path}: タスク {t.id} が {count} 個の単位にある"))
         if t.issue not in f.issues:
@@ -258,8 +258,9 @@ def _closures_and_orders(graph, bad) -> tuple[dict[_Key, frozenset[_Key]], dict[
     sorter = TopologicalSorter(graph)
     try:
         sorter.prepare()
+        cyclic = False
     except CycleError:
-        pass  # 輪で止まるまでは get_ready で並べられる。輪の単位は下で拾う
+        cyclic = True  # 輪で止まるまでは get_ready で並べられる。輪の単位は下で拾う
     while sorter.is_active():
         ready = sorter.get_ready()
         for k in ready:
@@ -270,7 +271,7 @@ def _closures_and_orders(graph, bad) -> tuple[dict[_Key, frozenset[_Key]], dict[
     for k in tangled:
         closure[k] = _closure(k, graph)
         order[k] = 0
-    if tangled:
+    if cyclic:
         cycle = sorted(k for k in tangled if k in closure[k])
         bad.append(Finding("U1", cycle[0][1], f"単位の依存が輪になる（{'・'.join(n for _, n in cycle)}）"))
     return closure, order
