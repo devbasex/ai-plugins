@@ -8,12 +8,11 @@ from __future__ import annotations
 from ndf import contracts
 
 CRITERIA = "data/writing-criteria.md"
-# 文書の種類ごとの読み手のセクションの見出し
+# 文書の種類ごとの読み手のセクションの見出し。後ろに続く小見出し（読み手が複数いる文書）までが読み手の決め方である
 READERS_HEADING = "### 文書の種類ごとの読み手"
 # 通じない文の 4 つの型と 2 つの区分のセクションの見出し
 TYPES_HEADING = "## 3. 読み手に通じない文の 4 つの型"
 _SECTION = "## "
-_SUBSECTION = "### "
 
 
 class CriteriaBroken(contracts.ContractError):
@@ -28,21 +27,24 @@ def criteria() -> str:
 
 
 def readers_section() -> str:
-    """文書の種類ごとの読み手のセクション（見出しから次の見出しの前まで）。見出しが無ければ `CriteriaBroken`。"""
-    return _section(READERS_HEADING, (_SECTION, _SUBSECTION))
+    """文書の種類ごとの読み手と、読み手が複数いる文書の扱い（見出しから次の章の見出しの前まで）。見出しが無ければ `CriteriaBroken`。
+
+    「エンジニア向けの補足」をエンジニア向けに書けるのは、ほかの読み手が読まなくても判断できるときだけである。この条件が無いと、
+    読み手は見出しだけで補足の文への指摘を退ける。"""
+    return _section(READERS_HEADING)
 
 
 def types_section() -> str:
     """通じない文の 4 つの型と 2 つの区分のセクション。見出しが無ければ `CriteriaBroken`。"""
-    return _section(TYPES_HEADING, (_SECTION,))
+    return _section(TYPES_HEADING)
 
 
-def _section(heading: str, ends: tuple[str, ...]) -> str:
-    """見出し `heading` から、`ends` のどれかで始まる次の行の前まで。見出しが無ければ `CriteriaBroken`。"""
+def _section(heading: str) -> str:
+    """見出し `heading` から、次の章の見出し（`## `）の前まで。見出しが無ければ `CriteriaBroken`。"""
     lines = criteria().splitlines()
     if heading not in lines:
         raise CriteriaBroken(f"文書の基準 {CRITERIA} に見出し「{heading}」が無い")
     start = lines.index(heading)
     rest = lines[start + 1 :]
-    end = next((i for i, line in enumerate(rest) if line.startswith(ends)), len(rest))
+    end = next((i for i, line in enumerate(rest) if line.startswith(_SECTION)), len(rest))
     return "\n".join([heading, *rest[:end]]).strip()
