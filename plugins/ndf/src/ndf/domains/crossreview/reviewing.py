@@ -187,31 +187,36 @@ def _fill_seats(
     return *seats.launch_reviewers(run, round_no, prompts, _prompt_diffs(run, fresh), launch), full
 
 
-def pending(record: Mapping[str, Any], prep: Prepared, got: Reviewed) -> dict[str, Any]:
-    """相手役の結果を、判定待ちのラウンドとして状態に残す形にする（#4363）。差分は中身を持たず、作り直せる範囲
+def _handed(run: ReviewingRun) -> list[list[str]]:
+    """相手役へ確かめさせる足すべき内容（`--findings`）の ID と本文。"""
+    return [[h.id, h.text] for h in run.cfg.handed]
+
+
+def pending(run: ReviewingRun, record: Mapping[str, Any], prep: Prepared, got: Reviewed) -> dict[str, Any]:
+    """全席の結果がそろった相手役の結果を、判定待ちのラウンドとして状態に残す形にする（#4363）。差分は中身を持たず、作り直せる範囲
     （`record` の head と比較基点、`scope_base`）と、指摘ごとの差分を選ぶキーを持つ。`unreviewed` は相手役へ詳細レビューを
-    求めたセクションである。"""
+    求めたセクション、`handed` は確かめさせた足すべき内容である。"""
     filled = got.filled
     return {
         "record": dict(record),
         "scope_base": prep.scope.base,
         "unreviewed": list(prep.scope.unreviewed),
+        "handed": _handed(run),
         "raised": got.raised,
-        "unread": {seat: u.hint for seat, u in got.unread.items()},
         "filled": None if filled is None else {"keys": sorted(filled.keys), "others": sorted(filled.others)},
     }
 
 
 def kept(run: ReviewingRun, round_no: int, prep: Prepared, basis: scope_decide.Basis) -> Optional[Reviewed]:
-    """判定待ちで残ったラウンドが、今回のラウンドと同じ番号・head・範囲・詳細レビューを求めるセクションで、`basis` に合えば、
-    その相手役の結果と席を返す（相手役を起動しない）。合わなければ None。"""
+    """判定待ちで残ったラウンドが、今回のラウンドと同じ番号・head・範囲・詳細レビューを求めるセクション・足すべき内容で、
+    `basis` に合えば、その相手役の結果と席を返す（相手役を起動しない）。合わなければ None。"""
     held = run.data.get(store.PENDING_REVIEW)
     if not isinstance(held, Mapping):
         return None
     record = held["record"]
     seated = store.list_of(record, scope_decide.REVIEWERS)
-    then = (record["round"], record["head"], record["scope"], held["scope_base"], held["unreviewed"])
-    now = (round_no, prep.head, prep.scope.kind, prep.scope.base, list(prep.scope.unreviewed))
+    then = (record["round"], record["head"], record["scope"], held["scope_base"], held["unreviewed"], held["handed"])
+    now = (round_no, prep.head, prep.scope.kind, prep.scope.base, list(prep.scope.unreviewed), _handed(run))
     if then != now or len(seated) != len(run.seats) or not scope_decide.same_review(record, basis):
         return None
     run.seats[:] = seated
@@ -224,8 +229,7 @@ def kept(run: ReviewingRun, round_no: int, prep: Prepared, basis: scope_decide.B
         full = prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep)
         read = FilledRead(full, frozenset(keys["keys"]), frozenset(keys["others"]))
     run.process.append({"run": f"round {round_no}", "result": "判定待ちで残った相手役の結果を使い、相手役を起動しない"})
-    unread = {seat: seats.Unread(hint, "", hint) for seat, hint in held["unread"].items()}
-    return Reviewed(list(held["raised"]), unread, False, read)
+    return Reviewed(list(held["raised"]), {}, False, read)
 
 
 def _prompt_diffs(run: ReviewingRun, prep: Prepared) -> tuple[Path, ...]:

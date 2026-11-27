@@ -8,7 +8,7 @@
    Markdown が `cross-review.design-doc-lines` の行数を超えれば注意に載せる（止めない。#3941）。承認済みの MVV があれば、PR 全体で
    足した MVV の根拠の記述を機械で確かめ、誤りを NDF の指摘としてジャーナルへ入れる（`changes.citations`。解決も次の確かめだけが決める。#4076）
 2. 相手役（`ndf.core.converge.participants`）を並べて起動し、最後の 1 行の `{"findings": [...]}` を読む。相手役へは
-   指摘の基準と重要度（`criteria_decide`）と、PR に既にあるコメント（起動の始めに 1 回だけ読み、`prior_decide.others`・`relevant` で絞る。#3941）を渡す。サンドボックスが
+   指摘の基準と重要度（`criteria_decide`）と、PR に既にあるコメント（1 回の起動で 1 回だけ読み、`prior_decide.others`・`relevant` で絞る。#3941）を渡す。サンドボックスが
    コマンドを打てなかった相手役（標準エラーの `bwrap:`）は読めなかったとして回答を指摘に入れない。読めなかった相手役は
    同じラウンドで 1 度だけ起動し直す。誰も読めなければ `precondition` で止める（#3893）。一部が読めなければ、その
    ラウンドを収束に数えず `incomplete_reviewers` で終える（#3941）。起動し直しても結果の無い席が claude 以外だけなら、その席を
@@ -22,8 +22,8 @@
 5. 修正担当（claude）を起動し、修正の結果ファイル（`store.fix_result_path`）の指摘ごとの「直した」「見送った（理由）」を
    ジャーナルへ読み込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけマージする。#2440）
 
-相手役へ渡す資料と指示の組み立て、起動し直しと席の埋めは `reviewing` が持つ。判定役を起動するラウンドは、起動の直前に相手役の
-結果を判定待ちのラウンド（`pending_review`）として保存し、ラウンドの記録を作る前に中断した打ち直しは、同じ対象なら相手役を
+相手役へ渡す資料と指示の組み立て、起動し直しと席の埋めは `reviewing` が持つ。判定役を起動するラウンドは、全席の結果がそろっていれば、起動の直前に相手役の
+結果を判定待ちのラウンド（`pending_review`）として保存し、ラウンドの記録を作る前に中断した打ち直しは、同じ対象と足すべき内容なら相手役を
 起動せずに 3 から続ける（#4363）。
 
 状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら、最後のコミットの根拠の記述を
@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -125,8 +125,10 @@ class _Run:
     warnings: list[str]
     process: list[dict[str, str]]
     history: list[frozenset[str]]
-    # PR の既存のコメント（起動の始めに 1 回だけ読む。読めなければ空）
+    # PR の既存のコメント（PR コメントは起動の始めに 1 回だけ読む。読めなければ空）
     remarks: Sequence[prior_decide.Remark] = ()
+    # インラインのレビューコメントとレビュー本文をまだ読んでいなければ、読んで返す関数（相手役を初めて起動する直前に 1 回だけ呼ぶ）
+    unread_reviews: Optional[Callable[[], Sequence[prior_decide.Remark]]] = None
     # 起動の始めにベースブランチ（`--base` がコミットなら PR のマージ先）から読んだプロジェクト MVV（#4076）
     snapshot: Optional[mvv.Snapshot] = None
     # MVV を見分ける値と、MVV を読んだブランチ（ラウンドの記録に残す。#4076）
@@ -605,6 +607,9 @@ def _reviewed(run: _Run, round_no: int, prep: reviewing.Prepared, launch: Launch
     held = reviewing.kept(run, round_no, prep, _basis(run, prep.head, run.cfg.may_fill))
     if held is not None:
         return held
+    if run.unread_reviews is not None:
+        run.remarks = [*run.remarks, *run.unread_reviews()]
+        run.unread_reviews = None
     got = reviewing.review_round(run, round_no, prep, reviewing.remarks_file(run, round_no, reviewing.remarks(run, prep)), launch)
     if got.silent:
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く。
@@ -622,7 +627,7 @@ def _keeping(run: _Run, round_no: int, prep: reviewing.Prepared, got: reviewing.
 
     def judging(spec: agents.Launch) -> agents.AgentStatus:
         data = store.read_state(run.ref)
-        data[store.PENDING_REVIEW] = reviewing.pending(_round_record(run, round_no, prep), prep, got)
+        data[store.PENDING_REVIEW] = reviewing.pending(run, _round_record(run, round_no, prep), prep, got)
         store.write_object(run.ref.path, data)
         return launch(spec)
 
@@ -638,8 +643,10 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     keys = run.journal.enter(round_no, raised, run.mvv_items, run.mvv)
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
+    # 結果の無い席が残るラウンドは判定待ちに保存しない（保存すると、打ち直しがその席を起動しない）
+    judging = launch if got.unread else _keeping(run, round_no, prep, got, launch)
+    checked = _confirm_heavy(run, round_no, prep.diff, judging, filled=got.filled)
     # 確認で下げた指摘は、振動の判定のキーに数えない
-    checked = _confirm_heavy(run, round_no, prep.diff, _keeping(run, round_no, prep, got, launch), filled=got.filled)
     run.history.append(keys - checked.lowered)
     record = _round_record(run, round_no, prep)
     if checked.record:  # 中断した起動の出力も保存先に残るので、このラウンドの起動の保存できた出力を名指す（回答の有無は表さない）
@@ -703,7 +710,7 @@ def drive(
 ) -> Outcome:
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
-    いつも読み、PR のマージ先は `--base` がコミットのときだけスレッドと同じ応答から読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。
+    いつも読み、PR のマージ先は `--base` がコミットのときだけスレッドと同じ応答から読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は相手役を初めて起動する直前に 1 回だけ読む（前回の結果を返すときと、判定待ちの結果だけで終わるときは読まない。PR 3944 の r2-10・#4363）。
     `clean` は、結果と MVV の記録に残す自由記述を伏せる処理（省けば秘密だけを伏せる）。"""
     cfg = settings.outside_checkout(cfg)
     try:
@@ -740,7 +747,8 @@ def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[carry.Reader
         run.process.append({"run": f"round {n}", "result": "head が変わっていないので前回の結果（converged）を返した"})
         seats.reused_warnings(run)
         return _summary(run, fin.CONVERGED, n, reused=True)
-    run.remarks = [*prior.comments, *carry.read_reviews(prs, run.warnings)]
+    run.remarks = prior.comments
+    run.unread_reviews = lambda: carry.read_reviews(prs, run.warnings)
     run.warnings += [seats.filled_warning(f, "起動の前") for f in cfg.prefilled]
     seats.fill_refused(run)
     final, done = fin.MAX_ROUNDS, 0

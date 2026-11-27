@@ -179,7 +179,8 @@ class Warned:
 
 @dataclass(frozen=True)
 class Launch:
-    """外部 CLI の 1 回の起動。`timeout` は監視の上限の秒。`env` は足す環境変数。"""
+    """外部 CLI の 1 回の起動。`timeout` は監視の上限の秒。`env` は足す環境変数。`private` は標準エラーが非公開の内容を
+    含みうる起動で、監視の早期の警告は種類だけを知らせ、行は標準エラーのログにだけ残す。"""
 
     agent: str
     argv: tuple[str, ...]
@@ -187,6 +188,7 @@ class Launch:
     paths: AgentPaths
     timeout: float
     env: Optional[dict[str, str]] = None
+    private: bool = False
 
 
 class AgentState(StrEnum):
@@ -246,7 +248,8 @@ class _Watch:
 
 def _report_warnings(w: _Watch) -> None:
     for kind, text in w.warned.new(early_warnings(w.spec.paths)):
-        diag(f"[{w.spec.agent}] 早期の警告（{kind}）: {text}", kind=kind, agent=w.spec.agent)
+        shown = "内容は起動の出力に残す" if w.spec.private else text
+        diag(f"[{w.spec.agent}] 早期の警告（{kind}）: {shown}", kind=kind, agent=w.spec.agent)
 
 
 def _out_usage_limit(spec: Launch) -> Optional[str]:

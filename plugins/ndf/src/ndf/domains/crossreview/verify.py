@@ -11,6 +11,7 @@
 失敗しても例外で駆動を止めず、起動し直さない。回答なしと注意にする（どの指摘も下がらない）。注意は PR の記録に載るので、
 手元の絶対パス・指摘の本文・回答の中身を書かない。過程も結果 JSON に出るので、載せるのはエラーの種別と資料の種類・ファイル名までで、
 起動の状態の詳細（標準エラーの原文を含みうる）と絶対パスを含む詳細は、標準エラーのログとは別の、実行者だけが読める記録に残す。
+監視の早期の警告も種類だけを知らせ、標準エラーの行は載せない（`agents.Launch.private`）。
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import shutil
 import tempfile
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
@@ -134,6 +136,8 @@ def ask(
         written = Path(made)
         system = str(criteria_decide.verify_text()["system"])
         spec = participants.read_only_launch(system, run.cfg.worktree, prompt, written / stem.name, readable=(into,))
+        # 判定役の標準エラーは接続先やアカウントを含みうるので、監視の警告に行を載せない
+        spec = replace(spec, private=True)
         held_mvv = criteria_decide.approved(snap)
         # MVV の本文と共通原則の写しも、読めなければ確かめにならない資料である
         copied = () if held_mvv is None else tuple(p for p in (held_mvv.path, held_mvv.principles_path) if p is not None)
