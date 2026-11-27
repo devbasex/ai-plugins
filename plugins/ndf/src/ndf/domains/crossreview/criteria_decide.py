@@ -282,11 +282,17 @@ def unit_block(role: str, unit: str) -> list[str]:
 
 
 def document_line(documents: bool) -> list[str]:
-    """文書を含む PR（`documents`）なら文書の基準の 1 行、含まなければ空。判定役の指示にはこの 1 行だけを足す（#4363）。"""
+    """判定役の指示の「指摘の基準」に足す行（#4363）。文書を含む PR（`documents`）なら文書の基準の 1 行と、その行が指す
+    4 つの型と 2 つの区分のセクション、含まなければ空。基準の本文を読めなければ `writing.CriteriaBroken`。"""
     if not documents:
         return []
+    return [_document_item(), _table()["document"]["excerpt"], writing.types_section()]
+
+
+def _document_item() -> str:
+    """文書の基準（基準 6）の 1 行。"""
     doc = _table()["document"]
-    return [f"{doc['number']}. {doc['text']}"]
+    return f"{doc['number']}. {doc['text']}"
 
 
 def document_block(role: str, documents: bool, previous: Optional[Previous] = None) -> list[str]:
@@ -297,7 +303,7 @@ def document_block(role: str, documents: bool, previous: Optional[Previous] = No
     if not documents:
         return []
     doc = _table()["document"]
-    lines = ["## 文書の指摘の基準", "この PR は文書を変えているので、次の基準を足す。", *document_line(documents)]
+    lines = ["## 文書の指摘の基準", "この PR は文書を変えているので、次の基準を足す。", _document_item()]
     if role == REVIEWER:
         lines += doc["fields"]
         if previous is not None:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.contracts import writing
 from ndf.domains.crossreview import criteria_decide, report_decide, verify_decide
 
 NDF_BY = "ndf"
@@ -151,7 +152,8 @@ def test_issue_4363_lowers_nothing_else(row: dict, verdict: verify_decide.Verdic
 
 def test_issue_4363_document_line_is_the_sixth_criterion_only_for_documents() -> None:
     assert criteria_decide.document_line(False) == []
-    [line] = criteria_decide.document_line(True)
+    line, *excerpt = criteria_decide.document_line(True)
     assert line.startswith("6. ")
+    assert writing.types_section() in excerpt
     assert criteria_decide.track_kinds()[: len(criteria_decide.protect_kinds())] == criteria_decide.protect_kinds()
     assert criteria_decide.track_kinds()[len(criteria_decide.protect_kinds()) :] == ("delivered", "approval")
