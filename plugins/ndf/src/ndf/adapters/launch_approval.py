@@ -367,7 +367,7 @@ def _live(history: _History, candidate: Path, now: Optional[str], current: Calla
     if index is None:
         return False
     req = history.requests.rows[index]
-    if _completed_by(read_launch_record(reflected_file(Path(str(req.get("target"))), DONE)), req):
+    if read_launch_record(reflected_file(Path(str(req.get("target"))), DONE)).get("request_id") == req.get("request_id"):
         return False
     approvals = history.approvals
     if approvals.used_row(req) is not None and approvals.approved(req.get("repo"), req.get("sha256")):
@@ -385,7 +385,8 @@ def pending_request(repo: str, target: Path) -> Optional[Mapping[str, Any]]:
     if not rows or _judged(_last_labels().get(rows[-1].get("request_id")), rows[-1])[0] != "approve":
         return None
     req = rows[-1]
-    if _completed_by(read_launch_record(reflected_file(target, DONE)), req):
+    done = read_launch_record(reflected_file(target, DONE))
+    if done.get("request_id") == req["request_id"]:
         return None
     if req.get("candidate") is None and any(r.get("request_id") == req["request_id"] for r in records.whole_rows(state_file(APPROVALS))):
         return None
@@ -589,16 +590,12 @@ def new_candidate(repo: str, target: Path) -> Draft:
     return Draft(made / CANDIDATE_NAME, leftovers)
 
 
-class Refused(Exception):
-    """`reflect` の `record` が、人の同意か承認を確かめられずに拒むときに投げる。文は利用者に示す理由。"""
-
-
 @dataclass(frozen=True)
 class Reflection:
     """`reflect` の結果。`placed` は置いたか反映済みか。`saved` は、利用者の保存を別の名前で残したパス（残さなければ None）。
 
     真偽は `placed` と同じ。偽（拒否）でも `saved` があれば、呼び手は拒否の文にそのパスを載せる。`refusal` は、反映先か候補の中身が
-    呼び手の照らしたものと違って拒んだとき（反映先を見ずに拒むので `saved` は無い）か、`record` が `Refused` で拒んだときの理由。
+    呼び手の照らしたものと違って拒んだときの理由（そのときは反映先を見ずに拒むので `saved` は無い）。
     """
 
     placed: bool
@@ -610,7 +607,7 @@ class Reflection:
 
 
 def reflect(
-    candidate: Path, record: Callable[[], Optional[str]], sha256: str, request_id: Optional[str] = None, *, data: bytes, expected: Path
+    candidate: Path, record: Callable[[], None], sha256: str, request_id: Optional[str] = None, *, data: bytes, expected: Path
 ) -> Reflection:
     """承認の記録の錠の中で候補の中身 `data` を反映先へ置く。置いたか反映済みなら真、反映先が変わっていたか途中で保存を見つけたら偽の結果を返す。
 
@@ -618,18 +615,22 @@ def reflect(
     `expected`（今の作業場所の `.ndf/launch.json`）と違うか、候補の今の中身が `data` と違えば、何も書かずに `refusal` 付きの偽を返す。
     先に `recover` で退避を片付け、反映先が反映元のバージョンと同じときだけ `record`（人の同意を照らし、要れば承認の行を書く）を呼んで置き換える。
     反映先がすでに候補と同じ中身（手で同じ内容を書いた・置いた直後の中断）でも `record` を呼ぶ。承認の行が無いと次の起動が止まるためで、
-    `record` は承認済みなら何も書かない形にする。`record` は同意した人の名前を返し、確かめられなければ `Refused` を投げる。
-    名前と確認の経路（`request_id` があれば `answer`、無ければ `terminal`）は、承認の行を書かない場合も途中と完了の記録に残す。
-    一時ファイルの名前も途中の記録に残し、中断の後の `recover` が片付ける。
+    `record` は承認済みなら何も書かない形にする。
     書けなければ片付けてから `precondition` で止める（承認の行は残る）。片付けで利用者の保存を別の名前で残したら、そのパスを
     結果の `saved` か、止める文に載せる。
     """
+    from ndf.contracts import internal
+
     wanted = hashlib.sha256(data).hexdigest()
     with records_lock(state_file(APPROVALS)):
         source = _source_record(candidate)
-        stale = _stale_reflect_input(candidate, source, expected, wanted)
-        if stale is not None:
-            return Reflection(False, refusal=stale)
+        if source.get("target") != str(expected):
+            return Reflection(
+                False,
+                refusal=f"候補の反映先（{source.get('target')}）が、この作業場所の {expected} と違う。この作業場所で draft から作り直す",
+            )
+        if content_version(candidate) != wanted:
+            return Reflection(False, refusal="ハッシュを照らした後に候補が変わった。show で示し直して承認を取り直す")
         target = expected
         saved = recover(target)
         now = content_version(target)
@@ -637,68 +638,33 @@ def reflect(
             "candidate": candidate.parent.name,
             "base": source.get("base"),
             "content": wanted,
-            "route": "answer" if request_id is not None else "terminal",
-            # 承認の対象のハッシュと依頼の組は、初回の分もここだけに置く。先頭が来歴（反映した人と経路）の組で、書き換えない再実行が後ろへ足す
-            "confirmed": [[sha256, request_id]],
+            "sha256": sha256,
+            "request_id": request_id,
         }
-        if now != wanted and now != source.get("base"):
-            return Reflection(False, saved)
-        try:
-            rec["approver"] = record()
-        except Refused as exc:
-            return Reflection(False, saved, refusal=str(exc))
         if now == wanted:
-            # 同じ候補・反映先・中身の完了の記録があれば、書き換えた人と経路の記録を、書き換えない再実行で上書きしない
-            done = read_launch_record(reflected_file(target, DONE))
-            kept = (done.get("candidate"), done.get("target"), done.get("content")) == (candidate.parent.name, str(target), wanted)
-            _after_reflect(target, candidate, _confirmed_again(done, sha256, request_id) if kept else rec)
+            record()
+            _after_reflect(target, candidate, rec)
             return Reflection(True, saved)
-        return _put_candidate(target, candidate, data, rec, saved)
+        if now != source.get("base"):
+            return Reflection(False, saved)
+        record()
+        launch_candidates.write_launch_record(reflected_file(target, PENDING), rec)
+        try:
+            placed = _replace(target, data, rec["base"])
+        except OSError as exc:
+            saved = recover(target) or saved
+            kept = f"。利用者の保存を {saved} に残した" if saved is not None else ""
+            raise internal.InternalError(
+                "precondition", f"{target} へ反映できない（{type(exc).__name__}）{kept}。同じコマンドを打ち直す"
+            ) from None
+        if not placed:
+            return Reflection(False, recover(target) or saved)
+        _after_reflect(target, candidate, rec)
+        return Reflection(True, saved)
 
 
-def _confirmed_again(done: Mapping[str, Any], sha256: str, request_id: Optional[str]) -> dict[str, Any]:
-    """反映した人と経路の来歴は残し、この再実行のハッシュとリクエストを、打ち直しで照らす組（`confirmed`）に足した完了の記録。"""
-    confirmed = _confirmed_pairs(done)
-    if [sha256, request_id] not in confirmed:
-        confirmed.append([sha256, request_id])
-    return {**done, "confirmed": confirmed}
-
-
-def _stale_reflect_input(candidate: Path, source: Mapping[str, Any], expected: Path, wanted: str) -> Optional[str]:
-    """候補の記録の反映先が `expected` と違うか、候補の今の中身が照らしたもの（`wanted`）と違えば、その拒否の理由。合えば None。"""
-    if source.get("target") != str(expected):
-        found = source.get("target")
-        return f"反映しない。候補の反映先（{found}）が、この作業場所の {expected} と違う。この作業場所で draft から作り直す"
-    if content_version(candidate) != wanted:
-        return "反映しない。ハッシュを照らした後に候補が変わった。show で示し直して承認を取り直す"
-    return None
-
-
-def _put_candidate(target: Path, candidate: Path, data: bytes, rec: Mapping[str, Any], saved: Optional[Path]) -> Reflection:
-    """途中の記録（一時ファイルの名前を含む）を書いてから置き換え、置けたら完了の記録を書く。書けなければ片付けて `precondition` で止める。"""
-    from ndf.contracts import internal
-
-    tmp = target.with_name(f".{target.name}.{uuid.uuid4().hex}")
-    launch_candidates.write_launch_record(reflected_file(target, PENDING), {**rec, "tmp": tmp.name})
-    try:
-        placed = _replace(target, data, rec["base"], tmp)
-    except OSError as exc:
-        saved = recover(target) or saved
-        kept = f"。利用者の保存を {saved} に残した" if saved is not None else ""
-        raise internal.InternalError(
-            "precondition", f"{target} へ反映できない（{type(exc).__name__}）{kept}。同じコマンドを打ち直す"
-        ) from None
-    if not placed:
-        return Reflection(False, recover(target) or saved)
-    _after_reflect(target, candidate, rec)
-    return Reflection(True, saved)
-
-
-def _replace(target: Path, data: bytes, base: Optional[str], tmp: Path) -> bool:
-    """置き換えの手順の 2〜5（退避・照らし直し・反映先が無いときだけ置く・もう一度照らす）。途中で保存を見つけたら偽。
-
-    一時ファイル `tmp` は所有者だけが読める権限で作る（ハードリンクで置くので、反映先も同じ権限になる）。書き込みに失敗しても消す。
-    """
+def _replace(target: Path, data: bytes, base: Optional[str]) -> bool:
+    """置き換えの手順の 2〜5（退避・照らし直し・反映先が無いときだけ置く・もう一度照らす）。途中で保存を見つけたら偽。"""
     aside = target.with_name(target.name + REFLECTING)
     had = target.exists()
     if had:
@@ -706,14 +672,14 @@ def _replace(target: Path, data: bytes, base: Optional[str], tmp: Path) -> bool:
         if content_version(aside) != base:
             return False
     target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(f".{target.name}.{uuid.uuid4().hex}")
+    tmp.write_bytes(data)
     try:
-        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as f:
-            f.write(data)
         os.link(tmp, target)
     except FileExistsError:  # noqa: NDF401 ファイル: 置く間に保存された反映先は残し、呼び手が片付けて止める
         return False
     finally:
-        tmp.unlink(missing_ok=True)
+        tmp.unlink()
     if had:
         if content_version(aside) != base:
             return False
@@ -722,8 +688,7 @@ def _replace(target: Path, data: bytes, base: Optional[str], tmp: Path) -> bool:
 
 
 def _write_done(target: Path, rec: Mapping[str, Any]) -> None:
-    done = {k: v for k, v in rec.items() if k != "tmp"}  # 一時ファイルの名前は途中の記録だけに要る
-    launch_candidates.write_launch_record(reflected_file(target, DONE), {**done, "target": str(target)})
+    launch_candidates.write_launch_record(reflected_file(target, DONE), {**rec, "target": str(target)})
     reflected_file(target, PENDING).unlink(missing_ok=True)
 
 
@@ -761,13 +726,10 @@ def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> Non
 def recover(target: Path) -> Optional[Path]:
     """錠の中で、退避（`launch.json.reflecting`）と反映の途中の記録を設計書の「退避が残っている場合の判定」の表で片付ける。
 
-    利用者の保存を別の名前（`launch.json.saved-<値>`）で残したらそのパスを返す。途中の記録にある、NDF が作った一時ファイルも消す。
+    利用者の保存を別の名前（`launch.json.saved-<値>`）で残したらそのパスを返す。
     """
     pending_path = reflected_file(target, PENDING)
     rec = read_launch_record(pending_path)
-    made = rec.get("tmp")
-    if isinstance(made, str) and made.startswith(f".{target.name}.") and Path(made).name == made:
-        target.with_name(made).unlink(missing_ok=True)
     aside = target.with_name(target.name + REFLECTING)
     saved = None
     if aside.exists():
@@ -789,6 +751,15 @@ def recover(target: Path) -> Optional[Path]:
     return saved
 
 
+def _done_of(candidate: Path) -> Optional[dict[str, Any]]:
+    """候補を反映した完了の記録（反映先ごとに最後の 1 件）。無ければ None。"""
+    for path in _store(REFLECTED).glob("*" + DONE):
+        rec = read_launch_record(path)
+        if rec.get("candidate") == candidate.parent.name and isinstance(rec.get("target"), str):
+            return rec
+    return None
+
+
 def reflected_candidate(candidate: Path, target: Path) -> bool:
     """反映先 `target` の最後の完了の記録がこの候補のもので、反映先が今もその中身か。候補が残っていれば、候補もその中身か。何も書かない。
 
@@ -805,32 +776,7 @@ def _still_placed(rec: Optional[Mapping[str, Any]]) -> bool:
     return rec is not None and content_version(Path(str(rec["target"]))) == rec.get("content")
 
 
-def reflected(candidate: Path, sha256: str, request_id: Optional[str], target: Path) -> bool:
-    """候補が無い打ち直しで、今の作業場所の反映先 `target` の完了の記録と、反映先の中身を照らす。何も書かない。
-
-    ハッシュとリクエストは、最初の反映と、反映先を書き換えずに成功した再実行の組（`confirmed`）のどれかと合えばよい。
-    """
-    rec = read_launch_record(reflected_file(target, DONE))
-    if (rec.get("candidate"), rec.get("target")) != (candidate.parent.name, str(target)):
-        return False
-    return [sha256, request_id] in _confirmed_pairs(rec) and _still_placed(rec)
-
-
-def _completed_by(done: Mapping[str, Any], req: Mapping[str, Any]) -> bool:
-    """完了の記録 `done` が、依頼 `req` の候補の反映を、その依頼で済ませたものか。
-
-    候補の識別子が一致し、依頼の識別子が `confirmed` の組のどれかにあれば真。書き換えない再実行で足した組も含むので、
-    `pending_request` と掃除（`_live`）が、初回と再実行のどちらで済んだ依頼も同じ条件で処理済みとみなす。
-    """
-    candidate = req.get("candidate")
-    if candidate is None or done.get("candidate") != Path(str(candidate)).parent.name:
-        return False
-    return any(len(pair) == 2 and pair[1] == req.get("request_id") for pair in _confirmed_pairs(done))
-
-
-def _confirmed_pairs(done: Mapping[str, Any]) -> list[list[Any]]:
-    """完了の記録の、打ち直しで照らす組の一覧。欄が無いか壊れていれば空。"""
-    pairs = done.get("confirmed")
-    if not isinstance(pairs, list):
-        return []
-    return [pair for pair in pairs if isinstance(pair, list)]
+def reflected(candidate: Path, sha256: str, request_id: Optional[str]) -> bool:
+    """候補が無い打ち直しで、完了の記録と反映先の中身を照らす。何も書かない。"""
+    rec = _done_of(candidate)
+    return rec is not None and (rec.get("sha256"), rec.get("request_id")) == (sha256, request_id) and _still_placed(rec)

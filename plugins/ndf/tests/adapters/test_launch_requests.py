@@ -521,9 +521,9 @@ def test_reflect_replaces_the_target_once_and_the_retry_succeeds_without_writing
     assert not candidate.exists() and not untouched.exists()  # 反映元のバージョンが合わなくなった、直していない候補は消す
     assert edited.exists()  # 直した候補は、反映元のバージョンが合わなくなっても残す
     assert not target.with_name("launch.json.reflecting").exists()
-    assert la.reflected(candidate, SHA, None, target)
+    assert la.reflected(candidate, SHA, None)
     target.write_bytes(OLD)
-    assert not la.reflected(candidate, SHA, None, target)
+    assert not la.reflected(candidate, SHA, None)
 
 
 def test_reflect_into_a_missing_target(tmp_path):
@@ -623,69 +623,6 @@ def test_recover_with_only_the_aside_or_only_the_pending_record(tmp_path, left):
     assert la.recover(target) is None
     assert (target.read_bytes() == OLD) if left == "aside" else not target.exists()
     assert not la.reflected_file(target, la.PENDING).exists()
-
-
-def test_recover_removes_the_temporary_file_named_in_the_pending_record(tmp_path):
-    """反映の一時ファイルを作った後に中断しても、次の片付けで NDF が作った一時ファイルを消す。"""
-    target, _, _ = _interrupted(tmp_path)
-    pending = la.reflected_file(target, la.PENDING)
-    tmp = target.with_name(".launch.json.0123")
-    tmp.write_bytes(NEW)
-    lc.write_launch_record(pending, {**la.read_launch_record(pending), "tmp": tmp.name})
-    la.recover(target)
-    assert not tmp.exists()
-
-
-def test_reflect_places_an_owner_only_file_and_records_who_consented(tmp_path):
-    """反映先は所有者だけが読める権限で置き、承認の行を書かない反映でも、同意した人と経路を完了の記録に残す。"""
-    target = _worktree(tmp_path)
-    candidate = _candidate(target)
-    assert _reflect(candidate, lambda: "人", SHA)
-    assert target.stat().st_mode & 0o777 == 0o600
-    done = la.read_launch_record(la.reflected_file(target, la.DONE))
-    assert (done["approver"], done["route"]) == ("人", "terminal") and "tmp" not in done
-    assert [p.name for p in target.parent.iterdir() if p.name.startswith(".launch.json.")] == []
-
-
-def test_a_rerun_without_rewriting_keeps_who_rewrote_the_target(tmp_path):
-    """反映済みの候補を別の人が打ち直しても、書き換えた人と経路の完了の記録を上書きしない。"""
-    target = _worktree(tmp_path)
-    candidate = _candidate(target)
-    data = candidate.read_bytes()
-    assert _reflect(candidate, lambda: "人", SHA)
-    candidate.parent.mkdir(parents=True, exist_ok=True)
-    candidate.write_bytes(data)  # 候補を退避できない環境と同じく、候補が残っている
-    lc.write_launch_record(candidate.parent / lc.SOURCE_NAME, {"target": str(target), "base": None, "written": None})
-    _asked(target, "q9", candidate)
-    assert la.pending_request("/r", target)["request_id"] == "q9"
-    assert _reflect(candidate, lambda: "別の人", SHA, "q9")
-    done = la.read_launch_record(la.reflected_file(target, la.DONE))
-    assert (done["approver"], done["route"]) == ("人", "terminal")
-    # 組は初回の分も confirmed だけに置き、書き換えない再実行で済ませた依頼も処理済みとして案内しない
-    assert done["confirmed"] == [[SHA, None], [SHA, "q9"]] and "request_id" not in done and "sha256" not in done
-    assert la.pending_request("/r", target) is None
-    # 候補を片付けた後の打ち直しは、最初の反映の組でも、後から成功した再実行の組でも反映済みとして通す
-    assert la.reflected(candidate, SHA, None, target) and la.reflected(candidate, SHA, "q9", target)
-    assert not la.reflected(candidate, SHA, "q8", target)
-
-
-def test_reflect_returns_the_refusal_of_record_without_placing(tmp_path):
-    target = _worktree(tmp_path)
-    candidate = _candidate(target)
-
-    def refuse() -> None:
-        raise la.Refused("同意が無い")
-
-    result = _reflect(candidate, refuse, SHA)
-    assert not result and result.refusal == "同意が無い" and target.read_bytes() == OLD
-
-
-def test_reflected_looks_only_at_the_given_worktree(tmp_path):
-    target = _worktree(tmp_path)
-    candidate = _candidate(target)
-    assert _reflect(candidate, lambda: None, SHA)
-    other = _worktree(tmp_path / "other")
-    assert la.reflected(candidate, SHA, None, target) and not la.reflected(candidate, SHA, None, other)
 
 
 def test_reflect_tells_where_the_users_save_in_the_aside_was_kept(tmp_path):

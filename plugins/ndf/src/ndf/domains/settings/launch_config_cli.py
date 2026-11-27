@@ -45,24 +45,16 @@ WARNING = (
 CLEANUP_NOTE = "metrics.cleanup_targets の候補は消してよい。消す前に、その候補を開いているエディタでの編集を終えて閉じる"
 
 
-class _NoConsent(la.Refused):
+class _NoConsent(Exception):
     """承認の回答が使えない。"""
-
-    def __init__(self) -> None:
-        super().__init__(
-            "承認の回答が無いか使えない（未回答・承認しない・別の内容か候補か反映先・より新しいリクエスト・取り消し・設定の変更）。質問を出し直す"
-        )
 
 
 class _Refused(Exception):
     """候補がこの作業場所の反映先のものでない・照らした後に変わったなど、承認の手順の前提を欠く。文は利用者に示す理由。"""
 
 
-class _Revoked(la.Refused):
+class _Revoked(Exception):
     """承認済みとして進めた内容の承認が、記録の錠を取るまでに取り消された（人の確認が要るようになった）。"""
-
-    def __init__(self) -> None:
-        super().__init__("反映の直前に、この内容の承認が取り消された。記録も反映もしない。show で示し直して承認を取り直す")
 
 
 def _candidate_path(given: Optional[str]) -> Optional[Path]:
@@ -291,7 +283,7 @@ def _before_approve(a: argparse.Namespace, cand: Optional[Path]) -> Optional[dic
     if _in_ai_child():
         return _refused_config("NDF が起動した AI の中では承認できない。利用者が端末で打つ")
     if cand is not None and not cand.exists():
-        if la.reflected(cand, a.sha256, a.request, ls.launch_file(_worktree_root())):
+        if la.reflected(cand, a.sha256, a.request):
             return result.result(TOOL, result.OK, "反映は済んでいる", metrics={"sha256": a.sha256})
         return _refused_config("候補が無く、反映も確かめられない（反映の後に設定が変わったか、候補が別の内容）。draft からやり直す")
     if a.request is not None and la.request_answer(a.request)[0] == "deny":
@@ -307,62 +299,48 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
     root = _worktree_root()
     repo, target = la.repo_key(root), ls.launch_file(root)
     try:
-        t, data, recovered = _approval_input(root, cand, target)
+        t, data = _approval_input(root, cand, target)
     except _Refused as exc:
         return _refused_config(str(exc))
-    # 回復で利用者の保存を別の名前で残したら、この後の成功・拒否のどの結果にもそのパスを載せる
-    kept = f"。利用者の保存を {recovered} に残した" if recovered is not None else ""
     if t.sha256 != a.sha256:
-        return _refused_config(f"示した内容（{a.sha256[:12]}…）と今の内容が違う。show で示し直して承認を取り直す{kept}")
+        return _refused_config(f"示した内容（{a.sha256[:12]}…）と今の内容が違う。show で示し直して承認を取り直す")
     needed = _widens(t) and not la.is_approved(repo, t.sha256)
     # 承認の行を足す条件（起動の許可）と、反映を許す条件（今回の書き換えへの同意）は別に判定する。書き換えは毎回人に確かめる
     asks = needed or cand is not None
     approver = _confirm_terminal(t, target if cand else None) if asks and a.request is None else None
     if asks and a.request is None and approver is None:
-        return _refused_config(f"人の確認が無い。Skill の質問で回答するか、利用者が端末で打って名前とハッシュの先頭 8 文字を入れる{kept}")
+        return _refused_config("人の確認が無い。Skill の質問で回答するか、利用者が端末で打って名前とハッシュの先頭 8 文字を入れる")
     record = functools.partial(_record_approval, a.request, repo, t, target, cand, approver)
-    refused, saved = _approve_and_place(cand, record, t, a.request, data, target)
-    found = saved or recovered
-    kept = f"。利用者の保存を {found} に残した" if found is not None else ""
+    try:
+        refused = _approve_and_place(cand, record, t, a.request, data, target)
+    except _Revoked:
+        return _refused_config("反映の直前に、この内容の承認が取り消された。記録も反映もしない。show で示し直して承認を取り直す")
+    except _NoConsent:
+        return _refused_config(
+            "承認の回答が無いか使えない（未回答・承認しない・別の内容か候補か反映先・より新しいリクエスト・取り消し・設定の変更）。質問を出し直す"
+        )
     if refused is not None:
-        return _refused_config(refused + kept)
-    summary = ("承認した" if needed else "承認の記録は要らない（許可が広がらないか承認済み）") + ("。候補を反映した" if cand else "") + kept
+        return _refused_config(refused)
+    summary = ("承認した" if needed else "承認の記録は要らない（許可が広がらないか承認済み）") + ("。候補を反映した" if cand else "")
     return result.result(TOOL, result.OK, summary, metrics={"sha256": t.sha256})
 
 
-def _approval_input(root: Path, cand: Optional[Path], target: Path) -> tuple[ls.Target, bytes, Optional[Path]]:
-    """承認の対象と、反映する候補のバイト列（候補が無ければ空）と、回復で残した利用者の保存のパス（候補が無いときだけ。無ければ None）。
-
-    候補の反映先がこの作業場所でなければ `_Refused`。候補があるときの回復は `reflect` が錠の中で行う。
-    """
+def _approval_input(root: Path, cand: Optional[Path], target: Path) -> tuple[ls.Target, bytes]:
+    """承認の対象と、反映する候補のバイト列（候補が無ければ空）。候補の反映先がこの作業場所でなければ `_Refused`。"""
     if cand is None:
         with la.records_lock(la.state_file(la.APPROVALS)):
-            saved = la.recover(target)
-        try:
-            return ls.approval_target(ls.load(root)), b"", saved
-        except internal.InternalError as exc:
-            if saved is None:
-                raise
-            # 回復で移した利用者の保存先は、設定を読めずに止まる結果にも載せる
-            raise internal.InternalError(exc.kind, f"{exc}。利用者の保存を {saved} に残した") from None
+            la.recover(target)
+        return ls.approval_target(ls.load(root)), b""
     _check_destination(cand, target)
-    return (*_checked_target(root, cand), None)
+    return _checked_target(root, cand)
 
 
-def _record_approval(
-    request: Optional[str], repo: str, t: ls.Target, target: Path, cand: Optional[Path], approver: Optional[str]
-) -> Optional[str]:
-    """承認の記録の錠の中で呼ばれ、同意した人の名前を返す。使える同意が無ければ `la.Refused` を投げる。
-
-    回答はこの操作（反映先・候補・内容）への同意かを錠の中で照らし、錠の外で見た「承認済み」も照らし直す。
-    """
-    consenter = approver
-    if request is not None:
-        consenter = la.consent_by_answer(request, repo, t.sha256, target, cand)
-        if consenter is None:
-            raise _NoConsent
+def _record_approval(request: Optional[str], repo: str, t: ls.Target, target: Path, cand: Optional[Path], approver: Optional[str]) -> None:
+    """承認の記録の錠の中で呼ばれる。回答はこの操作（反映先・候補・内容）への同意かを錠の中で照らし、錠の外で見た「承認済み」も照らし直す。"""
+    if request is not None and la.consent_by_answer(request, repo, t.sha256, target, cand) is None:
+        raise _NoConsent
     if not _widens(t) or la.is_approved(repo, t.sha256):
-        return consenter
+        return
     if request is not None:
         if la.approve_by_answer(repo, t.sha256, request) is None:
             raise _NoConsent
@@ -370,26 +348,21 @@ def _record_approval(
         la.write_row(la.state_file(la.APPROVALS), la.approval_row(repo, t.sha256, la.Action.APPROVE, approver))
     else:
         raise _Revoked
-    return consenter
 
 
-def _approve_and_place(
-    cand: Optional[Path], record: Any, t: ls.Target, request: Optional[str], data: bytes, target: Path
-) -> tuple[Optional[str], Optional[Path]]:
-    """承認を記録し、候補があれば反映する。拒んだら利用者に示す文（済めば None）と、反映で残した利用者の保存のパスを返す。"""
+def _approve_and_place(cand: Optional[Path], record: Any, t: ls.Target, request: Optional[str], data: bytes, target: Path) -> Optional[str]:
+    """承認を記録し、候補があれば反映する。拒んだら利用者に示す文、済めば None。"""
     if cand is None:
-        try:
-            with la.records_lock(la.state_file(la.APPROVALS)):
-                record()
-        except la.Refused as exc:
-            return str(exc), None
-        return None, None
+        with la.records_lock(la.state_file(la.APPROVALS)):
+            record()
+        return None
     done = la.reflect(cand, record, t.sha256, request, data=data, expected=target)
     if done.refusal is not None:
-        return done.refusal, done.saved
+        return "反映しない。" + done.refusal
     if not done:
-        return "候補を作った後に設定が別の作業で変わったため置き換えない。draft からやり直す", done.saved
-    return None, done.saved
+        kept = f"。利用者の保存を {done.saved} に残した" if done.saved is not None else ""
+        return "候補を作った後に設定が別の作業で変わったため置き換えない。draft からやり直す" + kept
+    return None
 
 
 def _draft(a: argparse.Namespace) -> dict[str, Any]:
