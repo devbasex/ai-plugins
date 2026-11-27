@@ -8,8 +8,14 @@
 | --- | --- |
 | 相手役 | cross-review で差分を読んで指摘を書く AI |
 | 判定役 | 相手役が書いた重い指摘（critical・major）が実際に起きるかを確かめる読むだけの claude |
-| 行 | 状態ファイルの指摘 1 件分の記録（`findings` の要素） |
-| 保護の種類 | `secret`・`authz`・`user_data`・`irreversible`・`safety` の 5 つ（秘密・認証認可・利用者のデータ・戻せない操作・人の安全） |
+| 行 | 状態ファイルの指摘 1 件分の記録（`findings` の要素）。「処理の手順」の表の 1 行を指すときは「表の行」と書く |
+| 保護の種類 | `secret`・`authz`・`user_data`・`irreversible`・`safety` の 5 つ（秘密・認証認可・利用者のデータ・戻せない操作・人の安全）。相手役は指摘の `protect` に書く |
+| 指摘の種類（`tracks`） | 判定役が回答の `tracks` に書く値。保護の種類の 5 つと、`delivered`（利用者に届いた不具合）・`approval`（承認資料の正しさ。承認する人へ見せる説明が事実と違う）の 7 つ |
+| `mvv` | 行のキー。相手役が、指摘がプロジェクトの判断基準（MVV）のどの項目に反するかを挙げた値。反する指摘は重要度を major 以上に固定する（今の `journal._classify`） |
+| `redline` | 行のキー。挙げた項目が「必ず人の承認が要る操作」（MVV の表の `P<番号>` と共通原則の表の `C<番号>`）である印。修正担当へ渡さず、収束も止めずに、人の承認を待つ |
+| NDF の指摘 | `by` が NDF の行。文書が引いた MVV の根拠の誤りを、NDF が機械で確かめて作った指摘 |
+| 振動の判定 | 前々ラウンドの指摘が前ラウンドで消えて今のラウンドで戻ったら、直しては戻す往復とみなしてループを止める判定（`oscillation.returned`）。指摘は本文の先頭から作るキーで比べる |
+| 下げる | 重い指摘の重要度を minor にすること。minor は修正担当へ渡らず、収束も止めない |
 
 ## 地図
 
@@ -33,7 +39,7 @@ plugins/ndf/
 └── tests/domains/crossreview/
 ```
 
-依存の向き: `drive` が `carry`・`reviewing`・`verify`・`journal` を読み、`verify` が `verify_decide` を読み、`journal` と `verify_decide` が `criteria_decide` を読む。`carry`・`reviewing`・`verify` は `drive` を読まず、使う値を Protocol（呼ばれる側が要る属性だけを書いた型）で受けるので、輪は無い。`verify_decide` は名前が `_decide` で終わる判断のモジュールで、外部のコマンドもファイルも触らない（`ndf check` の構造の規則）。
+依存の向き: `drive` が `carry`・`reviewing`・`verify`・`journal` を読む。`carry` は `journal` を読む。`verify` は `verify_decide` を読む。`journal` は、回答の型と下げてよいかの判断を使うために `verify_decide` を読む。`journal` と `verify_decide` は `criteria_decide` を読む。`carry`・`reviewing`・`verify` は `drive` を読まず、使う値を Protocol（呼ばれる側が要る属性だけを書いた型）で受けるので、輪は無い。`verify_decide` は名前が `_decide` で終わる判断のモジュールで、外部のコマンドもファイルも触らない（`ndf check` の構造の規則）。
 
 `drive.py` は 986 行で、構造の規則の上限は 1,000 行である。この課題と後の 2 課題がすべて `drive.py` を変えるので、先に引き継ぎと相手役の起動の 2 つのまとまりを別のモジュールへ移す（実装計画のプレリファクタリング）。
 
@@ -64,7 +70,10 @@ plugins/ndf/
 
 満たす決定: 決定 1（判定役を足す場所を `drive.py` に空けるための移動）、受け入れ条件 1
 
-振る舞いを変えない移動である。関数の中身は変えず、名前の先頭の `_` を外し、状態ファイルの保存だけを呼び手（`drive`）へ戻す。テストの変更は参照名の置き換えだけにする。
+振る舞いを変えない移動である。変えるのは次の 2 点だけで、テストの変更は参照名の置き換えにする。
+
+- ほかのモジュール（`drive` とテスト）から呼ぶ関数と型は、名前の先頭の `_` を外す。移した先の中だけで呼ぶ関数（`_settle_resolved`・`_merge_tracked`・`_fill_seats`・`_prompt_diffs`・`_full_diff`）は `_` を残す
+- `carry` と `restate` は、今は自分で状態ファイルを保存している。移した後は保存せず、状態が変わったかを返し、`drive` が保存する
 
 ### 関数の仕様
 
@@ -135,10 +144,17 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `select` | `verify_decide.py` | 新設 | `select(rows: Sequence[Mapping[str, Any]], use_tracks: bool = False) -> list[Mapping[str, Any]]` | このラウンドで新しく出たか戻った重い指摘のうち、判定役へ渡すものを返す |
+| `select` | `verify_decide.py` | 新設 | `select(rows: Sequence[Mapping[str, Any]], use_tracks: bool = False) -> list[Mapping[str, Any]]` | 呼び手が渡す指摘（このラウンドで新しく出たか戻った critical・major）のうち、判定役へ渡すものを返す |
 | `instruction` | `verify_decide.py` | 新設 | `instruction(rows: Sequence[Mapping[str, Any]], diff: Path, worktree: Path, criteria: Sequence[str]) -> str` | 判定役への指示を組む。誰が書いた指摘か（`by`）は載せない |
 | `read` | `verify_decide.py` | 新設 | `read(found: Optional[Sequence[Mapping[str, Any]]], ids: Sequence[str]) -> Answers` | 回答の並びを指摘ごとの `Verdict` にし、読めない分を注意にする |
 | `lowers` | `verify_decide.py` | 新設 | `lowers(row: Mapping[str, Any], verdict: Verdict) -> bool` | 成り立たないと答えた指摘を minor へ下げてよいかを返す |
+
+重要度とラウンドで指摘を絞るのは呼び手（下の `drive._confirm`）で、`select` は指摘の持つ印だけを見る。
+
+`mvv` と `protect` を持つ指摘は、回答がどうであっても下げない。それでも渡す場合があるのは、回答の指摘の種類（`tracks`）を後の処理が使うためである。その指摘だけのために判定役を起動すると費用に見合わないので、起動するのは次のどちらかの場合に限る。
+
+- ほかに渡す指摘がある（起動の回数が増えない）
+- 呼び手が `use_tracks` を真にした。回答の種類を使う処理があるラウンドを表す。この課題の `drive` は常に偽で呼ぶ。#3780 は線引き（直さずに残す指摘を決めて起票する）をするラウンドで真にし、#2468 は突き合わせる見送り済みの指摘などがあるラウンドで真にする
 
 - `read`
   - 事前条件: `found` は出力の最後の `{"verdicts": [...]}` の要素（見つからなければ None）
@@ -148,16 +164,17 @@ plugins/ndf/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `select` | 行が `redline` を持つか `by` が NDF | 渡さない |
-| `select` | 残りのうち `mvv` か `protect` を持つ行 | `use_tracks` が真か、下の行の指摘が 1 件でもあれば渡す。どちらも無ければ渡さない |
-| `select` | ほかの行 | 渡す |
+| `select` | 指摘が `redline` を持つか、NDF の指摘である | 渡さない |
+| `select` | 上に当たらず、`mvv` も `protect` も持たない（ここで「普通の指摘」と呼ぶ） | 渡す |
+| `select` | 上に当たらず、`mvv` か `protect` を持つ | `use_tracks` が真か、同じ呼び出しに普通の指摘が 1 件でもあれば渡す。どちらでもなければ渡さない |
 | `read` | `holds` が真で `condition`・`path`・`result` がすべて空でない | 有効 |
 | `read` | `holds` が偽で `reason` が空でない | 有効 |
 | `read` | `holds` が null | `Verdict(holds=None)`。`tracks` を残し、理由を注意にする |
 | `read` | 上のどれでもない | 不正。`verdicts` に入れず注意にする |
-| `lowers` | 行が `redline`・`mvv`・`by` = NDF・`protect` のどれかを持つ | 下げない |
-| `lowers` | `tracks` に保護の種類があるか、種類の表に無い文字列がある | 下げない |
-| `lowers` | ほかで `holds` が偽 | 下げる |
+| `lowers`（順 1） | `holds` が偽でない（示せた・null） | 下げない |
+| `lowers`（順 2） | 指摘が `redline`・`mvv`・`protect` のどれかを持つか、NDF の指摘である | 下げない |
+| `lowers`（順 3） | 回答の `tracks` に保護の種類があるか、7 つの種類に無い文字列がある | 下げない |
+| `lowers`（順 4） | 順 1〜3 のどれにも当たらない | 下げる |
 
 - 繰り返しの終わる条件: 回答の並びを 1 回なめるだけである
 
@@ -248,15 +265,18 @@ plugins/ndf/
 
 ### 処理の手順
 
-出し直し（`_raised_again`）は、行の `check.lowered` が真かで分かれる。
+下げた行（`check.lowered` が真）が出し直された場合、`_raised_again` は次のとおり扱う。下げていない行の扱いは今のまま変えない。
 
-| 下げた行への出し直し | 重要度 | `check.lowered` |
-| --- | --- | --- |
-| 今回の `protect` が空でない | `at_least_blocking(raised_severity)` へ戻し、今回の値と重い方を残す | 偽 |
-| 今回 `mvv` の項目か必ず人の承認が要る操作を挙げた | 今の `_classify` の決まりで固定する | 偽 |
-| ほか | 変えない（I1） | 真のまま |
+下げた行には、設計の不変条件 I1（判定役の確認で下げた指摘は minor のままで、出し直されても戻らない。後から保護の種類が示された場合だけ戻す）がある。次の表の A と B のどちらにも当たらない出し直しは I1 のとおりで、重要度を変えず、`check.lowered` を真のままにする。
 
-2 行目は設計文書の I1 に無い場合である。MVV に反する指摘を下げない受け入れ条件 5 を優先する（設計の承認で確かめる）。
+| 当たる出し直し | 扱い |
+| --- | --- |
+| A: 今回の `protect` が空でない | `check.lowered` を偽にする。行の重要度を、相手役が最初に付けた重要度（`raised_severity`）へ戻す。戻す値は `criteria_decide.at_least_blocking` を通すので、critical はそのまま、ほか（minor・不明を含む）は major になる。今回の出し直しの重要度のほうが重ければ、その重さにする |
+| B: 今回の出し直しが MVV の項目か必ず人の承認が要る操作を挙げた | `check.lowered` を偽にする。下げていない行と同じく、今回の重要度と行の重要度の重い方を残してから、今の `journal._classify` を当てる。`_classify` は、MVV の項目なら重要度を major 以上に固定し、承認の要る操作なら行に `redline` を付けて人の承認を待つ指摘にする |
+
+A と B の両方に当たる場合は、A の次に B を当てる。保護の種類は行に残り、重さと `redline` は B の結果になる。
+
+B は I1 に定めの無い場合である。この詳細設計は、MVV に反する指摘と承認の要る操作の指摘を下げないという受け入れ条件 5 を優先する。確認で一度下げた指摘をこの 2 つの理由で重い扱いへ戻してよいかを、設計の承認で確かめる（[設計文書の「未確認のまま残ること」](./issue-4363-design.md#未確認のまま残ること)）。
 
 下げる行に `raised_severity` が無い（前の実行から引き継いだ行が戻った）場合は、下げる前の重要度を `raised_severity` に書いてから下げる（I3）。
 
@@ -288,8 +308,8 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `enter` | `protect` が行に残り、`fresh` に新しい行と戻った行だけが入る | 同じラウンドの 2 件の `protect` を合わせる | `protect` が文字列なら持たない |
-| `apply_checks` | 成り立たないと答えた major は minor になり、`pending` に出ず、元の重要度が残る | 示せた回答は重要度が変わらない。`authz` と `user_data` の両方を持つ。`delivered` だけは下がる。元の重要度が critical・不明 | `holds` が null・回答の欠けは `check` が無く重要度が変わらず `unconfirmed` に入る。MVV・`redline`・`protect` の行は下がらない |
-| `_raised_again` | 下げた行が minor のまま出し直されても minor（I1） | `protect` 付きの出し直しで元の重要度へ戻り `check.lowered` が偽 | 下げた行に MVV の項目を挙げた出し直しは固定した重さになる |
+| `apply_checks` | 次の 4 つ。(1) 成り立たないと答えた普通の major は minor になり、`pending` に出ず、元の重要度が残る。(2) 起きると示せたと答えた指摘は重要度が変わらない。(3) 回答の `tracks` が `authz` と `user_data` の 2 つなら、指摘の `protect` に 2 つとも残り、下がらない。(4) 回答の `tracks` が `delivered` だけで成り立たないと答えた指摘は下がる | 下げる前の重要度が critical の指摘と、`raised_severity` が不明の指摘 | `holds` が null の回答と回答の無い指摘は、`check` が書かれず重要度が変わらず `unconfirmed` に入る。`mvv`・`redline`・`protect` を持つ指摘は、成り立たないと答えても下がらない |
+| `_raised_again` | 保護の種類も MVV の項目も無い出し直しでは、下げた行は minor のまま（I1） | `protect` 付きの出し直しで元の重要度へ戻り `check.lowered` が偽になる。`protect` と MVV の項目の両方を持つ出し直し | MVV の項目を挙げた出し直しは major 以上に固定され、承認の要る操作を挙げた出し直しは `redline` が付く |
 | `_revive` | 直した後の再発で `check` が消え、`protect` が残る。次の確認の `tracks` が空でも下がらない | 無し | 無し |
 
 ## 駆動への組み込み（drive）
@@ -301,12 +321,14 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_confirm` | `drive.py` | 新設 | `_confirm(run: _Run, round_no: int, diff: Path, launch: Launcher, use_tracks: bool = False) -> Checked` | このラウンドの新しい重い指摘を選び、判定役を呼び、ジャーナルへ適用する |
-| `_round` | `drive.py` | 変更 | シグネチャは変えない | 登録の直後、読めない相手役の確認と収束の判定の前に `_confirm` を呼ぶ |
+| `_round` | `drive.py` | 変更 | シグネチャは変えない | `enter` の直後に `_confirm` を呼ぶ。呼ぶ位置は、読めなかった相手役がいるかを確かめる処理よりも、収束の判定よりも前である |
 
 - `_confirm`
   - 事前条件: 直前に `run.journal.enter` を呼んでいる
   - 事後条件: 渡す指摘が無ければ判定役を起動せず、空の `Checked` を返す
   - 副作用: `verify.ask` が claude を起動する。注意を `run.warnings` に足す
+
+`_confirm` は、`run.journal.fresh`（このラウンドで新しく出たか戻った行の番号）の行のうち、重要度が critical か major のものを `verify_decide.select` へ渡す。
 
 `_round` は `enter` が返したキーの集合から `Checked.lowered` を除いたものを振動の判定の履歴（`run.history`）に足す。一部の相手役が読めなかったラウンドでも、読めた分は確かめる。
 

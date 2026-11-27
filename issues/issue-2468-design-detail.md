@@ -6,6 +6,13 @@
 
 | 語 | 意味 |
 | --- | --- |
+| 相手役 | cross-review で差分を読んで指摘を書く AI |
+| 判定役 | 相手役が書いた重い指摘が実際に起きるかを確かめる読むだけの claude（#4363） |
+| 席 | 相手役 1 人分の枠。結果を返さない相手役の席には、読むだけの claude が代わりに入る |
+| 線引き | 2 ラウンド目以降の指摘を、修正へ進めるものと直さずに残すものに分けること（#3780） |
+| 欠け | 結果の `gaps`。直したとも見送ったとも決まらない重い指摘などで、残ると結果が `ok` にならない |
+| 差分のレビュー | 実装のプランが、レビューの後に足したコミットだけを、別の状態の保存先で読むレビュー |
+| 単位のレビューの包み | 単位の実装プランがレビューの起動を包むシェルスクリプト（`core/route` の `UNIT_REVIEW`）。対象の PR を読んだかを確かめる |
 | 仮の指摘 | 相手役が返し、まだ行（状態ファイルの指摘の記録）にしていない指摘（`candidates`） |
 | 出直し | 見送った指摘か直さずに残した指摘と同じ指摘が、もう一度出ること |
 | 使った量 | ラウンドごとの秒と claude の費用（記録の `spent`） |
@@ -43,7 +50,7 @@ plugins/ndf/
 └── tests/ domains/crossreview/, core/plan/, route/
 ```
 
-依存の向き: `cli` が `drive` を読み、`drive` が `spend`・`journal`・`verify`・`finish_decide` を読み、`spend` が `budget_decide` を読む。`budget_decide`・`finish_decide`・`verify_decide`・`leftover_decide` は外部との接続を読まない。`core.plan` と `core.route` は cross-review のモジュールを読まない（今のとおりコマンドの文字列でつなぐ）。輪は無い。
+依存の向き: `cli` が `drive` を読み、`drive` が `spend`・`journal`・`verify`・`budget_decide`・`finish_decide`・`round_scope`・`changes` を読み、`spend` が `budget_decide` を読む。`budget_decide`・`finish_decide`・`verify_decide`・`leftover_decide` は外部との接続を読まない。`core.plan` と `core.route` は cross-review のモジュールを読まない（今のとおりコマンドの文字列でつなぐ）。輪は無い。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -54,7 +61,7 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/domains/crossreview/journal.py` | 変更 | 仮の指摘をまとめ、行を確定し、出直しを扱う | `leftover_decide`・`verify_decide` | `FindingJournal`・`Settled`・`Context` | 新設: `propose`・`view`・`to_verify`・`settle`・`known_for_verifier`・`oscillating` / 変更: `enter`・`carry`・`apply_fix` |
 | `plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py` | 変更 | 出直した見送りと上限で残った指摘の残し方 | `criteria_decide` | モジュール | 新設: `filed_number` / 変更: `result_fields`・`summary_line` |
 | `plugins/ndf/src/ndf/domains/crossreview/leftover.py` | 変更 | 出直した見送りと上限で残った指摘を起票する | `leftover_decide` | モジュール | 変更: `file_issues` |
-| `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | ラウンドを合計で数え、上限を確かめ、中断から続ける | `spend`・`journal`・`budget_decide` | `_Run`・`Outcome` | 新設: `_over`・`_resume`・`_stale_skips`・`_collect`・`_decide` / 変更: `_round`・`_drive_rounds`・`_summary` |
+| `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | ラウンドを合計で数え、上限を確かめ、中断から続ける | `spend`・`journal`・`verify`・`budget_decide`・`finish_decide`・`round_scope`・`changes` | `_Run`・`Outcome` | 新設: `_over`・`_resume`・`_stale_skips`・`_collect`・`_decide` / 変更: `_round`・`_drive_rounds`・`_summary` |
 | `plugins/ndf/src/ndf/domains/crossreview/fixer.py` | 変更 | 見送りを決めた時点の head と比較基点を渡す（設計の「データ構造」の `skipped_head`・`skipped_base`。設計の触るファイルに足した） | `journal` | モジュール | 変更: `take_fix`・`_fix_record` |
 | `plugins/ndf/src/ndf/domains/crossreview/fixgate_decide.py` | 変更 | 上限で修正を起動しなかったラウンドを記録の不足にしない（設計の触るファイルに足した） | 無し | モジュール | 変更: `require_fix_for_changes` |
 | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py` | 変更 | 中断したラウンドを読んだ証跡にしない | `store` | モジュール | 新設: `finished` / 変更: `read_by_all_head`・`origin_record` |
@@ -190,7 +197,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `counted` | 収束の無い打ち直しをまたいで合計する | 収束の後は 0 から。`ended_at` の順で保存先を混ぜる。`spent` の無い記録 | 無し |
-| `hit` | 4 つの上限をそれぞれ返す | ちょうど上限。ラウンド数の上限ちょうどの最後のラウンドは、判定役と修正担当の前では当たらない | `--max-rounds` に当たり `limits.rounds` が残る・その逆（小さい方を 1 つの回数と比べると落ちる） |
+| `hit` | 4 つの上限をそれぞれ返す | ちょうど上限。ラウンド数の上限ちょうどの最後のラウンドは、判定役と修正担当の前では当たらない | `--max-rounds` だけに当たり `limits.rounds` が残る場合と、その逆。2 つの上限の小さい方を 1 つの回数と比べる誤った実装は、このテストで失敗する |
 | `recovered` | 経過の秒を使う | 出力の更新時刻のほうが長い・起動の前の更新時刻は使わない | 出力が無くても経過の秒 |
 | `same_target` | 元の番号と今の番号 | 巻き直した後 | 別のリポジトリ・別の PR |
 | `advice` | 当たった上限をすべて並べ、引数か `.ndf/review.json` のキーかが分かる | 差分のレビューの保存先の名前を含む | 無し |
@@ -209,7 +216,7 @@ plugins/ndf/
 
 - `Meter`
   - 事前条件: `record` は状態ファイルに保存済みのラウンドの記録
-  - 事後条件: 起動が 1 つでも走っている間、`spent.running` がある。全部終わると消え、`spent.seconds`・`usd`・`unread`・`ended_at` が上書きされる
+  - 事後条件: 起動が 1 つでも走っている間は `spent.running` がある。走っている起動がすべて終わった時点で、その起動の費用を `spent.usd` に足し（読めなかった起動は `spent.unread` に数える）、同じ保存の中で `spent.running` を消す。`spent.seconds` は、`Meter` を作った時点で記録にあった秒に、作ってからの秒を足した値に置き換える（判定役から再開したラウンドでも、前の分が残る）。`spent.ended_at` は書いた時刻に置き換える
   - 副作用: `save` で状態ファイルを書く。起動中は別のスレッドが `cross-review.heartbeat-seconds` の間隔で `spent.running.elapsed` を書き直す
 - `other_records`
   - 事前条件: `dirs` は `outside_checkout` が実体のパスにした値
@@ -229,7 +236,7 @@ plugins/ndf/
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 並べて起動する相手役と経過を書くスレッド | ラウンドの記録と状態ファイル | `Meter` の中の 1 つのロック | `spent` は上書きで、足し増やさない。同じ起動分は 2 回数えない |
+| 並べて起動する相手役と経過を書くスレッド | ラウンドの記録と状態ファイル | `Meter` の中の 1 つのロック | `spent` はラウンドの記録に 1 つだけ持つ。起動の費用を足すのと `spent.running` を消すのを 1 回の保存で行うので、中断の回収と合わせても同じ起動の分は 2 回数えない |
 
 ### 内部のデータと定数
 
@@ -296,7 +303,7 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 | `known_for_verifier` | `journal.py` | 新設 | `known_for_verifier(self, mvv: Optional[str], oscillating: Collection[str]) -> list[dict[str, Any]]` | 同じ MVV の見送りの行、残した行、振動の候補の行の番号・本文・理由 |
 | `oscillating` | `journal.py` | 新設 | `oscillating(self, history: Sequence[Collection[str]]) -> frozenset[str]` | 前々ラウンドにあって前ラウンドで出ず、直した行の番号 |
 | `settle` | `journal.py` | 新設 | `settle(self, round_no: int, candidates: Sequence[Mapping[str, Any]], answers: verify_decide.Answers, ctx: Context) -> Settled` | 設計の「出直しの形」の表で行を確定し、確認の結果を適用する |
-| `enter` | `journal.py` | 変更 | シグネチャは変えない | `propose` と回答の無い `settle` を続けて呼ぶ（返りは行の番号の集合になる） |
+| `enter` | `journal.py` | 変更 | 引数と返りの型は変えない（返りの中身が指摘のキーから行の番号に変わる） | `propose` と回答の無い `settle` を続けて呼び、収束を止める行の番号を返す |
 | `carry` | `journal.py` | 変更 | シグネチャは変えない | 本文の重なりを、critical・major は `normalized` の一致で見る |
 | `apply_fix` | `journal.py` | 変更 | `apply_fix(self, items, handed, round_no, *, mvv: Optional[str] = None, at: Optional[changes.Range] = None)` | 見送りの行に `skipped_head`・`skipped_base` を書く |
 
@@ -342,8 +349,8 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `propose`・`view` | 同じ本文 2 件が 1 件になり、後の報告だけの `redline` と `protect` が残る | 1 文の無い critical と 1 文のある major は major。未変更行の critical と変えた行の major は、重要度 critical・場所と 1 文は変えた行。届く順を入れ替えても同じ | 本文が空の報告は捨てる |
-| `settle` | 見送った指摘が同じ文でも言い換え（`same_as`）でも出直すと未解決にならない | 保護の種類が増えると新しい行。区分と重要度の変化で戻る。直さずに残した行の出直しは、critical か変えた行の major なら `parked` が外れる | 先頭だけが同じ別の指摘は別の行。判定役の失敗で新しい行 |
-| `settle`（理由の確認） | `skip_broken` が偽なら見送りのまま | 同じ種類・重要度の保護の対象で、`stale` なら `skip_broken` が null でも未解決へ戻り警告 | `redline` の行は `reraised` が付いても人の判断を待つ |
+| `settle` | 見送った指摘が、同じ文でも言い換え（`same_as`）でも、出直しで未解決にならない | 本文の全体が一致し、保護の種類が増えるか重要度が上がる出直しは、見送りの行が未解決へ戻る。言い換えで保護の種類が増える場合は新しい行になる。直さずに残した行の出直しは、critical か変えた行の major なら `parked` が外れる | 本文の先頭だけが同じ別の指摘は別の行になる。判定役が失敗したときの言い換えも新しい行になる |
+| `settle`（理由の確認） | `skip_broken` が偽なら見送りのままにする | 出直しの重要度が見送りの行以下で、保護の種類がすべて行の `protect` にあり、行か出直しが保護の対象で、行が `stale`（`_stale_skips` の返り）の場合は、`skip_broken` が null でも行を未解決へ戻して警告する | `redline` の行は `reraised` が付いても人の判断を待つ |
 | `oscillating` | 直した行が 1 ラウンド消えれば候補 | 3 ラウンド未満は空 | 見送った行は候補にしない |
 | `apply_fix` | 見送りに head と比較基点 | `at` が None なら書かない | 無し |
 
@@ -356,7 +363,7 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_over` | `drive.py` | 新設 | `_over(run: _Run, *, before_round: bool, meter: Optional[spend.Meter] = None) -> tuple[str, ...]` | 使った量を数え、当たった上限を返す |
-| `_resume` | `drive.py` | 新設 | `_resume(run: _Run, launch: Launcher) -> Optional[str]` | 判定の前に中断したラウンドを回収し、続けられれば判定役から続けて終わり方を返す |
+| `_resume` | `drive.py` | 新設 | `_resume(run: _Run, launch: Launcher) -> Optional[str]` | 中断した起動の使った量を回収する。判定の前に中断したラウンドは、続けられれば判定役から続けて終わり方を返す |
 | `_stale_skips` | `drive.py` | 新設 | `_stale_skips(run: _Run, current: changes.Range) -> frozenset[str]` | 見送りを決めた後に根拠の差分が加わりうる行の番号 |
 | `_collect` | `drive.py` | 新設 | `_collect(run: _Run, round_no: int, prep: Prepared, record: dict[str, Any], launch: Launcher) -> list[dict[str, Any]]` | 相手役を起動し、仮の指摘と読めなかった相手役を保存する |
 | `_decide` | `drive.py` | 新設 | `_decide(run: _Run, record: dict[str, Any], prep: Prepared, candidates: Sequence[Mapping[str, Any]], launch: Launcher, meter: spend.Meter) -> Optional[str]` | 判定役、行の確定、線引き、判定までを行う |
@@ -368,7 +375,7 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 - `_over`
   - 副作用: `spend.other_records` で渡した保存先の状態を読む（書き換えない）
 - `_resume`
-  - 事後条件: `verdict` の無い最後のラウンドは残らない
+  - 事後条件: `verdict` の無い最後のラウンドと、`spent.running` の残った最後のラウンドは残らない
   - 副作用: 判定役を起動しうる。状態ファイルを書く
 - `_stale_skips`
   - 副作用: `git` を読む（`changes.new_in_pr`）
@@ -390,20 +397,32 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 | 3 | `_over(before_round=True)` が空でなければ終える。秒か費用に当たっていれば `limit`、ほかは `max_rounds` |
 | 4 | `_round`。終わり方が返れば終える。ほかは 3 へ |
 
-- 秒か費用とラウンド数の両方に当たった場合は `limit` にする（秒か費用に当たると、次の起動も回せないため。設計の表はこの重なりを定めていないので、設計の承認で確かめる）
-- 繰り返しの終わる条件: `_over` はラウンドを足すごとに増える回数を `--max-rounds` と比べるので、必ず終わる
+- 秒か費用とラウンド数の両方に当たった場合は `limit` にする（秒か費用に当たると、次の起動も回せないため。設計の表はこの重なりを定めていないので、[設計文書の「未確認のまま残ること」](./issue-2468-design.md#未確認のまま残ること)を設計の承認で確かめる）
+- 繰り返しの終わる条件: ラウンドを 1 つ回すごとに数えるラウンドが 1 増え、順 3 で `--max-rounds` に達するので、必ず終わる
 
-`_resume` は設計の「消費量の保存と、中断したラウンドの再開」の表に従う。
+上限で終わった記録の残し方は、終える場所で違う。
 
-| 最後のラウンドの状態 | `_resume` |
-| --- | --- |
-| `verdict` がある | 何もしない（修正の中断は今の `_ingest_pending`） |
-| `spent.running` がある | 先に `spend.recover` |
-| `candidates` が無い | `verdict: interrupted` にして None |
-| `candidates` があり、head・比較基点・相手役・重点・単位の指示・PR・MVV が記録と同じ | `_decide` から続ける。`unread_reviewers` があれば `incomplete_reviewers` で終える |
-| 上のどれかが違う | `verdict: interrupted` にして `candidates` を消し None |
+| 終える場所 | 状態ファイルに足すもの | `final` の渡り方 |
+| --- | --- | --- |
+| 修正担当を起動する前に秒か費用に当たった | そのラウンドの記録に `stopped_limit`（設計の決まり） | 駆動が `limit` を要約と記録のコメントへ渡す。後の `ndf cross-review report` は、`final_of` が `stopped_limit` を読んで `limit` にする |
+| 順 3（次のラウンドを始める前） | 何も足さない（直前のラウンドは修正まで終えている） | 駆動が `limit` か `max_rounds` を要約と記録のコメントへ渡す。後の `ndf cross-review report` は記録から上限の終わりを読めず、「終わり方の記録が無い」と出す |
 
-`_stale_skips` は、見送りの行の `skipped_head` が今の head と違うか、`skipped_base` が今の比較基点と違って `changes.new_in_pr`（`skipped_head` を前の head にする）が空でないか比べられない行である。
+2 行目の場合の保存は、設計文書が定めていない（設計は `final` を状態ファイルと記録に残る値とするが、データ構造に対応するキーが無い）。この詳細設計はキーを足さない。
+
+`_resume` は設計の「消費量の保存と、中断したラウンドの再開」の表に従い、次の順に当てる。
+
+| 順 | 最後のラウンドの状態 | `_resume` |
+| --- | --- | --- |
+| 1 | `spent.running` が残っている（`verdict` の有無によらない。修正担当の実行中に中断したラウンドは `verdict` を持つ） | `spend.recover` で中断した起動の分を足して保存し、順 2 へ進む |
+| 2 | `verdict` がある | ここで終える。修正の結果の取り込みは今の `_ingest_pending` がする |
+| 3 | `candidates` が無い | `verdict: interrupted` にして None |
+| 4 | `candidates` があり、head・比較基点・相手役・重点・単位の指示・PR・MVV が記録と同じ | `_decide` から続ける。`unread_reviewers` があれば `incomplete_reviewers` で終える |
+| 5 | `candidates` があり、順 4 のどれかが違う | `verdict: interrupted` にして `candidates` を消し None |
+
+`_stale_skips` は、見送りの行のうち次のどちらかに当たる行の番号を返す。今回は比較基点と head を `current` と書く。
+
+- (a) 行の `skipped_head` が今の head と違う（`skipped_head` が無い行も含む）
+- (b) 行の `skipped_base` が今の比較基点と違い、かつ `changes.new_in_pr(g, Range(skipped_base, skipped_head), current)` が空でないか、比べられない（None）
 
 ### 異常系の処理
 
@@ -413,7 +432,7 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 | `_resume` | 判定役の起動に失敗 | 上限・失敗 | `verify.ask` | 既定値で続ける（行を確定する） | 注意 | 無し |
 | `_stale_skips` | 比べられない | コミットが無い | `new_in_pr` が None | 既定値で続ける（確かめが要る側に入れる） | 注意 | 無し |
 | `_collect` | 全員が読めない | 今と同じ | `Reviewed.silent` | 止める。記録は残す | `precondition` | 打ち直すと上限に数える |
-| `_decide` | 秒か費用に当たった | `_over` | 起動の前 | 判定役を起動せずに行を確定して保存し、`limit` | 上限の結果 | 上限を上げて打ち直すと続く |
+| `_decide` | 秒か費用に当たった | `_over` | 判定役を起動する前 | 判定役を起動せずに行を確定して保存し、判定へ進む。修正が要れば修正担当も起動せず、`stopped_limit` を書いて `limit` | 上限の結果 | 上限を上げて打ち直すと続く |
 
 ### ログと記録の出力
 
@@ -435,8 +454,8 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_over`（`run` を通す） | 収束せずに終えた後の打ち直しは残りの回数だけ回る。収束の後は 0 から | 起動の時点で使い切ると相手役を起動しない。上限ちょうどの最後のラウンドは修正まで行う。秒か費用が上限ちょうどなら判定役も修正担当も起動しない | 数え直すと落ちる |
-| `_resume` | 判定役の実行中の中断は相手役を起動せずに続き、相手役の費用を 1 回だけ数える | 一部が読めなかったラウンドは `incomplete_reviewers`。保存済みで上限なら判定役を起動しない | head が変われば `interrupted` で読み直す。相手役の実行中の中断も 1 ラウンドに数える |
+| `_over`（`run` を通す） | 収束せずに終えた後の打ち直しは残りの回数だけ回る。収束の後は 0 から | 起動の時点で使い切ると相手役を起動しない。上限ちょうどの最後のラウンドは修正まで行う。秒か費用が上限ちょうどなら判定役も修正担当も起動しない | 打ち直すたびに 0 から数え直す誤った実装は、このテストで失敗する |
+| `_resume` | 判定役の実行中の中断は相手役を起動せずに続き、相手役の費用を 1 回だけ数える | 一部が読めなかったラウンドは `incomplete_reviewers`。保存済みで上限なら判定役を起動しない。修正担当の実行中の中断（`verdict` がある）でも、中断した起動の秒と claude の数を 1 回だけ足す | head が変われば `interrupted` で読み直す。相手役の実行中の中断も 1 ラウンドに数える |
 | `_collect` | 記録と `spent` が残る | 全員が読めないラウンドも数え、読んだ head にしない | 無し |
 | `_decide`・`_round` | 指摘 0 件は `converged`（受け入れ条件 2） | 修正を起動せずに終えた記録に `stopped_limit` が付き `verdict` は変わらず、次の起動は記録の不足で止まらない | 比較基点を変えて起動すると見送りの理由を確かめる |
 | `require_fix_for_changes` | `stopped_limit` があれば `OK` | 結果ファイルが残っていれば今のとおり | `stopped_limit` も記録も無ければ `STOP` |
@@ -521,10 +540,10 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_limit_verdict` | 表の 5 行 | 相手役を足した打ち直しは同じ head でも `ok` にならない。修正を送って上限に当たった起動と打ち直しが同じ結果 | `fix.pushed` を読んだ head とみなすと落ちる |
+| `_limit_verdict` | 表の 5 行 | 相手役を足した打ち直しは同じ head でも `ok` にならない。修正を送って上限に当たった起動と、その打ち直しが同じ結果になる | 修正で送ったコミット（`fix.pushed`）を読んだ head とみなす誤った実装は、このテストで失敗する |
 | `read_all` | 比較基点が同じなら返る | 競合の無いベースの取り込みは返る。比較先を変えて差分から消えただけなら返る | 比較先を変えて新しい変更が現れると None |
 | `finished` | `interrupted` と未完の記録は偽 | `verdict` の無い古い記録（`spent` も無い）は真 | 無し |
-| `file_issues`・`result_fields` | 出直した見送りと上限の行の URL が `items` に載る | 区分 `filed` は起票し直さない。保護の対象の行は上限で起票しても未解決のまま、上限を上げた打ち直しと別の保存先で修正担当へ渡る | **出直した見送りと上限で残った指摘の起票でも、題の境目をまたぐ偽の秘密の断片が題にも本文にも残らない** |
+| `file_issues`・`result_fields` | 出直した見送りと上限で残った指摘の URL が `items` に載る | 区分 `filed` は起票し直さない。保護の対象の指摘は、上限で残って起票しても未解決のままである。上限を上げて同じ保存先で打ち直すと修正担当へ渡り、別の保存先で始めた実行（差分のレビューなど）にも未解決の指摘として引き継がれて修正担当へ渡る | **出直した見送りと上限で残った指摘の起票でも、題の境目をまたぐ偽の秘密の断片が題にも本文にも残らない** |
 
 ## プランの経路と単位のレビューの包み（impl.json・route）
 
@@ -571,7 +590,15 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 | 停止でステップが違う | そのステップで 1 |
 | 承認の待ち・起動せずに返した結果・ステップの分からない停止 | 変えない |
 
-起動の始めに、`--resume` が無ければ全プランの `stop` を消し、`--retry` のプランだけを消す。回数の確かめは `--from` の指定に関係なく行う。起動せずに返す結果は、`step` に保存した `stop.step` を入れ、`next` に `--from <プラン>=<ステップ>` が付くようにする。`--retry` は `next` に入れない。
+起動の始め、子のプランを起動する前に、保存した停止の回数（`queue.json` の `stop`）を次のとおり消して保存する。
+
+| 打ち方 | 消す回数 |
+| --- | --- |
+| `--resume` なし | 全プランの分 |
+| `--resume` だけ | 消さない |
+| `--resume` と `--retry <プラン>` | 指定したプランの分だけ |
+
+回数の確かめは `--from` の指定に関係なく行う。起動せずに返す結果は、`step` に保存した `stop.step` を入れ、`next` に `--from <プラン>=<ステップ>` が付くようにする。`--retry` は `next` に入れない。
 
 ### 異常系の処理
 

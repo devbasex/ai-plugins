@@ -33,7 +33,7 @@
 
 ### Task 1: プレリファクタリング（`review-scope` の判断を `local_scope.py` へ移す）
 - **対象ファイル:** `local_scope.py`、`cli.py`
-- **変更内容:** `_LocalBase`・`_local_base`・`_local_mvv`・`_local_sections`・`_local_scope` を振る舞いを変えずに移す
+- **変更内容:** `_LocalBase`・`_local_base`・`_local_mvv`・`_local_sections`・`_local_scope` を振る舞いを変えずに移す。`_local_scope` は `decide` に名前を変える
 - **満たす受け入れ条件:** 無し
 - **進め方:** テスト駆動は適用しない。今の `test_crossreview_scope.py` がそのまま通ることで確かめる
 
@@ -81,7 +81,7 @@
 
 ### Task 9: 記録のコメント・結果・引き継ぎへの組み込み
 - **対象ファイル:** `report_decide.py`、`prior_decide.py`、`journal.py`（`carry`）、`threads.py`（`viewer`）、`cli.py`、`cross-review.result.schema.json`、`conftest.py`、`test_crossreview_report.py`、`test_crossreview_prior.py`
-- **変更内容:** 表の残し方と URL、一覧の `parked`・`issue`、`Hub.leftovers`、`_publish`・`_report`・`_with_leftovers`
+- **変更内容:** 表の残し方と URL、一覧の `parked`・`issue`、`Hub.leftovers`、`_github_hub`・`_publish`・`_post_report`・`_report`・`cmd_report`・`_with_leftovers`
 - **満たす受け入れ条件:** 3780:2
 - **進め方:** 失敗するテスト（結果の `items` に `disposition` と `url`、起票の失敗の後の打ち直しで 1 回だけ起票、別の保存先は残した指摘を引き継がず URL を戻す）→ 最小実装 → 整理
 

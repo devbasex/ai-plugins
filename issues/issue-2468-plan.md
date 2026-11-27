@@ -79,7 +79,7 @@
 - **対象ファイル:** `drive.py`、`scope_decide.py`、`reviewed_pr.py`、`fixgate_decide.py`、`settings.py`、`cli.py`（`--budget-state`）、`finish_decide.py`（終わり方 `limit` を足すだけ）、`report_decide.py`、`cross-review.args.schema.json`、`docs/contracts/commands.md`、`test_crossreview_limits.py`、`test_crossreview_run.py`
 - **変更内容:** `_over`・`_resume`・`_collect`・`_decide`、`finished`、記録を相手役の前に保存する順。`cmd_fix_gate` も `stopped_limit` を渡す
 - **満たす受け入れ条件:** 2468:2・3・4
-- **進め方:** 失敗するテスト（収束していない打ち直しの合計が `--max-rounds` を越えない・上限で相手役を起動しない・判定の前の中断から続ける）→ 最小実装 → 整理
+- **進め方:** 失敗するテスト（収束していない打ち直しの合計が `--max-rounds` を越えない・上限で相手役を起動しない・判定の前の中断から続ける・修正担当の実行中の中断の使った量を 1 回だけ数える）→ 最小実装 → 整理
 
 ### Task 9: 上限で終わった起動の結果と残し方
 - **対象ファイル:** `finish_decide.py`、`round_scope.py`、`reviewed_pr.py`、`leftover_decide.py`、`leftover.py`、`report_decide.py`、`cli.py`、`test_crossreview_limits.py`、`test_crossreview_leftover.py`
