@@ -250,7 +250,10 @@ src/ndf/
       - 最初のリモートの URL を見つけた時点で読むのをやめる。使うのは最初の URL だけなので、その後の `include` は開かない
     - 3 か所が同じ関数を使うのは、`git remote get-url` の URL（`insteadOf` を当てた後）と設定に書いた URL が違いうるためである。違う値を使うと、`insteadOf` で GitHub の URL を社内のミラーへ置き換えている利用者で、記録と照合が食い違い、質問が止まる
     - 費用: リモートの URL を求める処理では git を起動しない。読むのは、作業場所の `.git`、共通の git ディレクトリの下の `config`（と、そこから読み込む設定ファイル）、メインディレクトリの `.ndf/worktree.json` だけである
-      - コマンド全体では、`show` は承認の記録のキー（`la.repo_key`）を求めるために、`reading add` は作業場所のルート（`git rev-parse --show-toplevel`）を求めるために、それぞれ git を 1 回起動する
+      - コマンド全体では、次の回数だけ git を起動する
+        - `show` は、承認の記録のキー（`la.repo_key`）を求めるために git を 1 回起動する
+        - `show --question` が質問を返す場合は、承認の選択肢に出す承認者名を取得する `git config user.name` も実行し、合計 2 回になる
+        - `reading add` は、作業場所のルートを求めるために `git rev-parse --show-toplevel` を 1 回実行する
       - `reading add` は、以前の `Git.remote_repo()` が使っていた 2 回の起動が無くなる
   - 比べて採らなかった案は次の 3 つである
     - `Git.remote_repo()` で確かめる: 質問を作るたびに `git worktree list` と `git remote get-url` の 2 回の起動が増え、guard の照合とも識別子が食い違う
