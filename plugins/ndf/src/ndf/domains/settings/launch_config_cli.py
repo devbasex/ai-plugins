@@ -316,7 +316,7 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
     # 端末の経路だけ、名前とハッシュを求める前に中断の前の完了を確かめる（入れ直させないため）。質問の経路は入力が無いので、
     # 錠と読み取りを増やさず、`reflect` の中の完了の確かめに任せる
     prior = la.finished(cand, target, t.sha256, None, data) if cand is not None and a.request is None else la.Reflection(False)
-    kept = f"。利用者の保存を {prior.saved} に残した" if prior.saved is not None else ""
+    kept = _kept_note(prior.saved)
     if prior:
         # 置いた直後の中断の後の打ち直し。人の確認を求め直さず、中断の前の完了の記録（同意した人と経路）を残す
         return result.result(TOOL, result.OK, "反映は済んでいる（中断の前に置いた設定をそのまま使う）" + kept, metrics={"sha256": t.sha256})
@@ -328,7 +328,7 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
         return _refused_config("人の確認が無い。Skill の質問で回答するか、利用者が端末で打って名前とハッシュの先頭 8 文字を入れる" + kept)
     record = functools.partial(_record_approval, a.request, repo, t, target, cand, approver)
     try:
-        refused = _approve_and_place(cand, record, t, a.request, data, target)
+        refused, saved = _approve_and_place(cand, record, t, a.request, data, target)
     except _Revoked:
         return _refused_config("反映の直前に、この内容の承認が取り消された。記録も反映もしない。show で示し直して承認を取り直す" + kept)
     except _NoConsent:
@@ -343,7 +343,8 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
     if refused is not None:
         return _refused_config(refused + kept)
     summary = ("承認した" if needed else "承認の記録は要らない（許可が広がらないか承認済み）") + ("。候補を反映した" if cand else "")
-    return result.result(TOOL, result.OK, summary + kept, metrics={"sha256": t.sha256})
+    # 別の操作の中断を片付けたときに、利用者の保存を別の名前で残していれば載せる
+    return result.result(TOOL, result.OK, summary + _kept_note(saved) + kept, metrics={"sha256": t.sha256})
 
 
 def _approval_input(root: Path, cand: Optional[Path], target: Path) -> tuple[ls.Target, bytes]:
@@ -382,19 +383,25 @@ def _record_approval(
     return consent
 
 
-def _approve_and_place(cand: Optional[Path], record: Any, t: ls.Target, request: Optional[str], data: bytes, target: Path) -> Optional[str]:
-    """承認を記録し、候補があれば反映する。拒んだら利用者に示す文、済めば None。"""
+def _kept_note(saved: Optional[Path]) -> str:
+    """利用者の保存を別の名前で残したときに、結果の文へ足す文（残していなければ空）。"""
+    return f"。利用者の保存を {saved} に残した" if saved is not None else ""
+
+
+def _approve_and_place(
+    cand: Optional[Path], record: Any, t: ls.Target, request: Optional[str], data: bytes, target: Path
+) -> tuple[Optional[str], Optional[Path]]:
+    """承認を記録し、候補があれば反映する。拒んだら利用者に示す文（済めば None）と、成功のときに利用者の保存を別の名前で残したパス。"""
     if cand is None:
         with la.records_lock(la.state_file(la.APPROVALS)):
             record()
-        return None
+        return None, None
     done = la.reflect(cand, record, t.sha256, request, data=data, expected=target)
     if done.refusal is not None:
-        return "反映しない。" + done.refusal
+        return "反映しない。" + done.refusal, None
     if not done:
-        kept = f"。利用者の保存を {done.saved} に残した" if done.saved is not None else ""
-        return "候補を作った後に設定が別の作業で変わったため置き換えない。draft からやり直す" + kept
-    return None
+        return "候補を作った後に設定が別の作業で変わったため置き換えない。draft からやり直す" + _kept_note(done.saved), None
+    return None, done.saved
 
 
 def _draft(a: argparse.Namespace) -> dict[str, Any]:

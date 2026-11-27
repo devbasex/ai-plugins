@@ -804,6 +804,8 @@ def recover(target: Path) -> Optional[Path]:
     利用者の保存を別の名前（`launch.json.saved-<値>`）で残したらそのパスを返す。退避が無く（反映先が無い状態から置いた・退避を
     消した直後の中断）、反映先が途中の記録の中身と同じなら、反映は済んでいるので、途中の記録（同意した人と確認の経路を含む）から
     完了の記録を書く。途中の記録は人の同意を確かめた後にだけ書くので、記録の承認者をそのまま引き継げる。
+    利用者のエディタは錠を取らないので、照らした後に反映先へ保存が入ることがある。退避を反映先へ戻すときは反映先を上書きせず、
+    消すのは NDF が置いた候補の中身だけにする（利用者の保存は反映先か別の名前に残す）。
     """
     pending_path = reflected_file(target, PENDING)
     rec = read_launch_record(pending_path)
@@ -812,22 +814,56 @@ def recover(target: Path) -> Optional[Path]:
     if aside.exists():
         now, kept = content_version(target), content_version(aside)
         if now is None:
-            os.rename(aside, target)
+            saved = _link_back(aside, target)
         elif now == rec.get("content"):
             if kept == rec.get("base"):
                 aside.unlink()
                 _write_done(target, rec)
             else:
-                os.replace(aside, target)
+                saved = _restore_over_placed(aside, target, rec.get("content"))
         elif kept == rec.get("base"):
             aside.unlink()
         else:
-            saved = target.with_name(f"{target.name}.saved-{uuid.uuid4().hex[:8]}")
-            os.rename(aside, saved)
+            saved = _keep_as_saved(aside, target)
     elif rec.get("content") is not None and content_version(target) == rec.get("content"):
         _write_done(target, rec)
     pending_path.unlink(missing_ok=True)
     return saved
+
+
+def _keep_as_saved(path: Path, target: Path) -> Path:
+    """利用者の保存 `path` を `launch.json.saved-<値>` へ名前を変えて残し、そのパスを返す。"""
+    saved = target.with_name(f"{target.name}.saved-{uuid.uuid4().hex[:8]}")
+    os.rename(path, saved)
+    return saved
+
+
+def _link_back(path: Path, target: Path) -> Optional[Path]:
+    """`path` を反映先の名前へ戻す。反映先が既にあれば（照らした後の利用者の保存）上書きせず、`path` を別の名前で残してそのパスを返す。"""
+    try:
+        os.link(path, target)
+    except FileExistsError:  # 照らした後に保存された反映先は残し、戻す側を別の名前で残す
+        return _keep_as_saved(path, target)
+    path.unlink()
+    return None
+
+
+def _restore_over_placed(aside: Path, target: Path, placed: Optional[str]) -> Optional[Path]:
+    """反映先に NDF が置いた候補（中身 `placed`）があり、退避の側に利用者の保存があるとき、退避を反映先へ戻す。
+
+    反映先を一時の名前へ移してから中身を照らし、置いた候補のままなら消して退避を戻す。照らした後に利用者が反映先へ保存して
+    いれば、その保存を反映先へ戻し、退避を別の名前で残してそのパスを返す（どちらの保存も消さない）。
+    """
+    moving = target.with_name(f".{target.name}.{uuid.uuid4().hex}")
+    try:
+        os.rename(target, moving)
+    except FileNotFoundError:  # 照らした後に利用者が反映先を消した。退避を戻すだけにする
+        return _link_back(aside, target)
+    if content_version(moving) == placed:
+        moving.unlink()  # NDF が置いた候補だけを消す
+        return _link_back(aside, target)
+    _link_back(moving, target)  # 戻せなければ別の名前で残る
+    return _keep_as_saved(aside, target)
 
 
 def reflected_candidate(candidate: Path, target: Path) -> bool:

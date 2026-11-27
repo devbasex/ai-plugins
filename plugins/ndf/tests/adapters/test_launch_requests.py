@@ -646,6 +646,23 @@ def test_recover_keeps_both_when_target_and_aside_hold_the_users_contents(tmp_pa
     assert saved.name.startswith("launch.json.saved-") and not aside.exists()
 
 
+@pytest.mark.parametrize("placed", ["candidate", "users_save", "missing"])
+def test_putting_the_aside_back_never_overwrites_a_save_made_after_the_check(tmp_path, placed):
+    """退避を反映先へ戻すとき、照らした後に利用者が反映先へ保存していれば上書きせず、退避を別の名前で残す（Value 6）。"""
+    target, candidate, aside = _interrupted(tmp_path)
+    aside.write_bytes(b'{"version": 1, "b": 1}\n')
+    if placed == "users_save":
+        target.write_bytes(b'{"version": 1, "a": 1}\n')
+    elif placed == "missing":
+        target.unlink()
+    saved = la._restore_over_placed(aside, target, la.content_version(candidate))
+    if placed == "users_save":
+        assert target.read_bytes() == b'{"version": 1, "a": 1}\n' and saved.read_bytes() == b'{"version": 1, "b": 1}\n'
+    else:
+        assert target.read_bytes() == b'{"version": 1, "b": 1}\n' and saved is None
+    assert not aside.exists() and not list(target.parent.glob(".launch.json.*"))
+
+
 @pytest.mark.parametrize("left", ["aside", "pending"])
 def test_recover_with_only_the_aside_or_only_the_pending_record(tmp_path, left):
     target, _, aside = _interrupted(tmp_path)
