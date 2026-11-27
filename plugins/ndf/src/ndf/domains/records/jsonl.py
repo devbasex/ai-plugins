@@ -109,25 +109,55 @@ def read_rows_after(
 def _raw(chunk: bytes) -> tuple[list[dict[str, Any]], Optional[str]]:
     """1 行のバイト列を辞書の並びにし、読めなかった断片の理由を添えて返す。
 
-    行全体が 1 つの辞書として読めれば（[辞書], None）。読めなければ、`append` の書いた行の始まり（`ROW_START`）を
-    境界の候補として前から順に探し、境界から行末までが 1 つの辞書として読める最初の境界で分ける。境界より前も同じ手順で
-    読む。前の書き込みが途中で終わると、改行の無い断片の後ろに次の書き手の行がつながる。前の書き込みが閉じ括弧まで
-    書けて末尾の改行だけが欠けると、完全な辞書が 2 つつながる（`append` は末尾の改行を確かめるが、確かめてから書くまでに
-    別の書き手の書き込みが終わることがある）。どちらの場合も、境界の前後で完全に読めた辞書はすべて返す。
-    行の始まりだけで分けるので、断片の中の入れ子の辞書を行として拾わない。返すのは（読めた辞書の並び, 断片の理由）で、
-    断片が無ければ理由は None、どこからも読めなければ（[], 理由）。行全体が読めた行では、境界を探さず読み直さない。
+    行全体が 1 つの辞書として読めれば（[辞書], None）。読めなければ、行の先頭から 1 つずつ辞書を読み、その辞書の終わりの
+    位置から次を読む。読めない所（断片）でだけ、`append` の書いた次の行の始まり（`ROW_START`）を探し、そこから読み続ける。
+    前の書き込みが途中で終わると、改行の無い断片の後ろに次の書き手の行がつながる。前の書き込みが閉じ括弧まで書けて
+    末尾の改行だけが欠けると、完全な辞書がつながる（`append` は末尾の改行を確かめるが、確かめてから書くまでに
+    別の書き手の書き込みが終わることがある）。どちらの場合も、完全に読めた辞書はすべて返す。
+    読み直すのは行の先頭と行の始まりからだけなので、断片の中の入れ子の辞書を行として拾わない。つながった n 件の辞書は、
+    行全体の 1 回と合わせて n + 1 回の解析で読む。返すのは（読めた辞書の並び, 断片の理由）で、断片が無ければ理由は
+    None、どこからも読めなければ（[], 理由）。行全体が読めた行では、行の始まりを探さず読み直さない。
     """
     whole = _parsed(chunk)
     if isinstance(whole, dict):
         return [whole], None
-    start = chunk.find(ROW_START, 1)
-    while start != -1:
-        tail = _parsed(chunk[start:])
-        if isinstance(tail, dict):
-            head, cut = _raw(chunk[:start])
-            return [*head, tail], cut
-        start = chunk.find(ROW_START, start + 1)
-    return [], whole
+    # UTF-8 として読めないバイトも位置を保って文字にし、読めた辞書の範囲に含まれていれば断片として扱う
+    text = chunk.decode("utf-8", "surrogateescape")
+    rows: list[dict[str, Any]] = []
+    cut = False
+    pos = _skip_space(text, 0)
+    while pos < len(text):
+        found = _decoded(text, pos)
+        if found is not None:
+            rows.append(found[0])
+            pos = _skip_space(text, found[1])
+            continue
+        cut = True
+        pos = text.find(_ROW_START_TEXT, pos + 1)
+        if pos == -1:
+            break
+    return rows, whole if cut else None
+
+
+_ROW_START_TEXT = ROW_START.decode("utf-8")
+_DECODER = json.JSONDecoder()
+
+
+def _skip_space(text: str, pos: int) -> int:
+    """`pos` から空白を飛ばした位置。"""
+    while pos < len(text) and text[pos].isspace():
+        pos += 1
+    return pos
+
+
+def _decoded(text: str, pos: int) -> Optional[tuple[dict[str, Any], int]]:
+    """`pos` から始まる 1 つの辞書と、その終わりの位置。辞書として読めないか、UTF-8 として読めないバイトを含めば None。"""
+    try:
+        raw, end = _DECODER.raw_decode(text, pos)
+        text[pos:end].encode("utf-8")
+    except (json.JSONDecodeError, UnicodeEncodeError):
+        return None
+    return (raw, end) if isinstance(raw, dict) else None
 
 
 def _parsed(chunk: bytes) -> dict[str, Any] | str:

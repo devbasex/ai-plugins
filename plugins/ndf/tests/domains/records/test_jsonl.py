@@ -127,3 +127,14 @@ def test_a_row_that_lost_only_its_newline_is_kept_with_the_row_joined_after_it(t
     rows = [first, {**ROW, "version": 1, "step": "後"}]
     assert jsonl.read_rows(path, kind="usage") == (rows, [])
     assert jsonl.read_rows_after(path, 0, kind="usage") == (rows, 0, path.stat().st_size)
+
+
+def test_rows_joined_without_newlines_are_all_read_and_only_the_fragment_between_them_is_dropped(tmp_path):
+    """改行の欠けた完全な行が 3 件つながり、途中に切れた断片が挟まっても、完全な行はすべて読み、断片だけを除く。"""
+    rows = [{"version": 1, **ROW, "step": s} for s in ("一", "二", "三")]
+    line = [json.dumps(r, ensure_ascii=False).encode("utf-8") for r in rows]
+    path = tmp_path / "u.jsonl"
+    path.write_bytes(line[0] + line[1] + b'{"version": 1, "step": "' + "区".encode("utf-8")[:2] + line[2] + b"\n")
+    got, broken = jsonl.read_rows(path, kind="usage")
+    assert got == rows and [b.line for b in broken] == [1]
+    assert jsonl.read_rows_after(path, 0, kind="usage") == (rows, 1, path.stat().st_size)
