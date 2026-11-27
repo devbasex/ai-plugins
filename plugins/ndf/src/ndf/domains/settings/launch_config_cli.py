@@ -277,6 +277,25 @@ def _show(a: argparse.Namespace) -> dict[str, Any]:
         return result.stopped(TOOL, exc.kind, f"{exc}。回答済みで反映が済んでいない承認があるので、先に next のコマンドを打つ", **extra)
 
 
+def _approval_question(
+    target: Path, from_candidate: bool, t: ls.Target, changes: Sequence[Mapping[str, Any]], request: str, approver: str
+) -> dict[str, Any]:
+    """承認の質問の文と選択肢（AskUserQuestion の `questions`）。候補を反映するかどうかで、問いと承認の効果の文が変わる。"""
+    if from_candidate:
+        head = f"この作業場所の {target} を候補の内容で置き換え、以下の起動時の許可を反映してよいですか"
+        effect = "この内容で起動してよい。承認を記録し、候補の内容で起動の設定を置き換える"
+    else:
+        head = f"この作業場所の {target} にある、以下の起動時の許可を承認してよいですか（設定ファイルは変えません）"
+        effect = "この内容で起動してよい。承認を記録する。設定ファイルは変えない"
+    # 識別子は、同じ内容の質問どうしを回答の記録で見分けるために入れる
+    text = "\n".join([head, *_target_lines(t), *_change_lines(changes), f"質問を見分けるリクエストの識別子: {request}"])
+    options = [
+        {"label": la.APPROVE_LABEL.format(approver), "description": effect},
+        {"label": la.DENY_LABEL, "description": "記録も反映もしない。起動の設定は変わらない"},
+    ]
+    return {"questions": [{"question": text, "header": "起動の承認", "options": options, "multiSelect": False}]}
+
+
 def _show_result(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: str, target: Path, extra: dict[str, Any]) -> dict[str, Any]:
     """`show` の結果（続きのコマンド `extra` を添える）。設定を読めなければ `InternalError`。"""
     session = _answer_session() if a.question else None
@@ -295,19 +314,7 @@ def _show_result(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: 
         changes = shown["changes"] = experiment_changes(root, cand)
         if cand is not None:  # 示した experiments をリクエストに残し、approve が反映する候補と照らす（r7-1）
             asked["experiments_sha"] = experiments_sha(cand.read_bytes())
-        if cand is not None:
-            head = f"この作業場所の {target} を候補の内容で置き換え、以下の起動時の許可を反映してよいですか"
-            effect = "この内容で起動してよい。承認を記録し、候補の内容で起動の設定を置き換える"
-        else:
-            head = f"この作業場所の {target} にある、以下の起動時の許可を承認してよいですか（設定ファイルは変えません）"
-            effect = "この内容で起動してよい。承認を記録する。設定ファイルは変えない"
-        # 識別子は、同じ内容の質問どうしを回答の記録で見分けるために入れる
-        text = "\n".join([head, *_target_lines(t), *_change_lines(changes), f"質問を見分けるリクエストの識別子: {request}"])
-        options = [
-            {"label": la.APPROVE_LABEL.format(_approver_name(root)), "description": effect},
-            {"label": la.DENY_LABEL, "description": "記録も反映もしない。起動の設定は変わらない"},
-        ]
-        question = {"questions": [{"question": text, "header": "起動の承認", "options": options, "multiSelect": False}]}
+        question = _approval_question(target, cand is not None, t, changes, request, _approver_name(root))
         return {**question, "sha256": t.sha256}
 
     asked = dict(request_id=request, repo=repo, sha256="", target=str(target), session=session)
