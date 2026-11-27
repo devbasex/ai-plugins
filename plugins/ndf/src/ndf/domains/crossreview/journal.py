@@ -390,7 +390,7 @@ class FindingJournal:
                 unconfirmed.add(fid)
                 continue
             lower = verify_decide.lowers(row, verdict)
-            answered = {k: v for k, v in verdict._asdict().items() if k not in ("id", "unknown")}
+            answered = {k: v for k, v in verdict._asdict().items() if k not in ("id", "unknown", "invalid")}
             row[CHECK] = answered | {"tracks": list(verdict.tracks), criteria_decide.LOWERED: lower}
             if lower:
                 # 引き継いだ指摘は元の重要度を持たないので、下げる前の重要度を残す

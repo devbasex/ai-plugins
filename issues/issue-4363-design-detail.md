@@ -161,7 +161,7 @@ plugins/ndf/
 
 - `read`
   - 事前条件: `found` は出力の最後の `{"verdicts": [...]}` の要素（見つからなければ None）
-  - 事後条件: `Answers.verdicts` は、有効な回答、`holds` が null の回答、保護の種類を示した不正な回答（`invalid` が真）を持つ。不正な回答・知らない番号・回答の無い番号は `Answers.warnings` に番号を載せる
+  - 事後条件: `Answers.verdicts` は、有効な回答、`holds` が null の回答、保護の種類を示した不正な回答（`invalid` が真）を持つ。渡した番号に有効な回答がなければ、その番号を `Answers.warnings` に載せる。`warnings` は公開の記録に載るので、渡していない番号への回答は番号を写さず、件数だけを載せる
 
 ### 処理の手順
 
