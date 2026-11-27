@@ -542,20 +542,20 @@ def _head(cwd: Path) -> str:
     return sh(cwd, "rev-parse", "HEAD").strip()
 
 
-def test_origin_range_needs_an_ancestor_head_and_line_origin_does_not_ask_who_read(wt: Path) -> None:
+def test_origin_needs_an_ancestor_head_and_line_origin_does_not_ask_who_read(wt: Path) -> None:
     base = _head(wt)
     first = commit(wt, "a.txt", "1\n", "一")
     head = commit(wt, "a.txt", "2\n", "二")
     g = git.Git.offline(wt)
     row = _record(head=first, base=base, reviewers=["codex"])
     both = scope_decide.Basis(reviewers=("codex", "kiro"))
-    assert round_scope.origin_range(g, {"rounds": [row]}, scope_decide.Basis(reviewers=("codex",)), head) == changes.Range(base, first)
-    assert round_scope.origin_range(g, {"rounds": [row]}, both, head) is None
+    assert round_scope.origin(g, {"rounds": [row]}, scope_decide.Basis(reviewers=("codex",)), head) == changes.Range(base, first)
+    assert round_scope.origin(g, {"rounds": [row]}, both, head) is None
     assert round_scope.line_origin(g, {"rounds": [row]}, head) == changes.Range(base, first)
     sh(wt, "reset", "-q", "--hard", base)
     other = commit(wt, "b.txt", "x\n", "巻き直し")
     for gone in (row, _record(head="0" * 40, base=base), {k: v for k, v in row.items() if k != "base"}):
-        assert round_scope.origin_range(g, {"rounds": [gone]}, scope_decide.Basis(), other) is None
+        assert round_scope.origin(g, {"rounds": [gone]}, scope_decide.Basis(), other) is None
         assert round_scope.line_origin(g, {"rounds": [gone]}, other) is None
 
 
@@ -663,6 +663,27 @@ def test_conflict_resolved_back_to_the_previous_head_is_new(wt: Path) -> None:
     moved = _move_base(wt, {"a.txt": _lines((10, "base"))})
     sh(wt, "merge", "-q", "--no-edit", "-X", "ours", "target")
     assert (wt / "a.txt").read_text(encoding="utf-8") == _lines((10, "pr"))
+    assert _new(wt, changes.Range(base, head), moved) == ("a.txt",)
+
+
+def test_a_mode_only_fix_does_not_count_a_binary_as_read(wt: Path) -> None:
+    """#3780: 今回渡す差分が権限だけを変えるバイナリは中身が渡らないので、読んだ blob と違えば返す。"""
+    base = _start(wt, {"blob.bin": b"\0one"})
+    head = _write(wt, {"blob.bin": b"\0pr"}, "PR")
+    moved = _move_base(wt, {"blob.bin": b"\0base"})
+    sh(wt, "merge", "-q", "--no-edit", "-X", "ours", "target")
+    sh(wt, "update-index", "--chmod=+x", "blob.bin")
+    sh(wt, "commit", "-q", "-m", "実行権限")
+    assert _new(wt, changes.Range(base, head), moved) == ("blob.bin",)
+
+
+def test_a_removal_before_an_inserted_line_is_new_when_the_base_file_changed(wt: Path) -> None:
+    """#3780: ベース側が変わったファイルでは、今回足した行の直前の削除は前の位置へ直せないので返す。"""
+    base = _start(wt, {"a.txt": _lines()})
+    head = _write(wt, {"a.txt": _lines().replace("line 20\n", "")}, "PR")
+    moved = _move_base(wt, {"a.txt": _lines((2, "base"))})
+    _merge_target(wt)
+    _write(wt, {"a.txt": _lines((2, "base"), (20, "同じ場所へ足した"))}, "直し")
     assert _new(wt, changes.Range(base, head), moved) == ("a.txt",)
 
 

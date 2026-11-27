@@ -391,12 +391,16 @@ def _changed_rows(hunks: Sequence[Hunk]) -> tuple[list[tuple[int, str]], list[tu
 
 def _has_unread_lines(path: str, now: _Delta, seen: _Delta, since: _Delta) -> bool:
     """今の PR の差分の `path` に、今回渡す差分にも既読の差分にも同じ位置で現れない足した行か消した行があるか。位置は今の head の
-    行の番号で、既読の差分とは前の head の行の番号へ直して比べる。消したファイルには残る行が無いので、本文だけを比べる。"""
+    行の番号で、既読の差分とは前の head の行の番号へ直して比べる。消したファイルには残る行が無いので、本文だけを比べる。
+    消した箇所の後ろの行が今回足した行なら、ファイルのベース側の blob が前と同じときだけ先の行へ進め、違えば未読にする
+    （ベースの変更で増えた削除を、別の位置の読んだ削除に当てない）。"""
     entry = now.entries[path]
     deleted = entry.status == "D"
     step = since.entries.get(path)
     before = step.old if step is not None else path
     steps = since.hunks[path] if path in since.hunks else ()
+    read_entry = seen.entries.get(before)
+    same_base = read_entry is not None and read_entry.blobs[0] == entry.blobs[0]
     added, removed = _changed_rows(now.hunks[path] if path in now.hunks else ())
     since_added, since_removed = _changed_rows(steps)
     seen_added, seen_removed = _changed_rows(seen.hunks[before] if before in seen.hunks else ())
@@ -409,9 +413,11 @@ def _has_unread_lines(path: str, now: _Delta, seen: _Delta, since: _Delta) -> bo
     left -= Counter((None if deleted else at, text) for at, text in since_removed)
     gone = Counter((None if deleted else at, text) for at, text in seen_removed)
     for (at, text), count in left.items():
-        # すぐ後ろの行が今回足した行なら、前の head に対応のある最初の行まで進める
+        # すぐ後ろの行が今回足した行なら、前の head の位置へ直せない。ベース側が同じなら、対応のある最初の行まで進める
         prev = None
         while at is not None and (prev := _base_lines(steps, at)) is None:
+            if not same_base:
+                return True
             at += 1
         if gone[(prev, text)] < count:
             return True
@@ -419,15 +425,20 @@ def _has_unread_lines(path: str, now: _Delta, seen: _Delta, since: _Delta) -> bo
     return False
 
 
-def _has_unread(path: str, now: _Delta, seen: _Delta, since: _Delta) -> bool:
-    """今の PR の差分の `path` の変更に、読んでおらず今回も渡らないものがあるか。"""
+def _has_unread(path: str, kinds: frozenset[tuple], now: _Delta, seen: _Delta, since: _Delta) -> bool:
+    """今の PR の差分の `path` の変更に、読んでおらず今回も渡らないものがあるか。`kinds` は既読の差分と今回渡す差分の
+    変更の形。行で比べられないファイルは、今回渡す差分が中身（blob）を変えないなら（権限だけ・名前だけ）、読んだ変更前後の
+    blob と照らす。"""
     entry = now.entries[path]
-    known = (*seen.entries.values(), *since.entries.values())
-    if all(e.kind != entry.kind for e in known):
+    if entry.kind not in kinds:
         return True
-    if path in now.binary:
-        return path not in since.entries and all(e.blobs != entry.blobs for e in seen.entries.values() if e.new == path)
-    return _has_unread_lines(path, now, seen, since)
+    if path not in now.binary:
+        return _has_unread_lines(path, now, seen, since)
+    step = since.entries.get(path)
+    if step is not None and step.blobs[0] != step.blobs[1]:
+        return False
+    read = seen.entries.get(step.old if step is not None else path)
+    return read is None or read.blobs != entry.blobs
 
 
 def new_in_pr(g: git.Git, previous: Range, current: Range) -> Optional[tuple[str, ...]]:
@@ -439,7 +450,8 @@ def new_in_pr(g: git.Git, previous: Range, current: Range) -> Optional[tuple[str
         since = _delta(g, f"{previous.head}..{current.head}")
     except git.GitError:  # noqa: NDF401 外部コマンド: 比べられないことを None で返し、呼び手は全差分にする
         return None
-    return tuple(path for path in now.entries if _has_unread(path, now, seen, since))
+    kinds = frozenset(e.kind for delta in (seen, since) for e in delta.entries.values())
+    return tuple(path for path in now.entries if _has_unread(path, kinds, now, seen, since))
 
 
 def _with_old_paths(entries: Mapping[str, _Entry], paths: Sequence[str]) -> list[str]:
