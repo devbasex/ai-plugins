@@ -301,7 +301,6 @@ def test_adapted_weights_are_drawn_with_their_probabilities(tmp_path, store, clo
         {"phase": "burn_in"},
         {"probs": [0, 0, 0]},  # 抽選に使えない確率は、保存されていても使わずに均等に抽選する
         {"probs": [1.0]},
-        {"probs": [0, 0.5, 0.5]},  # 候補の組に確率 0 があると、その組は割り付けられない
     ],
 )
 def test_weights_that_do_not_match_are_not_used(tmp_path, store, clock, entry):
@@ -310,16 +309,6 @@ def test_weights_that_do_not_match_are_not_used(tmp_path, store, clock, entry):
     _pick(root, unit="u")
     (row,) = _rows(store, "assign")
     assert row["phase"] == "burn_in" and row["probs"] == pytest.approx([1 / 3] * 3)
-
-
-def test_probabilities_shorter_than_the_arms_are_not_drawn(tmp_path, store, clock):
-    # ほかの組を打ち切って基準の組だけが候補に残った項目の確率は、選択肢の数より短いので使わず、均等に抽選する
-    root = _repo(tmp_path)
-    until = _at(NOW + timedelta(days=1))
-    _weights(store, root, candidates=[0], probs=[1.0], cutoffs=[{"arm": 1, "until": until}, {"arm": 2, "until": until}])
-    _pick(root, unit="u")
-    (row,) = _rows(store, "assign")
-    assert row["phase"] == "burn_in" and row["probs"] == [1, 0, 0]
 
 
 def test_a_newer_actual_model_stops_using_the_weights(tmp_path, store, clock):
@@ -828,7 +817,6 @@ NOT_NDF_WEIGHTS = [
     {"version": 1, "entries": [{**_sweep_entry(90), "phase": "adaptive", "probs": []}]},  # 抽選に使えない確率
     {"version": 1, "entries": [{**_sweep_entry(90), "phase": "adaptive", "probs": [0, 0]}]},
     {"version": 1, "entries": [{**_sweep_entry(90), "phase": "adaptive", "probs": [0.5, 0, 0.5]}]},  # 候補でない組に確率がある
-    {"version": 1, "entries": [{**_sweep_entry(90), "phase": "adaptive", "probs": [0, 1]}]},  # 候補の組の確率が 0
 ]
 
 

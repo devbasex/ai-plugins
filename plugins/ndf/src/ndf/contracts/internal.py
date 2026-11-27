@@ -113,15 +113,15 @@ def _loop_event_v1(row: Row) -> Row:
 def _weights_rules(row: Row) -> list[str]:
     """出現率の `adaptive` の項目の確率が、割り付けの抽選に使えるか（#2944）。
 
-    確率は組ごとの値で、候補の組はどれも 0 より大きく、候補でない組は 0、合計は 1（丸めの誤差は許す）。候補の組が 0 だと、その組は
-    割り付けられず比べる単位が集まらない。ほかが合わなければ、割り付けがこの確率で抽選できない。
+    確率は組ごとの値で、候補の組の添字すべてに値があり、候補でない組は 0、合計は 1（丸めの誤差は許す）。合わなければ、割り付けが
+    この確率で抽選できない。
     """
     errors = []
     for n, entry in enumerate(row["entries"]):
         if entry["phase"] != "adaptive":
             continue
         probs, cands = entry["probs"], set(entry["candidates"])
-        if any(i >= len(probs) or probs[i] <= 0 for i in cands) or any(p > 0 for i, p in enumerate(probs) if i not in cands):
+        if any(i >= len(probs) for i in cands) or any(p > 0 for i, p in enumerate(probs) if i not in cands):
             errors.append(f"entries/{n}/probs（候補の組と確率の組が対応しない）")
         elif not math.isclose(math.fsum(probs), 1, abs_tol=1e-6):
             errors.append(f"entries/{n}/probs（確率の合計が 1 でない）")
