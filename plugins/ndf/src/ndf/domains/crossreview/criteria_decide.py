@@ -33,6 +33,9 @@ TABLE = "data/review-criteria.json"
 DECL_VERSION = 1
 # 文書の基準を足す指示の相手
 REVIEWER, FIXER = "reviewer", "fixer"
+# 指摘の行の欄のうち、このモジュールと判定役の判断も読むもの。指摘に一度でも示された保護の種類と、判定役の確認の結果、
+# その中の「確認で下げた」を表す欄（#4363。書くのは `journal`）
+PROTECT, CHECK, LOWERED = "protect", "check", "lowered"
 # 修正担当の会話を保存するかのキー（#4013）
 FIXER_SESSIONS = "fixer_sessions"
 # 必ず人の承認が要る操作の番号（`P1`・`C7`。MVV の項目の `Value 5`・`Vision` と見分ける）
@@ -78,7 +81,7 @@ def _lightest_blocking() -> str:
     return _edge(True, min)
 
 
-def _heaviest_light() -> str:
+def heaviest_light() -> str:
     """収束の妨げにならない重さのうち最も重いもの（minor）。"""
     return _edge(False, max)
 
@@ -96,15 +99,17 @@ def effective_severity(severity: Optional[str], impact: object, *, redline: bool
     if severity is not None and not blocking(severity):
         return severity
     if not redline and not _has_impact(impact):
-        return _heaviest_light()
+        return heaviest_light()
     return severity if severity is not None else _lightest_blocking()
 
 
 def downgraded(row: Mapping[str, Any]) -> bool:
-    """ジャーナルへ入れるときに minor へ下げた行か（#4014）。`raised_severity` の無い行（引き継いだ行・前のバージョンの行）は偽。"""
-    if "raised_severity" not in row:
+    """ジャーナルへ入れるときに minor へ下げた行か（#4014）。`raised_severity` の無い行（引き継いだ行・前のバージョンの行）と、
+    判定役の確認で下げた行（#4363）は偽。"""
+    check = row.get(CHECK)
+    if "raised_severity" not in row or (isinstance(check, Mapping) and check.get(LOWERED)):
         return False
-    return blocking(severity_of(row["raised_severity"])) and row.get("severity") == _heaviest_light()
+    return blocking(severity_of(row["raised_severity"])) and row.get("severity") == heaviest_light()
 
 
 def heavier(known: Optional[str], raised: Optional[str]) -> Optional[str]:
@@ -123,6 +128,16 @@ def heavier_raised(known: Optional[str], raised: Optional[str]) -> Optional[str]
 def protect_kinds() -> tuple[str, ...]:
     """保護の種類（秘密・認証認可・利用者のデータ・戻せない操作・人の安全。#4363）。"""
     return tuple(_table()["kinds"]["protect"])
+
+
+def track_kinds() -> tuple[str, ...]:
+    """判定役が回答の `tracks` に書く指摘の種類の全部（保護の種類と、利用者に届いた不具合・承認資料の正しさ。#4363）。"""
+    return (*protect_kinds(), *_table()["kinds"]["other"])
+
+
+def verify_text() -> Mapping[str, Any]:
+    """判定役への指示の文（#4363）。"""
+    return _table()["verify"]
 
 
 def protect_of(value: object) -> tuple[str, ...]:
@@ -202,7 +217,7 @@ def reviewer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list
     names = "・".join(facts.ids(SEVERITIES))
     impact = t["impact"]["reviewer"].format(
         blocking="・".join(facts.ids(SEVERITIES, blocking=True)),
-        light_first=_heaviest_light(),
+        light_first=heaviest_light(),
         light="・".join(facts.ids(SEVERITIES, blocking=False)),
     )
     return [
@@ -266,6 +281,14 @@ def unit_block(role: str, unit: str) -> list[str]:
     return [text["heading"], unit.rstrip(), text[role]]
 
 
+def document_line(documents: bool) -> list[str]:
+    """文書を含む PR（`documents`）なら文書の基準の 1 行、含まなければ空。判定役の指示にはこの 1 行だけを足す（#4363）。"""
+    if not documents:
+        return []
+    doc = _table()["document"]
+    return [f"{doc['number']}. {doc['text']}"]
+
+
 def document_block(role: str, documents: bool, previous: Optional[Previous] = None) -> list[str]:
     """文書を含む PR（`documents`）の指示に足す「文書の指摘の基準」のセクション（#4285 の決定 4〜6）。含まなければ空。
 
@@ -274,7 +297,7 @@ def document_block(role: str, documents: bool, previous: Optional[Previous] = No
     if not documents:
         return []
     doc = _table()["document"]
-    lines = ["## 文書の指摘の基準", "この PR は文書を変えているので、次の基準を足す。", f"{doc['number']}. {doc['text']}"]
+    lines = ["## 文書の指摘の基準", "この PR は文書を変えているので、次の基準を足す。", *document_line(documents)]
     if role == REVIEWER:
         lines += doc["fields"]
         if previous is not None:

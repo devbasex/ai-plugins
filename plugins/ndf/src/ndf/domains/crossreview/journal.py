@@ -1,6 +1,6 @@
 """指摘のジャーナル（`drive.py` から分けた。#3941）。
 
-相手役の指摘を番号を付けて重ねずに入れ、修正担当の結果・前の実行から引き継いだ指摘・再発を読み込み、
+相手役の指摘を番号を付けて重ねずに入れ、判定役の確認の結果・修正担当の結果・前の実行から引き継いだ指摘・再発を読み込み、
 終わり方の判定（`finish_decide`）へ渡す形にする。状態ファイルの `findings` の行の形を持つのはここだけである。
 """
 
@@ -10,10 +10,10 @@ import hashlib
 import json
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf.core.converge import oscillation
-from ndf.domains.crossreview import criteria_decide, prior_decide, store
+from ndf.domains.crossreview import criteria_decide, prior_decide, store, verify_decide
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, UNPINNED
 from ndf.domains.records import jsonl
@@ -34,7 +34,9 @@ OCCURRENCE = "occurrence"
 
 
 # 指摘に一度でも示された保護の種類の欄（`criteria_decide.protect_kinds`。足した値は外さない。#4363）
-PROTECT = "protect"
+PROTECT = criteria_decide.PROTECT
+# 判定役の確認の結果の欄（有効な回答のあった指摘だけが持つ。直した指摘が戻れば外す。#4363）
+CHECK = criteria_decide.CHECK
 # 指摘がプロジェクト MVV に反するときの欄のうち、手元の状態ファイルだけに持つもの（#4076。記録のコメントにも載せる欄は
 # `report_decide.MARKS`、必ず人の承認が要る操作に当たるかの欄は `finish_decide.REDLINE`）。識別子は、どの MVV かを表す文字列である
 # MVV が変わって外した判定の並び（追記だけ）
@@ -219,6 +221,40 @@ def _mvv_warnings(round_no: int, unknown: Sequence[str], unexplained: Sequence[s
     return out
 
 
+def _lowered(row: Mapping[str, Any]) -> bool:
+    """判定役の確認で下げた指摘か。"""
+    check = row.get(CHECK)
+    return isinstance(check, Mapping) and bool(check.get(criteria_decide.LOWERED))
+
+
+def _protect(row: dict[str, Any], kinds: object) -> None:
+    """指摘に保護の種類を足す（足すものが無ければ何もしない。足した値は外さない）。"""
+    added = criteria_decide.protect_of(kinds)
+    if added:
+        row[PROTECT] = list(criteria_decide.protect_of([*store.list_of(row, PROTECT), *added]))
+
+
+def _unlower(row: dict[str, Any], new: Mapping[str, Any], named: Optional[str]) -> bool:
+    """判定役の確認で下げた指摘が、`new`（`_raised` の値）と MVV の項目 `named` で出し直されたとき。下げたままにするなら偽。
+
+    保護の種類が付けば元の重要度（最低 major）へ戻し、今回のほうが重ければ今回の値にする。MVV の項目か必ず人の承認が
+    要る操作を挙げれば、下げていない指摘と同じに今回の値と重ねる（分類は呼び手の `_classify`）。#4363"""
+    if PROTECT not in new and named is None:
+        return False
+    row[CHECK][criteria_decide.LOWERED] = False
+    if PROTECT in new:
+        restored = criteria_decide.at_least_blocking(criteria_decide.severity_of(row.get("raised_severity")))
+        row["severity"] = criteria_decide.heavier(restored, new["severity"])
+    return True
+
+
+class Checked(NamedTuple):
+    """確認の結果を当てた後に、駆動が使う値。`lowered` は下げた指摘のキー、`unconfirmed` は有効な回答の無かった指摘の id。"""
+
+    lowered: frozenset[str] = frozenset()
+    unconfirmed: frozenset[str] = frozenset()
+
+
 class FindingJournal:
     """指摘のジャーナル（id から行の辞書。状態ファイルの findings に並べる形のまま持つ）と、その規則。
 
@@ -231,6 +267,8 @@ class FindingJournal:
         self.rows: dict[str, dict[str, Any]] = {str(f["id"]): f for f in rows if isinstance(f, dict) and "id" in f}
         # 直した・見送ったのに出し直されて未解決へ戻した指摘の id（呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
         self.revived: list[str] = []
+        # 最後の `enter` で、新しく出たか戻った指摘の id（判定役へ渡す候補。#4363）
+        self.fresh: list[str] = []
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
         # 最後の `carry` で、前の実行が残した MVV の判定を重ねて変わった、既にある指摘の id
@@ -253,6 +291,7 @@ class FindingJournal:
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
         unexplained: list[str] = []
+        fresh: list[str] = []
         for item in raised:
             text = item.get("text")
             text = text.strip() if isinstance(text, str) else ""
@@ -266,8 +305,11 @@ class FindingJournal:
                 row = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
                 known = self.rows[fid] = row | _raised(item, named)
                 by_key[key] = known
+                fresh.append(fid)
             else:
+                revived = len(self.revived)
                 self._raised_again(known, item, round_no, named, mvv)
+                fresh += self.revived[revived:]
             if named is not None and known.get("by") != BY_NDF:
                 _classify(known, item, named, items, mvv)
                 if _text(item.get("impact")) is None:
@@ -275,6 +317,7 @@ class FindingJournal:
             elif named is None and items and _named_any(item):
                 unknown.append(str(known["id"]))
             touched[key] = known
+        self.fresh = list(dict.fromkeys(fresh))
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
 
@@ -282,24 +325,24 @@ class FindingJournal:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
         未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
         1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
-        行の値に今回の値を足す（#4363）。"""
+        行の値に今回の値を足す。判定役の確認で下げた指摘の重要度は、`_unlower` の条件に当たらなければ変えない（#4363）。"""
         new = _raised(item, named)
         if known.get(JUDGED) not in (None, mvv):
             _unclassify(known)
         if known.get("outcome") == fin.FIXED or _skip_is_void(known, named, mvv):
             self._revive(known, new, _text(item.get("section")), round_no)
-        severity = criteria_decide.heavier(criteria_decide.severity_of(known.get("severity")), new["severity"])
-        if severity is not None:
-            known["severity"] = severity
+        _protect(known, new.get(PROTECT))
+        if "raised_severity" in known:
+            raised = criteria_decide.severity_of(known["raised_severity"])
+            known["raised_severity"] = criteria_decide.heavier_raised(raised, new["raised_severity"])
+        if not _lowered(known) or _unlower(known, new, named):
+            severity = criteria_decide.heavier(criteria_decide.severity_of(known.get("severity")), new["severity"])
+            if severity is not None:
+                known["severity"] = severity
         if UNPINNED in known:
             known[UNPINNED] = criteria_decide.heavier(criteria_decide.severity_of(known[UNPINNED]), new["severity"])
         if "impact" not in known and "impact" in new:
             known["impact"] = new["impact"]
-        if PROTECT in new:
-            known[PROTECT] = list(criteria_decide.protect_of([*store.list_of(known, PROTECT), *new[PROTECT]]))
-        if "raised_severity" in known:
-            raised = criteria_decide.severity_of(known["raised_severity"])
-            known["raised_severity"] = criteria_decide.heavier_raised(raised, new["raised_severity"])
 
     def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
         """直した・見送った指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
@@ -308,10 +351,33 @@ class FindingJournal:
         self.revived.append(str(known["id"]))
         # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
         # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
-        for stale in ("path", "line", SKIPPED_MVV, REVIEW_DEFER):
+        for stale in ("path", "line", SKIPPED_MVV, REVIEW_DEFER, CHECK):
             known.pop(stale, None)
         known |= {k: v for k, v in new.items() if k in ("path", "line")}
         known["section"] = section
+
+    def apply_checks(self, asked: Sequence[str], verdicts: Mapping[str, verify_decide.Verdict]) -> Checked:
+        """判定役へ渡した指摘 `asked` に回答 `verdicts` を当てる。有効な回答は行の `check` に残し、下げてよい指摘
+        （`verify_decide.lowers`）は minor にする。判断できない回答と回答の無い指摘の重要度は変えない。回答の種類のうち
+        保護の種類は、行に足す（#4363）。"""
+        lowered: set[str] = set()
+        unconfirmed: set[str] = set()
+        for fid in asked:
+            row, verdict = self.rows[fid], verdicts.get(fid)
+            if verdict is not None:
+                _protect(row, verdict.tracks)
+            if verdict is None or verdict.holds is None:
+                unconfirmed.add(fid)
+                continue
+            lower = verify_decide.lowers(row, verdict)
+            answered = {k: v for k, v in verdict._asdict().items() if k not in ("id", "unknown")}
+            row[CHECK] = answered | {"tracks": list(verdict.tracks), criteria_decide.LOWERED: lower}
+            if lower:
+                # 引き継いだ指摘は元の重要度を持たないので、下げる前の重要度を残す
+                row.setdefault("raised_severity", criteria_decide.severity_of(row.get("severity")))
+                row["severity"] = criteria_decide.heaviest_light()
+                lowered.add(row["key"])
+        return Checked(frozenset(lowered), frozenset(unconfirmed))
 
     def ingest_citations(
         self, errors: Optional[Sequence[Mapping[str, Any]]], mvv: Optional[str], round_no: int, *, recorded: bool = True

@@ -69,6 +69,10 @@ def test_issue_4014_downgraded_reads_raised_severity() -> None:
     # 引き継いだ行・前のバージョンの行（raised_severity が無い）
     assert criteria_decide.downgraded({"severity": "minor"}) is False
     assert criteria_decide.downgraded({}) is False
+    # 判定役の確認で下げた行は、ジャーナルへ入れるときに下げた行に数えない（#4363）
+    row = {"severity": "minor", "raised_severity": "major"}
+    assert criteria_decide.downgraded({**row, "check": {"lowered": True}}) is False
+    assert criteria_decide.downgraded({**row, "check": {"lowered": False}}) is True
 
 
 def test_focus_reads_version_1_only() -> None:
