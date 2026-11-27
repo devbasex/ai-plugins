@@ -127,6 +127,9 @@ def test_design_handlings_find_the_columns_by_the_header_and_return_empty_withou
     swapped = "## 設計の結果\n\n| 扱い | 課題 | 触るファイル |\n| --- | --- | --- |\n| 閉じる | #3 | — |\n"
     assert design_handlings(swapped) == {3: ("閉じる", None)}
     assert design_handlings("## 設計\n\n| 課題 | 扱い | 統合先 |\n| --- | --- | --- |\n| #1 | 実装する | — |\n") == {}
+    # 区切りの行の先頭の `|` を省いた表も、同じ表として読む
+    bare_rule = "## 設計の結果\n\n| 課題 | 扱い | 統合先 |\n--- | --- | ---\n| #2 | マージする | #1 |\n"
+    assert design_handlings(bare_rule) == {2: ("マージする", 1)}
     # 見出しの次が区切りでない表は対象の表ではない
     assert design_handlings("## 設計の結果\n\n| 課題 | 扱い |\n| #1 | 実装する |\n") == {}
 

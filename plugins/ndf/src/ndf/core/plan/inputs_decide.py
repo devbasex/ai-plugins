@@ -289,7 +289,8 @@ def design_handlings(text: str) -> dict[int, tuple[str, Optional[int]]]:
 def _results_table(text: str) -> Optional[list[list[str]]]:
     """「設計の結果」の、見出しに「課題」「扱い」があり次の行が区切りの最初の表の行（見出し・区切り・本文）。無ければ None。
 
-    表は囲みの外で `|` から始まる行が続く範囲で、空行・本文の行・囲みで切れる。"""
+    表は囲みの外で表の行（`_table_line`。表の行の直後の、先頭の `|` を省いた区切りの行を含む）が続く範囲で、空行・本文の
+    行・囲みで切れる。"""
     lines = body_lines(text)
     span = section_span(lines, RESULTS_HEADING)
     if span is None:
@@ -298,9 +299,10 @@ def _results_table(text: str) -> Optional[list[list[str]]]:
     last = -2
     # 添字は本文の行のもの。囲みの行も数に入るので、囲みを挟んだ 2 つの表はつながらない
     for i, line in outside_fences(lines[span[0] : span[1]]):
-        if not line.strip().startswith("|"):
+        follows = bool(tables) and i == last + 1
+        if not _table_line(line, follows):
             continue
-        if i == last + 1 and tables:
+        if follows:
             tables[-1].append(line)
         else:
             tables.append([line])
