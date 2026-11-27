@@ -8,7 +8,7 @@ import re
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import pytest
 
@@ -213,15 +213,31 @@ def _diff(root: Path) -> Path:
     return path
 
 
-def _launcher(seen: list, verdicts: Optional[list], state: Any = agents.AgentState.DONE, denied: Optional[Path] = None):
-    """起動を `seen` に残し、回答 `verdicts`（None は JSON の無い本文）を claude の出力の形で書く偽の起動。"""
+def _given(spec: agents.Launch) -> Path:
+    """判定役が worktree のほかに読めるディレクトリ。"""
+    [place] = [spec.argv[i + 1] for i, a in enumerate(spec.argv) if a == "--add-dir"]
+    return Path(place)
+
+
+def _launcher(
+    seen: list,
+    verdicts: Optional[list],
+    state: Any = agents.AgentState.DONE,
+    denied: Union[Path, str, None] = None,
+    read: Optional[dict] = None,
+):
+    """起動を `seen` に残し、回答 `verdicts`（None は JSON の無い本文）を claude の出力の形で書く偽の起動。`denied` の文字列は
+    資料のディレクトリのファイル名。資料は起動の後に消えるので、中身は起動の中で `read` へ写す。"""
 
     def launch(spec: agents.Launch) -> agents.AgentStatus:
         seen.append(spec)
+        if read is not None:
+            read.update({f.name: f.read_text(encoding="utf-8") for f in _given(spec).iterdir()})
         body: dict = {"result": "読んだ" if verdicts is None else json.dumps({"verdicts": verdicts}, ensure_ascii=False)}
         body["permission_denials"] = []
         if denied is not None:
-            body["permission_denials"] = [{"tool_name": "Read", "tool_input": {"file_path": str(denied)}}]
+            path = _given(spec) / denied if isinstance(denied, str) else denied
+            body["permission_denials"] = [{"tool_name": "Read", "tool_input": {"file_path": str(path)}}]
         spec.paths.out.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
         return agents.AgentStatus(spec.agent, state, 0, "", ())
 
@@ -244,7 +260,8 @@ def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers
     (tmp_path / "round1-verify.out").symlink_to(other)
     (tmp_path / "round1-verify.err.log").write_text("前の記録", encoding="utf-8")
     modes: list[int] = []
-    answered = _launcher(seen, [holding(_row())])
+    read: dict[str, str] = {}
+    answered = _launcher(seen, [holding(_row())], read=read)
 
     def launch(spec: agents.Launch) -> agents.AgentStatus:
         modes.append(spec.paths.out.parent.stat().st_mode & 0o777)
@@ -256,11 +273,11 @@ def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers
     argv = list(spec.argv)
     assert spec.agent == participants.FIXER and spec.cwd == run.cfg.worktree
     assert argv[argv.index("--tools") + 1] == participants.READ_TOOLS and "--restricted" in argv
-    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"] == [str(diff.parent)]
-    assert str(diff) in argv[-1] and spec.paths.out.name == "round1-verify.out"
-    listed = diff.parent / "round1-verify-findings.jsonl"
-    assert str(listed) in argv[-1] and not any("保存が止まる" in a for a in argv)
-    assert "保存が止まる" in listed.read_text(encoding="utf-8")
+    place = _given(spec)
+    assert place != diff.parent and str(place / diff.name) in argv[-1] and str(diff) not in argv[-1]
+    assert spec.paths.out.name == "round1-verify.out" and not place.exists()
+    assert str(place / "round1-verify-findings.jsonl") in argv[-1] and not any("保存が止まる" in a for a in argv)
+    assert "保存が止まる" in read["round1-verify-findings.jsonl"] and read[diff.name] == "diff"
     # 出力はこの起動の間だけの実行者だけが開けるディレクトリに書かせ、起動ごとの名前で状態の保存先へ新規作成する
     written = spec.paths.out.parent
     assert modes == [0o700] and not written.exists()
@@ -290,9 +307,9 @@ def test_issue_4363_ask_keeps_the_records_of_every_launch_and_replaces_nothing(t
 @pytest.mark.parametrize("source", ["path", "principles_path"])
 def test_issue_4363_ask_does_not_answer_when_reading_the_mvv_copy_is_denied(tmp_path: Path, source: str) -> None:
     snap, diff = _approved(tmp_path), _diff(tmp_path)
-    denied = diff.parent / getattr(snap, source).name
+    denied = getattr(snap, source).name
     answers = verify.ask(_AskRun(tmp_path, snap), 1, [_row()], {"r1-1": [diff]}, _launcher([], [holding(_row())], denied=denied))
-    assert answers.verdicts == {} and denied.name in answers.warnings[0]
+    assert answers.verdicts == {} and denied in answers.warnings[0]
 
 
 @pytest.mark.parametrize(
@@ -335,12 +352,12 @@ def test_issue_4363_ask_does_not_take_a_negative_answer_when_reading_the_impleme
 def test_issue_4363_ask_points_the_mvv_criterion_at_the_copies_in_the_input_directory(tmp_path: Path) -> None:
     """MVV の本文と共通原則は、判定役が読める資料のディレクトリへ写してから基準 5 で指す。"""
     snap, diff, seen = _approved(tmp_path), _diff(tmp_path), []
-    verify.ask(_AskRun(tmp_path, snap), 1, [_row()], {"r1-1": [diff]}, _launcher(seen, []))
+    read: dict[str, str] = {}
+    verify.ask(_AskRun(tmp_path, snap), 1, [_row()], {"r1-1": [diff]}, _launcher(seen, [], read=read))
     prompt = seen[0].argv[-1]
     for source in (snap.path, snap.principles_path):
-        copied = diff.parent / source.name
-        assert str(copied) in prompt and str(source) not in prompt
-        assert copied.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+        assert str(_given(seen[0]) / source.name) in prompt and str(source) not in prompt
+        assert read[source.name] == source.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -356,22 +373,32 @@ def test_issue_4363_ask_lists_the_diffs_of_each_finding_when_they_differ(tmp_pat
     """指示は渡す指摘の差分をすべて挙げ、一覧の各行はその指摘の差分だけを持つ。渡さない指摘の差分は挙げない。"""
     diff, seen = _diff(tmp_path), []
     full, unused = diff.parent / "round1-full.diff", diff.parent / "unused.diff"
+    full.write_text("full", encoding="utf-8")
     diffs = {"r1-1": [diff], "r1-2": [diff, full], "r1-3": [unused]}
-    verify.ask(_AskRun(tmp_path), 1, [_row("r1-1"), _row("r1-2")], diffs, _launcher(seen, []))
-    prompt = seen[0].argv[-1]
-    assert str(full) in prompt and str(unused) not in prompt
-    listed = (diff.parent / "round1-verify-findings.jsonl").read_text(encoding="utf-8")
-    assert [json.loads(line)["diffs"] for line in listed.splitlines()] == [[str(diff)], [str(diff), str(full)]]
+    read: dict[str, str] = {}
+    verify.ask(_AskRun(tmp_path), 1, [_row("r1-1"), _row("r1-2")], diffs, _launcher(seen, [], read=read))
+    prompt, place = seen[0].argv[-1], _given(seen[0])
+    assert str(place / full.name) in prompt and unused.name not in prompt
+    shown = [json.loads(line)["diffs"] for line in read["round1-verify-findings.jsonl"].splitlines()]
+    assert shown == [[str(place / diff.name)], [str(place / diff.name), str(place / full.name)]]
 
 
-def test_issue_4363_ask_masks_the_credentials_quoted_in_the_listed_findings(tmp_path: Path) -> None:
-    """相手役が指摘に引用した認証情報は、判定役が読む一覧へ書く前に伏せる。"""
-    diff, token, password = _diff(tmp_path), "ghp_" + "A" * 24, "pass" + "word123"
+def test_issue_4363_ask_masks_the_credentials_in_everything_it_gives_the_judge(tmp_path: Path) -> None:
+    """指摘の引用・差分の削除行・MVV の写し・指示に埋める重点の認証情報は、判定役へ渡す前に伏せ、元の差分は変えない。"""
+    snap, diff, seen = _approved(tmp_path), _diff(tmp_path), []
+    token, password = "ghp_" + "A" * 24, "pass" + "word123"
+    removed = f"-url = https://user:{password}@example.com\n-token = {token}\n+url = None\n"
+    diff.write_text(removed, encoding="utf-8")
+    snap.path.write_text(f"# MVV の本文 {token}", encoding="utf-8")
+    run = _AskRun(tmp_path, snap)
+    run.cfg.settings.focus = (f"{token} の扱い",)
     row = _row(text=f"{token} をログに出す", impact=f"https://user:{password}@example.com が読まれる")
-    verify.ask(_AskRun(tmp_path), 1, [row], {"r1-1": [diff]}, _launcher([], []))
-    listed = (diff.parent / "round1-verify-findings.jsonl").read_text(encoding="utf-8")
-    assert token not in listed and password not in listed
-    assert "をログに出す" in listed and "@example.com が読まれる" in listed
+    read: dict[str, str] = {}
+    verify.ask(run, 1, [row], {"r1-1": [diff]}, _launcher(seen, [], read=read))
+    given = "".join(read.values()) + seen[0].argv[-1]
+    assert token not in given and password not in given
+    assert "をログに出す" in given and "の扱い" in given and "+url = None" in read[diff.name] and "# MVV の本文" in read[snap.path.name]
+    assert diff.read_text(encoding="utf-8") == removed
 
 
 @pytest.mark.parametrize("how", ["failed", "denied", "no-json", "empty"])
@@ -380,7 +407,7 @@ def test_issue_4363_ask_failure_gives_no_answer_and_one_warning(tmp_path: Path, 
     diff, seen = _diff(tmp_path), []
     launch = {
         "failed": _launcher(seen, [holding(_row())], state=agents.AgentState.FAILED),
-        "denied": _launcher(seen, [holding(_row())], denied=diff),
+        "denied": _launcher(seen, [holding(_row())], denied=diff.name),
         "no-json": _launcher(seen, None),
         "empty": _launcher(seen, []),
     }[how]

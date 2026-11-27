@@ -1,9 +1,10 @@
 """判定役を 1 回起動して回答を返す（#4363）。
 
 判定役は、修正担当・相手役とは別の、読むだけの claude の起動である（`participants.read_only_launch`）。読める場所は
-レビューする worktree と、この実行の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV の写し）だけである。
-指摘の文はプロセスの引数に載せず、秘密（`run_log.redact`）を伏せた一覧のファイルで渡す。一覧は、実行者だけが開ける資料のディレクトリに置く。判定役の出力は
-起動の間だけの一時ディレクトリ（`tempfile.TemporaryDirectory`。起動の関数の中で閉じる）に書かせ、起動の後で、状態の保存先に
+レビューする worktree と、この起動の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV の写し）だけである。
+指摘の文はプロセスの引数に載せず、一覧のファイルで渡す。判定役へ渡す一覧・差分・MVV の写し・指示に埋める基準の行は、どれも
+秘密（`run_log.redact`）を伏せる。資料と出力は、起動の間だけの一時ディレクトリ（`tempfile.TemporaryDirectory`。起動の関数の中で
+閉じる）の別々のディレクトリに置き、相手役が読んだ元の差分は変えず、判定役に読ませない。起動の後で、状態の保存先に
 起動ごとに違う名前の実行者だけが読めるファイルとして新規作成する（排他作成。前からあるファイルは置き換えない）。書けなければ過程に
 1 行残す。保存先の記録の片付けと、強制終了などで残った一時ディレクトリの回収は持たない。どの指摘を渡すかと回答の読み方は
 `verify_decide`、回答を指摘の行へ当てるのは呼び手の `drive` である。
@@ -20,7 +21,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import tempfile
 import uuid
 from collections.abc import Mapping, Sequence
@@ -48,17 +48,20 @@ class VerifyRun(Protocol):
     def note(self, round_no: int, who: str, result: str, warning: Optional[str] = None) -> None: ...
 
 
+def _masked_copy(source: Path, into: Path) -> Path:
+    """`source` の秘密を伏せた写しを、資料のディレクトリ `into` に同じ名前で作る。写せなければ `OSError`。"""
+    copied = into / source.name
+    copied.write_text(run_log.redact(source.read_bytes()), encoding="utf-8")
+    return copied
+
+
 def _readable_mvv(snap: Optional[mvv.Snapshot], into: Path) -> Optional[mvv.Snapshot]:
-    """承認済みの MVV なら、本文と共通原則を資料のディレクトリ `into` へ写し、写しを指すスナップショットを返す。元のファイルは
-    利用者の状態の保存先にあり判定役が読めないためで、読める場所は増やさない。写せなければ `OSError`。"""
+    """承認済みの MVV なら、本文と共通原則を資料のディレクトリ `into` へ写し（`_masked_copy`）、写しを指すスナップショットを返す。
+    元のファイルは利用者の状態の保存先にあり判定役が読めないためで、読める場所は増やさない。"""
     held = criteria_decide.approved(snap)
     if held is None or held.path is None or held.principles_path is None:
         return snap
-    copies = []
-    for source in (held.path, held.principles_path):
-        copies.append(into / source.name)
-        shutil.copyfile(source, copies[-1])
-    return held._replace(path=copies[0], principles_path=copies[1])
+    return held._replace(path=_masked_copy(held.path, into), principles_path=_masked_copy(held.principles_path, into))
 
 
 def _record(run: VerifyRun, round_no: int, to: Path, data: bytes) -> bool:
@@ -101,53 +104,74 @@ def _unanswered(run: VerifyRun, round_no: int, count: int, why: str, warning: st
     return verify_decide.Answers({}, (warning,))
 
 
+def _prepare(
+    run: VerifyRun,
+    round_no: int,
+    rows: Sequence[Mapping[str, Any]],
+    diffs: Mapping[str, Sequence[Path]],
+    into: Path,
+) -> tuple[str, tuple[Path, ...]]:
+    """資料のディレクトリ `into` を作って判定役の資料を置き、指示と、判定役が読む資料のファイルを返す。判定役へ渡すものは
+    どれも秘密を伏せ、元の差分は変えない。用意できなければ `OSError`。"""
+    into.mkdir(mode=0o700)
+    used = tuple(dict.fromkeys(diff for row in rows for diff in diffs[str(row["id"])]))
+    copies = {diff: _masked_copy(diff, into) for diff in used}
+    snap = _readable_mvv(run.snapshot, into)
+    # 相手役が引用した認証情報も伏せる（差分のパスは変えないので、足す前に伏せる）
+    masked = run_log.redact([dict(row) for row in rows])
+    # 差分が 1 つなら、行ごとに繰り返し書かない
+    shown = masked if len(used) == 1 else [{**row, "diffs": [str(copies[d]) for d in diffs[str(row["id"])]]} for row in masked]
+    listed = into / f"round{round_no}-verify-findings.jsonl"
+    listed.write_text(verify_decide.listing(shown), encoding="utf-8")
+    criteria = [
+        *criteria_decide.criteria_lines(run.cfg.settings.focus, snap),
+        *criteria_decide.document_line(run.documents, rows),
+    ]
+    shared = tuple(copies.values())
+    # 指示に埋める基準の行（重点・文書の基準）にも同じ伏せ字を掛ける
+    prompt = verify_decide.instruction(listed, shared, run.cfg.worktree, run_log.redact(criteria))
+    held = criteria_decide.approved(snap)
+    # MVV の本文と共通原則の写しも、読めなければ確かめにならない資料である
+    extra = () if held is None else tuple(p for p in (held.path, held.principles_path) if p is not None)
+    return prompt, (*shared, listed, *extra)
+
+
 def ask(
     run: VerifyRun, round_no: int, rows: Sequence[Mapping[str, Any]], diffs: Mapping[str, Sequence[Path]], launch: Launcher
 ) -> verify_decide.Answers:
     """指摘 `rows`（空でない）を判定役の 1 回の起動で確かめる。`diffs` は指摘の番号ごとの、その指摘を出した相手役が読んだ
     差分のファイルで、どれも資料のディレクトリにある。"""
     count = len(rows)
-    used = tuple(dict.fromkeys(diff for row in rows for diff in diffs[str(row["id"])]))
-    # 相手役が引用した認証情報は、外部のランタイム（判定役）へ渡す前に伏せる（差分のパスは変えないので、足す前に伏せる）
-    masked = run_log.redact([dict(row) for row in rows])
-    # 差分が 1 つなら、行ごとに繰り返し書かない
-    shown = masked if len(used) == 1 else [{**row, "diffs": [str(d) for d in diffs[str(row["id"])]]} for row in masked]
-    into = used[0].parent
-    listed = into / f"round{round_no}-verify-findings.jsonl"
     stem = run.round_stem(round_no, "-verify")
     # 状態の保存先に残す記録の名前。起動ごとに違うので、同じラウンドを起動し直しても前の記録が残る
     name = f"{stem.name}-{uuid.uuid4().hex[:8]}"
-    material = "MVV の写し"
-    try:
-        snap = _readable_mvv(run.snapshot, into)
-        material = "指摘の一覧"
-        listed.write_text(verify_decide.listing(shown), encoding="utf-8")
-        criteria = [
-            *criteria_decide.criteria_lines(run.cfg.settings.focus, snap),
-            *criteria_decide.document_line(run.documents, rows),
-        ]
-        prompt = verify_decide.instruction(listed, used, run.cfg.worktree, criteria)
-        # 回答は非公開の内容を含みうる。出力の先は新しく作る実行者だけが開けるディレクトリで、前からあるファイルやリンクを開かない
-        material = "出力の一時ディレクトリ"
-        scratch = tempfile.TemporaryDirectory(prefix=f"{stem.name}-")
-    except OSError as exc:
+
+    def unprepared(material: str, exc: OSError) -> verify_decide.Answers:
         warning = (
-            "判定役の資料（指摘の一覧・MVV の本文と共通原則の写し）か出力の一時ディレクトリを用意できないので、判定役を起動せず下げない"
+            "判定役の資料（指摘の一覧・差分と MVV の本文と共通原則の写し）か一時ディレクトリを用意できないので、判定役を起動せず下げない"
         )
         # 絶対パスを含む詳細は、状態の保存先の実行者だけが読める記録に残す
         _record(run, round_no, stem.with_name(f"{name}.detail.log"), f"{material}: {exc}\n".encode())
         return _unanswered(run, round_no, count, f"起動していない: {material}で {type(exc).__name__}", warning)
+
+    try:
+        scratch = tempfile.TemporaryDirectory(prefix=f"{stem.name}-")
+    except OSError as exc:
+        return unprepared("一時ディレクトリ", exc)
     with scratch as made:
-        written = Path(made)
+        # 回答は非公開の内容を含みうる。出力の先は新しく作る実行者だけが開けるディレクトリで、前からあるファイルやリンクを開かない
+        into, written = Path(made, "in"), Path(made, "out")
+        try:
+            written.mkdir(mode=0o700)
+            prompt, required = _prepare(run, round_no, rows, diffs, into)
+        except OSError as exc:
+            return unprepared("判定役の資料", exc)
         system = str(criteria_decide.verify_text()["system"])
         spec = participants.read_only_launch(system, run.cfg.worktree, prompt, written / stem.name, readable=(into,))
         # 判定役の標準エラーは接続先やアカウントを含みうるので、監視の警告に行を載せない
         spec = replace(spec, private=True)
-        held_mvv = criteria_decide.approved(snap)
-        # MVV の本文と共通原則の写しも、読めなければ確かめにならない資料である
-        copied = () if held_mvv is None else tuple(p for p in (held_mvv.path, held_mvv.principles_path) if p is not None)
         try:
-            answers = _answers(run, round_no, rows, spec, (*used, listed, *copied), launch)
+            answers = _answers(run, round_no, rows, spec, required, launch)
         finally:
             # 監視中の割り込みでも、起動の層（`agents`）が判定役を止めてから伝えるので、記録は書き終わっている
             saved = _save_records(run, round_no, written, stem, name)

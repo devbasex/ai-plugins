@@ -49,7 +49,7 @@ SKIPPED_MVV = "skipped_mvv"
 FIXER_REASON = "fixer_reason"
 # 根拠の記述の誤りの指摘が、次の確かめで同じ誤りかを見分ける欄（`citation_key`）
 CITATION_KEY = "citation_key"
-# 指摘の本文の後ろへ別の報告を書き足すときの区切り。照合キーはこの区切りより前の本文で作る（#4363）
+# 指摘の本文の後ろへ別の報告を書き足すときの区切り。指摘を見分けるキーはこの区切りより前の本文で作る（#4363）
 ALSO = REVIEW_ALSO
 
 
@@ -287,7 +287,7 @@ def _place(row: dict[str, Any], new: Mapping[str, Any], section: Optional[str]) 
     row["section"] = section
 
 
-def _basis(item: Mapping[str, Any], items: Sequence[str]) -> int:
+def _report_rank(item: Mapping[str, Any], items: Sequence[str]) -> int:
     """出し直し 1 件が、指摘を人の承認待ちか確認で下げない扱いにする根拠の強さ（必ず人の承認が要る操作・MVV の項目・保護の種類の順。
     根拠でなければ 0）。"""
     named = criteria_decide.mvv_item(item.get("mvv"), items)
@@ -327,7 +327,7 @@ def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]], items:
     """このラウンドで新しく出たか戻った行の本文・1 文・位置を、出し直し 1 件のものにそろえ、判定役へ渡せる 1 文がこのラウンドに
     あるかを返す。`same` はこのラウンドのその指摘の出し直しである。
 
-    承認や保護の根拠となる出し直し（`_basis`）があれば、利用者と修正担当に別の操作の説明を見せないよう、1 文が無くてもその
+    承認や保護の根拠となる出し直し（`_report_rank`）があれば、利用者と修正担当に別の操作の説明を見せないよう、1 文が無くてもその
     1 件を使う。根拠の強さが同じなら 1 文を持つもの、次に重いもの、次に先のものを選ぶ。根拠が無ければ 1 文を持つもののうちで選び、
     1 件も無ければ何も変えない。指摘のキーは本文の先頭だけで決まるので、判定役がある報告の発生条件を別の報告の位置で確かめない
     ためでもある。
@@ -339,7 +339,7 @@ def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]], items:
     told = False
     for item in same:
         new = _raised(dict(item))
-        rank = _basis(item, items), "impact" in new
+        rank = _report_rank(item, items), "impact" in new
         told = told or rank[1]
         if not any(rank):
             continue
@@ -448,7 +448,7 @@ class FindingJournal:
                 fresh += self.revived[revived:]
             if named is not None and known.get("by") != BY_NDF:
                 # 前からある指摘に、承認の要る別の操作が加わった（新しい指摘と戻った指摘は `_align_report` がそろえる）
-                if criteria_decide.redline(named) and known["id"] not in fresh and named not in approvals.get(known["id"], ()):
+                if criteria_decide.redline(named) and known["id"] not in fresh and named not in approvals[known["id"]]:
                     _add_report(known, item)
                 _classify(known, item, named, items, mvv)
                 if _text(item.get("impact")) is None:
