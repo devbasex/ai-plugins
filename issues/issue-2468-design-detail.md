@@ -217,7 +217,7 @@ plugins/ndf/
 
 - `Meter`
   - 事前条件: `record` は状態ファイルに保存済みのラウンドの記録
-  - 事後条件: 起動が 1 つでも走っている間は `spent.running` がある。起動が 1 つ終わるたびに、その起動の費用を `spent.usd` に足し（読めなかった claude の起動は `spent.unread` に数える）、同じ保存の中でその起動を `spent.running` から外す（claude の起動なら claude の数を 1 減らし、出力ファイルを除く）。最後の起動が終わる保存で `spent.running` を消し、`spent.seconds` を、`Meter` を作った時点で記録にあった秒に、作ってからの秒を足した値に置き換える（判定役から再開したラウンドでも、前の分が残る）。`spent.running` がある間は `spent.seconds` を書き換えない（走っている間の秒は `spent.running.elapsed` が持ち、回収で 2 回足さないため）。`spent.ended_at` は書いた時刻に置き換える
+  - 事後条件: 起動が 1 つでも走っている間は `spent.running` がある。起動が 1 つ終わるたびに、その起動の費用を `spent.usd` に足し（読めなかった claude の起動は `spent.unread` に数える）、同じ保存の中でその起動を `spent.running` から外す（claude の起動なら claude の数を 1 減らし、出力ファイルを除く）。この保存では `spent.running.elapsed` もその時点の秒にする（除いた出力ファイルの更新時刻は回収で使えないため）。最後の起動が終わる保存で `spent.running` を消し、`spent.seconds` を、`Meter` を作った時点で記録にあった秒に、作ってからの秒を足した値に置き換える（判定役から再開したラウンドでも、前の分が残る）。`spent.running` がある間は `spent.seconds` を書き換えない（走っている間の秒は `spent.running.elapsed` が持ち、回収で 2 回足さないため）。`spent.ended_at` は書いた時刻に置き換える
   - 副作用: `save` で状態ファイルを書く。起動中は別のスレッドが `cross-review.heartbeat-seconds` の間隔で `spent.running.elapsed` を書き直す
 - `other_records`
   - 事前条件: `dirs` は `outside_checkout` が実体のパスにした値
@@ -372,7 +372,7 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 | `_round` | `drive.py` | 変更 | シグネチャは変えない | 相手役の前に、`spent` の初期値（秒・費用・`unread` は 0、`ended_at` は作った時刻）を持たせた記録を保存し、`_collect`・`_decide`・`_fix` の順に進め、各起動の前に上限を確かめる |
 | `require_fix_for_changes` | `fixgate_decide.py` | 変更 | `require_fix_for_changes(round_no, verdict, fix, pending, stopped_limit: Optional[str] = None)` | `stopped_limit` のあるラウンドは記録の不足にしない |
 
-`fixer.take_fix` と `_fix_record` は、修正担当が終わった時点の head と比較基点を `apply_fix(at=...)` へ渡す。`ndf cross-review fix-gate` も `stopped_limit` を渡す。`Outcome` に `limited: Optional[fin.Limited]` を足す。
+`fixer.take_fix` と `_fix_record` は、修正担当が終わった時点の head と比較基点を `apply_fix(at=...)` へ渡す。`_fix` と `_ingest_pending` は、`stopped_limit` のあるラウンドに `fix` を書く保存で `stopped_limit` を消す。先に消すと、修正の結果を書く前の中断の後、次の起動が記録の不足で止まるためである。`ndf cross-review fix-gate` も `stopped_limit` を渡す。`Outcome` に `limited: Optional[fin.Limited]` を足す。
 
 - `_over`
   - 副作用: `spend.other_records` で渡した保存先の状態を読む（書き換えない）
@@ -417,7 +417,7 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 | 順 | 最後のラウンドの状態 | `_resume` |
 | --- | --- | --- |
 | 1 | `spent.running` が残っている（`verdict` の有無によらない。修正担当の実行中に中断したラウンドは `verdict` を持つ） | `spend.recover` で中断した起動の分を足して保存し、順 2 へ進む |
-| 2 | `verdict` が `changes_required` で `stopped_limit` があり、順 4 に挙げる値が記録と同じ | `_fix` で同じ番号のラウンドの修正担当を起動する。相手役と判定役は起動しない。秒か費用の上限に当たったままなら `_fix` は起動せず、`stopped_limit` を残して `limit`。起動するときは `stopped_limit` を消し、返りは `_round` の修正の後と同じ（`error` か None） |
+| 2 | `verdict` が `changes_required` で `stopped_limit` があり `fix` が無く、順 4 に挙げる値が記録と同じ | `_fix` で同じ番号のラウンドの修正担当を起動する。相手役と判定役は起動しない。秒か費用の上限に当たったままなら `_fix` は起動せず、`stopped_limit` を残して `limit`。起動の時点では `stopped_limit` を残し、`fix` か `verdict: error` を書く保存で消す。返りは `_round` の修正の後と同じ（`error` か None） |
 | 2a | ほかで `verdict` がある（`stopped_limit` があっても順 4 に挙げる値が違う場合を含む） | ここで終える。修正の結果の取り込みは今の `_ingest_pending` がする。未解決の行は次のラウンドで修正担当へ渡る |
 | 3 | `candidates` が無い | `verdict: interrupted` にして None |
 | 4 | `candidates` があり、head・比較基点・相手役・重点・単位の指示・PR・MVV が記録と同じ | `_decide` から同じ番号のラウンドを続け、修正が要れば `_round` と同じく `_fix` で修正担当まで進める。`unread_reviewers` があれば `incomplete_reviewers` で終える |
@@ -459,7 +459,7 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `_over`（`run` を通す） | 収束せずに終えた後の打ち直しは残りの回数だけ回る。収束の後は 0 から | 起動の時点で使い切ると相手役を起動しない。その後の `report` が同じ終わり方と当たった上限を出す。上限を上げた打ち直しは `limit_end` を消す。上限ちょうどの最後のラウンドは修正まで行う。秒か費用が上限ちょうどなら判定役も修正担当も起動しない | 打ち直すたびに 0 から数え直す誤った実装は、このテストで失敗する |
-| `_resume` | 判定役の実行中の中断は相手役を起動せずに続き、相手役の費用を 1 回だけ数える | 一部が読めなかったラウンドは `incomplete_reviewers`。保存済みで上限なら判定役を起動しない。修正担当の実行中の中断（`verdict` がある）でも、中断した起動の秒を `spent.seconds` へ、claude の数を `spent.unread` へ 1 回だけ足す | head が変われば `interrupted` で読み直す。相手役の実行中の中断も 1 ラウンドに数える。ラウンド数の上限ちょうどのラウンドが秒の上限で修正を起動せずに終えた後、秒の上限だけを上げて打ち直すと、相手役を起動せずに修正担当だけを起動する |
+| `_resume` | 判定役の実行中の中断は相手役を起動せずに続き、相手役の費用を 1 回だけ数える | 一部が読めなかったラウンドは `incomplete_reviewers`。保存済みで上限なら判定役を起動しない。修正担当の実行中の中断（`verdict` がある）でも、中断した起動の秒を `spent.seconds` へ、claude の数を `spent.unread` へ 1 回だけ足す | head が変われば `interrupted` で読み直す。相手役の実行中の中断も 1 ラウンドに数える。ラウンド数の上限ちょうどのラウンドが秒の上限で修正を起動せずに終えた後、秒の上限だけを上げて打ち直すと、相手役を起動せずに修正担当だけを起動する。その修正担当が結果を書く前に中断しても、次の打ち直しは記録の不足で止まらず、修正担当を起動する |
 | `_collect` | 記録と `spent` が残る | 全員が読めないラウンドも数え、読んだ head にしない | 無し |
 | `_decide`・`_round` | 指摘 0 件は `converged`（受け入れ条件 2） | 修正を起動せずに終えた記録に `stopped_limit` が付き `verdict` は変わらず、次の起動は記録の不足で止まらない | 比較基点を変えて起動すると見送りの理由を確かめる |
 | `require_fix_for_changes` | `stopped_limit` があれば `OK` | 結果ファイルが残っていれば今のとおり | `stopped_limit` も記録も無ければ `STOP` |
