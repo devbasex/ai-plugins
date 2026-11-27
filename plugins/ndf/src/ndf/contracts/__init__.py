@@ -281,6 +281,22 @@ def broken_rules(instance: Any, rel: str) -> list[str]:
     return sorted(broken_rule(e) for e in found)
 
 
+def broken_places(instance: Any, rel: str) -> list[str]:
+    """`instance` の `contracts/<rel>` のスキーマに合わない場所と規則の名前を `<場所>: <規則>` で返す（空なら合う）。
+
+    場所は `schema_errors` と同じで、入力の値もキーも含まない（欠けた欄の文はスキーマにある欄の名前だけを含むので添える）。
+    読んだ中身を人に見せない相手の検査に使う。
+    """
+    found = sorted(
+        (
+            "/".join(str(p) for p in e.absolute_path) or "(最上位)",
+            f"{e.validator}: {e.message}" if e.validator == "required" else str(e.validator),
+        )
+        for e in _schema_validator(rel).iter_errors(instance)
+    )
+    return [f"{where}: {rule}" for where, rule in found]
+
+
 def broken_rule(error: ValidationError) -> str:
     """破ったスキーマの場所と規則の名前。入力の値もキーも含まない。欠けた欄（`required`）の文はスキーマにある欄の名前だけを含むので添える。"""
     rule = f"{'/'.join(str(p) for p in error.absolute_schema_path)}（{error.validator}）"

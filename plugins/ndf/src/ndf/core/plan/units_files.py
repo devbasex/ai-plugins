@@ -11,7 +11,7 @@ import json
 import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
@@ -32,6 +32,7 @@ PLAN_SUFFIX = "-plan.md"
 EXCLUDED_HANDLINGS = frozenset({inputs_decide.MERGE_HANDLING, "閉じる"})
 
 _SYMLINK_MODE = "120000"
+_TASK_ID = re.compile(r"T[1-9][0-9]*")
 _PARALLEL_TITLE = "並列と直列"
 _UNITS_HEAD = (
     review_units_decide.NAME_COLUMN,
@@ -63,22 +64,37 @@ class Tree(NamedTuple):
     root: Path
     commit: Optional[str] = None
 
-    def names(self) -> list[str]:
-        """`issues/` の直下の項目のパス（ファイルのほか、ディレクトリとリンクも含む）。"""
+    def listing(self) -> dict[str, Optional[tuple[str, str, str]]]:
+        """`issues/` の直下の項目（ファイルのほか、ディレクトリとリンクも含む）。値はコミットなら (モード, 種類, id)、worktree なら None。"""
         if self.commit is not None:
-            return sorted(self._entries("issues/"))
+            return dict(self._entries("issues/"))
         found = self.root / "issues"
-        return sorted(f"issues/{p.name}" for p in found.iterdir()) if found.is_dir() else []
+        return {f"issues/{p.name}": None for p in found.iterdir()} if found.is_dir() else {}
+
+    def names(self) -> list[str]:
+        """`listing` のパスの並び。"""
+        return sorted(self.listing())
 
     def read(self, path: str) -> Optional[str]:
-        """ファイルの本文。無ければ None。ディレクトリ・シンボリックリンク・UTF-8 でない中身は `UnitsFileError`。"""
-        data = self._committed(path) if self.commit is not None else self._working(path)
-        if data is None:
-            return None
-        try:
-            return data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise UnitsFileError(f"{path}: UTF-8 で読めない（{exc.start} バイト目）") from None
+        """ファイルの本文。無ければ None。
+
+        リポジトリの根からの相対でないパス・ディレクトリ・シンボリックリンク・UTF-8 でない中身は `UnitsFileError`。
+        """
+        return self.read_all([path])[path]
+
+    def read_all(
+        self, paths: Sequence[str], listing: Optional[Mapping[str, Optional[tuple[str, str, str]]]] = None
+    ) -> dict[str, Optional[str]]:
+        """`read` をまとめて行う。コミットの読み取りは git の起動が件数に依らない。`listing` を渡すと項目を調べ直さない。"""
+        for path in paths:
+            # 絶対パスは `root / path` で根が落ちるので、開く前に断る
+            if PurePosixPath(path).is_absolute() or ".." in PurePosixPath(path).parts:
+                raise UnitsFileError(f"{path}: リポジトリの根からの相対パスでないものは読まない")
+        if self.commit is not None:
+            data = self._committed(paths, listing)
+        else:
+            data = {path: self._working(path) for path in paths}
+        return {path: _decode(path, found) for path, found in data.items()}
 
     def _working(self, path: str) -> Optional[bytes]:
         full = self.root / path
@@ -89,27 +105,44 @@ class Tree(NamedTuple):
             raise UnitsFileError(f"{path}: ディレクトリは読まない")
         return full.read_bytes() if full.is_file() else None
 
-    def _committed(self, path: str) -> Optional[bytes]:
-        entries = self._entries(path)
-        if path not in entries:
-            return None
-        mode, kind = entries[path]
-        if mode == _SYMLINK_MODE:
-            raise UnitsFileError(f"{path}: シンボリックリンクは読まない")
-        if kind != "blob":
-            raise UnitsFileError(f"{path}: ディレクトリは読まない")
-        return Git(self.root).blobs(f"{self.commit}:{path}")[0]
+    def _committed(
+        self, paths: Sequence[str], listing: Optional[Mapping[str, Optional[tuple[str, str, str]]]]
+    ) -> dict[str, Optional[bytes]]:
+        if not paths:
+            return {}
+        entries = self._entries(*paths) if listing is None else listing
+        ids: dict[str, str] = {}
+        for path in paths:
+            if path not in entries:
+                continue
+            mode, kind, oid = entries[path]
+            if mode == _SYMLINK_MODE:
+                raise UnitsFileError(f"{path}: シンボリックリンクは読まない")
+            if kind != "blob":
+                raise UnitsFileError(f"{path}: ディレクトリは読まない")
+            ids[path] = oid
+        blobs = dict(zip(ids, Git(self.root).blobs(*ids.values()))) if ids else {}
+        return {path: blobs[path] if path in blobs else None for path in paths}
 
-    def _entries(self, spec: str) -> dict[str, tuple[str, str]]:
-        """コミットの `git ls-tree` の {パス: (モード, 種類)}。"""
-        out = Git(self.root).run_bytes("ls-tree", "-z", END_OF_OPTIONS, str(self.commit), "--", spec)
-        found: dict[str, tuple[str, str]] = {}
+    def _entries(self, *specs: str) -> dict[str, tuple[str, str, str]]:
+        """コミットの `git ls-tree` の {パス: (モード, 種類, id)}。"""
+        out = Git(self.root).run_bytes("ls-tree", "-z", END_OF_OPTIONS, str(self.commit), "--", *specs)
+        found: dict[str, tuple[str, str, str]] = {}
         for record in out.decode("utf-8", "replace").split("\0"):
             if record:
                 meta, _, path = record.partition("\t")
-                mode, kind, _ = meta.split(" ", 2)
-                found[path] = (mode, kind)
+                mode, kind, oid = meta.split(" ", 2)
+                found[path] = (mode, kind, oid)
         return found
+
+
+def _decode(path: str, data: Optional[bytes]) -> Optional[str]:
+    if data is None:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise UnitsFileError(f"{path}: UTF-8 で読めない（{exc.start} バイト目）") from None
 
 
 class Collected(NamedTuple):
@@ -148,11 +181,14 @@ def _numbers_in(pattern: re.Pattern[str], path: str) -> frozenset[int]:
     return frozenset(int(n) for n in found.group(1).split("-")) if found else frozenset()
 
 
-def find(tree: Tree, issues: Sequence[int]) -> dict[int, str]:
-    """課題の番号 → ファイル名の番号の並びにその課題を持つ単位のファイル。無い課題は入らない。2 つあれば `UnitsFileError`。"""
+def find(tree: Tree, issues: Sequence[int], names: Optional[Sequence[str]] = None) -> dict[int, str]:
+    """課題の番号 → ファイル名の番号の並びにその課題を持つ単位のファイル。無い課題は入らない。2 つあれば `UnitsFileError`。
+
+    `names` に `tree.names()` を渡すと、一覧を取り直さない。
+    """
     wanted = set(issues)
     out: dict[int, str] = {}
-    for path in tree.names():
+    for path in tree.names() if names is None else names:
         for issue in sorted(_numbers_in(_UNITS_PATH, path) & wanted):
             if issue in out:
                 raise UnitsFileError(f"#{issue} の単位のファイルが 2 つある: {out[issue]}、{path}")
@@ -162,14 +198,18 @@ def find(tree: Tree, issues: Sequence[int]) -> dict[int, str]:
 
 def load(tree: Tree, path: str) -> ud.UnitFile:
     """スキーマとパスを検査して読む。名前が単位のファイルの形なら、名前の番号と中の `issues` の一致も確かめる。"""
-    text = tree.read(path)
+    return _load(path, tree.read(path))
+
+
+def _load(path: str, text: Optional[str]) -> ud.UnitFile:
     if text is None:
         raise UnitsFileError(f"{path}: 単位のファイルが無い")
     try:
         doc = json.loads(text)
     except json.JSONDecodeError as exc:
         raise UnitsFileError(f"{path}: {exc.lineno} 行目が JSON として読めない（{exc.msg}）") from None
-    errs = contracts.schema_errors(doc, SCHEMA)
+    # 読んだ中身を誤りの文に写さない（場所と規則の名前だけを出す）
+    errs = contracts.broken_places(doc, SCHEMA)
     if errs:
         raise UnitsFileError(f"{path}: 形が違う: {'; '.join(_with_task_id(e, doc) for e in errs)}")
     named = _numbers_in(_UNITS_PATH, path)
@@ -179,12 +219,13 @@ def load(tree: Tree, path: str) -> ud.UnitFile:
 
 
 def _with_task_id(error: str, doc: Any) -> str:
-    """`tasks/<添字>` を指すスキーマの誤りに、タスクの `id` を添える。"""
+    """`tasks/<添字>` を指すスキーマの誤りに、タスクの `id` を添える。形の違う `id` は添えない。"""
     found = re.match(r"tasks/(\d+)\b", error)
     if not found:
         return error
     task = doc["tasks"][int(found.group(1))]
-    return f"タスク {task['id']}（{error}）" if isinstance(task, dict) and "id" in task else error
+    tid = task["id"] if isinstance(task, dict) and "id" in task else None
+    return f"タスク {tid}（{error}）" if isinstance(tid, str) and _TASK_ID.fullmatch(tid) else error
 
 
 def limits_of(project: Mapping[str, Any]) -> ud.Limits:
@@ -204,25 +245,32 @@ def limits_of(project: Mapping[str, Any]) -> ud.Limits:
 
 def collect(tree: Tree, issues: Sequence[int], omitted: Sequence[int]) -> Collected:
     """課題ごとの扱いを当て、読むファイルと欠落を返す。扱いは省略の指定より先に当てる。"""
+    return _collect(tree, tree.listing(), issues, omitted)
+
+
+def _collect(tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int], omitted: Sequence[int]) -> Collected:
     wanted = tuple(sorted(set(issues)))
-    excluded = tuple(n for n in wanted if n in _excluded_by_design(tree, wanted))
+    dropped = _excluded_by_design(tree, listing, wanted)
+    excluded = tuple(n for n in wanted if n in dropped)
     skipped = tuple(n for n in wanted if n in set(omitted) and n not in excluded)
     rest = [n for n in wanted if n not in excluded and n not in skipped]
-    found = find(tree, rest)
-    files = tuple(load(tree, path) for path in dict.fromkeys(found[n] for n in rest if n in found))
+    found = find(tree, rest, sorted(listing))
+    paths = list(dict.fromkeys(found[n] for n in rest if n in found))
+    texts = tree.read_all(paths, listing)
+    files = tuple(_load(path, texts[path]) for path in paths)
     return Collected(files, skipped, excluded, tuple(n for n in rest if n not in found))
 
 
-def _excluded_by_design(tree: Tree, issues: Sequence[int]) -> set[int]:
+def _excluded_by_design(tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int]) -> set[int]:
     """設計書の「設計の結果」の扱いが「マージする」か「閉じる」の課題。設計書が無いか、扱いが割れる課題は含めない。"""
+    named = {path: _numbers_in(_DESIGN_PATH, path) & set(issues) for path in sorted(listing)}
+    texts = tree.read_all([path for path, found in named.items() if found], listing)
     handlings: dict[int, set[str]] = {}
-    for path in tree.names():
-        named = _numbers_in(_DESIGN_PATH, path) & set(issues)
-        text = tree.read(path) if named else None
+    for path, text in texts.items():
         if text is None:
             continue
         table = inputs_decide.design_handlings(text)
-        for issue in named & table.keys():
+        for issue in named[path] & table.keys():
             handlings.setdefault(issue, set()).add(table[issue][0])
     return {issue for issue, found in handlings.items() if found <= EXCLUDED_HANDLINGS}
 
@@ -232,13 +280,14 @@ def check(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: ud.
 
     実装計画を省いた課題は、課題全体の 1 単位（`units_decide.single`）として判定に加える。
     """
-    found = collect(tree, issues, omitted)
+    listing = tree.listing()
+    found = _collect(tree, listing, issues, omitted)
     judgement = ud.judge([*found.files, *map(ud.single, found.omitted)], limits, criteria)
     gaps: list[TaskGap] = []
     stale: list[str] = []
-    for unit_file in found.files if docs else ():
-        plan = unit_file.path.removesuffix(UNITS_SUFFIX) + PLAN_SUFFIX
-        text = tree.read(plan)
+    plans = {f.path.removesuffix(UNITS_SUFFIX) + PLAN_SUFFIX: f for f in (found.files if docs else ())}
+    for plan, text in tree.read_all(list(plans), listing).items():
+        unit_file = plans[plan]
         # 実装計画が無ければ、単位のファイルのタスクがすべて片側だけになる
         gap = _task_gap(plan, "" if text is None else text, unit_file)
         if gap is not None:
@@ -276,18 +325,24 @@ def render_tables(plan: str, views: Sequence[ud.View], file: Optional[str] = Non
     """実装計画の「レビューの単位」と「並列と直列」の表を書き直した全文（改行は LF）。
 
     `views` は全ファイルの単位で、`file` の単位だけを行にする（省けばすべて）。別のファイルの単位は依存と並列の相手として
-    名前に課題の番号を添える。セクションの最初の表だけを置き換え、前後の文とほかの表は残す。表が無ければセクションの終わりに
-    足し、セクションが無ければ「タスク分解」の後（「並列と直列」は「レビューの単位」の後）に足す。
+    名前に課題の番号を添える。置き換えるのは、列の見出しが生成する表のものを持つ表（下位の見出しより手前）だけで、前後の文と
+    ほかの表は残す。その表が無ければ、セクションのほかの表と下位の見出しより手前（どちらも無ければ終わり）に足し、セクションが
+    無ければ「タスク分解」の後（「並列と直列」は「レビューの単位」の後）に足す。
     """
     mine = [v for v in views if file is None or v.file == file]
     text = _put_table(
         _newlines(plan),
         review_units_decide.UNITS_HEADING,
+        review_units_decide.REQUIRED_COLUMNS,
         _markdown_table(_UNITS_HEAD, _unit_cells(mine, views)),
         review_units_decide.TASKS_HEADING,
     )
     return _put_table(
-        text, _PARALLEL_TITLE, _markdown_table(_PARALLEL_HEAD, _parallel_rows(mine, views)), review_units_decide.UNITS_HEADING
+        text,
+        _PARALLEL_TITLE,
+        _PARALLEL_HEAD[:2],
+        _markdown_table(_PARALLEL_HEAD, _parallel_rows(mine, views)),
+        review_units_decide.UNITS_HEADING,
     )
 
 
@@ -348,7 +403,7 @@ def _closures(views: Sequence[ud.View]) -> dict[tuple[str, str], set[tuple[str, 
 
 
 def _parallel_rows(mine: Sequence[ud.View], views: Sequence[ud.View]) -> list[list[str]]:
-    """実行順ごとの 1 行。並列に流れる単位は、どちらからも依存で届かない単位である。"""
+    """実行順ごとの 1 行。並列に流れる単位は、どちらからも依存で届かず、触るファイルが重ならない単位である。"""
     closure = _closures(views)
     rows = []
     for order in sorted({v.order for v in mine}):
@@ -356,22 +411,23 @@ def _parallel_rows(mine: Sequence[ud.View], views: Sequence[ud.View]) -> list[li
         parallel, serial = [], []
         for v in group:
             name, key = _namer(v, views), (v.file, v.name)
-            others = [name(k) for k in ((o.file, o.name) for o in views) if k != key and k not in closure[key] and key not in closure[k]]
+            apart = ((o.file, o.name) for o in views if not set(o.touches) & set(v.touches))
+            others = [name(k) for k in apart if k != key and k not in closure[key] and key not in closure[k]]
             parallel.append(f"{v.name}: {_JOIN.join(others) or _NONE}")
             serial += [f"{name((f, n))} → {v.name}: {reason}" for f, n, reason in v.after]
         rows.append([str(order), _JOIN.join(v.name for v in group), "\n".join(parallel), "\n".join(serial) or _NONE])
     return rows
 
 
-def _put_table(text: str, title: str, table: list[str], after: str) -> str:
-    """`title` のセクションの最初の表を `table` にする。"""
+def _put_table(text: str, title: str, columns: Sequence[str], table: list[str], after: str) -> str:
+    """`title` のセクションの、列の見出しに `columns` を持つ表を `table` にする。無ければ足す。"""
     lines = text.split("\n")
-    slot = review_units_decide.table_slot(text, title)
+    slot = review_units_decide.table_slot(text, title, columns)
     if slot is None:
-        previous = review_units_decide.table_slot(text, after)
+        previous = review_units_decide.table_slot(text, after, ())
         return _add_block(lines, len(lines) if previous is None else previous.end, [f"## {title}", "", *table])
     if slot.table is None:
-        return _add_block(lines, slot.end, table)
+        return _add_block(lines, slot.at, table)
     lines[slot.table.start : slot.table.stop] = table
     return "\n".join(lines)
 

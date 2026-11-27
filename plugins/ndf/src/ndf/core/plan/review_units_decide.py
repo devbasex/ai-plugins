@@ -89,9 +89,13 @@ class _Table(NamedTuple):
 
 
 class Slot(NamedTuple):
-    """セクション 1 つの中の、表を書き換える場所。`end` はセクションの次の行の番号（文書の終わりなら行の数）。"""
+    """セクション 1 つの中の、表を書き換える場所。`end` はセクションの次の行の番号（文書の終わりなら行の数）。
+
+    `table` は置き換える表の行の範囲、`at` は表を足すときの行の番号（最初の表か下位の見出しの手前。無ければ `end`）。
+    """
 
     end: int
+    at: int
     table: Optional[range]
 
 
@@ -162,15 +166,22 @@ def _task_numbers(doc: _Doc) -> list[int]:
     return [int(m.group(1)) for m in titles if m]
 
 
-def table_slot(text: str, title: str) -> Optional[Slot]:
-    """`title` のセクション（`UNITS_HEADING` は単位の見出し）の終わりと、最初の表の行の範囲。セクションが無ければ None。"""
+def table_slot(text: str, title: str, columns: Sequence[str]) -> Optional[Slot]:
+    """`title` のセクション（`UNITS_HEADING` は単位の見出し）の表を書き換える場所。セクションが無ければ None。
+
+    置き換える表は、下位の見出しより手前にあり、列の見出しに `columns` のすべてを持つ最初の表である。
+    """
     doc = _parse(text)
     found = _unit_headings(doc) if title == UNITS_HEADING else [h for h in doc.headings if h.level >= 2 and h.title == title]
     if not found:
         return None
     section = _section(doc, found[0])
-    table = _first_table(doc, section)
-    return Slot(min(section.stop, len(text.split("\n"))), None if table is None else range(table.at, table.end))
+    end = min(section.stop, len(text.split("\n")))
+    sub = next((h.at for h in doc.headings if h.at in section), end)
+    table = next((t for t in doc.tables if t.at in range(section.start, sub) and set(columns) <= set(t.rows[0])), None)
+    first = _first_table(doc, section)
+    at = sub if first is None else min(sub, first.at)
+    return Slot(end, at, None if table is None else range(table.at, table.end))
 
 
 def _cell_elements(cell: str) -> list[str]:

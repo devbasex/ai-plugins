@@ -100,7 +100,7 @@ def test_load_parses_a_file_that_matches_the_schema(tmp_path):
         (_doc(tasks=[{k: v for k, v in _task("T1").items() if k != "lines"}]), "タスク T1"),
         (_doc(tasks=[_task("T1", files=["plugins/"])]), "タスク T1"),
         (_doc(units=[_unit("A", "T1", "T1")]), "units/0/tasks"),
-        ({**_doc(), "order": 1}, "order"),
+        ({**_doc(), "order": 1}, "additionalProperties"),
         (_doc(issues=(8,)), "ファイル名の番号"),
     ],
 )
@@ -323,7 +323,8 @@ def test_render_tables_names_a_dependency_in_another_file_with_its_issue():
 def test_render_tables_is_stable_and_keeps_the_prose_around_the_tables():
     first, views = _two_files()
     plan = (
-        "# 実装計画\n\n## レビューの単位\n\n前の説明。\n\n| 単位 | 実際の行数 |\n| --- | --- |\n| 形 | 999 |\n\n後の説明。\n\n"
+        "# 実装計画\n\n## レビューの単位\n\n前の説明。\n\n| 単位 | 含むタスク | 満たす受け入れ条件 | 実際の行数 |\n"
+        "| --- | --- | --- | --- |\n| 形 | Task 1 | 無し | 999 |\n\n後の説明。\n\n"
         "| 別の表 |\n| --- |\n| 残る |\n\n## 並列と直列\n\n## 完了の定義\n\n- [ ] 済\n"
     )
 
@@ -334,6 +335,49 @@ def test_render_tables_is_stable_and_keeps_the_prose_around_the_tables():
     for kept in ("前の説明。\n\n| 単位 |", "後の説明。\n\n| 別の表 |\n| --- |\n| 残る |", "## 完了の定義\n\n- [ ] 済\n"):
         assert kept in once
     assert once.count("## レビューの単位") == 1 and once.count("## 並列と直列") == 1
+
+
+def test_render_tables_keeps_other_tables_when_there_is_no_generated_table():
+    first, views = _two_files()
+    note = "| 単位 | 備考 |\n| --- | --- |\n| 形 | 残る |"
+    plan = f"# 実装計画\n\n## レビューの単位\n\n{note}\n\n## 並列と直列\n\n### 補足\n\n{note}\n"
+
+    once = uf.render_tables(plan, views, first.path)
+
+    assert once.count(note) == 2
+    assert once.index("| 単位 | 含むタスク |") < once.index(note)
+    assert once.index("| 実行順 |") < once.index("### 補足")
+    assert uf.render_tables(once, views, first.path) == once
+
+
+def test_render_tables_leaves_units_that_touch_the_same_file_out_of_the_parallel_column():
+    unit_file = ud.parse(
+        _doc(tasks=[_task("T1", files=["a.py"]), _task("T2", files=["a.py"])], units=[_unit("A", "T1"), _unit("B", "T2")]),
+        "issues/issue-7-plan.units.json",
+    )
+
+    text = uf.render_tables(_plan(1, 2), ud.judge([unit_file], LIMITS, {7: 0}).views)
+
+    assert _rows(text, "並列と直列") == ["| 1 | A、B | A: 無し<br>B: 無し | 無し |"]
+
+
+def test_read_refuses_a_path_outside_the_repository(tmp_path):
+    outside = _units(tmp_path, "7")
+    tree = uf.Tree(tmp_path / "repo")
+
+    for path in (str(tmp_path / outside), f"../{outside}"):
+        with pytest.raises(uf.UnitsFileError) as stopped:
+            uf.load(tree, path)
+        assert "相対パス" in str(stopped.value)
+
+
+def test_load_does_not_copy_the_content_into_a_schema_error(tmp_path):
+    path = _put(tmp_path, "issue-7-plan.units.json", {"token-key": "s3cret", **_doc(tasks=[_task("s3cret", lines="s3cret")])})
+
+    with pytest.raises(uf.UnitsFileError) as stopped:
+        uf.load(uf.Tree(tmp_path), path)
+
+    assert "s3cret" not in str(stopped.value) and "token-key" not in str(stopped.value)
 
 
 def test_differs_ignores_only_the_actual_lines_and_the_path():
