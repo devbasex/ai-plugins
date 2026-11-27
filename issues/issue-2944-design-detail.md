@@ -312,7 +312,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `_after_unit` | 同 | 新設 | `_after_unit(state_dir: Path, step, out: dict) -> None` | 割り付け ID を保持し、修正と作業場所の用意の効果指標を書く |
 | `run_step` | 同 | 変更 | `run_step(spec, step_id, attempt, nth=1, retry=None)` | 上の 2 つを呼ぶ |
 | `outcome_of` | `core/plan/steps.py` | 変更 | 変えない | 結果の `metrics.launch` を拾う |
-| `_add_models`・`recorded_models` | `core/plan/records.py` | 新設 | `_add_models(state_dir, step_id, launch)`・`recorded_models(state_dir) -> dict` | ステップごとの指定した値と実際のモデルを残し、結果の `metrics.models` に載せる |
+| `_add_models`・`recorded_models` | `core/plan/records.py` | 新設 | `_add_models(state_dir, run_id, step_id, launch)`・`recorded_models(state_dir, run_id) -> dict` | ステップごとの指定した値と実際のモデルを、実行 ID（`run_id`）と一緒に残す。結果の `metrics.models` には、結果を返す実行で起動したステップだけを載せる |
 | `read_units`・`write_units` | 同 | 新設 | `read_units(state_dir) -> dict`・`write_units(state_dir, value)` | 工程の割り付け ID と、結果待ちの修正を持つ |
 
 - 作業の名前は、ステップの引数が `ndf answer work` で始まる場合の最後の語。単位は、`design`・`impl` が `<run_id>:<工程>`、`fix`・`mechanical` が `<run_id>:<ステップ>`
@@ -320,7 +320,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - `NDF_CHARGE_TO` を付けるのは次の 2 つで、ほかは外す
   - worker でないステップ。この実行に `impl`（無ければ `design`）の割り付けがある場合
   - `fix`・`ci-fix` の worker。この実行に `impl` の割り付けがある場合
-- 修正の効果指標は、修正ステップの 1 回目の実行を対象に、その修正を確かめる検査の結果で書く。検査のステップは、定義の `verifies` に修正の作業の名前を持つステップのうち、修正の後で最初に実行するものである
+- 修正の効果指標は、修正ステップの 1 回目の実行を対象に、その修正を確かめる検査の結果で書く。修正の後に、定義の `verifies` にその修正の作業の名前を持つステップ（検査のステップ）の結果を実行順に見て、効果指標を決められる最初の結果を使う。前提の不足や期限切れで決められなければ、結果待ちの修正を残し、同じ実行で次に該当する検査を待つ。同じ検査の打ち直しも対象にする
 
 | `verifies` を足す共通のステップ | 値 |
 | --- | --- |
@@ -328,7 +328,6 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `push` | `fix-push` |
 
 - 検査が `ok` なら 1。停止理由が `test_failed`・`check_failed`・`push_rejected`・`base_conflict` なら 0、ほかの理由（前提の不足、期限切れなど）なら書かない
-- 検査が指標を書かない理由で止まった場合、結果待ちの修正は残し、同じ実行の次の検査（打ち直しを含む）で判定する
 - 工程のモードは、工程の入力の `mode` を `NDF_WORKFLOW_MODE` でステップの子へ渡し、無ければ子の環境から外す。`launch_choice` は引数の `mode` が無ければこの値を行の `mode` にする
 - プランの実行は `model_choice` を読み込めない（`checks/children.json`）ので、作業の工程は `claude_choice.pick_stage`（差し込まれた `stage_of`）で引く（実装で決定）
 - 検査の前にある push・待ち・準備・承認ゲートのステップの結果は、指標に使わない。承認ゲートの承認や却下からは、1 も 0 も書かない。検査に届かずに実行が終われば欠測とし、行を書かない
@@ -346,7 +345,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 耐久ステップの回復 | `units.json`・`models.json` | 1 つのプランは 1 本ずつステップを打つ | 回数は遷移の状態が持つので回復で同じ値になる。同じ割り付け ID の効果指標は、先に書いた行だけが有効 |
+| 耐久ステップの回復 | `units.json`・`models.json` | 1 つのプランは 1 本ずつステップを打つ | 回数は遷移の状態が持つので回復で同じ値になる。結果待ちの修正はステップごとに 1 件で持ち、同じ実行 ID・ステップ・実行回数を流し直しても増えない。同じ割り付け ID の効果指標は、先に書いた行だけが有効 |
 
 ### 単体テストの観点
 

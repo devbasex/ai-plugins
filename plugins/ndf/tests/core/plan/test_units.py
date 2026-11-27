@@ -242,6 +242,15 @@ def test_a_stopped_fix_is_zero_and_only_its_first_run_counts(tmp_path, outcomes)
     assert outcomes == [("f1", 0.0)]
 
 
+def test_a_recovered_fix_leaves_one_pending_entry(tmp_path, outcomes):
+    _after(tmp_path, _step("fix", "fix"), assign="f1")
+    first = records.read_units(tmp_path)
+    _after(tmp_path, _step("fix", "fix"), assign="f1")
+    assert records.read_units(tmp_path) == first
+    _after(tmp_path, _verify_step())
+    assert outcomes == [("f1", 1.0)]
+
+
 def test_preparing_the_worktree_is_judged_by_itself(tmp_path, outcomes):
     _after(tmp_path, _step("work", "worktree"), assign="m1")
     _after(tmp_path, _step("work", "worktree"), STOPPED, "work_stopped", assign="m2")
@@ -249,7 +258,7 @@ def test_preparing_the_worktree_is_judged_by_itself(tmp_path, outcomes):
 
 
 def test_a_pending_fix_of_another_run_is_not_judged(tmp_path, outcomes):
-    records.write_units(tmp_path, {"run": "run-0", "pending": [{"assign_id": "old", "work": "fix"}]})
+    records.write_units(tmp_path, {"run": "run-0", "pending": [{"step": "fix", "assign_id": "old", "work": "fix"}]})
     _after(tmp_path, _verify_step())
     assert outcomes == []
 
@@ -279,9 +288,26 @@ def test_outcome_of_picks_the_launch_of_the_worker():
 
 
 def test_the_models_of_the_steps_are_kept_by_step(tmp_path):
-    records._add_models(tmp_path, "work", {"name": "impl", "requested_model": "sonnet", "model": "claude-sonnet", "assign_id": "a"})
-    records._add_models(tmp_path, "fix", {"name": "fix", "effort": "high"})
-    assert records.recorded_models(tmp_path) == {
+    records._add_models(
+        tmp_path, "run-1", "work", {"name": "impl", "requested_model": "sonnet", "model": "claude-sonnet", "assign_id": "a"}
+    )
+    records._add_models(tmp_path, "run-1", "fix", {"name": "fix", "effort": "high"})
+    assert records.recorded_models(tmp_path, "run-1") == {
         "work": {"name": "impl", "requested_model": "sonnet", "model": "claude-sonnet"},
         "fix": {"name": "fix", "effort": "high"},
     }
+
+
+def test_the_models_of_another_run_are_not_reported(tmp_path):
+    records._add_models(tmp_path, "run-0", "work", {"name": "impl"})
+    assert records.recorded_models(tmp_path, "run-1") == {}
+    records._add_models(tmp_path, "run-1", "fix", {"name": "fix"})
+    assert records.recorded_models(tmp_path, "run-1") == {"fix": {"name": "fix"}}
+
+
+def test_writing_a_record_does_not_follow_a_planted_link(tmp_path):
+    victim = tmp_path / "victim"
+    victim.write_text("keep", encoding="utf-8")
+    (tmp_path / "models.tmp").symlink_to(victim)
+    records._add_models(tmp_path, "run-1", "work", {"name": "impl"})
+    assert victim.read_text(encoding="utf-8") == "keep"

@@ -264,6 +264,7 @@ def _after_unit(state_dir: Path, step: model.Step, out: Mapping[str, Any]) -> No
 
     修正は 1 回目の実行だけが対象で、止まれば 0、通れば後で最初に確かめる検査の結果で書く。作業場所の用意は完了が 1、
     停止が 0。記録を書けなければ警告を出して続け、ステップの結果は変えない。`out` は回の id（`run`）と何回目か（`nth`）を持つ。
+    耐久ステップの回復で同じ実行を流し直しても記録が変わらないよう、結果待ちの修正はステップごとに 1 件にする。
     """
     held = _run_units(state_dir, out["run"])
     assigns = held["assigns"] if "assigns" in held else {}
@@ -276,10 +277,11 @@ def _after_unit(state_dir: Path, step: model.Step, out: Mapping[str, Any]) -> No
     elif stage == "mechanical" and out["status"] in (OK, STOPPED):
         _report(assign_id, 1.0 if out["status"] == OK else 0.0, step, out)
     elif stage == "fix" and out["nth"] == 1:
+        pending = [f for f in pending if f["step"] != step.id]
         if out["status"] == STOPPED:
             _report(assign_id, 0.0, step, out)
         elif out["status"] == OK:
-            pending = [*pending, {"assign_id": assign_id, "work": step.work}]
+            pending = [*pending, {"step": step.id, "assign_id": assign_id, "work": step.work}]
     new = {"run": out["run"], "assigns": assigns, "pending": pending}
     if new == {"assigns": {}, "pending": [], **held}:
         return
@@ -293,7 +295,7 @@ def _keep_launch(state_dir: Path, step: model.Step, out: Mapping[str, Any]) -> N
     """起動の値をプランの記録に残し、単位の記録を進める。"""
     if out.get("launch"):
         try:
-            _add_models(state_dir, step.id, out["launch"])
+            _add_models(state_dir, out["run"], step.id, out["launch"])
         except OSError as exc:  # ファイル: 記録を書けなくても工程の結果は変えない
             log.warning("起動の値の記録を %s へ書けない: %s", state_dir, exc)
     _after_unit(state_dir, step, out)
@@ -795,7 +797,7 @@ def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optio
     """終わった回の結果。状態の保存先の記録（載った PR・ステップの outputs・起動の値）を読み、`_result_of` で組む。"""
     items = [_run_item(inv), *_pr_items(inv.state_dir)]
     metrics: dict[str, Any] = {"round": inv.round_no, "steps": final["count"] if final else 0}
-    models = recorded_models(inv.state_dir)
+    models = recorded_models(inv.state_dir, inv.run_id)
     if models:
         metrics["models"] = models
     outputs, warnings = recorded_outputs(inv.state_dir)

@@ -1,5 +1,5 @@
 """プランの回をまたぐ記録（状態の保存先の `prs.json`・`outputs.json`・`step-gaps.json`・`models.json`・`units.json`・
-`progress.jsonl`）の読み書き。`units.json` だけは回をまたがず、書いた回の id を持つ（#2944）。
+`progress.jsonl`）の読み書き。`models.json` と `units.json` だけは回をまたがず、書いた回の id を持つ（#2944）。
 
 書くのは耐久ステップ（`runner.run_step`・`runner.record_choices`）で、読むのはプランの結果を組む `runner` である。
 """
@@ -26,7 +26,8 @@ STEP_GAPS_FILE = "step-gaps.json"
 GAP_SCHEMA = result.SCHEMA + "#/$defs/gap"
 # 選択の記録を追記する進捗記録（追記だけ。書き換えない）
 PROGRESS_FILE = "progress.jsonl"
-# ステップごとの起動の指定した値と実際のモデル（ステップの id → 値。プランの結果の metrics.models に載せる。#2944）
+# ステップごとの起動の指定した値と実際のモデル（steps がステップの id → 値。プランの結果の metrics.models に載せる。#2944）。
+# 回の id（run）が違う記録は使わない
 MODELS_FILE = "models.json"
 # 回の工程の割り付け ID（assigns）と、検査の結果を待つ修正（pending）。回の id（run）が違う記録は使わない（#2944）
 UNITS_FILE = "units.json"
@@ -34,16 +35,19 @@ UNITS_FILE = "units.json"
 log = logging.getLogger(__name__)
 
 
-def _add_models(state_dir: Path, step_id: str, launch: Mapping[str, Any]) -> None:
-    """ステップ `step_id` の最後の起動の、指定した値と実際のモデルを残す。"""
+def _add_models(state_dir: Path, run_id: Optional[str], step_id: str, launch: Mapping[str, Any]) -> None:
+    """回 `run_id` のステップ `step_id` の最後の起動の、指定した値と実際のモデルを残す。前の回の値は引き継がない。"""
     kept = {k: launch[k] for k in ("name", "requested_model", "effort", "model") if k in launch}
-    write_json(state_dir / MODELS_FILE, {**recorded_models(state_dir), step_id: kept})
+    write_json(state_dir / MODELS_FILE, {"run": run_id, "steps": {**recorded_models(state_dir, run_id), step_id: kept}})
 
 
-def recorded_models(state_dir: Path) -> dict[str, Any]:
-    """ステップごとの起動の値。無ければ空。"""
+def recorded_models(state_dir: Path, run_id: Optional[str]) -> dict[str, Any]:
+    """回 `run_id` で起動したステップごとの値。無いか、別の回の記録なら空。"""
     found = read_json(state_dir / MODELS_FILE)
-    return found if found is not None else {}
+    if found is None or "run" not in found or found["run"] != run_id:
+        return {}
+    steps = found["steps"] if "steps" in found else None
+    return steps if isinstance(steps, dict) else {}
 
 
 def read_units(state_dir: Path) -> dict[str, Any]:
