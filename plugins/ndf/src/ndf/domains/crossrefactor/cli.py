@@ -169,7 +169,7 @@ def _release(a: argparse.Namespace) -> dict[str, Any]:
     root = _root(a)
     held = workspace.hold_pr(root.parent, a.pr)
     if held is None:
-        return result.stopped(TOOL, "precondition", f"PR #{a.pr} の別の refactor run か release が動いている。終わってから打ち直す")
+        return result.stopped(TOOL, "precondition", workspace.held_elsewhere(a.pr))
     try:
         kept, swept = _release_held(repo, root)
     finally:

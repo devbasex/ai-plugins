@@ -137,6 +137,11 @@ def hold_pr(parent: Path, pr: int) -> Optional[FileLock]:
     return slot_pool.try_lock(locks / f"rf{pr}.lock")
 
 
+def held_elsewhere(pr: int) -> str:
+    """`hold_pr` が取れなかったときの停止の文。`run` と `release` で同じ文を返す。"""
+    return f"PR #{pr} の別の refactor run か release が動いている。終わってから打ち直す"
+
+
 def layout(root: Path, runtimes: Sequence[str]) -> Workspace:
     return Workspace(root, root / "work", root / "read", root / "logs", tuple(runtimes))
 

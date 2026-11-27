@@ -915,7 +915,7 @@ def drive(cfg: RunConfig, ports: Optional[Ports] = None) -> Finish:
     root = workspace.root_of(repo, cfg.pr)
     held = workspace.hold_pr(root.parent, cfg.pr)
     if held is None:
-        return Finish("precondition", f"PR #{cfg.pr} の別の refactor run か release が動いている。終わってから打ち直す")
+        return Finish("precondition", workspace.held_elsewhere(cfg.pr))
     try:
         workspace.sweep(repo, root, time.time())
         return _drive_held(cfg, ports if ports is not None else Ports(), repo, root)
