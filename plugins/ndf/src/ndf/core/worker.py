@@ -437,7 +437,7 @@ def _resume_until_written(
         written = fresh.cleared and _written(wd, handoff.result_file.name)  # 前の結果を消す前は、残った前の結果を数えない
         if (written and not _missing_record(handoff, wd)) or _reply_failed(reply, out):
             return
-        argv = base + run.cli_args() + ["--resume", out.session]
+        argv = base + run.cli_args() + claude.session_args(claude.Session(out.session, resume=True))
         run.next_try(log)
         prompt, timeout, resumes, bound = (RECORD_PROMPT if written else RESUME_PROMPT), handoff.timeout, resumes + 1, None
     out.cause = "work_stopped"
