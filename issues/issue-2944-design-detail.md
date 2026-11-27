@@ -328,6 +328,9 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `push` | `fix-push` |
 
 - 検査が `ok` なら 1。停止理由が `test_failed`・`check_failed`・`push_rejected`・`base_conflict` なら 0、ほかの理由（前提の不足、期限切れなど）なら書かない
+- 検査が指標を書かない理由で止まった場合、結果待ちの修正は残し、同じ実行の次の検査（打ち直しを含む）で判定する
+- 工程のモードは、工程の入力の `mode` を `NDF_WORKFLOW_MODE` でステップの子へ渡し、無ければ子の環境から外す。`launch_choice` は引数の `mode` が無ければこの値を行の `mode` にする
+- プランの実行は `model_choice` を読み込めない（`checks/children.json`）ので、作業の工程は `claude_choice.pick_stage`（差し込まれた `stage_of`）で引く（実装で決定）
 - 検査の前にある push・待ち・準備・承認ゲートのステップの結果は、指標に使わない。承認ゲートの承認や却下からは、1 も 0 も書かない。検査に届かずに実行が終われば欠測とし、行を書かない
 - 修正ステップ自体が止まれば 0。`worktree` は完了が 1、停止が 0
 

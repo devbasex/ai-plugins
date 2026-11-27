@@ -56,12 +56,15 @@ class StepRefused(Exception):
 
 @dataclass(frozen=True)
 class StepContext:
-    """ステップを打つ文脈。`values` は差し込みの値（`state_dir` など）、`env` は子の環境に重ねる値（#1959 の「子へ渡す環境変数」）。"""
+    """ステップを打つ文脈。`values` は差し込みの値（`state_dir` など）、`env` は子の環境に重ねる値（#1959 の「子へ渡す環境変数」）。
+
+    `env` の値が None の名前は、親から継いだ値を子の環境から外す（#2944）。
+    """
 
     plan: Plan
     state_dir: Path
     values: dict[str, str]
-    env: Mapping[str, str] = field(default_factory=dict)
+    env: Mapping[str, Optional[str]] = field(default_factory=dict)
 
 
 def usable_worktree(path: Optional[str]) -> bool:
@@ -147,7 +150,10 @@ def _plain(status: str, kind: Optional[str], summary: str, code: Optional[int]) 
 
 
 def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
-    """終了コードと標準出力からステップの結果を作る（`status`・`kind`・`retry_after`・`routes`・`summary`・`code`・`prs`・`outputs`・`gaps`）。"""
+    """終了コードと標準出力からステップの結果を作る（`status`・`kind`・`retry_after`・`routes`・`summary`・`code`・`prs`・`outputs`・`gaps`）。
+
+    結果 JSON を持つステップの結果は、承認の提示の欄と起動の値（`launch`）も持つ。
+    """
     found = last_json(stdout)
     if found is None:
         if code == exit_codes.code_of("ok"):
@@ -170,7 +176,15 @@ def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
         "presented_id": _presented_id(found),
         "presentation_path": _presentation_path(found),
         "production": _gate_reaches_production(found),
+        "launch": _launch_values(found),
     }
+
+
+def _launch_values(found: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """worker の結果の起動の値と割り付け ID（`metrics.launch`。#2944）。無いか形が違えば None。"""
+    metrics = found.get("metrics")
+    got = metrics.get("launch") if isinstance(metrics, dict) else None
+    return got if isinstance(got, dict) and got else None
 
 
 def _presented_id(found: dict[str, Any]) -> Optional[str]:
@@ -222,7 +236,7 @@ def _log_path(ctx: StepContext, step: Step) -> Path:
 def _launch(ctx: StepContext, step: Step) -> subprocess.Popen:
     args = assemble_decide.fill(step.run, ctx.values)
     _log_path(ctx, step).parent.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, **ctx.env} if ctx.env else None
+    env = {k: v for k, v in {**os.environ, **ctx.env}.items() if v is not None} if ctx.env else None
     return subprocess.Popen(
         args, cwd=workdir(ctx.plan, step), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
     )

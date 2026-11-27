@@ -21,24 +21,33 @@ from typing import NamedTuple, Optional, Union
 from ndf.contracts import causes, chosen, limits, routing
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core.loop import Next
-from ndf.core.plan.model import Plan, Step
+from ndf.core.plan.model import CHECK_FIXES, Plan, Step
 
 # 結果の status の語のうち、手の実行が返すもの（OK・GATE・STOPPED のほか）
 SLEPT, ANSWERED = "slept", "answered"
 # 待ちの上限の名前（利用上限の待ちの頭打ち）
 USAGE_WAIT_MAX = "supervise.limit-wait-max"
 USAGE_LIMIT = "usage_limit"
+# 修正の作業ごとの引き上げの理由（#2944）。作業で理由が決まる作業と、`model.CHECK_FIXES` が引き継ぐ停止理由
+FIXED_REASONS = {"fix-push": "push_failed", "fix-base": "base_conflict"}
+CHECK_REASONS = ("test_failed", "check_failed", "base_conflict")
+# 修正を確かめる検査がこの理由で止まれば、その修正の効果は 0。ほかの理由は検査できていないので指標を書かない
+FAILED_CHECKS = (*CHECK_REASONS, "push_rejected")
 # 選択の記録の規則の番号（AI が判断している分岐の一覧。docs/specifications/ndf-rebuild-scripted-flow.md の「洗い出しの一覧」）。
 # 止まったプランの再開点（R03）、衝突で止まったときのマージ（R10）、承認の回答の後のルート（R13）
 RULE_STOPPED, RULE_CONFLICT, RULE_ANSWER = "R03", "R10", "R13"
 
 
 class RunStep(NamedTuple):
-    """ステップを打つ手。`attempt` は止まった種類での打ち直しの回数、`nth` はそのプランの実行でそのステップを実行した何回目か（最初が 1。#1959）。"""
+    """ステップを打つ手。`attempt` は止まった種類での打ち直しの回数、`nth` はそのプランの実行でそのステップを実行した何回目か（最初が 1。#1959）。
+
+    `retry` は同じ理由で同じ修正ステップに 2 回目以降に入った実行の、引き上げの理由（#2944）。
+    """
 
     step: str
     attempt: int
     nth: int = 1
+    retry: Optional[str] = None
 
 
 class Sleep(NamedTuple):
@@ -76,7 +85,8 @@ class Outcome(NamedTuple):
 @dataclass(frozen=True)
 class StepState:
     """遷移の状態。`prelude` は開始点の前に通すステップの残り、`retries` は（ステップ, 種類）ごとの打ち直しの回数、
-    `runs` はステップごとの実行の回数（打ち直しと、遷移で戻った実行を含む。#1959）。"""
+    `runs` はステップごとの実行の回数（打ち直しと、遷移で戻った実行を含む。#1959）。`entries` は（修正ステップ, 理由）ごとの
+    入った回数、`retry` は今のステップの手に持たせる引き上げの理由（待った後の打ち直しも同じ。#2944）。"""
 
     current: Optional[str]
     start: Optional[str]
@@ -86,6 +96,8 @@ class StepState:
     gates: int = 0
     retries: Mapping[str, int] = field(default_factory=dict)
     runs: Mapping[str, int] = field(default_factory=dict)
+    entries: Mapping[str, int] = field(default_factory=dict)
+    retry: Optional[str] = None
     status: str = OK
     kind: Optional[str] = None
     detail: Optional[str] = None
@@ -99,6 +111,26 @@ def start_state(plan: Plan, start: Optional[str], prelude: Sequence[str] = ()) -
     if first in (routing.END, routing.STOP):
         first = None
     return StepState(current=None, start=first, prelude=tuple(prelude), limit=plan.limit)
+
+
+def retry_reason(work: Optional[str], kind: Optional[str]) -> Optional[str]:
+    """修正の作業 `work` と、入った元の停止理由 `kind` から、引き上げの理由（`--retry` の値）を返す。当てはまらなければ None。"""
+    if work in FIXED_REASONS:
+        return FIXED_REASONS[work]
+    return kind if work in CHECK_FIXES and kind in CHECK_REASONS else None
+
+
+def _entered(state: StepState, step: Step) -> StepState:
+    """ステップ `step` へ入る。修正ステップは理由ごとに数え、2 回目以降だけ理由を持たせる。
+
+    理由の元は直前に止まった種類で、通ったステップ（失敗の集計 `test-repeat`・`repeat-check`）を挟んでも残る。
+    """
+    reason = retry_reason(step.work, state.kind)
+    if reason is None:
+        return replace(state, retry=None)
+    key = _retry_key(step.id, reason)
+    n = (state.entries[key] if key in state.entries else 0) + 1
+    return replace(state, entries={**state.entries, key: n}, retry=reason if n > 1 else None)
 
 
 def _retry_key(step: str, kind: str) -> str:
@@ -120,12 +152,13 @@ def _run(plan: Plan, state: StepState, target: Optional[str]) -> Next:
         return _finish(state, OK, None, None)
     if target == routing.STOP:
         return _finish(state, STOPPED, "refused", f"ステップ {state.last} のルートが stop")
-    if plan.step(target) is None:
+    step = plan.step(target)
+    if step is None:
         return _finish(state, STOPPED, "invalid", f"知らないステップ: {target}")
     if state.count + 1 > state.limit:
         return _finish(state, STOPPED, "fix_limit", f"ステップの数が上限 {state.limit} を超えた")
-    nxt = _ran_again(replace(state, current=target, last=target, count=state.count + 1), target)
-    return Next.step(RunStep(target, 0, nxt.runs[target]), nxt)
+    nxt = _entered(_ran_again(replace(state, current=target, last=target, count=state.count + 1), target), step)
+    return Next.step(RunStep(target, 0, nxt.runs[target], nxt.retry), nxt)
 
 
 def _after_ok(plan: Plan, state: StepState, step: Step) -> Next:
@@ -213,7 +246,8 @@ def decide(plan: Plan, state: StepState, done: Optional[Outcome]) -> Next:
     step = plan.step(state.current)
     if done.status == SLEPT:
         nxt = _ran_again(state, step.id)
-        return Next.step(RunStep(step.id, state.retries[_retry_key(step.id, state.kind)], nxt.runs[step.id]), nxt)
+        attempt = state.retries[_retry_key(step.id, state.kind)]
+        return Next.step(RunStep(step.id, attempt, nxt.runs[step.id], nxt.retry), nxt)
     if done.status == ANSWERED:
         return _after_answer(plan, state, step, done)
     if done.status == OK:

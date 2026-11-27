@@ -11,9 +11,9 @@ import logging
 from datetime import timedelta
 
 from ndf.adapters import model_choice
-from ndf.adapters.model_choice import base_fallback, launch_choice, precheck
+from ndf.adapters.model_choice import base_fallback, launch_choice, precheck, stage_of
 
-__all__ = ["base_fallback", "launch_choice", "observed", "precheck"]
+__all__ = ["base_fallback", "launch_choice", "observed", "precheck", "stage_of"]
 
 log = logging.getLogger(__name__)
 
