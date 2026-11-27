@@ -43,7 +43,7 @@ EFFORT_ENV = identity.env_name("claude-effort-level")
 
 
 def _parsed(payload: dict) -> claude.ClaudeReply:
-    return claude._parse_reply(json.dumps(payload))
+    return claude.parse_reply(json.dumps(payload))
 
 
 def test_the_measured_refusal_is_a_model_refusal_that_names_where_to_fix() -> None:

@@ -299,7 +299,7 @@ graph TD
 | ランタイム | 判定に要るもの（すべて） |
 | --- | --- |
 | Claude | 結果の JSON があり、`is_error` が真、`api_error_status` が 404、4 つのトークン数がどれも欄として在って 0、`modelUsage` が空 |
-| Codex | API がモデルか effort を理由に断った誤りが出力にあり、モデルの回答と使用量の行が無い。誤りの欄の名前は未確認で、実装で確かめるまではこの判定に当てない |
+| Codex | `turn.completed` の行と回答の項目（`agent_message`）が無く、`turn.failed` の `error.message` が `model is not supported` か `reasoning.effort` を含む（2026-11-27 に codex-cli 0.172.0 の実際の出力で確かめた） |
 
 Claude の値は、2026-11-26 に Claude Code 2.1.332 を無いモデル名で起動して確かめた（終了コード 1）。
 

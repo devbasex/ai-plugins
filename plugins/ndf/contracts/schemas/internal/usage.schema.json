@@ -9,10 +9,10 @@
   "properties": {
     "version": {"$ref": "common.schema.json#/$defs/version", "description": "行の形のバージョン"},
     "at": {"$ref": "common.schema.json#/$defs/time", "description": "書いた時刻"},
-    "caller": {"type": "string", "description": "呼び手の区分（subagent・claude-p）"},
+    "caller": {"type": "string", "description": "呼び手の区分（subagent・claude-p・codex-exec）"},
     "agent_id": {"type": "string", "description": "サブエージェントの id"},
     "transcript": {"type": "string", "description": "サブエージェントの会話の記録のパス"},
-    "usage": {"description": "使用量（token）。claude -p の行は起動 1 回分（結果の usage）。読めなければ unknown", "oneOf": [{"const": "unknown"}, {"type": "object", "additionalProperties": false, "required": ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"], "properties": {"input_tokens": {"type": "integer", "minimum": 0}, "output_tokens": {"type": "integer", "minimum": 0}, "cache_creation_input_tokens": {"type": "integer", "minimum": 0}, "cache_read_input_tokens": {"type": "integer", "minimum": 0}}}]},
+    "usage": {"description": "使用量（token）。claude -p の行は起動 1 回分（結果の usage）、codex-exec の行は turn.completed の usage の合計（input_tokens はキャッシュの読み書きを除いた分）。読めなければ unknown", "oneOf": [{"const": "unknown"}, {"type": "object", "additionalProperties": false, "required": ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"], "properties": {"input_tokens": {"type": "integer", "minimum": 0}, "output_tokens": {"type": "integer", "minimum": 0}, "cache_creation_input_tokens": {"type": "integer", "minimum": 0}, "cache_read_input_tokens": {"type": "integer", "minimum": 0}}}]},
     "launch_id": {"type": "string", "description": "起動した子プロセスごとに一意な値（プランの進捗の記録の行と突き合わせる値）"},
     "name": {"type": "string", "description": "工程の名前（worker の作業種別か Skill の名前。.ndf/launch.json の steps のキーと同じ）"},
     "run_id": {"type": "string", "description": "プランの実行の id"},

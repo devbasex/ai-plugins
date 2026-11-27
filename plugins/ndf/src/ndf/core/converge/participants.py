@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
@@ -259,6 +260,21 @@ def reading_launch(
     return read_only_launch(reader.system, workdir, prompt, stem, timeout, readable=reader.readable)
 
 
+def with_choice(spec: agents.Launch, choice: Optional[Any]) -> agents.Launch:
+    """相手役か修正担当の起動 `spec` に、選んだ値（`claude_choice.pick_values` の Choice）の引数と環境を、最後の引数（質問）の前に足す。
+
+    ランタイムの表に `usage_args` があれば（codex）、使用量を出力から取る引数も足し、回答を `agents.codex_answer_path` へ書かせる。
+    `choice` が None の起動（cross-refactoring・値を選ばない起動）は変えない。
+    """
+    if choice is None:
+        return spec
+    row = facts.row(RUNTIMES, spec.agent)
+    usage = row["usage_args"] if "usage_args" in row else []
+    answer = str(agents.codex_answer_path(spec.paths.out))
+    added = (*choice.cli_args(), *(a.replace("{answer}", answer) for a in usage))
+    return agents.adding_env(replace(spec, argv=(*spec.argv[:-1], *added, spec.argv[-1])), choice.env_changes())
+
+
 class ClaudeAnswer(NamedTuple):
     """claude の `--output-format json` の出力を 1 回読んだもの。`text` は結果を探す本文（外側の JSON の `result`。外側が JSON で
     なければ出力のまま）、`denials` は外側の JSON の `permission_denials` の要素（辞書だけ）。"""
@@ -283,9 +299,11 @@ def claude_answer(out: Path) -> ClaudeAnswer:
 
 
 def answer_text(runtime: str, out: Path) -> str:
-    """担当の出力から結果を探す本文。claude は `--output-format json` の外側の JSON の `result` を本文にし、ほかは出力の末尾。"""
+    """担当の出力から結果を探す本文。claude は `--output-format json` の外側の JSON の `result` を本文にし、ほかは回答のファイル
+    （`agents.codex_answer_path`。使用量を取る起動の codex が書く）があればその本文、無ければ出力の末尾。"""
     if runtime != FIXER:
-        return agents.tail(out)
+        answer = agents.codex_answer_path(out)
+        return agents.tail(answer if answer.is_file() else out)
     return claude_answer(out).text
 
 

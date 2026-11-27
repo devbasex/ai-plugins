@@ -377,7 +377,11 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - `_record_experiment` は、終わり方が収束かラウンドの上限のときに書く。結果を読めないシートがあって終わった場合と、誤りで終わった場合は書かない。design と impl の指標は `1 / (1 + 1 ラウンド目の採用された重大な指摘の数)` で、数が None なら null
 - 修正担当は `launch_choice("seat", "fix")`（工程が無いので実験の引数を足さない）。環境変数と引数の指定は効く
 - シートの子の環境から `NDF_CHARGE_TO` を外す
-- `codex exec --json` で、利用上限とサンドボックスの失敗が今の検出（`agents.usage_limit`・`sandbox_failed`。行頭の文字列を読む）に掛かるかは未確認である。実装で失敗する条件を 1 回起動し、掛からなければ検出を `--json` の出力の形に合わせる
+- `codex exec --json` は理由を標準エラーに出さないので、利用上限は `error`・`turn.failed` の行の文を `usage_limit` で読み、サンドボックスの失敗は終了コードが 0 でない `command_execution` の出力が `bwrap:` で始まるかを `sandbox_failed` が読む。どちらも、最初の行が `thread.started` の出力だけを `--json` の出力と扱う（`codex_events`）
+- 起動の前に回答のファイル（`<出力>.out.answer`）を消す（`_start`）。codex は失敗すると前の中身を残すためである
+- 実装で設計の形を変えた所（B5）。振る舞いは変えていない
+  - 値は `review_launch`・`read_only_launch`・`reading_launch` の引数にせず、組み立てた起動に `participants.with_choice(launch, choice)` で足す。引数を足すと上限（PLR0913。6）を超え、cross-refactoring が呼ぶ関数の形も変わるためである
+  - `codex_usage` は辞書でなく `agents.CodexUsage`（4 つの欄）を返し、`codex_cost` はそれを受ける。欄の名前の文字列を複数のファイルに置くと重複の検査が落とすためである。`codex_cost` の返り値の 1 つ目は、換算に使ったモデルの名前である。行を書くのは `usage.record_codex`、行の `caller` は `codex-exec` である
 - Codex の行は `session_seq` 0、費用は `codex_cost` の値を `session_cost_usd` に書く。単価が無ければ欄を置かず、`unpriced` の行を足す
 
 ### 異常系の処理
