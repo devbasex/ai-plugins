@@ -131,10 +131,10 @@ experimental/ndf/
 | `findings` | 「人へ残す判断」の表の行で、「判断」が `blank`・番号が無い・「なぜ当たるか」が `blank` のどれか | 指摘する |
 | `findings` | `delegates` が真で `named` が偽 | 指摘する |
 | `findings` | `delegates` が真で `named` が真 | 指摘しない |
-
-`findings` の行は、表の上から順に当て、最初に当たった行で結果を決める。`lines` の範囲の確認は、表の不備や委ね方を指摘する条件より先に行う。後に置くと、差分の外にある既存の不備まで指摘し、利用者は今回変更していない判断を直すまで PR を送れなくなるためである。ただし `named` が相手にする表の行は、`lines` に依らず文書全体の表から読む（差分の外の表の行も、委ねる行の対応付けの相手になる）。
 | `named` | 行の番号のどれかが、`blank` でない「判断」と「なぜ当たるか」を持つ表の行の番号と同じで、その表の行の正規化した「判断」が、正規化した委ねる行に含まれる | 真 |
 | `named` | 番号の直後が「に当たらない」「には当たらない」「に該当しない」 | その番号を数えない |
+
+`findings` は表の条件を上から順に評価し、最初に一致した条件の結果を返す。`named` は差分の対象外も含め、文書全体の表を参照する。`lines` の範囲の確認を、表の不備や委ね方を指摘する条件より先に置くのは、後に置くと差分の外にある既存の不備まで指摘し、利用者が今回変更していない判断を直すまで PR を送れなくなるためである。
 
 - hunk の見出しの件数: `git diff -U0` は、範囲が 1 行のとき件数を省く（1 行の置き換えは `@@ -a +c @@`、1 行の追加は `@@ -a,0 +c @@`）。省いた件数は 1 として読む。件数が 0 の側は行を返さない
 - 見出しの行: `heading_touched` は `atx_headings` の行番号（0 始まり）に 1 を足して、hunk の行番号（1 始まり）と比べる
@@ -331,10 +331,12 @@ experimental/ndf/
 | ステップ `design-check-repeat` | 設定値（`run`: `["ndf", "route", "repeat", "--result", "{state_dir}/design-check.json", "--log", "{state_dir}/design-check-causes.jsonl"]`、`next`: `design-check-fix`） | 同上 | — |
 | ステップ `design-check-fix` | 設定値（`run`: `["{{worker}}", "design-check-fix"]`、`next`: `design-check`） | 同上 | — |
 | ステップ `design-check-reviewed` と、その `-repeat`・`-fix` | 設定値（上の 3 つと同じ形。結果は同じ `{state_dir}/design-check.json` に上書きし、直しの作業が直前の検査の結果を同じパスで読めるようにする。繰り返しの記録は分けて `{state_dir}/design-check-reviewed-causes.jsonl`。`design-check-reviewed-fix` の `next` は `review-fixed`、`design-check-reviewed` の `next` は `push-reviewed`） | `templates/design.json` | — |
-| ステップ `review-fixed` | 設定値（`run`: `["{{review}}"]`、`next`: `design-check-reviewed`。`on_cause` を持たないので、`incomplete` を含め完了しなければプランが止まる） | `templates/design.json` | — |
-
-`review-fixed` の `run` には、`review` のステップが渡す `--findings {state_dir}/rebuild.json` を付けない。`rebuild.json` は組み直しが最初のレビューへ引き継いだ足すべき内容で、最初のレビューがすでに扱っている。直した版にもう一度渡すと、解決済みの組み直しの指摘が再び修正の対象になり、同じ修正のやり直しや、未完了による停止が起きる。直した版のレビューが見るのは、直した版そのものと、そのレビューが新しく出す指摘だけである。`document-review` の `review-fixed` も同じく `["{{review}}"]` で、`--findings` を持たない（もともと最初の `review` も持たない）。
+| ステップ `review-fixed` | 設定値（`run` は `review` のステップと同じ `["{{review}}", "--findings", "{state_dir}/rebuild.json"]`、`next`: `design-check-reviewed`。`on_cause` を持たないので、`incomplete` を含め完了しなければプランが止まる） | `templates/design.json` | — |
 | 値 `base` | 設定値（`params` に足す） | `templates/design-detail.json` | `route.derived_locally` の `default_base` |
+
+`review-fixed` には、最初のレビューで扱った組み直しの指摘を再送しない。ただし `--findings` は外さず、`review` と同じ `rebuild.json` を渡す。最初のレビューが `incomplete` で終わっても検査へ進む経路があり、そのときは組み直しの指摘の一部が未解決のまま残るためである。外すと、未解決の指摘は `review-fixed` の完了の条件から消え、別の直しが入った版が、組み直しの指摘を確かめないまま承認へ届く。
+
+同じファイルを渡しても、解決済みの指摘は再送されない。`{{review}}` の既定の起動は、どちらのステップでも同じ状態の置き場 `{state_dir}/cross-review`（`route.REVIEW_STATE`）を使う。cross-review は、引き継いだ指摘のうち、その置き場の記録で直した・見送ったと決まっていない件だけを修正担当へ渡す（`journal.pending`）。終わり方も、決まっていない件が残れば `incomplete` にする（`finish_decide._handed`）。このため `review-fixed` が見るのは、直した版と、最初のレビューで未解決のまま残った組み直しの指摘と、新しく出る指摘である。未解決の組み直しの指摘が残れば `review-fixed` は完了せず、プランが止まる。`document-review` の `review-fixed` は、最初の `review` と同じく `["{{review}}"]` で、`--findings` を持たない（組み直しを経ないため）。
 
 `design.json` でつなぎ直す分岐は次のとおりである（設計文書の「処理の流れ」の表）。
 
@@ -351,7 +353,7 @@ experimental/ndf/
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `design` のプラン | 指摘が無ければ `design` → `rebuild` → `design-check` → `push` → … → `design-check-reviewed` → `push-reviewed` → `conflict-check` → `ci` | 1 回落ちて直すと検査へ戻る。`review` の `incomplete` は `design-check-reviewed` へ進む | 3 回目の `check_failed` で `fix_limit`。`review-fixed` の `incomplete` で止まる。`precondition` は直しへ回らない。`ci-fix`・`base-sync`・`fix-base`・`fix-push`・`fix-push-reviewed` の後に検査を通らずに push すると落ちる。`review-fixed` の `run` が `--findings` を含むと落ちる |
+| `design` のプラン | 指摘が無ければ `design` → `rebuild` → `design-check` → `push` → … → `design-check-reviewed` → `push-reviewed` → `conflict-check` → `ci` | 1 回落ちて直すと検査へ戻る。`review` の `incomplete` は `design-check-reviewed` へ進む | 3 回目の `check_failed` で `fix_limit`。`review-fixed` の `incomplete` で止まる。`precondition` は直しへ回らない。`ci-fix`・`base-sync`・`fix-base`・`fix-push`・`fix-push-reviewed` の後に検査を通らずに push すると落ちる。`review-fixed` の `run` が `review` と違う（`--findings` を外す・別の状態の置き場を使う）と落ちる。cross-review の終わり方の既存のテストで、同じ状態の置き場に直したと記録した引き継ぎの指摘は修正担当へ渡らず、決まっていない指摘が残れば `incomplete` になることを確かめる（足りなければ足す） |
 | `design-detail` のプラン | `work` → `design-check` → `push` | `fix-push` の後に検査へ戻る | `base` を渡さずに組むと、`.ndf/project.json` の `branch_strategy` のスプリントの PR のマージ先が入る。その宣言が無ければ `RouteError` |
 
 ## 文書レビューのプランのテンプレートと工程の定義
