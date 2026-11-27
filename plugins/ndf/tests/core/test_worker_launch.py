@@ -92,7 +92,7 @@ def test_a_revocation_while_waiting_to_launch_keeps_the_previous_result(tmp_path
     launched: list[list[str]] = []
 
     def fake(argv, prompt, timeout, cwd, options):
-        launch_settings.launch_approval.append(str(root), sha, launch_settings.launch_approval.Action.REVOKE)  # 起動の枠を待つ間
+        launch_settings.launch_approval.append(str(root), sha, launch_settings.launch_approval.Action.REVOKE)  # 起動のスロットを待つ間
         reason = options.verify()
         if reason is not None:
             return claude.ClaudeReply.failed("", reason, failure=claude.Failure.LAUNCH)

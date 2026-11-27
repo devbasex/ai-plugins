@@ -71,7 +71,7 @@ from ndf.contracts.exit_codes import OK
 from ndf.core import durable_locks, worker_append
 from ndf.core.plan import model, runner
 from ndf.core.plan.records import PROGRESS_FILE
-from ndf.core.worker_outcome import outcome_of, require_outputs
+from ndf.core.worker_outcome import FreshResult, Uncleared, outcome_of, require_outputs
 
 log = logging.getLogger(__name__)
 
@@ -413,81 +413,34 @@ def delegate(
 ) -> Delivery:
     """worker を起動し、結果ファイルが書かれるまで同じ会話を `RESUMES` 回まで再起動する。
 
-    結果ファイルは開いた結果の保存先 `wd` の中の名前としてリンクをたどらずに扱う。前の試行の結果ファイルは、最初の子が
-    起動する直前に消す（`_FreshResult`）。承認を確かめる起動では、起動の直前の照らし直しを通った後に消すので、起動の設定の
-    検査・承認の確認・照らし直しで止まれば前の結果ファイルは残る。消せない（リンクなど）なら起動せずに `invalid` にする。
-    結果ファイルがあれば `cause` が None、再起動しても
-    無ければ `work_stopped`、起動が打ち直しても直らない失敗で終えればその種類を `cause` に置く。委譲中に結果ファイルが
+    結果ファイルは開いた結果の保存先 `wd` の中の名前としてリンクをたどらずに扱う。前の試行の結果ファイルは最初の子の起動の
+    直前に消し（`FreshResult`）、起動の設定の検査・承認の確認・照らし直しで止まれば残す。消せない（リンクなど）なら
+    起動せずに `invalid` にする。結果ファイルがあれば `cause` が None、再起動しても無ければ `work_stopped`、起動が打ち直しても直らない失敗で終えればその種類を `cause` に置く。委譲中に結果ファイルが
     リンクになったか読めなければ、再起動せずに `bad_report` にする。指定の停止は `InternalError` で上げる（`ndf.cli` が結果 JSON にする）。
     """
     out = Delivery(session=session or str(uuid.uuid4()))
     with launch_settings.prepared(handoff.kind, handoff.cwd) as grant:  # 起動できない指定なら、前の結果ファイルを消す前に止まる
         base, out.notice = _args_for(system, root, handoff.cwd, grant)
         try:
-            fresh = _FreshResult(wd, handoff.result_file.name, grant.verifier)
-            options = claude.LaunchOptions(verify=fresh.check if grant.verifier is not None else None)
-            _resume_until_written(handoff, wd, out, base, call, options, fresh)
-        except _Uncleared as exc:
+            _resume_until_written(handoff, out, base, call, FreshResult(wd, handoff.result_file.name, grant.verifier))
+        except Uncleared as exc:
             out.cause, out.detail = "invalid", f"結果ファイル {handoff.result_file} を起動の前に消せない: {exc}"
         except worker_paths.EntryError as exc:
             out.cause, out.detail = "bad_report", f"結果ファイル {handoff.result_file} を読めない: {exc}"
     return out
 
 
-class _Uncleared(Exception):
-    """起動の前に、前の試行の結果ファイルを消せなかった（リンクなど）。"""
-
-
-class _FreshResult:
-    """前の試行の結果ファイルを、最初の子の起動の直前に消す。消すまでは、残っている前の結果を今回の結果と見なさない。
-
-    照らし直し `verify` が無ければ（承認を調べない起動）、作った時点で消す。あれば、照らし直しが通った最初の 1 回で消す。
-    照らし直しで止まった（承認の取り消し・設定の書き換え）起動では、前の結果ファイルを残す。
-    """
-
-    def __init__(self, wd: worker_paths.WorkDir, name: str, verify: Optional[Callable[[], Optional[str]]]) -> None:
-        self._wd, self._name, self._verify = wd, name, verify
-        self.cleared = False
-        if verify is None:
-            self._clear()
-
-    def _clear(self) -> None:
-        try:
-            worker_paths.remove_file(self._wd, self._name)
-        except worker_paths.EntryError as exc:
-            raise _Uncleared(str(exc)) from None
-        self.cleared = True
-
-    def check(self) -> Optional[str]:
-        """子を起動する直前の照らし直し（`LaunchOptions.verify`）。通った最初の 1 回で前の結果ファイルを消す。"""
-        reason = self._verify() if self._verify is not None else None
-        if reason is None and not self.cleared:
-            self._clear()
-        return reason
-
-    def written(self) -> bool:
-        """今回の試行の結果ファイルがあるか（前の結果を消す前は偽）。"""
-        return self.cleared and _written(self._wd, self._name)
-
-
-def _resume_until_written(
-    handoff: Handoff,
-    wd: worker_paths.WorkDir,
-    out: Delivery,
-    base: list[str],
-    call: Caller,
-    options: claude.LaunchOptions,
-    fresh: _FreshResult,
-) -> None:
-    """`delegate` の起動と再起動（子ごとに `options.verify` が起動の直前に打たれる）。結果ファイルが読めなければ `EntryError` を上げる。"""
+def _resume_until_written(handoff: Handoff, out: Delivery, base: list[str], call: Caller, fresh: FreshResult) -> None:
+    """`delegate` の起動と再起動（子ごとに `fresh.options` の照らし直しが起動の直前に打たれる）。結果ファイルが読めなければ `EntryError` を上げる。"""
+    wd = fresh.wd
     argv = base + ["--session-id", out.session]
     prompt = f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
     for attempt in range(RESUMES + 1):
         with _worker_env(handoff.kind, wd):
-            reply = call(argv, prompt, handoff.timeout, handoff.cwd, options)
+            reply = call(argv, prompt, handoff.timeout, handoff.cwd, fresh.options)
         out.attempts, out.cost = attempt + 1, out.cost + reply.cost
         out.replies.append(reply.raw[:200])
-        written = fresh.written()
+        written = fresh.cleared and _written(wd, handoff.result_file.name)  # 前の結果を消す前は、残った前の結果を数えない
         if (written and not _missing_record(handoff, wd)) or _reply_failed(reply, out):
             return
         argv = base + ["--resume", out.session]
