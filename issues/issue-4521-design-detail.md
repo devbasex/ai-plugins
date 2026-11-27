@@ -2,6 +2,12 @@
 
 設計文書 [issue-4521-design.md](./issue-4521-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。以下の「決定 N」は設計文書の決定、「受け入れ条件 N」は要求仕様 [issue-4521-requirements.md](./issue-4521-requirements.md) の番号を指す。新設する関数が 2 つ以上あり、シグネチャを変える関数もあるので、別ファイルにする。
 
+この文書で使う呼び名は次のとおりである。
+
+- **6 項目**: `.ndf/project.json` の `languages`・`services`・`issues`・`checks`・`ndf_policies`・`instructions`
+- **読み手**: 設定に書かれた値を使うプログラム・手順書・利用者（数え方は要求仕様）
+- **指紋**: 解析が書いた値の SHA-256。項目ごとに設定の `analysis.written` に持ち、解析が書いたままの値か人が直した値かを見分ける
+
 現状の記述は、`main` のコミット `7504f88a3`（#4580 のマージを含む）のコードに合わせる。実装はこのコミット以降の `main` から始める。
 
 ## 地図
@@ -24,7 +30,7 @@ contracts/
 | `src/ndf/domains/project/measure_ci.py` | 変更 | 必須のチェックだけを測る | `measure_repo` | `measure_ci` | 変更: `measure` |
 | `src/ndf/domains/project/cli.py` | 変更 | 測定の組み立て | 下の全部 | `cli`・`MeasurementContext` | 変更: `_ci_items`・`measure_project`。削除: `_instruction_notes` |
 | `src/ndf/domains/project/write.py` | 変更 | 設定の値と、書くファイルの計画を作る | `check`・`analysis_record` | `write` | 変更: `plan`・`p_number`・`_build_record`・`_project_file` |
-| `src/ndf/domains/project/analysis_record.py` | 変更 | 旧い形のキー | `items` | `analysis_record` | 変更: `strip_item`・`strip_legacy`。削除: `_old_keys` の配列の呼び出し |
+| `src/ndf/domains/project/analysis_record.py` | 変更 | 旧い形のキー | `items` | `analysis_record` | 変更: `strip_item`・`strip_legacy`。削除: 配列の各行の中の旧いキーを探す分岐 |
 | `src/ndf/domains/project/check.py` | 変更 | 解析器のバージョン | — | `check` | 変更: 定数 `ANALYZER` |
 | `contracts/schemas/ndf-settings/project.schema.json` と `skills/development-workflow/schemas/project.schema.json` | 変更 | 設定の形（後者は `ndf project schema` の生成物） | — | — | — |
 | `contracts/domains/ndf-files.json` | 変更 | NDF が書くファイルの表 | — | — | — |
@@ -51,14 +57,14 @@ contracts/
 | --- | --- | --- | --- | --- |
 | `compose_services` | `measure_repo.py` | 変更 | `(text: str) -> list[str]` | `services:` の直下の名前を返す（image は読まない） |
 | `service_names` | `measure_repo.py` | 新設 | `(tree: Tree) -> list[str]` | 根と 1 段下の compose のファイルのサービス名を、重複なく整列して返す |
-| `instruction_notes` | `measure_repo.py` | 新設 | `(tree: Tree) -> list[str]` | 指示書の案内（古い案内のマーカー、指示書が無い）を、今の `measure_instructions` の `notes` と同じ文と順で返す |
+| `instruction_notes` | `measure_repo.py` | 新設 | `(tree: Tree) -> list[str]` | 指示書（`AGENTS.md`・`CLAUDE.md` など、AI への指示を書くファイル）の注意書きを返す。対象は、指示書か、指示書が読み込むファイルの先頭 5 行に、古い NDF の案内の目印（`NDF_PLUGIN_GUIDE_START`）がある場合と、指示書が無い場合の 2 つである。今の `measure_instructions` の `notes` と同じ文と順で返す |
 | `measure` | `measure_repo.py` | 変更 | `(tree: Tree, step: Step, items: dict) -> list[str]` | `test`・`materials` を `items` へ入れ、指示書の注記を返す |
 | `measure` | `measure_ci.py` | 変更 | `(tree, repo, head, deadline) -> dict`（返すキーは `ci`・`notes`） | 必須のチェックだけを測る |
 | `_ci_items` | `cli.py` | 変更 | `(tree, step, ctx) -> list[str]` | `ci` の項目を入れ、CI の注記だけを返す |
 
 - `measure`（`measure_repo.py`）
   - 事後条件: `items` に `test`・`materials` のほかの項目の値が無い。依存・サービス名・指示書の確かめが失敗しても残りを測る
-  - 手順の名前（`step` のキー）は `dependencies`・`services`・`instructions` で、失敗の記録は `items` に入っても、`cli.measure_project` が `write.ITEM_KEYS` で絞るので結果に出ない
+  - `step` に渡す処理の名前は `dependencies`・`services`・`instructions` である。どれかが失敗すると、失敗の記録がその名前で `items` に入る。`cli.measure_project` は `write.ITEM_KEYS` にあるキーだけを残すので、この記録は結果に出ない
 - `measure_project` の注記の順は、指示書の注記、CI の注記、開かなかった秘密の名前のファイル、の順で今と同じである
 - `MeasurementContext` から `repo_issues` を消す
 
@@ -79,10 +85,10 @@ contracts/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `strip_item` | `analysis_record.py` | 変更 | `(key, value) -> tuple[Any, list[str]]` | `ci` の中の旧いキーを取り除く（配列の行の中を見る経路を消す） |
+| `strip_item` | `analysis_record.py` | 変更 | `(key, value) -> tuple[Any, list[str]]` | `ci` の中の旧いキーを取り除く。値が配列のときに各行の中の旧いキーを取り除く分岐は消す（対象は `languages[].files` だけで、`languages` は項目ごと消える） |
 | `strip_legacy` | `analysis_record.py` | 変更 | `(doc) -> tuple[dict, list[str]]` | 6 項目を項目ごと取り除く |
 | `plan` | `write.py` | 変更 | シグネチャは今のまま | 回答できる項目を、`status: question` のうち `ITEM_KEYS` にあるものに絞る。ほかの回答は `ignored` の行にする |
-| `p_number` | `write.py` | 変更 | `(key, default) -> str` | 番号の表を `test`（P2）・`ci`（P4）だけにする |
+| `p_number` | `write.py` | 変更 | `(key, default) -> str` | 項目と番号（`measure`・`write` の出力で項目を指す `P2` などの表示）の対応表を、`test`（P2）・`ci`（P4）だけにする |
 | `_build_record` | `write.py` | 変更 | シグネチャは今のまま | `analyzer` に測定の結果の `analyzer` を書く。1 以上の整数でない値は、記録の形の確かめより前に止める |
 | `_project_file` | `write.py` | 変更 | `(inp, doc) -> Optional[File]` | 6 項目が残る設定では、差分の前の側を、6 項目の値を `（伏せた）` に置き換えて整形し直した文にする |
 
