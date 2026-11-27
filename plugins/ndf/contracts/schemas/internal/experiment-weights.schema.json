@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "experiment-weights.schema.json",
+  "title": "モデルと effort の実験の出現率のファイル",
+  "description": "出現率のファイル（表 ndf-files の launch-weights）の形（#2944）。実験の記録と使用量ログから作り直せるコピーで、項目はリポジトリ × 工程 × ランタイム × 互換性のキーで引く。書き手は ndf.domains.records.experiments の出現率の計算と、期間を過ぎた項目を消す月の掃除（ndf.adapters.model_choice.update_weights）。読み手は割り付け（ndf.adapters.model_choice）で、この形に合わないファイルは項目が無いとして均等に抽選する。確率の数が選択肢の数と合うこと・候補の確率が 0 より大きいことは選択肢を知る読み書きの側（model_choice.probs_fit）が確かめる",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "entries"],
+  "properties": {
+    "version": {"$ref": "common.schema.json#/$defs/version"},
+    "entries": {"type": "array", "items": {"$ref": "#/$defs/entry"}}
+  },
+  "$defs": {
+    "arm": {"type": "integer", "minimum": 0, "description": "選択肢の組の添字（0 が基準の組）"},
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "出現率の項目 1 つ",
+      "required": ["repo", "stage", "runtime", "key", "at", "phase", "candidates", "allocation", "models", "cutoffs"],
+      "properties": {
+        "repo": {"type": "string", "minLength": 1, "description": "リポジトリのキー（割り付けの行の repo と同じ）"},
+        "stage": {"type": "string", "minLength": 1, "description": "工程"},
+        "runtime": {"type": "string", "minLength": 1, "description": "ランタイム（表 runtimes の id）"},
+        "key": {"type": "string", "minLength": 1, "description": "互換性のキー（選択肢の並びと指標の名前とバージョンのハッシュ）"},
+        "at": {"$ref": "common.schema.json#/$defs/time", "description": "計算した日時。これから allocation の window_days を過ぎた項目は消す"},
+        "phase": {"enum": ["burn_in", "adaptive"], "description": "burn_in は件数を集める間（確率を持たない）、adaptive は調整した出現率"},
+        "candidates": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/arm"}, "description": "計算したときの候補（打ち切った組と起動できない組を除いた添字）"},
+        "allocation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["floor", "min_units", "margin", "window_days"],
+          "description": "計算に使った割り付けの値。今の設定と違えば項目を使わない",
+          "properties": {
+            "floor": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+            "min_units": {"type": "integer", "minimum": 2},
+            "margin": {"type": "number", "minimum": 0, "maximum": 1},
+            "window_days": {"type": "integer", "minimum": 1, "maximum": 365}
+          }
+        },
+        "probs": {"type": "array", "minItems": 2, "items": {"type": "number", "minimum": 0, "maximum": 1}, "description": "組ごとの確率（adaptive のとき）。候補は floor 以上で、ほかは 0"},
+        "counts": {"type": "array", "items": {"type": "integer", "minimum": 0}, "description": "組ごとの、計算に使った効果指標のある単位の数（候補でない組は 0）"},
+        "models": {
+          "type": "object",
+          "propertyNames": {"pattern": "^(default|[0-9]+)$"},
+          "additionalProperties": {"type": "string", "minLength": 1},
+          "description": "計算に使った実際のモデル。default はモデルを指定しない組すべて、数字は指定する組の添字"
+        },
+        "cutoffs": {
+          "type": "array",
+          "description": "打ち切った組と期限。期限の前だけ候補から外す",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["arm", "until"],
+            "properties": {"arm": {"$ref": "#/$defs/arm"}, "until": {"$ref": "common.schema.json#/$defs/time"}}
+          }
+        }
+      },
+      "if": {"properties": {"phase": {"const": "adaptive"}}},
+      "then": {"required": ["probs"]}
+    }
+  }
+}
