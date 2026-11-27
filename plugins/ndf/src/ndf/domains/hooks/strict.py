@@ -448,22 +448,9 @@ def _repo_root(here: Path) -> Optional[Path]:
 
 
 def _git_dir(repo_root: Path) -> Optional[Path]:
-    """設定を持つ git のディレクトリ。worktree の `.git` ファイルは共通のディレクトリまでたどる。"""
-    dot = repo_root / ".git"
-    if dot.is_dir():
-        return dot
-    try:
-        line = dot.read_text(encoding="utf-8").strip()
-    except OSError:  # noqa: NDF401 ファイル: .git を読めなければ git のディレクトリは無い
-        return None
-    if not line.startswith("gitdir:"):
-        return None
-    gitdir = (repo_root / line[len("gitdir:") :].strip()).resolve()
-    try:
-        common = (gitdir / "commondir").read_text(encoding="utf-8").strip()
-    except OSError:
-        return gitdir
-    return (gitdir / common).resolve()
+    """設定を持つ git のディレクトリ。worktree の `.git` ファイルは共通のディレクトリまでたどる（`git_mod.git_dirs`）。"""
+    dirs = git_mod.git_dirs(repo_root)
+    return dirs.common if dirs is not None else None
 
 
 def _remote_slug(repo_root: Path) -> Optional[str]:
@@ -471,8 +458,7 @@ def _remote_slug(repo_root: Path) -> Optional[str]:
 
     linked worktree からもメインディレクトリ（共通の git ディレクトリの親）の設定を読む（`Git.remote()` と同じ設定）。
     """
-    git_dir = _git_dir(repo_root)
-    return git_mod.configured_remote_slug(git_dir) if git_dir is not None else None
+    return git_mod.configured_remote_slug(repo_root)
 
 
 def _deliveries(repo_root: Path) -> object:

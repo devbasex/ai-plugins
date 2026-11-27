@@ -77,14 +77,14 @@ def _approver_name(root: Path) -> str:
     return name if name else getpass.getuser()
 
 
-def _reading_recordable(repo: str) -> bool:
+def _reading_recordable(root: Path) -> bool:
     """読み手役の確認を記録できるか。記録（`ndf records reading add`）と hook の guard `reading-check` の照合は、
     git の設定のリモートの URL から求める同じ識別子（`git.configured_remote_slug`）を使う。それを求められない作業場所では
     質問の前の記録を作れないので、質問ではなく端末のコマンドを返す。
 
-    `repo` は `la.repo_key` が求めた git の共通ディレクトリで、git を起動せずにその下の設定を読む。
+    `root` はこの作業場所で、git を起動せずに、その `.git` から求めた共通ディレクトリの設定を読む。
     """
-    return git.configured_remote_slug(Path(repo)) is not None
+    return git.configured_remote_slug(root) is not None
 
 
 def _widens(t: ls.Target) -> bool:
@@ -157,7 +157,7 @@ def _show(a: argparse.Namespace) -> dict[str, Any]:
 def _shown(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: str, target: Path, extra: dict[str, Any]) -> dict[str, Any]:
     """`show` の結果（続きのコマンド `extra` を添える）。設定を読めなければ `InternalError`。"""
     session = _session() if a.question else None
-    if session is not None and not _reading_recordable(repo):
+    if session is not None and not _reading_recordable(root):
         session = None
     if a.question is None or session is None:
         # 候補を指定したときは、その候補を反映した完了の記録があり、反映先（と残っていれば候補）が今もその中身かを示す

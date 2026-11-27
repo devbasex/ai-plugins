@@ -342,7 +342,7 @@ def add(entry: Mapping[str, Any], root: Path, repo: Optional[str] = None) -> dic
     """確認の記録を 1 行追記し、追記した行を返す。形が違えば `ReadingInvalid` で、追記しない。GitHub を読まない。
 
     `repo` を省けば作業場所 `root` の git の設定から、hook の guard `reading-check` が照らすのと同じ識別子
-    （`git_mod.configured_remote_slug`）を求める。読めなければ `GitError`。
+    （`git_mod.configured_remote_slug`。git を起動しない）を求める。読めなければ `GitError`。
     """
     _require_keys(entry, ADD_KEYS)
     key = _key(entry["questions"])
@@ -353,7 +353,7 @@ def add(entry: Mapping[str, Any], root: Path, repo: Optional[str] = None) -> dic
 
 
 def _configured_repo(root: Path) -> str:
-    slug = git_mod.configured_remote_slug(Git(root).common_dir())
+    slug = git_mod.configured_remote_slug(root)
     if slug is None:
         raise GitError("リモートの URL を git の設定から読めない（リモートが無いか、.ndf/worktree.json の remote を読めない）")
     return slug

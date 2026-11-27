@@ -88,22 +88,42 @@ def test_remote_repo_refuses_non_github_remote() -> None:
     assert "s3cret" not in str(exc.value)
 
 
-@pytest.mark.parametrize("section", ["include", 'includeIf "gitdir:{git_dir}/"', 'includeIf "gitdir/i:{upper}/"'])
-def test_configured_remote_slug_reads_included_config_files(tmp_path: Path, section: str) -> None:
-    git_dir = tmp_path / "main" / ".git"
-    git_dir.mkdir(parents=True)
+def _repo_with_include(tmp_path: Path, head: str) -> Path:
+    """メインの作業場所 `main` と linked worktree `sub/wt` を、git を起動せずに作る。`config` の見出し `head` が `remote.conf` を読み込む。"""
+    common = tmp_path / "main" / ".git"
+    own = common / "worktrees" / "wt"
+    own.mkdir(parents=True)
+    (own / "commondir").write_text("../..\n", encoding="utf-8")
+    (tmp_path / "sub" / "wt").mkdir(parents=True)
+    (tmp_path / "sub" / "wt" / ".git").write_text(f"gitdir: {own}\n", encoding="utf-8")
     (tmp_path / "remote.conf").write_text('[remote "origin"]\n\turl = "https://github.com/a/b.git" # 注釈\n', encoding="utf-8")
-    head = section.format(git_dir=git_dir, upper=str(git_dir).upper())
-    (git_dir / "config").write_text(f"[core]\n\tbare = false\n[{head}]\n\tpath = ../../remote.conf\n", encoding="utf-8")
-    assert git.configured_remote_slug(git_dir) == "a/b"
+    (common / "config").write_text(f"[core]\n\tbare = false\n[{head.format(d=tmp_path)}]\n\tpath = ../../remote.conf\n", encoding="utf-8")
+    return tmp_path
 
 
-def test_configured_remote_slug_skips_include_whose_gitdir_does_not_match(tmp_path: Path) -> None:
-    git_dir = tmp_path / "main" / ".git"
-    git_dir.mkdir(parents=True)
-    (tmp_path / "remote.conf").write_text('[remote "origin"]\n\turl = https://github.com/a/b.git\n', encoding="utf-8")
-    (git_dir / "config").write_text('[includeIf "gitdir:/elsewhere/"]\n\tpath = ../../remote.conf\n', encoding="utf-8")
-    assert git.configured_remote_slug(git_dir) is None
+# 条件と、メインの作業場所・linked worktree のそれぞれで読み込むか。gitdir の行は git 2.53.0 で同じ結果になることを確かめた。onbranch の条件は読まない
+@pytest.mark.parametrize(
+    ("head", "main", "worktree"),
+    [
+        ("include", True, True),
+        ('includeIf "gitdir:{d}/main/"', True, True),
+        ('includeIf "gitdir/i:{d}/MAIN/"', True, True),
+        ('includeIf "gitdir:{d}/main/.git"', True, False),
+        ('includeIf "gitdir:{d}/main/.git/worktrees/wt"', False, True),
+        ('includeIf "gitdir:{d}/main/.git/"', False, True),
+        ('includeIf "gitdir:wt"', False, True),
+        ('includeIf "gitdir:{d}/*"', False, False),
+        ('includeIf "gitdir:{d}/*/.git"', True, False),
+        ('includeIf "gitdir:{d}/main/**/.git"', True, False),
+        ('includeIf "gitdir:{d}/[!m]ain/"', False, False),
+        ('includeIf "gitdir:/elsewhere/"', False, False),
+        ('includeIf "onbranch:main"', False, False),
+    ],
+)
+def test_configured_remote_slug_reads_included_config_files_like_git(tmp_path: Path, head: str, main: bool, worktree: bool) -> None:
+    root = _repo_with_include(tmp_path, head)
+    assert git.configured_remote_slug(root / "main") == ("a/b" if main else None)
+    assert git.configured_remote_slug(root / "sub" / "wt") == ("a/b" if worktree else None)
 
 
 def test_parse_shortstat_sums_insertions_and_deletions() -> None:
