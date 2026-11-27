@@ -293,3 +293,13 @@ def test_transcript_usage_is_unknown_on_bytes_that_are_not_utf8(tmp_path: Path) 
     path = tmp_path / "bad.jsonl"
     path.write_bytes(b'\xff\xfe "usage"\n')
     assert usage.transcript_usage(path) == ud.UNKNOWN
+
+
+def test_record_outcome_is_the_receptacle_of_the_experiments(monkeypatch) -> None:
+    """#2944: 効果指標の差し込みの受け口は、実験の記録へそのまま渡して結果を返す。"""
+    from ndf.domains.records import experiments
+
+    calls: list = []
+    monkeypatch.setattr(experiments, "write_outcome", lambda *a: calls.append(a) or True)
+    assert usage.record_outcome("a1", 0.5, {"major": 1})
+    assert calls == [("a1", 0.5, {"major": 1})]

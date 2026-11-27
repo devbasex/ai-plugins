@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from ndf import identity
 from ndf.contracts import facts
 from ndf.contracts.internal import InternalError
-from ndf.domains.records import jsonl
+from ndf.domains.records import experiments, jsonl
 from ndf.domains.records import usage_decide as ud
 
 if TYPE_CHECKING:
@@ -102,6 +102,14 @@ def record_cli(usage: Any, meta: Mapping[str, Any], env: Optional[Mapping[str, s
     except (LookupError, OSError, InternalError) as exc:
         print(f"使用量の使用量ログへ書けない: {exc}", file=sys.stderr)
         return None
+
+
+def record_outcome(assign_id: str, quality: Optional[float], detail: Mapping[str, Any]) -> bool:
+    """効果指標の差し込みの受け口（#2944）。起動の記録のインターフェースから呼ばれ、`experiments.write_outcome` へ渡す。
+
+    adapters と core は domains を読み込めないので、評価する工程はこの受け口を差し込みで呼ぶ。
+    """
+    return experiments.write_outcome(assign_id, quality, detail)
 
 
 def _transcripts(rows: list[dict[str, Any]], since: datetime, until: datetime) -> dict[str, ud.Usage | str]:

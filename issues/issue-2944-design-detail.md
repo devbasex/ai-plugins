@@ -34,7 +34,7 @@ src/ndf/
 
 | パス | 種類 | 役割 | 依存する先 | クラスまたはモジュール | 新設（N）と変更（C） |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/adapters/model_choice.py` | 新設 | 値と出所を返す | launch_settings・launch_approval | `Choice` | N: `table`・`bundled_errors`・`stage_of`・`launch_choice`・`raised`・`base_fallback`・`candidates`・`compatibility_key`・`read_experiments`・`ledger`・`append_row` |
+| `src/ndf/adapters/model_choice.py` | 新設 | 値と出所を返す | launch_settings・launch_approval | `Choice` | N: `table`・`bundled_errors`・`stage_of`・`launch_choice`・`raised`・`base_fallback`・`candidates`・`compatibility_key`・`read_experiments`・`ledger`・`append_row`・`read_weights`・`update_weights`・`weights_entry`・`probs_fit`・`entry_fits`・`model_group`・`assigns`・`records_rule`・`utc_now`（B2 で出現率の計算が使う読み書きと時計を公開した） |
 | `src/ndf/adapters/launch_settings.py` | 変更 | `experiments` を返す | — | `Settings` | C: `load` |
 | `src/ndf/adapters/claude.py` | 変更 | 引数と拒否の判定 | — | `ClaudeCall`・`LaunchRecorder` | C: `claude_launch`・`_error_reply`。N: `report_outcome` |
 | `src/ndf/adapters/llm.py` | 変更 | 判定の単位 | model_choice | モジュール | C: `ask` |
@@ -49,9 +49,9 @@ src/ndf/
 | `src/ndf/core/plan/records.py` | 変更 | 回をまたぐ記録 | — | モジュール | N: `_add_models`・`recorded_models`・`read_units`・`write_units` |
 | `src/ndf/progress/invoke.py` | 変更 | Skill の起動 | model_choice | モジュール | C: `_call_skill` |
 | `src/ndf/progress/gate/entry.py` | 変更 | `ndf worker run` の引数に `--mode` を足す | — | モジュール | 呼ぶ引数を足すだけ |
-| `src/ndf/domains/records/usage.py` | 変更 | 行と指標の受け口 | experiments | モジュール | N: `codex_cost`・`record_outcome` |
-| `src/ndf/domains/records/experiments.py` | 新設 | 効果指標と出現率 | model_choice・allocation_decide | `UnitValue` | N: `record_outcome`・`unit_values`・`refresh` |
-| `src/ndf/domains/records/allocation_decide.py` | 新設 | 計算 | — | `Entry`・`Judgement` | N: `weighted`・`eliminated`・`probabilities`・`judgement` |
+| `src/ndf/domains/records/usage.py` | 変更 | 行と指標の受け口 | experiments | モジュール | N: `codex_cost`・`record_outcome`（`experiments.write_outcome` を呼ぶ） |
+| `src/ndf/domains/records/experiments.py` | 新設 | 効果指標と出現率 | model_choice・allocation_decide | `UnitValue` | N: `write_outcome`・`unit_values`・`seed_of`・`refresh` |
+| `src/ndf/domains/records/allocation_decide.py` | 新設 | 計算 | — | `Entry`・`Judgement`・`Stats`・`Verdict`（単位は型 `Unit`、乱数は型 `Sampler` で受ける） | N: `weighted`・`eliminated`・`probabilities`・`judgement` |
 | `src/ndf/domains/records/models_cli.py` | 新設 | `ndf models` | model_choice・experiments・usage | モジュール | N: `main`・`_pick_command`・`_report`・`report_rows` |
 | `src/ndf/domains/settings/delegate_run_cli.py` | 変更 | 委譲の起動にモデルと effort を足す | model_choice・launch_settings | モジュール | C: `main` |
 | `src/ndf/domains/crossreview/seats.py` | 変更 | シートの単位 | model_choice・usage | `SeatRun` | C: `launch_reviewers`・`_seat_launch`・`_seat_result` |
@@ -71,7 +71,7 @@ src/ndf/
 | `contracts/domains/env.json` | `NDF_UNIT_ID`・`NDF_CHARGE_TO`・`NDF_RETRY_CAUSE`・`NDF_LAUNCH_MODEL`・`NDF_LAUNCH_EFFORT`・`NDF_LAUNCH_CODEX_MODEL`・`NDF_LAUNCH_CODEX_EFFORT`・`CLAUDE_CODE_EFFORT_LEVEL` |
 | `contracts/domains/ndf-files.json` | `launch-experiments-<YYYY-MM>.jsonl`・`launch-weights.json`・`launch-pruned`（保存先は使用量ログと同じ） |
 | `contracts/schemas/ndf-settings/launch.schema.json` | `experiments` のキー |
-| `contracts/schemas/internal/experiment.schema.json`（新設）・`usage.schema.json` | 実験の記録の行の形、使用量ログの足す欄 |
+| `contracts/schemas/internal/experiment.schema.json`（新設）・`experiment-weights.schema.json`（新設。B2）・`usage.schema.json` | 実験の記録の行の形、出現率のファイルの形（内部データの種類 `experiment-weights`）、使用量ログの足す欄（`outcome` は名前の対応表 `contracts/data/internal-names.json` の行「起動の終わり方」） |
 | `contracts/schemas/io/models.*`・`docs/contracts/*.md` | 引数のスキーマと規約のページは生成し、結果のスキーマは手で書く |
 | `skills/external-ai/SKILL.md`・`references/cli-codex.md`・`cli-agy.md`・`cli-kiro.md`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md` | 固定の `medium` を消す。起動の例の `ndf delegate-run`（#1959）は変えない |
 | `contracts/templates/parts/steps.json` | 検査のステップに `verifies`（そのステップが確かめる修正の作業の名前）を足す |
@@ -94,7 +94,7 @@ src/ndf/
 | `candidates` | 同 | 新設 | `candidates(arms: Sequence, rows: Sequence, entry: Optional[Mapping], now: datetime, where: Where) -> list[int]` | 打ち切った組と起動できない組を除いた添字。`launch_error` は割り付け ID で割り付けの行を引き、`where`（`repo`・`stage`・`runtime`・`key` を持つ組）が同じものだけを数える。引数の多い関数の検査（PLR0913）に合わせ、4 つのキーを 1 つの値にまとめた |
 | `compatibility_key` | 同 | 新設 | `compatibility_key(arms: Sequence, metric: str) -> str` | 選択肢の並びと指標のハッシュ |
 | `read_experiments` | 同 | 新設 | `read_experiments(since: datetime, root: Optional[Path] = None) -> list[dict]` | `since` の月から今月までの実験の記録を読む（ロックを取らない） |
-| `ledger` | 同 | 新設 | `ledger(since: datetime, root: Optional[Path] = None) -> ContextManager[Ledger]` | 設計書の「読み書き」の順で、読んだ行（`rows`）と追記（`append`）を、実験の記録のロックの中で渡す |
+| `ledger` | 同 | 新設 | `ledger(since: datetime, root: Optional[Path] = None, older: Optional[Callable[[Sequence[Mapping]], Optional[datetime]]] = None) -> ContextManager[Ledger]` | 設計書の「読み書き」の順で、読んだ行（`rows`）と追記（`append`）を、実験の記録のロックの中で渡す。`older` は任意で、`since` の月から読んだ行を受け取り、さらに古い月から読む日時か None を返す。日時を返せば、その月から `since` の前の月までを、ロックを取る前に読み足す（古い月には追記されないため）。`Ledger.since` は読み始めた日時で、読み足したときはその日時になる |
 | `append_row` | 同 | 新設 | `append_row(row: Mapping, root: Optional[Path] = None) -> bool` | `ledger` を開いて 1 行足す。`root` は記録の保存先で、省くと既定の保存先（`records_dir()`）に書く。書けなければ警告を出して偽を返す |
 | `prune` | 同 | 新設 | `prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)の月の掃除。`window_days` は今の設定の値である。残す日数は、この値と、記録に残る割り付けの行の `window_days` のうち最も大きい値に 30 日を足した日数で、`now` からその日数を引いた日時より前に終わった月のファイルを消す。`launch-pruned` の月が今月なら何もしない。違えば、古い月のファイルと出現率の項目を消し（出現率のファイルはロックの中で読み直してから変える）、全部成功したら今月を書く。`launch_choice` が呼び、失敗しても起動は続ける |
 
@@ -103,7 +103,7 @@ src/ndf/
   - 事前条件: `layer` は `worker`・`skill`・`judge`・`seat`
   - 事後条件: 引数か環境変数で、モデルと effort の片方でも指定があれば割り付けず、無い側は基準の組の値。`unit` が無い場合、`enabled` が偽の場合、選択肢が 1 つの場合は、基準の組の値（出所は `base`、組が値を持たなければ `default`）で、割り付けの行を書かない。停止（`enabled` が偽）・固定（選択肢が 1 つ）・互換性のキーの変更で基準を使う単位に割り付けがあれば `halted` の行を足す。引数か環境変数の指定がある起動は、`unit` があれば割り付けの有無に関わらず理由 `manual` の `halted` の行を足し、`charge_to` があればその割り付けの単位にも足す。同じ単位の同じ理由の行は重ねて足さない。工程が無い層と作業の名前の起動には、引数を足さない（環境変数と起動の引数の指定は効く）
   - 副作用: `ledger` の中で、割り付けの判定と行の追記をする
-- ロックを取るのは `ledger` だけである。`Ledger.append` はロックを取らないので、`launch_choice` と `record_outcome` は開いた `ledger` の `append` を呼び、`append_row` を中から呼ばない（同じロックを取り直さない）。拒否・実際のモデル・`unpriced` の行のように、`ledger` の外から 1 行を足す呼び出しは `append_row` を使う
+- ロックを取るのは `ledger` だけである。`Ledger.append` はロックを取らないので、`launch_choice` と `experiments.write_outcome` は開いた `ledger` の `append` を呼び、`append_row` を中から呼ばない（同じロックを取り直さない）。拒否・実際のモデル・`unpriced` の行のように、`ledger` の外から 1 行を足す呼び出しは `append_row` を使う
 - `Ledger.append` は、行の形を確かめ、記録が改行で終わらなければ書きかけの行を閉じるバイト列（`launch_records.TORN_END`）を先に足す
 
 ### 異常系の処理
@@ -133,6 +133,7 @@ src/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | 工程・選択肢・順位・指標・割り付けの値 | 設定値 | `contracts/domains/launch-experiments.json` | 設計書の表 |
+| 出現率を計算し直す間隔 | 設定値 | 同上の records の行の `refresh_minutes` | 60 分 |
 | 起動できない組の条件 | 定数 | 同上 | 同じリポジトリ・工程・ランタイム・互換性のキー・組で、直近 7 日に、モデルを理由にした拒否が 2 件 |
 | 実験の記録の行 | 型 | `contracts/schemas/internal/experiment.schema.json` | `assign`・`outcome`・`launch_error`・`halted`・`observed`・`unpriced` |
 
@@ -156,9 +157,9 @@ src/ndf/
 | `overlay_env` | `worker._worker_env` | `core/worker.py` | 一時的な環境の上書きを下の層へ移して共有する |
 | `codex_usage`・`codex_cost` | `ud.usage_of` | `domains/records/usage_decide.py` | 4 つの値の形に合わせて使う |
 | `unit_values` | `launch_costs`（#1959） | 同上 | 起動 1 回の費用に使う |
-| `weighted`・`eliminated`・`probabilities`・`judgement` | 標準ライブラリの `random` | 設計書の決定 5 | 使う |
+| `weighted`・`eliminated`・`probabilities`・`judgement` | 標準ライブラリの `random` | 設計書の決定 5 | 使う。判断のモジュールは `random` を読めない（規則 decide-pure）ので、`experiments` が種から `random.Random` を作って渡す |
 | `launch_choice` | `participants.assign`（相手役の割り当て） | `core/converge/participants.py` | 役割の割り当てで、値は選ばない。新設する |
-| `record_outcome`（2 つ）・`refresh` | `jsonfile`・`jsonl` | `domains/records/` | 読み書きに使う |
+| `write_outcome`・`record_outcome`・`refresh` | `jsonfile`・`jsonl` | `domains/records/` | 使用量ログの読み取りに `jsonl` を使う。実験の記録と出現率のファイルは `model_choice` の `ledger`・`read_experiments`・`weights_entry`・`update_weights` を使う |
 | `_step_env`・`_after_unit`・`_add_models`・`recorded_models`・`read_units`・`write_units` | `_add_outputs`・`read_json`・`write_json` | `core/plan/records.py`・`files.py` | 同じ読み書きを使う |
 | `_record_experiment` | `drive._summary`・`criteria_decide.blocking` | `domains/crossreview/` | 重大の判定に使う |
 | `main`・`_pick_command`・`_report` | `contracts.result`・`ndf.cli` のサブコマンドの形 | `src/ndf/cli.py` | 結果 JSON の組み立てを使う |
@@ -385,25 +386,40 @@ src/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `record_outcome` | `domains/records/experiments.py` | 新設 | `record_outcome(assign_id: str, quality: Optional[float], detail: Mapping) -> bool` | 割り付けを引いて指標の行を足し、`refresh` を呼ぶ |
-| `unit_values` | 同 | 新設 | `unit_values(rows, usage_rows, *, repo: str, stage: str, runtime: str, key: str, now: datetime) -> list[UnitValue]` | 割り付け ID ごとに効果・費用・確率・組をまとめ、使えない単位を除く |
+| `write_outcome` | `domains/records/experiments.py` | 新設 | `write_outcome(assign_id: str, quality: Optional[float], detail: Mapping) -> bool` | 割り付けを引いて指標の行を足し、出現率を計算し直すかを判定する |
+| `unit_values` | 同 | 新設 | `unit_values(rows, usage_rows, *, where: Where, now: datetime, window_days: int, observed: Optional[Mapping[str, str]] = None) -> list[UnitValue]` | 割り付け ID ごとに効果・費用・確率・組・実際のモデルをまとめ、使えない単位を除く |
+| `seed_of` | 同 | 新設 | `seed_of(where: Where, allocation: Mapping, units) -> int` | 乱数の種（工程・ランタイム・互換性のキー・割り付けの値・計算に使う単位の SHA-256） |
 | `refresh` | 同 | 新設 | `refresh(assign: Mapping) -> bool` | 計算し直す条件に当たれば、出現率の項目を置き換える。書き換えるときに、期間を過ぎた項目も消す |
-| `record_outcome` | `domains/records/usage.py` | 新設 | 同じ引数 | 差し込みの受け口。`experiments.record_outcome` を呼ぶ |
+| `record_outcome` | `domains/records/usage.py` | 新設 | `record_outcome(assign_id: str, quality: Optional[float], detail: Mapping) -> bool` | 差し込みの受け口。`experiments.write_outcome` を呼ぶ |
 | `weighted` | `domains/records/allocation_decide.py` | 新設 | `weighted(units) -> Stats` | 重み付きの平均と有効な件数 |
-| `eliminated` | 同 | 新設 | `eliminated(units, arms, margin, window_days, seed) -> dict[int, datetime]` | 打ち切る組と期限 |
-| `probabilities` | 同 | 新設 | `probabilities(units, candidates, allocation, seed) -> Optional[Entry]` | 段階と確率。件数が足りなければ `burn_in` |
-| `judgement` | 同 | 新設 | `judgement(units, candidates, seed) -> Judgement` | 「必要な件数」の表の 4 つの表示 |
+| `eliminated` | 同 | 新設 | `eliminated(units, arms, margin, window_days, rng) -> dict[int, datetime]` | 打ち切る組と期限 |
+| `probabilities` | 同 | 新設 | `probabilities(units, candidates, allocation, rng) -> Entry` | 段階と確率。件数が足りなければ `burn_in` |
+| `judgement` | 同 | 新設 | `judgement(units, candidates, allocation, rng) -> Judgement` | 「必要な件数」の表の 4 つの表示。最良である確率は `probabilities` と同じ効果の下限（`allocation` の `margin`）を当てて出す |
 
 - 計算の式、順番、乱数の種、単位の除き方は [allocation](./issue-2944-design-allocation.md#出現率の計算) のとおり。`allocation_decide` はファイルも時刻も読まない
-- `record_outcome`
-  - 事後条件: 同じ割り付け ID の指標の行があれば足さない。この確認と追記は、1 つの `ledger` の中で行う。指標の名前とバージョンは、割り付けの工程の表から引く。`refresh` は `ledger` を抜けてから呼ぶ
+- 実装で設計の名前と引数を変えた所（B2）。決定は変えていない
+  - `experiments` の関数は `write_outcome`（設計では `record_outcome`）。同じ名前の関数が 2 つのファイルにあると重複の検査（copy-dup）が落とすため。`usage` の受け口は `record_outcome` のまま
+  - `unit_values` はキーを 4 つの引数でなく `Where` で受け、期間 `window_days` を足した。引数の多い関数の検査（PLR0913。上限 6）に合わせ、`candidates` と同じ形にした
+  - `allocation_decide` の 3 つの関数は、種の代わりに種から作った乱数（`random.Random`）を受ける。判断のモジュールは `random` を読めない（規則 decide-pure）ので、種を作る `seed_of` と乱数の生成は `experiments` が持つ
+  - `probabilities` は件数が足りないときも `burn_in` の `Entry` を返す（None を返す場面が無い）
+- 出現率のファイルの形は `contracts/schemas/internal/experiment-weights.schema.json` で、書く側（`update_weights`）と読む側（`read_weights`）の両方がこの形を確かめる
+  - 添字と確率が選択肢に合うかは、選択肢を知る読み手（割り付けの `entry_fits`）と書き手（`refresh`）が `probs_fit` で確かめる。条件は [allocation の「割り付けの流れ」](./issue-2944-design-allocation.md#割り付けの流れ)にある「項目を使える条件」の添字と確率の 2 つで、添字はどの段階でも確かめ、確率は `adaptive` のときだけ確かめる
+  - 合わない項目は、割り付けが使わず、候補から均等に抽選する（PR #4661 のレビューの r16-3: https://github.com/devbasex/ai-plugins/pull/4661 ）
+- `write_outcome`
+  - 事後条件: 同じ割り付け ID の指標の行があれば足さない。この確認と追記は、1 つの `ledger` の中で行う。指標の名前とバージョンは、割り付けの工程の表から引く。出現率を計算し直すかの判定は `ledger` を抜けてから行い、行を足さなかったときも行う。指標を書いた直後に中断した作業を再開したときに、その指標を出現率へ反映するためである
+  - 読む範囲: 割り付けの行は、まず出現率の計算に要る期間の月から探す。作業ディレクトリの設定にある `window_days` と、同梱の記録規則（`records_rule()`）にある `refusal_days` を比べ、長いほうの日数がかかる月から割り付けの行を探す。見つからなければ、記録を残す最長の期間（365 日＋`kept_extra_days`）の始まりの月から、読んだ範囲の前の月までだけを読み足す。読み足しは、関数の表にある `ledger` の引数 `older` に、割り付けの行が無ければ最長の期間の始まりを返す関数を渡して指定する。読み足したかは `Ledger.since`（読み始めた日時）で分かる。読み足しは、最初の月と同じく実験の記録のロックを取る前に行う。古い月には追記されないので、ロックの中で読み直す必要は無い。ロックの中では、今月の追記分を読み足してから、割り付けと同じ割り付け ID の効果指標の行を確かめ、無ければ追記する。読んだ月を読み直さず、ロックも 1 回だけ取る。設定を読めなければ、最初から最長の期間で読む。効果指標は割り付けの後に書くので、割り付けが範囲にあれば同じ割り付け ID の指標の行も範囲にある
+  - 計算への受け渡し: `ledger` で読んだ行を計算に渡し、月別のファイルを読み直さない。最長の期間まで読み足した場合だけ、計算に要る期間の月の行に絞って渡す（`experiments._read_range`）。読み足していなければ、読んだ行がそのまま計算に要る範囲なので絞らない。割り付けが読むのと同じ範囲にそろえ、期間の外の割り付けに付いた拒否や `observed` の行を候補とモデルの判定に数えないためである
+- `refresh`
+  - 作業ディレクトリのリポジトリが割り付けのリポジトリと同じかは、計算し直す条件に当たったときだけ `launch_approval.repo_key` で確かめる（`git rev-parse` を 1 回起動する）。条件は [allocation の「出現率の計算」](./issue-2944-design-allocation.md#出現率の計算) のとおりで、前の計算から間隔の内でも、項目が無い・候補か割り付けの値が違う・実際のモデルが今のモデルと違うときは当たる。違うリポジトリなら計算しない。条件に当たらない呼び出しは git を起動しない。項目は割り付けの行のリポジトリのキーで引く
+  - 今のモデルの観測（`model_choice.observed_models`）は 1 回だけ求め、項目を使えるかの照合（`entry_fits` は観測の結果を引数に受ける）と単位の絞り込みの両方に使う
+  - 単位を絞る今のモデルと、項目に書く実際のモデル（`models`）は、割り付けの `entry_fits` と同じ `observed` の行（`model_choice.observed_models`）から決める（[allocation の「実際のモデルが変わった単位は混ぜない」](./issue-2944-design-allocation.md#実験の記録と出現率)）
   - 副作用: 実験の記録への追記と、出現率のファイルの置き換え
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `record_outcome` | 割り付けが無い | 別のマシンの ID、消された記録 | 検索 | 偽を返す | 警告 | — |
+| `write_outcome` | 割り付けが無い | 別のマシンの ID、消された記録 | 検索 | 偽を返す | 警告 | — |
 | `refresh` | 計算か書き込みの失敗 | ログの読み取り・権限 | 例外 | 前の出現率のまま続ける | 警告 | 次の指標で計算し直す |
 | `refresh` | 出現率のファイルが壊れている | 書きかけ | 解析 | 項目が無いとして作り直す | 出力なし | 冪等 |
 
@@ -411,14 +427,14 @@ src/ndf/
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 再開の処理が重なった `record_outcome` | 実験の記録 | 確認と追記を同じロックの中で行う | 指標の行は割り付け ID ごとに 1 つ。壊れて 2 行ある記録は、どの集計も先に書いた行だけを使う |
+| 再開の処理が重なった `write_outcome` | 実験の記録 | 確認と追記を同じロックの中で行う | 指標の行は割り付け ID ごとに 1 つ。壊れて 2 行ある記録は、どの集計も先に書いた行だけを使う |
 | 複数の `refresh` と `prune` | `launch-weights.json` | 計算はロックの外。書き換えるときは同じロックを取り、ロックの中で最新の内容を読み直してから変える（一時ファイルから `os.replace`） | 同じ項目の計算は後で書いた側が残る。掃除は期限を過ぎた項目だけを消すので、新しい項目は失われない |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `record_outcome` | 行が 1 つ、計算が呼ばれる | 前の計算から 1 時間以内。実際のモデルが項目と違えば 1 時間以内でも計算する | 2 回目は足さない。並べて呼んでも 1 行 |
+| `write_outcome` | 行が 1 つ、計算の判定が呼ばれる。計算に要る期間で割り付けが見つかれば記録を読み直さず、項目が新しければ git を起動しない | 前の計算から 1 時間以内。実際のモデルが項目と違えば 1 時間以内でも計算し、新しいモデルの評価が無ければ `burn_in` を新しいモデルで書く | 2 回目は足さないが判定は行う。ロックを待つ間に先行の呼び出しが書いた行を見て足さない |
 | `unit_values` | 手戻りの費用を含む | 費用 0 と不明は費用の平均から除き、効果は残す、期間を過ぎた割り付け直し | 別のリポジトリ、モデルが変わった単位、モデルが切り替わって元に戻った場合の期限切れの境界 |
 | `probabilities` | 合計 1、下限以上 | `min_units` の前後、費用の分かる単位が 2 件未満 | 効果の下限を外れる安い組 |
 | `eliminated` | 0.99 を超える組 | 30 件の前後、期限の後に戻る | 基準は打ち切らない |
