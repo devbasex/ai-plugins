@@ -120,6 +120,18 @@ def heavier_raised(known: Optional[str], raised: Optional[str]) -> Optional[str]
     return heavier(known, raised)
 
 
+def protect_kinds() -> tuple[str, ...]:
+    """保護の種類（秘密・認証認可・利用者のデータ・戻せない操作・人の安全。#4363）。"""
+    return tuple(_table()["kinds"]["protect"])
+
+
+def protect_of(value: object) -> tuple[str, ...]:
+    """値が並びなら、保護の種類だけを表の順で重ねずに返す。並びでなければ空（#4363）。"""
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(kind for kind in protect_kinds() if kind in value)
+
+
 def focus_of(raw: Any, where: str) -> tuple[str, ...]:
     """`.ndf/review.json` の中身から重点の並び。`version: 1` だけを読み、ほかのバージョンと形の違いは `ReviewDeclInvalid`。"""
     version = raw.get("version") if isinstance(raw, Mapping) else None
@@ -199,6 +211,7 @@ def reviewer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list
         *criteria_lines(focus, mvv),
         f"書かないもの: {'・'.join(t['not_written'])}",
         f"対応のアクションの無いもの（{'・'.join(t['no_action'])}）は指摘にしない。",
+        t["protect"]["reviewer"].format(kinds="・".join(protect_kinds())),
         f"重要度 severity は {names} から選ぶ。{impact}",
         *_mvv_lines("reviewer", mvv),
     ]

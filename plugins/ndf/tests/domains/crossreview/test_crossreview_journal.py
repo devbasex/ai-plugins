@@ -227,6 +227,62 @@ def test_issue_4014_carried_rows_are_not_rated_again() -> None:
     assert not criteria_decide.downgraded(row)
 
 
+def test_issue_4363_enter_keeps_the_protect_kinds_of_the_reviewer() -> None:
+    """#4363: 相手役の `protect` のうち保護の種類だけを行に残し、当たらない指摘と形の違う値はキーを持たない。"""
+    journal = drive.FindingJournal()
+    journal.enter(
+        1,
+        [
+            {"text": "A", "protect": ["user_data", "速さ", "secret", "secret"], "by": "codex"},
+            {"text": "B", "protect": [], "by": "codex"},
+            {"text": "C", "protect": "secret", "by": "codex"},
+            {"text": "D", "by": "codex"},
+        ],
+    )
+    assert [r.get("protect") for r in journal.rows.values()] == [["secret", "user_data"], None, None, None]
+    assert ["protect" in r for r in journal.rows.values()] == [True, False, False, False]
+
+
+@pytest.mark.parametrize("rounds", [(1, 1), (1, 2)])
+def test_issue_4363_reraised_finding_adds_protect_kinds_and_never_drops_them(rounds: tuple[int, int]) -> None:
+    """#4363: 同じ指摘の出し直し（同じラウンドでも後のラウンドでも）は保護の種類を足し、`protect` の無い出し直しでは外さない。"""
+    first, second = rounds
+    journal = drive.FindingJournal()
+    one = {"text": "A", "protect": ["user_data"], "by": "codex"}
+    two = {"text": "A", "protect": ["authz"], "by": "kiro"}
+    if first == second:
+        journal.enter(first, [one, two])
+    else:
+        journal.enter(first, [one])
+        journal.enter(second, [two])
+    [row] = journal.rows.values()
+    assert row["protect"] == ["authz", "user_data"]
+    journal.enter(3, [{"text": "A", "by": "kiro"}])
+    assert row["protect"] == ["authz", "user_data"]
+
+
+def test_issue_4363_fixed_finding_coming_back_keeps_protect() -> None:
+    """#4363: 直した指摘が `protect` を書かずに戻っても、行の保護の種類は残る。"""
+    journal = drive.FindingJournal()
+    journal.enter(1, [{"text": "A", "severity": "major", "impact": IMPACT, "protect": ["secret"], "by": "codex"}])
+    journal.rows["r1-1"]["outcome"] = fin.FIXED
+    journal.enter(2, [{"text": "A", "severity": "major", "impact": IMPACT, "by": "kiro"}])
+    row = journal.rows["r1-1"]
+    assert (row["outcome"], row["protect"]) == (fin.UNRESOLVED, ["secret"])
+
+
+@pytest.mark.parametrize("protect", [[], ["secret"]])
+def test_issue_4363_protect_does_not_change_how_a_finding_is_rated(protect: list[str]) -> None:
+    """#4363: 今の下げ方の退行を防ぐ。`protect` の有無によらず、1 文のある major は重いままで修正担当へ渡り、1 文の無い major は
+    minor になる。"""
+    journal = drive.FindingJournal()
+    told = {"text": "A", "severity": "major", "impact": IMPACT, "protect": protect, "by": "codex"}
+    keys = journal.enter(1, [told, {"text": "B", "severity": "major", "protect": protect, "by": "codex"}])
+    assert [r["severity"] for r in journal.rows.values()] == ["major", "minor"]
+    assert keys == frozenset({"a"})
+    assert [r["text"] for r in journal.handable()] == ["A"]
+
+
 def test_occurrence_is_new_for_each_raise_and_written_for_older_rows() -> None:
     """#4016: 指摘を初めて記録するとき（`enter`・`carry`・`apply_fix`）と再発で発生の値を書き、前のバージョンの行には
     `with_occurrences` が書く。同じ指摘の出し直し（直していない）は値を変えない。"""
@@ -298,6 +354,16 @@ def test_redline_without_impact_is_not_lowered_but_warned(item: str, raised: str
     assert not criteria_decide.downgraded(row)
     [warning] = journal.warnings
     assert "r1-1" in warning and "起きること" in warning
+
+
+def test_issue_4363_5_mvv_and_redline_findings_are_not_lowered() -> None:
+    """#4363 の受け入れ条件 5: 1 文の無い major でも、MVV に反する指摘は重いまま修正担当へ渡り、必ず人の承認が要る操作の指摘は
+    重さを保って人の承認を待つ。どちらも下げた行に数えない。"""
+    journal = _entered(_named("A", "Value 5", impact=None), _named("B", "P1", impact=None))
+    mvv_row, redline_row = journal.rows.values()
+    assert (mvv_row["severity"], redline_row["severity"], redline_row["redline"]) == ("major", "major", True)
+    assert [r["text"] for r in journal.handable()] == ["A"]
+    assert not any(criteria_decide.downgraded(r) for r in journal.rows.values())
 
 
 @pytest.mark.parametrize("order", [("Value 5", "P1"), ("P1", "Value 5"), (None, "P1"), ("P1", None)])
