@@ -114,6 +114,17 @@ def test_issue_2468_project_limits_of_a_wrong_shape_is_invalid(limits: object) -
 
 
 @pytest.mark.parametrize(
+    "limits",
+    ["dummy-secret", {"dummy-secret": 1}, {"rounds": 1, "token": "dummy-secret"}, {"usd": "dummy-secret"}],
+)
+def test_issue_2468_project_limits_of_errors_do_not_repeat_the_written_values(limits: object) -> None:
+    """例外の文は結果 JSON に出るので、書かれた値と知らないキーの名前を載せない。"""
+    with pytest.raises(criteria_decide.ReviewDeclInvalid) as got:
+        _limits(limits)
+    assert "dummy-secret" not in str(got.value)
+
+
+@pytest.mark.parametrize(
     "body",
     [None, {"version": 1, "focus": []}, {"version": 1, "focus": [], "limits": {}}],
 )

@@ -158,17 +158,19 @@ def fixer_sessions_of(raw: Mapping[str, Any], where: str) -> bool:
 def project_limits_of(raw: Mapping[str, Any], where: str) -> ProjectLimits:
     """`.ndf/review.json` の中身（`focus_of` が version を確かめた後）から、書かれた上限（#2468）。`limits` と各キーは省ける。
     `rounds` は 1 以上の整数値（JSON Schema の integer と同じく `4.0` も受け、`int` にして返す）、`seconds`・`usd` は正の
-    有限の数だけを受け、知らないキーと形の違いは `ReviewDeclInvalid`。"""
+    有限の数だけを受け、知らないキーと形の違いは `ReviewDeclInvalid`。例外の文は結果 JSON に出るので、書かれた値と知らないキーの
+    名前を載せない（誤って貼られた認証情報を出さない）。"""
     if "limits" not in raw:
         return ProjectLimits()
     value = raw["limits"]
     if not isinstance(value, Mapping) or not set(value) <= set(ProjectLimits._fields):
-        raise ReviewDeclInvalid(f"{where} の limits が {value!r}。{'・'.join(ProjectLimits._fields)} を持つオブジェクトを書く")
+        keys = "・".join(ProjectLimits._fields)
+        raise ReviewDeclInvalid(f"{where} の limits の形が違う。{keys} だけを持つオブジェクトを書く")
     for key, got in value.items():
         number = isinstance(got, (int, float)) and not isinstance(got, bool)
         if not number or not 0 < got <= sys.float_info.max or (key == "rounds" and got % 1):
             wanted = "1 以上の整数" if key == "rounds" else "正の数"
-            raise ReviewDeclInvalid(f"{where} の limits.{key} が {got!r}。{wanted}を書く")
+            raise ReviewDeclInvalid(f"{where} の limits.{key} の形か範囲が違う。{wanted}を書く")
     declared = ProjectLimits(**value)
     return declared if declared.rounds is None else declared._replace(rounds=int(declared.rounds))
 

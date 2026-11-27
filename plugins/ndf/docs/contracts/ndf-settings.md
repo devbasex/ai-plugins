@@ -253,7 +253,7 @@ worktree・チーム・公開・[release.schema.json](../../contracts/schemas/nd
 
 worktree・チーム・公開・[review.schema.json](../../contracts/schemas/ndf-settings/review.schema.json)。読む工程: `ndf loop`（レビューの引数を組むとき）・`工程: コードレビュー`（レビューの観点を足すとき）・`ndf cross-review run`（相手役と修正担当へ重点（基準 3）を渡すとき・修正担当の会話を続けるかを決めるとき。version 1 の focus と fixer_sessions と limits だけを読み、version 2・3 は invalid で止める（#3941・#4013・#2468））
 
-レビューで必ず見る観点の並びと、指摘の基準・見送り・返信を差し替えるプロファイル。version 1 は focus と fixer_sessions と limits だけを読みほかのキーを無視し、version 2 は focus と profile、version 3 は focus と最上位の criteria・not_written と profiles を読む
+レビューで必ず見る観点の並びと、指摘の基準・見送り・返信を差し替えるプロファイル。ndf cross-review run は、レビュー対象の worktree ではなく、その worktree を作った元の clone（メインディレクトリ）の .ndf/review.json を読む。レビュー対象の worktree にだけ書いた値は、設定として読まず、検証もしない。version 1 は focus と fixer_sessions と limits だけを読みほかのキーを無視し、version 2 は focus と profile、version 3 は focus と最上位の criteria・not_written と profiles を読む
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
@@ -261,7 +261,7 @@ worktree・チーム・公開・[review.schema.json](../../contracts/schemas/ndf
 | `criteria` | criteria | — | — | 任意 | version 3 で全プロファイルに足す指摘の基準（番号 → 文）。番号はプロファイルか既定の基準と重ならない |
 | `fixer_sessions` | boolean | `false` | — | 任意 | version 1 だけで書ける。真なら ndf cross-review run の修正担当が 2 ラウンド目から前のラウンドの会話を続け（#4013）、claude の設定の保存先の projects/<作業ディレクトリのキー>/<会話の ID>.jsonl に会話の記録が残る。止めるのは Claude の会話の記録だけで、値によらず状態の保存先の round<n>-fix.out・round<n>-fix-new.out の stream-json（修正担当が Tool で読んだファイルの中身と未公開の指摘を含む）は残る |
 | `focus` | array of string | — | — | 任意 | レビューで必ず見る観点の文。version 1 では必須 |
-| `limits` | limits | — | — | 任意 | version 1 だけで書ける。cross-review のラウンド数（rounds）・ラウンドにかかった時間の合計（seconds。秒）・計測できた Claude の費用の合計（usd。米ドル）の上限（#2468）。ndf cross-review run は実行者のメインディレクトリからこの設定を読み込んで形を検証する。今の実装は読み込みと検証までで、設定した値に達してもレビューは停止しない（停止の処理は後の変更で追加する）。どのキーも省ける。省いたとき seconds と usd は NDF の既定（contracts/limits/ の cross-review.max-seconds・cross-review.max-usd）を使い、rounds はプロジェクトの上限を置かない |
+| `limits` | limits | — | — | 任意 | version 1 だけで書ける。cross-review の上限で、rounds はラウンド数、seconds はラウンドにかかった時間の合計（秒）、usd は計測できた Claude の費用の合計（米ドル）の上限である（#2468）。どのキーも省ける。省いたとき seconds と usd は NDF の既定（contracts/limits/ の cross-review.max-seconds・cross-review.max-usd）を使い、rounds はプロジェクトの上限を置かない。ndf cross-review run は相手役を起動する前に形を検証し、形が違えば止まる。今の実装は読み込みと検証までで、設定した値に達してもレビューは停止しない（停止の処理は後の変更で追加する） |
 | `not_written` | not_written | — | — | 任意 | version 3 で全プロファイルに足す、書かないものの並び |
 | `profile` | profile | — | — | 任意 | version 2 のプロファイル（指摘の基準・書かないもの・見送りの種類・返信・観点の区分）。version 3 では書かず profiles に移す |
 | `profiles` | array of profile_entry | — | — | 任意 | version 3 のプロファイルの候補。PR の変更ファイルのパスが paths に当たる先頭の 1 つを選ぶ。name は重ならず、paths を持たない候補は高々 1 つで末尾に置く |
