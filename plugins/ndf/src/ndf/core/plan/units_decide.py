@@ -77,8 +77,10 @@ class Finding(NamedTuple):
 
 
 class Proposal(NamedTuple):
-    """分け方の案。`file` の単位 `unit` を `units` に置き換え、`repoint` の `(ファイルのパス, 単位の名前)` が持つ
-    `unit` への依存を、`units` の最後の単位へ付け替えると適用できる。
+    """分け方の案。`file` の単位 `unit` を `units` に置き換え、`repoint` の依存を `units` の最後の単位へ付け替えると適用できる。
+
+    `repoint` の 1 件は `(依存を持つ単位のファイルのパス, その単位の名前, 依存の Edge.issue)`。その単位の依存のうち、
+    単位の名前が `unit` で `issue` が一致するものだけを付け替える（別のファイルの同じ名前の単位への依存は変えない）。
     """
 
     file: str
@@ -86,7 +88,7 @@ class Proposal(NamedTuple):
     units: tuple[UnitDef, ...]
     resplit: tuple[str, ...]
     remaining: tuple[Finding, ...]
-    repoint: tuple[tuple[str, str], ...]
+    repoint: tuple[tuple[str, str, Optional[int]], ...]
 
 
 class Judgement(NamedTuple):
@@ -148,7 +150,7 @@ def split(files: Sequence[UnitFile], key: tuple[str, str], limits: Limits, crite
     """単位 `key`（ファイルのパス, 単位の名前）を、依存の順に目安で区切った直列の単位にする案。ファイルは書き換えない。
 
     1 つで上限を超えるタスクがあれば、区切らずに `resplit` へ返す。区切りが 1 つなら `units` は空。
-    元の単位の依存は最初の区切りが引き継ぎ、元の単位を指す依存は最後の区切りへ付け替える（付け替える単位は `repoint`）。
+    元の単位の依存は最初の区切りが引き継ぎ、元の単位を指す依存は最後の区切りへ付け替える（付け替える依存は `repoint`）。
     `remaining` は、案を当てた後に残る違反。受け入れ条件の参照は `criteria` を渡したときに確かめる。
     """
     at = next(i for i, f in enumerate(files) if f.path == key[0])
@@ -199,10 +201,12 @@ def _pieces(tasks: Sequence[Task], target: int) -> list[list[Task]]:
     return pieces
 
 
-def _apply(files: Sequence[UnitFile], at: int, name: str, units: tuple[UnitDef, ...]) -> tuple[list[UnitFile], tuple[tuple[str, str], ...]]:
+def _apply(
+    files: Sequence[UnitFile], at: int, name: str, units: tuple[UnitDef, ...]
+) -> tuple[list[UnitFile], tuple[tuple[str, str, Optional[int]], ...]]:
     """`at` のファイルの単位 `name` を `units` に置き換え、その単位を指していた依存を最後の区切りへ付け替える。
 
-    置き換えた後のファイルと、依存を付け替えた単位の `(ファイルのパス, 単位の名前)` を返す。
+    置き換えた後のファイルと、付け替えた依存（`Proposal.repoint` の形）を返す。
     """
     owner = _issue_owners(files, [])
 
@@ -211,7 +215,7 @@ def _apply(files: Sequence[UnitFile], at: int, name: str, units: tuple[UnitDef, 
         return e._replace(unit=units[-1].name) if (target, e.unit) == (at, name) else e
 
     applied = []
-    repoint: list[tuple[str, str]] = []
+    repoint: list[tuple[str, str, Optional[int]]] = []
     for where, f in enumerate(files):
         kept: list[UnitDef] = []
         for u in f.units:
@@ -219,8 +223,7 @@ def _apply(files: Sequence[UnitFile], at: int, name: str, units: tuple[UnitDef, 
                 kept += units
             else:
                 after = tuple(moved(where, e) for e in u.after)
-                if after != u.after:
-                    repoint.append((f.path, u.name))
+                repoint += [(f.path, u.name, old.issue) for old, new in zip(u.after, after) if new != old]
                 kept.append(u._replace(after=after))
         applied.append(f._replace(units=tuple(kept)))
     return applied, tuple(repoint)

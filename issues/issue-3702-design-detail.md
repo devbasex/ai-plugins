@@ -90,8 +90,15 @@ contracts/
 | `Limits` | `target`・`max` |
 | `View` | `file`・`name`・`order`・`merge`・`after`（解決済みの `(file, name, reason)`）・`issues`・`tasks`・`criteria`・`lines`・`actual_lines`・`touches` |
 | `Finding` | `rule`・`unit`・`reason` |
-| `Proposal` | `file`（超えた単位のファイルのパス）・`unit`・`units: tuple[UnitDef, ...]`・`resplit: tuple[str, ...]`（切り直すタスク）・`remaining: tuple[Finding, ...]`・`repoint: tuple[tuple[str, str], ...]`（`unit` への依存を最後の区切りへ付け替える単位の `(file, name)`） |
+| `Proposal` | `file`（超えた単位のファイルのパス）・`unit`・`units: tuple[UnitDef, ...]`・`resplit: tuple[str, ...]`（切り直すタスク）・`remaining: tuple[Finding, ...]`・`repoint: tuple[tuple[str, str, Optional[int]], ...]`（付け替える依存。中身は表の下） |
 | `Judgement` | `views`・`violations`・`warnings`・`proposals` |
+
+分け方の案（`Proposal`）は、次の 2 つを行うと適用できる。
+
+- `file` の単位 `unit` を、`units` に置き換える
+- `repoint` が指す依存の先を、`units` の最後の単位に変える
+
+`repoint` の 1 件は、依存を持つ単位のファイルのパス、その単位の名前、依存の `Edge.issue` の 3 つ組である。その単位の依存のうち、先の名前が `unit` で `issue` が一致するものだけを変える。`issue` まで比べるのは、1 つの単位が別々のファイルの同じ名前の単位に依存できるためである。名前だけで選ぶと、分けていない単位への依存まで書き換わる。
 
 `UnitDef` は #4369 の `review_units_decide.Unit`（流すときの単位）と別の型である。
 
@@ -133,7 +140,7 @@ contracts/
 3. 前から足して `target` を超える手前で区切る。1 つで `target` を超えるタスクは、それだけで 1 区切りにする
 4. 区切りが 1 つなら `units` を空にする（分けようがない）
 5. 名前は `<元の名前> <番号>`、後の区切りは直前の区切りを先に要る単位にする（理由「分け方の案: 依存の順」）
-6. 元の `after` は最初の区切りが引き継ぎ、元の単位を指していた依存は最後の区切りへ付け替える。付け替えた単位は `repoint` に入れる
+6. 元の `after` は最初の区切りが引き継ぎ、元の単位を指していた依存は最後の区切りへ付け替える。付け替えた依存は `repoint` に入れる
 7. 当てた後のグラフを同じ規則で確かめ（案は作らない）、残る違反を `remaining` に入れる。`judge` は受け取った `criteria` を `split` に渡し、受け入れ条件の参照の違反も残す
 
 ### 異常系の処理

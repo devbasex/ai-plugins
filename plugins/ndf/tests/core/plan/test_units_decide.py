@@ -272,7 +272,7 @@ def test_split_moves_edges_to_the_first_and_the_last_piece():
     )
     later = _file([_task("T1")], [_unit("Y", "T1", after=[{"unit": "A", "reason": "r", "issue": 20}])], issues=(30,), path="c.json")
     p = ud.split((base, big, later), ("b.json", "A"), LIMITS)
-    assert (p.file, p.unit, p.repoint) == ("b.json", "A", (("c.json", "Y"),))
+    assert (p.file, p.unit, p.repoint) == ("b.json", "A", (("c.json", "Y", 20),))
     assert p.units[0].after == (ud.Edge("X", "X の型", 10),)
     assert p.units[1].after == (ud.Edge("A 1", "分け方の案: 依存の順"),)
     # 元の単位を指していた依存は最後の区切りへ付け替わるので、当てた後に違反は残らない
@@ -283,9 +283,9 @@ def _apply_proposal(files, p):
     """返り値の欄だけを使って案を適用する。"""
 
     def edges(f, u):
-        if (f.path, u.name) not in p.repoint:
-            return u.after
-        return tuple(e._replace(unit=p.units[-1].name) if e.unit == p.unit else e for e in u.after)
+        return tuple(
+            e._replace(unit=p.units[-1].name) if e.unit == p.unit and (f.path, u.name, e.issue) in p.repoint else e for e in u.after
+        )
 
     applied = []
     for f in files:
@@ -305,9 +305,21 @@ def test_split_proposal_is_enough_to_apply_across_files():
     )
     later = _file([_task("T1")], [_unit("Y", "T1", after=[{"unit": "A", "reason": "r", "issue": 20}])], issues=(30,), path="c.json")
     (p,) = _judge(big, later).proposals
-    assert p.repoint == (("b.json", "B"), ("c.json", "Y"))
+    assert p.repoint == (("b.json", "B", None), ("c.json", "Y", 20))
     applied = _judge(*_apply_proposal((big, later), p))
     assert (applied.violations, applied.warnings) == ((), ())
+
+
+def test_split_repoints_only_the_edge_to_the_split_unit_among_same_names():
+    other = _file([_task("T1")], [_unit("A", "T1")], issues=(10,), path="a.json")
+    big = _file([_task("T1", lines=400), _task("T2", lines=400)], [_unit("A", "T1", "T2")], issues=(20,), path="b.json")
+    edges = [{"unit": "A", "reason": "r", "issue": 10}, {"unit": "A", "reason": "r", "issue": 20}]
+    later = _file([_task("T1")], [_unit("Y", "T1", after=edges)], issues=(30,), path="c.json")
+    (p,) = _judge(other, big, later).proposals
+    assert p.repoint == (("c.json", "Y", 20),)
+    applied = _judge(*_apply_proposal((other, big, later), p))
+    assert applied.violations == ()
+    assert _views(applied)["Y"].after == (("a.json", "A", "r"), ("b.json", "A 2", "r"))
 
 
 def test_split_keeps_the_criteria_violation_left_after_applying():
