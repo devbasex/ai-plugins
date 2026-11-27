@@ -12,6 +12,7 @@ full の起動 1 回の指定は `prepared` が解く。許可を広げる指定
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
 import shlex
@@ -36,6 +37,8 @@ REPO_MCP = ".mcp.json"
 SPEC_KEYS = ("load", "allow", "mcp")
 # MCP の定義のコピーを置く保存先の行（表 ndf-files。`<id>` は `<PID>-<一意な値>`）
 COPIES = "launch-mcp"
+# コピーのディレクトリの持ち主の錠。NDF が作った印を兼ね、これが無いディレクトリは掃除で触らない
+OWNER_LOCK = "owner.lock"
 
 Mcp = Union[None, str, tuple[str, ...]]
 
@@ -336,14 +339,22 @@ def _copies(definitions: list[Any]) -> Iterator[tuple[Path, ...]]:
     except OSError as exc:
         raise _precondition(f"MCP の定義のコピーの保存先 {base} を作れない（{type(exc).__name__}）") from None
     try:
-        paths = tuple(_write_copy(where / f"{i}.json", raw) for i, raw in enumerate(definitions))
+        owner = _hold_owner_lock(where)
     except OSError as exc:
         shutil.rmtree(where, ignore_errors=True)
-        raise _precondition(f"MCP の定義のコピーを {where} に書けない（{type(exc).__name__}）") from None
+        raise _precondition(f"MCP の定義のコピーの保存先 {where} に持ち主の錠を置けない（{type(exc).__name__}）") from None
     try:
-        yield paths
+        try:
+            paths = tuple(_write_copy(where / f"{i}.json", raw) for i, raw in enumerate(definitions))
+        except OSError as exc:
+            shutil.rmtree(where, ignore_errors=True)
+            raise _precondition(f"MCP の定義のコピーを {where} に書けない（{type(exc).__name__}）") from None
+        try:
+            yield paths
+        finally:
+            shutil.rmtree(where, ignore_errors=True)
     finally:
-        shutil.rmtree(where, ignore_errors=True)
+        os.close(owner)  # 錠は閉じると外れる
 
 
 def _write_copy(path: Path, raw: Any) -> Path:
@@ -353,20 +364,42 @@ def _write_copy(path: Path, raw: Any) -> Path:
     return path
 
 
-def _sweep_copies(base: Path) -> None:
-    """オーナーのプロセスが無いコピーのディレクトリ（`<PID>-<一意な値>`）を消す（落ちた起動の消し残り）。"""
-    for place in base.iterdir():
-        pid = place.name.partition("-")[0]
-        if place.is_dir() and pid.isdigit() and not _pid_alive(int(pid)):
-            shutil.rmtree(place, ignore_errors=True)
+def _hold_owner_lock(where: Path) -> int:
+    """`where` に持ち主の錠（`OWNER_LOCK`）を置いて排他で取り、その fd を返す。閉じるまで掃除はこのディレクトリを消さない。
 
-
-def _pid_alive(pid: int) -> bool:
-    """`pid` のプロセスが生きているか（`process_group.group_alive` と同じ確かめ方）。"""
+    錠は別名で作って取ってから `OWNER_LOCK` へ改名する。掃除が錠の無い瞬間のファイルを見て、取れたと判断しないためである。
+    錠（`flock`）はカーネルが持つので、状態の保存先を共有する PID 名前空間の違うコンテナどうしでも、使用中と分かる。
+    """
+    staged = where / f"{OWNER_LOCK}.new"
+    fd = os.open(staged, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        os.kill(pid, 0)
-    except (ProcessLookupError, OverflowError):  # noqa: NDF401 外部コマンド: プロセスが無い・pid の範囲の外
-        return False
-    except PermissionError:  # noqa: NDF401 外部コマンド: 送る権限の無いプロセスが残っている（生きている）
-        return True
-    return True
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 作ったばかりのファイルなので取れる
+        os.rename(staged, where / OWNER_LOCK)
+    except OSError:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _sweep_copies(base: Path) -> None:
+    """持ち主の錠が外れたコピーのディレクトリ（落ちた起動の消し残り）を消す。
+
+    消すのは NDF が作った印（`OWNER_LOCK`）のあるディレクトリだけで、錠を待たずに取れたものに限る。印の無いもの・
+    リンク・錠を取られているものは触らない。
+    """
+    for place in base.iterdir():
+        if place.is_symlink() or not place.is_dir():
+            continue
+        try:
+            fd = os.open(place / OWNER_LOCK, os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError:  # NDF の印が無い（NDF が作ったものでない）か読めないものは消さない
+            continue
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:  # 持ち主が錠を持っている（使用中）
+            os.close(fd)
+            continue
+        try:
+            shutil.rmtree(place, ignore_errors=True)
+        finally:
+            os.close(fd)

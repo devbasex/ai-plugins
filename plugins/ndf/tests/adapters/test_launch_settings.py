@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shlex
@@ -308,16 +309,33 @@ def test_copies_are_removed_when_the_launch_fails(repo: Path) -> None:
     assert not grant.mcp_files[0].parent.exists()
 
 
-def test_copies_left_by_a_process_that_is_gone_are_removed(repo: Path) -> None:
-    gone = ls.copies_dir() / "4194399-left"
-    gone.mkdir(parents=True)
-    mine = ls.copies_dir() / f"{os.getpid()}-running"
-    mine.mkdir()
+def _owned_copy_dir(name: str) -> Path:
+    place = ls.copies_dir() / name
+    place.mkdir(parents=True)
+    (place / ls.OWNER_LOCK).write_text("", encoding="utf-8")
+    return place
+
+
+def test_only_copies_whose_owner_lock_is_free_are_removed(repo: Path) -> None:
+    """Value 6: 消すのは NDF の印（持ち主の錠）のある、錠の外れたディレクトリだけ。PID を見ないので、名前空間の違う
+    コンテナの使用中のコピーも、錠を持たれていれば消さない。印の無い利用者のディレクトリは数字始まりでも消さない。"""
+    gone = _owned_copy_dir("4194399-left")
+    held = _owned_copy_dir("4194398-other-container")
+    fd = os.open(held / ls.OWNER_LOCK, os.O_RDONLY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    users = ls.copies_dir() / "4194397-mine"
+    users.mkdir()
     _write(repo, {"version": 1, "permissions": {"steps": {"*": {"mcp": [".ndf/mcp/a.json"]}}}})
     _write(repo, {"mcpServers": {}}, ".ndf/mcp/a.json")
     _approve(repo)
-    with ls.prepared("impl", repo):
-        assert not gone.exists() and mine.exists()
+    try:
+        with ls.prepared("impl", repo) as grant:
+            assert not gone.exists() and held.exists() and users.exists()
+            assert (grant.mcp_files[0].parent / ls.OWNER_LOCK).exists()
+            with ls.prepared("impl", repo) as again:  # 使用中のコピーは、次の起動の掃除で消えない
+                assert grant.mcp_files[0].exists() and again.mcp_files[0].exists()
+    finally:
+        os.close(fd)
 
 
 @pytest.mark.parametrize("change", ["settings", "definition", "revoke"])
