@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf.domains.crossreview import finish_decide as fin
@@ -57,19 +57,22 @@ class Scope(NamedTuple):
     unreviewed: tuple[str, ...]
 
 
-def sections_of(path: str, text: str) -> list[str]:
-    """Markdown の見出しを `<パス>#<見出し>` の並びにする（コードブロックの中の `#` は見出しでない）。"""
-    out: list[str] = []
+def _lines(text: str) -> Iterator[tuple[str, Optional[tuple[int, str]]]]:
+    """本文の各行と、その行が見出しなら（見出しの深さ, 見出し）。コードブロックの中の `#` は見出しでない。レビューの対象の
+    セクション（`sections_of`）と、起点どうしの本文の比較（`_bodies`）は、この判定だけでセクションを分ける（PR 4638 の r6-3）。"""
     fenced = False
     for line in text.splitlines():
         if line.lstrip().startswith(_FENCES):
             fenced = not fenced
+            yield line, None
             continue
-        if not fenced and line.startswith("#"):
-            title = line.lstrip("#").strip()
-            if title:
-                out.append(f"{path}#{title}")
-    return out
+        title = line.lstrip("#").strip()
+        yield line, ((len(line) - len(line.lstrip("#")), title) if not fenced and line.startswith("#") and title else None)
+
+
+def sections_of(path: str, text: str) -> list[str]:
+    """Markdown の見出しを `<パス>#<見出し>` の並びにする（コードブロックの中の `#` は見出しでない）。"""
+    return [f"{path}#{heading[1]}" for _, heading in _lines(text) if heading is not None]
 
 
 def reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None, base_branch: Optional[str] = None) -> set[str]:
@@ -111,25 +114,27 @@ def reviewed_for(state: Mapping[str, Any], basis: Basis, read: Optional[BaseText
     return kept - moved
 
 
-def _bodies(path: str, text: Optional[str]) -> dict[str, list[list[str]]]:
-    """セクション（`sections_of` と同じ `<パス>#<見出し>`）ごとの本文の行（見出しの行から次の見出しの前まで。同じ見出しが
-    いくつあれば、その数だけ並べる）。本文が無ければ空。"""
-    out: dict[str, list[list[str]]] = {}
+def _bodies(path: str, text: Optional[str]) -> dict[str, list[tuple[tuple[str, ...], list[str]]]]:
+    """セクション（`sections_of` と同じ `<パス>#<見出し>`）ごとの、親の見出しの並びと本文の行（見出しの行から次の見出しの前まで。
+    同じ見出しがいくつあれば、その数だけ並べる）。本文が無ければ空。親の見出しも比べるのは、同じ本文のセクションを別の親の
+    見出しの下へ移すと、手順などの適用先が変わるためである（PR 4638 の r6-1）。"""
+    out: dict[str, list[tuple[tuple[str, ...], list[str]]]] = {}
+    parents: list[tuple[int, str]] = []
     current: Optional[list[str]] = None
-    fenced = False
-    for line in (text or "").splitlines():
-        if line.lstrip().startswith(_FENCES):
-            fenced = not fenced
-        elif not fenced and line.startswith("#") and line.lstrip("#").strip():
+    for line, heading in _lines(text or ""):
+        if heading is not None:
+            while parents and parents[-1][0] >= heading[0]:
+                parents.pop()
             current = []
-            out.setdefault(f"{path}#{line.lstrip('#').strip()}", []).append(current)
+            out.setdefault(f"{path}#{heading[1]}", []).append((tuple(t for _, t in parents), current))
+            parents.append(heading)
         if current is not None:
             current.append(line)
     return out
 
 
 def _changed_sections(path: str, before: Optional[str], after: Optional[str]) -> set[str]:
-    """2 つの本文で、本文が違うセクション（片方にしか無いものも）。"""
+    """2 つの本文で、親の見出しの並びか本文が違うセクション（片方にしか無いものも）。"""
     old, new = _bodies(path, before), _bodies(path, after)
     return {s for s in old.keys() | new.keys() if old.get(s) != new.get(s)}
 

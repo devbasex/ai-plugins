@@ -781,7 +781,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     sections = changes.sections(changed.docs)
     head = run.g.rev_parse("HEAD")
     merge_base = _merge_base(run, head)
-    reviewed = round_scope.reviewed(run.g, run.data, _basis(run, head))
+    reviewed = round_scope.reviewed(run.g, run.data, _basis(run, head), cfg.every_section)
     prev = round_scope.previous_head(run.g, run.data, _basis(run, head), head)
     scope = scope_decide.review_scope(cfg.every_section, round_no, prev, sections, reviewed)
     diff = since = _write_diff(run, round_no, ".diff", scope.base or merge_base, head)

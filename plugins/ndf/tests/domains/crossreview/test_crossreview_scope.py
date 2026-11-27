@@ -316,6 +316,11 @@ def test_issue_3702_sections_reviewed_against_another_target_are_reviewed_again(
 # 起点 m1 と m2 の文書の本文。セクション A は同じで、セクション B だけが違う（m1 で 0、m2 で 1）
 _BASE_TEXTS = {"issues/d.md": ("# セクション A\n値は 0\n# セクション B\n値は 0\n", "# セクション A\n値は 0\n# セクション B\n値は 1\n")}
 
+# 起点 m1 と m2 の文書の本文。セクション B は本文が同じで、親の見出しだけが「本番」から「検証」へ変わる
+_MOVED_TEXTS = {
+    "issues/d.md": ("# 本番\n## セクション B\n手順\n# 検証\n## セクション A\n", "# 本番\n# 検証\n## セクション B\n手順\n## セクション A\n")
+}
+
 
 @pytest.mark.parametrize(
     ("recorded", "base", "texts", "reviewed"),
@@ -326,6 +331,8 @@ _BASE_TEXTS = {"issues/d.md": ("# セクション A\n値は 0\n# セクション
         ("m2", "m1", _BASE_TEXTS, {A}),
         ("m1", "m2", None, set()),
         (None, "m1", {}, set()),
+        # 本文が同じセクション B を、別の親の見出しの下へ移した（適用先が変わる。r6-1）
+        ("m1", "m2", _MOVED_TEXTS, {A}),
     ],
 )
 def test_pr_4638_r5_1_sections_are_kept_while_their_text_at_both_starts_is_the_same(

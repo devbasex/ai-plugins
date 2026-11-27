@@ -20,9 +20,12 @@ def previous_head(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basi
     return prev if prev is not None and _reachable_from(g, prev, head) else None
 
 
-def reviewed(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis) -> set[str]:
+def reviewed(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, every_section: bool) -> set[str]:
     """今の起動で引き継げる詳細レビューの記録（`scope_decide.reviewed_for`）。`run` と `review-scope` の両方がこれを呼ぶ。
-    git を起動するのは、記録の起点が今の起点と違い、引き継ぐ候補があるときだけである（PR 4638 の r4-2・r5-1）。"""
+    git を起動するのは、詳細レビューを求める起動（`every_section`。設計の PR）で、記録の起点が今の起点と違い、引き継ぐ候補が
+    あるときだけである（PR 4638 の r4-2・r5-1・r6-2）。ほかの起動は範囲に記録を使わないので、起点が違えば本文を比べずに外す。"""
+    if not every_section:
+        return scope_decide.reviewed_for(state, basis)
     return scope_decide.reviewed_for(state, basis, lambda start, now, kept: _base_texts(g, start, now, kept))
 
 
