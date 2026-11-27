@@ -242,8 +242,9 @@
 | 呼び方 | 引数 |
 | --- | --- |
 | `ndf models pick` | `--layer`（string・必須）: 起動の層（worker・skill・judge・seat）<br>`--name`（string・必須）: 作業の名前（worker の作業の名前・Skill の名前など）<br>`--runtime`（string・任意・既定 `"claude"`）: ランタイム（claude か codex）<br>`--unit`（string・任意）: 単位の ID（省けば割り付けない）<br>`--retry`（string・任意）: 同じ失敗への 2 回目以降の起動の理由（省けば引き上げない）<br>`--args`（boolean・任意）: CLI に渡す引数を 1 行に 1 つずつ出す（省けば結果 JSON） |
+| `ndf models report` | `--since`（string・必須）: 期間の最初の日（JST。YYYY-MM-DD）<br>`--until`（string・必須）: 期間の最後の日（JST。YYYY-MM-DD）<br>`--stage`（string・任意）: 工程（impl など。省けばすべて） |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `args`（array of string）・`assign_id`（string）・`effort`（string）・`effort_source`（string）・`layer`（string）・`mode`（string）・`model_source`（string）・`name`（string）・`raised`（boolean）・`requested_model`（string）・`runtime`（string）・`stage`（string）・`unit`（string）
+結果の `metrics`: `broken_rows`（integer）・`experiment_rows`（integer）・`usage_rows`（integer）。`items` の要素: 決まった項目を持たない
 
 ## `ndf notify`
 

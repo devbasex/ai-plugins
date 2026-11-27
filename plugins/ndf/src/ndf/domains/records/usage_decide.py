@@ -195,6 +195,12 @@ def launch_costs(rows: Iterable[Mapping[str, Any]]) -> dict[str, Optional[float]
     return {row["launch_id"]: _launch_cost(row, totals) for row in kept}
 
 
+def launch_rows(rows: Iterable[Mapping[str, Any]]) -> list[tuple[Mapping[str, Any], Optional[float]]]:
+    """`launch_id` ごとに数える 1 行と、その起動 1 回の費用（求められなければ None）の組。重なった行を 1 回だけ数える集計が使う。"""
+    costs = launch_costs(rows)
+    return [(row, costs[row["launch_id"]]) for row in _first_per_launch(rows)]
+
+
 def _launch_cost(row: Mapping[str, Any], totals: Mapping[tuple[str, int], Optional[float]]) -> Optional[float]:
     value, seq, session = _session_cost(row), row.get("session_seq"), row.get("session_id")
     if value is None or not isinstance(seq, int) or isinstance(seq, bool):

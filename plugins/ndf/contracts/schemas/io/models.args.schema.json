@@ -43,6 +43,33 @@
         "--layer",
         "--name"
       ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "report",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--since": {
+          "type": "string",
+          "description": "期間の最初の日（JST。YYYY-MM-DD）"
+        },
+        "--until": {
+          "type": "string",
+          "description": "期間の最後の日（JST。YYYY-MM-DD）"
+        },
+        "--stage": {
+          "type": "string",
+          "description": "工程（impl など。省けばすべて）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--since",
+        "--until"
+      ]
     }
   ]
 }

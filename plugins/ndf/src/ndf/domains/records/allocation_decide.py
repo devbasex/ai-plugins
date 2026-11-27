@@ -140,7 +140,7 @@ def weighted(units: Sequence[Unit]) -> Stats:
     )
 
 
-def _comparable(units: Sequence[Unit], arms: Sequence[int]) -> list[Unit]:
+def comparable(units: Sequence[Unit], arms: Sequence[int]) -> list[Unit]:
     """割り付けた時に、`arms` のすべての確率が 0 より大きかった単位。"""
     return [u for u in units if all(u.probs[a] > 0 for a in arms)]
 
@@ -198,7 +198,7 @@ def probabilities(units: Sequence[Unit], candidates: Sequence[int], allocation: 
     満たせば、候補の組の出現率は `floor + (1 − floor × 候補の数) × 最良である確率`、候補でない組は 0（`adaptive`）。
     """
     cands = sorted(candidates)
-    used = _comparable(units, cands)
+    used = comparable(units, cands)
     stats = _by_arm(used, cands)
     width = len(units[0].probs) if units else max(cands) + 1
     counts = _counts(stats, width)
@@ -221,7 +221,7 @@ def eliminated(units: Sequence[Unit], arms: Sequence[int], margin: float, window
     `window_days` を足した日時。基準は打ち切らない。"""
     out: dict[int, datetime] = {}
     for arm in sorted(a for a in arms if a != BASE):
-        pair = _comparable(units, [BASE, arm])
+        pair = comparable(units, [BASE, arm])
         base, other = [u for u in pair if u.arm == BASE], [u for u in pair if u.arm == arm]
         if len(base) < ENOUGH_UNITS or len(other) < ENOUGH_UNITS:
             continue
@@ -235,7 +235,7 @@ def judgement(units: Sequence[Unit], candidates: Sequence[int], allocation: Mapp
     """`report` の優劣の表示。比べる組がそろって候補だった単位が無ければ比較できない、30 件未満の組があれば件数が足りない、
     最良である確率（`probabilities` と同じ効果の下限を当てる）が 0.95 以上の組があれば判断できる、無ければ優劣を判定できない。"""
     cands = sorted(candidates)
-    used = _comparable(units, cands)
+    used = comparable(units, cands)
     stats = _by_arm(used, cands)
     counts = _counts(stats, len(units[0].probs) if units else max(cands) + 1)
     if not used:

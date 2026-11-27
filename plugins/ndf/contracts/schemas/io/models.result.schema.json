@@ -2,44 +2,124 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "models.result.schema.json",
   "title": "ndf models の結果 JSON",
-  "description": "ndf models が標準出力の最後の 1 行に出す結果 JSON（pick。--args を付けた pick は結果 JSON を出さない）。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
-  "allOf": [
-    {
-      "$ref": "../result.schema.json"
-    }
-  ],
+  "description": "ndf models が標準出力の最後の 1 行に出す結果 JSON（pick と report。--args を付けた pick は結果 JSON を出さない）。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [{"$ref": "../result.schema.json"}],
   "properties": {
-    "tool": {
-      "const": "models"
-    },
+    "tool": {"const": "models"},
     "metrics": {
       "type": "object",
-      "description": "ndf models の計測値",
+      "description": "ndf models の計測値（report だけが置く）",
       "additionalProperties": false,
-      "properties": {}
+      "properties": {
+        "usage_rows": {"type": "integer", "minimum": 0, "description": "読んだ使用量ログの行の数（同じ launch_id の重なりを含む）"},
+        "experiment_rows": {"type": "integer", "minimum": 0, "description": "読んだ実験の記録の行の数"},
+        "broken_rows": {"type": "integer", "minimum": 0, "description": "使用量ログのうち形が違って読めなかった行の数"}
+      }
     },
     "items": {
       "type": "array",
-      "description": "pick の起動の値（1 件）",
+      "description": "pick は起動の値 1 件、report は起動の区分と実験の組ごとの値",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["layer", "name", "runtime", "model_source", "effort_source", "raised", "args"],
-        "properties": {
-          "layer": {"type": "string", "description": "起動の層"},
-          "name": {"type": "string", "description": "作業の名前"},
-          "runtime": {"type": "string", "description": "ランタイム"},
-          "stage": {"type": "string", "description": "層と作業の名前から引いた工程。工程の無い起動は置かない（実験の引数を足さない）"},
-          "mode": {"type": "string", "description": "工程のモード。渡されたときだけ"},
-          "unit": {"type": "string", "description": "単位の ID。渡されたときだけ"},
-          "assign_id": {"type": "string", "description": "割り付け ID。割り付けたときだけ"},
-          "requested_model": {"type": "string", "description": "CLI に渡すモデル。指定しなければ無し"},
-          "effort": {"type": "string", "description": "CLI に渡す effort。指定しなければ無し"},
-          "model_source": {"type": "string", "description": "モデルの出所（argument・environment・experiment・base・default）"},
-          "effort_source": {"type": "string", "description": "effort の出所（model_source と同じ語）"},
-          "raised": {"type": "boolean", "description": "同じ失敗への 2 回目以降の起動で、値を 1 つ上げたか"},
-          "args": {"type": "array", "items": {"type": "string"}, "description": "CLI に渡す引数の並び（--args が 1 行 1 つで出すもの）"}
-        }
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["layer", "name", "runtime", "model_source", "effort_source", "raised", "args"],
+            "properties": {
+              "layer": {"type": "string", "description": "起動の層"},
+              "name": {"type": "string", "description": "作業の名前"},
+              "runtime": {"type": "string", "description": "ランタイム"},
+              "stage": {"type": "string", "description": "層と作業の名前から引いた工程。工程の無い起動は置かない（実験の引数を足さない）"},
+              "mode": {"type": "string", "description": "工程のモード。渡されたときだけ"},
+              "unit": {"type": "string", "description": "単位の ID。渡されたときだけ"},
+              "assign_id": {"type": "string", "description": "割り付け ID。割り付けたときだけ"},
+              "requested_model": {"type": "string", "description": "CLI に渡すモデル。指定しなければ無し"},
+              "effort": {"type": "string", "description": "CLI に渡す effort。指定しなければ無し"},
+              "model_source": {"type": "string", "description": "モデルの出所（argument・environment・experiment・base・default）"},
+              "effort_source": {"type": "string", "description": "effort の出所（model_source と同じ語）"},
+              "raised": {"type": "boolean", "description": "同じ失敗への 2 回目以降の起動で、値を 1 つ上げたか"},
+              "args": {"type": "array", "items": {"type": "string"}, "description": "CLI に渡す引数の並び（--args が 1 行 1 つで出すもの）"}
+            },
+            "description": "pick の起動の値（1 件）"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "report の起動の区分（工程 × 行の指定値）ごとの値。指定の無い欄は置かない（指定なし）",
+            "required": [
+              "kind",
+              "stage",
+              "launch_count",
+              "seconds",
+              "tokens",
+              "cost_usd",
+              "unpriced_launches",
+              "mismatched",
+              "requests",
+              "success_rate",
+              "steps",
+              "retry_rate",
+              "judge_requests",
+              "judge_retry_rate",
+              "judge_returned"
+            ],
+            "properties": {
+              "kind": {"const": "launch_group"},
+              "stage": {"type": "string", "description": "工程"},
+              "repo": {"type": "string", "description": "対象のリポジトリ（使用量ログの repo）"},
+              "runtime": {"type": "string", "description": "ランタイム"},
+              "mode": {"type": "string", "description": "工程のモード（モードごとの内訳）"},
+              "requested_model": {"type": "string", "description": "指定したモデル"},
+              "effort": {"type": "string", "description": "指定した effort（実際に効いた値ではない）"},
+              "launch_count": {"type": "integer", "minimum": 0, "description": "期間の起動の数（同じ launch_id は 1 回）"},
+              "seconds": {"type": "number", "minimum": 0, "description": "期間の起動の所要時間の合計（秒）"},
+              "tokens": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}, "description": "期間の起動のトークンの合計（使用量ログの usage の 4 つ）"},
+              "cost_usd": {"type": "number", "minimum": 0, "description": "期間の起動の費用の合計（USD。費用が不明の起動は足さない）"},
+              "unpriced_launches": {"type": "integer", "minimum": 0, "description": "費用が不明の起動の数"},
+              "mismatched": {"type": "integer", "minimum": 0, "description": "指定したモデルと実際のモデルが食い違った起動の数"},
+              "requests": {"type": "integer", "minimum": 0, "description": "成功率の分母のリクエストの数（区分は拒否された行を除いた最初の行の指定値、期間は最後の行）"},
+              "success_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "成功のリクエスト ÷ リクエスト。リクエストが無ければ null"},
+              "steps": {"type": "integer", "minimum": 0, "description": "worker か Skill の行があるステップの数（区分は attempt が最も小さい行）"},
+              "retry_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "attempt が 2 以上の行があるステップ ÷ ステップ。ステップが無ければ null"},
+              "judge_requests": {"type": "integer", "minimum": 0, "description": "判定のリクエストの数"},
+              "judge_retry_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "拒否された行を除いた最初の行が invalid で後の行がある判定のリクエスト ÷ 判定のリクエスト"},
+              "judge_returned": {"type": "integer", "minimum": 0, "description": "2 回とも形に合わず人へ戻した判定のリクエストの数"}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "report の実験のキー（リポジトリ × 工程 × ランタイム × 互換性のキー）の組ごとの値。期間に割り付けた単位を、呼ばれた時点で計算し直す",
+            "required": ["kind", "repo", "stage", "runtime", "key", "arm", "units", "modes", "quality", "quality_interval", "cost_usd", "unpriced_units", "roi", "roi_ratio", "phase", "verdict", "note"],
+            "properties": {
+              "kind": {"const": "arm"},
+              "repo": {"type": "string", "description": "リポジトリのキー（割り付けの行の repo）"},
+              "stage": {"type": "string", "description": "工程"},
+              "runtime": {"type": "string", "description": "ランタイム"},
+              "key": {"type": "string", "description": "互換性のキー"},
+              "arm": {"type": "integer", "minimum": 0, "description": "組の添字（0 が基準の組）"},
+              "model": {"type": "string", "description": "組が指定するモデル"},
+              "effort": {"type": "string", "description": "組が指定する effort（指定した effort。実際に効いた値ではない）"},
+              "units": {"type": "integer", "minimum": 0, "description": "比べる単位の数（重みを付けない）"},
+              "modes": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}, "description": "モード → 比べる単位の数（モードごとの内訳。モードの無い単位は数えない）"},
+              "quality": {"type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "効果の重み付きの平均。単位が無ければ null"},
+              "quality_interval": {"oneOf": [{"type": "null"}, {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}, "minItems": 2, "maxItems": 2}], "description": "効果の平均の 95% の幅（下限と上限。正規近似）"},
+              "cost_usd": {"type": ["number", "null"], "minimum": 0, "description": "費用の分かる単位の費用の重み付きの平均（USD）。無ければ null"},
+              "unpriced_units": {"type": "integer", "minimum": 0, "description": "費用が不明の単位の数（費用の平均に入れない）"},
+              "roi": {"type": ["number", "null"], "minimum": 0, "description": "ROI（効果の平均 ÷ 費用の平均）"},
+              "roi_ratio": {"type": ["number", "null"], "minimum": 0, "description": "基準の組の ROI を 1 とした比"},
+              "best": {"type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "最良である確率（計算できたときだけ）"},
+              "probability": {"type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "出現率（段階が adaptive のときだけ。件数を集めている間は置かない）"},
+              "phase": {"enum": ["burn_in", "adaptive", "uniform"], "description": "段階（burn_in は件数を集めている、uniform は費用を計算できないモデルがあり均等）"},
+              "verdict": {"enum": ["incomparable", "short", "decided", "undecided"], "description": "優劣の表示（比較できない・件数が足りない・判断できる・優劣を判定できない）"},
+              "note": {"type": "string", "description": "段階と優劣の表示の文。単位の無い組は「記録なし」"},
+              "leader": {"const": true, "description": "判断できるときの最良の組だけに置く"},
+              "dropped": {"enum": ["cutoff", "refused"], "description": "候補から外した理由（打ち切り・起動できない組）"},
+              "dropped_until": {"type": "string", "description": "打ち切りの期限"},
+              "unpriced_models": {"type": "array", "items": {"type": "string"}, "description": "費用を計算できないモデル（段階が uniform のとき）"}
+            }
+          }
+        ]
       }
     }
   }

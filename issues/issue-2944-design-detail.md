@@ -51,8 +51,9 @@ src/ndf/
 | `src/ndf/progress/gate/entry.py` | 変更 | `ndf worker run` の引数に `--mode` を足す | — | モジュール | 呼ぶ引数を足すだけ |
 | `src/ndf/domains/records/usage.py` | 変更 | 行と指標の受け口 | experiments | モジュール | N: `codex_cost`・`record_outcome`（`experiments.write_outcome` を呼ぶ） |
 | `src/ndf/domains/records/experiments.py` | 新設 | 効果指標と出現率 | model_choice・allocation_decide | `UnitValue` | N: `write_outcome`・`unit_values`・`seed_of`・`refresh` |
-| `src/ndf/domains/records/allocation_decide.py` | 新設 | 計算 | — | `Entry`・`Judgement`・`Stats`・`Verdict`（単位は型 `Unit`、乱数は型 `Sampler` で受ける） | N: `weighted`・`eliminated`・`probabilities`・`judgement` |
-| `src/ndf/domains/records/models_cli.py` | 新設 | `ndf models` | model_choice・experiments・usage | モジュール | N: `main`・`_pick_command`・`_report`・`report_rows` |
+| `src/ndf/domains/records/allocation_decide.py` | 新設 | 計算 | — | `Entry`・`Judgement`・`Stats`・`Verdict`（単位は型 `Unit`、乱数は型 `Sampler` で受ける） | N: `weighted`・`comparable`（`report` も比べる単位の絞り込みに使う）・`eliminated`・`probabilities`・`judgement` |
+| `src/ndf/domains/records/usage_decide.py` | 変更 | `launch_id` ごとの行と費用 | — | モジュール | N: `launch_rows` |
+| `src/ndf/domains/records/models_cli.py` | 新設 | `ndf models` | model_choice・experiments・allocation_decide・usage・usage_decide | モジュール | N: `main`・`_pick_command`・`_report`・`report_rows` |
 | `src/ndf/domains/settings/delegate_run_cli.py` | 変更 | 委譲の起動にモデルと effort を足す | model_choice・launch_settings | モジュール | C: `main` |
 | `src/ndf/domains/crossreview/seats.py` | 変更 | シートの単位 | model_choice・usage | `SeatRun` | C: `launch_reviewers`・`_seat_launch`・`_seat_result` |
 | `src/ndf/domains/crossreview/fixer.py` | 変更 | 修正担当の値 | model_choice・usage | `FixRun` | C: `_fixer_launch`・`_launch_fixer`・`_keep_fixer` |
@@ -451,7 +452,8 @@ src/ndf/
 | `main` | `domains/records/models_cli.py` | 新設 | `main(argv: list[str]) -> int` | `pick`・`report` を振り分ける |
 | `_pick_command` | 同 | 新設 | `_pick_command(a: Namespace) -> int` | `--args` が無ければ結果 JSON、あれば 1 行 1 引数 |
 | `_report` | 同 | 新設 | `_report(a: Namespace) -> int` | 使用量ログと実験の記録を読んで結果を出す |
-| `report_rows` | 同 | 新設 | `report_rows(usage_rows, experiment_rows, since, until, stage) -> list[dict]` | 設計書の「集計」の順と区分で値を組む |
+| `report_rows` | 同 | 新設 | `report_rows(usage_rows, experiment_rows, since, until, stage, allocation) -> list[dict]` | 設計書の「集計」の順と区分で値を組む。`allocation` は `_report` が今の設定（`model_choice.table`）から渡す割り付けの値で、打ち切りと段階と確率の計算に使う |
+| `launch_rows` | `domains/records/usage_decide.py` | 新設 | `launch_rows(rows) -> list[tuple[Mapping, Optional[float]]]` | `launch_id` ごとに数える 1 行と起動 1 回の費用の組（`launch_costs` と同じ行の選び方） |
 | `main` | `domains/settings/delegate_run_cli.py` | 変更 | 引数は #1959 のまま | codex は `settings = launch_settings.load(launch_settings.launch_root(cwd))` で起動の設定を読み、同じ `cwd` と `settings` を渡した `launch_choice("seat", "delegate", "codex", cwd=cwd, settings=settings, argument=(<コマンドが明示したモデル>, <コマンドが明示した effort>))` の引数と `safety_args("codex", a.use, cwd, settings=settings)`（用途は `--use` で受けた値。省けば `delegate`）の引数の並び、作業ディレクトリの引数（`-C <今のディレクトリ>`。ランタイムの表の `workdir_options` の先頭の名前）を、この順に続けて `{args}` に入れる。コマンドが `-m`・`--model`（ランタイムの表の `model_options`）でモデルを、`-c`・`--config`（同じく `effort_options`）の `model_reasoning_effort=<値>` で effort を明示すれば、その値を起動の引数として渡し（設計書の「値の優先」の順 1。下位の環境変数は確かめない）、明示した側の引数は足さない。kiro と agy は `launch_choice` を呼ばず、`safety_args` の引数だけを入れる |
 | `safety_args` | `adapters/launch_settings.py` | 変更 | `safety_args(runtime: str, use: str, cwd: Path, settings: Optional[Settings] = None) -> SafetyArgs` | #1959 の判定表のまま。サンドボックスなしで起動する経路で、`settings` を渡されれば `.ndf/launch.json` を読み直さずに使う。起動の直前の照らし直し（`verify`）は、これまでどおりファイルを読み直して承認と照らす |
 
@@ -460,6 +462,9 @@ src/ndf/
   - `verify` が見つけるのは、承認のハッシュの対象（`permissions` と、そこから参照する MCP の定義ファイル。工程の指定に `mcp: "inherit"` があればリポジトリ直下の `.mcp.json` も入り、無いこと自体も対象になる）の変更と、承認の取り消しだけである。読み直しで起動の設定か対象の定義ファイルを読めない・JSON でない・スキーマや定義の形に合わないときも、理由を返して起動を止める（`launch_settings._target_files`・`_mcp_definition`・`Grant.verify`）。`experiments` だけの変更は、スキーマに合う限り見つけず、委譲を止めない。モデルと effort は、引数を組み立てる段階で最初に読んだ設定から選ぶ
 - `_pick_command` の `--args` の形は、`InternalError` を自分で受けて標準エラーへ書き、標準出力に何も出さずに 0 以外で終える。`delegate-run` の失敗の扱いは #1959 の詳細設計のとおりで、`launch_choice` の失敗も CLI を起動せずに同じ形で終える
 - `report` は呼ばれた時点で計算し直し、出現率のファイルを書き換えない
+- `report` の結果の items は 2 種類である。`launch_group` は工程 × 行の指定値（リポジトリ・ランタイム・モード・モデル・effort）ごとの起動の値・成功率・やり直し率で、モードが区分に入るのでモードごとの内訳になる。`arm` は実験のキーの組ごとの単位の数・効果の平均と幅・費用の平均・ROI と基準の組との比・最良である確率・出現率（`adaptive` のときだけ）・段階と優劣の表示で、モードごとの単位の数を持つ。単位の無い組の表示は「記録なし」、件数を集める間は「件数を集めている」
+- 拒否された行は、モデルを理由にした拒否（実験の記録の `launch_error` の行）の割り付け ID を持ち、成功でない使用量ログの行とする。使用量ログの行は拒否を欄で持たないためである
+- 成功・成功率の分母に入れない `outcome` と、ステップのやり直し率に数える層は、表 launch-experiments の records の行（`success_outcomes`・`uncounted_outcomes`・`step_layers`）が持つ。コードに写さない（検査 const-fact）
 
 ### 異常系の処理
 
