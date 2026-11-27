@@ -401,11 +401,27 @@ def test_a_left_share_is_swept_even_when_the_push_is_not_read(tmp_path: Path) ->
     repo = Repo(tmp_path, deliveries=None)
     left = repo.common / "ndf-release-record" / "59.json"
     left.parent.mkdir(parents=True)
-    left.write_text("{}", encoding="utf-8")
+    made = record_unversioned.Prefix(COMMIT, record_decide.Push(BEFORE, AFTER), None, frozenset(), frozenset())
+    left.write_text(json.dumps(made.as_json()), encoding="utf-8")
+    mine = left.with_name("notes.json")  # NDF が書いていないファイルは消さない
+    mine.write_text("{}", encoding="utf-8")
+    other = left.with_name("58.json")
+    other.write_text("{}", encoding="utf-8")
     old = left.stat().st_mtime - 4000
-    os.utime(left, (old, old))
+    for path in (left, mine, other):
+        os.utime(path, (old, old))
     _write(_hub(), repo, _args(WEB, targets=(WEB,)), _release(None))
-    assert not left.exists()
+    assert not left.exists() and mine.exists() and other.exists()
+
+
+def test_a_share_with_another_push_than_the_trusted_record_is_not_used(tmp_path: Path) -> None:
+    """同じ値の信用する記録の push は保存先より優先し、別の push を指す保存先は使わずに作り直す。"""
+    share = tmp_path / "share"
+    other = record_unversioned.Prefix(COMMIT, record_decide.Push("e1" * 20, "e2" * 20), None, frozenset(), frozenset())
+    trusted = record_decide.Push(BEFORE, AFTER)
+    record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: other)
+    made = record_unversioned.Prefix(COMMIT, trusted, None, frozenset({"web/a.ts"}), frozenset())
+    assert record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: made, trusted) == made
 
 
 def test_a_missing_parent_for_the_pull_diff_stops_with_a_deeper_fetch(tmp_path: Path) -> None:

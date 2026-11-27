@@ -38,6 +38,8 @@ REMOVED = "removed"
 # 共通の前処理の保存先のロックを待つ上限
 SHARE_LOCK = "release-record.share-lock"
 _SHARE_DIR = "ndf-release-record"
+# 保存先の JSON の `kind`。NDF が書いた保存先だけを読み、掃除する
+_SHARE_KIND = "ndf-release-record.prefix/v1"
 
 
 class Unversioned(NamedTuple):
@@ -78,6 +80,7 @@ class Prefix(NamedTuple):
 
     def as_json(self) -> dict[str, Any]:
         return {
+            "kind": _SHARE_KIND,
             "commit": self.commit,
             "push": self.push._asdict() if self.push is not None else None,
             "at": self.deliveries.as_json() if self.deliveries is not None else None,
@@ -234,12 +237,15 @@ def _history_hint(production: str, tip: str) -> str:
 def _first_parent_history(repo_git: Git, production: str, commit: str, tip: str) -> tuple[list[tuple[str, str]], list[str]]:
     """反映したコミットの後から `tip` までの本番ブランチの第一親のコミット（新しい順に (SHA, 第一親)）と、そのうち設定の
     ファイルを変えたコミット（git の起動 1 回）。`--sparse` で設定のファイルを変えないコミットも親を書き換えずに並べ、
-    `--name-only` は設定のファイルだけを出す。反映したコミットの親は解決しないので、浅い clone の境界でも読める。"""
+    `--name-only` は設定のファイルだけを出す。反映したコミットの親は解決しないので、浅い clone の境界でも読める。
+    `--no-follow` で利用者の `log.follow` の値によらず同じ出力にする。"""
     try:
         out = repo_git.run(
             "log",
             "--first-parent",
             "--sparse",
+            # 利用者の `log.follow` を継がない（真だと、パスの指定で名前の変更を追い、変更の無いコミットを出さない）
+            "--no-follow",
             "--diff-merges=first-parent",
             "--format=%x01%H %P",
             "--name-only",
@@ -321,22 +327,42 @@ def _share_path(share: Path, number: int) -> Path:
     return share / f"{int(number)}.json"
 
 
-def _read_share(path: Path, commit: str) -> Optional[Prefix]:
-    """保存先の前処理（反映したコミットが今と同じときだけ）。無い・壊れていれば None。"""
-    try:
-        got = Prefix.from_json(json.loads(path.read_text(encoding="utf-8")))
-    except (OSError, ValueError, KeyError, TypeError):  # noqa: NDF401 ファイル: 無い・壊れた保存先は None で返して作り直す
+def _ours(path: Path) -> Optional[Mapping[str, Any]]:
+    """NDF が書いた保存先の中身（名前が `<本番の PR>.json` で、`kind` が `_SHARE_KIND`）。それ以外・無い・壊れていれば None。"""
+    if not path.stem.isdigit():
         return None
-    return got if got.commit == commit else None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 無い・壊れた保存先は None で返して作り直す
+        return None
+    return raw if isinstance(raw, dict) and raw.get("kind") == _SHARE_KIND else None
 
 
-def shared_prefix(share: Path, number: int, commit: str, compute: Callable[[], Prefix]) -> Prefix:
+def _read_share(path: Path, commit: str, push: Optional[record_decide.Push] = None) -> Optional[Prefix]:
+    """保存先の前処理（NDF が書き、反映したコミットが今と同じで、`push` を渡せばその push と同じときだけ）。当たらなければ None。
+
+    同じ値の信用する記録の push（`push`）は保存先より優先する。保存先が別の push を指していれば使わずに作り直す。"""
+    raw = _ours(path)
+    if raw is None:
+        return None
+    try:
+        got = Prefix.from_json(raw)
+    except (KeyError, TypeError, ValueError):  # noqa: NDF401 ファイル: 形の違う保存先は None で返して作り直す
+        return None
+    if got.commit != commit or (push is not None and got.push != push):
+        return None
+    return got
+
+
+def shared_prefix(
+    share: Path, number: int, commit: str, compute: Callable[[], Prefix], push: Optional[record_decide.Push] = None
+) -> Prefix:
     """届け先ごとに並べて打った呼び出しで共有する前処理（`share` は `share_dir`）。保存先のロックを取り、反映したコミットが
-    同じものがあれば読み、無いか違えば `compute` で作って書く。"""
+    同じもの（`push` を渡せばその push のもの）があれば読み、無いか違えば `compute` で作って書く。"""
     path = _share_path(share, number)
     path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(path) + ".lock", timeout=limits.seconds(SHARE_LOCK)):
-        got = _read_share(path, commit)
+        got = _read_share(path, commit, push)
         if got is None:
             got = compute()
             path.write_text(json.dumps(got.as_json(), ensure_ascii=False), encoding="utf-8")
@@ -351,7 +377,9 @@ def drop_share(share: Path, number: int) -> None:
 
 
 def _drop_stale(path: Path, older_than: float, now: Callable[[], float]) -> None:
-    """ロックされておらず、作ってから `older_than` 秒より長く経った保存先 `path` を消す。"""
+    """NDF が書き、ロックされておらず、作ってから `older_than` 秒より長く経った保存先 `path` を消す（ほかのファイルは残す）。"""
+    if _ours(path) is None:
+        return
     try:
         with FileLock(str(path) + ".lock", timeout=0):
             if now() - path.stat().st_mtime > older_than:
@@ -443,14 +471,14 @@ def _shape(hub: GitHub, hands: Hands, number: int, production: str, release: Map
     # 対象の出典は worktree でなく本番へ反映した時点で決める。並べて打った別の呼び出しが push を読んで置き場に書いて
     # いれば、判定もやり直さずに使う。push を読まないと決めた結果は置き場に書かない（判定は git の起動 2 回で済む）
     known = _known_push(state, args.version)
-    prefix = _read_share(_share_path(share, number), commit)
+    prefix = _read_share(_share_path(share, number), commit, known)
     if prefix is None:
         landed = _push_needed(hands.repo_git, production, commit, args.tip) if known is None else frozenset()
         if known is None and landed is None:
             prefix = Prefix(commit, None, None, frozenset(), frozenset())
         else:
             found = (known, landed or frozenset())
-            prefix = shared_prefix(share, number, commit, lambda: _prefix(hub, hands, production, pull, args.tip, found))
+            prefix = shared_prefix(share, number, commit, lambda: _prefix(hub, hands, production, pull, args.tip, found), known)
     targets = _record_targets(prefix, args)
     _check_names(targets, args)
     _check_records(state, targets, args.version, commit, number)
