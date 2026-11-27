@@ -261,10 +261,12 @@ def reading_launch(
 
 class ClaudeAnswer(NamedTuple):
     """claude の `--output-format json` の出力を 1 回読んだもの。`text` は結果を探す本文（外側の JSON の `result`。外側が JSON で
-    なければ出力のまま）、`denials` は外側の JSON の `permission_denials` の要素（辞書だけ）。"""
+    なければ出力のまま）、`denials` は外側の JSON の `permission_denials` の要素（辞書だけ）。`verified` は、外側の JSON が
+    文字列の `result` と、辞書だけの並びの `permission_denials` を持つか（偽なら、本文と拒否の一覧のどちらかが欠けうる）。"""
 
     text: str
     denials: tuple[dict[str, Any], ...]
+    verified: bool = False
 
 
 def claude_answer(out: Path) -> ClaudeAnswer:
@@ -279,7 +281,8 @@ def claude_answer(out: Path) -> ClaudeAnswer:
     body = payload.get("result")
     denials = payload.get("permission_denials")
     found = tuple(d for d in denials if isinstance(d, dict)) if isinstance(denials, list) else ()
-    return ClaudeAnswer(body if isinstance(body, str) else raw, found)
+    verified = isinstance(body, str) and isinstance(denials, list) and len(found) == len(denials)
+    return ClaudeAnswer(body if isinstance(body, str) else raw, found, verified)
 
 
 def answer_text(runtime: str, out: Path) -> str:

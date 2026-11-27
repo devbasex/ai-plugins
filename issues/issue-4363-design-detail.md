@@ -312,6 +312,7 @@ plugins/ndf/
 | `ask` | 起動が成功しない | 利用上限・無進捗・監視の上限・起動の拒否・非ゼロの終了 | `launch` の返す状態が `done` でない | 既定値で続ける（どの指摘も下げない） | `warnings` に状態を 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
 | `ask` | 差分・指摘の一覧・MVV の本文と共通原則の写しのどれかを読めない | claude の `permission_denials` にそのファイルがある | `participants.denied_reads` | 既定値で続ける | `warnings` と過程にはファイル名だけ。絶対パスは実行者だけが読める `.detail.log` | 同上 |
 | `ask` | 回答が読めない | 出力が無い・JSON でない・`verdicts` の配列が無い | `participants.claude_answer` と `listed_of` | 既定値で続ける | `warnings` に 1 行 | 同上 |
+| `ask` | 出力の外側を確かめられない | 外側が JSON でない・文字列の `result` が無い・`permission_denials` が辞書だけの並びでない | `ClaudeAnswer.verified` が偽 | 成り立たないとした回答を採らない（起きるとした回答と指摘の種類は残す） | 否定の回答があれば `warnings` に 1 行 | 同上 |
 | `ask` | 出力の記録を状態の保存先に書けない | 保存先に書けない・同じ名前のファイル・リンク・ディレクトリがある | 起動の後の `OSError` | 回答の扱いは変えない | 過程に記録の名前とエラーの種別の 1 行。終了コードは変えない | その記録は残らない |
 
 ### ログと記録の出力
@@ -342,7 +343,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `enter` | `journal.py` | 変更 | `enter(self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = (), mvv: Optional[str] = None) -> frozenset[str]` | 今の登録に加え、このラウンドで新しく出たか戻った行の番号を `self.fresh` に残す |
 | `apply_checks` | `journal.py` | 新設 | `apply_checks(self, asked: Sequence[str], verdicts: Mapping[str, verify_decide.Verdict]) -> Checked` | 確認の結果を行に書き、下げる行を下げる |
-| `_raised_again` | `journal.py` | 変更 | シグネチャは変えない | 出し直しの `protect` を足し、下げた行の重要度の扱いを分ける |
+| `_raised_again` | `journal.py` | 変更 | シグネチャは変えない | 出し直しの `protect` を足し、下げた行の重要度の扱いを分ける。戻した指摘に今回の `impact` があれば置き換える（無ければ前の値を残す） |
 | `_revive` | `journal.py` | 変更 | シグネチャは変えない | 戻った行から `check` を外す（`protect` は残す） |
 
 `_raised` は相手役の `protect` を `criteria_decide.protect_of` で通して行に足す（1 件も無ければキーを持たない）。

@@ -33,5 +33,5 @@ def answer(spec: agents.Launch, verdict: Callable[[dict], Optional[dict]]) -> ag
     rows = listed_rows(spec)
     body = json.dumps({"verdicts": [v for row in rows if (v := verdict(row)) is not None]}, ensure_ascii=False)
     spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
-    spec.paths.out.write_text(json.dumps({"result": body}, ensure_ascii=False), encoding="utf-8")
+    spec.paths.out.write_text(json.dumps({"result": body, "permission_denials": []}, ensure_ascii=False), encoding="utf-8")
     return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())

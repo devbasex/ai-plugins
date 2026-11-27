@@ -355,7 +355,8 @@ class FindingJournal:
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
         未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
-        1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
+        1 文は既にある行に無いときだけ足し（戻した指摘に今回の 1 文があれば置き換える。判定役が前の経路の起きることを
+        今回の位置と一緒に確かめないため。#4363）、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
         行の値に今回の値を足す。判定役の確認で下げたままの指摘の重要度は変えず（下げた扱いの解除は先に `_unlower` が行う）、
         下げた扱いを抜けた指摘に保護の種類が付けば元へ戻す（`_restore_lowered`。#4363）。"""
         new = _raised(item, named)
@@ -363,6 +364,8 @@ class FindingJournal:
             _unclassify(known)
         if known.get("outcome") == fin.FIXED or _skip_is_void(known, named, mvv):
             self._revive(known, new, _text(item.get("section")), round_no)
+            if "impact" in new:
+                known["impact"] = new["impact"]
         _protect(known, new.get(PROTECT))
         if "raised_severity" in known:
             raised = criteria_decide.severity_of(known["raised_severity"])

@@ -219,6 +219,7 @@ def _launcher(seen: list, verdicts: Optional[list], state: Any = agents.AgentSta
     def launch(spec: agents.Launch) -> agents.AgentStatus:
         seen.append(spec)
         body: dict = {"result": "読んだ" if verdicts is None else json.dumps({"verdicts": verdicts}, ensure_ascii=False)}
+        body["permission_denials"] = []
         if denied is not None:
             body["permission_denials"] = [{"tool_name": "Read", "tool_input": {"file_path": str(denied)}}]
         spec.paths.out.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
@@ -292,6 +293,29 @@ def test_issue_4363_ask_does_not_answer_when_reading_the_mvv_copy_is_denied(tmp_
     denied = diff.parent / getattr(snap, source).name
     answers = verify.ask(_AskRun(tmp_path, snap), 1, [_row()], {"r1-1": [diff]}, _launcher([], [holding(_row())], denied=denied))
     assert answers.verdicts == {} and denied.name in answers.warnings[0]
+
+
+@pytest.mark.parametrize(
+    "outer",
+    [
+        "警告の行\n{inner}",
+        '{{"permission_denials": [], "nested": {inner}}}',
+        '{{"result": {quoted}}}',
+        '{{"result": {quoted}, "permission_denials": ["壊れた要素"]}}',
+    ],
+)
+def test_issue_4363_ask_does_not_take_a_negative_answer_from_an_unverified_output(tmp_path: Path, outer: str) -> None:
+    """外側の結果か拒否の一覧を確かめられない出力から読めた否定の回答は採らず、指摘の種類は残す。"""
+    inner = json.dumps({"verdicts": [_answer(tracks=["secret"])]}, ensure_ascii=False)
+
+    def launch(spec: agents.Launch) -> agents.AgentStatus:
+        spec.paths.out.write_text(outer.format(inner=inner, quoted=json.dumps(inner)), encoding="utf-8")
+        return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
+
+    answers = verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, launch)
+    verdict = answers.verdicts["r1-1"]
+    assert (verdict.holds, verdict.tracks) == (None, ("secret",))
+    assert any("確かめられない" in warning for warning in answers.warnings)
 
 
 def test_issue_4363_ask_does_not_take_a_negative_answer_when_reading_the_implementation_is_denied(tmp_path: Path) -> None:

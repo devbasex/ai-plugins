@@ -183,14 +183,15 @@ def read(found: Optional[Sequence[Mapping[str, Any]]], ids: Sequence[str]) -> An
     return Answers(verdicts, _warnings(ids, verdicts, repeated, unknown))
 
 
-def unlowering(answers: Answers) -> Answers:
-    """資料のほかのファイルの読み取りを拒否された起動の回答。拒否は指摘に対応づけられないので、成り立たないとした回答は
-    どれも判断できないにする（指摘の種類は残す）。起きると示せた回答は変えない。"""
+def unlowering(answers: Answers, why: str = "判定役がファイルの読み取りを拒否された") -> Answers:
+    """否定の回答を採れない起動（理由 `why`。資料のほかのファイルの読み取りの拒否か、確かめられない出力）の回答。どの指摘に
+    響くかを決められないので、成り立たないとした回答はどれも判断できないにする（指摘の種類は残す）。起きると示せた回答は
+    変えない。"""
     refused = [v.id for v in answers.verdicts.values() if v.holds is False]
     if not refused:
         return answers
     verdicts = {fid: v._replace(holds=None) if fid in refused else v for fid, v in answers.verdicts.items()}
-    warning = f"判定役がファイルの読み取りを拒否されたので、成り立たないとした回答を採らず下げない: {'・'.join(refused)}"
+    warning = f"{why}ので、成り立たないとした回答を採らず下げない: {'・'.join(refused)}"
     return answers._replace(verdicts=verdicts, warnings=(*answers.warnings, warning))
 
 
