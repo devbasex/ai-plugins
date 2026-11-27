@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import functools
 import getpass
-import hashlib
 import json
 import os
 import re
@@ -160,25 +159,14 @@ def experiments_sha(data: bytes) -> Optional[str]:
         raw = json.loads(data)
     except ValueError:  # noqa: NDF401 利用者の入力: 読めない候補は、示した内容と一致しないとして拒む
         return None
-    return (
-        launch_records.canonical_sha(raw["experiments"] if isinstance(raw, dict) and "experiments" in raw else {})
-        if isinstance(raw, dict)
-        else None
-    )
+    return launch_records.canonical_sha(raw["experiments"] if isinstance(raw, dict) and "experiments" in raw else {}) if isinstance(raw, dict) else None
 
 
-def asked_same_candidate(asked: Optional[Mapping[str, Any]], data: bytes) -> bool:
-    """質問で示した候補と、反映する候補のバイト列 `data` が一致するか。リクエストの行 `asked` が無ければ一致しない。
-
-    `experiments_sha`（質問で示した `experiments` のハッシュ）を残した行はそれと照らす。旧版で作った質問の行には `experiments_sha` が
-    無いので、旧版でも残る `candidate_version`（質問を作ったときの候補のファイル全体の SHA-256）と照らす。全体が一致すれば
-    `experiments` も示した内容のままなので、版上げをまたいでも既存の回答で続けられる（PR 4683 の r15-3）。
-    """
-    if asked is None:
-        return False
-    if "experiments_sha" in asked:
-        return asked["experiments_sha"] == experiments_sha(data)
-    return asked.get("candidate_version") == hashlib.sha256(data).hexdigest()
+def asked_experiments(request_id: str) -> Optional[str]:
+    """リクエストの質問を作ったときに示した `experiments` のハッシュ（質問の記録の最後の行）。無ければ None。"""
+    key = la.CONTINUATION[1]  # リクエストの識別子の欄
+    found = [r for r in la.records.whole_rows(la.state_file(la.QUESTIONS)) if key in r and r[key] == request_id]
+    return found[-1]["experiments_sha"] if found and "experiments_sha" in found[-1] else None
 
 
 def _has_secret(value: Any) -> bool:
@@ -398,26 +386,22 @@ def _checked_target(root: Path, cand: Path) -> tuple[ls.Target, bytes]:
             raise internal.InternalError(exc.kind, str(exc).replace(str(copy), str(cand))) from None
 
 
-def _before_approve(a: argparse.Namespace, cand: Optional[Path]) -> tuple[Optional[dict[str, Any]], Optional[Mapping[str, Any]]]:
-    """承認の対象を読む前に決まる結果（AI の中・候補が無い打ち直し・「承認しない」の回答）と、リクエストの行。
-
-    続けてよければ結果は None。リクエストの行は、回答を読んだのと同じ 1 回の読み取りで得て、候補の照合に渡す（r15-4）。
-    """
+def _before_approve(a: argparse.Namespace, cand: Optional[Path]) -> Optional[dict[str, Any]]:
+    """承認の対象を読む前に決まる結果（AI の中・候補が無い打ち直し・「承認しない」の回答）。続けてよければ None。"""
     if _in_ai_child():
-        return _refused_config("NDF が起動した AI の中では承認できない。利用者が端末で打つ"), None
+        return _refused_config("NDF が起動した AI の中では承認できない。利用者が端末で打つ")
     if cand is not None and not cand.exists():
         if la.reflected(cand, a.sha256, a.request):
-            return result.result(TOOL, result.OK, "反映は済んでいる", metrics={"sha256": a.sha256}), None
-        return _refused_config("候補が無く、反映も確かめられない（反映の後に設定が変わったか、候補が別の内容）。draft からやり直す"), None
-    answer, asked = la.answered_request(a.request) if a.request is not None else (None, None)
-    if answer == "deny":
-        return _refused_config("このリクエストには「承認しない」と回答している。記録も反映もしない"), None
-    return None, asked
+            return result.result(TOOL, result.OK, "反映は済んでいる", metrics={"sha256": a.sha256})
+        return _refused_config("候補が無く、反映も確かめられない（反映の後に設定が変わったか、候補が別の内容）。draft からやり直す")
+    if a.request is not None and la.request_answer(a.request)[0] == "deny":
+        return _refused_config("このリクエストには「承認しない」と回答している。記録も反映もしない")
+    return None
 
 
 def _approve(a: argparse.Namespace) -> dict[str, Any]:
     cand = _candidate_path(a.candidate)
-    early, asked = _before_approve(a, cand)
+    early = _before_approve(a, cand)
     if early is not None:
         return early
     root = _worktree_root()
@@ -428,10 +412,8 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
         return _refused_config(str(exc))
     if t.sha256 != a.sha256:
         return _refused_config(f"示した内容（{a.sha256[:12]}…）と今の内容が違う。show で示し直して承認を取り直す")
-    if a.request is not None and cand is not None and not asked_same_candidate(asked, data):
-        return _refused_config(
-            "質問で示したモデルと effort の選択肢（experiments）と、反映する候補の内容が違う。show で示し直して承認を取り直す"
-        )
+    if a.request is not None and cand is not None and asked_experiments(a.request) != experiments_sha(data):
+        return _refused_config("質問で示したモデルと effort の選択肢（experiments）と、反映する候補の内容が違う。show で示し直して承認を取り直す")
     needed = _widens(t) and not la.is_approved(repo, t.sha256)
     # 承認の行を足す条件（起動の許可）と、反映を許す条件（今回の書き換えへの同意）は別に判定する。書き換えは毎回人に確かめる
     asks = needed or cand is not None
