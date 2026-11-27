@@ -577,9 +577,10 @@ experimental/ndf/
   - 通す経路: `Publisher.comment`（確認用 PR）、別の番号へのコメント、`Publisher` の課題の作成、`PATCH` による本文の書き換え、ラベルの付け替え（`POST .../labels`）、`mutation` を含む GraphQL、`artifact_zip` と同じく `api.request` を直接呼ぶ `GET`、`branch_file` の GraphQL の `query`
   - 合格: 作り物まで届いたのが `GET` と `query` の 2 件だけで、コメントの投稿は捕まり、ほかの書き込みはすべて `Refused` で拒まれた。合格しなければ終了コード 1 で、`gate` を打たない
 - `material_of`
-  - 表で止まる件: 材料を組むときに、差分の設計成果物を head の SHA で読み、読み込んだ `ndf` の `mvv_gate._table_numbers` と同じ読み方で番号を求めて `Material.tabled` に入れる。番号があれば、その件は判定が `follow` で `boundary` が空でも、変更後のゲートでは省かれない（設計文書の決定 6 の順 4）。指示文に依らないので、材料と一緒に 1 回だけ求める
+  - 表の確かめ: `material_of` は PR ごとに差分の設計成果物の（head の SHA, パス）の組を集めるだけで、本文を読まない。サブコマンド `material` が、対象のすべての PR の組をまとめて、設計文書の決定 6 の順 4 の「本文の読み取り」のとおりに読む（`github.graphql-batch` 件ずつの `aliased`、組ごとの「取得済み」「本文が無い」「未取得」の保存、未取得の組だけの 1 回の打ち直し）。組の結果がそろってから、PR ごとに `design_check_decide.redline_rows` を当て、`material_of` が返した `Material` の `tabled` を `_replace` で埋めてから保存する。指示文に依らないので、材料と一緒に 1 回だけ求める
+  - `Material.tabled` の値: 「番号あり」は番号の空でないタプル、「番号なし」は空のタプル、「未確認」は None（組が 1 つでも「本文が無い」か「未取得」）。番号なしと未確認を同じ値にしない
 - `main`
-  - 集計: `follow` で `boundary` が空の件のうち、`Material.tabled` が空でない件を「表で止まる件」として、両方の指示文の側の確認後の件数から引く
+  - 集計: 側ごとに、その側の判定が `follow` で `boundary` が空の PR を、設計文書の決定 6 の順 4 の「その側での扱い」の表に当てる。`Material.tabled` が空でないタプルなら省けない（表で止まる件）、None なら未確認、空のタプルなら本文の確認の結果で決める。確認後の件数は「省ける」の PR だけを数え、未確認の件数を併記する。片方の側の結果を、もう片方の側の件数から引かない。未確認の PR が残るときの合否は、決定 6 の「未確認の PR があるときの合否」の両端の決め方による
   - 副作用: `--plugin-root` があれば、`<置き場>/src` を `sys.path` の先頭へ足してから `ndf` を読み込む。無ければこのリポジトリの `plugins/ndf/src` を足す
 
 ### 異常系の処理
@@ -603,7 +604,7 @@ experimental/ndf/
 | 比べる PR の番号と、対照で挙がるべき番号 | 引数（`--prs`・`--expect`） | 実験版へ渡す。値は設計文書の決定 4・6 | — |
 | モデル | 引数（`--model`） | 実験版へ渡す | — |
 | 作り物の材料の対 | ファイル | `experimental/ndf/mvv_replay_cases/` | 対は 1 つ。「扱いあり」と「扱いなし」の 2 つの材料で、それぞれ要求仕様と設計書の 2 ファイル（設計書は同じ） |
-| `Material` | 型（NamedTuple: `base_sha: str`・`head_sha: str`・`text: str`・`sha256: str`・`tabled: tuple[str, ...]`） | `mvv_replay.py` | — |
+| `Material` | 型（NamedTuple: `base_sha: str`・`head_sha: str`・`text: str`・`sha256: str`・`tabled: Optional[tuple[str, ...]]`。None は表を確かめられなかった） | `mvv_replay.py` | — |
 
 ### 既存の部品の再利用
 
