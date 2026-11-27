@@ -58,6 +58,8 @@ PULLS_PER_HEAD = 5
 TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
 # GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く。#3506）
 BOT_SUFFIX = "[bot]"
+
+
 # マージ先の設定の読み取りに、token の利用者の login とアカウント ID（`viewer`）も同じ 1 回の要求で載せる（承認の証跡の書き手を照らす。#4409）
 def _branch_file_query(body: str = "") -> str:
     """マージ先の設定を読む問い合わせ文。`body` は `repository` の下へ並べて載せる選択（空なら載せない）。"""
