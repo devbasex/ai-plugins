@@ -52,10 +52,11 @@ def _asked(target: Path, request_id: str = "q1", candidate: Path | None = None, 
         _answer(request_id, label)
 
 
-def _reflect(candidate: Path, record, sha256: str, request_id: str | None = None) -> la.Reflection:
-    """CLI と同じく、候補の今の中身と、候補の記録の反映先を照らしたものとして渡す。"""
+def _reflect(candidate: Path, record, sha256: str, request_id: str | None = None, kept: list[Path] | None = None) -> la.Reflection:
+    """CLI と同じく、候補の今の中身と、候補の記録の反映先を照らしたものとして渡す。別の名前で残した保存は `kept` に入る。"""
     expected = Path(la.candidate_destination(candidate))
-    return la.reflect(candidate, record, sha256, request_id, data=candidate.read_bytes(), expected=expected)
+    kept = [] if kept is None else kept
+    return la.reflect(candidate, record, (sha256, request_id), data=candidate.read_bytes(), expected=expected, kept=kept)
 
 
 def _approvals() -> list[dict]:
@@ -536,8 +537,9 @@ def test_a_target_changed_after_the_draft_is_not_overwritten(tmp_path):
     target = _worktree(tmp_path)
     candidate = _candidate(target)
     target.write_bytes(b'{"version": 1, "mine": true}\n')
-    result = _reflect(candidate, lambda: pytest.fail("記録しない"), SHA)
-    assert not result and result.saved is None
+    kept: list[Path] = []
+    result = _reflect(candidate, lambda: pytest.fail("記録しない"), SHA, kept=kept)
+    assert not result and kept == []
     assert target.read_bytes() == b'{"version": 1, "mine": true}\n' and candidate.exists()
 
 
@@ -558,19 +560,22 @@ def test_a_save_between_the_check_and_the_rename_is_kept(tmp_path, monkeypatch):
     assert not target.with_name("launch.json.reflecting").exists()
 
 
-def test_a_save_into_the_aside_after_placing_is_restored(tmp_path, monkeypatch):
-    """候補を置いた後、退避の側へエディタが書けば、その中身を反映先へ戻して止まる。"""
+def test_a_save_into_the_aside_after_placing_is_kept_under_another_name(tmp_path, monkeypatch):
+    """候補を置いた後、退避の側へエディタが書けば、候補を置いたまま完了とし、退避を別の名前で残してパスを返す。"""
     target = _worktree(tmp_path)
     candidate = _candidate(target)
+    placed = candidate.read_bytes()
     link = os.link
 
     def editor_writes(src, dst):
         link(src, dst)
-        Path(str(dst) + la.REFLECTING).write_bytes(b'{"version": 1, "editor": 1}\n')
+        if Path(dst) == target:
+            Path(str(dst) + la.REFLECTING).write_bytes(b'{"version": 1, "editor": 1}\n')
 
     monkeypatch.setattr(la.os, "link", editor_writes)
-    assert not _reflect(candidate, lambda: None, SHA)
-    assert target.read_bytes() == b'{"version": 1, "editor": 1}\n'
+    kept: list[Path] = []
+    assert _reflect(candidate, lambda: None, SHA, kept=kept)
+    assert target.read_bytes() == placed and [p.read_bytes() for p in kept] == [b'{"version": 1, "editor": 1}\n']
 
 
 def _interrupted(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -609,16 +614,16 @@ def test_after_an_interruption_without_an_aside_the_pending_record_completes(tmp
     """退避を消した直後か、反映先が無い状態から置いた直後の中断でも、途中の記録から完了の記録を書く。"""
     target, candidate, aside = _interrupted(tmp_path)
     aside.unlink()
-    assert la.finished(candidate, target, SHA, None, candidate.read_bytes())
+    assert la.finished(candidate, target, SHA, None, candidate.read_bytes(), [])
     assert _done(target)["approver"] == "山田" and not la.reflected_file(target, la.PENDING).exists()
 
 
 def test_finished_is_false_for_another_operation_or_a_changed_target(tmp_path):
     target, candidate, _ = _interrupted(tmp_path)
-    assert not la.finished(candidate, target, SHA, "q-other", candidate.read_bytes())  # 別のリクエストの操作
+    assert not la.finished(candidate, target, SHA, "q-other", candidate.read_bytes(), [])  # 別のリクエストの操作
     assert la.reflected_file(target, la.PENDING).exists()  # 別の操作の途中の記録は片付けない
     target.write_bytes(b'{"version": 1, "a": 1}\n')
-    assert not la.finished(candidate, target, SHA, None, candidate.read_bytes())
+    assert not la.finished(candidate, target, SHA, None, candidate.read_bytes(), [])
 
 
 def test_a_hand_saved_copy_of_the_candidate_still_asks_for_consent(tmp_path):
@@ -630,11 +635,16 @@ def test_a_hand_saved_copy_of_the_candidate_still_asks_for_consent(tmp_path):
     assert _reflect(candidate, lambda: calls.append(1), SHA) and calls == [1]
 
 
-def test_after_an_interruption_a_save_into_the_aside_is_put_back(tmp_path):
+def test_after_an_interruption_a_save_into_the_aside_is_kept_under_another_name(tmp_path):
+    """置いた直後の中断で退避に利用者の保存があれば、反映先の候補を消さず、退避を別の名前で残す。完了の記録は人の同意の後に書く。"""
     target, candidate, aside = _interrupted(tmp_path)
     aside.write_bytes(b'{"version": 1, "saved": 1}\n')
-    assert not _reflect(candidate, lambda: None, SHA)
-    assert target.read_bytes() == b'{"version": 1, "saved": 1}\n' and not aside.exists()
+    placed = target.read_bytes()
+    calls: list[int] = []
+    kept: list[Path] = []
+    assert _reflect(candidate, lambda: calls.append(1), SHA, kept=kept) and calls == [1]
+    assert target.read_bytes() == placed
+    assert [p.read_bytes() for p in kept] == [b'{"version": 1, "saved": 1}\n'] and not aside.exists()
 
 
 def test_recover_keeps_both_when_target_and_aside_hold_the_users_contents(tmp_path):
@@ -646,21 +656,19 @@ def test_recover_keeps_both_when_target_and_aside_hold_the_users_contents(tmp_pa
     assert saved.name.startswith("launch.json.saved-") and not aside.exists()
 
 
-@pytest.mark.parametrize("placed", ["candidate", "users_save", "missing"])
-def test_putting_the_aside_back_never_overwrites_a_save_made_after_the_check(tmp_path, placed):
-    """退避を反映先へ戻すとき、照らした後に利用者が反映先へ保存していれば上書きせず、退避を別の名前で残す（Value 6）。"""
-    target, candidate, aside = _interrupted(tmp_path)
+@pytest.mark.parametrize("taken", [False, True])
+def test_putting_the_aside_back_never_overwrites_an_existing_file(tmp_path, monkeypatch, taken):
+    """退避を戻すときも別の名前で残すときも、既にあるファイル（照らした後の保存・前に残した保存）を上書きしない（Value 6）。"""
+    target, _, aside = _interrupted(tmp_path)
     aside.write_bytes(b'{"version": 1, "b": 1}\n')
-    if placed == "users_save":
-        target.write_bytes(b'{"version": 1, "a": 1}\n')
-    elif placed == "missing":
-        target.unlink()
-    saved = la._restore_over_placed(aside, target, la.content_version(candidate))
-    if placed == "users_save":
-        assert target.read_bytes() == b'{"version": 1, "a": 1}\n' and saved.read_bytes() == b'{"version": 1, "b": 1}\n'
-    else:
-        assert target.read_bytes() == b'{"version": 1, "b": 1}\n' and saved is None
-    assert not aside.exists() and not list(target.parent.glob(".launch.json.*"))
+    target.write_bytes(b'{"version": 1, "a": 1}\n')
+    earlier = target.with_name("launch.json.saved-00000000")
+    earlier.write_bytes(b'{"version": 1, "old": 1}\n')
+    values = iter(["0" * 32, "1" * 32] if taken else ["1" * 32])
+    monkeypatch.setattr(la.uuid, "uuid4", lambda: la.uuid.UUID(next(values)))
+    saved = la._link_back(aside, target)
+    assert target.read_bytes() == b'{"version": 1, "a": 1}\n' and earlier.read_bytes() == b'{"version": 1, "old": 1}\n'
+    assert saved.name == "launch.json.saved-11111111" and saved.read_bytes() == b'{"version": 1, "b": 1}\n' and not aside.exists()
 
 
 @pytest.mark.parametrize("left", ["aside", "pending"])
@@ -679,8 +687,9 @@ def test_reflect_tells_where_the_users_save_in_the_aside_was_kept(tmp_path):
     target, candidate, aside = _interrupted(tmp_path)
     target.write_bytes(b'{"version": 1, "a": 1}\n')
     aside.write_bytes(b'{"version": 1, "b": 1}\n')
-    result = _reflect(candidate, lambda: pytest.fail("記録しない"), SHA)
-    assert not result and result.saved.read_bytes() == b'{"version": 1, "b": 1}\n'
+    kept: list[Path] = []
+    result = _reflect(candidate, lambda: pytest.fail("記録しない"), SHA, kept=kept)
+    assert not result and [p.read_bytes() for p in kept] == [b'{"version": 1, "b": 1}\n']
 
 
 @pytest.mark.parametrize("locked", [True, False])

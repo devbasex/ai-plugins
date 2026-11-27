@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import hashlib
 import json
@@ -608,14 +609,13 @@ def new_candidate(repo: str, target: Path) -> Draft:
 
 @dataclass(frozen=True)
 class Reflection:
-    """`reflect` の結果。`placed` は置いたか反映済みか。`saved` は、利用者の保存を別の名前で残したパス（残さなければ None）。
+    """`reflect` と `finished` の結果。`placed` は置いたか反映済みか。真偽は `placed` と同じ。
 
-    真偽は `placed` と同じ。偽（拒否）でも `saved` があれば、呼び手は拒否の文にそのパスを載せる。`refusal` は、反映先か候補の中身が
-    呼び手の照らしたものと違って拒んだときの理由（そのときは反映先を見ずに拒むので `saved` は無い）。
+    `refusal` は、反映先か候補の中身が呼び手の照らしたものと違って拒んだときの理由。利用者の保存を別の名前で残したパスは、
+    結果でなく呼び手が渡す `kept` に足す（拒否・成功・例外のどれで終わっても、呼び手がすべてのパスを結果の文に載せるため）。
     """
 
     placed: bool
-    saved: Optional[Path] = None
     refusal: Optional[str] = None
 
     def __bool__(self) -> bool:
@@ -625,11 +625,11 @@ class Reflection:
 def reflect(
     candidate: Path,
     record: Callable[[], Optional[Mapping[str, Any]]],
-    sha256: str,
-    request_id: Optional[str] = None,
+    approval: tuple[str, Optional[str]],
     *,
     data: bytes,
     expected: Path,
+    kept: list[Path],
 ) -> Reflection:
     """承認の記録の錠の中で候補の中身 `data` を反映先へ置く。置いたか反映済みなら真、反映先が変わっていたか途中で保存を見つけたら偽の結果を返す。
 
@@ -642,10 +642,12 @@ def reflect(
     `record` は承認済みなら何も書かない形にする。反映先が反映元のバージョンと同じときだけ `record` を呼んで置き換える。`record` が返した欄（書き換えに同意した人 `approver` と確認の経路 `route`）は、
     承認の行を書いたかにかかわらず、反映の途中の記録と完了の記録に入れる（だれがどの経路で書き換えを認めたかを残す）。
     書けなければ片付けてから `precondition` で止める（承認の行は残る）。片付けで利用者の保存を別の名前で残したら、そのパスを
-    結果の `saved` か、止める文に載せる。
+    `kept` に足す（`record` が例外で止めた場合も足した後なので、呼び手が止める文に載せられる）。
+    `approval` は、承認の対象のハッシュとリクエスト（端末の経路は None）の組で、この操作を見分ける。
     """
     from ndf.contracts import internal
 
+    sha256, request_id = approval
     wanted = hashlib.sha256(data).hexdigest()
     with records_lock(state_file(APPROVALS)):
         source = _source_record(candidate)
@@ -657,7 +659,7 @@ def reflect(
         if content_version(candidate) != wanted:
             return Reflection(False, refusal="ハッシュを照らした後に候補が変わった。show で示し直して承認を取り直す")
         target = expected
-        saved = recover(target)
+        _recover_into(target, kept)
         now = content_version(target)
         rec = {
             "candidate": candidate.parent.name,
@@ -670,26 +672,35 @@ def reflect(
             done = _done_for(candidate, target, sha256, request_id, wanted)
             if done is not None:  # 中断の前に置いた同じ操作の完了。同意した人と経路は記録のまま残す
                 _tidy_after_reflect(target, candidate, done)
-                return Reflection(True, saved)
+                return Reflection(True)
             rec.update(record() or {})
             _after_reflect(target, candidate, rec)
-            return Reflection(True, saved)
+            return Reflection(True)
         if now != source.get("base"):
-            return Reflection(False, saved)
+            return Reflection(False)
         rec.update(record() or {})
         launch_candidates.write_launch_record(reflected_file(target, PENDING), rec)
         try:
             placed = _replace(target, data, rec["base"])
         except OSError as exc:
-            saved = recover(target) or saved
-            kept = f"。利用者の保存を {saved} に残した" if saved is not None else ""
+            _recover_into(target, kept)
             raise internal.InternalError(
-                "precondition", f"{target} へ反映できない（{type(exc).__name__}）{kept}。同じコマンドを打ち直す"
+                "precondition", f"{target} へ反映できない（{type(exc).__name__}）。同じコマンドを打ち直す"
             ) from None
         if not placed:
-            return Reflection(False, recover(target) or saved)
+            _recover_into(target, kept)
+            if content_version(target) != wanted:
+                return Reflection(False)
+            # 置いた後に退避へ保存が入った。同意はこの実行で確かめたので、候補を置いたまま完了とし、保存は別の名前で残す
         _after_reflect(target, candidate, rec)
-        return Reflection(True, saved)
+        return Reflection(True)
+
+
+def _recover_into(target: Path, kept: list[Path]) -> None:
+    """`recover` を呼び、利用者の保存を別の名前で残したらそのパスを `kept` に足す。"""
+    saved = recover(target)
+    if saved is not None:
+        kept.append(saved)
 
 
 def _replace(target: Path, data: bytes, base: Optional[str]) -> bool:
@@ -734,27 +745,26 @@ def _done_for(candidate: Path, target: Path, sha256: str, request_id: Optional[s
     return rec if content_version(target) == content else None
 
 
-def finished(candidate: Path, target: Path, sha256: str, request_id: Optional[str], data: bytes) -> Reflection:
+def finished(candidate: Path, target: Path, sha256: str, request_id: Optional[str], data: bytes, kept: list[Path]) -> Reflection:
     """端末で人の確認を求める前に、この操作の反映が中断の前に済んでいるかを確かめる。済んでいれば候補を片付けて真の結果を返す。
 
     承認の記録の錠の中で、反映先が候補の中身 `data` と同じで、反映の途中の記録がこの操作のものなら `recover` で完了の記録を確定する。
     反映先が別の中身なら何も片付けない（利用者の保存を残した場所は、続く `reflect` の `recover` が結果に載せる）。
     完了の記録がこの操作のものなら真を返す。端末で名前とハッシュを入れ直させず、同じ反映先の新しいリクエストで拒みもしない。
     利用者のエディタは錠を取らないので、最初に照らした後に反映先と退避の両方へ保存が入ると、`recover` が退避を別の名前で残す。
-    そのパスは続く `reflect` では見つからないため、結果の `saved` に載せて呼び手へ返す（真偽にかかわらず）。
+    そのパスは続く `reflect` では見つからないため、`kept` に足して呼び手へ返す（真偽にかかわらず）。
     """
     content = hashlib.sha256(data).hexdigest()
     with records_lock(state_file(APPROVALS)):
         if content_version(target) != content:
             return Reflection(False)
-        saved = None
         if _same_operation(read_launch_record(reflected_file(target, PENDING)), candidate, sha256, request_id, content):
-            saved = recover(target)
+            _recover_into(target, kept)
         done = _done_for(candidate, target, sha256, request_id, content)
         if done is None:
-            return Reflection(False, saved)
+            return Reflection(False)
         _tidy_after_reflect(target, candidate, done)
-        return Reflection(True, saved)
+        return Reflection(True)
 
 
 def _write_done(target: Path, rec: Mapping[str, Any]) -> None:
@@ -804,8 +814,10 @@ def recover(target: Path) -> Optional[Path]:
     利用者の保存を別の名前（`launch.json.saved-<値>`）で残したらそのパスを返す。退避が無く（反映先が無い状態から置いた・退避を
     消した直後の中断）、反映先が途中の記録の中身と同じなら、反映は済んでいるので、途中の記録（同意した人と確認の経路を含む）から
     完了の記録を書く。途中の記録は人の同意を確かめた後にだけ書くので、記録の承認者をそのまま引き継げる。
-    利用者のエディタは錠を取らないので、照らした後に反映先へ保存が入ることがある。退避を反映先へ戻すときは反映先を上書きせず、
-    消すのは NDF が置いた候補の中身だけにする（利用者の保存は反映先か別の名前に残す）。
+    利用者のエディタは錠を取らないので、照らした後に反映先へ保存が入ることがある。退避を反映先へ戻すときは反映先を上書きしない。
+    反映先が候補で退避に利用者の保存があるときは、承認した候補を反映先に残し、退避を別の名前で残す（反映先を消すと、照らした後の
+    保存を消しうるため。反映先を一時の名前へ移す段階も作らないので、そこで中断しても失うものが無い）。完了の記録は書かず、次の
+    `reflect` が人の同意を確かめてから書く。
     """
     pending_path = reflected_file(target, PENDING)
     rec = read_launch_record(pending_path)
@@ -820,7 +832,7 @@ def recover(target: Path) -> Optional[Path]:
                 aside.unlink()
                 _write_done(target, rec)
             else:
-                saved = _restore_over_placed(aside, target, rec.get("content"))
+                saved = _keep_as_saved(aside, target)
         elif kept == rec.get("base"):
             aside.unlink()
         else:
@@ -832,10 +844,16 @@ def recover(target: Path) -> Optional[Path]:
 
 
 def _keep_as_saved(path: Path, target: Path) -> Path:
-    """利用者の保存 `path` を `launch.json.saved-<値>` へ名前を変えて残し、そのパスを返す。"""
-    saved = target.with_name(f"{target.name}.saved-{uuid.uuid4().hex[:8]}")
-    os.rename(path, saved)
-    return saved
+    """利用者の保存 `path` を `launch.json.saved-<値>` へ名前を変えて残し、そのパスを返す。
+
+    同じ名前の保存が既にあれば上書きしないよう、名前が空いているときだけ成功する `os.link` で置き、重なれば別の値で取り直す。
+    """
+    while True:
+        saved = target.with_name(f"{target.name}.saved-{uuid.uuid4().hex[:8]}")
+        with contextlib.suppress(FileExistsError):  # noqa: NDF402 ファイル: 前に残した保存と名前が重なれば、別の値で取り直す
+            os.link(path, saved)
+            path.unlink()
+            return saved
 
 
 def _link_back(path: Path, target: Path) -> Optional[Path]:
@@ -846,24 +864,6 @@ def _link_back(path: Path, target: Path) -> Optional[Path]:
         return _keep_as_saved(path, target)
     path.unlink()
     return None
-
-
-def _restore_over_placed(aside: Path, target: Path, placed: Optional[str]) -> Optional[Path]:
-    """反映先に NDF が置いた候補（中身 `placed`）があり、退避の側に利用者の保存があるとき、退避を反映先へ戻す。
-
-    反映先を一時の名前へ移してから中身を照らし、置いた候補のままなら消して退避を戻す。照らした後に利用者が反映先へ保存して
-    いれば、その保存を反映先へ戻し、退避を別の名前で残してそのパスを返す（どちらの保存も消さない）。
-    """
-    moving = target.with_name(f".{target.name}.{uuid.uuid4().hex}")
-    try:
-        os.rename(target, moving)
-    except FileNotFoundError:  # 照らした後に利用者が反映先を消した。退避を戻すだけにする
-        return _link_back(aside, target)
-    if content_version(moving) == placed:
-        moving.unlink()  # NDF が置いた候補だけを消す
-        return _link_back(aside, target)
-    _link_back(moving, target)  # 戻せなければ別の名前で残る
-    return _keep_as_saved(aside, target)
 
 
 def reflected_candidate(candidate: Path, target: Path) -> bool:
