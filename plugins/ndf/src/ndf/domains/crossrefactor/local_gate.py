@@ -549,6 +549,8 @@ def run_local_gate(
 ) -> dict[str, Any]:
     """取得と載せ直し → テスト → push か直し、を周の上限まで回し、最終ゲートの記録を返す。止まれば `final_gate.GateStopped`。"""
     gate = _Gate(g, cfg, state, save, ex)
+    # 保留中の直しを検査する前に未コミットの変更が無いことを確かめる（範囲外で戻すときに、中断後の作業を消さない）
+    worktree.refuse_dirty(g)
     _check_pending_fix(gate)
     remote = g.remote()
     tip: Optional[str] = None
@@ -674,9 +676,10 @@ def follow_pushed(g: git.Git, pushed: Path, remote: str, branch: str) -> str:
     すでにその SHA なら何もしない。SHA のコミットが手元にあれば取得せずに早送りし、無いときだけ PR のブランチを取得する。
     ファイルが無いか空、早送りできない（先へ進んでいる・無視したファイルを上書きする）なら `precondition`。
     """
-    sha = pushed.read_text(encoding="utf-8").strip() if pushed.is_file() else ""
-    if not sha:
-        raise final_gate.GateStopped("precondition", f"送った SHA のファイルが無いか空: {pushed}")
+    text = pushed.read_text(encoding="utf-8", errors="replace") if pushed.is_file() and not pushed.is_symlink() else ""
+    if not _SHA_LINE.fullmatch(text):
+        raise final_gate.GateStopped("precondition", f"送った SHA のファイルが無いか、中身が SHA 1 行でない: {pushed}")
+    sha = text.strip()
     if g.rev_parse("HEAD") == sha:
         return sha
     if g.attempt("cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:

@@ -128,6 +128,12 @@ def test_follow_stops_ahead_of_the_sha_or_without_the_file(clones):
     with pytest.raises(final_gate.GateStopped) as missing:
         _follow_to(caller, pushed)
     assert missing.value.kind == "precondition"
+    # SHA でない中身（ブランチ名など）は、git を起動する前に止める
+    pushed.write_text("b\n", encoding="utf-8")
+    before = _head(caller)
+    with pytest.raises(final_gate.GateStopped) as named:
+        _follow_to(caller, pushed)
+    assert named.value.kind == "precondition" and _head(caller) == before
     pushed.write_text(_head(caller) + "\n", encoding="utf-8")
     git_sandbox.sh(caller, "commit", "-q", "--allow-empty", "-m", "ahead")
     with pytest.raises(final_gate.GateStopped) as ahead:

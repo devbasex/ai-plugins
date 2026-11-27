@@ -123,8 +123,8 @@ def _resolve_first(path: str, tree: Mapping[str, str | None]) -> str | None:
             continue
         if target.startswith("/"):
             return None
-        base = normalize(posixpath.join(posixpath.dirname(prefix), target))
-        return None if base is None else "/".join([base, *parts[i:]])
+        # リンク先と残りの要素を合わせて正規化する（ルートを指すリンクの下のファイルも、ルートの中のパスになる）
+        return normalize(posixpath.join(posixpath.dirname(prefix), target, *parts[i:]))
     return None
 
 

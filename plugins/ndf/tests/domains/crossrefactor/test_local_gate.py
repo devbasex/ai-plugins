@@ -18,6 +18,7 @@ import git_sandbox
 import pytest
 
 from ndf.adapters import git
+from ndf.core.converge import worktree
 from ndf.domains.crossrefactor import final_gate, local_gate, workspace
 from ndf.testing import means
 
@@ -338,6 +339,19 @@ def test_a_restart_after_the_fixer_committed_checks_the_scope_of_the_fix(tmp_pat
     assert sh(w.work, "rev-parse", "HEAD") == bad
     assert "fixing" not in w.state
     assert fake.seen == [] and w.remote_tip() == w.tip
+
+
+def test_a_restart_with_uncommitted_work_keeps_it_before_checking_the_fix(tmp_path, monkeypatch):
+    w = make_world(tmp_path, monkeypatch)
+    bad = commit(w.work, {"src/a.py": "x = 2\n"})
+    commit(w.work, {"docs/x.md": "d\n"})
+    # 中断の後に、コミットしていない作業が積まれている
+    (w.work / "src/a.py").write_text("x = 5\n", encoding="utf-8")
+    w.state["fixing"] = {"before": bad, "tip": w.tip, "labels": ["#1 unit"]}
+    with pytest.raises(worktree.SyncRefused):
+        _run(w, FakeExec())
+    assert (w.work / "src/a.py").read_text(encoding="utf-8") == "x = 5\n"
+    assert "fixing" in w.state
 
 
 def test_a_command_pointing_into_the_work_tree_is_a_precondition(tmp_path, monkeypatch):
