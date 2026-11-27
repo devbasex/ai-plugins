@@ -150,7 +150,8 @@ def test_a_launched_child_without_json_hands_a_row_without_usage(recorder):
     timed = claude.ClaudeReply.failed("", "期限", failure=claude.Failure.TIMEOUT)._replace(launched=True, seconds=1.0)
     claude.LaunchLog({"name": "fix", "session_id": "s-1"}).report(timed)
     usage, row = recorder.rows[0]
-    assert usage is None and "model" not in row and row["session_cost_usd"] is None and row["session_id"] == "s-1"
+    # 値の無い欄は None で渡し、使用量ログへ書く record_cli が欄ごと落とす
+    assert usage is None and row["model"] is None and row["session_cost_usd"] is None and row["session_id"] == "s-1"
 
 
 def test_without_a_recorder_nothing_is_written(monkeypatch):
