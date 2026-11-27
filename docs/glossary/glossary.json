@@ -7738,7 +7738,7 @@
       "term": "テストを確かめる手段",
       "context": "ndf-ci-test",
       "meaning": "工程「リファクタリング」が変更の後のテストの合否を確かめる先。必須のチェックがある場合は、指定されたチェックの通過を CI で確認する。テストの合否まで分かるのは、そのチェックにテストが含まれる場合である。必須のチェックが無ければ、CI テストの設定（test.ci.only）が無効で、実行コマンドを持つテストの suite（kind が lint でないもの。省けば test）がある場合に手元で確かめる。どちらも使えなければ、既定の実行条件では理由を記録して工程を飛ばす",
-      "pending_source": "issues/issue-4566-requirements.md"
+      "source": "docs/specifications/cross-refactoring-local-test-gate.md"
     },
     {
       "term": "収集の確かめ",
