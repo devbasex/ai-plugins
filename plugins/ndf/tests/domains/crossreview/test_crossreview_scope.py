@@ -666,9 +666,13 @@ def test_conflict_resolved_back_to_the_previous_head_is_new(wt: Path) -> None:
     assert _new(wt, changes.Range(base, head), moved) == ("a.txt",)
 
 
-def test_new_in_pr_is_none_when_a_commit_is_not_local(wt: Path) -> None:
+def test_a_commit_that_is_not_local_gives_none_or_a_git_error(wt: Path) -> None:
+    """比べるコミットが無ければ、`new_in_pr` は None を返し（呼び手は全差分にする）、`since_diff` は例外を返す。"""
     head = _head(wt)
-    assert changes.new_in_pr(git.Git.offline(wt), changes.Range("0" * 40, head), changes.Range(head, head)) is None
+    previous, current = changes.Range("0" * 40, head), changes.Range(head, head)
+    assert changes.new_in_pr(git.Git.offline(wt), previous, current) is None
+    with pytest.raises(git.GitError):
+        changes.since_diff(git.Git.offline(wt), previous, current, ())
 
 
 def test_since_diff_is_limited_to_pr_files_and_appends_the_new_ones(wt: Path) -> None:
