@@ -427,3 +427,13 @@ def test_a_secret_shaped_value_in_experiments_is_refused_without_showing_it(repo
     got = json.loads(out.strip().splitlines()[-1])
     assert code != 0 and got["cause"]["kind"] == "refused" and fake not in out
     assert not la.state_file(la.QUESTIONS).exists()
+
+
+def test_a_candidate_removing_a_secret_shaped_value_shows_the_change_with_the_value_masked(repo, capsys):
+    """r7-3: 今の設定だけにある秘密の形の値は伏せて示し、候補がそれを消す変更は拒まない。"""
+    fake = "gh" + "p_" + "A" * 24  # 秘密の形の作り物の値
+    _settings(repo, {"version": 1, "experiments": {"stages": {"impl": {"arms": {"claude": [{}, {"model": fake}]}}}}})
+    got, question, _ = _ask(capsys, _draft(capsys, ARMS))
+    (changes,) = [i["changes"] for i in got["items"] if i["kind"] == "launch-experiments"]
+    assert changes == [{"path": "experiments/stages/impl/arms/claude", "before": lc.MASKED, "after": ARMS["experiments"]["stages"]["impl"]["arms"]["claude"]}]
+    assert fake not in json.dumps(got, ensure_ascii=False) and fake not in question["questions"][0]["question"]

@@ -48,6 +48,8 @@ WARNING = (
 CLEANUP_NOTE = "metrics.cleanup_targets の候補は消してよい。消す前に、その候補を開いているエディタでの編集を終えて閉じる"
 # 比べる 2 つの設定の片方に無いキーの値
 _ABSENT = object()
+# 確認の画面で、今の設定にある秘密の形の値とキーの代わりに示す文
+MASKED = "（秘密の形の値。表示しない）"
 
 
 class _NoConsent(Exception):
@@ -134,25 +136,29 @@ def experiment_changes(root: Path, cand: Optional[Path]) -> list[dict[str, Any]]
 
     `experiments` は承認のハッシュに入らないが、反映すると worker・Skill・判定の起動のモデルと effort が変わるので、確認の画面に
     示す（#2944 の r1-1）。要素は `{path, before, after}` で、書いていない側は欄を省く（同梱の値を使う）。今の設定を読めなければ
-    空の設定と比べる。候補が無ければ空。変わる値かキーに秘密の形（`holds_secret`）があれば、値を出さずに `_Refused` で拒む。
+    空の設定と比べる。候補が無ければ空。候補の `experiments` の値かキーに秘密の形（`holds_secret`）があれば、値を出さずに
+    `_Refused` で拒む（反映後に秘密が残る）。今の設定だけにある秘密の形の値とキーは伏せて示す。候補がその値を消す変更を、
+    同じ拒否で止めないためである（#2944 の r7-3）。
     """
     if cand is None:
         return []
+    after = ls.load(root, cand).experiments
+    if holds_secret(json.dumps(after, ensure_ascii=False)):
+        raise _Refused("候補の experiments に秘密の形の値がある（値は表示しない）。秘密を書かずに候補を直してから示し直す")
     try:
         before = ls.load(root).experiments
     except internal.InternalError:  # ファイル: 壊れた今の設定は候補が直す。変更は空の設定からの差として示す
         before = {}
-    changes = _changes(before, ls.load(root, cand).experiments, "experiments")
-    if holds_secret(json.dumps(changes, ensure_ascii=False)):
-        raise _Refused("候補か今の設定の experiments に秘密の形の値がある（値は表示しない）。秘密を書かずに候補を直してから示し直す")
-    return changes
+    changes = _changes(before, after, "experiments")
+    return [{**c, "before": MASKED} if "before" in c and holds_secret(json.dumps(c["before"], ensure_ascii=False)) else c for c in changes]
 
 
 def _changes(before: Any, after: Any, at: str) -> list[dict[str, Any]]:
     """2 つの値の違う葉。オブジェクトはキーごとに下り（片方に無いオブジェクトも下る）、配列（選択肢の並び）はまとめて比べる。"""
     if _descends(before) and _descends(after) and (before is not _ABSENT or after is not _ABSENT):
         keys = dict.fromkeys([*_keys(before), *_keys(after)])
-        return [c for k in keys for c in _changes(_value(before, k), _value(after, k), f"{at}/{k}")]
+        # 秘密の形のキーは今の設定にだけある（候補は呼び手が拒む）ので、場所の文では伏せる
+        return [c for k in keys for c in _changes(_value(before, k), _value(after, k), f"{at}/{MASKED if holds_secret(k) else k}")]
     if before == after:
         return []
     sides = {"before": before, "after": after}
