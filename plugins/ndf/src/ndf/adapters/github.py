@@ -768,8 +768,9 @@ class GitHub:
         node = self.repository(github_merge.PULL_ID_QUERY, {"number": int(number)})["pullRequest"]
         variables = {"id": text_of(node["id"]), "head": pull.head_sha, "method": github_merge.GRAPHQL_MERGE_METHODS[chosen]}
         data = self.graphql(github_merge.ADMIN_MERGE_MUTATION, variables)
-        merged = (data.get("mergePullRequest") or {}).get("pullRequest") or {}
-        commit = merged.get("mergeCommit")
+        payload = data.get("mergePullRequest")
+        merged = payload.get("pullRequest") if isinstance(payload, dict) else None
+        commit = merged.get("mergeCommit") if isinstance(merged, dict) else None
         return text_of(commit.get("oid")) if isinstance(commit, dict) else ""
 
     def _merge_with(

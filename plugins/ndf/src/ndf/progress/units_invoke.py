@@ -520,7 +520,8 @@ def _one_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> tuple[dict
             raise _unit_stop_of(got.report, "impl が止まった", _ci_note(ctx, got.report))
     report = merge_unit(ctx, branch, worktree, round_dir, ports)
     number = _pr_number(round_dir)
-    return _unit_item(unit, number, "merged"), github_pulls.MergedPull(int(number or 0), _merge_sha(report))
+    assert number is not None, "merge_unit は PR の番号が無ければマージせずに止まる"
+    return _unit_item(unit, number, "merged"), github_pulls.MergedPull(number, _merge_sha(report))
 
 
 def _merge_sha(report: Mapping[str, Any]) -> str:
@@ -805,7 +806,7 @@ def _tip_mismatch(g: Git, ctx: Context, tip: str, head: str) -> str:
         )
     return found + (
         "手元にだけあるコミットは、NDF からは送らず、履歴も付け替えない。利用者本人が差分を確かめ、要る変更は別のブランチに"
-        "コミットして、別の PR でレビューを経て取り込む。未コミットの変更は git status で確かめ、ブランチを作るだけでは残らないので"
+        "コミットして、別の PR でレビューを経てマージする。未コミットの変更は git status で確かめ、ブランチを作るだけでは残らないので"
         f" git stash などで別に保全する。そのうえで作業場所を {ctx.remote} の {ctx.branch} の HEAD に揃えて、ndf progress next を打ち直す"
     )
 
