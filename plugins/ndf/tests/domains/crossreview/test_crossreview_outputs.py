@@ -52,16 +52,20 @@ def test_pr_4638_r2_4_output_is_restored_when_the_record_cannot_be_written(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, made_empty: bool
 ) -> None:
     """PR 4638 の r2-4: 記録を残せなければ、出力を書く前の状態（無い・空）へ戻す（次の起動が記録の無い出力で止まらない）。"""
+    put = outputs.Claim._put
 
-    def broken(path, value):
-        raise OSError("書けない")
+    def broken(self, value):
+        if value.keys() & {outputs.STAGING_KEY, outputs.WRITING_KEY}:
+            raise OSError("書けない")
+        put(self, value)
 
     out = tmp_path / "h"
     if made_empty:
         out.touch()
-    monkeypatch.setattr(store, "write_object", broken)
+    monkeypatch.setattr(outputs.Claim, "_put", broken)
     with pytest.raises(OSError):
         outputs.write_output(out, HEAD)
+    monkeypatch.undo()
     assert (out.exists(), out.read_text(encoding="utf-8") if made_empty else "") == (made_empty, "")
     outputs.clear_stale(out)
 
@@ -92,15 +96,16 @@ def test_pr_4638_r3_5_parent_without_write_permission_is_refused(tmp_path: Path)
 
 
 def test_pr_4638_r1_4_record_is_written_before_the_output_is_published(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """PR 4638 の r1-4・r2-1・r2-7・r2-9: 無い出力は、記録を残してから出力の名前へ置き換える。置き換えの前に強制終了されて
-    記録と一時のファイルが残っても、次の起動は記録から一時のファイルを見つけて消し、記録も消して続く。"""
+    """PR 4638 の r1-4・r2-1・r2-7・r2-9・r3-5: 無い出力は、記録を残してから出力の名前へ置き換える。置き換えの前に強制終了
+    されて記録と一時のファイルが残っても、次の起動は記録から一時のファイルを見つけて消し、記録も消して続く。記録のための一時の
+    ファイルは作らないので、ディレクトリには何も残らない。"""
     out = tmp_path / "h"
     record = outputs.owner_record(out)
     replace = os.replace
     left: dict[str, str] = {}
 
     def watching(src, dst):
-        if Path(dst) != out:  # 記録を置く置き換え（`store.write_object`）はそのまま通す
+        if Path(dst) != out:  # 出力の名前への置き換えだけを止める
             return replace(src, dst)
         # 強制終了された時点の記録と一時のファイルを残しておく（hard link は inode を保つ）
         left.update(record=record.read_text(encoding="utf-8"), tmp=str(src))
@@ -141,7 +146,7 @@ def test_pr_4638_r2_5_record_not_written_by_ndf_is_kept(tmp_path: Path, output: 
         out.write_text("" if output == "empty" else HEAD, encoding="utf-8")
     record = outputs.owner_record(out)
     record.write_text('{"note": "利用者のファイル"}', encoding="utf-8")
-    with pytest.raises(OSError):
+    with pytest.raises((OSError, outputs.Unowned)):
         outputs.clear_stale(out)
     assert record.read_text(encoding="utf-8") == '{"note": "利用者のファイル"}'
 
@@ -166,3 +171,15 @@ def test_pr_4638_r1_5_write_only_empty_output_is_refused(tmp_path: Path) -> None
     out.chmod(0o200)
     with pytest.raises(OSError):
         outputs.clear_stale(out)
+
+
+def test_pr_4638_r3_4_output_in_use_by_a_running_review_is_not_cleared(tmp_path: Path) -> None:
+    """PR 4638 の r3-4: 同じ出力先を実行中の起動が使っていれば、後の起動は片付けずに `Busy` で止まり、先の起動は書き終える。"""
+    out = tmp_path / "h"
+    with outputs.claim(out) as running:
+        with pytest.raises(outputs.Busy):
+            outputs.clear_stale(out)
+        running.write(HEAD)
+    assert out.read_text(encoding="utf-8") == HEAD
+    outputs.clear_stale(out)
+    assert not out.exists()
