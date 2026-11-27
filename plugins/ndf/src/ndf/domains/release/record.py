@@ -552,7 +552,7 @@ def read_release(hub: GitHub, number: int, select: Selection, bodies: bool, issu
     pairs = None
     if bodies or issues is not None:
         numbers = list(issues) if issues is not None else _issues_of(hub, views)
-        checks = [v for v in got.verifications if v.get("version") == rep.version and v.get("unit") == rep.unit]
+        checks = record_decide.verifications_of(got.verifications, rep.version, rep.unit)
         pairs = record_decide.to_test(_released_targets(got.releases, rep, targets), numbers, checks)
     return _records_outputs(
         select,

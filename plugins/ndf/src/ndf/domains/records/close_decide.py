@@ -80,7 +80,7 @@ def verdict(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], enf
 
 def _last_check(view: Mapping[str, Any], rep: Mapping[str, Any]) -> Optional[list[Mapping[str, Any]]]:
     """代表と `version`・`unit` が同じテストの記録のうち、最後の 1 件の行（無ければ None）。"""
-    same = [v for v in view["verifications"] if (v.get("version"), v.get("unit")) == (rep.get("version"), rep.get("unit"))]
+    same = record_decide.verifications_of(view["verifications"], rep.get("version"), rep.get("unit"))
     return list(same[-1]["issues"]) if same else None
 
 
@@ -128,7 +128,7 @@ def records_verdict(issue: int, view: Mapping[str, Any], enforced: bool) -> Verd
     release = reflection._asdict()
     if not reflection.complete:
         return Verdict(KEEP, f"反映がそろっていない（まだの届け先: {', '.join(reflection.missing)}）", False, release)
-    checks = [v for v in view["verifications"] if (v.get("version"), v.get("unit")) == (rep.version, rep.unit)]
+    checks = record_decide.verifications_of(view["verifications"], rep.version, rep.unit)
     got = {t: record_decide.pair_verdict(checks, t, issue) for t in targets}
     failed = [t for t, v in got.items() if v == "failed"]
     if failed:

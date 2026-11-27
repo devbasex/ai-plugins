@@ -278,6 +278,11 @@ def verifications(bodies: Iterable[str]) -> list[dict[str, Any]]:
     return [p for p in (payload_of(b, VERIFICATION_MARK) for b in bodies) if p is not None]
 
 
+def verifications_of(verifications: Iterable[Mapping[str, Any]], version: Any, unit: Any) -> list[Mapping[str, Any]]:
+    """テストの記録のうち、`version`・`unit` が渡した値と同じもの（古い順を保つ）。"""
+    return [v for v in verifications if (v.get("version"), v.get("unit")) == (version, unit)]
+
+
 def value_pairs(found: Sequence[Record]) -> tuple[dict[str, str], list[Record]]:
     """値とコミットの組（値 → コミット）と、有効な記録（古い順）。`found` は信用する書き手の記録の古い順。
 
