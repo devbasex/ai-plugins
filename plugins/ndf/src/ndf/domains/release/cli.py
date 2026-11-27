@@ -28,7 +28,7 @@ import argparse
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ndf import cli
 from ndf.adapters import git as git_mod
@@ -65,14 +65,26 @@ from ndf.domains.release import version_store as store_mod
 TOOL = cli.tool_of(__name__)
 
 
+def _common_dir(args: argparse.Namespace) -> Optional[Path]:
+    """`--root` の共通の git ディレクトリ（git の外なら None）。解決できた値は `--root` ごとに `args` に置いて使い回し、
+    1 回の実行で設定・リモート名・リリース記録の共有の置き場を読むたびに git を起動し直さない。"""
+    root = Path(args.root)
+    cached = getattr(args, "_common_dir", None)
+    if cached is not None and cached[0] == root:
+        return cached[1]
+    try:
+        common = git_mod.Git(root).common_dir()
+    except git_mod.GitError:  # git の外はメインディレクトリが無いので None
+        return None
+    args._common_dir = (root, common)
+    return common
+
+
 def _main_dir(args: argparse.Namespace) -> Path:
     """メインディレクトリ（作業場所の設定は PR の変更でマージの主体・方式を差し替えられるため読まない）。
     git の外ならメインディレクトリを持たないので `--root`。"""
-    root = Path(args.root)
-    try:
-        return git_mod.Git(root).common_dir().parent
-    except git_mod.GitError:  # git の外はメインディレクトリが無いので --root の設定を読む
-        return root
+    common = _common_dir(args)
+    return common.parent if common is not None else Path(args.root)
 
 
 def _strategy(args: argparse.Namespace) -> branch_strategy.Strategy:
@@ -242,7 +254,10 @@ def _record_args(args: argparse.Namespace, strategy: branch_strategy.Strategy) -
 
 
 def _hands(args: argparse.Namespace) -> record_unversioned.Hands:
-    return record_unversioned.Hands(git_mod.Git(Path(args.root)))
+    # 共通の git ディレクトリは、先に設定を読んだとき（`_strategy`）に解決した値を使い、git を起動し直さない
+    cached = getattr(args, "_common_dir", None)
+    common = cached[1] if cached is not None and cached[0] == Path(args.root) else None
+    return record_unversioned.Hands(git_mod.Git(Path(args.root)), common=common)
 
 
 def _unversioned_result(args: argparse.Namespace, strategy: branch_strategy.Strategy, given: record_unversioned.Unversioned) -> dict:

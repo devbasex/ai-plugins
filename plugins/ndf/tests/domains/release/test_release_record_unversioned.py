@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +77,11 @@ class Repo(FakeGit):
         self.revs: list[str] = []
         # 反映したコミットから第一親をたどったコミット（新しい順）
         self.chain = [COMMIT, "r2" * 20, "r1" * 20, "m0" * 20]
+        # 反映したコミットの後から追跡参照までの第一親のコミット（新しい順）と、追跡参照が指すコミット
+        self.later = [AFTER]
+        self.tip: str | None = None
+        # 履歴が途中で切れている（浅い clone の境界で、いちばん古いコミットに親が無い）
+        self.cut = False
         # 反映したコミットの後に第一親で設定のファイル（.ndf/project.json）を変えたコミット
         self.project_changes: list[str] = []
 
@@ -84,9 +90,29 @@ class Repo(FakeGit):
         if any(a.startswith("--max-count=") for a in args):
             count = int(next(a for a in args if a.startswith("--max-count=")).split("=")[1])
             return "".join(f"{c}\n" for c in self.chain[:count])
-        if "--" in args:
-            return "".join(f"{c}\n" for c in self.project_changes)
-        return f"{AFTER}\n{COMMIT}\n"
+        if args[0] == "log":
+            out = ""
+            for i, sha in enumerate(self.later):
+                parent = self.later[i + 1] if i + 1 < len(self.later) else ("" if self.cut else COMMIT)
+                out += f"\x01{sha} {parent}".rstrip() + "\n\n" + (".ndf/project.json\n" if sha in self.project_changes else "")
+            return out
+        return ""
+
+    def run_bytes(self, *args: str, stdin: bytes | None = None, codes: Any = (0,)) -> bytes:
+        """`cat-file --batch` の見出しに、コミットを指す名前ではそのコミットの SHA を載せる（追跡参照は `tip`）。"""
+        self.calls.append(args)
+        out = b""
+        for name in (stdin or b"").decode().splitlines():
+            if name.startswith("refs/") and name.endswith("^{commit}"):
+                tip = self.tip if self.tip is not None else (self.later[0] if self.later else COMMIT)
+                out += f"{tip} commit 1\nc\n".encode()
+            elif name in self.objects:
+                body = self.objects[name]
+                sha = name[: -len("^{commit}")] if name.endswith("^{commit}") else "0" * 40
+                out += f"{sha} blob {len(body)}\n".encode() + body + b"\n"
+            else:
+                out += f"{name} missing\n".encode()
+        return out
 
     def diff_between(self, a: str, b: str, *options: str) -> str:
         self.calls.append(("diff", a, b, *options))
@@ -111,7 +137,8 @@ def _args(*environments: str, targets: tuple[str, ...] = (), observed: frozenset
 
 
 def _hands(repo: Repo, run: FakeRun | None = None) -> record_unversioned.Hands:
-    return record_unversioned.Hands(repo, lambda: 0.0, lambda s: None, run or FakeRun(0))
+    """CLI と同じく、共通の git ディレクトリは解決済みの値を渡す。"""
+    return record_unversioned.Hands(repo, lambda: 0.0, lambda s: None, run or FakeRun(0), common=repo.common)
 
 
 def _push_activity(hub: FakeHub) -> FakeHub:
@@ -141,8 +168,8 @@ def test_writes_each_environment_to_every_included_pull_with_the_push_and_target
         assert {tuple(r.confirmation.items()) for r in rows} == {((WEB, "cd"),), ((WORKER, "cd"),)}
     # CD は push の after で照会し、共通の前処理の保存先は complete で消える
     assert {q[2] for q in hub.run_queries} == {AFTER} and not (repo.common / "ndf-release-record" / f"{PROD}.json").exists()
-    # 共有の置き場は掃除・共有・削除で使い回し、共通の git ディレクトリを 1 回だけ解決する
-    assert [c[0] for c in repo.calls].count("rev-parse") == 1
+    # 共有の置き場は CLI が解決済みの共通の git ディレクトリの下に置き、git を起動して解決し直さない
+    assert "rev-parse" not in [c[0] for c in repo.calls]
 
 
 def test_writes_to_the_production_pull_when_it_has_no_work_pulls(tmp_path: Path) -> None:
@@ -204,7 +231,7 @@ def test_all_pending_or_failed_write_nothing(tmp_path: Path) -> None:
         (_args("db"), None, "今回の対象の届け先"),  # 確かめ 4
         (_args(WEB, observed=frozenset({WORKER})), None, "--observed"),  # 確かめ 4
         (_args(WEB), "no_push", "時間を置いて打ち直す"),  # push を決められない
-        (_args(WEB), "stale", r"git fetch origin \+refs/heads/main:refs/remotes/origin/main"),  # 手元の追跡参照に反映したコミットがまだ無い
+        (_args(WEB), "stale", r"git fetch origin \+refs/heads/main:refs/remotes/origin/main"),  # 手元の追跡参照が反映したコミットより古い
         (_args(WEB), "cancelled", "打ち消された"),  # 確かめ 3: 対象が空
     ],
 )
@@ -214,7 +241,7 @@ def test_checks_one_to_six_write_nothing(tmp_path: Path, args: Any, change: str 
     if change == "no_push":
         hub.activities = [{"before": "x" * 40, "after": "y" * 40}]
     if change == "stale":
-        repo.run = lambda *a: f"{BEFORE}\n"  # type: ignore[method-assign]
+        repo.later, repo.tip = [], BEFORE
     if change == "cancelled":
         repo.diffs[(BEFORE, AFTER)] = ["docs/readme.md"]
     with pytest.raises(record.RecordError, match=match):
@@ -295,10 +322,10 @@ def test_a_repository_without_deliveries_takes_targets_and_attests(tmp_path: Pat
     got = _write(hub, repo, _args(WEB, targets=(WORKER, WEB)), _release(None))
     assert got.recorded == (WEB,) and got.record.targets == (WEB, WORKER) and got.missing == (WORKER,)
     assert [r.confirmation for r in _written(hub, 11)] == [{WEB: "attested"}] and [r.push for r in _written(hub, 11)] == [None]
-    # 設定のファイルを変えたコミットの探索と、反映したコミットの時点の設定の読み取りだけで、push も差分も共有の置き場も使わない
-    assert [c[0] for c in repo.calls] == ["rev-list", "cat-file"]
+    # 第一親の履歴と設定のファイルの変更の 1 回と、設定の読み取りの 1 回だけで、push も差分も読まず、置き場にも書かない
+    assert [c[0] for c in repo.calls] == ["log", "cat-file"]
     assert not [r for r in hub.requests if r[1].endswith("/activity")]
-    assert not (repo.common / "ndf-release-record").exists()
+    assert not list((repo.common / "ndf-release-record").glob("*.json"))
 
 
 def test_a_later_change_without_deliveries_does_not_read_the_push(tmp_path: Path) -> None:
@@ -309,7 +336,7 @@ def test_a_later_change_without_deliveries_does_not_read_the_push(tmp_path: Path
     repo.objects[f"{later}:.ndf/project.json"] = repo.objects[f"{COMMIT}:.ndf/project.json"]
     repo.project_changes = [later]
     got = _write(hub, repo, _args(WEB, targets=(WEB,)), _release(None))
-    assert got.recorded == (WEB,) and [c[0] for c in repo.calls] == ["rev-list", "cat-file"]
+    assert got.recorded == (WEB,) and [c[0] for c in repo.calls] == ["log", "cat-file"]
     assert not [r for r in hub.requests if r[1].endswith("/activity")]
 
 
@@ -338,6 +365,47 @@ def test_a_shallow_clone_without_the_parent_records_without_the_push(tmp_path: P
 
     repo.run = shallow  # type: ignore[method-assign]
     assert _write(hub, repo, _args(WEB, targets=(WEB,)), _release(None)).recorded == (WEB,)
+
+
+@pytest.mark.parametrize(
+    ("cut", "later", "tip", "match"),
+    [
+        (True, [AFTER], None, r"git fetch --unshallow origin \+refs/heads/main"),  # 浅い clone の履歴が途中で切れている
+        (False, [], BEFORE, r"git fetch origin \+refs/heads/main"),  # 追跡参照が反映したコミットより古い
+    ],
+)
+def test_targets_are_refused_when_the_history_does_not_reach_the_commit(
+    tmp_path: Path, cut: bool, later: list, tip: str | None, match: str
+) -> None:
+    """追跡参照から反映したコミットまで第一親の履歴がつながらなければ、後の設定を確かめられないので --target を受けずに止まる。"""
+    hub = _hub()
+    repo = Repo(tmp_path, deliveries=None)
+    repo.cut, repo.later, repo.tip = cut, later, tip
+    with pytest.raises(record.RecordError, match=match):
+        _write(hub, repo, _args(WEB, targets=(WEB,)), _release(None))
+    assert hub.comments_of == {}
+
+
+def test_a_later_parallel_call_reuses_the_shared_push_without_deciding_again(tmp_path: Path) -> None:
+    """並べて打った後の呼び出しは、前の呼び出しが push を読んで置き場に書いた結果を使い、判定の git も起動しない。"""
+    hub = _push_activity(_hub(cd_runs=[[SUCCESS]]))
+    repo = Repo(tmp_path)
+    _write(hub, repo, _args(WORKER))
+    repo.calls.clear()
+    _write(hub, repo, _args(WEB))
+    assert [c[0] for c in repo.calls] == []
+
+
+def test_a_left_share_is_swept_even_when_the_push_is_not_read(tmp_path: Path) -> None:
+    """宣言を外した後に --target だけで記録しても、期限を過ぎて残った置き場を消す。"""
+    repo = Repo(tmp_path, deliveries=None)
+    left = repo.common / "ndf-release-record" / "59.json"
+    left.parent.mkdir(parents=True)
+    left.write_text("{}", encoding="utf-8")
+    old = left.stat().st_mtime - 4000
+    os.utime(left, (old, old))
+    _write(_hub(), repo, _args(WEB, targets=(WEB,)), _release(None))
+    assert not left.exists()
 
 
 def test_a_missing_parent_for_the_pull_diff_stops_with_a_deeper_fetch(tmp_path: Path) -> None:
@@ -517,7 +585,7 @@ def test_shared_prefix_is_computed_once_and_redone_for_another_commit(tmp_path: 
         calls.append(commit)
         return record_unversioned.Prefix(commit, record_decide.Push(BEFORE, AFTER), None, frozenset({"a"}), frozenset())
 
-    share = record_unversioned.share_dir(repo)
+    share = record_unversioned.share_dir(_hands(repo))
     first = record_unversioned.shared_prefix(share, PROD, COMMIT, compute)
     assert record_unversioned.shared_prefix(share, PROD, COMMIT, compute) == first and calls == [COMMIT]
     record_unversioned.shared_prefix(share, PROD, "f" * 40, lambda: compute("f" * 40))

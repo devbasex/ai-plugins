@@ -83,19 +83,32 @@ class Reach(NamedTuple):
     transport: Optional[httpx.BaseTransport] = None
 
 
-def _batch_entries(out: bytes, count: int) -> list[Optional[bytes]]:
-    """`git cat-file --batch` の出力から `count` 件の中身（無いものは None）。"""
-    got: list[Optional[bytes]] = []
+def _batch_objects(out: bytes, count: int) -> list[Optional[tuple[str, bytes]]]:
+    """`git cat-file --batch` の出力から `count` 件の（オブジェクトの SHA, 中身）（無いものは None）。
+
+    読む位置だけを進め、残りのバイト列を写さない（件数 N で写す量が N の二乗に増えないように）。"""
+    got: list[Optional[tuple[str, bytes]]] = []
+    pos = 0
     for _ in range(count):
-        line, _, out = out.partition(b"\n")
-        fields = line.split()
+        end = out.find(b"\n", pos)
+        if end < 0:
+            got.append(None)
+            pos = len(out)
+            continue
+        fields = out[pos:end].split()
+        pos = end + 1
         if len(fields) != 3 or fields[-1] == b"missing":
             got.append(None)
             continue
         size = int(fields[2])
-        got.append(out[:size])
-        out = out[size + 1 :]
+        got.append((fields[0].decode("ascii", "replace"), out[pos : pos + size]))
+        pos += size + 1
     return got
+
+
+def _batch_entries(out: bytes, count: int) -> list[Optional[bytes]]:
+    """`git cat-file --batch` の出力から `count` 件の中身（無いものは None）。"""
+    return [None if o is None else o[1] for o in _batch_objects(out, count)]
 
 
 def _titled(node: Any, title: str) -> Optional[Mapping[str, Any]]:
@@ -142,17 +155,27 @@ def deliveries_at(repo_git: Git, after: str) -> DeliveriesAt:
     return _classify(raw, after)
 
 
-def declared_among(repo_git: Git, commit: str, later: Sequence[str]) -> Optional[bool]:
+class Since(NamedTuple):
+    """`declared_since` の結果。`tip` は追跡参照が指すコミットの SHA（読めなければ None）、`declared` はどれかの時点に
+    届け先の設定があるか。"""
+
+    tip: Optional[str]
+    declared: bool
+
+
+def declared_since(repo_git: Git, tip: str, commit: str, later: Sequence[str]) -> Optional[Since]:
     """コミット `commit` と、その後に設定のファイルを変えたコミット `later` のどれかの時点に、届け先の設定があるか
-    （`git cat-file --batch` の起動 1 回。壊れた設定も、あるとみなす）。`commit` が手元に無ければ None。
+    （`git cat-file --batch` の起動 1 回。壊れた設定も、あるとみなす）。追跡参照 `tip` の SHA も同じ起動で読む。
+    `commit` が手元に無ければ None。
 
     設定のファイルを変えても届け先の設定が無いままなら、どの時点も設定が無いので、push を読まずに済む。"""
     names = (commit, *later)
-    stdin = "".join([f"{commit}^{{commit}}\n", *(f"{c}:{branch_strategy.PROJECT}\n" for c in names)]).encode()
-    head, *raws = _batch_entries(repo_git.run_bytes("cat-file", "--batch", stdin=stdin), len(names) + 1)
+    stdin = "".join([f"{tip}^{{commit}}\n", f"{commit}^{{commit}}\n", *(f"{c}:{branch_strategy.PROJECT}\n" for c in names)]).encode()
+    at_tip, head, *raws = _batch_objects(repo_git.run_bytes("cat-file", "--batch", stdin=stdin), len(names) + 2)
     if head is None:
         return None
-    return any(_classify(raw, at).kind != ABSENT for raw, at in zip(raws, names))
+    declared = any(_classify(None if raw is None else raw[1], at).kind != ABSENT for raw, at in zip(raws, names))
+    return Since(at_tip[0] if at_tip is not None else None, declared)
 
 
 def _classify(raw: Optional[bytes], after: str) -> DeliveriesAt:
