@@ -22,7 +22,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, NamedTuple, NoReturn, Optional
 
 from ndf import contracts
@@ -457,6 +457,33 @@ def _check_of(body: str) -> Optional[dict[str, Any]]:
     return got if got is not None and isinstance(got.get("version"), str) and isinstance(got.get("issues"), list) else None
 
 
+class _Sorted(NamedTuple):
+    """コメントの分類（どれも古い順）。`versioned`・`unversioned` はリリース記録（コミットの有無で分ける）、`checks` はテストの記録、`fixes` は訂正の記録。"""
+
+    versioned: list[_Found]
+    unversioned: list[_Found]
+    checks: list[_Found]
+    fixes: list[_Found]
+
+
+def _sorted_comments(comments: Iterable[Authored]) -> _Sorted:
+    """手順 1・2。マーカーと JSON の形でコメントを分け、位置を保つ（書き手は照会しない）。"""
+    got = _Sorted([], [], [], [])
+    for at, c in enumerate(comments):
+        made = _read_marked(c.body, record_decide.parse_record)
+        if made is not None:
+            (got.versioned if made.commit is None else got.unversioned).append(_Found(at, c, made))
+            continue
+        check = _check_of(c.body)
+        if check is not None:
+            got.checks.append(_Found(at, c, check))
+            continue
+        fix = _read_marked(c.body, record_decide.parse_correction)
+        if fix is not None:
+            got.fixes.append(_Found(at, c, fix))
+    return got
+
+
 def _bridged(hub: GitHub, unversioned: Sequence[_Found], seeds: Sequence[_Found]) -> list[_Found]:
     """手順 3 の 2・3。起点の書き手を照会し、信用した記録と値かコミットを共有する記録へだけ広げる（古い順）。"""
     asked: set[int] = set()
@@ -486,22 +513,7 @@ def candidates(
     `commit` を渡すと、そのコミットの記録も起点にする（書く側の確かめ 6 が、同じコミットの別の値の記録を見るため）。
     `comments` を渡すと、PR のコメントを取得せずにそれを読む。
     """
-    versioned: list[_Found] = []
-    unversioned: list[_Found] = []
-    checks: list[_Found] = []
-    fixes: list[_Found] = []
-    for at, c in enumerate(hub.comments(number) if comments is None else comments):  # 手順 1・2
-        made = _read_marked(c.body, record_decide.parse_record)
-        if made is not None:
-            (versioned if made.commit is None else unversioned).append(_Found(at, c, made))
-            continue
-        check = _check_of(c.body)
-        if check is not None:
-            checks.append(_Found(at, c, check))
-            continue
-        fix = _read_marked(c.body, record_decide.parse_correction)
-        if fix is not None:
-            fixes.append(_Found(at, c, fix))
+    versioned, unversioned, checks, fixes = _sorted_comments(hub.comments(number) if comments is None else comments)  # 手順 1・2
     kept_versioned = [f for f in versioned if select.takes(f.value) and hub.trusts_strict(f.authored)]
     kept_checks = [f.value for f in checks if select.takes_check(f.value) and hub.trusts_strict(f.authored)]
     # 手順 3
