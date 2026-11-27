@@ -14,7 +14,7 @@ src/ndf/progress/        model.py  folding.py  run_view.py  run.py  stages.py  d
                          approval_decide.py*  delivery_decide.py*  run_approval.py*  reopening.py*  redo.py*  redo_decide.py*
 src/ndf/progress/gate/   asking.py  answering.py  entry.py  records.py  release.py  __init__.py
                          targets.py*  finishing.py*  requests.py*  delivery_check.py*  mvv_trail.py*
-src/ndf/domains/         records/cli.py  records/mvv_gate.py  release/record_decide.py  worktree/cli.py  worktree/merged.py
+src/ndf/domains/         records/cli.py  records/mvv_gate.py  release/{record,record_decide}.py  worktree/cli.py  worktree/merged.py
 tests/progress/          test_model.py  test_command.py  test_reopen_operations.py*  test_manual_gate.py*
                          test_release_confirm.py*  test_redo.py*  test_requests.py*
 skills/                  progress-tracking/SKILL.md  development-workflow/references/{agent-layers,approval-answer,pace,parallel}.md
@@ -44,6 +44,23 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `progress/gate/delivery_check.py` | 新設 | 記録の PR と CD の実行を読み、判定に渡す | `adapters.github`・`delivery_decide` | 新設 `confirm` |
 | `progress/gate/mvv_trail.py` | 新設 | MVV の承認の後に、担い手 `mvv` の証跡を書く | `core.merge_approval` | 新設 `ensure` |
 | `progress/plan/external.py` | 変更 | リクエストのファイルを新しく作ったかを返し、中身の比較を公開する | — | 変更 `write_request`・`same_body`（`_same_body` から改名） |
+| `progress/model.py` | 変更 | 事象の名前と、書ける状態の確かめ | `contracts` | 関数は変えない |
+| `progress/folding.py` | 変更 | 事象の列を工程の進みへ畳み込む | `model` | 新設 `StepProgress._reopened`・`StepProgress._finish_held`。変更 `StepProgress.next_step`・`StepProgress._answered` |
+| `progress/stages.py` | 変更 | 工程の定義と、文脈へ重ねる出力 | `model` | 変更 `recorded_outputs` |
+| `progress/definition.py` | 変更 | 出力の規約の確かめ | `contracts` | 新設 `generated_outputs`。変更 `check_stage_output` |
+| `progress/run_view.py` | 変更 | ステートマシンの読み取りの形 | `approval_decide` | 新設 `View.last_pr`。変更 `StageAnswers.__init__` |
+| `progress/records.py` | 変更 | 進み具合の表の宛先 | `run_view` の形 | 変更 `_targets` |
+| `progress/run.py` | 変更 | 次の 1 手の判断と駆動 | `run_approval`・`redo` | 変更 `_running_move`・`_reading_skipped`・`_run_step`・`_start_once`・`_complete`・`Env` |
+| `progress/command.py` | 変更 | サブコマンドのうち、移さずに残るもの | `model` | `_cmd_finish`・`_cmd_check`・`_cmd_retry` を `gate/finishing.py` へ移す |
+| `progress/gate/asking.py` | 変更 | 質問と承認資料 | `run_view` | 新設 `off_wait_question`。変更 `material` |
+| `progress/gate/answering.py` | 変更 | 回答の記録と、回答を読む前の確かめ | `asking`・`targets`・`reopening` | 新設 `_find_question`・`_effects`・`_drafts`。変更 `answer`・`_refusal`・`_trail_by`・`_ensure_trail`・`github_observe`・`recheck` |
+| `progress/gate/records.py` | 変更 | 回答を読む口 | `approval_decide` | 変更 `approved_head`・`answers` |
+| `progress/gate/release.py` | 変更 | リリースのリクエストを出す | `requests` | 変更 `request_release` |
+| `progress/gate/entry.py`・`progress/gate/__init__.py` | 変更 | サブコマンドと引数の登録、`Env` の口の差し込み | `finishing` | `question`・`request-status`・新しい引数の登録 |
+| `domains/records/cli.py` | 変更 | `ndf records mvv gate` の引数 | `mvv_gate` | `--no-skip` の登録と、設計の `--expect-pr` |
+| `domains/records/mvv_gate.py` | 変更 | MVV 判定と、その記録 | `adapters` | 変更 `gate`・`_recorded` |
+| `domains/release/record.py`・`domains/release/record_decide.py` | 変更 | リリース記録の組み立て | `core.release_record` | 読み取りの関数の参照先を移し先へ変える |
+| `domains/worktree/cli.py`・`domains/worktree/merged.py` | 変更 | 作り直し用の作業場所を外す | `store` | 新設 `remove_one`・`remove_redo` |
 
 行数の制約で移すだけの関数は、地図の外の挙動を変えない。
 
@@ -202,6 +219,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | --- | --- | --- | --- |
 | `plan_reopen` | `_cmd_cancel` の工程の列挙 | `command.py` を読む | 使えない。中止は全工程が対象で、開き直しは指定の工程から後ろである |
 | `work_stopped` | `run.is_live`・`run._launching`・`store.run_lock` | `run.py` を読む | 使う。排他を持ったまま起動のマーカーを見る形にまとめる |
+| `revoke_approvals`・`write_revocation` | `merge_approval.write_merge_row`・`answering._post_trail` | `core/merge_approval.py`・`gate/answering.py` を読む | 行の形と投稿は使う。対象の最新の行が承認のときだけ却下の行を足す関数は無い |
 
 ### 単体テストの観点
 
@@ -268,7 +286,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `hand_finish`・`judge_design` | `run._run_step`・`invoke.stage_run`・`Env.invoker` | `run.py`・`invoke.py` を読む | ステップの起動は使う。判定の後の記録は手の経路だけの形なので新設する |
-| `confirm`・`pick_records`・`judge_delivery`・`judge_no_release`・`pick_run` | `record_decide.records`・`record.read`・`production_delivery` | `grep -rn` で `src/ndf/` を `リリース記録`・`workflow_runs`・`actions/workflows` で検索 | 記録の読み取りは `records` を使う。手の記録の行と CD の条件を判定する関数は無い |
+| `confirm`・`pick_records`・`executed`・`judge_delivery`・`judge_no_release`・`pick_run` | `record_decide.records`・`record.read`・`production_delivery` | `grep -rn` で `src/ndf/` を `リリース記録`・`workflow_runs`・`actions/workflows` で検索 | 記録の読み取りは `records` を使う。手の記録の行と CD の条件を判定する関数は無い |
 | `GitHub.workflow_runs` | `GitHub.workflow_run`・`GitHub.check_runs` | `adapters/github.py` を読む | 使えない。実行 1 件の読み取りと check の一覧で、workflow とコミットから実行を引けない |
 
 ### 単体テストの観点
@@ -334,12 +352,12 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `_find_question` | `progress/gate/answering.py` | 新設 | `(v: View, gate_id: str, root: Path \| None) -> Question` | 待ちの質問、無ければ承認ゲートの工程ごとの待っていない質問から id の合うものを返す。対象の PR は提示した対象から引く |
 | `_effects` | `progress/gate/answering.py` | 新設 | `(v: View, q: Question, a: Answer) -> Effects` | 回答の種類と工程の状態から、`late`・`after_release`・開き直し・`failed` の要否を返す |
 | `_drafts` | `progress/gate/answering.py` | 新設 | `(v, q, a, effects: Effects, extra: Mapping) -> list[EventDraft]` | `reopened`、`answered`、`failed`、出力、外した課題の順に下書きを並べる |
+| `_trail_by` | `progress/gate/answering.py` | 変更 | `(conn, q: Question, a: Answer, seen: Target) -> str \| None` | 追認（`after_release`）と `no_release` の承認では `None` を返す |
+| `_ensure_trail` | `progress/gate/answering.py` | 変更 | `(conn, v: View, held: Event, a: Answer, post: Post) -> None` | 記録した回答がもう有効でない（`boundary` より前、後の回答がある）ときは証跡を書かない |
 | `write_merge_row` | `core/merge_approval.py` | 変更 | `(hub, row: MergeRow, viewer, *, latest_only: bool = False) -> bool` | `latest_only`（DB に無い新しい回答）では、対象の最新の行の識別子と回答が同じときだけ書かない。偽（記録済みの回答の送り直しと `ndf ci answer`）では、識別子・回答・対象が同じ行が 1 件でもあれば書かない |
 
 - `answer`
   - 副作用: PR の証跡 1 件、リクエストのファイルの削除、事象の追記（1 トランザクション）、`gate-rejections`、進み具合の表
-- 追認（`after_release`）の承認と `no_release` の承認では `_trail_by` が `None` を返し、証跡を書かない
-- `_ensure_trail`（記録済みの回答の送り直し）は、その回答がもう有効でない（`boundary` より前、後の回答がある）ときは何も書かない
 - 開き直しを起こす回答は、却下の証跡の後に `revoke_approvals` を呼ぶ
 
 ### 異常系の処理
@@ -364,6 +382,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `_effects` | 終了の工程の変更要求は開き直し、却下は `failed` も | 待っていない未着手への否定は記録だけ | 自動の流れの回答待ちは今と同じ |
+| `_trail_by`・`_ensure_trail` | 事前の承認は担い手 `user` の証跡 | 追認でも却下の証跡は書く | 追認と `no_release` の承認、無効になった回答の送り直しは書かない |
 | `answer` | 開き直しを起こす回答の事象の順 | 送り直し（作業が流れていても同じ結果） | 異常系の各行 |
 | `write_merge_row` | 同じ回答の打ち直しは増えない | 同じ識別子で回答が違えば書く。承認 → 却下 → 承認の送り直しで最新の行が承認になる | 開き直した後の古い承認の送り直しで行が増えない |
 
@@ -406,12 +425,14 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `ensure` | `progress/gate/mvv_trail.py` | 新設 | `(hub: GitHub, v: View, answered: Event, now: Target) -> bool` | 記録した `service:mvv` の承認がまだ有効なら、判定の記録へのリンクと担い手 `mvv` の行を持つ証跡を書く |
 | `recheck` | `progress/gate/answering.py` | 変更 | `(st, machine_id, observe, docs_only=never_docs_only) -> str \| None` | 手で終えた回答待ちと MVV の回答でも、マージ先と本番への反映を比べる |
 | `_reading_skipped` | `progress/run.py` | 変更 | `(d, v, s, step, prog) -> list[EventDraft] \| None` | 有効な先の承認がある設計では、読み手役のステップを打たない |
+| `_run_step` | `progress/run.py` | 変更 | `(d: Drive, v: View, s: StageDef, step: StepDef) -> list[EventDraft]` | 否定の回答が残る間は設計の判定のステップの `argv` に `--no-skip` を足し、設計の工程の入力を作り直し用の作業場所へ差し替える |
 
 - `run.py` の `Env` に 3 つの口を足し、`gate` のエントリポイントが差し込む。`run` は GitHub を直接読まない今の形を保つ
   - `approved_state: Callable[[View, Question], Reading]`
   - `confirm: Callable[..., Confirmed]`
   - `mvv_trail: Callable[..., bool]`
 - 証跡の記録の識別子は `mvv:<ゲート>:<質問の id>:<HEAD>`。本文は `## MVV 判定（` の見出しを持つ（今の証跡の数え方に合わせる）
+- `consume_held` が `no_release` の承認で終了を書くときは、`hand_finish` と同じく、同じ追記で後ろの対象の工程へ `disabled`（`cause: no_release`）を書く
 
 ### 異常系の処理
 
@@ -436,6 +457,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | --- | --- | --- | --- |
 | `consume_held` | 承認とマージで終了し、次の工程が始まる | 承認した HEAD が前からマージ済み | 異常系の各行 |
 | `prior_approval` | 対象が同じなら質問しない | HEAD が違えば質問する | 否定が残れば MVV で省かない |
+| `_run_step` | 否定の回答が無ければ `argv` は今と同じ | リリースの判定には足さない | 否定が残れば `--no-skip` が付く |
 | 読み取りの回数 | 1 回の呼び出しで PR と設定が 1 回ずつ | 読み直しのある呼び出しは 1 回ずつ増える | — |
 
 ## 承認を読む側
@@ -449,6 +471,8 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `StageAnswers.__init__` | `progress/run_view.py` | 変更 | `(self, v: View, stage: str) -> None` | 走査を `approval_decide.boundary`（直近の `reopened`・`finish_held`・質問の出し直し）で止め、工程の対象の PR と違う PR を見た回答を飛ばす。最新の承認の回答が追認か `no_release` なら、前へさかのぼらず無いと返す |
 | `approved_head` | `progress/gate/records.py` | 変更 | `(v: View, kind: str, root: Path \| None = None) -> str \| None` | `boundary` と `latest_answer` で最後の回答を選ぶ。工程の対象の PR と違う回答、追認、`no_release` の回答なら `None` |
 | `answers` | `progress/gate/records.py` | 変更 | `(v: View) -> list[dict]` | すべての回答を出し、`after_release` の回答は「追認」と示す項目を足す |
+
+- `ndf progress show` が回答を表示する所も、同じ項目で「追認」を示す
 
 ### 単体テストの観点
 
@@ -533,13 +557,19 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `redo_record` | `progress/redo.py` | 新設 | `(d: Drive, v: View, s: StageDef) -> Record \| None` | 要否を 1 回だけ決め、不要の場合も記録（`needed: false`）し、今の記録を返す |
 | `ensure_workspace` | `progress/redo.py` | 新設 | `(d: Drive, v: View, rec: Record) -> dict \| None` | 予定を記録してから `ndf worktree create <ブランチ> --from <ベース>` を打ち、`new_branch` が真なら作ったことを記録する。作ったことの記録が無いのにパスかブランチがあれば引き継がない。失敗は `stopped` の結果を返す |
 | `redirect_inputs` | `progress/redo.py` | 新設 | `(rec: Record \| None, inputs: Mapping) -> dict` | 設計の工程の `worktree`・`branch` を差し替える |
+| `note_merged` | `progress/redo.py` | 新設 | `(d: Drive, v: View, rec: Record, step_dir: Path) -> None` | 作り直し用の作業場所でマージのステップが終わったら、PR の番号と作業場所の HEAD を記録に足す |
 | `take_in` | `progress/redo.py` | 新設 | `(d: Drive, v: View, rec: Record) -> dict \| None` | ベースの固定、マージ、`cherry-pick -x` を行う。止まれば `stopped` の結果を返す |
 | `discard` | `progress/redo.py` | 新設 | `(d: Drive, rec: Record) -> list[str]` | `ndf worktree remove --machine <ID> --redo <開き直しの番号>` を打ち、残ったものを警告にする |
 | `remove_one` | `domains/worktree/merged.py` | 新設 | `(main: Git, branch: str, path: Path, rec: Record) -> None` | 今の外し方（未コミットは残す・追跡外は退避・`--force` なし）と `git branch -d` |
 | `remove_redo` | `domains/worktree/merged.py` | 新設 | `(main: Git, st: Store, machine_id: str, redo: int, rec: Record) -> None` | 記録からパスとブランチを引き、作ったことの記録、パスとブランチの対応、全コミットが記録のマージ済みの PR か今の作業場所に入っていることを確かめてから `remove_one` を呼ぶ。満たさなければ何も消さない |
 
 - `domains/worktree/cli.py` に `ndf worktree remove --machine <ID> --redo <開き直しの番号>` を足す。パスとブランチは引数で受けず、`remove_redo` が記録から引く
-- 設計の工程の入力の差し替えは、`_start`・`_run_step`・`hand_finish` が同じ `redirect_inputs` を通る
+- 設計の工程の入力の差し替えは、`_start_once`・`_run_step`・`hand_finish` が同じ `redirect_inputs` を通る
+- `run.py` の呼ぶ順
+  - `_start_once`: 設計の工程では `redo_record` と `ensure_workspace`、後ろの工程では `take_in` と `discard` を、工程を始める前に呼ぶ
+  - `_complete`: スプリントを完了する前に `take_in` と `discard` を呼ぶ
+  - `_run_step`: 設計の工程とドキュメントレビューのマージのステップ（種別 `merge`）が終わったら `note_merged` を呼ぶ
+- `note_merged` の PR の番号は、ステップの保存先の `prs.json` から読む。GitHub は読まない
 
 ### 異常系の処理
 
@@ -565,6 +595,8 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `needed`・`branch_name`・`commits_to_move`・`redo_record`・`ensure_workspace`・`redirect_inputs` | `ndf worktree create`・`model.branch_prefix` | `grep -rn` で `src/ndf/` を `redo`・`rebuild` で検索 | 作成と接頭辞は使う。記録と差し替えを持つものは無い |
 | `take_in` | `core/converge/worktree.py` の `cherry-pick`、`adapters.git.Git` | `grep -rn` で `src/ndf/` を `cherry-pick` で検索 | `Git.run`・`Git.fetch` を使う。収束ループの取り込みは担当の worktree の前提を持つので使えない |
 | `discard`・`remove_one` | `merged._remove_worktree`・`merged._delete_branch` | `domains/worktree/merged.py` を読む | 使う。`remove_one` は 2 つを PR の番号なしで呼ぶ入口である |
+| `remove_redo` | `ndf worktree merged` の対象の決め方 | `domains/worktree/merged.py` を読む | 使えない。PR の番号から対象を決める。外し方は `remove_one` を使う |
+| `note_merged` | `core.plan.records.recorded_prs` | `core/plan/records.py` を読む | PR の番号の読み取りに使う。マージした HEAD を残す関数は無い |
 
 ### 単体テストの観点
 
@@ -574,6 +606,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `ensure_workspace` | 作って、作ったことを記録する | どちらも無ければ打ち直しで作る | 予定の記録だけでは引き継がない |
 | `remove_redo` | 取り込み済みなら外す | — | 作ったことの記録が無い・取り込んでいないコミットがあれば何も消さない |
 | `commits_to_move` | マージした PR より後のコミット | マージした PR が無い | 適用済みを飛ばす |
+| `note_merged` | マージの後に番号と HEAD が増える | 同じマージの打ち直しで増えない | 記録が無い（不要の記録を含む）工程では何も書かない |
 | `take_in` | 実の一時リポジトリで取り込む | 差分なし | 衝突・中断からの再開 |
 
 ## 手順書
