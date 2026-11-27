@@ -117,6 +117,17 @@ def test_a_child_in_a_new_conversation_starts_its_number_from_zero(recorder):
     assert [(row["session_id"], row["session_seq"]) for _, row in recorder.rows] == [("s-a", 0), ("s-b", 0)]
 
 
+def test_a_retry_on_another_account_with_the_same_session_continues_the_number(tmp_path, recorder, monkeypatch):
+    """登録済みアカウントへの切り替えは元の `--session-id` をそのまま渡すので、替え先の子の番号は続く（累計を 2 回数えない）。"""
+    run = claude.AccountRun(dict(os.environ), ["claude", "--session-id", "s-1"])
+    replies = iter([_launched(ok=False, failure=claude.Failure.USAGE_LIMIT, session_id="s-1"), _launched(session_id="s-1")])
+    monkeypatch.setattr(claude, "_launch_once", lambda *a: next(replies))
+    options = claude.LaunchOptions(log=claude.LaunchLog({"name": "fix", "session_id": "s-1"}))
+    got = claude._accounted(FakeChecks(run, run), run, "q", 30, tmp_path, options)
+    assert got.ok
+    assert [(row["session_id"], row["session_seq"]) for _, row in recorder.rows] == [("s-1", 0), ("s-1", 1)]
+
+
 def test_a_child_that_did_not_launch_hands_no_row(recorder):
     log = claude.LaunchLog({"name": "fix"})
     log.report(claude.ClaudeReply.failed("", "古い", failure=claude.Failure.REFUSED))
