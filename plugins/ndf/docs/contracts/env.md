@@ -60,6 +60,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_MVV_STATE_DIR` | service | path | — | 判断の記録（ask.jsonl）と承認ゲートの変更要求の記録（gate-rejections.jsonl）の保存先。無ければ状態の保存先 | 公開 |
 | `NDF_ORGANIZER_DIR` | ndf | path | — | 外のオーガナイザーとファイルでやり取りする保存先。あればこのセッションは外のオーガナイザーのレーン | 公開 |
 | `NDF_ORGANIZER_LANE` | ndf | string | — | 外のオーガナイザーのレーンの名前。NDF_ORGANIZER_DIR と組で渡す | 公開 |
+| `NDF_PLAN_RUN_ID` | ndf | string | — | プランの実行がステップの子へ渡す、プランの実行の id。使用量ログの行の run_id になる（#1959）。実行ログの親を指す NDF_RUN_ID とは別の値で、実行ログを開いた実行でも上書きされない。無ければプランの外の起動で、行の欄を省く。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_PROGRESS_DB` | service | string | 秘密 | ステートマシンの DB の URL（sqlite:/// か postgresql://。PostgreSQL の URL は認証情報を含むため秘密）。無ければチェックアウトの保存先の progress.sqlite。Factory は PostgreSQL の URL を入れる | 公開 |
 | `NDF_RELAY_DIR` | ndf | path | — | 中継のラッパーが子のセッションへ渡すセグメントのやり取りの保存先。hook が次のセグメントのマーカーと問い合わせをここへ書く。無ければ中継の外 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_HUB_WAIT` | user | seconds | — | 頼む側がリレーハブの回答を待つ上限。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
@@ -77,6 +78,8 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_RUNTIME_SESSION` | user | string | — | ランタイムのセッションを <pid>:<開始時刻> で指定する（テストと CI）。無ければ祖先のプロセスから探す | 内部（予告なく変えてよい） |
 | `NDF_SHARED_CONFIG_DIR` | ndf | path | — | アカウントの子の中で、元の CLAUDE_CONFIG_DIR を持つ（空なら ~/.claude）。アカウントの登録の保存先を決める。登録済みアカウントの子には、親にあれば親の値、無ければ子へ渡す前の CLAUDE_CONFIG_DIR（無ければ空文字）を入れる | 内部（予告なく変えてよい） |
 | `NDF_STATE_HOME` | user | path | — | 状態の保存先の根。保存先は <値>/<プラグイン名>（XDG_STATE_HOME と同じ読み方。入れ替えの前に旧い NDF と同じ値を渡されても、旧い保存先を退避しない）。無ければ XDG_STATE_HOME の下 | 公開 |
+| `NDF_STEP_ATTEMPT` | ndf | integer | — | プランの実行がステップの子へ渡す、そのプランの実行でそのステップを実行した何回目か（最初が 1。打ち直しと、遷移で戻った実行の両方で 1 増える）。使用量ログの行の attempt になる（#1959）。無いか 1 以上の整数でなければ行の欄を省く。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
+| `NDF_STEP_ID` | ndf | string | — | プランの実行がステップの子へ渡す、ステップの id。使用量ログの行の step になる（#1959）。無ければプランの外の起動で、行の欄を省く。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_SUPERVISE_CLAUDE_FALLBACK` | user | string | 秘密 | 従量の接続の設定（KEY=VALUE を空白区切り）。定義されていれば保存した設定（metered.json）より先に読む | 内部（予告なく変えてよい） |
 | `NDF_UPKEEP_STATE_DIR` | user | path | — | 棚卸しの状態（候補・順位・却下・見積・付け直しの前の状態・深さの記録）の保存先。無ければメインディレクトリの .ndf/backlog/state | 内部（予告なく変えてよい） |
 | `NDF_USAGE_DIR` | user | path | — | 使用量の使用量ログ（usage.jsonl）の保存先。hook から書いてもスクリプトから書いても同じ保存先になる。無ければ状態の保存先の usage | 内部（予告なく変えてよい） |

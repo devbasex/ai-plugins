@@ -102,8 +102,8 @@ LAUNCHER_NAMES = {"run", "spawn", "Popen"}
 # argv を引数で受けて起動する箇所（静的には実行ファイルの名前が見えない）。比べを持つ関数か、比べを通った後にだけ呼ばれる関数
 DYNAMIC_SITES = {
     ("adapters/agents.py", "_guarded_run"),
-    # call_claude の起動はどれも _prefaced を通り、確かめが確定した起動ごとの環境と実行ファイルで比べる
-    ("adapters/claude.py", "_prefaced"),
+    # call_claude の起動はどれも _prefaced から _launch_once を通り、確かめが確定した起動ごとの環境と実行ファイルで比べる
+    ("adapters/claude.py", "_launch_once"),
     # 登録の解除は logout の中で claude を打つ。detach の前に比べ、古ければ登録も symlink も残す
     ("domains/relay/cli_account.py", "_acc_remove"),
     # bin/ndf-claude が exec claude の前に打つ launch-args

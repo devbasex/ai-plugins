@@ -15,6 +15,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
+from urllib.parse import urlsplit
 
 from ndf import identity
 
@@ -24,7 +25,10 @@ SHORT_SHA = re.compile(r"^[0-9a-f]{7,40}$")
 # `git diff --shortstat` の 1 行（`N files changed, A insertions(+), D deletions(-)`）
 _SHORTSTAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
 # リモートの URL から `<所有者>/<リポジトリ>` を取る（https と ssh の両方）
-_REMOTE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
+# リモートの URL の書き方 2 つ。scp の形（`git@github.com:<所有者>/<名前>.git`）と、それ以外の `<スキーム>://` の形（ホストは urlsplit で読む）
+_SCP_REMOTE = re.compile(r"^(?:[^@/\s]+@)?github\.com:(?P<path>[^?#\s]+)$")
+# GitHub のリポジトリのパス。所有者と名前に使える文字だけを受け、クエリ・フラグメント・余分な階層を含むパスは受けない
+_REPO_PATH = re.compile(r"^/?(?P<owner>[A-Za-z0-9-]+)/(?P<name>[A-Za-z0-9._-]+?)(?:\.git)?/?$")
 # `git cat-file --batch` がオブジェクトごとに置く見出しの行（無い名前の行は `<名前> missing`）
 _BATCH_HEAD = re.compile(rb"^[0-9a-f]{40,64} (\S+) ([0-9]+)$")
 # git の誤りの文に出る URL の、伏せる部分（利用者の情報と、`?`・`#` から後ろ）。トークンを URL に埋めたリモートの誤りに出る
@@ -166,8 +170,23 @@ def first_parent_lines(log_text: str) -> dict[str, int]:
 
 
 def repo_of_url(url: str) -> Optional[str]:
-    """リモートの URL の `<所有者>/<リポジトリ>`。GitHub の URL でなければ None。"""
-    m = _REMOTE.search(url.strip())
+    """リモートの URL の `<所有者>/<リポジトリ>`。GitHub の URL でなければ None。
+
+    ホストが github.com であることを確かめ、認証情報・クエリ・フラグメントを除いたパスから所有者と名前だけを取る
+    （URL に埋めたトークンを使用量ログなどへ写さない。#1959）。パスがリポジトリの形でなければ None。
+    """
+    text = url.strip()
+    if "://" in text:
+        parts = urlsplit(text)
+        if parts.hostname is None or parts.hostname.lower() != "github.com":
+            return None
+        path = parts.path
+    else:
+        scp = _SCP_REMOTE.match(text)
+        if scp is None:
+            return None
+        path = scp.group("path")
+    m = _REPO_PATH.match(path)
     return f"{m.group('owner')}/{m.group('name')}" if m else None
 
 

@@ -39,7 +39,7 @@ src/ndf/
 | `src/ndf/adapters/launch_candidates.py` | 新設 | 候補のディレクトリ内の記録を読む。読む対象は通常ファイルに限り、シンボリックリンクはたどらない。候補の中が NDF の作ったものだけかを確かめ、退避・消去・元の名前へ戻す。作成途中の候補のディレクトリは、作る前から隣に残す記録で NDF が作ったと確かめたものだけを片付ける。どの候補を片付けるかは `launch_approval` が履歴から決める | — | `Read` | N: `write_launch_record`・`raw_record`・`record_object`・`ownership`・`stamped_version`・`regular_version`・`same_stamp`・`set_aside`・`settle_aside`・`restore_aside`（`launch_approval.py` から分ける）・`start_draft`・`finish_draft`・`reclaim_drafts` |
 | `src/ndf/adapters/secret_forms.py` | 新設 | 秘密の形の表と、当たる文字列を伏せる処理 | — | モジュール | N: `SECRET_VALUE`・`ASSIGNED_SECRET`・`MASK`・`redact`（`domains/project/secret.py` から移す） |
 | `src/ndf/domains/project/secret.py` | 変更 | 移した表と処理を `secret_forms` から読み込む | secret_forms | モジュール | C: 定義の移動 |
-| `src/ndf/adapters/claude.py` | 変更 | 起動の引数と結果 | launch_settings | `ClaudeCall`・`ClaudeReply`・`LaunchOptions`・`LaunchRecorder` | C: `permission_args`・`_full_args`・`call_claude`・`_precheck`・`_parse_reply`・`context_window`・`_accounted`。N: `main_model`・`set_launch_recorder`・`report_launch` |
+| `src/ndf/adapters/claude.py` | 変更 | 起動の引数と結果 | launch_settings | `ClaudeCall`・`ClaudeReply`・`LaunchOptions`・`LaunchRecorder` | C: `permission_args`・`_full_args`・`call_claude`・`_precheck`・`_parse_reply`・`context_window`・`_prefaced`。N: `main_model`・`set_launch_recorder`・`LaunchLog` |
 | `src/ndf/adapters/cli_floor.py` | 変更 | CLI の最低バージョンの確認が、確かめの間に待ったかを返す。自分で `--version` の終了を待った場合と、同じ実行ファイルのバージョン取得を別スレッドに任せて、その終了を実行ファイルごとの錠で待った場合は真を返す。待った後にキャッシュを使う場合も真である。バージョン取得を待たずにキャッシュを使った場合は偽を返す。呼び出し元が、待った間の取り消しを確かめ直すために使う | — | モジュール | C: `require`（戻り値を `bool` にする）。N: `_version_read` |
 | `src/ndf/adapters/agents.py` | 変更 | 相手役の起動 | identity | `Launch` | C: `_start`・`_guarded_run`・`Launch`（`verify`） |
 | `src/ndf/core/worker.py` | 変更 | worker の起動 | launch_settings・claude | `Caller` | C: `delegate`・`_args_for`・`_resume_until_written` |
@@ -196,7 +196,7 @@ src/ndf/
 | `load` の秘密の検査 | `domains/project/secret.py` の `redact` | 層の順序の確認（adapters は domains を読めない） | 表と処理を `adapters/secret_forms.py` へ移し、2 つの層が同じ表を使う |
 | `prepared` | `tempfile.mkdtemp` | 標準ライブラリ | 使う（状態の保存先の下に作る） |
 | `launch_costs`・`main_model` | `claude.context_window` の主モデルの選び方 | `adapters/claude.py` の 449 行の付近 | `main_model` に切り出して両方が使う |
-| `report_launch`・`set_launch_recorder` | `set_relay_checks` | `adapters/claude.py` | 同じ差し込みの形にする |
+| `LaunchLog`・`set_launch_recorder` | `set_relay_checks` | `adapters/claude.py` | 同じ差し込みの形にする |
 | `step_spec`・`digest`・`approved`・`new_candidate`・`reflect`・`recover`・`pending_request` | 起動の設定と承認を扱う関数 | `grep -rn "approval\|launch.json" src/ndf` | 同じ役割は無い（マージの承認の証跡 `core/merge_approval.py` は PR のコメントが対象）。新設する |
 | `put_question`・`record_answer`・`check` | `guards/ask.py`・`ask_clear.py` | `ls src/ndf/domains/hooks/guards` | 質問の転送と後片付けで、答えは残さない。guard の形だけ使う |
 | `approve_by_answer` | `filelock.FileLock` | `domains/records/jsonl.py` の使い方 | 使う |
@@ -274,17 +274,18 @@ src/ndf/
 | `_precheck` | 同 | 変更 | 変えない | `options.verify` が理由を返せば `Failure.LAUNCH` にする |
 | `call_claude` | 同 | 変更 | 変えない | 子の環境に `NDF_AI_CHILD=1` を足す |
 | `_parse_reply` | 同 | 変更 | 変えない | 成功でも誤りでも、`session_id`・`usage`・`modelUsage`・`total_cost_usd` を回答に持たせる |
-| `_accounted` | 同 | 変更 | 変えない | アカウントを替えて打ち直した場合、前の子の回答を `earlier` に残す |
+| `_prefaced` | 同 | 変更 | 変えない | 起動の前置きと起動を打ち、起動した子が終わったその場で `options.log` へ回答を渡す。アカウントを替えて打ち直す場合も、前の子の行は替え先の起動より先に渡る |
 | `main_model` | 同 | 新設 | `main_model(models: Mapping) -> Optional[tuple[str, Mapping]]` | トークンの和が最大（同じなら窓の小さい方）のモデルを返す |
 | `context_window` | 同 | 変更 | 変えない | 主モデルの選び方を `main_model` にする |
 | `set_launch_recorder` | 同 | 新設 | `set_launch_recorder(recorder: Optional[LaunchRecorder]) -> None` | 書き込み処理を差し込む |
-| `report_launch` | 同 | 新設 | `report_launch(reply: ClaudeReply, meta: Mapping, seq: int) -> int` | `earlier` と回答のうち起動した子ごとに 1 行を渡し、渡した数を返す |
+| `LaunchLog` | 同 | 新設 | `LaunchLog(meta: Mapping)`、`report(child: ClaudeReply) -> None` | 1 回の委譲か Skill の呼び出しの記録先。起動した子 1 つにつき 1 行を書き込み処理へ渡す。`session_seq` は会話の id（結果の `session_id`、無ければ `meta` の `session_id`）ごとに 0 から数える。書き込み処理が無ければ渡さない |
+| `launch_meta` | 同 | 新設（A4） | `launch_meta(name: str, repo: Optional[str] = None) -> dict` | 行の `name`・`repo`（呼び出し元が解決済みのときだけ）と、環境変数の `run_id`・`step`・`attempt`。worker と Skill を回す起動が同じ組み立てを使う |
 
 - `permission_args` の full の並び: `--permission-mode acceptEdits --tools <同梱の読み込む一覧 + grant.load をカンマで連結> --allowed-tools <同梱の許可 13 個> <grant.allow の各件> [--strict-mcp-config] [--mcp-config <コピー>...]`。`inherit` は後ろの 2 つを付けない。`--allowed-tools` は複数の値を取る。後に続くプロンプトを値として読ませないよう、`plugins.args` が空のときも、後ろに `--append-system-prompt` を置く（今の `_full_args` の並び。`plugins.args` は空になりうるので、終端として数えない）。`grant` が None なら指定なしと同じ
 - 定数: `LOAD_TOOLS`（16 個）を足し、`FULL_TOOLS`（許可の 13 個）は変えない。`load` の名前は `--allowed-tools` に入れない
-- `ClaudeCall` に `grant`（full 以外で渡すと `ValueError`）、`ClaudeReply` に `session_id`・`usage`・`model_usage`・`session_cost_usd`・`launched: bool`・`launched_at`・`seconds`・`earlier`、`LaunchOptions` に `verify: Optional[Callable[[], Optional[str]]]` を足す。どれも省略できる
+- `ClaudeCall` に `grant`（full 以外で渡すと `ValueError`）、`ClaudeReply` に `session_id`・`usage`・`model_usage`・`session_cost_usd`・`launched: bool`・`launched_at`・`seconds`、`LaunchOptions` に `verify: Optional[Callable[[], Optional[str]]]` と `log: Optional[LaunchLog]` を足す。どれも省略できる
 - `LaunchRecorder` は `record_cli(usage, meta)` を持つ
-- `report_launch`
+- `LaunchLog.report`
   - 事後条件: `launched` が偽の子（CLI が古い、同時起動のスロットが取れない、起動できない、起動の直前の照らし直し（`Grant.verify`）で停止）は行を渡さない。`launch_id` は子ごとに作る
   - 副作用: 差し込まれた書き込み処理の呼び出し
 
@@ -293,14 +294,14 @@ src/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `_precheck` | 承認の対象が変わった | 起動の直前の書き換え・取り消し。CLI の最低バージョンの確認（`claude --version` の終了を待つ）の間の取り消しを含む | `options.verify`（最低バージョンの確認の前と、確認で `claude --version` の終了を待った起動では後にも打つ。別の起動の `--version` を錠で待った起動も含む） | 呼び出し元へ返す | 呼び出し元の `precondition`。承認の案内のコマンドには、読み直した現在のハッシュを `--sha256` に載せる | 子を起動しない。承認して再実行 |
-| `report_launch` | 書き込み処理が無い | エントリポイントを通らない呼び出し | None の判定 | 既定値（書かない）で続ける | 出力なし | — |
+| `LaunchLog.report` | 書き込み処理が無い | エントリポイントを通らない呼び出し | None の判定 | 既定値（書かない）で続ける | 出力なし | — |
 | `_parse_reply` | 欄が無い・形が違う | CLI の出力の変化、JSON でない | 読み取り | 欄を None にして続ける | 行の `usage` が `unknown` | — |
 
 ### ログと記録の出力
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `report_launch` | 設計書の「使用量ログの行」の欄 | 使用量ログ | 質問の本文、回答の本文 |
+| `LaunchLog.report` | 設計書の「使用量ログの行」の欄 | 使用量ログ | 質問の本文、回答の本文 |
 
 ### 単体テストの観点
 
@@ -308,7 +309,7 @@ src/ndf/
 | --- | --- | --- | --- |
 | `permission_args` | 指定なし、定義ファイルの指定、`inherit` | `load` と `allow` が空 | `load` の名前が `--allowed-tools` に入らない。`--setting-sources` が無い |
 | `_precheck` | `verify` が None を返せば起動 | — | 理由を返せば子を起動しない |
-| `report_launch` | 子 1 つで 1 行、打ち直しで 2 行 | `usage` が無い | `launched` が偽なら 0 行 |
+| `LaunchLog.report` | 子 1 つで 1 行、打ち直しで 2 行（前の子の行が打ち直しより先） | `usage` が無い。同じ id のままアカウントを替えた子は番号が続き、会話の id が変わった子は番号が 0。会話の id が分からない子は常に 0 | `launched` が偽なら 0 行 |
 | `main_model` | 和が最大 | 同じ和は窓の小さい方 | `modelUsage` が空 |
 
 ## worker の起動と Skill を回す起動
@@ -321,11 +322,11 @@ src/ndf/
 | --- | --- | --- | --- | --- |
 | `delegate` | `core/worker.py` | 変更 | 変えない | `prepared(handoff.kind, handoff.cwd)` の中で引数を組み、再開まで流す |
 | `_args_for` | 同 | 変更 | `_args_for(system, root, cwd, grant) -> claude.PluginArgs` | 指定を持つ引数を組む |
-| `_resume_until_written` | 同 | 変更 | `_resume_until_written(handoff, wd, out, base, call, options)` | 子ごとに `verify` を渡し、`report_launch` を呼び、`session_seq` を進める |
+| `_resume_until_written` | 同 | 変更 | `_resume_until_written(handoff, wd, out, base, call, options)` | 子ごとに `verify` と、委譲の間で共通の `LaunchLog` を渡す |
 | `_call_skill` | `progress/invoke.py` | 変更 | 変えない | `prepared(run.name, cwd)` の中で起動し、記録する。`session_seq` は 0 から |
 
 - `Caller` と `SkillCaller` は 5 つ目の引数 `options: claude.LaunchOptions` を受ける形にする。テストの偽の呼び出しも直す
-- 行の `name` は作業の名前か Skill の名前、`repo` はリモートの URL を `git.repo_of_url` で読む。読めなければ欄を省く
+- 行の `name` は作業の名前か Skill の名前。worker と Skill を回す起動はリポジトリ名を解決済みで持たないので、`repo` の欄を省く（リポジトリ名を得るためだけに git を起動しない）
 - `run_id`・`step`・`attempt` は、環境変数 `NDF_PLAN_RUN_ID`・`NDF_STEP_ID`・`NDF_STEP_ATTEMPT` があれば書く
 - 実装する worker は、PR を作る前に、工程が MCP の Tool を呼んだ件数を数え直し、結果を PR の本文へ書く。目的は、MCP を読み込まなくする前に、使っている工程が無いかを確かめることである。呼んだ工程があれば、このリポジトリの `.ndf/launch.json` に指定を足す。数えるのは、2026-11-24 から数える日までの、変更を入れる前のバージョンで起動した非対話の会話の記録である。起動の見分け方は設計書の決定 3 の表にある
 
@@ -355,6 +356,7 @@ src/ndf/
 | `_run` | `core/plan/transition_decide.py` | 変更 | 変えない | ステップを実行する指示（`RunStep`）に、そのステップの何回目かを持たせる |
 | `decide` | 同 | 変更 | 変えない | 打ち直し（待ちの後）の指示でも回数を 1 増やす |
 | `run_step` | `core/plan/runner.py` | 変更 | `run_step(spec, step_id, attempt, nth: int = 1)` | `run_id`・ステップの id・回数を子の環境にする |
+| `plan_step_env` | 同 | 新設（A4） | `plan_step_env(run_id: Optional[str], step_id: str, nth: int) -> dict[str, str]` | 子へ渡す 3 つの環境変数を、名前を環境変数の表から引いて組む |
 | `_launch` | `core/plan/steps.py` | 変更 | 変えない | `StepContext.env` を子の環境に重ねる |
 
 - `RunStep` に `nth: int = 1`、`StepState` に `runs: Mapping[str, int]`、`StepContext` に `env: Mapping[str, str]` を足す。`attempt`（打ち直しの回数）の意味は変えない

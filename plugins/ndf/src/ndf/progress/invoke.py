@@ -886,7 +886,10 @@ def _skill_cause(failure: Optional[claude.Failure]) -> str:
 
 
 def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResult:
-    """Skill を full で 1 回回す。起動の設定の Skill の名前の指定が壊れているか未承認なら起動せずに `precondition` で止める（#1959）。"""
+    """Skill を full で 1 回回す。起動の設定の Skill の名前の指定が壊れているか未承認なら起動せずに `precondition` で止める（#1959）。
+
+    起動した子が終わるたびに使用量ログへ 1 行渡す（工程の名前は Skill の名前。会話を再開しないので番号は会話ごとに 0 から。
+    書けなくても結果を変えない。#1959 の決定 6）。"""
     held = contextlib.ExitStack()
     try:
         grant = held.enter_context(launch_settings.prepared(run.name, cwd))
@@ -896,7 +899,7 @@ def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResu
         schema = contracts.load_json(contracts.schema_path("result"))
         call = claude.ClaudeCall(system=SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema, grant=grant)
         argv, notice = claude.claude_launch(call, cwd=cwd)
-        options = claude.LaunchOptions(verify=grant.verifier)
+        options = claude.LaunchOptions(verify=grant.verifier, log=claude.LaunchLog(claude.launch_meta(run.name)))
         reply = call_claude(argv, skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd, options)
     if not reply.ok:
         kind = _skill_cause(reply.failure)

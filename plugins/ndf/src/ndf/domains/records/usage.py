@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from ndf import identity
 from ndf.contracts import facts
+from ndf.contracts.internal import InternalError
 from ndf.domains.records import jsonl
 from ndf.domains.records import usage_decide as ud
 
@@ -86,16 +87,19 @@ def record_subagent(
         return None
 
 
-def record_cli(usage: Mapping[str, Any], meta: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> Optional[dict[str, Any]]:
-    """`claude -p` の 1 回を、サブエージェントと同じ使用量ログへ 1 行書く。書けなければ None。
+def record_cli(usage: Any, meta: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> Optional[dict[str, Any]]:
+    """`claude -p` の起動した子 1 つを、サブエージェントと同じ使用量ログへ 1 行書く。書けなければ None（#1959 の決定 6）。
 
-    `meta` の欄は `contracts/schemas/internal/usage.schema.json` にあるものだけ（ほかの欄は書かずに `InternalError`）。
+    `meta` の欄は `contracts/schemas/internal/usage.schema.json` にあるものだけで、値が None の欄は置かない。使用量が
+    辞書でなければ（結果の JSON が無い起動）unknown にする。権限・容量・ロックの待ち・行の形の誤りで書けなくても
+    例外を外へ出さず、標準エラーへ 1 行出す（工程の結果を変えない。I4）。
     """
     u = ud.usage_of(usage)
-    row = {"at": jsonl.now(), "caller": CLAUDE_CLI, **meta, "usage": u.as_dict() if u is not None else ud.UNKNOWN}
+    filled = {key: value for key, value in meta.items() if value is not None}
+    row = {"at": jsonl.now(), "caller": CLAUDE_CLI, **filled, "usage": u.as_dict() if u is not None else ud.UNKNOWN}
     try:
         return jsonl.append_locked(usage_log_path(env), row, kind="usage")
-    except (LookupError, OSError) as exc:
+    except (LookupError, OSError, InternalError) as exc:
         print(f"使用量の使用量ログへ書けない: {exc}", file=sys.stderr)
         return None
 

@@ -26,6 +26,7 @@
     "P1a": {"issue": 3369, "packages": ["ndf.progress.backup", "ndf.progress.command", "ndf.progress.definition", "ndf.progress.model", "ndf.progress.stages", "ndf.progress.store"], "needs": ["D1", "D1+", "D2", "C1+", "T1", "T1+", "AD1", "B1"], "order": 4, "lane": "lr-rf", "closed": true},
     "M3b": {"issue": 3407, "packages": ["ndf.domains.relay"], "needs": ["D2", "AD2", "AD3", "T1"], "order": 4, "lane": "lr-fix-b", "closed": true},
     "X9": {"issue": 3604, "packages": ["ndf.__main__"], "needs": ["X0", "AD3", "M3b"], "order": 9, "lane": "lracct", "closed": true},
+    "X9+": {"issue": 1959, "packages": [], "needs": ["X9", "M7"], "order": 9, "lane": "lmodel", "closed": false},
     "M3b+": {"issue": 3604, "packages": [], "needs": ["M3b", "S1e"], "order": 9, "lane": "lr-relay", "closed": false},
     "C3": {"issue": 3292, "packages": ["ndf.core.route", "ndf.core.issue_docs"], "needs": ["C2", "B1"], "order": 5, "lane": "lr-flow", "closed": true},
     "C3+": {"issue": 3474, "packages": [], "needs": ["C3", "P1b"], "order": 6, "lane": "lr-flow", "closed": false},
