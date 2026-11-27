@@ -28,6 +28,7 @@ import argparse
 import contextlib
 import importlib
 import os
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable, ContextManager, NamedTuple, Optional, TypeVar
@@ -660,7 +661,7 @@ def _begin_run(args: argparse.Namespace, stack: contextlib.ExitStack, claims: di
         return _stop("invalid", str(exc))
     for stale in _output_paths(args):
         try:
-            claims[stale] = stack.enter_context(outputs.claim(Path(stale)))
+            claims[stale] = held = stack.enter_context(outputs.claim(Path(stale), args.set_aside_unrecorded_out))
         except outputs.Busy:
             # 実行中の起動の書き込みを片付けで壊さない（PR 4638 の r3-4）
             return _stop(
@@ -671,14 +672,23 @@ def _begin_run(args: argparse.Namespace, stack: contextlib.ExitStack, claims: di
             # NDF が書いたと確かめられない既存のファイルは利用者のデータかもしれないので消さない（PR 4638 の C4）
             return _stop(
                 "precondition",
-                f"出力先 {stale} に、NDF が書いた出力と確かめられないファイルがある（記録を残さない前のバージョンが書いた出力も含む）。別のパスを渡すか、そのファイルを消す",
+                f"出力先 {stale} に、NDF が書いた出力と確かめられないファイルがある。出力先の指定を誤っていないかを確かめ、"
+                "別のパスを渡して打ち直す。そのファイルを消してよいのは、記録を残さない前のバージョンの NDF が書いた出力だと"
+                "確かめられた場合だけである",
             )
         except OSError as exc:
             # 出力先の不備は始めに分かるので、相手役を起動する前に止める（レビューの後に書けないと分かっても遅い。#3702）
             return _stop("precondition", f"出力先 {stale} に書けない: {exc}")
+        _tell_set_aside(stale, held)
     if slug is not None:
         os.environ[GH_REPO_ENV] = slug
     return None
+
+
+def _tell_set_aside(stale: str, held: outputs.Claim) -> None:
+    """記録の無い出力を消さずに移したなら、移した先を標準エラーに出す（利用者が後で確かめられるように。PR 4638 の r3-2）。"""
+    if held.set_aside_to is not None:
+        print(f"出力先 {stale} の記録の無いファイルを、消さずに {held.set_aside_to} へ移した", file=sys.stderr)
 
 
 def _output_paths(args: argparse.Namespace) -> list[str]:
@@ -891,6 +901,13 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
         help="--reviewed-out と併用する。対象 PR の HEAD（起動時の head か、同じ起動でその PR のブランチへ push した修正コミット）を"
         "レビューしたと確認できた場合、指定ファイルに <所有者>/<リポジトリ>#<番号> を書く。指定した実行は、起動時に対象 PR を確認できなければ"
         "レビューを始めずに precondition で停止し、同じ PR を読んだ記録だけを差分の起点や収束結果の再利用に使う。" + _OUTPUT_RULE,
+    )
+    r.add_argument(
+        "--set-aside-unrecorded-out",
+        action="store_true",
+        help="--reviewed-out・--reviewed-pr-out・--reviewed-base-out の出力先に NDF の記録の無いファイル（記録を残さない前の"
+        "バージョンが書いた出力など）があれば、出力先の錠を取った後に、消さずに隣の別名（<名前>.unrecorded-<16 進>）へ移して続ける。"
+        "移した先は標準エラーに出す。版上げをまたいで再開する NDF の工程が使う",
     )
     r.add_argument(
         "--reviewed-base-out",

@@ -291,3 +291,21 @@ def test_pr_4638_r1_5_hard_linked_outputs_are_invalid(tmp_path: Path, capsys: py
     argv = ["run", "--pr", "7", "--state-dir", str(tmp_path / "st"), "--base", "origin/main"]
     code, got = run_cli(capsys, *argv, "--reviewed-out", str(head), "--reviewed-base-out", str(tmp_path / "b"))
     assert (got["cause"]["kind"], head.read_text(encoding="utf-8")) == ("invalid", "")
+
+
+def test_pr_4638_r3_2_unrecorded_output_is_set_aside_without_deleting(tmp_path: Path) -> None:
+    """PR 4638 の r3-2・r3-3: `set_aside` なら、記録の無い出力を消さずに隣の別名へ移し、記録付きの出力を書いて続ける。
+    指定しなければ従来どおり消さずに止まる。"""
+    out = tmp_path / "head"
+    out.write_text(HEAD, encoding="utf-8")
+    before = out.stat().st_ino
+    with pytest.raises(outputs.Unowned):
+        outputs.clear_stale(out)
+    with outputs.claim(out, set_aside=True) as held:
+        aside = held.set_aside_to
+        assert aside is not None and not out.exists()
+        held.write("b" * 40 + "\n")
+    assert (aside.parent, aside.stat().st_ino, aside.read_text(encoding="utf-8")) == (tmp_path, before, HEAD)
+    # 書き直した出力は記録付きなので、次の起動は指定が無くても片付けられる
+    outputs.clear_stale(out)
+    assert not out.exists() and aside.exists()

@@ -11,6 +11,10 @@ NDF が書いたファイルとはみなさない（PR 4638 の r1-4）。
 ものだけで（MVV の Value 6）、記録の無い出力には確かめる根拠が無いためである（PR 4638 の r2-2）。工程は錠の外で出力を消さない。
 同じ出力先を使う実行中の起動が書いた出力まで消すためである（PR 4638 の r1-2）。
 
+版上げをまたいで再開する NDF の工程（実装のテンプレート）は `set_aside` を渡す。錠を取った後に、記録の無い出力を消さずに
+隣の別名（`<名前>.unrecorded-<16 進>`）へ移して残し、出力の名前を空けて続ける。移すだけなので中身も inode も失わず、利用者に
+確かめや打ち直しを求めずに止まった所から続く（MVV の Value 1・Value 3。PR 4638 の r3-2・r3-3）。
+
 記録には種別（`ndf_record`）を書き、片付けで消すのはこの種別の記録（と空の記録）と、その記録が指す一時のファイルだけである
 （PR 4638 の r2-5）。
 
@@ -155,6 +159,8 @@ class Claim:
         self._written = False
         # 記録が、片付けの済んでいない出力か一時のファイルを指しているか。指していれば消さない（PR 4638 の r4-6・r4-7）
         self._pointing = False
+        # 記録の無い出力を移した先（`set_aside` のとき。移さなければ None）
+        self.set_aside_to: Optional[Path] = None
 
     def _read(self) -> Optional[dict[str, Any]]:
         """記録の中身（終端の改行まで書けた最後の行）。空か、何も指さない記録を書く途中で切れたなら `{}`（NDF は作った直後に
@@ -195,7 +201,7 @@ class Claim:
         if os.pwrite(self._fd, line, offset) != len(line):
             raise OSError(f"出力の記録 {self.record} を書き切れない")
 
-    def clear(self) -> None:
+    def clear(self, set_aside: bool = False) -> None:
         """前の起動の出力を片付ける（`claim` の説明のとおり）。"""
         found = self._read()
         if found is None:
@@ -209,7 +215,7 @@ class Claim:
             self._pointing = bool(found.keys() - {RECORD_KIND_KEY})
             _collect_staging(self.path, found)
         if self.path.exists():
-            _clear_output(self.path, found)
+            self.set_aside_to = _clear_output(self.path, found, set_aside)
         if self._pointing:
             self._put(_record())
             self._pointing = False
@@ -336,7 +342,7 @@ def _lock(path: Path) -> Claim:
 
 
 @contextmanager
-def claim(path: Path) -> Iterator[Claim]:
+def claim(path: Path, set_aside: bool = False) -> Iterator[Claim]:
     """出力先の錠を取り、前の起動の出力を片付けて、起動の終わりまで持つ（親が無い・書けない・記録の保存先がファイルでない・
     NDF が書いたと確かめられない記録がある・一時のファイルを確かめられなければ `OSError`、実行中の別の起動が使っていれば
     `Busy`、確かめられない出力があれば `Unowned`）。
@@ -347,20 +353,25 @@ def claim(path: Path) -> Iterator[Claim]:
       書いた後に記録を作るために読み直すので、読み書きの両方ができるかを確かめる（PR 4638 の r1-5）
     - ほかの既存のファイル（記録の無い・作り直された・書き換えられたもの）は、利用者のデータかもしれないので消さずに `Unowned`
     - 公開の前に落ちた起動の一時のファイルは、記録で確かめて消す（PR 4638 の r2-7）
+    - `set_aside` を渡せば、記録の何も指さない出力のファイル（記録を残さない前のバージョンが書いたものなど）を消さずに隣の別名へ
+      移し、移した先を `Claim.set_aside_to` に残す（PR 4638 の r3-2）
     """
     held = _lock(path)
     try:
-        held.clear()
+        held.clear(set_aside)
         yield held
     finally:
         held.release()
 
 
-def _clear_output(path: Path, found: dict[str, Any]) -> None:
-    """既存の出力を、空なら読み書きできるかを確かめて残し、NDF が書いたと確かめられれば片付け、確かめられなければ `Unowned`。"""
+def _clear_output(path: Path, found: dict[str, Any], set_aside: bool = False) -> Optional[Path]:
+    """既存の出力を、空なら読み書きできるかを確かめて残し、NDF が書いたと確かめられれば片付け、確かめられなければ `Unowned`。
+    `set_aside` なら、記録の何も指さない出力のファイルは隣の別名へ移し、移した先を返す（`claim` の説明のとおり）。"""
     if path.is_file() and path.stat().st_size == 0:
         path.open("r+", encoding="utf-8").close()
-        return
+        return None
+    if set_aside and not (found.keys() - {RECORD_KIND_KEY}) and path.is_file() and not path.is_symlink():
+        return _keep_unrecorded(path)
     owned = _owned(path, found) if found else None
     if owned is None:
         raise Unowned(str(path))
@@ -369,6 +380,26 @@ def _clear_output(path: Path, found: dict[str, Any]) -> None:
         path.open("w", encoding="utf-8").close()
     else:
         path.unlink()
+    return None
+
+
+def _keep_unrecorded(path: Path) -> Path:
+    """記録の無い出力 `path` を消さずに、同じディレクトリの使われていない別名へ移す（既存のファイルを上書きしない）。"""
+    while True:
+        aside = path.with_name(f"{path.name}.unrecorded-{secrets.token_hex(4)}")
+        if _link_new(path, aside):
+            # 別名で残せてから元の名前を外す
+            path.unlink()
+            return aside
+
+
+def _link_new(path: Path, aside: Path) -> bool:
+    """`aside` の名前で `path` のハードリンクを作る。その名前に既にファイルがあれば作らずに偽（上書きしない）。"""
+    try:
+        os.link(path, aside)
+    except FileExistsError:  # noqa: NDF401 ファイル: 名前が使われていれば、呼び手が別の名前を選び直す（上書きしない）
+        return False
+    return True
 
 
 def clear_stale(path: Path) -> None:
