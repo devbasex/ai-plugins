@@ -32,6 +32,7 @@ import contextlib
 import dataclasses
 import fcntl
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -58,14 +59,18 @@ EXCLUDES, INCLUDES, UNKNOWN = "含まない", "含む", "判断できない"
 # judge が結果ファイルの一時ファイルを作る、結果の隣の専用ディレクトリの名前の終わり（`.<結果のファイル名>` に続ける）。
 # 強制終了で残った一時ファイルを、利用者のファイルと取り違えずに、この中だけから回収する
 WORK_SUFFIX = ".mvv-replay"
-# 専用ディレクトリを judge が作ったことを示す印のファイルの名前。作った起動が作った直後に中へ置く。印の無い同名のディレクトリ
-# （利用者が作ったものなど）は、中身を消さず、ディレクトリも消さない
+# 専用ディレクトリを judge が作ったことを示す印のファイルの名前。作った起動が作った直後に中へ置き、そのディレクトリの鍵
+# （`WORK_KEY_BYTES` バイトの乱数の 16 進数）を書く。印の無い同名のディレクトリ（利用者が作ったものなど）は、中身を消さず、
+# ディレクトリも消さない
 WORK_MARK = ".made-by-mvv-replay"
+WORK_KEY_BYTES = 32
+WORK_KEY_PATTERN = re.compile(rf"[0-9a-f]{{{WORK_KEY_BYTES * 2}}}")
 # 専用ディレクトリの名前の候補の数。印の無い同名のディレクトリが続いても、候補を探し続けないための上限
 WORK_TRIES = 100
-# judge が専用ディレクトリに作る一時ファイルの名前。回収するのは、この名前のものだけ
+# judge が専用ディレクトリに作る一時ファイルの名前（`judge-` + 乱数 16 桁 + 印の鍵で乱数から作った HMAC-SHA256 の先頭 16 桁 +
+# `.tmp`）。回収するのは、この名前で、HMAC が印の鍵と合うものだけ（judge が作ったことを名前で確かめる）
 WORK_TMP_PREFIX = "judge-"
-WORK_TMP_PATTERN = re.compile(rf"{re.escape(WORK_TMP_PREFIX)}[0-9a-f]{{16}}\.tmp")
+WORK_TMP_PATTERN = re.compile(rf"{re.escape(WORK_TMP_PREFIX)}([0-9a-f]{{16}})([0-9a-f]{{16}})\.tmp")
 STAND_IN = {"verdict": "follow", "reasons": ["判定の代役（実物の LLM を呼ばない）"], "boundary": [], "basis": ["Value 1"]}
 
 
@@ -585,10 +590,10 @@ def _work_tmp(result: Path, retry: bool = True) -> Optional[_Tmp]:
     """judge が作った専用ディレクトリに一時ファイル（0600）を作って返す。
 
     候補の名前（基本の名前と、末尾に `-1`〜`-99` を付けた名前の計 `WORK_TRIES` 個）を順に見て、judge が作った印のある
-    ディレクトリか、新しく作れたディレクトリを使う。作った起動は、作ったディレクトリを開いた記述子を基準に、印のファイル
-    （`WORK_MARK`）を置く。印の無い既存のもの（利用者が作ったもの、印を置く前に強制終了した起動のものなど）は、残したまま次の
-    候補へ移る。全部の候補が使えなければ止める。一時ファイルは、印を確かめたのと同じ記述子を基準に、judge の一時ファイルの名前
-    （`WORK_TMP_PREFIX` + 16 桁の 16 進数 + `.tmp`）で作る。ロックを外した前の起動が空の専用ディレクトリを消すことがあるので、
+    ディレクトリか、新しく作れたディレクトリを使う。作った起動は、作ったディレクトリを開いた記述子を基準に、新しい鍵を書いた
+    印のファイル（`WORK_MARK`）を置く。印の無い既存のもの（利用者が作ったもの、印を置く前に強制終了した起動のものなど）は、
+    残したまま次の候補へ移る。全部の候補が使えなければ止める。一時ファイルは、印を確かめたのと同じ記述子を基準に、その印の鍵で
+    作った judge の一時ファイルの名前（`_tmp_name`）で作る。ロックを外した前の起動が空の専用ディレクトリを消すことがあるので、
     作る前に消されたら作り直す。`retry` が偽なら作り直さずに None を返す。親のディレクトリが消えたときは止める。
     """
     parent = result.absolute().parent
@@ -605,9 +610,11 @@ def _work_tmp(result: Path, retry: bool = True) -> Optional[_Tmp]:
                 dfd = _open_dir(work)
                 if dfd is None:
                     continue
-                if made:
-                    _mark(dfd)
-                elif not _marked(dfd):
+                key = _mark(dfd, secrets.token_bytes(WORK_KEY_BYTES)) if made else None
+                if key is None:
+                    # 既にあったディレクトリか、作った直後に別の起動が印を置いた
+                    key = _marked(dfd)
+                if key is None:
                     os.close(dfd)
                     continue
             except FileNotFoundError as exc:
@@ -620,7 +627,7 @@ def _work_tmp(result: Path, retry: bool = True) -> Optional[_Tmp]:
                 _drop_work_dir(result)
                 raise Stop(f"--result（{result}）の一時ファイルを作れない: {exc}") from None
             try:
-                fd, name = _create_tmp(dfd)
+                fd, name = _create_tmp(dfd, key)
                 return _Tmp(fd=fd, dfd=dfd, name=name)
             except FileNotFoundError:
                 # 印を確かめた後、ロックを外した前の起動がこのディレクトリを消した
@@ -640,10 +647,27 @@ def _work_tmp(result: Path, retry: bool = True) -> Optional[_Tmp]:
             return None
 
 
-def _create_tmp(dfd: int) -> tuple[int, str]:
-    """開いた専用ディレクトリに、judge の一時ファイルの名前で新しいファイル（0600）を作り、`(記述子, 名前)` を返す。"""
+def _tmp_tag(key: bytes, nonce: str) -> str:
+    """印の鍵で乱数の部分から作る、一時ファイルの名前の確かめの部分（HMAC-SHA256 の先頭 16 桁）。"""
+    return hmac.new(key, nonce.encode("ascii"), hashlib.sha256).hexdigest()[:16]
+
+
+def _tmp_name(key: bytes) -> str:
+    """印の鍵 `key` で作る、judge の一時ファイルの新しい名前。"""
+    nonce = secrets.token_hex(8)
+    return f"{WORK_TMP_PREFIX}{nonce}{_tmp_tag(key, nonce)}.tmp"
+
+
+def _ours(key: bytes, name: str) -> bool:
+    """`name` が、印の鍵 `key` で judge が作った一時ファイルの名前か。"""
+    m = WORK_TMP_PATTERN.fullmatch(name)
+    return m is not None and hmac.compare_digest(m.group(2), _tmp_tag(key, m.group(1)))
+
+
+def _create_tmp(dfd: int, key: bytes) -> tuple[int, str]:
+    """開いた専用ディレクトリに、印の鍵で作った judge の一時ファイルの名前で新しいファイル（0600）を作り、`(記述子, 名前)` を返す。"""
     while True:
-        name = f"{WORK_TMP_PREFIX}{secrets.token_hex(8)}.tmp"
+        name = _tmp_name(key)
         try:
             fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd)
         except FileExistsError:
@@ -659,25 +683,43 @@ def _open_dir(work: Path) -> Optional[int]:
         return None
 
 
-def _mark(dfd: int) -> None:
-    """開いた専用ディレクトリに、judge が作ったことを示す印のファイルを置く。既にあればそのまま。"""
-    try:
-        os.close(os.open(WORK_MARK, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd))
-    except FileExistsError:
-        pass
+def _mark(dfd: int, key: bytes) -> Optional[bytes]:
+    """開いた専用ディレクトリに、鍵 `key` を書いた、judge が作ったことを示す印のファイルを置き、`key` を返す。
 
-
-def _marked(dfd: int) -> bool:
-    """開いたディレクトリが、この利用者の judge が作った専用ディレクトリか。
-
-    ディレクトリと、中の印のファイル（`WORK_MARK`、通常のファイル）の所有者が、どちらもこのプロセスの利用者のときだけ真。
+    既に印のファイルがあれば、書かずに None を返す。
     """
     try:
-        m = os.stat(WORK_MARK, dir_fd=dfd, follow_symlinks=False)
+        fd = os.open(WORK_MARK, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd)
+    except FileExistsError:
+        return None
+    try:
+        os.write(fd, key.hex().encode("ascii"))
+    finally:
+        os.close(fd)
+    return key
+
+
+def _marked(dfd: int) -> Optional[bytes]:
+    """開いたディレクトリが、この利用者の judge が作った専用ディレクトリなら、印の鍵を返す。違えば None を返す。
+
+    ディレクトリと、中の印のファイル（`WORK_MARK`、通常のファイル）の所有者が、どちらもこのプロセスの利用者で、印のファイルに
+    鍵（`WORK_KEY_PATTERN`）が書いてあるときだけ鍵を返す。
+    """
+    try:
+        fd = os.open(WORK_MARK, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dfd)
     except OSError:
-        return False
-    uid = os.getuid()
-    return stat.S_ISREG(m.st_mode) and m.st_uid == uid and os.fstat(dfd).st_uid == uid
+        return None
+    try:
+        m = os.fstat(fd)
+        uid = os.getuid()
+        if not (stat.S_ISREG(m.st_mode) and m.st_uid == uid and os.fstat(dfd).st_uid == uid):
+            return None
+        text = os.read(fd, WORK_KEY_BYTES * 2 + 1).decode("ascii", "replace")
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    return bytes.fromhex(text) if WORK_KEY_PATTERN.fullmatch(text) else None
 
 
 def _same_dir(dfd: int, work: Path) -> bool:
@@ -695,14 +737,15 @@ def _drop_work_dir(result: Path) -> None:
 
     今ある候補だけを見る（`_work_existing`）。印の確かめと操作は、開いたディレクトリの記述子を基準にする。印を消した後、名前が
     まだ同じディレクトリを指すときだけ名前で消す。名前が別のものを指すか、別の起動の一時ファイルがあって消せなければ、開いた
-    ディレクトリに印を戻して残す。
+    ディレクトリに同じ鍵の印を戻して残す（中の一時ファイルの名前は、その鍵で回収できるまま）。
     """
     for work in _work_existing(result):
         dfd = _open_dir(work)
         if dfd is None:
             continue
         try:
-            if not _marked(dfd):
+            key = _marked(dfd)
+            if key is None:
                 continue
             with contextlib.suppress(OSError):
                 os.unlink(WORK_MARK, dir_fd=dfd)
@@ -711,7 +754,7 @@ def _drop_work_dir(result: Path) -> None:
                         raise FileNotFoundError(work)
                     os.rmdir(work)
                 except OSError:
-                    _mark(dfd)
+                    _mark(dfd, key)
         finally:
             os.close(dfd)
 
@@ -719,8 +762,9 @@ def _drop_work_dir(result: Path) -> None:
 def _sweep(result: Path) -> None:
     """judge が作った専用ディレクトリに残った、judge の一時ファイルを消す。消せない分は残して続ける。
 
-    消すのは、次の 3 つがそろうものだけである。judge が作った印のある専用ディレクトリ（`_marked`）の中にあること、judge が
-    一時ファイルに付ける名前（`WORK_TMP_PATTERN`）であること、この利用者が持つ通常のファイルであること。今ある候補だけを見る
+    消すのは、次の 3 つがそろうものだけである。judge が作った印のある専用ディレクトリ（`_marked`）の中にあること、その印の鍵で
+    judge が作った一時ファイルの名前（`_ours`）であること、この利用者が持つ通常のファイルであること。名前の形が同じでも、鍵と
+    合わないもの（利用者が置いたもの、この形より前の名前のもの）は消さない。今ある候補だけを見る
     （`_work_existing`）。保存の一時ファイルは結果のロックを取ってから作るので、ロックを取った時点で残っているものは、強制終了した
     前の起動のもの。初回の結果ファイルを置くための一時ファイル（`_create_locked`）は、ロックを取る前に作るので、別の起動が作って
     いる途中のこともある。それを消しても、その起動は `os.link` の元が消えたことを見て、結果ファイルを開き直す。
@@ -731,14 +775,15 @@ def _sweep(result: Path) -> None:
         if dfd is None:
             continue
         try:
-            if not _marked(dfd):
+            key = _marked(dfd)
+            if key is None:
                 continue
             try:
                 names = os.listdir(dfd)
             except OSError:
                 continue
             for name in names:
-                if not WORK_TMP_PATTERN.fullmatch(name):
+                if not _ours(key, name):
                     continue
                 with contextlib.suppress(OSError):
                     st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
