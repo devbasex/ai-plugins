@@ -5,17 +5,21 @@
 - `--require-output` の名前（作業の定義の outputs。#3908）は、結果ファイルの `outputs` にあり、値が結果 JSON の
   `outputs` の形（`contracts/schemas/result.schema.json` の `$defs/outputs`）に合うかを確かめる。無いか形が違えば
   欠け（`kind` が `output`）にし、そろえば ok の結果の `outputs` に載せる（プランのステップが標準出力から読み、後の工程へ渡す）
+- 前の試行の結果ファイルは、最初の子の起動の直前に消す（`FreshResult`。#1959）。起動の前の確かめ（スロット・アカウントの
+  確かめ直し・CLI の下限・承認の照らし直し）のどれかで止まると、子は起動しない。先に消すと一度も動かないまま前の結果を
+  失うので、最後に打たれる照らし直し（`claude._precheck`）が通った最初の 1 回で消す
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional
 
 from ndf import cli, contracts
-from ndf.contracts import result
+from ndf.adapters import claude
+from ndf.contracts import result, worker_paths
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 
 # 結果 JSON の tool（このモジュールは `ndf worker run` の部品なので、サブコマンド `worker` の名前を使う）
@@ -100,3 +104,40 @@ def outcome_of(
         return result.result(TOOL, GATE, f"作業 {kind} の worker が判断を求めた: {said}", items, metrics, routes=routes)
     gaps = gaps or [{"kind": "work", "name": kind, "reason": said}]
     return result.stopped(TOOL, "incomplete", f"作業 {kind} の worker が作業を残した: {said}", items=items, metrics=metrics, gaps=gaps)
+
+
+class Uncleared(Exception):
+    """起動の前に、前の試行の結果ファイルを消せなかった（リンクなど）。"""
+
+
+class FreshResult:
+    """前の試行の結果ファイル `name` を消す時点を決める。`cleared` が偽の間は、残った前の結果を今回の結果と見なさない。
+
+    承認の再確認が要る起動（照らし直し `verify` がある）では、最初の子の起動の前の確かめがすべて通った後に消す
+    （`LaunchOptions.ready`）。承認の再確認が要らない起動では、作った時点で消す。
+    """
+
+    def __init__(self, wd: worker_paths.WorkDir, name: str, verify: Optional[Callable[[], Optional[str]]]) -> None:
+        self.wd, self.name, self._verify = wd, name, verify
+        self.cleared = False
+        if verify is None:
+            self._clear()
+
+    def _clear(self) -> None:
+        try:
+            worker_paths.remove_file(self.wd, self.name)
+        except worker_paths.EntryError as exc:
+            raise Uncleared(str(exc)) from None
+        self.cleared = True
+
+    def ready(self) -> None:
+        """子を起動する直前、起動の前の確かめがすべて通った後に打つ（`LaunchOptions.ready`）。最初の 1 回で前の結果ファイルを消す。"""
+        if not self.cleared:
+            self._clear()
+
+    @property
+    def options(self) -> claude.LaunchOptions:
+        """子の起動の選び方。照らし直しの無い起動は `verify` と `ready` を置かない（起動の費用を足さない）。"""
+        if self._verify is None:
+            return claude.LaunchOptions()
+        return claude.LaunchOptions(verify=self._verify, ready=self.ready)

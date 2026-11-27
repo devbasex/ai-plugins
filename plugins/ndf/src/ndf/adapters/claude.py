@@ -39,6 +39,10 @@ PLUGIN_LIST = "claude-plugins.list"
 LIST_UNREADABLE = "導入済みのプラグインの一覧を読めず、旧い NDF を外さずに起動する"
 # full の起動で許す Tool
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch,WebFetch,WebSearch"
+# full の起動で読み込む組み込みの Tool。許す 13 個に、工程の中で使う 3 個を足す（#1959 の決定 5）。起動の設定の `load` を後ろに足す
+LOAD_TOOLS = FULL_TOOLS + ",TaskStop,NotebookEdit,ListAgents"
+# MCP を起動の設定で指定したものだけ読む引数（指定の無い工程は環境の MCP を読まない。#1959 の決定 1）
+STRICT_MCP = "--strict-mcp-config"
 # 起動の頭（質問を 1 回渡し、回答を JSON で受ける）
 PRINT_JSON = ["-p", "--output-format", "json"]
 # 逐次の起動の頭（1 歩ごとに 1 行の JSON を出す。stream-json は --verbose が無いと起動できない。#3945）
@@ -68,7 +72,8 @@ class Permission(StrEnum):
 
     - `judge`: 判断の呼び出し。最小構成で Tool を使わせない
     - `tools`: 最小構成で、渡した Tool だけを許して編集を受ける（acceptEdits）
-    - `full`: Skill を回す起動。設定・プラグイン・hook をそのまま読み、`FULL_TOOLS` を許して編集を受ける
+    - `full`: Skill を回す起動。設定・プラグイン・hook をそのまま読み、`LOAD_TOOLS` の組み込みの Tool だけを読み込み、`FULL_TOOLS` を
+      許して編集を受ける。MCP は起動の設定が指定した工程だけが読む（#1959）
     """
 
     JUDGE = "judge"
@@ -80,6 +85,23 @@ class Permission(StrEnum):
 # （members の名前は id の大文字）
 FAILURES = "claude-failures"
 Failure = StrEnum("Failure", [(i.upper(), i) for i in facts.ids(FAILURES)])
+
+
+class LaunchGrant(Protocol):
+    """full の起動 1 回の指定（`launch_settings.Grant` が満たす）。`load` は読み込みに足す Tool、`allow` は尋ねずに使ってよい指定、
+    `inherit` は環境の MCP をすべて読むか、`mcp_files` は読む MCP の定義（確かめた中身のコピー）。"""
+
+    @property
+    def load(self) -> tuple[str, ...]: ...
+
+    @property
+    def allow(self) -> tuple[str, ...]: ...
+
+    @property
+    def inherit(self) -> bool: ...
+
+    @property
+    def mcp_files(self) -> tuple[Path, ...]: ...
 
 
 class Session(NamedTuple):
@@ -97,6 +119,7 @@ class ClaudeCall:
     `session` は会話の指定（None なら最小構成は会話を残さない。#4013）。`json_schema` は回答を縛るスキーマ。`stream` は標準出力を 1 歩ごとの
     行にする（結果をファイルで受け、標準出力を読まない担当だけが使う。無進捗の監視が作業中の担当を止まりと誤らない。#3945）。
     `readable` は作業ディレクトリのほかに読める場所で、`tools` の権限でだけ渡す。渡すと読める場所を限った起動になる（#3955）。
+    `grant` は起動の設定から解いた指定（`LaunchGrant`）で、`full` の権限でだけ渡す。None なら指定なしと同じ（#1959）。
     """
 
     system: str
@@ -107,12 +130,15 @@ class ClaudeCall:
     model: Optional[str] = None
     stream: bool = False
     readable: tuple[Path, ...] = ()
+    grant: Optional[LaunchGrant] = None
 
     def __post_init__(self) -> None:
         if (self.permission is Permission.TOOLS) != bool(self.tools):
             raise ValueError(f"tools は権限 {Permission.TOOLS} のときだけ、空でなく渡す（権限 {self.permission}）")
         if self.readable and self.permission is not Permission.TOOLS:
             raise ValueError(f"readable は権限 {Permission.TOOLS} のときだけ渡す（権限 {self.permission}）")
+        if self.grant is not None and self.permission is not Permission.FULL:
+            raise ValueError(f"grant は権限 {Permission.FULL} のときだけ渡す（権限 {self.permission}）")
 
 
 class PluginArgs(NamedTuple):
@@ -279,13 +305,16 @@ def minimal_args(system: str, stream: bool = False, session: Optional[Session] =
     return head + ["--disable-slash-commands", "--system-prompt", system, *session_args(session)]
 
 
-def permission_args(permission: Permission, tools: Optional[str] = None, readable: Sequence[Path] = ()) -> list[str]:
+def permission_args(
+    permission: Permission, tools: Optional[str] = None, readable: Sequence[Path] = (), grant: Optional[LaunchGrant] = None
+) -> list[str]:
     """権限ごとの、使える Tool と許可のモードの引数。権限の引数はここだけが持つ。
 
     `readable` が空でなければ、Tool をその場所と作業ディレクトリへ閉じ込め（`--restricted`・`--add-dir`）、許していない操作を
-    断る（`dontAsk`）。値を 1 つだけ取る `--permission-mode` を最後に置き、後ろのリクエストを `--add-dir` の値と読ませない（#3955）。"""
+    断る（`dontAsk`）。値を 1 つだけ取る `--permission-mode` を最後に置き、後ろのリクエストを `--add-dir` の値と読ませない（#3955）。
+    `full` の引数は `_full_permission`（`grant` は full でだけ使う）。"""
     if permission is Permission.FULL:
-        return [*ACCEPT_EDITS, "--allowed-tools", FULL_TOOLS]
+        return _full_permission(grant)
     if permission is Permission.TOOLS:
         if not tools:
             raise ValueError(f"権限 {Permission.TOOLS} は許す Tool を要る")
@@ -296,6 +325,23 @@ def permission_args(permission: Permission, tools: Optional[str] = None, readabl
     return ["--tools", ""]
 
 
+def _full_permission(grant: Optional[LaunchGrant]) -> list[str]:
+    """full の起動の Tool と MCP の引数（#1959）。
+
+    読み込む Tool（`--tools`）は `LOAD_TOOLS` に `grant.load` を足し、尋ねずに使ってよい指定（`--allowed-tools`）は `FULL_TOOLS` に
+    `grant.allow` を足す。`load` の名前は許可に入れない。許可の指定は空白を含みうるので 1 件を 1 つの引数にする（値を複数取る引数）。
+    `inherit` でなければ `--strict-mcp-config` で環境の MCP を読まず、定義のコピーがあれば `--mcp-config` で渡す。後ろには必ず
+    `--` で始まる引数（プラグインの引数か `--append-system-prompt`）が続き、値を複数取る引数の終わりになる。
+    """
+    load = (*LOAD_TOOLS.split(","), *(grant.load if grant is not None else ()))
+    allow = (*FULL_TOOLS.split(","), *(grant.allow if grant is not None else ()))
+    args = [*ACCEPT_EDITS, "--tools", ",".join(dict.fromkeys(load)), "--allowed-tools", *dict.fromkeys(allow)]
+    if grant is not None and grant.inherit:
+        return args
+    files = [str(p) for p in grant.mcp_files] if grant is not None else []
+    return [*args, STRICT_MCP, *(["--mcp-config", *files] if files else [])]
+
+
 def _print_head(stream: bool) -> list[str]:
     """`-p` の出力の形の引数。`stream` なら逐次（stream-json）、でなければ 1 回の JSON。"""
     return list(PRINT_STREAM if stream else PRINT_JSON)
@@ -303,7 +349,7 @@ def _print_head(stream: bool) -> list[str]:
 
 def _full_args(call: ClaudeCall, root: Path, cwd: Optional[Path]) -> PluginArgs:
     plugins = plugin_args(root, cwd=cwd)
-    args = [*_print_head(call.stream), *permission_args(Permission.FULL)]
+    args = [*_print_head(call.stream), *permission_args(Permission.FULL, grant=call.grant)]
     args += plugins.args + ["--append-system-prompt", call.system]
     return PluginArgs(args + session_args(call.session), plugins.notice)
 
@@ -557,6 +603,11 @@ class LaunchOptions:
       偽なら確かめ直さずに `Failure.REFUSED`（アカウントの設定の API を呼ばず、設定も変えない）
     - `switch_account`: 中継の起動先を継いだ起動が利用上限に当たったとき、替え先のアカウントで 1 回だけ打ち直すか。
       偽なら打ち直さずに `Failure.USAGE_LIMIT` を返す（1 回の判定で 1 回だけ起動すると決めた呼び手）
+    - `verify`: 子を起動する直前（スロット・アカウントの確かめ直しの後、CLI の下限の前）に打つ照らし直し。理由の 1 行を返せば起動せず `Failure.LAUNCH`。
+      承認を確かめた起動の設定が、確かめた後に変わったか取り消されたかを見る（`launch_settings.Grant.verify`。#1959）。
+      子プロセスを起動しない確かめなので、`claude --version` を打つ CLI の下限より前に打つ（止まる起動に `--version` を打たない）
+    - `ready`: 起動の前の確かめをすべて通った後、子を起動する直前に 1 回打つ準備（worker が前の結果ファイルを消すなど）。
+      どの確かめで止まった起動でも打たない
     """
 
     slot_wait: Optional[float] = None
@@ -564,6 +615,8 @@ class LaunchOptions:
     cli_floor: bool = True
     ensure_training: bool = True
     switch_account: bool = True
+    verify: Optional[Callable[[], Optional[str]]] = None
+    ready: Optional[Callable[[], None]] = None
 
 
 # 選び方を省いた起動（今までどおり）
@@ -626,11 +679,24 @@ def require_claude(run: AccountRun, cwd: Optional[Path], check: bool) -> Optiona
 
 
 def _precheck(run: AccountRun, cwd: Optional[Path], options: LaunchOptions) -> Optional[ClaudeReply]:
-    """起動の直前の確かめ。`run.recheck` が 1 行を返せば `Failure.REFUSED`、次に CLI の下限（`require_claude`）。通れば None。"""
+    """起動の直前の確かめ。`run.recheck` が 1 行を返せば `Failure.REFUSED`、次に `options.verify` が 1 行を返せば
+    `Failure.LAUNCH`、最後に CLI の下限（`require_claude`）。すべて通れば `options.ready` を打って None。
+
+    照らし直しは子プロセスを起動しないので、`claude --version` を打つ下限より前に打つ（取り消しで止まる起動に `--version` を打たない）。
+    起動の準備（`ready`）は確かめをすべて通った後に打つので、どの確かめで止まった起動でも準備をしない。
+    """
     refused = run.recheck() if run.recheck is not None else None
     if refused is not None:
         return ClaudeReply.failed("", refused, failure=Failure.REFUSED)
-    return require_claude(run, cwd, options.cli_floor)
+    changed = options.verify() if options.verify is not None else None
+    if changed is not None:
+        return ClaudeReply.failed("", changed, failure=Failure.LAUNCH)
+    too_old = require_claude(run, cwd, options.cli_floor)
+    if too_old is not None:
+        return too_old
+    if options.ready is not None:
+        options.ready()
+    return None
 
 
 def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path], options: LaunchOptions) -> ClaudeReply:

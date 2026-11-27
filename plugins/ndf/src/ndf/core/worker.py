@@ -14,6 +14,7 @@ worker（`claude -p` の full の起動）へ渡す規則文を組み、作業�
   判断が要る・できなかった結果と、変えた定義が無く語を空で書いた記録は再起動しない。記録は結果 JSON に載せる（#3188）
 - 受け入れ条件の区分の記録と「確かめられなかった条件があれば ok にしない」は、条件を確かめる作業種別（`ACCEPTANCE_KINDS`）
   にだけ手順（`ACCEPTANCE_RULES`）として渡す。リリース後と記録した条件は確かめられなかった条件に数えない（#1682）
+- 起動の設定の作業種別の指定を `launch_settings.prepared` で解き、壊れているか未承認なら起動しない（`precondition`。#1959）
 - 起動の間は子へ作業種別を環境変数 `identity.WORKER_KIND_ENV` で渡す。hook の guard `full-test` はこれで worker の中の
   全体テストを止める（#3112）
 - push の前に、コミットの件名と本文の closing keywords を照らし、当たれば push させない（`closing_commits`。#3129）
@@ -64,13 +65,13 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import cli, identity
-from ndf.adapters import claude, git
+from ndf.adapters import claude, git, launch_settings
 from ndf.contracts import causes, exit_codes, facts, limits, result, worker_kinds, worker_paths, writing
 from ndf.contracts.exit_codes import OK
 from ndf.core import durable_locks, worker_append
 from ndf.core.plan import model, runner
 from ndf.core.plan.records import PROGRESS_FILE
-from ndf.core.worker_outcome import outcome_of, require_outputs
+from ndf.core.worker_outcome import FreshResult, Uncleared, outcome_of, require_outputs
 
 log = logging.getLogger(__name__)
 
@@ -269,7 +270,7 @@ def sources_of(raw: Any) -> list[Source]:
 # --- 受け渡し ---------------------------------------------------------------------------------
 
 
-Caller = Callable[[list[str], str, float, Optional[Path]], claude.ClaudeReply]
+Caller = Callable[[list[str], str, float, Optional[Path], claude.LaunchOptions], claude.ClaudeReply]
 
 
 def work_timeout() -> float:
@@ -389,13 +390,10 @@ def _worker_env(kind: str, result_dir: Optional[worker_paths.WorkDir] = None) ->
                 os.environ[key] = value
 
 
-def _args_for(system: str, root: Optional[Path], cwd: Path) -> claude.PluginArgs:
-    """worker の起動の引数（会話の指定を除く）。導入済みの一覧は worker の `cwd` で読む。
-
-    一覧の読み取り（`claude plugin list --json` の起動）は 1 回の委譲で 1 回だけにするため、`delegate` の頭で 1 回組み、
-    新しい会話は `--session-id`、再起動は `--resume` だけを足す。
-    """
-    return claude.claude_launch(claude.ClaudeCall(system, claude.Permission.FULL), root, cwd=cwd)
+def _args_for(system: str, root: Optional[Path], cwd: Path, grant: Optional[launch_settings.Grant] = None) -> claude.PluginArgs:
+    """worker の起動の引数（会話の指定を除く）。`grant` は起動の設定の指定。導入済みの一覧は worker の `cwd` で読む。
+    一覧の読み取りは 1 回の委譲で 1 回だけにするため `delegate` の頭で組み、会話の引数（`--session-id`・`--resume`）だけを足す。"""
+    return claude.claude_launch(claude.ClaudeCall(system, claude.Permission.FULL, grant=grant), root, cwd=cwd)
 
 
 def _stopped_detail(handoff: Handoff, wd: worker_paths.WorkDir) -> str:
@@ -415,35 +413,34 @@ def delegate(
 ) -> Delivery:
     """worker を起動し、結果ファイルが書かれるまで同じ会話を `RESUMES` 回まで再起動する。
 
-    結果ファイルは開いた結果の保存先 `wd` の中の名前としてリンクをたどらずに扱う。前の試行の結果ファイルは起動の前に
-    消し、消せない（リンクなど）なら起動せずに `invalid` にする。結果ファイルがあれば `cause` が None、再起動しても
-    無ければ `work_stopped`、起動が打ち直しても直らない失敗で終えればその種類を `cause` に置く。委譲中に結果ファイルが
-    リンクになったか読めなければ、再起動せずに `bad_report` にする。
+    結果ファイルは開いた結果の保存先 `wd` の中の名前としてリンクをたどらずに扱う。前の試行の結果ファイルを消す時点は `FreshResult` が
+    決める。承認の再確認が要る起動では、起動の設定の検査・承認の確認・起動の前の確かめのどれで止まっても残す。消せない（リンクなど）なら
+    起動せずに `invalid` にする。結果ファイルがあれば `cause` が None、再起動しても無ければ `work_stopped`、起動が打ち直しても直らない失敗で終えればその種類を `cause` に置く。委譲中に結果ファイルが
+    リンクになったか読めなければ、再起動せずに `bad_report` にする。指定の停止は `InternalError` で上げる（`ndf.cli` が結果 JSON にする）。
     """
     out = Delivery(session=session or str(uuid.uuid4()))
-    try:
-        worker_paths.remove_file(wd, handoff.result_file.name)
-    except worker_paths.EntryError as exc:
-        out.cause, out.detail = "invalid", f"結果ファイル {handoff.result_file} を起動の前に消せない: {exc}"
-        return out
-    base, out.notice = _args_for(system, root, handoff.cwd)
-    try:
-        _resume_until_written(handoff, wd, out, base, call)
-    except worker_paths.EntryError as exc:
-        out.cause, out.detail = "bad_report", f"結果ファイル {handoff.result_file} を読めない: {exc}"
+    with launch_settings.prepared(handoff.kind, handoff.cwd) as grant:  # 起動できない指定なら、前の結果ファイルを消す前に止まる
+        base, out.notice = _args_for(system, root, handoff.cwd, grant)
+        try:
+            _resume_until_written(handoff, out, base, call, FreshResult(wd, handoff.result_file.name, grant.verifier))
+        except Uncleared as exc:
+            out.cause, out.detail = "invalid", f"結果ファイル {handoff.result_file} を起動の前に消せない: {exc}"
+        except worker_paths.EntryError as exc:
+            out.cause, out.detail = "bad_report", f"結果ファイル {handoff.result_file} を読めない: {exc}"
     return out
 
 
-def _resume_until_written(handoff: Handoff, wd: worker_paths.WorkDir, out: Delivery, base: list[str], call: Caller) -> None:
-    """`delegate` の起動と再起動。結果ファイルがリンクになったか読めなければ `EntryError` を上げる。"""
+def _resume_until_written(handoff: Handoff, out: Delivery, base: list[str], call: Caller, fresh: FreshResult) -> None:
+    """`delegate` の起動と再起動（子ごとに `fresh.options` の照らし直しが起動の直前に打たれる）。結果ファイルが読めなければ `EntryError` を上げる。"""
+    wd = fresh.wd
     argv = base + ["--session-id", out.session]
     prompt = f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
     for attempt in range(RESUMES + 1):
         with _worker_env(handoff.kind, wd):
-            reply = call(argv, prompt, handoff.timeout, handoff.cwd)
+            reply = call(argv, prompt, handoff.timeout, handoff.cwd, fresh.options)
         out.attempts, out.cost = attempt + 1, out.cost + reply.cost
         out.replies.append(reply.raw[:200])
-        written = _written(wd, handoff.result_file.name)
+        written = fresh.cleared and _written(wd, handoff.result_file.name)  # 前の結果を消す前は、残った前の結果を数えない
         if (written and not _missing_record(handoff, wd)) or _reply_failed(reply, out):
             return
         argv = base + ["--resume", out.session]
