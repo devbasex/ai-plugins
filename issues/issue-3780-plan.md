@@ -51,7 +51,7 @@
 
 ### Task 4: 起点の条件と、新しく PR の変更になったファイル
 - **対象ファイル:** `scope_decide.py`、`round_scope.py`、`changes.py`、`test_crossreview_scope.py`
-- **変更内容:** `origin_record`・`origin`・`line_origin`・`new_in_pr`・`since_diff`
+- **変更内容:** `origin_record`・`read_origin`・`line_origin`・`new_in_pr`・`since_diff`
 - **満たす受け入れ条件:** 3780:1
 - **進め方:** 一時のリポジトリで失敗するテスト（詳細設計の `new_in_pr` の観点。比較先の変更、競合の解消、実行権限だけの変更、同じ文の追加）→ 最小実装 → 整理
 

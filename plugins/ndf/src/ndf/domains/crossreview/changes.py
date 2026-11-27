@@ -1,6 +1,7 @@
 """変更の読み取りと、PR が足した MVV の根拠の記述の確かめ（#4076）。
 
-`base...HEAD` で変わったファイルと、Markdown の本文・セクション、差分とそのファイルごとの行を読む。差分の行の番号は git の
+`base...HEAD` で変わったファイルと、Markdown の本文・セクション、差分とそのファイルごとの行を読む。2 ラウンド目以降に渡す
+前の head からの差分と、比較基点の変化で新しく PR の変更になったファイル（#3780）も読む。差分の行の番号は git の
 数え方（`\\n` だけで区切る）なので、Markdown の解析の行の番号（`\\r` でも区切る）とは `_markdown_rows` で対応させる。
 
 根拠の記述は、`- 根拠: Value 5（MVV バージョン 11）` のように、決定がどの MVV の項目に基づくかを書いた行である。`citations` が、
@@ -11,7 +12,10 @@ from __future__ import annotations
 
 import ast
 import re
+from bisect import bisect_right
+from collections import Counter, defaultdict
 from collections.abc import Iterator, Mapping, Sequence
+from itertools import groupby
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
@@ -161,6 +165,12 @@ class Line(NamedTuple):
     base: Optional[int]
     head: Optional[int]
     text: str
+    newline: bool = True
+
+    @property
+    def key(self) -> str:
+        """行を比べるときの値。末尾に改行の無い行は、同じ本文の改行のある行と別の値にする（本文は改行を含まない）。"""
+        return self.text if self.newline else f"{self.text}\n"
 
 
 class Hunk(NamedTuple):
@@ -223,6 +233,11 @@ def _read_name(line: str, names: dict[bool, Optional[str]]) -> None:
             names[of_base] = _path(line.removeprefix(start), prefix)
 
 
+def _end_without_newline(lines: Sequence[Line]) -> tuple[Line, ...]:
+    """`lines` の最後の行を、末尾に改行の無い行にする（`\\ No newline at end of file` は直前の行を指す）。"""
+    return (*lines[:-1], lines[-1]._replace(newline=False))
+
+
 def _hunk(header: re.Match[str], rest: Iterator[str]) -> Hunk:
     """見出し `header` の hunk を、示された行数だけ `rest` から読む（見出しに見える本文の行を読み違えない）。"""
     base_left, head_left = (int(n) if n is not None else 1 for n in (header[2], header[4]))
@@ -233,7 +248,7 @@ def _hunk(header: re.Match[str], rest: Iterator[str]) -> Hunk:
     while base_left or head_left:
         line = next(rest)
         if line.startswith("\\"):
-            # `\ No newline at end of file` は行でない
+            lines = list(_end_without_newline(lines))
             continue
         in_base, in_head = line[0] != "+", line[0] != "-"
         lines.append(Line(base if in_base else None, head if in_head else None, line[1:]))
@@ -242,9 +257,8 @@ def _hunk(header: re.Match[str], rest: Iterator[str]) -> Hunk:
     return Hunk(first, tuple(lines))
 
 
-def _diff_files(text: str) -> list[DiffFile]:
-    """`review_diff` の差分を、ファイルごとに分ける。消したファイルと、パスの行の無いファイル（バイナリ・実行権限だけの変更・
-    空のファイル）は返さない。"""
+def _file_blocks(text: str) -> list[tuple[dict[bool, Optional[str]], list[Hunk]]]:
+    """`review_diff` の差分の、ファイルごとのパス（ベースの側か → パス）と hunk。"""
     files: list[tuple[dict[bool, Optional[str]], list[Hunk]]] = []
     rest = iter(text.split("\n"))
     for line in rest:
@@ -253,9 +267,20 @@ def _diff_files(text: str) -> list[DiffFile]:
             files.append(({}, []))
         elif header is not None:
             files[-1][1].append(_hunk(header, rest))
+        elif line.startswith("\\"):
+            # hunk の最後の行を指すものは、示された行数を読み終えた後に来る
+            last = files[-1][1][-1]
+            files[-1][1][-1] = last._replace(lines=_end_without_newline(last.lines))
         elif files:
             _read_name(line, files[-1][0])
-    return [DiffFile(path, names.get(True), tuple(hunks)) for names, hunks in files if (path := names.get(False)) is not None]
+    return files
+
+
+def _diff_files(text: str) -> list[DiffFile]:
+    """`review_diff` の差分を、ファイルごとに分ける。消したファイルと、パスの行の無いファイル（バイナリ・実行権限だけの変更・
+    空のファイル）は返さない。"""
+    blocks = _file_blocks(text)
+    return [DiffFile(path, names.get(True), tuple(hunks)) for names, hunks in blocks if (path := names.get(False)) is not None]
 
 
 def _base_lines(hunks: Sequence[Hunk], head_line: int) -> Optional[int]:
@@ -281,6 +306,277 @@ def _markdown_rows(text: str) -> list[tuple[int, str]]:
             out.append((no, row[1]))
             no += row[2].endswith("\n")
     return out
+
+
+# --- 前のラウンドからの差分（#3780）--------------------------------------------------------------
+
+# 変わったファイルの種別・モード・blob と、行で比べられるかを読む引数（改名の検出は `_DIFF` と同じ）
+_LISTING = (
+    "-c",
+    "core.quotePath=false",
+    "diff",
+    "--raw",
+    "--numstat",
+    "-z",
+    "--no-abbrev",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-relative",
+    "--find-renames",
+    "-l1000",
+)
+
+
+class Range(NamedTuple):
+    """1 つの PR の差分の両端のコミット（比較基点と head）。"""
+
+    base: str
+    head: str
+
+
+class _Entry(NamedTuple):
+    """`git diff --raw` の 1 件。`status` は種別の 1 字、`old`・`new` は前後のパス（改名でなければ同じ）。"""
+
+    status: str
+    old: str
+    new: str
+    modes: tuple[str, str]
+    blobs: tuple[str, str]
+
+    @property
+    def kind(self) -> tuple[str, str, str, tuple[str, str]]:
+        """中身によらない変更の形（種別・前後のパス・前後のモード）。"""
+        return self.status, self.old, self.new, self.modes
+
+
+class _Delta(NamedTuple):
+    """1 つの差分。`entries`・`hunks` は後ろの側のパス（消したファイルは前のパス）で引き、`binary` は行で比べられないパス。"""
+
+    entries: dict[str, _Entry]
+    binary: frozenset[str]
+    hunks: dict[str, tuple[Hunk, ...]]
+
+
+# 差分の範囲から、その一覧（変わったファイルと、そのうち行で比べられないもの）。呼び手が空の辞書を作り、同じラウンドの
+# `new_in_pr` と `since_diff` へ渡して、同じ範囲の一覧を 2 回読まない
+Listings = dict[str, tuple[dict[str, _Entry], frozenset[str]]]
+
+
+def _listing(g: git.Git, span: str, listed: Listings) -> tuple[dict[str, _Entry], frozenset[str]]:
+    """差分 `span` の一覧。`listed` に無ければ読んで入れる。"""
+    if span not in listed:
+        listed[span] = _read_listing(g, span)
+    return listed[span]
+
+
+def _read_listing(g: git.Git, span: str) -> tuple[dict[str, _Entry], frozenset[str]]:
+    """差分 `span` の変わったファイルと、そのうち行で比べられないもの。UTF-8 でないパスは、git へ渡し直せる形で読む。"""
+    fields = iter(g.run_bytes(*_LISTING, span).decode("utf-8", errors="surrogateescape").split("\0"))
+    entries: dict[str, _Entry] = {}
+    binary: set[str] = set()
+    for field in fields:
+        if field.startswith(":"):
+            old_mode, new_mode, old_blob, new_blob, status = field[1:].split(" ")
+            old = next(fields)
+            new = next(fields) if status[0] in "RC" else old
+            entries[new] = _Entry(status[0], old, new, (old_mode, new_mode), (old_blob, new_blob))
+        elif field:
+            added, _, path = field.split("\t", 2)
+            if not path:
+                # 改名と複製は、パスの欄が空で、前後のパスが続く
+                next(fields)
+                path = next(fields)
+            if added == "-":
+                binary.add(path)
+    return entries, frozenset(binary)
+
+
+def _delta(g: git.Git, span: str, listed: Listings) -> _Delta:
+    entries, binary = _listing(g, span, listed)
+    hunks: dict[str, tuple[Hunk, ...]] = {}
+    text = g.run_bytes(*_DIFF, span).decode("utf-8", errors="surrogateescape")
+    for names, found in _file_blocks(text):
+        path = names.get(False) or names.get(True)
+        if path is not None:
+            hunks[path] = (*(hunks[path] if path in hunks else ()), *found)
+    return _Delta(entries, binary, hunks)
+
+
+def _changed_rows(hunks: Sequence[Hunk]) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
+    """足した行と消した行の、後ろの側の行の番号と本文。消した行の番号は、消した箇所のすぐ後ろの行の番号。"""
+    added: list[tuple[int, str]] = []
+    removed: list[tuple[int, str]] = []
+    for hunk in hunks:
+        at = hunk.head
+        for line in hunk.lines:
+            if line.head is None:
+                removed.append((at, line.key))
+                continue
+            if line.base is None:
+                added.append((line.head, line.key))
+            at = line.head + 1
+    return added, removed
+
+
+class _Block(NamedTuple):
+    """前の head からの差分の、変えた行が続くひとかたまり。`start`・`end` は今の head の行の番号（`end` はすぐ後ろの残る行）、
+    `base` は前の head の最初の行の番号、`removed` は消した行の本文。"""
+
+    start: int
+    end: int
+    base: int
+    removed: tuple[str, ...]
+
+
+def _append_block(blocks: list[_Block], block: _Block) -> None:
+    """`block` を `blocks` の後ろへ足す。前のかたまりとの間に残る行が無ければ 1 つにする。"""
+    if blocks and (blocks[-1].end, blocks[-1].base + len(blocks[-1].removed)) == (block.start, block.base):
+        before = blocks.pop()
+        block = _Block(before.start, block.end, before.base, before.removed + block.removed)
+    blocks.append(block)
+
+
+def _changed_blocks(hunks: Sequence[Hunk]) -> list[_Block]:
+    """`hunks` の変えた行のかたまりを、行の順に返す。間に残る行の無いかたまりは 1 つにする（種別の変更は、削除と追加が
+    同じ位置の別の hunk になる）。"""
+    blocks: list[_Block] = []
+    offset = 0
+    for hunk in hunks:
+        head, base = hunk.head, hunk.head + offset
+        for changed_here, group in groupby(hunk.lines, key=lambda x: x.base is None or x.head is None):
+            lines = list(group)
+            end = head + sum(x.head is not None for x in lines)
+            if changed_here:
+                _append_block(blocks, _Block(head, end, base, tuple(x.key for x in lines if x.head is None)))
+            base += sum(x.base is not None for x in lines)
+            head = end
+        offset = base - head
+    return blocks
+
+
+def _locate(blocks: Sequence[_Block], starts: Sequence[int], at: int) -> tuple[int, Optional[int]]:
+    """今の head の `at` 行目に当たる前の head の行の番号と、`at` がかたまりの中かすぐ後ろならそのかたまりの `blocks` の番号。
+    かたまりの中の行（足した行）の番号は、かたまりのすぐ後ろの行の番号にする。`starts` は `blocks` の `start`。"""
+    index = bisect_right(starts, at) - 1
+    if index < 0:
+        return at, None
+    block = blocks[index]
+    after = block.base + len(block.removed)
+    return (after, index) if at <= block.end else (at + after - block.end, None)
+
+
+def _removals_unread(
+    removed: Sequence[tuple[int, str]], seen_removed: Sequence[tuple[int, str]], blocks: Sequence[_Block], starts: Sequence[int]
+) -> bool:
+    """今の PR の差分が消した行 `removed` に、読んでおらず今回も消さないものがあるか。消した箇所の前後の残る行に挟まれた
+    範囲ごとに、既読の削除と今回の削除を前の head の順に並べ、その並びに同じ順で現れるかを確かめる。今回の削除に当てるのは、
+    今の head での位置も同じときだけである（同じ範囲の別の位置で同じ本文を消した変更は、今回渡る差分に出ない）。"""
+    seen: defaultdict[int, list[tuple[Optional[int], str]]] = defaultdict(list)
+    for at, text in seen_removed:
+        # 既読の削除は範囲の中のどこでも当たる（位置は None）
+        seen[at].append((None, text))
+    # キーに `_Block` を入れると、消した行ごとに `removed` の全体をハッシュする
+    gaps: dict[tuple[int, Optional[int]], list[tuple[int, str]]] = {}
+    for at, text in removed:
+        gaps.setdefault(_locate(blocks, starts, at), []).append((at, text))
+    for (end, index), rows in gaps.items():
+        known: list[tuple[Optional[int], str]] = []
+        if index is not None:
+            block = blocks[index]
+            for number, gone in enumerate(block.removed, block.base):
+                known += [*seen[number], (block.start, gone)]
+        rest = iter([*known, *seen[end]])
+        # `any` は `rest` を一致した所まで進めるので、順序も確かめる
+        if not all(any(text == gone and where in (None, at) for where, gone in rest) for at, text in rows):
+            return True
+    return False
+
+
+def _has_unread_lines(path: str, now: _Delta, seen: _Delta, since: _Delta) -> bool:
+    """今の PR の差分の `path` に、今回渡す差分にも既読の差分にも同じ位置で現れない足した行か消した行があるか。位置は今の head の
+    行の番号で、既読の差分とは前の head の行の番号へ直して比べる（消した行は `_removals_unread`）。消したファイルには残る行が
+    無いので、本文と件数だけを比べる。"""
+    deleted = now.entries[path].status == "D"
+    step = since.entries.get(path)
+    before = step.old if step is not None else path
+    steps = since.hunks[path] if path in since.hunks else ()
+    blocks = _changed_blocks(steps)
+    starts = [block.start for block in blocks]
+    added, removed = _changed_rows(now.hunks[path] if path in now.hunks else ())
+    since_added, since_removed = _changed_rows(steps)
+    seen_added, seen_removed = _changed_rows(seen.hunks[before] if before in seen.hunks else ())
+    read = set(seen_added)
+    fresh = set(since_added)
+    for at, text in added:
+        # 今回足した行でなければ、`_locate` の番号はその行の前の head の番号
+        if (at, text) not in fresh and (_locate(blocks, starts, at)[0], text) not in read:
+            return True
+    if not deleted:
+        return _removals_unread(removed, seen_removed, blocks, starts)
+    known = Counter(text for _, text in (*since_removed, *seen_removed))
+    return bool(Counter(text for _, text in removed) - known)
+
+
+def _has_unread(path: str, kinds: frozenset[tuple], now: _Delta, seen: _Delta, since: _Delta) -> bool:
+    """今の PR の差分の `path` の変更に、読んでおらず今回も渡らないものがあるか。`kinds` は既読の差分と今回渡す差分の
+    変更の形。行で比べられないファイルは `_binary_unread` で照らす。"""
+    entry = now.entries[path]
+    if entry.kind not in kinds:
+        return True
+    if path not in now.binary:
+        return _has_unread_lines(path, now, seen, since)
+    return _binary_unread(path, now, seen, since)
+
+
+def _binary_unread(path: str, now: _Delta, seen: _Delta, since: _Delta) -> bool:
+    """行で比べられない `path` の今の PR の変更に、相手役が確かめる材料が渡っていないか。材料は差分のブロックの変更前後の
+    blob ID（`index` の行）で、相手役は作業場所のリポジトリからその ID の中身を読む。変更後の blob は、今回渡す差分か既読の
+    差分が持つ。変更前の blob が、そのどちらの変更前とも違えば未読にする（ベースが同じファイルを変えた）。今回渡す差分が
+    中身を変えない（権限だけ・名前だけ）なら、既読の差分の変更前だけと照らす。"""
+    step = since.entries.get(path)
+    read = seen.entries.get(step.old if step is not None else path)
+    given = [read] if read is not None else []
+    if step is not None and step.blobs[0] != step.blobs[1]:
+        given.append(step)
+    return now.entries[path].blobs[0] not in {entry.blobs[0] for entry in given}
+
+
+def new_in_pr(g: git.Git, previous: Range, current: Range, listed: Listings) -> Optional[tuple[str, ...]]:
+    """比較基点が変わったことで PR の変更になり、前のラウンドで読んでおらず今回の前の head からの差分にも出ない変更のある
+    ファイル（#3780）。`previous.head` は `current.head` の祖先であること。比べるコミットや blob が手元に無ければ None。"""
+    try:
+        seen = _delta(g, f"{previous.base}...{previous.head}", listed)
+        now = _delta(g, f"{current.base}...{current.head}", listed)
+        since = _delta(g, f"{previous.head}..{current.head}", listed)
+    except git.GitError:  # noqa: NDF401 外部コマンド: 比べられないことを None で返し、呼び手は全差分にする
+        return None
+    kinds = frozenset(e.kind for delta in (seen, since) for e in delta.entries.values())
+    return tuple(path for path in now.entries if _has_unread(path, kinds, now, seen, since))
+
+
+def _with_old_paths(entries: Mapping[str, _Entry], paths: Sequence[str]) -> list[str]:
+    """`paths` と、そのうち改名・複製の元のパス（元を指定しないと、足したファイルの差分になる）。"""
+    return sorted({p for path in paths for p in ((entries[path].old, path) if path in entries else (path,))})
+
+
+def _diff_of(g: git.Git, span: str, paths: Sequence[str]) -> str:
+    """差分 `span` の `paths` の分（`paths` はパターンとして読ませない）。"""
+    return g.run_bytes("--literal-pathspecs", *_DIFF, span, "--", *paths).decode("utf-8", errors="replace")
+
+
+def since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str:
+    """前の head からの差分（PR が前のラウンドの時点か今に変えるファイルに絞る。ベースのマージで入った PR に関係の無い変更を
+    読ませない）に、`added`（`new_in_pr` の返り）の今の PR の差分を続けて返す（#3780）。"""
+    seen, _ = _listing(g, f"{previous.base}...{previous.head}", listed)
+    now, _ = _listing(g, f"{current.base}...{current.head}", listed)
+    paths = sorted({p for e in (*seen.values(), *now.values()) for p in (e.old, e.new)})
+    # パスの指定の無い `git diff` は全差分になるので、絞るファイルが無ければ打たない
+    if not paths:
+        return ""
+    text = _diff_of(g, f"{previous.head}..{current.head}", paths)
+    if added:
+        text += _diff_of(g, f"{current.base}...{current.head}", _with_old_paths(now, added))
+    return text
 
 
 # --- 根拠の記述の確かめ -------------------------------------------------------------------------

@@ -55,7 +55,7 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py` | 新設 | 指摘が進むか、残すなら起票か記録かを決め、起票の文を組む | `criteria_decide` | モジュール、`Touched`・`Listed` | 新設: `normalized`・`proceeds`・`kinds_of`・`files_issue`・`identity`・`issue_parts`・`trusted`・`matches`・`record_entries`・`record_body`・`result_fields`・`summary_line`・`decisions` |
 | `plugins/ndf/src/ndf/domains/crossreview/leftover.py` | 新設 | 残す指摘を起票し、URL を行に書く | `leftover_decide`・`store`・`threads`・`settings`・`publish`・`github` | `Port`（Protocol）、`GitHubIssues` | 新設: `primary_of`・`file_issues` |
 | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py` | 変更 | 起点の条件と、収束を使い回す条件を分ける | `store` | モジュール | 新設: `origin_record` |
-| `plugins/ndf/src/ndf/domains/crossreview/round_scope.py` | 変更 | 起点と線引きの起点を git で確かめる | `scope_decide`・`changes` | モジュール | 新設: `origin`・`line_origin` |
+| `plugins/ndf/src/ndf/domains/crossreview/round_scope.py` | 変更 | 起点と線引きの起点を git で確かめる | `scope_decide`・`changes` | モジュール | 新設: `read_origin`・`line_origin` |
 | `plugins/ndf/src/ndf/domains/crossreview/changes.py` | 変更 | 新しく PR の変更になったファイル・渡す差分・変えた行を読む | `git`・`leftover_decide` | モジュール、`Range` | 新設: `new_in_pr`・`since_diff`・`touched` |
 | `plugins/ndf/src/ndf/domains/crossreview/journal.py` | 変更 | 残す指摘に `parked` を付け、進む条件に当たれば外す | `leftover_decide` | `FindingJournal` | 新設: `sort` / 変更: `enter`・`_revive`・`_classify`・`carry`・`handable`・`findings` |
 | `plugins/ndf/src/ndf/domains/crossreview/finish_decide.py` | 変更 | `parked` の指摘を欠けから除く | `leftover_decide` | `Finding` | 変更: `_finding_gaps`・`_counts`・`as_findings` |
@@ -98,7 +98,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `decide` | `local_scope.py` | 変更 | `decide(wt: Path, base: str, every_section: bool, data: Mapping[str, Any], resolved: ScopeSettings) -> tuple[scope_decide.Scope, list[str]]` | 次のラウンドの範囲と注意を、手元のオブジェクトと状態の記録から決める |
 
-実装の PR では、起点を `round_scope.origin`（下の「範囲の起点」）で選ぶ。起点と比較基点が違えば `changes.new_in_pr` を手元のオブジェクトで呼び、比べられなければ全差分にする。設計の PR は今のとおり `scope_decide.read_by_all_head` を使う。
+実装の PR では、起点を `round_scope.read_origin`（下の「範囲の起点」）で選ぶ。起点と比較基点が違えば `changes.new_in_pr` を手元のオブジェクトで呼び、比べられなければ全差分にする。設計の PR は今のとおり `scope_decide.read_by_all_head` を使う。
 
 ### 異常系の処理
 
@@ -121,12 +121,12 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `origin_record` | `scope_decide.py` | 新設 | `origin_record(state: Mapping[str, Any], basis: Basis) -> Optional[Mapping[str, Any]]` | 相手役の全員が読んだ最後のラウンドの記録を返す。今回の席と読んだ PR だけを照らし、比較基点・重点・単位の指示・MVV は見ない |
-| `origin` | `round_scope.py` | 新設 | `origin(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str) -> Optional[changes.Range]` | `origin_record` の head が `head` の祖先なら、その比較基点と head を返す |
+| `read_origin` | `round_scope.py` | 新設 | `read_origin(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str) -> Optional[changes.Range]` | `origin_record` の head が `head` の祖先なら、その比較基点と head を返す |
 | `line_origin` | `round_scope.py` | 新設 | `line_origin(g: git.Git, state: Mapping[str, Any], head: str) -> Optional[changes.Range]` | 線引きの起点（担当した相手役が全員結果を返した最後のラウンドの、比較基点と head）を返す |
 
 `line_origin` が探すのは、そのラウンドを担当した相手役が全員結果を返した（`incomplete_reviewers` で終わっていない）最後のラウンドである。そのラウンドを読んだ顔ぶれが今回の相手役と同じか、読んだ PR が今回と同じかは問わない。`origin_record` に条件の無い `Basis()` を渡すと、この 2 つの照合をしない。
 
-`line_origin` を `origin` と分けるのは、設計の決定 2 が「範囲が全差分に戻ったラウンドでも、前に全員が読んだ head があれば線引きする」と定めるためである。読んでいない相手役がいて全差分になったラウンドでも、線引きの起点は残る。
+`line_origin` を `read_origin` と分けるのは、設計の決定 2 が「範囲が全差分に戻ったラウンドでも、前に全員が読んだ head があれば線引きする」と定めるためである。読んでいない相手役がいて全差分になったラウンドでも、線引きの起点は残る。
 
 - `_reusable`（前回の収束をそのまま返すかの判定）と `read_by_all_head` は変えない
 
@@ -134,22 +134,22 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `origin`・`line_origin` | head が祖先でないか、コミットが手元に無い | PR の作り直し | `round_scope._reachable_from` | 既定値で続ける（None。全差分・線引きなし） | 無し | 打ち直せる |
+| `read_origin`・`line_origin` | head が祖先でないか、コミットが手元に無い | PR の作り直し | `round_scope._reachable_from` | 既定値で続ける（None。全差分・線引きなし） | 無し | 打ち直せる |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `origin_record` | `scope_decide.read_by_all_head`・`_seated_read` | `grep -rn "def .*origin\b\|def .*previous_head\|def read_by_all" --include=*.py src/ndf` | 席の照らし合わせは `_seated_read` を使う。`read_by_all_head` は収束の使い回し用の条件のまま残す |
-| `origin` | `round_scope.previous_head`・`_reachable_from` | 同上 | 祖先の確かめは `_reachable_from` を使う |
-| `line_origin` | 同上 | 同上 | `origin` と同じ中身を、条件の無い `Basis()` で呼ぶ |
+| `read_origin` | `round_scope.previous_head`・`_reachable_from` | 同上 | 祖先の確かめは `_reachable_from` を使う |
+| `line_origin` | 同上 | 同上 | `read_origin` と同じ中身を、条件の無い `Basis()` で呼ぶ |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `origin_record` | 比較基点・重点・単位の指示・MVV・根拠の確認が違っても記録を返す | 一部が読めなかったラウンドを飛ばす | 読んでいない相手役・PR の違い・ラウンドが無いときは None |
-| `origin`・`line_origin` | 祖先の head を返す | 読んでいない相手役がいるとき、`origin` は None で `line_origin` は値 | 祖先でない・コミットが無いときは None |
+| `read_origin`・`line_origin` | 祖先の head を返す | 読んでいない相手役がいるとき、`read_origin` は None で `line_origin` は値 | 祖先でない・コミットが無いときは None |
 
 ## 新しく PR の変更になったファイルと変えた行（changes）
 
@@ -159,15 +159,17 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `new_in_pr` | `changes.py` | 新設 | `new_in_pr(g: git.Git, previous: Range, current: Range) -> Optional[tuple[str, ...]]` | 比較基点が変わったことで、既読の差分にも今回渡す差分にも無い変更を持つファイルを返す。比べられなければ None |
-| `since_diff` | `changes.py` | 新設 | `since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str]) -> str` | 前の head からの差分（PR が変えるファイルに絞る）に、`added` の今の PR の差分を続けて返す |
-| `touched` | `changes.py` | 新設 | `touched(g: git.Git, since: str, head: str) -> leftover_decide.Touched` | `since` の後に変わったファイルと、足した行・書き換えた行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`origin`）ではない |
+| `new_in_pr` | `changes.py` | 新設 | `new_in_pr(g: git.Git, previous: Range, current: Range, listed: Listings) -> Optional[tuple[str, ...]]` | 比較基点が変わったことで、既読の差分にも今回渡す差分にも無い変更を持つファイルを返す。比べられなければ None |
+| `since_diff` | `changes.py` | 新設 | `since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str` | 前の head からの差分（PR が変えるファイルに絞る）に、`added` の今の PR の差分を続けて返す |
+| `touched` | `changes.py` | 新設 | `touched(g: git.Git, since: str, head: str) -> leftover_decide.Touched` | `since` の後に変わったファイルと、足した行・書き換えた行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`read_origin`）ではない |
 
 - `new_in_pr`
   - 事前条件: `previous.head` は `current.head` の祖先
+  - `listed`: 呼び手が空の辞書を作って渡す。読んだ一覧が入るので、同じ辞書を `since_diff` へ渡す
   - 副作用: `git diff` と `git diff --raw` を打つ（読むだけ）
 - `since_diff`
-  - 事前条件: `added` は `new_in_pr` の返り
+  - 比較基点が前のラウンドと違う: 先に `new_in_pr` を呼び、その返りを `added` に、同じ辞書を `listed` に渡す。返りが None のときは全差分にするので、`since_diff` は呼ばない
+  - 比較基点が前のラウンドと同じ: `new_in_pr` は呼ばない。`added=()` と空の辞書の `listed` を渡す
   - 事後条件: 絞るファイル（PR が前のラウンドの時点か今に変えるファイル）が 1 つも無ければ、空文字列を返す。`added` は今の PR が変えるファイルの一部なので、このとき足す分も無い。パスの指定の無い `git diff` は全差分になるため打たない
 
 ### 異常系の処理
@@ -184,22 +186,65 @@ plugins/ndf/
 
 今の PR の差分にある変更を 1 つずつ確かめ、どれか 1 つでも「読んだか、今回読む」に当たらないファイルを返す。
 
-同じソースの行でも、どの head の内容かで行番号がずれる。比べる位置は次の 2 つの番号にそろえる。今回渡す差分との比較は今の head の行番号で行う。既読の差分との比較は、その番号を今回渡す差分の対応（`changes._base_lines`）で前の head の行番号に直して行う。
+同じソースの行でも、どの head の内容かで行番号がずれる。比べる位置は次の 2 つの番号にそろえる。今回渡す差分との比較は今の head の行番号で行う。既読の差分との比較は、その番号を今回渡す差分の対応（変えずに残した行の前後の番号の対応）で前の head の行番号に直して行う。
 
 | 確かめる対象 | 位置の取り方 | 読んだか今回読むに当たる条件 |
 | --- | --- | --- |
 | 今の PR の差分が足したソースの行 | その行の、今の head での行番号 | 今回渡す差分が同じ位置で同じ内容を足している。または、前の head の番号に直した位置で、既読の差分が同じ内容を足している |
-| 今の PR の差分が消したソースの行 | 消したソースの行は今の head に無いので、消した箇所のすぐ後ろに残る行の、今の head での行番号 | 今回渡す差分が同じ位置で同じ内容を消している。または、前の head の番号に直した位置で、既読の差分が同じ内容を消している |
+| 今の PR の差分が消したソースの行 | 消したソースの行は今の head に無いので、消した箇所のすぐ後ろに残る行の、今の head での行番号 | 区間内の既読の削除と今回の削除を、下の手順で 1 つの列に並べる。今の PR の差分の削除がすべて、その列に同じ順で現れる |
 | 変更の種別・リネームの元と先・ファイルのモード | 行を使わない | 既読の差分か今回渡す差分の `git diff --raw` に同じ値がある |
-| ソースの行で比べられないファイル（バイナリなど） | 行を使わない | 今回渡す差分にそのファイルの変更がある。または、既読の差分に、変更前後の blob が同じ変更がある |
+| ソースの行で比べられないファイル（バイナリなど） | 行を使わない | 今の PR の差分の変更前の blob が、既読の差分の変更前の blob か、今回渡す差分の変更前の blob（今回渡す差分が中身を変える場合）と同じ |
+
+行の内容は、末尾の改行の有無も含めて比べる。改行の無い `x` と改行のある `x` は別の行である。
+
+バイナリは差分に中身が出ない。相手役が確かめる材料は、差分のファイルごとの見出しにある変更前後の blob ID（`index` の行）である。相手役は作業場所のリポジトリから、その ID の中身を読める。`--binary` を付けて符号化した中身を渡す案は、相手役が読めず token が増えるので採らない。今の PR の差分の変更後の blob は今の head の内容なので、今回渡す差分か既読の差分に必ず現れる。そこで照らすのは変更前の blob である。例えば今の PR が `B` → `C`、今回渡す差分が `A` → `C` で、既読の差分の変更前も `B` でなければ、`B` はどこにも渡っていないので、今の PR の差分を足して渡す。
+
+通常のファイルとシンボリックリンクを入れ替えると、差分は削除と追加の 2 つの hunk になる。間に残る行が無いので、1 つの変更のまとまりとして照らす。
 
 足した行の例: 既読の差分が、前の head の 10 行目に `x = 1` を足していた。今回渡す差分は、その上に 2 行を足した。今の PR の差分は `x = 1` を今の head の 12 行目に足している。12 は前の head の番号に直すと 10 になり、既読の差分と一致するので、読んだ行である。
 
 消した行の例: 既読の差分が `y = 0` を消し、すぐ後ろに残る行は前の head の 20 行目だった。今回渡す差分は、その上に 2 行を足した。今の PR の差分では、`y = 0` を消した箇所のすぐ後ろの行は今の head の 22 行目になる。22 は 20 に直るので一致する。
 
-最後の表の行は、設計の「範囲の起点の条件」の手順 3（今回渡す差分に無く、既読の差分と変更前後の内容が同じでもなければ、当たらない）を、当たる側から書いたものである。今回渡す差分にあれば、このラウンドで読む。無い場合は、既読の差分にファイルの名前があるだけでは後で中身が変わったかが分からないので、変更前後の blob まで同じことを求める。
+最後の表の行は、設計の「範囲の起点の条件」の手順 3 を、当たる側から書いたものである。今回渡す差分がファイルの中身を変えていれば、このラウンドで読む。今回渡す差分にファイルが無いときと、実行権限や名前だけを変えるときは、中身はこのラウンドで渡らない。この場合は、変更前後の blob が既読の差分と同じことを求める。ファイルの名前があるだけでは、中身が後で変わったかが分からないためである。今回渡す差分が名前を変えたファイルは、元の名前で既読の差分を引く。
 
-番号を直せない（位置の行が今回渡す差分で足された行である）場合は、当たらないとみなす。計算量の注意として、3 つの差分は 1 回ずつ読み、行は辞書で引く。
+足したソースの行は、番号を直せない（位置の行が今回渡す差分で足された行である）場合、既読の差分とは一致しないとみなす。
+
+消したソースの行は、1 つの行番号ではなく区間で比べる。区間は前の head の行番号で定め、直前の対応行の次の行から、直後の対応行までである。対応行とは、今回渡す差分が変えずに残した行である。直前の対応行が無ければ 1 行目から、直後の対応行が無ければ末尾の次の行までとする。消した行の位置はすぐ後ろの行の番号で表すので、直後の対応行の番号も区間に含む。
+
+区間の中では順序も比べる。まず、区間の削除を前の head の行の順に並べる。行番号ごとに、既読の差分がその行の直前で消した行を置き、続けて、今回渡す差分がその行を消していれば置く。今の PR の差分がこの区間で消した行が、すべてこの並びに同じ順序で現れれば、読んだか今回読む行とする。1 つでも現れなければ当たらないとする。並びのうち今回渡す差分の削除に当てるには、内容に加えて、今の head 上の位置（すぐ後ろに残る行の番号）も同じであることを求める。既読の差分の削除は、区間の中なら位置を問わない。消したファイルには残る行が無いので、順序は比べず、本文と件数だけを比べる。
+
+区間で比べるのは、読んだ削除の跡に行を足したり、読んだ置き換えを書き直したりしただけで、そのファイルをもう一度渡さないためである。順序を比べるのは、ベースが行を移して生じた削除を、移す前の位置の削除と取り違えないためである。例えば、並びが「`X`（読んだ削除）、`A`（今回消す行）」の区間で、今の PR の差分が `A`、`X` の順に消していれば、`X` は読んでいない。
+
+今回渡す差分の削除に位置も求めるのは、同じ区間の別の位置で同じ内容を消した変更が、相手役に渡らないためである。例えば、前の head が `P / A / Z`、今の head が `P / R1 / R2 / Z`、今のベースが `P / R1 / A / R2 / Z`（`/` は改行）とする。今回渡す差分は `R1` の前の `A` を消し、今の PR の差分は `R2` の前の `A` を消す。内容は同じでも位置が違うので、当たらないとする。
+
+行番号の対応はファイルごとに 1 回だけ索引にする。
+
+#### git を起動する回数
+
+1 つの差分は、一覧（`git diff --raw --numstat -z`）と行の差分（`git diff`）の 2 回の起動で読む。一覧はパス・モード・blob ID・行で比べられるかを、区切りのあいまいでない形で返す。行の差分はそれを返さない。
+
+| ラウンド | 呼ぶ関数 | 起動の回数 |
+| --- | --- | --- |
+| 比較基点が変わった | `new_in_pr`（3 つの差分）と `since_diff` | `new_in_pr` が 6 回。`since_diff` は行の差分だけで 1 回、足すファイルがあれば 2 回 |
+| 比較基点が同じ | `since_diff` だけ | 一覧 2 回と行の差分 1 回 |
+
+同じ範囲の一覧は、`listed` で 2 つの関数が共有する。`listed` は git が返した一覧を 1 ラウンドの間だけメモリに持つ写しで、共有しない場合より起動が 2 回少ない。
+
+省ける 2 回の起動（既読の差分と今の PR の差分の一覧）の時間は、このリポジトリで次のとおり測った。条件は git 2.53.0、x86_64 の 8 CPU、2 回の一覧の読み取りを 21 回繰り返した値である。どちらの測定も、前の head は `2c508370b`、今の head は `c5ba10c90` である。
+
+| 比較基点 | 変わったファイル | 省ける時間の中央値（最小〜最大） |
+| --- | --- | --- |
+| `7e7fcce8f`（PR 1 件の大きさの差分） | 17 | 23 ミリ秒（19〜28） |
+| `f5587e8e2`（大きい差分） | 1842 | 1.5 秒（1.3〜1.7） |
+
+PR 1 件の大きさでは短縮はわずかで、効くのは変わったファイルが多い PR である。写しはラウンドの中で作って捨て、コミットの範囲が同じなら一覧は変わらないので、古い値を読むことは無い。そのため共有する。
+
+ほかの起動を分ける理由と、採らなかった案は次のとおりである。どれもローカルの git の起動で、token・API・CI は増えない。
+
+| 分けているもの | 理由 | 採らなかった案 |
+| --- | --- | --- |
+| 一覧と行の差分 | NUL 区切りの一覧と行の差分を 1 つの出力にすると、両方を切り分ける読み取りを新しく作ることになる | `git diff --raw --numstat -p -z` で 1 回にまとめる（`new_in_pr` の起動が 3 回減る） |
+| `since_diff` の行の差分 | 渡す差分は PR が変えるファイルに絞る。`new_in_pr` が読んだ差分は絞っていない。比較基点が同じラウンドは `new_in_pr` を呼ばない | `new_in_pr` が読んだ差分の文字列を、ファイルごとに切り分けて組み立てる（起動が 1〜2 回減る） |
 
 `touched` の「変えた行」は、`since..head` の差分で足した行と書き換えた行の番号である。行を消しただけの箇所は、前後の行の番号を入れる。
 
@@ -214,7 +259,7 @@ plugins/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `new_in_pr` | `changes._diff_files`・`_base_lines`・`review_diff` | `grep -rn "def .*new_files\|def .*touched\|def .*changed_lines\|def _base_lines\|--raw" --include=*.py src/ndf` | 差分の読み取りと行の対応は 3 つを使う。`git.Git.changed_lines` は行数の和を返すもので使えない |
+| `new_in_pr` | `changes._diff_files`・`_base_lines`・`review_diff` | `grep -rn "def .*new_files\|def .*touched\|def .*changed_lines\|def _base_lines\|--raw" --include=*.py src/ndf` | 差分の読み取りは `_diff_files` と `review_diff` の中身を使う。行の対応は、`_base_lines` が呼ぶたびに hunk を先頭からたどるので、1 回だけ作る索引を別に持つ。`git.Git.changed_lines` は行数の和を返すもので使えない |
 | `since_diff` | `changes.review_diff`・`git.Git.changed_files` | 同上 | 同じ差分の引数（`_DIFF`）に `--literal-pathspecs` とパスの指定を足して作る |
 | `touched` | `crossrefactor.scope.touched`（記号の単位） | 同上 | 返す単位が違うので使えない。`_diff_files` の行を使う |
 
@@ -222,7 +267,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `new_in_pr` | 分岐したブランチへ比較先を変えると、新しく PR の変更になったファイルが返る。取り込みの競合を解消して前の head の内容に戻したファイルも返る | 競合の無いベースの取り込みは空。head が同じまま比較先を変えて実行権限の変更が現れる。同じ文の追加が同じファイルの別の関数にある。比較先を変えて差分から消えただけのファイルは返らない | コミットが無ければ None |
+| `new_in_pr` | 分岐したブランチへ比較先を変えると、新しく PR の変更になったファイルが返る。取り込みの競合を解消して前の head の内容に戻したファイルも返る | 競合の無いベースの取り込みは空。head が同じまま比較先を変えて実行権限の変更が現れる。同じ文の追加が同じファイルの別の関数にある。比較先を変えて差分から消えただけのファイルは返らない。末尾の改行の有無だけが違う行は別の行にし、種別の変更の削除と追加は 1 つにまとめる。バイナリは変更前の blob が渡っていなければ返す（この 3 つは差分を入力にして確かめる）。消した行は、今回渡す差分と同じ内容でも位置が違えば未読にする（上の `R1`・`R2` の例。差分を入力にして確かめ、git を起動しない） | コミットが無ければ None |
 | `since_diff` | PR に関係の無いベースの変更を含まない。`added` のファイルの今の差分を含む | 絞るファイルが無ければ空文字列 | コミットが手元に無ければ `git.GitError` |
 | `touched` | 足したソースの行と書き換えたソースの行 | 行を消しただけの箇所は前後の行。バイナリはファイルだけ | コミットが手元に無ければ `git.GitError` |
 
@@ -462,7 +507,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_ranges` | `drive.py` | 新設 | `_ranges(run: _Run, merge_base: str, head: str) -> Ranges` | 目的ごとに、差分を渡す起点（`origin`）・足すファイル・線引きの起点（`line_origin`）を決める |
+| `_ranges` | `drive.py` | 新設 | `_ranges(run: _Run, merge_base: str, head: str) -> Ranges` | 目的ごとに、差分を渡す起点（`read_origin`）・足すファイル・線引きの起点（`line_origin`）を決める |
 | `_sort_leftovers` | `drive.py` | 新設 | `_sort_leftovers(run: _Run, prep: Prepared, checked: Checked) -> frozenset[str]` | 線引きの対象のラウンドなら、`changes.touched(g, prep.lines, prep.head)` で変えた行を読んで `journal.sort` を呼ぶ |
 | `default_max_rounds` | `settings.py` | 新設 | `default_max_rounds(every_section: bool) -> int` | `--max-rounds` を省いたときの上限（設計の PR は 3、ほかは 4） |
 | `_with_leftovers` | `cli.py` | 新設 | `_with_leftovers(verdict: fin.Verdict, items: list[dict[str, Any]], data: Mapping[str, Any]) -> fin.Verdict` | 結果の `items` に残し方を足し、要約の行と MVV の判断を足す |
@@ -487,11 +532,11 @@ plugins/ndf/
 | 目的 | `_ranges` の結果 |
 | --- | --- |
 | 設計の PR（`every_section`） | 今のとおり `round_scope.previous_head`。線引きの起点は無し |
-| 実装の PR で `origin` が無い | 全差分。線引きの起点は `line_origin`（あれば） |
-| 実装の PR で `origin` があり、比較基点が同じ | 起点は `origin.head`、足すファイル無し |
+| 実装の PR で `read_origin` が無い | 全差分。線引きの起点は `line_origin`（あれば） |
+| 実装の PR で `read_origin` があり、比較基点が同じ | 起点は `read_origin.head`、足すファイル無し |
 | 実装の PR で比較基点が違う | `new_in_pr` の結果を足す。None なら全差分で線引きなし |
 
-線引きをするのは、実装の PR で、状態ファイルの通算で 2 ラウンド目以降で、`line_origin` があり、比較基点の変化で足すファイルが無いラウンドである。足すファイルの有無は、`origin` が無くて全差分になるラウンドでも、`line_origin` の比較基点が今と違えば `new_in_pr` で確かめる。`_confirm_heavy` の `use_tracks` を真にするのは、線引きをするラウンドで、このラウンドの新しい重い指摘に、MVV の項目を持ち `proceeds` が偽のものがある場合だけである。その指摘は、回答の指摘の種類によって、進むか（保護の種類が付く）、起票するかが変わる。
+線引きをするのは、実装の PR で、状態ファイルの通算で 2 ラウンド目以降で、`line_origin` があり、比較基点の変化で足すファイルが無いラウンドである。足すファイルの有無は、`read_origin` が無くて全差分になるラウンドでも、`line_origin` の比較基点が今と違えば `new_in_pr` で確かめる。`_confirm_heavy` の `use_tracks` を真にするのは、線引きをするラウンドで、このラウンドの新しい重い指摘に、MVV の項目を持ち `proceeds` が偽のものがある場合だけである。その指摘は、回答の指摘の種類によって、進むか（保護の種類が付く）、起票するかが変わる。
 
 保護の対象の指摘は `proceeds` の順 7 で進むと決まっていて、起票もしない。critical や変えた行の MVV の指摘も進むと決まっている。これらだけのラウンドでは、判定役を起動しない（ほかの理由で起動するラウンドでは、今のとおり一緒に渡る）。`proceeds` に渡す `touched` は、`_confirm_heavy` の前に 1 回読み、`_sort_leftovers` でも使う。
 
