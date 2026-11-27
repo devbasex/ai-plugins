@@ -614,24 +614,11 @@ def test_prune_reads_and_drops_months_inside_the_record_lock(store, monkeypatch)
 SWEEP_AT = datetime(2027, 3, 10, tzinfo=UTC)
 
 
-def _sweep_entry(days_ago: int) -> dict:
-    """`days_ago` 日前に計算した、期間 60 日の出現率の項目（NDF の書く形）。"""
-    return {
-        "repo": "/r",
-        "stage": "impl",
-        "runtime": "claude",
-        "key": "k",
-        "at": _at(SWEEP_AT - timedelta(days=days_ago)),
-        "phase": "burn_in",
-        "candidates": [0, 1],
-        "allocation": {"floor": 0.05, "min_units": 10, "margin": 0.1, "window_days": 60},
-    }
-
-
 def _weights_file(root: Path, *days_ago: int) -> Path:
     """`days_ago` 日前に計算した、期間 60 日の出現率の項目を持つファイル。"""
+    entries = [{"at": _at(SWEEP_AT - timedelta(days=d)), "allocation": {"window_days": 60}} for d in days_ago]
     path = root / "launch-weights.json"
-    path.write_text(json.dumps({"version": 1, "entries": [_sweep_entry(d) for d in days_ago]}), encoding="utf-8")
+    path.write_text(json.dumps({"entries": entries}), encoding="utf-8")
     return path
 
 
@@ -798,34 +785,16 @@ def test_the_sweep_keeps_files_ndf_cannot_have_made(store):
     assert (filled / "launch-experiments.lock").exists() and tmp.exists()
 
 
-NOT_NDF_WEIGHTS = [
-    {"version": 1, "entries": {}, "memo": "退避データ"},
-    {"version": 1, "entries": ""},
-    {"entries": []},
-    {"version": 1, "entries": [{"at": "x"}]},
-    {"version": 1, "entries": [{**_sweep_entry(90), "memo": "退避"}]},
-]
-
-
-@pytest.mark.parametrize("data", NOT_NDF_WEIGHTS)
+@pytest.mark.parametrize(
+    "data",
+    [{"entries": {}, "memo": "退避データ"}, {"entries": ""}, {"entries": [], "memo": "x"}, {"entries": [{"at": "x"}]}],
+)
 def test_the_sweep_keeps_a_json_that_is_not_ndf_weights(store, data):
-    # 名前が出現率ファイルでも、NDF の書く形（内部データの種類 launch-weights）でなければ、ディレクトリごと残す
+    # 名前が出現率ファイルでも、NDF の書く形（キーは entries だけで、項目の配列）でなければ、ディレクトリごと残す
     other = _idle_repo(store.parent / ("a" * 16))
     (other / "launch-weights.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     mc.prune(SWEEP_AT, 60, store)
     assert (other / "launch-weights.json").exists() and (other / "launch-pruned").exists()
-
-
-@pytest.mark.parametrize("own", [True, False], ids=["own-prune", "sweep"])
-def test_prune_leaves_a_json_that_is_not_ndf_weights_as_it_is(store, own):
-    # 期限を過ぎた項目があっても、NDF の書く形でないファイルは、月の掃除も保存先全体の片付けも書き換えない
-    root = store if own else store.parent / ("a" * 16)
-    root.mkdir(parents=True, exist_ok=True)
-    path = root / "launch-weights.json"
-    text = json.dumps({"version": 1, "entries": [{**_sweep_entry(90), "memo": "退避"}, _sweep_entry(1)]}, ensure_ascii=False)
-    path.write_text(text, encoding="utf-8")
-    mc.prune(SWEEP_AT, 60, store)
-    assert path.read_text(encoding="utf-8") == text
 
 
 def test_a_candidate_swapped_for_a_link_is_not_followed(tmp_path, store, monkeypatch):

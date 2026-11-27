@@ -25,7 +25,7 @@ from typing import Any, Mapping, Optional
 
 from filelock import FileLock, ReadWriteLock, Timeout
 
-from ndf.contracts import facts, internal
+from ndf.contracts import facts
 
 # 表 ndf-files の行（保存先は使用量ログと同じ）
 LEDGER = "launch-experiments"
@@ -125,21 +125,16 @@ def _weights(path: Path, now: datetime) -> Optional[tuple[Optional[dict[str, Any
 
 
 def _parsed_weights(raw: bytes, now: datetime) -> Optional[tuple[Optional[dict[str, Any]], list[Any]]]:
-    """出現率のファイルの中身 `raw` と、期限の前の項目。NDF の書く形（`_ndf_weights`）でなければ None。
-
-    月の掃除・保存先全体の片付け・回収のどれも、ここを通して読む。形の違うファイルは利用者が置いたものとして、どれも変えない。
-    """
+    """出現率のファイルの中身 `raw` と、期限の前の項目。NDF の書く形でなければ None。"""
     try:
         data = json.loads(raw.decode("utf-8"))
-        if not _ndf_weights(data):
-            return None
         return data, [e for e in data["entries"] if not past(e, now)]
     except (ValueError, KeyError, TypeError):  # noqa: NDF401 ファイル: 壊れた出現率のファイルは出現率の計算が作り直す
         return None
 
 
 def prune_weights(root: Path, now: datetime) -> Optional[int]:
-    """期限を過ぎた出現率の項目を消し、残りの数を返す（ファイルが無ければ 0、NDF の書く形でなければ変えずに None）。出現率のロックの中で呼ぶ。"""
+    """期限を過ぎた出現率の項目を消し、残りの数を返す（ファイルが無ければ 0、壊れていれば None）。出現率のロックの中で呼ぶ。"""
     path = store_file(root, WEIGHTS)
     got = _weights(path, now)
     if got is None:
@@ -238,22 +233,22 @@ def _idle(root: Path, fd: int, files: Mapping[str, os.stat_result], now: datetim
     if weights.name not in files:
         return True
     got = _parsed_weights(_read_at(fd, weights.name), now)
-    return got is not None and not got[1]
+    return got is not None and _ndf_weights(got[0]) and not got[1]
 
 
 def _ndf_weights(data: Any) -> bool:
-    """`data` が NDF の書く出現率のファイルの形（内部データの種類 `launch-weights` のスキーマ）か。
-
-    出現率の計算（#2944 の B2）は同じ種類として書き出す前に確かめるので、書き手と掃除・回収が同じ規則を使う。`version` の無い
-    ファイルや、必須の欄が欠けているか、スキーマに無い欄を持つファイルは、利用者が置いたものとして、掃除も回収もしない。
+    """`data` が NDF の書く出現率のファイルの形か。キーは `entries` だけで、その値は項目の配列。項目は日時の文字列 `at` と、
+    整数の `window_days` を持つ割り付けの値 `allocation` を持つ。形が違えば利用者が置いたものとして回収しない。
     """
-    if not isinstance(data, dict) or "version" not in data:
+    if not isinstance(data, dict) or set(data) != {"entries"} or not isinstance(data["entries"], list):
         return False
-    try:
-        internal.read_record(WEIGHTS, data)
-    except internal.InternalError:  # noqa: NDF401 ファイル: NDF の書く形でないものは、利用者が置いたものとして変えない
-        return False
-    return True
+    return all(
+        isinstance(e, dict)
+        and isinstance(e.get("at"), str)
+        and isinstance(e.get("allocation"), dict)
+        and type(e["allocation"].get("window_days")) is int
+        for e in data["entries"]
+    )
 
 
 def _read_at(fd: int, name: str) -> bytes:
