@@ -20,6 +20,15 @@ def sprint_repo(tmp_path: Path, project: dict | None = None) -> Path:
     return repo
 
 
+def with_remote(repo: Path) -> Path:
+    """作業場所にリモート origin（隣の裸のリポジトリ）を足して返す。工程「実装」は単位を調べるために開始時にリモートから
+    ブランチを取得し、取得できなければ止まる（#4369）。リモートにブランチが無いことは確かめられるので、そのまま流れる。"""
+    remote = repo.parent / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", str(remote)], check=True)
+    return remote
+
+
 def with_worker(monkeypatch) -> None:
     """params.json の worker の既定を偽の起動に替える（プランに載ったことを見分けるため）。"""
     _set_worker(monkeypatch, ["ndf-worker"])

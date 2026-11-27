@@ -18,6 +18,7 @@ from types import SimpleNamespace
 
 import merge_hub
 import pytest
+import sprint_fixture
 import strategy_fixture
 
 from ndf import ci_cli
@@ -81,7 +82,7 @@ def _flow(repo: Path, monkeypatch, hub: merge_hub.MergeHub) -> SimpleNamespace:
     patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "merge")
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
 
     class FakeGit:
         def __init__(self, *_: object) -> None:
@@ -105,6 +106,7 @@ def _flow(repo: Path, monkeypatch, hub: merge_hub.MergeHub) -> SimpleNamespace:
     subprocess.run(["git", "symbolic-ref", "HEAD", f"refs/heads/{BRANCH}"], cwd=repo, check=True)
     subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "集めた"], cwd=repo, check=True)
     gathered = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    sprint_fixture.with_remote(repo)
     values = {
         "worktree": str(repo),
         "branch": BRANCH,

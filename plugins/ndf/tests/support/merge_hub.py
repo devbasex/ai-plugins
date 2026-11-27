@@ -71,6 +71,11 @@ class MergeHub:
         self.calls.append("pulls_by_head")
         return {b: [p for p in self.pulls_of.values() if p.head_ref == b] for b in branches}
 
+    def open_pulls_of_head(self, branch: str, enough: int, base: Optional[str] = None) -> list[Pull]:
+        self.calls.append("open_pulls_of_head")
+        found = [p for p in self.pulls_of.values() if p.head_ref == branch and p.state == "open" and not p.cross_repository]
+        return [p for p in found if base is None or p.base_ref == base][:enough]
+
     def pulls(self, numbers: Any) -> dict[int, Optional[Pull]]:
         self.calls.append("pulls")
         return {int(n): self.pulls_of.get(int(n)) for n in numbers}

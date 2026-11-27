@@ -6893,6 +6893,24 @@
       "source": "docs/specifications/ndf-review-units-and-refactoring-timing.md"
     },
     {
+      "term": "単位のファイル",
+      "context": "ndf-branch-strategy",
+      "meaning": "実装計画と組の JSON ファイル。タスクとレビューの単位の SSOT で、実装計画の単位の表はここから作る",
+      "source": "issues/issue-3702-design.md"
+    },
+    {
+      "term": "実行順",
+      "context": "ndf-branch-strategy",
+      "meaning": "レビューの単位の依存の深さを表す番号。先に要る単位の実行順の最大に 1 を足した値である。単位は、先に要る単位をすべてマージしたら始める",
+      "source": "issues/issue-3702-design.md"
+    },
+    {
+      "term": "分け方の案",
+      "context": "ndf-branch-strategy",
+      "meaning": "大きさの目安や上限を超えたレビューの単位を、タスクの依存の順に区切り直した案",
+      "source": "issues/issue-3702-design.md"
+    },
+    {
       "term": "つなぎ目",
       "context": "ndf-branch-strategy",
       "meaning": "スプリントの PR の差分のうち、すべての単位の PR をスプリントブランチへマージした時点（集めた時点）の後に入ったコミット。工程「コードレビュー」はここだけをレビューし、ここにコードのファイルが無ければ工程を飛ぶ",
@@ -7717,6 +7735,12 @@
       "source": "docs/specifications/ndf-next-ci-failed-tests-junit.md"
     },
     {
+      "term": "テストを確かめる手段",
+      "context": "ndf-ci-test",
+      "meaning": "工程「リファクタリング」が変更の後のテストの合否を確かめる先。必須のチェックがある場合は、指定されたチェックの通過を CI で確認する。テストの合否まで分かるのは、そのチェックにテストが含まれる場合である。必須のチェックが無ければ、CI テストの設定（test.ci.only）が無効で、実行コマンドを持つテストの suite（kind が lint でないもの。省けば test）がある場合に手元で確かめる。どちらも使えなければ、既定の実行条件では理由を記録して工程を飛ばす",
+      "pending_source": "issues/issue-4566-requirements.md"
+    },
+    {
       "term": "収集の確かめ",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring が、足したテストを全体の実行が収集するかを suite の `collect_command` で確かめる工程。成功と読む終了コードは suite の設定から読み、設定が無ければ 0 だけ",
@@ -7868,7 +7892,7 @@
     {
       "term": "設計の検査",
       "context": "ndf-design",
-      "meaning": "設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査（design-survey.py check。設計のプランのステップ survey-check）",
+      "meaning": "設計文書を書いた後に走らせる、言語モデルを呼ばない決まった検査（ndf records design check。設計のプランのステップ design-check）",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
