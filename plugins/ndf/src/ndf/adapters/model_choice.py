@@ -406,6 +406,8 @@ class Request:
     argument: tuple[Optional[str], Optional[str]] = (None, None)
     # 起動の引数を誤りの文で指す言い方（モデル・effort の順）。CLI ごとに引数の名前が違う起動（codex の委譲は `-c`）が変える
     argument_at: tuple[str, str] = ("引数 --model", "引数 --effort")
+    # 呼び手が解決済みのリポジトリのキー（`launch_approval.repo_key` の値）。None ならここで git を起動して解決する
+    repo_key: Optional[str] = None
 
 
 # --- 実験の記録 --------------------------------------------------------------------------------------
@@ -888,7 +890,7 @@ def launch_choice(
 
     `mode`（工程のモード。記録に残すだけで値は変えない）が無ければ、プランの実行が渡す環境変数から読む。
 
-    `request` は `Request` の欄（`unit`・`charge_to`・`retry`・`mode`・`argument`・`argument_at`）。起動のたびに最初に月の掃除をする。
+    `request` は `Request` の欄（`unit`・`charge_to`・`retry`・`mode`・`argument`・`argument_at`・`repo_key`）。起動のたびに最初に月の掃除をする。
     `unit` の無い起動と工程の無い起動は、実験の記録を読み書きしない。`settings` は `table` へ渡す（渡されれば起動の設定を読み直さない）。
     """
     req = Request(**request)
@@ -908,10 +910,14 @@ def launch_choice(
         effort, effort_source = None, Source.ENVIRONMENT
     extra = dict(unit=req.unit, base_arm=base, inherited_effort=manual.inherited, retry=None if manual.given else req.retry, store=store)
     choice = Choice(layer, name, runtime, stage, req.mode, model, effort, model_source, effort_source, **extra)
+    if stage is None and store is not None and manual.given and req.charge_to is not None:  # 修正担当の手動指定（I2）
+        nowhere = Where("", "", runtime, "")
+        _halt_manual(_Unit(None, req.mode, (), got.allocation, False, got.enabled, nowhere, now, store), req.charge_to)
     if stage is None or store is None or (req.unit is None and req.charge_to is None):
         return choice if manual.given or req.retry is None or stage is None else _raised_once(choice)
     metric = metric_of(stage)
-    where = Where(launch_approval.repo_key(root), stage, runtime, compatibility_key(arms, metric))
+    key = req.repo_key if req.repo_key is not None else launch_approval.repo_key(root)
+    where = Where(key, stage, runtime, compatibility_key(arms, metric))
     experiment = got.enabled and len(arms) > 1 and metric is not None
     choice = replace(choice, repo=launch_approval.repo_digest(where.repo))  # 割り付けの無い起動と基準への切り替えでも、行に書けるように持つ
     u = _Unit(req.unit, req.mode, tuple(arms), got.allocation, experiment, got.enabled, where, now, store)

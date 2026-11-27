@@ -2,20 +2,25 @@
 
 席ごとのリクエストで相手役を並べて起動し、指摘と結果の無い席の直し方と理由を返す（`launch_reviewers`）。始める前に学習の設定で
 断られた claude 以外の席を claude の読むだけの起動で埋め（`fill_refused`）、埋めた席の注意を作る（`filled_warning`）。
+
+席の起動は、席の単位で選んだモデルと effort を足し、起動ごとに使用量ログの行を書く（`experiment`。#2944）。選んだ組がモデルを
+理由に拒まれたら、基準の組で 1 回だけ起動し直す。
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf import identity
-from ndf.adapters import agents
+from ndf.adapters import agents, claude, claude_choice
 from ndf.contracts import facts
 from ndf.core.converge import participants
-from ndf.domains.crossreview import scope_decide, store
+from ndf.domains.crossreview import experiment, scope_decide, store
 from ndf.domains.crossreview.fixer import Launcher
 from ndf.domains.crossreview.scope_decide import Filled
 from ndf.domains.crossreview.settings import DriveStopped, RunConfig
@@ -37,6 +42,7 @@ class SeatRun(Protocol):
     seats: list[str]
     filled: list[Filled]
     input_dir: Optional[Path]
+    repo_key: Optional[str]
 
     def round_stem(self, round_no: int, suffix: str) -> Path: ...
 
@@ -50,17 +56,19 @@ class _SeatResult(NamedTuple):
     denied: tuple[Path, ...] = ()
 
 
-def _seat_result(status: agents.AgentStatus, spec: agents.Launch, required: Sequence[Path]) -> _SeatResult:
+def _seat_result(
+    status: agents.AgentStatus, spec: agents.Launch, required: Sequence[Path], reply: Optional[claude.ClaudeReply] = None
+) -> _SeatResult:
     """完了した席の出力の指摘。claude は外側の JSON を 1 回だけ読み、`result` の指摘と `permission_denials` を取り出す（PR 4461 の
     r2-4）。渡した差分のファイルの読み取りを拒否されていれば、指摘が空でも結果が無い（r1-1）。完了でない・出力が無い・指摘の配列が
-    無ければ結果が無い。"""
+    無ければ結果が無い。使用量の行を書くために解析済みの claude の回答（`reply`）があれば、出力を読み直さない。"""
     if status.state != agents.AgentState.DONE:
         return _SeatResult(None)
     out = spec.paths.out
     try:
         if spec.agent != participants.FIXER:
-            return _SeatResult(participants.findings_of(out.read_text(encoding="utf-8", errors="replace")))
-        answer = participants.claude_answer(out)
+            return _SeatResult(participants.findings_of(participants.answer_text(spec.agent, out)))
+        answer = participants.claude_answer(out) if reply is None else participants.ClaudeAnswer(reply.raw, reply.denials)
     except OSError:  # 出力の無い相手役は回答しなかった扱い（呼び手が注意に載せる）
         return _SeatResult(None)
     denied = participants.denied_reads(answer.denials, required, spec.cwd)
@@ -97,10 +105,32 @@ class Unread(NamedTuple):
     local: str
 
 
-def _seat_launch(run: SeatRun, seat: str, prompt: str, stem: Path) -> agents.Launch:
-    """席の 1 回の起動。claude の席は読める場所をこの実行の資料のディレクトリに限った読むだけの起動（#3955 の決定 2・3）。"""
+def _seat_launch(run: SeatRun, seat: str, prompt: str, stem: Path, choice: Optional[Any]) -> agents.Launch:
+    """席の 1 回の起動。claude の席は読める場所をこの実行の資料のディレクトリに限った読むだけの起動（#3955 の決定 2・3）。
+    `choice` の値を足し、子の環境から費用を負う先（`NDF_CHARGE_TO`）を外す（レビューは手戻りでない。#2944）。"""
     readable = () if run.input_dir is None else (run.input_dir,)
-    return participants.reading_launch(seat, participants.ClaudeReader(SEAT_SYSTEM, readable), run.cfg.worktree, prompt, stem)
+    spec = participants.reading_launch(seat, participants.ClaudeReader(SEAT_SYSTEM, readable), run.cfg.worktree, prompt, stem)
+    spec = participants.with_choice(spec, choice)
+    return agents.adding_env(spec, {experiment.charge_env(): None})
+
+
+def _run_seat(
+    spec_of: Callable[[Optional[Any]], agents.Launch], chosen: claude_choice.ChoiceRun, launch: Launcher
+) -> tuple[agents.Launch, agents.AgentStatus, Optional[claude.ClaudeReply]]:
+    """席を起動して行を書き、最後の起動・状態・解析した回答を返す。
+
+    モデルを理由に拒まれたら、監視の上限の残りの時間で基準の組の起動へ 1 回だけ替える。
+    """
+    spec = spec_of(chosen.choice)
+    deadline = claude_choice.deadline_after(spec.timeout)
+    status = launch(spec)
+    reply = experiment.seat_row(spec, status, chosen)
+    left = None if reply is None else chosen.fall_back_until(reply, deadline)
+    if left is not None and left > 0:
+        spec = replace(spec_of(chosen.choice), timeout=left)
+        status = launch(spec)
+        reply = experiment.seat_row(spec, status, chosen)
+    return spec, status, reply
 
 
 class _Cause(NamedTuple):
@@ -130,15 +160,19 @@ def launch_reviewers(
     `required` はリクエストで渡した差分のファイル（claude の席がその読み取りを拒否されたら結果の無い席と数える）。
     出力の名前・指摘の担当・注意・過程には席の名前を、起動にはランタイムの名前を使う（#3955 の決定 3）。"""
     seats = list(prompts)
-    specs = [_seat_launch(run, s, prompts[s], run.round_stem(round_no, f"-{s}{suffix}")) for s in seats]
-    with ThreadPoolExecutor(max_workers=max(1, len(specs))) as pool:
-        statuses = list(pool.map(launch, specs))
+    # 値の誤り（precondition）でどの席も起動しないよう、起動の前にすべての席の値を選ぶ
+    chosen = [experiment.choose_seat(run, s, run.cfg.worktree) for s in seats]
+    builders = [partial(_seat_launch, run, s, prompts[s], run.round_stem(round_no, f"-{s}{suffix}")) for s in seats]
+    with ThreadPoolExecutor(max_workers=max(1, len(seats))) as pool:
+        ran = list(pool.map(_run_seat, builders, chosen, [launch] * len(seats)))
+    for seat, got_values in zip(seats, chosen):
+        experiment.keep_seat(run, seat, got_values)
     raised: list[dict[str, Any]] = []
     unread: dict[str, Unread] = {}
     again = "（起動し直した）" if suffix else ""
-    for seat, spec, status in zip(seats, specs, statuses):
+    for seat, (spec, status, reply) in zip(seats, ran):
         sandbox = agents.sandbox_failed(spec.paths)
-        got = _SeatResult(None) if sandbox is not None else _seat_result(status, spec, required)
+        got = _SeatResult(None) if sandbox is not None else _seat_result(status, spec, required, reply)
         found = got.findings
         if found is None:
             why = _unread_cause(sandbox, got, status)

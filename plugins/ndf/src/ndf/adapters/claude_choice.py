@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
+from ndf import identity
 from ndf.adapters import claude
 from ndf.contracts import internal
 
@@ -127,6 +128,10 @@ class ChoiceRun:
     def env_changes(self) -> dict[str, Optional[str]]:
         """子の環境の変更（None の名前は外す）。"""
         return {} if self.choice is None else self.choice.env_changes()
+
+    def conversation_env(self) -> dict[str, Optional[str]]:
+        """再開する会話の起動の子の環境。値を選んだ起動は effort の変数を最初の起動の扱いに固定する（引き継いだなら最初の値、ほかは外す）。"""
+        return {} if self.choice is None else {identity.env_name("claude-effort-level"): None, **self.env_changes()}
 
     def meta(self) -> dict[str, Any]:
         """使用量ログの行に足す値の欄（値の無い欄は省く）。"""

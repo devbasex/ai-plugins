@@ -68,9 +68,7 @@ def conversation_env(kind: str, wd: worker_paths.WorkDir, run: claude_choice.Cho
         identity.WORKER_RESULT_DIR_ENV: f"{dev}:{ino}:{wd.path}",
         identity.env_name("charge-to"): run.charge_to,
     }
-    if run.choice is not None:
-        env.update({identity.env_name("claude-effort-level"): None, **run.env_changes()})
-    return env
+    return {**env, **run.conversation_env()}
 
 
 def first_launch(

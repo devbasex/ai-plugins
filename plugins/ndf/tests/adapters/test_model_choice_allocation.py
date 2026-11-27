@@ -188,6 +188,15 @@ def test_changed_choices_halt_the_unit_and_launch_the_base(tmp_path, store, cloc
     assert len(_rows(store, "assign")) == 1 and len(_rows(store, "halted")) == 1
 
 
+def test_a_manual_launch_without_a_stage_still_halts_the_charged_unit(tmp_path, store, clock):
+    """工程の無い起動（cross-review の修正担当）の手動指定も、費用を負う先の単位を実験から外す（#2944 の I2）。"""
+    root = _repo(tmp_path)
+    impl = _assign(store, root, "r1:impl", 1)
+    choice = mc.launch_choice("seat", "fix", cwd=root, charge_to=impl["assign_id"], environ={MODEL_ENV: "opus"})
+    assert choice.model == "opus" and choice.stage is None
+    assert [(r["unit"], r["reason"]) for r in _rows(store, "halted")] == [("r1:impl", "manual")]
+
+
 def test_a_manual_launch_halts_its_unit_and_the_charged_unit(tmp_path, store, clock):
     root = _repo(tmp_path)
     impl = _assign(store, root, "r1:impl", 1)
