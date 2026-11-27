@@ -677,6 +677,25 @@ def test_the_placing_copy_is_removed_after_a_forced_stop_or_a_failed_write(tmp_p
     assert not made[0].exists() and target.read_bytes() == OLD and users.exists()
 
 
+def test_the_placing_copy_is_removed_when_its_identity_cannot_be_recorded(tmp_path, monkeypatch):
+    """一時ファイルの実体を途中の記録へ書けずに止まったら、次の片付けでは確かめられないので、その実行が手元の実体でその場で消す（Value 6）。"""
+    target = _worktree(tmp_path)
+    candidate = _candidate(target)
+    write = lc.write_launch_record
+    made: list[Path] = []
+
+    def fail_on_the_identity(path, rec):
+        if "placed" in rec:
+            made.append(Path(rec["placing"]))
+            raise OSError("書けない")
+        write(path, rec)
+
+    monkeypatch.setattr(lc, "write_launch_record", fail_on_the_identity)
+    with pytest.raises(internal.InternalError):
+        _reflect(candidate, lambda: None, SHA)
+    assert made and not made[0].exists() and target.read_bytes() == OLD
+
+
 @pytest.mark.parametrize("body", [b'{"version": 1, "mine": 1}\n', b""])
 def test_the_cleanup_keeps_a_file_the_record_names_but_ndf_did_not_make(tmp_path, body):
     """途中の記録が名前を残していても、記録した実体と違うファイルは、利用者の作ったものかもしれないので消さない（Value 6）。

@@ -718,7 +718,8 @@ def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
     一時ファイルは乱数の名前（`.launch.json.placing-<値>`）で、作る前にその名前を途中の記録の `placing` に書き、名前が空いている
     ときだけ成功する作り方（`O_EXCL`）で作る。名前が重なれば、そのファイルには触れずに別の値で取り直す。中身は実体を途中の記録に
     書いた後に書く。プロセスが強制終了しても、次の `recover` が途中の記録から一時ファイルを特定し、NDF が作ったと確かめられる
-    ものだけを消す（`_drop_placing`）。例外で止まったときの片付けも、呼び手の `recover` に任せる。通常の終わりでも名前を直接は消さず、
+    ものだけを消す（`_drop_placing`）。例外で止まったときの片付けも、呼び手の `recover` に任せる。ただし、実体を途中の記録へ書く処理が
+    例外になったときは、記録から実体を確かめられないので、この実行が手元に持つ実体でその場で消す。通常の終わりでも名前を直接は消さず、
     その名前が作った実体のままのときだけ `_drop_placing` で消す（反映の間に利用者が同じ名前へ保存したファイルを消さないため）。
     """
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -736,7 +737,13 @@ def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
     with os.fdopen(fd, "wb") as out:
         made = os.fstat(out.fileno())
         rec["placed"] = [made.st_dev, made.st_ino]
-        launch_candidates.write_launch_record(pending, rec)
+        try:
+            launch_candidates.write_launch_record(pending, rec)
+        except BaseException:
+            # 実体を記録に書けなければ、次の `recover` はこのファイルを NDF が作ったと確かめられない。
+            # この実行は作った実体を手元に持っているので、その実体のままのときだけここで消してから止める
+            _drop_placing(target, rec)
+            raise
         out.write(data)
     placed = _replace(target, tmp, rec["base"])
     # 名前を直接消さない。反映の間に利用者が同じ名前へ保存していたら、作った実体と違うので残す
