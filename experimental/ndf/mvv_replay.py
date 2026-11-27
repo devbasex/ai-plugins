@@ -364,7 +364,14 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
         raise Stop(f"--result（{args.result}）は名前が {LOCK_SUFFIX} で終わる。ロックの置き場と重ならない名前を渡す")
     args.result.parent.mkdir(parents=True, exist_ok=True)
     lock_path = f"{args.result}{LOCK_SUFFIX}"
-    lock = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    _place_lock(lock_path)
+    try:
+        lock = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        raise Stop(f"同じ --result（{args.result}）の judge が動いていた。打ち直す") from None
+    except OSError:
+        # ELOOP（シンボリックリンク）と、開けないもの
+        raise Stop(f"{lock_path} はこの実験版のロックでない既存のファイルなので触れない。別の --result を渡す") from None
     try:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -379,6 +386,9 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
             now = None
         if now is None or (now.st_dev, now.st_ino) != (held.st_dev, held.st_ino):
             raise Stop(f"同じ --result（{args.result}）の judge が動いていた。打ち直す")
+        # 片付けてよいのはこの実験版が置いたロックだけなので、印の無いファイルは使わず、消さずに止める
+        if os.pread(lock, len(LOCK_MARK) + 1, 0) != LOCK_MARK:
+            raise Stop(f"{lock_path} はこの実験版のロックでない既存のファイルなので触れない。別の --result を渡す")
         try:
             return _judge_locked(args, question, info, materials)
         finally:
@@ -387,6 +397,22 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
                 os.unlink(lock_path)
     finally:
         os.close(lock)
+
+
+def _place_lock(lock_path: str) -> None:
+    """印 `LOCK_MARK` を書いた一時ファイルを `lock_path` へリンクで置く（既にあれば置かない）。
+
+    ロックのファイルは、置いた瞬間から印を持つ。別の起動が、印を書く前の空のファイルを他人のファイルと見誤らないためである。
+    """
+    folder, name = os.path.split(lock_path)
+    fd, tmp = tempfile.mkstemp(prefix=f".{name}.", suffix=".tmp", dir=folder or ".")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(LOCK_MARK)
+        with contextlib.suppress(FileExistsError):
+            os.link(tmp, lock_path)
+    finally:
+        os.unlink(tmp)
 
 
 def _judge_locked(args: argparse.Namespace, question: str, info: Mapping[str, Any], materials: Mapping[int, Optional[Material]]) -> int:
@@ -428,6 +454,8 @@ def _judge_locked(args: argparse.Namespace, question: str, info: Mapping[str, An
 
 # judge が結果ファイルの隣に置くロックの名前の後ろ（`--result` にこの名前で終わるパスは渡せない）
 LOCK_SUFFIX = ".lock"
+# judge が置いたロックのファイルの中身（これを持つファイルだけをロックに使い、終わるときに消す）
+LOCK_MARK = b"ndf mvv_replay judge lock\n"
 # 前の結果ファイルを同じ測定の続きとみなす判定の条件
 JUDGE_CONDITIONS = ("model", "claude_version", "prompt_commit", "prompt_sha256")
 # 1 件の PR の判定を打つ回数の上限（同じ材料で失敗が続いたら打ち直さず、その PR は `tally` が保留の理由に挙げる）
@@ -702,11 +730,18 @@ def _cmd_tally(args: argparse.Namespace) -> int:
         if (new["model"], new["claude_version"]) != (old["model"], old["claude_version"]):
             raise Stop("比べる 2 つの判定でモデル ID か Claude Code のバージョンが違う")
     # 回ごとに指示文や実行環境を変えると、公開する指示文で再現を確かめていない改善が合格になるので、側ごとに全回の条件を揃える
+    # 指示文のハッシュを持たない結果（この変更より前の形式）は、実際に送った指示文を照合できないので比べない。前の結果ファイルは
+    # judge が条件の違いで続きに使わないので、欠けた側と回のファイルだけを挙げ、新しい保存先で打ち直す打ち方を示す
+    redo = [
+        f"{i}回目の{name}: {args.judged[i - 1][side]}（judge --materials {args.materials} --model {pair[side].get('model')}"
+        f" --prompt-commit {pair[side].get('prompt_commit')} --result <新しいパス> で判定し、--judged のこのファイルを置き換える）"
+        for i, pair in enumerate(pairs, 1)
+        for side, name in ((0, "変更後"), (1, PREV_COMMIT))
+        if not _is_sha256(pair[side].get("prompt_sha256"))
+    ]
+    if redo:
+        raise Stop("送った指示文の SHA-256 が無い判定結果がある。次の側と回だけを判定し直す:\n" + "\n".join(redo))
     for side, name in ((0, "変更後"), (1, PREV_COMMIT)):
-        # 指示文のハッシュを持たない結果（この変更より前の形式）は、実際に送った指示文を照合できないので比べない
-        missing = [str(pair[side].get("run_id")) for pair in pairs if not _is_sha256(pair[side].get("prompt_sha256"))]
-        if missing:
-            raise Stop(f"{name}の判定結果に送った指示文の SHA-256 が無い（実行の識別子 {missing}）。同じ条件で judge を打ち直す")
         conditions = {tuple(pair[side].get(k) for k in JUDGE_CONDITIONS) for pair in pairs}
         if len(conditions) > 1:
             raise Stop(f"{name}の判定の条件（{', '.join(JUDGE_CONDITIONS)}）が回によって違う: {sorted(map(str, conditions))}")
