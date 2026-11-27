@@ -251,7 +251,7 @@ def _allocation_errors(allocation: Mapping[str, Any], widest: int) -> list[str]:
 
 
 def bundled_errors() -> list[str]:
-    """同梱の値が起動の設定の形（スキーマ）に合わない箇所。同梱の値は配布の後に変わらないので、起動のたびには照らさず CI のテストが呼ぶ。"""
+    """同梱の値が起動の設定の形（スキーマ）に合わない箇所。同梱の値はリリースの後に変わらないので、起動のたびには照らさず CI のテストが呼ぶ。"""
     return contracts.broken_places({"version": 1, "experiments": _bundled()}, launch_settings.SCHEMA)
 
 
