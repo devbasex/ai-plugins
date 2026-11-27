@@ -17,8 +17,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import stat
-import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -50,8 +50,10 @@ _SHARE_KIND = "ndf-release-record.prefix/v1"
 _SHARE_TMP = ".ndf-tmp"
 # 一時ファイルを作るディレクトリ（保存先のディレクトリの下）。NDF だけが作る場所で、掃除はここだけを見る
 _SHARE_TMP_DIR = "tmp"
-# NDF の一時ファイルの名前（`_publish` が `mkstemp` で作る `<本番の PR>.json.<乱数 8 文字>.ndf-tmp`）。掃除はこの名前だけを消す
-_SHARE_TMP_NAME = re.compile(r"\d+\.json\.[a-z0-9_]{8}" + re.escape(_SHARE_TMP))
+# 一時ファイルの名前の乱数の長さ（`secrets.token_hex` のバイト数。名前には 16 進でその 2 倍の文字が入る）
+_SHARE_TMP_TOKEN = 8
+# NDF の一時ファイルの名前（`_tmp_name` が作る `<本番の PR>.json.<16 進 16 文字>.ndf-tmp`）。掃除はこの名前だけを消す
+_SHARE_TMP_NAME = re.compile(rf"\d+\.json\.[0-9a-f]{{{2 * _SHARE_TMP_TOKEN}}}" + re.escape(_SHARE_TMP))
 
 
 class Unversioned(NamedTuple):
@@ -405,32 +407,49 @@ def shared_prefix(
         got = _read_share(path, commit, push)
         if got is not None:
             return got
-        if not path.exists() or _ours(path) is not None:
+        tmp_dir = _tmp_dir(share)
+        if tmp_dir is not None and (not path.exists() or _ours(path) is not None):
             got = compute()
-            _publish(path, got)
+            _publish(path, tmp_dir, got)
             return got
+    # 同じ名前のファイルがあるか、一時ファイルのディレクトリが使えないので共有できない。その呼び出しだけで使う
     return compute()
 
 
-def _publish(path: Path, got: Prefix) -> None:
+def _tmp_dir(share: Path) -> Optional[Path]:
+    """一時ファイルを作るディレクトリ（無ければ作る）。リンクや通常のファイルで塞がれていて使えなければ None。"""
+    tmp_dir = share / _SHARE_TMP_DIR
+    try:
+        tmp_dir.mkdir(exist_ok=True)
+        return tmp_dir if stat.S_ISDIR(tmp_dir.lstat().st_mode) else None
+    except OSError:  # noqa: NDF401 ファイル: 使えない一時ファイルのディレクトリは None で返し、共有せずに続ける
+        return None
+
+
+def _tmp_name(path: Path) -> str:
+    """`path` の一時ファイルの名前（`_SHARE_TMP_NAME` に当たる）。"""
+    return f"{path.name}.{secrets.token_hex(_SHARE_TMP_TOKEN)}{_SHARE_TMP}"
+
+
+def _open_tmp(path: Path, tmp_dir: Path) -> tuple[int, Path]:
+    """`path` の一時ファイルを `tmp_dir` に新しく作って書き込み用に開く（既にあれば作らない）。"""
+    tmp = tmp_dir / _tmp_name(path)
+    return os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), tmp
+
+
+def _publish(path: Path, tmp_dir: Path, got: Prefix) -> None:
     """前処理を一時ファイルに書き終えてから `path` へ差し替える。中断しても `path` が書きかけにならない。
 
-    一時ファイルは NDF だけが作るディレクトリ（`_SHARE_TMP_DIR`）に `mkstemp` で作る。書き込みが途中で止まると一部だけ
-    書かれた一時ファイルが残ることがあるので、掃除は中身を読まず、このディレクトリにあることで NDF が作ったと判断する。"""
+    一時ファイルは NDF だけが作るディレクトリ `tmp_dir` に作る。書き込みが途中で止まると一部だけ書かれた一時ファイルが
+    残ることがあるので、掃除は中身を読まず、このディレクトリにあることと名前（`_SHARE_TMP_NAME`）で判断する。"""
     data = json.dumps(got.as_json(), ensure_ascii=False).encode("utf-8")
-    tmp_dir = path.parent / _SHARE_TMP_DIR
-    tmp_dir.mkdir(exist_ok=True)
-    if not stat.S_ISDIR(tmp_dir.lstat().st_mode):
-        raise RecordError(
-            f"一時ファイルのディレクトリ {tmp_dir} がディレクトリでない（リンクなど）。NDF が作るディレクトリなので、置いたものを移してから打ち直す"
-        )
-    fd, tmp = tempfile.mkstemp(dir=tmp_dir, prefix=path.name + ".", suffix=_SHARE_TMP)
+    fd, tmp = _open_tmp(path, tmp_dir)
     try:
         with os.fdopen(fd, "wb") as out:
             out.write(data)
         os.replace(tmp, path)
     except BaseException:
-        Path(tmp).unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)
         raise
 
 
@@ -476,9 +495,10 @@ def sweep_shares(share: Path, older_than: float, now: Callable[[], float] = time
     try:
         if not stat.S_ISDIR(tmp_dir.lstat().st_mode):
             return
-    except OSError:  # noqa: NDF401 ファイル: 一時ファイルのディレクトリが無ければ消すものは無い
+        names = list(tmp_dir.iterdir())
+    except OSError:  # noqa: NDF401 ファイル: 無い・列挙できない一時ファイルのディレクトリは掃除せず、記録へ進む
         return
-    for path in tmp_dir.iterdir():
+    for path in names:
         if _SHARE_TMP_NAME.fullmatch(path.name):
             _drop_stale_tmp(path, older_than, now)
 

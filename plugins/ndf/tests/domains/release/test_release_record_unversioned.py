@@ -624,14 +624,17 @@ def test_shared_prefix_keeps_a_file_it_did_not_write_and_sweeps_its_own_leftover
     users = {share / f"{PROD}.json.{name}.ndf-tmp": text for name, text in (("a", ""), ("b", whole), ("c", "{"))}
     for path, text in users.items():
         path.write_text(text, encoding="utf-8")
-    # NDF の一時ファイルのディレクトリに残ったものは、空・書き終えたもの・途中まで書かれたもののどれも消す
-    leftovers = [ours / f"{PROD}.json.{name}.ndf-tmp" for name in ("abcd_123", "efgh_456", "ijkl_789")]
+    # 書く側が作って中断で残した一時ファイルは、空・書き終えたもの・途中まで書かれたもののどれも消す
+    leftovers = []
+    for text in ("", whole, whole[:5]):
+        fd, path = record_unversioned._open_tmp(foreign, ours)
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(text)
+        leftovers.append(path)
     # NDF の一時ファイルのディレクトリでも、作る側と同じ形でない名前のものは残す
-    odd = [ours / name for name in ("x.json.abcd_123.ndf-tmp", f"{PROD}.json.short.ndf-tmp", "notes.txt")]
+    odd = [ours / name for name in (f"x.json.{'0' * 16}.ndf-tmp", f"{PROD}.json.short.ndf-tmp", "notes.txt")]
     for path in odd:
         path.write_text("", encoding="utf-8")
-    for path, text in zip(leftovers, ("", whole, whole[:5])):
-        path.write_text(text, encoding="utf-8")
     assert record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: made) == made
     record_unversioned.drop_share(share, PROD)
     record_unversioned.sweep_shares(share, 60, now=lambda: foreign.stat().st_mtime + 3600)
@@ -640,15 +643,35 @@ def test_shared_prefix_keeps_a_file_it_did_not_write_and_sweeps_its_own_leftover
     assert not any(path.exists() for path in leftovers) and all(path.exists() for path in odd)
 
 
+def test_shared_prefix_uses_its_own_result_when_the_temporary_directory_is_blocked(tmp_path: Path) -> None:
+    share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
+    made = record_unversioned.Prefix(COMMIT, record_decide.Push(BEFORE, AFTER), None, frozenset({"a"}), frozenset())
+    share.mkdir(parents=True)
+    (share / "tmp").write_text("利用者のメモ", encoding="utf-8")
+    assert record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: made) == made
+    assert not (share / f"{PROD}.json").exists() and (share / "tmp").read_text(encoding="utf-8") == "利用者のメモ"
+
+
+def test_sweep_shares_skips_a_temporary_directory_it_cannot_list(monkeypatch, tmp_path: Path) -> None:
+    share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
+    (share / "tmp").mkdir(parents=True)
+
+    def denied(self: Path) -> Any:
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, "iterdir", denied)
+    record_unversioned.sweep_shares(share, 60, now=lambda: 0.0)
+
+
 def test_sweep_shares_does_not_open_a_fifo_or_follow_a_link(monkeypatch, tmp_path: Path) -> None:
     share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
     ours = share / "tmp"
     ours.mkdir(parents=True)
     fifo = share / f"{PROD}.json"
     os.mkfifo(fifo)
-    tmp_fifo = ours / f"{PROD}.json.abcd_123.ndf-tmp"
+    tmp_fifo = ours / f"{PROD}.json.{'0' * 16}.ndf-tmp"
     os.mkfifo(tmp_fifo)
-    link = ours / f"{PROD}.json.efgh_456.ndf-tmp"
+    link = ours / f"{PROD}.json.{'1' * 16}.ndf-tmp"
     link.symlink_to(fifo)
     # 待つ開き方が戻ると FIFO で止まるので、開く前にその場で落とす（非ブロッキングとリンクをたどらない指定だけを通す）
     real_open = os.open
