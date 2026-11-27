@@ -51,16 +51,19 @@ def _approve_unsandboxed(root: Path, runtimes: list[str]) -> str:
 
 @pytest.mark.parametrize("args", [["-s", "workspace-write"], []])
 def test_the_place_holder_is_spread_into_the_safety_arguments(args: list[str]) -> None:
-    got = drc.build_command("codex", ["codex", "exec", "{args}", "-C", "/w"], args)
-    assert got == ["codex", "exec", *args, "-C", "/w"]
+    got = drc.build_command("codex", ["codex", "exec", "{args}", "--model", "m"], args)
+    assert got == ["codex", "exec", *args, "--model", "m"]
 
 
 @pytest.mark.parametrize(
     "command",
     [
-        ["codex", "exec", "-C", "/w"],  # {args} が無い
+        ["codex", "exec", "--model", "m"],  # {args} が無い
         ["codex", "exec", "{args}", "{args}"],  # 2 つある
         ["codex", "exec", "x{args}"],  # 単独の引数でない
+        ["codex", "{args}", "exec"],  # サブコマンドの前（codex の最上位のオプションとして読まれる）
+        ["codex", "exec", "--config", "{args}"],  # 別のオプションの値の位置
+        ["codex", "exec", "--", "{args}"],  # プロンプトの位置
         ["kiro-cli", "chat", "{args}"],  # 別のランタイムの CLI
         ["sh", "-c", "codex exec {args}"],
         [],
@@ -88,9 +91,9 @@ def test_a_command_without_one_place_holder_or_of_another_cli_is_refused(command
 )
 def test_a_safety_argument_given_by_the_command_itself_is_refused(runtime: str, word: str) -> None:
     """安全装置の引数は NDF だけが入れる。利用者のコマンドが自分で持てば、判定を迂回するので拒む。"""
-    exe = drc.facts.value("runtimes", runtime, "executable")
+    head = drc._prefix(runtime, drc.facts.row("runtimes", runtime))
     with pytest.raises(internal.InternalError) as got:
-        drc.build_command(runtime, [exe, "{args}", word, "x"], [])
+        drc.build_command(runtime, [*head, "{args}", word, "x"], [])
     assert got.value.kind == "precondition" and word.split("=")[0][:2] in str(got.value)
 
 
@@ -103,9 +106,9 @@ def test_a_prompt_after_the_options_end_is_not_taken_for_a_safety_argument() -> 
 
 def test_the_delegate_replaces_itself_with_the_cli_marked_as_an_ai_child(repo: Path, monkeypatch, execs, capsys) -> None:
     monkeypatch.setattr(agents, "user_namespaces", lambda: True)
-    drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", "-C", str(repo)])
+    drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", "-"])
     (file, argv, env) = execs[0]
-    assert file == "codex" and argv == ["codex", "exec", "-s", "workspace-write", "-C", str(repo)]
+    assert file == "codex" and argv == ["codex", "exec", "-s", "workspace-write", "-C", str(repo), "-"]
     assert env["NDF_AI_CHILD"] == "1"
     assert capsys.readouterr().out == ""
 
@@ -113,7 +116,7 @@ def test_the_delegate_replaces_itself_with_the_cli_marked_as_an_ai_child(repo: P
 def test_a_read_only_delegate_takes_the_review_row(repo: Path, monkeypatch, execs) -> None:
     monkeypatch.setattr(agents, "user_namespaces", lambda: True)
     drc.main(["--runtime", "codex", "--use", "review", "--", "codex", "exec", "{args}"])
-    assert execs[0][1] == ["codex", "exec", "-s", "read-only"]
+    assert execs[0][1] == ["codex", "exec", "-s", "read-only", "-C", str(repo)]
 
 
 def test_without_namespaces_and_an_approval_it_stops_before_the_cli(repo: Path, monkeypatch, execs, capsys) -> None:
@@ -127,7 +130,7 @@ def test_an_approved_delegate_without_namespaces_takes_the_unsandboxed_arguments
     monkeypatch.setattr(agents, "user_namespaces", lambda: False)
     _approve_unsandboxed(repo, ["codex"])
     drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}"])
-    assert execs[0][1] == ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox"]
+    assert execs[0][1] == ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "-C", str(repo)]
 
 
 def test_a_revoke_between_the_arguments_and_the_launch_stops_it(repo: Path, monkeypatch, execs, capsys) -> None:
@@ -146,18 +149,20 @@ def test_a_revoke_between_the_arguments_and_the_launch_stops_it(repo: Path, monk
     assert execs == [] and "launch-config" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("flag", [["-C", "/elsewhere"], ["--cd", "/elsewhere"], ["--cd=/elsewhere"]])
-def test_a_working_directory_other_than_the_current_one_is_refused(repo: Path, monkeypatch, execs, capsys, flag) -> None:
-    """承認と名前空間は今のディレクトリで確かめるので、別の作業場所を指す起動は拒む。"""
+@pytest.mark.parametrize(
+    "flag", [["-C", "."], ["-C", "/elsewhere"], ["-C/elsewhere"], ["-C=/elsewhere"], ["--cd", "/elsewhere"], ["--cd=/elsewhere"]]
+)
+def test_a_working_directory_given_by_the_command_itself_is_refused(repo: Path, monkeypatch, execs, capsys, flag) -> None:
+    """承認と名前空間は今のディレクトリで確かめるので、作業場所は NDF が今のディレクトリで入れ、コマンドの指定は形によらず拒む。"""
     monkeypatch.setattr(agents, "user_namespaces", lambda: True)
     assert drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", *flag]) == PRECONDITION
     assert execs == [] and "-C" in capsys.readouterr().err
 
 
-def test_a_relative_working_directory_that_is_the_current_one_passes(repo: Path, monkeypatch, execs) -> None:
-    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
-    drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", "-C", "."])
-    assert execs
+def test_kiro_takes_the_safety_arguments_after_its_non_interactive_chat(repo: Path, execs) -> None:
+    _approve_unsandboxed(repo, ["kiro"])
+    drc.main(["--runtime", "kiro", "--", "kiro-cli", "chat", "--no-interactive", "{args}", "--model", "m"])
+    assert execs[0][1] == ["kiro-cli", "chat", "--no-interactive", "--trust-all-tools", "--model", "m"]
 
 
 @pytest.mark.parametrize("argv", [["--runtime", "codex"], ["--runtime", "nobody", "--", "x", "{args}"], ["--", "codex", "{args}"]])

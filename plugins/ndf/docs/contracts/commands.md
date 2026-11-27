@@ -79,7 +79,7 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
-| `ndf delegate-run` | `--runtime`（string・必須・値 `codex`・`agy`・`kiro`）: 起動するランタイム<br>`--use`（string・任意・既定 `"delegate"`・値 `review`・`delegate`）: 用途（読むだけの委譲は review）<br>`command`（array of string・任意・位置）: -- の後に CLI のコマンド（{args} を 1 つ持つ） |
+| `ndf delegate-run` | `--runtime`（string・必須・値 `codex`・`agy`・`kiro`）: 起動するランタイム<br>`--use`（string・任意・既定 `"delegate"`・値 `review`・`delegate`）: 用途（読むだけの委譲は review）<br>`command`（array of string・任意・位置）: -- の後に CLI のコマンド（実行ファイルと決まった語のすぐ後に {args}） |
 
 結果の `metrics`: 決まった項目を持たない。`items` の要素: `retired_from`（string）・`retired_to`（string）
 

@@ -2,11 +2,12 @@
 
     ndf delegate-run --runtime codex|kiro|agy [--use delegate|review] -- <CLI のコマンド>
 
-CLI のコマンドの先頭はそのランタイムの実行ファイルで、NDF の引数を入れる位置 `{args}` を単独の引数として 1 つだけ持つ。
-安全装置の引数（`launch_settings.safety_args`）を取り、外す引数なら起動の直前に承認の対象を読み直してから、子の環境に
+CLI のコマンドは、そのランタイムの実行ファイルと決まった語（ランタイムの表の `delegate_prefix`。codex は `exec`）で始め、
+そのすぐ後に NDF の引数を入れる位置 `{args}` を単独の引数として 1 つだけ持つ。`{args}` には安全装置の引数
+（`launch_settings.safety_args`）と、作業ディレクトリを今のディレクトリにする引数（codex は `-C <今のディレクトリ>`）を入れる。外す引数なら起動の直前に承認の対象を読み直してから、子の環境に
 `NDF_AI_CHILD=1` を足してこのプロセスを CLI に置き換える（`exec`）。標準入力・標準出力・終了コードは CLI のものになる。
 
-コマンドが安全装置の引数を自分で持つ・今のディレクトリと違う作業ディレクトリを指す・起動できない状況・読み直しの食い違いは、
+コマンドの始まりが違う・安全装置か作業ディレクトリの引数を自分で持つ・起動できない状況・読み直しの食い違いは、
 CLI を起動せず、理由を標準エラーだけに書いて停止理由 `precondition` の終了コードで終える。結果 JSON は出さない
 （標準出力は CLI に渡すため。`cli.NO_RESULT_COMMANDS`）。安全装置の引数だけを返すコマンドは作らない（取得の後の取り消しを
 確かめられないため。設計書の「安全装置を外す指定」）。
@@ -30,8 +31,10 @@ RUNTIMES = ls.RUNTIMES
 PLACE = "{args}"
 # 安全装置の引数の名前を集める列（表 runtimes。別名の列を足す）
 SAFETY_COLUMNS = (*ls.SANDBOXED.values(), ls.UNSANDBOXED, "safety_aliases")
-# 作業ディレクトリを指す引数の名前の列
+# 作業ディレクトリを指す引数の名前の列（先頭の名前で NDF が今のディレクトリを入れる）
 WORKDIR_COLUMN = "workdir_options"
+# 実行ファイルのすぐ後に置く語の列（そのすぐ後が `{args}` の位置）
+PREFIX_COLUMN = "delegate_prefix"
 # 引数の終わり（これより後の語は CLI のオプションとして読まれない）
 OPTIONS_END = "--"
 
@@ -62,56 +65,59 @@ def _names(word: str, names: set[str]) -> bool:
     return head in names or any(len(n) == 2 and n[1] != "-" and word.startswith(n) for n in names)
 
 
+def _prefix(runtime: str, row: dict) -> list[str]:
+    """コマンドの先頭に置く語（実行ファイルと、ランタイムの表の `delegate_prefix`）。"""
+    return [agents.executable(runtime), *(row[PREFIX_COLUMN] if PREFIX_COLUMN in row else [])]
+
+
 def build_command(runtime: str, command: Sequence[str], args: Sequence[str]) -> list[str]:
-    """先頭の語がランタイムの CLI で、`{args}` が単独の引数として 1 つだけあり、安全装置の引数を自分で持たないことを確かめ、
-    `{args}` を `args` に広げる。満たさなければ `precondition`。"""
+    """コマンドが実行ファイルと `delegate_prefix` の語で始まってそのすぐ後に `{args}` を持ち、ほかに `{args}` を持たず、安全装置の
+    引数と作業ディレクトリの引数を自分で持たないことを確かめ、`{args}` を `args` に広げる。満たさなければ `precondition`。
+
+    `{args}` の位置を NDF が決めるのは、安全装置の引数が CLI のオプションとして読まれることを保証するため（別のオプションの値や
+    プロンプトの位置に置かれると、安全装置が効かないまま起動する）。"""
     row = facts.row(RUNTIMES, runtime)
-    exe = agents.executable(runtime)
-    if not command or Path(command[0]).name != exe:
-        raise _fail(f"コマンドの先頭は {runtime} の CLI（{exe}）にする")
-    if list(command).count(PLACE) != 1 or sum(PLACE in w for w in command) != 1:
+    prefix = _prefix(runtime, row)
+    words = list(command)
+    at = len(prefix)
+    head = [Path(words[0]).name, *words[1:at]] if words else []
+    if head != prefix or words[at : at + 1] != [PLACE]:
+        raise _fail(f"コマンドは {' '.join(prefix)} {PLACE} で始める（{PLACE} は安全装置の引数がオプションとして読まれる位置）")
+    if sum(PLACE in w for w in words) != 1:
         raise _fail(f"コマンドは NDF の引数を入れる位置 {PLACE} を単独の引数として 1 つだけ持つ")
-    names = _option_names(row)
-    given = [w for w in _options(command) if _names(w, names)]
+    names = _option_names(row) | _workdir_names(row)
+    given = [w for w in _options(words) if _names(w, names)]
     if given:
-        raise _fail(f"安全装置の引数（{'・'.join(sorted(names))}）は NDF が入れる。コマンドから外す（持っていた語: {' '.join(given)}）")
-    at = list(command).index(PLACE)
-    return [*command[:at], *args, *command[at + 1 :]]
+        raise _fail(
+            f"安全装置と作業ディレクトリの引数（{'・'.join(sorted(names))}）は NDF が入れる。コマンドから外す（持っていた語: {' '.join(given)}）"
+        )
+    return [*words[:at], *args, *words[at + 1 :]]
 
 
-def _check_workdir(runtime: str, command: Sequence[str], cwd: Path) -> None:
-    """作業ディレクトリを指す引数が今のディレクトリと違えば `precondition`（承認とサンドボックスは今のディレクトリで確かめる）。"""
+def _workdir_names(row: dict) -> set[str]:
+    return set(row[WORKDIR_COLUMN]) if WORKDIR_COLUMN in row else set()
+
+
+def _workdir_args(runtime: str, cwd: Path) -> list[str]:
+    """作業ディレクトリを今のディレクトリにする引数（ランタイムの表の `workdir_options` の先頭の名前）。無いランタイムは空。"""
     row = facts.row(RUNTIMES, runtime)
-    names = set(row[WORKDIR_COLUMN]) if WORKDIR_COLUMN in row else set()
-    words = _options(command)
-    for i, word in enumerate(words):
-        head, eq, value = word.partition("=")
-        if head not in names:
-            continue
-        if not eq:
-            value = words[i + 1] if i + 1 < len(words) else ""
-        if (cwd / value).resolve() != cwd.resolve():
-            raise _fail(
-                f"作業ディレクトリの指定（{'・'.join(sorted(names))}）が今のディレクトリと違う（{value}）。"
-                f'対象のディレクトリへ移ってから -C "$PWD" で打つ'
-            )
+    return [row[WORKDIR_COLUMN][0], str(cwd)] if WORKDIR_COLUMN in row else []
 
 
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="外部 AI への委譲を、安全装置の引数を入れて起動する")
     p.add_argument("--runtime", required=True, choices=_delegates(), help="起動するランタイム")
     p.add_argument("--use", choices=ls.USES, default="delegate", help="用途（読むだけの委譲は review）")
-    p.add_argument("command", nargs=argparse.REMAINDER, help=f"-- の後に CLI のコマンド（{PLACE} を 1 つ持つ）")
+    p.add_argument("command", nargs=argparse.REMAINDER, help=f"-- の後に CLI のコマンド（実行ファイルと決まった語のすぐ後に {PLACE}）")
     return p
 
 
 def _launch(a: argparse.Namespace) -> None:
     command = a.command[1:] if a.command[:1] == [OPTIONS_END] else a.command
     cwd = Path.cwd()
-    _check_workdir(a.runtime, command, cwd)
     build_command(a.runtime, command, [])  # 使い方の誤り（安全装置の引数の競合を含む）は、承認の案内より先に示す
     safety = ls.safety_args(a.runtime, a.use, cwd)
-    argv = build_command(a.runtime, command, safety.args)
+    argv = build_command(a.runtime, command, [*safety.args, *_workdir_args(a.runtime, cwd)])
     why = safety.verify() if safety.verify is not None else None
     if why is not None:
         raise _fail(why)

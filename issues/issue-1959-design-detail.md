@@ -56,7 +56,7 @@ src/ndf/
 | `src/ndf/domains/hooks/guards/launch_answer.py` | 新設 | 承認の問いの答えを記録する | launch_approval | モジュール | N: `check` |
 | `src/ndf/domains/crossreview/seats.py` | 変更 | サンドボックスのためにファイルを読めなかったレビュー担当向けの直し方の文を、承認の手順にする | — | モジュール | C: `_unread_hint` |
 | `src/ndf/cli.py`・`src/ndf/__main__.py` | 変更 | サブコマンドの登録と差し込み | usage | `COMMANDS` | C: 行の追加 |
-| `contracts/domains/runtimes.json` | 変更 | `delegate_sandbox_args`・`sandbox_needs_userns` の列と、kiro・agy の引数 | — | 表 | — |
+| `contracts/domains/runtimes.json` | 変更 | `delegate_sandbox_args`・`sandbox_needs_userns`・`delegate_prefix` の列と、kiro・agy の引数 | — | 表 | — |
 | `contracts/domains/env.json` | 変更 | 子へ渡す環境変数の 4 行 | — | 表 | — |
 | `contracts/domains/ndf-files.json`・`locations.json` | 変更 | 起動の設定・承認の記録・問いと答え・候補・反映の完了の記録・MCP の定義のコピーの保存先 | — | 表 | — |
 | `contracts/domains/entrypoints.json` | 変更 | 承認の答えの hook の行（読む環境変数は `NDF_FACTORY_RUN`） | — | 表 | — |
@@ -220,7 +220,7 @@ src/ndf/
 | `_confirm_terminal` | 同 | 新設 | `_confirm_terminal(target: Target, destination: Optional[Path]) -> Optional[str]` | 端末で承認の対象と、候補を反映するなら反映先のパスを示し、名前とハッシュの先頭 8 文字を受ける |
 | `_revoke` | 同 | 新設 | `_revoke(a: Namespace) -> int` | 答えを記録しない会話（`NDF_AI_CHILD`・`NDF_FACTORY_RUN`・`NDF_RELAY_PLAN`・`NDF_ORGANIZER_DIR` のどれかがある。`launch_records.unattended`）でなければ取り消しの行を足す。hook `launch-answer` と同じ判定で、人のいない会話で AI が承認の記録を変えないためである（受け入れ条件 14） |
 | `main` | `domains/settings/delegate_run_cli.py` | 新設 | `main(argv: list[str]) -> int` | `safety_args(runtime, "delegate", cwd)` を取り、`verify` を打ってから、`NDF_AI_CHILD=1` を足して `os.execvpe` で CLI に置き換える。失敗は標準エラーだけに出す |
-| `build_command` | 同 | 新設 | `build_command(runtime: str, command: Sequence[str], args: Sequence[str]) -> list[str]` | 先頭の語がランタイムの CLI で、`{args}` が単独の引数として 1 つだけあることを確かめ、そこを `args` に広げる |
+| `build_command` | 同 | 新設 | `build_command(runtime: str, command: Sequence[str], args: Sequence[str]) -> list[str]` | コマンドがランタイムの CLI と `delegate_prefix` の語で始まり、そのすぐ後に `{args}` が単独の引数として 1 つだけあり、安全装置と作業ディレクトリの引数を自分で持たないことを確かめ、そこを `args` に広げる |
 | `check` | `domains/hooks/guards/launch_answer.py` | 新設 | `check(ctx, svc) -> Verdict` | `AskUserQuestion` の答えを `record_answer` へ渡し、常に通す |
 
 - `draft` と `show` の結果の `cleanup_targets`: 利用者が手で片付けてよい候補を、結果 JSON の `cleanup_targets` 配列で出す。`/proc` の無い環境では掃除が候補を退避しないので、利用者はこの一覧を見て候補のディレクトリを消す
@@ -285,7 +285,7 @@ src/ndf/
 | `_draft`・`reflect` | 2 つの候補は別のファイル | 反映先のファイルが無い | 版が違う反映先は上書きしない |
 | `reflect`・`recover`・`reflected` | 反映して候補を消した後の打ち直しが成功する。候補を置いた直後の中断の後の打ち直しが成功する | 退避だけが残った中断、反映の途中の記録だけが残った中断 | 照らした後の保存（名前の変更の前後に差し込む）が残る。置いた直後の中断で退避の側が書き換わっていれば拒んで戻す。反映先と退避の両方が利用者の中身なら両方残る。反映の後に変えた設定の打ち直しは拒む |
 | `_show` | 続きのコマンドが出る | 依頼から長くたった答え | 4 つの環境変数があれば問いでなく端末のコマンド |
-| `delegate_run_cli.main`・`build_command` | `{args}` に引数が入り、子の環境に `NDF_AI_CHILD` がある（`exec` は差し替える） | 引数が 0 個 | 停止と読み直しの食い違いで `exec` を呼ばない。`{args}` が無い・別の CLI は拒む |
+| `delegate_run_cli.main`・`build_command` | `{args}` に引数が入り、子の環境に `NDF_AI_CHILD` がある（`exec` は差し替える） | 引数が 0 個 | 停止と読み直しの食い違いで `exec` を呼ばない。`{args}` が無い・決まった位置に無い・別の CLI・作業ディレクトリの指定（`-C`・`-C<値>`・`--cd=<値>` など）は拒む |
 
 ## 起動の引数の組み立てと起動の結果
 
@@ -413,7 +413,7 @@ src/ndf/
 | `_start` | `adapters/agents.py` | 変更 | 変えない | 相手役と修正担当の子の環境に `NDF_AI_CHILD=1` を足す |
 | `_guarded_run` | 同 | 変更 | 変えない | `Launch.verify`（`Optional[Callable[[], Optional[str]]]`、省けば None）があれば、同時起動の枠と CLI のバージョンの確認の後、`_start` の直前に呼ぶ。理由を返せば起動せず `AgentState.REFUSED` |
 
-- `runtimes.json`: codex に `sandbox_needs_userns: true` と `delegate_sandbox_args: ["-s", "workspace-write"]`。kiro は `sandbox_args: ["--trust-tools=fs_read"]` を持たせ、`review_args` に書いてある同じ値は `{sandbox}` に置き換える。kiro の `unsandboxed_args: ["--trust-all-tools"]`。agy は `unsandboxed_args: ["--dangerously-skip-permissions"]`
+- `runtimes.json`: codex に `sandbox_needs_userns: true` と `delegate_sandbox_args: ["-s", "workspace-write"]`。kiro は `sandbox_args: ["--trust-tools=fs_read"]` を持たせ、`review_args` に書いてある同じ値は `{sandbox}` に置き換える。kiro の `unsandboxed_args: ["--trust-all-tools"]`。agy は `unsandboxed_args: ["--dangerously-skip-permissions"]`。`ndf delegate-run` の `{args}` の前に置く語 `delegate_prefix` は、codex が `["exec"]`、kiro が `["chat", "--no-interactive"]`（agy は持たない）
 - `_unread_hint`（`domains/crossreview/seats.py`）のサンドボックスの失敗の文は「NDF がサンドボックスを外して起動する」をやめ、`/ndf:launch-config` で承認する手順にする
 
 ### 異常系の処理

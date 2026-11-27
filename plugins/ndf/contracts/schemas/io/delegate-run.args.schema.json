@@ -31,7 +31,7 @@
           "items": {
             "type": "string"
           },
-          "description": "-- の後に CLI のコマンド（{args} を 1 つ持つ）",
+          "description": "-- の後に CLI のコマンド（実行ファイルと決まった語のすぐ後に {args}）",
           "x-ndf-positional": true
         }
       },

@@ -19,7 +19,8 @@
     "sandbox_needs_userns": {"type": "boolean", "summary": "サンドボックスがユーザー名前空間を要る（`unshare -Ur true` が通らない Linux では使えない）。真のランタイムは、名前空間を作れなければ承認があるときだけ unsandboxed_args で起動する。codex のサンドボックス（bubblewrap）は名前空間が無いとコマンドを打てない（#3893）", "optional": true},
     "unsandboxed_args": {"type": "array", "summary": "安全装置を外す引数。サンドボックスが使えず、起動の設定の permissions.unsandboxed にランタイムがあり承認済みのときだけ入れる（#1959。外で隔離された環境の中でだけ打つ前提）", "optional": true},
     "safety_aliases": {"type": "array", "summary": "sandbox_args・delegate_sandbox_args・unsandboxed_args の引数の別名（短い名前・長い名前）。ndf delegate-run は、利用者のコマンドがこれらの引数の名前を自分で持てば拒む（安全装置の判定を迂回させない）", "optional": true},
-    "workdir_options": {"type": "array", "summary": "作業ディレクトリを指す引数の名前。ndf delegate-run は、今のディレクトリと違う場所を指せば拒む（承認とサンドボックスは今のディレクトリで確かめるため）", "optional": true}
+    "delegate_prefix": {"type": "array", "summary": "ndf delegate-run の起動で、実行ファイルのすぐ後に置く語（サブコマンドと、委譲で必ず付ける引数）。コマンドは実行ファイルの後にこの語を並べ、そのすぐ後に安全装置の引数を入れる位置を置く（安全装置の引数がオプションとして読まれる位置を NDF が決める）。無いランタイムは実行ファイルのすぐ後", "optional": true},
+    "workdir_options": {"type": "array", "summary": "作業ディレクトリを指す引数の名前。ndf delegate-run は先頭の名前で今のディレクトリを入れ、コマンドがこれらの名前を自分で持てば拒む（承認とサンドボックスは今のディレクトリで確かめるため）", "optional": true}
   },
   "rows": [
     {
@@ -55,6 +56,7 @@
       "sandbox_needs_userns": true,
       "unsandboxed_args": ["--dangerously-bypass-approvals-and-sandbox"],
       "safety_aliases": ["--sandbox"],
+      "delegate_prefix": ["exec"],
       "workdir_options": ["-C", "--cd"]
     },
     {
@@ -85,7 +87,8 @@
       "review_args": ["chat", "--no-interactive", "{sandbox}"],
       "sandbox_args": ["--trust-tools=fs_read"],
       "unsandboxed_args": ["--trust-all-tools"],
-      "safety_aliases": ["-a"]
+      "safety_aliases": ["-a"],
+      "delegate_prefix": ["chat", "--no-interactive"]
     }
   ]
 }
