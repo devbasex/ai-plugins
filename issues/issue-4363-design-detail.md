@@ -161,7 +161,7 @@ plugins/ndf/
 
 - `read`
   - 事前条件: `found` は出力の最後の `{"verdicts": [...]}` の要素（見つからなければ None）
-  - 事後条件: `Answers.verdicts` は有効な回答と `holds` が null の回答だけを持つ。不正な回答・知らない番号・回答の無い番号は `Answers.warnings` に番号を載せる
+  - 事後条件: `Answers.verdicts` は、有効な回答、`holds` が null の回答、保護の種類を示した不正な回答（`invalid` が真）を持つ。不正な回答・知らない番号・回答の無い番号は `Answers.warnings` に番号を載せる
 
 ### 処理の手順
 
@@ -170,7 +170,7 @@ plugins/ndf/
 | `select` | 指摘が `redline` を持つか、NDF の指摘である | 渡さない |
 | `select` | 上に当たらず、`mvv` も `protect` も持たない（ここで「普通の指摘」と呼ぶ） | 渡す |
 | `select` | 上に当たらず、`mvv` か `protect` を持つ | `use_tracks` が真か、同じ呼び出しに普通の指摘が 1 件でもあれば渡す。どちらでもなければ渡さない |
-| `read` | 回答が有効か、判断できないか、不正か | 設計文書の「[回答の形](./issue-4363-design.md#回答の形)」の表で分ける。有効な回答と判断できない回答は `Verdict` にして `verdicts` に入れる（判断できない回答は `holds=None` とし、`tracks` を残して注意にする）。不正な回答は `verdicts` に入れず注意にする。注意には判定役が書いた文を写さない（設計文書の同じ節） |
+| `read` | 回答が有効か、判断できないか、不正か | 設計文書の「[回答の形](./issue-4363-design.md#回答の形)」の表で分ける。有効な回答と判断できない回答は `Verdict` にして `verdicts` に入れる（判断できない回答は `holds=None` とし、`tracks` を残して注意にする）。不正な回答は注意にする。そのうち `tracks` に保護の種類があるものは、`holds=None`・`invalid=True` とし、保護の種類だけを持つ `Verdict` にして `verdicts` に入れる。ほかの不正な回答は入れない。注意には判定役が書いた文を写さない（設計文書の同じ節） |
 | `lowers`（順 1） | `holds` が偽でない（示せた・null） | 下げない |
 | `lowers`（順 2） | 指摘が `redline`・`mvv`・`protect` のどれかを持つか、NDF の指摘である | 下げない |
 | `lowers`（順 3） | 回答の `tracks` に保護の種類があるか、7 つの種類に無い文字列がある | 下げない |
@@ -182,7 +182,7 @@ plugins/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `Verdict(id, holds, condition, path, result, reason, tracks, unknown)` | 型 | `verify_decide.py` | `unknown` は `tracks` に種類の表に無い文字列があったか。`tracks` は表にある値だけ |
+| `Verdict(id, holds, condition, path, result, reason, tracks, unknown, invalid)` | 型 | `verify_decide.py` | `unknown` は `tracks` に種類の表に無い文字列があったか。`tracks` は表にある値だけ。`invalid` は不正な回答から保護の種類だけを残したもの |
 | `Answers(verdicts, warnings)` | 型 | `verify_decide.py` | `verdicts` は番号から `Verdict` |
 
 ### 既存の部品の再利用
@@ -261,7 +261,7 @@ plugins/ndf/
 
 - `apply_checks`
   - 事前条件: `asked` は `verify_decide.select` が返した行の番号
-  - 事後条件: 有効な回答（`holds` が真か偽）を持つ行は `check` を持つ。`holds` が null か回答の無い行は `check` を持たず、重要度が変わらない。`verdicts` にある回答（有効な回答と `holds` が null の回答）の `tracks` のうち保護の種類は、行の `protect` に足される。不正な回答は `verdicts` に入らないので、その `tracks` は使わない。下げた行は `severity` が minor、`check.lowered` が真で、`raised_severity` のキーを持つ
+  - 事後条件: 有効な回答（`holds` が真か偽）を持つ行は `check` を持つ。`holds` が null か回答の無い行は `check` を持たず、重要度が変わらない。`verdicts` にある回答の `tracks` のうち保護の種類は、行の `protect` に足される。不正な回答が示した保護の種類も足される。下げた行は `severity` が minor、`check.lowered` が真で、`raised_severity` のキーを持つ
 
 ### 処理の手順
 
@@ -324,7 +324,7 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `enter` | `protect` が行に残り、`fresh` に新しい行と戻った行だけが入る | 同じラウンドの 2 件の `protect` を合わせる | `protect` が文字列なら持たない |
-| `apply_checks` | 次の 4 つ。(1) 成り立たないと答えた普通の major は minor になり、`pending` に出ず、元の重要度が残る。(2) 起きると示せたと答えた指摘は重要度が変わらない。(3) 回答の `tracks` が `authz` と `user_data` の 2 つなら、指摘の `protect` に 2 つとも残り、下がらない。(4) 回答の `tracks` が `delivered` だけで成り立たないと答えた指摘は下がる | 下げる前の重要度が critical の指摘と、`raised_severity` が不明の指摘 | `holds` が null の回答と回答の無い指摘は、`check` が書かれず重要度が変わらず `unconfirmed` に入る。`mvv`・`redline`・`protect` のどれか 1 つでも持つ指摘は、成り立たないと答えても下がらない。不正な回答の `tracks` は `protect` に足されない |
+| `apply_checks` | 次の 4 つ。(1) 成り立たないと答えた普通の major は minor になり、`pending` に出ず、元の重要度が残る。(2) 起きると示せたと答えた指摘は重要度が変わらない。(3) 回答の `tracks` が `authz` と `user_data` の 2 つなら、指摘の `protect` に 2 つとも残り、下がらない。(4) 回答の `tracks` が `delivered` だけで成り立たないと答えた指摘は下がる | 下げる前の重要度が critical の指摘と、`raised_severity` が不明の指摘 | `holds` が null の回答と回答の無い指摘は、`check` が書かれず重要度が変わらず `unconfirmed` に入る。`mvv`・`redline`・`protect` のどれか 1 つでも持つ指摘は、成り立たないと答えても下がらない。不正な回答の `tracks` は、保護の種類だけが `protect` に足され、`check` は書かれない |
 | `_raised_again` | 保護の種類も MVV の項目も無い出し直しでは、下げた行は minor のまま（I1） | `protect` 付きの出し直しで元の重要度へ戻り `check.lowered` が偽になる。`protect` と MVV の項目の両方を持つ出し直し | MVV の項目を挙げた出し直しは major 以上に固定され、承認の要る操作だけを挙げた出し直しは `redline` が付き、重要度は今回の値と minor の重い方になる |
 | `_revive` | 直した後の再発で `check` が消え、`protect` が残る。次の確認の `tracks` が空でも下がらない | 無し | 無し |
 

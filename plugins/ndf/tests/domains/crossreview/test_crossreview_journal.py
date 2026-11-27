@@ -716,6 +716,19 @@ def test_issue_4363_unconfirmed_finding_keeps_its_severity(verdicts: dict) -> No
     assert checked == journal_mod.Checked(frozenset(), frozenset({"r1-1"}))
 
 
+@pytest.mark.parametrize("answer", [{"holds": False, "reason": ""}, {"holds": True}, {}])
+def test_issue_4363_invalid_answer_leaves_only_its_protect_kinds(answer: dict) -> None:
+    """#4363: 不正な回答は確認の結果にせず重要度を保つが、示した保護の種類は行に残す。"""
+    journal = drive.FindingJournal()
+    journal.enter(1, [_told()])
+    answers = verify_decide.read([{"id": "r1-1", "tracks": ["secret", "delivered"], **answer}], ["r1-1"])
+    checked = journal.apply_checks(["r1-1"], answers.verdicts)
+    row = journal.rows["r1-1"]
+    assert (row["severity"], row["protect"]) == ("major", ["secret"]) and "check" not in row
+    assert answers.verdicts["r1-1"].tracks == ("secret",) and len(answers.warnings) == 1
+    assert checked.unconfirmed == frozenset({"r1-1"})
+
+
 def test_issue_4363_tracks_of_the_judge_stay_as_protect_kinds() -> None:
     journal = drive.FindingJournal()
     journal.enter(1, [_told()])

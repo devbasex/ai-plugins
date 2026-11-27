@@ -22,7 +22,7 @@ _SHOWN = ("id", "severity", "text", "impact", "path", "line", "section")
 
 class Verdict(NamedTuple):
     """指摘 1 件への回答。`holds` は起きると示せたか（None は資料が足りず判断できない）。`tracks` は指摘の種類の表にある
-    値だけで、`unknown` は表に無い値が書かれていたか。"""
+    値だけで、`unknown` は表に無い値が書かれていたか。`invalid` は不正な回答から保護の種類だけを残したもの（`holds` は None）。"""
 
     id: str
     holds: Optional[bool]
@@ -32,10 +32,11 @@ class Verdict(NamedTuple):
     reason: str = ""
     tracks: tuple[str, ...] = ()
     unknown: bool = False
+    invalid: bool = False
 
 
 class Answers(NamedTuple):
-    """判定役の回答。`verdicts` は番号から、有効な回答と判断できない回答だけを持つ。"""
+    """判定役の回答。`verdicts` は番号から、有効な回答、判断できない回答、保護の種類を示した不正な回答（`Verdict.invalid`）を持つ。"""
 
     verdicts: Mapping[str, Verdict]
     warnings: tuple[str, ...] = ()
@@ -119,6 +120,14 @@ def _verdict(fid: str, item: Mapping[str, Any]) -> Optional[Verdict]:
     return Verdict(fid, holds, condition, path, result, reason, tracks, unknown)
 
 
+def _invalid(fid: str, item: Mapping[str, Any]) -> Optional[Verdict]:
+    """不正な回答の 1 件。回答としては使わないが、示した保護の種類は行に残すので（#4363 の不変条件 I4）、その種類だけを持つ
+    回答にする。保護の種類が無ければ None。"""
+    protect = criteria_decide.protect_kinds()
+    kinds = tuple(k for k in _tracks(item.get("tracks"))[0] if k in protect)
+    return Verdict(fid, None, tracks=kinds, invalid=True) if kinds else None
+
+
 def _repeated(fid: str, items: Sequence[Mapping[str, Any]]) -> Verdict:
     """同じ番号への複数の回答。どれが正しいか決められないので判断できないとし、どれかが示した指摘の種類はすべて残す。"""
     shown = {kind for item in items for kind in _tracks(item.get("tracks"))[0]}
@@ -129,10 +138,11 @@ def _repeated(fid: str, items: Sequence[Mapping[str, Any]]) -> Verdict:
 def _warnings(ids: Sequence[str], verdicts: Mapping[str, Verdict], repeated: Sequence[str], unknown: int) -> tuple[str, ...]:
     """読んだ回答の注意。公開の記録に載るので、判定役が書いた文（理由・渡していない番号）は写さず、渡した指摘の番号と
     件数だけを書く。`repeated` は複数の回答があった番号、`unknown` は渡していない番号への回答の件数。"""
+    invalid = [fid for fid in ids if fid not in verdicts or verdicts[fid].invalid]
     listed = (
-        ("判定役の有効な回答が無いので下げない", [fid for fid in ids if fid not in verdicts]),
+        ("判定役の有効な回答が無いので下げない", invalid),
         ("判定役が同じ番号に複数の回答を返したので下げない", repeated),
-        ("判定役が判断できないので下げない", [v.id for v in verdicts.values() if v.holds is None and v.id not in repeated]),
+        ("判定役が判断できないので下げない", [v.id for v in verdicts.values() if v.holds is None and v.id not in (*repeated, *invalid)]),
     )
     warnings = [f"{head}: {'・'.join(found)}" for head, found in listed if found]
     if unknown:
@@ -154,7 +164,7 @@ def read(found: Optional[Sequence[Mapping[str, Any]]], ids: Sequence[str]) -> An
             given.setdefault(fid, []).append(item)
     verdicts: dict[str, Verdict] = {}
     for fid, items in given.items():
-        verdict = _repeated(fid, items) if len(items) > 1 else _verdict(fid, items[0])
+        verdict = _repeated(fid, items) if len(items) > 1 else _verdict(fid, items[0]) or _invalid(fid, items[0])
         if verdict is not None:
             verdicts[fid] = verdict
     repeated = [fid for fid, items in given.items() if len(items) > 1]
