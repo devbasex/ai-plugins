@@ -77,10 +77,16 @@ class Finding(NamedTuple):
 
 
 class Proposal(NamedTuple):
+    """分け方の案。`file` の単位 `unit` を `units` に置き換え、`repoint` の `(ファイルのパス, 単位の名前)` が持つ
+    `unit` への依存を、`units` の最後の単位へ付け替えると適用できる。
+    """
+
+    file: str
     unit: str
     units: tuple[UnitDef, ...]
     resplit: tuple[str, ...]
     remaining: tuple[Finding, ...]
+    repoint: tuple[tuple[str, str], ...]
 
 
 class Judgement(NamedTuple):
@@ -135,32 +141,33 @@ def judge(files: Sequence[UnitFile], limits: Limits, criteria: Mapping[int, int]
     over = dict.fromkeys(
         (v.file, v.name) for v in views if v.lines is not None and (v.lines > limits.max or (v.lines > limits.target and len(v.tasks) > 1))
     )
-    return Judgement(views, bad, warn, tuple(split(files, key, limits) for key in over))
+    return Judgement(views, bad, warn, tuple(split(files, key, limits, criteria) for key in over))
 
 
-def split(files: Sequence[UnitFile], key: tuple[str, str], limits: Limits) -> Proposal:
+def split(files: Sequence[UnitFile], key: tuple[str, str], limits: Limits, criteria: Optional[Mapping[int, int]] = None) -> Proposal:
     """単位 `key`（ファイルのパス, 単位の名前）を、依存の順に目安で区切った直列の単位にする案。ファイルは書き換えない。
 
     1 つで上限を超えるタスクがあれば、区切らずに `resplit` へ返す。区切りが 1 つなら `units` は空。
-    元の単位の依存は最初の区切りが引き継ぎ、元の単位を指す依存は最後の区切りへ付け替える。
-    `remaining` は、案を当てた後に残る違反（受け入れ条件の参照は区切っても変わらないので見ない）。
+    元の単位の依存は最初の区切りが引き継ぎ、元の単位を指す依存は最後の区切りへ付け替える（付け替える単位は `repoint`）。
+    `remaining` は、案を当てた後に残る違反。受け入れ条件の参照は `criteria` を渡したときに確かめる。
     """
     at = next(i for i, f in enumerate(files) if f.path == key[0])
     unit = next(u for u in files[at].units if u.name == key[1])
     tasks = _in_dependency_order(_unit_tasks({t.id: t for t in files[at].tasks}, unit))
     if any(t.lines is None for t in tasks):  # 実装計画を省いた課題の単位は行数が無く、区切れない
-        return Proposal(unit.name, (), (), ())
+        return Proposal(key[0], unit.name, (), (), (), ())
     resplit = tuple(t.id for t in tasks if t.lines > limits.max)
     pieces = [] if resplit else _pieces(tasks, limits.target)
     if len(pieces) < 2:
-        return Proposal(unit.name, (), resplit, ())
+        return Proposal(key[0], unit.name, (), resplit, (), ())
     names = [f"{unit.name} {n}" for n in range(1, len(pieces) + 1)]
     units = tuple(
         UnitDef(name, tuple(t.id for t in piece), unit.after if i == 0 else (Edge(names[i - 1], _SPLIT_REASON),))
         for i, (name, piece) in enumerate(zip(names, pieces))
     )
-    _, remaining, _ = _check(_apply(files, at, unit.name, units), limits, None)
-    return Proposal(unit.name, units, (), remaining)
+    applied, repoint = _apply(files, at, unit.name, units)
+    _, remaining, _ = _check(applied, limits, criteria)
+    return Proposal(key[0], unit.name, units, (), remaining, repoint)
 
 
 def _in_dependency_order(tasks: Sequence[Task]) -> list[Task]:
@@ -192,8 +199,11 @@ def _pieces(tasks: Sequence[Task], target: int) -> list[list[Task]]:
     return pieces
 
 
-def _apply(files: Sequence[UnitFile], at: int, name: str, units: tuple[UnitDef, ...]) -> list[UnitFile]:
-    """`at` のファイルの単位 `name` を `units` に置き換え、その単位を指していた依存を最後の区切りへ付け替える。"""
+def _apply(files: Sequence[UnitFile], at: int, name: str, units: tuple[UnitDef, ...]) -> tuple[list[UnitFile], tuple[tuple[str, str], ...]]:
+    """`at` のファイルの単位 `name` を `units` に置き換え、その単位を指していた依存を最後の区切りへ付け替える。
+
+    置き換えた後のファイルと、依存を付け替えた単位の `(ファイルのパス, 単位の名前)` を返す。
+    """
     owner = _issue_owners(files, [])
 
     def moved(where: int, e: Edge) -> Edge:
@@ -201,15 +211,19 @@ def _apply(files: Sequence[UnitFile], at: int, name: str, units: tuple[UnitDef, 
         return e._replace(unit=units[-1].name) if (target, e.unit) == (at, name) else e
 
     applied = []
+    repoint: list[tuple[str, str]] = []
     for where, f in enumerate(files):
         kept: list[UnitDef] = []
         for u in f.units:
             if (where, u.name) == (at, name):
                 kept += units
             else:
-                kept.append(u._replace(after=tuple(moved(where, e) for e in u.after)))
+                after = tuple(moved(where, e) for e in u.after)
+                if after != u.after:
+                    repoint.append((f.path, u.name))
+                kept.append(u._replace(after=after))
         applied.append(f._replace(units=tuple(kept)))
-    return applied
+    return applied, tuple(repoint)
 
 
 def _check(

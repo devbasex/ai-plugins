@@ -110,7 +110,7 @@ def test_size_check_by_lines(lines, violations, warnings):
     j = _judge(_file([_task("T1", lines=lines)], [_unit("A", "T1")]))
     assert (_rules(j.violations), _rules(j.warnings)) == (violations, warnings)
     # タスクが 1 つの単位は区切れないので、上限を超えるときだけ切り直すタスクを返す
-    expected = [ud.Proposal("A", (), ("T1",), ())] if violations else []
+    expected = [ud.Proposal("issues/issue-7-plan.units.json", "A", (), ("T1",), (), ())] if violations else []
     assert list(j.proposals) == expected
 
 
@@ -272,25 +272,65 @@ def test_split_moves_edges_to_the_first_and_the_last_piece():
     )
     later = _file([_task("T1")], [_unit("Y", "T1", after=[{"unit": "A", "reason": "r", "issue": 20}])], issues=(30,), path="c.json")
     p = ud.split((base, big, later), ("b.json", "A"), LIMITS)
+    assert (p.file, p.unit, p.repoint) == ("b.json", "A", (("c.json", "Y"),))
     assert p.units[0].after == (ud.Edge("X", "X の型", 10),)
     assert p.units[1].after == (ud.Edge("A 1", "分け方の案: 依存の順"),)
     # 元の単位を指していた依存は最後の区切りへ付け替わるので、当てた後に違反は残らない
     assert p.remaining == ()
 
 
+def _apply_proposal(files, p):
+    """返り値の欄だけを使って案を適用する。"""
+
+    def edges(f, u):
+        if (f.path, u.name) not in p.repoint:
+            return u.after
+        return tuple(e._replace(unit=p.units[-1].name) if e.unit == p.unit else e for e in u.after)
+
+    applied = []
+    for f in files:
+        units = []
+        for u in f.units:
+            units += p.units if (f.path, u.name) == (p.file, p.unit) else [u._replace(after=edges(f, u))]
+        applied.append(f._replace(units=tuple(units)))
+    return applied
+
+
+def test_split_proposal_is_enough_to_apply_across_files():
+    big = _file(
+        [_task("T1", lines=400), _task("T2", lines=400), _task("T3")],
+        [_unit("A", "T1", "T2"), _unit("B", "T3", after=["A"])],
+        issues=(20,),
+        path="b.json",
+    )
+    later = _file([_task("T1")], [_unit("Y", "T1", after=[{"unit": "A", "reason": "r", "issue": 20}])], issues=(30,), path="c.json")
+    (p,) = _judge(big, later).proposals
+    assert p.repoint == (("b.json", "B"), ("c.json", "Y"))
+    applied = _judge(*_apply_proposal((big, later), p))
+    assert (applied.violations, applied.warnings) == ((), ())
+
+
+def test_split_keeps_the_criteria_violation_left_after_applying():
+    tasks = [_task("T1", lines=400, criteria=("7:3",)), _task("T2", lines=400)]
+    j = _judge(_file(tasks, [_unit("A", "T1", "T2")]), criteria={7: 2})
+    (p,) = j.proposals
+    assert p.remaining == j.violations
+    assert _rules(p.remaining) == ["U2"]
+
+
 def test_split_returns_tasks_over_the_max_to_be_cut_again():
     f = _file([_task("T1", lines=1001), _task("T2", lines=10), _task("T3", lines=2000)], [_unit("A", "T1", "T2", "T3")])
-    assert ud.split((f,), (f.path, "A"), LIMITS) == ud.Proposal("A", (), ("T1", "T3"), ())
+    assert ud.split((f,), (f.path, "A"), LIMITS) == ud.Proposal(f.path, "A", (), ("T1", "T3"), (), ())
 
 
 def test_split_of_a_whole_unit_without_lines_has_no_units():
     f = ud.single(7)
-    assert ud.split((f,), (f.path, "issue-7"), LIMITS) == ud.Proposal("issue-7", (), (), ())
+    assert ud.split((f,), (f.path, "issue-7"), LIMITS) == ud.Proposal(f.path, "issue-7", (), (), (), ())
 
 
 def test_split_with_one_piece_has_no_units():
     f = _file([_task("T1", lines=100), _task("T2", lines=100)], [_unit("A", "T1", "T2")])
-    assert ud.split((f,), (f.path, "A"), LIMITS) == ud.Proposal("A", (), (), ())
+    assert ud.split((f,), (f.path, "A"), LIMITS) == ud.Proposal(f.path, "A", (), (), (), ())
 
 
 def test_split_reports_the_overlap_left_after_applying():

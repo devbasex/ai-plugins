@@ -90,7 +90,7 @@ contracts/
 | `Limits` | `target`・`max` |
 | `View` | `file`・`name`・`order`・`merge`・`after`（解決済みの `(file, name, reason)`）・`issues`・`tasks`・`criteria`・`lines`・`actual_lines`・`touches` |
 | `Finding` | `rule`・`unit`・`reason` |
-| `Proposal` | `unit`・`units: tuple[UnitDef, ...]`・`resplit: tuple[str, ...]`（切り直すタスク）・`remaining: tuple[Finding, ...]` |
+| `Proposal` | `file`（超えた単位のファイルのパス）・`unit`・`units: tuple[UnitDef, ...]`・`resplit: tuple[str, ...]`（切り直すタスク）・`remaining: tuple[Finding, ...]`・`repoint: tuple[tuple[str, str], ...]`（`unit` への依存を最後の区切りへ付け替える単位の `(file, name)`） |
 | `Judgement` | `views`・`violations`・`warnings`・`proposals` |
 
 `UnitDef` は #4369 の `review_units_decide.Unit`（流すときの単位）と別の型である。
@@ -101,7 +101,7 @@ contracts/
 | --- | --- | --- | --- | --- |
 | `parse` | `units_decide.py` | 新設 | `(doc: Mapping, path: str) -> UnitFile` | スキーマを通った辞書を型にする。`issue` を省いたタスクはファイルの唯一の課題 |
 | `judge` | 同上 | 新設 | `(files: Sequence[UnitFile], limits: Limits, criteria: Mapping[int, int]) -> Judgement` | 全ファイルを 1 つのグラフにし、違反・警告・導く値・案を返す。`criteria` のキーは、受け入れ条件を指してよい課題のすべてである |
-| `split` | 同上 | 新設 | `(files, key: tuple[str, str], limits) -> Proposal` | 超えた単位を、依存の順の直列の単位に区切る |
+| `split` | 同上 | 新設 | `(files, key: tuple[str, str], limits, criteria=None) -> Proposal` | 超えた単位を、依存の順の直列の単位に区切る |
 | `single` | 同上 | 新設 | `(issue: int) -> UnitFile` | 課題全体を 1 つの単位にする。名前は `issue-<番号>`、`lines` は無し、`touches` は空、`whole` は真 |
 
 ### 処理の手順
@@ -133,8 +133,8 @@ contracts/
 3. 前から足して `target` を超える手前で区切る。1 つで `target` を超えるタスクは、それだけで 1 区切りにする
 4. 区切りが 1 つなら `units` を空にする（分けようがない）
 5. 名前は `<元の名前> <番号>`、後の区切りは直前の区切りを先に要る単位にする（理由「分け方の案: 依存の順」）
-6. 元の `after` は最初の区切りが引き継ぎ、元の単位を指していた依存は最後の区切りへ付け替える
-7. 当てた後のグラフを同じ規則で確かめ（案は作らない）、残る違反を `remaining` に入れる
+6. 元の `after` は最初の区切りが引き継ぎ、元の単位を指していた依存は最後の区切りへ付け替える。付け替えた単位は `repoint` に入れる
+7. 当てた後のグラフを同じ規則で確かめ（案は作らない）、残る違反を `remaining` に入れる。`judge` は受け取った `criteria` を `split` に渡し、受け入れ条件の参照の違反も残す
 
 ### 異常系の処理
 
