@@ -2,7 +2,7 @@
 
 起票の記録は、元の PR（状態ファイルの `pr`）に置く専用のコメントである。Issue を作る前に、試みる指摘の識別値を書く。状態の
 保存先が違う打ち直しも同じコメントを読み、URL の無い識別値は検索と一覧で確かめてから起票する（2 件作らない）。記録の URL は、
-指す Issue を読んで確かめてから使う。今のアカウントで編集できない記録は、中身を引き継いだ新しいコメントにする。何を起票するかと、
+指す Issue を読んで確かめてから使う。何を起票するかと、
 文と記録の形は `leftover_decide` が持つ。GitHub の失敗では指摘を失わず、行の `issue_error` と注意に残す。
 """
 
@@ -124,12 +124,6 @@ def _refused(exc: Exception) -> bool:
     return type(status) is int and 400 <= status < 500
 
 
-def _not_editable(exc: Exception) -> bool:
-    """今のアカウントに編集の権限が無い失敗か（レート制限の 403 は含めない）。"""
-    limited = getattr(exc, "secondary", False) or getattr(exc, "quota", None) is not None
-    return getattr(exc, "status", None) == 403 and not limited
-
-
 def _reason(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
@@ -163,18 +157,15 @@ class _Filing:
             row.pop(Filed.ERROR, None)
 
     def read(self) -> None:
-        """起票の記録を読み、複数あれば 1 つにまとめる（URL のある項目を残す）。書き先は最も新しい記録である。`at` の無い項目
-        （記録を書いた後に中断した）には、コメントの更新時刻を当てる。"""
+        """起票の記録を読む。`at` の無い項目（記録を書いた後に中断した）には、コメントの更新時刻を当てる。"""
         self.me = self.port.viewer()
-        found = self._records()
-        if not found:
+        found = self._record()
+        if found is None:
             return
-        self.record_id = self.data[RECORD_ID] = found[-1].id
-        for comment in found:
-            for ident, entry in leftover_decide.record_entries(comment.body).items():
-                entry.setdefault("at", comment.updated_at)
-                if "url" in entry or not self.url_of(ident):
-                    self.entries[ident] = entry
+        self.record_id = self.data[RECORD_ID] = found.id
+        self.entries = leftover_decide.record_entries(found.body)
+        for entry in self.entries.values():
+            entry.setdefault("at", found.updated_at)
 
     def _trusts(self, author: str, association: str) -> bool:
         return leftover_decide.trusted(author, association, self.me, self.logins())
@@ -182,9 +173,8 @@ class _Filing:
     def _usable(self, comment: Comment) -> bool:
         return comment.body.startswith(leftover_decide.RECORD_MARK) and self._trusts(comment.author, comment.association)
 
-    def _records(self) -> list[Comment]:
-        """起票の記録のコメント（古い順）。番号を持てばその番号の 1 件を読む。無い（消された）ときは元の PR のコメントの一覧を
-        最後まで読む（引き継いだ記録は後ろに足されるので、最初の 1 件で止めない）。"""
+    def _record(self) -> Optional[Comment]:
+        """起票の記録のコメント。番号を持てばその番号で読み、無い（消された）ときだけ元の PR のコメントの一覧から探す。"""
         known = self.data.get(RECORD_ID)
         if type(known) is int:
             try:
@@ -195,8 +185,8 @@ class _Filing:
                     raise
             else:
                 if self._usable(comment):
-                    return [comment]
-        return [c for c in self.port.comments(self.ref.origin_pr) if self._usable(c)]
+                    return comment
+        return next((c for c in self.port.comments(self.ref.origin_pr) if self._usable(c)), None)
 
     def redact(self, idents: Sequence[str]) -> None:
         """起票に使う値を、全文のまま 1 回で伏せる（切り出しは伏せた後）。"""
@@ -299,17 +289,12 @@ class _Filing:
         return [i for i in pending if i not in self.entries or i in absent], bool(found)
 
     def write(self) -> str:
-        """起票の記録を書き、GitHub が記録した更新時刻を返す。記録が無いか、今のアカウントで編集できなければ、全項目を持つ
-        新しいコメントを投稿する。"""
+        """起票の記録を書き、GitHub が記録した更新時刻を返す。"""
         body = leftover_decide.record_body(self.entries)
-        written: Optional[tuple[int, str]] = None
-        if self.record_id is not None:
-            try:
-                written = self.port.edit(self.record_id, body)
-            except Exception as exc:
-                if not _not_editable(exc):
-                    raise
-        self.record_id, at = written or self.port.post(self.ref.origin_pr, body)
+        if self.record_id is None:
+            self.record_id, at = self.port.post(self.ref.origin_pr, body)
+        else:
+            self.record_id, at = self.port.edit(self.record_id, body)
         self.data[RECORD_ID] = self.record_id
         return at
 

@@ -30,7 +30,6 @@ class FakeGitHub:
         self.calls: list[tuple[str, str]] = []
         self.fail: dict[tuple[str, str], int] = {}
         self.indexed = True
-        self.edits_others = True
         self.login = "me"
         self.viewed = 0
         self._tick = 0
@@ -85,8 +84,6 @@ class FakeGitHub:
             if found is None:
                 raise GitHubError("無い", 404)
             if method == "PATCH":
-                if not self.edits_others and found["user"]["login"] != self.login:
-                    raise GitHubError("他人のコメントは編集できない", 403)
                 found.update(body=payload["body"], updated_at=self.now())
             return dict(found)
         pr = int(tail.split("/")[0])
@@ -348,23 +345,6 @@ def test_a_record_url_that_is_not_the_issue_of_the_finding_is_not_used(url: str)
     github.records.append({"id": 500, "pr": 7, "body": forged, "user": {"login": "x"}, "author_association": "MEMBER", "updated_at": "t"})
     assert run.go() == [] and github.created() == 1
     assert run.row[Filed.URL] == github.issues[-1]["html_url"] != url
-
-
-def test_issue_3780_a_record_of_another_account_that_cannot_be_edited_is_taken_over() -> None:
-    github = FakeGitHub()
-    github.login, github.edits_others = "app[bot]", False
-    first = Run(github)
-    first.go()
-    github.login = "human"
-    second = _row("r2-2", "別の指摘")
-    again = Run(github, _row(), second)
-    again.data["issue_logins"] = ["app[bot]"]
-    assert again.go() == [] and github.created() == 2
-    assert len(github.records) == 2 and len(leftover_decide.record_entries(github.records[1]["body"])) == 2
-    # 別の保存先は、両方の記録をまとめて読む
-    third = Run(github, _row(), second)
-    third.data["issue_logins"] = ["app[bot]", "human"]
-    assert third.go() == [] and github.created() == 2
 
 
 def test_a_match_on_a_read_page_is_used_when_the_list_is_over_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
