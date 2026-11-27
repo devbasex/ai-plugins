@@ -25,6 +25,7 @@ from typing import Any, Mapping, Optional
 
 from ndf import identity
 from ndf.contracts import causes, facts, limits, result
+from ndf.values import CLAUDE_COST_KEY
 
 ENV_RUN_ID = "NDF_RUN_ID"
 ENV_RUN_LOG = "NDF_RUN_LOG"
@@ -502,7 +503,7 @@ def reported_cost(stdout: str) -> Optional[float]:
         payload = json.loads(lines[-1]) if lines[-1] else None
     except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 終わる前の出力は JSON でない
         return None
-    spent = payload.get("total_cost_usd") if isinstance(payload, dict) else None
+    spent = payload.get(CLAUDE_COST_KEY) if isinstance(payload, dict) else None
     return float(spent) if isinstance(spent, (int, float)) and not isinstance(spent, bool) else None
 
 
