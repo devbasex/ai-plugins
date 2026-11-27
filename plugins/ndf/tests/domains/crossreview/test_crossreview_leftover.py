@@ -298,8 +298,7 @@ def test_sorting_prefers_a_line_over_a_file_only_report_only_when_it_takes_a_com
     journal = journal_mod.FindingJournal()
     journal.enter(2, [_told(path="a.py"), _told(**UNCHANGED)])
     assert journal.sort(TOUCHED._replace(commentable={"a.py": commentable}), {"r2-1"}) == frozenset()
-    row = journal.rows["r2-1"]
-    assert (row["path"], row.get("line")) == ("a.py", line)
+    assert threads.location(journal.rows["r2-1"]) == ("a.py", line)
 
 
 @pytest.mark.parametrize(
@@ -311,8 +310,7 @@ def test_sorting_never_places_a_line_outside_the_pr_diff(reports: tuple[int, ...
     journal.enter(2, [_told(path="a.py", line=n) for n in reports])
     # 5 行目は変えていない行なので、判定役の回答が無い扱いにして、両方の出し直しを進む側にする
     assert journal.sort(TOUCHED._replace(commentable={"a.py": frozenset({5})}), {"r2-1"}) == frozenset()
-    row = journal.rows["r2-1"]
-    assert (row["path"], row.get("line")) == ("a.py", line)
+    assert threads.location(journal.rows["r2-1"]) == ("a.py", line)
 
 
 @pytest.mark.parametrize(
@@ -323,7 +321,8 @@ def test_sorting_replaces_an_unparking_line_outside_the_pr_diff(others: tuple[in
     journal, row = _parked()
     journal.enter(3, [_told(severity="critical", path="a.py", line=99), *(_told(path="a.py", line=n) for n in others)])
     journal.sort(TOUCHED)
-    assert (row["path"], row.get("line"), row[journal_mod.PLACED_ROUND]) == ("a.py", line, 3)
+    assert (threads.location(row), row[journal_mod.PLACED_ROUND]) == (("a.py", line), 3)
+    assert row["line"] == (line or 99)
 
 
 @pytest.mark.parametrize(("number", "line"), [(5, 5), (99, None)])

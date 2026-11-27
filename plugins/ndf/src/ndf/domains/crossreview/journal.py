@@ -144,15 +144,12 @@ def _move(row: dict[str, Any], place: Mapping[str, Any], round_no: int) -> None:
 
 
 def _post_place(places: Sequence[Mapping[str, Any]], touched: leftover_decide.Touched) -> dict[str, Any]:
-    """出し直しの位置 `places` のうち、投稿に使うもの。行コメントを付けられる行を指すものを先にし、その中では変えた行を指すものを
-    先にする。そのような行が無ければ `line` を除き、ファイルの位置にする（PR の差分に載らない行は投稿で拒まれて呼び出しが
-    増える）。"""
-    best = max(
+    """出し直しの位置 `places` のうち、指摘の行に保存するもの。行コメントを付けられる行を指すものを先にし、その中では変えた行を
+    指すものを先にする。そのような行が無くても `line` は除かない（投稿の位置から除くのは `_check_post_line` の `OFF_DIFF`）。"""
+    return max(
         places,
         key=lambda p: (leftover_decide.on_commentable_line(p, touched), leftover_decide.on_touched_line(p, touched), "path" in p),
     )
-    keep = leftover_decide.on_commentable_line(best, touched)
-    return {k: v for k, v in best.items() if keep or k != "line"}
 
 
 def _named_any(item: dict[str, Any]) -> bool:
@@ -534,7 +531,7 @@ class FindingJournal:
         `unconfirmed` は判定役へ渡して有効な回答の無かった指摘の id。
 
         位置は今回の出し直しのものを 1 件ずつ当てる（残していた指摘の行の位置は、前の head の行番号である）。どれか 1 件が
-        進めば進める。指摘の行の位置は、進んだ出し直しから投稿できる位置（`_post_place`）を選んで置き換える（どれにも
+        進めば進める。指摘の行の位置は、進んだ出し直しから保存する位置（`_post_place`）を選んで置き換える（どれにも
         `path` が無ければ元の位置を残す。`_move`。#3780）。最後に、投稿に使う位置を `_check_post_line` で確かめる。"""
         for fid, places in self._moved.items():
             row = self.rows[fid]
