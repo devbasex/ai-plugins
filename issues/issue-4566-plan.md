@@ -72,10 +72,11 @@
 
 1 つの課題で差分が 1,000 行を超える見込みなので、依存の向きで 3 つに分ける。単位 1 は呼び出し元の無い部品、単位 2 は直接打つコマンド、単位 3 はスプリントの自動の経路である。単位 3 をマージするまで、工程の振る舞いは変わらない。
 
-行数は次のコマンドで数える。除くのは、生成して作るファイルとコピーである。
+行数は次のコマンドで数える。比較元のブランチかコミットを変数 `base_ref` に入れてから打つ。除くのは、生成して作るファイルとコピーである。
 
 ```bash
-git diff --shortstat <ベース>...HEAD -- . ':(exclude)issues' ':(exclude)plugins/ndf/docs/contracts/commands.md' ':(exclude)plugins/ndf/contracts/schemas/io' ':(exclude)plugins/ndf/skills/development-workflow/schemas'
+base_ref=origin/main  # 比較元のブランチかコミット
+git diff --shortstat "${base_ref}...HEAD" -- . ':(exclude)issues' ':(exclude)plugins/ndf/docs/contracts/commands.md' ':(exclude)plugins/ndf/contracts/schemas/io' ':(exclude)plugins/ndf/skills/development-workflow/schemas'
 ```
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |

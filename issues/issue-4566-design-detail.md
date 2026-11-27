@@ -145,7 +145,7 @@ docs/{glossary.md, glossary/}
 | `_drive_parsers` | `src/ndf/domains/crossrefactor/cli.py` | 変更 | 今のまま | `--required` の必須を外し（`default=[]`）、`--local-test`（値なし）と `--pushed-out` を足す |
 | `_check_gate` | 同上 | 新設 | `_check_gate(a: argparse.Namespace) -> None` | 引数と手段の組み合わせを確かめ、合わなければ `ValueError` |
 | `run_config` | 同上 | 変更 | 今のまま | 先頭で `_check_gate` を呼び、`local_test` と `pushed_out` を渡す |
-| `_release` | 同上 | 変更 | 今のまま | 排他ロックを取り、記録に残る検証用の作業場所も片付け、`sweep_gate_logs` を呼ぶ |
+| `_release` | 同上 | 変更 | 今のまま | 排他ロックを取り、記録に残る検証用の作業場所も片付け、`sweep_gate_logs` を呼ぶ。`state.json` と `logs/` は消さない（下の `sweep_gate_logs` の「所有の記録の置き場」） |
 | `main` | 同上 | 変更 | 今のまま | `final_gate.GateStopped` の扱いは今のまま。ロックを取れないときの停止を足す |
 
 argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON を出さずに終わるためである。`_check_gate` の `ValueError` は、今の表（`STOP_KINDS`）で `invalid` になる。
@@ -234,6 +234,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
   - 事後条件: `own` 以外の `rf<PR>/` は、その PR のロック（`hold`）を待たずに取れたときだけ扱い、扱い終えたら解く。取れなければ飛ばす。状態ファイルが無い・読めない・`repo` が無いか違う `rf<PR>/` には触れない。`rf<PR>/` か `logs/` がシンボリックリンクなら入らない。消せないファイルは残して続ける
   - 呼ぶ所: `drive` と `_release` が、自分の排他ロックを取った後に呼ぶ。`base` は作業場所の親ディレクトリ（`location.default_base`）で、`NDF_WORKTREE_BASE` を通じてほかのリポジトリと共有されうる。`keep` は `contracts/limits/cross-refactoring.gate-log.keep.json` の `seconds` である
   - 記録: `gate_logs` への記録は `write_private_log` の中で、ファイルを作る前に行う（上の手順）。ログの保存と所有の記録の間で中断しても、記録の無いログは残らない
+  - 所有の記録の置き場: `repo` と `gate_logs` は `rf<PR>/state.json` に置き、`_release` の後も残す。`workspace.release` が外すのは worktree だけで、`state.json` と `logs/` を消さない（今の振る舞いのまま）。そのため、`release` の後に打った `run` や `release` も、この PR の期限切れのログを記録から見つけて消せる。`gate_logs` から記録を外すのは、上の事後条件のとおり、記録したファイルが無くなった後だけである
 - `rf<PR>/` のリポジトリへのひもづけ（`drive` と `_release`）
   - 保存先を共有すると、2 つのリポジトリの同じ番号の PR が同じ `rf<PR>/` を指す。そのため、自分の排他ロックを取った直後、状態や作業場所に触れる前に、この `rf<PR>/` が自分のリポジトリのものかを確かめる
   - 状態ファイルに `repo` があり、`repo_id` と違えば、何も変えずに `precondition` で停止する。理由には、ほかのリポジトリが同じ保存先で同じ番号の PR を扱っていることと、`NDF_WORKTREE_BASE` をリポジトリごとに分ける直し方を載せる
@@ -271,7 +272,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | 7 | push の拒否で、取り直したリモートの先頭が変わっていて、周が残る | 次の周 |
 | 8 | push の拒否で、ほか | `push_rejected` |
 | 9 | 不合格 | 基準側の結果が要るかを決める。周が残るか、変更後に 126・127 を返した suite があれば順 10 へ。どちらも無ければ `test_failed` |
-| 10 | 順 9 で基準側が要る | 基準側の結果を見つける。取り込んだ先頭の組が `local_passed` にあれば全 suite 合格とする。ただし、変更後に 126・127 を返した suite があるときは、今の起動の識別値（`run`）を持つ記録だけを使う。組が `local_base_failed` にあり、その記録の `run` が今の起動の識別値と同じなら、その記録を使う。どちらでもなければ、取り込んだ先頭（この実行のコミットを載せない状態）だけでテスト全体を打って記録する。記録を使った場合も打った場合も順 11 へ |
+| 10 | 順 9 で基準側が要る | 基準側の結果を見つける。取り込んだ先頭の組が `local_passed` にあれば全 suite 合格とする。ただし、変更後に 126・127 を返した suite があるときは、今の起動の識別値（`run`）を持つ記録だけを使う。組が `local_base_failed` にあり、その記録の `run` が今の起動の識別値と同じなら、その記録を使う。どちらでもなければ、取り込んだ先頭（この実行がまだ送っていないコミットを載せない状態）だけでテスト全体を打って記録する。記録を使った場合も打った場合も順 11 へ |
 | 11 | 順 10 の後 | 基準側と変更後を比べる。比べ方は表の下の箇条のとおりで、上から順に当てる。直しへ進むのは、最後の箇条に当たり、周が残る場合だけである |
 | 12 | 順 11 で直しへ進む | `fix_or_undo` で直し、`check_fix`（保護するファイルは範囲の外）で確かめて次の周 |
 
