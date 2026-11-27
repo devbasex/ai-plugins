@@ -295,10 +295,24 @@ def _aged(*paths: Path) -> None:
         os.utime(path, (past, past))
 
 
-def _registered(directory: Path, name: str, inode: int) -> Path:
-    mark = directory / f"{name}.owned-{inode}"
+def _registered(directory: Path, name: str, inode: int, mtime_ns: int = 0, size: int = 0) -> Path:
+    mark = directory / f"{name}.owned-{inode}-{mtime_ns}-{size}"
     mark.write_text(mark.name, encoding="utf-8")
     return mark
+
+
+def _registered_as(record: Path) -> Path:
+    found = record.stat()
+    return _registered(record.parent, record.name, found.st_ino, found.st_mtime_ns, found.st_size)
+
+
+def _aged_records(directory: Path) -> None:
+    """保存した記録を古くする。登録は更新時刻を含むので、古くした後の値で作り直す。"""
+    for mark in list(directory.glob("*.owned-*")):
+        record = directory / mark.name.split(".owned-")[0]
+        mark.unlink()
+        _aged(record)
+        _aged(_registered_as(record))
 
 
 def test_issue_4363_ask_drops_only_the_registered_records_past_the_keep_period(tmp_path: Path) -> None:
@@ -306,21 +320,24 @@ def test_issue_4363_ask_drops_only_the_registered_records_past_the_keep_period(t
     run, diff = _AskRun(tmp_path), _diff(tmp_path)
     verify.ask(run, 1, [_row()], {"r1-1": [diff]}, _launcher([], []))
     records = tmp_path / judge_records.RECORD_DIR
+    _aged_records(records)
     saved = list(records.iterdir())
     unmarked, replaced = records / "round1-verify-ab12_cd3.out", records / "round1-verify-ef45_gh6.out"
     for path in (unmarked, replaced):
         path.write_text("利用者の退避", encoding="utf-8")
     stale = _registered(records, replaced.name, replaced.stat().st_ino + 1)
-    # 消された記録の inode 番号を別のファイルが再利用した状態（番号は合うが固定用のリンクが無い）
+    # 消された記録の inode 番号を別のファイルが再利用した状態（番号とサイズは合うが更新時刻が違う）
     reused = records / "round1-verify-qr34_st5.out"
     reused.write_text("利用者の退避", encoding="utf-8")
-    taken = _registered(records, reused.name, reused.stat().st_ino)
+    _aged(reused)
+    found = reused.stat()
+    taken = _registered(records, reused.name, found.st_ino, found.st_mtime_ns - 1, found.st_size)
     # 保存の途中で止まった登録ファイルは古ければ消し、新しければ並行する保存のために残す
     left = _registered(records, "round1-verify-ij78_kl9.out", 1)
     fresh = _registered(records, "round1-verify-mn01_op2.out", 1)
-    _aged(unmarked, replaced, stale, reused, taken, left, *saved)
+    _aged(unmarked, replaced, stale, taken, left)
     verify.ask(run, 2, [_row()], {"r1-1": [diff]}, _launcher([], []))
-    assert [p for p in saved if p.name.endswith(".pin")] and not any(p.exists() for p in (*saved, stale, taken, left))
+    assert saved and not any(p.exists() for p in (*saved, stale, taken, left))
     assert unmarked.exists() and replaced.exists() and reused.exists() and fresh.exists()
 
 
@@ -328,9 +345,9 @@ def test_issue_4363_ask_keeps_what_only_has_the_shape_of_a_registration_or_an_ou
     """名前の形が同じだけのファイル・リンク・ディレクトリは残し、所有ファイルのある古い出力のディレクトリは消す。"""
     records = tmp_path / judge_records.RECORD_DIR
     records.mkdir()
-    plain = records / "round1-verify-ab12_cd3.out.owned-1"
+    plain = records / "round1-verify-ab12_cd3.out.owned-1-0-0"
     plain.write_text("利用者の退避", encoding="utf-8")
-    linked = records / "round1-verify-ef45_gh6.out.owned-1"
+    linked = records / "round1-verify-ef45_gh6.out.owned-1-0-0"
     linked.symlink_to(plain)
     unowned = tmp_path / "round1-verify-ij78_kl9"
     unowned.mkdir()
@@ -351,8 +368,9 @@ def test_issue_4363_ask_does_not_follow_a_linked_record_directory(tmp_path: Path
     elsewhere.mkdir()
     record = elsewhere / "round1-verify-ab12_cd3.out"
     record.write_text("別の場所", encoding="utf-8")
-    mark = _registered(elsewhere, record.name, record.stat().st_ino)
-    _aged(record, mark)
+    _aged(record)
+    mark = _registered_as(record)
+    _aged(mark)
     (tmp_path / judge_records.RECORD_DIR).symlink_to(elsewhere)
     run, seen = _AskRun(tmp_path), []
     verify.ask(run, 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher(seen, [holding(_row())]))
