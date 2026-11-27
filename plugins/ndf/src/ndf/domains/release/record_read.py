@@ -100,13 +100,16 @@ def _bridged(hub: GitHub, unversioned: Sequence[_Found], seeds: Sequence[_Found]
     """手順 3 の 2・3。起点の書き手を照会し、信用した記録と値かコミットを共有する記録へだけ広げる（古い順）。"""
     asked: set[int] = set()
     kept: list[_Found] = []
+    values: set[Any] = set()
+    commits: set[Any] = set()
     frontier = list(seeds)
     while frontier:
         for f in frontier:
             asked.add(f.at)
             if hub.trusts_strict(f.authored):
                 kept.append(f)
-        values, commits = {f.value.version for f in kept}, {f.value.commit for f in kept}
+                values.add(f.value.version)
+                commits.add(f.value.commit)
         frontier = [f for f in unversioned if f.at not in asked and (f.value.version in values or f.value.commit in commits)]
     return sorted(kept, key=lambda f: f.at)
 
