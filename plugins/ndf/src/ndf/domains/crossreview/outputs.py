@@ -10,6 +10,10 @@
 出力全体が一致していれば、同じ引数で打ち直して続く（r2-6・r2-7）。記録を作った直後に終了して空の記録が残っても、失う中身が無い
 ので記録が無いのと同じに扱う。一時のファイルは作らない（名前の長さの上限と、強制終了で残るファイルを増やさない。r3-2・r3-5）。
 書き込みの失敗・書き切れなかったことに気づいた起動は、その場で出力を空に戻し記録を消してから失敗を返す（r3-3・r3-4）。
+出力は承認の記録を組む `build`（`worker_paths.read_file(owned=True)`）が読むので、読める形にする。書くときにグループとほかの
+利用者の書き込み権限を外し、新しく作ったファイルが親から継いだ macOS の拡張 ACL を外す。オーナーが違う・ハードリンクがある・
+拡張 ACL のある既存の出力は、直すと利用者の設定が変わるので、`check` が相手役を起動する前に止める（PR 4686）。
+
 1 回の書き込みの途中で電源断などにより止まり、出力か記録の一部だけが残った場合は、変えずに `precondition` で止まる。
 
 同じ出力先を同時に使う起動・記録の書き換え・記録を残さない前のバージョンの出力は扱わない。NDF は単位の回ごとに新しい
@@ -20,9 +24,11 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf.contracts import worker_paths
 from ndf.core.plan import files
 
 KIND_KEY = files.RECORD_KIND_KEY
@@ -33,6 +39,8 @@ FILE_KEY = "identity"
 RECORD_MODE = 0o600
 # 無い出力を作るときの権限。umask が 002 でも、承認の記録の読み手が拒むグループの書き込みを付けない
 OUTPUT_MODE = 0o644
+# 承認の記録の読み手が拒むので、出力へ書くときに外す権限
+OTHERS_WRITE = stat.S_IWGRP | stat.S_IWOTH
 
 
 class Unowned(Exception):
@@ -77,8 +85,26 @@ def _probe_create(path: Path) -> None:
     path.unlink()
 
 
+def _unreadable_by_approval(path: Path) -> Optional[str]:
+    """既存の出力を、書いた後も承認の記録の読み手が拒む理由。拒まなければ None。
+
+    書き込み権限は `write_recorded` が外すので見ない。
+    """
+    st = os.stat(path)
+    if st.st_uid != os.geteuid():
+        return "呼んだ利用者の持ち物でない"
+    if st.st_nlink != 1:
+        return "ハードリンクがある"
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        return "拡張 ACL がある" if worker_paths.has_darwin_acl(fd) else None
+    finally:
+        os.close(fd)
+
+
 def check(path: Path) -> None:
-    """何も変えずに、出力先を片付けて書けるかを確かめる（親が無い・出力か記録を書けなければ `OSError`）。
+    """何も変えずに、出力先を片付けて書けるかを確かめる（親が無い・出力か記録を書けない・承認の記録の読み手が拒む出力なら
+    `OSError`）。
 
     出力先がリンク・通常のファイルでないもの・前の起動の記録と同じファイルで中身全体が一致すると確かめられない中身のあるファイルなら
     `Unowned`。
@@ -97,6 +123,9 @@ def check(path: Path) -> None:
             raise Unowned(str(path))
         if not os.access(path, os.W_OK):
             raise OSError(f"出力先 {path} に書けない")
+        why = _unreadable_by_approval(path)
+        if why:
+            raise OSError(f"出力先 {path} は{why}ので、承認の記録を組めない。中身を確かめてこのファイルを消すか、別のパスを渡して打ち直す")
     else:
         _probe_create(path)
     # 記録は書いた後でなく書く前に作るので、記録を作れない出力先はレビューの前に止める（r1-6）
@@ -122,14 +151,29 @@ def _write_once(fd: int, data: bytes, path: Path) -> None:
         raise OSError(f"{path} に書き切れない")
 
 
+def _make_readable(fd: int, path: Path) -> None:
+    """空の出力 `fd` を、中身を書く前に承認の記録の読み手が読める権限にする。できなければ `OSError`。"""
+    mode = stat.S_IMODE(os.fstat(fd).st_mode)
+    if mode & OTHERS_WRITE:
+        os.fchmod(fd, mode & ~OTHERS_WRITE)
+    try:
+        # 拡張 ACL のある既存の出力は `check` が止めるので、ここで外すのは新しく作ったファイルが継いだものだけである
+        worker_paths.drop_darwin_acl(fd, path.name)
+    except worker_paths.EntryError as exc:
+        raise OSError(f"{path} の拡張 ACL を外せない") from exc
+
+
 def write_recorded(path: Path, text: str) -> None:
-    """出力を空にして開き、記録を残してから、出力の中身を書く（既存のファイルへは inode と権限を保って書く）。
+    """出力を空にして開き、記録を残してから、出力の中身を書く。
+
+    既存のファイルへは inode を保って書き、権限はグループとほかの利用者の書き込みだけを外す。
 
     書けなければ、出力を空に戻し記録を消してから `OSError` を返す。次の起動は同じ引数で続く（r3-3・r3-4）。
     """
     record = owner_record(path)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, OUTPUT_MODE)
     try:
+        _make_readable(fd, path)
         body = json.dumps({KIND_KEY: RECORD_KIND, TEXT_KEY: text, FILE_KEY: _file_of(os.fstat(fd))}, ensure_ascii=False)
         rfd = os.open(record, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, RECORD_MODE)
         try:

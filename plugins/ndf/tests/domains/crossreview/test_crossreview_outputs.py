@@ -40,6 +40,27 @@ def test_new_output_is_not_writable_by_the_group(tmp_path: Path) -> None:
     assert stat.S_IMODE(out.stat().st_mode) == 0o644
 
 
+def test_group_write_is_removed_from_an_existing_output(tmp_path: Path) -> None:
+    """呼び手が umask 002 で用意した空の出力は、同じファイルのまま書き込み権限だけを外す（承認の記録の読み手が拒まない）。"""
+    out = tmp_path / "reviewed-head"
+    out.touch()
+    out.chmod(0o664)
+    ino = out.stat().st_ino
+    _settle(out)
+    outputs.write_recorded(out, "x\n")
+    assert (out.stat().st_ino, stat.S_IMODE(out.stat().st_mode)) == (ino, 0o644)
+
+
+def test_hardlinked_output_is_refused_before_the_review(tmp_path: Path) -> None:
+    """承認の記録の読み手が拒むハードリンクのある出力は、何も変えずに `OSError`。"""
+    out = tmp_path / "reviewed-head"
+    out.touch()
+    os.link(out, tmp_path / "other")
+    with pytest.raises(OSError, match="ハードリンク"):
+        outputs.check(out)
+    assert out.stat().st_nlink == 2
+
+
 def test_record_is_readable_only_by_the_owner(tmp_path: Path) -> None:
     """記録は umask によらず所有者だけが読める（出力の値を他の利用者に見せない。r1-3）。"""
     out = tmp_path / "h"

@@ -62,7 +62,9 @@ __all__ = [
     "check_unshared",
     "check_writable",
     "dir_id",
+    "drop_darwin_acl",
     "entry_state",
+    "has_darwin_acl",
     "held_dir",
     "held_dir_id",
     "held_target",
@@ -403,7 +405,21 @@ def _others_may_write(fd: int, st: os.stat_result) -> bool:
     """
     if st.st_mode & 0o022:
         return True
+    return has_darwin_acl(fd)
+
+
+def has_darwin_acl(fd: int) -> bool:
+    """macOS で開いた記述子に、`read_file(owned=True)` が拒む拡張 ACL があるか（確かめられなければ真）。ほかの OS は偽。"""
     return sys.platform == "darwin" and _has_acl_darwin(fd)
+
+
+def drop_darwin_acl(fd: int, name: str) -> None:
+    """macOS で呼び手が作ったファイル `fd` が親から継いだ拡張 ACL を外す。外せなければ `EntryUnsafe`（`acl`）。ほかの OS は何もしない。
+
+    Linux の継いだ ACL はモードのグループのビットで抑えられ、`read_file(owned=True)` が拒まないので残す。
+    """
+    if sys.platform == "darwin":
+        _drop_acl_darwin(fd, name)
 
 
 def check_removable(wd: WorkDir, name: str) -> Optional[os.stat_result]:
