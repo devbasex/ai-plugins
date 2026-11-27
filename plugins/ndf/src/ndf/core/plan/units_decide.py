@@ -278,13 +278,21 @@ def _u3(files, unit_of, closure, bad) -> None:
 def _u4(files, homes, closure, bad) -> None:
     """依存（間接を含む）で前後が決まらない 2 単位が同じファイルを触る（U4）。
 
-    組は 1 回ずつ、組を貯めずに見る。前後の決まった組は重なりを比べる前に外し、触るファイルの無い単位は組にしない。
+    ファイルから触る単位を引く索引を作り、各単位について同じファイルを触る後ろの単位だけを重複なく集める。
+    依存で前後の決まる相手は、重なるファイルを求める前に外す。ファイルを共有しない組は見ない。
     """
+    position = {k: i for i, k in enumerate(homes)}
     touches = {k: frozenset(_touches(files[k[0]], homes[k])) for k in homes}
-    keys = [k for k in homes if touches[k]]
-    for i, a in enumerate(keys):
-        for b in keys[i + 1 :]:
-            if a in closure[b] or b in closure[a] or touches[a].isdisjoint(touches[b]):
+    by_path: dict[str, list[_Key]] = {}
+    for k in homes:
+        for p in touches[k]:
+            by_path.setdefault(p, []).append(k)
+    for a in homes:
+        partners: set[_Key] = set()
+        for p in touches[a]:
+            partners.update(by_path[p])
+        for b in sorted((b for b in partners if position[b] > position[a]), key=position.__getitem__):
+            if a in closure[b] or b in closure[a]:
                 continue
             where = f"{files[a[0]].path} の {a[1]} と {files[b[0]].path} の {b[1]}"
             bad.append(Finding("U4", a[1], f"{where} が前後なしに {'・'.join(sorted(touches[a] & touches[b]))} を触る"))
