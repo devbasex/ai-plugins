@@ -90,11 +90,12 @@ contracts/
 | `plan` | `write.py` | 変更 | シグネチャは今のまま | 回答できる項目を、`status: question` のうち `ITEM_KEYS` にあるものに絞る。ほかの回答は `ignored` の行にする |
 | `p_number` | `write.py` | 変更 | `(key, default) -> str` | 項目と番号（`measure`・`write` の出力で項目を指す `P2` などの表示）の対応表を、`test`（P2）・`ci`（P4）だけにする |
 | `_build_record` | `write.py` | 変更 | シグネチャは今のまま | `analyzer` に測定の結果の `analyzer` を書く。1 以上の整数でない値は、記録の形の確かめより前に止める |
-| `_project_file` | `write.py` | 変更 | `(inp, doc) -> Optional[File]` | 6 項目が残る設定では、差分の前の側を、6 項目の値を `（伏せた）` に置き換えて整形し直した文にする |
+| `_project_file` | `write.py` | 変更 | `(inp, doc) -> Optional[File]` | 旧い形のキーが残る設定では、差分の前の側を、そのキーの値をすべて `（伏せた）` に置き換えて整形し直した文にする |
 
 - `analysis_record` の定数は、6 項目の並び `UNREAD_ITEMS` を足し、`OLD_ITEMS` を `test_duration` と `UNREAD_ITEMS` にする。`_OLD_IN_ITEMS` から `languages[].files` を消す
 - 6 項目の指紋は、`merge_project` が `analysis.written` を `ITEM_KEYS` の項目だけで作り直すので消える。足す処理は無い
-- `_project_file` が置き換えるのは差分の前の側（`File.old`）だけで、書く中身（`File.new`）は 6 項目を持たない
+- `_project_file` は、伏せるキーを `analysis_record.strip_legacy` が返すキーの名前から決め、`write.py` に別の一覧を持たない。名前が `<項目>` ならその項目の値を、`<項目>.<キー>` ならそのキーの値を置き換える。対象には、6 項目のほかに `test_duration`・`ci.workflows`・`ci.provider`・`analysis` の `written` 以外が入る。置き換えは、差分の文を作る前に今の設定のコピーに対して行う
+- `_project_file` が置き換えるのは差分の前の側（`File.old`）だけで、書く中身（`File.new`）は旧い形のキーを持たない
 - 不正な `analyzer` を記録の形の確かめ（`contracts.schema_errors`）に渡さない。そのエラー文は検証した値を含み、`write` は `WriteError` の文を出力と結果 JSON にそのまま載せるためである
 - ブランチの構成は、#4580 の `_measured_branches` と `_record_branches` をそのまま使う
 - `ANALYZER`（`check.py`）は 5 にする
@@ -146,4 +147,4 @@ contracts/
 | `strip_legacy` | 6 項目を取り除き、キーの名前を返す | 6 項目の無い設定は変わらない | 値がスキーマに合わない 6 項目も取り除く |
 | `plan` | `test` の回答は適用される | 旧版の測定の結果の `issues` の回答は `ignored` | — |
 | `_build_record` | `analyzer` に測定の結果の値を書く | 1 は通る | 文字列・真偽値・小数・0・欠落は `WriteError`。文に入力された値が無い |
-| `_project_file` | 取り除くキーが差分に出て、値は伏せる | 6 項目の無い設定の差分は今と同じ | — |
+| `_project_file` | 取り除くキーが差分に出て、値は伏せる。6 項目も、`test_duration` などの以前からの旧いキーも同じである | 旧い形のキーの無い設定の差分は今と同じ | — |
