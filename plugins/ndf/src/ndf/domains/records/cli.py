@@ -502,6 +502,27 @@ def _add_mvv(sub: Any) -> None:
     cite.set_defaults(handler=_mvv_cite)
 
 
+def _result_refusal(dest: Path, root: Path, inputs: list[str]) -> str | None:
+    """`--result` の `dest` へ書けない理由（書けるなら None）。
+
+    検査した文書と同じファイルは書かない（未コミットの本文を検査結果で消さない）。既にあるファイルは、前の検査の結果
+    （`tool` がこの CLI の結果 JSON）だけを上書きする。プランが同じ保存先の結果を打ち直すたびに書き換えるため。
+    """
+    if not dest.exists():
+        return None
+    real = dest.resolve()
+    for p in inputs:
+        if real == (root / p).resolve():
+            return f"--result に検査する文書 {p} を指定した（検査結果で本文を上書きしない）"
+    try:
+        prev = json.loads(dest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        prev = None
+    if not (isinstance(prev, dict) and prev.get("tool") == TOOL):
+        return f"--result の {dest} は前の検査結果でない既存のファイルなので上書きしない"
+    return None
+
+
 def _design_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     """ファイルか `--base` のどちらか一方で対象を集めて検査し、`--result` があれば同じ結果をそのファイルへも書く。"""
     if bool(args.files) == (args.base is not None):
@@ -512,10 +533,14 @@ def _design_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         else:
             targets = design_check.from_base(root, args.base, args.remote if args.remote is not None else Git(root).remote())
     except design_check.DesignCheckError as exc:
+        targets = []
         out = result.stopped(TOOL, "precondition", str(exc))
     else:
         out = design_check.check(targets)
     if args.result is not None:
+        refused = _result_refusal(args.result, root, [*args.files, *(t.path for t in targets)])
+        if refused is not None:
+            return result.stopped(TOOL, "invalid", refused)
         args.result.parent.mkdir(parents=True, exist_ok=True)
         args.result.write_text(json.dumps(out, ensure_ascii=False) + "\n", encoding="utf-8")
     return out

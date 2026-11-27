@@ -709,6 +709,29 @@ class GitHub:
         self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
         return _file_at(self._repository_of(data), "object")
 
+    def branch_file_with(self, base: str, path: str, selections: dict[str, str]) -> tuple[FileAt, dict[str, Any]]:
+        """`branch_file` と同じ読み取りに、`repository` の下の選択 `selections`（名前 → 選択）を同じ要求で載せる。
+
+        返すのは `branch_file` の値と、`aliased` と同じ形の辞書（すべての名前をキーに持ち、読めなければ None）。
+        1 回の要求に載せる件数の上限（`github.graphql-batch`）を超えた分だけ、`aliased` で次の要求へ分ける。
+        """
+        names = list(selections)
+        first = names[: max(int(limits.value("github.graphql-batch", "count")) - 1, 0)]
+        chunk = {_alias(i): selections[k] for i, k in enumerate(first)}
+        body = " ".join(f"{alias}: {sel}" for alias, sel in chunk.items())
+        query = (
+            "query($owner: String!, $name: String!, $expr: String!) { viewer { login databaseId } "
+            f"repository(owner: $owner, name: $name) {{ nameWithOwner object(expression: $expr) {{ ... on Blob {{ oid text }} }} {body} }} }}"
+        )
+        data = self.graphql(query, {**self._owner_name(), "expr": f"{base}:{path}"})
+        self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
+        repo = self._repository_of(data)
+        out: dict[str, Any] = {k: repo[alias] if alias in repo else None for alias, k in zip(chunk, first)}
+        rest = names[len(first) :]
+        if rest:
+            out.update(self.aliased({k: selections[k] for k in rest}))
+        return _file_at(repo, "object"), out
+
     def _remember_viewer(self, node: Any) -> None:
         if self._viewer:
             return

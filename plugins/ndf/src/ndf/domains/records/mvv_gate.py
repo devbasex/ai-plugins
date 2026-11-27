@@ -444,29 +444,49 @@ def _judged(
         skip, why = False, [f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない", *why]
     if gate_name not in MVV_SKIP_GATES:
         skip, why = False, [*why, RELEASE_KEPT]
-    outcome = _bound(j, mm.gate_outcome(gate_name, verdict, skip, why, rec.holds, pull=(number, j.pull.head_sha)))
-    return j.posted_if_current(_tabled(j, rows, outcome))
+    outcome = _bound(j, rows, mm.gate_outcome(gate_name, verdict, skip, why, rec.holds, pull=(number, j.pull.head_sha)))
+    return j.posted_if_current(outcome)
 
 
-def _bound(j: _Judging, outcome: dict[str, Any]) -> dict[str, Any]:
-    """承認ゲートを省く判定にだけ承認の対象 `target` を持たせる。マージ先の設定を読めなければ、判定を保ったまま省かない（#4409）。"""
+def _design_paths(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    """差分の設計文書のうち、head に本文があるもの（削除したものは読まない）。"""
+    return [str(r["filename"]) for r in rows if issue_docs.DESIGN_FILE.match(str(r["filename"])) and r.get("status") != "removed"]
+
+
+def _bound(j: _Judging, rows: Sequence[Mapping[str, Any]], outcome: dict[str, Any]) -> dict[str, Any]:
+    """承認ゲートを省く判定にだけ、承認の対象 `target` を持たせ、差分の設計文書の「人へ残す判断」の表を確かめる。
+
+    マージ先の設定と、差分の設計文書の head の本文を、GitHub の 1 回の要求で読む（#4409・#2912 の決定 7）。読めなければ、
+    判定を保ったまま省かない。表に番号を持つ行か、本文の無い・切られた設計文書があれば、`skip` を偽にして `target` を外し、
+    `why` にパスごとの理由を足す。前に人が承認した行かは問わない。省けない判定では何も読まない。
+    """
     if not outcome["skip"]:
         return outcome
+    paths = _design_paths(rows)
     try:
-        return {**outcome, "target": _target(j.hub, j.pull)}
+        target, found = _target(j.hub, j.pull, paths)
     except (GitHubError, GitError) as exc:
         why = [*outcome["why"], "マージ先の設定を読めない: " + j.text("base_unreadable", exc)]
+        if paths:
+            reason = j.text("table_unreadable", exc)
+            why += [f"{TABLE_UNREADABLE}{p}（{reason}）" for p in paths]
         return {**outcome, "skip": False, "why": why}
+    kept = [
+        f"{TABLE_UNREADABLE}{p}（本文が無い）" if numbers is None else f"{TABLE_KEPT}{p}（{'・'.join(numbers)}）"
+        for p, numbers in found.items()
+        if numbers != ()
+    ]
+    if kept:
+        return {**outcome, "skip": False, "why": [*outcome["why"], *kept]}
+    return {**outcome, "target": target}
 
 
-def _table_numbers(hub: GitHub, head: str, paths: Sequence[str]) -> dict[str, Optional[tuple[str, ...]]]:
-    """`paths` の head `head` の本文を 1 回の要求で読み、パスごとに「人へ残す判断」の表の番号を出てくる順に重複なく返す。
+def _table_numbers(got: Mapping[str, Any], paths: Sequence[str]) -> dict[str, Optional[tuple[str, ...]]]:
+    """応答 `got` のパスごとの本文から、「人へ残す判断」の表の番号を出てくる順に重複なく返す。
 
-    本文が無い（Blob でない・応答に無い）パスと、切り詰められた（`isTruncated`）パスは None。GitHub の失敗は `GitHubError` を送出する。
+    本文が無い（Blob でない・応答に無い）パスと、切り詰められた（`isTruncated`）パスは None。
     切られた本文では後ろにある表の行を見落とし、省く側へ倒れるので読まない。
     """
-    selection = "{ ... on Blob { oid text isTruncated } }"
-    got = hub.aliased({p: f"object(expression: {json.dumps(f'{head}:{p}')}) {selection}" for p in paths})
     out: dict[str, Optional[tuple[str, ...]]] = {}
     for p in paths:
         node = got.get(p)
@@ -476,42 +496,19 @@ def _table_numbers(hub: GitHub, head: str, paths: Sequence[str]) -> dict[str, Op
     return out
 
 
-def _tabled(j: _Judging, rows: Sequence[Mapping[str, Any]], outcome: dict[str, Any]) -> dict[str, Any]:
-    """省く判定のときだけ、差分の設計文書の head の表を読み、番号を持つ行か読めない文書があれば省かない（#2912 の決定 7）。
+def _target(hub: GitHub, pull: Pull, paths: Sequence[str]) -> tuple[dict[str, Any], dict[str, Optional[tuple[str, ...]]]]:
+    """判定した PR の承認の対象（出力 `mvv_gate.target`）と、設計文書 `paths` の表の番号（`_table_numbers`）。
 
-    判定の回答（`verdict`・`boundary`）と保留は変えず、`skip` を偽にして承認の対象 `target` を外し、`why` にパスごとの理由を足す。
-    前に人が承認した行かは問わない。省けない判定と、差分に設計文書が無い判定では何も読まない。
+    マージ先の設定と head の本文を、同じ GraphQL の要求で読む（承認ゲートを省く判定でだけ打つ。設計の費用表の増分に記録する）。
+    マージ先の設定を読めなければ本番へ反映され得るとして扱う。GitHub の失敗は `GitHubError` を送出する。
     """
-    if not outcome["skip"]:
-        return outcome
-    paths = [str(r["filename"]) for r in rows if issue_docs.DESIGN_FILE.match(str(r["filename"])) and r.get("status") != "removed"]
-    if not paths:
-        return outcome
-    try:
-        found = _table_numbers(j.hub, j.pull.head_sha, paths)
-    except GitHubError as exc:
-        reason = j.text("table_unreadable", exc)
-        why = [f"{TABLE_UNREADABLE}{p}（{reason}）" for p in paths]
-    else:
-        why = [
-            f"{TABLE_UNREADABLE}{p}（本文が無い）" if numbers is None else f"{TABLE_KEPT}{p}（{'・'.join(numbers)}）"
-            for p, numbers in found.items()
-            if numbers != ()
-        ]
-    if not why:
-        return outcome
-    kept = {k: v for k, v in outcome.items() if k != "target"}
-    return {**kept, "skip": False, "why": [*outcome["why"], *why]}
-
-
-def _target(hub: GitHub, pull: Pull) -> dict[str, Any]:
-    """判定した PR の承認の対象（出力 `mvv_gate.target`。承認ゲートを省くときだけ持つ）。マージ先の設定を読めなければ本番へ反映され得るとして扱う。
-
-    マージ先の設定の読み取り（GraphQL 1 回）は、承認ゲートを省く判定でだけ打つ（設計の費用表の増分に記録する）。"""
-    found = hub.branch_file(pull.base_ref, production_merge.PROJECT_FILE)
+    selection = "{ ... on Blob { oid text isTruncated } }"
+    selections = {p: f"object(expression: {json.dumps(f'{pull.head_sha}:{p}')}) {selection}" for p in paths}
+    found, got = hub.branch_file_with(pull.base_ref, production_merge.PROJECT_FILE, selections)
     verdict = production_merge.judge_project_text(found.text, pull.base_ref, source_repo=found.repo, repo=hub.repo)
     production = production_merge.reaches_production(verdict)
-    return {"repo": hub.repo, "pr": pull.number, "base": pull.base_ref, "head": pull.head_sha, "production": production}
+    target = {"repo": hub.repo, "pr": pull.number, "base": pull.base_ref, "head": pull.head_sha, "production": production}
+    return target, _table_numbers(got, paths)
 
 
 def post_note(hub: GitHub, number: int, text: str) -> publish.Published:

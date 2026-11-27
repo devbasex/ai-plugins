@@ -103,8 +103,15 @@ def _read_json(path: Path) -> Any:
 
 
 def _write_json(path: Path, value: Any) -> None:
+    """所有者だけが読み書きできる権限（0600）で書く。既にあるファイルも 0600 にしてから書く。
+
+    認証して取得した PR の本文・差分・ファイルの全文を保存するため、umask に任せると同じホストのほかの利用者が読める。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        os.fchmod(f.fileno(), 0o600)
+        f.write(json.dumps(value, ensure_ascii=False, indent=1) + "\n")
 
 
 def _material(raw: Mapping[str, Any]) -> Material:
@@ -371,11 +378,17 @@ def _checked_judged(paths: Sequence[Path], materials: Mapping[int, Optional[Mate
 
 
 def latest_review(records: Sequence[Mapping[str, Any]], material: Material, number: int) -> Optional[Mapping[str, Any]]:
-    """PR 番号・head の SHA・PR 本文の SHA-256 が材料と一致する記録のうち、時刻が最も新しいもの。"""
+    """PR 番号・ベースと head の SHA・PR 本文の SHA-256 が材料と一致し、確認したパス（`paths`）が材料の変えたファイルを
+    すべて含む記録のうち、時刻が最も新しいもの。ベースが動いて確かめる対象のファイルが増えたのに、前の確認を採らないため。"""
     found = [
         r
         for r in records
-        if int(r["pr"]) == number and r.get("head_sha") == material.head_sha and r.get("pr_body_sha256") == material.pr_body_sha256
+        if int(r["pr"]) == number
+        and r.get("base_sha") == material.base_sha
+        and r.get("head_sha") == material.head_sha
+        and r.get("pr_body_sha256") == material.pr_body_sha256
+        and isinstance(r.get("paths"), list)
+        and set(material.changed) <= set(r["paths"])
     ]
     return max(found, key=lambda r: str(r["at"])) if found else None
 
@@ -440,7 +453,10 @@ def _cmd_bodies(args: argparse.Namespace) -> int:
         out.append(
             {
                 "pr": t.number,
+                "base_sha": m.base_sha,
                 "head_sha": t.head_sha,
+                # 確認の記録に写すパスの集合（`latest_review` は、材料の変えたファイルをすべて含む記録だけを採る）
+                "paths": [p for _, p in rp.pairs],
                 "pr_body": m.pr_body,
                 "pr_body_sha256": m.pr_body_sha256,
                 "listed": rp.listed,
@@ -507,6 +523,7 @@ def _round(
     materials: Mapping[int, Optional[Material]], pair: Sequence[Mapping[str, Any]], reviewed: Sequence[Mapping[str, Any]]
 ) -> dict[str, Any]:
     new, old = _side(materials, pair[0], reviewed, True), _side(materials, pair[1], reviewed, False)
+    gaps = _gaps(materials, pair)
     lower = new["confirmed"] - (old["confirmed"] + len(old["unconfirmed"]))
     upper = new["confirmed"] + len(new["unconfirmed"]) - old["confirmed"]
     record = [{"pr": i["pr"], "numbers": i["numbers"], "side": "変更後"} for i in new["includes"]]
@@ -522,14 +539,34 @@ def _round(
         "range": [lower, upper],
         "missed": bool(new["includes"]),
         "possible_miss": bool(new["unconfirmed"]),
+        "gaps": gaps,
         "record_to_3017": record,
     }
+
+
+def _gaps(materials: Mapping[int, Optional[Material]], pair: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """材料か、どちらかの側の有効な判定結果（`ok` が真で回答を持つ）が欠けた PR。省けない回答と区別して保留にするため。"""
+    out = []
+    for number, m in materials.items():
+        rows = [side["results"].get(str(number)) for side in pair]
+        why = ["材料が欠けた"] if m is None else []
+        why += [f"{name}の判定結果が無い" for name, row in zip(("変更後", PREV_COMMIT), rows) if row is None]
+        why += [
+            f"{name}の判定に失敗した"
+            for name, row in zip(("変更後", PREV_COMMIT), rows)
+            if row is not None and not (row.get("ok") and isinstance(row.get("answer"), dict))
+        ]
+        if why:
+            out.append({"pr": number, "why": why})
+    return out
 
 
 def _verdict(rounds: Sequence[Mapping[str, Any]]) -> tuple[str, Optional[str]]:
     """回をまたぐ合否（詳細設計書の「回をまたぐ合否」の 5 つの順）。"""
     if any(r["missed"] for r in rounds):
         return "不合格", None
+    if any(r["gaps"] for r in rounds):
+        return "保留", "判定結果か材料が欠けた PR がある"
     if any(r["possible_miss"] for r in rounds):
         return "保留", "未確認が残る"
     lower, upper = rounds[0]["range"]

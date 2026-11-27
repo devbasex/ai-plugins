@@ -93,6 +93,8 @@ def test_two_design_documents_are_read_in_one_request_and_removed_ones_are_not(r
     out, hub = _gate_with(repo, case)
     (selection,) = hub.selections
     assert list(selection) == [DESIGN_DOC, DETAIL_DOC]
+    # マージ先の設定と 2 件の本文を、GitHub の 1 回の要求で読む
+    assert hub.requests == 1
     assert out["skip"] is False and out["why"] == [mvv_gate.TABLE_KEPT + f"{DETAIL_DOC}（C7）"]
 
 
@@ -111,8 +113,10 @@ def test_unreadable_design_documents_keep_the_gate(repo: Path, blob: Any) -> Non
 def test_a_github_failure_keeps_the_gate_for_every_design_document(repo: Path) -> None:
     case = _design_case(github.GitHubError("届かない zz-fake-secret-88"), (DESIGN_DOC, "modified"), (DETAIL_DOC, "added"))
     out, _ = _gate_with(repo, case)
-    assert out["skip"] is False and len(out["why"]) == 2
-    assert all(w.startswith(mvv_gate.TABLE_UNREADABLE) and "診断の記録" in w for w in out["why"])
+    # マージ先の設定と本文は同じ要求で読むので、設定の理由に続けて設計文書ごとの理由が載る
+    assert out["skip"] is False and "target" not in out and len(out["why"]) == 3
+    assert out["why"][0].startswith("マージ先の設定を読めない")
+    assert all(w.startswith(mvv_gate.TABLE_UNREADABLE) and "診断の記録" in w for w in out["why"][1:])
     assert "zz-fake-secret-88" not in json.dumps(out, ensure_ascii=False)
 
 

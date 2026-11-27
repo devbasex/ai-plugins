@@ -89,6 +89,10 @@ class MergeHub:
         text, oid = self.files.get(base, (None, None))
         return FileAt(self.file_repo or self.repo, text, oid)
 
+    def branch_file_with(self, base: str, path: str, selections: dict[str, str]) -> tuple[FileAt, dict[str, Any]]:
+        """`branch_file` と同じ値に、選択ごとの None（読めない）を添える。"""
+        return self.branch_file(base, path), {k: None for k in selections}
+
     def viewer(self) -> Viewer:
         return Viewer(self.login, self.account_id)
 

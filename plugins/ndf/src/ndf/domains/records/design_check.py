@@ -60,6 +60,19 @@ def _worktree_text(root: Path, path: str) -> str:
         raise DesignCheckError(f"{path} を読めない: {exc}") from None
 
 
+def _tree_text(root: Path, path: str) -> str:
+    """差分から列挙した `path` を、シンボリックリンクをたどらず作業ツリーの中の通常ファイルとして読む。
+
+    どこかの階層がリンクなら（解決した先が `root` の下の同じパスでなければ）読まず止める。作業ツリーの外の文書の行を
+    結果の `items[].text` へ出さないため。
+    """
+    top = root.resolve()
+    p = top / path
+    if p.resolve() != p or p.is_symlink() or not p.is_file():
+        raise DesignCheckError(f"{path} は作業ツリーの中の通常ファイルでない（シンボリックリンクはたどらない）")
+    return _worktree_text(top, path)
+
+
 def from_files(root: Path, paths: Sequence[str]) -> list[Target]:
     """指定したファイルを、名前を問わず全行の対象として読む。"""
     return [Target(p, _worktree_text(root, p), None) for p in paths]
@@ -143,7 +156,7 @@ def from_base(root: Path, base: str, remote: str, git_of: Callable[[Path], git.G
     before_of = {c.new: b for c, b in zip(tracked, befores)}
     out: list[Target] = []
     for c in changed:
-        text = _worktree_text(root, c.new)
+        text = _tree_text(root, c.new)
         if c.whole:
             out.append(Target(c.new, text, None))
             continue

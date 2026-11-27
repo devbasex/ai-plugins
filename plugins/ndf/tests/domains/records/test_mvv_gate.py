@@ -128,6 +128,7 @@ class Hub:
         self.number, self.case = number, case
         self.paths: list[str] = []
         self.reads = 0
+        self.requests = 0
 
     def open_pulls_of_head(self, branch: str, enough: int) -> list[SimpleNamespace]:
         # 本物と同じく、開いた同じリポジトリの PR を `enough` 件まで返す
@@ -153,6 +154,12 @@ class Hub:
             "release": {"deliveries": [{"channel": "production", "kind": "auto"}]},
         }
         return FileAt("o/r", json.dumps({"branch_strategy": section}), "c1")
+
+    def branch_file_with(self, base: str, path: str, selections: dict[str, str]) -> tuple[FileAt, dict[str, Any]]:
+        """マージ先の設定と、選択 `selections`（設計文書の head の本文）を 1 回の要求で読む。選択は `aliased` の偽物が答える。"""
+        self.requests += 1
+        aliased = getattr(self, "aliased", None)
+        return self.branch_file(base, path), (aliased(selections) if selections and aliased is not None else {})
 
     def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> dict:
         self.paths.append(path)
