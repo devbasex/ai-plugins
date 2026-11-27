@@ -435,14 +435,15 @@ class FindingJournal:
         すべての指摘を重ねた後にそろえる（`_align_report`。承認や保護の根拠となる出し直しがあれば、その 1 件にする）。戻った指摘にこのラウンドの 1 文が 1 つも無ければ、行は前の 1 文と
         重さを持ち続けるが、`fresh` に入れず判定役に渡さない（前の経路の 1 文で下げないため）。承認や保護の根拠が
         無く、違う位置の重い報告が並ぶ指摘も `fresh` に入れない（`_align_report` が None を返す）。確認で下げた指摘が
-        別のファイルの重い報告で出し直されたら、戻った指摘として扱う（`_revive_elsewhere`。#4363）。"""
+        別のファイルの重い報告で出し直されたら、下げた扱いを解除してそのファイルの指摘にし、判定役には渡さない
+        （`_revive_elsewhere`。確認の結果を持つ行は `fresh` に入れない。#4363）。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
         unexplained: list[str] = []
         same: dict[str, list[Mapping[str, Any]]] = {}
         before = len(self.revived)
-        self._revive_elsewhere(by_key, raised, items, round_no)
+        denied = self._revive_elsewhere(by_key, raised, items, round_no)
         fresh = self.revived[before:]
         _unlower(by_key, raised, items)
         # この呼び出しの前から行が持つ、必ず人の承認が要る操作の番号
@@ -476,18 +477,37 @@ class FindingJournal:
                 unknown.append(str(known["id"]))
             touched[key] = known
             same.setdefault(str(known["id"]), []).append(item)
-        back = set(self.revived[before:])
-        told = {fid: _align_report(self.rows[fid], same[fid], items) for fid in dict.fromkeys(fresh)}
-        self.fresh = [fid for fid, aligned in told.items() if aligned is not None and (aligned or fid not in back)]
+        self.fresh = self._align_fresh(fresh, same, denied, set(self.revived[before:]), items)
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
 
+    def _align_fresh(
+        self,
+        fresh: Sequence[str],
+        same: Mapping[str, Sequence[Mapping[str, Any]]],
+        denied: Mapping[str, str],
+        back: set[str],
+        items: Sequence[str],
+    ) -> list[str]:
+        """新しく出たか戻った行 `fresh` を出し直し `same` の 1 件にそろえ（`_align_report`）、判定役へ渡す候補の id を返す。
+        `denied` の行は、否定した位置のファイルの報告（承認や保護の根拠が無いもの）からは選ばない。`back` は戻った行。"""
+        out = []
+        for fid in dict.fromkeys(fresh):
+            reports = [i for i in same[fid] if fid not in denied or _report_rank(i, items) or _located(i).get("path") != denied[fid]]
+            aligned = _align_report(self.rows[fid], reports, items)
+            if CHECK not in self.rows[fid] and aligned is not None and (aligned or fid not in back):
+                out.append(fid)
+        return out
+
     def _revive_elsewhere(
         self, by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str], round_no: int
-    ) -> None:
-        """確認で下げた指摘が、確かめた位置と違うファイルの重い報告で出し直されたら、前の確認の結果を外してその位置の
-        指摘として戻す。キーは本文だけで決まるので、同じキーでも別の経路の不具合でありうる。行の番号は修正でずれるので
-        比べず、どちらかにファイルが無ければ戻さない。#4363"""
+    ) -> dict[str, str]:
+        """確認で下げた指摘が、確かめた位置と違うファイルの重い報告で出し直されたら、下げた扱いを解除してその位置の指摘に
+        戻し、戻した指摘の id と、否定した位置のファイルを返す。キーは本文の先頭だけで決まるので、同じキーでも別の経路の
+        不具合でありうる。確認の結果は下げた扱いを抜けたことを書き加えて残すので、判定役には渡し直さず（呼び出し元と呼び出し先を
+        交互に指す同じ指摘を、何度も確かめない）、保護の対象なら元の重要度へ戻る（`_restore_lowered`）。行の番号は修正で
+        ずれるので比べず、どちらかにファイルが無ければ戻さない。#4363"""
+        denied: dict[str, str] = {}
         for item in raised:
             text = item.get("text")
             row = by_key.get(oscillation.finding_key(text.strip())) if isinstance(text, str) and text.strip() else None
@@ -495,7 +515,11 @@ class FindingJournal:
                 continue
             new = _raised(dict(item), criteria_decide.mvv_item(item.get("mvv"), items))
             if criteria_decide.blocking(new["severity"]) and new.get("path") not in (None, row["path"]):
+                denied[str(row["id"])] = row["path"]
+                check = row[CHECK] | {criteria_decide.LOWERED: False, UNLOWERED: True}
                 self._revive(row, new, _text(item.get("section")), round_no)
+                row[CHECK] = check
+        return denied
 
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
