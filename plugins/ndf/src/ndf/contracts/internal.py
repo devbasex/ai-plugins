@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import json
-import math
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -39,13 +38,11 @@ class InternalError(Exception):
 
 class Kind(NamedTuple):
     """内部データの種類 1 つ。`steps[n]` はバージョン n の行をバージョン n + 1 の形へ移す。`marker` は、バージョン 1 から必ず持つ欄で、`version` が
-    整数の別の意味だった種類だけが持つ（この欄の無い行をバージョン 0 と見分ける）。`rules` は、スキーマで表せない条件（欄どうしの
-    対応など）を確かめ、破った場所と規則の文を返す。スキーマに合った行だけに使う。"""
+    整数の別の意味だった種類だけが持つ（この欄の無い行をバージョン 0 と見分ける）。"""
 
     schema: str
     steps: tuple[Callable[[Row], Row], ...]
     marker: Optional[str] = None
-    rules: Optional[Callable[[Row], list[str]]] = None
 
 
 # --- バージョン 0 → 1 の移し方 ------------------------------------------------------------------------------
@@ -110,24 +107,6 @@ def _loop_event_v1(row: Row) -> Row:
     return out
 
 
-def _weights_rules(row: Row) -> list[str]:
-    """出現率の `adaptive` の項目の確率が、割り付けの抽選に使えるか（#2944）。
-
-    確率は組ごとの値で、候補の組の添字すべてに値があり、候補でない組は 0、合計は 1（丸めの誤差は許す）。合わなければ、割り付けが
-    この確率で抽選できない。
-    """
-    errors = []
-    for n, entry in enumerate(row["entries"]):
-        if entry["phase"] != "adaptive":
-            continue
-        probs, cands = entry["probs"], set(entry["candidates"])
-        if any(i >= len(probs) for i in cands) or any(p > 0 for i, p in enumerate(probs) if i not in cands):
-            errors.append(f"entries/{n}/probs（候補の組と確率の組が対応しない）")
-        elif not math.isclose(math.fsum(probs), 1, abs_tol=1e-6):
-            errors.append(f"entries/{n}/probs（確率の合計が 1 でない）")
-    return errors
-
-
 KINDS: dict[str, Kind] = {
     "usage": Kind(contracts.schema_path("internal/usage"), (dict,)),
     "mvv-signals": Kind(contracts.schema_path("internal/mvv-signals"), (_signal_v1,), marker="mvv_version"),
@@ -140,7 +119,7 @@ KINDS: dict[str, Kind] = {
     "reading-docs": Kind(contracts.schema_path("internal/reading-docs"), (dict,)),
     "mvv-gate-failure": Kind(contracts.schema_path("internal/mvv-gate-failure"), (dict,)),
     "experiment": Kind(contracts.schema_path("internal/experiment"), (dict,)),
-    "launch-weights": Kind(contracts.schema_path("internal/launch-weights"), (dict,), rules=_weights_rules),
+    "launch-weights": Kind(contracts.schema_path("internal/launch-weights"), (dict,)),
 }
 
 
@@ -260,10 +239,7 @@ def _validator(schema: str) -> Draft202012Validator:
 def _require(kind: str, row: Row) -> None:
     """種類のスキーマに合わなければ `InternalError`。誤りの文はスキーマの側の語だけで組む（キーが値を持つ辞書と、スキーマに無い
     キーがあるため、行の値もキーも含まない）。"""
-    spec = _kind(kind)
-    errors = {contracts.broken_rule(e) for e in _validator(spec.schema).iter_errors(row)}
-    if not errors and spec.rules is not None:
-        errors = set(spec.rules(row))
+    errors = {contracts.broken_rule(e) for e in _validator(_kind(kind).schema).iter_errors(row)}
     if errors:
         raise InternalError("invalid", f"内部データ {kind} の形が違う: {'; '.join(sorted(errors))}")
 

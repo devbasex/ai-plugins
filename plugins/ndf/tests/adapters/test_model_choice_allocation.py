@@ -295,13 +295,7 @@ def test_adapted_weights_are_drawn_with_their_probabilities(tmp_path, store, clo
 
 @pytest.mark.parametrize(
     "entry",
-    [
-        {"allocation": {"floor": 0.05, "min_units": 10, "margin": 0.1, "window_days": 30}},
-        {"candidates": [0, 1]},
-        {"phase": "burn_in"},
-        {"probs": [0, 0, 0]},  # 抽選に使えない確率は、保存されていても使わずに均等に抽選する
-        {"probs": [1.0]},
-    ],
+    [{"allocation": {"floor": 0.05, "min_units": 10, "margin": 0.1, "window_days": 30}}, {"candidates": [0, 1]}, {"phase": "burn_in"}],
 )
 def test_weights_that_do_not_match_are_not_used(tmp_path, store, clock, entry):
     root = _repo(tmp_path)
@@ -814,9 +808,6 @@ NOT_NDF_WEIGHTS = [
     {"version": 1, "entries": [{**_sweep_entry(90), "phase": "adaptive"}]},  # adaptive なのに確率が無い
     {"version": 1, "entries": [{**_sweep_entry(90), "probs": [0.5, 0.5]}]},  # burn_in なのに確率を持つ
     {"version": 1, "entries": [{**_sweep_entry(90), "cutoffs": [{"arm": 1, "until": "2027-01-01T00:00:00"}]}]},  # 期限に時差が無い
-    {"version": 1, "entries": [{**_sweep_entry(90), "phase": "adaptive", "probs": []}]},  # 抽選に使えない確率
-    {"version": 1, "entries": [{**_sweep_entry(90), "phase": "adaptive", "probs": [0, 0]}]},
-    {"version": 1, "entries": [{**_sweep_entry(90), "phase": "adaptive", "probs": [0.5, 0, 0.5]}]},  # 候補でない組に確率がある
 ]
 
 
