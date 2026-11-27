@@ -184,10 +184,13 @@ def test_values_given_in_the_command_win_over_the_variables(repo: Path, monkeypa
     assert execs[0][1] == ["codex", "exec", "-s", "workspace-write", "-C", str(repo), *given]
 
 
-def test_an_effort_written_as_a_toml_string_is_read_like_codex(repo: Path, monkeypatch, execs) -> None:
-    """codex は `-c` の値を TOML として読む。引用符つきの `"low"` も low として確かめ、子へは書いたままの引数を渡す。"""
+@pytest.mark.parametrize("setting", ['model_reasoning_effort="low"', "model_reasoning_effort= low", 'model_reasoning_effort = "low"'])
+def test_an_effort_setting_is_read_like_codex(repo: Path, monkeypatch, execs, setting: str) -> None:
+    """codex は `-c` の `=` の左右の空白を除き、値を TOML として読む。引用符つき・空白つきの指定も明示の low として選択に渡り
+    （下位の環境変数の壊れた値で止まらない）、子へは書いたままの引数を渡す。"""
     monkeypatch.setattr(agents, "user_namespaces", lambda: True)
-    given = ["-c", 'model_reasoning_effort="low"']
+    monkeypatch.setenv(identity.env_name("launch-codex-effort"), "turbo")
+    given = ["-c", setting]
     drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", *given])
     assert execs[0][1] == ["codex", "exec", "-s", "workspace-write", "-C", str(repo), *given]
 

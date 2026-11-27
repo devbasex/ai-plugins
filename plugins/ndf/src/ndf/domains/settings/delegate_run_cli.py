@@ -115,13 +115,25 @@ def _workdir_args(runtime: str, cwd: Path) -> list[str]:
 
 
 def _toml_text(value: str) -> str:
-    """設定の値（`-c key=<値>`）を CLI と同じく TOML として読んだ文字列。TOML の文字列でなければ書いたまま（codex は TOML として
-    読めない値を文字どおりの文字列として扱う）。"""
+    """設定の値（`-c key=<値>` の `=` より右）を codex と同じ規則で読んだ文字列。両端の空白を除いて TOML として読み、読めなければ
+    両端の引用符も除いた文字どおりの文字列（codex の `config_override.rs` の規則）。TOML の文字列でない値は空白を除いたまま。"""
+    text = value.strip()
     try:
-        got = tomllib.loads(f"v = {value}")["v"]
+        got = tomllib.loads(f"v = {text}")["v"]
     except tomllib.TOMLDecodeError:
-        return value
-    return got if isinstance(got, str) else value
+        return text.strip("\"'")
+    return got if isinstance(got, str) else text
+
+
+def _setting_value(word: str, form: str, place: str) -> Optional[str]:
+    """語 `word` が形 `form` に合えば、その値（合わなければ None）。形が設定の `key=<値>` なら、codex と同じく `=` の左右の空白を
+    除いてキーを比べ、値は `_toml_text` で読む（`key= low`・`key = "low"` も low）。"""
+    left, _, right = form.partition(place)
+    if left.endswith("=") and not right:
+        key, sep, value = word.partition("=")
+        return _toml_text(value) if sep and key.strip() == left[:-1].strip() else None
+    hit = re.fullmatch(re.escape(form).replace(re.escape(place), "(.+)"), word)
+    return hit.group(1) if hit is not None else None
 
 
 def _given_value(runtime: str, command: Sequence[str], key: str) -> tuple[Optional[str], str]:
@@ -129,7 +141,7 @@ def _given_value(runtime: str, command: Sequence[str], key: str) -> tuple[Option
 
     引数の名前はランタイムの表の `<key>_options`、値の形は `choice_args` の形（codex の effort は `model_reasoning_effort=<値>`）。
     `--name 値`・`--name=値`・`-n値` を読み、形に合わない値（`-c` の別の設定など）は数えない。複数あれば CLI と同じく最後。
-    形が設定の `key=<値>` なら、値は TOML として読む（`"low"` は `low`）。子へは書いたままの引数を渡す。"""
+    形が設定の `key=<値>` なら、codex と同じ規則で読む（`_setting_value`。`"low"`・`key= low` は `low`）。子へは書いたままの引数を渡す。"""
     row = facts.row(RUNTIMES, runtime)
     column = f"{key}_options"
     names = list(row[column]) if column in row else []
@@ -139,7 +151,6 @@ def _given_value(runtime: str, command: Sequence[str], key: str) -> tuple[Option
         return None, f"引数 --{key}"
     form, place = forms[0], f"{{{key}}}"
     at = f"引数 {'・'.join(names)}" + (f" の {form.replace(place, '<値>')}" if form != place else "")
-    shape = re.compile(re.escape(form).replace(re.escape(place), "(.+)"))
     options = _options(command)
     found = None
     for i, w in enumerate(options):
@@ -149,9 +160,9 @@ def _given_value(runtime: str, command: Sequence[str], key: str) -> tuple[Option
             value = w.partition("=")[2] if w.startswith("--") else w[2:]
         else:
             continue
-        hit = shape.fullmatch(value) if value is not None else None
-        if hit is not None:
-            found = _toml_text(hit.group(1)) if form != place else hit.group(1)
+        got = _setting_value(value, form, place) if value is not None else None
+        if got is not None:
+            found = got
     return found, at
 
 
