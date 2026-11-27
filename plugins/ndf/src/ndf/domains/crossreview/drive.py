@@ -845,6 +845,7 @@ def _round_record(run: _Run, round_no: int, prep: _Prepared) -> dict[str, Any]:
         scope_decide.MVV: {scope_decide.MVV_ID: run.mvv, scope_decide.MVV_BRANCH: run.mvv_branch},
         fin.MVV_CHECKED: _mvv_checked(run, prep.head),
         "scope": prep.scope.kind,
+        **experiment.round_assigns(run.data, run.seats),
     }
     if run.filled:
         # 埋めた後のすべてのラウンドに書く（#3955）
