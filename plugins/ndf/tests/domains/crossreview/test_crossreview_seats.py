@@ -477,6 +477,7 @@ class _LaunchRun:
 
         self.cfg = SimpleNamespace(worktree=root)
         self.input_dir: Optional[Path] = None
+        self.seat_assigns: dict[str, str] = {}
         self.root = root
         self.notes: list[tuple[int, str, str, Optional[str]]] = []
 

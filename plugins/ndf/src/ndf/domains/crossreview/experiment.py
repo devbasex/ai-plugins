@@ -1,8 +1,8 @@
 """cross-review の実験の記録と、起動した AI の子の使用量ログの行（#2944）。
 
-状態ファイルの `experiment_units` は、実行の ID（`id`。1 回だけ作り、打ち直しでも同じ）・シートの割り付け ID（`seats`）・評価する設計か
+状態ファイルの `experiment_units` は、実行の ID（`id`。1 回だけ作り、打ち直しでも同じ）・評価する設計か
 実装の割り付け ID（`charged`）と、その最初のレビューのラウンドで重大だった指摘の id（`first`）を持つ。読めない相手役がいる間は
-`partial` を持つ。シートの単位は `<実行の ID>:<シート>` である。値を選ぶ処理の差し込みが無い起動は、状態ファイルに何も足さず、行も書かない。
+`partial` を持つ。シートの割り付け ID は、ラウンドの記録（`seat_assigns`）だけに残す。シートの単位は `<実行の ID>:<シート>` である。値を選ぶ処理の差し込みが無い起動は、状態ファイルに何も足さず、行も書かない。
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def start_run(data: dict[str, Any]) -> bool:
     """値を選ぶ処理があるのに状態ファイルに `experiment_units` が無ければ、実行の ID を作って足し、真を返す（呼び手が保存する）。"""
     if claude_choice.launch_chooser is None or KEY in data:
         return False
-    data[KEY] = {"id": uuid.uuid4().hex, "seats": {}}
+    data[KEY] = {"id": uuid.uuid4().hex}
     return True
 
 
@@ -72,10 +72,11 @@ def keep_first(data: dict[str, Any], round_no: int, serious: Sequence[str], comp
 
 
 class Held(Protocol):
-    """状態ファイルの中身と、解決したリポジトリのキーを持つ 1 回の起動の値（`drive._Run`）。"""
+    """状態ファイルの中身・解決したリポジトリのキー・シートの割り付け ID を持つ 1 回の起動の値（`drive._Run`）。"""
 
     data: dict[str, Any]
     repo_key: Optional[str]
+    seat_assigns: dict[str, str]
 
 
 def choose_seat(run: Held, seat: str, cwd: Path) -> claude_choice.ChoiceRun:
@@ -92,19 +93,18 @@ def choose_seat(run: Held, seat: str, cwd: Path) -> claude_choice.ChoiceRun:
 
 
 def keep_seat(run: Held, seat: str, chosen: claude_choice.ChoiceRun) -> None:
-    """シートの割り付け ID を残す。割り付けの無い値（停止・手動指定・基準の組への切り替え）なら外す。"""
+    """起動を終えたシートの割り付け ID を、ラウンドの記録を作るまで持つ。割り付けの無い値（停止・手動指定・基準の組への切り替え）なら外す。"""
     if chosen.assign_id is not None:
-        run.data[KEY]["seats"][seat] = chosen.assign_id
-    elif KEY in run.data:
-        run.data[KEY]["seats"].pop(seat, None)
+        run.seat_assigns[seat] = chosen.assign_id
+    else:
+        run.seat_assigns.pop(seat, None)
 
 
-def round_assigns(data: dict[str, Any], seats: Sequence[str]) -> dict[str, Any]:
+def round_assigns(run: Held, seats: Sequence[str]) -> dict[str, Any]:
     """ラウンドの記録に足す、相手役ごとの割り付け ID（相手役の起動を終えた後に呼ぶ）。実験をしていなければ何も足さない。"""
-    if KEY not in data:
+    if KEY not in run.data:
         return {}
-    held = data[KEY]["seats"]
-    return {SEAT_ASSIGNS: {s: held[s] for s in seats if s in held}}
+    return {SEAT_ASSIGNS: {s: run.seat_assigns[s] for s in seats if s in run.seat_assigns}}
 
 
 def meta_of(name: str, chosen: claude_choice.ChoiceRun) -> dict[str, Any]:

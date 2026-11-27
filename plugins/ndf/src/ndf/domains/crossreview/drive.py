@@ -156,6 +156,7 @@ class _Run:
     filled: list[Filled] = field(default_factory=list)
     input_dir: Optional[Path] = None
     repo_key: Optional[str] = None  # シートの値を選ぶためのリポジトリのキー（最初に要った時に 1 回だけ解決する。#2944）
+    seat_assigns: dict[str, str] = field(default_factory=dict)  # 起動したシートの割り付け ID（ラウンドの記録に残す。#2944）
 
     @property
     def mvv_items(self) -> tuple[str, ...]:
@@ -845,7 +846,7 @@ def _round_record(run: _Run, round_no: int, prep: _Prepared) -> dict[str, Any]:
         scope_decide.MVV: {scope_decide.MVV_ID: run.mvv, scope_decide.MVV_BRANCH: run.mvv_branch},
         fin.MVV_CHECKED: _mvv_checked(run, prep.head),
         "scope": prep.scope.kind,
-        **experiment.round_assigns(run.data, run.seats),
+        **experiment.round_assigns(run, run.seats),
     }
     if run.filled:
         # 埋めた後のすべてのラウンドに書く（#3955）
