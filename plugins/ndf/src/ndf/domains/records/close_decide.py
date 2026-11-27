@@ -72,12 +72,12 @@ def verdict(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], enf
         if enforced:
             return Verdict(KEEP, "リリース後テストの記録が無い", False)
         return Verdict(CLOSE, "リリース後テストの記録が無い（条件 2 を見ない）", False)
-    rows = list(verification)
-    verified = _all_passed(issue, rows)
-    bad = blocking_rows(issue, rows)
+    mine = _rows_of(issue, verification)
+    verified = bool(mine) and all(r.get("result") == "passed" for r in mine)
+    bad = [r for r in mine if r.get("result") == "failed"]
     if bad:
         return Verdict(KEEP, f"リリース後テストに不合格の行が {len(bad)} 件ある", verified)
-    waiting = waiting_rows(issue, rows)
+    waiting = [r for r in mine if r.get("result") == "not_run"]
     if waiting:
         return Verdict(ASK, f"保留（not_run）の行が {len(waiting)} 件ある。閉じるかを人が決める", verified)
     return Verdict(CLOSE, "リリース後テストに不合格と保留の行が無い", verified)
