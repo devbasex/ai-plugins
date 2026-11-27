@@ -307,7 +307,7 @@ def test_the_models_of_another_run_are_not_reported(tmp_path):
 
 
 def _temporary(state_dir: Path, digit: str) -> Path:
-    return state_dir / files.WRITING_DIR / f"{records.MODELS_FILE}.{digit * 32}.tmp"
+    return state_dir / files.WRITING_DIR / f"{records.MODELS_FILE}.{digit * 32}.ndf-tmp"
 
 
 def test_writing_a_record_keeps_the_files_it_did_not_make(tmp_path):
@@ -318,9 +318,12 @@ def test_writing_a_record_keeps_the_files_it_did_not_make(tmp_path):
     outside.write_text("user", encoding="utf-8")
     _temporary(tmp_path, "a").parent.mkdir()
     _temporary(tmp_path, "a").symlink_to(victim)
+    inside = _temporary(tmp_path, "a").parent / "notes.txt"  # 領域の中でも、名前の形が違うものは消さない
+    inside.write_text("user", encoding="utf-8")
     records._add_models(tmp_path, "run-1", "work", {"name": "impl"})
     assert (victim.read_text(encoding="utf-8"), outside.read_text(encoding="utf-8")) == ("keep", "user")
     assert _temporary(tmp_path, "a").is_symlink()
+    assert inside.read_text(encoding="utf-8") == "user"
 
 
 def test_the_next_write_removes_only_a_left_temporary_file_nobody_writes(tmp_path):

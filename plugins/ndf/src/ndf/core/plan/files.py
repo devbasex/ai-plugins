@@ -1,9 +1,10 @@
 """状態の保存先の JSON の記録を読み書きする（`runner`・`steps`・`queue_run`・`cli` が使う）。
 
 書くときは一時ファイルへ書いてから置き換え、読む側に書きかけを見せない。一時ファイルは、記録と同じディレクトリの下の
-NDF 専用の領域（`.ndf-writing/`）に、書き込みごとに一意な名前で排他的に新規作成し、書く間はロックを持つ。同じ記録への
-書き込みが重なっても、作ったプロセスだけがそのファイルを記録へ置き換える。強制終了で残った一時ファイルは、同じディレクトリの
-記録の次の書き込みで消す。掃除が列挙して消すのはこの領域の中の、ロックを誰も持たないファイルだけである。
+NDF 専用の領域（`.ndf-writing/`）に、書き込みごとに一意な名前（`<記録の名前>.<32 桁の 16 進数>.ndf-tmp`）で排他的に
+新規作成し、書く間はロックを持つ。同じ記録への書き込みが重なっても、作ったプロセスだけがそのファイルを記録へ置き換える。
+強制終了で残った一時ファイルは、同じディレクトリの記録の次の書き込みで消す。掃除が消すのはこの領域の中の、
+名前の形が合い、ロックを誰も持たないファイルだけである。
 """
 
 from __future__ import annotations
@@ -11,11 +12,13 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-WRITING_DIR = ".ndf-writing"  # NDF の一時ファイルだけを置く領域。ほかのものを置かない（掃除が消す）
+WRITING_DIR = ".ndf-writing"  # NDF の一時ファイルを置く領域
+_MADE = re.compile(r".+\.[0-9a-f]{32}\.ndf-tmp")  # `write_json` が作る一時ファイルの名前
 
 
 def read_json(path: Path) -> Optional[dict[str, Any]]:
@@ -32,7 +35,7 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
     _remove_left(area)
     text = json.dumps(value, ensure_ascii=False)
     while True:
-        tmp = area / f"{path.name}.{uuid.uuid4().hex}.tmp"
+        tmp = area / f"{path.name}.{uuid.uuid4().hex}.ndf-tmp"
         # "x" は排他的な新規作成（O_EXCL）。権限は umask に従う（`mkstemp` の 0600 にすると、読める人が変わる）
         with tmp.open("x", encoding="utf-8") as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
@@ -45,8 +48,8 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
 
 
 def _remove_left(area: Path) -> None:
-    """一時ファイルの領域に残ったファイルを消す。書き込み中（ロックがある）・リンク・開けないものは残す。"""
-    for left in list(area.iterdir()):
+    """領域に残った一時ファイルを消す。名前の形が違うもの・書き込み中（ロックがある）・リンク・開けないものは残す。"""
+    for left in [p for p in area.iterdir() if _MADE.fullmatch(p.name)]:
         try:
             fd = os.open(left, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
             try:
