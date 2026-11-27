@@ -8,9 +8,9 @@
 
 ```text
 contracts/workflow/      progress.json  ndf.schema.json  stages/design.json
-src/ndf/adapters/        github.py
+src/ndf/adapters/        github.py  github_pulls.py
 src/ndf/core/            merge_approval.py  release_record.py*
-src/ndf/progress/        model.py  folding.py  run_view.py  run.py  stages.py  definition.py  records.py  command.py
+src/ndf/progress/        model.py  folding.py  run_view.py  run.py  stages.py  definition.py  records.py  command.py  plan/external.py
                          approval_decide.py*  delivery_decide.py*  run_approval.py*  reopening.py*  redo.py*  redo_decide.py*
 src/ndf/progress/gate/   asking.py  answering.py  entry.py  records.py  release.py  __init__.py
                          targets.py*  finishing.py*  requests.py*  delivery_check.py*  mvv_trail.py*
@@ -30,11 +30,12 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | --- | --- | --- | --- | --- |
 | `core/release_record.py` | 新設 | リリース記録の本文を読む（`domains/release/record_decide.py` から移す） | `contracts` | 移動: `Record`・`parse_record`・`records`・`payload_of`・`UnreadableRecord` |
 | `adapters/github.py` | 変更 | workflow の実行の一覧を読む | — | 新設 `GitHub.workflow_runs` |
-| `core/merge_approval.py` | 変更 | 証跡の重複を、識別子・回答・対象で判定する | `adapters` | 変更 `write_merge_row` |
+| `adapters/github_pulls.py` | 変更 | コメントの作成時刻を持つ（実行済みの証拠が、開き直しより後の記録かを見る） | — | 変更 `Authored`（`created` を足す） |
+| `core/merge_approval.py` | 変更 | 証跡の重複を、識別子・回答・対象で判定する。開き直しの取り消しの行を書く | `adapters` | 変更 `write_merge_row`。新設 `write_revocation` |
 | `progress/approval_decide.py` | 新設 | 事象の列と対象から、有効な承認と残る否定の回答を決める | `progress.model` | 新設 `boundary`・`latest_answer`・`differences`・`objection_remains` |
 | `progress/delivery_decide.py` | 新設 | リリース記録と CD の実行から、工程を終えてよいかを決める | `core.release_record` | 新設 `pick_records`・`judge_delivery`・`judge_no_release`・`pick_run` |
 | `progress/run_approval.py` | 新設 | 承認ゲートの回答を読む手（`run.py` から分ける） | `run`・`approval_decide` | 移動と変更: `_consume`・`approved_seen`。新設 `consume_held`・`prior_approval` |
-| `progress/reopening.py` | 新設 | 開き直す工程と事象を組み、作業の停止を確かめる | `run`・`model` | 新設 `plan_reopen`・`work_stopped` |
+| `progress/reopening.py` | 新設 | 開き直す工程と事象を組み、作業の停止を確かめ、承認の証跡を取り消す | `run`・`model`・`core.merge_approval` | 新設 `plan_reopen`・`work_stopped`・`revoke_approvals` |
 | `progress/redo.py` | 新設 | 作り直し用の作業場所の記録・作成・取り込み・片付け | `adapters.git`・`redo_decide` | 新設 `redo_record`・`ensure_workspace`・`take_in`・`discard`・`redirect_inputs` |
 | `progress/redo_decide.py` | 新設 | 作り直しの要否、ブランチの名前、移すコミットを決める | `progress.model` | 新設 `needed`・`branch_name`・`commits_to_move` |
 | `progress/gate/targets.py` | 新設 | 承認の対象を 1 回の呼び出しで 1 回だけ読む | `adapters.github`・`asking` | 新設 `TargetReader` |
@@ -42,6 +43,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `progress/gate/requests.py` | 新設 | 出したリリースのリクエストの記録と取り下げ | `store`・`plan.external` | 新設 `record_issued`・`issued`・`withdraw`・`unrecorded`・`current_request` |
 | `progress/gate/delivery_check.py` | 新設 | 記録の PR と CD の実行を読み、判定に渡す | `adapters.github`・`delivery_decide` | 新設 `confirm` |
 | `progress/gate/mvv_trail.py` | 新設 | MVV の承認の後に、担い手 `mvv` の証跡を書く | `core.merge_approval` | 新設 `ensure` |
+| `progress/plan/external.py` | 変更 | リクエストのファイルを新しく作ったかを返し、中身の比較を公開する | — | 変更 `write_request`・`same_body`（`_same_body` から改名） |
 
 行数の制約で移すだけの関数は、地図の外の挙動を変えない。
 
@@ -128,8 +130,8 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `boundary` | `progress/approval_decide.py` | 新設 | `(rows: Sequence[Event], gate_step: str) -> int` | 承認を数え始める事象の番号（直近の `reopened`・`finish_held`・質問の出し直し）を返す |
-| `latest_answer` | `progress/approval_decide.py` | 新設 | `(rows: Sequence[Event], gate: str, after: int) -> Event \| None` | 境界より後の、この承認ゲートの最新の回答を返す。前へはさかのぼらない |
-| `differences` | `progress/approval_decide.py` | 新設 | `(answer: Mapping, now: Mapping, *, gate: str, carried_head: str \| None) -> list[str]` | 回答が承認として数えられない理由と、見た対象と今の対象の違いを返す。空なら有効 |
+| `latest_answer` | `progress/approval_decide.py` | 新設 | `(rows: Sequence[Event], gate: str, after: int) -> Event \| None` | 境界より後の、この承認ゲートの最新の回答を返す。前へはさかのぼらない。承認を読む側もこれを使う |
+| `differences` | `progress/approval_decide.py` | 新設 | `(answer: Mapping, now: Mapping, *, gate: str, carried_head: str \| None, closing: bool = False, no_release_reason: str \| None = None) -> list[str]` | 回答が承認として数えられない理由と、見た対象と今の対象の違いを返す。空なら有効。追認（`after_release`）は `closing`（デプロイを閉じる判定）でだけ数える。`no_release` の回答と今の操作の用途と理由が違えば数えない |
 | `objection_remains` | `progress/approval_decide.py` | 新設 | `(rows: Sequence[Event], gate: str) -> bool` | `late: true` の承認でない回答の後に、承認が無いかを返す（開き直しより前も数える） |
 | `TargetReader.read` | `progress/gate/targets.py` | 新設 | `(self, q: Question) -> Reading` | PR を 1 回、マージ先の設定を 1 回読み、`Reading(target: Target, merged: bool)` を返す |
 | `TargetReader.forget` | `progress/gate/targets.py` | 新設 | `(self) -> None` | 対象が変わりうる所で、読んだ値を捨てる |
@@ -157,7 +159,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `boundary`・`latest_answer` | 境界の後の承認を返す | 境界より前の承認しか無ければ `None` | 最新が承認でなければ、前の承認を返さない |
-| `differences` | 5 項目がそろえば空 | HEAD が同じでマージ先か本番への反映が違う | 保留のある MVV の回答は数えない |
+| `differences` | 5 項目がそろえば空 | HEAD が同じでマージ先か本番への反映が違う | 保留のある MVV の回答、閉じる判定でない読み手の追認、用途か理由の違う `no_release` は数えない |
 | `objection_remains` | 否定の後の承認で偽になる | 開き直しより前の否定も数える | — |
 
 ## 開き直し
@@ -168,12 +170,15 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `plan_reopen` | `progress/reopening.py` | 新設 | `(v: View, stage: str, *, later: str, reason: str, trigger: Mapping, notes: str \| None) -> Reopen` | 開き直す工程を決め、`reopened` の下書きと、進みがあった工程の名前と、取り消されない操作の警告を返す（書かない） |
+| `plan_reopen` | `progress/reopening.py` | 新設 | `(v: View, stage: str, *, later: str, reason: str, trigger: Mapping, notes: str \| None) -> Reopen` | 開き直す工程を決め、`reopened` と `enabled` の下書き、進みがあった工程の名前、取り消されない操作の警告、取り消す承認の対象を返す（書かない） |
+| `revoke_approvals` | `progress/reopening.py` | 新設 | `(r: Reopen, post: Revoke) -> None` | 取り消す対象ごとに `write_revocation` を呼ぶ。`answer` と `_cmd_retry` が DB の追記より前に呼ぶ |
+| `write_revocation` | `core/merge_approval.py` | 新設 | `(hub: GitHub, target: MergeTarget, record_id: str, viewer: Viewer) -> bool` | 対象の最新の証跡が承認なら、`回答: rejected`・`担い手: reopen` の行を書く。それ以外は書かない |
 | `work_stopped` | `progress/reopening.py` | 新設 | `(st: Store, machine_id: str) -> ContextManager[None]` | 作業の排他を取り、起動のマーカーも確かめる。作業が流れていれば断る |
 | `_cmd_retry` | `progress/gate/finishing.py` | 変更 | `(a: Namespace, cwd: Path, st: Store) -> dict` | 失敗の工程は今のまま `retry` を書き、終了と手で終えた回答待ちは `--later` を必須にして開き直す |
 
-- `Reopen`（新設の型）: `drafts: list[EventDraft]`・`stages: list[str]`・`gates: list[tuple[str, str]]`（取り下げの対象の工程と承認ゲート）・`warnings: list[str]`
-- `later` は `reopen` か `keep`。`keep` は指定の工程だけを対象にする。無効と中止の工程は対象にしない
+- `Reopen`（新設の型）: `drafts: list[EventDraft]`・`stages: list[str]`・`gates: list[tuple[str, str]]`（取り下げの対象の工程と承認ゲート）・`warnings: list[str]`・`revoke: list[tuple[MergeTarget, str]]`（直近の開き直しより後の承認のうち、証跡を書いた対象と、取り消しの行の記録の識別子 `reopen:<ステートマシンの ID>:<工程>:<回答の事象の番号>`）
+- `later` は `reopen` か `keep`。`keep` は指定の工程だけを対象にする。無効と中止の工程は開き直さない。ただし、開き直す工程がリリースしないで終えて無効にした工程（`disabled` の `cause: no_release` と工程名が一致する）には、`later` の値によらず `enabled` を足す
+- `core/merge_approval.py` の証跡の読み取りは、担い手 `reopen` を却下の行でだけ数える
 - 取り消されない操作は、対象の工程のうち終了したもので、定義がマージかリリースのステップを持つものを挙げる
 
 ### 異常系の処理
@@ -182,6 +187,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | --- | --- | --- | --- | --- | --- | --- |
 | `work_stopped` | 排他を取れない・起動の直後 | 作業が流れている | 排他と起動のマーカー | 呼び出し元へ返す | `refused`。`ndf progress wait` を案内 | 何も書かない |
 | `_cmd_retry` | `--later` が無い・失敗の工程に `--later` | 引数 | 状態の確かめ | 止める | `refused`。打てるコマンドを返す | 打ち直せる |
+| `revoke_approvals` | コメントを読めない・取り消しを書けない | GitHub・権限 | 投稿 | 止める | `refused` | DB へ書かない。打ち直せる |
 | `_cmd_retry` | 手で終えていない回答待ち・未着手・実行中・無効・中止、完了・中止したスプリント | 状態 | 状態の確かめ | 止める | `refused`。代わりのコマンドを返す | — |
 
 ### ログと記録の出力
@@ -201,7 +207,8 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `plan_reopen` | 指定と後ろの工程に `reopened` | `keep` は 1 件。後ろがすべて未着手なら `stages` は指定だけ | 無効・中止の工程を含めない |
+| `plan_reopen` | 指定と後ろの工程に `reopened` | `keep` は 1 件。後ろがすべて未着手なら `stages` は指定だけ。`keep` でも `no_release` で無効にした工程は戻す | 人が無効にした工程と中止の工程を含めない |
+| `revoke_approvals` | 承認した対象に却下の行が増え、同じ対象の `merge_judgment` が None | 本番へ反映されない承認は対象にしない。打ち直しで行は増えない | 書けなければ事象を追記しない |
 | `_cmd_retry` | 失敗の工程は今と同じ事象 | — | 異常系の各行 |
 
 ## 手で終える操作
@@ -218,20 +225,22 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `hand_finish` | `progress/gate/finishing.py` | 新設 | `(st: Store, machine_id: str, stage: StageDef, output: Mapping, a: Namespace, seams: Seams) -> dict` | 作業の排他の中で、確かめと判定をし、`manual_finished` か `finish_held` を 1 回の追記で書く |
 | `judge_design` | `progress/gate/finishing.py` | 新設 | `(v: View, stage: StageDef, inputs: Mapping, env: Env, cwd: Path, *, no_skip: bool, pr: int) -> dict` | 工程の定義の判定のステップを、入力の `worktree` で流し、結果を返す |
 | `_cmd_check` | `progress/gate/finishing.py` | 変更 | `(a, cwd, st) -> dict` | `finish` と同じ出力の規則（手書き・`--no-release`）で確かめる |
-| `confirm` | `progress/gate/delivery_check.py` | 新設 | `(hub: GitHub, *, record_pr: int, sprint_pr: int, version: str \| None, target: str \| None, no_release: bool, strategy: Mapping) -> Confirmed` | 記録の PR のコメントと CD の実行を読み、受けるか、足りないものを返す |
-| `pick_records` | `progress/delivery_decide.py` | 新設 | `(bodies: Sequence[str], *, sprint_pr: int, version: str) -> list[Found]` | 対象の PR とバージョンで絞り、単位ごとの最新を返す（workflow の記録と手の記録） |
+| `confirm` | `progress/gate/delivery_check.py` | 新設 | `(hub: GitHub, *, record_pr: int, sprint_pr: int, version: str \| None, target: str \| None, no_release: bool, strategy: Mapping) -> Confirmed` | 記録の PR のコメントと CD の実行を読み、受けるか、足りないものを返す。`deliveries` があるのに `target` の同じ行が無ければ受けない |
+| `pick_records` | `progress/delivery_decide.py` | 新設 | `(bodies: Sequence[str], *, sprint_pr: int, version: str) -> list[Found]` | 対象の PR とバージョンで絞り、単位ごとの最新を返す（workflow の記録と手の記録）。対象の記録より後の、バージョンの無い `反映失敗` も返す |
+| `executed` | `progress/delivery_decide.py` | 新設 | `(comments: Sequence[tuple[str, datetime]], *, sprint_pr: int, since: datetime \| None) -> bool` | 直近の開き直し（`since`）より後に書かれた、workflow の記録か `段階: 本番`・`反映失敗` の手の記録があるかを返す。質問と回答の経路が使う |
 | `judge_delivery` | `progress/delivery_decide.py` | 新設 | `(found: Sequence[Found], runs: Mapping[str, Run \| None]) -> Verdict` | 記録の条件と CD の結果の条件を当てる |
 | `judge_no_release` | `progress/delivery_decide.py` | 新設 | `(bodies: Sequence[str], *, sprint_pr: int) -> Verdict` | 最新の記録が `デプロイなし` かを確かめる |
 | `pick_run` | `progress/delivery_decide.py` | 新設 | `(runs: Sequence[Mapping]) -> Mapping \| None` | `push`、無ければ `workflow_dispatch` の最新を選ぶ |
 | `GitHub.workflow_runs` | `adapters/github.py` | 新設 | `(self, workflow: str, *, branch: str, head_sha: str) -> list[dict]` | workflow のファイル名・ブランチ・コミットで実行の一覧を読む |
 | `gate` | `domains/records/mvv_gate.py` | 変更 | `(root, gate_name, inputs, hub, ask=llm.ask, warnings=None, *, no_skip: bool = False) -> dict` | `no_skip` なら省かない。理由に「承認でない回答が残る」を足す |
-| `_recorded` | `domains/records/mvv_gate.py` | 変更 | `(hub, number, outcome, where) -> dict` | 判定の記録だけを書き、証跡の行を書かない |
+| `_recorded` | `domains/records/mvv_gate.py` | 変更 | `(hub, number, outcome, where) -> dict` | 判定の記録だけを書き、証跡の行を書かない。投稿の識別子（判定の入力と結論から作る）を本文に入れ、同じ書き手の編集されていないコメントに同じ識別子があれば投稿せずに使う |
 
 - コマンドの引数: `ndf records mvv gate` に `--no-skip` を足し、`--expect-pr` を `--gate design` でも受ける
 - `ndf progress finish` に `--record-pr <番号>` と `--no-release` を足す（デプロイの工程だけ）
 - `hand_finish`
   - 事前条件: 工程が承認ゲートを持ち、状態が未着手か失敗
   - 事後条件: 追記した事象は、読み直した最後の事象の番号を条件にしている（`store.Conflict` なら読み直しから）
+  - `--no-release` では `finish_held` と `finished` に `no_release: true`・理由・`record_pr` を残し、終了と同じ追記で、後ろの対象の工程へ `disabled`（`cause: no_release`・デプロイの工程名）を書く
   - 副作用: PR の読み取り、判定の PR のコメント 1 件、事象の追記、進み具合の表の更新
 - `Seams`（新設の型）: `reader: TargetReader`・`hub: Callable[[], GitHub]`・`env: Env`・`post: Post`。テストはここを差し替える
 
@@ -251,7 +260,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| `finish` と変更要求・却下の回答 | 工程の事象 | 両方が作業の排他を取る | 途中で止まった `finish` は何も追記していないので、打ち直して判定し直す |
+| `finish` と変更要求・却下の回答 | 工程の事象 | 両方が作業の排他を取る | 途中で止まった `finish` は何も追記していないので、打ち直して判定し直す。投稿済みの判定のコメントは再利用する |
 | `finish` と承認の回答 | 同上 | 承認は排他を取らない | 追記の前に読み直し、番号の条件で追記する |
 
 ### 既存の部品の再利用
@@ -267,7 +276,10 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `hand_finish` | 承認ありは終了、無しは回答待ち | 判定の間に承認が増える | 異常系の各行 |
-| `pick_records` | 単位ごとの最新 | 単位の名前の無い記録は 1 組 | 別の単位の後の記録に引かれない |
+| `pick_records` | 単位ごとの最新 | 単位の名前の無い記録は 1 組 | 別の単位の後の記録に引かれない。成功の後のバージョンの無い `反映失敗` を落とさない |
+| `executed` | 開き直しより後の本番の記録で真 | 開き直しより前の記録だけなら偽 | `デプロイなし`・`検証` の記録は数えない |
+| `confirm` | `target` の同じ行の workflow を読む | 行に `result.workflow` が無ければ CD を読まない | `deliveries` に同じ行が無ければ受けない |
+| `_recorded` | 同じ入力と結論の打ち直しで投稿が増えない | 理由の文だけが違えば前のコメントを使う | HEAD か結論が違えば新しく投稿する |
 | `judge_delivery` | CD 成功 | 実行が無く `CD の結果: 未確定` は受けて `unknown` | 失敗の完了・`段階: 反映失敗` |
 | `pick_run` | `push` を優先 | `workflow_dispatch` だけ | ほかのイベントは数えない |
 | `gate`（`no_skip`） | `skip` が偽 | — | 証跡の行が書かれない |
@@ -280,7 +292,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `ask_question` | `progress/gate/finishing.py` | 新設 | `(st: Store, machine_id: str, stage: str, pr: int \| None, seams: Seams) -> dict` | 待っていない承認ゲートの工程の質問と承認資料を作り、`gate` の結果を返す。待っていれば今の質問を返す |
+| `ask_question` | `progress/gate/finishing.py` | 新設 | `(st: Store, machine_id: str, stage: str, pr: int \| None, seams: Seams) -> dict` | 待っていない承認ゲートの工程の質問と承認資料を作り、`gate` の結果を返す。待っていれば今の質問を返す。`--pr` は、同じリポジトリの PR で head のブランチが工程のブランチと同じときだけ受ける。デプロイの工程では `executed` を読み、実行済みなら追認の質問にする |
 | `off_wait_question` | `progress/gate/asking.py` | 新設 | `(v: View, stage: StageDef, *, pr: int \| None, repo: str \| None) -> Question` | 工程の最後の事象の番号を起点に、待ちと同じ形の質問を組む |
 | `material` | `progress/gate/asking.py` | 変更 | `(v: View, q: Question, *, private: bool = True) -> str` | 追認（リリース済み）とリリースしない回答待ちでは、その説明を足す。MVV 判定の欄は `finish_held` の記録からも読む |
 
@@ -292,7 +304,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `ask_question` | 承認ゲートが無い・中止か無効の工程 | 引数 | 定義と状態 | 止める | `refused` と理由 | — |
-| `ask_question` | 設計の対象の PR が無い・文脈と違う `--pr`・ほかのゲートに `--pr` | 引数 | 対象の決定 | 止める | `refused`。正しい打ち方 | 打ち直せる |
+| `ask_question` | 設計の対象の PR が無い・文脈と違う `--pr`・head のブランチが違うかフォークの `--pr`・ほかのゲートに `--pr` | 引数 | 対象の決定 | 止める | `refused`。正しい打ち方 | 打ち直せる |
 
 ### 既存の部品の再利用
 
@@ -318,15 +330,17 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `answer` | `progress/gate/answering.py` | 変更 | `(st, machine_id, a: Answer, observe=no_observe, post=no_post, env: Mapping[str, str] = os.environ) -> dict` | 送り直しを先に照らし、開き直す回答では排他・証跡・取り下げ・追記・表の更新の順に書く |
-| `_refusal` | `progress/gate/answering.py` | 変更 | `(v, a, observe, root=None) -> tuple[Question, Target]` | 待っている質問か、`off_wait_question` の質問を受ける |
+| `_refusal` | `progress/gate/answering.py` | 変更 | `(v, a, observe, root=None) -> tuple[Question, Target]` | 待っている質問か、`off_wait_question` の質問を受ける。待っていない質問では、提示した PR が工程の対象（文脈の `design_pr`、無ければ工程のブランチの PR）であることを確かめ直し、デプロイの工程では `executed` を読む |
 | `_find_question` | `progress/gate/answering.py` | 新設 | `(v: View, gate_id: str, root: Path \| None) -> Question` | 待ちの質問、無ければ承認ゲートの工程ごとの待っていない質問から id の合うものを返す。対象の PR は提示した対象から引く |
 | `_effects` | `progress/gate/answering.py` | 新設 | `(v: View, q: Question, a: Answer) -> Effects` | 回答の種類と工程の状態から、`late`・`after_release`・開き直し・`failed` の要否を返す |
 | `_drafts` | `progress/gate/answering.py` | 新設 | `(v, q, a, effects: Effects, extra: Mapping) -> list[EventDraft]` | `reopened`、`answered`、`failed`、出力、外した課題の順に下書きを並べる |
-| `write_merge_row` | `core/merge_approval.py` | 変更 | `(hub, row: MergeRow, viewer) -> bool` | 記録の識別子・回答・対象のすべてが同じ証跡があるときだけ書かない |
+| `write_merge_row` | `core/merge_approval.py` | 変更 | `(hub, row: MergeRow, viewer, *, latest_only: bool = False) -> bool` | `latest_only`（DB に無い新しい回答）では、対象の最新の行の識別子と回答が同じときだけ書かない。偽（記録済みの回答の送り直しと `ndf ci answer`）では、識別子・回答・対象が同じ行が 1 件でもあれば書かない |
 
 - `answer`
   - 副作用: PR の証跡 1 件、リクエストのファイルの削除、事象の追記（1 トランザクション）、`gate-rejections`、進み具合の表
-- 追認（`after_release`）の承認では `_trail_by` が `None` を返し、証跡を書かない
+- 追認（`after_release`）の承認と `no_release` の承認では `_trail_by` が `None` を返し、証跡を書かない
+- `_ensure_trail`（記録済みの回答の送り直し）は、その回答がもう有効でない（`boundary` より前、後の回答がある）ときは何も書かない
+- 開き直しを起こす回答は、却下の証跡の後に `revoke_approvals` を呼ぶ
 
 ### 異常系の処理
 
@@ -351,7 +365,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | --- | --- | --- | --- |
 | `_effects` | 終了の工程の変更要求は開き直し、却下は `failed` も | 待っていない未着手への否定は記録だけ | 自動の流れの回答待ちは今と同じ |
 | `answer` | 開き直しを起こす回答の事象の順 | 送り直し（作業が流れていても同じ結果） | 異常系の各行 |
-| `write_merge_row` | 同じ回答の打ち直しは増えない | 同じ識別子で回答が違えば書く | — |
+| `write_merge_row` | 同じ回答の打ち直しは増えない | 同じ識別子で回答が違えば書く。承認 → 却下 → 承認の送り直しで最新の行が承認になる | 開き直した後の古い承認の送り直しで行が増えない |
 
 ## 依頼の有効性の問い合わせ
 
@@ -362,19 +376,19 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `request_status` | `progress/gate/finishing.py` | 新設 | `(st: Store, machine_id: str, ident: str) -> dict` | `metrics.valid` を返す。何も書かず、GitHub を読まない |
-| `current_request` | `progress/gate/requests.py` | 新設 | `(v: View) -> str \| None` | 今待っている質問の id について、最後に記録した `request_issued` の依頼の ID を返す。待っていなければ `None` |
+| `current_request` | `progress/gate/requests.py` | 新設 | `(v: View, root: Path) -> str \| None` | 今待っているリリース承認の質問と提示した対象から作る依頼の ID（`asking.request_id`）を返す。待っていなければ `None`。`request_issued` は読まない |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `request_status`・`current_request` | `release_request_of`・`plan_request` | `gate/asking.py` を読む | 使えない。並行開発の計画の事象だけを読み、外のオーガナイザーの依頼を持たない |
+| `request_status`・`current_request` | `release_request_of`・`plan_request`・`request_id`・`read_presented` | `gate/asking.py` を読む | `request_id` と `read_presented` を使う。`release_request_of` は並行開発の計画の事象だけを読むので使えない |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `request_status` | 今の ID は真 | 出し直した後の前の ID は偽 | 開き直しの後は、ファイルが残っていても偽 |
+| `request_status` | 今の ID は真。`request_issued` の無い改修前の依頼も真 | 出し直した後の前の ID は偽 | 開き直しの後は、ファイルが残っていても偽 |
 
 ## 次の 1 手の判断
 
@@ -387,7 +401,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `_running_move` | `progress/run.py` | 変更 | `(v: View, s: StageDef) -> Move` | `held_finish` があれば、ステップを流さず `GATE` か `CONSUME` を返す。否定の回答が残る承認ゲートは省かない |
 | `consume` | `progress/run_approval.py` | 変更 | `(d: Drive, v: View, m: Move) -> dict \| None` | 今の `_consume`。MVV で省くときは対象の 5 項目を照らし、承認の記録・証跡・マージの確かめを同じ呼び出しで行う |
 | `consume_held` | `progress/run_approval.py` | 新設 | `(d: Drive, v: View, m: Move) -> dict \| None` | 有効な承認を照らし、設計はマージ済み、デプロイはリリースの確かめを通して終了を書く |
-| `prior_approval` | `progress/run_approval.py` | 新設 | `(d: Drive, v: View, s: StageDef, step: StepDef) -> list[EventDraft] \| None` | 自動の流れの承認ゲートに有効な先の承認があれば、質問せずに済ませる事象を返す |
+| `prior_approval` | `progress/run_approval.py` | 新設 | `(d: Drive, v: View, s: StageDef, step: StepDef) -> list[EventDraft] \| None` | 自動の流れの承認ゲートに有効な先の承認があれば、質問せずに済ませる事象を返す。追認と `no_release` の承認は使わない |
 | `approved_seen` | `progress/run_approval.py` | 変更 | `(answers: StageAnswers, root: Path) -> dict \| None` | 直近の開き直しより後で、工程の対象の PR を見た承認だけを返す |
 | `ensure` | `progress/gate/mvv_trail.py` | 新設 | `(hub: GitHub, v: View, answered: Event, now: Target) -> bool` | 記録した `service:mvv` の承認がまだ有効なら、判定の記録へのリンクと担い手 `mvv` の行を持つ証跡を書く |
 | `recheck` | `progress/gate/answering.py` | 変更 | `(st, machine_id, observe, docs_only=never_docs_only) -> str \| None` | 手で終えた回答待ちと MVV の回答でも、マージ先と本番への反映を比べる |
@@ -432,30 +446,31 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `StageAnswers.__init__` | `progress/run_view.py` | 変更 | `(self, v: View, stage: str) -> None` | 走査を直近の `reopened` で止め、工程の対象の PR と違う PR を見た回答を飛ばす |
-| `approved_head` | `progress/gate/records.py` | 変更 | `(v: View, kind: str, root: Path \| None = None) -> str \| None` | 同じ条件で最後の回答を選ぶ |
+| `StageAnswers.__init__` | `progress/run_view.py` | 変更 | `(self, v: View, stage: str) -> None` | 走査を `approval_decide.boundary`（直近の `reopened`・`finish_held`・質問の出し直し）で止め、工程の対象の PR と違う PR を見た回答を飛ばす。最新の承認の回答が追認か `no_release` なら、前へさかのぼらず無いと返す |
+| `approved_head` | `progress/gate/records.py` | 変更 | `(v: View, kind: str, root: Path \| None = None) -> str \| None` | `boundary` と `latest_answer` で最後の回答を選ぶ。工程の対象の PR と違う回答、追認、`no_release` の回答なら `None` |
 | `answers` | `progress/gate/records.py` | 変更 | `(v: View) -> list[dict]` | すべての回答を出し、`after_release` の回答は「追認」と示す項目を足す |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 異常 |
 | --- | --- | --- |
-| `approved_head` | 開き直しの後の承認を返す | 開き直しより前の承認と、違う PR の承認は返さない |
+| `approved_head` | 開き直しの後の承認を返す | 開き直し・`finish_held`・質問の出し直しより前の承認、違う PR の承認、追認、`no_release` の承認は返さない（出し直した後の `ndf answer head` は古い HEAD を返さない） |
 
 ## リリースのリクエスト
 
 満たす決定: 決定 4・9、受け入れ条件 15
 
-出したリクエストは、事象 `request_issued`（ステートマシンの DB）に記録する。payload は `stage`・`gate_id`・`id`・`sink`（`file`・`plan`・`none`）・`path`（ファイルのときの絶対パス）・`body`（書いた項目の全部）である。重複のキーは `request_issued:<ステートマシンの ID>:<id>:<path>` で、同じ組は 2 度書かない。
+出したリクエストは、事象 `request_issued`（ステートマシンの DB）に記録する。payload は `stage`・`gate_id`・`id`・`sink`（`file`・`plan`・`none`）・`path`（ファイルのときの絶対パス）・`body`（書いた項目の全部）・`created`（NDF がファイルを新しく作ったと確かめた記録だけ真）である。重複のキーは `request_issued:<ステートマシンの ID>:<id>:<path>:<created>` で、同じ組は 2 度書かない。ファイルを書く前に偽で追記し、新しく作れたら真でもう 1 件追記する。
 
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `request_release` | `progress/gate/release.py` | 変更 | `(st, v, q, env) -> dict \| None` | 手で終えた回答待ちでは出さない。出す前に `record_issued` を呼ぶ |
-| `record_issued` | `progress/gate/requests.py` | 新設 | `(st: Store, v: View, q: Question, *, sink: str, path: Path \| None, body: Mapping) -> None` | 事象 `request_issued` を追記する |
+| `request_release` | `progress/gate/release.py` | 変更 | `(st, v, q, env) -> dict \| None` | 手で終えた回答待ちでは出さない。出す前に `record_issued` を呼び、ファイルを新しく作れたら `created` を真でもう 1 回呼ぶ |
+| `write_request` | `progress/plan/external.py` | 変更 | `(root: Path, body: Mapping) -> tuple[Path, bool]` | 新しく作ったら真。同じ中身のファイルが先にあれば偽（違えば今と同じく `ExchangeError`） |
+| `record_issued` | `progress/gate/requests.py` | 新設 | `(st: Store, v: View, q: Question, *, sink: str, path: Path \| None, body: Mapping, created: bool = False) -> None` | 事象 `request_issued` を追記する |
 | `issued` | `progress/gate/requests.py` | 新設 | `(v: View, stages: Collection[str]) -> list[Issued]` | 指定の工程が出した記録を古い順に返す |
-| `withdraw` | `progress/gate/requests.py` | 新設 | `(records: Sequence[Issued]) -> list[str]` | 中身が記録と一致するファイルを消し、残したものと無いものを警告にする |
+| `withdraw` | `progress/gate/requests.py` | 新設 | `(records: Sequence[Issued]) -> list[str]` | `created` の記録があり中身が記録と一致するファイルを消し、残したものと無いものを警告にする |
 | `unrecorded` | `progress/gate/requests.py` | 新設 | `(v: View, gates: Collection[tuple[str, str]], root: Path, env: Mapping[str, str]) -> list[str]` | 記録の無い改修前の依頼を、今の `.seen.json` から探して警告にする（消さない） |
 
 - 並行開発の計画へ出した依頼は、`answer` と `_cmd_retry` の追記と同じトランザクションで、今の `plan.close_request` で閉じる
@@ -474,13 +489,13 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `record_issued`・`issued`・`withdraw`・`unrecorded` | `external.write_request`・`external._same_body`・`release._seen_path` | `grep -rn` で `src/ndf/` を `organizer`・`unlink` で検索 | 中身の比較は `_same_body` を公開名にして使う。削除と記録の関数は無い |
+| `record_issued`・`issued`・`withdraw`・`unrecorded` | `external.write_request`・`external._same_body`・`release._seen_path` | `grep -rn` で `src/ndf/` を `organizer`・`unlink` で検索 | 中身の比較は `_same_body` を公開名（`same_body`）にして使う。削除と記録の関数は無い |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `withdraw` | 打った側に `NDF_ORGANIZER_DIR` が無くても消す | 2 つの発行先の両方 | 中身が違うファイルは残る |
+| `withdraw` | 打った側に `NDF_ORGANIZER_DIR` が無くても消す | 2 つの発行先の両方 | 中身が違うファイルと、出す前から同じ中身であったファイル（`created` が無い）は残る |
 | `issued` | 開き直す工程の分だけ | `--later keep` で残した工程を含めない | — |
 | `unrecorded` | 警告に ID が出る | 環境変数が無ければパスを載せない | 消さない |
 
@@ -512,17 +527,18 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `needed` | `progress/redo_decide.py` | 新設 | `(events: Sequence[Event], pr_merged: bool) -> bool` | 開き直しの時点の `design_pr` がマージ済みで、記録がまだ無いかを返す |
+| `needed` | `progress/redo_decide.py` | 新設 | `(events: Sequence[Event], pr_merged: bool) -> bool` | 開き直しの時点の `design_pr` がマージ済みで、記録がまだ無いかを返す。不要と決めた記録があれば偽 |
 | `branch_name` | `progress/redo_decide.py` | 新設 | `(issue: int, machine_id: str, generation: int) -> str` | 作り直し用のブランチの名前を返す |
 | `commits_to_move` | `progress/redo_decide.py` | 新設 | `(branch_commits: Sequence[str], merged_heads: Sequence[str], applied: Collection[str]) -> list[str]` | マージされておらず、まだ移していないコミットを順に返す |
-| `redo_record` | `progress/redo.py` | 新設 | `(d: Drive, v: View, s: StageDef) -> Record \| None` | 要否を 1 回だけ決めて記録し、今の記録を返す |
-| `ensure_workspace` | `progress/redo.py` | 新設 | `(d: Drive, v: View, rec: Record) -> dict \| None` | 予定を記録してから `ndf worktree create <ブランチ> --from <ベース>` を打つ。失敗は `stopped` の結果を返す |
+| `redo_record` | `progress/redo.py` | 新設 | `(d: Drive, v: View, s: StageDef) -> Record \| None` | 要否を 1 回だけ決め、不要の場合も記録（`needed: false`）し、今の記録を返す |
+| `ensure_workspace` | `progress/redo.py` | 新設 | `(d: Drive, v: View, rec: Record) -> dict \| None` | 予定を記録してから `ndf worktree create <ブランチ> --from <ベース>` を打ち、`new_branch` が真なら作ったことを記録する。作ったことの記録が無いのにパスかブランチがあれば引き継がない。失敗は `stopped` の結果を返す |
 | `redirect_inputs` | `progress/redo.py` | 新設 | `(rec: Record \| None, inputs: Mapping) -> dict` | 設計の工程の `worktree`・`branch` を差し替える |
 | `take_in` | `progress/redo.py` | 新設 | `(d: Drive, v: View, rec: Record) -> dict \| None` | ベースの固定、マージ、`cherry-pick -x` を行う。止まれば `stopped` の結果を返す |
-| `discard` | `progress/redo.py` | 新設 | `(d: Drive, rec: Record) -> list[str]` | `ndf worktree remove` を打ち、残ったものを警告にする |
+| `discard` | `progress/redo.py` | 新設 | `(d: Drive, rec: Record) -> list[str]` | `ndf worktree remove --machine <ID> --redo <開き直しの番号>` を打ち、残ったものを警告にする |
 | `remove_one` | `domains/worktree/merged.py` | 新設 | `(main: Git, branch: str, path: Path, rec: Record) -> None` | 今の外し方（未コミットは残す・追跡外は退避・`--force` なし）と `git branch -d` |
+| `remove_redo` | `domains/worktree/merged.py` | 新設 | `(main: Git, st: Store, machine_id: str, redo: int, rec: Record) -> None` | 記録からパスとブランチを引き、作ったことの記録、パスとブランチの対応、全コミットが記録のマージ済みの PR か今の作業場所に入っていることを確かめてから `remove_one` を呼ぶ。満たさなければ何も消さない |
 
-- `domains/worktree/cli.py` に `ndf worktree remove <ブランチ> --path <パス>` を足す。パスがそのブランチの worktree でなければ何もしない
+- `domains/worktree/cli.py` に `ndf worktree remove --machine <ID> --redo <開き直しの番号>` を足す。パスとブランチは引数で受けず、`remove_redo` が記録から引く
 - 設計の工程の入力の差し替えは、`_start`・`_run_step`・`hand_finish` が同じ `redirect_inputs` を通る
 
 ### 異常系の処理
@@ -530,6 +546,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `ensure_workspace` | 同じ名前のブランチか保存先がある・`new_branch` が偽 | 別の作業 | 作成の前後 | 止める | `stopped`（`precondition`）と名前 | 予定の記録を無効にする |
+| `ensure_workspace` | 予定の記録だけがあり、パスかブランチがある | 中断か別の処理 | 打ち直し | 止める | `stopped`（`precondition`）。確かめて外す手順 | 使わず、消さない |
 | `ensure_workspace` | fetch と作成の失敗 | ネットワーク・git | コマンドの結果 | 呼び出し元へ返す | そのコマンドの `cause` | 打ち直すと予定の記録から続ける |
 | `take_in` | 途中の状態が残る | 中断 | git の状態 | 止める | `stopped`。`--continue` か `--abort` を案内 | 打ち直せる |
 | `take_in` | 解けない衝突 | 両側の変更 | マージと cherry-pick | 止める | `stopped`（`precondition`）と衝突したファイル | 取りやめて元に戻す |
@@ -553,7 +570,9 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `needed` | マージ済みで真 | 記録があれば偽 | 未マージは偽 |
+| `needed` | マージ済みで真 | 記録（不要の記録を含む）があれば偽 | 未マージは偽 |
+| `ensure_workspace` | 作って、作ったことを記録する | どちらも無ければ打ち直しで作る | 予定の記録だけでは引き継がない |
+| `remove_redo` | 取り込み済みなら外す | — | 作ったことの記録が無い・取り込んでいないコミットがあれば何も消さない |
 | `commits_to_move` | マージした PR より後のコミット | マージした PR が無い | 適用済みを飛ばす |
 | `take_in` | 実の一時リポジトリで取り込む | 差分なし | 衝突・中断からの再開 |
 

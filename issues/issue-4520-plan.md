@@ -15,7 +15,7 @@
 | --- | --- |
 | `contracts/workflow/`（`progress.json`・`ndf.schema.json`・`stages/design.json`） | 事象の追加、書ける状態の拡張、NDF が作る出力の宣言 |
 | `src/ndf/core/`（`release_record.py`・`merge_approval.py`） | リリース記録の読み取りの移動、証跡の重複の判定 |
-| `src/ndf/adapters/github.py` | workflow の実行の一覧の読み取り |
+| `src/ndf/adapters/`（`github.py`・`github_pulls.py`） | workflow の実行の一覧の読み取り、コメントの作成時刻 |
 | `src/ndf/progress/`（今のモジュール） | 畳み込み、次の 1 手、出力の確かめ、進み具合の表 |
 | `src/ndf/progress/`（`approval_decide`・`delivery_decide`・`run_approval`・`reopening`・`redo`・`redo_decide`） | 新しい判定と手 |
 | `src/ndf/progress/gate/` | 手の経路の操作、質問と回答、リクエストの記録と取り下げ、対象の読み取り、MVV の証跡 |
@@ -36,8 +36,8 @@
 
 ### Task 2: 終えた工程を開き直す
 
-- **対象ファイル:** `contracts/workflow/progress.json`、`src/ndf/progress/{model,folding,stages,run_view,records,reopening}.py`、`gate/finishing.py`、`gate/records.py`、`tests/progress/test_reopen_operations.py`（新設）、`tests/progress/test_model.py`
-- **変更内容:** 事象 `reopened`、開き直す工程の決定、`retry --later`、世代と出力の扱い、承認を読む側が直近の開き直しより前を読まないこと、取り消されない操作の警告、表の PR の欄
+- **対象ファイル:** `contracts/workflow/progress.json`、`src/ndf/progress/{model,folding,stages,run_view,records,reopening}.py`、`gate/finishing.py`、`gate/records.py`、`src/ndf/core/merge_approval.py`、`tests/progress/test_reopen_operations.py`（新設）、`tests/progress/test_model.py`
+- **変更内容:** 事象 `reopened`、開き直す工程の決定、`retry --later`、世代と出力の扱い、承認を読む側が直近の開き直しより前を読まないこと、取り消されない操作の警告、表の PR の欄、開き直す承認の証跡の取り消し（同じ HEAD とマージ先のまま開き直すと `ndf ci merge` が断るテストを置く）
 - **満たす受け入れ条件:** 10・11・12・13・16・17・19・20
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理。単体テストの観点は詳細設計の「遷移の表」「畳み込み」「開き直し」「承認を読む側」
 
@@ -64,14 +64,14 @@
 
 ### Task 6: デプロイの工程のリリースの確かめと追認
 
-- **対象ファイル:** `src/ndf/core/release_record.py`（新設）、`src/ndf/domains/release/{record,record_decide}.py`、`src/ndf/adapters/github.py`、`src/ndf/progress/delivery_decide.py`、`gate/{delivery_check,finishing,asking,release}.py`、`tests/progress/test_release_confirm.py`（新設）
+- **対象ファイル:** `src/ndf/core/release_record.py`（新設）、`src/ndf/domains/release/{record,record_decide}.py`、`src/ndf/adapters/{github,github_pulls}.py`、`src/ndf/progress/delivery_decide.py`、`gate/{delivery_check,finishing,asking,release}.py`、`tests/progress/test_release_confirm.py`（新設）
 - **変更内容:** 記録の読み取りを `core` へ移し、`--record-pr`・`--no-release`、記録と CD の条件、追認の記録、後ろの工程の無効化と復帰
 - **満たす受け入れ条件:** 無し（不変条件 I1 のデプロイ。テスト設計の「デプロイ済み」「CD の結果」「追認」の行）
 - **進め方:** 読み取りの移動を先に（今のテストが通る）→ 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 7: 出したリクエストの記録と取り下げ
 
-- **対象ファイル:** `progress.json`、`gate/{requests,release,answering,finishing}.py`、`tests/progress/test_requests.py`（新設）
+- **対象ファイル:** `progress.json`、`gate/{requests,release,answering,finishing}.py`、`src/ndf/progress/plan/external.py`、`tests/progress/test_requests.py`（新設）
 - **変更内容:** 事象 `request_issued`、取り下げ、改修前の依頼の警告、計画の依頼を閉じる、`ndf progress request-status`
 - **満たす受け入れ条件:** 無し（決定 9。テスト設計の「出したリクエストの記録」「依頼の有効性」の行）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
@@ -120,15 +120,29 @@
 
 | リスク | 対処 |
 | --- | --- |
-| 流し直した工程のプランが、マージ済みの PR を前に止まる（設計の「未確認のまま残ること」） | リリースの後テストで、実際の開き直しを 1 回通す |
+| 流し直した工程のプランが、マージ済みの PR を前に止まる（設計の「未確認のまま残ること」） | リリース承認の前に、実際の開き直しを 1 回通す（下の「出荷前の確かめ」） |
 | `finish` の中の MVV 判定の所要時間が分からない | 実装の後に 1 回測り、PR に書く |
 | 進行中のスプリントの記録が新しいコードで読めない | 改修前の事象の並びを読むテストを Task 2・3 に置く |
 
+## 出荷前の確かめ
+
+実装やデプロイまで進んだ利用者が変更を求めた場合に、流し直しが進めなくならないことを、リリース承認を求める前に確かめる。版上げの PR の head から導入した NDF を、試験用のリポジトリで使う。
+
+1. 実装とデプロイを終えたスプリントを作り、前の工程への変更要求と、`retry --later reopen` で開き直す
+2. `ndf progress next` で流し直し、マージ済みの PR、残っているブランチ、公開済みのバージョンを前に、どのステップが止まるかを記録する
+3. 止まった工程を、新しいブランチと PR で作業して `ndf progress finish` で終え、後ろの工程へ進めることを確かめる
+4. 結果と再開の打ち方を PR に書く。再開できない箇所があれば、直すか手順書へ再開の打ち方を足してから、リリース承認を求める
+
 ## 切り戻し手順
 
-- 版を戻せる。データの移行は無い。新しい事象を書いたステートマシンを古い版で読む場合の振る舞いは、設計の「影響と危険」にある
+データの移行は無い。ただし、新しい事象を書いた進行中のステートマシンは、前の版で動かさない。前の版は `finish_held` の工程を普通の実行中と読み、工程を初めから流す。手の経路でリリースした後の追認を待っていれば、デプロイをもう一度実行する。開き直しで書いた `担い手: reopen` の証跡も読まないので、取り消した承認が有効に戻る。前の版がほかの新しい事象を読めるかは未確認である。
+
+1. 版を戻す前に、進行中のスプリントのステートマシンを `ndf progress show` で確かめ、手で終えた回答待ち、開き直し（`reopened`）、作り直し用の作業場所があるものを書き出す
+2. 該当するスプリントは、新しい版のまま回答して終了させるか、`ndf progress cancel` で中止してから版を戻す。中止する場合は、開き直しで承認を取り消した未マージの PR を閉じる。前の版では取り消しが効かないためである
+3. 終える前に戻す必要があるときは、該当するステートマシンに前の版で `ndf progress next` を打たず、その PR をマージしない。直した版へ上げた後に `ndf progress next` で再開する
 
 ## 完了の定義
 
 - [ ] 受け入れ条件 1〜23 をすべて満たし、条件ごとに検証手段と結果が対応している
 - [ ] `pytest plugins/ndf/tests` と `ndf check` が通る
+- [ ] 「出荷前の確かめ」の結果と再開の打ち方が PR に書かれている
