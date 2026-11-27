@@ -364,7 +364,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `with_choice` | `core/converge/participants.py` | 新設 | `with_choice(spec: agents.Launch, choice: Optional[Any]) -> agents.Launch` | `review_launch`・`read_only_launch`・`reading_launch` が組み立てた起動に組の引数と環境を足し、Codex は `usage_args` を足す |
-| `answer_text` | 同 | 変更 | 変えない | 結果を探す本文を返す。Codex の `--json` の出力では `<出力>.answer` の末尾を返し、ファイルが無い場合は表の下の「Codex の回答の読み方」に従う |
+| `answer_text` | 同 | 変更 | 変えない | 結果を探す本文を返す。Codex の `--json` の出力では回答のファイルの末尾を返す。回答のファイルのパスと、ファイルが無い場合の扱いは、表の下の「Codex の回答の読み方」に従う |
 | `_start_and_watch` | `adapters/agents.py` | 変更 | 変えない | `AgentStatus.seconds` に起動から終了までの秒を入れる |
 | `codex_usage` | 同 | 新設 | `codex_usage(out: Path) -> Optional[CodexUsage]` | `turn.completed` の行の `usage` を足し合わせる |
 | `codex_cost` | `domains/records/usage.py` | 新設 | `codex_cost(used: Any, model: Optional[str]) -> tuple[str, Optional[float]]`（`used` は `agents.CodexUsage`） | 換算に使ったモデルの名前と、単価表から求めた USD を返す。単価の無いモデルの USD は None |
@@ -381,6 +381,8 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - 修正担当は `launch_choice("seat", "fix")`（工程が無いので実験の引数を足さない）。環境変数と引数の指定は効く
 - シートの子の環境から `NDF_CHARGE_TO` を外す
 - Codex の回答の読み方
+  - 回答のファイルは、標準出力のログのファイル名に `.answer` を足したものである。標準出力のログが `review.out` なら、回答のファイルは `review.out.answer` になる
+  - 回答先の指定、起動前の削除、読み取りは、どれも `agents.codex_answer_path(out)`（`out` は標準出力のログのパス）で求めたパスを使う
   - `--json` の出力を出した起動の回答は、回答のファイルにある。標準出力は回答の代わりにならない
   - 回答のファイルが無い場合も、`answer_text` は標準出力の末尾を返し、回答の有無は判定しない
   - この末尾はイベントの行である。回答やコマンドの出力はイベントの中の文字列になっているので、呼び出し元が結果の JSON（`findings` など）を探しても見つからず、回答なしになる
@@ -390,7 +392,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
   - サンドボックスの失敗の検出（`sandbox_failed`）は、`codex_events` で標準出力全体を読み、`type` が `item.completed` のイベントから `item.type` が `command_execution` のものを抽出する。その `item` の `exit_code` が 0 以外で、かつ `aggregated_output` が `bwrap:` で始まる場合に、サンドボックスの失敗と判定する
   - どちらも、標準出力の最初の行が `thread.started` イベントの場合だけ、後続の行を Codex のイベントとして扱う。最初の行がそうでなければ、後の行に `thread.started` があっても扱わない
   - コマンドの出力で見つけた失敗は、出力の行でなく固定の文を返す。返す値は PR のコメントに載り、出力の行は手元のパスやコマンドが出したデータを含み得るためである
-- 回答のファイル（`<出力>.out.answer`）を回答先に指定した起動は、起動の前にそのファイルを消す（`_start`）。codex は失敗すると前の中身を残すためである。指定しない起動は消さない。`answer_text` が回答のファイルを読むのは codex の `--json` の出力だけなので、残った古い回答は読まれない
+- 回答のファイル（パスは上の「Codex の回答の読み方」）を回答先に指定した起動は、起動の前にそのファイルを消す（`_start`）。codex は失敗すると前の中身を残すためである。指定しない起動は消さない。`answer_text` が回答のファイルを読むのは codex の `--json` の出力だけなので、残った古い回答は読まれない
 - 実装で設計の形を変えた理由（B5）。振る舞いは変えていない
   - 値を起動の組み立ての関数の引数にしないのは、引数を足すと上限（PLR0913。6）を超え、cross-refactoring が呼ぶ関数の形も変わるためである
   - 使用量を辞書で持たないのは、欄の名前の文字列を複数のファイルに置くと重複の検査が落とすためである
