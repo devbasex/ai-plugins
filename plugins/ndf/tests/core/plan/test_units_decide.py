@@ -155,8 +155,10 @@ def test_cycle_keeps_judging_the_rest():
         ([_task("T1", criteria=("8:1",))], [_unit("A", "T1")], None),
         ([_task("T1", criteria=("7:0",))], [_unit("A", "T1")], None),
         ([_task("T1", criteria=("7:3",))], [_unit("A", "T1")], {7: 2}),
+        ([], [], None),
+        ([_task("T1")], [_unit("A", "T1"), _unit("B")], None),
     ],
-    ids=["no-unit", "two-units", "outside-issue", "zero", "beyond-count"],
+    ids=["no-unit", "two-units", "outside-issue", "zero", "beyond-count", "empty-plan", "unit-without-tasks"],
 )
 def test_u2(tasks, units, criteria):
     assert "U2" in _rules(_judge(_file(tasks, units), criteria=criteria).violations)
@@ -196,6 +198,21 @@ def test_u4_ignores_ordered_units_with_different_orders():
     assert _judge(_file(tasks, units)).violations == ()
     units[2] = _unit("C", "T3")
     assert _rules(_judge(_file(tasks, units)).violations) == ["U4"]
+
+
+def test_u4_reports_a_pair_once_with_all_shared_files():
+    tasks = [_task("T1", files=("x.py", "y.py")), _task("T2", files=("y.py", "x.py", "z.py"))]
+    j = _judge(_file(tasks, [_unit("A", "T1"), _unit("B", "T2")]))
+    assert [(f.rule, f.unit) for f in j.violations] == [("U4", "A")]
+    assert "x.py・y.py" in j.violations[0].reason
+
+
+def test_units_after_a_cycle_get_order_zero_and_keep_their_closure():
+    tasks = [_task(t, files=("x.py",) if t in ("T3", "T4") else ()) for t in ("T1", "T2", "T3", "T4")]
+    units = [_unit("A", "T1", after=["B"]), _unit("B", "T2", after=["A"]), _unit("C", "T3", after=["A"]), _unit("D", "T4", after=["C"])]
+    j = _judge(_file(tasks, units))
+    assert {n: v.order for n, v in _views(j).items()} == {"A": 0, "B": 0, "C": 0, "D": 0}
+    assert _rules(j.violations) == ["U1"]
 
 
 def test_u5_blank_reason():

@@ -111,7 +111,7 @@ contracts/
 1. 単位を `(ファイルのパス, 単位の名前)` の組にする。`Edge.issue` は、その課題を `issues` に持つファイルを探すためだけに使う
 2. タスクのグラフ（ファイルごと）と単位のグラフ（全ファイル）を `graphlib.TopologicalSorter` に入れる。`CycleError` は U1 にする
 3. 単位のグラフを並べた順に、実行順を「先に要る単位の実行順の最大 + 1」（無ければ 1）で決める
-4. 同じ順に、各単位の閉包（間接を含む先に要る単位の集合）を求める
+4. 同じ順に、各単位の閉包（間接を含む先に要る単位の集合）を求める。先に要る単位の閉包は求め済みなので、それと直接の依存の和にする（依存の辺は 1 回ずつ見る）
 5. 下の表の規則を当てる
 6. `merge` は、実行順、同じ実行順の中は `(単位の最小の課題の番号, ファイルの中の並び)` の順に 1 から振る
 7. U6 の単位すべてと、W1 のうちタスクが 2 つ以上の単位に `split` を呼ぶ
@@ -119,9 +119,9 @@ contracts/
 | 規則 | 判定の式 |
 | --- | --- |
 | U1 | ファイルの中でタスクの `id` か単位の名前が重なる。1 つの課題を 2 つのファイルの `issues` が持つ。`after`・`units[].tasks` の指す先が無い。グラフに輪がある |
-| U2 | タスクが 0 個か 2 個以上の単位にある。タスクの `issue` がファイルの `issues` に無い。`criteria` が指す課題が引数 `criteria` のキーに無い（対象外の参照）。番号が 1 未満か、`criteria[課題]`（本文の受け入れ条件の数）より大きい |
+| U2 | ファイルにタスクか単位が無い。単位のタスクが 0 個。タスクが 0 個か 2 個以上の単位にある。タスクの `issue` がファイルの `issues` に無い。`criteria` が指す課題が引数 `criteria` のキーに無い（対象外の参照）。番号が 1 未満か、`criteria[課題]`（本文の受け入れ条件の数）より大きい |
 | U3 | タスク B の `after` のタスク A の単位が、B の単位でも B の単位の閉包の中でもない |
-| U4 | 互いに相手を閉包に持たない 2 単位の `touches` が重なる。`touches` はタスクの `files` の和で、文字列の一致で比べる |
+| U4 | 互いに相手を閉包に持たない 2 単位の `touches` が重なる。`touches` はタスクの `files` の和で、文字列の一致で比べる。ファイルごとに触る単位を集め、同じファイルを触る組だけを調べる。1 つの組の違反は重なるファイルをまとめて 1 件にする |
 | U5 | `Edge.reason` が前後の空白を除くと空 |
 | U6・W1 | `lines`（タスクの `lines` の和）が `max` を超える（U6）。`target` を超え `max` 以下（W1）。`lines` が無い単位（`whole` が真）にはどちらも当てない |
 
@@ -172,7 +172,7 @@ contracts/
 | `Report` | 同上 | `judgement`・`missing`・`task_gaps`・`stale_tables` |
 | `review-units.target-lines.json`・`max-lines.json` | `contracts/limits/` | `{"summary", "count": 400 / 1000, "read_by": ["ndf.core.plan.units_files"]}` |
 
-`review-units.schema.json` は設計書の「データ構造」の例の形で、`additionalProperties: false`、`version` は定数 1 にする。`tasks[].files` の各値は、先頭と末尾の `/`、`//`、`.` と `..` の区切り、`*?[]` を断る `pattern` を持つ。`title` と `lines`（0 以上の整数）は必須である。行数の無い通常のタスクは `load` が `invalid` で止める。宣言 `workflow.review_units` は `{"target_lines", "max_lines"}`（1 以上の整数。どちらも任意）で、`project-workflow.schema.json` と `ndf-settings/project.schema.json` の両方に足す。
+`review-units.schema.json` は設計書の「データ構造」の例の形で、`additionalProperties: false`、`version` は定数 1 にする。`tasks[].files` の各値は、先頭と末尾の `/`、`//`、`.` と `..` の区切り、`*?[]` を断る `pattern` を持つ。`title` と `lines`（0 以上の整数）は必須である。`tasks`・`units`・各単位の `tasks` は 1 つ以上（`minItems: 1`）にする。計画を省く課題は `single` で課題全体を 1 単位にするので、空の計画はファイルで表さない。行数の無い通常のタスクは `load` が `invalid` で止める。宣言 `workflow.review_units` は `{"target_lines", "max_lines"}`（1 以上の整数。どちらも任意）で、`project-workflow.schema.json` と `ndf-settings/project.schema.json` の両方に足す。
 
 ### 処理の手順
 

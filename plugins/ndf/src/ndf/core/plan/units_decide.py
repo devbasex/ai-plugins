@@ -140,8 +140,7 @@ def judge(files: Sequence[UnitFile], limits: Limits, criteria: Mapping[int, int]
             for tid in u.tasks:
                 member.setdefault((at, tid), []).append((at, u.name))
     graph, edges = _unit_graph(files, homes, owner, bad)
-    closure = {k: _closure(k, graph) for k in homes}
-    order = _orders(graph, closure, bad)
+    closure, order = _closures_and_orders(graph, bad)
     _u3(files, {k: v[0] for k, v in member.items() if len(v) == 1}, closure, bad)
     _u4(files, homes, closure, bad)
     views = _views(files, homes, edges, order)
@@ -178,7 +177,12 @@ def _name_rules(f: UnitFile, bad: list[Finding]) -> None:
 
 
 def _task_rules(f: UnitFile, criteria: Mapping[int, int], bad: list[Finding]) -> None:
-    """タスクの所属・課題・受け入れ条件（U2）。"""
+    """空の計画・タスクの無い単位・タスクの所属・課題・受け入れ条件（U2）。計画を省く課題は `single` で表すので、空は誤り。"""
+    if not f.tasks:
+        bad.append(Finding("U2", "", f"{f.path}: タスクが無い"))
+    if not f.units:
+        bad.append(Finding("U2", "", f"{f.path}: 単位が無い"))
+    bad += [Finding("U2", u.name, f"{f.path}: 単位にタスクが無い") for u in f.units if not u.tasks]
     for t in f.tasks:
         count = sum(u.tasks.count(t.id) for u in f.units)
         if count != 1:
@@ -222,7 +226,7 @@ def _unit_graph(files, homes, owner, bad):
 
 
 def _closure(key: _Key, graph: Mapping[_Key, set[_Key]]) -> frozenset[_Key]:
-    """間接を含む先に要る単位の集合。"""
+    """間接を含む先に要る単位の集合（輪にかかる単位だけに使う）。"""
     seen: set[_Key] = set()
     stack = list(graph[key])
     while stack:
@@ -233,16 +237,33 @@ def _closure(key: _Key, graph: Mapping[_Key, set[_Key]]) -> frozenset[_Key]:
     return frozenset(seen)
 
 
-def _orders(graph, closure, bad) -> dict[_Key, int]:
-    """実行順は「先に要る単位の実行順の最大 + 1」。輪にかかる単位（輪の上か、輪の後ろ）は 0 にする。"""
-    tangled = {k for k in graph if k in closure[k] or any(c in closure[c] for c in closure[k])}
+def _closures_and_orders(graph, bad) -> tuple[dict[_Key, frozenset[_Key]], dict[_Key, int]]:
+    """閉包と実行順を依存の順に求める。閉包は直接の依存と、その求め済みの閉包の和にし、依存の辺を 1 回ずつ見る。
+
+    実行順は「先に要る単位の実行順の最大 + 1」。輪にかかる単位（輪の上か、輪の後ろ）は並びに出てこないので、
+    閉包をたどり直して求め、実行順を 0 にする。
+    """
+    closure: dict[_Key, frozenset[_Key]] = {}
+    order: dict[_Key, int] = {}
+    sorter = TopologicalSorter(graph)
+    try:
+        sorter.prepare()
+    except CycleError:
+        pass  # 輪で止まるまでは get_ready で並べられる。輪の単位は下で拾う
+    while sorter.is_active():
+        ready = sorter.get_ready()
+        for k in ready:
+            closure[k] = frozenset(graph[k]).union(*(closure[p] for p in graph[k]))
+            order[k] = 1 + max((order[p] for p in graph[k]), default=0)
+        sorter.done(*ready)
+    tangled = [k for k in graph if k not in closure]
+    for k in tangled:
+        closure[k] = _closure(k, graph)
+        order[k] = 0
     if tangled:
         cycle = sorted(k for k in tangled if k in closure[k])
         bad.append(Finding("U1", cycle[0][1], f"単位の依存が輪になる（{'・'.join(n for _, n in cycle)}）"))
-    order = dict.fromkeys(tangled, 0)
-    for k in TopologicalSorter({k: v for k, v in graph.items() if k not in tangled}).static_order():
-        order[k] = 1 + max((order[p] for p in graph[k]), default=0)
-    return order
+    return closure, order
 
 
 def _u3(files, unit_of, closure, bad) -> None:
@@ -256,14 +277,20 @@ def _u3(files, unit_of, closure, bad) -> None:
 
 def _u4(files, homes, closure, bad) -> None:
     """依存（間接を含む）で前後が決まらない 2 単位が同じファイルを触る（U4）。"""
-    keys = list(homes)
-    touches = {k: set(_touches(files[k[0]], homes[k])) for k in keys}
-    pairs = [(a, b) for i, a in enumerate(keys) for b in keys[i + 1 :] if a not in closure[b] and b not in closure[a]]
-    for a, b in pairs:
-        shared = touches[a] & touches[b]
-        if shared:
+    position = {k: i for i, k in enumerate(homes)}
+    by_path: dict[str, list[_Key]] = {}
+    for k in homes:
+        for p in _touches(files[k[0]], homes[k]):
+            by_path.setdefault(p, []).append(k)
+    shared: dict[tuple[_Key, _Key], list[str]] = {}
+    for p, ks in by_path.items():
+        for i, a in enumerate(ks):
+            for b in ks[i + 1 :]:
+                shared.setdefault((a, b), []).append(p)
+    for (a, b), paths in sorted(shared.items(), key=lambda item: (position[item[0][0]], position[item[0][1]])):
+        if a not in closure[b] and b not in closure[a]:
             where = f"{files[a[0]].path} の {a[1]} と {files[b[0]].path} の {b[1]}"
-            bad.append(Finding("U4", a[1], f"{where} が前後なしに {'・'.join(sorted(shared))} を触る"))
+            bad.append(Finding("U4", a[1], f"{where} が前後なしに {'・'.join(sorted(paths))} を触る"))
 
 
 def _unit_tasks(f: UnitFile, u: UnitDef) -> list[Task]:

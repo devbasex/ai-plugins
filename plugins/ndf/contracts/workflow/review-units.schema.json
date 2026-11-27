@@ -15,8 +15,8 @@
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/issue"}
     },
-    "tasks": {"type": "array", "items": {"$ref": "#/$defs/task"}},
-    "units": {"type": "array", "items": {"$ref": "#/$defs/unit"}}
+    "tasks": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/task"}},
+    "units": {"type": "array", "description": "計画を省く課題はファイルを置かず課題全体を 1 単位にする（ndf.core.plan.units_decide.single）ので、ここは 1 つ以上", "minItems": 1, "items": {"$ref": "#/$defs/unit"}}
   },
   "if": {"required": ["issues"], "properties": {"issues": {"minItems": 2}}},
   "then": {"properties": {"tasks": {"items": {"required": ["issue"]}}}},
@@ -58,7 +58,7 @@
       "required": ["name", "tasks", "after"],
       "properties": {
         "name": {"type": "string", "minLength": 1},
-        "tasks": {"type": "array", "items": {"$ref": "#/$defs/task_id"}},
+        "tasks": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/task_id"}},
         "after": {"type": "array", "description": "先に要る単位と理由", "items": {"$ref": "#/$defs/edge"}},
         "actual_lines": {"type": "integer", "minimum": 0, "description": "実装の後に書き足す実際の差分の行数"}
       }
