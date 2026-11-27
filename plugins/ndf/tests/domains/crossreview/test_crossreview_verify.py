@@ -1,13 +1,25 @@
-"""判定役の判断（verify_decide）。確かめる指摘の選び方・指示・回答の読み方・下げるかの決め方（#4363）。"""
+"""判定役の判断（verify_decide）・起動（verify.ask）・駆動への組み込み（#4363）。判断は確かめる指摘の選び方・指示・回答の
+読み方・下げるかの決め方。駆動は `ndf cross-review run` を偽の起動（`test_crossreview_run.Fake`）で通す。"""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Optional
 
 import pytest
 
+from ndf.adapters import agents
 from ndf.contracts import writing
-from ndf.domains.crossreview import criteria_decide, report_decide, verify_decide
+from ndf.core.converge import participants
+from ndf.domains.crossreview import criteria_decide, report_decide, verify, verify_decide
+from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.records import mvv
+from ndf.domains.records import mvv_decide as md
+
+from ._judge import holding
+from .test_crossreview_run import IMPACT, Fake, _run, _state
 
 NDF_BY = "ndf"
 
@@ -169,3 +181,157 @@ def test_issue_4363_document_line_is_added_only_for_a_possible_document_finding(
 def test_issue_4363_track_kinds_start_with_the_protect_kinds() -> None:
     assert criteria_decide.track_kinds()[: len(criteria_decide.protect_kinds())] == criteria_decide.protect_kinds()
     assert criteria_decide.track_kinds()[len(criteria_decide.protect_kinds()) :] == ("delivered", "approval")
+
+
+# --- 起動（verify.ask） ----------------------------------------------------------------
+
+
+class _AskRun:
+    """`verify.ask` が読む、1 回の起動の値の偽物。"""
+
+    def __init__(self, root: Path, snapshot: Optional[mvv.Snapshot] = None):
+        self.cfg = SimpleNamespace(worktree=root / "wt", settings=SimpleNamespace(focus=()))
+        self.snapshot, self.documents, self.root = snapshot, False, root
+        self.notes: list[tuple[int, str, str]] = []
+
+    def round_stem(self, round_no: int, suffix: str) -> Path:
+        return self.root / f"round{round_no}{suffix}"
+
+    def note(self, round_no: int, who: str, result: str, warning: Optional[str] = None) -> None:
+        self.notes.append((round_no, who, result))
+
+
+def _diff(root: Path) -> Path:
+    path = root / "in" / "round1.diff"
+    path.parent.mkdir()
+    path.write_text("diff", encoding="utf-8")
+    return path
+
+
+def _launcher(seen: list, verdicts: Optional[list], state: Any = agents.AgentState.DONE, denied: Optional[Path] = None):
+    """起動を `seen` に残し、回答 `verdicts`（None は JSON の無い本文）を claude の出力の形で書く偽の起動。"""
+
+    def launch(spec: agents.Launch) -> agents.AgentStatus:
+        seen.append(spec)
+        body: dict = {"result": "読んだ" if verdicts is None else json.dumps({"verdicts": verdicts}, ensure_ascii=False)}
+        if denied is not None:
+            body["permission_denials"] = [{"tool_name": "Read", "tool_input": {"file_path": str(denied)}}]
+        spec.paths.out.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        return agents.AgentStatus(spec.agent, state, 0, "", ())
+
+    return launch
+
+
+def _approved(root: Path) -> mvv.Snapshot:
+    body, shared = root / "v1-body.md", root / "principles-p.md"
+    body.write_text("# MVV の本文", encoding="utf-8")
+    shared.write_text("# 共通原則", encoding="utf-8")
+    return mvv.Snapshot(md.State.APPROVED, 1, "a" * 64, body, (), {}, "c" * 40, "b" * 64, shared)
+
+
+def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers(tmp_path: Path) -> None:
+    run, diff, seen = _AskRun(tmp_path), _diff(tmp_path), []
+    answers = verify.ask(run, 1, [_row()], diff, _launcher(seen, [holding(_row())]))
+    assert answers.verdicts["r1-1"].holds is True and answers.warnings == ()
+    [spec] = seen
+    argv = list(spec.argv)
+    assert spec.agent == participants.FIXER and spec.cwd == run.cfg.worktree
+    assert argv[argv.index("--tools") + 1] == participants.READ_TOOLS and "--restricted" in argv
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"] == [str(diff.parent)]
+    assert str(diff) in argv[-1] and spec.paths.out.name == "round1-verify.out"
+    assert run.notes == [(1, "verify", "判定役へ 1 件、有効な回答 1 件")]
+
+
+def test_issue_4363_ask_points_the_mvv_criterion_at_the_copies_in_the_input_directory(tmp_path: Path) -> None:
+    """MVV の本文と共通原則は、判定役が読める資料のディレクトリへ写してから基準 5 で指す。"""
+    snap, diff, seen = _approved(tmp_path), _diff(tmp_path), []
+    verify.ask(_AskRun(tmp_path, snap), 1, [_row()], diff, _launcher(seen, []))
+    prompt = seen[0].argv[-1]
+    for source in (snap.path, snap.principles_path):
+        copied = diff.parent / source.name
+        assert str(copied) in prompt and str(source) not in prompt
+        assert copied.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("how", ["failed", "denied", "no-json", "empty"])
+def test_issue_4363_ask_failure_gives_no_answer_and_one_warning(tmp_path: Path, how: str) -> None:
+    """起動の失敗・差分の読み取りの拒否・読めない回答・空の回答は、回答なしと注意 1 件にし、起動し直さない。"""
+    diff, seen = _diff(tmp_path), []
+    launch = {
+        "failed": _launcher(seen, [holding(_row())], state=agents.AgentState.FAILED),
+        "denied": _launcher(seen, [holding(_row())], denied=diff),
+        "no-json": _launcher(seen, None),
+        "empty": _launcher(seen, []),
+    }[how]
+    answers = verify.ask(_AskRun(tmp_path), 1, [_row()], diff, launch)
+    assert answers.verdicts == {} and len(answers.warnings) == 1 and len(seen) == 1
+    # 注意は PR の記録に載るので、手元の絶対パスを書かない
+    assert str(tmp_path) not in answers.warnings[0]
+
+
+def test_issue_4363_ask_does_not_launch_when_the_mvv_cannot_be_copied(tmp_path: Path) -> None:
+    snap = _approved(tmp_path)._replace(path=tmp_path / "無い.md")
+    seen: list = []
+    answers = verify.ask(_AskRun(tmp_path, snap), 1, [_row()], _diff(tmp_path), _launcher(seen, []))
+    assert answers.verdicts == {} and len(answers.warnings) == 1 and seen == []
+    assert str(tmp_path) not in answers.warnings[0]
+
+
+# --- 駆動への組み込み（ndf cross-review run） -------------------------------------------
+
+HEAVY = {"text": "保存が止まる", "severity": "major", "impact": IMPACT}
+
+
+def _broken(row: dict) -> dict:
+    return _answer(row["id"])
+
+
+def test_issue_4363_3_run_converges_without_the_fixer_when_the_major_does_not_hold(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    fake = Fake(tmp_path / "st", {"codex": [[HEAVY]], "kiro": [[]]})
+    fake.verdict = _broken
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert "claude" not in fake.calls and len(fake.judged) == 1
+    state = _state(fake.state_dir)
+    [row] = state["findings"]
+    assert (row["severity"], row["raised_severity"], row["check"]["lowered"]) == ("minor", "major", True)
+    assert state["rounds"][-1]["verdict"] == fin.CONVERGED
+
+
+def test_issue_4363_4_run_hands_the_major_that_holds_to_the_fixer(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    fake = Fake(tmp_path / "st", {"codex": [[HEAVY], []], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert fake.calls.count("claude") == 1 and len(fake.judged) == 1
+    [row] = _state(fake.state_dir)["findings"]
+    assert (row["severity"], row["outcome"], row["check"]["holds"], row["check"]["lowered"]) == ("major", fin.FIXED, True, False)
+
+
+def test_issue_4363_run_keeps_the_major_and_warns_when_the_judge_fails(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    fake = Fake(tmp_path / "st", {"codex": [[HEAVY], []], "kiro": [[], []]})
+    fake.judge_fails = True
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert fake.calls.count("claude") == 1 and len(fake.judged) == 1
+    [row] = _state(fake.state_dir)["findings"]
+    assert (row["severity"], "check" in row) == ("major", False)
+    assert [w for w in got["warnings"] if w.startswith("round 1: ") and "判定役" in w]
+
+
+@pytest.mark.parametrize("found", [{**HEAVY, "protect": ["secret"]}, {**HEAVY, "severity": "minor"}], ids=["protected-only", "light-only"])
+def test_issue_4363_run_does_not_launch_the_judge_without_a_finding_to_ask(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, found: dict
+) -> None:
+    fake = Fake(tmp_path / "st", {"codex": [[found], []], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert (code, got["status"]) == (0, "ok") and fake.judged == []
+
+
+def test_issue_4363_lowered_finding_is_not_counted_as_a_return(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """確認で下げた指摘は、そのラウンドの振動の判定のキーに数えない（後で保護の種類が付いて戻っても、往復と見ない）。"""
+    other, third = {**HEAVY, "text": "読み込みが止まる"}, {**HEAVY, "text": "削除が止まる"}
+    fake = Fake(tmp_path / "st", {"codex": [[HEAVY, other], [third], [{**HEAVY, "protect": ["user_data"]}]], "kiro": [[], [], []]})
+    fake.verdict = lambda row: _broken(row) if row["text"] == HEAVY["text"] else holding(row)
+    _run(capsys, monkeypatch, fake, wt)
+    rounds = _state(fake.state_dir)["rounds"]
+    assert [r["verdict"] for r in rounds] == ["changes_required"] * 3

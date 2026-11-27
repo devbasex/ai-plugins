@@ -13,7 +13,9 @@
    同じラウンドで 1 度だけ起動し直す。誰も読めなければ `precondition` で止める（#3893）。一部が読めなければ、その
    ラウンドを収束に数えず `incomplete_reviewers` で終える（#3941）。起動し直しても結果の無い席が claude 以外だけなら、その席を
    claude の読むだけの起動で埋め、2 者の指摘で判定する。埋めた席は以後のラウンドも座り続ける（`participants.fill_targets`。#3955）
-3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない
+3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない。このラウンドで
+   新しく出たか戻った critical・major があれば、読むだけの claude（判定役。`verify`）を 1 回起動して起きるかを確かめ、
+   成り立たないと分かった指摘を minor へ下げる（下げない指摘は `verify_decide`。#4363）
 4. 収束の妨げになる重さ（`criteria_decide.blocking`）の未解決の指摘と、まだ決めていない足すべき内容（`--findings`。#2444）が
    無ければ収束。必ず人の承認が要る操作に当たる指摘（`mvv` が `P`・`C` の番号）は、修正担当へ渡さず、収束も止めず、
    人の承認を待つ指摘として残す（#4076）。前々ラウンドの指摘が戻っていれば振動で止める
@@ -61,10 +63,12 @@ from ndf.domains.crossreview import (
     settings,
     store,
     threads,
+    verify,
+    verify_decide,
 )
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.fixer import Launcher
-from ndf.domains.crossreview.journal import FindingJournal
+from ndf.domains.crossreview.journal import Checked, FindingJournal
 from ndf.domains.crossreview.scope_decide import Filled
 from ndf.domains.crossreview.settings import DriveStopped, RunConfig
 from ndf.domains.records import jsonl, mvv
@@ -534,6 +538,24 @@ def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
     return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr)
 
 
+def _confirm_heavy(run: _Run, round_no: int, diff: Path, launch: Launcher, use_tracks: bool = False) -> Checked:
+    """直前の `enter` で新しく出たか戻った critical・major を判定役に確かめ、回答をジャーナルへ当てる（#4363）。渡す指摘が
+    無ければ起動しない。`use_tracks` は、回答の指摘の種類を使う処理があるラウンドで真にする。"""
+    heavy = [row for row in map(run.journal.rows.__getitem__, run.journal.fresh) if _heavy(row.get("severity"))]
+    asked = verify_decide.select(heavy, use_tracks)
+    if not asked:
+        return Checked()
+    answers = verify.ask(run, round_no, asked, diff, launch)
+    run.warnings += [f"round {round_no}: {warning}" for warning in answers.warnings]
+    return run.journal.apply_checks([str(row["id"]) for row in asked], answers.verdicts)
+
+
+def _heavy(severity: object) -> bool:
+    """尺度にある収束の妨げになる重さ（critical・major）か。重要度の無い引き継いだ行は偽。"""
+    known = criteria_decide.severity_of(severity)
+    return known is not None and criteria_decide.blocking(known)
+
+
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
     """ラウンドの判定（収束・振動・修正が要る）。"""
     if not open_ and not handed:
@@ -576,9 +598,11 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         # precondition の詳細は手元にだけ返るので、標準エラーのログを絶対パスで示す（PR 4461 の r3-1）
         local = [u.local for u in got.unread.values()]
         raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(local))
-    run.history.append(run.journal.enter(round_no, raised, run.mvv_items, run.mvv))
+    keys = run.journal.enter(round_no, raised, run.mvv_items, run.mvv)
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
+    # 確認で下げた指摘は、振動の判定のキーに数えない
+    run.history.append(keys - _confirm_heavy(run, round_no, prep.diff, launch).lowered)
     record = _round_record(run, round_no, prep)
     rounds.append(record)
     if unread:

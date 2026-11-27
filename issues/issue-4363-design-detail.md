@@ -54,7 +54,7 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/domains/crossreview/verify.py` | 新設 | 読むだけの claude を 1 回起動して回答を返す | `verify_decide`・`participants` | モジュール、`VerifyRun`（Protocol） | 新設: `ask` |
 | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 指摘の種類の一覧と、相手役への `protect` の指示を持つ | `contracts` | モジュール | 新設: `protect_kinds`・`track_kinds`・`protect_of`・`document_line` / 変更: `reviewer_block`・`downgraded` |
 | `plugins/ndf/src/ndf/domains/crossreview/journal.py` | 変更 | 行に `protect` と `check` を書き、下げる・戻すを決める | `criteria_decide`・`verify_decide` | `FindingJournal`、`Checked` | 新設: `apply_checks` / 変更: `enter`・`_raised`・`_raised_again`・`_revive` |
-| `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | 指摘を入れた直後に判定役を呼ぶ | `carry`・`reviewing`・`verify` | `_Run` | 新設: `_confirm` / 変更: `_round` |
+| `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | 指摘を入れた直後に判定役を呼ぶ | `carry`・`reviewing`・`verify` | `_Run` | 新設: `_confirm_heavy` / 変更: `_round` |
 | `plugins/ndf/src/ndf/domains/crossreview/report_decide.py` | 変更 | 下げた行の元の重要度と定型の理由を表に出す | `criteria_decide` | モジュール | 変更: `_finding_rows` |
 | `plugins/ndf/contracts/data/review-criteria.json` | 変更 | 判定役への指示の文と、指摘の種類の一覧を持つ | 無し | データ | — |
 | `plugins/ndf/contracts/data/writing-criteria.md` | 変更 | 文書の種類ごとの読み手の表を、小見出しで切り出せる形にする | 無し | データ | — |
@@ -233,7 +233,7 @@ plugins/ndf/
 | `read` | `verify_decide.py` | 新設 | `read(found: Optional[Sequence[Mapping[str, Any]]], ids: Sequence[str]) -> Answers` | 回答の並びを指摘ごとの `Verdict` にし、読めない分を注意にする |
 | `lowers` | `verify_decide.py` | 新設 | `lowers(row: Mapping[str, Any], verdict: Verdict) -> bool` | 成り立たないと答えた指摘を minor へ下げてよいかを返す |
 
-重要度とラウンドで指摘を絞るのは呼び手（下の `drive._confirm`）で、`select` は指摘の持つ印だけを見る。
+重要度とラウンドで指摘を絞るのは呼び手（下の `drive._confirm_heavy`）で、`select` は指摘の持つ印だけを見る。
 
 `mvv` か `protect` のどちらか一方でも持つ指摘は、回答がどうであっても下げない。それでも渡す場合があるのは、回答の指摘の種類（`tracks`）を後の処理が使うためである。その指摘だけのために判定役を起動すると費用に見合わないので、起動するのは次のどちらかの場合に限る。
 
@@ -297,7 +297,7 @@ plugins/ndf/
 - `ask`
   - 事前条件: `rows` は空でない。`run.input_dir`（この実行の資料のディレクトリ）に `diff` がある
   - 事後条件: 例外で駆動を止めない。起動し直さない
-  - 指示の組み立て: `ask` は次の順で、`verify_decide.instruction` の `criteria` に渡す行を作る。`rows` は `_confirm` が `verify_decide.select` から受け取った指摘で、`run.documents` は PR の差分に Markdown のファイルがあるかである。この手順のために、`VerifyRun` は `run.cfg`・`run.snapshot`・`run.documents` を持つ
+  - 指示の組み立て: `ask` は次の順で、`verify_decide.instruction` の `criteria` に渡す行を作る。`rows` は `_confirm_heavy` が `verify_decide.select` から受け取った指摘で、`run.documents` は PR の差分に Markdown のファイルがあるかである。この手順のために、`VerifyRun` は `run.cfg`・`run.snapshot`・`run.documents` を持つ
     1. 承認済みの MVV があれば（`criteria_decide.approved(run.snapshot)`）、MVV の本文（`path`）と共通原則（`principles_path`）を `run.input_dir` へ写す。元のファイルは利用者の状態の保存先にあり、判定役は読めないためである。読める場所は増やさない
     2. `criteria_decide.criteria_lines(run.cfg.settings.focus, snapshot)` を呼ぶ。`snapshot` は、承認済みの MVV があれば `run.snapshot._replace(path=<本文の写し>, principles_path=<共通原則の写し>)`、無ければ `run.snapshot` である
     3. 2 の戻り値の後に `criteria_decide.document_line(run.documents, rows)` の戻り値を加え、`instruction` に渡す
@@ -422,15 +422,15 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_confirm` | `drive.py` | 新設 | `_confirm(run: _Run, round_no: int, diff: Path, launch: Launcher, use_tracks: bool = False) -> Checked` | このラウンドの新しい重い指摘を選び、判定役を呼び、ジャーナルへ適用する |
-| `_round` | `drive.py` | 変更 | シグネチャは変えない | `enter` の直後に `_confirm` を呼ぶ。呼ぶ位置は、読めなかった相手役がいるかを確かめる処理よりも、収束の判定よりも前である |
+| `_confirm_heavy` | `drive.py` | 新設 | `_confirm_heavy(run: _Run, round_no: int, diff: Path, launch: Launcher, use_tracks: bool = False) -> Checked` | このラウンドの新しい重い指摘を選び、判定役を呼び、ジャーナルへ適用する |
+| `_round` | `drive.py` | 変更 | シグネチャは変えない | `enter` の直後に `_confirm_heavy` を呼ぶ。呼ぶ位置は、読めなかった相手役がいるかを確かめる処理よりも、収束の判定よりも前である |
 
-- `_confirm`
+- `_confirm_heavy`
   - 事前条件: 直前に `run.journal.enter` を呼んでいる
   - 事後条件: 渡す指摘が無ければ判定役を起動せず、空の `Checked` を返す
   - 副作用: `verify.ask` が claude を起動する。注意を `run.warnings` に足す
 
-`_confirm` は、`run.journal.fresh`（このラウンドで新しく出たか戻った行の番号）の行のうち、重要度が critical か major のものを `verify_decide.select` へ渡す。
+`_confirm_heavy` は、`run.journal.fresh`（このラウンドで新しく出たか戻った行の番号）の行のうち、重要度が critical か major のものを `verify_decide.select` へ渡す。
 
 `_round` は `enter` が返したキーの集合から `Checked.lowered` を除いたものを振動の判定の履歴（`run.history`）に足す。一部の相手役が読めなかったラウンドでも、読めた分は確かめる。
 
@@ -438,19 +438,19 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_confirm` | 回答が得られない | `verify.ask` の異常系 | `Answers.verdicts` が空 | 既定値で続ける | `verify.ask` の注意 | 今と同じ数の指摘が修正担当へ渡る |
+| `_confirm_heavy` | 回答が得られない | `verify.ask` の異常系 | `Answers.verdicts` が空 | 既定値で続ける | `verify.ask` の注意 | 今と同じ数の指摘が修正担当へ渡る |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `_confirm` | `verify.ask`・`verify_decide.select`・`journal.apply_checks` | `grep -rn "def confirm\b" --include=*.py src/ndf`（駆動の側に同名は無い） | 3 つを順に呼ぶだけの関数にする |
+| `_confirm_heavy` | `verify.ask`・`verify_decide.select`・`journal.apply_checks` | `grep -rn "def confirm\b" --include=*.py src/ndf`（駆動の側に同名は無い） | 3 つを順に呼ぶだけの関数にする |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_confirm`（`ndf cross-review run` を偽の起動で通す） | 成り立たない major だけのラウンドは、修正担当を起動せずに収束する。示せた major は修正担当へ渡る | `redline` の指摘だけ・MVV の指摘だけ・`protect` の指摘だけのラウンドは判定役を起動しない | 判定役が失敗したラウンドは今のとおり修正へ回り、警告が載る |
+| `_confirm_heavy`（`ndf cross-review run` を偽の起動で通す） | 成り立たない major だけのラウンドは、修正担当を起動せずに収束する。示せた major は修正担当へ渡る | `redline` の指摘だけ・MVV の指摘だけ・`protect` の指摘だけのラウンドは判定役を起動しない | 判定役が失敗したラウンドは今のとおり修正へ回り、警告が載る |
 
 偽の起動（テストの `Fake`）は、指示に判定役の system の文を持つ claude の起動を判定役として扱う。
 
@@ -483,3 +483,5 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
 理由: 判定役の理由の全文は、公開前の伏せ字で防げない未公開の情報を含みうる。公開した情報は取り消せない。
 
 2026-11-27 にこのスプリントのオーガナイザー（AI）が決めた。利用者の承認ではない。
+
+駆動の確認の関数は `drive._confirm_heavy` と名付けた。詳細設計の初めの名前は中継の `domains/relay/hub.py` の関数と同じで、`ndf check` の `copy-dup`（同じ名前の関数の件数）が基準を超えるためである。

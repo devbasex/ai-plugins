@@ -2,7 +2,7 @@
 
 [設計文書](./issue-2468-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。決定の理由・不変条件（I1〜I4）・出直しの扱いの表・消費量の数え方は設計文書を、受け入れ条件は [要求仕様](./issue-2468-requirements.md) を指し、ここでは写さない。
 
-[#4363 の詳細設計](./issue-4363-design-detail.md) と [#3780 の詳細設計](./issue-3780-design-detail.md) の後に実装する。使うのは `verify_decide`（`select`・`instruction`・`read`・`Verdict`・`Answers`）、`verify.ask`、`journal.apply_checks`・`sort`・`filed`、`drive._confirm`、`scope_decide.origin_record`、`round_scope.origin`、`changes.Range`・`new_in_pr`、`leftover_decide`（`normalized`・`proceeds`・`kinds_of`・`files_issue`・`result_fields`）、`leftover.file_issues` である。
+[#4363 の詳細設計](./issue-4363-design-detail.md) と [#3780 の詳細設計](./issue-3780-design-detail.md) の後に実装する。使うのは `verify_decide`（`select`・`instruction`・`read`・`Verdict`・`Answers`）、`verify.ask`、`journal.apply_checks`・`sort`・`filed`、`drive._confirm_heavy`、`scope_decide.origin_record`、`round_scope.origin`、`changes.Range`・`new_in_pr`、`leftover_decide`（`normalized`・`proceeds`・`kinds_of`・`files_issue`・`result_fields`）、`leftover.file_issues` である。
 
 | 語 | 意味 |
 | --- | --- |

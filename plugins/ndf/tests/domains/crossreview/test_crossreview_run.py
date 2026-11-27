@@ -21,6 +21,7 @@ from ndf.contracts import result
 from ndf.domains.crossreview import cli, drive, fixer, report_decide, settings, store
 from ndf.domains.crossreview import finish_decide as fin
 
+from ._judge import answer, holding, is_judge
 from ._repos import BRANCH, Repos, commit, run_cli, sh
 
 PR = 41
@@ -42,6 +43,9 @@ class Fake:
 
     相手役は毎ラウンド 1 回ずつ起動されるので、n はラウンドの番号 - 1 にあたる。台本の位置と修正の回数は偽物が
     数える（相手役は並べて起動されるので、数える値はロックで守る）。
+
+    判定役の起動（#4363）は `calls`・`launches` に数えず `judged` に残し、`_judge.answer` が `verdict` で回答する。
+    `judge_fails` が真なら失敗で終わる。
     """
 
     def __init__(self, state_dir: Path, script: dict[str, list[Any]], decide: Optional[Callable[[str], Optional[dict]]] = None):
@@ -52,6 +56,10 @@ class Fake:
         self.calls: list[str] = []
         # 起動の中身の並び（起動の引数を見るテストが使う。#4013）
         self.launches: list[agents.Launch] = []
+        # 判定役の起動の並びと、回答の作り方（#4363）
+        self.judged: list[agents.Launch] = []
+        self.verdict: Callable[[dict], Optional[dict]] = holding
+        self.judge_fails = False
         self._lock = threading.Lock()
         self._said: dict[str, int] = {}
         self._fixes = 0
@@ -77,7 +85,17 @@ class Fake:
         lines = self.script.get(agent, [])
         return lines[at] if at < len(lines) else []
 
+    def _judge(self, spec: agents.Launch) -> agents.AgentStatus:
+        with self._lock:
+            self.judged.append(spec)
+            self._keep_inputs(spec.argv[-1])
+        if self.judge_fails:
+            return agents.AgentStatus(spec.agent, agents.AgentState.FAILED, 1, "落ちた", ())
+        return answer(spec, self.verdict)
+
     def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
+        if is_judge(spec):
+            return self._judge(spec)
         self.calls.append(spec.agent)
         with self._lock:
             self.launches.append(spec)
@@ -449,7 +467,8 @@ class Recording(Fake):
         self.prompts: list[tuple[str, str, str]] = []
 
     def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
-        self.prompts.append((spec.agent, spec.paths.out.name, spec.argv[-1]))
+        if not is_judge(spec):
+            self.prompts.append((spec.agent, spec.paths.out.name, spec.argv[-1]))
         return super().__call__(spec)
 
 
@@ -470,10 +489,10 @@ def _entry(fid: str, by: str, text: str, outcome: str, round_no: int, reason: Op
 
 
 def _findings(state: dict) -> list[dict]:
-    """ジャーナルの行から発生の値（乱数。#4016）と、修正担当が直したと返した時刻（#3959）を外す。"""
+    """ジャーナルの行から発生の値（乱数。#4016）と、修正担当が直したと返した時刻（#3959）と、判定役の確認の結果（#4363）を外す。"""
     assert all(len(f["occurrence"]) == 12 for f in state["findings"])
     assert all(isinstance(f.get("fixed_at", ""), str) for f in state["findings"])
-    return [{k: v for k, v in f.items() if k not in ("occurrence", "fixed_at")} for f in state["findings"]]
+    return [{k: v for k, v in f.items() if k not in ("occurrence", "fixed_at", "check")} for f in state["findings"]]
 
 
 def _rounds_without_heads(state: dict) -> list[dict]:
@@ -503,6 +522,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert got["process"] == [
         {"run": "round 1 codex", "result": "指摘 1 件"},
         {"run": "round 1 kiro", "result": "指摘 2 件"},
+        {"run": "round 1 verify", "result": "判定役へ 2 件、有効な回答 2 件"},
         {"run": "round 1 claude", "result": f"指摘 2 件を扱った（新しい会話: {fixer.UNSAVED}）"},
         {"run": "round 2 codex", "result": "指摘 0 件"},
         {"run": "round 2 kiro", "result": "指摘 0 件"},
@@ -559,7 +579,7 @@ def test_run_lists_deferred_findings_in_the_next_review_prompt_and_does_not_reen
     )
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["summary"]) == (0, "2 ラウンドで converged。指摘 2 件（直した 1・見送った 1・未解決 0）")
-    assert got["process"][3] == {"run": "round 2 codex", "result": "指摘 1 件"}
+    assert got["process"][4] == {"run": "round 2 codex", "result": "指摘 1 件"}
     assert _findings(_state(fake.state_dir)) == [
         _entry("r1-1", "codex", "一つ目", fin.FIXED, 1),
         {**_entry("r1-2", "codex", "二つ目", fin.SKIPPED, 1, "別で直す"), "skipped_mvv": "absent:::"},
@@ -579,9 +599,11 @@ def test_run_reopens_a_fixed_finding_that_returns(wt: Path, tmp_path: Path, caps
     assert [p["run"] for p in got["process"]] == [
         "round 1 codex",
         "round 1 kiro",
+        "round 1 verify",
         "round 1 claude",
         "round 2 codex",
         "round 2 kiro",
+        "round 2 verify",
         "round 2 claude",
     ]
     state = _state(fake.state_dir)
