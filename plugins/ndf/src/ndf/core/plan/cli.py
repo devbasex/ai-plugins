@@ -31,7 +31,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -360,40 +359,13 @@ def _held(path: Path) -> str:
         return ""
 
 
-def _discard_checked(target: Path) -> None:
-    """前の確かめが書いた `checked.json` を消す。NDF の記録と読めないもの（リンクを含む）は消さずに止まる。"""
-    if not os.path.lexists(target):
-        return
-    held = None if target.is_symlink() else _held(target)
-    try:
-        found = json.loads(held) if held else None
-    except json.JSONDecodeError:
-        found = None
-    if not isinstance(found, dict) or found.get(files.RECORD_KIND_KEY) != CHECKED_KIND:
-        raise _UnitsStopped("refused", f"{target} は NDF が書いた記録と確かめられないので消さない（中身を調べて退けてから打ち直す）")
-    target.unlink()
-
-
-def _write_checked(target: Path, value: dict[str, Any]) -> None:
-    """一意の一時の名前へ書き終えてから、`target` の名前が空いているときだけ公開する（確かめの間に置かれたファイルは残す）。"""
-    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as out:
-            json.dump({files.RECORD_KIND_KEY: CHECKED_KIND, **value}, out, ensure_ascii=False)
-        os.link(tmp, target)
-    except FileExistsError:
-        raise _UnitsStopped("refused", f"{target} が確かめの間に置かれたので上書きしない（中身を調べて退けてから打ち直す）") from None
-    finally:
-        Path(tmp).unlink(missing_ok=True)
-
-
 def _record(path: Path, targets: _Targets) -> _Record:
     """保存先を読み、レビューの後に対象が変わっていないことを確かめる。前の `checked.json` は始めに消す。
 
     マージ先（`reviewed-base`）はここでは有無だけを見る。PR の今のマージ先と比べるのは、承認の判定
     （`ndf records mvv gate`）が受け持つ。
     """
-    _discard_checked(path / CHECKED_FILE)
+    files.discard_record(path / CHECKED_FILE, CHECKED_KIND)
     if targets.paths:
         raise _UnitsStopped("invalid", f"{RECORD_DIR_ENV} があるときは、単位のファイルを直に指さず課題で確かめる")
     held = {name: _held(path / name) for name in (units_files.REVIEWED_HEAD, REVIEWED_PR, REVIEWED_BASE)}
@@ -440,8 +412,9 @@ def _checked_units(a: argparse.Namespace, targets: _Targets, record: Optional[_R
     summary = f"{len(units)} 個の単位の確かめを通った（警告 {len(warnings)} 件）"
     outputs = None
     if record is not None:
-        _write_checked(
+        files.publish_record(
             record.path / CHECKED_FILE,
+            CHECKED_KIND,
             dict(
                 head=record.head,
                 branch=targets.inputs.branch,
@@ -502,6 +475,8 @@ def _cmd_units(a: argparse.Namespace) -> int:
         return result.emit(_units(a))
     except _UnitsStopped as exc:
         return result.emit(result.stopped(TOOL, exc.kind, str(exc)))
+    except files.RecordRefused as exc:
+        return result.emit(result.stopped(TOOL, "refused", str(exc)))
     except units_files.UnitsFileError as exc:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
     except github.GitHubError as exc:

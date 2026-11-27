@@ -213,15 +213,15 @@ def load(tree: Tree, path: str) -> ud.UnitFile:
 
 
 def _load(path: str, text: Optional[str]) -> ud.UnitFile:
-    return ud.parse(_document(path, text), path)
+    return ud.parse(_json_document(path, text), path)
 
 
 def documents(tree: Tree, paths: Sequence[str], listing: Mapping[str, Optional[tuple[str, str, str]]]) -> dict[str, dict[str, Any]]:
     """`load` と同じ検査を通した JSON をまとめて読む。型にしないので、書いたキーの有無が残る。`listing` は `tree.listing()`。"""
-    return {path: _document(path, text) for path, text in tree.read_all(paths, listing).items()}
+    return {path: _json_document(path, text) for path, text in tree.read_all(paths, listing).items()}
 
 
-def _document(path: str, text: Optional[str]) -> dict[str, Any]:
+def _json_document(path: str, text: Optional[str]) -> dict[str, Any]:
     if text is None:
         raise UnitsFileError(f"{path}: 単位のファイルが無い")
     try:

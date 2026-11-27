@@ -28,6 +28,8 @@ from ndf.progress.run_view import ACTOR, ANSWERED, STEP_EVENT, View, event_paylo
 RECORD_VERSION = 1
 # 保存先に `build` が書くファイル
 TARGET_FILE = "design-target.json"
+# `design-target.json` の記録の種別（種別の違うファイルは消さず、上書きもしない）
+TARGET_KIND = "design-target"
 # 回答の事象の payload が記録を持つキー
 TARGET_KEY = "design_target"
 # 承認ゲートの区分の語（コントラクト `workflow/progress.json` の gates の行。表に無ければ import の時点で `StopIteration`）
@@ -69,7 +71,11 @@ def build(record_dir: Path) -> dict[str, Any]:
         )
     except KeyError as exc:
         raise RecordUnreadable(f"{record_dir / plan_cli.CHECKED_FILE} にキー {exc} が無い") from None
-    plan_files.write_json(record_dir / TARGET_FILE, record)
+    try:
+        plan_files.discard_record(record_dir / TARGET_FILE, TARGET_KIND)
+        plan_files.publish_record(record_dir / TARGET_FILE, TARGET_KIND, record)
+    except plan_files.RecordRefused as exc:
+        raise RecordUnreadable(str(exc)) from None
     return record
 
 

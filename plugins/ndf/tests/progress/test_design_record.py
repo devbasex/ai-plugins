@@ -157,8 +157,30 @@ def test_build_joins_the_review_files_and_the_check_and_writes_the_record(checke
     assert record["targets"] == {"issues": [7], "handling": {"7": {"handling": "実装する", "into": None}}, "omitted": []}
     assert (record["limits"], record["criteria"]) == ({"target": 400, "max": 1000}, {"7": 2})
     assert [u["name"] for u in record["units"]] == ["U7"]
-    assert json.loads((record_dir / "design-target.json").read_text(encoding="utf-8")) == record
+    written = json.loads((record_dir / "design-target.json").read_text(encoding="utf-8"))
+    assert written == {"ndf_record": "design-target", **record}
     assert design_record.mismatches(record, uf.Tree(work), _context(7)) == []
+
+
+def test_build_replaces_the_record_it_wrote_before(checked):
+    record_dir, _ = checked
+
+    first = design_record.build(record_dir)
+
+    assert design_record.build(record_dir) == first
+
+
+@pytest.mark.parametrize("held", [b"{}", b"memo", b"\xff"])
+def test_build_keeps_a_target_file_that_ndf_did_not_write(checked, held):
+    record_dir, _ = checked
+    (record_dir / "design-target.json").write_bytes(held)
+    (record_dir / "design-target.tmp").write_text("keep", encoding="utf-8")
+
+    with pytest.raises(design_record.RecordUnreadable, match="design-target.json"):
+        design_record.build(record_dir)
+
+    assert (record_dir / "design-target.json").read_bytes() == held
+    assert (record_dir / "design-target.tmp").read_text(encoding="utf-8") == "keep"
 
 
 @pytest.mark.parametrize("name", ["reviewed-pr", "reviewed-head", "reviewed-base", "checked.json"])

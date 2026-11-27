@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -28,3 +29,33 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, path)
+
+
+class RecordRefused(Exception):
+    """記録の保存先に、NDF の記録と確かめられないファイルがある。"""
+
+
+def discard_record(target: Path, kind: str) -> None:
+    """前に書いた `target` を消す。種別 `kind` の記録と読めないもの（リンクを含む）は消さずに `RecordRefused`。"""
+    if not os.path.lexists(target):
+        return
+    try:
+        found = None if target.is_symlink() else read_json(target)
+    except UnicodeDecodeError:
+        found = None
+    if found is None or found.get(RECORD_KIND_KEY) != kind:
+        raise RecordRefused(f"{target} は NDF が書いた記録と確かめられないので消さない（中身を調べて退けてから打ち直す）")
+    target.unlink()
+
+
+def publish_record(target: Path, kind: str, value: dict[str, Any]) -> None:
+    """種別 `kind` の記録を、一意の一時の名前へ書き終えてから、`target` の名前が空いているときだけ公開する。"""
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            json.dump({RECORD_KIND_KEY: kind, **value}, out, ensure_ascii=False)
+        os.link(tmp, target)
+    except FileExistsError:
+        raise RecordRefused(f"{target} が書く前に置かれたので上書きしない（中身を調べて退けてから打ち直す）") from None
+    finally:
+        Path(tmp).unlink(missing_ok=True)

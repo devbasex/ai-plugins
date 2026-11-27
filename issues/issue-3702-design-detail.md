@@ -272,9 +272,9 @@ contracts/
 | --- | --- | --- |
 | `reviewed-pr`・`reviewed-head`・`reviewed-base` | `ndf cross-review run`（テンプレート `design-pr-review`） | `<所有者>/<リポジトリ>#<番号>`、SHA、ブランチ名 |
 | `checked.json` | `ndf plan units check` | 上の「コマンド」 |
-| `design-target.json` | `build` | `{"version": 1, "review": {"repo","pr","head","base"}, "sprint_branch": "<ブランチ>", "targets": {"issues","handling","omitted"}, "limits": {"target","max"}, "criteria": {"<課題>": 数}, "units": [...]}` |
+| `design-target.json` | `build` | `{"ndf_record": "design-target", "version": 1, "review": {"repo","pr","head","base"}, "sprint_branch": "<ブランチ>", "targets": {"issues","handling","omitted"}, "limits": {"target","max"}, "criteria": {"<課題>": 数}, "units": [...]}` |
 
-承認の回答のイベント（`answered`）の payload に、`design-target.json` の中身をキー `design_target` で持つ。回答の SSOT はイベントで、ファイルは資料を作るための作業用である。
+承認の回答のイベント（`answered`）の payload に、`design-target.json` の中身をキー `design_target` で持つ。回答の SSOT はイベントで、ファイルは資料を作るための作業用である。ファイルの `ndf_record` は記録の種別で、`build` は前の `design-target.json` をこの種別のものだけ消し、名前が空いているときだけ公開する（`checked.json` と同じ）。ほかのファイルは変えずに `RecordUnreadable` にする。
 
 ### 関数の仕様
 
