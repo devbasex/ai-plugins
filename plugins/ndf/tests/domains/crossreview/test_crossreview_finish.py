@@ -291,7 +291,7 @@ def test_run_removes_the_previous_reviewed_pr_and_writes_it_only_with_the_head(
 ) -> None:
     """前の起動のファイルは消し、HEAD を書かない起動は PR も書かない。引数が無ければ結果は今のまま。"""
     pr_out = tmp_path / "reviewed-pr"
-    previous_output(tmp_path / "state", pr_out, "o/r#1\n")
+    previous_output(pr_out, "o/r#1\n")
     code, got, made = _in_process_run(
         monkeypatch, capsys, tmp_path, "--reviewed-pr-out", str(pr_out), "--reviewed-out", str(tmp_path / "head"), head=None
     )
@@ -307,7 +307,7 @@ def test_run_refuses_a_malformed_repository_and_keeps_the_previous_file(
     monkeypatch.setenv("GH_REPO", "before/repo")
     pr_out = tmp_path / "reviewed-pr"
     (tmp_path / "state").mkdir()
-    previous_output(tmp_path / "state", pr_out, "o/r#1\n")
+    previous_output(pr_out, "o/r#1\n")
     code, got, made = _in_process_run(monkeypatch, capsys, tmp_path, "--repo", slug, "--reviewed-pr-out", str(pr_out))
     assert got["cause"]["kind"] == "invalid" and not made and pr_out.read_text(encoding="utf-8") == "o/r#1\n"
     assert os.environ["GH_REPO"] == "before/repo"

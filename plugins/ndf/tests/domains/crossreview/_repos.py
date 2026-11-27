@@ -71,9 +71,8 @@ def run_cli(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, dict]:
     return code, last_result(capsys.readouterr().out)
 
 
-def previous_output(state_dir: Path, path: Path, text: str) -> None:
-    """前の起動が `path` へ `text` を書いた状態を作る（出力と、状態の保存先の書いた出力の記録。PR 4638 の C4）。"""
-    from ndf.domains.crossreview import cli, store
+def previous_output(path: Path, text: str) -> None:
+    """前の起動が `path` へ `text` を書いた状態を作る（出力と、その隣の書いた出力の記録。PR 4638 の C4・r1-1）。"""
+    from ndf.domains.crossreview import outputs
 
-    path.write_text(text, encoding="utf-8")
-    store.write_object(state_dir / cli.WRITTEN_FILE, {str(path.resolve()): text})
+    outputs.write_output(path, text)

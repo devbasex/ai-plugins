@@ -397,12 +397,20 @@ contracts/
 | --- | --- | --- | --- | --- |
 | `_sync` | `domains/crossreview/drive.py` | 変更 | 変えない | `RunConfig.follow_base` が真なら、`--base` でなく PR の今のマージ先を読んで取得し、比較元にする |
 | `_reusable` | 同上 | 変更 | 変えない | 起動の引数によらず、前のラウンドに記録した比較元のブランチ（`mvv.mvv_branch`）が今回と違えば偽 |
-| `cmd_run` | `domains/crossreview/cli.py` | 変更 | 変えない | `--reviewed-base-out` を受け、始めに消し、`--reviewed-out` を書くときに最後のラウンドの比較元のブランチを書く。`--reviewed-out`・`--reviewed-pr-out` と同じ保存先か、入力の `--findings` と同じファイルなら、消す前に `invalid` で止まる。3 つの出力先は、状態の保存先の記録（`written-outputs.json`）にある前の起動の出力と中身が一致するときだけ消す。記録に無い既存のファイルは利用者のデータかもしれないので消さず、相手役を起動する前に `precondition` で止まる。`--repo` の形はこれらを消す前に確かめる |
+| `cmd_run` | `domains/crossreview/cli.py` | 変更 | 変えない | `--reviewed-base-out` を受け、始めに消し、`--reviewed-out` を書くときに最後のラウンドの比較元のブランチを書く。`--reviewed-out`・`--reviewed-pr-out` と同じ保存先か、入力の `--findings` と同じファイルなら、消す前に `invalid` で止まる。3 つの出力先の既存のファイルは、NDF が書いたままだと確かめられたときだけ消す（下の「出力先の既存のファイル」）。`--repo` の形はこれらを消す前に確かめる |
 | `_merge_pull` | `ci_cli.py` | 変更 | 変えない | `--verify-merged` があり、マージ済みの PR の head か base が承認の値と違えば `refused` |
 | `_watch` | 同上 | 変更 | 変えない | `--head <SHA>` があれば、待ちの開始時と必須チェックが通った時点に PR の HEAD を読み、指定した SHA と違えば `approval_stale` |
 | `pulls` | `adapters/github.py` | 変更 | `(numbers, spare=(), *, rest_fallback: bool = True)` | 偽なら REST へ読み替えない |
 
 - `RunConfig`（`settings.py`）に `follow_base: bool = False` を足し、`--reviewed-base-out` を渡した起動だけ真にする
+- 出力先の既存のファイル（`outputs.clear_stale`）は、利用者のデータを消さないために、NDF が書いたままだと確かめられたときだけ消す
+  - 確かめには、出力を書いたときに隣へ残す記録（`.<名前>.ndf-output.json`）を使う。記録には中身の hash と、ファイルの同一性（デバイス・inode・大きさ・更新時刻）を残す
+  - 記録を状態の保存先でなく出力の隣に置くのは、通常のレビューと差分のレビューが、違う状態の保存先から同じ `reviewed-head` を書くためである
+  - 消すときは記録も消す。利用者が同じパスへ同じ中身で作り直したファイルは、同一性が違うので消さない
+  - 空のファイルは失う中身が無いので、消さずに残し、レビューの後に上書きする。呼び手が出力先を先に作っておく使い方で止まらない
+  - ほかの既存のファイルは消さず、相手役を起動する前に `precondition` で止まる。この停止は 3 つの引数の説明（`--help`・スキーマ・`commands.md`）に書く
+  - 実装のテンプレートの差分のレビュー（`review-delta`）は、通常のレビューが書いた `reviewed-head` を起点の控え（`delta-base`）へ写した後に消してから起動する。記録の無い前のバージョンが書いた `reviewed-head` からも再開できる
+- `--reviewed-base-out` を渡した起動も、`--reviewed-pr-out` と同じく読んだ PR を確かめる（`RunConfig.check_pr` を真にする）。比較元は、レビューした HEAD がその PR の HEAD と確かめられたときだけ書く。確かめずに書くと、別の PR のマージ先を、レビューした HEAD と組にして承認へ渡してしまう
 - ラウンドの比較元のブランチは、ラウンドの記録の `mvv.mvv_branch` で照らす。別のキーは足さない。`_sync` は、MVV を読むブランチを決めた時点でこの値を書く
   - 比較元がブランチなら、その名前を `mvv.mvv_branch` に記録する。`follow_base` の起動では、PR の今のマージ先がこのブランチになる
   - `follow_base` が偽で `--base` がコミットなら、比較元のブランチは無い。この場合は、MVV を読んだ PR のマージ先のブランチを、ラウンドの `mvv.mvv_branch` と、詳細レビューを通ったセクションの `reviewed_base_branch` の両方に記録する。空にもコミットの SHA にもしない

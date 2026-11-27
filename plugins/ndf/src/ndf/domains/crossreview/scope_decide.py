@@ -48,7 +48,8 @@ _NO_MVV = mvv_decide.identity_of(mvv_decide.State.ABSENT)
 # 承認済みの MVV の、MVV を見分ける値の始まり
 _APPROVED = f"{mvv_decide.State.APPROVED}:"
 # Markdown の解析（`adapters/markdown.py` と同じ CommonMark。判断のモジュールは adapters を読めないので markdown-it-py を直接使う）
-_MARKDOWN = MarkdownIt("commonmark")
+_MARKDOWN = MarkdownIt()  # 既定の設定が CommonMark
+_HEADING_TAGS = frozenset(f"h{n}" for n in range(1, 7))
 
 
 class Scope(NamedTuple):
@@ -59,7 +60,7 @@ class Scope(NamedTuple):
     unreviewed: tuple[str, ...]
 
 
-def _split(text: str) -> list[str]:
+def _text_lines(text: str) -> list[str]:
     """markdown-it と同じ数え方の行（改行は `\\r\\n`・`\\r`・`\\n`。末尾の改行の後は行にしない）。"""
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = normalized.split("\n")
@@ -79,13 +80,14 @@ def _lines(text: str) -> Iterator[tuple[str, Optional[tuple[int, str]]]]:
     と同じ CommonMark の解析）で決め、ATX と Setext の見出しを、文書の最上位にあるものだけ数える（PR 4638 の r1-9）。コードブロック
     （囲み・インデント）・引用・リストの中と、先頭の YAML front matter の中は見出しでない。レビューの対象のセクション
     （`sections_of`）と、起点どうしの本文の比較（`_bodies`）は、この判定だけでセクションを分ける（PR 4638 の r6-3）。"""
-    lines = _split(text)
+    lines = _text_lines(text)
     skip = _front_matter_end(lines)
     # front matter は空行にして解析し、行の位置を変えない（CommonMark は front matter を `---` の区切り線と見出しに読む）
     tokens = _MARKDOWN.parse("\n".join([""] * skip + list(lines[skip:])))
     starts: dict[int, tuple[int, str]] = {}
     for i, token in enumerate(tokens):
-        if token.type == "heading_open" and token.level == 0 and token.map is not None:
+        # 見出しの開きのトークン（`h1`〜`h6` の開き）
+        if token.nesting == 1 and token.tag in _HEADING_TAGS and token.level == 0 and token.map is not None:
             title = " ".join(tokens[i + 1].content.split())
             if title:
                 starts[token.map[0]] = (int(token.tag[1:]), title)

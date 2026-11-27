@@ -736,7 +736,9 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
     read = reviewed_pr.read_by_all_this_run(run.data, rounds)
     # 注意を足すことがあるので、`run.warnings` を写す前に確かめる
     pr = reviewed_pr.confirmed(run, read)
-    base = run.mvv_branch if read is not None else None
+    # PR の今のマージ先を比較元にした起動は、レビューした HEAD がそのマージ先を読んだ PR の head と確かめられたときだけ比較元を
+    # 出す（別の PR のマージ先を HEAD と組にして承認へ渡さない。PR 4638 の r1-7）
+    base = run.mvv_branch if read is not None and (pr is not None or not run.cfg.follow_base) else None
     return Outcome(review, path, tuple(run.warnings), tuple(run.process), read, reused, results, failed, pr, base)
 
 

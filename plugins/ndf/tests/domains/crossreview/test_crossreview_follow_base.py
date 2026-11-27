@@ -5,22 +5,30 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
-from ndf.domains.crossreview import reviewed_pr
+from ndf.domains.crossreview import reviewed_pr, threads
 
-from ._repos import Repos, commit, sh
-from .test_crossreview_run import Fake, Recording, _push_to_pr, _run, _state
+from ._repos import BRANCH, Repos, commit, sh
+from .test_crossreview_run import PR, Fake, Recording, _push_to_pr, _run, _state
 
 SPRINT = "sprint/y"
 
 
 @pytest.fixture(autouse=True)
-def _fetches_from_the_pr_repo(monkeypatch: pytest.MonkeyPatch, hub) -> None:
-    """テストのリモートはローカルのパスなので、取得元を PR のベースリポジトリと同じと読ませる。"""
+def _fetches_from_the_pr_repo(monkeypatch: pytest.MonkeyPatch, hub, repos: Repos) -> None:
+    """テストのリモートはローカルのパスなので、取得元を PR のベースリポジトリと同じと読ませる。`--reviewed-base-out` の起動は
+    PR の確認を求める（PR 4638 の r1-7）ので、読んだ PR の head は PR のブランチの origin の先頭にする。"""
     monkeypatch.setattr(reviewed_pr, "fetch_repo", lambda g, remote: hub.port.repo_name)
+    port = hub.port
+    monkeypatch.setattr(
+        port,
+        "read_pr",
+        lambda: threads.ReadPr(f"{port.repo_name}#{PR}", BRANCH, sh(repos.origin, "rev-parse", BRANCH).strip(), port.repo_name),
+    )
 
 
 def _sprint_branch(repos: Repos) -> None:
@@ -184,3 +192,40 @@ def test_findings_input_given_as_an_output_is_invalid_and_kept(wt: Path, tmp_pat
     given.write_text('{"items": []}', encoding="utf-8")
     code, got = _run(capsys, monkeypatch, fake, wt, "--findings", str(given), "--reviewed-out", str(given))
     assert (got["cause"]["kind"], fake.calls, given.is_file()) == ("invalid", [], True)
+
+
+def test_pr_4638_r1_4_recreated_output_is_not_taken_for_the_previous_one(tmp_path: Path) -> None:
+    """PR 4638 の r1-4: 消すと書いた出力の記録も消え、同じパスへ同じ中身で作り直したファイルは NDF の出力とみなさない。"""
+    from ndf.domains.crossreview import outputs
+
+    out = tmp_path / "head"
+    outputs.write_output(out, "a" * 40 + "\n")
+    outputs.clear_stale(out)
+    assert not out.exists() and not outputs.owner_record(out).exists()
+    outputs.write_output(out, "a" * 40 + "\n")
+    out.unlink()
+    out.write_text("a" * 40 + "\n", encoding="utf-8")
+    # 時刻の刻みの粗いファイルシステムでも、後から作り直したファイルとして更新時刻を変える
+    os.utime(out, ns=(1, 1))
+    with pytest.raises(outputs.Unowned):
+        outputs.clear_stale(out)
+    assert out.read_text(encoding="utf-8") == "a" * 40 + "\n"
+
+
+def test_pr_4638_r1_11_empty_output_made_in_advance_is_kept_and_written(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 4638 の r1-11: 呼び手が先に作った空の出力先は消さずに使い、レビューした HEAD を書く。"""
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    out = tmp_path / "h"
+    out.touch()
+    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(out))
+    assert (code, got["status"]) == (0, "ok") and len(out.read_text(encoding="utf-8").strip()) == 40
+
+
+def test_pr_4638_r1_7_base_out_checks_the_pr_head(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """PR 4638 の r1-7: `--reviewed-pr-out` が無くても、`--reviewed-base-out` の起動は PR の head がレビューするブランチの先頭と
+    違えば、相手役を起動する前に precondition で止まり、比較元を書かない。"""
+    port = hub.port
+    monkeypatch.setattr(port, "read_pr", lambda: threads.ReadPr(f"{port.repo_name}#{PR}", "other/branch", "0" * 40, port.repo_name))
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(tmp_path / "b"))
+    assert (got["cause"]["kind"], fake.calls, (tmp_path / "b").exists()) == ("precondition", [], False)

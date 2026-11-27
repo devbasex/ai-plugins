@@ -179,7 +179,7 @@ def test_reviewed_out_is_the_head_the_last_round_read_not_the_fix(repos: Repos, 
     before = sh(wt, "rev-parse", "HEAD").strip()
     out = tmp_path / "reviewed-head"
     (tmp_path / "st").mkdir()
-    previous_output(tmp_path / "st", out, "0" * 40 + "\n")
+    previous_output(out, "0" * 40 + "\n")
     fake = Fake(tmp_path / "st", {"codex": [["一つ目"]], "kiro": [[]]})
     _run(capsys, monkeypatch, fake, wt, "--max-rounds", "1", "--reviewed-out", str(out))
     after = sh(wt, "rev-parse", "HEAD").strip()
@@ -690,8 +690,7 @@ def test_reviewed_out_skips_a_round_some_reviewers_could_not_read(wt: Path, tmp_
     rounds = _state(fake.state_dir)["rounds"]
     assert rounds[-1]["verdict"] == fin.INCOMPLETE_REVIEWERS
     assert out.read_text().strip() == rounds[0]["head"] != rounds[1]["head"]
-    (tmp_path / "st2").mkdir()
-    previous_output(tmp_path / "st2", out, out.read_text(encoding="utf-8"))
+    # 状態の保存先が違う起動（差分のレビュー）も、前の起動が書いた出力を片付ける（PR 4638 の r1-1）
     again = Fake(tmp_path / "st2", {"codex": [FAIL, FAIL], "kiro": [[]], "claude": [FAIL]})
     _run(capsys, monkeypatch, again, wt, "--reviewed-out", str(out))
     assert not out.exists()

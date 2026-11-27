@@ -43,6 +43,7 @@ from ndf.domains.crossreview import (
     fixer,
     fixgate_decide,
     journal,
+    outputs,
     push,
     repo,
     report_decide,
@@ -527,7 +528,8 @@ def _run_config(args: argparse.Namespace) -> RunConfig:
         main=got.policy.main,
         settings=got.settings,
         unit=got.unit,
-        check_pr=args.reviewed_pr_out is not None,
+        # 比較元を書く起動も、マージ先を読んだ PR がレビューした HEAD の PR だと確かめる（PR 4638 の r1-7）
+        check_pr=args.reviewed_pr_out is not None or args.reviewed_base_out is not None,
         follow_base=args.reviewed_base_out is not None,
     )
 
@@ -638,7 +640,7 @@ def _ready(args: argparse.Namespace) -> tuple[RunConfig, Optional[str]] | int:
 
 
 def _begin_run(args: argparse.Namespace) -> Optional[int]:
-    """前の起動が書いた `--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out` を消し、`--repo` の対象のリポジトリを
+    """前の起動が書いた `--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out` を消し（`outputs.clear_stale`）、`--repo` の対象のリポジトリを
     子の `gh` へ渡す。`--repo` の形が違うか、`--reviewed-base-out` を `--reviewed-out` なしで渡すか、出力先が重なるか、出力先に
     書けなければ、止まった結果を出した終了コードを返す（書かれないと分かっている出力のために、レビューの token と時間を使わない。#3702）。"""
     if args.reviewed_base_out and not args.reviewed_out:
@@ -655,13 +657,14 @@ def _begin_run(args: argparse.Namespace) -> Optional[int]:
         slug = repo.resolve_target_repo(args.repo, None, Path.cwd()).slug if args.repo is not None else None
     except repo.RepoUnresolved as exc:
         return _stop("invalid", str(exc))
-    written = _outputs_written(args)
     for stale in _output_paths(args):
-        if Path(stale).exists() and written.get(str(Path(stale).resolve())) != _held_output_text(Path(stale)):
-            # 前の起動が書いたと確かめられない既存のファイルは利用者のデータかもしれないので消さない（PR 4638 の C4）
-            return _stop("precondition", f"出力先 {stale} に、前の起動が書いた出力と確かめられないファイルがある。別のパスを渡す")
         try:
-            _clear_output(Path(stale))
+            outputs.clear_stale(Path(stale))
+        except outputs.Unowned:
+            # NDF が書いたと確かめられない既存のファイルは利用者のデータかもしれないので消さない（PR 4638 の C4）
+            return _stop(
+                "precondition", f"出力先 {stale} に、NDF が書いた出力と確かめられないファイルがある。別のパスを渡すか、そのファイルを消す"
+            )
         except OSError as exc:
             # 出力先の不備は始めに分かるので、相手役を起動する前に止める（レビューの後に書けないと分かっても遅い。#3702）
             return _stop("precondition", f"出力先 {stale} に書けない: {exc}")
@@ -670,42 +673,12 @@ def _begin_run(args: argparse.Namespace) -> Optional[int]:
     return None
 
 
-# 前の起動が書いた出力の記録（状態の保存先の中。片付けてよい出力かを確かめる。PR 4638 の C4）
-WRITTEN_FILE = "written-outputs.json"
-
-
 def _output_paths(args: argparse.Namespace) -> list[str]:
     return [p for p in (args.reviewed_out, args.reviewed_pr_out, args.reviewed_base_out) if p]
 
 
 def _same_file(given: str, others: Sequence[str]) -> bool:
     return Path(given).resolve() in {Path(o).resolve() for o in others}
-
-
-def _held_output_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない既存のファイルは前の出力と確かめられないとして消さない
-        return None
-
-
-def _outputs_written(args: argparse.Namespace) -> dict[str, str]:
-    """この状態の保存先で前の起動が書いた出力（解決したパス → 中身）。読めなければ空。"""
-    path = Path(args.state_dir) / WRITTEN_FILE if args.state_dir else None
-    if path is None or not path.is_file():
-        return {}
-    try:
-        held = store.read_object(path)
-    except store.StateBroken:
-        return {}
-    return {k: v for k, v in held.items() if isinstance(v, str)}
-
-
-def _write_output(args: argparse.Namespace, path: Path, text: str) -> None:
-    """出力を書き、書いた中身を状態の保存先へ残す（次の起動が消してよい出力かを確かめる。PR 4638 の C4）。"""
-    path.write_text(text, encoding="utf-8")
-    if args.state_dir:
-        store.write_object(Path(args.state_dir) / WRITTEN_FILE, {**_outputs_written(args), str(path.resolve()): text})
 
 
 def _shared_output(args: argparse.Namespace) -> Optional[str]:
@@ -721,29 +694,21 @@ def _shared_output(args: argparse.Namespace) -> Optional[str]:
     return None
 
 
-def _clear_output(path: Path) -> None:
-    """前の起動が書いた出力を消し、同じ場所へファイルを作って消せるかを確かめる（親が無い・書けない出力先は `OSError`）。
-    本番の値はレビューの後に書くので、確かめた後は何も残さない。"""
-    path.unlink(missing_ok=True)
-    path.open("x", encoding="utf-8").close()
-    path.unlink()
-
-
 def _write_reviewed(args: argparse.Namespace, got: drive.Outcome) -> Optional[int]:
     """レビューした HEAD があれば `--reviewed-out` へ書く。その HEAD を読んだラウンドの比較元のブランチを `--reviewed-base-out`
     へ、その HEAD を head に持つと確かめた PR を読めていれば `--reviewed-pr-out` へ、続けて書く。書けなければ、止まった結果を
     出した終了コードを返す。"""
     if not args.reviewed_out or got.reviewed_head is None:
         return None
-    _write_output(args, Path(args.reviewed_out), got.reviewed_head + "\n")
+    outputs.write_output(Path(args.reviewed_out), got.reviewed_head + "\n")
     if args.reviewed_base_out and got.reviewed_base is not None:
         try:
-            _write_output(args, Path(args.reviewed_base_out), got.reviewed_base + "\n")
+            outputs.write_output(Path(args.reviewed_base_out), got.reviewed_base + "\n")
         except OSError as exc:
             return _stop("precondition", f"レビューの比較元のブランチを {args.reviewed_base_out} へ書けない: {exc}")
     if args.reviewed_pr_out and got.reviewed_pr is not None:
         try:
-            _write_output(args, Path(args.reviewed_pr_out), f"{got.reviewed_pr}\n")
+            outputs.write_output(Path(args.reviewed_pr_out), f"{got.reviewed_pr}\n")
         except OSError as exc:
             return _stop("precondition", f"読んだ PR を {args.reviewed_pr_out} へ書けない: {exc}")
     return None
@@ -754,7 +719,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     `--reviewed-out` を渡せば、今回の起動で相手役の全員が読めた最後のラウンドの HEAD をそのファイルへ書く（#3879。一部が
     読めなかったラウンドの HEAD は書かない。PR 3944 の r2-3）。最後のラウンドの
-    修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。前の起動が書いた出力は始めに消す（記録に無い既存のファイルは消さずに止まる）ので、
+    修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。前の起動が書いた出力は始めに消す（空のファイルは消さずに使い、NDF が書いたと確かめられない中身のあるファイルは消さずに止まる。`outputs.clear_stale`）ので、
     書けなかった起動の後に前の起動の値が残らない。
 
     単位の経路の引数（#4369）: `--repo` は保存済みの状態と作業場所のリモートより優先する対象のリポジトリで、子の `gh` にも
@@ -765,7 +730,8 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     `--reviewed-base-out`（#3702）は `--reviewed-out` を書くときに、そのラウンドの比較元のブランチを書く（始めに消す）。この引数を
     渡した起動は、`--base` でなく PR の今のマージ先を取得して比較元にし、マージ先が前のラウンドと違えば新しいマージ先との
-    全差分を読ませる。マージ先を読めなければ、相手役を起動せずに `precondition` で止まる。
+    全差分を読ませる。マージ先を読めなければ、相手役を起動せずに `precondition` で止まる。`--reviewed-pr-out` と同じく読んだ PR を
+    確かめ、レビューした HEAD がその PR の HEAD と確かめられたときだけ書く（PR 4638 の r1-7）。
     """
     refused = _begin_run(args)
     if refused is not None:
@@ -800,11 +766,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     items, warnings = _report(cfg, got, hub_once)
     metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
     return _emit_verdict(verdict, got.mvv, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
-
-
-def _write_reviewed_pr(path: Path, ident: str) -> None:
-    """レビューが読んだ PR（`<所有者>/<リポジトリ>#<番号>`）を書く。"""
-    path.write_text(f"{ident}\n", encoding="utf-8")
 
 
 def _report(cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -866,6 +827,14 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
+# 出力の 3 つの引数に共通する、既存のファイルの扱い（`outputs.clear_stale`。PR 4638 の C4・r1-11）
+_OUTPUT_RULE = (
+    "前の起動が書いた出力は始めに消す（書けなかった起動の後に前の値を残さない）。空のファイルは消さずに使う。"
+    "NDF が書いたと確かめられない中身のあるファイル（記録の無い・書き換えた・作り直したもの）があれば、消さずにレビューを始めずに "
+    "precondition で停止する"
+)
+
+
 def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r = add("run")
     r.add_argument("--pr", type=int, required=True)
@@ -877,21 +846,26 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--reviewer", action="append")
     r.add_argument("--max-rounds", type=int, default=int(limits.value(MAX_ROUNDS, "count")))
     r.add_argument("--findings")
-    r.add_argument("--reviewed-out")
+    r.add_argument(
+        "--reviewed-out",
+        help="相手役の全員が読めた最後のラウンドの HEAD を指定ファイルに書く。" + _OUTPUT_RULE,
+    )
     r.add_argument("--repo", help="対象のリポジトリ（<所有者>/<リポジトリ>）。保存済みの状態と作業場所のリモートより優先する")
     r.add_argument("--stop-on-hold", action="store_true", help="人の判断を待つ指摘が残れば incomplete で終える")
     r.add_argument(
         "--reviewed-pr-out",
         help="--reviewed-out と併用する。対象 PR の HEAD（起動時の head か、同じ起動でその PR のブランチへ push した修正コミット）を"
         "レビューしたと確認できた場合、指定ファイルに <所有者>/<リポジトリ>#<番号> を書く。指定した実行は、起動時に対象 PR を確認できなければ"
-        "レビューを始めずに precondition で停止し、同じ PR を読んだ記録だけを差分の起点や収束結果の再利用に使う",
+        "レビューを始めずに precondition で停止し、同じ PR を読んだ記録だけを差分の起点や収束結果の再利用に使う。" + _OUTPUT_RULE,
     )
     r.add_argument(
         "--reviewed-base-out",
         help="--reviewed-out と併用する。--base でなく PR の今のマージ先を比較元にし、レビューした HEAD のラウンドの比較元の"
         "ブランチ名を指定ファイルに書く。マージ先が前のラウンドと違えば、新しいマージ先との全差分を読ませる。"
+        "--reviewed-pr-out と同じく、起動時に対象 PR の head がレビューするブランチの先頭と確認できなければ precondition で停止し、"
+        "レビューした HEAD がその PR の HEAD と確認できたときだけ書く。"
         "--reviewed-out なしで渡すか、--reviewed-out・--reviewed-pr-out と同じ保存先を渡すと、レビューを始めずに invalid で停止する。マージ先を取得するリモートが PR のベースリポジトリと"
-        "一致すると確かめられなければ、レビューを始めずに precondition で停止する",
+        "一致すると確かめられなければ、レビューを始めずに precondition で停止する。" + _OUTPUT_RULE,
     )
 
 
