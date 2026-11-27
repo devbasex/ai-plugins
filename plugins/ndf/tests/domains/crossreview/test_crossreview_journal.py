@@ -773,6 +773,22 @@ def test_issue_4363_5_lowered_finding_raised_with_mvv_leaves_the_lowering(mvv: s
     assert (row["severity"], bool(row.get("redline")), row["check"]["lowered"]) == (*want, False)
 
 
+@pytest.mark.parametrize("protect_first", [False, True])
+@pytest.mark.parametrize("rounds", [(2, 2), (2, 3)])
+@pytest.mark.parametrize("mvv", ["Value 5", "C7"])
+def test_issue_4363_lowered_finding_gets_its_severity_back_in_any_order_of_mvv_and_protect(
+    mvv: str, rounds: tuple[int, int], protect_first: bool
+) -> None:
+    """#4363: MVV の項目だけの出し直しと保護の種類だけの出し直しが別々に来ても、順によらず元の critical に戻る。"""
+    journal, row = _lowered(severity="critical")
+    told = [_told(severity="minor", mvv=mvv), _told(severity="minor", protect=["secret"])]
+    for round_no, item in zip(rounds, reversed(told) if protect_first else told):
+        journal.enter(round_no, [item], ITEMS, V11)
+    assert row["severity"] == "critical"
+    journal.restate("other")
+    assert row["severity"] == "critical"
+
+
 def test_issue_4363_revived_finding_is_checked_again_and_keeps_protect() -> None:
     journal = drive.FindingJournal()
     journal.enter(1, [_told()])

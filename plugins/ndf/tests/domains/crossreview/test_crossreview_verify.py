@@ -78,6 +78,8 @@ def test_issue_4363_read_keeps_the_tracks_of_an_undecided_answer_and_warns() -> 
         _answer("a", True, condition="c", path=" ", result="r"),
         _answer("a", True, path="p", result="r"),
         _answer("a", False, reason=" "),
+        _answer("a", False, tracks=None),
+        {"id": "a", "holds": False, "reason": "tracks が無い"},
         _answer("a", "false"),
         _answer("a", 0),
         {"id": "a", "reason": "holds が無い"},
@@ -96,7 +98,14 @@ def test_issue_4363_read_without_an_answer_warns_for_every_finding() -> None:
     assert len(answers.warnings) == 1 and "a" in answers.warnings[0] and "b" in answers.warnings[0]
 
 
-@pytest.mark.parametrize("tracks, unknown", [(["delivered", "速さ"], True), ("secret", True), ([1], True), (None, False), ([], False)])
+@pytest.mark.parametrize("first", [_answer("a"), _answer("a", tracks=None)])
+def test_issue_4363_read_does_not_decide_a_repeated_id_and_keeps_every_track(first: dict) -> None:
+    answers = verify_decide.read([first, _answer("a", tracks=["user_data"]), _answer("a", True, tracks=["secret"])], ["a"])
+    assert (answers.verdicts["a"].holds, answers.verdicts["a"].tracks) == (None, ("secret", "user_data"))
+    assert len(answers.warnings) == 1 and "a" in answers.warnings[0]
+
+
+@pytest.mark.parametrize("tracks, unknown", [(["delivered", "速さ"], True), ("secret", True), ([1], True), ([], False)])
 def test_issue_4363_read_marks_tracks_outside_the_table(tracks: object, unknown: bool) -> None:
     assert verify_decide.read([_answer("a", tracks=tracks)], ["a"]).verdicts["a"].unknown is unknown
 

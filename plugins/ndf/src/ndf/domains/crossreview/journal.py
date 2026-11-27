@@ -37,6 +37,8 @@ OCCURRENCE = "occurrence"
 PROTECT = criteria_decide.PROTECT
 # 判定役の確認の結果の欄（有効な回答のあった指摘だけが持つ。直した指摘が戻れば外す。#4363）
 CHECK = criteria_decide.CHECK
+# `CHECK` の中の欄。下げた指摘が保護の種類の無い出し直しで下げた扱いを抜け、元の重要度へまだ戻していない（#4363）
+UNRESTORED = "unrestored"
 # 指摘がプロジェクト MVV に反するときの欄のうち、手元の状態ファイルだけに持つもの（#4076。記録のコメントにも載せる欄は
 # `report_decide.MARKS`、必ず人の承認が要る操作に当たるかの欄は `finish_decide.REDLINE`）。識別子は、どの MVV かを表す文字列である
 # MVV が変わって外した判定の並び（追記だけ）
@@ -237,15 +239,26 @@ def _protect(row: dict[str, Any], kinds: object) -> None:
 def _unlower(row: dict[str, Any], new: Mapping[str, Any], named: Optional[str]) -> bool:
     """判定役の確認で下げた指摘が、`new`（`_raised` の値）と MVV の項目 `named` で出し直されたとき。下げたままにするなら偽。
 
-    保護の種類が付けば元の重要度（最低 major）へ戻し、今回のほうが重ければ今回の値にする。MVV の項目か必ず人の承認が
-    要る操作を挙げれば、下げていない指摘と同じに今回の値と重ねる（分類は呼び手の `_classify`）。#4363"""
+    保護の種類か、MVV の項目か必ず人の承認が要る操作を挙げれば、下げていない指摘と同じに今回の値と重ねる（分類は
+    呼び手の `_classify`）。元の重要度へ戻すのは保護の種類が付いたときで、`_restore_lowered` が行う。#4363"""
     if PROTECT not in new and named is None:
         return False
-    row[CHECK][criteria_decide.LOWERED] = False
-    if PROTECT in new:
-        restored = criteria_decide.at_least_blocking(criteria_decide.severity_of(row.get("raised_severity")))
-        row["severity"] = criteria_decide.heavier(restored, new["severity"])
+    row[CHECK] |= {criteria_decide.LOWERED: False, UNRESTORED: True}
     return True
+
+
+def _restore_lowered(row: dict[str, Any], new: Mapping[str, Any]) -> None:
+    """下げたことのある指摘に保護の種類が付いたら、元の重要度（最低 major）へ戻す（今の重さのほうが重ければそのまま）。
+
+    MVV の項目だけの出し直しが先に下げた扱いを抜けていても戻すので、出し直しの順で重さが変わらない。固定する前の重さも
+    戻し、MVV が変わって固定を外しても下げた値にしない。#4363"""
+    check = row.get(CHECK)
+    if PROTECT not in new or not isinstance(check, dict) or not check.pop(UNRESTORED, False):
+        return
+    restored = criteria_decide.at_least_blocking(criteria_decide.severity_of(row.get("raised_severity")))
+    for key in ("severity", UNPINNED):
+        if key in row:
+            row[key] = criteria_decide.heavier(criteria_decide.severity_of(row[key]), restored)
 
 
 class Checked(NamedTuple):
@@ -325,7 +338,8 @@ class FindingJournal:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
         未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
         1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
-        行の値に今回の値を足す。判定役の確認で下げた指摘の重要度は、`_unlower` の条件に当たらなければ変えない（#4363）。"""
+        行の値に今回の値を足す。判定役の確認で下げた指摘の重要度は、`_unlower` の条件に当たらなければ変えず、保護の種類が
+        付けば元へ戻す（`_restore_lowered`。#4363）。"""
         new = _raised(item, named)
         if known.get(JUDGED) not in (None, mvv):
             _unclassify(known)
@@ -341,6 +355,7 @@ class FindingJournal:
                 known["severity"] = severity
         if UNPINNED in known:
             known[UNPINNED] = criteria_decide.heavier(criteria_decide.severity_of(known[UNPINNED]), new["severity"])
+        _restore_lowered(known, new)
         if "impact" not in known and "impact" in new:
             known["impact"] = new["impact"]
 

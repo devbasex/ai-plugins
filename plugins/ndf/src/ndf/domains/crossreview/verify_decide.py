@@ -101,8 +101,8 @@ def _tracks(value: object) -> tuple[tuple[str, ...], bool]:
 
 
 def _verdict(fid: str, item: Mapping[str, Any]) -> Optional[Verdict]:
-    """回答の 1 件。起きると示せたのに条件・経路・結果が欠ける、成り立たないのに理由が無い、`holds` が無いか真偽値でも
-    null でもない回答は None（不正）。"""
+    """回答の 1 件。起きると示せたのに条件・経路・結果が欠ける、成り立たないのに理由か `tracks` が無い（分類を確かめられ
+    ない）、`holds` が無いか真偽値でも null でもない回答は None（不正）。"""
     if "holds" not in item:
         return None
     holds = item["holds"]
@@ -110,7 +110,7 @@ def _verdict(fid: str, item: Mapping[str, Any]) -> Optional[Verdict]:
     if holds is True:
         valid = bool(condition and path and result)
     elif holds is False:
-        valid = bool(reason)
+        valid = bool(reason) and item.get("tracks") is not None
     else:
         valid = holds is None
     if not valid:
@@ -119,17 +119,29 @@ def _verdict(fid: str, item: Mapping[str, Any]) -> Optional[Verdict]:
     return Verdict(fid, holds, condition, path, result, reason, tracks, unknown)
 
 
+def _repeated(fid: str, items: Sequence[Mapping[str, Any]]) -> Verdict:
+    """同じ番号への複数の回答。どれが正しいか決められないので判断できないとし、どれかが示した指摘の種類はすべて残す。"""
+    shown = {kind for item in items for kind in _tracks(item.get("tracks"))[0]}
+    kinds = tuple(k for k in criteria_decide.track_kinds() if k in shown)
+    return Verdict(fid, None, reason="同じ番号の回答が複数ある", tracks=kinds)
+
+
 def read(found: Optional[Sequence[Mapping[str, Any]]], ids: Sequence[str]) -> Answers:
     """回答の並び（出力から取り出せなければ None）を、渡した指摘 `ids` ごとの回答にする。読めない分は注意にする。"""
     if found is None:
         return Answers({}, (f"判定役の回答を読めないので下げない: {'・'.join(ids)}",))
-    verdicts: dict[str, Verdict] = {}
+    given: dict[str, list[Mapping[str, Any]]] = {}
     unknown: list[str] = []
     for item in found:
         fid = str(item.get("id"))
         if fid not in ids:
             unknown.append(" ".join(fid.split()))
-        elif fid not in verdicts and (verdict := _verdict(fid, item)) is not None:
+        else:
+            given.setdefault(fid, []).append(item)
+    verdicts: dict[str, Verdict] = {}
+    for fid, items in given.items():
+        verdict = _repeated(fid, items) if len(items) > 1 else _verdict(fid, items[0])
+        if verdict is not None:
             verdicts[fid] = verdict
     warnings = []
     unanswered = [fid for fid in ids if fid not in verdicts]
