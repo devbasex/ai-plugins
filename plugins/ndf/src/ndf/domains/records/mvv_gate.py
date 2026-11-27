@@ -505,8 +505,7 @@ def _table_numbers(got: Mapping[str, Any], paths: Sequence[str]) -> dict[str, Op
     out: dict[str, Optional[tuple[str, ...]]] = {}
     for p in paths:
         text = github.whole_text(got.get(p))
-        rows = design_check_rules.redline_rows(text) if text is not None else None
-        out[p] = None if rows is None else tuple(dict.fromkeys(n for r in rows for n in r.numbers))
+        out[p] = None if text is None else design_check_rules.redline_numbers(text)
     return out
 
 

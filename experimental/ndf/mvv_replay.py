@@ -337,7 +337,7 @@ def _tabled(material: Material, texts: Mapping[tuple[str, str], Optional[str]]) 
         text = texts.get((material.head_sha, path))
         if text is None:
             return None
-        numbers.update({n: None for r in design_check_rules.redline_rows(text) for n in r.numbers})
+        numbers.update(dict.fromkeys(design_check_rules.redline_numbers(text)))
     return tuple(numbers)
 
 

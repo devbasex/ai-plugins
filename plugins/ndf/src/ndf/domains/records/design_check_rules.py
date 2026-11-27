@@ -128,6 +128,11 @@ def redline_rows(text: str) -> list[DecisionRow]:
     return [r for r in decision_rows(text) if r.numbers]
 
 
+def redline_numbers(text: str) -> tuple[str, ...]:
+    """`redline_rows` の行が持つレッドラインの番号を、出てくる順に重複なく返す。"""
+    return tuple(dict.fromkeys(n for r in redline_rows(text) for n in r.numbers))
+
+
 def _anchors(rows: Sequence[DecisionRow]) -> list[DecisionRow]:
     """対応付けの相手にできる行（判断と理由が実質空でなく、番号を持つ）。"""
     return [r for r in rows if r.numbers and not blank(r.decision) and not blank(r.reason)]
