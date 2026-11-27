@@ -419,7 +419,7 @@ src/ndf/
 | --- | --- | --- | --- | --- |
 | `record_cli` | `domains/records/usage.py` | 変更 | 変えない | `meta` の足した欄を書く。値が None の欄は置かない。使用量ログの錠を取らずに `jsonl.append` で書く（設計書の「行を書く時点」の「書き方」） |
 | `append` | `domains/records/jsonl.py` | 変更 | 変えない | 種類 `kind` の形を確かめてから、1 行全体を `O_APPEND` の 1 回の `os.write` で足し、書いた行を返す。錠は取らず、要る呼び手が `lock` の中で打つ（`append_locked` も同じ関数を使う）。ファイルの末尾が改行でなければ、追記するバイト列の先頭に改行を付ける。補った改行と新しい JSONL の行は、同じ 1 回の `os.write` で追記する（それでも行がつながった場合の復旧は読む側が行う）。形が違えば書かずに `InternalError`、一部しか書けなければ `OSError` |
-| `read_rows`・`read_rows_after` | `domains/records/jsonl.py` | 変更 | 変えない | 行ごとに UTF-8 の JSON として読む。読めない行は、行の先頭から `json.JSONDecoder.raw_decode` で辞書を 1 つずつ読み、読めた辞書の終わりの位置から次を読む。読めない所（断片）に当たったときだけ、その後ろの `ROW_START`（`{"version": `）を探し、そこから読み続ける。読めた辞書（改行だけが欠けてつながった行も含む）はすべて使い、断片があればその行を読めない行として 1 回数える。どこからも読めなければ行ごと除く。どちらの場合も、ほかの行の読み取りは続ける |
+| `read_rows`・`read_rows_after` | `domains/records/jsonl.py` | 変更 | 変えない | 通常は行全体を UTF-8 としてデコードし、JSON の辞書として読む。失敗した場合は、デコードできないバイトを `surrogateescape` で保持して行全体を文字列にし、行の先頭から `json.JSONDecoder.raw_decode` で辞書を 1 つずつ読む。読めた辞書の終わりの位置から次を読む。JSON として読めない範囲と、デコードできないバイトを含む範囲は断片として扱う。断片に当たったときだけ、その後ろの `ROW_START`（`{"version": `）を探し、そこから読み続ける。読めた辞書（改行だけが欠けてつながった行も含む）はすべて使い、断片があればその行を読めない行として 1 回数える。どこからも読めなければ行ごと除く。どちらの場合も、ほかの行の読み取りは続ける |
 | `launch_costs` | `domains/records/usage_decide.py` | 新設 | `launch_costs(rows: Iterable[Mapping]) -> dict[str, Optional[float]]` | 同じ会話の累計の差から、`launch_id` ごとの費用を返す。不明は None |
 
 - `__main__.py` は `claude.set_launch_recorder(usage)` を呼ぶ
