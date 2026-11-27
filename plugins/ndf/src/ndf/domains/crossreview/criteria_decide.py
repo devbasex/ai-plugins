@@ -281,15 +281,21 @@ def unit_block(role: str, unit: str) -> list[str]:
     return [text["heading"], unit.rstrip(), text[role]]
 
 
-def document_line(documents: bool, source: Path) -> list[str]:
-    """判定役の指示の「指摘の基準」に足す行（#4363）。文書を含む PR（`documents`）なら文書の基準の 1 行と、その行が指す
-    基準を読む手順、含まなければ空。`source` は判定役が読める場所に保存した文書の基準のファイル。本文は指示に埋め込まず、
-    文書の指摘を確かめるときだけ読ませる。"""
-    if not documents:
+def document_line(documents: bool, rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    """判定役の指示の「指摘の基準」に足す行（#4363）。文書を含む PR（`documents`）で、渡す指摘 `rows` に文書の指摘がありうる
+    ときは、文書の基準の 1 行と、その行が指す 4 つの型と 2 つの区分のセクション。ほかは空で、基準を読めなければ
+    `writing.CriteriaBroken`。
+
+    文書の指摘がありうるのは、`path` が Markdown の指摘と、`path` の無い指摘（場所が分からないので含める）である。
+    本文は指示に埋め込む。ファイルを読ませると、文書の指摘を確かめるたびに Tool の呼び出しと入力の token が増える。"""
+    if not documents or all(_in_code(row.get("path")) for row in rows):
         return []
-    doc = _table()["document"]
-    heading = writing.TYPES_HEADING.lstrip("# ")
-    return [_document_item(), doc["verify"].format(number=doc["number"], path=source, heading=heading)]
+    return [_document_item(), _table()["document"]["excerpt"], writing.types_section()]
+
+
+def _in_code(path: object) -> bool:
+    """指摘の `path` が、Markdown でないファイルを指すか（`path` が無ければ偽）。"""
+    return isinstance(path, str) and bool(path) and not path.endswith(".md")
 
 
 def _document_item() -> str:

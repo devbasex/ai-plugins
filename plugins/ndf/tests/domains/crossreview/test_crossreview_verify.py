@@ -161,11 +161,22 @@ def test_issue_4363_lowers_nothing_else(row: dict, verdict: verify_decide.Verdic
     assert verify_decide.lowers(row, verdict) is False
 
 
-def test_issue_4363_document_line_is_the_sixth_criterion_only_for_documents() -> None:
-    source = Path("/in/writing-criteria.md")
-    assert criteria_decide.document_line(False, source) == []
-    line, step = criteria_decide.document_line(True, source)
-    assert line.startswith("6. ")
-    assert str(source) in step and writing.TYPES_HEADING.lstrip("# ") in step
+@pytest.mark.parametrize(
+    "documents, places, added",
+    [
+        (True, [{"path": "src/a.py"}, {"path": "docs/a.md"}], True),
+        (True, [{"section": "a.md#見出し"}], True),
+        (True, [{"path": "src/a.py"}], False),
+        (False, [{"path": "docs/a.md"}], False),
+    ],
+)
+def test_issue_4363_document_line_is_added_only_for_a_possible_document_finding(documents: bool, places: list, added: bool) -> None:
+    lines = criteria_decide.document_line(documents, [_row(**place) for place in places])
+    assert bool(lines) is added
+    if added:
+        assert lines[0].startswith("6. ") and writing.types_section() in lines
+
+
+def test_issue_4363_track_kinds_start_with_the_protect_kinds() -> None:
     assert criteria_decide.track_kinds()[: len(criteria_decide.protect_kinds())] == criteria_decide.protect_kinds()
     assert criteria_decide.track_kinds()[len(criteria_decide.protect_kinds()) :] == ("delivered", "approval")
