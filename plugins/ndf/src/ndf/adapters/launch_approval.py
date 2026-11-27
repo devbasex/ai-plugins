@@ -734,24 +734,27 @@ def _done_for(candidate: Path, target: Path, sha256: str, request_id: Optional[s
     return rec if content_version(target) == content else None
 
 
-def finished(candidate: Path, target: Path, sha256: str, request_id: Optional[str], data: bytes) -> bool:
-    """人の確認を求める前に、この操作の反映が中断の前に済んでいるかを確かめる。済んでいれば候補を片付けて真。
+def finished(candidate: Path, target: Path, sha256: str, request_id: Optional[str], data: bytes) -> Reflection:
+    """端末で人の確認を求める前に、この操作の反映が中断の前に済んでいるかを確かめる。済んでいれば候補を片付けて真の結果を返す。
 
     承認の記録の錠の中で、反映先が候補の中身 `data` と同じで、反映の途中の記録がこの操作のものなら `recover` で完了の記録を確定する。
     反映先が別の中身なら何も片付けない（利用者の保存を残した場所は、続く `reflect` の `recover` が結果に載せる）。
     完了の記録がこの操作のものなら真を返す。端末で名前とハッシュを入れ直させず、同じ反映先の新しいリクエストで拒みもしない。
+    利用者のエディタは錠を取らないので、最初に照らした後に反映先と退避の両方へ保存が入ると、`recover` が退避を別の名前で残す。
+    そのパスは続く `reflect` では見つからないため、結果の `saved` に載せて呼び手へ返す（真偽にかかわらず）。
     """
     content = hashlib.sha256(data).hexdigest()
     with records_lock(state_file(APPROVALS)):
         if content_version(target) != content:
-            return False
+            return Reflection(False)
+        saved = None
         if _same_operation(read_launch_record(reflected_file(target, PENDING)), candidate, sha256, request_id, content):
-            recover(target)
+            saved = recover(target)
         done = _done_for(candidate, target, sha256, request_id, content)
         if done is None:
-            return False
+            return Reflection(False, saved)
         _tidy_after_reflect(target, candidate, done)
-        return True
+        return Reflection(True, saved)
 
 
 def _write_done(target: Path, rec: Mapping[str, Any]) -> None:
