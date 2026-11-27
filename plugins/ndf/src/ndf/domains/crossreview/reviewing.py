@@ -172,7 +172,7 @@ def review_round(
     prompts = dict.fromkeys(asked, prompt)
     full = None if before.filled is None else before.filled.diff
     if before.full_seats:
-        full, full_prompt, full_required = _full_request(run, round_no, prep, remarks)
+        full, full_prompt, full_required = _full_request(run, round_no, prep, remarks, full)
         prompts.update(dict.fromkeys(before.full_seats, full_prompt))
         required = tuple(dict.fromkeys((*required, *full_required)))
     more, unread = seats.launch_reviewers(run, round_no, prompts, required, launch)
@@ -189,7 +189,9 @@ def review_round(
     targets = () if len(unread) == len(run.seats) else participants.fill_targets(run.seats, unread)
     filled_now: tuple[str, ...] = ()
     if targets:
-        found, left, full, filled_now = _fill_seats(run, round_no, prep, remarks, {t: unread[t] for t in targets}, launch)
+        request = _full_request(run, round_no, prep, remarks, full)
+        full = request[0]
+        found, left, filled_now = _fill_seats(run, round_no, {t: unread[t] for t in targets}, request, launch)
         raised += found
         from_full += found
         unread = left
@@ -203,23 +205,34 @@ def review_round(
     return Reviewed(raised, unread, len(unread) == len(run.seats), read, full_seats)
 
 
-def _full_request(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Optional[Path]) -> tuple[Path, str, tuple[Path, ...]]:
+def _full_request(
+    run: ReviewingRun, round_no: int, prep: Prepared, remarks: Optional[Path], written: Optional[Path]
+) -> tuple[Path, str, tuple[Path, ...]]:
     """埋めた席へ渡す全差分のファイル・リクエスト・読ませる差分。埋めた claude はこの実行で初めて加わるので、前回の情報を
-    含まないリクエストと `--base` からの全差分を渡す。ラウンドの範囲（`prep.scope`）は変えない（記録の範囲を全差分にしない）。"""
-    full = prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep)
+    含まないリクエストと `--base` からの全差分を渡す。ラウンドの範囲（`prep.scope`）は変えない（記録の範囲を全差分にしない）。
+    判定待ちから復元した全差分のファイル `written` があれば、作り直さずに使う。"""
+    if written is not None:
+        full = written
+    else:
+        full = prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep)
     fresh = prep._replace(scope=scope_decide.Scope(scope_decide.FULL, None, prep.scope.unreviewed), diff=full, previous=None)
     return full, review_prompt(run, round_no, fresh, remarks), _prompt_diffs(run, fresh)
 
 
 def _fill_seats(
-    run: ReviewingRun, round_no: int, prep: Prepared, remarks: Optional[Path], targets: Mapping[str, seats.Unread], launch: Launcher
-) -> tuple[list[dict[str, Any]], dict[str, seats.Unread], Path, tuple[str, ...]]:
-    """結果の無い席を claude の読むだけの起動で 1 回ずつ埋める。指摘・結果の無い席・渡した全差分のファイル・埋めた席を返す。"""
-    full, prompt, required = _full_request(run, round_no, prep, remarks)
+    run: ReviewingRun,
+    round_no: int,
+    targets: Mapping[str, seats.Unread],
+    request: tuple[Path, str, tuple[Path, ...]],
+    launch: Launcher,
+) -> tuple[list[dict[str, Any]], dict[str, seats.Unread], tuple[str, ...]]:
+    """結果の無い席を claude の読むだけの起動で 1 回ずつ、全差分のリクエスト `request`（`_full_request`）で埋める。
+    指摘・結果の無い席・埋めた席を返す。"""
+    _, prompt, required = request
     prompts: dict[str, str] = {}
     for absent, why in targets.items():
         prompts[seats.fill_seat(run, absent, why.cause, f"round {round_no}")] = prompt
-    return *seats.launch_reviewers(run, round_no, prompts, required, launch), full, tuple(prompts)
+    return *seats.launch_reviewers(run, round_no, prompts, required, launch), tuple(prompts)
 
 
 def _handed(run: ReviewingRun) -> list[list[str]]:

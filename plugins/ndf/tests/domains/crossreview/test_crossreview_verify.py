@@ -551,3 +551,26 @@ def test_issue_4363_run_resumes_by_launching_only_the_seat_without_a_result(wt: 
     [row] = state["findings"]
     assert (row["by"], row["check"]["lowered"]) == ("kiro", True)
     assert len(state["rounds"]) == 1 and "pending_review" not in state
+
+
+def test_issue_4363_run_writes_the_full_diff_once_when_it_resumes_a_filled_seat(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """差分を絞るラウンドで埋めた席を起動し直すとき、判定待ちから復元した全差分を作り直さない。"""
+    other = {**HEAVY, "text": "読み込みが止まる"}
+
+    def interrupted_on_the_second_round(row: dict) -> Optional[dict]:
+        if row["text"] == other["text"]:
+            raise KeyboardInterrupt
+        return holding(row)
+
+    first = Fake(tmp_path / "st", {"codex": [[HEAVY], FAIL, FAIL], "kiro": [[], [other]], "claude": [FAIL]})
+    first.verdict = interrupted_on_the_second_round
+    with pytest.raises(KeyboardInterrupt):
+        _run(capsys, monkeypatch, first, wt)
+    second = Fake(tmp_path / "st", {"claude": [[]]})
+    second.verdict = _broken
+    written: list[str] = []
+    write = reviewing.write_diff
+    monkeypatch.setattr(reviewing, "write_diff", lambda *args: (written.append(args[2]), write(*args))[1])
+    code, got = _run(capsys, monkeypatch, second, wt)
+    assert (code, got["status"]) == (0, "ok") and second.calls == ["claude"]
+    assert written.count(reviewing.FULL_DIFF_SUFFIX) == 1
