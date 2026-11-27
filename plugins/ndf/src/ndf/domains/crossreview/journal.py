@@ -1,7 +1,7 @@
 """指摘のジャーナル（`drive.py` から分けた。#3941）。
 
 相手役の指摘を番号を付けて重ねずに入れ、判定役の確認の結果・修正担当の結果・前の実行から引き継いだ指摘・再発を読み込み、
-終わり方の判定（`finish_decide`）へ渡す形にする。状態ファイルの `findings` の行の形を持つのはここだけである。
+直さずに残す指摘（#3780 の線引き。`leftover_decide`）に `parked` を付け、終わり方の判定（`finish_decide`）へ渡す形にする。状態ファイルの `findings` の行の形を持つのはここだけである。
 """
 
 from __future__ import annotations
@@ -9,11 +9,11 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf.core.converge import oscillation
-from ndf.domains.crossreview import criteria_decide, prior_decide, store, verify_decide
+from ndf.domains.crossreview import criteria_decide, leftover_decide, prior_decide, store, verify_decide
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, UNPINNED
 from ndf.domains.records import jsonl
@@ -31,12 +31,16 @@ def _text(value: object) -> Optional[str]:
 # 指摘の発生の値の欄。番号は別の状態ファイルでも再発でも使い回されるので、PR のスレッドは番号とこの値の両方で
 # 指摘に結び付ける（#4016 の不変条件 I4）
 OCCURRENCE = "occurrence"
+# 行の `path`・`line` が `round` と違うラウンドの head の位置であるとき、そのラウンド
+PLACED_ROUND = "placed_round"
 
 
 # 指摘に一度でも示された保護の種類の欄（`criteria_decide.protect_kinds`。足した値は外さない。#4363）
 PROTECT = criteria_decide.PROTECT
 # 判定役の確認の結果の欄（有効な回答のあった指摘だけが持つ。直した指摘が戻れば外す。#4363）
 CHECK = criteria_decide.CHECK
+# 直さずに残す指摘の欄（#3780）
+PARKED = leftover_decide.PARKED
 # `CHECK` の中の欄。下げた指摘が出し直しで下げた扱いを抜けた（#4363）
 UNLOWERED = "unlowered"
 # 指摘がプロジェクト MVV に反するときの欄のうち、手元の状態ファイルだけに持つもの（#4076。記録のコメントにも載せる欄は
@@ -96,7 +100,7 @@ def _located(item: Mapping[str, Any]) -> dict[str, Any]:
         out["severity"] = severity
     path = _text(item.get("path"))
     if path is not None:
-        out["path"] = path.strip()
+        out["path"] = leftover_decide.plain_path(path)
         line = item.get("line")
         if type(line) is int and line > 0:
             out["line"] = line
@@ -118,6 +122,34 @@ def _raised(item: dict[str, Any], named: Optional[str] = None) -> dict[str, Any]
     if kinds:
         out[PROTECT] = list(kinds)
     return out
+
+
+def _place(item: Mapping[str, Any]) -> dict[str, Any]:
+    """相手役の 1 件の位置（`path`・`line`）。"""
+    return {k: v for k, v in _located(item).items() if k != "severity"}
+
+
+def _move(row: dict[str, Any], place: Mapping[str, Any], round_no: int) -> None:
+    """指摘の行の位置（`path`・`line`）を、ラウンド `round_no` の出し直しの `place` に置き換える。`round`（指摘が出たラウンド）は
+    変えず、違えば位置の基準のラウンドを `PLACED_ROUND` に残す（行番号は、そのラウンドの head のものである）。`place` に
+    `path` が無ければ、位置と基準のラウンドを組のまま残す（投稿の位置を `section` と本文の行番号から読む指摘に、後の head を
+    組み合わせない）。"""
+    if "path" not in place:
+        return
+    for stale in ("path", "line", PLACED_ROUND, leftover_decide.OFF_DIFF):
+        row.pop(stale, None)
+    row |= place
+    if round_no != row.get("round"):
+        row[PLACED_ROUND] = round_no
+
+
+def _post_place(places: Sequence[Mapping[str, Any]], touched: leftover_decide.Touched) -> dict[str, Any]:
+    """出し直しの位置 `places` のうち、指摘の行に保存するもの。行コメントを付けられる行を指すものを先にし、その中では変えた行を
+    指すものを先にする。そのような行が無くても `line` は除かない（投稿の位置から除くのは `_check_post_line` の `OFF_DIFF`）。"""
+    return max(
+        places,
+        key=lambda p: (leftover_decide.on_commentable_line(p, touched), leftover_decide.on_touched_line(p, touched), "path" in p),
+    )
 
 
 def _named_any(item: dict[str, Any]) -> bool:
@@ -166,6 +198,8 @@ def _classify(row: dict[str, Any], item: dict[str, Any], named: str, items: Sequ
     redlines = [i for i in found if criteria_decide.redline(i)]
     if redlines:
         _unpin(row)
+        # 人の承認を待つ指摘は直さずに残さない（#3780）
+        row.pop(PARKED, None)
         row |= {MVV: redlines[0], fin.REDLINE: True, REDLINE_ITEMS: redlines, JUDGED: mvv}
         return
     severity = criteria_decide.severity_of(row.get("severity"))
@@ -333,6 +367,16 @@ class FindingJournal:
         self.revived: list[str] = []
         # 最後の `enter` で新しく出たか戻った指摘のうち、判定役へ渡す候補の id（`_askable`。#4363）
         self.fresh: list[str] = []
+        # 最後の `enter` で出た指摘の id、そのうち直した後に戻った指摘の id（`sort` が使う。#3780）
+        self.raised_ids: list[str] = []
+        self.returned: list[str] = []
+        # 最後の `enter` が `parked` を外して位置を置き換えた指摘と、その位置の候補（`sort` が投稿できる位置かを確かめる）
+        self._moved: dict[str, list[dict[str, Any]]] = {}
+        # 最後の `enter` で新しく出たか戻った指摘の id（`fresh` と違い、判定役へ渡さないものも含む）と、指摘ごとの出し直し、
+        # そのラウンド
+        self._arrived: frozenset[str] = frozenset()
+        self._reports: dict[str, list[Mapping[str, Any]]] = {}
+        self._round = 0
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
         # 最後の `carry` で、前の実行が残した MVV の判定を重ねて変わった、既にある指摘の id
@@ -358,7 +402,10 @@ class FindingJournal:
         unexplained: list[str] = []
         fresh: list[str] = []
         same: dict[str, list[Mapping[str, Any]]] = {}
+        # このラウンドで `parked` を外した指摘の id と、外した出し直し
+        unparked: dict[str, Mapping[str, Any]] = {}
         before = len(self.revived)
+        self.returned = []
         _unlower(by_key, raised, items)
         for item in raised:
             text = item.get("text")
@@ -368,6 +415,7 @@ class FindingJournal:
             key = oscillation.finding_key(text)
             named = criteria_decide.mvv_item(item.get("mvv"), items)
             known = by_key.get(key)
+            parked = known is not None and PARKED in known
             if known is None:
                 fid = self._next_id(round_no)
                 row = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
@@ -384,19 +432,40 @@ class FindingJournal:
                     unexplained.append(str(known["id"]))
             elif named is None and items and _named_any(item):
                 unknown.append(str(known["id"]))
+            if parked and PARKED not in known:
+                unparked[str(known["id"])] = item
             touched[key] = known
             same.setdefault(str(known["id"]), []).append(item)
+        self._move_unparked(unparked, same, round_no)
         back = set(self.revived[before:])
         self.fresh = [fid for fid in dict.fromkeys(fresh) if _askable(self.rows[fid], same[fid], items, fid in back)]
+        self.raised_ids, self._arrived, self._reports = list(same), frozenset(fresh), same
+        self._round = round_no
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
+
+    def _move_unparked(
+        self, unparked: Mapping[str, Mapping[str, Any]], same: Mapping[str, Sequence[Mapping[str, Any]]], round_no: int
+    ) -> None:
+        """`parked` を外した指摘の位置を出し直しのものに置き換え、置いた位置の候補を `_moved` に残す。"""
+        self._moved = {}
+        for fid, item in unparked.items():
+            # 残していた行の位置は前の head の行番号なので、見送りを解いた出し直しのものにする。`path` か行番号が無ければ、同じ
+            # ラウンドのほかの出し直しから補う（`path` があれば、同じ `path` の出し直しからだけ）
+            own, *others = map(_place, (item, *same[fid]))
+            places = [own, *(p for p in others if own.get("path") in (None, p.get("path")))]
+            best = max(places, key=lambda p: ("line" in p, "path" in p))
+            _move(self.rows[fid], best, round_no)
+            if "path" in best:
+                self._moved[fid] = places
 
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
         未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
         1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
         行の値に今回の値を足す。判定役の確認で下げたままの指摘の重要度は変えず（下げた扱いの解除は先に `_unlower` が行う）、
-        下げた扱いを抜けた指摘に保護の種類が付けば元へ戻す（`_restore_lowered`。#4363）。"""
+        下げた扱いを抜けた指摘に保護の種類が付けば元へ戻す（`_restore_lowered`。#4363）。直さずに残していた指摘が、変えた行に
+        よらず進むもの（critical・保護の対象）になれば、線引きをしないラウンドでもここで `parked` を外す（#3780）。"""
         new = _raised(item, named)
         if known.get(JUDGED) not in (None, mvv):
             _unclassify(known)
@@ -415,15 +484,19 @@ class FindingJournal:
         _restore_lowered(known)
         if "impact" not in known and "impact" in new:
             known["impact"] = new["impact"]
+        if known.get(PARKED) and leftover_decide.proceeds(known, leftover_decide.Touched()):
+            del known[PARKED]
 
     def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
         """直した・見送った指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
         resolve 済みの古いスレッドへ結び付けない（#4016）。"""
+        if known.get("outcome") == fin.FIXED:
+            self.returned.append(str(known["id"]))
         known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no, OCCURRENCE: new_occurrence()}
         self.revived.append(str(known["id"]))
         # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
         # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
-        for stale in ("path", "line", SKIPPED_MVV, REVIEW_DEFER, CHECK):
+        for stale in ("path", "line", PLACED_ROUND, leftover_decide.OFF_DIFF, SKIPPED_MVV, REVIEW_DEFER, CHECK, PARKED):
             known.pop(stale, None)
         known |= {k: v for k, v in new.items() if k in ("path", "line")}
         known["section"] = section
@@ -450,6 +523,52 @@ class FindingJournal:
                 row["severity"] = criteria_decide.heaviest_light()
                 lowered.add(row["key"])
         return Checked(frozenset(lowered), frozenset(unconfirmed))
+
+    def sort(self, touched: leftover_decide.Touched, unconfirmed: Collection[str] = ()) -> frozenset[str]:
+        """直前の `enter` で出た指摘のうち、新しく出たか戻った指摘と、直さずに残していた指摘に線引き
+        （`leftover_decide.proceeds`）を当て、残した指摘のキーを返す。前から修正へ進むと決まっている指摘は分け直さない。
+        `enter` が `parked` を外して置き換えた位置は、行コメントを付けられない行のときだけ選び直す。
+        `unconfirmed` は判定役へ渡して有効な回答の無かった指摘の id。
+
+        位置は今回の出し直しのものを 1 件ずつ当てる（残していた指摘の行の位置は、前の head の行番号である）。どれか 1 件が
+        進めば進める。指摘の行の位置は、進んだ出し直しから保存する位置（`_post_place`）を選んで置き換える（どれにも
+        `path` が無ければ元の位置を残す。`_move`。#3780）。最後に、投稿に使う位置を `_check_post_line` で確かめる。"""
+        for fid, places in self._moved.items():
+            row = self.rows[fid]
+            if "line" in row and not leftover_decide.on_commentable_line(row, touched):
+                _move(row, _post_place(places, touched), self._round)
+        parked: set[str] = set()
+        for fid in self.raised_ids:
+            row = self.rows[fid]
+            if row.get("outcome") != fin.UNRESOLVED or not (fid in self._arrived or row.get(PARKED)):
+                continue
+            base = {k: v for k, v in row.items() if k not in ("path", "line")}
+            returned, unanswered = fid in self.returned, fid in unconfirmed
+            passed = [
+                p
+                for p in map(_place, self._reports[fid])
+                if leftover_decide.proceeds(base | p, touched, returned=returned, unconfirmed=unanswered)
+            ]
+            if not passed:
+                row[PARKED] = True
+                parked.add(row["key"])
+            else:
+                row.pop(PARKED, None)
+                _move(row, _post_place(passed, touched), self._round)
+        for fid in self.raised_ids:
+            self._check_post_line(self.rows[fid], touched)
+        return frozenset(parked)
+
+    def _check_post_line(self, row: dict[str, Any], touched: leftover_decide.Touched) -> None:
+        """投稿に使う行（`leftover_decide.location`。`path` が無ければ `section` と本文の先頭から読む）が、基準のコミットの PR の
+        差分に載らなければ、`OFF_DIFF` を付ける。`touched` で確かめられるのは位置の基準がこのラウンドの行だけなので、ほかの行は
+        前に付けた記録を保つ。記録は、線引きをしないラウンドで投稿するときにも効く。"""
+        if (row.get(PLACED_ROUND) or row.get("round")) != self._round:
+            return
+        row.pop(leftover_decide.OFF_DIFF, None)
+        path, line = leftover_decide.location(row)
+        if line is not None and not leftover_decide.on_commentable_line({"path": path, "line": line}, touched):
+            row[leftover_decide.OFF_DIFF] = True
 
     def ingest_citations(
         self, errors: Optional[Sequence[Mapping[str, Any]]], mvv: Optional[str], round_no: int, *, recorded: bool = True
@@ -567,8 +686,8 @@ class FindingJournal:
         return [f["text"] for f in self.rows.values() if f.get("outcome") == fin.SKIPPED and _same_mvv(f.get(SKIPPED_MVV), mvv)]
 
     def handable(self) -> list[dict[str, Any]]:
-        """修正担当へ渡す未解決の指摘。"""
-        return [f for f in self.rows.values() if f.get("outcome") == fin.UNRESOLVED and _blocking(f)]
+        """修正担当へ渡す未解決の指摘（直さずに残す指摘は渡さない）。"""
+        return [f for f in self.rows.values() if f.get("outcome") == fin.UNRESOLVED and _blocking(f) and not f.get(PARKED)]
 
     def pending(self, handed: Sequence[fin.Handed]) -> tuple[list[dict[str, Any]], list[fin.Handed]]:
         """修正担当へ渡す未解決の指摘と、まだ決めていない足すべき内容。"""

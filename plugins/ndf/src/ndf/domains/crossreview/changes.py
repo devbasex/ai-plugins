@@ -1,7 +1,7 @@
 """変更の読み取りと、PR が足した MVV の根拠の記述の確かめ（#4076）。
 
 `base...HEAD` で変わったファイルと、Markdown の本文・セクション、差分とそのファイルごとの行を読む。2 ラウンド目以降に渡す
-前の head からの差分と、比較基点の変化で新しく PR の変更になったファイル（#3780）も読む。差分の行の番号は git の
+前の head からの差分と、比較基点の変化で新しく PR の変更になったファイル、線引きに使う変えた行（#3780）も読む。差分の行の番号は git の
 数え方（`\\n` だけで区切る）なので、Markdown の解析の行の番号（`\\r` でも区切る）とは `_markdown_rows` で対応させる。
 
 根拠の記述は、`- 根拠: Value 5（MVV バージョン 11）` のように、決定がどの MVV の項目に基づくかを書いた行である。`citations` が、
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters import git
-from ndf.domains.crossreview import criteria_decide, scope_decide, settings
+from ndf.domains.crossreview import criteria_decide, leftover_decide, scope_decide, settings
 from ndf.domains.records import mvv, mvv_decide
 
 
@@ -393,13 +393,22 @@ def _read_listing(g: git.Git, span: str) -> tuple[dict[str, _Entry], frozenset[s
 
 def _delta(g: git.Git, span: str, listed: Listings) -> _Delta:
     entries, binary = _listing(g, span, listed)
+    return _Delta(entries, binary, _hunks(g, span))
+
+
+def _hunks(g: git.Git, span: str) -> dict[str, tuple[Hunk, ...]]:
+    """差分 `span` の行の差分を、後ろの側のパス（消したファイルは前のパス）ごとに返す。一覧は読まない。"""
+    return _parsed_hunks(g.run_bytes(*_DIFF, span).decode("utf-8", errors="surrogateescape"))
+
+
+def _parsed_hunks(text: str) -> dict[str, tuple[Hunk, ...]]:
+    """行の差分の本文 `text` を `_hunks` の形にする。"""
     hunks: dict[str, tuple[Hunk, ...]] = {}
-    text = g.run_bytes(*_DIFF, span).decode("utf-8", errors="surrogateescape")
     for names, found in _file_blocks(text):
         path = names.get(False) or names.get(True)
         if path is not None:
             hunks[path] = (*(hunks[path] if path in hunks else ()), *found)
-    return _Delta(entries, binary, hunks)
+    return hunks
 
 
 def _changed_rows(hunks: Sequence[Hunk]) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
@@ -604,6 +613,44 @@ def since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str]
     if added:
         text += _diff_of(g, f"{current.base}...{current.head}", _added_paths(g, current, added, listed))
     return text
+
+
+def _touched_rows(block: _Block) -> range:
+    """かたまり `block` の変えた行の番号。足した行と書き換えた行が無ければ（消しただけ）、消した箇所の前後の行。"""
+    return range(block.start, block.end) if block.end > block.start else range(max(block.start - 1, 1), block.start + 1)
+
+
+def _given_or_read(g: git.Git, span: str, text: Optional[str]) -> dict[str, tuple[Hunk, ...]]:
+    """差分 `span` の行の差分。取得済みの本文 `text` があれば git を起動しない。`text` のパスに置き換え文字があれば
+    （`review_diff` は UTF-8 でない字を置き換えるので、元のパスが分からない）読み直す。"""
+    if text is not None:
+        hunks = _parsed_hunks(text)
+        if not any("\ufffd" in path for path in hunks):
+            return hunks
+    return _hunks(g, span)
+
+
+def touched_since(
+    g: git.Git,
+    since: str,
+    current: Range,
+    listed: Listings,
+    since_lines: Optional[str] = None,
+    pr_lines: Optional[str] = None,
+) -> leftover_decide.Touched:
+    """`since` の後、今の head（`current.head`）までに変わったファイルと、head の側の変えた行の番号、今の PR の差分
+    （`current`）に載る head の側の行の番号（#3780）。行で比べられないファイルは行を持たない。`listed` は同じラウンドで読んだ
+    一覧（`new_in_pr` が読んだ範囲なら読み直さない）。`since_lines` は取得済みの `since..head` の行の差分（比較基点が起点と
+    同じラウンドの `since_diff` の返り）、`pr_lines` は取得済みの `current.base...current.head` の全差分（`review_diff` の返り）。
+    渡せばその行の差分を読み直さない（ファイルから読むときは改行を変換しない）。コミットが手元に無ければ `git.GitError`。"""
+    span = f"{since}..{current.head}"
+    entries, _ = _listing(g, span, listed)
+    changed = _given_or_read(g, span, since_lines)
+    # PR の差分は行の番号だけを使うので、一覧は読まない
+    shown = _given_or_read(g, f"{current.base}...{current.head}", pr_lines)
+    lines = {path: frozenset(n for b in _changed_blocks(hunks) for n in _touched_rows(b)) for path, hunks in changed.items()}
+    commentable = {path: frozenset(x.head for h in hunks for x in h.lines if x.head is not None) for path, hunks in shown.items()}
+    return leftover_decide.Touched(frozenset(entries), lines, commentable)
 
 
 # --- 根拠の記述の確かめ -------------------------------------------------------------------------
