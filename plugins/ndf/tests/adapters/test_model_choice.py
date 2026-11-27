@@ -281,3 +281,12 @@ def test_codex_reads_the_process_environment_without_an_inherited_variable(tmp_p
     monkeypatch.delenv(CODEX_EFFORT_ENV, raising=False)
     got = mc.launch_choice("seat", "review", "codex", cwd=_repo(tmp_path))
     assert got.effort == "low" and got.env_changes() == {}
+
+
+def test_the_mode_of_the_plan_step_is_taken_when_no_mode_is_given(tmp_path):
+    """#2944: プランの実行が渡した工程のモードを行に残す。引数の mode が先に効き、選ぶ値は変えない。"""
+    root, env = _repo(tmp_path), {identity.env_name("workflow-mode"): "light"}
+    assert _pick(root, environ=env).row_fields()["mode"] == "light"
+    assert _pick(root, environ=env, mode="standard").row_fields()["mode"] == "standard"
+    assert "mode" not in _pick(root).row_fields()
+    assert _pick(root, environ=env).cli_args() == _pick(root).cli_args()

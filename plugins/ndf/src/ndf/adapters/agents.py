@@ -445,7 +445,9 @@ def _start(spec: Launch) -> subprocess.Popen:
     child = ai_child_env()
     env = child_process_env(child if spec.env is None else {**spec.env, **child})
     spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
-    codex_answer_path(spec.paths.out).unlink(missing_ok=True)  # codex は失敗すると `-o` の前の中身を残す
+    answer = codex_answer_path(spec.paths.out)
+    if str(answer) in spec.argv:  # 回答先に指定した起動だけ消す。codex は失敗すると `-o` の前の中身を残す
+        answer.unlink(missing_ok=True)
     with open(spec.paths.out, "wb") as out, open(spec.paths.err, "wb") as err:
         return subprocess.Popen(
             list(spec.argv), cwd=spec.cwd, stdout=out, stderr=err, stdin=subprocess.DEVNULL, env=env, start_new_session=True

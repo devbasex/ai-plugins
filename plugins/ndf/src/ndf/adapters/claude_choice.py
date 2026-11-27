@@ -28,6 +28,8 @@ class LaunchChooser(Protocol):
 
     def precheck(self, runtime: str = "claude", *, cwd: Path, **given: Any) -> None: ...
 
+    def stage_of(self, layer: str, name: str) -> Optional[str]: ...
+
     def base_fallback(self, choice: Any, reason: str) -> Optional[Any]: ...
 
     def observed(self, choice: Any, model: str) -> None: ...
@@ -46,6 +48,11 @@ def set_launch_chooser(chooser: Optional[LaunchChooser]) -> None:
 def pick_values(layer: str, name: str, *, cwd: Path, **request: Any) -> Optional[Any]:
     """差し込まれた処理で値を選ぶ。差し込みが無ければ None。値や設定の誤りは処理の `InternalError`（precondition）をそのまま送る。"""
     return None if launch_chooser is None else launch_chooser.launch_choice(layer, name, cwd=cwd, **request)
+
+
+def pick_stage(layer: str, name: str) -> Optional[str]:
+    """差し込まれた処理で、層と作業の名前の工程を引く。差し込みが無いか工程の無い作業なら None。"""
+    return None if launch_chooser is None else launch_chooser.stage_of(layer, name)
 
 
 def precheck_values(*, cwd: Path, **given: Any) -> None:

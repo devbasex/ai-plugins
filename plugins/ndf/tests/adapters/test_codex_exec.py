@@ -152,8 +152,19 @@ def test_the_answer_left_by_a_previous_launch_is_removed_before_launching(tmp_pa
     paths = _paths(tmp_path, "")
     agents.codex_answer_path(paths.out).write_text('{"findings": []}', encoding="utf-8")
     monkeypatch.setattr(agents.subprocess, "Popen", lambda *a, **k: _Proc())
-    agents._start(agents.Launch("codex", ("codex",), tmp_path, paths, 60))
+    argv = ("codex", "-o", str(agents.codex_answer_path(paths.out)), "質問")
+    agents._start(agents.Launch("codex", argv, tmp_path, paths, 60))
     assert not agents.codex_answer_path(paths.out).exists()
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex", "kiro", "agy"])
+def test_a_launch_that_does_not_write_the_answer_file_keeps_it(tmp_path, monkeypatch, runtime):
+    """回答先に指定していないファイルは、その起動が作ったものではないので消さない。"""
+    paths = _paths(tmp_path, "")
+    agents.codex_answer_path(paths.out).write_text("残す", encoding="utf-8")
+    monkeypatch.setattr(agents.subprocess, "Popen", lambda *a, **k: _Proc())
+    agents._start(agents.Launch(runtime, (runtime, "質問"), tmp_path, paths, 60))
+    assert agents.codex_answer_path(paths.out).read_text(encoding="utf-8") == "残す"
 
 
 def test_the_seconds_of_a_launched_child_are_kept(tmp_path, monkeypatch):
@@ -224,6 +235,14 @@ def test_the_answer_file_is_read_instead_of_the_stream(tmp_path):
     paths = _paths(tmp_path, OK)
     agents.codex_answer_path(paths.out).write_text('{"findings": [{"text": "指摘"}]}\n', encoding="utf-8")
     assert participants.findings_of(participants.answer_text("codex", paths.out)) == [{"text": "指摘"}]
+
+
+@pytest.mark.parametrize("runtime, out", [("kiro", OK), ("agy", OK), ("kiro", "本文\n"), ("codex", "本文\n")])
+def test_an_old_answer_file_is_read_only_for_a_codex_stream(tmp_path, runtime, out):
+    """前の起動の回答が残っていても、回答のファイルを書かない起動は自分の出力を読む。"""
+    paths = _paths(tmp_path, out)
+    agents.codex_answer_path(paths.out).write_text('{"findings": [{"text": "古い"}]}\n', encoding="utf-8")
+    assert participants.answer_text(runtime, paths.out) == agents.tail(paths.out)
 
 
 def test_a_stream_without_an_answer_file_has_no_findings(tmp_path):

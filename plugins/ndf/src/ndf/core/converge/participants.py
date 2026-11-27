@@ -299,12 +299,14 @@ def claude_answer(out: Path) -> ClaudeAnswer:
 
 
 def answer_text(runtime: str, out: Path) -> str:
-    """担当の出力から結果を探す本文。claude は `--output-format json` の外側の JSON の `result` を本文にし、ほかは回答のファイル
-    （`agents.codex_answer_path`。使用量を取る起動の codex が書く）があればその本文、無ければ出力の末尾。"""
-    if runtime != FIXER:
-        answer = agents.codex_answer_path(out)
-        return agents.tail(answer if answer.is_file() else out)
-    return claude_answer(out).text
+    """担当の出力から結果を探す本文。claude は `--output-format json` の外側の JSON の `result` を本文にする。codex の
+    `--json` の出力（使用量を取る起動）は回答のファイル（`agents.codex_answer_path`）があればその本文を使う。ほかは出力の末尾
+    （前の起動の回答のファイルが残っていても読まない）。"""
+    if runtime == FIXER:
+        return claude_answer(out).text
+    answer = agents.codex_answer_path(out)
+    written = runtime == "codex" and answer.is_file() and bool(agents.codex_events(out))
+    return agents.tail(answer if written else out)
 
 
 # `READ_TOOLS` の Tool ごとの、読む場所を指す引数の名前（相対パスは claude の作業ディレクトリから解決される）

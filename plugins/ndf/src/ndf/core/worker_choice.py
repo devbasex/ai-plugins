@@ -1,8 +1,8 @@
 """worker の起動のモデルと effort（`core/worker.py` の部品。#2944）。
 
 - 値は会話の最初に、差し込まれた値を選ぶ処理（`claude_choice.pick_values`）で選ぶ。差し込みが無ければ値を選ばずに起動する
-- 単位は `--unit` か `NDF_UNIT_ID`、引き上げの理由は `NDF_RETRY_CAUSE`、費用を負う割り付け ID は手戻りの作業（`CHARGED_KINDS`）
-  だけが `NDF_CHARGE_TO` から受ける。空の値は無いとみなす
+- 単位は `--unit` か `NDF_UNIT_ID`、引き上げの理由は `NDF_RETRY_CAUSE`、費用を負う割り付け ID は手戻りの作業
+  （`model.CHECK_FIXES`）だけが `NDF_CHARGE_TO` から受ける。ほかは子の環境から外す。空の値は無いとみなす
 - 子の環境の `CLAUDE_CODE_EFFORT_LEVEL` は会話の最初の起動の扱いに固定する（引き継いだなら最初の値、ほかは外す）。中断の間に
   利用者が変数を変えても、再開は最初の起動と同じ値で動く（設計書の「同じ会話を続ける起動」）
 - 子ごとの終わり方（`outcome`）は結果ファイルの status、無ければ `no_result`、起動の失敗と読めない結果ファイルは `unknown`
@@ -19,9 +19,7 @@ from ndf import identity
 from ndf.adapters import claude, claude_choice
 from ndf.contracts import worker_paths
 from ndf.contracts.exit_codes import STATUSES
-
-# 費用を手戻りとして負う割り付け ID（`NDF_CHARGE_TO`）を受ける作業種別。ほかは子の環境から外す
-CHARGED_KINDS = frozenset({"fix", "ci-fix"})
+from ndf.core.plan import model
 
 
 def _nonempty(name: str, environ: Mapping[str, str]) -> Optional[str]:
@@ -35,8 +33,8 @@ def choice_inputs(
 ) -> dict[str, Optional[str]]:
     """値を選ぶ手がかり（`Handoff` の `unit`・`mode`・`retry`・`charge_to`）。引数の単位が環境変数より先に効く。"""
     env = os.environ if environ is None else environ
-    charge = _nonempty(identity.env_name("charge-to"), env) if kind in CHARGED_KINDS else None
-    held, retry = _nonempty(identity.env_name("unit-id"), env), _nonempty(identity.env_name("retry-cause"), env)
+    charge = _nonempty(identity.env_name("charge-to"), env) if kind in model.CHECK_FIXES else None
+    held, retry = _nonempty(identity.env_name("unit-id"), env), _nonempty(model.retry_cause_env(), env)
     return {"unit": held if unit is None or unit == "" else unit, "mode": mode, "retry": retry, "charge_to": charge}
 
 
@@ -79,7 +77,8 @@ def first_launch(
     kind: str, session: str, base: list[str], wd: worker_paths.WorkDir, run: claude_choice.ChoiceRun, report: Callable[[], Any]
 ) -> tuple[list[str], dict[str, Optional[str]], claude.LaunchLog]:
     """会話の最初の起動の引数・子の環境・行の書き手。再開は同じ環境と書き手を使い、引数は会話の指定だけを替える。"""
-    return base + run.cli_args() + ["--session-id", session], conversation_env(kind, wd, run), launch_log(kind, session, run, report)
+    argv = base + run.cli_args() + claude.session_args(claude.Session(session, resume=False))
+    return argv, conversation_env(kind, wd, run), launch_log(kind, session, run, report)
 
 
 def launch_log(kind: str, session: str, run: claude_choice.ChoiceRun, report: Callable[[], Any]) -> claude.LaunchLog:

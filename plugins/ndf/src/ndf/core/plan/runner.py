@@ -10,6 +10,8 @@
   止めない
 - 遷移の判断がルートを選ぶたびに、選択の記録（`ndf.contracts.chosen`）を状態の保存先の `progress.jsonl` へ追記する。
   書くのは耐久ステップで、回復で判断を流し直しても同じ選択を 2 回書かない
+- ステップの子へ、割り付けの単位・費用を負う割り付け ID・引き上げの理由・工程のモードを環境変数で渡し、worker の起動の
+  値を記録して、修正と作業場所の用意の効果指標を書く（#2944）
 - ステップの結果 JSON の `outputs` を回をまたいで `outputs.json` に重ね（後のステップの値が勝つ）、プランの結果の `outputs` に載せる。
   `outputs.gaps` が空でなければ、最後まで ok で流れてもプランの結果は incomplete でその欠けを持つ（レビューの欠けを
   CI の後まで引き継ぐ）
@@ -20,6 +22,7 @@
 from __future__ import annotations
 
 import functools
+import logging
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -28,7 +31,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import cli, identity
-from ndf.adapters import git
+from ndf.adapters import claude_choice, git
 from ndf.contracts import chosen, limits, result, routing, worker_kinds, worker_paths
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import actors, durable, durable_locks, loop
@@ -36,13 +39,17 @@ from ndf.core.plan import assemble_decide, model, queue_decide, steps, transitio
 from ndf.core.plan.files import read_json, write_json
 from ndf.core.plan.records import (
     PROGRESS_FILE,
+    _add_models,
     _add_outputs,
     _add_prs,
     _keep_step_gaps,
     read_result,
+    read_units,
+    recorded_models,
     recorded_outputs,
     recorded_prs,
     recorded_step_gaps,
+    write_units,
 )
 from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcome, RunStep, Sleep
 
@@ -71,6 +78,11 @@ TOPIC_RETRY = "retry-wait"
 # 承認の回答を 1 回に待つ秒の方針（contracts/limits/）。期限で回答が無ければ待ち直す（回答の来ない承認ゲートを打ち切らない）
 ANSWER_WAIT = "supervise.answer-wait"
 POLL = durable.POLL
+# 単位を回と工程で 1 つにする工程（`<回の id>:<工程>`）と、ステップごとにする工程（`<回の id>:<ステップ>`）。費用を負う順（#2944）
+RUN_UNITS = ("impl", "design")
+STEP_UNITS = ("fix", "mechanical")
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -186,17 +198,124 @@ def plan_step_env(run_id: Optional[str], step_id: str, nth: int) -> dict[str, st
     return env
 
 
+def _work_stage(step: model.Step) -> Optional[str]:
+    """ステップの worker の作業の工程。worker のステップでないか、工程の無い作業なら None。"""
+    return None if step.work is None else claude_choice.pick_stage("worker", step.work)
+
+
+def _run_units(state_dir: Path, run_id: Optional[str]) -> dict[str, Any]:
+    """回 `run_id` の割り付けの記録。前の回の記録は使わない。"""
+    found = read_units(state_dir)
+    return found if found.get("run") == run_id else {"run": run_id}
+
+
+def _step_env(spec: dict[str, Any], step: model.Step, act: RunStep) -> dict[str, Optional[str]]:
+    """ステップの子へ渡す環境変数。値が None の名前は、親から継いだ値を子の環境から外す（#2944）。
+
+    費用を負う割り付け ID は、worker でないステップ（実装、無ければ設計の割り付け）と、`fix`・`ci-fix` の worker
+    （実装の割り付け）に付ける。工程のモードは工程の入力の `mode`（差し込みの値）である。
+    """
+    run_id = spec.get("run_id")
+    stage = _work_stage(step)
+    unit = None
+    if run_id and stage in RUN_UNITS:
+        unit = f"{run_id}:{stage}"
+    elif run_id and stage in STEP_UNITS:
+        unit = f"{run_id}:{step.id}"
+    held = _run_units(Path(spec["state_dir"]), run_id)
+    assigns = held["assigns"] if "assigns" in held else {}
+    if step.work is None:
+        charge = next((assigns[s] for s in RUN_UNITS if s in assigns), None)
+    else:
+        charge = assigns.get("impl") if step.work in model.CHECK_FIXES else None
+    mode = spec["values"].get("mode")
+    return {
+        **plan_step_env(run_id, step.id, act.nth),
+        identity.env_name("unit-id"): unit,
+        identity.env_name("charge-to"): charge,
+        model.retry_cause_env(): act.retry,
+        identity.env_name("workflow-mode"): None if mode == "" else mode,
+    }
+
+
+def _quality_of(out: Mapping[str, Any]) -> Optional[float]:
+    """検査のステップの結果が表す修正の効果。検査できていなければ None。"""
+    if out["status"] == OK:
+        return 1.0
+    return 0.0 if out["status"] == STOPPED and out["kind"] in transition_decide.FAILED_CHECKS else None
+
+
+def _report(assign_id: str, quality: float, step: model.Step, out: Mapping[str, Any]) -> None:
+    claude_choice.report_outcome(assign_id, quality, {"step": step.id, "status": out["status"], "cause": out["kind"]})
+
+
+def _judge_pending(pending: list[dict[str, str]], step: model.Step, out: Mapping[str, Any]) -> list[dict[str, str]]:
+    """検査のステップ `step` が確かめる、結果待ちの修正の効果指標を書き、残る修正を返す。"""
+    quality = _quality_of(out)
+    if quality is None:
+        return pending
+    for fix in (f for f in pending if f["work"] in step.verifies):
+        _report(fix["assign_id"], quality, step, out)
+    return [f for f in pending if f["work"] not in step.verifies]
+
+
+def _after_unit(state_dir: Path, step: model.Step, out: Mapping[str, Any]) -> None:
+    """ステップの後に、工程の割り付け ID を残し、修正と作業場所の用意の効果指標を書く（#2944）。
+
+    修正は 1 回目の実行だけが対象で、止まれば 0、通れば後で最初に確かめる検査の結果で書く。作業場所の用意は完了が 1、
+    停止が 0。記録を書けなければ警告を出して続け、ステップの結果は変えない。`out` は回の id（`run`）と何回目か（`nth`）を持つ。
+    耐久ステップの回復で同じ実行を流し直しても記録が変わらないよう、結果待ちの修正はステップごとに 1 件にする。
+    """
+    held = _run_units(state_dir, out["run"])
+    assigns = held["assigns"] if "assigns" in held else {}
+    pending = _judge_pending(held["pending"] if "pending" in held else [], step, out)
+    launch = out.get("launch")
+    assign_id = launch.get("assign_id") if launch else None
+    stage = _work_stage(step) if assign_id else None
+    if stage in RUN_UNITS:
+        assigns = {**assigns, stage: assign_id}  # 単位に 2 つの ID があれば、最後の起動の ID
+    elif stage == "mechanical" and out["status"] in (OK, STOPPED):
+        _report(assign_id, 1.0 if out["status"] == OK else 0.0, step, out)
+    elif stage == "fix" and out["nth"] == 1:
+        pending = [f for f in pending if f["step"] != step.id]
+        if out["status"] == STOPPED:
+            _report(assign_id, 0.0, step, out)
+        elif out["status"] == OK:
+            pending = [*pending, {"step": step.id, "assign_id": assign_id, "work": step.work}]
+    new = {"run": out["run"], "assigns": assigns, "pending": pending}
+    if new == {"assigns": {}, "pending": [], **held}:
+        return
+    try:
+        write_units(state_dir, new)
+    except OSError as exc:  # ファイル: 記録を書けなくても工程の結果は変えない（その単位は数えない）
+        log.warning("割り付けの記録を %s へ書けない: %s", state_dir, exc)
+
+
+def _keep_launch(state_dir: Path, step: model.Step, out: Mapping[str, Any]) -> None:
+    """起動の値をプランの記録に残し、単位の記録を進める。"""
+    if out.get("launch"):
+        try:
+            _add_models(state_dir, out["run"], step.id, out["launch"])
+        except OSError as exc:  # ファイル: 記録を書けなくても工程の結果は変えない
+            log.warning("起動の値の記録を %s へ書けない: %s", state_dir, exc)
+    _after_unit(state_dir, step, out)
+
+
 @durable.step
-def run_step(spec: dict[str, Any], step_id: str, attempt: int, nth: int = 1) -> dict[str, Any]:
+def run_step(spec: dict[str, Any], step_id: str, attempt: int, nth: int = 1, retry: Optional[str] = None) -> dict[str, Any]:
     """ステップを 1 回打つ耐久ステップ。済んだ呼び出しは回復のときに打ち直さない。
 
     `nth` はそのプランの実行でそのステップを実行した何回目かで、プランの実行の id・ステップの id と一緒に子の環境へ渡す（#1959）。
+    `retry` は引き上げの理由で、単位・費用を負う割り付け ID・工程のモードと一緒に子の環境へ渡す（`_step_env`。#2944）。
     承認待ちで止まれば提示の写しを、書いた回の id と組で残す（旧い形の目印を補うとき、同じ回の写しかを確かめる）。
     """
     plan = model.parse(spec["plan"])
-    ctx = steps.StepContext(plan, Path(spec["state_dir"]), dict(spec["values"]), plan_step_env(spec.get("run_id"), step_id, nth))
-    out = steps.run(ctx, plan.step(step_id))
-    out["attempt"] = attempt
+    step = plan.step(step_id)
+    env = _step_env(spec, step, RunStep(step_id, attempt, nth, retry))
+    ctx = steps.StepContext(plan, Path(spec["state_dir"]), dict(spec["values"]), env)
+    out = steps.run(ctx, step)
+    out.update(attempt=attempt, nth=nth, run=spec.get("run_id"))
+    _keep_launch(ctx.state_dir, step, out)
     if out["status"] == GATE:
         shown = _pick_shown(out)
         write_json(step_presented_path(ctx.state_dir, step_id), {"step": step_id, "run": spec.get("run_id"), **shown})
@@ -240,7 +359,7 @@ def clear_waiting(path: str) -> None:
 def _perform(spec: dict[str, Any], act: Any) -> Outcome:
     """手を実行する。ステップは耐久ステップ、待ちは耐久の recv で行う。"""
     if isinstance(act, RunStep):
-        out = run_step(spec, act.step, act.attempt, act.nth)
+        out = run_step(spec, act.step, act.attempt, act.nth, act.retry)
         return Outcome(out["status"], out["kind"], out["retry_after"])
     if isinstance(act, Sleep):
         durable.recv(TOPIC_RETRY, act.seconds)
@@ -675,9 +794,12 @@ def _result_of(inv: Invocation, final: Optional[dict[str, Any]], status: Optiona
 
 
 def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optional[str]) -> dict[str, Any]:
-    """終わった回の結果。状態の保存先の記録（載った PR・ステップの outputs）を読み、`_result_of` で組む。"""
+    """終わった回の結果。状態の保存先の記録（載った PR・ステップの outputs・起動の値）を読み、`_result_of` で組む。"""
     items = [_run_item(inv), *_pr_items(inv.state_dir)]
-    metrics = {"round": inv.round_no, "steps": final["count"] if final else 0}
+    metrics: dict[str, Any] = {"round": inv.round_no, "steps": final["count"] if final else 0}
+    models = recorded_models(inv.state_dir, inv.run_id)
+    if models:
+        metrics["models"] = models
     outputs, warnings = recorded_outputs(inv.state_dir)
     shared = {"outputs": outputs, "warnings": warnings, "run_id": inv.run_id}
     return _result_of(inv, final, status, _FinalRecords(items, metrics, outputs, shared, recorded_step_gaps(inv.state_dir)))

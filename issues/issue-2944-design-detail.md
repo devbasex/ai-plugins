@@ -312,7 +312,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `_after_unit` | 同 | 新設 | `_after_unit(state_dir: Path, step, out: dict) -> None` | 割り付け ID を保持し、修正と作業場所の用意の効果指標を書く |
 | `run_step` | 同 | 変更 | `run_step(spec, step_id, attempt, nth=1, retry=None)` | 上の 2 つを呼ぶ |
 | `outcome_of` | `core/plan/steps.py` | 変更 | 変えない | 結果の `metrics.launch` を拾う |
-| `_add_models`・`recorded_models` | `core/plan/records.py` | 新設 | `_add_models(state_dir, step_id, launch)`・`recorded_models(state_dir) -> dict` | ステップごとの指定した値と実際のモデルを残し、結果の `metrics.models` に載せる |
+| `_add_models`・`recorded_models` | `core/plan/records.py` | 新設 | `_add_models(state_dir, run_id, step_id, launch)`・`recorded_models(state_dir, run_id) -> dict` | ステップごとの指定した値と実際のモデルを、実行 ID（`run_id`）と一緒に残す。結果の `metrics.models` には、結果を返す実行で起動したステップだけを載せる |
 | `read_units`・`write_units` | 同 | 新設 | `read_units(state_dir) -> dict`・`write_units(state_dir, value)` | 工程の割り付け ID と、結果待ちの修正を持つ |
 
 - 作業の名前は、ステップの引数が `ndf answer work` で始まる場合の最後の語。単位は、`design`・`impl` が `<run_id>:<工程>`、`fix`・`mechanical` が `<run_id>:<ステップ>`
@@ -320,7 +320,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - `NDF_CHARGE_TO` を付けるのは次の 2 つで、ほかは外す
   - worker でないステップ。この実行に `impl`（無ければ `design`）の割り付けがある場合
   - `fix`・`ci-fix` の worker。この実行に `impl` の割り付けがある場合
-- 修正の効果指標は、修正ステップの 1 回目の実行を対象に、その修正を確かめる検査の結果で書く。検査のステップは、定義の `verifies` に修正の作業の名前を持つステップのうち、修正の後で最初に実行するものである
+- 修正の効果指標は、修正ステップの 1 回目の実行を対象に、その修正を確かめる検査の結果で書く。修正の後に、定義の `verifies` にその修正の作業の名前を持つステップ（検査のステップ）の結果を実行順に見て、効果指標を決められる最初の結果を使う。前提の不足や期限切れで決められなければ、結果待ちの修正を残し、同じ実行で次に該当する検査を待つ。同じ検査の打ち直しも対象にする
 
 | `verifies` を足す共通のステップ | 値 |
 | --- | --- |
@@ -328,6 +328,8 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `push` | `fix-push` |
 
 - 検査が `ok` なら 1。停止理由が `test_failed`・`check_failed`・`push_rejected`・`base_conflict` なら 0、ほかの理由（前提の不足、期限切れなど）なら書かない
+- 工程のモードは、工程の入力の `mode` を `NDF_WORKFLOW_MODE` でステップの子へ渡し、無ければ子の環境から外す。`launch_choice` は引数の `mode` が無ければこの値を行の `mode` にする
+- プランの実行は `model_choice` を読み込めない（`checks/children.json`）ので、作業の工程は `claude_choice.pick_stage`（差し込まれた `stage_of`）で引く（実装で決定）
 - 検査の前にある push・待ち・準備・承認ゲートのステップの結果は、指標に使わない。承認ゲートの承認や却下からは、1 も 0 も書かない。検査に届かずに実行が終われば欠測とし、行を書かない
 - 修正ステップ自体が止まれば 0。`worktree` は完了が 1、停止が 0
 
@@ -343,7 +345,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 耐久ステップの回復 | `units.json`・`models.json` | 1 つのプランは 1 本ずつステップを打つ | 回数は遷移の状態が持つので回復で同じ値になる。同じ割り付け ID の効果指標は、先に書いた行だけが有効 |
+| 耐久ステップの回復 | `units.json`・`models.json` | 1 つのプランは 1 本ずつステップを打つ | 回数は遷移の状態が持つので回復で同じ値になる。結果待ちの修正はステップごとに 1 件で持ち、同じ実行 ID・ステップ・実行回数を流し直しても増えない。同じ割り付け ID の効果指標は、先に書いた行だけが有効 |
 
 ### 単体テストの観点
 
@@ -362,7 +364,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `with_choice` | `core/converge/participants.py` | 新設 | `with_choice(spec: agents.Launch, choice: Optional[Any]) -> agents.Launch` | `review_launch`・`read_only_launch`・`reading_launch` が組み立てた起動に組の引数と環境を足し、Codex は `usage_args` を足す |
-| `answer_text` | 同 | 変更 | 変えない | `<出力>.answer` があれば、その本文を読む |
+| `answer_text` | 同 | 変更 | 変えない | codex の `--json` の出力で `<出力>.answer` があれば、その本文を読む |
 | `_start_and_watch` | `adapters/agents.py` | 変更 | 変えない | `AgentStatus.seconds` に起動から終了までの秒を入れる |
 | `codex_usage` | 同 | 新設 | `codex_usage(out: Path) -> Optional[CodexUsage]` | `turn.completed` の行の `usage` を足し合わせる |
 | `codex_cost` | `domains/records/usage.py` | 新設 | `codex_cost(used: Any, model: Optional[str]) -> tuple[str, Optional[float]]`（`used` は `agents.CodexUsage`） | 換算に使ったモデルの名前と、単価表から求めた USD を返す。単価の無いモデルの USD は None |
@@ -380,10 +382,10 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - シートの子の環境から `NDF_CHARGE_TO` を外す
 - `codex exec --json` は失敗の理由を標準エラーに出さないので、利用上限とサンドボックスの失敗は標準出力のイベントからも検出する
   - 監視中の利用上限の検出は、`error`・`turn.failed` の行の文を `usage_limit` で調べる。`CodexTail` で追記された完全な行だけを読み、起動の終了時には改行のない最後の行も読む
-  - サンドボックスの失敗の検出（`sandbox_failed`）は、`codex_events` で出力全体を読み、`type` が `item.completed` のイベントを調べる。そのイベントの `item` の `type` が `command_execution` のとき、`item` の `exit_code` が 0 でなく、`aggregated_output` が `bwrap:` で始まれば失敗とする
+  - サンドボックスの失敗の検出（`sandbox_failed`）は、`codex_events` で標準出力全体を読み、`type` が `item.completed` のイベントから `item.type` が `command_execution` のものを抽出する。その `item` の `exit_code` が 0 以外で、かつ `aggregated_output` が `bwrap:` で始まる場合に、サンドボックスの失敗と判定する
   - どちらも、標準出力の最初の行が `thread.started` イベントの場合だけ、後続の行を Codex のイベントとして扱う。最初の行がそうでなければ、後の行に `thread.started` があっても扱わない
   - コマンドの出力で見つけた失敗は、出力の行でなく固定の文を返す。返す値は PR のコメントに載り、出力の行は手元のパスやコマンドが出したデータを含み得るためである
-- 起動の前に回答のファイル（`<出力>.out.answer`）を消す（`_start`）。codex は失敗すると前の中身を残すためである
+- 回答のファイル（`<出力>.out.answer`）を回答先に指定した起動は、起動の前にそのファイルを消す（`_start`）。codex は失敗すると前の中身を残すためである。指定しない起動は消さない。`answer_text` が回答のファイルを読むのは codex の `--json` の出力だけなので、残った古い回答は読まれない
 - 実装で設計の形を変えた理由（B5）。振る舞いは変えていない
   - 値を起動の組み立ての関数の引数にしないのは、引数を足すと上限（PLR0913。6）を超え、cross-refactoring が呼ぶ関数の形も変わるためである
   - 使用量を辞書で持たないのは、欄の名前の文字列を複数のファイルに置くと重複の検査が落とすためである
