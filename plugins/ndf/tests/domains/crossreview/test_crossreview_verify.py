@@ -48,7 +48,7 @@ def test_issue_4363_select_passes_ordinary_findings_and_never_redline_or_ndf(use
 
 
 @pytest.mark.parametrize("marks", [{"mvv": "Value 5"}, {"protect": ["secret"]}])
-def test_issue_4363_select_passes_marked_findings_alone_only_for_their_tracks(marks: dict) -> None:
+def test_issue_4363_select_passes_registered_findings_alone_only_for_their_tracks(marks: dict) -> None:
     """下がらない指摘だけのラウンドは、回答の種類を使う処理があるときだけ判定役へ渡す。"""
     rows = [_row(**marks)]
     assert verify_decide.select(rows) == []
@@ -295,33 +295,43 @@ def _aged(*paths: Path) -> None:
         os.utime(path, (past, past))
 
 
-def test_issue_4363_ask_drops_only_the_listed_records_past_the_keep_period(tmp_path: Path) -> None:
-    """片付けるのは保存した記録の一覧に載るものだけで、同じ形の名前でも一覧に無いファイルは残す。"""
+def _registered(directory: Path, name: str, inode: int) -> Path:
+    mark = directory / f"{name}.owned-{inode}"
+    mark.touch()
+    return mark
+
+
+def test_issue_4363_ask_drops_only_the_registered_records_past_the_keep_period(tmp_path: Path) -> None:
+    """片付けるのは登録ファイルと合う記録だけで、同じ形の名前でも登録の無いファイルや登録ファイルと合わないファイルは残す。"""
     run, diff = _AskRun(tmp_path), _diff(tmp_path)
     verify.ask(run, 1, [_row()], {"r1-1": [diff]}, _launcher([], []))
     records = tmp_path / judge_records.RECORD_DIR
     saved = list(records.iterdir())
-    unlisted = records / "round1-verify-ab12_cd3.out"
-    unlisted.write_text("利用者の退避", encoding="utf-8")
-    _aged(unlisted, *saved)
+    unmarked, replaced = records / "round1-verify-ab12_cd3.out", records / "round1-verify-ef45_gh6.out"
+    for path in (unmarked, replaced):
+        path.write_text("利用者の退避", encoding="utf-8")
+    stale = _registered(records, replaced.name, replaced.stat().st_ino + 1)
+    # 保存の途中で止まった登録ファイルは古ければ消し、新しければ並行する保存のために残す
+    left = _registered(records, "round1-verify-ij78_kl9.out", 1)
+    fresh = _registered(records, "round1-verify-mn01_op2.out", 1)
+    _aged(unmarked, replaced, stale, left, *saved)
     verify.ask(run, 2, [_row()], {"r1-1": [diff]}, _launcher([], []))
-    assert saved and not any(p.exists() for p in saved) and unlisted.exists()
-    listed = json.loads((tmp_path / judge_records.RECORD_LIST).read_text(encoding="utf-8"))["record_names"]
-    assert not {p.name for p in saved} & set(listed)
+    assert saved and not any(p.exists() for p in (*saved, stale, left))
+    assert unmarked.exists() and replaced.exists() and fresh.exists()
 
 
 def test_issue_4363_ask_does_not_follow_a_linked_record_directory(tmp_path: Path) -> None:
     """記録のディレクトリを開けなければ、片付けと保存を飛ばして過程に残し、判定役は起動する。リンクの先は触らない。"""
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    name = "round1-verify-ab12_cd3.out"
-    (elsewhere / name).write_text("別の場所", encoding="utf-8")
-    _aged(elsewhere / name)
+    record = elsewhere / "round1-verify-ab12_cd3.out"
+    record.write_text("別の場所", encoding="utf-8")
+    mark = _registered(elsewhere, record.name, record.stat().st_ino)
+    _aged(record, mark)
     (tmp_path / judge_records.RECORD_DIR).symlink_to(elsewhere)
-    (tmp_path / judge_records.RECORD_LIST).write_text(json.dumps({"record_names": [name]}), encoding="utf-8")
     run, seen = _AskRun(tmp_path), []
     verify.ask(run, 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher(seen, [holding(_row())]))
-    assert len(seen) == 1 and [p.name for p in elsewhere.iterdir()] == [name]
+    assert len(seen) == 1 and sorted(elsewhere.iterdir()) == [record, mark]
     assert [note for note in run.notes if "片付けない" in note[2]]
 
 

@@ -54,7 +54,7 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/domains/crossreview/reviewing.py` | 新設 | 相手役へ渡す資料と指示を組み、席を起動する | `seats`・`criteria_decide`・`prior_decide`・`changes`・`scope_decide` | モジュール、`Prepared`、`Reviewed`、`FilledRead`、`ReviewingRun`（Protocol） | 変更（移動）: `write_diff`・`remarks`・`remarks_file`・`review_prompt`・`review_round`・`_fill_seats`・`_prompt_diffs`・`_full_diff` |
 | `plugins/ndf/src/ndf/domains/crossreview/verify_decide.py` | 新設 | 確かめる指摘を選び、指示を組み、回答を読み、下げるかを決める | `criteria_decide` | モジュール、`Verdict`、`Answers` | 新設: `select`・`instruction`・`read`・`lowers` |
 | `plugins/ndf/src/ndf/domains/crossreview/verify.py` | 新設 | 読むだけの claude を 1 回起動して回答を返す | `verify_decide`・`judge_records`・`participants` | モジュール、`VerifyRun`（Protocol） | 新設: `ask` |
-| `plugins/ndf/src/ndf/domains/crossreview/judge_records.py` | 新設 | 判定役の記録を残し、期限を過ぎたものを片付ける | `store`・`contracts` | モジュール、`Noting`（Protocol） | 新設: `keep`・`drop_old` |
+| `plugins/ndf/src/ndf/domains/crossreview/judge_records.py` | 新設 | 判定役の記録を残し、期限を過ぎたものを片付ける | `contracts` | モジュール、`Noting`（Protocol） | 新設: `keep`・`drop_old` |
 | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 指摘の種類の一覧と、相手役への `protect` の指示を持つ | `contracts` | モジュール | 新設: `protect_kinds`・`track_kinds`・`protect_of`・`document_line` / 変更: `reviewer_block`・`downgraded` |
 | `plugins/ndf/src/ndf/domains/crossreview/journal.py` | 変更 | 行に `protect` と `check` を書き、下げる・戻すを決める | `criteria_decide`・`verify_decide` | `FindingJournal`、`Checked` | 新設: `apply_checks` / 変更: `enter`・`_raised`・`_raised_again`・`_revive` |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | 指摘を入れた直後に判定役を呼ぶ | `carry`・`reviewing`・`verify` | `_Run` | 新設: `_confirm_heavy` / 変更: `_round` |
@@ -307,8 +307,14 @@ plugins/ndf/
     2. `criteria_decide.criteria_lines(run.cfg.settings.focus, snapshot)` を呼ぶ。`snapshot` は、承認済みの MVV があれば `run.snapshot._replace(path=<本文の写し>, principles_path=<共通原則の写し>)`、無ければ `run.snapshot` である
     3. 2 の戻り値の後に `criteria_decide.document_line(run.documents, rows)` の戻り値を加え、`instruction` に渡す
   - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は、状態の保存先に起動ごとに作るディレクトリ（`tempfile.mkdtemp`。権限 0700）の `round<n>-verify.*` に書く。前からあるファイルやシンボリックリンクは開かない。指摘の一覧は、権限 0700 の資料のディレクトリに書く。起動の前に `judge_records.drop_old` で古い記録を片付け、起動の後は成功でも失敗でも `judge_records.keep` で記録を残す（下の箇条書き）。過程の行と注意を `run.note` で足す
-  - 記録の保存（`judge_records.keep`）: 出力のファイルを権限 0600 にして、状態の保存先の下の記録専用のディレクトリ `ndf-judge-records/`（無ければ権限 0700 で作る）へ移し、起動ごとのディレクトリを消す。移し先の名前は、各ファイル名の `round<n>-verify` を `round<n>-verify-<起動ごとの接尾辞>`（起動ごとのディレクトリの名前）に替え、残りの部分は保持する。移すには `os.link` を使い、前からあるファイルやリンクは置き換えない（「[設計との食い違い](#設計との食い違い)」）。移せた名前だけを、状態の保存先の一覧のファイル `ndf-judge-records.json`（`{"record_names": [<名前>]}`）に足す
-  - 古い記録の片付け（`judge_records.drop_old`）: 消すのは、一覧に載る名前の通常のファイルのうち、更新から `cross-review.judge-record.keep`（30 日）を過ぎたものだけで、消した名前は一覧から外す。一覧に載る名前でも、`round<n>-verify-<接尾辞>` に `.out`・`.err.log`・`-launch.json`・`-progress.log` のどれかを付けた形でなければ扱わない。一覧に無いファイルは、同じ形の名前でも消さない
+  - 記録の保存（`judge_records.keep`）: 出力のファイルを権限 0600 にして、状態の保存先の下の記録専用のディレクトリ `ndf-judge-records/`（無ければ権限 0700 で作る）へ移し、起動ごとのディレクトリを消す。移し先の名前は、各ファイル名の `round<n>-verify` を `round<n>-verify-<起動ごとの接尾辞>`（起動ごとのディレクトリの名前）に替え、残りの部分は保持する。移すには `os.link` を使い、前からあるファイルやリンクは置き換えない（「[設計との食い違い](#設計との食い違い)」）。後で NDF が作った記録だと確かめられるように、移す前に、記録ごとの登録ファイルを同じディレクトリに作る。登録ファイルは空のファイルで、名前は `<移し先の名前>.owned-<記録の inode 番号>` である
+    - 登録ファイルを作れなければ、その記録は移さない。移せなかった記録は起動ごとのディレクトリと一緒に消し、理由を過程に残す。判定の結果は変えない
+    - 登録ファイルを作った後、記録を移す前にプロセスが止まると、登録ファイルだけが残る。残った登録ファイルは、残す期間を過ぎた後の片付けが消す
+    - 登録ファイルは記録ごとに別のファイルである。同じ状態の保存先で判定役が並行して動いても、互いの登録を失わない
+  - 古い記録の片付け（`judge_records.drop_old`）: `ndf-judge-records/` の登録ファイルを 1 つずつ確かめる。登録ファイルの中身は開かず、名前だけを読む。残す期間は `cross-review.judge-record.keep`（30 日）である
+    - 登録ファイルの名前の記録が通常のファイルで、inode 番号が登録ファイルと同じ場合は、記録の更新から残す期間を過ぎていれば、記録と登録ファイルを消す
+    - それ以外の場合（記録が無い、inode 番号が違う、通常のファイルでない）は、登録ファイルの更新から残す期間を過ぎていれば、登録ファイルだけを消す。新しい登録ファイルを残すのは、並行する保存がまだ記録を移していない場合があるためである
+    - 記録の名前が `round<n>-verify-<接尾辞>` に `.out`・`.err.log`・`-launch.json`・`-progress.log` のどれかを付けた形でない登録ファイルは扱わない。登録の無いファイルは、記録と同じ形の名前でも消さない
   - ディレクトリの開き方: `ndf-judge-records/` はリンクをたどらずに開き（`O_NOFOLLOW`）、保存と削除は開いたディレクトリを基準にする。リンクである・ディレクトリでない・読めないときは、保存と片付けを飛ばして理由を過程に残し、判定役の起動は続ける
 
 ### 異常系の処理
@@ -319,7 +325,7 @@ plugins/ndf/
 | `ask` | 起動が終わらない | 利用上限・無進捗・監視の上限・起動の拒否 | `launch` の返す状態が `done` でない | 既定値で続ける（どの指摘も下げない） | `warnings` に状態を 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
 | `ask` | 差分・指摘の一覧・MVV の本文と共通原則の写しのどれかを読めない | claude の `permission_denials` にそのファイルがある | `participants.denied_reads` | 既定値で続ける | `warnings` にファイル名（絶対パスは過程にだけ） | 同上 |
 | `ask` | 回答が読めない | 出力が無い・JSON でない・`verdicts` の配列が無い | `participants.claude_answer` と `listed_of` | 既定値で続ける | `warnings` に 1 行 | 同上 |
-| `ask` | 出力の記録を `ndf-judge-records/` へ移せない | `ndf-judge-records/` がシンボリックリンクかファイルである、または読めない・移し先が書けない・同じ名前のファイル・リンク・ディレクトリがある・保存先がハードリンクを作れない | 起動の後の `OSError` | 回答の扱いは変えず、記録を作ったディレクトリと一緒に消す | 過程にだけ 1 行。終了コードは変えない | 記録は残らない |
+| `ask` | 出力の記録を `ndf-judge-records/` へ移せない | `ndf-judge-records/` がシンボリックリンクかファイルである、または読めない・移し先が書けない・同じ名前のファイル・リンク・ディレクトリがある・登録ファイルを作れない・保存先がハードリンクを作れない | 起動の後の `OSError` | 回答の扱いは変えず、記録を作ったディレクトリと一緒に消す | 過程にだけ 1 行。終了コードは変えない | 記録は残らない |
 
 ### ログと記録の出力
 
