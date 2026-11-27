@@ -294,8 +294,11 @@ def _recorded_listing(recorded: units_files.Tree) -> tuple[Optional[Listing], st
     """
     try:
         return recorded.listing(), ""
-    except GitError:  # noqa: NDF401 git: コミットが手元に無いので取得して読み直す
-        pass
+    except GitError:
+        return _fetched_listing(recorded)
+
+
+def _fetched_listing(recorded: units_files.Tree) -> tuple[Optional[Listing], str]:
     git = Git(recorded.root)
     done = None
     try:
