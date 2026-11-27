@@ -11,7 +11,7 @@
 ので記録が無いのと同じに扱う。一時のファイルは作らない（名前の長さの上限と、強制終了で残るファイルを増やさない。r3-2・r3-5）。
 書き込みの失敗・書き切れなかったことに気づいた起動は、その場で出力を空に戻し記録を消してから失敗を返す（r3-3・r3-4）。
 出力は承認の記録を組む `build`（`worker_paths.read_file(owned=True)`）が読むので、読める形にする。書くときにグループとほかの
-利用者の書き込み権限を外し、新しく作ったファイルが親から継いだ macOS の拡張 ACL を外す。オーナーが違う・ハードリンクがある・
+利用者の書き込み権限を外し、新しく作ったファイルが親から継いだ macOS の拡張 ACL は所有者限定の権限に絞ってから外す。オーナーが違う・ハードリンクがある・
 拡張 ACL のある既存の出力は、直すと利用者の設定が変わるので、`check` が相手役を起動する前に止める（PR 4686）。
 
 1 回の書き込みの途中で電源断などにより止まり、出力か記録の一部だけが残った場合は、変えずに `precondition` で止まる。
@@ -41,6 +41,8 @@ RECORD_MODE = 0o600
 OUTPUT_MODE = 0o644
 # 承認の記録の読み手が拒むので、出力へ書くときに外す権限
 OTHERS_WRITE = stat.S_IWGRP | stat.S_IWOTH
+# 親から拡張 ACL を継いだ新しい出力の権限
+OWNER_ONLY = 0o600
 
 
 class Unowned(Exception):
@@ -156,8 +158,11 @@ def _make_readable(fd: int, path: Path) -> None:
     mode = stat.S_IMODE(os.fstat(fd).st_mode)
     if mode & OTHERS_WRITE:
         os.fchmod(fd, mode & ~OTHERS_WRITE)
+    # 拡張 ACL のある既存の出力は `check` が止めるので、ここで見つかるのは新しく作ったファイルが継いだものだけである
+    if worker_paths.has_darwin_acl(fd):
+        # 継いだ ACL は読み取りを拒む項目を持ちうる。外した後に読める人が広がらないよう、先に所有者限定にする（PR 4686 の r2-2）
+        os.fchmod(fd, OWNER_ONLY)
     try:
-        # 拡張 ACL のある既存の出力は `check` が止めるので、ここで外すのは新しく作ったファイルが継いだものだけである
         worker_paths.drop_darwin_acl(fd, path.name)
     except worker_paths.EntryError as exc:
         raise OSError(f"{path} の拡張 ACL を外せない") from exc

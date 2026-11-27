@@ -51,6 +51,16 @@ def test_group_write_is_removed_from_an_existing_output(tmp_path: Path) -> None:
     assert (out.stat().st_ino, stat.S_IMODE(out.stat().st_mode)) == (ino, 0o644)
 
 
+def test_new_output_with_an_inherited_acl_is_owner_only_before_the_acl_is_dropped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """継いだ拡張 ACL が読み取りを拒んでいても、外した後に読める人が広がらない（PR 4686 の r2-2）。"""
+    out = tmp_path / "reviewed-head"
+    seen: list[int] = []
+    monkeypatch.setattr(outputs.worker_paths, "has_darwin_acl", lambda _fd: True)
+    monkeypatch.setattr(outputs.worker_paths, "drop_darwin_acl", lambda fd, _name: seen.append(stat.S_IMODE(os.fstat(fd).st_mode)))
+    outputs.write_recorded(out, "x\n")
+    assert seen == [0o600] and stat.S_IMODE(out.stat().st_mode) == 0o600
+
+
 def test_hardlinked_output_is_refused_before_the_review(tmp_path: Path) -> None:
     """承認の記録の読み手が拒むハードリンクのある出力は、何も変えずに `OSError`。"""
     out = tmp_path / "reviewed-head"
