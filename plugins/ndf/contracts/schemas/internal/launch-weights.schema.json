@@ -38,7 +38,7 @@
               "window_days": {"type": "integer", "minimum": 1, "maximum": 365}
             }
           },
-          "probs": {"type": "array", "items": {"type": "number", "minimum": 0}, "description": "組ごとの確率。adaptive の項目は必ず持ち（割り付けがこの確率で抽選する）、burn_in の項目は持たない"},
+          "probs": {"type": "array", "minItems": 1, "items": {"type": "number", "minimum": 0, "maximum": 1}, "description": "組ごとの確率。adaptive の項目は必ず持ち（割り付けがこの確率で抽選する）、burn_in の項目は持たない。候補の組との対応と合計が 1 であることは、スキーマで表せないので ndf.contracts.internal の種類 launch-weights の追加の検証で確かめる"},
           "models": {"type": "object", "additionalProperties": {"type": "string"}, "description": "計算に使った実際のモデル（まとまり → モデル）"},
           "counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}, "description": "組ごとの計算に使った件数"},
           "cutoffs": {

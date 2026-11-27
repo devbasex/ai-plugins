@@ -663,12 +663,17 @@ class _Unit:
 
 
 def _weights_entry(u: _Unit) -> Optional[dict[str, Any]]:
-    """出現率のファイルの、同じリポジトリ・工程・ランタイム・互換性のキーの項目。無いか読めなければ None。"""
+    """出現率のファイルの、同じリポジトリ・工程・ランタイム・互換性のキーの項目。無いか読めなければ None。
+
+    ファイルは書き手と同じ内部データの検証（`internal.check_record`）で確かめ、合わなければ項目なしとする。抽選に使えない確率を
+    持つ項目で起動を止めないためである。
+    """
     path = _store_file(u.store, WEIGHTS)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        internal.check_record(WEIGHTS, data)
         found = [e for e in data["entries"] if u.where.of(e) and not _past(e, u.now)]  # 掃除の後に期限を過ぎた項目も使わない
-    except (OSError, ValueError, KeyError, TypeError):  # noqa: NDF401 ファイル: 無いか壊れた出現率のファイルは項目なし（均等に抽選する）
+    except (OSError, ValueError, KeyError, TypeError, internal.InternalError):  # noqa: NDF401 ファイル: 無いか形の違う出現率のファイルは項目なし（均等に抽選する）
         return None
     return found[-1] if found else None
 
