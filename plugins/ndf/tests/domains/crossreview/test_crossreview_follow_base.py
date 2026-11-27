@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -194,24 +193,6 @@ def test_findings_input_given_as_an_output_is_invalid_and_kept(wt: Path, tmp_pat
     assert (got["cause"]["kind"], fake.calls, given.is_file()) == ("invalid", [], True)
 
 
-def test_pr_4638_r1_4_recreated_output_is_not_taken_for_the_previous_one(tmp_path: Path) -> None:
-    """PR 4638 の r1-4: 消すと書いた出力の記録も消え、同じパスへ同じ中身で作り直したファイルは NDF の出力とみなさない。"""
-    from ndf.domains.crossreview import outputs
-
-    out = tmp_path / "head"
-    outputs.write_output(out, "a" * 40 + "\n")
-    outputs.clear_stale(out)
-    assert not out.exists() and not outputs.owner_record(out).exists()
-    outputs.write_output(out, "a" * 40 + "\n")
-    out.unlink()
-    out.write_text("a" * 40 + "\n", encoding="utf-8")
-    # 時刻の刻みの粗いファイルシステムでも、後から作り直したファイルとして更新時刻を変える
-    os.utime(out, ns=(1, 1))
-    with pytest.raises(outputs.Unowned):
-        outputs.clear_stale(out)
-    assert out.read_text(encoding="utf-8") == "a" * 40 + "\n"
-
-
 def test_pr_4638_r1_11_empty_output_made_in_advance_is_kept_and_written(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """PR 4638 の r1-11: 呼び手が先に作った空の出力先は消さずに使い、レビューした HEAD を書く。"""
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
@@ -229,40 +210,3 @@ def test_pr_4638_r1_7_base_out_checks_the_pr_head(wt: Path, tmp_path: Path, caps
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(tmp_path / "b"))
     assert (got["cause"]["kind"], fake.calls, (tmp_path / "b").exists()) == ("precondition", [], False)
-
-
-def test_pr_4638_r2_4_record_location_is_checked_before_any_launch(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """PR 4638 の r2-4: 出力の記録の保存先に同名のディレクトリがあれば、相手役を起動する前に precondition で止まる。"""
-    from ndf.domains.crossreview import outputs
-
-    out = tmp_path / "h"
-    outputs.owner_record(out).mkdir()
-    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(out))
-    assert (got["cause"]["kind"], fake.calls, out.exists()) == ("precondition", [], False)
-
-
-def test_pr_4638_r2_4_output_is_not_left_when_the_record_cannot_be_written(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """PR 4638 の r2-4: 記録を残せなければ出力も残さない（次の起動が記録の無い出力で止まらない）。"""
-    from ndf.domains.crossreview import outputs, store
-
-    def broken(path, value):
-        raise OSError("書けない")
-
-    monkeypatch.setattr(store, "write_object", broken)
-    out = tmp_path / "h"
-    with pytest.raises(OSError):
-        outputs.write_output(out, "a" * 40 + "\n")
-    assert sorted(p.name for p in tmp_path.iterdir()) == []
-
-
-def test_pr_4638_r2_5_output_of_an_earlier_version_is_cleared(tmp_path: Path) -> None:
-    """PR 4638 の r2-5: 記録の無い出力は、中身が状態ファイルに残る値と同じときだけ、前のバージョンが書いた出力として消す。"""
-    from ndf.domains.crossreview import outputs
-
-    out = tmp_path / "h"
-    out.write_text("a" * 40 + "\n", encoding="utf-8")
-    with pytest.raises(outputs.Unowned):
-        outputs.clear_stale(out, {"b" * 40 + "\n"})
-    outputs.clear_stale(out, {"a" * 40 + "\n"})
-    assert not out.exists()

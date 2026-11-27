@@ -657,14 +657,14 @@ def _begin_run(args: argparse.Namespace) -> Optional[int]:
         slug = repo.resolve_target_repo(args.repo, None, Path.cwd()).slug if args.repo is not None else None
     except repo.RepoUnresolved as exc:
         return _stop("invalid", str(exc))
-    earlier = _earlier_outputs(args)
     for stale in _output_paths(args):
         try:
-            outputs.clear_stale(Path(stale), earlier[stale] if stale in earlier else ())
+            outputs.clear_stale(Path(stale))
         except outputs.Unowned:
             # NDF が書いたと確かめられない既存のファイルは利用者のデータかもしれないので消さない（PR 4638 の C4）
             return _stop(
-                "precondition", f"出力先 {stale} に、NDF が書いた出力と確かめられないファイルがある。別のパスを渡すか、そのファイルを消す"
+                "precondition",
+                f"出力先 {stale} に、NDF が書いた出力と確かめられないファイルがある（記録を残さない前のバージョンが書いた出力も含む）。別のパスを渡すか、そのファイルを消す",
             )
         except OSError as exc:
             # 出力先の不備は始めに分かるので、相手役を起動する前に止める（レビューの後に書けないと分かっても遅い。#3702）
@@ -672,26 +672,6 @@ def _begin_run(args: argparse.Namespace) -> Optional[int]:
     if slug is not None:
         os.environ[GH_REPO_ENV] = slug
     return None
-
-
-def _earlier_outputs(args: argparse.Namespace) -> dict[str, set[str]]:
-    """出力先ごとの、記録を残さない前のバージョンが書いたかもしれない中身（状態ファイルのラウンドの HEAD と読んだ PR。PR 4638 の
-    r2-5）。`--reviewed-base-out` は前のバージョンに無いので無い。状態ファイルを読めなければ空。"""
-    try:
-        data = store.read_state(store.state_pr(Path(args.state_dir), args.pr))
-    except store.StateBroken:
-        return {}
-    rounds = [r for r in store.list_of(data, store.ROUNDS) if isinstance(r, dict)]
-
-    def values(key: str) -> set[str]:
-        return {f"{r[key]}\n" for r in rounds if isinstance(r.get(key), str) and r[key]}
-
-    out: dict[str, set[str]] = {}
-    if args.reviewed_out:
-        out[args.reviewed_out] = values("head")
-    if args.reviewed_pr_out:
-        out[args.reviewed_pr_out] = values(scope_decide.PR)
-    return out
 
 
 def _output_paths(args: argparse.Namespace) -> list[str]:
@@ -853,8 +833,7 @@ def _parser() -> argparse.ArgumentParser:
 
 # 出力の 3 つの引数に共通する、既存のファイルの扱い（`outputs.clear_stale`。PR 4638 の C4・r1-11）
 _OUTPUT_RULE = (
-    "前の起動が書いた出力は始めに消す（書けなかった起動の後に前の値を残さない）。記録を残さない前のバージョンが書いた出力は、"
-    "中身が状態ファイルのラウンドの値と同じときだけ消す。空のファイルは消さずに使う。出力の隣の記録"
+    "前の起動が書いた出力は始めに消す（書けなかった起動の後に前の値を残さない）。空のファイルは消さずに使う。出力の隣の記録"
     "（.<名前>.ndf-output.json）の保存先に書けなければ、レビューを始めずに precondition で停止する。"
     "NDF が書いたと確かめられない中身のあるファイル（記録の無い・書き換えた・作り直したもの）があれば、消さずにレビューを始めずに "
     "precondition で停止する"
