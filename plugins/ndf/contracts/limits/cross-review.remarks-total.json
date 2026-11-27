@@ -2,6 +2,6 @@
   "summary": "cross-review が相手役へ渡す既存の PR のコメント全体の上限（字）。超えたら古いものから省く（履歴の長い PR でプロンプトと CLI の引数が伸びない）",
   "count": 8000,
   "read_by": [
-    "ndf.domains.crossreview.drive"
+    "ndf.domains.crossreview.reviewing"
   ]
 }

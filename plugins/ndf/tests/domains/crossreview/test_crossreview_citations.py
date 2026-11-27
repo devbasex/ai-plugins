@@ -13,7 +13,7 @@ import pytest
 
 from ndf.adapters import git, markdown
 from ndf.contracts import result
-from ndf.domains.crossreview import changes, drive, fixer, store
+from ndf.domains.crossreview import changes, drive, fixer, reviewing, store
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.changes import DiffFile, Target
 from ndf.domains.records import mvv
@@ -283,11 +283,11 @@ def test_only_the_round_that_reads_the_whole_diff_keeps_it(repos: Repos, wt: Pat
     """全差分を読むラウンドだけが全差分のファイルを残し、どのラウンドも head の Markdown の本文を持つ。相手役へ渡す差分は、
     利用者の設定によらない同じ形になる。"""
     sh(wt, "config", "diff.noprefix", "true")
-    prepared: list[drive._Prepared] = []
+    prepared: list[reviewing.Prepared] = []
     targets: list[Target] = []
     prepare = drive._prepare_round
 
-    def kept(run: Any, round_no: int) -> drive._Prepared:
+    def kept(run: Any, round_no: int) -> reviewing.Prepared:
         prepared.append(prepare(run, round_no))
         targets.append(run.last_target)
         return prepared[-1]
@@ -429,13 +429,13 @@ def test_issue_4090_4_failed_round_is_checked_again_before_the_verdict(repos: Re
     _push_pr(repos, "doc.md", "# 設計", WRONG)
     read = changes._diff_files
     failing = _git_fails(monkeypatch, "_diff_files")
-    reviewed = drive._review_round
+    reviewed = reviewing.review_round
 
     def review_then_recover(*args: Any) -> Any:
         monkeypatch.setattr(changes, "_diff_files", read)
         return reviewed(*args)
 
-    monkeypatch.setattr(drive, "_review_round", review_then_recover)
+    monkeypatch.setattr(reviewing, "review_round", review_then_recover)
     fake = Fixer(tmp_path / "st", wt)
     _, got = _base(capsys, monkeypatch, fake, wt)
     assert (got["cause"]["kind"], len(failing)) == ("mvv_unresolved", 1)
@@ -448,14 +448,14 @@ def test_round_checked_only_at_the_end_is_reused_on_the_same_head(repos: Repos, 
     """ラウンドの中の確かめに失敗しても、同じ head の最後の確かめに成功して収束したら、打ち直しは相手役を起動せずに前回の結果を返す。"""
     _push_base(repos)
     _push_pr(repos, "doc.md", "# 設計", RIGHT)
-    read, reviewed = changes._diff_files, drive._review_round
+    read, reviewed = changes._diff_files, reviewing.review_round
     _git_fails(monkeypatch, "_diff_files")
 
     def review_then_recover(*args: Any) -> Any:
         monkeypatch.setattr(changes, "_diff_files", read)
         return reviewed(*args)
 
-    monkeypatch.setattr(drive, "_review_round", review_then_recover)
+    monkeypatch.setattr(reviewing, "review_round", review_then_recover)
     code, got = _base(capsys, monkeypatch, Fixer(tmp_path / "st", wt), wt)
     assert (code, got["status"]) == (0, "ok")
     assert [r["mvv_checked"] for r in _state(tmp_path / "st")["rounds"]] == [True]
