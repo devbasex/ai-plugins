@@ -12,6 +12,7 @@ import pytest
 from ndf.adapters.github import Authored, GitHubError
 from ndf.domains.records import cleanup_stage, gws
 from ndf.domains.records import close_decide as cd
+from ndf.progress.flow import CloseRule
 from ndf.progress.records import ISSUE_SECTION, SECTION_END
 
 FAILED_ROW = {"number": 5, "result": "failed"}
@@ -22,7 +23,7 @@ PASSED_ROW = {"number": 5, "result": "passed"}
 
 
 @pytest.mark.parametrize(
-    ("number", "rows", "require", "decision", "reason"),
+    ("number", "rows", "enforced", "decision", "reason"),
     [
         (5, [FAILED_ROW], False, cd.KEEP, None),
         (6, [FAILED_ROW], False, cd.CLOSE, None),
@@ -31,24 +32,84 @@ PASSED_ROW = {"number": 5, "result": "passed"}
     ],
 )
 def test_verdict_reads_the_record_even_without_the_flag(
-    number: int, rows: list[dict], require: bool, decision: str, reason: str | None
+    number: int, rows: list[dict], enforced: bool, decision: str, reason: str | None
 ) -> None:
-    got = cd.verdict(number, rows, require=require)
-    assert got[0] == decision
+    got = cd.verdict(number, rows, enforced=enforced)
+    assert got.decided == decision
     if reason is not None:
-        assert got == (decision, reason)
+        assert got.reason == reason
 
 
 def test_verdict_leaves_a_not_run_row_to_a_person_and_prefers_failed() -> None:
-    assert cd.verdict(5, [NOT_RUN_ROW, PASSED_ROW], require=True) == (cd.ASK, "保留（not_run）の行が 1 件ある。閉じるかを人が決める")
-    assert cd.verdict(5, [NOT_RUN_ROW, FAILED_ROW], require=False) == (cd.KEEP, "リリース後テストに不合格の行が 1 件ある")
+    got = cd.verdict(5, [NOT_RUN_ROW, PASSED_ROW], enforced=True)
+    assert (got.decided, got.reason) == (cd.ASK, "保留（not_run）の行が 1 件ある。閉じるかを人が決める")
+    got = cd.verdict(5, [NOT_RUN_ROW, FAILED_ROW], enforced=False)
+    assert (got.decided, got.reason) == (cd.KEEP, "リリース後テストに不合格の行が 1 件ある")
     assert cd.waiting_rows(5, [NOT_RUN_ROW, FAILED_ROW, {"number": 6, "result": "not_run"}]) == [NOT_RUN_ROW]
     assert cd.waiting_rows(5, None) == []
 
 
-def test_verdict_without_a_record_depends_on_require() -> None:
-    assert cd.verdict(5, None, require=False)[0] == cd.CLOSE
-    assert cd.verdict(5, None, require=True) == (cd.KEEP, "リリース後テストの記録が無い")
+def test_verdict_without_a_record_depends_on_enforced() -> None:
+    assert cd.verdict(5, None, enforced=False).decided == cd.CLOSE
+    got = cd.verdict(5, None, enforced=True)
+    assert (got.decided, got.reason) == (cd.KEEP, "リリース後テストの記録が無い")
+
+
+@pytest.mark.parametrize(
+    ("rows", "verified"),
+    [
+        ([PASSED_ROW], True),
+        ([PASSED_ROW, {"number": 6, "result": "failed"}], True),
+        ([{"number": 6, "result": "passed"}], False),
+        ([], False),
+        (None, False),
+        ([PASSED_ROW, NOT_RUN_ROW], False),
+        ([PASSED_ROW, FAILED_ROW], False),
+    ],
+)
+def test_verdict_is_verified_only_when_every_row_of_the_issue_passed(rows: list[dict] | None, verified: bool) -> None:
+    # 受け入れ条件 6・9: テストで確認できたのは、その課題の行があり、すべて合格のときだけ
+    assert cd.verdict(5, rows, enforced=False).verified is verified
+    assert cd.verdict(5, rows, enforced=False).release is None
+
+
+def test_verdict_keeps_a_failed_issue_whatever_is_enforced() -> None:
+    # 受け入れ条件 8・I2: 条件を外しても（enforced が偽でも）、渡した記録の不合格では閉じない
+    for enforced in (True, False):
+        assert cd.verdict(5, [PASSED_ROW, FAILED_ROW], enforced=enforced).decided == cd.KEEP
+
+
+REQUIRED = CloseRule(True, None)
+EXCLUDED = CloseRule(False, "監視で確かめる")
+
+
+@pytest.mark.parametrize(
+    ("rules", "require", "verification", "retrospective"),
+    [
+        (
+            {"release_verification": REQUIRED, "retrospective_line": REQUIRED},
+            True,
+            {"excluded": False, "reason": None, "enforced": True},
+            {"excluded": False, "reason": None, "enforced": True},
+        ),
+        (
+            {"release_verification": REQUIRED, "retrospective_line": REQUIRED},
+            False,
+            {"excluded": False, "reason": None, "enforced": False},
+            {"excluded": False, "reason": None, "enforced": True},
+        ),
+        (
+            {"release_verification": EXCLUDED, "retrospective_line": CloseRule(False, "週次の会")},
+            True,
+            {"excluded": True, "reason": "監視で確かめる", "enforced": False},
+            {"excluded": True, "reason": "週次の会", "enforced": False},
+        ),
+    ],
+)
+def test_conditions_of_separates_the_setting_from_the_call(rules: dict, require: bool, verification: dict, retrospective: dict) -> None:
+    # 受け入れ条件 6・7: 設定で外したか（excluded）と、今回の呼び出しで記録を求めたか（enforced）を別に返す
+    got = {name: c._asdict() for name, c in cd.conditions_of(rules, require).items()}
+    assert got == {"release_verification": verification, "retrospective_line": retrospective}
 
 
 def _body(mark: str) -> str:

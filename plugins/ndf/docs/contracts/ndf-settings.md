@@ -189,7 +189,7 @@ worktree・チーム・公開・[pace.schema.json](../../contracts/schemas/ndf-s
 
 ## `.ndf/project.json`（project）
 
-worktree（抑制コメントのキーはメインディレクトリ）・チーム・公開・[project.schema.json](../../contracts/schemas/ndf-settings/project.schema.json)。読む工程: `ndf records preflight`（工程の前の確かめで、知らないキーを数える）・`ndf release-steps`（本番のマージで branch_strategy（マージの主体・方式・迂回）をメインディレクトリから読む）・`ndf refactor`（リファクタリングで test.suites の収集のコマンドを読む）・`ndf progress`（ステートマシンを作るときに workflow.stages の工程の有効・無効を読む）
+worktree（抑制コメントのキーはメインディレクトリ）・チーム・公開・[project.schema.json](../../contracts/schemas/ndf-settings/project.schema.json)。読む工程: `ndf records preflight`（工程の前の確かめで、知らないキーを数える）・`ndf release-steps`（本番のマージで branch_strategy（マージの主体・方式・迂回）をメインディレクトリから読む）・`ndf refactor`（リファクタリングで test.suites の収集のコマンドを読む）・`ndf progress`（ステートマシンを作るときに workflow.stages の工程の有効・無効を読む）・`ndf records close-check`（課題を閉じてよいかを決めるときに workflow.close の条件の要否を読む）
 
 言語・テスト・CI・リリースの経路・課題の保存先の設定。人と解析（M7）が書く。無ければ既定で動く
 
@@ -212,7 +212,7 @@ worktree（抑制コメントのキーはメインディレクトリ）・チー
 | `test_duration`（非推奨。読み手は読まない） | TestDuration か Unknown か null | — | — | 任意 | 読み手は読まない（今のバージョンの読み手が読む値。11.0.0 の後に消す） |
 | `toolchain` | Toolchain | — | — | 任意 | このリポジトリの CI が何で回すか。検査（ndf check の規則 toolchain）が読む。キーごとに独立して効き、無いキーは突き合わせない。NDF 自身が動く条件は配るコントラクト（contracts/data/toolchain.json）が持つ |
 | `version` | integer | — | `1` | 必須 | 設定の形のバージョン。読み手は知らないバージョンを読まない |
-| `workflow` | object | — | — | 任意 | 工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch） |
+| `workflow` | object | — | — | 任意 | 工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch）と、課題を閉じる条件の要否（close） |
 
 例: `{"version": 1, "test": {"suites": [{"name": "pytest", "runner": "pytest", "command": "uv run pytest -q"}]}}`
 

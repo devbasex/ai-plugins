@@ -207,7 +207,7 @@
     },
     "workflow": {
       "type": "object",
-      "description": "工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch）",
+      "description": "工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch）と、課題を閉じる条件の要否（close）",
       "properties": {
         "stages": {
           "type": "object",
@@ -215,6 +215,19 @@
           "additionalProperties": {
             "$ref": "#/$defs/StageToggle"
           }
+        },
+        "close": {
+          "type": "object",
+          "description": "課題を閉じる条件の要否。省いた条件は求める。外すときは reason が要る。外せるのはリリース後テストの記録（release_verification）と「振り返り:」の行（retrospective_line）だけ",
+          "properties": {
+            "release_verification": {
+              "$ref": "#/$defs/CloseRule"
+            },
+            "retrospective_line": {
+              "$ref": "#/$defs/CloseRule"
+            }
+          },
+          "additionalProperties": false
         },
         "launch": {
           "type": "object",
@@ -279,6 +292,10 @@
     {
       "by": "ndf progress",
       "when": "ステートマシンを作るときに workflow.stages の工程の有効・無効を読む"
+    },
+    {
+      "by": "ndf records close-check",
+      "when": "課題を閉じてよいかを決めるときに workflow.close の条件の要否を読む"
     }
   ],
   "examples": [
@@ -1553,6 +1570,38 @@
       ],
       "title": "CiExempt",
       "type": "object"
+    },
+    "CloseRule": {
+      "type": "object",
+      "description": "課題を閉じる条件 1 つの要否。外すときは理由が要る",
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "条件を求めるか"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "条件を外す理由"
+        }
+      },
+      "required": [
+        "required"
+      ],
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "required": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reason"
+        ]
+      },
+      "title": "CloseRule"
     },
     "CodeMeasure": {
       "additionalProperties": false,

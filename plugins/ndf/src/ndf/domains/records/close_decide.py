@@ -2,6 +2,8 @@
 
 - スプリントを閉じる条件 2: リリース後テストの記録があれば、フラグを問わず見る。不合格の行を持つ課題は閉じない
   （フラグの付け忘れで不合格の課題を閉じない）。不合格が無く保留（not_run）の行を持つ課題は、閉じるかを人が決める（#3855）
+- 閉じる条件の要否（#4580）: 流れの設定で外した条件と理由（excluded・reason）と、今回の呼び出しで記録を求めたか（enforced）を
+  分けて返す。外しても、渡した記録の不合格では閉じない
 - クリーンアップの工程の記録: 課題の本文の進行のセクションで、工程「クリーンアップ」の行が未チェックならチェックを付ける。記録済みなら
   打ち直さない
 """
@@ -10,8 +12,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
+from ndf.progress import flow
+from ndf.progress.flow import CloseRule
 from ndf.progress.records import ISSUE_SECTION, SECTION_END
 
 # クリーンアップの工程の名前（進行のセクションの行）
@@ -38,21 +42,68 @@ def waiting_rows(issue: int, verification: Optional[Iterable[Mapping[str, Any]]]
     return _rows_with(issue, verification, "not_run")
 
 
-def verdict(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], require: bool) -> tuple[str, str]:
-    """課題を閉じてよいか（`CLOSE` / `KEEP` / `ASK`）と理由。`require` は記録が要る（記録が無ければ閉じない）。
+class Verdict(NamedTuple):
+    """課題を閉じてよいか（`CLOSE` / `KEEP` / `ASK`）・理由・テストで確認できたか・反映の判定（`--records` のときだけ）。"""
+
+    decided: str
+    reason: str
+    verified: bool
+    release: Optional[dict[str, Any]] = None
+
+
+def _all_passed(issue: int, rows: list[Mapping[str, Any]]) -> bool:
+    """記録にその課題の行があり、すべて合格か。"""
+    mine = [r for r in rows if r.get("number") == issue]
+    return bool(mine) and all(r.get("result") == "passed" for r in mine)
+
+
+def verdict(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], enforced: bool) -> Verdict:
+    """課題を閉じてよいかと理由。`enforced` は記録を求める（記録が無ければ閉じない）。
 
     記録があれば条件 2 を必ず見る。failed があれば not_run の有無に依らず閉じない（悪い方を優先する）。
     """
     if verification is None:
-        return (KEEP, "リリース後テストの記録が無い") if require else (CLOSE, "リリース後テストの記録が無い（条件 2 を見ない）")
+        if enforced:
+            return Verdict(KEEP, "リリース後テストの記録が無い", False)
+        return Verdict(CLOSE, "リリース後テストの記録が無い（条件 2 を見ない）", False)
     rows = list(verification)
+    verified = _all_passed(issue, rows)
     bad = blocking_rows(issue, rows)
     if bad:
-        return KEEP, f"リリース後テストに不合格の行が {len(bad)} 件ある"
+        return Verdict(KEEP, f"リリース後テストに不合格の行が {len(bad)} 件ある", verified)
     waiting = waiting_rows(issue, rows)
     if waiting:
-        return ASK, f"保留（not_run）の行が {len(waiting)} 件ある。閉じるかを人が決める"
-    return CLOSE, "リリース後テストに不合格と保留の行が無い"
+        return Verdict(ASK, f"保留（not_run）の行が {len(waiting)} 件ある。閉じるかを人が決める", verified)
+    return Verdict(CLOSE, "リリース後テストに不合格と保留の行が無い", verified)
+
+
+class Condition(NamedTuple):
+    """閉じる条件 1 つの扱い。`excluded` は設定で外したか、`reason` はその理由、`enforced` は今回の呼び出しで求めるか。"""
+
+    excluded: bool
+    reason: Optional[str]
+    enforced: bool
+
+
+def conditions_of(rules: Mapping[str, CloseRule], require: bool) -> dict[str, Condition]:
+    """閉じる条件ごとの扱い（結果 JSON では `Condition._asdict()` の形）。
+
+    `--require` に当たる条件（リリース後テストの記録）は `--require` があり外していないときだけ求める。
+    ほかの条件（振り返りの行）は外していなければ求める（行は手順書の AI が確かめる）。
+    """
+    flagged = flow.require_flag_condition()
+    out: dict[str, Condition] = {}
+    for name, rule in rules.items():
+        excluded = not rule.required
+        enforced = not excluded and (require if name == flagged else True)
+        out[name] = Condition(excluded, rule.reason if excluded else None, enforced)
+    return out
+
+
+def excluded_note(conditions: Mapping[str, Condition]) -> str:
+    """閉じる報告へ転記する、設定で外した条件と理由（無ければ空）。"""
+    names = [f"{name}（{c.reason}）" for name, c in conditions.items() if c.excluded]
+    return f"。設定で外した条件: {', '.join(names)}" if names else ""
 
 
 def _stage_line(stage: str) -> re.Pattern[str]:

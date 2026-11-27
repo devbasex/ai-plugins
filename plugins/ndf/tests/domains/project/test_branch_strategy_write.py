@@ -188,3 +188,23 @@ def test_ai_plugins_section_is_the_plugin_row_with_its_measured_facts():
     carried.pop("reviews", None)
     carried["release"].pop("deliveries", None)
     assert carried == init
+
+
+FLOW = {
+    "stages": {"確定仕様化": {"enabled": False, "reason": "別の場所で管理する"}},
+    "close": {
+        "release_verification": {"required": False, "reason": "監視で確かめる"},
+        "retrospective_line": {"required": False, "reason": "週次の会で行う"},
+    },
+}
+
+
+def test_issue_4580_branch_strategy_write_and_remove_keep_the_flow(tmp_path):
+    """受け入れ条件 13・I3: ブランチ戦略の書き出しと削除は、利用者の流れの設定（workflow）を書き換えない。"""
+    root = make_repo(tmp_path, {"project.json": {"version": 1, "workflow": FLOW}})
+    plan = bw.plan_write(root, section("web-trunk"))
+    bw.commit_plan(root, plan, plan.digest)
+    assert json.loads((root / ".ndf" / "project.json").read_text(encoding="utf-8"))["workflow"] == FLOW
+    plan = bw.plan_remove(root)
+    bw.commit_plan(root, plan, plan.digest)
+    assert json.loads((root / ".ndf" / "project.json").read_text(encoding="utf-8"))["workflow"] == FLOW

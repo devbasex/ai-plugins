@@ -184,6 +184,21 @@ def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_resul
     assert json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))["checks"] == decl["checks"]
 
 
+def test_issue_4580_write_keeps_the_flow(repo, tmp_path, capsys, last_result):
+    """受け入れ条件 13・I3: project write は利用者の流れの設定（workflow の stages・close）を書き換えない。"""
+    flow = {
+        "stages": {"確定仕様化": {"enabled": False, "reason": "別の場所で管理する"}},
+        "close": {"release_verification": {"required": False, "reason": "監視で確かめる"}},
+    }
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "project.json").write_text(json.dumps({"version": 1, "workflow": flow}, ensure_ascii=False), encoding="utf-8")
+    measured = _measure_file(tmp_path, {"checks": {"status": "measured", "value": {"tools": []}}})
+    answers = _answers(tmp_path, {"test": {"value": {"suites": []}}})
+    assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
+    last_result(capsys.readouterr().out)
+    assert json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))["workflow"] == flow
+
+
 def test_write_refuses_broken_ndf_settings(repo, tmp_path):
     measured = _measure_file(tmp_path, {})
     (repo / ".ndf").mkdir()

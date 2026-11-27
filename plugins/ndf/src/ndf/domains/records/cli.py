@@ -13,7 +13,7 @@
     ndf records mvv cite --gate design|release --base <ブランチ> <ファイル>...   # 承認資料の根拠の行を承認済みの MVV で確かめる
     ndf records preflight                          # 手順 0 の 3 つの確かめ（worktree の設定・設定・MVV）
     ndf records cleanup-stage <PR番号>...           # クリーンアップを終えた PR が閉じる課題に工程の記録を付ける
-    ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか
+    ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか（流れの設定の close を読む）
     ndf records gws-check                          # gws の認証を確かめる
     ndf records reading prompt|add --file <JSON>   # 読み手役への指示・確認の記録
     ndf records reading check --gate <design|release> --pr <番号> [--material <ファイル>] --questions-out <ファイル>
@@ -42,7 +42,7 @@ from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
 from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, reading, spec, usage
 from ndf.core import durable
-from ndf.progress import command, definition, invoke, model, stage_inputs
+from ndf.progress import command, definition, flow, invoke, model, stage_inputs
 from ndf.progress.invoke import INPUT_ENV
 from ndf.domains.records import glossary_decide as gd
 from ndf.domains.records import spec_decide as sd
@@ -342,20 +342,29 @@ def _verification_rows(path: Path) -> tuple[Any, str | None]:
 
 
 def _close_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    try:
+        rules = flow.close_rules(flow.read_flow(root))
+    except contracts.ContractError as exc:
+        return result.stopped(TOOL, "precondition", f"流れの設定を読めない: {exc}")
+    conditions = close_decide.conditions_of(rules, args.require)
     rows = None
     if args.verification is not None:
         rows, err = _verification_rows(args.verification)
         if err is not None:
             return result.stopped(TOOL, "precondition", err)
-    decided, why = close_decide.verdict(args.issue, rows, args.require)
-    item = {"issue": args.issue, "closable": decided == close_decide.CLOSE, "reason": why}
-    if decided == close_decide.KEEP:
-        return result.stopped(TOOL, "refused", f"#{args.issue} を閉じない: {why}", items=[item])
-    if decided == close_decide.ASK:
+    enforced = conditions[flow.require_flag_condition()].enforced
+    got = close_decide.verdict(args.issue, rows, enforced)
+    item = {"issue": args.issue, "closable": got.decided == close_decide.CLOSE, "reason": got.reason}
+    outputs = {"conditions": {name: c._asdict() for name, c in conditions.items()}, "verified": got.verified}
+    note = close_decide.excluded_note(conditions)
+    if got.decided == close_decide.KEEP:
+        return result.stopped(TOOL, "refused", f"#{args.issue} を閉じない: {got.reason}{note}", items=[item], outputs=outputs)
+    if got.decided == close_decide.ASK:
         # 閉じる操作は gh issue close で、ndf のコマンドを持たない
         routes = {"approved": None, "rejected": None}
-        return result.result(TOOL, result.GATE, f"#{args.issue} を閉じるかは人が決める: {why}", [item], routes=routes)
-    return result.result(TOOL, result.OK, f"#{args.issue} を閉じてよい: {why}", [item])
+        summary = f"#{args.issue} を閉じるかは人が決める: {got.reason}{note}"
+        return result.result(TOOL, result.GATE, summary, [item], routes=routes, outputs=outputs)
+    return result.result(TOOL, result.OK, f"#{args.issue} を閉じてよい: {got.reason}{note}", [item], outputs=outputs)
 
 
 def _gws_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
