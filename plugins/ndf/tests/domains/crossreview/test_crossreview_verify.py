@@ -297,7 +297,7 @@ def _aged(*paths: Path) -> None:
 
 def _registered(directory: Path, name: str, inode: int) -> Path:
     mark = directory / f"{name}.owned-{inode}"
-    mark.touch()
+    mark.write_text(mark.name, encoding="utf-8")
     return mark
 
 
@@ -318,6 +318,27 @@ def test_issue_4363_ask_drops_only_the_registered_records_past_the_keep_period(t
     verify.ask(run, 2, [_row()], {"r1-1": [diff]}, _launcher([], []))
     assert saved and not any(p.exists() for p in (*saved, stale, left))
     assert unmarked.exists() and replaced.exists() and fresh.exists()
+
+
+def test_issue_4363_ask_keeps_what_only_has_the_shape_of_a_registration_or_an_output_directory(tmp_path: Path) -> None:
+    """名前の形が同じだけのファイル・リンク・ディレクトリは残し、所有ファイルのある古い出力のディレクトリは消す。"""
+    records = tmp_path / judge_records.RECORD_DIR
+    records.mkdir()
+    plain = records / "round1-verify-ab12_cd3.out.owned-1"
+    plain.write_text("利用者の退避", encoding="utf-8")
+    linked = records / "round1-verify-ef45_gh6.out.owned-1"
+    linked.symlink_to(plain)
+    unowned = tmp_path / "round1-verify-ij78_kl9"
+    unowned.mkdir()
+    stopped = judge_records.new_held(tmp_path / "round1-verify")
+    (stopped / "round1-verify.out").write_text("止まった起動の出力", encoding="utf-8")
+    running = judge_records.new_held(tmp_path / "round1-verify")
+    _aged(plain, unowned, *stopped.iterdir())
+    past = time.time() - limits.seconds(judge_records.RECORD_KEEP) - 60
+    os.utime(linked, (past, past), follow_symlinks=False)
+    verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher([], []))
+    assert plain.exists() and linked.is_symlink() and unowned.is_dir() and running.is_dir()
+    assert not stopped.exists()
 
 
 def test_issue_4363_ask_does_not_follow_a_linked_record_directory(tmp_path: Path) -> None:

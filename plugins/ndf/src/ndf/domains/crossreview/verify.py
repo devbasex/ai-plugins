@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import shutil
-import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional, Protocol
@@ -79,7 +78,7 @@ def ask(
         ]
         prompt = verify_decide.instruction(listed, used, run.cfg.worktree, criteria)
         # 回答は非公開の内容を含みうる。出力の先は新しく作り（0700）、前からあるファイルやリンクを開かない
-        held = Path(tempfile.mkdtemp(prefix=f"{stem.name}-", dir=stem.parent))
+        held = judge_records.new_held(stem)
     except OSError as exc:
         warning = "判定役の資料（指摘の一覧・MVV の本文と共通原則の写し）か出力の保存先を用意できないので、判定役を起動せず下げない"
         return _unanswered(run, round_no, count, f"起動していない: {exc}", warning)
