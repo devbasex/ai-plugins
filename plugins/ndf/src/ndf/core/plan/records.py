@@ -117,13 +117,22 @@ def _keep_step_missing(state_dir: Path, step_id: str, status: str, names: Option
     """
     if status != GATE:
         return
-    found = read_json(state_dir / STEP_MISSING_FILE)
-    before = found if isinstance(found, dict) else {}
-    kept = {k: v for k, v in before.items() if k != step_id}
-    if names:
-        kept[step_id] = list(names)
+    before, kept = _replaced_step(state_dir / STEP_MISSING_FILE, step_id, list(names) if names else None)
     if kept != before:
         write_json(state_dir / STEP_MISSING_FILE, kept)
+
+
+def _replaced_step(path: Path, step_id: str, value: Optional[Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """ステップごとの JSON 記録 `path` の今の中身と、`step_id` の項目を外して `value` を入れ直した中身。
+
+    記録が無いか dict でなければ空とみなす。`value` が None なら入れ直さない（外すだけ）。
+    """
+    found = read_json(path)
+    before = found if isinstance(found, dict) else {}
+    kept = {k: v for k, v in before.items() if k != step_id}
+    if value is not None:
+        kept[step_id] = value
+    return before, kept
 
 
 def recorded_step_missing(state_dir: Path) -> dict[str, list[str]]:
