@@ -2,19 +2,27 @@
 
 2026-11-25 の [#4516](https://github.com/devbasex/ai-plugins/issues/4516)（プロジェクトの設定から、実行ごとに変わる値を追跡しない別ファイルへ分ける）の設計承認ゲートで、利用者が、どの仕組みも使っていない計測値について [「使われない情報を取得・保存する必要はないです」と指摘した](https://github.com/devbasex/ai-plugins/pull/4518#issuecomment-7162632854)。
 
-#4516 はファイル数・CI の実行時間などを測るのをやめた。一方で、解析（`ndf project measure` と `ndf project write`）が `.ndf/project.json` に書くほかの項目は、使う側があるかを数えていなかった。数えると、7 項目のうち 6 項目は、書いた値を読むプログラムも手順も無かった（下の「今の姿」の表）。利用者のリポジトリでは今も、これらの項目が測られ、チームで共有する設定のファイルに書かれる。一部の項目は、AI が回答を作る手間もかかる。
+#4516 はファイル数・CI の実行時間などを測るのをやめた。一方で、解析（`ndf project measure` と `ndf project write`）が `.ndf/project.json` に書くほかの項目は、使う側があるかを数えていなかった。
+
+解析が書く項目は 9 つある。このうち `test`（テストの走らせ方）と `ci`（CI の必須のチェック）は、値を読むプログラムがある（`plugins/ndf/src/ndf/testing/declared.py:58`・`means.py:31`）。この 2 つは維持するので調査の対象から外した。起票時の本文の「対象範囲」にも含まれていない。残る 7 項目を調べると、6 項目は、書いた値を読むプログラムも手順も無かった（下の「今の姿」の表）。利用者のリポジトリでは今も、これらの項目が測られ、チームで共有する設定のファイルに書かれる。一部の項目は、AI が回答を作る手間もかかる。
 
 ## 種類
 
-機能追加（解析が設定に書く項目という、今の約束を減らす形に変える）
+機能追加（解析が `.ndf/project.json` に書くと決めている項目を減らす）
 
 ## 今の姿
 
-解析は、リポジトリを調べて `.ndf/project.json`（git で追跡し、チームで共有する設定のファイル）に項目を書く。値が機械で決まらない項目は「質問」になり、AI が根拠を読んで回答する。手順の SSOT は [project-analysis.md](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/skills/development-workflow/references/project-analysis.md)、仕組みと理由の SSOT は [確定仕様 ndf-project-analysis-record.md](https://github.com/devbasex/ai-plugins/blob/main/docs/specifications/ndf-project-analysis-record.md) である。
+解析は、リポジトリを調べて `.ndf/project.json`（git で追跡し、チームで共有する設定のファイル）に項目を書く。値が機械で決まらない項目は「質問」になり、AI が根拠を読んで回答する。解析は、書いた値のハッシュ（以下「指紋」）も同じファイルの `analysis.written` に残す。次の書き出しは指紋を使って、解析が書いたままの値か、人が直した値かを見分ける。手順の SSOT は [project-analysis.md](https://github.com/devbasex/ai-plugins/blob/main/plugins/ndf/skills/development-workflow/references/project-analysis.md)、仕組みと理由の SSOT は [確定仕様 ndf-project-analysis-record.md](https://github.com/devbasex/ai-plugins/blob/main/docs/specifications/ndf-project-analysis-record.md) である。
 
 ### 項目ごとの読み手
 
-2026-11-27 に `main` のコミット `0cf28737c`（NDF 11.0.49）で数えた。「読み手」は、`.ndf/project.json` に書かれた値を読んで振る舞いを変えるプログラムか、値を読めと指示する手順書を指す。パスは `plugins/ndf/` からの位置である。
+2026-11-27 に `main` のコミット `0cf28737c`（NDF 11.0.49）で数えた。「読み手」は、`.ndf/project.json` に書かれた値を使う次の 3 つを指す。
+
+- 値を読んで振る舞いを変えるプログラム
+- 値を読めと指示する手順書
+- 手順書や出力に従って、保存した値を見て作業する利用者。ファイルを開けば閲覧できる、というだけの場合は数えない
+
+表は解析が書く 9 項目のうち、`test` と `ci` を除く 7 項目である。パスは `plugins/ndf/` からの位置である。
 
 | 項目 | 中身 | 読み手 | 扱い |
 | --- | --- | --- | --- |
@@ -39,9 +47,11 @@
 | --- | --- | --- |
 | 解析が書く項目 | `languages`・`test`・`ci`・`services`・`issues`・`checks`・`ndf_policies`・`instructions`・`materials` | `test`・`ci`・`materials` |
 | 解析が呼ぶ GitHub の API | 必須のチェック・閉じた Pull Request・課題 | 必須のチェックだけ |
-| AI が回答する質問 | `test`・`issues`・`ndf_policies`・`materials`（当たるもの） | `test`・`materials`（当たるもの） |
+| AI が回答する質問 | `test`・`issues`・`ndf_policies`・`materials`（測定が質問にしたもの） | `test`・`materials`（測定が質問にしたもの） |
 | 指示書の案内 | 書き出しの出力に出る | 変わらない |
 | 既存の設定に残る 6 項目 | 解析が値を保つ | 次の書き出しで取り除く |
+
+測定が項目を質問にするのは、値を機械で決められないときである。たとえば `test` は、テストを走らせる手がかり（テストのツール、コマンド、指示書の記述）があるときだけ質問になり、無ければ質問にならない。
 
 ## 今の利用者への影響と互換
 
@@ -80,7 +90,7 @@
 
 ## 受け入れ条件
 
-- [ ] 1. 解析が書く項目ごとに、読み手（ファイルと行）か「読み手無し」を書いた表が課題の本文にある
+- [ ] 1. 解析が書く 9 項目のうち `test` と `ci` を除く 7 項目ごとに、読み手（ファイルと行）か「読み手無し」を書いた表が課題の本文にある
 - [ ] 2. 読み手の無い項目は、`ndf project measure` が測らず、`ndf project write` が書かない
 - [ ] 3. `ndf project measure` の結果の項目に `languages`・`services`・`issues`・`checks`・`ndf_policies`・`instructions` が無い
 - [ ] 4. 設定の無いリポジトリで書き出した `.ndf/project.json` に、3 の 6 キーが無く、`analysis.written` にもその指紋が無い
