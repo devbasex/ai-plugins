@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 
 from ndf.core.converge import participants
-from ndf.domains.crossreview import cli, scope_decide, store, threads
+from ndf.domains.crossreview import scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 
 from ._repos import BRANCH, Repos, commit, count_git, run_cli, sh
-from .test_crossreview_run import Recording
+from .test_crossreview_run import Recording, _run
 
 A, B = "issues/d.md#セクション A", "issues/d.md#セクション B"
 # ラウンドの記録の比較基点（`--base` と HEAD の merge-base の SHA。PR 3944 の r2-1）。状態ファイルを書く前に本物の SHA へ置き換える
@@ -221,46 +221,31 @@ def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
 APPROVED = "approved:11:aaa:ccc"
 
 
-def test_converged_run_is_reused_only_under_the_same_conditions(
-    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch, hub
+def test_converged_run_is_reused_only_for_the_same_unit_and_pr(
+    wt: Path, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch, hub
 ) -> None:
-    """#3780 の現状固定: 同じ head の打ち直しは、条件が同じなら前回の収束を返し、比較基点・重点・単位の指示・読んだ PR・
-    相手役のどれかが変われば相手役を起動し直す。条件は起動を通して 1 つずつ変え、変えた値は後の起動にも残す。"""
-    first = sh(wt, "rev-parse", "HEAD").strip()
-    head = commit(repos.other, "second.txt", "二つ目\n", "二つ目のコミット")
-    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
-    sh(repos.main, "fetch", "-q", "origin")
+    """#3780 の現状固定: 同じ head の打ち直しは、単位の指示と読んだ PR が同じなら前回の収束を返し、どちらかが変われば相手役を
+    起動し直す。比較基点と相手役の変更は `test_crossreview_prior.py`、重点の変更は `test_crossreview_run.py` が確かめる。"""
+    head = sh(wt, "rev-parse", "HEAD").strip()
     read = {"ident": "o/r#41"}
     monkeypatch.setattr(hub.port, "read_pr", lambda: threads.ReadPr(read["ident"], BRANCH, head, "o/r"))
-    monkeypatch.delenv("NDF_UNIT_FILE", raising=False)
-    argv = ["run", "--pr", "41", "--state-dir", str(tmp_path / "st"), "--base", "origin/main", "--worktree", str(wt)]
-    argv += ["--branch", BRANCH, "--reviewed-pr-out", str(tmp_path / "reviewed-pr"), "--reviewer", "codex"]
+    unit = tmp_path / "unit.md"
+    unit.write_text("単位 u1\n", encoding="utf-8")
+    monkeypatch.setenv("NDF_UNIT_FILE", str(unit))
 
     def launched() -> set[str]:
         fake = Recording(tmp_path / "st", {})
-        monkeypatch.setattr(cli, "LAUNCH", fake)
-        code, got = run_cli(capsys, *argv)
+        code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-pr-out", str(tmp_path / "reviewed-pr"))
         assert (code, got["status"]) == (0, "ok")
         return {agent for agent, _, _ in fake.prompts}
 
-    only = {"codex"}
-    assert launched() == only
+    both = {"codex", "kiro"}
+    assert launched() == both
     assert launched() == set()
-    # 比較基点: PR の 1 つ目のコミットがベースのブランチへ入る（HEAD は変わらない）
-    sh(repos.other, "push", "-q", "origin", f"{first}:refs/heads/main")
-    sh(repos.main, "fetch", "-q", "origin")
-    assert launched() == only
-    (repos.main / ".ndf").mkdir(exist_ok=True)
-    (repos.main / ".ndf" / "review.json").write_text('{"version": 1, "focus": ["足した重点"]}', encoding="utf-8")
-    assert launched() == only
-    (tmp_path / "unit.md").write_text("単位 u1\n", encoding="utf-8")
-    monkeypatch.setenv("NDF_UNIT_FILE", str(tmp_path / "unit.md"))
-    assert launched() == only
+    unit.write_text("単位 u2\n", encoding="utf-8")
+    assert launched() == both
     read["ident"] = "o/r#42"
-    assert launched() == only
-    argv += ["--reviewer", "kiro"]
-    assert launched() == {"codex", "kiro"}
-    assert launched() == set()
+    assert launched() == both
 
 
 @pytest.mark.parametrize(
