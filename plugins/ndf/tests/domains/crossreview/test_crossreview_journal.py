@@ -803,6 +803,15 @@ def test_issue_4363_restored_finding_follows_a_later_raised_severity_in_any_orde
     assert row["severity"] == "critical"
 
 
+@pytest.mark.parametrize("mvv_first", [False, True])
+def test_issue_4363_lowered_finding_has_the_same_severity_in_any_order_within_a_round(mvv_first: bool) -> None:
+    """#4363: 同じラウンドの critical と MVV の項目付きの minor は、処理の順によらず critical になる。"""
+    journal, row = _lowered()
+    told = [_told(severity="critical"), _told(severity="minor", mvv="Value 5")]
+    journal.enter(2, told[::-1] if mvv_first else told, ITEMS, V11)
+    assert (row["severity"], row["check"]["lowered"]) == ("critical", False)
+
+
 def test_issue_4363_revived_finding_is_checked_again_and_keeps_protect() -> None:
     journal = drive.FindingJournal()
     journal.enter(1, [_told()])

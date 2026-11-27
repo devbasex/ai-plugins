@@ -236,15 +236,19 @@ def _protect(row: dict[str, Any], kinds: object) -> None:
         row[PROTECT] = list(criteria_decide.protect_of([*store.list_of(row, PROTECT), *added]))
 
 
-def _unlower(row: dict[str, Any], new: Mapping[str, Any], named: Optional[str]) -> bool:
-    """判定役の確認で下げた指摘が、`new`（`_raised` の値）と MVV の項目 `named` で出し直されたとき。下げたままにするなら偽。
+def _unlower(by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str]) -> None:
+    """判定役の確認で下げた指摘のうち、このラウンドの出し直し `raised` のどれかが保護の種類か、MVV の項目か必ず人の承認が
+    要る操作を挙げたものは、下げた扱いを解除する。
 
-    保護の種類か、MVV の項目か必ず人の承認が要る操作を挙げれば、下げていない指摘と同じに今回の値と重ねる（分類は
-    呼び手の `_classify`）。元の重要度へ戻すのは保護の種類が付いたときで、`_restore_lowered` が行う。#4363"""
-    if PROTECT not in new and named is None:
-        return False
-    row[CHECK] |= {criteria_decide.LOWERED: False, UNLOWERED: True}
-    return True
+    重要度を重ねる前に解除するので、同じラウンドのほかの出し直しの重要度は、処理の順によらず重ねられる。分類は
+    `_classify`、元の重要度へ戻すのは `_restore_lowered` が行う。#4363"""
+    for item in raised:
+        text = item.get("text")
+        row = by_key.get(oscillation.finding_key(text.strip())) if isinstance(text, str) and text.strip() else None
+        if row is None or not _lowered(row):
+            continue
+        if criteria_decide.protect_of(item.get(PROTECT)) or criteria_decide.mvv_item(item.get("mvv"), items) is not None:
+            row[CHECK] |= {criteria_decide.LOWERED: False, UNLOWERED: True}
 
 
 def _restore_lowered(row: dict[str, Any]) -> None:
@@ -305,6 +309,7 @@ class FindingJournal:
         unknown: list[str] = []
         unexplained: list[str] = []
         fresh: list[str] = []
+        _unlower(by_key, raised, items)
         for item in raised:
             text = item.get("text")
             text = text.strip() if isinstance(text, str) else ""
@@ -338,8 +343,8 @@ class FindingJournal:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
         未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
         1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
-        行の値に今回の値を足す。判定役の確認で下げた指摘の重要度は、`_unlower` の条件に当たらなければ変えず、保護の種類が
-        付けば元へ戻す（`_restore_lowered`。#4363）。"""
+        行の値に今回の値を足す。判定役の確認で下げたままの指摘の重要度は変えず（下げた扱いの解除は先に `_unlower` が行う）、
+        下げた扱いを抜けた指摘に保護の種類が付けば元へ戻す（`_restore_lowered`。#4363）。"""
         new = _raised(item, named)
         if known.get(JUDGED) not in (None, mvv):
             _unclassify(known)
@@ -349,7 +354,7 @@ class FindingJournal:
         if "raised_severity" in known:
             raised = criteria_decide.severity_of(known["raised_severity"])
             known["raised_severity"] = criteria_decide.heavier_raised(raised, new["raised_severity"])
-        if not _lowered(known) or _unlower(known, new, named):
+        if not _lowered(known):
             severity = criteria_decide.heavier(criteria_decide.severity_of(known.get("severity")), new["severity"])
             if severity is not None:
                 known["severity"] = severity

@@ -126,16 +126,30 @@ def _repeated(fid: str, items: Sequence[Mapping[str, Any]]) -> Verdict:
     return Verdict(fid, None, reason="同じ番号の回答が複数ある", tracks=kinds)
 
 
+def _warnings(ids: Sequence[str], verdicts: Mapping[str, Verdict], repeated: Sequence[str], unknown: int) -> tuple[str, ...]:
+    """読んだ回答の注意。公開の記録に載るので、判定役が書いた文（理由・渡していない番号）は写さず、渡した指摘の番号と
+    件数だけを書く。`repeated` は複数の回答があった番号、`unknown` は渡していない番号への回答の件数。"""
+    listed = (
+        ("判定役の有効な回答が無いので下げない", [fid for fid in ids if fid not in verdicts]),
+        ("判定役が同じ番号に複数の回答を返したので下げない", repeated),
+        ("判定役が判断できないので下げない", [v.id for v in verdicts.values() if v.holds is None and v.id not in repeated]),
+    )
+    warnings = [f"{head}: {'・'.join(found)}" for head, found in listed if found]
+    if unknown:
+        warnings.append(f"判定役が渡していない番号に {unknown} 件の回答を返した")
+    return tuple(warnings)
+
+
 def read(found: Optional[Sequence[Mapping[str, Any]]], ids: Sequence[str]) -> Answers:
     """回答の並び（出力から取り出せなければ None）を、渡した指摘 `ids` ごとの回答にする。読めない分は注意にする。"""
     if found is None:
         return Answers({}, (f"判定役の回答を読めないので下げない: {'・'.join(ids)}",))
     given: dict[str, list[Mapping[str, Any]]] = {}
-    unknown: list[str] = []
+    unknown = 0
     for item in found:
         fid = str(item.get("id"))
         if fid not in ids:
-            unknown.append(" ".join(fid.split()))
+            unknown += 1
         else:
             given.setdefault(fid, []).append(item)
     verdicts: dict[str, Verdict] = {}
@@ -143,16 +157,8 @@ def read(found: Optional[Sequence[Mapping[str, Any]]], ids: Sequence[str]) -> An
         verdict = _repeated(fid, items) if len(items) > 1 else _verdict(fid, items[0])
         if verdict is not None:
             verdicts[fid] = verdict
-    warnings = []
-    unanswered = [fid for fid in ids if fid not in verdicts]
-    if unanswered:
-        warnings.append(f"判定役の有効な回答が無いので下げない: {'・'.join(unanswered)}")
-    undecided = [f"{v.id}（{' '.join(v.reason.split()) or '理由なし'}）" for v in verdicts.values() if v.holds is None]
-    if undecided:
-        warnings.append(f"判定役が判断できないので下げない: {'・'.join(undecided)}")
-    if unknown:
-        warnings.append(f"判定役が渡していない番号に回答した: {'・'.join(unknown)}")
-    return Answers(verdicts, tuple(warnings))
+    repeated = [fid for fid, items in given.items() if len(items) > 1]
+    return Answers(verdicts, _warnings(ids, verdicts, repeated, unknown))
 
 
 def lowers(row: Mapping[str, Any], verdict: Verdict) -> bool:

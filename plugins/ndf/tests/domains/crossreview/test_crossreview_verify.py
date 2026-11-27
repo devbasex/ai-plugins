@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.domains.crossreview import criteria_decide, verify_decide
+from ndf.domains.crossreview import criteria_decide, report_decide, verify_decide
 
 NDF_BY = "ndf"
 
@@ -68,7 +68,16 @@ def test_issue_4363_read_takes_the_valid_answers() -> None:
 def test_issue_4363_read_keeps_the_tracks_of_an_undecided_answer_and_warns() -> None:
     answers = verify_decide.read([_answer("a", None, reason="資料が無い", tracks=["secret"])], ["a"])
     assert (answers.verdicts["a"].holds, answers.verdicts["a"].tracks) == (None, ("secret",))
-    assert len(answers.warnings) == 1 and "a" in answers.warnings[0] and "資料が無い" in answers.warnings[0]
+    assert len(answers.warnings) == 1 and "a" in answers.warnings[0]
+
+
+def test_issue_4363_read_keeps_the_judges_free_text_out_of_the_public_comment() -> None:
+    """判定役が読んだ資料の内容（作り物の値）は、理由と番号のどちらに写されても記録のコメントに出ない。"""
+    private = "sample-corp-internal-plan"
+    found = [_answer("a", None, reason=private), _answer(private)]
+    warnings = verify_decide.read(found, ["a"]).warnings
+    body = report_decide.comment(1, {}, None, warnings)
+    assert warnings and private not in body
 
 
 @pytest.mark.parametrize(
@@ -89,7 +98,7 @@ def test_issue_4363_read_keeps_the_tracks_of_an_undecided_answer_and_warns() -> 
 def test_issue_4363_read_leaves_out_invalid_unknown_and_missing_answers(item: dict) -> None:
     answers = verify_decide.read([item], ["a"])
     assert answers.verdicts == {}
-    assert any("a" in w for w in answers.warnings) and any(item["id"] in w for w in answers.warnings)
+    assert any("a" in w for w in answers.warnings)
 
 
 def test_issue_4363_read_without_an_answer_warns_for_every_finding() -> None:
