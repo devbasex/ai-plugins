@@ -276,21 +276,18 @@ def _u3(files, unit_of, closure, bad) -> None:
 
 
 def _u4(files, homes, closure, bad) -> None:
-    """依存（間接を含む）で前後が決まらない 2 単位が同じファイルを触る（U4）。"""
-    position = {k: i for i, k in enumerate(homes)}
-    by_path: dict[str, list[_Key]] = {}
-    for k in homes:
-        for p in _touches(files[k[0]], homes[k]):
-            by_path.setdefault(p, []).append(k)
-    shared: dict[tuple[_Key, _Key], list[str]] = {}
-    for p, ks in by_path.items():
-        for i, a in enumerate(ks):
-            for b in ks[i + 1 :]:
-                shared.setdefault((a, b), []).append(p)
-    for (a, b), paths in sorted(shared.items(), key=lambda item: (position[item[0][0]], position[item[0][1]])):
-        if a not in closure[b] and b not in closure[a]:
+    """依存（間接を含む）で前後が決まらない 2 単位が同じファイルを触る（U4）。
+
+    組は 1 回ずつ、組を貯めずに見る。前後の決まった組は重なりを比べる前に外し、触るファイルの無い単位は組にしない。
+    """
+    touches = {k: frozenset(_touches(files[k[0]], homes[k])) for k in homes}
+    keys = [k for k in homes if touches[k]]
+    for i, a in enumerate(keys):
+        for b in keys[i + 1 :]:
+            if a in closure[b] or b in closure[a] or touches[a].isdisjoint(touches[b]):
+                continue
             where = f"{files[a[0]].path} の {a[1]} と {files[b[0]].path} の {b[1]}"
-            bad.append(Finding("U4", a[1], f"{where} が前後なしに {'・'.join(sorted(paths))} を触る"))
+            bad.append(Finding("U4", a[1], f"{where} が前後なしに {'・'.join(sorted(touches[a] & touches[b]))} を触る"))
 
 
 def _unit_tasks(f: UnitFile, u: UnitDef) -> list[Task]:
