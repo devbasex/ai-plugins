@@ -141,6 +141,57 @@ def test_a_refused_codex_arm_is_launched_once_more_with_the_base_arm(tmp_path: P
     assert run.data[experiment.KEY]["seats"] == {}
 
 
+class Slow(Seats):
+    """起動のたびに時計を `took` 秒進める codex の席。`refuse` が真を返す起動は、モデルを理由に拒まれる。"""
+
+    def __init__(self, monkeypatch, took: float, refuse) -> None:
+        super().__init__()
+        self.now, self.took, self.refuse = 1000.0, took, refuse
+        monkeypatch.setattr(claude_choice, "_monotonic", lambda: self.now)
+
+    def __call__(self, spec):
+        status = super().__call__(spec)
+        self.now += self.took
+        if not self.refuse(len(self.launches)):
+            return status
+        if "-o" in spec.argv:
+            Path(spec.argv[spec.argv.index("-o") + 1]).unlink()
+        message = "[ReasoningEffortParam] [reasoning.effort] [invalid_enum_value] Invalid value"
+        events = [{"type": "thread.started"}, {"type": "turn.failed", "error": {"message": message}}]
+        spec.paths.out.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+        return status._replace(state=agents.AgentState.FAILED, exit_code=1)
+
+
+@pytest.mark.parametrize("refusals, unread_seats", [(1, []), (2, ["codex"])])
+def test_the_relaunch_gets_the_remaining_time_and_its_result_is_the_seats_result(
+    tmp_path: Path, monkeypatch, outcomes, refusals: int, unread_seats: list[str]
+) -> None:
+    """起動し直しは 1 回だけで、監視の上限は残りの秒。席の結果と行の結果は最後の起動のもの。"""
+    monkeypatch.setattr(model_choice, "_random_value", lambda: 0.99)
+    fake, run = Slow(monkeypatch, 100.0, lambda n: n <= refusals), _held(tmp_path)
+    raised, unread = seats.launch_reviewers(run, 1, {"codex": "読む"}, [], fake)
+    first, second = fake.launches
+    assert second.timeout == first.timeout - 100.0
+    assert (raised, list(unread)) == ([], unread_seats)
+    assert [r["outcome"] for r in _rows(name="review")] == ["failed", "failed" if unread_seats else "done"]
+
+
+def test_a_refused_seat_is_not_relaunched_after_the_deadline(tmp_path: Path, monkeypatch, outcomes) -> None:
+    monkeypatch.setattr(model_choice, "_random_value", lambda: 0.99)
+    fake = Slow(monkeypatch, 10**9, lambda n: True)
+    _, unread = seats.launch_reviewers(_held(tmp_path), 1, {"codex": "読む"}, [], fake)
+    assert len(fake.launches) == 1 and list(unread) == ["codex"]
+    (row,) = _rows(name="review")
+    assert (row["model_refused"], row["outcome"]) == (True, "failed")
+
+
+def test_a_seat_without_chosen_values_is_launched_once_and_writes_no_row(tmp_path: Path, monkeypatch, outcomes) -> None:
+    monkeypatch.setattr(claude_choice, "launch_chooser", None)
+    fake = Slow(monkeypatch, 1.0, lambda n: True)
+    _, unread = seats.launch_reviewers(_held(tmp_path), 1, {"codex": "読む"}, [], fake)
+    assert len(fake.launches) == 1 and list(unread) == ["codex"] and _rows(name="review") == []
+
+
 def test_a_bad_value_stops_before_any_seat_is_launched(tmp_path: Path, monkeypatch, outcomes) -> None:
     monkeypatch.setenv("NDF_LAUNCH_CODEX_EFFORT", "bogus")
     fake = Seats()
