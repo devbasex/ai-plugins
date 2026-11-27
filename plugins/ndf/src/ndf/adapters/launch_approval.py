@@ -180,7 +180,7 @@ def _put_request(request: Mapping[str, Any], question: Mapping[str, Any], candid
     target = Path(request["target"])
     row = {
         **request, **({"sha256": question["sha256"]} if "sha256" in question else {}), "at": _at_now(), "action": str(Action.APPROVE), "target": str(target),
-        "base": launch_candidates.record_object(launch_candidates.raw_record(candidate.parent / SOURCE_NAME)).get("base") if candidate is not None else content_version(target),
+        "base": _source_record(candidate).get("base") if candidate is not None else content_version(target),
         "candidate": str(candidate) if candidate is not None else None,
         "candidate_version": content_version(candidate) if candidate is not None else None,
         "question_sha": canonical_sha(question["questions"]),
@@ -213,11 +213,20 @@ def _judged(label: Any, request: Mapping[str, Any]) -> tuple[Optional[str], Opti
     return None, None
 
 
-def request_answer(request_id: str) -> tuple[Optional[str], Optional[str]]:
-    """リクエストへの最後の回答（`approve`・`deny`・None）と承認者の名前。"""
+def _find_request(request_id: str) -> Optional[tuple[_Requests, int]]:
+    """承認のリクエストの履歴を読み、識別子のリクエストの索引と位置を返す。無ければ None。"""
     requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
     index = requests.by_id.get(request_id)
-    return (None, None) if index is None else _judged(_last_labels().get(request_id), requests.rows[index])
+    return None if index is None else (requests, index)
+
+
+def request_answer(request_id: str) -> tuple[Optional[str], Optional[str]]:
+    """リクエストへの最後の回答（`approve`・`deny`・None）と承認者の名前。"""
+    found = _find_request(request_id)
+    if found is None:
+        return None, None
+    requests, index = found
+    return _judged(_last_labels().get(request_id), requests.rows[index])
 
 
 def consent_by_answer(request_id: str, repo: str, sha256: str, target: Path, candidate: Optional[Path]) -> Optional[str]:
@@ -226,10 +235,10 @@ def consent_by_answer(request_id: str, repo: str, sha256: str, target: Path, can
     リクエストが無い・操作が違う（別の反映先か別の候補への質問）・同じ反映先により新しいリクエストがある・回答が「承認する」でなければ None。
     承認の行を足すかとは別に、設定を書き換えてよいかを決める（承認の対象が空か承認済みでも、書き換えには毎回人の同意が要る）。
     """
-    requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
-    index = requests.by_id.get(request_id)
-    if index is None:
+    found = _find_request(request_id)
+    if found is None:
         return None
+    requests, index = found
     req = requests.rows[index]
     asked = (req.get("repo"), req.get("action"), req.get("sha256"), req.get("target"), req.get("candidate"))
     if asked != (repo, Action.APPROVE, sha256, str(target), str(candidate) if candidate is not None else None) or requests.newer(index):
@@ -254,10 +263,10 @@ def approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]:
     同じリクエストの承認の行があり承認済みなら、行を足さずに承認者を返す（中断の後の打ち直し）。リクエストの後の取り消しは、
     リクエストを作った時点の承認の記録の行数より後ろの行で見分ける（時刻は秒の単位なので、同じ秒の取り消しと区別できない）。
     """
-    requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
-    index = requests.by_id.get(request_id)
-    if index is None:
+    found = _find_request(request_id)
+    if found is None:
         return None
+    requests, index = found
     req = requests.rows[index]
     if (req.get("repo"), req.get("action"), req.get("sha256")) != (repo, Action.APPROVE, sha256):
         return None
