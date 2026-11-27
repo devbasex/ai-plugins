@@ -492,7 +492,8 @@ def test_one_failed_check_ends_the_question_but_not_the_material(tmp_path: Path,
     if name == reading.MATERIAL:
         assert gaps and "2 回の確かめ" in gaps[0]["reason"], got
         return
-    assert gaps == [] and got["cause"]["kind"] != "incomplete", got
+    assert gaps == [] and got["status"] == "ok", got
+    assert {"name": reading.QUESTION, "reader": reading.APPROVER, "round": 1, "result": "remained"} in checks_rows()[-1]["reads"]
 
 
 # --- 止まる経路（条件 2・5） ---------------------------------------------------------------------------------
