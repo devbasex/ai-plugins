@@ -137,3 +137,37 @@ def test_record_that_cannot_be_created_is_an_os_error(tmp_path: Path) -> None:
             outputs.check(out)
     finally:
         tmp_path.chmod(0o700)
+
+
+def test_failed_write_leaves_an_empty_output_and_no_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """出力を書き切れなかった起動は、その場で出力を空に戻し記録を消すので、同じ引数で打ち直せる（r3-3・r3-4）。"""
+    out = tmp_path / "h"
+    out.touch()
+    out.chmod(0o600)
+    calls: list[Path] = []
+    real = outputs._write_once
+
+    def short(fd: int, data: bytes, path: Path) -> None:
+        calls.append(path)
+        if path == out:
+            os.write(fd, data[:3])
+            raise OSError("書き切れない")
+        real(fd, data, path)
+
+    monkeypatch.setattr(outputs, "_write_once", short)
+    with pytest.raises(OSError):
+        outputs.write_recorded(out, "a" * 40 + "\n")
+    assert calls == [outputs.owner_record(out), out]
+    assert out.read_bytes() == b"" and stat.S_IMODE(out.stat().st_mode) == 0o600
+    assert not outputs.owner_record(out).exists()
+    monkeypatch.setattr(outputs, "_write_once", real)
+    _settle(out)
+
+
+def test_empty_record_counts_as_no_record(tmp_path: Path) -> None:
+    """記録を作った直後に終了して残った空の記録は、記録が無いのと同じに扱い、片付けで消す（r2-6）。"""
+    out = tmp_path / "h"
+    out.touch()
+    outputs.owner_record(out).touch()
+    _settle(out)
+    assert out.exists() and not outputs.owner_record(out).exists()
