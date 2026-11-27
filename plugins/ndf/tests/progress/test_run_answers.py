@@ -80,7 +80,6 @@ def test_a_rejection_seen_on_the_way_to_an_older_approval_is_the_release_gate_an
         (_answered("approved", by="human:x"), _outputs()),  # 利用者の承認
         (_answered("approved", by="service:mvv"), _outputs()),  # MVV 判定の承認
         (_answered("approved"), _other()),  # 次の事象が出力でない
-        (_answered("approved"), _outputs(version="  ")),
         (_answered("approved"),),
         (),
     ],
@@ -103,7 +102,7 @@ def test_released_answer_returns_the_version_as_it_is_without_stripping(version)
     assert run.released_answer(run.StageAnswers(v, STAGE)).version == version
 
 
-@pytest.mark.parametrize("version", [None, 123, ["v"], {"v": 1}, "", "\n\t"])
+@pytest.mark.parametrize("version", [None, 123, ["v"], {"v": 1}, "", "  ", "\n\t"])
 def test_released_answer_is_none_unless_the_version_is_a_non_blank_string(version):
     v = _view(_answered("approved"), _outputs(version=version))
     assert run.released_answer(run.StageAnswers(v, STAGE)) is None

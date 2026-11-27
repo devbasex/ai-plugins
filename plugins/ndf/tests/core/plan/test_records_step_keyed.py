@@ -70,12 +70,6 @@ def test_missing_names_of_other_steps_are_kept_when_one_step_is_rewritten(tmp_pa
     assert _raw(tmp_path / records.STEP_MISSING_FILE) == {"b": ["y"], "a": ["z"]}
 
 
-def test_missing_names_cleared_for_the_last_step_leave_an_empty_object(tmp_path):
-    records._keep_step_missing(tmp_path, "a", "gate", ["x"])
-    records._keep_step_missing(tmp_path, "a", "gate", None)
-    assert _raw(tmp_path / records.STEP_MISSING_FILE) == {}
-
-
 def test_missing_names_are_copied_into_a_list(tmp_path):
     names = ("x", "y")
     records._keep_step_missing(tmp_path, "a", "gate", names)  # type: ignore[arg-type]

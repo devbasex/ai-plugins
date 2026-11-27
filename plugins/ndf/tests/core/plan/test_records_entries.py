@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from ndf.core.plan import records
@@ -50,6 +52,7 @@ def test_the_missing_names_of_the_last_round_of_a_step_are_kept_and_cleared(tmp_
     assert records.recorded_step_missing(tmp_path) == {"release": names}
     records._keep_step_missing(tmp_path, "release", "gate", None)
     assert records.recorded_step_missing(tmp_path) == {}
+    assert json.loads((tmp_path / records.STEP_MISSING_FILE).read_text(encoding="utf-8")) == {}
 
 
 def test_the_missing_names_are_neither_read_nor_written_unless_the_step_asked_for_a_decision(tmp_path, monkeypatch):
