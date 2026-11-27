@@ -138,7 +138,7 @@ stateDiagram-v2
 | 承認を読む側（マージの対象・承認済みのコミット・リリースの識別子） | 直近の開き直しより前の回答と、見た PR が工程の対象の PR と違う回答を読まない |
 | リリースのリクエスト（並行開発の計画か、計画の外のオーガナイザーへ出す承認の依頼） | 開き直しで失効する承認ゲートのリクエストだけを取り下げる |
 | 進み具合の表の更新 | 開き直しと、回答待ちからの終了の後に、課題と PR の本文を書き直す。失敗したときは、記録を足さずにもう一度書き直せる |
-| 作り直し用の作業場所 | マージ済みの設計を開き直したとき、現在のベースから作業場所を作って記録し、マージの後に取り込んで片付ける |
+| 作り直し用の作業場所 | マージ済みの設計を開き直したとき、現在のベースから作業場所（`.worktrees/` の下）を作って記録し、マージの後に取り込んで片付ける |
 | 手順書（進み具合の記録・supervisor の経路・承認の回答の記録） | 新しい操作と振る舞いを説明する |
 
 ```mermaid
@@ -152,6 +152,10 @@ graph TD
   TB --> ST
   RO --> REC["進み具合の表の更新"]
 ```
+
+NDF が足す記録は、すべてステートマシンの DB の事象に置く。`.git` の下に新しい置き場もファイルの種類も足さない。承認資料と提示した対象は、今ある書き手が今の保存先へ書く。その保存先を `.ndf/` へ移す変更は [#3500](https://github.com/devbasex/ai-plugins/issues/3500) が持つ。
+
+ファイルと関数の粒度は、詳細設計（[issue-4520-design-detail.md](./issue-4520-design-detail.md)）にある。作業の分け方は実装計画（[issue-4520-plan.md](./issue-4520-plan.md)）にある。
 
 ## 入出力のコントラクト
 
@@ -184,6 +188,9 @@ graph TD
 | `ndf progress question <ID> <工程> [--pr <番号>]` | 新設。結果は `gate` で、回答ごとの `ndf answer` を返す。回答待ちの工程には今の質問を返す。設計承認ゲートでは対象の PR が必要である。文脈に対象の PR が無いときは `--pr` で指定し、文脈に対象があるときは省ける。文脈の対象と違う番号は断る。ほかの承認ゲートは文脈の `pr` だけを対象にし、`--pr` を受けない |
 | `ndf answer <ID> --gate <質問の id> ...` | 引数は変わらない。`question` が作った質問の id を受ける |
 | `ndf progress request-status <ID> <依頼の ID>` | 新設。依頼の ID が今の質問のものかを `valid` で返す（「依頼が今も有効かの確かめ」）。何も書かない |
+| `ndf progress check <ID> <工程> --output <JSON> [--no-release]` | `--no-release` を `finish` と同じに受ける |
+| `ndf records mvv gate` | `--no-skip` を足す。`--expect-pr` を設計の判定でも受ける。承認の証跡は書かない |
+| `ndf worktree remove <ブランチ> --path <パス>` | 新設。作り直し用の作業場所の片付けが使う（「片付け」） |
 | `ndf progress next <ID>` | 引数は変わらない。手で終えた回答待ちの工程では `gate` と回答のコマンドを返す。設計承認ゲートの承認を読むとき、承認した PR が未マージなら `stopped`（`precondition`）で「マージしてから打ち直す」と返す |
 
 開き直しを起こす操作の結果は、次を持つ。
@@ -200,7 +207,10 @@ graph TD
 | 事象 | 書ける状態 | 後の状態 | payload |
 | --- | --- | --- | --- |
 | `finish_held`（新設） | 未着手・失敗 | 実行中 | 承認ゲートのステップ、出力のファイル、MVV 判定を打ったときはその結果（決定 7）。デプロイでは `record_pr`・`no_release`・`cd_result`（「リリース済みの確かめ」） |
+| `request_issued`（新設） | ステートマシン全体（工程の行ではない） | 変えない | 出したリリースのリクエスト（「出したリクエストの記録」） |
+| `redo_recorded`（新設） | 同上 | 変えない | 作り直しの記録の今の版（「作り直しの記録」） |
 | `reopened`（新設） | 未着手・実行中・失敗・終了 | 未着手 | きっかけ（`retry` か回答）、変更要求の指摘 |
+| `outputs_recorded` | 未着手・実行中・失敗・終了（未着手と失敗を足す） | 変えない | 今と同じ |
 | `answered` | 未着手・実行中・失敗・終了（未着手と終了を足す） | 変えない | 待っていない質問への回答と、開き直しを起こす回答には `late: true` |
 | `failed` | 実行中・未着手（未着手を足す） | 失敗 | 今と同じ |
 
@@ -255,7 +265,7 @@ graph TD
 
 記録のあるファイルは DB より先に消すので、開き直した記録があるのに、取り下げの対象にした古いリクエストのファイルが残ることはない。中身が記録と一致しないファイルと、この改修より前に出したリクエストのファイルは残るので、結果の `warnings` に載せる（下の 2 項）。
 
-**出したリクエストの記録。** 保存先の環境変数 `NDF_ORGANIZER_DIR` は、リクエストを出したシェルにしか無いことがある。そこで、リクエストを出すたびに、状態の保存先の承認資料の隣へ次の記録を残す。
+**出したリクエストの記録。** 保存先の環境変数 `NDF_ORGANIZER_DIR` は、リクエストを出したシェルにしか無いことがある。そこで、リクエストを出すたびに、ステートマシンの DB へ事象 `request_issued` を追記する（決定 9）。記録のためのファイルは作らない。
 
 | 項目 | 中身 |
 | --- | --- |
@@ -264,13 +274,14 @@ graph TD
 | 発行先 | ファイルの絶対パス（ファイルの場合だけ） |
 | リクエストの中身 | 書いた項目の全部（リクエストの ID、`sprint_state`、`prs`、`issues` など） |
 
-- 記録はファイルを書く前に、リクエストの ID と発行先の組ごとに 1 件残す。同じ組の記録は上書きしない。同じ質問を別の `NDF_ORGANIZER_DIR` で出し直すと、記録が 1 件増える
-- 同じ名前で中身の違うファイルがあって書けなかった場合は、今回作った記録を消す。NDF が書いていないファイルを指す記録を残さないためである
-- 取り下げでは、開き直す工程の記録にあるパスをすべて読む。中身が記録と一致するときだけ消す。比べるのは、書いた時刻（`at`）を除く全項目である。打った側の `NDF_ORGANIZER_DIR` は使わない
+- 事象はファイルを書く前に追記する。リクエストの ID と発行先の組が同じなら、2 度は追記しない。同じ質問を別の `NDF_ORGANIZER_DIR` で出し直すと、事象が 1 件増える
+- 同じ名前で中身の違うファイルがあって書けなかった場合も、事象は残る。中身が記録と一致しないので、そのファイルは取り下げで消えない
+- 取り下げでは、開き直す工程の事象にあるパスをすべて読む。中身が記録と一致するときだけ消す。比べるのは、書いた時刻（`at`）を除く全項目である。打った側の `NDF_ORGANIZER_DIR` は使わない
 - 中身が一致しないファイルは消さない。開き直しは進め、結果の `warnings` に「未取り下げ」としてリクエストの ID とパスを載せる
-- `--later keep` で残した工程の記録は対象にしないので、残した承認ゲートのリクエストは消えない
+- パスにファイルが無ければ、何も消さずに開き直し、`warnings` に ID とパスを載せる。取り下げ済みか、回収されたか、別の機械で出したリクエストである
+- `--later keep` で残した工程の事象は対象にしないので、残した承認ゲートのリクエストは消えない
 
-**この改修より前に出したリクエスト。** NDF はこのリクエストのファイルを自動で消さない。発行先と、書いたファイルを指す記録が残っていないためである。承認資料の隣の対象のファイル（`<提示の識別子>.seen.json`）から分かるのは、どの質問でリクエストを出したかまでで、どのファイルを NDF が作ったかは分からない。打ったシェルの `NDF_ORGANIZER_DIR` にある同じ中身のファイルは、利用者が置いた控えかもしれない。NDF が自動で消すのは、自分が作ったと確かめられるものだけである。
+**この改修より前に出したリクエスト。** NDF はこのリクエストのファイルを自動で消さない。事象 `request_issued` が無く、発行先と書いた中身が分からないためである。承認資料の隣の対象のファイル（`<提示の識別子>.seen.json`）から分かるのは、どの質問でリクエストを出したかまでで、どのファイルを NDF が作ったかは分からない。打ったシェルの `NDF_ORGANIZER_DIR` にある同じ中身のファイルは、利用者が置いた控えかもしれない。NDF が自動で消すのは、自分が作ったと確かめられるものだけである。
 
 - 並行開発の計画へ出した分は、計画の事象に記録があるので、計画の事象で閉じる
 - ファイルで出した分は、開き直しを進め、結果の `warnings` にリクエストの ID と「発行先の記録が無いので消していない」ことを載せる。打ったシェルの `NDF_ORGANIZER_DIR` に `requests/<ID>.json` があれば、そのパスも載せる。消すかは利用者が決める
@@ -280,7 +291,7 @@ graph TD
 
 - 外のオーガナイザーは、依頼を利用者へ示す前に 1 回、`ndf progress request-status <依頼の sprint_state> <依頼の ID> --cwd <レーンのリポジトリ>` を打つ
 - 結果が `valid: true` でなければ、依頼を捨て、利用者へ承認を求めない。コマンドが失敗したときは、示さずに打ち直す。回答を書く前には打たない
-- NDF が `valid: true` を返すのは、そのステートマシンが今回答を待つ質問の、依頼の ID と一致するときだけである。ステートマシンの記録だけを読み、GitHub は読まない
+- NDF が `valid: true` を返すのは、そのステートマシンが今回答を待つ質問について、最後の `request_issued` の依頼の ID と一致するときだけである。ステートマシンの記録だけを読み、GitHub は読まない
 - NDF は、取り下げた依頼の ID への回答を読まない。確かめた後に取り下げられて回答が書かれても、承認にはならない
 
 並行開発の計画へ出したリクエストは、計画の事象 `request_closed` で閉じるので、この確かめは要らない。
@@ -726,6 +737,17 @@ NDF が前後を見分けられるのは、記録の順だけである。承認�
 
 - 根拠: Value 1「ワークフロー上の課題（再起動・告知・確認）で、利用者に操作を求めない」（MVV バージョン 11）
 
+### 決定 9: `.git` の下の置き場を増やさないため、出したリクエストの記録はステートマシンの事象で持つ
+
+- **質問**: 取り下げに使う「出したリクエストの記録」を、どこに置くか
+- **選んだ案**: ステートマシンの DB の事象 `request_issued` にする
+  - 読み手は NDF だけで、置き場の決まりでは「機械だけが読む状態」に当たる
+  - 状態の保存先を複数のマシンで共有する場合も、記録は状態と一緒に届く
+- 採らなかった案: 状態の保存先（`.git/ndf/` の下）の承認資料の隣に記録のファイルを置く（`.git` の下にファイルの種類が増える。利用者は置き場を `.ndf/` へ移すと決めている）
+- 採らなかった案: `.ndf/` の下の無視されるフォルダに置く（人も AI も読まない記録で、記録と状態の 2 か所を合わせる必要がある。`git clean -fdx` で消える）
+- **代償**: 事象の種類が 1 つ増える。発行先のパスは出した機械のもので、別の機械で開き直すとファイルは消せず、警告になる
+- 根拠: Value 8「履歴を残す事実は追記だけで持ち、今の値は最新の記録から引く」（MVV バージョン 11）。[#3500](https://github.com/devbasex/ai-plugins/issues/3500) の利用者の決定
+
 ## 影響と危険
 
 - **働く範囲**: 利用先のリポジトリでも働く（`ndf progress` と `ndf answer`）
@@ -832,7 +854,7 @@ NDF が前後を見分けられるのは、記録の順だけである。承認�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4520 | 実装する | — | `plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/run_view.py`、`plugins/ndf/src/ndf/progress/approval.py`（新設）、`plugins/ndf/src/ndf/progress/reopening.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/stage_inputs.py`、`plugins/ndf/src/ndf/domains/worktree/merged.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/gate/release.py`、`plugins/ndf/src/ndf/progress/plan/external.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/core/merge_approval.py`、`plugins/ndf/tests/progress/test_reopen_operations.py`（新設）、`plugins/ndf/tests/progress/test_manual_gate.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-answer.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-workflow.md`、`docs/glossary.md` |
+| #4520 | 実装する | — | `plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/src/ndf/core/release_record.py`、`plugins/ndf/src/ndf/core/merge_approval.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/run_view.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/approval_decide.py`、`plugins/ndf/src/ndf/progress/delivery_decide.py`、`plugins/ndf/src/ndf/progress/run_approval.py`、`plugins/ndf/src/ndf/progress/reopening.py`、`plugins/ndf/src/ndf/progress/redo.py`、`plugins/ndf/src/ndf/progress/redo_decide.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/gate/release.py`、`plugins/ndf/src/ndf/progress/gate/__init__.py`、`plugins/ndf/src/ndf/progress/gate/targets.py`、`plugins/ndf/src/ndf/progress/gate/finishing.py`、`plugins/ndf/src/ndf/progress/gate/requests.py`、`plugins/ndf/src/ndf/progress/gate/delivery_check.py`、`plugins/ndf/src/ndf/progress/gate/mvv_trail.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/domains/worktree/cli.py`、`plugins/ndf/src/ndf/domains/worktree/merged.py`、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/progress/test_reopen_operations.py`、`plugins/ndf/tests/progress/test_manual_gate.py`、`plugins/ndf/tests/progress/test_release_confirm.py`、`plugins/ndf/tests/progress/test_redo.py`、`plugins/ndf/tests/progress/test_requests.py`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-answer.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-workflow.md`、`docs/glossary.md` |
 
 [#3957](https://github.com/devbasex/ai-plugins/issues/3957)（手で終えると回答を待たずに次の工程が始まる）の受け入れ条件 3 件は、要求仕様の受け入れ条件 1・2・4 に含まれる。
 
