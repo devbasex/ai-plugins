@@ -378,21 +378,58 @@ OWN_FILES = frozenset({CANDIDATE_NAME, SOURCE_NAME, DISCARD_NAME})
 RECORD_KEYS = {SOURCE_NAME: frozenset({"target", "base", "written"}), DISCARD_NAME: frozenset({"kept"})}
 
 
-def _ndf_record(path: Path, data: Optional[bytes] = None) -> bool:
-    """`path` が、NDF が書いたままの記録（普通のファイルで、`RECORD_KEYS` の欄だけを `write_launch_record` の形で持つ）か。
+@dataclass(frozen=True)
+class _Read:
+    """記録を読んだ中身と、読んだファイルの識別情報と状態（`_ident`。後で同じファイルのままかを照らす）。"""
 
-    利用者が同じ名前の別のファイルやディレクトリへ置き換えていれば偽で、呼び手はそれを消さない。呼び手が読み終えた中身 `data` が
-    あれば、読み直さずに使う。
+    data: bytes
+    ident: tuple[int, int, int, int]
+
+
+def _ident(st: os.stat_result) -> tuple[int, int, int, int]:
+    """ファイルの `(st_dev, st_ino, 大きさ, 更新時刻)`。同じ大きさと更新時刻の別のファイルへの置き換えも見分ける。"""
+    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns
+
+
+def _raw(path: Path) -> Optional[_Read]:
+    """記録を、親のディレクトリと記録のどちらもリンクをたどらずに開き、開いた記述子で普通のファイルと確かめてから読む。
+
+    無い・読めない・普通のファイルでない記録は None。FIFO は開く段階で待たない（`O_NONBLOCK`）。読む間に変わった記録も None。
     """
     try:
-        if not stat.S_ISREG(os.lstat(path).st_mode):
-            return False
-        if data is None:
-            data = path.read_bytes()
-        obj = json.loads(data)
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない・壊れた記録は、NDF が書いたままと確かめられないので消さない
+        folder = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=folder)
+        finally:
+            os.close(folder)
+        with os.fdopen(fd, "rb") as f:
+            before = os.fstat(f.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                return None
+            data = f.read()
+            after = os.fstat(f.fileno())
+    except OSError:  # noqa: NDF401 ファイル: 無い・読めない記録は「記録が無い」と同じに扱い、所有の確かめで外す
+        return None
+    return _Read(data, _ident(after)) if _ident(before) == _ident(after) else None
+
+
+def _ndf_record(path: Path, read: Optional[_Read] = None) -> bool:
+    """`path` が、NDF が書いたままの記録（普通のファイルで、`RECORD_KEYS` の欄だけを `write_launch_record` の形で持つ）か。
+
+    利用者が同じ名前の別のファイルやディレクトリへ置き換えていれば偽で、呼び手はそれを消さない。呼び手が読み終えた中身 `read` が
+    あれば、読み直さずに使う。
+    """
+    if read is None:
+        read = _raw(path)
+    if read is None:
         return False
-    return isinstance(obj, dict) and obj.keys() == RECORD_KEYS[path.name] and json.dumps(obj, ensure_ascii=False).encode("utf-8") == data
+    try:
+        obj = json.loads(read.data)
+    except ValueError:  # noqa: NDF401 ファイル: 壊れた記録は、NDF が書いたままと確かめられないので消さない
+        return False
+    return (
+        isinstance(obj, dict) and obj.keys() == RECORD_KEYS[path.name] and json.dumps(obj, ensure_ascii=False).encode("utf-8") == read.data
+    )
 
 
 @dataclass(frozen=True)
@@ -421,19 +458,29 @@ def _stamp(stats: list[tuple[str, os.stat_result]]) -> frozenset[tuple[str, int,
     return frozenset((name, st.st_ino, st.st_size, st.st_mtime_ns) for name, st in stats)
 
 
-def _ownership(folder: Path, known: Optional[Mapping[str, bytes]] = None) -> Optional[_Owned]:
+def _ownership(folder: Path, known: Optional[Mapping[str, Optional[_Read]]] = None) -> Optional[_Owned]:
     """候補のディレクトリの中が NDF の作った普通のファイルだけなら、その確かめた結果（`_Owned`）。
 
     リンクをたどらずに調べる（`lstat`）。ほかの項目（利用者のファイル・シンボリックリンク・ディレクトリ）があるか、
     記録（`source.json`・`discard.json`）が NDF の書いたままでないか（`_ndf_record`）、調べる途中で状態を読めなければ None を返し、
-    呼び手はその候補を消さない。`known` は呼び手が読み終えた記録の中身で、読み直さずに使う。
+    呼び手はその候補を消さない。`known` は呼び手が読み終えた記録（読めなければ None）で、読み直さずに使う。その記録が、ここで
+    調べた同じ名前の項目と識別情報・状態まで同じでなければ None を返す（読んだ後に別のファイルへ置き換わった記録の中身を、
+    新しいファイルの状態と組み合わせない）。
     """
     found = _entries(folder)
     if found is None:
         return None
     top, stats = found
-    if not all(_ndf_record(folder / name, None if known is None else known.get(name)) for name, _ in stats if name != CANDIDATE_NAME):
+    known = known or {}
+    present = {name for name, _ in stats}
+    if any(read is not None and name not in present for name, read in known.items()):
         return None
+    for name, st in stats:
+        if name == CANDIDATE_NAME:
+            continue
+        read = known[name] if name in known else _raw(folder / name)
+        if read is None or read.ident != _ident(st) or not _ndf_record(folder / name, read):
+            return None
     keys = frozenset({(top.st_dev, top.st_ino)} | {(st.st_dev, st.st_ino) for _, st in stats})
     return _Owned(keys, _stamp(stats))
 
@@ -546,16 +593,9 @@ class _Due:
     current: Optional[str] = None
 
 
-def _raw(path: Path) -> Optional[bytes]:
+def _parsed(raw: Optional[_Read]) -> dict[str, Any]:
     try:
-        return path.read_bytes()
-    except OSError:  # noqa: NDF401 ファイル: 無い・読めない記録は「記録が無い」と同じに扱い、所有の確かめで読み直して外す
-        return None
-
-
-def _parsed(raw: Optional[bytes]) -> dict[str, Any]:
-    try:
-        data = json.loads(raw) if raw is not None else {}
+        data = json.loads(raw.data) if raw is not None else {}
     except ValueError:
         return {}
     return data if isinstance(data, dict) else {}
@@ -567,7 +607,8 @@ def _sweep_reasons(home: Path) -> dict[Path, _Due]:
     上から順に当てはめ、最初に当たった理由だけを使う。最新のリクエストに「承認しない」と回答した（`denied`）。反映先の worktree が
     無い（`worktree_gone`）。反映先が反映元のバージョンから変わり、候補の中身が反映先の今の中身と一致する（`reflected`。比べる
     バージョンに反映先の今の中身を足す。反映の完了の記録は照らさない）。反映先が反映元のバージョンから変わった（`outdated`。この
-    候補では `reflect` が拒む）。後の 2 つは、否認の後に作り直したリクエストが回答待ちの候補にも当てはめる。「承認しない」の判定は
+    候補では `reflect` が拒む）。後の 2 つは、否認の後に作り直したリクエストが回答待ちの候補にも当てはめる。ただし、使える
+    承認済みのリクエストがあり反映の完了の記録が無い候補は、反映先と同じ中身でも `reflected` にしない（`_unfinished`）。「承認しない」の判定は
     候補ごとの最新のリクエストで行う。直したかどうかはここでは見ない（片付ける側が `_untouched` か読んだ `current` で見る）。
 
     条件はまず履歴と反映先だけで決め、当たらない候補のディレクトリは調べない。当たった候補だけ、中身を読む前に NDF が作ったもの
@@ -576,7 +617,9 @@ def _sweep_reasons(home: Path) -> dict[Path, _Due]:
     1 回だけ求める。
     """
     latest: dict[Any, dict[str, Any]] = {}
+    newest: dict[Any, dict[str, Any]] = {}
     for row in records.whole_rows(state_file(QUESTIONS)):
+        newest[row.get("target")] = row
         if row.get("candidate") is not None:
             latest[row.get("candidate")] = row
     labels = _last_labels()
@@ -586,29 +629,46 @@ def _sweep_reasons(home: Path) -> dict[Path, _Due]:
         raw = _raw(made / SOURCE_NAME)
         source = _parsed(raw)
         req = latest.get(str(made / CANDIDATE_NAME))
-        if req is not None and _judged(labels.get(req.get("request_id")), req)[0] == "deny":
+        answer = None if req is None else _judged(labels.get(req.get("request_id")), req)[0]
+        if answer == "deny":
             due = _inspect(made, raw, source, "denied")
         elif _worktree_gone(source.get("target")):
             due = _inspect(made, raw, source, "worktree_gone")
         else:
-            due = _moved_target(made, raw, source, versions)
+            due = _moved_target(made, raw, source, versions, answer == "approve" and _unfinished(req, newest))
         if due is not None:
             reasons[made] = due
     return reasons
 
 
-def _inspect(made: Path, raw: Optional[bytes], source: Mapping[str, Any], reason: str) -> Optional[_Due]:
+def _unfinished(req: Mapping[str, Any], newest: Mapping[Any, Mapping[str, Any]]) -> bool:
+    """「承認する」と回答したリクエストが、まだ使えて（同じ反映先の最新のリクエストで）、完了の記録が無いか。
+
+    その候補は、打ち直した `approve --candidate` が承認を済ませる入口なので、完了の記録ができるまで片付けない。
+    """
+    if newest.get(req.get("target")) is not req:
+        return False
+    return read_launch_record(reflected_file(Path(str(req.get("target"))), DONE)).get("request_id") != req.get("request_id")
+
+
+def _inspect(made: Path, raw: Optional[_Read], source: Mapping[str, Any], reason: str) -> Optional[_Due]:
     """条件に当たった候補が NDF の作ったものだけなら、その判定（候補はまだ読まない）。そうでなければ None。"""
-    owned = _ownership(made, {SOURCE_NAME: raw} if raw is not None else None)
+    owned = _ownership(made, {SOURCE_NAME: raw})
     return None if owned is None else _Due(reason, owned.stamp, source.get("written"))
 
 
 def _moved_target(
-    made: Path, raw: Optional[bytes], source: Mapping[str, Any], versions: dict[str, tuple[bool, Optional[str]]]
+    made: Path,
+    raw: Optional[_Read],
+    source: Mapping[str, Any],
+    versions: dict[str, tuple[bool, Optional[str]]],
+    approved: bool = False,
 ) -> Optional[_Due]:
     """反映先が反映元のバージョンから変わった候補の判定（`reflected` か `outdated`）。変わっていないか、反映先か候補を読めなければ None。
 
     反映先のバージョンは `versions` に残し、同じ反映先の候補では読み直さない。候補は NDF の作ったものだけと確かめてから読む。
+    `approved`（使える承認済みのリクエストがあり、完了の記録が無い）候補は、反映先と同じ中身でも片付けない（`approve` の打ち直しが
+    この候補で承認を済ませる）。反映先と違う中身なら `reflect` が拒むので、`outdated` として片付ける。
     """
     target = str(source.get("target"))
     if target not in versions:
@@ -623,6 +683,8 @@ def _moved_target(
     if not ok:
         return None
     if now is not None and current == now:
+        if approved:
+            return None
         return _Due("reflected", due.stamp, due.written, now, True, current)
     return _Due("outdated", due.stamp, due.written, None, True, current)
 
@@ -631,8 +693,8 @@ def _listed(reasons: Mapping[Path, _Due], left_out: set[Path]) -> list[dict[str,
     """元のパスに残った片付けの条件に当たる候補のうち、利用者が消しても設定案と利用者の項目を失わないもの（`cleanup_targets` の形）。
 
     `left_out`（退避した候補と、開いたままのファイルなどで同じ掃除が元の名前へ戻した候補）と、直した候補は入れない。返す前に、
-    候補のディレクトリの項目と各項目の大きさ・更新時刻が判定の時と同じかを照らし、判定の後に保存された候補や隣に置かれた別案の
-    ある候補も入れない。判定で読んだ候補のバージョンがあれば、読み直さずに使う。読めない候補は入れない。
+    候補のディレクトリの項目名と、各項目の inode・大きさ・更新時刻を判定の時と照らし、どれかが変わった候補（判定の後に保存された
+    候補、隣に別案が置かれた候補、同じ大きさと更新時刻の別のファイルへ置き換わった候補）も入れない。判定で読んだ候補のバージョンがあれば、読み直さずに使う。読めない候補は入れない。
     """
     listed = []
     for made, due in reasons.items():
