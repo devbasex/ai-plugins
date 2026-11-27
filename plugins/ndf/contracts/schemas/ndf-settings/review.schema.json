@@ -37,7 +37,7 @@
     },
     "limits": {
       "$ref": "#/$defs/limits",
-      "description": "version 1 だけで書ける。cross-review の費用と時間の上限（#2468）。どのキーも省ける。省いたとき seconds と usd は NDF の既定（contracts/limits/ の cross-review.max-seconds・cross-review.max-usd）を使い、rounds はプロジェクトの上限を置かない"
+      "description": "version 1 だけで書ける。cross-review のラウンド数（rounds）・ラウンドにかかった時間の合計（seconds。秒）・計測できた Claude の費用の合計（usd。米ドル）の上限（#2468）。ndf cross-review run は実行者のメインディレクトリからこの設定を読み込んで形を検証する。今の実装は読み込みと検証までで、設定した値に達してもレビューは停止しない（停止の処理は後の変更で追加する）。どのキーも省ける。省いたとき seconds と usd は NDF の既定（contracts/limits/ の cross-review.max-seconds・cross-review.max-usd）を使い、rounds はプロジェクトの上限を置かない"
     },
     "profile": {
       "$ref": "#/$defs/profile",
