@@ -1,4 +1,4 @@
-"""出現率の計算（#2944 の設計 issue-2944-design-allocation.md の「出現率の計算」「必要な件数と、判断できる件数」）。
+"""出現率の計算（確定仕様 ndf-launch-model-experiment.md の「出現率の計算」「判断できる件数」）。
 
 純粋な関数で、ファイルも時刻も読まない。単位の値（`experiments.Unit`）を受け、重み付きの平均（`weighted`）、打ち切り
 （`eliminated`）、段階と確率（`probabilities`）、`report` の 4 つの表示（`judgement`）を返す。
