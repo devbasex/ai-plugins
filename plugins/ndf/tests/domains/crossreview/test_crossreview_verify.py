@@ -235,11 +235,12 @@ def _approved(root: Path) -> mvv.Snapshot:
 
 def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers(tmp_path: Path) -> None:
     run, diff, seen = _AskRun(tmp_path), _diff(tmp_path), []
-    # 前からある出力の名前のリンクは開かず、リンク先の権限も中身も変えない
+    # 前からある同じ名前のリンクやファイルは、開かず置き換えず、リンク先の権限も中身も変えない
     other = tmp_path / "other"
     other.write_text("別のファイル", encoding="utf-8")
     other.chmod(0o644)
     (tmp_path / "round1-verify.out").symlink_to(other)
+    (tmp_path / "round1-verify.err.log").write_text("前の記録", encoding="utf-8")
     modes: list[int] = []
     answered = _launcher(seen, [holding(_row())])
 
@@ -258,13 +259,32 @@ def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers
     listed = diff.parent / "round1-verify-findings.jsonl"
     assert str(listed) in argv[-1] and not any("保存が止まる" in a for a in argv)
     assert "保存が止まる" in listed.read_text(encoding="utf-8")
-    # 出力はこの起動で作った実行者だけが開けるディレクトリに書かせ、記録を状態の保存先へ移してディレクトリを消す
+    # 出力はこの起動で作った実行者だけが開けるディレクトリに書かせ、記録を起動ごとの名前で状態の保存先へ移してディレクトリを消す
     held = spec.paths.out.parent
     assert held.parent == tmp_path and modes == [0o700] and not held.exists()
-    record = tmp_path / "round1-verify.out"
+    record = tmp_path / f"{held.name}.out"
     assert not record.is_symlink() and record.stat().st_mode & 0o777 == 0o600 and "verdicts" in record.read_text(encoding="utf-8")
+    assert (tmp_path / "round1-verify.out").is_symlink()
+    assert (tmp_path / "round1-verify.err.log").read_text(encoding="utf-8") == "前の記録"
     assert (other.read_text(encoding="utf-8"), other.stat().st_mode & 0o777) == ("別のファイル", 0o644)
     assert run.notes == [(1, "verify", "判定役へ 1 件、有効な回答 1 件")]
+
+
+def test_issue_4363_ask_keeps_the_records_of_every_launch_and_replaces_nothing(tmp_path: Path) -> None:
+    """同じラウンドの起動し直しでも前の記録は残る。移し先に同じ名前があれば、置き換えずに過程へ残す。"""
+    run, diff, seen = _AskRun(tmp_path), _diff(tmp_path), []
+    answered = _launcher(seen, [holding(_row())])
+
+    def taken(spec: agents.Launch) -> agents.AgentStatus:
+        (tmp_path / f"{spec.paths.out.parent.name}.out").write_text("前の記録", encoding="utf-8")
+        return answered(spec)
+
+    for launch in (answered, answered, taken):
+        assert verify.ask(run, 1, [_row()], {"r1-1": [diff]}, launch).verdicts["r1-1"].holds is True
+    first, second, third = (tmp_path / f"{spec.paths.out.parent.name}.out" for spec in seen)
+    assert first != second and all("verdicts" in p.read_text(encoding="utf-8") for p in (first, second))
+    assert third.read_text(encoding="utf-8") == "前の記録" and not seen[2].paths.out.parent.exists()
+    assert [note for note in run.notes if "移せない" in note[2]]
 
 
 def test_issue_4363_ask_points_the_mvv_criterion_at_the_copies_in_the_input_directory(tmp_path: Path) -> None:
@@ -311,7 +331,8 @@ def test_issue_4363_ask_failure_gives_no_answer_and_one_warning(tmp_path: Path, 
     }[how]
     answers = verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [diff]}, launch)
     assert answers.verdicts == {} and len(answers.warnings) == 1 and len(seen) == 1
-    assert not seen[0].paths.out.parent.exists() and (tmp_path / "round1-verify.out").is_file()
+    held = seen[0].paths.out.parent
+    assert not held.exists() and (tmp_path / f"{held.name}.out").is_file()
     # 注意は PR の記録に載るので、手元の絶対パスを書かない
     assert str(tmp_path) not in answers.warnings[0]
 
