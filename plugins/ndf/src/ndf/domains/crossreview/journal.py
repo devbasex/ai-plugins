@@ -49,6 +49,8 @@ SKIPPED_MVV = "skipped_mvv"
 FIXER_REASON = "fixer_reason"
 # 根拠の記述の誤りの指摘が、次の確かめで同じ誤りかを見分ける欄（`citation_key`）
 CITATION_KEY = "citation_key"
+# 指摘の本文の後ろへ別の報告を書き足すときの区切り。照合キーはこの区切りより前の本文で作る（#4363）
+ALSO = " ／ 同じ指摘の別の報告: "
 
 
 def new_occurrence() -> str:
@@ -294,6 +296,22 @@ def _basis(item: Mapping[str, Any], items: Sequence[str]) -> int:
     return 1 if criteria_decide.protect_of(item.get(PROTECT)) else 0
 
 
+def _add_report(row: dict[str, Any], item: Mapping[str, Any]) -> None:
+    """指摘の本文の後ろに、別の報告 `item` の本文・位置・起きることの 1 文を書き足す（行と同じ本文と位置の報告と、書き足し済みの
+    報告は足さない。起きることの 1 文が行と違う報告は足す）。欄を分けず本文に足すのは、修正担当・判定役・承認資料・記録のコメントがどれも本文を読み、公開の前の伏せ字も
+    本文に掛かるためである。#4363"""
+    new = _raised(dict(item))
+    text = str(item["text"]).strip()
+    path, line = new.get("path"), new.get("line")
+    same_place = (text, path, line) == (row["text"].split(ALSO)[0], row.get("path"), row.get("line"))
+    if same_place and new.get("impact") in (None, row.get("impact")):
+        return
+    place = f"{path}:{line}" if path and line else path or _text(item.get("section"))
+    added = ALSO + text + (f"（{place}）" if place else "") + criteria_decide.fixer_impact(new)
+    if added not in row["text"]:
+        row["text"] += added
+
+
 def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]], items: Sequence[str]) -> bool:
     """このラウンドで新しく出たか戻った行の本文・1 文・位置を、出し直し 1 件のものにそろえ、判定役へ渡せる 1 文がこのラウンドに
     あるかを返す。`same` はこのラウンドのその指摘の出し直しである。
@@ -301,7 +319,11 @@ def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]], items:
     承認や保護の根拠となる出し直し（`_basis`）があれば、利用者と修正担当に別の操作の説明を見せないよう、1 文が無くてもその
     1 件を使う。根拠の強さが同じなら 1 文を持つもの、次に重いもの、次に先のものを選ぶ。根拠が無ければ 1 文を持つもののうちで選び、
     1 件も無ければ何も変えない。指摘のキーは本文の先頭だけで決まるので、判定役がある報告の発生条件を別の報告の位置で確かめない
-    ためでもある。#4363"""
+    ためでもある。
+
+    根拠の 1 件を選んだときは、ほかの報告のうち次のものを本文に書き足す（`_add_report`）。必ず人の承認が要る操作を挙げた報告の
+    すべてと、選んだ 1 件に 1 文が無いか、より重い場合の、1 文を持つ最も重い報告である。根拠のある指摘は確認で下げないので、
+    書き足しても指摘を下げる材料は混ざらない。#4363"""
     best: Optional[tuple[tuple[int, bool], Mapping[str, Any], dict[str, Any]]] = None
     told = False
     for item in same:
@@ -315,14 +337,31 @@ def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]], items:
             best = rank, item, new
     if best is None:
         return False
-    _, item, new = best
+    rank, item, new = best
     row["text"] = str(item["text"]).strip()
     if "impact" in new:
         row["impact"] = new["impact"]
     else:
         row.pop("impact", None)
     _place(row, new, _text(item.get("section")))
+    if rank[0]:
+        for other in _other_reports(same, items, new if rank[1] else None):
+            _add_report(row, other)
     return told
+
+
+def _other_reports(same: Sequence[Mapping[str, Any]], items: Sequence[str], chosen: Optional[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """行の本文に書き足す報告。`chosen` は行に選んだ報告の `_raised` の値で、その報告に 1 文が無ければ None。"""
+    out = [item for item in same if criteria_decide.redline(criteria_decide.mvv_item(item.get("mvv"), items))]
+    told = [(item, new) for item in same if "impact" in (new := _raised(dict(item)))]
+    if told:
+        top = told[0]
+        for pair in told:
+            if criteria_decide.heavier(top[1]["severity"], pair[1]["severity"]) != top[1]["severity"]:
+                top = pair
+        if chosen is None or criteria_decide.heavier(chosen["severity"], top[1]["severity"]) != chosen["severity"]:
+            out.append(top[0])
+    return out
 
 
 class Checked(NamedTuple):
@@ -375,6 +414,8 @@ class FindingJournal:
         fresh: list[str] = []
         same: dict[str, list[Mapping[str, Any]]] = {}
         _unlower(by_key, raised, items)
+        # この呼び出しの前から行が持つ、必ず人の承認が要る操作の番号
+        approvals = {fid: tuple(store.list_of(row, REDLINE_ITEMS)) for fid, row in self.rows.items()}
         before = len(self.revived)
         for item in raised:
             text = item.get("text")
@@ -395,6 +436,9 @@ class FindingJournal:
                 self._raised_again(known, item, round_no, named, mvv)
                 fresh += self.revived[revived:]
             if named is not None and known.get("by") != BY_NDF:
+                # 前からある指摘に、承認の要る別の操作が加わった（新しい指摘と戻った指摘は `_align_report` がそろえる）
+                if criteria_decide.redline(named) and known["id"] not in fresh and named not in approvals.get(known["id"], ()):
+                    _add_report(known, item)
                 _classify(known, item, named, items, mvv)
                 if _text(item.get("impact")) is None:
                     unexplained.append(str(known["id"]))
@@ -522,7 +566,7 @@ class FindingJournal:
         self.merged = []
         by_key = {f.get("key"): f for f in self.rows.values()}
         for c in carried:
-            key = oscillation.finding_key(c.text)
+            key = oscillation.finding_key(c.text.split(ALSO)[0])
             # スレッドの無い指摘の id（`p-<元の id>`）は別の保存先の違う指摘とも重なるので、同じ本文の行だけに判定を重ねる
             known = by_key.get(key) or (self.rows.get(c.id) if c.comment is not None else None)
             if known is not None:

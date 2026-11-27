@@ -242,7 +242,7 @@ def test_issue_4363_finding_coming_back_without_impact_stays_major_and_is_not_as
 @pytest.mark.parametrize("order", [1, -1])
 @pytest.mark.parametrize("basis", [{"mvv": "C7"}, {"mvv": "Value 5"}, {"protect": ["irreversible"]}])
 def test_issue_4363_finding_keeps_the_text_and_the_place_of_the_report_that_marked_it(basis: dict, order: int) -> None:
-    """承認や保護の根拠となる報告に 1 文が無くても、行は別の報告の本文・1 文・位置で上書きしない。"""
+    """承認や保護の根拠となる報告に 1 文が無くても、行は別の報告で上書きせず、1 文のある報告は本文に書き足す。"""
     journal = drive.FindingJournal()
     told = [
         {"text": "A", "severity": "major", "path": "x.py", "line": 3, "by": "codex", **basis},
@@ -250,7 +250,22 @@ def test_issue_4363_finding_keeps_the_text_and_the_place_of_the_report_that_mark
     ]
     journal.enter(1, told[::order], ("Value 5", "C7"), "approved:11:aaa:ccc")
     row = journal.rows["r1-1"]
-    assert (row["text"], row["path"], row["line"], row.get("impact")) == ("A", "x.py", 3, None)
+    assert (row["path"], row["line"], row.get("impact")) == ("x.py", 3, None)
+    assert row["text"].startswith(f"A{journal_mod.ALSO}a（y.py:5）") and IMPACT in row["text"]
+
+
+def test_issue_4363_every_operation_that_needs_approval_keeps_its_report() -> None:
+    """承認の要る操作が複数の報告に分かれても、どの操作の本文と位置も行に残り、次の実行でも同じ指摘に重ねる。"""
+    journal = drive.FindingJournal()
+    ops = [_told("A", mvv=item, path=path, line=1) for item, path in (("C2", "auth.py"), ("C3", "move.py"), ("C7", "rule.md"))]
+    journal.enter(1, ops[:2], ("C2", "C3", "C7"), V11)
+    journal.enter(2, ops[2:], ("C2", "C3", "C7"), V11)
+    row = journal.rows["r1-1"]
+    assert row["path"] == "auth.py" and "move.py:1" in row["text"] and "rule.md:1" in row["text"]
+    again = drive.FindingJournal()
+    again.carry([prior_decide.Carried("t1", None, row["text"], None, None, None, None)])
+    again.enter(1, [_told("A")])
+    assert list(again.rows) == ["t1"]
 
 
 def test_issue_4014_carried_rows_are_not_rated_again() -> None:
