@@ -664,10 +664,11 @@ def review_launch(template_name: str, branch: str, base: str) -> list[str]:
 
     実装のテンプレートは `pr` のステップが保存した番号（`REVIEW_WITH_SAVED_PR`）、ほかはブランチの PR（`REVIEW_WITH_PR`）。
     """
-    review = review_command(template_name, base)
     if template_name == "impl":
-        return ["sh", "-c", REVIEW_WITH_SAVED_PR, PR_NUMBER_FILE, *review]
-    return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
+        script, arg0 = REVIEW_WITH_SAVED_PR, PR_NUMBER_FILE
+    else:
+        script, arg0 = REVIEW_WITH_PR, branch
+    return ["sh", "-c", script, arg0, *review_command(template_name, base)]
 
 
 def review_command(template_name: str, base: str) -> list[str]:
