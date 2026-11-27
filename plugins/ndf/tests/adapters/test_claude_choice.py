@@ -9,12 +9,14 @@ import copy
 import json
 import logging
 import os
+import time
 from pathlib import Path
 
 import pytest
 
 from ndf import identity
 from ndf.adapters import claude, claude_choice, llm, model_choice, model_chooser, run_log
+from ndf.contracts import facts
 
 # 実測の形（2026-11-27、Claude Code 2.1.332 を `--model no-such-model-xyz` で起動した結果。終了コード 1）。判定に要らない欄の一部は省いた
 REFUSED = {
@@ -302,3 +304,66 @@ def test_without_a_chooser_the_judge_launches_without_values(recorder) -> None:
     calls = Calls(_answer(GOOD))
     assert llm.ask("質問", "材料", SCHEMA, 30, call=calls).ok
     assert not {"--model", "--effort"} & set(calls.argv[0]) and "assign_id" not in recorder.rows[0]
+
+
+# --- 基準の組への切り替えの期限（判定の起動の今の振る舞いを固定する） -----------------------------------
+
+
+class TimedCalls:
+    """単調時計を持つ偽の呼び出し。起動ごとに時計を `elapsed` 秒進め、渡された上限の秒を残す。"""
+
+    def __init__(self, monkeypatch, *replies: tuple[float, claude.ClaudeReply]) -> None:
+        self.now, self.replies, self.timeouts = 100.0, list(replies), []
+        # 期限をどの層で測っても同じ時計になるように、`time.monotonic` そのものを差し替える
+        monkeypatch.setattr(time, "monotonic", lambda: self.now)
+
+    def __call__(self, argv, prompt, timeout):
+        self.timeouts.append(timeout)
+        elapsed, reply = self.replies.pop(0)
+        self.now += elapsed
+        return reply
+
+
+def _refusal(seconds) -> claude.ClaudeReply:
+    return _parsed(REFUSED)._replace(launched=True, seconds=seconds)
+
+
+@pytest.mark.parametrize(
+    "elapsed,seconds,checking,left",
+    [
+        (0.0, 2.0, 0.0, 28.0),  # 子の返した秒が時計の進みより長ければ、子の秒を引く
+        (5.0, 2.0, 0.0, 25.0),  # 時計の進みの方が長ければ、時計で測る
+        (5.0, None, 0.0, 25.0),  # 子の秒が無ければ、時計だけで測る
+        (0.0, 4.0, 3.0, 23.0),  # 材料の確かめにかかった秒も引く
+    ],
+)
+def test_the_base_launch_gets_what_is_left_of_the_deadline(judge_repo, recorder, monkeypatch, elapsed, seconds, checking, left) -> None:
+    calls = TimedCalls(monkeypatch, (elapsed, _refusal(seconds)), (0.0, _answer(GOOD)))
+
+    def check() -> None:
+        calls.now += checking
+
+    assert llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=check).ok
+    assert calls.timeouts == [30, pytest.approx(left)]
+
+
+def test_a_deadline_passed_on_the_clock_alone_stops_before_the_check(judge_repo, recorder, monkeypatch, tmp_path) -> None:
+    calls = TimedCalls(monkeypatch, (30.0, _refusal(None)))
+    got = llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=lambda: pytest.fail("期限切れで材料を確かめた"))
+    assert not got.ok and got.attempts == 1 and got.cause["kind"] != "needs_human" and calls.timeouts == [30]
+    assert _refused_only(tmp_path / "store")
+
+
+def test_a_refusal_of_the_base_stops_without_another_check(judge_repo, recorder, tmp_path) -> None:
+    calls = Calls(_refusal(1.0), _refusal(1.0))
+    checked: list[int] = []
+    got = llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=lambda: checked.append(1))
+    assert not got.ok and got.attempts == 1 and got.cost == 0.0 and len(calls.argv) == 2 and checked == [1]
+    assert got.cause["kind"] == facts.value(claude.FAILURES, claude.Failure.MODEL_REFUSED, "judge_cause")
+    assert len(_experiments(tmp_path / "store", "launch_error")) == 1
+
+
+def test_a_refusal_without_a_chooser_stops_without_a_check(recorder) -> None:
+    calls = Calls(_refusal(1.0))
+    got = llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=lambda: pytest.fail("切り替えないのに材料を確かめた"))
+    assert not got.ok and got.attempts == 1 and len(calls.argv) == 1
