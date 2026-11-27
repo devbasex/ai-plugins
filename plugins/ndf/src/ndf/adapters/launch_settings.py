@@ -372,12 +372,11 @@ def _unsandboxed(runtime: str, row: Mapping[str, Any], cwd: Path, settings: Opti
 
 
 @contextlib.contextmanager
-def prepared(name: str, cwd: Path, key_of: Optional[Callable[[Path], str]] = None) -> Iterator[Grant]:
+def prepared(name: str, cwd: Path) -> Iterator[Grant]:
     """工程 `name` の full の起動 1 回の指定を解き、承認を確かめ、MCP の定義のコピーを作って渡す。抜けるときにコピーを消す。
 
     指定が空（`load`・`allow`・`mcp` が無い）なら承認を調べず、git も起動しない。壊れた指定・未承認・承認の対象を読めない場合は
     `precondition` で止まる（起動しない）。
-    `key_of` はリポジトリのキーの解き方。値の選択と同じ起動の準備では同じものを渡し、git を 1 回にする（省けば `repo_key`）。
     """
     root = launch_root(cwd)
     settings = load(root)
@@ -392,7 +391,7 @@ def prepared(name: str, cwd: Path, key_of: Optional[Callable[[Path], str]] = Non
             f"工程 {name} の起動を止めた。承認の要る起動は、すべての工程の MCP の定義ファイルをまとめて承認と照らすため、"
             f"どれか 1 つでも読めないと止まる: {exc}"
         ) from None
-    repo = (key_of or launch_approval.repo_key)(root)
+    repo = launch_approval.repo_key(root)
     if not launch_approval.is_approved(repo, sha):
         listing = json.dumps(_listing(settings, files, sha), ensure_ascii=False)
         raise _precondition(

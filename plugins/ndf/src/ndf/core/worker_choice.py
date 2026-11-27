@@ -51,10 +51,10 @@ class Request(Protocol):
     charge_to: Optional[str]
 
 
-def choose_values(h: Request, key_of: Optional[Callable[[Path], str]] = None) -> claude_choice.ChoiceRun:
+def choose_values(h: Request) -> claude_choice.ChoiceRun:
     """会話の最初に値を選ぶ。値と設定の誤りは選ぶ処理の `InternalError`（precondition）をそのまま送る（起動しない）。"""
     request = {"unit": h.unit, "mode": h.mode, "retry": h.retry, "charge_to": h.charge_to}
-    return claude_choice.ChoiceRun(claude_choice.pick_values("worker", h.kind, cwd=h.cwd, key_of=key_of, **request), charge_to=h.charge_to)
+    return claude_choice.ChoiceRun(claude_choice.pick_values("worker", h.kind, cwd=h.cwd, **request), charge_to=h.charge_to)
 
 
 def conversation_env(kind: str, wd: worker_paths.WorkDir, run: claude_choice.ChoiceRun) -> dict[str, Optional[str]]:

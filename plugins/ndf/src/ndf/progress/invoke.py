@@ -34,12 +34,12 @@ import os
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from functools import cache, partial
+from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
-from ndf.adapters import claude, claude_choice, git, github, launch_approval, launch_settings, run_log
+from ndf.adapters import claude, claude_choice, git, github, launch_settings, run_log
 from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
 from ndf.contracts import facts, internal, limits, result, worker_paths
@@ -896,10 +896,9 @@ def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResu
     使用量ログへ値と終わり方（`outcome`）の 1 行を渡す（工程の名前は Skill の名前。会話を再開しないので番号は会話ごとに 0 から。
     書けなくても結果を変えない。#1959 の決定 6）。回答の検証は行と工程の結果で 1 回を使い回す（`_Checked`）。"""
     held = contextlib.ExitStack()
-    key_of = cache(launch_approval.repo_key)  # この起動の準備の中で、値の選択と承認の確認がキーを 1 回だけ解く
     try:
-        picked = claude_choice.ChoiceRun(_skill_choice(run, cwd, key_of))
-        grant = held.enter_context(launch_settings.prepared(run.name, cwd, key_of))
+        picked = claude_choice.ChoiceRun(_skill_choice(run, cwd))
+        grant = held.enter_context(launch_settings.prepared(run.name, cwd))
     except internal.InternalError as exc:
         return StageResult(result.stopped(SKILL, exc.kind, f"Skill {run.name} を起動しない: {exc}"), {})
     checked = _Checked()
@@ -939,11 +938,11 @@ def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResu
     return got if notice is None else replace(got, warnings=(*got.warnings, notice))
 
 
-def _skill_choice(run: StageRun, cwd: Path, key_of: Callable[[Path], str]) -> Any:
+def _skill_choice(run: StageRun, cwd: Path) -> Any:
     """Skill の起動の値。単位は `NDF_UNIT_ID`（無いか空なら割り付けない）、モードは工程の入力の `mode`。"""
     unit = os.environ.get(identity.env_name("unit-id"))
     mode = run.inputs["mode"] if isinstance(run.inputs.get("mode"), str) else None
-    return claude_choice.pick_values("skill", run.name, cwd=cwd, unit=None if unit == "" else unit, mode=mode, key_of=key_of)
+    return claude_choice.pick_values("skill", run.name, cwd=cwd, unit=None if unit == "" else unit, mode=mode)
 
 
 class _Checked:
