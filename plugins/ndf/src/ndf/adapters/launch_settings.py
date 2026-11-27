@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shlex
 import shutil
 import tempfile
 from dataclasses import dataclass, field
@@ -262,9 +263,13 @@ def launch_root(cwd: Path) -> Path:
 
 
 def _approval_hint(root: Path, sha256: Optional[str] = None) -> str:
-    """承認の手順の文（Skill と、端末で打つコマンド）。コマンドは `ndf` の絶対パスで出す（利用者の PATH に無くても打てる）。"""
+    """承認の手順の文（Skill と、端末で打つコマンド）。コマンドは `ndf` の絶対パスで出す（利用者の PATH に無くても打てる）。
+
+    パスはシェル用に引用する（空白で引数が分かれず、特殊文字を解釈させない）。
+    """
     ident = identity.load()
-    command = f"cd {root} && {identity.entrypoint(ident.root)} launch-config approve" + (f" --sha256 {sha256}" if sha256 else "")
+    ndf = shlex.quote(str(identity.entrypoint(ident.root)))
+    command = f"cd {shlex.quote(str(root))} && {ndf} launch-config approve" + (f" --sha256 {sha256}" if sha256 else "")
     return f"/{ident.prefix}launch-config で承認するか、端末で `{command}` を打ってから打ち直す"
 
 

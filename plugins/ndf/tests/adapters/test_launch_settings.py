@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 from pathlib import Path
 
 import pytest
@@ -262,6 +263,18 @@ def test_an_unapproved_spec_stops_with_the_listing_and_how_to_approve(repo: Path
     text = _prepare_stops("impl", repo)
     assert "launch-config" in text and f"--sha256 {sha}" in text and ".ndf/mcp/a.json" in text and HIDDEN not in text
     assert not ls.copies_dir().exists() or not any(ls.copies_dir().iterdir())
+
+
+def test_the_approval_command_quotes_paths_for_the_shell(tmp_path: Path, monkeypatch) -> None:
+    """案内のコマンドを端末に貼っても、空白で引数が分かれず、特殊文字を解釈しない。"""
+    root = tmp_path / "my repo;$(touch x)"
+    (root / ".git").mkdir(parents=True)
+    monkeypatch.setattr(ls.launch_approval, "repo_key", lambda r: str(r))
+    _write(root, {"version": 1, "permissions": {"steps": {"impl": {"load": ["LSP"]}}}})
+    text = _prepare_stops("impl", root)
+    command = text.split("`")[-2]
+    words = shlex.split(command)
+    assert words[:3] == ["cd", str(root), "&&"] and words[4:6] == ["launch-config", "approve"]
 
 
 def test_an_approved_spec_gives_private_copies_of_what_was_checked_and_removes_them(repo: Path) -> None:
