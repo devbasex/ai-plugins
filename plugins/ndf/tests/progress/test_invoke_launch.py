@@ -121,15 +121,16 @@ def test_a_broken_effort_stops_the_skill_without_launching(tmp_path: Path, unit_
     assert seen == [] and got.cause["kind"] == "precondition"
 
 
-def test_the_switch_reads_the_plugin_list_once_and_checks_the_answer_once(tmp_path: Path, unit_rows, monkeypatch) -> None:
-    listed, checked = [], []
-    monkeypatch.setattr(claude, "list_plugins", lambda **_: listed.append(1) or [])
+def test_the_switch_builds_the_launch_args_once_and_checks_the_answer_once(tmp_path: Path, unit_rows, monkeypatch) -> None:
+    built, checked = [], []  # 起動の引数の組み立て（導入済みのプラグインの確かめを含む）を数える。名前が ndf の根は一覧を読まない
+    build = claude.claude_launch
+    monkeypatch.setattr(claude, "claude_launch", lambda *a, **k: built.append(1) or build(*a, **k))
     real = result.received
     monkeypatch.setattr(result, "received", lambda obj: checked.append(1) or real(obj))
     refused = claude._parse_reply(json.dumps(REFUSED))._replace(launched=True)
     done = claude.ClaudeReply(True, result.result("design", result.OK, "済"), "", 0.0, launched=True)
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=_replying([refused, done], []))
-    assert got.status == "ok" and unit_rows[-1]["outcome"] == "ok" and (len(listed), len(checked)) == (1, 1)
+    assert got.status == "ok" and unit_rows[-1]["outcome"] == "ok" and (len(built), len(checked)) == (1, 1)
 
 
 def test_the_skill_does_not_relaunch_when_recording_the_switch_used_up_the_time(tmp_path: Path, unit_rows, monkeypatch) -> None:
