@@ -165,7 +165,6 @@
 
 ## 実装中の取り決め（conductor、2026-11-28 JST）
 
-- `plugins/ndf/tests/domains/records/test_usage.py::test_usage_report_counts_closed_issues_of_the_origin_repo_with_one_search` は、この変更と無関係に落ちる（#4702）。単位の完了の判定からはこの 1 件だけを除き、止まらずに次のタスクへ進む
 - 利用者は次の 2 つの懸念を残したまま設計を承認した（[課題 #4520 の「設計承認で残った懸念」](https://github.com/devbasex/ai-plugins/issues/4520)の懸念 1・3）。実装の中で次のことを決め、決定と理由を実装の Pull Request に記録する
   - 懸念 1: 自動の流れで人が承認した後に、マージ先や「本番へ反映されるか」が変わった場合に、再承認をどう扱うか。今の設計では承認し直しにならない
   - 懸念 3: 「出荷前の確かめ」は、本体のリリース承認より前に、試験用の別のリポジトリでデプロイの工程まで進む。そこへの公開の有無と、公開を承認する人が決まっていない

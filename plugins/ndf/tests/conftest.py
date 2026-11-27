@@ -26,6 +26,10 @@ import postgres_server
 import pytest
 import result_json
 
+# githubkit は httpx2 があるとそちらで送るため、`httpx` の偽の応答を返すテストが落ちる（#4702）。httpx2 は根の開発用の
+# 依存（`--all-extras`）で入り、NDF の依存には無いので、NDF と CI の環境にそろえる。githubkit を読み込む前に置く。
+os.environ.setdefault("GITHUBKIT_HTTPX2_DISABLE_FLAG", "1")
+
 from ndf import cli
 from ndf.checks import spec_model
 from ndf.contracts import result as result_contract
