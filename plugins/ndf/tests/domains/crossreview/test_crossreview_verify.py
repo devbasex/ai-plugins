@@ -234,6 +234,11 @@ def _approved(root: Path) -> mvv.Snapshot:
 
 def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers(tmp_path: Path) -> None:
     run, diff, seen = _AskRun(tmp_path), _diff(tmp_path), []
+    # 前からある出力の名前のリンクは開かず、リンク先の権限も中身も変えない
+    other = tmp_path / "other"
+    other.write_text("別のファイル", encoding="utf-8")
+    other.chmod(0o644)
+    (tmp_path / "round1-verify.out").symlink_to(other)
     answers = verify.ask(run, 1, [_row()], diff, _launcher(seen, [holding(_row())]))
     assert answers.verdicts["r1-1"].holds is True and answers.warnings == ()
     [spec] = seen
@@ -245,8 +250,10 @@ def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers
     listed = diff.parent / "round1-verify-findings.jsonl"
     assert str(listed) in argv[-1] and not any("保存が止まる" in a for a in argv)
     assert "保存が止まる" in listed.read_text(encoding="utf-8")
-    # 指摘の一覧と判定役の出力は、実行者だけが読める
-    assert {p.stat().st_mode & 0o777 for p in (listed, spec.paths.out, spec.paths.err)} == {0o600}
+    # 判定役の出力は、この起動で作った実行者だけが開けるディレクトリに置く
+    held = spec.paths.out.parent
+    assert held.parent == tmp_path and spec.paths.err.parent == held and held.stat().st_mode & 0o777 == 0o700
+    assert (other.read_text(encoding="utf-8"), other.stat().st_mode & 0o777) == ("別のファイル", 0o644)
     assert run.notes == [(1, "verify", "判定役へ 1 件、有効な回答 1 件")]
 
 
@@ -335,13 +342,20 @@ def test_issue_4363_run_does_not_launch_the_judge_without_a_finding_to_ask(
     assert (code, got["status"]) == (0, "ok") and fake.judged == []
 
 
-def test_issue_4363_run_gives_the_judge_the_full_diff_read_by_a_filled_seat(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """差分を絞るラウンドで埋めた席が指摘を出したら、判定役もその席が読んだ全差分を読む。"""
-    other = {**HEAVY, "text": "読み込みが止まる"}
-    fake = Fake(tmp_path / "st", {"codex": [[HEAVY]], "kiro": [[], FAIL, FAIL], "claude": [[other]]})
+@pytest.mark.parametrize(
+    "from_codex, from_filled, diff",
+    [([], "major", "round2-full.diff"), ([{**HEAVY, "text": "削除が止まる"}], "minor", "round2.diff")],
+    ids=["filled-finding-asked", "filled-finding-not-asked"],
+)
+def test_issue_4363_run_gives_the_judge_the_full_diff_only_for_a_filled_seats_finding(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, from_codex: list, from_filled: str, diff: str
+) -> None:
+    """差分を絞るラウンドでは、埋めた席の指摘を判定役へ渡すときだけ、その席が読んだ全差分を渡す。"""
+    other = {**HEAVY, "text": "読み込みが止まる", "severity": from_filled}
+    fake = Fake(tmp_path / "st", {"codex": [[HEAVY], from_codex], "kiro": [[], FAIL, FAIL], "claude": [[other]]})
     _run(capsys, monkeypatch, fake, wt)
     first, second = (spec.argv[-1] for spec in fake.judged[:2])
-    assert "round1.diff" in first and "round2-full.diff" in second
+    assert "round1.diff" in first and diff in second
 
 
 def test_issue_4363_lowered_finding_is_not_counted_as_a_return(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

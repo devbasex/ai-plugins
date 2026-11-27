@@ -538,13 +538,25 @@ def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
     return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr)
 
 
-def _confirm_heavy(run: _Run, round_no: int, diff: Path, launch: Launcher, use_tracks: bool = False) -> Checked:
+def _confirm_heavy(
+    run: _Run,
+    round_no: int,
+    diff: Path,
+    launch: Launcher,
+    use_tracks: bool = False,
+    filled: Optional[reviewing.FilledRead] = None,
+) -> Checked:
     """直前の `enter` で新しく出たか戻った critical・major を判定役に確かめ、回答をジャーナルへ当てる（#4363）。渡す指摘が
-    無ければ起動しない。`use_tracks` は、回答の指摘の種類を使う処理があるラウンドで真にする。"""
+    無ければ起動しない。`use_tracks` は、回答の指摘の種類を使う処理があるラウンドで真にする。
+
+    判定役は 1 回の起動で 1 つの差分を読む。渡す指摘に埋めた席だけが出した指摘（`filled`）があれば、ラウンドの差分 `diff`
+    でなく、その席が読んだ全差分を渡す（ラウンドの差分には無い PR の変更を指しうる）。"""
     heavy = [row for row in map(run.journal.rows.__getitem__, run.journal.fresh) if _heavy(row.get("severity"))]
     asked = verify_decide.select(heavy, use_tracks)
     if not asked:
         return Checked()
+    if filled is not None and any(row.get("key") in filled.keys for row in asked):
+        diff = filled.diff
     answers = verify.ask(run, round_no, asked, diff, launch)
     run.warnings += [f"round {round_no}: {warning}" for warning in answers.warnings]
     return run.journal.apply_checks([str(row["id"]) for row in asked], answers.verdicts)
@@ -602,8 +614,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
     # 確認で下げた指摘は、振動の判定のキーに数えない
-    # 埋めた席の指摘は、その席が読んだ全差分で確かめる（ラウンドの差分には無い PR の変更を指しうる）
-    run.history.append(keys - _confirm_heavy(run, round_no, got.full or prep.diff, launch).lowered)
+    run.history.append(keys - _confirm_heavy(run, round_no, prep.diff, launch, filled=got.filled).lowered)
     record = _round_record(run, round_no, prep)
     rounds.append(record)
     if unread:

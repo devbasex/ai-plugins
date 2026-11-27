@@ -13,7 +13,7 @@ from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters import git, run_log
 from ndf.contracts import limits
-from ndf.core.converge import participants
+from ndf.core.converge import oscillation, participants
 from ndf.domains.crossreview import changes, criteria_decide, prior_decide, scope_decide, seats, store
 from ndf.domains.crossreview.fixer import Launcher
 from ndf.domains.crossreview.journal import FindingJournal
@@ -121,14 +121,26 @@ def review_prompt(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Opt
     return "\n".join(lines)
 
 
+class FilledRead(NamedTuple):
+    """埋めた席が読んだ全差分のファイル `diff` と、埋めた席だけが出した指摘のキー `keys`。"""
+
+    diff: Path
+    keys: frozenset[str]
+
+
 class Reviewed(NamedTuple):
-    """1 ラウンドのレビューの結果。`silent` は全員が結果を返さなかったか（席を埋めていない）。`full` は埋めた席が指摘を
-    出したときの、その席が読んだ全差分のファイル（ほかは None）。"""
+    """1 ラウンドのレビューの結果。`silent` は全員が結果を返さなかったか（席を埋めていない）。`filled` は席を埋めたときだけ
+    持つ。"""
 
     raised: list[dict[str, Any]]
     unread: dict[str, seats.Unread]
     silent: bool
-    full: Optional[Path] = None
+    filled: Optional[FilledRead] = None
+
+
+def _keys(raised: Sequence[Mapping[str, Any]]) -> frozenset[str]:
+    """相手役の指摘の、ジャーナルが同じ指摘と見分けるキー。"""
+    return frozenset(oscillation.finding_key(t.strip()) for f in raised if isinstance(t := f.get("text"), str))
 
 
 def review_round(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Optional[Path], launch: Launcher) -> Reviewed:
@@ -149,7 +161,7 @@ def review_round(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Opti
     if not targets:
         return Reviewed(raised, unread, False)
     more, left, full = _fill_seats(run, round_no, prep, remarks, {t: unread[t] for t in targets}, launch)
-    return Reviewed(raised + more, left, False, full if more else None)
+    return Reviewed(raised + more, left, False, FilledRead(full, _keys(more) - _keys(raised)))
 
 
 def _fill_seats(
