@@ -474,8 +474,17 @@ def _local_refactor_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
     return {**plan, "steps": steps}
 
 
-def _built(t: Template, given: Mapping[str, Value], local_tests: bool) -> tuple[dict[str, Any], dict[str, Any]]:
-    """組んだプランと、埋める前のプランの形（`expanded` を `_by_refactor_gate` で組み替えたもの）。誤りは `RouteError`。"""
+def render(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> dict[str, Any]:
+    """テンプレートを埋めたプラン（`model.parse` を通る形）。誤りは `RouteError`。
+
+    `local_tests` が偽（CI テストの設定 `test.ci.only` があるリポジトリ）なら、手元でテストを打つステップ
+    （`LOCAL_TEST_STEPS`）を外して組む。テストは CI の結果で確かめる。`{{refactor}}` の起動で経路を組み替える（`_by_refactor_gate`）。
+    """
+    return rendered(t, given, local_tests=local_tests)[0]
+
+
+def rendered(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> tuple[dict[str, Any], list[str]]:
+    """`render` と同じプランと、埋める前の形（`_by_refactor_gate` で組み替えたもの）から取った作業の名前（現れた順。#4513）。"""
     values = resolve(t, given, local_tests=local_tests)
     shape = _by_refactor_gate(t.name, expanded(t, local_tests=local_tests), values)
     plan = _fill(shape, values)
@@ -483,21 +492,6 @@ def _built(t: Template, given: Mapping[str, Value], local_tests: bool) -> tuple[
         model.parse(plan)
     except model.PlanError as exc:
         raise RouteError(f"テンプレート {t.name} から組んだプランが誤り: {exc}") from None
-    return plan, shape
-
-
-def render(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> dict[str, Any]:
-    """テンプレートを埋めたプラン（`model.parse` を通る形）。誤りは `RouteError`。
-
-    `local_tests` が偽（CI テストの設定 `test.ci.only` があるリポジトリ）なら、手元でテストを打つステップ
-    （`LOCAL_TEST_STEPS`）を外して組む。テストは CI の結果で確かめる。`{{refactor}}` の起動で経路を組み替える（`_by_refactor_gate`）。
-    """
-    return _built(t, given, local_tests)[0]
-
-
-def rendered(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> tuple[dict[str, Any], list[str]]:
-    """`render` と同じプランと、同じ形（`_built` の組み替えた形）から取った作業の名前（現れた順。判定のために展開し直さない。#4513）。"""
-    plan, shape = _built(t, given, local_tests)
     return plan, list(dict.fromkeys(work_names(shape)))
 
 
