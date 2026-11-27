@@ -742,13 +742,16 @@ def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
             launch_candidates.write_launch_record(pending, rec)
         except BaseException:
             # 実体を記録に書けなければ、次の `recover` はこのファイルを NDF が作ったと確かめられない。
-            # この実行は作った実体を手元に持っているので、その実体のままのときだけここで消してから止める
-            _drop_placing(target, rec)
+            # この実行は作った実体を手元に持っているので、その実体のままのときだけここで消してから止める。
+            # 中身をまだ書いていない空のファイルなので、移す先を記録できなくても移して消す
+            _drop_placing(target, rec, filled=False)
             raise
         out.write(data)
     placed = _replace(target, tmp, rec["base"])
     # 名前を直接消さない。反映の間に利用者が同じ名前へ保存していたら、作った実体と違うので残す
-    _drop_placing(target, rec)
+    if not _drop_placing(target, rec):
+        # 設定案の写しを移す先を記録できなかった。写しは元の名前のまま残し、呼び手の `recover` が途中の記録から片付け直す
+        raise OSError("置き換えの一時ファイルを移す先を、反映の途中の記録へ書けない")
     return placed
 
 
@@ -760,8 +763,8 @@ _DROPPING_HEAD = ".{}.dropping-"
 _DROPPING_FILE = "placing"
 
 
-def _drop_placing(target: Path, rec: dict[str, Any]) -> None:
-    """途中の記録 `rec` が名前を残した一時ファイルのうち、NDF が作ったと確かめられるものを消す。
+def _drop_placing(target: Path, rec: dict[str, Any], *, filled: bool = True) -> bool:
+    """途中の記録 `rec` が名前を残した一時ファイルのうち、NDF が作ったと確かめられるものを消す。片付け直しが要るときだけ偽を返す。
 
     確かめる条件は、記録した実体（`placed`）と同じことだけである。実体を記録する前に止まった場合は、その名前のファイルが空でも消さない。
     名前が重なった利用者の空のファイルと見分けられないためで、NDF が作った空のファイルが残っても中身（設定案の写し）は無い。
@@ -769,16 +772,20 @@ def _drop_placing(target: Path, rec: dict[str, Any]) -> None:
     対象は、記録した一時ファイルの名前と、記録した専用のディレクトリ（`dropping`）の中の 1 つだけで、ほかは走査しない。
     専用のディレクトリは、前の実行が消す前に移した直後に強制終了した分を片付けるために先に見る（`_empty_box`）。
     実体が記録に無ければ、どれも消さない。
+
+    `filled` は、一時ファイルに設定案の写しを書いたかもしれないか。偽（中身を書く前の空のファイル）なら、移す先を記録できなくても
+    移して消す。真なら、移す先の名前と実体を途中の記録へ書けたときだけ移し、書けなければ元の名前のまま残して偽を返す
+    （移した後に強制終了すると、次の片付けが写しを見つけられないため）。
     """
     name = rec.get("placing")
     placed = rec.get("placed")
     if not isinstance(name, str) or placed is None:
-        return
+        return True
     tmp = Path(name)
     if not _ours(target, tmp, _PLACING_HEAD):
-        return
+        return True
     _empty_box(target, rec, placed)  # 前の実行が移した後に止まった分
-    _drop_if_made(target, tmp, rec, placed)
+    return _drop_if_made(target, tmp, rec, placed, filled)
 
 
 def _ours(target: Path, path: Path, head: str) -> bool:
@@ -786,16 +793,13 @@ def _ours(target: Path, path: Path, head: str) -> bool:
     return path.parent == target.parent and path.name.startswith(head.format(target.name))
 
 
-def _note(target: Path, rec: Mapping[str, Any]) -> None:
-    """片付けの進み具合を反映の途中の記録に書く。書けなくても、この実行は手元の名前と実体で片付けを続ける。
-
-    書けないのは、実体を記録できずにその場で消す経路（`_place`）と同じく、記録の保存先が書けないときである。この実行が
-    片付けを終える前に強制終了したときだけ、次の片付けが専用のディレクトリを特定できず、そのディレクトリが残る。
-    """
+def _note(target: Path, rec: Mapping[str, Any]) -> bool:
+    """片付けの進み具合を反映の途中の記録に書く。書けたら真。"""
     try:
         launch_candidates.write_launch_record(reflected_file(target, PENDING), rec)
-    except OSError:  # noqa: NDF401 ファイル: 記録できなくても、手元の名前と実体で片付けを続ける
-        return
+    except OSError:  # noqa: NDF401 ファイル: 書けたかどうかで、呼び手が写しを移すかを決める
+        return False
+    return True
 
 
 def _empty_box(target: Path, rec: Mapping[str, Any], placed: Any) -> None:
@@ -833,31 +837,32 @@ def _made(path: Path, placed: Any) -> bool:
     return placed == [found.st_dev, found.st_ino]
 
 
-def _drop_if_made(target: Path, path: Path, rec: dict[str, Any], placed: Any) -> None:
+def _drop_if_made(target: Path, path: Path, rec: dict[str, Any], placed: Any, filled: bool) -> bool:
     """`path` が記録した実体なら消す。共有のディレクトリの名前を確かめた結果に頼らないよう、専用のディレクトリへ移してから確かめ直して消す。
 
-    専用のディレクトリは乱数の名前で、作る前にその名前を、作った直後にその実体を、途中の記録の `dropping`・`box` に書く。
-    名前が空いているときだけ成功する `os.mkdir` で作り（所有者だけが使える権限）、名前が重なれば、そのディレクトリには触れずに別の値で
-    取り直す。移した直後に強制終了しても、次の `recover` が記録から作成元を確かめて片付けられる（`_empty_box`）。
+    専用のディレクトリは乱数の名前で、名前が空いているときだけ成功する `os.mkdir` で作り（所有者だけが使える権限）、名前が重なれば、
+    そのディレクトリには触れずに別の値で取り直す。作った後、名前と実体を 1 回の書き込みで途中の記録の `dropping`・`box` に書き、
+    書けてから移す。移した直後に強制終了しても、次の `recover` が記録から作成元を確かめて片付けられる（`_empty_box`）。
+    書けなければ、`filled` が真（設定案の写しかもしれない）なら移さずに作ったディレクトリを消し、偽を返す。偽（空のファイル）なら移して消す。
     利用者のエディタなどは専用のディレクトリの中へ書かないので、移した後に確かめたファイルと消すファイルは同じになる。確かめてから
     移すまでの間に `path` の名前が利用者のファイルへ置き換わっていれば、移した先で実体が違うと分かるので消さず、元の名前へ戻す
     （元の名前が埋まっていれば専用のディレクトリの中に残す）。
     """
     if not _made(path, placed):
-        return
+        return True
     while True:
         box = target.with_name(f"{_DROPPING_HEAD.format(target.name)}{uuid.uuid4().hex}")
-        rec.pop("box", None)
-        rec["dropping"] = str(box)
-        _note(target, rec)  # 作る前に名前を残す
         try:
             os.mkdir(box, 0o700)
         except FileExistsError:  # noqa: NDF401 ファイル: 利用者の同じ名前のものには触れず、別の値で取り直す
             continue
         break
     found = os.lstat(box)
-    rec["box"] = [found.st_dev, found.st_ino]
-    _note(target, rec)  # 作成元を確かめられるよう、移す前に実体を残す
+    rec["dropping"], rec["box"] = str(box), [found.st_dev, found.st_ino]
+    if not _note(target, rec) and filled:  # 移す前に、作成元を確かめる名前と実体を残す
+        os.rmdir(box)
+        del rec["dropping"], rec["box"]
+        return False
     inside = box / _DROPPING_FILE
     try:
         os.rename(path, inside)
@@ -868,10 +873,11 @@ def _drop_if_made(target: Path, path: Path, rec: dict[str, Any], placed: Any) ->
             try:
                 os.link(inside, path, follow_symlinks=False)  # 名前が空いているときだけ戻し、置かれた利用者のファイルを上書きしない
             except OSError:  # noqa: NDF401 ファイル: 戻せない利用者のファイルは、専用のディレクトリの中に残す
-                return
+                return True
         inside.unlink()
     os.rmdir(box)
     del rec["dropping"], rec["box"]  # 片付け終えたディレクトリは、完了の記録に残さない
+    return True
 
 
 def _replace(target: Path, tmp: Path, base: Optional[str]) -> bool:
@@ -1039,8 +1045,10 @@ def recover(target: Path) -> Optional[Path]:
         saved = _noted_saved(rec)  # 退避を別の名前で残し、退避を消した直後の中断
         if _placed(target, rec):
             _write_done(target, rec)
-    _drop_placing(target, rec)  # 置き換えの途中で止まったか強制終了した実行の一時ファイル
-    pending_path.unlink(missing_ok=True)
+    # 置き換えの途中で止まったか強制終了した実行の一時ファイル。写しを移す先を記録できず残したときは、
+    # 次の片付けが名前を読めるよう途中の記録を消さない
+    if _drop_placing(target, rec):
+        pending_path.unlink(missing_ok=True)
     return saved
 
 

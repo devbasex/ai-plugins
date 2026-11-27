@@ -763,6 +763,20 @@ def test_the_cleanup_removes_the_copy_only_after_moving_it_into_its_own_director
     assert not tmp.exists() and not box.exists()
 
 
+@pytest.mark.parametrize("filled", [True, False])
+def test_the_cleanup_moves_a_copy_only_after_recording_where_it_goes(tmp_path, monkeypatch, filled):
+    """移す先の名前と実体を途中の記録へ書けなければ、設定案の写しは移さずに元の名前のまま残し、片付け直しが要ると返す。
+    中身を書く前の空のファイルは、記録できなくても移して消す（Value 6）。"""
+    target = _worktree(tmp_path)
+    tmp = target.with_name(".launch.json.placing-0")
+    tmp.write_bytes(b"ndf" if filled else b"")
+    found = os.lstat(tmp)
+    monkeypatch.setattr(la, "_note", lambda target, rec: False)
+    done = la._drop_placing(target, {"placing": str(tmp), "placed": [found.st_dev, found.st_ino]}, filled=filled)
+    assert done is not filled and tmp.exists() is filled
+    assert not list(target.parent.glob(".launch.json.dropping-*"))
+
+
 def test_the_cleanup_finishes_a_move_before_removal_only_for_the_recorded_directory(tmp_path):
     """消す前に専用のディレクトリへ移した直後に止まった一時ファイルは、記録した名前と実体のディレクトリだけを片付ける（Value 6）。"""
     target = _worktree(tmp_path)
