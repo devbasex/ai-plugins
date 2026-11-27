@@ -605,15 +605,17 @@ def test_default_client_falls_back_without_waiting_for_the_rate_limit_reset() ->
     assert got[7] is not None and got[7].head_sha == HEAD
 
 
-def test_pulls_do_not_fall_back_past_the_rest_fallback_limit() -> None:
+@pytest.mark.parametrize(("numbers", "fallback"), [(range(1, 50), True), ([7], False)], ids=["past-the-limit", "issue-3702-not-allowed"])
+def test_pulls_do_not_fall_back_past_the_rest_fallback_limit(numbers, fallback: bool) -> None:
+    """上限を超える件数と、`rest_fallback=False`（#3702）は、GraphQL の利用枠の失敗を REST へ読み替えずにそのまま上げる。"""
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request.url.path)
-        return _limited(request)
+        return _limited(request) if request.url.path == "/graphql" else httpx.Response(200, json=_pull())
 
     with pytest.raises(github.GitHubError) as err:
-        _hub(handler).pulls(range(1, 50))
+        _hub(handler).pulls(numbers, rest_fallback=fallback)
     assert err.value.quota == github.GRAPHQL and seen == ["/graphql"]
 
 

@@ -54,9 +54,7 @@ _REJUDGED = "production_gate"
 PRODUCTION_LINE = merge_approval.PRODUCTION_MATERIAL_LINE
 
 
-def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="ndf ci", description="CI の結果を読み、停止理由の種類で返す")
-    sub = p.add_subparsers(dest="command", required=True)
+def _watch_parser(sub: Any) -> None:
     w = sub.add_parser("watch", help="PR の HEAD の必須のチェックの結論が出るまで待つ")
     w.add_argument("--pr", type=int, required=True)
     w.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば作業場所の origin")
@@ -65,7 +63,14 @@ def _parser() -> argparse.ArgumentParser:
     w.add_argument("--budget", type=float, required=True, help="待ちの合計の秒（ランナーの割り当ての待ちは数えない）")
     w.add_argument("--after-merge", action="store_true", help="マージの段階が落ちた後の判定")
     w.add_argument("--merge-failed", action="append", default=[], help="マージの段階が落ちたと読んだチェックの名前")
+    w.add_argument("--head", help="待つ PR の HEAD。待ちの開始か成功の確定の時点で PR の HEAD が違えば approval_stale で止まる")
     w.set_defaults(run=_watch)
+
+
+def _parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="ndf ci", description="CI の結果を読み、停止理由の種類で返す")
+    sub = p.add_subparsers(dest="command", required=True)
+    _watch_parser(sub)
     m = sub.add_parser(
         "merge",
         help="PR を、前段の確かめ（決めていない残リスク・HEAD の食い違い・本番チャネルへの承認の証跡）を通してマージする",
@@ -92,6 +97,11 @@ def _parser() -> argparse.ArgumentParser:
     m.add_argument("--approved-head", help="工程の承認ゲートで承認した HEAD（--approved-base と組で渡す）")
     m.add_argument("--approved-base", help="工程の承認ゲートで承認したマージ先")
     m.add_argument("--presented-out", help="stop で止まるときに承認の対象を書くファイル（ndf ci answer が読む）")
+    m.add_argument(
+        "--verify-merged",
+        action="store_true",
+        help="--approved-head・--approved-base と組で渡す。マージ済みの PR も HEAD とマージ先を承認の値と照らし、違えば refused で止まる",
+    )
     m.add_argument(
         "--required",
         action="append",
@@ -207,10 +217,27 @@ def _watch(args: argparse.Namespace) -> dict:
     watch = Watch(_unread, args.budget, on_round=_progress, decided=lambda r: classifier.cause(r) == "test_failed")
     hub = GitHub(args.repo if args.repo else git.Git().remote_repo(), github_mod.client(remaining=watch.remaining))
     pull = hub.pull(args.pr)
+    moved = _moved_head(args, pull)
+    if moved is not None:
+        return moved
     reader = HeadReader(hub, pull, local_head(pull.head_ref), args.required, args.test)
     watch.reader = reader
     watched = watch.run()
-    return _report(args, reader.pull, hub, watched, watched.cause_by(classifier))
+    kind = watched.cause_by(classifier)
+    if kind is None and args.head is not None:
+        # 成功を確定する前に PR を読み直す（待つ間に HEAD が動けば、読んだ結果は承認した HEAD のものと言えない。#3702）
+        moved = _moved_head(args, hub.pull(args.pr))
+        if moved is not None:
+            return moved
+    return _report(args, reader.pull, hub, watched, kind)
+
+
+def _moved_head(args: argparse.Namespace, pull: github_mod.Pull) -> Optional[dict]:
+    """`--head` があり、読んだ PR の HEAD がそれと違えば `approval_stale` の結果。無いか同じなら None。"""
+    if args.head is None or git.sha_matches(args.head, pull.head_sha):
+        return None
+    detail = f"#{pull.number} の HEAD {pull.head_sha[:12]} が待つ HEAD {args.head[:12]} と違う（承認ゲートから質問し直す）"
+    return result.stopped(TOOL, "approval_stale", detail, instance=pull.head_sha, items=_pr_item_list(pull.number))
 
 
 def _report(args: argparse.Namespace, pull: github_mod.Pull, hub: GitHub, watched: WatchResult, kind: Optional[str]) -> dict:
@@ -397,6 +424,11 @@ def _numbered_target(hub: GitHub, args: argparse.Namespace) -> Pull | dict:
         detail = f"#{pull.number} の{foreign}"
         return result.stopped(TOOL, "refused", detail, instance=pull.head_sha, items=_pr_item_list(pull.number))
     if pull.merged:
+        mismatch = _approved_mismatch(args, pull) if args.verify_merged else None
+        if mismatch is not None:
+            # マージ済みの PR は承認し直しても戻せないので、approval_stale でなく refused で止まる（#3702）
+            detail = f"マージ済みの #{pull.number} の{mismatch}"
+            return result.stopped(TOOL, "refused", detail, instance=pull.head_sha, items=_pr_item_list(pull.number, pull.merge_sha))
         summary = f"#{pull.number} は既にマージ済み"
         return result.result(TOOL, result.OK, summary, items=_pr_item_list(pull.number, pull.merge_sha), metrics={"merge": "already"})
     if pull.state != "open":
@@ -537,6 +569,8 @@ def _invalid_args(args: argparse.Namespace) -> Optional[dict]:
         return result.stopped(TOOL, "invalid", "--branch か --pr のどちらかを渡す")
     if (args.approved_head is None) != (args.approved_base is None):
         return result.stopped(TOOL, "invalid", "--approved-head と --approved-base は組で渡す")
+    if args.verify_merged and args.approved_head is None:
+        return result.stopped(TOOL, "invalid", "--verify-merged は --approved-head・--approved-base と組で渡す")
     if args.required and args.budget is None:
         return result.stopped(TOOL, "invalid", "--required を渡すときは --budget も渡す")
     return None

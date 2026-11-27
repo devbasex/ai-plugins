@@ -117,6 +117,10 @@
           "type": "string",
           "description": "stop で止まるときに承認の対象を書くファイル（ndf ci answer が読む）"
         },
+        "--verify-merged": {
+          "type": "boolean",
+          "description": "--approved-head・--approved-base と組で渡す。マージ済みの PR も HEAD とマージ先を承認の値と照らし、違えば refused で止まる"
+        },
         "--required": {
           "type": "array",
           "items": {
@@ -183,6 +187,10 @@
             "type": "string"
           },
           "description": "マージの段階が落ちたと読んだチェックの名前"
+        },
+        "--head": {
+          "type": "string",
+          "description": "待つ PR の HEAD。待ちの開始か成功の確定の時点で PR の HEAD が違えば approval_stale で止まる"
         }
       },
       "required": [
