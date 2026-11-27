@@ -66,7 +66,7 @@ def _private_log(run: VerifyRun, round_no: int, stem: Path, text: str) -> None:
 
 def _save_record(record: Path, to: Path) -> None:
     """記録 `record` を、実行者だけが読める新しいファイル `to` にする。前からある同じ名前のファイルやリンクは置き換えない
-    （`FileExistsError`）。ハードリンクを作れない保存先では、排他的に新規作成して中身を写し、写し切れなければ消す。"""
+    （`FileExistsError`）。ハードリンクを作れない保存先では、排他的に新規作成して中身を写し、写し切れなければ（割り込みを含む）消す。"""
     record.chmod(0o600)
     try:
         os.link(record, to)
@@ -78,7 +78,7 @@ def _save_record(record: Path, to: Path) -> None:
     try:
         with open(fd, "wb") as out, record.open("rb") as source:
             shutil.copyfileobj(source, out)
-    except OSError:
+    except BaseException:  # 割り込み（KeyboardInterrupt）でも、途中までの中身を正式な名前で残さない
         to.unlink(missing_ok=True)
         raise
 

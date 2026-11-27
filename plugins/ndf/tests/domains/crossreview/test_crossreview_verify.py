@@ -14,7 +14,7 @@ import pytest
 from ndf.adapters import agents
 from ndf.contracts import writing
 from ndf.core.converge import participants
-from ndf.domains.crossreview import criteria_decide, report_decide, reviewing, verify, verify_decide
+from ndf.domains.crossreview import criteria_decide, report_decide, reviewing, scope_decide, store, verify, verify_decide
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 from ndf.domains.records import mvv_decide as md
@@ -373,6 +373,47 @@ def test_issue_4363_ask_copies_the_records_when_the_state_dir_has_no_hard_links(
     assert record.stat().st_mode & 0o777 == 0o600 and "verdicts" in record.read_text(encoding="utf-8")
 
 
+def test_issue_4363_ask_leaves_no_partial_record_when_copying_is_interrupted(tmp_path: Path, monkeypatch) -> None:
+    def no_link(*_: object) -> None:
+        raise PermissionError("hard links are not supported")
+
+    def interrupted(source: Any, out: Any) -> None:
+        out.write(b"{")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(verify.os, "link", no_link)
+    monkeypatch.setattr(verify.shutil, "copyfileobj", interrupted)
+    seen: list = []
+    with pytest.raises(KeyboardInterrupt):
+        verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher(seen, [holding(_row())]))
+    assert not (tmp_path / f"{seen[0].paths.out.parent.name}.out").exists()
+
+
+@pytest.mark.parametrize("asked, resumed", [((), True), (("a.md#見出し",), False)], ids=["unsent-head", "other-sections"])
+def test_issue_4363_kept_review_needs_the_same_sections_but_not_the_citation_check(asked: tuple, resumed: bool) -> None:
+    """承認済みの MVV の根拠の記述を確かめ終えていない（head が PR に届いていない）結果は使い、詳細レビューを求める
+    セクションが違う結果は使わない。"""
+    approved = f"{md.State.APPROVED}:v1"
+    record = {
+        "round": 1,
+        "head": "h" * 40,
+        scope_decide.BASE: "b" * 40,
+        scope_decide.REVIEWERS: ["codex"],
+        scope_decide.FOCUS: [],
+        scope_decide.MVV: {scope_decide.MVV_ID: approved},
+        fin.MVV_CHECKED: False,
+        "scope": scope_decide.FULL,
+    }
+    scope = scope_decide.Scope(scope_decide.FULL, None, ())
+    prep = reviewing.Prepared(scope, [], set(), "h" * 40, Path("round1.diff"), (), "b" * 40, None)
+    held = reviewing.pending(record, prep, reviewing.Reviewed([HEAVY], {}, False))
+    run = SimpleNamespace(data={store.PENDING_REVIEW: held}, seats=["codex"], filled=[], warnings=[], process=[])
+    now = prep._replace(scope=scope._replace(unreviewed=asked))
+    basis = scope_decide.Basis("b" * 40, ("codex",), (), approved, unit="")
+    got = reviewing.kept(run, 1, now, basis)
+    assert (got is not None and got.raised == [HEAVY]) is resumed
+
+
 def test_issue_4363_ask_does_not_launch_when_the_mvv_cannot_be_copied(tmp_path: Path) -> None:
     snap = _approved(tmp_path)._replace(path=tmp_path / "無い.md")
     seen: list = []
@@ -433,8 +474,13 @@ def test_issue_4363_run_does_not_launch_the_judge_without_a_finding_to_ask(
     wt: Path, tmp_path: Path, capsys, monkeypatch, found: dict
 ) -> None:
     fake = Fake(tmp_path / "st", {"codex": [[found], []], "kiro": [[], []]})
+    written: list[dict] = []
+    write = store.write_object
+    monkeypatch.setattr(store, "write_object", lambda path, value: (written.append(dict(value)), write(path, value)))
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok") and fake.judged == []
+    # 判定役を起動しないラウンドは、判定待ちのための保存をしない
+    assert not any(store.PENDING_REVIEW in value for value in written)
 
 
 def test_issue_4363_run_gives_the_judge_the_diffs_read_by_the_seats_of_the_asked_findings(

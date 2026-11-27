@@ -2,7 +2,7 @@
 
 PR の既存のコメントと差分のファイルを用意し、指示（指摘の基準・出力の形）を組んで今の席を並べて起動する。結果の無い claude
 以外の席は 1 度だけ起動し直し、それでも無ければ claude の読むだけの起動で埋める（`review_round`）。受け取った結果は判定待ちの
-ラウンドとして状態に入れ（`keep`）、打ち直しが同じ対象なら使う（`kept`）。ラウンドの範囲を決めるのと記録と保存は呼び手の `drive` がする。
+ラウンドの形にし（`pending`）、打ち直しが同じ対象なら使う（`kept`）。ラウンドの範囲を決めるのと記録と保存は呼び手の `drive` がする。
 """
 
 from __future__ import annotations
@@ -187,13 +187,15 @@ def _fill_seats(
     return *seats.launch_reviewers(run, round_no, prompts, _prompt_diffs(run, fresh), launch), full
 
 
-def keep(run: ReviewingRun, record: Mapping[str, Any], prep: Prepared, got: Reviewed) -> None:
-    """相手役の結果を、判定待ちのラウンドとして状態に入れる（保存は呼び手がする。#4363）。差分は中身を持たず、作り直せる範囲
-    （`record` の head と比較基点、`scope_base`）と、指摘ごとの差分を選ぶキーを持つ。"""
+def pending(record: Mapping[str, Any], prep: Prepared, got: Reviewed) -> dict[str, Any]:
+    """相手役の結果を、判定待ちのラウンドとして状態に残す形にする（#4363）。差分は中身を持たず、作り直せる範囲
+    （`record` の head と比較基点、`scope_base`）と、指摘ごとの差分を選ぶキーを持つ。`unreviewed` は相手役へ詳細レビューを
+    求めたセクションである。"""
     filled = got.filled
-    run.data[store.PENDING_REVIEW] = {
+    return {
         "record": dict(record),
         "scope_base": prep.scope.base,
+        "unreviewed": list(prep.scope.unreviewed),
         "raised": got.raised,
         "unread": {seat: u.hint for seat, u in got.unread.items()},
         "filled": None if filled is None else {"keys": sorted(filled.keys), "others": sorted(filled.others)},
@@ -201,15 +203,16 @@ def keep(run: ReviewingRun, record: Mapping[str, Any], prep: Prepared, got: Revi
 
 
 def kept(run: ReviewingRun, round_no: int, prep: Prepared, basis: scope_decide.Basis) -> Optional[Reviewed]:
-    """判定待ちで残ったラウンドが、今回のラウンドと同じ番号・head・範囲で、`basis` に合えば、その相手役の結果と席を返す
-    （相手役を起動しない）。合わなければ None。"""
+    """判定待ちで残ったラウンドが、今回のラウンドと同じ番号・head・範囲・詳細レビューを求めるセクションで、`basis` に合えば、
+    その相手役の結果と席を返す（相手役を起動しない）。合わなければ None。"""
     held = run.data.get(store.PENDING_REVIEW)
     if not isinstance(held, Mapping):
         return None
     record = held["record"]
     seated = store.list_of(record, scope_decide.REVIEWERS)
-    same = (record["round"], record["scope"], held["scope_base"]) == (round_no, prep.scope.kind, prep.scope.base)
-    if not same or len(seated) != len(run.seats) or scope_decide.read_by_all_head({store.ROUNDS: [record]}, basis) != prep.head:
+    then = (record["round"], record["head"], record["scope"], held["scope_base"], held["unreviewed"])
+    now = (round_no, prep.head, prep.scope.kind, prep.scope.base, list(prep.scope.unreviewed))
+    if then != now or len(seated) != len(run.seats) or not scope_decide.same_review(record, basis):
         return None
     run.seats[:] = seated
     filled = scope_decide.filled_of(record)

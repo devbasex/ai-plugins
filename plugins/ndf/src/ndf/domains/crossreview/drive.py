@@ -22,8 +22,9 @@
 5. 修正担当（claude）を起動し、修正の結果ファイル（`store.fix_result_path`）の指摘ごとの「直した」「見送った（理由）」を
    ジャーナルへ読み込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけマージする。#2440）
 
-相手役へ渡す資料と指示の組み立て、起動し直しと席の埋めは `reviewing` が持つ。相手役の結果は 3 の前に判定待ちのラウンド
-（`pending_review`）として保存し、ラウンドの記録を作る前に中断した打ち直しは、同じ対象なら相手役を起動せずに 3 から続ける（#4363）。
+相手役へ渡す資料と指示の組み立て、起動し直しと席の埋めは `reviewing` が持つ。判定役を起動するラウンドは、起動の直前に相手役の
+結果を判定待ちのラウンド（`pending_review`）として保存し、ラウンドの記録を作る前に中断した打ち直しは、同じ対象なら相手役を
+起動せずに 3 から続ける（#4363）。
 
 状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら、最後のコミットの根拠の記述を
 確かめてから `summary.json`（`finish_decide` が読む形）を書き、MVV に反するとした指摘を MVV の記録に残す（#4076）。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
@@ -36,6 +37,7 @@ merge-base の SHA）と MVV とレビューの単位の指示が今と同じで
 
 from __future__ import annotations
 
+import copy
 import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -600,8 +602,7 @@ def _round_record(run: _Run, round_no: int, prep: reviewing.Prepared) -> dict[st
 
 
 def _reviewed(run: _Run, round_no: int, prep: reviewing.Prepared, launch: Launcher) -> reviewing.Reviewed:
-    """相手役の結果。判定待ちで残った同じ対象のラウンドがあれば使い、無ければ起動して受け取り、判定役を起動する前に
-    判定待ちのラウンドとして保存する（判定役の待ちで中断しても、打ち直しがレビューからやり直さない。#4363）。"""
+    """相手役の結果。判定待ちで残った同じ対象のラウンドがあれば使い、無ければ起動して受け取る（#4363）。"""
     held = reviewing.kept(run, round_no, prep, _basis(run, prep.head, run.cfg.may_fill))
     if held is not None:
         return held
@@ -611,10 +612,21 @@ def _reviewed(run: _Run, round_no: int, prep: reviewing.Prepared, launch: Launch
         # precondition の詳細は手元にだけ返るので、標準エラーのログを絶対パスで示す（PR 4461 の r3-1）
         local = [u.local for u in got.unread.values()]
         raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(local))
-    # 指摘をジャーナルへ入れる前に保存する（打ち直しが同じ指摘を入れ直し、同じように判定役へ渡す）
-    reviewing.keep(run, _round_record(run, round_no, prep), prep, got)
-    _save(run)
     return got
+
+
+def _keeping(run: _Run, round_no: int, prep: reviewing.Prepared, got: reviewing.Reviewed, launch: Launcher) -> Launcher:
+    """判定役の起動の直前に、判定待ちのラウンドを保存する起動（判定役の待ちで中断しても、打ち直しがレビューからやり直さない。
+    起動しないラウンドは書かない。#4363）。保存するのは、このラウンドの指摘をジャーナルへ入れる前の状態である（打ち直しが
+    同じ指摘を入れ直し、同じように判定役へ渡す）。ジャーナルへ入れる前に呼ぶ。"""
+    held = reviewing.pending(_round_record(run, round_no, prep), prep, got)
+    data = copy.deepcopy({**run.data, store.FINDINGS: list(run.journal.rows.values()), store.PENDING_REVIEW: held})
+
+    def judging(spec: agents.Launch) -> agents.AgentStatus:
+        store.write_object(run.ref.path, data)
+        return launch(spec)
+
+    return judging
 
 
 def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
@@ -623,11 +635,12 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     prep = _prepare_round(run, round_no)
     got = _reviewed(run, round_no, prep, launch)
     raised, unread = got.raised, {s: u.hint for s, u in got.unread.items()}
+    judge = _keeping(run, round_no, prep, got, launch)
     keys = run.journal.enter(round_no, raised, run.mvv_items, run.mvv)
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
     # 確認で下げた指摘は、振動の判定のキーに数えない
-    checked = _confirm_heavy(run, round_no, prep.diff, launch, filled=got.filled)
+    checked = _confirm_heavy(run, round_no, prep.diff, judge, filled=got.filled)
     run.history.append(keys - checked.lowered)
     record = _round_record(run, round_no, prep)
     if checked.record:  # 中断した起動の出力も保存先に残るので、このラウンドの起動の保存できた出力を名指す（回答の有無は表さない）
