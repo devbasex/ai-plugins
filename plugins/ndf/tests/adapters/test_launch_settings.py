@@ -344,7 +344,7 @@ SWEPT = {
     "left": (False, False),  # NDF の記録が合い、使っていない
     "halfway": (False, False),  # 管理ファイルだけが残った途中の消し残り
     "creating": (False, False),  # 記録を書く前に落ちた（空の管理ファイルと空のディレクトリ）
-    "torn": (False, False),  # 記録を書く途中で落ちた（終わりの印の無い管理ファイルと空のディレクトリ）
+    "torn": (False, False),  # 記録を書く途中で落ちた（終わりを示す文字の無い管理ファイルと空のディレクトリ）
     "in_use": (True, True),  # ほかのコンテナのオーナーが錠を取っている
     "users": (True, False),  # 管理ファイルの無い利用者のディレクトリ（同じ形の名前）
     "forged": (True, True),  # 管理ファイルの中身が NDF の記録でない
