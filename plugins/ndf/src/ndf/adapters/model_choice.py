@@ -49,6 +49,7 @@ from ndf.adapters.experiment_rows import assigns as assigns
 from ndf.adapters.experiment_rows import candidates as candidates
 from ndf.adapters.experiment_rows import entry_fits as entry_fits
 from ndf.adapters.experiment_rows import model_group as model_group
+from ndf.adapters.experiment_rows import has_observed as has_observed
 from ndf.adapters.experiment_rows import observed_latest as observed_latest
 from ndf.adapters.experiment_rows import observed_models as observed_models
 from ndf.adapters.experiment_rows import probs_fit as probs_fit

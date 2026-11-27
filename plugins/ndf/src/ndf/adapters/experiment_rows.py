@@ -106,6 +106,11 @@ def refused_until(arms: Sequence[Mapping[str, str]], rows: Sequence[Mapping[str,
     return out
 
 
+def has_observed(rows: Sequence[Mapping[str, Any]], assign_id: str) -> bool:
+    """割り付け ID に、実際のモデルの行（`observed`）が既にあるか。"""
+    return any(r["kind"] == "observed" and r["assign_id"] == assign_id for r in rows)
+
+
 def observed_models(rows: Sequence[Mapping[str, Any]], where: Where, arms: Sequence[Mapping[str, str]], start: datetime) -> dict[str, str]:
     """まとまり → `start` 以降の同じキーの最も新しい `observed` の行の実際のモデル。割り付け（`entry_fits`）と出現率の計算
     （`experiments.refresh`）が同じ観測でモデルを決めるために共有する。
