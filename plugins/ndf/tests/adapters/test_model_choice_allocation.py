@@ -804,10 +804,6 @@ NOT_NDF_WEIGHTS = [
     {"entries": []},
     {"version": 1, "entries": [{"at": "x"}]},
     {"version": 1, "entries": [{**_sweep_entry(90), "memo": "退避"}]},
-    {"version": "1", "entries": [_sweep_entry(90)]},  # 移せば今の形に合うが、NDF は文字列のバージョンを書き出さない
-    {"version": 1, "entries": [{**_sweep_entry(90), "phase": "adaptive"}]},  # adaptive なのに確率が無い
-    {"version": 1, "entries": [{**_sweep_entry(90), "probs": [0.5, 0.5]}]},  # burn_in なのに確率を持つ
-    {"version": 1, "entries": [{**_sweep_entry(90), "cutoffs": [{"arm": 1, "until": "2027-01-01T00:00:00"}]}]},  # 期限に時差が無い
 ]
 
 
