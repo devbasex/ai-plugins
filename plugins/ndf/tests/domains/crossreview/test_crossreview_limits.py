@@ -7,8 +7,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from ndf import contracts
 from ndf.adapters import agents
-from ndf.domains.crossreview import settings
+from ndf.domains.crossreview import criteria_decide, settings
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, Repos, commit, sh
@@ -67,3 +70,82 @@ def test_a_rerun_after_convergence_reviews_the_added_diff(repos: Repos, wt: Path
     assert state["pr"] == PR
     assert [r["verdict"] for r in state["rounds"]] == [fin.CONVERGED, fin.CONVERGED]
     assert state["rounds"][0]["head"] != state["rounds"][1]["head"]
+
+
+# --- 上限の設定（.ndf/review.json の limits） ------------------------------------------------------
+
+
+def _limits(limits: object) -> criteria_decide.ProjectLimits:
+    return criteria_decide.project_limits_of({"version": 1, "focus": [], "limits": limits}, "r")
+
+
+def test_issue_2468_project_limits_of_reads_the_declared_keys_and_leaves_the_rest_empty() -> None:
+    assert _limits({"rounds": 4, "seconds": 1800.5, "usd": 5}) == criteria_decide.ProjectLimits(4, 1800.5, 5.0)
+    assert _limits({"usd": 0.5}) == criteria_decide.ProjectLimits(usd=0.5)
+    assert _limits({}) == criteria_decide.ProjectLimits()
+    assert criteria_decide.project_limits_of({"version": 1, "focus": []}, "r") == criteria_decide.ProjectLimits()
+
+
+@pytest.mark.parametrize(
+    "limits",
+    [
+        None,
+        [],
+        {"round": 3},
+        {"rounds": 0},
+        {"rounds": 1.5},
+        {"rounds": True},
+        {"rounds": "3"},
+        {"rounds": None},
+        {"seconds": 0},
+        {"seconds": -1},
+        {"seconds": False},
+        {"seconds": "3600"},
+        {"seconds": float("inf")},
+        {"usd": 0},
+        {"usd": float("nan")},
+        {"usd": 10**400},
+    ],
+)
+def test_issue_2468_project_limits_of_a_wrong_shape_is_invalid(limits: object) -> None:
+    with pytest.raises(criteria_decide.ReviewDeclInvalid, match="limits"):
+        _limits(limits)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [None, {"version": 1, "focus": []}, {"version": 1, "focus": [], "limits": {}}],
+)
+def test_issue_2468_6_without_declared_limits_seconds_and_usd_take_the_defaults(repos: Repos, wt: Path, body: object) -> None:
+    """上限を書かないプロジェクトは秒と費用だけに既定が入り、ラウンドには上限を置かない。"""
+    if body is not None:
+        _declare(repos, body)
+    assert settings.read_settings(repos.main, wt).limits == criteria_decide.ProjectLimits(None, 3600, 20)
+
+
+def test_issue_2468_declared_limits_replace_the_defaults(repos: Repos, wt: Path) -> None:
+    _declare(repos, {"version": 1, "focus": [], "limits": {"rounds": 2, "usd": 50}})
+    assert settings.read_settings(repos.main, wt).limits == criteria_decide.ProjectLimits(2, 3600, 50)
+
+
+def test_issue_2468_wrong_limits_stop_the_run_before_any_launch(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    _declare(repos, {"version": 1, "focus": [], "limits": {"seconds": -1}})
+    fake = Fake(tmp_path / "st", {})
+    _, got = _run(capsys, monkeypatch, fake, wt)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "invalid")
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize(
+    ("body", "valid"),
+    [
+        ({"version": 1, "focus": [], "limits": {"rounds": 4, "seconds": 3600, "usd": 20}}, True),
+        ({"version": 1, "focus": [], "limits": {}}, True),
+        ({"version": 1, "focus": [], "limits": {"rounds": 0}}, False),
+        ({"version": 1, "focus": [], "limits": {"seconds": 0}}, False),
+        ({"version": 1, "focus": [], "limits": {"minutes": 1}}, False),
+        ({"version": 3, "focus": [], "limits": {"rounds": 4}}, False),
+    ],
+)
+def test_issue_2468_the_settings_schema_takes_limits_only_in_version_1(body: dict, valid: bool) -> None:
+    assert (contracts.schema_errors(body, "schemas/ndf-settings/review.schema.json") == []) is valid

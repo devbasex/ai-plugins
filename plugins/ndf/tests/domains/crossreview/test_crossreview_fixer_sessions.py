@@ -287,7 +287,8 @@ def test_issue_4013_saved_sessions_inside_the_reviewed_worktree_stop_before_any_
     code, got = run_cli(capsys, *argv, "--branch", BRANCH, "--reviewer", "codex")
     assert got["cause"]["kind"] == "invalid" and "claude" not in fake.calls
     (wt / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["重点"]}), encoding="utf-8")
-    assert settings.read_settings(repos.main, wt) == settings.ReviewSettings(("重点",), (wt / ".ndf" / "review.json").read_bytes())
+    got = settings.read_settings(repos.main, wt)
+    assert (got.focus, got.raw, got.fixer_sessions) == (("重点",), (wt / ".ndf" / "review.json").read_bytes(), False)
 
 
 def test_issue_4013_saved_sessions_in_the_reviewed_worktree_itself_stop(repos: Repos) -> None:

@@ -8,6 +8,7 @@
   収束の妨げになる側に倒すのは、ジャーナルへ入れる処理を通らない行（引き継いだ行・前のバージョンの行）を読むときである
 - 重点（基準 3）は `.ndf/review.json` の `version: 1` の `focus` だけを読む。`version: 2`・`3` のプロファイルは
   読まず、形が違えば `ReviewDeclInvalid`（黙って無視しない）
+- 同じ `version: 1` の `limits` は、費用と時間の上限（`rounds`・`seconds`・`usd`。どれも省ける）である（#2468）
 - レビューの単位の指示（`NDF_UNIT_FILE`）があれば、単位の範囲と例外を相手役と修正担当の両方へ渡す（`unit_block`。#4369）
 - 基準 5（プロジェクト MVV に反しないか）は、ベースブランチの MVV が承認済みのときだけ指示に載せる。MVV の本文と
   NDF の共通原則は、起動の始めに保存したスナップショットのパスで渡す（#4076）
@@ -16,6 +17,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, Optional
@@ -41,6 +43,14 @@ _REDLINE = re.compile(r"[A-Z][0-9]+")
 
 class ReviewDeclInvalid(ValueError):
     """`.ndf/review.json` の形が違うか、cross-review が読まないバージョンである。"""
+
+
+class ProjectLimits(NamedTuple):
+    """`.ndf/review.json` の `limits`（#2468）。ラウンド数・秒・費用（ドル）で、上限の無いものは None。"""
+
+    rounds: Optional[int] = None
+    seconds: Optional[float] = None
+    usd: Optional[float] = None
 
 
 @contracts.cached_reader
@@ -143,6 +153,22 @@ def fixer_sessions_of(raw: Mapping[str, Any], where: str) -> bool:
     if not isinstance(value, bool):
         raise ReviewDeclInvalid(f"{where} の {FIXER_SESSIONS} が {value!r}。true か false を書く")
     return value
+
+
+def project_limits_of(raw: Mapping[str, Any], where: str) -> ProjectLimits:
+    """`.ndf/review.json` の中身（`focus_of` が version を確かめた後）から、書かれた上限（#2468）。`limits` と各キーは省ける。
+    `rounds` は 1 以上の整数、`seconds`・`usd` は正の有限の数だけを受け、知らないキーと形の違いは `ReviewDeclInvalid`。"""
+    if "limits" not in raw:
+        return ProjectLimits()
+    value = raw["limits"]
+    if not isinstance(value, Mapping) or not set(value) <= set(ProjectLimits._fields):
+        raise ReviewDeclInvalid(f"{where} の limits が {value!r}。{'・'.join(ProjectLimits._fields)} を持つオブジェクトを書く")
+    for key, got in value.items():
+        number = isinstance(got, int if key == "rounds" else (int, float)) and not isinstance(got, bool)
+        if not number or not 0 < got <= sys.float_info.max:
+            wanted = "1 以上の整数" if key == "rounds" else "正の数"
+            raise ReviewDeclInvalid(f"{where} の limits.{key} が {got!r}。{wanted}を書く")
+    return ProjectLimits(**value)
 
 
 def approved(mvv: Optional[Snapshot]) -> Optional[Snapshot]:

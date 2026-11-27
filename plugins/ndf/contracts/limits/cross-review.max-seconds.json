@@ -1,0 +1,7 @@
+{
+  "summary": "cross-review のラウンドにかかった秒の和の上限の既定（.ndf/review.json の limits.seconds を省いたとき。#2468）",
+  "seconds": 3600,
+  "read_by": [
+    "ndf.domains.crossreview.settings"
+  ]
+}
