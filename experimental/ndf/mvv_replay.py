@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import dataclasses
 import fcntl
 import hashlib
@@ -358,14 +359,32 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
     # 材料は最初の保存の前に読む（読めずに止まるとき、前の結果ファイルを書き換えない）
     materials = _materials(args.materials)
     # 同じ結果ファイルを補う起動を並べると、起動時に読んだ状態で互いの行を上書きするので、結果ファイルごとに 1 つだけ動かす
+    if args.result.name.endswith(LOCK_SUFFIX):
+        # 別の結果ファイルのロックを結果の保存で置き換えると、その結果ファイルの排他が崩れる
+        raise Stop(f"--result（{args.result}）は名前が {LOCK_SUFFIX} で終わる。ロックの置き場と重ならない名前を渡す")
     args.result.parent.mkdir(parents=True, exist_ok=True)
-    lock = os.open(f"{args.result}.lock", os.O_WRONLY | os.O_CREAT, 0o600)
+    lock_path = f"{args.result}{LOCK_SUFFIX}"
+    lock = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise Stop(f"同じ --result（{args.result}）の judge が動いている。終わってから打ち直す") from None
-        return _judge_locked(args, question, info, materials)
+        # 先の judge は終わるときにロックのファイルを消す。消される前に開いた古いファイルのロックでは排他にならないので、
+        # 取れたロックが今のパスのファイルかを確かめる
+        held = os.fstat(lock)
+        try:
+            now = os.stat(lock_path, follow_symlinks=False)
+        except FileNotFoundError:
+            now = None
+        if now is None or (now.st_dev, now.st_ino) != (held.st_dev, held.st_ino):
+            raise Stop(f"同じ --result（{args.result}）の judge が動いていた。打ち直す")
+        try:
+            return _judge_locked(args, question, info, materials)
+        finally:
+            # ロックを持ったまま消す（測定の結果を片付けたとき、役目を終えたロックのファイルを出力先に残さない）
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(lock_path)
     finally:
         os.close(lock)
 
@@ -407,6 +426,8 @@ def _judge_locked(args: argparse.Namespace, question: str, info: Mapping[str, An
     return 1 if any(state["expect_missing"].values()) else 0
 
 
+# judge が結果ファイルの隣に置くロックの名前の後ろ（`--result` にこの名前で終わるパスは渡せない）
+LOCK_SUFFIX = ".lock"
 # 前の結果ファイルを同じ測定の続きとみなす判定の条件
 JUDGE_CONDITIONS = ("model", "claude_version", "prompt_commit", "prompt_sha256")
 # 1 件の PR の判定を打つ回数の上限（同じ材料で失敗が続いたら打ち直さず、その PR は `tally` が保留の理由に挙げる）
@@ -663,6 +684,11 @@ def _verdict(rounds: Sequence[Mapping[str, Any]]) -> tuple[str, Optional[str]]:
     return "保留", "再測定でも差が残らない"
 
 
+def _is_sha256(value: Any) -> bool:
+    """16 進 64 桁の文字列か（判定結果の `prompt_sha256` として有効か）。"""
+    return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
 def _cmd_tally(args: argparse.Namespace) -> int:
     materials = {n: m for n, m in _materials(args.materials).items()}
     reviewed = _reviews(args.reviewed)
@@ -677,6 +703,10 @@ def _cmd_tally(args: argparse.Namespace) -> int:
             raise Stop("比べる 2 つの判定でモデル ID か Claude Code のバージョンが違う")
     # 回ごとに指示文や実行環境を変えると、公開する指示文で再現を確かめていない改善が合格になるので、側ごとに全回の条件を揃える
     for side, name in ((0, "変更後"), (1, PREV_COMMIT)):
+        # 指示文のハッシュを持たない結果（この変更より前の形式）は、実際に送った指示文を照合できないので比べない
+        missing = [str(pair[side].get("run_id")) for pair in pairs if not _is_sha256(pair[side].get("prompt_sha256"))]
+        if missing:
+            raise Stop(f"{name}の判定結果に送った指示文の SHA-256 が無い（実行の識別子 {missing}）。同じ条件で judge を打ち直す")
         conditions = {tuple(pair[side].get(k) for k in JUDGE_CONDITIONS) for pair in pairs}
         if len(conditions) > 1:
             raise Stop(f"{name}の判定の条件（{', '.join(JUDGE_CONDITIONS)}）が回によって違う: {sorted(map(str, conditions))}")
