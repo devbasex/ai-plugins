@@ -616,7 +616,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     checked = _confirm_heavy(run, round_no, prep.diff, launch, filled=got.filled)
     run.history.append(keys - checked.lowered)
     record = _round_record(run, round_no, prep)
-    if checked.record:  # 中断した起動の出力も保存先に残るので、このラウンドが採った出力を名指す
+    if checked.record:  # 中断した起動の出力も保存先に残るので、このラウンドの起動の出力を名指す（回答の有無は表さない）
         record[verify_decide.ROUND_KEY] = checked.record
     rounds.append(record)
     if unread:

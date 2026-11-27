@@ -8,8 +8,8 @@
 `drive` である。
 
 失敗しても例外で駆動を止めず、起動し直さない。回答なしと注意にする（どの指摘も下がらない）。注意は PR の記録に載るので、
-手元の絶対パス・指摘の本文・回答の中身を書かない。過程も結果 JSON に出るので、起動の状態の詳細（標準エラーの原文）は載せず、
-実行者だけが読めるログに残す。
+手元の絶対パス・指摘の本文・回答の中身を書かない。過程も結果 JSON に出るので、起動の状態の詳細（標準エラーの原文を含みうる）は
+載せず、標準エラーのログとは別の、実行者だけが読める記録に残す。
 """
 
 from __future__ import annotations
@@ -125,12 +125,12 @@ def _answers(
     status = launch(spec)
     if status.state != agents.AgentState.DONE:
         warning = f"判定役が終わらなかった（{status.state}）ので下げない"
-        # 詳細は接続先やアカウントを含みうる。過程には状態だけを載せ、原文は 0600 で移すログに足す（起動できなかった詳細はログに無い）
+        # 詳細は接続先やアカウントを含みうるので過程に載せない。起動できなかった詳細は標準エラーに無いので別の記録に書き、
+        # 子プロセスが書いた標準エラーのログは変えない。記録は出力と一緒に 0600 で移る
         try:
-            with spec.paths.err.open("a", encoding="utf-8") as log:
-                print(status.detail, file=log)
-        except OSError as exc:  # 足せなくても判定の結果と駆動は変えない
-            run.note(round_no, "verify", f"判定役のログに詳細を足せない（{exc.strerror}）")
+            spec.paths.out.with_name(f"{spec.paths.out.stem}.detail.log").write_text(f"{status.detail}\n", encoding="utf-8")
+        except OSError as exc:  # 書けなくても判定の結果と駆動は変えない
+            run.note(round_no, "verify", f"判定役の起動の詳細を書けない（{exc.strerror}）")
         return _unanswered(run, round_no, count, str(status.state), warning)
     try:
         answer = participants.claude_answer(spec.paths.out)

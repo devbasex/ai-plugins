@@ -31,8 +31,10 @@ worktree とこのディレクトリだけで、保存先の直下（修正担�
 
 判定役の出力は残すだけで、cross-review は片付けない。後から消すには、NDF が作ったファイルだと確かめる仕組みが要り、
 名前や更新時刻だけで消すと利用者のファイルを失いうるためである。起動のたびにファイルは増え、状態の保存先と一緒に残る。
-ラウンドが回答を採った出力の名前は、状態ファイルの `rounds[].judge_output` にある。どのラウンドも名指さない出力は、
-ラウンドを保存する前に中断した起動の分で、診断にだけ使う。起動が終わらなかった原因の原文は、出力の標準エラーのログにある。
+状態ファイルの `rounds[].judge_output` は、そのラウンドで判定役の起動を試みたときの出力ファイル名の接頭辞である。
+回答を得られなかった場合も記録するので、指摘を判定した証拠にはならない。有効な回答があった指摘には `findings[].check` が記録される。
+どのラウンドの `judge_output` にも無い出力は、ラウンドを保存する前に中断した起動の分で、診断にだけ使う。
+起動が終わらなかったときの原因は、同じ接頭辞の `.detail.log` にある。標準エラーのログは、判定役が書いたまま残る。
 
 ## 1 ラウンド
 
@@ -190,7 +192,7 @@ PR が足した MVV の根拠の記述の誤り（NDF が機械で確かめて�
 
 | キー | 中身 |
 | --- | --- |
-| `rounds[]` | `round`・`head`（レビューした head）・`base`（比較基点。`--base` と HEAD の merge-base の SHA）・`reviewers`（そのラウンドに座った席。埋めた後の並び）・`filled`（そのラウンドで claude が座っている埋めた席。`seat`・`for`（欠けた相手役。`allowed` のために起動の前に埋めたときは null）・`reason`。埋めた後のすべてのラウンドに書き、埋めていなければ書かない）・`focus`（そのラウンドで渡した重点）・`mvv`（レビューに使ったプロジェクト MVV。`id` は承認の状態・バージョン・本文と共通原則の sha256 から作る値、`mvv_branch` は MVV を読んだブランチ）・`mvv_checked`（その head の MVV の根拠の記述を確かめ終えたか。承認済みの MVV が無ければ真）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`）・`judge_output`（判定役を起動したラウンドだけ。そのラウンドが回答を採った出力の名前 `round<n>-verify-<接尾辞>`） |
+| `rounds[]` | `round`・`head`（レビューした head）・`base`（比較基点。`--base` と HEAD の merge-base の SHA）・`reviewers`（そのラウンドに座った席。埋めた後の並び）・`filled`（そのラウンドで claude が座っている埋めた席。`seat`・`for`（欠けた相手役。`allowed` のために起動の前に埋めたときは null）・`reason`。埋めた後のすべてのラウンドに書き、埋めていなければ書かない）・`focus`（そのラウンドで渡した重点）・`mvv`（レビューに使ったプロジェクト MVV。`id` は承認の状態・バージョン・本文と共通原則の sha256 から作る値、`mvv_branch` は MVV を読んだブランチ）・`mvv_checked`（その head の MVV の根拠の記述を確かめ終えたか。承認済みの MVV が無ければ真）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`）・`judge_output`（判定役の起動を試みたラウンドだけ。その出力ファイル名の接頭辞 `round<n>-verify-<接尾辞>`。回答を得られなくても記録するので、判定の有無は `findings[].check` で読む） |
 | `findings[]` | ジャーナル。指摘ごとの `id`（`r<ラウンド>-<通し番号>`。引き継いだ指摘は `t<コメントの id>`、記録のコメントから戻した指摘は `p-<元の id>`、NDF が見つけた MVV の根拠の記述の誤りは `r<ラウンド>-n<通し番号>`）・`key`・`text`・`section`・`round`・`outcome`（`fixed` / `deferred` / `unresolved`）・`reason`・`by`。相手役が返したときだけ `path`・`line`。相手役が返した指摘の行は `severity`（現在の重要度。ジャーナルに入れるときに決まり、判定役の回答で下がることがある）・`raised_severity`（相手役が付けた元の重要度。尺度に無い・無いときは null）と、1 文があれば `impact` を持つ。保護の種類が示された行は `protect`、`holds` が真か偽の有効な回答があった行には `check`（`holds`・`condition`・`path`・`result`・`reason`・`tracks`・`lowered`。出し直しで下げた扱いを抜けた行は `unlowered` も）を記録する。判断できないという回答や無回答には `check` を記録しない。引き継いだ指摘の行は記録された `severity` だけを持つ。MVV に反する指摘の行は `mvv`（反する項目）・`judged_mvv`（判定したときの MVV）と、重さを固定したなら `mvv_pinned`・`unpinned_severity`、必ず人の承認が要る操作に当たれば `redline`・`redline_items` も持つ |
 | `reviewed_sections` | 詳細レビューを通ったセクション（`<パス>#<見出し>`） |
 | `reviewed_mvv` | `reviewed_sections` のセクションを読んだときの `mvv` の `id` |

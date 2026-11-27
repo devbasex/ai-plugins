@@ -346,17 +346,20 @@ def test_issue_4363_ask_failure_gives_no_answer_and_one_warning(tmp_path: Path, 
 
 
 def test_issue_4363_ask_keeps_the_failure_detail_out_of_the_process_and_in_the_private_log(tmp_path: Path) -> None:
-    """起動の状態の詳細は接続先やアカウントを含みうるので、過程へ載せず、実行者だけが読めるログに残す。"""
+    """起動の状態の詳細は接続先やアカウントを含みうるので過程へ載せず、実行者だけが読める別の記録に残し、標準エラーは変えない。"""
     run, diff, seen = _AskRun(tmp_path), _diff(tmp_path), []
     answered = _launcher(seen, None, state=agents.AgentState.FAILED)
 
     def launch(spec: agents.Launch) -> agents.AgentStatus:
+        spec.paths.err.write_text("usage limit", encoding="utf-8")
         return answered(spec)._replace(detail="usage limit: https://private.example.test")
 
     answers = verify.ask(run, 1, [_row()], {"r1-1": [diff]}, launch)
     assert "private.example.test" not in str(run.notes) + str(answers.warnings)
-    [log] = [p for p in tmp_path.glob(f"{answers.record}.*") if "private.example.test" in p.read_text(encoding="utf-8")]
-    assert log.stat().st_mode & 0o777 == 0o600
+    log = tmp_path / f"{answers.record}.detail.log"
+    assert "private.example.test" in log.read_text(encoding="utf-8") and log.stat().st_mode & 0o777 == 0o600
+    err = tmp_path / seen[0].paths.err.name.replace(seen[0].paths.out.stem, answers.record)
+    assert err.read_text(encoding="utf-8") == "usage limit"
 
 
 def test_issue_4363_ask_does_not_launch_when_the_mvv_cannot_be_copied(tmp_path: Path) -> None:
@@ -386,7 +389,7 @@ def test_issue_4363_3_run_converges_without_the_fixer_when_the_major_does_not_ho
     [row] = state["findings"]
     assert (row["severity"], row["raised_severity"], row["check"]["lowered"]) == ("minor", "major", True)
     assert state["rounds"][-1]["verdict"] == fin.CONVERGED
-    # ラウンドの記録は、回答を採った起動の出力を名指す
+    # ラウンドの記録は、このラウンドで起動した判定役の出力を名指す
     assert list(fake.state_dir.glob(f"{state['rounds'][-1]['judge_output']}.*"))
 
 
