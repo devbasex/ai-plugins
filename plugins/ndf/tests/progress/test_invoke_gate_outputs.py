@@ -13,9 +13,10 @@ from ndf.core import route
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import records as plan_records
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import invoke
+from ndf.progress import definition, invoke
 
 STEPS = [{"id": "a", "run": ["true"]}, {"id": "b", "run": ["true"]}]
+WORKER = "作業 release の worker が判断を求めた: semver の形で返せない"
 DELIVERY = {"target": "本番", "kind": "manual", "trigger": "手で出す", "versioned": False}
 
 
@@ -38,7 +39,7 @@ def _gate_at(tmp_path: Path, monkeypatch, last: str, outputs=None, missing=None,
         plan_records._add_outputs(work, "a", "ok", earlier)
     plan_records._add_outputs(work, last, "gate", outputs)
     plan_records._keep_step_missing(work, last, missing)
-    final = {"status": "gate", "kind": None, "detail": "判断を求めた", "last": last, "count": 2}
+    final = {"status": "gate", "kind": None, "detail": f"ステップ {last} が承認ゲートで止まった: {WORKER}", "last": last, "count": 2}
     out = plan_runner.final_result(inv, final, "SUCCESS")
     plan_files.write_json(inv.result_path, out)
     return run, work, out
@@ -56,7 +57,7 @@ def test_an_approval_of_a_gate_with_every_value_ends_the_stage(tmp_path, monkeyp
     run, work, out = _gate_at(tmp_path, monkeypatch, "b", values)
     assert "missing_outputs" not in out["metrics"]
     got = invoke.invoke(run, tmp_path, work, "approved", runner=_never)
-    assert got.status == "ok" and got.report["outputs"] == values
+    assert got.status == "ok" and got.report["outputs"] == values and WORKER in got.report["metrics"]["waited"]
 
 
 @pytest.mark.parametrize("last", ["a", "b"])
@@ -65,7 +66,10 @@ def test_an_approval_of_a_gate_without_its_value_fails_even_with_a_continuation_
     earlier = {"product_version": "先の値"} if last == "b" else None
     run, work, _ = _gate_at(tmp_path, monkeypatch, last, {"delivery": DELIVERY}, ["product_version"], earlier)
     got = invoke.invoke(run, tmp_path, work, "approved", runner=_never)
-    assert got.status == "stopped" and got.cause["kind"] == "bad_report" and "product_version" in got.cause["detail"]
+    # #4513 の受け入れ条件 6: 理由に足りない値の名前と、worker が判断を求めた理由の要約と、次の操作が入る
+    detail = got.cause["detail"]
+    assert got.status == "stopped" and got.cause["kind"] == "bad_report"
+    assert "足りない出力: product_version" in detail and WORKER in detail and "ndf progress retry" in detail
 
 
 def test_a_rejection_of_a_gate_without_its_value_is_still_a_rejection(tmp_path, monkeypatch):
@@ -79,3 +83,9 @@ def test_a_gate_whose_delivery_does_not_fit_the_context_reaches_the_answer(tmp_p
     _, work, out = _gate_at(tmp_path, monkeypatch, "b", {"product_version": "1.2.3"}, ["delivery"])
     assert invoke.finished(invoke.StageRun(invoke.PLAN, "release", {}, (), "none", "release"), out).status == "gate"
     assert json.loads((work / plan_records.STEP_MISSING_FILE).read_text()) == {"b": ["delivery"]}
+
+
+def test_answered_gap_detail_names_every_missing_value_the_summary_and_the_next_step():
+    got = definition.answered_gap_detail(["delivery", "product_version"], "止まった")
+    assert got.startswith("足りない出力: delivery, product_version。判断を求めたステップの要約: 止まった。")
+    assert "ndf progress retry" in got

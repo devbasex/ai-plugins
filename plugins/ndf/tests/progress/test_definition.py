@@ -570,3 +570,13 @@ def test_the_after_release_stages_take_a_distribution_id_that_is_not_a_version_n
     assert invoke.resolve_inputs(s, {"product_version": "main abc1234"}) == {"product_version": "main abc1234"}
     with pytest.raises(invoke.StageInputInvalid):
         invoke.resolve_inputs(s, {"product_version": "main\nabc1234"})
+
+
+def test_required_outputs_reads_the_nested_required_keys_of_the_contract():
+    # #4513: release-result は allOf の 2 つ目に入れ子で outputs.product_version を必須とする
+    step = next(st for st in definition.load_definition("standard").stage("デプロイ").steps if st.id == "release")
+    assert definition.required_outputs(step.output_ref) == ("product_version",)
+    gate = next(st for st in definition.load_definition("standard").stage("デプロイ").steps if st.id == "release-gate")
+    assert definition.required_outputs(gate.output_ref) == ()
+    with pytest.raises(contracts.ContractError):
+        definition.required_outputs("file:///workflow/no-such.schema.json#/$defs/x")

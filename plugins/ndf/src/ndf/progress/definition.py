@@ -21,12 +21,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from jsonschema import Draft202012Validator
 
 from ndf import contracts, identity
+from ndf.contracts import result
 from ndf.progress import model, stages
 
 DSL = "workflow/dsl/workflow-1.0.3.json"
@@ -136,6 +137,25 @@ def answer_choices(ref: Optional[str]) -> list[str]:
     """規約の参照 `ref` が指すスキーマの `answer` の enum（承認ゲートの回答の語）。参照が無いか enum が無ければ空。"""
     listed = find_enum(ref_target(ref), "answer") if ref else None
     return listed if listed is not None else []
+
+
+def required_outputs(ref: str) -> tuple[str, ...]:
+    """ステップの出力の規約 `ref` が `outputs` に必須とするキーの名前（見つけた順・重なりを除く。#4513）。
+
+    `release-result` のように `allOf` の中に入れ子で持つ規約も、木をたどって集める（`find_enum` と同じたどり方）。
+    規約が無ければ `contracts.ContractError`。
+    """
+    node = ref_target(ref)
+    if node is None:
+        raise contracts.ContractError(f"規約 {ref} が無い")
+    return tuple(dict.fromkeys(_required_outputs(node)))
+
+
+def _required_outputs(node: Any) -> Iterable[str]:
+    found = dig(node, "properties", "outputs", "required")
+    yield from (str(n) for n in found) if isinstance(found, list) else ()
+    for child in _children(node):
+        yield from _required_outputs(child)
 
 
 def validate_io(ref: str, obj: Any) -> list[str]:
@@ -473,3 +493,37 @@ def stage_io(name: str) -> stages.StageDef:
 def mode_heights() -> dict[str, int]:
     """モード → 高さ。範囲の変更でモードを下げる操作を断るのに使う。"""
     return {m: _ndf_meta(contracts.load_json(f"{MODES_DIR}/{m}.json"))["height"] for m in modes()}
+
+
+# --- 出力の足りない承認の読み方と失敗の理由（#4513 の決定 4） ---------------------------------------------------------
+
+# 承認の回答を経て終わったプランの結果の metrics で、判断を求めて止まったときの要約を載せるキー（#4513）
+WAITED = "waited"
+
+
+def answered_gap_detail(names: Sequence[str], waited: str) -> str:
+    """出力の足りない承認の失敗の理由。足りない値の名前・判断を求めたステップの要約・次の操作を 1 つの文にする。"""
+    return (
+        f"足りない出力: {', '.join(names)}。判断を求めたステップの要約: {waited or '（要約なし）'}。"
+        "次の操作: ndf progress retry <ID> <工程> で工程を打ち直し、足りない値を返させる"
+    )
+
+
+def waited_of(report: Mapping[str, Any]) -> Optional[str]:
+    """承認の回答を経て終わった結果の `metrics.waited`（判断を求めて止まったときの要約）。無ければ None。"""
+    metrics = report.get("metrics")
+    got = metrics.get(WAITED) if isinstance(metrics, dict) else None
+    return got if isinstance(got, str) else None
+
+
+def gate_summary_of(done: Optional[Mapping[str, Any]]) -> str:
+    """承認ゲートで止まった回の結果の要約（止まったステップの要約を含む）。無ければ空。"""
+    got = done.get("summary") if done is not None else None
+    return got if isinstance(got, str) else ""
+
+
+def waited_missing(done: Optional[Mapping[str, Any]]) -> list[str]:
+    """承認ゲートで止まった回の結果の `metrics.missing_outputs`（判断を求めたステップ自身の欠け）。無ければ空。"""
+    metrics = done.get("metrics") if done is not None else None
+    got = metrics.get(result.MISSING_OUTPUTS) if isinstance(metrics, dict) else None
+    return [str(n) for n in got] if isinstance(got, list) else []

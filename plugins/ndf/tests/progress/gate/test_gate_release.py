@@ -388,3 +388,28 @@ def test_the_released_reader_is_called_once_per_step(st, lane_sprint, flow, monk
     monkeypatch.setattr(run, "released_answer", lambda answers: calls.append(1) or real(answers))
     reader = run._released_reader(run.StageAnswers(run.read(st, tid), "デプロイ"))
     assert reader() == reader() == worker_kinds.Recorded(DIST, ROW, "none") and calls == [1]
+
+
+def test_an_approval_without_the_value_fails_with_the_names_and_is_not_relaunched(st, new_table, flow, env):
+    # #4513 の受け入れ条件 6・7: 承認の後に値が足りなければ、名前と worker の理由を示して失敗し、next で打ち直さない
+    tid = new_table()
+    q = _at_release(st, tid, flow)
+    gate.answer(st, tid, gate.Answer(q.id, "approved", "出してよい", BY, "k-release"))
+    calls: list = []
+    waited = "ステップ release が承認ゲートで止まった: 作業 release の worker が判断を求めた: バージョンを返せない"
+    values = gate_lanes.values(flow.repo, "sprint/s1")
+
+    def invoker(r, cwd, work_dir, answer):
+        if r.step != "release":
+            return gate_lanes.ok_result(r, values)
+        calls.append(r.step)
+        return invoke.finished(r, result.result("plan", "ok", "最後の承認ゲートが承認された", metrics={"waited": waited}))
+
+    deploy = run.Env(**{**env.__dict__, "invoker": invoker})
+    for _ in range(3):
+        flow.turn(tid, deploy)
+    (failed,) = [e for e in run.read(st, tid).events if e.draft.kind == "failed"]
+    detail = failed.draft.payload["cause"]["detail"]
+    assert "足りない出力: product_version" in detail and "バージョンを返せない" in detail and "ndf progress retry" in detail
+    flow.turn(tid, deploy)
+    assert calls == ["release"]

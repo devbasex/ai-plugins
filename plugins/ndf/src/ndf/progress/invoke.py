@@ -794,13 +794,6 @@ def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -
     return argv + (["--answer", answer, "--by", PLAN_ANSWER_BY] if answer else [])
 
 
-def _waited_missing(done: Optional[Mapping[str, Any]]) -> list[str]:
-    """承認ゲートで止まった回の結果の `metrics.missing_outputs`（判断を求めたステップ自身の欠け。#4513）。無ければ空。"""
-    metrics = done.get("metrics") if done is not None else None
-    got = metrics.get(result.MISSING_OUTPUTS) if isinstance(metrics, dict) else None
-    return [str(n) for n in got] if isinstance(got, list) else []
-
-
 def _no_route(run: StageRun, work_dir: Path, answer: Optional[str]) -> Optional[StageResult]:
     """承認ゲートで終わった回への回答に続きが無いときの結果。承認ならプランは終わり、ほかは承認されなかった。続きがあれば None。
 
@@ -811,16 +804,19 @@ def _no_route(run: StageRun, work_dir: Path, answer: Optional[str]) -> Optional[
     if routes is None:
         return None
     done = _previous(work_dir)[1] if answer == APPROVED else None
-    missing = _waited_missing(done)
+    missing = definition.waited_missing(done)
     if missing:
-        detail = f"プラン {run.name} で判断を求めたステップが必須の出力を返さないまま承認された（足りない出力: {', '.join(missing)}）"
+        detail = definition.answered_gap_detail(missing, definition.gate_summary_of(done))
         return StageResult(result.stopped(PLAN, "bad_report", detail), {})
     if _from_of(routes[answer] if answer in routes else None) is not None:
         return None
     if answer == APPROVED:
         assert done is not None
         outputs = done["outputs"] if isinstance(done.get("outputs"), dict) else {}
-        return finished(run, result.result(PLAN, result.OK, f"プラン {run.name} の最後の承認ゲートが承認された", outputs=outputs))
+        said = f"プラン {run.name} の最後の承認ゲートが承認された"
+        return finished(
+            run, result.result(PLAN, result.OK, said, metrics={definition.WAITED: definition.gate_summary_of(done)}, outputs=outputs)
+        )
     return StageResult(result.stopped(PLAN, "refused", f"プラン {run.name} の承認ゲートで承認されなかった（回答 {answer}）"), {})
 
 
