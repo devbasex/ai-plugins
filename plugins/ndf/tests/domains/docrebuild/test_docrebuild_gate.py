@@ -319,6 +319,66 @@ def test_run_rows_are_used_by_branch_and_only_the_changed_part_is_read(tmp_path:
     assert Path(part).read_text(encoding="utf-8") == "第 1 の段落。\n\n第 2 の段落を直した。\n\n第 3 の段落。\n"
 
 
+def _hashing_the_read_file(state_dir: Path, targets: list[tuple[str, Path]]) -> list[dict[str, Any]]:
+    """文書には、読ませたファイル（抜き出しならその抜き出し）の `git hash-object` を書く worker（#4599）。"""
+    out = passing(state_dir, targets)
+    files = dict(targets)
+    for rec in out:
+        if rec["name"] == DESIGN:
+            rec["checks"][0]["hash"] = blob(files[DESIGN].read_text(encoding="utf-8"))
+    return out
+
+
+def test_a_record_of_the_read_part_matches_and_is_stored_as_the_whole_document(tmp_path: Path) -> None:
+    """#4599: 抜き出しを読ませた文書は、抜き出しのハッシュの記録を「読ませた後に変わった」としない。
+    記録の行は文書の全体の blob で書き、次の確認は同じ blob の文書を読ませない。"""
+    old = "# 設計\n\n第 1 の段落。\n\n第 2 の段落。\n\n第 3 の段落。\n\n第 4 の段落。\n"
+    new = "# 設計\n\n第 1 の段落。\n\n第 2 の段落を直した。\n\n第 3 の段落。\n\n第 4 の段落。\n"
+    w = world(tmp_path, {DESIGN: old})
+    assert w.run(FakeWorker())["status"] == "ok"
+    objects = w.git.objects
+    w.git = FakeGit(tmp_path, {DESIGN: new}, head=H2)
+    w.git.objects.update(objects)
+    w.hub.head = H2
+    worker = FakeWorker(_hashing_the_read_file)
+    got = w.run(worker)
+    assert got["status"] == "ok", got
+    assert "/parts/" in next(line for line in worker.prompts[0].splitlines() if line.startswith(f"- `{DESIGN}`"))
+    rows = [r for r in reading.doc_rows() if r.get("kind") == "read" and r["name"] == DESIGN]
+    assert rows[-1]["hash"] == blob(new)
+    third = FakeWorker()
+    assert w.run(third)["status"] == "ok" and third.calls == 0
+
+
+def _failing_once(name: str, quote: str) -> Behave:
+    """`name` を 1 回の確かめの不合格（引用 `quote`）で終え、ほかを合格にする worker（#4599）。"""
+
+    def behave(state_dir: Path, targets: list[tuple[str, Path]]) -> list[dict[str, Any]]:
+        out = passing(state_dir, targets)
+        for rec in out:
+            if rec["name"] == name:
+                bad = {"verdict": "fail", "hash": HASH(name, state_dir), "restatements": ["要点"], "reason": "通じない",
+                       "quotes": [{"quote": quote, "why": "語が通じない"}]}  # fmt: skip
+                rec.update(verdict="fail", checks=[bad])
+        return out
+
+    return behave
+
+
+@pytest.mark.parametrize("no_doc_fix", [True, False], ids=["not-fixable", "fixable"])
+def test_one_failed_check_ends_only_a_document_that_must_not_be_fixed(tmp_path: Path, no_doc_fix: bool) -> None:
+    """#4599: 直してよいファイルに入らない文書は、quotes つきの 1 回の不合格で終えてよく、残った文になる。
+    直してよい文書には、今どおり 2 回の確かめを求める。"""
+    w = world(tmp_path)
+    got = w.run(FakeWorker(_failing_once(DESIGN, "第 2 の段落。")), no_doc_fix=no_doc_fix)
+    if not no_doc_fix:
+        assert got["cause"]["kind"] == "incomplete" and "2 回の確かめ" in got["gaps"][0]["reason"], got
+        return
+    assert got["status"] == "ok", got
+    assert got["items"][0]["doc"] == DESIGN and "第 2 の段落。" in got["items"][0]["text"]
+    assert {"name": DESIGN, "reader": reading.ENGINEER, "round": 1, "result": "remained"} in checks_rows()[-1]["reads"]
+
+
 # --- 止まる経路（条件 2・5） ---------------------------------------------------------------------------------
 
 

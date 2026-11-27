@@ -220,7 +220,7 @@ def test_write_refuses_a_row_that_does_not_fit(row):
         {"reads": []},
         {"reads": [{**READING["reads"][0], "name": "material"}]},
         {"reads": [{**READING["reads"][0], "round": 3}]},
-        {"reads": [{**READING["reads"][0], "result": "remained"}]},
+        {"reads": [{**READING["reads"][0], "result": "failed"}]},
         {"reads": [{**READING["reads"][0], "quote": "x"}]},
         {"prs": [{"number": 1, "branch": "design/x"}]},
         {"question_key": "a"},
