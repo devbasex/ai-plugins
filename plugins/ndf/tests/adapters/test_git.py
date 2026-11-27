@@ -615,7 +615,9 @@ def test_github_target_refuses_other_hosts_and_unreadable_forms(url: str) -> Non
 
 
 def _repo_with_config(tmp_path: Path, *entries: tuple[str, str]) -> git.Git:
-    path, _ = _init_repo(tmp_path, {"a": "a\n"})
+    path = tmp_path / "repo"
+    path.mkdir()
+    git_sandbox.sh(path, "init", "-q", "-b", "main", identity=True, strip=True)
     for key, value in entries:
         git_sandbox.sh(path, "config", "--add", key, value, identity=True, strip=True)
     return git.Git(path)
