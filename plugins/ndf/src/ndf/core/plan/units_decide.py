@@ -77,7 +77,8 @@ class Finding(NamedTuple):
 
 
 class Proposal(NamedTuple):
-    """分け方の案。`file` の単位 `unit` を `units` に置き換え、`repoint` の依存を `units` の最後の単位へ付け替えると適用できる。
+    """分け方の案。`units` が空なら区切れなかったことを表し、元の単位と依存をそのまま残す。
+    空でなければ、`file` の単位 `unit` を `units` に置き換え、`repoint` の依存を `units` の最後の単位へ付け替えると適用できる。
 
     `repoint` の 1 件は `(依存を持つ単位のファイルのパス, その単位の名前, 依存の Edge.issue)`。その単位の依存のうち、
     単位の名前が `unit` で `issue` が一致するものだけを付け替える（別のファイルの同じ名前の単位への依存は変えない）。

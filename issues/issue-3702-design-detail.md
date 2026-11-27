@@ -93,7 +93,11 @@ contracts/
 | `Proposal` | `file`（超えた単位のファイルのパス）・`unit`・`units: tuple[UnitDef, ...]`・`resplit: tuple[str, ...]`（切り直すタスク）・`remaining: tuple[Finding, ...]`・`repoint: tuple[tuple[str, str, Optional[int]], ...]`（付け替える依存。中身は表の下） |
 | `Judgement` | `views`・`violations`・`warnings`・`proposals` |
 
-分け方の案（`Proposal`）は、次の 2 つを行うと適用できる。
+分け方の案（`Proposal`）を適用する処理は、まず `units` が空かどうかを見る。
+
+空の案は、単位を区切れなかったことを表す。適用するものは無いので、元の単位と、その単位への依存をそのまま残す。空の `units` で置き換えると元の単位が消え、そのタスクがどの単位にも属さなくなる。1 つで上限を超えるタスクがある場合は、切り直すタスクが `resplit` に入る。
+
+`units` に単位がある場合は、次の 2 つを行って適用する。
 
 - `file` の単位 `unit` を、`units` に置き換える
 - `repoint` が指す依存の先を、`units` の最後の単位に変える
