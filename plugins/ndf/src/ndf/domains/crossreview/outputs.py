@@ -9,7 +9,8 @@
 書く順序は、出力を空にして開く → 記録を 1 回の書き込みで書く → 出力の中身を 1 回の書き込みで書く、である。出力が空か、記録と
 出力全体が一致していれば、同じ引数で打ち直して続く（r2-6・r2-7）。記録を作った直後に終了して空の記録が残っても、失う中身が無い
 ので記録が無いのと同じに扱う。中身を一時のファイルから置き換えない（名前の長さの上限と、強制終了で残るファイルを増やさない。r3-2・r3-5。
-macOS で空のファイルを公開する一時ディレクトリは、名前の長さが出力の名前に依らない）。
+macOS で空のファイルを公開する一時ディレクトリは、名前の長さが出力の名前に依らず、強制終了で残っても次の起動の `check` が
+片付ける）。
 書き込みの失敗・書き切れなかったことに気づいた起動は、その場で出力を空に戻し記録を消してから失敗を返す（r3-3・r3-4）。
 出力は承認の記録を組む `build`（`worker_paths.read_file(owned=True)`）が読むので、読める形にする。無い出力と記録は、呼んだ
 利用者だけがアクセスできるファイルとして作る（`worker_paths.create_private`。macOS では親の拡張 ACL を継いでいない状態で
@@ -87,6 +88,14 @@ def _create_private(path: Path) -> None:
         raise OSError(f"{path} を作れない") from exc
 
 
+def _clear_residue(path: Path) -> None:
+    """前の起動が `path` を作る途中で強制終了して残した一時ディレクトリを片付ける。できなければ `OSError`。"""
+    try:
+        worker_paths.clear_private_residue(path)
+    except worker_paths.EntryError as exc:
+        raise OSError(f"{path} を作る途中で残った一時ディレクトリを片付けられない") from exc
+
+
 def _probe_create(path: Path) -> None:
     """無いファイルを実際に作れるかを、作って消して確かめる（作れなければ `OSError`）。"""
     _create_private(path)
@@ -111,16 +120,19 @@ def _unreadable_by_approval(path: Path) -> Optional[str]:
 
 
 def check(path: Path) -> None:
-    """何も変えずに、出力先を片付けて書けるかを確かめる（親が無い・出力か記録を書けない・承認の記録の読み手が拒む出力なら
+    """出力先を片付けて書けるかを確かめる（親が無い・出力か記録を書けない・承認の記録の読み手が拒む出力なら
     `OSError`）。
 
     出力先がリンク・通常のファイルでないもの・前の起動の記録と同じファイルで中身全体が一致すると確かめられない中身のあるファイルなら
     `Unowned`。
-    呼び手は、すべての出力先を確かめてから `clear_previous` を呼ぶ（1 つでも止まるなら何も変えない。r1-9）。
+    呼び手は、すべての出力先を確かめてから `clear_previous` を呼ぶ（1 つでも止まるなら出力と記録は何も変えない。r1-9）。
+    ここで消すのは、強制終了した起動が残した NDF の一時ディレクトリだけである（残すと出力のリンク数が 2 のままになる）。
     """
     if not path.parent.is_dir():
         raise OSError(f"出力先 {path} の親のディレクトリが無い")
     record = owner_record(path)
+    _clear_residue(path)
+    _clear_residue(record)
     held = _recorded(record)
     if os.path.lexists(path):
         if path.is_symlink() or not path.is_file():

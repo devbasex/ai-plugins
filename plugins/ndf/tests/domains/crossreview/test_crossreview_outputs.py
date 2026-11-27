@@ -66,6 +66,34 @@ def test_on_macos_the_inherited_acl_is_dropped_before_the_files_appear(tmp_path:
     assert sorted(p.name for p in tmp_path.iterdir()) == sorted([out.name, record.name])
 
 
+@pytest.mark.parametrize("published", [False, True], ids=["before-link", "after-link"])
+def test_on_macos_the_residue_of_a_killed_publish_is_removed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, published: bool) -> None:
+    """公開の途中で強制終了して残った一時ディレクトリは、次の起動が片付けて同じ出力先で続ける（PR 4686 の r4-2・r4-3）。"""
+    out = tmp_path / "reviewed-head"
+    monkeypatch.setattr(outputs.worker_paths.sys, "platform", "darwin")
+    monkeypatch.setattr(outputs.worker_paths, "_has_acl_darwin", lambda _fd: False)
+    tmp = tmp_path / outputs.worker_paths._private_tmp_name(out.name)
+    tmp.mkdir(mode=0o700)
+    (tmp / "data").touch(mode=0o600)
+    if published:
+        os.link(tmp / "data", out)
+    _settle(out)
+    assert not tmp.exists()
+    outputs.write_recorded(out, "x\n")
+    assert out.stat().st_nlink == 1
+
+
+def test_on_macos_an_existing_file_gets_no_temporary_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """既にある出力には、公開用の一時ディレクトリを作らない（PR 4686 の r4-4）。"""
+    out = tmp_path / "reviewed-head"
+    out.touch(mode=0o600)
+    made: list[str] = []
+    monkeypatch.setattr(outputs.worker_paths.sys, "platform", "darwin")
+    monkeypatch.setattr(outputs.worker_paths, "_make_tmp_dir", lambda *_args: made.append("tmp"))
+    outputs.worker_paths.create_private(out)
+    assert made == []
+
+
 def test_hardlinked_output_is_refused_before_the_review(tmp_path: Path) -> None:
     """承認の記録の読み手が拒むハードリンクのある出力は、何も変えずに `OSError`。"""
     out = tmp_path / "reviewed-head"

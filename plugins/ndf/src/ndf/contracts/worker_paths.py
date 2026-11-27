@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import hashlib
 import os
 import re
 import secrets
@@ -361,13 +362,13 @@ def open_lock(wd: WorkDir, name: str) -> int:
     return fd
 
 
-def _publish_lock(wd: WorkDir, name: str) -> None:
+def _publish_lock(wd: WorkDir, name: str, *, tmp_name: Optional[str] = None) -> None:
     """空のロックのファイルを私有の一時ディレクトリに作り、`name` が無いときだけ公開する（あれば何もしない）。
 
     一時ディレクトリが親から継いだ拡張 ACL を先に外し、その中に作る。最終名で作ってから外すと、外すまでに ACL の権限で開いた
-    記述子が残り、公開した inode のロックを取れるためである。
+    記述子が残り、公開した inode のロックを取れるためである。`tmp_name` は一時ディレクトリの名前（`create_private`）。
     """
-    tmp, tmp_fd = _make_tmp_dir(wd)
+    tmp, tmp_fd = _make_tmp_dir(wd, tmp_name)
     owned: Optional[os.stat_result] = None
     created = False
     try:
@@ -419,13 +420,50 @@ def create_private(path: Path) -> None:
     macOS で親から継いだ拡張 ACL の許可は作った時点で効き、その間に開かれた記述子は後から取り消せない。そのため `open_lock` と
     同じく、継いだ ACL を外した私有の一時ディレクトリで作ってから `path` へ公開する。ほかの OS の継いだ ACL は、モードの
     グループのビット（ACL のマスク）が 0 なので効かず、その場で作る。
+
+    macOS の一時ディレクトリの名前は `path` の名前から決まる。公開の途中で強制終了して残っても、`clear_private_residue` が
+    見つけて片付けられるようにするためである。同じ `path` を同時に作る呼び手は想定しない。
     """
     if sys.platform == "darwin":
+        if os.path.lexists(path):  # あるファイルには一時ディレクトリを作らない
+            return
         with open_workdir(path.parent.resolve()) as wd:
-            _publish_lock(wd, path.name)
+            _publish_lock(wd, path.name, tmp_name=_private_tmp_name(path.name))
         return
     with contextlib.suppress(FileExistsError):  # noqa: NDF402 ファイル: あるファイルはそのまま使う
         os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600))
+
+
+def _private_tmp_name(name: str) -> str:
+    """`create_private` が `name` を公開するときの一時ディレクトリの名前。長さは `name` に依らない。"""
+    return f".ndf-new-{hashlib.sha256(os.fsencode(name)).hexdigest()[:16]}"
+
+
+def clear_private_residue(path: Path) -> None:
+    """強制終了した `create_private(path)` が残した一時ディレクトリを片付ける（macOS だけが作る。無ければ何もしない）。
+
+    公開の直後に終了すると、一時ディレクトリの `data` と `path` が同じ inode を指したままになるので、`data` の名前を
+    消して `path` のリンク数を 1 に戻す。NDF が作ったと確かめられるものだけを消す。呼んだ利用者だけの一時ディレクトリと、
+    その中の呼んだ利用者の空の通常のファイル `data` である。違えば `EntryUnsafe`、ほかのファイルがあれば `OSError`。
+    """
+    if sys.platform != "darwin":
+        return
+    tmp = _private_tmp_name(path.name)
+    with open_workdir(path.parent.resolve()) as wd:
+        try:
+            tmp_fd = os.open(tmp, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=wd.fd)
+        except FileNotFoundError:  # noqa: NDF401 ファイル: 残った一時ディレクトリが無ければ片付けるものは無い
+            return
+        try:
+            owned = _tmp_owned(tmp, tmp_fd)
+            with contextlib.suppress(FileNotFoundError):  # noqa: NDF402 ファイル: data を作る前か消した後に終了した
+                st = os.stat("data", dir_fd=tmp_fd, follow_symlinks=False)
+                if not (stat.S_ISREG(st.st_mode) and st.st_uid == os.geteuid() and st.st_size == 0):
+                    raise EntryUnsafe(tmp, "other")
+                os.unlink("data", dir_fd=tmp_fd)
+            _remove_opened_dir(wd, tmp_fd, tmp, owned)
+        finally:
+            os.close(tmp_fd)
 
 
 def check_removable(wd: WorkDir, name: str) -> Optional[os.stat_result]:
@@ -538,13 +576,13 @@ def staged_write(wd: WorkDir, name: str, text: str, *, retire: Iterable[str] = (
                 _clean_tmp(wd, tmp_fd, tmp, None, created=created, published=False)
 
 
-def _make_tmp_dir(wd: WorkDir) -> tuple[str, int]:
-    """作業ディレクトリの直下に私有の一時ディレクトリを作って開き、名前と記述子を返す。
+def _make_tmp_dir(wd: WorkDir, name: Optional[str] = None) -> tuple[str, int]:
+    """作業ディレクトリの直下に私有の一時ディレクトリを作って開き、名前と記述子を返す。`name` が無ければ乱数の名前にする。
 
     名前の長さは出力名に依らない（出力名が上限に近くても作れる）。開けなければ作ったディレクトリだと確かめる
     記述子が無いので、名前を消さずに上げる（差し替えられた別の手の空のディレクトリを消さない）。
     """
-    tmp = f".ndf-{secrets.token_hex(8)}"
+    tmp = name or f".ndf-{secrets.token_hex(8)}"
     os.mkdir(tmp, 0o700, dir_fd=wd.fd)
     return tmp, os.open(tmp, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=wd.fd)
 
