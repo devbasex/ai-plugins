@@ -810,6 +810,32 @@ def test_a_saved_path_reaches_the_caller_even_if_a_later_cleanup_step_fails(tmp_
     assert len(kept) == 1 and kept[0].read_bytes() == b'{"version": 1, "saved": 1}\n'
 
 
+@pytest.mark.parametrize("earlier", [False, True])
+def test_a_saved_path_reaches_the_caller_even_if_removing_the_aside_fails(tmp_path, monkeypatch, earlier):
+    """別の名前を置いた後（前の実行が置いた同じ実体の名前を確かめた後も）、退避の削除が OSError で止まっても、パスは呼び手の一覧に入る。"""
+    target, _, aside = _interrupted(tmp_path)
+    aside.write_bytes(b'{"version": 1, "saved": 1}\n')
+    if earlier:  # 前の実行が名前を記録して os.link を済ませた後に中断した
+        named = target.with_name("launch.json.saved-00000000")
+        os.link(aside, named)
+        pending = la.reflected_file(target, la.PENDING)
+        lc.write_launch_record(pending, {**la.read_launch_record(pending), "saved": str(named)})
+    unlink = Path.unlink
+
+    def fail_on_the_aside(self, *args, **kwargs):
+        if self == aside:
+            raise PermissionError("unlink")
+        unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_on_the_aside)
+    kept: list[Path] = []
+    with pytest.raises(internal.InternalError) as raised:
+        la._recover_into(target, kept)
+    assert raised.value.kind == "precondition"
+    assert len(kept) == 1 and kept[0].read_bytes() == b'{"version": 1, "saved": 1}\n'
+    assert not earlier or kept[0].name == "launch.json.saved-00000000"
+
+
 def test_the_cleanup_finishes_a_move_before_removal_only_for_the_recorded_directory(tmp_path):
     """消す前に専用のディレクトリへ移した直後に止まった一時ファイルは、記録した名前と実体のディレクトリだけを片付ける（Value 6）。"""
     target = _worktree(tmp_path)

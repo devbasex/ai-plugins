@@ -710,17 +710,11 @@ def _recover_into(target: Path, kept: list[Path]) -> None:
     そのまま次の反映へ進むと、`_place` が同じ記録を新しい一時ファイルの名前で上書きするか、`_after_reflect` が記録を消し、
     残った一時ファイルを次の片付けで特定できなくなる。そこで、途中の記録が残っていれば、`kept` に足した後で `precondition` で止める
     （記録と一時ファイルはそのまま残し、打ち直しの `recover` が片付け直す）。
-    片付けのファイル操作が `OSError` で止まったときも、残した保存のパスを `kept` に足した後で `precondition` にして止める
-    （呼び手は `InternalError` の文に `kept` を添えて利用者に示す）。
+    片付けのファイル操作が `OSError` で止まったときは `recover_or_stop` が `precondition` にして止める。
     """
     from ndf.contracts import internal
 
-    try:
-        recover(target, kept)
-    except OSError as exc:
-        raise internal.InternalError(
-            "precondition", f"{target} の前の反映を片付けられない（{type(exc).__name__}）。同じコマンドを打ち直す"
-        ) from None
+    recover_or_stop(target, kept)
     pending = reflected_file(target, PENDING)
     if pending.exists():
         left = read_launch_record(pending).get("placing")
@@ -730,6 +724,23 @@ def _recover_into(target: Path, kept: list[Path]) -> None:
             f"前の反映の一時ファイル（{left}）を片付ける途中で、途中の記録 {pending} を更新できなかった。"
             f"一時ファイルと記録は残した。{pending.parent} に書き込めるか確かめてから、同じコマンドを打ち直す",
         )
+
+
+def recover_or_stop(target: Path, kept: list[Path]) -> None:
+    """錠の中で `recover` を呼び、片付けのファイル操作が `OSError` で止まったら `precondition` の `InternalError` にして止める。
+
+    利用者の保存を別の名前で残したパスは、止まる前に `kept` に入っている（呼び手は `InternalError` の文に `kept` を添えて示す）。
+    反映の経路（`_recover_into`）と候補の無い `approve` が同じ文と同じ打ち直しの案内を使うよう、変換はここだけに置く。
+    錠は呼び手が取るので、錠を取れないときの例外はここを通らず、片付けの失敗と区別される。
+    """
+    from ndf.contracts import internal
+
+    try:
+        recover(target, kept)
+    except OSError as exc:
+        raise internal.InternalError(
+            "precondition", f"{target} の前の反映を片付けられない（{type(exc).__name__}）。同じコマンドを打ち直す"
+        ) from None
 
 
 def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
@@ -1054,28 +1065,23 @@ def recover(target: Path, kept: Optional[list[Path]] = None) -> Optional[Path]:
     aside = target.with_name(target.name + REFLECTING)
     saved = None
 
-    def tell(path: Optional[Path]) -> Optional[Path]:
-        # 別の名前で残した時点で呼び手の一覧へ足す（後のファイル操作が例外で止まっても、呼び手が結果に載せられる）
-        if path is not None and kept is not None and path not in kept:
-            kept.append(path)
-        return path
-
     if aside.exists():
         asided = content_version(aside)
         if content_version(target) is None:
-            saved = tell(_link_back(aside, target, rec))
+            saved = _link_back(aside, target, rec, kept)
         elif _placed(target, rec):
             if asided == rec.get("base"):
                 aside.unlink()
             else:
-                saved = tell(_keep_as_saved(aside, target, rec))
+                saved = _keep_as_saved(aside, target, rec, kept)
             _write_done(target, rec)
         elif asided == rec.get("base"):
             aside.unlink()
         else:
-            saved = tell(_keep_as_saved(aside, target, rec))
+            saved = _keep_as_saved(aside, target, rec, kept)
     else:
-        saved = tell(_noted_saved(rec))  # 退避を別の名前で残し、退避を消した直後の中断
+        saved = _noted_saved(rec)  # 退避を別の名前で残し、退避を消した直後の中断
+        _tell(saved, kept)
         if _placed(target, rec):
             _write_done(target, rec)
     # 置き換えの途中で止まったか強制終了した実行の一時ファイル。写しを移す先を記録できず残したときは、
@@ -1085,8 +1091,17 @@ def recover(target: Path, kept: Optional[list[Path]] = None) -> Optional[Path]:
     return saved
 
 
-def _keep_as_saved(path: Path, target: Path, rec: Optional[dict[str, Any]] = None) -> Path:
+def _tell(path: Optional[Path], kept: Optional[list[Path]]) -> None:
+    """別の名前で残した保存のパスを呼び手の一覧 `kept` へ足す（まだ載っていなければ）。"""
+    if path is not None and kept is not None and path not in kept:
+        kept.append(path)
+
+
+def _keep_as_saved(path: Path, target: Path, rec: Optional[dict[str, Any]] = None, kept: Optional[list[Path]] = None) -> Path:
     """利用者の保存 `path` を `launch.json.saved-<値>` へ名前を変えて残し、そのパスを返す。
+
+    `kept` を渡せば、保存を別の名前で置いた時点（`os.link` が済んだか、同じ実体の既存の名前を確かめた時点）でそのパスを足す。
+    続く `path` の削除が `OSError` で止まっても、保存は既に別の名前にあるので、呼び手が結果に載せられるようにするためである。
 
     同じ名前の保存が既にあれば上書きしないよう、名前が空いているときだけ成功する `os.link` で置き、重なれば別の値で取り直す。
     反映の途中の記録 `rec` を渡せば、`path` を消す前に、使う名前を途中の記録の `saved` に書く。前の実行が名前を書いた後に中断して
@@ -1107,6 +1122,7 @@ def _keep_as_saved(path: Path, target: Path, rec: Optional[dict[str, Any]] = Non
         except FileExistsError:  # noqa: NDF401 ファイル: 前に残した保存と名前が重なれば、別の値で取り直す
             if not _same_file(path, saved):
                 continue
+        _tell(saved, kept)
         path.unlink()
         return saved
 
@@ -1120,12 +1136,15 @@ def _same_file(a: Path, b: Path) -> bool:
     return (x.st_dev, x.st_ino) == (y.st_dev, y.st_ino)
 
 
-def _link_back(path: Path, target: Path, rec: Optional[dict[str, Any]] = None) -> Optional[Path]:
-    """`path` を反映先の名前へ戻す。反映先が既にあれば（照らした後の利用者の保存）上書きせず、`path` を別の名前で残してそのパスを返す。"""
+def _link_back(path: Path, target: Path, rec: Optional[dict[str, Any]] = None, kept: Optional[list[Path]] = None) -> Optional[Path]:
+    """`path` を反映先の名前へ戻す。反映先が既にあれば（照らした後の利用者の保存）上書きせず、`path` を別の名前で残してそのパスを返す。
+
+    別の名前で残したら、置いた時点でそのパスを `kept` に足す（`_keep_as_saved`）。
+    """
     try:
         os.link(path, target)
     except FileExistsError:  # 照らした後に保存された反映先は残し、戻す側を別の名前で残す
-        return _keep_as_saved(path, target, rec)
+        return _keep_as_saved(path, target, rec, kept)
     path.unlink()
     return None
 

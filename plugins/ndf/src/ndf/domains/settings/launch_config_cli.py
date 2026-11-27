@@ -366,14 +366,10 @@ def _approval_input(root: Path, cand: Optional[Path], target: Path, kept: list[P
     候補が無ければ、設定を読む前に退避を片付け、利用者の保存を別の名前で残したらそのパスを `kept` に足す。
     """
     if cand is None:
-        try:
-            with la.records_lock(la.state_file(la.APPROVALS)):
-                la.recover(target, kept)  # 別の名前で残した時点でパスを `kept` に足す
-        except OSError as exc:
-            # 保存を別の名前で残した後のファイル操作で止まっても、呼び手がそのパスを載せられるよう `InternalError` にする
-            raise internal.InternalError(
-                "precondition", f"{target} の前の反映を片付けられない（{type(exc).__name__}）。同じコマンドを打ち直す"
-            ) from None
+        with la.records_lock(la.state_file(la.APPROVALS)):
+            # 片付けの失敗は反映の経路と同じ `precondition` にする（別の名前で残したパスは止まる前に `kept` に入る）。
+            # 錠を取れないときは片付けの失敗にせず、ほかの経路と同じく錠の例外のまま返す
+            la.recover_or_stop(target, kept)
         return ls.approval_target(ls.load(root)), b""
     _check_destination(cand, target)
     return _checked_target(root, cand)
