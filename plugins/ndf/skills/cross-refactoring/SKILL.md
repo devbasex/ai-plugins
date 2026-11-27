@@ -80,6 +80,8 @@ ndf refactor run --pr 130 --branch feat/x --base <ベースブランチ> --scope
 ndf refactor run --pr 130 --branch feat/x --base <ベースブランチ> --scope src tests --required test lint --budget-minutes 30 --safety-net-minutes 90
 ```
 
+**最終ゲートの確かめ先は `--required <チェック>...`（必須のチェックを CI で待つ）か `--local-test`（手元でテスト全体を打つ）のどちらか 1 つ（#4566）。** `--local-test` は、設定の手段が手元のテスト（必須のチェックが無く、CI テストの設定が無いか `false` で、`command` を持つテストの suite がある）のときだけ受ける。手元の経路は、テストの定義のファイル（`.ndf/`・`package.json`・`conftest.py`・suite のコマンドが名指すパス・`test.protected_files`）を対象範囲から外し、PR のブランチの先頭を取得してから検証用の作業場所でテスト全体を打ち、合格した SHA だけを push する。変更が残らなければテストを打たずに完了する。`--pushed-out <ファイル>` には呼び出し元を合わせる先の SHA を書く。停止理由は `test_failed`（直しの上限でも落ちる・元から落ちる suite）・`refused`（テストの定義のファイルを変えた）・`precondition`（手段が手元のテストでなくなった・起動できない・コマンドが `--work` を絶対パスで指す・同じ PR の別の実行）・`fix_limit`（累計の上限。`test.local_total_minutes` で延ばす）・`push_rejected`。必須のチェックの経路の結果は「通ったチェックの名前」を載せ、テストに合格したとは書かない。
+
 **CI テストの設定（`test.ci.only`）があるリポジトリでは、テストを手元で走らせない。** 合否は最終ゲートが待つ CI の
 必須のチェックで読む。
 
