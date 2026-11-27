@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from ndf.adapters import git
-from ndf.domains.crossreview import changes, criteria_decide, journal as journal_mod, leftover_decide, threads
+from ndf.domains.crossreview import changes, criteria_decide, drive, journal as journal_mod, leftover_decide, round_scope, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.leftover_decide import PARKED, Touched
 
@@ -398,6 +399,33 @@ def test_touched_since_reads_only_the_diffs_it_cannot_use(monkeypatch: pytest.Mo
 def test_touched_since_a_commit_that_is_not_local_raises(wt: Path) -> None:
     with pytest.raises(git.GitError):
         changes.touched_since(git.Git.offline(wt), "0" * 40, changes.Range("0" * 40, _head(wt)), {})
+
+
+# --- git と判定役を起動する条件 --------------------------------------------------------------
+
+
+def test_changed_lines_are_needed_only_for_findings_to_sort() -> None:
+    journal, _ = _parked()
+    assert journal.sortable()
+    journal.enter(3, [], ITEMS, V11)
+    assert not journal.sortable()
+
+
+@pytest.mark.parametrize(("returned", "wanted"), [pytest.param([], True, id="new"), pytest.param(["r2-1"], False, id="returned")])
+def test_the_judge_is_not_asked_the_kinds_of_a_returned_finding(returned: list[str], wanted: bool) -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(2, [_told(mvv="Value 1", **UNCHANGED)], ITEMS, V11)
+    journal.returned = returned
+    assert drive._wants_tracks(SimpleNamespace(journal=journal), TOUCHED) is wanted  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(("confirmed", "asked"), [pytest.param("h1", 0, id="same-head"), pytest.param("h0", 1, id="other-head")])
+def test_line_origin_does_not_confirm_the_confirmed_head_again(confirmed: str, asked: int) -> None:
+    calls: list[tuple[str, str]] = []
+    g = SimpleNamespace(is_ancestor=lambda prev, head: calls.append((prev, head)) or True)
+    state = {"rounds": [{"round": 1, "base": "b", "head": "h1", "verdict": "changes_required"}]}
+    assert round_scope.line_origin(g, state, "h2", confirmed) == changes.Range("b", "h1")  # type: ignore[arg-type]
+    assert len(calls) == asked
 
 
 # --- 駆動（`run` を通す） --------------------------------------------------------------------

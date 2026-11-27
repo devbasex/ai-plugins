@@ -540,7 +540,7 @@ class FindingJournal:
         parked: set[str] = set()
         for fid in self.raised_ids:
             row = self.rows[fid]
-            if row.get("outcome") != fin.UNRESOLVED or not (fid in self._arrived or row.get(PARKED)):
+            if not self._sorts(fid):
                 continue
             base = {k: v for k, v in row.items() if k not in ("path", "line")}
             returned, unanswered = fid in self.returned, fid in unconfirmed
@@ -559,11 +559,24 @@ class FindingJournal:
             self._check_post_line(self.rows[fid], touched)
         return frozenset(parked)
 
+    def sortable(self) -> bool:
+        """直前の `enter` の指摘に、`sort` が変えた行を使うもの（線引きするか、投稿の位置を確かめる）があるか。"""
+        return bool(self._moved) or any(self._sorts(fid) or self._placed_now(self.rows[fid]) for fid in self.raised_ids)
+
+    def _sorts(self, fid: str) -> bool:
+        """指摘 `fid` に線引きを当てるか（未解決で、新しく出たか戻ったか、直さずに残していた）。"""
+        row = self.rows[fid]
+        return row.get("outcome") == fin.UNRESOLVED and bool(fid in self._arrived or row.get(PARKED))
+
+    def _placed_now(self, row: Mapping[str, Any]) -> bool:
+        """指摘の位置の基準が、直前の `enter` のラウンドか。"""
+        return (row.get(PLACED_ROUND) or row.get("round")) == self._round
+
     def _check_post_line(self, row: dict[str, Any], touched: leftover_decide.Touched) -> None:
         """投稿に使う行（`leftover_decide.location`。`path` が無ければ `section` と本文の先頭から読む）が、基準のコミットの PR の
         差分に載らなければ、`OFF_DIFF` を付ける。`touched` で確かめられるのは位置の基準がこのラウンドの行だけなので、ほかの行は
         前に付けた記録を保つ。記録は、線引きをしないラウンドで投稿するときにも効く。"""
-        if (row.get(PLACED_ROUND) or row.get("round")) != self._round:
+        if not self._placed_now(row):
             return
         row.pop(leftover_decide.OFF_DIFF, None)
         path, line = leftover_decide.location(row)
