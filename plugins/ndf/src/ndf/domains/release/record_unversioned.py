@@ -240,7 +240,9 @@ def _declared_at(repo_git: Git, commit: str, fetch: str, what: str = "反映し�
 
 def _deepen_hint(production: str, tip: str, depth: int) -> str:
     """浅い clone で親のコミットが手元に無いときに、本番ブランチの履歴を `depth` だけ深く取得するコマンド。"""
-    return _fetch_hint(production, tip).replace("git fetch ", f"git fetch --deepen={int(depth)} ", 1)
+    parts = tip.split("/")
+    remote = parts[2] if len(parts) > 3 and parts[:2] == ["refs", "remotes"] else "<リモート>"
+    return f"git fetch --deepen={int(depth)} {remote} {tracking_refspec(remote, production)}"
 
 
 def find_push(hub: GitHub, production: str, commit: str, tip: str, landed: frozenset[str]) -> record_decide.Push:
