@@ -165,9 +165,8 @@ class Claim:
         for line in lines:
             if not line:
                 continue
-            try:
-                value = json.loads(line.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):  # noqa: NDF401 ファイル: 改行の後ろへ足す途中で切れた行は読み飛ばす（PR 4638 の r4-5）
+            value = _decoded(line)
+            if value is _UNREADABLE:
                 continue
             if not (isinstance(value, dict) and value.get(RECORD_KIND_KEY) == RECORD_KIND):
                 return None
@@ -287,6 +286,9 @@ class Claim:
 
 def _lock(path: Path) -> Claim:
     """記録のファイルに錠を取り（無ければ 0600 で作る）、読み書きのために開く。別の起動が持っていれば `Busy`。"""
+    if not path.parent.is_dir():
+        # FileLock は親を作るので、作る前に止める（出力先の誤りを相手役の起動の前に知らせる。#3702）
+        raise OSError(f"出力先 {path} の親のディレクトリが無い")
     record = owner_record(path)
     if os.path.lexists(record) and not record.is_file():
         # レビューの後に記録を残せないと分かっても遅いので、相手役を起動する前に止める（PR 4638 の r2-4）
@@ -371,3 +373,16 @@ def write_output(path: Path, text: str) -> None:
     """前の起動の出力を片付けてから出力を書き、錠を外す（`claim` の 1 回分）。"""
     with claim(path) as held:
         held.write(text)
+
+
+# 読めない記録の行を表す値（JSON の null と分けるため None を使わない）
+_UNREADABLE = object()
+
+
+def _decoded(line: bytes) -> object:
+    """記録の 1 行の JSON。読めなければ `_UNREADABLE`。"""
+    try:
+        return json.loads(line.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        # 改行の後ろへ足す途中で切れた行は読み飛ばす（PR 4638 の r4-5）
+        return _UNREADABLE

@@ -156,7 +156,7 @@ def test_pr_4638_r2_5_record_not_written_by_ndf_is_kept(tmp_path: Path, output: 
 
 def test_pr_4638_r2_7_staging_file_that_does_not_match_the_record_is_kept(tmp_path: Path) -> None:
     """PR 4638 の r2-7・r4-7: 記録の指す一時のファイルでも、inode が記録と違えば利用者のファイルとみなして消さない。
-    記録も消さず、次の起動も同じ照合で止まる。"""
+    記録も消さず、次の起動も同じ確かめで止まる。"""
     out = tmp_path / "h"
     tmp = tmp_path / ".h.0.tmp"
     tmp.write_text("利用者のファイル", encoding="utf-8")
