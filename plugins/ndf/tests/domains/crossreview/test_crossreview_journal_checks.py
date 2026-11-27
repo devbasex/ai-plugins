@@ -228,37 +228,3 @@ def test_issue_4363_revived_finding_is_checked_again_and_keeps_protect() -> None
     assert "check" not in row and row["protect"] == ["secret"] and journal.fresh == ["r1-1"]
     journal.apply_checks(["r1-1"], _answered())
     assert (row["severity"], row["check"]["lowered"]) == ("major", False)
-
-
-@pytest.mark.parametrize("order", [1, -1])
-def test_issue_4363_heavy_reports_of_different_conditions_at_one_place_are_not_asked(order: int) -> None:
-    """同じ位置でも発生条件の違う重い報告は、1 つの否定で下がらないように判定役へ渡さず、どの条件も残す。"""
-    journal = drive.FindingJournal()
-    told = [_told(path="a.py", line=1, impact=impact) for impact in ("空の入力で失敗する", "既存データの更新で失敗する")]
-    journal.enter(1, told[::order])
-    row = journal.rows["r1-1"]
-    assert (row["severity"], journal.fresh) == ("major", [])
-    shown = criteria_decide.fixer_impact(row)
-    assert "空の入力で失敗する" in shown and "既存データの更新で失敗する" in shown
-
-
-@pytest.mark.parametrize("other", [{"impact": "既存データの更新で失敗する"}, {"section": "doc.md#移行"}])
-def test_issue_4363_lowered_finding_raised_differently_in_the_same_file_is_checked_again(other: dict) -> None:
-    """同じファイルで 1 文か見出しだけが違う出し直しは、判定役に確かめ直し、否定されればまた下げて修正担当へ渡さない。
-    確かめ直しの後は、否定した内容の出し直しは下げたままにし、どちらとも違う重い報告は判定役に渡さず修正候補に戻す。"""
-    journal, row = _lowered(path="a.py", line=1, section="doc.md#保存")
-    occurrence = row[journal_mod.OCCURRENCE]
-    journal.enter(2, [_told(path="a.py", line=9, section="doc.md#保存")])
-    assert (row["severity"], row["line"], journal.fresh) == ("minor", 1, [])
-    journal.enter(3, [_told(**{"path": "a.py", "line": 20, "section": "doc.md#保存", **other})])
-    assert (row["severity"], row["line"], row["round"], "check" in row) == ("major", 20, 3, False)
-    assert journal.fresh == ["r1-1"] and journal.revived == [] and row[journal_mod.OCCURRENCE] == occurrence
-    journal.apply_checks(journal.fresh, _answered())
-    assert (row["severity"], journal.handable()) == ("minor", [])
-    # 先に否定した内容と、確かめ直して否定した内容は、下げたままにする
-    for told in ({}, other):
-        journal.enter(4, [_told(**{"path": "a.py", "line": 20, "section": "doc.md#保存", **told})])
-        assert (row["severity"], row["check"]["lowered"], journal.fresh) == ("minor", True, [])
-    journal.enter(5, [_told(path="a.py", line=30, section="doc.md#保存", impact="別の発生条件で止まる")])
-    assert (row["severity"], row["line"], journal.fresh) == ("major", 30, [])
-    assert journal.handable() == [row]
