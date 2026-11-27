@@ -596,6 +596,31 @@ class _Decided(NamedTuple):
     share: Path
 
 
+def _resolve_prefix(
+    hub: GitHub,
+    hands: Hands,
+    number: int,
+    production: str,
+    pull: Pull,
+    commit: str,
+    state: record_read.Candidates,
+    share: Path,
+    args: Unversioned,
+) -> Prefix:
+    """共有済みの前処理を読み、無ければ push の要否を決めて計算する（必要なら保存先で共有する）。"""
+    # 対象の出典は worktree でなく本番へ反映した時点で決める。並べて打った別の呼び出しが push を読んで保存先に書いて
+    # いれば、判定もやり直さずに使う。push を読まないと決めた結果は保存先に書かない（判定は git の起動 2 回で済む）
+    known = _known_push(state, args.version)
+    prefix = _read_share(_share_path(share, number), commit, known)
+    if prefix is not None:
+        return prefix
+    landed = _push_needed(hands.repo_git, production, commit, args.tip) if known is None else frozenset()
+    if known is None and landed is None:
+        return Prefix(commit, None, None, frozenset(), frozenset())
+    found = (known, landed or frozenset())
+    return shared_prefix(share, number, commit, lambda: _prefix(hub, hands, production, pull, args.tip, found), known)
+
+
 def _shape(hub: GitHub, hands: Hands, number: int, production: str, release: Mapping[str, Any], args: Unversioned) -> _Decided:
     """確かめ 1〜6。通らなければ `RecordError`（何も書かない）。"""
     pull, commit = _landed_value(hub, number, production, args.version, args.production_sha)
@@ -604,17 +629,7 @@ def _shape(hub: GitHub, hands: Hands, number: int, production: str, release: Map
     # 残った保存先の掃除は push を読むかによらず毎回行う（保存先の解決は CLI が済ませた値を使い、git を起動しない）
     share = share_dir(hands)
     sweep_shares(share, _share_age(release))
-    # 対象の出典は worktree でなく本番へ反映した時点で決める。並べて打った別の呼び出しが push を読んで保存先に書いて
-    # いれば、判定もやり直さずに使う。push を読まないと決めた結果は保存先に書かない（判定は git の起動 2 回で済む）
-    known = _known_push(state, args.version)
-    prefix = _read_share(_share_path(share, number), commit, known)
-    if prefix is None:
-        landed = _push_needed(hands.repo_git, production, commit, args.tip) if known is None else frozenset()
-        if known is None and landed is None:
-            prefix = Prefix(commit, None, None, frozenset(), frozenset())
-        else:
-            found = (known, landed or frozenset())
-            prefix = shared_prefix(share, number, commit, lambda: _prefix(hub, hands, production, pull, args.tip, found), known)
+    prefix = _resolve_prefix(hub, hands, number, production, pull, commit, state, share, args)
     targets = _record_targets(prefix, args)
     _check_names(targets, args)
     _check_records(state, targets, args.version, commit, number)
