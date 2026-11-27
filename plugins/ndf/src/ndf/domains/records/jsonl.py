@@ -55,20 +55,19 @@ def read_rows(
     for number, chunk in enumerate(path.read_bytes().split(b"\n"), 1):
         if not chunk.strip():
             continue
-        raw, cut = _raw(chunk)
-        if cut is not None:  # 途中で切れた書き込みの断片。断片だけを除き、後ろにつながった行は読む
+        raws, cut = _raw(chunk)
+        if cut is not None:  # 途中で切れた書き込みの断片。断片だけを除き、前後につながった行は読む
             broken.append(Broken(number, cut, len(rows), None))
-        if raw is None:
-            continue
-        try:
-            if wanted(raw):
-                rows.append(internal.read_record(kind, raw))
-            else:
-                internal.readable_version(kind, raw)
-        except internal.InternalError as exc:
-            if exc.kind != "invalid":
-                raise
-            broken.append(Broken(number, str(exc), len(rows), raw))
+        for raw in raws:
+            try:
+                if wanted(raw):
+                    rows.append(internal.read_record(kind, raw))
+                else:
+                    internal.readable_version(kind, raw)
+            except internal.InternalError as exc:
+                if exc.kind != "invalid":
+                    raise
+                broken.append(Broken(number, str(exc), len(rows), raw))
     return rows, broken
 
 
@@ -94,39 +93,41 @@ def read_rows_after(
     for chunk in data[:end].split(b"\n"):
         if not chunk.strip():
             continue
-        raw, cut = _raw(chunk)
+        raws, cut = _raw(chunk)
         broken += cut is not None
-        if raw is None:
-            continue
-        try:
-            if wanted(raw):
-                rows.append(internal.read_record(kind, raw))
-        except internal.InternalError as exc:
-            if exc.kind != "invalid":
-                raise
-            broken += 1
+        for raw in raws:
+            try:
+                if wanted(raw):
+                    rows.append(internal.read_record(kind, raw))
+            except internal.InternalError as exc:
+                if exc.kind != "invalid":
+                    raise
+                broken += 1
     return rows, broken, start + end
 
 
-def _raw(chunk: bytes) -> tuple[Optional[dict[str, Any]], Optional[str]]:
-    """1 行のバイト列を辞書にし、読めなかった部分の理由を添えて返す。
+def _raw(chunk: bytes) -> tuple[list[dict[str, Any]], Optional[str]]:
+    """1 行のバイト列を辞書の並びにし、読めなかった断片の理由を添えて返す。
 
-    行全体が読めれば（辞書, None）。読めなければ、行の中で `append` の書いた行の始まり（`ROW_START`）を後ろへ順に探し、
-    そこから行末までを 1 つの辞書として読み直す。追記が途中で終わると、改行の無い断片の後ろに次の書き手の行がつながるため
-    である（`append` は末尾の改行を確かめるが、確かめてから書くまでに別の書き手の書き込みが途中で終わることがある）。
-    行の始まりだけから読み直すので、断片の中の入れ子の辞書を行として拾わない。読めれば（後ろの辞書, 断片の理由）、
-    どこからも読めなければ（None, 理由）。読み直すのは読めない行だけなので、読める行の費用は変わらない。
+    行全体が 1 つの辞書として読めれば（[辞書], None）。読めなければ、`append` の書いた行の始まり（`ROW_START`）を
+    境界の候補として前から順に探し、境界から行末までが 1 つの辞書として読める最初の境界で分ける。境界より前も同じ手順で
+    読む。前の書き込みが途中で終わると、改行の無い断片の後ろに次の書き手の行がつながる。前の書き込みが閉じ括弧まで
+    書けて末尾の改行だけが欠けると、完全な辞書が 2 つつながる（`append` は末尾の改行を確かめるが、確かめてから書くまでに
+    別の書き手の書き込みが終わることがある）。どちらの場合も、境界の前後で完全に読めた辞書はすべて返す。
+    行の始まりだけで分けるので、断片の中の入れ子の辞書を行として拾わない。返すのは（読めた辞書の並び, 断片の理由）で、
+    断片が無ければ理由は None、どこからも読めなければ（[], 理由）。行全体が読めた行では、境界を探さず読み直さない。
     """
     whole = _parsed(chunk)
     if isinstance(whole, dict):
-        return whole, None
+        return [whole], None
     start = chunk.find(ROW_START, 1)
     while start != -1:
         tail = _parsed(chunk[start:])
         if isinstance(tail, dict):
-            return tail, whole
+            head, cut = _raw(chunk[:start])
+            return [*head, tail], cut
         start = chunk.find(ROW_START, start + 1)
-    return None, whole
+    return [], whole
 
 
 def _parsed(chunk: bytes) -> dict[str, Any] | str:
@@ -185,7 +186,8 @@ def append(path: Path, row: Mapping[str, Any], *, kind: str) -> dict[str, Any]:
     追記の形（`O_APPEND`）の 1 回の書き込みで足すので、錠を取らない書き手どうしでも行は混ざらない。前の書き込みが
     途中で終わってファイルが改行で終わっていなければ、改行を先に足して断片を 1 行に閉じ込める。確かめてから書くまでに
     別の書き手の書き込みが途中で終われば、この行は断片の後ろにつながる。その場合も読み手（`read_rows`・`read_rows_after`）が
-    行の始まり（`ROW_START`）から読み直し、断片だけを読めない行として除く。一部しか書けなければ `OSError`。
+    行の始まり（`ROW_START`）で分けて読み直し、断片だけを読めない行として除く。別の書き手の行が末尾の改行だけを欠いて
+    つながった場合は、両方の行を読む。一部しか書けなければ `OSError`。
     """
     out = internal.write_record(kind, row)
     data = (json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8")

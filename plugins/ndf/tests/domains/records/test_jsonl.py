@@ -106,3 +106,24 @@ def test_a_row_written_right_after_another_writer_was_cut_off_is_still_read(tmp_
     kept = [{**ROW, "version": 1}] if before else []
     assert rows == [*kept, {**ROW, "version": 1, "step": "後"}] and [b.line for b in broken] == [len(kept) + 1]
     assert jsonl.read_rows_after(path, 0, kind="usage") == (rows, 1, path.stat().st_size)
+
+
+def test_a_row_that_lost_only_its_newline_is_kept_with_the_row_joined_after_it(tmp_path, monkeypatch):
+    """末尾を確かめた後に別の書き手の行が閉じ括弧まで書けて改行だけを欠いても、つながった 2 行をどちらも読む。"""
+    path = tmp_path / "u.jsonl"
+    path.write_text("", encoding="utf-8")
+    fstat = jsonl.os.fstat
+    first = {"version": 1, **ROW, "step": "先"}
+
+    def cut_in(fd):
+        got = fstat(fd)
+        with path.open("ab") as f:  # 確かめた後で、別の書き手の行が改行だけを欠いて終わる
+            f.write(json.dumps(first, ensure_ascii=False).encode("utf-8"))
+        return got
+
+    monkeypatch.setattr(jsonl.os, "fstat", cut_in)
+    jsonl.append(path, {**ROW, "step": "後"}, kind="usage")
+    monkeypatch.undo()
+    rows = [first, {**ROW, "version": 1, "step": "後"}]
+    assert jsonl.read_rows(path, kind="usage") == (rows, [])
+    assert jsonl.read_rows_after(path, 0, kind="usage") == (rows, 0, path.stat().st_size)

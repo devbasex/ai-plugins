@@ -418,8 +418,8 @@ src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `record_cli` | `domains/records/usage.py` | 変更 | 変えない | `meta` の足した欄を書く。値が None の欄は置かない。使用量ログの錠を取らずに `jsonl.append` で書く（設計書の「行を書く時点」の「書き方」） |
-| `append` | `domains/records/jsonl.py` | 変更 | 変えない | 種類 `kind` の形を確かめてから、1 行全体を `O_APPEND` の 1 回の `os.write` で足し、書いた行を返す。錠は取らず、要る呼び手が `lock` の中で打つ（`append_locked` も同じ関数を使う）。ファイルが改行で終わっていなければ、先に改行を足す（つながった場合の復旧は読む側が行う）。形が違えば書かずに `InternalError`、一部しか書けなければ `OSError` |
-| `read_rows`・`read_rows_after` | `domains/records/jsonl.py` | 変更 | 変えない | 行ごとに UTF-8 の JSON として読む。読めない行は、行の中の `ROW_START`（`{"version": `）の位置から行末までを読み直し、読めればその辞書を使って、前の断片だけを読めない行として数える。どこからも読めなければ行ごと除く。どちらの場合も、ほかの行の読み取りは続ける |
+| `append` | `domains/records/jsonl.py` | 変更 | 変えない | 種類 `kind` の形を確かめてから、1 行全体を `O_APPEND` の 1 回の `os.write` で足し、書いた行を返す。錠は取らず、要る呼び手が `lock` の中で打つ（`append_locked` も同じ関数を使う）。ファイルの末尾が改行でなければ、追記するバイト列の先頭に改行を付ける。補った改行と新しい JSONL の行は、同じ 1 回の `os.write` で追記する（それでも行がつながった場合の復旧は読む側が行う）。形が違えば書かずに `InternalError`、一部しか書けなければ `OSError` |
+| `read_rows`・`read_rows_after` | `domains/records/jsonl.py` | 変更 | 変えない | 行ごとに UTF-8 の JSON として読む。読めない行は、行の中の `ROW_START`（`{"version": `）を前から探し、その位置から行末までが 1 つの辞書として読める最初の位置で分ける。後ろの辞書を使い、前の部分も同じ手順で読む。前の部分が完全な辞書なら（改行だけが欠けた場合）それも使い、読めなければその断片だけを読めない行として数える。どこからも読めなければ行ごと除く。どちらの場合も、ほかの行の読み取りは続ける |
 | `launch_costs` | `domains/records/usage_decide.py` | 新設 | `launch_costs(rows: Iterable[Mapping]) -> dict[str, Optional[float]]` | 同じ会話の累計の差から、`launch_id` ごとの費用を返す。不明は None |
 
 - `__main__.py` は `claude.set_launch_recorder(usage)` を呼ぶ
