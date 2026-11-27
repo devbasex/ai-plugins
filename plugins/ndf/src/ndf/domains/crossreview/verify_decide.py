@@ -16,6 +16,8 @@ from ndf.domains.crossreview import criteria_decide
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv_decide
 
+# ラウンドの記録で、そのラウンドが回答を採った起動の出力の名前（ファイル名の拡張子より前）を持つキー
+ROUND_KEY = "judge_output"
 # 指示に載せる指摘の欄（書いた相手役 `by` は載せない）
 _SHOWN = ("id", "severity", "text", "impact", "path", "line", "section", "diffs")
 
@@ -40,6 +42,8 @@ class Answers(NamedTuple):
 
     verdicts: Mapping[str, Verdict]
     warnings: tuple[str, ...] = ()
+    # 起動の出力の名前。起動していなければ空
+    record: str = ""
 
 
 def _never_asked(row: Mapping[str, Any]) -> bool:

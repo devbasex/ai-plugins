@@ -277,10 +277,12 @@ def _restore_lowered(row: dict[str, Any]) -> None:
 
 
 class Checked(NamedTuple):
-    """確認の結果を当てた後に、駆動が使う値。`lowered` は下げた指摘のキー、`unconfirmed` は有効な回答の無かった指摘の id。"""
+    """確認の結果を当てた後に、駆動が使う値。`lowered` は下げた指摘のキー、`unconfirmed` は有効な回答の無かった指摘の id。
+    `record` は判定役の出力の名前で、駆動が足す（起動していなければ空）。"""
 
     lowered: frozenset[str] = frozenset()
     unconfirmed: frozenset[str] = frozenset()
+    record: str = ""
 
 
 class FindingJournal:

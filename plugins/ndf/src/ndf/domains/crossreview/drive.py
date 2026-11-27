@@ -558,7 +558,7 @@ def _confirm_heavy(
     diffs = {str(row["id"]): (diff,) if filled is None else filled.diffs(row.get("key"), diff) for row in asked}
     answers = verify.ask(run, round_no, asked, diffs, launch)
     run.warnings += [f"round {round_no}: {warning}" for warning in answers.warnings]
-    return run.journal.apply_checks(list(diffs), answers.verdicts)
+    return run.journal.apply_checks(list(diffs), answers.verdicts)._replace(record=answers.record)
 
 
 def _heavy(severity: object) -> bool:
@@ -613,8 +613,11 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
     # 確認で下げた指摘は、振動の判定のキーに数えない
-    run.history.append(keys - _confirm_heavy(run, round_no, prep.diff, launch, filled=got.filled).lowered)
+    checked = _confirm_heavy(run, round_no, prep.diff, launch, filled=got.filled)
+    run.history.append(keys - checked.lowered)
     record = _round_record(run, round_no, prep)
+    if checked.record:  # 中断した起動の出力も保存先に残るので、このラウンドが採った出力を名指す
+        record[verify_decide.ROUND_KEY] = checked.record
     rounds.append(record)
     if unread:
         # 読めなかった相手役の分を収束に数えない（#3941）。読めた相手役の指摘はジャーナルに残し、次の起動で続ける

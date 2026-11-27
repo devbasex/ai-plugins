@@ -8,7 +8,8 @@
 `drive` である。
 
 失敗しても例外で駆動を止めず、起動し直さない。回答なしと注意にする（どの指摘も下がらない）。注意は PR の記録に載るので、
-手元の絶対パス・指摘の本文・回答の中身を書かない。詳しい原因は過程にだけ残す。
+手元の絶対パス・指摘の本文・回答の中身を書かない。過程も結果 JSON に出るので、起動の状態の詳細（標準エラーの原文）は載せず、
+実行者だけが読めるログに残す。
 """
 
 from __future__ import annotations
@@ -106,7 +107,7 @@ def ask(
     # MVV の本文と共通原則の写しも、読めなければ確かめにならない資料である
     copied = () if held_mvv is None else tuple(p for p in (held_mvv.path, held_mvv.principles_path) if p is not None)
     try:
-        return _answers(run, round_no, rows, spec, (*used, listed, *copied), launch)
+        return _answers(run, round_no, rows, spec, (*used, listed, *copied), launch)._replace(record=held.name)
     finally:
         _keep_records(run, round_no, held, stem)
 
@@ -124,7 +125,13 @@ def _answers(
     status = launch(spec)
     if status.state != agents.AgentState.DONE:
         warning = f"判定役が終わらなかった（{status.state}）ので下げない"
-        return _unanswered(run, round_no, count, f"{status.state}: {status.detail}", warning)
+        # 詳細は接続先やアカウントを含みうる。過程には状態だけを載せ、原文は 0600 で移すログに足す（起動できなかった詳細はログに無い）
+        try:
+            with spec.paths.err.open("a", encoding="utf-8") as log:
+                print(status.detail, file=log)
+        except OSError as exc:  # 足せなくても判定の結果と駆動は変えない
+            run.note(round_no, "verify", f"判定役のログに詳細を足せない（{exc.strerror}）")
+        return _unanswered(run, round_no, count, str(status.state), warning)
     try:
         answer = participants.claude_answer(spec.paths.out)
     except OSError:  # 出力の無い判定役は、回答を読めなかった扱いにする
