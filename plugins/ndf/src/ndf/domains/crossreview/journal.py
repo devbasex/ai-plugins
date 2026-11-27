@@ -31,6 +31,8 @@ def _text(value: object) -> Optional[str]:
 # 指摘の発生の値の欄。番号は別の状態ファイルでも再発でも使い回されるので、PR のスレッドは番号とこの値の両方で
 # 指摘に結び付ける（#4016 の不変条件 I4）
 OCCURRENCE = "occurrence"
+# 行の `path`・`line` が `round` と違うラウンドの head の位置であるとき、そのラウンド
+PLACED_ROUND = "placed_round"
 
 
 # 指摘に一度でも示された保護の種類の欄（`criteria_decide.protect_kinds`。足した値は外さない。#4363）
@@ -127,11 +129,14 @@ def _place(item: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in _located(item).items() if k != "severity"}
 
 
-def _move(row: dict[str, Any], place: Mapping[str, Any]) -> None:
-    """指摘の行の位置（`path`・`line`）を `place` に置き換える。"""
-    row.pop("path", None)
-    row.pop("line", None)
+def _move(row: dict[str, Any], place: Mapping[str, Any], round_no: int) -> None:
+    """指摘の行の位置（`path`・`line`）を、ラウンド `round_no` の出し直しの `place` に置き換える。`round`（指摘が出たラウンド）は
+    変えず、違えば位置の基準のラウンドを `PLACED_ROUND` に残す（行番号は、そのラウンドの head のものである）。"""
+    for stale in ("path", "line", PLACED_ROUND):
+        row.pop(stale, None)
     row |= place
+    if round_no != row.get("round"):
+        row[PLACED_ROUND] = round_no
 
 
 def _named_any(item: dict[str, Any]) -> bool:
@@ -352,10 +357,11 @@ class FindingJournal:
         # 最後の `enter` で出た指摘の id、そのうち直した後に戻った指摘の id（`sort` が使う。#3780）
         self.raised_ids: list[str] = []
         self.returned: list[str] = []
-        # 最後の `enter` で新しく出たか戻った指摘（`fresh` と違い、判定役へ渡さないものも含む）と、見送りを解いた指摘の id。
-        # 後ろは指摘ごとの出し直し
+        # 最後の `enter` で新しく出たか戻った指摘の id（`fresh` と違い、判定役へ渡さないものも含む）と、指摘ごとの出し直し、
+        # そのラウンド
         self._arrived: frozenset[str] = frozenset()
         self._reports: dict[str, list[Mapping[str, Any]]] = {}
+        self._round = 0
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
         # 最後の `carry` で、前の実行が残した MVV の判定を重ねて変わった、既にある指摘の id
@@ -382,7 +388,6 @@ class FindingJournal:
         fresh: list[str] = []
         same: dict[str, list[Mapping[str, Any]]] = {}
         before = len(self.revived)
-        unparked: set[str] = set()
         self.returned = []
         _unlower(by_key, raised, items)
         for item in raised:
@@ -400,11 +405,9 @@ class FindingJournal:
                 by_key[key] = known
                 fresh.append(fid)
             else:
-                revived, parked = len(self.revived), PARKED in known
+                revived = len(self.revived)
                 self._raised_again(known, item, round_no, named, mvv)
                 fresh += self.revived[revived:]
-                if parked and PARKED not in known:
-                    unparked.add(str(known["id"]))
             if named is not None and known.get("by") != BY_NDF:
                 _classify(known, item, named, items, mvv)
                 if _text(item.get("impact")) is None:
@@ -415,7 +418,8 @@ class FindingJournal:
             same.setdefault(str(known["id"]), []).append(item)
         back = set(self.revived[before:])
         self.fresh = [fid for fid in dict.fromkeys(fresh) if _askable(self.rows[fid], same[fid], items, fid in back)]
-        self.raised_ids, self._arrived, self._reports = list(same), frozenset(fresh) | unparked, same
+        self.raised_ids, self._arrived, self._reports = list(same), frozenset(fresh), same
+        self._round = round_no
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
 
@@ -447,7 +451,7 @@ class FindingJournal:
         if known.get(PARKED) and leftover_decide.proceeds(known, leftover_decide.Touched()):
             del known[PARKED]
             # 残していた行の位置は前の head の行番号なので、今回の出し直しのものにする
-            _move(known, _place(item))
+            _move(known, _place(item), round_no)
 
     def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
         """直した・見送った指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
@@ -458,7 +462,7 @@ class FindingJournal:
         self.revived.append(str(known["id"]))
         # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
         # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
-        for stale in ("path", "line", SKIPPED_MVV, REVIEW_DEFER, CHECK, PARKED):
+        for stale in ("path", "line", PLACED_ROUND, SKIPPED_MVV, REVIEW_DEFER, CHECK, PARKED):
             known.pop(stale, None)
         known |= {k: v for k, v in new.items() if k in ("path", "line")}
         known["section"] = section
@@ -510,7 +514,7 @@ class FindingJournal:
                 row[PARKED] = True
                 parked.add(row["key"])
             elif row.pop(PARKED, False) or place:
-                _move(row, place)
+                _move(row, place, self._round)
         return frozenset(parked)
 
     def ingest_citations(

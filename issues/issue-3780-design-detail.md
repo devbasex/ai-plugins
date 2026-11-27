@@ -61,7 +61,7 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/domains/crossreview/finish_decide.py` | 変更 | `parked` の指摘を欠けから除く | `leftover_decide` | `Finding` | 変更: `_finding_gaps`・`_counts`・`as_findings` |
 | `plugins/ndf/src/ndf/domains/crossreview/report_decide.py` | 変更 | 表に残し方と URL を出し、一覧に起票済みを載せる | `leftover_decide` | モジュール | 変更: `_finding_rows`・`open_block` |
 | `plugins/ndf/src/ndf/domains/crossreview/prior_decide.py` | 変更 | 記録のコメントの `parked` と `issue` を読む（設計の「データ構造」の引き継ぎの決まり。設計の触るファイルに足した） | `report_decide` | `Carried` | 変更: `_recorded_one` |
-| `plugins/ndf/src/ndf/domains/crossreview/threads.py` | 変更 | `parked` の指摘をスレッドにせず、login を渡す | `report_decide` | `GitHubPort` | 新設: `GitHubPort.viewer` / 変更: `_wanted`・`_trusted` |
+| `plugins/ndf/src/ndf/domains/crossreview/threads.py` | 変更 | `parked` の指摘をスレッドにせず、login を渡し、位置の基準のコミットにスレッドを付ける | `report_decide`・`journal` | `GitHubPort` | 新設: `GitHubPort.viewer`・`_placed_head` / 変更: `_wanted`・`_trusted` |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | 範囲の起点を目的で分け、線引きを当てる | `round_scope`・`changes`・`journal` | `_Run` | 新設: `_ranges`・`_sort_leftovers` / 変更: `_prepare_round`・`_round` |
 | `plugins/ndf/src/ndf/domains/crossreview/settings.py` | 変更 | 目的ごとの上限の既定を持つ | `limits` | `RunConfig` | 新設: `default_max_rounds` |
 | `plugins/ndf/src/ndf/domains/crossreview/cli.py` | 変更 | 起票を記録の公開に組み込み、結果に残し方を載せる | `leftover`・`leftover_decide`・`local_scope`・`drive` | `Hub` | 新設: `_with_leftovers` / 変更: `_github_hub`・`_post_report`・`_publish`・`_report`・`_run_config`・`_run_parser`・`cmd_scope`・`cmd_report` |
@@ -328,6 +328,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `Listed(url, body, author, association, created_at, is_pull)` | 型 | `leftover_decide.py` | 無し |
 | `kinds.filed` | 定数 | `contracts/data/review-criteria.json` | 上の 6 つ |
 | `PARKED = "parked"`・`ISSUE = "issue"`・`ISSUE_ERROR = "issue_error"` | 行のキー | `leftover_decide.py` | 無し |
+| `PLACED_ROUND = "placed_round"` | 行のキー | `journal.py` | 無し（無ければ `round`） |
 
 ### 既存の部品の再利用
 
@@ -453,7 +454,16 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 
 `parked` の指摘を修正担当へ渡さないのは `handable` である。重さの判定（`_blocking`）は変えない。`enter` が返すキーには残していた指摘も含め、駆動が `sort` の返りを除く。出し直しで進むことになった指摘のキーが、振動の判定の履歴から抜けないためである。
 
-ただし、直さずに残した指摘が critical か保護の対象の指摘として出し直されたときは、`enter` が取り込む時点で `parked` を外し、行の位置をその出し直しのものに置き換える。この条件は今の差分と照らさなくても決まるので、`sort` を呼ばないラウンドでも修正担当へ渡すためである。
+ただし、直さずに残した指摘が critical か保護の対象の指摘として出し直されたときは、`enter` が取り込む時点で `parked` を外し、行の位置をその出し直しのものに置き換える。この条件は今の差分と照らさなくても決まるので、`sort` を呼ばないラウンドでも修正担当へ渡すためである。続けて `sort` を呼んでも、この位置は変えない。`parked` の無くなった前からの指摘は分け直さないので、同じラウンドに通常の報告が先に届いていても、`parked` を外した報告の位置が残る。
+
+指摘の行の位置を置き換えるときは、指摘が出たラウンド（`round`）を変えない。`path`・`line` と、その行番号の基準になるラウンド（`placed_round`）を一緒に書き換える。ジャーナルから投稿の処理（`threads.py`）へ渡す位置の取り決めは次のとおりである。
+
+| 指摘の行 | `path`・`line` の基準のコミット |
+| --- | --- |
+| `placed_round` が無い | `round` のラウンドの head |
+| `placed_round` がある（位置を後のラウンドの出し直しに置き換えた） | `placed_round` のラウンドの head |
+
+`placed_round` は、置き換えたラウンドが `round` と違うときだけ持つ。直した指摘が戻って `round` が変わるとき（`_revive`）は消す。
 
 ### 既存の部品の再利用
 
@@ -483,6 +493,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `open_block` | `report_decide.py` | 変更 | シグネチャは変えない | 一覧の項目に `parked` と `issue` を足す |
 | `viewer` | `threads.py` | 新設 | `GitHubPort.viewer(self) -> str` | 今の認証の login を 1 回だけ読んで返す |
 | `_wanted` | `threads.py` | 変更 | シグネチャは変えない | スレッドの無い `parked` の指摘にスレッドを作らない |
+| `_placed_head` | `threads.py` | 新設 | `_placed_head(rounds, finding) -> Optional[str]` | スレッドを付けるコミットを、`placed_round`（無ければ `round`）のラウンドの head にする |
 
 `Finding` に `parked: bool = False` を足す。`summary_of` は `Finding` の全項目を書くので変えない。`--stop-on-hold` の欠けを作る `_held` も変えない。`parked` の指摘は未解決で `redline` でないので、今の条件で数えないためである。
 

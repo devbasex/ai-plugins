@@ -6,7 +6,8 @@
 - 場所: 相手役が返した `path`・`line`（#3941）があればそこに付ける。無ければ指摘の `section`（`<パス>#<シンボル>`）のパスに、
   本文の先頭の `<名前>:<行>` が同じファイルを指せばその行に付ける。行の分からない指摘はファイルに付ける（`subject_type: file`）。
   場所が分からない・PR の差分に無いファイルの指摘はスレッドにしない（中身は記録のコメントの「指摘」の表に載る）
-- 行の分かる指摘は、付けるコミット（指摘のラウンドの head）ごとに 1 つのレビューでまとめて書く（#4016 の決定 4）。
+- 行の分かる指摘は、付けるコミット（指摘のラウンドの head。位置を置き換えた指摘は `placed_round` の head）
+  ごとに 1 つのレビューでまとめて書く（#4016 の決定 4）。
   レビューが行の位置で断られた組だけを 1 件ずつの書き込みへ落とす（決定 5）
 - この実行で閉じた（直した・見送った）指摘は、閉じた理由を最初のコメントへ入れて返信を省く（決定 6）。前の実行の
   スレッドを持つ指摘が閉じたときだけ返信する。閉じた指摘のスレッドは 1 件ずつ resolve する（決定 9）
@@ -137,6 +138,11 @@ def _round_head(rounds: Sequence[Mapping[str, Any]], round_no: Any) -> Optional[
         if r.get("round") == round_no and isinstance(r.get("head"), str):
             return str(r["head"])
     return None
+
+
+def _placed_head(rounds: Sequence[Mapping[str, Any]], finding: Mapping[str, Any]) -> Optional[str]:
+    """指摘の `path`・`line` の基準のコミット（位置を置き換えた指摘は置き換えたラウンド、ほかは指摘のラウンドの head）。"""
+    return _round_head(rounds, finding.get(journal.PLACED_ROUND) or finding.get("round"))
 
 
 def _fix_commit(rounds: Sequence[Mapping[str, Any]], finding: Mapping[str, Any]) -> Optional[str]:
@@ -306,7 +312,7 @@ class _Sync:
             if _has_comment(self.done.get(finding["id"])):
                 continue
             path, line = location(finding)
-            commit = _round_head(self.rounds, finding.get("round"))
+            commit = _placed_head(self.rounds, finding)
             if path is None or commit is None or path not in changed:
                 # 場所が分からない・差分に無い指摘はスレッドにしない。中身は記録のコメントの「指摘」の表に載る
                 self.done.pop(finding["id"], None)
@@ -332,7 +338,7 @@ class _Sync:
     def single(self, finding: Mapping[str, Any]) -> bool:
         """1 件をスレッドにする（行 → ファイルの付け直しは口が行う）。作れたら真。"""
         path, line = location(finding)
-        commit = _round_head(self.rounds, finding.get("round"))
+        commit = _placed_head(self.rounds, finding)
         closed = closing(finding, self.rounds)
         try:
             made = self.port.open_thread(str(path), line, str(commit), opening(finding, closed))

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from ndf.adapters import git
-from ndf.domains.crossreview import changes, criteria_decide, journal as journal_mod, leftover_decide
+from ndf.domains.crossreview import changes, criteria_decide, journal as journal_mod, leftover_decide, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.leftover_decide import PARKED, Touched
 
@@ -170,9 +170,19 @@ def test_issue_3780_any_report_of_the_round_on_a_changed_line_proceeds() -> None
 )
 def test_issue_3780_5_parked_finding_raised_again_is_unparked_without_sorting(again: dict) -> None:
     journal, row = _parked()
-    journal.enter(3, [_told(path="a.py", line=7, **again)])
+    # 通常の報告が先に届いても、見送りを解いた報告の位置が残る
+    journal.enter(3, [_told(**UNCHANGED), _told(path="a.py", line=7, **again)])
+    assert journal.sort(TOUCHED) == frozenset()
     assert PARKED not in row and journal.handable() == [row]
     assert (row["path"], row["line"]) == ("a.py", 7)
+    assert (row["round"], row[journal_mod.PLACED_ROUND]) == (2, 3)
+
+
+def test_a_parked_finding_unparked_by_sorting_keeps_its_round_and_places_the_line_in_the_current_one() -> None:
+    journal, row = _parked()
+    journal.enter(3, [_told(path="a.py", line=10)])
+    journal.sort(TOUCHED)
+    assert (row["round"], row["line"], row[journal_mod.PLACED_ROUND]) == (2, 10, 3)
 
 
 def test_a_new_finding_takes_the_place_of_the_report_on_a_changed_line() -> None:
@@ -223,6 +233,12 @@ def test_a_fixed_finding_coming_back_on_an_unchanged_line_proceeds() -> None:
     assert journal.sort(Touched()) == frozenset()
     journal.enter(3, [])
     assert journal.returned == [] and journal.raised_ids == []
+
+
+def test_the_thread_commit_of_a_moved_finding_is_the_head_of_the_placed_round() -> None:
+    rounds = [{"round": 2, "head": "old"}, {"round": 3, "head": "new"}]
+    assert threads._placed_head(rounds, {"round": 2}) == "old"
+    assert threads._placed_head(rounds, {"round": 2, journal_mod.PLACED_ROUND: 3}) == "new"
 
 
 # --- 変えた行 ------------------------------------------------------------------------------
