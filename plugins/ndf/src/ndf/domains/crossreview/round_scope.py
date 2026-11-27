@@ -30,16 +30,24 @@ def reviewed(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, ev
 
 
 def _base_texts(g: git.Git, start: str, now: str, kept: Collection[str]) -> Optional[dict[str, tuple[Optional[str], Optional[str]]]]:
-    """2 つの起点の間で変わったファイルのうち、`kept` のセクションを含む文書の、両方の起点の本文。変わったファイルの名前を
-    1 回、該当する文書があればその本文を 1 回読む（git の起動は 1〜2 回）。どちらかの起点が手元に無いなどで読めなければ None。"""
+    """2 つの起点の間で変わったファイルのうち、`kept` のセクションを含む文書の、両方の起点の本文。変わったファイルの名前と
+    変わり方を 1 回、該当する文書があればその本文を 1 回読む（git の起動は 1〜2 回）。`review-scope` と同じく手元のオブジェクト
+    だけを読み、部分クローンで欠けた blob をリモートから取得しない（PR 4638 の r1-8）。どちらかの起点が手元に無い・変わり方から
+    あるはずの本文が欠けているなどで読めなければ None（記録を引き継がずに詳細レビューへ回す）。"""
+    local = git.Git.offline(g.cwd)
     try:
-        names = g.diff_between(start, now, "--name-only", "-z", changes.NO_RENAMES, "--no-relative").split("\0")
-        paths = [p for p in names if p and any(s.startswith(f"{p}#") for s in kept)]
+        fields = local.diff_between(start, now, "--name-status", "-z", changes.NO_RENAMES, "--no-relative").split("\0")
+        status = dict(zip(fields[1::2], fields[0::2]))
+        paths = [p for p in status if p and any(s.startswith(f"{p}#") for s in kept)]
         if not paths:
             return {}
-        got = g.blobs(*(f"{c}:{p}" for p in paths for c in (start, now)))
+        got = local.blobs(*(f"{c}:{p}" for p in paths for c in (start, now)))
     except git.GitError:  # noqa: NDF401 外部コマンド: 起点が手元に無いなどで読めなければ、引き継がずに詳細レビューへ回す
         return None
+    for i, p in enumerate(paths):
+        # 追加（A）なら記録の起点に、削除（D）なら今の起点に本文が無い。ほかに無い本文は手元に無い blob なので、無いファイルと読まない
+        if (got[2 * i] is None) != (status[p] == "A") or (got[2 * i + 1] is None) != (status[p] == "D"):
+            return None
     text = [b.decode("utf-8", errors="replace") if b is not None else None for b in got]
     return {p: (text[2 * i], text[2 * i + 1]) for i, p in enumerate(paths)}
 

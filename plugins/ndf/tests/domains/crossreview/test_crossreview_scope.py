@@ -566,3 +566,24 @@ def test_issue_3955_filled_seats_and_previous_seats() -> None:
     assert scope_decide.read_by_all_head(state, scope_decide.Basis(reviewers=("codex", "claude"))) == "h1"
     swapped = {**state["rounds"][0], "reviewers": ["kiro", "claude"], "filled": [{"seat": "claude", "for": "codex", "reason": "r"}]}
     assert scope_decide.read_by_all_head({"rounds": [swapped]}, scope_decide.Basis(reviewers=("codex", "claude"), stand_in=True)) is None
+
+
+def test_pr_4638_r1_8_base_texts_read_offline_and_drop_missing_blobs(repos: Repos, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """PR 4638 の r1-8: 起点どうしの本文は手元のオブジェクトだけで読み（`NO_LAZY_FETCH`）、変わり方からあるはずの本文が欠けて
+    いれば（部分クローンで手元に無い blob）、無いファイルと読まずに None を返す。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import round_scope
+
+    wt = repos.add_worktree(tmp_path / "pr8")
+    start = sh(wt, "rev-parse", "HEAD").strip()
+    commit(wt, "doc.md", "# 設計\n\n## セクション A\n\n変えた\n", "変える")
+    now = sh(wt, "rev-parse", "HEAD").strip()
+    envs: list[object] = []
+    start_git = git._start
+    monkeypatch.setattr(git, "_start", lambda args, *rest, **named: envs.append(named.get("env")) or start_git(args, *rest, **named))
+    kept = {"doc.md#セクション A"}
+    got = round_scope._base_texts(git.Git(wt), start, now, kept)
+    assert got == {"doc.md": ("# 設計\n\n## セクション A\n\n本文\n", "# 設計\n\n## セクション A\n\n変えた\n")}
+    assert len(envs) == 2 and all(e == git.NO_LAZY_FETCH for e in envs)
+    monkeypatch.setattr(git.Git, "blobs", lambda self, *names: [None] * len(names))
+    assert round_scope._base_texts(git.Git(wt), start, now, kept) is None
