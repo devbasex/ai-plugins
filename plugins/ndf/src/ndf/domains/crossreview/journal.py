@@ -37,8 +37,8 @@ OCCURRENCE = "occurrence"
 PROTECT = criteria_decide.PROTECT
 # 判定役の確認の結果の欄（有効な回答のあった指摘だけが持つ。直した指摘が戻れば外す。#4363）
 CHECK = criteria_decide.CHECK
-# `CHECK` の中の欄。下げた指摘が保護の種類の無い出し直しで下げた扱いを抜け、元の重要度へまだ戻していない（#4363）
-UNRESTORED = "unrestored"
+# `CHECK` の中の欄。下げた指摘が出し直しで下げた扱いを抜けた（#4363）
+UNLOWERED = "unlowered"
 # 指摘がプロジェクト MVV に反するときの欄のうち、手元の状態ファイルだけに持つもの（#4076。記録のコメントにも載せる欄は
 # `report_decide.MARKS`、必ず人の承認が要る操作に当たるかの欄は `finish_decide.REDLINE`）。識別子は、どの MVV かを表す文字列である
 # MVV が変わって外した判定の並び（追記だけ）
@@ -243,17 +243,17 @@ def _unlower(row: dict[str, Any], new: Mapping[str, Any], named: Optional[str]) 
     呼び手の `_classify`）。元の重要度へ戻すのは保護の種類が付いたときで、`_restore_lowered` が行う。#4363"""
     if PROTECT not in new and named is None:
         return False
-    row[CHECK] |= {criteria_decide.LOWERED: False, UNRESTORED: True}
+    row[CHECK] |= {criteria_decide.LOWERED: False, UNLOWERED: True}
     return True
 
 
-def _restore_lowered(row: dict[str, Any], new: Mapping[str, Any]) -> None:
-    """下げたことのある指摘に保護の種類が付いたら、元の重要度（最低 major）へ戻す（今の重さのほうが重ければそのまま）。
+def _restore_lowered(row: dict[str, Any]) -> None:
+    """下げた扱いを抜けた指摘が保護の種類を持てば、元の重要度（最低 major）まで上げる（今の重さのほうが重ければそのまま）。
 
-    MVV の項目だけの出し直しが先に下げた扱いを抜けていても戻すので、出し直しの順で重さが変わらない。固定する前の重さも
-    戻し、MVV が変わって固定を外しても下げた値にしない。#4363"""
+    出し直しのたびに当て直すので、戻した後に元の重要度が上がっても、MVV の項目だけの出し直しが先に下げた扱いを抜けても、
+    出し直しの順で重さが変わらない。固定する前の重さも上げ、MVV が変わって固定を外しても下げた値にしない。#4363"""
     check = row.get(CHECK)
-    if PROTECT not in new or not isinstance(check, dict) or not check.pop(UNRESTORED, False):
+    if PROTECT not in row or not isinstance(check, Mapping) or not check.get(UNLOWERED):
         return
     restored = criteria_decide.at_least_blocking(criteria_decide.severity_of(row.get("raised_severity")))
     for key in ("severity", UNPINNED):
@@ -355,7 +355,7 @@ class FindingJournal:
                 known["severity"] = severity
         if UNPINNED in known:
             known[UNPINNED] = criteria_decide.heavier(criteria_decide.severity_of(known[UNPINNED]), new["severity"])
-        _restore_lowered(known, new)
+        _restore_lowered(known)
         if "impact" not in known and "impact" in new:
             known["impact"] = new["impact"]
 

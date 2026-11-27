@@ -170,11 +170,7 @@ plugins/ndf/
 | `select` | 指摘が `redline` を持つか、NDF の指摘である | 渡さない |
 | `select` | 上に当たらず、`mvv` も `protect` も持たない（ここで「普通の指摘」と呼ぶ） | 渡す |
 | `select` | 上に当たらず、`mvv` か `protect` を持つ | `use_tracks` が真か、同じ呼び出しに普通の指摘が 1 件でもあれば渡す。どちらでもなければ渡さない |
-| `read` | `holds` が真で `condition`・`path`・`result` がすべて空でない | 有効 |
-| `read` | `holds` が偽で `reason` が空でなく、`tracks` がある（無い・null は分類を確かめられないので不正） | 有効 |
-| `read` | 同じ番号の回答が複数ある（ほかの行より先に当てる） | `Verdict(holds=None)`。どれかが示した `tracks` をすべて残し、注意にする |
-| `read` | `holds` が null | `Verdict(holds=None)`。`tracks` を残し、理由を注意にする |
-| `read` | 上のどれでもない | 不正。`verdicts` に入れず注意にする |
+| `read` | 回答が有効か、判断できないか、不正か | 設計文書の「[回答の形](./issue-4363-design.md#回答の形)」の表で分ける。有効な回答と判断できない回答は `Verdict` にして `verdicts` に入れる（判断できない回答は `holds=None` とし、`tracks` を残して注意にする）。不正な回答は `verdicts` に入れず注意にする |
 | `lowers`（順 1） | `holds` が偽でない（示せた・null） | 下げない |
 | `lowers`（順 2） | 指摘が `redline`・`mvv`・`protect` のどれかを持つか、NDF の指摘である | 下げない |
 | `lowers`（順 3） | 回答の `tracks` に保護の種類があるか、7 つの種類に無い文字列がある | 下げない |
@@ -283,7 +279,7 @@ B で `_classify` を当てた結果は次のとおりである。
 - MVV の項目（`Value 5` など）を挙げた: 重要度を major 以上に固定する
 - 必ず人の承認が要る操作（`P<番号>`・`C<番号>`）だけを挙げた: 行に `redline` を付けるが、`_classify` は重要度を変えない。重要度は、今回の出し直しの重要度と minor の重い方になる（今回が critical か major ならその値、minor か nit なら minor、重要度が書かれていなければ major）。minor のままでも `redline` を持つので、人の承認を待つ指摘として扱う
 
-B で下げた扱いを抜けた行に、後の出し直しで `protect` が付いた場合も、A と同じに元の重要度へ戻す（行の `check.unrestored` で見分ける。固定する前の重さも戻す）。別々の相手役の出し直しを処理する順で、重さを変えないためである。
+A か B で下げた扱いを抜けた行（`check.unlowered`）が `protect` を持つ場合は、出し直しのたびに、行の重要度と固定する前の重さを元の重要度（最低 major）まで上げる。別々の相手役の出し直しを処理する順で、重さを変えないためである。
 
 A と B の両方に当たる場合は、A の次に B を当てる。保護の種類は行に残り、重さと `redline` は B の結果になる。
 

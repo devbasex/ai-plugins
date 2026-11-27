@@ -789,6 +789,18 @@ def test_issue_4363_lowered_finding_gets_its_severity_back_in_any_order_of_mvv_a
     assert row["severity"] == "critical"
 
 
+@pytest.mark.parametrize("protect_first", [False, True])
+def test_issue_4363_restored_finding_follows_a_later_raised_severity_in_any_order(protect_first: bool) -> None:
+    """#4363: 戻した後の出し直しで元の重要度が上がっても、順によらず固定を外した後は critical になる。"""
+    journal, row = _lowered()
+    told = [_told(severity="critical", impact=None, mvv="Value 5"), _told(severity="minor", protect=["secret"])]
+    for item in reversed(told) if protect_first else told:
+        journal.enter(2, [item], ITEMS, V11)
+    assert row["severity"] == "critical"
+    journal.restate("other")
+    assert row["severity"] == "critical"
+
+
 def test_issue_4363_revived_finding_is_checked_again_and_keeps_protect() -> None:
     journal = drive.FindingJournal()
     journal.enter(1, [_told()])
