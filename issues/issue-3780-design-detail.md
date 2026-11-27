@@ -162,7 +162,7 @@ plugins/ndf/
 | `new_in_pr` | `changes.py` | 新設 | `new_in_pr(g: git.Git, previous: Range, current: Range, listed: Listings) -> Optional[tuple[str, ...]]` | 比較基点が変わったことで、既読の差分にも今回渡す差分にも無い変更を持つファイルを返す。比べられなければ None |
 | `since_diff` | `changes.py` | 新設 | `since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str` | 前の head からの差分（比較基点が違えば PR が変えるファイルに絞る）に、`added` の今の PR の差分を続けて返す |
 | `since_files` | `changes.py` | 新設 | `since_files(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> tuple[str, ...]` | `since_diff` が渡すファイルのパスを返す。足して渡す PR の差分に改名があれば、`since_diff` と同じく、改名前と改名後の両方のパスを返す。PR に既にあるインラインのコメントを選ぶ `reviewing.remarks` が使う |
-| `touched_since` | `changes.py` | 新設 | `touched_since(g: git.Git, since: str, current: Range, listed: Listings) -> leftover_decide.Touched` | `since` の後に変わったファイル、足した行・書き換えた行の番号、今の PR の差分（`current`）に載る行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`read_origin`）ではない |
+| `touched_since` | `changes.py` | 新設 | `touched_since(g: git.Git, since: str, current: Range, listed: Listings, since_lines: Optional[str] = None) -> leftover_decide.Touched` | `since` の後に変わったファイル、足した行・書き換えた行の番号、今の PR の差分（`current`）に載る行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`read_origin`）ではない |
 
 - `new_in_pr`
   - 事前条件: `previous.head` は `current.head` の祖先
@@ -228,7 +228,15 @@ plugins/ndf/
 | --- | --- | --- |
 | 比較基点が変わった | `new_in_pr`（3 つの差分）と `since_diff` | `new_in_pr` が 6 回。`since_diff` は行の差分だけで 1 回、足すファイルがあれば 2 回 |
 | 比較基点が同じ | `since_diff` だけ | 行の差分 1 回 |
-| 線引きをする（上の 2 つに加わる） | `touched_since` | `since..head` の行の差分が 1 回、その一覧が 1 回（`listed` にあれば 0 回）、今の PR の差分の行の差分が 1 回。合わせて 2〜3 回 |
+| 線引きをする（上の 2 つに加わる） | `touched_since` | `since..head` の行の差分が 1 回（`since_lines` を渡せば 0 回）、その一覧が 1 回（`listed` にあれば 0 回）、今の PR の差分の行の差分が 1 回。合わせて 1〜3 回 |
+
+`since_diff` が取得した行の差分は、次のすべてに当たるラウンドで `touched_since` の `since_lines` に渡す。比較基点が同じなら、`since_diff` の返りは `since..head` の行の差分そのものだからである。
+
+- 相手役へ渡す差分を `since_diff` で作った
+- 差分を渡す起点の比較基点が、今の比較基点と同じ
+- 差分を渡す起点の head が、線引きの起点の head と同じ
+
+どれかに当たらないラウンドでは、`since..head` の行の差分を 1 回読む。比較基点が違うときの返りはファイルを絞ってあり、起点の head が違えば範囲が違うためである。渡す文字列は、改行を変換せずに持ち回る。
 
 `touched_since` は、今の PR の差分からは行の番号だけを使う。そのため、この差分の一覧は読まない。
 
@@ -609,7 +617,7 @@ PR の差分に載らない行がレビュー投稿にまとめる指摘に混�
 
 線引きをするのは、実装の PR で、状態ファイルの通算で 2 ラウンド目以降で、`line_origin` があり、比較基点の変化で足すファイルが無いラウンドである。足すファイルの有無は、`read_origin` が無くて全差分になるラウンドでも、`line_origin` の比較基点が今と違えば `new_in_pr` で確かめる。`_confirm_heavy` の `use_tracks` を真にするのは、線引きをするラウンドで、このラウンドの新しい重い指摘に、MVV の項目を持ち `proceeds` が偽のものがある場合だけである。その指摘は、回答の指摘の種類によって、進むか（保護の種類が付く）、起票するかが変わる。
 
-保護の対象の指摘は `proceeds` の順 7 で進むと決まっていて、起票もしない。critical や変えた行の MVV の指摘も進むと決まっている。これらだけのラウンドでは、判定役を起動しない（ほかの理由で起動するラウンドでは、今のとおり一緒に渡る）。`proceeds` に渡す `touched` は、線引きをするラウンドで `_confirm_heavy` の前に `changes.touched_since(g, prep.lines, changes.Range(merge_base, prep.head), listed)`（`merge_base` は `_ranges` に渡す今の比較基点） で 1 回読み、`_sort_leftovers` にも渡す（線引きをしないラウンドは None）。`listed` は `prep.listed`（`_ranges` が読んだ差分の一覧。読んでいなければ空）で、一覧を読んだ範囲は読み直さない。
+保護の対象の指摘は `proceeds` の順 7 で進むと決まっていて、起票もしない。critical や変えた行の MVV の指摘も進むと決まっている。これらだけのラウンドでは、判定役を起動しない（ほかの理由で起動するラウンドでは、今のとおり一緒に渡る）。`proceeds` に渡す `touched` は、線引きをするラウンドで `_confirm_heavy` の前に `changes.touched_since(g, prep.lines, changes.Range(merge_base, prep.head), listed, since_lines)`（`merge_base` は `_ranges` に渡す今の比較基点） で 1 回読み、`_sort_leftovers` にも渡す（線引きをしないラウンドは None）。`since_lines` は、「git を起動する回数」の条件に当たるラウンドでは `since_diff` の返り、ほかは None である。`listed` は `prep.listed`（`_ranges` が読んだ差分の一覧。読んでいなければ空）で、一覧を読んだ範囲は読み直さない。
 
 `run.history`（振動の判定に使う、ラウンドごとの指摘のキーの集合）へは、`enter` が返したキーから、下げた指摘（`Checked.lowered`）と残した指摘（`_sort_leftovers` の返り）を除いて足す。どちらも修正担当へ渡らないので、後でもう一度出ても、直しては戻す往復には当たらないためである。
 

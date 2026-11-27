@@ -338,6 +338,16 @@ def test_issue_3780_5_touched_since_has_added_rewritten_and_the_neighbours_of_re
     assert {1, 3, 6, 11} <= got.commentable["a.txt"] and 30 not in got.commentable["a.txt"]
 
 
+def test_touched_since_does_not_read_the_line_diff_it_is_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    """比較基点が起点と同じラウンドは、`since_diff` の返りを渡して `since..head` の行の差分を読み直さない。"""
+    spans: list[str] = []
+    monkeypatch.setattr(git.Git, "run_bytes", lambda self, *args: spans.append(args[-1]) or b"")
+    text = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"
+    listed: changes.Listings = {"h1..h2": ({}, frozenset())}
+    got = changes.touched_since(git.Git(), "h1", changes.Range("b", "h2"), listed, text)
+    assert (got.lines, spans) == ({"a.py": frozenset({1})}, ["b...h2"])
+
+
 def test_touched_since_a_commit_that_is_not_local_raises(wt: Path) -> None:
     with pytest.raises(git.GitError):
         changes.touched_since(git.Git.offline(wt), "0" * 40, changes.Range("0" * 40, _head(wt)), {})
