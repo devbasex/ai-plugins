@@ -327,16 +327,20 @@ class _Manual:
         return self.model is not None or self.effort is not None or self.inherited is not None
 
 
-def _manual(runtime: str, argument: tuple[Optional[str], Optional[str]], environ: Mapping[str, str]) -> _Manual:
-    """引数と環境変数の指定を読む。モデルと effort それぞれで優先の順に値を決めてから、使う値だけを確かめる。誤りは `precondition`。"""
+def _manual(
+    runtime: str, argument: tuple[Optional[str], Optional[str]], environ: Mapping[str, str], argument_at: tuple[str, str]
+) -> _Manual:
+    """引数と環境変数の指定を読む。モデルと effort それぞれで優先の順に値を決めてから、使う値だけを確かめる。誤りは `precondition`。
+
+    `argument_at` は起動の引数を誤りの文で指す言い方（モデル・effort の順）。"""
     order = _order_row(runtime)
     model_env, effort_env = _order_env(order, "model_env"), _order_env(order, "effort_env")
     model = _first_given(
-        (argument[0], Source.ARGUMENT, "引数 --model"),
+        (argument[0], Source.ARGUMENT, argument_at[0]),
         (environ[model_env] if model_env in environ else None, Source.ENVIRONMENT, f"環境変数 {model_env}"),
     )
     effort = _first_given(
-        (argument[1], Source.ARGUMENT, "引数 --effort"),
+        (argument[1], Source.ARGUMENT, argument_at[1]),
         (environ[effort_env] if effort_env in environ else None, Source.ENVIRONMENT, f"環境変数 {effort_env}"),
     )
     if model is not None:
@@ -368,6 +372,8 @@ class Request:
     retry: Optional[str] = None
     mode: Optional[str] = None
     argument: tuple[Optional[str], Optional[str]] = (None, None)
+    # 起動の引数を誤りの文で指す言い方（モデル・effort の順）。CLI ごとに引数の名前が違う起動（codex の委譲は `-c`）が変える
+    argument_at: tuple[str, str] = ("引数 --model", "引数 --effort")
 
 
 def launch_choice(
@@ -382,7 +388,7 @@ def launch_choice(
 ) -> Choice:
     """優先の順で値を決め、`retry` があれば引き上げる。値の誤り・壊れた設定は `precondition`。
 
-    `request` は `Request` の欄（`unit`・`charge_to`・`retry`・`mode`・`argument`）。今は割り付けず、単位があっても基準の組を返す。
+    `request` は `Request` の欄（`unit`・`charge_to`・`retry`・`mode`・`argument`・`argument_at`）。今は割り付けず、単位があっても基準の組を返す。
     `settings` は `table` へ渡す（渡されれば起動の設定を読み直さない）。
     """
     req = Request(**request)
@@ -391,7 +397,7 @@ def launch_choice(
     if req.retry is not None and req.retry not in _retries():
         raise _fail(f"打ち直しの理由 {req.retry} は無い（{'・'.join(sorted(_retries()))}）")
     got = table(launch_settings.launch_root(cwd), settings)
-    manual = _manual(runtime, req.argument, env)
+    manual = _manual(runtime, req.argument, env, req.argument_at)
     arms = got.arms[stage][runtime] if stage is not None and runtime in got.arms[stage] else ()
     base = arms[0] if arms else None
     model, model_source = manual.model if manual.model is not None else _from_base(base, "model")

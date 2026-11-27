@@ -184,6 +184,22 @@ def test_values_given_in_the_command_win_over_the_variables(repo: Path, monkeypa
     assert execs[0][1] == ["codex", "exec", "-s", "workspace-write", "-C", str(repo), *given]
 
 
+def test_an_effort_written_as_a_toml_string_is_read_like_codex(repo: Path, monkeypatch, execs) -> None:
+    """codex は `-c` の値を TOML として読む。引用符つきの `"low"` も low として確かめ、子へは書いたままの引数を渡す。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    given = ["-c", 'model_reasoning_effort="low"']
+    drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", *given])
+    assert execs[0][1] == ["codex", "exec", "-s", "workspace-write", "-C", str(repo), *given]
+
+
+def test_a_wrong_effort_in_the_command_names_the_codex_option(repo: Path, monkeypatch, execs, capsys) -> None:
+    """誤った effort の停止は、codex の委譲で使う `-c`・`--config` の model_reasoning_effort を指し、codex に無い --effort を案内しない。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    assert drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", "-c", "model_reasoning_effort=turbo"]) == PRECONDITION
+    err = capsys.readouterr().err
+    assert execs == [] and "-c・--config の model_reasoning_effort=" in err and "--effort" not in err
+
+
 @pytest.mark.parametrize(("can", "reads"), [(True, 1), (False, 2)])
 def test_codex_reads_the_launch_settings_once_to_build_the_arguments(repo: Path, monkeypatch, execs, can: bool, reads: int) -> None:
     """引数の組み立てで読むのは 1 回。サンドボックスなしの経路だけ、起動の直前の照らし直しがもう 1 回読む。"""

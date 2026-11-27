@@ -22,6 +22,7 @@ import argparse
 import os
 import re
 import sys
+import tomllib
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -113,38 +114,54 @@ def _workdir_args(runtime: str, cwd: Path) -> list[str]:
     return [row[WORKDIR_COLUMN][0], str(cwd)] if WORKDIR_COLUMN in row else []
 
 
-def _given_value(runtime: str, command: Sequence[str], key: str) -> Optional[str]:
-    """コマンドが明示した値（`key` は `model` か `effort`）。無ければ None。
+def _toml_text(value: str) -> str:
+    """設定の値（`-c key=<値>`）を CLI と同じく TOML として読んだ文字列。TOML の文字列でなければ書いたまま（codex は TOML として
+    読めない値を文字どおりの文字列として扱う）。"""
+    try:
+        got = tomllib.loads(f"v = {value}")["v"]
+    except tomllib.TOMLDecodeError:
+        return value
+    return got if isinstance(got, str) else value
+
+
+def _given_value(runtime: str, command: Sequence[str], key: str) -> tuple[Optional[str], str]:
+    """コマンドが明示した値（`key` は `model` か `effort`。無ければ None）と、その引数を誤りの文で指す言い方。
 
     引数の名前はランタイムの表の `<key>_options`、値の形は `choice_args` の形（codex の effort は `model_reasoning_effort=<値>`）。
-    `--name 値`・`--name=値`・`-n値` を読み、形に合わない値（`-c` の別の設定など）は数えない。複数あれば CLI と同じく最後。"""
+    `--name 値`・`--name=値`・`-n値` を読み、形に合わない値（`-c` の別の設定など）は数えない。複数あれば CLI と同じく最後。
+    形が設定の `key=<値>` なら、値は TOML として読む（`"low"` は `low`）。子へは書いたままの引数を渡す。"""
     row = facts.row(RUNTIMES, runtime)
     column = f"{key}_options"
-    names = set(row[column]) if column in row else set()
+    names = list(row[column]) if column in row else []
     words = row[model_choice.ARGS_COLUMN] if model_choice.ARGS_COLUMN in row else []
     forms = [f for f in words[1::2] if f"{{{key}}}" in f]
     if not names or not forms:
-        return None
-    shape = re.compile(re.escape(forms[0]).replace(re.escape(f"{{{key}}}"), "(.+)"))
+        return None, f"引数 --{key}"
+    form, place = forms[0], f"{{{key}}}"
+    at = f"引数 {'・'.join(names)}" + (f" の {form.replace(place, '<値>')}" if form != place else "")
+    shape = re.compile(re.escape(form).replace(re.escape(place), "(.+)"))
     options = _options(command)
     found = None
     for i, w in enumerate(options):
         if w in names:
             value = options[i + 1] if i + 1 < len(options) else None
-        elif _names(w, names):
+        elif _names(w, set(names)):
             value = w.partition("=")[2] if w.startswith("--") else w[2:]
         else:
             continue
         hit = shape.fullmatch(value) if value is not None else None
-        found = hit.group(1) if hit is not None else found
-    return found
+        if hit is not None:
+            found = _toml_text(hit.group(1)) if form != place else hit.group(1)
+    return found, at
 
 
 def _choice_args(runtime: str, command: Sequence[str], cwd: Path, settings: ls.Settings) -> list[str]:
     """選んだモデルと effort の引数。コマンドが明示した値は起動の引数として選択に渡し（設計書の「値の優先」の順 1。下位の環境変数を
-    確かめない）、その側の引数は足さない（コマンドがすでに持つ）。"""
-    model, effort = _given_value(runtime, command, "model"), _given_value(runtime, command, "effort")
-    choice = model_choice.launch_choice(*CHOICE_LAUNCH, runtime, cwd=cwd, settings=settings, argument=(model, effort))
+    確かめない）、その側の引数は足さない（コマンドがすでに持つ）。誤りの文は、コマンドで使う引数の名前で指す。"""
+    (model, model_at), (effort, effort_at) = _given_value(runtime, command, "model"), _given_value(runtime, command, "effort")
+    choice = model_choice.launch_choice(
+        *CHOICE_LAUNCH, runtime, cwd=cwd, settings=settings, argument=(model, effort), argument_at=(model_at, effort_at)
+    )
     return replace(
         choice, model=None if model is not None else choice.model, effort=None if effort is not None else choice.effort
     ).cli_args()
