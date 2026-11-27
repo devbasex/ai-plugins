@@ -82,6 +82,22 @@ def test_issue_3702_same_target_reuses_the_converged_round(repos: Repos, wt: Pat
     assert base_out.read_text(encoding="utf-8") == "main\n"
 
 
+def test_issue_3702_changed_base_with_the_same_merge_base_reviews_again(
+    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """PR 4638 の r1-1: HEAD・merge-base・MVV が同じでも、`--base` を別のブランチへ替えれば前回の収束を返さず、新しい比較元で
+    全差分を読ませる（`follow_base` でない起動も同じ）。"""
+    _sprint_branch(repos)
+    state_dir = tmp_path / "st"
+    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
+    fake = Recording(state_dir, {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt, "--base", f"origin/{SPRINT}")
+    assert (code, got["status"]) == (0, "ok") and fake.prompts
+    assert all("範囲: full" in p for _, _, p in fake.prompts)
+    rounds = _state(state_dir)["rounds"]
+    assert rounds[-1]["base"] == rounds[0]["base"] and rounds[-1]["base_branch"] == SPRINT
+
+
 def test_issue_3702_without_reviewed_base_out_the_given_base_is_kept(
     repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub
 ) -> None:

@@ -142,7 +142,6 @@ class _Run:
     mvv: Optional[str] = None
     mvv_branch: Optional[str] = None
     base_branch: str = ""  # 差分の比較元のブランチ（`follow_base` なら PR の今のマージ先。ラウンドの記録に残す。#3702）
-    followed: Optional[str] = None  # `follow_base` の比較元。同じマージ先のラウンドだけを差分の起点と再利用に使う（#3702）
     # PR に届いたと分かっている最後のコミット（始めの同期で取得した先頭か、この起動で送ったコミット）
     sent: str = ""
     # 始めに読めて、head ブランチとその先頭がレビューするブランチの取得した先頭と一致した PR
@@ -323,7 +322,6 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide
         mvv=snap.identity,
         mvv_branch=based.branch,
         base_branch=based.branch,
-        followed=based.branch if cfg.follow_base else None,
         sent=synced.remote,
         remote=based.remote,
         synced_head=synced.remote,
@@ -821,11 +819,14 @@ def _merge_base(run: _Run, head: str) -> str:
 
 
 def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
-    """前のラウンドを差分の起点や収束の再利用に使える条件（今回の値。席は今の席）。"""
+    """前のラウンドを差分の起点や収束の再利用に使える条件（今回の値。席は今の席）。比較元のブランチは、`follow_base` かどうかに
+    よらず照らす。merge-base が同じでも `--base` を別のブランチへ替えた起動は、新しい比較元で詳細レビューをやり直す（PR 4638 の r1-1）。"""
     unit = scope_decide.unit_id(run.cfg.unit)
     # 確認を求める起動は、読んだ PR が無ければラウンドの前に止まっている
     pr = run.read_pr.ident if run.cfg.check_pr and run.read_pr is not None else None
-    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr, run.followed)
+    return scope_decide.Basis(
+        _merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr, run.base_branch
+    )
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:

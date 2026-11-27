@@ -21,11 +21,12 @@ MB = "<merge-base>"
 
 
 def _with_merge_base(data, sha: str):
-    """状態ファイルの中身の `MB` を本物の merge-base の SHA へ置き換え、`run` と同じく既定の相手役をラウンドに記録する
-    （`review-scope` も今回の相手役で決める。PR 3944 の r3-4）。"""
+    """状態ファイルの中身の `MB` を本物の merge-base の SHA へ置き換え、`run` と同じく既定の相手役と `--base origin/main` の
+    比較元のブランチをラウンドに記録する（`review-scope` も今回の相手役と比較元で決める。PR 3944 の r3-4・PR 4638 の r1-1）。"""
     if isinstance(data, dict) and isinstance(data.get("rounds"), list):
         seats = list(participants.assign())
-        rounds = [{"reviewers": seats, **r, "base": sha} if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
+        on_main = {"reviewers": seats, scope_decide.BASE_BRANCH: "main"}
+        rounds = [{**on_main, **r, "base": sha} if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
         return {**data, "rounds": rounds}
     return data
 
