@@ -313,20 +313,40 @@ def test_issue_3702_sections_reviewed_against_another_target_are_reviewed_again(
     assert scope_decide.reviewed_of(state, APPROVED, now) == reviewed
 
 
+# 起点 m1 と m2 の文書の本文。セクション A は同じで、セクション B だけが違う（m1 で 0、m2 で 1）
+_BASE_TEXTS = {"issues/d.md": ("# セクション A\n値は 0\n# セクション B\n値は 0\n", "# セクション A\n値は 0\n# セクション B\n値は 1\n")}
+
+
 @pytest.mark.parametrize(
-    ("recorded", "base", "reviewed"),
-    [("m1", "m1", {A, B}), ("m1", "m2", set()), ("m2", "m1", set()), (None, "m1", set())],
+    ("recorded", "base", "texts", "reviewed"),
+    [
+        ("m1", "m1", None, {A, B}),
+        ("m1", "m2", {}, {A, B}),
+        ("m1", "m2", _BASE_TEXTS, {A}),
+        ("m2", "m1", _BASE_TEXTS, {A}),
+        ("m1", "m2", None, set()),
+        (None, "m1", {}, set()),
+    ],
 )
-def test_pr_4638_r4_1_sections_are_kept_only_while_the_start_of_the_diff_is_the_same(
-    recorded: str | None, base: str, reviewed: set[str]
+def test_pr_4638_r5_1_sections_are_kept_while_their_text_at_both_starts_is_the_same(
+    recorded: str | None, base: str, texts: dict[str, tuple[str, str]] | None, reviewed: set[str]
 ) -> None:
-    """詳細レビューの記録は、記録の起点が今の起点と同じときだけ引き継ぐ（`--base` がブランチかコミットかは問わない）。記録の起点が
-    今の起点の祖先でも、同じ HEAD に対する差分の中身が変わり、前に読んでいない変更が現れうるので外す。起点の記録が無いときも外す。"""
+    """詳細レビューの記録は、記録の起点が今の起点と同じならすべて引き継ぎ、違えば 2 つの起点で本文が同じセクションだけ引き継ぐ
+    （`--base` がブランチかコミットか、起点が祖先かは問わない。r4-1・r5-1）。間で文書が変わっていなければすべて引き継ぎ、
+    本文を読めないときと起点の記録が無いときは外す。"""
     state = {store.REVIEWED: [A, B], store.REVIEWED_MVV: APPROVED, store.REVIEWED_BASE_BRANCH: "main"}
     if recorded:
         state[store.REVIEWED_BASE_COMMIT] = recorded
     basis = scope_decide.Basis(base, mvv=APPROVED, base_branch="main")
-    assert scope_decide.reviewed_for(state, basis) == reviewed
+    asked: list[tuple[str, str]] = []
+
+    def read(start: str, now: str, kept: object) -> dict[str, tuple[str, str]] | None:
+        asked.append((start, now))
+        return texts
+
+    assert scope_decide.reviewed_for(state, basis, read) == reviewed
+    # 起点が同じなら、本文を読まない（git を起動しない。r4-2）
+    assert asked == ([] if recorded in (None, base) else [(recorded, base)])
 
 
 @pytest.mark.parametrize(("recorded", "head"), [("main", "h1"), ("sprint/y", None), (None, None)])

@@ -383,7 +383,7 @@ def _local_scope(wt: Path, args: argparse.Namespace, data: dict[str, Any], resol
     unit = scope_decide.unit_id(resolved.unit)
     # `run` と同じく比較元のブランチも照らす（`--base` を替えた打ち直しは全差分。PR 4638 の r1-1）
     basis = scope_decide.Basis(merge_base, resolved.seats.names, resolved.settings.focus, now, unit=unit, base_branch=based.branch)
-    prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_for(data, basis)
+    prev, reviewed = scope_decide.read_by_all_head(data, basis), round_scope.reviewed(g, data, basis)
     found = scope_decide.review_scope(_every_section(args.purpose), len(rounds) + 1, prev, sections, reviewed)
     got = round_scope.descended(g, found, "HEAD")
     return got, unsure if rounds else []

@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any, Optional
 
 from ndf.adapters import git
@@ -18,6 +18,27 @@ def previous_head(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basi
     それより前のラウンドへは戻らずに None（PR の全差分を読む）。"""
     prev = scope_decide.read_by_all_head(state, basis)
     return prev if prev is not None and _reachable_from(g, prev, head) else None
+
+
+def reviewed(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis) -> set[str]:
+    """今の起動で引き継げる詳細レビューの記録（`scope_decide.reviewed_for`）。`run` と `review-scope` の両方がこれを呼ぶ。
+    git を起動するのは、記録の起点が今の起点と違い、引き継ぐ候補があるときだけである（PR 4638 の r4-2・r5-1）。"""
+    return scope_decide.reviewed_for(state, basis, lambda start, now, kept: _base_texts(g, start, now, kept))
+
+
+def _base_texts(g: git.Git, start: str, now: str, kept: Collection[str]) -> Optional[dict[str, tuple[Optional[str], Optional[str]]]]:
+    """2 つの起点の間で変わったファイルのうち、`kept` のセクションを含む文書の、両方の起点の本文。変わったファイルの名前を
+    1 回、該当する文書があればその本文を 1 回読む（git の起動は 1〜2 回）。どちらかの起点が手元に無いなどで読めなければ None。"""
+    try:
+        names = g.diff_between(start, now, "--name-only", "-z", "--no-renames", "--no-relative").split("\0")
+        paths = [p for p in names if p and any(s.startswith(f"{p}#") for s in kept)]
+        if not paths:
+            return {}
+        got = g.blobs(*(f"{c}:{p}" for p in paths for c in (start, now)))
+    except git.GitError:
+        return None
+    text = [b.decode("utf-8", errors="replace") if b is not None else None for b in got]
+    return {p: (text[2 * i], text[2 * i + 1]) for i, p in enumerate(paths)}
 
 
 def descended(g: git.Git, scope: scope_decide.Scope, head: str) -> scope_decide.Scope:

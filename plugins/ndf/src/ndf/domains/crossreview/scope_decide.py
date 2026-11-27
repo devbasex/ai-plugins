@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf.domains.crossreview import finish_decide as fin
@@ -84,17 +84,54 @@ def reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None, base_branch
     return set(store.list_of(state, store.REVIEWED))
 
 
-def reviewed_for(state: Mapping[str, Any], basis: Basis) -> set[str]:
-    """`run` と `review-scope` が共通に使う、今の起動で引き継げる詳細レビューの記録（PR 4638 の r2-1・r3-1・r4-1）。MVV と比較元の
-    ブランチを `basis` で照らし、差分の起点（`basis.base`。merge-base の SHA）も照らす。記録の起点が今の起点と同じときだけ
-    引き継ぐ。起点が違えば、記録の起点が今の起点の祖先でも、同じ HEAD に対する差分の中身が変わり、前に読んでいない変更が
-    現れうる（起点 A で 0、途中の B で 1、HEAD で 0 なら、B を起点にした差分にだけ 1 から 0 への変更が現れる）。起点を記録
-    しない前のバージョンの記録も引き継がない。`--base` がブランチかコミットかは問わない。比べるのは記録の値どうしなので、
-    git を起動しない（r4-2）。"""
+# 2 つの起点の間で変わった文書の、それぞれの起点の本文（`パス → (記録の起点の本文, 今の起点の本文)`。無いファイルは None）を
+# 読む関数。引数は記録の起点・今の起点・引き継ぐ候補のセクション。読めなければ None を返す
+BaseTexts = Callable[[str, str, Collection[str]], Optional[Mapping[str, tuple[Optional[str], Optional[str]]]]]
+
+
+def reviewed_for(state: Mapping[str, Any], basis: Basis, read: Optional[BaseTexts] = None) -> set[str]:
+    """`run` と `review-scope` が共通に使う、今の起動で引き継げる詳細レビューの記録（PR 4638 の r2-1・r3-1・r4-1・r5-1）。MVV と
+    比較元のブランチを `basis` で照らし、差分の起点（`basis.base`。merge-base の SHA）も照らす。記録の起点が今の起点と同じなら
+    すべて引き継ぐ。違えば、2 つの起点でセクションの本文が同じものだけ引き継ぐ。同じ HEAD に対するそのセクションの差分は、
+    起点の本文が同じなら同じだからである。記録の起点が今の起点の祖先かでは決めない（起点 A で 0、途中の B で 1、HEAD で 0 なら、
+    B を起点にした差分にだけ 1 から 0 への変更が現れる。r4-1）。本文を読めない（`read` が無い・None を返す）ときと、起点を
+    記録しない前のバージョンの記録は引き継がない。`--base` がブランチかコミットかは問わない。"""
     kept = reviewed_of(state, basis.mvv, basis.base_branch)
     if not kept or basis.base is None:
         return kept
-    return kept if state.get(store.REVIEWED_BASE_COMMIT) == basis.base else set()
+    start = state.get(store.REVIEWED_BASE_COMMIT)
+    if not isinstance(start, str) or not start:
+        return set()
+    if start == basis.base:
+        return kept
+    texts = read(start, basis.base, kept) if read is not None else None
+    if texts is None:
+        return set()
+    moved = {s for path, (before, after) in texts.items() for s in _changed_sections(path, before, after)}
+    return kept - moved
+
+
+def _bodies(path: str, text: Optional[str]) -> dict[str, list[list[str]]]:
+    """セクション（`sections_of` と同じ `<パス>#<見出し>`）ごとの本文の行（見出しの行から次の見出しの前まで。同じ見出しが
+    いくつあれば、その数だけ並べる）。本文が無ければ空。"""
+    out: dict[str, list[list[str]]] = {}
+    current: Optional[list[str]] = None
+    fenced = False
+    for line in (text or "").splitlines():
+        if line.lstrip().startswith(_FENCES):
+            fenced = not fenced
+        elif not fenced and line.startswith("#") and line.lstrip("#").strip():
+            current = []
+            out.setdefault(f"{path}#{line.lstrip('#').strip()}", []).append(current)
+        if current is not None:
+            current.append(line)
+    return out
+
+
+def _changed_sections(path: str, before: Optional[str], after: Optional[str]) -> set[str]:
+    """2 つの本文で、本文が違うセクション（片方にしか無いものも）。"""
+    old, new = _bodies(path, before), _bodies(path, after)
+    return {s for s in old.keys() | new.keys() if old.get(s) != new.get(s)}
 
 
 def _known(value: object) -> str:
