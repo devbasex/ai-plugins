@@ -471,6 +471,8 @@ def _render(targets: _Targets) -> None:
     limits_held = units_files.limits_of(units_files.project_of(tree))
     for plan, text in units_files.rendered(tree, targets.issues, targets.omitted, limits_held).items():
         target = targets.root / plan
+        # 置き換えは親ディレクトリの権限だけで通る。読み取り専用の計画を上書きしないよう、切り詰めずに書き込み用で開いて確かめる
+        os.close(os.open(target, os.O_WRONLY))
         _replace_file(target, text, stat.S_IMODE(target.stat().st_mode))
 
 

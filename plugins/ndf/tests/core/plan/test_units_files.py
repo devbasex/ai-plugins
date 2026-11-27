@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import git_sandbox
@@ -732,3 +733,14 @@ def test_replace_file_keeps_the_original_when_the_write_fails_and_keeps_the_mode
         cli._replace_file(target, "途中の本文", 0o640)
     assert target.read_text(encoding="utf-8") == "新しい本文"
     assert list(tmp_path.iterdir()) == [target]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root は読み取り専用のファイルにも書ける")
+def test_render_keeps_a_read_only_plan(tmp_path):
+    _units(tmp_path, "7")
+    target = tmp_path / _put(tmp_path, "issue-7-plan.md", _plan(1))
+    target.chmod(0o444)
+
+    with pytest.raises(PermissionError):
+        cli._render(cli._Targets(tmp_path, (7,), (), ()))
+    assert target.read_text(encoding="utf-8") == _plan(1)
