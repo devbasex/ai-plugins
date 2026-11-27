@@ -255,9 +255,13 @@ def bundled_errors() -> list[str]:
     return contracts.broken_places({"version": 1, "experiments": _bundled()}, launch_settings.SCHEMA)
 
 
-def table(root: Path) -> Table:
-    """同梱の表とリポジトリ `root` の `experiments` を重ね、値の制約を確かめる。外れれば直す場所を載せて `precondition`。"""
-    settings = launch_settings.load(root)
+def table(root: Path, settings: Optional[launch_settings.Settings] = None) -> Table:
+    """同梱の表とリポジトリ `root` の `experiments` を重ね、値の制約を確かめる。外れれば直す場所を載せて `precondition`。
+
+    `settings`（`root` の起動の設定を読んだもの）を渡されれば読み直さずに使う。
+    """
+    if settings is None:
+        settings = launch_settings.load(root)
     given = settings.experiments
     bundled = _bundled()
     _given_keys(given, bundled, settings.path)
@@ -367,18 +371,26 @@ class Request:
 
 
 def launch_choice(
-    layer: str, name: str, runtime: str = "claude", *, cwd: Path, environ: Optional[Mapping[str, str]] = None, **request: Any
+    layer: str,
+    name: str,
+    runtime: str = "claude",
+    *,
+    cwd: Path,
+    environ: Optional[Mapping[str, str]] = None,
+    settings: Optional[launch_settings.Settings] = None,
+    **request: Any,
 ) -> Choice:
     """優先の順で値を決め、`retry` があれば引き上げる。値の誤り・壊れた設定は `precondition`。
 
     `request` は `Request` の欄（`unit`・`charge_to`・`retry`・`mode`・`argument`）。今は割り付けず、単位があっても基準の組を返す。
+    `settings` は `table` へ渡す（渡されれば起動の設定を読み直さない）。
     """
     req = Request(**request)
     env = os.environ if environ is None else environ
     stage = stage_of(layer, name)
     if req.retry is not None and req.retry not in _retries():
         raise _fail(f"打ち直しの理由 {req.retry} は無い（{'・'.join(sorted(_retries()))}）")
-    got = table(launch_settings.launch_root(cwd))
+    got = table(launch_settings.launch_root(cwd), settings)
     manual = _manual(runtime, req.argument, env)
     arms = got.arms[stage][runtime] if stage is not None and runtime in got.arms[stage] else ()
     base = arms[0] if arms else None

@@ -3,11 +3,13 @@
     ndf delegate-run --runtime codex|kiro|agy [--use delegate|review] -- <CLI のコマンド>
 
 CLI のコマンドは、そのランタイムの実行ファイルと決まった語（ランタイムの表の `delegate_prefix`。codex は `exec`）で始め、
-そのすぐ後に NDF の引数を入れる位置 `{args}` を単独の引数として 1 つだけ持つ。`{args}` には安全装置の引数
-（`launch_settings.safety_args`）と、作業ディレクトリを今のディレクトリにする引数（codex は `-C <今のディレクトリ>`）を入れる。外す引数なら起動の直前に承認の対象を読み直してから、子の環境に
+そのすぐ後に NDF の引数を入れる位置 `{args}` を単独の引数として 1 つだけ持つ。`{args}` には、codex なら選んだモデルと
+effort の引数（`model_choice.launch_choice` の層 `seat`・作業 `delegate`。#2944）、安全装置の引数（`launch_settings.safety_args`）、
+作業ディレクトリを今のディレクトリにする引数（codex は `-C <今のディレクトリ>`）をこの順に入れる。kiro と agy は値を選ばない
+（モデルは手順書が `--model` で書く）。codex は起動の設定（`.ndf/launch.json`）を 1 回だけ読み、値の選択と安全装置の判定に渡す。外す引数なら起動の直前に承認の対象を読み直してから、子の環境に
 `NDF_AI_CHILD=1` を足してこのプロセスを CLI に置き換える（`exec`）。標準入力・標準出力・終了コードは CLI のものになる。
 
-コマンドの始まりが違う・安全装置か作業ディレクトリの引数を自分で持つ・起動できない状況・読み直しの食い違いは、
+コマンドの始まりが違う・安全装置か作業ディレクトリの引数を自分で持つ・値の選択肢の誤り・起動できない状況・読み直しの食い違いは、
 CLI を起動せず、理由を標準エラーだけに書いて停止理由 `precondition` の終了コードで終える。結果 JSON は出さない
 （標準出力は CLI に渡すため。`cli.NO_RESULT_COMMANDS`）。安全装置の引数だけを返すコマンドは作らない（取得の後の取り消しを
 確かめられないため。設計書の「安全装置を外す指定」）。
@@ -22,7 +24,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ndf import cli
-from ndf.adapters import agents, launch_settings as ls
+from ndf.adapters import agents, launch_settings as ls, model_choice
 from ndf.contracts import causes, facts, internal
 
 TOOL = cli.tool_of(__name__)
@@ -37,6 +39,9 @@ WORKDIR_COLUMN = "workdir_options"
 PREFIX_COLUMN = "delegate_prefix"
 # 引数の終わり（これより後の語は CLI のオプションとして読まれない）
 OPTIONS_END = "--"
+# モデルと effort を選ぶランタイムと、値を引く層と作業の名前（表 launch-experiments の工程 delegate）
+CHOOSES = ("codex",)
+CHOICE_LAUNCH = ("seat", "delegate")
 
 
 def _fail(detail: str) -> internal.InternalError:
@@ -117,8 +122,13 @@ def _launch(a: argparse.Namespace) -> None:
     command = a.command[1:] if a.command[:1] == [OPTIONS_END] else a.command
     cwd = Path.cwd()
     build_command(a.runtime, command, [])  # 使い方の誤り（安全装置の引数の競合を含む）は、承認の案内より先に示す
-    safety = ls.safety_args(a.runtime, a.use, cwd)
-    argv = build_command(a.runtime, command, [*safety.args, *_workdir_args(a.runtime, cwd)])
+    choice: list[str] = []
+    settings = None
+    if a.runtime in CHOOSES:
+        settings = ls.load(ls.launch_root(cwd))
+        choice = model_choice.launch_choice(*CHOICE_LAUNCH, a.runtime, cwd=cwd, settings=settings).cli_args()
+    safety = ls.safety_args(a.runtime, a.use, cwd, settings=settings)
+    argv = build_command(a.runtime, command, [*choice, *safety.args, *_workdir_args(a.runtime, cwd)])
     why = safety.verify() if safety.verify is not None else None
     if why is not None:
         raise _fail(why)

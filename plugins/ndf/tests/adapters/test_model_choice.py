@@ -82,6 +82,14 @@ def test_table_stops_on_a_broken_value_with_where_to_fix(tmp_path, experiments, 
     assert where in detail and str(root / ".ndf" / "launch.json") in detail
 
 
+def test_given_settings_are_used_without_reading_the_file_again(tmp_path, monkeypatch):
+    root = _repo(tmp_path, {"stages": {"delegate": {"arms": {"codex": [{"effort": "high"}]}}}})
+    settings = mc.launch_settings.load(root)
+    monkeypatch.setattr(mc.launch_settings, "load", lambda *a, **kw: pytest.fail("読み直した"))
+    assert mc.table(root, settings=settings).arms["delegate"]["codex"] == ({"effort": "high"},)
+    assert _pick(root, "seat", "delegate", "codex", settings=settings).cli_args() == ["-c", "model_reasoning_effort=high"]
+
+
 def test_a_broken_unused_value_still_stops_the_launch(tmp_path):
     """上位の指定で使わない工程の誤りでも止まる（I7）。"""
     root = _repo(tmp_path, {"stages": {"design": {"arms": {"claude": [{"effort": "turbo"}]}}}})

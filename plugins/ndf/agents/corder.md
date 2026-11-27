@@ -52,7 +52,7 @@ description: |
 そのため、どちらの場合もレビューのプロンプトに「ファイルを変更しないこと」と書く。
 
 どちらの用途も、対象のディレクトリに移れた場合だけ起動する（`cd` と `timeout` を `&&` でつなぐ）。移れないまま起動すると、元のディレクトリの承認で別の worktree を Codex に処理させてしまう。
-安全装置の引数と作業ディレクトリの指定（`-C <今のディレクトリ>`）は `ndf delegate-run` が `'{args}'` に入れるので、自分では書かない。
+モデルと effort・安全装置の引数・作業ディレクトリの指定（`-C <今のディレクトリ>`）は `ndf delegate-run` が `'{args}'` に入れるので、自分では書かない（モデルと effort は起動の設定の `experiments`、無ければ同梱の表から選ばれる）。
 
 起動の前に一時ディレクトリを作り、その絶対パスを決めてからプロンプトを書く。プロンプトに書く出力先は、変数名ではなく絶対パスにする。
 プロンプトのファイルの中の `$TMP` や `$FINAL` はシェルが展開しないので、変数名のまま書くと、Codex は呼び出し元が回収する場所に結果を書けない。
@@ -75,14 +75,14 @@ description: |
 
 ```bash
 cd "<対象のディレクトリ>" && timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}' \
-  --config model_reasoning_effort=medium < "$TMP/prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
+  < "$TMP/prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
 ```
 
 書き込みを伴う作業（上限は 3600 + 120 秒）:
 
 ```bash
 cd "<対象のディレクトリ>" && timeout 3720 ndf delegate-run --runtime codex -- codex exec '{args}' \
-  --config model_reasoning_effort=medium < "$TMP/prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
+  < "$TMP/prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
 ```
 
 - Claude Code では Bash の `run_in_background: true` で、選んだ用途のコマンドを起動し、完了通知を 1 回受ける（決まりは `development-workflow/references/waiting.md`）
