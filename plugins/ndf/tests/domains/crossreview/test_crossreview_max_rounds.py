@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
-from ndf.domains.crossreview import cli
+from ndf.adapters import git
+from ndf.domains.crossreview import changes, cli
 from ndf.domains.crossreview import finish_decide as fin
 
+from ._repos import BRANCH, Repos, commit, sh
 from .test_crossreview_run import Fake, Recording, _run, _state
 
 
@@ -23,13 +26,24 @@ def test_passed_max_rounds_is_the_limit(wt: Path, tmp_path: Path, capsys, monkey
 
 
 @pytest.mark.parametrize("purpose", ["code", "design"])
-def test_first_round_reads_the_full_diff(wt: Path, tmp_path: Path, capsys, monkeypatch, purpose: str) -> None:
-    """受け入れ条件 4: 1 ラウンド目は、相手役の全員が差分の全体を読む。"""
+def test_first_round_reads_the_full_diff(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, purpose: str) -> None:
+    """受け入れ条件 4: 1 ラウンド目は、相手役の全員へ比較基点から HEAD までの差分の全体を渡す。"""
+    # PR のコミットを 2 つにして、最後のコミットだけの差分と全体の差分を区別する
+    commit(repos.other, "second.txt", "二つ目\n", "二つ目のコミット")
+    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    sh(repos.main, "fetch", "-q", "origin")
     fake = Recording(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     _run(capsys, monkeypatch, fake, wt, "--purpose", purpose)
     assert _state(fake.state_dir)["rounds"][0]["scope"] == "full"
     first = [prompt for _, name, prompt in fake.prompts if name.startswith("round1-")]
-    assert len(first) == 2 and all("範囲: full" in p for p in first)
+    assert len(first) == 2
+    want = changes.review_diff(git.Git(wt), "origin/main", "HEAD")
+    assert "+## セクション B" in want and "+二つ目" in want
+    for prompt in first:
+        found = re.search(r"差分は (\S+?)（範囲: full）", prompt)
+        assert found is not None
+        # 資料のディレクトリは実行の終わりに消えるので、偽物が起動の時に写した中身を読む
+        assert fake.inputs[Path(found.group(1)).name] == want
 
 
 @pytest.mark.parametrize(
