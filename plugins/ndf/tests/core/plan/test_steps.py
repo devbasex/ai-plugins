@@ -93,12 +93,21 @@ def test_run_refuses_a_child_left_on_another_host(tmp_path):
 
 
 def test_the_child_gets_the_plan_values_of_the_context_even_inside_a_run_log(tmp_path, monkeypatch):
-    """#1959: ステップの子の環境に、プランの実行の id・ステップの id・何回目かがある。実行ログの NDF_RUN_ID と混ざらない。"""
+    """#1959: ステップの子へ渡す環境に、プランの実行の id・ステップの id・何回目かがある。実行ログの NDF_RUN_ID と混ざらない。
+
+    子は起動せず、`Popen` が受けた環境を見る。
+    """
     monkeypatch.setenv("NDF_RUN_ID", "親の実行ログ")
-    out = tmp_path / "env.txt"
-    script = f'printf "%s|%s|%s|%s" "$NDF_PLAN_RUN_ID" "$NDF_STEP_ID" "$NDF_STEP_ATTEMPT" "$NDF_RUN_ID" > {out}'
-    plan = model.parse({"name": "p", "steps": [{"id": "s", "run": ["sh", "-c", script]}]})
+    seen: dict = {}
+
+    def popen(args, **kwargs):
+        seen.update(kwargs)
+        return "proc"
+
+    monkeypatch.setattr(steps.subprocess, "Popen", popen)
+    plan = model.parse({"name": "p", "steps": [{"id": "s", "run": ["true"]}]})
     env = {"NDF_PLAN_RUN_ID": "run-1", "NDF_STEP_ID": "s", "NDF_STEP_ATTEMPT": "2"}
     ctx = steps.StepContext(plan, tmp_path / "state", {"state_dir": str(tmp_path / "state")}, env)
-    assert steps.run(ctx, plan.steps[0])["status"] == "ok"
-    assert out.read_text(encoding="utf-8") == "run-1|s|2|親の実行ログ"
+    assert steps._launch(ctx, plan.steps[0]) == "proc"
+    got = seen["env"]
+    assert (got["NDF_PLAN_RUN_ID"], got["NDF_STEP_ID"], got["NDF_STEP_ATTEMPT"], got["NDF_RUN_ID"]) == ("run-1", "s", "2", "親の実行ログ")
