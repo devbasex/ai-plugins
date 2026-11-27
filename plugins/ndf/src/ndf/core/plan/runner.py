@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-from ndf import cli
+from ndf import cli, identity
 from ndf.adapters import git
 from ndf.contracts import chosen, limits, result, routing, worker_kinds, worker_paths
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
@@ -175,14 +175,26 @@ def stored_result(state_dir: Path, run: str) -> Optional[dict[str, Any]]:
 # --- 耐久ワークフロー ---------------------------------------------------------------------
 
 
+def plan_step_env(run_id: Optional[str], step_id: str, nth: int) -> dict[str, str]:
+    """ステップの子へ渡す環境変数（プランの実行の id・ステップの id・そのステップを実行した何回目か）。名前は環境変数の表から引く（#1959）。
+
+    プランの実行の id は実行ログの `NDF_RUN_ID` と別の名前で渡す（実行ログが子の環境を親の値で上書きするため）。id が無ければ省く。
+    """
+    env = {identity.env_name("step-id"): step_id, identity.env_name("step-attempt"): str(nth)}
+    if run_id:
+        env = {identity.env_name("plan-run-id"): run_id, **env}
+    return env
+
+
 @durable.step
-def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]:
+def run_step(spec: dict[str, Any], step_id: str, attempt: int, nth: int = 1) -> dict[str, Any]:
     """ステップを 1 回打つ耐久ステップ。済んだ呼び出しは回復のときに打ち直さない。
 
+    `nth` はそのプランの実行でそのステップを実行した何回目かで、プランの実行の id・ステップの id と一緒に子の環境へ渡す（#1959）。
     承認待ちで止まれば提示の写しを、書いた回の id と組で残す（旧い形の目印を補うとき、同じ回の写しかを確かめる）。
     """
     plan = model.parse(spec["plan"])
-    ctx = steps.StepContext(plan, Path(spec["state_dir"]), dict(spec["values"]))
+    ctx = steps.StepContext(plan, Path(spec["state_dir"]), dict(spec["values"]), plan_step_env(spec.get("run_id"), step_id, nth))
     out = steps.run(ctx, plan.step(step_id))
     out["attempt"] = attempt
     if out["status"] == GATE:
@@ -228,7 +240,7 @@ def clear_waiting(path: str) -> None:
 def _perform(spec: dict[str, Any], act: Any) -> Outcome:
     """手を実行する。ステップは耐久ステップ、待ちは耐久の recv で行う。"""
     if isinstance(act, RunStep):
-        out = run_step(spec, act.step, act.attempt)
+        out = run_step(spec, act.step, act.attempt, act.nth)
         return Outcome(out["status"], out["kind"], out["retry_after"])
     if isinstance(act, Sleep):
         durable.recv(TOPIC_RETRY, act.seconds)

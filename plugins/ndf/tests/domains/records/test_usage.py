@@ -132,11 +132,79 @@ def test_a_row_that_does_not_fit_is_reported_and_a_newer_version_stops_the_write
     assert path.read_text(encoding="utf-8") == '{"version": 2}\n'
 
 
-def test_the_meta_of_the_cli_row_takes_only_the_columns_of_the_schema(tmp_path: Path) -> None:
+def test_the_meta_of_the_cli_row_takes_only_the_columns_of_the_schema(tmp_path: Path, capsys) -> None:
+    """I4: 形の違う行は書かず、例外を外へ出さずに警告を 1 行出す（工程の結果を変えない）。"""
     env = {"NDF_USAGE_DIR": str(tmp_path)}
-    with pytest.raises(InternalError):
-        usage.record_cli({"output_tokens": 2}, {"started_at": "2026-11-14T01:00:00Z"}, env)
+    assert usage.record_cli({"output_tokens": 2}, {"started_at": "2026-11-14T01:00:00Z"}, env) is None
     assert not usage.usage_log_path(env).exists()
+    assert len(capsys.readouterr().err.strip().splitlines()) == 1
+
+
+def test_the_cli_row_of_a_launch_fits_the_schema_and_drops_the_empty_columns(tmp_path: Path) -> None:
+    """#1959 の決定 6: 起動 1 回の行の足した欄がスキーマに合い、None の欄は置かない。使用量が無ければ unknown。"""
+    env = {"NDF_USAGE_DIR": str(tmp_path)}
+    meta = {
+        "launch_id": "l-1",
+        "name": "fix",
+        "run_id": "run-1",
+        "step": "implement",
+        "attempt": 1,
+        "session_id": "s-1",
+        "session_seq": 0,
+        "session_cost_usd": 0.5,
+        "model": "claude-haiku-5-5",
+        "model_usage": {
+            "claude-haiku-5-5": {"inputTokens": 4, "outputTokens": 22, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0}
+        },
+        "launched_at": "2026-11-27T01:00:00+00:00",
+        "seconds": 1.5,
+        "repo": None,
+    }
+    row = usage.record_cli({"output_tokens": 2}, meta, env)
+    assert row is not None and "repo" not in row and row["session_cost_usd"] == 0.5 and row["name"] == "fix"
+    bare = usage.record_cli(None, {"launch_id": "l-2", "name": "fix", "session_seq": 1, "model": None}, env)
+    assert bare is not None and bare["usage"] == ud.UNKNOWN and "model" not in bare
+
+
+def test_an_unwritable_usage_log_warns_once_and_returns_none(tmp_path: Path, capsys) -> None:
+    """I4: 使用量ログへ書けなくても例外を出さない。"""
+    blocker = tmp_path / "file"
+    blocker.write_text("", encoding="utf-8")
+    assert usage.record_cli({"output_tokens": 2}, {"name": "fix"}, {"NDF_USAGE_DIR": str(blocker / "usage")}) is None
+    assert len(capsys.readouterr().err.strip().splitlines()) == 1
+
+
+def _cli(launch: str, seq, cost, session="s-1", **kw) -> dict:
+    row = {"caller": usage.CLAUDE_CLI, "launch_id": launch, "session_seq": seq, **kw}
+    if session is not None:
+        row["session_id"] = session
+    if cost is not None:
+        row["session_cost_usd"] = cost
+    return row
+
+
+def test_launch_costs_of_a_resumed_conversation_are_the_differences_of_the_running_total() -> None:
+    rows = [_cli("a", 0, 0.5), _cli("b", 1, 0.8), _cli("c", 2, 1.0)]
+    got = ud.launch_costs(rows)
+    assert got["a"] == 0.5 and got["b"] == pytest.approx(0.3) and got["c"] == pytest.approx(0.2)
+
+
+def test_launch_costs_take_the_value_for_the_first_launch_and_a_row_without_a_session() -> None:
+    assert ud.launch_costs([_cli("a", 0, 0.4, session=None), {"caller": usage.SUBAGENT, "agent_id": "x"}]) == {"a": 0.4}
+
+
+def test_launch_costs_are_unknown_for_a_gap_a_missing_value_or_a_negative_difference() -> None:
+    rows = [_cli("a", 0, 0.5), _cli("b", 2, 0.9), _cli("c", 0, None, session="s-2"), _cli("d", 1, 0.1, session="s-2")]
+    rows += [_cli("e", 0, 0.5, session="s-3"), _cli("f", 1, 0.2, session="s-3"), _cli("g", 1, 0.7, session=None)]
+    got = ud.launch_costs(rows)
+    assert got == {"a": 0.5, "b": None, "c": None, "d": None, "e": 0.5, "f": None, "g": None}
+
+
+def test_launch_costs_count_the_first_row_with_a_value_once_per_launch_id() -> None:
+    rows = [_cli("a", 0, None), _cli("a", 0, 0.5), _cli("a", 0, 0.7), _cli("b", 1, 0.9), _cli("z", 0, None, session="s-9")]
+    rows.append(_cli("z", 0, None, session="s-9"))
+    got = ud.launch_costs(rows)
+    assert got["a"] == 0.5 and got["b"] == pytest.approx(0.4) and got["z"] is None and len(got) == 3
 
 
 def test_usage_log_path_defaults_to_the_state_dir(tmp_path: Path) -> None:

@@ -34,8 +34,11 @@ RULE_STOPPED, RULE_CONFLICT, RULE_ANSWER = "R03", "R10", "R13"
 
 
 class RunStep(NamedTuple):
+    """ステップを打つ手。`attempt` は止まった種類での打ち直しの回数、`nth` はそのプランの実行でそのステップを実行した何回目か（最初が 1。#1959）。"""
+
     step: str
     attempt: int
+    nth: int = 1
 
 
 class Sleep(NamedTuple):
@@ -72,7 +75,8 @@ class Outcome(NamedTuple):
 
 @dataclass(frozen=True)
 class StepState:
-    """遷移の状態。`prelude` は開始点の前に通すステップの残り、`retries` は（ステップ, 種類）ごとの打ち直しの回数。"""
+    """遷移の状態。`prelude` は開始点の前に通すステップの残り、`retries` は（ステップ, 種類）ごとの打ち直しの回数、
+    `runs` はステップごとの実行の回数（打ち直しと、遷移で戻った実行を含む。#1959）。"""
 
     current: Optional[str]
     start: Optional[str]
@@ -81,6 +85,7 @@ class StepState:
     limit: int = 0
     gates: int = 0
     retries: Mapping[str, int] = field(default_factory=dict)
+    runs: Mapping[str, int] = field(default_factory=dict)
     status: str = OK
     kind: Optional[str] = None
     detail: Optional[str] = None
@@ -100,6 +105,11 @@ def _retry_key(step: str, kind: str) -> str:
     return f"{step}:{kind}"
 
 
+def _ran_again(state: StepState, step: str) -> StepState:
+    """ステップ `step` の実行の回数を 1 増やした状態。"""
+    return replace(state, runs={**state.runs, step: (state.runs[step] if step in state.runs else 0) + 1})
+
+
 def _finish(state: StepState, status: str, kind: Optional[str], detail: Optional[str]) -> Next:
     return Next.finish(replace(state, status=status, kind=kind, detail=detail))
 
@@ -114,8 +124,8 @@ def _run(plan: Plan, state: StepState, target: Optional[str]) -> Next:
         return _finish(state, STOPPED, "invalid", f"知らないステップ: {target}")
     if state.count + 1 > state.limit:
         return _finish(state, STOPPED, "fix_limit", f"ステップの数が上限 {state.limit} を超えた")
-    nxt = replace(state, current=target, last=target, count=state.count + 1)
-    return Next.step(RunStep(target, 0), nxt)
+    nxt = _ran_again(replace(state, current=target, last=target, count=state.count + 1), target)
+    return Next.step(RunStep(target, 0, nxt.runs[target]), nxt)
 
 
 def _after_ok(plan: Plan, state: StepState, step: Step) -> Next:
@@ -202,7 +212,8 @@ def decide(plan: Plan, state: StepState, done: Optional[Outcome]) -> Next:
         return _run(plan, state, first)
     step = plan.step(state.current)
     if done.status == SLEPT:
-        return Next.step(RunStep(step.id, state.retries[_retry_key(step.id, state.kind)]), state)
+        nxt = _ran_again(state, step.id)
+        return Next.step(RunStep(step.id, state.retries[_retry_key(step.id, state.kind)], nxt.runs[step.id]), nxt)
     if done.status == ANSWERED:
         return _after_answer(plan, state, step, done)
     if done.status == OK:

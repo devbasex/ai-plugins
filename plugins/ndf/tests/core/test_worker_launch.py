@@ -109,6 +109,69 @@ def test_a_launch_stopped_by_a_check_before_it_keeps_the_previous_result(tmp_pat
     assert launched == [] and done.cause is not None and h.result_file.exists()
 
 
+class Rows:
+    """差し込む偽の使用量ログの書き込み処理。"""
+
+    def __init__(self) -> None:
+        self.rows: list[tuple[object, dict]] = []
+
+    def record_cli(self, usage, meta):
+        self.rows.append((usage, dict(meta)))
+
+
+def _ran(reply: claude.ClaudeReply) -> claude.ClaudeReply:
+    return reply._replace(launched=True, seconds=1.0, launched_at="2026-11-27T01:00:00+00:00")
+
+
+def test_each_child_of_a_resumed_worker_writes_one_row_in_order(tmp_path: Path, monkeypatch) -> None:
+    """条件 3・E4: 再開した worker は子の数だけ行が増え、会話の中の番号が 0 から進む。JSON の無い失敗の子も使用量なしの行になる。"""
+    rows = Rows()
+    monkeypatch.setattr(claude, "launch_recorder", rows)
+    monkeypatch.setenv("NDF_PLAN_RUN_ID", "run-1")
+    monkeypatch.setenv("NDF_STEP_ID", "implement")
+    monkeypatch.setenv("NDF_STEP_ATTEMPT", "2")
+    h = worker.Handoff("fix", "直す", tmp_path / "result.json", tmp_path, tmp_path / "state")
+    logs: list[claude.LaunchLog] = []
+
+    def fake(argv, prompt, timeout, cwd, options):
+        """`call_claude` と同じく、起動した子が終わったその場で行を `options.log` へ渡す。"""
+        logs.append(options.log)
+        if len(logs) == 1:
+            reply = _ran(claude.ClaudeReply.failed("出力なし", "claude が終了コード 1 で終えた"))
+        else:
+            h.result_file.write_text('{"status": "ok"}', encoding="utf-8")
+            reply = _ran(claude._parse_reply('{"result": "{}", "usage": {"output_tokens": 3}, "total_cost_usd": 0.2}'))
+        options.log.report(reply)
+        return reply
+
+    with worker_paths.open_workdir(tmp_path) as wd:
+        done = worker.delegate(h, "規則", root=tmp_path, wd=wd, call=fake, session="s-1")
+
+    assert done.cause is None and len(rows.rows) == 2 and logs[0] is logs[1]  # 再開しても同じ記録先が番号を進める
+    (u0, r0), (u1, r1) = rows.rows
+    assert u0 is None and u1 == {"output_tokens": 3}
+    assert [r0["session_seq"], r1["session_seq"]] == [0, 1] and r0["session_id"] == r1["session_id"] == "s-1"
+    assert r1["name"] == "fix" and (r1["run_id"], r1["step"], r1["attempt"]) == ("run-1", "implement", 2)
+    assert "repo" not in r1  # リポジトリ名を得るためだけに git を起動しない
+    assert r1["session_cost_usd"] == 0.2 and "直す" not in str(r1)  # 行に質問の本文を書かない
+
+
+def test_a_worker_child_that_did_not_launch_writes_no_row(tmp_path: Path, monkeypatch) -> None:
+    """起動しなかった子（スロット・下限・照らし直しで止まった）は行を書かない。"""
+    rows = Rows()
+    monkeypatch.setattr(claude, "launch_recorder", rows)
+    h = worker.Handoff("fix", "直す", tmp_path / "result.json", tmp_path, tmp_path / "state")
+
+    def fake(argv, prompt, timeout, cwd, options):
+        reply = claude.ClaudeReply.failed("", "空かない", failure=claude.Failure.NO_SLOT)
+        options.log.report(reply)
+        return reply
+
+    with worker_paths.open_workdir(tmp_path) as wd:
+        done = worker.delegate(h, "規則", root=tmp_path, wd=wd, call=fake, session="s-1")
+    assert done.cause is not None and rows.rows == []
+
+
 @pytest.mark.parametrize(
     ("agent", "namespaces", "expected"),
     [
