@@ -32,7 +32,11 @@ TABLE = "cli-floors"
 VERSION_POLICY = "cli-floor.version"
 # (実パス, st_mtime_ns, st_size) → 読めたバージョン（読めなければ None）
 _SEEN: dict[tuple[str, int, int], Optional[str]] = {}
+# `_SEEN` と `_GATES` を読み書きする間だけ取る錠。`--version` の終わりはこの錠では待たない
 _LOCK = threading.Lock()
+# 記録のキーごとの、`--version` を打つ間の錠。同じキーを読んでいる別のスレッドの終わりだけを待つ（別の実行ファイルとキャッシュの参照では待たない）
+_GATES: dict[tuple[str, int, int], threading.Lock] = {}
+_gate = threading.Lock
 
 
 class TooOld(Exception):
@@ -123,26 +127,33 @@ def _version(name: str, path: str, row: Mapping[str, object], env: Optional[Mapp
 def _version_read(
     name: str, path: str, row: Mapping[str, object], env: Optional[Mapping[str, str]], cwd: Optional[Path]
 ) -> tuple[Optional[str], bool]:
-    """`_version` と、確かめの間に待ったか。自分が `--version` を打って終わりを待ったときと、`_LOCK` を待ったとき
-    （別のスレッドが `--version` を打っている間）に真。錠を待たずに記録を再利用したときだけ偽。"""
+    """`_version` と、確かめの間に待ったか。自分が `--version` を打って終わりを待ったときと、同じキーの `--version` を
+    別のスレッドが打っている間にその終わりを待ったときに真。記録を再利用したとき（記録の読み書きの錠 `_LOCK` だけを待ったときを含む）は偽。"""
     try:
         st = os.stat(path)
     except OSError:  # noqa: NDF401 外部コマンド: 消えた実行ファイルは比べずに通し、起動の失敗は今の起動の箇所が扱う
         return None, False
     key = (path, st.st_mtime_ns, st.st_size)
-    queued = not _LOCK.acquire(blocking=False)
-    if queued:
-        _LOCK.acquire()
-    try:
+    with _LOCK:
         if key in _SEEN:
-            return _SEEN[key], queued
+            return _SEEN[key], False
+        gate = _GATES.setdefault(key, _gate())
+    queued = not gate.acquire(blocking=False)
+    if queued:
+        gate.acquire()
+    try:
+        with _LOCK:
+            if key in _SEEN:
+                return _SEEN[key], True
         version = _read_version(path, row, env, cwd)
-        _SEEN[key] = version
+        with _LOCK:
+            _SEEN[key] = version
+            _GATES.pop(key, None)
         if version is None:
             diag(f"{name} のバージョンを読めない（{path}）。下限 {row['min_version']} と比べずに起動する", kind="cli_floor", cli=name)
         return version, True
     finally:
-        _LOCK.release()
+        gate.release()
 
 
 def refuse_old(name: str, argv0: str, error: type[Exception], env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> None:
@@ -164,8 +175,8 @@ def require(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd:
     """`argv0` で起動する外部 CLI `name` が下限より古ければ `TooOld`。表に無い名前と、見つからない・読めない CLI は通す。
     起動の引数 `args` が行の `flag_floors` の引数を含めば、その下限と比べ、バージョンを確かめられなければ `Unverified`（#3955）。
 
-    通したときは、確かめの間に待ったかを返す（`--version` の終わりか、別のスレッドの `--version` の終わりを待つ錠）。錠を待たずに
-    記録を再利用したときだけ偽。待った間の変化を確かめ直す呼び手が使う。
+    通したときは、確かめの間に待ったかを返す（自分の `--version` の終わりか、同じ実行ファイルの `--version` を打つ別のスレッドの
+    終わり）。記録を再利用したときは偽。待った間の変化を確かめ直す呼び手が使う。
     """
     if name not in facts.ids(TABLE):
         return False

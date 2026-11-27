@@ -21,6 +21,7 @@ VERSION_LINE = {"gh": "gh version {v} (2026-01-01)", "claude": "{v} (Claude Code
 def _fresh_cache(monkeypatch):
     """比べの結果の再利用をテストごとに空から始める。"""
     monkeypatch.setattr(cli_floor, "_SEEN", {})
+    monkeypatch.setattr(cli_floor, "_GATES", {})
 
 
 # ---------------------------------------------------------------- 表
@@ -243,42 +244,26 @@ def test_issue_1959_require_reports_whether_it_waited_for_the_version(tmp_path, 
 
 
 def test_issue_1959_require_waiting_for_another_threads_version_counts_as_waited(tmp_path, monkeypatch):
-    # #1959: 別のスレッドが `--version` を打っている間に錠を待った `require` も、記録に当たるが待ったとして真を返す
-    import threading
-
+    # #1959: 同じ実行ファイルの `--version` を別のスレッドが打っている間に待った `require` は、待った後に記録に当たっても真を返す。
+    # 錠の取得の結果を差し替え、待つ間に別のスレッドが記録を書き終えたことを同じスレッドで再現する（実スレッドも時間の待ちも使わない）
     exe = tmp_path / "claude"
     exe.write_text("", encoding="utf-8")
     exe.chmod(0o755)
-    reading, release, queued = threading.Event(), threading.Event(), threading.Event()
-    real = cli_floor._LOCK
+    st = exe.stat()
+    key = (str(exe), st.st_mtime_ns, st.st_size)
 
-    class Lock:
-        """錠を待たずに取れなかったことを知らせる錠（待つ側が錠の前に来たことを、時間を待たずに知るため）。"""
+    class Busy:
+        """待たずには取れず、待つと別のスレッドが記録を書き終えた後に取れる錠。"""
 
         def acquire(self, blocking: bool = True) -> bool:
-            got = real.acquire(blocking)
-            if not got:
-                queued.set()
-            return got
+            if blocking:
+                cli_floor._SEEN[key] = "9.0.0"
+            return blocking
 
         def release(self) -> None:
-            real.release()
+            pass
 
-    def read_version(*a):
-        reading.set()
-        assert release.wait(10)
-        return "9.0.0"
-
-    monkeypatch.setattr(cli_floor, "_LOCK", Lock())
-    monkeypatch.setattr(cli_floor, "_read_version", read_version)
-    got: dict[str, bool] = {}
-    first = threading.Thread(target=lambda: got.__setitem__("first", cli_floor.require("claude", str(exe))))
-    second = threading.Thread(target=lambda: got.__setitem__("second", cli_floor.require("claude", str(exe))))
-    first.start()
-    assert reading.wait(10)
-    second.start()
-    assert queued.wait(10)
-    release.set()
-    first.join(10)
-    second.join(10)
-    assert got == {"first": True, "second": True}
+    monkeypatch.setattr(cli_floor, "_gate", Busy)
+    monkeypatch.setattr(cli_floor, "_read_version", lambda *a: pytest.fail("待った後は記録を使い、--version を打たない"))
+    assert cli_floor.require("claude", str(exe)) is True
+    assert cli_floor.require("claude", str(exe)) is False  # 記録に当たるだけなら、キーごとの錠を取らず、待ったとしない
