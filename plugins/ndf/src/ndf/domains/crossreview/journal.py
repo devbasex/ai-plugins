@@ -439,6 +439,18 @@ class FindingJournal:
                 unparked[str(known["id"])] = item
             touched[key] = known
             same.setdefault(str(known["id"]), []).append(item)
+        self._move_unparked(unparked, same, round_no)
+        back = set(self.revived[before:])
+        self.fresh = [fid for fid in dict.fromkeys(fresh) if _askable(self.rows[fid], same[fid], items, fid in back)]
+        self.raised_ids, self._arrived, self._reports = list(same), frozenset(fresh), same
+        self._round = round_no
+        self.warnings = _mvv_warnings(round_no, unknown, unexplained)
+        return frozenset(key for key, row in touched.items() if _blocking(row))
+
+    def _move_unparked(
+        self, unparked: Mapping[str, Mapping[str, Any]], same: Mapping[str, Sequence[Mapping[str, Any]]], round_no: int
+    ) -> None:
+        """`parked` を外した指摘の位置を出し直しのものに置き換え、置いた位置の候補を `_moved` に残す。"""
         self._moved = {}
         for fid, item in unparked.items():
             # 残していた行の位置は前の head の行番号なので、見送りを解いた出し直しのものにする。`path` か行番号が無ければ、同じ
@@ -449,12 +461,6 @@ class FindingJournal:
             _move(self.rows[fid], best, round_no)
             if "path" in best:
                 self._moved[fid] = places
-        back = set(self.revived[before:])
-        self.fresh = [fid for fid in dict.fromkeys(fresh) if _askable(self.rows[fid], same[fid], items, fid in back)]
-        self.raised_ids, self._arrived, self._reports = list(same), frozenset(fresh), same
-        self._round = round_no
-        self.warnings = _mvv_warnings(round_no, unknown, unexplained)
-        return frozenset(key for key, row in touched.items() if _blocking(row))
 
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
