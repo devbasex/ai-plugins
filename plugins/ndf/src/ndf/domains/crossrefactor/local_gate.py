@@ -549,13 +549,13 @@ def run_local_gate(
 ) -> dict[str, Any]:
     """取得と載せ直し → テスト → push か直し、を周の上限まで回し、最終ゲートの記録を返す。止まれば `final_gate.GateStopped`。"""
     gate = _Gate(g, cfg, state, save, ex)
-    # 保留中の直しを検査する前に未コミットの変更が無いことを確かめる（範囲外で戻すときに、中断後の作業を消さない）
-    worktree.refuse_dirty(g)
-    _check_pending_fix(gate)
+    # 保留中の直しがあれば、その検査が未コミットの変更を確かめる。最初の周はその結果を使い、同じ検査を打ち直さない
+    checked = _check_pending_fix(gate)
     remote = g.remote()
     tip: Optional[str] = None
     for round_no in range(cfg.max_fix + 1):
-        worktree.refuse_dirty(g)
+        if round_no or not checked:
+            worktree.refuse_dirty(g)
         if tip is None:
             tip = worktree.fetch_tips(g, cfg.branch, remote, None)[0]
         head = _take_in(gate, tip)
@@ -617,14 +617,33 @@ def _checked_fix(
     gate.save()
 
 
-def _check_pending_fix(gate: _Gate) -> None:
-    """前の起動が最終ゲート修正の範囲の検査の前に中断していれば、その直しの範囲を検査する（範囲外なら戻して `refused`）。"""
+def _check_pending_fix(gate: _Gate) -> bool:
+    """前の起動が最終ゲート修正の範囲の検査の前に中断していれば、その直しの範囲を検査する（範囲外なら戻して `refused`）。
+
+    検査は直す前の SHA へ作業場所を戻しうるので、その前に中断の後の作業を確かめる。追跡ファイルに未コミットの変更があるか、
+    戻すと追跡されるパスに未追跡のファイルがあれば、何も変えずに止める。保留中の直しが無ければ何も打たずに偽を返す。
+    """
     pending = gate.state["fixing"] if "fixing" in gate.state else None
     if not isinstance(pending, Mapping):
-        return
+        return False
+    before = str(pending["before"])
+    worktree.refuse_dirty(gate.g)
+    _refuse_untracked_in(gate.g, before)
     tip = str(pending["tip"])
     protected = protection_at(gate.g, tip, settings_at(gate.g, tip, gate.cfg.repo_work), gate.cfg.repo_work, gate.trees)
-    _checked_fix(gate, lambda: None, str(pending["before"]), [str(x) for x in pending["labels"]], protected)
+    _checked_fix(gate, lambda: None, before, [str(x) for x in pending["labels"]], protected)
+    return True
+
+
+def _refuse_untracked_in(g: git.Git, before: str) -> None:
+    """`before` へ戻すと追跡されるパス（今の `HEAD` に無いパス）に未追跡のファイルがあれば `SyncRefused`（上書きしない）。"""
+    root = Path(g.run("rev-parse", "--show-toplevel").strip())
+    added = [p for p in g.run("diff", "--name-only", "-z", "--diff-filter=A", "HEAD", before).split("\0") if p]
+    hits = [p for p in added if (root / p).exists() or (root / p).is_symlink()]
+    if hits:
+        raise worktree.SyncRefused(
+            "最終ゲート修正の前へ戻すと上書きする未追跡のファイルがある。移すかコミットしてから流し直す: " + ", ".join(hits)
+        )
 
 
 def suite_seconds(project: Mapping[str, Any]) -> Optional[float]:

@@ -196,15 +196,21 @@ flowchart TD
 
 ### リファクタリングの既定の起動
 
-`.ndf/project.json` に `workflow.launch.refactor` を持たないリポジトリでも、工程「リファクタリング」の差し込み `refactor` が決まる。`ndf refactor run` の必須の引数 5 つを、決まる時点で分けて渡す。
+`.ndf/project.json` に `workflow.launch.refactor` を持たないリポジトリでも、工程「リファクタリング」の差し込み `refactor` が決まる。`ndf refactor run` の必須の引数 5 つを、決まる時点で分けて渡す。最終ゲートの手段の引数は `--required` か `--local-test` のどちらか 1 つで、表の下の選択規則で決める。
 
 | 引数 | 出所 | 決める時点 |
 | --- | --- | --- |
 | `--branch` | 差し込み `branch`（工程の入力） | プランを組むとき |
 | `--base` | 起点。マージ先は読み込み済みの設定から（`branch_strategy.of_project(project).pr_target("sprint")`）、参照は工程の条件 `code_in_diff` と同じ規則（`progress.command.base_ref`）で決める | プランを組むとき |
-| `--required` | `.ndf/project.json` の `ci.required_checks` | プランを組むとき |
+| `--required <チェック>...` か `--local-test` | `.ndf/project.json` の `ci.required_checks` と `test`（下の選択規則） | プランを組むとき |
 | `--pr` | ブランチの Pull Request の番号（`gh pr view`） | ステップを打つとき |
 | `--scope` | 起点からの差分のファイル（`git diff --name-only -z --diff-filter=d <起点>...HEAD`） | ステップを打つとき |
+
+最終ゲートの手段の引数は、次の順に 1 つだけ決める。この判定は、工程の条件 `tests_verifiable`（#4566）と同じ規則である。両方を付けると `ndf refactor run` が `invalid` で止まるので、2 つを同時には付けない。
+
+1. 必須のチェック（`ci.required_checks`）があれば、`--required <チェック>...` だけを付ける。手元のテストは見ない
+2. 必須のチェックが無く、実行できる手元のテスト（`command` を持つテストの suite）があれば、`--local-test` を付ける。CI テストの設定 `test.ci.only` が真なら、手元のテストは使わない
+3. どちらも無ければ、既定の起動を組まない（工程は理由を記録して飛ぶ）
 
 Pull Request の番号と差分は前の工程（実装の Pull Request の作成と push）が終わるまで決まらないので、`bash -c` の包み（`route.REFACTOR_WITH_PR`）が打つ時点に読んで足す。Pull Request が無い・差分を読めない・差分が空のときは `ndf refactor run` を打たず、`stopped`（`precondition`）の結果 JSON を出して終える。差分のパスは NUL 区切りで読んで 1 ファイル 1 引数で渡し、先頭がハイフンのパスを引数と取り違えないよう `./` を前置する。
 
@@ -302,10 +308,7 @@ ndf plan next <プラン>
 
 - **既定が入った後、今まで止まっていた 17 工程が流れるようになる。** 工程が意図しない作業をしたときは、conductor がその工程を `ndf progress` で止めて手で閉じる経路が残る。直しは `kinds.json` の行とテンプレートの文で行い、全体を戻すときは `params.json` の `worker` の既定を外す
 - **工程ごとの起動を `.ndf/project.json` に書かないリポジトリでも、工程は流れる。** 作業場所・課題の番号・受け入れ条件は差し込みの値として渡り、読む Skill と手順の抜粋は `kinds.json` が持つ
-- **`workflow.launch.refactor` を省略した場合、NDF はプロジェクトのテスト設定から、リファクタリングの既定の起動コマンドを組む。** 最終ゲートの引数は、次の順に 1 つだけ決める。この判定は、工程の条件 `tests_verifiable`（#4566）と同じ規則である。両方を付けると `ndf refactor run` が `invalid` で止まるので、2 つを同時には付けない
-  1. 必須のチェック（`ci.required_checks`）があれば、`--required <チェック>...` だけを付ける。手元のテストは見ない
-  2. 必須のチェックが無く、実行できる手元のテスト（`command` を持つテストの suite）があれば、`--local-test` を付ける。CI テストの設定 `test.ci.only` が真なら、手元のテストは使わない
-  3. どちらも無ければ、既定ではリファクタリングを飛ばし、飛ばした理由を記録する。工程を設定で有効にしたうえで `workflow.launch.refactor` も無いときだけ、差し込み `refactor` が決まらずに止まる
+- **`workflow.launch.refactor` を省略した場合、NDF はプロジェクトのテスト設定から、リファクタリングの既定の起動コマンドを組む。** `--required` と `--local-test` のどちらを付けるかは、「リファクタリングの既定の起動」の選択規則に従う。必須のチェックも実行できる手元のテストも設定されていなければ、既定ではリファクタリングを飛ばし、飛ばした理由を記録する。工程を設定で有効にしたうえで `workflow.launch.refactor` も無いときだけ、差し込み `refactor` が決まらずに止まる
 - **工程「ドキュメント再構成」の差し込み `rebuild` は既定を持たない。** その工程を流すときに、リファクタリングと同じ形で足す
 
 ### 既知の限界

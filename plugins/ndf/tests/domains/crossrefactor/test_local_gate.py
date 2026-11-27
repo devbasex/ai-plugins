@@ -354,6 +354,20 @@ def test_a_restart_with_uncommitted_work_keeps_it_before_checking_the_fix(tmp_pa
     assert "fixing" in w.state
 
 
+def test_a_restart_keeps_an_untracked_file_that_undoing_the_fix_would_overwrite(tmp_path, monkeypatch):
+    w = make_world(tmp_path, monkeypatch)
+    bad = commit(w.work, {"src/a.py": "x = 2\n", "docs/old.md": "old\n"})
+    # 修正担当が範囲外のファイルを消してコミットした後に中断し、利用者が同じパスへ未追跡のファイルを書いた
+    sh(w.work, "rm", "-q", "docs/old.md")
+    sh(w.work, "commit", "-q", "-m", "rm")
+    (w.work / "docs/old.md").write_text("mine\n", encoding="utf-8")
+    w.state["fixing"] = {"before": bad, "tip": w.tip, "labels": ["#1 unit"]}
+    with pytest.raises(worktree.SyncRefused):
+        _run(w, FakeExec())
+    assert (w.work / "docs/old.md").read_text(encoding="utf-8") == "mine\n"
+    assert "fixing" in w.state
+
+
 def test_a_command_pointing_into_the_work_tree_is_a_precondition(tmp_path, monkeypatch):
     w = make_world(tmp_path, monkeypatch)
     project = {"test": {"suites": [{"name": "u", "command": f"pytest {w.main}/tests"}]}}
