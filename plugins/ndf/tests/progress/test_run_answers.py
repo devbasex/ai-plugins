@@ -92,3 +92,58 @@ def test_released_answer_is_none_unless_the_organizer_approved_with_a_value(draf
 def test_a_delivery_and_a_store_kind_that_were_not_recorded_are_none():
     v = _view(_answered("approved"), _outputs(delivery=None, store_kind=None))
     assert run.released_answer(run.StageAnswers(v, STAGE)) == worker_kinds.Recorded("main abc1234", None, None)
+
+
+# 以下は I-005（識別子と届け先の確かめを `worker_kinds.released_of` と共通にする）の前に今の振る舞いを固定する
+
+
+@pytest.mark.parametrize("version", ["main abc1234", " v1.2.3 ", "x"])
+def test_released_answer_returns_the_version_as_it_is_without_stripping(version):
+    v = _view(_answered("approved"), _outputs(version=version))
+    assert run.released_answer(run.StageAnswers(v, STAGE)).version == version
+
+
+@pytest.mark.parametrize("version", [None, 123, ["v"], {"v": 1}, "", "\n\t"])
+def test_released_answer_is_none_unless_the_version_is_a_non_blank_string(version):
+    v = _view(_answered("approved"), _outputs(version=version))
+    assert run.released_answer(run.StageAnswers(v, STAGE)) is None
+
+
+@pytest.mark.parametrize("outputs", [None, "main abc1234", ["main abc1234"], {}])
+def test_released_answer_is_none_when_the_outputs_are_not_an_object_with_a_version(outputs):
+    after = model.EventDraft(stages.OUTPUTS_EVENT, "workflow", STAGE, payload={"outputs": outputs, "release_store": "none"})
+    assert run.released_answer(run.StageAnswers(_view(_answered("approved"), after), STAGE)) is None
+
+
+@pytest.mark.parametrize("delivery", ["本番", ["本番"], 1, True])
+def test_a_delivery_that_is_not_an_object_is_none_and_keeps_the_version(delivery):
+    v = _view(_answered("approved"), _outputs(delivery=delivery))
+    assert run.released_answer(run.StageAnswers(v, STAGE)) == worker_kinds.Recorded("main abc1234", None, "none")
+
+
+def test_an_empty_delivery_object_is_kept_as_an_empty_object():
+    after = model.EventDraft(
+        stages.OUTPUTS_EVENT, "workflow", STAGE, payload={"outputs": {"product_version": "v", "delivery": {}}, "release_store": "none"}
+    )
+    assert run.released_answer(run.StageAnswers(_view(_answered("approved"), after), STAGE)) == worker_kinds.Recorded("v", {}, "none")
+
+
+def test_the_delivery_is_a_copy_of_the_recorded_object():
+    delivery = dict(ROW)
+    got = run.released_answer(run.StageAnswers(_view(_answered("approved"), _outputs(delivery=delivery)), STAGE))
+    assert got.delivery == ROW and got.delivery is not delivery
+    got.delivery["target"] = "変えた"
+    assert delivery["target"] == "本番"
+
+
+@pytest.mark.parametrize("store_kind", ["none", "versioned", "unknown", "誰も知らない種類"])
+def test_a_string_store_kind_is_returned_as_it_is(store_kind):
+    # 今は 3 つの種類に絞らない（`released_of` は絞る）
+    v = _view(_answered("approved"), _outputs(store_kind=store_kind))
+    assert run.released_answer(run.StageAnswers(v, STAGE)).store == store_kind
+
+
+@pytest.mark.parametrize("store_kind", [1, ["none"], {"kind": "none"}, True])
+def test_a_store_kind_that_is_not_a_string_is_none(store_kind):
+    v = _view(_answered("approved"), _outputs(store_kind=store_kind))
+    assert run.released_answer(run.StageAnswers(v, STAGE)) == worker_kinds.Recorded("main abc1234", ROW, None)
