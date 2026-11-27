@@ -247,19 +247,53 @@ def _inherit_protect(row: dict[str, Any], kinds: object) -> bool:
     return before != row
 
 
+def _other_content(row: Mapping[str, Any], item: Mapping[str, Any], named: Optional[str], *, line: bool = False) -> bool:
+    """出し直し `item`（反する MVV の項目は `named`）が重い報告で、内容（本文・起きることの 1 文・パス・見出し。`line` が真なら
+    行の番号も）が行 `row` と違うか。行の番号は修正でずれるので、下げた指摘の出し直しでは比べない。#4363"""
+    new = _raised(dict(item), named)
+    if not criteria_decide.blocking(new["severity"]):
+        return False
+    told = {**new, "text": str(item["text"]).strip(), "section": _text(item.get("section"))}
+    return any(told.get(k) != row.get(k) for k in ("text", "impact", "path", "section", *(("line",) if line else ())))
+
+
+def _askable(row: dict[str, Any], reports: Sequence[Mapping[str, Any]], items: Sequence[str], back: bool) -> bool:
+    """新しく出たか戻った行 `row` を判定役へ渡す候補にするか。`reports` はこのラウンドのその指摘の出し直し、`back` は戻った行。
+
+    戻った行は 1 文を今回のものに置き換える。今回の 1 文が無ければ前の 1 文と重さを持ち続けるが、渡さない（前の経路の
+    1 文で下げないため）。保護の種類を挙げた報告があるか、行と内容の違う重い報告がある指摘も、1 つの否定でほかの報告まで
+    下げないように渡さない。必ず人の承認が要る操作の行は `verify_decide.select` が除く。#4363"""
+    if back:
+        told = next((t for i in reports if (t := _text(i.get("impact")))), None)
+        if told is None:
+            return False
+        row["impact"] = told.strip()
+    return not any(
+        criteria_decide.protect_of(i.get(PROTECT)) or _other_content(row, i, criteria_decide.mvv_item(i.get("mvv"), items), line=True)
+        for i in reports
+    )
+
+
 def _unlower(by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str]) -> None:
     """判定役の確認で下げた指摘のうち、このラウンドの出し直し `raised` のどれかが保護の種類か、MVV の項目か必ず人の承認が
-    要る操作を挙げたものは、下げた扱いを解除する。
+    要る操作を挙げたもの、または内容の違う重い報告（`_other_content`）のものは、下げた扱いを解除する。内容の違う重い報告が
+    あれば、重要度を元の重要度（最低 major）へ戻す。本文と位置は行のまま変えない。
 
     重要度を重ねる前に解除するので、同じラウンドのほかの出し直しの重要度は、処理の順によらず重ねられる。分類は
-    `_classify`、元の重要度へ戻すのは `_restore_lowered` が行う。#4363"""
+    `_classify`、保護の対象を元の重要度へ戻すのは `_restore_lowered` が行う。#4363"""
+    lowered = {key for key, row in by_key.items() if _lowered(row)}
     for item in raised:
         text = item.get("text")
-        row = by_key.get(oscillation.finding_key(text.strip())) if isinstance(text, str) and text.strip() else None
-        if row is None or not _lowered(row):
+        key = oscillation.finding_key(text.strip()) if isinstance(text, str) and text.strip() else None
+        if key not in lowered:
             continue
-        if criteria_decide.protect_of(item.get(PROTECT)) or criteria_decide.mvv_item(item.get("mvv"), items) is not None:
+        row = by_key[key]
+        named = criteria_decide.mvv_item(item.get("mvv"), items)
+        differs = _other_content(row, item, named)
+        if differs or named is not None or criteria_decide.protect_of(item.get(PROTECT)):
             row[CHECK] |= {criteria_decide.LOWERED: False, UNLOWERED: True}
+        if differs:
+            row["severity"] = criteria_decide.at_least_blocking(criteria_decide.severity_of(row.get("raised_severity")))
 
 
 def _restore_lowered(row: dict[str, Any]) -> None:
@@ -277,10 +311,12 @@ def _restore_lowered(row: dict[str, Any]) -> None:
 
 
 class Checked(NamedTuple):
-    """確認の結果を当てた後に、駆動が使う値。`lowered` は下げた指摘のキー、`unconfirmed` は有効な回答の無かった指摘の id。"""
+    """確認の結果を当てた後に、駆動が使う値。`lowered` は下げた指摘のキー、`unconfirmed` は有効な回答の無かった指摘の id。
+    `record` は判定役の出力の名前で、駆動が足す（起動していなければ空）。"""
 
     lowered: frozenset[str] = frozenset()
     unconfirmed: frozenset[str] = frozenset()
+    record: str = ""
 
 
 class FindingJournal:
@@ -295,7 +331,7 @@ class FindingJournal:
         self.rows: dict[str, dict[str, Any]] = {str(f["id"]): f for f in rows if isinstance(f, dict) and "id" in f}
         # 直した・見送ったのに出し直されて未解決へ戻した指摘の id（呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
         self.revived: list[str] = []
-        # 最後の `enter` で、新しく出たか戻った指摘の id（判定役へ渡す候補。#4363）
+        # 最後の `enter` で新しく出たか戻った指摘のうち、判定役へ渡す候補の id（`_askable`。#4363）
         self.fresh: list[str] = []
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
@@ -314,12 +350,15 @@ class FindingJournal:
         """指摘をジャーナルへ入れ、このラウンドで出た収束の妨げになるキーを返す（振動の判定に使う）。`items` は承認済みの
         MVV の項目、`mvv` はその識別子。見送り済みは扱わず（MVV が変わっていれば判定し直す）、
         直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら（同じラウンドの中でも）重い方を残す。
-        収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。"""
+        収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。判定役へ渡す候補 `fresh` は、新しく出たか
+        戻った指摘のうち `_askable` が通すものである（#4363）。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
         unexplained: list[str] = []
         fresh: list[str] = []
+        same: dict[str, list[Mapping[str, Any]]] = {}
+        before = len(self.revived)
         _unlower(by_key, raised, items)
         for item in raised:
             text = item.get("text")
@@ -346,7 +385,9 @@ class FindingJournal:
             elif named is None and items and _named_any(item):
                 unknown.append(str(known["id"]))
             touched[key] = known
-        self.fresh = list(dict.fromkeys(fresh))
+            same.setdefault(str(known["id"]), []).append(item)
+        back = set(self.revived[before:])
+        self.fresh = [fid for fid in dict.fromkeys(fresh) if _askable(self.rows[fid], same[fid], items, fid in back)]
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
 

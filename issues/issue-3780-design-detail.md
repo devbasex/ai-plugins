@@ -2,7 +2,7 @@
 
 [設計文書](./issue-3780-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。決定の理由・不変条件（I1〜I3）・起票の手順は設計文書を、受け入れ条件は [要求仕様](./issue-3780-requirements.md) を指す。
 
-[#4363 の詳細設計](./issue-4363-design-detail.md) の後に実装する。そこで作る `reviewing.py`・`carry.py`・`verify_decide.select`・`journal.apply_checks`（返りの `Checked`）・`journal.fresh`・`drive._confirm`・`criteria_decide.protect_kinds` を前提にする。
+[#4363 の詳細設計](./issue-4363-design-detail.md) の後に実装する。そこで作る `reviewing.py`・`carry.py`・`verify_decide.select`・`journal.apply_checks`（返りの `Checked`）・`journal.fresh`・`drive._confirm_heavy`・`criteria_decide.protect_kinds` を前提にする。
 
 | 語 | 意味 |
 | --- | --- |
@@ -475,7 +475,7 @@ plugins/ndf/
 | `_run_parser` | `cli.py` | 変更 | シグネチャは変えない | `--max-rounds` の既定を None にする |
 | `cmd_scope` | `cli.py` | 変更 | シグネチャは変えない | 範囲を `local_scope.decide` に決めさせる |
 | `cmd_report` | `cli.py` | 変更 | シグネチャは変えない | 打った場所からメインディレクトリを決め、`manual=True` で起票する |
-| `_round` | `drive.py` | 変更 | シグネチャは変えない | 判定役へ指摘の種類を求めるか（`use_tracks`）を `_confirm` へ渡し、`_sort_leftovers` を呼び、振動の判定の履歴から残した指摘を除く |
+| `_round` | `drive.py` | 変更 | シグネチャは変えない | 判定役へ指摘の種類を求めるか（`use_tracks`）を `_confirm_heavy` へ渡し、`_sort_leftovers` を呼び、振動の判定の履歴から残した指摘を除く |
 
 `Hub` に `leftovers: Optional[Callable[[int], leftover.Port]] = None` を足す。
 
@@ -491,9 +491,9 @@ plugins/ndf/
 | 実装の PR で `origin` があり、比較基点が同じ | 起点は `origin.head`、足すファイル無し |
 | 実装の PR で比較基点が違う | `new_in_pr` の結果を足す。None なら全差分で線引きなし |
 
-線引きをするのは、実装の PR で、状態ファイルの通算で 2 ラウンド目以降で、`line_origin` があり、比較基点の変化で足すファイルが無いラウンドである。足すファイルの有無は、`origin` が無くて全差分になるラウンドでも、`line_origin` の比較基点が今と違えば `new_in_pr` で確かめる。`_confirm` の `use_tracks` を真にするのは、線引きをするラウンドで、このラウンドの新しい重い指摘に、MVV の項目を持ち `proceeds` が偽のものがある場合だけである。その指摘は、回答の指摘の種類によって、進むか（保護の種類が付く）、起票するかが変わる。
+線引きをするのは、実装の PR で、状態ファイルの通算で 2 ラウンド目以降で、`line_origin` があり、比較基点の変化で足すファイルが無いラウンドである。足すファイルの有無は、`origin` が無くて全差分になるラウンドでも、`line_origin` の比較基点が今と違えば `new_in_pr` で確かめる。`_confirm_heavy` の `use_tracks` を真にするのは、線引きをするラウンドで、このラウンドの新しい重い指摘に、MVV の項目を持ち `proceeds` が偽のものがある場合だけである。その指摘は、回答の指摘の種類によって、進むか（保護の種類が付く）、起票するかが変わる。
 
-保護の対象の指摘は `proceeds` の順 7 で進むと決まっていて、起票もしない。critical や変えた行の MVV の指摘も進むと決まっている。これらだけのラウンドでは、判定役を起動しない（ほかの理由で起動するラウンドでは、今のとおり一緒に渡る）。`proceeds` に渡す `touched` は、`_confirm` の前に 1 回読み、`_sort_leftovers` でも使う。
+保護の対象の指摘は `proceeds` の順 7 で進むと決まっていて、起票もしない。critical や変えた行の MVV の指摘も進むと決まっている。これらだけのラウンドでは、判定役を起動しない（ほかの理由で起動するラウンドでは、今のとおり一緒に渡る）。`proceeds` に渡す `touched` は、`_confirm_heavy` の前に 1 回読み、`_sort_leftovers` でも使う。
 
 `run.history`（振動の判定に使う、ラウンドごとの指摘のキーの集合）へは、`enter` が返したキーから、下げた指摘（`Checked.lowered`）と残した指摘（`_sort_leftovers` の返り）を除いて足す。どちらも修正担当へ渡らないので、後でもう一度出ても、直しては戻す往復には当たらないためである。
 

@@ -16,8 +16,10 @@ from ndf.domains.crossreview import criteria_decide
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv_decide
 
+# ラウンドの記録で、そのラウンドが判定役の起動を試み、出力を保存できたときの名前（ファイル名の拡張子より前）を持つキー。回答の有無は表さない
+ROUND_KEY = "judge_output"
 # 指示に載せる指摘の欄（書いた相手役 `by` は載せない）
-_SHOWN = ("id", "severity", "text", "impact", "path", "line", "section")
+_SHOWN = ("id", "severity", "text", "impact", "path", "line", "section", "diffs")
 
 
 class Verdict(NamedTuple):
@@ -40,6 +42,8 @@ class Answers(NamedTuple):
 
     verdicts: Mapping[str, Verdict]
     warnings: tuple[str, ...] = ()
+    # 起動を試みて保存できた出力の名前（回答が無くても持つ）。起動を試みていないか、保存できた出力が無ければ空
+    record: str = ""
 
 
 def _never_asked(row: Mapping[str, Any]) -> bool:
@@ -62,22 +66,29 @@ def select(rows: Sequence[Mapping[str, Any]], use_tracks: bool = False) -> list[
     return []
 
 
-def instruction(rows: Sequence[Mapping[str, Any]], diff: Path, worktree: Path, criteria: Sequence[str]) -> str:
-    """判定役への指示。`criteria` は指摘の基準の行。誰が書いた指摘かは載せない。"""
+def listing(rows: Sequence[Mapping[str, Any]]) -> str:
+    """判定役が読む指摘の一覧のファイルの中身（指摘 1 件が JSON の 1 行）。誰が書いた指摘かは載せない。"""
+    return "".join(json.dumps({k: row[k] for k in _SHOWN if row.get(k) is not None}, ensure_ascii=False) + "\n" for row in rows)
+
+
+def instruction(listed: Path, diffs: Sequence[Path], worktree: Path, criteria: Sequence[str]) -> str:
+    """判定役への指示。`listed` は指摘の一覧（`listing`）のファイル、`criteria` は指摘の基準の行。指示はプロセスの引数に
+    載るので、指摘の文は書かずにファイルのパスだけを書く。`diffs` は確かめに使う差分のファイルで、2 つ以上なら、どの指摘が
+    どれに基づくかは一覧の行の `diffs` が持つ。"""
     text = criteria_decide.verify_text()
     kinds = {"protect": "・".join(criteria_decide.protect_kinds()), "all": "・".join(criteria_decide.track_kinds())}
-    listed = [json.dumps({k: row[k] for k in _SHOWN if row.get(k) is not None}, ensure_ascii=False) for row in rows]
     return "\n".join(
         [
-            text["system"],
             *text["steps"],
             f"作業場所: {worktree}",
-            f"このラウンドの差分: {diff}",
+            f"このラウンドの差分: {diffs[0]}"
+            if len(diffs) == 1
+            else f"差分: {'・'.join(map(str, diffs))}（指摘が基づく差分は、一覧のその行の diffs にある）",
             "## 指摘の基準",
             *criteria,
             "## 指摘の一覧",
             text["data"],
-            *listed,
+            f"指摘の一覧のファイル: {listed}",
             "## 回答の形",
             text["tracks"].format(**kinds),
             text["answer"],
@@ -170,6 +181,18 @@ def read(found: Optional[Sequence[Mapping[str, Any]]], ids: Sequence[str]) -> An
             verdicts[fid] = verdict
     repeated = [fid for fid, items in given.items() if len(items) > 1]
     return Answers(verdicts, _warnings(ids, verdicts, repeated, unknown))
+
+
+def unlowering(answers: Answers, why: str = "判定役がファイルの読み取りを拒否された") -> Answers:
+    """否定の回答を採れない起動（理由 `why`。資料のほかのファイルの読み取りの拒否か、確かめられない出力）の回答。どの指摘に
+    響くかを決められないので、成り立たないとした回答はどれも判断できないにする（指摘の種類は残す）。起きると示せた回答は
+    変えない。"""
+    refused = [v.id for v in answers.verdicts.values() if v.holds is False]
+    if not refused:
+        return answers
+    verdicts = {fid: v._replace(holds=None) if fid in refused else v for fid, v in answers.verdicts.items()}
+    warning = f"{why}ので、成り立たないとした回答を採らず下げない: {'・'.join(refused)}"
+    return answers._replace(verdicts=verdicts, warnings=(*answers.warnings, warning))
 
 
 def lowers(row: Mapping[str, Any], verdict: Verdict) -> bool:

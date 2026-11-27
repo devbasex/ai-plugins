@@ -11,10 +11,11 @@ import json
 from collections.abc import Mapping
 from typing import Any, Optional
 
+from ndf import values
 from ndf.domains.crossrefactor.allocation_decide import is_number
 
 # claude の `--output-format json` の外側の JSON で費用（USD）を持つキー
-REPORTED = "total_cost_usd"
+REPORTED = values.CLAUDE_COST_KEY
 
 
 def reported(output: str) -> Optional[float]:

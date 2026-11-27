@@ -159,10 +159,11 @@ class Basis(NamedTuple):
     pr: Optional[str] = None
 
 
-def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
+def _matches(record: Mapping[str, Any], basis: Basis, checked: bool = True) -> bool:
     """ラウンドの記録が `basis` に合うか。`basis` の値があれば、比較基点（`BASE`）が違う・そのラウンドを読んだ相手役
     （`REVIEWERS`）に無い相手役がいる・重点（`FOCUS`）か単位の指示（`UNIT`）か読んだ PR（`PR`）か MVV（`MVV`）が違うときは合わない。承認済みの MVV があるのに、
-    そのラウンドの head で根拠の記述を確かめ終えていない（`finish_decide.MVV_CHECKED`）ときも合わない（#4090）。"""
+    そのラウンドの head で根拠の記述を確かめ終えていない（`finish_decide.MVV_CHECKED`）ときも合わない（#4090）。`checked` が
+    偽なら、確かめ終えたかは見ない。"""
     if basis.base is not None and record.get(BASE) != basis.base:
         return False
     if basis.reviewers is not None and not _seated_read(record, basis):
@@ -178,7 +179,13 @@ def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
         return True
     if _known(_mvv_record(record).get(MVV_ID)) != basis.mvv:
         return False
-    return not basis.mvv.startswith(_APPROVED) or record.get(fin.MVV_CHECKED) is True
+    return not checked or not basis.mvv.startswith(_APPROVED) or record.get(fin.MVV_CHECKED) is True
+
+
+def same_review(record: Mapping[str, Any], basis: Basis) -> bool:
+    """判定待ちで残した相手役の結果が、今回の条件 `basis` で読んだものか。根拠の記述を確かめ終えたかは見ない。head が PR に
+    届いていないと確かめ終えないが、相手役が読んだ差分と指示は変わらない（#4363）。"""
+    return _matches(record, basis, checked=False)
 
 
 def _seated_read(record: Mapping[str, Any], basis: Basis) -> bool:

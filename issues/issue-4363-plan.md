@@ -18,7 +18,7 @@
 | `src/ndf/domains/crossreview/verify.py`（新設） | `ask` |
 | `src/ndf/domains/crossreview/criteria_decide.py` | `protect_kinds`・`track_kinds`・`protect_of`・`document_line`、`reviewer_block`・`downgraded` |
 | `src/ndf/domains/crossreview/journal.py` | `protect`・`check`・`fresh`・`apply_checks` |
-| `src/ndf/domains/crossreview/drive.py` | 移動と `_confirm` |
+| `src/ndf/domains/crossreview/drive.py` | 移動と `_confirm_heavy` |
 | `src/ndf/domains/crossreview/report_decide.py` | 下げた行の元の重要度と定型の理由 |
 | `contracts/data/review-criteria.json` | 指摘の種類の一覧、`protect` と判定役の指示の文 |
 | `contracts/limits/cross-review.remark-chars.json`・`cross-review.remarks-total.json` | 読み手のモジュール名（`ndf check` の `limit-readers` が実際の読み手と照らすため） |
@@ -55,7 +55,7 @@
 
 ### Task 5: 判定役を起動して駆動へ組み込む
 - **対象ファイル:** `verify.py`、`drive.py`、`review-criteria.json`、`test_crossreview_verify.py`
-- **変更内容:** `ask`、`_confirm`
+- **変更内容:** `ask`、`_confirm_heavy`
 - **満たす受け入れ条件:** 4363:3・4
 - **進め方:** 偽の起動で `ndf cross-review run` を通す失敗するテスト（成り立たない major だけなら修正担当を起動せずに収束する・判定役の失敗では下げない・渡す指摘が無ければ起動しない）→ 最小実装 → 整理
 

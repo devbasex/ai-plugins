@@ -8,19 +8,23 @@
    Markdown が `cross-review.design-doc-lines` の行数を超えれば注意に載せる（止めない。#3941）。承認済みの MVV があれば、PR 全体で
    足した MVV の根拠の記述を機械で確かめ、誤りを NDF の指摘としてジャーナルへ入れる（`changes.citations`。解決も次の確かめだけが決める。#4076）
 2. 相手役（`ndf.core.converge.participants`）を並べて起動し、最後の 1 行の `{"findings": [...]}` を読む。相手役へは
-   指摘の基準と重要度（`criteria_decide`）と、PR に既にあるコメント（起動の始めに 1 回だけ読み、`prior_decide.others`・`relevant` で絞る。#3941）を渡す。サンドボックスが
+   指摘の基準と重要度（`criteria_decide`）と、PR に既にあるコメント（1 回の起動で 1 回だけ読み、`prior_decide.others`・`relevant` で絞る。#3941）を渡す。サンドボックスが
    コマンドを打てなかった相手役（標準エラーの `bwrap:`）は読めなかったとして回答を指摘に入れない。読めなかった相手役は
    同じラウンドで 1 度だけ起動し直す。誰も読めなければ `precondition` で止める（#3893）。一部が読めなければ、その
    ラウンドを収束に数えず `incomplete_reviewers` で終える（#3941）。起動し直しても結果の無い席が claude 以外だけなら、その席を
    claude の読むだけの起動で埋め、2 者の指摘で判定する。埋めた席は以後のラウンドも座り続ける（`participants.fill_targets`。#3955）
-3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない
+3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない。このラウンドで
+   新しく出たか戻った critical・major があれば、読むだけの claude（判定役。`verify`）を 1 回起動して起きるかを確かめ、
+   成り立たないと分かった指摘を minor へ下げる（下げない指摘は `verify_decide`。#4363）
 4. 収束の妨げになる重さ（`criteria_decide.blocking`）の未解決の指摘と、まだ決めていない足すべき内容（`--findings`。#2444）が
    無ければ収束。必ず人の承認が要る操作に当たる指摘（`mvv` が `P`・`C` の番号）は、修正担当へ渡さず、収束も止めず、
    人の承認を待つ指摘として残す（#4076）。前々ラウンドの指摘が戻っていれば振動で止める
 5. 修正担当（claude）を起動し、修正の結果ファイル（`store.fix_result_path`）の指摘ごとの「直した」「見送った（理由）」を
    ジャーナルへ読み込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけマージする。#2440）
 
-相手役へ渡す資料と指示の組み立て、起動し直しと席の埋めは `reviewing` が持つ。
+相手役へ渡す資料と指示の組み立て、起動し直しと席の埋めは `reviewing` が持つ。判定役を起動するラウンドは、起動の直前に相手役の
+結果を判定待ちのラウンド（`pending_review`）として保存する。ラウンドの記録を作る前に中断した打ち直しは、同じ対象と足すべき内容なら
+保存した結果を使い、結果の無い席だけを起動して 3 から続ける（#4363）。
 
 状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら、最後のコミットの根拠の記述を
 確かめてから `summary.json`（`finish_decide` が読む形）を書き、MVV に反するとした指摘を MVV の記録に残す（#4076）。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
@@ -35,7 +39,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -61,10 +65,12 @@ from ndf.domains.crossreview import (
     settings,
     store,
     threads,
+    verify,
+    verify_decide,
 )
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.fixer import Launcher
-from ndf.domains.crossreview.journal import FindingJournal
+from ndf.domains.crossreview.journal import Checked, FindingJournal
 from ndf.domains.crossreview.scope_decide import Filled
 from ndf.domains.crossreview.settings import DriveStopped, RunConfig
 from ndf.domains.records import jsonl, mvv
@@ -119,8 +125,10 @@ class _Run:
     warnings: list[str]
     process: list[dict[str, str]]
     history: list[frozenset[str]]
-    # PR の既存のコメント（起動の始めに 1 回だけ読む。読めなければ空）
+    # PR の既存のコメント（PR コメントは起動の始めに 1 回だけ読む。読めなければ空）
     remarks: Sequence[prior_decide.Remark] = ()
+    # インラインのレビューコメントとレビュー本文をまだ読んでいなければ、読んで返す関数（相手役を初めて起動する直前に 1 回だけ呼ぶ）
+    unread_reviews: Optional[Callable[[], Sequence[prior_decide.Remark]]] = None
     # 起動の始めにベースブランチ（`--base` がコミットなら PR のマージ先）から読んだプロジェクト MVV（#4076）
     snapshot: Optional[mvv.Snapshot] = None
     # MVV を見分ける値と、MVV を読んだブランチ（ラウンドの記録に残す。#4076）
@@ -534,6 +542,35 @@ def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
     return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr)
 
 
+def _confirm_heavy(
+    run: _Run,
+    round_no: int,
+    diff: Path,
+    launch: Launcher,
+    use_tracks: bool = False,
+    filled: Optional[reviewing.FilledRead] = None,
+) -> Checked:
+    """直前の `enter` で新しく出たか戻った critical・major を判定役に確かめ、回答をジャーナルへ当てる（#4363）。渡す指摘が
+    無ければ起動しない。`use_tracks` は、回答の指摘の種類を使う処理があるラウンドで真にする。
+
+    判定役の起動は 1 回で、指摘ごとに、それを出した席が読んだ差分を渡す。席を埋めたラウンド（`filled`）の埋めた席の指摘は
+    全差分、ほかはラウンドの差分 `diff` である（一方の差分に載る変更が、他方に載るとは限らない）。"""
+    heavy = [row for row in map(run.journal.rows.__getitem__, run.journal.fresh) if _heavy(row.get("severity"))]
+    asked = verify_decide.select(heavy, use_tracks)
+    if not asked:
+        return Checked()
+    diffs = {str(row["id"]): (diff,) if filled is None else filled.diffs(row.get("key"), diff) for row in asked}
+    answers = verify.ask(run, round_no, asked, diffs, launch)
+    run.warnings += [f"round {round_no}: {warning}" for warning in answers.warnings]
+    return run.journal.apply_checks(list(diffs), answers.verdicts)._replace(record=answers.record)
+
+
+def _heavy(severity: object) -> bool:
+    """尺度にある収束の妨げになる重さ（critical・major）か。重要度の無い引き継いだ行は偽。"""
+    known = criteria_decide.severity_of(severity)
+    return known is not None and criteria_decide.blocking(known)
+
+
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
     """ラウンドの判定（収束・振動・修正が要る）。"""
     if not open_ and not handed:
@@ -565,22 +602,57 @@ def _round_record(run: _Run, round_no: int, prep: reviewing.Prepared) -> dict[st
     return record
 
 
-def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
-    """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
-    rounds = run.data.setdefault(store.ROUNDS, [])
-    prep = _prepare_round(run, round_no)
-    got = reviewing.review_round(run, round_no, prep, reviewing.remarks_file(run, round_no, reviewing.remarks(run, prep)), launch)
-    raised, unread = got.raised, {s: u.hint for s, u in got.unread.items()}
+def _reviewed(run: _Run, round_no: int, prep: reviewing.Prepared, launch: Launcher) -> reviewing.Reviewed:
+    """相手役の結果。判定待ちで残った同じ対象のラウンドがあれば使い、結果の無い席か、残っていなければ全部の席を起動して
+    受け取る（#4363）。"""
+    held = reviewing.kept(run, round_no, prep, _basis(run, prep.head, run.cfg.may_fill))
+    if held is not None and not held.unread:
+        return held
+    if run.unread_reviews is not None:
+        run.remarks = [*run.remarks, *run.unread_reviews()]
+        run.unread_reviews = None
+    remarks = reviewing.remarks_file(run, round_no, reviewing.remarks(run, prep))
+    got = reviewing.review_round(run, round_no, prep, remarks, launch, held)
     if got.silent:
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く。
         # precondition の詳細は手元にだけ返るので、標準エラーのログを絶対パスで示す（PR 4461 の r3-1）
         local = [u.local for u in got.unread.values()]
         raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(local))
-    run.history.append(run.journal.enter(round_no, raised, run.mvv_items, run.mvv))
+    return got
+
+
+def _keeping(run: _Run, round_no: int, prep: reviewing.Prepared, got: reviewing.Reviewed, launch: Launcher) -> Launcher:
+    """判定役の起動の直前に、判定待ちのラウンドを保存する起動（判定役の待ちで中断しても、打ち直しがレビューからやり直さない。
+    起動しないラウンドは、状態を読みも書きも複製もしない。#4363）。足す先は状態ファイルの中身である。ラウンドの途中では
+    状態ファイルを書かないので、このラウンドの指摘をジャーナルへ入れる前の状態が残り、打ち直しが同じ指摘を入れ直して同じように
+    判定役へ渡す。"""
+
+    def judging(spec: agents.Launch) -> agents.AgentStatus:
+        data = store.read_state(run.ref)
+        data[store.PENDING_REVIEW] = reviewing.pending(run, _round_record(run, round_no, prep), prep, got)
+        store.write_object(run.ref.path, data)
+        return launch(spec)
+
+    return judging
+
+
+def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
+    """1 ラウンドを回す。終わり方（`finish_decide` の FINALS）か、次へ進むなら None。"""
+    rounds = run.data.setdefault(store.ROUNDS, [])
+    prep = _prepare_round(run, round_no)
+    got = _reviewed(run, round_no, prep, launch)
+    raised, unread = got.raised, {s: u.hint for s, u in got.unread.items()}
+    keys = run.journal.enter(round_no, raised, run.mvv_items, run.mvv)
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
+    # 確認で下げた指摘は、振動の判定のキーに数えない
+    checked = _confirm_heavy(run, round_no, prep.diff, _keeping(run, round_no, prep, got, launch), filled=got.filled)
+    run.history.append(keys - checked.lowered)
     record = _round_record(run, round_no, prep)
+    if checked.record:  # 中断した起動の出力も保存先に残るので、このラウンドの起動の保存できた出力を名指す（回答の有無は表さない）
+        record[verify_decide.ROUND_KEY] = checked.record
     rounds.append(record)
+    run.data.pop(store.PENDING_REVIEW, None)
     if unread:
         # 読めなかった相手役の分を収束に数えない（#3941）。読めた相手役の指摘はジャーナルに残し、次の起動で続ける
         record["verdict"] = fin.INCOMPLETE_REVIEWERS
@@ -638,7 +710,7 @@ def drive(
 ) -> Outcome:
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
-    いつも読み、PR のマージ先は `--base` がコミットのときだけスレッドと同じ応答から読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は前回の結果を返さないときだけ読む（PR 3944 の r2-10）。
+    いつも読み、PR のマージ先は `--base` がコミットのときだけスレッドと同じ応答から読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は相手役を初めて起動する直前に 1 回だけ読む（前回の結果を返すときと、判定待ちの結果だけで終わるときは読まない。PR 3944 の r2-10・#4363）。
     `clean` は、結果と MVV の記録に残す自由記述を伏せる処理（省けば秘密だけを伏せる）。"""
     cfg = settings.outside_checkout(cfg)
     try:
@@ -675,7 +747,8 @@ def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[carry.Reader
         run.process.append({"run": f"round {n}", "result": "head が変わっていないので前回の結果（converged）を返した"})
         seats.reused_warnings(run)
         return _summary(run, fin.CONVERGED, n, reused=True)
-    run.remarks = [*prior.comments, *carry.read_reviews(prs, run.warnings)]
+    run.remarks = prior.comments
+    run.unread_reviews = lambda: carry.read_reviews(prs, run.warnings)
     run.warnings += [seats.filled_warning(f, "起動の前") for f in cfg.prefilled]
     seats.fill_refused(run)
     final, done = fin.MAX_ROUNDS, 0

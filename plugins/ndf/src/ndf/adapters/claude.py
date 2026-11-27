@@ -31,6 +31,7 @@ from ndf.adapters import cli_floor, launch_slot, transcript
 from ndf.adapters.agents import usage_limit
 from ndf.adapters.run_log import child_process_env, record_cost
 from ndf.contracts import facts, limits
+from ndf.values import CLAUDE_COST_KEY
 
 CLAUDE = facts.value("runtimes", "claude", "executable")
 # 導入済みのプラグインの一覧を読む時間の上限の方針（contracts/limits/）
@@ -498,7 +499,7 @@ def _parse_reply(stdout: str) -> ClaudeReply:
     payload = _payload(stdout)
     if isinstance(payload, ClaudeReply):
         return payload
-    spent = payload.get("total_cost_usd")
+    spent = payload.get(CLAUDE_COST_KEY)
     cost = float(spent) if isinstance(spent, (int, float)) else 0.0
     text = payload.get("result") if isinstance(payload.get("result"), str) else stdout
     if payload.get("is_error"):

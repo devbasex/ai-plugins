@@ -31,6 +31,8 @@ REVIEWED = "reviewed_sections"
 # `reviewed_sections` のセクションを読んだときの MVV を見分ける値（#4076）
 REVIEWED_MVV = "reviewed_mvv"
 FINDINGS = "findings"
+# 相手役の結果を受け取り、まだラウンドの記録にしていないラウンド（判定役の待ちで中断した打ち直しが使う。#4363）
+PENDING_REVIEW = "pending_review"
 # MVV の記録を書けなかった原因（保存先のパスを含むので手元だけに残す。書けたら消す。#4076）
 MVV_RECORD_ERROR = "mvv_record_error"
 # 直した通常の指摘を MVV の記録の保留と照らし終えた状態（`{"pr": <番号>, "at": <時刻>, "size": <バイト位置>, "keys": [...]}`）。
