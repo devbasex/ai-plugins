@@ -122,10 +122,17 @@ def review_prompt(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Opt
 
 
 class FilledRead(NamedTuple):
-    """埋めた席が読んだ全差分のファイル `diff` と、埋めた席だけが出した指摘のキー `keys`。"""
+    """埋めた席が読んだ全差分のファイル `diff` と、埋めた席が出した指摘のキー `keys`、ほかの席が出した指摘のキー `others`。"""
 
     diff: Path
     keys: frozenset[str]
+    others: frozenset[str]
+
+    def diffs(self, key: object, round_diff: Path) -> tuple[Path, ...]:
+        """キー `key` の指摘を出した席が読んだ差分。両方の席が出した指摘は、ラウンドの差分 `round_diff` と全差分の両方。"""
+        if key not in self.keys:
+            return (round_diff,)
+        return tuple(dict.fromkeys((round_diff, self.diff))) if key in self.others else (self.diff,)
 
 
 class Reviewed(NamedTuple):
@@ -161,7 +168,7 @@ def review_round(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Opti
     if not targets:
         return Reviewed(raised, unread, False)
     more, left, full = _fill_seats(run, round_no, prep, remarks, {t: unread[t] for t in targets}, launch)
-    return Reviewed(raised + more, left, False, FilledRead(full, _keys(more) - _keys(raised)))
+    return Reviewed(raised + more, left, False, FilledRead(full, _keys(more), _keys(raised)))
 
 
 def _fill_seats(

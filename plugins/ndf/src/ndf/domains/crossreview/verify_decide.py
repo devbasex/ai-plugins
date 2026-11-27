@@ -17,7 +17,7 @@ from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv_decide
 
 # 指示に載せる指摘の欄（書いた相手役 `by` は載せない）
-_SHOWN = ("id", "severity", "text", "impact", "path", "line", "section")
+_SHOWN = ("id", "severity", "text", "impact", "path", "line", "section", "diffs")
 
 
 class Verdict(NamedTuple):
@@ -67,9 +67,10 @@ def listing(rows: Sequence[Mapping[str, Any]]) -> str:
     return "".join(json.dumps({k: row[k] for k in _SHOWN if row.get(k) is not None}, ensure_ascii=False) + "\n" for row in rows)
 
 
-def instruction(listed: Path, diff: Path, worktree: Path, criteria: Sequence[str]) -> str:
+def instruction(listed: Path, diffs: Sequence[Path], worktree: Path, criteria: Sequence[str]) -> str:
     """判定役への指示。`listed` は指摘の一覧（`listing`）のファイル、`criteria` は指摘の基準の行。指示はプロセスの引数に
-    載るので、指摘の文は書かずにファイルのパスだけを書く。"""
+    載るので、指摘の文は書かずにファイルのパスだけを書く。`diffs` は確かめに使う差分のファイルで、2 つ以上なら、どの指摘が
+    どれに基づくかは一覧の行の `diffs` が持つ。"""
     text = criteria_decide.verify_text()
     kinds = {"protect": "・".join(criteria_decide.protect_kinds()), "all": "・".join(criteria_decide.track_kinds())}
     return "\n".join(
@@ -77,7 +78,9 @@ def instruction(listed: Path, diff: Path, worktree: Path, criteria: Sequence[str
             text["system"],
             *text["steps"],
             f"作業場所: {worktree}",
-            f"このラウンドの差分: {diff}",
+            f"このラウンドの差分: {diffs[0]}"
+            if len(diffs) == 1
+            else f"差分: {'・'.join(map(str, diffs))}（指摘が基づく差分は、一覧のその行の diffs にある）",
             "## 指摘の基準",
             *criteria,
             "## 指摘の一覧",

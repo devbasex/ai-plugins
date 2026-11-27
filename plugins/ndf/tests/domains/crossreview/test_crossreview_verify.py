@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -62,7 +63,7 @@ def test_issue_4363_instruction_lists_the_findings_without_their_author() -> Non
     listed = verify_decide.listing(rows)
     for part in ("r2-1", "r2-2", "r2-3", "保存が止まる", "critical", "入力が消える", "src/a.py", "10", "a.md#見出し"):
         assert part in listed
-    text = verify_decide.instruction(Path("/in/findings.jsonl"), Path("/in/round2.diff"), Path("/work/tree"), criteria)
+    text = verify_decide.instruction(Path("/in/findings.jsonl"), [Path("/in/round2.diff")], Path("/work/tree"), criteria)
     for part in ("/in/findings.jsonl", "/in/round2.diff", "/work/tree", "1. 基準の行", "verdicts"):
         assert part in text
     assert all(kind in text for kind in criteria_decide.track_kinds())
@@ -239,7 +240,14 @@ def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers
     other.write_text("別のファイル", encoding="utf-8")
     other.chmod(0o644)
     (tmp_path / "round1-verify.out").symlink_to(other)
-    answers = verify.ask(run, 1, [_row()], diff, _launcher(seen, [holding(_row())]))
+    modes: list[int] = []
+    answered = _launcher(seen, [holding(_row())])
+
+    def launch(spec: agents.Launch) -> agents.AgentStatus:
+        modes.append(spec.paths.out.parent.stat().st_mode & 0o777)
+        return answered(spec)
+
+    answers = verify.ask(run, 1, [_row()], {"r1-1": [diff]}, launch)
     assert answers.verdicts["r1-1"].holds is True and answers.warnings == ()
     [spec] = seen
     argv = list(spec.argv)
@@ -250,9 +258,11 @@ def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers
     listed = diff.parent / "round1-verify-findings.jsonl"
     assert str(listed) in argv[-1] and not any("保存が止まる" in a for a in argv)
     assert "保存が止まる" in listed.read_text(encoding="utf-8")
-    # 判定役の出力は、この起動で作った実行者だけが開けるディレクトリに置く
+    # 出力はこの起動で作った実行者だけが開けるディレクトリに書かせ、記録を状態の保存先へ移してディレクトリを消す
     held = spec.paths.out.parent
-    assert held.parent == tmp_path and spec.paths.err.parent == held and held.stat().st_mode & 0o777 == 0o700
+    assert held.parent == tmp_path and modes == [0o700] and not held.exists()
+    record = tmp_path / "round1-verify.out"
+    assert not record.is_symlink() and record.stat().st_mode & 0o777 == 0o600 and "verdicts" in record.read_text(encoding="utf-8")
     assert (other.read_text(encoding="utf-8"), other.stat().st_mode & 0o777) == ("別のファイル", 0o644)
     assert run.notes == [(1, "verify", "判定役へ 1 件、有効な回答 1 件")]
 
@@ -260,7 +270,7 @@ def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers
 def test_issue_4363_ask_points_the_mvv_criterion_at_the_copies_in_the_input_directory(tmp_path: Path) -> None:
     """MVV の本文と共通原則は、判定役が読める資料のディレクトリへ写してから基準 5 で指す。"""
     snap, diff, seen = _approved(tmp_path), _diff(tmp_path), []
-    verify.ask(_AskRun(tmp_path, snap), 1, [_row()], diff, _launcher(seen, []))
+    verify.ask(_AskRun(tmp_path, snap), 1, [_row()], {"r1-1": [diff]}, _launcher(seen, []))
     prompt = seen[0].argv[-1]
     for source in (snap.path, snap.principles_path):
         copied = diff.parent / source.name
@@ -278,8 +288,9 @@ def test_issue_4363_ask_failure_gives_no_answer_and_one_warning(tmp_path: Path, 
         "no-json": _launcher(seen, None),
         "empty": _launcher(seen, []),
     }[how]
-    answers = verify.ask(_AskRun(tmp_path), 1, [_row()], diff, launch)
+    answers = verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [diff]}, launch)
     assert answers.verdicts == {} and len(answers.warnings) == 1 and len(seen) == 1
+    assert not seen[0].paths.out.parent.exists() and (tmp_path / "round1-verify.out").is_file()
     # 注意は PR の記録に載るので、手元の絶対パスを書かない
     assert str(tmp_path) not in answers.warnings[0]
 
@@ -287,7 +298,7 @@ def test_issue_4363_ask_failure_gives_no_answer_and_one_warning(tmp_path: Path, 
 def test_issue_4363_ask_does_not_launch_when_the_mvv_cannot_be_copied(tmp_path: Path) -> None:
     snap = _approved(tmp_path)._replace(path=tmp_path / "無い.md")
     seen: list = []
-    answers = verify.ask(_AskRun(tmp_path, snap), 1, [_row()], _diff(tmp_path), _launcher(seen, []))
+    answers = verify.ask(_AskRun(tmp_path, snap), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher(seen, []))
     assert answers.verdicts == {} and len(answers.warnings) == 1 and seen == []
     assert str(tmp_path) not in answers.warnings[0]
 
@@ -343,19 +354,28 @@ def test_issue_4363_run_does_not_launch_the_judge_without_a_finding_to_ask(
 
 
 @pytest.mark.parametrize(
-    "from_codex, from_filled, diff",
-    [([], "major", "round2-full.diff"), ([{**HEAVY, "text": "削除が止まる"}], "minor", "round2.diff")],
-    ids=["filled-finding-asked", "filled-finding-not-asked"],
+    "from_codex, filled_text, filled_severity, diffs",
+    [
+        ([], "読み込みが止まる", "major", ["round2-full.diff"]),
+        (["削除が止まる"], "読み込みが止まる", "minor", ["round2.diff"]),
+        (["削除が止まる"], "読み込みが止まる", "major", ["round2.diff", "round2-full.diff"]),
+        ([("読み込みが止まる", "minor")], "読み込みが止まる", "major", ["round2.diff", "round2-full.diff"]),
+    ],
+    ids=["filled-only", "filled-not-asked", "both-seats-asked", "same-finding-from-both"],
 )
-def test_issue_4363_run_gives_the_judge_the_full_diff_only_for_a_filled_seats_finding(
-    wt: Path, tmp_path: Path, capsys, monkeypatch, from_codex: list, from_filled: str, diff: str
+def test_issue_4363_run_gives_the_judge_the_diffs_read_by_the_seats_of_the_asked_findings(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, from_codex: list, filled_text: str, filled_severity: str, diffs: list
 ) -> None:
-    """差分を絞るラウンドでは、埋めた席の指摘を判定役へ渡すときだけ、その席が読んだ全差分を渡す。"""
-    other = {**HEAVY, "text": "読み込みが止まる", "severity": from_filled}
-    fake = Fake(tmp_path / "st", {"codex": [[HEAVY], from_codex], "kiro": [[], FAIL, FAIL], "claude": [[other]]})
+    """席を埋めたラウンドの判定役は 1 回の起動で、渡す指摘を出した席が読んだ差分をすべて読む。"""
+    said = [(f, "major") if isinstance(f, str) else f for f in from_codex]
+    codex = [{**HEAVY, "text": text, "severity": severity} for text, severity in said]
+    filled = {**HEAVY, "text": filled_text, "severity": filled_severity}
+    fake = Fake(tmp_path / "st", {"codex": [[HEAVY], codex], "kiro": [[], FAIL, FAIL], "claude": [[filled]]})
     _run(capsys, monkeypatch, fake, wt)
     first, second = (spec.argv[-1] for spec in fake.judged[:2])
-    assert "round1.diff" in first and diff in second
+    assert "round1.diff" in first
+    [line] = [line for line in second.splitlines() if line.startswith(("このラウンドの差分: ", "差分: "))]
+    assert re.findall(r"round2[\w-]*\.diff", line) == diffs
 
 
 def test_issue_4363_lowered_finding_is_not_counted_as_a_return(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

@@ -2,8 +2,8 @@
 
 判定役は、修正担当・相手役とは別の、読むだけの claude の起動である（`participants.read_only_launch`）。読める場所は
 レビューする worktree と、この実行の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV の写し）だけである。
-指摘の文はプロセスの引数に載せず一覧のファイルで渡す。一覧は資料のディレクトリに、判定役の出力は起動ごとに新しく作る
-ディレクトリに置き、どちらのディレクトリも実行者だけが開ける。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の `drive` である。
+指摘の文はプロセスの引数に載せず一覧のファイルで渡す。一覧は、実行者だけが開ける資料のディレクトリに置く。判定役の出力は
+起動ごとに新しく作る実行者だけが開けるディレクトリに書かせ、起動の後で記録を状態の保存先へ移してディレクトリを消す。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の `drive` である。
 
 失敗しても例外で駆動を止めず、起動し直さない。回答なしと注意にする（どの指摘も下がらない）。注意は PR の記録に載るので、
 手元の絶対パス・指摘の本文・回答の中身を書かない。詳しい原因は過程にだけ残す。
@@ -50,10 +50,18 @@ def _readable_mvv(snap: Optional[mvv.Snapshot], into: Path) -> Optional[mvv.Snap
     return held._replace(path=copies[0], principles_path=copies[1])
 
 
-def _private_stem(stem: Path) -> Path:
-    """`stem` の横に新しく作った、実行者だけが開けるディレクトリ（0700）の中の同じ名前を返す。回答は非公開の内容を含みうる。
-    前からあるファイルやシンボリックリンクは開かず、権限も変えない。"""
-    return Path(tempfile.mkdtemp(prefix=f"{stem.name}-", dir=stem.parent)) / stem.name
+def _keep_records(run: VerifyRun, round_no: int, held: Path, into: Path) -> None:
+    """起動ごとのディレクトリ `held` の記録を、実行者だけが読めるファイルにして `into` へ移し、`held` を消す。同じ名前の前からの
+    ファイルやシンボリックリンクは、開かずに置き換える。移せない記録はディレクトリと一緒に消える。"""
+    for record in held.iterdir():
+        if record.is_symlink() or not record.is_file():
+            continue
+        try:
+            record.chmod(0o600)
+            record.replace(into / record.name)
+        except OSError as exc:  # 診断の記録を移せなくても、判定の結果と駆動は変えない
+            run.note(round_no, "verify", f"判定役の記録 {record.name} を移せない（{exc}）")
+    shutil.rmtree(held, ignore_errors=True)
 
 
 def _unanswered(run: VerifyRun, round_no: int, count: int, why: str, warning: str) -> verify_decide.Answers:
@@ -62,25 +70,49 @@ def _unanswered(run: VerifyRun, round_no: int, count: int, why: str, warning: st
     return verify_decide.Answers({}, (warning,))
 
 
-def ask(run: VerifyRun, round_no: int, rows: Sequence[Mapping[str, Any]], diff: Path, launch: Launcher) -> verify_decide.Answers:
-    """指摘 `rows`（空でない）を判定役の 1 回の起動で確かめる。`diff` は指摘を書いた相手役が読んだ差分で、資料のディレクトリ
-    にある。"""
+def ask(
+    run: VerifyRun, round_no: int, rows: Sequence[Mapping[str, Any]], diffs: Mapping[str, Sequence[Path]], launch: Launcher
+) -> verify_decide.Answers:
+    """指摘 `rows`（空でない）を判定役の 1 回の起動で確かめる。`diffs` は指摘の番号ごとの、その指摘を出した相手役が読んだ
+    差分のファイルで、どれも資料のディレクトリにある。"""
     count = len(rows)
-    listed = diff.parent / f"round{round_no}-verify-findings.jsonl"
+    used = tuple(dict.fromkeys(diff for row in rows for diff in diffs[str(row["id"])]))
+    # 差分が 1 つなら、行ごとに繰り返し書かない
+    shown = rows if len(used) == 1 else [{**row, "diffs": [str(d) for d in diffs[str(row["id"])]]} for row in rows]
+    into = used[0].parent
+    listed = into / f"round{round_no}-verify-findings.jsonl"
+    stem = run.round_stem(round_no, "-verify")
     try:
-        snap = _readable_mvv(run.snapshot, diff.parent)
-        listed.write_text(verify_decide.listing(rows), encoding="utf-8")
+        snap = _readable_mvv(run.snapshot, into)
+        listed.write_text(verify_decide.listing(shown), encoding="utf-8")
         criteria = [
             *criteria_decide.criteria_lines(run.cfg.settings.focus, snap),
             *criteria_decide.document_line(run.documents, rows),
         ]
-        prompt = verify_decide.instruction(listed, diff, run.cfg.worktree, criteria)
-        system = str(criteria_decide.verify_text()["system"])
-        stem = _private_stem(run.round_stem(round_no, "-verify"))
-        spec = participants.read_only_launch(system, run.cfg.worktree, prompt, stem, readable=(diff.parent,))
+        prompt = verify_decide.instruction(listed, used, run.cfg.worktree, criteria)
+        # 回答は非公開の内容を含みうる。出力の先は新しく作り（0700）、前からあるファイルやリンクを開かない
+        held = Path(tempfile.mkdtemp(prefix=f"{stem.name}-", dir=stem.parent))
     except OSError as exc:
         warning = "判定役の資料（指摘の一覧・MVV の本文と共通原則の写し）か出力の保存先を用意できないので、判定役を起動せず下げない"
         return _unanswered(run, round_no, count, f"起動していない: {exc}", warning)
+    system = str(criteria_decide.verify_text()["system"])
+    spec = participants.read_only_launch(system, run.cfg.worktree, prompt, held / stem.name, readable=(into,))
+    try:
+        return _answers(run, round_no, rows, spec, (*used, listed), launch)
+    finally:
+        _keep_records(run, round_no, held, stem.parent)
+
+
+def _answers(
+    run: VerifyRun,
+    round_no: int,
+    rows: Sequence[Mapping[str, Any]],
+    spec: agents.Launch,
+    required: Sequence[Path],
+    launch: Launcher,
+) -> verify_decide.Answers:
+    """起動 `spec` を打ち、指摘 `rows` への回答を読む。`required` は判定役が読む資料のファイルである。"""
+    count = len(rows)
     status = launch(spec)
     if status.state != agents.AgentState.DONE:
         warning = f"判定役が終わらなかった（{status.state}）ので下げない"
@@ -89,7 +121,7 @@ def ask(run: VerifyRun, round_no: int, rows: Sequence[Mapping[str, Any]], diff: 
         answer = participants.claude_answer(spec.paths.out)
     except OSError:  # 出力の無い判定役は、回答を読めなかった扱いにする
         answer = participants.ClaudeAnswer("", ())
-    denied = participants.denied_reads(answer.denials, (diff, listed), spec.cwd)
+    denied = participants.denied_reads(answer.denials, required, spec.cwd)
     if denied:
         warning = f"判定役が資料のファイル {'・'.join(p.name for p in denied)} の読み取りを拒否されたので下げない"
         return _unanswered(run, round_no, count, f"permission_denials: {' / '.join(map(str, denied))}", warning)

@@ -549,17 +549,16 @@ def _confirm_heavy(
     """直前の `enter` で新しく出たか戻った critical・major を判定役に確かめ、回答をジャーナルへ当てる（#4363）。渡す指摘が
     無ければ起動しない。`use_tracks` は、回答の指摘の種類を使う処理があるラウンドで真にする。
 
-    判定役は 1 回の起動で 1 つの差分を読む。渡す指摘に埋めた席だけが出した指摘（`filled`）があれば、ラウンドの差分 `diff`
-    でなく、その席が読んだ全差分を渡す（ラウンドの差分には無い PR の変更を指しうる）。"""
+    判定役の起動は 1 回で、指摘ごとに、それを出した席が読んだ差分を渡す。席を埋めたラウンド（`filled`）の埋めた席の指摘は
+    全差分、ほかはラウンドの差分 `diff` である（一方の差分に載る変更が、他方に載るとは限らない）。"""
     heavy = [row for row in map(run.journal.rows.__getitem__, run.journal.fresh) if _heavy(row.get("severity"))]
     asked = verify_decide.select(heavy, use_tracks)
     if not asked:
         return Checked()
-    if filled is not None and any(row.get("key") in filled.keys for row in asked):
-        diff = filled.diff
-    answers = verify.ask(run, round_no, asked, diff, launch)
+    diffs = {str(row["id"]): (diff,) if filled is None else filled.diffs(row.get("key"), diff) for row in asked}
+    answers = verify.ask(run, round_no, asked, diffs, launch)
     run.warnings += [f"round {round_no}: {warning}" for warning in answers.warnings]
-    return run.journal.apply_checks([str(row["id"]) for row in asked], answers.verdicts)
+    return run.journal.apply_checks(list(diffs), answers.verdicts)
 
 
 def _heavy(severity: object) -> bool:
