@@ -3,8 +3,9 @@
 判定役は、修正担当・相手役とは別の、読むだけの claude の起動である（`participants.read_only_launch`）。読める場所は
 レビューする worktree と、この実行の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV の写し）だけである。
 指摘の文はプロセスの引数に載せず一覧のファイルで渡す。一覧は、実行者だけが開ける資料のディレクトリに置く。判定役の出力は
-起動ごとに新しく作る実行者だけが開けるディレクトリに書かせる。起動の後の記録の保存と、古い記録の片付けは
-`judge_records` が持つ。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の `drive` である。
+起動ごとに新しく作る実行者だけが開けるディレクトリに書かせ、起動の後で記録を起動ごとの名前で状態の保存先へ移してディレクトリを
+消す。移した記録は残すだけで、片付けない。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の
+`drive` である。
 
 失敗しても例外で駆動を止めず、起動し直さない。回答なしと注意にする（どの指摘も下がらない）。注意は PR の記録に載るので、
 手元の絶対パス・指摘の本文・回答の中身を書かない。詳しい原因は過程にだけ残す。
@@ -12,14 +13,16 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
 from ndf.adapters import agents
 from ndf.core.converge import participants
-from ndf.domains.crossreview import criteria_decide, judge_records, verify_decide
+from ndf.domains.crossreview import criteria_decide, verify_decide
 from ndf.domains.crossreview.fixer import Launcher
 from ndf.domains.crossreview.settings import RunConfig
 from ndf.domains.records import mvv
@@ -50,6 +53,22 @@ def _readable_mvv(snap: Optional[mvv.Snapshot], into: Path) -> Optional[mvv.Snap
     return held._replace(path=copies[0], principles_path=copies[1])
 
 
+def _keep_records(run: VerifyRun, round_no: int, held: Path, stem: Path) -> None:
+    """起動ごとのディレクトリ `held` の記録を、実行者だけが読めるファイルにして `stem` の隣へ移し、`held` を消す。移し先の
+    名前は、`stem` の名前の部分を `held` の名前（起動ごとに違う）に替えたものである。前からある同じ名前のファイルやリンクは
+    置き換えない（`os.link` は移し先があれば失敗する）。移せない記録はディレクトリと一緒に消える。"""
+    for record in held.iterdir():
+        if record.is_symlink() or not record.is_file():
+            continue
+        name = held.name + record.name.removeprefix(stem.name)
+        try:
+            record.chmod(0o600)
+            os.link(record, stem.parent / name)
+        except OSError as exc:  # 診断の記録を移せなくても、判定の結果と駆動は変えない
+            run.note(round_no, "verify", f"判定役の記録 {name} を移せない（{exc}）")
+    shutil.rmtree(held, ignore_errors=True)
+
+
 def _unanswered(run: VerifyRun, round_no: int, count: int, why: str, warning: str) -> verify_decide.Answers:
     """回答の得られなかった起動。原因 `why` は過程にだけ残す。"""
     run.note(round_no, "verify", f"判定役へ {count} 件、回答無し（{why}）")
@@ -68,7 +87,6 @@ def ask(
     into = used[0].parent
     listed = into / f"round{round_no}-verify-findings.jsonl"
     stem = run.round_stem(round_no, "-verify")
-    judge_records.drop_old(run, round_no, stem.parent)
     try:
         snap = _readable_mvv(run.snapshot, into)
         listed.write_text(verify_decide.listing(shown), encoding="utf-8")
@@ -78,7 +96,7 @@ def ask(
         ]
         prompt = verify_decide.instruction(listed, used, run.cfg.worktree, criteria)
         # 回答は非公開の内容を含みうる。出力の先は新しく作り（0700）、前からあるファイルやリンクを開かない
-        held = judge_records.new_held(stem)
+        held = Path(tempfile.mkdtemp(prefix=f"{stem.name}-", dir=stem.parent))
     except OSError as exc:
         warning = "判定役の資料（指摘の一覧・MVV の本文と共通原則の写し）か出力の保存先を用意できないので、判定役を起動せず下げない"
         return _unanswered(run, round_no, count, f"起動していない: {exc}", warning)
@@ -90,7 +108,7 @@ def ask(
     try:
         return _answers(run, round_no, rows, spec, (*used, listed, *copied), launch)
     finally:
-        judge_records.keep(run, round_no, held, stem)
+        _keep_records(run, round_no, held, stem)
 
 
 def _answers(

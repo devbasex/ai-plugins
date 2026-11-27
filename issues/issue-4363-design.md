@@ -78,7 +78,6 @@ flowchart TD
 | --- | --- |
 | 判定役の判断（`verify_decide.py`、新設） | 確かめる指摘を選ぶ・指示を組む・回答を読む・下げるかを決める。外部のコマンドを打たない |
 | 判定役の起動（`verify.py`、新設） | 読むだけの claude を 1 回起動し、回答を返す。起動には、結果の無い相手役の代わりに claude を読むだけで起動する既存の経路（`seats._seat_launch` から `participants.read_only_launch`）と同じ関数を使う。作業ディレクトリはレビューする worktree、使える Tool は読み取りだけ（`participants.READ_TOOLS`）、ほかに読めるのはこの実行の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV があるときはその本文と共通原則の写し）だけである |
-| 判定役の記録（`judge_records.py`、新設） | 判定役の起動の記録を残し、残す期間を過ぎたものを片付ける。片付けるのは、NDF が作ったと確かめられる記録と起動ごとのディレクトリだけである |
 | 駆動（`drive.py`） | 指摘をジャーナルへ入れた直後、収束の判定の前に判定役を呼ぶ |
 | ジャーナル（`journal.py`） | 相手役の `protect` と確認の結果を指摘の行に書き、下げるかを決めて重要度を下げる。保護の対象と後で分かった行は元の重要度へ戻す。下げた指摘は、振動の判定（前々ラウンドの指摘が戻ったら止める）に使う指摘のキーの集合に入れない |
 | 指示の文（`contracts/data/review-criteria.json` の `verify`） | 判定役への指示 |
@@ -115,7 +114,7 @@ flowchart TD
 
 ### 判定役の指示
 
-渡すのは、指摘の一覧（番号・本文・重要度・1 文・場所）、差分のファイル、作業場所、指摘の基準である。誰が書いた指摘かは渡さない。指摘の一覧は、実行者だけが開けるディレクトリのファイルに書き、指示（プロセスの引数に載る）にはそのパスだけを書く。判定役の標準出力と標準エラーは、起動ごとに新しく作る、実行者だけが開けるディレクトリに書く。起動が終わったら、この 2 つを実行者だけが読めるファイルとして状態の保存先の下の記録専用のディレクトリ `ndf-judge-records/` へ移し、起動ごとのディレクトリを消す。移した後の名前は起動ごとに違い、前からあるファイルは置き換えない。移した記録は診断のために 30 日残し、過ぎたものは次に判定役を起動するときに消す。消すのは、NDF が作ったと確かめられる記録だけである。確かめるために、記録を移す前に、記録の名前と、記録の inode 番号・保存した時のサイズ・そのサイズまでの内容のハッシュを名前に持ち、中身がその名前と同じ登録ファイルを記録ごとに作る。消す前に、記録の inode 番号が登録した番号と同じで、現在のサイズが保存した時のサイズ以上であることを確かめる。次に、記録の先頭から保存した時のサイズ分を読み、そのハッシュが登録した値と同じであることを確かめる。どれかが違う記録は消さない。サイズは完全一致を求めないので、保存の後に追記されただけの記録も消せる。空の出力は内容で見分けられないので移さない。名前の形が同じだけで中身の合わないファイルやリンクも消さない。判定役の起動中か保存の途中でプロセスが止まると起動ごとのディレクトリが残るので、NDF が作ったと確かめられるものは、同じ 30 日を過ぎた後に消す。登録ファイルを記録ごとに分けるのは、同じ状態の保存先で判定役が並行して動いても登録を失わず、移した記録を登録の無いまま残さないためである。
+渡すのは、指摘の一覧（番号・本文・重要度・1 文・場所）、差分のファイル、作業場所、指摘の基準である。誰が書いた指摘かは渡さない。指摘の一覧は、実行者だけが開けるディレクトリのファイルに書き、指示（プロセスの引数に載る）にはそのパスだけを書く。判定役の標準出力と標準エラーは、起動ごとに新しく作る、実行者だけが開けるディレクトリに書く。起動が終わったら、この 2 つを実行者だけが読めるファイルとして状態の保存先へ移し、ディレクトリを消す。移した後の名前は起動ごとに違い、前からあるファイルは置き換えない。移した記録は残すだけで、この課題は片付けを持たない。消すには NDF が作ったファイルだと確かめる仕組みが要り、受け入れ条件にもこの設計の目的にも無いためである。名前や更新時刻だけで消すと、利用者のファイルを失いうる。片付けは別の課題にする。
 
 判定役の起動は 1 ラウンドに 1 回で、指摘ごとに、その指摘を出した相手役がレビューの対象として読んだ差分を渡す。
 
@@ -329,7 +328,7 @@ MVV に反する指摘と保護の対象の指摘は、確認しても重要度�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4363 | 実装する | — | `plugins/ndf/src/ndf/domains/crossreview/verify_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/verify.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/judge_records.py`（新設）、`plugins/ndf/contracts/limits/cross-review.judge-record.keep.json`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_verify.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/src/ndf/domains/crossreview/carry.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/reviewing.py`（新設）、`plugins/ndf/contracts/limits/cross-review.remark-chars.json`、`plugins/ndf/contracts/limits/cross-review.remarks-total.json`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_citations.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_documents.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py` |
+| #4363 | 実装する | — | `plugins/ndf/src/ndf/domains/crossreview/verify_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/verify.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_verify.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/src/ndf/domains/crossreview/carry.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/reviewing.py`（新設）、`plugins/ndf/contracts/limits/cross-review.remark-chars.json`、`plugins/ndf/contracts/limits/cross-review.remarks-total.json`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_citations.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_documents.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py` |
 
 ## 設計との食い違い
 
@@ -338,7 +337,7 @@ MVV に反する指摘と保護の対象の指摘は、確認しても重要度�
 | 承認された設計 | 変えた後 | 理由 |
 | --- | --- | --- |
 | 下げた指摘は、状態ファイルと公開の記録のコメントに、元の重要度と判定役の理由が残る。コメントの理由の欄には `check.reason` を出す | 記録のコメントに出すのは、元の重要度と定型の理由「判定役の確認で成り立たないと分かった」だけにする。判定役の理由の全文は公開せず、実行したサーバーの状態ファイルの `check.reason` に残す | 判定役の理由の全文は、公開前の伏せ字で防げない未公開の情報を含みうる（伏せ字の対象は秘密の環境変数の値と既知の形式だけである）。公開した情報は取り消せない |
-| 判定役の標準出力と標準エラーは、状態の保存先の `round<n>-verify.*` へ移し、同じ名前の前からあるファイルは置き換える | 記録専用のディレクトリ `ndf-judge-records/` へ移す。移すときは、各ファイル名の `round<n>-verify` を `round<n>-verify-<起動ごとの接尾辞>` に替え、残りの部分は保持する。前からあるファイルは置き換えない | 置き換えると、作成元を確かめずにファイルを失い、同じラウンドを起動し直したときに前の起動の記録が残らない。起動のたびに記録のファイルは増えるので、30 日（`cross-review.judge-record.keep`）を過ぎた記録は、次に判定役を起動するときに消す。消すのは、保存の前に NDF が登録した記録と、プロセスが止まって残った起動ごとのディレクトリ（NDF が作ったと確かめられるもの）だけである |
+| 判定役の標準出力と標準エラーは、状態の保存先の `round<n>-verify.*` へ移し、同じ名前の前からあるファイルは置き換える | 起動ごとに違う名前 `round<n>-verify-<接尾辞>.*` へ移し、前からあるファイルは置き換えない。移した記録は残すだけで、片付けは持たない | 置き換えると、作成元を確かめずにファイルを失い、同じラウンドを起動し直したときに前の起動の記録が残らない。起動のたびに記録のファイルは増え、状態の保存先と一緒に残る。記録の自動削除は受け入れ条件にも承認された設計にも無く、ファイルの持ち主を確かめられないと利用者のファイルを消しうる（共通原則 C4）ので、別の課題にする |
 
 ## 未確認のまま残ること
 
