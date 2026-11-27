@@ -27,6 +27,7 @@ from ndf.adapters.git import Git, GitError, tracking_refspec
 from ndf.adapters.github import Authored, GitHub, GitHubError, Pull
 from ndf.adapters.publish import Publisher
 from ndf.contracts import limits
+from ndf.core import branch_strategy
 from ndf.domains.release import delivery_confirm, names_decide, record, record_decide
 from ndf.domains.release.delivery_confirm import DeliveriesAt
 from ndf.domains.release.record import KEPT, WRITTEN, RecordError, Selection, Written
@@ -202,11 +203,11 @@ def _declared_at(repo_git: Git, commit: str, fetch: str) -> bool:
     return at.kind != delivery_confirm.ABSENT
 
 
-def find_push(hub: GitHub, repo_git: Git, production: str, commit: str, tip: str) -> record_decide.Push:
-    """反映したコミットを本番ブランチへ入れた push（git の起動 1 回とブランチの更新の読み取り）。決められなければ `RecordError`。
+def landed_commits(repo_git: Git, production: str, commit: str, tip: str) -> frozenset[str]:
+    """反映したコミットから手元の追跡参照 `tip` が指す HEAD までの、本番ブランチの第一親のコミット（git の起動 1 回）。
 
-    コミットの集合は手元の追跡参照 `tip` で作るので、GitHub でマージした直後は参照が古く、反映したコミットが集合に無いか、
-    新しい更新の `after` が集合の外になる。どちらも時間を置いても直らないので、止まる文で本番ブランチの取得を示す。"""
+    GitHub でマージした直後は参照が古く、反映したコミットが集合に無いか、手元に無くて git が失敗する。どちらも時間を
+    置いても直らないので、止まる文で本番ブランチの取得を示して `RecordError`。"""
     fetch = _fetch_hint(production, tip)
     try:
         landed = frozenset(repo_git.run("rev-list", "--first-parent", f"{commit}^1..{tip}").split())
@@ -216,20 +217,45 @@ def find_push(hub: GitHub, repo_git: Git, production: str, commit: str, tip: str
         ) from exc
     if commit not in landed:
         raise RecordError(f"手元の {tip} に反映したコミット {commit} がまだ無い。{fetch} で本番ブランチを取得してから打ち直す")
+    return landed
+
+
+def find_push(hub: GitHub, production: str, commit: str, tip: str, landed: frozenset[str]) -> record_decide.Push:
+    """反映したコミットを本番ブランチへ入れた push（ブランチの更新の読み取り）。`landed` は `landed_commits`。決められなければ
+    `RecordError`（新しい更新の `after` が集合の外になる、追跡参照が古い場合を含む）。"""
     push = record_decide.push_of(hub.branch_activity(production), landed)
     if push is None:
         raise RecordError(
             f"反映したコミット {commit} を入れた push を {production} の更新の記録から決められない。"
-            f"手元の {tip} が古ければ {fetch} で取得し、push の直後でまだ更新の記録に載っていなければ時間を置いて打ち直す"
+            f"手元の {tip} が古ければ {_fetch_hint(production, tip)} で取得し、push の直後でまだ更新の記録に載っていなければ"
+            "時間を置いて打ち直す"
         )
     return push
 
 
+def _push_needed(repo_git: Git, commit: str, tip: str, fetch: str) -> bool:
+    """同じ値の記録に push が無いとき、push を決めてその時点の設定を読むか（git の起動は最大 2 回）。
+
+    反映したコミットの時点に設定があるか、反映したコミットの後に第一親で設定のファイルを変えたコミットがあれば読む。
+    後者は、同じ push の後の PR が設定を足した場合に、CD の結果を確かめずに `--target` で書かせないためである。
+    反映したコミットを含む追跡参照には、同じ push で入った `after` も含まれる（push は参照をまとめて動かす）ので、
+    追跡参照の HEAD までに設定のファイルを変えたコミットが無ければ、push の `after` の設定は反映したコミットの時点と同じである。"""
+    if _declared_at(repo_git, commit, fetch):
+        return True
+    return bool(repo_git.run("rev-list", "--first-parent", f"{commit}..{tip}", "--", branch_strategy.PROJECT).split())
+
+
 def _prefix(hub: GitHub, hands: Hands, production: str, pull: Pull, tip: str, known: Optional[record_decide.Push]) -> Prefix:
-    """worktree に届け先の設定があるリポジトリの前処理（push・push の時点の設定・差分）。`pull` は本番へ入った PR
-    （`merge_sha` が反映したコミット）。止まるときは `RecordError`。"""
+    """届け先によらない前処理（push を読むかの判定・push・push の時点の設定・差分）。`pull` は本番へ入った PR
+    （`merge_sha` が反映したコミット）。push を読まなければ、push も設定も持たない形（対象は `--target`）。止まるときは `RecordError`。"""
     commit = pull.merge_sha
-    push = known if known is not None else find_push(hub, hands.repo_git, production, commit, tip)
+    if known is None:
+        fetch = _fetch_hint(production, tip)
+        landed = landed_commits(hands.repo_git, production, commit, tip)
+        if not _push_needed(hands.repo_git, commit, tip, fetch):
+            return Prefix(commit, None, None, frozenset(), frozenset())
+        known = find_push(hub, production, commit, tip, landed)
+    push = known
     at = delivery_confirm.deliveries_at(hands.repo_git, push.after)
     if at.kind in (delivery_confirm.MISSING_REF, delivery_confirm.BROKEN):
         raise RecordError(f"{at.reason}。CD の結果が失敗のときと同じく、課題は人が確かめてから閉じる" if at.kind == "broken" else at.reason)
@@ -351,13 +377,9 @@ def _shape(hub: GitHub, hands: Hands, number: int, production: str, release: Map
     pull, commit = _landed_value(hub, number, production, args.version, args.production_sha)
     included = _record_pulls(hub, pull, production, names_decide.formats_of(release))
     state = _trusted_state(hub, included[0], args.version, commit)
-    # 対象の出典は worktree でなく本番へ反映した時点で決める。同じ値の記録に push があればその push の時点の設定、無ければ
-    # 反映したコミットの時点に設定があれば push を決めてその時点の設定、どちらも無ければ `--target`
+    # 対象の出典は worktree でなく本番へ反映した時点で決める（`_prefix`）。判定も、届け先ごとに並べて打った呼び出しで共有する
     known = _known_push(state, args.version)
-    if known is None and not _declared_at(hands.repo_git, commit, _fetch_hint(production, args.tip)):
-        prefix = Prefix(commit, None, None, frozenset(), frozenset())
-    else:
-        prefix = shared_prefix(hands.repo_git, number, commit, lambda: _prefix(hub, hands, production, pull, args.tip, known))
+    prefix = shared_prefix(hands.repo_git, number, commit, lambda: _prefix(hub, hands, production, pull, args.tip, known))
     targets = _record_targets(prefix, args)
     _check_names(targets, args)
     _check_records(state, targets, args.version, commit, number)
@@ -527,7 +549,7 @@ def write_unversioned(hub: GitHub, hands: Hands, number: int, production: str, r
     reread = [r for _e, _g, wrote in results for r in wrote.reread]
     covered = [*shape.state.valid, *reread, *(rep._replace(environments=(e,)) for e in (*kept, *recorded))]
     complete, missing = record_decide.complete_of(covered, rep, shape.targets)
-    if complete and prefix.deliveries is not None:
+    if complete:
         drop_share(hands.repo_git, number)
     return Outcome(
         rep,

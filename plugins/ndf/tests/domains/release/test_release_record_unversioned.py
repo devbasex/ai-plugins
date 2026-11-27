@@ -75,12 +75,16 @@ class Repo(FakeGit):
         self.revs: list[str] = []
         # 反映したコミットから第一親をたどったコミット（新しい順）
         self.chain = [COMMIT, "r2" * 20, "r1" * 20, "m0" * 20]
+        # 反映したコミットの後に第一親で設定のファイル（.ndf/project.json）を変えたコミット
+        self.project_changes: list[str] = []
 
     def run(self, *args: str) -> str:
         self.calls.append(args)
         if any(a.startswith("--max-count=") for a in args):
             count = int(next(a for a in args if a.startswith("--max-count=")).split("=")[1])
             return "".join(f"{c}\n" for c in self.chain[:count])
+        if "--" in args:
+            return "".join(f"{c}\n" for c in self.project_changes)
         return f"{AFTER}\n{COMMIT}\n"
 
     def diff_between(self, a: str, b: str, *options: str) -> str:
@@ -285,8 +289,31 @@ def test_a_repository_without_deliveries_takes_targets_and_attests(tmp_path: Pat
     got = _write(hub, repo, _args(WEB, targets=(WORKER, WEB)), _release(None))
     assert got.recorded == (WEB,) and got.record.targets == (WEB, WORKER) and got.missing == (WORKER,)
     assert [r.confirmation for r in _written(hub, 11)] == [{WEB: "attested"}] and [r.push for r in _written(hub, 11)] == [None]
-    # 反映したコミットの時点の設定を読む 1 回だけで、push も差分も読まない
-    assert [c[0] for c in repo.calls] == ["cat-file"] and not [r for r in hub.requests if r[1].endswith("/activity")]
+    # 反映したコミットの時点の設定と、その後に設定のファイルを変えたコミットを読むだけで、push も差分も読まない
+    assert [c[0] for c in repo.calls] == ["rev-list", "cat-file", "rev-list"]
+    assert not [r for r in hub.requests if r[1].endswith("/activity")]
+
+
+def test_a_setting_added_later_in_the_same_push_is_read_from_the_push(tmp_path: Path) -> None:
+    """反映したコミットに設定が無くても、同じ push の後の PR が設定を足していれば、push の時点の設定で決めて --target を断る。"""
+    hub = _push_activity(_hub(cd_runs=[[FAILURE]]))
+    repo = Repo(tmp_path, deliveries=None)
+    repo.objects.update({k: v for k, v in Repo(tmp_path).objects.items() if k.startswith(AFTER)})
+    repo.project_changes = [AFTER]
+    with pytest.raises(record.RecordError, match="--target を渡さず"):
+        _write(hub, repo, _args(WEB, targets=(WEB,)), _release(None))
+    got = _write(hub, repo, _args(WEB), _release(None))
+    assert set(got.failed) == {WEB} and got.recorded == ()
+
+
+def test_parallel_calls_share_the_decision_to_read_the_push(tmp_path: Path) -> None:
+    """届け先ごとに並べて打った呼び出しは、push を読むかの判定も共有の保存先から読み、同じコミットを読み直さない。"""
+    hub = _hub()
+    repo = Repo(tmp_path, deliveries=None)
+    _write(hub, repo, _args(WEB, targets=(WEB, WORKER)), _release(None))
+    calls = len(repo.calls)
+    _write(hub, repo, _args(WORKER, targets=(WEB, WORKER)), _release(None))
+    assert len(repo.calls) == calls
 
 
 def test_the_first_record_after_removing_the_setting_uses_the_setting_of_the_commit(tmp_path: Path) -> None:
