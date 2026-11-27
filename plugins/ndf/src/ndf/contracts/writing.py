@@ -8,11 +8,15 @@ from __future__ import annotations
 from ndf import contracts
 
 CRITERIA = "data/writing-criteria.md"
-# 文書の種類ごとの読み手のセクションの見出し。後ろに続く小見出し（読み手が複数いる文書）までが読み手の決め方である
+# 文書の種類ごとの読み手のセクションの見出し
 READERS_HEADING = "### 文書の種類ごとの読み手"
+# 読み手が複数いる文書のセクションの見出しと、その中で補足の適用条件を持つ段落が書く見出しの名前
+MULTIPLE_HEADING = "### 読み手が複数いる文書"
+SUPPLEMENT_NAME = "「エンジニア向けの補足」"
 # 通じない文の 4 つの型と 2 つの区分のセクションの見出し
 TYPES_HEADING = "## 3. 読み手に通じない文の 4 つの型"
 _SECTION = "## "
+_SUBSECTION = "### "
 
 
 class CriteriaBroken(contracts.ContractError):
@@ -27,24 +31,34 @@ def criteria() -> str:
 
 
 def readers_section() -> str:
-    """文書の種類ごとの読み手と、読み手が複数いる文書の扱い（見出しから次の章の見出しの前まで）。見出しが無ければ `CriteriaBroken`。
+    """文書の種類ごとの読み手のセクション（見出しから次の見出しの前まで）。見出しが無ければ `CriteriaBroken`。"""
+    return _section(READERS_HEADING, (_SECTION, _SUBSECTION))
 
-    「エンジニア向けの補足」をエンジニア向けに書けるのは、ほかの読み手が読まなくても判断できるときだけである。この条件が無いと、
+
+def supplement_rule() -> str:
+    """「エンジニア向けの補足」の適用条件の段落（読み手が複数いる文書のセクションのうち、補足の名前を書く行）。
+    見出しか段落が無ければ `CriteriaBroken`。
+
+    補足をエンジニア向けに書けるのは、ほかの読み手が読まなくても判断できるときだけである。この条件が無いと、
     読み手は見出しだけで補足の文への指摘を退ける。"""
-    return _section(READERS_HEADING)
+    lines = _section(MULTIPLE_HEADING, (_SECTION, _SUBSECTION)).splitlines()[1:]
+    found = "\n".join(line for line in lines if SUPPLEMENT_NAME in line)
+    if not found:
+        raise CriteriaBroken(f"文書の基準 {CRITERIA} の「{MULTIPLE_HEADING}」に{SUPPLEMENT_NAME}の段落が無い")
+    return found
 
 
 def types_section() -> str:
     """通じない文の 4 つの型と 2 つの区分のセクション。見出しが無ければ `CriteriaBroken`。"""
-    return _section(TYPES_HEADING)
+    return _section(TYPES_HEADING, (_SECTION,))
 
 
-def _section(heading: str) -> str:
-    """見出し `heading` から、次の章の見出し（`## `）の前まで。見出しが無ければ `CriteriaBroken`。"""
+def _section(heading: str, ends: tuple[str, ...]) -> str:
+    """見出し `heading` から、`ends` のどれかで始まる次の行の前まで。見出しが無ければ `CriteriaBroken`。"""
     lines = criteria().splitlines()
     if heading not in lines:
         raise CriteriaBroken(f"文書の基準 {CRITERIA} に見出し「{heading}」が無い")
     start = lines.index(heading)
     rest = lines[start + 1 :]
-    end = next((i for i, line in enumerate(rest) if line.startswith(_SECTION)), len(rest))
+    end = next((i for i, line in enumerate(rest) if line.startswith(ends)), len(rest))
     return "\n".join([heading, *rest[:end]]).strip()

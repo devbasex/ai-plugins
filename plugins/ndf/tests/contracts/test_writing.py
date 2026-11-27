@@ -29,9 +29,22 @@ def test_types_section_is_cut_at_the_next_section() -> None:
     assert [line for line in section.splitlines() if line.startswith("## ")] == [writing.TYPES_HEADING]
 
 
-def test_readers_section_keeps_subsections_and_is_cut_at_the_next_section(criteria_file: Path) -> None:
-    criteria_file.write_text(f"# 基準\n\n{writing.READERS_HEADING}\n\n表\n\n### 複数\n\n条件\n\n## 次の章\n", encoding="utf-8")
-    assert writing.readers_section() == f"{writing.READERS_HEADING}\n\n表\n\n### 複数\n\n条件"
+def test_readers_section_is_cut_at_the_next_heading() -> None:
+    section = writing.readers_section()
+    assert section in writing.criteria()
+    assert [line for line in section.splitlines() if line.startswith("#")] == [writing.READERS_HEADING]
+
+
+def test_supplement_rule_is_only_the_paragraph_naming_the_supplement(criteria_file: Path) -> None:
+    rule = f"- {writing.SUPPLEMENT_NAME}の条件"
+    criteria_file.write_text(f"# 基準\n\n{writing.MULTIPLE_HEADING}\n\n{rule}\n- ほかの規則\n\n## 次の章\n", encoding="utf-8")
+    assert writing.supplement_rule() == rule
+
+
+def test_a_missing_supplement_paragraph_is_a_contract_error(criteria_file: Path) -> None:
+    criteria_file.write_text(f"# 基準\n\n{writing.MULTIPLE_HEADING}\n\n- ほかの規則\n", encoding="utf-8")
+    with pytest.raises(contracts.ContractError, match="段落"):
+        writing.supplement_rule()
 
 
 def test_types_section_keeps_subsections_and_reads_to_the_end(criteria_file: Path) -> None:
