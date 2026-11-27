@@ -89,41 +89,63 @@ def test_remote_repo_refuses_non_github_remote() -> None:
 
 
 def _repo_with_include(tmp_path: Path, head: str) -> Path:
-    """メインの作業場所 `main` と linked worktree `sub/wt` を、git を起動せずに作る。`config` の見出し `head` が `remote.conf` を読み込む。"""
+    """メインの作業場所 `main` と linked worktree `sub/wt`・`sub/1wt` を、git を起動せずに作る。`config` の見出し `head` が `remote.conf` を読み込む。"""
     common = tmp_path / "main" / ".git"
-    own = common / "worktrees" / "wt"
-    own.mkdir(parents=True)
-    (own / "commondir").write_text("../..\n", encoding="utf-8")
-    (tmp_path / "sub" / "wt").mkdir(parents=True)
-    (tmp_path / "sub" / "wt" / ".git").write_text(f"gitdir: {own}\n", encoding="utf-8")
+    for name in WORKTREES:
+        own = common / "worktrees" / name
+        own.mkdir(parents=True)
+        (own / "commondir").write_text("../..\n", encoding="utf-8")
+        (tmp_path / "sub" / name).mkdir(parents=True)
+        (tmp_path / "sub" / name / ".git").write_text(f"gitdir: {own}\n", encoding="utf-8")
     (tmp_path / "remote.conf").write_text('[remote "origin"]\n\turl = "https://github.com/a/b.git" # 注釈\n', encoding="utf-8")
     (common / "config").write_text(f"[core]\n\tbare = false\n[{head.format(d=tmp_path)}]\n\tpath = ../../remote.conf\n", encoding="utf-8")
     return tmp_path
 
 
-# 条件と、メインの作業場所・linked worktree のそれぞれで読み込むか。gitdir の行は git 2.53.0 で同じ結果になることを確かめた。onbranch の条件は読まない
+WORKTREES = ("wt", "1wt")
+
+
+# 条件と、読み込む作業場所（メインの `main`・linked worktree の `wt` と `1wt`）。gitdir の行は git 2.53.0 で同じ結果になることを
+# 確かめた。onbranch の条件は読まない
 @pytest.mark.parametrize(
-    ("head", "main", "worktree"),
+    ("head", "hits"),
     [
-        ("include", True, True),
-        ('includeIf "gitdir:{d}/main/"', True, True),
-        ('includeIf "gitdir/i:{d}/MAIN/"', True, True),
-        ('includeIf "gitdir:{d}/main/.git"', True, False),
-        ('includeIf "gitdir:{d}/main/.git/worktrees/wt"', False, True),
-        ('includeIf "gitdir:{d}/main/.git/"', False, True),
-        ('includeIf "gitdir:wt"', False, True),
-        ('includeIf "gitdir:{d}/*"', False, False),
-        ('includeIf "gitdir:{d}/*/.git"', True, False),
-        ('includeIf "gitdir:{d}/main/**/.git"', True, False),
-        ('includeIf "gitdir:{d}/[!m]ain/"', False, False),
-        ('includeIf "gitdir:/elsewhere/"', False, False),
-        ('includeIf "onbranch:main"', False, False),
+        ("include", {"main", "wt", "1wt"}),
+        ('includeIf "gitdir:{d}/main/"', {"main", "wt", "1wt"}),
+        ('includeIf "gitdir/i:{d}/MAIN/"', {"main", "wt", "1wt"}),
+        ('includeIf "gitdir:{d}/main/.git"', {"main"}),
+        ('includeIf "gitdir:{d}/main/.git/worktrees/wt"', {"wt"}),
+        ('includeIf "gitdir:{d}/main/.git/"', {"wt", "1wt"}),
+        ('includeIf "gitdir:./worktrees/"', {"wt", "1wt"}),
+        ('includeIf "gitdir:./worktrees/wt"', {"wt"}),
+        ('includeIf "gitdir/i:./WORKTREES/"', {"wt", "1wt"}),
+        ('includeIf "gitdir:./*"', set()),
+        ('includeIf "gitdir:wt"', {"wt"}),
+        ('includeIf "gitdir:{d}/*"', set()),
+        ('includeIf "gitdir:{d}/*/.git"', {"main"}),
+        ('includeIf "gitdir:{d}/main/**/.git"', {"main"}),
+        ('includeIf "gitdir:{d}/[!m]ain/"', set()),
+        ('includeIf "gitdir:{d}/main/.git/worktrees/[[:digit:]]*"', {"1wt"}),
+        ('includeIf "gitdir:{d}/main/.git/worktrees/[![:digit:]]*"', {"wt"}),
+        ('includeIf "gitdir:{d}/main/.git/worktrees/[[:bogus:]]*"', set()),
+        ('includeIf "gitdir:{d}/main/.git/worktrees/[z-a]*"', set()),
+        ('includeIf "gitdir:{d}/main/.git/worktrees/[]w]t"', {"wt"}),
+        ('includeIf "gitdir:/elsewhere/"', set()),
+        ('includeIf "onbranch:main"', set()),
     ],
 )
-def test_configured_remote_slug_reads_included_config_files_like_git(tmp_path: Path, head: str, main: bool, worktree: bool) -> None:
+def test_configured_remote_slug_reads_included_config_files_like_git(tmp_path: Path, head: str, hits: set[str]) -> None:
     root = _repo_with_include(tmp_path, head)
-    assert git.configured_remote_slug(root / "main") == ("a/b" if main else None)
-    assert git.configured_remote_slug(root / "sub" / "wt") == ("a/b" if worktree else None)
+    places = {"main": root / "main", **{name: root / "sub" / name for name in WORKTREES}}
+    assert {name for name, here in places.items() if git.configured_remote_slug(here) == "a/b"} == hits
+
+
+def test_configured_remote_slug_reads_remote_after_a_reversed_range(tmp_path: Path) -> None:
+    common = tmp_path / ".git"
+    common.mkdir()
+    head = f'[includeIf "gitdir:{tmp_path}/[z-a]/"]\n\tpath = x.conf\n'
+    (common / "config").write_text(head + '[remote "origin"]\n\turl = https://github.com/a/b.git\n', encoding="utf-8")
+    assert git.configured_remote_slug(tmp_path) == "a/b"
 
 
 def test_parse_shortstat_sums_insertions_and_deletions() -> None:

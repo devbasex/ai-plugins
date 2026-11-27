@@ -228,68 +228,206 @@ def _includes(section: tuple[str, str], path: Path, own: Path) -> bool:
 
 
 def _gitdir_matches(pattern: str, path: Path, own: Path, fold: bool) -> bool:
-    """`includeIf "gitdir:<pattern>"` の条件が作業場所の git のディレクトリ `own` に当たるか。
+    """`includeIf "gitdir:<pattern>"` の条件が作業場所の git のディレクトリ `own` に当たるか（git の `include_by_gitdir` と同じ）。
 
-    git の説明書の規則で形を整える（`~/` と `./` の展開、相対の形の先頭に `**/`、`/` で終われば `**` を足す）。
-    比べ方は git の wildmatch のパスの形と同じで、`*`・`?`・`[...]` は `/` をまたがず、`**/` は 0 個以上の階層に当たる。
-    `own` は、そのままの絶対パスと実体のパスの両方で比べる。
+    `~` を展開し、`./` で始まれば、設定ファイル `path` の実体があるディレクトリに置き換えて、その部分は文字どおりに比べる。
+    ほかの相対の形は先頭に `**/` を足し、`/` で終われば `**` を足す。残りは wildmatch（`_wildmatch`）で比べる。
+    `own` は実体のパスで比べ、当たらなければ、そのままの絶対パスでもう一度比べる。
     """
-    if pattern.startswith("~/"):
+    if pattern.startswith("~"):
         pattern = os.path.expanduser(pattern)
-    elif pattern.startswith("./"):
-        pattern = str(path.parent / pattern[2:])
-    if not pattern.startswith("/"):
+    prefix = 0
+    if pattern.startswith("./"):
+        base = os.path.dirname(os.path.realpath(path))
+        pattern, prefix = base + pattern[1:], len(base) + 1
+    elif not os.path.isabs(pattern):
         pattern = "**/" + pattern
     if pattern.endswith("/"):
         pattern += "**"
-    regex = re.compile(_wildmatch_regex(pattern), re.IGNORECASE if fold else 0)
-    return any(regex.fullmatch(c) for c in {str(own), os.path.realpath(own)})
+    pat = os.fsencode(pattern)
+    for text in (os.fsencode(os.path.realpath(own)), os.fsencode(os.path.abspath(own))):
+        head, got = pat[:prefix], text[:prefix]
+        if len(text) < prefix or (head.lower() != got.lower() if fold else head != got):
+            return False
+        if _wildmatch(pat[prefix:], text[prefix:], fold):
+            return True
+    return False
 
 
-def _wildmatch_regex(pattern: str) -> str:
-    """git の wildmatch（パスの形）のパターンを、同じ文字列に当たる正規表現にする。"""
-    out: list[str] = []
-    i, n = 0, len(pattern)
-    while i < n:
-        if pattern.startswith("**", i):
-            j = i + 2
-            while j < n and pattern[j] == "*":
-                j += 1
-            whole = i == 0 or pattern[i - 1] == "/"
-            if whole and j == n:
-                out.append(".*")
-            elif whole and pattern[j] == "/":
-                out.append("(?:.*/)?")
-                j += 1
-            else:
-                out.append("[^/]*")
-            i = j
-            continue
-        part, i = _wildmatch_one(pattern, i)
-        out.append(part)
-    return "".join(out)
+# git の wildmatch の結果（`wildmatch.c` の `WM_*`）。打ち切りは、外側の `*` に戻らずに当たらないと決める
+_WM_MATCH, _WM_NOMATCH, _WM_ABORT_ALL, _WM_ABORT_TO_STARSTAR = 0, 1, -1, -2
+_SLASH, _STAR, _BACKSLASH, _LBRACKET, _RBRACKET = (ord(c) for c in "/*\\[]")
+_GLOB_SPECIAL = frozenset(b"*?[\\")
+# 角括弧の中の POSIX 文字クラス（git の sane_ctype と同じく ASCII だけ）
+_POSIX_CLASSES: dict[bytes, Callable[[int, bool], bool]] = {
+    b"alnum": lambda c, _f: chr(c).isascii() and chr(c).isalnum(),
+    b"alpha": lambda c, _f: chr(c).isascii() and chr(c).isalpha(),
+    b"blank": lambda c, _f: c in b" \t",
+    b"cntrl": lambda c, _f: c < 32 or c == 127,
+    b"digit": lambda c, _f: 48 <= c <= 57,
+    b"graph": lambda c, _f: 33 <= c <= 126,
+    b"lower": lambda c, _f: 97 <= c <= 122,
+    b"print": lambda c, _f: 32 <= c <= 126,
+    b"punct": lambda c, _f: 33 <= c <= 126 and not chr(c).isalnum(),
+    b"space": lambda c, _f: c in b" \t\n\r\f\v",
+    b"upper": lambda c, fold: 65 <= c <= 90 or (fold and 97 <= c <= 122),
+    b"xdigit": lambda c, _f: c in b"0123456789abcdefABCDEF",
+}
 
 
-def _wildmatch_one(pattern: str, i: int) -> tuple[str, int]:
-    """`**` 以外の 1 字（`*`・`?`・`[...]`・`\\` のエスケープ・ふつうの字）の正規表現と、次の位置。"""
-    ch = pattern[i]
-    if ch == "*":
-        return "[^/]*", i + 1
-    if ch == "?":
-        return "[^/]", i + 1
-    if ch == "\\" and i + 1 < len(pattern):
-        return re.escape(pattern[i + 1]), i + 2
-    if ch == "[":
-        j = i + 1
-        negate = j < len(pattern) and pattern[j] in "!^"
-        j += 1 if negate else 0
-        start = j
-        j += 1 if j < len(pattern) and pattern[j] == "]" else 0
-        end = pattern.find("]", j)
-        if end != -1:
-            body = "".join("\\" + c if c in "\\^[]" else c for c in pattern[start:end])
-            return f"(?!/)[{'^' if negate else ''}{body}]", end + 1
-    return re.escape(ch), i + 1
+def _wildmatch(pattern: bytes, text: bytes, fold: bool) -> bool:
+    """git の `wildmatch(pattern, text, WM_PATHNAME | (fold なら WM_CASEFOLD))` が当たりを返すか。`wildmatch.c` の `dowild` を移したもの。"""
+    return _dowild(pattern, 0, text, 0, fold) == _WM_MATCH
+
+
+def _at(s: bytes, i: int) -> int:
+    """`s` の `i` 番目のバイト。末尾より後ろは 0（C の文字列の終わり）。"""
+    return s[i] if i < len(s) else 0
+
+
+def _fold(c: int, fold: bool) -> int:
+    return c + 32 if fold and 65 <= c <= 90 else c
+
+
+def _dowild(p: bytes, pi: int, t: bytes, ti: int, fold: bool) -> int:
+    while pi < len(p):
+        p_ch, t_ch = _fold(p[pi], fold), _fold(_at(t, ti), fold)
+        if ti >= len(t) and p_ch != _STAR:
+            return _WM_ABORT_ALL
+        if p_ch == _STAR:
+            star = _star(p, pi, t, ti, fold)
+            if isinstance(star, int):
+                return star
+            pi, ti = star
+        else:
+            found, pi = _bracket(p, pi, t_ch, fold) if p_ch == _LBRACKET else _one(p, pi, p_ch, t_ch)
+            if found != _WM_MATCH:
+                return found
+        pi, ti = pi + 1, ti + 1
+    return _WM_NOMATCH if ti < len(t) else _WM_MATCH
+
+
+def _one(p: bytes, pi: int, p_ch: int, t_ch: int) -> tuple[int, int]:
+    """`dowild` の `?`・`\\` のエスケープ・ふつうの字の場合。結果と、読んだ最後の位置。"""
+    if p_ch == ord("?"):
+        return (_WM_NOMATCH if t_ch == _SLASH else _WM_MATCH), pi
+    if p_ch == _BACKSLASH:
+        pi += 1
+        p_ch = _at(p, pi)
+    return (_WM_MATCH if t_ch == p_ch else _WM_NOMATCH), pi
+
+
+def _star(p: bytes, pi: int, t: bytes, ti: int, fold: bool) -> int | tuple[int, int]:
+    """`dowild` の `*` の場合。結果が決まればその値、`*/` で次の階層へ進むなら、続きを読む位置（`/` の位置の組）。"""
+    head = _star_head(p, pi, t, ti, fold)
+    if isinstance(head, int):
+        return head
+    pi, match_slash = head
+    if pi >= len(p):
+        return _WM_NOMATCH if not match_slash and _SLASH in t[ti:] else _WM_MATCH
+    if not match_slash and p[pi] == _SLASH:
+        slash = t.find(b"/", ti)
+        return (pi, slash) if slash >= 0 else _WM_NOMATCH
+    return _star_scan(p, pi, t, ti, fold, match_slash)
+
+
+def _star_head(p: bytes, pi: int, t: bytes, ti: int, fold: bool) -> int | tuple[int, bool]:
+    """`*` の並びを読み、次の位置と、`/` をまたげるか（階層の全体を表す `**` か）。`**/` が 0 個の階層で当たれば `_WM_MATCH`。"""
+    pi += 1
+    if _at(p, pi) != _STAR:
+        return pi, False
+    prev = pi - 2
+    while _at(p, pi) == _STAR:
+        pi += 1
+    nxt = _at(p, pi)
+    whole = prev < 0 or p[prev] == _SLASH
+    if not whole or not (pi >= len(p) or nxt == _SLASH or (nxt == _BACKSLASH and _at(p, pi + 1) == _SLASH)):
+        return pi, False
+    if nxt == _SLASH and _dowild(p, pi + 1, t, ti, fold) == _WM_MATCH:
+        return _WM_MATCH
+    return pi, True
+
+
+def _star_scan(p: bytes, pi: int, t: bytes, ti: int, fold: bool, match_slash: bool) -> int:
+    """`*` の後ろを、`*` が当たる長さを 1 字ずつ延ばしながら比べる。"""
+    t_ch = _fold(_at(t, ti), fold)
+    while ti < len(t):
+        if p[pi] not in _GLOB_SPECIAL:
+            want = _fold(p[pi], fold)
+            while ti < len(t) and (match_slash or t[ti] != _SLASH) and _fold(t[ti], fold) != want:
+                ti += 1
+            t_ch = _fold(_at(t, ti), fold)
+            if ti >= len(t) or t_ch != want:
+                return _WM_ABORT_ALL if match_slash else _WM_ABORT_TO_STARSTAR
+        found = _dowild(p, pi, t, ti, fold)
+        if found != _WM_NOMATCH and (not match_slash or found != _WM_ABORT_TO_STARSTAR):
+            return found
+        if found == _WM_NOMATCH and not match_slash and t_ch == _SLASH:
+            return _WM_ABORT_TO_STARSTAR
+        ti += 1
+        t_ch = _at(t, ti)
+    return _WM_ABORT_ALL
+
+
+def _bracket(p: bytes, pi: int, t_ch: int, fold: bool) -> tuple[int, int]:
+    """`dowild` の `[...]` の場合。結果と、閉じる `]` の位置。逆順の範囲（`[z-a]`）は何にも当たらず、閉じない括弧と
+    名前の誤った POSIX 文字クラスは `_WM_ABORT_ALL`（git と同じ）。"""
+    pi += 1
+    negated = _at(p, pi) in b"!^"
+    pi += 1 if negated else 0
+    prev, matched = 0, False
+    while True:
+        if pi >= len(p):
+            return _WM_ABORT_ALL, pi
+        found, pi, p_ch = _bracket_item(p, pi, t_ch, fold, prev)
+        if found is None:
+            return _WM_ABORT_ALL, pi
+        matched |= found
+        prev = p_ch
+        pi += 1
+        if _at(p, pi) == _RBRACKET:
+            break
+    return (_WM_NOMATCH if matched == negated or t_ch == _SLASH else _WM_MATCH), pi
+
+
+def _bracket_item(p: bytes, pi: int, t_ch: int, fold: bool, prev: int) -> tuple[Optional[bool], int, int]:
+    """角括弧の中の 1 つ（字・エスケープ・範囲・POSIX 文字クラス）が当たるか、読んだ最後の位置、次の範囲の始まりに使う字。
+    打ち切るなら当たるかは None。"""
+    p_ch = p[pi]
+    if p_ch == _BACKSLASH:
+        pi += 1
+        return (None, pi, 0) if pi >= len(p) else (t_ch == p[pi], pi, p[pi])
+    if p_ch == ord("-") and prev and pi + 1 < len(p) and p[pi + 1] != _RBRACKET:
+        pi, end = _range_end(p, pi)
+        if end < 0:
+            return None, pi, 0
+        upper = t_ch - 32 if fold and 97 <= t_ch <= 122 else t_ch
+        return prev <= t_ch <= end or prev <= upper <= end, pi, 0
+    if p_ch == _LBRACKET and _at(p, pi + 1) == ord(":"):
+        return _posix_class(p, pi, t_ch, fold)
+    return t_ch == p_ch, pi, p_ch
+
+
+def _range_end(p: bytes, pi: int) -> tuple[int, int]:
+    """範囲の `-` の後ろの文字（`\\` のエスケープを外す）と、その位置。エスケープで終われば文字は -1。"""
+    pi += 1
+    if p[pi] == _BACKSLASH:
+        pi += 1
+        return (pi, p[pi]) if pi < len(p) else (pi, -1)
+    return pi, p[pi]
+
+
+def _posix_class(p: bytes, pi: int, t_ch: int, fold: bool) -> tuple[Optional[bool], int, int]:
+    """`[:name:]` の評価（当たったか、最後に読んだ位置、続きの比べに使う直前の文字）。`:]` で閉じていなければ `[` を
+    ふつうの文字として比べる。閉じない・名前が誤りなら当たったかは None。"""
+    start = pi + 2
+    end = p.find(b"]", start)
+    if end < 0:
+        return None, len(p), 0
+    if end - start - 1 < 0 or p[end - 1] != ord(":"):
+        return t_ch == _LBRACKET, pi, _LBRACKET
+    check = _POSIX_CLASSES.get(p[start : end - 1])
+    return (None if check is None else check(t_ch, fold)), end, 0
 
 
 def slug_of_url(url: str) -> Optional[str]:
