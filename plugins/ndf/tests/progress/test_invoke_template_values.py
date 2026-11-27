@@ -44,7 +44,7 @@ def filled(monkeypatch):
     held = route.params()
     monkeypatch.setattr(route, "params", lambda: {**held, "worker": replace(held["worker"], default=["ndf-worker"])})
     read: list[int] = []
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: read.append(n) or (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: read.append(n) or (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: read.append("merge_method") or "squash")
     return read
 
@@ -159,7 +159,7 @@ def test_close_reads_the_issue_before_asking_github_for_the_merge_method(tmp_pat
 
 def test_a_failed_issue_read_does_not_ask_github_for_the_merge_method(tmp_path, filled, local, monkeypatch):
     # マージの方式は課題を読んだ後に GitHub に問う。課題を読めずに止まる試行では問い合わせない（PR 4289 の指摘）
-    def fail(location, n):
+    def fail(location, n, repo=None):
         raise invoke.github.GitHubError("読めない")
 
     monkeypatch.setattr(issue_values, "issue_text", fail)
@@ -197,7 +197,7 @@ def test_a_retry_whose_issue_read_fails_after_the_merge_method_does_not_ask_it_a
     # 目印を消す（PR 4289 の指摘）
     pending = _pending(tmp_path)
 
-    def fail(location, n):
+    def fail(location, n, repo=None):
         raise invoke.github.GitHubError("読めない", status=502)
 
     with monkeypatch.context() as m:

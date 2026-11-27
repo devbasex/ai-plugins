@@ -57,7 +57,7 @@ _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 _MAX_DEPTH = 8
 _URL_RE = re.compile(r"^https?://[^/]+/([^/]+/[^/]+)/pull/\d+")
 # gh が `-R` の代わりに対象のリポジトリとして読む環境変数（https://cli.github.com/manual/gh_help_environment）
-_GH_REPO = "GH_REPO"
+_GH_REPO = identity.env_name("gh-repo")
 # hook の入力の、Tool の引数のキー（`context.HookContext.tool_input` も読む）
 TOOL_INPUT = "tool_input"
 # 作業ディレクトリを移す語のうち、移った先を字句から決められないもの

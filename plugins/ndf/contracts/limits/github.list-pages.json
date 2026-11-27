@@ -3,6 +3,7 @@
   "count": 50,
   "read_by": [
     "ndf.adapters.github",
+    "ndf.adapters.github_pulls",
     "ndf.domains.backlog.issues_gh",
     "ndf.domains.backlog.settle",
     "ndf.domains.crossreview.threads"
