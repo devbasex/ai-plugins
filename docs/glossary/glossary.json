@@ -8559,6 +8559,18 @@
       "pending_source": "issues/issue-4580-design.md"
     },
     {
+      "term": "開き直し",
+      "context": "ndf-workflow",
+      "meaning": "終えた工程や途中の工程を未着手に戻し、その工程で開き直す前に記録した結果と承認を、次の作業の判断に使わないこと。過去の記録は残る",
+      "pending_source": "issues/issue-4520-design.md"
+    },
+    {
+      "term": "有効な承認",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートを持つ工程の、最後に開き直した後の最新の回答が承認で、回答者に提示した対象が現在の対象と一致し、承認ゲートの承認の検査を満たすもの。比べる項目は、この語の SSOT が定める",
+      "pending_source": "issues/issue-4520-design.md"
+    },
+    {
       "term": "起動の設定",
       "context": "ndf-agent-cli",
       "meaning": "NDF が AI を起動するときの、リポジトリごとの指定を持つ .ndf/launch.json。工程ごとの MCP と Tool の指定、安全装置を外すランタイム、起動の実験の指定を持つ",
