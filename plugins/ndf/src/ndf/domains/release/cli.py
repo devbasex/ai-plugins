@@ -317,10 +317,18 @@ def cmd_verification_record(args: argparse.Namespace) -> dict:
     if not isinstance(payload, dict):
         raise record.RecordError(f"{args.record} はオブジェクトの JSON でない")
     try:
-        url = record.write_verification(_hub(args), args.pr, payload, lambda: _release_names(args))
-    except record.RecordElsewhere as exc:
+        url = record.write_verification(_hub(args), args.pr, payload, lambda: _release_names(args), _unversioned_store(args))
+    except (record.RecordElsewhere, record.RetestWithoutReason) as exc:
         return result.stopped(TOOL, "precondition", str(exc), items=exc.items)
     return result.result(TOOL, result.OK, f"#{args.pr} へリリース後テストの記録を書いた: {url}")
+
+
+def _unversioned_store(args: argparse.Namespace) -> bool:
+    """バージョン番号を持たないリポジトリ（`version_store.kind` が none）か。設定が読めなければ偽（今の確かめで書く）。"""
+    try:
+        return _strategy(args).version_store["kind"] == "none"
+    except branch_strategy.StrategyError:  # noqa: NDF401 利用者の入力: 設定の無いリポジトリは今のとおりバージョン番号を持つリポジトリとして確かめる
+        return False
 
 
 def _release_names(args: argparse.Namespace) -> tuple[str | None, names_decide.NameFormats]:

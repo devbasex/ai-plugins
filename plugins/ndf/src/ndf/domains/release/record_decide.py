@@ -36,6 +36,10 @@ VERIFICATION_MARK = f"<!-- {_NS}:release-verification -->"
 CORRECTION_MARK = f"<!-- {_NS}:release-targets-correction -->"
 # 実環境の確認で反映を確かめた届け先の `confirmation` の値（この届け先だけが `evidence` を持つ）
 OBSERVED = "observed"
+# `release-steps records` の outputs の、代表と同じ値・リリースの単位の有効なリリース記録の並びのキー
+RELEASES = "releases"
+# CD の結果で反映を確かめた届け先の `confirmation` の値（ほかの区分は閉じる報告に「CD で確かめていない」と載る）
+CD = "cd"
 # 値の 16 進の語と SHA の一致に要る最小の長さ（確かめ 2 と実環境の確認の両方が読む）
 SHA_PREFIX = 7
 # JSON Pointer が指す値が無いこと（null の値と見分ける）
@@ -223,8 +227,11 @@ def _unversioned_of(got: Mapping[str, Any], base: Record) -> Record | None:
 def parse_record(body: str) -> Record | None:
     """コメント 1 件をリリース記録として読む。リリース記録でない・形が違えば None。"""
     got = payload_of(body, RECORD_MARK)
-    if got is None:
-        return None
+    return None if got is None else parse_record_json(got)
+
+
+def parse_record_json(got: Mapping[str, Any]) -> Record | None:
+    """リリース記録の JSON（コメントの本文か `Record.as_json` の出力）を読む。形が違えば None。"""
     version, release, included = got.get("version"), got.get("release"), _numbers(got.get("included"))
     unit = got["unit"] if "unit" in got else None
     if not isinstance(version, str) or not version or not _is_int(release) or included is None:
@@ -317,11 +324,15 @@ def representative(found: Sequence[Record], targets: tuple[str, ...] | None) -> 
     return next((r for r in reversed(found) if r.targets is None or r.targets == targets), None)
 
 
-def complete_of(releases: Sequence[Record], representative: Record, targets: tuple[str, ...]) -> tuple[bool, tuple[str, ...]]:
-    """代表と `version`・`release`・`unit`・`commit` が同じで `targets` が正の一覧の記録の `environments` が、
-    `targets` を覆うかと、まだ反映の記録が無い届け先（`targets` の順）。"""
+def counted(releases: Sequence[Record], representative: Record, targets: tuple[str, ...]) -> list[Record]:
+    """反映がそろったかを数える記録。代表と `version`・`release`・`unit`・`commit` が同じで `targets` が正の一覧の記録（古い順）。"""
     key = (representative.version, representative.release, representative.unit, representative.commit)
-    covered = {e for r in releases if (r.version, r.release, r.unit, r.commit) == key and r.targets == targets for e in r.environments}
+    return [r for r in releases if (r.version, r.release, r.unit, r.commit) == key and r.targets == targets]
+
+
+def complete_of(releases: Sequence[Record], representative: Record, targets: tuple[str, ...]) -> tuple[bool, tuple[str, ...]]:
+    """`counted` の記録の `environments` が `targets` を覆うかと、まだ反映の記録が無い届け先（`targets` の順）。"""
+    covered = {e for r in counted(releases, representative, targets) for e in r.environments}
     missing = tuple(t for t in targets if t not in covered)
     return not missing, missing
 
@@ -589,7 +600,7 @@ def confirm(delivery: Mapping[str, Any], run: Mapping[str, Any] | None, observed
         return Confirmation("ok", "attested")
     if run is not None and run.get("status") == "completed":
         if run.get("conclusion") == "success":
-            return Confirmation("ok", "cd")
+            return Confirmation("ok", CD)
         return Confirmation("failed", reason=f"CD の結果が失敗（{run.get('conclusion')}）")
     observe = delivery.get("observe")
     if not isinstance(observe, Mapping):

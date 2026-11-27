@@ -217,6 +217,82 @@ def test_issue_4580_a_failed_row_keeps_the_issue_even_with_both_conditions_exclu
     assert got["outputs"]["verified"] is False
 
 
+def _web_trunk(repo: Path, close: dict | None = None) -> None:
+    """バージョン番号を持たないリポジトリ（`version_store.kind` が none）の設定。"""
+    from strategy_fixture import section
+
+    project = {"branch_strategy": section("web-trunk")} | ({"workflow": {"close": close}} if close else {})
+    (repo / ".ndf").mkdir(exist_ok=True)
+    (repo / ".ndf" / "project.json").write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+
+
+WEB, WORKER = "web", "worker"
+
+
+def _records(repo: Path, *checks: tuple[tuple[str, ...], int, str], environments: tuple[str, ...] = (WEB, WORKER), **change) -> str:
+    """`release-steps records --version` の出力を手順書のとおり 1 行の結果 JSON としてファイルに保存する。"""
+    made = {"version": "main abc1234", "release": 20, "included": [11, 20], "environments": list(environments), "commit": "a" * 40}
+    made |= {"targets": [WEB, WORKER], "confirmation": {e: "cd" for e in environments}}
+    verifications = [
+        {"version": "main abc1234", "environments": list(e), "issues": [{"number": n, "result": r, "evidence": "確かめた"}]}
+        for e, n, r in checks
+    ]
+    outputs = {"command": "records", "selection": {"version": "main abc1234", "release": None, "unit": None}, "release": made}
+    outputs |= {"releases": [made], "targets": [WEB, WORKER], "verifications": verifications, "bodies": None, "to_test": None}
+    got = result.result("release-steps", result.OK, "読んだ", outputs=outputs) | change
+    path = repo / "records.json"
+    path.write_text("人が読む行\n" + json.dumps(got, ensure_ascii=False) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def test_issue_4580_close_check_reads_the_records_output_per_target(repo: Path, capsys, last_result) -> None:
+    # 受け入れ条件 9: バージョンの無いリポジトリでは records の出力を --records で渡し、届け先ごとに判定する
+    _web_trunk(repo)
+    path = _records(repo, ((WEB,), 7, "passed"), ((WORKER,), 7, "passed"))
+    code, got = _close_check(capsys, last_result, repo, "7", "--records", path, "--require")
+    assert code == 0 and got["outputs"]["verified"] is True
+    assert got["outputs"]["release"] == {"complete": True, "missing": [], "unconfirmed": []}
+    code, got = _close_check(capsys, last_result, repo, "7", "--records", _records(repo, ((WEB,), 7, "passed"), environments=(WEB,)))
+    assert code == 1 and got["cause"]["kind"] == "refused" and got["outputs"]["release"]["missing"] == [WORKER]
+
+
+def test_issue_4580_records_with_a_failed_row_keep_the_issue_with_both_conditions_excluded(repo: Path, capsys, last_result) -> None:
+    # 受け入れ条件 8・I2: 不合格の記録を含む --records は、両方の条件を外しても閉じない
+    _web_trunk(repo, {"release_verification": {"required": False, "reason": "x"}, "retrospective_line": {"required": False, "reason": "y"}})
+    path = _records(repo, ((WEB,), 7, "passed"), ((WORKER,), 7, "failed"))
+    code, got = _close_check(capsys, last_result, repo, "7", "--records", path, "--require")
+    assert code == 1 and got["cause"]["kind"] == "refused" and got["outputs"]["verified"] is False
+
+
+def test_issue_4580_close_check_refuses_the_wrong_pair_of_records(repo: Path, capsys, last_result) -> None:
+    # バージョンの保存先が none のリポジトリは --verification を受けず、--records を示す。両方を渡すのも誤り
+    _web_trunk(repo)
+    code, got = _close_check(capsys, last_result, repo, "7", "--verification", _verification(repo, (7, "passed")))
+    assert code == 3 and got["cause"]["kind"] == "precondition" and "--records" in got["summary"]
+    path = _records(repo, ((WEB, WORKER), 7, "passed"))
+    code, got = _close_check(capsys, last_result, repo, "7", "--records", path, "--verification", _verification(repo, (7, "passed")))
+    assert code == 3 and got["cause"]["kind"] == "precondition"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"tool": "records"}, {"outputs": {"command": "records"}}, {"outputs": {"release": None}}],
+)
+def test_issue_4580_close_check_stops_on_records_of_the_wrong_shape(repo: Path, capsys, last_result, change: dict) -> None:
+    # records の成功の結果で outputs が $defs.records_outputs に合うものだけを受ける
+    _web_trunk(repo)
+    path = _records(repo, ((WEB, WORKER), 7, "passed"), **change)
+    code, got = _close_check(capsys, last_result, repo, "7", "--records", path)
+    assert code == 3 and got["cause"]["kind"] == "precondition"
+
+
+def test_issue_4580_close_check_without_records_does_not_ask_for_a_release(repo: Path, capsys, last_result) -> None:
+    # デプロイを飛ばした経路は --records も --verification も渡さず、リリース記録が無いことで閉じないとは返さない
+    _web_trunk(repo)
+    code, got = _close_check(capsys, last_result, repo, "7")
+    assert code == 0 and "release" not in got["outputs"]
+
+
 @pytest.mark.parametrize(
     "close",
     [{"release_verification": {"required": False}}, {"unknown": {"required": True}}],

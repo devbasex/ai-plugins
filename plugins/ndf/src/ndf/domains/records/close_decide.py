@@ -14,6 +14,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any, NamedTuple, Optional
 
+from ndf.domains.release import record_decide
 from ndf.progress import flow
 from ndf.progress.flow import CloseRule
 from ndf.progress.records import ISSUE_SECTION, SECTION_END
@@ -75,6 +76,72 @@ def verdict(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], enf
     if waiting:
         return Verdict(ASK, f"保留（not_run）の行が {len(waiting)} 件ある。閉じるかを人が決める", verified)
     return Verdict(CLOSE, "リリース後テストに不合格と保留の行が無い", verified)
+
+
+def _last_check(view: Mapping[str, Any], rep: Mapping[str, Any]) -> Optional[list[Mapping[str, Any]]]:
+    """代表と `version`・`unit` が同じテストの記録のうち、最後の 1 件の行（無ければ None）。"""
+    same = [v for v in view["verifications"] if (v.get("version"), v.get("unit")) == (rep.get("version"), rep.get("unit"))]
+    return list(same[-1]["issues"]) if same else None
+
+
+class Reflection(NamedTuple):
+    """反映の判定（結果 JSON の `outputs.release`）。`missing` はまだの届け先、`unconfirmed` は CD の結果でなく確かめた届け先と区分。"""
+
+    complete: bool
+    missing: list[str]
+    unconfirmed: list[dict[str, str]]
+
+
+def _release_view(rep: record_decide.Record, releases: list[record_decide.Record], targets: tuple[str, ...]) -> Reflection:
+    """反映の判定。数えるのは `record_decide.counted` の記録だけ。"""
+    complete, missing = record_decide.complete_of(releases, rep, targets)
+    counted = record_decide.counted(releases, rep, targets)
+    kinds = [(t, _confirmed_by(counted, t)) for t in targets]
+    unconfirmed = [{"name": t, "kind": k} for t, k in kinds if k is not None and k != record_decide.CD]
+    return Reflection(complete, list(missing), unconfirmed)
+
+
+def _confirmed_by(counted: list[record_decide.Record], name: str) -> Optional[str]:
+    """届け先 `name` の反映を最初に記録した記録の確かめ方（`confirmation` の値。反映の記録が無ければ None）。"""
+    for r in counted:
+        if name in r.environments and r.confirmation is not None and name in r.confirmation:
+            return r.confirmation[name]
+    return None
+
+
+def records_verdict(issue: int, view: Mapping[str, Any], enforced: bool) -> Verdict:
+    """`release-steps records --version` の outputs 1 つから、課題を閉じてよいか（設計書の「close-check の結果」）。
+
+    バージョン付きの代表（`targets` を持たない）は、同じ値・単位の最後のテストの記録 1 件を `verdict` で判定し、`release` は None。
+    バージョンの無い代表は、反映がそろったかを見てから、対象の届け先ごとに `record_decide.pair_verdict` で判定する
+    （悪い方を優先する: 反映がそろわない → 不合格 → 保留 → 行の無い届け先 → 合格）。"""
+    rep_json = view["release"]
+    targets = tuple(view["targets"]) if view["targets"] is not None else None
+    if rep_json is not None and targets is None:
+        return verdict(issue, _last_check(view, rep_json), enforced)._replace(release=None)
+    rep = record_decide.parse_record_json(rep_json) if rep_json is not None else None
+    if rep is None or targets is None:
+        missing = [] if targets is None else list(targets)
+        return Verdict(KEEP, "今回のリリースのリリース記録が無い", False, Reflection(False, missing, [])._asdict())
+    releases = [r for r in (record_decide.parse_record_json(j) for j in view[record_decide.RELEASES]) if r is not None]
+    reflection = _release_view(rep, releases, targets)
+    release = reflection._asdict()
+    if not reflection.complete:
+        return Verdict(KEEP, f"反映がそろっていない（まだの届け先: {', '.join(reflection.missing)}）", False, release)
+    checks = [v for v in view["verifications"] if (v.get("version"), v.get("unit")) == (rep.version, rep.unit)]
+    got = {t: record_decide.pair_verdict(checks, t, issue) for t in targets}
+    failed = [t for t, v in got.items() if v == "failed"]
+    if failed:
+        return Verdict(KEEP, f"リリース後テストが不合格の届け先がある: {', '.join(failed)}", False, release)
+    waiting = [t for t, v in got.items() if v == "not_run"]
+    if waiting:
+        return Verdict(ASK, f"保留（not_run）の届け先がある: {', '.join(waiting)}。閉じるかを人が決める", False, release)
+    absent = [t for t, v in got.items() if v is None]
+    if absent and enforced:
+        return Verdict(KEEP, f"その課題の行を持つリリース後テストの記録が無い届け先がある: {', '.join(absent)}", False, release)
+    if absent:
+        return Verdict(CLOSE, f"その課題の行が無い届け先がある（条件 2 を見ない）: {', '.join(absent)}", False, release)
+    return Verdict(CLOSE, "対象の届け先のすべてでリリース後テストに合格した", True, release)
 
 
 class Condition(NamedTuple):

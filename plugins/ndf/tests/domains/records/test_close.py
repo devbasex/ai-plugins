@@ -79,6 +79,109 @@ def test_verdict_keeps_a_failed_issue_whatever_is_enforced() -> None:
         assert cd.verdict(5, [PASSED_ROW, FAILED_ROW], enforced=enforced).decided == cd.KEEP
 
 
+WEB, WORKER = "web", "worker"
+VALUE = "main abc1234"
+
+
+def _release(*environments: str, unit: str | None = None, release: int = 20, confirmation: dict | None = None) -> dict[str, Any]:
+    """`records` の出力の、バージョンの無いリリース記録 1 件（対象は web と worker）。"""
+    got = {"version": VALUE, "release": release, "included": [11, release], "environments": list(environments)}
+    got.update(commit="a" * 40, targets=[WEB, WORKER], confirmation=confirmation or {e: "cd" for e in environments})
+    observed = {e: {"url": "https://web.example/version", "value": "a" * 40} for e, k in got["confirmation"].items() if k == "observed"}
+    got |= {"evidence": observed} if observed else {}
+    return got | ({"unit": unit} if unit is not None else {})
+
+
+def _check(environments: tuple[str, ...], *rows: tuple[int, str], retest: str | None = None) -> dict[str, Any]:
+    issues = [{"number": n, "result": r, "evidence": "確かめた"} | ({"retest_reason": retest} if retest else {}) for n, r in rows]
+    return {"version": VALUE, "environments": list(environments), "issues": issues}
+
+
+def _view(releases: list[dict[str, Any]], *checks: dict[str, Any], targets: list[str] | None = None) -> dict[str, Any]:
+    """`release-steps records --version` の出力の outputs（代表は最後のリリース記録）。"""
+    return {
+        "release": releases[-1] if releases else None,
+        "releases": releases,
+        "targets": targets or [WEB, WORKER],
+        "verifications": list(checks),
+    }
+
+
+BOTH = _release(WEB, WORKER)
+
+
+def test_records_verdict_closes_when_every_target_is_reflected_and_passed() -> None:
+    # 受け入れ条件 9: 対象の届け先のすべてで反映の記録があり、その課題の行が合格なら閉じてよく、verified が真
+    got = cd.records_verdict(
+        7, _view([_release(WEB), _release(WORKER)], _check((WEB,), (7, "passed")), _check((WORKER,), (7, "passed"))), True
+    )
+    assert got.decided == cd.CLOSE and got.verified is True
+    assert got.release == {"complete": True, "missing": [], "unconfirmed": []}
+
+
+@pytest.mark.parametrize(
+    "view",
+    [
+        _view([_release(WEB)], _check((WEB,), (7, "passed"))),
+        _view([], _check((WEB, WORKER), (7, "passed"))),
+        # 同じ値でも、別の本番の PR・別のリリースの単位の記録では、まだの届け先を埋めない
+        _view([_release(WEB), _release(WORKER, release=21), _release(WORKER, unit="b")], _check((WEB, WORKER), (7, "passed"))),
+    ],
+)
+def test_records_verdict_keeps_the_issue_until_every_target_is_reflected(view: dict[str, Any]) -> None:
+    # 決定 7: 反映がそろうまで閉じない（条件 1）。まだの届け先を返す
+    view["release"] = view["releases"][0] if view["releases"] else None
+    got = cd.records_verdict(7, view, False)
+    assert got.decided == cd.KEEP and got.verified is False
+    assert got.release == {"complete": False, "missing": [WORKER] if view["releases"] else [WEB, WORKER], "unconfirmed": []}
+
+
+def test_records_verdict_without_the_issues_row_on_a_target_depends_on_enforced() -> None:
+    # 受け入れ条件 9: 別の課題の行しかない届け先があると verified は偽。--require なら閉じない
+    view = _view([BOTH], _check((WEB,), (7, "passed")), _check((WORKER,), (8, "passed")))
+    got = cd.records_verdict(7, view, False)
+    assert got.decided == cd.CLOSE and got.verified is False
+    assert cd.records_verdict(7, view, True).decided == cd.KEEP
+
+
+def test_records_verdict_is_not_hidden_by_a_later_retest_of_another_issue() -> None:
+    # 受け入れ条件 8・9: 同じ届け先で別の課題だけを再テストした記録が後にあっても、その課題の不合格で閉じない
+    view = _view([BOTH], _check((WEB, WORKER), (7, "failed"), (8, "failed")), _check((WEB, WORKER), (8, "passed"), retest="接続を直した"))
+    assert cd.records_verdict(7, view, False).decided == cd.KEEP
+    assert cd.records_verdict(8, view, False).decided == cd.CLOSE
+
+
+def test_records_verdict_leaves_a_not_run_pair_to_a_person_and_prefers_failed() -> None:
+    assert cd.records_verdict(7, _view([BOTH], _check((WEB,), (7, "not_run")), _check((WORKER,), (7, "passed"))), True).decided == cd.ASK
+    view = _view([BOTH], _check((WEB,), (7, "not_run")), _check((WORKER,), (7, "failed")))
+    assert cd.records_verdict(7, view, True).decided == cd.KEEP
+
+
+def test_records_verdict_lists_targets_reflected_without_the_cd_result() -> None:
+    # 決定 7: 反映の記録が CD の結果でない届け先は unconfirmed に区分つきで載る
+    made = _release(WEB, WORKER, confirmation={WEB: "observed", WORKER: "attested"})
+    got = cd.records_verdict(7, _view([made], _check((WEB, WORKER), (7, "passed"))), True)
+    assert got.release == {
+        "complete": True,
+        "missing": [],
+        "unconfirmed": [{"name": WEB, "kind": "observed"}, {"name": WORKER, "kind": "attested"}],
+    }
+
+
+def test_records_verdict_on_a_versioned_record_judges_only_the_last_check() -> None:
+    # 受け入れ条件 9: バージョン付きの記録では complete は null で、代表と同じ値・単位の最後のテストの記録だけで判定する
+    versioned = {"version": "1.2.3", "release": 20, "included": [11]}
+    first = {"version": "1.2.3", "issues": [{"number": 7, "result": "failed", "evidence": "e"}]}
+    last = {"version": "1.2.3", "issues": [{"number": 7, "result": "passed", "evidence": "e"}]}
+    other_unit = {"version": "1.2.3", "unit": "b", "issues": [{"number": 7, "result": "failed", "evidence": "e"}]}
+    got = cd.records_verdict(
+        7, {"release": versioned, "releases": [versioned], "targets": None, "verifications": [first, last, other_unit]}, True
+    )
+    assert got.decided == cd.CLOSE and got.verified is True and got.release is None
+    got = cd.records_verdict(7, {"release": versioned, "releases": [versioned], "targets": None, "verifications": []}, True)
+    assert got.decided == cd.KEEP and got.release is None
+
+
 REQUIRED = CloseRule(True, None)
 EXCLUDED = CloseRule(False, "監視で確かめる")
 

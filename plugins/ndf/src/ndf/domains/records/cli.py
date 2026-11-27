@@ -13,7 +13,7 @@
     ndf records mvv cite --gate design|release --base <ブランチ> <ファイル>...   # 承認資料の根拠の行を承認済みの MVV で確かめる
     ndf records preflight                          # 手順 0 の 3 つの確かめ（worktree の設定・設定・MVV）
     ndf records cleanup-stage <PR番号>...           # クリーンアップを終えた PR が閉じる課題に工程の記録を付ける
-    ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか（流れの設定の close を読む）
+    ndf records close-check <課題> [--verification <JSON> | --records <records の出力>] [--require]   # 課題を閉じてよいか（流れの設定の close を読む）
     ndf records gws-check                          # gws の認証を確かめる
     ndf records reading prompt|add --file <JSON>   # 読み手役への指示・確認の記録
     ndf records reading check --gate <design|release> --pr <番号> [--material <ファイル>] --questions-out <ファイル>
@@ -41,7 +41,7 @@ from ndf.adapters import publish
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
 from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, reading, spec, usage
-from ndf.core import durable
+from ndf.core import branch_strategy, durable
 from ndf.progress import command, definition, flow, invoke, model, stage_inputs
 from ndf.progress.invoke import INPUT_ENV
 from ndf.domains.records import glossary_decide as gd
@@ -51,6 +51,8 @@ from ndf.domains.records.mvv_decide import State
 TOOL = cli.tool_of(__name__)
 # リリース後テストの記録のスキーマ（contracts/schemas/release-verification.schema.json）
 VERIFICATION = "release-verification"
+# `release-steps records` の outputs の形（書き手の `cmd_records` と同じ定義。#4580）
+RECORDS_OUTPUTS = "schemas/io/release-steps.result.schema.json#/$defs/records_outputs"
 
 
 def _root(args: argparse.Namespace) -> Path:
@@ -341,21 +343,72 @@ def _verification_rows(path: Path) -> tuple[Any, str | None]:
     return record["issues"], None
 
 
+def _records_view(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """`release-steps records --version` の結果 JSON（標準出力を保存したファイルの最後の行）を確かめ、(outputs, 止める理由) を返す。
+
+    通すのは、結果のコントラクトに合う `release-steps` の `ok` の結果で、`outputs` が `$defs.records_outputs` に合うものだけ。"""
+    try:
+        got = result.last_line(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return None, f"records の出力を読めない: {exc}"
+    if got is None or got.get("tool") != "release-steps" or got.get("status") != result.OK:
+        return None, "records の出力が release-steps records の成功の結果 JSON でない"
+    outputs = result.outputs_of(got)
+    errs = contracts.schema_errors(outputs, RECORDS_OUTPUTS)
+    if errs:
+        return None, "records の出力の outputs の形が違う（release-steps records に --version を渡して打つ）: " + "; ".join(errs)
+    return outputs, None
+
+
+def _without_versions(root: Path) -> bool:
+    """バージョン番号を持たないリポジトリ（`branch_strategy.release.version_store.kind` が none）か。設定が無いか読めなければ偽。"""
+    try:
+        return branch_strategy.load(root).version_store["kind"] == "none"
+    except branch_strategy.StrategyError:  # noqa: NDF401 利用者の入力: 設定の無いリポジトリは今のとおりバージョン番号を持つリポジトリとして確かめる
+        return False
+
+
+def _pair_error(args: argparse.Namespace, root: Path) -> str | None:
+    """引数の組の誤り（両方の記録・バージョンの無いリポジトリでの --verification）。"""
+    if args.records is not None and args.verification is not None:
+        return "--records と --verification は一緒に渡さない"
+    if args.verification is not None and _without_versions(root):
+        return (
+            "バージョンの保存先が none のリポジトリでは --verification を受けない。"
+            "release-steps records --version <値> --bodies の出力を保存し、--records に渡す"
+        )
+    return None
+
+
+def _judged(args: argparse.Namespace, enforced: bool) -> tuple[close_decide.Verdict | None, str | None]:
+    """渡した記録で判定する（`--records` なら `records_verdict`、ほかは `verdict`）。読めなければ (None, 止める理由)。"""
+    if args.records is not None:
+        view, err = _records_view(args.records)
+        return (close_decide.records_verdict(args.issue, view, enforced), None) if view is not None else (None, err)
+    rows = None
+    if args.verification is not None:
+        rows, err = _verification_rows(args.verification)
+        if err is not None:
+            return None, err
+    return close_decide.verdict(args.issue, rows, enforced), None
+
+
 def _close_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     try:
         rules = flow.close_rules(flow.read_flow(root))
     except contracts.ContractError as exc:
         return result.stopped(TOOL, "precondition", f"流れの設定を読めない: {exc}")
     conditions = close_decide.conditions_of(rules, args.require)
-    rows = None
-    if args.verification is not None:
-        rows, err = _verification_rows(args.verification)
-        if err is not None:
-            return result.stopped(TOOL, "precondition", err)
-    enforced = conditions[flow.require_flag_condition()].enforced
-    got = close_decide.verdict(args.issue, rows, enforced)
+    err = _pair_error(args, root)
+    if err is not None:
+        return result.stopped(TOOL, "precondition", err)
+    got, err = _judged(args, conditions[flow.require_flag_condition()].enforced)
+    if got is None:
+        return result.stopped(TOOL, "precondition", err or "記録を読めない")
     item = {"issue": args.issue, "closable": got.decided == close_decide.CLOSE, "reason": got.reason}
-    outputs = {"conditions": {name: c._asdict() for name, c in conditions.items()}, "verified": got.verified}
+    outputs: dict[str, Any] = {"conditions": {name: c._asdict() for name, c in conditions.items()}, "verified": got.verified}
+    if args.records is not None:
+        outputs["release"] = got.release
     note = close_decide.excluded_note(conditions)
     if got.decided == close_decide.KEEP:
         return result.stopped(TOOL, "refused", f"#{args.issue} を閉じない: {got.reason}{note}", items=[item], outputs=outputs)
@@ -514,6 +567,12 @@ def _add_close_check(sub: Any) -> None:
     k = sub.add_parser("close-check")
     k.add_argument("issue", type=int)
     k.add_argument("--verification", type=Path, default=None, help="リリース後テストの記録（release-verification のスキーマの JSON）")
+    k.add_argument(
+        "--records",
+        type=Path,
+        default=None,
+        help="release-steps records --version の出力（結果 JSON）を保存したファイル。届け先ごとに判定する",
+    )
     k.add_argument("--require", action="store_true", help="記録が無ければ閉じない")
     k.set_defaults(handler=_close_check)
 

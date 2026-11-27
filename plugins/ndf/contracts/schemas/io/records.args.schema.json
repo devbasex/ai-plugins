@@ -49,6 +49,10 @@
           "type": "string",
           "description": "リリース後テストの記録（release-verification のスキーマの JSON）"
         },
+        "--records": {
+          "type": "string",
+          "description": "release-steps records --version の出力（結果 JSON）を保存したファイル。届け先ごとに判定する"
+        },
         "--require": {
           "type": "boolean",
           "description": "記録が無ければ閉じない"
