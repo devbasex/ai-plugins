@@ -1,14 +1,18 @@
-"""#1959 の決定 6: `claude -p` の起動 1 回の結果の欄と、使用量ログへ渡す行（`report_launch`）。"""
+"""#1959 の決定 6: `claude -p` の起動 1 回の結果の欄と、使用量ログへ渡す行（`LaunchLog`）。
+
+実プロセスの起動と実時間は使わない（偽の `Popen` と差し替えた時計で縛る）。
+"""
 
 from __future__ import annotations
 
 import json
 import os
 import sys
+from contextlib import contextmanager
 
 import pytest
 
-from ndf.adapters import claude
+from ndf.adapters import claude, launch_slot
 
 # 実測の形（2026-11-27、Claude Code 2.1.332 の haiku の結果から値だけを残した）。`usage` は起動 1 回分、`modelUsage` と `total_cost_usd` は会話の累計
 MODEL_USAGE = {
@@ -80,11 +84,11 @@ def test_main_model_is_the_largest_sum_and_the_smaller_window_on_a_tie():
 
 
 def test_one_launched_child_hands_one_row(recorder):
-    meta = {"name": "fix", "repo": "o/r", "session_id": "s-1"}
-    assert claude.report_launch(_launched(), meta, 2) == 1
+    log = claude.LaunchLog({"name": "fix", "repo": "o/r", "session_id": "s-1"})
+    log.report(_launched(session_id=None))
     [(usage, row)] = recorder.rows
     assert usage == USAGE
-    assert row["name"] == "fix" and row["repo"] == "o/r" and row["session_id"] == "s-1" and row["session_seq"] == 2
+    assert row["name"] == "fix" and row["repo"] == "o/r" and row["session_id"] == "s-1" and row["session_seq"] == 0
     assert row["session_cost_usd"] == 0.00080865 and row["model"] == "claude-haiku-5-5"
     tokens = {"inputTokens": 4, "outputTokens": 22, "cacheReadInputTokens": 6145, "cacheCreationInputTokens": 3679}
     assert row["model_usage"] == {"claude-haiku-5-5": tokens}  # 会話の累計のまま、4 つのトークンの値だけ
@@ -92,36 +96,44 @@ def test_one_launched_child_hands_one_row(recorder):
 
 
 def test_the_session_id_of_the_result_is_written_when_the_caller_did_not_name_it(recorder):
-    claude.report_launch(_launched(), {"name": "review"}, 0)
+    claude.LaunchLog({"name": "review"}).report(_launched())
     assert recorder.rows[0][1]["session_id"] == "s-9"
 
 
-def test_a_retried_child_hands_two_rows_with_their_own_launch_ids(recorder):
-    first = _launched(session_cost_usd=0.1)
-    second = _launched(earlier=(first,))
-    assert claude.report_launch(second, {"name": "fix"}, 0) == 2
+def test_children_of_one_conversation_count_up_with_their_own_launch_ids(recorder):
+    log = claude.LaunchLog({"name": "fix", "session_id": "s-9"})
+    log.report(_launched(session_cost_usd=0.1))
+    log.report(_launched())
     rows = [row for _, row in recorder.rows]
     assert [r["session_seq"] for r in rows] == [0, 1] and [r["session_cost_usd"] for r in rows] == [0.1, 0.00080865]
     assert rows[0]["launch_id"] != rows[1]["launch_id"]
 
 
+def test_a_child_in_a_new_conversation_starts_its_number_from_zero(recorder):
+    """アカウントを替えて打ち直した子は結果の会話の id が変わるので、その会話の番号は 0 から（費用が不明にならない）。"""
+    log = claude.LaunchLog({"name": "design"})
+    log.report(_launched(session_id="s-a"))
+    log.report(_launched(session_id="s-b"))
+    assert [(row["session_id"], row["session_seq"]) for _, row in recorder.rows] == [("s-a", 0), ("s-b", 0)]
+
+
 def test_a_child_that_did_not_launch_hands_no_row(recorder):
-    stopped = claude.ClaudeReply.failed("", "古い", failure=claude.Failure.REFUSED)
-    assert claude.report_launch(stopped, {"name": "fix"}, 0) == 0
-    assert claude.report_launch(_launched()._replace(earlier=(stopped,)), {"name": "fix"}, 0) == 1
+    log = claude.LaunchLog({"name": "fix"})
+    log.report(claude.ClaudeReply.failed("", "古い", failure=claude.Failure.REFUSED))
+    log.report(_launched())
     assert len(recorder.rows) == 1 and recorder.rows[0][1]["session_seq"] == 0
 
 
 def test_a_launched_child_without_json_hands_a_row_without_usage(recorder):
     timed = claude.ClaudeReply.failed("", "期限", failure=claude.Failure.TIMEOUT)._replace(launched=True, seconds=1.0)
-    assert claude.report_launch(timed, {"name": "fix", "session_id": "s-1"}, 0) == 1
+    claude.LaunchLog({"name": "fix", "session_id": "s-1"}).report(timed)
     usage, row = recorder.rows[0]
-    assert usage is None and "model" not in row and row["session_cost_usd"] is None
+    assert usage is None and "model" not in row and row["session_cost_usd"] is None and row["session_id"] == "s-1"
 
 
 def test_without_a_recorder_nothing_is_written(monkeypatch):
     monkeypatch.setattr(claude, "launch_recorder", None)
-    assert claude.report_launch(_launched(), {"name": "fix"}, 0) == 1
+    claude.LaunchLog({"name": "fix"}).report(_launched())  # 書き込み処理が無くても止まらない
 
 
 def test_set_launch_recorder_replaces_the_recorder(monkeypatch):
@@ -146,18 +158,51 @@ def test_launch_meta_outside_a_plan_has_only_the_name(monkeypatch):
     assert "attempt" not in claude.launch_meta("fix", None)
 
 
-ANSWER = "import json, sys; sys.stdin.read(); print(json.dumps({'result': '{}', 'session_id': 's-2', 'usage': {'output_tokens': 1}}))"
+class FakeProc:
+    """管を持たない偽のプロセス（実プロセスを起動しない）。"""
+
+    def __init__(self, stdout: str) -> None:
+        self.returncode, self.pid = 0, 0
+        self.stdin = self.stdout = self.stderr = None
+        self._out = stdout
+
+    def communicate(self, prompt: str = "", timeout: float = 0) -> tuple[str, str]:
+        return self._out, ""
 
 
-def test_a_launched_child_is_marked_with_its_time(tmp_path):
-    got = claude.call_claude([sys.executable, "-c", ANSWER], "q", 30, options=claude.LaunchOptions(cli_floor=False))
+@pytest.fixture
+def no_slot(monkeypatch):
+    """スロットの取得を偽物にし（空きを待たず、環境に値を足さない）、中継の確かめを外す。"""
+
+    @contextmanager
+    def gate(agent, *, cwd=None, env=None, wait=None, ensure=True):
+        yield {}
+
+    monkeypatch.setattr(launch_slot, "gate", gate)
+    monkeypatch.setattr(claude, "relay_checks", None)
+
+
+def test_a_launched_child_is_marked_with_its_time_and_handed_to_the_log(no_slot, recorder, monkeypatch):
+    """起動した時刻とかかった秒は差し替えた時計の値。子が終わったその場で行が渡る。"""
+    answer = json.dumps({"result": "{}", "session_id": "s-2", "usage": {"output_tokens": 1}})
+    monkeypatch.setattr(claude.subprocess, "Popen", lambda argv, **kw: FakeProc(answer))
+    clock = iter([("2026-11-27T01:00:00+00:00", 10.0), ("2026-11-27T01:00:03+00:00", 13.5)])
+    monkeypatch.setattr(claude, "_now", lambda: next(clock))
+    options = claude.LaunchOptions(cli_floor=False, log=claude.LaunchLog({"name": "fix"}))
+    got = claude.call_claude(["claude"], "q", 30, options=options)
     assert got.ok and got.launched and got.session_id == "s-2"
-    assert got.seconds is not None and got.seconds >= 0 and got.launched_at is not None and got.launched_at.endswith("+00:00")
+    assert (got.launched_at, got.seconds) == ("2026-11-27T01:00:00+00:00", 3.5)
+    assert [(row["session_id"], row["seconds"]) for _, row in recorder.rows] == [("s-2", 3.5)]
 
 
-def test_a_command_that_cannot_start_is_not_marked_launched(tmp_path):
-    got = claude.call_claude([str(tmp_path / "missing")], "q", 30, options=claude.LaunchOptions(cli_floor=False))
-    assert got.failure is claude.Failure.LAUNCH and not got.launched
+def test_a_command_that_cannot_start_is_not_marked_launched(no_slot, recorder, monkeypatch):
+    def popen(argv, **kw):
+        raise OSError("無い")
+
+    monkeypatch.setattr(claude.subprocess, "Popen", popen)
+    options = claude.LaunchOptions(cli_floor=False, log=claude.LaunchLog({"name": "fix"}))
+    got = claude.call_claude(["claude"], "q", 30, options=options)
+    assert got.failure is claude.Failure.LAUNCH and not got.launched and recorder.rows == []
 
 
 class FakeChecks:
@@ -171,13 +216,23 @@ class FakeChecks:
         return self.again
 
 
-def test_the_child_before_an_account_switch_is_kept_as_earlier(tmp_path, monkeypatch):
+def test_the_child_before_an_account_switch_is_handed_before_the_retry(tmp_path, recorder, monkeypatch):
+    """利用上限で終えた子の行は、替え先の起動より先に渡る（打ち直しの途中で止められても残る）。番号は会話ごとに 0 から。"""
     run = claude.AccountRun(dict(os.environ), ["x"])
-    limited = _launched(ok=False, failure=claude.Failure.USAGE_LIMIT)
-    replies = iter([limited, _launched()])
-    monkeypatch.setattr(claude, "_prefaced", lambda *a: next(replies))
-    got = claude._accounted(FakeChecks(run, run), run, "q", 30, tmp_path, claude.DEFAULT_LAUNCH)
-    assert got.ok and got.earlier == (limited,)
+    limited = _launched(ok=False, failure=claude.Failure.USAGE_LIMIT, session_id="s-a")
+    rows_at_retry: list[int] = []
+
+    def launch_once(run, prompt, timeout, cwd, options):
+        if rows_at_retry or recorder.rows:
+            rows_at_retry.append(len(recorder.rows))
+            return _launched(session_id="s-b")
+        return limited
+
+    monkeypatch.setattr(claude, "_launch_once", launch_once)
+    options = claude.LaunchOptions(log=claude.LaunchLog({"name": "design"}))
+    got = claude._accounted(FakeChecks(run, run), run, "q", 30, tmp_path, options)
+    assert got.ok and rows_at_retry == [1]
+    assert [(row["session_id"], row["session_seq"]) for _, row in recorder.rows] == [("s-a", 0), ("s-b", 0)]
 
 
 def test_the_entry_point_injects_the_usage_log(monkeypatch):

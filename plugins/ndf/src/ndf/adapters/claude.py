@@ -461,7 +461,7 @@ class ClaudeReply(NamedTuple):
     （結果の `total_cost_usd`）は結果の JSON の値で、読めなければ None。`usage` は起動 1 回分、`model_usage` と
     `session_cost_usd` は会話の累計である（2026-11-27 に Claude Code 2.1.332 で同じ会話を 2 回再開して測った）。
     `launched` は子プロセスを起動できたか（スロット・下限・照らし直しで止まった起動と、起動に失敗した起動は偽）、
-    `launched_at`・`seconds` は起動した時刻（UTC）とかかった秒。`earlier` は、アカウントを替えて打ち直す前に起動した子の回答である。
+    `launched_at`・`seconds` は起動した時刻（UTC）とかかった秒。
     """
 
     ok: bool
@@ -477,7 +477,6 @@ class ClaudeReply(NamedTuple):
     launched: bool = False
     launched_at: Optional[str] = None
     seconds: Optional[float] = None
-    earlier: tuple["ClaudeReply", ...] = ()
 
     @classmethod
     def failed(cls, raw: str, error: str, cost: float = 0.0, failure: Optional[Failure] = None) -> "ClaudeReply":
@@ -598,8 +597,10 @@ def _with_usage(reply: ClaudeReply, payload: Mapping[str, Any]) -> ClaudeReply:
     )
 
 
-def launch_meta(name: str, repo: Optional[str]) -> dict[str, Any]:
-    """使用量ログの行の工程の欄。`name` は工程の名前（作業種別か Skill の名前）、`repo` は `<所有者>/<リポジトリ>`（読めなければ None）。
+def launch_meta(name: str, repo: Optional[str] = None) -> dict[str, Any]:
+    """使用量ログの行の工程の欄。`name` は工程の名前（作業種別か Skill の名前）、`repo` は呼び出し元が解決済みの `<所有者>/<リポジトリ>`。
+
+    `repo` を得るためだけに git を起動しない（起動 1 回ごとに git のプロセスが増えるため）。解決済みの値が無ければ欄を省く。
 
     プランの実行の子なら、プランの実行の id・ステップの id・何回目かを環境変数から足す（#1959 の「子へ渡す環境変数」）。
     無い値と、整数でない回数は欄を省く。
@@ -617,21 +618,35 @@ def launch_meta(name: str, repo: Optional[str]) -> dict[str, Any]:
     return meta
 
 
-def report_launch(reply: ClaudeReply, meta: Mapping[str, Any], seq: int) -> int:
-    """起動した子ごとに使用量ログの行を 1 つ書き込み処理へ渡し、起動した子の数を返す（#1959 の決定 6）。
+class LaunchLog:
+    """1 回の委譲か Skill の呼び出しが起動した子の行を、子が終わるたびに使用量ログの書き込み処理へ渡す（#1959 の決定 6）。
 
-    子は `reply.earlier` の順に続けて `reply`。起動しなかった子（`launched` が偽）は行を渡さない。`seq` は最初の子の
-    `session_seq` で、子ごとに 1 進める。`meta` の `session_id` が無ければ結果の会話の id を書く。書き込み処理が
-    差し込まれていなければ渡さない。行に質問と回答の本文を入れない。
+    起動の前置き（`_prefaced`）が、起動した子 1 つが終わるたびに `report` を打つ。アカウントを替えて打ち直す場合も、
+    前の子の行は打ち直しより先に渡るので、打ち直しの途中で止められても残る。
+
+    `meta` は工程の欄（`launch_meta` の値。worker は指定した会話の id も入れる）。行の会話の id は、結果の JSON の
+    `session_id` を優先し、無ければ `meta` の値にする。`session_seq` は会話の id ごとに 0 から数える。アカウントを
+    替えて打ち直した子は会話の id が変わるので、その会話の番号は 0 から始まる。書き込み処理が差し込まれていなければ渡さない。
+    行に質問と回答の本文を入れない。
     """
-    children = [child for child in (*reply.earlier, reply) if child.launched]
-    for offset, child in enumerate(children):
+
+    def __init__(self, meta: Mapping[str, Any]) -> None:
+        self.meta = dict(meta)
+        self._seqs: dict[Optional[str], int] = {}
+
+    def report(self, child: ClaudeReply) -> None:
+        """起動した子 1 つの行を渡す。起動しなかった子（`launched` が偽）は渡さない。"""
+        if not child.launched:
+            return
+        named = self.meta["session_id"] if "session_id" in self.meta else None
+        session = child.session_id if child.session_id is not None else named
+        seq = self._seqs[session] if session in self._seqs else 0
+        self._seqs[session] = seq + 1
         if launch_recorder is not None:
-            launch_recorder.record_cli(child.usage, _launch_row(child, meta, seq + offset))
-    return len(children)
+            launch_recorder.record_cli(child.usage, _launch_row(child, self.meta, session, seq))
 
 
-def _launch_row(child: ClaudeReply, meta: Mapping[str, Any], seq: int) -> dict[str, Any]:
+def _launch_row(child: ClaudeReply, meta: Mapping[str, Any], session: Optional[str], seq: int) -> dict[str, Any]:
     """子 1 つの行の欄（使用量を除く）。値の無い欄は None のまま渡し、書き込み処理が省く。"""
     models = child.model_usage if child.model_usage is not None else {}
     main = main_model(models)
@@ -639,7 +654,7 @@ def _launch_row(child: ClaudeReply, meta: Mapping[str, Any], seq: int) -> dict[s
     row = {
         **meta,
         "launch_id": uuid.uuid4().hex,
-        "session_id": meta["session_id"] if "session_id" in meta else child.session_id,
+        "session_id": session,
         "session_seq": seq,
         "session_cost_usd": child.session_cost_usd,
         "model": main[0] if main is not None else None,
@@ -707,6 +722,7 @@ class LaunchOptions:
       子プロセスを起動しない確かめなので、`claude --version` を打つ CLI の下限より前に打つ（止まる起動に `--version` を打たない）
     - `ready`: 起動の前の確かめをすべて通った後、子を起動する直前に 1 回打つ準備（worker が前の結果ファイルを消すなど）。
       どの確かめで止まった起動でも打たない
+    - `log`: 起動した子が終わるたびに使用量ログの行を渡す先（`LaunchLog`。#1959 の決定 6）。None なら渡さない
     """
 
     slot_wait: Optional[float] = None
@@ -716,6 +732,7 @@ class LaunchOptions:
     switch_account: bool = True
     verify: Optional[Callable[[], Optional[str]]] = None
     ready: Optional[Callable[[], None]] = None
+    log: Optional[LaunchLog] = None
 
 
 # 選び方を省いた起動（今までどおり）
@@ -764,10 +781,7 @@ def _accounted(
     if reply.failure is not Failure.USAGE_LIMIT or not options.switch_account:
         return reply
     again = checks.retry(base.argv, base.env, where, keys)
-    if again is None:
-        return reply
-    retried = _prefaced(again, prompt, timeout, cwd, options)
-    return retried._replace(earlier=(*reply.earlier, reply, *retried.earlier))  # 前の子の使用量の行を残す（#1959）
+    return reply if again is None else _prefaced(again, prompt, timeout, cwd, options)
 
 
 def require_claude(run: AccountRun, cwd: Optional[Path], check: bool) -> Optional[ClaudeReply]:
@@ -802,6 +816,14 @@ def _precheck(run: AccountRun, cwd: Optional[Path], options: LaunchOptions) -> O
 
 
 def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path], options: LaunchOptions) -> ClaudeReply:
+    """`_launch_once` を打ち、起動した子が終わったその場で使用量ログの行を `options.log` へ渡す（#1959 の決定 6）。"""
+    reply = _launch_once(run, prompt, timeout, cwd, options)
+    if options.log is not None:
+        options.log.report(reply)
+    return reply
+
+
+def _launch_once(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path], options: LaunchOptions) -> ClaudeReply:
     """起動の前置き（学習の設定・スロット・下限）を `run` の環境と実行ファイルで打って起動し、どの終わり方でも `run.end` を 1 回だけ打つ。
 
     前置きの選び方は `options`（スロットを待つ上限・claude を置くプロセスの組・下限の確かめ）。関所の起動は今までどおり新しい組で起動する。
@@ -816,7 +838,7 @@ def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path],
             stopped = _precheck(run, cwd, options)
             if stopped is not None:
                 return stopped
-            at, started = datetime.now(UTC).isoformat(timespec="seconds"), time.monotonic()
+            at, started = _now()
             if run.gate is None:
                 launched = True
                 return _timed(_run_claude(run.argv, prompt, timeout, cwd, run.env, options.new_group), at, started)
@@ -831,11 +853,16 @@ def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path],
         run.end(launched)
 
 
+def _now() -> tuple[str, float]:
+    """今の時刻（UTC の ISO 8601）と、かかった秒を測る単調な時計の値。"""
+    return datetime.now(UTC).isoformat(timespec="seconds"), time.monotonic()
+
+
 def _timed(reply: ClaudeReply, at: str, started: float) -> ClaudeReply:
     """起動した子の回答に、起動した時刻とかかった秒を持たせる。起動できなかった回答はそのまま返す。"""
     if not reply.launched:
         return reply
-    return reply._replace(launched_at=at, seconds=round(time.monotonic() - started, 3))
+    return reply._replace(launched_at=at, seconds=round(_now()[1] - started, 3))
 
 
 def _absolute_config(env: dict[str, str], cwd: Optional[Path]) -> dict[str, str]:

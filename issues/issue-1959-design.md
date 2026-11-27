@@ -581,15 +581,20 @@ timeout 1320 ndf delegate-run --runtime codex -- codex exec '{args}' -C "$PWD" <
 | `session_cost_usd`（足す） | 結果の `total_cost_usd` | 欄を置かない |
 | `model` | 主モデルの名前。決め方は下の「モデルの欄」 | 欄を置かない |
 | `model_usage` | 結果の `modelUsage` の、モデルごとのトークン数。会話の累計のまま書き、起動 1 回分は `session_cost_usd` と同じ求め方（同じ会話の 1 つ前の行との差）で集計の時に求める | 欄を置かない |
-| `seconds`・`launched_at`・`repo` | 呼び出し元が測る値 | 同じ |
+| `seconds`・`launched_at` | 起動した時刻と、子が終わるまでの秒 | 同じ |
+| `repo` | 呼び出し元が解決済みの `<所有者>/<リポジトリ>`。worker と Skill を回す起動は解決済みの値を持たないので欄を省く | 同じ |
 
 子プロセスを起動できなかった場合（CLI のバージョンが下限より古い、同時起動のスロットが取れないなど）は、使った量が無いので行を書かない。
 
+`repo` を得るためだけに git を起動しないのは、worker の委譲と Skill の呼び出しのたびに、同期の git のプロセス（`git worktree list` と `git remote get-url`）が 2 つ増えるためである。集計は `repo` を使わないので、欄を省いても費用の比較は変わらない。
+
 **結果の値の範囲（実測）。** 2026-11-27 に Claude Code 2.1.332 で、haiku の同じ会話を `--resume` で 2 回再開して 3 回の結果を測った。`usage` は起動 1 回分で、3 回とも `input_tokens` 2・`output_tokens` 11 だった。`modelUsage` と `total_cost_usd` は会話の累計で、`modelUsage` の `inputTokens` は 2→4→6、`cacheReadInputTokens` は 1670→6145→11061 と各回の `usage` の和に一致し、`costUSD` は `total_cost_usd` と同じ値だった。そこで `usage` はそのまま書き、`model_usage` と `session_cost_usd` は累計のまま書いて、起動 1 回分は集計の時に差で求める。書き込みの時に差を取らないのは、前の行を読むために使用量ログの錠の中で全体を読むことになり、書けなかった起動があると差が誤るためである。起動 1 回分の `model_usage` を返す関数は、読み手が現れるまで足さない
 
-**会話の id と順番。** worker の起動は呼び出し元が id を指定する（`--session-id`、再開は `--resume`）ので、その値を書く。Skill を回す起動は id を指定しないので、結果の JSON の `session_id` を書く。どちらからも取得できなければ欄を省く。
+**会話の id と順番。** 会話の id は、結果の JSON の `session_id` を書く。結果の JSON が得られなければ、worker の起動は呼び出し元が指定した id（`--session-id`、再開は `--resume`）を書き、Skill を回す起動は id を指定しないので欄を省く。
 
-`session_seq` は、呼び出し元が持って渡す。#1959 の範囲で同じ会話を再開するのは worker の再開ループだけで、このループは会話の最初の起動から順に回数を持っている。Skill を回す起動は常に 0 である。番号が 1 つ飛べば、ログへの追記に失敗した起動があると分かる。
+`session_seq` は、会話の id ごとに 0 から数える。数えるのは、呼び出し元が 1 回の委譲か Skill の呼び出しごとに作る記録先（`claude.LaunchLog`）である。#1959 の範囲で同じ会話を再開するのは worker の再開ループだけで、ループの間は同じ記録先を使う。アカウントの利用上限で別のアカウントに替えて打ち直した子は、結果の会話の id が変わるので、その会話の番号は 0 から始まる。番号を続けると、新しい会話の最初の起動なのに 1 つ前の行が無く、費用が不明になる。番号が 1 つ飛べば、ログへの追記に失敗した起動があると分かる。
+
+**行を書く時点。** 記録先は、子が 1 つ終わったその場で行を書く。アカウントを替えて打ち直す場合も、前の子の行は替え先の起動より先に書く。打ち直しの途中で利用者が中断しても、終わっていた子の行は残る。
 
 **モデルの欄。** 1 回の起動で複数のモデルが動くことがある。`model` は、結果の `modelUsage` のうち、トークン数の和が最も大きいモデルである。和に入れるのは `inputTokens`・`outputTokens`・`cacheReadInputTokens`・`cacheCreationInputTokens` の 4 つである。同じ和なら `contextWindow` が小さいほうを選ぶ。`claude.py` の `context_window` が主モデルを選ぶ規則と同じなので、1 つの関数を両方が使う。`modelUsage` が無いか空なら、欄を省く。`model_usage` には、モデルごとに上の 4 つの値を入れる。
 

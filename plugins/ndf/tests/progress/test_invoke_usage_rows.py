@@ -35,7 +35,14 @@ def _outside_a_plan(monkeypatch):
 
 
 def _call(reply: claude.ClaudeReply):
-    return lambda argv, prompt, timeout, cwd=None, options=None: reply
+    """偽の `call_claude`。本物と同じく、起動した子が終わったその場で行を `options.log` へ渡す。"""
+
+    def call(argv, prompt, timeout, cwd=None, options=None):
+        if options is not None and options.log is not None:
+            options.log.report(reply)
+        return reply
+
+    return call
 
 
 def test_skill_writes_one_row_named_after_the_skill_with_the_session_of_the_result(tmp_path, monkeypatch):
@@ -48,7 +55,7 @@ def test_skill_writes_one_row_named_after_the_skill_with_the_session_of_the_resu
     assert got.status == "ok" and len(rows.rows) == 1
     used, row = rows.rows[0]
     assert used == {"output_tokens": 5} and row["name"] == "design" and row["session_id"] == "s-7" and row["session_seq"] == 0
-    assert "run_id" not in row and row["session_cost_usd"] == 0.3
+    assert "run_id" not in row and "repo" not in row and row["session_cost_usd"] == 0.3
 
 
 def test_skill_result_is_the_same_when_the_usage_log_cannot_be_written(tmp_path, monkeypatch, capsys):
