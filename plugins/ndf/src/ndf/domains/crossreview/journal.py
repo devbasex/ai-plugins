@@ -17,7 +17,7 @@ from ndf.domains.crossreview import criteria_decide, prior_decide, store, verify
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, UNPINNED
 from ndf.domains.records import jsonl
-from ndf.domains.records.mvv_decide import DEFERS, REVIEW_DEFER, REVIEW_FIXED_AT, State
+from ndf.domains.records.mvv_decide import DEFERS, REVIEW_ALSO_REDLINES, REVIEW_DEFER, REVIEW_FIXED_AT, State, also_redlines_note
 
 
 def _text(value: object) -> Optional[str]:
@@ -159,7 +159,7 @@ def _unclassify(row: dict[str, Any]) -> None:
     old = {k: row[k] for k in (JUDGED, MVV, REDLINE_ITEMS, "outcome", SKIPPED_MVV) if k in row}
     row[HISTORY] = [*store.list_of(row, HISTORY), old]
     _unpin(row)
-    for key in (MVV, fin.REDLINE, REDLINE_ITEMS, JUDGED):
+    for key in (MVV, fin.REDLINE, REDLINE_ITEMS, JUDGED, REVIEW_ALSO_REDLINES):
         row.pop(key, None)
 
 
@@ -341,16 +341,20 @@ def _denied_report(item: Mapping[str, Any], items: Sequence[str], denied: Option
     return any(new.get("path") == d.path and not _other_path_or_condition(item, new, d) for d in denied)
 
 
-def _add_report(row: dict[str, Any], item: Mapping[str, Any]) -> None:
+def _add_report(row: dict[str, Any], item: Mapping[str, Any], items: Sequence[str]) -> None:
     """別の報告 `item` の本文・位置（パスと行、見出し）・起きることの 1 文を、1 件の文字列にして `ALSO_REPORTS` の欄に足す（行と同じ
     本文と位置で 1 文も増えない報告と、足してある報告は足さない）。本文 `text` は PR のスレッドと記録のコメントで公開され、公開の
-    前の伏せ字は自由記述の非公開の情報を防げないので、本文には何も足さない。修正担当と判定役が欄を読む。#4363"""
+    前の伏せ字は自由記述の非公開の情報を防げないので、本文には何も足さない。修正担当と判定役が欄を読む。足した報告が必ず人の承認が
+    要る操作を挙げていれば、番号を `REVIEW_ALSO_REDLINES` に残し、承認資料には番号と定型の説明だけを出す。#4363"""
     new = _raised(dict(item))
     text = str(item["text"]).strip()
     path, line, section = new.get("path"), new.get("line"), _text(item.get("section"))
     same_place = (text, path, line, section) == (row["text"], row.get("path"), row.get("line"), row.get("section"))
     if same_place and new.get("impact") in (None, row.get("impact")):
         return
+    named = criteria_decide.mvv_item(item.get("mvv"), items)
+    if criteria_decide.redline(named):
+        row[REVIEW_ALSO_REDLINES] = [i for i in items if i == named or i in store.list_of(row, REVIEW_ALSO_REDLINES)]
     place = "、".join(p for p in (f"{path}:{line}" if path and line else path, section) if p)
     told = text + (f"（{place}）" if place else "") + criteria_decide.fixer_impact(new)
     if told not in (held := store.list_of(row, ALSO_REPORTS)):
@@ -392,6 +396,7 @@ def _align_report(
     rank, item, new = best
     row["text"] = str(item["text"]).strip()
     row.pop(ALSO_REPORTS, None)
+    row.pop(REVIEW_ALSO_REDLINES, None)
     if "impact" in new:
         row["impact"] = new["impact"]
     else:
@@ -400,11 +405,11 @@ def _align_report(
     if rank[0]:
         placeless = _heavy_placeless(same) if denied else []
         for other in [*_other_reports(same, items, new if rank[1] else None), *placeless]:
-            _add_report(row, other)
+            _add_report(row, other, items)
         return told
     others = _heavy_others(row, same)
     for other in others:
-        _add_report(row, other)
+        _add_report(row, other, items)
     return None if others else told
 
 
@@ -520,7 +525,7 @@ class FindingJournal:
             if named is not None and known.get("by") != BY_NDF:
                 # 前からある指摘に、承認の要る別の操作が加わった（新しい指摘と戻った指摘は `_align_report` がそろえる）
                 if criteria_decide.redline(named) and known["id"] not in fresh and named not in approvals[known["id"]]:
-                    _add_report(known, item)
+                    _add_report(known, item, items)
                 _classify(known, item, named, items, mvv)
                 if _text(item.get("impact")) is None:
                     unexplained.append(str(known["id"]))
@@ -840,7 +845,7 @@ class FindingJournal:
         return tuple(
             fin.Finding(
                 f["id"],
-                f["text"] if isinstance(f.get("text"), str) else "",
+                (f["text"] if isinstance(f.get("text"), str) else "") + also_redlines_note(f),
                 f["outcome"],
                 _text(f.get("reason")),
                 criteria_decide.severity_of(f.get("severity")),

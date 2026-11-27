@@ -113,7 +113,7 @@ def mvv_outputs(rows: Sequence[Mapping[str, Any]], snapshot: Snapshot, head: str
             unknown = [shown[t] for t in store.list_of(f.row, "unknown")]
             out["citations"].append({"id": f.row["id"], **place, "unknown": unknown, "outcome": f.outcome})
         elif f.outcome == fin.REDLINE:
-            out["redlines"].append({**ident, "text": shown[f.row["text"]]})
+            out["redlines"].append({**ident, "text": shown[f.row["text"]] + mvv_decide.also_redlines_note(f.row)})
         elif f.outcome == fin.SKIPPED:
             out["disputed"].append({**ident, "reason": shown.get(f.row.get("reason"))})
         else:
@@ -227,6 +227,8 @@ def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
         shown = OUTCOME_LABEL[outcome] if outcome in OUTCOME_LABEL else outcome
         if outcome == fin.UNRESOLVED and (f.get(fin.REDLINE) or _light(f)):
             shown = REDLINE_LABEL if f.get(fin.REDLINE) else LIGHT_LABEL
+        if f.get(fin.REDLINE):
+            shown = f"{shown}{mvv_decide.also_redlines_note(f)}"
         severity, reason = _cell(criteria_decide.severity_of(f.get("severity"))), f.get("reason")
         check = f.get(criteria_decide.CHECK)
         if isinstance(check, Mapping) and check.get(criteria_decide.LOWERED):

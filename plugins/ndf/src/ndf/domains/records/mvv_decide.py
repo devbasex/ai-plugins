@@ -57,6 +57,8 @@ _SETTLED_DEFERS = (DEFER_FILED, DEFER_NOT_APPLICABLE)
 # 指摘のジャーナルの行の欄: 修正担当が直したと返した時刻（`jsonl.now` の形）。通常の指摘を直した記録で承認ゲートの保留を解くのは、
 # 保留の見送りの記録より後に直した行だけである（見送りより前の直しの再送で保留を解かない。#3959）
 REVIEW_FIXED_AT = "fixed_at"
+# 指摘のジャーナルの行の欄: 同じ指摘の別の報告（本文を公開しない）が挙げた、必ず人の承認が要る操作の番号
+REVIEW_ALSO_REDLINES = "also_redlines"
 # NDF が機械で確かめて作った指摘（根拠の記述の誤り）の `by`
 BY_NDF = identity.FIXED_WORDS["entrypoint"]
 # 終わり方ごとの、記録に残す自由記述の欄
@@ -418,6 +420,15 @@ def holding_keys(seqs: Mapping[str, Sequence[Mapping[str, Any]]]) -> set[str]:
     return out
 
 
+def also_redlines_note(row: Mapping[str, Any]) -> str:
+    """承認資料で指摘の本文の後ろに添える定型の説明（別の報告が挙げた操作の番号が無ければ空）。別の報告の本文・位置・起きることの
+    1 文は公開しないので、番号と読む場所だけを書く（#4363）。"""
+    named = row.get(REVIEW_ALSO_REDLINES)
+    if not named:
+        return ""
+    return f"（同じ指摘の別の報告が操作 {'・'.join(named)} を挙げた。本文は公開せず、実行したサーバーの状態ファイルの also_reports にある）"
+
+
 def review_entry(found: Judged, shown: Optional[Mapping[str, str]]) -> dict[str, Any]:
     """MVV の記録の、指摘ごとに違う欄。`shown` は自由記述 → 伏せた後の値で、None なら自由記述を書かずに `withheld` を置く。
 
@@ -430,7 +441,10 @@ def review_entry(found: Judged, shown: Optional[Mapping[str, str]]) -> dict[str,
         out[REVIEW_DEFER] = found.row[REVIEW_DEFER]
     if shown is None:
         return out | ({"withheld": True} if found.free_fields else {})
-    return out | {k: shown[v] for k, v in found.free_fields.items()}
+    out |= {k: shown[v] for k, v in found.free_fields.items()}
+    if found.outcome == REVIEW_REDLINE and "text" in out:
+        out["text"] += also_redlines_note(found.row)
+    return out
 
 
 def one_per_key(entries: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
