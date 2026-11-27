@@ -2,10 +2,35 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.contracts import limits
+
+# GitHub の closing keywords（https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue）。
+# 形は旧実装 plugins/ndf/scripts/lib/closing.py の CLOSING と同じ。語の後ろの `:` と空白は省いてよく（`Fix:#12`）、
+# 指し先は `#番号`・`<所有者>/<リポジトリ>#番号`・課題の URL（`https://github.com/<所有者>/<リポジトリ>/issues/<番号>`）
+CLOSING = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*"
+    r"(https?://github\.com/[\w.-]+/[\w.-]+/issues/\d+|[\w.-]+/[\w.-]+#\d+|#\d+)",
+    re.IGNORECASE,
+)
+
+
+def closing_keyword_issues(body: str, repo: str) -> list[int]:
+    """本文の closing keywords が指す、リポジトリ `repo`（`<所有者>/<リポジトリ>`）の課題の番号（出た順・重複なし）。"""
+    out: list[int] = []
+    for m in CLOSING.finditer(body):
+        ref = m.group(1)
+        where, _sep, number = ref.rpartition("/issues/") if "/issues/" in ref else ref.rpartition("#")
+        owner_repo = where.removeprefix("https://github.com/").removeprefix("http://github.com/")
+        if owner_repo and owner_repo.lower() != repo.lower():
+            continue
+        if int(number) not in out:
+            out.append(int(number))
+    return out
+
 
 # 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は contracts/limits/ の github.check-runs・github.list-pages）
 PER_PAGE = 100
@@ -73,6 +98,8 @@ class Authored(NamedTuple):
     edited: bool = False
     # 書き手のアカウント ID（REST の `user.id`）。同じ名前の別のアカウントを分けるのに使う（#4409）。無ければ 0
     author_id: int = 0
+    # コメントの ID（REST の `id`。自分が書いたコメントを消すのに使う。#4580）。無ければ 0
+    comment_id: int = 0
 
     @classmethod
     def from_rest(cls, raw: dict) -> Authored:
@@ -80,7 +107,11 @@ class Authored(NamedTuple):
         created, updated = raw.get("created_at"), raw.get("updated_at")
         edited = isinstance(created, str) and isinstance(updated, str) and updated != created
         user = raw["user"]
-        return cls(_login(user), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited, account_id_of(user))
+        comment_id = raw.get("id")
+        comment_id = comment_id if isinstance(comment_id, int) and not isinstance(comment_id, bool) else 0
+        return cls(
+            _login(user), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited, account_id_of(user), comment_id
+        )
 
 
 class Pull(NamedTuple):

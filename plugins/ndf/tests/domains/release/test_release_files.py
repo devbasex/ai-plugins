@@ -400,7 +400,16 @@ def test_release_steps_parser_current_behavior() -> None:
         "merge": common + [pr, req("--budget", float)],
         "record": common + [pr, req("--production"), opt("--production-sha")],
         "verification-record": common + [pr, req("--record")],
-        "records": common + [pr],
+        "records": common
+        + [
+            pr,
+            opt("--version"),
+            ("--release", False, None, None, int, "_StoreAction"),
+            opt("--unit"),
+            ("--bodies", False, False, None, None, "_StoreTrueAction"),
+            ("--issues", False, None, None, int, "_StoreAction"),
+            ("--pr-body-only", False, False, None, None, "_StoreTrueAction"),
+        ],
         "publish": common + [req("--revision"), opt("--since")],
         "sync-base": common + [req("--main-dir"), req("--base")],
         "config-snapshot": common + [req("--out")],

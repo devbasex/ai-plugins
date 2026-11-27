@@ -10,7 +10,7 @@ from typing import Any
 import git_sandbox
 from strategy_fixture import KINDS, section  # noqa: F401 代表の 5 種の設定（10 系のテストも同じファイルを読む）
 
-from ndf.adapters.github import Authored, GitHubError, MergeOutcome, Pull
+from ndf.adapters.github import Authored, GitHubError, MergeOutcome, PermissionUnknown, Pull
 from ndf.adapters.github_rules import RuleFacts, rule_facts_of
 from ndf.core.branch_strategy import Strategy
 
@@ -63,6 +63,11 @@ class FakeHub:
     # PR ごとのレビュー（REST の形）と、本番ブランチ宛てで開いている PR の (番号, head)
     reviews_of: dict[int, list[dict]] = field(default_factory=dict)
     open_at: list[tuple[int, str]] = field(default_factory=list)
+    # 権限を照会できない書き手（`trusts_strict` が 403 で止まる）と、`trusts_strict` で照会した書き手（照会の順）
+    unknown: set[str] = field(default_factory=set)
+    asked: list[str] = field(default_factory=list)
+    # Issue（か PR）の本文と書き手（`issue_body`）
+    bodies_of: dict[int, Authored] = field(default_factory=dict)
 
     def pull(self, number: int) -> Pull:
         return self.pulls[number]
@@ -75,6 +80,16 @@ class FakeHub:
 
     def permission(self, login: str) -> str:
         return "write" if login in self.trusted else "read"
+
+    def trusts_strict(self, authored: Authored) -> bool:
+        self.asked.append(authored.author)
+        if authored.author in self.unknown:
+            raise PermissionUnknown(authored.author, 403)
+        return authored.author in self.trusted
+
+    def issue_body(self, number: int) -> Authored:
+        self.requests.append(("GET", f"/repos/{self.repo}/issues/{number}", None))
+        return self.bodies_of[number]
 
     def reviews(self, number: int) -> list[dict]:
         return list(self.reviews_of.get(number, []))

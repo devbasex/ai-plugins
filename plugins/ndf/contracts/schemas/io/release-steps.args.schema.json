@@ -495,6 +495,33 @@
         },
         "--pr": {
           "type": "integer"
+        },
+        "--version": {
+          "type": "string",
+          "description": "閉じるリリースの値（リリース記録の version）。渡した値の記録だけから代表とテストの記録を選ぶ"
+        },
+        "--release": {
+          "type": "integer",
+          "description": "本番の PR の番号。渡すとその本番の PR の記録だけから選ぶ"
+        },
+        "--unit": {
+          "type": "string",
+          "description": "リリースの単位の名前（単位が 2 つ以上のリリース）。渡すとその単位の記録だけから選ぶ"
+        },
+        "--bodies": {
+          "type": "boolean",
+          "description": "代表のリリース記録の含めた PR の本文と、書き手を信用するかも返す"
+        },
+        "--issues": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "テストする組（to_test）を作る課題の番号。渡すと含めた PR の本文を読まない"
+        },
+        "--pr-body-only": {
+          "type": "boolean",
+          "description": "リリース記録を選ばず、--pr の PR の本文だけを返す（デプロイを飛ばした経路）"
         }
       },
       "required": [

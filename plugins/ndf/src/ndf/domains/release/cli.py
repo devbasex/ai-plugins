@@ -12,7 +12,7 @@
 | `merge` | workflow | `land`（証跡の後に、ブランチ戦略の設定の主体と方式で入れ、要ればベースブランチへ戻す PR） |
 | `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後） |
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く。リリースの PR なら記録を持つ PR を示して止まる） |
-| `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む） |
+| `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む）。`--version` などを渡すと `record.read_release`（閉じる手順の読み取り）、`--pr-body-only` は `record.pr_body_only` |
 | `publish` | workflow | `tagging`（タグと GitHub Release） |
 
 `assemble`・`materials`・`publish` は、メインディレクトリのブランチ戦略の設定（リリースの形・バージョンの保存先・名前の書式・
@@ -79,7 +79,7 @@ def _strategy(args: argparse.Namespace) -> branch_strategy.Strategy:
     return branch_strategy.load(_main_dir(args))
 
 
-def _remote(args: argparse.Namespace) -> str:
+def _remote_name(args: argparse.Namespace) -> str:
     """メインディレクトリの設定のリモート名（#3615 の決定 9）。"""
     return git_mod.remote_of(_main_dir(args))
 
@@ -95,7 +95,7 @@ def _target(args: argparse.Namespace, remote: str) -> assemble.Target:
 
 
 def cmd_assemble(args: argparse.Namespace) -> dict:
-    remote = _remote(args)
+    remote = _remote_name(args)
     return assembled(assemble.assemble(Path(args.root), _hub(args, remote), _target(args, remote), _strategy(args)))
 
 
@@ -108,7 +108,7 @@ def assembled(built: assemble.Built) -> dict:
 
 
 def cmd_materials(args: argparse.Namespace) -> dict:
-    remote = _remote(args)
+    remote = _remote_name(args)
     facts = assemble.collect(Path(args.root), _hub(args, remote), _target(args, remote), _strategy(args))
     text = materials_decide.render(facts)
     if args.out:
@@ -246,6 +246,19 @@ def _release_names(args: argparse.Namespace) -> tuple[str | None, names_decide.N
 
 
 def cmd_records(args: argparse.Namespace) -> dict:
+    select = record.Selection(args.version, args.release, args.unit)
+    if args.pr_body_only:
+        if select != record.Selection(None, None, None) or args.bodies or args.issues is not None:
+            raise record.RecordError("--pr-body-only は --version・--release・--unit・--bodies・--issues と一緒に渡さない")
+        outputs = record.pr_body_only(_hub(args), args.pr)
+        return result.result(TOOL, result.OK, f"#{args.pr} の本文を読んだ（リリース記録は選ばない）", outputs=outputs)
+    if select != record.Selection(None, None, None) or args.bodies or args.issues is not None:
+        outputs = record.read_release(_hub(args), args.pr, select, args.bodies, args.issues)
+        version = outputs["release"]["version"] if outputs["release"] else "無し"
+        detail = (
+            f"#{args.pr} の今回のリリースのリリース記録（値 {version}）とリリース後テストの記録 {len(outputs['verifications'])} 件を読んだ"
+        )
+        return result.result(TOOL, result.OK, detail, outputs=outputs)
     got = record.read(_hub(args), args.pr)
     outputs = {"release": got.release.as_json() if got.release else None, "verifications": list(got.verifications)}
     version = got.release.version if got.release else "無し"
@@ -371,6 +384,17 @@ def _verification(p: argparse.ArgumentParser) -> None:
     p.add_argument("--record", required=True, help="リリース後テストの記録の JSON（スキーマ release-verification）")
 
 
+def _records_selection(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--version", help="閉じるリリースの値（リリース記録の version）。渡した値の記録だけから代表とテストの記録を選ぶ")
+    p.add_argument("--release", type=int, help="本番の PR の番号。渡すとその本番の PR の記録だけから選ぶ")
+    p.add_argument("--unit", help="リリースの単位の名前（単位が 2 つ以上のリリース）。渡すとその単位の記録だけから選ぶ")
+    p.add_argument("--bodies", action="store_true", help="代表のリリース記録の含めた PR の本文と、書き手を信用するかも返す")
+    p.add_argument("--issues", type=int, nargs="+", help="テストする組（to_test）を作る課題の番号。渡すと含めた PR の本文を読まない")
+    p.add_argument(
+        "--pr-body-only", action="store_true", help="リリース記録を選ばず、--pr の PR の本文だけを返す（デプロイを飛ばした経路）"
+    )
+
+
 def _main_dir_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument("--main-dir", required=True)
 
@@ -403,7 +427,7 @@ ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.Argume
     cmd_merge: (_pr, _budget),
     cmd_record: (_pr, _production, _production_sha),
     cmd_verification_record: (_pr, _verification),
-    cmd_records: (_pr,),
+    cmd_records: (_pr, _records_selection),
     cmd_publish: (_revision,),
     cmd_sync_base: (_main_dir_arg, _base),
     cmd_config_snapshot: (_snapshot_out,),

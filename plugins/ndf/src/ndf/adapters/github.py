@@ -105,6 +105,16 @@ class GitHubError(Exception):
         return made
 
 
+class PermissionUnknown(GitHubError):
+    """書き手の権限を照会できない（レート制限によるものでない 403・404。#4580）。`login` は照会できなかった書き手。"""
+
+    def __init__(self, login: str, status: int = 0) -> None:
+        super().__init__(
+            f"{login} の対象のリポジトリでの権限を照会できない（{status or '403・404'}）。権限が無いとは扱わずに止める", status
+        )
+        self.login = login
+
+
 def token() -> str:
     """認証の値。環境変数を先に読み、無ければ `gh auth token`。得られなければ `GitHubError`。"""
     found = next((os.environ[name] for name in TOKEN_ENV if os.environ.get(name)), None)
@@ -310,6 +320,8 @@ class GitHub:
     api: Client
     # 書き手の login → 対象リポジトリでの権限（`permission`）。1 つの書き手を 1 回だけ読む
     _permissions: dict[str, str] = field(default_factory=dict, compare=False, repr=False)
+    # 権限を照会できなかった書き手の login → 照会の状態（403・404）。`permission` は `none` と読み、`permission_strict` は止める
+    _unreadable: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
     # token の利用者（`viewer`。1 回だけ読む。読んだら 1 件）
     _viewer: list[Viewer] = field(default_factory=list, compare=False, repr=False)
     # 二次レート制限の待ちの終わりを知らせる先。省けば `api` の throttler の `WriteGate`（A5）
@@ -464,11 +476,19 @@ class GitHub:
 
         OWNER はそのまま信用し、MEMBER・COLLABORATOR は対象リポジトリでの権限を読んで write 以上のときだけ信用する。
         """
+        return self._trusts_by(authored, self.permission)
+
+    def trusts_strict(self, authored: Authored) -> bool:
+        """`trusts` と同じ区分の扱いで、権限を照会できない書き手では偽を返さず `PermissionUnknown` を投げる（#4580）。"""
+        return self._trusts_by(authored, self.permission_strict)
+
+    @staticmethod
+    def _trusts_by(authored: Authored, read: Callable[[str], str]) -> bool:
         if authored.association == OWNER_ASSOCIATION:
             return True
         if authored.association not in PERMISSION_CHECKED_ASSOCIATIONS or not authored.author:
             return False
-        return self.permission(authored.author) in WRITE_PERMISSIONS
+        return read(authored.author) in WRITE_PERMISSIONS
 
     def token_trusted(self) -> bool:
         """このクライアントの token で書いた本文を、読み手が `trusts` で信用するか（#3487）。
@@ -490,16 +510,29 @@ class GitHub:
 
         読めない（404・上限でない 403）なら `none` として信用しない。上限と他の失敗は `GitHubError` のまま投げる。
         """
-        if login not in self._permissions:
-            self._permissions[login] = self._read_permission(login)
-        return self._permissions[login]
+        if login not in self._permissions and login not in self._unreadable:
+            got = self._read_permission(login)
+            if got is not None:
+                self._permissions[login] = got
+        return self._permissions[login] if login in self._permissions else "none"
 
-    def _read_permission(self, login: str) -> str:
+    def permission_strict(self, login: str) -> str:
+        """`permission` と同じ照会で、照会できない（404・上限でない 403）書き手では `PermissionUnknown` を投げる（#4580）。
+
+        GitHub が 200 で返した値（`none` も）だけを保存し、照会できなかった書き手は別に覚えて照会し直さない。"""
+        got = self.permission(login)
+        if login in self._unreadable:
+            raise PermissionUnknown(login, self._unreadable[login])
+        return got
+
+    def _read_permission(self, login: str) -> Optional[str]:
+        """照会した権限。照会できない（404・上限でない 403）なら状態を `_unreadable` に覚えて None。"""
         try:
             raw = self.rest("GET", f"/repos/{self.repo}/collaborators/{quote(login, safe='')}/permission")
         except GitHubError as exc:
             if exc.quota is None and exc.status in (403, 404):
-                return "none"
+                self._unreadable[login] = exc.status
+                return None
             raise
         return text_of(raw["permission"]).lower() if isinstance(raw, dict) and "permission" in raw else "none"
 

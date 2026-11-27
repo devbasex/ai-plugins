@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.adapters.github import Authored
+from ndf.adapters.github import Authored, PermissionUnknown
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import names_decide, record, record_decide
 
@@ -400,3 +400,344 @@ def test_issue_3852_cli_writes_to_a_holder_without_the_branch_strategy(
     # 設定が無いのでリリースの PR では探さず、items を持たずに止まる
     code, out = _verification_cli(tmp_path, monkeypatch, capsys, hub, RELEASE)
     assert code == 3 and out["cause"]["kind"] == "precondition" and not out.get("items")
+
+
+# --- #4580: バージョン番号を持たないリポジトリの記録と、閉じる手順の読み取り（records --version など） ---
+
+X = "abc1234" + "0" * 33  # 反映したコミット
+Y = "def5678" + "0" * 33
+WEB, WORKER = "web", "worker"
+TARGETS = (WEB, WORKER)
+
+
+def _unversioned(
+    version: str = "main abc1234",
+    commit: str = X,
+    environments: tuple[str, ...] = (WEB,),
+    targets: tuple[str, ...] = TARGETS,
+    release: int = RELEASE,
+    unit: str | None = None,
+    included: tuple[int, ...] = (11, 12),
+) -> record_decide.Record:
+    return record_decide.Record(
+        version,
+        release,
+        included,
+        unit,
+        environments,
+        targets,
+        commit,
+        record_decide.Push("p" * 40, commit),
+        {e: "cd" for e in environments},
+    )
+
+
+def _row(number: int, result: str, retest: str | None = None) -> dict:
+    row = {"number": number, "result": result, "evidence": "確かめた"}
+    if retest is not None:
+        row["retest_reason"] = retest
+    return row
+
+
+def _check(environments: tuple[str, ...], *rows: dict, version: str = "main abc1234") -> dict:
+    return {"version": version, "environments": list(environments), "issues": list(rows)}
+
+
+def test_unversioned_record_reads_back_with_its_targets_and_evidence() -> None:
+    observed = _unversioned(environments=(WEB, WORKER))._replace(
+        confirmation={WEB: "cd", WORKER: "observed"}, evidence={WORKER: record_decide.Evidence("https://example.invalid/v", X)}
+    )
+    assert record_decide.parse_record(record_decide.render_record(observed)) == observed
+    # バージョン番号を持つリポジトリの記録は足した項目を書かず、今と同じに読む
+    versioned = record_decide.Record(VERSION, RELEASE, (11,))
+    assert set(versioned.as_json()) == {"version", "release", "included"}
+    assert record_decide.parse_record(record_decide.render_record(versioned)) == versioned
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"confirmation": {WEB: "observed"}},  # observed で evidence が無い
+        {"evidence": {WEB: {"url": "https://example.invalid/v", "value": X}}},  # observed でない届け先に evidence
+        {"confirmation": {WEB: "observed"}, "evidence": {WEB: {"url": "https://example.invalid/v", "value": 1}}},
+        {"targets": []},
+        {"commit": ""},
+    ],
+)
+def test_unversioned_record_of_a_wrong_shape_is_not_a_record(change: dict) -> None:
+    payload = {**_unversioned().as_json(), **change}
+    body = f"{record_decide.RECORD_MARK}\n```json\n{json.dumps(payload)}\n```\n"
+    assert record_decide.parse_record(body) is None
+
+
+def test_correction_reads_back_and_a_wrong_shape_is_none() -> None:
+    made = record_decide.Correction("main abc1234", X, TARGETS, (WEB,), "worker を落としていた")
+    assert record_decide.parse_correction(record_decide.render_correction(made)) == made
+    broken = record_decide.render_correction(made).replace('"reason": "worker を落としていた"', '"reason": 3')
+    assert record_decide.parse_correction(broken) is None
+    assert record_decide.parse_correction(record_decide.render_record(_unversioned())) is None
+
+
+def test_value_pairs_follow_the_older_record() -> None:
+    first, short = _unversioned(), _unversioned(version="main abc12340")  # 同じコミットを違う長さの SHA で書いた値
+    other = _unversioned(version="main abc1234 def5678", commit=X)
+    moved = _unversioned(version="main abc1234 def5678", commit=Y)  # 2 つの SHA を含む同じ値を別のコミットで
+    versioned = record_decide.Record(VERSION, RELEASE, (11,))
+    pairs, valid = record_decide.value_pairs([first, short, versioned, first])
+    assert pairs == {"main abc1234": X} and valid == [first, versioned, first]
+    pairs, valid = record_decide.value_pairs([other, moved])
+    assert pairs == {"main abc1234 def5678": X} and valid == [other]
+    # 渡した順だけで決まり、release や unit を見ない
+    _pairs, valid = record_decide.value_pairs([first._replace(release=9, unit="b"), short._replace(release=1)])
+    assert valid == [first._replace(release=9, unit="b")]
+
+
+def test_authoritative_targets_take_the_first_record_and_the_last_correction() -> None:
+    first, later = _unversioned(targets=(WEB,)), _unversioned(targets=TARGETS)
+    assert record_decide.authoritative_targets([first, later], [], "main abc1234") == (WEB,)
+    fixes = [record_decide.Correction("main abc1234", X, t, (WEB,), "直す") for t in (TARGETS, (WORKER,))]
+    assert record_decide.authoritative_targets([first, later], fixes, "main abc1234") == (WORKER,)
+    assert record_decide.authoritative_targets([], [], "main abc1234") is None
+
+
+def test_representative_is_the_last_record_on_the_authoritative_targets() -> None:
+    right, wrong = _unversioned(environments=(WEB,)), _unversioned(environments=(WORKER,), targets=(WORKER,))
+    assert record_decide.representative([right, wrong], TARGETS) == right
+    versioned = [record_decide.Record(VERSION, RELEASE, (11,)), record_decide.Record(VERSION, 51, (11,))]
+    assert record_decide.representative(versioned, None) == versioned[-1]
+    assert record_decide.representative([wrong], TARGETS) is None
+
+
+@pytest.mark.parametrize(
+    ("rows", "verdict"),
+    [
+        ([_row(1, "passed"), _row(1, "failed")], "failed"),
+        ([_row(1, "failed"), _row(1, "passed")], "failed"),  # 理由の無い合格で不合格を覆さない
+        ([_row(1, "failed"), _row(1, "passed", "検証環境が落ちていた")], "passed"),
+        ([_row(1, "not_run"), _row(1, "passed")], "passed"),
+        ([_row(1, "not_run")], "not_run"),
+        ([_row(2, "failed")], None),
+    ],
+)
+def test_pair_verdict_does_not_depend_on_the_order_of_posting(rows: list[dict], verdict: str | None) -> None:
+    checks = [_check((WEB,), row) for row in rows]
+    assert record_decide.pair_verdict(checks, WEB, 1) == verdict
+    assert record_decide.pair_verdict(list(reversed(checks)), WEB, 1) in (
+        {verdict} if rows[-1].get("retest_reason") is None else {"failed"}
+    )
+    # ほかの届け先の行は数えない
+    assert record_decide.pair_verdict(checks, WORKER, 1) is None
+
+
+def test_to_test_takes_pairs_without_rows_or_on_hold() -> None:
+    checks = [_check((WEB,), _row(1, "passed"), _row(2, "not_run")), _check((WORKER,), _row(1, "failed"))]
+    got = record_decide.to_test([WEB, WORKER], [1, 2, 3], checks)
+    assert got == [
+        {"environment": WEB, "issue": 2},
+        {"environment": WEB, "issue": 3},
+        {"environment": WORKER, "issue": 2},
+        {"environment": WORKER, "issue": 3},
+    ]
+
+
+def test_complete_of_counts_only_the_same_release_unit_and_commit() -> None:
+    rep = _unversioned(environments=(WEB,))
+    other_unit, other_release = _unversioned(environments=(WORKER,), unit="b"), _unversioned(environments=(WORKER,), release=51)
+    wrong_targets = _unversioned(environments=(WORKER,), targets=(WORKER,))
+    assert record_decide.complete_of([rep, other_unit, other_release, wrong_targets], rep, TARGETS) == (False, (WORKER,))
+    assert record_decide.complete_of([rep, _unversioned(environments=(WORKER,))], rep, TARGETS) == (True, ())
+
+
+def _comment(writer: str, body: str) -> Authored:
+    return Authored(writer, "MEMBER", body)
+
+
+def _records_hub(*comments: Authored, trusted: tuple[str, ...] = ("octocat",), unknown: tuple[str, ...] = ()) -> FakeHub:
+    hub = FakeHub(trusted=set(trusted), unknown=set(unknown))
+    hub.comments_of[11] = list(comments)
+    return hub
+
+
+def _read(hub: FakeHub, version: str | None = "main abc1234", release: int | None = None, unit: str | None = None, **kw) -> dict:
+    return record.read_release(hub, 11, record.Selection(version, release, unit), kw.get("bodies", False), kw.get("issues"))
+
+
+def _rec(writer: str, made: record_decide.Record) -> Authored:
+    return _comment(writer, record_decide.render_record(made))
+
+
+def test_read_release_takes_the_given_value_and_unit_and_counts_a_duplicate_once() -> None:
+    later = _unversioned(version="main def5678", commit=Y)
+    a, b = _unversioned(unit="a"), _unversioned(unit="b", environments=(WORKER,))
+    hub = _records_hub(_rec("octocat", a), _rec("octocat", b), _rec("octocat", a), _rec("octocat", later))
+    got = _read(hub, unit="a")
+    assert got["release"] == a.as_json() and got["releases"] == [a.as_json()] and got["targets"] == list(TARGETS)
+    assert got["selection"] == {"version": "main abc1234", "release": None, "unit": "a"} and got["command"] == "records"
+
+
+def test_read_release_keeps_the_authoritative_record_and_skips_writers_of_other_releases() -> None:
+    right, wrong = _unversioned(), _unversioned(environments=(WORKER,), targets=(WORKER,))
+    other = _unversioned(version="main def5678", commit=Y)
+    hub = _records_hub(_rec("octocat", right), _rec("someone", other), _rec("octocat", wrong), unknown=("someone",))
+    got = _read(hub)
+    assert got["release"] == right.as_json() and "someone" not in hub.asked
+    # 候補の書き手を照会できなければ、記録を選ばずに止まる
+    with pytest.raises(PermissionUnknown) as caught:
+        _read(hub, version="main def5678")
+    assert caught.value.login == "someone"
+
+
+def test_read_release_drops_writers_without_write_and_does_not_ask_about_other_comments() -> None:
+    fake = _unversioned(targets=(WEB,))
+    talk = _comment("stranger", "ただの会話")
+    hub = _records_hub(talk, _rec("reader", fake), _rec("octocat", _unversioned()), unknown=("stranger",))
+    got = _read(hub)
+    assert got["targets"] == list(TARGETS) and "stranger" not in hub.asked
+
+
+def test_read_release_marks_bodies_of_writers_without_write_and_stops_on_unknown_ones() -> None:
+    hub = _records_hub(_rec("octocat", _unversioned()))
+    hub.bodies_of = {11: Authored("octocat", "OWNER", "Closes #3"), 12: Authored("reader", "MEMBER", "Closes #4")}
+    got = _read(hub, bodies=True)
+    assert [(b["number"], b["trusted"], b["body"]) for b in got["bodies"]] == [(11, True, "Closes #3"), (12, False, "Closes #4")]
+    # 本文の書き手の課題は信用する本文からだけ集める
+    assert got["to_test"] == [{"environment": WEB, "issue": 3}]
+    hub.unknown = {"reader"}
+    with pytest.raises(PermissionUnknown):
+        _read(hub, bodies=True)
+
+
+def test_read_release_with_issues_does_not_read_bodies() -> None:
+    hub = _records_hub(
+        _rec("octocat", _unversioned()), _comment("octocat", record_decide.render_verification(_check((WEB,), _row(5, "passed"))))
+    )
+    got = _read(hub, issues=[5, 6])
+    assert got["to_test"] == [{"environment": WEB, "issue": 6}] and got["bodies"] is None
+    assert not [r for r in hub.requests if "/issues/" in r[1]]
+
+
+def test_read_release_takes_the_corrections_of_trusted_records_only() -> None:
+    fix = record_decide.Correction("main abc1234", X, (WEB,), TARGETS, "worker は配らない")
+    stray = record_decide.Correction("main def5678", Y, (WEB,), TARGETS, "信用しない記録にだけ対応する")
+    hub = _records_hub(
+        _rec("octocat", _unversioned()),
+        _rec("reader", _unversioned(version="main def5678", commit=Y)),
+        _comment("someone", record_decide.render_correction(stray)),
+        _comment("octocat", record_decide.render_correction(fix)),
+        _rec("octocat", _unversioned(targets=(WEB,))),
+        unknown=("someone",),
+    )
+    got = _read(hub, version=None)
+    assert got["targets"] == [WEB] and got["release"]["targets"] == [WEB] and "someone" not in hub.asked
+    # --version を渡せば、組を決めるために集めた別の値の訂正の書き手は照会しない
+    # （(A, X) とコミットを共有する (B, X) と、それと値を共有する (B, Y) で、B は Y と組になる）
+    hub.comments_of[11][1:1] = [_rec("octocat", _unversioned(version="B", commit=X)), _rec("octocat", _unversioned(version="B", commit=Y))]
+    hub.comments_of[11].append(_comment("someone", record_decide.render_correction(fix._replace(version="B", commit=Y))))
+    assert _read(hub)["targets"] == [WEB] and "someone" not in hub.asked
+    with pytest.raises(PermissionUnknown):
+        _read(hub, version=None)
+    hub.comments_of[11].append(_comment("ghost", record_decide.render_correction(fix)))
+    hub.unknown.add("ghost")
+    with pytest.raises(PermissionUnknown):
+        _read(hub)
+
+
+def test_read_release_does_not_take_the_loser_of_a_concurrent_write() -> None:
+    winner = _unversioned()
+    loser = _unversioned(version="main abc12340", release=51)  # 同じコミットを別の値で後に書いた
+    hub = _records_hub(_rec("octocat", winner), _rec("octocat", loser))
+    assert _read(hub, version=None, release=51)["release"] is None
+    # 同じコミットに残った後の値の記録は、先の値の読み取りに影響しない
+    assert _read(hub)["release"] == winner.as_json()
+
+
+def test_read_release_with_a_value_keeps_only_that_value() -> None:
+    a_x, b_x, b_y = _unversioned(version="A abc1234"), _unversioned(version="B abc1234"), _unversioned(version="B def5678", commit=Y)
+    hub = _records_hub(_rec("octocat", a_x), _rec("octocat", b_x), _rec("octocat", b_y))
+    got = _read(hub, version="A abc1234")
+    assert got["releases"] == [a_x.as_json()] and got["release"] == a_x.as_json()
+
+
+def test_read_release_by_the_release_or_the_unit_alone() -> None:
+    first = _unversioned(targets=(WEB,))
+    later = _unversioned(targets=TARGETS, environments=(WORKER,), release=51)  # 同じ値・同じコミットで targets の違う後の記録
+    hub = _records_hub(_rec("octocat", first), _rec("octocat", later))
+    got = _read(hub, version=None, release=51)
+    assert got["targets"] == [WEB] and got["release"] is None
+    assert _read(hub, version=None, release=RELEASE)["release"] == first.as_json()
+    unit_hub = _records_hub(
+        _rec("octocat", _unversioned(unit="a")), _rec("octocat", _unversioned(version="main def5678", commit=Y, unit="b"))
+    )
+    assert _read(unit_hub, version=None, unit="b")["release"]["version"] == "main def5678"
+
+
+def test_read_release_asks_only_about_records_bridged_from_trusted_ones() -> None:
+    base = _unversioned()
+    shared_value = _unversioned(environments=(WORKER,))  # 信用する記録と値を共有する
+    via_untrusted = _unversioned(version="main def5678", commit=Y)  # 信用しない書き手の記録とだけコミットを共有する
+    hub = _records_hub(
+        _rec("octocat", base),
+        _rec("member", shared_value),
+        _rec("reader", via_untrusted._replace(version="other", commit=Y)),
+        _rec("someone", via_untrusted._replace(version="third", commit=Y)),
+        trusted=("octocat", "member"),
+        unknown=("someone",),
+    )
+    got = _read(hub)
+    assert [r["environments"] for r in got["releases"]] == [[WEB], [WORKER]] and "someone" not in hub.asked
+    hub.unknown.add("member")
+    hub.asked.clear()
+    with pytest.raises(PermissionUnknown):
+        _read(hub)
+
+
+def test_read_release_of_versioned_records_is_not_narrowed_by_targets() -> None:
+    old, new = record_decide.Record("1.2.3", 49, (11,)), record_decide.Record(VERSION, RELEASE, (11,))
+    check = {"version": VERSION, "issues": [_row(7, "passed")]}
+    hub = _records_hub(_rec("octocat", old), _rec("octocat", new), _comment("octocat", record_decide.render_verification(check)))
+    got = _read(hub, version=VERSION, issues=[7, 8])
+    assert got["release"] == new.as_json() and got["targets"] is None and got["verifications"] == [check]
+    assert got["to_test"] == [{"environment": None, "issue": 8}]
+    assert _read(hub, version="1.2.3")["verifications"] == []
+
+
+def test_pr_body_only_returns_that_pull_body_alone() -> None:
+    hub = _records_hub(_rec("octocat", _unversioned()))
+    hub.bodies_of = {7: Authored("octocat", "OWNER", "Closes #9")}
+    got = record.pr_body_only(hub, 7)
+    assert got["bodies"] == [{"number": 7, "author": "octocat", "trusted": True, "body": "Closes #9"}]
+    assert got["release"] is None and got["releases"] == [] and hub.asked == ["octocat"]
+
+
+def _records_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], hub: FakeHub, *extra: str) -> tuple[int, dict]:
+    monkeypatch.setattr(release_cli, "_hub", lambda args, remote=None: hub)
+    code = release_cli.main(["records", "--pr", "11", *extra])
+    return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+def test_records_cli_reads_the_release_and_stops_on_an_unknown_writer(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hub = _records_hub(_rec("octocat", _unversioned()))
+    code, out = _records_cli(monkeypatch, capsys, hub, "--version", "main abc1234", "--issues", "3")
+    assert (
+        code == 0
+        and out["outputs"]["release"] == _unversioned().as_json()
+        and out["outputs"]["to_test"] == [{"environment": WEB, "issue": 3}]
+    )
+    hub.comments_of[11].append(_rec("someone", _unversioned(environments=(WORKER,))))
+    hub.unknown = {"someone"}
+    code, out = _records_cli(monkeypatch, capsys, hub, "--version", "main abc1234")
+    assert code != 0 and out["status"] == "stopped" and out["cause"]["kind"] == "unknown" and "someone" in out["cause"]["detail"]
+    # 新しい引数が無ければ今の読み方のまま
+    code, out = _records_cli(monkeypatch, capsys, hub)
+    assert code == 0 and set(out["outputs"]) == {"release", "verifications"}
+
+
+def test_records_cli_pr_body_only_refuses_a_selection(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    hub = _records_hub()
+    hub.bodies_of = {11: Authored("octocat", "OWNER", "Closes #9")}
+    code, out = _records_cli(monkeypatch, capsys, hub, "--pr-body-only")
+    assert code == 0 and out["outputs"]["bodies"][0]["number"] == 11
+    code, out = _records_cli(monkeypatch, capsys, hub, "--pr-body-only", "--version", "main abc1234")
+    assert code == 3 and out["cause"]["kind"] == "precondition"
