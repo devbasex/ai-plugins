@@ -139,7 +139,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | --- | --- | --- | --- |
 | 工程・選択肢・順位・指標・割り付けの値 | 設定値 | `contracts/domains/launch-experiments.json` | 設計書の表 |
 | 出現率を計算し直す間隔 | 設定値 | 同上の records の行の `refresh_minutes` | 60 分 |
-| 起動できない組の条件 | 定数 | 同上 | 同じリポジトリ・工程・ランタイム・互換性のキー・組で、直近 7 日に、モデルを理由にした拒否が 2 件 |
+| 起動できない組の条件 | 定数 | 同上 | 同じリポジトリ・工程・ランタイム・互換性のキー・組で、直近 7 日に、記録したモデルを理由にした拒否（`launch_error` の行）が 2 件。基準の組で起動し直す前の確認で止まった拒否は記録しないので数えない |
 | 実験の記録の行 | 型 | `contracts/schemas/internal/experiment.schema.json` | `assign`・`outcome`・`launch_error`・`halted`・`observed`・`unpriced` |
 
 ### 並行と排他
