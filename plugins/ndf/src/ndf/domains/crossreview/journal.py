@@ -131,7 +131,11 @@ def _place(item: Mapping[str, Any]) -> dict[str, Any]:
 
 def _move(row: dict[str, Any], place: Mapping[str, Any], round_no: int) -> None:
     """指摘の行の位置（`path`・`line`）を、ラウンド `round_no` の出し直しの `place` に置き換える。`round`（指摘が出たラウンド）は
-    変えず、違えば位置の基準のラウンドを `PLACED_ROUND` に残す（行番号は、そのラウンドの head のものである）。"""
+    変えず、違えば位置の基準のラウンドを `PLACED_ROUND` に残す（行番号は、そのラウンドの head のものである）。`place` に
+    `path` が無ければ、位置と基準のラウンドを組のまま残す（投稿の位置を `section` と本文の行番号から読む指摘に、後の head を
+    組み合わせない）。"""
+    if "path" not in place:
+        return
     for stale in ("path", "line", PLACED_ROUND):
         row.pop(stale, None)
     row |= place
@@ -398,6 +402,7 @@ class FindingJournal:
             key = oscillation.finding_key(text)
             named = criteria_decide.mvv_item(item.get("mvv"), items)
             known = by_key.get(key)
+            parked = known is not None and PARKED in known
             if known is None:
                 fid = self._next_id(round_no)
                 row = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
@@ -414,6 +419,9 @@ class FindingJournal:
                     unexplained.append(str(known["id"]))
             elif named is None and items and _named_any(item):
                 unknown.append(str(known["id"]))
+            if parked and PARKED not in known:
+                # 残していた行の位置は前の head の行番号なので、見送りを解いた出し直しのものにする
+                _move(known, _place(item), round_no)
             touched[key] = known
             same.setdefault(str(known["id"]), []).append(item)
         back = set(self.revived[before:])
@@ -450,8 +458,6 @@ class FindingJournal:
             known["impact"] = new["impact"]
         if known.get(PARKED) and leftover_decide.proceeds(known, leftover_decide.Touched()):
             del known[PARKED]
-            # 残していた行の位置は前の head の行番号なので、今回の出し直しのものにする
-            _move(known, _place(item), round_no)
 
     def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
         """直した・見送った指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
@@ -496,8 +502,7 @@ class FindingJournal:
         `unconfirmed` は判定役へ渡して有効な回答の無かった指摘の id。
 
         位置は今回の出し直しのものを 1 件ずつ当てる（残していた指摘の行の位置は、前の head の行番号である）。どれか 1 件が
-        進めば進め、指摘の行の位置をその出し直しのものに置き換える。新しい指摘は、その出し直しに位置が無ければ元の位置を
-        残す（#3780）。"""
+        進めば進め、指摘の行の位置をその出し直しのものに置き換える（`path` の無い出し直しなら元の位置を残す。`_move`。#3780）。"""
         parked: set[str] = set()
         for fid in self.raised_ids:
             row = self.rows[fid]
@@ -513,7 +518,8 @@ class FindingJournal:
             if place is None:
                 row[PARKED] = True
                 parked.add(row["key"])
-            elif row.pop(PARKED, False) or place:
+            else:
+                row.pop(PARKED, None)
                 _move(row, place, self._round)
         return frozenset(parked)
 

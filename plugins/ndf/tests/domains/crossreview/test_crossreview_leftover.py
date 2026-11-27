@@ -235,6 +235,22 @@ def test_a_fixed_finding_coming_back_on_an_unchanged_line_proceeds() -> None:
     assert journal.returned == [] and journal.raised_ids == []
 
 
+@pytest.mark.parametrize("again", [pytest.param({}, id="sorted"), pytest.param({"severity": "critical"}, id="unparked-on-entry")])
+def test_a_report_without_a_path_keeps_the_place_and_its_commit(again: dict) -> None:
+    journal, row = _parked()
+    journal.enter(3, [_told(**again)])
+    journal.sort(TOUCHED, {"r2-1"})
+    assert PARKED not in row
+    assert (row["path"], row["line"]) == ("a.py", 5) and journal_mod.PLACED_ROUND not in row
+
+
+def test_a_parked_finding_unparked_by_the_approval_item_takes_the_place_of_that_report() -> None:
+    journal, row = _parked()
+    journal.enter(3, [_told(**UNCHANGED), _told(mvv="P1", path="a.py", line=7)], ITEMS, V11)
+    _waits_for_a_human(journal, row)
+    assert (row["round"], row["line"], row[journal_mod.PLACED_ROUND]) == (2, 7, 3)
+
+
 def test_the_thread_commit_of_a_moved_finding_is_the_head_of_the_placed_round() -> None:
     rounds = [{"round": 2, "head": "old"}, {"round": 3, "head": "new"}]
     assert threads._placed_head(rounds, {"round": 2}) == "old"
