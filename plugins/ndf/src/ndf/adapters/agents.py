@@ -308,13 +308,20 @@ def _start(spec: Launch) -> subprocess.Popen:
 
 
 def _start_and_watch(spec: Launch, poll: Optional[float]) -> AgentStatus:
-    """起動して見る。起動できない（実行ファイルが無い・実行権が無い）ときは `AgentState.FAILED` を返す。"""
+    """起動して見る。起動できない（実行ファイルが無い・実行権が無い）ときは `AgentState.FAILED` を返す。
+
+    監視が割り込まれたら（Ctrl+C など）、子の組を止めてから割り込みを伝える。子は別セッションで端末の割り込みが届かず、
+    残すと監視の上限が効かないまま動き、起動のスロットを返した後や呼び元が入力を片付けた後も動き続ける。"""
     try:
         proc = _start(spec)
     except OSError as exc:
         # 文面はログ・実行ファイルの絶対パスを含み得るので、公開用はファイル名と理由だけにする（PR 4461 の r2-1）
         return AgentStatus(spec.agent, AgentState.FAILED, None, f"起動できない: {exc}", (), public=f"起動できない: {_os_error_public(exc)}")
-    return watch(proc, spec, poll)
+    try:
+        return watch(proc, spec, poll)
+    except BaseException:
+        process_group.stop_group(proc)
+        raise
 
 
 def _os_error_public(exc: OSError) -> str:
