@@ -308,9 +308,9 @@ def prompt_diffs(run: ReviewingRun, prep: Prepared) -> tuple[Path, ...]:
 
 def judge_diffs(run: ReviewingRun, round_no: int, prep: Prepared) -> tuple[Path, ...]:
     """判定役へ渡す、埋めていない席の指摘の差分。相手役が前の head からの差分も読むラウンド（`prompt_diffs`）では、その全体の
-    代わりに、削除された行と追加された行の範囲の抜粋（`verify_decide.excerpt_lines`）を足す。変わった行が無ければ足さない。"""
+    代わりに、変わった行の抜粋（`verify_decide.excerpt_lines`）を足す。変わった行が無ければ足さない。"""
     round_diff, *since = prompt_diffs(run, prep)
-    excerpt = verify_decide.excerpt_lines(since[0].read_text(encoding="utf-8")) if since else ""
+    excerpt = verify_decide.excerpt_lines(*(p.read_text(encoding="utf-8") for p in (since[0], round_diff))) if since else ""
     if not excerpt:
         return (round_diff,)
     path = run.input_path(round_no, EXCERPT_SUFFIX)

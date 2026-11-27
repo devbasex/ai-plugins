@@ -428,26 +428,27 @@ def test_issue_4363_filled_read_gives_the_diffs_read_by_the_seats_of_the_finding
     assert since == [n for name in names for n in ([name, "round2-since.diff"] if name == "round2.diff" else [name])]
 
 
-def test_issue_4363_excerpt_lines_give_the_numbers_of_the_deleted_and_added_lines() -> None:
-    """判定役へ足すのは、削除された行（両側の行番号と本文）と追加された行の範囲（本文は無し）と、そのファイルの見出しである。"""
+def test_issue_4363_excerpt_lines_give_the_text_of_the_lines_the_full_diff_does_not_show() -> None:
+    """削除行と全差分に載らない追加行は行番号と本文を、全差分に載る追加行はファイルごとに 1 行の範囲だけを書く。"""
     head = ["diff --git a/a.md b/a.md", "--- a/a.md", "+++ b/a.md"]
     since = [
         *head,
-        "@@ -1,4 +1,5 @@",
+        "@@ -1,3 +1,5 @@",
         " 前の行",
         "--- 区切り",
-        " 間の行",
-        "+足した行",
+        "+載る行",
         "+次の行",
+        "+戻した行",
         " 後の行",
         "@@ -9 +10 @@",
         "-旧い行",
-        "+新しい行",
+        "+載る別の行",
     ]
-    got = verify_decide.excerpt_lines("\n".join(since) + "\n")
-    changes = ["削除 旧2 新2: -- 区切り", "追加 新3-4", "削除 旧9 新10: 旧い行", "追加 新10-10"]
+    full = [*head, "@@ -1,2 +2,2 @@", "+載る行", "+次の行", "@@ -9 +10 @@", "+載る別の行"]
+    got = verify_decide.excerpt_lines("\n".join(since) + "\n", "\n".join(full) + "\n")
+    changes = ["削除 旧2 新2: -- 区切り", "追加 新4: 戻した行", "削除 旧9 新10: 旧い行", "追加（本文は全差分） 新2-3,10-10"]
     assert got.split("\n") == [verify_decide.EXCERPT_NOTE, *head, *changes, ""]
-    assert verify_decide.excerpt_lines("") == ""
+    assert verify_decide.excerpt_lines("", "") == ""
 
 
 def test_issue_4363_ask_lists_the_diffs_of_each_finding_when_they_differ(tmp_path: Path) -> None:

@@ -445,7 +445,7 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
 | 補充した相手役だけ | 全差分 |
 | 両方 | `diffs` と全差分 |
 
-表の `diffs` は `reviewing.judge_diffs` が返す差分で、ラウンドの差分（`round<n>.diff`）である。Markdown を含む PR で前の head があるのに全差分をレビューするラウンドでは、前の head からの差分（`round<n>-since.diff`）から `verify_decide.excerpt_lines` が作る抜粋（`round<n>-excerpt.diff`）を足す。変わった行が無ければ足さない。`_confirm_heavy` が `judged` を呼ぶのは、判定役へ渡す指摘があり、その中に通常の相手役が出した指摘があるときだけである。ほかのラウンドでは抜粋を作らない。ラウンドの範囲ごとにどの差分を判定役へ渡すかと、その理由は、設計書の「[判定役の指示](./issue-4363-design.md#判定役の指示)」にある。
+表の `diffs` は `reviewing.judge_diffs` が返す差分で、ラウンドの差分（`round<n>.diff`）である。Markdown を含む PR で前の head があるのに全差分をレビューするラウンドでは、前の head からの差分（`round<n>-since.diff`）と全差分から `verify_decide.excerpt_lines(since, full)` が作る抜粋（`round<n>-excerpt.diff`）を足す。変わった行が無ければ足さない。`_confirm_heavy` が `judged` を呼ぶのは、判定役へ渡す指摘があり、その中に通常の相手役が出した指摘があるときだけである。ほかのラウンドでは抜粋を作らない。ラウンドの範囲ごとにどの差分を判定役へ渡すかと、その理由は、設計書の「[判定役の指示](./issue-4363-design.md#判定役の指示)」にある。
 
 `_round` は `enter` が返したキーの集合から `Checked.lowered` を除いたものを振動の判定の履歴（`run.history`）に足す。一部の相手役が読めなかったラウンドでも、読めた分は確かめる。
 
