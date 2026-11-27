@@ -58,7 +58,7 @@
       "required": ["name", "tasks", "after"],
       "properties": {
         "name": {"type": "string", "minLength": 1},
-        "tasks": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/task_id"}},
+        "tasks": {"type": "array", "description": "単位に含めるタスク。同じタスクは 1 回だけ書く", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/task_id"}},
         "after": {"type": "array", "description": "先に要る単位と理由", "items": {"$ref": "#/$defs/edge"}},
         "actual_lines": {"type": "integer", "minimum": 0, "description": "実装の後に書き足す実際の差分の行数"}
       }

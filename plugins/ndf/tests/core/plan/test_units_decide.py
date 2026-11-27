@@ -128,6 +128,14 @@ def test_u1(tasks, units):
     assert "U1" in _rules(_judge(_file(tasks, units)).violations)
 
 
+def test_u1_duplicate_task_in_a_unit_counts_once():
+    j = _judge(_file([_task("T1", lines=600)], [_unit("A", "T1", "T1")]))
+    assert _rules(j.violations) == ["U1"]
+    assert "T1 が重なる" in j.violations[0].reason
+    v = _views(j)["A"]
+    assert (v.lines, v.tasks) == (600, ("T1",))
+
+
 def test_u1_issue_in_two_files():
     a = _file([_task("T1")], [_unit("A", "T1")], path="a.json")
     b = _file([_task("T1")], [_unit("B", "T1")], path="b.json")

@@ -186,6 +186,7 @@ def test_the_unit_file_refuses_paths_that_are_not_a_single_concrete_file(path):
         {**UNIT_FILE, "tasks": []},
         {**UNIT_FILE, "units": []},
         {**UNIT_FILE, "units": [{"name": "a", "tasks": [], "after": []}]},
+        {**UNIT_FILE, "units": [{"name": "a", "tasks": ["T1", "T1"], "after": []}]},
         _task(lines=-1),
         _task(lines=1.5),
         _task(id="Task 1"),

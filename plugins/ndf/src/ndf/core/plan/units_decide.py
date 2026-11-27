@@ -136,7 +136,7 @@ def judge(files: Sequence[UnitFile], limits: Limits, criteria: Mapping[int, int]
     for at, f in enumerate(files):
         for u in f.units:
             homes.setdefault((at, u.name), u)
-            for tid in u.tasks:
+            for tid in dict.fromkeys(u.tasks):  # 同じ単位の中の重なった参照は 1 回と数え、U1 で知らせる
                 member.setdefault((at, tid), []).append((at, u.name))
     for at, f in enumerate(files):
         _name_rules(f, index[at], bad)
@@ -171,11 +171,14 @@ def _issue_owners(files: Sequence[UnitFile], bad: list[Finding]) -> dict[int, in
 
 
 def _name_rules(f: UnitFile, ids: Mapping[str, Task], bad: list[Finding]) -> None:
-    """タスクの番号と単位の名前の重なり・単位が指すタスクの欠落（U1）と、理由の無い依存（U5）。`ids` はファイルのタスクの索引。"""
+    """タスクの番号・単位の名前・単位の中のタスクの参照の重なりと、単位が指すタスクの欠落（U1）、理由の無い依存（U5）。`ids` はファイルのタスクの索引。"""
     id_counts = Counter(t.id for t in f.tasks)
     name_counts = Counter(u.name for u in f.units)
     bad += [Finding("U1", "", f"{f.path}: タスク {dup} が重なる") for dup in sorted(x for x, n in id_counts.items() if n > 1)]
     bad += [Finding("U1", dup, f"{f.path}: 単位の名前が重なる") for dup in sorted(x for x, n in name_counts.items() if n > 1)]
+    bad += [
+        Finding("U1", u.name, f"{f.path}: 単位のタスク {tid} が重なる") for u in f.units for tid, n in Counter(u.tasks).items() if n > 1
+    ]
     bad += [Finding("U1", u.name, f"{f.path}: 単位のタスク {tid} が無い") for u in f.units for tid in u.tasks if tid not in ids]
     bad += [Finding("U5", u.name, f"{f.path}: 先に要る単位 {e.unit} の理由が空") for u in f.units for e in u.after if not e.reason.strip()]
 
@@ -317,8 +320,8 @@ def _u4(files, tasks_of, closure, bad) -> None:
 
 
 def _unit_tasks(by_id: Mapping[str, Task], u: UnitDef) -> list[Task]:
-    """単位のタスク。`by_id` はファイルのタスクの索引（`judge` がファイルごとに 1 度だけ作る）。"""
-    return [by_id[tid] for tid in u.tasks if tid in by_id]
+    """単位のタスク。重なった参照は 1 回にする（行数を重ねて数えない）。`by_id` はファイルのタスクの索引（`judge` がファイルごとに 1 度だけ作る）。"""
+    return [by_id[tid] for tid in dict.fromkeys(u.tasks) if tid in by_id]
 
 
 def _touches(tasks: Sequence[Task]) -> tuple[str, ...]:
@@ -344,6 +347,18 @@ def _views(files, homes, edges, order, tasks_of) -> tuple[View, ...]:
         criteria = tuple(dict.fromkeys(c for t in tasks for c in t.criteria))
         after = tuple((files[t[0]].path, t[1], reason) for t, reason in edges[k])
         views.append(
-            View(f.path, u.name, order[k], merge[k], after, issues_of(k), u.tasks, criteria, lines, u.actual_lines, _touches(tasks))
+            View(
+                f.path,
+                u.name,
+                order[k],
+                merge[k],
+                after,
+                issues_of(k),
+                tuple(dict.fromkeys(u.tasks)),
+                criteria,
+                lines,
+                u.actual_lines,
+                _touches(tasks),
+            )
         )
     return tuple(views)
