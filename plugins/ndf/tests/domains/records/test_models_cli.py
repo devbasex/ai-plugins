@@ -39,6 +39,13 @@ def test_pick_as_args_prints_one_argument_per_line(repo, capsys):
     assert capsys.readouterr().out == "-c\nmodel_reasoning_effort=low\n"
 
 
+def test_pick_as_args_prints_an_accepted_model_name_as_written(repo, capsys, monkeypatch):
+    """バックスラッシュを含むモデル名も、変えずに 1 行で出す。"""
+    monkeypatch.setenv(identity.env_name("launch-model"), r"m\1\nx")
+    assert cli.main(["models", "pick", "--layer", "seat", "--name", "fix", "--args"]) == 0
+    assert capsys.readouterr().out == "--model\n" + "m\\1\\nx\n"
+
+
 def test_pick_as_args_without_a_choice_prints_nothing(repo, capsys):
     assert cli.main(["models", "pick", "--layer", "seat", "--name", "fix", "--args"]) == 0
     assert capsys.readouterr().out == ""

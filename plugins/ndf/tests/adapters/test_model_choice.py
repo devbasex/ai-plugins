@@ -190,6 +190,19 @@ def test_codex_takes_its_own_variables_and_argument_form(tmp_path):
     assert got.cli_args() == ["-c", "model_reasoning_effort=high", "-m", "gpt-9"] and got.env_changes() == {}
 
 
+def test_a_model_name_with_a_backslash_is_passed_as_written(tmp_path):
+    """受理したモデル名は置換の構文として解釈せず、そのまま 1 語で渡す。"""
+    root = _repo(tmp_path)
+    assert _pick(root, argument=(r"a\1\nb", None)).cli_args() == ["--model", r"a\1\nb"]
+    assert _pick(root, "seat", "review", "codex", argument=(r"g\g<0>", None)).cli_args()[-2:] == ["-m", r"g\g<0>"]
+
+
+def test_a_wrong_lower_value_does_not_stop_when_a_higher_one_is_given(tmp_path):
+    """引数が上書きする環境変数の値は使わないので、誤っていても止めない。"""
+    got = _pick(_repo(tmp_path), argument=("opus", "high"), environ={MODEL_ENV: "a\nb", EFFORT_ENV: "turbo"})
+    assert (got.model, got.effort) == ("opus", "high")
+
+
 def test_a_launch_without_a_stage_takes_only_the_manual_values(tmp_path):
     root = _repo(tmp_path)
     assert _pick(root, "seat", "fix").cli_args() == []
@@ -226,13 +239,13 @@ def test_a_wrong_value_stops_before_the_launch(tmp_path, kw):
 
 
 def test_row_fields_hold_only_present_values(tmp_path):
+    """割り付けを受けていない起動は、単位を渡されても使用量ログの欄に unit を置かない。"""
     got = _pick(_repo(tmp_path), mode="light", unit="run-1:impl")
     assert got.row_fields() == {
         "layer": "worker",
         "name": "impl",
         "runtime": "claude",
         "mode": "light",
-        "unit": "run-1:impl",
         "model_source": mc.Source.DEFAULT,
         "effort_source": mc.Source.DEFAULT,
         "raised": False,

@@ -48,6 +48,8 @@ def _pick_command(a: argparse.Namespace) -> int:
         sys.stdout.write("".join(f"{word}\n" for word in args))
         return 0
     item = {**got.row_fields(), "args": args}
+    if a.unit is not None:  # 使用量ログの欄は割り付けた起動だけ unit を持つ。pick の結果には渡された単位を載せる
+        item["unit"] = a.unit
     if got.stage is not None:
         item["stage"] = got.stage
     return result.emit(result.result(TOOL, result.OK, f"{a.layer} {a.name} の起動の値", items=[item]))

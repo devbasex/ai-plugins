@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import enum
+import functools
 import os
 import re
 from dataclasses import dataclass, replace
@@ -115,7 +116,7 @@ class Choice:
             place = _PLACE.search(form)
             value = values[place.group(1)] if place is not None else None
             if value is not None:
-                out += [flag, _PLACE.sub(value, form)]
+                out += [flag, _PLACE.sub(lambda _: value, form)]  # 置換の文字列として解釈させず、値を文字どおり入れる
         return out
 
     def env_changes(self) -> dict[str, Optional[str]]:
@@ -130,13 +131,13 @@ class Choice:
         return {}
 
     def row_fields(self) -> dict[str, Any]:
-        """使用量ログの行に足す欄（値の無い欄は置かない）。"""
+        """使用量ログの行に足す欄（値の無い欄は置かない）。`unit` は割り付けを受けた起動（`assign_id` がある）だけに置く。"""
         fields: dict[str, Any] = {
             "layer": self.layer,
             "name": self.name,
             "runtime": self.runtime,
             "mode": self.mode,
-            "unit": self.unit,
+            "unit": self.unit if self.assign_id is not None else None,
             "assign_id": self.assign_id,
             "requested_model": self.model,
             "effort": self.effort,
@@ -250,14 +251,21 @@ def _allocation_errors(allocation: Mapping[str, Any], widest: int) -> list[str]:
     return errs
 
 
-def table(root: Path) -> Table:
-    """同梱の表とリポジトリ `root` の `experiments` を重ね、値の制約を確かめる。外れれば直す場所を載せて `precondition`。"""
-    settings = launch_settings.load(root)
-    given = settings.experiments
+@functools.cache
+def _checked_bundled() -> dict[str, Any]:
+    """同梱の値を形（起動の設定のスキーマ）に照らして返す。同梱の値はプロセスの中で変わらないので、照らすのは初回だけ。"""
     bundled = _bundled()
     broken = contracts.broken_places({"version": 1, "experiments": bundled}, launch_settings.SCHEMA)
     if broken:
         raise _fail(f"{_bundled_path()} の選択肢が起動の設定の形に合わない: {'; '.join(broken)}")
+    return bundled
+
+
+def table(root: Path) -> Table:
+    """同梱の表とリポジトリ `root` の `experiments` を重ね、値の制約を確かめる。外れれば直す場所を載せて `precondition`。"""
+    settings = launch_settings.load(root)
+    given = settings.experiments
+    bundled = _checked_bundled()
     _given_keys(given, bundled, settings.path)
     merged = _overlaid(bundled, given)
     errs = [e for stage, by in merged["arms"].items() for runtime, arms in by.items() for e in _arms_errors(stage, runtime, arms)]
@@ -289,28 +297,22 @@ def raised(runtime: str, model: Optional[str], effort: Optional[str]) -> tuple[O
     return model, effort
 
 
-def _given_effort(value: Optional[str], runtime: str, where: str) -> Optional[str]:
-    if not value:
-        return None
+def _check_effort(value: str, runtime: str, where: str) -> None:
     efforts = _order_row(runtime)["efforts"]
     if value not in efforts:
         raise _fail(f"{where} の effort {value} は {runtime} の順位に無い（{'・'.join(efforts)}）")
-    return value
 
 
-def _given_model(value: Optional[str], where: str) -> Optional[str]:
-    if not value:
-        return None
+def _check_model(value: str, where: str) -> None:
     if _NEWLINE.search(value):
         raise _fail(f"{where} のモデル名が改行を含む")
-    return value
 
 
-def _first_given(*found: tuple[Optional[str], Source]) -> Optional[tuple[str, Source]]:
-    """値のある最初の (値, 出所)。どれも無ければ None。"""
-    for value, source in found:
+def _first_given(*found: tuple[Optional[str], Source, str]) -> Optional[tuple[str, Source, str]]:
+    """値のある最初の (値, 出所, 読んだ場所)。どれも無ければ None。下位の値は使わないので確かめない。"""
+    for value, source, where in found:
         if value:
-            return value, source
+            return value, source, where
     return None
 
 
@@ -328,22 +330,30 @@ class _Manual:
 
 
 def _manual(runtime: str, argument: tuple[Optional[str], Optional[str]], environ: Mapping[str, str]) -> _Manual:
-    """引数と環境変数の指定を読む。値の誤りは `precondition`。"""
+    """引数と環境変数の指定を読む。モデルと effort それぞれで優先の順に値を決めてから、使う値だけを確かめる。誤りは `precondition`。"""
     order = _order_row(runtime)
     model_env, effort_env = _order_env(order, "model_env"), _order_env(order, "effort_env")
     model = _first_given(
-        (_given_model(argument[0], "引数 --model"), Source.ARGUMENT),
-        (_given_model(environ[model_env] if model_env in environ else None, f"環境変数 {model_env}"), Source.ENVIRONMENT),
+        (argument[0], Source.ARGUMENT, "引数 --model"),
+        (environ[model_env] if model_env in environ else None, Source.ENVIRONMENT, f"環境変数 {model_env}"),
     )
     effort = _first_given(
-        (_given_effort(argument[1], runtime, "引数 --effort"), Source.ARGUMENT),
-        (_given_effort(environ[effort_env] if effort_env in environ else None, runtime, f"環境変数 {effort_env}"), Source.ENVIRONMENT),
+        (argument[1], Source.ARGUMENT, "引数 --effort"),
+        (environ[effort_env] if effort_env in environ else None, Source.ENVIRONMENT, f"環境変数 {effort_env}"),
     )
+    if model is not None:
+        _check_model(model[0], model[2])
+    if effort is not None:
+        _check_effort(effort[0], runtime, effort[2])
     inherited_env = _order_env(order, "inherited_effort_env")
     inherited = None
     if effort is None and inherited_env is not None and inherited_env in environ and environ[inherited_env]:
         inherited = environ[inherited_env]
-    return _Manual(model, effort, inherited)
+    return _Manual(
+        model[:2] if model is not None else None,
+        effort[:2] if effort is not None else None,
+        inherited,
+    )
 
 
 def _from_base(base: Optional[Mapping[str, str]], key: str) -> tuple[Optional[str], Source]:

@@ -85,9 +85,9 @@ src/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `table` | `adapters/model_choice.py` | 新設 | `table(root: Path) -> Table` | 同梱とリポジトリの `experiments` を重ね、値の制約を検証する |
+| `table` | `adapters/model_choice.py` | 新設 | `table(root: Path, settings: Optional[Settings] = None) -> Table` | 同梱とリポジトリの `experiments` を重ね、値の制約を検証する。`settings` を渡されれば `.ndf/launch.json` を読み直さずに使う。同梱の値のスキーマ検証はプロセスの中で初回だけ行う |
 | `stage_of` | 同 | 新設 | `stage_of(layer: str, name: str) -> Optional[str]` | 層と作業の名前から工程を引く |
-| `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, unit: Optional[str] = None, charge_to: Optional[str] = None, retry: Optional[str] = None, mode: Optional[str] = None, argument: tuple[Optional[str], Optional[str]] = (None, None), environ: Optional[Mapping] = None) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる |
+| `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, unit: Optional[str] = None, charge_to: Optional[str] = None, retry: Optional[str] = None, mode: Optional[str] = None, argument: tuple[Optional[str], Optional[str]] = (None, None), environ: Optional[Mapping] = None, settings: Optional[Settings] = None) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる。`settings` は `table` へ渡す |
 | `raised` | 同 | 新設 | `raised(runtime: str, model: Optional[str], effort: Optional[str]) -> tuple[Optional[str], Optional[str]]` | 設計書の「引き上げる起動」の上げ方の表を当てる |
 | `fallback` | 同 | 新設 | `fallback(choice: Choice, reason: str) -> Optional[Choice]` | 切り替える条件に当たれば `launch_error` の行を書き、基準の組の値を返す。当たらなければ None |
 | `candidates` | 同 | 新設 | `candidates(arms: Sequence, rows: Sequence, entry: Optional[Mapping], now: datetime, *, repo: str, stage: str, runtime: str, key: str) -> list[int]` | 打ち切った組と起動できない組を除いた添字。`launch_error` は割り付け ID で割り付けの行を引き、`repo`・`stage`・`runtime`・`key` が同じものだけを数える |
@@ -97,7 +97,7 @@ src/ndf/
 | `append_row` | 同 | 新設 | `append_row(row: Mapping) -> bool` | `ledger` を開いて 1 行足す |
 | `prune` | 同 | 新設 | `prune(now: datetime) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)の月の掃除。`launch-pruned` の月が今月なら何もしない。違えば、古い月のファイルと出現率の項目を消し（出現率のファイルはロックの中で読み直してから変える）、全部成功したら今月を書く。`launch_choice` が呼び、失敗しても起動は続ける |
 
-- `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm` を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄）を返す
+- `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm` を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄。`unit` は割り付けを受けた起動、つまり `assign_id` がある起動だけに置く）を返す
 - `launch_choice`
   - 事前条件: `layer` は `worker`・`skill`・`judge`・`seat`
   - 事後条件: 引数か環境変数で、モデルと effort の片方でも指定があれば割り付けず、無い側は基準の組の値。`unit` が無い場合、`enabled` が偽の場合、選択肢が 1 つの場合は、基準の組の値（出所は `base`、組が値を持たなければ `default`）で、割り付けの行を書かない。停止（`enabled` が偽）・固定（選択肢が 1 つ）・互換性のキーの変更で基準を使う単位に割り付けがあれば `halted` の行を足す。引数か環境変数の指定がある起動は、`unit` があれば割り付けの有無に関わらず理由 `manual` の `halted` の行を足し、`charge_to` があればその割り付けの単位にも足す。同じ単位の同じ理由の行は重ねて足さない。工程が無い層と作業の名前の起動には、引数を足さない（環境変数と起動の引数の指定は効く）
@@ -435,8 +435,10 @@ src/ndf/
 | `_pick_command` | 同 | 新設 | `_pick_command(a: Namespace) -> int` | `--args` が無ければ結果 JSON、あれば 1 行 1 引数 |
 | `_report` | 同 | 新設 | `_report(a: Namespace) -> int` | 使用量ログと実験の記録を読んで結果を出す |
 | `report_rows` | 同 | 新設 | `report_rows(usage_rows, experiment_rows, since, until, stage) -> list[dict]` | 設計書の「集計」の順と区分で値を組む |
-| `main` | `domains/settings/delegate_run_cli.py` | 変更 | 引数は #1959 のまま | codex は `launch_choice("seat", "delegate", "codex")` の引数と `safety_args("codex", "delegate", cwd)` の引数の並びを続けて `{args}` に入れる。kiro と agy は `launch_choice` を呼ばず、`safety_args` の引数だけを入れる |
+| `main` | `domains/settings/delegate_run_cli.py` | 変更 | 引数は #1959 のまま | codex は `launch_settings.load` で起動の設定を 1 回だけ読んで検証し、その `Settings` を渡した `launch_choice("seat", "delegate", "codex", settings=…)` の引数と `safety_args("codex", "delegate", cwd, settings=…)` の引数の並びを続けて `{args}` に入れる。kiro と agy は `launch_choice` を呼ばず、`safety_args` の引数だけを入れる |
+| `safety_args` | `adapters/launch_settings.py` | 変更 | `safety_args(runtime: str, use: str, cwd: Path, settings: Optional[Settings] = None) -> SafetyArgs` | #1959 の判定表のまま。サンドボックスなしで起動する経路で、`settings` を渡されれば `.ndf/launch.json` を読み直さずに使う。起動の直前の照らし直し（`verify`）は、これまでどおりファイルを読み直して承認と照らす |
 
+- `delegate-run` の codex の委譲では、起動の設定の読み取りと全体のスキーマ検証を 1 回にする。`launch_choice` と `safety_args` がそれぞれ `.ndf/launch.json` を読むと、サンドボックスなしの経路で読み取りと検証が 1 回ずつ増えるためである。承認を取り消した場合や、確かめた後にファイルを書き換えた場合は、起動の直前の `verify` が見つける
 - `_pick_command` の `--args` の形は、`InternalError` を自分で受けて標準エラーへ書き、標準出力に何も出さずに 0 以外で終える。`delegate-run` の失敗の扱いは #1959 の詳細設計のとおりで、`launch_choice` の失敗も CLI を起動せずに同じ形で終える
 - `report` は呼ばれた時点で計算し直し、出現率のファイルを書き換えない
 
