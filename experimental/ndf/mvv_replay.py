@@ -67,6 +67,10 @@ WORK_KEY_BYTES = 32
 WORK_KEY_PATTERN = re.compile(rf"[0-9a-f]{{{WORK_KEY_BYTES * 2}}}")
 # 専用ディレクトリの名前の候補の数。印の無い同名のディレクトリが続いても、候補を探し続けないための上限
 WORK_TRIES = 100
+# 片付けで、印を消す前に専用ディレクトリを移す名前の終わり（専用ディレクトリの基本の名前に、これと 16 桁の 16 進数の乱数を続ける）。
+# 印を消した後に強制終了しても、この名前の形で judge が片付けの途中だったと確かめ、空なら次の起動が消す
+WORK_DROP_INFIX = ".drop-"
+WORK_DROP_HEX = 16
 # judge が専用ディレクトリに作る一時ファイルの名前（`judge-` + 乱数 16 桁 + 印の鍵で乱数から作った HMAC-SHA256 の先頭 16 桁 +
 # `.tmp`）。回収するのは、この名前で、HMAC が印の鍵と合うものだけ（judge が作ったことを名前で確かめる）
 WORK_TMP_PREFIX = "judge-"
@@ -575,13 +579,19 @@ def _work_name(result: Path, i: int) -> str:
     return base if i == 0 else f"{base}-{i}"
 
 
+def _drop_pattern(result: Path) -> re.Pattern[str]:
+    """片付けの途中の専用ディレクトリの名前（`_work_base` + `WORK_DROP_INFIX` + 16 桁の 16 進数）に合う正規表現。"""
+    return re.compile(rf"{re.escape(_work_base(result) + WORK_DROP_INFIX)}[0-9a-f]{{{WORK_DROP_HEX}}}")
+
+
 def _work_existing(result: Path) -> list[Path]:
-    """親のディレクトリに今ある、専用ディレクトリの候補の名前のものだけを返す（親を 1 回だけ読む）。"""
+    """親のディレクトリに今ある、専用ディレクトリの候補の名前のものと、片付けの途中の名前のものだけを返す（親を 1 回だけ読む）。"""
     parent = result.absolute().parent
     names = {_work_name(result, i) for i in range(WORK_TRIES)}
+    drop = _drop_pattern(result)
     try:
         with os.scandir(parent) as it:
-            return [parent / e.name for e in it if e.name in names]
+            return [parent / e.name for e in it if e.name in names or drop.fullmatch(e.name)]
     except OSError:
         return []
 
@@ -735,16 +745,11 @@ def _same_dir(dfd: int, work: Path) -> bool:
 def _drop_work_dir(result: Path) -> None:
     """judge が作った専用ディレクトリのうち、空のもの（印のファイルのほかに何も無いもの）を消す。印の無いディレクトリには触れない。
 
-    今ある候補だけを見る（`_work_existing`）。印の確かめと操作は、開いたディレクトリの記述子を基準にする。印の鍵は一時ファイルを
-    回収するのに要るので、印を消す前に中身を読み、印のほかに何かある（別の起動の一時ファイルなど）ときと、名前がもう同じ
-    ディレクトリを指さないときは、印を消さずに残す。読んだ時点で一時ファイルがあったディレクトリでは、片付けが途中で強制終了
-    しても鍵は消えない。印を消した後、名前がまだ同じディレクトリを指すときだけ名前で消す。読んだ後に別の起動が一時ファイルを
-    作って消せなければ、開いたディレクトリに同じ鍵の印を戻して残す（中の一時ファイルの名前は、その鍵で回収できるまま）。
-    別の起動が印の削除前に鍵を読み（`_marked`）、この起動が中身を確かめた後、ディレクトリが消える前に一時ファイルを作る
-    （`_create_tmp`）ことがある。鍵を先に読んだ起動は、印を削除した後でも `rmdir` より先に作れる。この起動が印を削除してから
-    戻すまでに強制終了し、作った起動もその一時ファイルを消す前に強制終了すると、鍵が消え、次回の起動はその一時ファイルを回収できない。
-    一時ファイルを作るたびに専用ディレクトリのロックを取る手間に見合わないので、この重なりには備えない。
+    印の鍵を残したまま、片付けの途中の名前（`_drop_pattern`）へ移してから印を消し、ディレクトリを消す。印を消した後に強制終了して
+    残った空のディレクトリは、次の起動がこの名前の形で確かめて消す。印を消さずに残す条件、回収できない一時ファイルが残る順序と
+    それに備えない理由は、詳細設計（issues/issue-2912-design-detail.md の「測定の回の区別（`tally`）」）にまとめてある。
     """
+    drop = _drop_pattern(result)
     for work in _work_existing(result):
         dfd = _open_dir(work)
         if dfd is None:
@@ -752,10 +757,25 @@ def _drop_work_dir(result: Path) -> None:
         try:
             key = _marked(dfd)
             if key is None:
+                # 印を消した後に強制終了した片付けの残り。この利用者のものなら、空のときだけ消える
+                if drop.fullmatch(work.name) and os.fstat(dfd).st_uid == os.getuid() and _same_dir(dfd, work):
+                    with contextlib.suppress(OSError):
+                        os.rmdir(work)
                 continue
             with contextlib.suppress(OSError):
                 if os.listdir(dfd) != [WORK_MARK] or not _same_dir(dfd, work):
                     continue
+                if not drop.fullmatch(work.name):
+                    moved = work.with_name(_work_base(result) + WORK_DROP_INFIX + secrets.token_hex(WORK_DROP_HEX // 2))
+                    os.rename(work, moved)
+                    if not _same_dir(dfd, moved):
+                        # 確かめた後に名前が別のディレクトリを指した。移したものを元の名前へ戻す
+                        os.rename(moved, work)
+                        continue
+                    work = moved
+                    # 移す前に鍵を読んだ別の起動が、一時ファイルを作ったかもしれない。印を残し、次の回収に任せる
+                    if os.listdir(dfd) != [WORK_MARK]:
+                        continue
                 os.unlink(WORK_MARK, dir_fd=dfd)
                 try:
                     if not _same_dir(dfd, work):
@@ -772,7 +792,7 @@ def _sweep(result: Path) -> None:
 
     消すのは、次の 3 つがそろうものだけである。judge が作った印のある専用ディレクトリ（`_marked`）の中にあること、その印の鍵で
     judge が作った一時ファイルの名前（`_ours`）であること、この利用者が持つ通常のファイルであること。名前の形が同じでも、鍵と
-    合わないもの（利用者が置いたもの、この形より前の名前のもの）は消さない。今ある候補だけを見る
+    合わないもの（利用者が置いたもの、この形より前の名前のもの）は消さない。今ある候補と片付けの途中の名前のものだけを見る
     （`_work_existing`）。保存の一時ファイルは結果のロックを取ってから作るので、ロックを取った時点で残っているものは、強制終了した
     前の起動のもの。初回の結果ファイルを置くための一時ファイル（`_create_locked`）は、ロックを取る前に作るので、別の起動が作って
     いる途中のこともある。それを消しても、その起動は `os.link` の元が消えたことを見て、結果ファイルを開き直す。
