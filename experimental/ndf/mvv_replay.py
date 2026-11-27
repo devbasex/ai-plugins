@@ -7,7 +7,7 @@
 
     uv run --frozen --project . python experimental/ndf/mvv_replay.py material --prs 2214 2295 --store S.json --out M.json
     uv run --frozen --project . python experimental/ndf/mvv_replay.py material --case experimental/ndf/mvv_replay_cases/with-handling --out C.json
-    uv run --frozen --project . python experimental/ndf/mvv_replay.py judge --materials M.json --model <ID> [--prompt-commit c93e690ed] [--expect 2213=C2,C4] [--expect-claude-version <版>] [--expect-prompt-sha256 <SHA-256>] --result J.json
+    uv run --frozen --project . python experimental/ndf/mvv_replay.py judge --materials M.json --model <ID> [--prompt-commit c93e690ed] [--expect 2213=C2,C4] [--expect-claude-version <版>] [--expect-prompt-commit <コミット>] [--expect-prompt-sha256 <SHA-256>] --result J.json
     uv run --frozen --project . python experimental/ndf/mvv_replay.py bodies --materials M.json --judged J_new.json J_old.json [--reviewed R.jsonl] --store S.json --out B.json
     uv run --frozen --project . python experimental/ndf/mvv_replay.py tally --materials M.json --judged J_new.json J_old.json [--judged ...] --reviewed R.jsonl --out T.json
     uv run --frozen --project . python experimental/ndf/mvv_replay.py guard-check --result G.json
@@ -28,17 +28,20 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import dataclasses
+import errno
 import fcntl
 import hashlib
 import json
 import os
+import socket
 import shlex
 import subprocess
 import sys
 import tempfile
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -357,7 +360,12 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
         "plugin_root": str(root),
     }
     # 再判定では、残す結果と同じ条件で打たないと tally が拒むので、LLM を呼ぶ前に照合して止める（費用を払ってから拒まれない）
-    for key, want in (("claude_version", args.expect_claude_version), ("prompt_sha256", args.expect_prompt_sha256)):
+    expected = (
+        ("claude_version", args.expect_claude_version),
+        ("prompt_commit", args.expect_prompt_commit),
+        ("prompt_sha256", args.expect_prompt_sha256),
+    )
+    for key, want in expected:
         if want is not None and info[key] != want:
             raise Stop(f"{key} が期待した値と違う（期待: {want} / 今: {info[key]}）。判定せずに止める", 2)
     # 材料は最初の保存の前に読む（読めずに止まるとき、前の結果ファイルを書き換えない）
@@ -365,22 +373,45 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
     # 結果は名前の置き換えで保存するので、最後の要素がシンボリックリンクだと初回の保存でリンクが消え、次の起動が別の宛先を読む
     if args.result.is_symlink():
         raise Stop(f"--result（{args.result}）はシンボリックリンク。リンクの先のパスを渡す")
-    # 同じ結果ファイルを補う起動を並べると、起動時に読んだ状態で互いの行を上書きするので、結果ファイルのディレクトリを排他で
-    # ロックし、そのディレクトリに保存する judge を 1 つだけ動かす。ディレクトリそのものをロックするので、ロックのためのファイルを
-    # 作らず（片付けるものが残らない）、状態の保存先の環境変数が違う起動どうしでも同じロックを取る
-    folder = args.result.absolute().parent
+    # 同じ結果ファイルを補う起動を並べると、起動時に読んだ状態で互いの行を上書きするので、結果ファイルごとに 1 つだけ動かす
+    with _exclusive(args.result):
+        return _judge_locked(args, question, info, materials)
+
+
+@contextlib.contextmanager
+def _exclusive(result: Path) -> Iterator[None]:
+    """結果ファイルごとの排他。取れなければ止める。
+
+    Linux では、結果ファイルの絶対パスの SHA-256 を名前にした抽象名前空間の UNIX ソケットを bind する。ファイルを作らないので
+    片付けるものが残らず、プロセスが終われば自動で外れ、状態の保存先の環境変数にも依らない。抽象名前空間の無い OS では、
+    結果ファイルのディレクトリに flock を掛ける（同じディレクトリの別の結果ファイルとも排他になる）。
+    """
+    folder = result.absolute().parent
     folder.mkdir(parents=True, exist_ok=True)
-    lock = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    # 祖先のリンクは解き、最後の要素は解かない（最後の要素のリンクは呼び出し元が拒む）
+    target = folder.resolve() / result.name
+    if sys.platform.startswith("linux"):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            try:
+                sock.bind(f"\0ndf-mvv-replay-judge-{_sha(str(target))}")
+            except OSError as exc:
+                if exc.errno != errno.EADDRINUSE:
+                    raise Stop(f"結果ファイルごとの排他を取れない: {exc}") from None
+                raise Stop(f"同じ --result（{result}）の judge が動いている。終わってから打ち直す") from None
+            yield
+        finally:
+            sock.close()
+        return
+    fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise Stop(
-                f"同じディレクトリ（{folder}）に結果を保存する judge が動いている。終わってから打ち直すか、別のディレクトリの --result を渡す"
-            ) from None
-        return _judge_locked(args, question, info, materials)
+            raise Stop(f"同じディレクトリ（{folder}）に結果を保存する judge が動いている。終わってから打ち直す") from None
+        yield
     finally:
-        os.close(lock)
+        os.close(fd)
 
 
 def _judge_locked(args: argparse.Namespace, question: str, info: Mapping[str, Any], materials: Mapping[int, Optional[Material]]) -> int:
@@ -681,29 +712,35 @@ def _is_sha256(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
 
 
+def _kept(pairs: Sequence[Sequence[Mapping[str, Any]]], side: int) -> Optional[Mapping[str, Any]]:
+    """その側で残す結果（指示文のハッシュを持つ回のどれか。条件が回をまたいで一致することは呼び出し元が確かめる）。"""
+    return next((p[side] for p in pairs if _is_sha256(p[side].get("prompt_sha256"))), None)
+
+
 def _redo_hint(args: argparse.Namespace, pairs: Sequence[Sequence[Mapping[str, Any]]], i: int, side: int, name: str) -> str:
     """指示文のハッシュが無い 1 つの結果ファイルを判定し直す案内。
 
-    残す結果と同じ Claude Code の版と、同じ側のハッシュを持つ回の指示文のハッシュ（あれば）を照合の引数に入れ、judge が LLM を呼ぶ前に
-    不一致で止まるようにする。指示文の取得元がコミットで決まるのは比較の基準の側だけである。変更後の側は `--prompt-commit` を
-    省いた起動（読み込んだ ndf の指示文）と見分けられないので、コマンドを示さず、元の起動方法を確かめる案内にする。
+    照合の引数を入れ、judge が LLM を呼ぶ前に不一致で止まるようにする。モデルと Claude Code の版は組の 2 つで揃える必要があるので、
+    どちらかの側に残す結果があればそれから取る。指示文のコミットとハッシュは、同じ側に残す結果があればそれから取る。指示文の
+    取得元がコミットで決まるのは比較の基準の側だけである。変更後の側は `--prompt-commit` を省いた起動（読み込んだ ndf の指示文）と
+    見分けられないので、コマンドを示さず、元の起動方法を確かめる案内にする。
     """
-    # 期待する条件は残す結果（同じ側のハッシュを持つ回。呼び出し元が条件の一致を確かめ済み）から取る。無ければこの結果の条件
-    kept = next((p[side] for p in pairs if _is_sha256(p[side].get("prompt_sha256"))), None)
-    row = kept or pairs[i - 1][side]
-    check = ["--expect-claude-version", str(row.get("claude_version"))]
-    if kept is not None:
-        check += ["--expect-prompt-sha256", str(kept["prompt_sha256"])]
+    same = _kept(pairs, side)
+    env = same or _kept(pairs, 1 - side) or pairs[i - 1][side]
+    row = same or pairs[i - 1][side]
+    check = ["--expect-claude-version", str(env.get("claude_version"))]
+    if same is not None:
+        check += ["--expect-prompt-commit", str(same.get("prompt_commit")), "--expect-prompt-sha256", str(same["prompt_sha256"])]
     where = f"{i}回目の{name}: {args.judged[i - 1][side]}"
     if side == 0:
         return (
             f"{where}（指示文の取得元を結果ファイルから特定できない。元の judge の起動方法（--prompt-commit・--plugin-root）を確かめ、"
-            f"同じ起動に次の引数を足して新しい --result へ判定する: {shlex.join(['--model', str(row.get('model')), *check])}）"
+            f"同じ起動に次の引数を足して新しい --result へ判定する: {shlex.join(['--model', str(env.get('model')), *check])}）"
         )
     head = ["uv", "run", "--frozen", "--project", str(REPO), "python", str(REPO / "experimental" / "ndf" / "mvv_replay.py")]
     if row.get("plugin_root"):
         head += ["--plugin-root", str(row["plugin_root"])]
-    argv = [*head, "judge", "--materials", str(args.materials), "--model", str(row.get("model"))]
+    argv = [*head, "judge", "--materials", str(args.materials), "--model", str(env.get("model"))]
     argv += ["--prompt-commit", str(row.get("prompt_commit")), *check]
     return f"{where}（<新しいパス> を新しい結果ファイルのパスに置き換えて打つ: {shlex.join(argv)} --result <新しいパス>）"
 
@@ -727,6 +764,10 @@ def _cmd_tally(args: argparse.Namespace) -> int:
         conditions = {tuple(pair[side].get(k) for k in JUDGE_CONDITIONS) for pair in pairs if _is_sha256(pair[side].get("prompt_sha256"))}
         if len(conditions) > 1:
             raise Stop(f"{name}の判定の条件（{', '.join(JUDGE_CONDITIONS)}）が回によって違う: {sorted(map(str, conditions))}")
+    # 組の 2 つはモデルと Claude Code の版を揃える必要があるので、両側に残す結果があれば、側をまたいでも揃っているかを確かめる
+    kept = [k for k in (_kept(pairs, 0), _kept(pairs, 1)) if k is not None]
+    if len({(k.get("model"), k.get("claude_version")) for k in kept}) > 1:
+        raise Stop("残す判定結果のモデル ID か Claude Code のバージョンが側によって違う。どちらかの側をすべての回で判定し直す")
     # 指示文のハッシュを持たない結果（この変更より前の形式）は、実際に送った指示文を照合できないので比べない。前の結果ファイルは
     # judge が条件の違いで続きに使わないので、欠けた側と回のファイルだけを挙げ、新しい保存先で打ち直す打ち方を示す
     redo = [
@@ -963,6 +1004,7 @@ def _parser() -> argparse.ArgumentParser:
     j.add_argument("--expect", type=_expect, nargs="*", default=[], help="<PR>=<番号>,<番号> の並び（順 1）")
     j.add_argument("--result", type=Path, required=True)
     j.add_argument("--expect-claude-version", default=None, help="Claude Code の版がこれと違えば判定せずに止める")
+    j.add_argument("--expect-prompt-commit", default=None, help="判定結果に書く指示文のコミットがこれと違えば判定せずに止める")
     j.add_argument("--expect-prompt-sha256", default=None, help="送る指示文の SHA-256 がこれと違えば判定せずに止める")
     b = sub.add_parser("bodies")
     b.add_argument("--materials", type=Path, required=True)
