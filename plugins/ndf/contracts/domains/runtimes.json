@@ -20,7 +20,8 @@
     "unsandboxed_args": {"type": "array", "summary": "安全装置を外す引数。サンドボックスが使えず、起動の設定の permissions.unsandboxed にランタイムがあり承認済みのときだけ入れる（#1959。外で隔離された環境の中でだけ打つ前提）", "optional": true},
     "safety_aliases": {"type": "array", "summary": "sandbox_args・delegate_sandbox_args・unsandboxed_args の引数の別名（短い名前・長い名前）。ndf delegate-run は、利用者のコマンドがこれらの引数の名前を自分で持てば拒む（安全装置の判定を迂回させない）", "optional": true},
     "delegate_prefix": {"type": "array", "summary": "ndf delegate-run の起動で、実行ファイルのすぐ後に置く語（サブコマンドと、委譲で必ず付ける引数）。コマンドは実行ファイルの後にこの語を並べ、そのすぐ後に安全装置の引数を入れる位置を置く（安全装置の引数がオプションとして読まれる位置を NDF が決める）。無いランタイムは実行ファイルのすぐ後", "optional": true},
-    "workdir_options": {"type": "array", "summary": "作業ディレクトリを指す引数の名前。ndf delegate-run は先頭の名前で今のディレクトリを入れ、コマンドがこれらの名前を自分で持てば拒む（承認とサンドボックスは今のディレクトリで確かめるため）", "optional": true}
+    "workdir_options": {"type": "array", "summary": "作業ディレクトリを指す引数の名前。ndf delegate-run は先頭の名前で今のディレクトリを入れ、コマンドがこれらの名前を自分で持てば拒む（承認とサンドボックスは今のディレクトリで確かめるため）", "optional": true},
+    "choice_args": {"type": "array", "summary": "選んだモデルと effort を渡す引数の形（#2944）。引数の名前と値の 2 語ずつの並びで、値の {model} と {effort} に選んだ値を入れる。値の無い側の 2 語は足さない。並びの順に出す。無いランタイムは値を渡さない", "optional": true}
   },
   "rows": [
     {
@@ -35,7 +36,8 @@
       "host_env": ["CLAUDE_PLUGIN_ROOT", "CLAUDECODE"],
       "auth_probe": ["auth", "status"],
       "model_probe": ["-p", "--output-format", "json", "--tools", "", "--system-prompt", "Answer briefly.", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"],
-      "model_args": ["--model", "default"]
+      "model_args": ["--model", "default"],
+      "choice_args": ["--model", "{model}", "--effort", "{effort}"]
     },
     {
       "id": "codex",
@@ -57,7 +59,8 @@
       "unsandboxed_args": ["--dangerously-bypass-approvals-and-sandbox"],
       "safety_aliases": ["--sandbox"],
       "delegate_prefix": ["exec"],
-      "workdir_options": ["-C", "--cd"]
+      "workdir_options": ["-C", "--cd"],
+      "choice_args": ["-c", "model_reasoning_effort={effort}", "-m", "{model}"]
     },
     {
       "id": "agy",
