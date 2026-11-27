@@ -240,7 +240,10 @@ def fixer_impact(row: Mapping[str, Any]) -> str:
     （`ALSO_IMPACTS`）があれば、区切りを付けて続ける。"""
     impact = row.get("impact")
     own = f"— {_table()['impact']['fixer_label']}: {impact.strip()}" if _has_impact(impact) else ""
-    return own + "".join(REVIEW_ALSO + part for part in row.get(ALSO_IMPACTS, ()))
+    others = row.get(ALSO_IMPACTS)
+    if others:
+        own += "".join(REVIEW_ALSO + part for part in others)
+    return own
 
 
 def citation_text(error: Mapping[str, Any], version: int) -> str:
