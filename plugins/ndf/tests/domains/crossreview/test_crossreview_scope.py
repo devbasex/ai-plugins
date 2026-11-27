@@ -357,9 +357,9 @@ def test_changed_sections_do_not_look_for_renames(tmp_path: Path) -> None:
 def test_committed_text_skipped_by_git_is_an_error_unless_the_file_is_empty(tmp_path: Path, monkeypatch) -> None:
     """手元に無い blob を git grep が飛ばしたら、本文の無い文書とみなさずに止める。空のファイルは行が無くてよい。"""
     from ndf.adapters import git
-    from ndf.domains.crossreview import changes, settings
+    from ndf.domains.crossreview import changes
 
-    empty = settings.blob_id(b"", 40)
+    empty = mvv.blob_id(b"", 40)
     trees = {"empty.md": empty, "a.md": "a" * 40}
     monkeypatch.setattr(git.Git, "run_bytes", lambda self, *args, **kw: b"")
 
