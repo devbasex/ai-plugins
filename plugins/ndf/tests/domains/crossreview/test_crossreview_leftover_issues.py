@@ -32,7 +32,6 @@ class FakeGitHub:
         self.indexed = True
         self.edits_others = True
         self.login = "me"
-        self.association = "NONE"
         self.viewed = 0
         self._tick = 0
 
@@ -48,7 +47,7 @@ class FakeGitHub:
         return {r: PUBLIC for r in repos}
 
     def _by(self, body: str) -> dict[str, Any]:
-        return {"body": body, "user": {"login": self.login}, "author_association": self.association}
+        return {"body": body, "user": {"login": self.login}, "author_association": "NONE"}
 
     def issue(self, body: str, **other: Any) -> dict[str, Any]:
         number = 100 + len(self.issues)
@@ -89,9 +88,6 @@ class FakeGitHub:
                 if not self.edits_others and found["user"]["login"] != self.login:
                     raise GitHubError("他人のコメントは編集できない", 403)
                 found.update(body=payload["body"], updated_at=self.now())
-            if method == "DELETE":
-                self.records.remove(found)
-                return None
             return dict(found)
         pr = int(tail.split("/")[0])
         if method == "GET":
@@ -199,7 +195,7 @@ def test_issue_3780_2_files_once_and_writes_the_url_to_the_row() -> None:
     assert run.go() == []
     url = github.issues[0]["html_url"]
     assert run.row[Filed.URL] == url and Filed.ERROR not in run.row
-    assert run.data["issue_logins"] == ["me"]
+    assert run.data["issue_logins"] == ["me"] and run.data["issue_record_id"] == github.records[0]["id"]
     # 作成を試みていない候補だけなら、検索も一覧も呼ばない
     assert github.count("GET", "search/issues") == 0 and github.count("GET", f"repos/{REPO}/issues") == 0
     assert run.go() == [] and github.created() == 1
@@ -359,74 +355,16 @@ def test_issue_3780_a_record_of_another_account_that_cannot_be_edited_is_taken_o
     github.login, github.edits_others = "app[bot]", False
     first = Run(github)
     first.go()
-    github.login, github.association = "human", "MEMBER"
+    github.login = "human"
     second = _row("r2-2", "別の指摘")
     again = Run(github, _row(), second)
     again.data["issue_logins"] = ["app[bot]"]
     assert again.go() == [] and github.created() == 2
     assert len(github.records) == 2 and len(leftover_decide.record_entries(github.records[1]["body"])) == 2
-    # login を持たない空の保存先でも、引き継いだ記録から bot の Issue を使う
+    # 別の保存先は、両方の記録をまとめて読む
     third = Run(github, _row(), second)
-    assert third.go() == [] and third.row[Filed.URL] == first.row[Filed.URL] and github.created() == 2
-
-
-def test_issue_3780_a_state_of_the_old_record_reads_the_one_that_took_over() -> None:
-    github = FakeGitHub()
-    github.login, github.edits_others = "app[bot]", False
-    first = Run(github)
-    first.go()
-    github.login, github.association = "human", "MEMBER"
-    github.fail[("PATCH", "comments/501")] = 502
-    second = _row("r2-2", "別の指摘")
-    taken = Run(github, second)
-    taken.data["issue_logins"] = ["app[bot]"]
-    assert taken.go() and github.created() == 2
-    # 元の bot は書き込みの権限を持ち、引き継いだ記録を編集できる
-    github.login, github.association, github.edits_others = "app[bot]", "NONE", True
-    first.data["findings"].append(_row("r2-2", "別の指摘"))
-    assert first.go() == [] and first.data["findings"][1][Filed.URL] == github.issues[1]["html_url"]
-    assert github.created() == 2
-
-
-def test_issue_3780_an_account_others_cannot_trust_does_not_take_over_the_record() -> None:
-    github = FakeGitHub()
-    github.login, github.edits_others = "app[bot]", False
-    first = Run(github)
-    first.go()
-    github.login = "outsider"
-    other = Run(github, _row("r2-2", "別の指摘"))
-    other.data["issue_logins"] = ["app[bot]"]
-    assert other.go() and other.row[Filed.ERROR] and github.created() == 1
-    assert [c["id"] for c in github.records] == [500]
-    github.login = "app[bot]"
-    first.data["findings"].append(_row("r2-2", "別の指摘"))
-    assert first.go() == [] and github.created() == 2
-
-
-@pytest.mark.parametrize("login", ["outsider", "app[bot]"])
-def test_issue_3780_a_take_over_that_could_not_be_removed_is_not_used_by_anyone(login: str) -> None:
-    github = FakeGitHub()
-    github.login, github.edits_others = "app[bot]", False
-    Run(github).go()
-    github.login = "outsider"
-    github.fail[("DELETE", "comments/501")] = 502
-    second = _row("r2-2", "別の指摘")
-    assert Run(github, second).go() and len(github.records) == 2
-    # 残ったコメントを、投稿者本人の打ち直しも別のアカウントも起票の根拠にしない
-    github.login = login
-    again = Run(github, _row("r2-2", "別の指摘"))
-    again.data["issue_logins"] = ["app[bot]"]
-    again.go()
-    assert github.created() == (2 if login == "app[bot]" else 1)
-
-
-def test_a_url_removed_from_the_newest_record_does_not_come_back() -> None:
-    github = FakeGitHub()
-    first = Run(github)
-    first.go()
-    github.records.append(github.records[0] | {"id": 501, "body": leftover_decide.record_body({})})
-    again = Run(github)
-    assert again.go() == [] and github.created() == 2 and again.row[Filed.URL] != first.row[Filed.URL]
+    third.data["issue_logins"] = ["app[bot]", "human"]
+    assert third.go() == [] and github.created() == 2
 
 
 def test_a_match_on_a_read_page_is_used_when_the_list_is_over_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
