@@ -11,7 +11,8 @@ from dataclasses import replace
 
 
 from ndf.contracts import result
-from ndf.progress import command, gate, invoke, run
+from ndf.progress import gate, invoke, run
+from ndf.progress.gate import finishing
 
 
 def test_a_stopped_table_resumes_with_the_same_next_and_the_gate_carries_the_routes(st, env, new_table, flow):
@@ -37,7 +38,7 @@ def test_a_stopped_table_resumes_with_the_same_next_and_the_gate_carries_the_rou
             # conductor は止まった結果のルート retry を打つ（ask の reason を足す）
             argv = resumed["routes"]["retry"]["argv"]
             assert argv[:3] == ["ndf", "progress", "retry"] and "--from" not in argv
-            assert command.main([*argv[2:], "--reason", "一時障害が収まった"]) == 0
+            assert finishing.main([*argv[2:], "--reason", "一時障害が収まった"]) == 0
         resumed = flow.turn(tid, failing)
     assert resumed["status"] == "gate" and len(calls) >= 2
     q = gate.waiting(run.read(st, tid))

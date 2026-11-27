@@ -19,6 +19,7 @@ from ndf import contracts
 from ndf.domains.records import cli, mvv_gate
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress import command, definition, invoke, model, stage_inputs, store
+from ndf.progress.gate import finishing
 
 from . import test_mvv_gate as base
 from ._mvv_gate_records import failures as _failures
@@ -179,12 +180,12 @@ def test_both_entrypoints_judge_the_same_pr_with_the_same_input(
     tid = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["metrics"]["machine_id"]
     out_file = repo.parent / "outputs.json"
     out_file.write_text(json.dumps({"steps": [], "summary": "用意した", "outputs": {"worktree": str(repo), "branch": "design/x"}}))
-    assert command.main(["finish", tid, "作業場所の用意", "--output", str(out_file), "--reason", "手で"]) == 0
+    assert finishing.main(["finish", tid, "作業場所の用意", "--output", str(out_file), "--reason", "手で"]) == 0
     # 文脈の design_pr は判定する PR と違っても読まない（両方とも worktree のブランチの PR を判定する）
     out_file.write_text(
         json.dumps({"steps": [], "summary": "設計", "outputs": {"design_pr": 99, "mvv_gate": mm.gate_outcome("design", None, False, [])}})
     )
-    assert command.main(["finish", tid, "設計", "--output", str(out_file), "--reason", "手で"]) == 0
+    assert finishing.main(["finish", tid, "設計", "--output", str(out_file), "--reason", "手で"]) == 0
     capsys.readouterr()
     monkeypatch.setattr(cli, "_hub", _hub(5, DOCS))
     seen: list[dict[str, Any]] = []
@@ -267,7 +268,7 @@ def _set_pr(repo: Path, capsys: pytest.CaptureFixture[str], tid: str, pr: int) -
     try:
         out_file = repo.parent / f"pr-{pr}.json"
         out_file.write_text(json.dumps({"steps": [], "summary": "PR を作った", "outputs": {"pr": pr}}))
-        assert command.main(["finish", tid, "Pull Request", "--output", str(out_file), "--reason", "手で"]) == 0
+        assert finishing.main(["finish", tid, "Pull Request", "--output", str(out_file), "--reason", "手で"]) == 0
         capsys.readouterr()
     finally:
         monkey.undo()

@@ -15,10 +15,11 @@ from ndf.adapters.git import Completed, Git, GitError
 from ndf.contracts import causes
 from ndf.core import durable
 from ndf.progress import command, definition, invoke, model, stages, store
+from ndf.progress.gate import finishing
 
 
 def _run(capsys, last_result, *argv: str) -> tuple[int, dict]:
-    code = command.main(list(argv))
+    code = finishing.main(list(argv))
     return code, last_result(capsys.readouterr().out)
 
 

@@ -1,6 +1,6 @@
 """ステートマシンの事象の列を、工程の中のステップの進みへ畳み込む（純粋な処理。ファイルもプロセスも触らない）。
 
-行のステップの進み（`StepProgress`）と回答の語を持つ。事象の種類の定数と、1 回の取得で読んだステートマシン（`View`）は
+行のステップの進み（`StepProgress`）・次の 1 手の型（`Action`・`Move`）・回答の語を持つ。事象の種類の定数と、1 回の取得で読んだステートマシン（`View`）は
 `ndf.progress.run_view` が持つ。次の 1 手を決めて流すのは `ndf.progress.run` である。
 """
 
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Optional
 
 from ndf.contracts import facts, result
@@ -118,3 +119,26 @@ def step_progress(v: View, stage: str) -> StepProgress:
     for ev in v.row_events(stage):
         prog.see(ev)
     return prog
+
+
+class Action(StrEnum):
+    """次の 1 手の種類（値は結果 JSON の `metrics.move` に載る）。"""
+
+    DONE = "done"
+    COMPLETE = "complete"
+    START = "start"
+    RESUME = "resume"
+    GATE = "gate"
+    CONSUME = "consume"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class Move:
+    """次の 1 手。"""
+
+    action: Action
+    stage: Optional[stages.StageDef] = None
+    step: Optional[stages.StepDef] = None
+    progress: Optional[StepProgress] = None
+    event: Optional[model.Event] = None

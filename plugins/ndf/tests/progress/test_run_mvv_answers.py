@@ -15,7 +15,8 @@ import pytest
 from result_json import last_result
 
 from ndf.contracts import result
-from ndf.progress import command, gate, invoke, model, run
+from ndf.progress import command, gate, invoke, model, run, run_approval
+from ndf.progress.gate import finishing
 
 ISSUE = 3959
 JUDGED = "a" * 40
@@ -105,11 +106,11 @@ def _old_mvv_answer(st, tid, held: dict) -> model.Event:
 
 
 def _consumed_by_old_ndf(st, tid, answered: model.Event) -> None:
-    """更新前の NDF の `_consume` が、`service:mvv` の回答を読んで承認ゲートのステップを済みにした記録。"""
+    """更新前の NDF の `consume` が、`service:mvv` の回答を読んで承認ゲートのステップを済みにした記録。"""
     v = run.read(st, tid)
     m = run.decide(v)
     assert m.stage is not None and m.step is not None and m.progress is not None
-    payload = {"step": m.step.id, "status": run.FINISHED, "report": run.gate_report(m.step, answered), "generation": 0}
+    payload = {"step": m.step.id, "status": run.FINISHED, "report": run_approval.gate_report(m.step, answered), "generation": 0}
     run._write(st, tid, model.EventDraft(run.STEP_EVENT, run.ACTOR, m.stage.name, payload=payload, rev=v.rev))
 
 
@@ -192,7 +193,7 @@ def test_a_failed_merge_after_an_old_service_answer_asks_a_human_after_the_retry
     run._write(st, tid, run._failed(v.snap.stage("デプロイ"), "release", v.rev, "refused", "承認済みのコミットが無い"))
     out = run.advance(st, tid, repo, env.env)
     assert out["status"] == "stopped"
-    assert command.main(["retry", tid, "デプロイ", "--reason", "打ち直す"]) == 0
+    assert finishing.main(["retry", tid, "デプロイ", "--reason", "打ち直す"]) == 0
     out = lanes.turn(st, tid, repo, env.env)
     assert out["status"] == "gate" and out["metrics"]["step"] == "release-gate"
 
@@ -232,10 +233,10 @@ def test_consume_does_not_take_an_answer_that_is_not_counted(repo, st, env, caps
     m = run.decide(v)
     d = run.Drive(st, tid, repo, env.env, inline=True)
     before = len(v.events)
-    out = run._consume(d, v, dataclasses.replace(m, action=run.Action.CONSUME, event=old))
+    out = run_approval.consume(d, v, dataclasses.replace(m, action=run.Action.CONSUME, event=old))
     assert out is not None and out["status"] == "gate" and len(run.read(st, tid).events) == before
     # 回答が無く、直前の判定が省かないと決めた手でも service:mvv の回答を書かない
-    out = run._consume(d, v, dataclasses.replace(m, action=run.Action.CONSUME, event=None))
+    out = run_approval.consume(d, v, dataclasses.replace(m, action=run.Action.CONSUME, event=None))
     assert out is not None and out["status"] == "gate" and len(run.read(st, tid).events) == before
 
 

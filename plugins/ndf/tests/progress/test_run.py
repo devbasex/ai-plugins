@@ -22,6 +22,7 @@ from ndf.adapters.github import GitHubError
 from ndf.contracts import causes, result
 from ndf.core import route
 from ndf.progress import command, definition, gate, invoke, issue_values, model, records, run, stages, store
+from ndf.progress.gate import finishing
 
 ISSUE = 3092
 
@@ -391,7 +392,7 @@ def test_failures_that_need_a_decision_return_routes_and_the_exit_code_of_the_ca
     assert _labels(st, tid)["作業場所の用意"] == "failed"
     # 失敗の行は conductor が retry で戻すまで流さない。戻せば失敗したステップから流し直す
     assert run.advance(st, tid, repo, env.env)["cause"]["kind"] == "test_failed"
-    _main(capsys, command.main, "retry", tid, "作業場所の用意", "--reason", "直した")
+    _main(capsys, finishing.main, "retry", tid, "作業場所の用意", "--reason", "直した")
     assert lanes.turn(st, tid, repo, env.env)["status"] == "gate"
     assert [c.retries for c in env.fake.calls if c.step == "worktree"] == [0, 1]
 
@@ -413,7 +414,7 @@ def test_retry_after_a_stage_output_that_breaks_the_contract_runs_the_steps_agai
     failed = [e for e in run.read(st, tid).events if e.draft.kind == "failed"][-1]
     assert failed.draft.payload["step"] is None  # 工程全体の出力の検査で落ちた
     before = len(env.fake.calls)
-    _main(capsys, command.main, "retry", tid, "作業場所の用意", "--reason", "作り直す")
+    _main(capsys, finishing.main, "retry", tid, "作業場所の用意", "--reason", "作り直す")
     assert lanes.turn(st, tid, repo, env.env)["status"] == "gate"
     again = env.fake.calls[before:]
     assert [c.step for c in again][0] == "worktree"
@@ -444,7 +445,7 @@ def test_retry_after_a_failed_step_keeps_the_steps_that_finished(repo, st, env, 
     assert failed.draft.payload["step"] == "implement"
     prog = run.step_progress(run.read(st, tid), stage)
     done = dict(prog.done)
-    _main(capsys, command.main, "retry", tid, stage, "--reason", "直した")
+    _main(capsys, finishing.main, "retry", tid, stage, "--reason", "直した")
     run.advance(st, tid, repo, env.env)  # 行を始め直す（作業は起動するだけ）
     assert run.step_progress(run.read(st, tid), stage).done == done
 
@@ -454,7 +455,7 @@ def test_finish_by_hand_writes_the_outputs_to_the_context_like_the_workflow(repo
     out_file = tmp_path / "worktree.json"
     outputs = {"worktree": str(repo), "branch": "sprint/s1"}
     out_file.write_text(json.dumps({"steps": [], "summary": "手で用意した", "outputs": outputs}))
-    code, out = _main(capsys, command.main, "finish", tid, "作業場所の用意", "--output", str(out_file), "--reason", "手で行った")
+    code, out = _main(capsys, finishing.main, "finish", tid, "作業場所の用意", "--output", str(out_file), "--reason", "手で行った")
     assert code == 0, out
     v = run.read(st, tid)
     assert v.rows["作業場所の用意"].state == "finished"
@@ -961,7 +962,7 @@ def test_a_retry_clears_the_values_of_the_last_try_and_prepares_the_step_it_runs
         c.write_text("{}", encoding="utf-8")
     prepared = []
     recording = run.Env(**{**vars(env.env), "prepare": lambda r, work_dir, cwd: prepared.append((r.name, work_dir))})
-    _main(capsys, command.main, "retry", tid, "設計", "--reason", "設定を直した")
+    _main(capsys, finishing.main, "retry", tid, "設計", "--reason", "設定を直した")
     run.advance(st, tid, repo, recording)
     assert [d for d in dirs if (d / invoke.VALUES_FILE).exists()] == [] and [c for c in copies if c.exists()] == []
     assert prepared == [("design-merge", dirs[2])]
