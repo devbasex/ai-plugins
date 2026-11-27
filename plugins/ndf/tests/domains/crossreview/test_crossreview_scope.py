@@ -51,6 +51,13 @@ def test_pr_4638_r7_1_setext_headings_are_sections_and_parents() -> None:
     assert scope_decide._changed_sections("d.md", before, after) == {"d.md#本番", "d.md#検証", "d.md#実行手順"}
 
 
+def test_pr_4638_r1_9_headings_follow_commonmark() -> None:
+    """PR 4638 の r1-9: インデントしたコードの直後の `---` は見出しでなく、囲みの中の別種の囲みでコードブロックを閉じない。
+    引用とリストの中の `#` も見出しでない。"""
+    text = "# 題\n\n    コード\n---\n\n````\n```\n# 例\n```\n````\n## B\n> # 引用\n- # 項目\n"
+    assert scope_decide.sections_of("d.md", text) == ["d.md#題", "d.md#B"]
+
+
 def test_issue_3181_design_pr_keeps_the_full_diff_until_every_section_had_a_detailed_review() -> None:
     """#3181: 設計の PR は、詳細レビューを通らないセクションが残る間は 2 ラウンド目以降も全差分を見る。"""
     got = scope_decide.review_scope(True, 2, "abc1234", [A, B], {A})

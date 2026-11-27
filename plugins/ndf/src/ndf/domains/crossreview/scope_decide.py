@@ -11,6 +11,8 @@ import hashlib
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
+from markdown_it import MarkdownIt
+
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import store
 from ndf.domains.records import mvv_decide
@@ -45,8 +47,8 @@ UNKNOWN_MVV = ""
 _NO_MVV = mvv_decide.identity_of(mvv_decide.State.ABSENT)
 # 承認済みの MVV の、MVV を見分ける値の始まり
 _APPROVED = f"{mvv_decide.State.APPROVED}:"
-# Markdown のコードブロックの囲み
-_FENCES = ("```", "~~~")
+# Markdown の解析（`adapters/markdown.py` と同じ CommonMark。判断のモジュールは adapters を読めないので markdown-it-py を直接使う）
+_MARKDOWN = MarkdownIt("commonmark")
 
 
 class Scope(NamedTuple):
@@ -57,73 +59,38 @@ class Scope(NamedTuple):
     unreviewed: tuple[str, ...]
 
 
-def _atx(line: str) -> Optional[tuple[int, str]]:
-    """行頭の `#` の見出しなら（見出しの深さ, 見出し）。"""
-    title = line.lstrip("#").strip()
-    return (len(line) - len(line.lstrip("#")), title) if line.startswith("#") and title else None
+def _split(text: str) -> list[str]:
+    """markdown-it と同じ数え方の行（改行は `\\r\\n`・`\\r`・`\\n`。末尾の改行の後は行にしない）。"""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    return lines[:-1] if lines and not lines[-1] else lines
 
 
-def _underline(line: str) -> Optional[int]:
-    """Setext 見出しの下線（`=` だけなら 1、`-` だけなら 2）。下線でなければ None。"""
-    mark = line.strip()
-    if len(line) - len(line.lstrip(" ")) > 3 or not mark:
-        return None
-    return 1 if set(mark) == {"="} else 2 if set(mark) == {"-"} else None
-
-
-def _paragraph(line: str) -> bool:
-    """Setext 見出しの本文になれる行か（空行・`#` の見出し・リストの項目・引用は段落の行として数えない）。"""
-    body = line.strip()
-    return bool(body) and _atx(line) is None and not body.startswith((">", "- ", "* ", "+ ")) and _underline(line) is None
+def _front_matter_end(lines: Sequence[str]) -> int:
+    """先頭の YAML front matter の後の行の番号（front matter が無ければ 0）。"""
+    if not lines or lines[0].strip() != "---":
+        return 0
+    close = next((i for i in range(1, len(lines)) if lines[i].strip() in ("---", "...")), None)
+    return close + 1 if close is not None else 0
 
 
 def _lines(text: str) -> Iterator[tuple[str, Optional[tuple[int, str]]]]:
-    """本文の各行と、その行が見出しなら（見出しの深さ, 見出し）。行頭の `#` の見出しと、次の行に `=` か `-` だけの下線を持つ
-    Setext 見出しを認識する（PR 4638 の r7-1）。コードブロックの中と、先頭の YAML front matter の中は見出しでない。レビューの
-    対象のセクション（`sections_of`）と、起点どうしの本文の比較（`_bodies`）は、この判定だけでセクションを分ける（PR 4638 の r6-3）。"""
-    lines = text.splitlines()
-    plain = _heading_candidates(lines)
-    i = 0
-    while i < len(lines):
-        if not plain[i]:
-            yield lines[i], None
-            i += 1
-            continue
-        atx = _atx(lines[i])
-        if atx is not None or not _paragraph(lines[i]):
-            yield lines[i], atx
-            i += 1
-            continue
-        # 段落の行を集め、直後が下線なら段落全体を 1 つの見出しにする
-        end = i
-        while end + 1 < len(lines) and plain[end + 1] and _paragraph(lines[end + 1]):
-            end += 1
-        level = _underline(lines[end + 1]) if end + 1 < len(lines) and plain[end + 1] else None
-        if level is None:
-            for j in range(i, end + 1):
-                yield lines[j], None
-            i = end + 1
-            continue
-        yield lines[i], (level, " ".join(lines[j].strip() for j in range(i, end + 1)))
-        for j in range(i + 1, end + 2):
-            yield lines[j], None
-        i = end + 2
-
-
-def _heading_candidates(lines: Sequence[str]) -> list[bool]:
-    """各行が見出しになりうるか（コードブロックの中と、先頭の YAML front matter の中は偽）。"""
-    plain = [False] * len(lines)
-    start = 0
-    if lines and lines[0].strip() == "---":
-        close = next((i for i in range(1, len(lines)) if lines[i].strip() in ("---", "...")), None)
-        start = close + 1 if close is not None else 0
-    fenced = False
-    for i in range(start, len(lines)):
-        if lines[i].lstrip().startswith(_FENCES):
-            fenced = not fenced
-        elif not fenced:
-            plain[i] = True
-    return plain
+    """本文の各行と、その行が見出しの始まりなら（見出しの深さ, 見出し）。見出しと行の位置は markdown-it-py（`adapters/markdown.py`
+    と同じ CommonMark の解析）で決め、ATX と Setext の見出しを、文書の最上位にあるものだけ数える（PR 4638 の r1-9）。コードブロック
+    （囲み・インデント）・引用・リストの中と、先頭の YAML front matter の中は見出しでない。レビューの対象のセクション
+    （`sections_of`）と、起点どうしの本文の比較（`_bodies`）は、この判定だけでセクションを分ける（PR 4638 の r6-3）。"""
+    lines = _split(text)
+    skip = _front_matter_end(lines)
+    # front matter は空行にして解析し、行の位置を変えない（CommonMark は front matter を `---` の区切り線と見出しに読む）
+    tokens = _MARKDOWN.parse("\n".join([""] * skip + list(lines[skip:])))
+    starts: dict[int, tuple[int, str]] = {}
+    for i, token in enumerate(tokens):
+        if token.type == "heading_open" and token.level == 0 and token.map is not None:
+            title = " ".join(tokens[i + 1].content.split())
+            if title:
+                starts[token.map[0]] = (int(token.tag[1:]), title)
+    for i, line in enumerate(lines):
+        yield line, starts.get(i)
 
 
 def sections_of(path: str, text: str) -> list[str]:
