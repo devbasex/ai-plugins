@@ -618,7 +618,7 @@ def repo_key(root: Path) -> str:
         common = gitdir / "commondir"
         if common.is_file():
             gitdir = gitdir / common.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない `.git` は git の外と同じく `root` の実体をキーにする
+    except (OSError, UnicodeDecodeError):  # 読めない `.git` は git の外と同じく `root` の実体をキーにする
         return os.path.realpath(root)
     return os.path.realpath(gitdir)
 
@@ -793,11 +793,11 @@ def _halted(r: Mapping[str, Any], unit: str, where: Where) -> bool:
     return r["kind"] == "halted" and r["unit"] == unit and where.at(r)
 
 
-def _halt(led: Ledger, u_now: datetime, start: datetime, unit: str, where: Where, assign_id: Optional[str], reason: Halt) -> None:
-    """停止の行を足す。期間の中に、同じリポジトリ・工程・ランタイムの同じ単位の同じ理由の行があれば足さない。"""
-    if any(_halted(r, unit, where) and r["reason"] == reason and _row_time(r) >= start for r in led.rows):
+def _halt(led: Ledger, u: _Unit, assign_id: Optional[str], reason: Halt) -> None:
+    """単位 `u` に停止の行を足す。期間の中に、同じリポジトリ・工程・ランタイムの同じ単位の同じ理由の行があれば足さない。"""
+    if any(_halted(r, u.unit, u.where) and r["reason"] == reason and _row_time(r) >= u.start for r in led.rows):
         return
-    row = {"kind": "halted", "at": _time_text(u_now), "unit": unit, **where.fields(), "assign_id": assign_id, "reason": str(reason)}
+    row = {"kind": "halted", "at": _time_text(u.now), "unit": u.unit, **u.where.fields(), "assign_id": assign_id, "reason": str(reason)}
     led.append(row)
 
 
@@ -833,14 +833,14 @@ def _decide_assignment(led: Ledger, u: _Unit, choice: Choice) -> Choice:
     last = own[-1] if own else None
     if not u.experiment:
         if last is not None:
-            _halt(led, u.now, u.start, u.unit, u.where, last["assign_id"], Halt.FIXED if u.enabled else Halt.DISABLED)
+            _halt(led, u, last["assign_id"], Halt.FIXED if u.enabled else Halt.DISABLED)
         return choice
     if _left_experiment(led.rows, u, own):
         return choice
     if last is not None:
         if last["key"] == u.where.key:
             return _with_assignment(choice, last)
-        _halt(led, u.now, u.start, u.unit, u.where, last["assign_id"], Halt.CHANGED)
+        _halt(led, u, last["assign_id"], Halt.CHANGED)
         return choice
     return _with_assignment(choice, led.append(_assignment(led.rows, u)))
 
@@ -863,11 +863,11 @@ def _halt_manual(u: _Unit, charge_to: Optional[str]) -> None:
         with ledger(u.since, u.store) as led:
             if u.unit is not None:
                 own = _own(led.rows, u)
-                _halt(led, u.now, u.start, u.unit, u.where, own[-1]["assign_id"] if own else None, Halt.MANUAL)
+                _halt(led, u, own[-1]["assign_id"] if own else None, Halt.MANUAL)
             charged = _assigns(led.rows).get(charge_to) if charge_to is not None else None
             if charged is not None:
                 at = Where(charged["repo"], charged["stage"], charged["runtime"], charged["key"])
-                _halt(led, u.now, u.start, charged["unit"], at, charged["assign_id"], Halt.MANUAL)
+                _halt(led, replace(u, unit=charged["unit"], where=at), charged["assign_id"], Halt.MANUAL)
     except _STORE_ERRORS as exc:
         log.warning("実験の記録へ手動の指定の停止を書けない（単位 %s）: %s", u.unit, exc)
 
