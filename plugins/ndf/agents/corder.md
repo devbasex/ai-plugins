@@ -49,9 +49,11 @@ description: |
 TMP=$(mktemp -d)
 FINAL="$TMP/codex-result.md"
 
-# 2. 対象のディレクトリで、上限（レビューは 1200 + 120 秒）で包んで起動する。安全装置の引数は ndf delegate-run が '{args}' に入れる
+# 2. 対象のディレクトリへ移り、上限（レビューは 1200 + 120 秒）で包んで起動する。
+#    安全装置の引数と作業ディレクトリの指定（-C <今のディレクトリ>）は ndf delegate-run が '{args}' に入れるので、自分では書かない
+cd <対象のディレクトリ>
 timeout 1320 ndf delegate-run --runtime codex -- codex exec '{args}' --config model_reasoning_effort=medium \
-  -C "$PWD" < "$TMP/prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
+  < "$TMP/prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
 ```
 
 - Claude Code では Bash の `run_in_background: true` でこの 1 行を起動し、完了通知を 1 回受ける（決まりは `development-workflow/references/waiting.md`）
