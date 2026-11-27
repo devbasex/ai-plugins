@@ -19,28 +19,23 @@ RECORD_VERSION = 1
 # 記録のディレクトリを git から外す `.gitignore` の中身
 IGNORE_TEXT = "# NDF の解析が書く記録。コミットしない\n*\n"
 SCHEMA = contracts.schema_path("internal/project-analysis")
-# 項目の中の旧い形のキー（`<項目>[].<キー>` は配列の各行の中、`<項目>.<キー>` は object の中）
-_OLD_IN_ITEMS = ("languages[].files", "ci.workflows", "ci.provider")
+# 項目の中の旧い形のキー（`<項目>[]` は配列の各行の中、`<項目>` は object の中）
+_OLD_IN_ITEMS: dict[str, tuple[str, ...]] = {"languages[]": ("files",), "ci": ("workflows", "provider")}
 # 項目ごと消す旧い形のキー
 OLD_ITEMS = ("test_duration",)
-
-
-def _old_keys(head: str) -> tuple[str, ...]:
-    """`_OLD_IN_ITEMS` のうち、点より前が `head`（`<項目>` か `<項目>[]`）のキーの名前。"""
-    return tuple(path.partition(".")[2] for path in _OLD_IN_ITEMS if path.partition(".")[0] == head)
 
 
 def strip_item(key: str, value: Any) -> tuple[Any, list[str]]:
     """設定の 1 項目の値から旧い形のキーを取り除いた値と、取り除いたキーの名前。入力を書き換えない。"""
     if isinstance(value, list):
-        old = _old_keys(f"{key}[]")
+        old = _OLD_IN_ITEMS.get(f"{key}[]", ())
         found = [k for k in old if any(isinstance(row, dict) and k in row for row in value)]
         if not found:
             return value, []
         rows = [{k: v for k, v in row.items() if k not in old} if isinstance(row, dict) else row for row in value]
         return rows, [f"{key}[].{k}" for k in found]
     if isinstance(value, dict):
-        found = [k for k in value if k in _old_keys(key)]
+        found = [k for k in value if k in _OLD_IN_ITEMS.get(key, ())]
         if found:
             return {k: v for k, v in value.items() if k not in found}, [f"{key}.{k}" for k in found]
     return value, []
