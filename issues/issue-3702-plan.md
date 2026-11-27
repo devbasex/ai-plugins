@@ -260,6 +260,7 @@ Task 15 が使うので、番号の順でなくここに置く。
   - テンプレート `design-pr-review`・`docs-ci`・`design-merge-approved`
   - `design-pr-review` の既定のレビューの起動を `--purpose design` にし、組んだ起動の引数と詳細レビューの対象をテストで確かめる
   - `design-pr-review` は途中のステップから打ち直さず、終わった回があれば新しい回にする
+  - `design-pr-review` の結果に `reviewed` が無いか null なら、理由を書き分けてステップを止める
   - `invoke` のレビューした値の差し込み・指摘のファイル・承認の値・`PRODUCTION_GATE`
   - 工程の定義はまだ呼ばない
 - **満たす受け入れ条件:** 無し（条件 1 の部品。条件 1 は Task 18 の単位で確かめる）
