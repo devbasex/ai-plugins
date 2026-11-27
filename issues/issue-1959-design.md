@@ -741,7 +741,7 @@ CI やコンテナのように状態の保存先が作り直される環境で�
 - 採らなかった案: 一覧を固定して足す手段を持たない（`LSP` などを使う利用先が工程の中で使えなくなる）
 - 採らなかった案: Claude Code の Tool の名前の一覧を NDF が持って突き合わせる（バージョンが上がるたびに食い違い、新しい Tool を足せなくなる）
 - **代償**: 名前の打ち間違いは、形が合えば検証を通り、CLI が黙って捨てる
-- **実際の起動に載る一覧**: `--tools` には 16 個を渡すが、メインの Tool の一覧に載るのは `WebFetch` を除く 15 個（`Read`・`Edit`・`Write`・`Bash`・`Grep`・`Glob`・`Skill`・`Agent`・`Monitor`・`SendMessage`・`ToolSearch`・`WebSearch`・`TaskStop`・`NotebookEdit`・`ListAgents`）である。`--tools` に `Agent` と `WebFetch` を一緒に渡すと、Claude Code は `WebFetch` をメインの一覧から外してサブエージェントの側に置く（2.1.268・2.1.332 で同じ）。直す前の起動でもメインに `WebFetch` は無いので、使える範囲は変わらない。`--tools` から `WebFetch` を外すとサブエージェントの側からも消えるので、渡す 16 個は変えない
+- **実際の起動に載る一覧**: `--tools` には 16 個を渡すが、メインの Tool の一覧に載るのは `WebFetch` を除く 15 個（`Read`・`Edit`・`Write`・`Bash`・`Grep`・`Glob`・`Skill`・`Agent`・`Monitor`・`SendMessage`・`ToolSearch`・`WebSearch`・`TaskStop`・`NotebookEdit`・`ListAgents`。`system/init` の一覧では `Agent` は `Task` の名前で載る）である。`--tools` に `Agent` と `WebFetch` を一緒に渡すと、Claude Code は `WebFetch` をメインの一覧から外してサブエージェントの側に置く（2.1.268・2.1.332 で同じ）。直す前の起動でもメインに `WebFetch` は無いので、使える範囲は変わらない。`--tools` から `WebFetch` を外すとサブエージェントの側からも消えるので、渡す 16 個は変えない
 - 根拠: Value 4（MVV バージョン 11）。どの利用先の工程でも、今できることを保つ（Value 4「どのプロジェクトでもそのまま使える」）
 
 ### 決定 6: 費用を前後で比べられるよう、起動の呼び出し元が使用量ログへ 1 行書く
