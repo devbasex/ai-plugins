@@ -173,12 +173,15 @@ def test_kiro_takes_the_safety_arguments_after_its_non_interactive_chat(repo: Pa
     assert execs[0][1] == ["kiro-cli", "chat", "--no-interactive", "--trust-all-tools", "--model", "m"]
 
 
-def test_a_model_given_in_the_command_wins_over_the_model_variable(repo: Path, monkeypatch, execs) -> None:
-    """コマンドが明示したモデルは起動の引数として選択に渡り、下位の環境変数を確かめない（改行を含んでも止まらない）。モデルの引数は足さない。"""
+def test_values_given_in_the_command_win_over_the_variables(repo: Path, monkeypatch, execs) -> None:
+    """コマンドが明示したモデルと effort は起動の引数として選択に渡り、下位の環境変数を確かめない（壊れた値でも止まらない）。
+    明示した側の引数は足さない。"""
     monkeypatch.setattr(agents, "user_namespaces", lambda: True)
     monkeypatch.setenv(identity.env_name("launch-codex-model"), "a\nb")
-    drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", "--model", "gpt-x"])
-    assert execs[0][1] == ["codex", "exec", *EFFORT, "-s", "workspace-write", "-C", str(repo), "--model", "gpt-x"]
+    monkeypatch.setenv(identity.env_name("launch-codex-effort"), "turbo")
+    given = ["--model", "gpt-x", "-c", "model_reasoning_effort=low"]
+    drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", *given])
+    assert execs[0][1] == ["codex", "exec", "-s", "workspace-write", "-C", str(repo), *given]
 
 
 @pytest.mark.parametrize(("can", "reads"), [(True, 1), (False, 2)])

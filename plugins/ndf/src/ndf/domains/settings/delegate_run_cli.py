@@ -5,8 +5,8 @@
 CLI のコマンドは、そのランタイムの実行ファイルと決まった語（ランタイムの表の `delegate_prefix`。codex は `exec`）で始め、
 そのすぐ後に NDF の引数を入れる位置 `{args}` を単独の引数として 1 つだけ持つ。`{args}` には、codex なら選んだモデルと
 effort の引数（`model_choice.launch_choice` の層 `seat`・作業 `delegate`。#2944）、安全装置の引数（`launch_settings.safety_args`）、
-作業ディレクトリを今のディレクトリにする引数（codex は `-C <今のディレクトリ>`）をこの順に入れる。コマンドが `--model` でモデルを
-明示すれば、その値を起動の引数として値の選択に渡し（下位のモデルの環境変数を読まない）、選んだモデルの引数は足さない。kiro と agy は値を選ばない
+作業ディレクトリを今のディレクトリにする引数（codex は `-C <今のディレクトリ>`）をこの順に入れる。コマンドが `--model` でモデルを、
+`-c model_reasoning_effort=<値>` で effort を明示すれば、その値を起動の引数として値の選択に渡し（下位の環境変数を読まない）、その側の引数は足さない。kiro と agy は値を選ばない
 （モデルは手順書が `--model` で書く）。codex は起動の設定（`.ndf/launch.json`）を 1 回だけ読み、値の選択と安全装置の判定に渡す。外す引数なら起動の直前に承認の対象を読み直してから、子の環境に
 `NDF_AI_CHILD=1` を足してこのプロセスを CLI に置き換える（`exec`）。標準入力・標準出力・終了コードは CLI のものになる。
 
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from collections.abc import Sequence
 from dataclasses import replace
@@ -38,8 +39,6 @@ PLACE = "{args}"
 SAFETY_COLUMNS = (*ls.SANDBOXED.values(), ls.UNSANDBOXED, "safety_aliases")
 # 作業ディレクトリを指す引数の名前の列（先頭の名前で NDF が今のディレクトリを入れる）
 WORKDIR_COLUMN = "workdir_options"
-# モデルを指す引数の名前の列（コマンドが明示したモデルを、値の選択に起動の引数として渡す）
-MODEL_COLUMN = "model_options"
 # 実行ファイルのすぐ後に置く語の列（そのすぐ後が `{args}` の位置）
 PREFIX_COLUMN = "delegate_prefix"
 # 引数の終わり（これより後の語は CLI のオプションとして読まれない）
@@ -114,26 +113,41 @@ def _workdir_args(runtime: str, cwd: Path) -> list[str]:
     return [row[WORKDIR_COLUMN][0], str(cwd)] if WORKDIR_COLUMN in row else []
 
 
-def _given_model(runtime: str, command: Sequence[str]) -> Optional[str]:
-    """コマンドが明示したモデル（`--model M`・`--model=M`・`-mM`。複数あれば CLI と同じく最後）。無ければ None。"""
+def _given_value(runtime: str, command: Sequence[str], key: str) -> Optional[str]:
+    """コマンドが明示した値（`key` は `model` か `effort`）。無ければ None。
+
+    引数の名前はランタイムの表の `<key>_options`、値の形は `choice_args` の形（codex の effort は `model_reasoning_effort=<値>`）。
+    `--name 値`・`--name=値`・`-n値` を読み、形に合わない値（`-c` の別の設定など）は数えない。複数あれば CLI と同じく最後。"""
     row = facts.row(RUNTIMES, runtime)
-    names = set(row[MODEL_COLUMN]) if MODEL_COLUMN in row else set()
-    words = _options(command)
+    column = f"{key}_options"
+    names = set(row[column]) if column in row else set()
+    words = row[model_choice.ARGS_COLUMN] if model_choice.ARGS_COLUMN in row else []
+    forms = [f for f in words[1::2] if f"{{{key}}}" in f]
+    if not names or not forms:
+        return None
+    shape = re.compile(re.escape(forms[0]).replace(re.escape(f"{{{key}}}"), "(.+)"))
+    options = _options(command)
     found = None
-    for i, w in enumerate(words):
+    for i, w in enumerate(options):
         if w in names:
-            found = words[i + 1] if i + 1 < len(words) else found
+            value = options[i + 1] if i + 1 < len(options) else None
         elif _names(w, names):
-            found = w.partition("=")[2] if "=" in w else w[2:]
+            value = w.partition("=")[2] if w.startswith("--") else w[2:]
+        else:
+            continue
+        hit = shape.fullmatch(value) if value is not None else None
+        found = hit.group(1) if hit is not None else found
     return found
 
 
 def _choice_args(runtime: str, command: Sequence[str], cwd: Path, settings: ls.Settings) -> list[str]:
-    """選んだモデルと effort の引数。コマンドが明示したモデルは起動の引数として渡し（設計書の「値の優先」の順 1）、引数は足さない
-    （コマンドがすでに持つ）。"""
-    model = _given_model(runtime, command)
-    choice = model_choice.launch_choice(*CHOICE_LAUNCH, runtime, cwd=cwd, settings=settings, argument=(model, None))
-    return (replace(choice, model=None) if model is not None else choice).cli_args()
+    """選んだモデルと effort の引数。コマンドが明示した値は起動の引数として選択に渡し（設計書の「値の優先」の順 1。下位の環境変数を
+    確かめない）、その側の引数は足さない（コマンドがすでに持つ）。"""
+    model, effort = _given_value(runtime, command, "model"), _given_value(runtime, command, "effort")
+    choice = model_choice.launch_choice(*CHOICE_LAUNCH, runtime, cwd=cwd, settings=settings, argument=(model, effort))
+    return replace(
+        choice, model=None if model is not None else choice.model, effort=None if effort is not None else choice.effort
+    ).cli_args()
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -59,11 +59,13 @@ ndf delegate-run --runtime codex -- codex exec '{args}' \
 | `--json` | JSON Lines でイベントを出力。`event.type=assistant_message` を grep すれば確実に本文を取れる |
 | `codex resume` | 長時間ジョブで親エージェントが再起動した場合にセッションを再開する |
 
-通常はモデルと effort を省略し、リポジトリの起動の設定に従わせる。明示が必要な場合だけ、設定より優先する次の方法を使う。モデルと effort は別々に、上の行ほど優先される。
+通常はモデルと effort を省略し、リポジトリの起動の設定に従わせる。明示が必要な場合だけ、設定より優先する次の方法を使う。
+
+`ndf delegate-run` は、モデルと effort を別々に、次の表の上の行から最初に指定があるもので選ぶ。上の行で指定した側は、下の行の値を確かめない。たとえば effort をコマンドに書けば、環境変数 `NDF_LAUNCH_CODEX_EFFORT` に無効な値が残っていても起動は止まらない。
 
 | 順 | モデルの指定 | effort の指定 |
 |---:|---|---|
-| 1 | コマンドの `'{args}'` より後に `--model M`（`-m M`）を書く。`ndf delegate-run` はこの値で選び、自分ではモデルを足さない | コマンドの `'{args}'` より後に `--config model_reasoning_effort=<値>` を書く（後に置いた値が `'{args}'` の値より優先される。codex-cli 0.172.0 で実測） |
+| 1 | コマンドの `'{args}'` より後に `--model M`（`-m M`）を書く。`ndf delegate-run` はこの値で選び、自分ではモデルを足さない | コマンドの `'{args}'` より後に `--config model_reasoning_effort=<値>`（`-c` でもよい）を書く。`ndf delegate-run` はこの値で選び、自分では effort を足さない。値が同梱の表 `launch-experiments.json` の codex の順位に無ければ、起動する前に止まる |
 | 2 | 環境変数 `NDF_LAUNCH_CODEX_MODEL`（その起動の間だけの上書き） | 環境変数 `NDF_LAUNCH_CODEX_EFFORT`（同梱の表 `launch-experiments.json` の codex の順位にある値だけ。ほかの値では起動しない） |
 | 3 | 起動の設定（`.ndf/launch.json` の `experiments`、無ければ同梱の表） | 同じ |
 
@@ -104,7 +106,7 @@ Codex は最終 message を返さなくても `apply_patch` でファイルを�
 書き出し後、念のため stdout にも同じ内容を出力してください（冪等で問題ありません）。
 ```
 
-補助策として effort を下げる指定（`--config model_reasoning_effort=<値>`）を `'{args}'` より後に置く（後に置いた値が `'{args}'` の値より優先される。codex-cli 0.172.0 で実測）、`--json` でイベントを採取する、
+補助策として effort を下げる指定（`--config model_reasoning_effort=<値>`）を `'{args}'` より後に置く（上の「起動コマンド」の優先順位の表の順 1）、`--json` でイベントを採取する、
 プロンプト末尾に「tool 呼び出しのみで終了しないこと」を明記する、の 3 つを併用する。
 
 回収は **ファイル → stdout → stderr** の順で行う。
