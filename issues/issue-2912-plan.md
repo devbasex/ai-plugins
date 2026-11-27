@@ -13,7 +13,7 @@
 | ファイル | 変える中身 |
 | --- | --- |
 | `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` | `patch_material` に行数の引数 `limit`。指示文 `SYSTEM` に起票者の推定の扱いの箇条 |
-| `experimental/ndf/mvv_replay.py`（新設） | サブコマンド `material`・`judge`・`bodies`・`tally`・`gate`・`guard-check`（`main`・`prompt_at`・`material_of`・`read_pairs`・`review_paths`・`judge_once`・`gate_once`・`GuardedApi`・`guarded_hub`・`guard_check`） |
+| `experimental/ndf/mvv_replay.py`（新設） | サブコマンド `material`・`judge`・`bodies`・`tally`・`gate`・`guard-check`（`main`・`prompt_at`・`material_of`・`read_pairs`・`review_paths`・`latest_review`・`judge_once`・`gate_once`・`GuardedApi`・`guarded_hub`・`guard_check`） |
 | `experimental/ndf/mvv_replay_cases/`（新設） | 推定の扱いの有無だけが違う作り物の材料の対（要求仕様と設計書を 1 組にした材料を 2 つ） |
 | `plugins/ndf/src/ndf/adapters/markdown.py` | `tables`（`Table`・`TableRow`） |
 | `plugins/ndf/src/ndf/domains/records/design_check_decide.py`（新設） | `decision_rows`・`redline_rows`・`findings`・`anchors_lost`・`added_lines`・`heading_touched`・`delegates`・`named`・`numbers_in`・`blank` と定数 |
@@ -56,7 +56,7 @@
 ### Task 3: 判定の比較の実験版と、対照の当たる操作を決める
 
 - **対象ファイル:** `experimental/ndf/mvv_replay.py`・`experimental/ndf/mvv_replay_cases/`・`issues/issue-2912-design.md`（決定 6 の対照の表の「当たる操作」の欄）
-- **変更内容:** サブコマンド `material` と `judge` を作る（`prompt_at`・`material_of`・`judge_once`）。材料は PR ごとに 1 回組んで保存し、比べる判定には同じファイルを渡す。`material` は、材料を組んだ時点の PR 本文とその SHA-256（`Material.pr_body`・`pr_body_sha256`）と、変えたファイルのパス（`Material.changed`）も保存する。`judge` は PR ごとの判定結果をファイルへ保存し、後の `bodies` と `tally` が判定を呼び直さずに使えるようにする。この Task の `material` は、表の集計（`Material.tabled` を埋める処理）を持たず、`tabled` を None（未確認）のまま保存する。空のタプルは「番号なし」の意味なので使わない。表の集計は、後の単位で新設する `design_check_decide.redline_rows` を使うので Task 14 で足す。順 1・2 は表の集計を使わないので、この Task だけで打てる。推定の対を 1 つ（扱いありと扱いなしの 2 つの材料）置く。10 系の判定の記録の boundary から、対照 20 件の番号ごとに当たる操作を決めて設計書の表へ書く。2524 は元の差分から操作と番号を決め、当たらなければ根拠を #3017 に記録して対照から外す
+- **変更内容:** サブコマンド `material` と `judge` を作る（`prompt_at`・`material_of`・`judge_once`）。材料は PR ごとに 1 回組んで保存し、比べる判定には同じファイルを渡す。`material` は、材料を組んだ時点の PR 本文とその SHA-256（`Material.pr_body`・`pr_body_sha256`）と、変えたファイルのパス（`Material.changed`）も保存する。`judge` は PR ごとの判定結果と、起動ごとの実行の識別子（UUID）をファイルへ保存し、後の `bodies` と `tally` が判定を呼び直さずに使えるようにする。この Task の `material` は、表の集計（`Material.tabled` を埋める処理）を持たず、`tabled` を None（未確認）のまま保存する。空のタプルは「番号なし」の意味なので使わない。表の集計は、後の単位で新設する `design_check_decide.redline_rows` を使うので Task 14 で足す。順 1・2 は表の集計を使わないので、この Task だけで打てる。推定の対を 1 つ（扱いありと扱いなしの 2 つの材料）置く。10 系の判定の記録の boundary から、対照 20 件の番号ごとに当たる操作を決めて設計書の表へ書く。2524 は元の差分から操作と番号を決め、当たらなければ根拠を #3017 に記録して対照から外す
 - **満たす受け入れ条件:** 5・6・7 の確かめの手段
 - **進め方:** 実験版は単体テストを持たない（設計書の決定 5）。手元で 1 件を判定して、結果のファイルにモデル ID・Claude Code のバージョン・指示文のコミット・材料のベースと head の SHA・材料のハッシュが載ることを確かめる
 
@@ -148,10 +148,11 @@
 - **変更内容:** 詳細設計書の「判定の比較（実験版）」の `review_paths`・`bodies`・`tally` を作る
   - `review_paths`: `issues/` の一覧の名前に `issues/` を付けて照合し、PR ごとに `ReviewPaths`（読む組と、一覧を読めたか）を返す
   - `bodies`: 保存した判定結果（`--judged`）を今回の材料と照らしてから、本文の確認に当てる PR を選ぶ。前の回までの本文の確認の結果（`--reviewed`）で確認済みの PR は、一覧を読む前に外す。PR 本文とファイルの本文を確認担当が読むファイルへ書き、読めていない本文がある PR に印を付ける
-  - `tally`: 保存した判定結果・材料・本文の確認の結果（`--reviewed`）だけから、判定上の値・確認後の値・経路全体の値を出す。判定結果と本文の確認の記録は、今回の材料と一致したときだけ採る。`--judged` を回の数だけ受け、全回の結果から最終の合否を 1 つ出す。変更後の側の「含む」で不合格とし、変更後の側に未確認の PR が残れば合格を保留し、「#3017 へ記録する件」の一覧を書く
+  - `latest_review`: 追記した本文の確認の記録から、材料と一致する最新の記録を PR ごとに選ぶ。`bodies` と `tally` の両方が使う
+  - `tally`: 保存した判定結果・材料・本文の確認の結果（`--reviewed`）だけから、判定上の値・確認後の値・経路全体の値を出す。判定結果と本文の確認の記録は、今回の材料と一致したときだけ採る。`judge` が起動ごとに書く実行の識別子を使い、`--judged` を回の数だけ受け、同じ実行の識別子が重なれば止め、全回の結果から最終の合否を 1 つ出す。保留には「再測定が要る」「未確認が残る」「再測定でも差が残らない」のどれかの理由を付け、再測定は「再測定が要る」のときだけ始める。変更後の側の「含む」で不合格とし、変更後の側に未確認の PR が残れば合格を保留し、「#3017 へ記録する件」の一覧を書く
 - **満たす受け入れ条件:** 7（順 4 の確かめの手段）
 - **依存:** Task 14（`read_pairs` と `Material.tabled`）
-- **進め方:** 実験版は単体テストを持たない（設計書の決定 5）。手元で、Task 14 で保存した材料と、その材料を Task 3 の `judge` で判定した結果を使って `bodies` を打ち、同じ課題の要求仕様・設計書・詳細設計書が PR で変えていなくても出力に載ることを確かめる。続けて、作り物の本文の確認の結果で `tally` を 3 回打つ。1 回目は変更後の側で「含む」の PR を含めて不合格になること、2 回目は head の SHA を変えた記録が採られずに未確認へ数えられること、3 回目は `c93e690ed` の側だけの「含む」が合否を変えずに「#3017 へ記録する件」に載ることを確かめる。さらに、変更後の側に未確認の PR を 1 件残した結果で合格が保留になること、3 回分の `--judged` で差が 1・0・3 件のとき保留になること、`--reviewed` を渡した `bodies` が確認済みの PR の一覧を読まないことを確かめる。`tally` は LLM も GitHub も呼ばない
+- **進め方:** 実験版は単体テストを持たない（設計書の決定 5）。手元で、Task 14 で保存した材料と、その材料を Task 3 の `judge` で判定した結果を使って `bodies` を打ち、同じ課題の要求仕様・設計書・詳細設計書が PR で変えていなくても出力に載ることを確かめる。続けて、作り物の本文の確認の結果で `tally` を 3 回打つ。1 回目は変更後の側で「含む」の PR を含めて不合格になること、2 回目は head の SHA を変えた記録が採られずに未確認へ数えられること、3 回目は `c93e690ed` の側だけの「含む」が合否を変えずに「#3017 へ記録する件」に載ることを確かめる。さらに、変更後の側に未確認の PR を 1 件残した結果で合格が保留になること、3 回分の `--judged` で差が 1・0・3 件のとき保留になること、同じ判定結果を 3 回渡すと止まること、同じ PR に「判断できない」の後に「含む」を追記すると「含む」が採られること、`--reviewed` を渡した `bodies` が確認済みの PR の一覧を読まないことを確かめる。`tally` は LLM も GitHub も呼ばない
 
 決定 6 の順 3・4 は、リリースの後にリリース後テストの担当が Task 3・12・14・15 の実験版で打つ。実装のタスクには含めない。順 4 では、`material`・`judge`・`bodies`・`tally` の順に打ち、`bodies` の出力を確認担当が読んで本文の確認の結果を書く。
 
