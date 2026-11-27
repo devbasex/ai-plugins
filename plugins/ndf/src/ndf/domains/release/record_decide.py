@@ -371,11 +371,15 @@ def pair_verdict(verifications: Sequence[Mapping[str, Any]], environment: str | 
     最後に `retest_reason` を持つ行より前の行を捨て、残りを投稿の順によらずに合わせる。不合格が 1 つでもあれば不合格、
     無ければ合格が 1 つでもあれば合格（保留は合格を打ち消さない）、保留だけなら保留。"""
     rows = _pair_rows(verifications, environment, issue)
-    retested = [i for i, r in enumerate(rows) if r.get("retest_reason")]
-    results = {r.get("result") for r in rows[retested[-1] if retested else 0 :]}
+    start = max((i for i, r in enumerate(rows) if r.get("retest_reason")), default=0)
+    results = {r.get("result") for r in rows[start:]}
     if not results:
         return None
-    return next(v for v in ("failed", "passed", "not_run") if v in results or v == "not_run")
+    if "failed" in results:
+        return "failed"
+    if "passed" in results:
+        return "passed"
+    return "not_run"
 
 
 def to_test(released: Sequence[str | None], issues: Sequence[int], verifications: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
