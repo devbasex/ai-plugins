@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import ast
 import re
+from bisect import bisect_right
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
+from itertools import groupby
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
@@ -389,50 +391,89 @@ def _changed_rows(hunks: Sequence[Hunk]) -> tuple[list[tuple[int, str]], list[tu
     return added, removed
 
 
-def _gap(steps: Sequence[Hunk], at: Optional[int]) -> Sequence[Optional[int]]:
-    """今の head の `at` 行目の直前で消した行が、前の head で取りうる位置（消した箇所のすぐ後ろの行の番号）。`steps` は
-    前の head からの差分の hunk。前後の、前の head に対応のある行に挟まれた区間で、`at` が None（消したファイル）なら
-    None だけ。"""
-    if at is None:
-        return (None,)
-    low, high = at - 1, at
-    while low and _base_lines(steps, low) is None:
-        low -= 1
-    while (end := _base_lines(steps, high)) is None:
-        high += 1
-    start = _base_lines(steps, low) if low else 0
-    assert start is not None
-    return range(start + 1, end + 1)
+class _Block(NamedTuple):
+    """前の head からの差分の、変えた行が続くひとかたまり。`start`・`end` は今の head の行の番号（`end` はすぐ後ろの残る行）、
+    `base` は前の head の最初の行の番号、`removed` は消した行の本文。"""
+
+    start: int
+    end: int
+    base: int
+    removed: tuple[str, ...]
+
+
+def _blocks(hunks: Sequence[Hunk]) -> list[_Block]:
+    """`hunks` の変えた行のかたまりを、行の順に返す。"""
+    blocks: list[_Block] = []
+    offset = 0
+    for hunk in hunks:
+        head, base = hunk.head, hunk.head + offset
+        for changed_here, group in groupby(hunk.lines, key=lambda x: x.base is None or x.head is None):
+            lines = list(group)
+            end = head + sum(x.head is not None for x in lines)
+            if changed_here:
+                blocks.append(_Block(head, end, base, tuple(x.text for x in lines if x.head is None)))
+            base += sum(x.base is not None for x in lines)
+            head = end
+        offset = base - head
+    return blocks
+
+
+def _locate(blocks: Sequence[_Block], starts: Sequence[int], at: int) -> tuple[int, Optional[_Block]]:
+    """今の head の `at` 行目に当たる前の head の行の番号と、`at` がかたまりの中かすぐ後ろならそのかたまり。かたまりの
+    中の行（足した行）の番号は、かたまりのすぐ後ろの行の番号にする。`starts` は `blocks` の `start`。"""
+    index = bisect_right(starts, at) - 1
+    if index < 0:
+        return at, None
+    block = blocks[index]
+    after = block.base + len(block.removed)
+    return (after, block) if at <= block.end else (at + after - block.end, None)
+
+
+def _removals_unread(
+    removed: Sequence[tuple[int, str]], seen_removed: Sequence[tuple[int, str]], blocks: Sequence[_Block], starts: Sequence[int]
+) -> bool:
+    """今の PR の差分が消した行 `removed` に、読んでおらず今回も消さないものがあるか。消した箇所の前後の残る行に挟まれた
+    区間ごとに、既読の削除と今回の削除を前の head の順に並べ、その並びに同じ順で現れるかを確かめる。"""
+    seen: dict[int, list[str]] = {}
+    for at, text in seen_removed:
+        seen.setdefault(at, []).append(text)
+    gaps: dict[tuple[int, Optional[_Block]], list[str]] = {}
+    for at, text in removed:
+        gaps.setdefault(_locate(blocks, starts, at), []).append(text)
+    for (end, block), texts in gaps.items():
+        known: list[str] = []
+        for number, gone in enumerate(block.removed if block else (), block.base if block else end):
+            known += [*(seen[number] if number in seen else ()), gone]
+        rest = iter([*known, *(seen[end] if end in seen else ())])
+        # `in` は `rest` を一致した所まで進めるので、順序も確かめる
+        if not all(text in rest for text in texts):
+            return True
+    return False
 
 
 def _has_unread_lines(path: str, now: _Delta, seen: _Delta, since: _Delta) -> bool:
     """今の PR の差分の `path` に、今回渡す差分にも既読の差分にも同じ位置で現れない足した行か消した行があるか。位置は今の head の
-    行の番号で、既読の差分とは前の head の行の番号へ直して比べる。消したファイルには残る行が無いので、本文だけを比べる。
-    消した行は、消した箇所の前後で前の head に対応のある行に挟まれた区間（`_gap`）の読んだ削除と、本文と件数で照らす。"""
-    entry = now.entries[path]
-    deleted = entry.status == "D"
+    行の番号で、既読の差分とは前の head の行の番号へ直して比べる（消した行は `_removals_unread`）。消したファイルには残る行が
+    無いので、本文と件数だけを比べる。"""
+    deleted = now.entries[path].status == "D"
     step = since.entries.get(path)
     before = step.old if step is not None else path
     steps = since.hunks[path] if path in since.hunks else ()
+    blocks = _blocks(steps)
+    starts = [block.start for block in blocks]
     added, removed = _changed_rows(now.hunks[path] if path in now.hunks else ())
     since_added, since_removed = _changed_rows(steps)
     seen_added, seen_removed = _changed_rows(seen.hunks[before] if before in seen.hunks else ())
     read = set(seen_added)
     fresh = set(since_added)
     for at, text in added:
-        if (at, text) not in fresh and (_base_lines(steps, at), text) not in read:
+        # 今回足した行でなければ、`_locate` の番号はその行の前の head の番号
+        if (at, text) not in fresh and (_locate(blocks, starts, at)[0], text) not in read:
             return True
-    left = Counter((None if deleted else at, text) for at, text in removed)
-    left -= Counter((None if deleted else at, text) for at, text in since_removed)
-    gone = Counter((None if deleted else at, text) for at, text in seen_removed)
-    for (at, text), count in left.items():
-        for prev in _gap(steps, at):
-            taken = min(count, gone[(prev, text)])
-            gone[(prev, text)] -= taken
-            count -= taken
-        if count:
-            return True
-    return False
+    if not deleted:
+        return _removals_unread(removed, seen_removed, blocks, starts)
+    known = Counter(text for _, text in (*since_removed, *seen_removed))
+    return bool(Counter(text for _, text in removed) - known)
 
 
 def _has_unread(path: str, kinds: frozenset[tuple], now: _Delta, seen: _Delta, since: _Delta) -> bool:

@@ -699,6 +699,16 @@ def test_a_removal_added_by_the_base_next_to_a_read_one_is_new(wt: Path) -> None
     assert _new(wt, changes.Range(base, head), moved) == ("a.txt",)
 
 
+def test_a_removal_the_base_moved_past_a_line_removed_now_is_new(wt: Path) -> None:
+    """#3780: ベースが今回消す行の後ろへ移した行の削除は、移す前の位置で読んだ削除に当てない。"""
+    base = _start(wt, {"a.txt": "P\nX\nA\nZ\n"})
+    head = _write(wt, {"a.txt": "P\nA\nZ\n"}, "PR")
+    moved = _move_base(wt, {"a.txt": "P\nA\nX\nZ\n"})
+    sh(wt, "merge", "-q", "--no-edit", "-X", "ours", "target")
+    _write(wt, {"a.txt": "P\nR\nZ\n"}, "直し")
+    assert _new(wt, changes.Range(base, head), moved) == ("a.txt",)
+
+
 def test_a_commit_that_is_not_local_gives_none_or_a_git_error(wt: Path) -> None:
     """比べるコミットが無ければ、`new_in_pr` は None を返し（呼び手は全差分にする）、`since_diff` は例外を返す。"""
     head = _head(wt)
