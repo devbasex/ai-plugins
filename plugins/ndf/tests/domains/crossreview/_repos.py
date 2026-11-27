@@ -69,3 +69,10 @@ def run_cli(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, dict]:
     """サブコマンド `cross-review` を打ち、終了コードと結果 JSON を返す。"""
     code = cli.main(list(argv))
     return code, last_result(capsys.readouterr().out)
+
+
+def previous_output(path: Path, text: str) -> None:
+    """前の起動が `path` へ `text` を書いた状態を作る（出力と、その隣の書いた出力の記録。PR 4638 の C4・r1-1）。"""
+    from ndf.domains.crossreview import outputs
+
+    outputs.write_recorded(path, text)

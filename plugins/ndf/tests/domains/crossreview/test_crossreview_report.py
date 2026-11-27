@@ -384,7 +384,7 @@ def test_reader_and_writer_share_one_port_per_pr(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr(write_gate, "gate_path", lambda: tmp_path / "write-gate.json")
     gh = types.SimpleNamespace(GitHub=lambda slug, client, gate=None: _RestHub(), client=lambda **_: None, GitHubError=_Refused)
     monkeypatch.setattr(cli, "load_github", lambda: gh)
-    monkeypatch.setattr(repo, "resolve_target_repo", lambda *a: types.SimpleNamespace(slug="o/r"))
+    monkeypatch.setattr(repo, "resolve_target_repo", lambda *a: repo.RepoTarget("o/r", repo.ARG))
     made = cli._github_hub(None, None, Path("."))
     assert made.reader(7) is made.threads(7) and made.reader(7) is not made.threads(8)
 

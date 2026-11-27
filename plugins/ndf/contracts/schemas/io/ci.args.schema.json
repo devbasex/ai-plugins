@@ -77,7 +77,7 @@
         },
         "--pr": {
           "type": "integer",
-          "description": "PR の番号。--branch か --base を添えると、まず PR がその指定に合うかを確かめる。head のブランチ名かマージ先が指定と違う PR、フォークからの PR、マージされずに閉じた PR は refused で止まる。--branch と --base を両方省くと、この確かめを省く。確かめを通った後も、省いた後も、次に PR がマージ済みかを調べる。マージ済みなら、マージ操作をせずに ok を返す。作業場所が無いときは、--branch を省き、--pr と --repo を渡す"
+          "description": "PR の番号。--branch か --base を添えると、まず PR がその指定に合うかを確かめる。head のブランチ名かマージ先が指定と違う PR、フォークからの PR、マージされずに閉じた PR は refused で止まる。--branch と --base を両方省くと、この確かめを省く。確かめを通った後も、省いた後も、次に PR がマージ済みかを調べる。マージ済みの場合はマージ操作を省く。--verify-merged の指定がなければ ok を返す。指定があれば、承認した HEAD とマージ先に PR が合うかを確かめ、違えば refused を返す。作業場所が無いときは、--branch を省き、--pr と --repo を渡す"
         },
         "--base": {
           "type": "string",
@@ -116,6 +116,10 @@
         "--presented-out": {
           "type": "string",
           "description": "stop で止まるときに承認の対象を書くファイル（ndf ci answer が読む）"
+        },
+        "--verify-merged": {
+          "type": "boolean",
+          "description": "--pr・--approved-head・--approved-base と組で渡す。指定した PR がマージ済みの場合も、HEAD とマージ先が承認時の値と同じかを確かめる。値が違えば refused で止まる"
         },
         "--required": {
           "type": "array",
@@ -183,6 +187,10 @@
             "type": "string"
           },
           "description": "マージの段階が落ちたと読んだチェックの名前"
+        },
+        "--head": {
+          "type": "string",
+          "description": "待つ PR の HEAD の SHA。チェック結果はこの SHA のものだけを読み、作業場所の HEAD は追わない。待ちの開始時と、必須チェックが通った時点に PR の HEAD を読み、この SHA と違えば approval_stale を返す。必須チェックが通った起動は、approval_stale を返す場合も含めて PR の取得が 1 回増える（REST の上限に当たって GraphQL で読み替えるときは、API の要求がさらに 1 回増える）"
         }
       },
       "required": [

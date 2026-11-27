@@ -100,9 +100,15 @@ class ReadPr(NamedTuple):
 class Reader(Protocol):
     """PR のコメントを読む口（テストは偽物）。失敗は例外。`comments` は PR コメント（引き継ぎの確かめに要る記録のコメントを
     含む）、`reviews` はインラインのレビューコメントとレビュー本文（相手役へ渡す参考資料にだけ使う）。`base` は PR の
-    マージ先のブランチの名前、`read_pr` は `open_threads` が読んだ PR（読めていなければ None。要求を足さない）。"""
+    マージ先のブランチの名前、`repo` はその PR のベースリポジトリ（`<所有者>/<リポジトリ>`）、`fetched` は対象のリポジトリを
+    作業場所のリモートの URL から決めたときのその値（それ以外は None）、`read_pr` は `open_threads` が読んだ PR（読めていなければ
+    None。要求を足さない）。"""
 
     def base(self) -> str: ...
+
+    def repo(self) -> str: ...
+
+    def fetched(self) -> Optional[str]: ...
 
     def read_pr(self) -> Optional[ReadPr]: ...
 
@@ -452,8 +458,10 @@ class GitHubPort:
     ):
         """`errors` は GitHub が断ったときの例外の型（`github.GitHubError`）。`sleep` はテストが差し替える。
         `block`（`WriteGate.block`）へ二次レート制限の打ち直しの待ちを毎回知らせ、ほかのプロセスの書き込みも止める（#4016）。
-        信頼できる書き手は、今の実行の認証の login（GraphQL の `viewer`。1 回だけ読む）と同じ書き手だけである。"""
+        信頼できる書き手は、今の実行の認証の login（GraphQL の `viewer`。1 回だけ読む）と同じ書き手だけである。
+        `fetched_repo` は、対象のリポジトリを作業場所のリモートの URL から決めたときに作り手が入れるその値（`Reader.fetched`）。"""
         self.hub, self.publisher, self.pr, self.errors = hub, publisher, int(pr), errors
+        self.fetched_repo: Optional[str] = None
         self.sleep, self.block = sleep, block
         self._me: Optional[str] = None
         self._pr_head: Optional[str] = None
@@ -526,6 +534,14 @@ class GitHubPort:
         if not self._base:
             raise self.errors(f"PR #{self.pr} のマージ先のブランチを読めない（応答に無い）")
         return self._base
+
+    def repo(self) -> str:
+        """PR のベースリポジトリ（`<所有者>/<リポジトリ>`。読む先のリポジトリで、要求を足さない）。"""
+        return str(self.hub.repo)
+
+    def fetched(self) -> Optional[str]:
+        """対象のリポジトリを作業場所のリモートの URL から決めたときのその値（それ以外は None）。"""
+        return self.fetched_repo
 
     def read_pr(self) -> Optional[ReadPr]:
         """スレッドの一覧と同じ応答から読んだ PR（読んでいないか、応答に head が無ければ None。要求を足さない）。"""

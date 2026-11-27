@@ -279,6 +279,14 @@ def test_watch_reads_the_pull_head_outside_its_branch() -> None:
     assert hub.read_shas == [HEAD]
 
 
+def test_issue_3702_watch_head_pins_the_reads_to_the_checked_sha() -> None:
+    """`pinned` があれば、作業場所の HEAD も PR の今の HEAD も追わず、渡した SHA のチェックだけを読む。"""
+    hub = _Hub([NEW], {HEAD: [run("pytest")], NEW: [run("pytest", conclusion="failure")]})
+    reader = ci_cli.HeadReader(hub, _pull(HEAD), None, ["pytest"], ["pytest"], pinned=HEAD)
+    assert reader().verdict == "passed" and reader().verdict == "passed"
+    assert hub.read_shas == [HEAD, HEAD]
+
+
 def test_local_head_only_on_the_pull_branch(tmp_path: Path) -> None:
     from ndf.adapters import git
 
@@ -800,3 +808,82 @@ def _a_new_presentation_refuses_the_answer_to_the_old_one(monkeypatch, capsys, l
 def test_production_merge_scenes(request, scene, values):
     """ndf ci merge・ask・answer の本番チャネルの判定と承認の証跡の場面（#4409）。"""
     scenes.play(request, scene, values)
+
+
+# --- マージ済みの PR を承認と照らす `--verify-merged` と、HEAD を固定して待つ `watch --head`（#3702） ---
+
+APPROVED = ["--approved-head", merge_hub.HEAD, "--approved-base", "main"]
+
+
+@pytest.mark.parametrize(("head", "base"), [(merge_hub.OTHER, "main"), (merge_hub.HEAD, "develop")])
+def test_issue_3702_verify_merged_refuses_a_merged_pr_other_than_the_approved_one(
+    monkeypatch, capsys, last_result, head: str, base: str
+) -> None:
+    """`--verify-merged` があれば、マージ済みの PR の HEAD かマージ先が承認の値と違うと refused で止まる。"""
+    hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(merged=True, head=head, base=base)}))
+    assert ci_cli.main(["merge", "--pr", "7", "--production-gate", "stale", *APPROVED, "--verify-merged"]) == causes.exit_code("refused")
+    assert _out(capsys, last_result)["cause"]["kind"] == "refused" and hub.merged == []
+
+
+def test_issue_3702_verify_merged_accepts_the_approved_merged_pr(monkeypatch, capsys, last_result) -> None:
+    hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(merged=True)}))
+    assert ci_cli.main(["merge", "--pr", "7", "--production-gate", "stale", *APPROVED, "--verify-merged"]) == 0
+    assert _out(capsys, last_result)["metrics"]["merge"] == "already" and hub.calls == ["pulls"]
+
+
+def test_issue_3702_without_verify_merged_a_merged_pr_is_ok_as_before(monkeypatch, capsys, last_result) -> None:
+    """引数が無ければ、承認と違うマージ済みの PR も今のまま ok。"""
+    _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(merged=True, head=merge_hub.OTHER)}))
+    assert ci_cli.main(["merge", "--pr", "7", "--production-gate", "stale", *APPROVED]) == 0
+    assert _out(capsys, last_result)["metrics"]["merge"] == "already"
+
+
+@pytest.mark.parametrize(
+    "argv", [["--pr", "7", "--verify-merged"], ["--branch", "feature", *APPROVED, "--verify-merged"]], ids=["no-approved", "no-pr"]
+)
+def test_issue_3702_verify_merged_needs_the_pr_and_the_approved_target(monkeypatch, capsys, last_result, argv: list[str]) -> None:
+    """番号を渡さない経路は開いている PR しか探さないので、`--pr` も承認の値も無ければ GitHub を読まずに invalid。"""
+    hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(merged=True)}))
+    assert ci_cli.main(["merge", *argv]) == causes.exit_code("invalid")
+    assert hub.calls == []
+
+
+def _serve_heads(monkeypatch: pytest.MonkeyPatch, heads: list[str], runs: list[dict]) -> list[str]:
+    """PR を読むたびに `heads` の次の HEAD を返す（尽きたら最後）。読んだ HEAD の並びを返す。"""
+    read: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/pulls/7"):
+            sha = heads[min(len(read), len(heads) - 1)]
+            read.append(sha)
+            return httpx.Response(200, json={**PULL, "head": {"sha": sha, "ref": "x"}})
+        if path.endswith("/check-runs"):
+            return httpx.Response(200, json={"total_count": len(runs), "check_runs": runs})
+        return httpx.Response(404, json={"message": "not found"})
+
+    monkeypatch.setattr(github, "client", lambda **_: offline_client(handler))
+    return read
+
+
+OTHER_HEAD = "3" * 40
+
+
+def test_issue_3702_watch_head_passes_while_the_pr_stays_at_the_head(monkeypatch, capsys, last_result) -> None:
+    _serve_heads(monkeypatch, [HEAD], [run("pytest", rid=1), run("doc-lint", rid=2)])
+    assert ci_cli.main([*ARGS, "--head", HEAD]) == 0
+    assert last_result(capsys.readouterr().out)["status"] == "ok"
+
+
+@pytest.mark.parametrize("heads", [[OTHER_HEAD], [HEAD, OTHER_HEAD]], ids=["at-start", "at-success"])
+def test_issue_3702_watch_head_is_approval_stale_when_the_pr_moves(monkeypatch, capsys, last_result, heads: list[str]) -> None:
+    """`--head` があれば、待ちの開始か成功の確定の時点で PR の HEAD が違うと成功にせず approval_stale で止まる。"""
+    _serve_heads(monkeypatch, heads, [run("pytest", rid=1), run("doc-lint", rid=2)])
+    assert ci_cli.main([*ARGS, "--head", HEAD]) == causes.exit_code("approval_stale")
+    assert last_result(capsys.readouterr().out)["cause"]["kind"] == "approval_stale"
+
+
+def test_issue_3702_watch_without_head_reads_the_pr_once(monkeypatch, capsys, last_result) -> None:
+    """引数が無ければ今のまま、成功の確定で PR を読み直さない。"""
+    read = _serve_heads(monkeypatch, [HEAD, OTHER_HEAD], [run("pytest", rid=1), run("doc-lint", rid=2)])
+    assert ci_cli.main(ARGS) == 0 and read == [HEAD]

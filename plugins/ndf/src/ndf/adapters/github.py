@@ -381,10 +381,12 @@ class GitHub:
         got = self.aliased({str(n): f"{node}(number: {n}) {{ {fields} }}" for n in wanted}, batch)
         return {n: got[str(n)] if isinstance(got[str(n)], dict) else {} for n in wanted}
 
-    def pulls(self, numbers: Iterable[int], spare: Iterable[int] = ()) -> dict[int, Optional[Pull]]:
+    def pulls(self, numbers: Iterable[int], spare: Iterable[int] = (), *, rest_fallback: bool = True) -> dict[int, Optional[Pull]]:
         """番号ごとの PR を 1 回のクエリ（100 件ごと）で読む。PR でない・無い番号は None。
 
         GraphQL のスロットが一次の上限なら、`github.rest-fallback` 件までは REST のスロットで読み替える（不足 g。二次レート制限は読み替えない）。
+        `rest_fallback` が偽なら読み替えずに `GitHubError` を上げる（REST の応答はマージキューの状態を持たないので、キューの状態を
+        読む呼び手は読み替えた値を使えない。#3702）。
         `spare`（ついでに読めればよい番号）は、`numbers` を読むクエリの 100 件に満たない残りの分だけを読み、呼び出しの回数と読み替えの
         可否を変えない。残りに入らない番号と、REST へ読み替えたときの番号は、返す辞書に載らない。
         """
@@ -394,7 +396,12 @@ class GitHub:
         try:
             raw = self.nodes([*wanted, *extra], "pullRequest", PULL_FIELDS)
         except GitHubError as exc:
-            if exc.quota != GRAPHQL or exc.secondary or len(wanted) > int(limits.value("github.rest-fallback", "count")):
+            if (
+                not rest_fallback
+                or exc.quota != GRAPHQL
+                or exc.secondary
+                or len(wanted) > int(limits.value("github.rest-fallback", "count"))
+            ):
                 raise
             # 1 件ずつの REST の読み取りは github.rest-fallback 件まで（上で確かめた）
             return {n: self._rest_pull_or_none(n) for n in wanted}

@@ -54,9 +54,7 @@ _REJUDGED = "production_gate"
 PRODUCTION_LINE = merge_approval.PRODUCTION_MATERIAL_LINE
 
 
-def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="ndf ci", description="CI の結果を読み、停止理由の種類で返す")
-    sub = p.add_subparsers(dest="command", required=True)
+def _watch_parser(sub: Any) -> None:
     w = sub.add_parser("watch", help="PR の HEAD の必須のチェックの結論が出るまで待つ")
     w.add_argument("--pr", type=int, required=True)
     w.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば作業場所の origin")
@@ -65,7 +63,20 @@ def _parser() -> argparse.ArgumentParser:
     w.add_argument("--budget", type=float, required=True, help="待ちの合計の秒（ランナーの割り当ての待ちは数えない）")
     w.add_argument("--after-merge", action="store_true", help="マージの段階が落ちた後の判定")
     w.add_argument("--merge-failed", action="append", default=[], help="マージの段階が落ちたと読んだチェックの名前")
+    w.add_argument(
+        "--head",
+        help="待つ PR の HEAD の SHA。チェック結果はこの SHA のものだけを読み、作業場所の HEAD は追わない。"
+        "待ちの開始時と、必須チェックが通った時点に PR の HEAD を読み、この SHA と違えば approval_stale を返す。"
+        "必須チェックが通った起動は、approval_stale を返す場合も含めて PR の取得が 1 回増える"
+        "（REST の上限に当たって GraphQL で読み替えるときは、API の要求がさらに 1 回増える）",
+    )
     w.set_defaults(run=_watch)
+
+
+def _parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="ndf ci", description="CI の結果を読み、停止理由の種類で返す")
+    sub = p.add_subparsers(dest="command", required=True)
+    _watch_parser(sub)
     m = sub.add_parser(
         "merge",
         help="PR を、前段の確かめ（決めていない残リスク・HEAD の食い違い・本番チャネルへの承認の証跡）を通してマージする",
@@ -76,7 +87,7 @@ def _parser() -> argparse.ArgumentParser:
         type=int,
         help="PR の番号。--branch か --base を添えると、まず PR がその指定に合うかを確かめる。"
         "head のブランチ名かマージ先が指定と違う PR、フォークからの PR、マージされずに閉じた PR は refused で止まる。"
-        "--branch と --base を両方省くと、この確かめを省く。確かめを通った後も、省いた後も、次に PR がマージ済みかを調べる。マージ済みなら、マージ操作をせずに ok を返す。"
+        "--branch と --base を両方省くと、この確かめを省く。確かめを通った後も、省いた後も、次に PR がマージ済みかを調べる。マージ済みの場合はマージ操作を省く。--verify-merged の指定がなければ ok を返す。指定があれば、承認した HEAD とマージ先に PR が合うかを確かめ、違えば refused を返す。"
         "作業場所が無いときは、--branch を省き、--pr と --repo を渡す",
     )
     m.add_argument("--base", help="期待するマージ先。対象の PR のマージ先が違えばマージしない")
@@ -92,6 +103,12 @@ def _parser() -> argparse.ArgumentParser:
     m.add_argument("--approved-head", help="工程の承認ゲートで承認した HEAD（--approved-base と組で渡す）")
     m.add_argument("--approved-base", help="工程の承認ゲートで承認したマージ先")
     m.add_argument("--presented-out", help="stop で止まるときに承認の対象を書くファイル（ndf ci answer が読む）")
+    m.add_argument(
+        "--verify-merged",
+        action="store_true",
+        help="--pr・--approved-head・--approved-base と組で渡す。指定した PR がマージ済みの場合も、HEAD とマージ先が承認時の値と"
+        "同じかを確かめる。値が違えば refused で止まる",
+    )
     m.add_argument(
         "--required",
         action="append",
@@ -185,12 +202,25 @@ class HeadReader:
     `local`（作業場所の HEAD）を渡すと、PR の HEAD がそれに追いつくまでは PR を読み直し、結論の出ていない読み取り
     （待っているものは `BEHIND`）を返す。push の直後は GitHub の PR がまだ前のコミットを指し、そのまま読むと前の
     コミットの結果を返すため。待ちの間隔と予算は `Watch` が持つ。読んだ PR は `pull` に残る（結果 JSON が使う）。
+
+    `pinned`（`--head` と一致を確かめた PR の HEAD の完全な SHA）を渡すと、`local` を使わず、そのコミットのチェックだけを読む。
+    作業場所の未送信のコミットを待ったり、待つ間に PR が動いた先のコミットの結果を読んだりしないため（#3702）。
     """
 
-    def __init__(self, hub: GitHub, pull: github_mod.Pull, local: Optional[str], required: list[str], tests: list[str]) -> None:
-        self.hub, self.pull, self.local, self.required, self.tests = hub, pull, local, required, tests
+    def __init__(
+        self,
+        hub: GitHub,
+        pull: github_mod.Pull,
+        local: Optional[str],
+        required: list[str],
+        tests: list[str],
+        pinned: Optional[str] = None,
+    ) -> None:
+        self.hub, self.pull, self.local, self.required, self.tests, self.pinned = hub, pull, local, required, tests, pinned
 
     def __call__(self) -> Reading:
+        if self.pinned is not None:
+            return read(self.hub.check_runs(self.pinned), self.required, self.tests)
         if self.local is not None and self.pull.head_sha != self.local:
             self.pull = self.hub.pull(self.pull.number)
             if self.pull.head_sha != self.local:
@@ -207,10 +237,31 @@ def _watch(args: argparse.Namespace) -> dict:
     watch = Watch(_unread, args.budget, on_round=_progress, decided=lambda r: classifier.cause(r) == "test_failed")
     hub = GitHub(args.repo if args.repo else git.Git().remote_repo(), github_mod.client(remaining=watch.remaining))
     pull = hub.pull(args.pr)
-    reader = HeadReader(hub, pull, local_head(pull.head_ref), args.required, args.test)
+    moved = _moved_head(args, pull)
+    if moved is not None:
+        return moved
+    if args.head is not None:
+        # 一致を確かめた PR の HEAD の完全な SHA にチェックの読み取りを固定する（作業場所の HEAD を追わない。#3702）
+        reader = HeadReader(hub, pull, None, args.required, args.test, pinned=pull.head_sha)
+    else:
+        reader = HeadReader(hub, pull, local_head(pull.head_ref), args.required, args.test)
     watch.reader = reader
     watched = watch.run()
-    return _report(args, reader.pull, hub, watched, watched.cause_by(classifier))
+    kind = watched.cause_by(classifier)
+    if kind is None and args.head is not None:
+        # 必須チェックが通ったら PR を読み直す（チェックは承認した SHA に固定して読むので、PR の HEAD が動いても通る。#3702）
+        moved = _moved_head(args, hub.pull(args.pr))
+        if moved is not None:
+            return moved
+    return _report(args, reader.pull, hub, watched, kind)
+
+
+def _moved_head(args: argparse.Namespace, pull: github_mod.Pull) -> Optional[dict]:
+    """`--head` があり、読んだ PR の HEAD がそれと違えば `approval_stale` の結果。無いか同じなら None。"""
+    if args.head is None or git.sha_matches(args.head, pull.head_sha):
+        return None
+    detail = f"#{pull.number} の HEAD {pull.head_sha[:12]} が待つ HEAD {args.head[:12]} と違う（承認ゲートから質問し直す）"
+    return result.stopped(TOOL, "approval_stale", detail, instance=pull.head_sha, items=_pr_item_list(pull.number))
 
 
 def _report(args: argparse.Namespace, pull: github_mod.Pull, hub: GitHub, watched: WatchResult, kind: Optional[str]) -> dict:
@@ -397,6 +448,11 @@ def _numbered_target(hub: GitHub, args: argparse.Namespace) -> Pull | dict:
         detail = f"#{pull.number} の{foreign}"
         return result.stopped(TOOL, "refused", detail, instance=pull.head_sha, items=_pr_item_list(pull.number))
     if pull.merged:
+        mismatch = _approved_mismatch(args, pull) if args.verify_merged else None
+        if mismatch is not None:
+            # マージ済みの PR は承認し直しても戻せないので、approval_stale でなく refused で止まる（#3702）
+            detail = f"マージ済みの #{pull.number} の{mismatch}"
+            return result.stopped(TOOL, "refused", detail, instance=pull.head_sha, items=_pr_item_list(pull.number, pull.merge_sha))
         summary = f"#{pull.number} は既にマージ済み"
         return result.result(TOOL, result.OK, summary, items=_pr_item_list(pull.number, pull.merge_sha), metrics={"merge": "already"})
     if pull.state != "open":
@@ -537,6 +593,9 @@ def _invalid_args(args: argparse.Namespace) -> Optional[dict]:
         return result.stopped(TOOL, "invalid", "--branch か --pr のどちらかを渡す")
     if (args.approved_head is None) != (args.approved_base is None):
         return result.stopped(TOOL, "invalid", "--approved-head と --approved-base は組で渡す")
+    if args.verify_merged and (args.pr is None or args.approved_head is None):
+        # 番号を渡さない経路は開いている PR しか探さないので、マージ済みの PR を承認の値と照らせない（#3702）
+        return result.stopped(TOOL, "invalid", "--verify-merged は --pr・--approved-head・--approved-base と組で渡す")
     if args.required and args.budget is None:
         return result.stopped(TOOL, "invalid", "--required を渡すときは --budget も渡す")
     return None

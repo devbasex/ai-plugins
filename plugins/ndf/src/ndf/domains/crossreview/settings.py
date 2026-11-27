@@ -39,7 +39,9 @@ class RunConfig:
     名前の `base` は取得と表示にだけ使う。`reviewers` は起動の前に決めた席（`participants.review_seats`。書き換えない）、
     `may_fill` は席を埋めてよいか（名指しが 1 者なら偽）、`prefilled` は `allowed` のために起動の前に埋めた席（#3955）。
     `unit` はレビューの単位の指示の中身（単位の経路でなければ空。#4369）。`check_pr` は読んだ PR の確認を呼び手が求めるか
-    （`--reviewed-pr-out`。真なら同じ PR を読んだラウンドだけを差分の起点と収束の再利用に使う。#4369）。"""
+    （`--reviewed-pr-out` か `--reviewed-base-out`。真なら同じ PR を読んだラウンドだけを差分の起点と収束の再利用に使う。#4369・PR 4638 の r1-7）。`follow_base` は
+    `base` でなく PR の今のマージ先を比較元にするか（`--reviewed-base-out`。真なら同じマージ先のラウンドだけを差分の起点と
+    収束の再利用に使う。#3702）。"""
 
     worktree: Path
     branch: str
@@ -59,6 +61,7 @@ class RunConfig:
     prefilled: tuple[scope_decide.Filled, ...] = ()
     unit: str = ""
     check_pr: bool = False
+    follow_base: bool = False
 
 
 def settings_path(root: Path, file_id: str) -> Path:

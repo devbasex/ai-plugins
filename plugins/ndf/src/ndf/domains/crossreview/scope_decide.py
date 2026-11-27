@@ -8,8 +8,10 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
+
+from markdown_it import MarkdownIt
 
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import store
@@ -33,7 +35,9 @@ UNIT = "unit"
 PR = "pr"
 # ラウンドの記録のキー（そのラウンドのレビューに使った MVV。#4076）と、その中身のキー。`MVV_ID` は MVV を見分ける値
 # （`mvv_decide.identity_of`）、`MVV_BRANCH` は MVV を読んだブランチ（`--base` がコミットのときに、`review-scope` が
-# GitHub へ問い合わせずに同じブランチの MVV を読むのに使う）
+# GitHub へ問い合わせずに同じブランチの MVV を読むのに使う）。MVV を読んだブランチはそのラウンドの比較元のブランチと同じ値なので、
+# 比較元のブランチの記録もこのキーだけにする（`--reviewed-base-out` の起動は PR の今のマージ先。マージ先が変わると merge-base が
+# 同じでも PR の差分の相手が変わるので、名前でも比べる。別のキーを足すと、足す前のバージョンが書いたラウンドを使えない。#3702・PR 4638 の r1-4・r1-5）
 MVV = "mvv"
 MVV_ID = "id"
 MVV_BRANCH = "mvv_branch"
@@ -43,8 +47,9 @@ UNKNOWN_MVV = ""
 _NO_MVV = mvv_decide.identity_of(mvv_decide.State.ABSENT)
 # 承認済みの MVV の、MVV を見分ける値の始まり
 _APPROVED = f"{mvv_decide.State.APPROVED}:"
-# Markdown のコードブロックの囲み
-_FENCES = ("```", "~~~")
+# Markdown の解析（`adapters/markdown.py` と同じ CommonMark。判断のモジュールは adapters を読めないので markdown-it-py を直接使う）
+_MARKDOWN = MarkdownIt()  # 既定の設定が CommonMark
+_HEADING_TAGS = frozenset(f"h{n}" for n in range(1, 7))
 
 
 class Scope(NamedTuple):
@@ -55,27 +60,108 @@ class Scope(NamedTuple):
     unreviewed: tuple[str, ...]
 
 
+def _text_lines(text: str) -> list[str]:
+    """markdown-it と同じ数え方の行（改行は `\\r\\n`・`\\r`・`\\n`。末尾の改行の後は行にしない）。"""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    return lines[:-1] if lines and not lines[-1] else lines
+
+
+def _front_matter_end(lines: Sequence[str]) -> int:
+    """先頭の YAML front matter の後の行の番号（front matter が無ければ 0）。"""
+    if not lines or lines[0].strip() != "---":
+        return 0
+    close = next((i for i in range(1, len(lines)) if lines[i].strip() in ("---", "...")), None)
+    return close + 1 if close is not None else 0
+
+
+def _lines(text: str) -> Iterator[tuple[str, Optional[tuple[int, str]]]]:
+    """本文の各行と、その行が見出しの始まりなら（見出しの深さ, 見出し）。見出しと行の位置は markdown-it-py（`adapters/markdown.py`
+    と同じ CommonMark の解析）で決め、ATX と Setext の見出しを、文書の最上位にあるものだけ数える（PR 4638 の r1-9）。コードブロック
+    （囲み・インデント）・引用・リストの中と、先頭の YAML front matter の中は見出しでない。レビューの対象のセクション
+    （`sections_of`）と、起点どうしの本文の比較（`_bodies`）は、この判定だけでセクションを分ける（PR 4638 の r6-3）。"""
+    lines = _text_lines(text)
+    skip = _front_matter_end(lines)
+    # front matter は空行にして解析し、行の位置を変えない（CommonMark は front matter を `---` の区切り線と見出しに読む）
+    tokens = _MARKDOWN.parse("\n".join([""] * skip + list(lines[skip:])))
+    starts: dict[int, tuple[int, str]] = {}
+    for i, token in enumerate(tokens):
+        # 見出しの開きのトークン（`h1`〜`h6` の開き）
+        if token.nesting == 1 and token.tag in _HEADING_TAGS and token.level == 0 and token.map is not None:
+            title = " ".join(tokens[i + 1].content.split())
+            if title:
+                starts[token.map[0]] = (int(token.tag[1:]), title)
+    for i, line in enumerate(lines):
+        yield line, starts.get(i)
+
+
 def sections_of(path: str, text: str) -> list[str]:
     """Markdown の見出しを `<パス>#<見出し>` の並びにする（コードブロックの中の `#` は見出しでない）。"""
-    out: list[str] = []
-    fenced = False
-    for line in text.splitlines():
-        if line.lstrip().startswith(_FENCES):
-            fenced = not fenced
-            continue
-        if not fenced and line.startswith("#"):
-            title = line.lstrip("#").strip()
-            if title:
-                out.append(f"{path}#{title}")
+    return [f"{path}#{heading[1]}" for _, heading in _lines(text) if heading is not None]
+
+
+def reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None, base_branch: Optional[str] = None) -> set[str]:
+    """状態ファイルの中身から、前のラウンドまでに詳細レビューを通ったセクション（並びでなければ無し）。今の MVV を見分ける
+    値 `mvv`（None は確かめない）と違う MVV で通ったセクションは、通っていないとみなす（#4076）。今の比較元のブランチ
+    `base_branch`（None は確かめない）と違う比較元で通ったセクションも、通っていないとみなす。`run` と `review-scope` は
+    差分の起点も照らす `reviewed_for` から呼ぶ（#3702・PR 4638 の r2-2・r3-1）。"""
+    if mvv is not None and _known(state.get(store.REVIEWED_MVV)) != mvv:
+        return set()
+    if base_branch is not None and state.get(store.REVIEWED_BASE_BRANCH) != base_branch:
+        return set()
+    return set(store.list_of(state, store.REVIEWED))
+
+
+# 2 つの起点の間で変わった文書の、それぞれの起点の本文（`パス → (記録の起点の本文, 今の起点の本文)`。無いファイルは None）を
+# 読む関数。引数は記録の起点・今の起点・引き継ぐ候補のセクション。読めなければ None を返す
+BaseTexts = Callable[[str, str, Collection[str]], Optional[Mapping[str, tuple[Optional[str], Optional[str]]]]]
+
+
+def reviewed_for(state: Mapping[str, Any], basis: Basis, read: Optional[BaseTexts] = None) -> set[str]:
+    """`run` と `review-scope` が共通に使う、今の起動で引き継げる詳細レビューの記録（PR 4638 の r2-1・r3-1・r4-1・r5-1）。MVV と
+    比較元のブランチを `basis` で照らし、差分の起点（`basis.base`。merge-base の SHA）も照らす。記録の起点が今の起点と同じなら
+    すべて引き継ぐ。違えば、2 つの起点でセクションの本文が同じものだけ引き継ぐ。同じ HEAD に対するそのセクションの差分は、
+    起点の本文が同じなら同じだからである。記録の起点が今の起点の祖先かでは決めない（起点 A で 0、途中の B で 1、HEAD で 0 なら、
+    B を起点にした差分にだけ 1 から 0 への変更が現れる。r4-1）。本文を読めない（`read` が無い・None を返す）ときと、起点を
+    記録しない前のバージョンの記録は引き継がない。`--base` がブランチかコミットかは問わない。"""
+    kept = reviewed_of(state, basis.mvv, basis.base_branch)
+    if not kept or basis.base is None:
+        return kept
+    start = state.get(store.REVIEWED_BASE_COMMIT)
+    if not isinstance(start, str) or not start:
+        return set()
+    if start == basis.base:
+        return kept
+    texts = read(start, basis.base, kept) if read is not None else None
+    if texts is None:
+        return set()
+    moved = {s for path, (before, after) in texts.items() for s in _changed_sections(path, before, after)}
+    return kept - moved
+
+
+def _bodies(path: str, text: Optional[str]) -> dict[str, list[tuple[tuple[str, ...], list[str]]]]:
+    """セクション（`sections_of` と同じ `<パス>#<見出し>`）ごとの、親の見出しの並びと本文の行（見出しの行から次の見出しの前まで。
+    同じ見出しがいくつあれば、その数だけ並べる）。本文が無ければ空。親の見出しも比べるのは、同じ本文のセクションを別の親の
+    見出しの下へ移すと、手順などの適用先が変わるためである（PR 4638 の r6-1）。"""
+    out: dict[str, list[tuple[tuple[str, ...], list[str]]]] = {}
+    parents: list[tuple[int, str]] = []
+    current: Optional[list[str]] = None
+    for line, heading in _lines(text) if text is not None else ():
+        if heading is not None:
+            while parents and parents[-1][0] >= heading[0]:
+                parents.pop()
+            current = []
+            out.setdefault(f"{path}#{heading[1]}", []).append((tuple(t for _, t in parents), current))
+            parents.append(heading)
+        if current is not None:
+            current.append(line)
     return out
 
 
-def reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None) -> set[str]:
-    """状態ファイルの中身から、前のラウンドまでに詳細レビューを通ったセクション（並びでなければ無し）。今の MVV を見分ける
-    値 `mvv`（None は確かめない）と違う MVV で通ったセクションは、通っていないとみなす（#4076）。"""
-    if mvv is not None and _known(state.get(store.REVIEWED_MVV)) != mvv:
-        return set()
-    return set(store.list_of(state, store.REVIEWED))
+def _changed_sections(path: str, before: Optional[str], after: Optional[str]) -> set[str]:
+    """2 つの本文で、親の見出しの並びか本文が違うセクション（片方にしか無いものも）。"""
+    old, new = _bodies(path, before), _bodies(path, after)
+    return {s for s in old.keys() | new.keys() if old.get(s) != new.get(s)}
 
 
 def _known(value: object) -> str:
@@ -148,7 +234,8 @@ class Basis(NamedTuple):
     （merge-base の SHA。PR 3944 の r2-1）、`reviewers` は今回の相手役（r2-2）、`focus` は今回の重点（r4-3）、`mvv` は今の
     MVV を見分ける値（確かめられなければ `UNKNOWN_MVV`。#4076）。`stand_in` が真なら、前のラウンドの埋めた席を、席の名前か
     欠けた相手役のどちらか一方として今回の席に割り当てる（同じ head の打ち直しの再利用だけが使う。#3955）。`unit` は今回の
-    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回読んだ PR（読んだ PR の確認を求めない起動は None。#4369）。"""
+    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回読んだ PR（読んだ PR の確認を求めない起動は None。#4369）。
+    `base_branch` は今回の比較元のブランチ（`run` と `review-scope` はいつも渡す。#3702・PR 4638 の r1-1）。"""
 
     base: Optional[str] = None
     reviewers: Optional[Collection[str]] = None
@@ -157,11 +244,13 @@ class Basis(NamedTuple):
     stand_in: bool = False
     unit: Optional[str] = None
     pr: Optional[str] = None
+    base_branch: Optional[str] = None
 
 
 def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
     """ラウンドの記録が `basis` に合うか。`basis` の値があれば、比較基点（`BASE`）が違う・そのラウンドを読んだ相手役
-    （`REVIEWERS`）に無い相手役がいる・重点（`FOCUS`）か単位の指示（`UNIT`）か読んだ PR（`PR`）か MVV（`MVV`）が違うときは合わない。承認済みの MVV があるのに、
+    （`REVIEWERS`）に無い相手役がいる・重点（`FOCUS`）か単位の指示（`UNIT`）か読んだ PR（`PR`）か MVV（`MVV`）か比較元のブランチ
+    （`MVV_BRANCH`）が違うときは合わない。承認済みの MVV があるのに、
     そのラウンドの head で根拠の記述を確かめ終えていない（`finish_decide.MVV_CHECKED`）ときも合わない（#4090）。"""
     if basis.base is not None and record.get(BASE) != basis.base:
         return False
@@ -173,6 +262,8 @@ def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
     if basis.unit is not None and (record[UNIT] if UNIT in record else "") != basis.unit:
         return False
     if basis.pr is not None and (record[PR] if PR in record else None) != basis.pr:
+        return False
+    if basis.base_branch is not None and _mvv_record(record).get(MVV_BRANCH) != basis.base_branch:
         return False
     if basis.mvv is None:
         return True

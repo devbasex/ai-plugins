@@ -16,21 +16,46 @@ from ._repos import Repos, commit, count_git, run_cli, sh
 A, B = "issues/d.md#セクション A", "issues/d.md#セクション B"
 # ラウンドの記録の比較基点（`--base` と HEAD の merge-base の SHA。PR 3944 の r2-1）。状態ファイルを書く前に本物の SHA へ置き換える
 MB = "<merge-base>"
+# 詳細レビューを `--base origin/main` の比較元と、その merge-base の起点で通した記録（比較元が違う記録は引き継がない。#3702）
+ON_MAIN = {store.REVIEWED_BASE_BRANCH: "main", store.REVIEWED_BASE_COMMIT: MB}
 
 
 def _with_merge_base(data, sha: str):
-    """状態ファイルの中身の `MB` を本物の merge-base の SHA へ置き換え、`run` と同じく既定の相手役をラウンドに記録する
-    （`review-scope` も今回の相手役で決める。PR 3944 の r3-4）。"""
+    """状態ファイルの中身の `MB`（詳細レビューの記録の起点も）を本物の merge-base の SHA へ置き換え、`run` と同じく既定の相手役と `--base origin/main` の
+    比較元のブランチをラウンドに記録する（`review-scope` も今回の相手役と比較元で決める。PR 3944 の r3-4・PR 4638 の r1-1）。"""
     if isinstance(data, dict) and isinstance(data.get("rounds"), list):
         seats = list(participants.assign())
-        rounds = [{"reviewers": seats, **r, "base": sha} if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
-        return {**data, "rounds": rounds}
+        rounds = [_on_main(r, seats, sha) if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
+        start = {store.REVIEWED_BASE_COMMIT: sha} if data.get(store.REVIEWED_BASE_COMMIT) == MB else {}
+        return {**data, "rounds": rounds, **start}
     return data
+
+
+def _on_main(r: dict, seats: list[str], sha: str) -> dict:
+    """ラウンドの記録に、既定の相手役と比較基点と、MVV を読んだ（比較元の）ブランチ `main` を足す（記録の値を優先する）。"""
+    mvv = {scope_decide.MVV_BRANCH: "main", **(r.get(scope_decide.MVV) or {})}
+    return {"reviewers": seats, **r, "base": sha, scope_decide.MVV: mvv}
 
 
 def test_sections_skip_headings_inside_code_blocks() -> None:
     text = "# 題\n\n```\n# コメント\n```\n## セクション A\n"
     assert scope_decide.sections_of("d.md", text) == ["d.md#題", "d.md#セクション A"]
+
+
+def test_pr_4638_r7_1_setext_headings_are_sections_and_parents() -> None:
+    """PR 4638 の r7-1: 下線の Setext 見出しもセクションと親の見出しに数え、親が変わったセクションは引き継がない。
+    front matter とコードブロックの中の下線は見出しでない。"""
+    text = "---\ntitle: x\n---\n本番\n====\n## 実行手順\n手順\n\n```\n例\n---\n```\n注意\n----\n"
+    assert scope_decide.sections_of("d.md", text) == ["d.md#本番", "d.md#実行手順", "d.md#注意"]
+    before, after = "本番\n====\n## 実行手順\n手順\n", "検証\n====\n## 実行手順\n手順\n"
+    assert scope_decide._changed_sections("d.md", before, after) == {"d.md#本番", "d.md#検証", "d.md#実行手順"}
+
+
+def test_pr_4638_r1_9_headings_follow_commonmark() -> None:
+    """PR 4638 の r1-9: インデントしたコードの直後の `---` は見出しでなく、囲みの中の別種の囲みでコードブロックを閉じない。
+    引用とリストの中の `#` も見出しでない。"""
+    text = "# 題\n\n    コード\n---\n\n````\n```\n# 例\n```\n````\n## B\n> # 引用\n- # 項目\n"
+    assert scope_decide.sections_of("d.md", text) == ["d.md#題", "d.md#B"]
 
 
 def test_issue_3181_design_pr_keeps_the_full_diff_until_every_section_had_a_detailed_review() -> None:
@@ -56,7 +81,8 @@ def test_issue_3181_cli_reads_sections_of_changed_documents(repos: Repos, tmp_pa
     store.write_object(
         state / store.STATE_NAME.format(pr=8),
         _with_merge_base(
-            {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": sha, "base": MB}], store.REVIEWED: ["issues/d.md#設計", A]}, sha
+            {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": sha, "base": MB}], store.REVIEWED: ["issues/d.md#設計", A], **ON_MAIN},
+            sha,
         ),
     )
     base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main"]
@@ -163,7 +189,7 @@ def test_scope_of_a_design_pr_treats_a_broken_reviewed_list_as_empty(scope_run) 
 
 def test_scope_of_a_design_pr_narrows_to_the_last_head_once_every_section_was_reviewed(scope_run) -> None:
     rounds = [{"round": 1, "head": "abc", "base": MB}, {"round": 2, "head": "def", "base": MB}]
-    code, got = scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})
+    code, got = scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS, **ON_MAIN})
     assert got["summary"] == "round 3 の範囲は since（詳細レビューを通らないセクション 0 件）"
     assert got["items"] == [_scope(scope_decide.SINCE, scope_run.heads["def"], [])]
 
@@ -178,7 +204,9 @@ def test_scope_that_is_full_does_not_ask_git_for_the_last_head(scope_run, monkey
     rounds = [{"round": 1, "head": "abc", "base": MB}]
     assert scope_run("design", {"pr": 8, "rounds": rounds})[1]["items"] == [_scope(scope_decide.FULL, None, _SECTIONS)]
     assert asked == []
-    assert scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})[1]["items"][0]["scope"] == scope_decide.SINCE
+    assert (
+        scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS, **ON_MAIN})[1]["items"][0]["scope"] == scope_decide.SINCE
+    )
     assert len(asked) == 1
 
 
@@ -288,6 +316,77 @@ def test_sections_reviewed_under_another_mvv_are_reviewed_again(recorded: str | 
     assert got == (scope_decide.Scope(scope_decide.SINCE, "h1", ()) if reviewed else scope_decide.Scope(scope_decide.FULL, None, (A, B)))
 
 
+@pytest.mark.parametrize(
+    ("recorded", "now", "reviewed"), [("main", "main", {A, B}), ("main", "sprint/y", set()), (None, "main", set()), ("main", None, {A, B})]
+)
+def test_issue_3702_sections_reviewed_against_another_target_are_reviewed_again(
+    recorded: str | None, now: str | None, reviewed: set[str]
+) -> None:
+    """MVV が同じでも、前と違う比較元のブランチで詳細レビューを通ったセクションは、まだ通っていないセクションとして並ぶ。"""
+    state = {store.REVIEWED: [A, B], store.REVIEWED_MVV: APPROVED}
+    if recorded:
+        state[store.REVIEWED_BASE_BRANCH] = recorded
+    assert scope_decide.reviewed_of(state, APPROVED, now) == reviewed
+
+
+# 起点 m1 と m2 の文書の本文。セクション A は同じで、セクション B だけが違う（m1 で 0、m2 で 1）
+_BASE_TEXTS = {"issues/d.md": ("# セクション A\n値は 0\n# セクション B\n値は 0\n", "# セクション A\n値は 0\n# セクション B\n値は 1\n")}
+
+# 起点 m1 と m2 の文書の本文。セクション B は本文が同じで、親の見出しだけが「本番」から「検証」へ変わる
+_MOVED_TEXTS = {
+    "issues/d.md": ("# 本番\n## セクション B\n手順\n# 検証\n## セクション A\n", "# 本番\n# 検証\n## セクション B\n手順\n## セクション A\n")
+}
+
+
+@pytest.mark.parametrize(
+    ("recorded", "base", "texts", "reviewed"),
+    [
+        ("m1", "m1", None, {A, B}),
+        ("m1", "m2", {}, {A, B}),
+        ("m1", "m2", _BASE_TEXTS, {A}),
+        ("m2", "m1", _BASE_TEXTS, {A}),
+        ("m1", "m2", None, set()),
+        (None, "m1", {}, set()),
+        # 本文が同じセクション B を、別の親の見出しの下へ移した（適用先が変わる。r6-1）
+        ("m1", "m2", _MOVED_TEXTS, {A}),
+    ],
+)
+def test_pr_4638_r5_1_sections_are_kept_while_their_text_at_both_starts_is_the_same(
+    recorded: str | None, base: str, texts: dict[str, tuple[str, str]] | None, reviewed: set[str]
+) -> None:
+    """詳細レビューの記録は、記録の起点が今の起点と同じならすべて引き継ぎ、違えば 2 つの起点で本文が同じセクションだけ引き継ぐ
+    （`--base` がブランチかコミットか、起点が祖先かは問わない。r4-1・r5-1）。間で文書が変わっていなければすべて引き継ぎ、
+    本文を読めないときと起点の記録が無いときは外す。"""
+    state = {store.REVIEWED: [A, B], store.REVIEWED_MVV: APPROVED, store.REVIEWED_BASE_BRANCH: "main"}
+    if recorded:
+        state[store.REVIEWED_BASE_COMMIT] = recorded
+    basis = scope_decide.Basis(base, mvv=APPROVED, base_branch="main")
+    asked: list[tuple[str, str]] = []
+
+    def read(start: str, now: str, kept: object) -> dict[str, tuple[str, str]] | None:
+        asked.append((start, now))
+        return texts
+
+    assert scope_decide.reviewed_for(state, basis, read) == reviewed
+    # 起点が同じなら、本文を読まない（git を起動しない。r4-2）
+    assert asked == ([] if recorded in (None, base) else [(recorded, base)])
+
+
+@pytest.mark.parametrize(("recorded", "head"), [("main", "h1"), ("sprint/y", None), (None, None)])
+def test_issue_3702_round_base_branch_is_read_from_the_mvv_record(recorded: str | None, head: str | None) -> None:
+    """PR 4638 の r1-4・r1-5: ラウンドの比較元のブランチは MVV を読んだブランチの記録で照らす（前のバージョンが書いたラウンドも使える）。"""
+    mvv = {"id": "absent:::"} if recorded is None else {"id": "absent:::", scope_decide.MVV_BRANCH: recorded}
+    state = {"rounds": [{"round": 1, "head": "h1", "verdict": "converged", scope_decide.MVV: mvv}]}
+    assert scope_decide.read_by_all_head(state, scope_decide.Basis(base_branch="main")) == head
+
+
+def test_issue_3702_changed_base_sends_every_section_to_the_detailed_review(scope_run) -> None:
+    """PR 4638 の r3-1: `--base` を変えた起動は、前の比較元で通ったセクションも詳細レビューに通す（`run` と同じ範囲を返す）。"""
+    rounds = [{"round": 1, "head": "abc", "base": MB}]
+    state = {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS, store.REVIEWED_BASE_BRANCH: "sprint/y"}
+    assert scope_run("design", state)[1]["items"] == [_scope(scope_decide.FULL, None, _SECTIONS)]
+
+
 def test_branch_the_mvv_was_read_from_is_the_last_recorded_one() -> None:
     rounds = [{scope_decide.MVV: {"id": APPROVED, "mvv_branch": "main"}}, {"round": 2}, "壊れたラウンド"]
     assert scope_decide.mvv_branch({"rounds": rounds}) == "main"
@@ -301,7 +400,8 @@ def test_scope_uses_the_same_reviewers_as_run(repos: Repos, tmp_path: Path, caps
     state = tmp_path / "state"
     state.mkdir()
     sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
-    rounds = [{"round": 1, "head": sha, "base": sha, "reviewers": ["codex"], "verdict": "changes_required"}]
+    mvv = {scope_decide.MVV_BRANCH: "main"}
+    rounds = [{"round": 1, "head": sha, "base": sha, "reviewers": ["codex"], "verdict": "changes_required", scope_decide.MVV: mvv}]
     store.write_object(state / store.STATE_NAME.format(pr=8), {store.ORIGIN_KEY: 8, "rounds": rounds})
     base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main", "--purpose", "check"]
     assert run_cli(capsys, *base, "--reviewer", "codex")[1]["items"][0]["scope"] == scope_decide.SINCE
@@ -466,3 +566,24 @@ def test_issue_3955_filled_seats_and_previous_seats() -> None:
     assert scope_decide.read_by_all_head(state, scope_decide.Basis(reviewers=("codex", "claude"))) == "h1"
     swapped = {**state["rounds"][0], "reviewers": ["kiro", "claude"], "filled": [{"seat": "claude", "for": "codex", "reason": "r"}]}
     assert scope_decide.read_by_all_head({"rounds": [swapped]}, scope_decide.Basis(reviewers=("codex", "claude"), stand_in=True)) is None
+
+
+def test_pr_4638_r1_8_base_texts_read_offline_and_drop_missing_blobs(repos: Repos, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """PR 4638 の r1-8: 起点どうしの本文は手元のオブジェクトだけで読み（`NO_LAZY_FETCH`）、変わり方からあるはずの本文が欠けて
+    いれば（部分クローンで手元に無い blob）、無いファイルと読まずに None を返す。"""
+    from ndf.adapters import git
+    from ndf.domains.crossreview import round_scope
+
+    wt = repos.add_worktree(tmp_path / "pr8")
+    start = sh(wt, "rev-parse", "HEAD").strip()
+    commit(wt, "doc.md", "# 設計\n\n## セクション A\n\n変えた\n", "変える")
+    now = sh(wt, "rev-parse", "HEAD").strip()
+    envs: list[object] = []
+    start_git = git._start
+    monkeypatch.setattr(git, "_start", lambda args, *rest, **named: envs.append(named.get("env")) or start_git(args, *rest, **named))
+    kept = {"doc.md#セクション A"}
+    got = round_scope._base_texts(git.Git(wt), start, now, kept)
+    assert got == {"doc.md": ("# 設計\n\n## セクション A\n\n本文\n", "# 設計\n\n## セクション A\n\n変えた\n")}
+    assert len(envs) == 2 and all(e == git.NO_LAZY_FETCH for e in envs)
+    monkeypatch.setattr(git.Git, "blobs", lambda self, *names: [None] * len(names))
+    assert round_scope._base_texts(git.Git(wt), start, now, kept) is None

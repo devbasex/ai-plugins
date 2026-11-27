@@ -54,7 +54,7 @@
       {"use": "fix-base"},
       {
         "id": "review-delta",
-        "run": ["sh", "-c", "r=$0 o=$1 d=$2 m=$4; rm -f \"$3\" && { [ -s \"$o\" ] || cp \"$r\" \"$o\"; } && b=$(cat \"$o\") && shift 4 && \"$@\" --base \"$b\" --state-dir \"$d\" --reviewed-out \"$r\"; c=$?; if [ \"$c\" -eq 0 ]; then rm -f \"$m\" && rm -f \"$o\" || { echo \"差分のレビューのクリーンアップ（$m と $o の削除）に失敗した\" >&2; printf '%s\\n' '{\"status\": \"stopped\", \"cause\": {\"kind\": \"precondition\"}, \"summary\": \"差分のレビューは通ったが、未解決のフラグか起点の記録を消せなかった\"}'; exit 3; }; fi; exit \"$c\"","{state_dir}/reviewed-head", "{state_dir}/delta-base", "{state_dir}/cross-review-delta", "{state_dir}/delta-recheck", "{state_dir}/unresolved-delta", "{{review}}"],
+        "run": ["sh", "-c", "r=$0 o=$1 d=$2 m=$4; rm -f \"$3\" && { [ -s \"$o\" ] || cp \"$r\" \"$o\"; } && b=$(cat \"$o\") && [ -n \"$b\" ] && { [ -L \"$r\" ] || : > \"$r\"; } && shift 4 && \"$@\" --base \"$b\" --state-dir \"$d\" --reviewed-out \"$r\"; c=$?; if [ \"$c\" -eq 0 ]; then rm -f \"$m\" && rm -f \"$o\" || { echo \"差分のレビューのクリーンアップ（$m と $o の削除）に失敗した\" >&2; printf '%s\\n' '{\"status\": \"stopped\", \"cause\": {\"kind\": \"precondition\"}, \"summary\": \"差分のレビューは通ったが、未解決のフラグか起点の記録を消せなかった\"}'; exit 3; }; fi; exit \"$c\"","{state_dir}/reviewed-head", "{state_dir}/delta-base", "{state_dir}/cross-review-delta", "{state_dir}/delta-recheck", "{state_dir}/unresolved-delta", "{{review}}"],
         "on_cause": {"incomplete": "mark-delta-unresolved"},
         "next": "push-reviewed"
       },
