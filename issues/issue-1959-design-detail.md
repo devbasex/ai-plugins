@@ -36,7 +36,7 @@ src/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/adapters/launch_settings.py` | 新設 | 起動の設定を読んで検証し、起動 1 回の指定を返す | launch_approval・agents・git・contracts | `Settings`・`StepSpec`・`Grant` | N: `load`・`step_spec`・`check_definitions`・`approval_target`・`prepared`・`safety_args` |
 | `src/ndf/adapters/launch_approval.py` | 新設 | 承認のハッシュと記録を持つ | identity・git | モジュール | N: `repo_key`・`digest`・`approved`・`append`・`put_question`・`record_answer`・`approve_by_answer`・`pending_request`・`new_candidate`・`reflect`・`recover`・`reflected` |
-| `src/ndf/adapters/launch_candidates.py` | 新設 | 候補のディレクトリを、普通のファイルとして読み、NDF が作ったものだけかを確かめ、退避・消去・元の名前へ戻す（どの候補を片付けるかは `launch_approval` が履歴から決める） | — | `Read` | N: `write_launch_record`・`raw_record`・`record_object`・`ownership`・`stamped_version`・`regular_version`・`same_stamp`・`set_aside`・`settle_aside`・`restore_aside`（`launch_approval.py` から分ける） |
+| `src/ndf/adapters/launch_candidates.py` | 新設 | 候補のディレクトリ内の記録を読む。読む対象は通常ファイルに限り、シンボリックリンクはたどらない。候補の中が NDF の作ったものだけかを確かめ、退避・消去・元の名前へ戻す。作成途中の候補のディレクトリは、隣に残した実体の記録と照らして片付ける。どの候補を片付けるかは `launch_approval` が履歴から決める | — | `Read` | N: `write_launch_record`・`raw_record`・`record_object`・`ownership`・`stamped_version`・`regular_version`・`same_stamp`・`set_aside`・`settle_aside`・`restore_aside`（`launch_approval.py` から分ける）・`start_draft`・`finish_draft`・`reclaim_drafts` |
 | `src/ndf/adapters/secret_forms.py` | 新設 | 秘密の形の表と、当たる文字列を伏せる処理 | — | モジュール | N: `SECRET_VALUE`・`ASSIGNED_SECRET`・`MASK`・`redact`（`domains/project/secret.py` から移す） |
 | `src/ndf/domains/project/secret.py` | 変更 | 移した表と処理を `secret_forms` から読み込む | secret_forms | モジュール | C: 定義の移動 |
 | `src/ndf/adapters/claude.py` | 変更 | 起動の引数と結果 | launch_settings | `ClaudeCall`・`ClaudeReply`・`LaunchOptions`・`LaunchRecorder` | C: `permission_args`・`_full_args`・`call_claude`・`_precheck`・`_parse_reply`・`context_window`・`_accounted`。N: `main_model`・`set_launch_recorder`・`report_launch` |
@@ -89,7 +89,7 @@ src/ndf/
   - 事前条件: `cwd` は起動する作業場所。リポジトリの根は、`cwd` から親へたどって最初に `.git`（ディレクトリかファイル）を持つディレクトリ、無ければ `cwd`。git のプロセスは起動しない。`safety_args` も同じ決め方にする
   - git の起動: 指定が空でない場合の `repo_key`（`git rev-parse --git-common-dir`）の 1 回だけ
   - 事後条件: 指定が空（`load`・`allow`・`mcp` が無い）なら承認を調べず、`sha256` が None の `Grant` を返す。空でなければ承認済みのハッシュを持つ。抜けた後、コピーのディレクトリは無い
-  - 副作用: 状態の保存先の `launch-mcp/<PID>-<一意な値>/`（0700、中のファイルは 0600）を作って消す。隣に管理ファイル（`<id>.owner`）を置き、抜けるまでその錠（`filelock`）を取り続ける。錠の取得は、初回を含めて最大 3 回試す。別の起動の掃除に錠を先に取られて取得できなければ、残りの試行では別の `<id>` を使う。管理ファイルには `row`・`id`・ディレクトリの `dev`・`ino` の記録を JSON で書き、終わりに改行を付ける。作る前に、錠を待たずに取れる管理ファイルを調べ、設計書の「消し残り」の表のとおりに消す。管理ファイルは最後に消す
+  - 副作用: 状態の保存先の `launch-mcp/<PID>-<一意な値>/`（0700、中のファイルは 0600）を作って消す。隣に管理ファイル（`<id>.owner`）を置き、抜けるまでその錠（`filelock`）を取り続ける。錠の取得は、初回を含めて最大 3 回試す。別の起動の掃除に錠を先に取られて取得できなければ、残りの試行では別の `<id>` を使う。管理ファイルには `row`・`id`・ディレクトリの `dev`・`ino`・これから書くコピーの名前（`files`）の記録を JSON で書き、終わりに改行を付ける。作る前に、錠を待たずに取れる管理ファイルを調べ、設計書の「消し残り」の表のとおりに消す。ディレクトリの中で消すのは記録の `files` の普通のファイルだけで、ディレクトリは再帰的に消さない。管理ファイルは最後に消す
 - `safety_args`
   - 事前条件: `use` は `review` か `delegate`
   - 副作用: サンドボックスの確認（`agents.user_namespaces`）と、承認の記録の読み取り
@@ -129,7 +129,7 @@ src/ndf/
 | `load`・`step_spec` | 工程の指定が `*` をキーごとに置き換える | ファイルが無い、`permissions` が空 | `load` に `Bash(...)`・`mcp__` の名前・カンマ、秘密の形の指定子（文に値が出ない。`token=$API_TOKEN` は通る） |
 | `check_definitions` | `command` のサーバと `url` のサーバ | `mcpServers` が空 | 形の誤りの文に値が出ない |
 | `approval_target` | 字下げとキーの順の違いで同じ値 | `inherit` で `.mcp.json` が無い | 定義の中身を変えると値が変わる。引数・`env`・`headers`・URL が一覧に出ない。`mcp` の根の外へ出るシンボリックリンクで止まる |
-| `prepared` | コピーの権限と、抜けた後の削除、掃除と重なったときの取り直し | 指定が空なら記録が無くても通る | 例外でも削除される。設計書の「消し残り」の表の各行（管理ファイルだけが残った途中の消し残り、記録を書く前の空の残り、改行で終わらない書きかけの記録の残り、使用中、管理ファイルの無いもの、記録の形でないもの、置き換わったディレクトリ） |
+| `prepared` | コピーの権限と、抜けた後の削除、掃除と重なったときの取り直し | 指定が空なら記録が無くても通る | 例外でも削除される。設計書の「消し残り」の表の各行（管理ファイルだけが残った途中の消し残り、記録を書く前の空の残り、改行で終わらない書きかけの記録の残り、使用中、管理ファイルの無いもの、記録の形でないもの、置き換わったディレクトリ、記録のコピーのほかに利用者のファイルがあるもの） |
 | `safety_args` | 判定表の各行 | 承認があっても名前空間を作れれば外さない（`verify` は None） | 承認が無ければ停止。引数を返した後の取り消しで `verify` が理由を返す |
 
 ## 起動の承認
@@ -291,7 +291,7 @@ src/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_precheck` | 承認の対象が変わった | 起動の直前の書き換え・取り消し | `options.verify` | 呼び出し元へ返す | 呼び出し元の `precondition` | 子を起動しない。承認して再実行 |
+| `_precheck` | 承認の対象が変わった | 起動の直前の書き換え・取り消し。CLI の最低バージョンの確認（`claude --version` の終了を待つ）の間の取り消しを含む | `options.verify`（最低バージョンの確認の前と、確認した起動では後にも打つ） | 呼び出し元へ返す | 呼び出し元の `precondition`。承認の案内のコマンドには、読み直した現在のハッシュを `--sha256` に載せる | 子を起動しない。承認して再実行 |
 | `report_launch` | 書き込み処理が無い | エントリポイントを通らない呼び出し | None の判定 | 既定値（書かない）で続ける | 出力なし | — |
 | `_parse_reply` | 欄が無い・形が違う | CLI の出力の変化、JSON でない | 読み取り | 欄を None にして続ける | 行の `usage` が `unknown` | — |
 

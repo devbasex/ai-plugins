@@ -426,6 +426,25 @@ def test_draft_reclaims_what_an_interrupted_draft_or_sweep_left(tmp_path):
     assert not drafting.exists() and not removing.exists() and edited.read_bytes() == NEW
 
 
+def test_draft_reclaims_only_what_the_draft_record_identifies(tmp_path):
+    """Value 6: 作成途中の名前の形だけでは消さない。記録と実体が合う作成途中は NDF のファイルだけを消し、利用者の項目を残す。
+    記録の無い作成途中は、中身があれば消さない。"""
+    target = _worktree(tmp_path)
+    home = la.new_candidate("/r", target).candidate.parents[1]
+    users = home / f"{lc.DRAFTING}users"
+    users.mkdir()
+    (users / lc.CANDIDATE_NAME).write_text("利用者の設定案", encoding="utf-8")
+    recorded = lc.start_draft(home, "half")
+    (recorded / lc.CANDIDATE_NAME).write_bytes(NEW)
+    (recorded / "利用者のメモ").write_text("x", encoding="utf-8")
+    la.new_candidate("/r", target)
+    assert (users / lc.CANDIDATE_NAME).read_text(encoding="utf-8") == "利用者の設定案"
+    assert sorted(p.name for p in recorded.iterdir()) == ["利用者のメモ"]
+    (recorded / "利用者のメモ").unlink()
+    la.new_candidate("/r", target)
+    assert not recorded.exists() and not recorded.with_name(recorded.name + lc.DRAFT_RECORD).exists()
+
+
 def test_reflect_replaces_the_target_once_and_the_retry_succeeds_without_writing(tmp_path):
     target = _worktree(tmp_path)
     candidate, edited, untouched = _candidate(target), _candidate(target, b"{}\n"), la.new_candidate("/r", target).candidate

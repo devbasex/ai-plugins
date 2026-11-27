@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import hashlib
 import json
 import os
-import shutil
+import re
 import stat
 import uuid
 from dataclasses import dataclass
@@ -27,6 +28,12 @@ DISCARD_NAME = "discard.json"
 DRAFTING = ".draft-"
 REMOVING = ".removing-"
 SETTLING = ".settling-"
+# 作成途中のディレクトリ `.draft-<名前>` の隣に置く記録 `.draft-<名前>.record` の拡張子。作った直後のディレクトリの実体
+# （`dev`・`ino`）を書く。掃除は、名前の形でなくこの記録と実体が合うディレクトリだけを NDF が作ったものとして片付ける
+DRAFT_RECORD = ".record"
+# 作成途中のディレクトリの中で NDF が作るもの: 候補と反映元の記録、それらを書く途中の一時ファイル（`replace_private` の名前）
+DRAFT_FILES = (CANDIDATE_NAME, SOURCE_NAME)
+DRAFT_TEMP = re.compile(r"\.(" + "|".join(re.escape(n) for n in DRAFT_FILES) + r")\.[0-9a-f]{32}")
 
 
 def replace_private(path: Path, data: bytes) -> None:
@@ -298,10 +305,82 @@ def _remove_own(aside: Path) -> None:
     aside.rmdir()
 
 
+def start_draft(home: Path, name: str) -> Path:
+    """候補の錠の中で、作成途中のディレクトリ `.draft-<name>`（0700）を作り、その実体の記録を隣に書いて、ディレクトリを返す。
+
+    記録を書く前に落ちたディレクトリは空なので、掃除が空のときだけ消す（`reclaim_drafts`）。
+    """
+    home.mkdir(parents=True, exist_ok=True, mode=0o700)
+    drafting = home / f"{DRAFTING}{name}"
+    drafting.mkdir(mode=0o700)
+    st = drafting.lstat()
+    write_launch_record(_draft_record(drafting), {"dev": st.st_dev, "ino": st.st_ino})
+    return drafting
+
+
+def finish_draft(drafting: Path, made: Path) -> None:
+    """作成途中のディレクトリを候補の名前へ付け替え、作成途中の記録を消す。"""
+    os.rename(drafting, made)
+    _draft_record(drafting).unlink(missing_ok=True)
+
+
+def _draft_record(drafting: Path) -> Path:
+    return drafting.with_name(drafting.name + DRAFT_RECORD)
+
+
+def reclaim_drafts(home: Path) -> None:
+    """候補の錠の中で、中断した作成の残りを片付ける。NDF が作ったと確かめられたものだけを消す。
+
+    | 作成途中の記録 | ディレクトリ `.draft-<名前>` | 消すもの |
+    | --- | --- | --- |
+    | 記録の形で、実体が合う | 中が NDF の作るもの（`DRAFT_FILES` と書く途中の一時ファイル）だけ | 中身、ディレクトリ、記録 |
+    | 記録の形で、実体が合う | ほかの項目がある | NDF の作るものだけ（ディレクトリと記録は残す） |
+    | 記録の形で、実体が違うか、無い | — | 記録だけ（ディレクトリは NDF が作ったものでない） |
+    | 記録の形でない | — | 何も消さない |
+    | 無い | 空 | ディレクトリ（記録を書く前に落ちた。中身が無いので利用者のデータは失われない） |
+    | 無い | 中身がある | 何も消さない |
+    """
+    for record in home.glob(f"{DRAFTING}*{DRAFT_RECORD}"):
+        drafting = record.with_name(record.name.removesuffix(DRAFT_RECORD))
+        read = raw_record(record)
+        obj = record_object(read)
+        if read is None or set(obj) != {"dev", "ino"} or not all(type(obj[k]) is int for k in obj):
+            continue
+        if _same_dir(drafting, obj):
+            _remove_draft_files(drafting)
+            if _same_dir(drafting, obj):
+                continue  # 利用者の項目が残っているか、消し切れなかった。ディレクトリと記録を残す
+        record.unlink(missing_ok=True)
+    for left in home.glob(f"{DRAFTING}*"):
+        if not left.name.endswith(DRAFT_RECORD) and not _draft_record(left).exists():
+            with contextlib.suppress(OSError):  # noqa: NDF401 ファイル: 記録の無い作成途中は、空のときだけ消す（中身があれば NDF が作ったと確かめられない）
+                if not left.is_symlink() and left.is_dir():
+                    left.rmdir()
+
+
+def _same_dir(where: Path, obj: Mapping[str, Any]) -> bool:
+    """`where` が記録の実体（`dev`・`ino`）と同じディレクトリか。リンクは同じと見なさない。"""
+    try:
+        st = os.lstat(where)
+    except OSError:  # noqa: NDF401 ファイル: 無いディレクトリは、記録の実体と同じでない
+        return False
+    return stat.S_ISDIR(st.st_mode) and (st.st_dev, st.st_ino) == (obj["dev"], obj["ino"])
+
+
+def _remove_draft_files(drafting: Path) -> None:
+    """作成途中のディレクトリの中の、NDF が作る普通のファイルだけを消し、空になればディレクトリを消す。ほかの項目には触れない。"""
+    with contextlib.suppress(OSError):  # noqa: NDF401 ファイル: 消せなかった残りは、ディレクトリごと次の掃除に任せる
+        with os.scandir(drafting) as it:
+            for entry in list(it):
+                if (entry.name in DRAFT_FILES or DRAFT_TEMP.fullmatch(entry.name)) and entry.is_file(follow_symlinks=False):
+                    os.unlink(entry.path)
+        drafting.rmdir()
+
+
 def settle_aside(home: Path) -> set[str]:
     """候補の錠の中で、作業中のディレクトリを片付け、元の名前へ戻した候補の名前を返す。
 
-    作成途中は中断の残りなので消す。前の掃除が退避した候補は、消してよいと確かめられたものだけを消し、ほかは元の名前へ戻す。
+    作成途中は中断の残りなので、記録と実体の合う NDF の作ったものだけを消す（`reclaim_drafts`）。前の掃除が退避した候補は、消してよいと確かめられたものだけを消し、ほかは元の名前へ戻す。
     戻した候補は、呼び手がこの掃除では退避し直さない（利用者が元のパスへ保存できるようにし、判定は次の掃除でやり直す）。
 
     消す前に、退避した候補を乱数を含む名前（`SETTLING`）へ移してから、開いたままのプロセスを `/proc` で 1 回だけ調べ、
@@ -310,8 +389,7 @@ def settle_aside(home: Path) -> set[str]:
     中身（NDF が作った写し）か反映した中身のままの候補の、NDF が作ったファイルだけである。1 つの候補で失敗しても、ほかの候補の
     片付けと呼び手の操作は続ける。
     """
-    for left in home.glob(DRAFTING + "*"):
-        shutil.rmtree(left, ignore_errors=True)
+    reclaim_drafts(home)
     settling = [_isolate(left) for left in sorted([*home.glob(REMOVING + "*"), *home.glob(SETTLING + "*")])]
     if not settling:
         return set()

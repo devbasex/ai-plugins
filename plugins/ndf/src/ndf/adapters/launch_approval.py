@@ -12,7 +12,6 @@ import functools
 import hashlib
 import json
 import os
-import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -22,7 +21,7 @@ from typing import Any, Callable, Mapping, Optional
 
 from ndf import identity
 from ndf.adapters import launch_candidates, launch_records as records
-from ndf.adapters.launch_candidates import CANDIDATE_NAME, DRAFTING, SOURCE_NAME, Read
+from ndf.adapters.launch_candidates import CANDIDATE_NAME, SOURCE_NAME, Read
 
 APPROVALS = "launch-approvals"
 QUESTIONS = "launch-questions"
@@ -537,6 +536,8 @@ def new_candidate(repo: str, target: Path) -> Draft:
 
     リポジトリごとの候補の錠の中で、中断の残りを片付け、掃除（`_sweep`）をしてから作る。完了の記録も、反映先の worktree が
     無ければ消す。候補は作成途中の名前（`DRAFTING`）のディレクトリで候補と記録をそろえてから付け替え、途中で失敗すれば消す。
+    作成途中のディレクトリは、作った直後に実体の記録を隣に残し（`launch_candidates.start_draft`）、消すのはその記録と合うものの
+    NDF が作ったファイルだけである（`launch_candidates.reclaim_drafts`）。
     写しと反映元のバージョンは反映先の同じ読み取りから作る（別に読むと、間の保存で古い写しに新しいバージョンが付く）。
     """
     home = _store(CANDIDATES) / _short_hash(repo)
@@ -546,16 +547,17 @@ def new_candidate(repo: str, target: Path) -> Draft:
             if _worktree_gone(read_launch_record(record).get("target")):
                 record.unlink(missing_ok=True)
         name = uuid.uuid4().hex
-        drafting, made = home / f"{DRAFTING}{name}", home / name
+        made = home / name
         data, base = _snapshot(target)
+        drafting = launch_candidates.start_draft(home, name)
         try:
             launch_candidates.replace_private(drafting / CANDIDATE_NAME, data)
             launch_candidates.write_launch_record(
                 drafting / SOURCE_NAME, {"target": str(target), "base": base, "written": hashlib.sha256(data).hexdigest()}
             )
-            os.rename(drafting, made)
+            launch_candidates.finish_draft(drafting, made)
         except BaseException:
-            shutil.rmtree(drafting, ignore_errors=True)
+            launch_candidates.reclaim_drafts(home)
             raise
     return Draft(made / CANDIDATE_NAME, leftovers)
 

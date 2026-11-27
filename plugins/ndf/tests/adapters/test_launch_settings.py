@@ -320,9 +320,11 @@ def _left(state: str) -> tuple[Path, Path]:
     ident = "4194399-00000000000000aa"
     where, owner = ls.copies_dir() / ident, _owner(ident)
     where.mkdir(parents=True)
-    record = json.dumps(ls._owner_record(ident, where.lstat())) + ls.RECORD_END
-    if state in ("left", "in_use", "halfway", "replaced", "forged"):
+    record = json.dumps(ls._owner_record(ident, where.lstat(), ("0.json",))) + ls.RECORD_END
+    if state in ("left", "in_use", "halfway", "replaced", "forged", "added"):
         (where / "0.json").write_text("{}", encoding="utf-8")
+    if state == "added":  # 記録の後に、利用者が同じディレクトリへファイルを置いた
+        (where / "利用者のデータ").write_text("x", encoding="utf-8")
     if state == "replaced":  # 記録の後に、別の実体のディレクトリへ置き換わった（同時にあるので inode は違う）
         other = ls.copies_dir() / "other"
         other.mkdir()
@@ -349,6 +351,7 @@ SWEPT = {
     "users": (True, False),  # 管理ファイルの無い利用者のディレクトリ（同じ形の名前）
     "forged": (True, True),  # 管理ファイルの中身が NDF の記録でない
     "replaced": (True, False),  # 記録の後に置き換わった別の実体のディレクトリ
+    "added": (True, True),  # 記録のコピーのほかに利用者のファイルがある（コピーだけを消し、ディレクトリと記録は残す）
 }
 
 
@@ -367,6 +370,8 @@ def test_the_sweep_removes_only_what_ndf_made_and_no_one_uses(repo: Path, state:
     try:
         with ls.prepared("impl", repo):
             assert (where.exists(), owner.exists()) == SWEPT[state]
+            if state == "added":
+                assert sorted(p.name for p in where.iterdir()) == ["利用者のデータ"]
     finally:
         if fd is not None:
             os.close(fd)
@@ -431,6 +436,7 @@ def test_the_check_before_each_child_sees_a_change_after_the_approval(repo: Path
             ls.launch_approval.append(str(repo), sha, ls.launch_approval.Action.REVOKE)
         reason = grant.verify()
         assert reason is not None and "launch-config" in reason and HIDDEN not in reason
+        assert f"--sha256 {ls.approval_target(ls.load(repo)).sha256}" in reason  # 端末の承認に要るハッシュを、読み直した現在の値で案内する
         assert json.loads(grant.mcp_files[0].read_text(encoding="utf-8")) == {"mcpServers": {"search": SERVER}}
 
 

@@ -17,7 +17,7 @@ import os
 import re
 import secrets
 import shlex
-import shutil
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Union
@@ -44,6 +44,8 @@ COPIES = "launch-mcp"
 OWNER_SUFFIX = ".owner"
 # コピーの `<id>`（`<PID>-<一意な値>`）の形。掃除はこの形の名前だけを見る
 COPY_ID = re.compile(r"[0-9]+-[0-9a-f]{16}")
+# ディレクトリ `<id>/` の中で NDF が作る定義のコピーの名前（`<番号>.json`）の形。記録の `files` はこの形の名前だけを持つ
+COPY_NAME = re.compile(r"[0-9]+\.json")
 # 管理ファイルの錠を、作った直後に別の起動の掃除と取り合って取り損ねたとき、別の `<id>` で取り直す回数（最初の 1 回を含む）
 OWNER_ATTEMPTS = 3
 # 記録の終わりを示す文字。記録は JSON の後にこの 1 文字を付けて書く。これで終わらない中身は、書き込みの途中で落ちた記録である
@@ -260,7 +262,10 @@ class Grant:
     repo: Optional[str] = None
 
     def verify(self) -> Optional[str]:
-        """承認の対象を読み直し、確かめた後に変わったか取り消されていれば理由の 1 行。同じなら None。"""
+        """承認の対象を読み直し、確かめた後に変わったか取り消されていれば理由の 1 行。同じなら None。
+
+        理由の文の承認の案内には、読み直した現在の対象のハッシュを `--sha256` に載せる（端末の承認はハッシュの指定が要る）。
+        """
         if self.sha256 is None or self.root is None or self.repo is None:
             return None
         try:
@@ -268,9 +273,12 @@ class Grant:
         except internal.InternalError as exc:
             return f"起動の直前に起動の設定を読み直せない: {exc}"
         if now != self.sha256:
-            return f"起動の設定か MCP の定義ファイルが、承認を確かめた後に変わった（確かめたハッシュ {self.sha256[:8]}）。{_approval_hint(self.root)}"
-        if not launch_approval.is_approved(self.repo, self.sha256):
-            return f"起動の設定の承認が、確かめた後に取り消された（ハッシュ {self.sha256[:8]}）。{_approval_hint(self.root)}"
+            return (
+                f"起動の設定か MCP の定義ファイルが、承認を確かめた後に変わった（確かめたハッシュ {self.sha256[:8]}、"
+                f"現在のハッシュ {now[:8]}）。{_approval_hint(self.root, now)}"
+            )
+        if not launch_approval.is_approved(self.repo, now):
+            return f"起動の設定の承認が、確かめた後に取り消された（ハッシュ {now[:8]}）。{_approval_hint(self.root, now)}"
         return None
 
     @property
@@ -343,8 +351,8 @@ def copies_dir() -> Path:
 def _copies(definitions: list[Any]) -> Iterator[tuple[Path, ...]]:
     """確かめた定義の中身を、所有者だけが読めるコピー（0700 のディレクトリの 0600 のファイル）にして渡し、抜けるときに消す。
 
-    作る順は、管理ファイルの錠を取る → ディレクトリを作る → 記録（ディレクトリの実体を含む）を書く → 定義のコピーを書く。
-    消すときは、ディレクトリを消し終えてから管理ファイルを消す。どこで落ちても、次の掃除が残りを見分けて消せる（`_sweep_copies`）。
+    作る順は、管理ファイルの錠を取る → ディレクトリを作る → 記録（ディレクトリの実体と、これから書くコピーの名前）を書く →
+    定義のコピーを書く。消すときは、記録にあるコピーだけを消してディレクトリを消し終えてから管理ファイルを消す。どこで落ちても、次の掃除が残りを見分けて消せる（`_sweep_copies`）。
     """
     base = copies_dir()
     try:
@@ -354,12 +362,13 @@ def _copies(definitions: list[Any]) -> Iterator[tuple[Path, ...]]:
     except (OSError, Timeout) as exc:
         raise _precondition(f"MCP の定義のコピーの保存先 {base} を作れない（{type(exc).__name__}）") from None
     where = base / ident
+    names = tuple(f"{i}.json" for i in range(len(definitions)))
     try:
         try:
             where.mkdir(mode=0o700)
             os.chmod(where, 0o700)
-            _write_record(base, ident, where.lstat())
-            paths = tuple(_write_private(where / f"{i}.json", json.dumps(raw, ensure_ascii=False)) for i, raw in enumerate(definitions))
+            _write_record(base, ident, where.lstat(), names)
+            paths = tuple(_write_private(where / name, json.dumps(raw, ensure_ascii=False)) for name, raw in zip(names, definitions))
         except OSError as exc:
             raise _precondition(f"MCP の定義のコピーを {where} に書けない（{type(exc).__name__}）") from None
         yield paths
@@ -394,18 +403,19 @@ def _owner_lock(base: Path, ident: str) -> FileLock:
     return FileLock(str(base / f"{ident}{OWNER_SUFFIX}"), timeout=0, mode=0o600)
 
 
-def _owner_record(ident: str, st: os.stat_result) -> dict[str, Any]:
+def _owner_record(ident: str, st: os.stat_result, files: tuple[str, ...]) -> dict[str, Any]:
     """管理ファイルに書く記録。表 ndf-files の行の名前（`row`）、ディレクトリの名前（`id`）、作った直後のディレクトリの
-    実体（`lstat` の `dev`・`ino`）。掃除は JSON の値として比べ、終わりの `RECORD_END` のほかは書式（空白・キーの順）を問わない。"""
-    return {"row": COPIES, "id": ident, "dev": st.st_dev, "ino": st.st_ino}
+    実体（`lstat` の `dev`・`ino`）、ディレクトリの中に NDF が作るコピーの名前（`files`）。掃除が消すのは `files` の名前だけである。
+    掃除は JSON の値として比べ、終わりの `RECORD_END` のほかは書式（空白・キーの順）を問わない。"""
+    return {"row": COPIES, "id": ident, "dev": st.st_dev, "ino": st.st_ino, "files": list(files)}
 
 
-def _write_record(base: Path, ident: str, st: os.stat_result) -> None:
+def _write_record(base: Path, ident: str, st: os.stat_result, files: tuple[str, ...]) -> None:
     """錠を取った管理ファイル（空）に記録を書く。記録の終わりに `RECORD_END` を付け、途中で落ちた書き込みを完成した記録と
     見分けられるようにする（JSON の中に改行は無いので、途中までの中身は `RECORD_END` で終わらない）。"""
     fd = os.open(base / f"{ident}{OWNER_SUFFIX}", os.O_WRONLY | os.O_NOFOLLOW)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(json.dumps(_owner_record(ident, st), ensure_ascii=False) + RECORD_END)
+        f.write(json.dumps(_owner_record(ident, st, files), ensure_ascii=False) + RECORD_END)
 
 
 def _write_private(path: Path, text: str) -> Path:
@@ -447,7 +457,9 @@ def _reclaim_locked(base: Path, ident: str) -> None:
     | --- | --- | --- |
     | 空か、`RECORD_END` で終わらない（記録を書き終える前に落ちた） | 無いか空 | 空のディレクトリと管理ファイル（中身が無いので利用者のデータは失われない） |
     | 空か、`RECORD_END` で終わらない | 中身がある | 何も消さない（NDF が作ったと確かめられない） |
-    | 記録の形で、`id` が名前と同じ | 記録の `dev`・`ino` と同じ実体か、無い | ディレクトリと管理ファイル |
+    | 記録の形で、`id` が名前と同じ | 記録の `dev`・`ino` と同じ実体で、中が記録の `files` の項目だけ | `files` の項目、ディレクトリ、管理ファイル |
+    | 記録の形で、`id` が名前と同じ | 記録の `dev`・`ino` と同じ実体で、`files` のほかの項目がある | `files` の項目だけ（ディレクトリと管理ファイルは残す） |
+    | 記録の形で、`id` が名前と同じ | 無い | 管理ファイル |
     | 記録の形で、`id` が名前と同じ | 記録の `dev`・`ino` と違う実体（リンクを含む。記録の後に置き換わった） | 管理ファイルだけ（ディレクトリは NDF が作ったものでない） |
     | `RECORD_END` で終わるが、記録の形でないか `id` が違う | — | 何も消さない |
     """
@@ -465,10 +477,21 @@ def _reclaim_locked(base: Path, ident: str) -> None:
     if record is None or record["id"] != ident:
         return
     if _is_recorded_dir(where, record):
-        shutil.rmtree(where, ignore_errors=True)
+        _remove_recorded(where, record["files"])
         if _is_recorded_dir(where, record):
-            return  # 消し切れなかった。記録を残して、次の掃除に任せる
+            return  # 利用者の項目が残っているか、消し切れなかった。ディレクトリと記録を残す
     owner.unlink(missing_ok=True)
+
+
+def _remove_recorded(where: Path, files: list[str]) -> None:
+    """記録にあるコピー（`files`）のうち普通のファイルだけを消し、ディレクトリが空になれば消す。ほかの項目には触れない。"""
+    for name in files:
+        path = where / name
+        with contextlib.suppress(OSError):  # noqa: NDF401 ファイル: 消せなかったコピーは残し、ディレクトリごと次の掃除に任せる
+            if stat.S_ISREG(path.lstat().st_mode):
+                path.unlink()
+    with contextlib.suppress(OSError):  # noqa: NDF401 ファイル: 利用者の項目が残ったディレクトリは消さない
+        where.rmdir()
 
 
 def _remove_if_empty(where: Path) -> None:
@@ -486,15 +509,17 @@ def _read_owner(owner: Path) -> Optional[str]:
 
 
 def _parsed_record(text: str) -> Optional[dict[str, Any]]:
-    """記録の形（`_owner_record` と同じキーと型、`row` が `launch-mcp`）なら解いた値、違えば None。"""
+    """記録の形（`_owner_record` と同じキーと型、`row` が `launch-mcp`、`files` がコピーの名前の並び）なら解いた値、違えば None。"""
     try:
         raw = json.loads(text)
     except ValueError:  # noqa: NDF401 ファイル: JSON でない中身は NDF の記録でない
         return None
-    shape = {"row": str, "id": str, "dev": int, "ino": int}
+    shape = {"row": str, "id": str, "dev": int, "ino": int, "files": list}
     if not isinstance(raw, dict) or set(raw) != set(shape) or raw["row"] != COPIES:
         return None
-    return raw if all(isinstance(raw[k], t) and not isinstance(raw[k], bool) for k, t in shape.items()) else None
+    if not all(isinstance(raw[k], t) and not isinstance(raw[k], bool) for k, t in shape.items()):
+        return None
+    return raw if all(isinstance(name, str) and COPY_NAME.fullmatch(name) for name in raw["files"]) else None
 
 
 def _is_recorded_dir(where: Path, record: Optional[Mapping[str, Any]]) -> bool:

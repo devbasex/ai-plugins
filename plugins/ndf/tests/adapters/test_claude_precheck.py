@@ -175,10 +175,24 @@ def _verify_logged(seen: Seen, reason: Optional[str] = None) -> claude.LaunchOpt
 
 
 def test_issue_1959_verify_runs_before_the_floor_and_ready_after_every_check(seen, tmp_path):
-    """照らし直し（`verify`）は確かめ直しの後・下限の前に打ち、起動の準備（`ready`）は確かめをすべて通った後に打つ。"""
+    """照らし直し（`verify`）は確かめ直しの後・下限の前と、下限の後・本体の起動の直前に打ち、起動の準備（`ready`）は確かめをすべて通った後に打つ。"""
     got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen))
 
-    assert got.ok and seen.order == ["slot", "recheck", "verify", "floor", "ready", "launch"]
+    assert got.ok and seen.order == ["slot", "recheck", "verify", "floor", "verify", "ready", "launch"]
+
+
+def test_issue_1959_a_revoke_during_the_floor_check_stops_the_launch(seen, tmp_path):
+    """下限の確かめ（`claude --version` の終了を待つ）の間に承認が取り消されたら、本体を起動せず、起動の準備も打たない。"""
+    answers = iter([None, "取り消された"])
+
+    def verify() -> Optional[str]:
+        seen.order.append("verify")
+        return next(answers)
+
+    options = claude.LaunchOptions(verify=verify, ready=lambda: seen.order.append("ready"))
+    got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, options)
+
+    assert got.failure is claude.Failure.LAUNCH and seen.order == ["slot", "recheck", "verify", "floor", "verify"] and seen.popen == []
 
 
 def test_issue_1959_a_refused_verify_stops_before_the_floor(seen, tmp_path):

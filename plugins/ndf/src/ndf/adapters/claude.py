@@ -680,10 +680,12 @@ def require_claude(run: AccountRun, cwd: Optional[Path], check: bool) -> Optiona
 
 def _precheck(run: AccountRun, cwd: Optional[Path], options: LaunchOptions) -> Optional[ClaudeReply]:
     """起動の直前の確かめ。`run.recheck` が 1 行を返せば `Failure.REFUSED`、次に `options.verify` が 1 行を返せば
-    `Failure.LAUNCH`、最後に CLI の下限（`require_claude`）。すべて通れば `options.ready` を打って None。
+    `Failure.LAUNCH`、次に CLI の下限（`require_claude`）。下限を確かめた起動は、本体を起動する直前に `options.verify` をもう一度打つ。
+    すべて通れば `options.ready` を打って None。
 
     照らし直しは子プロセスを起動しないので、`claude --version` を打つ下限より前に打つ（取り消しで止まる起動に `--version` を打たない）。
-    起動の準備（`ready`）は確かめをすべて通った後に打つので、どの確かめで止まった起動でも準備をしない。
+    下限の確かめは、キャッシュが無ければ `claude --version` の終了を待つ。その間に承認が取り消されても取り消した許可で起動しないよう、
+    下限の後にも照らし直す。起動の準備（`ready`）は確かめをすべて通った後に打つので、どの確かめで止まった起動でも準備をしない。
     """
     refused = run.recheck() if run.recheck is not None else None
     if refused is not None:
@@ -694,6 +696,9 @@ def _precheck(run: AccountRun, cwd: Optional[Path], options: LaunchOptions) -> O
     too_old = require_claude(run, cwd, options.cli_floor)
     if too_old is not None:
         return too_old
+    changed = options.verify() if options.verify is not None and options.cli_floor else None
+    if changed is not None:
+        return ClaudeReply.failed("", changed, failure=Failure.LAUNCH)
     if options.ready is not None:
         options.ready()
     return None
