@@ -48,7 +48,11 @@ def read_rows(
         return [], []
     rows: list[dict[str, Any]] = []
     broken: list[Broken] = []
-    for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+    for number, chunk in enumerate(path.read_bytes().split(b"\n"), 1):
+        line = _decoded(chunk)
+        if line is None:  # 途中で切れた書き込みの断片。この行だけを除く
+            broken.append(Broken(number, "UTF-8 として読めない", len(rows), None))
+            continue
         if not line.strip():
             continue
         raw: Any = None
@@ -84,7 +88,11 @@ def read_rows_after(
     end = data.rfind(b"\n") + 1
     rows: list[dict[str, Any]] = []
     broken = 0
-    for line in data[:end].decode("utf-8").split("\n"):
+    for chunk in data[:end].split(b"\n"):
+        line = _decoded(chunk)
+        if line is None:
+            broken += 1
+            continue
         if not line.strip():
             continue
         try:
@@ -96,6 +104,14 @@ def read_rows_after(
                 raise
             broken += 1
     return rows, broken, start + end
+
+
+def _decoded(chunk: bytes) -> Optional[str]:
+    """1 行のバイト列を UTF-8 として解く。文字の途中で切れた断片なら None（ファイル全体の読み取りを止めない）。"""
+    try:
+        return chunk.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def broken_items(path: Path, broken: list[Broken]) -> list[dict[str, Any]]:
@@ -138,10 +154,26 @@ def lock(path: Path) -> FileLock:
 
 
 def append(path: Path, row: Mapping[str, Any], *, kind: str) -> dict[str, Any]:
-    """種類 `kind` の 1 行を核で確かめてから足し、書いた行を返す（錠は呼び手が持つ）。形が違えば書かずに `InternalError`。"""
+    """種類 `kind` の 1 行を核で確かめてから足し、書いた行を返す。形が違えば書かずに `InternalError`。錠は取らない。
+
+    錠が要るかは呼び手が決める（既存の行を読んでから書く呼び手は `lock` の中で打つか `append_locked` を使う）。行全体を
+    追記の形（`O_APPEND`）の 1 回の書き込みで足すので、錠を取らない書き手どうしでも行は混ざらない。前の書き込みが
+    途中で終わってファイルが改行で終わっていなければ、改行を先に足して断片を 1 行に閉じ込め、この行を巻き込ませない
+    （読み手は断片の行だけを読めない行として除く）。一部しか書けなければ `OSError`。
+    """
     out = internal.write_record(kind, row)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(out, ensure_ascii=False) + "\n")
+    data = (json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o666)
+    try:
+        size = os.fstat(fd).st_size
+        if size and os.pread(fd, 1, size - 1) != b"\n":
+            data = b"\n" + data
+        written = os.write(fd, data)
+    finally:
+        os.close(fd)
+    if written != len(data):
+        raise OSError(f"{path} へ行の一部しか書けなかった（{written}/{len(data)} バイト）")
     return out
 
 
@@ -149,22 +181,3 @@ def append_locked(path: Path, row: Mapping[str, Any], *, kind: str) -> dict[str,
     """錠を取って 1 行足し、書いた行を返す。"""
     with lock(path):
         return append(path, row, kind=kind)
-
-
-def append_unlocked(path: Path, row: Mapping[str, Any], *, kind: str) -> dict[str, Any]:
-    """錠を取らずに 1 行足し、書いた行を返す。形が違えば書かずに `InternalError`。
-
-    行全体を追記の形（`O_APPEND`）で 1 回の書き込みにするので、ほかの書き手の行と混ざらない。錠を持つ書き手が
-    既存の行を読んでいる間も待たない。錠の中で読んで差を書く書き手（`usage.record_subagent`）の結果を変えない行だけに使う。
-    """
-    out = internal.write_record(kind, row)
-    data = (json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
-    try:
-        written = os.write(fd, data)
-    finally:
-        os.close(fd)
-    if written != len(data):
-        raise OSError(f"{path} へ行の一部しか書けなかった（{written}/{len(data)} バイト）")
-    return out

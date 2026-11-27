@@ -102,7 +102,7 @@ def record_cli(usage: Any, meta: Mapping[str, Any], env: Optional[Mapping[str, s
     filled = {key: value for key, value in meta.items() if value is not None}
     row = {"at": jsonl.now(), "caller": CLAUDE_CLI, **filled, "usage": u.as_dict() if u is not None else ud.UNKNOWN}
     try:
-        return jsonl.append_unlocked(usage_log_path(env), row, kind="usage")
+        return jsonl.append(usage_log_path(env), row, kind="usage")
     except (LookupError, OSError, InternalError) as exc:
         print(f"使用量の使用量ログへ書けない: {exc}", file=sys.stderr)
         return None

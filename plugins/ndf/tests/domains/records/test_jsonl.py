@@ -65,7 +65,7 @@ def _wanted(row: Mapping[str, Any]) -> bool:
     return row.get("agent_id") == "a"
 
 
-@pytest.mark.parametrize("fn", [jsonl.append, jsonl.append_locked, jsonl.append_unlocked])
+@pytest.mark.parametrize("fn", [jsonl.append, jsonl.append_locked])
 def test_append_writes_the_stamped_row_and_nothing_when_it_does_not_fit(tmp_path, fn):
     path = tmp_path / "u.jsonl"
     assert fn(path, ROW, kind="usage") == {**ROW, "version": 1}
@@ -74,3 +74,13 @@ def test_append_writes_the_stamped_row_and_nothing_when_it_does_not_fit(tmp_path
     with pytest.raises(InternalError):
         fn(path, {**ROW, "created_at": ROW["at"]}, kind="usage")
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_a_row_after_a_cut_off_write_is_kept_and_only_the_fragment_is_dropped(tmp_path):
+    """途中で終わった追記の断片（UTF-8 の文字の途中で切れたもの）が、次に足した行と後の読み取りを巻き込まない。"""
+    path = tmp_path / "u.jsonl"
+    path.write_bytes(b'{"step": "' + "区".encode("utf-8")[:2])
+    jsonl.append(path, ROW, kind="usage")
+    rows, broken = jsonl.read_rows(path, kind="usage")
+    assert rows == [{**ROW, "version": 1}] and [b.line for b in broken] == [1]
+    assert jsonl.read_rows_after(path, 0, kind="usage") == ([{**ROW, "version": 1}], 1, path.stat().st_size)
