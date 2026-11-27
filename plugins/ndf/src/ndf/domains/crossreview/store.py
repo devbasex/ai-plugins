@@ -32,7 +32,7 @@ REVIEWED = "reviewed_sections"
 REVIEWED_MVV = "reviewed_mvv"
 # `reviewed_sections` のセクションを読んだときの比較元のブランチ（PR のマージ先に合わせる起動だけが比べる。#3702）
 REVIEWED_BASE_BRANCH = "reviewed_base_branch"
-# `reviewed_sections` を読んだときの差分の起点（`--base` と HEAD の merge-base の SHA。`--base` がコミットの起動だけが比べる。#3702）
+# `reviewed_sections` を読んだときの差分の起点（`--base` と HEAD の merge-base の SHA。今の起点と同じかその祖先の記録だけ引き継ぐ。#3702・PR 4638 の r3-1）
 REVIEWED_BASE_COMMIT = "reviewed_base_commit"
 FINDINGS = "findings"
 # MVV の記録を書けなかった原因（保存先のパスを含むので手元だけに残す。書けたら消す。#4076）

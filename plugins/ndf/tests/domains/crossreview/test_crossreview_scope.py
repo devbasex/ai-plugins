@@ -14,19 +14,20 @@ from ndf.domains.records import mvv
 from ._repos import Repos, commit, count_git, run_cli, sh
 
 A, B = "issues/d.md#セクション A", "issues/d.md#セクション B"
-# 詳細レビューを `--base origin/main` の比較元で通した記録（比較元が違う記録は引き継がない。#3702）
-ON_MAIN = {store.REVIEWED_BASE_BRANCH: "main"}
 # ラウンドの記録の比較基点（`--base` と HEAD の merge-base の SHA。PR 3944 の r2-1）。状態ファイルを書く前に本物の SHA へ置き換える
 MB = "<merge-base>"
+# 詳細レビューを `--base origin/main` の比較元と、その merge-base の起点で通した記録（比較元が違う記録は引き継がない。#3702）
+ON_MAIN = {store.REVIEWED_BASE_BRANCH: "main", store.REVIEWED_BASE_COMMIT: MB}
 
 
 def _with_merge_base(data, sha: str):
-    """状態ファイルの中身の `MB` を本物の merge-base の SHA へ置き換え、`run` と同じく既定の相手役と `--base origin/main` の
+    """状態ファイルの中身の `MB`（詳細レビューの記録の起点も）を本物の merge-base の SHA へ置き換え、`run` と同じく既定の相手役と `--base origin/main` の
     比較元のブランチをラウンドに記録する（`review-scope` も今回の相手役と比較元で決める。PR 3944 の r3-4・PR 4638 の r1-1）。"""
     if isinstance(data, dict) and isinstance(data.get("rounds"), list):
         seats = list(participants.assign())
         rounds = [_on_main(r, seats, sha) if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
-        return {**data, "rounds": rounds}
+        start = {store.REVIEWED_BASE_COMMIT: sha} if data.get(store.REVIEWED_BASE_COMMIT) == MB else {}
+        return {**data, "rounds": rounds, **start}
     return data
 
 
@@ -313,25 +314,17 @@ def test_issue_3702_sections_reviewed_against_another_target_are_reviewed_again(
 
 
 @pytest.mark.parametrize(
-    ("recorded", "base", "pinned", "reviewed"),
-    [
-        ("m1", "m1", True, {A, B}),
-        ("m1", "m2", True, set()),
-        (None, "m1", True, set()),
-        ("m1", "m2", False, {A, B}),
-        (None, "m1", False, {A, B}),
-    ],
+    ("recorded", "base", "reviewed"),
+    [("m1", "m1", {A, B}), ("m1", "m2", {A, B}), ("m2", "m1", set()), ("x", "m1", set()), (None, "m1", set())],
 )
-def test_pr_4638_r2_sections_are_kept_while_the_start_of_the_diff_is_the_same(
-    recorded: str | None, base: str, pinned: bool, reviewed: set[str]
-) -> None:
-    """`--base` がコミットの起動は、差分の起点の merge-base が違う記録を引き継がない（r1-2）。起点は入力の形によらず merge-base の
-    SHA で記録するので、ブランチ名で通した記録も同じ merge-base のコミットの起動で引き継ぐ（r2-2）。ブランチの起動は起点を照らさない。"""
+def test_pr_4638_r3_1_sections_are_kept_only_while_the_range_does_not_grow(recorded: str | None, base: str, reviewed: set[str]) -> None:
+    """詳細レビューの記録は、記録の起点が今の起点と同じかその祖先のときだけ引き継ぐ（`--base` がブランチかコミットかは問わない）。
+    ここでは m1 が m2 の祖先。起点が前へ戻った・つながらない・起点の記録が無いなら、前に読んでいない変更が範囲に入りうるので外す。"""
     state = {store.REVIEWED: [A, B], store.REVIEWED_MVV: APPROVED, store.REVIEWED_BASE_BRANCH: "main"}
     if recorded:
         state[store.REVIEWED_BASE_COMMIT] = recorded
     basis = scope_decide.Basis(base, mvv=APPROVED, base_branch="main")
-    assert scope_decide.reviewed_for(state, basis, pinned) == reviewed
+    assert scope_decide.reviewed_for(state, basis, lambda start, now: (start, now) == ("m1", "m2")) == reviewed
 
 
 @pytest.mark.parametrize(("recorded", "head"), [("main", "h1"), ("sprint/y", None), (None, None)])

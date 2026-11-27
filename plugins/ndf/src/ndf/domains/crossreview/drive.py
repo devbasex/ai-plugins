@@ -258,7 +258,6 @@ class _Based(NamedTuple):
     branch: str
     commit: str
     remote: str
-    pinned: bool = False
 
 
 def _sync(cfg: RunConfig, g: git.Git, reader_for: Optional[ReaderFor]) -> _Based:
@@ -279,7 +278,7 @@ def _sync(cfg: RunConfig, g: git.Git, reader_for: Optional[ReaderFor]) -> _Based
         synced = sync(branch)
         return _Based(synced, branch, synced.base, remote)
     synced, base = worktree.fetch_base(g, cfg.base, remote, sync, lambda: _merge_target(cfg, reader_for))
-    return _Based(synced, base.branch, base.commit if base.commit is not None else synced.base, remote, base.commit is not None)
+    return _Based(synced, base.branch, base.commit if base.commit is not None else synced.base, remote)
 
 
 def _snapshot(cfg: RunConfig, based: _Based) -> mvv.Snapshot:
@@ -299,7 +298,7 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide
         raise DriveStopped("precondition", worktree.conflict_detail(synced))
     snap = _snapshot(cfg, based)
     # 差分の比較元をコミットで持つ。起動の途中で別のセッションがベースを取得しても、比べる相手は変わらない（#4090）
-    cfg = replace(cfg, base_commit=based.commit, base_pinned=based.pinned)
+    cfg = replace(cfg, base_commit=based.commit)
     warnings: list[str] = []
     # 重点は呼び手が同期の前に実行者のメインディレクトリから読んだもの。PR の head の設定は相手役と修正担当への指示に
     # しない（PR の作成者が承認を経ずに指摘の採否や直し方を誘導できる。PR 3944 の r3-1）。違えば注意に載せる
@@ -782,7 +781,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     sections = changes.sections(changed.docs)
     head = run.g.rev_parse("HEAD")
     merge_base = _merge_base(run, head)
-    reviewed = scope_decide.reviewed_for(run.data, _basis(run, head), cfg.base_pinned)
+    reviewed = round_scope.reviewed(run.g, run.data, _basis(run, head))
     prev = round_scope.previous_head(run.g, run.data, _basis(run, head), head)
     scope = scope_decide.review_scope(cfg.every_section, round_no, prev, sections, reviewed)
     diff = since = _write_diff(run, round_no, ".diff", scope.base or merge_base, head)

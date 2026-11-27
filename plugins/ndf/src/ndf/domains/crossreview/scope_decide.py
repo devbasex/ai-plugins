@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf.domains.crossreview import finish_decide as fin
@@ -72,32 +72,31 @@ def sections_of(path: str, text: str) -> list[str]:
     return out
 
 
-def reviewed_of(
-    state: Mapping[str, Any], mvv: Optional[str] = None, base_branch: Optional[str] = None, pinned: Optional[str] = None
-) -> set[str]:
+def reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None, base_branch: Optional[str] = None) -> set[str]:
     """状態ファイルの中身から、前のラウンドまでに詳細レビューを通ったセクション（並びでなければ無し）。今の MVV を見分ける
     値 `mvv`（None は確かめない）と違う MVV で通ったセクションは、通っていないとみなす（#4076）。今の比較元のブランチ
-    `base_branch`（None は確かめない）と違う比較元で通ったセクションも、通っていないとみなす。`run` はどの起動でも今の比較元を
-    渡す（`--base` やマージ先を変えれば、新しい全差分のセクションを詳細レビューに通す。比較元が違う記録を範囲の決定に使うと、
-    今の比較元の名前で済んだと書き直す。#3702・PR 4638 の r2-2・r3-1）。`pinned` は差分の起点の merge-base の SHA（None は
-    確かめない）で、記録の起点と違えば通っていないとみなす。`run` と `review-scope` は `reviewed_for` から呼ぶ。"""
+    `base_branch`（None は確かめない）と違う比較元で通ったセクションも、通っていないとみなす。`run` と `review-scope` は
+    差分の起点も照らす `reviewed_for` から呼ぶ（#3702・PR 4638 の r2-2・r3-1）。"""
     if mvv is not None and _known(state.get(store.REVIEWED_MVV)) != mvv:
         return set()
     if base_branch is not None and state.get(store.REVIEWED_BASE_BRANCH) != base_branch:
         return set()
-    if pinned is not None and state.get(store.REVIEWED_BASE_COMMIT) != pinned:
-        return set()
     return set(store.list_of(state, store.REVIEWED))
 
 
-def reviewed_for(state: Mapping[str, Any], basis: Basis, pinned: bool) -> set[str]:
-    """`run` と `review-scope` が共通に使う、今の起動で引き継げる詳細レビューの記録（PR 4638 の r2-1・r2-2）。MVV・比較元の
-    ブランチを `basis` で照らし、`pinned`（`--base` がコミット）なら差分の起点の merge-base（`basis.base`）も照らす。
-    コミットの起動では比較元のブランチが PR のマージ先になり、別のコミットを渡しても一致するためである（r1-2）。ブランチの起動は
-    起点を照らさない（マージ先を PR へマージして merge-base が進んでも、詳細レビューを繰り返さない）。起点は入力の形によらず
-    merge-base の SHA で記録するので、ブランチ名から同じ merge-base の SHA へ替えても引き継ぐ。照らす値はどれも `basis` の
-    値なので、記録を外す起動では最後のラウンドも `basis` に合わず、`run` は前回の収束を返さない（`_reusable`）。"""
-    return reviewed_of(state, basis.mvv, basis.base_branch, basis.base if pinned else None)
+def reviewed_for(state: Mapping[str, Any], basis: Basis, contains: Callable[[str, str], bool]) -> set[str]:
+    """`run` と `review-scope` が共通に使う、今の起動で引き継げる詳細レビューの記録（PR 4638 の r2-1・r3-1）。MVV と比較元の
+    ブランチを `basis` で照らし、差分の起点（`basis.base`。merge-base の SHA）も照らす。記録の起点が今の起点と同じか、その
+    祖先（`contains(記録の起点, 今の起点)`）のときだけ引き継ぐ。今の範囲が前の範囲に含まれ、前に読んでいない変更が範囲に
+    入らないためである。起点が前へ戻った（コミットの `--base` から分岐点の前のブランチへ戻した）なら、間の変更を読んでいない
+    ので引き継がない。起点を記録しない前のバージョンの記録も引き継がない。`--base` がブランチかコミットかは問わない。"""
+    kept = reviewed_of(state, basis.mvv, basis.base_branch)
+    if not kept or basis.base is None:
+        return kept
+    start = state.get(store.REVIEWED_BASE_COMMIT)
+    if not isinstance(start, str) or not start:
+        return set()
+    return kept if start == basis.base or contains(start, basis.base) else set()
 
 
 def _known(value: object) -> str:
