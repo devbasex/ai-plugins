@@ -854,6 +854,16 @@ def test_issue_4363_lowered_finding_stays_lowered_when_raised_again() -> None:
     assert journal.fresh == []
 
 
+def test_issue_4363_lowered_finding_raised_in_another_file_is_asked_again() -> None:
+    """下げた指摘と同じ本文の重い報告が別のファイルで出たら、前の確認を流用せず、今回の位置と 1 文で確かめ直す。"""
+    journal, row = _lowered(path="a.py", line=1)
+    journal.enter(2, [_told(path="a.py", line=9)])
+    assert (row["severity"], row["line"], journal.fresh) == ("minor", 1, [])
+    journal.enter(3, [_told(path="b.py", line=2, impact="別の経路で保存が止まる")])
+    assert (row["severity"], row["path"], row["line"], row["impact"]) == ("major", "b.py", 2, "別の経路で保存が止まる")
+    assert "check" not in row and journal.fresh == ["r1-1"] and journal.revived == ["r1-1"]
+
+
 @pytest.mark.parametrize(
     "before, again, want",
     [("major", "major", "major"), ("critical", "minor", "critical"), ("major", "critical", "critical"), ("major", "nit", "major")],

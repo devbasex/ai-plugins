@@ -434,17 +434,19 @@ class FindingJournal:
         収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。新しく出たか戻った行の本文・1 文・位置は、
         すべての指摘を重ねた後にそろえる（`_align_report`。承認や保護の根拠となる出し直しがあれば、その 1 件にする）。戻った指摘にこのラウンドの 1 文が 1 つも無ければ、行は前の 1 文と
         重さを持ち続けるが、`fresh` に入れず判定役に渡さない（前の経路の 1 文で下げないため）。承認や保護の根拠が
-        無く、違う位置の重い報告が並ぶ指摘も `fresh` に入れない（`_align_report` が None を返す。#4363）。"""
+        無く、違う位置の重い報告が並ぶ指摘も `fresh` に入れない（`_align_report` が None を返す）。確認で下げた指摘が
+        別のファイルの重い報告で出し直されたら、戻った指摘として扱う（`_revive_elsewhere`。#4363）。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
         unexplained: list[str] = []
-        fresh: list[str] = []
         same: dict[str, list[Mapping[str, Any]]] = {}
+        before = len(self.revived)
+        self._revive_elsewhere(by_key, raised, items, round_no)
+        fresh = self.revived[before:]
         _unlower(by_key, raised, items)
         # この呼び出しの前から行が持つ、必ず人の承認が要る操作の番号
         approvals = {fid: tuple(store.list_of(row, REDLINE_ITEMS)) for fid, row in self.rows.items()}
-        before = len(self.revived)
         for item in raised:
             text = item.get("text")
             text = text.strip() if isinstance(text, str) else ""
@@ -480,6 +482,21 @@ class FindingJournal:
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
 
+    def _revive_elsewhere(
+        self, by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str], round_no: int
+    ) -> None:
+        """確認で下げた指摘が、確かめた位置と違うファイルの重い報告で出し直されたら、前の確認の結果を外してその位置の
+        指摘として戻す。キーは本文だけで決まるので、同じキーでも別の経路の不具合でありうる。行の番号は修正でずれるので
+        比べず、どちらかにファイルが無ければ戻さない。#4363"""
+        for item in raised:
+            text = item.get("text")
+            row = by_key.get(oscillation.finding_key(text.strip())) if isinstance(text, str) and text.strip() else None
+            if row is None or not _lowered(row) or not row.get("path"):
+                continue
+            new = _raised(dict(item), criteria_decide.mvv_item(item.get("mvv"), items))
+            if criteria_decide.blocking(new["severity"]) and new.get("path") not in (None, row["path"]):
+                self._revive(row, new, _text(item.get("section")), round_no)
+
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
         未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
@@ -506,7 +523,7 @@ class FindingJournal:
             known["impact"] = new["impact"]
 
     def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
-        """直した・見送った指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
+        """直した・見送った指摘が出し直されたとき（下げた指摘が別のファイルで出たときも）、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
         resolve 済みの古いスレッドへ結び付けない（#4016）。"""
         known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no, OCCURRENCE: new_occurrence()}
         self.revived.append(str(known["id"]))
