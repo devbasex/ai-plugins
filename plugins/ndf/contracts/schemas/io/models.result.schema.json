@@ -79,7 +79,7 @@
               "tokens": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}, "description": "期間の起動のトークンの合計（使用量ログの usage の 4 つ）"},
               "cost_usd": {"type": "number", "minimum": 0, "description": "期間の起動の費用の合計（USD。費用が不明の起動は足さない）"},
               "unpriced_launches": {"type": "integer", "minimum": 0, "description": "費用が不明の起動の数"},
-              "mismatched": {"type": "integer", "minimum": 0, "description": "指定したモデルと実際のモデルが食い違った起動の数"},
+              "mismatched": {"type": "integer", "minimum": 0, "description": "指定したモデルと実際のモデルが食い違った起動の数（- を含まない別名の指定は、実際の ID を - で区切った部分にあれば一致）"},
               "requests": {"type": "integer", "minimum": 0, "description": "成功率の分母のリクエストの数（区分は拒否された行を除いた最初の行の指定値、期間は最後の行）"},
               "success_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "成功のリクエスト ÷ リクエスト。リクエストが無ければ null"},
               "steps": {"type": "integer", "minimum": 0, "description": "worker か Skill の行があるステップの数（区分は attempt が最も小さい行）"},

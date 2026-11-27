@@ -95,9 +95,19 @@ def test_a_launch_of_unknown_cost_is_counted_but_not_added():
     assert (one["launch_count"], one["cost_usd"], one["unpriced_launches"]) == (2, 1.0, 1)
 
 
-def test_a_launch_whose_actual_model_differs_from_the_requested_one_is_counted():
-    rows = [_row("l1", requested_model="sonnet", model="claude-opus-4"), _row("l2", requested_model="sonnet", model="sonnet")]
-    assert _launches(_report(rows), requested_model="sonnet")["mismatched"] == 1
+@pytest.mark.parametrize(
+    ("requested", "actual", "mismatched"),
+    [
+        ("sonnet", "claude-sonnet-5-5", 0),  # 別名の指定は、実際の ID の区切った部分にあれば指定どおり
+        ("claude-sonnet-5-5", "claude-sonnet-5-5", 0),
+        ("sonnet", "claude-opus-4-8", 1),  # 別の系統
+        ("claude-sonnet-5", "claude-sonnet-5-5", 1),  # 完全な ID の指定は同じ値だけが一致する
+        ("son", "claude-sonnet-5-5", 1),  # 部分の一部は別名でない
+    ],
+)
+def test_a_launch_whose_actual_model_differs_from_the_requested_one_is_counted(requested, actual, mismatched):
+    one = _launches(_report([_row("l1", requested_model=requested, model=actual)]), requested_model=requested)
+    assert one["mismatched"] == mismatched
 
 
 def test_a_request_switched_to_the_base_counts_as_a_success_of_the_base():

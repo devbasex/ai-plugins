@@ -149,6 +149,11 @@ def _rate(part: int, whole: int) -> Optional[float]:
     return part / whole if whole else None
 
 
+def _same_model(requested: str, actual: str) -> bool:
+    """指定どおりのモデルか。2 つが同じか、指定が `-` を含まない別名（`sonnet` など）で、実際の ID を `-` で区切った部分にある。"""
+    return requested == actual or ("-" not in requested and requested in actual.split("-"))
+
+
 def _add_launch(t: _Tally, row: Mapping[str, Any], cost: Optional[float]) -> None:
     t.launches += 1
     t.seconds += row["seconds"] if "seconds" in row else 0.0
@@ -158,7 +163,7 @@ def _add_launch(t: _Tally, row: Mapping[str, Any], cost: Optional[float]) -> Non
         t.unpriced += 1
     else:
         t.cost += cost
-    t.mismatched += "requested_model" in row and "model" in row and row["requested_model"] != row["model"]
+    t.mismatched += "requested_model" in row and "model" in row and not _same_model(row["requested_model"], row["model"])
 
 
 def _launch_end(row: Mapping[str, Any]) -> Optional[str]:

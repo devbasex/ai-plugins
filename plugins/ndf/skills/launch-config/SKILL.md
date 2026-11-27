@@ -56,7 +56,8 @@ NDF が非対話で起動する AI（プランの worker・Skill を回す起動
 ### モデルと effort の実験（`experiments`）
 
 `experiments` は、NDF が起動する AI のモデルと effort を変える。効くのは worker（`ndf worker run`）・Skill を回す起動・判定の起動・
-Codex への委譲（`ndf delegate-run`）である。cross-review の相手役にはまだ効かない。
+Codex への委譲（`ndf delegate-run`）・cross-review の相手役（工程 `review`。claude と codex のシート）である。kiro と agy のシートには
+値を渡さない。cross-review の修正担当は抽選せず、起動の引数と環境変数の指定だけが効く。cross-refactoring の相手役は変えない。
 
 NDF は工程ごとの選択肢（モデルと effort の組）を同梱している。各工程の選択肢の先頭の組を、基準の組と呼ぶ。割り付けの単位を持つ起動は、
 単位ごとに選択肢から 1 組を抽選し、同じ単位の起動はすべて同じ組を使う。単位の無い起動は基準の組を使う。`experiments` は同梱の値のうち
