@@ -48,17 +48,21 @@ class MergeTarget(NamedTuple):
 
 
 class MergeRow(NamedTuple):
-    """マージの承認の証跡の 1 行。`production` は承認資料に示した「本番へ反映されるか」、`record_id` は回答の記録の識別子。"""
+    """マージの承認の証跡の 1 行。`production` は承認資料に示した「本番へ反映されるか」、`record_id` は回答の記録の識別子。
+
+    `url` は PR から読んだ行だけが持つ、行を書いたコメントの URL（本文には書かない）。"""
 
     answer: str
     by: str
     target: MergeTarget
     production: bool
     record_id: str
+    url: str = ""
 
 
 class Revocation(NamedTuple):
-    """取り消す承認。`approvals` は開き直す工程が書いた承認の記録の識別子、`record_id` は取り消しの行の記録の識別子。"""
+    """取り消す承認。`approvals` は開き直す工程が書いた承認を指す値（回答は記録の識別子、MVV 判定はコメントの URL）、
+    `record_id` は取り消しの行の記録の識別子。"""
 
     target: MergeTarget
     approvals: frozenset[str]
@@ -68,11 +72,6 @@ class Revocation(NamedTuple):
 def presented_record_id(gate_id: str, presentation: str | None) -> str:
     """承認ゲートの回答の記録の識別子（質問の id と提示の識別子。提示の識別子が無ければ質問の id のまま）。"""
     return f"{gate_id}-{presentation}" if presentation else gate_id
-
-
-def mvv_record_id(gate: str, head: str) -> str:
-    """MVV 判定が通した承認の記録の識別子。"""
-    return f"mvv:{gate}:{head}"
 
 
 def render_merge_row(row: MergeRow) -> str:
@@ -137,7 +136,7 @@ def merge_rows(hub: GitHub, number: int, viewer: Viewer) -> list[MergeRow]:
             continue
         row = _parse_merge_row(c.body)
         if row is not None:
-            rows.append(row)
+            rows.append(row._replace(url=c.url))
     return rows
 
 
@@ -164,7 +163,7 @@ def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer) -> bool:
 
 def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Viewer) -> None:
     """対象ごとに、最新の証跡が `approvals` の承認なら担い手 `reopen` の却下の行を投稿する。承認が無い・既に却下・
-    最新の承認が別の記録（残す工程や別のステートマシンの承認）なら書かない。
+    最新の承認が別のもの（残す工程や別のステートマシンの承認）なら書かない。
 
     コメントの一覧は PR ごとに 1 回だけ読み、公開範囲は全体で 1 回だけ照会する。`ndf ci merge` は同じ対象の最新の行が
     却下なら承認が無いと扱う（`merge_judgment`）。打ち直しで行は増えない。`viewer` のアカウント ID が読めていなければ
@@ -175,7 +174,7 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
         if target.number not in read:
             read[target.number] = merge_rows(hub, target.number, viewer)
         latest = merge_judgment(read[target.number], target)
-        if latest is None or latest.record_id not in approvals:
+        if latest is None or approvals.isdisjoint((latest.record_id, latest.url)):
             continue
         publisher.comment(target.number, render_merge_row(MergeRow(REJECTED, REOPEN_BY, target, True, record_id)))
 

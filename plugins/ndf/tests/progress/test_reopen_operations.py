@@ -14,7 +14,7 @@ import merge_hub
 import pytest
 from result_json import last_result
 
-from ndf.adapters.github import GitHubError
+from ndf.adapters.github import Authored, GitHubError
 from ndf.core import merge_approval
 from ndf.progress import command, gate, invoke, model, reopening, run, store
 from ndf.progress.gate import asking, finishing
@@ -324,6 +324,21 @@ def test_a_later_approval_from_elsewhere_is_not_revoked(repo, st, env, capsys):
     assert _judgment(env, target) == row
 
 
+@pytest.mark.parametrize(("note", "revoked"), [(1, False), (2, True)])
+def test_an_mvv_approval_is_matched_by_its_comment(note, revoked):
+    """2 つのスプリントの MVV 判定は記録の識別子が同じになるので、判定のコメントの URL で取り消す承認を分ける。"""
+    hub = merge_hub.MergeHub()
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+    row = merge_approval.MergeRow("approved", "mvv", target, True, f"mvv:design:{merge_hub.HEAD}")
+    body = f"{merge_approval.MVV_NOTE_HEADING}design）\n{merge_approval.render_merge_row(row)}"
+    hub.comments_of[7] = [Authored(hub.login, "OWNER", body, f"url-{n}", author_id=hub.account_id) for n in (1, 2)]
+
+    revocation = merge_approval.Revocation(target, frozenset({f"url-{note}"}), "reopen:x")
+    merge_approval.write_revocations(hub, [revocation], hub.viewer())
+
+    assert ("post_comment" in hub.calls) is revoked
+
+
 def test_revocations_read_the_comments_of_a_pr_once():
     hub = merge_hub.MergeHub()
     targets = [merge_approval.MergeTarget(merge_hub.REPO, 7, "main", head) for head in (merge_hub.HEAD, merge_hub.OTHER)]
@@ -392,6 +407,7 @@ def test_the_trail_of_an_mvv_verdict_without_a_recorded_answer_is_also_revoked(r
     lanes.turn(st, tid, repo, env.env)
     v = run.read(st, tid)
     held = {"gate": "design", "skip": True, "head": merge_hub.HEAD, "target": {"repo": "o/r", "pr": 7, "base": "main", "production": True}}
+    held["note_url"] = "https://example.invalid/7#1"
     payload = {"step": "design-mvv", "status": "finished", "report": {"outputs": {"mvv_gate": held}}}
     draft = model.EventDraft("step_recorded", "workflow", DESIGN, payload=payload, rev=v.rev)
     judged = replace(v, events=[*v.events, model.Event(v.events[-1].seq + 1, v.events[-1].at, draft)])
@@ -399,7 +415,7 @@ def test_the_trail_of_an_mvv_verdict_without_a_recorded_answer_is_also_revoked(r
     planned = reopening.plan_reopen(judged, DESIGN, later="keep", reason="r", trigger={"by": "retry"})
 
     target = merge_approval.MergeTarget("o/r", 7, "main", merge_hub.HEAD)
-    assert [(r.target, r.approvals) for r in planned.revoke] == [(target, {merge_approval.mvv_record_id("design", merge_hub.HEAD)})]
+    assert [(r.target, r.approvals) for r in planned.revoke] == [(target, {held["note_url"]})]
 
 
 def test_a_reopen_by_hand_does_not_count_as_a_user_choice(repo):

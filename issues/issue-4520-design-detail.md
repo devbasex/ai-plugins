@@ -189,11 +189,12 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | --- | --- | --- | --- | --- |
 | `plan_reopen` | `progress/reopening.py` | 新設 | `(v: View, stage: str, *, later: str, reason: str, trigger: Mapping, notes: str \| None) -> Reopen` | 開き直す工程を決め、`reopened` と `enabled` の下書き、進みがあった工程の名前、取り消されない操作の警告、取り消す承認の対象を返す（書かない） |
 | `revoke_approvals` | `progress/reopening.py` | 新設 | `(r: Reopen, post: Revoke) -> None` | 取り消す承認があれば、まとめて `write_revocations` へ渡す。`answer` と `_cmd_retry` が DB の追記より前に呼ぶ |
-| `write_revocations` | `core/merge_approval.py` | 新設 | `(hub: GitHub, revocations: Sequence[Revocation], viewer: Viewer) -> None` | 対象の最新の証跡が `approvals` の承認なら、`回答: rejected`・`担い手: reopen` の行を書く。それ以外は書かない。コメントの一覧は PR ごとに 1 回読む |
+| `write_revocations` | `core/merge_approval.py` | 新設 | `(hub: GitHub, revocations: Sequence[Revocation], viewer: Viewer) -> None` | `merge_judgment` が選ぶ対象の最新の証跡が `approvals` の承認なら、`回答: rejected`・`担い手: reopen` の行を書く。それ以外は書かない。コメントの一覧は PR ごとに 1 回読む |
 | `work_stopped` | `progress/reopening.py` | 新設 | `(st: Store, machine_id: str) -> ContextManager[None]` | 作業の排他を取り、起動のマーカーも確かめる。作業が流れていれば断る |
 | `_cmd_retry` | `progress/gate/finishing.py` | 変更 | `(a: Namespace, cwd: Path, st: Store) -> dict` | 失敗の工程は今のまま `retry` を書き、終了と手で終えた回答待ちは `--later` を必須にして開き直す |
 
-- `Reopen`（新設の型）: `drafts: list[EventDraft]`・`stages: list[str]`・`gates: list[tuple[str, str]]`（取り下げの対象の工程と承認ゲート）・`warnings: list[str]`・`revoke: list[Revocation]`（直近の開き直しより後の承認のうち、証跡を書いた対象、その承認の記録の識別子の集合、取り消しの行の記録の識別子 `reopen:<ステートマシンの ID>:<工程>:<回答の事象の番号>`）
+- `Reopen`（新設の型）: `drafts: list[EventDraft]`・`stages: list[str]`・`gates: list[tuple[str, str]]`（取り下げの対象の工程と承認ゲート）・`warnings: list[str]`・`revoke: list[Revocation]`（直近の開き直しより後の承認のうち、証跡を書いた対象、その承認を指す値の集合、取り消しの行の記録の識別子 `reopen:<ステートマシンの ID>:<工程>:<回答の事象の番号>`）
+- 承認を指す値は、利用者の回答なら証跡の記録の識別子である。MVV 判定が通した承認は、判定のコマンドの出力 `mvv_gate.note_url`（証跡を書いたコメントの URL）である。今の MVV の証跡は判定のコメントに入り、記録の識別子 `mvv:<ゲート>:<HEAD>` は別のステートマシンの判定と同じになる。証跡を別のコメントに分けて識別子へ質問の id を入れる変更（Task 3）では、照らす値も記録の識別子に変える
 - `later` は `reopen` か `keep`。`keep` は指定の工程だけを対象にする。無効と中止の工程は開き直さない。ただし、開き直す工程がリリースしないで終えて無効にした工程（`disabled` の `cause: no_release` と工程名が一致する）には、`later` の値によらず `enabled` を足す
 - `core/merge_approval.py` の証跡の読み取りは、担い手 `reopen` を却下の行でだけ数える
 - 取り消されない操作は、対象の工程のうち、定義がマージかリリースのステップを持ち、工程が終了したか、そのステップの成功を直近の開き直しより後に記録したものを挙げる

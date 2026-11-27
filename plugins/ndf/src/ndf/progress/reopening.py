@@ -7,6 +7,7 @@ PR のコメントの証跡だけを読む `ndf ci merge` のために、開き�
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
@@ -33,27 +34,35 @@ class Reopen:
     revoke: list[merge_approval.Revocation]
 
 
-def _state(v: View, stage: str) -> Optional[str]:
-    row = v.rows.get(stage)
+# 工程 → 直近の開き直しより後の事象（改訂を問わない。証跡は改訂が変わっても PR に残る）
+Since = Mapping[str, list[model.Event]]
+
+
+def _since_reopened(v: View) -> Since:
+    """履歴を 1 回だけたどって、工程ごとの直近の開き直しより後の事象を集める。事象の無い工程は空。"""
+    cut = stages.reopened_at(v.events)
+    out: defaultdict[str, list[model.Event]] = defaultdict(list)
+    for ev in v.events:
+        stage = ev.draft.row_key
+        if stage is not None and ev.seq > (cut[stage] if stage in cut else 0):
+            out[stage].append(ev)
+    return out
+
+
+def _state(rows: Mapping[str, model.RowState], stage: str) -> Optional[str]:
+    row = rows.get(stage)
     return row.state if row is not None else None
 
 
-def _since_reopened(v: View, stage: str) -> list[model.Event]:
-    """工程の直近の開き直しより後の事象（改訂を問わない。証跡は改訂が変わっても PR に残る）。"""
-    after = v.last_reopened(stage)
-    return [ev for ev in v.events if ev.draft.row_key == stage and ev.seq > after]
-
-
-def _progressed(v: View, stage: str) -> bool:
+def _progressed(v: View, rows: Mapping[str, model.RowState], since: Since, stage: str) -> bool:
     """工程に開き直すものがあるか（無効と中止は開き直さない。未着手は、前に流した記録があるときだけ）。"""
-    state = _state(v, stage)
+    state = _state(rows, stage)
     # 終わりの状態のうち開き直すのは終了だけ
     if state is None or (model.is_terminal(state) and state != FINISHED):
         return False
-    after = v.last_reopened(stage)
     # 流した・回答した・出力を書いた記録（作成と、無効と有効の切り替えは進みに数えない）
     ran = (STARTED, ANSWERED, stages.OUTPUTS_EVENT)
-    return state != "pending" or any(ev.seq > after and ev.draft.kind in ran for ev in v.row_events(stage))
+    return state != "pending" or any(ev.draft.rev == v.rev and ev.draft.kind in ran for ev in since[stage])
 
 
 def _target_of(seen: Any, head: Any = None) -> Optional[merge_approval.MergeTarget]:
@@ -83,19 +92,21 @@ def _trail(ev: model.Event) -> Optional[tuple[merge_approval.MergeTarget, str]]:
     if not isinstance(held, Mapping) or held.get("skip") is not True:
         return None
     target = _target_of(held.get("target"), held.get("head"))
-    return None if target is None else (target, merge_approval.mvv_record_id(str(held.get("gate")), target.head))
+    # 記録の識別子は別のステートマシンの判定と同じになるので、証跡を書いたコメントの URL で指す
+    url = held.get("note_url")
+    return (target, url) if target is not None and isinstance(url, str) and url else None
 
 
-def _revocations(v: View, names: list[str]) -> list[merge_approval.Revocation]:
+def _revocations(since: Since, machine_id: str, names: list[str]) -> list[merge_approval.Revocation]:
     found: dict[merge_approval.MergeTarget, merge_approval.Revocation] = {}
     for name in names:
-        for ev in _since_reopened(v, name):
+        for ev in since[name]:
             trail = _trail(ev)
             if trail is None:
                 continue
             target, approval = trail
             approvals = found[target].approvals if target in found else frozenset()
-            found[target] = merge_approval.Revocation(target, approvals | {approval}, f"reopen:{v.machine_id}:{name}:{ev.seq}")
+            found[target] = merge_approval.Revocation(target, approvals | {approval}, f"reopen:{machine_id}:{name}:{ev.seq}")
     return list(found.values())
 
 
@@ -104,20 +115,16 @@ def _outward(step: stages.StepDef) -> bool:
     return step.kind == "merge" or step.kind == "release"
 
 
-def _acted(v: View, s: stages.StageDef) -> bool:
+def _acted(rows: Mapping[str, model.RowState], since: Since, s: stages.StageDef) -> bool:
     """工程の外への操作が済んでいるか。工程が終了したか、直近の開き直しより後に外への操作のステップの成功を記録した
     （その後のステップや出力の検証で失敗した工程も含む）。"""
     outward = {step.id for step in s.steps if _outward(step)}
     if not outward:
         return False
-    if _state(v, s.name) == FINISHED:
+    if _state(rows, s.name) == FINISHED:
         return True
-    recorded = (event_payload(ev) for ev in _since_reopened(v, s.name) if ev.draft.kind == STEP_EVENT)
+    recorded = (event_payload(ev) for ev in since[s.name] if ev.draft.kind == STEP_EVENT)
     return any(p.get("step") in outward and p.get("status") == FINISHED for p in recorded)
-
-
-def _irreversible(v: View, names: list[str]) -> list[str]:
-    return [f"工程 {s.name} のマージ・リリースは取り消されない" for s in v.snap.stages if s.name in names and _acted(v, s)]
 
 
 def plan_reopen(v: View, stage: str, *, later: str, reason: str, trigger: Mapping[str, Any], notes: Optional[str] = None) -> Reopen:
@@ -128,11 +135,13 @@ def plan_reopen(v: View, stage: str, *, later: str, reason: str, trigger: Mappin
         raise model.Refused(f"ステートマシン {v.machine_id} は{model.label(v.whole)}で、工程を開き直せない")
     order: list[stages.StageDef] = list(v.snap.stages)
     at = order.index(v.snap.stage(stage))
-    behind = [s.name for s in order[at + 1 :] if _progressed(v, s.name)] if later == REOPEN else []
+    rows, since = v.rows, _since_reopened(v)
+    behind = [s.name for s in order[at + 1 :] if _progressed(v, rows, since, s.name)] if later == REOPEN else []
     names = [stage, *behind]
     payload = {"trigger": dict(trigger), "notes": notes, "later": later}
     drafts = [model.EventDraft(REOPENED, CONDUCTOR, name, reason=reason, payload=payload, rev=v.rev) for name in names]
-    return Reopen(drafts, names, _irreversible(v, names), _revocations(v, names))
+    warnings = [f"工程 {s.name} のマージ・リリースは取り消されない" for s in order if s.name in names and _acted(rows, since, s)]
+    return Reopen(drafts, names, warnings, _revocations(since, v.machine_id, names))
 
 
 def revoke_approvals(r: Reopen, post: Revoke) -> None:
