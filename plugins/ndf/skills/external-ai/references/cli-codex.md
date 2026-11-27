@@ -22,19 +22,13 @@ Codex の既定サンドボックスは `bubblewrap (bwrap)` に依存する。�
 - **WSL2**（カーネルで `unprivileged_userns_clone` が無効）
 - **一部の devcontainer / Docker 環境**（user namespace 非対応）
 
-該当環境では `--dangerously-bypass-approvals-and-sandbox` を付けて起動する。
+安全装置の引数は自分で書かず、`ndf delegate-run` に入れさせる。`ndf delegate-run` は名前空間を作れるか（`unshare -Ur true` が通るか）を
+確かめ、作れれば `-s workspace-write`（`--use review` なら `-s read-only`）で起動する。作れない環境では、起動の設定
+（`.ndf/launch.json` の `permissions.unsandboxed`）で codex を承認したときだけ `--dangerously-bypass-approvals-and-sandbox` で起動し、
+承認が無ければ起動せずに止まる。
 
-```bash
-# ❌ サンドボックス有効（bwrap 失敗で exec コマンドが全滅）
-codex exec -s read-only -C "$PWD"
-
-# ✅ サンドボックスバイパス（外側が既にコンテナ等で隔離されている前提）
-codex exec --dangerously-bypass-approvals-and-sandbox -C "$PWD"
-```
-
-**判断基準**: Docker / devcontainer / VM / CI ランナー等で外部的に隔離済みなら実用上安全。
-ホスト直接実行でコードを全書き換えされたくない場合はフラグを付けず、下記の bwrap 代替で対処する。
-`-s read-only` / `-s workspace-write` も bwrap を使うため、フラグなしでは同じ失敗になる点に注意。
+**判断基準**: 承認するのは、Docker / devcontainer / VM / CI ランナー等で外部的に隔離済みの環境に限る。
+ホスト直接実行でコードを全書き換えされたくない場合は承認せず、下記の bwrap 代替で名前空間を作れるようにする。
 
 ### bwrap 代替の有効化（ホスト直接実行時）
 
@@ -49,17 +43,18 @@ echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/00-local-user
 ## 起動コマンド
 
 次の形で起動する（`timeout <秒>` で包む。秒は SKILL.md の「共通の実行手順」）。プロンプトは **stdin へ流し**、
-`-C` で作業ディレクトリを渡す。
+作業ディレクトリへ移ってから `-C "$PWD"` で渡す。
 
 ```bash
-codex exec --dangerously-bypass-approvals-and-sandbox --config model_reasoning_effort=medium \
-  -C <workdir> [--model M] < <prompt> > <stem>-stdout.log 2> <stem>-err.log
+cd <workdir>
+ndf delegate-run --runtime codex -- codex exec '{args}' --config model_reasoning_effort=medium \
+  -C "$PWD" [--model M] < <prompt> > <stem>-stdout.log 2> <stem>-err.log
 ```
 
 | オプション | 用途 |
 |---|---|
-| `-C <dir>` | 作業ディレクトリ。指定しないと cwd が想定と異なりファイルを読めなくなる |
-| `--dangerously-bypass-approvals-and-sandbox` | bwrap 非対応環境で必須。外部隔離環境内でのみ使用する |
+| `'{args}'` | 安全装置の引数を `ndf delegate-run` が入れる位置。`-s` などを自分で書くと拒まれる |
+| `-C "$PWD"` | 作業ディレクトリ。指定しないと cwd が想定と異なりファイルを読めなくなる。今のディレクトリと違う場所は拒まれる |
 | `--config model_reasoning_effort=medium` | `high` だと思考へ偏り最終 message を返さない頻度が上がるため、既定で `medium` を推奨 |
 | `-o <file>` | 最終 message を、呼び出した側が決めたファイルへ書かせる。プロンプトに出力先を書けないときに使う。最終 message が無ければ中身は得られない |
 | `--json` | JSON Lines でイベントを出力。`event.type=assistant_message` を grep すれば確実に本文を取れる |
@@ -118,8 +113,9 @@ stderr の `^tokens used$` sentinel と結果ファイルで見て、上限は�
 ```bash
 FINAL=$TMP/codex-api-v2-review.md
 # プロンプト（出力先に $FINAL を書く）はファイル書き込みツールで $TMP/review-prompt.md に置く
-timeout 1320 codex exec --dangerously-bypass-approvals-and-sandbox --config model_reasoning_effort=medium \
-  -C /workspace < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
+cd /workspace
+timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}' --config model_reasoning_effort=medium \
+  -C "$PWD" < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
 # => $FINAL があればそれを、無ければ $TMP/codex-stdout.log を読む
 ```
 
@@ -134,15 +130,16 @@ timeout 1320 codex exec --dangerously-bypass-approvals-and-sandbox --config mode
 
 ### Q2. `bwrap: No permissions to create a new namespace` で exec 失敗
 
-**原因**: `--dangerously-bypass-approvals-and-sandbox` を付け忘れ、かつ環境が user namespace 非対応。
+**原因**: `ndf delegate-run` を通さずに codex を起動し、かつ環境が user namespace 非対応。
 
-**対処**: フラグを追加して再実行する。ホストで有効化する方法は「サンドボックス制約」セクションを参照。
+**対処**: `ndf delegate-run` で打ち直す。止まったら、外部隔離環境であることを確かめて `/ndf:launch-config` で codex を承認するか、
+ホストで名前空間を有効化する（「サンドボックス制約」セクション）。
 
 ### Q3. 「ファイルを読めません」と返ってくる
 
 **原因**: サンドボックス有効で読み取りに失敗、またはプロンプトの相対パスと cwd の不一致。
 
-**対処**: `--dangerously-bypass-approvals-and-sandbox` を追加し、プロンプトには絶対パス、`-C` で cwd を明示する。
+**対処**: プロンプトには絶対パスを書き、対象のディレクトリへ移ってから `-C "$PWD"` を渡す。サンドボックスが読み取りを止めたなら Q2 を見る。
 
 ### Q4. 認証エラー（`Unauthorized` / `token expired`）
 

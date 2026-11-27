@@ -73,6 +73,16 @@
 
 結果の `metrics`: `findings`（integer）・`rounds`（integer）。`items` の要素: `after`（string）・`base`（string か null）・`before`（string）・`branch`（string）・`conflicts`（array of string）・`current_pr`（integer）・`head`（string か null）・`id`（string）・`kind`（string）・`locked`（string）・`number`（integer）・`ok`（boolean）・`origin_head`（string か null）・`origin_pr`（integer）・`outcome`（string）・`path`（string）・`points_to`（string）・`reason`（string か null）・`rebased`（boolean）・`remote`（string）・`replayed`（integer）・`scope`（string）・`slug`（string）・`source`（string）・`unreviewed`（array of string）・`url`（string）
 
+## `ndf delegate-run`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/delegate-run.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/delegate-run.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf delegate-run` | `--runtime`（string・必須・値 `codex`・`agy`・`kiro`）: 起動するランタイム<br>`--use`（string・任意・既定 `"delegate"`・値 `review`・`delegate`）: 用途（読むだけの委譲は review）<br>`command`（array of string・任意・位置）: -- の後に CLI のコマンド（{args} を 1 つ持つ） |
+
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `retired_from`（string）・`retired_to`（string）
+
 ## `ndf document-rebuild`
 
 内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/document-rebuild.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/document-rebuild.result.schema.json)

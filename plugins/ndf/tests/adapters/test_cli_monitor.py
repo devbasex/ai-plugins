@@ -91,3 +91,20 @@ def test_start_failure_is_a_failed_status(tmp_path):
 
     assert (status.state, status.exit_code) == ("failed", None)
     assert status.detail.startswith("起動できない")
+
+
+@pytest.mark.parametrize(("reason", "launched"), [(None, True), ("承認が取り消された。/ndf:launch-config で承認する", False)])
+def test_the_check_just_before_the_start_decides_whether_the_child_starts(tmp_path, monkeypatch, reason, launched):
+    """#1959: 起動の直前の照らし直し（`Launch.verify`）が理由を返せば子を起動せず refused。None なら起動する。"""
+    from ndf.adapters import cli_floor
+
+    monkeypatch.setattr(cli_floor, "require", lambda *a, **k: False)
+    started: list[agents.Launch] = []
+    monkeypatch.setattr(
+        agents, "_start_and_watch", lambda spec, poll: started.append(spec) or agents.AgentStatus(spec.agent, "done", 0, "", ())
+    )
+    spec = agents.Launch("codex", ("codex",), tmp_path, agents.AgentPaths.at(tmp_path / "run"), 30, verify=lambda: reason)
+    status = agents._guarded_run(spec, None)
+    assert bool(started) is launched
+    assert status.state == ("done" if launched else agents.AgentState.REFUSED)
+    assert launched or status.detail == reason

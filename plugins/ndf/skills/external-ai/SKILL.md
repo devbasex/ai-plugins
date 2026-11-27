@@ -55,7 +55,7 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 | 観点 | Codex | agy | Kiro | Claude |
 |---|---|---|---|---|
 | stdout の信頼性 | 最終 message が落ちることがある（ファイル書き出し必須） | stdout に response が直接出る | ANSI エスケープが必ず混ざる | `--output-format json` で構造化される |
-| 承認の与え方 | `--dangerously-bypass-approvals-and-sandbox` | `--dangerously-skip-permissions`（**作業領域の外への書き込みは止まらない**） | `--trust-all-tools`（**絞り込みは防御にならない**） | `--permission-mode acceptEdits` + `--allowed-tools` |
+| 安全装置の引数 | `ndf delegate-run` が入れる。サンドボックスが使えれば `-s workspace-write`、使えず承認があれば `--dangerously-bypass-approvals-and-sandbox` | `ndf delegate-run` が承認のあるときだけ `--dangerously-skip-permissions` を入れる（**作業領域の外への書き込みは止まらない**） | `ndf delegate-run` が承認のあるときだけ `--trust-all-tools` を入れる（**絞り込みは防御にならない**） | `--permission-mode acceptEdits` + `--allowed-tools` |
 | 非対話実行 | `codex exec` で完結。プロンプトは**標準入力必須** | `-p=<本文>` で渡す。**標準入力は受け取らない** | `chat --no-interactive` | `-p` |
 | 完了判定 | stderr の `^tokens used$` sentinel | プロセス終了（`kill -0` / `wait`） | **終了コードは使えない。** 結果ファイルと stderr の検証 | JSON の `is_error` / `subtype` |
 | 実測モデルの取得 | セッションの記録（`$CODEX_HOME/sessions`）から取れる | できない | **できない**（`auto` が選んだモデルは返らない） | `modelUsage` から取れる |
@@ -93,12 +93,22 @@ NDF には 4 つの CLI をまとめて起動するサブコマンドが無い�
 2. CLI の有無と認証を確かめる（`command -v <CLI>` と、補助ファイルのインストールとログインのセクションの確かめ方）。Claude Code と Codex では
    `ndf training check --runtime <claude|codex>` も打ち、学習に使わない設定を確かめる
 3. 補助ファイルの起動の形（codex・agy は「起動コマンド」、claude・kiro は「非対話実行」）を、`timeout <秒>` で包んで打つ。Claude Code では Bash の
-   `run_in_background: true` で起動し、完了通知を 1 回受ける。標準出力と標準エラー出力は別のファイルへ逃がす
+   `run_in_background: true` で起動し、完了通知を 1 回受ける。標準出力と標準エラー出力は別のファイルへ逃がす。
+   codex・agy・kiro は `ndf delegate-run --runtime <名前> -- <CLI のコマンド>` で打ち、安全装置の引数は書かずに、入れる位置へ `'{args}'` を 1 つ置く。
+   作業ディレクトリは、対象のディレクトリへ移ってから `-C "$PWD"` で渡す（今のディレクトリと違う `-C` は拒まれる）
 
    ```bash
-   timeout 1320 codex exec --dangerously-bypass-approvals-and-sandbox --config model_reasoning_effort=medium \
+   cd <対象のディレクトリ>
+   timeout 1320 ndf delegate-run --runtime codex -- codex exec '{args}' --config model_reasoning_effort=medium \
      -C "$PWD" < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
    ```
+
+   - `ndf delegate-run` は、サンドボックスが使えればその中で起動し、使えなければ起動の設定（`.ndf/launch.json` の `permissions.unsandboxed`）で
+     そのランタイムを承認したときだけ安全装置を外す。Kiro と agy の委譲はサンドボックスを持たないので、毎回承認が要る
+   - 承認が無いと CLI を起動せず、理由と承認の手順を標準エラーに出して止まる（終了コード 3）。`/ndf:launch-config` で承認してから打ち直す
+   - 読むだけの委譲は `--use review` を付ける（codex は `-s read-only`、kiro は読むだけの指定で起動し、agy は止まる）
+   - コマンドが安全装置の引数（`-s`・`--sandbox`・`--dangerously-bypass-approvals-and-sandbox`・`--trust-all-tools`・`--trust-tools`・
+     `--dangerously-skip-permissions` など）を自分で持つと拒まれる
 
 4. 回収する。結果ファイル → 標準出力（claude は JSON の `result`、agy は JSON の `response`、kiro は ANSI を除く） →
    標準エラー出力の末尾の順に読み、最初に中身のあったものを結果にする
@@ -214,9 +224,10 @@ CLI 固有の症状（サンドボックス失敗、承認モードによるハ�
 3. **API コスト**: トークン従量課金。1 セッションで数千〜数万トークン消費することがあり、短時間で済むタスクには使わない
 4. **機密情報**: コードが外部 API へ送信される。社外秘コードの扱いは組織ポリシーに従う
 5. **モデル選択**: 既定モデルは時期により変動する。安定性が要るときは明示指定する
-6. **サンドボックス無効化フラグ**: Codex の `--dangerously-bypass-approvals-and-sandbox` と agy の
-   `--dangerously-skip-permissions` は、任意のシェル実行とファイル編集を無確認で許可する。**Docker / devcontainer / VM /
-   CI ランナー / 隔離 worktree などの外部隔離環境内でのみ使用**し、ホスト直接実行や本番リポジトリでは使わない
+6. **安全装置を外す引数**: Codex の `--dangerously-bypass-approvals-and-sandbox`、agy の `--dangerously-skip-permissions`、
+   Kiro の `--trust-all-tools` は、任意のシェル実行とファイル編集を無確認で許可する。`ndf delegate-run` は、起動の設定で承認した
+   ランタイムにだけこれらを入れる。承認する人は、**Docker / devcontainer / VM / CI ランナーなどの外部隔離環境の中**であることを
+   確かめる。ホスト直接実行や本番リポジトリでは承認しない
 
 ## 関連
 

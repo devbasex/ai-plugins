@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
+from ndf import identity
 from ndf.adapters import agents
 from ndf.contracts import facts
 from ndf.core.converge import participants
@@ -71,16 +72,18 @@ def _unread_hint(seat: str, cause: str, err: Path, local_cause: Optional[str] = 
     文は 1 度だけ組み立てる。標準エラーのログ `err` は、PR のコメントに載る注意にはファイル名、手元の precondition の
     詳細には絶対パスで示す（PR 4461 の r3-1）。`local_cause` は手元用の理由（実行ファイルの絶対パスを含む CLI の
     バージョン検査の文面など。無ければ `cause`。PR 4461 の r1-1）。"""
-    row = facts.row(participants.RUNTIMES, participants.runtime_of(seat))
+    runtime = participants.runtime_of(seat)
     if cause.startswith(DENIED_READ):
         fix = DENIED_FIX
     elif cause.startswith(agents.SANDBOX_FAILED):
         fix = (
-            "サンドボックスが名前空間を作れない。ユーザー名前空間を許すか、外で隔離された環境で打つ"
-            "（`unshare -Ur true` が通らない環境では NDF がサンドボックスを外して起動する）"
+            "サンドボックスが名前空間を作れない。ユーザー名前空間を許すか、このマシンが外側で隔離されていることを確かめてから、"
+            f"起動の設定の permissions.unsandboxed に {runtime} を書いて /{identity.load().prefix}launch-config で承認する"
+            "（承認があるときだけ、サンドボックスを使えない環境で安全装置を外して起動する）"
         )
     else:
-        fix = f"ログインを `{' '.join([row['executable'], *row['auth_probe']])}` で確かめる"
+        probe = facts.value(participants.RUNTIMES, runtime, "auth_probe")
+        fix = f"ログインを `{' '.join([agents.executable(runtime), *probe])}` で確かめる"
     local = cause if local_cause is None else local_cause
     return f"- {seat}: {cause}。{fix}（標準エラー: {err.name}）", f"- {seat}: {local}。{fix}（標準エラー: {err}）"
 

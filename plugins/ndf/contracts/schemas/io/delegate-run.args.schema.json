@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/delegate-run.args.schema.json",
+  "title": "ndf delegate-run の引数",
+  "description": "ndf delegate-run が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "--runtime": {
+          "type": "string",
+          "enum": [
+            "codex",
+            "agy",
+            "kiro"
+          ],
+          "description": "起動するランタイム"
+        },
+        "--use": {
+          "type": "string",
+          "enum": [
+            "review",
+            "delegate"
+          ],
+          "default": "delegate",
+          "description": "用途（読むだけの委譲は review）"
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "-- の後に CLI のコマンド（{args} を 1 つ持つ）",
+          "x-ndf-positional": true
+        }
+      },
+      "required": [
+        "--runtime"
+      ]
+    }
+  ]
+}

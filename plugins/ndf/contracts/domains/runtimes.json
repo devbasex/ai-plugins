@@ -13,9 +13,13 @@
     "auth_probe": {"type": "array", "summary": "認証を確かめる引数（実行ファイルの後ろ）"},
     "model_probe": {"type": "array", "summary": "最小の呼び出しでモデルが回答するかを確かめる引数（実行ファイルの後ろ。{workdir} は確かめるディレクトリに置き換える）。無いランタイムは認証の確かめだけで担当に入る", "optional": true},
     "model_args": {"type": "array", "summary": "既定のモデルで起動し直す引数（利用者の設定ファイルを書き換えない）。無いランタイムは自ら既定のモデルで回答する", "optional": true},
-    "review_args": {"type": "array", "summary": "cross 系の相手役として、読むだけで 1 回回答する起動の引数（実行ファイルの後ろ。{workdir} は worktree に置き換え、{sandbox} は sandbox_args か unsandboxed_args に広げ、質問を後ろに 1 つ足す）。無いランタイムは相手役に入らない", "optional": true},
-    "sandbox_args": {"type": "array", "summary": "review_args の {sandbox} に入れる、ランタイム自身のサンドボックスで読むだけにする引数", "optional": true},
-    "unsandboxed_args": {"type": "array", "summary": "ユーザー名前空間を作れない環境（`unshare -Ur true` が通らない Linux）で sandbox_args の代わりに入れる引数。codex のサンドボックス（bubblewrap）はそこでコマンドを打てず、差分を読めない（#3893）。外で隔離された環境の中でだけ打つ前提", "optional": true}
+    "review_args": {"type": "array", "summary": "cross 系の相手役として、読むだけで 1 回回答する起動の引数（実行ファイルの後ろ。{workdir} は worktree に置き換え、{sandbox} は安全装置の引数（launch_settings.safety_args の review）に広げ、質問を後ろに 1 つ足す）。無いランタイムは相手役に入らない", "optional": true},
+    "sandbox_args": {"type": "array", "summary": "読むだけの起動（review）で、ランタイム自身のサンドボックスか読むだけの指定にする引数。無いランタイムは読むだけの起動ができず、review を止める", "optional": true},
+    "delegate_sandbox_args": {"type": "array", "summary": "作業の委譲（delegate。ndf delegate-run）で、ランタイム自身のサンドボックスの中で書けるようにする引数。無いランタイムの委譲は、承認があるときだけ unsandboxed_args で起動する（#1959）", "optional": true},
+    "sandbox_needs_userns": {"type": "boolean", "summary": "サンドボックスがユーザー名前空間を要る（`unshare -Ur true` が通らない Linux では使えない）。真のランタイムは、名前空間を作れなければ承認があるときだけ unsandboxed_args で起動する。codex のサンドボックス（bubblewrap）は名前空間が無いとコマンドを打てない（#3893）", "optional": true},
+    "unsandboxed_args": {"type": "array", "summary": "安全装置を外す引数。サンドボックスが使えず、起動の設定の permissions.unsandboxed にランタイムがあり承認済みのときだけ入れる（#1959。外で隔離された環境の中でだけ打つ前提）", "optional": true},
+    "safety_aliases": {"type": "array", "summary": "sandbox_args・delegate_sandbox_args・unsandboxed_args の引数の別名（短い名前・長い名前）。ndf delegate-run は、利用者のコマンドがこれらの引数の名前を自分で持てば拒む（安全装置の判定を迂回させない）", "optional": true},
+    "workdir_options": {"type": "array", "summary": "作業ディレクトリを指す引数の名前。ndf delegate-run は、今のディレクトリと違う場所を指せば拒む（承認とサンドボックスは今のディレクトリで確かめるため）", "optional": true}
   },
   "rows": [
     {
@@ -47,7 +51,11 @@
       "model_args": ["--ignore-user-config"],
       "review_args": ["exec", "--skip-git-repo-check", "--ephemeral", "{sandbox}", "-C", "{workdir}"],
       "sandbox_args": ["-s", "read-only"],
-      "unsandboxed_args": ["--dangerously-bypass-approvals-and-sandbox"]
+      "delegate_sandbox_args": ["-s", "workspace-write"],
+      "sandbox_needs_userns": true,
+      "unsandboxed_args": ["--dangerously-bypass-approvals-and-sandbox"],
+      "safety_aliases": ["--sandbox"],
+      "workdir_options": ["-C", "--cd"]
     },
     {
       "id": "agy",
@@ -59,7 +67,8 @@
       "delegate": true,
       "training_check": false,
       "host_env": [],
-      "auth_probe": ["models"]
+      "auth_probe": ["models"],
+      "unsandboxed_args": ["--dangerously-skip-permissions"]
     },
     {
       "id": "kiro",
@@ -73,7 +82,10 @@
       "host_env": ["KIRO_PLUGIN_ROOT", "KIRO_AGENT"],
       "auth_probe": ["whoami"],
       "model_probe": ["chat", "--no-interactive"],
-      "review_args": ["chat", "--no-interactive", "--trust-tools=fs_read"]
+      "review_args": ["chat", "--no-interactive", "{sandbox}"],
+      "sandbox_args": ["--trust-tools=fs_read"],
+      "unsandboxed_args": ["--trust-all-tools"],
+      "safety_aliases": ["-a"]
     }
   ]
 }

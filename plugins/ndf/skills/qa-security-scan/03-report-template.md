@@ -92,7 +92,7 @@
 
 ## Codex CLI 連携
 
-詳細な独立レビューが必要な場合は `corder` エージェントに委譲するか、`/ndf:external-ai` skill の「共通の実行手順」で `codex exec` を `timeout` で包んで 1 行で起動する。例:
+詳細な独立レビューが必要な場合は `corder` エージェントに委譲するか、`/ndf:external-ai` skill の「共通の実行手順」で `codex exec` を `ndf delegate-run` と `timeout` で包んで 1 行で起動する。安全装置の引数は `ndf delegate-run` が `'{args}'` の位置へ入れ、承認が無くサンドボックスも使えなければ起動せずに止まる。例:
 
 ```bash
 # === 1. プロンプトを一意の一時ファイルに書く（最終出力先を明示し apply_patch で書かせる） ===
@@ -117,8 +117,8 @@ Markdown。行番号と該当コードスニペットを明記。tool 呼び出�
 最後に必ず assistant message として 1 回出力してください。
 EOF
 
-# === 2. 上限（レビューは 1200 + 120 秒）で包んで起動する ===
-timeout 1320 codex exec --dangerously-bypass-approvals-and-sandbox --config model_reasoning_effort=medium \
+# === 2. 対象のディレクトリで、上限（レビューは 1200 + 120 秒）で包んで起動する（結果を $FINAL へ書かせるので用途は delegate） ===
+timeout 1320 ndf delegate-run --runtime codex -- codex exec '{args}' --config model_reasoning_effort=medium \
   -C "$PWD" < "$TMP/sec-scan-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
 ```
 

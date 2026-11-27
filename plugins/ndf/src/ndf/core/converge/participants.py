@@ -5,8 +5,9 @@
   `review_args` を持てば `default_seat` が偽でも入れる
 - 相手役は読むだけの起動で、指摘を最後の 1 行の JSON（`{"findings": [...]}`）で返す。起動の引数は表の
   `review_args` が持つ（`{workdir}` は worktree に置き換える）。質問は最後の引数で渡す
-- `{sandbox}` は表の `sandbox_args` に広げる。ユーザー名前空間を作れない環境では `unsandboxed_args` に広げる
-  （codex のサンドボックスがコマンドを打てず差分を読めない。#3893）
+- `{sandbox}` は安全装置の引数（`launch_settings.safety_args` の review）に広げる。サンドボックスが使えない環境で外す引数に
+  なるのは、起動の設定で承認したときだけで、承認が無ければどの担当も起動せずに止まる。外す起動は、起動の直前の照らし直しを
+  `Launch.verify` に入れる（#3893・#1959）
 - リポジトリのランタイムの設定（`.ndf/runtimes.json` の `allowed`。メインディレクトリから読む）があれば、相手役をその中から
   選び、外の名前を名指せば `UnknownParticipant`。修正担当が外なら起動の前に `FixerNotAllowed`（#3941。`declared_allowed`）
 - 始める前に担当すべての学習の設定のバックアップを確かめる（`unready`）。無いか期限切れならその場で確かめ、
@@ -23,17 +24,17 @@ import json
 import os
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional
 
 from ndf import contracts
-from ndf.adapters import agents, claude, training
+from ndf.adapters import agents, claude, launch_settings, training
 from ndf.contracts import facts, limits
 
-RUNTIMES = "runtimes"
+RUNTIMES = launch_settings.RUNTIMES
 REVIEW_ARGS = "review_args"
 SANDBOX = "{sandbox}"
 # 修正担当: `claude -p` を打つランタイム（claude のアダプターの実行ファイルの行）
-FIXER = next(r["id"] for r in facts.rows(RUNTIMES) if r["executable"] == claude.CLAUDE)
+FIXER = next(r["id"] for r in facts.rows(RUNTIMES) if agents.executable(r["id"]) == claude.CLAUDE)
 # 相手役・修正担当 1 回の監視の上限
 REVIEW_TIMEOUT = "monitor.phase.review"
 # 読むだけの claude に許す Tool
@@ -207,18 +208,17 @@ def unready(runtimes: Sequence[str]) -> list[str]:
     return list(refused_runtimes(runtimes).values())
 
 
-def _sandbox_args(row: dict[str, Any]) -> list[str]:
-    """`{sandbox}` に入れる引数。名前空間を作れない環境で `unsandboxed_args` を持つ行はそれを、ほかは `sandbox_args`。"""
-    if "unsandboxed_args" in row and not agents.user_namespaces():
-        return list(row["unsandboxed_args"])
-    return list(row["sandbox_args"]) if "sandbox_args" in row else []
+def _sandbox_args(agent: str, worktree: Path) -> launch_settings.SafetyArgs:
+    """`{sandbox}` に入れる引数と、外す引数のときの起動の直前の照らし直し。止める状況は `precondition` を送る。"""
+    return launch_settings.safety_args(agent, "review", worktree)
 
 
-def _review_args(row: dict[str, Any], worktree: Path) -> tuple[str, ...]:
+def _review_args(agent: str, row: dict[str, Any], worktree: Path) -> tuple[tuple[str, ...], Optional[Callable[[], Optional[str]]]]:
+    safety = _sandbox_args(agent, worktree) if SANDBOX in row[REVIEW_ARGS] else launch_settings.SafetyArgs([])
     out: list[str] = []
     for a in row[REVIEW_ARGS]:
-        out += _sandbox_args(row) if a == SANDBOX else [a.replace("{workdir}", str(worktree))]
-    return tuple(out)
+        out += safety.args if a == SANDBOX else [a.replace("{workdir}", str(worktree))]
+    return tuple(out), safety.verify
 
 
 def _review_limit(timeout: Optional[float]) -> float:
@@ -229,9 +229,9 @@ def _review_limit(timeout: Optional[float]) -> float:
 def review_launch(agent: str, worktree: Path, prompt: str, stem: Path, timeout: Optional[float] = None) -> agents.Launch:
     """相手役 `agent` の読むだけの 1 回の起動。出力は `stem` の名前のファイルへ書く。"""
     row = facts.row(RUNTIMES, agent)
-    args = _review_args(row, worktree)
+    args, verify = _review_args(agent, row, worktree)
     limit = timeout if timeout is not None else limits.seconds(REVIEW_TIMEOUT)
-    return agents.Launch(agent, (row["executable"], *args, prompt), worktree, agents.AgentPaths.at(stem), limit)
+    return agents.Launch(agent, (agents.executable(agent), *args, prompt), worktree, agents.AgentPaths.at(stem), limit, verify=verify)
 
 
 def read_only_launch(

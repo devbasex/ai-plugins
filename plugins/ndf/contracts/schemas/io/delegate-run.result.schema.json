@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "delegate-run.result.schema.json",
+  "title": "ndf delegate-run の結果 JSON",
+  "description": "ndf delegate-run は成功すると CLI に置き換わり、失敗は標準エラーだけに書くので、自分では結果 JSON を出さない（cli.NO_RESULT_COMMANDS）。サブコマンドを呼ぶ前の状態の保存先の用意の失敗と、捕まえない例外だけは、エントリポイントが stopped の結果 JSON を出す。共通の欄は結果のコントラクト（result.schema.json）が持ち、metrics と items は項目を持たない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "delegate-run"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf delegate-run の計測値（持たない）",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf delegate-run の項目の並び（状態の保存先の用意で退避した元と先だけ）",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "retired_from": {
+            "type": "string",
+            "description": "退避した旧い状態の保存先"
+          },
+          "retired_to": {
+            "type": "string",
+            "description": "退避した先"
+          }
+        }
+      }
+    }
+  }
+}

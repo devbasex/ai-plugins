@@ -13,7 +13,7 @@
 1 回読み、`result.choose_format` へ渡す（#4003）。サブコマンドの後ろは読まない（`ndf relay claude` などは後ろの引数を子の
 `claude` へそのまま渡し、`claude` も同じ名前の引数を持つ）。明示が無ければ、標準出力が端末のときは文、ほかは結果 JSON で出す。
 
-どのサブコマンドも結果 JSON を 1 行出して終わる。内部データの読み書きの例外は `stopped`（種類は `InternalError.kind`）、ほかの
+どのサブコマンドも結果 JSON を 1 行出して終わる（`NO_RESULT_COMMANDS` を除く）。内部データの読み書きの例外は `stopped`（種類は `InternalError.kind`）、ほかの
 サブコマンドが捕まえない例外は `stopped`（種類 `unknown`）、使い方の誤り
 （argparse の終了コード 2 の `SystemExit`）は `stopped`（種類 `invalid`）の結果 JSON をここで出す（#3394）。
 
@@ -79,6 +79,7 @@ COMMANDS: dict[str, str] = {
     "ci": "ndf.ci_cli",
     "contracts": "ndf.contracts.cli",
     "cross-review": "ndf.domains.crossreview.cli",
+    "delegate-run": "ndf.domains.settings.delegate_run_cli",
     "document-rebuild": "ndf.domains.docrebuild.cli",
     "gws": "ndf.domains.gws.cli",
     "hooks": "ndf.domains.hooks.cli",
@@ -108,6 +109,8 @@ COMMANDS: dict[str, str] = {
 }
 # NDF 自身の開発のサブコマンド（使い方の表示に出さない。名前で呼べば動く。#3617 の決定 11）
 DEVELOPER_COMMANDS = frozenset({"check", "manifests", "samples"})
+# 結果 JSON を出さないサブコマンド（標準出力を置き換えた CLI に渡し、失敗は標準エラーだけに書く。#1959 の `ndf delegate-run`）
+NO_RESULT_COMMANDS = frozenset({"delegate-run"})
 # モジュールのパス → サブコマンドの名前（`tool_of` の引き。2 つの名前が同じモジュールを指すときは表の先の名前）
 _TOOL_OF: dict[str, str] = {path: name for name, path in reversed(COMMANDS.items())}
 
