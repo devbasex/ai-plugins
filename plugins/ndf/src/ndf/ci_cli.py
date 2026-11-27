@@ -65,10 +65,10 @@ def _watch_parser(sub: Any) -> None:
     w.add_argument("--merge-failed", action="append", default=[], help="マージの段階が落ちたと読んだチェックの名前")
     w.add_argument(
         "--head",
-        help="待つ PR の HEAD。このコミットのチェックだけを読み、作業場所の HEAD は追わない。"
-        "待ちの開始か成功の確定の時点で PR の HEAD が違えば approval_stale で止まる。"
-        "成功を確定する前に PR を 1 回読み直すので、成功 1 回につき PR を読む GitHub API の呼び出しが 1 回増える"
-        "（待つ間に HEAD が動けば、読んだチェックの結果は承認した HEAD のものと言えないため）",
+        help="待つ PR の HEAD の SHA。チェック結果はこの SHA のものだけを読み、作業場所の HEAD は追わない。"
+        "待ちの開始時と、成功を返す直前に PR の HEAD を読み、この SHA と違えば approval_stale を返す。"
+        "成功を返す直前の読み直しで、成功 1 回につき PR の取得が 1 回増える"
+        "（REST の上限に当たって GraphQL で読み替えるときは、API の要求がさらに 1 回増える）",
     )
     w.set_defaults(run=_watch)
 

@@ -399,7 +399,7 @@ contracts/
 | `_reusable` | 同上 | 変更 | 変えない | `follow_base` で、前のラウンドの記録の `base_branch` が今と違えば偽 |
 | `cmd_run` | `domains/crossreview/cli.py` | 変更 | 変えない | `--reviewed-base-out` を受け、始めに消し、`--reviewed-out` を書くときに最後のラウンドの `base_branch` を書く |
 | `_merge_pull` | `ci_cli.py` | 変更 | 変えない | `--verify-merged` があり、マージ済みの PR の head か base が承認の値と違えば `refused` |
-| `_watch` | 同上 | 変更 | 変えない | `--head <SHA>` があれば、読んだ PR の HEAD が違う時点（開始と成功の確定）で `approval_stale` |
+| `_watch` | 同上 | 変更 | 変えない | `--head <SHA>` があれば、待ちの開始時と成功を返す直前に PR の HEAD を読み、指定した SHA と違えば `approval_stale` |
 | `pulls` | `adapters/github.py` | 変更 | `(numbers, spare=(), *, rest_fallback: bool = True)` | 偽なら REST へ読み替えない |
 
 - `RunConfig`（`settings.py`）に `follow_base: bool = False` を足し、`--reviewed-base-out` を渡した起動だけ真にする。ラウンドの記録に `base_branch` を足す
@@ -407,7 +407,16 @@ contracts/
 - 詳細レビューを通ったセクションの記録にも、そのときの比較元のブランチ（`reviewed_base_branch`）を残す。`follow_base` の起動は、比較元が今のマージ先と違う記録を引き継がず、新しい全差分のセクションをすべて詳細レビューに通す。MVV が同じでも差分の相手が変われば、前の詳細レビューは新しい差分を確かめていないためである
 - 全差分のラウンドの後に記録を書き直すときは、どの起動でも、前の記録を比較元が今と同じときだけ引き継ぐ。比較元が違う記録を今の比較元の名前で残すと、`follow_base` を使わない起動（`--base sprint/y` など）の後で、`follow_base` の起動が `sprint/y` との差分で確かめていないセクションを通ったと読むためである
 - `--verify-merged` は `--pr`・`--approved-head`・`--approved-base` と組でだけ受ける（どれかが無ければ `invalid`）。番号を渡さない経路は開いている PR しか探さず、マージ済みの PR を承認の値と照らせないためである
-- `ndf ci watch --head` は、成功を確定する前に PR を 1 回読み直す。成功 1 回につき PR を読む GitHub API の呼び出しが 1 回増えるが、待つ間に HEAD が動けば、読んだチェックの結果は承認した HEAD のものと言えないため省かない。読み直しはコマンドの契約（`--head` の説明）にも書く
+
+`ndf ci watch --head <SHA>` が返すチェック結果は、指定した SHA のものである。待ちの開始時と成功を返す直前に PR の HEAD を読み、指定した SHA と違えば `approval_stale` を返す。取得したチェック結果がどの SHA のものかを確かめるだけでは足りない。結果は指定した SHA に固定して読んでいるので、PR の HEAD が動いても一致し、成功を返してしまうためである。
+
+読み直しの費用は、成功を返す起動 1 回につき `GitHub.pull()` 1 回である。REST の一次の上限に当たって GraphQL で読み替える場合は、API の要求がさらに 1 回増える。成功しなかった起動は読み直さない。読み直しの回数はコマンドの契約（`--head` の説明）にも書く。
+
+| 案 | 追加の PR の取得 | 採否と理由 |
+| --- | --- | --- |
+| 待ちの開始時だけ HEAD を確かめる | 無し | 採らない。待つ間に PR の HEAD が変わっても `ci watch` が検出できず、承認していない HEAD で成功を返す |
+| 成功を返す直前にだけ読み直す | 成功 1 回につき 1 回 | 採る。待つ間の変更を検出でき、増えるのは成功の経路の 1 回だけである |
+| 待つ間にチェックを読むたびに PR も読む | チェックを読むたびに 1 回 | 採らない。変更は早く分かるが、回数が待つ時間に比例して増える。成功を返さない限り、遅く分かっても誤りにならない |
 
 | 失敗 | 扱い |
 | --- | --- |
