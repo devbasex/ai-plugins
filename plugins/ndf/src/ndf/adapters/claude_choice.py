@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
 from ndf.adapters import claude
+from ndf.contracts import internal
 
 log = logging.getLogger(__name__)
 
@@ -145,16 +146,22 @@ class ChoiceRun:
         self.choice, self.request_try, self.switched = back, self.request_try + 1, True
         return True
 
-    def fall_back_until(self, reply: claude.ClaudeReply, deadline: float) -> Optional[float]:
+    def fall_back_until(
+        self, reply: claude.ClaudeReply, deadline: float, verify: Optional[Callable[[], Optional[str]]] = None
+    ) -> Optional[float]:
         """`fall_back` を期限 `deadline`（`deadline_after`）の中で行い、基準の組で起動し直せる残りの秒を返す。
 
-        切り替えの記録の前に残りを測り、無ければ切り替えず記録も書かずに 0 を返す。切り替えたら、記録を書いた後（錠の待ちを含む）に
-        測り直した残りの秒を返す（0 以下なら呼び手が起動し直さない）。切り替えなければ None。
+        切り替えの記録の前に、期限の残り・起動の承認の対象（`verify`。`launch_settings.Grant.verifier`）・もう一度期限の残りの順に
+        確かめる。残りが無ければ切り替えず記録も書かずに 0 を返し、承認の対象が変わったか承認が取り消されていれば、記録を書かずに
+        `InternalError`（precondition）を送る。切り替えたら、記録を書いた後（錠の待ちを含む）に測り直した残りの秒を返す（0 以下なら
+        呼び手が起動し直さない）。切り替えなければ None。起動し直しには `LaunchOptions.left` で `deadline` の残りを渡す。
         """
         expired = False
 
         def ready() -> bool:
             nonlocal expired
+            if left_until(deadline) > 0 and verify is not None and (changed := verify()) is not None:
+                raise internal.InternalError("precondition", changed)
             expired = left_until(deadline) <= 0
             return not expired
 

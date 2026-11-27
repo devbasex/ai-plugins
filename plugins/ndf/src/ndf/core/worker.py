@@ -368,8 +368,7 @@ def _missing_record(handoff: Handoff, wd: worker_paths.WorkDir) -> bool:
     return isinstance(report, dict) and report.get("status") == OK and search_record(report) is None
 
 
-def _reply_failed(reply: claude.ClaudeReply, out: Delivery) -> bool:
-    """再起動しても直らない失敗なら理由を `out` へ置いて真。"""
+def _reply_failed(reply: claude.ClaudeReply, out: Delivery) -> bool:  # 再起動しても直らない失敗なら理由を `out` へ置いて真
     if reply.failure is None:
         return False
     out.cause = facts.value(claude.FAILURES, reply.failure, "work_cause")
@@ -427,27 +426,28 @@ def _resume_until_written(
     新しい会話で 1 回だけ、最初の起動の前から単調時計で持つ期限の残りで起動し直す（`ChoiceRun.fall_back_until`）。残りが無ければ `interrupted`、2 回目の拒否は `_reply_failed` が止める（#2944）。"""
     wd, first = fresh.wd, f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
     prompt, timeout, resumes, opening, deadline = first, handoff.timeout, 0, True, claude_choice.deadline_after(handoff.timeout)
+    bound: Optional[Callable[[], float]] = None  # 切り替えた起動だけが持つ期限の残り
     read = partial(_read_result, wd, handoff.result_file.name, owned=handoff.owned)  # 子が起動した後は前の結果を消してある
     while resumes <= RESUMES:
         if opening:  # 会話の最初の起動: 引数・環境・行の書き手をここで決め、再開でも使う
             (argv, env, log), opening = worker_choice.first_launch(handoff.kind, out.session, base, wd, run, read), False
         with run_log.overlay_env(env):
-            reply = call(argv, prompt, timeout, handoff.cwd, replace(fresh.options, log=log))
+            reply = call(argv, prompt, timeout, handoff.cwd, replace(fresh.options, log=log, left=bound))
         run.seen(reply)
         out.attempts, out.cost, out.launch = out.attempts + 1, out.cost + reply.cost, worker_choice.launch_metrics(out.launch, run, reply)
         out.replies.append(reply.raw[:200])
-        if (left := run.fall_back_until(reply, deadline) if resumes == 0 else None) is not None:
+        if (left := run.fall_back_until(reply, deadline, fresh.options.verify) if resumes == 0 else None) is not None:
             if left <= 0:
                 out.cause, out.detail = "interrupted", f"作業 {handoff.kind} の worker を基準の組で起動し直す期限が残っていない"
                 return
-            out.session, prompt, timeout, opening = str(uuid.uuid4()), first, left, True
+            out.session, prompt, timeout, opening, bound = str(uuid.uuid4()), first, left, True, partial(claude_choice.left_until, deadline)
             continue
         written = fresh.cleared and _written(wd, handoff.result_file.name)  # 前の結果を消す前は、残った前の結果を数えない
         if (written and not _missing_record(handoff, wd)) or _reply_failed(reply, out):
             return
         argv = base + run.cli_args() + ["--resume", out.session]
         worker_choice.next_try(run, log)
-        prompt, timeout, resumes = (RECORD_PROMPT if written else RESUME_PROMPT), handoff.timeout, resumes + 1
+        prompt, timeout, resumes, bound = (RECORD_PROMPT if written else RESUME_PROMPT), handoff.timeout, resumes + 1, None
     out.cause = "work_stopped"
     out.detail = _stopped_detail(handoff, wd)
 

@@ -78,12 +78,14 @@ class Fake:
         self.h, self.replies, self.write_on, self.clock = h, replies, write_on, clock
         self.argv: list[list[str]] = []
         self.timeouts: list[float] = []
+        self.left: list[float | None] = []
         self.effort_env: list[str | None] = []
         self.charge_env: list[str | None] = []
 
     def __call__(self, argv, prompt, timeout, cwd, options):
         self.argv.append(list(argv))
         self.timeouts.append(timeout)
+        self.left.append(None if options.left is None else options.left())
         env = run_log.child_process_env()
         self.effort_env.append(env.get(EFFORT_ENV))
         self.charge_env.append(env.get(CHARGE_ENV))
@@ -183,6 +185,7 @@ def test_a_refused_arm_switches_to_the_base_in_a_new_conversation_once(tmp_path,
     fake = Fake(h, [_refused(seconds=10.0)], write_on=2, clock=clock)
     done = _delegate(h, fake, tmp_path)
     assert done.cause is None and done.attempts == 2 and fake.timeouts == [30, 20]
+    assert fake.left == [None, 20]  # 起動し直しは、起動の部品が待ちの後に残りを測り直せる
     assert _value(fake.argv[1], "--model") is None and _value(fake.argv[1], "--session-id") not in (None, "s-1")
     assert done.session == _value(fake.argv[1], "--session-id")
     assert [(r["request_try"], r["outcome"]) for r in rows] == [(1, "unknown"), (2, "ok")]
@@ -227,6 +230,15 @@ def test_no_time_left_after_a_refusal_stops_as_interrupted_without_the_switch_ro
     fake = Fake(h, [_refused(seconds=5.0)], clock=clock)
     done = _delegate(h, fake, tmp_path)
     assert done.cause == "interrupted" and len(fake.argv) == 1
+    assert not any(r["kind"] == "launch_error" for r in _ledger())
+
+
+def test_a_changed_approval_stops_the_switch_without_the_switch_row(tmp_path, clock) -> None:
+    # PR 4694 の r2-4: 承認の対象が変わった・取り消された拒否は、記録せず候補から外す件数に入れない
+    run = worker_choice.choose_values(_handoff(tmp_path, unit="run-1:impl"))
+    with pytest.raises(internal.InternalError) as got:
+        run.fall_back_until(_refused(), clock.now + 30, lambda: "承認が取り消された")
+    assert got.value.kind == "precondition" and not run.switched
     assert not any(r["kind"] == "launch_error" for r in _ledger())
 
 

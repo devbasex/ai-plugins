@@ -169,18 +169,3 @@ def test_partner_children_carry_the_ai_child_flag(tmp_path: Path, monkeypatch) -
     spec = agents.Launch("codex", ("codex", "exec"), tmp_path, agents.AgentPaths.at(tmp_path / "out"), 1.0, env={"X": "y"})
     agents._start(spec)
     assert seen[0][identity.env_name("ai-child")] == "1" and seen[0]["X"] == "y"
-
-
-def test_repo_key_asks_git_once_per_root_and_does_not_keep_a_failure(tmp_path, monkeypatch) -> None:
-    """#2944: 値の選択と承認の確かめが同じ根のキーを求めても、git は 1 回だけ。解けなかった根は覚えない。"""
-    asked: list[Path] = []
-
-    def common_dir(self):
-        asked.append(self.cwd)
-        if len(asked) == 1:
-            raise git.GitError("git の外")
-        return tmp_path / ".git"
-
-    monkeypatch.setattr(git.Git, "common_dir", common_dir)
-    assert la.repo_key(tmp_path) == os.path.realpath(tmp_path)
-    assert la.repo_key(tmp_path) == la.repo_key(tmp_path) == str(tmp_path / ".git") and len(asked) == 2

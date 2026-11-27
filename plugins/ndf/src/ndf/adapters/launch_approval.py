@@ -55,26 +55,14 @@ def target_digest(permissions: Mapping[str, Any], files: Mapping[str, Any]) -> s
     return canonical_sha({"permissions": permissions, "files": files})
 
 
-# git で解いたリポジトリのキー（`root` の文字列 → キー）。同じプロセスの値の選択と承認の確かめが git を打ち直さない（#2944）
-_repo_keys: dict[str, str] = {}
-
-
 def repo_key(root: Path) -> str:
-    """リポジトリのキー: git の共通ディレクトリの実体の絶対パス（リンクされた worktree は同じキー）。git の外は `root` の実体。
-
-    git で解いたキーはプロセスの中で覚え、同じ `root` には git を起動しない（共通ディレクトリはプロセスの間に変わらない）。
-    git の外と解けなかった場合は覚えない（後で `git init` された場所を git の外のまま扱わない）。
-    """
+    """リポジトリのキー: git の共通ディレクトリの実体の絶対パス（リンクされた worktree は同じキー）。git の外は `root` の実体。"""
     from ndf.adapters import git
 
-    if str(root) in _repo_keys:
-        return _repo_keys[str(root)]
     try:
-        key = str(git.Git(root).common_dir())
+        return str(git.Git(root).common_dir())
     except (git.GitError, OSError):
         return os.path.realpath(root)
-    _repo_keys[str(root)] = key
-    return key
 
 
 def state_file(file_id: str) -> Path:

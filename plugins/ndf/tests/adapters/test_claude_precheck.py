@@ -218,3 +218,19 @@ def test_issue_1959_a_too_old_cli_stops_before_ready(seen, tmp_path):
     got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen))
 
     assert got.failure is claude.Failure.REFUSED and seen.order == ["slot", "recheck", "verify", "floor"] and seen.popen == []
+
+
+def test_issue_2944_a_deadline_used_up_while_waiting_stops_the_launch(seen, tmp_path):
+    """期限の残り（`left`）はスロットと確かめの後に測る。残りが無ければ起動も準備もせず `Failure.TIMEOUT`、あれば子の期限を残りにする。"""
+    spent = claude.LaunchOptions(left=lambda: 0.0, ready=lambda: seen.order.append("ready"))
+    got = claude._prefaced(_run(seen), "q", 30, tmp_path, spent)
+
+    assert got.failure is claude.Failure.TIMEOUT and seen.order == ["slot", "floor"] and seen.ended == [False]
+
+
+def test_issue_2944_the_child_gets_the_time_left_after_the_checks(seen, tmp_path, monkeypatch):
+    given: list[float] = []
+    monkeypatch.setattr(FakeProc, "communicate", lambda self, prompt="", timeout=0: given.append(timeout) or (REPLY, ""))
+    got = claude._prefaced(_run(seen), "q", 30, tmp_path, claude.LaunchOptions(left=lambda: 7.0))
+
+    assert got.ok and given == [7.0]

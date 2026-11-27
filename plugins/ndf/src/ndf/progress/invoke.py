@@ -34,6 +34,7 @@ import os
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -909,17 +910,22 @@ def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResu
             claude.ClaudeCall(SKILL_SYSTEM, claude.Permission.FULL, json_schema=schema, grant=grant), cwd=cwd
         )
 
-        def launch(timeout: float) -> claude.ClaudeReply:  # 組んだ引数に選んだ値の引数を足して 1 回起動する
+        def launch(timeout: float, bound: Optional[Callable[[], float]] = None) -> claude.ClaudeReply:
+            # 組んだ引数に選んだ値の引数を足して 1 回起動する。`bound` は起動し直しの期限の残り
             log = claude.LaunchLog({**claude.launch_meta(run.name), **picked.meta()}, lambda r: {"outcome": skill_outcome(r, checked)})
-            options = claude.LaunchOptions(verify=grant.verifier, log=log)
+            options = claude.LaunchOptions(verify=grant.verifier, log=log, left=bound)
             with run_log.overlay_env(picked.env_changes()):
                 got = call_claude([*base, *picked.cli_args()], skill_prompt(run), timeout, cwd, options)
             picked.seen(got)
             return got
 
         reply = launch(limit)
-        if (left := picked.fall_back_until(reply, deadline)) is not None and left > 0:
-            reply = launch(left)
+        try:
+            left = picked.fall_back_until(reply, deadline, grant.verifier)
+        except internal.InternalError as exc:  # 切り替えの前に承認の対象が変わったか、承認が取り消された
+            return StageResult(result.stopped(SKILL, exc.kind, f"Skill {run.name} を基準の組で起動し直さない: {exc}"), {})
+        if left is not None and left > 0:
+            reply = launch(left, partial(claude_choice.left_until, deadline))
     if not reply.ok:
         kind = _skill_cause(reply.failure)
         got = StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})

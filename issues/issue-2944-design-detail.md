@@ -155,7 +155,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `read_experiments`・`ledger`・`append_row` | `domains/records/jsonl.py` | 層の順序（adapters は domains を読めない） | 使えない。`filelock` と `contracts` の形の確認を使う |
 | `table` | `launch_settings.load` | #1959 の詳細設計 | 使う |
 | `compatibility_key` | `launch_approval.digest` の形 | 同上 | 同じ「キーの順にそろえた JSON の SHA-256」にする |
-| `launch_choice` のリポジトリのキー | `launch_approval.repo_key` | #1959 の詳細設計 | 使う。単位のある起動のたびに `git rev-parse` を 1 回起動するが、同じ値をファイルから求める関数を別に持つと、`.git` と `commondir` を読む処理がほかの 3 か所と重なる（重複の検査）。起動する CLI に比べて子プロセス 1 つの費用は小さい |
+| `launch_choice` のリポジトリのキー | `launch_approval.repo_key` | #1959 の詳細設計 | 使う。値の選択（単位のある起動）と起動の承認の確認（指定のある起動）は別々に呼び、呼ぶたびに `git rev-parse` を 1 回起動する。キーは呼び出しの間でも、プロセスの中でも共有しない。1 回は中央値 1.6 ms・95 パーセンタイル 2.2 ms（2026-11-27、このリポジトリの worktree で 200 回）である。覚えても両方を通る起動で 1 回分しか減らないので、キーの写しを持たない。同じ値をファイルから求める関数を別に持つと、`.git` と `commondir` を読む処理がほかの 3 か所と重なる（重複の検査）。起動する CLI に比べて子プロセス 1 つの費用は小さい |
 | `stage_of` | `contracts/worker/kinds.json` | `ls contracts/worker` | 作業の名前は同じ。工程の対応は持たないので表に置く |
 | `raised`・`candidates`・`base_fallback` | — | `grep -rn "effort" src/ndf`（該当なし） | 新設する |
 | `report_outcome`・`record_outcome` | `report_launch`・`record_cli`（#1959） | #1959 の詳細設計 | 同じ差し込みに関数を足す |
@@ -266,6 +266,8 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - 再開は、最初の起動の `--model`・`--effort`・割り付け ID・`CLAUDE_CODE_EFFORT_LEVEL` の扱いを保持して使う（設計書の「同じ会話を続ける起動」）。最初の起動の子にこの変数が無かった場合は、再開の子から外す
 - `charge_to`（費用を手戻りとして負う割り付け ID）は、作業が `fix`・`ci-fix` のときの `NDF_CHARGE_TO` の値である。ほかの作業は `charge_to` を書かず、子の環境から `NDF_CHARGE_TO` を外す
 - `outcome` は、結果ファイルがあればその `status`、無ければ `no_result`、起動の失敗の回答は `unknown`。基準へ切り替える打ち直しは `RESUMES` に数えない
+- worker と Skill は、拒否の行を書く前に、残りの期限と起動の承認の対象（`Grant.verify`）を確かめる。承認の対象が変わったか承認が取り消されていれば、行を書かずに `precondition` で止まる
+- 基準の組で起動し直すときは、期限そのものを起動の部品へ渡す（`LaunchOptions.left`）。起動の部品はスロットの待ちと起動の前の確かめの後に残りを測り直し、残りが無ければ起動せず `interrupted`、あれば残りを子の期限にする
 - `--mode` は、`ndf answer work` が作業の値に `mode` を持つ場合に渡す（`progress/gate/entry.py`）
 
 ### 異常系の処理

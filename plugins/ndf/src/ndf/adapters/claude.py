@@ -637,8 +637,7 @@ class LaunchLog:
     `session_id` を優先し、無ければ `meta` の値にする。`session_seq` は会話の id ごとに 0 から数える。アカウントを
     替えても、同じ id のまま打ち直した子（worker は起動引数で id を指定する）は番号を続け、結果の id が変わった子
     （id を指定しない Skill）だけがその id の 0 から始まる。会話の id がどちらからも分からない行は常に 0 にする。
-    書き込み処理が差し込まれていなければ渡さない。
-    行に質問と回答の本文を入れない。
+    書き込み処理が差し込まれていなければ渡さない。行に質問と回答の本文を入れない。
     """
 
     def __init__(self, meta: Mapping[str, Any], after: Optional[Callable[[ClaudeReply], Mapping[str, Any]]] = None) -> None:
@@ -753,6 +752,7 @@ class LaunchOptions:
     - `ready`: 起動の前の確かめをすべて通った後、子を起動する直前に 1 回打つ準備（worker が前の結果ファイルを消すなど）。
       どの確かめで止まった起動でも打たない
     - `log`: 起動した子が終わるたびに使用量ログの行を渡す先（`LaunchLog`。#1959 の決定 6）。None なら渡さない
+    - `left`: 起動の期限の残りの秒を返す。確かめの後に残りが無ければ起動せず `Failure.TIMEOUT`、あれば子の期限を残りにする（#2944）
     """
 
     slot_wait: Optional[float] = None
@@ -763,6 +763,7 @@ class LaunchOptions:
     verify: Optional[Callable[[], Optional[str]]] = None
     ready: Optional[Callable[[], None]] = None
     log: Optional[LaunchLog] = None
+    left: Optional[Callable[[], float]] = None
 
 
 # 選び方を省いた起動（今までどおり）
@@ -773,6 +774,7 @@ PRECHECK_FAILURES = {
     claude_precheck.Check.RECHECK: Failure.REFUSED,
     claude_precheck.Check.VERIFY: Failure.LAUNCH,
     claude_precheck.Check.FLOOR: Failure.REFUSED,
+    claude_precheck.Check.DEADLINE: Failure.TIMEOUT,
 }
 
 
@@ -845,6 +847,7 @@ def _launch_once(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Pat
             if stopped is not None:
                 return ClaudeReply.failed("", stopped.detail, failure=PRECHECK_FAILURES[stopped.check])
             at, started = _now()
+            timeout = timeout if options.left is None else options.left()  # 待ちの後に測り直した残り
             if run.gate is None:
                 launched = True
                 return _timed(_run_claude(run.argv, prompt, timeout, cwd, run.env, options.new_group), at, started)
@@ -972,13 +975,11 @@ def _run_claude(
     return _talk(proc, prompt, timeout)
 
 
-def _launch_failed(exc: OSError) -> ClaudeReply:
-    """子を起動できなかったときの回答（`Failure.LAUNCH`）。"""
+def _launch_failed(exc: OSError) -> ClaudeReply:  # 子を起動できなかったときの回答
     return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
 
 
-def _talk(proc: subprocess.Popen, prompt: str, timeout: float) -> ClaudeReply:
-    """起動した子に質問を渡して回答を読み、起動した子の回答（`launched` が真）にする。"""
+def _talk(proc: subprocess.Popen, prompt: str, timeout: float) -> ClaudeReply:  # 起動した子の回答（`launched` が真）にする
     return _read_answer(proc, prompt, timeout)._replace(launched=True)
 
 
