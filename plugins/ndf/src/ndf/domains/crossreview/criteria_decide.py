@@ -130,6 +130,11 @@ def protect_kinds() -> tuple[str, ...]:
     return tuple(_table()["kinds"]["protect"])
 
 
+def filed_kinds() -> tuple[str, ...]:
+    """直さずに残すときに起票する指摘の種類（#3780）。"""
+    return tuple(_table()["kinds"]["filed"])
+
+
 def track_kinds() -> tuple[str, ...]:
     """判定役が回答の `tracks` に書く指摘の種類の全部（保護の種類と、利用者に届いた不具合・承認資料の正しさ。#4363）。"""
     return (*protect_kinds(), *_table()["kinds"]["other"])

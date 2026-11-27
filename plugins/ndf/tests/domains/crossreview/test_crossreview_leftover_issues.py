@@ -1,0 +1,320 @@
+"""直さずに残した指摘の起票と起票の記録（#3780）。GitHub は REST の偽物で、伏せ字は本物の `publish.Publisher` を通す。"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from ndf.adapters import publish
+from ndf.adapters.github import PUBLIC, GitHubError
+from ndf.adapters.github_pulls import PER_PAGE
+from ndf.domains.crossreview import leftover, leftover_decide, store
+from ndf.domains.crossreview.leftover_decide import Filed, Listed
+
+REPO = "o/r"
+PR_URL = f"https://github.com/{REPO}/pull/7"
+
+
+class FakeGitHub:
+    """起票が使う REST の偽物。時刻は書き込みのたびに 1 秒進む。`fail` の (method, パスの末尾) は、指定の状態で 1 回だけ断る。
+    `indexed` が偽なら、作った Issue は検索にまだ出ない。"""
+
+    repo = REPO
+
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+        self.issues: list[dict[str, Any]] = []
+        self.calls: list[tuple[str, str]] = []
+        self.fail: dict[tuple[str, str], int] = {}
+        self.indexed = True
+        self.login = "me"
+        self.viewed = 0
+        self._tick = 0
+
+    def now(self) -> str:
+        self._tick += 1
+        return f"2026-11-27T00:00:{self._tick:02d}Z"
+
+    def viewer(self) -> str:
+        self.viewed += 1
+        return self.login
+
+    def visibilities(self, repos) -> dict[str, str]:
+        return {r: PUBLIC for r in repos}
+
+    def _by(self, body: str) -> dict[str, Any]:
+        return {"body": body, "user": {"login": self.login}, "author_association": "NONE"}
+
+    def issue(self, body: str, **other: Any) -> dict[str, Any]:
+        number = 100 + len(self.issues)
+        row = self._by(body) | {"number": number, "html_url": f"https://github.com/{REPO}/issues/{number}", "created_at": self.now()}
+        self.issues.append(row | other)
+        return self.issues[-1]
+
+    def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> Any:
+        path = path.removeprefix("/")
+        self.calls.append((method, path))
+        for (wanted, tail), status in list(self.fail.items()):
+            if wanted == method and path.endswith(tail):
+                del self.fail[(wanted, tail)]
+                raise GitHubError(f"{method} {path} は {status}", status)
+        if path == "search/issues":
+            ident = params["q"].split('"')[1]
+            return {"items": [i for i in self.issues if self.indexed and ident in i["body"]]}
+        if path == f"repos/{REPO}/issues" and method == "GET":
+            ordered = sorted(self.issues, key=lambda i: i["created_at"], reverse=True)
+            start = (params["page"] - 1) * params["per_page"]
+            return ordered[start : start + params["per_page"]]
+        if path == f"repos/{REPO}/issues":
+            return self.issue(payload["body"], title=payload["title"])
+        return self._comment(method, path.removeprefix(f"repos/{REPO}/issues/"), payload)
+
+    def _comment(self, method: str, tail: str, payload: Any) -> Any:
+        if tail.startswith("comments/"):
+            found = next((c for c in self.records if c["id"] == int(tail.split("/")[1])), None)
+            if found is None:
+                raise GitHubError("無い", 404)
+            if method == "PATCH":
+                found.update(body=payload["body"], updated_at=self.now())
+            return dict(found)
+        pr = int(tail.split("/")[0])
+        if method == "GET":
+            return [dict(c) for c in self.records if c["pr"] == pr]
+        self.records.append(self._by(payload["body"]) | {"id": 500 + len(self.records), "pr": pr, "updated_at": self.now()})
+        return dict(self.records[-1])
+
+    def count(self, method: str, tail: str) -> int:
+        return sum(1 for m, p in self.calls if m == method and p.endswith(tail))
+
+    def created(self) -> int:
+        return self.count("POST", f"repos/{REPO}/issues")
+
+
+def _row(fid: str = "r2-1", text: str = "古い行で値を落とす", **other: Any) -> dict[str, Any]:
+    row = {"id": fid, "text": text, "severity": "major", "impact": "利用者の値が消える", "path": "a.py", "line": 5}
+    return row | {"outcome": "unresolved", "parked": True, "protect": ["user_data"]} | other
+
+
+class Run:
+    """1 つの状態の保存先からの公開。`go` は起票を 1 回打つ。"""
+
+    def __init__(self, github: FakeGitHub, *rows: dict[str, Any], current: int = 7):
+        self.github = github
+        self.data: dict[str, Any] = {"pr": 7, "findings": list(rows) or [_row()]}
+        self.ref = store.StateRef(7, current, Path("unused"))
+        self.saved: list[str] = []
+        self.port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
+
+    def go(self, primary: str | None = "github", **options: Any) -> list[str]:
+        return leftover.file_issues(self.data, self.ref, self.port, lambda: self.saved.append(json.dumps(self.data)), primary, **options)
+
+    @property
+    def row(self) -> dict[str, Any]:
+        return self.data["findings"][0]
+
+
+# --- 判断（純粋な関数） -----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("row", "filed"),
+    [
+        pytest.param({"severity": "major", "check": {"tracks": ["delivered"]}}, True, id="delivered"),
+        pytest.param({"severity": "critical", "protect": ["user_data"]}, True, id="user-data"),
+        pytest.param({"severity": "major", "protect": ["authz"]}, False, id="authz-only"),
+        pytest.param({"severity": "major", "protect": ["authz"], "check": {"tracks": ["delivered"]}}, True, id="authz-and-delivered"),
+        pytest.param({"severity": "minor", "protect": ["secret"]}, False, id="minor"),
+    ],
+)
+def test_issue_3780_2_files_issue(row: dict, filed: bool) -> None:
+    assert leftover_decide.files_issue(row) is filed
+
+
+def test_identity_folds_spaces_and_case_and_reads_the_whole_text() -> None:
+    same = leftover_decide.identity(7, "Alpha  beta\n")
+    assert leftover_decide.identity(7, "alpha beta") == same and len(same) == 12
+    assert leftover_decide.identity(7, "alpha betb") != same != leftover_decide.identity(8, "alpha beta")
+
+
+def test_issue_parts_ends_with_the_mark_and_omits_empty_sections() -> None:
+    title, body = leftover_decide.issue_parts("あ" * 100, "", "", [PR_URL], "abc")
+    assert title == "あ" * leftover_decide.TITLE_CHARS
+    assert PR_URL in body and body.rstrip().endswith("cross-review-leftover abc -->")
+    assert "起きること" not in body and "場所" not in body
+
+
+def _listed(body: str, **other: Any) -> Listed:
+    return Listed("u", body, "me", "NONE", "t", False)._replace(**other)
+
+
+def test_issue_3780_matches_finding_needs_the_mark_the_url_and_the_text_outside_quotes() -> None:
+    text = "値を落とす\n\n```\n閉じていないコード"
+    _, body = leftover_decide.issue_parts(text, "消える", "a.py:5", [PR_URL], "abc")
+    assert leftover_decide.matches_finding(_listed(body), "abc", PR_URL, text)
+    mark = body.rstrip().splitlines()[-1]
+    quoted = "\n".join(f"> {line}" for line in body.splitlines()) + f"\n\n{mark}\n"
+    for other in (quoted, body + "後ろの文\n", f"```\n{body}\n```\n{mark}\n"):
+        assert not leftover_decide.matches_finding(_listed(other), "abc", PR_URL, text)
+    assert not leftover_decide.matches_finding(_listed(body, is_pull=True), "abc", PR_URL, text)
+
+
+@pytest.mark.parametrize(
+    ("author", "association", "wanted"),
+    [("x", "OWNER", True), ("x", "COLLABORATOR", True), ("me", "NONE", True), ("app[bot]", "NONE", True), ("x", "CONTRIBUTOR", False)],
+)
+def test_trusted_authors(author: str, association: str, wanted: bool) -> None:
+    assert leftover_decide.trusted(author, association, "me", ["app[bot]"]) is wanted
+
+
+def test_the_record_reads_back_what_it_writes_and_a_broken_body_is_empty() -> None:
+    entries = {"abc": {"at": "t", "url": "u"}, "def": {}}
+    assert leftover_decide.record_entries(leftover_decide.record_body(entries)) == entries
+    assert leftover_decide.record_entries(leftover_decide.record_body({})) == {}
+    assert leftover_decide.record_entries(leftover_decide.RECORD_MARK + "\n壊れた本文") == {}
+
+
+# --- 起票 ----------------------------------------------------------------------------------
+
+
+def test_issue_3780_2_files_once_and_writes_the_url_to_the_row() -> None:
+    github = FakeGitHub()
+    run = Run(github)
+    assert run.go() == []
+    url = github.issues[0]["html_url"]
+    assert run.row[Filed.URL] == url and Filed.ERROR not in run.row
+    assert run.data["issue_logins"] == ["me"] and run.data["issue_record_id"] == github.records[0]["id"]
+    # 作成を試みていない候補だけなら、検索も一覧も呼ばない
+    assert github.count("GET", "search/issues") == 0 and github.count("GET", f"repos/{REPO}/issues") == 0
+    assert run.go() == [] and github.created() == 1
+    # 別の保存先の打ち直しは、起票の記録の URL を使う
+    again = Run(github)
+    assert again.go() == [] and again.row[Filed.URL] == url and github.created() == 1
+
+
+def test_only_candidates_call_github() -> None:
+    github = FakeGitHub()
+    others = (_row(parked=False), _row(protect=["authz"]), _row(outcome="fixed"), _row(issue="u"))
+    assert Run(github, *others).go() == []
+    assert Run(github).go("markdown") == [] and Run(github).go(None) == []
+    assert github.calls == [] and github.viewed == 0
+
+
+def test_the_login_is_read_once_and_the_record_of_a_bot_is_trusted() -> None:
+    github = FakeGitHub()
+    github.login = "app[bot]"
+    first = Run(github)
+    first.go()
+    github.login = "human"
+    again = Run(github)
+    again.data["issue_logins"] = list(first.data["issue_logins"])
+    again.go()
+    again.go()
+    assert again.row[Filed.URL] == first.row[Filed.URL] and github.created() == 1 and github.viewed == 2
+
+
+def test_a_refused_creation_keeps_the_finding_and_can_be_retried() -> None:
+    github = FakeGitHub()
+    github.fail[("POST", f"repos/{REPO}/issues")] = 422
+    run = Run(github)
+    warnings = run.go()
+    assert run.row[Filed.ERROR] and Filed.URL not in run.row and "r2-1" in warnings[0]
+    assert leftover_decide.record_entries(github.records[0]["body"]) == {}
+    assert run.go() == [] and run.row[Filed.URL] and Filed.ERROR not in run.row
+
+
+def test_nothing_is_created_when_the_record_cannot_be_written() -> None:
+    github = FakeGitHub()
+    github.fail[("POST", "issues/7/comments")] = 502
+    run = Run(github)
+    assert run.go() and run.row[Filed.ERROR] and github.created() == 0
+
+
+@pytest.mark.parametrize("current", [pytest.param(7, id="same-pr"), pytest.param(9, id="reopened-pr")])
+@pytest.mark.parametrize("indexed", [pytest.param(True, id="search"), pytest.param(False, id="list")])
+def test_issue_3780_a_lost_result_does_not_create_a_second_issue(current: int, indexed: bool) -> None:
+    github = FakeGitHub()
+    github.indexed = indexed
+    github.fail[("PATCH", "comments/500")] = 502
+    assert Run(github).go()
+    again = Run(github, current=current)
+    assert again.go() == [] and again.row[Filed.URL] == github.issues[0]["html_url"]
+    assert github.created() == 1
+    assert leftover_decide.record_entries(github.records[0]["body"])[leftover_decide.identity(7, again.row["text"])]["url"]
+
+
+def test_an_issue_created_at_the_attempted_time_is_found_in_the_list() -> None:
+    github = FakeGitHub()
+    github.indexed = False
+    github.fail[("PATCH", "comments/500")] = 502
+    Run(github).go()
+    github.issues[0]["created_at"] = github.records[0]["updated_at"]
+    again = Run(github)
+    again.go()
+    assert again.row[Filed.URL] and github.created() == 1
+
+
+def test_an_unknown_result_with_no_issue_is_created_after_checking() -> None:
+    github = FakeGitHub()
+    github.fail[("POST", f"repos/{REPO}/issues")] = 502
+    run = Run(github)
+    assert run.go() and run.row[Filed.ERROR]
+    assert run.go() == [] and run.row[Filed.URL]
+    assert github.count("GET", "search/issues") == 1 and github.count("GET", f"repos/{REPO}/issues") == 1
+
+
+def test_an_unreadable_search_does_not_create() -> None:
+    github = FakeGitHub()
+    github.fail[("POST", f"repos/{REPO}/issues")] = 502
+    run = Run(github)
+    run.go()
+    github.fail[("GET", "search/issues")] = 403
+    assert run.go() and run.row[Filed.ERROR] and github.created() == 1
+
+
+def test_a_list_over_the_page_limit_is_held_until_a_manual_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(leftover.limits, "value", lambda name, key: 1)
+    github = FakeGitHub()
+    github.fail[("POST", f"repos/{REPO}/issues")] = 502
+    run = Run(github)
+    run.go()
+    for _ in range(PER_PAGE):
+        github.issue("無関係")
+    assert run.go() and run.data["issue_list_full"] == 1
+    listed = github.count("GET", f"repos/{REPO}/issues")
+    assert run.go() and github.count("GET", f"repos/{REPO}/issues") == listed
+    monkeypatch.setattr(leftover.limits, "value", lambda name, key: 3)
+    assert run.go() == [] and run.row[Filed.URL] and "issue_list_full" not in run.data
+
+
+def test_a_secret_across_the_title_cut_does_not_reach_the_issue() -> None:
+    secret = "ghp_" + "Zq7x" * 9
+    text = "あ" * (leftover_decide.TITLE_CHARS - 8) + " " + secret + " が漏れる"
+    github = FakeGitHub()
+    run = Run(github, _row(text=text, impact=f"{secret} が読める", protect=["secret"]))
+    assert run.go() == []
+    made = github.issues[0]
+    for written in (made["title"], made["body"], github.records[0]["body"]):
+        assert "ghp_" not in written and "Zq7x" not in written
+
+
+@pytest.mark.parametrize(
+    ("decl", "primary", "noted"),
+    [
+        pytest.param({"issues": {"primary": "github"}}, "github", False, id="github"),
+        pytest.param({"issues": {"primary": "markdown", "others": ["github"]}}, "markdown", False, id="markdown"),
+        pytest.param({"issues": {"primary": "unknown"}}, None, True, id="unknown"),
+        pytest.param({"issues": None}, None, True, id="null"),
+        pytest.param({}, None, True, id="no-issues"),
+        pytest.param("{", None, True, id="broken"),
+        pytest.param(None, None, True, id="no-file"),
+    ],
+)
+def test_primary_of(tmp_path: Path, decl: Any, primary: str | None, noted: bool) -> None:
+    if decl is not None:
+        (tmp_path / ".ndf").mkdir()
+        (tmp_path / ".ndf" / "project.json").write_text(decl if isinstance(decl, str) else json.dumps(decl), encoding="utf-8")
+    got, note = leftover.primary_of(tmp_path)
+    assert (got, note is not None) == (primary, noted)
