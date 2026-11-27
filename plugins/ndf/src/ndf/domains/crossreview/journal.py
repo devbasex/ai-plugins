@@ -224,13 +224,14 @@ def _serious(row: Mapping[str, Any]) -> bool:
 def experiment_values(
     rows: Sequence[Mapping[str, Any]], first: Optional[Collection[str]], seats: Sequence[str]
 ) -> tuple[Optional[int], dict[str, Optional[float]]]:
-    """効果指標の元の数（#2944）: 1 ラウンド目（`first` の id）の採用された重大な指摘の数と、シートごとの挙げた割合。
+    """効果指標の元の数（#2944）: 1 ラウンド目の採用された重大な指摘の数と、シートごとの挙げた割合。`first` は 1 ラウンド目の時点で
+    重大だった指摘の id で、採否だけを `rows` の今の状態から引く（後のラウンドで重要度が上がった指摘は数に入れない）。
 
     採用は修正担当が直した指摘で、相手役が挙げたもの（`raisers`）だけを数える。数は、`first` が無いか、1 ラウンド目の重大な指摘に
     決めていないものがあれば None。割合は、シートが 2 つ以上で採用が 1 件以上のときだけ値を持つ。
     """
     major = [r for r in rows if _serious(r) and store.list_of(r, RAISERS)]
-    mine = [r for r in major if first is not None and r["id"] in first]
+    mine = [r for r in rows if first is not None and r["id"] in first and store.list_of(r, RAISERS)]
     unknown = first is None or any(r["outcome"] not in fin.DECIDED for r in mine)
     count = None if unknown else sum(r["outcome"] == fin.FIXED for r in mine)
     adopted = [store.list_of(r, RAISERS) for r in major if r["outcome"] == fin.FIXED]
@@ -301,6 +302,10 @@ class FindingJournal:
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         self.entered = [str(row["id"]) for row in touched.values()]
         return frozenset(key for key, row in touched.items() if _blocking(row))
+
+    def entered_serious(self) -> list[str]:
+        """最後の `enter` で相手役が挙げた指摘のうち、今の重要度が重大なものの id。"""
+        return [i for i in self.entered if _serious(self.rows[i])]
 
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は

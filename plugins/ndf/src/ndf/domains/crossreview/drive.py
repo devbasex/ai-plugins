@@ -155,6 +155,7 @@ class _Run:
     seats: list[str] = field(default_factory=list)
     filled: list[Filled] = field(default_factory=list)
     input_dir: Optional[Path] = None
+    repo_key: Optional[str] = None  # シートの値を選ぶためのリポジトリのキー（最初に要った時に 1 回だけ解決する。#2944）
 
     @property
     def mvv_items(self) -> tuple[str, ...]:
@@ -863,8 +864,8 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         local = [u.local for u in got.unread.values()]
         raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(local))
     run.history.append(run.journal.enter(round_no, raised, run.mvv_items, run.mvv))
-    if round_no == 1:  # 設計と実装の効果指標は修正の前の指摘だけを数える（後のラウンドで同じ指摘が出ると行の round が変わる。#2944）
-        experiment.keep_first(run.data, run.journal.entered)
+    # 設計と実装の効果指標は修正の前の指摘とその時の重要度で数える（後のラウンドで行の round と重要度が変わる。#2944）
+    experiment.keep_first(run.data, round_no, run.journal.entered_serious())
     run.warnings += run.journal.warnings
     _detach_revived(run)
     record = _round_record(run, round_no, prep)

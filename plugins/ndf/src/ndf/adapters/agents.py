@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional
+from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional, Sequence
 
 from ndf import identity, process_group
 from ndf.adapters import cli_floor, launch_slot
@@ -60,7 +60,7 @@ def sandbox_failed(paths: "AgentPaths") -> Optional[str]:
 
     失敗は最初のコマンドで出て、その後の回答のログに埋もれるので、末尾でなく全体を読む。`--json` の起動は失敗を標準エラーに
     出さず、失敗で終わったコマンドの出力が `bwrap:` で始まる。"""
-    err = _whole_text(paths.err)
+    err = whole_text(paths.err)
     found = _SANDBOX_LINE.search(err)
     if found:
         return _line_at(err, found.start())
@@ -85,7 +85,7 @@ def codex_answer_path(out: Path) -> Path:
     return out.with_name(out.name + ".answer")
 
 
-def _whole_text(path: Path) -> str:
+def whole_text(path: Path) -> str:
     """ファイル全体を文字で読む。無ければ空。"""
     try:
         return path.read_text(encoding="utf-8", errors="replace")
@@ -111,7 +111,7 @@ def _starts_codex_stream(first_line: str) -> bool:
 
 def codex_events(out: Path) -> list[dict[str, Any]]:
     """`codex exec --json` の出力のイベント。最初の行が `thread.started` でなければ（`--json` の出力でなければ）空。"""
-    lines = _whole_text(out).split("\n")
+    lines = whole_text(out).split("\n")
     if not _starts_codex_stream(lines[0]):
         return []
     return [e for e in map(_codex_event, lines) if e is not None]
@@ -163,9 +163,9 @@ class CodexUsage(NamedTuple):
     output_tokens: int
 
 
-def codex_usage(out: Path) -> Optional[CodexUsage]:
-    """`turn.completed` の行の `usage` の合計。行が無ければ（失敗した起動）None。"""
-    found = [e["usage"] for e in codex_events(out) if e.get("type") == "turn.completed" and isinstance(e.get("usage"), Mapping)]
+def codex_usage(events: Sequence[Mapping[str, Any]]) -> Optional[CodexUsage]:
+    """`turn.completed` の行の `usage` の合計。行が無ければ（失敗した起動）None。`events` は `codex_events` の値。"""
+    found = [e["usage"] for e in events if e.get("type") == "turn.completed" and isinstance(e.get("usage"), Mapping)]
     if not found:
         return None
     return CodexUsage(*(sum(u[k] for u in found if isinstance(u.get(k), int)) for k in CodexUsage._fields))
@@ -179,9 +179,8 @@ def _failure_message(event: Mapping[str, Any]) -> str:
     return str(error.get("message")) if event.get("type") == "turn.failed" and isinstance(error, Mapping) else ""
 
 
-def codex_refused(out: Path) -> bool:
+def codex_refused(events: Sequence[Mapping[str, Any]]) -> bool:
     """API がモデルか effort の指定を理由に、実行を始める前に断ったか（回答も使用量も無く、`turn.failed` の文が当たる）。"""
-    events = codex_events(out)
     items = [e.get("item") for e in events]
     ran = any(e.get("type") == "turn.completed" for e in events)
     ran = ran or any(isinstance(i, Mapping) and i.get("type") == "agent_message" for i in items)

@@ -1,8 +1,8 @@
 """cross-review の実験の記録と、起動した AI の子の使用量ログの行（#2944）。
 
-状態ファイルの `experiment_units` は、実行の ID（`id`。1 回だけ作り、打ち直しでも同じ）・シートの割り付け ID（`seats`）・1 ラウンド目に
-挙がった指摘の id（`first`）を持つ。シートの単位は `<実行の ID>:<シート>` である。値を選ぶ処理の差し込みが無い起動は、状態ファイルに
-何も足さず、行も書かない。
+状態ファイルの `experiment_units` は、実行の ID（`id`。1 回だけ作り、打ち直しでも同じ）・シートの割り付け ID（`seats`）・評価する設計か
+実装の割り付け ID（`charged`）と、その最初のレビューのラウンドで重大だった指摘の id（`first`）を持つ。シートの単位は
+`<実行の ID>:<シート>` である。値を選ぶ処理の差し込みが無い起動は、状態ファイルに何も足さず、行も書かない。
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Optional, Protocol
 
 from ndf import identity
-from ndf.adapters import agents, claude, claude_choice
+from ndf.adapters import agents, claude, claude_choice, launch_approval, launch_settings
 from ndf.contracts import facts
 from ndf.core.converge import participants
 from ndf.domains.crossreview import finish_decide as fin
@@ -35,12 +35,6 @@ def start_run(data: dict[str, Any]) -> bool:
     return True
 
 
-def keep_first(data: dict[str, Any], entered: Sequence[str]) -> None:
-    """1 ラウンド目に相手役が挙げた指摘の id を残す。"""
-    if KEY in data:
-        data[KEY]["first"] = list(entered)
-
-
 def charge_env() -> str:
     """費用を手戻りとして負う割り付け ID を持つ環境変数の名前。"""
     return identity.env_name("charge-to")
@@ -52,10 +46,24 @@ def charge_to() -> Optional[str]:
     return None if value == "" else value
 
 
+def keep_first(data: dict[str, Any], round_no: int, serious: Sequence[str]) -> None:
+    """評価する単位の最初のラウンドで重大だった指摘の id を、その割り付け ID と対で残す。
+
+    残すのは 1 ラウンド目と、費用を負う割り付けが残したものから変わった後の最初のラウンドである（同じ状態の保存先で別の実装の
+    変更を続けてレビューした場合に、前の実装の指摘で評価しない）。割り付けを指定しない打ち直しは、前の記録を変えない。
+    """
+    if KEY not in data:
+        return
+    held, charged = data[KEY], charge_to()
+    if round_no == 1 or (charged is not None and ("charged" not in held or held["charged"] != charged)):
+        held["first"], held["charged"] = list(serious), charged
+
+
 class Held(Protocol):
-    """状態ファイルの中身を持つ 1 回の起動の値（`drive._Run`）。"""
+    """状態ファイルの中身と、解決したリポジトリのキーを持つ 1 回の起動の値（`drive._Run`）。"""
 
     data: dict[str, Any]
+    repo_key: Optional[str]
 
 
 def choose_seat(run: Held, seat: str, cwd: Path) -> claude_choice.ChoiceRun:
@@ -65,7 +73,10 @@ def choose_seat(run: Held, seat: str, cwd: Path) -> claude_choice.ChoiceRun:
         return claude_choice.ChoiceRun(None)
     start_run(run.data)
     unit = f"{run.data[KEY]['id']}:{seat}"
-    return claude_choice.ChoiceRun(claude_choice.pick_values("seat", "review", cwd=cwd, runtime=runtime, unit=unit))
+    if run.repo_key is None:  # git の起動は 1 回の駆動で 1 回だけにする（シートと打ち直しで使い回す）
+        run.repo_key = launch_approval.repo_key(launch_settings.launch_root(cwd))
+    picked = claude_choice.pick_values("seat", "review", cwd=cwd, runtime=runtime, unit=unit, repo_key=run.repo_key)
+    return claude_choice.ChoiceRun(picked)
 
 
 def keep_seat(run: Held, seat: str, chosen: claude_choice.ChoiceRun) -> None:
@@ -96,15 +107,17 @@ def seat_row(spec: agents.Launch, status: agents.AgentStatus, chosen: claude_cho
     if chosen.choice is None:
         return None
     if spec.agent == participants.FIXER:
-        reply = claude_row(claude.LaunchLog(meta_of("review", chosen)), agents.tail(spec.paths.out), status)
+        # 出力は 1 つの JSON なので全体を読む（末尾だけでは、大きい回答の使用量と費用が欠ける）
+        reply = claude_row(claude.LaunchLog(meta_of("review", chosen)), agents.whole_text(spec.paths.out), status)
         chosen.seen(reply)
         return reply
-    refused = agents.codex_refused(spec.paths.out)
+    events = agents.codex_events(spec.paths.out)
+    refused = agents.codex_refused(events)
     if status.seconds is not None:
         meta = {**meta_of("review", chosen), "seconds": status.seconds, "outcome": str(status.state)}
         if refused:
             meta["model_refused"] = True
-        usage.record_codex(agents.codex_usage(spec.paths.out), meta, chosen.choice)
+        usage.record_codex(agents.codex_usage(events), meta, chosen.choice)
     failure = claude.Failure.MODEL_REFUSED if refused else None
     return claude.ClaudeReply.failed("", "codex の起動の結果", failure=failure)
 
@@ -112,7 +125,8 @@ def seat_row(spec: agents.Launch, status: agents.AgentStatus, chosen: claude_cho
 def record(data: dict[str, Any], rows: Sequence[dict[str, Any]], seats: Sequence[str], final: str) -> None:
     """収束かラウンドの上限で終わったレビューの効果指標を書く: シートの単位と、費用を負う割り付け（評価した設計か実装の単位）。
 
-    書けなくても警告だけで、レビューの結果は変えない。同じ割り付け ID の 2 回目の指標は書き込み処理が足さない。
+    書けなくても警告だけで、レビューの結果は変えない。同じ割り付け ID の 2 回目の指標は書き込み処理が足さないので、ラウンドの
+    上限では値の決まらない指標（null）を書かず、再開して裁定した後の値を書けるようにする。
     """
     if final not in RECORDED or KEY not in data:
         return
@@ -120,7 +134,13 @@ def record(data: dict[str, Any], rows: Sequence[dict[str, Any]], seats: Sequence
     count, shares = experiment_values(rows, held.get("first"), seats)
     for seat in seats:
         if seat in held["seats"]:
-            claude_choice.report_outcome(held["seats"][seat], shares[seat], {"seats": len(seats)})
+            _report(held["seats"][seat], shares[seat], {"seats": len(seats)}, final)
     charged = charge_to()
     if charged is not None:
-        claude_choice.report_outcome(charged, None if count is None else 1 / (1 + count), {"major": count})
+        _report(charged, None if count is None else 1 / (1 + count), {"major": count}, final)
+
+
+def _report(assign_id: str, quality: Optional[float], detail: dict[str, Any], final: str) -> None:
+    """効果指標を 1 件書く。ラウンドの上限の null は書かない（`record`）。行が無い単位は null の行と同じく計算に数えない。"""
+    if quality is not None or final == fin.CONVERGED:
+        claude_choice.report_outcome(assign_id, quality, detail)

@@ -97,7 +97,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `bundled_errors` | 同 | 新設 | `bundled_errors() -> list[str]` | 同梱の値が起動の設定のスキーマに合わない箇所を返す。起動の経路では呼ばず、CI のテストが呼ぶ |
 | `stage_of` | 同 | 新設 | `stage_of(layer: str, name: str) -> Optional[str]` | 層と作業の名前から工程を引く |
 | `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, environ: Optional[Mapping[str, str]] = None, settings: Optional[Settings] = None, **request: Any) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる。`settings` は `table` へ渡す。`request` は `Request` の欄を名前で受ける |
-| `Request` | 同 | 新設 | `unit: Optional[str] = None`、`charge_to: Optional[str] = None`、`retry: Optional[str] = None`、`mode: Optional[str] = None`、`argument: tuple[Optional[str], Optional[str]] = (None, None)`、`argument_at: tuple[str, str] = ("引数 --model", "引数 --effort")` | `launch_choice` の `request` が受け付ける欄。ほかの名前を渡すと `TypeError` になる。`argument` はモデルと effort の引数の指定、`argument_at` は誤りの文でその引数を指す言い方 |
+| `Request` | 同 | 新設 | `unit: Optional[str] = None`、`charge_to: Optional[str] = None`、`retry: Optional[str] = None`、`mode: Optional[str] = None`、`argument: tuple[Optional[str], Optional[str]] = (None, None)`、`argument_at: tuple[str, str] = ("引数 --model", "引数 --effort")`、`repo_key: Optional[str] = None` | `launch_choice` の `request` が受け付ける欄。ほかの名前を渡すと `TypeError` になる。`argument` はモデルと effort の引数の指定、`argument_at` は誤りの文でその引数を指す言い方、`repo_key` は呼び出し元が解決済みのリポジトリのキー（None なら `launch_choice` が解く） |
 | `raised` | 同 | 新設 | `raised(runtime: str, model: Optional[str], effort: Optional[str]) -> tuple[Optional[str], Optional[str]]` | 設計書の「引き上げる起動」の上げ方の表を当てる |
 | `base_fallback` | 同 | 新設 | `base_fallback(choice: Choice, reason: str) -> Optional[Choice]` | 切り替える条件（`Choice.switchable`。割り付けた、基準でない組）に当たれば `launch_error` の行を書き、基準の組の値を返す。当たらなければ None。行は `append_row(row, choice.store)` で、割り付けたときと同じ保存先に書く。呼び出しで環境変数を差し替えて保存先が既定と違っても、次の起動が同じ保存先から切り替えを読めるようにするためである |
 | `candidates` | 同 | 新設 | `candidates(arms: Sequence, rows: Sequence, entry: Optional[Mapping], now: datetime, where: Where, *, refused: Optional[Mapping[int, datetime]] = None) -> list[int]` | 打ち切った組と起動できない組を除いた添字。`refused` は呼び手が求めた `refused_until` の結果で、渡されれば記録を走査し直さない。`launch_error` は割り付け ID で割り付けの行を引き、`where`（`repo`・`stage`・`runtime`・`key` を持つ組）が同じものだけを数える。引数の多い関数の検査（PLR0913）に合わせ、4 つのキーを 1 つの値にまとめた |
@@ -162,7 +162,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `read_experiments`・`ledger`・`append_row` | `domains/records/jsonl.py` | 層の順序（adapters は domains を読めない） | 使えない。`filelock` と `contracts` の形の確認を使う |
 | `table` | `launch_settings.load` | #1959 の詳細設計 | 使う |
 | `compatibility_key` | `launch_approval.digest` の形 | 同上 | 同じ「キーの順にそろえた JSON の SHA-256」にする |
-| `launch_choice` のリポジトリのキー | `launch_approval.repo_key` | #1959 の詳細設計 | 使う。値の選択（単位のある起動）と起動の承認の確認（指定のある起動）の両方がキーを使い、それぞれがその時点で解く。承認の確認が、割り付けの記録を待つ前に解いたキーを使わないためである（[設計書の「受け入れる限界」](./issue-2944-design.md#受け入れる限界)）。同じ値をファイルから求める関数を別に持つと、`.git` と `commondir` を読む処理がほかの 3 か所と重なる（重複の検査） |
+| `launch_choice` のリポジトリのキー | `launch_approval.repo_key` | #1959 の詳細設計 | 使う。値の選択（単位のある起動）と起動の承認の確認（指定のある起動）の両方がキーを使い、それぞれがその時点で解く。ただし cross-review のシートの値の選択は、1 回の駆動で 1 回だけ解いたキーを `repo_key` で渡す（シートと打ち直しのたびに git を起動しないため）。承認の確認が、割り付けの記録を待つ前に解いたキーを使わないためである（[設計書の「受け入れる限界」](./issue-2944-design.md#受け入れる限界)）。同じ値をファイルから求める関数を別に持つと、`.git` と `commondir` を読む処理がほかの 3 か所と重なる（重複の検査） |
 | `stage_of` | `contracts/worker/kinds.json` | `ls contracts/worker` | 作業の名前は同じ。工程の対応は持たないので表に置く |
 | `raised`・`candidates`・`base_fallback` | — | `grep -rn "effort" src/ndf`（該当なし） | 新設する |
 | `report_outcome`・`record_outcome` | `report_launch`・`record_cli`（#1959） | #1959 の詳細設計 | 同じ差し込みに関数を足す |
@@ -367,22 +367,23 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `with_choice` | `core/converge/participants.py` | 新設 | `with_choice(spec: agents.Launch, choice: Optional[Any]) -> agents.Launch` | `review_launch`・`read_only_launch`・`reading_launch` が組み立てた起動に組の引数と環境を足し、Codex は `usage_args` を足す |
 | `answer_text` | 同 | 変更 | 変えない | 結果を探す本文を返す。Codex の `--json` の出力では回答のファイルの末尾を返す。回答のファイルのパスと、ファイルが無い場合の扱いは、表の下の「Codex の回答の読み方」に従う |
 | `_start_and_watch` | `adapters/agents.py` | 変更 | 変えない | `AgentStatus.seconds` に起動から終了までの秒を入れる |
-| `codex_usage` | 同 | 新設 | `codex_usage(out: Path) -> Optional[CodexUsage]` | `turn.completed` の行の `usage` を足し合わせる |
+| `codex_usage` | 同 | 新設 | `codex_usage(events: Sequence) -> Optional[CodexUsage]`（`events` は `codex_events` の値。拒否の判定 `codex_refused(events)` と 1 回の読み取りを共有する） | `turn.completed` の行の `usage` を足し合わせる |
 | `codex_cost` | `domains/records/usage.py` | 新設 | `codex_cost(used: Any, model: Optional[str]) -> tuple[str, Optional[float]]`（`used` は `agents.CodexUsage`） | 換算に使ったモデルの名前と、単価表から求めた USD を返す。単価の無いモデルの USD は None |
 | `record_codex` | 同 | 新設 | `record_codex(used: Any, meta: Mapping[str, Any], choice: Any) -> None` | `caller` が `codex-exec` の行を使用量ログに書く。費用の欄と `unpriced` を記録する条件は、表の下の「Codex の費用と `unpriced` の記録」に従う |
 | `_seat_launch`・`launch_reviewers`・`_seat_result` | `domains/crossreview/seats.py` | 変更 | `_seat_launch(run, seat, prompt, stem, choice)` | シートの単位で値を取得し、起動ごとに行を書き、Codex の回答を `answer_text` で読む |
 | `_fixer_launch`・`_launch_fixer`・`_keep_fixer` | `domains/crossreview/fixer.py` | 変更 | 変えない | 修正担当の値と `charge_to`・`session_seq` を 1 回の駆動の中だけで持ち、同じ駆動の中の会話の再開に使う（状態ファイルには残さない） |
 | `enter` | `domains/crossreview/journal.py` | 変更 | 変えない | 同じ指摘を挙げた担当を `raisers` にすべて残す |
-| `experiment_values` | 同 | 新設 | `experiment_values(rows: Sequence, first: Collection[str], seats: Sequence[str]) -> tuple[Optional[int], dict[str, Optional[float]]]` | 1 ラウンド目の採用された重大な指摘の数（裁定していない重大な指摘があれば None）と、シートごとの挙げた割合を返す |
+| `experiment_values` | 同 | 新設 | `experiment_values(rows: Sequence, first: Collection[str], seats: Sequence[str]) -> tuple[Optional[int], dict[str, Optional[float]]]` | 1 ラウンド目の採用された重大な指摘の数と、シートごとの挙げた割合を返す。`first` は 1 ラウンド目の時点で重大だった指摘の id で、その中に裁定していない指摘があれば数は None |
 | `_record_experiment` | `domains/crossreview/drive.py` | 新設 | `_record_experiment(run: _Run, final: str) -> None` | シートと、`NDF_CHARGE_TO` の単位の効果指標を書く |
 
-- シートの単位は `<cross-review の実行の ID>:<シート>`。実行の ID は状態ファイルに 1 回だけ作り、打ち直しでも同じ値。1 ラウンド目で出た指摘の id も状態ファイルに残す。後のラウンドで担当が同じ指摘をもう一度挙げると、ジャーナルの行の `round` がそのラウンドに書き換わり、1 ラウンド目の指摘と見分けられなくなるためである
+- シートの単位は `<cross-review の実行の ID>:<シート>`。実行の ID は状態ファイルに 1 回だけ作り、打ち直しでも同じ値。1 ラウンド目で出た指摘のうち、その時点で重大だったものの id も状態ファイルに残す。後のラウンドで担当が同じ指摘をもう一度挙げると、ジャーナルの行の `round` と重要度がそのラウンドの値に書き換わり、1 ラウンド目の指摘と当時の重要度が見分けられなくなるためである
+- 残した id は、その時の `NDF_CHARGE_TO` の割り付け ID と対にする。後の起動で `NDF_CHARGE_TO` が別の ID になったら、その起動の最初のラウンドの指摘で残し直す。同じ状態の保存先で別の実装の変更を続けてレビューした場合に、前の実装の指摘で評価しないためである。`NDF_CHARGE_TO` の無い起動は残し直さない
 - 採用された指摘は修正担当が直した（`fixed`）指摘で、見送りと、ラウンドの上限で終わって裁定していない指摘は含めない。重大は critical か major。review の指標は、同じレビューに 2 つ以上のシートがあり、採用が 1 件以上の場合だけ値を持つ
 - `_record_experiment` は、終わり方が収束かラウンドの上限のときに書く。結果を読めないシートがあって終わった場合と、誤りで終わった場合は書かない。design と impl の指標は `1 / (1 + 1 ラウンド目の採用された重大な指摘の数)` で、数が None なら null
+- ラウンドの上限では、値が null になる指標は行を書かない。同じ割り付け ID の指標は先に書いた行だけが有効なので、null を書くと、再開して裁定した後の値を残せないためである。行の無い単位は、null の行がある単位と同じく計算に数えない。値の決まった指標は上限でも書く
 - 修正担当は `launch_choice("seat", "fix")`（工程が無いので実験の引数を足さない）。環境変数と引数の指定は効く
-- シートの子の環境から `NDF_CHARGE_TO` を外す
 - モデルか effort を理由に拒まれた基準でない組は、シートの中で基準の組へ 1 回切り替える（`_run_seat`。判定は `agents.codex_refused` と claude の `Failure.MODEL_REFUSED`）
-- 値を選ぶ処理の差し込みが無い起動は、引数を足さず、行も状態ファイルのキーも書かない
+- レビューのシートの子には `NDF_CHARGE_TO` を渡さない。値を選ぶ処理が登録されていない起動には、モデルと effort の引数を足さず、使用量ログの行と `experiment_units` も書かない
 - Codex の回答の読み方
   - 回答のファイルは、標準出力のログのファイル名に `.answer` を足したものである。標準出力のログが `review.out` なら、回答のファイルは `review.out.answer` になる
   - 回答先の指定、起動前の削除、読み取りは、どれも `agents.codex_answer_path(out)`（`out` は標準出力のログのパス）で求めたパスを使う
@@ -424,8 +425,8 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | --- | --- | --- | --- |
 | `review_launch` | `-c`・`-m`・`--ephemeral`・`--json`・`-o` | 指定なしの組 | cross-refactoring の起動は変わらない |
 | `codex_usage`・`codex_cost` | 実際の出力の見本 | モデルの指定なしは `default_model` | 単価の無いモデル |
-| `experiment_values` | 割合と件数 | 採用 0 件は null、シート 1 つは null | 見送り・裁定していない指摘・後のラウンドを数えない。1 ラウンド目に裁定していない重大な指摘があれば件数は None |
-| `_record_experiment` | 収束で 1 回 | `NDF_CHARGE_TO` なし | 打ち直しで 2 行目が効かない |
+| `experiment_values` | 割合と件数 | 採用 0 件は null、シート 1 つは null | 見送り・裁定していない指摘・後のラウンドで挙がった指摘と重大になった指摘を数えない。1 ラウンド目に裁定していない重大な指摘があれば件数は None |
+| `_record_experiment` | 収束で 1 回 | `NDF_CHARGE_TO` なし。上限では null を書かない | 打ち直しで 2 行目が効かない |
 | `_launch_fixer` | 再開の値と `charge_to` が初回と同じ | 新しい会話は取り直す | — |
 
 ## 効果指標と出現率

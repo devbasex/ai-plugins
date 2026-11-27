@@ -42,6 +42,7 @@ class SeatRun(Protocol):
     seats: list[str]
     filled: list[Filled]
     input_dir: Optional[Path]
+    repo_key: Optional[str]
 
     def round_stem(self, round_no: int, suffix: str) -> Path: ...
 

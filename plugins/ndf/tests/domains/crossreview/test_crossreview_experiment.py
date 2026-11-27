@@ -1,61 +1,74 @@
-"""cross-review の相手役のシートを実験の単位にし、効果指標と起動の行を書く（#2944）。相手役と修正担当は偽物。"""
+"""cross-review の相手役のシートを実験の単位にし、効果指標と起動の行を書く（#2944）。
+
+相手役と修正担当は偽物で、git は起動しない（起動するとテストが落ちる）。
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from ndf.adapters import agents, claude, claude_choice, model_chooser
+from ndf.adapters import agents, claude, claude_choice, git, model_choice
+from ndf.contracts import internal
+from ndf.domains.crossreview import drive, experiment, fixer, seats, settings
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.journal import FindingJournal, experiment_values
 from ndf.domains.records import jsonl, usage
 
-from ._repos import Repos
-from .test_crossreview_fixer_sessions import SAVED, Sessions, _declare
-from .test_crossreview_run import FAIL, Fake, _run, _state
-
 USED = {"input_tokens": 100, "cached_input_tokens": 40, "cache_write_input_tokens": 0, "output_tokens": 10}
-
-
-def _major(text: str) -> dict:
-    return {"text": text, "severity": "major", "impact": "利用者の経路で処理が止まる", "section": ""}
-
-
-def _as_codex(spec: agents.Launch, status: agents.AgentStatus) -> agents.AgentStatus:
-    """`--json` の起動は、本文を `-o` のファイルへ、使用量の行を標準出力へ書く。"""
-    if "--json" in spec.argv:
-        answer = Path(spec.argv[spec.argv.index("-o") + 1])
-        events = [{"type": "thread.started", "thread_id": "t"}, {"type": "turn.completed", "usage": USED}]
-        if status.state == agents.AgentState.DONE:
-            answer.write_text(spec.paths.out.read_text(encoding="utf-8"), encoding="utf-8")
-        spec.paths.out.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
-    return status._replace(seconds=1.5)
-
-
-class Seated(Fake):
-    def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
-        return _as_codex(spec, super().__call__(spec))
-
-
-class SeatedSessions(Sessions):
-    def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
-        return _as_codex(spec, super().__call__(spec))
+NO_FINDINGS = '{"findings": []}'
 
 
 @pytest.fixture
-def outcomes(monkeypatch) -> dict[str, tuple]:
-    """値を選ぶ処理と使用量ログの書き込み処理を本物にし、書く効果指標を集める。"""
+def outcomes(monkeypatch, launch_chooser) -> dict[str, tuple]:
+    """値を選ぶ処理と使用量ログの書き込み処理を本物にし、書く効果指標を集める。git の起動は失敗にする。"""
     monkeypatch.delenv("NDF_USAGE_DIR", raising=False)
     for name in ("NDF_CHARGE_TO", "NDF_LAUNCH_MODEL", "NDF_LAUNCH_EFFORT", "CLAUDE_CODE_EFFORT_LEVEL"):
         monkeypatch.delenv(name, raising=False)
     got: dict[str, tuple] = {}
-    monkeypatch.setattr(claude_choice, "launch_chooser", model_chooser)
     monkeypatch.setattr(claude, "launch_recorder", usage)
     monkeypatch.setattr(claude_choice, "report_outcome", lambda aid, quality, detail: got.__setitem__(aid, (quality, detail)))
+
+    def no_git(args, *rest, **named):
+        raise AssertionError(f"git を起動した: {args}")
+
+    monkeypatch.setattr(git, "_start", no_git)
     return got
+
+
+def _held(tmp_path: Path, saved: bool = False) -> drive._Run:
+    """1 回の駆動の値。git と状態の読み書きを使わない部分だけを持つ。"""
+    work, state = tmp_path / "wt", tmp_path / "st"
+    work.mkdir()
+    state.mkdir()
+    cfg = SimpleNamespace(worktree=work, state_dir=state, fixer="claude", settings=settings.ReviewSettings(fixer_sessions=saved))
+    return drive._Run(cfg=cfg, g=None, ref=None, data={}, journal=FindingJournal(), warnings=[], process=[], history=[])
+
+
+def _done(spec: agents.Launch) -> agents.AgentStatus:
+    return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())._replace(seconds=1.5)
+
+
+class Seats:
+    """偽の相手役。codex の `--json` の起動は、本文を `-o` のファイルへ、使用量の行を標準出力へ書く。"""
+
+    def __init__(self) -> None:
+        self.launches: list[agents.Launch] = []
+
+    def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
+        self.launches.append(spec)
+        spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
+        if "--json" in spec.argv:
+            Path(spec.argv[spec.argv.index("-o") + 1]).write_text(NO_FINDINGS, encoding="utf-8")
+            events = [{"type": "thread.started", "thread_id": "t"}, {"type": "turn.completed", "usage": USED}]
+            spec.paths.out.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+        else:
+            spec.paths.out.write_text(NO_FINDINGS, encoding="utf-8")
+        return _done(spec)
 
 
 def _rows(**wanted: Any) -> list[dict]:
@@ -63,58 +76,116 @@ def _rows(**wanted: Any) -> list[dict]:
     return [r for r in found if all(r.get(k) == v for k, v in wanted.items())]
 
 
-def test_a_converged_review_records_the_share_of_the_seat_and_of_the_charged_unit(
-    wt: Path, tmp_path: Path, capsys, monkeypatch, outcomes
-) -> None:
+def _review(run: drive._Run, round_no: int, launch, *names: str) -> None:
+    seats.launch_reviewers(run, round_no, {s: "読む" for s in names}, [], launch)
+
+
+def test_each_seat_launch_writes_a_row_and_the_repository_key_is_resolved_once(tmp_path: Path, monkeypatch, outcomes) -> None:
     monkeypatch.setenv("NDF_CHARGE_TO", "design-unit")
-    fake = Seated(tmp_path / "st", {"codex": [[_major("一つ目")]], "kiro": [[_major("一つ目"), _major("二つ目")]]})
-    code, got = _run(capsys, monkeypatch, fake, wt)
-    assert (code, got["status"]) == (0, "ok")
+    resolved: list[Path] = []
+    monkeypatch.setattr(model_choice.launch_approval, "repo_key", lambda root: resolved.append(root) or str(root))
+    run, fake = _held(tmp_path), Seats()
+    for round_no in (1, 2):
+        _review(run, round_no, fake, "codex", "kiro")
+    assert len(resolved) == 1
     rows = _rows(name="review", runtime="codex")
     assert [(r["caller"], r["layer"], r["outcome"], r["seconds"]) for r in rows] == [("codex-exec", "seat", "done", 1.5)] * 2
-    run_id = _state(fake.state_dir)["experiment_units"]["id"]
-    assert {r["unit"] for r in rows} == {f"{run_id}:codex"} and len({r["assign_id"] for r in rows}) == 1
+    held = run.data[experiment.KEY]
+    assert {r["unit"] for r in rows} == {f"{held['id']}:codex"} and held["seats"]["codex"] == rows[0]["assign_id"]
+    assert rows[0]["assign_id"] == rows[1]["assign_id"]
     assert rows[0]["effort"] and rows[0]["session_cost_usd"] > 0 and "charge_to" not in rows[0]
-    assert outcomes[rows[0]["assign_id"]][0] == 0.5
-    assert outcomes["design-unit"] == (pytest.approx(1 / 3), {"major": 2})
     codex = [s for s in fake.launches if s.agent == "codex"][0]
     assert f"model_reasoning_effort={rows[0]['effort']}" in codex.argv and codex.env["NDF_CHARGE_TO"] is None
 
 
-def test_the_fixer_row_is_charged_and_without_charge_to_only_seats_are_recorded(
-    wt: Path, tmp_path: Path, capsys, monkeypatch, outcomes
-) -> None:
-    fake = Seated(tmp_path / "st", {"codex": [[_major("一つ目")]], "kiro": [[]]})
-    _run(capsys, monkeypatch, fake, wt)
-    (fix,) = _rows(name="fix")
-    assert (fix["layer"], fix["caller"], "assign_id" in fix, "charge_to" in fix) == ("seat", "claude-p", False, False)
-    assert len(outcomes) == 1
+def test_a_claude_seat_answer_longer_than_the_tail_keeps_its_cost(tmp_path: Path, outcomes) -> None:
+    def large(spec: agents.Launch) -> agents.AgentStatus:
+        body = "読んだ" * agents.TAIL_BYTES + "\n" + NO_FINDINGS
+        spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
+        answer = {"type": "result", "result": body, "session_id": "s", "total_cost_usd": 0.5}
+        spec.paths.out.write_text(json.dumps(answer, ensure_ascii=False), encoding="utf-8")
+        return _done(spec)
+
+    _review(_held(tmp_path), 1, large, "claude")
+    (row,) = _rows(name="review")
+    assert row["session_cost_usd"] == 0.5
 
 
-def test_a_review_that_stops_with_an_unread_seat_records_nothing(wt: Path, tmp_path: Path, capsys, monkeypatch, outcomes) -> None:
-    monkeypatch.setenv("NDF_CHARGE_TO", "impl-unit")
-    fake = Seated(tmp_path / "st", {"codex": [[_major("一つ目")]], "kiro": [FAIL, FAIL], "claude": [FAIL]})
-    _run(capsys, monkeypatch, fake, wt)
-    assert _state(fake.state_dir)["rounds"][-1]["verdict"] == fin.INCOMPLETE_REVIEWERS
-    assert outcomes == {}
+def test_a_refused_codex_arm_is_launched_once_more_with_the_base_arm(tmp_path: Path, monkeypatch, outcomes) -> None:
+    monkeypatch.setattr(model_choice, "_random_value", lambda: 0.99)  # 基準でない組を引く
+
+    class Refusing(Seats):
+        def __call__(self, spec):
+            status = super().__call__(spec)
+            if "model_reasoning_effort=high" in spec.argv:
+                Path(spec.argv[spec.argv.index("-o") + 1]).unlink()
+                message = "[ReasoningEffortParam] [reasoning.effort] [invalid_enum_value] Invalid value"
+                events = [{"type": "thread.started"}, {"type": "turn.failed", "error": {"message": message}}]
+                spec.paths.out.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+                return status._replace(state=agents.AgentState.FAILED, exit_code=1)
+            return status
+
+    run = _held(tmp_path)
+    _review(run, 1, Refusing(), "codex")
+    first, second = _rows(name="review", runtime="codex")
+    assert (first["model_refused"], first["effort"], second["effort"], second["request_try"]) == (True, "high", "low", 2)
+    assert first["request_id"] == second["request_id"] and "assign_id" not in second
+    assert run.data[experiment.KEY]["seats"] == {}
 
 
-def test_a_resumed_fixer_keeps_the_first_values_and_charge(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, outcomes) -> None:
+def test_a_bad_value_stops_before_any_seat_is_launched(tmp_path: Path, monkeypatch, outcomes) -> None:
+    monkeypatch.setenv("NDF_LAUNCH_CODEX_EFFORT", "bogus")
+    fake = Seats()
+    with pytest.raises(internal.InternalError) as stopped:
+        _review(_held(tmp_path), 1, fake, "kiro", "codex")
+    assert stopped.value.kind == "precondition" and fake.launches == []
+
+
+# --- 修正担当 ----------------------------------------------------------------------------------------
+
+
+class Fixer:
+    """偽の修正担当。会話を続けられる大きさの文脈を持つ結果の行を書く。`after` は起動のたびに呼ぶ。"""
+
+    def __init__(self, after=lambda: None) -> None:
+        self.after = after
+        self.launches: list[agents.Launch] = []
+
+    def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
+        self.launches.append(spec)
+        spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
+        iteration = {"input_tokens": 2, "cache_read_input_tokens": 998, "cache_creation_input_tokens": 0}
+        models = {"claude-opus-5-5": {"inputTokens": 1000, "outputTokens": 1, "contextWindow": 1000000}}
+        result = {"type": "result", "usage": {"iterations": [iteration]}, "modelUsage": models}
+        spec.paths.out.write_text(json.dumps(result) + "\n", encoding="utf-8")
+        self.after()
+        return _done(spec)
+
+
+def _fix(run: drive._Run, round_no: int, launch: Fixer) -> None:
+    fixer._launch_fixer(run, round_no, "直す", run.cfg.state_dir / "fix-result.json", launch)
+
+
+def test_a_fixer_row_without_charge_to_has_neither_assignment_nor_charge(tmp_path: Path, outcomes) -> None:
+    _fix(_held(tmp_path), 1, Fixer())
+    (row,) = _rows(name="fix")
+    assert (row["layer"], row["caller"], "assign_id" in row, "charge_to" in row) == ("seat", "claude-p", False, False)
+
+
+def test_a_resumed_fixer_keeps_the_first_values_and_charge(tmp_path: Path, monkeypatch, outcomes) -> None:
     """続けた会話の起動は、後から変えた環境変数に影響されず、同じ値と費用を負う先を使う。"""
-    _declare(repos, SAVED)
     monkeypatch.setenv("NDF_CHARGE_TO", "impl-unit")
     monkeypatch.setenv("NDF_LAUNCH_MODEL", "opus")
 
-    class Changing(SeatedSessions):
-        def _fix(self, spec):
-            monkeypatch.setenv("NDF_LAUNCH_MODEL", "haiku")
-            monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "max")
-            return super()._fix(spec)
+    def change() -> None:
+        monkeypatch.setenv("NDF_LAUNCH_MODEL", "haiku")
+        monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "max")
 
-    fake = Changing(tmp_path / "st", {"codex": [["一つ目"], ["二つ目"], []], "kiro": [[], [], []]})
-    code, got = _run(capsys, monkeypatch, fake, wt)
-    assert (code, got["status"]) == (0, "ok")
-    first, second = [s for s in fake.launches if s.agent == "claude"]
+    run, fake = _held(tmp_path, saved=True), Fixer(change)
+    _fix(run, 1, fake)
+    run.fixer_last = run.fixer_last._replace(taken=True)  # 駆動が結果をマージできた後と同じ
+    _fix(run, 2, fake)
+    first, second = fake.launches
     assert "--resume" in second.argv
     for spec in (first, second):
         assert spec.argv[spec.argv.index("--model") + 1] == "opus"
@@ -126,38 +197,81 @@ def test_a_resumed_fixer_keeps_the_first_values_and_charge(repos: Repos, wt: Pat
     ]
 
 
-def test_a_refused_codex_arm_is_launched_once_more_with_the_base_arm(wt: Path, tmp_path: Path, capsys, monkeypatch, outcomes) -> None:
-    monkeypatch.setattr(model_chooser.model_choice, "_random_value", lambda: 0.99)  # 基準でない組を引く
-
-    class Refusing(Seated):
-        def __call__(self, spec):
-            status = super().__call__(spec)
-            if spec.agent == "codex" and "model_reasoning_effort=high" in spec.argv:
-                Path(spec.argv[spec.argv.index("-o") + 1]).unlink()
-                message = "[ReasoningEffortParam] [reasoning.effort] [invalid_enum_value] Invalid value"
-                events = [{"type": "thread.started"}, {"type": "turn.failed", "error": {"message": message}}]
-                spec.paths.out.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
-                return status._replace(state=agents.AgentState.FAILED, exit_code=1)
-            return status
-
-    fake = Refusing(tmp_path / "st", {"codex": [[], []], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt)
-    assert (code, got["status"]) == (0, "ok")
-    first, second = _rows(name="review", runtime="codex")
-    assert (first["model_refused"], first["effort"], second["effort"], second["request_try"]) == (True, "high", "low", 2)
-    assert first["request_id"] == second["request_id"] and "assign_id" not in second
-    assert outcomes == {} and _state(fake.state_dir)["experiment_units"]["seats"] == {}
+# --- 効果指標 ----------------------------------------------------------------------------------------
 
 
-def test_a_bad_value_stops_before_any_seat_is_launched(wt: Path, tmp_path: Path, capsys, monkeypatch, outcomes) -> None:
-    monkeypatch.setenv("NDF_LAUNCH_CODEX_EFFORT", "bogus")
-    fake = Seated(tmp_path / "st", {})
-    monkeypatch.setattr("ndf.domains.crossreview.cli.LAUNCH", fake)
-    from ndf.contracts import internal
+def _major(text: str, by: str, severity: str = "major") -> dict:
+    return {"text": text, "by": by, "severity": severity, "impact": "利用者の経路で処理が止まる", "section": ""}
 
-    with pytest.raises(internal.InternalError) as stopped:
-        _run(capsys, monkeypatch, fake, wt)
-    assert stopped.value.kind == "precondition" and fake.launches == []
+
+def _data() -> dict:
+    return {experiment.KEY: {"id": "run", "seats": {"codex": "a-codex", "kiro": "a-kiro"}}}
+
+
+def _entered(data: dict, journal: FindingJournal, round_no: int, *items: dict) -> None:
+    journal.enter(round_no, list(items))
+    experiment.keep_first(data, round_no, journal.entered_serious())
+
+
+def _decide(journal: FindingJournal, outcome: str) -> None:
+    for row in journal.rows.values():
+        row["outcome"] = outcome
+
+
+def _record(data: dict, journal: FindingJournal, final: str) -> None:
+    experiment.record(data, list(journal.rows.values()), ["codex", "kiro"], final)
+
+
+def test_a_converged_review_records_the_share_of_the_seat_and_of_the_charged_unit(monkeypatch, outcomes) -> None:
+    monkeypatch.setenv("NDF_CHARGE_TO", "design-unit")
+    data, journal = _data(), FindingJournal()
+    _entered(data, journal, 1, _major("一つ目", "codex"), _major("一つ目", "kiro"), _major("二つ目", "kiro"))
+    _decide(journal, fin.FIXED)
+    _record(data, journal, fin.CONVERGED)
+    assert (outcomes["a-codex"][0], outcomes["a-kiro"][0]) == (0.5, 1.0)
+    assert outcomes["design-unit"] == (pytest.approx(1 / 3), {"major": 2})
+
+
+def test_a_review_that_ends_with_an_unread_seat_records_nothing(monkeypatch, outcomes) -> None:
+    monkeypatch.setenv("NDF_CHARGE_TO", "impl-unit")
+    data, journal = _data(), FindingJournal()
+    _entered(data, journal, 1, _major("一つ目", "codex"))
+    _record(data, journal, fin.INCOMPLETE_REVIEWERS)
+    assert outcomes == {}
+
+
+def test_a_finding_that_becomes_serious_later_is_not_counted_for_the_unit(monkeypatch, outcomes) -> None:
+    monkeypatch.setenv("NDF_CHARGE_TO", "impl-unit")
+    data, journal = _data(), FindingJournal()
+    _entered(data, journal, 1, _major("一つ目", "codex", "minor"))
+    _entered(data, journal, 2, _major("一つ目", "codex"))
+    _decide(journal, fin.FIXED)
+    _record(data, journal, fin.CONVERGED)
+    assert outcomes["impl-unit"] == (1.0, {"major": 0})
+
+
+def test_the_first_round_is_taken_again_only_when_the_charged_unit_changes(monkeypatch, outcomes) -> None:
+    data = _data()
+    seen = []
+    for charged, round_no, serious in (("impl-a", 1, "r1-1"), ("impl-a", 2, "r2-1"), ("impl-b", 3, "r3-1"), (None, 4, "r4-1")):
+        if charged is None:
+            monkeypatch.delenv("NDF_CHARGE_TO")
+        else:
+            monkeypatch.setenv("NDF_CHARGE_TO", charged)
+        experiment.keep_first(data, round_no, [serious])
+        seen.append((data[experiment.KEY]["charged"], data[experiment.KEY]["first"]))
+    assert seen == [("impl-a", ["r1-1"]), ("impl-a", ["r1-1"]), ("impl-b", ["r3-1"]), ("impl-b", ["r3-1"])]
+
+
+def test_a_review_stopped_at_the_round_limit_leaves_unknown_values_for_the_resumed_run(monkeypatch, outcomes) -> None:
+    monkeypatch.setenv("NDF_CHARGE_TO", "impl-unit")
+    data, journal = _data(), FindingJournal()
+    _entered(data, journal, 1, _major("一つ目", "codex"))
+    _record(data, journal, fin.MAX_ROUNDS)
+    assert outcomes == {}
+    _decide(journal, fin.FIXED)
+    _record(data, journal, fin.CONVERGED)
+    assert outcomes["impl-unit"] == (0.5, {"major": 1}) and outcomes["a-codex"][0] == 1.0
 
 
 # --- 数え方 ------------------------------------------------------------------------------------------
@@ -175,7 +289,7 @@ ROWS = [
     _row("r2-1", fin.FIXED, ["kiro"]),
     _row("r1-n1", fin.FIXED, []),
 ]
-FIRST = ["r1-1", "r1-2", "r1-3", "r1-4", "r1-n1"]
+FIRST = ["r1-1", "r1-2", "r1-3", "r1-n1"]
 
 
 def test_only_adopted_major_findings_are_counted() -> None:

@@ -60,14 +60,14 @@ def _paths(tmp_path: Path, out: str, err: str = "") -> agents.AgentPaths:
 
 
 def test_the_usage_of_every_completed_turn_is_added_up(tmp_path):
-    got = agents.codex_usage(_paths(tmp_path, OK + USAGE).out)
+    got = agents.codex_usage(agents.codex_events(_paths(tmp_path, OK + USAGE).out))
     assert got == agents.CodexUsage(input_tokens=65156, cached_input_tokens=27904, cache_write_input_tokens=0, output_tokens=10)
 
 
 @pytest.mark.parametrize("out", [MODEL_REFUSED, "ただの回答の本文\n" + USAGE, ""])
 def test_a_run_without_a_completed_turn_has_no_usage(tmp_path, out):
     """失敗した起動と、`--json` でない出力（cross-refactoring の起動）は使用量を持たない。"""
-    assert agents.codex_usage(_paths(tmp_path, out).out) is None
+    assert agents.codex_usage(agents.codex_events(_paths(tmp_path, out).out)) is None
 
 
 def test_a_sandbox_failure_is_found_in_the_command_output_of_the_stream(tmp_path):
@@ -132,7 +132,7 @@ def test_the_watch_stops_reading_an_output_that_is_not_json(tmp_path):
 
 @pytest.mark.parametrize("out", [MODEL_REFUSED, EFFORT_REFUSED])
 def test_a_refusal_of_the_model_or_effort_is_recognized(tmp_path, out):
-    assert agents.codex_refused(_paths(tmp_path, out).out)
+    assert agents.codex_refused(agents.codex_events(_paths(tmp_path, out).out))
 
 
 @pytest.mark.parametrize(
@@ -140,7 +140,7 @@ def test_a_refusal_of_the_model_or_effort_is_recognized(tmp_path, out):
     [OK, UNAUTHORIZED, MODEL_REFUSED + USAGE, EFFORT_REFUSED + '{"type":"item.completed","item":{"type":"agent_message"}}\n'],
 )
 def test_other_failures_and_runs_that_answered_are_not_refusals(tmp_path, out):
-    assert not agents.codex_refused(_paths(tmp_path, out).out)
+    assert not agents.codex_refused(agents.codex_events(_paths(tmp_path, out).out))
 
 
 class _Proc:
