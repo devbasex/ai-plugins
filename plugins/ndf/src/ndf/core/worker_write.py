@@ -20,15 +20,20 @@ import functools
 import sys
 from typing import Any
 
+from ndf import identity
 from ndf.contracts import result, worker_paths
 from ndf.contracts.exit_codes import OK
 from ndf.core.worker_guard import WorkerError, check_held
 
 PATH_HELP = (
-    "書き込むファイル。書き込み先は `ndf worker run --result-file` の親ディレクトリの配下に限る（`--state-dir` の配下ではない）。"
-    "相対パスは、このコマンドを実行する作業ディレクトリから解決する。本文は標準入力に渡し、ファイルの全文を置き換える。"
-    "信頼済みの呼び出し元（`ndf worker run` が起動した worker など）が使う。環境変数で受け取った保存先の識別子と、"
-    "開いたディレクトリの識別子が一致するかを確かめる。呼び出し元が `ndf worker run` の起動した worker かどうかは検証しない"
+    "書き込むファイル。書き込み先は、`ndf worker run` の `--result-file` に指定したファイルの親ディレクトリの配下に限る。"
+    "`--state-dir` の指定は、書き込める範囲に影響しない。相対パスは、このコマンドを実行する作業ディレクトリから解決する。"
+    "本文は標準入力に渡し、ファイルの全文を置き換える。"
+    "このコマンドは、書き込み先のディレクトリが `ndf worker run` の開いたディレクトリと同じかを確かめる。"
+    f"`ndf worker run` は、開いたディレクトリのデバイス番号・inode 番号とパスを環境変数 `{identity.WORKER_RESULT_DIR_ENV}` で worker へ渡す。"
+    "このコマンドは自分で開いた書き込み先のディレクトリの番号をその値と比べ、違えば書かずに止まる（precondition）。"
+    "環境変数は呼び出し元が変えられるので、呼び出し元が `ndf worker run` の起動した worker かどうかは検証しない。"
+    "信頼できる呼び出し元だけが使う"
 )
 
 

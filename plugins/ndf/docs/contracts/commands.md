@@ -463,7 +463,7 @@
 | `ndf worker plan-edits` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意） |
 | `ndf worker prepare` | `--dir`（string・必須）<br>`--name`（string・必須） |
 | `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--timeout`（number・任意）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意） |
-| `ndf worker write` | `--path`（string・必須）: 書き込むファイル。書き込み先は `ndf worker run --result-file` の親ディレクトリの配下に限る（`--state-dir` の配下ではない）。相対パスは、このコマンドを実行する作業ディレクトリから解決する。本文は標準入力に渡し、ファイルの全文を置き換える。信頼済みの呼び出し元（`ndf worker run` が起動した worker など）が使う。環境変数で受け取った保存先の識別子と、開いたディレクトリの識別子が一致するかを確かめる。呼び出し元が `ndf worker run` の起動した worker かどうかは検証しない |
+| `ndf worker write` | `--path`（string・必須）: 書き込むファイル。書き込み先は、`ndf worker run` の `--result-file` に指定したファイルの親ディレクトリの配下に限る。`--state-dir` の指定は、書き込める範囲に影響しない。相対パスは、このコマンドを実行する作業ディレクトリから解決する。本文は標準入力に渡し、ファイルの全文を置き換える。このコマンドは、書き込み先のディレクトリが `ndf worker run` の開いたディレクトリと同じかを確かめる。`ndf worker run` は、開いたディレクトリのデバイス番号・inode 番号とパスを環境変数 `NDF_WORKER_RESULT_DIR` で worker へ渡す。このコマンドは自分で開いた書き込み先のディレクトリの番号をその値と比べ、違えば書かずに止まる（precondition）。環境変数は呼び出し元が変えられるので、呼び出し元が `ndf worker run` の起動した worker かどうかは検証しない。信頼できる呼び出し元だけが使う |
 
 結果の `metrics`: `attempts`（integer）・`attention`（integer）・`edits`（integer）・`expectation_search`（object か null）・`paths`（object）・`report`（string）。`items` の要素: `action`（string）・`at`（—）・`backup`（string）・`diff`（string か null）・`kind`（string）・`path`（string）・`plan`（string か null）・`reason`（string か null）・`result_file`（string）・`session`（string か null）・`sha`（string）・`state`（string）・`subject`（string）・`text`（—）・`words`（array of string）
 
