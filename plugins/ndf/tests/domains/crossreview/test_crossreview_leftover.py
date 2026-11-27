@@ -283,12 +283,16 @@ def test_an_unparking_report_without_a_line_takes_the_line_of_another_report(fir
     assert (row["path"], row["line"]) == ("a.py", 7)
 
 
-def test_sorting_prefers_a_report_with_a_line_over_a_file_only_one() -> None:
+@pytest.mark.parametrize(
+    ("commentable", "line"),
+    [pytest.param(frozenset({5}), 5, id="in-pr-diff"), pytest.param(frozenset(), None, id="outside-pr-diff")],
+)
+def test_sorting_prefers_a_line_over_a_file_only_report_only_when_it_takes_a_comment(commentable, line) -> None:
     journal = journal_mod.FindingJournal()
     journal.enter(2, [_told(path="a.py"), _told(**UNCHANGED)])
-    assert journal.sort(TOUCHED, {"r2-1"}) == frozenset()
+    assert journal.sort(TOUCHED._replace(commentable={"a.py": commentable}), {"r2-1"}) == frozenset()
     row = journal.rows["r2-1"]
-    assert (row["path"], row["line"]) == ("a.py", 5)
+    assert (row["path"], row.get("line")) == ("a.py", line)
 
 
 def test_the_thread_commit_of_a_moved_finding_is_the_head_of_the_placed_round() -> None:
@@ -304,14 +308,16 @@ def test_issue_3780_5_touched_since_has_added_rewritten_and_the_neighbours_of_re
     since = _write(wt, {"a.txt": _lines(), "gone.txt": "x\n", "blob.bin": b"\0one"}, "前のラウンド")
     text = _lines((3, "書き換えた")).replace("line 20\n", "").replace("line 10\n", "line 10\n足した\n")
     _write(wt, {"a.txt": text, "gone.txt": None, "blob.bin": b"\0two", "new.txt": "a\nb\n"}, "直し")
-    got = changes.touched_since(git.Git.offline(wt), since, _head(wt), {})
+    got = changes.touched_since(git.Git.offline(wt), since, changes.Range(since, _head(wt)), {})
     assert got.files == frozenset({"a.txt", "gone.txt", "blob.bin", "new.txt"})
     # 3 は書き換え、11 は追加、20・21 は消した行（元の 20 行目）の前後
     assert got.lines["a.txt"] == frozenset({3, 11, 20, 21})
     assert got.lines["new.txt"] == frozenset({1, 2})
     assert "blob.bin" not in got.lines
+    # PR の差分に載る行は、変えた行と前後 3 行
+    assert {1, 3, 6, 11} <= got.commentable["a.txt"] and 30 not in got.commentable["a.txt"]
 
 
 def test_touched_since_a_commit_that_is_not_local_raises(wt: Path) -> None:
     with pytest.raises(git.GitError):
-        changes.touched_since(git.Git.offline(wt), "0" * 40, _head(wt), {})
+        changes.touched_since(git.Git.offline(wt), "0" * 40, changes.Range("0" * 40, _head(wt)), {})

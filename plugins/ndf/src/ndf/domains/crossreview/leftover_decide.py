@@ -16,10 +16,12 @@ PARKED = "parked"
 
 
 class Touched(NamedTuple):
-    """線引きの起点の後に変わったファイルと、足した行・書き換えた行の番号（行を消しただけの箇所は前後の行）。"""
+    """線引きの起点の後に変わったファイルと、足した行・書き換えた行の番号（行を消しただけの箇所は前後の行）。`commentable` は
+    今の PR の差分に載る head の側の行の番号（行コメントを付けられる行）。"""
 
     files: frozenset[str] = frozenset()
     lines: Mapping[str, frozenset[int]] = {}
+    commentable: Mapping[str, frozenset[int]] = {}
 
 
 def normalized(text: str) -> str:
@@ -47,6 +49,12 @@ def on_touched_line(row: Mapping[str, Any], touched: Touched) -> bool:
     """指摘の位置が、変えた行を指すか。"""
     path = _path(row)
     return path in touched.lines and row.get("line") in touched.lines[path]
+
+
+def on_commentable_line(row: Mapping[str, Any], touched: Touched) -> bool:
+    """指摘の位置が、PR の差分に載る行（行コメントを付けられる行）を指すか。"""
+    path = _path(row)
+    return path in touched.commentable and row.get("line") in touched.commentable[path]
 
 
 def proceeds(row: Mapping[str, Any], touched: Touched, *, returned: bool = False, unconfirmed: bool = False) -> bool:

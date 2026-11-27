@@ -509,8 +509,8 @@ class FindingJournal:
         `unconfirmed` は判定役へ渡して有効な回答の無かった指摘の id。
 
         位置は今回の出し直しのものを 1 件ずつ当てる（残していた指摘の行の位置は、前の head の行番号である）。どれか 1 件が
-        進めば進める。指摘の行の位置は、進んだ出し直しのうち、変えた行を指すもの、行番号を持つもの、`path` を持つものの順に
-        選んで置き換える（どれにも `path` が無ければ元の位置を残す。`_move`。#3780）。"""
+        進めば進める。指摘の行の位置は、進んだ出し直しのうち、変えた行を指すもの、行コメントを付けられる行を指すもの、
+        `path` だけを持つもの、ほかの `path` を持つものの順に選んで置き換える（どれにも `path` が無ければ元の位置を残す。`_move`。#3780）。"""
         parked: set[str] = set()
         for fid in self.raised_ids:
             row = self.rows[fid]
@@ -528,7 +528,16 @@ class FindingJournal:
                 parked.add(row["key"])
             else:
                 row.pop(PARKED, None)
-                best = max(passed, key=lambda p: (leftover_decide.on_touched_line(p, touched), "line" in p, "path" in p))
+                best = max(
+                    passed,
+                    key=lambda p: (
+                        leftover_decide.on_touched_line(p, touched),
+                        leftover_decide.on_commentable_line(p, touched),
+                        # PR の差分に載らない行は投稿で拒まれて呼び出しが増えるので、ファイルだけの位置を先にする
+                        "path" in p and "line" not in p,
+                        "path" in p,
+                    ),
+                )
                 _move(row, best, self._round)
         return frozenset(parked)
 

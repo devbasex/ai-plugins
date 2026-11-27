@@ -611,13 +611,15 @@ def _touched_rows(block: _Block) -> range:
     return range(block.start, block.end) if block.end > block.start else range(max(block.start - 1, 1), block.start + 1)
 
 
-def touched_since(g: git.Git, since: str, head: str, listed: Listings) -> leftover_decide.Touched:
-    """`since` の後、`head` までに変わったファイルと、`head` の側の変えた行の番号（#3780）。行で比べられないファイルは
-    行を持たない。`listed` は同じラウンドで読んだ一覧（`new_in_pr` が読んだ範囲なら読み直さない）。コミットが手元に無ければ
-    `git.GitError`。"""
-    delta = _delta(g, f"{since}..{head}", listed)
+def touched_since(g: git.Git, since: str, current: Range, listed: Listings) -> leftover_decide.Touched:
+    """`since` の後、今の head（`current.head`）までに変わったファイルと、head の側の変えた行の番号、今の PR の差分
+    （`current`）に載る head の側の行の番号（#3780）。行で比べられないファイルは行を持たない。`listed` は同じラウンドで読んだ
+    一覧（`new_in_pr` が読んだ範囲なら読み直さない）。コミットが手元に無ければ `git.GitError`。"""
+    delta = _delta(g, f"{since}..{current.head}", listed)
     lines = {path: frozenset(n for b in _changed_blocks(hunks) for n in _touched_rows(b)) for path, hunks in delta.hunks.items()}
-    return leftover_decide.Touched(frozenset(delta.entries), lines)
+    shown = _delta(g, f"{current.base}...{current.head}", listed).hunks
+    commentable = {path: frozenset(x.head for h in hunks for x in h.lines if x.head is not None) for path, hunks in shown.items()}
+    return leftover_decide.Touched(frozenset(delta.entries), lines, commentable)
 
 
 # --- 根拠の記述の確かめ -------------------------------------------------------------------------
