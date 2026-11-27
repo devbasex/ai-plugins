@@ -390,6 +390,7 @@ LEDGER_LOCK = "launch-experiments-lock"
 WEIGHTS = "launch-weights"
 WEIGHTS_LOCK = "launch-weights-lock"
 PRUNED = "launch-pruned"
+PRUNED_LOCK = "launch-pruned-lock"
 # 月ごとのファイルの名前の、月の位置
 MONTH = "<YYYY-MM>"
 _MONTH_FORM = re.compile(r"\d{4}-\d{2}")
@@ -543,12 +544,31 @@ def prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None:
     消すのは、掃除する日時から「残す日数」を引いた日時より前に終わった月である。残す日数は、`window_days` と、記録に残る割り付けの
     行の `window_days` の最大値に、記録を残す日数（records の行の `kept_extra_days`）を足したもの。保存先はリポジトリで
     分かれないので、`window_days` の長い別のリポジトリが使う月を、短い側の掃除が消さないためである。
+
+    掃除するのは、掃除の錠（`launch-pruned-lock`）を待たずに取れた起動だけである。取れなかった起動は掃除を飛ばす（錠を持つ
+    起動が掃除している）。錠の中で `launch-pruned` を読み直すので、月替わりに起動が重なっても全部の月を読むのは 1 回で済む。
     """
     root = records_dir() if root is None else root
     done = _store_file(root, PRUNED)
     month = _month(now)
-    if done.is_file() and done.read_text(encoding="utf-8").strip() == month:
+    if _pruned(done, month):
         return
+    lock = _store_file(root, PRUNED_LOCK)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with FileLock(str(lock), timeout=0):
+            if not _pruned(done, month):
+                _prune_now(root, now, window_days)
+                _write_replacing(done, month)
+    except Timeout:  # noqa: NDF401 錠: ほかの起動が掃除している。失敗すれば次の起動がやり直す
+        return
+
+
+def _pruned(done: Path, month: str) -> bool:
+    return done.is_file() and done.read_text(encoding="utf-8").strip() == month
+
+
+def _prune_now(root: Path, now: datetime, window_days: int) -> None:
     head, tail = facts.value("ndf-files", LEDGER, "path").split(MONTH)
     found: dict[str, Path] = {}
     for path in root.glob(f"{head}*{tail}"):
@@ -562,7 +582,6 @@ def prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None:
         if _month_start(name, 1) <= edge:
             path.unlink(missing_ok=True)
     _prune_weights(root, now)
-    _write_replacing(done, month)
 
 
 def _past(entry: Mapping[str, Any], now: datetime) -> bool:

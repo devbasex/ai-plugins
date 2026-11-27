@@ -79,6 +79,7 @@
     {"id": "launch-weights", "location": "usage-log", "path": "launch-weights.json", "kind": "measured", "tracked": false, "writer": "出現率の計算（#2944。実験の記録と使用量ログから作り直せるコピー）。期間を過ぎた項目は、出現率の計算と月の掃除が消す", "ends": "replaced"},
     {"id": "launch-weights-lock", "location": "usage-log", "path": "launch-weights.json.lock", "kind": "exchange", "tracked": false, "writer": "出現率のファイルの書き換えの排他（#2944。出現率の計算と月の掃除）", "ends": "kept"},
     {"id": "launch-pruned", "location": "usage-log", "path": "launch-pruned", "kind": "record", "tracked": false, "writer": "月の掃除を終えた月（YYYY-MM。#2944）", "ends": "replaced"},
+    {"id": "launch-pruned-lock", "location": "usage-log", "path": "launch-pruned.lock", "kind": "exchange", "tracked": false, "writer": "月の掃除の排他（#2944。待たずに取れた起動だけが掃除する）", "ends": "kept"},
     {"id": "organizer-request", "location": "organizer", "path": "requests/<id>.json", "kind": "exchange", "tracked": false, "writer": "計画とレーンのステートマシン（P3）", "ends": "kept", "reader": "service", "fields": ["kind", "id", "lane", "prs", "issues", "sprint_state", "at", "ndf_version"]},
     {"id": "organizer-answer", "location": "organizer", "path": "answers/<id>.json", "kind": "exchange", "tracked": false, "writer": "外のオーガナイザー（サービス）", "ends": "kept", "fields": ["result"]},
     {"id": "organizer-range", "location": "organizer", "path": "ranges/<n>.json", "kind": "exchange", "tracked": false, "writer": "外のオーガナイザー（サービス）", "ends": "kept", "fields": ["sha", "version", "prs", "lanes"]},

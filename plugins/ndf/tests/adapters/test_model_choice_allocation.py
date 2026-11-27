@@ -526,3 +526,12 @@ def test_the_repo_key_of_a_linked_worktree_is_the_main_git_dir_without_git(tmp_p
     monkeypatch.setattr("subprocess.run", lambda *a, **k: pytest.fail("git を起動した"))
     assert mc.repo_key(tree) == mc.repo_key(main) == os.path.realpath(main / ".git")
     assert mc.repo_key(tmp_path) == os.path.realpath(tmp_path)
+
+
+def test_a_prune_another_launch_is_running_is_skipped_without_waiting(store):
+    from filelock import FileLock
+
+    old = _month_file(store, "2020-01")
+    with FileLock(str(store / "launch-pruned.lock")):
+        mc.prune(NOW, 60, store)
+    assert old.exists() and not (store / "launch-pruned").exists()
