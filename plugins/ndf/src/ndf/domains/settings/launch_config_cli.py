@@ -92,15 +92,14 @@ def _reading_recordable(root: Path, repo: str) -> bool:
     """読み手役の確認を記録できるか。`ndf records reading add` は GitHub のリモートの `<所有者>/<リポジトリ>`
     （`Git.remote_repo`）で記録するため、それを求められない作業場所では質問の前の記録を作れない（質問ではなく端末のコマンドを返す）。
 
-    `repo`（`la.repo_key` が求めた git の共通ディレクトリ）が `.git` という名前なら、その親がメインディレクトリなので、
-    `Git.remote_repo` と同じリモート名（`remote_of`）を `git worktree list` を起動せずに求め、`git remote get-url` の 1 回だけで決める。
-    ほか（bare のリポジトリなど）は `Git.remote_repo` で決める。"""
+    `repo`（`la.repo_key` が求めた git の共通ディレクトリの実体）が `.git` という名前なら、その親がメインディレクトリである
+    （`git worktree list` も、共通ディレクトリの実体の後ろの `/.git` を外してメインディレクトリを求める。管理ディレクトリを別の場所に置いた
+    リポジトリでも同じ）。そこから `Git.remote_repo` と同じリモート名（`remote_of`）を `git worktree list` を起動せずに求め、
+    `Git.remote_repo` に渡して `git remote get-url` の 1 回だけで決める。ほか（bare のリポジトリなど）はリモート名を省いて呼ぶ。"""
     g, common = git.Git(root), Path(repo)
     try:
-        if common.name != ".git":
-            g.remote_repo()
-            return True
-        return git.repo_of_url(g.remote_url(git.remote_of(common.parent))) is not None
+        g.remote_repo(git.remote_of(common.parent) if common.name == ".git" else None)
+        return True
     except (git.GitError, OSError):  # noqa: NDF401 外部コマンド: 識別子を求められなければ質問の前の記録を作れない
         return False
 
