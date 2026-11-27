@@ -403,9 +403,27 @@ def test_issue_4363_recover_keeps_a_record_that_differs_from_the_saved_one(tmp_p
         (tmp_path / f"{name}.out").write_text(saved, encoding="utf-8")
     data = {store.JUDGE_HELD: list(names)}
     assert verify.recover(run, data) and data == {store.JUDGE_HELD: names[:1]}
+    # 打ち直しても、同じ衝突の診断のファイルは増えない
+    assert not verify.recover(run, data) and len(list(tmp_path.glob("*.detail.log"))) == 1
     assert (tmp_path / names[0] / "round1-verify.out").read_text(encoding="utf-8") == "出力"
     assert (tmp_path / f"{names[0]}.out").read_text(encoding="utf-8") == "書きかけ"
     assert not (tmp_path / names[1]).exists()
+
+
+def test_issue_4363_recover_leaves_the_directory_of_a_running_judge(tmp_path: Path) -> None:
+    """重ねて起動した実行は、使っている最中のディレクトリを移さず消さず、名前を残す。"""
+    run, data = _AskRun(tmp_path), {}
+    run.cfg.state_dir = tmp_path
+    answered = _launcher([], [holding(_row())])
+
+    def launch(spec: agents.Launch) -> agents.AgentStatus:
+        status = answered(spec)
+        verify.hold(data, spec)
+        assert not verify.recover(run, data) and spec.paths.out.exists()
+        return status
+
+    answers = verify.ask(run, 1, [_row()], {"r1-1": [_diff(tmp_path)]}, launch)
+    assert answers.verdicts and verify.recover(run, data) and data == {}
 
 
 @pytest.mark.parametrize("asked, resumed", [((), True), (("a.md#見出し",), False)], ids=["unsent-head", "other-sections"])
