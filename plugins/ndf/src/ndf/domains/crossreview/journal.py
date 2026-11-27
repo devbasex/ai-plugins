@@ -373,7 +373,7 @@ def _align_report(
         row.pop("impact", None)
     _place(row, new, _text(item.get("section")))
     if rank[0]:
-        placeless = [] if denied is None else [i for i in _heavy_elsewhere(row, same) if "path" not in _located(i)]
+        placeless = [] if denied is None else _heavy_placeless(same)
         for other in [*_other_reports(same, items, new if rank[1] else None), *placeless]:
             _add_report(row, other)
         return told
@@ -392,6 +392,12 @@ def _heavy_elsewhere(row: Mapping[str, Any], same: Sequence[Mapping[str, Any]]) 
         if criteria_decide.blocking(new["severity"]) and place != (row.get("path"), row.get("line"), row.get("section")):
             out.append(item)
     return out
+
+
+def _heavy_placeless(same: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """出し直し `same` のうち、重い扱いで、パスの無いもの。行の位置とは比べない（行にもパスが無いと、発生条件の違う報告を同じ
+    位置とみなして落とすためである。同じ報告は `_add_report` が足さない）。"""
+    return [i for i in same if "path" not in (new := _raised(dict(i))) and criteria_decide.blocking(new["severity"])]
 
 
 def _other_reports(same: Sequence[Mapping[str, Any]], items: Sequence[str], chosen: Optional[Mapping[str, Any]]) -> list[Mapping[str, Any]]:

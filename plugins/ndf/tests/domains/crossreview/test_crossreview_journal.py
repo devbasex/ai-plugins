@@ -882,6 +882,17 @@ def test_issue_4363_report_without_a_place_does_not_lead_the_unlowered_finding(s
 
 
 @pytest.mark.parametrize("order", [1, -1])
+def test_issue_4363_placeless_reports_all_reach_the_unlowered_finding_led_by_a_placeless_one(order: int) -> None:
+    """代表が位置の無い保護対象の報告でも、発生条件の違う位置の無い重い報告を本文に残す。"""
+    journal, row = _lowered(path="a.py", line=1)
+    protected = _told(impact="秘密が記録に残る", protect=["secret"])
+    plain = _told(impact="保存が止まる")
+    journal.enter(2, [plain, protected, _told(path="b.py", line=2)][::order])
+    assert (row.get("path"), row["impact"]) == (None, "秘密が記録に残る")
+    assert "保存が止まる" in row["text"]
+
+
+@pytest.mark.parametrize("order", [1, -1])
 def test_issue_4363_denied_report_does_not_weigh_on_the_unlowered_finding(order: int) -> None:
     """確認で否定したファイルの根拠の無い報告は、解除するラウンドの重要度に重ねない。"""
     journal, row = _lowered(path="a.py", line=1)
