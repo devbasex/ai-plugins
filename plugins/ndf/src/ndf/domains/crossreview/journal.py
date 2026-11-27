@@ -127,6 +127,13 @@ def _place(item: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in _located(item).items() if k != "severity"}
 
 
+def _move(row: dict[str, Any], place: Mapping[str, Any]) -> None:
+    """指摘の行の位置（`path`・`line`）を `place` に置き換える。"""
+    row.pop("path", None)
+    row.pop("line", None)
+    row |= place
+
+
 def _named_any(item: dict[str, Any]) -> bool:
     """相手役が `mvv` に何か書いたか（キーが無い・null・空白だけなら偽）。"""
     value = item.get("mvv")
@@ -345,7 +352,8 @@ class FindingJournal:
         # 最後の `enter` で出た指摘の id、そのうち直した後に戻った指摘の id（`sort` が使う。#3780）
         self.raised_ids: list[str] = []
         self.returned: list[str] = []
-        # 最後の `enter` で新しく出たか戻った指摘の id（`fresh` と違い、判定役へ渡さないものも含む）と、指摘ごとの出し直し
+        # 最後の `enter` で新しく出たか戻った指摘（`fresh` と違い、判定役へ渡さないものも含む）と、見送りを解いた指摘の id。
+        # 後ろは指摘ごとの出し直し
         self._arrived: frozenset[str] = frozenset()
         self._reports: dict[str, list[Mapping[str, Any]]] = {}
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
@@ -374,6 +382,7 @@ class FindingJournal:
         fresh: list[str] = []
         same: dict[str, list[Mapping[str, Any]]] = {}
         before = len(self.revived)
+        unparked: set[str] = set()
         self.returned = []
         _unlower(by_key, raised, items)
         for item in raised:
@@ -391,9 +400,11 @@ class FindingJournal:
                 by_key[key] = known
                 fresh.append(fid)
             else:
-                revived = len(self.revived)
+                revived, parked = len(self.revived), PARKED in known
                 self._raised_again(known, item, round_no, named, mvv)
                 fresh += self.revived[revived:]
+                if parked and PARKED not in known:
+                    unparked.add(str(known["id"]))
             if named is not None and known.get("by") != BY_NDF:
                 _classify(known, item, named, items, mvv)
                 if _text(item.get("impact")) is None:
@@ -404,7 +415,7 @@ class FindingJournal:
             same.setdefault(str(known["id"]), []).append(item)
         back = set(self.revived[before:])
         self.fresh = [fid for fid in dict.fromkeys(fresh) if _askable(self.rows[fid], same[fid], items, fid in back)]
-        self.raised_ids, self._arrived, self._reports = list(same), frozenset(fresh), same
+        self.raised_ids, self._arrived, self._reports = list(same), frozenset(fresh) | unparked, same
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
 
@@ -413,7 +424,8 @@ class FindingJournal:
         未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
         1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
         行の値に今回の値を足す。判定役の確認で下げたままの指摘の重要度は変えず（下げた扱いの解除は先に `_unlower` が行う）、
-        下げた扱いを抜けた指摘に保護の種類が付けば元へ戻す（`_restore_lowered`。#4363）。"""
+        下げた扱いを抜けた指摘に保護の種類が付けば元へ戻す（`_restore_lowered`。#4363）。直さずに残していた指摘が、変えた行に
+        よらず進むもの（critical・保護の対象）になれば、線引きをしないラウンドでもここで `parked` を外す（#3780）。"""
         new = _raised(item, named)
         if known.get(JUDGED) not in (None, mvv):
             _unclassify(known)
@@ -432,6 +444,10 @@ class FindingJournal:
         _restore_lowered(known)
         if "impact" not in known and "impact" in new:
             known["impact"] = new["impact"]
+        if known.get(PARKED) and leftover_decide.proceeds(known, leftover_decide.Touched()):
+            del known[PARKED]
+            # 残していた行の位置は前の head の行番号なので、今回の出し直しのものにする
+            _move(known, _place(item))
 
     def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
         """直した・見送った指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
@@ -476,7 +492,8 @@ class FindingJournal:
         `unconfirmed` は判定役へ渡して有効な回答の無かった指摘の id。
 
         位置は今回の出し直しのものを 1 件ずつ当てる（残していた指摘の行の位置は、前の head の行番号である）。どれか 1 件が
-        進めば進め、残していた指摘はその位置に置き換える（#3780）。"""
+        進めば進め、指摘の行の位置をその出し直しのものに置き換える。新しい指摘は、その出し直しに位置が無ければ元の位置を
+        残す（#3780）。"""
         parked: set[str] = set()
         for fid in self.raised_ids:
             row = self.rows[fid]
@@ -492,10 +509,8 @@ class FindingJournal:
             if place is None:
                 row[PARKED] = True
                 parked.add(row["key"])
-            elif row.pop(PARKED, False):
-                row.pop("path", None)
-                row.pop("line", None)
-                row |= place
+            elif row.pop(PARKED, False) or place:
+                _move(row, place)
         return frozenset(parked)
 
     def ingest_citations(

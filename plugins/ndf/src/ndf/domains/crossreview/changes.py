@@ -611,10 +611,11 @@ def _touched_rows(block: _Block) -> range:
     return range(block.start, block.end) if block.end > block.start else range(max(block.start - 1, 1), block.start + 1)
 
 
-def touched_since(g: git.Git, since: str, head: str) -> leftover_decide.Touched:
+def touched_since(g: git.Git, since: str, head: str, listed: Listings) -> leftover_decide.Touched:
     """`since` の後、`head` までに変わったファイルと、`head` の側の変えた行の番号（#3780）。行で比べられないファイルは
-    行を持たない。コミットが手元に無ければ `git.GitError`。"""
-    delta = _delta(g, f"{since}..{head}", {})
+    行を持たない。`listed` は同じラウンドで読んだ一覧（`new_in_pr` が読んだ範囲なら読み直さない）。コミットが手元に無ければ
+    `git.GitError`。"""
+    delta = _delta(g, f"{since}..{head}", listed)
     lines = {path: frozenset(n for b in _changed_blocks(hunks) for n in _touched_rows(b)) for path, hunks in delta.hunks.items()}
     return leftover_decide.Touched(frozenset(delta.entries), lines)
 

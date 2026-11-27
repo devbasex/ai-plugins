@@ -164,6 +164,25 @@ def test_issue_3780_any_report_of_the_round_on_a_changed_line_proceeds() -> None
     assert journal.sort(TOUCHED) == frozenset()
 
 
+@pytest.mark.parametrize(
+    "again",
+    [pytest.param({"severity": "critical"}, id="critical"), pytest.param({"protect": ["user_data"]}, id="protect")],
+)
+def test_issue_3780_5_parked_finding_raised_again_is_unparked_without_sorting(again: dict) -> None:
+    journal, row = _parked()
+    journal.enter(3, [_told(path="a.py", line=7, **again)])
+    assert PARKED not in row and journal.handable() == [row]
+    assert (row["path"], row["line"]) == ("a.py", 7)
+
+
+def test_a_new_finding_takes_the_place_of_the_report_on_a_changed_line() -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(2, [_told(**UNCHANGED), _told(path="a.py", line=10)])
+    journal.sort(TOUCHED)
+    row = journal.rows["r2-1"]
+    assert (row["path"], row["line"]) == ("a.py", 10)
+
+
 def test_parked_finding_raised_again_unconfirmed_is_unparked() -> None:
     journal, row = _parked()
     journal.enter(3, [_told(**UNCHANGED)])
@@ -213,7 +232,7 @@ def test_issue_3780_5_touched_since_has_added_rewritten_and_the_neighbours_of_re
     since = _write(wt, {"a.txt": _lines(), "gone.txt": "x\n", "blob.bin": b"\0one"}, "前のラウンド")
     text = _lines((3, "書き換えた")).replace("line 20\n", "").replace("line 10\n", "line 10\n足した\n")
     _write(wt, {"a.txt": text, "gone.txt": None, "blob.bin": b"\0two", "new.txt": "a\nb\n"}, "直し")
-    got = changes.touched_since(git.Git.offline(wt), since, _head(wt))
+    got = changes.touched_since(git.Git.offline(wt), since, _head(wt), {})
     assert got.files == frozenset({"a.txt", "gone.txt", "blob.bin", "new.txt"})
     # 3 は書き換え、11 は追加、20・21 は消した行（元の 20 行目）の前後
     assert got.lines["a.txt"] == frozenset({3, 11, 20, 21})
@@ -223,4 +242,4 @@ def test_issue_3780_5_touched_since_has_added_rewritten_and_the_neighbours_of_re
 
 def test_touched_since_a_commit_that_is_not_local_raises(wt: Path) -> None:
     with pytest.raises(git.GitError):
-        changes.touched_since(git.Git.offline(wt), "0" * 40, _head(wt))
+        changes.touched_since(git.Git.offline(wt), "0" * 40, _head(wt), {})
