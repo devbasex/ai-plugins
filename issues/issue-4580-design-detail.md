@@ -14,10 +14,36 @@
 | 作業の PR | 本番の PR のマージに含まれた、個々の変更の PR |
 | 含めた PR | 本番の PR と作業の PR を合わせたもの（記録の `included`）。リリース記録はこのすべてのコメントに書く |
 | 記録の PR | 含めた PR のうち番号が最も小さい 1 本。リリース後テストの記録と対象の一覧の訂正の記録はここにだけ書き、閉じる判定もここを読む |
+| 値 | リリース記録とリリース後テストの記録の項目 `version` に入る文字列。バージョン番号を持たないリポジトリでは出したものを指す値（例: `main abc1234`。`record --version` に渡し、デプロイの工程の出力 `product_version` と同じもの）、バージョン番号を持つリポジトリではバージョン番号である。「同じ値の記録」は `version` が文字列として同じ記録をいう（設計書の「解き方の全体像」） |
+| バージョン番号を持たないリポジトリ | `.ndf/project.json` の `branch_strategy.release.version_store.kind` が `none` のリポジトリ。それ以外（`file` など）はバージョン番号を持つリポジトリである。設計書の「バージョンの保存先が `none`」と同じ意味で、この文書の表の列「保存先」（ソースファイルの置き場所）とは関係が無い |
+| バージョン番号を持たないリポジトリの記録 | バージョン番号を持たないリポジトリで `record --version` が書くリリース記録。`version` に値を持ち、加えて `environments`・`targets`・`commit`・`push`・`confirmation` を持つ。バージョン番号を持つリポジトリの記録は今の形のままで、`commit` と `targets` を持たないことで見分ける。設計書の「バージョンの無いリリースの記録」「バージョン付きの記録」と同じものを指す |
+| 流れの文書 | 新設する `plugins/ndf/skills/development-workflow/references/project-flow.md`。種類ごとの流れと閉じる条件を利用者向けに 1 ページで示す。生成の印で挟んだ範囲は、手で書かず正本から生成する（設計書の決定 10。正本は「流れの文書の生成」の表） |
 | 正の `targets`（正の一覧） | 同じ値の記録が従う、今回の対象の配布先の一覧。記録の PR の、信用する書き手の最後の訂正の記録の一覧で、訂正が無ければ同じ値の最初の有効なリリース記録の一覧である（設計書の「正の `targets`」） |
 | 代表 | `records` が閉じる判定のために選ぶ 1 件のリリース記録。出力の `release` と、本文を読む PR の一覧（`included`）をこの記録から取る（設計書の「閉じる手順の読み取り」の手順 5） |
 
-構成要素は 2 回のリリース（設計書の決定 9）のどちらで出すかを、小見出しの最初の行の「出す回」に書く。1 回目は閉じる条件の除外と、バージョンの無いリリースとテストの記録、2 回目は種類の既定・モードごとの要否・設定の確かめ・流れの文書である。
+構成要素は 2 回のリリース（設計書の決定 9）のどちらで出すかを、小見出しの最初の行の「出す回」に書く。1 回目は閉じる条件の除外と、バージョン番号を持たないリポジトリのリリース記録とテストの記録、2 回目は種類の既定・モードごとの要否・設定の確かめ・流れの文書である。
+
+## 設計書の番号つきの確かめと手順
+
+この文書の「確かめ 0〜8」「書く順の手順 1〜4」「読み取りの手順 1〜6」は、設計書の番号をそのまま使う。判定の詳細は出典にあり、ここでは何を確かめるかだけを要約する。
+
+`record --version` の確かめ（出典: 設計書の「バージョンの無いリリース記録の書き方」の確かめの表）。0〜6 のどれかに当たれば、どの PR にも書かずに止まる。7・8 は配布先ごとに判定し、止まらない。
+
+| # | 確かめること |
+| --- | --- |
+| 0 | 引数の組。`--version` と `--environment` はそろえて、バージョン番号を持たないリポジトリでだけ受ける。配布先の宣言（`branch_strategy.release.deliveries`）が無ければ `--target` が 1 つ以上要り、あれば受けない |
+| 1 | 本番の PR が本番ブランチへ入ったか（マージ済みか、`--production-sha` が正規の squash か）。入れたコミットを「反映したコミット」と呼ぶ |
+| 2 | 値の中に、反映したコミットの SHA の先頭 7 文字以上と一致する 16 進の語があるか |
+| 3 | 今回の対象の配布先（`targets`）を決める。宣言があれば、`paths` を持たない配布先と、本番の PR の差分と push の差分の両方に出るパスが当たる配布先。無ければ `--target` の集合。空なら止まる |
+| 4 | `--environment` が `targets` の部分集合か、`--observed` が `--environment` に含まれるか |
+| 5 | 今回の `targets` が正の `targets` と同じか |
+| 6 | 値とコミットが 1 対 1 か（同じコミットの記録が別の値で無いか、同じ値の記録が別のコミットで無いか） |
+| 7 | 配布先ごとに、同じ値・正の `targets` の記録が含めた PR のすべてに既にあるか。あればその配布先を `kept` に載せ、確かめ 8 も書き込みもしない |
+| 8 | 残った配布先ごとに、反映を何で確かめたか（`confirmation` の `cd`・`observed`・`attested`）を決める。失敗は `failed`、未確定は `pending` に載せて書かない（出典の「配布先ごとの反映の確かめ」） |
+
+書く順の手順（出典: 設計書の同じ節の「書く順」）: 1. 記録の PR へ書く。2. 記録の PR を読み直し、正の `targets` か値とコミットの組が自分と違えば、自分のコメントを消して止まる。3. 残りの含めた PR へ書く。4. 書いた PR を読み直し、自分より前に同じ記録があれば自分のコメントを消す。
+
+読み取りの手順（出典: 設計書の「閉じる手順の読み取り」）: 1. マーカーで候補を選ぶ。2. 形と引数で絞る。3. バージョン番号を持たないリポジトリの記録を、信用を確かめながら集め、値とコミットの組と正の `targets` を決めてから引数で絞る。4. 訂正の記録を照らす。5. 代表を選ぶ。6. `--bodies` なら含めた PR の本文を読む。
 
 ## 地図
 
@@ -33,7 +59,9 @@ plugins/ndf/
 │   │   ├── release-verification.schema.json
 │   │   └── io/{records.result,project.result,release-steps.args,release-steps.result}.schema.json
 │   └── workflow/context.schema.json
-├── skills/development-workflow/schemas/project.schema.json
+├── skills/
+│   ├── development-workflow/{schemas/project.schema.json, references/project-flow.md *}
+│   └── progress-tracking/SKILL.md
 ├── src/ndf/
 │   ├── adapters/github.py
 │   ├── progress/{flow.py *, command.py}
@@ -53,6 +81,8 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `plugins/ndf/contracts/schemas/project-workflow.schema.json` | 変更 | `workflow` の `kind`・`modes`・`close` の形 | — | スキーマ | — |
 | `plugins/ndf/contracts/schemas/ndf-settings/project.schema.json` | 変更 | 同じ形を設定全体のスキーマに入れる。配布先の宣言に `paths`・`observe` を足す | — | スキーマ | — |
 | `plugins/ndf/skills/development-workflow/schemas/project.schema.json` | 変更 | 上の写し（`check-ndf-contracts.py` の写しの一致の検査の対象） | — | スキーマ | — |
+| `plugins/ndf/skills/development-workflow/references/project-flow.md` | 新設 | 流れの文書。生成の印で挟んだ範囲を `check-ndf-contracts.py --write` が書き、手では直さない | — | 文書 | — |
+| `plugins/ndf/skills/progress-tracking/SKILL.md` | 変更 | 「閉じる条件」のセクションに、`workflow.close` で外せる 2 つの条件と免除する範囲を書き足す（流れの文書の正本の 1 つ） | — | 文書 | — |
 | `plugins/ndf/contracts/schemas/release-verification.schema.json` | 変更 | `version` を任意の空でない文字列にし（#4513 の後の形）、`environments`・`unit`・行の `retest_reason` を足す | — | スキーマ | — |
 | `plugins/ndf/contracts/workflow/context.schema.json` | 変更 | 文脈の `product_version` の説明に、出したものを指す値を足す（型は #4513 の形のまま） | — | スキーマ | — |
 | `plugins/ndf/contracts/schemas/io/records.result.schema.json` | 変更 | `close-check` の `outputs.conditions`・`verified`・`release` | — | スキーマ | — |
@@ -65,10 +95,10 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `plugins/ndf/src/ndf/domains/records/close_decide.py` | 変更 | 条件ごとの扱い・`verified`・配布先ごとの判定 | `release.record_decide` | モジュール `close_decide` | `verdict`（返りを変える）・`Verdict`・`conditions_of`・`records_verdict`（新設） |
 | `plugins/ndf/src/ndf/domains/records/cli.py` | 変更 | `close-check` に `--records` と設定の読み取りを足す | `progress.flow`・`close_decide` | モジュール `cli` | `_close_check`（中身）・`_records_view`・`_add_close_check`（引数） |
 | `plugins/ndf/src/ndf/domains/release/record_decide.py` | 変更 | 記録の形・値と SHA の照合・対象の決め方・正の一覧（同じ値の記録が従う対象の配布先の一覧）・代表（閉じる判定で `release` と `included` を取る 1 件のリリース記録）・判定に使う行・`to_test` | — | モジュール `record_decide` | `Record`（項目）・`Correction`・`Push`・`Confirmation` と下の「関数の仕様」の新設の関数 |
-| `plugins/ndf/src/ndf/domains/release/record.py` | 変更 | バージョンの無い記録の書き込みと訂正、閉じる手順の読み取り | `record_decide`・`adapters.github`・`adapters.git`・`httpx` | モジュール `record` | `write_unversioned`・`correct_targets`・`read_release`・`write_verification`（引数） ほか下の表 |
+| `plugins/ndf/src/ndf/domains/release/record.py` | 変更 | バージョン番号を持たないリポジトリの記録の書き込みと訂正、閉じる手順の読み取り | `record_decide`・`adapters.github`・`adapters.git`・`httpx` | モジュール `record` | `write_unversioned`・`correct_targets`・`read_release`・`write_verification`（引数） ほか下の表 |
 | `plugins/ndf/src/ndf/domains/release/cli.py` | 変更 | 引数の受け口と結果の組み立て | `record` | モジュール `cli` | `cmd_record`・`cmd_records`・`cmd_verification_record`（中身）・`_record_args`（新設） |
 | `plugins/ndf/src/ndf/adapters/github.py` | 変更 | 照会できない権限を例外で返す読み方、push の記録・CD の実行の一覧・コメントの削除 | githubkit | クラス `GitHub`・`Authored` | `Authored.comment_id`（項目）・`permission`・`_read_permission`（中身）・`permission_strict`・`trusts_strict`・`branch_activity`・`workflow_runs`・`delete_comment` |
-| `scripts/contracts_lib/project_flow_doc.py` | 新設 | 流れの文書の生成した範囲を正本から作る | `contracts` のデータ | モジュール `project_flow_doc` | `render`・`replace_generated`・`mismatches` |
+| `scripts/contracts_lib/project_flow_doc.py` | 新設 | 流れの文書（`plugins/ndf/skills/development-workflow/references/project-flow.md`）の生成の印で挟んだ範囲を、正本（「流れの文書の生成」の表の 4 つ）から作る | `contracts` のデータ・`progress-tracking` の `SKILL.md` | モジュール `project_flow_doc` | `render`・`replace_generated`・`mismatches` |
 | `scripts/check-ndf-contracts.py` | 変更 | `--write` で書き出し、引数なしで違いを違反にする | `project_flow_doc` | モジュール | `main`（引数）・`flow_doc_violations`（新設） |
 
 ## 流れの設定の読み取り
@@ -198,7 +228,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_flow_items` | `domains/project/cli.py` | 新設 | `_flow_items(root: Path) -> list[dict[str, Any]]` | 全モードの定義と今の `branch_strategy.release` で `flow.conflicts` を呼び、`items` の形にする |
-| `_check` | `domains/project/cli.py` | 変更 | 今と同じ | `items` に `_flow_items` を足し、`summary` に件数を足す。終了コードは設定の新しさだけで決める |
+| `_check` | `domains/project/cli.py` | 変更 | 今と同じ | `items` に `_flow_items` を足し、`summary` に件数を足す。終了コードは今と同じく `check.judge`（`domains/project/check.py`）が返す設定の状態だけで決め、`_flow_items` の件数では変えない。状態と終了コードは、`fresh`（`.ndf/project.json` があり、解析の記録 `analysis` の入力が今と変わっていない）で `ok`（0）、`missing`（設定が無い）・`stale`（`analysis` が無いか入力が変わった。`--force` のときも）で `not_applicable`（3）、`broken`（設定を読めない）で `invalid`（2）である |
 
 ### 異常系の処理
 
@@ -233,7 +263,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 
 - `records_verdict`
   - 事前条件: `view` は `ndf release-steps records --version` の出力の `outputs`（代表・`releases`・`targets`・`verifications`）
-  - 事後条件: `targets` を持たない代表（バージョン付き）では `release` が `null` で、テストの記録は代表と `version`・`unit` が同じ最後のものを `verdict` と同じに判定する
+  - 事後条件: `targets` を持たない代表（バージョン番号を持つリポジトリの記録）では `release` が `null` で、テストの記録は代表と `version`・`unit` が同じ最後のものを `verdict` と同じに判定する
   - 事後条件: `release.complete` と `release.missing` は、代表と `version`・`release`（本番の PR）・`unit`・`commit` が同じで、`targets` が正の一覧と同じリリース記録の `environments` だけで決める（絞るのは `complete_of`）。同じ値を使う別の配布単位や別の本番の PR の記録では、未反映の配布先を埋めない
 - `_records_view`
   - 事後条件: 結果 JSON 全体を `release-steps.result.schema.json` で確かめる。通すのは、`tool` が `release-steps`、`status` が `ok`、`outputs.command` が `records` で、`outputs` が `$defs.records_outputs`（`command`・`selection`・`release`・`releases`・`targets`・`verifications`・`bodies`・`to_test`）に合う結果だけである。`cmd_records` は同じ `$defs.records_outputs` に合う `outputs` を書き、契約の検査（`check-ndf-contracts.py`）が書き手の出力の例をこの定義で確かめる。`records.result.schema.json` は `close-check` の結果の形で、入力の検証には使わない
@@ -244,7 +274,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `_close_check` | 流れの設定の形の誤り | `read_flow` の `ContractError` | `_close_check` | 止める | `precondition`（3）。閉じない | 直して打ち直せる |
-| `_close_check` | 引数の組の誤り | `--records` と `--verification` を両方渡した。保存先が `none` で `--verification` を渡した | `_close_check` | 止める | `precondition`（3）。`--records` を渡すよう示す | 同上 |
+| `_close_check` | 引数の組の誤り | `--records` と `--verification` を両方渡した。バージョン番号を持たないリポジトリで `--verification` を渡した | `_close_check` | 止める | `precondition`（3）。`--records` を渡すよう示す | 同上 |
 | `_records_view` | 読めない・形が違う | ファイルが無い、JSON でない、`release-steps records` の成功の結果でない（`tool`・`status`・`outputs.command` が違う）、`outputs` が `$defs.records_outputs` に合わない | `_records_view` | 止める | `precondition`（3） | 同上 |
 | `records_verdict` | 反映がそろわない | リリース記録が無い、`release.complete` が偽 | `records_verdict` | 閉じない | `refused`（1）。`release.missing` を載せる | 残りの配布先へ反映して `record` を打ってから打ち直す |
 
@@ -284,7 +314,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Record` | `release/record_decide.py` | 変更 | `NamedTuple Record(version, release, included, unit=None, environments: tuple[str, ...] = (), targets: tuple[str, ...] \| None = None, commit: str \| None = None, push: Push \| None = None, confirmation: Mapping[str, str] \| None = None, evidence: Mapping[str, Evidence] \| None = None)` | バージョンの無い記録の項目を足す（バージョン付きの記録では足した項目を書かない） |
+| `Record` | `release/record_decide.py` | 変更 | `NamedTuple Record(version, release, included, unit=None, environments: tuple[str, ...] = (), targets: tuple[str, ...] \| None = None, commit: str \| None = None, push: Push \| None = None, confirmation: Mapping[str, str] \| None = None, evidence: Mapping[str, Evidence] \| None = None)` | バージョン番号を持たないリポジトリの記録の項目を足す（バージョン番号を持つリポジトリの記録では足した項目を書かない） |
 | `Evidence` | `release/record_decide.py` | 新設 | `NamedTuple Evidence(url: str, value: str)` | 実環境の確認の証跡 1 つ。`url` は読んだ `observe.url`、`value` は `observe.pointer` が指した値（文字列） |
 | `render_record` | `release/record_decide.py` | 変更 | 今と同じ | 足した項目を記録の JSON に書く。`evidence` は JSON のキー `evidence`（配布先の名前 → `{"url": <文字列>, "value": <文字列>}`）で、`confirmation` が `observed` の配布先にだけ書く |
 | `parse_record` | `release/record_decide.py` | 変更 | 今と同じ | 足した項目を読む。形が違えば None（今と同じ）。`confirmation` が `observed` の配布先に `evidence` が無い記録、`observed` でない配布先に `evidence` がある記録、`url`・`value` が文字列でない記録も形の違いとして None にする |
@@ -298,7 +328,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `push_of` | `release/record_decide.py` | 新設 | `push_of(activities: Iterable[Mapping], landed: frozenset[str]) -> Push \| None` | 「反映したコミットを含む push」の手順 2（アクティビティを新しい順に読み、`after` が集合にあり `before` が無い更新のうち最初に当たったもの。`after` が集合の外の更新に当たったら打ち切る） |
 | `authoritative_targets` | `release/record_decide.py` | 新設 | `authoritative_targets(found: Sequence[Record], corrections: Sequence[Correction], version: str) -> tuple[str, ...] \| None` | 「正の `targets`」。最後の訂正、無ければ同じ値の最初の記録の一覧。`found` は `--release`・`--unit` で絞る前の有効な記録を渡す |
 | `value_commit_conflict` | `release/record_decide.py` | 新設 | `value_commit_conflict(found: Sequence[Record], commit: str, version: str) -> tuple[str, str] \| None` | 確かめ 6。`value_pairs(found)` の組で、今回のコミットが別の値と組か、今回の値が別のコミットと組なら、その組の `(version, commit)` |
-| `value_pairs` | `release/record_decide.py` | 新設 | `value_pairs(found: Sequence[Record]) -> tuple[dict[str, str], list[Record]]` | 設計書の「値とコミットの組」。古い順にたどって値からコミットへの組と、有効な記録（組に合う記録とバージョン付きの記録）を返す。`authoritative_targets`・`has_unversioned`・`representative`・`complete_of` は有効な記録だけを受け取る |
+| `value_pairs` | `release/record_decide.py` | 新設 | `value_pairs(found: Sequence[Record]) -> tuple[dict[str, str], list[Record]]` | 設計書の「値とコミットの組」。古い順にたどって値からコミットへの組と、有効な記録（組に合う記録と、バージョン番号を持つリポジトリの記録）を返す。`authoritative_targets`・`has_unversioned`・`representative`・`complete_of` は有効な記録だけを受け取る |
 | `has_unversioned` | `release/record_decide.py` | 新設 | `has_unversioned(found: Sequence[Record], version: str, environments: tuple[str, ...], targets: tuple[str, ...]) -> bool` | 重ねない判定（同じ値・同じ `environments`・正の `targets`） |
 | `confirm` | `release/record_decide.py` | 新設 | `confirm(delivery: Mapping, run: Mapping \| None, observed: Any, after: str) -> Confirmation` | 「配布先ごとの反映の確かめ」の表を 1 回評価する（`Confirmation(state, kind, reason, evidence: Evidence \| None)`。`state` は `ok`・`failed`・`pending`。`kind` が `observed` のときだけ `evidence` を持つ） |
 | `json_pointer` | `release/record_decide.py` | 新設 | `json_pointer(doc: Any, pointer: str) -> Any` | RFC 6901 の 1 つの値（無ければ `_MISSING`） |
@@ -332,7 +362,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `targets_of` | `paths` の無い配布先は常に入る | 移動の前のパスで当たる。push の差分に出ないパス（打ち消し）は入らない | 空の結果 |
 | `glob_matches` | `web/**` | `**/` が 0 段に当たる。`*` が `/` を越えない | — |
 | `push_of` | merge queue がまとめた途中の PR の push | 新しい順で `after` が集合の外に出たら打ち切る | 見つからなければ None |
-| `parse_record` | `evidence` つきの `observed` の記録を `render_record` の出力から読み戻す | バージョン付きの記録は足した項目なしで今と同じに読む | `observed` で `evidence` の無い記録、`evidence` の値が文字列でない記録は None |
+| `parse_record` | `evidence` つきの `observed` の記録を `render_record` の出力から読み戻す | バージョン番号を持つリポジトリの記録は足した項目なしで今と同じに読む | `observed` で `evidence` の無い記録、`evidence` の値が文字列でない記録は None |
 | `authoritative_targets` | 最初の記録の一覧 | 最後の訂正が勝つ | 記録が無ければ None |
 | `confirm` | `cd`・`observed`・`attested` | `pointer` の外の SHA は数えない | 失敗・`observe` 無し・不一致は `failed` か `pending` |
 | `decisive_row` | 後の行が前の行に代わる | 不合格の後の理由の無い行は飛ばす | — |
@@ -361,21 +391,21 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_command_result` | `release/record.py` | 新設 | `_command_result(root: Path, command: str, after: str, deadline: float, now: Callable[[], float] = time.monotonic) -> Mapping` | `{revision}` を `after` に置き換えたコマンドをリポジトリの根で 1 回実行し、終了コード 0・75・1・それ以外を、成功・未完了・失敗・未確定の `run` の形（`status`・`conclusion`）にする（cd-setup.md の契約）。時間の上限は `deadline − now()`（期限までの残り）で、0 以下なら実行せずに未確定を返す |
 | `_observe` | `release/record.py` | 新設 | `_observe(delivery: Mapping, timeout: float) -> tuple[Any, str]` | `observe.url` を `httpx` で 1 回読み、`pointer` の値と読んだ URL を返す |
 | `_write_one` | `release/record.py` | 新設 | `_write_one(hub: GitHub, made: Record, holder: int, others: Sequence[int]) -> list[Written]` | 1 つの配布先の記録を書く順の手順 1〜4 で書き、重なりを自分のコメントの削除で戻す |
-| `_candidates` | `release/record.py` | 新設 | `_candidates(hub: GitHub, number: int, select: Selection) -> Candidates` | 設計書の読み取りの手順 1〜4。マーカーで候補にし、バージョン付きの記録とテストの記録は引数で絞る。バージョンの無いリリース記録は、起点（`--version` があればその値、無ければ `--release`・`--unit` の一致、どれも無ければ全部）から、信用を確かめた記録だけを元に値かコミットの同じ記録へ広げて照会する。集めた記録で `value_pairs` を決め、値ごとの正の `targets` を絞る前の有効な記録で決めてから、`--version`・`--release`・`--unit` のすべてで絞る。訂正は組のコミットに一致するものだけを照会する |
+| `_candidates` | `release/record.py` | 新設 | `_candidates(hub: GitHub, number: int, select: Selection) -> Candidates` | 設計書の読み取りの手順 1〜4。マーカーで候補にし、バージョン番号を持つリポジトリの記録とテストの記録は引数で絞る。バージョン番号を持たないリポジトリのリリース記録は、起点（`--version` があればその値、無ければ `--release`・`--unit` の一致、どれも無ければ全部）から、信用を確かめた記録だけを元に値かコミットの同じ記録へ広げて照会する。集めた記録で `value_pairs` を決め、値ごとの正の `targets` を絞る前の有効な記録で決めてから、`--version`・`--release`・`--unit` のすべてで絞る。訂正は組のコミットに一致するものだけを照会する |
 | `Candidates` | `release/record.py` | 新設 | `NamedTuple Candidates(releases: list[Record], authoritative: dict[str, tuple[str, ...]], corrections: list[Correction], verifications: list[dict])` | `releases` は引数で絞った有効な記録、`authoritative` は値ごとの正の `targets`（絞る前の有効な記録と訂正で決めた） |
 | `Selection` | `release/record.py` | 新設 | `NamedTuple Selection(version: str \| None, release: int \| None, unit: str \| None)` | `records` の絞り込みの引数 |
 | `read_release` | `release/record.py` | 新設 | `read_release(hub: GitHub, number: int, select: Selection, bodies: bool, issues: Sequence[int] \| None) -> dict[str, Any]` | 読み取りの手順 1〜6 と `to_test`。`records` の新しい `outputs` を返す |
 | `pr_body_only` | `release/record.py` | 新設 | `pr_body_only(hub: GitHub, number: int) -> dict[str, Any]` | `--pr-body-only`。その PR の本文と `trusted` だけを返す |
 | `write_verification` | `release/record.py` | 変更 | `write_verification(hub, number, payload, names=_no_names, unversioned: bool = False) -> str` | `unversioned` なら、記録の PR・`environments` の反映の記録・`unit`・`retest_reason` を確かめてから書く |
 | `cmd_record` | `release/cli.py` | 変更 | 今と同じ | 引数の組（確かめ 0）で `write`・`write_unversioned`・`correct_targets` を呼び分け、`record` の終わり方の表で状態を決める |
-| `_record_args` | `release/cli.py` | 新設 | `_record_args(args: argparse.Namespace, strategy: Strategy) -> Unversioned \| None` | 確かめ 0。保存先が `none` でなければ `--version` 系を断る |
+| `_record_args` | `release/cli.py` | 新設 | `_record_args(args: argparse.Namespace, strategy: Strategy) -> Unversioned \| None` | 確かめ 0。バージョン番号を持つリポジトリ（`version_store.kind` が `none` でない）では `--version`・`--environment` を断る |
 | `cmd_records` | `release/cli.py` | 変更 | 今と同じ | 新しい引数があれば `read_release` か `pr_body_only`、無ければ今の `read` |
-| `cmd_verification_record` | `release/cli.py` | 変更 | 今と同じ | 保存先が `none` なら `unversioned=True` で呼ぶ |
+| `cmd_verification_record` | `release/cli.py` | 変更 | 今と同じ | バージョン番号を持たないリポジトリなら `unversioned=True` で呼ぶ |
 
 - `_confirm_delivery`
   - 事後条件: 期限 `deadline` は、1 回目の CD の照会の直前に `now() + result.timeout_seconds`（無ければ 1800）で 1 回だけ決め、照会し直すたびには決め直さない。`workflow_runs`・`_command_result`・`_observe` には同じ `deadline` から求めた残り時間（`deadline − now()`）を時間の上限として渡し、次の照会までは `min(間隔, 残り時間)` だけ待つ。どの操作も始める前に残り時間が 0 以下なら始めず、始めた操作が上限に当たったときも、`pending` を返す
 - `write_unversioned`
-  - 事前条件: 保存先が `none`。`args.environments` が 1 つ以上
+  - 事前条件: バージョン番号を持たないリポジトリである。`args.environments` が 1 つ以上
   - 事後条件: 確かめ 0〜6 で止まれば、どの PR にも書いていない。書いた配布先ごとに、含めた PR の各々に、同じ値・同じ `environments`・正の `targets` の信用する記録がちょうど 1 件ある
   - 副作用: GitHub のコメントの読み取り・書き込み・自分が書いたコメントの削除、git の起動 3 回（共有の置き場を使えたときは 0 回）、共有の置き場の読み書きと削除、CD の実行の照会、`observe.url` の HTTP の読み取り
 - `read_release`
@@ -497,22 +527,31 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 
 出す回: 2 回目
 
+生成先は `plugins/ndf/skills/development-workflow/references/project-flow.md` の生成の印で挟んだ範囲である。正本は次の 4 つで、パスはリポジトリの根から書く（設計書の決定 10）。
+
+| 生成する表 | 正本 |
+| --- | --- |
+| モードごとの工程の並びと、条件で省く工程 | `plugins/ndf/contracts/workflow/modes/*.json` と工程の定義 `plugins/ndf/contracts/workflow/stages/`（どちらも `progress/definition.py` が読む） |
+| 種類ごとに省く工程と理由 | `plugins/ndf/contracts/data/workflow-kinds.json` |
+| 種類ごとの本番の承認の場面と、リリースの結果として記録する値 | `plugins/ndf/contracts/data/branch-strategy-presets.json` |
+| 閉じる条件と、利用者が外せる条件 | `plugins/ndf/skills/progress-tracking/SKILL.md` の見出し `### 閉じる条件` の次の行から次の見出しの直前まで（機械的に抜き出す） |
+
 ### 関数の仕様
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `render` | `scripts/contracts_lib/project_flow_doc.py` | 新設 | `render(root: Path) -> str` | 決定 10 の 4 つの表と「閉じる条件」の抜き出しを、生成の印で挟む範囲の本文にする |
+| `render` | `scripts/contracts_lib/project_flow_doc.py` | 新設 | `render(root: Path) -> str` | 上の表の 4 つの正本から、生成の印で挟む範囲の本文を作る |
 | `replace_generated` | `scripts/contracts_lib/project_flow_doc.py` | 新設 | `replace_generated(doc: str, generated: str) -> str` | 生成の印の間を置き換えた本文 |
-| `mismatches` | `scripts/contracts_lib/project_flow_doc.py` | 新設 | `mismatches(root: Path) -> list[dict]` | 今の文書と生成し直した本文が違えば違反 1 件 |
-| `flow_doc_violations` | `scripts/check-ndf-contracts.py` | 新設 | `flow_doc_violations(root: Path, write: bool) -> list[dict]` | `--write` なら書き出し、無ければ `mismatches` を返す |
+| `mismatches` | `scripts/contracts_lib/project_flow_doc.py` | 新設 | `mismatches(root: Path) -> list[dict]` | `project-flow.md` の今の印の間と、生成し直した本文が違えば違反 1 件 |
+| `flow_doc_violations` | `scripts/check-ndf-contracts.py` | 新設 | `flow_doc_violations(root: Path, write: bool) -> list[dict]` | `--write` なら `project-flow.md` へ書き出し、無ければ `mismatches` を返す |
 | `main` | `scripts/check-ndf-contracts.py` | 変更 | 今と同じ | 引数 `--write` を足し、`find` の違反に `flow_doc_violations` を足す |
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `render` | 抜き出せない | 正本に見出し `### 閉じる条件` が無い | `render` | 止める（違反 1 件） | 検査の結果 JSON の違反。終了コード 1 | 正本を直して打ち直す |
-| `replace_generated` | 印が無い | 文書から印を消した | `replace_generated` | 止める（違反 1 件） | 同上 | 印を戻す |
+| `render` | 抜き出せない | `progress-tracking/SKILL.md` に見出し `### 閉じる条件` が無い | `render` | 止める（違反 1 件） | 検査の結果 JSON の違反。終了コード 1 | 正本を直して打ち直す |
+| `replace_generated` | 印が無い | `project-flow.md` から印を消した | `replace_generated` | 止める（違反 1 件） | 同上 | 印を戻す |
 
 ### 単体テストの観点
 
