@@ -1,7 +1,7 @@
 """効果指標の記録と出現率の更新（#2944 の詳細設計「効果指標と出現率」）。
 
 - `write_outcome`: 割り付け ID から割り付けの行を引いて効果指標の行を足し（同じ割り付け ID の行があれば足さない。確認と追記は
-  実験の記録のロックの中）、ロックを抜けてから `refresh` を呼ぶ
+  実験の記録のロックの中）、ロックを抜けてから、そのとき読んだ記録で出現率を計算し直すかを判定する（足さなかったときも判定する）
 - `unit_values`: 実験の記録と使用量ログから、計算に使う単位の値を割り付け ID ごとに作る（純粋な関数）
 - `refresh`: 計算し直す条件に当たれば、出現率の項目を置き換える。計算はロックの外で、書き換えは `model_choice.update_weights`
 
@@ -96,15 +96,19 @@ def _costs(usage_rows: Sequence[Mapping[str, Any]]) -> dict[str, Optional[float]
 
 
 def _models(usage_rows: Sequence[Mapping[str, Any]]) -> dict[str, str]:
-    """割り付け ID → その単位の最初の起動（引き上げでない。基準へ切り替えた起動は割り付け ID を持たない）の実際のモデル。"""
-    first: dict[str, tuple[datetime, str]] = {}
+    """割り付け ID → その単位の最初の起動（引き上げでない。基準へ切り替えた起動は割り付け ID を持たない）の実際のモデル。
+
+    最初の起動をモデル名の有無で絞らずに決め、その行にモデル名が無ければ（期限切れで回答が無い）不明として載せない。
+    再開後の起動のモデルを、最初の起動のモデルとして扱わないためである。
+    """
+    first: dict[str, tuple[datetime, Optional[str]]] = {}
     for row in usage_rows:
-        if "assign_id" not in row or "model" not in row or ("raised" in row and row["raised"]):
+        if "assign_id" not in row or ("raised" in row and row["raised"]):
             continue
         when = datetime.fromisoformat(row["launched_at"] if "launched_at" in row else row["at"])
         if row["assign_id"] not in first or when < first[row["assign_id"]][0]:
-            first[row["assign_id"]] = (when, row["model"])
-    return {aid: model for aid, (_, model) in first.items()}
+            first[row["assign_id"]] = (when, row["model"] if "model" in row else None)
+    return {aid: model for aid, (_, model) in first.items() if model is not None}
 
 
 @dataclass(frozen=True)
@@ -116,18 +120,21 @@ class _Seen:
     evaluated: datetime
 
 
-def _group_units(seen: Sequence[_Seen]) -> list[UnitValue]:
-    """1 つのまとまりの、今のモデル（最も新しく評価した単位の実際のモデル）の単位と、数えるモデルの分からない単位。
+def _group_units(seen: Sequence[_Seen], observed: Optional[str] = None) -> list[UnitValue]:
+    """1 つのまとまりの、今のモデルの単位と、数えるモデルの分からない単位。
 
+    今のモデルは、まとまりの最も新しい `observed` の行のモデル（`observed`）。無ければ最も新しく評価した単位の実際のモデル。
+    割り付けが項目を使えるかを見る観測（`model_choice.entry_fits`）と同じ観測で決め、モデルが切り替わってから新しいモデルの評価が
+    そろうまでは、古いモデルの単位を数えずに件数を集める段階にする。
     モデルの分からない単位は、変化を観測していなければすべて、今と異なるモデルを観測した単位のうち割り付けが最後のものより後に
     今のモデルを観測した単位があれば、その最初の単位以降に割り付けたものだけを数える。後に今のモデルの単位が無ければ数えない。
-    どの単位もモデルが分からないまとまり（Codex など）は絞らない。
+    どの単位もモデルが分からず観測も無いまとまり（Codex など）は絞らない。
     """
     known = [s for s in seen if s.value.model is not None]
     unknown = [s.value for s in seen if s.value.model is None]
-    if not known:
+    if not known and observed is None:
         return unknown
-    current = max(known, key=lambda s: s.evaluated).value.model
+    current = observed if observed is not None else max(known, key=lambda s: s.evaluated).value.model
     same = [s.value for s in known if s.value.model == current]
     changed = [s.value.at for s in known if s.value.model != current]
     if not changed:
@@ -137,11 +144,21 @@ def _group_units(seen: Sequence[_Seen]) -> list[UnitValue]:
 
 
 def unit_values(
-    rows: Sequence[Mapping[str, Any]], usage_rows: Sequence[Mapping[str, Any]], *, where: mc.Where, now: datetime, window_days: int
+    rows: Sequence[Mapping[str, Any]],
+    usage_rows: Sequence[Mapping[str, Any]],
+    *,
+    where: mc.Where,
+    now: datetime,
+    window_days: int,
+    observed: Optional[Mapping[str, str]] = None,
 ) -> list[UnitValue]:
     """割り付け ID ごとの単位の値（割り付けの日時の順）。使うのは、直近 `window_days` 日に割り付けた、`where`（リポジトリ・工程・
     ランタイム・互換性のキー）が同じで、今の指標の効果（null でない）がある単位のうち、停止と基準への切り替えの無いもので、
-    実際のモデルがまとまりの今のモデルと同じもの（設計の「出現率の再利用」「期限切れの単位とモデルの変化」）。"""
+    実際のモデルがまとまりの今のモデルと同じもの（設計の「出現率の再利用」「期限切れの単位とモデルの変化」）。
+
+    `observed` は、まとまり → 最も新しい `observed` の行のモデル（`model_choice.observed_models`）。あるまとまりは、その
+    モデルを今のモデルとする。"""
+    observed = {} if observed is None else observed
     start = now - timedelta(days=window_days)
     left, effects = _left(rows), _effects(rows, mc.metric_of(where.stage))
     costs, models = _costs(usage_rows), _models(usage_rows)
@@ -153,7 +170,7 @@ def unit_values(
         value = UnitValue(aid, a["chosen"], tuple(a["probs"]), _time(a), effects[aid]["quality"], costs.get(aid), models.get(aid))
         seen.append(_Seen(value, mc.model_group(a["arms"][a["chosen"]], a["arms"]), _time(effects[aid])))
     groups = sorted({s.group for s in seen})
-    found = [u for g in groups for u in _group_units([s for s in seen if s.group == g])]
+    found = [u for g in groups for u in _group_units([s for s in seen if s.group == g], observed.get(g))]
     return sorted(found, key=lambda u: (u.at, u.assign_id))
 
 
@@ -170,29 +187,66 @@ def seed_of(where: mc.Where, allocation: Mapping[str, Any], units: Sequence[Unit
 # --- 効果指標の記録 ----------------------------------------------------------------------------------
 
 
-def write_outcome(assign_id: str, quality: Optional[float], detail: Mapping[str, Any]) -> bool:
-    """割り付けを引いて効果指標の行を足し、`refresh` を呼ぶ。同じ割り付け ID の行が既にあれば足さず真を返す（再開で重なった呼び出し）。
+@dataclass(frozen=True)
+class _Known:
+    """効果指標を書いたときにロックの中で読んだ実験の記録と、その読み始めの日時。読み始めが計算に要る範囲を含めば、
+    出現率の計算はこの記録を使い、月別のファイルを読み直さない。"""
 
-    割り付けが無い（別のマシンの ID・消された記録）か記録を書けなければ、警告を出して偽。指標の名前とバージョンは割り付けの工程の
-    表から引く。確認と追記は 1 つのロックの中で行い、`refresh` はロックを抜けてから呼ぶ。
-    """
-    now = mc.utc_now()
-    since = now - timedelta(days=mc.LONGEST_WINDOW + mc.records_rule()["kept_extra_days"])
+    since: datetime
+    rows: Sequence[Mapping[str, Any]]
+
+
+def _since(now: datetime, window_days: int) -> datetime:
+    """出現率の計算に要る記録の読み始め（期間と、起動できない組を数える日数の長いほう）。"""
+    return now - timedelta(days=max(window_days, mc.records_rule()["refusal_days"]))
+
+
+def _table_here(cwd: Path) -> Optional[mc.Table]:
+    """作業ディレクトリのリポジトリの今の設定。読めないか値が制約に合わなければ None（効果指標の記録は止めない）。"""
     try:
-        with mc.ledger(since, mc.records_dir()) as led:
-            assign = mc.assigns(led.rows).get(assign_id)
-            if assign is None:
-                log.warning("効果指標を書く割り付け %s が実験の記録に無い（別のマシンの ID か、消された記録）", assign_id)
-                return False
-            if any(r["kind"] == "outcome" and r["assign_id"] == assign_id for r in led.rows):
-                return True
+        return mc.table(launch_settings.launch_root(cwd))
+    except (OSError, ValueError, internal.InternalError, contracts.ContractError):  # noqa: NDF401 ファイル: 読めない設定は出現率の計算が読み直して警告する
+        return None
+
+
+def _logged(assign_id: str, quality: Optional[float], detail: Mapping[str, Any], now: datetime, since: datetime) -> Optional[_Known]:
+    """`since` の月から読んだ記録で割り付けを引き、同じ割り付け ID の効果指標の行が無ければ足す。割り付けが無ければ None。
+
+    確認と追記は 1 つのロックの中で行う。効果指標の行は割り付けより後に書くので、割り付けが範囲にあれば先行する指標の行も範囲にある。
+    """
+    with mc.ledger(since, mc.records_dir()) as led:
+        assign = mc.assigns(led.rows).get(assign_id)
+        if assign is None:
+            return None
+        if not any(r["kind"] == "outcome" and r["assign_id"] == assign_id for r in led.rows):
             stage = facts.row(mc.TABLE, assign["stage"])
             row = {"kind": "outcome", "at": _text(now), "assign_id": assign_id, "metric": stage["metric"]}
             led.append({**row, "metric_version": stage["metric_version"], "quality": quality, "detail": dict(detail)})
+        return _Known(since, list(led.rows))
+
+
+def write_outcome(assign_id: str, quality: Optional[float], detail: Mapping[str, Any]) -> bool:
+    """割り付けを引いて効果指標の行を足し、出現率を計算し直すかを判定する。同じ割り付け ID の行が既にあれば足さずに判定だけを行い、
+    真を返す（再開で重なった呼び出し。前の呼び出しが判定の前に止まっていても、ここで反映する）。
+
+    割り付けはまず出現率の計算に要る期間（今の設定の `window_days`）から探し、無ければ記録を残す最長の期間から探す。期間の中で
+    見つかれば、そのとき読んだ記録を計算に渡して読み直さない。割り付けが無い（別のマシンの ID・消された記録）か記録を書けなければ、
+    警告を出して偽。指標の名前とバージョンは割り付けの工程の表から引く。確認と追記は 1 つのロックの中で行い、計算はロックを
+    抜けてから行う。
+    """
+    now, cwd = mc.utc_now(), Path.cwd()
+    got = _table_here(cwd)
+    longest = now - timedelta(days=mc.LONGEST_WINDOW + mc.records_rule()["kept_extra_days"])
+    tries = ([_since(now, got.allocation["window_days"])] if got is not None else []) + [longest]
+    try:
+        known = next((k for since in tries if (k := _logged(assign_id, quality, detail, now, since)) is not None), None)
     except (*mc.STORE_ERRORS, internal.InternalError, contracts.ContractError) as exc:
         log.warning("実験の記録へ効果指標を書けない（割り付け %s）: %s", assign_id, exc)
         return False
-    refresh(assign)
+    if known is None:
+        log.warning("効果指標を書く割り付け %s が実験の記録に無い（別のマシンの ID か、消された記録）", assign_id)
+        return False
+    _refresh_with(mc.assigns(known.rows)[assign_id], now, cwd, got, known)
     return True
 
 
@@ -210,13 +264,15 @@ class _Scope:
     now: datetime
 
 
-def _scope(assign: Mapping[str, Any], now: datetime, cwd: Path) -> Optional[_Scope]:
-    """作業ディレクトリのリポジトリの今の設定で、割り付けと同じキーの範囲。リポジトリか設定（互換性のキー）が違えば None。"""
-    root = launch_settings.launch_root(cwd)
-    got = mc.table(root)
+def _scope(assign: Mapping[str, Any], now: datetime, got: mc.Table) -> Optional[_Scope]:
+    """今の設定 `got` で、割り付けと同じキーの範囲。設定（互換性のキー）が違えば None。
+
+    リポジトリのキーは割り付けの行の値を使う。作業ディレクトリのリポジトリと同じかは、計算すると決めた後に確かめる
+    （git を起動するので、計算しない呼び出しでは確かめない）。
+    """
     stage, runtime = assign["stage"], assign["runtime"]
     arms = got.arms[stage][runtime] if runtime in got.arms[stage] else ()
-    where = mc.Where(launch_approval.repo_key(root), stage, runtime, mc.compatibility_key(arms, mc.metric_of(stage)))
+    where = mc.Where(assign["repo"], stage, runtime, mc.compatibility_key(arms, mc.metric_of(stage)))
     return _Scope(where, tuple(arms), got.allocation, mc.records_dir(), now) if where.of(assign) else None
 
 
@@ -236,13 +292,23 @@ def _cutoffs(units: Sequence[UnitValue], entry: Optional[Mapping[str, Any]], s: 
     return [{"arm": arm, "until": _text(until)} for arm, until in sorted(cut.items())]
 
 
-def _computed(units: Sequence[UnitValue], rows: Sequence[Mapping[str, Any]], entry: Optional[Mapping[str, Any]], s: _Scope) -> dict:
-    """出現率の項目（打ち切りの判定 → 候補の確定 → 段階の判定と確率の計算の順）。添字と確率が選択肢に合わなければ `InternalError`。"""
+def _computed(
+    units: Sequence[UnitValue],
+    rows: Sequence[Mapping[str, Any]],
+    entry: Optional[Mapping[str, Any]],
+    s: _Scope,
+    observed: Mapping[str, str],
+) -> dict:
+    """出現率の項目（打ち切りの判定 → 候補の確定 → 段階の判定と確率の計算の順）。添字と確率が選択肢に合わなければ `InternalError`。
+
+    項目の実際のモデルは、単位を絞ったのと同じ観測（`observed`）を優先する。新しいモデルの評価がまだ無いまとまりも観測のモデルを
+    持つので、次の割り付けは項目を捨てずに件数を集める段階として使う。
+    """
     seed = seed_of(s.where, s.allocation, units)
     cutoffs = _cutoffs(units, entry, s, seed)
     cands = mc.candidates(s.arms, rows, {"cutoffs": cutoffs}, s.now, s.where)
     found = ad.probabilities(units, cands, s.allocation, random.Random(seed))
-    models = {mc.model_group(s.arms[u.arm], s.arms): u.model for u in units if u.model is not None}
+    models = {mc.model_group(s.arms[u.arm], s.arms): u.model for u in units if u.model is not None} | dict(observed)
     item = {**s.where.fields(), "key": s.where.key, "at": _text(s.now), "phase": found.phase, "candidates": cands}
     item |= {"allocation": dict(s.allocation), "counts": [found.counts[i] if i < len(found.counts) else 0 for i in range(len(s.arms))]}
     item |= {"models": models, "cutoffs": cutoffs} | ({"probs": list(found.probs)} if found.probs is not None else {})
@@ -251,32 +317,43 @@ def _computed(units: Sequence[UnitValue], rows: Sequence[Mapping[str, Any]], ent
     return item
 
 
-def _recomputed(assign: Mapping[str, Any], now: datetime, cwd: Path) -> bool:
-    s = _scope(assign, now, cwd)
+def _recomputed(assign: Mapping[str, Any], now: datetime, cwd: Path, got: Optional[mc.Table], known: Optional[_Known]) -> bool:
+    root = launch_settings.launch_root(cwd)
+    s = _scope(assign, now, mc.table(root) if got is None else got)
     if s is None:
         return False
     window = s.allocation["window_days"]
-    rows = mc.read_experiments(now - timedelta(days=max(window, mc.records_rule()["refusal_days"])), s.store)
+    since = _since(now, window)
+    rows = known.rows if known is not None and known.since <= since else mc.read_experiments(since, s.store)
     entry = mc.weights_entry(s.store, s.where, now)
     if entry is not None and not mc.entry_fits(entry, rows, s.where, s.arms, s.allocation, now):
         entry = None  # 割り付けの値・選択肢の数・実際のモデルが合わない項目は、打ち切りも引き継がない
     if _fresh(entry, rows, s):
         return False
+    if launch_approval.repo_key(root) != s.where.repo:
+        return False  # 作業ディレクトリが割り付けと別のリポジトリなので、その設定では計算しない
     usage_rows, _ = jsonl.read_rows(s.store / facts.value("ndf-files", USAGE_LOG, "path"), kind="usage")
-    units = unit_values(rows, usage_rows, where=s.where, now=now, window_days=window)
-    mc.update_weights(s.store, now, _computed(units, rows, entry, s))
+    observed = mc.observed_models(rows, s.where, s.arms, now - timedelta(days=window))
+    units = unit_values(rows, usage_rows, where=s.where, now=now, window_days=window, observed=observed)
+    mc.update_weights(s.store, now, _computed(units, rows, entry, s, observed))
     return True
+
+
+def _refresh_with(assign: Mapping[str, Any], now: datetime, cwd: Path, got: Optional[mc.Table], known: Optional[_Known]) -> bool:
+    """`refresh` の本体。`got`（今の設定）と `known`（効果指標を書いたときに読んだ記録）があれば読み直さずに使う。"""
+    try:
+        return _recomputed(assign, now, cwd, got, known)
+    except (*mc.STORE_ERRORS, internal.InternalError, contracts.ContractError, ValueError) as exc:
+        log.warning("出現率を計算し直せないので、前の出現率のまま続ける（割り付け %s）: %s", assign["assign_id"], exc)
+        return False
 
 
 def refresh(assign: Mapping[str, Any]) -> bool:
     """割り付け `assign` のキーの出現率を、計算し直す条件に当たれば計算して置き換える。置き換えたら真。
 
     条件は、項目が無い・候補か割り付けの値が今と違う・実際のモデルが最新の観測と違う・前の計算から間隔（表 launch-experiments の
-    records の行の `refresh_minutes`）を過ぎた、のどれか。今の設定は作業ディレクトリのリポジトリから読み、リポジトリか互換性の
-    キーが割り付けと違えば計算しない。計算か書き込みに失敗したら、警告を出して前の出現率のまま続ける（偽）。
+    records の行の `refresh_minutes`）を過ぎた、のどれか。今の設定は作業ディレクトリのリポジトリから読み、互換性のキーが割り付けと
+    違えば計算しない。リポジトリが割り付けと違うかは、条件に当たったときだけ確かめ、違えば計算しない。計算か書き込みに失敗したら、
+    警告を出して前の出現率のまま続ける（偽）。
     """
-    try:
-        return _recomputed(assign, mc.utc_now(), Path.cwd())
-    except (*mc.STORE_ERRORS, internal.InternalError, contracts.ContractError, ValueError) as exc:
-        log.warning("出現率を計算し直せないので、前の出現率のまま続ける（割り付け %s）: %s", assign["assign_id"], exc)
-        return False
+    return _refresh_with(assign, mc.utc_now(), Path.cwd(), None, None)

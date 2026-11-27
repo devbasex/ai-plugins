@@ -5,15 +5,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
-import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from ndf.adapters import launch_records
 from ndf.adapters import model_choice as mc
 from ndf.contracts import internal
 from ndf.domains.records import experiments as ex
@@ -189,6 +190,15 @@ def test_the_model_of_a_unit_is_from_its_first_launch_that_was_not_raised():
     assert [u.model for u in _values((rows, usage + [raised]), later)] == ["claude-new", "claude-new"]
 
 
+def test_a_unit_whose_first_launch_returned_no_model_keeps_an_unknown_model():
+    # 最初の起動が期限切れで回答が無く、再開後の起動だけがモデルを返した単位は、再開後のモデルを最初の起動のモデルにしない
+    rows, _ = _unit("a", 0, 1.0, 1.0, _day(1))
+    lost = _launch("l-a", None, _day(1), assign_id="a")
+    resumed = _launch("l-a2", 1.0, _day(1) + timedelta(hours=1), assign_id="a", model="claude-new")
+    (found,) = _values((rows, [lost, resumed]))
+    assert found.model is None
+
+
 @pytest.mark.parametrize(
     ("models", "kept"),
     [
@@ -234,7 +244,7 @@ def _rows(store: Path, kind: str) -> list[dict]:
 @pytest.fixture
 def refreshed(monkeypatch) -> list:
     calls: list = []
-    monkeypatch.setattr(ex, "refresh", lambda assign: calls.append(assign["assign_id"]) or True)
+    monkeypatch.setattr(ex, "_refresh_with", lambda assign, *rest: calls.append(assign["assign_id"]) or True)
     return calls
 
 
@@ -246,20 +256,24 @@ def test_write_outcome_adds_one_row_with_the_stage_metric_and_refreshes(store, c
     assert refreshed == ["a"]
 
 
-def test_write_outcome_does_not_add_a_second_row(store, clock, refreshed):
+def test_write_outcome_does_not_add_a_second_row_but_still_refreshes(store, clock, refreshed):
+    # 前の呼び出しが指標を書いた直後に止まっても、再開した呼び出しが出現率の更新を判定する
     _ledger(store, _assign("a", 1), _outcome("a", 1.0))
     assert ex.write_outcome("a", 0.0, {})
-    assert [r["quality"] for r in _rows(store, "outcome")] == [1.0] and refreshed == []
+    assert [r["quality"] for r in _rows(store, "outcome")] == [1.0] and refreshed == ["a"]
 
 
-def test_parallel_write_outcome_adds_one_row(store, clock, refreshed):
+def test_write_outcome_sees_the_row_written_while_it_waited_for_the_lock(store, clock, refreshed, monkeypatch):
+    # ロックの外で読んだ後、先にロックを取った呼び出しが指標を書いた。ロックを取ってから読み足した行を見て足さない
     _ledger(store, _assign("a", 1))
-    threads = [threading.Thread(target=ex.write_outcome, args=("a", 1.0, {})) for _ in range(8)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert len(_rows(store, "outcome")) == 1
+
+    def rival(path: Path) -> contextlib.AbstractContextManager:
+        launch_records.write_row(mc._month_file(store, "2026-11"), _outcome("a", 1.0))
+        return contextlib.nullcontext()
+
+    monkeypatch.setattr(mc, "_lock", rival)
+    assert ex.write_outcome("a", 0.0, {})
+    assert [r["quality"] for r in _rows(store, "outcome")] == [1.0]
 
 
 def test_write_outcome_without_the_assignment_warns_and_returns_false(store, clock, refreshed, caplog):
@@ -321,8 +335,28 @@ def test_refresh_waits_an_hour_unless_the_actual_model_changed(store, clock, roo
         ),
     )
     assert ex.refresh(last)
+    # 新しいモデルの評価がまだ無いので、古いモデルの単位を数えずに件数を集める段階を、観測のモデルで保存する
+    (entry,) = _entries(store)
+    assert entry["models"] == {"default": "claude-y"} and entry["phase"] == "burn_in" and entry["counts"] == [0, 3, 3]
+    clock["at"] = NOW + timedelta(minutes=45)
+    assert not ex.refresh(last)  # 保存した項目が最新の観測に合うので、1 時間以内は計算し直さない
     clock["at"] = NOW + timedelta(minutes=90)
     assert ex.refresh(last)
+
+
+def test_write_outcome_uses_the_rows_it_read_and_skips_git_while_the_entry_is_fresh(store, clock, root, monkeypatch):
+    last = _fill(store, root, 3)
+    assert ex.refresh(last)
+    _ledger(store, _assign("z", 1, repo=last["repo"]))
+    clock["at"] = NOW + timedelta(minutes=10)
+
+    def unexpected(*args):
+        raise AssertionError("呼ばれない")
+
+    monkeypatch.setattr(mc, "read_experiments", unexpected)
+    monkeypatch.setattr(mc.launch_approval, "repo_key", unexpected)
+    assert ex.write_outcome("z", 1.0, {})
+    assert _entries(store)[0]["at"] == _at(NOW)
 
 
 def test_refresh_drops_entries_past_their_window_and_rebuilds_a_broken_file(store, clock, root):

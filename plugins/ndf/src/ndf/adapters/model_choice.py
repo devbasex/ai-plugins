@@ -745,13 +745,20 @@ def entry_fits(
     now: datetime,
 ) -> bool:
     """項目を今の割り付けに使えるか: 割り付けの値が今の設定と同じで、添字と確率が選択肢に合い（`probs_fit`）、実際のモデルが
-    期間の中の同じキーの最も新しい `observed` の行と、まとまりごとに食い違わない。
-
-    最も新しい行は記録の順でなく行の日時で選ぶ。並行する起動の観測は、ロックの待ちで日時と逆の順に記録されることがある。
+    期間の中の同じキーの最も新しい `observed` の行（`observed_models`）と、まとまりごとに食い違わない。
     """
     if entry["allocation"] != dict(allocation) or not probs_fit(entry, len(arms)):
         return False
-    start = now - timedelta(days=allocation["window_days"])
+    latest = observed_models(rows, where, arms, now - timedelta(days=allocation["window_days"]))
+    return all(latest[g] == m for g, m in entry["models"].items() if g in latest)
+
+
+def observed_models(rows: Sequence[Mapping[str, Any]], where: Where, arms: Sequence[Mapping[str, str]], start: datetime) -> dict[str, str]:
+    """まとまり → `start` 以降の同じキーの最も新しい `observed` の行の実際のモデル。割り付け（`entry_fits`）と出現率の計算
+    （`experiments.refresh`）が同じ観測でモデルを決めるために共有する。
+
+    最も新しい行は記録の順でなく行の日時で選ぶ。並行する起動の観測は、ロックの待ちで日時と逆の順に記録されることがある。
+    """
     found = assigns(rows)
     latest: dict[str, Mapping[str, Any]] = {}
     for r in rows:
@@ -759,7 +766,7 @@ def entry_fits(
             group = model_group(r["arm"], arms)
             if group not in latest or _row_time(r) >= _row_time(latest[group]):
                 latest[group] = r
-    return all(latest[g]["model"] == m for g, m in entry["models"].items() if g in latest)
+    return {g: r["model"] for g, r in latest.items()}
 
 
 def _has_unpriced(rows: Sequence[Mapping[str, Any]], u: _Unit) -> bool:

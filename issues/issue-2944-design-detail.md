@@ -386,8 +386,8 @@ src/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `write_outcome` | `domains/records/experiments.py` | 新設 | `write_outcome(assign_id: str, quality: Optional[float], detail: Mapping) -> bool` | 割り付けを引いて指標の行を足し、`refresh` を呼ぶ |
-| `unit_values` | 同 | 新設 | `unit_values(rows, usage_rows, *, where: Where, now: datetime, window_days: int) -> list[UnitValue]` | 割り付け ID ごとに効果・費用・確率・組・実際のモデルをまとめ、使えない単位を除く |
+| `write_outcome` | `domains/records/experiments.py` | 新設 | `write_outcome(assign_id: str, quality: Optional[float], detail: Mapping) -> bool` | 割り付けを引いて指標の行を足し、出現率を計算し直すかを判定する |
+| `unit_values` | 同 | 新設 | `unit_values(rows, usage_rows, *, where: Where, now: datetime, window_days: int, observed: Optional[Mapping[str, str]] = None) -> list[UnitValue]` | 割り付け ID ごとに効果・費用・確率・組・実際のモデルをまとめ、使えない単位を除く |
 | `seed_of` | 同 | 新設 | `seed_of(where: Where, allocation: Mapping, units) -> int` | 乱数の種（工程・ランタイム・互換性のキー・割り付けの値・計算に使う単位の SHA-256） |
 | `refresh` | 同 | 新設 | `refresh(assign: Mapping) -> bool` | 計算し直す条件に当たれば、出現率の項目を置き換える。書き換えるときに、期間を過ぎた項目も消す |
 | `record_outcome` | `domains/records/usage.py` | 新設 | `record_outcome(assign_id: str, quality: Optional[float], detail: Mapping) -> bool` | 差し込みの受け口。`experiments.write_outcome` を呼ぶ |
@@ -404,7 +404,11 @@ src/ndf/
   - `probabilities` は件数が足りないときも `burn_in` の `Entry` を返す（None を返す場面が無い）
 - 出現率のファイルの形は `contracts/schemas/internal/experiment-weights.schema.json`。書く側（`update_weights`）と読む側（`read_weights`）の両方がこの形を確かめ、確率の数が選択肢の数と合うこと・候補の確率が 0 より大きくほかが 0 で合計が 1 であること・添字が範囲にあることは、選択肢を知る読み手（割り付けの `entry_fits`）と書き手（`refresh`）が `probs_fit` で確かめる。合わない項目は、割り付けが使わず候補で均等に抽選する（PR #4661 のレビューの r16-3）
 - `write_outcome`
-  - 事後条件: 同じ割り付け ID の指標の行があれば足さない。この確認と追記は、1 つの `ledger` の中で行う。指標の名前とバージョンは、割り付けの工程の表から引く。`refresh` は `ledger` を抜けてから呼ぶ
+  - 事後条件: 同じ割り付け ID の指標の行があれば足さない。この確認と追記は、1 つの `ledger` の中で行う。指標の名前とバージョンは、割り付けの工程の表から引く。出現率を計算し直すかの判定は `ledger` を抜けてから行い、行を足さなかったときも行う。指標を書いた直後に中断した作業を再開したときに、その指標を出現率へ反映するためである
+  - 読む範囲: 割り付けは、まず出現率の計算に要る期間（作業ディレクトリの設定の `window_days` と `refusal_days` の長いほう）の月から探す。見つかれば、`ledger` で読んだ行をそのまま計算に渡し、月別のファイルを読み直さない。見つからないか設定を読めなければ、記録を残す最長の期間（365 日＋`kept_extra_days`）から探す。効果指標は割り付けの後に書くので、割り付けが範囲にあれば同じ割り付け ID の指標の行も範囲にある
+- `refresh`
+  - リポジトリのキーは割り付けの行の値で項目を引き、作業ディレクトリのリポジトリと同じかは、計算し直すと決めた後にだけ `launch_approval.repo_key` で確かめる（`git rev-parse` を 1 回起動する）。前の計算から間隔を過ぎていない呼び出しは、git を起動しない
+  - 単位を絞る今のモデルと、項目に書く実際のモデル（`models`）は、割り付けの `entry_fits` と同じ `observed` の行（`model_choice.observed_models`）から決める（[allocation の「実際のモデルが変わった単位は混ぜない」](./issue-2944-design-allocation.md#実験の記録と出現率)）
   - 副作用: 実験の記録への追記と、出現率のファイルの置き換え
 
 ### 異常系の処理
@@ -426,7 +430,7 @@ src/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `write_outcome` | 行が 1 つ、計算が呼ばれる | 前の計算から 1 時間以内。実際のモデルが項目と違えば 1 時間以内でも計算する | 2 回目は足さない。並べて呼んでも 1 行 |
+| `write_outcome` | 行が 1 つ、計算の判定が呼ばれる。計算に要る期間で割り付けが見つかれば記録を読み直さず、項目が新しければ git を起動しない | 前の計算から 1 時間以内。実際のモデルが項目と違えば 1 時間以内でも計算し、新しいモデルの評価が無ければ `burn_in` を新しいモデルで書く | 2 回目は足さないが判定は行う。ロックを待つ間に先行の呼び出しが書いた行を見て足さない |
 | `unit_values` | 手戻りの費用を含む | 費用 0 と不明は費用の平均から除き、効果は残す、期間を過ぎた割り付け直し | 別のリポジトリ、モデルが変わった単位、モデルが切り替わって元に戻った場合の期限切れの境界 |
 | `probabilities` | 合計 1、下限以上 | `min_units` の前後、費用の分かる単位が 2 件未満 | 効果の下限を外れる安い組 |
 | `eliminated` | 0.99 を超える組 | 30 件の前後、期限の後に戻る | 基準は打ち切らない |
