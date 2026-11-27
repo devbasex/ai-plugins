@@ -30,7 +30,7 @@ from typing import Any, Callable, Mapping, NamedTuple, Optional, Protocol, Seque
 
 from ndf import identity, process_group
 from ndf.adapters import claude_gate, claude_precheck, cli_floor, launch_slot, transcript
-from ndf.adapters.agents import claude_body, claude_denials, usage_limit
+from ndf.adapters.agents import ai_child_env, claude_body, claude_denials, usage_limit
 from ndf.adapters.run_log import child_process_env, record_cost
 from ndf.contracts import facts, limits
 
@@ -842,7 +842,7 @@ def _launch_once(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Pat
         with launch_slot.gate(
             "claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=claude_precheck.slot_wait(options), ensure=options.ensure_training
         ) as slot_env:
-            run = run._replace(env={**run.env, **slot_env, identity.env_name("ai-child"): "1"})
+            run = run._replace(env={**run.env, **slot_env, **ai_child_env()})
             stopped = claude_precheck.precheck_claude(run, cwd, options)
             if stopped is not None:
                 return ClaudeReply.failed("", stopped.detail, failure=PRECHECK_FAILURES[stopped.check])
