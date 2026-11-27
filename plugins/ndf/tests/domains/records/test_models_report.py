@@ -28,7 +28,7 @@ KEY = mc.compatibility_key(ARMS, mc.metric_of("impl"))
 
 
 def _at(when: datetime) -> str:
-    return when.isoformat(timespec="microseconds")
+    return when.astimezone(UTC).isoformat(timespec="microseconds")  # 記録の時刻は UTC（common.schema.json の time）
 
 
 def _row(lid: str, when: datetime = NOW, cost: float | None = 1.0, **fields) -> dict:

@@ -291,7 +291,7 @@ def _units_of(where: model_choice.Where, arms: Sequence[Mapping[str, str]], rec:
     return period, period if edge == since else pick(edge)
 
 
-def _experiment_items(where: model_choice.Where, assigned: Sequence[Mapping[str, Any]], rec: _Records) -> list[dict]:
+def _key_items(where: model_choice.Where, assigned: Sequence[Mapping[str, Any]], rec: _Records) -> list[dict]:
     """キー 1 つの組ごとの値。打ち切りの判定 → 候補 → 段階と確率（出現率の計算と同じ順）を、期間の終わりの時点で計算し直す。"""
     arms, allocation, end = assigned[0]["arms"], rec.allocation, rec.span.end
     units, recent = _units_of(where, arms, rec)
@@ -352,7 +352,7 @@ def report_rows(usage_rows: Sequence[Mapping[str, Any]], experiment_rows: Sequen
     found = [a for a in assigned if span.has(a) and a["repo"] == scope.repo and stage in (None, a["stage"])]
     keys = sorted({(a["repo"], a["stage"], a["runtime"], a["key"]) for a in found})
     for where in (model_choice.Where(*k) for k in keys):
-        items += _experiment_items(where, [a for a in found if where.of(a)], rec)
+        items += _key_items(where, [a for a in found if where.of(a)], rec)
     return items
 
 
