@@ -165,6 +165,7 @@ plugins/ndf/
 | `since_diff` | `changes.py` | 新設 | `since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str` | 前の head からの差分（比較基点が違えば PR が変えるファイルに絞る）に、`added` の今の PR の差分を続けて返す |
 | `since_files` | `changes.py` | 新設 | `since_files(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> tuple[str, ...]` | `since_diff` が渡すファイルのパスを返す。足して渡す PR の差分に改名があれば、`since_diff` と同じく、改名前と改名後の両方のパスを返す。PR に既にあるインラインのコメントを選ぶ `reviewing.remarks` が使う |
 | `touched_since` | `changes.py` | 新設 | `touched_since(g: git.Git, since: str, current: Range, listed: Listings, since_lines: Optional[str] = None, pr_lines: Optional[str] = None) -> leftover_decide.Touched` | `since` の後に変わったファイル、足した行・書き換えた行の番号、今の PR の差分（`current`）に載る行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`read_origin`）ではない |
+| `commentable_lines` | `changes.py` | 新設 | `commentable_lines(pr_lines: str) -> dict[str, frozenset[int]]` | 取得済みの PR の全差分に載る head の側の行の番号を返す（`unpark` に渡す。git は起動しない） |
 
 - `new_in_pr`
   - 事前条件: `previous.head` は `current.head` の祖先
@@ -471,7 +472,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | --- | --- | --- | --- | --- |
 | `sort` | `journal.py` | 新設 | `sort(self, touched: leftover_decide.Touched, unconfirmed: Collection[str] = ()) -> frozenset[str]` | このラウンドで出た指摘のうち分け直すものに線引きを当て、残した指摘のキーを返す |
 | `passed` | `journal.py` | 新設 | `passed(self, fid: str, touched: leftover_decide.Touched, *, unconfirmed: bool = False) -> list[dict[str, Any]]` | このラウンドの出し直しの位置のうち、修正へ進むものを返す（`sort` と `_wants_tracks` が使う） |
-| `unpark` | `journal.py` | 新設 | `unpark(self) -> None` | 線引きをしないラウンドで、出し直された指摘の `parked` を外して位置を置き換える |
+| `unpark` | `journal.py` | 新設 | `unpark(self, touched: leftover_decide.Touched) -> None` | 線引きをしないラウンドで、出し直された指摘の `parked` を外して位置を置き換え、投稿できる行かを確かめる |
 | `enter` | `journal.py` | 変更 | シグネチャは変えない | このラウンドで出た指摘の番号を `self.raised_ids` に残し、`self.returned`（直した後に戻った指摘の番号）を呼び出しごとに空にする |
 | `carry` | `journal.py` | 変更 | シグネチャは変えない | 記録のコメントの `parked` の項目は指摘の行にせず、本文から URL への対応 `self.filed` に残す。`issue` を持つほかの項目は指摘の行へ移す |
 | `_revive` | `journal.py` | 変更 | シグネチャは変えない | 直した（`fixed`）指摘が戻ったときに、番号を `self.returned` に足す |
@@ -501,7 +502,9 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 
 線引きをしないラウンド（変えた行を読めないラウンドを含む）では、`_sort_leftovers` が `sort` の代わりに `unpark` を呼ぶ。`unpark` は、このラウンドで出し直された指摘の `parked` をすべて外し、行の位置を同じ決まりで出し直しのものに置き換える。線引きを当てられないラウンドは重い指摘をすべて進めるので、前のラウンドで残した指摘も修正へ戻すためである。
 
-続けて `sort` を呼ぶ（線引きをする）ラウンドでも、`sort` は `parked` の外れた指摘を修正へ進めるかどうかを判定し直さない。投稿の位置だけは、次のとおり確かめる。
+線引きを当てられるかと、投稿できる行かの確認は分ける。`unpark` は、置き換えた位置（`enter` が置き換えたものを含む）を、後で述べる `off_diff` の判定にかける。判定に使う `Touched.commentable` は、このラウンドで取得済みの全差分から `changes.commentable_lines` で読み、git は起動しない。全差分が無いか読めないときは、行番号のある指摘に `off_diff` を付け、ファイル単位のコメントにする。差分に載らない行が 1 件でも混じると、まとめた投稿の全体が拒否されるためである。
+
+`enter` の後に `sort` を呼ぶ（線引きをする）ラウンドでも、`sort` は `parked` の外れた指摘を修正へ進めるかどうかを判定し直さない。投稿の位置だけは、次のとおり確かめる。
 
 - `enter` が置き換えた行が PR の差分に載れば、その位置を保つ
 - 載らなければ、`enter` が候補にした出し直しから、上の番号付きの 2 つの順で選び直して保存する
@@ -524,7 +527,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 
 投稿が拒否されて API 呼び出しが増えないように、基準のコミットの PR の差分に載らない行は、投稿の位置に使わない。指摘の行には `path`・`line` を保存したまま、差分に載らないことを欄 `off_diff` に残し、投稿するときに行番号を除く。
 
-- 付けるのは `sort` である。位置を選んで保存した後に、このラウンドで出た指摘のうち、位置の基準がこのラウンドのものを確かめる。修正へ進む指摘も、直さずに残す指摘も対象にする。投稿の処理と同じ関数（`leftover_decide.location`）で読むので、`path` の無い指摘は `section` と本文の先頭から読んだ行を確かめる
+- 付けるのは `sort` と `unpark` である。`unpark` が確かめるのは、位置を置き換えた指摘だけである。`sort` は、位置を選んで保存した後に、このラウンドで出た指摘のうち、位置の基準がこのラウンドのものを確かめる。修正へ進む指摘も、直さずに残す指摘も対象にする。投稿の処理と同じ関数（`leftover_decide.location`）で読むので、`path` の無い指摘は `section` と本文の先頭から読んだ行を確かめる
 - 参照するのは `leftover_decide.location` である。`off_diff` を持つ指摘は行を返さず、ファイルの位置になる。線引きを省くラウンドで見送りが解けた指摘も、同じ扱いになる
 - `off_diff` を付けるときは、保存した `path`・`line` と位置の基準を書き換えない。行番号は起票の「場所」に使うためである
 - 位置の基準が前のラウンドの指摘は、今の差分では確かめられないので、`off_diff` をそのまま保つ。位置を置き換えるか、直した指摘が戻ったときは消す
@@ -554,7 +557,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 
 正しい行にスレッドを付けるために、この 2 つの増加は受け入れる。
 
-PR の差分に載らない行がレビュー投稿にまとめる指摘に混じると、組の全体が拒否される。組が n 件で、そのうち行への個別の投稿も拒否される指摘が k 件なら、1 回で済む投稿が、拒否 1 回、行への投稿 n 回、ファイルへの投稿 k 回の、合わせて `1 + n + k` 回になる。`sort` は差分に載らない行を位置に使わず、`enter` が `parked` を外して置き換えた位置も確かめ直すので、線引きをするラウンドではこの増加は起きない。線引きをしないラウンドで `enter` が置き換える位置は、差分と照らさないので、この限りでない。
+PR の差分に載らない行がレビュー投稿にまとめる指摘に混じると、組の全体が拒否される。組が n 件で、そのうち行への個別の投稿も拒否される指摘が k 件なら、1 回で済む投稿が、拒否 1 回、行への投稿 n 回、ファイルへの投稿 k 回の、合わせて `1 + n + k` 回になる。`sort` は差分に載らない行を位置に使わず、`enter` が `parked` を外して置き換えた位置も確かめ直すので、線引きをするラウンドではこの増加は起きない。線引きをしないラウンドでは、`unpark` が置き換えた位置を取得済みの全差分と照らし、照らせなければファイル単位にする。
 
 `off_diff` でファイル単位の投稿に移すと、全部の行が差分に載って 1 回のレビュー投稿にまとまる場合より、API 呼び出しが増えることがある。同じコミットの指摘 n 件のうち k 件（k は 1 以上）が移る場合の差し引きは、次のとおりである。P は、投稿の後にスレッドの一覧を読み直すページの数である。
 
@@ -634,7 +637,7 @@ PR の差分に載らない行がレビュー投稿にまとめる指摘に混�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_ranges` | `drive.py` | 新設 | `_ranges(run: _Run, merge_base: str, head: str) -> Ranges` | 目的ごとに、差分を渡す起点（`read_origin`）・足すファイル・線引きの起点（`line_origin`）を決める |
-| `_sort_leftovers` | `drive.py` | 新設 | `_sort_leftovers(run: _Run, touched: Optional[leftover_decide.Touched], checked: Checked) -> frozenset[str]` | `_confirm_heavy` の前に読んだ変えた行を受け取り、線引きの対象のラウンドなら `journal.sort` に渡し、ほかは `journal.unpark` を呼ぶ |
+| `_sort_leftovers` | `drive.py` | 新設 | `_sort_leftovers(run: _Run, touched: Optional[leftover_decide.Touched], checked: Checked, prep: reviewing.Prepared, got: reviewing.Reviewed) -> frozenset[str]` | `_confirm_heavy` の前に読んだ変えた行を受け取り、線引きの対象のラウンドなら `journal.sort` に渡し、ほかは取得済みの全差分から読んだ行を `journal.unpark` に渡す |
 | `default_max_rounds` | `settings.py` | 新設 | `default_max_rounds(every_section: bool) -> int` | `--max-rounds` を省いたときの上限（設計の PR は 3、ほかは 4） |
 | `_with_leftovers` | `cli.py` | 新設 | `_with_leftovers(verdict: fin.Verdict, items: list[dict[str, Any]], data: Mapping[str, Any]) -> fin.Verdict` | 結果の `items` に残し方を足し、要約の行と MVV の判断を足す |
 | `_prepare_round` | `drive.py` | 変更 | シグネチャは変えない（返りの `Prepared` に `lines: Optional[str]` と `listed: changes.Listings` を足す） | 実装の PR は起点からの差分を `since_diff` で作る。`lines` には線引きの起点（`line_origin` の head）を入れ、線引きをしないラウンドは None にする |
@@ -664,7 +667,7 @@ PR の差分に載らない行がレビュー投稿にまとめる指摘に混�
 
 線引きをするのは、実装の PR で、状態ファイルの通算で 2 ラウンド目以降で、`line_origin` があり、比較基点の変化で足すファイルが無いラウンドである。足すファイルの有無は、`read_origin` が無くて全差分になるラウンドでも、`line_origin` の比較基点が今と違えば `new_in_pr` で確かめる。`_confirm_heavy` の `use_tracks` を真にするのは、線引きをするラウンドで、このラウンドの新しい重い指摘に、MVV の項目を持ち、`sort` が残すと判定するものがある場合だけである。`sort` と同じく出し直しのすべての位置に `proceeds` を当て（`journal.passed`）、すべて偽なら残すと判定する。その指摘は、回答の指摘の種類によって、進むか（保護の種類が付く）、起票するかが変わる。
 
-次の 2 種類の指摘は、判定役の回答で扱いが変わらない。1 つは保護の対象の指摘で、`proceeds` の順 7 までに進むと決まり、起票もしない。もう 1 つは MVV の項目を持つ指摘のうち、`proceeds` が真のもの（critical のものや、変えた行を指すものなど）である。回答がどうであれ修正へ進み、MVV の項目を持つ指摘は重要度も下げない。新しい重い指摘がこの 2 種類だけのラウンドでは、判定役を起動しない（ほかの理由で起動するラウンドでは、今のとおり一緒に渡る）。保護の対象でも MVV の項目を持つ指摘でもない指摘は、critical を含め、今のとおり重要度の確認のために判定役へ渡す。`proceeds` に渡す `touched` は、線引きをするラウンドで `_confirm_heavy` の前に `changes.touched_since(g, prep.lines, changes.Range(merge_base, prep.head), listed, since_lines, pr_lines)`（`merge_base` は `_ranges` に渡す今の比較基点） で 1 回読み、`_sort_leftovers` にも渡す（線引きをしないラウンドと、線引きにも投稿の位置の確かめにも使う指摘が無いラウンドは、読まずに None。`journal.sortable`。数えるのは critical・major だけで、minor・nit は線引きで扱いが変わらず、スレッドにもしないので数えない）。`since_lines` は、「git を起動する回数」の条件に当たるラウンドでは `since_diff` の返り、ほかは None である。`listed` は `prep.listed`（`_ranges` が読んだ差分の一覧。読んでいなければ空）で、一覧を読んだ範囲は読み直さない。
+次の 2 種類の指摘は、判定役の回答で扱いが変わらない。1 つは保護の対象の指摘で、`proceeds` の順 7 までに進むと決まり、起票もしない。もう 1 つは MVV の項目を持つ指摘のうち、`proceeds` が真のもの（critical のものや、変えた行を指すものなど）である。回答がどうであれ修正へ進み、MVV の項目を持つ指摘は重要度も下げない。新しい重い指摘がこの 2 種類だけのラウンドでは、判定役を起動しない（ほかの理由で起動するラウンドでは、今のとおり一緒に渡る）。判定役に渡す候補は、`FindingJournal.enter` が `fresh` に入れた指摘である。そのうち保護の種類も MVV の項目も持たない critical・major は、今のとおり重要度を確認するために判定役へ渡す（必ず人の承認が要る操作の指摘と NDF が作った指摘は除く）。`proceeds` に渡す `touched` は、線引きをするラウンドで `_confirm_heavy` の前に `changes.touched_since(g, prep.lines, changes.Range(merge_base, prep.head), listed, since_lines, pr_lines)`（`merge_base` は `_ranges` に渡す今の比較基点） で 1 回読み、`_sort_leftovers` にも渡す（線引きをしないラウンドと、線引きにも投稿の位置の確かめにも使う指摘が無いラウンドは、読まずに None。`journal.sortable`。数えるのは critical・major だけで、minor・nit は線引きで扱いが変わらず、スレッドにもしないので数えない）。`since_lines` は、「git を起動する回数」の条件に当たるラウンドでは `since_diff` の返り、ほかは None である。`listed` は `prep.listed`（`_ranges` が読んだ差分の一覧。読んでいなければ空）で、一覧を読んだ範囲は読み直さない。
 
 `pr_lines` は、このラウンドで取得した今の PR の全差分である。相手役の起動と席の穴埋めが終わった後なので、次の順で最初に当たるファイルを `read_bytes().decode("utf-8")` で読んで渡す。
 

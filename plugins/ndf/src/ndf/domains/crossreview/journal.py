@@ -563,11 +563,15 @@ class FindingJournal:
             if leftover_decide.proceeds(base | p, touched, returned=returned, unconfirmed=unconfirmed)
         ]
 
-    def unpark(self) -> None:
+    def unpark(self, touched: leftover_decide.Touched) -> None:
         """線引きをしないラウンドで、直前の `enter` で出し直された指摘の `parked` を外し、位置を出し直しのものにする
-        （前の線引きの結果で、重い指摘を修正から外したままにしない。#3780）。"""
+        （前の線引きの結果で、重い指摘を修正から外したままにしない。#3780）。置き換えた位置（`enter` が置き換えたものを含む）は
+        `touched.commentable` で確かめ、PR の差分に載ると分からない行には `OFF_DIFF` を付ける。"""
+        moved = set(self._moved)
         back = {fid: self._reports[fid][0] for fid in self.raised_ids if self.rows[fid].pop(PARKED, None)}
         self._move_unparked(back, self._reports, self._round)
+        for fid in moved | set(self._moved):
+            self._check_post_line(self.rows[fid], touched)
 
     def sortable(self) -> bool:
         """直前の `enter` の指摘に、`sort` が変えた行を使うもの（線引きするか、投稿の位置を確かめる）があるか。minor・nit は

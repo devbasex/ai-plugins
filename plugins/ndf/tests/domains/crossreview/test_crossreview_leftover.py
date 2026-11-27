@@ -418,13 +418,29 @@ def test_changed_lines_are_not_read_for_new_light_findings(severity: str, wanted
     assert journal.sortable() is wanted
 
 
-def test_a_round_without_the_line_drawing_hands_over_a_parked_finding_raised_again() -> None:
+@pytest.mark.parametrize(
+    ("full", "severity", "number", "posted"),
+    [
+        pytest.param(True, "major", 7, 7, id="in-pr-diff"),
+        pytest.param(True, "major", 99, None, id="outside-pr-diff"),
+        pytest.param(True, "critical", 99, None, id="unparked-by-enter"),
+        pytest.param(False, "major", 7, None, id="no-full-diff"),
+    ],
+)
+def test_a_round_without_the_line_drawing_hands_over_a_parked_finding_raised_again(
+    tmp_path: Path, full: bool, severity: str, number: int, posted
+) -> None:
     journal, row = _parked()
-    journal.enter(3, [_told(path="a.py", line=7)], ITEMS, V11)
-    run = SimpleNamespace(journal=journal)
-    assert drive._sort_leftovers(run, None, drive.Checked()) == frozenset()  # type: ignore[arg-type]
+    journal.enter(3, [_told(severity=severity, path="a.py", line=number)], ITEMS, V11)
+    diff = tmp_path / "full.diff"
+    diff.write_text("diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -7 +7 @@\n-x\n+y\n", encoding="utf-8")
+    run = SimpleNamespace(journal=journal, last_target=None)
+    prep = SimpleNamespace(scope=SimpleNamespace(base=None if full else "h2"), diff=diff)
+    got = SimpleNamespace(filled=None)
+    assert drive._sort_leftovers(run, None, drive.Checked(), prep, got) == frozenset()  # type: ignore[arg-type]
     assert PARKED not in row and journal.handable() == [row]
-    assert (row["line"], row[journal_mod.PLACED_ROUND]) == (7, 3)
+    assert (row["line"], row[journal_mod.PLACED_ROUND]) == (number, 3)
+    assert threads.location(row) == ("a.py", posted)
 
 
 def test_the_judge_is_not_asked_the_kinds_when_another_report_is_on_a_changed_line() -> None:

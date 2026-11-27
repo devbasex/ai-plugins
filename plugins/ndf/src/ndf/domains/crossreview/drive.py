@@ -669,11 +669,26 @@ def _wants_tracks(run: _Run, touched: Optional[leftover_decide.Touched]) -> bool
     )
 
 
-def _sort_leftovers(run: _Run, touched: Optional[leftover_decide.Touched], checked: Checked) -> frozenset[str]:
+def _commentable(run: _Run, prep: reviewing.Prepared, got: reviewing.Reviewed) -> leftover_decide.Touched:
+    """線引きをしないラウンドで投稿の位置を確かめる行。取得済みの全差分から読み、git は起動しない。全差分が無いか読めなければ
+    空（行を確かめられない指摘は、ファイルに付けるコメントになる）。"""
+    full = _full_diff_file(run, prep, got)
+    if full is None:
+        return leftover_decide.Touched()
+    try:
+        text = full.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return leftover_decide.Touched()
+    return leftover_decide.Touched(commentable=changes.commentable_lines(text))
+
+
+def _sort_leftovers(
+    run: _Run, touched: Optional[leftover_decide.Touched], checked: Checked, prep: reviewing.Prepared, got: reviewing.Reviewed
+) -> frozenset[str]:
     """線引きをするラウンドなら指摘を分け、直さずに残した指摘のキーを返す。しないラウンドは、出し直された指摘の `parked` を
-    外す。"""
+    外し、置き換えた位置を確かめる。"""
     if touched is None:
-        run.journal.unpark()
+        run.journal.unpark(_commentable(run, prep, got))
         return frozenset()
     return run.journal.sort(touched, checked.unconfirmed)
 
@@ -755,7 +770,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     touched = _touched(run, round_no, prep, got)
     keeping = _keeping(run, round_no, prep, got, launch)
     checked = _confirm_heavy(run, round_no, prep.diff, keeping, _wants_tracks(run, touched), got.filled)
-    parked = _sort_leftovers(run, touched, checked)
+    parked = _sort_leftovers(run, touched, checked, prep, got)
     # 確認で下げた指摘と直さずに残した指摘は、修正担当へ渡らないので振動の判定のキーに数えない
     run.history.append(keys - checked.lowered - parked)
     record = _round_record(run, round_no, prep)

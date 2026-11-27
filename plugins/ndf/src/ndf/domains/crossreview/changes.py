@@ -649,8 +649,17 @@ def touched_since(
     # PR の差分は行の番号だけを使うので、一覧は読まない
     shown = _given_or_read(g, f"{current.base}...{current.head}", pr_lines)
     lines = {path: frozenset(n for b in _changed_blocks(hunks) for n in _touched_rows(b)) for path, hunks in changed.items()}
-    commentable = {path: frozenset(x.head for h in hunks for x in h.lines if x.head is not None) for path, hunks in shown.items()}
-    return leftover_decide.Touched(frozenset(entries), lines, commentable)
+    return leftover_decide.Touched(frozenset(entries), lines, _head_rows(shown))
+
+
+def _head_rows(shown: Mapping[str, Sequence[Hunk]]) -> dict[str, frozenset[int]]:
+    """行の差分に載る、head の側の行の番号。"""
+    return {path: frozenset(x.head for h in hunks for x in h.lines if x.head is not None) for path, hunks in shown.items()}
+
+
+def commentable_lines(pr_lines: str) -> dict[str, frozenset[int]]:
+    """取得済みの PR の全差分（`review_diff` の返り）に載る head の側の行の番号（行コメントを付けられる行）。"""
+    return _head_rows(_parsed_hunks(pr_lines))
 
 
 # --- 根拠の記述の確かめ -------------------------------------------------------------------------
