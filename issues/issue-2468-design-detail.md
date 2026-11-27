@@ -370,7 +370,7 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 | `_decide` | `drive.py` | 新設 | `_decide(run: _Run, record: dict[str, Any], prep: Prepared, candidates: Sequence[Mapping[str, Any]], launch: Launcher, meter: spend.Meter) -> Optional[str]` | 判定役、行の確定、線引き、判定までを行う |
 | `_fix` | `drive.py` | 新設 | `_fix(run: _Run, record: dict[str, Any], prep: Prepared, launch: Launcher, meter: spend.Meter) -> Optional[str]` | 上限を確かめて修正担当を起動し、結果を取り込んで送る。`_round` と `_resume` が呼ぶ |
 | `_round` | `drive.py` | 変更 | シグネチャは変えない | 相手役の前に、`spent` の初期値（秒・費用・`unread` は 0、`ended_at` は作った時刻）を持たせた記録を保存し、`_collect`・`_decide`・`_fix` の順に進め、各起動の前に上限を確かめる |
-| `require_fix_for_changes` | `fixgate_decide.py` | 変更 | `require_fix_for_changes(round_no, verdict, fix, pending, stopped_limit: Optional[str] = None)` | `stopped_limit` のあるラウンドは記録の不足にしない |
+| `require_fix_for_changes` | `fixgate_decide.py` | 変更 | `require_fix_for_changes(round_no, verdict, fix, pending, stopped_limit: Optional[str] = None)` | `stopped_limit` のあるラウンドは記録の不足にしない。判断の順は、`fix` があれば `OK`、`pending` があれば `INGEST`（`stopped_limit` があっても取り込む）、`stopped_limit` があれば `OK`、ほかは `STOP` |
 
 `fixer.take_fix` と `_fix_record` は、修正担当が終わった時点の head と比較基点を `apply_fix(at=...)` へ渡す。`_fix` と `_ingest_pending` は、`stopped_limit` のあるラウンドに `fix` を書く保存で `stopped_limit` を消す。先に消すと、修正の結果を書く前の中断の後、次の起動が記録の不足で止まるためである。`ndf cross-review fix-gate` も `stopped_limit` を渡す。`Outcome` に `limited: Optional[fin.Limited]` を足す。
 
@@ -417,11 +417,20 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 | 順 | 最後のラウンドの状態 | `_resume` |
 | --- | --- | --- |
 | 1 | `spent.running` が残っている（`verdict` の有無によらない。修正担当の実行中に中断したラウンドは `verdict` を持つ） | `spend.recover` で中断した起動の分を足して保存し、順 2 へ進む |
-| 2 | `verdict` が `changes_required` で `stopped_limit` があり `fix` が無く、順 4 に挙げる値が記録と同じ | `_fix` で同じ番号のラウンドの修正担当を起動する。相手役と判定役は起動しない。秒か費用の上限に当たったままなら `_fix` は起動せず、`stopped_limit` を残して `limit`。起動の時点では `stopped_limit` を残し、`fix` か `verdict: error` を書く保存で消す。返りは `_round` の修正の後と同じ（`error` か None） |
+| 2 | `verdict` が `changes_required` で `stopped_limit` があり `fix` が無く、順 4 に挙げる値が記録と同じ（head の比べ方だけは表の下） | `_fix` で同じ番号のラウンドの修正担当を起動する。相手役と判定役は起動しない。秒か費用の上限に当たったままなら `_fix` は起動せず、`stopped_limit` を残して `limit`。起動の時点では `stopped_limit` を残し、`fix` か `verdict: error` を書く保存で消す。返りは `_round` の修正の後と同じ（`error` か None） |
 | 2a | ほかで `verdict` がある（`stopped_limit` があっても順 4 に挙げる値が違う場合を含む） | ここで終える。修正の結果の取り込みは今の `_ingest_pending` がする。未解決の行は次のラウンドで修正担当へ渡る |
 | 3 | `candidates` が無い | `verdict: interrupted` にして None |
 | 4 | `candidates` があり、head・比較基点・相手役・重点・単位の指示・PR・MVV が記録と同じ | `_decide` から同じ番号のラウンドを続け、修正が要れば `_round` と同じく `_fix` で修正担当まで進める。`unread_reviewers` があれば `incomplete_reviewers` で終える |
 | 5 | `candidates` があり、順 4 のどれかが違う | `verdict: interrupted` にして `candidates` を消し None |
+
+順 2 の head は、worktree の `HEAD` でなく、起動の始めの同期で読んだ origin の PR ブランチの先頭（`SyncResult.tip`）を記録の head と比べる。修正担当がコミットした後、結果ファイルを書く前に中断すると、そのコミットは送られないまま worktree に残り、`HEAD` は記録の head と違うためである。
+
+| 起きたこと | origin の先頭 | 順 2 |
+| --- | --- | --- |
+| 中断した修正担当の未送信のコミットが worktree にある | 記録の head と同じ | 同じラウンドの修正担当を起動する |
+| ほかの人がコミットを送った | 記録の head と違う | 順 2a |
+
+順 2 の `_fix` は、記録の head をレビューした head として `send_fix` へ渡す。起動し直した修正担当が新しいコミットを作らなくても、残っていたコミットが送られる。
 
 `_stale_skips` は、見送りの行のうち次のどちらかに当たる行の番号を返す。ここで `current` は、このラウンドの比較基点と head の組（引数の `changes.Range`）である。
 
@@ -459,10 +468,10 @@ claude の起動は `spec.agent` が claude かで見分ける（席の claude�
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `_over`（`run` を通す） | 収束せずに終えた後の打ち直しは残りの回数だけ回る。収束の後は 0 から | 起動の時点で使い切ると相手役を起動しない。その後の `report` が同じ終わり方と当たった上限を出す。上限を上げた打ち直しは `limit_end` を消す。上限ちょうどの最後のラウンドは修正まで行う。秒か費用が上限ちょうどなら判定役も修正担当も起動しない | 打ち直すたびに 0 から数え直す誤った実装は、このテストで失敗する |
-| `_resume` | 判定役の実行中の中断は相手役を起動せずに続き、相手役の費用を 1 回だけ数える | 一部が読めなかったラウンドは `incomplete_reviewers`。保存済みで上限なら判定役を起動しない。修正担当の実行中の中断（`verdict` がある）でも、中断した起動の秒を `spent.seconds` へ、claude の数を `spent.unread` へ 1 回だけ足す | head が変われば `interrupted` で読み直す。相手役の実行中の中断も 1 ラウンドに数える。ラウンド数の上限ちょうどのラウンドが秒の上限で修正を起動せずに終えた後、秒の上限だけを上げて打ち直すと、相手役を起動せずに修正担当だけを起動する。その修正担当が結果を書く前に中断しても、次の打ち直しは記録の不足で止まらず、修正担当を起動する |
+| `_resume` | 判定役の実行中の中断は相手役を起動せずに続き、相手役の費用を 1 回だけ数える | 一部が読めなかったラウンドは `incomplete_reviewers`。保存済みで上限なら判定役を起動しない。修正担当の実行中の中断（`verdict` がある）でも、中断した起動の秒を `spent.seconds` へ、claude の数を `spent.unread` へ 1 回だけ足す | head が変われば `interrupted` で読み直す。相手役の実行中の中断も 1 ラウンドに数える。ラウンド数の上限ちょうどのラウンドが秒の上限で修正を起動せずに終えた後、秒の上限だけを上げて打ち直すと、相手役を起動せずに修正担当だけを起動する。その修正担当が結果を書く前に中断しても、次の打ち直しは記録の不足で止まらず、修正担当を起動する。コミットした後の中断でも同じラウンドの修正担当を起動し、残ったコミットを送る。origin の先頭が進んでいれば起動しない |
 | `_collect` | 記録と `spent` が残る | 全員が読めないラウンドも数え、読んだ head にしない | 無し |
 | `_decide`・`_round` | 指摘 0 件は `converged`（受け入れ条件 2） | 修正を起動せずに終えた記録に `stopped_limit` が付き `verdict` は変わらず、次の起動は記録の不足で止まらない | 比較基点を変えて起動すると見送りの理由を確かめる |
-| `require_fix_for_changes` | `stopped_limit` があれば `OK` | 結果ファイルが残っていれば今のとおり | `stopped_limit` も記録も無ければ `STOP` |
+| `require_fix_for_changes` | `stopped_limit` があり結果ファイルが無ければ `OK` | `stopped_limit` と結果ファイルの両方があれば `INGEST` | `stopped_limit`・修正の記録・結果ファイルのどれも無ければ `STOP` |
 
 ## 終わり方と残し方（finish_decide・scope_decide・round_scope・reviewed_pr・leftover・report_decide・cli）
 
