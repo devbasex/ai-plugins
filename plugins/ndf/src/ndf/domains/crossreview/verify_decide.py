@@ -18,6 +18,8 @@ from ndf.domains.records import mvv_decide
 
 # ラウンドの記録で、そのラウンドが判定役の起動を試み、出力を保存できたときの名前（ファイル名の拡張子より前）を持つキー。回答の有無は表さない
 ROUND_KEY = "judge_output"
+# 削除された行の抜粋（`removed_lines`）の先頭の行
+REMOVED_NOTE = "前の head からの差分のうち、削除された行だけの抜粋である。足した行と前後の行は含まない。"
 # 指示に載せる指摘の欄（書いた相手役 `by` は載せない）
 _SHOWN = ("id", "severity", "text", "impact", "path", "line", "section", "diffs")
 
@@ -64,6 +66,28 @@ def select(rows: Sequence[Mapping[str, Any]], use_tracks: bool = False) -> list[
     if use_tracks or any(not _never_lowered(row) for row in asked):
         return asked
     return []
+
+
+def removed_lines(diff: str) -> str:
+    """差分 `diff` から、削除された行と、その場所が分かる見出し（ファイルと範囲）だけを抜き出す。削除が無ければ空。
+
+    判定役へ前の head からの差分の全体を渡すと、その分の入力トークンが増える。全差分と作業場所から読めないのは、直前の
+    修正で削除した行だけである。"""
+    out: list[str] = []
+    header: list[str] = []
+    hunk: list[str] = []
+    in_hunk = False
+    for line in diff.split("\n"):
+        if line.startswith("diff --git "):
+            header, hunk, in_hunk = [line], [], False
+        elif line.startswith("@@"):
+            hunk, in_hunk = [line], True
+        elif not in_hunk:
+            header.append(line)
+        elif line.startswith("-"):
+            out += [*header, *hunk, line]
+            header, hunk = [], []
+    return "".join(f"{line}\n" for line in (REMOVED_NOTE, *out)) if out else ""
 
 
 def listing(rows: Sequence[Mapping[str, Any]]) -> str:

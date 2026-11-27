@@ -14,7 +14,7 @@ from typing import Any, NamedTuple, Optional, Protocol
 from ndf.adapters import git, run_log
 from ndf.contracts import limits
 from ndf.core.converge import oscillation, participants
-from ndf.domains.crossreview import changes, criteria_decide, prior_decide, scope_decide, seats, store
+from ndf.domains.crossreview import changes, criteria_decide, prior_decide, scope_decide, seats, store, verify_decide
 from ndf.domains.crossreview.fixer import Launcher
 from ndf.domains.crossreview.journal import FindingJournal
 from ndf.domains.records import mvv
@@ -23,6 +23,8 @@ from ndf.domains.records import mvv
 RETRY_SUFFIX = "-retry"
 # `--base` からの全差分のファイルの名前の後ろ（`round<n>-full.diff`。前の head からの差分を渡すラウンドで、根拠の確かめと埋めた席が使う）
 FULL_DIFF_SUFFIX = "-full.diff"
+# 判定役へ渡す、前の head からの差分の削除された行の抜粋のファイルの名前の後ろ（`round<n>-removed.diff`）
+REMOVED_SUFFIX = "-removed.diff"
 # 相手役へ渡す既存のコメントのファイルの名前の後ろ（`round<n>.remarks.txt`）
 REMARKS_SUFFIX = ".remarks.txt"
 # 相手役のレビューの最後の行に出させる findings の JSON の形（`%s` には、承認済みの MVV があるときだけキー `mvv` を入れる）
@@ -133,7 +135,7 @@ class FilledRead(NamedTuple):
     others: frozenset[str]
 
     def diffs(self, key: object, *round_diffs: Path) -> tuple[Path, ...]:
-        """キー `key` の指摘を出した席が読んだ差分。`round_diffs` は埋めていない席が読んだ差分（`prompt_diffs`）で、
+        """キー `key` の指摘を確かめる差分。`round_diffs` は埋めていない席の指摘の差分（`judge_diffs`）で、
         両方の席が出した指摘は、それと全差分の両方。"""
         if key not in self.keys:
             return round_diffs
@@ -298,6 +300,18 @@ def prompt_diffs(run: ReviewingRun, prep: Prepared) -> tuple[Path, ...]:
     `criteria_decide.document_block` が読ませる前の head からの差分（PR 4461 の r2-2）。"""
     since = (prep.previous.diff,) if run.documents and prep.previous is not None else ()
     return tuple(dict.fromkeys((prep.diff, *since)))
+
+
+def judge_diffs(run: ReviewingRun, round_no: int, prep: Prepared) -> tuple[Path, ...]:
+    """判定役へ渡す、埋めていない席の指摘の差分。相手役が前の head からの差分も読むラウンド（`prompt_diffs`）では、その全体の
+    代わりに、削除された行の抜粋（`verify_decide.removed_lines`）を足す。削除が無ければ足さない。"""
+    round_diff, *since = prompt_diffs(run, prep)
+    removed = verify_decide.removed_lines(since[0].read_text(encoding="utf-8")) if since else ""
+    if not removed:
+        return (round_diff,)
+    path = run.input_path(round_no, REMOVED_SUFFIX)
+    path.write_text(removed, encoding="utf-8")
+    return (round_diff, path)
 
 
 def _full_diff(run: ReviewingRun, round_no: int, prep: Prepared) -> Path:

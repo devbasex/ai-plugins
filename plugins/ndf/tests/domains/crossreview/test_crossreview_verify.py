@@ -427,6 +427,16 @@ def test_issue_4363_filled_read_gives_the_diffs_read_by_the_seats_of_the_finding
     assert since == [n for name in names for n in ([name, "round2-since.diff"] if name == "round2.diff" else [name])]
 
 
+def test_issue_4363_removed_lines_keep_only_the_deletions_and_their_places() -> None:
+    """判定役へ足すのは削除された行と、そのファイルと範囲の見出しだけで、削除が無ければ何も足さない。"""
+    added = "diff --git a/new.md b/new.md\n--- /dev/null\n+++ b/new.md\n@@ -0,0 +1 @@\n+足した行\n"
+    head = ["diff --git a/a.md b/a.md", "--- a/a.md", "+++ b/a.md"]
+    changed = [*head, "@@ -1,3 +1,2 @@", " 前の行", "--- 区切り", "+足した行", "@@ -9 +8 @@", "+別の行"]
+    got = verify_decide.removed_lines(added + "\n".join(changed) + "\n")
+    assert got.split("\n") == [verify_decide.REMOVED_NOTE, *head, "@@ -1,3 +1,2 @@", "--- 区切り", ""]
+    assert verify_decide.removed_lines(added) == ""
+
+
 def test_issue_4363_ask_lists_the_diffs_of_each_finding_when_they_differ(tmp_path: Path) -> None:
     """指示は渡す指摘の差分をすべて挙げ、一覧の各行はその指摘の差分だけを持つ。渡さない指摘の差分は挙げない。"""
     diff, seen = _diff(tmp_path), []

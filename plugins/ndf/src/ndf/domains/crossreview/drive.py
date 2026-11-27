@@ -553,9 +553,8 @@ def _confirm_heavy(
     """直前の `enter` で新しく出たか戻った critical・major を判定役に確かめ、回答をジャーナルへ当てる（#4363）。渡す指摘が
     無ければ起動しない。`use_tracks` は、回答の指摘の種類を使う処理があるラウンドで真にする。
 
-    判定役の起動は 1 回で、指摘ごとに、それを出した席が読んだ差分を渡す。席を埋めたラウンド（`filled`）の埋めた席の指摘は
-    全差分、ほかは相手役のリクエストが読ませた `round_diffs`（`reviewing.prompt_diffs`）である（一方の差分に載る変更が、
-    他方に載るとは限らない）。"""
+    判定役の起動は 1 回で、指摘ごとに、それを出した席に合う差分を渡す。席を埋めたラウンド（`filled`）の埋めた席の指摘は
+    全差分、ほかは `round_diffs`（`reviewing.judge_diffs`）である（一方の差分に載る変更が、他方に載るとは限らない）。"""
     heavy = [row for row in map(run.journal.rows.__getitem__, run.journal.fresh) if _heavy(row.get("severity"))]
     asked = verify_decide.select(heavy, use_tracks)
     if not asked:
@@ -647,7 +646,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
     # 確認で下げた指摘は、振動の判定のキーに数えない
-    judged = reviewing.prompt_diffs(run, prep)
+    judged = reviewing.judge_diffs(run, round_no, prep)
     checked = _confirm_heavy(run, round_no, judged, _keeping(run, round_no, prep, got, launch), filled=got.filled)
     run.history.append(keys - checked.lowered)
     record = _round_record(run, round_no, prep)
