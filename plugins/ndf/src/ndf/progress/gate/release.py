@@ -152,15 +152,14 @@ def _recorded_where(reply: Mapping[str, Any]) -> tuple[Optional[str], Optional[d
     return known, dict(row)
 
 
-def _released(reply: Mapping[str, Any], value: str, row: Optional[dict[str, Any]]) -> dict[str, Any]:
-    """出した回答が持つバージョンとリリース記録の PR（文脈の `product_version`・`release_pr`）。後の工程（閉じ・リリース後テスト）は
-    文脈から読み、リリースの PR を探さない（#2783）。承認しない回答や、値の無いキーは書かない。
+def _released(reply: Mapping[str, Any], row: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """承認した回答が持つバージョンとリリース記録の PR（文脈の `product_version`・`release_pr`）。後の工程（閉じ・リリース後テスト）は
+    文脈から読み、リリースの PR を探さない（#2783）。値の無いキーは書かない。承認した回答にだけ呼ぶ（承認しない回答の出力は空で、
+    `take_reply` が決める）。
 
     オーガナイザーがリリース記録に残した届け先 `row`（`_recorded_where` が返したもの）があれば `delivery` として足す（バージョン番号を
     持たないリポジトリで、本番に届く行が 1 つに決まったときだけ残る）。デプロイの工程はこの記録だけから `delivery` を返し、worker を起動しない（#4513）。
     """
-    if value != run.APPROVED:
-        return {}
     out: dict[str, Any] = {name: str(reply[key]) for key, name in RELEASED_OUTPUTS.items() if reply.get(key)}
     if row is not None:
         out[DELIVERY] = row
@@ -189,8 +188,12 @@ def take_reply(
     seen = json.loads(seen_file.read_text(encoding="utf-8")) if seen_file.exists() else None
     reason = str(reply["reason"]) if reply.get("reason") else f"オーガナイザーのリリースの回答（{reply['result']}）"
     target = Target.from_dict(seen)
-    # 回答の種類と届け先は承認ごとに 1 回だけ解釈し、出力と release_store の両方に使う
-    store_kind, row = _recorded_where(reply) if value == run.APPROVED else (None, None)
+    # 承認のときだけ、回答の種類と届け先を 1 回解釈し、出力と release_store の両方に使う
+    store_kind: Optional[str] = None
+    outputs: dict[str, Any] = {}
+    if value == run.APPROVED:
+        store_kind, row = _recorded_where(reply)
+        outputs = _released(reply, row)
     given = Answer(
         q.id,
         value,
@@ -198,7 +201,7 @@ def take_reply(
         "organizer",
         f"organizer:{request_id(q)}",
         seen=target,
-        outputs=_released(reply, value, row),
+        outputs=outputs,
         release_store=store_kind,
     )
     return answer(st, machine_id, given, observe, post)
