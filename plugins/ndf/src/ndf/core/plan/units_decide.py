@@ -278,24 +278,33 @@ def _u3(files, unit_of, closure, bad) -> None:
 def _u4(files, homes, closure, bad) -> None:
     """依存（間接を含む）で前後が決まらない 2 単位が同じファイルを触る（U4）。
 
-    ファイルから触る単位を引く索引を作り、各単位について同じファイルを触る後ろの単位だけを重複なく集める。
-    依存で前後の決まる相手は、重なるファイルを求める前に外す。ファイルを共有しない組は見ない。
+    ファイルから触る単位を引く索引を作り、各単位について、入力順で後ろにあり同じファイルを触る単位だけを重複なく集める。
+    索引をたどる量（ファイルごとの触る単位の数の 2 乗の和）が全組の数（単位の数の 2 乗）を超えるときは、
+    多くのファイルを共有していて索引が組を何度も数えるので、入力順で後ろの単位すべてと組にする。
+    どちらでも、依存で前後の決まる相手は、重なるファイルを求める前に外す。
     """
-    position = {k: i for i, k in enumerate(homes)}
-    touches = {k: frozenset(_touches(files[k[0]], homes[k])) for k in homes}
+    keys = list(homes)
+    position = {k: i for i, k in enumerate(keys)}
+    touches = {k: frozenset(_touches(files[k[0]], homes[k])) for k in keys}
     by_path: dict[str, list[_Key]] = {}
-    for k in homes:
+    for k in keys:
         for p in touches[k]:
             by_path.setdefault(p, []).append(k)
-    for a in homes:
-        partners: set[_Key] = set()
-        for p in touches[a]:
-            partners.update(by_path[p])
-        for b in sorted((b for b in partners if position[b] > position[a]), key=position.__getitem__):
+    scan_all = sum(len(ks) ** 2 for ks in by_path.values()) > len(keys) ** 2
+    for i, a in enumerate(keys):
+        if scan_all:
+            later = keys[i + 1 :]
+        else:
+            partners = {b for p in touches[a] for b in by_path[p] if position[b] > i}
+            later = sorted(partners, key=position.__getitem__)
+        for b in later:
             if a in closure[b] or b in closure[a]:
                 continue
+            common = touches[a] & touches[b]
+            if not common:
+                continue
             where = f"{files[a[0]].path} の {a[1]} と {files[b[0]].path} の {b[1]}"
-            bad.append(Finding("U4", a[1], f"{where} が前後なしに {'・'.join(sorted(touches[a] & touches[b]))} を触る"))
+            bad.append(Finding("U4", a[1], f"{where} が前後なしに {'・'.join(sorted(common))} を触る"))
 
 
 def _unit_tasks(f: UnitFile, u: UnitDef) -> list[Task]:
