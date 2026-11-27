@@ -109,11 +109,7 @@ def _release_view(rep: record_decide.Record, releases: list[record_decide.Record
     """反映の判定。数えるのは `record_decide.counted` の記録だけ。"""
     counted = record_decide.counted(releases, rep, targets)
     missing = record_decide.missing_in(counted, targets)
-    unconfirmed = [
-        {"name": t, "kind": k}
-        for t in targets
-        if (k := _confirmed_by(counted, t)) is not None and k != record_decide.CD
-    ]
+    unconfirmed = [{"name": t, "kind": k} for t in targets if (k := _confirmed_by(counted, t)) is not None and k != record_decide.CD]
     return Reflection(not missing, list(missing), unconfirmed)
 
 
