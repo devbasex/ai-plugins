@@ -41,7 +41,7 @@ def main_worktree(g: git.Git) -> Path:
         raise git.GitError("主 worktree が無い（bare のリポジトリか、git worktree list が空）")
     main = entries[0].path
     probe = git.Git(main)
-    top = Path(os.path.realpath(probe.run("rev-parse", "--show-toplevel").strip()))
+    top = Path(os.path.realpath(probe.toplevel()))  # 比べる前に実体のパスへそろえる
     if top != Path(os.path.realpath(main)) or probe.common_dir() != g.common_dir():
         raise git.GitError(f"git worktree list が報告した主 worktree {main} が、このリポジトリの worktree の最上位でない")
     return main

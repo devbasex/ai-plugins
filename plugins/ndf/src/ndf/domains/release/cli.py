@@ -10,9 +10,9 @@
 | `approval-state` | 会話のセッション | `land.approval_state`（`merge` と同じ承認の条件の判定を読むだけ） |
 | `pull-checks` | 会話のセッション | `record.pinned_included` と `gather.pull_facts`（版上げの PR に含まれる各 PR の最新の CI の結果を取得し、対象の PR と検査の結果を承認資料に貼れる形で出力する） |
 | `merge` | workflow | `land`（証跡の後に、ブランチ戦略の設定の主体と方式で入れ、要ればベースブランチへ戻す PR） |
-| `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後） |
+| `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後）。`--version` は `record_unversioned.write_unversioned`（バージョンの無いリリース記録を届け先ごとに確かめて書く）、`--correct-targets` は `record_unversioned.correct_targets` |
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く。リリースの PR なら記録を持つ PR を示して止まる） |
-| `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む） |
+| `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む）。`--version` などを渡すと `record_read.read_release`（閉じる手順の読み取り）、`--pr-body-only` は `record_read.pr_body_only` |
 | `publish` | workflow | `tagging`（タグと GitHub Release） |
 
 `assemble`・`materials`・`publish` は、メインディレクトリのブランチ戦略の設定（リリースの形・バージョンの保存先・名前の書式・
@@ -28,13 +28,13 @@ import argparse
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from ndf import cli
 from ndf.adapters import git as git_mod
 from ndf.adapters import github as github_mod
 from ndf.adapters.github import GitHub
-from ndf.contracts import result
+from ndf.contracts import result, worker_kinds
 from ndf.core import branch_strategy, merge_approval
 from ndf.domains.release import (
     approval_decide,
@@ -47,6 +47,8 @@ from ndf.domains.release import (
     names_decide,
     record,
     record_decide,
+    record_read,
+    record_unversioned,
     route_decide,
     sync_decide,
     tagging,
@@ -64,14 +66,32 @@ from ndf.domains.release import version_store as store_mod
 TOOL = cli.tool_of(__name__)
 
 
+def _cached_common_dir(args: argparse.Namespace) -> Optional[Path]:
+    """`args` に置いた共通の git ディレクトリのうち、今の `--root` で解決した値（無ければ None）。"""
+    cached = getattr(args, "_common_dir", None)
+    return cached[1] if cached is not None and cached[0] == Path(args.root) else None
+
+
+def _root_common_dir(args: argparse.Namespace) -> Optional[Path]:
+    """`--root` の共通の git ディレクトリ（git の外なら None）。解決できた値は `--root` ごとに `args` に置いて使い回し、
+    1 回の実行で設定・リモート名・リリース記録の共有の保存先を読むたびに git を起動し直さない。"""
+    cached = _cached_common_dir(args)
+    if cached is not None:
+        return cached
+    root = Path(args.root)
+    try:
+        common = git_mod.Git(root).common_dir()
+    except git_mod.GitError:  # noqa: NDF401 外部コマンド: git の外はメインディレクトリが無いので None
+        return None
+    args._common_dir = (root, common)
+    return common
+
+
 def _main_dir(args: argparse.Namespace) -> Path:
     """メインディレクトリ（作業場所の設定は PR の変更でマージの主体・方式を差し替えられるため読まない）。
     git の外ならメインディレクトリを持たないので `--root`。"""
-    root = Path(args.root)
-    try:
-        return git_mod.Git(root).common_dir().parent
-    except git_mod.GitError:  # git の外はメインディレクトリが無いので --root の設定を読む
-        return root
+    common = _root_common_dir(args)
+    return common.parent if common is not None else Path(args.root)
 
 
 def _strategy(args: argparse.Namespace) -> branch_strategy.Strategy:
@@ -79,7 +99,7 @@ def _strategy(args: argparse.Namespace) -> branch_strategy.Strategy:
     return branch_strategy.load(_main_dir(args))
 
 
-def _remote(args: argparse.Namespace) -> str:
+def _remote_name(args: argparse.Namespace) -> str:
     """メインディレクトリの設定のリモート名（#3615 の決定 9）。"""
     return git_mod.remote_of(_main_dir(args))
 
@@ -95,7 +115,7 @@ def _target(args: argparse.Namespace, remote: str) -> assemble.Target:
 
 
 def cmd_assemble(args: argparse.Namespace) -> dict:
-    remote = _remote(args)
+    remote = _remote_name(args)
     return assembled(assemble.assemble(Path(args.root), _hub(args, remote), _target(args, remote), _strategy(args)))
 
 
@@ -108,7 +128,7 @@ def assembled(built: assemble.Built) -> dict:
 
 
 def cmd_materials(args: argparse.Namespace) -> dict:
-    remote = _remote(args)
+    remote = _remote_name(args)
     facts = assemble.collect(Path(args.root), _hub(args, remote), _target(args, remote), _strategy(args))
     text = materials_decide.render(facts)
     if args.out:
@@ -215,8 +235,90 @@ def cmd_merge(args: argparse.Namespace) -> dict:
     return result.stopped(TOOL, done.kind if done.kind else "unknown", detail, outputs=outputs)
 
 
+def _record_args(args: argparse.Namespace, strategy: branch_strategy.Strategy) -> record_unversioned.Unversioned | None:
+    """確かめ 0。`record` の引数の組。バージョンの無いリリース記録の引数なら `Unversioned`（`tip` は呼び手が埋める）、
+    今の記録（バージョン番号を持つリポジトリ）なら None。`--correct-targets` は訂正の引数の規則で確かめて None。誤りは `RecordError`。"""
+    none_store = not strategy.has_version_number
+    if args.correct_targets:
+        if not none_store:
+            raise record.RecordError("--correct-targets はバージョンの保存先が none のリポジトリでだけ受ける")
+        if args.version is None or not args.target or not args.reason:
+            raise record.RecordError("--correct-targets には --version・--target（1 つ以上）・--reason が要る")
+        if args.environment or args.observed:
+            raise record.RecordError("--correct-targets は --environment と --observed を受けない")
+        return None
+    if args.reason is not None:
+        raise record.RecordError("--reason は --correct-targets と一緒にだけ渡す")
+    if args.version is None and not args.environment and not args.target and not args.observed:
+        return None
+    if not none_store:
+        raise record.RecordError("バージョンの保存先が none でないリポジトリでは --version・--environment・--target・--observed を渡さない")
+    if args.version is None or not args.environment:
+        raise record.RecordError("--version と --environment（1 つ以上）はそろえて渡す")
+    # `--target` の要否は、同じ値の記録の push の時点の設定でも決まる（設定を外した後の打ち直し）ので確かめ 3 で確かめる
+    environments = tuple(dict.fromkeys(args.environment))
+    return record_unversioned.Unversioned(args.version, environments, tuple(args.target), frozenset(args.observed), args.production_sha, "")
+
+
+def _hands(args: argparse.Namespace) -> record_unversioned.Hands:
+    # 共通の git ディレクトリは、先に設定を読んだとき（`_strategy`）に解決した値を使い、git を起動し直さない
+    return record_unversioned.Hands(git_mod.Git(Path(args.root)), common=_cached_common_dir(args))
+
+
+def _unversioned_result(args: argparse.Namespace, strategy: branch_strategy.Strategy, given: record_unversioned.Unversioned) -> dict:
+    """`record --version` の結果（設計書の「`record` の終わり方」の表）。"""
+    remote = _remote_name(args)
+    given = given._replace(tip=f"refs/remotes/{remote}/{args.production}")
+    try:
+        got = record_unversioned.write_unversioned(
+            _hub(args, remote), _hands(args), args.pr, args.production, strategy.section["release"], given
+        )
+    except record_unversioned.CommentLeft as exc:
+        kind = "infra_wait" if exc.retry_after is not None else "unknown"
+        return result.stopped(TOOL, kind, str(exc), retry_after=exc.retry_after, items=[{"kind": "comment", "url": u} for u in exc.urls])
+    outputs = {
+        "product_version": got.record.version,
+        "included": list(got.record.included),
+        "targets": list(got.record.targets if got.record.targets is not None else ()),
+        "recorded": list(got.recorded),
+        "kept": list(got.kept),
+        "failed": got.failed,
+        "pending": got.pending,
+        "complete": got.complete,
+        "missing": list(got.missing),
+    }
+    items = sorted({(w.number, w.result) for w in got.written})
+    rows = [{"kind": "pull", "number": n, "result": r} for n, r in items]
+    rows += [
+        {"kind": worker_kinds.DELIVERY, "name": e, "result": state, "reason": why}
+        for state, by in (("failed", got.failed), ("pending", got.pending))
+        for e, why in by.items()
+    ]
+    if got.recorded or got.kept:
+        detail = f"値 {given.version} のリリース記録を書いた（書いた届け先 {record_decide.listed_names(got.recorded)}・既にあった届け先 {record_decide.listed_names(got.kept)}）"
+        return result.result(TOOL, result.OK, detail, rows, outputs=outputs)
+    if got.failed:
+        return result.stopped(
+            TOOL,
+            "refused",
+            f"CD の結果が失敗した届け先がある（{record_decide.listed_names(tuple(got.failed))}）。何も書いていない",
+            items=rows,
+            outputs=outputs,
+        )
+    detail = f"どの届け先も反映を確かめられなかった（{record_decide.listed_names(tuple(got.pending))}）。結果が確定してから打ち直す"
+    return result.stopped(TOOL, "precondition", detail, items=rows, outputs=outputs)
+
+
 def cmd_record(args: argparse.Namespace) -> dict:
-    formats = names_decide.formats_of(_strategy(args).section["release"])
+    strategy = _strategy(args)
+    given = _record_args(args, strategy)
+    if args.correct_targets:
+        fix = (args.version, tuple(args.target), args.reason, args.production_sha)
+        url = record_unversioned.correct_targets(_hub(args), _hands(args), args.pr, args.production, strategy.section["release"], fix)
+        return result.result(TOOL, result.OK, f"値 {args.version} の対象の一覧を {', '.join(sorted(set(args.target)))} へ訂正した: {url}")
+    if given is not None:
+        return _unversioned_result(args, strategy, given)
+    formats = names_decide.formats_of(strategy.section["release"])
     made, written = record.write(_hub(args), args.pr, args.production, formats, args.production_sha)
     count = sum(1 for w in written if w.result == record.WRITTEN)
     outputs = {"product_version": made.version, "included": list(made.included)}
@@ -229,10 +331,15 @@ def cmd_verification_record(args: argparse.Namespace) -> dict:
     if not isinstance(payload, dict):
         raise record.RecordError(f"{args.record} はオブジェクトの JSON でない")
     try:
-        url = record.write_verification(_hub(args), args.pr, payload, lambda: _release_names(args))
-    except record.RecordElsewhere as exc:
+        url = record.write_verification(_hub(args), args.pr, payload, lambda: _release_names(args), _unversioned_store(args))
+    except (record.RecordElsewhere, record.RetestWithoutReason) as exc:
         return result.stopped(TOOL, "precondition", str(exc), items=exc.items)
     return result.result(TOOL, result.OK, f"#{args.pr} へリリース後テストの記録を書いた: {url}")
+
+
+def _unversioned_store(args: argparse.Namespace) -> bool:
+    """バージョン番号を持たないリポジトリ（`version_store.kind` が none）か。設定が読めなければ偽（今の確かめで書く）。"""
+    return branch_strategy.without_version_number(lambda: _strategy(args))
 
 
 def _release_names(args: argparse.Namespace) -> tuple[str | None, names_decide.NameFormats]:
@@ -246,6 +353,20 @@ def _release_names(args: argparse.Namespace) -> tuple[str | None, names_decide.N
 
 
 def cmd_records(args: argparse.Namespace) -> dict:
+    select = record_read.Selection(args.version, args.release, args.unit)
+    reads_release = select != record_read.Selection(None, None, None) or args.bodies or args.issues is not None
+    if args.pr_body_only:
+        if reads_release:
+            raise record.RecordError("--pr-body-only は --version・--release・--unit・--bodies・--issues と一緒に渡さない")
+        outputs = record_read.pr_body_only(_hub(args), args.pr)
+        return result.result(TOOL, result.OK, f"#{args.pr} の本文を読んだ（リリース記録は選ばない）", outputs=outputs)
+    if reads_release:
+        outputs = record_read.read_release(_hub(args), args.pr, select, args.bodies, args.issues)
+        version = outputs["release"]["version"] if outputs["release"] else "無し"
+        detail = (
+            f"#{args.pr} の今回のリリースのリリース記録（値 {version}）とリリース後テストの記録 {len(outputs['verifications'])} 件を読んだ"
+        )
+        return result.result(TOOL, result.OK, detail, outputs=outputs)
     got = record.read(_hub(args), args.pr)
     outputs = {"release": got.release.as_json() if got.release else None, "verifications": list(got.verifications)}
     version = got.release.version if got.release else "無し"
@@ -367,15 +488,39 @@ def _revision(p: argparse.ArgumentParser) -> None:
     p.add_argument("--since", help="前の push の先頭。祖先なら --revision までの first-parent のコミットを古い順にすべて公開する")
 
 
+def _unversioned(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--version", help="出したものを指す値（例 'main abc1234'。バージョンの保存先が none のリポジトリだけ）")
+    p.add_argument("--environment", action="append", default=[], help="反映を確かめた届け先（繰り返せる。--version と一緒に）")
+    p.add_argument(
+        "--target", action="append", default=[], help="今回の対象の届け先（push の時点に届け先の設定が無いときだけ。繰り返せる）"
+    )
+    p.add_argument(
+        "--observed", action="append", default=[], help="CD が未完了なら実環境の確認（設定の observe）で確かめる届け先（繰り返せる）"
+    )
+    p.add_argument("--correct-targets", action="store_true", help="値の対象の一覧を --target の集合へ訂正する（--reason が要る）")
+    p.add_argument("--reason", help="対象の一覧を訂正する理由（--correct-targets と一緒に）")
+
+
 def _verification(p: argparse.ArgumentParser) -> None:
     p.add_argument("--record", required=True, help="リリース後テストの記録の JSON（スキーマ release-verification）")
+
+
+def _records_selection(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--version", help="閉じるリリースの値（リリース記録の version）。渡した値の記録だけから代表とテストの記録を選ぶ")
+    p.add_argument("--release", type=int, help="本番の PR の番号。渡すとその本番の PR の記録だけから選ぶ")
+    p.add_argument("--unit", help="リリースの単位の名前（単位が 2 つ以上のリリース）。渡すとその単位の記録だけから選ぶ")
+    p.add_argument("--bodies", action="store_true", help="代表のリリース記録の含めた PR の本文と、書き手を信用するかも返す")
+    p.add_argument("--issues", type=int, nargs="+", help="テストする組（to_test）を作る課題の番号。渡すと含めた PR の本文を読まない")
+    p.add_argument(
+        "--pr-body-only", action="store_true", help="リリース記録を選ばず、--pr の PR の本文だけを返す（デプロイを飛ばした経路）"
+    )
 
 
 def _main_dir_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument("--main-dir", required=True)
 
 
-def _base(p: argparse.ArgumentParser) -> None:
+def _base_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument("--base", required=True)
 
 
@@ -387,7 +532,7 @@ def _before(p: argparse.ArgumentParser) -> None:
     p.add_argument("--before", required=True)
 
 
-def _branch(p: argparse.ArgumentParser) -> None:
+def _branch_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument("--branch", action="append", required=True)
 
 
@@ -401,14 +546,14 @@ ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.Argume
     cmd_approval_state: (_pr,),
     cmd_pull_checks: (_pr,),
     cmd_merge: (_pr, _budget),
-    cmd_record: (_pr, _production, _production_sha),
+    cmd_record: (_pr, _production, _production_sha, _unversioned),
     cmd_verification_record: (_pr, _verification),
-    cmd_records: (_pr,),
+    cmd_records: (_pr, _records_selection),
     cmd_publish: (_revision,),
-    cmd_sync_base: (_main_dir_arg, _base),
+    cmd_sync_base: (_main_dir_arg, _base_arg),
     cmd_config_snapshot: (_snapshot_out,),
     cmd_config_check: (_before,),
-    cmd_cleanup: (_branch,),
+    cmd_cleanup: (_branch_arg,),
 }
 
 # サブコマンドの名前 → ハンドラー。名前はハンドラーの名前（`cmd_<名前>` の `_` を `-` にしたもの）から作り、写さない

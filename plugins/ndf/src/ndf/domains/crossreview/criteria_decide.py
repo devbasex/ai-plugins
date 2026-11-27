@@ -8,6 +8,7 @@
   収束の妨げになる側に倒すのは、ジャーナルへ入れる処理を通らない行（引き継いだ行・前のバージョンの行）を読むときである
 - 重点（基準 3）は `.ndf/review.json` の `version: 1` の `focus` だけを読む。`version: 2`・`3` のプロファイルは
   読まず、形が違えば `ReviewDeclInvalid`（黙って無視しない）
+- レビューの単位の指示（`NDF_UNIT_FILE`）があれば、単位の範囲と例外を相手役と修正担当の両方へ渡す（`unit_block`。#4369）
 - 基準 5（プロジェクト MVV に反しないか）は、ベースブランチの MVV が承認済みのときだけ指示に載せる。MVV の本文と
   NDF の共通原則は、起動の始めに保存したスナップショットのパスで渡す（#4076）
 """
@@ -241,6 +242,15 @@ class Previous(NamedTuple):
 
     head: str
     diff: Path
+
+
+def unit_block(role: str, unit: str) -> list[str]:
+    """レビューの単位の指示のファイルの中身 `unit` と、役 `role`（`REVIEWER`・`FIXER`）の扱いの文（#4369 の決定 8）。
+    `unit` が空なら空。"""
+    if not unit:
+        return []
+    text = _table()["unit"]
+    return [text["heading"], unit.rstrip(), text[role]]
 
 
 def document_block(role: str, documents: bool, previous: Optional[Previous] = None) -> list[str]:

@@ -397,14 +397,14 @@ def test_an_unreadable_denied_candidate_is_left_out_and_other_drafts_continue(tm
     first, other = _worktree(tmp_path / "a"), _worktree(tmp_path / "b")
     candidate = la.new_candidate("/r", first).candidate
     _asked(first, candidate=candidate, label=la.DENY_LABEL)
-    read_regular = lc._read_regular
+    read_regular = lc._read_opened_regular
 
     def denied_read(path, strict=True):
         if path == candidate:
             raise PermissionError(13, "Permission denied", str(path))
         return read_regular(path, strict)
 
-    monkeypatch.setattr(lc, "_read_regular", denied_read)
+    monkeypatch.setattr(lc, "_read_opened_regular", denied_read)
     assert la.new_candidate("/r", other).cleanup_targets == [] and la.cleanup_targets("/r") == []
     assert candidate.parent.is_dir()
 

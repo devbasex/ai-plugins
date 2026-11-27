@@ -10,7 +10,7 @@
 | --- | --- |
 | `missing` | 設定が無い |
 | `broken` | 設定が読めない・スキーマに合わない |
-| `stale` | 解析の記録が無い・解析器のバージョンが古い・入力の指紋かブランチの構成が変わった・`--force` |
+| `stale` | 設定に旧い形のキーがある・解析の記録（`.ndf/analysis/project.json`）が無い・読めない・書き出しの途中のマーカーがある・記録が今の設定の書いた値の指紋に対応しない・解析器のバージョンが古い・入力の指紋かブランチの構成が変わった・`--force` |
 | `fresh` | それ以外 |
 """
 
@@ -24,10 +24,11 @@ from ndf import contracts
 from ndf.contracts import facts
 from ndf.adapters import git
 from ndf.core import branch_strategy as bs
+from ndf.domains.project import analysis_record
 from ndf.domains.records import files, jsonfile
 
 # 解析器のバージョン。測る項目・入力のパスの表を変えたら上げる（上がると check が古いと判定する。旧い project_lib と同じ値）
-ANALYZER = 3
+ANALYZER = 4
 SCHEMA = contracts.schema_path("ndf-settings/project")
 WORKFLOWS = ".github/workflows/*"
 # 根と 1 段下のファイル名で当てる表（依存の定義・テストの設定・コンテナ・デプロイ）。指示書は事実の表 instruction-files の根の名前
@@ -127,54 +128,79 @@ def _read(path: Path) -> Optional[dict[str, Any]]:
     return jsonfile.read_object(path) if path.is_file() else None
 
 
-def repo_dirs(root: Path) -> tuple[git.Git, Path]:
-    """作業場所の git とメインディレクトリ。git の外なら `CheckError`。"""
+class RepoDirs(NamedTuple):
+    """作業場所の git・メインディレクトリ・git の共通ディレクトリ（linked worktree からでもメインの `.git`）。"""
+
+    top: git.Git
+    main: Path
+    common: Path
+
+
+def repo_dirs(root: Path) -> RepoDirs:
+    """作業場所の git・メインディレクトリ・git の共通ディレクトリ。git の外なら `CheckError`。"""
     repo = git.Git(root)
     done = repo.attempt("rev-parse", "--show-toplevel")
     if done.returncode != 0:
         raise CheckError(f"{root} は git の worktree ではない: {done.stderr.strip()}")
     top = git.Git(Path(done.stdout.strip()))
     try:
-        main = top.common_dir().parent
+        common = top.common_dir()
     except git.GitError as exc:
         raise CheckError(str(exc)) from exc
-    return top, main
+    return RepoDirs(top, common.parent, common)
 
 
 def load(main: Path) -> Optional[dict[str, Any]]:
-    """設定（無ければ None）。読めない・スキーマに合わなければ `JsonFileError`。"""
+    """設定（無ければ None）。旧い形のキーを取り除いたコピーで形を確かめ、取り除く前の値を返す（旧い形を壊れているとしない）。
+    読めない・取り除いてもスキーマに合わなければ `JsonFileError`。"""
     decl = _read(files.path(main, "project"))
     if decl is not None:
-        errs = contracts.schema_errors(decl, SCHEMA)
+        errs = contracts.schema_errors(analysis_record.strip_legacy(decl)[0], SCHEMA)
         if errs:
             raise jsonfile.JsonFileError(f"{files.relpath('project')} が形に合わない: {'; '.join(errs[:5])}")
     return decl
 
 
-def _stale_reasons(repo: git.Git, analysis: dict[str, Any], decl: dict[str, Any]) -> list[str]:
+def _stale_reasons(repo: git.Git, record: dict[str, Any], decl: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
-    if analysis["analyzer"] < ANALYZER:
-        reasons.append(f"解析器のバージョンが古い（{analysis['analyzer']} < {ANALYZER}）")
-    reasons += [f"変わった入力: {p}" for p in diff(analysis["inputs"], inputs(repo))]
+    if record["analyzer"] < ANALYZER:
+        reasons.append(f"解析器のバージョンが古い（{record['analyzer']} < {ANALYZER}）")
+    reasons += [f"変わった入力: {p}" for p in diff(record["inputs"], inputs(repo))]
     now = branch_state(repo, declared_branches(decl))
-    if analysis["branches"] != now:
-        reasons.append(f"変わった入力: ブランチの構成（{analysis['branches']} → {now}）")
+    if record["branches"] != now:
+        reasons.append(f"変わった入力: ブランチの構成（{record['branches']} → {now}）")
     return reasons
+
+
+def _record_reason(main: Path, decl: dict[str, Any]) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """判定に使う解析の記録か、記録を待たずに古いとする理由（旧い形の設定・記録が無い・読めない・途中のマーカー・設定に対応しない）。"""
+    legacy = analysis_record.strip_legacy(decl)[1]
+    if legacy:
+        return None, f"旧い形の値が設定にある: {'・'.join(legacy)}"
+    record, why = analysis_record.load(main)
+    if record is None:
+        return None, why
+    if record.get("pending"):
+        return None, "前の書き出しが終わっていない"
+    if record["written_digest"] != analysis_record.written_digest(decl):
+        return None, "設定が解析の記録と対応しない"
+    return record, None
 
 
 def judge(root: Path, force: bool) -> Judged:
     """設定が新しい・無い・古い・壊れているのどれかを決める。判定できなければ `CheckError`。"""
-    repo, main = repo_dirs(root)
+    dirs = repo_dirs(root)
+    repo, main = dirs.top, dirs.main
     try:
         decl = load(main)
     except jsonfile.JsonFileError as exc:
         return Judged(BROKEN, [f"{exc}。直してから打ち直す"])
     if decl is None:
         return Judged(MISSING, ["設定が無い"])
-    analysis = decl["analysis"] if "analysis" in decl and isinstance(decl["analysis"], dict) else None
-    if analysis is None:
-        return Judged(STALE, ["解析の記録（analysis）が無い（手で書いた設定）"])
-    reasons = _stale_reasons(repo, analysis, decl)
+    record, why = _record_reason(main, decl)
+    if record is None:
+        return Judged(STALE, [str(why)])
+    reasons = _stale_reasons(repo, record, decl)
     if not reasons and force:
         reasons.append("変わった入力: 強制（--force）")
-    return Judged(STALE if reasons else FRESH, reasons, len(analysis["inputs"]))
+    return Judged(STALE if reasons else FRESH, reasons, len(record["inputs"]))

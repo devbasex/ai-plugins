@@ -17,7 +17,6 @@ Skill を回す `full` の起動は、入っている旧い NDF を `--settings`
 
 from __future__ import annotations
 
-import errno
 import json
 import os
 import subprocess
@@ -30,7 +29,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Protocol, Sequence, Union
 
 from ndf import identity, process_group
-from ndf.adapters import claude_precheck, cli_floor, launch_slot, transcript
+from ndf.adapters import claude_gate, claude_precheck, cli_floor, launch_slot, transcript
 from ndf.adapters.agents import claude_body, claude_denials, usage_limit
 from ndf.adapters.run_log import child_process_env, record_cost
 from ndf.contracts import facts, limits
@@ -374,7 +373,9 @@ def claude_launch(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[
     else:
         args = minimal_args(call.system, call.stream, call.session) + permission_args(call.permission, call.tools, call.readable)
     if call.json_schema is not None:
-        args += ["--json-schema", json.dumps(call.json_schema, ensure_ascii=False)]
+        # CLI（2.1.332 で実測）は最上位の `$schema` を解決できずに拒むので、渡すときだけ外す（#2912）
+        sent = {k: v for k, v in call.json_schema.items() if k != "$schema"}
+        args += ["--json-schema", json.dumps(sent, ensure_ascii=False)]
     if call.model:
         args += ["--model", call.model]
     if call.effort:
@@ -894,7 +895,7 @@ def _gated(run: AccountRun, cwd: Optional[Path], left: Left = None) -> "subproce
         for _ in range(2):
             opened.extend(os.pipe())
     except OSError as exc:
-        _close_fds(opened)
+        claude_gate.close_fds(opened)
         return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
     r, w, sr, sw = opened
     proc: Optional[subprocess.Popen] = None
@@ -904,7 +905,7 @@ def _gated(run: AccountRun, cwd: Optional[Path], left: Left = None) -> "subproce
         finally:
             os.close(r)
             os.close(sw)
-        why = _open_gate(run, proc, w, sr, left)
+        why = claude_gate.open_gate(run, proc, w, sr, left)
     except OSError as exc:
         if proc is None:
             return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
@@ -914,39 +915,12 @@ def _gated(run: AccountRun, cwd: Optional[Path], left: Left = None) -> "subproce
             _stop(proc)
         raise
     finally:
-        _close_fds((w, sr))
+        claude_gate.close_fds((w, sr))
     if why is None:
         return proc
     _stop(proc)
     failure = Failure.TIMEOUT if why == claude_precheck.EXPIRED else Failure.LAUNCH
     return ClaudeReply.failed("", f"claude を関所で起動できない: {why}", failure=failure)
-
-
-def _close_fds(fds: Sequence[int]) -> None:
-    for fd in fds:
-        try:
-            os.close(fd)
-        except OSError:  # noqa: S110 ファイル: 閉じ済みの関所の口は閉じ直さない
-            pass
-
-
-def _open_gate(run: AccountRun, proc: subprocess.Popen, w: int, sr: int, left: Left) -> Optional[str]:
-    """`attach` に通り起動の期限が残っていれば関所を開け、起動の知らせを読む。claude になれば None、なれなければ理由の符号。"""
-    why = (run.attach(proc.pid) if run.attach is not None else None) or claude_precheck.spent(left)
-    if why is not None:
-        return why
-    os.write(w, b"1")
-    got = process_group.read_status(sr, claude_precheck.time_left(left, limits.seconds("relay.gate-exec")))
-    if got is None:  # 起動の期限の残りで打ち切ったら、期限切れを理由にする
-        return claude_precheck.spent(left) or "gate_timeout"
-    return f"launch_failed errno {_errno_name(got)}" if got else None
-
-
-def _errno_name(got: bytes) -> str:
-    """関所が知らせた errno の数値を名前にする（`2` は `ENOENT`）。数値でなければ受けた文字列のまま。"""
-    text = got.decode(errors="replace").strip()
-    code = int(text) if text.isdigit() else None
-    return errno.errorcode[code] if code in errno.errorcode else text
 
 
 def _stop(proc: subprocess.Popen) -> None:

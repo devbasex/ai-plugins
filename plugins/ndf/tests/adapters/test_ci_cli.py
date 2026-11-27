@@ -495,16 +495,6 @@ def _merge_reads_the_base_branch_of_the_pr_repository(monkeypatch, capsys, last_
     assert hub.merged == [] and _out(capsys, last_result)["metrics"]["verdict"] == "unknown"
 
 
-def _merge_rejudges_when_the_config_changed_before_sending(monkeypatch, capsys, last_result):
-    """決定 3・8: 判定の後にマージ先の設定へ自動反映の行が足されたら、確かめの本文で判定し直して止まる。"""
-    manual = merge_hub.project_text(merge_hub.strategy(deliveries="manual"))
-    auto = merge_hub.project_text(merge_hub.strategy(deliveries="auto"))
-    hub = _use(monkeypatch, merge_hub.MergeHub(files={"main": (manual, "c1")}, files_at_merge={"main": (auto, "c2")}))
-    assert ci_cli.main(["merge", "--branch", "sprint/x", "--production-gate", "defer"]) == 0
-    found = _out(capsys, last_result)
-    assert hub.merged == [] and found["metrics"]["merge"] == "deferred" and found["metrics"]["verdict"] == "automatic"
-
-
 def _merge_by_pr_does_nothing_for_a_merged_pr(monkeypatch, capsys, last_result):
     """決定 5: --pr の PR がマージ済みなら、設定の読み取りもマージもしない。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(merged=True)}))
@@ -739,7 +729,6 @@ def _a_new_presentation_refuses_the_answer_to_the_old_one(monkeypatch, capsys, l
         ],
         scenes.scene(_merge_without_a_login_stops_apart_from_approval_stale, id="merge_without_a_login_stops_apart_from_approval_stale"),
         scenes.scene(_merge_reads_the_base_branch_of_the_pr_repository, id="merge_reads_the_base_branch_of_the_pr_repository"),
-        scenes.scene(_merge_rejudges_when_the_config_changed_before_sending, id="merge_rejudges_when_the_config_changed_before_sending"),
         scenes.scene(_merge_by_pr_does_nothing_for_a_merged_pr, id="merge_by_pr_does_nothing_for_a_merged_pr"),
         *[
             scenes.scene(

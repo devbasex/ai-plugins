@@ -150,22 +150,34 @@ def redlines(*texts: str) -> dict[str, str]:
     return out
 
 
-def patch_material(files: Sequence[Mapping[str, Any]]) -> str:
-    """PR の変えたファイルと差分（GitHub の files の行。`filename`・`status`・任意の `patch`）を材料の本文にする。"""
-    parts = []
-    for f in files:
-        lines = str(f["patch"]).splitlines() if f.get("patch") else []
-        cut = "\n（以下略）" if len(lines) > PATCH_LINES else ""
-        head = f"### {f['filename']}（{f['status']}）"
-        parts.append(f"{head}\n\n```diff\n" + "\n".join(lines[:PATCH_LINES]) + f"\n```{cut}" if lines else head)
-    return "\n\n".join(parts)
+def patch_material(files: Sequence[Mapping[str, Any]], limit: Optional[int] = PATCH_LINES) -> str:
+    """PR の変えたファイルと差分（GitHub の files の行。`filename`・`status`・任意の `patch`）を材料の本文にする。
+
+    差分は `limit` 行で切る。None なら切らない（判定の比較の実験版だけが渡す。#2912）。
+    """
+    return "\n\n".join(_file_material(f, limit) for f in files)
+
+
+def _patch_lines(f: Mapping[str, Any]) -> list[str]:
+    """ファイル `f` の差分の行（`patch` が無ければ空）。"""
+    return str(f["patch"]).splitlines() if f.get("patch") else []
+
+
+def _file_material(f: Mapping[str, Any], limit: Optional[int]) -> str:
+    """ファイル `f` 1 件分の材料（見出しと、差分があれば `limit` 行で切った差分）。"""
+    head = f"### {f['filename']}（{f['status']}）"
+    lines = _patch_lines(f)
+    if not lines:
+        return head
+    cut = "\n（以下略）" if limit is not None and len(lines) > limit else ""
+    return f"{head}\n\n```diff\n" + "\n".join(lines[:limit]) + f"\n```{cut}"
 
 
 def _cut(f: Mapping[str, Any]) -> bool:
     """ファイル `f` の差分の一部か全部が材料に載らないか。"""
     if not f.get("patch"):
         return f.get("changes") != 0
-    return len(str(f["patch"]).splitlines()) > PATCH_LINES
+    return len(_patch_lines(f)) > PATCH_LINES
 
 
 def incomplete_patches(files: Sequence[Mapping[str, Any]]) -> list[str]:

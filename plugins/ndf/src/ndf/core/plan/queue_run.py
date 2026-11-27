@@ -73,7 +73,7 @@ def _from_record(name: str, row: dict[str, Any]) -> queue_decide.Outcome:
 
 def _outcome(entry: Entry, out: dict[str, Any]) -> queue_decide.Outcome:
     cause = out["cause"] if isinstance(out.get("cause"), dict) else {}
-    prs = tuple(i["number"] for i in out["items"] if isinstance(i, dict) and i.get("kind") == "pr")
+    prs = tuple(result.pr_numbers(out))
     step = next((i.get("step") for i in out["items"] if isinstance(i, dict) and i.get("kind") == "plan"), None)
     return queue_decide.Outcome(
         entry.plan.name, out["status"], cause.get("kind"), str(out["summary"]), out.get("routes"), prs, entry.plan.release, step

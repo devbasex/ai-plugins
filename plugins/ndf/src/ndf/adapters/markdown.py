@@ -5,6 +5,7 @@ Markdown の解析は markdown-it-py、コードの字句は pygments だけが�
 - `block_kinds` は行ごとに、その行を含むブロックの種類（`BLOCK_KINDS`）を返す
 - `code_lines` はコードブロック（囲みとインデント）の中の行かどうかを返す。引用や箇条の中のコードも含む
 - `atx_headings` は文書の最上位の ATX の見出し（`## 題`）を返す。コードブロックと引用の中の `#` は見出しにしない
+- `gfm_tables` は文書の最上位の GFM の表を、見出しの欄と行ごとの欄の文で返す
 - `mask_comments` はコードの行のコメントを同じ幅の空白に置き換える
 """
 
@@ -40,6 +41,21 @@ class Heading(NamedTuple):
     line: int
     level: int
     title: str
+
+
+class TableRow(NamedTuple):
+    """表の本体の 1 行。`line` は 0 始まりの行の番号、`cells` は欄の文（インラインのままの Markdown）。"""
+
+    line: int
+    cells: tuple[str, ...]
+
+
+class Table(NamedTuple):
+    """GFM の表の 1 つ。`line` は見出しの行の番号（0 始まり）。"""
+
+    line: int
+    header: tuple[str, ...]
+    rows: tuple[TableRow, ...]
 
 
 @lru_cache(maxsize=1)
@@ -95,6 +111,36 @@ def atx_headings(text: str) -> list[Heading]:
             continue
         found.append(Heading(token.map[0], int(token.tag[1:]), tokens[i + 1].content))
     return found
+
+
+def gfm_tables(text: str) -> list[Table]:
+    """文書の最上位の表を、出てくる順に返す（コードブロック・引用・箇条の中の表は返さない）。
+
+    欄の文は markdown-it-py の `inline` の `content` で、インラインコードの `` ` `` を残す。欄が見出しより少ない行は
+    markdown-it-py が空の欄で埋める。
+    """
+    tokens = _tokens(text)
+    found: list[Table] = []
+    for i, token in enumerate(tokens):
+        if token.type != "table_open" or token.level != 0 or token.map is None:
+            continue
+        rows = _rows_to_close(tokens, i + 1)
+        found.append(Table(token.map[0], rows[0].cells if rows else (), tuple(rows[1:])))
+    return found
+
+
+def _rows_to_close(tokens: tuple[Token, ...], start: int) -> list[TableRow]:
+    """`start` から表の閉じまでの行（見出しの行を先頭に含む）。"""
+    rows: list[TableRow] = []
+    for i in range(start, len(tokens)):
+        token = tokens[i]
+        if token.type == "table_close":
+            break
+        if token.type == "tr_open":
+            rows.append(TableRow(token.map[0] if token.map is not None else -1, ()))
+        elif token.type == "inline" and rows:
+            rows[-1] = rows[-1]._replace(cells=(*rows[-1].cells, token.content))
+    return rows
 
 
 def mask_comments(lines: list[str], suffix: str) -> list[str]:

@@ -226,9 +226,12 @@ def _diff_table_rows(diffs) -> list[list[str]]:
     ]
 
 
-def _reading_lines(large: list[str]) -> list[str]:
+def _reading_lines(large: list[str], diffs: list) -> list[str]:
+    """読み取りの節の本文。前の行と比べられた版が無ければ、差が小さいとは書かず、算出できなかったと書く。"""
     if large:
         return [f"差の大きい版: {', '.join(large)}。手引き（README.md）に従い、版ごとに 1〜3 行をここへ書く。"]
+    if not any(ratio is not None for _, _, ratio in diffs):
+        return [f"前の版と比べられる版が無いため、版ごとの差は算出できなかった（PR を作った会話のある版: {len(diffs)} 件）。"]
     return [f"差の大きい版は無い（すべて ±{THRESHOLD:.0%} の内）。読み取りは要らない。"]
 
 
@@ -279,7 +282,7 @@ def render(snap: Snapshot) -> str:
         ["ndf の版", "層", "起動", "P", "k", "書き込み 5 分", "書き込み 1 時間", "書き直し", "うち 5 分超", "1 起動あたりの書き直し"],
         layer_rows(by_version["per_role"]),
     )
-    out += ["", "## 読み取り", "", *_reading_lines(large)]
+    out += ["", "## 読み取り", "", *_reading_lines(large, diffs)]
     body = tu.render_md(by_version, ["version"])
     body = "\n".join("#" + line if line.startswith("## ") else line for line in body.splitlines())
     out += ["", "## 集計の出力", "", body]

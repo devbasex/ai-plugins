@@ -135,7 +135,7 @@ def test_a_write_over_the_budget_is_not_sent_and_carries_the_wait(tmp_path: Path
     assert err.value.quota == github.REST and not err.value.secondary
 
 
-# _translated（GitHub.rest）
+# _as_github_error（GitHub.rest）
 
 
 def _rest_failure(response: httpx.Response) -> tuple[github.GitHubError, _Gate]:

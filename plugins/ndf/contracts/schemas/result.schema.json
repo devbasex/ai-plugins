@@ -56,6 +56,7 @@
   ],
   "$defs": {
     "text": {"type": "string", "pattern": "\\S"},
+    "version_number": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$", "description": "バージョン番号の形の唯一の保存先。バージョン番号を持つリポジトリの product_version を ndf worker run がこれで確かめる（#4513）"},
     "command": {
       "description": "そのまま打てるコマンド。argv は置き換えの要らない引数の配列で、先頭はエントリポイントの短い名前 ndf（パスとバージョンを含まない）。ask は打つ側が埋めるキーで、キーごとに --<キー> <値> を末尾へ足して打つ",
       "type": "object",
@@ -88,7 +89,7 @@
           "type": "array",
           "items": {"$ref": "#/$defs/gap"}
         },
-        "product_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"},
+        "product_version": {"$ref": "#/$defs/text", "description": "出したものを指す値。バージョン番号を持つリポジトリでのバージョン番号の形（$defs/version_number）は ndf worker run が確かめる（#4513）"},
         "head": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "release-steps: 承認の対象の PR の HEAD（present・approval-check・approval-state）。document-rebuild gate: 確かめた PR の head"},
         "questions": {"type": "string", "minLength": 1, "description": "document-rebuild gate: 記録した承認の質問（AskUserQuestion の questions）のファイルのパス（#4446）"},
         "material": {
@@ -124,9 +125,78 @@
         "admin": {"type": "boolean", "description": "release-steps merge: 管理者の迂回でマージしたか"},
         "admin_record": {"type": "string", "minLength": 1, "description": "release-steps merge: 迂回の記録のコメントの URL"},
         "included": {"type": "array", "items": {"type": "integer", "minimum": 1}, "description": "release-steps record: リリース記録に含めた PR"},
-        "release": {"type": ["object", "null"], "description": "release-steps records: 最新のリリース記録（無ければ null）"},
+        "release": {"type": ["object", "null"], "description": "release-steps records: 最新のリリース記録。--version・--release・--unit などを渡せば閉じる判定に使う代表の記録（無ければ null）。records close-check --records: 反映がそろったか（complete・missing・unconfirmed。#4580）"},
+        "recorded": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "release-steps record --version: この呼び出しが反映を確かめて記録を書いた届け先（#4580）"},
+        "kept": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "release-steps record --version: 同じ値・正の一覧の記録が含めた PR のすべてに既にあった届け先（#4580）"},
+        "failed": {"type": "object", "additionalProperties": {"type": "string"}, "description": "release-steps record --version: CD の結果が失敗して書かなかった届け先 → 理由（#4580）"},
+        "pending": {"type": "object", "additionalProperties": {"type": "string"}, "description": "release-steps record --version: 反映を確かめられず書かなかった届け先 → 理由。その届け先だけで打ち直す（#4580）"},
+        "complete": {"type": "boolean", "description": "release-steps record --version: 今回の対象の届け先のすべてに反映の記録がそろったか（#4580）"},
+        "missing": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "release-steps record --version: まだ反映の記録が無い対象の届け先（#4580）"},
         "verifications": {"type": "array", "items": {"type": "object"}, "description": "release-steps records: リリース後テストの記録（古い順）"},
-        "action": {"type": "string", "minLength": 1, "description": "release-steps sync-base: ベースのそろえ方"}
+        "action": {"type": "string", "minLength": 1, "description": "release-steps sync-base: ベースのそろえ方"},
+        "conditions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["release_verification", "retrospective_line"],
+          "properties": {
+            "release_verification": {"$ref": "#/$defs/close_condition"},
+            "retrospective_line": {"$ref": "#/$defs/close_condition"}
+          },
+          "description": "records close-check: 閉じる条件ごとの扱い。excluded は流れの設定（workflow.close）で外したか、reason はその理由、enforced は今回の呼び出しで求めるか（#4580）"
+        },
+        "verified": {"type": "boolean", "description": "records close-check: その課題の行がリリース後テストの記録にあり、すべて合格か（受け入れ条件のチェックを付けてよいか。#4580）"},
+        "command": {"type": "string", "minLength": 1, "description": "release-steps records: 出力を書いたサブコマンド（records）。--version などを渡した読み取りだけが持つ（#4580）"},
+        "selection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "release", "unit"],
+          "properties": {
+            "version": {"type": ["string", "null"]},
+            "release": {"type": ["integer", "null"], "minimum": 1},
+            "unit": {"type": ["string", "null"]}
+          },
+          "description": "release-steps records: 記録を絞った引数（渡さなかったものは null。#4580）"
+        },
+        "releases": {"type": "array", "items": {"type": "object"}, "description": "release-steps records: 代表と同じ値・リリースの単位の有効なリリース記録（古い順。同じ記録は 1 件。#4580）"},
+        "targets": {"type": ["array", "null"], "items": {"type": "string", "minLength": 1}, "description": "release-steps records: 今回の対象の届け先の正の一覧（バージョン番号を持つリポジトリの記録では null。#4580）"},
+        "bodies": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["number", "author", "trusted", "body"],
+            "properties": {
+              "number": {"type": "integer", "minimum": 1},
+              "author": {"type": "string"},
+              "trusted": {"type": "boolean"},
+              "body": {"type": "string"}
+            }
+          },
+          "description": "release-steps records: --bodies・--pr-body-only で読んだ PR の本文と、書き手が write 以上の権限を持つか（trusted。#4580）"
+        },
+        "to_test": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["environment", "issue"],
+            "properties": {
+              "environment": {"type": ["string", "null"]},
+              "issue": {"type": "integer", "minimum": 1}
+            }
+          },
+          "description": "release-steps records: テストを始めてよい届け先と課題の組（行が無い組と保留の組。--bodies か --issues のときだけ。届け先を持たない記録では environment が null。#4580）"
+        }
+      }
+    },
+    "close_condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["excluded", "reason", "enforced"],
+      "properties": {
+        "excluded": {"type": "boolean"},
+        "reason": {"type": ["string", "null"]},
+        "enforced": {"type": "boolean"}
       }
     },
     "item": {

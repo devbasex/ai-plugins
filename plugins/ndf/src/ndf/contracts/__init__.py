@@ -19,6 +19,8 @@ from typing import Any, TypeVar
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
+from referencing import Registry, Resource
+from referencing.jsonschema import DRAFT202012
 
 from ndf.identity import ROOT
 
@@ -251,7 +253,16 @@ def _shipped_validator(rel: str) -> Draft202012Validator:
         if "$defs" not in schema:
             raise ContractError(f"スキーマ {path} に $defs が無い（{rel} を引けない）")
         schema = {"$schema": schema.get("$schema"), "$defs": schema["$defs"], "$ref": f"#{pointer}"}
-    return Draft202012Validator(schema)
+    return Draft202012Validator(schema, registry=_SHIPPED_REGISTRY)
+
+
+def _retrieve(uri: str) -> Resource:
+    """ほかのファイルへの `$ref` の先（`contracts` の下の相対パス）を同梱のスキーマから読む。外へは取りに行かない（#4513）。"""
+    return Resource.from_contents(load_schema(uri), default_specification=DRAFT202012)
+
+
+# リリース後テストの記録の定義が文脈の定義（`workflow/context.schema.json#/$defs/distribution_id`）を参照するため（#4513）
+_SHIPPED_REGISTRY: Registry = Registry(retrieve=_retrieve)
 
 
 @cached_reader

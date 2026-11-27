@@ -50,7 +50,7 @@ def _issue_repo(tmp_path: Path, monkeypatch) -> Path:
     """設定 `PROJECT` を持つ作業場所。worker の既定を置き、課題の題と本文は偽の課題からコピーする。"""
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     return repo
 
@@ -264,7 +264,7 @@ def test_prepare_plan_for_a_ci_only_project_leaves_local_tests_off(tmp_path, mon
     project = {**PROJECT, "test": {"ci": {"only": True}, "suites": [{"name": "lint", "kind": "lint", "command": "ruff check"}]}}
     repo = _sprint_repo(tmp_path, project)
     sprint_fixture.with_worker(monkeypatch)
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"
     got = invoke.prepare_plan(_stage_run_of("impl", repo, [3473]), work, repo)
     held = invoke.read_values(work)
@@ -283,3 +283,83 @@ def test_prepare_plan_raises_when_the_values_cannot_be_written(tmp_path, monkeyp
     finally:
         work.chmod(0o700)
     assert invoke.read_values(work) is None
+
+
+# --- #4513: 記録済みの値を使うプランだけが、記録済みの値を values.json に残す -------------------------------------------------
+
+from dataclasses import replace  # noqa: E402
+
+from ndf.contracts import worker_kinds  # noqa: E402
+
+ROW = {"target": "本番", "kind": "manual", "trigger": "手で出す", "versioned": False}
+NOW = worker_kinds.Recorded("main abc1234", ROW, "none")
+
+
+def _release_template(monkeypatch, name: str = "release-x", work: str = "release", params=("worker",)) -> route.Template:
+    """作業 `work` を既定の worker で起動するステップ 1 つのテンプレートを `route.templates()` が返すようにする。"""
+    plan = {"name": name, "steps": [{"id": "a", "run": ["{{worker}}", work]}]}
+    t = route.Template(name, name, "試験のテンプレート", params, plan)
+    monkeypatch.setattr(route, "templates", lambda: {name: t})
+    return t
+
+
+def _released_run(name: str, reader) -> invoke.StageRun:
+    return replace(invoke.StageRun(invoke.PLAN, name, {"pr": 3}, (), "none", "release"), released=reader)
+
+
+def _fail():
+    raise AssertionError("記録済みの値を使わないプランでは呼ばない")
+
+
+@pytest.mark.parametrize("held", [None, worker_kinds.Recorded("main old", None, "none")])
+def test_plan_path_rewrites_the_recorded_value_left_by_an_earlier_attempt(tmp_path, monkeypatch, held):
+    # 前の試行・直す前の NDF（released_version の無い values.json）が残した値を使わず、今の記録で書き直す
+    _release_template(monkeypatch)
+    work = tmp_path / "w"
+    worker_kinds.write_values(work, "release-x", {}, {"pr": 3}, True, held)
+    invoke.plan_path(_released_run("release-x", lambda: NOW), work, tmp_path)
+    assert worker_kinds.released_of(invoke.read_values(work)) == NOW
+
+
+def test_plan_path_removes_the_recorded_value_when_there_is_none_now(tmp_path, monkeypatch):
+    _release_template(monkeypatch)
+    work = tmp_path / "w"
+    worker_kinds.write_values(work, "release-x", {}, {"pr": 3}, True, NOW)
+    invoke.plan_path(_released_run("release-x", lambda: None), work, tmp_path)
+    assert not set(worker_kinds.RELEASED_KEYS) & set(invoke.read_values(work))
+
+
+def test_plan_path_does_not_write_when_the_recorded_value_is_the_same(tmp_path, monkeypatch):
+    _release_template(monkeypatch)
+    work = tmp_path / "w"
+    worker_kinds.write_values(work, "release-x", {}, {"pr": 3}, True, NOW)
+    written = _counting(monkeypatch, "write_released")
+    invoke.plan_path(_released_run("release-x", lambda: NOW), work, tmp_path)
+    assert written == []
+
+
+def test_a_plan_without_the_release_work_never_reads_the_recorded_value(tmp_path, monkeypatch):
+    # 今のテンプレートに release が無ければ、values.json に released_version が残っていても書き直さず、履歴もたどらない
+    _release_template(monkeypatch, work="fix")
+    work = tmp_path / "w"
+    worker_kinds.write_values(work, "release-x", {}, {}, True, NOW)
+    written = _counting(monkeypatch, "write_released")
+    invoke.plan_path(_released_run("release-x", _fail), work, tmp_path)
+    assert written == []
+
+
+def test_plan_path_after_prepare_plan_uses_its_judgement_without_listing_the_works_again(tmp_path, monkeypatch):
+    # 工程の初回（plan_path が prepare_plan を呼ぶ回）は、prepare_plan の判定を引き継ぎ、判定し直さない（判定は prepare_plan の 1 回だけ）
+    _release_template(monkeypatch, params=("worker", "repo"))
+    monkeypatch.setattr(invoke, "template_values", lambda *a, **k: {"repo": str(tmp_path)})
+    judged = _counting(monkeypatch, "uses_released")
+    work = tmp_path / "w"
+    invoke.plan_path(_released_run("release-x", lambda: NOW), work, tmp_path)
+    assert len(judged) == 1 and worker_kinds.released_of(invoke.read_values(work)) == NOW
+
+
+def test_uses_released_reads_the_outputs_of_the_work_definitions():
+    assert invoke.uses_released(["fix", "release"]) is True
+    assert invoke.uses_released([]) is False and invoke.uses_released(["fix"]) is False
+    with pytest.raises(KeyError):
+        invoke.uses_released(["no-such-work"])

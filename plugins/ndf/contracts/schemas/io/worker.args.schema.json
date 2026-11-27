@@ -214,6 +214,9 @@
           "items": {
             "type": "string"
           }
+        },
+        "--require-version-number": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -223,6 +226,24 @@
         "--result-file",
         "--cwd",
         "--state-dir"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "write",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--path": {
+          "type": "string",
+          "description": "書き込むファイル。書き込み先は、`ndf worker run` の `--result-file` に指定したファイルの親ディレクトリの配下に限る。`--state-dir` の指定は、書き込める範囲に影響しない。相対パスは、このコマンドを実行する作業ディレクトリから解決する。本文は標準入力に渡し、ファイルの全文を置き換える。このコマンドは、書き込み先のディレクトリが `ndf worker run` の開いたディレクトリと同じかを確かめる。`ndf worker run` は、開いたディレクトリのデバイス番号・inode 番号とパスを環境変数 `NDF_WORKER_RESULT_DIR` で worker へ渡す。このコマンドは自分で開いた書き込み先のディレクトリの番号をその値と比べ、違えば書かずに止まる（precondition）。環境変数は呼び出し元が変えられるので、呼び出し元が `ndf worker run` の起動した worker かどうかは検証しない。信頼できる呼び出し元だけが使う"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--path"
       ]
     }
   ]

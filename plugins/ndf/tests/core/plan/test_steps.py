@@ -66,6 +66,22 @@ def test_outcome_of_a_stopped_step_keeps_its_gaps():
     assert steps.outcome_of(_step(), 0, "no json")["gaps"] is None
 
 
+@pytest.mark.parametrize(
+    ("metrics", "want"),
+    [
+        ({"missing_outputs": ["product_version"]}, ["product_version"]),
+        ({}, None),
+        ({"missing_outputs": "x"}, None),
+        ({"missing_outputs": [3]}, None),
+    ],
+)
+def test_outcome_of_a_gate_reads_the_missing_outputs(metrics, want):
+    # #4513: 判断を求めた結果が確かめを通さなかった必須の出力の名前。名前の並びでなければ None
+    line = json.dumps({"status": "gate", "summary": "s", "metrics": metrics})
+    assert steps.outcome_of(_step(), 10, line)["missing_outputs"] == want
+    assert steps.outcome_of(_step(), 0, "no json")["missing_outputs"] is None
+
+
 def test_steps_after_the_worktree_is_removed_run_in_the_repo_root(repo, tmp_path):
     """マージで作業場所が消えた・登録が外れた後のステップはリポジトリの根で打つ（#2969・#3022・#3186・#1886）。"""
     wt = tmp_path / "wt"

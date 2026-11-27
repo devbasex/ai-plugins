@@ -25,10 +25,11 @@
         "when": {
           "type": "array",
           "uniqueItems": true,
-          "items": {"anyOf": [{"$ref": "#/$defs/diff_word"}, {"enum": ["code_in_unreviewed_diff", "ci_declared", "prod_branch", "release_record", "retro_enabled", "design_pr"]}]},
+          "items": {"anyOf": [{"$ref": "#/$defs/diff_word"}, {"enum": ["code_in_unreviewed_diff", "ci_declared", "tests_verifiable", "prod_branch", "release_record", "retro_enabled", "design_pr"]}]},
           "description": "すべてが真のときだけ工程を流す条件。偽の語があれば、最初の偽の語を理由に無効にする。code_in_unreviewed_diff はつなぎ目（文脈の gathered から後のコミット）にコードのファイルがあるか（gathered が無ければ真）"
         },
         "per_issue": {"const": true, "description": "進め方 fast で、課題ごとの子の行にする工程"},
+        "per_unit": {"const": true, "description": "実装計画のレビューの単位ごとに流す工程"},
         "inputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が読むスプリントの文脈のキー"},
         "optional_inputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が文脈にあるときだけ読むスプリントの文脈のキー（無くても工程を流す）"},
         "outputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が書くスプリントの文脈のキー"}

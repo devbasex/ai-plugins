@@ -38,9 +38,9 @@
           "name": {"type": "string", "minLength": 1, "description": "文書のパスか、question（質問の文）・material（質問の直前に示す材料か承認資料）"},
           "reader": {"type": "string", "minLength": 1, "description": "読み手の立場"},
           "round": {"enum": [1, 2], "description": "その立場で何回目の読みか"},
-          "result": {"enum": ["passed", "remained"], "description": "合格か、2 回目にも残ったか"}
+          "result": {"enum": ["passed", "remained"], "description": "合格か、残ったか（2 回目にも残ったか、直さない文書と質問の文の 1 回目の不合格。#4621）"}
         },
-        "if": {"properties": {"result": {"const": "remained"}}, "required": ["result"]},
+        "if": {"properties": {"result": {"const": "remained"}, "name": {"const": "material"}}, "required": ["result", "name"]},
         "then": {"properties": {"round": {"const": 2}}}
       }
     }

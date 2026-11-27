@@ -118,7 +118,7 @@ def seat_row(spec: agents.Launch, status: agents.AgentStatus, chosen: claude_cho
     if spec.agent == participants.FIXER:
         # 出力は 1 つの JSON なので全体を読む（末尾だけでは、大きい回答の使用量と費用が欠ける）。回答と読み取りの拒否の
         # 判定もこの解析結果を使う
-        reply = claude_row(claude.LaunchLog(meta_of("review", chosen)), agents.whole_text(spec.paths.out), status)
+        reply = claude_row(claude.LaunchLog(meta_of("review", chosen)), agents.whole_output(spec.paths.out), status)
         chosen.seen(reply)
         return reply
     events = agents.codex_events(spec.paths.out)

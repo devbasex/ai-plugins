@@ -118,3 +118,22 @@ def test_the_gate_outcome_carries_the_judged_pr_and_a_stop_before_the_pr_has_non
     stopped = mm.stop_outcome("design", "pr_moved", ["x"], pull=(7, "h1"))
     assert (stopped["pr"], stopped["head"], stopped["stopped_by"]["kind"]) == (7, "h1", "pr_moved")
     assert "pr" not in mm.stop_outcome("design", "no_pr", ["x"]) and "head" not in mm.stop_outcome("design", "no_pr", ["x"])
+
+
+def _patch_file(lines: int) -> dict:
+    return {"filename": "a.md", "status": "modified", "patch": "\n".join(f"+{i}" for i in range(lines))}
+
+
+def test_patch_material_cuts_at_200_lines_by_default() -> None:
+    """#2912 Task 1: 本番の材料は、差分を 200 行で切り「（以下略）」を付ける（呼び出しを変えずに残す振る舞い）。"""
+    text = mm.patch_material([_patch_file(201)])
+    assert "+199" in text and "+200" not in text and text.endswith("（以下略）")
+    assert mm.patch_material([_patch_file(200)]).endswith("```")
+
+
+def test_patch_material_keeps_every_line_without_a_limit() -> None:
+    """#2912 Task 2: 実験版は `limit=None` で差分を切らずに材料にする。`limit=200` は既定と同じ。"""
+    whole = mm.patch_material([_patch_file(201)], limit=None)
+    assert "+200" in whole and "（以下略）" not in whole
+    assert mm.patch_material([_patch_file(201)], limit=200) == mm.patch_material([_patch_file(201)])
+    assert mm.patch_material([{"filename": "b.md", "status": "renamed"}], limit=None) == "### b.md（renamed）"

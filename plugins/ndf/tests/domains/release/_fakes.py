@@ -10,7 +10,7 @@ from typing import Any
 import git_sandbox
 from strategy_fixture import KINDS, section  # noqa: F401 代表の 5 種の設定（10 系のテストも同じファイルを読む）
 
-from ndf.adapters.github import Authored, GitHubError, MergeOutcome, Pull
+from ndf.adapters.github import Authored, GitHubError, MergeOutcome, PermissionUnknown, Pull
 from ndf.adapters.github_rules import RuleFacts, rule_facts_of
 from ndf.core.branch_strategy import Strategy
 
@@ -63,6 +63,25 @@ class FakeHub:
     # PR ごとのレビュー（REST の形）と、本番ブランチ宛てで開いている PR の (番号, head)
     reviews_of: dict[int, list[dict]] = field(default_factory=dict)
     open_at: list[tuple[int, str]] = field(default_factory=list)
+    # 権限を照会できない書き手（`trusts_strict` が 403 で止まる）と、`trusts_strict` で照会した書き手（照会の順）
+    unknown: set[str] = field(default_factory=set)
+    asked: list[str] = field(default_factory=list)
+    # Issue（か PR）の本文と書き手（`issue_body`）
+    bodies_of: dict[int, Authored] = field(default_factory=dict)
+    # 書いたコメントの数（ID に使う）・ブランチの更新（新しい順）・CD の実行の照会ごとの応答（尽きたら最後を繰り返す）と照会・消したコメント
+    made: int = 0
+    activities: list[dict] = field(default_factory=list)
+    cd_runs: list[list[dict]] = field(default_factory=list)
+    run_queries: list[tuple[str, str, str, float | None]] = field(default_factory=list)
+    deleted: list[int] = field(default_factory=list)
+    # 消すのに失敗するコメントの ID
+    undeletable: set[int] = field(default_factory=set)
+    # PR のコミットの数（無ければ 1）・コミットに紐づく PR の番号（例外なら照会の失敗、None なら GitHub に無いコミット）と、
+    # 照会したコミットと照会の回数
+    commit_counts: dict[int, int] = field(default_factory=dict)
+    linked: dict[str, Any] = field(default_factory=dict)
+    linked_asked: list[str] = field(default_factory=list)
+    linked_batches: int = 0
 
     def pull(self, number: int) -> Pull:
         return self.pulls[number]
@@ -75,6 +94,16 @@ class FakeHub:
 
     def permission(self, login: str) -> str:
         return "write" if login in self.trusted else "read"
+
+    def trusts_strict(self, authored: Authored) -> bool:
+        self.asked.append(authored.author)
+        if authored.author in self.unknown:
+            raise PermissionUnknown(authored.author, 403)
+        return authored.author in self.trusted
+
+    def issue_body(self, number: int) -> Authored:
+        self.requests.append(("GET", f"/repos/{self.repo}/issues/{number}", None))
+        return self.bodies_of[number]
 
     def reviews(self, number: int) -> list[dict]:
         return list(self.reviews_of.get(number, []))
@@ -93,13 +122,44 @@ class FakeHub:
         self.requests.append((method, path, payload))
         if method == "POST" and path.endswith("/comments"):
             number = int(path.split("/")[-2])
+            self.made += 1
             if not self.drop_comments:
-                self.comments_of.setdefault(number, []).append(Authored("octocat", "OWNER", payload["body"], author_id=1))
-            return {"html_url": f"https://example.invalid/{number}"}
+                made = Authored(
+                    "octocat", "OWNER", payload["body"], f"https://example.invalid/{number}#{self.made}", author_id=1, comment_id=self.made
+                )
+                self.comments_of.setdefault(number, []).append(made)
+            return {"html_url": f"https://example.invalid/{number}", "id": self.made}
         got = self.responses.get((method, path))
         if isinstance(got, Exception):
             raise got
         return got if got is not None else {}
+
+    def branch_activity(self, branch: str) -> Any:
+        self.requests.append(("GET", f"/repos/{self.repo}/activity", branch))
+        return iter(self.activities)
+
+    def workflow_runs(self, workflow: str, branch: str, commit: str, timeout: float | None = None) -> list[dict]:
+        self.run_queries.append((workflow, branch, commit, timeout))
+        return list(self.cd_runs.pop(0) if len(self.cd_runs) > 1 else self.cd_runs[0]) if self.cd_runs else []
+
+    def pull_commit_count(self, number: int) -> int:
+        return self.commit_counts.get(number, 1)
+
+    def commits_pulls(self, shas: Any) -> dict[str, list[int] | None]:
+        self.linked_batches += 1
+        self.linked_asked.extend(shas)
+        failed = next((self.linked[s] for s in shas if isinstance(self.linked.get(s), Exception)), None)
+        if failed is not None:
+            raise failed
+        got = {s: self.linked.get(s, []) for s in shas}
+        return {s: list(v) if v is not None else None for s, v in got.items()}
+
+    def delete_comment(self, comment_id: int) -> None:
+        if comment_id in self.undeletable:
+            raise GitHubError("消せない", 403)
+        self.deleted.append(comment_id)
+        for number, rows in self.comments_of.items():
+            self.comments_of[number] = [c for c in rows if c.comment_id != comment_id]
 
     def branch_rules(self, branch: str) -> list[dict]:
         got = self.rest("GET", f"/repos/{self.repo}/rules/branches/{branch}")

@@ -75,7 +75,7 @@ def _names(word: str, names: set[str]) -> bool:
     return head in names or any(len(n) == 2 and n[1] != "-" and word.startswith(n) for n in names)
 
 
-def _prefix(runtime: str, row: dict) -> list[str]:
+def _command_head(runtime: str, row: dict) -> list[str]:
     """コマンドの先頭に置く語（実行ファイルと、ランタイムの表の `delegate_prefix`）。"""
     return [agents.executable(runtime), *(row[PREFIX_COLUMN] if PREFIX_COLUMN in row else [])]
 
@@ -87,7 +87,7 @@ def build_command(runtime: str, command: Sequence[str], args: Sequence[str]) -> 
     `{args}` の位置を NDF が決めるのは、安全装置の引数が CLI のオプションとして読まれることを保証するため（別のオプションの値や
     プロンプトの位置に置かれると、安全装置が効かないまま起動する）。"""
     row = facts.row(RUNTIMES, runtime)
-    prefix = _prefix(runtime, row)
+    prefix = _command_head(runtime, row)
     words = list(command)
     at = len(prefix)
     head = [Path(words[0]).name, *words[1:at]] if words else []
@@ -187,7 +187,7 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="外部 AI への委譲を、安全装置の引数を入れて起動する")
     p.add_argument("--runtime", required=True, choices=_delegates(), help="起動するランタイム")
     p.add_argument("--use", choices=ls.USES, default="delegate", help="用途（読むだけの委譲は review）")
-    heads = "、".join(f"`{' '.join(_prefix(r, facts.row(RUNTIMES, r)))}`" for r in _delegates())
+    heads = "、".join(f"`{' '.join(_command_head(r, facts.row(RUNTIMES, r)))}`" for r in _delegates())
     p.add_argument("command", nargs=argparse.REMAINDER, help=f"`--` の後に起動コマンドを指定する。{PLACE} は {heads} の直後に置く")
     return p
 

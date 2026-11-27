@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf.contracts.worker_kinds import DELIVERY, PRODUCT_VERSION, STORE_KINDS, store_kind_of
+from ndf.core import production_delivery, production_merge
 from ndf.progress import lane, model, plan, run, store
 from ndf.progress.gate.answering import Answer, Observe, Post, answer, no_observe, no_post
 from ndf.progress.gate.asking import (
@@ -128,15 +130,40 @@ def _organizer_reply(st: store.Store, q: Question, env: Mapping[str, str]) -> Op
 
 
 # まとめたリリースの回答のキー → スプリントの文脈のキー（デプロイの出力）
-RELEASED_OUTPUTS = {"version": "product_version", "release": "release_pr"}
+RELEASED_OUTPUTS = {"version": PRODUCT_VERSION, "release": "release_pr"}
+# 回答に残せるバージョンの保存先の種類（`ndf lanes release` が記録し、外のオーガナイザーは回答のファイルに書ける）
+RELEASE_STORES = STORE_KINDS
 
 
-def _released(reply: Mapping[str, Any], value: str) -> dict[str, Any]:
-    """出した回答が持つバージョンとリリース記録の PR（文脈の `product_version`・`release_pr`）。後の工程（閉じ・リリース後テスト）は
-    文脈から読み、リリースの PR を探さない（#2783）。承認しない回答や、値の無いキーは書かない。"""
-    if value != run.APPROVED:
-        return {}
-    return {name: str(reply[key]) for key, name in RELEASED_OUTPUTS.items() if reply.get(key)}
+def _recorded_where(reply: Mapping[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    """オーガナイザーがリリース記録に残した、バージョンの保存先の種類と本番の届け先の 1 行（#4513）。
+
+    レーンが回答を受け取る時点の設定で決め直さない（その間に設定が変わると、リリースしていない届け先を記録する）。種類が 3 つの語の
+    どれでもなければ記録されていないもの（None）とする。届け先は、種類が `none` で、本番に届く行（`production_delivery` の
+    `production_delivery` と同じ `on_production_channel` の条件）で、文脈の `delivery` の形に合うとき（同じモジュールの
+    `fits_context`）だけ返す。外のオーガナイザーがベースブランチ向けの行を書いても、リリースの実績にしない。
+    """
+    kind = reply.get("store")
+    known = kind if kind in RELEASE_STORES else None
+    row = reply.get("delivery")
+    production = production_merge.on_production_channel(row)
+    if known != store_kind_of(False) or not production or not isinstance(row, Mapping) or not production_delivery.fits_context(row):
+        return known, None
+    return known, dict(row)
+
+
+def _released(reply: Mapping[str, Any], row: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """承認した回答が持つバージョンとリリース記録の PR（文脈の `product_version`・`release_pr`）。後の工程（閉じ・リリース後テスト）は
+    文脈から読み、リリースの PR を探さない（#2783）。値の無いキーは書かない。承認した回答にだけ呼ぶ（承認しない回答の出力は空で、
+    `take_reply` が決める）。
+
+    オーガナイザーがリリース記録に残した届け先 `row`（`_recorded_where` が返したもの）があれば `delivery` として足す（バージョン番号を
+    持たないリポジトリで、本番に届く行が 1 つに決まったときだけ残る）。デプロイの工程はこの記録だけから `delivery` を返し、worker を起動しない（#4513）。
+    """
+    out: dict[str, Any] = {name: str(reply[key]) for key, name in RELEASED_OUTPUTS.items() if reply.get(key)}
+    if row is not None:
+        out[DELIVERY] = row
+    return out
 
 
 def take_reply(
@@ -161,5 +188,20 @@ def take_reply(
     seen = json.loads(seen_file.read_text(encoding="utf-8")) if seen_file.exists() else None
     reason = str(reply["reason"]) if reply.get("reason") else f"オーガナイザーのリリースの回答（{reply['result']}）"
     target = Target.from_dict(seen)
-    given = Answer(q.id, value, reason, "organizer", f"organizer:{request_id(q)}", seen=target, outputs=_released(reply, value))
+    # 承認のときだけ、回答の種類と届け先を 1 回解釈し、出力と release_store の両方に使う
+    store_kind: Optional[str] = None
+    outputs: dict[str, Any] = {}
+    if value == run.APPROVED:
+        store_kind, row = _recorded_where(reply)
+        outputs = _released(reply, row)
+    given = Answer(
+        q.id,
+        value,
+        reason,
+        "organizer",
+        f"organizer:{request_id(q)}",
+        seen=target,
+        outputs=outputs,
+        release_store=store_kind,
+    )
     return answer(st, machine_id, given, observe, post)

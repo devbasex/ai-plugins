@@ -15,6 +15,7 @@
 - 読む側（`read`）は write 以上の権限を持つ書き手の記録だけを読む
 - 書く前に、書く token の書き手を読む側が信用するかを確かめ、信用されなければ 1 件も書かずに `RecordError` で止まる。
   信用されない書き手（Actions の `github.token` の github-actions[bot] など）の記録は読まれず、打ち直しで重なるため
+- 閉じる手順の読み取り（`read_release`。#4580）は `record_read` にある
 """
 
 from __future__ import annotations
@@ -25,7 +26,9 @@ from typing import Any, NamedTuple, NoReturn, Optional
 from ndf import contracts
 from ndf.adapters.github import GitHub, Pull, text_of
 from ndf.adapters.publish import Publisher
+from ndf.contracts import worker_kinds
 from ndf.domains.release import included_decide, names_decide, record_decide
+from ndf.domains.release.record_read import Selection, candidates
 
 # リリース後テストの記録のスキーマ
 VERIFICATION_SCHEMA = contracts.schema_path("release-verification")
@@ -56,6 +59,31 @@ class RecordElsewhere(RecordError):
         self.items = [{"kind": "pull", "number": n} for n in holders]
 
 
+class NotRecordPull(RecordElsewhere):
+    """渡した PR は値のリリース記録を持つが記録の PR（含めた PR のうち番号が最も小さい PR）でない（#4580）。"""
+
+    def __init__(self, number: int, version: str, holder: int) -> None:
+        RecordError.__init__(
+            self,
+            f"#{number} は値 {version} の記録の PR でない。リリース後テストの記録は記録の PR（含めた PR のうち番号が最も小さい "
+            f"#{holder}）へ書く。--pr に #{holder} を渡す",
+        )
+        self.holders = (holder,)
+        self.items = [{"kind": "pull", "number": holder}]
+
+
+class RetestWithoutReason(RecordError):
+    """今の判定が不合格の届け先と課題の組をテストし直す行に、理由（`retest_reason`）が無い（#4580）。`items` はその組。"""
+
+    def __init__(self, pairs: Sequence[tuple[str, int]]) -> None:
+        listed = ", ".join(f"{name} の #{issue}" for name, issue in pairs)
+        super().__init__(
+            f"今の判定が不合格の組（{listed}）をテストし直す行に retest_reason が無い。不合格の原因がリリースした変更でなく"
+            "検証の側にあり、それが直ったときだけ、理由を書いて打ち直す"
+        )
+        self.items = [{"kind": worker_kinds.DELIVERY, "name": name, "number": issue, "result": "failed"} for name, issue in pairs]
+
+
 class Written(NamedTuple):
     """PR 1 本の結果（`WRITTEN` か `KEPT`）。"""
 
@@ -73,7 +101,7 @@ class Records(NamedTuple):
     verifications: tuple[dict[str, Any], ...]
 
 
-def _release_commits(hub: GitHub, pull: Pull) -> list[dict]:
+def release_commits(hub: GitHub, pull: Pull) -> list[dict]:
     """リリースの PR `pull` のコミット。マージコミットが読めなければ `RecordError`。
 
     PR のコミットは `pulls/<番号>/commits`（250 件で切れる）ではなく、マージコミットの第 1 親（マージ前の本番
@@ -86,7 +114,7 @@ def _release_commits(hub: GitHub, pull: Pull) -> list[dict]:
     return hub.compare_commits(parents[0], pull.head_sha)
 
 
-def _included(commits: Sequence[dict], pull: Pull, production: str, formats: names_decide.NameFormats) -> list[int]:
+def included_pulls(commits: Sequence[dict], pull: Pull, production: str, formats: names_decide.NameFormats) -> list[int]:
     """リリースの PR `pull` に含めた PR の番号（小さい順）。
 
     組み立て（`assemble`）がリリースのコミットへ書いた「含む PR」の行（`record_decide.INCLUDED_TRAILER`）を、HEAD から
@@ -169,6 +197,16 @@ def _landed_by(hub: GitHub, number: int, production: str, production_sha: Option
     return landed if landed is not None and landed.number == number else None
 
 
+def landed_commit(hub: GitHub, number: int, production: str, production_sha: Optional[str]) -> tuple[Pull, str]:
+    """確かめ 1。本番ブランチ `production` へ入った PR `number`（マージ済みか、`production_sha` が正規の squash）と、反映したコミット
+    （GitHub が返さなければ空）。head の名前は問わない。入っていなければ `NotReleased`。"""
+    pull = hub.pull(number)
+    landed = pull if pull.merged else _landed_by(hub, number, production, production_sha)
+    if landed is None or pull.base_ref != production:
+        raise NotReleased(f"#{number} は {production} へマージした PR でない（{pull.base_ref}・merged={pull.merged}）")
+    return landed, landed.merge_sha
+
+
 def released(
     hub: GitHub,
     number: int,
@@ -182,15 +220,12 @@ def released(
     `strict` の squash は PR を閉じる（マージ済みにならない）ので、本番へ入れたコミット `production_sha` が正規の squash
     （`landed_squash`）なら、マージしたものとして読む。単位ごとのリリース記録は、組み立てがリリースのコミットへ書いた単位ごとの
     行（単位が 2 つ以上のとき）から、その単位のバージョンとその単位の範囲の PR で組む（行が無ければ空）。"""
-    pull = hub.pull(number)
-    landed = pull if pull.merged else _landed_by(hub, number, production, production_sha)
-    if landed is None or pull.base_ref != production:
-        raise NotReleased(f"#{number} は {production} へマージしたリリースの PR でない（{pull.base_ref}・merged={pull.merged}）")
+    landed, _commit = landed_commit(hub, number, production, production_sha)
     version = formats.branch_version(landed.head_ref)
     if version is None:
         raise NotReleased(f"#{number} の head {landed.head_ref} はリリースブランチ（{formats.branch}）でない")
-    commits = _release_commits(hub, landed)
-    made = record_decide.Record(version, number, tuple(_included(commits, landed, production, formats)))
+    commits = release_commits(hub, landed)
+    made = record_decide.Record(version, number, tuple(included_pulls(commits, landed, production, formats)))
     by_unit = tuple(record_decide.Record(v, number, nums, unit) for unit, v, nums in record_decide.approved_units(commits, landed.head_sha))
     return landed, made, by_unit
 
@@ -200,7 +235,7 @@ def _trusted_bodies(hub: GitHub, number: int) -> list[str]:
     return [c.body for c in hub.comments(number) if hub.trusts(c)]
 
 
-def _require_trusted_writer(hub: GitHub) -> None:
+def require_trusted_writer(hub: GitHub) -> None:
     """書く token の書き手が読む側（`GitHub.trusts`）に信用されなければ `RecordError`。"""
     if not hub.token_trusted():
         raise RecordError(
@@ -219,7 +254,7 @@ def write(
     """リリースの PR `number` に含めた PR の各々へ、まだ無ければリリース記録を書く。書く token が信用されなければ `RecordError`。
     `production_sha` は本番へ入れたコミット（`strict` の squash で閉じた PR を読むため。`released`）。"""
     _pull, made, by_unit = released(hub, number, production, formats, production_sha)
-    _require_trusted_writer(hub)
+    require_trusted_writer(hub)
     publisher = Publisher(hub)
     out = []
     for rec in by_unit or (made,):  # 単位ごとの行があれば、PR へはその単位のバージョンの記録を書く
@@ -305,19 +340,93 @@ def write_verification(
     number: int,
     payload: Mapping[str, Any],
     names: Callable[[], tuple[Optional[str], names_decide.NameFormats]] = _no_names,
+    unversioned: bool = False,
 ) -> str:
     """リリース後テストの記録を、同じバージョンのリリース記録を持つ PR `number` へ書く。書いたコメントの URL を返す。
 
     形がスキーマ `release-verification` に合わない・PR が同じバージョンの信用するリリース記録を持たない・書く token が
     信用されなければ `RecordError`。記録を持たないときだけ `names()` で本番ブランチと書式を読み、`number` がリリースの PR で
     含めた PR が記録を持てば、その番号を持つ `RecordElsewhere` で止まる（何も書かない。#3852）。
+    `unversioned`（バージョン番号を持たないリポジトリ）なら `_check_unversioned` の確かめを通してから書く（#4580）。
     """
     errors = contracts.schema_errors(dict(payload), VERIFICATION_SCHEMA)
     if errors:
         raise RecordError(f"リリース後テストの記録の形が違う: {'; '.join(errors)}")
-    version = payload["version"]
-    found = record_decide.records(_trusted_bodies(hub, number))
-    if record_decide.has_record_of(found, version):
-        _require_trusted_writer(hub)
-        return Publisher(hub).comment(number, record_decide.render_verification(payload)).url
-    _raise_without_record(hub, number, version, found, names)
+    if unversioned:
+        _check_unversioned(hub, number, payload)
+    else:
+        version = payload["version"]
+        found = record_decide.records(_trusted_bodies(hub, number))
+        if not record_decide.has_record_of(found, version):
+            _raise_without_record(hub, number, version, found, names)
+    require_trusted_writer(hub)
+    return Publisher(hub).comment(number, record_decide.render_verification(payload)).url
+
+
+def _check_unversioned(hub: GitHub, number: int, payload: Mapping[str, Any]) -> None:
+    """バージョン番号を持たないリポジトリのテストの記録を書く前の確かめ（#4580）。どれかに当たれば `RecordError` で何も書かない。
+
+    1. `environments` がある
+    2. 同じ値・同じ単位のリリース記録が PR `number` にある。値に単位が 2 つ以上あれば `unit` が要る
+    3. PR `number` が記録の PR（代表の `included` のうち最小）である。違えば `NotRecordPull`
+    4. `environments` のどれも、正の一覧にあり反映の記録がある（`record_decide.complete_of` で数える記録）
+    5. 今の判定（`record_decide.pair_verdict`）が不合格の組の行は `retest_reason` を持つ。無ければ `RetestWithoutReason`"""
+    version, unit, environments = payload["version"], payload.get("unit"), payload.get("environments")
+    _require_environments(environments)
+    got = candidates(hub, number, Selection(version, None, None))
+    _require_unit(got, version, unit)
+    targets = got.authoritative.get(version)
+    mine = [r for r in got.releases if r.unit == unit]
+    rep = _unversioned_representative(number, version, unit, mine, targets)
+    _require_record_pull(number, version, rep)
+    _require_reflected(environments, mine, rep, targets)
+    _require_retest_reasons(got, unit, environments, payload["issues"])
+
+
+def _require_environments(environments: Any) -> None:
+    """確かめ 1: `environments` がある。"""
+    if not environments:
+        raise RecordError("バージョンの保存先が none のリポジトリのリリース後テストの記録には environments（テストした届け先）が要る")
+
+
+def _require_unit(got: Any, version: str, unit: Optional[str]) -> None:
+    """確かめ 2 の前半: 値に単位があれば `unit` が要る。"""
+    units = sorted({r.unit for r in got.releases if r.unit is not None})
+    if unit is None and units:
+        raise RecordError(f"値 {version} のリリースは単位を持つ（{', '.join(units)}）。unit にテストした単位の名前を書く")
+
+
+def _unversioned_representative(number: int, version: str, unit: Optional[str], mine: list, targets: Any) -> Any:
+    """確かめ 2 の後半: 同じ値・同じ単位のリリース記録の代表を返す。無ければ `RecordError`。"""
+    rep = record_decide.representative(mine, targets)
+    if rep is None or rep.targets is None or targets is None:
+        where = f"値 {version}" + (f"・単位 {unit}" if unit is not None else "")
+        raise RecordError(f"#{number} は{where}のバージョンの無いリリース記録を持たない。先に release-steps record --version を打つ")
+    return rep
+
+
+def _require_record_pull(number: int, version: str, rep: Any) -> None:
+    """確かめ 3: PR `number` が記録の PR（代表の `included` のうち最小）である。"""
+    if number != min(rep.included):
+        raise NotRecordPull(number, version, min(rep.included))
+
+
+def _require_reflected(environments: Any, mine: list, rep: Any, targets: Any) -> None:
+    """確かめ 4: `environments` のどれも、正の一覧にあり反映の記録がある。"""
+    _complete, missing = record_decide.complete_of(mine, rep, targets)
+    outside = [e for e in environments if e not in targets or e in missing]
+    if outside:
+        raise RecordError(f"反映の記録が無い届け先がある（{', '.join(outside)}）。先にその届け先の release-steps record を打つ")
+
+
+def _require_retest_reasons(got: Any, unit: Optional[str], environments: Any, issues: Any) -> None:
+    """確かめ 5: 今の判定が不合格の組の行は `retest_reason` を持つ。"""
+    checks = [v for v in got.verifications if v.get("unit") == unit]
+    failed = [
+        (e, row["number"])
+        for e in environments
+        for row in issues
+        if not row.get("retest_reason") and record_decide.pair_verdict(checks, e, row["number"]) == "failed"
+    ]
+    if failed:
+        raise RetestWithoutReason(failed)

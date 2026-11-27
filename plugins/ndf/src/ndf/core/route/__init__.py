@@ -6,7 +6,8 @@
   （プランの形。`ndf.core.plan.model` が読む形に `{{名前}}` と `{"use": ...}` を足したもの）を持つ
 - `params.json`: 差し込みの名前ごとの意味・既定・並びか（`list`）。意味と既定はここだけが持つ
 - `parts/steps.json`: テンプレートどうしで共有するステップ。テンプレートのステップは `{"use": "<名前>", ...}` で 1 つを引き、
-  並べたキーでキーごとに上書きする。値が null のキーは消す
+  並べたキーでキーごとに上書きする。値が null のキーは消す。`pr_source` は PR の番号の取り方を持つキーで、
+  展開の時点で run へ差し込む。共有の `ci` は番号の取り方だけをこれで差し替える
 
 差し込み `{{名前}}` はここで埋める。実行のときの差し込み `{名前}`（`{state_dir}` など）はプランの実行（`runner`）が
 埋めるので触らない。並びの名前は引数の要素ごとに展開する: 要素がその名前だけなら並びを差し込み、ほかの字を含めば
@@ -53,7 +54,7 @@ import os
 import re
 import tempfile
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -75,6 +76,9 @@ PARAMS_FILE = "params.json"
 PARTS_FILE = "parts/steps.json"
 # テンプレートのステップで共有のステップを引くキー
 USE = "use"
+# 共有のステップの PR の番号の取り方のキー: `command`（番号を出力するコマンド。引数は `$1` で読む）を run の要素の中の
+# `@pr_command` へ、`arg` を run の要素 `@pr_arg` へ差し込む。展開の時点で組み込み、実行時にシェルを増やさない
+PR_SOURCE = "pr_source"
 # 手元でテストを打つステップの id。CI テストの設定（`test.ci.only`）があるリポジトリのプランからは外す（#3473）
 LOCAL_TEST_STEPS = ("test", "test-all", "ci-local")
 # ステップのルートのキー: 1 つのルートを持つキーと、場合 → ルートの対応表を持つキー（ステップを外すときに付け替える）
@@ -95,6 +99,30 @@ LAUNCH_SOURCES = {"acceptance": ("issue",)}
 # プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
 REVIEW_STATE = "{state_dir}/cross-review"
 REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
+# 実装のテンプレートの既定の `{{review}}`: ブランチから引き直さず、`pr` のステップが保存した番号（`$0` のファイル）を読む
+# （#4369。同じブランチから別のマージ先へ出した PR をレビューしない）
+PR_NUMBER_FILE = "{state_dir}/pr-number"
+REVIEW_WITH_SAVED_PR = 'n=$(cat "$0") && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
+# 単位の経路の `{{review}}`（#4369 の決定 6・14）: `$0` がリポジトリ、`$1` が保存先、残りがレビューの起動とステップが後ろに
+# 足す引数。保存した番号の PR を `--repo`・`--pr` で渡し、レビューが読んだ PR（`reviewed-pr`）が違うか無ければ、
+# `--reviewed-out` のファイルを消して止める。終了コード 0 と 6（incomplete）のほかは、起動の理由を残してそのまま返す
+UNIT_REVIEW = """d=$1; shift
+n=$(cat "$d/pr-number") && [ -n "$n" ] || exit 2
+rm -f "$d/reviewed-pr" || exit 2
+out= prev=
+for a in "$@"; do [ "$prev" != --reviewed-out ] || out=$a; prev=$a; done
+"$@" --repo "$0" --pr "$n" --stop-on-hold --reviewed-pr-out "$d/reviewed-pr"
+c=$?
+case $c in
+  0|6)
+    [ "$(cat "$d/reviewed-pr" 2>/dev/null)" != "$0#$n" ] || exit "$c"
+    [ -z "$out" ] || rm -f "$out"
+    printf '{"status": "stopped", "cause": {"kind": "precondition"}, "summary": "レビューが読んだ PR が %s#%s でないか、記録が無い"}\\n' "$0" "$n"
+    exit 3;;
+esac
+[ -z "$out" ] || rm -f "$out"
+exit "$c"
+"""
 # 設定（`workflow.launch.refactor`）が無いときの `{{refactor}}`（#3908 の決定 7）: ブランチ（`$0`）の PR の番号と、起点
 # （`$1`）からの差分のファイルを打つ時点に読み、`--pr`・`--scope` に足して `ndf refactor run` を打つ。どちらも前の工程
 # （実装の PR の作成・push）が終わるまで決まらない。PR が無い・差分を読めない・差分が空なら、打たずに停止の結果 JSON を出す。
@@ -203,14 +231,23 @@ def choose(purpose: str) -> Template:
 
 
 def _expand_step(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """`use` の共有のステップに上書きを重ね、値が null のキーを消す。"""
+    """`use` の共有のステップに上書きを重ね、値が null のキーを消し、`pr_source` を run へ差し込む。"""
     if USE not in raw:
         return dict(raw)
     shared = parts()
     if raw[USE] not in shared:
         raise RouteError(f"共有のステップに {raw[USE]} が無い")
     merged = {**copy.deepcopy(shared[raw[USE]]), **{k: v for k, v in raw.items() if k != USE}}
-    return {k: v for k, v in merged.items() if v is not None}
+    return _splice({k: v for k, v in merged.items() if v is not None})
+
+
+def _splice(step: dict[str, Any]) -> dict[str, Any]:
+    """`pr_source` を run の `@pr_command`・`@pr_arg` へ差し込み、キーを消す。無いステップはそのまま。"""
+    if PR_SOURCE not in step:
+        return step
+    source = step.pop(PR_SOURCE)
+    step["run"] = [source["arg"] if x == "@pr_arg" else x.replace("@pr_command", source["command"]) for x in step["run"]]
+    return step
 
 
 def expanded(t: Template, *, local_tests: bool = True) -> dict[str, Any]:
@@ -220,13 +257,17 @@ def expanded(t: Template, *, local_tests: bool = True) -> dict[str, Any]:
     return plan if local_tests else without_steps(plan, LOCAL_TEST_STEPS)
 
 
+def _plain_next(found: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+    """ステップの id → 通常の遷移先（そのステップの `next`、無ければ並びの次。末尾は終了）。"""
+    ids = [str(s["id"]) for s in found]
+    return {i: str(s["next"]) if "next" in s else after for i, s, after in zip(ids, found, [*ids[1:], END])}
+
+
 def _successors(found: Sequence[Mapping[str, Any]], drop: frozenset[str]) -> dict[str, str]:
     """外すステップの id → 代わりのルート（そのステップの `next`、無ければ並びの次。外すステップが続けば辿る）。"""
-    ids = [str(s["id"]) for s in found]
-    following = [*ids[1:], END]
-    plain = {i: str(s["next"]) if "next" in s else after for i, s, after in zip(ids, found, following)}
+    plain = _plain_next(found)
     out: dict[str, str] = {}
-    for i in (x for x in ids if x in drop):
+    for i in (x for x in plain if x in drop):
         target = plain[i]
         while target in drop and target != i:
             target = plain[target]
@@ -257,6 +298,45 @@ def without_steps(plan: Mapping[str, Any], ids: Iterable[str]) -> dict[str, Any]
     found = list(plan["steps"])
     moved = _successors(found, drop)
     return {**plan, "steps": [_retarget(s, moved) for s in found if s["id"] not in drop]}
+
+
+def may_read_pr_number(plan: Mapping[str, Any], start: str, writer: str) -> bool:
+    """`start` から流すと、番号を保存する `writer` のステップを通らずに、PR の番号を読むステップへ進みうるか。
+
+    番号を読むのは、引数が `PR_NUMBER_FILE` を持つステップと、レビュー（`{{review}}`）のステップである。プランに無い
+    `start` は、読みうるとみなす。
+    """
+    steps = {str(s["id"]): s for s in plan["steps"]}
+    if start not in steps:
+        return True
+    plain = _plain_next(plan["steps"])
+    seen, todo = {writer}, [start]
+    while todo:
+        sid = todo.pop()
+        if sid in seen or sid not in steps:
+            continue
+        seen.add(sid)
+        step = steps[sid]
+        text = json.dumps(step, ensure_ascii=False)
+        if PR_NUMBER_FILE in text or "{{review}}" in text:
+            return True
+        todo.append(plain[sid])
+        if "on_fail" in step:
+            todo.append(step["on_fail"])
+        for key in TARGET_TABLE_KEYS:
+            if key in step:
+                todo.extend(step[key].values())
+    return False
+
+
+def unit_template(t: Template, repo: str, drop: Collection[str]) -> Template:
+    """単位の経路のテンプレート（#4369）: `use` を開いて `drop` のステップを外し、残る `ci` の引数の末尾に `--repo` を足す。
+
+    外した後のプランが使わない差し込みと作業は、`needed`・`kinds_of` がこのテンプレートから求めるので要らなくなる。
+    """
+    plan = without_steps(expanded(t), drop)
+    found = [{**s, "run": [*s["run"], "--repo", repo]} if s["id"] == "ci" else s for s in plan["steps"]]
+    return replace(t, plan={**plan, "steps": found})
 
 
 def used_names(value: Any) -> set[str]:
@@ -350,18 +430,69 @@ def resolve(t: Template, given: Mapping[str, Value], *, local_tests: bool = True
     return values
 
 
+# `ndf refactor run` の手元の経路の引数と、手元の経路のプランが `refactor` の後に足す引数（#4566）
+LOCAL_TEST_FLAG = "--local-test"
+REFACTOR_TEMPLATE = "cross-refactoring"
+PUSHED_OUT = ["--pushed-out", "{state_dir}/pushed-sha"]
+
+
+class RouteUnsupported(RouteError):
+    """この変更では対応しない組み合わせ（手元の経路の `check` のプラン。#4472 で扱う）。停止理由は `precondition`。"""
+
+
+def _by_refactor_gate(name: str, plan: Mapping[str, Any], values: Mapping[str, Value]) -> dict[str, Any]:
+    """`{{refactor}}` の起動に `--local-test` があるかで、プランのステップを組み替える（#4566 の決定 6）。
+
+    `cross-refactoring` は、CI の経路なら `follow` を外し、手元の経路なら `push`・`fix-push` を外して `refactor` に
+    `--pushed-out` を足し `on_cause.incomplete` を消す（残すと `follow` を通らずに成功で終わる）。`check` の手元の経路は組まない。
+    """
+    launch = values["refactor"] if "refactor" in values else None
+    local = isinstance(launch, list) and LOCAL_TEST_FLAG in launch
+    if name == "check" and local:
+        raise RouteUnsupported(
+            "手元の経路（--local-test）の検査のプランは組まない。必須のチェックの無いリポジトリの検査のプランは #4472 で扱う"
+        )
+    if name != REFACTOR_TEMPLATE:
+        return dict(plan)
+    if not local:
+        return without_steps(plan, ["follow"])
+    return _local_refactor_plan(plan)
+
+
+def _local_refactor_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
+    """`cross-refactoring` の手元の経路のプラン。`push`・`fix-push` を外し、`refactor` のステップを組み替える。
+
+    `refactor` には `--pushed-out` を足し `on_cause.incomplete` を消す（残すと `follow` を通らずに成功で終わる）。
+    """
+    steps = []
+    for step in without_steps(plan, ["push", "fix-push"])["steps"]:
+        if step["id"] == "refactor":
+            causes_ = {k: v for k, v in step["on_cause"].items() if k != "incomplete"} if "on_cause" in step else {}
+            step = {k: v for k, v in step.items() if k != "on_cause"} | ({"on_cause": causes_} if causes_ else {})
+            step["run"] = [*step["run"], *PUSHED_OUT]
+        steps.append(step)
+    return {**plan, "steps": steps}
+
+
 def render(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> dict[str, Any]:
     """テンプレートを埋めたプラン（`model.parse` を通る形）。誤りは `RouteError`。
 
     `local_tests` が偽（CI テストの設定 `test.ci.only` があるリポジトリ）なら、手元でテストを打つステップ
-    （`LOCAL_TEST_STEPS`）を外して組む。テストは CI の結果で確かめる。
+    （`LOCAL_TEST_STEPS`）を外して組む。テストは CI の結果で確かめる。`{{refactor}}` の起動で経路を組み替える（`_by_refactor_gate`）。
     """
-    plan = _fill(expanded(t, local_tests=local_tests), resolve(t, given, local_tests=local_tests))
+    return rendered(t, given, local_tests=local_tests)[0]
+
+
+def rendered(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> tuple[dict[str, Any], list[str]]:
+    """`render` と同じプランと、埋める前の形（`_by_refactor_gate` で組み替えたもの）から取った作業の名前（現れた順。#4513）。"""
+    values = resolve(t, given, local_tests=local_tests)
+    shape = _by_refactor_gate(t.name, expanded(t, local_tests=local_tests), values)
+    plan = _fill(shape, values)
     try:
         model.parse(plan)
     except model.PlanError as exc:
         raise RouteError(f"テンプレート {t.name} から組んだプランが誤り: {exc}") from None
-    return plan
+    return plan, list(dict.fromkeys(work_names(shape)))
 
 
 # テンプレートの中で、作業の名前を後ろに置く worker の起動の差し込み
@@ -526,7 +657,7 @@ def repeated(history: Sequence[str], key: str, same_cause: int) -> bool:
 
 def repo_root(cwd: Path) -> str:
     """打った場所の git のworktreeの根（サブモジュールならそのworktree。共通の git ディレクトリから求めない）。"""
-    return git.Git(cwd).run("rev-parse", "--show-toplevel").strip()
+    return str(git.Git(cwd).toplevel())
 
 
 def default_base(repo: Path) -> str:
@@ -580,20 +711,37 @@ def _remote_of_repo(repo: Path) -> str:
 
 
 def review_launch(template_name: str, branch: str, base: str) -> list[str]:
-    """設定が無いときの `{{review}}` の値（`REVIEW_WITH_PR`）。PR の番号は打つ時点にブランチから読んで `--pr` に足す。"""
+    """設定が無いときの `{{review}}` の値。PR の番号は打つ時点に読んで `--pr` に足す。
+
+    実装のテンプレートは `pr` のステップが保存した番号（`REVIEW_WITH_SAVED_PR`）、ほかはブランチの PR（`REVIEW_WITH_PR`）。
+    """
+    if template_name == "impl":
+        script, arg0 = REVIEW_WITH_SAVED_PR, PR_NUMBER_FILE
+    else:
+        script, arg0 = REVIEW_WITH_PR, branch
+    return ["sh", "-c", script, arg0, *review_command(template_name, base)]
+
+
+def review_command(template_name: str, base: str) -> list[str]:
+    """設定が無いときのレビューの起動そのもの（`--pr` を持たない `ndf cross-review run`）。設計のテンプレートは purpose design。"""
     purpose = "design" if template_name == "design" else "code"
     entry = identity.FIXED_WORDS["entrypoint"]
-    review = [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
-    return ["sh", "-c", REVIEW_WITH_PR, branch, *review]
+    return [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
 
 
-def refactor_launch(branch: str, base_ref: str, required: Sequence[str]) -> list[str]:
+def unit_review_launch(repo: str, command: Sequence[str]) -> list[str]:
+    """単位の経路の `{{review}}`: レビューの起動 `command`（`--pr` を持たない）を、読んだ PR を確かめる `UNIT_REVIEW` で打つ。"""
+    return ["sh", "-c", UNIT_REVIEW, repo, "{state_dir}", *command]
+
+
+def refactor_launch(branch: str, base_ref: str, gate: Sequence[str]) -> list[str]:
     """設定が無いときの `{{refactor}}` の値（`REFACTOR_WITH_PR`）。PR の番号と触るファイルは打つ時点に読んで足す。
 
     位置引数は `$0` がブランチ、`$1` が起点で、本文の先頭の `shift` の後の `"$@"` が `ndf refactor run` の argv になる。
+    `gate` は最終ゲートの確かめ先の引数（`--required <名前>...` か `--local-test`。#4566）。
     """
     entry = identity.FIXED_WORDS["entrypoint"]
-    run = [entry, "refactor", "run", "--branch", branch, "--base", base_ref, "--required", *required]
+    run = [entry, "refactor", "run", "--branch", branch, "--base", base_ref, *gate]
     return ["bash", "-c", REFACTOR_WITH_PR, branch, base_ref, *run]
 
 

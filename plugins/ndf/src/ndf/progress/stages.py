@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ndf import contracts
-from ndf.contracts import internal
+from ndf.contracts import internal, result
 from ndf.progress import model
 
 
@@ -54,6 +54,8 @@ class StageDef:
     optional_inputs: tuple[str, ...] = ()
     input_ref: Optional[str] = None
     output_ref: Optional[str] = None
+    # 実装計画のレビューの単位ごとに流す工程（#4369）
+    per_unit: bool = False
 
     @property
     def gates(self) -> tuple[str, ...]:
@@ -357,6 +359,46 @@ def keep_declared(declared: Iterable[str], outputs: Mapping[str, Any]) -> tuple[
     names = set(declared)
     kept = {k: v for k, v in outputs.items() if k in names}
     return kept, sorted(set(outputs) - set(kept))
+
+
+# 結果の items の PR で補う工程の出力のキー。プラン design は設計 PR を items にだけ載せ、outputs に design_pr を
+# 書かない（共通のステップ pr は番号を items に返す）。補わないと設計承認ゲートの質問が PR を持たず（#4495）、
+# 工程「設計」が「文脈のキー design_pr が無い」で失敗する（#4455）
+DESIGN_PR = "design_pr"
+ITEM_PR_OUTPUTS = (DESIGN_PR,)
+
+
+def step_outputs(stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """工程 `stage` の済んだステップ（`done`: ステップの id → 結果）の outputs を、定義の順に重ねる。
+
+    工程が `ITEM_PR_OUTPUTS` のキーを出力に持ち、どのステップの outputs にも無ければ、種類が work（工程の成果物を作る作業。レビュー・記録・マージは除く）の
+    ステップの items の PR（番号が 1 つに決まるときだけ）で補う。outputs に明示した値は、どのステップのものでも補った値より
+    優先する。記録済みの結果（11.0.43 までに始めたステートマシン）にも効くよう、読む側で補う。"""
+    explicit, filled = _split_outputs(stage, done)
+    return {**filled, **explicit}
+
+
+def item_only_outputs(stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """`step_outputs` のうち、どのステップの outputs にも無く items の PR から補った値だけ。"""
+    explicit, filled = _split_outputs(stage, done)
+    return {k: v for k, v in filled.items() if k not in explicit}
+
+
+def _split_outputs(stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """済んだステップの outputs に明示した値と、items の PR から補える値の組。"""
+    explicit: dict[str, Any] = {}
+    filled: dict[str, Any] = {}
+    keys = set(stage.outputs) & set(ITEM_PR_OUTPUTS)
+    for st in stage.steps:
+        if st.id not in done:
+            continue
+        report = done[st.id]
+        if isinstance(report.get("outputs"), dict):
+            explicit.update(report["outputs"])
+        prs = set(result.pr_numbers(report)) if st.kind == "work" and keys else set()
+        if len(prs) == 1:
+            filled.update(dict.fromkeys(keys, next(iter(prs))))
+    return explicit, filled
 
 
 def outputs_draft(stage: StageDef, rev: int, outputs: Mapping[str, Any], actor: str) -> tuple[Optional[model.EventDraft], list[str]]:

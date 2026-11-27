@@ -1,0 +1,20 @@
+{
+  "template": "document-review",
+  "purpose": "document_review",
+  "summary": "文書のレビュー: レビューの起動（終わり切らなくても incomplete で進む）→ 設計の検査（番号の無い「人へ残す判断」の行。落ちれば同じ原因を数えて worker が直し、直したバージョンをレビューし直してから検査へ戻る。直したバージョンのレビューが完了しなければ止まる）→ push。push が拒まれたら worker が直して検査からやり直す",
+  "params": ["repo", "worktree", "branch", "remote", "base", "review", "worker"],
+  "plan": {
+    "name": "document-review-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"id": "review", "run": ["{{review}}"], "on_cause": {"incomplete": "design-check"}},
+      {"use": "design-check"},
+      {"use": "design-check-repeat"},
+      {"use": "design-check-fix", "next": "review-fixed"},
+      {"id": "review-fixed", "run": ["{{review}}"], "next": "design-check"},
+      {"use": "push", "on_fail": "fix-push", "next": "end"},
+      {"use": "fix-push", "next": "design-check"}
+    ]
+  }
+}

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from dataclasses import dataclass, field, replace
@@ -18,6 +17,7 @@ from ndf.contracts import facts, limits
 from ndf.core.converge import participants
 from ndf.domains.crossreview import criteria_decide, scope_decide
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.records import mvv
 
 # ラウンドの上限の既定の方針（contracts/limits/）
 MAX_ROUNDS = "cross-review.max-rounds"
@@ -37,7 +37,9 @@ class RunConfig:
     `base_commit` は起動の始めに `base` が指していたコミット（#4090。MVV を読むコミットとは違うことがある）。差分と
     前回の結果を再利用できるかはこれで決め、
     名前の `base` は取得と表示にだけ使う。`reviewers` は起動の前に決めた席（`participants.review_seats`。書き換えない）、
-    `may_fill` は席を埋めてよいか（名指しが 1 者なら偽）、`prefilled` は `allowed` のために起動の前に埋めた席（#3955）。"""
+    `may_fill` は席を埋めてよいか（名指しが 1 者なら偽）、`prefilled` は `allowed` のために起動の前に埋めた席（#3955）。
+    `unit` はレビューの単位の指示の中身（単位の経路でなければ空。#4369）。`check_pr` は読んだ PR の確認を呼び手が求めるか
+    （`--reviewed-pr-out`。真なら同じ PR を読んだラウンドだけを差分の起点と収束の再利用に使う。#4369）。"""
 
     worktree: Path
     branch: str
@@ -55,6 +57,8 @@ class RunConfig:
     base_commit: Optional[str] = None
     may_fill: bool = True
     prefilled: tuple[scope_decide.Filled, ...] = ()
+    unit: str = ""
+    check_pr: bool = False
 
 
 def settings_path(root: Path, file_id: str) -> Path:
@@ -114,12 +118,6 @@ FOCUS_DIFFERS = (
 )
 
 
-def blob_id(raw: bytes, width: int) -> str:
-    """`raw` を Git の blob にしたときの ID（`width` 桁。64 桁なら SHA-256 のリポジトリ）。"""
-    algo = hashlib.sha256 if width == 64 else hashlib.sha1
-    return algo(b"blob %d\0" % len(raw) + raw).hexdigest()
-
-
 def proposed_differs(g: git.Git, head: str, raw: Optional[bytes]) -> bool:
     """PR の head（`head`。未送信のコミットを載せ直す前に取得した SHA。載せ直した後の HEAD は手元の変更が PR の設定を
     隠す。PR 3944 の r5-4）のツリーの `.ndf/review.json` が実行者の設定（`raw`）と違うか。作業場所のファイルを
@@ -131,7 +129,7 @@ def proposed_differs(g: git.Git, head: str, raw: Optional[bytes]) -> bool:
     mode, kind, oid = entry.split("\t", 1)[0].split()
     if raw is None or kind != "blob" or mode not in git.REGULAR_MODES:
         return True
-    return oid != blob_id(raw, len(oid))
+    return oid != mvv.blob_id(raw, len(oid))
 
 
 def outside_checkout(cfg: RunConfig) -> RunConfig:

@@ -284,6 +284,9 @@ def test_a_lane_reads_the_answer_of_its_closed_request_from_status(opened):
         (["request-1"], "failed", None, None),
         (["request-1"], "released", None, None),
         (["request-9"], "rejected", None, None),
+        # リリースの識別子は 1 行（#4513。文脈の product_version の形）
+        (["request-1"], "released", "main\nabc1234", "https://github.com/o/r/pull/900"),
+        (["request-1"], "released", "  ", "https://github.com/o/r/pull/900"),
     ],
 )
 def test_a_batched_release_refuses_a_bad_answer(opened, keys, outcome, version, release):
@@ -292,6 +295,17 @@ def test_a_batched_release_refuses_a_bad_answer(opened, keys, outcome, version, 
         plan.open_request(conn, pid, {"lane": "a", "kind": "release"}, "リリースしたい", "workflow")
     with store.transaction(opened) as conn, pytest.raises(model.Refused):
         plan.record_release(conn, pid, keys, plan.ReleaseAnswer(outcome, "理由", version, release))
+
+
+def test_a_batched_release_keeps_a_distribution_id_that_is_not_a_version_number(opened):
+    # バージョン番号を持たないリポジトリのまとめたリリース（#4513 の受け入れ条件 1 の前提）
+    pid = _two(opened)
+    with store.transaction(opened) as conn:
+        ra = plan.open_request(conn, pid, {"lane": "a", "kind": "release"}, "リリースしたい", "workflow")
+        plan.record_release(conn, pid, [ra], plan.ReleaseAnswer(plan.RELEASED, "出した", "main abc1234", "https://github.com/o/r/pull/900"))
+    with store.transaction(opened) as conn:
+        (closed,) = [r for r in plan.closed_requests(plan.lane.read_plan(conn, pid)[0]) if r["release"]]
+    assert closed["release"]["version"] == "main abc1234"
 
 
 def test_status_is_built_from_the_two_tables(opened):

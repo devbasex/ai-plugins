@@ -468,6 +468,39 @@
         "--production-sha": {
           "type": "string",
           "description": "本番へ入れたコミット（strict の squash で閉じた PR の記録に要る）"
+        },
+        "--version": {
+          "type": "string",
+          "description": "出したものを指す値（例 'main abc1234'。バージョンの保存先が none のリポジトリだけ）"
+        },
+        "--environment": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "反映を確かめた届け先（繰り返せる。--version と一緒に）"
+        },
+        "--target": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "今回の対象の届け先（push の時点に届け先の設定が無いときだけ。繰り返せる）"
+        },
+        "--observed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "CD が未完了なら実環境の確認（設定の observe）で確かめる届け先（繰り返せる）"
+        },
+        "--correct-targets": {
+          "type": "boolean",
+          "description": "値の対象の一覧を --target の集合へ訂正する（--reason が要る）"
+        },
+        "--reason": {
+          "type": "string",
+          "description": "対象の一覧を訂正する理由（--correct-targets と一緒に）"
         }
       },
       "required": [
@@ -495,6 +528,33 @@
         },
         "--pr": {
           "type": "integer"
+        },
+        "--version": {
+          "type": "string",
+          "description": "閉じるリリースの値（リリース記録の version）。渡した値の記録だけから代表とテストの記録を選ぶ"
+        },
+        "--release": {
+          "type": "integer",
+          "description": "本番の PR の番号。渡すとその本番の PR の記録だけから選ぶ"
+        },
+        "--unit": {
+          "type": "string",
+          "description": "リリースの単位の名前（単位が 2 つ以上のリリース）。渡すとその単位の記録だけから選ぶ"
+        },
+        "--bodies": {
+          "type": "boolean",
+          "description": "代表のリリース記録の含めた PR の本文と、書き手を信用するかも返す"
+        },
+        "--issues": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "テストする組（to_test）を作る課題の番号。渡すと含めた PR の本文を読まない"
+        },
+        "--pr-body-only": {
+          "type": "boolean",
+          "description": "リリース記録を選ばず、--pr の PR の本文だけを返す（デプロイを飛ばした経路）"
         }
       },
       "required": [

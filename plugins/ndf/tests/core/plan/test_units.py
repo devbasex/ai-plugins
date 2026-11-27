@@ -126,7 +126,7 @@ def _env(state_dir: Path, step: model.Step, retry=None, **values) -> dict:
 
 
 def _assigned(state_dir: Path, run: str = "run-1", **assigns) -> None:
-    records.write_units(state_dir, {"run": run, "assigns": assigns})
+    records.write_assigns(state_dir, {"run": run, "assigns": assigns})
 
 
 @pytest.mark.parametrize(
@@ -205,7 +205,7 @@ def test_the_assignments_of_the_run_are_kept_and_the_last_wins(tmp_path, outcome
     _after(tmp_path, _step("design", "design"), assign="d1")
     _after(tmp_path, _step("work", "impl"), assign="i1")
     _after(tmp_path, _step("work", "impl"), assign="i2")
-    assert records.read_units(tmp_path)["assigns"] == {"design": "d1", "impl": "i2"}
+    assert records.read_assigns(tmp_path)["assigns"] == {"design": "d1", "impl": "i2"}
     assert outcomes == []
 
 
@@ -244,9 +244,9 @@ def test_a_stopped_fix_is_zero_and_only_its_first_run_counts(tmp_path, outcomes)
 
 def test_a_recovered_fix_leaves_one_pending_entry(tmp_path, outcomes):
     _after(tmp_path, _step("fix", "fix"), assign="f1")
-    first = records.read_units(tmp_path)
+    first = records.read_assigns(tmp_path)
     _after(tmp_path, _step("fix", "fix"), assign="f1")
-    assert records.read_units(tmp_path) == first
+    assert records.read_assigns(tmp_path) == first
     _after(tmp_path, _verify_step())
     assert outcomes == [("f1", 1.0)]
 
@@ -258,7 +258,7 @@ def test_preparing_the_worktree_is_judged_by_itself(tmp_path, outcomes):
 
 
 def test_a_pending_fix_of_another_run_is_not_judged(tmp_path, outcomes):
-    records.write_units(tmp_path, {"run": "run-0", "pending": [{"step": "fix", "assign_id": "old", "work": "fix"}]})
+    records.write_assigns(tmp_path, {"run": "run-0", "pending": [{"step": "fix", "assign_id": "old", "work": "fix"}]})
     _after(tmp_path, _verify_step())
     assert outcomes == []
 
@@ -271,9 +271,9 @@ def test_a_record_that_cannot_be_written_only_warns(tmp_path, outcomes, caplog):
 
 
 def test_a_broken_units_file_reads_as_empty(tmp_path, caplog):
-    (tmp_path / records.UNITS_FILE).write_text("{", encoding="utf-8")
-    assert records.read_units(tmp_path) == {}
-    assert records.UNITS_FILE in caplog.text
+    (tmp_path / records.ASSIGNS_FILE).write_text("{", encoding="utf-8")
+    assert records.read_assigns(tmp_path) == {}
+    assert records.ASSIGNS_FILE in caplog.text
 
 
 # --- 結果の metrics ---------------------------------------------------------------------

@@ -24,9 +24,11 @@ FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 SHORT_SHA = re.compile(r"^[0-9a-f]{7,40}$")
 # `git diff --shortstat` の 1 行（`N files changed, A insertions(+), D deletions(-)`）
 _SHORTSTAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
-# リモートの URL から `<所有者>/<リポジトリ>` を取る（https と ssh の両方）
-# リモートの URL の書き方 2 つ。scp の形（`git@github.com:<所有者>/<名前>.git`）と、それ以外の `<スキーム>://` の形（ホストは urlsplit で読む）
-_SCP_REMOTE = re.compile(r"^(?:[^@/\s]+@)?github\.com:(?P<path>[^?#\s]+)$")
+# scp の形のリモートの URL（`[<利用者>@]<ホスト>:<パス>`）
+_SCP_URL = re.compile(r"^(?:[^@/:]+@)?(?P<host>[^/:]+):(?P<path>.+)$")
+# GitHub のリモートの URL のスキームと、そのスキームで GitHub を指すホスト（`ssh.github.com` は SSH を 443 番で使う接続先）
+_SSH_HOSTS = frozenset({"github.com", "ssh.github.com"})
+_GITHUB_HOSTS = {"https": frozenset({"github.com"}), "http": frozenset({"github.com"}), "git": frozenset({"github.com"}), "ssh": _SSH_HOSTS}
 # GitHub のリポジトリのパス。所有者と名前に使える文字だけを受け、クエリ・フラグメント・余分な階層を含むパスは受けない
 _REPO_PATH = re.compile(r"^/?(?P<owner>[A-Za-z0-9-]+)/(?P<name>[A-Za-z0-9._-]+?)(?:\.git)?/?$")
 # `git cat-file --batch` がオブジェクトごとに置く見出しの行（無い名前の行は `<名前> missing`）
@@ -55,6 +57,14 @@ NO_LAZY_FETCH = {"GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": ""}
 # （diff・log・rev-parse）と、`--` を受けないもの（merge）は `END_OF_OPTIONS`（git 2.24 以降）を ref の
 # 前に置き、checkout は SHA へ解決してから渡し、`--` の後を ref として読むもの（merge-base・show-ref・remote・fetch）は `--` の後に置く。`-` で始まる値は option にならず、ref として読めずに失敗する
 END_OF_OPTIONS = "--end-of-options"
+# 差分の形を利用者とプロジェクトの Git の設定によらず同じにする `git diff` の引数（色・外部 diff・本文の変換を止め、前後の接頭辞を
+# 固定する）。MVV 判定の手元の差分・cross-review の差分・設計の検査が同じ値を使う（#2912）
+FIXED_DIFF = ("--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/")
+
+
+def tracking_refspec(remote: str, name: str) -> str:
+    """ブランチ `name` を追跡参照 `refs/remotes/<remote>/<name>` へ取る refspec（`remote.<remote>.fetch` の設定によらない）。"""
+    return f"+refs/heads/{name}:refs/remotes/{remote}/{name}"
 
 
 class GitError(Exception):
@@ -126,13 +136,13 @@ def run_git(args: list[str], cwd: Optional[Path], env: Optional[Mapping[str, str
     return Completed(proc.returncode, proc.stdout, proc.stderr)
 
 
-def _mask_urls(text: str) -> str:
+def mask_urls(text: str) -> str:
     """git の誤りの文から、URL の認証情報とクエリを伏せる（結果 JSON・ログに出すため）。"""
     return _URL_QUERY.sub(r"\1***", _URL_USERINFO.sub("***@", text))
 
 
 def _failed(args: tuple[str, ...], returncode: int, stderr: str) -> GitError:
-    return GitError(_mask_urls(f"git {' '.join(args)} が失敗（終了コード {returncode}）: {stderr.strip()}"))
+    return GitError(mask_urls(f"git {' '.join(args)} が失敗（終了コード {returncode}）: {stderr.strip()}"))
 
 
 def sha_matches(expected: str, actual: str) -> bool:
@@ -172,22 +182,26 @@ def first_parent_lines(log_text: str) -> dict[str, int]:
 def repo_of_url(url: str) -> Optional[str]:
     """リモートの URL の `<所有者>/<リポジトリ>`。GitHub の URL でなければ None。
 
-    ホストが github.com であることを確かめ、認証情報・クエリ・フラグメントを除いたパスから所有者と名前だけを取る
-    （URL に埋めたトークンを使用量ログなどへ写さない。#1959）。パスがリポジトリの形でなければ None。
+    ホストとパスを分けて読むので、パスの中に `github.com` を持つほかのホストの URL は GitHub とみなさない。認証情報・クエリ・
+    フラグメントを除いたパスから所有者と名前だけを取る（URL に埋めたトークンを使用量ログなどへ写さない。#1959）。
+    パスがリポジトリの形でなければ None。
     """
-    text = url.strip()
-    if "://" in text:
-        parts = urlsplit(text)
-        if parts.hostname is None or parts.hostname.lower() != "github.com":
+    url = url.strip()
+    if "://" in url:
+        try:
+            parts = urlsplit(url)
+        except ValueError:  # noqa: NDF401 利用者の入力: 形の壊れた URL は GitHub のリポジトリと確かめられない
             return None
-        path = parts.path
+        scheme, host, path = parts.scheme, parts.hostname, parts.path
     else:
-        scp = _SCP_REMOTE.match(text)
-        if scp is None:
+        m = _SCP_URL.match(url)
+        if m is None:
             return None
-        path = scp.group("path")
-    m = _REPO_PATH.match(path)
-    return f"{m.group('owner')}/{m.group('name')}" if m else None
+        scheme, host, path = "ssh", m.group("host").lower(), m.group("path")
+    if scheme not in _GITHUB_HOSTS or host not in _GITHUB_HOSTS[scheme]:
+        return None
+    found = _REPO_PATH.match(path)
+    return f"{found.group('owner')}/{found.group('name')}" if found else None
 
 
 class WorktreeEntry(NamedTuple):
@@ -267,6 +281,13 @@ class Git:
             raise _failed(args, done.returncode, done.stderr.decode("utf-8", "replace"))
         return done.stdout
 
+    def toplevel(self) -> Path:
+        """作業場所の worktree の根（`git rev-parse --show-toplevel`。サブモジュールならそのworktree）。失敗は `GitError`。
+
+        設定を読むリポジトリの根の解き方はここだけに置く（`route.repo_root`・`progress.settings_roots.settings_root` が使う。#4513）。
+        """
+        return Path(self.run("rev-parse", "--show-toplevel").strip())
+
     def rev_parse(self, ref: str) -> str:
         """参照（短い SHA・ブランチ・タグ）をコミットの完全な SHA へ解決する（#2041）。"""
         sha = self.run("rev-parse", "--verify", "--quiet", END_OF_OPTIONS, f"{ref}^{{commit}}").strip()
@@ -303,7 +324,13 @@ class Git:
         return out
 
     def commits_of(self, *refs: str) -> list[str]:
-        """参照（`refs/` から始まる全体の名前）のコミットの完全な SHA を、何件でも git を 1 回だけ起動して返す。"""
+        """参照（`HEAD` か `refs/` から始まる全体の名前）のコミットの完全な SHA を、何件でも git を 1 回だけ起動して返す。
+
+        `--verify` は参照を 1 つしか受けず、`--verify` の無い `rev-parse` は `--end-of-options` を出力に写すので、
+        `-` で始まる参照は option として読ませないよう起動の前に断る。
+        """
+        if any(r.startswith("-") for r in refs):
+            raise GitError(f"参照の名前が - で始まる: {refs!r}")
         got = self.run("rev-parse", *(f"{r}^{{commit}}" for r in refs)).split()
         if len(got) != len(refs) or not all(FULL_SHA.match(sha) for sha in got):
             raise GitError(f"{', '.join(refs)} をコミットへ解決できない: {got!r}")
@@ -355,9 +382,12 @@ class Git:
             return Completed(128, "", str(e))
         return self.attempt("checkout", "-q", "--detach", sha)
 
-    def merge_ff(self, ref: str) -> Completed:
-        """`ref` を fast-forward だけでマージする。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
-        return self.attempt("merge", "--ff-only", "-q", END_OF_OPTIONS, ref)
+    def merge_ff(self, ref: str, *options: str) -> Completed:
+        """`ref` を fast-forward だけでマージする。結果はそのまま返す。`ref` を option として読ませない（3364-7）。
+
+        `options` は `git merge` に足す引数（`ref` の前に置く）。
+        """
+        return self.attempt("merge", "--ff-only", "-q", *options, END_OF_OPTIONS, ref)
 
     def changed_files(self, base: str, head: str, *options: str) -> list[str]:
         """`base...head`（分岐点から head まで）で変わったファイルのパス。`options` は `git diff` に足す引数。
@@ -415,6 +445,11 @@ class Git:
             raise GitError(f"リモート {remote} の URL は GitHub のリポジトリでない")
         return repo
 
+    def push_repos(self, remote: str) -> list[Optional[str]]:
+        """`git push <remote>` の送り先ごとの `<所有者>/<リポジトリ>`（`pushurl`・`pushInsteadOf` を反映する。GitHub の URL で
+        なければ None）。"""
+        return [repo_of_url(url) for url in self.run("remote", "get-url", "--push", "--all", "--", remote).splitlines()]
+
     def remote_default_branch(self, remote: Optional[str] = None) -> Optional[str]:
         """リモートの既定ブランチ（取得済みの `refs/remotes/<remote>/HEAD` の指す先から `<remote>/` を外した名前）。
 
@@ -446,10 +481,10 @@ class Git:
 
     def fetch_branch(self, remote: str, name: str) -> Completed:
         """ブランチ 1 本を `refs/remotes/<remote>/<name>` へマージする（`FETCH_HEAD` を読まない。#3317）。結果はそのまま返す。"""
-        return self.fetch(remote, f"+refs/heads/{name}:refs/remotes/{remote}/{name}")
+        return self.fetch(remote, tracking_refspec(remote, name))
 
     def fetch_branch_or_raise(self, remote: str, name: str) -> None:
         """`fetch_branch` を打ち、マージできなければ `GitError`（`<remote> の <name> をマージできない`）。"""
         done = self.fetch_branch(remote, name)
         if done.returncode != 0:
-            raise GitError(f"{remote} の {name} をマージできない: {_mask_urls(done.stderr.strip())}")
+            raise GitError(f"{remote} の {name} をマージできない: {mask_urls(done.stderr.strip())}")
