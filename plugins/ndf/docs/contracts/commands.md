@@ -471,16 +471,6 @@
 
 結果の `metrics`: 決まった項目を持たない。`items` の要素: `checked_at`（string）・`reason`（string）・`rewrites`（array of object）・`runtime`（string）・`training`（boolean か null）
 
-## `ndf usage-limit`
-
-内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/usage-limit.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/usage-limit.result.schema.json)
-
-| 呼び方 | 引数 |
-| --- | --- |
-| `ndf usage-limit` | `--runtime`（string・必須・値 `claude`・`codex`・`agy`・`kiro`）: 判定する起動のランタイム<br>`--stdout`（string・必須）: 判定する起動の標準出力のファイル<br>`--stderr`（string・必須）: 判定する起動の標準エラー出力のファイル |
-
-結果の `metrics`: `line`（string）・`usage_limit`（boolean）。`items` の要素: 決まった項目を持たない
-
 ## `ndf worker`
 
 内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/worker.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/worker.result.schema.json)

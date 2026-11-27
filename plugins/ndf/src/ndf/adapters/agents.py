@@ -65,14 +65,16 @@ def sandbox_failed(paths: "AgentPaths") -> Optional[str]:
 
 # ---------------------------------------------------------------- 監視（#1411・#2059）
 
+# claude が標準出力へ出す結果の JSON の利用上限（`api_error_status: 429`）
+CLAUDE_USAGE_LIMIT_JSON = re.compile(r'^\{.*?"api_error_status"\s*:\s*429', re.MULTILINE)
 # 利用上限の行。CLI が出す行の形（行頭。codex の `ERROR:` の前置きだけを許す）に限り、コメントの写し
-# （`path:line [user] 本文`・`[PR-COMMENT] [user] 本文`）や差分・文書の中の語を拾わない。claude の結果の JSON の
-# `api_error_status` は行の形で見ず、`launch_usage_limit` が JSON の直下の値で見る（入れ子の 429 を拾わない）
+# （`path:line [user] 本文`・`[PR-COMMENT] [user] 本文`）や差分・文書の中の語を拾わない
 USAGE_LIMIT_LINES = (
     re.compile(r"^(?:ERROR:\s*)?(?:quota exceeded|rate limit exceeded)\b", re.IGNORECASE | re.MULTILINE),
     re.compile(r"^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ -]+ )?(?:limit|budget)\b", re.MULTILINE),  # 「5-hour limit」のハイフンも通す
     re.compile(r"^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b", re.MULTILINE),
     re.compile(r"^(?:ERROR:\s*)?Monthly request limit reached", re.MULTILINE),
+    CLAUDE_USAGE_LIMIT_JSON,
     re.compile(r"^HTTP/\d\S* 429 ", re.MULTILINE),
 )
 # 早期の警告（致命ではない）の行
@@ -131,8 +133,8 @@ def usage_limit(text: str) -> Optional[str]:
     return None
 
 
-def _result_json(stdout: str) -> Optional[dict[str, Any]]:
-    """claude の標準出力の結果の JSON（オブジェクト）。無いか読めなければ None。
+def _denials_warning(stdout: str) -> Optional[str]:
+    """claude が成功で終わり拒否が残ったときの警告の文（拒否は致命にしない）。
 
     結果の JSON は最後の行にある（`--output-format json` は 1 行だけ、`stream-json` は 1 歩ごとの行の後に結果の行。#3945）。
     行の区切りは LF だけ。`splitlines()` は本文の U+2028・U+2029 でも切り、結果の JSON を途中で割る。"""
@@ -141,13 +143,7 @@ def _result_json(stdout: str) -> Optional[dict[str, Any]]:
         payload = json.loads(lines[-1]) if lines else None
     except json.JSONDecodeError:  # noqa: NDF401 外部コマンド: 終わる前の出力は JSON でない
         return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _denials_warning(stdout: str) -> Optional[str]:
-    """claude が成功で終わり拒否が残ったときの警告の文（拒否は致命にしない）。"""
-    payload = _result_json(stdout)
-    if payload is None or payload.get("subtype") != "success" or payload.get("is_error"):
+    if not isinstance(payload, dict) or payload.get("subtype") != "success" or payload.get("is_error"):
         return None
     denials = payload.get("permission_denials")
     if not isinstance(denials, list) or not denials:
@@ -254,25 +250,16 @@ def _report_warnings(w: _Watch) -> None:
         diag(f"[{w.spec.agent}] 早期の警告（{kind}）: {text}", kind=kind, agent=w.spec.agent)
 
 
-def launch_usage_limit(agent: str, out: Path, err: Path) -> Optional[str]:
-    """起動の出力が利用上限を告げていれば、その行か旨の文を返す。無ければ None。
-
-    標準エラー（`err`）は上限の行（`USAGE_LIMIT_LINES`）で見る。標準出力（`out`）は claude の結果の JSON の直下の
-    `api_error_status` だけを見て、他の CLI の標準出力は読まない（調査の結果が行頭に `quota exceeded` を引用しても、
-    結果の入れ子のデータに 429 があっても利用上限にしない）。
-    監視（`_verdict`）と、手順書の回収（`ndf usage-limit`）が同じ条件で判定するよう、ここだけに置く。"""
-    hit = usage_limit(tail(err))
-    if hit:
-        return hit
-    payload = _result_json(tail(out)) if agent == "claude" else None
-    if payload is not None and payload.get("api_error_status") == 429:
-        return "標準出力の結果の JSON に api_error_status 429"
-    return None
+def _out_usage_limit(spec: Launch) -> Optional[str]:
+    """claude の標準出力の結果の JSON に利用上限があれば、その旨の文を返す（他の CLI の標準出力は読まない）。"""
+    if spec.agent != "claude" or not CLAUDE_USAGE_LIMIT_JSON.search(tail(spec.paths.out)):
+        return None
+    return "標準出力の結果の JSON に api_error_status 429"
 
 
 def _verdict(w: _Watch, code: Optional[int], now: float) -> Optional[tuple[str, str]]:
     """終わり方を決める。まだ続くなら None。利用上限は終了コードより先に見る。"""
-    hit = launch_usage_limit(w.spec.agent, w.spec.paths.out, w.spec.paths.err)
+    hit = usage_limit(tail(w.spec.paths.err)) or _out_usage_limit(w.spec)
     if hit:
         return AgentState.USAGE_LIMIT, hit
     if code is not None:
