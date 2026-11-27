@@ -375,7 +375,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `_fixer_launch`・`_launch_fixer`・`_keep_fixer` | `domains/crossreview/fixer.py` | 変更 | 変えない | 修正担当の値と `charge_to`・`session_seq` を 1 回の駆動の中だけで持ち、同じ駆動の中の会話の再開に使う（状態ファイルには残さない） |
 | `enter` | `domains/crossreview/journal.py` | 変更 | 変えない | 同じ指摘を挙げた担当を `raisers` にすべて残す。そのラウンドで受け付けた重要度が重大だった指摘の id を `entered_serious` に置く |
 | `experiment_values` | 同 | 新設 | `experiment_values(rows: Sequence, first: Collection[str], seats: Sequence[str]) -> tuple[Optional[int], dict[str, Optional[float]]]` | 1 ラウンド目の採用された重大な指摘の数と、シートごとの挙げた割合を返す。`first` は 1 ラウンド目で受け付けた重要度が重大だった指摘の id で、その中に裁定していない指摘があれば数は None |
-| `record`（以下の `_record_experiment` はこの処理） | `domains/crossreview/experiment.py` | 新設 | `record(data, rows, seats, final) -> None` | シートと、`NDF_CHARGE_TO` の単位の効果指標を書く。`drive._summary` から呼ぶ |
+| `record`（以下の `_record_experiment` はこの処理） | `domains/crossreview/experiment.py` | 新設 | `record(data, rows, seats, final) -> None` | シートと、`NDF_CHARGE_TO` の単位の効果指標を書く。呼び出し元の `drive._summary` は、状態ファイルの内容（`data`）、ジャーナルに残る全ラウンドの指摘（`rows`。1 ラウンド目の分に絞らない）、参加したシートの名前（`seats`）、終了理由（`final`）を渡す。シートの指標は全ラウンドの指摘から求める。設計・実装の指標は、`data` に残した最初のラウンドの重大な指摘の id（表の下の箇条書き）について、`rows` にある今の採否から求める。前回の結果を返すだけの打ち直しでは呼ばない |
 
 - シートの単位は `<cross-review の実行の ID>:<シート>`。実行の ID は状態ファイルに 1 回だけ作り、打ち直しでも同じ値。1 ラウンド目で出た指摘のうち、そのラウンドで受け付けた重要度が重大だったものの id も状態ファイルに残す。前のラウンドの重い重要度は引き継がない。同じラウンドの同じ指摘への複数の報告は、ジャーナルの行と同じ規則で 1 つに重ねてから判定する。MVV の項目が付けば重要度を引き上げ、人の承認が必要な項目も付けば、そちらを優先して引き上げない。後のラウンドで担当が同じ指摘をもう一度挙げると、ジャーナルの行の `round` と重要度がそのラウンドの値に書き換わり、1 ラウンド目の指摘と当時の重要度が見分けられなくなるためである
 - 残した id は、その時の `NDF_CHARGE_TO` の割り付け ID と対にする。後の起動で `NDF_CHARGE_TO` が別の ID になったら、その起動の最初のラウンドの指摘で残し直す。同じ状態の保存先で別の実装の変更を続けてレビューした場合に、前の実装の指摘で評価しないためである。`NDF_CHARGE_TO` の無い起動は残し直さない
