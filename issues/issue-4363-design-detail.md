@@ -107,7 +107,7 @@ plugins/ndf/
 | `protect_kinds` | `criteria_decide.py` | 新設 | `protect_kinds() -> tuple[str, ...]` | 保護の種類 5 つを表から返す |
 | `track_kinds` | `criteria_decide.py` | 新設 | `track_kinds() -> tuple[str, ...]` | 指摘の種類の全部（保護の種類と `delivered`・`approval`）を返す |
 | `protect_of` | `criteria_decide.py` | 新設 | `protect_of(value: object) -> tuple[str, ...]` | 値が文字列の並びなら、保護の種類だけを表の順で重ねずに返し、ほかは空を返す |
-| `document_line` | `criteria_decide.py` | 新設 | `document_line(documents: bool, rows: Sequence[Mapping[str, Any]]) -> list[str]` | 文書を含む PR で、渡す指摘に文書の指摘がありうる（`path` が Markdown か、`path` が無い）ときは、判定役の指示に足す行として、基準 6 の 1 行と「4 つの型と 2 つの区分」のセクション（`writing.types_section`）を返す。ほかは空を返す。この渡し方にした理由は下の「文書の基準の渡し方」にある。基準 6 は指摘の基準の 6 番（この PR で変わった Markdown の、想定した読み手に通じない文）で、番号と文は `contracts/data/review-criteria.json` の `document` にある。今は相手役と修正担当の指示に `criteria_decide.document_block` が足している |
+| `document_line` | `criteria_decide.py` | 新設 | `document_line(documents: bool, rows: Sequence[Mapping[str, Any]]) -> list[str]` | 文書を含む PR で、渡す指摘に文書の指摘がありうる（`path` が Markdown か、`path` が無い）ときは、判定役の指示に足す行として、基準 6 の 1 行と、「読み手を想定する」のセクション（`writing.readers_section`）と、「4 つの型と 2 つの区分」のセクション（`writing.types_section`）を返す。ほかは空を返す。この渡し方にした理由は下の「文書の基準の渡し方」にある。基準 6 は指摘の基準の 6 番（この PR で変わった Markdown の、想定した読み手に通じない文）で、番号と文は `contracts/data/review-criteria.json` の `document` にある。今は相手役と修正担当の指示に `criteria_decide.document_block` が足している |
 | `reviewer_block` | `criteria_decide.py` | 変更 | `reviewer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[str]` | 相手役へ `protect` の書き方の行を足す |
 | `downgraded` | `criteria_decide.py` | 変更 | `downgraded(row: Mapping[str, Any]) -> bool` | 判定役の確認で下げた行（`check.lowered`）を「入れるときに下げた行」に数えない |
 
@@ -129,11 +129,13 @@ plugins/ndf/
 | `protect_kinds` | `criteria_decide._table` | `grep -rn "def .*protect\|\"protect\"" --include=*.py src/ndf` | 保護の種類を返す関数は無い。表の読み口 `_table` を使う |
 | `track_kinds` | 同上 | 同上 | `_table` を使って作る |
 | `protect_of` | `journal._located`（位置の形の検査） | 同上 | 形の検査の書き方をそろえる。対象の値が違うので別の関数にする |
-| `document_line` | `criteria_decide.document_block` | `criteria_decide.py` を読んだ | `document_block` は文書の基準の全文を足すので、判定役には基準 6 の 1 行と型のセクションだけを返す関数を置く。1 行の文は同じ表の `document` から取り、セクションは `writing.types_section` を使う |
+| `document_line` | `criteria_decide.document_block` | `criteria_decide.py` を読んだ | `document_block` は文書の基準の全文を足すので、判定役には基準 6 の 1 行と、読み手の決め方と型の 2 つのセクションだけを返す関数を置く。1 行の文は同じ表の `document` から取り、セクションは `writing.readers_section` と `writing.types_section` を使う |
 
 ### 文書の基準の渡し方
 
-判定役には、文書の指摘がありうるときだけ、型のセクションを指示に埋め込んで渡す。次の 3 つの方式を比べた。
+判定役には、文書の指摘がありうるときだけ、読み手の決め方のセクションと型のセクションを指示に埋め込んで渡す。読み手の決め方も渡すのは、4 つの型が想定した読み手を前提に文を判定する表だからである。文書の種類ごとの読み手と、文書自身が決めた読み手を優先する規則を知らないと、判定役はエンジニアに通じるかだけで判断し、要求仕様書などの指摘を誤って下げうる。
+
+渡し方は、次の 3 つの方式を比べた。
 
 - 直接渡す: 文書を含む PR では、いつも埋め込む
 - 遅延読み込み: 指示には基準のファイルの場所だけを書き、文書の指摘を確かめるときに読ませる
@@ -150,6 +152,8 @@ plugins/ndf/
 | 文書を含む | 遅延読み込み | 25,745 | 6.0 | 12.6 |
 
 遅延読み込みは、文書の指摘があると Tool の呼び出しが 1 回増え、読んだ基準の全文がその後の入力にも載る。条件で渡す方式は、どちらの組でも入力の token が最も小さい。秒の差は小さく、方式を分ける理由にしていない。見本が小さいので、token と秒の絶対値は実際の PR の値ではない。
+
+この測定で埋め込んだのは型のセクションだけである。その後に足した読み手の決め方のセクション（約 1,600 字）を含めた値は測っていない。文書の指摘があるラウンドの入力は、表の値よりこのセクションの分だけ多い。コードの指摘だけのラウンドは変わらない。
 
 ### 単体テストの観点
 
@@ -210,7 +214,7 @@ plugins/ndf/
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `select` | `journal.FindingJournal.handable` | `grep -rn "verdicts\|def confirm\b" --include=*.py src/ndf` | 判定役への振り分けは無い。`handable` は修正担当向けで条件が違う |
-| `instruction` | `criteria_decide.criteria_lines`・`reviewer_block` | `criteria_decide.py` を読んだ | 基準の行は `criteria_lines` を呼び手が渡して使う。指示の骨組みは新しく書く |
+| `instruction` | `criteria_decide.criteria_lines`・`reviewer_block` | `criteria_decide.py` を読んだ | 基準の行は呼び手の `verify.ask` が `criteria_lines` と `document_line` で組んで渡す。指示の骨組みは新しく書く |
 | `read` | `participants.listed_of(text, "verdicts")` | `grep -rn "def listed_of" src/ndf` | 出力の最後の JSON を取り出すのは `listed_of` を `verify.ask` で使う。回答の意味の検査だけを新しく書く |
 | `lowers` | `criteria_decide.effective_severity` | `criteria_decide.py` を読んだ | 登録のときの下げと、確認の後の下げは条件が違うので別の関数にする（設計文書の決定 2 の表の 2 段階） |
 
@@ -236,6 +240,7 @@ plugins/ndf/
 - `ask`
   - 事前条件: `rows` は空でない。`run.input_dir`（この実行の資料のディレクトリ）に `diff` がある
   - 事後条件: 例外で駆動を止めない。起動し直さない
+  - 指示の組み立て: `verify_decide.instruction` の `criteria` には、`criteria_decide.criteria_lines(run.cfg.settings.focus, run.snapshot)` の行の後に、`criteria_decide.document_line(run.documents, rows)` の戻り値を加えて渡す。`rows` は `_confirm` が `verify_decide.select` から受け取った指摘で、`run.documents` は PR の差分に Markdown のファイルがあるかである。`VerifyRun` はこの 3 つの値を持つ
   - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は状態の保存先の `round<n>-verify.*` に書く。過程の行と注意を `run.note` で足す
 
 ### 異常系の処理

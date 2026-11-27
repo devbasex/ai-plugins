@@ -174,7 +174,7 @@ def test_issue_4363_document_line_is_added_only_for_a_possible_document_finding(
     lines = criteria_decide.document_line(documents, [_row(**place) for place in places])
     assert bool(lines) is added
     if added:
-        assert lines[0].startswith("6. ") and writing.types_section() in lines
+        assert lines[0].startswith("6. ") and {writing.readers_section(), writing.types_section()} <= set(lines)
 
 
 def test_issue_4363_track_kinds_start_with_the_protect_kinds() -> None:
