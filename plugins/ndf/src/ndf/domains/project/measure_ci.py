@@ -83,14 +83,10 @@ def required_contexts(rules: Any) -> list[str]:
 
 
 def _required_checks(gh: Gh, branch: Optional[str]) -> list[str]:
+    """既定ブランチ `branch` の必須のチェック。取れなければ `GhUnavailable`（未認証などで空と読み違えて既存の値を消さない）。"""
     if not branch:
         return []
-    try:
-        return required_contexts(gh.get(f"repos/{gh.repo}/rules/branches/{branch}"))
-    except GhUnavailable as exc:
-        if str(exc) == TIME_UP:
-            raise
-        return []
+    return required_contexts(gh.get(f"repos/{gh.repo}/rules/branches/{branch}"))
 
 
 def _measure_merges(gh: Gh) -> tuple[dict[str, int], list[str]]:

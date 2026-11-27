@@ -194,11 +194,11 @@ def test_measure_time_up_on_the_branch_rules_makes_ci_unknown(tmp_path, monkeypa
     assert "CI を測れない: 時間切れ" in got["notes"]
 
 
-def test_measure_other_failure_on_the_branch_rules_is_an_empty_list(tmp_path, monkeypatch):
-    _patch_gh(monkeypatch, {"repos/o/r/rules/": measure_ci.GhUnavailable("gh が失敗した: 404")})
+def test_measure_other_failure_on_the_branch_rules_makes_ci_unknown(tmp_path, monkeypatch):
+    _patch_gh(monkeypatch, {"repos/o/r/rules/": measure_ci.GhUnavailable("gh が失敗した: 401")})
     got = _measure(tmp_path)
-    assert got["ci"] == forms.measured({"required_checks": []})
-    assert got["notes"] == []
+    assert got["ci"] == forms.unknown("gh が失敗した: 401")
+    assert "CI を測れない: gh が失敗した: 401" in got["notes"]
 
 
 # --- measure_repo.measure_languages: 言語の行はファイル数を持たず、名前の順に並ぶ（#4516 の決定 3） ---
