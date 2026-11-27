@@ -52,7 +52,6 @@ REPO = Path(__file__).resolve().parents[2]
 PREV_COMMIT = "c93e690ed"
 MATERIAL_MODULE = "plugins/ndf/src/ndf/domains/records/mvv_material_decide.py"
 REQUIREMENTS = "issues/issue-{number}-requirements.md"
-BLOB = "{ ... on Blob { oid text isTruncated } }"
 TREE = "{ ... on Tree { entries { name } } }"
 FETCHED, ABSENT, FAILED = "取得済み", "本文が無い", "未取得"
 EXCLUDES, INCLUDES, UNKNOWN = "含まない", "含む", "判断できない"
@@ -298,7 +297,7 @@ def _store(path: Path) -> dict[str, Any]:
 
 def read_pairs(hub: Any, pairs: Sequence[tuple[str, str]], store: Path) -> dict[tuple[str, str], Optional[str]]:
     """（head の SHA, パス）の組の本文を、件数の上限ずつに分けて読む。結果と読みに行った回数を `store` へ書く（未取得は 2 回まで）。"""
-    from ndf.adapters.github import GitHubError
+    from ndf.adapters.github import GitHubError, whole_blob_at, whole_text
     from ndf.contracts import limits
 
     saved = _store(store)
@@ -308,7 +307,7 @@ def read_pairs(hub: Any, pairs: Sequence[tuple[str, str]], store: Path) -> dict[
         chunk = wanted[start : start + size]
         keys = [f"{sha}:{path}" for sha, path in chunk]
         try:
-            got = hub.aliased({f"p{i}": f"object(expression: {json.dumps(k)}) {BLOB}" for i, k in enumerate(keys)})
+            got = hub.aliased({f"p{i}": whole_blob_at(sha, path) for i, (sha, path) in enumerate(chunk)})
         except GitHubError:
             got = None
         for i, key in enumerate(keys):
@@ -316,8 +315,7 @@ def read_pairs(hub: Any, pairs: Sequence[tuple[str, str]], store: Path) -> dict[
             if got is None:
                 saved[key] = {"state": FAILED, "tries": tries}
                 continue
-            node = got.get(f"p{i}")
-            text = node.get("text") if isinstance(node, dict) and node.get("isTruncated") is False else None
+            text = whole_text(got.get(f"p{i}"))
             saved[key] = {"state": FETCHED, "tries": tries, "text": text} if isinstance(text, str) else {"state": ABSENT, "tries": tries}
         _write_json(store, saved)
     return {p: saved.get(f"{p[0]}:{p[1]}", {}).get("text") for p in pairs}
