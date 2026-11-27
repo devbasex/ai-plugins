@@ -1,7 +1,7 @@
 {
-  "summary": "判定役の起動の記録（状態の保存先の ndf-judge-records/ の記録）を残す秒（30 日）。過ぎたものは次に判定役を起動するときに消す",
+  "summary": "判定役の起動の記録（状態の保存先の ndf-judge-records/ の記録。一覧に載るもの）を残す秒（30 日）。過ぎたものは次に判定役を起動するときに消す",
   "seconds": 2592000,
   "read_by": [
-    "ndf.domains.crossreview.verify"
+    "ndf.domains.crossreview.judge_records"
   ]
 }

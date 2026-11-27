@@ -16,7 +16,7 @@ import pytest
 from ndf.adapters import agents
 from ndf.contracts import limits, writing
 from ndf.core.converge import participants
-from ndf.domains.crossreview import criteria_decide, report_decide, reviewing, verify, verify_decide
+from ndf.domains.crossreview import criteria_decide, judge_records, report_decide, reviewing, verify, verify_decide
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 from ndf.domains.records import mvv_decide as md
@@ -264,7 +264,7 @@ def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers
     # 出力はこの起動で作った実行者だけが開けるディレクトリに書かせ、記録を起動ごとの名前で状態の保存先へ移してディレクトリを消す
     held = spec.paths.out.parent
     assert held.parent == tmp_path and modes == [0o700] and not held.exists()
-    record = tmp_path / verify.RECORD_DIR / f"{held.name}.out"
+    record = tmp_path / judge_records.RECORD_DIR / f"{held.name}.out"
     assert not record.is_symlink() and record.stat().st_mode & 0o777 == 0o600 and "verdicts" in record.read_text(encoding="utf-8")
     assert (tmp_path / "round1-verify.out").is_symlink()
     assert (tmp_path / "round1-verify.err.log").read_text(encoding="utf-8") == "前の記録"
@@ -278,30 +278,51 @@ def test_issue_4363_ask_keeps_the_records_of_every_launch_and_replaces_nothing(t
     answered = _launcher(seen, [holding(_row())])
 
     def taken(spec: agents.Launch) -> agents.AgentStatus:
-        (tmp_path / verify.RECORD_DIR / f"{spec.paths.out.parent.name}.out").write_text("前の記録", encoding="utf-8")
+        (tmp_path / judge_records.RECORD_DIR / f"{spec.paths.out.parent.name}.out").write_text("前の記録", encoding="utf-8")
         return answered(spec)
 
     for launch in (answered, answered, taken):
         assert verify.ask(run, 1, [_row()], {"r1-1": [diff]}, launch).verdicts["r1-1"].holds is True
-    first, second, third = (tmp_path / verify.RECORD_DIR / f"{spec.paths.out.parent.name}.out" for spec in seen)
+    first, second, third = (tmp_path / judge_records.RECORD_DIR / f"{spec.paths.out.parent.name}.out" for spec in seen)
     assert first != second and all("verdicts" in p.read_text(encoding="utf-8") for p in (first, second))
     assert third.read_text(encoding="utf-8") == "前の記録" and not seen[2].paths.out.parent.exists()
     assert [note for note in run.notes if "移せない" in note[2]]
 
 
-def test_issue_4363_ask_drops_only_its_own_records_past_the_keep_period(tmp_path: Path) -> None:
-    records = tmp_path / verify.RECORD_DIR
-    records.mkdir()
-    old = [records / f"round1-verify-ab12_cd3{suffix}" for suffix in (".out", ".err.log", "-launch.json", "-progress.log")]
-    # 新しい記録・記録の形でない名前・専用のディレクトリの外にある同じ形の名前は残す
-    kept = [records / "round1-verify-new00000.out", records / "round1-verify-notes.txt", tmp_path / "round1-verify-ab12_cd3.out"]
-    for path in (*old, *kept):
-        path.write_text("記録", encoding="utf-8")
-    past = time.time() - limits.seconds(verify.RECORD_KEEP) - 60
-    for path in (*old, *kept[1:]):
+def _aged(*paths: Path) -> None:
+    past = time.time() - limits.seconds(judge_records.RECORD_KEEP) - 60
+    for path in paths:
         os.utime(path, (past, past))
-    verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher([], []))
-    assert not any(p.exists() for p in old) and all(p.exists() for p in kept)
+
+
+def test_issue_4363_ask_drops_only_the_listed_records_past_the_keep_period(tmp_path: Path) -> None:
+    """片付けるのは保存した記録の一覧に載るものだけで、同じ形の名前でも一覧に無いファイルは残す。"""
+    run, diff = _AskRun(tmp_path), _diff(tmp_path)
+    verify.ask(run, 1, [_row()], {"r1-1": [diff]}, _launcher([], []))
+    records = tmp_path / judge_records.RECORD_DIR
+    saved = list(records.iterdir())
+    unlisted = records / "round1-verify-ab12_cd3.out"
+    unlisted.write_text("利用者の退避", encoding="utf-8")
+    _aged(unlisted, *saved)
+    verify.ask(run, 2, [_row()], {"r1-1": [diff]}, _launcher([], []))
+    assert saved and not any(p.exists() for p in saved) and unlisted.exists()
+    listed = json.loads((tmp_path / judge_records.RECORD_LIST).read_text(encoding="utf-8"))["record_names"]
+    assert not {p.name for p in saved} & set(listed)
+
+
+def test_issue_4363_ask_does_not_follow_a_linked_record_directory(tmp_path: Path) -> None:
+    """記録のディレクトリを開けなければ、片付けと保存を飛ばして過程に残し、判定役は起動する。リンクの先は触らない。"""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    name = "round1-verify-ab12_cd3.out"
+    (elsewhere / name).write_text("別の場所", encoding="utf-8")
+    _aged(elsewhere / name)
+    (tmp_path / judge_records.RECORD_DIR).symlink_to(elsewhere)
+    (tmp_path / judge_records.RECORD_LIST).write_text(json.dumps({"record_names": [name]}), encoding="utf-8")
+    run, seen = _AskRun(tmp_path), []
+    verify.ask(run, 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher(seen, [holding(_row())]))
+    assert len(seen) == 1 and [p.name for p in elsewhere.iterdir()] == [name]
+    assert [note for note in run.notes if "片付けない" in note[2]]
 
 
 @pytest.mark.parametrize("source", ["path", "principles_path"])
@@ -357,7 +378,7 @@ def test_issue_4363_ask_failure_gives_no_answer_and_one_warning(tmp_path: Path, 
     answers = verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [diff]}, launch)
     assert answers.verdicts == {} and len(answers.warnings) == 1 and len(seen) == 1
     held = seen[0].paths.out.parent
-    assert not held.exists() and (tmp_path / verify.RECORD_DIR / f"{held.name}.out").is_file()
+    assert not held.exists() and (tmp_path / judge_records.RECORD_DIR / f"{held.name}.out").is_file()
     # 注意は PR の記録に載るので、手元の絶対パスを書かない
     assert str(tmp_path) not in answers.warnings[0]
 

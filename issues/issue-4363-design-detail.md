@@ -31,6 +31,7 @@ plugins/ndf/
 │   ├── reviewing.py *        相手役への指示と起動（drive.py から移す）
 │   ├── verify_decide.py *    判定役の判断
 │   ├── verify.py *           判定役の起動
+│   ├── judge_records.py *    判定役の記録の保存と片付け
 │   ├── criteria_decide.py
 │   ├── journal.py
 │   ├── drive.py
@@ -38,11 +39,12 @@ plugins/ndf/
 ├── contracts/data/review-criteria.json
 ├── contracts/limits/cross-review.remark-chars.json
 ├── contracts/limits/cross-review.remarks-total.json
+├── contracts/limits/cross-review.judge-record.keep.json *
 ├── skills/cross-review/docs/01-state-and-review.md
 └── tests/domains/crossreview/
 ```
 
-依存の向き: `drive` が `carry`・`reviewing`・`verify`・`journal` を読む。`carry` は `journal` を読む。`verify` は `verify_decide` を読む。`journal` は、回答の型と下げてよいかの判断を使うために `verify_decide` を読む。`journal` と `verify_decide` は `criteria_decide` を読む。`carry`・`reviewing`・`verify` は `drive` を読まず、使う値を Protocol（呼ばれる側が要る属性だけを書いた型）で受けるので、輪は無い。`verify_decide` は名前が `_decide` で終わる判断のモジュールで、外部のコマンドもファイルも触らない（`ndf check` の構造の規則）。
+依存の向き: `drive` が `carry`・`reviewing`・`verify`・`journal` を読む。`carry` は `journal` を読む。`verify` は `verify_decide` と `judge_records` を読む。`journal` は、回答の型と下げてよいかの判断を使うために `verify_decide` を読む。`journal` と `verify_decide` は `criteria_decide` を読む。`carry`・`reviewing`・`verify` は `drive` を読まず、使う値を Protocol（呼ばれる側が要る属性だけを書いた型）で受けるので、輪は無い。`verify_decide` は名前が `_decide` で終わる判断のモジュールで、外部のコマンドもファイルも触らない（`ndf check` の構造の規則）。
 
 `drive.py` は 986 行で、構造の規則の上限は 1,000 行である。この課題と後の 2 課題がすべて `drive.py` を変えるので、先に引き継ぎと相手役の起動の 2 つのまとまりを別のモジュールへ移す（実装計画のプレリファクタリング）。
 
@@ -51,7 +53,8 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/domains/crossreview/carry.py` | 新設 | 起動の始めに PR を読み、前の実行の指摘を引き継ぐ | `journal`・`prior_decide`・`threads`・`store` | モジュール、`Prior`、`CarryRun`（Protocol） | 変更（移動）: `reader`・`read_prior`・`read_reviews`・`carry`・`restate`・`detach_revived`・`_settle_resolved`・`_merge_tracked` |
 | `plugins/ndf/src/ndf/domains/crossreview/reviewing.py` | 新設 | 相手役へ渡す資料と指示を組み、席を起動する | `seats`・`criteria_decide`・`prior_decide`・`changes`・`scope_decide` | モジュール、`Prepared`、`Reviewed`、`FilledRead`、`ReviewingRun`（Protocol） | 変更（移動）: `write_diff`・`remarks`・`remarks_file`・`review_prompt`・`review_round`・`_fill_seats`・`_prompt_diffs`・`_full_diff` |
 | `plugins/ndf/src/ndf/domains/crossreview/verify_decide.py` | 新設 | 確かめる指摘を選び、指示を組み、回答を読み、下げるかを決める | `criteria_decide` | モジュール、`Verdict`、`Answers` | 新設: `select`・`instruction`・`read`・`lowers` |
-| `plugins/ndf/src/ndf/domains/crossreview/verify.py` | 新設 | 読むだけの claude を 1 回起動して回答を返す | `verify_decide`・`participants` | モジュール、`VerifyRun`（Protocol） | 新設: `ask` |
+| `plugins/ndf/src/ndf/domains/crossreview/verify.py` | 新設 | 読むだけの claude を 1 回起動して回答を返す | `verify_decide`・`judge_records`・`participants` | モジュール、`VerifyRun`（Protocol） | 新設: `ask` |
+| `plugins/ndf/src/ndf/domains/crossreview/judge_records.py` | 新設 | 判定役の記録を残し、期限を過ぎたものを片付ける | `store`・`contracts` | モジュール、`Noting`（Protocol） | 新設: `keep`・`drop_old` |
 | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 指摘の種類の一覧と、相手役への `protect` の指示を持つ | `contracts` | モジュール | 新設: `protect_kinds`・`track_kinds`・`protect_of`・`document_line` / 変更: `reviewer_block`・`downgraded` |
 | `plugins/ndf/src/ndf/domains/crossreview/journal.py` | 変更 | 行に `protect` と `check` を書き、下げる・戻すを決める | `criteria_decide`・`verify_decide` | `FindingJournal`、`Checked` | 新設: `apply_checks` / 変更: `enter`・`_raised`・`_raised_again`・`_revive` |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | 指摘を入れた直後に判定役を呼ぶ | `carry`・`reviewing`・`verify` | `_Run` | 新設: `_confirm_heavy` / 変更: `_round` |
@@ -61,6 +64,7 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/contracts/writing.py` | 変更 | 基準の本文から、判定役へ渡すセクションを取り出す | `contracts` | モジュール | 新設: `readers_section`・`supplement_rules` / 変更: `types_section` |
 | `plugins/ndf/contracts/limits/cross-review.remark-chars.json` | 変更 | 読み手のモジュールを `reviewing` にする | 無し | データ | — |
 | `plugins/ndf/contracts/limits/cross-review.remarks-total.json` | 変更 | 同上 | 無し | データ | — |
+| `plugins/ndf/contracts/limits/cross-review.judge-record.keep.json` | 新設 | 判定役の記録を残す期間を持つ | 無し | データ | — |
 | `plugins/ndf/skills/cross-review/docs/01-state-and-review.md` | 変更 | 「指摘の基準」に確認の決まりを足す | 無し | 文書 | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_verify.py` | 新設 | 判定役の判断・起動・適用を確かめる | 上の各モジュール | テスト | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py` | 変更 | `protect`・下げた行の出し直しを確かめる | `journal` | テスト | — |
@@ -302,7 +306,10 @@ plugins/ndf/
     1. 承認済みの MVV があれば（`criteria_decide.approved(run.snapshot)`）、MVV の本文（`path`）と共通原則（`principles_path`）を `run.input_dir` へ写す。元のファイルは利用者の状態の保存先にあり、判定役は読めないためである。読める場所は増やさない
     2. `criteria_decide.criteria_lines(run.cfg.settings.focus, snapshot)` を呼ぶ。`snapshot` は、承認済みの MVV があれば `run.snapshot._replace(path=<本文の写し>, principles_path=<共通原則の写し>)`、無ければ `run.snapshot` である
     3. 2 の戻り値の後に `criteria_decide.document_line(run.documents, rows)` の戻り値を加え、`instruction` に渡す
-  - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は、状態の保存先に起動ごとに作るディレクトリ（`tempfile.mkdtemp`。権限 0700）の `round<n>-verify.*` に書く。前からあるファイルやシンボリックリンクは開かない。起動の後は、成功でも失敗でも、出力のファイルを権限 0600 にして、状態の保存先の下の記録専用のディレクトリ `ndf-judge-records/`（無ければ権限 0700 で作る。シンボリックリンクなら書かない）へ移し、作ったディレクトリを消す。移し先の名前は、ファイル名の `round<n>-verify` を作ったディレクトリの名前（`round<n>-verify-<接尾辞>`。起動ごとに違う）に替えたものである。移すには `os.link` を使い、前からあるファイルやリンクは置き換えない（「[設計との食い違い](#設計との食い違い)」）。指摘の一覧は、権限 0700 の資料のディレクトリに書く。起動の前に、`ndf-judge-records/` の中の、名前が `round<n>-verify-<接尾辞>` に `.out`・`.err.log`・`-launch.json`・`-progress.log` のどれかを付けた形の通常のファイルのうち、更新から `cross-review.judge-record.keep`（30 日）を過ぎたものを消す。ほかの名前のファイル、リンク、`ndf-judge-records/` の外のファイルは消さない。`ndf-judge-records/` がシンボリックリンクなら何も消さない。過程の行と注意を `run.note` で足す
+  - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は、状態の保存先に起動ごとに作るディレクトリ（`tempfile.mkdtemp`。権限 0700）の `round<n>-verify.*` に書く。前からあるファイルやシンボリックリンクは開かない。指摘の一覧は、権限 0700 の資料のディレクトリに書く。起動の前に `judge_records.drop_old` で古い記録を片付け、起動の後は成功でも失敗でも `judge_records.keep` で記録を残す（下の箇条書き）。過程の行と注意を `run.note` で足す
+  - 記録の保存（`judge_records.keep`）: 出力のファイルを権限 0600 にして、状態の保存先の下の記録専用のディレクトリ `ndf-judge-records/`（無ければ権限 0700 で作る）へ移し、起動ごとのディレクトリを消す。移し先の名前は、各ファイル名の `round<n>-verify` を `round<n>-verify-<起動ごとの接尾辞>`（起動ごとのディレクトリの名前）に替え、残りの部分は保持する。移すには `os.link` を使い、前からあるファイルやリンクは置き換えない（「[設計との食い違い](#設計との食い違い)」）。移せた名前だけを、状態の保存先の一覧のファイル `ndf-judge-records.json`（`{"record_names": [<名前>]}`）に足す
+  - 古い記録の片付け（`judge_records.drop_old`）: 消すのは、一覧に載る名前の通常のファイルのうち、更新から `cross-review.judge-record.keep`（30 日）を過ぎたものだけで、消した名前は一覧から外す。一覧に載る名前でも、`round<n>-verify-<接尾辞>` に `.out`・`.err.log`・`-launch.json`・`-progress.log` のどれかを付けた形でなければ扱わない。一覧に無いファイルは、同じ形の名前でも消さない
+  - ディレクトリの開き方: `ndf-judge-records/` はリンクをたどらずに開き（`O_NOFOLLOW`）、保存と削除は開いたディレクトリを基準にする。リンクである・ディレクトリでない・読めないときは、保存と片付けを飛ばして理由を過程に残し、判定役の起動は続ける
 
 ### 異常系の処理
 
@@ -312,7 +319,7 @@ plugins/ndf/
 | `ask` | 起動が終わらない | 利用上限・無進捗・監視の上限・起動の拒否 | `launch` の返す状態が `done` でない | 既定値で続ける（どの指摘も下げない） | `warnings` に状態を 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
 | `ask` | 差分・指摘の一覧・MVV の本文と共通原則の写しのどれかを読めない | claude の `permission_denials` にそのファイルがある | `participants.denied_reads` | 既定値で続ける | `warnings` にファイル名（絶対パスは過程にだけ） | 同上 |
 | `ask` | 回答が読めない | 出力が無い・JSON でない・`verdicts` の配列が無い | `participants.claude_answer` と `listed_of` | 既定値で続ける | `warnings` に 1 行 | 同上 |
-| `ask` | 出力の記録を `ndf-judge-records/` へ移せない | `ndf-judge-records/` がシンボリックリンクかファイルである・移し先が書けない・同じ名前のファイル・リンク・ディレクトリがある・保存先がハードリンクを作れない | 起動の後の `OSError` | 回答の扱いは変えず、記録を作ったディレクトリと一緒に消す | 過程にだけ 1 行。終了コードは変えない | 記録は残らない |
+| `ask` | 出力の記録を `ndf-judge-records/` へ移せない | `ndf-judge-records/` がシンボリックリンクかファイルである、または読めない・移し先が書けない・同じ名前のファイル・リンク・ディレクトリがある・保存先がハードリンクを作れない | 起動の後の `OSError` | 回答の扱いは変えず、記録を作ったディレクトリと一緒に消す | 過程にだけ 1 行。終了コードは変えない | 記録は残らない |
 
 ### ログと記録の出力
 
