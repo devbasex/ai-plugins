@@ -308,6 +308,50 @@ def test_reopening_revokes_the_merge_approval_of_the_stage_once(repo, st, env, c
     assert [(r.answer, r.by) for r in rows] == [("approved", "user"), ("rejected", "reopen")]
 
 
+def test_a_later_approval_from_elsewhere_is_not_revoked(repo, st, env, capsys):
+    """同じ対象の最新の承認が開き直す工程の記録でなければ、取り消さない。"""
+    tid = _new(capsys)
+    lanes.turn(st, tid, repo, env.env)
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+    _approve_production(st, tid, env, target)
+    lanes.turn(st, tid, repo, env.env)
+    row = merge_approval.MergeRow("approved", "user", target, True, "another-machine")
+    merge_approval.write_merge_row(env.hub, row, env.hub.viewer())
+
+    out = _retry(capsys, tid, DESIGN, "--later", "keep")
+
+    assert out["status"] == "ok", out
+    assert _judgment(env, target) == row
+
+
+def test_revocations_read_the_comments_of_a_pr_once():
+    hub = merge_hub.MergeHub()
+    targets = [merge_approval.MergeTarget(merge_hub.REPO, 7, "main", head) for head in (merge_hub.HEAD, merge_hub.OTHER)]
+    for n, target in enumerate(targets):
+        merge_approval.write_merge_row(hub, merge_approval.MergeRow("approved", "user", target, True, str(n)), hub.viewer())
+    hub.calls.clear()
+
+    revocations = [merge_approval.Revocation(t, frozenset({str(n)}), f"reopen:{n}") for n, t in enumerate(targets)]
+    merge_approval.write_revocations(hub, revocations, hub.viewer())
+
+    assert hub.calls == ["comments", "post_comment", "post_comment"]
+
+
+def test_an_unfinished_stage_with_a_recorded_merge_is_warned(repo, st, env, capsys):
+    """外への操作のステップが成功した工程は、終了していなくても取り消されないと警告する。"""
+    tid = _new(capsys)
+    lanes.turn(st, tid, repo, env.env)
+    v = run.read(st, tid)
+    merge = next(step.id for step in v.snap.stage(DESIGN).steps if step.kind == "merge")
+    payload = {"step": merge, "status": "finished", "report": {}}
+    draft = model.EventDraft("step_recorded", "workflow", DESIGN, payload=payload, rev=v.rev)
+    merged = replace(v, events=[*v.events, model.Event(v.events[-1].seq + 1, v.events[-1].at, draft)])
+
+    assert reopening.plan_reopen(v, DESIGN, later="keep", reason="r", trigger={"by": "retry"}).warnings == []
+    warned = reopening.plan_reopen(merged, DESIGN, later="keep", reason="r", trigger={"by": "retry"}).warnings
+    assert warned == [f"工程 {DESIGN} のマージ・リリースは取り消されない"]
+
+
 def test_a_revocation_that_cannot_be_written_records_nothing(repo, st, env, capsys):
     tid = _new(capsys)
     lanes.turn(st, tid, repo, env.env)
@@ -354,7 +398,8 @@ def test_the_trail_of_an_mvv_verdict_without_a_recorded_answer_is_also_revoked(r
 
     planned = reopening.plan_reopen(judged, DESIGN, later="keep", reason="r", trigger={"by": "retry"})
 
-    assert [t for t, _ in planned.revoke] == [merge_approval.MergeTarget("o/r", 7, "main", merge_hub.HEAD)]
+    target = merge_approval.MergeTarget("o/r", 7, "main", merge_hub.HEAD)
+    assert [(r.target, r.approvals) for r in planned.revoke] == [(target, {merge_approval.mvv_record_id("design", merge_hub.HEAD)})]
 
 
 def test_a_reopen_by_hand_does_not_count_as_a_user_choice(repo):

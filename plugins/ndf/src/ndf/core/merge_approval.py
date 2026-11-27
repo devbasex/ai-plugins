@@ -6,7 +6,7 @@
 
 承認の対象は 4 つの値（ベースリポジトリ・PR の番号・マージ先・HEAD）で、証跡の行はその対象・回答・担い手・
 「本番へ反映されるか」・回答の記録の識別子を持つ。
-工程の開き直しは、承認した対象へ担い手 `reopen` の却下の行を足して承認を取り消す（`write_revocation`）。
+工程の開き直しは、承認した対象へ担い手 `reopen` の却下の行を足して承認を取り消す（`write_revocations`）。
 """
 
 from __future__ import annotations
@@ -55,6 +55,24 @@ class MergeRow(NamedTuple):
     target: MergeTarget
     production: bool
     record_id: str
+
+
+class Revocation(NamedTuple):
+    """取り消す承認。`approvals` は開き直す工程が書いた承認の記録の識別子、`record_id` は取り消しの行の記録の識別子。"""
+
+    target: MergeTarget
+    approvals: frozenset[str]
+    record_id: str
+
+
+def presented_record_id(gate_id: str, presentation: str | None) -> str:
+    """承認ゲートの回答の記録の識別子（質問の id と提示の識別子。提示の識別子が無ければ質問の id のまま）。"""
+    return f"{gate_id}-{presentation}" if presentation else gate_id
+
+
+def mvv_record_id(gate: str, head: str) -> str:
+    """MVV 判定が通した承認の記録の識別子。"""
+    return f"mvv:{gate}:{head}"
 
 
 def render_merge_row(row: MergeRow) -> str:
@@ -144,16 +162,22 @@ def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer) -> bool:
     return True
 
 
-def write_revocation(hub: GitHub, target: MergeTarget, record_id: str, viewer: Viewer) -> bool:
-    """対象 `target` の最新の証跡が承認なら、担い手 `reopen` の却下の行を投稿して真。承認が無い・既に却下なら書かずに偽。
+def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Viewer) -> None:
+    """対象ごとに、最新の証跡が `approvals` の承認なら担い手 `reopen` の却下の行を投稿する。承認が無い・既に却下・
+    最新の承認が別の記録（残す工程や別のステートマシンの承認）なら書かない。
 
-    `ndf ci merge` は同じ対象の最新の行が却下なら承認が無いと扱う（`merge_judgment`）。打ち直しで行は増えない。
-    `viewer` のアカウント ID が読めていなければ `TrailError`（`merge_rows` が投げる）。"""
-    if merge_judgment(merge_rows(hub, target.number, viewer), target) is None:
-        return False
-    row = MergeRow(REJECTED, REOPEN_BY, target, True, record_id)
-    Publisher(hub).comment(target.number, render_merge_row(row))
-    return True
+    コメントの一覧は PR ごとに 1 回だけ読み、公開範囲は全体で 1 回だけ照会する。`ndf ci merge` は同じ対象の最新の行が
+    却下なら承認が無いと扱う（`merge_judgment`）。打ち直しで行は増えない。`viewer` のアカウント ID が読めていなければ
+    `TrailError`（`merge_rows` が投げる）。"""
+    publisher = Publisher(hub)
+    read: dict[int, list[MergeRow]] = {}
+    for target, approvals, record_id in revocations:
+        if target.number not in read:
+            read[target.number] = merge_rows(hub, target.number, viewer)
+        latest = merge_judgment(read[target.number], target)
+        if latest is None or latest.record_id not in approvals:
+            continue
+        publisher.comment(target.number, render_merge_row(MergeRow(REJECTED, REOPEN_BY, target, True, record_id)))
 
 
 class TrailError(Exception):

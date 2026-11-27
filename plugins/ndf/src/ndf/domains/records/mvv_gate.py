@@ -568,7 +568,11 @@ def _recorded(hub: GitHub, number: int, outcome: dict[str, Any], where: Mapping[
     if outcome["skip"] and isinstance(held, dict):
         t = merge_approval.MergeTarget(held["repo"], held["pr"], held["base"], held["head"])
         row = merge_approval.MergeRow(
-            approval_words.APPROVED, merge_approval.MVV_BY, t, bool(held["production"]), f"mvv:{outcome['gate']}:{t.head}"
+            approval_words.APPROVED,
+            merge_approval.MVV_BY,
+            t,
+            bool(held["production"]),
+            merge_approval.mvv_record_id(outcome["gate"], t.head),
         )
         text = f"{text}\n{merge_approval.render_merge_row(row)}"
     try:

@@ -19,18 +19,18 @@ from ndf.progress.run_view import ANSWERED, CONDUCTOR, FINISHED, REOPENED, START
 # 後ろの工程の扱い（開き直す・残す）
 REOPEN, KEEP = "reopen", "keep"
 
-# 承認の取り消しを書く口（対象と記録の識別子を渡し、書いたら真）
-Revoke = Callable[[merge_approval.MergeTarget, str], bool]
+# 承認の取り消しを書く口（取り消す承認をまとめて渡す）
+Revoke = Callable[[list[merge_approval.Revocation]], None]
 
 
 @dataclass(frozen=True)
 class Reopen:
-    """開き直し 1 回の中身。`stages` は開き直す工程の名前、`revoke` は取り消す承認の対象と取り消しの行の記録の識別子。"""
+    """開き直し 1 回の中身。`stages` は開き直す工程の名前、`revoke` は取り消す承認。"""
 
     drafts: list[model.EventDraft]
     stages: list[str]
     warnings: list[str]
-    revoke: list[tuple[merge_approval.MergeTarget, str]]
+    revoke: list[merge_approval.Revocation]
 
 
 def _state(v: View, stage: str) -> Optional[str]:
@@ -66,11 +66,15 @@ def _target_of(seen: Any, head: Any = None) -> Optional[merge_approval.MergeTarg
     return merge_approval.MergeTarget(repo, number, base, sha)
 
 
-def _trail_target(ev: model.Event) -> Optional[merge_approval.MergeTarget]:
-    """事象が証跡を書いた承認の対象。承認の回答と、省くと決めた MVV 判定の記録（判定のコマンドが証跡を書く）を読む。"""
+def _trail(ev: model.Event) -> Optional[tuple[merge_approval.MergeTarget, str]]:
+    """事象が証跡を書いた承認の対象と記録の識別子。承認の回答と、省くと決めた MVV 判定の記録（判定のコマンドが証跡を書く）を読む。"""
     p = event_payload(ev)
     if ev.draft.kind == ANSWERED:
-        return _target_of(p.get("seen")) if p.get("answer") == run.APPROVED else None
+        seen = p.get("seen")
+        target = _target_of(seen) if p.get("answer") == run.APPROVED else None
+        if target is None:
+            return None
+        return target, merge_approval.presented_record_id(str(p.get("gate_id")), seen.get("presentation"))
     if ev.draft.kind != STEP_EVENT:
         return None
     report = p.get("report")
@@ -78,17 +82,21 @@ def _trail_target(ev: model.Event) -> Optional[merge_approval.MergeTarget]:
     held = outputs.get(model.MVV_KEY) if isinstance(outputs, Mapping) else None
     if not isinstance(held, Mapping) or held.get("skip") is not True:
         return None
-    return _target_of(held.get("target"), held.get("head"))
+    target = _target_of(held.get("target"), held.get("head"))
+    return None if target is None else (target, merge_approval.mvv_record_id(str(held.get("gate")), target.head))
 
 
-def _revocations(v: View, names: list[str]) -> list[tuple[merge_approval.MergeTarget, str]]:
-    found: dict[merge_approval.MergeTarget, str] = {}
+def _revocations(v: View, names: list[str]) -> list[merge_approval.Revocation]:
+    found: dict[merge_approval.MergeTarget, merge_approval.Revocation] = {}
     for name in names:
         for ev in _since_reopened(v, name):
-            target = _trail_target(ev)
-            if target is not None:
-                found[target] = f"reopen:{v.machine_id}:{name}:{ev.seq}"
-    return list(found.items())
+            trail = _trail(ev)
+            if trail is None:
+                continue
+            target, approval = trail
+            approvals = found[target].approvals if target in found else frozenset()
+            found[target] = merge_approval.Revocation(target, approvals | {approval}, f"reopen:{v.machine_id}:{name}:{ev.seq}")
+    return list(found.values())
 
 
 def _outward(step: stages.StepDef) -> bool:
@@ -96,9 +104,20 @@ def _outward(step: stages.StepDef) -> bool:
     return step.kind == "merge" or step.kind == "release"
 
 
+def _acted(v: View, s: stages.StageDef) -> bool:
+    """工程の外への操作が済んでいるか。工程が終了したか、直近の開き直しより後に外への操作のステップの成功を記録した
+    （その後のステップや出力の検証で失敗した工程も含む）。"""
+    outward = {step.id for step in s.steps if _outward(step)}
+    if not outward:
+        return False
+    if _state(v, s.name) == FINISHED:
+        return True
+    recorded = (event_payload(ev) for ev in _since_reopened(v, s.name) if ev.draft.kind == STEP_EVENT)
+    return any(p.get("step") in outward and p.get("status") == FINISHED for p in recorded)
+
+
 def _irreversible(v: View, names: list[str]) -> list[str]:
-    done = [s for s in v.snap.stages if s.name in names and _state(v, s.name) == FINISHED]
-    return [f"工程 {s.name} のマージ・リリースは取り消されない" for s in done if any(map(_outward, s.steps))]
+    return [f"工程 {s.name} のマージ・リリースは取り消されない" for s in v.snap.stages if s.name in names and _acted(v, s)]
 
 
 def plan_reopen(v: View, stage: str, *, later: str, reason: str, trigger: Mapping[str, Any], notes: Optional[str] = None) -> Reopen:
@@ -117,9 +136,9 @@ def plan_reopen(v: View, stage: str, *, later: str, reason: str, trigger: Mappin
 
 
 def revoke_approvals(r: Reopen, post: Revoke) -> None:
-    """取り消す対象ごとに取り消しを書く。DB の追記より前に呼ぶ（書けなければ `post` が `model.Refused`）。"""
-    for target, record_id in r.revoke:
-        post(target, record_id)
+    """承認の取り消しを書く。DB の追記より前に呼ぶ（書けなければ `post` が `model.Refused`）。"""
+    if r.revoke:
+        post(r.revoke)
 
 
 @contextmanager

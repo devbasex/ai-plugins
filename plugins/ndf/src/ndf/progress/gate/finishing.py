@@ -22,12 +22,13 @@ def _revoker(cwd: Path) -> reopening.Revoke:
     """承認の取り消しを PR へ書く口。書けなければ `model.Refused`（開き直しを記録しない）。"""
     get_hub = shared_hub(cwd)
 
-    def revoke(target: merge_approval.MergeTarget, record_id: str) -> bool:
+    def revoke(revocations: list[merge_approval.Revocation]) -> None:
         try:
             hub = get_hub()
-            return merge_approval.write_revocation(hub, target, record_id, hub.viewer())
+            merge_approval.write_revocations(hub, revocations, hub.viewer())
         except (merge_approval.TrailError, GitHubError, GitError) as exc:
-            raise model.Refused(f"PR #{target.number} の承認を取り消せないので、開き直さない: {exc}") from None
+            numbers = "・".join(f"#{n}" for n in sorted({r.target.number for r in revocations}))
+            raise model.Refused(f"PR {numbers} の承認を取り消せないので、開き直さない: {exc}") from None
 
     return revoke
 

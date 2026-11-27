@@ -818,7 +818,11 @@ def parser() -> argparse.ArgumentParser:
         add_stage_target(sub.add_parser(name, help=f"工程に {name} を書く"))
     retry = sub.add_parser("retry", help="工程に retry を書く")
     add_stage_target(retry)
-    retry.add_argument("--later", choices=("reopen", "keep"), help="終了した工程の開き直しで、後ろの工程を開き直すか残すか")
+    retry.add_argument(
+        "--later",
+        choices=("reopen", "keep"),
+        help="終了した工程では必須。reopen は後ろの工程も開き直し、keep は指定した工程だけを開き直す。失敗した工程の打ち直しには指定できない",
+    )
     finish = sub.add_parser("finish", help="工程に finish を書く")
     add_stage_target(finish)
     finish.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")
