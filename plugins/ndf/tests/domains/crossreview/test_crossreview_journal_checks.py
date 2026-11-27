@@ -264,7 +264,8 @@ def test_issue_4363_heavy_reports_of_different_conditions_at_one_place_are_not_a
 
 @pytest.mark.parametrize("other", [{"impact": "既存データの更新で失敗する"}, {"section": "doc.md#移行"}])
 def test_issue_4363_lowered_finding_raised_differently_in_the_same_file_is_checked_again(other: dict) -> None:
-    """同じファイルで 1 文か見出しだけが違う出し直しは、判定役に確かめ直し、否定されればまた下げて修正担当へ渡さない。"""
+    """同じファイルで 1 文か見出しだけが違う出し直しは、判定役に確かめ直し、否定されればまた下げて修正担当へ渡さない。
+    確かめ直しの後は、否定した内容の出し直しは下げたままにし、どちらとも違う重い報告は判定役に渡さず修正候補に戻す。"""
     journal, row = _lowered(path="a.py", line=1, section="doc.md#保存")
     occurrence = row[journal_mod.OCCURRENCE]
     journal.enter(2, [_told(path="a.py", line=9, section="doc.md#保存")])
@@ -274,8 +275,10 @@ def test_issue_4363_lowered_finding_raised_differently_in_the_same_file_is_check
     assert journal.fresh == ["r1-1"] and journal.revived == [] and row[journal_mod.OCCURRENCE] == occurrence
     journal.apply_checks(journal.fresh, _answered())
     assert (row["severity"], journal.handable()) == ("minor", [])
-    # 確かめ直しは 1 回だけ。次の言い換えは下げたままで判定役にも渡さず、違うファイルの指摘は修正候補に戻す
-    journal.enter(4, [_told(path="a.py", line=20, section="doc.md#保存", impact="別の言い方で止まる")])
-    assert (row["severity"], row["check"]["lowered"], journal.fresh) == ("minor", True, [])
-    journal.enter(5, [_told(path="b.py", line=1)])
-    assert (row["severity"], row["path"], journal.fresh) == ("major", "b.py", [])
+    # 先に否定した内容と、確かめ直して否定した内容は、下げたままにする
+    for told in ({}, other):
+        journal.enter(4, [_told(**{"path": "a.py", "line": 20, "section": "doc.md#保存", **told})])
+        assert (row["severity"], row["check"]["lowered"], journal.fresh) == ("minor", True, [])
+    journal.enter(5, [_told(path="a.py", line=30, section="doc.md#保存", impact="別の発生条件で止まる")])
+    assert (row["severity"], row["line"], journal.fresh) == ("major", 30, [])
+    assert journal.handable() == [row]
