@@ -588,7 +588,7 @@ def run_local_gate(
             continue
         own = _compare(gate, tip, head, found, failed, round_no)
         labels = [f.label for f in own]
-        # 担当のコミットの後・範囲の検査の前に中断しても、再開で検査できるよう直す前の SHA を残す
+        # 担当の起動から範囲の検査の終わりまでに中断しても、再開で検査できるよう直す前の SHA を残す
         state["fixing"] = {"before": head, "tip": tip, "labels": labels}
         save()
         stopped = _record("work_stopped", round_no, head)
@@ -600,15 +600,21 @@ def run_local_gate(
 
 
 def _checked_fix(
-    gate: _Gate, launch: Callable[[], None], before: str, labels: Sequence[str], protected: protected_decide.Protected
+    gate: _Gate,
+    launch: Callable[[], None],
+    before: str,
+    labels: Sequence[str],
+    protected: protected_decide.Protected,
+    before_undo: Optional[Callable[[], None]] = None,
 ) -> None:
     """修正担当を起動し（`launch`）、直しの範囲を検査してから `fixing` を消す。止まれば消してから止める。
 
-    担当のコミットの後・検査の前に中断すれば `fixing` が残り、再開の頭の `_check_pending_fix` が同じ検査をする。
+    担当の起動の前から検査の終わりまでに中断すれば `fixing` が残り、再開の頭の `_check_pending_fix` が同じ検査をする。
+    `before_undo` は範囲外で `before` へ戻すと決まったときだけ、戻す前に呼ぶ（`final_gate.check_fix`）。
     """
     try:
         launch()
-        final_gate.check_fix(gate.g, before, labels, gate.cfg.scope, protected.covers)
+        final_gate.check_fix(gate.g, before, labels, gate.cfg.scope, protected.covers, before_undo)
     except final_gate.GateStopped:
         gate.state.pop("fixing", None)
         gate.save()
@@ -620,26 +626,24 @@ def _checked_fix(
 def _check_pending_fix(gate: _Gate) -> bool:
     """前の起動が最終ゲート修正の範囲の検査の前に中断していれば、その直しの範囲を検査する（範囲外なら戻して `refused`）。
 
-    検査は直す前の SHA へ作業場所を戻しうるので、その前に中断の後の作業を確かめる。追跡ファイルに未コミットの変更があるか、
-    戻すと追跡されるパスに未追跡のファイルがあれば、何も変えずに止める。保留中の直しが無ければ何も打たずに偽を返す。
+    検査は直す前の SHA へ作業場所を戻しうるので、中断の後の作業を確かめる。追跡ファイルに未コミットの変更があれば、範囲を
+    読む前に止める。戻すと上書き・削除される未追跡のファイルは、範囲外で戻すと決まったときだけ確かめ、あれば何も変えずに止める
+    （範囲内の直しの再開では Git を余計に打たない）。保留中の直しが無ければ何も打たずに偽を返す。
     """
     pending = gate.state["fixing"] if "fixing" in gate.state else None
     if not isinstance(pending, Mapping):
         return False
     before = str(pending["before"])
     worktree.refuse_dirty(gate.g)
-    _refuse_untracked_in(gate.g, before)
     tip = str(pending["tip"])
     protected = protection_at(gate.g, tip, settings_at(gate.g, tip, gate.cfg.repo_work), gate.cfg.repo_work, gate.trees)
-    _checked_fix(gate, lambda: None, before, [str(x) for x in pending["labels"]], protected)
+    _checked_fix(gate, lambda: None, before, [str(x) for x in pending["labels"]], protected, partial(_refuse_untracked_in, gate.g, before))
     return True
 
 
 def _refuse_untracked_in(g: git.Git, before: str) -> None:
-    """`before` へ戻すと追跡されるパス（今の `HEAD` に無いパス）に未追跡のファイルがあれば `SyncRefused`（上書きしない）。"""
-    root = Path(g.run("rev-parse", "--show-toplevel").strip())
-    added = [p for p in g.run("diff", "--name-only", "-z", "--diff-filter=A", "HEAD", before).split("\0") if p]
-    hits = [p for p in added if (root / p).exists() or (root / p).is_symlink()]
+    """`before` へ戻すと上書き・削除される未追跡のファイル（親子のパスを含む）があれば `SyncRefused`（消さない）。"""
+    hits = worktree.untracked_in_the_way(g, before)
     if hits:
         raise worktree.SyncRefused(
             "最終ゲート修正の前へ戻すと上書きする未追跡のファイルがある。移すかコミットしてから流し直す: " + ", ".join(hits)

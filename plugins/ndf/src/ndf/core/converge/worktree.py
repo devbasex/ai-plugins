@@ -300,12 +300,16 @@ def own_commits(g: git.Git, remote: str, head: str) -> list[str]:
     return g.run("rev-list", "--reverse", "--no-merges", "--cherry-pick", "--right-only", f"{remote}...{head}").split()
 
 
-def _untracked_in_the_way(g: git.Git, remote: str) -> list[str]:
-    """未追跡のファイル（ignored を含む）のうち、`remote` が追跡するパスと重なる（reset で上書き・削除される）もの。"""
+def untracked_in_the_way(g: git.Git, commit: str) -> list[str]:
+    """未追跡のファイル（ignored を含む）のうち、`commit` が追跡するパスと重なる（`commit` へ reset すると上書き・削除される）もの。
+
+    親子のパスも重なりとして数える（追跡されるファイルの親のディレクトリにある未追跡のファイル、未追跡のファイルの下に追跡されるパス）。
+    リモートへの同期と、手元の最終ゲートの直す前の SHA へのロールバックが共に使う（#4566）。
+    """
     untracked = [p for p in g.run("ls-files", "--others", "-z").split("\0") if p]
     if not untracked:
         return []
-    files = {p for p in g.run("ls-tree", "-r", "--name-only", "-z", remote).split("\0") if p}
+    files = {p for p in g.run("ls-tree", "-r", "--name-only", "-z", commit).split("\0") if p}
     dirs = {d for f in files for d in _parents(f)}
     return [p for p in untracked if _clashes(p, files, dirs)]
 
@@ -328,7 +332,7 @@ def _refuse_lossy_sync(g: git.Git, remote: str, before: str) -> None:
         raise SyncRefused(
             f"送っていないマージのコミットがあり、載せ直すとマージで足した変更が消える。送ってから流し直す: {', '.join(merges)}"
         )
-    clashing = _untracked_in_the_way(g, remote)
+    clashing = untracked_in_the_way(g, remote)
     if clashing:
         raise SyncRefused(
             f"未追跡のファイルが origin の先頭の追跡するパスと重なり、合わせると上書きされる。移してから流し直す: {', '.join(clashing)}"

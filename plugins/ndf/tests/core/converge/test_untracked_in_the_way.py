@@ -1,4 +1,4 @@
-"""現状固定: 同期の前に、origin が追跡するパスと重なる未追跡のファイルを見つける（`worktree._untracked_in_the_way`）。
+"""現状固定: 同期の前に、origin が追跡するパスと重なる未追跡のファイルを見つける（`worktree.untracked_in_the_way`）。
 
 重なるのは、同じパスのファイル・origin のディレクトリと同じパス・origin のファイルを親に持つパスの 3 つ。
 """
@@ -22,7 +22,7 @@ class _Git:
 
 
 def _in_the_way(untracked: list[str], tracked: list[str]) -> list[str]:
-    return worktree._untracked_in_the_way(_Git(untracked, tracked), "origin/x")  # type: ignore[arg-type]
+    return worktree.untracked_in_the_way(_Git(untracked, tracked), "origin/x")  # type: ignore[arg-type]
 
 
 def test_untracked_file_on_a_tracked_file_clashes() -> None:
@@ -39,7 +39,7 @@ def test_untracked_file_under_a_tracked_file_clashes() -> None:
 
 def test_no_untracked_files_does_not_read_the_tree() -> None:
     g = _Git([], ["a"])
-    assert worktree._untracked_in_the_way(g, "origin/x") == []  # type: ignore[arg-type]
+    assert worktree.untracked_in_the_way(g, "origin/x") == []  # type: ignore[arg-type]
     assert [c[0] for c in g.calls] == ["ls-files"]
 
 

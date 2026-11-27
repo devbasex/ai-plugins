@@ -368,6 +368,33 @@ def test_a_restart_keeps_an_untracked_file_that_undoing_the_fix_would_overwrite(
     assert "fixing" in w.state
 
 
+def test_a_restart_keeps_an_untracked_file_where_undoing_the_fix_needs_a_directory(tmp_path, monkeypatch):
+    w = make_world(tmp_path, monkeypatch)
+    bad = commit(w.work, {"src/a.py": "x = 2\n", "docs/old/a.md": "old\n"})
+    # 修正担当が範囲外のディレクトリを消してコミットした後に中断し、利用者が同じ名前で未追跡のファイルを書いた
+    sh(w.work, "rm", "-q", "-r", "docs/old")
+    sh(w.work, "commit", "-q", "-m", "rm")
+    (w.work / "docs/old").write_text("mine\n", encoding="utf-8")
+    w.state["fixing"] = {"before": bad, "tip": w.tip, "labels": ["#1 unit"]}
+    with pytest.raises(worktree.SyncRefused):
+        _run(w, FakeExec())
+    assert (w.work / "docs/old").read_text(encoding="utf-8") == "mine\n"
+    assert "fixing" in w.state
+
+
+def test_a_restart_of_a_fix_inside_the_scope_ignores_an_untracked_file_at_a_removed_path(tmp_path, monkeypatch):
+    w = make_world(tmp_path, monkeypatch)
+    bad = commit(w.work, {"src/a.py": "x = 2\n", "src/b.py": "y = 1\n"})
+    # 修正担当が範囲内のファイルを消してコミットした後に中断し、利用者が同じパスへ未追跡のファイルを書いた
+    sh(w.work, "rm", "-q", "src/b.py")
+    sh(w.work, "commit", "-q", "-m", "rm")
+    (w.work / "src/b.py").write_text("mine\n", encoding="utf-8")
+    w.state["fixing"] = {"before": bad, "tip": w.tip, "labels": ["#1 unit"]}
+    _run(w, FakeExec())
+    assert (w.work / "src/b.py").read_text(encoding="utf-8") == "mine\n"
+    assert "fixing" not in w.state
+
+
 def test_a_command_pointing_into_the_work_tree_is_a_precondition(tmp_path, monkeypatch):
     w = make_world(tmp_path, monkeypatch)
     project = {"test": {"suites": [{"name": "u", "command": f"pytest {w.main}/tests"}]}}

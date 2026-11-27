@@ -95,15 +95,23 @@ def changed_by_commit(g: git.Git, before: str) -> dict[str, list[str]]:
 
 
 def check_fix(
-    g: git.Git, before: str, failed: Sequence[str], scope: Sequence[str], excluded: Optional[Callable[[str], bool]] = None
+    g: git.Git,
+    before: str,
+    failed: Sequence[str],
+    scope: Sequence[str],
+    excluded: Optional[Callable[[str], bool]] = None,
+    before_undo: Optional[Callable[[], None]] = None,
 ) -> None:
     """最後の修正の直しを確かめる。範囲外を変えていれば `before` へ戻して `refused` で止める（#3038）。
 
     `excluded` が真のファイル（手元の経路のテストの定義のファイル。#4566）は、範囲の中でも範囲の外として扱う。
+    `before_undo` は戻すと決まった後・戻す前にだけ呼ぶ（戻すと失うものがあれば、そこで止める。#4566）。
     """
     verdict = final_gate_decide.verify_final_fix(changed_by_commit(g, before), scope, excluded)
     if verdict.ok:
         return
+    if before_undo is not None:
+        before_undo()
     g.run("reset", "-q", "--hard", before)
     record = {"status": "refused", "outside_failures": verdict.record(failed)}
     raise GateStopped("refused", str(verdict.cause()["detail"]), record)
