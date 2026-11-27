@@ -1,4 +1,4 @@
-"""直さずに残した指摘の起票と起票の記録（#3780）。GitHub は REST の偽物で、伏せ字は本物の `publish.Publisher` を通す。"""
+"""直さずに残した指摘の起票と起票の記録（#3780）。GitHub は API の偽物で、伏せ字は本物の `publish.Publisher` を通す。"""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ PR_URL = f"https://github.com/{REPO}/pull/7"
 
 
 class FakeGitHub:
-    """起票が使う REST の偽物。時刻は書き込みのたびに 1 秒進む。`fail` の (method, パスの末尾) は、指定の状態で 1 回だけ断る。
+    """起票が使う GitHub の API の偽物。時刻は書き込みのたびに 1 秒進む。`fail` の (method, パスの末尾) は、指定の状態で 1 回だけ断る。
     `indexed` が偽なら、作った Issue は検索にまだ出ない。"""
 
     repo = REPO
@@ -70,13 +70,20 @@ class FakeGitHub:
             return ordered[start : start + params["per_page"]]
         if path == f"repos/{REPO}/issues":
             return self.issue(payload["body"], title=payload["title"])
-        tail = path.removeprefix(f"repos/{REPO}/issues/")
-        if method == "GET" and tail.isdecimal():
-            found = next((i for i in self.issues if i["number"] == int(tail)), None)
-            if found is None:
-                raise GitHubError("無い", 404)
-            return dict(found)
         return self._comment(method, path.removeprefix(f"repos/{REPO}/issues/"), payload)
+
+    def nodes(self, numbers: Any, node: str, fields: str) -> dict[int, dict[str, Any]]:
+        """GraphQL のまとめ読み。bot の login は末尾の `[bot]` を持たず、無い番号は空の辞書。"""
+        wanted = sorted(set(numbers))
+        self.calls.append(("GRAPHQL", node))
+        found = {i["number"]: i for i in self.issues}
+        return {n: self._node(found[n]) if n in found else {} for n in wanted}
+
+    def _node(self, issue: dict[str, Any]) -> dict[str, Any]:
+        login = issue["user"]["login"]
+        author = {"__typename": "Bot" if login.endswith("[bot]") else "User", "login": login.removesuffix("[bot]")}
+        read = {"url": issue["html_url"], "body": issue["body"], "createdAt": issue["created_at"]}
+        return read | {"authorAssociation": issue["author_association"], "author": author}
 
     def _comment(self, method: str, tail: str, payload: Any) -> Any:
         if tail.startswith("comments/"):
@@ -220,6 +227,15 @@ def test_the_login_is_read_once_and_the_record_of_a_bot_is_trusted() -> None:
     again.go()
     again.go()
     assert again.row[Filed.URL] == first.row[Filed.URL] and github.created() == 1 and github.viewed == 2
+
+
+def test_recorded_issues_are_read_together() -> None:
+    github = FakeGitHub()
+    rows = (_row(), _row("r2-2", text="別の指摘で値を落とす"))
+    Run(github, *rows).go()
+    again = Run(github, _row(), _row("r2-2", text="別の指摘で値を落とす"))
+    assert again.go() == [] and all(r[Filed.URL] for r in again.data["findings"])
+    assert github.count("GRAPHQL", "issue") == 1 and github.created() == 2
 
 
 def test_a_refused_creation_keeps_the_finding_and_can_be_retried() -> None:

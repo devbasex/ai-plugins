@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
+from ndf.adapters.github import BOT_SUFFIX
 from ndf.adapters.github_pulls import PER_PAGE
 from ndf.contracts import limits
 from ndf.domains.crossreview import finish_decide as fin
@@ -27,6 +28,8 @@ RECORD_ID = "issue_record_id"
 LIST_FULL = "issue_list_full"
 # 起票先を GitHub にする `.ndf/project.json` の `issues.primary` の値
 GITHUB = "github"
+# 起票の記録の URL が指す Issue を、GraphQL でまとめて読むときの欄
+ISSUE_FIELDS = "url body createdAt authorAssociation author { __typename login }"
 
 Entries = dict[str, dict[str, Any]]
 
@@ -70,7 +73,7 @@ class Port(Protocol):
 
     def recent(self, since: str) -> list[Listed]: ...
 
-    def issue(self, url: str) -> Optional[Listed]: ...
+    def issues(self, urls: Sequence[str]) -> dict[str, Optional[Listed]]: ...
 
     def create(self, title: str, body: str) -> str: ...
 
@@ -256,16 +259,18 @@ class _Filing:
 
     def known(self) -> None:
         """起票の記録に URL がある識別値は、その URL が信用する作者のこの指摘の Issue なら、起票せず行に書く。違えば記録の URL を
-        捨て、作成の結果が分からない識別値として確かめる。読めなければ起票も採用もしない。"""
-        for ident in self.rows:
-            url = self.url_of(ident)
-            if not url:
-                continue
-            try:
-                issue = self.port.issue(url)
-            except Exception as exc:  # noqa: BLE001 ネットワーク: 確かめられない URL は使わず、打ち直しで確かめる
+        捨て、作成の結果が分からない識別値として確かめる。読めなければ起票も採用もしない。Issue はまとめて 1 回で読む。"""
+        urls = {ident: url for ident in self.rows if (url := self.url_of(ident))}
+        if not urls:
+            return
+        try:
+            read = self.port.issues(list(urls.values()))
+        except Exception as exc:  # noqa: BLE001 ネットワーク: 確かめられない URL は使わず、打ち直しで確かめる
+            for ident in urls:
                 self.fail(ident, _reason(exc))
-                continue
+            return
+        for ident, url in urls.items():
+            issue = read[url]
             if issue and self._trusts(issue.author, issue.association) and leftover_decide.names_finding(issue, ident):
                 self.done(ident, url)
             else:
@@ -411,8 +416,25 @@ def _listed_of(row: Mapping[str, Any]) -> Listed:
     )
 
 
+def _listed_node(node: Mapping[str, Any]) -> Listed:
+    """GraphQL で読んだ Issue。bot の login は REST と同じ `<名前>[bot]` にそろえる。"""
+    author = node.get("author")
+    author = author if isinstance(author, Mapping) else {}
+    login = _text(author.get("login"))
+    if login and author.get("__typename") == "Bot":
+        login += BOT_SUFFIX
+    return Listed(
+        _text(node.get("url")),
+        _text(node.get("body")),
+        login,
+        _text(node.get("authorAssociation")),
+        _text(node.get("createdAt")),
+        False,
+    )
+
+
 class GitHubIssues:
-    """GitHub の REST で起票を読み書きする `Port`。書く本文は `publish.Publisher` の検査を通し、書き込みは二次レート制限なら
+    """GitHub の API で起票を読み書きする `Port`。書く本文は `publish.Publisher` の検査を通し、書き込みは二次レート制限なら
     待って打ち直す（`threads.patient`）。"""
 
     def __init__(
@@ -495,18 +517,13 @@ class GitHubIssues:
         for rows in self._pages(f"/repos/{self.hub.repo}/issues", params):
             yield from map(_listed_of, rows)
 
-    def issue(self, url: str) -> Optional[Listed]:
-        """`url` がこのリポジトリの Issue ならその中身。別の場所の URL と、無い（消された）Issue は None。"""
-        prefix = f"https://github.com/{self.hub.repo}/issues/"
-        number = url[len(prefix) :]
-        if not (url.lower().startswith(prefix.lower()) and number.isdecimal()):
-            return None
-        try:
-            return _listed_of(self.hub.rest("GET", f"/repos/{self.hub.repo}/issues/{number}"))
-        except self.errors as exc:
-            if getattr(exc, "status", None) in (404, 410):
-                return None
-            raise
+    def issues(self, urls: Sequence[str]) -> dict[str, Optional[Listed]]:
+        """URL ごとに、このリポジトリの Issue ならその中身。別の場所の URL と、無い（消された・Pull Request の）番号は None。
+        GraphQL でまとめて読む（`GitHub.nodes`）。"""
+        prefix = f"https://github.com/{self.hub.repo}/issues/".lower()
+        numbers = {u: int(u[len(prefix) :]) for u in urls if u.lower().startswith(prefix) and u[len(prefix) :].isdecimal()}
+        read = self.hub.nodes(numbers.values(), "issue", ISSUE_FIELDS) if numbers else {}
+        return {u: _listed_node(read[numbers[u]]) if u in numbers and read[numbers[u]] else None for u in urls}
 
     def create(self, title: str, body: str) -> str:
         return str(self._write(lambda: self.publisher.create_issue(title, body)).url)
