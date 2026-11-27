@@ -686,8 +686,7 @@ def _lost_reason(made: record_decide.Record, authoritative: Optional[tuple[str, 
     """並行した書き込みに負けて自分のコメントを消したときの止まる文。"""
     if conflict is not None:
         return f"並行して書かれた記録と値とコミットの組が合わない（既にある値 {conflict[0]}・コミット {conflict[1]}）。その値かコミットで打ち直す"
-    listed = ", ".join(authoritative) if authoritative else "無し"
-    return f"並行して書かれた記録が値 {made.version} の正の一覧（{listed}）になった。正の一覧で打ち直す"
+    return f"並行して書かれた記録が値 {made.version} の正の一覧（{record_decide.listed_names(authoritative)}）になった。正の一覧で打ち直す"
 
 
 def _holding_pulls(hub: GitHub, shape: _Shape, version: str, environments: Sequence[str]) -> dict[str, frozenset[int]]:

@@ -310,7 +310,7 @@ def _unversioned_result(args: argparse.Namespace, strategy: branch_strategy.Stra
 
 
 def _listed_names(names: tuple[str, ...]) -> str:
-    return ", ".join(names) if names else "無し"
+    return record_decide.listed_names(names)
 
 
 def cmd_record(args: argparse.Namespace) -> dict:

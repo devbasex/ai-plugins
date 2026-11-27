@@ -342,6 +342,11 @@ def missing_in(counted_records: Sequence[Record], targets: tuple[str, ...]) -> t
     return tuple(t for t in targets if t not in covered)
 
 
+def listed_names(names: Sequence[str] | None) -> str:
+    """届け先の名前を `, ` でつないだ文。空か `None` なら「無し」。"""
+    return ", ".join(names) if names else "無し"
+
+
 def complete_of(releases: Sequence[Record], representative: Record, targets: tuple[str, ...]) -> tuple[bool, tuple[str, ...]]:
     """`counted` の記録の `environments` が `targets` を覆うかと、まだ反映の記録が無い届け先（`targets` の順）。"""
     missing = missing_in(counted(releases, representative, targets), targets)
