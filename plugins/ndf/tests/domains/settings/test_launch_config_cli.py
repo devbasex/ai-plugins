@@ -76,6 +76,13 @@ def _ask(capsys, candidate: Path) -> tuple[dict, dict, list[str]]:
     return got, question, got["routes"]["approved"]["argv"][2:]
 
 
+def _typed(monkeypatch, sha: str, name: str = "山田") -> None:
+    """端末で、承認者の名前とハッシュの先頭 8 文字を打つ。"""
+    monkeypatch.setattr(lc, "_terminal", lambda: True)
+    typed = iter([name, sha[:8]])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(typed))
+
+
 def _approve_rows() -> list[dict]:
     return [r for r in la.records.whole_rows(la.state_file(la.APPROVALS)) if r["action"] == "approve"]
 
@@ -113,13 +120,86 @@ def test_a_denied_answer_also_stops_an_empty_candidate(repo, capsys):
     assert not (repo / ".ndf" / "launch.json").exists()
 
 
-def test_an_empty_candidate_is_reflected_without_an_approval_row(repo, capsys):
+def test_an_empty_candidate_is_reflected_without_an_approval_row_only_after_a_human_confirmation(repo, capsys, monkeypatch):
+    """承認の対象が空でも、設定の書き換えには毎回人の確認が要る（C7）。端末では反映先のパスを示す。"""
+    target = repo / ".ndf" / "launch.json"
     candidate = _draft(capsys, EMPTY)
     sha = _run(capsys, "show", "--candidate", str(candidate))["metrics"]["sha256"]
-    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["status"] == "ok"
-    assert json.loads((repo / ".ndf" / "launch.json").read_text()) == EMPTY
+    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["cause"]["kind"] == "refused"  # 端末でない
+    assert not target.exists()
+    _typed(monkeypatch, sha)
+    code = cli.main([lc.TOOL, "approve", "--sha256", sha, "--candidate", str(candidate)])
+    out = capsys.readouterr()
+    assert code == 0 and str(target) in out.err
+    assert json.loads(target.read_text()) == EMPTY
     assert _approve_rows() == []
-    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["status"] == "ok"
+    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["status"] == "ok"  # 反映済みの打ち直し
+
+
+def test_an_approved_candidate_is_not_reflected_without_a_human_confirmation(repo, capsys):
+    candidate = _draft(capsys)
+    sha = _run(capsys, "show", "--candidate", str(candidate))["metrics"]["sha256"]
+    la.append("/r", sha, la.Action.APPROVE, approver="人")
+    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["cause"]["kind"] == "refused"
+    assert not (repo / ".ndf" / "launch.json").exists()
+
+
+def test_an_empty_candidate_is_reflected_by_the_answer(repo, capsys):
+    candidate = _draft(capsys, EMPTY)
+    _, question, approve = _ask(capsys, candidate)
+    assert _run(capsys, *approve)["cause"]["kind"] == "refused"  # 未回答
+    _answer(question, la.APPROVE_LABEL.format("人"))
+    assert _run(capsys, *approve)["status"] == "ok"
+    assert json.loads((repo / ".ndf" / "launch.json").read_text()) == EMPTY and _approve_rows() == []
+
+
+def _elsewhere(capsys, monkeypatch, repo: Path) -> Path:
+    """別の作業場所（同じリポジトリのキー）で作った候補。"""
+    other = repo.parent / "other"
+    (other / ".git").mkdir(parents=True)
+    monkeypatch.chdir(other)
+    candidate = _draft(capsys)
+    monkeypatch.chdir(repo)
+    return candidate
+
+
+def test_a_candidate_of_another_worktree_is_neither_asked_nor_reflected(repo, capsys, monkeypatch):
+    candidate = _elsewhere(capsys, monkeypatch, repo)
+    asked = _run(capsys, "show", "--candidate", str(candidate), "--question", "approve")
+    assert asked["cause"]["kind"] == "refused" and not la.state_file(la.QUESTIONS).exists()
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")  # 端末のコマンドを返す会話でも拒む
+    assert _run(capsys, "show", "--candidate", str(candidate), "--question", "approve")["cause"]["kind"] == "refused"
+    sha = _run(capsys, "show", "--candidate", str(candidate))["metrics"]["sha256"]
+    _typed(monkeypatch, sha)
+    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["cause"]["kind"] == "refused"
+    assert not (repo / ".ndf" / "launch.json").exists() and not (repo.parent / "other" / ".ndf" / "launch.json").exists()
+    assert _approve_rows() == []
+
+
+def test_the_answer_to_another_candidate_does_not_reflect_this_candidate(repo, capsys):
+    asked = _draft(capsys)
+    other = _draft(capsys)  # 同じ中身の別の候補
+    _, question, approve = _ask(capsys, asked)
+    _answer(question, la.APPROVE_LABEL.format("人"))
+    i = approve.index("--candidate")
+    assert _run(capsys, *approve[: i + 1], str(other))["cause"]["kind"] == "refused"
+    assert not (repo / ".ndf" / "launch.json").exists() and _approve_rows() == []
+
+
+def test_a_candidate_changed_after_the_hash_check_is_not_reflected(repo, capsys, monkeypatch):
+    target = repo / ".ndf" / "launch.json"
+    candidate = _draft(capsys, EMPTY)
+    sha = _run(capsys, "show", "--candidate", str(candidate))["metrics"]["sha256"]
+    _typed(monkeypatch, sha)
+    reflect = la.reflect
+
+    def changed_first(cand, *args, **kwargs):
+        cand.write_text(json.dumps(LSP), encoding="utf-8")  # ハッシュを照らした後、反映の前に候補を書き換える
+        return reflect(cand, *args, **kwargs)
+
+    monkeypatch.setattr(la, "reflect", changed_first)
+    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["cause"]["kind"] == "refused"
+    assert not target.exists()
 
 
 def test_show_returns_the_continuation_of_an_answered_request(repo, capsys):
@@ -177,11 +257,12 @@ def test_the_terminal_route_with_a_candidate_can_be_confirmed_after_the_reflecti
     assert got["metrics"]["required"] and confirmed["metrics"]["approved"]
 
 
-def test_an_unreflected_candidate_with_the_same_hash_as_no_setting_is_not_reported_as_reflected(repo, capsys):
+def test_an_unreflected_candidate_with_the_same_hash_as_no_setting_is_not_reported_as_reflected(repo, capsys, monkeypatch):
     """許可の指定が無い候補は、設定が無い状態と承認の対象のハッシュが同じになる。反映したかは完了の記録で決める。"""
     candidate = _draft(capsys, {"version": 1})
     shown = _run(capsys, "show", "--candidate", str(candidate))
     assert shown["metrics"]["reflected"] is False and not (repo / ".ndf" / "launch.json").exists()
+    _typed(monkeypatch, shown["metrics"]["sha256"])
     assert _run(capsys, "approve", "--sha256", shown["metrics"]["sha256"], "--candidate", str(candidate))["status"] == "ok"
     assert _run(capsys, "show", "--candidate", str(candidate))["metrics"]["reflected"]
 
@@ -190,6 +271,7 @@ def test_a_candidate_edited_after_the_reflection_is_not_reported_as_reflected(re
     monkeypatch.setattr(la.launch_candidates, "_settleable", lambda: False)  # 候補を退避できず、反映の後も残る環境
     candidate = _draft(capsys, EMPTY)
     sha = _run(capsys, "show", "--candidate", str(candidate))["metrics"]["sha256"]
+    _typed(monkeypatch, sha)
     assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["status"] == "ok"
     assert candidate.exists() and _run(capsys, "show", "--candidate", str(candidate))["metrics"]["reflected"]
     candidate.write_text(json.dumps(LSP), encoding="utf-8")  # 反映の後に直し直した
@@ -210,8 +292,10 @@ def test_approving_a_candidate_equal_to_the_hand_written_setting_records_the_app
 
 def test_a_revoke_before_the_lock_stops_the_reflection(repo, capsys, monkeypatch):
     candidate = _draft(capsys)
-    sha = _run(capsys, "show", "--candidate", str(candidate))["metrics"]["sha256"]
+    _, question, approve = _ask(capsys, candidate)
+    sha = approve[approve.index("--sha256") + 1]
     la.append("/r", sha, la.Action.APPROVE, approver="人")
+    _answer(question, la.APPROVE_LABEL.format("人"))
     reflect = la.reflect
 
     def revoked_first(*args, **kwargs):
@@ -219,7 +303,7 @@ def test_a_revoke_before_the_lock_stops_the_reflection(repo, capsys, monkeypatch
         return reflect(*args, **kwargs)
 
     monkeypatch.setattr(la, "reflect", revoked_first)
-    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["cause"]["kind"] == "refused"
+    assert _run(capsys, *approve)["cause"]["kind"] == "refused"
     assert not (repo / ".ndf" / "launch.json").exists()
 
 
@@ -277,11 +361,22 @@ def test_inside_an_ai_started_by_ndf_draft_approve_and_revoke_are_refused(repo, 
     assert not la.state_file(la.APPROVALS).exists()
 
 
+@pytest.mark.parametrize("name", ["NDF_FACTORY_RUN", "NDF_RELAY_PLAN", "NDF_ORGANIZER_DIR"])
+def test_revoke_is_refused_where_answers_are_not_recorded(repo, capsys, monkeypatch, name):
+    _run(capsys, "show")  # 最初のコマンドが状態の保存先を用意する（それより前に書いた記録は退避される）
+    la.append("/r", "a" * 64, la.Action.APPROVE, approver="人")
+    monkeypatch.setenv(name, "1")
+    assert _run(capsys, "revoke", "--sha256", "a" * 64)["cause"]["kind"] == "refused"
+    assert la.is_approved("/r", "a" * 64)
+
+
 def test_a_malformed_hash_is_invalid(repo, capsys):
     assert _run(capsys, "revoke", "--sha256", "ABC")["cause"]["kind"] == "invalid"
 
 
 def test_revoke_adds_a_row(repo, capsys):
+    _run(capsys, "show")  # 最初のコマンドが状態の保存先を用意する（それより前に書いた記録は退避される）
     la.append("/r", "a" * 64, la.Action.APPROVE, approver="人")
+    assert la.is_approved("/r", "a" * 64)
     assert _run(capsys, "revoke", "--sha256", "a" * 64)["status"] == "ok"
     assert not la.is_approved("/r", "a" * 64)
