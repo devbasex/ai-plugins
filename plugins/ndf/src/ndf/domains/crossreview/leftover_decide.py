@@ -220,14 +220,14 @@ def names_finding(listed: Listed, ident: str) -> bool:
 
 
 def record_body(entries: Mapping[str, Mapping[str, Any]]) -> str:
-    """起票の記録のコメントの本文（識別値ごとの試みた時刻 `at` と Issue の `url`）。"""
+    """起票の記録のコメントの本文（識別値ごとの試みた時刻 `at`・Issue の `url`・起票した login の `by`）。"""
     payload = json.dumps({k: dict(v) for k, v in entries.items()}, sort_keys=True)
     note = "cross-review が起票を試みた指摘の記録（同じ指摘を 2 件起票しないために読む。書き換えない）。"
     return f"{RECORD_MARK}\n{note}\n\n{_ENTRIES_MARK}{payload} -->"
 
 
 def record_entries(body: str) -> dict[str, dict[str, Any]]:
-    """起票の記録の本文から、識別値ごとの `at` と `url`（どちらも無いことがある）を読む。読めなければ空。"""
+    """起票の記録の本文から、識別値ごとの `at`・`url`・`by`（どれも無いことがある）を読む。読めなければ空。"""
     last = _final_line(body)
     if not (last.startswith(_ENTRIES_MARK) and last.endswith(" -->")):
         return {}
@@ -238,7 +238,7 @@ def record_entries(body: str) -> dict[str, dict[str, Any]]:
     if not isinstance(raw, dict):
         return {}
     return {
-        ident: {k: v for k, v in entry.items() if k in ("at", "url") and isinstance(v, str)}
+        ident: {k: v for k, v in entry.items() if k in ("at", "url", "by") and isinstance(v, str)}
         for ident, entry in raw.items()
         if isinstance(entry, dict)
     }
