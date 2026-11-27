@@ -381,10 +381,10 @@ Codex のシートは、今と同じく `--ephemeral` で起動し、会話の�
 `external-ai` と `corder` の手順は、#1959 の `ndf delegate-run` を通して起動する。この設計は、このコマンドにモデルと effort の選択を足す。引数を受け取ってシェルで組み立てる形にはしない。
 
 ```bash
-timeout 1320 ndf delegate-run --runtime codex -- codex exec '{args}' -C "$PWD" < "$TMP/prompt.md"
+timeout 1320 ndf delegate-run --runtime codex -- codex exec '{args}' < "$TMP/prompt.md"
 ```
 
-`{args}` の位置には、モデルと effort の引数の並びと、安全装置の引数の並びがこの順で入る。2 つの並びは、1 つのプロセスの中で次の 2 つの処理を呼んで作る。
+Codex では、`delegate-run` が `{args}` の位置に、モデルと effort、安全装置、作業ディレクトリの順に引数を入れる。作業ディレクトリは `delegate-run` が今のディレクトリを `-C` で指定するので、手順書のコマンドには `-C` を書かない（書くと、安全装置と作業ディレクトリの引数の競合として拒まれる。[#1959 の設計](./issue-1959-design.md)）。モデルと effort の並びと安全装置の並びは、1 つのプロセスの中で次の 2 つの処理を呼んで作る。
 
 - モデルと effort を選ぶ処理（`pick --layer seat --name delegate` と同じ）
 - 安全装置の引数を返す処理（#1959 の `delegate-run` が使うもの）
