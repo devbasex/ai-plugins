@@ -26,7 +26,7 @@ from ndf import cli as top
 from ndf import contracts
 from ndf.contracts import internal, limits, named_cap, result
 from ndf.contracts.worker_kinds import PRODUCT_VERSION, store_kind_of
-from ndf.core import branch_strategy, production_merge
+from ndf.core import branch_strategy, production_delivery
 from ndf.progress import lane, model, store
 from ndf.progress.lane import launch, liveness, machine
 
@@ -312,7 +312,7 @@ def released_where(strategy: Optional[branch_strategy.Strategy]) -> tuple[str, O
     届け先は種類が `none` で、本番に届く行が 1 つに決まるときだけ返す（`none` 以外は worker が `delivery` を返す）。
     """
     kind = store_kind_of(None if strategy is None else strategy.has_version_number)
-    row = production_merge.production_delivery(strategy.section) if strategy is not None and not strategy.has_version_number else None
+    row = production_delivery.production_delivery(strategy.section) if strategy is not None and not strategy.has_version_number else None
     return kind, row
 
 

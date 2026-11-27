@@ -6,7 +6,7 @@ import pytest
 
 from ndf import contracts
 from ndf.contracts import facts
-from ndf.core import production_merge
+from ndf.core import production_delivery
 from ndf.domains.release import forms_decide
 
 SCHEMA = "schemas/ndf-settings/project.schema.json"
@@ -70,12 +70,12 @@ def test_reaches_takes_the_production_and_the_unset_channel(channel, want):
 )
 def test_production_delivery_is_the_one_row_that_reaches_production(rows):
     want = [r for r in rows if r["channel"] != "base"][0]
-    assert production_merge.production_delivery(_settings(rows)) == want
+    assert production_delivery.production_delivery(_settings(rows)) == want
 
 
 @pytest.mark.parametrize("rows", [[], [PROD, {**PROD, "target": "別"}], [{**PROD, "target": ""}], "x"])
 def test_production_delivery_is_none_unless_one_row_fits_the_context(rows):
-    assert production_merge.production_delivery(_settings(rows)) is None
+    assert production_delivery.production_delivery(_settings(rows)) is None
 
 
 def _settings(rows) -> dict:

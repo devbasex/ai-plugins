@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.contracts.worker_kinds import DELIVERY, PRODUCT_VERSION, store_kind_of
-from ndf.core import production_merge
+from ndf.core import production_delivery, production_merge
 from ndf.progress import lane, model, plan, run, store
 from ndf.progress.gate.answering import Answer, Observe, Post, answer, no_observe, no_post
 from ndf.progress.gate.asking import (
@@ -139,15 +139,15 @@ def _recorded_where(reply: Mapping[str, Any]) -> tuple[Optional[str], Optional[d
     """オーガナイザーがリリース記録に残した、バージョンの保存先の種類と本番の届け先の 1 行（#4513）。
 
     レーンが回答を受け取る時点の設定で決め直さない（その間に設定が変わると、リリースしていない届け先を記録する）。種類が 3 つの語の
-    どれでもなければ記録されていないもの（None）とする。届け先は、種類が `none` で、本番に届く行（`production_delivery` と同じ
-    `on_production_channel` の条件）で、文脈の `delivery` の形に合うときだけ返す。外のオーガナイザーがベースブランチ向けの行を書いても、
-    リリースの実績にしない。
+    どれでもなければ記録されていないもの（None）とする。届け先は、種類が `none` で、本番に届く行（`production_delivery` の
+    `production_delivery` と同じ `on_production_channel` の条件）で、文脈の `delivery` の形に合うとき（同じモジュールの
+    `fits_context`）だけ返す。外のオーガナイザーがベースブランチ向けの行を書いても、リリースの実績にしない。
     """
     kind = reply.get("store")
     known = kind if kind in RELEASE_STORES else None
     row = reply.get("delivery")
     production = production_merge.on_production_channel(row)
-    if known != store_kind_of(False) or not production or not isinstance(row, Mapping) or not production_merge.fits_context(row):
+    if known != store_kind_of(False) or not production or not isinstance(row, Mapping) or not production_delivery.fits_context(row):
         return known, None
     return known, dict(row)
 

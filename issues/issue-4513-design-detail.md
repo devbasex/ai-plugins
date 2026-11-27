@@ -57,9 +57,10 @@ plugins/ndf/
 | `src/ndf/progress/invoke.py` | 変更 | ステップの呼び出し | `worker_kinds`・`plan` | `StageRun`・`PreparedPlan`・モジュール | `StageRun.released`（新設の欄）・`PreparedPlan.released`（新設の欄）・`uses_released`（新設）・`answered_gap_detail`（新設）・`prepare_plan`・`_prepared`・`plan_path`・`_no_route`（変更） |
 | `src/ndf/core/route/__init__.py` | 変更 | テンプレートからプランを組む | — | モジュール | `rendered`・`_built`（新設）・`render`（変更） |
 | `src/ndf/progress/gate/entry.py` | 変更 | `ndf answer work` | `worker_kinds`・`branch_strategy` | `Released`（新設）・`WorkHandoff`・モジュール | `released_outcome`（新設）・`_strategy_at`（新設）・`WorkHandoff.version_number`（新設の欄）・`_cmd_work`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`（変更） |
-| `src/ndf/progress/gate/release.py` | 変更 | オーガナイザーの承認の記録 | `production_merge` | モジュール | `_recorded_where`（新設）・`_released`・`take_reply`（変更） |
+| `src/ndf/progress/gate/release.py` | 変更 | オーガナイザーの承認の記録 | `production_merge`・`production_delivery` | モジュール | `_recorded_where`（新設）・`_released`・`take_reply`（変更） |
 | `src/ndf/progress/plan/cli.py` | 変更 | まとめたリリースの回答の記録 | `command`・`progress/plan` | モジュール | `_read_delivered`（新設）・`_cmd_release`・`_dispatch`（変更） |
-| `src/ndf/core/production_merge.py` | 変更 | 本番の届け先の選び方 | `contracts`（関数の中で読む） | モジュール | `on_channel`・`fits_context`・`production_delivery`（新設） |
+| `src/ndf/core/production_merge.py` | 変更 | 本番の届け先の選び方（hook も読む） | — | モジュール | `on_channel`（新設） |
+| `src/ndf/core/production_delivery.py` | 新設 | リリース記録の本番の届け先の 1 行 | `contracts`・`production_merge` | モジュール | `fits_context`・`production_delivery`（新設） |
 | `src/ndf/domains/release/forms_decide.py` | 変更 | 承認資料の届け先の選び方 | `production_merge` | モジュール | `reaches`（新設）・`deliveries_of`（変更） |
 | `src/ndf/core/worker.py` | 変更 | `ndf worker run` | `worker_outcome` | モジュール | `_add_run`・`_cmd_run`（引数を 1 つ足すだけ） |
 | `src/ndf/core/worker_outcome.py` | 変更 | worker の結果の確かめ | `contracts` | `Checked`（新設）・モジュール | `require_outputs`・`_output_gap`・`outcome_of`（変更） |
@@ -385,8 +386,8 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `on_channel` | `src/ndf/core/production_merge.py` | 新設 | `on_channel(row: object, channel: str) -> bool` | 届け先の行がチャネルの語（`production`・`base`）に当たるか。`channel` の省略・`null` の行はどのチャネルにも当たる |
-| `fits_context` | `src/ndf/core/production_merge.py` | 新設 | `fits_context(row: Mapping[str, Any]) -> bool` | 届け先の行が文脈の `delivery` の形に合うか |
-| `production_delivery` | `src/ndf/core/production_merge.py` | 新設 | `production_delivery(section: Mapping[str, Any]) -> Optional[dict[str, Any]]` | ブランチ戦略の設定から、本番に届く行が 1 つで文脈の形に合えば、その行を返す。それ以外は `None` |
+| `fits_context` | `src/ndf/core/production_delivery.py` | 新設 | `fits_context(row: Mapping[str, Any]) -> bool` | 届け先の行が文脈の `delivery` の形に合うか |
+| `production_delivery` | `src/ndf/core/production_delivery.py` | 新設 | `production_delivery(section: Mapping[str, Any]) -> Optional[dict[str, Any]]` | ブランチ戦略の設定から、本番に届く行が 1 つで文脈の形に合えば、その行を返す。それ以外は `None` |
 | `reaches` | `src/ndf/domains/release/forms_decide.py` | 新設 | `reaches(row: Mapping[str, Any], channel: str) -> bool` | 届け先の行が承認資料のチャネル（`production`・`dev`）に当たるか。`dev` を `base` に読み替えて `on_channel` を呼ぶ |
 | `deliveries_of` | `src/ndf/domains/release/forms_decide.py` | 変更 | 今のまま | 条件を `reaches` で読む（振る舞いは変えない） |
 | `ReleaseAnswer` | `src/ndf/progress/plan/__init__.py` | 変更 | 欄 `store: Optional[str] = None`・`delivery: Optional[dict[str, Any]] = None` を足す | 記録する時点のバージョンの保存先の種類と、本番の届け先の 1 行を運ぶ |
@@ -402,7 +403,7 @@ plugins/ndf/
 | `Answer.release_store` | `src/ndf/progress/gate/answering.py` | 新設 | `release_store: Optional[str] = None`（データクラスの欄） | 回答が値を運ぶとき、出力の事象の payload に `outputs` と並べて `release_store` を書く。`None` なら書かない（ほかの回答は今のまま） |
 
 - **届け先と種類は、配布したリポジトリの設定から、回答を記録する時点に決める。** レーンが回答を取り込む時点の設定で決めると、取り込むまでに本番の届け先が A から B に変わったとき、A に出した配布識別子に B が実績として残る（Value 13）。また、レーンの側には設定を持つ作業ディレクトリの場所が無く、Git の保存先の位置から逆算すると、`git clone --separate-git-dir` で Git のデータを分けた構成で設定を読めない（Value 4）
-- 本番に届く行の条件は `on_channel` だけに置く。`ndf ci merge` と hook の判定（`_automatic_row`）、承認資料の届け先（`reaches`）、配布の記録の届け先（`production_delivery`）が同じ関数を使う（Value 11）。hook は標準ライブラリだけで動くので、`fits_context` は `ndf.contracts`（jsonschema を読む）を関数の中で読む
+- 本番に届く行の条件は `on_channel` だけに置く。`ndf ci merge` と hook の判定（`_automatic_row`）、承認資料の届け先（`reaches`）、配布の記録の届け先（`production_delivery`）が同じ関数を使う（Value 11）。hook（`domains.hooks.strict`）は標準ライブラリだけで動き、`production_merge` を読む。`fits_context` は `ndf.contracts`（jsonschema を読む）を使うので、`fits_context` と `production_delivery` は hook が読まない `core/production_delivery.py` に置く。関数の中で読む形では足りない。hook の import の範囲のテスト（`tests/domains/hooks/test_imports.py`）は構文木で関数の中の import も辿るためである。子の表では `production_merge` と同じ子 PM1 の `packages` に足す（PM1 の先に要る子の閉包に `contracts` の D1 が入っている）
 - `fits_context` は、worker の結果の確かめ（下の「worker の結果の確かめ」）と同じく、文脈のスキーマ全体（`contracts.internal.CONTEXT`）へ `{"delivery": 行}` を渡す（`contracts.schema_errors`）。`#/$defs/delivery` だけを指定しない。今の検証器（`contracts._shipped_validator`）は、`$defs` を指定すると `$defs` だけを残してルートの `properties` を捨てる。`$defs/delivery` の `branch` は `#/properties/branch` を参照するので、`branch` を書いた有効な行が参照の誤りで止まる
 - `deliveries_of` は行を 3 項目の `Delivery` に縮め、文脈の `delivery` が必須とする `versioned` を落とすので使わない。条件だけを共有する
 - 届け先が決まらなくても回答を断らない。`delivery` を足さずに `product_version` と `release_pr` だけを書く。回答を断ると、オーガナイザーが出した後のスプリントが承認ゲートの待ちに残るためである。足した `delivery` は、今の `answering._outputs` の確かめ（工程の定義の `outputs` に `delivery` があり、`invoke.value_errors` で文脈の形を確かめる）を通る

@@ -55,7 +55,7 @@
     "X4": {"issue": 3617, "packages": [], "needs": [], "order": 9, "lane": "lgeneric", "closed": false},
     "G1": {"issue": 3618, "packages": [], "needs": ["S1a", "X3"], "order": 9, "lane": "lguard", "closed": false},
     "B1": {"issue": 3681, "packages": ["ndf.adapters.merge_queue", "ndf.core.branch_strategy", "ndf.core.branch_strategy_legacy", "ndf.core.json_pointer"], "needs": ["D1", "AD1"], "order": 4, "lane": "lnext-bs", "closed": false},
-    "PM1": {"issue": 4409, "packages": ["ndf.core.actors", "ndf.core.approval_words", "ndf.core.merge_approval", "ndf.core.production_merge"], "needs": ["X0", "AD1"], "order": 4, "lane": "l4409", "closed": true},
+    "PM1": {"issue": 4409, "packages": ["ndf.core.actors", "ndf.core.approval_words", "ndf.core.merge_approval", "ndf.core.production_delivery", "ndf.core.production_merge"], "needs": ["X0", "AD1"], "order": 4, "lane": "l4409", "closed": true},
     "B2": {"issue": 3615, "packages": [], "needs": ["B1", "M2"], "order": 9, "lane": "lrel-form2", "closed": false},
     "S2": {"issue": 3304, "packages": [], "needs": ["T2", "S1d", "X4", "G1", "B2"], "order": 10, "lane": "lrebuild", "closed": false},
     "S3": {"issue": 3412, "packages": [], "needs": ["S2"], "order": 11, "lane": "lrebuild", "closed": false},

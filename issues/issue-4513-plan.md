@@ -25,7 +25,8 @@
 | `src/ndf/core/route/__init__.py` | `_built`・`rendered`（新設）、`render`（変更） |
 | `src/ndf/progress/gate/entry.py` | `released_outcome`・`_strategy_at`・`Released`（新設）、`WorkHandoff`・`_cmd_work`・`_work_handoff`・`work_prompt`・`work_argv`・`_outputs_of`（変更） |
 | `src/ndf/progress/gate/release.py`・`progress/gate/answering.py` | `release_store_of`・`Answer.release_store`（新設）、`_released`・`take_reply`・`_outputs`（変更。オーガナイザーの承認と一緒に届け先と承認の時点のバージョンの保存先の種類を記録する） |
-| `src/ndf/domains/release/forms_decide.py` | `reaches`・`production_delivery`（新設）、`deliveries_of`（変更） |
+| `src/ndf/domains/release/forms_decide.py` | `reaches`（新設）、`deliveries_of`（変更） |
+| `src/ndf/core/production_merge.py`・`core/production_delivery.py` | `on_channel`（新設）、`fits_context`・`production_delivery`（新設。hook が読まない `production_delivery.py` に置く） |
 | `src/ndf/core/worker.py`・`core/worker_outcome.py` | 引数 `--require-version-number`、`Checked`（新設）、`require_outputs`・`_output_gap`・`outcome_of`（変更） |
 | `src/ndf/core/plan/steps.py`・`transition_decide.py`・`runner.py`・`records.py` | `missing_outputs` と要約の引き継ぎ、`outputs.json` の要素の並び |
 | `skills/` の 5 ファイル | `product_version` の意味と、出力の足りない承認の読み方 |
@@ -68,7 +69,7 @@
 
 ### Task 4: 記録済みの値を `values.json` で渡し、worker を起動せずに終える
 
-- **対象ファイル:** `contracts/worker_kinds.py`（`Recorded`・`write_released`・`released_of`・`write_values`）・`progress/run.py`（`StageAnswers`・`released_answer`・`approved_seen`・`_prepare`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`PreparedPlan.uses_released`・`uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`core/route/__init__.py`（`_built`・`rendered`・`render`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`progress/gate/release.py`（`release_store_of`・`_released`・`take_reply`）・`progress/gate/answering.py`（`Answer.release_store`・`_outputs`）・`domains/release/forms_decide.py`（`reaches`・`production_delivery`）・`tests/progress/gate/test_gate_release.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
+- **対象ファイル:** `contracts/worker_kinds.py`（`Recorded`・`write_released`・`released_of`・`write_values`）・`progress/run.py`（`StageAnswers`・`released_answer`・`approved_seen`・`_prepare`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`PreparedPlan.uses_released`・`uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`core/route/__init__.py`（`_built`・`rendered`・`render`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`progress/gate/release.py`（`release_store_of`・`_released`・`take_reply`）・`progress/gate/answering.py`（`Answer.release_store`・`_outputs`）・`domains/release/forms_decide.py`（`reaches`）・`core/production_merge.py`（`on_channel`）・`core/production_delivery.py`（`fits_context`・`production_delivery`）・`tests/progress/gate/test_gate_release.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
 - **変更内容:** 詳細設計書の「値のファイル」「工程の進行: 記録済みの値の読み方」「worker の起動」の記録済みの値の分と、「オーガナイザーの承認と一緒に届け先を記録する」。工程の初回は `prepare_plan` の判定を `PreparedPlan.uses_released` で `plan_path` へ引き継ぎ、作業の一覧を取り直すのは保存済みの `values.json` からプランを再開する回だけにする。承認の時点の種類が `unknown` で worker を起動しないときは、Task 2 の形の確かめの指示も出さない
 - **満たす受け入れ条件:** 1・2
 - **進め方:**
