@@ -208,22 +208,11 @@ def _judged(label: Any, request: Mapping[str, Any]) -> tuple[Optional[str], Opti
     return None, None
 
 
-def _request_and_answer(request_id: str) -> tuple[Optional[Mapping[str, Any]], tuple[Optional[str], Optional[str]]]:
-    """リクエストの行（無ければ None）と、最後の回答（`approve`・`deny`・None）と承認者の名前。質問の記録は 1 回だけ読む。
-
-    行の選び方と回答の判定はここだけに置き、`request_answer` と `answered_request` はここから要る値を取り出す（PR 4683 の r16-2）。
-    """
-    requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
-    index = requests.by_id.get(request_id)
-    if index is None:
-        return None, (None, None)
-    req = requests.rows[index]
-    return req, _judged(_last_labels().get(request_id), req)
-
-
 def request_answer(request_id: str) -> tuple[Optional[str], Optional[str]]:
     """リクエストへの最後の回答（`approve`・`deny`・None）と承認者の名前。"""
-    return _request_and_answer(request_id)[1]
+    requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
+    index = requests.by_id.get(request_id)
+    return (None, None) if index is None else _judged(_last_labels().get(request_id), requests.rows[index])
 
 
 def answered_request(request_id: str) -> tuple[Optional[str], Optional[Mapping[str, Any]]]:
@@ -231,8 +220,12 @@ def answered_request(request_id: str) -> tuple[Optional[str], Optional[Mapping[s
 
     `approve` が回答と、質問で示した候補との照合の両方に使うので、質問の記録を 1 回だけ読んで両方を返す（PR 4683 の r15-4）。
     """
-    req, (answer, _) = _request_and_answer(request_id)
-    return answer, req
+    requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
+    index = requests.by_id.get(request_id)
+    if index is None:
+        return None, None
+    req = requests.rows[index]
+    return _judged(_last_labels().get(request_id), req)[0], req
 
 
 def consent_by_answer(request_id: str, repo: str, sha256: str, target: Path, candidate: Optional[Path]) -> Optional[str]:
