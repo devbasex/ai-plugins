@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from ndf.contracts import facts
-from ndf.domains.crossreview import cli, criteria_decide, drive, fixer, report_decide, scope_decide, store, threads
+from ndf.domains.crossreview import cli, criteria_decide, fixer, report_decide, reviewing, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records.mvv import Snapshot
 from ndf.domains.records.mvv_decide import State
@@ -331,7 +331,7 @@ def test_the_unit_file_reaches_the_reviewer_and_the_fixer_prompts(tmp_path: Path
     )
     prep = SimpleNamespace(scope=scope_decide.Scope(scope_decide.FULL, None, ()), diff=tmp_path / "round1.diff", previous=None)
     prompts = {
-        criteria_decide.REVIEWER: drive._review_prompt(run, 1, prep),
+        criteria_decide.REVIEWER: reviewing.review_prompt(run, 1, prep),
         criteria_decide.FIXER: fixer._fix_prompt(run, [], (), tmp_path / "fix.json"),
     }
     for role, prompt in prompts.items():
