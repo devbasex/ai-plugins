@@ -56,6 +56,11 @@ FIXER_REASON = "fixer_reason"
 CITATION_KEY = "citation_key"
 
 
+# 同じ照合キーの本文が、承認の要る操作の報告と、位置か内容の違う別の不具合の両方を指すときに、後の行のキーへ足す印
+# （`finding_key` は空白をそろえるので、改行を含むキーは本文から作られない。#4363）
+SIBLING = "\n2"
+
+
 def new_occurrence() -> str:
     """指摘の新しい発生の値（`uuid4` の 16 進の先頭 12 字）。"""
     return uuid.uuid4().hex[:12]
@@ -188,6 +193,18 @@ def _skip_is_void(row: dict[str, Any], named: Optional[str], mvv: Optional[str])
     return redline or not _same_mvv(row.get(SKIPPED_MVV), mvv)
 
 
+def _carried_key(by_key: Mapping[Any, dict[str, Any]], c: prior_decide.Carried, items: Sequence[str]) -> str:
+    """引き継ぐ指摘 `c` を重ねる行のキー。承認の要る操作かどうかが違い、ファイルか見出しも違う行には重ねない（`_row_keys`）。"""
+    base = oscillation.finding_key(c.text)
+    asks = any(criteria_decide.redline(i) for i in _judged_items(c._asdict(), items))
+    spot = _Spot(c.path, None, _text(c.section))
+    for key in (base, base + SIBLING):
+        row = by_key.get(key)
+        if row is None or bool(row.get(fin.REDLINE)) == asks or not _apart(spot, _spot(row)):
+            return key
+    return base
+
+
 def _judged_items(marks: Mapping[str, Any], items: Sequence[str]) -> list[str]:
     """前の実行が残した判定 `marks`（`report_decide.MARKS` の欄）の項目のうち、`items`（MVV の項目）にあるもの。"""
     return [i for i in (marks.get(MVV), *store.list_of(marks, REDLINE_ITEMS)) if criteria_decide.mvv_item(i, items)]
@@ -252,15 +269,72 @@ def _inherit_protect(row: dict[str, Any], kinds: object) -> bool:
     return before != row
 
 
-def _unlower(by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str]) -> None:
+class _Spot(NamedTuple):
+    """報告か行が指す、ファイル・起きることの 1 文・見出し。"""
+
+    path: Optional[str]
+    impact: Optional[str]
+    section: Optional[str]
+
+
+def _spot(item: Mapping[str, Any]) -> _Spot:
+    return _Spot(_located(item).get("path"), _text(item.get("impact")), _text(item.get("section")))
+
+
+def _apart(one: _Spot, other: _Spot) -> bool:
+    """ファイル・1 文・見出しのどれかが、両方にあって違うか。"""
+    return any(_differs(a, b) for a, b in zip(one, other))
+
+
+def _row_keys(by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str]) -> list[Optional[str]]:
+    """出し直し `raised` のそれぞれを重ねる行のキー（本文の無いものは None）。
+
+    照合キーは本文の先頭だけで決まる。必ず人の承認が要る操作の行は修正担当へ渡らないので、位置か内容の違う別の重い報告を
+    重ねると、その不具合が直されないまま収束する。そのような報告は、承認の要る操作とは別の行（`SIBLING`）にする。修正担当へ
+    渡る行がある所へ、別の位置の承認の要る操作が来たときも、行を分ける。#4363"""
+    texts = [item.get("text") for item in raised]
+    bases = [oscillation.finding_key(t.strip()) if isinstance(t, str) and t.strip() else None for t in texts]
+    approval = [criteria_decide.redline(criteria_decide.mvv_item(item.get("mvv"), items)) for item in raised]
+    spots: dict[str, list[_Spot]] = {}
+    for item, base, asks in zip(raised, bases, approval):
+        if base is not None and asks:
+            spots.setdefault(base, []).append(_spot(item))
+    out: list[Optional[str]] = []
+    for item, base, asks in zip(raised, bases, approval):
+        out.append(None if base is None else _row_key(by_key, base, item, asks, spots.get(base, [])))
+    return out
+
+
+def _row_key(by_key: Mapping[Any, dict[str, Any]], base: str, item: Mapping[str, Any], asks: bool, spots: Sequence[_Spot]) -> str:
+    """本文のキーが `base` の報告 1 件を重ねる行のキー。`asks` は承認の要る操作の報告か、`spots` はこのラウンドの承認の要る
+    操作の報告が指す所。"""
+    slots = (base, base + SIBLING)
+    held = next((k for k in slots if k in by_key and by_key[k].get(fin.REDLINE)), None)
+    approving = held or base
+    if held is None and base in by_key and spots:
+        row = by_key[base]
+        if row.get("outcome") == fin.UNRESOLVED and _blocking(row) and all(_apart(s, _spot(row)) for s in spots):
+            approving = slots[1]
+    if asks:
+        return approving
+    known = [*([_spot(by_key[held])] if held else []), *spots]
+    fixing = slots[1] if approving == base else base
+    heavy = criteria_decide.blocking(_raised(dict(item))["severity"])
+    if known and (heavy or fixing in by_key) and all(_apart(_spot(item), s) for s in known):
+        return fixing
+    return approving
+
+
+def _unlower(
+    by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], keys: Sequence[Optional[str]], items: Sequence[str]
+) -> None:
     """判定役の確認で下げた指摘のうち、このラウンドの出し直し `raised` のどれかが保護の種類か、MVV の項目か必ず人の承認が
     要る操作を挙げたものは、下げた扱いを解除する。
 
     重要度を重ねる前に解除するので、同じラウンドのほかの出し直しの重要度は、処理の順によらず重ねられる。分類は
     `_classify`、元の重要度へ戻すのは `_restore_lowered` が行う。#4363"""
-    for item in raised:
-        text = item.get("text")
-        row = by_key.get(oscillation.finding_key(text.strip())) if isinstance(text, str) and text.strip() else None
+    for item, key in zip(raised, keys):
+        row = by_key.get(key) if key else None
         if row is None or not _lowered(row):
             continue
         if criteria_decide.protect_of(item.get(PROTECT)) or criteria_decide.mvv_item(item.get("mvv"), items) is not None:
@@ -482,7 +556,8 @@ class FindingJournal:
     def enter(
         self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = (), mvv: Optional[str] = None
     ) -> frozenset[str]:
-        """指摘をジャーナルへ入れ、このラウンドで出た収束の妨げになるキーを返す（振動の判定に使う）。`items` は承認済みの
+        """指摘をジャーナルへ入れ、このラウンドで出た収束の妨げになるキーを返す（振動の判定に使う。どの行へ重ねるかは
+        `_row_keys` が決める）。`items` は承認済みの
         MVV の項目、`mvv` はその識別子。見送り済みは扱わず（MVV が変わっていれば判定し直す）、
         直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら（同じラウンドの中でも）重い方を残す。
         収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。新しく出たか戻った行の本文・1 文・位置は、
@@ -498,17 +573,16 @@ class FindingJournal:
         unexplained: list[str] = []
         same: dict[str, list[Mapping[str, Any]]] = {}
         before = len(self.revived)
-        denied, recheck = self._revive_elsewhere(by_key, raised, items, round_no)
+        keys = _row_keys(by_key, raised, items)
+        denied, recheck = self._revive_elsewhere(by_key, raised, keys, items, round_no)
         fresh = [*self.revived[before:], *recheck]
-        _unlower(by_key, raised, items)
+        _unlower(by_key, raised, keys, items)
         # この呼び出しの前から行が持つ、必ず人の承認が要る操作の番号
         approvals = {fid: tuple(store.list_of(row, REDLINE_ITEMS)) for fid, row in self.rows.items()}
-        for item in raised:
-            text = item.get("text")
-            text = text.strip() if isinstance(text, str) else ""
-            if not text:
+        for item, key in zip(raised, keys):
+            if key is None:
                 continue
-            key = oscillation.finding_key(text)
+            text = item["text"].strip()
             named = criteria_decide.mvv_item(item.get("mvv"), items)
             known = by_key.get(key)
             if known is None:
@@ -556,7 +630,12 @@ class FindingJournal:
         return out
 
     def _revive_elsewhere(
-        self, by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str], round_no: int
+        self,
+        by_key: Mapping[Any, dict[str, Any]],
+        raised: Sequence[Mapping[str, Any]],
+        keys: Sequence[Optional[str]],
+        items: Sequence[str],
+        round_no: int,
     ) -> tuple[dict[str, tuple[_Denied, ...]], list[str]]:
         """確認で下げた指摘が、確かめたものと違うファイル・起きることの 1 文・見出しの重い報告で出し直されたら、下げた扱いを
         解除してその報告の指摘にする。解除した指摘の id から否定した内容への対応と、判定役にもう一度確かめる id を返す。
@@ -573,9 +652,8 @@ class FindingJournal:
           何度も確かめない）、保護の対象なら元の重要度へ戻る（`_restore_lowered`）。#4363"""
         found: dict[str, tuple[dict[str, Any], tuple[_Denied, ...], list[Mapping[str, Any]]]] = {}
         marked: set[str] = set()
-        for item in raised:
-            text = item.get("text")
-            row = by_key.get(oscillation.finding_key(text.strip())) if isinstance(text, str) and text.strip() else None
+        for item, key in zip(raised, keys):
+            row = by_key.get(key) if key else None
             if row is None or not _lowered(row) or not row.get("path"):
                 continue
             fid = str(row["id"])
@@ -719,7 +797,7 @@ class FindingJournal:
         self.merged = []
         by_key = {f.get("key"): f for f in self.rows.values()}
         for c in carried:
-            key = oscillation.finding_key(c.text)
+            key = _carried_key(by_key, c, items)
             # スレッドの無い指摘の id（`p-<元の id>`）は別の保存先の違う指摘とも重なるので、同じ本文の行だけに判定を重ねる
             known = by_key.get(key) or (self.rows.get(c.id) if c.comment is not None else None)
             if known is not None:

@@ -264,9 +264,30 @@ def test_issue_4363_finding_keeps_the_text_and_the_place_of_the_report_that_mark
         {"text": "a", "severity": "major", "impact": IMPACT, "path": "y.py", "line": 5, "by": "kiro"},
     ]
     journal.enter(1, told[::order], ("Value 5", "C7"), "approved:11:aaa:ccc")
-    row = journal.rows["r1-1"]
+    row = next(r for r in journal.rows.values() if r["text"] == "A")
     assert (row["path"], row["line"], row.get("impact")) == ("x.py", 3, None)
-    assert row["text"] == "A" and f"a（y.py:5）— 起きること: {IMPACT}" in criteria_decide.fixer_impact(row)
+    if basis.get("mvv") == "C7":  # 承認の要る操作の行は修正担当へ渡らないので、別の所の不具合は別の行になる
+        assert [(r["text"], r["path"]) for r in journal.handable()] == [("a", "y.py")]
+    else:
+        assert f"a（y.py:5）— 起きること: {IMPACT}" in criteria_decide.fixer_impact(row)
+
+
+@pytest.mark.parametrize("rounds", [(1, 1), (1, 2)])
+@pytest.mark.parametrize("approval_first", [True, False])
+def test_issue_4363_defect_in_another_file_than_the_approval_reaches_the_fixer(approval_first: bool, rounds: tuple[int, int]) -> None:
+    """本文の先頭が同じでも、承認の要る操作と別のファイルの不具合は別の行にし、不具合は順によらず修正担当へ渡る。"""
+    journal = drive.FindingJournal()
+    told = [_told("A", mvv="C7", path="auth.py", line=1), _told("A", protect=["user_data"], path="config.py", line=2)]
+    told = told if approval_first else told[::-1]
+    if rounds == (1, 1):
+        journal.enter(1, told, ("C7",), V11)
+    else:
+        for round_no, item in zip(rounds, told):
+            journal.enter(round_no, [item], ("C7",), V11)
+    assert [r["path"] for r in journal.handable()] == ["config.py"]
+    assert [r["path"] for r in journal.rows.values() if r.get("redline")] == ["auth.py"]
+    journal.enter(3, told, ("C7",), V11)
+    assert len(journal.rows) == 2
 
 
 def test_issue_4363_every_operation_that_needs_approval_keeps_its_report() -> None:

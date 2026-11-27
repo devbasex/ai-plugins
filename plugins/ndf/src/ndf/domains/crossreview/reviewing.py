@@ -133,7 +133,10 @@ class FilledRead(NamedTuple):
     others: frozenset[str]
 
     def diffs(self, key: object, round_diff: Path) -> tuple[Path, ...]:
-        """キー `key` の指摘を出した席が読んだ差分。両方の席が出した指摘は、ラウンドの差分 `round_diff` と全差分の両方。"""
+        """キー `key` の指摘を出した席が読んだ差分。両方の席が出した指摘は、ラウンドの差分 `round_diff` と全差分の両方。
+        行を分けた指摘のキー（印は改行より後ろ）は、本文のキーで引く。"""
+        if isinstance(key, str):
+            key = key.partition("\n")[0]
         if key not in self.keys:
             return (round_diff,)
         return tuple(dict.fromkeys((round_diff, self.diff))) if key in self.others else (self.diff,)
