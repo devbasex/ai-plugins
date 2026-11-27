@@ -39,7 +39,8 @@ src/ndf/
 | `src/ndf/adapters/launch_candidates.py` | 新設 | 候補のディレクトリ内の記録を読む。読む対象は通常ファイルに限り、シンボリックリンクはたどらない。候補の中が NDF の作ったものだけかを確かめ、退避・消去・元の名前へ戻す。作成途中の候補のディレクトリは、作る前から隣に残す記録で NDF が作ったと確かめたものだけを片付ける。どの候補を片付けるかは `launch_approval` が履歴から決める | — | `Read` | N: `write_launch_record`・`raw_record`・`record_object`・`ownership`・`stamped_version`・`regular_version`・`same_stamp`・`set_aside`・`settle_aside`・`restore_aside`（`launch_approval.py` から分ける）・`start_draft`・`finish_draft`・`reclaim_drafts` |
 | `src/ndf/adapters/secret_forms.py` | 新設 | 秘密の形の表と、当たる文字列を伏せる処理 | — | モジュール | N: `SECRET_VALUE`・`ASSIGNED_SECRET`・`MASK`・`redact`（`domains/project/secret.py` から移す） |
 | `src/ndf/domains/project/secret.py` | 変更 | 移した表と処理を `secret_forms` から読み込む | secret_forms | モジュール | C: 定義の移動 |
-| `src/ndf/adapters/claude.py` | 変更 | 起動の引数と結果 | launch_settings | `ClaudeCall`・`ClaudeReply`・`LaunchOptions`・`LaunchRecorder` | C: `permission_args`・`_full_args`・`call_claude`・`_precheck`・`_parse_reply`・`context_window`・`_prefaced`。N: `main_model`・`set_launch_recorder`・`LaunchLog` |
+| `src/ndf/adapters/claude.py` | 変更 | 起動の引数と結果 | launch_settings・claude_precheck | `ClaudeCall`・`ClaudeReply`・`LaunchOptions`・`LaunchRecorder` | C: `permission_args`・`_full_args`・`call_claude`・`_parse_reply`・`context_window`・`_prefaced`・`_launch_once`（止めた確かめを `PRECHECK_FAILURES` で失敗の理由へ直す）。N: `main_model`・`set_launch_recorder`・`LaunchLog`・`PRECHECK_FAILURES` |
+| `src/ndf/adapters/claude_precheck.py` | 新設 | 起動の直前の確かめ（中継の確かめ直し・承認した起動の設定の照らし直し・CLI の最低バージョン）。止めた確かめと理由を返し、回答と失敗の理由への直しは `claude` が持つ。`claude` を読まない（読むと import の輪になる） | cli_floor | `Check`・`Stop` | N: `precheck_claude`・`require_claude`（`claude.py` の `_precheck`・`require_claude` から分ける） |
 | `src/ndf/adapters/cli_floor.py` | 変更 | CLI の最低バージョンの確認が、確かめの間に待ったかを返す。自分で `--version` の終了を待った場合と、同じ実行ファイルのバージョン取得を別スレッドに任せて、その終了を実行ファイルごとの錠で待った場合は真を返す。待った後にキャッシュを使う場合も真である。バージョン取得を待たずにキャッシュを使った場合は偽を返す。呼び出し元が、待った間の取り消しを確かめ直すために使う | — | モジュール | C: `require`（戻り値を `bool` にする）。N: `_version_read` |
 | `src/ndf/adapters/agents.py` | 変更 | 相手役の起動 | identity | `Launch` | C: `_start`・`_guarded_run`・`Launch`（`verify`） |
 | `src/ndf/core/worker.py` | 変更 | worker の起動 | launch_settings・claude | `Caller` | C: `delegate`・`_args_for`・`_resume_until_written` |
@@ -271,8 +272,8 @@ src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `permission_args` | `adapters/claude.py` | 変更 | `permission_args(permission, tools=None, readable=(), grant: Optional[Grant] = None) -> list[str]` | full は `--tools`・`--allowed-tools <1 件 1 引数>`・`--strict-mcp-config`・`--mcp-config` を組む |
-| `_precheck` | 同 | 変更 | 変えない | `options.verify` が理由を返せば `Failure.LAUNCH` にする |
-| `call_claude` | 同 | 変更 | 変えない | 子の環境に `NDF_AI_CHILD=1` を足す |
+| `precheck_claude` | `adapters/claude_precheck.py` | 変更 | `precheck_claude(run, cwd, options) -> Optional[Stop]`（`claude.py` の `_precheck` から分ける） | `options.verify` が理由を返せば `Check.VERIFY` で止め、`claude` が `Failure.LAUNCH` にする |
+| `call_claude` | `adapters/claude.py` | 変更 | 変えない | 子の環境に `NDF_AI_CHILD=1` を足す |
 | `_parse_reply` | 同 | 変更 | 変えない | 成功でも誤りでも、`session_id`・`usage`・`modelUsage`・`total_cost_usd` を回答に持たせる |
 | `_prefaced` | 同 | 変更 | 変えない | 起動の前置きと起動を打ち、起動した子が終わったその場で `options.log` へ回答を渡す。アカウントを替えて打ち直す場合も、前の子の行は替え先の起動より先に渡る |
 | `main_model` | 同 | 新設 | `main_model(models: Mapping) -> Optional[tuple[str, Mapping]]` | トークンの和が最大（同じなら窓の小さい方）のモデルを返す |
@@ -293,7 +294,7 @@ src/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_precheck` | 承認の対象が変わった | 起動の直前の書き換え・取り消し。CLI の最低バージョンの確認（`claude --version` の終了を待つ）の間の取り消しを含む | `options.verify`（最低バージョンの確認の前と、確認で `claude --version` の終了を待った起動では後にも打つ。別の起動の `--version` を錠で待った起動も含む） | 呼び出し元へ返す | 呼び出し元の `precondition`。承認の案内のコマンドには、読み直した現在のハッシュを `--sha256` に載せる | 子を起動しない。承認して再実行 |
+| `precheck_claude` | 承認の対象が変わった | 起動の直前の書き換え・取り消し。CLI の最低バージョンの確認（`claude --version` の終了を待つ）の間の取り消しを含む | `options.verify`（最低バージョンの確認の前と、確認で `claude --version` の終了を待った起動では後にも打つ。別の起動の `--version` を錠で待った起動も含む） | 呼び出し元へ返す | 呼び出し元の `precondition`。承認の案内のコマンドには、読み直した現在のハッシュを `--sha256` に載せる | 子を起動しない。承認して再実行 |
 | `LaunchLog.report` | 書き込み処理が無い | エントリポイントを通らない呼び出し | None の判定 | 既定値（書かない）で続ける | 出力なし | — |
 | `_parse_reply` | 欄が無い・形が違う | CLI の出力の変化、JSON でない | 読み取り | 欄を None にして続ける | 行の `usage` が `unknown` | — |
 
@@ -308,7 +309,7 @@ src/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `permission_args` | 指定なし、定義ファイルの指定、`inherit` | `load` と `allow` が空 | `load` の名前が `--allowed-tools` に入らない。`--setting-sources` が無い |
-| `_precheck` | `verify` が None を返せば起動 | — | 理由を返せば子を起動しない |
+| `precheck_claude` | `verify` が None を返せば起動 | — | 理由を返せば子を起動しない |
 | `LaunchLog.report` | 子 1 つで 1 行、打ち直しで 2 行（前の子の行が打ち直しより先） | `usage` が無い。同じ id のままアカウントを替えた子は番号が続き、会話の id が変わった子は番号が 0。会話の id が分からない子は常に 0 | `launched` が偽なら 0 行 |
 | `main_model` | 和が最大 | 同じ和は窓の小さい方 | `modelUsage` が空 |
 
