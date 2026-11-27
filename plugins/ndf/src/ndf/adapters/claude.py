@@ -627,13 +627,14 @@ class LaunchLog:
     `meta` は工程の欄（`launch_meta` の値。worker は指定した会話の id も入れる）。行の会話の id は、結果の JSON の
     `session_id` を優先し、無ければ `meta` の値にする。`session_seq` は会話の id ごとに 0 から数える。アカウントを
     替えても、同じ id のまま打ち直した子（worker は起動引数で id を指定する）は番号を続け、結果の id が変わった子
-    （id を指定しない Skill）だけがその id の 0 から始まる。書き込み処理が差し込まれていなければ渡さない。
+    （id を指定しない Skill）だけがその id の 0 から始まる。会話の id がどちらからも分からない行は常に 0 にする。
+    書き込み処理が差し込まれていなければ渡さない。
     行に質問と回答の本文を入れない。
     """
 
     def __init__(self, meta: Mapping[str, Any]) -> None:
         self.meta = dict(meta)
-        self._seqs: dict[Optional[str], int] = {}
+        self._seqs: dict[str, int] = {}
 
     def report(self, child: ClaudeReply) -> None:
         """起動した子 1 つの行を渡す。起動しなかった子（`launched` が偽）は渡さない。"""
@@ -641,8 +642,11 @@ class LaunchLog:
             return
         named = self.meta["session_id"] if "session_id" in self.meta else None
         session = child.session_id if child.session_id is not None else named
-        seq = self._seqs[session] if session in self._seqs else 0
-        self._seqs[session] = seq + 1
+        if session is None:  # どの会話の続きか分からない行は常に 0 で、ほかの会話の番号を進めない
+            seq = 0
+        else:
+            seq = self._seqs[session] if session in self._seqs else 0
+            self._seqs[session] = seq + 1
         if launch_recorder is not None:
             launch_recorder.record_cli(child.usage, _launch_row(child, self.meta, session, seq))
 

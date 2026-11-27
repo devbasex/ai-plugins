@@ -128,6 +128,17 @@ def test_a_retry_on_another_account_with_the_same_session_continues_the_number(t
     assert [(row["session_id"], row["session_seq"]) for _, row in recorder.rows] == [("s-1", 0), ("s-1", 1)]
 
 
+def test_a_skill_child_without_a_session_id_is_always_number_zero(recorder):
+    """結果に会話の id が無い Skill の子は、どの会話の続きか分からないので常に 0。ほかの会話の番号も進めない。"""
+    log = claude.LaunchLog({"name": "design"})
+    bare = claude.ClaudeReply.failed("", "期限", failure=claude.Failure.TIMEOUT)._replace(launched=True)
+    log.report(_launched(session_id="s-a"))
+    log.report(bare)
+    log.report(bare)
+    log.report(_launched(session_id="s-a"))
+    assert [(row["session_id"], row["session_seq"]) for _, row in recorder.rows] == [("s-a", 0), (None, 0), (None, 0), ("s-a", 1)]
+
+
 def test_a_child_that_did_not_launch_hands_no_row(recorder):
     log = claude.LaunchLog({"name": "fix"})
     log.report(claude.ClaudeReply.failed("", "古い", failure=claude.Failure.REFUSED))
