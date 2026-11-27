@@ -10,6 +10,7 @@ import pytest
 
 from ndf.core import route
 from ndf.core.plan import model
+from ndf.progress import definition
 
 from ._flow import plan_of, values
 
@@ -275,3 +276,18 @@ def test_impl_acceptance_takes_the_list_as_given():
     acceptance = ["--issue", "1", "--criteria", "1:1", "--criteria", "1:2"]
     step = _impl_steps(acceptance=acceptance)["acceptance"]
     assert step["run"] == ["ndf", "loop", "acceptance", "check", *acceptance]
+
+
+def test_document_reviews_use_the_plan_with_the_design_check():
+    """#2912 決定 2: 設計レビューとドキュメントレビューは文書のレビューのプランを組み、コードレビューは検査の無いプランのまま。"""
+    found = route.templates()
+    assert "document-review" in found
+    model.parse(route.render(found["document-review"], values("document_review")))
+    plans = {
+        st.subject: st.args.get("plan")
+        for stage in definition.load_definition("standard").stages
+        for st in stage.steps
+        if st.kind == "review"
+    }
+    assert plans == {"design": "document-review", "docs": "document-review", "code": "cross-review"}
+    assert not any("design-check" in str(s) for s in found["cross-review"].plan["steps"])

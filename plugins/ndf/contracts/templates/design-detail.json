@@ -1,16 +1,19 @@
 {
   "template": "design-detail",
   "purpose": "design_detail",
-  "summary": "詳細設計: worker の詳細設計 → push。push が拒まれたら worker が直して push し直す",
-  "params": ["repo", "worktree", "branch", "remote", "worker"],
+  "summary": "詳細設計: worker の詳細設計 → 設計の検査（番号の無い「人へ残す判断」の行。落ちれば同じ原因を数えて worker が直し、検査へ戻る）→ push。push が拒まれたら worker が直して検査からやり直す",
+  "params": ["repo", "worktree", "branch", "remote", "base", "worker"],
   "plan": {
     "name": "design-detail-{{branch}}",
     "repo": "{{repo}}",
     "worktree": "{{worktree}}",
     "steps": [
       {"id": "work", "run": ["{{worker}}", "design-detail"]},
+      {"id": "design-check", "run": ["ndf", "records", "design", "check", "--result", "{state_dir}/design-check.json", "--base", "{{base}}", "--remote", "{{remote}}"], "on_cause": {"check_failed": "design-check-repeat"}, "next": "push"},
+      {"id": "design-check-repeat", "run": ["ndf", "route", "repeat", "--result", "{state_dir}/design-check.json", "--log", "{state_dir}/design-check-causes.jsonl"], "next": "design-check-fix"},
+      {"id": "design-check-fix", "run": ["{{worker}}", "design-check-fix"], "next": "design-check"},
       {"use": "push", "on_fail": "fix-push", "next": "end"},
-      {"use": "fix-push"}
+      {"use": "fix-push", "next": "design-check"}
     ]
   }
 }

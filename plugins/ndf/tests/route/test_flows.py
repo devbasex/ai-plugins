@@ -210,7 +210,10 @@ def test_design_plan_checks_ci_after_push():
     """#2932（#2741 の形）: 設計のプランは push の後に CI を待つ。CI の合格は push の前の worker（design）でなく、
     push → PR → レビュー → push の後の CI の待ちが確かめる。"""
     visited, state = walk(plan_of("design"), {})
-    assert visited == ["design", "rebuild", "push", "pr", "head-check", "review", "push-reviewed", "conflict-check", "ci"]
+    assert visited == [
+        "design", "rebuild", "design-check", "push", "pr", "head-check", "review", "design-check-reviewed", "push-reviewed",
+        "conflict-check", "ci",
+    ]  # fmt: skip
     assert state.status == OK
 
 
@@ -220,7 +223,7 @@ def test_design_plan_ci_failure_is_fixed_then_pushed_and_rechecked(kind):
     通って worker が直し、push してから CI を待ち直す（止まらない）。"""
     visited, state = walk(plan_of("design"), {"ci": [stopped(kind)]})
     i = visited.index("ci")
-    assert visited[i + 1 :] == ["repeat-check", "ci-fix", "push-reviewed", "conflict-check", "ci"]
+    assert visited[i + 1 :] == ["repeat-check", "ci-fix", "design-check-reviewed", "push-reviewed", "conflict-check", "ci"]
     assert state.status == OK
 
 
@@ -252,8 +255,91 @@ def test_design_review_gets_rebuild_findings():
     assert review.run[review.run.index("--findings") + 1] == out
     visited, state = walk(plan, {"review": [stopped("incomplete")]})
     assert visited.index("rebuild") < visited.index("review")
-    assert visited[visited.index("review") + 1] == "push-reviewed"
+    assert visited[visited.index("review") + 1] == "design-check-reviewed"
     assert state.status == OK
+
+
+FAILED_CHECK = stopped("check_failed")
+
+
+def test_design_plan_fixes_a_failed_design_check_and_checks_again():
+    """#2912 決定 2: 設計のプランは push の前に設計の検査を打ち、落ちれば同じ原因を数えて worker が直し、検査へ戻る。"""
+    visited, state = walk(plan_of("design"), {"design-check": [FAILED_CHECK]})
+    i = visited.index("design-check")
+    assert visited[i : i + 5] == ["design-check", "design-check-repeat", "design-check-fix", "design-check", "push"]
+    assert state.status == OK
+
+
+def test_design_plan_reviews_the_fixed_version_before_pushing_it():
+    """#2912 決定 2: レビューの後の検査が落ちたら、直したバージョンをレビューし直し（review-fixed）、検査に合格してから push する。"""
+    visited, state = walk(plan_of("design"), {"design-check-reviewed": [FAILED_CHECK]})
+    i = visited.index("design-check-reviewed")
+    assert visited[i:] == [
+        "design-check-reviewed", "design-check-reviewed-repeat", "design-check-reviewed-fix", "review-fixed",
+        "design-check-reviewed", "push-reviewed", "conflict-check", "ci",
+    ]  # fmt: skip
+    assert state.status == OK
+
+
+def test_design_plan_stops_at_the_limit_and_when_the_fixed_review_does_not_finish():
+    """#2912 決定 2: 同じ原因の 3 回目で fix_limit に止まる。直したバージョンのレビューが incomplete なら検査と push へ進まずに止まる。
+    precondition は直しへ回さない。"""
+    script = {"design-check": [FAILED_CHECK] * 3, "design-check-repeat": [Outcome(OK), Outcome(OK), stopped("fix_limit")]}
+    visited, state = walk(plan_of("design"), script)
+    assert visited.count("design-check-fix") == 2 and "push" not in visited
+    assert (state.status, state.kind) == (STOPPED, "fix_limit")
+    visited, state = walk(plan_of("design"), {"design-check-reviewed": [FAILED_CHECK], "review-fixed": [stopped("incomplete")]})
+    assert visited[-1] == "review-fixed" and "push-reviewed" not in visited
+    assert (state.status, state.kind) == (STOPPED, "incomplete")
+    visited, state = walk(plan_of("design"), {"design-check": [stopped("precondition")]})
+    assert visited[-1] == "design-check" and (state.status, state.kind) == (STOPPED, "precondition")
+
+
+@pytest.mark.parametrize(
+    ("step", "check"),
+    [
+        ("fix-push", "design-check"),
+        ("fix-push-reviewed", "design-check-reviewed"),
+        ("ci-fix", "design-check-reviewed"),
+        ("base-sync", "design-check-reviewed"),
+        ("fix-base", "design-check-reviewed"),
+    ],
+)
+def test_design_plan_never_pushes_without_passing_the_check(step: str, check: str):
+    """#2912 決定 2: push へ向かう分岐（直し・マージ先の反映）はすべて、手前の検査を通ってから push する。"""
+    assert step_of(plan_of("design"), step).next == check
+
+
+def test_fixed_review_runs_the_same_review_as_the_first():
+    """#2912: 直したバージョンのレビューは最初のレビューと同じ起動・同じ指摘ファイルで打つ（解決済みの指摘は cross-review が再送しない）。"""
+    plan = plan_of("design", rebuild=["ndf-rebuild"], review=["ndf-review"])
+    assert step_of(plan, "review-fixed").run == step_of(plan, "review").run
+    check = step_of(plan, "design-check").run
+    assert tuple(check[:4]) == ("ndf", "records", "design", "check") and "--base" in check and "--remote" in check
+
+
+def test_design_detail_plan_checks_before_pushing():
+    """#2912 決定 2: 詳細設計のプランは worker の後、push の前に検査し、fix-push の後も検査へ戻る。"""
+    visited, state = walk(plan_of("design_detail"), {})
+    assert visited == ["work", "design-check", "push"] and state.status == OK
+    visited, _ = walk(plan_of("design_detail"), {"push": [stopped("push_rejected")] * 2})
+    i = visited.index("fix-push")
+    assert visited[i : i + 3] == ["fix-push", "design-check", "push"]
+    visited, _ = walk(plan_of("design_detail"), {"design-check": [FAILED_CHECK]})
+    assert visited == ["work", "design-check", "design-check-repeat", "design-check-fix", "design-check", "push"]
+
+
+def test_document_review_plan_checks_after_the_review():
+    """#2912 決定 2: 文書のレビューのプランは、レビュー（incomplete を含む）の後に検査し、直したバージョンをレビューし直してから検査へ戻る。"""
+    visited, state = walk(plan_of("document_review"), {"review": [stopped("incomplete")]})
+    assert visited == ["review", "design-check", "push"] and state.status == OK
+    visited, state = walk(plan_of("document_review"), {"design-check": [FAILED_CHECK]})
+    assert visited == ["review", "design-check", "design-check-repeat", "design-check-fix", "review-fixed", "design-check", "push"]
+    visited, state = walk(plan_of("document_review"), {"design-check": [FAILED_CHECK], "review-fixed": [stopped("incomplete")]})
+    assert "push" not in visited and (state.status, state.kind) == (STOPPED, "incomplete")
+    script = {"design-check": [FAILED_CHECK] * 3, "design-check-repeat": [Outcome(OK), Outcome(OK), stopped("fix_limit")]}
+    _, state = walk(plan_of("document_review"), script)
+    assert (state.status, state.kind) == (STOPPED, "fix_limit")
 
 
 def test_impl_plan_ends_when_ci_passes_at_the_reviewed_head():
