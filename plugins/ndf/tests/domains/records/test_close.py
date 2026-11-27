@@ -79,6 +79,65 @@ def test_verdict_keeps_a_failed_issue_whatever_is_enforced() -> None:
         assert cd.verdict(5, [PASSED_ROW, FAILED_ROW], enforced=enforced).decided == cd.KEEP
 
 
+OTHER_FAILED = {"number": 6, "result": "failed"}
+OTHER_NOT_RUN = {"number": 6, "result": "not_run"}
+
+
+@pytest.mark.parametrize(
+    ("rows", "decided", "reason", "verified"),
+    [
+        (
+            [FAILED_ROW, dict(FAILED_ROW), OTHER_FAILED, NOT_RUN_ROW],
+            cd.KEEP,
+            "リリース後テストに不合格の行が 2 件ある",
+            False,
+        ),
+        (
+            [NOT_RUN_ROW, OTHER_FAILED, dict(NOT_RUN_ROW), OTHER_NOT_RUN, PASSED_ROW],
+            cd.ASK,
+            "保留（not_run）の行が 2 件ある。閉じるかを人が決める",
+            False,
+        ),
+        ([PASSED_ROW, dict(PASSED_ROW), OTHER_FAILED, OTHER_NOT_RUN], cd.CLOSE, "リリース後テストに不合格と保留の行が無い", True),
+        ([OTHER_FAILED, OTHER_NOT_RUN], cd.CLOSE, "リリース後テストに不合格と保留の行が無い", False),
+        ([{"number": 5, "result": "skipped"}], cd.CLOSE, "リリース後テストに不合格と保留の行が無い", False),
+        ([{"number": 5}], cd.CLOSE, "リリース後テストに不合格と保留の行が無い", False),
+        ([{"result": "failed"}, PASSED_ROW], cd.CLOSE, "リリース後テストに不合格と保留の行が無い", True),
+        ([{"number": "5", "result": "failed"}, PASSED_ROW], cd.CLOSE, "リリース後テストに不合格と保留の行が無い", True),
+    ],
+)
+def test_verdict_counts_only_the_rows_of_the_issue(rows: list[dict], decided: str, reason: str, verified: bool) -> None:
+    # 件数・合格の判定はその課題（number が一致する行）だけで数え、他の課題や number の無い行は混ざらない
+    got = cd.verdict(5, rows, enforced=True)
+    assert got == cd.Verdict(decided, reason, verified, None)
+
+
+@pytest.mark.parametrize(
+    ("rows", "decided", "verified"),
+    [
+        ([PASSED_ROW, FAILED_ROW], cd.KEEP, False),
+        ([PASSED_ROW, NOT_RUN_ROW], cd.ASK, False),
+        ([PASSED_ROW, OTHER_FAILED], cd.CLOSE, True),
+        ([], cd.CLOSE, False),
+    ],
+)
+def test_verdict_reads_a_one_shot_iterator_like_a_list(rows: list[dict], decided: str, verified: bool) -> None:
+    # 記録は 1 回しか回せないイテレータでも、リストと同じ判定になる
+    got = cd.verdict(5, (r for r in rows), enforced=True)
+    assert got == cd.verdict(5, rows, enforced=True)
+    assert (got.decided, got.verified) == (decided, verified)
+
+
+def test_blocking_and_waiting_rows_keep_the_order_and_identity_of_the_issue_rows() -> None:
+    first, second = dict(FAILED_ROW), dict(FAILED_ROW)
+    rows = [first, OTHER_FAILED, NOT_RUN_ROW, second, OTHER_NOT_RUN]
+    got = cd.blocking_rows(5, rows)
+    assert got == [first, second] and got[0] is first and got[1] is second
+    assert cd.blocking_rows(5, iter(rows)) == [first, second]
+    assert cd.waiting_rows(5, iter(rows)) == [NOT_RUN_ROW]
+    assert cd.blocking_rows(5, None) == []
+
+
 WEB, WORKER = "web", "worker"
 VALUE = "main abc1234"
 
