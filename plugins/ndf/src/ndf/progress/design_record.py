@@ -64,12 +64,22 @@ def required(snap: stages.Snapshot) -> bool:
 
 def build(record_dir: Path) -> dict[str, Any]:
     """レビューの記録の 3 つのファイルと `checked.json` から記録を組み、`design-target.json` に書く。"""
-    head = _text(record_dir, units_files.REVIEWED_HEAD)
-    base = _text(record_dir, plan_files.REVIEWED_BASE)
-    repo, _, number = _text(record_dir, plan_files.REVIEWED_PR).rpartition("#")
+    try:
+        # 入力の読み取りから出力の公開まで、同じディレクトリの記述子を使う
+        with worker_paths.open_workdir(_real_record_dir(record_dir)) as wd:
+            return _build(wd)
+    except (worker_paths.EntryError, OSError) as exc:
+        raise RecordUnreadable(f"{record_dir} を開けない（{type(exc).__name__}）") from None
+
+
+def _build(wd: worker_paths.WorkDir) -> dict[str, Any]:
+    record_dir = wd.path
+    head = _text(wd, units_files.REVIEWED_HEAD)
+    base = _text(wd, plan_files.REVIEWED_BASE)
+    repo, _, number = _text(wd, plan_files.REVIEWED_PR).rpartition("#")
     if not repo or not number.isdigit():
         raise RecordUnreadable(f"{record_dir / plan_files.REVIEWED_PR}: <所有者>/<リポジトリ>#<番号> の形でない")
-    checked = _checked(record_dir, head)
+    checked = _checked(wd, head)
     record = _record(
         {"repo": repo, "pr": int(number), "head": head, "base": base},
         checked["branch"],
@@ -79,8 +89,8 @@ def build(record_dir: Path) -> dict[str, Any]:
         checked["units"],
     )
     try:
-        plan_files.discard_record(record_dir / TARGET_FILE, TARGET_KIND)
-        plan_files.publish_record(record_dir / TARGET_FILE, TARGET_KIND, record)
+        plan_files.discard_record(wd, TARGET_FILE, TARGET_KIND)
+        plan_files.publish_record(wd, TARGET_FILE, TARGET_KIND, record)
     except plan_files.RecordRefused as exc:
         raise RecordUnreadable(str(exc)) from None
     return record
@@ -96,12 +106,11 @@ def _real_record_dir(record_dir: Path) -> Path:
     return record_dir if at is None else Path(*parts[:at]).resolve().joinpath(*parts[at:])
 
 
-def _text(record_dir: Path, name: str) -> str:
-    """保存先の直下の通常ファイルの中身。保存先と途中のディレクトリ、ファイルのリンクは辿らない（外の中身を理由の文に出さない）。"""
-    path = record_dir / name
+def _text(wd: worker_paths.WorkDir, name: str) -> str:
+    """保存先の直下の通常ファイルの中身。ファイルのリンクは辿らない（外の中身を理由の文に出さない）。"""
+    path = wd.path / name
     try:
-        with worker_paths.open_workdir(_real_record_dir(record_dir)) as wd:
-            held = worker_paths.read_file(wd, name)
+        held = worker_paths.read_file(wd, name)
     except (worker_paths.EntryError, OSError) as exc:
         raise RecordUnreadable(f"{path} を読めない（{type(exc).__name__}）") from None
     found = "" if held is None else held.strip()
@@ -110,12 +119,13 @@ def _text(record_dir: Path, name: str) -> str:
     return found
 
 
-def _checked(record_dir: Path, head: str) -> dict[str, Any]:
+def _checked(wd: worker_paths.WorkDir, head: str) -> dict[str, Any]:
+    record_dir = wd.path
     path = record_dir / plan_files.CHECKED_FILE
     if not _COMMIT_ID.fullmatch(head):
         raise RecordUnreadable(f"{record_dir / units_files.REVIEWED_HEAD}: コミットの ID の形でない")
     try:
-        found = json.loads(_text(record_dir, plan_files.CHECKED_FILE))
+        found = json.loads(_text(wd, plan_files.CHECKED_FILE))
     except json.JSONDecodeError:
         found = None
     if not isinstance(found, dict) or found.get(plan_files.RECORD_KIND_KEY) != plan_files.CHECKED_KIND:
@@ -124,8 +134,8 @@ def _checked(record_dir: Path, head: str) -> dict[str, Any]:
     if seen != head:
         shown = f"（{seen}）" if isinstance(seen, str) and _COMMIT_ID.fullmatch(seen) else ""
         raise RecordUnreadable(f"{path} が確かめたコミット{shown}はレビューした HEAD（{head}）と違う")
-    # 読んだ中身を理由の文に写さない（場所と規則の名前だけを出す）
-    errs = contracts.broken_places(found, CHECKED_SCHEMA) or _unpaired(found)
+    # 読んだ中身を理由の文に写さない（スキーマの場所と規則の名前だけを出す。入力のキーも含まない）
+    errs = contracts.broken_rules(found, CHECKED_SCHEMA) or _unpaired(found)
     if errs:
         raise RecordUnreadable(f"{path} の形が違う: {'; '.join(errs)}")
     return found

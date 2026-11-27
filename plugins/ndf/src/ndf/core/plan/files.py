@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
+import secrets
 from pathlib import Path
 from typing import Any, Optional
+
+from ndf.contracts import worker_paths
 
 
 # NDF が書いた記録の JSON が、記録の種別を持つキー。消す前にこの値で NDF の記録かを確かめる
@@ -41,27 +43,32 @@ class RecordRefused(Exception):
     """記録の保存先に、NDF の記録と確かめられないファイルがある。"""
 
 
-def discard_record(target: Path, kind: str) -> None:
-    """前に書いた `target` を消す。種別 `kind` の記録と読めないもの（リンクを含む）は消さずに `RecordRefused`。"""
-    if not os.path.lexists(target):
-        return
+def discard_record(wd: worker_paths.WorkDir, name: str, kind: str) -> None:
+    """開いたディレクトリ `wd` の直下の、前に書いた `name` を消す。
+
+    種別 `kind` の記録と読めないもの（シンボリックリンク・ハードリンクを含む）は消さずに `RecordRefused`。
+    """
     try:
-        found = None if target.is_symlink() else read_json(target)
-    except UnicodeDecodeError:
-        found = None
-    if found is None or found.get(RECORD_KIND_KEY) != kind:
-        raise RecordRefused(f"{target} は NDF が書いた記録と確かめられないので消さない（中身を調べて退けてから打ち直す）")
-    target.unlink()
+        held = worker_paths.read_file(wd, name)
+        found = None if held is None else json.loads(held)
+    except (worker_paths.EntryError, json.JSONDecodeError):
+        held, found = "", None
+    if held is None:
+        return
+    if not isinstance(found, dict) or found.get(RECORD_KIND_KEY) != kind:
+        raise RecordRefused(f"{wd.path / name} は NDF が書いた記録と確かめられないので消さない（中身を調べて退けてから打ち直す）")
+    os.unlink(name, dir_fd=wd.fd)
 
 
-def publish_record(target: Path, kind: str, value: dict[str, Any]) -> None:
-    """種別 `kind` の記録を、一意の一時の名前へ書き終えてから、`target` の名前が空いているときだけ公開する。"""
-    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+def publish_record(wd: worker_paths.WorkDir, name: str, kind: str, value: dict[str, Any]) -> None:
+    """種別 `kind` の記録を、一意の一時の名前へ書き終えてから、`name` が空いているときだけ `wd` の直下へ公開する。"""
+    tmp = f".{name}.{secrets.token_hex(8)}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=wd.fd)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:
             json.dump({RECORD_KIND_KEY: kind, **value}, out, ensure_ascii=False)
-        os.link(tmp, target)
+        os.link(tmp, name, src_dir_fd=wd.fd, dst_dir_fd=wd.fd, follow_symlinks=False)
     except FileExistsError:
-        raise RecordRefused(f"{target} が書く前に置かれたので上書きしない（中身を調べて退けてから打ち直す）") from None
+        raise RecordRefused(f"{wd.path / name} が書く前に置かれたので上書きしない（中身を調べて退けてから打ち直す）") from None
     finally:
-        Path(tmp).unlink(missing_ok=True)
+        os.unlink(tmp, dir_fd=wd.fd)

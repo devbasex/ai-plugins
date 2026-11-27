@@ -359,7 +359,8 @@ def _record(path: Path, targets: _Targets) -> _Record:
     マージ先（`reviewed-base`）はここでは有無だけを見る。PR の今のマージ先と比べるのは、承認の判定
     （`ndf records mvv gate`）が受け持つ。
     """
-    files.discard_record(path / files.CHECKED_FILE, files.CHECKED_KIND)
+    with worker_paths.open_resolved(path) as wd:
+        files.discard_record(wd, files.CHECKED_FILE, files.CHECKED_KIND)
     if targets.paths:
         raise _UnitsStopped("invalid", f"{RECORD_DIR_ENV} があるときは、単位のファイルを直に指さず課題で確かめる")
     held = {name: _held(path / name) for name in (units_files.REVIEWED_HEAD, files.REVIEWED_PR, files.REVIEWED_BASE)}
@@ -406,20 +407,22 @@ def _checked_units(a: argparse.Namespace, targets: _Targets, record: Optional[_R
     summary = f"{len(units)} 個の単位の確かめを通った（警告 {len(warnings)} 件）"
     outputs = None
     if record is not None:
-        files.publish_record(
-            record.path / files.CHECKED_FILE,
-            files.CHECKED_KIND,
-            dict(
-                head=record.head,
-                branch=targets.inputs.branch,
-                issues=list(targets.issues),
-                handling={str(n): dict(handling=handling, into=into) for n, (handling, into) in report.handlings.items()},
-                omitted=[f.issues[0] for f in report.files if f.whole],
-                limits=limits_held._asdict(),
-                criteria={str(n): count for n, count in counts.items()},
-                units=units,
-            ),
-        )
+        with worker_paths.open_resolved(record.path) as wd:
+            files.publish_record(
+                wd,
+                files.CHECKED_FILE,
+                files.CHECKED_KIND,
+                dict(
+                    head=record.head,
+                    branch=targets.inputs.branch,
+                    issues=list(targets.issues),
+                    handling={str(n): dict(handling=handling, into=into) for n, (handling, into) in report.handlings.items()},
+                    omitted=[f.issues[0] for f in report.files if f.whole],
+                    limits=limits_held._asdict(),
+                    criteria={str(n): count for n, count in counts.items()},
+                    units=units,
+                ),
+            )
         outputs = dict(design_pr=record.pr)
     return result.result(TOOL, OK, summary, units + splits, metrics, warnings=warnings, outputs=outputs)
 

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -599,3 +600,27 @@ def test_build_reads_through_a_link_above_the_git_directory(checked, tmp_path):
     record = design_record.build(tmp_path / "linked-home" / "repo" / ".git" / "record")
 
     assert record["review"]["head"] == head
+
+
+def test_build_does_not_quote_an_input_key_of_a_broken_check(checked):
+    record_dir, head = checked
+    held = json.loads((record_dir / "checked.json").read_text(encoding="utf-8"))
+    held["criteria"] = {"secret-key": "x"}
+    (record_dir / "checked.json").write_text(json.dumps(held), encoding="utf-8")
+
+    with pytest.raises(design_record.RecordUnreadable, match="checked.json") as caught:
+        design_record.build(record_dir)
+
+    assert "secret-key" not in str(caught.value)
+
+
+def test_build_keeps_a_hard_linked_target_file(checked, tmp_path):
+    record_dir, _ = checked
+    other = tmp_path / "other.json"
+    other.write_text(json.dumps({"ndf_record": "design-target"}), encoding="utf-8")
+    os.link(other, record_dir / "design-target.json")
+
+    with pytest.raises(design_record.RecordUnreadable, match="design-target.json"):
+        design_record.build(record_dir)
+
+    assert (record_dir / "design-target.json").samefile(other)
