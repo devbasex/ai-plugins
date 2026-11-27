@@ -133,7 +133,7 @@ stateDiagram-v2
 | 承認を読む側（マージの対象・承認済みのコミット・リリースの識別子） | 直近の開き直しより前の回答と、見た PR が工程の対象の PR と違う回答を読まない |
 | リリースのリクエスト（並行開発の計画か、計画の外のオーガナイザーへ出す承認の依頼） | 開き直しで失効する承認ゲートのリクエストだけを取り下げる |
 | 進み具合の表の更新 | 開き直しと、回答待ちからの終了の後に、課題と PR の本文を書き直す。失敗したときは、記録を足さずにもう一度書き直せる |
-| 作り直し用の作業場所 | マージ済みの設計を開き直したとき、現在のベースから作業場所を作り、マージの後に取り込んで片付ける |
+| 作り直し用の作業場所 | マージ済みの設計を開き直したとき、現在のベースから作業場所を作って記録し、マージの後に取り込んで片付ける |
 | 手順書（進み具合の記録・supervisor の経路・承認の回答の記録） | 新しい操作と振る舞いを説明する |
 
 ```mermaid
@@ -219,16 +219,18 @@ graph TD
 
 `retry` は冪等のキーを持たないので、手順 2 から始める。手順 1 で終わる送り直しは、何も追記せず、何も消さず、課題と PR の本文も読まない。本文の更新の失敗は `ndf progress resync <ID>` で直す。
 
-`finish` も作業の排他を取る。有効な承認の確かめから、MVV 判定、`finished` か `finish_held` の追記まで排他を持ったままにするので、その間の変更要求と却下は「作業が流れている」で断られる。承認の回答は排他を取らないので、`finish` は初めに読んだ最後の事象の番号を条件にして追記する。判定の間に事象が増えていれば、ステートマシンへは何も追記せずに断り、打ち直しを案内する。
+`finish` も作業の排他を取る。有効な承認の確かめから、MVV 判定、`finished` か `finish_held` の追記まで排他を持ったままにするので、その間の変更要求と却下は「作業が流れている」で断られる。
 
-断っても、判定が書いたものは残る。PR の判定のコメント（承認の証跡は含まない）と、手元の MVV 判定の記録である。打ち直しでコメントが重ならないように、`finish` は判定の結果を状態の保存先に残してから追記する。残すのは、判定が出てコメントを書けた結果だけである。打ち直しで次がすべて同じなら、判定のコマンドを打たずに残した結果を使う。
+承認の回答は排他を取らないので、判定の間に事象が増えることがある。この場合も `finish` は中断せず、判定し直さない。追記の前に事象を読み直し、次のように分ける。
 
-- 工程と世代
-- PR の番号、HEAD、マージ先、本文
-- ベースブランチの MVV と、レビューの保留
-- 進め方と、承認でない回答が残っているか
+| 読み直した結果 | `finish` の動き |
+| --- | --- |
+| 判定の間に有効な承認が記録された | 有効な承認がある場合と同じにする（承認した HEAD がマージ済みなら終了、未マージなら断る） |
+| 有効な承認が無い | 打ってある判定の結果を持つ `finish_held` を追記する |
 
-どれかが違えば判定し直し、新しいコメントを書く。コメントを書いた後、結果を残す前にプロセスが止まった場合は、コメントが 2 件になる。
+追記は読み直した最後の事象の番号を条件にする。さらに事象が増えていれば、読み直しからやり直す。有効な承認の確かめで PR を読むのは、承認の回答が増えた場合だけである。
+
+打ち直しを求めないので、同じ判定のコメントは重ならず、判定の結果を別に保存して使い回す必要も無い。使い回すには、差分の起点、PR の HEAD、マージ先の設定など、判定が読んだ入力をすべて読み直して照らすことになる。プロセスが途中で止まって打ち直した場合は判定し直し、PR の判定のコメントがもう 1 件増える（承認の証跡は含まない）。LLM の「従う」の判定は、今と同じく手元の記録を再利用する。
 
 ### 外への書き込みの順序
 
@@ -252,9 +254,9 @@ graph TD
 | 発行先 | ファイルの絶対パス（ファイルの場合だけ） |
 | リクエストの中身 | 書いた項目の全部（リクエストの ID、`sprint_state`、`prs`、`issues` など） |
 
-- 記録はファイルを書く前に残す。同じ ID の記録があれば上書きしない
+- 記録はファイルを書く前に、リクエストの ID と発行先の組ごとに 1 件残す。同じ組の記録は上書きしない。同じ質問を別の `NDF_ORGANIZER_DIR` で出し直すと、記録が 1 件増える
 - 同じ名前で中身の違うファイルがあって書けなかった場合は、今回作った記録を消す。NDF が書いていないファイルを指す記録を残さないためである
-- 取り下げでは、開き直す工程の記録にあるパスを読む。中身が記録と一致するときだけ消す。比べるのは、書いた時刻（`at`）を除く全項目である。打った側の `NDF_ORGANIZER_DIR` は使わない
+- 取り下げでは、開き直す工程の記録にあるパスをすべて読む。中身が記録と一致するときだけ消す。比べるのは、書いた時刻（`at`）を除く全項目である。打った側の `NDF_ORGANIZER_DIR` は使わない
 - 中身が一致しないファイルは消さない。開き直しは進め、結果の `warnings` に「未取り下げ」としてリクエストの ID とパスを載せる
 - `--later keep` で残した工程の記録は対象にしないので、残した承認ゲートのリクエストは消えない
 
@@ -387,33 +389,66 @@ MVV 判定で省くときの順序は次のとおりである。
 
 ### 開き直した設計を新しい PR に載せる
 
-マージ済みの PR は開き直せないので、前の設計 PR は再利用せず、現在のベースブランチから作り直して新しい設計 PR を出す。対象は、設計・詳細設計・ドキュメント再構成・ドキュメントレビュー（以下「設計の工程」）である。
+マージ済みの PR は開き直せないので、前の設計 PR は再利用せず、現在のベースブランチから作り直して新しい設計 PR を出す。対象は、設計・詳細設計・ドキュメント再構成・ドキュメントレビュー（以下「設計の工程」）である。実装の工程を始めた後でも同じ順で、開き直した工程は `next` が自動で流す。
 
-`next` は、開き直した設計の工程を始める前に、最後に記録した `design_pr` を 1 回読む。
+#### 作り直しの記録
 
-| 前の設計 PR | 作業場所 |
+作り直すかどうかは、開き直した後に `next` が設計の工程を初めて始めるときに 1 回だけ決める。見るのは、**開き直しの時点の** `design_pr`（開き直しより前の記録にある最後の値）である。この PR を 1 回読み、無いかマージしていなければ、今の作業場所とブランチのまま流して以下は行わない。マージ済みなら、次の項目をステートマシンの事象に残す。
+
+| 項目 | 中身 |
 | --- | --- |
-| 無い、またはマージしていない | 今の作業場所とブランチのまま流す |
-| マージ済み | 作り直し用の作業場所を用意して流す（下の手順） |
+| 開き直しの時点の設計 PR | 番号と HEAD。後で新しい `design_pr` が記録されても変えない |
+| 作り直し用の作業場所 | パスとブランチの名前 |
+| この作業場所からマージした PR | 番号と HEAD。設計の工程のマージとドキュメントレビューのマージが終わるたびに足す |
+| 取り込みと片付け | 済んだかと、残ったもの |
 
-マージ済みの場合は次の順で進む。実装の工程を始めた後でも同じ順で、開き直した工程は `next` が自動で流す。
+後に続く設計の工程は、この記録の作業場所を使い、作り直すかを決め直さない。もう一度開き直した場合は新しい記録を作る。前の作業場所が残っていれば、先に「片付け」の条件で片付ける。
 
-1. `next` が、現在のベースブランチから `design/<課題の番号>-r<世代>` のブランチと作業場所を作る（`ndf worktree create`）。打ち直しで同じ名前の作業場所があれば使う。保存先は設計の工程の開始の事象に記録する
-2. 設計の工程の入力 `worktree` と `branch` を、この作業場所に差し替える。`finish` と `ndf records mvv gate --machine` が組む入力も同じにする。今の作業場所とブランチには手を付けないので、実装のコミットは失われず、設計 PR にも混ざらない
-3. 設計のプランは開いた PR だけを探すので、新しい PR を作り、その番号が `design_pr` になる。差分は再設計の分だけになる。前の PR を squash や rebase でマージしていても同じである
-4. `next` は、設計の工程より後の工程を始める前に、新しい設計 PR のマージコミットが今の作業場所のブランチに含まれるかを確かめる。含まれなければ、ベースブランチを取り込んでから工程を始める
-5. 取り込んだ後、作り直し用の作業場所とブランチを `ndf worktree merged <PR番号>` で片付ける。片付けに失敗しても工程は進め、警告にする
+#### 作業場所を作る
 
-手順 4 の取り込みで衝突したときは、次のように扱う。squash や rebase でマージしたブランチでは、前の設計の文書が衝突することがある。
+1. ベースは `.ndf/project.json` の `branch_strategy.branches.base`（設計 PR のマージ先）、リモートは `.ndf/worktree.json` の `remote`（省けば既定）から決める
+2. ブランチの名前は `design/<課題の番号>-redo-<ステートマシンの ID から作る 8 桁>-<世代>` にする
+3. 同じ名前のローカルのブランチか保存先があり、このステートマシンの記録が無ければ、使わずに `stopped` にする
+4. 作る予定のパスとブランチを事象に残してから、`ndf worktree --cwd <メインディレクトリ> create <ブランチ> --from <ベース>` を打つ。`--from` を省くとスプリントの起点から切られ、起点が本番ブランチのプロジェクトではマージ済みの設計が入らない
+5. 結果の `new_branch` が偽なら使わず、予定の記録を無効にして `stopped` にする。同じ名前のブランチがローカルかリモートにあると、このコマンドは成功のまま、そのブランチを使うためである
 
-- 衝突したファイルのブランチ側の中身が、前の設計 PR の HEAD と同じなら、ベース側を採る。前の設計より後の変更が無いので、失う作業は無い
-- それ以外の衝突があれば、取り込みを取りやめて `stopped`（`precondition`）を返す。衝突したファイルを示し、取り込んでから `ndf progress next` を打つよう案内する。含まれていれば、次の `next` は工程を始める
+打ち直しで予定の記録だけがある場合は、記録のパスがそのブランチの worktree で、ブランチに独自のコミットが無ければ使う。パスもブランチも無ければ作る。それ以外は `stopped` にする。後の工程を始めるときは、記録のパスが記録のブランチの worktree であることを確かめる。
 
-開き直した設計の工程を手の経路（`finish`）で終える場合も、ベースブランチから `design/` で始まるブランチを作る。この PR は工程の入力の作業場所の PR ではないので、`finish` は MVV 判定を打たず（`--expect-pr`）、人へ質問する。手順 4 は手の経路で終えた場合も行う。
+設計の工程の入力 `worktree` と `branch` は、この作業場所に差し替える。`finish` と `ndf records mvv gate --machine` が組む入力も同じにする。今の作業場所とブランチには手を付けないので、実装のコミットは失われず、設計 PR にも混ざらない。設計のプランは開いた PR だけを探すので新しい PR を作り、その差分は再設計の分だけになる。
 
 自動の流れで設計に差分が出なければ、新しい PR は作れず、`pr` ステップが失敗する。変えずに終えるときは、`finish` の出力に前の `design_pr` を書き、その PR を対象に改めて承認を取る。承認した HEAD はマージ済みなので、マージは打たない。
 
-この経路は、プランの定義（`design.json`、`document-review.json`、`parts/steps.json` の `pr` ステップ）と `ndf worktree create` のコードを読んで確かめた。実行しては確かめていない。
+#### 後ろの工程へ戻る前の取り込み
+
+開き直した設計の工程がすべて終わったら、`next` は次の工程を始める前かスプリントを完了する前に、次を 1 回行う。`--later keep` で後ろを残した場合も通る。
+
+1. ベースを fetch し、今の作業場所のブランチへマージする
+2. 作り直し用のブランチに、最後にマージした PR の HEAD より後のコミット（マージした PR が無ければ独自のコミット）があれば、今の作業場所へ cherry-pick する。ドキュメントレビューの工程が無効で、詳細設計のコミットがマージされない場合などに当たる
+
+1 の衝突では、衝突したファイルのブランチ側の中身が、開き直しの時点の設計 PR の HEAD と同じなら、ベース側を採る。前の設計より後の変更が無いので、失う作業は無い。squash や rebase でマージしたブランチでは、この衝突が起きうる。1 のそれ以外の衝突と 2 の衝突では、取りやめて `stopped`（`precondition`）を返し、衝突したファイルと、解消してから `ndf progress next` を打つことを案内する。
+
+開き直した設計の工程を手の経路（`finish`）で終える場合は、conductor がベースブランチから `design/` で始まるブランチを作る。この PR は工程の入力の作業場所の PR ではないので、`finish` は MVV 判定を打たず（`--expect-pr`）、人へ質問する。マージの後の取り込みは 1 を行う。
+
+#### 片付け
+
+取り込みの後に、**記録のパスとブランチ**を片付ける。`ndf worktree merged <PR番号>` は使わない。PR の head のブランチを片付けるコマンドなので、差分が無く前の PR を承認した場合に番号を渡すと、今回の作業場所ではなく前の PR のブランチが対象になる。
+
+- 条件: 記録のパスが記録のブランチの worktree であり、ブランチのコミットがすべて、マージ済みの PR か今の作業場所に入っている。満たさなければ何も消さない
+- 手順: `ndf worktree merged` と同じ外し方（未コミットの変更があれば残す、追跡していないファイルは退避する、`--force` を使わない `git worktree remove`）の後、今の作業場所から `git branch -d` を打つ
+- 結果の確認: worktree かブランチが残れば、名前と理由を事象と `warnings` に残し、スプリントの完了の結果にも載せる。工程は止めない
+
+2026-11-27 に、作り物のリポジトリ（git 2.53.0）で `git worktree remove` と `git branch -d` を打った結果は次のとおりである。
+
+| 設計 PR のマージ | worktree | ブランチ（ベースを取り込んだ今の作業場所から `git branch -d`） |
+| --- | --- | --- |
+| merge コミット | 外れる | 消える |
+| squash | 外れる | 「not fully merged」で残る |
+| rebase | 外れる | 「not fully merged」で残る |
+| 差分なし（PR なし） | 外れる | 消える |
+
+残ったブランチを消すには `git branch -D` が要り、人の承認が要る操作（共通原則の C4）に当たる。`next` は打たない。`warnings` に、残ったブランチの名前、内容を含むマージ済みの PR の番号、消すコマンドを載せ、利用者が決める。cherry-pick で移したブランチも同じ扱いになる。
+
+同じ作り物のリポジトリで `ndf worktree create` も打った。`--from` にベースを渡すとリモートのベースから切られた。省くと、起点が本番の設定では本番ブランチから切られた。同じ名前のローカルのブランチがあると、`new_branch` が偽の成功になった（リモートにだけある場合はコードを読んで確かめた）。GitHub での PR の作成とマージ、`next` からの呼び出しは確かめていない。
 
 ## 非機能の実現方式
 
@@ -531,7 +566,16 @@ MVV 判定で省くときの順序は次のとおりである。
 - **選んだ案**: 現在のベースブランチから作り直し用の作業場所を作り、設計の工程だけをそこで流す。マージの後にベースを今の作業場所へ取り込み、後ろの工程を `next` が続ける（「開き直した設計を新しい PR に載せる」）
 - 採らなかった案: 今のブランチのまま新しい PR を出す（squash や rebase でマージした後は、前の設計の差分がもう一度含まれる。実装を始めた後は、実装のコミットが設計 PR に混ざる）
 - 採らなかった案: conductor が手でブランチを作り、設計の工程を手の経路で終える（`next` が開き直した工程から流すという受け入れ条件 6・12 を満たさない）
-- **代償**: `next` が作業場所の用意と取り込みを持つ。開き直した設計の工程を始めるたびに、PR の読み取りが 1 回増える
+- 採らなかった案: 片付けに `ndf worktree merged` を使う（PR の番号から対象を決めるので、新しい PR が無いと今回の作業場所を指せない。PR の読み取りと fetch も増える）
+- **代償**: `next` が作業場所の用意、取り込み、片付けを持つ。squash と rebase ではブランチが残り、利用者が消すかを決める。マージ済みの設計を開き直すたびに、次の処理が増える
+
+  | 処理 | 回数 | 使い回せないもの |
+  | --- | --- | --- |
+  | PR の読み取り | 1 | 開き直しの時点の設計 PR がマージ済みかと HEAD を、この 1 回で読む |
+  | 作業場所の作成（`ndf worktree create`） | 1 | コマンドの中で fetch を 1 回行う |
+  | 取り込みの fetch | 1 | 作成の後に設計 PR がマージされるので、作成時の参照は使えない |
+  | 片付け | 1 | 記録と取り込み済みの参照を使うので、fetch と PR の読み取りは増えない |
+
 - 根拠: Value 1「ワークフロー上の課題（再起動・告知・確認）で、利用者に操作を求めない」（MVV バージョン 11）
 
 ## 影響と危険
@@ -584,23 +628,26 @@ MVV 判定で省くときの順序は次のとおりである。
 | 14 | 開き直した承認ゲートの工程の `finish` と自動の流れが改めて承認を求め、承認済みのコミットは返らない | 開き直しより前の回答を読む |
 | 15 | 結果に開き直した工程の一覧と、取り消されない操作の警告が出る | 一覧か警告を落とす |
 | Value 6 | 開き直しの後、古いリリースのリクエストが閉じ、出し直したものだけが開いている | 閉じる事象を落とす |
-| 出したリクエストの記録 | 打った側に `NDF_ORGANIZER_DIR` が無くても、開き直す工程のリクエストのファイルが消える。`--later keep` で残した工程のファイルと、同じ名前で中身の違うファイルは残る | 環境変数から保存先を決める・パスか `sprint_state` の一致だけで消す |
+| 出したリクエストの記録 | 打った側に `NDF_ORGANIZER_DIR` が無くても、開き直す工程のリクエストのファイルが消える。同じ質問を 2 つの発行先へ出していれば両方消える。`--later keep` で残した工程のファイルと、同じ名前で中身の違うファイルは残る | 環境変数から保存先を決める・パスか `sprint_state` の一致だけで消す |
 | 改修前のリクエスト | 記録の無いリクエストは、ID と提示した対象が一致すれば消え、確かめられなければ結果に未取り下げが出る | 記録が無ければ黙って残す |
 | 進み具合の表の再同期 | 本文の更新に失敗した後、`resync` で表が直り、事象は増えない。文脈の `pr` が外れても PR の欄を直す。同じキーの送り直しは本文を読まない | `resync` が文脈の `pr` だけを宛先にする・送り直しで本文を読む |
 | `design_pr` の確定 | `design_pr` の無い工程へ `question --pr` で承認した後、`ndf answer head` が HEAD を返し、マージ後の `finish` が終了を書く | 文脈へ書かない |
 | 先の承認 | 対象が同じ先の承認があれば、自動の流れの承認ゲートは質問せず、読み手役のステップも打たない。HEAD が違えば質問する | `late` の承認を常に読まない・対象を比べない |
-| 開き直した設計の経路 | 前の設計 PR がマージ済みなら、現在のベースから作った作業場所で設計の工程が流れ、差分は再設計の分だけになる。マージしていなければ今の作業場所で流れる | 今の作業場所で流す |
-| 後続の工程の再開 | 新しい設計 PR のマージの後の `next` は、ベースを取り込んで後ろの工程を始める。実装のコミットは残る。設計の文書以外の衝突は止まり、解消の後の `next` で始まる | 取り込まずに始める・衝突をベース側で上書きする |
+| 開き直した設計の経路 | 開き直しの時点の設計 PR がマージ済みなら、宣言のベースから作った作業場所で設計の工程が流れる。マージしていなければ今の作業場所で流れる | 今の作業場所で流す・起点を省いて作る |
+| 作り直しの記録 | 新しい設計 PR のマージの後に始める詳細設計とドキュメントレビューは、同じ作業場所を使う | 工程ごとに最新の `design_pr` で決め直す |
+| 作業場所の由来 | 記録の無い同じ名前のブランチがあれば使わない。`new_branch` が偽の結果は使わない | ブランチの名前だけで再利用する |
+| 後続の工程の再開 | 新しい設計 PR のマージの後の `next` は、ベースを取り込み、マージされていないコミットを移して後ろの工程を始める。実装のコミットは残る。解けない衝突は止まる | 取り込まずに始める・未マージのコミットを捨てる・衝突をベース側で上書きする |
+| 作り直し用の片付け | 差分なしで終えた場合も記録の作業場所だけを外し、元のブランチは残る。ブランチを消せなければ結果に名前が出る | PR の番号で対象を決める・残ったことを報告しない・`-D` で消す |
 | 指摘の保持 | 開き直した工程の進みが指摘を持つ | `reopened` の指摘を畳み込まない |
 | 排他と送り直し | 開き直した後に同じキーで送り直すと、作業が流れていても同じ結果が返り記録は増えない。同じキーで質問の id・回答・回答者が違えば断る | 排他を冪等の照合より先に取る・キーだけで同じ結果を返す |
 | I4（起動直後） | 起動のマーカーがあり作業が排他を取る前の開き直しを断り、何も書かない | 排他だけを確かめる |
 | 外への書き込みの順序 | リクエストのファイルを消せないと開き直しは何も記録しない。打ち直して消せれば開き直る | 削除を DB の確定の後に移す |
 | 証跡の再利用 | 証跡を書いた後に確定が失敗した回答を打ち直すと、証跡は増えず工程が開き直る。同じ識別子で回答の違う証跡は使わない | 識別子だけで重複を判定する |
-| 決定 7（証跡） | `ndf records mvv gate` と `finish` は承認の証跡を書かない。`next` が承認を記録した後にだけ書かれる。承認でない回答が残る・判定の間に事象が増えた場合は書かれない。書けなかったら後ろへ進まず、次の `next` が書く | 判定のコマンドで書く・承認の記録より先に書く・失敗を無視して進む |
+| 決定 7（証跡） | `ndf records mvv gate` と `finish` は承認の証跡を書かない。`next` が承認を記録した後にだけ書かれる。承認でない回答が残る場合は書かれない。書けなかったら後ろへ進まず、次の `next` が書く | 判定のコマンドで書く・承認の記録より先に書く・失敗を無視して進む |
 | マージ済みの PR の承認 | 承認した HEAD が既にマージ済みなら、`next` はマージを案内せずに終了を書く | 承認の後は必ずマージを案内する |
 | 承認した HEAD のマージ | 承認と違う HEAD でマージされた PR では、`next` と `finish` は終了を書かない | マージ済みの真偽だけを見る |
-| `finish` の排他 | `finish` の判定の間の変更要求は断られ、承認が追記されれば `finish` はステートマシンへ何も書かない | 排他か最後の事象の番号の条件を外す |
-| 判定の再利用 | 追記で断った `finish` の打ち直しは、対象が同じなら判定のコメントを増やさない。HEAD が違えば判定し直す | 結果を残さない・対象を比べずに使う |
+| `finish` の排他 | `finish` の判定の間の変更要求は断られる | 排他を外す |
+| 判定の間の承認 | 判定の間に有効な承認が記録されれば、`finish` は判定し直さずに有効な承認の分岐へ進む。対象が違う承認なら `finish_held` を書き、判定のコメントは 1 件である | 読み直さずに `finish_held` を書く・中断して打ち直させる |
 | 省くときの結果 | 最初の `next` が承認を記録し、同じ結果でマージの案内を返す | 承認の記録だけで返る |
 | 手の経路の出力（デプロイ） | デプロイの出力の `mvv_gate` は今と同じく必須で、文脈へ書く | 設計の扱いをデプロイにも当てる |
 | 有効な承認（対象） | HEAD が同じでマージ先か本番への反映が変わった承認では終了にならない | 比べる項目から外す |
@@ -621,7 +668,7 @@ MVV 判定で省くときの順序は次のとおりである。
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4520 | 実装する | — | `plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/run_view.py`、`plugins/ndf/src/ndf/progress/approval.py`（新設）、`plugins/ndf/src/ndf/progress/reopening.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/stage_inputs.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/gate/release.py`、`plugins/ndf/src/ndf/progress/plan/external.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/core/merge_approval.py`、`plugins/ndf/tests/progress/test_reopen_operations.py`（新設）、`plugins/ndf/tests/progress/test_manual_gate.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-answer.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-workflow.md`、`docs/glossary.md` |
+| #4520 | 実装する | — | `plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/run_view.py`、`plugins/ndf/src/ndf/progress/approval.py`（新設）、`plugins/ndf/src/ndf/progress/reopening.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/stage_inputs.py`、`plugins/ndf/src/ndf/domains/worktree/merged.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/gate/release.py`、`plugins/ndf/src/ndf/progress/plan/external.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/core/merge_approval.py`、`plugins/ndf/tests/progress/test_reopen_operations.py`（新設）、`plugins/ndf/tests/progress/test_manual_gate.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-answer.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-workflow.md`、`docs/glossary.md` |
 
 [#3957](https://github.com/devbasex/ai-plugins/issues/3957)（手で終えると回答を待たずに次の工程が始まる）の受け入れ条件 3 件は、要求仕様の受け入れ条件 1・2・4 に含まれる。
 
@@ -629,7 +676,7 @@ MVV 判定で省くときの順序は次のとおりである。
 
 | 項目 | 内容 |
 | --- | --- |
-| 流し直したステップの外の状態への反応 | 設計の経路はプランの定義を読んで確かめた（「開き直した設計を新しい PR に載せる」）。実際の GitHub での動きと、ほかの工程のプランがマージ済みの PR を前にどう進むかは、実装のテストでは外の状態を作り物にするため確かめられない。リリースの後に実際の開き直しで分かる |
+| 流し直したステップの外の状態への反応 | 作業場所の作成と片付けの git の振る舞いは作り物のリポジトリで確かめ、PR の作成の経路はプランの定義を読んで確かめた（「開き直した設計を新しい PR に載せる」）。実際の GitHub での動きと、ほかの工程のプランがマージ済みの PR を前にどう進むかは、実装のテストでは外の状態を作り物にするため確かめられない。リリースの後に実際の開き直しで分かる |
 | `finish` の中の MVV 判定の所要時間 | 実際に打つまで分からない |
 
 ## 外部の調査
