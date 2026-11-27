@@ -238,8 +238,13 @@ def _interval(s: ad.Stats) -> Optional[list[float]]:
     return [max(0.0, s.quality - half), min(1.0, s.quality + half)]
 
 
+def _roi(s: ad.Stats) -> Optional[float]:
+    """効果の平均を費用の平均で割った値。単位が無いか、費用の平均が無いか 0 なら None。"""
+    return s.quality / s.cost if s.units and s.cost else None  # 費用の平均は正の値か None
+
+
 def _arm_item(where: model_choice.Where, arm: Mapping[str, str], s: ad.Stats, base_roi: Optional[float]) -> dict:
-    roi = s.quality / s.cost if s.units and s.cost else None  # 費用の平均は正の値か None
+    roi = _roi(s)
     item = {
         "kind": "arm",
         **where.fields(),
@@ -296,6 +301,13 @@ def _units_of(where: model_choice.Where, arms: Sequence[Mapping[str, str]], rec:
     return period, period if edge == since else pick(edge)
 
 
+def _dropped_fields(arm: int, cut: Mapping[int, datetime], refused: Mapping[int, datetime], end: datetime) -> dict:
+    """候補から外れた組の、外れた理由と期限の欄。打ち切りと拒否が重なれば、候補へ戻るのは遅いほうの期限。"""
+    reasons = ([("cutoff", cut[arm])] if arm in cut and end < cut[arm] else []) + ([("refused", refused[arm])] if arm in refused else [])
+    dropped, until = max(reasons, key=lambda r: r[1])
+    return {"dropped": dropped, "dropped_until": internal.stamp(until.timestamp())}
+
+
 def _key_items(where: model_choice.Where, assigned: Sequence[Mapping[str, Any]], rec: _Records) -> list[dict]:
     """キー 1 つの組ごとの値。打ち切りの判定 → 候補 → 段階と確率（出現率の計算と同じ順）を、期間の終わりの時点で計算し直す。"""
     arms, allocation, end = assigned[0]["arms"], rec.allocation, rec.span.end
@@ -315,7 +327,7 @@ def _key_items(where: model_choice.Where, assigned: Sequence[Mapping[str, Any]],
     unfit = probs is not None and allocation["floor"] * len(cands) > 1
     used = ad.comparable(units, cands)
     stats = [ad.weighted([u for u in used if u.arm == i]) for i in range(len(arms))]
-    base_roi = stats[0].quality / stats[0].cost if stats[0].units and stats[0].cost else None
+    base_roi = _roi(stats[0])
     modes = {aid: a["mode"] for aid, a in model_choice.assigns(assigned).items() if "mode" in a}
     best = judge.best  # 期間の単位から求めた値だけを出す（出現率の計算に使う直近の単位の値は混ぜない）
     items = []
@@ -330,10 +342,7 @@ def _key_items(where: model_choice.Where, assigned: Sequence[Mapping[str, Any]],
         elif probs is not None:
             item["probability"] = probs[i]
         item |= {"leader": True} if judge.leader == i else {}
-        if i not in cands:  # 打ち切りと拒否が重なれば、候補へ戻るのは遅いほうの期限
-            reasons = ([("cutoff", cut[i])] if i in cut and end < cut[i] else []) + ([("refused", refused[i])] if i in refused else [])
-            dropped, until = max(reasons, key=lambda r: r[1])
-            item |= {"dropped": dropped, "dropped_until": internal.stamp(until.timestamp())}
+        item |= _dropped_fields(i, cut, refused, end) if i not in cands else {}
         items.append(item | ({"unpriced_models": unpriced} if unpriced else {}))
     return items
 
