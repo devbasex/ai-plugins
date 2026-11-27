@@ -528,7 +528,9 @@ def sweep_shares(share: Path, older_than: float, now: Callable[[], float] = time
             _drop_stale_tmp(share, path, int(matched["number"]), older_than, now)
 
 
-def _trusted_state(hub: GitHub, number: int, version: str, commit: str, comments: Optional[Sequence[Authored]] = None) -> record_read.Candidates:
+def _trusted_state(
+    hub: GitHub, number: int, version: str, commit: str, comments: Optional[Sequence[Authored]] = None
+) -> record_read.Candidates:
     """PR の信用する書き手の記録（値 `version` かコミット `commit` を起点に集めた有効な記録と、値ごとの正の一覧）。"""
     return record_read.candidates(hub, number, Selection(version, None, None), commit, comments)
 
