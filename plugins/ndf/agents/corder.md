@@ -86,7 +86,8 @@ cd "<対象のディレクトリ>" && timeout 3720 ndf delegate-run --runtime co
 ```
 
 - Claude Code では Bash の `run_in_background: true` で、選んだ用途のコマンドを起動し、完了通知を 1 回受ける（決まりは `development-workflow/references/waiting.md`）
-- 読むだけのレビューは `$TMP/codex-stdout.log` を、書き込みを伴う作業は `$FINAL` を先に読み、無ければ `$TMP/codex-stdout.log` を読む。
+- 本文を読む前に終了コードを見る。124（上限に当たった）なら、本文があっても途中までの結果なので、`/ndf:external-ai` skill の「共通の実行手順」の「上限に当たったとき」に従う
+- 124 でなければ、読むだけのレビューは `$TMP/codex-stdout.log` を、書き込みを伴う作業は `$FINAL` を先に読み、無ければ `$TMP/codex-stdout.log` を読む。
   どちらも空なら、`/ndf:external-ai` skill の `references/cli-codex.md` の「最終出力をファイル経由で保証する」の表で、終了コードと `$TMP/codex-err.log` から次の手を決める
 - CLI の有無と認証は先に `command -v codex` と `codex login status` で確かめる
 - サンドボックスが使えず起動の設定で codex を承認していなければ、`ndf delegate-run` は起動せずに理由を標準エラーへ出して止まる（終了コード 3）。承認は人が `/ndf:launch-config` で行うので、止まったことと理由を呼び出し元へ返す
