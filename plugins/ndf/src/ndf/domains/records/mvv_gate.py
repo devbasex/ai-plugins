@@ -17,7 +17,7 @@ MVV とレッドラインのパスは PR のベースのコミットから 1 度
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -27,8 +27,8 @@ from ndf.adapters import llm, publish, run_log
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, Pull
 from ndf.contracts import internal, limits
-from ndf.core import approval_words, merge_approval, production_merge
-from ndf.domains.records import files, jsonfile, jsonl, mvv
+from ndf.core import approval_words, issue_docs, merge_approval, production_merge
+from ndf.domains.records import design_check_rules, files, jsonfile, jsonl, mvv
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress import definition
@@ -50,6 +50,9 @@ RELEASE_KEPT = "リリース承認ゲートは、保留を読む PR の範囲が
 NO_DECL = "MVV の設定が手元の HEAD にもリモートの追跡ブランチにも無いため、MVV 判定を打たない"
 # 記録を読めないときの保留の頭（#3959）
 RECORDS_UNREADABLE = "MVV の記録（mvv-validation.jsonl）を読めない: "
+# 省ける判定のときに読む設計文書の「人へ残す判断」の表で、省かない理由の頭の文（#2912 の決定 7）
+TABLE_KEPT = "設計文書の『人へ残す判断』の表に、レッドラインに当たる判断がある: "
+TABLE_UNREADABLE = "設計文書の本文を読めないため、『人へ残す判断』の表を確かめられない: "
 # 判定の 1 回の呼び出し（質問・材料・回答のスキーマ・上限の秒 → 回答。キーワード `before_retry` は打ち直しの起動の直前に呼ぶ
 # 確かめ。`llm.ask` と同じ）。テストはスタブへ差し替える
 Ask = Callable[..., llm.JudgeAnswer]
@@ -441,7 +444,8 @@ def _judged(
         skip, why = False, [f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない", *why]
     if gate_name not in MVV_SKIP_GATES:
         skip, why = False, [*why, RELEASE_KEPT]
-    return j.posted_if_current(_bound(j, mm.gate_outcome(gate_name, verdict, skip, why, rec.holds, pull=(number, j.pull.head_sha))))
+    outcome = _bound(j, mm.gate_outcome(gate_name, verdict, skip, why, rec.holds, pull=(number, j.pull.head_sha)))
+    return j.posted_if_current(_tabled(j, rows, outcome))
 
 
 def _bound(j: _Judging, outcome: dict[str, Any]) -> dict[str, Any]:
@@ -453,6 +457,51 @@ def _bound(j: _Judging, outcome: dict[str, Any]) -> dict[str, Any]:
     except (GitHubError, GitError) as exc:
         why = [*outcome["why"], "マージ先の設定を読めない: " + j.text("base_unreadable", exc)]
         return {**outcome, "skip": False, "why": why}
+
+
+def _table_numbers(hub: GitHub, head: str, paths: Sequence[str]) -> dict[str, Optional[tuple[str, ...]]]:
+    """`paths` の head `head` の本文を 1 回の要求で読み、パスごとに「人へ残す判断」の表の番号を出てくる順に重複なく返す。
+
+    本文が無い（Blob でない・応答に無い）パスと、切り詰められた（`isTruncated`）パスは None。GitHub の失敗は `GitHubError` を送出する。
+    切られた本文では後ろにある表の行を見落とし、省く側へ倒れるので読まない。
+    """
+    selection = "{ ... on Blob { oid text isTruncated } }"
+    got = hub.aliased({p: f"object(expression: {json.dumps(f'{head}:{p}')}) {selection}" for p in paths})
+    out: dict[str, Optional[tuple[str, ...]]] = {}
+    for p in paths:
+        node = got.get(p)
+        text = node.get("text") if isinstance(node, dict) and node.get("isTruncated") is False else None
+        rows = design_check_rules.redline_rows(text) if isinstance(text, str) else None
+        out[p] = None if rows is None else tuple(dict.fromkeys(n for r in rows for n in r.numbers))
+    return out
+
+
+def _tabled(j: _Judging, rows: Sequence[Mapping[str, Any]], outcome: dict[str, Any]) -> dict[str, Any]:
+    """省く判定のときだけ、差分の設計文書の head の表を読み、番号を持つ行か読めない文書があれば省かない（#2912 の決定 7）。
+
+    判定の回答（`verdict`・`boundary`）と保留は変えず、`skip` を偽にして承認の対象 `target` を外し、`why` にパスごとの理由を足す。
+    前に人が承認した行かは問わない。省けない判定と、差分に設計文書が無い判定では何も読まない。
+    """
+    if not outcome["skip"]:
+        return outcome
+    paths = [str(r["filename"]) for r in rows if issue_docs.DESIGN_FILE.match(str(r["filename"])) and r.get("status") != "removed"]
+    if not paths:
+        return outcome
+    try:
+        found = _table_numbers(j.hub, j.pull.head_sha, paths)
+    except GitHubError as exc:
+        reason = j.text("table_unreadable", exc)
+        why = [f"{TABLE_UNREADABLE}{p}（{reason}）" for p in paths]
+    else:
+        why = [
+            f"{TABLE_UNREADABLE}{p}（本文が無い）" if numbers is None else f"{TABLE_KEPT}{p}（{'・'.join(numbers)}）"
+            for p, numbers in found.items()
+            if numbers != ()
+        ]
+    if not why:
+        return outcome
+    kept = {k: v for k, v in outcome.items() if k != "target"}
+    return {**kept, "skip": False, "why": [*outcome["why"], *why]}
 
 
 def _target(hub: GitHub, pull: Pull) -> dict[str, Any]:
