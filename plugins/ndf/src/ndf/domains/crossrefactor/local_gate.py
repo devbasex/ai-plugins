@@ -526,15 +526,21 @@ def _compare(gate: _Gate, tip: str, head: str, found: means.Means, failed: Seque
     def stop(kind: str, detail: str, base: Sequence[Mapping[str, Any]] = ()) -> final_gate.GateStopped:
         return final_gate.GateStopped(kind, detail, _record(kind, round_no, head, base_failed=list(base), head_failed=_rows(failed)))
 
-    names = ", ".join(f"{f.label}（{_failure_text(f)}）" for f in failed)
+    def listed(fs: Sequence[Failed]) -> str:
+        return ", ".join(f"{f.label}（{_failure_text(f)}）" for f in fs)
+
+    names = listed(failed)
+
+    def at_limit(base: Sequence[Mapping[str, Any]] = ()) -> final_gate.GateStopped:
+        return stop("test_failed", f"最終ゲートのテスト全体が直しの上限でも落ちる（送っていない）: {names}", base)
+
     if last and not env:
-        raise stop("test_failed", f"最終ゲートのテスト全体が直しの上限でも落ちる（送っていない）: {names}")
+        raise at_limit()
     base = gate.baseline(tip, found, env, round_no)
     base_rows = [{"suite": suite_label(i, found.suites[i - 1][0]), "code": c} for i, c in sorted(base.items())]
     hit = [f for f in failed if f.code in ENV_CODES and f.index in base and base[f.index] in ENV_CODES]
     if hit:
-        what = ", ".join(f"{f.label}（{_failure_text(f)}）" for f in hit)
-        raise stop("precondition", f"取得した先頭だけのテストでも同じ suite が起動できない。コマンドか環境を直す: {what}", base_rows)
+        raise stop("precondition", f"取得した先頭だけのテストでも同じ suite が起動できない。コマンドか環境を直す: {listed(hit)}", base_rows)
     own = [f for f in failed if f.index not in base]
     if not own:
         both = ", ".join(f"{r['suite']}（{r['code']}）" for r in base_rows)
@@ -544,7 +550,7 @@ def _compare(gate: _Gate, tip: str, head: str, found: means.Means, failed: Seque
         )
         raise stop("test_failed", detail, base_rows)
     if last:
-        raise stop("test_failed", f"最終ゲートのテスト全体が直しの上限でも落ちる（送っていない）: {names}", base_rows)
+        raise at_limit(base_rows)
     return own
 
 
