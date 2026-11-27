@@ -26,6 +26,7 @@ from ndf.contracts import result
 from ndf.domains.docrebuild import drive
 from ndf.domains.docrebuild import gate_decide as gd
 from ndf.domains.docrebuild.drive import Precondition, Stop
+from ndf.domains.crossreview.settings import blob_id
 from ndf.domains.records import mvv, pull_view, reading
 from ndf.domains.records.pull_view import PullView
 from ndf.domains.release import approval_decide
@@ -505,8 +506,8 @@ def _as_whole(run: Run, plan: Plan, t: Read, rec: Mapping[str, Any]) -> Mapping[
         return rec
     width = len(plan.docs[t.name])
     whole = {
-        gd.blob_id(_file_text(t.file).encode("utf-8"), width): plan.docs[t.name],
-        gd.blob_id(gd.changed_part(t.old, _file_text(doc_file(run, t.name))).encode("utf-8"), width): current_hash(run, plan, t.name),
+        blob_id(_file_text(t.file).encode("utf-8"), width): plan.docs[t.name],
+        blob_id(gd.changed_part(t.old, _file_text(doc_file(run, t.name))).encode("utf-8"), width): current_hash(run, plan, t.name),
     }
     renamed = [{**c, "hash": whole[c["hash"]]} if isinstance(c, Mapping) and c.get("hash") in whole else c for c in checks]
     return {**rec, "checks": renamed}

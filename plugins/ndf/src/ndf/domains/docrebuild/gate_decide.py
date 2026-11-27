@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import difflib
-import hashlib
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Optional
@@ -29,12 +28,6 @@ def strip_marks(text: str, expected: str) -> str:
     if cut:
         return body
     return "".join(line for line in text.splitlines(keepends=True) if line.strip() not in (reading.BEGIN, reading.END))
-
-
-def blob_id(data: bytes, width: int) -> str:
-    """`data` を Git の blob にしたときの id（`width` 桁。64 桁なら SHA-256 のリポジトリ）。Git を起動しない。"""
-    algo = hashlib.sha256 if width == 64 else hashlib.sha1
-    return algo(b"blob %d\0" % len(data) + data).hexdigest()
 
 
 def changed_part(old: str, new: str) -> str:
