@@ -651,7 +651,11 @@ def _begin_run(args: argparse.Namespace) -> Optional[int]:
         return _stop("invalid", f"入力 --findings {args.findings} を出力先にも渡している")
     if shared is not None:
         # 後に書く値が先の値を上書きし、承認と照らすのに要る HEAD・PR・比較元のどれかが失われる。消す前に止める（PR 4638 の r1-3）
-        return _stop("invalid", f"出力先 {shared} を --reviewed-out・--reviewed-pr-out・--reviewed-base-out の 2 つ以上に渡している")
+        return _stop(
+            "invalid",
+            f"出力先 {shared} を --reviewed-out・--reviewed-pr-out・--reviewed-base-out の 2 つ以上に渡しているか、別の出力の記録"
+            f"（.<名前>.ndf-output.json）と同じパスにしている",
+        )
     try:
         # 起動できない打ち方では何も消さないよう、出力を片付ける前に確かめる（PR 4638 の C4）
         slug = repo.resolve_target_repo(args.repo, None, Path.cwd()).slug if args.repo is not None else None
@@ -714,11 +718,13 @@ def _same_file(given: str, others: Sequence[str]) -> bool:
 
 def _shared_output(args: argparse.Namespace) -> Optional[str]:
     """`--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out` のうち、同じファイルを指す出力先（重ならなければ None）。
-    リンクと相対パスは解決してから比べ、既にあるファイルはデバイス番号と inode でも比べる（ハードリンク。PR 4638 の r1-5）。"""
+    リンクと相対パスは解決してから比べ、既にあるファイルはデバイス番号と inode でも比べる（ハードリンク。PR 4638 の r1-5）。
+    出力の隣の記録（`outputs.owner_record`）も比べる。出力先が別の出力の記録と同じパスなら、後に書く方が先の出力か記録を
+    上書きするので、作れるかを試す前に止める（PR 4638 の r2-3）。"""
     seen: set[object] = set()
     for given in (args.reviewed_out, args.reviewed_pr_out, args.reviewed_base_out):
         if given:
-            keys = _file_keys(given)
+            keys = _file_keys(given) | _file_keys(str(outputs.owner_record(Path(given))))
             if keys & seen:
                 return given
             seen |= keys
@@ -864,9 +870,10 @@ def _parser() -> argparse.ArgumentParser:
 # 出力の 3 つの引数に共通する、既存のファイルの扱い（`outputs.clear_previous`。PR 4638 の C4、利用者が選んだ判断 A）
 _OUTPUT_RULE = (
     "前の起動が書いた出力は始めに空に戻す（書けなかった起動の後に前の値を残さない。ファイルと権限は残す）。空に戻すのは、"
-    "出力の隣の記録（.<名前>.ndf-output.json。権限 0600）が指すのと同じファイルで、中身が記録と一致するものだけである。"
-    "空のファイルはそのまま使う。同じ中身でも記録と別のファイル・記録の無い中身のあるファイル・シンボリックリンク・NDF の記録と"
-    "読めない記録があるか、出力か記録を作れなければ、どの出力先も変えずに、レビューを始めずに precondition で停止する"
+    "出力の隣の記録（.<名前>.ndf-output.json。権限 0600）が指すのと同じファイルで、中身全体が記録と一致するものだけである。"
+    "空のファイルはそのまま使う。中身が一部でも記録と違うファイル（途中まで書かれたファイルを含む）・同じ中身でも記録と別のファイル・"
+    "記録の無い中身のあるファイル・シンボリックリンク・NDF の記録と読めない記録があるか、出力か記録を作れなければ、どの出力先も"
+    "変えずに、レビューを始めずに precondition で停止する"
 )
 
 

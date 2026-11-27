@@ -55,23 +55,39 @@ def test_file_not_matching_the_record_is_kept(tmp_path: Path, recorded: str | No
 
 
 def test_same_text_in_another_file_is_kept(tmp_path: Path) -> None:
-    """記録と同じ中身でも、記録と別のファイル（利用者が作り直した）は変えずに `Unowned`（r1-2）。"""
+    """記録と同じ中身でも、記録と別のファイル（利用者が作り直した）は変えずに `Unowned`（r1-2）。
+
+    置き換え先は元のファイルが残っている間に作るので、inode は必ず元と違う（r2-5）。"""
     out = tmp_path / "h"
     outputs.write_recorded(out, "x\n")
-    out.unlink()
-    out.write_text("x\n", encoding="utf-8")
+    other = tmp_path / "other"
+    other.write_text("x\n", encoding="utf-8")
+    assert other.stat().st_ino != out.stat().st_ino
+    os.replace(other, out)
     with pytest.raises(outputs.Unowned):
         outputs.check(out)
     assert out.read_text(encoding="utf-8") == "x\n"
 
 
-def test_partly_written_output_is_emptied(tmp_path: Path) -> None:
-    """書く途中で止まった出力（記録と同じファイルで、中身が記録の先頭の部分）は空に戻す。"""
+@pytest.mark.parametrize(("written", "held"), [("abcdef\n", b"abc"), ("あ\n", b"\xe3\x81")], ids=["shortened", "cut-in-a-character"])
+def test_output_differing_from_the_record_in_the_same_file_is_kept(tmp_path: Path, written: str, held: bytes) -> None:
+    """記録と同じファイルでも、中身全体が記録と一致しなければ（利用者が短く編集した・UTF-8 の文字の途中まで）変えずに
+    `Unowned`（r2-5・r2-8）。"""
     out = tmp_path / "h"
-    outputs.write_recorded(out, "abcdef\n")
-    out.write_text("abc", encoding="utf-8")
-    _settle(out)
-    assert out.read_text(encoding="utf-8") == ""
+    outputs.write_recorded(out, written)
+    with out.open("r+b") as f:
+        f.truncate(0)
+        f.write(held)
+    with pytest.raises(outputs.Unowned):
+        outputs.check(out)
+    assert out.read_bytes() == held
+
+
+def test_write_leaves_only_the_output_and_the_record(tmp_path: Path) -> None:
+    """記録は一時のファイルから置き換えるので、書いた後に一時のファイルは残らない（r2-6）。"""
+    out = tmp_path / "h"
+    outputs.write_recorded(out, "x\n")
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted([out.name, outputs.owner_record(out).name])
 
 
 def test_record_not_written_by_ndf_is_kept(tmp_path: Path) -> None:
