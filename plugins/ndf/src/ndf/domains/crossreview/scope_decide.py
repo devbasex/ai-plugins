@@ -73,10 +73,14 @@ def sections_of(path: str, text: str) -> list[str]:
     return out
 
 
-def reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None) -> set[str]:
+def reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None, base_branch: Optional[str] = None) -> set[str]:
     """状態ファイルの中身から、前のラウンドまでに詳細レビューを通ったセクション（並びでなければ無し）。今の MVV を見分ける
-    値 `mvv`（None は確かめない）と違う MVV で通ったセクションは、通っていないとみなす（#4076）。"""
+    値 `mvv`（None は確かめない）と違う MVV で通ったセクションは、通っていないとみなす（#4076）。今の比較元のブランチ
+    `base_branch`（None は確かめない）と違う比較元で通ったセクションも、通っていないとみなす（マージ先が変われば、新しい
+    全差分のセクションを詳細レビューに通す。#3702）。"""
     if mvv is not None and _known(state.get(store.REVIEWED_MVV)) != mvv:
+        return set()
+    if base_branch is not None and state.get(store.REVIEWED_BASE_BRANCH) != base_branch:
         return set()
     return set(store.list_of(state, store.REVIEWED))
 

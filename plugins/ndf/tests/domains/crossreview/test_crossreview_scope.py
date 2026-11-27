@@ -288,6 +288,19 @@ def test_sections_reviewed_under_another_mvv_are_reviewed_again(recorded: str | 
     assert got == (scope_decide.Scope(scope_decide.SINCE, "h1", ()) if reviewed else scope_decide.Scope(scope_decide.FULL, None, (A, B)))
 
 
+@pytest.mark.parametrize(
+    ("recorded", "now", "reviewed"), [("main", "main", {A, B}), ("main", "sprint/y", set()), (None, "main", set()), ("main", None, {A, B})]
+)
+def test_issue_3702_sections_reviewed_against_another_target_are_reviewed_again(
+    recorded: str | None, now: str | None, reviewed: set[str]
+) -> None:
+    """MVV が同じでも、前と違う比較元のブランチで詳細レビューを通ったセクションは、まだ通っていないセクションとして並ぶ。"""
+    state = {store.REVIEWED: [A, B], store.REVIEWED_MVV: APPROVED}
+    if recorded:
+        state[store.REVIEWED_BASE_BRANCH] = recorded
+    assert scope_decide.reviewed_of(state, APPROVED, now) == reviewed
+
+
 def test_branch_the_mvv_was_read_from_is_the_last_recorded_one() -> None:
     rounds = [{scope_decide.MVV: {"id": APPROVED, "mvv_branch": "main"}}, {"round": 2}, "壊れたラウンド"]
     assert scope_decide.mvv_branch({"rounds": rounds}) == "main"

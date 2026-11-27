@@ -779,7 +779,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     changed = changes.changed(run.g, cfg.base_commit, cfg.worktree)
     _oversized_docs(run, changed.docs)
     run.documents = any(p.endswith(".md") for p in changed.files)
-    reviewed = scope_decide.reviewed_of(run.data, run.mvv)
+    reviewed = scope_decide.reviewed_of(run.data, run.mvv, _followed_base(run))
     sections = changes.sections(changed.docs)
     head = run.g.rev_parse("HEAD")
     merge_base = _merge_base(run, head)
@@ -823,9 +823,14 @@ def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
     unit = scope_decide.unit_id(run.cfg.unit)
     # 確認を求める起動は、読んだ PR が無ければラウンドの前に止まっている
     pr = run.read_pr.ident if run.cfg.check_pr and run.read_pr is not None else None
-    # マージ先に合わせる起動は、同じマージ先と比べたラウンドだけを使う（変われば新しいマージ先との全差分を読む。#3702）
-    branch = run.base_branch if run.cfg.follow_base else None
+    branch = _followed_base(run)
     return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr, branch)
+
+
+def _followed_base(run: _Run) -> Optional[str]:
+    """マージ先に合わせる起動の比較元のブランチ（合わせない起動は None）。この起動は、同じマージ先と比べたラウンドと詳細レビューの
+    記録だけを使う（変われば新しいマージ先との全差分を読み、そのセクションを詳細レビューに通す。#3702）。"""
+    return run.base_branch if run.cfg.follow_base else None
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
@@ -905,6 +910,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     if prep.scope.kind == scope_decide.FULL:
         run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
         run.data[store.REVIEWED_MVV] = run.mvv
+        run.data[store.REVIEWED_BASE_BRANCH] = run.base_branch
     open_, handed = run.journal.pending(run.cfg.handed)
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:

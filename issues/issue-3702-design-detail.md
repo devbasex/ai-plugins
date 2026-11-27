@@ -404,6 +404,7 @@ contracts/
 
 - `RunConfig`（`settings.py`）に `follow_base: bool = False` を足し、`--reviewed-base-out` を渡した起動だけ真にする。ラウンドの記録に `base_branch` を足す
 - マージ先が前のラウンドと違うラウンドは、前の head からの差分を使わず、新しいマージ先との全差分を渡す。作り方は `--base` からの全差分と同じである
+- 詳細レビューを通ったセクションの記録にも、そのときの比較元のブランチ（`reviewed_base_branch`）を残す。`follow_base` の起動は、比較元が今のマージ先と違う記録を引き継がず、新しい全差分のセクションをすべて詳細レビューに通す。MVV が同じでも差分の相手が変われば、前の詳細レビューは新しい差分を確かめていないためである
 - `--verify-merged` は `--approved-head`・`--approved-base` と組でだけ受ける（無ければ `invalid`）
 
 | 失敗 | 扱い |

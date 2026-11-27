@@ -30,6 +30,8 @@ ROUNDS = "rounds"
 REVIEWED = "reviewed_sections"
 # `reviewed_sections` のセクションを読んだときの MVV を見分ける値（#4076）
 REVIEWED_MVV = "reviewed_mvv"
+# `reviewed_sections` のセクションを読んだときの比較元のブランチ（PR のマージ先に合わせる起動だけが比べる。#3702）
+REVIEWED_BASE_BRANCH = "reviewed_base_branch"
 FINDINGS = "findings"
 # MVV の記録を書けなかった原因（保存先のパスを含むので手元だけに残す。書けたら消す。#4076）
 MVV_RECORD_ERROR = "mvv_record_error"
