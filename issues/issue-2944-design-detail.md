@@ -40,7 +40,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `src/ndf/adapters/launch_settings.py` | 変更 | `experiments` を返す | — | `Settings` | C: `load` |
 | `src/ndf/adapters/claude.py` | 変更 | 引数と拒否の判定 | — | `ClaudeCall`・`LaunchRecorder`・`LaunchLog` | C: `claude_launch`・`_error_reply`。N: `model_refused` |
 | `src/ndf/adapters/claude_choice.py` | 新設 | 値を選ぶ処理の差し込みと、選んだ値で起動する部品 | claude | `LaunchChooser`・`ChoiceRun` | N: `set_launch_chooser`・`pick_values`・`report_outcome` |
-| `src/ndf/adapters/model_chooser.py` | 新設 | 差し込む値を選ぶ処理（`model_choice` の値の選択と切り替えに、実際のモデルの行と、切り替えない拒否の行を足す） | model_choice | モジュール | N: `observed`・`refused` |
+| `src/ndf/adapters/model_chooser.py` | 新設 | 差し込む値を選ぶ処理（`model_choice` の値の選択と切り替えに、実際のモデルの行を足す） | model_choice | モジュール | N: `observed` |
 | `src/ndf/__main__.py` | 変更 | 値を選ぶ処理の差し込み | claude_choice・model_chooser | モジュール | 差し込みの 1 行 |
 | `src/ndf/adapters/llm.py` | 変更 | 判定の単位 | claude_choice | モジュール | C: `ask` |
 | `src/ndf/adapters/run_log.py` | 変更 | 子の環境 | — | モジュール | C: `child_process_env`。N: `overlay_env` |
@@ -223,8 +223,8 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `ask` | `adapters/llm.py` | 変更 | 変えない | `request_id` を単位にして値を取得し、起動ごとに行を渡し、効果指標を書く |
 
 - 2 回目は `retry="invalid_answer"`。`MODEL_REFUSED` で `base_fallback` が値を返せば、判定の打ち直しの回数に数えずに 1 回だけ打ち直し、`request_try` を 1 増やす。期限は残りの時間
-- 切り替えの前に、単調時計で残りの期限を測り、残っていれば `before_retry` で材料が古くなっていないかを確かめ、もう一度期限を測る。どちらかで止まれば `base_fallback` を呼ばず、基準の組を起動しない。このときは `model_chooser.refused` が拒否の行（`launch_error` の `switched` が偽）を書く。拒否の数で割り付けの候補から外す判定に、切り替えなかった拒否も数えるためである
-- 確かめを通れば、`base_fallback` が切り替えの行（`launch_error` の `switched` が真）を書いて基準の組の値を返す。記録を読み書きする間（錠の待ちを含む）も期限は進むので、書いた後にもう一度残りの期限を測る。残っていれば基準の組で起動し直し、残っていなければ起動しない。どの場合も、1 回の拒否に書く `launch_error` の行は 1 行である
+- 切り替えの前に、単調時計で残りの期限を測り、残っていれば `before_retry` で材料が古くなっていないかを確かめ、もう一度期限を測る。どちらかで止まれば `base_fallback` を呼ばず、拒否の行も書かず、基準の組を起動しない。止まった拒否は、割り付けの候補から外す件数に数えない（[allocation の「起動できない組」の「受け入れる限界」](./issue-2944-design-allocation.md#起動できない組)）
+- 確かめを通れば、`base_fallback` が切り替えの行（`launch_error` の `switched` が真）を書いて基準の組の値を返す。記録を読み書きする間（錠の待ちを含む）も期限は進むので、書いた後にもう一度残りの期限を測る。残っていれば基準の組で起動し直し、残っていなければ起動しない
 - 回答のスキーマの検査は起動 1 回につき 1 回にし、その結果から使用量ログの `outcome` と打ち直しの判断の両方を作る
 - `outcome` は `valid`・`invalid`・`timeout`・`unknown`。`timeout` は、子プロセスを起動した後の期限切れ（`Failure.TIMEOUT`）である。効果指標は 1 回目が `valid` なら 1、`invalid` か `timeout` なら 0（2 回目で合っても、2 回目が期限切れでも 0 は変わらない）、`unknown` と起動できない場合は null
 - 値を取得する作業場所は `Path.cwd()`。stop-wait の判定（`judge_child`）は変えない
@@ -274,7 +274,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | --- | --- | --- | --- | --- | --- | --- |
 | `delegate` | 設定の誤り | `launch_choice` | 起動の前 | 呼び出し元へ返す | `stopped`・`precondition` | 起動しない |
 | `delegate` | 基準の組の拒否 | 使えないモデル | `MODEL_REFUSED` と `base_fallback` が None | 止める | `stopped`・`precondition`。理由と `.ndf/launch.json` を示す | 設定を直して再実行 |
-| `delegate` | 残りの期限が無い | 拒否に時間がかかった | 打ち直しの前 | 止める。拒否の行（`switched` が偽）は残し、切り替えの行は書かない | `stopped`・`interrupted` | 再実行は、元の割り付けの組でもう一度起動する。そこで拒否されれば基準の組へ切り替える |
+| `delegate` | 残りの期限が無い | 拒否に時間がかかった | 打ち直しの前 | 止める。拒否の行も切り替えの行も書かない | `stopped`・`interrupted` | 再実行は、同じ単位の期間の中の割り付けを引き継ぎ、元の組で起動する。拒否の件数で候補から外す規則は新しく割り付けるときの抽選だけに効き、既にある割り付けには効かない（[allocation の「割り付けの流れ」](./issue-2944-design-allocation.md#割り付けの流れ)）。元の組がまた拒否されれば、判定と同じ手順で基準の組へ切り替える |
 
 ### 単体テストの観点
 

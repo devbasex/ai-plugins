@@ -215,8 +215,8 @@ def test_the_switch_checks_the_material_before_launching_again(judge_repo, recor
 
 
 def _refused_only(store: Path) -> bool:
-    """拒否の行が切り替えなしの 1 行だけか（切り替えない拒否も、起動できない組を数えるために記録する。r7-7）。"""
-    return [r["switched"] for r in _experiments(store, "launch_error")] == [False]
+    """切り替えの行が無いか（切り替えないと決めた拒否は記録しない）。"""
+    return _experiments(store, "launch_error") == []
 
 
 def test_a_stale_material_stops_the_switch_without_a_switch_row(judge_repo, recorder, tmp_path) -> None:
