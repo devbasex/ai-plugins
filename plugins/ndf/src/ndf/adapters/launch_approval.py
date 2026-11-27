@@ -719,10 +719,11 @@ def _recover_into(target: Path, kept: list[Path]) -> None:
     pending = reflected_file(target, PENDING)
     if pending.exists():
         left = read_launch_record(pending).get("placing")
+        # 残るのは、片付けの進み具合を途中の記録へ書けなかったとき（`_note`）なので、案内するのは記録の保存先である
         raise internal.InternalError(
             "precondition",
-            f"前の反映の一時ファイル（{left}）を片付けられず、途中の記録 {pending} を残した。"
-            f"{target.parent} に書き込めるか確かめてから、同じコマンドを打ち直す",
+            f"前の反映の一時ファイル（{left}）を片付ける途中で、途中の記録 {pending} を更新できなかった。"
+            f"一時ファイルと記録は残した。{pending.parent} に書き込めるか確かめてから、同じコマンドを打ち直す",
         )
 
 

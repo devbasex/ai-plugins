@@ -323,7 +323,12 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
         return _refused_config(f"示した内容（{a.sha256[:12]}…）と今の内容が違う。show で示し直して承認を取り直す" + _kept_note(kept))
     # 端末の経路だけ、名前とハッシュを求める前に中断の前の完了を確かめる（入れ直させないため）。質問の経路は入力が無いので、
     # 錠と読み取りを増やさず、`reflect` の中の完了の確かめに任せる
-    if cand is not None and a.request is None and la.finished(cand, target, t.sha256, None, data, kept):
+    try:
+        done = cand is not None and a.request is None and la.finished(cand, target, t.sha256, None, data, kept)
+    except internal.InternalError as exc:
+        # 片付けで利用者の保存を別の名前で残した後に止まっても（一時ファイルの片付けが済まないなど）、そのパスを載せる
+        raise _with_kept(exc, kept) from None
+    if done:
         # 置いた直後の中断の後の打ち直し。人の確認を求め直さず、中断の前の完了の記録（同意した人と経路）を残す
         summary = "反映は済んでいる（中断の前に置いた設定をそのまま使う）" + _kept_note(kept)
         return result.result(TOOL, result.OK, summary, metrics={"sha256": t.sha256})
