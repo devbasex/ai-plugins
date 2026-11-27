@@ -735,9 +735,11 @@ def _same_dir(dfd: int, work: Path) -> bool:
 def _drop_work_dir(result: Path) -> None:
     """judge が作った専用ディレクトリのうち、空のもの（印のファイルのほかに何も無いもの）を消す。印の無いディレクトリには触れない。
 
-    今ある候補だけを見る（`_work_existing`）。印の確かめと操作は、開いたディレクトリの記述子を基準にする。印を消した後、名前が
-    まだ同じディレクトリを指すときだけ名前で消す。名前が別のものを指すか、別の起動の一時ファイルがあって消せなければ、開いた
-    ディレクトリに同じ鍵の印を戻して残す（中の一時ファイルの名前は、その鍵で回収できるまま）。
+    今ある候補だけを見る（`_work_existing`）。印の確かめと操作は、開いたディレクトリの記述子を基準にする。印の鍵は一時ファイルを
+    回収するのに要るので、印を消す前に中身を読み、印のほかに何かある（別の起動の一時ファイルなど）ときと、名前がもう同じ
+    ディレクトリを指さないときは、印を消さずに残す。片付けが途中で強制終了しても、一時ファイルのあるディレクトリから鍵は消えない。
+    印を消した後、名前がまだ同じディレクトリを指すときだけ名前で消す。読んだ後に別の起動が一時ファイルを作って消せなければ、
+    開いたディレクトリに同じ鍵の印を戻して残す（中の一時ファイルの名前は、その鍵で回収できるまま）。
     """
     for work in _work_existing(result):
         dfd = _open_dir(work)
@@ -748,6 +750,8 @@ def _drop_work_dir(result: Path) -> None:
             if key is None:
                 continue
             with contextlib.suppress(OSError):
+                if os.listdir(dfd) != [WORK_MARK] or not _same_dir(dfd, work):
+                    continue
                 os.unlink(WORK_MARK, dir_fd=dfd)
                 try:
                     if not _same_dir(dfd, work):
