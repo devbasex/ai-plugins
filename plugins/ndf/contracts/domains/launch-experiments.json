@@ -1,6 +1,6 @@
 {
   "summary": "モデルと effort の実験の同梱の既定（#2944）。工程ごとの選択肢（先頭が基準の組）と効果指標、層と作業の名前から工程を引く対応、ランタイムごとの effort とモデルの順位、実験の有効と割り付けの値を持つ。リポジトリは起動の設定（.ndf/launch.json）の experiments で、有効か・工程とランタイムごとの選択肢・割り付けの値を置き換える。対応・順位・指標・打ち直しの理由は置き換えられない。読み手は ndf.adapters.model_choice",
-  "owner": "#2944（ndf.adapters.model_choice）",
+  "owner": "D2（contracts/domains。読み手は ndf.adapters.model_choice。初版は #2944）",
   "shared_names": true,
   "columns": {
     "kind": {
