@@ -56,6 +56,9 @@ EXCLUDES, INCLUDES, UNKNOWN = "含まない", "含む", "判断できない"
 # judge が結果ファイルの一時ファイルを作る、結果の隣の専用ディレクトリの名前の終わり（`.<結果のファイル名>` に続ける）。
 # 強制終了で残った一時ファイルを、利用者のファイルと取り違えずに、この中だけから回収する
 WORK_SUFFIX = ".mvv-replay"
+# 専用ディレクトリを judge が作ったことを示す印のファイルの名前。作った起動が作った直後に中へ置く。印の無い同名のディレクトリ
+# （利用者が作ったものなど）は、中身を消さず、ディレクトリも消さない
+WORK_MARK = ".made-by-mvv-replay"
 STAND_IN = {"verdict": "follow", "reasons": ["判定の代役（実物の LLM を呼ばない）"], "boundary": [], "basis": ["Value 1"]}
 
 
@@ -417,7 +420,8 @@ def _exclusive(result: Path) -> Iterator[_Held]:
     持っているので、並べた起動のどれが先に開いても、作った起動より先にロックを取る起動は無い。保存しないまま終わったときは、その起動が
     作ったファイル（作った inode のまま）だけを消す。利用者が置いた空のファイルは消さない。ロックのためのファイルを別に作らず、
     プロセスが終われば自動で外れ、状態の保存先の環境変数にも依らない。judge の一時ファイルは結果の隣の専用ディレクトリ
-    （`_work_dir`）にだけ作り、ロックを取った後、前の起動が強制終了で残した分をその中からだけ消す（`_sweep`）。結果ファイルが
+    （`_work_dir`）にだけ作り、ロックを取った後、前の起動が強制終了で残した分をその中からだけ消す（`_sweep`）。専用ディレクトリの
+    中身を消すのも、ディレクトリを消すのも、judge が作った印（`WORK_MARK`）のあるディレクトリだけに限る。結果ファイルが
     まだ無いときは、保存先にハードリンクを作れることが要る（exFAT・FAT32 などでは新しい測定を始められない）。
     """
     result.absolute().parent.mkdir(parents=True, exist_ok=True)
@@ -462,9 +466,9 @@ def _exclusive(result: Path) -> Iterator[_Held]:
             # 置き換えた新しい中身を指すので、ここには来ない）
             result.unlink(missing_ok=True)
         os.close(held.fd)
-        # ロックを外してから消す。空でなければ（次の起動が使い始めた）消えずに残り、その起動が後で消す
-        with contextlib.suppress(OSError):
-            os.rmdir(_work_dir(result))
+        # ロックを外してから消す。judge が作った印の無いディレクトリは消さない。空でなければ（次の起動が使い始めた）消えずに
+        # 残り、その起動が後で消す
+        _drop_work_dir(result)
 
 
 def _create_locked(result: Path) -> Optional[int]:
@@ -480,6 +484,7 @@ def _create_locked(result: Path) -> Optional[int]:
         # 一時ファイルを作る前に、ロックを外した前の起動が専用ディレクトリを消した
         return None
     fd, tmp = made
+    failure: Optional[Stop] = None
     try:
         # 作ったばかりで誰も開いていないので、待たずに取れる
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -492,15 +497,19 @@ def _create_locked(result: Path) -> Optional[int]:
         if parent.is_dir() and not os.path.lexists(tmp):
             # 結果ファイルを置いてロックを取った別の起動が、この一時ファイルを残骸として消した
             return None
-        raise Stop(f"--result（{result}）を作れない: {exc}") from None
+        failure = Stop(f"--result（{result}）を作れない: {exc}")
     except OSError as exc:
         os.close(fd)
         # 作成と置き換えができても、ハードリンクを作れない保存先（exFAT・FAT32 など）ではここで止まる
-        raise Stop(
+        failure = Stop(
             f"--result（{result}）を作れない: {exc}。judge の保存先は、ハードリンクを作れるファイルシステム（ext4・XFS・APFS など）に置く"
-        ) from None
+        )
     finally:
         Path(tmp).unlink(missing_ok=True)
+    if failure is not None:
+        # `_exclusive` の終わりの片付けに入らずに止まるので、judge が作った空の専用ディレクトリをここで消す
+        _drop_work_dir(result)
+        raise failure
     return fd
 
 
@@ -514,11 +523,17 @@ def _work_tmp(result: Path, retry: bool = True) -> Any:
 
     ロックを外した前の起動が空の専用ディレクトリを消すことがあるので、作る前に消されたら作り直す。`retry` が偽なら作り直さずに
     None を返す。親のディレクトリが消えたときや、シンボリックリンクなど専用ディレクトリとして使えないものがあるときは止める。
+    専用ディレクトリを作った起動は、作った直後に印のファイル（`WORK_MARK`）を中に置く。既にあったディレクトリには印を足さない。
     """
     work = _work_dir(result)
     while True:
         try:
-            work.mkdir(mode=0o700, exist_ok=True)
+            try:
+                os.mkdir(work, 0o700)
+            except FileExistsError:
+                pass
+            else:
+                _mark(work)
             if not stat.S_ISDIR(os.lstat(work).st_mode):
                 raise Stop(f"{work} が judge の作業用のディレクトリでない（シンボリックリンクなど）。消してから打ち直す")
             return tempfile.mkstemp(dir=work, prefix="", suffix=".tmp")
@@ -528,24 +543,68 @@ def _work_tmp(result: Path, retry: bool = True) -> Any:
             if not retry:
                 return None
         except OSError as exc:
+            # 作ったばかりの空の専用ディレクトリを残さない
+            _drop_work_dir(result)
             raise Stop(f"--result（{result}）の一時ファイルを作れない: {exc}") from None
+
+
+def _mark(work: Path) -> None:
+    """専用ディレクトリに、judge が作ったことを示す印のファイルを置く。既にあればそのまま。"""
+    try:
+        os.close(os.open(work / WORK_MARK, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600))
+    except FileExistsError:
+        pass
+
+
+def _made_by_judge(work: Path) -> bool:
+    """`work` が、この利用者の judge が作った専用ディレクトリか。
+
+    次の 3 つがそろうときだけ judge が作ったものとみなす。ディレクトリそのもの（シンボリックリンクでない）であること、中に印の
+    ファイル（`WORK_MARK`）が通常のファイルとしてあること、ディレクトリと印のファイルの所有者がこのプロセスの利用者であること。
+    """
+    try:
+        d = os.lstat(work)
+        m = os.lstat(work / WORK_MARK)
+    except OSError:
+        return False
+    uid = os.getuid()
+    return stat.S_ISDIR(d.st_mode) and stat.S_ISREG(m.st_mode) and d.st_uid == uid and m.st_uid == uid
+
+
+def _drop_work_dir(result: Path) -> None:
+    """judge が作った専用ディレクトリが空なら（印のファイルのほかに何も無ければ）消す。印の無いディレクトリには触れない。
+
+    印を消してからディレクトリを消す。別の起動の一時ファイルがあって消せなければ、使われているので印を戻して残す。
+    """
+    work = _work_dir(result)
+    if not _made_by_judge(work):
+        return
+    with contextlib.suppress(OSError):
+        os.unlink(work / WORK_MARK)
+        try:
+            os.rmdir(work)
+        except OSError:
+            _mark(work)
 
 
 def _sweep(result: Path) -> None:
     """専用ディレクトリに残った一時ファイル（強制終了した前の起動のもの）を消す。消せない分は残して続ける。
 
-    専用ディレクトリの中だけを見るので、利用者が結果の隣に置いたファイルには触れない。ロックを持つ起動だけが保存の一時ファイルを
+    judge が作った印のある専用ディレクトリ（`_made_by_judge`）の中だけを見て、judge の一時ファイルの名前（終わりが `.tmp`）の
+    通常のファイルだけを消す。印の無いディレクトリや、ほかの名前のファイルには触れない。ロックを持つ起動だけが保存の一時ファイルを
     作るので、ロックを取った時点で残っているものは前の起動のもの。結果ファイルを置く前の別の起動の一時ファイルを消しても、
     その起動は置けずに開き直す（`_create_locked`）。
     """
     work = _work_dir(result)
+    if not _made_by_judge(work):
+        return
     try:
-        if not stat.S_ISDIR(os.lstat(work).st_mode):
-            return
         names = os.listdir(work)
     except OSError:
         return
     for name in names:
+        if name == WORK_MARK or not name.endswith(".tmp"):
+            continue
         with contextlib.suppress(OSError):
             if stat.S_ISREG(os.lstat(work / name).st_mode):
                 os.unlink(work / name)
