@@ -227,8 +227,8 @@ def _arms_errors(stage: str, runtime: str, arms: list[Any]) -> list[str]:
     for i, arm in enumerate(arms):
         if arm in arms[:i]:
             errs.append(f"{at}/{i}: 同じ組を 2 回書いている")
-        if "effort" in arm and arm["effort"] not in efforts:
-            errs.append(f"{at}/{i}/effort: 順位に無い値（使える値は {'・'.join(efforts)}）")  # 値は載せない（誤って入れた秘密を標準エラーへ漏らさない）
+        if "effort" in arm and arm["effort"] not in efforts:  # 値は載せない（誤って入れた秘密を標準エラーへ漏らさない）
+            errs.append(f"{at}/{i}/effort: 順位に無い値（使える値は {'・'.join(efforts)}）")
         if "model" in arm and (not arm["model"] or _NEWLINE.search(arm["model"])):
             errs.append(f"{at}/{i}/model: 空か改行を含む")
     return errs
@@ -297,8 +297,8 @@ def raised(runtime: str, model: Optional[str], effort: Optional[str]) -> tuple[O
 
 def _check_effort(value: str, runtime: str, where: str) -> None:
     efforts = _order_row(runtime)["efforts"]
-    if value not in efforts:
-        raise _fail(f"{where} の effort は {runtime} の順位に無い値（使える値は {'・'.join(efforts)}）")  # 値は載せない（誤って入れた秘密を標準エラーへ漏らさない）
+    if value not in efforts:  # 値は載せない（誤って入れた秘密を標準エラーへ漏らさない）
+        raise _fail(f"{where} の effort は {runtime} の順位に無い値（使える値は {'・'.join(efforts)}）")
 
 
 def _check_model(value: str, where: str) -> None:
