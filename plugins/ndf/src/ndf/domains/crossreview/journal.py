@@ -542,13 +542,7 @@ class FindingJournal:
             row = self.rows[fid]
             if not self._sorts(fid):
                 continue
-            base = {k: v for k, v in row.items() if k not in ("path", "line")}
-            returned, unanswered = fid in self.returned, fid in unconfirmed
-            passed = [
-                p
-                for p in map(_place, self._reports[fid])
-                if leftover_decide.proceeds(base | p, touched, returned=returned, unconfirmed=unanswered)
-            ]
+            passed = self.passed(fid, touched, unconfirmed=fid in unconfirmed)
             if not passed:
                 row[PARKED] = True
                 parked.add(row["key"])
@@ -559,9 +553,27 @@ class FindingJournal:
             self._check_post_line(self.rows[fid], touched)
         return frozenset(parked)
 
+    def passed(self, fid: str, touched: leftover_decide.Touched, *, unconfirmed: bool = False) -> list[dict[str, Any]]:
+        """直前の `enter` で出た指摘 `fid` の出し直しの位置のうち、修正へ進むもの（空なら直さずに残す）。"""
+        base = {k: v for k, v in self.rows[fid].items() if k not in ("path", "line")}
+        returned = fid in self.returned
+        return [
+            p
+            for p in map(_place, self._reports[fid])
+            if leftover_decide.proceeds(base | p, touched, returned=returned, unconfirmed=unconfirmed)
+        ]
+
+    def unpark(self) -> None:
+        """線引きをしないラウンドで、直前の `enter` で出し直された指摘の `parked` を外し、位置を出し直しのものにする
+        （前の線引きの結果で、重い指摘を修正から外したままにしない。#3780）。"""
+        back = {fid: self._reports[fid][0] for fid in self.raised_ids if self.rows[fid].pop(PARKED, None)}
+        self._move_unparked(back, self._reports, self._round)
+
     def sortable(self) -> bool:
-        """直前の `enter` の指摘に、`sort` が変えた行を使うもの（線引きするか、投稿の位置を確かめる）があるか。"""
-        return bool(self._moved) or any(self._sorts(fid) or self._placed_now(self.rows[fid]) for fid in self.raised_ids)
+        """直前の `enter` の指摘に、`sort` が変えた行を使うもの（線引きするか、投稿の位置を確かめる）があるか。minor・nit は
+        線引きで扱いが変わらず、スレッドにもしないので数えない（差分を読む git を起動しない）。"""
+        heavy = (fid for fid in self.raised_ids if criteria_decide.blocking(criteria_decide.severity_of(self.rows[fid].get("severity"))))
+        return bool(self._moved) or any(self._sorts(fid) or self._placed_now(self.rows[fid]) for fid in heavy)
 
     def _sorts(self, fid: str) -> bool:
         """指摘 `fid` に線引きを当てるか（未解決で、新しく出たか戻ったか、直さずに残していた）。"""

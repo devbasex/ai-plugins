@@ -639,8 +639,8 @@ def _full_diff_file(run: _Run, prep: reviewing.Prepared, got: reviewing.Reviewed
 
 
 def _touched(run: _Run, round_no: int, prep: reviewing.Prepared, got: reviewing.Reviewed) -> Optional[leftover_decide.Touched]:
-    """線引きに使う変えた行。線引きをしないラウンド、線引きにも投稿の位置の確かめにも使う指摘が無いラウンド、読めないとき
-    （すべての指摘を修正へ進める）は None。取得済みの差分は渡して読み直さない（ファイルは改行を変換せずに読む）。"""
+    """線引きに使う変えた行。線引きをしないラウンド、線引きにも投稿の位置の確かめにも使う指摘（critical・major）が無いラウンド、
+    読めないとき（すべての指摘を修正へ進める）は None。取得済みの差分は渡して読み直さない（ファイルは改行を変換せずに読む）。"""
     if prep.lines is None or not run.journal.sortable():
         return None
     # 比較基点が差分の起点と同じなら、`since_diff` の返りは `since..head` の行の差分そのものである
@@ -658,23 +658,24 @@ def _touched(run: _Run, round_no: int, prep: reviewing.Prepared, got: reviewing.
 
 def _wants_tracks(run: _Run, touched: Optional[leftover_decide.Touched]) -> bool:
     """判定役の回答の指摘の種類で、残すか進むかが変わる指摘があるか。新しい重い指摘のうち、MVV の項目を持ち（下げないので、
-    ほかに渡す指摘が無ければ判定役を起動しない）、今のままでは直さずに残すものである（直した後に戻った指摘は残さない。
-    #3780）。"""
+    ほかに渡す指摘が無ければ判定役を起動しない）、今のままでは直さずに残すものである。残すかは `journal.sort` と同じく、
+    出し直しのすべての位置で決める（#3780）。"""
     if touched is None:
         return False
-    rows = map(run.journal.rows.__getitem__, run.journal.fresh)
-    back = run.journal.returned
+    rows = run.journal.rows
     return any(
-        row.get(md.REVIEW_ITEM)
-        and _heavy(row.get("severity"))
-        and not leftover_decide.proceeds(row, touched, returned=str(row.get("id")) in back)
-        for row in rows
+        rows[fid].get(md.REVIEW_ITEM) and _heavy(rows[fid].get("severity")) and not run.journal.passed(fid, touched)
+        for fid in run.journal.fresh
     )
 
 
 def _sort_leftovers(run: _Run, touched: Optional[leftover_decide.Touched], checked: Checked) -> frozenset[str]:
-    """線引きをするラウンドなら指摘を分け、直さずに残した指摘のキーを返す。"""
-    return frozenset() if touched is None else run.journal.sort(touched, checked.unconfirmed)
+    """線引きをするラウンドなら指摘を分け、直さずに残した指摘のキーを返す。しないラウンドは、出し直された指摘の `parked` を
+    外す。"""
+    if touched is None:
+        run.journal.unpark()
+        return frozenset()
+    return run.journal.sort(touched, checked.unconfirmed)
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:

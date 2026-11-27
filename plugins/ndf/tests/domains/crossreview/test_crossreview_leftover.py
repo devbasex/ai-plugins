@@ -411,6 +411,31 @@ def test_changed_lines_are_needed_only_for_findings_to_sort() -> None:
     assert not journal.sortable()
 
 
+@pytest.mark.parametrize(("severity", "wanted"), [("minor", False), ("nit", False), ("major", True), ("critical", True)])
+def test_changed_lines_are_not_read_for_new_light_findings(severity: str, wanted: bool) -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(2, [_told(severity=severity, **UNCHANGED)], ITEMS, V11)
+    assert journal.sortable() is wanted
+
+
+def test_a_round_without_the_line_drawing_hands_over_a_parked_finding_raised_again() -> None:
+    journal, row = _parked()
+    journal.enter(3, [_told(path="a.py", line=7)], ITEMS, V11)
+    run = SimpleNamespace(journal=journal)
+    assert drive._sort_leftovers(run, None, drive.Checked()) == frozenset()  # type: ignore[arg-type]
+    assert PARKED not in row and journal.handable() == [row]
+    assert (row["line"], row[journal_mod.PLACED_ROUND]) == (7, 3)
+
+
+def test_the_judge_is_not_asked_the_kinds_when_another_report_is_on_a_changed_line() -> None:
+    journal = journal_mod.FindingJournal()
+    # 軽い重大度の出し直しは内容の違う重い報告に数えないので、指摘は判定役へ渡す候補に残る
+    told = [_told(mvv="Value 1", **UNCHANGED), _told(severity="minor", mvv="Value 1", path="a.py", line=10)]
+    journal.enter(2, told, ITEMS, V11)
+    assert journal.fresh == ["r2-1"]
+    assert not drive._wants_tracks(SimpleNamespace(journal=journal), TOUCHED)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize(("returned", "wanted"), [pytest.param([], True, id="new"), pytest.param(["r2-1"], False, id="returned")])
 def test_the_judge_is_not_asked_the_kinds_of_a_returned_finding(returned: list[str], wanted: bool) -> None:
     journal = journal_mod.FindingJournal()
