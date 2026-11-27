@@ -276,6 +276,33 @@ def _restore_lowered(row: dict[str, Any]) -> None:
             row[key] = criteria_decide.heavier(criteria_decide.severity_of(row[key]), restored)
 
 
+def _place(row: dict[str, Any], new: Mapping[str, Any], section: Optional[str]) -> None:
+    """指摘の位置とセクションを今回の値に置き換え、省かれていれば消す（行が動いた後の新しいスレッドを古い行に付けず、古い
+    セクションから場所を復元しない。PR 3944 の r7-3・r8-5）。"""
+    for stale in ("path", "line"):
+        row.pop(stale, None)
+    row |= {k: v for k, v in new.items() if k in ("path", "line")}
+    row["section"] = section
+
+
+def _align_impact(row: dict[str, Any], same: Sequence[Mapping[str, Any]]) -> None:
+    """このラウンドで新しく出たか戻った行の 1 文と位置を、同じ出し直し 1 件のものにそろえる。`same` はこのラウンドのその指摘の
+    出し直しで、1 文を持つもののうち最も重い（同じ重さなら先の）1 件を使う。1 件も 1 文を持たなければ何も変えない。判定役が、
+    ある位置の指摘を別の経路の 1 文で確かめないためである。#4363"""
+    best: Optional[tuple[Mapping[str, Any], dict[str, Any]]] = None
+    for item in same:
+        new = _raised(dict(item))
+        if "impact" not in new:
+            continue
+        if best is None or criteria_decide.heavier(best[1]["severity"], new["severity"]) != best[1]["severity"]:
+            best = item, new
+    if best is None:
+        return
+    item, new = best
+    row["impact"] = new["impact"]
+    _place(row, new, _text(item.get("section")))
+
+
 class Checked(NamedTuple):
     """確認の結果を当てた後に、駆動が使う値。`lowered` は下げた指摘のキー、`unconfirmed` は有効な回答の無かった指摘の id。
     `record` は判定役の出力の名前で、駆動が足す（起動していなければ空）。"""
@@ -316,12 +343,14 @@ class FindingJournal:
         """指摘をジャーナルへ入れ、このラウンドで出た収束の妨げになるキーを返す（振動の判定に使う）。`items` は承認済みの
         MVV の項目、`mvv` はその識別子。見送り済みは扱わず（MVV が変わっていれば判定し直す）、
         直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら（同じラウンドの中でも）重い方を残す。
-        収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。"""
+        収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。新しく出たか戻った行の 1 文と位置は、
+        すべての指摘を重ねた後にそろえる（`_align_impact`）。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
         unexplained: list[str] = []
         fresh: list[str] = []
+        same: dict[str, list[Mapping[str, Any]]] = {}
         _unlower(by_key, raised, items)
         for item in raised:
             text = item.get("text")
@@ -348,15 +377,17 @@ class FindingJournal:
             elif named is None and items and _named_any(item):
                 unknown.append(str(known["id"]))
             touched[key] = known
+            same.setdefault(str(known["id"]), []).append(item)
         self.fresh = list(dict.fromkeys(fresh))
+        for fid in self.fresh:
+            _align_impact(self.rows[fid], same[fid])
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
 
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
         未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
-        1 文は既にある行に無いときだけ足し（戻した指摘に今回の 1 文があれば置き換える。判定役が前の経路の起きることを
-        今回の位置と一緒に確かめないため。#4363）、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
+        1 文は既にある行に無いときだけ足し（戻した指摘の 1 文は `enter` がラウンドの後でそろえる）、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
         行の値に今回の値を足す。判定役の確認で下げたままの指摘の重要度は変えず（下げた扱いの解除は先に `_unlower` が行う）、
         下げた扱いを抜けた指摘に保護の種類が付けば元へ戻す（`_restore_lowered`。#4363）。"""
         new = _raised(item, named)
@@ -364,8 +395,6 @@ class FindingJournal:
             _unclassify(known)
         if known.get("outcome") == fin.FIXED or _skip_is_void(known, named, mvv):
             self._revive(known, new, _text(item.get("section")), round_no)
-            if "impact" in new:
-                known["impact"] = new["impact"]
         _protect(known, new.get(PROTECT))
         if "raised_severity" in known:
             raised = criteria_decide.severity_of(known["raised_severity"])
@@ -385,12 +414,10 @@ class FindingJournal:
         resolve 済みの古いスレッドへ結び付けない（#4016）。"""
         known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no, OCCURRENCE: new_occurrence()}
         self.revived.append(str(known["id"]))
-        # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
-        # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
-        for stale in ("path", "line", SKIPPED_MVV, REVIEW_DEFER, CHECK):
+        for stale in (SKIPPED_MVV, REVIEW_DEFER, CHECK):
             known.pop(stale, None)
-        known |= {k: v for k, v in new.items() if k in ("path", "line")}
-        known["section"] = section
+        # 位置は再発したラウンドの差分のものにする
+        _place(known, new, section)
 
     def apply_checks(self, asked: Sequence[str], verdicts: Mapping[str, verify_decide.Verdict]) -> Checked:
         """判定役へ渡した指摘 `asked` に回答 `verdicts` を当てる。有効な回答は行の `check` に残し、下げてよい指摘
