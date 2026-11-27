@@ -2,8 +2,8 @@
 
 起票の記録は、元の PR（状態ファイルの `pr`）に置く専用のコメントである。Issue を作る前に、試みる指摘の識別値を書く。状態の
 保存先が違う打ち直しも同じコメントを読み、URL の無い識別値は検索と一覧で確かめてから起票する（2 件作らない）。記録の URL は、
-指す Issue を読んで確かめてから使う。今のアカウントで編集できない記録は、中身を引き継いだ新しいコメントにし、以後は一番新しい記録だけを
-読み書きする。何を起票するかと、
+指す Issue を読んで確かめてから使う。今のアカウントで編集できない記録は、中身を引き継いだ新しいコメントにし（所有者・メンバー・共同作業者の
+アカウントだけ）、以後は一番新しい記録だけを読み書きする。何を起票するかと、
 文と記録の形は `leftover_decide` が持つ。GitHub の失敗では指摘を失わず、行の `issue_error` と注意に残す。
 """
 
@@ -49,6 +49,13 @@ class TooMany(Exception):
         super().__init__(f"Issue の一覧が {cap} ページを超える（上限 {threads.LIST_PAGES}）")
 
 
+class NotShared(Exception):
+    """編集できない起票の記録を、ほかの実行が信用できないアカウントは引き継がない。"""
+
+    def __init__(self) -> None:
+        super().__init__("起票の記録を編集できず、このアカウントはリポジトリの所有者・メンバー・共同作業者でないので引き継げない")
+
+
 class Port(Protocol):
     """起票の読み書きの口（テストは GitHub の偽物）。失敗は例外で、GitHub が断ったものは HTTP の状態 `status` を持つ。"""
 
@@ -60,9 +67,11 @@ class Port(Protocol):
 
     def comments(self, pr: int) -> list[Comment]: ...
 
-    def post(self, pr: int, body: str) -> tuple[int, str]: ...
+    def post(self, pr: int, body: str) -> Comment: ...
 
-    def edit(self, comment_id: int, body: str) -> tuple[int, str]: ...
+    def edit(self, comment_id: int, body: str) -> Comment: ...
+
+    def delete(self, comment_id: int) -> None: ...
 
     def search(self, ident: str) -> list[Listed]: ...
 
@@ -293,18 +302,28 @@ class _Filing:
         return [i for i in pending if i not in self.entries or i in absent], bool(found)
 
     def write(self) -> str:
-        """起票の記録を書き、GitHub が記録した更新時刻を返す。記録が無いか、今のアカウントで編集できなければ、全項目を持つ
-        新しいコメントを投稿する。"""
+        """起票の記録を書き、GitHub が記録した更新時刻を返す。記録が無ければ投稿し、今のアカウントで編集できなければ引き継ぐ。"""
         body = leftover_decide.record_body(self.entries)
-        written: Optional[tuple[int, str]] = None
-        if self.record_id is not None:
+        if self.record_id is None:
+            written = self.port.post(self.ref.origin_pr, body)
+        else:
             try:
                 written = self.port.edit(self.record_id, body)
             except Exception as exc:
                 if not _not_editable(exc):
                     raise
-        self.record_id, at = written or self.port.post(self.ref.origin_pr, body)
-        return at
+                written = self._take_over(body)
+        self.record_id = written.id
+        return written.updated_at
+
+    def _take_over(self, body: str) -> Comment:
+        """全項目を持つ新しいコメントを投稿する。書き手が所有者・メンバー・共同作業者でなければ、ほかのアカウントと保存先は
+        この記録を読めず同じ指摘を 2 件起票するので、投稿したコメントを消して `NotShared`。"""
+        made = self.port.post(self.ref.origin_pr, body)
+        if leftover_decide.associated(made.association):
+            return made
+        self.port.delete(made.id)
+        raise NotShared
 
     def announce(self, idents: Sequence[str]) -> Optional[str]:
         """作る前に、使う login を状態へ残し、起票の記録へ識別値を書く。試みた時刻（この書き込みの応答の更新時刻）を返し、
@@ -466,16 +485,18 @@ class GitHubIssues:
         pages = self._pages(f"/repos/{self.hub.repo}/issues/{int(pr)}/comments", {})
         return [_comment(r) for rows in pages for r in rows]
 
-    def _send(self, method: str, path: str, body: str) -> tuple[int, str]:
+    def _send(self, method: str, path: str, body: str) -> Comment:
         (safe,) = self.redact(body)
-        made = self._write(lambda: self.hub.rest(method, f"/repos/{self.hub.repo}/{path}", {"body": safe}))
-        return int(made["id"]), str(made["updated_at"])
+        return _comment(self._write(lambda: self.hub.rest(method, f"/repos/{self.hub.repo}/{path}", {"body": safe})))
 
-    def post(self, pr: int, body: str) -> tuple[int, str]:
+    def post(self, pr: int, body: str) -> Comment:
         return self._send("POST", f"issues/{int(pr)}/comments", body)
 
-    def edit(self, comment_id: int, body: str) -> tuple[int, str]:
+    def edit(self, comment_id: int, body: str) -> Comment:
         return self._send("PATCH", f"issues/comments/{int(comment_id)}", body)
+
+    def delete(self, comment_id: int) -> None:
+        self._write(lambda: self.hub.rest("DELETE", f"/repos/{self.hub.repo}/issues/comments/{int(comment_id)}"))
 
     def search(self, ident: str) -> list[Listed]:
         query = f'repo:{self.hub.repo} is:issue "{ident}" in:body'

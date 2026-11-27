@@ -184,10 +184,14 @@ def issue_parts(text: str, impact: str, place: str, pr_urls: Sequence[str], iden
     return title, "\n\n".join(parts) + "\n"
 
 
+def associated(association: str) -> bool:
+    """書き手がリポジトリの所有者・メンバー・共同作業者か（どのアカウントと保存先から読んでも同じ判定になる）。"""
+    return association in ("OWNER", "MEMBER", "COLLABORATOR")
+
+
 def trusted(author: str, association: str, me: str, logins: Collection[str]) -> bool:
     """起票の記録と Issue の作者を信用してよいか（第三者が目印を書いて起票を止めないようにする）。"""
-    # 所有者・メンバー・共同作業者
-    return association in ("OWNER", "MEMBER", "COLLABORATOR") or (bool(author) and (author == me or author in logins))
+    return associated(association) or (bool(author) and (author == me or author in logins))
 
 
 def _prose(text: str) -> str:

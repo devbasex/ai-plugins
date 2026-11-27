@@ -317,6 +317,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `files_issue` | `leftover_decide.py` | 新設 | `files_issue(row: Mapping[str, Any]) -> bool` | 重い指摘（critical・major）が起票してよい種類を持つか |
 | `identity` | `leftover_decide.py` | 新設 | `identity(origin_pr: int, text: str) -> str` | 元の PR の番号と `normalized(text)` の SHA-256 の先頭 12 字 |
 | `issue_parts` | `leftover_decide.py` | 新設 | `issue_parts(text: str, impact: str, place: str, pr_urls: Sequence[str], ident: str) -> tuple[str, str]` | 伏せ終えた値から起票の題と本文を組む |
+| `associated` | `leftover_decide.py` | 新設 | `associated(association: str) -> bool` | 書き手がリポジトリの所有者・メンバー・共同作業者か |
 | `trusted` | `leftover_decide.py` | 新設 | `trusted(author: str, association: str, me: str, logins: Collection[str]) -> bool` | 起票の記録と Issue の作者を信用してよいか |
 | `matches_finding` | `leftover_decide.py` | 新設 | `matches_finding(listed: Listed, ident: str, origin_pr: int) -> bool` | 検索か一覧で読んだ Issue がこの指摘を扱うものか（設計の「起票の形」の条件） |
 | `names_finding` | `leftover_decide.py` | 新設 | `names_finding(listed: Listed, ident: str) -> bool` | 起票の記録にある URL の Issue がこの指摘のものか（Pull Request でなく、本文に目印がある） |
@@ -405,7 +406,8 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `pr_url(pr)` | PR の URL | 呼ばない（リポジトリ名から組む） |
 | `redact(*texts)` | 伏せた値の並び | `publish.Publisher.guarded` |
 | `comments(pr)` | コメント（番号・本文・投稿者・更新時刻） | issue comments の GET |
-| `post(pr, body)`・`edit(id, body)` | 番号と応答の更新時刻 | POST・PATCH（`threads.patient` を通す） |
+| `post(pr, body)`・`edit(id, body)` | 書いたコメント（番号・書き手の `author_association`・更新時刻など） | POST・PATCH（`threads.patient` を通す） |
+| `delete(id)` | 無し。引き継げないアカウントが投稿した記録を消す | DELETE（`threads.patient` を通す） |
 | `search(ident)` | `Listed` の並び | `GET search/issues` |
 | `recent(since)` | 作成時刻が `since` 以後（同じ時刻を含む）の `Listed` の並び（超えれば、読めた分を持つ `TooMany`） | `GET repos/{repo}/issues?sort=created`。上限は `github.list-pages` |
 | `issue(url)` | このリポジトリの Issue の `Listed`。別の場所の URL と無い Issue は None | `GET repos/{repo}/issues/{number}` |
@@ -422,6 +424,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | --- | --- | --- | --- | --- | --- | --- |
 | `primary_of` | 設定を読めない・未設定・`unknown` | ファイルが無い・壊れている | JSON の読み取り | 既定値で続ける（起票しない） | `github` を設定するよう注意 | 設定すれば次の公開で起票する |
 | `file_issues` | 起票の記録を読めない・書けない | 通信・権限・二次レート制限の上限 | `GitHubError` | 止めない。どの候補も起票せず `issue_error` | 注意と記録のコメントの表。終了コードは変えない | 次の起動か `ndf cross-review report` で打ち直す |
+| `file_issues` | 起票の記録を引き継げない | 記録を編集できず、今のアカウントが所有者・メンバー・共同作業者でない | 引き継ぎの投稿の応答の `author_association` | 投稿したコメントを消し、起票せず `issue_error` | 注意と記録のコメントの表。終了コードは変えない | 編集の権限があるアカウントか、所有者・メンバー・共同作業者のアカウントで打ち直す |
 | `file_issues` | 検索か一覧を読めない・無いと確かめられない | 検索の上限・`TooMany` | `GitHubError`・`TooMany` | その候補を起票せず `issue_error`。`TooMany` なら `issue_list_full` に上限の値 | 同上 | `issue_list_full` がある間、自動の公開は一覧を読まない。`github.list-pages` を上げるか `report` で打ち直す |
 | `file_issues` | GitHub が作成をはっきり拒む | 4xx | `GitHubError.status` | 起票の記録からその識別値を消し、`issue_error` | 同上 | 打ち直せる |
 | `file_issues` | 作成の結果が分からない（5xx・不達・保存の前の中断） | 通信の障害 | 次の起動で記録に URL が無い識別値 | 起票の記録を残し、次の公開で検索と一覧で確かめる | 同上 | 打ち直しても 2 件作らない |

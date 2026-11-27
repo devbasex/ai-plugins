@@ -32,6 +32,7 @@ class FakeGitHub:
         self.indexed = True
         self.edits_others = True
         self.login = "me"
+        self.association = "NONE"
         self.viewed = 0
         self._tick = 0
 
@@ -47,7 +48,7 @@ class FakeGitHub:
         return {r: PUBLIC for r in repos}
 
     def _by(self, body: str) -> dict[str, Any]:
-        return {"body": body, "user": {"login": self.login}, "author_association": "NONE"}
+        return {"body": body, "user": {"login": self.login}, "author_association": self.association}
 
     def issue(self, body: str, **other: Any) -> dict[str, Any]:
         number = 100 + len(self.issues)
@@ -88,6 +89,9 @@ class FakeGitHub:
                 if not self.edits_others and found["user"]["login"] != self.login:
                     raise GitHubError("他人のコメントは編集できない", 403)
                 found.update(body=payload["body"], updated_at=self.now())
+            if method == "DELETE":
+                self.records.remove(found)
+                return None
             return dict(found)
         pr = int(tail.split("/")[0])
         if method == "GET":
@@ -355,7 +359,7 @@ def test_issue_3780_a_record_of_another_account_that_cannot_be_edited_is_taken_o
     github.login, github.edits_others = "app[bot]", False
     first = Run(github)
     first.go()
-    github.login = "human"
+    github.login, github.association = "human", "MEMBER"
     second = _row("r2-2", "別の指摘")
     again = Run(github, _row(), second)
     again.data["issue_logins"] = ["app[bot]"]
@@ -371,17 +375,32 @@ def test_issue_3780_a_state_of_the_old_record_reads_the_one_that_took_over() -> 
     github.login, github.edits_others = "app[bot]", False
     first = Run(github)
     first.go()
-    github.login = "human"
+    github.login, github.association = "human", "MEMBER"
     github.fail[("PATCH", "comments/501")] = 502
     second = _row("r2-2", "別の指摘")
     taken = Run(github, second)
     taken.data["issue_logins"] = ["app[bot]"]
     assert taken.go() and github.created() == 2
-    github.records[1]["author_association"] = "MEMBER"
-    github.login = "app[bot]"
+    # 元の bot は書き込みの権限を持ち、引き継いだ記録を編集できる
+    github.login, github.association, github.edits_others = "app[bot]", "NONE", True
     first.data["findings"].append(_row("r2-2", "別の指摘"))
     assert first.go() == [] and first.data["findings"][1][Filed.URL] == github.issues[1]["html_url"]
     assert github.created() == 2
+
+
+def test_issue_3780_an_account_others_cannot_trust_does_not_take_over_the_record() -> None:
+    github = FakeGitHub()
+    github.login, github.edits_others = "app[bot]", False
+    first = Run(github)
+    first.go()
+    github.login = "outsider"
+    other = Run(github, _row("r2-2", "別の指摘"))
+    other.data["issue_logins"] = ["app[bot]"]
+    assert other.go() and other.row[Filed.ERROR] and github.created() == 1
+    assert [c["id"] for c in github.records] == [500]
+    github.login = "app[bot]"
+    first.data["findings"].append(_row("r2-2", "別の指摘"))
+    assert first.go() == [] and github.created() == 2
 
 
 def test_a_url_removed_from_the_newest_record_does_not_come_back() -> None:
