@@ -100,7 +100,7 @@
 - [ ] 8. 回答のファイルに `issues` か `ndf_policies` を書いて書き出すと、終了コード 0 で終わり、そのキーは「無視した回答」と表示されて設定に書かれない
 - [ ] 9. 既存の `.ndf/project.json` に 3 の 6 キーのどれかが残っていると、`ndf project check` は理由を出して「古い」（終了コード 3）を返し、「壊れている」（終了コード 2）にしない
 - [ ] 10. 9 の状態から書き出すと、人が手で直した値も含めて 6 キーとその指紋が消える。残る項目について、解析が書いた値か人が直した値かの見分けは変わらない
-- [ ] 11. 10 の後に、同じ入力でもう 1 回書き出すと、`.ndf/project.json` は変わらず、`ndf project check` は「新しい」（終了コード 0）を返す
+- [ ] 11. 10 の後に、同じ入力（変更後の NDF で測った結果と、その回答）でもう 1 回書き出すと、`.ndf/project.json` は変わらず、`ndf project check` は「新しい」（終了コード 0）を返す
 - [ ] 12. 人が書いた `materials` は、10 の書き出しの後も同じ値で残る
 - [ ] 13. 設定の形の定義（スキーマ）・NDF が書くファイルの一覧（`ndf-files.json`）のキーの並び・`project-analysis.md`・`ndf-settings.md`・確定仕様 `ndf-project-analysis-record.md` が新しい形を書き、追跡している `.ndf/project.json` に 6 キーが無い。`ndf check` と `python3 scripts/check-skill-frontmatter.py` が通る
 
