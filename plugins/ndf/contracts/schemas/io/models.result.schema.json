@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "models.result.schema.json",
+  "title": "ndf models の結果 JSON",
+  "description": "ndf models が標準出力の最後の 1 行に出す結果 JSON（pick。--args を付けた pick は結果 JSON を出さない）。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "models"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf models の計測値",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "items": {
+      "type": "array",
+      "description": "pick の起動の値（1 件）",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["layer", "name", "runtime", "model_source", "effort_source", "raised", "args"],
+        "properties": {
+          "layer": {"type": "string", "description": "起動の層"},
+          "name": {"type": "string", "description": "作業の名前"},
+          "runtime": {"type": "string", "description": "ランタイム"},
+          "stage": {"type": "string", "description": "層と作業の名前から引いた工程。工程の無い起動は置かない（実験の引数を足さない）"},
+          "mode": {"type": "string", "description": "工程のモード。渡されたときだけ"},
+          "unit": {"type": "string", "description": "単位の ID。渡されたときだけ"},
+          "assign_id": {"type": "string", "description": "割り付け ID。割り付けたときだけ"},
+          "requested_model": {"type": "string", "description": "CLI に渡すモデル。指定しなければ無し"},
+          "effort": {"type": "string", "description": "CLI に渡す effort。指定しなければ無し"},
+          "model_source": {"type": "string", "description": "モデルの出所（argument・environment・experiment・base・default）"},
+          "effort_source": {"type": "string", "description": "effort の出所（model_source と同じ語）"},
+          "raised": {"type": "boolean", "description": "同じ失敗への 2 回目以降の起動で、値を 1 つ上げたか"},
+          "args": {"type": "array", "items": {"type": "string"}, "description": "CLI に渡す引数の並び（--args が 1 行 1 つで出すもの）"}
+        }
+      }
+    }
+  }
+}

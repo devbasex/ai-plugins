@@ -467,3 +467,14 @@ def test_a_broken_settings_file_stops_the_launch(repo: Path) -> None:
     """条件 5: 指定が壊れていれば、黙って指定なしで起動せずに止まる。"""
     _write(repo, "{壊れた")
     assert str(repo / ".ndf" / "launch.json") in _prepare_stops("impl", repo)
+
+
+def test_experiments_are_read_but_not_part_of_the_approval_target(tmp_path: Path) -> None:
+    """#2944: experiments は load が返し、承認の対象に入らない（書き換えても承認をやり直さない）。"""
+    a, b = tmp_path / "a", tmp_path / "b"
+    perm = {"steps": {"impl": {"load": ["LSP"]}}}
+    _write(a, {"version": 1, "permissions": perm})
+    experiments = {"enabled": False, "stages": {"impl": {"arms": {"claude": [{"model": "sonnet"}]}}}}
+    _write(b, {"version": 1, "permissions": perm, "experiments": experiments})
+    assert ls.load(a).experiments == {} and ls.load(b).experiments == experiments
+    assert ls.approval_target(ls.load(a)).sha256 == ls.approval_target(ls.load(b)).sha256

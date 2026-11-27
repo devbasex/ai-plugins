@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/launch.schema.json",
   "title": "起動の設定（.ndf/launch.json）",
-  "description": "Claude Code の非対話の起動のうち、利用者の設定・プラグイン・hook を読み込む構成（full。worker と Skill を回す起動）について、工程ごとの指定を置く（#1959）。工程ごとに、組み込みの Tool の追加、読み込む MCP サーバー、確認なしで使える操作を指定できる。MCP は、定義ファイルを列挙するとそのファイルのサーバーだけを読み込み、inherit を指定すると環境の MCP 設定を読み込む。工程の `mcp` が省略されていれば `steps[\"*\"]` の `mcp` を使う。どちらにも `mcp` がなければ、MCP サーバーを読み込まない。判定・相手役・修正担当の最小構成の起動には、この工程ごとの指定を当てない。相手役の起動と外部 AI への委譲については、サンドボックスが使えない環境で安全装置を外して起動してよいランタイムを指定できる。NDF は `permissions` 全体と、各工程の `mcp` に列挙した定義ファイルの内容が、承認した内容と同じかを確かめる。`mcp` に `inherit` を指定した工程があれば、リポジトリの `.mcp.json` も確かめる。full の起動で承認を確かめるかどうかは、工程の指定に `steps[\"*\"]` を重ねた後の値で決める。工程の指定に無いキーには、`steps[\"*\"]` の値を使う。その結果、組み込みの Tool の追加（`load`）と確認なしで使える操作（`allow`）がどちらも空で、MCP サーバーの読み込み（`mcp`）の指定も無い場合に限り、NDF は承認を確かめずに起動する。許可が広がらないためである。それ以外の場合は、承認の対象が利用者のマシンで承認した内容と同じときだけ起動する。相手役の起動と外部 AI への委譲で承認が要るのは、安全装置を外す必要がある起動である。この起動は、`unsandboxed` にそのランタイムがあり、いまの設定が承認済みのときだけ実行し、そうでなければ止める。ランタイムごとの扱いは次のとおりである。Codex は、サンドボックスが使える環境では、承認があってもサンドボックスの中で起動する。Kiro と agy には、委譲時に使えるサンドボックスの起動引数がない。そのため、ホストでサンドボックスが使える場合も、対象ランタイムが `permissions.unsandboxed` に含まれ、現在の設定が承認済みの場合に限り起動する。どちらかの条件を満たさなければ起動を止める。Kiro のレビューは、承認の有無に関わらず、これまでの読むだけの指定で起動する。agy はレビューに使わず、レビューの起動は止める。Claude Code の起動には、この設定による安全装置やサンドボックスの引数を足さない。用途とランタイムごとの条件は、設計書 `issues/issue-1959-design.md` の「安全装置を外す指定」の表にある。`inherit` の工程では、利用者の設定やプラグインにある MCP 定義も Claude Code が読み込む。NDF は、これらの定義を承認した内容と比べない。置かなくてよい",
+  "description": "Claude Code の非対話の起動のうち、利用者の設定・プラグイン・hook を読み込む構成（full。worker と Skill を回す起動）について、工程ごとの指定を置く（#1959）。工程ごとに、組み込みの Tool の追加、読み込む MCP サーバー、確認なしで使える操作を指定できる。MCP は、定義ファイルを列挙するとそのファイルのサーバーだけを読み込み、inherit を指定すると環境の MCP 設定を読み込む。工程の `mcp` が省略されていれば `steps[\"*\"]` の `mcp` を使う。どちらにも `mcp` がなければ、MCP サーバーを読み込まない。判定・相手役・修正担当の最小構成の起動には、この工程ごとの指定を当てない。相手役の起動と外部 AI への委譲については、サンドボックスが使えない環境で安全装置を外して起動してよいランタイムを指定できる。NDF は `permissions` 全体と、各工程の `mcp` に列挙した定義ファイルの内容が、承認した内容と同じかを確かめる。`mcp` に `inherit` を指定した工程があれば、リポジトリの `.mcp.json` も確かめる。full の起動で承認を確かめるかどうかは、工程の指定に `steps[\"*\"]` を重ねた後の値で決める。工程の指定に無いキーには、`steps[\"*\"]` の値を使う。その結果、組み込みの Tool の追加（`load`）と確認なしで使える操作（`allow`）がどちらも空で、MCP サーバーの読み込み（`mcp`）の指定も無い場合に限り、NDF は承認を確かめずに起動する。許可が広がらないためである。それ以外の場合は、承認の対象が利用者のマシンで承認した内容と同じときだけ起動する。相手役の起動と外部 AI への委譲で承認が要るのは、安全装置を外す必要がある起動である。この起動は、`unsandboxed` にそのランタイムがあり、いまの設定が承認済みのときだけ実行し、そうでなければ止める。ランタイムごとの扱いは次のとおりである。Codex は、サンドボックスが使える環境では、承認があってもサンドボックスの中で起動する。Kiro と agy には、委譲時に使えるサンドボックスの起動引数がない。そのため、ホストでサンドボックスが使える場合も、対象ランタイムが `permissions.unsandboxed` に含まれ、現在の設定が承認済みの場合に限り起動する。どちらかの条件を満たさなければ起動を止める。Kiro のレビューは、承認の有無に関わらず、これまでの読むだけの指定で起動する。agy はレビューに使わず、レビューの起動は止める。Claude Code の起動には、この設定による安全装置やサンドボックスの引数を足さない。用途とランタイムごとの条件は、設計書 `issues/issue-1959-design.md` の「安全装置を外す指定」の表にある。`inherit` の工程では、利用者の設定やプラグインにある MCP 定義も Claude Code が読み込む。NDF は、これらの定義を承認した内容と比べない。置かなくてよい。モデルと effort の実験の選択肢は experiments に書く（承認の対象ではない。#2944）",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -85,6 +85,75 @@
           "uniqueItems": true
         }
       }
+    },
+    "experiments": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "モデルと effort の実験（#2944）。同梱の既定（表 launch-experiments）のうち、書いたキーだけを置き換える。承認の対象ではない（permissions の外にあり、承認のハッシュに入らない）。値の制約（選択肢が 1 組以上で重ならない、effort が順位にある、floor が 0 より大きく floor × 組の数が 1 以下、min_units が 2 以上、window_days が 1 以上 365 以下、margin が 0 以上 1 以下）に外れると、実験の値を使う起動が理由と直す場所を示して止まる",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "偽なら割り付けず、どの工程も基準の組（先頭の組）で起動する"
+        },
+        "stages": {
+          "type": "object",
+          "description": "工程（同梱の表にある名前）ごとの選択肢。書いた工程とランタイムの組は、同梱の選択肢を置き換える",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "arms"
+            ],
+            "properties": {
+              "arms": {
+                "type": "object",
+                "description": "ランタイム（その工程の同梱の選択肢にあるもの）→ 選択肢の並び。先頭が基準の組で、1 組だけならその値に固定する",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "description": "選択肢の 1 組。どちらも省ける（{} は指定なしで、CLI の既定で動く）",
+                    "properties": {
+                      "model": {
+                        "type": "string",
+                        "description": "モデルの名前（別名か完全な ID）。名前は検証しない。改行を含む名前は起動しない"
+                      },
+                      "effort": {
+                        "type": "string",
+                        "description": "effort（Codex は推論の強さ）。そのランタイムの順位（同梱の表 launch-experiments）に無い値は起動しない"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "allocation": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "割り付けの値。省いたキーは同梱の値",
+          "properties": {
+            "floor": {
+              "type": "number",
+              "description": "候補の組の下限の出現率"
+            },
+            "min_units": {
+              "type": "integer",
+              "description": "組ごとに、調整を始める前に集める単位の数"
+            },
+            "margin": {
+              "type": "number",
+              "description": "効果指標の、許す低下の幅"
+            },
+            "window_days": {
+              "type": "integer",
+              "description": "選択の計算に使う期間の日数"
+            }
+          }
+        }
+      }
     }
   },
   "x-ndf-location": "worktree",
@@ -92,6 +161,10 @@
     {
       "by": "工程: full の起動",
       "when": "worker と Skill を回す起動が、工程の指定と承認を確かめるとき"
+    },
+    {
+      "by": "ndf models pick",
+      "when": "起動のモデルと effort を選ぶとき（experiments だけを読む。#2944）"
     }
   ],
   "examples": [
@@ -119,6 +192,35 @@
         "unsandboxed": [
           "codex"
         ]
+      },
+      "experiments": {
+        "enabled": true,
+        "stages": {
+          "impl": {
+            "arms": {
+              "claude": [
+                {},
+                {
+                  "model": "sonnet",
+                  "effort": "medium"
+                }
+              ]
+            }
+          },
+          "design": {
+            "arms": {
+              "claude": [
+                {
+                  "model": "opus",
+                  "effort": "high"
+                }
+              ]
+            }
+          }
+        },
+        "allocation": {
+          "window_days": 60
+        }
       }
     }
   ]

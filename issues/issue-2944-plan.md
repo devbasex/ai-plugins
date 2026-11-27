@@ -22,7 +22,7 @@
 
 ### Task 2: 選択肢から値を選び、割り付ける
 
-- **対象ファイル:** `contracts/domains/launch-experiments.json`・`adapters/model_choice.py`・`contracts/schemas/internal/experiment.schema.json`・`usage.schema.json`（足す欄。Task 3 と 4 が使う）・`domains/records/models_cli.py`（`pick`）・`tests/adapters/test_model_choice.py`（新設）、`adapters/launch_settings.py`・`launch.schema.json`、`cli.py`、`env.json`・`ndf-files.json`、`contracts/schemas/io/models.*`、`skills/launch-config/SKILL.md`
+- **対象ファイル:** `contracts/domains/launch-experiments.json`・`adapters/model_choice.py`・`contracts/schemas/internal/experiment.schema.json`・`usage.schema.json`（足す欄。Task 3 と 4 が使う）・`domains/records/models_cli.py`（`launch_choice`）・`tests/adapters/test_model_choice.py`（新設）、`adapters/launch_settings.py`・`launch.schema.json`、`cli.py`、`env.json`・`ndf-files.json`、`contracts/schemas/io/models.*`、`skills/launch-config/SKILL.md`
 - **変更内容:** 詳細設計の「値を選ぶ処理」と `ndf models pick`
 - **満たす受け入れ条件:** 1・7・10・12・14・15・19
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
@@ -50,10 +50,10 @@
 - **設計承認で持ち越した項目:** プランの外の Skill の起動は実験に入れず基準の組で動くことと、I8 は `outcome` の表の呼び出し元に限ることを限界に書く
 - **設計承認で持ち越した項目（#1959 から移した）:** プランの実行が、工程のモードを環境変数でステップの子へ渡す所を、このタスクで入れる。
   - 渡す値: 工程の入力の `mode`（`standard` などの開発のモード。`progress/invoke.py` が `run.inputs` から読む値と同じ）
-  - 使う所: `pick` が引数 `mode` に受け、使用量ログの行の `mode` に記録する。`ndf models report` はモードごとの内訳に使う。割り付ける組と確率はモードで変えない（設計書の受け入れ条件 11）
+  - 使う所: `launch_choice` が引数 `mode` に受け、使用量ログの行の `mode` に記録する。`ndf models report` はモードごとの内訳に使う。割り付ける組と確率はモードで変えない（設計書の受け入れ条件 11）
   - 値が無い場合: 工程の入力に `mode` が無ければ、新設する環境変数をステップの子の環境から外す。付けないだけでは足りない。`core/plan/steps.py` の `_launch` は親の `os.environ` に値を重ねて子へ渡すので、親がモードを持っていると子がそれを継ぎ、そのステップの使用量が親のモードの費用として集計されるためである。外し方は、詳細設計の `_step_env` が `NDF_RETRY_CAUSE` などを外すのと同じく値を None にし、`_launch` が None の値を子の環境から消す。行の `mode` も省く
   - 環境変数の名前: `contracts/domains/env.json` に行を足して決め、書く側と読む側はそこから引く（未確認: 名前は #2944 の設計にまだ無い）
-  - 経緯: #1959 の A4（[issue-1959-plan.md](./issue-1959-plan.md) の Task 5）は、ステップの子へ渡す環境変数のうち `NDF_PLAN_RUN_ID`・`NDF_STEP_ID`・`NDF_STEP_ATTEMPT` の 3 つだけを入れた。モードの値を使うのはこの課題の `pick` なので、読み手の無い値を先に渡さないよう、渡す所もこの課題へ移した（2026-11-27 の決定）
+  - 経緯: #1959 の A4（[issue-1959-plan.md](./issue-1959-plan.md) の Task 5）は、ステップの子へ渡す環境変数のうち `NDF_PLAN_RUN_ID`・`NDF_STEP_ID`・`NDF_STEP_ATTEMPT` の 3 つだけを入れた。モードの値を使うのはこの課題の `launch_choice` なので、読み手の無い値を先に渡さないよう、渡す所もこの課題へ移した（2026-11-27 の決定）
 - **進め方:** 遷移の判断は純粋な関数のテストを先に書く。`impl` と `check` のプランのテンプレートで遷移を通す
 
 ### Task 6: 相手役のシートを単位にし、レビューから効果指標を書く
@@ -66,7 +66,7 @@
 ### Task 7: 委譲の起動にモデルと effort の選択を足す
 
 - **対象ファイル:** `domains/settings/delegate_run_cli.py`、`skills/external-ai/SKILL.md`・`references/cli-codex.md`・`references/cli-agy.md`・`references/cli-kiro.md`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md`
-- **変更内容:** 詳細設計の「`ndf models` と `ndf delegate-run`」（`--runtime` は codex・kiro・agy。kiro と agy は `pick` を呼ばない）と手順書の固定の `medium` の削除
+- **変更内容:** 詳細設計の「`ndf models` と `ndf delegate-run`」（`--runtime` は codex・kiro・agy。kiro と agy は `launch_choice` を呼ばない）と手順書の固定の `medium` の削除
 - **満たす受け入れ条件:** 3
 - **進め方:** CLI はテストを先に書く。手順書の起動の例は打って確かめる
 
@@ -76,14 +76,16 @@
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 先に要る単位 | 実際の行数 |
 | --- | --- | --- | --- | --- | --- |
-| B1 値を選ぶ処理 | Task 1・2 | 2944:1・2944:7・2944:10・2944:12・2944:14・2944:15・2944:19 | 約 900 | #1959 の A1〜A5 | |
-| B2 出現率の計算と report | Task 3 | 2944:6・2944:9・2944:11・2944:17・2944:18・2944:20 | 約 900 | B1 | |
-| B3 claude の起動への適用 | Task 4 | 2944:2・2944:4・2944:5・2944:10・2944:13・2944:14 | 約 700 | B1 | |
+| B1a 同梱の表と優先の順 | Task 1・Task 2 の前半（表・`launch_choice` の優先の順 1・2・`ndf models pick`） | 2944:1・2944:7・2944:10・2944:12・2944:14・2944:19 | 約 900（B1 として） | #1959 の A1〜A5 | 1,264 行足し 50 行消した（実装の時点。設計書の名前の置き換えを含む） |
+| B1b 割り付け | Task 2 の後半（実験の記録・`ledger`・`prune`・`candidates`・`fallback`・優先の順 3〜5） | 2944:15 | 約 500 | B1a | |
+| B2 出現率の計算と report | Task 3 | 2944:6・2944:9・2944:11・2944:17・2944:18・2944:20 | 約 900 | B1b | |
+| B3 claude の起動への適用 | Task 4 | 2944:2・2944:4・2944:5・2944:10・2944:13・2944:14 | 約 700 | B1b | |
 | B4 プランの実行 | Task 5 | 2944:8・2944:9・2944:10・2944:15・2944:16 | 約 500 | B2・B3 | |
 | B5 cross-review と相手役 | Task 6 | 2944:3・2944:4・2944:13・2944:15・2944:16 | 約 700 | B2・B3 | |
-| B6 委譲の引数 | Task 7 | 2944:3 | 約 250 | B1 | |
+| B6 委譲の引数 | Task 7 | 2944:3 | 約 250 | B1a | |
 
-- 順序: B1 → （B2・B3・B6 は並列）→ （B4・B5 は並列）
+- 順序: B1a → （B1b・B6 は並列）→ （B2・B3 は並列）→ （B4・B5 は並列）
+- B1 は前半だけで 1,000 行を超えたため、B1a（同梱の表と優先の順）と B1b（割り付け）に分けた（2026-11-27）。使用量ログの欄 `outcome` は名前の表（`contracts/data/internal-names.json`）の別名と重なるので、B1a では足さず、使う B2・B3 で名前を決める
 - B3 は起動の差し込みの `record_outcome` を呼ぶ側で、受け口は B2 が `usage.py` に足す。2 つとも `usage.py` を触るので、後にマージする側が取り込む
 - B1 だけが入った状態では、どの起動も値を取得しないので振る舞いは変わらない。B3 以降で起動の値が変わるので、`main` へは B2〜B5 をそろえて出す（値を変えるのに指標を記録しない状態を作らない）
 - B1・B2 が 900 行になる見込みの大半はテストである。1,000 行を超えそうなら、B1 は同梱の表と優先の順・割り付けで、B2 は計算と `report` で分ける

@@ -949,7 +949,7 @@ def test_skill_is_called_with_full_permission_the_result_schema_and_the_implemen
     schema = contracts.load_json(contracts.schema_path("result"))
     want = claude.claude_args(claude.ClaudeCall(system=invoke.SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema))
     assert seen == [{"argv": want, "prompt": invoke.skill_prompt(run), "timeout": limits.seconds(invoke.SKILL_LIMIT), "cwd": tmp_path}]
-    assert got.status == "ok" and got.outputs == {"pr": 3} and got.warnings == ()
+    assert got.status == "ok" and got.outputs == {"pr": 3} and got.warnings == () and not {"--model", "--effort"} & set(want)  # #2944
     # Skill の作業はプランの保存先を作らない
     assert not (tmp_path / "w").exists()
 

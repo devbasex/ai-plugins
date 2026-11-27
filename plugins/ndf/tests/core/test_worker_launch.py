@@ -19,6 +19,16 @@ def _no_plugin_list(monkeypatch):
     monkeypatch.setattr(claude, "list_plugins", lambda **_: [])
 
 
+# モデルか effort を指定する引数（#2944 の Task 1 で値を選ぶ処理を入れる前の退行を縛る）
+_CHOICE_FLAGS = {"--model", "--effort", "-m", "--config"}
+
+
+def _has_choice(argv) -> bool:
+    """モデルか effort を指定する引数を持つか（claude の `--model`・`--effort`、codex の `-m`・`-c model_reasoning_effort=…`）。"""
+    words = list(argv)
+    return bool(_CHOICE_FLAGS & set(words)) or any("model_reasoning_effort" in w for w in words)
+
+
 def test_worker_resumes_with_the_same_full_arguments_and_only_the_session_changes(tmp_path: Path) -> None:
     """worker は最初の起動と再開で同じ full の引数を使い、会話の指定だけが `--session-id` から `--resume` へ変わる。"""
     h = worker.Handoff("fix", "直す", tmp_path / "result.json", tmp_path, tmp_path / "state")
@@ -38,6 +48,7 @@ def test_worker_resumes_with_the_same_full_arguments_and_only_the_session_change
     assert done.cause is None and [cwd for _, cwd in calls] == [tmp_path, tmp_path]
     assert calls[0][0] == [*full, "--session-id", "s-1"]
     assert calls[1][0] == [*full, "--resume", "s-1"]
+    assert not any(_has_choice(argv) for argv, _ in calls)  # #2944 の Task 1: モデルと effort を指定しない
 
 
 def _repo_with_mcp(tmp_path: Path, monkeypatch) -> Path:
@@ -192,3 +203,41 @@ def test_read_only_claude_partner_is_a_minimal_launch_with_read_tools(tmp_path: 
     assert list(argv[1:8]) == ["-p", "--output-format", "json", "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config"]
     assert argv[argv.index("--tools") + 1] == participants.READ_TOOLS == argv[argv.index("--allowed-tools") + 1]
     assert argv[-1] == "読む"
+
+
+# 退行を縛る（#2944 の Task 1）: 値を選ぶ処理を入れる前の、worker と cross-refactoring の起動の引数
+
+
+@pytest.mark.parametrize("kind", ["design", "impl", "worktree", "release"])
+def test_worker_launches_and_resumes_without_model_or_effort(tmp_path: Path, kind: str) -> None:
+    """fix 以外の作業の worker も、最初の起動と再開にモデルと effort を指定しない（fix は再開のテストが見る）。"""
+    h = worker.Handoff(kind, "作業", tmp_path / "result.json", tmp_path, tmp_path / "state")
+    calls: list[list[str]] = []
+
+    def fake(argv, prompt, timeout, cwd, options):
+        calls.append(list(argv))
+        if len(calls) == 2:
+            h.result_file.write_text('{"status": "ok"}', encoding="utf-8")
+        return claude.ClaudeReply(True, None, "終えた", 0.0)
+
+    with worker_paths.open_workdir(tmp_path) as wd:
+        worker.delegate(h, "規則", root=tmp_path, wd=wd, call=fake, session="s-1")
+
+    assert len(calls) == 2 and not any(_has_choice(argv) for argv in calls)
+
+
+def test_cross_refactoring_launches_are_unchanged(tmp_path: Path, monkeypatch) -> None:
+    """cross-refactoring の担当の起動（読むだけの codex・claude と、コードを書く claude）の引数を固定する。"""
+    from ndf.domains.crossrefactor import launch, launch_decide
+
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    codex = launch._read_only(launch.Request("propose", "codex", "質問", "pr1", "proposals", 30.0), tmp_path, tmp_path / "s")
+    reader = launch._read_only(launch.Request("propose", participants.FIXER, "質問", "pr1", "proposals", 30.0), tmp_path, tmp_path / "s")
+    where = launch_decide.result_location("implement", participants.FIXER, "i1", (tmp_path / "read", tmp_path, tmp_path / "logs"))
+    coder = launch._coding(launch.Request("implement", participants.FIXER, "直す", "i1", timeout=30.0), tmp_path, tmp_path / "s", where)
+
+    assert list(codex.argv) == ["codex", "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-C", str(tmp_path), "質問"]
+    system = f"{launch_decide.SKILL} の propose の担当"
+    want = participants.read_only_launch(system, tmp_path, "質問", tmp_path / "s", 30.0).argv
+    assert reader.argv == want
+    assert not any(_has_choice(x.argv) for x in (codex, reader, coder))

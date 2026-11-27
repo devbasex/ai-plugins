@@ -59,11 +59,12 @@ Mcp = Union[None, str, tuple[str, ...]]
 
 @dataclass(frozen=True)
 class Settings:
-    """読んだ起動の設定。`permissions` はファイルが無ければ空。"""
+    """読んだ起動の設定。`permissions` と `experiments`（モデルと effort の実験。承認の対象ではない。#2944）はファイルが無ければ空。"""
 
     root: Path
     path: Path
     permissions: Mapping[str, Any] = field(default_factory=dict)
+    experiments: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -145,7 +146,7 @@ def load(root: Path, source: Optional[Path] = None) -> Settings:
                 raise _precondition(
                     f"{where}/allow/{i} に秘密の形の値がある（値は出さない）。資格情報は環境変数で渡し、指定子には $名前 の参照だけを書く"
                 )
-    return Settings(root, path, permissions)
+    return Settings(root, path, permissions, _given_object(raw, "experiments"))
 
 
 def _mcp_files(spec: Mapping[str, Any]) -> tuple[str, ...]:

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/models.args.schema.json",
+  "title": "ndf models の引数",
+  "description": "ndf models が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "pick",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--layer": {
+          "type": "string",
+          "description": "起動の層（worker・skill・judge・seat）"
+        },
+        "--name": {
+          "type": "string",
+          "description": "作業の名前（worker の作業の名前・Skill の名前など）"
+        },
+        "--runtime": {
+          "type": "string",
+          "default": "claude",
+          "description": "ランタイム（claude か codex）"
+        },
+        "--unit": {
+          "type": "string",
+          "description": "単位の ID（省けば割り付けない）"
+        },
+        "--retry": {
+          "type": "string",
+          "description": "同じ失敗への 2 回目以降の起動の理由（省けば引き上げない）"
+        },
+        "--args": {
+          "type": "boolean",
+          "description": "CLI に渡す引数を 1 行に 1 つずつ出す（省けば結果 JSON）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--layer",
+        "--name"
+      ]
+    }
+  ]
+}

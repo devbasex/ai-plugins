@@ -1,0 +1,161 @@
+{
+  "summary": "モデルと effort の実験の同梱の既定（#2944）。工程ごとの選択肢（先頭が基準の組）と効果指標、層と作業の名前から工程を引く対応、ランタイムごとの effort とモデルの順位、実験の有効と割り付けの値を持つ。リポジトリは起動の設定（.ndf/launch.json）の experiments で、有効か・工程とランタイムごとの選択肢・割り付けの値を置き換える。対応・順位・指標・打ち直しの理由は置き換えられない。読み手は ndf.adapters.model_choice",
+  "owner": "D2（contracts/domains。読み手は ndf.adapters.model_choice。初版は #2944）",
+  "shared_names": true,
+  "columns": {
+    "kind": {
+      "type": "string",
+      "summary": "行の種類。stage は工程（id が工程の名前）、order はランタイムの順位（id がランタイム。表 runtimes の id）、defaults は実験の既定（1 行だけ）"
+    },
+    "launches": {
+      "type": "object",
+      "summary": "stage の行: 層（ndf models pick の --layer）→ この工程に属する作業の名前（--name）の並び。どの工程にも無い組は工程が無く、実験の引数を足さない。層はどれかの行に現れるものだけを受ける",
+      "optional": true
+    },
+    "metric": {
+      "type": "string",
+      "summary": "stage の行: 効果指標の名前（設計書の「初期の選択肢と効果指標」）。無い工程は効果指標を取れず、実験しない（選択肢を 1 つだけ持つ）",
+      "optional": true
+    },
+    "metric_version": {
+      "type": "integer",
+      "summary": "stage の行: 効果指標の定義のバージョン。定義を変えたら上げ、古い行は数えない",
+      "optional": true
+    },
+    "retries": {
+      "type": "array",
+      "summary": "stage の行: 同じ失敗への 2 回目以降の起動で値を 1 つ上げる、失敗の理由（ndf models pick の --retry の値）。どの行にも無い理由は受けない",
+      "optional": true
+    },
+    "arms": {
+      "type": "object",
+      "summary": "stage の行: ランタイム（表 runtimes の id）→ 選択肢の並び。要素は {\"model\", \"effort\"}（どちらも省ける。{} は指定なし）で、先頭が基準の組",
+      "optional": true
+    },
+    "efforts": {
+      "type": "array",
+      "summary": "order の行: そのランタイムが受ける effort の値の低い順。順位に無い effort は起動しない",
+      "optional": true
+    },
+    "models": {
+      "type": "array",
+      "summary": "order の行: 引き上げに使うモデルの順位（低い順）。無いランタイムはモデルを上げない。順位に無い名前（完全な ID など）は、引き上げで「順位に無い」に当たる",
+      "optional": true
+    },
+    "raise_at": {
+      "type": "string",
+      "summary": "order の行: 引き上げの表の境の effort（設計書の「引き上げる起動」の high）。これより低い effort は 1 つ上げ、これ自身も 1 つ上げる。モデルの順位にある最上位でないモデルは、effort がこれ以上か指定なしならモデルを 1 つ上げる",
+      "optional": true
+    },
+    "model_env": {
+      "type": "string",
+      "summary": "order の行: モデルを一時的に上書きする環境変数のキー（表 env の key）",
+      "optional": true
+    },
+    "effort_env": {
+      "type": "string",
+      "summary": "order の行: effort を一時的に上書きする環境変数のキー（表 env の key）",
+      "optional": true
+    },
+    "inherited_effort_env": {
+      "type": "string",
+      "summary": "order の行: ランタイム自身が読む effort の環境変数のキー（表 env の key）。あれば子へそのまま引き継ぎ、選択肢の effort を足さない。値は検証しない",
+      "optional": true
+    },
+    "enabled": {
+      "type": "boolean",
+      "summary": "defaults の行: 実験を有効にするか。偽ならどの工程も基準の組で起動する",
+      "optional": true
+    },
+    "allocation": {
+      "type": "object",
+      "summary": "defaults の行: 割り付けの値（floor は候補の組の下限の出現率、min_units は調整を始める前に集める単位の数、margin は効果指標の許す低下の幅、window_days は数える期間の日数）",
+      "optional": true
+    }
+  },
+  "rows": [
+    {
+      "id": "design",
+      "kind": "stage",
+      "launches": {"worker": ["requirements", "design", "design-detail"], "skill": ["requirements-design", "design"]},
+      "metric": "design_review_major_findings",
+      "metric_version": 1,
+      "arms": {"claude": [{}, {"model": "opus", "effort": "high"}, {"model": "sonnet", "effort": "high"}]}
+    },
+    {
+      "id": "impl",
+      "kind": "stage",
+      "launches": {"worker": ["impl"]},
+      "metric": "pr_review_major_findings",
+      "metric_version": 1,
+      "arms": {"claude": [{}, {"model": "sonnet", "effort": "medium"}, {"model": "sonnet", "effort": "high"}]}
+    },
+    {
+      "id": "fix",
+      "kind": "stage",
+      "launches": {"worker": ["fix", "ci-fix", "fix-push", "fix-base"]},
+      "metric": "first_fix_verified",
+      "metric_version": 1,
+      "retries": ["test_failed", "check_failed", "push_failed", "base_conflict"],
+      "arms": {"claude": [{}, {"model": "sonnet", "effort": "medium"}, {"model": "sonnet", "effort": "high"}]}
+    },
+    {
+      "id": "mechanical",
+      "kind": "stage",
+      "launches": {"worker": ["worktree"]},
+      "metric": "step_completed",
+      "metric_version": 1,
+      "arms": {"claude": [{}, {"model": "haiku", "effort": "low"}]}
+    },
+    {
+      "id": "judge",
+      "kind": "stage",
+      "launches": {"judge": ["ask"]},
+      "metric": "first_answer_valid",
+      "metric_version": 1,
+      "retries": ["invalid_answer"],
+      "arms": {"claude": [{}, {"model": "haiku", "effort": "medium"}, {"model": "sonnet", "effort": "medium"}]}
+    },
+    {
+      "id": "review",
+      "kind": "stage",
+      "launches": {"seat": ["review"]},
+      "metric": "major_findings_share",
+      "metric_version": 1,
+      "arms": {
+        "codex": [{"effort": "low"}, {"effort": "medium"}, {"effort": "high"}],
+        "claude": [{}, {"model": "sonnet", "effort": "high"}]
+      }
+    },
+    {
+      "id": "delegate",
+      "kind": "stage",
+      "launches": {"seat": ["delegate"]},
+      "arms": {"codex": [{"effort": "medium"}]}
+    },
+    {
+      "id": "claude",
+      "kind": "order",
+      "efforts": ["low", "medium", "high", "xhigh", "max"],
+      "models": ["haiku", "sonnet", "opus"],
+      "raise_at": "high",
+      "model_env": "launch-model",
+      "effort_env": "launch-effort",
+      "inherited_effort_env": "claude-effort-level"
+    },
+    {
+      "id": "codex",
+      "kind": "order",
+      "efforts": ["low", "medium", "high", "xhigh"],
+      "raise_at": "high",
+      "model_env": "launch-codex-model",
+      "effort_env": "launch-codex-effort"
+    },
+    {
+      "id": "experiments",
+      "kind": "defaults",
+      "enabled": true,
+      "allocation": {"floor": 0.05, "min_units": 10, "margin": 0.1, "window_days": 60}
+    }
+  ]
+}
