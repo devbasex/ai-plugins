@@ -118,8 +118,8 @@ def measure_project(root: Path, budget: float) -> dict[str, Any]:
     step = _Steps(start + budget)
     repo_issues = measure_repo.measure(tree, step, step.items)
     decl = check.load(main)
-    head = check.branch_state(repo, remote=tree.remote)["head"]
-    ctx = MeasurementContext(gh_repo=_gh_repo(repo, tree.remote), head=head, repo_issues=repo_issues)
+    state = check.branch_state(repo, check.declared_branches(decl), tree.remote)
+    ctx = MeasurementContext(gh_repo=_gh_repo(repo, tree.remote), head=state["head"], repo_issues=repo_issues)
     notes = _ci_items(tree, step, ctx)
     if tree.skipped:
         notes.append(f"秘密の名前のファイルを開かなかった: {'・'.join(tree.skipped[:10])}")
@@ -128,7 +128,7 @@ def measure_project(root: Path, budget: float) -> dict[str, Any]:
         "elapsed_seconds": round(time.monotonic() - start, 1),
         "items": {k: step.items[k] for k in write.ITEM_KEYS if k in step.items},
         "inputs": check.inputs(repo, tree.files),
-        "branch_state": check.branch_state(repo, check.declared_branches(decl), tree.remote),
+        "branch_state": state,
         "skipped_files": tree.skipped,
         "notes": notes,
     }
