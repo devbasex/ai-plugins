@@ -197,6 +197,12 @@
         "--sources": {
           "type": "string"
         },
+        "--unit": {
+          "type": "string"
+        },
+        "--mode": {
+          "type": "string"
+        },
         "--timeout": {
           "type": "number"
         },

@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
-from ndf.adapters import claude, git, github, launch_settings
+from ndf.adapters import claude, claude_choice, git, github, launch_settings, run_log
 from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
 from ndf.contracts import facts, internal, limits, result, worker_paths
@@ -886,21 +886,24 @@ def _skill_cause(failure: Optional[claude.Failure]) -> str:
 
 
 def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResult:
-    """Skill を full で 1 回回す。起動の設定の Skill の名前の指定が壊れているか未承認なら起動せずに `precondition` で止める（#1959）。
+    """Skill を full で 1 回回す。起動の設定の Skill の名前の指定かモデルと effort の値が壊れているか未承認なら、起動せずに
+    `precondition` で止める（#1959・#2944）。
 
-    起動した子が終わるたびに使用量ログへ 1 行渡す（工程の名前は Skill の名前。会話を再開しないので番号は会話ごとに 0 から。
-    書けなくても結果を変えない。#1959 の決定 6）。"""
+    モデルと effort は `NDF_UNIT_ID` を単位に差し込まれた処理で選び（差し込みが無ければ選ばない）、モデルを理由に拒まれたら
+    残りの期限で基準の組で 1 回だけ起動し直す。起動した子が終わるたびに使用量ログへ値と終わり方（`outcome`）の 1 行を渡す
+    （工程の名前は Skill の名前。会話を再開しないので番号は会話ごとに 0 から。書けなくても結果を変えない。#1959 の決定 6）。"""
     held = contextlib.ExitStack()
     try:
+        picked = claude_choice.ChoiceRun(_skill_choice(run, cwd))
         grant = held.enter_context(launch_settings.prepared(run.name, cwd))
     except internal.InternalError as exc:
         return StageResult(result.stopped(SKILL, exc.kind, f"Skill {run.name} を起動しない: {exc}"), {})
     with held:
-        schema = contracts.load_json(contracts.schema_path("result"))
-        call = claude.ClaudeCall(system=SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema, grant=grant)
-        argv, notice = claude.claude_launch(call, cwd=cwd)
-        options = claude.LaunchOptions(verify=grant.verifier, log=claude.LaunchLog(claude.launch_meta(run.name)))
-        reply = call_claude(argv, skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd, options)
+        limit = limits.seconds(SKILL_LIMIT)
+        reply, notice = _skill_launch(run, cwd, call_claude, picked, grant, limit)
+        left = limit - (reply.seconds if reply.seconds is not None else 0.0)
+        if picked.fall_back(reply, ready=lambda: left > 0):
+            reply, notice = _skill_launch(run, cwd, call_claude, picked, grant, left)
     if not reply.ok:
         kind = _skill_cause(reply.failure)
         got = StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
@@ -908,6 +911,37 @@ def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResu
         report = result.received(reply.answer)
         got = finished(run, report) if report is not None else bad_report(run, "回答が結果 JSON の形に合わない")
     return got if notice is None else replace(got, warnings=(*got.warnings, notice))
+
+
+def _skill_choice(run: StageRun, cwd: Path) -> Any:
+    """Skill の起動の値。単位は `NDF_UNIT_ID`（無いか空なら割り付けない）、モードは工程の入力の `mode`。"""
+    unit = os.environ.get(identity.env_name("unit-id"))
+    mode = run.inputs["mode"] if isinstance(run.inputs.get("mode"), str) else None
+    return claude_choice.pick_values("skill", run.name, cwd=cwd, unit=None if unit == "" else unit, mode=mode)
+
+
+def _skill_launch(
+    run: StageRun, cwd: Path, call_claude: SkillCaller, picked: claude_choice.ChoiceRun, grant: launch_settings.Grant, timeout: float
+) -> tuple[claude.ClaudeReply, Optional[str]]:
+    """選んだ値で Skill の `claude -p` を 1 回起動し、回答と導入済みの一覧を読めなかった知らせを返す。"""
+    schema = contracts.load_json(contracts.schema_path("result"))
+    call = claude.ClaudeCall(
+        SKILL_SYSTEM, claude.Permission.FULL, json_schema=schema, model=picked.model, effort=picked.effort, grant=grant
+    )
+    argv, notice = claude.claude_launch(call, cwd=cwd)
+    log = claude.LaunchLog({**claude.launch_meta(run.name), **picked.meta()}, lambda r: {"outcome": skill_outcome(r)})
+    with run_log.overlay_env(picked.env_changes()):
+        reply = call_claude(argv, skill_prompt(run), timeout, cwd, claude.LaunchOptions(verify=grant.verifier, log=log))
+    picked.seen(reply)
+    return reply, notice
+
+
+def skill_outcome(reply: claude.ClaudeReply) -> str:
+    """Skill の起動 1 回の終わり方: 結果 JSON の status、形に合わなければ `bad_report`、回答を返せなければ `unknown`。"""
+    if not reply.ok:
+        return "unknown"
+    report = result.received(reply.answer)
+    return str(report["status"]) if report is not None else "bad_report"
 
 
 def invoke(

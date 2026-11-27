@@ -224,11 +224,13 @@ def work_argv(
     *,
     prompt_file: Optional[str] = None,
     result_dir_id: Optional[tuple[int, int]] = None,
+    mode: Optional[str] = None,
 ) -> list[str]:
     """作業名を `ndf worker run` の必須の引数へ合わせる。4 つのファイルの名前は `report_paths` が持つ（字面を持たない）。
 
     `prompt_file` は起動指示を読む場所（`ndf answer work` は継いだ記述子の `/dev/fd/<番号>` を渡す。省くと保存先の起動指示）。
     `result_dir_id` は開いた保存先の `(st_dev, st_ino)` で、`ndf worker run` が結果ファイルの保存先を開き直したときに突き合わせる。
+    `mode` は工程の入力のモードで、あれば `--mode` で渡す（使用量ログと実験の記録に残す。#2944）。
     """
     spec = _known(kind)
     try:
@@ -238,7 +240,8 @@ def work_argv(
     files = ("--prompt-file", prompt_file or str(paths.prompt), "--result-file", str(paths.result))
     held = ("--result-dir-id", f"{result_dir_id[0]}:{result_dir_id[1]}") if result_dir_id is not None else ()
     required = [arg for name in spec["outputs"] for arg in ("--require-output", name)]
-    return ["run", "--kind", kind, *files, *held, "--cwd", str(cwd), "--state-dir", str(state_dir), *required]
+    modes = ("--mode", mode) if mode else ()
+    return ["run", "--kind", kind, *files, *held, "--cwd", str(cwd), "--state-dir", str(state_dir), *required, *modes]
 
 
 def work_parser() -> argparse.ArgumentParser:
@@ -287,6 +290,7 @@ class WorkHandoff(NamedTuple):
     workdir: Path
     prompt: str
     fd: int
+    mode: Optional[str] = None  # 工程の入力のモード（#2944）
 
 
 def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff:
@@ -316,7 +320,8 @@ def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff
         fd = _held_prompt(body)  # 前の報告一式を初期化する前に用意する（用意できなければ何も消さずに止まる）
         try:
             _write_prompt(wd, paths, body)
-            return WorkHandoff(kind, wd.path, worker_paths.dir_id(wd), workdir, body, fd)
+            mode = saved["inputs"].get("mode")
+            return WorkHandoff(kind, wd.path, worker_paths.dir_id(wd), workdir, body, fd, mode if isinstance(mode, str) else None)
         except BaseException:
             os.close(fd)
             raise
@@ -369,7 +374,9 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
         return result.emit(result.stopped(TOOL, kind, str(exc), items=items))
     fd = handoff.fd
     try:
-        args = work_argv(handoff.kind, handoff.state_dir, handoff.workdir, prompt_file=f"/dev/fd/{fd}", result_dir_id=handoff.dir_id)
+        args = work_argv(
+            handoff.kind, handoff.state_dir, handoff.workdir, prompt_file=f"/dev/fd/{fd}", result_dir_id=handoff.dir_id, mode=handoff.mode
+        )
         # -I: 作業場所と呼び出し元の PYTHONPATH の ndf.py・ndf/ を NDF の src より先に読まない。置き換えた先も、呼び出し元が読む
         # 今の標準出力・標準エラーの文字コードで書く（プランのステップはロケールで読む。#4029）
         argv = invoke.ndf_command("worker", *args, keep_streams=True)

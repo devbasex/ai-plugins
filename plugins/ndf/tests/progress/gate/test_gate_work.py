@@ -437,3 +437,12 @@ def test_a_handoff_file_that_cannot_be_made_keeps_the_previous_report(tmp_path, 
     assert code == causes.exit_code("precondition") and got == [] and out["cause"]["kind"] == "precondition"
     assert paths.report.read_text(encoding="utf-8") == "前の報告"
     assert paths.done.exists() and paths.result.read_text(encoding="utf-8") == "{}"
+
+
+def test_the_mode_of_the_stage_inputs_goes_to_worker_run(tmp_path):
+    """#2944: 工程の入力にモードがあれば `--mode` で渡し、無ければ渡さない。"""
+    invoke.write_values(tmp_path, "fix", {"worktree": "/w", "branch": "b"}, {"mode": "light"}, True)
+    got: list[list[str]] = []
+    assert gate._cmd_work(["--state-dir", str(tmp_path), "fix"], lambda exe, argv: got.append(argv)) == 0
+    assert worker._parser().parse_args(got[0][got[0].index("run") :]).mode == "light"
+    assert "--mode" not in gate.work_argv("fix", tmp_path, Path("/w"))
