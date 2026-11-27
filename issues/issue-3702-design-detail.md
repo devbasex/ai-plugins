@@ -279,6 +279,8 @@ contracts/
 
 `build` が読む 4 つの入力は、保存先の直下の通常ファイルに限る。シンボリックリンクはたどらない。保存先と途中のディレクトリは、`.git`（か `.ndf`）より上のリンクだけを解き、そこから下は 1 要素ずつリンクをたどらずに開く。理由の文に載せるコミットの ID は、ID の形（16 進の 40 桁か 64 桁）を確かめた値だけにする。保存先の外にあるファイルの中身が、停止の理由に出ないようにするためである。
 
+`build` は `checked.json` の形を `contracts/workflow/design-units-check.schema.json` で確かめる。`handling` と `criteria` のキーが `issues` の課題と違う場合と、`omitted` に `issues` に無い課題がある場合も、形の違いとして扱う。違えば、ファイル名を理由に含む `RecordUnreadable` にする。承認ゲートが、壊れた検査の結果を承認資料や回答の記録にしないためである。
+
 ファイルの `ndf_record` は記録の種別で、`build` は前の `design-target.json` をこの種別のものだけ消し、名前が空いているときだけ公開する（`checked.json` と同じ）。ほかのファイルは変えずに `RecordUnreadable` にする。
 
 ### 関数の仕様
@@ -292,7 +294,7 @@ contracts/
 | `approved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「ドキュメントレビュー」の設計承認ゲートの最新の回答が承認なら、その `design_target` を返す。その承認より後にゲートのステップを未了に戻すイベントがあれば None を返す。最新の回答が承認でない場合（承認の後の変更要求など）も None |
 | `mismatches` | 同上 | 新設 | `(record, tree, context) -> list[str]` | 設計書の決定 11 の表の 4 つの比較（単位のファイル・スプリントの課題・課題ごとの扱いと統合先・実装計画を省いた課題）。スプリントの課題は全体を比べ、ほかの比較は記録の `targets.issues` に絞る |
 | `without_issues` | 同上 | 新設 | `(record, drop, files) -> dict` | 課題を外す回答の記録の絞り込み。外せない形なら `Refused` |
-| `converted` | 同上 | 新設 | `(repo, head, branch, context, limits, checked: Checked) -> dict` | 変換の再承認の記録。`design-target.json` と同じ形で、`sprint_branch` は `branch`、`review.pr` は null、`head` は単位のファイルを含むコミット |
+| `converted` | 同上 | 新設 | `(repo, head, branch, context, limits, checked: Checked) -> dict` | 変換の再承認の記録。`build` の戻り値と同じ形で返す。`ndf_record` は作業用ファイルに書くときだけ付ける。`sprint_branch` は引数 `branch`、`review.pr` は null、`review.head` は単位のファイルを含むコミット |
 | `reapproved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「実装」の最新の回答が承認なら、その `design_target` |
 
 `Checked` は `design_record.py` の型で、`report`（`units_files.check` が返した `Report`）と `criteria`（`check` に渡した、課題ごとの受け入れ条件の数）を持つ。`Report` は受け入れ条件の数を持たないので、呼び手が 2 つを組にして `converted` へ渡す。

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "design-units-check.schema.json",
+  "title": "単位の検査の記録",
+  "description": "承認の記録の保存先の checked.json の形（#3702）。ndf plan units check が書き、ndf.progress.design_record が承認の記録を組むときに確かめる。キーどうしの一致（handling と criteria の課題・omitted が issues の一部）は読む側が確かめる",
+  "type": "object",
+  "required": ["ndf_record", "head", "branch", "issues", "handling", "omitted", "limits", "criteria", "units"],
+  "properties": {
+    "ndf_record": {"const": "design-units-check"},
+    "head": {"type": "string"},
+    "branch": {"type": "string", "minLength": 1},
+    "issues": {"$ref": "#/$defs/issues"},
+    "handling": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["handling", "into"],
+        "properties": {"handling": {"type": "string"}, "into": {"type": ["integer", "null"]}}
+      }
+    },
+    "omitted": {"$ref": "#/$defs/issues"},
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "max"],
+      "properties": {"target": {"type": "integer"}, "max": {"type": "integer"}}
+    },
+    "criteria": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+    "units": {"type": "array", "items": {"$ref": "#/$defs/unit"}}
+  },
+  "$defs": {
+    "issues": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+    "strings": {"type": "array", "items": {"type": "string"}},
+    "unit": {
+      "type": "object",
+      "required": ["kind", "file", "name", "order", "merge", "after", "issues", "tasks", "criteria", "lines", "touches"],
+      "properties": {
+        "kind": {"const": "unit"},
+        "file": {"type": "string"},
+        "name": {"type": "string"},
+        "order": {"type": "integer"},
+        "merge": {"type": "integer"},
+        "after": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["file", "unit", "reason"],
+            "properties": {"file": {"type": "string"}, "unit": {"type": "string"}, "reason": {"type": "string"}}
+          }
+        },
+        "issues": {"$ref": "#/$defs/issues"},
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "issue"],
+            "properties": {"id": {"type": "string"}, "issue": {"type": "integer", "minimum": 1}}
+          }
+        },
+        "criteria": {"$ref": "#/$defs/strings"},
+        "lines": {"type": ["integer", "null"]},
+        "touches": {"$ref": "#/$defs/strings"}
+      }
+    }
+  }
+}

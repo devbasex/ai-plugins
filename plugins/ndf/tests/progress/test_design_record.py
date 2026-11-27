@@ -233,6 +233,40 @@ def test_build_does_not_follow_a_linked_input_or_quote_it(tmp_path):
     assert "secret-token" not in str(caught.value)
 
 
+def _check_record(**changed: Any) -> dict[str, Any]:
+    unit = {"kind": "unit", "file": "", "name": "issue-7", "order": 1, "merge": 1, "after": [], "issues": [7]}
+    unit |= {"tasks": [{"id": "T1", "issue": 7}], "criteria": [], "lines": None, "touches": []}
+    held = {"ndf_record": "design-units-check", "head": "a" * 40, "branch": BRANCH, "issues": [7]}
+    held |= {"handling": {"7": {"handling": "実装する", "into": None}}, "omitted": [7]}
+    held |= {"limits": {"target": 400, "max": 1000}, "criteria": {"7": 2}, "units": [unit]}
+    return held | changed
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"units": {}},
+        {"units": [{"kind": "unit"}]},
+        {"handling": {}},
+        {"handling": {"7": "実装する"}},
+        {"omitted": [8]},
+        {"limits": {"target": "400", "max": 1000}},
+        {"criteria": {"7": "2"}},
+        {"criteria": {}},
+    ],
+)
+def test_build_refuses_a_check_that_breaks_the_record_contract(tmp_path, changed):
+    (tmp_path / "reviewed-head").write_text("a" * 40, encoding="utf-8")
+    (tmp_path / "reviewed-pr").write_text(f"{REPO}#12", encoding="utf-8")
+    (tmp_path / "reviewed-base").write_text("main", encoding="utf-8")
+    (tmp_path / "checked.json").write_text(json.dumps(_check_record(**changed)), encoding="utf-8")
+
+    with pytest.raises(design_record.RecordUnreadable, match="checked.json の形が違う"):
+        design_record.build(tmp_path)
+
+    assert not (tmp_path / "design-target.json").exists()
+
+
 # --- stale -------------------------------------------------------------------------------------
 
 

@@ -14,6 +14,12 @@ from typing import Any, Optional
 
 # NDF が書いた記録の JSON が、記録の種別を持つキー。消す前にこの値で NDF の記録かを確かめる
 RECORD_KIND_KEY = "ndf_record"
+# 承認の記録の保存先のファイル。前の 2 つ（と `units_files.REVIEWED_HEAD`）は設計の Pull Request のレビューが書き、後の 1 つは `units check` が書く
+REVIEWED_PR = "reviewed-pr"
+REVIEWED_BASE = "reviewed-base"
+CHECKED_FILE = "checked.json"
+# `checked.json` の記録の種別（`RECORD_KIND_KEY` の値）。種別の違うファイルは消さず、上書きもしない
+CHECKED_KIND = "design-units-check"
 
 
 def read_json(path: Path) -> Optional[dict[str, Any]]:

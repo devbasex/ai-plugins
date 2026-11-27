@@ -51,12 +51,6 @@ WAIT_POLL = "durable.wait-from-poll"
 # `units` が読む、工程の入力と承認の記録の保存先（`contracts/domains/env.json`）
 STAGE_INPUT_ENV = "NDF_STAGE_INPUT"
 RECORD_DIR_ENV = identity.env_name("design-record-dir")
-# 保存先のファイル。前の 2 つ（と `units_files.REVIEWED_HEAD`）は設計の Pull Request のレビューが書き、後の 1 つは `units check` が書く
-REVIEWED_PR = "reviewed-pr"
-REVIEWED_BASE = "reviewed-base"
-CHECKED_FILE = "checked.json"
-# `checked.json` の記録の種別（`files.RECORD_KIND_KEY` の値）。種別の違うファイルは消さず、上書きもしない
-CHECKED_KIND = "design-units-check"
 _REVIEWED_PR_FORM = re.compile(r"[^/\s]+/[^#\s]+#([1-9][0-9]*)")
 _REVIEW_LAUNCH_HINT = (
     "。workflow.launch.review でレビューの起動を差し替えているときは、起動の後ろの --reviewed-out・--reviewed-pr-out・"
@@ -365,12 +359,12 @@ def _record(path: Path, targets: _Targets) -> _Record:
     マージ先（`reviewed-base`）はここでは有無だけを見る。PR の今のマージ先と比べるのは、承認の判定
     （`ndf records mvv gate`）が受け持つ。
     """
-    files.discard_record(path / CHECKED_FILE, CHECKED_KIND)
+    files.discard_record(path / files.CHECKED_FILE, files.CHECKED_KIND)
     if targets.paths:
         raise _UnitsStopped("invalid", f"{RECORD_DIR_ENV} があるときは、単位のファイルを直に指さず課題で確かめる")
-    held = {name: _held(path / name) for name in (units_files.REVIEWED_HEAD, REVIEWED_PR, REVIEWED_BASE)}
-    pr = _REVIEWED_PR_FORM.fullmatch(held[REVIEWED_PR])
-    lack = [name for name, value in held.items() if not value or (name == REVIEWED_PR and pr is None)]
+    held = {name: _held(path / name) for name in (units_files.REVIEWED_HEAD, files.REVIEWED_PR, files.REVIEWED_BASE)}
+    pr = _REVIEWED_PR_FORM.fullmatch(held[files.REVIEWED_PR])
+    lack = [name for name, value in held.items() if not value or (name == files.REVIEWED_PR and pr is None)]
     if lack:
         launch = units_files.project_of(units_files.Tree(targets.root)).get("workflow")
         launch = launch.get("launch") if isinstance(launch, dict) else None
@@ -413,8 +407,8 @@ def _checked_units(a: argparse.Namespace, targets: _Targets, record: Optional[_R
     outputs = None
     if record is not None:
         files.publish_record(
-            record.path / CHECKED_FILE,
-            CHECKED_KIND,
+            record.path / files.CHECKED_FILE,
+            files.CHECKED_KIND,
             dict(
                 head=record.head,
                 branch=targets.inputs.branch,

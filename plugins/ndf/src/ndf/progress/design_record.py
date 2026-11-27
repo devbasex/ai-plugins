@@ -18,10 +18,9 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-from ndf import identity
+from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError, mask_urls
 from ndf.contracts import worker_paths
-from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import inputs_decide, units_files
 from ndf.core.plan import units_decide as ud
@@ -29,6 +28,8 @@ from ndf.progress import folding, model, stages
 from ndf.progress.run_view import ACTOR, ANSWERED, STEP_EVENT, View, event_payload
 
 RECORD_VERSION = 1
+# `checked.json` の形の規約
+CHECKED_SCHEMA = "workflow/design-units-check.schema.json"
 # 保存先に `build` が書くファイル
 TARGET_FILE = "design-target.json"
 # `design-target.json` の記録の種別（種別の違うファイルは消さず、上書きもしない）
@@ -41,6 +42,8 @@ _GATE = next(gate for gate in model.table()["gates"] if gate == "design")
 _REVIEW_STAGE, _IMPLEMENT_ROW = "document-review", "実装"
 _APPROVED = folding.answer_word("approved")
 _REDO = "変更を求めて実装計画を分け直す"
+# `units_files.Tree.listing` の値
+Listing = Mapping[str, Optional[tuple[str, str, str]]]
 # コミットの ID の形（理由の文に載せてよいかを確かめる）
 _COMMIT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 # NDF の保存先を持つディレクトリの名前。これより下の要素にリンクがあれば、保存先を読まない
@@ -62,22 +65,19 @@ def required(snap: stages.Snapshot) -> bool:
 def build(record_dir: Path) -> dict[str, Any]:
     """レビューの記録の 3 つのファイルと `checked.json` から記録を組み、`design-target.json` に書く。"""
     head = _text(record_dir, units_files.REVIEWED_HEAD)
-    base = _text(record_dir, plan_cli.REVIEWED_BASE)
-    repo, _, number = _text(record_dir, plan_cli.REVIEWED_PR).rpartition("#")
+    base = _text(record_dir, plan_files.REVIEWED_BASE)
+    repo, _, number = _text(record_dir, plan_files.REVIEWED_PR).rpartition("#")
     if not repo or not number.isdigit():
-        raise RecordUnreadable(f"{record_dir / plan_cli.REVIEWED_PR}: <所有者>/<リポジトリ>#<番号> の形でない")
+        raise RecordUnreadable(f"{record_dir / plan_files.REVIEWED_PR}: <所有者>/<リポジトリ>#<番号> の形でない")
     checked = _checked(record_dir, head)
-    try:
-        record = _record(
-            {"repo": repo, "pr": int(number), "head": head, "base": base},
-            checked["branch"],
-            {"issues": checked["issues"], "handling": checked["handling"], "omitted": checked["omitted"]},
-            checked["limits"],
-            checked[ud.CRITERIA_KEY],
-            checked["units"],
-        )
-    except KeyError as exc:
-        raise RecordUnreadable(f"{record_dir / plan_cli.CHECKED_FILE} にキー {exc} が無い") from None
+    record = _record(
+        {"repo": repo, "pr": int(number), "head": head, "base": base},
+        checked["branch"],
+        {"issues": checked["issues"], "handling": checked["handling"], "omitted": checked["omitted"]},
+        checked["limits"],
+        checked[ud.CRITERIA_KEY],
+        checked["units"],
+    )
     try:
         plan_files.discard_record(record_dir / TARGET_FILE, TARGET_KIND)
         plan_files.publish_record(record_dir / TARGET_FILE, TARGET_KIND, record)
@@ -111,20 +111,33 @@ def _text(record_dir: Path, name: str) -> str:
 
 
 def _checked(record_dir: Path, head: str) -> dict[str, Any]:
-    path = record_dir / plan_cli.CHECKED_FILE
+    path = record_dir / plan_files.CHECKED_FILE
     if not _COMMIT_ID.fullmatch(head):
         raise RecordUnreadable(f"{record_dir / units_files.REVIEWED_HEAD}: コミットの ID の形でない")
     try:
-        found = json.loads(_text(record_dir, plan_cli.CHECKED_FILE))
+        found = json.loads(_text(record_dir, plan_files.CHECKED_FILE))
     except json.JSONDecodeError:
         found = None
-    if not isinstance(found, dict) or found.get(plan_files.RECORD_KIND_KEY) != plan_cli.CHECKED_KIND:
+    if not isinstance(found, dict) or found.get(plan_files.RECORD_KIND_KEY) != plan_files.CHECKED_KIND:
         raise RecordUnreadable(f"{path} は単位の確かめの記録でない")
     seen = found.get("head")
     if seen != head:
         shown = f"（{seen}）" if isinstance(seen, str) and _COMMIT_ID.fullmatch(seen) else ""
         raise RecordUnreadable(f"{path} が確かめたコミット{shown}はレビューした HEAD（{head}）と違う")
+    # 読んだ中身を理由の文に写さない（場所と規則の名前だけを出す）
+    errs = contracts.broken_places(found, CHECKED_SCHEMA) or _unpaired(found)
+    if errs:
+        raise RecordUnreadable(f"{path} の形が違う: {'; '.join(errs)}")
     return found
+
+
+def _unpaired(found: Mapping[str, Any]) -> list[str]:
+    """形を通った `checked.json` の、スキーマで書けないキーどうしの食い違い。"""
+    issues = {str(int(n)) for n in found["issues"]}
+    errs = [f"{key}: 課題の並びが issues と違う" for key in ("handling", ud.CRITERIA_KEY) if set(found[key]) != issues]
+    if not {str(int(n)) for n in found["omitted"]} <= issues:
+        errs.append("omitted: issues に無い課題がある")
+    return errs
 
 
 def _record(
@@ -256,12 +269,13 @@ def mismatches(record: Mapping[str, Any], tree: units_files.Tree, context: Mappi
     if current != set(issues):
         found.append(f"スプリントの課題が違う: 承認の記録は {_listed(issues)}、今は {_listed(current)}")
     head = record["review"]["head"]
-    unfetched = _fetch_missing(tree.root, head)
-    if unfetched is not None:
-        return [*found, f"承認の記録のコミット {head} が手元に無いので、単位のファイルを比べられない（{unfetched}）"]
+    recorded = units_files.Tree(tree.root, head)
     try:
+        listed, unfetched = _recorded_listing(recorded)
+        if listed is None:
+            return [*found, f"承認の記録のコミット {head} が手元に無いので、単位のファイルを比べられない（{unfetched}）"]
         listing = tree.listing()
-        found += _file_mismatches(units_files.Tree(tree.root, head), tree, listing, issues)
+        found += _file_mismatches(recorded, listed, tree, listing, issues)
         found += _handling_mismatches(targets, tree, listing, issues)
     except units_files.UnitsFileError as exc:
         found.append(str(exc))
@@ -273,28 +287,33 @@ def _listed(issues: Collection[int]) -> str:
     return "・".join(f"#{n}" for n in sorted(issues)) or "無し"
 
 
-def _fetch_missing(root: Path, commit: str) -> Optional[str]:
-    """コミットが手元に無ければ取得を 1 回試す。手元にあれば None、無いままなら理由。"""
-    git = Git(root)
-    if git.commit_or_none(commit) is not None:
-        return None
+def _recorded_listing(recorded: units_files.Tree) -> tuple[Optional[Listing], str]:
+    """記録のコミットの一覧。読めなければ取得を 1 回試して読み直す。読めないままなら (None, 理由)。
+
+    手元にあるコミットは、有無を別に調べず一覧の読み取りだけで済ませる。
+    """
     try:
-        done = git.fetch(git.remote(), commit)
+        return recorded.listing(), ""
+    except GitError:  # noqa: NDF401 git: コミットが手元に無いので取得して読み直す
+        pass
+    git = Git(recorded.root)
+    done = None
+    try:
+        done = git.fetch(git.remote(), str(recorded.commit))
+        return recorded.listing(), ""
     except GitError as exc:
-        return f"取得できない: {exc}"
-    if git.commit_or_none(commit) is not None:
-        return None
-    return f"取得できない: {mask_urls(done.stderr.strip())}"
+        why = mask_urls(done.stderr.strip()) if done is not None and done.returncode != 0 else str(exc)
+        return None, f"取得できない: {why}"
 
 
 def _file_mismatches(
     recorded: units_files.Tree,
+    listed: Listing,
     tree: units_files.Tree,
-    now_listed: Mapping[str, Optional[tuple[str, str, str]]],
+    now_listed: Listing,
     issues: Sequence[int],
 ) -> list[str]:
     """単位のファイルの違い。パスが同じものは、JSON として読み、実際の行数を除いて比べる。一覧と本文は側ごとにまとめて読む。"""
-    listed = recorded.listing()
     before = units_files.find(recorded, issues, sorted(listed))
     after = units_files.find(tree, issues, sorted(now_listed))
     pairs = dict.fromkeys((before.get(n), after.get(n)) for n in sorted(issues))
