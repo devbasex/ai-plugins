@@ -92,35 +92,70 @@ def test_pr_4638_r3_5_parent_without_write_permission_is_refused(tmp_path: Path)
 
 
 def test_pr_4638_r1_4_record_is_written_before_the_output_is_published(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """PR 4638 の r1-4: 無い出力は、記録を残してから出力の名前へ置き換える。置き換えの前に落ちて記録だけが残っても、次の起動は
-    その記録を消して続く。"""
+    """PR 4638 の r1-4・r2-1・r2-7・r2-9: 無い出力は、記録を残してから出力の名前へ置き換える。置き換えの前に強制終了されて
+    記録と一時のファイルが残っても、次の起動は記録から一時のファイルを見つけて消し、記録も消して続く。"""
     out = tmp_path / "h"
-    seen = []
+    record = outputs.owner_record(out)
     replace = os.replace
+    left: dict[str, str] = {}
 
     def watching(src, dst):
-        seen.append(outputs.owner_record(out).exists())
-        raise KeyboardInterrupt  # 置き換えの直前に止まった起動
+        if Path(dst) != out:  # 記録を置く置き換え（`store.write_object`）はそのまま通す
+            return replace(src, dst)
+        # 強制終了された時点の記録と一時のファイルを残しておく（hard link は inode を保つ）
+        left.update(record=record.read_text(encoding="utf-8"), tmp=str(src))
+        os.link(src, tmp_path / "kept")
+        raise KeyboardInterrupt
 
     monkeypatch.setattr(outputs.os, "replace", watching)
     with pytest.raises(KeyboardInterrupt):
         outputs.write_output(out, HEAD)
     monkeypatch.setattr(outputs.os, "replace", replace)
-    store.write_object(outputs.owner_record(out), {"sha256": "0"})  # 例外処理も走らずに残った記録
+    # 例外処理も走らずに残った状態へ戻す
+    record.write_text(left["record"], encoding="utf-8")
+    os.rename(tmp_path / "kept", left["tmp"])
     outputs.clear_stale(out)
-    assert (seen, out.exists(), outputs.owner_record(out).exists()) == ([True], False, False)
+    assert sorted(p.name for p in tmp_path.iterdir()) == []
 
 
-def test_pr_4638_r1_4_write_into_an_empty_output_is_resumable(tmp_path: Path) -> None:
-    """PR 4638 の r1-4: 空の出力先へ書いた後、書いた後の記録を残す前に落ちても、次の起動は書きかけの記録で今回の書き込みと
-    確かめ、inode を保ったまま空へ戻して続く。"""
+@pytest.mark.parametrize("written", [0, 10, len(HEAD)], ids=["none", "part", "all"])
+def test_pr_4638_r2_8_write_into_an_empty_output_is_resumable(tmp_path: Path, written: int) -> None:
+    """PR 4638 の r1-4・r2-8: 空の出力先へ書いている途中か書いた後に、書いた後の記録を残す前に落ちても、次の起動は書きかけの
+    記録で今回の書き込みと確かめ、inode を保ったまま空へ戻す。同じ書き込みをやり直せる。"""
     out = tmp_path / "h"
     out.touch()
     before = out.stat().st_ino
     store.write_object(outputs.owner_record(out), outputs._writing_record(out, HEAD))
-    out.write_text(HEAD, encoding="utf-8")
+    out.write_text(HEAD[:written], encoding="utf-8")
     outputs.clear_stale(out)
     assert (out.stat().st_ino, out.read_text(encoding="utf-8"), outputs.owner_record(out).exists()) == (before, "", False)
+    outputs.write_output(out, HEAD)
+    assert (out.stat().st_ino, out.read_text(encoding="utf-8")) == (before, HEAD)
+
+
+@pytest.mark.parametrize("output", ["absent", "empty", "filled"])
+def test_pr_4638_r2_5_record_not_written_by_ndf_is_kept(tmp_path: Path, output: str) -> None:
+    """PR 4638 の r2-5: 記録の名前のファイルでも、NDF が書いた記録と確かめられなければ消さずに止まる。"""
+    out = tmp_path / "h"
+    if output != "absent":
+        out.write_text("" if output == "empty" else HEAD, encoding="utf-8")
+    record = outputs.owner_record(out)
+    record.write_text('{"note": "利用者のファイル"}', encoding="utf-8")
+    with pytest.raises(OSError):
+        outputs.clear_stale(out)
+    assert record.read_text(encoding="utf-8") == '{"note": "利用者のファイル"}'
+
+
+def test_pr_4638_r2_7_staging_file_that_does_not_match_the_record_is_kept(tmp_path: Path) -> None:
+    """PR 4638 の r2-7: 記録の指す一時のファイルでも、inode が記録と違えば利用者のファイルとみなして消さない。"""
+    out = tmp_path / "h"
+    tmp = tmp_path / ".h.0.tmp"
+    tmp.write_text("利用者のファイル", encoding="utf-8")
+    staging = {"tmp": tmp.name, "dev": tmp.stat().st_dev, "ino": tmp.stat().st_ino + 1}
+    store.write_object(outputs.owner_record(out), outputs._record(**{outputs.STAGING_KEY: staging}))
+    with pytest.raises(OSError):
+        outputs.clear_stale(out)
+    assert tmp.read_text(encoding="utf-8") == "利用者のファイル"
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
