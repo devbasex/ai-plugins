@@ -856,6 +856,17 @@ def _skill_cause(failure: Optional[claude.Failure]) -> str:
     return str(facts.value(claude.FAILURES, failure, "skill_cause"))
 
 
+class _PreparedSkill(NamedTuple):
+    """Skill の起動の準備。起動の引数と期限は 1 回だけ組み、起動し直しでも使う。"""
+
+    picked: claude_choice.ChoiceRun
+    grant: launch_settings.Grant
+    limit: float
+    deadline: float
+    base: list[str]
+    notice: Optional[str]
+
+
 def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResult:
     """Skill を full で 1 回回す。起動の設定の Skill の名前の指定かモデルと effort の値が壊れているか未承認なら、起動せずに
     `precondition` で止める（#1959・#2944）。
@@ -865,40 +876,68 @@ def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResu
     起動の引数（導入済みのプラグインの確かめを含む）は 1 回だけ組み、起動し直すときは値の引数だけを替える。起動した子が終わるたびに
     使用量ログへ値と終わり方（`outcome`）の 1 行を渡す（工程の名前は Skill の名前。会話を再開しないので番号は会話ごとに 0 から。
     書けなくても結果を変えない。#1959 の決定 6）。回答の検証は行と工程の結果で 1 回を使い回す（`_Checked`）。"""
-    held = contextlib.ExitStack()
-    try:
-        picked = claude_choice.ChoiceRun(_skill_choice(run, cwd))
-        grant = held.enter_context(launch_settings.prepared(run.name, cwd))
-    except internal.InternalError as exc:
-        return StageResult(result.stopped(SKILL, exc.kind, f"Skill {run.name} を起動しない: {exc}"), {})
     checked = _Checked()
-    with held:
-        limit = limits.seconds(SKILL_LIMIT)
-        deadline = claude_choice.deadline_after(limit)
-        schema = contracts.load_json(contracts.schema_path("result"))
-        base, notice = claude.claude_launch(
-            claude.ClaudeCall(SKILL_SYSTEM, claude.Permission.FULL, json_schema=schema, grant=grant), cwd=cwd
-        )
-
-        def launch(timeout: float, bound: Optional[Callable[[], float]] = None) -> claude.ClaudeReply:
-            # 組んだ引数に選んだ値の引数を足して 1 回起動する。`bound` は起動し直しの期限の残り
-            log = claude.LaunchLog(
-                {**claude.launch_meta(run.name, picked.repo), **picked.meta()}, lambda r: {"outcome": skill_outcome(r, checked)}
-            )
-            options = claude.LaunchOptions(verify=grant.verifier, log=log, left=bound)
-            with run_log.overlay_env(picked.env_changes()):
-                got = call_claude([*base, *picked.cli_args()], skill_prompt(run), timeout, cwd, options)
-            picked.seen(got)
-            return got
-
-        reply = launch(limit)
+    with contextlib.ExitStack() as held:  # 起動の指定（MCP の定義のコピー）は起動し直しが終わるまで持つ
         try:
-            left = picked.fall_back_until(reply, deadline, grant.verifier)
-        except internal.InternalError as exc:  # 切り替えの前に承認の対象が変わったか、承認が取り消された
-            return StageResult(result.stopped(SKILL, exc.kind, f"Skill {run.name} を基準の組で起動し直さない: {exc}"), {})
-        if left is not None:  # 切り替えられたか、期限を使い切った。残りが無ければ、元の拒否ではなく期限切れを理由にする
-            late = claude.ClaudeReply.failed("", "基準の組で起動し直す期限が残っていない", failure=claude.Failure.TIMEOUT)
-            reply = launch(left, partial(claude_choice.left_until, deadline)) if left > 0 else late
+            picked = claude_choice.ChoiceRun(_skill_choice(run, cwd))
+            grant = held.enter_context(launch_settings.prepared(run.name, cwd))
+        except internal.InternalError as exc:
+            return StageResult(result.stopped(SKILL, exc.kind, f"Skill {run.name} を起動しない: {exc}"), {})
+        prepared = _prepare_skill(cwd, picked, grant)
+        try:
+            reply = _launch_skill(run, cwd, call_claude, prepared, checked)
+        except _SkillNotRelaunched as exc:  # 切り替えの前に承認の対象が変わったか、承認が取り消された
+            return StageResult(result.stopped(SKILL, exc.cause.kind, f"Skill {run.name} を基準の組で起動し直さない: {exc.cause}"), {})
+    return _skill_result(run, reply, checked, prepared.notice)
+
+
+def _prepare_skill(cwd: Path, picked: claude_choice.ChoiceRun, grant: launch_settings.Grant) -> _PreparedSkill:
+    """起動の期限と引数を組む。"""
+    limit = limits.seconds(SKILL_LIMIT)
+    deadline = claude_choice.deadline_after(limit)
+    schema = contracts.load_json(contracts.schema_path("result"))
+    base, notice = claude.claude_launch(claude.ClaudeCall(SKILL_SYSTEM, claude.Permission.FULL, json_schema=schema, grant=grant), cwd=cwd)
+    return _PreparedSkill(picked, grant, limit, deadline, base, notice)
+
+
+class _SkillNotRelaunched(Exception):
+    """基準の組への切り替えを断られた。起動した呼び出しの例外と取り違えないように、切り替えの例外だけを包む。"""
+
+    def __init__(self, cause: internal.InternalError) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+
+
+def _launch_skill(run: StageRun, cwd: Path, call_claude: SkillCaller, prepared: _PreparedSkill, checked: _Checked) -> claude.ClaudeReply:
+    """起動し、モデルを理由に拒まれたら基準の組へ切り替えて起動し直す。最後の回答を返す。"""
+    picked, grant = prepared.picked, prepared.grant
+
+    def launch(timeout: float, bound: Optional[Callable[[], float]] = None) -> claude.ClaudeReply:
+        # 組んだ引数に選んだ値の引数を足して 1 回起動する。`bound` は起動し直しの期限の残り
+        log = claude.LaunchLog(
+            {**claude.launch_meta(run.name, picked.repo), **picked.meta()}, lambda r: {"outcome": skill_outcome(r, checked)}
+        )
+        options = claude.LaunchOptions(verify=grant.verifier, log=log, left=bound)
+        with run_log.overlay_env(picked.env_changes()):
+            got = call_claude([*prepared.base, *picked.cli_args()], skill_prompt(run), timeout, cwd, options)
+        picked.seen(got)
+        return got
+
+    reply = launch(prepared.limit)
+    try:
+        left = picked.fall_back_until(reply, prepared.deadline, grant.verifier)
+    except internal.InternalError as exc:
+        raise _SkillNotRelaunched(exc) from exc
+    if left is None:
+        return reply
+    # 切り替えられたか、期限を使い切った。残りが無ければ、元の拒否ではなく期限切れを理由にする
+    if left <= 0:
+        return claude.ClaudeReply.failed("", "基準の組で起動し直す期限が残っていない", failure=claude.Failure.TIMEOUT)
+    return launch(left, partial(claude_choice.left_until, prepared.deadline))
+
+
+def _skill_result(run: StageRun, reply: claude.ClaudeReply, checked: _Checked, notice: Optional[str]) -> StageResult:
+    """最後の回答から工程の結果を組み、起動の引数の注意を警告の末尾へ足す。"""
     if not reply.ok:
         kind = _skill_cause(reply.failure)
         got = StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
