@@ -139,6 +139,11 @@ class ChoiceRun:
         fields = {**values, **dict(request_id=self.request_id, request_try=self.request_try, charge_to=self.charge_to)}
         return {k: v for k, v in fields.items() if v is not None}
 
+    def next_try(self, log: claude.LaunchLog) -> None:
+        """同じ会話を再開する前に、リクエストの中の番号（`request_try`）を 1 つ進め、行の書き手の欄にも反映する。"""
+        self.request_try += 1
+        log.meta["request_try"] = self.request_try
+
     def seen(self, reply: claude.ClaudeReply) -> None:
         """実際のモデルを返した最初の起動で、割り付けの単位の `observed` の行を足す（足すかは差し込まれた処理が決める）。"""
         found = claude.main_model(reply.model_usage) if not self._seen and reply.model_usage is not None else None

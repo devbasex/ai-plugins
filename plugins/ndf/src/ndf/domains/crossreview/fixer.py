@@ -106,8 +106,7 @@ def _held(run: FixRun, session: Optional[claude.Session]) -> _Held:
 
 def _resumed(held: _Held) -> _Held:
     """続ける会話は値を選び直さず、リクエストの中の番号だけを進める。"""
-    held.chosen.request_try += 1
-    held.log.meta["request_try"] = held.chosen.request_try
+    held.chosen.next_try(held.log)
     return held
 
 

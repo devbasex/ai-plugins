@@ -438,7 +438,7 @@ def _resume_until_written(
         if (written and not _missing_record(handoff, wd)) or _reply_failed(reply, out):
             return
         argv = base + run.cli_args() + ["--resume", out.session]
-        worker_choice.next_try(run, log)
+        run.next_try(log)
         prompt, timeout, resumes, bound = (RECORD_PROMPT if written else RESUME_PROMPT), handoff.timeout, resumes + 1, None
     out.cause = "work_stopped"
     out.detail = _stopped_detail(handoff, wd)

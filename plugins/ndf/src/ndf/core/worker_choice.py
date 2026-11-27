@@ -97,12 +97,6 @@ def end_of(reply: claude.ClaudeReply, report: Callable[[], Any]) -> str:
     return status if status in STATUSES else "no_result"
 
 
-def next_try(run: claude_choice.ChoiceRun, log: claude.LaunchLog) -> None:
-    """同じ会話を再開する前に、リクエストの中の番号（`request_try`）を 1 つ進め、行の書き手の欄にも反映する。"""
-    run.request_try += 1
-    log.meta["request_try"] = run.request_try
-
-
 def launch_metrics(last: Mapping[str, Any], run: claude_choice.ChoiceRun, reply: claude.ClaudeReply) -> dict[str, Any]:
     """結果の `metrics.launch`: 今の値と出所・割り付け ID と、分かれば最後に実際のモデルを返した子のモデル。"""
     if run.choice is None:
