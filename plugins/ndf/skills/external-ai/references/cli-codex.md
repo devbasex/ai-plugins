@@ -48,16 +48,24 @@ echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/00-local-user
 ```bash
 cd <workdir>
 ndf delegate-run --runtime codex -- codex exec '{args}' \
-  [--model M] < <prompt> > <stem>-stdout.log 2> <stem>-err.log
+  < <prompt> > <stem>-stdout.log 2> <stem>-err.log
 ```
 
 | オプション | 用途 |
 |---|---|
 | `'{args}'` | `ndf delegate-run` が、モデルと effort の指定・安全装置の引数・作業ディレクトリの指定（`-C <今のディレクトリ>`）をこの順に入れる位置。`codex exec` のすぐ後でないと拒まれる。`-s` や `-C` を自分で書いても拒まれる |
-| （モデルと effort） | 書かない。`ndf delegate-run` が起動の設定（`.ndf/launch.json` の `experiments`、無ければ同梱の表）から選んで `'{args}'` に入れる（`-c model_reasoning_effort=<値>`） |
+| （モデルと effort） | 通常は書かない（明示する方法は下の表）。`ndf delegate-run` が起動の設定（`.ndf/launch.json` の `experiments`、無ければ同梱の表）から選んで `'{args}'` に入れる（`-c model_reasoning_effort=<値>`） |
 | `-o <file>` | 最終 message を、呼び出した側が決めたファイルへ書かせる。プロンプトに出力先を書けないときに使う。最終 message が無ければ中身は得られない |
 | `--json` | JSON Lines でイベントを出力。`event.type=assistant_message` を grep すれば確実に本文を取れる |
 | `codex resume` | 長時間ジョブで親エージェントが再起動した場合にセッションを再開する |
+
+通常はモデルと effort を省略し、リポジトリの起動の設定に従わせる。明示が必要な場合だけ、設定より優先する次の方法を使う。モデルと effort は別々に、上の行ほど優先される。
+
+| 順 | モデルの指定 | effort の指定 |
+|---:|---|---|
+| 1 | コマンドの `'{args}'` より後に `--model M`（`-m M`）を書く。`ndf delegate-run` はこの値で選び、自分ではモデルを足さない | コマンドの `'{args}'` より後に `--config model_reasoning_effort=<値>` を書く（後に置いた値が `'{args}'` の値より優先される。codex-cli 0.172.0 で実測） |
+| 2 | 環境変数 `NDF_LAUNCH_CODEX_MODEL`（その起動の間だけの上書き） | 環境変数 `NDF_LAUNCH_CODEX_EFFORT`（同梱の表 `launch-experiments.json` の codex の順位にある値だけ。ほかの値では起動しない） |
+| 3 | 起動の設定（`.ndf/launch.json` の `experiments`、無ければ同梱の表） | 同じ |
 
 ## 実際に動いたモデル
 
