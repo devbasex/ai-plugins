@@ -413,19 +413,20 @@ def delegate(
 ) -> Delivery:
     """worker を起動し、結果ファイルが書かれるまで同じ会話を `RESUMES` 回まで再起動する。
 
-    結果ファイルは開いた結果の保存先 `wd` の中の名前としてリンクをたどらずに扱う。前の試行の結果ファイルは起動の前に
-    消し、消せない（リンクなど）なら起動せずに `invalid` にする。結果ファイルがあれば `cause` が None、再起動しても
+    結果ファイルは開いた結果の保存先 `wd` の中の名前としてリンクをたどらずに扱う。前の試行の結果ファイルは、起動の設定の
+    検査と承認の確認（`launch_settings.prepared`）を通った後、起動の前に消す。検査で止まれば前の結果ファイルは残る。
+    消せない（リンクなど）なら起動せずに `invalid` にする。結果ファイルがあれば `cause` が None、再起動しても
     無ければ `work_stopped`、起動が打ち直しても直らない失敗で終えればその種類を `cause` に置く。委譲中に結果ファイルが
     リンクになったか読めなければ、再起動せずに `bad_report` にする。指定の停止は `InternalError` で上げる（`ndf.cli` が結果 JSON にする）。
     """
     out = Delivery(session=session or str(uuid.uuid4()))
-    try:
-        worker_paths.remove_file(wd, handoff.result_file.name)
-    except worker_paths.EntryError as exc:
-        out.cause, out.detail = "invalid", f"結果ファイル {handoff.result_file} を起動の前に消せない: {exc}"
-        return out
-    with launch_settings.prepared(handoff.kind, handoff.cwd) as grant:
+    with launch_settings.prepared(handoff.kind, handoff.cwd) as grant:  # 起動できない指定なら、前の結果ファイルを消す前に止まる
         base, out.notice = _args_for(system, root, handoff.cwd, grant)
+        try:
+            worker_paths.remove_file(wd, handoff.result_file.name)
+        except worker_paths.EntryError as exc:
+            out.cause, out.detail = "invalid", f"結果ファイル {handoff.result_file} を起動の前に消せない: {exc}"
+            return out
         try:
             _resume_until_written(handoff, wd, out, base, call, claude.LaunchOptions(verify=grant.verifier))
         except worker_paths.EntryError as exc:

@@ -51,13 +51,14 @@ def _repo_with_mcp(tmp_path: Path, monkeypatch) -> Path:
 
 
 def test_an_unapproved_spec_stops_the_worker_before_any_launch(tmp_path: Path, monkeypatch) -> None:
-    """条件 11: 作業種別の指定が未承認なら、worker を 1 度も起動せずに precondition で止まる。"""
+    """条件 11: 作業種別の指定が未承認なら、worker を 1 度も起動せずに precondition で止まる。前の結果ファイルは消さない。"""
     root = _repo_with_mcp(tmp_path, monkeypatch)
     h = worker.Handoff("fix", "直す", tmp_path / "result.json", root, tmp_path / "state")
+    h.result_file.write_text('{"status": "ok"}', encoding="utf-8")
     calls: list[list[str]] = []
     with worker_paths.open_workdir(tmp_path) as wd, pytest.raises(internal.InternalError) as got:
         worker.delegate(h, "規則", root=tmp_path, wd=wd, call=lambda argv, *a: calls.append(argv))
-    assert got.value.kind == "precondition" and calls == []
+    assert got.value.kind == "precondition" and calls == [] and h.result_file.exists()
 
 
 def test_an_approved_spec_launches_with_the_copy_and_checks_again_before_each_resume(tmp_path: Path, monkeypatch) -> None:
