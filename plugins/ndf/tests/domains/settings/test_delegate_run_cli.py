@@ -218,6 +218,16 @@ def test_an_empty_effort_in_the_command_stops_at_the_codex_option(repo: Path, mo
     assert execs == [] and "-c・--config の model_reasoning_effort=" in err and identity.env_name("launch-codex-effort") not in err
 
 
+@pytest.mark.parametrize("given", [["-m="], ["--model="], ["-m", ""], ["--model", ""], ["--model", "gpt-x", "-m="]])
+def test_an_empty_model_in_the_command_stops_at_the_codex_option(repo: Path, monkeypatch, execs, capsys, given: list[str]) -> None:
+    """最後に明示したモデルが空なら、下位の環境変数の壊れた値より先に、`-m`・`--model` を指して起動前に止まる。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    monkeypatch.setenv(identity.env_name("launch-codex-model"), "a\nb")
+    assert drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", *given]) == PRECONDITION
+    err = capsys.readouterr().err
+    assert execs == [] and "-m・--model" in err and identity.env_name("launch-codex-model") not in err
+
+
 def test_a_wrong_effort_in_the_command_names_the_codex_option(repo: Path, monkeypatch, execs, capsys) -> None:
     """誤った effort の停止は、codex の委譲で使う `-c`・`--config` の model_reasoning_effort を指し、codex に無い --effort を案内しない。"""
     monkeypatch.setattr(agents, "user_namespaces", lambda: True)

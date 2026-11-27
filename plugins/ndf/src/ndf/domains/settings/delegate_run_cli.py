@@ -132,7 +132,8 @@ def _setting_value(word: str, form: str, place: str) -> Optional[str]:
     if left.endswith("=") and not right:
         key, sep, value = word.partition("=")
         return _toml_text(value) if sep and key.strip() == left[:-1].strip() else None
-    hit = re.fullmatch(re.escape(form).replace(re.escape(place), "(.+)"), word)
+    # 空の値も一致させ、明示した空の値として呼び出し元で止める（未指定と区別する）
+    hit = re.fullmatch(re.escape(form).replace(re.escape(place), "(.*)"), word)
     return hit.group(1) if hit is not None else None
 
 
