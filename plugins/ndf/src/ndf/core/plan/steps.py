@@ -140,6 +140,7 @@ def _plain(status: str, kind: Optional[str], summary: str, code: Optional[int]) 
         "prs": [],
         "outputs": None,
         "gaps": None,
+        result.MISSING_OUTPUTS: None,
     }
 
 
@@ -164,10 +165,18 @@ def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
         "prs": _prs(found),
         "outputs": outputs if isinstance(outputs, dict) and outputs else None,
         "gaps": gaps if found["status"] == STOPPED and isinstance(gaps, list) and gaps else None,
+        result.MISSING_OUTPUTS: _missing_outputs(found),
         "presented_id": _presented_id(found),
         "presentation_path": _presentation_path(found),
         "production": _gate_reaches_production(found),
     }
+
+
+def _missing_outputs(found: dict[str, Any]) -> Optional[list[str]]:
+    """判断を求めた結果が確かめを通さなかった必須の出力の名前（`metrics.missing_outputs`。#4513）。名前の並びでなければ None。"""
+    metrics = found.get("metrics")
+    got = metrics.get(result.MISSING_OUTPUTS) if isinstance(metrics, dict) else None
+    return list(got) if isinstance(got, list) and got and all(isinstance(n, str) for n in got) else None
 
 
 def _presented_id(found: dict[str, Any]) -> Optional[str]:

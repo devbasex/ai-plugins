@@ -71,15 +71,29 @@ class Checked(NamedTuple):
     missing: tuple[str, ...]
 
 
+def _gate_outputs(report: dict[str, Any], required: Sequence[str], version_number: bool) -> Checked:
+    """判断を求めた（gate の）結果ファイルの確かめ。欠けで止めずに gate のまま返し、通った値と通らなかった名前を分ける（#4513）。"""
+    passed = [n for n in required if _output_gap(report, n, version_number) is None]
+    missing = tuple(n for n in required if n not in passed)
+    if not passed:
+        return Checked(report, None, missing)
+    return Checked(report, {n: report["outputs"][n] for n in passed}, missing)
+
+
 def require_outputs(report: Any, required: Sequence[str], *, version_number: bool = False) -> Checked:
     """ok の結果ファイルの `outputs` を `required`（`--require-output`）の名前で確かめる（#3908）。
 
     欠け（無い・形の違う値）があれば欠けを `gaps` に足したコピーと None と欠けた名前、無ければ `report` と確かめた名前の値だけの
-    outputs。ok でないか `required` が空なら `report` と None。欠けの付いた ok は `outcome_of` が incomplete にする。
+    outputs。gate（判断を求めた）なら `report` のまま、確かめを通った値（無ければ None）と通らなかった名前を返す。
+    ok・gate でないか `required` が空なら `report` と None。欠けの付いた ok は `outcome_of` が incomplete にする。
     `version_number` が真なら `product_version` をバージョン番号の形でも確かめる（`ndf answer work` が決める。#4513）。
     確かめた outputs を結果ファイルの中へ戻さないのは、worker が同じキーを結果ファイルに書いて確かめを迂回できないためである。
     """
-    if not (isinstance(report, dict) and report.get("status") == OK and required):
+    if not (isinstance(report, dict) and required):
+        return Checked(report, None, ())
+    if report.get("status") == GATE:
+        return _gate_outputs(report, required, version_number)
+    if report.get("status") != OK:
         return Checked(report, None, ())
     missing = [g for name in required if (g := _output_gap(report, name, version_number))]
     if missing:
@@ -102,6 +116,7 @@ def outcome_of(
     化けるためである。gate（判断が要る）は承認ゲートの結果にし、stopped（できなかった）と欠け（gaps）の付いた ok は
     欠けを付けた incomplete にする。`report` は委譲の後に 1 回だけ読んで解いた結果ファイルで、無いか形が違えば bad_report。
     ok の結果には `outputs`（`require_outputs` が確かめた値）だけを載せる（結果ファイルの確かめていない値は渡さない）。
+    gate の結果にも確かめを通った `outputs` を載せる（通らなかった名前は `checked_outcome` が `metrics` に載せる。#4513）。
     起動の回数は `metrics` の `attempts`（`ndf worker run` が結果へ載せる値）から読む。
     """
     status = report.get("status") if isinstance(report, dict) else None
@@ -116,6 +131,13 @@ def outcome_of(
         return result.result(TOOL, OK, summary, items, metrics, outputs=outputs)
     if status == GATE:
         routes = given if isinstance(given := report.get("routes"), dict) and given else {"retry": None, "cancel": None}
-        return result.result(TOOL, GATE, f"作業 {kind} の worker が判断を求めた: {said}", items, metrics, routes=routes)
+        return result.result(TOOL, GATE, f"作業 {kind} の worker が判断を求めた: {said}", items, metrics, routes=routes, outputs=outputs)
     gaps = gaps or [{"kind": "work", "name": kind, "reason": said}]
     return result.stopped(TOOL, "incomplete", f"作業 {kind} の worker が作業を残した: {said}", items=items, metrics=metrics, gaps=gaps)
+
+
+def checked_outcome(kind: str, result_file: Path, checked: Checked, items: list[dict[str, Any]], metrics: dict[str, Any]) -> dict[str, Any]:
+    """`require_outputs` の確かめの結果から `outcome_of` を組む。gate なら通らなかった名前を `metrics.missing_outputs` に載せる（#4513）。"""
+    gate = isinstance(checked.report, dict) and checked.report.get("status") == GATE
+    held = {**metrics, result.MISSING_OUTPUTS: list(checked.missing)} if gate and checked.missing else metrics
+    return outcome_of(kind, result_file, checked.report, items, held, outputs=checked.outputs)

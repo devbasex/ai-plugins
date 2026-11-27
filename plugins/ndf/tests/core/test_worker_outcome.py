@@ -15,13 +15,12 @@ from ndf.core import worker_outcome
 OUTPUTS = {"worktree": "/r/.worktrees/b", "branch": "b"}
 
 
-@pytest.mark.parametrize("status", ["gate", "stopped"])
-def test_outputs_of_a_report_that_is_not_ok_are_not_handed_on(tmp_path, status):
-    # 判断を求めた・できなかった作業の outputs は、必須の名前がそろっていても後の工程へ渡さない
-    report = {"status": status, "summary": "途中", "outputs": OUTPUTS}
+def test_outputs_of_a_stopped_report_are_not_handed_on(tmp_path):
+    # できなかった作業の outputs は、必須の名前がそろっていても後の工程へ渡さない
+    report = {"status": "stopped", "summary": "途中", "outputs": OUTPUTS}
     checked, outputs, _ = worker_outcome.require_outputs(report, list(OUTPUTS))
     got = worker_outcome.outcome_of("worktree", tmp_path / "r.json", checked, [], {"attempts": 1}, outputs=outputs)
-    assert outputs is None and "outputs" not in got and got["status"] == status and result.errors(got) == []
+    assert outputs is None and "outputs" not in got and got["status"] == "stopped" and result.errors(got) == []
 
 
 def test_a_report_without_outputs_and_no_required_names_stays_ok(tmp_path):
@@ -116,3 +115,34 @@ def test_a_delivery_that_does_not_fit_the_context_is_a_gap():
     report = {"status": "ok", "outputs": {"delivery": {"kind": "manual"}, "product_version": "1.0.0"}}
     checked = worker_outcome.require_outputs(report, RELEASE)
     assert checked.outputs is None and checked.missing == ("delivery",)
+
+
+# --- #4513 の U3: 判断を求めた結果は、確かめを通った値を渡し、通らなかった名前を metrics.missing_outputs に載せる ---------------
+
+
+def _gate(outputs):
+    return {"status": "gate", "summary": "判断を求めた", "outputs": outputs}
+
+
+def test_a_gate_report_with_every_value_hands_them_on_without_missing_names(tmp_path):
+    checked = worker_outcome.require_outputs(_gate({"delivery": DELIVERY, "product_version": "main abc1234"}), RELEASE)
+    assert checked.report["status"] == "gate" and checked.missing == ()
+    got = worker_outcome.checked_outcome("release", tmp_path / "r.json", checked, [], {"attempts": 1})
+    assert got["status"] == "gate" and got["outputs"] == checked.outputs and "missing_outputs" not in got["metrics"]
+    assert result.errors(got) == []
+
+
+@pytest.mark.parametrize(
+    ("outputs", "version_number", "kept", "missing"),
+    [
+        ({"delivery": DELIVERY}, False, {"delivery": DELIVERY}, ("product_version",)),
+        ({"delivery": DELIVERY, "product_version": "ndf v11.0.0"}, True, {"delivery": DELIVERY}, ("product_version",)),
+        ({"delivery": {"kind": "manual"}, "product_version": "1.2.3"}, True, {"product_version": "1.2.3"}, ("delivery",)),
+        (None, False, None, ("delivery", "product_version")),
+    ],
+)
+def test_a_gate_report_stays_gate_and_names_the_values_that_did_not_pass(tmp_path, outputs, version_number, kept, missing):
+    checked = worker_outcome.require_outputs(_gate(outputs), RELEASE, version_number=version_number)
+    assert "gaps" not in checked.report and checked.outputs == kept and checked.missing == missing
+    got = worker_outcome.checked_outcome("release", tmp_path / "r.json", checked, [], {"attempts": 1})
+    assert got["status"] == "gate" and got["metrics"]["missing_outputs"] == list(missing) and result.errors(got) == []

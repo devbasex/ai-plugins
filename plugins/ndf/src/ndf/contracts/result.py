@@ -23,6 +23,8 @@ from ndf.contracts import causes, exit_codes, facts, internal, text_view
 from ndf.contracts.exit_codes import GATE, OK, STATUSES, STOPPED
 
 SCHEMA = contracts.schema_path("result")
+# 判断を求めた結果の metrics で、確かめを通らなかった必須の出力の名前を載せるキー（worker・プラン・工程の進行が読み書きする。#4513）
+MISSING_OUTPUTS = "missing_outputs"
 
 
 # 任意の項目のうち配列のもの（置くときは写しの list にする）

@@ -794,13 +794,30 @@ def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -
     return argv + (["--answer", answer, "--by", PLAN_ANSWER_BY] if answer else [])
 
 
+def _waited_missing(done: Optional[Mapping[str, Any]]) -> list[str]:
+    """承認ゲートで止まった回の結果の `metrics.missing_outputs`（判断を求めたステップ自身の欠け。#4513）。無ければ空。"""
+    metrics = done.get("metrics") if done is not None else None
+    got = metrics.get(result.MISSING_OUTPUTS) if isinstance(metrics, dict) else None
+    return [str(n) for n in got] if isinstance(got, list) else []
+
+
 def _no_route(run: StageRun, work_dir: Path, answer: Optional[str]) -> Optional[StageResult]:
-    """承認ゲートで終わった回への回答に続きが無いときの結果。承認ならプランは終わり、ほかは承認されなかった。続きがあれば None。"""
+    """承認ゲートで終わった回への回答に続きが無いときの結果。承認ならプランは終わり、ほかは承認されなかった。続きがあれば None。
+
+    承認の回答では、続きがあるかを見る前に、判断を求めたステップ自身の欠け（`metrics.missing_outputs`）を見て、あれば続けずに
+    bad_report で止める。続けた後のステップや先のステップが同じキーを返すと、欠けが合成した出力で隠れるためである（#4513）。
+    """
     routes = stored_gate_routes(work_dir) if answer else None
-    if routes is None or _from_of(routes[answer] if answer in routes else None) is not None:
+    if routes is None:
+        return None
+    done = _previous(work_dir)[1] if answer == APPROVED else None
+    missing = _waited_missing(done)
+    if missing:
+        detail = f"プラン {run.name} で判断を求めたステップが必須の出力を返さないまま承認された（足りない出力: {', '.join(missing)}）"
+        return StageResult(result.stopped(PLAN, "bad_report", detail), {})
+    if _from_of(routes[answer] if answer in routes else None) is not None:
         return None
     if answer == APPROVED:
-        _, done = _previous(work_dir)
         assert done is not None
         outputs = done["outputs"] if isinstance(done.get("outputs"), dict) else {}
         return finished(run, result.result(PLAN, result.OK, f"プラン {run.name} の最後の承認ゲートが承認された", outputs=outputs))

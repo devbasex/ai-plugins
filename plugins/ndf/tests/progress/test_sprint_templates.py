@@ -242,7 +242,7 @@ def _worktree_plan(repo: Path, plan_path: Path, report: dict, monkeypatch) -> di
     def perform(act: transition_decide.RunStep) -> transition_decide.Outcome:
         out = steps.outcome_of(inv.plan.step(act.step), result.code_for(said), result.dumps_line(said))
         if out["outputs"]:
-            records._add_outputs(inv.state_dir, out["outputs"])
+            records._add_outputs(inv.state_dir, act.step, out["status"], out["outputs"])
         records._keep_step_gaps(inv.state_dir, act.step, out["gaps"])
         return transition_decide.Outcome(out["status"], out["kind"], out["retry_after"])
 

@@ -70,7 +70,7 @@ from ndf.contracts.exit_codes import OK
 from ndf.core import durable_locks, worker_append
 from ndf.core.plan import model, runner
 from ndf.core.plan.records import PROGRESS_FILE
-from ndf.core.worker_outcome import outcome_of, require_outputs
+from ndf.core.worker_outcome import checked_outcome, require_outputs
 
 log = logging.getLogger(__name__)
 
@@ -719,7 +719,7 @@ def _cmd_run(a: argparse.Namespace) -> int:
         out = result.stopped(TOOL, done.cause, done.detail, items=items, metrics=metrics)
     else:
         checked = require_outputs(report, a.require_output, version_number=a.require_version_number)
-        out = outcome_of(handoff.kind, handoff.result_file, checked.report, items, metrics, outputs=checked.outputs)
+        out = checked_outcome(handoff.kind, handoff.result_file, checked, items, metrics)
     if done.notice is not None:
         out.setdefault("warnings", []).append(done.notice)
     return result.emit(out)
@@ -917,8 +917,7 @@ def _add_run(sub: Any) -> None:
     rn.add_argument("--result-dir-id")
     # 結果ファイルの outputs に必ず入れる名前（`ndf answer work` が作業の定義の outputs から渡す。#3908）
     rn.add_argument("--require-output", action="append", default=[])
-    # product_version をバージョン番号の形でも確かめる（バージョン番号を持つリポジトリ。`ndf answer work` が決める。#4513）
-    rn.add_argument("--require-version-number", action="store_true")
+    rn.add_argument("--require-version-number", action="store_true")  # product_version の形（`ndf answer work` が決める。#4513）
     rn.set_defaults(fn=_cmd_run)
 
 
