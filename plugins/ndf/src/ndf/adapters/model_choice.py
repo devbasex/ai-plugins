@@ -43,21 +43,11 @@ from typing import Any, Mapping, Optional
 from filelock import FileLock, Timeout
 
 from ndf import contracts, identity
-from ndf.adapters import launch_records, launch_settings, launch_store
-from ndf.adapters.launch_store import LEDGER, LEDGER_LOCK, MONTH, PRUNED, PRUNED_LOCK, REPO, WEIGHTS, WEIGHTS_LOCK
-from ndf.adapters.launch_store import done_in as _pruned
-from ndf.adapters.launch_store import drop_months as _drop_months
-from ndf.adapters.launch_store import month as _month
-from ndf.adapters.launch_store import month_files as _month_files
-from ndf.adapters.launch_store import month_start as _month_start
-from ndf.adapters.launch_store import past as _past
-from ndf.adapters.launch_store import prune_weights as _prune_weights
-from ndf.adapters.launch_store import store_file as _store_file
-from ndf.adapters.launch_store import write_replacing as _write_replacing
+from ndf.adapters import launch_records, launch_settings
 from ndf.contracts import facts, internal, limits
 
-# 同梱の表（表 ndf-files の実験の記録の行と同じ名前）
-TABLE = LEDGER
+# 同梱の表
+TABLE = "launch-experiments"
 # 値の引数の形の列（表 runtimes）
 ARGS_COLUMN = "choice_args"
 # 引数の形の値に入れる位置（`{model}`・`{effort}`）
@@ -399,6 +389,21 @@ class Request:
 
 # --- 実験の記録 --------------------------------------------------------------------------------------
 
+# 表 ndf-files の行（保存先は使用量ログと同じ）
+LEDGER = "launch-experiments"
+LEDGER_LOCK = "launch-experiments-lock"
+WEIGHTS = "launch-weights"
+WEIGHTS_LOCK = "launch-weights-lock"
+PRUNED = "launch-pruned"
+PRUNED_LOCK = "launch-pruned-lock"
+SWEPT = "launch-swept"
+SWEPT_LOCK = "launch-swept-lock"
+# 月ごとのファイルの名前の、月の位置と、リポジトリごとのディレクトリの名前の位置
+MONTH = "<YYYY-MM>"
+REPO = "<repo>"
+# リポジトリのディレクトリの名前（repo_store）。ほかの名前のものとシンボリックリンクは掃除しない
+_REPO_DIR = re.compile(r"[0-9a-f]{16}")
+_MONTH_FORM = re.compile(r"\d{4}-\d{2}")
 # 錠の待ちの上限（contracts/limits）
 LOCK_LIMIT = "launch.experiments-lock"
 # 記録を読み書きできない原因（起動は続ける）
@@ -431,6 +436,15 @@ def _time_text(at: datetime) -> str:
 
 def _row_time(row: Mapping[str, Any]) -> datetime:
     return datetime.fromisoformat(row["at"])
+
+
+def _month(at: datetime) -> str:
+    return f"{at.astimezone(UTC):%Y-%m}"
+
+
+def _month_start(month: str, ahead: int = 0) -> datetime:
+    year, mon = divmod(int(month[:4]) * 12 + int(month[5:]) - 1 + ahead, 12)
+    return datetime(year, mon + 1, 1, tzinfo=UTC)
 
 
 def _months(first: str, last: str) -> list[str]:
@@ -466,6 +480,11 @@ def repo_store(base: Path, repo: str) -> Path:
     """
     name = hashlib.sha256(repo.encode("utf-8")).hexdigest()[:16]
     return base / Path(facts.value("ndf-files", LEDGER, "path").replace(REPO, name)).parent
+
+
+def _store_file(root: Path, file_id: str) -> Path:
+    """リポジトリのディレクトリ `root` の中のファイル。"""
+    return root / Path(facts.value("ndf-files", file_id, "path")).name
 
 
 def _month_file(root: Path, month: str) -> Path:
@@ -526,26 +545,62 @@ def append_row(row: Mapping[str, Any], root: Path) -> bool:
     return True
 
 
+def _write_replacing(path: Path, text: str) -> None:
+    """一時ファイルに書いてから置き換える。一時ファイルは作るときから所有者だけが読み書きできる（0600）。
+
+    出現率のファイルはリポジトリの絶対パスを持つので、umask で広がった権限のファイルに置き換えない。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
 def prune(now: datetime, window_days: int, root: Path) -> None:
-    """リポジトリのディレクトリ `root`（`repo_store`）の月の掃除の後に、保存先全体の片付け（`launch_store.sweep`）を呼ぶ。失敗は呼び手へ送る。
+    """リポジトリのディレクトリ `root`（`repo_store`）の月の掃除。`launch-pruned` が今月なら何もしない。失敗は呼び手へ送る。
 
     残す日数は、`window_days`（今の設定）と、`root` に残る割り付けの行の `window_days` の最大値に `kept_extra_days` を足したもの。
-    読み取りと削除は記録のロックの中で行い、読めない月があれば何も消さない。掃除の錠を待たずに取れた起動だけが掃除し、全部成功したら
-    `launch-pruned` に今月を書く。片付けの済みは `launch-swept` が別に持つので、片付けが済まなくても自分の掃除はやり直さない。
+    同じリポジトリの別の作業ディレクトリが長い期間で割り付けた行を読み落とさないよう、読み取りと削除は記録のロックの中で行う。
+    読めない月があれば何も消さない。掃除の錠を待たずに取れた起動だけが掃除し、全部成功したら今月を書く。続けて `_sweep` を呼ぶ。
     """
-    done, month = _store_file(root, PRUNED), _month(now)
-    if not _pruned(done, month):
-        root.mkdir(parents=True, exist_ok=True)
-        lock = FileLock(str(_store_file(root, PRUNED_LOCK)), timeout=0)
-        if not launch_store.locked_now(lock):
-            return  # ほかの起動が掃除と片付けをしている。失敗すれば次の起動がやり直す
-        try:  # 掃除の中のロックの待ちの超過は錠の取り合いでないので、呼び手へ送る
+    done = _store_file(root, PRUNED)
+    month = _month(now)
+    if _pruned(done, month):
+        return
+    lock = _store_file(root, PRUNED_LOCK)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with FileLock(str(lock), timeout=0):
             if not _pruned(done, month):
                 _prune_now(root, now, window_days)
                 _write_replacing(done, month)
-        finally:
-            lock.release()
-    launch_store.sweep(root.parent, now, root, now - timedelta(days=WINDOW_LIMIT + _rule()["kept_extra_days"]))
+    except Timeout:  # noqa: NDF401 錠: ほかの起動が掃除している。失敗すれば次の起動がやり直す
+        return
+
+
+def _pruned(done: Path, month: str) -> bool:
+    return done.is_file() and done.read_text(encoding="utf-8").strip() == month
+
+
+def _month_files(root: Path) -> dict[str, Path]:
+    """リポジトリのディレクトリ `root` にある月のファイル（月 → パス）。"""
+    head, tail = Path(facts.value("ndf-files", LEDGER, "path")).name.split(MONTH)
+    found: dict[str, Path] = {}
+    for path in root.glob(f"{head}*{tail}"):
+        name = path.name[len(head) : len(path.name) - len(tail)]
+        if _MONTH_FORM.fullmatch(name) and not path.is_symlink():
+            found[name] = path
+    return found
+
+
+def _drop_months(root: Path, edge: datetime) -> dict[str, Path]:
+    """`root` の月のファイルのうち `edge` より前に終わった月を消し、残った月を返す。"""
+    found = _month_files(root)
+    for name in [m for m in found if _month_start(m, 1) <= edge]:
+        found.pop(name).unlink(missing_ok=True)
+    return found
 
 
 def _prune_now(root: Path, now: datetime, window_days: int) -> None:
@@ -553,8 +608,54 @@ def _prune_now(root: Path, now: datetime, window_days: int) -> None:
         rows = [r for p in _month_files(root).values() for r in launch_records.read_rows(p, 0)[0]]  # 読めない月は OSError
         days = max([window_days] + [r["window_days"] for r in rows if r["kind"] == "assign" and "window_days" in r])
         _drop_months(root, now - timedelta(days=days + _rule()["kept_extra_days"]))
+    _prune_weights(root, now)
+    _sweep(root.parent, now)
+
+
+def _sweep(base: Path, now: datetime) -> None:
+    """使われなくなったリポジトリの記録を残さないよう、保存先 `base` の全リポジトリから、どの設定でも使わない古さ（`WINDOW_LIMIT` ＋
+    `kept_extra_days` 日）の月と期限を過ぎた出現率の項目を、月に 1 回（`launch-swept`）消す。そうした月はもう追記されない。
+    ディレクトリとロックのファイルは消さない（同じパスに別のロックができると排他が分かれる）。"""
+    done, month = _store_file(base, SWEPT), _month(now)
+    if _pruned(done, month):
+        return
+    lock = FileLock(str(_store_file(base, SWEPT_LOCK)), timeout=0)
+    try:
+        lock.acquire()
+    except Timeout:
+        log.info("ほかの起動が、使われなくなったリポジトリの実験の記録を片付けている")
+        return
+    try:
+        if _pruned(done, month):
+            return
+        edge = now - timedelta(days=WINDOW_LIMIT + _rule()["kept_extra_days"])
+        with os.scandir(base) as found:
+            dirs = [Path(e.path) for e in found if _REPO_DIR.fullmatch(e.name) and e.is_dir(follow_symlinks=False)]
+        for other in dirs:
+            _drop_months(other, edge)
+            _prune_weights(other, now)
+        _write_replacing(done, month)
+    finally:
+        lock.release()
+
+
+def _past(entry: Mapping[str, Any], now: datetime) -> bool:
+    return _row_time(entry) + timedelta(days=entry["allocation"]["window_days"]) < now
+
+
+def _prune_weights(root: Path, now: datetime) -> None:
+    """出現率のファイルの、計算した日時から項目の `window_days` を過ぎた項目を、ロックの中で読み直してから消す。"""
+    path = _store_file(root, WEIGHTS)
+    if not path.is_file():
+        return
     with _lock(_store_file(root, WEIGHTS_LOCK)):
-        _prune_weights(root, now)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            kept = [e for e in data["entries"] if not _past(e, now)]
+        except (ValueError, KeyError, TypeError):  # noqa: NDF401 ファイル: 壊れた出現率のファイルは出現率の計算が作り直す
+            return
+        if len(kept) != len(data["entries"]):
+            _write_replacing(path, json.dumps({**data, "entries": kept}, ensure_ascii=False))
 
 
 # --- 割り付け ----------------------------------------------------------------------------------------
