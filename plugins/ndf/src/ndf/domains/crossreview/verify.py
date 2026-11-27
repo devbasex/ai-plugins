@@ -2,7 +2,7 @@
 
 判定役は、修正担当・相手役とは別の、読むだけの claude の起動である（`participants.read_only_launch`）。読める場所は
 レビューする worktree と、この実行の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV の写し）だけである。
-指摘の文はプロセスの引数に載せず一覧のファイルで渡す。一覧は、実行者だけが開ける資料のディレクトリに置く。判定役の出力は
+指摘の文はプロセスの引数に載せず、秘密（`run_log.redact`）を伏せた一覧のファイルで渡す。一覧は、実行者だけが開ける資料のディレクトリに置く。判定役の出力は
 起動の間だけの一時ディレクトリ（`tempfile.TemporaryDirectory`。起動の関数の中で閉じる）に書かせ、起動の後で、状態の保存先に
 起動ごとに違う名前の実行者だけが読めるファイルとして新規作成する（排他作成。前からあるファイルは置き換えない）。書けなければ過程に
 1 行残す。保存先の記録の片付けと、強制終了などで残った一時ディレクトリの回収は持たない。どの指摘を渡すかと回答の読み方は
@@ -27,7 +27,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
-from ndf.adapters import agents
+from ndf.adapters import agents, run_log
 from ndf.core.converge import participants
 from ndf.domains.crossreview import criteria_decide, verify_decide
 from ndf.domains.crossreview.fixer import Launcher
@@ -107,8 +107,10 @@ def ask(
     差分のファイルで、どれも資料のディレクトリにある。"""
     count = len(rows)
     used = tuple(dict.fromkeys(diff for row in rows for diff in diffs[str(row["id"])]))
+    # 相手役が引用した認証情報は、外部のランタイム（判定役）へ渡す前に伏せる（差分のパスは変えないので、足す前に伏せる）
+    masked = run_log.redact([dict(row) for row in rows])
     # 差分が 1 つなら、行ごとに繰り返し書かない
-    shown = rows if len(used) == 1 else [{**row, "diffs": [str(d) for d in diffs[str(row["id"])]]} for row in rows]
+    shown = masked if len(used) == 1 else [{**row, "diffs": [str(d) for d in diffs[str(row["id"])]]} for row in masked]
     into = used[0].parent
     listed = into / f"round{round_no}-verify-findings.jsonl"
     stem = run.round_stem(round_no, "-verify")

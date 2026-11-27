@@ -298,7 +298,7 @@ plugins/ndf/
 - `ask`
   - 事前条件: `rows` は空でない。`diffs` は指摘の番号ごとに、その指摘を確かめる差分のファイル（1 つか 2 つ）を持ち、呼び手（`_confirm_heavy`）が決める。どのファイルも `run.input_dir`（この実行の資料のディレクトリ）にある
   - 事後条件: 例外で駆動を止めない。起動し直さない
-  - 指示の組み立て: `ask` は次の順で、指摘の一覧のファイル（資料のディレクトリの `round<n>-verify-findings.jsonl`。中身は `verify_decide.listing` で組む。`diffs` の差分が合わせて 2 つ以上なら、各行にキー `diffs` でその指摘の差分のパスを足す）を書き、`verify_decide.instruction` の `criteria` に渡す行を作る。`rows` は `_confirm_heavy` が `verify_decide.select` から受け取った指摘で、`run.documents` は PR の差分に Markdown のファイルがあるかである。この手順のために、`VerifyRun` は `run.cfg`・`run.snapshot`・`run.documents` を持つ
+  - 指示の組み立て: `ask` は次の順で、指摘の一覧のファイル（資料のディレクトリの `round<n>-verify-findings.jsonl`。中身は、指摘の秘密を `run_log.redact` で伏せてから `verify_decide.listing` で組む。`diffs` の差分が合わせて 2 つ以上なら、各行にキー `diffs` でその指摘の差分のパスを足す）を書き、`verify_decide.instruction` の `criteria` に渡す行を作る。`rows` は `_confirm_heavy` が `verify_decide.select` から受け取った指摘で、`run.documents` は PR の差分に Markdown のファイルがあるかである。この手順のために、`VerifyRun` は `run.cfg`・`run.snapshot`・`run.documents` を持つ
     1. 承認済みの MVV があれば（`criteria_decide.approved(run.snapshot)`）、MVV の本文（`path`）と共通原則（`principles_path`）を `run.input_dir` へ写す。元のファイルは利用者の状態の保存先にあり、判定役は読めないためである。読める場所は増やさない
     2. `criteria_decide.criteria_lines(run.cfg.settings.focus, snapshot)` を呼ぶ。`snapshot` は、承認済みの MVV があれば `run.snapshot._replace(path=<本文の写し>, principles_path=<共通原則の写し>)`、無ければ `run.snapshot` である
     3. 2 の戻り値の後に `criteria_decide.document_line(run.documents, rows)` の戻り値を加え、`instruction` に渡す

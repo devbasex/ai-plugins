@@ -340,6 +340,16 @@ def test_issue_4363_ask_lists_the_diffs_of_each_finding_when_they_differ(tmp_pat
     assert [json.loads(line)["diffs"] for line in listed.splitlines()] == [[str(diff)], [str(diff), str(full)]]
 
 
+def test_issue_4363_ask_masks_the_credentials_quoted_in_the_listed_findings(tmp_path: Path) -> None:
+    """相手役が指摘に引用した認証情報は、判定役が読む一覧へ書く前に伏せる。"""
+    diff, token, password = _diff(tmp_path), "ghp_" + "A" * 24, "pass" + "word123"
+    row = _row(text=f"{token} をログに出す", impact=f"https://user:{password}@example.com が読まれる")
+    verify.ask(_AskRun(tmp_path), 1, [row], {"r1-1": [diff]}, _launcher([], []))
+    listed = (diff.parent / "round1-verify-findings.jsonl").read_text(encoding="utf-8")
+    assert token not in listed and password not in listed
+    assert "をログに出す" in listed and "@example.com が読まれる" in listed
+
+
 @pytest.mark.parametrize("how", ["failed", "denied", "no-json", "empty"])
 def test_issue_4363_ask_failure_gives_no_answer_and_one_warning(tmp_path: Path, how: str) -> None:
     """起動の失敗・差分の読み取りの拒否・読めない回答・空の回答は、回答なしと注意 1 件にし、起動し直さない。"""
