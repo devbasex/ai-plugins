@@ -239,6 +239,48 @@ def test_a_question_is_not_made_for_a_candidate_that_is_gone(tmp_path):
     assert [r["request_id"] for r in la.records.whole_rows(la.state_file(la.QUESTIONS))] == ["q1"]
 
 
+def _denied_and_set_aside(target: Path, request_id: str = "q1") -> Path:
+    candidate = la.new_candidate("/r", target)
+    _asked(target, request_id, candidate=candidate, label=la.DENY_LABEL)
+    la.new_candidate("/r", target)
+    assert _aside(candidate).exists()
+    return candidate
+
+
+def test_a_set_aside_candidate_with_a_users_file_beside_it_is_put_back(tmp_path):
+    """掃除が消すのは NDF が作ったファイルだけ。候補の隣に利用者のファイルがあれば、候補ごと元の名前へ戻す。"""
+    target = _worktree(tmp_path)
+    candidate = _denied_and_set_aside(target)
+    (_aside(candidate).parent / "mine.json").write_bytes(b"{}\n")
+    la.new_candidate("/r", target)
+    assert candidate.exists() and (candidate.parent / "mine.json").read_bytes() == b"{}\n"
+
+
+def test_a_dangling_symlink_beside_a_candidate_does_not_stop_the_sweep(tmp_path):
+    """状態を読めない項目のある候補は元の名前へ戻し、ほかの候補の片付けと候補の作成は続ける。"""
+    target = _worktree(tmp_path)
+    linked, plain = la.new_candidate("/r", target), la.new_candidate("/r", target)
+    _asked(target, candidate=linked, label=la.DENY_LABEL)
+    _asked(target, "q2", candidate=plain, label=la.DENY_LABEL)
+    la.new_candidate("/r", target)
+    (_aside(linked).parent / "link").symlink_to(tmp_path / "gone")
+    assert la.new_candidate("/r", target).exists()
+    assert linked.exists() and (linked.parent / "link").is_symlink()
+    assert not plain.exists() and not _aside(plain).parent.exists()
+
+
+def test_without_proc_a_cleanup_target_stays_at_its_path_and_is_listed(tmp_path, monkeypatch):
+    """消してよいかを確かめられない環境では退避せず、何度 draft を打っても元のパスに残り、理由と共に一覧に出る。"""
+    monkeypatch.setattr(la, "_settleable", lambda: False)
+    target = _worktree(tmp_path)
+    candidate = la.new_candidate("/r", target)
+    _asked(target, candidate=candidate, label=la.DENY_LABEL)
+    for _ in range(3):
+        la.new_candidate("/r", target)
+        assert candidate.exists() and not _aside(candidate).exists()
+    assert la.cleanup_targets("/r") == [{"candidate": str(candidate), "reason": "denied"}]
+
+
 def test_draft_reclaims_what_an_interrupted_draft_or_sweep_left(tmp_path):
     """候補の錠の中で見つかる作業中のディレクトリは中断の残り。作成途中は消し、消す途中で直されていた候補は元へ戻す。"""
     target = _worktree(tmp_path)

@@ -299,13 +299,20 @@ def _untouched(made: Path, kept: Optional[str] = None) -> bool:
     return now is None or now in (read_launch_record(made / SOURCE_NAME).get("written"), kept)
 
 
+def _settleable() -> bool:
+    """退避した候補を消してよいかを確かめられる環境か（`/proc/<pid>/fd` がある）。無ければ候補を退避せず、元のパスに残す。"""
+    return Path("/proc/self/fd").is_dir()
+
+
 def _discard(made: Path, kept: Optional[str] = None) -> None:
     """候補の錠の中で、直していない候補を、消す前の退避（`REMOVING` の名前）へ移す。中身はその場では消さない。
 
     名前を変えた後は、元のパスへの保存はディレクトリが無いので失敗し、エディタの中の設定案は残る。名前を変える前に保存された
     中身と、変えた後も開いたままのファイルへ書かれた中身は退避の中に残り、次の掃除（`_reclaim`）が比べて元の名前へ戻す。
+    消してよいかを確かめられない環境（`_settleable` が偽）では退避しない。退避しても次の掃除で戻すだけで、`draft` のたびに
+    元のパスで開けるかどうかが変わるためである。その候補は `cleanup_targets` が理由と共に返す。
     """
-    if not _untouched(made, kept):
+    if not _settleable() or not _untouched(made, kept):
         return
     aside = made.with_name(REMOVING + made.name)
     try:
@@ -321,12 +328,11 @@ def _open_inodes(wanted: set[tuple[int, int]]) -> Optional[set[tuple[int, int]]]
 
     退避した候補をまとめて 1 回だけ走査する。走査するのは `/proc/<pid>/fd/` の項目の `stat` だけで、子のプロセスは起動しない。
     """
-    proc = Path("/proc")
-    if not (proc / "self" / "fd").is_dir():
+    if not _settleable():
         return None
     if not wanted:
         return set()
-    return {key for key in map(_fd_target, proc.glob("[0-9]*/fd/*")) if key in wanted}
+    return {key for key in map(_fd_target, Path("/proc").glob("[0-9]*/fd/*")) if key in wanted}
 
 
 def _fd_target(fd: Path) -> Optional[tuple[int, int]]:
@@ -338,12 +344,25 @@ def _fd_target(fd: Path) -> Optional[tuple[int, int]]:
     return opened.st_dev, opened.st_ino
 
 
-def _inodes(folder: Path) -> set[tuple[int, int]]:
-    """候補のディレクトリそのものと、その中のファイルの `(st_dev, st_ino)`。ディレクトリの fd からファイルを開く書き手も見分ける。"""
-    keys = set()
-    for item in (folder, *folder.iterdir()):
-        st = item.stat()
-        keys.add((st.st_dev, st.st_ino))
+# 候補のディレクトリの中で NDF が作るファイル。掃除が消すのはこれだけで、ほかの項目がある候補は消さずに元の名前へ戻す
+OWN_FILES = frozenset({CANDIDATE_NAME, SOURCE_NAME, DISCARD_NAME})
+
+
+def _own_inodes(folder: Path) -> Optional[set[tuple[int, int]]]:
+    """候補のディレクトリの中が NDF の作った普通のファイルだけなら、ディレクトリとそれらの `(st_dev, st_ino)`。
+
+    リンクをたどらずに調べる（`lstat`）。ほかの項目（利用者のファイル・シンボリックリンク・ディレクトリ）があるか、
+    調べる途中で状態を読めなければ None を返し、呼び手はその候補を消さない。ディレクトリの fd からファイルを開く書き手も見分ける。
+    """
+    try:
+        top = os.lstat(folder)
+        with os.scandir(folder) as it:
+            entries = list(it)
+        if any(e.name not in OWN_FILES or not e.is_file(follow_symlinks=False) for e in entries):
+            return None
+        keys = {(top.st_dev, top.st_ino)} | {(st.st_dev, st.st_ino) for st in (e.stat(follow_symlinks=False) for e in entries)}
+    except OSError:  # noqa: NDF401 ファイル: 状態を読めない候補は、消してよいと確かめられないので消さない（呼び手が元の名前へ戻す）
+        return None
     return keys
 
 
@@ -361,31 +380,48 @@ def _put_back(aside: Path) -> Path:
     return back
 
 
+def _remove_own(aside: Path) -> None:
+    """NDF が作ったファイルだけを消してから、空になったディレクトリを消す。ほかの項目が増えていれば、ディレクトリを消せずに `OSError`。"""
+    for name in OWN_FILES:
+        (aside / name).unlink(missing_ok=True)
+    aside.rmdir()
+
+
 def _reclaim(home: Path) -> set[str]:
     """候補の錠の中で、作業中のディレクトリを片付け、元の名前へ戻した候補の名前を返す。
 
-    作成途中は中断の残りなので消す。前の掃除が退避した候補は、消してよいと保証できるものだけを消し、ほかは元の名前へ戻す。
+    作成途中は中断の残りなので消す。前の掃除が退避した候補は、消してよいと確かめられたものだけを消し、ほかは元の名前へ戻す。
     戻した候補は、呼び手がこの掃除では退避し直さない（利用者が元のパスへ保存できるようにし、判定は次の掃除でやり直す）。
 
-    消す前に、退避した候補を誰も知らない名前（`SETTLING` と乱数）へ移してから、開いたままのプロセスを `/proc` で 1 回だけ調べ、
-    その後に中身を比べる。移した後は、どのパスからも新しく開けない。そのため、調べた時点で開いているプロセスが無ければ、
-    比べた後に書き込む者はいない。開いたままのプロセスがある候補と、`/proc` が無く確かめられない環境の候補は消さない。
-    消すのは、作った時の中身（NDF が作った写し）か、反映した中身のままの候補だけである。
+    消す前に、退避した候補を乱数を含む名前（`SETTLING`）へ移してから、開いたままのプロセスを `/proc` で 1 回だけ調べ、
+    その後に中身を比べる。名前を変えた後は、退避前のパスでは候補を開けない。開いたままのプロセスがある候補、`/proc` が無く
+    確かめられない環境の候補、NDF が作ったファイルのほかに項目がある候補、状態を読めない候補は消さない。消すのは、作った時の
+    中身（NDF が作った写し）か反映した中身のままの候補の、NDF が作ったファイルだけである。1 つの候補で失敗しても、ほかの候補の
+    片付けと呼び手の操作は続ける。
     """
     for left in home.glob(DRAFTING + "*"):
         shutil.rmtree(left, ignore_errors=True)
     settling = [_isolate(left) for left in sorted([*home.glob(REMOVING + "*"), *home.glob(SETTLING + "*")])]
     if not settling:
         return set()
-    keys = {aside: _inodes(aside) for aside in settling}
-    held = _open_inodes(set().union(*keys.values()))
+    keys = {aside: _own_inodes(aside) for aside in settling}
+    held = _open_inodes(set().union(*(k for k in keys.values() if k is not None)))
     restored = set()
     for aside in settling:
-        if held is not None and not keys[aside] & held and _untouched(aside, read_launch_record(aside / DISCARD_NAME).get("kept")):
-            shutil.rmtree(aside, ignore_errors=True)
-        else:
+        own = keys[aside]
+        removable = held is not None and own is not None and not own & held
+        if not (removable and _untouched(aside, read_launch_record(aside / DISCARD_NAME).get("kept")) and _removed(aside)):
             restored.add(_put_back(aside).name)
     return restored
+
+
+def _removed(aside: Path) -> bool:
+    """`_remove_own` で消せたか。消す途中で項目が増えたなどで消せなければ偽を返し、呼び手が残りを元の名前へ戻す。"""
+    try:
+        _remove_own(aside)
+    except OSError:  # noqa: NDF401 ファイル: 消せなかった候補は、残った中身ごと元の名前へ戻す（呼び手が戻す）
+        return False
+    return True
 
 
 def _isolate(aside: Path) -> Path:
@@ -406,27 +442,49 @@ def _restore(candidate: Path) -> None:
             return
 
 
-def _sweep(home: Path, restored: set[str]) -> None:
-    """候補の錠の中で、反映先の worktree が無い候補と、最新のリクエストに「承認しない」と回答した候補を退避する（直したものは残す）。
+def _sweep_reasons(home: Path) -> dict[Path, str]:
+    """反映先の worktree が無い候補（`worktree_gone`）と、最新のリクエストに「承認しない」と回答した候補（`denied`）と、その理由。
 
     「承認しない」の判定は、候補ごとの最新のリクエストで行う。否認の後に同じ候補で作り直したリクエストが回答待ちか承認済みなら、
-    その候補は消さない。どちらの場合も、片付けるのは作った時の中身のままの候補だけである。「承認しない」は反映を断る回答で、
-    利用者が書いた設定案を消してよいという回答ではないので、リクエストの前に直した候補も残す。
-    リクエストは同じ錠の中で作るので（`put_question`）、ここで読んだリクエストの一覧は退避を決めるまで変わらない。
-    同じ錠の中の `_reclaim` が元の名前へ戻した候補（`restored`）は、この掃除では退避しない。
+    その候補は入れない。直したかどうかはここでは見ない（片付ける側が `_untouched` で見る）。
     """
     latest: dict[Any, dict[str, Any]] = {}
     for row in records.whole_rows(state_file(QUESTIONS)):
         if row.get("candidate") is not None:
             latest[row.get("candidate")] = row
     labels = _last_labels()
+    reasons = {}
     for made in _candidates(home):
-        if made.name in restored:
-            continue
         req = latest.get(str(made / CANDIDATE_NAME))
-        denied = req is not None and _judged(labels.get(req.get("request_id")), req)[0] == "deny"
-        if denied or _worktree_gone(read_launch_record(made / SOURCE_NAME).get("target")):
+        if req is not None and _judged(labels.get(req.get("request_id")), req)[0] == "deny":
+            reasons[made] = "denied"
+        elif _worktree_gone(read_launch_record(made / SOURCE_NAME).get("target")):
+            reasons[made] = "worktree_gone"
+    return reasons
+
+
+def _sweep(home: Path, restored: set[str]) -> None:
+    """候補の錠の中で、`_sweep_reasons` の候補のうち、作った時の中身のままのものを退避する（直したものは残す）。
+
+    「承認しない」は反映を断る回答で、利用者が書いた設定案を消してよいという回答ではないので、リクエストの前に直した候補も残す。
+    リクエストは同じ錠の中で作るので（`put_question`）、ここで読んだリクエストの一覧は退避を決めるまで変わらない。
+    同じ錠の中の `_reclaim` が元の名前へ戻した候補（`restored`）は、この掃除では退避しない。
+    """
+    for made in _sweep_reasons(home):
+        if made.name not in restored:
             _discard(made)
+
+
+def cleanup_targets(repo: str) -> list[dict[str, str]]:
+    """片付けの条件に当たるが元のパスに残っている、作った時の中身のままの候補と、その理由（`denied`・`worktree_gone`）。
+
+    `draft` と `show` は、これを結果に載せる。`/proc` の無い環境では掃除が候補を退避しないので、利用者はこの一覧を見て
+    不要な候補を自分で消す。何も書かない。
+    """
+    home = _store(CANDIDATES) / _short_hash(repo)
+    return [
+        {"candidate": str(made / CANDIDATE_NAME), "reason": reason} for made, reason in _sweep_reasons(home).items() if _untouched(made)
+    ]
 
 
 def _snapshot(target: Path) -> tuple[bytes, Optional[str]]:

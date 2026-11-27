@@ -147,6 +147,7 @@ src/ndf/
 | `approve_by_answer` | 同 | 新設 | `approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]` | `reflect` か自分が取ったロックの中で、依頼の答えを設計書の「人の確認」の条件の表で照らし、承認の行を足して承認者を返す。同じ依頼の承認の行があり承認済みなら、行を足さずに承認者を返す |
 | `pending_request` | 同 | 新設 | `pending_request(repo: str, target: Path) -> Optional[Mapping]` | その反映先で「承認する」と答えがあり、反映が済んでいない使える依頼を返す |
 | `new_candidate` | 同 | 新設 | `new_candidate(repo: str, target: Path) -> Path` | `launch-candidates/<キーのハッシュ>/<一意な値>/` に候補（反映先の写し）と、反映先・反映元の版の記録を作る。その前に、設計書の「候補の掃除」のとおり、前の掃除が退避した候補を消すか元の名前へ戻し、反映先の worktree が無い候補と「承認しない」の依頼の候補を退避し、反映先の worktree が無い完了の記録を消す |
+| `cleanup_targets` | 同 | 新設 | `cleanup_targets(repo: str) -> list[dict]` | 片付けの条件に当たるが元のパスに残っている、作ったときの中身のままの候補と、その理由（`denied`・`worktree_gone`）を返す。何も書かない。`/proc` の無い環境では掃除が候補を退避しないので、`_draft` と `_show` がこの一覧を結果に載せる |
 | `reflect` | 同 | 新設 | `reflect(candidate: Path, record: Callable[[], None]) -> bool` | 承認の記録のロックの中で、`recover` を呼んでから、反映先を反映元の版と候補に照らす。版が同じなら `record` を呼び、設計書の「置き換えの手順」で置き、完了の記録を書いてから使えなくなった候補を消す。候補と同じなら完了の記録を書いて真、どちらでもないか途中で保存を見つけたら偽 |
 | `recover` | 同 | 新設 | `recover(target: Path) -> Optional[Path]` | 承認の記録のロックの中で、設計書の「退避が残っている場合の判定」の表のとおりに退避と反映の途中の記録を片付ける。利用者の保存を別の名前で残した場合はそのパスを返す |
 | `reflected` | 同 | 新設 | `reflected(candidate: Path, sha256: str, request_id: Optional[str]) -> bool` | 候補が無い打ち直しで、完了の記録と反映先の中身を照らす。何も書かない |
@@ -207,8 +208,8 @@ src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `main` | `domains/settings/launch_config_cli.py` | 新設 | `main(argv: list[str]) -> int` | `draft`・`show`・`approve`・`revoke` を振り分ける |
-| `_draft` | 同 | 新設 | `_draft(a: Namespace) -> int` | `NDF_AI_CHILD` が無ければ `new_candidate` を呼び、候補のパスを結果 JSON で出す |
-| `_show` | 同 | 新設 | `_show(a: Namespace) -> int` | 承認の対象と状態を結果 JSON で出す。反映が済んでいない依頼があれば続きの `approve` のコマンドを載せる。`--question approve` は、候補を読んで承認の対象・ハッシュ・問いの中身（`unsandboxed` があれば警告の 1 文を含む）を組み立てる関数を `put_question` へ渡し、返った問いの中身を結果に載せる。`--candidate` を付けた呼び出しでは、`put_question` を呼ぶ前に候補を読まない（読むと、退避した候補を元の名前へ戻す前に読むことになる）。答えが記録されない会話では端末で打つコマンドを返す |
+| `_draft` | 同 | 新設 | `_draft(a: Namespace) -> int` | `NDF_AI_CHILD` が無ければ `new_candidate` を呼び、候補のパスと、`cleanup_targets` が返す片付けの条件に当たる候補の一覧を結果 JSON で出す |
+| `_show` | 同 | 新設 | `_show(a: Namespace) -> int` | 承認の対象と状態を結果 JSON で出す。反映が済んでいない依頼があれば続きの `approve` のコマンドを載せる。`--question approve` は、候補を読んで承認の対象・ハッシュ・問いの中身（`unsandboxed` があれば警告の 1 文を含む）を組み立てる関数を `put_question` へ渡し、返った問いの中身を結果に載せる。`cleanup_targets` が返す片付けの条件に当たる候補の一覧も載せる。`--candidate` を付けた呼び出しでは、`put_question` を呼ぶ前に候補を読まない（読むと、退避した候補を元の名前へ戻す前に読むことになる）。答えが記録されない会話では端末で打つコマンドを返す |
 | `_approve` | 同 | 新設 | `_approve(a: Namespace) -> int` | 設計書の「人の確認」（端末での入力か、`--request` の依頼への人の答え）を満たす場合だけ記録し、`--candidate` を反映する |
 | `_confirm_terminal` | 同 | 新設 | `_confirm_terminal(target: Target) -> Optional[str]` | 端末で名前とハッシュの先頭 8 文字を受ける |
 | `_revoke` | 同 | 新設 | `_revoke(a: Namespace) -> int` | `NDF_AI_CHILD` が無ければ取り消しの行を足す |
