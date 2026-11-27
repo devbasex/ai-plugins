@@ -195,6 +195,29 @@ def test_an_effort_setting_is_read_like_codex(repo: Path, monkeypatch, execs, se
     assert execs[0][1] == ["codex", "exec", "-s", "workspace-write", "-C", str(repo), *given]
 
 
+def test_short_options_with_an_equals_separator_are_read_like_clap(repo: Path, monkeypatch, execs) -> None:
+    """codex が使う Clap は短いオプションに続く区切りの `=` を除いて値を読む。`-m=gpt-x`・`-c=model_reasoning_effort=low` も
+    明示の値として選択に渡り（下位の環境変数の壊れた値で止まらない）、その側の引数は足さない。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    monkeypatch.setenv(identity.env_name("launch-codex-model"), "a\nb")
+    monkeypatch.setenv(identity.env_name("launch-codex-effort"), "turbo")
+    given = ["-m=gpt-x", "-c=model_reasoning_effort=low"]
+    drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", *given])
+    assert execs[0][1] == ["codex", "exec", "-s", "workspace-write", "-C", str(repo), *given]
+
+
+@pytest.mark.parametrize("variable", [None, "low", "turbo"])
+def test_an_empty_effort_in_the_command_stops_at_the_codex_option(repo: Path, monkeypatch, execs, capsys, variable: str | None) -> None:
+    """明示した空の effort は、下位の環境変数の値によらず、`-c`・`--config` を指して起動前に止まる。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    if variable is not None:
+        monkeypatch.setenv(identity.env_name("launch-codex-effort"), variable)
+    command = ["codex", "exec", "{args}", "-c", 'model_reasoning_effort=""']
+    assert drc.main(["--runtime", "codex", "--", *command]) == PRECONDITION
+    err = capsys.readouterr().err
+    assert execs == [] and "-c・--config の model_reasoning_effort=" in err and identity.env_name("launch-codex-effort") not in err
+
+
 def test_a_wrong_effort_in_the_command_names_the_codex_option(repo: Path, monkeypatch, execs, capsys) -> None:
     """誤った effort の停止は、codex の委譲で使う `-c`・`--config` の model_reasoning_effort を指し、codex に無い --effort を案内しない。"""
     monkeypatch.setattr(agents, "user_namespaces", lambda: True)

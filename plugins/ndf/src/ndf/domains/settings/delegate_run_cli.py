@@ -140,7 +140,7 @@ def _given_value(runtime: str, command: Sequence[str], key: str) -> tuple[Option
     """コマンドが明示した値（`key` は `model` か `effort`。無ければ None）と、その引数を誤りの文で指す言い方。
 
     引数の名前はランタイムの表の `<key>_options`、値の形は `choice_args` の形（codex の effort は `model_reasoning_effort=<値>`）。
-    `--name 値`・`--name=値`・`-n値` を読み、形に合わない値（`-c` の別の設定など）は数えない。複数あれば CLI と同じく最後。
+    `--name 値`・`--name=値`・`-n値`・`-n=値` を読み、形に合わない値（`-c` の別の設定など）は数えない。複数あれば CLI と同じく最後。
     形が設定の `key=<値>` なら、codex と同じ規則で読む（`_setting_value`。`"low"`・`key= low` は `low`）。子へは書いたままの引数を渡す。"""
     row = facts.row(RUNTIMES, runtime)
     column = f"{key}_options"
@@ -157,12 +157,16 @@ def _given_value(runtime: str, command: Sequence[str], key: str) -> tuple[Option
         if w in names:
             value = options[i + 1] if i + 1 < len(options) else None
         elif _names(w, set(names)):
-            value = w.partition("=")[2] if w.startswith("--") else w[2:]
+            # 短い名前に続く値は、Clap と同じく区切りの `=` を 1 つ除いて読む（`-c=key=値`・`-m=値`）
+            value = w.partition("=")[2] if w.startswith("--") else w[2:].removeprefix("=")
         else:
             continue
         got = _setting_value(value, form, place) if value is not None else None
         if got is not None:
             found = got
+    if found == "":
+        # 空の値は選択では未指定と同じに扱われ、下位の環境変数が使われてしまうため、明示した引数の誤りとして止める
+        raise _fail(f"{at} に空の {key} が指定されている。値を書くか、引数を外す")
     return found, at
 
 
