@@ -47,9 +47,9 @@ RESTRICTED = ("-p", "--restricted", "--add-dir", "/x", "--permission-mode", "don
 
 
 def _claude_at(monkeypatch, found):
-    """claude の実行ファイルを `/bin/claude` に見せ、`--version` の回答を `found`（None は読めない）にする（子のプロセスを起動しない）。"""
+    """claude の実行ファイルを `/bin/claude` に見せ、`--version` の回答を `found`（None は読めない）にし、待たずに記録を再利用したことにする（子のプロセスを起動しない）。"""
     monkeypatch.setattr(cli_floor, "resolve", lambda argv0, env=None, cwd=None: "/bin/claude")
-    monkeypatch.setattr(cli_floor, "_version", lambda name, path, row, env, cwd: found)
+    monkeypatch.setattr(cli_floor, "_version_read", lambda name, path, row, env, cwd: (found, False))
 
 
 # 見つからない実行ファイル（`_claude_at` を当てず、PATH に無い）
