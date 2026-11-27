@@ -252,17 +252,6 @@ def test_the_total_limit_stops_with_fix_limit(tmp_path, monkeypatch):
     assert len(fake.seen) == 2
 
 
-def test_a_timeout_under_the_suite_limit_is_a_failure_and_at_the_total_is_fix_limit(tmp_path, monkeypatch):
-    w = make_world(tmp_path, monkeypatch)
-    commit(w.work, {"src/a.py": "x = 3\n"})
-    with pytest.raises(final_gate.GateStopped) as got:
-        _run(w, FakeExec(lambda c, t: -1 if c == "sh check.sh" else 0), max_fix=0, suite=10.0)
-    assert got.value.kind == "test_failed"
-    with pytest.raises(final_gate.GateStopped) as limit:
-        _run(w, FakeExec(lambda c, t: -1), max_fix=0, suite=None)
-    assert limit.value.kind == "fix_limit"
-
-
 def test_a_test_that_changes_tracked_files_is_a_precondition(tmp_path, monkeypatch):
     w = make_world(tmp_path, monkeypatch)
     commit(w.work, {"src/a.py": "x = 3\n"})

@@ -5,9 +5,9 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Optional
 
-import git_sandbox
 import pytest
 
 from ndf.domains.crossrefactor import final_gate, local_gate
@@ -37,16 +37,22 @@ class TimedExec:
         return local_gate.Exec(self.run, lambda: self.now, lambda began: 0.0)
 
 
+class _FixedHead:
+    """`HEAD` を固定の値で返す。時間上限の判定に Git の起動は要らない。"""
+
+    def __init__(self, tree: Path) -> None:
+        self.tree = tree
+
+    def rev_parse(self, rev: str) -> str:
+        return "c" * 40
+
+
 @pytest.fixture
 def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    git_sandbox.isolate_git(tmp_path, monkeypatch)
-    repo = tmp_path / "tree"
-    repo.mkdir()
-    git_sandbox.sh(repo, "init", "-q")
-    (repo / "a.txt").write_text("a\n", encoding="utf-8")
-    git_sandbox.sh(repo, "add", "-A")
-    git_sandbox.sh(repo, "commit", "-q", "-m", "c", identity=True)
-    return repo
+    # HEAD の取得と追跡ファイルの確認を差し替え、Git を起動しない（テストの前後で HEAD は動かず、変更も無い）
+    monkeypatch.setattr(local_gate, "git", SimpleNamespace(Git=_FixedHead))
+    monkeypatch.setattr(local_gate, "worktree", SimpleNamespace(dirty_tracked=lambda g: []))
+    return tmp_path
 
 
 def _found() -> means.Means:
