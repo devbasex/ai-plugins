@@ -380,3 +380,90 @@ def test_revoke_adds_a_row(repo, capsys):
     assert la.is_approved("/r", "a" * 64)
     assert _run(capsys, "revoke", "--sha256", "a" * 64)["status"] == "ok"
     assert not la.is_approved("/r", "a" * 64)
+
+
+# --- #2944 の r1-1: 確認の画面に experiments の変更を載せる ---------------------------------------------
+
+ARMS = {"version": 1, "experiments": {"stages": {"impl": {"arms": {"claude": [{}, {"model": "sonnet", "effort": "medium"}]}}}}}
+
+
+def test_the_question_and_the_items_show_the_model_and_effort_changes(repo, capsys):
+    _settings(repo, {"version": 1, "experiments": {"enabled": True}})
+    got, question, _ = _ask(capsys, _draft(capsys, ARMS))
+    (changes,) = [i["changes"] for i in got["items"] if i["kind"] == "launch-experiments"]
+    assert changes == [
+        {"path": "experiments/enabled", "before": True},
+        {"path": "experiments/stages/impl/arms/claude", "after": ARMS["experiments"]["stages"]["impl"]["arms"]["claude"]},
+    ]
+    # 質問の文は変わる工程と要点だけ（選択肢の全体は items に任せる）
+    text = question["questions"][0]["question"]
+    assert "experiments/stages/impl/arms/claude: 書かない（同梱の値） → 2 組の選択肢" in text and "sonnet" not in text
+
+
+def test_the_terminal_confirmation_shows_the_changes(repo, capsys, monkeypatch):
+    candidate = _draft(capsys, ARMS)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    got = _run(capsys, "show", "--candidate", str(candidate), "--question", "approve")
+    assert any(i["kind"] == "launch-experiments" for i in got["items"])
+    _typed(monkeypatch, got["metrics"]["sha256"])
+    shown: list[str] = []
+    monkeypatch.setattr(lc, "print", lambda text, **kw: shown.append(text), raising=False)
+    assert _run(capsys, "approve", "--sha256", got["metrics"]["sha256"], "--candidate", str(candidate))["status"] == "ok"
+    assert any("モデルと effort の変更 experiments/stages/impl/arms/claude" in t and "sonnet" in t for t in shown)
+
+
+def test_no_experiment_item_without_a_change(repo, capsys):
+    got, _, _ = _ask(capsys, _draft(capsys, LSP))
+    assert not any(i["kind"] == "launch-experiments" for i in got["items"])
+
+
+def test_a_secret_shaped_value_in_experiments_is_refused_without_showing_it(repo, capsys, monkeypatch):
+    """r1-6: experiments の値に秘密の形があれば、表示と質問へ載せずに拒む。"""
+    fake = "gh" + "p_" + "A" * 24  # 秘密の形の作り物の値
+    content = {"version": 1, "experiments": {"stages": {"impl": {"arms": {"claude": [{}, {"model": fake}]}}}}}
+    candidate = _draft(capsys, content)
+    code = cli.main([lc.TOOL, "show", "--candidate", str(candidate), "--question", "approve"])
+    out = capsys.readouterr().out
+    got = json.loads(out.strip().splitlines()[-1])
+    assert code != 0 and got["cause"]["kind"] == "refused" and fake not in out
+    assert not la.state_file(la.QUESTIONS).exists()
+
+
+def test_a_candidate_removing_a_secret_shaped_value_shows_the_change_with_the_value_masked(repo, capsys):
+    """r7-3: 今の設定だけにある秘密の形の値は伏せて示し、候補がそれを消す変更は拒まない。"""
+    fake = "gh" + "p_" + "A" * 24  # 秘密の形の作り物の値
+    _settings(repo, {"version": 1, "experiments": {"stages": {"impl": {"arms": {"claude": [{}, {"model": fake}]}}}}})
+    got, question, _ = _ask(capsys, _draft(capsys, ARMS))
+    (changes,) = [i["changes"] for i in got["items"] if i["kind"] == "launch-experiments"]
+    assert changes == [
+        {
+            "path": "experiments/stages/impl/arms/claude",
+            "before": lc.MASKED,
+            "after": ARMS["experiments"]["stages"]["impl"]["arms"]["claude"],
+        }
+    ]
+    assert fake not in json.dumps(got, ensure_ascii=False) and fake not in question["questions"][0]["question"]
+
+
+def test_a_secret_after_a_tab_is_found_before_serialization(repo, capsys):
+    """r7-2: タブの直後の秘密の形の値も、JSON にする前の値で見つけて拒む。"""
+    fake = "a\t" + "sk" + "-" + "A" * 40  # 秘密の形の作り物の値
+    content = {"version": 1, "experiments": {"stages": {"impl": {"arms": {"claude": [{}, {"model": fake}]}}}}}
+    candidate = _draft(capsys, content)
+    code = cli.main([lc.TOOL, "show", "--candidate", str(candidate), "--question", "approve"])
+    got = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code != 0 and got["cause"]["kind"] == "refused"
+
+
+def test_an_answer_does_not_reflect_experiments_changed_after_the_question(repo, capsys):
+    """r7-1: 質問の後に候補のモデルや effort を変えると、前の回答では反映しない。示した内容に戻せば反映する。"""
+    target = repo / ".ndf" / "launch.json"
+    candidate = _draft(capsys, ARMS)
+    _, question, approve = _ask(capsys, candidate)
+    _answer(question, la.APPROVE_LABEL.format("人"))
+    changed = json.loads(json.dumps(ARMS))
+    changed["experiments"]["stages"]["impl"]["arms"]["claude"][1]["model"] = "opus"
+    candidate.write_text(json.dumps(changed), encoding="utf-8")
+    assert _run(capsys, *approve)["cause"]["kind"] == "refused" and not target.exists()
+    candidate.write_text(json.dumps(ARMS), encoding="utf-8")
+    assert _run(capsys, *approve)["status"] == "ok" and json.loads(target.read_text()) == ARMS

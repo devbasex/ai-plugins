@@ -186,7 +186,7 @@
 | `ndf launch-config revoke` | `--sha256`（string・必須）: 取り消す承認の対象のハッシュ |
 | `ndf launch-config show` | `--candidate`（string・任意）: 候補のパス（draft が返したもの）<br>`--question`（string・任意・値 `approve`）: 承認の質問を作る |
 
-結果の `metrics`: `approved`（boolean）・`candidate`（string）・`cleanup_targets`（array of object）・`reflected`（boolean）・`request`（string）・`required`（boolean）・`sha256`（string）・`terminal`（string）。`items` の要素: `files`（array of object）・`input`（object）・`kind`（—）・`sha256`（string）・`steps`（object）・`unsandboxed`（array of string）
+結果の `metrics`: `approved`（boolean）・`candidate`（string）・`cleanup_targets`（array of object）・`reflected`（boolean）・`request`（string）・`required`（boolean）・`sha256`（string）・`terminal`（string）。`items` の要素: `changes`（array of object）・`files`（array of object）・`input`（object）・`kind`（—）・`sha256`（string）・`steps`（object）・`unsandboxed`（array of string）
 
 ## `ndf loop`
 

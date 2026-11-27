@@ -17,17 +17,20 @@ from __future__ import annotations
 import argparse
 import functools
 import getpass
+import json
 import os
 import re
 import shlex
 import sys
 import tempfile
 import uuid
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional
 
 from ndf import cli, identity
 from ndf.adapters import git, launch_approval as la, launch_candidates, launch_records, launch_settings as ls
+from ndf.adapters.secret_forms import holds_secret
 from ndf.contracts import internal, result
 
 TOOL = cli.tool_of(__name__)
@@ -43,6 +46,10 @@ WARNING = (
 )
 # 片付けてよい候補の一覧に添える文
 CLEANUP_NOTE = "metrics.cleanup_targets の候補は消してよい。消す前に、その候補を開いているエディタでの編集を終えて閉じる"
+# 比べる 2 つの設定の片方に無いキーの値
+_ABSENT = object()
+# 確認の画面で、今の設定にある秘密の形の値とキーの代わりに示す文
+MASKED = "（秘密の形の値。表示しない）"
 
 
 class _NoConsent(Exception):
@@ -124,6 +131,102 @@ def _target_lines(t: ls.Target) -> list[str]:
     return out + ([WARNING] if listing["unsandboxed"] else [])
 
 
+def experiment_changes(root: Path, cand: Optional[Path]) -> list[dict[str, Any]]:
+    """候補が今の `.ndf/launch.json` から変える `experiments` の値（モデルと effort の選択肢・抽選の切り替え・割り付けの値）。
+
+    `experiments` は承認のハッシュに入らないが、反映すると worker・Skill・判定の起動のモデルと effort が変わるので、確認の画面に
+    示す（#2944 の r1-1）。要素は `{path, before, after}` で、書いていない側は欄を省く（同梱の値を使う）。今の設定を読めなければ
+    空の設定と比べる。候補が無ければ空。候補の `experiments` の値かキーに秘密の形（`holds_secret`）があれば、値を出さずに
+    `_Refused` で拒む（反映後に秘密が残る）。今の設定だけにある秘密の形の値とキーは伏せて示す。候補がその値を消す変更を、
+    同じ拒否で止めないためである（#2944 の r7-3）。
+    """
+    if cand is None:
+        return []
+    after = ls.load(root, cand).experiments
+    if _has_secret(after):
+        raise _Refused("候補の experiments に秘密の形の値がある（値は表示しない）。秘密を書かずに候補を直してから示し直す")
+    try:
+        before = ls.load(root).experiments
+    except internal.InternalError:  # ファイル: 壊れた今の設定は候補が直す。変更は空の設定からの差として示す
+        before = {}
+    changes = _changes(before, after, "experiments")
+    return [{**c, "before": MASKED} if "before" in c and _has_secret(c["before"]) else c for c in changes]
+
+
+def experiments_sha(data: bytes) -> Optional[str]:
+    """候補のバイト列の `experiments`（書いていなければ空）のハッシュ。JSON のオブジェクトでなければ None。"""
+    try:
+        raw = json.loads(data)
+    except ValueError:  # noqa: NDF401 利用者の入力: 読めない候補は、示した内容と一致しないとして拒む
+        return None
+    return (
+        launch_records.canonical_sha(raw["experiments"] if isinstance(raw, dict) and "experiments" in raw else {})
+        if isinstance(raw, dict)
+        else None
+    )
+
+
+def asked_experiments(request_id: str) -> Optional[str]:
+    """リクエストの質問を作ったときに示した `experiments` のハッシュ（質問の記録の最後の行）。無ければ None。"""
+    key = la.CONTINUATION[1]  # リクエストの識別子の欄
+    found = [r for r in la.records.whole_rows(la.state_file(la.QUESTIONS)) if key in r and r[key] == request_id]
+    return found[-1]["experiments_sha"] if found and "experiments_sha" in found[-1] else None
+
+
+def _has_secret(value: Any) -> bool:
+    """値の中のキーと文字列のどれかが秘密の形か。1 つずつ当てる（JSON にするとエスケープで語の境が変わり、見逃すため。r7-2）。"""
+    if isinstance(value, str):
+        return holds_secret(value)
+    if isinstance(value, Mapping):
+        return any(holds_secret(str(k)) or _has_secret(v) for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(_has_secret(v) for v in value)
+    return False
+
+
+def _changes(before: Any, after: Any, at: str) -> list[dict[str, Any]]:
+    """2 つの値の違う葉。オブジェクトはキーごとに下り（片方に無いオブジェクトも下る）、配列（選択肢の並び）はまとめて比べる。"""
+    if _descends(before) and _descends(after) and (before is not _ABSENT or after is not _ABSENT):
+        keys = dict.fromkeys([*_keys(before), *_keys(after)])
+        # 秘密の形のキーは今の設定にだけある（候補は呼び手が拒む）ので、場所の文では伏せる
+        return [c for k in keys for c in _changes(_value(before, k), _value(after, k), f"{at}/{MASKED if holds_secret(k) else k}")]
+    if before == after:
+        return []
+    sides = {"before": before, "after": after}
+    return [{"path": at, **{k: v for k, v in sides.items() if v is not _ABSENT}}]
+
+
+def _descends(value: Any) -> bool:
+    return value is _ABSENT or isinstance(value, Mapping)
+
+
+def _keys(value: Any) -> list[str]:
+    return [] if value is _ABSENT else list(value)
+
+
+def _value(obj: Any, key: str) -> Any:
+    return obj[key] if obj is not _ABSENT and key in obj else _ABSENT
+
+
+def _change_lines(changes: Sequence[Mapping[str, Any]], whole: bool = False) -> list[str]:
+    """確認の画面に載せる、モデルと effort の変更の行。書いていない側は同梱の値を使う。
+
+    質問の文（`whole` が偽）は、変わる場所と要点（選択肢の組の数か、1 つの値の前後）だけを載せ、選択肢の全体は結果の
+    `items` の `launch-experiments` に任せる（一度で読み切れる量にする）。端末の確認（`whole` が真）は値の全体を載せる。
+    """
+    return [f"モデルと effort の変更 {c['path']}: {_gist(c, 'before', whole)} → {_gist(c, 'after', whole)}" for c in changes]
+
+
+def _gist(change: Mapping[str, Any], key: str, whole: bool) -> str:
+    if key not in change:
+        return "書かない（同梱の値）"
+    value = change[key]
+    if whole or not isinstance(value, (list, Mapping)):
+        return json.dumps(value, ensure_ascii=False)
+    count = f"{len(value)} 組の選択肢" if isinstance(value, list) else "値"
+    return f"{count}（全体は結果の items の launch-experiments）"
+
+
 def _spec_text(value: Any) -> str:
     return " ".join(value) if isinstance(value, list) else str(value)
 
@@ -189,6 +292,9 @@ def _show_result(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: 
         if cand is not None:
             _check_destination(cand, target)
         t = shown["t"] = ls.approval_target(ls.load(root, cand))
+        changes = shown["changes"] = experiment_changes(root, cand)
+        if cand is not None:  # 示した experiments をリクエストに残し、approve が反映する候補と照らす（r7-1）
+            asked["experiments_sha"] = experiments_sha(cand.read_bytes())
         if cand is not None:
             head = f"この作業場所の {target} を候補の内容で置き換え、以下の起動時の許可を反映してよいですか"
             effect = "この内容で起動してよい。承認を記録し、候補の内容で起動の設定を置き換える"
@@ -196,7 +302,7 @@ def _show_result(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: 
             head = f"この作業場所の {target} にある、以下の起動時の許可を承認してよいですか（設定ファイルは変えません）"
             effect = "この内容で起動してよい。承認を記録する。設定ファイルは変えない"
         # 識別子は、同じ内容の質問どうしを回答の記録で見分けるために入れる
-        text = "\n".join([head, *_target_lines(t), f"質問を見分けるリクエストの識別子: {request}"])
+        text = "\n".join([head, *_target_lines(t), *_change_lines(changes), f"質問を見分けるリクエストの識別子: {request}"])
         options = [
             {"label": la.APPROVE_LABEL.format(_approver_name(root)), "description": effect},
             {"label": la.DENY_LABEL, "description": "記録も反映もしない。起動の設定は変わらない"},
@@ -208,7 +314,7 @@ def _show_result(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: 
     made = la.put_question(asked, make_question, cand)
     t = shown["t"]
     question = {"questions": made["questions"], "metadata": {"source": SOURCE}}
-    items = [{"kind": "launch-target", **t.listing}, {"kind": "question", "input": question}]
+    items = [{"kind": "launch-target", **t.listing}, *_experiment_items(shown["changes"]), {"kind": "question", "input": question}]
     cand_arg = str(cand) if cand else None
     routes = {"approved": result.command(TOOL, *_approve_args(t.sha256, request, cand_arg)), "rejected": None}
     summary = "items の question の input をそのまま AskUserQuestion に渡し、承認なら routes.approved を打つ"
@@ -226,7 +332,7 @@ def _status_or_terminal(
     else:
         t = _candidate_target(root, cand) if cand else ls.approval_target(ls.load(root))
     metrics = {**_base_metrics(repo, t), **({"reflected": reflected} if cand else {})}
-    items = [{"kind": "launch-target", **t.listing}]
+    items = [{"kind": "launch-target", **t.listing}, *_experiment_items(experiment_changes(root, cand) if cand and not reflected else [])]
     if a.question is None:
         return result.result(TOOL, result.OK, "承認の対象と状態。" + CLEANUP_NOTE, items, metrics, **extra)
     if cand is not None:
@@ -244,18 +350,24 @@ def _status_or_terminal(
     return result.result(TOOL, result.GATE, summary, items, {**metrics, "terminal": terminal}, routes=routes, **extra)
 
 
+def _experiment_items(changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`experiments` の変更の項目（変更が無ければ置かない）。"""
+    return [{"kind": "launch-experiments", "changes": changes}] if changes else []
+
+
 def _terminal_line(prompt: str) -> str:
     """端末へ質問を出して 1 行受ける（質問は標準エラーへ出す。標準出力は結果 JSON だけ）。"""
     print(prompt, end="", file=sys.stderr, flush=True)
     return input().strip()
 
 
-def _confirm_terminal(t: ls.Target, destination: Optional[Path]) -> Optional[str]:
-    """端末で承認の対象（候補を反映するなら反映先のパスも）を示し、名前とハッシュの先頭 8 文字を受ける。端末でない・打ち間違い・中断は None。"""
+def _confirm_terminal(t: ls.Target, destination: Optional[Path], changes: Sequence[Mapping[str, Any]] = ()) -> Optional[str]:
+    """端末で承認の対象（候補を反映するなら反映先のパスとモデルと effort の変更も）を示し、名前とハッシュの先頭 8 文字を受ける。
+    端末でない・打ち間違い・中断は None。"""
     if not _terminal():
         return None
     head = [f"候補の内容で {destination} を置き換える"] if destination is not None else []
-    print("\n".join([*head, *_target_lines(t)]), file=sys.stderr)
+    print("\n".join([*head, *_target_lines(t), *_change_lines(changes, whole=True)]), file=sys.stderr)
     try:
         name, typed = _terminal_line("承認者の名前: "), _terminal_line(f"ハッシュの先頭 {PREFIX} 文字: ")
     except EOFError:  # noqa: NDF401 利用者の入力: 入力の中断は確認が無いとして呼び手が拒む
@@ -304,10 +416,18 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
         return _refused_config(str(exc))
     if t.sha256 != a.sha256:
         return _refused_config(f"示した内容（{a.sha256[:12]}…）と今の内容が違う。show で示し直して承認を取り直す")
+    if a.request is not None and cand is not None and asked_experiments(a.request) != experiments_sha(data):
+        return _refused_config(
+            "質問で示したモデルと effort の選択肢（experiments）と、反映する候補の内容が違う。show で示し直して承認を取り直す"
+        )
     needed = _widens(t) and not la.is_approved(repo, t.sha256)
     # 承認の行を足す条件（起動の許可）と、反映を許す条件（今回の書き換えへの同意）は別に判定する。書き換えは毎回人に確かめる
     asks = needed or cand is not None
-    approver = _confirm_terminal(t, target if cand else None) if asks and a.request is None else None
+    try:
+        shown = (target, experiment_changes(root, cand)) if cand else (None, [])
+    except _Refused as exc:
+        return _refused_config(str(exc))
+    approver = _confirm_terminal(t, *shown) if asks and a.request is None else None
     if asks and a.request is None and approver is None:
         return _refused_config("人の確認が無い。Skill の質問で回答するか、利用者が端末で打って名前とハッシュの先頭 8 文字を入れる")
     record = functools.partial(_record_approval, a.request, repo, t, target, cand, approver)

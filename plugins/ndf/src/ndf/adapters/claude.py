@@ -68,6 +68,9 @@ MODEL_TOKEN_FIELDS = ("inputTokens", "outputTokens", "cacheReadInputTokens", "ca
 # U11a の実機の確かめ（PR #4086。Claude Code 2.1.330）で json・stream・min-json・min-stream の 4 形はどれも、標準入力を読み終えるか
 # 3 秒待ち切るまで helper を呼ばなかったので、置く形は無い（キーの子の claude -p は `key_gate` で起動しない）
 KEY_FORMS: frozenset[str] = frozenset()
+# モデルを理由にした拒否の結果の JSON の値（#2944。2026-11-26・27 に Claude Code 2.1.332 を無いモデル名で起動して確かめた）
+REFUSED_STATUS = 404
+REFUSED_TOKENS = (*transcript.USAGE_KEYS, "output_tokens")
 
 
 class Permission(StrEnum):
@@ -123,6 +126,7 @@ class ClaudeCall:
     行にする（結果をファイルで受け、標準出力を読まない担当だけが使う。無進捗の監視が作業中の担当を止まりと誤らない。#3945）。
     `readable` は作業ディレクトリのほかに読める場所で、`tools` の権限でだけ渡す。渡すと読める場所を限った起動になる（#3955）。
     `grant` は起動の設定から解いた指定（`LaunchGrant`）で、`full` の権限でだけ渡す。None なら指定なしと同じ（#1959）。
+    `model`・`effort` は選んだ値で、None なら引数を足さない（#2944）。
     """
 
     system: str
@@ -131,6 +135,7 @@ class ClaudeCall:
     session: Optional[Session] = None
     json_schema: Optional[dict] = None
     model: Optional[str] = None
+    effort: Optional[str] = None
     stream: bool = False
     readable: tuple[Path, ...] = ()
     grant: Optional[LaunchGrant] = None
@@ -372,6 +377,8 @@ def claude_launch(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[
         args += ["--json-schema", json.dumps(call.json_schema, ensure_ascii=False)]
     if call.model:
         args += ["--model", call.model]
+    if call.effort:
+        args += ["--effort", call.effort]
     return PluginArgs([*base, *args], notice)
 
 
@@ -436,9 +443,11 @@ def set_relay_checks(checks: Optional[RelayChecks]) -> None:
 
 
 class LaunchRecorder(Protocol):
-    """起動した子 1 つの使用量の行を書く処理（`ndf.domains.records.usage` が満たす。#1959 の決定 6）。"""
+    """起動した子 1 つの使用量の行と、割り付け ID の効果指標（#2944）を書く処理（`ndf.domains.records.usage` が満たす。#1959 の決定 6）。"""
 
     def record_cli(self, usage: Any, meta: Mapping[str, Any]) -> Any: ...
+
+    def record_outcome(self, assign_id: str, quality: Optional[float], detail: Mapping[str, Any]) -> Any: ...
 
 
 # 差し込まれた使用量ログの書き込み処理。None なら書かない（エントリポイントを通らない呼び出しとテスト）
@@ -632,9 +641,10 @@ class LaunchLog:
     行に質問と回答の本文を入れない。
     """
 
-    def __init__(self, meta: Mapping[str, Any]) -> None:
+    def __init__(self, meta: Mapping[str, Any], after: Optional[Callable[[ClaudeReply], Mapping[str, Any]]] = None) -> None:
         self.meta = dict(meta)
         self._seqs: dict[str, int] = {}
+        self.after = after  # 子が終わった後に決まる欄（#2944 の終わり方 `outcome`）を子の回答から作る処理
 
     def report(self, child: ClaudeReply) -> None:
         """起動した子 1 つの行を渡す。起動しなかった子（`launched` が偽）は渡さない。"""
@@ -648,7 +658,8 @@ class LaunchLog:
             seq = self._seqs[session] if session in self._seqs else 0
             self._seqs[session] = seq + 1
         if launch_recorder is not None:
-            launch_recorder.record_cli(child.usage, _launch_row(child, self.meta, session, seq))
+            row = _launch_row(child, self.meta, session, seq)
+            launch_recorder.record_cli(child.usage, {**row, **(self.after(child) if self.after is not None else {})})
 
 
 def _launch_row(child: ClaudeReply, meta: Mapping[str, Any], session: Optional[str], seq: int) -> dict[str, Any]:
@@ -683,10 +694,24 @@ def _payload(stdout: str) -> dict | ClaudeReply:
 
 
 def _error_reply(payload: dict, text: str, cost: float) -> ClaudeReply:
-    """誤りで終えた回答。利用上限なら打ち直しても直らない失敗（`Failure.USAGE_LIMIT`）にする。"""
+    """誤りで終えた回答。利用上限なら `Failure.USAGE_LIMIT`、モデルを理由にした拒否なら `Failure.MODEL_REFUSED` にする（打ち直しても直らない）。"""
     if _limit_hit(payload, text):
         return ClaudeReply.failed(text, f"claude の利用上限: {text[:200]}", cost, Failure.USAGE_LIMIT)
+    if model_refused(payload):
+        names = f"{identity.env_name('launch-model')}・{identity.env_name('launch-effort')}"
+        detail = f"claude がモデルか effort の指定を拒んだ: {text[:200]}。起動の設定（launch.json）の experiments か環境変数 {names} を直す"
+        return ClaudeReply.failed(text, detail, cost, Failure.MODEL_REFUSED)
     return ClaudeReply.failed(text, f"claude が誤りで終えた: {text[:200]}", cost)
+
+
+def model_refused(payload: Mapping[str, Any]) -> bool:
+    """誤りで終えた結果の JSON が、実行を始める前にモデルを理由に断ったと確かめられるか（#2944 の「起動できない組」）。
+
+    `api_error_status` が 404、4 つのトークン数がどれも欄として在って 0、`modelUsage` が空の辞書のとき真。欄の欠けは 0 とみなさない。
+    """
+    usage, models = payload.get("usage"), payload.get("modelUsage")
+    zero = isinstance(usage, Mapping) and all(k in usage and _int(usage[k]) == 0 for k in REFUSED_TOKENS)
+    return payload.get("api_error_status") == REFUSED_STATUS and zero and isinstance(models, Mapping) and not models
 
 
 def _answer_reply(payload: dict, text: str, cost: float) -> ClaudeReply:

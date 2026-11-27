@@ -32,23 +32,28 @@ src/ndf/
 
 依存の向き: 層は下から contracts・adapters・core・progress・domains の順で、下の層は上の層を読み込まない。値を選ぶ処理は全部の層から呼ぶので adapters に置き、割り付けに要る実験の記録と出現率のファイルの読み書きもそこに置く。`domains/records/experiments.py` は、adapters のこの読み書きを使って読む。adapters と core から出現率の計算（domains）を呼ぶ所は、下の層が上の層を読み込めないため、#1959 の起動記録のインターフェースに効果指標の関数を足して、差し込みで呼ぶ。
 
+Claude の起動処理・判定・worker・Skill の起動処理は、`model_choice` を直接 import しない。モジュールの依存関係の検査（`checks/children.json`）がこの import を禁止しているためである。代わりに `adapters/claude_choice.py` が、値を選ぶ処理を受け取る口（`set_launch_chooser`）と、選んだ値で起動する部品（`ChoiceRun`・`report_outcome`）を持つ。`ndf.__main__` は、`claude_choice.set_launch_chooser` を通じて選択処理（`adapters/model_chooser.py`）を登録する。使用量ログの書き込み処理（`claude.set_launch_recorder`）と同じ形である。エントリポイントを通らない呼び出しとテストは選択処理を登録しないので、値を選ばずに起動する（2026-11-27、B3 の実装で決定）。
+
 | パス | 種類 | 役割 | 依存する先 | クラスまたはモジュール | 新設（N）と変更（C） |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/adapters/model_choice.py` | 新設 | 値と出所を返す | launch_settings・launch_approval | `Choice` | N: `table`・`bundled_errors`・`stage_of`・`launch_choice`・`raised`・`base_fallback`・`candidates`・`compatibility_key`・`read_experiments`・`ledger`・`append_row`・`read_weights`・`update_weights`・`weights_entry`・`probs_fit`・`entry_fits`・`model_group`・`assigns`・`records_rule`・`utc_now`（B2 で出現率の計算が使う読み書きと時計を公開した）・`refused_until`・`unpriced_models`・`oldest_kept`（B2b） |
 | `src/ndf/adapters/experiment_rows.py` | 新設（B2b） | 実験の記録の行を読むだけの判定 | — | `Where` | N: `records_rule`・`assigns`・`candidates`・`refused_until`・`observed_models`・`observed_latest`・`unpriced_models`・`model_group`・`probs_fit`・`entry_fits`。`model_choice` が同じ名前で公開し直す。`model_choice` が行数の安全網（1,000 行）を超えるので、ファイルの読み書きと時計を使わない判定をここへ分けた |
 | `src/ndf/adapters/launch_settings.py` | 変更 | `experiments` を返す | — | `Settings` | C: `load` |
-| `src/ndf/adapters/claude.py` | 変更 | 引数と拒否の判定 | — | `ClaudeCall`・`LaunchRecorder` | C: `claude_launch`・`_error_reply`。N: `report_outcome` |
-| `src/ndf/adapters/llm.py` | 変更 | 判定の単位 | model_choice | モジュール | C: `ask` |
+| `src/ndf/adapters/claude.py` | 変更 | 引数と拒否の判定 | — | `ClaudeCall`・`LaunchRecorder`・`LaunchLog` | C: `claude_launch`・`_error_reply`。N: `model_refused` |
+| `src/ndf/adapters/claude_choice.py` | 新設 | 値を選ぶ処理の差し込みと、選んだ値で起動する部品 | claude | `LaunchChooser`・`ChoiceRun` | N: `set_launch_chooser`・`pick_values`・`report_outcome` |
+| `src/ndf/adapters/model_chooser.py` | 新設 | 差し込む値を選ぶ処理（`model_choice` の値の選択と切り替えに、実際のモデルの行を足す） | model_choice | モジュール | N: `observed` |
+| `src/ndf/__main__.py` | 変更 | 値を選ぶ処理の差し込み | claude_choice・model_chooser | モジュール | 差し込みの 1 行 |
+| `src/ndf/adapters/llm.py` | 変更 | 判定の単位 | claude_choice | モジュール | C: `ask` |
 | `src/ndf/adapters/run_log.py` | 変更 | 子の環境 | — | モジュール | C: `child_process_env`。N: `overlay_env` |
 | `src/ndf/adapters/agents.py` | 変更 | 監視の結果 | — | `AgentStatus` | C: `_start_and_watch`。N: `codex_usage` |
-| `src/ndf/core/worker.py` | 変更 | worker の起動 | model_choice | `Handoff` | C: `_add_run`・`delegate`・`_resume_until_written`・`_cmd_run` |
+| `src/ndf/core/worker.py` | 変更 | worker の起動 | claude_choice | `Handoff` | C: `_add_run`・`delegate`・`_resume_until_written`・`_cmd_run` |
 | `src/ndf/core/converge/participants.py` | 変更 | 相手役の引数 | model_choice | モジュール | C: `review_launch`・`read_only_launch`・`reading_launch`・`answer_text` |
 | `src/ndf/core/plan/transition_decide.py` | 変更 | 打ち直しの理由を数える | — | `RunStep`・`StepState` | N: `retry_reason`。C: `_run` |
 | `src/ndf/core/plan/runner.py` | 変更 | 単位の ID と効果指標 | model_choice・claude | モジュール | C: `run_step`・`final_result`。N: `_step_env`・`_after_unit` |
 | `src/ndf/core/plan/steps.py` | 変更 | 子の結果の起動の値を拾う | — | モジュール | C: `outcome_of` |
 | `src/ndf/core/plan/model.py` | 変更 | ステップの定義の読み取り | — | `Step` | C: `verifies` を読む |
 | `src/ndf/core/plan/records.py` | 変更 | 回をまたぐ記録 | — | モジュール | N: `_add_models`・`recorded_models`・`read_units`・`write_units` |
-| `src/ndf/progress/invoke.py` | 変更 | Skill の起動 | model_choice | モジュール | C: `_call_skill` |
+| `src/ndf/progress/invoke.py` | 変更 | Skill の起動 | claude_choice | モジュール | C: `_call_skill` |
 | `src/ndf/progress/gate/entry.py` | 変更 | `ndf worker run` の引数に `--mode` を足す | — | モジュール | 呼ぶ引数を足すだけ |
 | `src/ndf/domains/records/usage.py` | 変更 | 行と指標の受け口 | experiments | モジュール | N: `codex_cost`・`record_outcome`（`experiments.write_outcome` を呼ぶ） |
 | `src/ndf/domains/records/experiments.py` | 新設 | 効果指標と出現率 | model_choice・allocation_decide | `UnitValue`・`UsageIndex` | N: `write_outcome`・`unit_values`・`unit_pool`・`pick_units`・`usage_index`・`seed_of`・`refresh`・`records_since`・`refused_launches`・`rows_for_units`（B2b） |
@@ -139,7 +144,7 @@ src/ndf/
 | --- | --- | --- | --- |
 | 工程・選択肢・順位・指標・割り付けの値 | 設定値 | `contracts/domains/launch-experiments.json` | 設計書の表 |
 | 出現率を計算し直す間隔 | 設定値 | 同上の records の行の `refresh_minutes` | 60 分 |
-| 起動できない組の条件 | 定数 | 同上 | 同じリポジトリ・工程・ランタイム・互換性のキー・組で、直近 7 日に、モデルを理由にした拒否が 2 件 |
+| 起動できない組の条件 | 定数 | 同上 | 条件の本文は[割り付けの設計の「起動できない組」](./issue-2944-design-allocation.md#起動できない組)の「外す条件」と「受け入れる限界」にある |
 | 実験の記録の行 | 型 | `contracts/schemas/internal/experiment.schema.json` | `assign`・`outcome`・`launch_error`・`halted`・`observed`・`unpriced` |
 
 ### 並行と排他
@@ -192,7 +197,7 @@ src/ndf/
 | --- | --- | --- | --- | --- |
 | `claude_launch` | `adapters/claude.py` | 変更 | 変えない | `ClaudeCall.effort` があれば `--effort` を足す |
 | `_error_reply` | 同 | 変更 | 変えない | 4 つの条件（`is_error` が真、`api_error_status` が 404、4 つのトークン数が欄として在って 0、`modelUsage` が空）がそろう誤りを `Failure.MODEL_REFUSED` にする |
-| `report_outcome` | 同 | 新設 | `report_outcome(assign_id: str, quality: Optional[float], detail: Mapping) -> None` | 差し込まれた処理の `record_outcome` を呼ぶ |
+| `report_outcome` | `adapters/claude_choice.py` | 新設 | `report_outcome(assign_id: str, quality: Optional[float], detail: dict) -> None` | 差し込まれた処理の `record_outcome` を呼ぶ |
 | `child_process_env` | `adapters/run_log.py` | 変更 | `child_process_env(extra: Optional[Mapping[str, Optional[str]]] = None)` | 値が None の名前を子の環境から外す |
 | `overlay_env` | 同 | 新設 | `overlay_env(changes: Mapping[str, Optional[str]]) -> ContextManager[None]` | このプロセスの環境を一時的に上書きし、戻す |
 
@@ -223,6 +228,9 @@ src/ndf/
 | `ask` | `adapters/llm.py` | 変更 | 変えない | `request_id` を単位にして値を取得し、起動ごとに行を渡し、効果指標を書く |
 
 - 2 回目は `retry="invalid_answer"`。`MODEL_REFUSED` で `base_fallback` が値を返せば、判定の打ち直しの回数に数えずに 1 回だけ打ち直し、`request_try` を 1 増やす。期限は残りの時間
+- 切り替えの前に、単調時計で残りの期限を測り、残っていれば `before_retry` で材料が古くなっていないかを確かめ、もう一度期限を測る。どちらかで止まれば `base_fallback` を呼ばず、拒否の行も書かず、基準の組を起動しない。止まった拒否は、割り付けの候補から外す件数に数えない（[allocation の「起動できない組」の「受け入れる限界」](./issue-2944-design-allocation.md#起動できない組)）
+- 確かめを通れば、`base_fallback` が切り替えの行（`launch_error` の `switched` が真）を書いて基準の組の値を返す。記録を読み書きする間（錠の待ちを含む）も期限は進むので、書いた後にもう一度残りの期限を測る。残っていれば基準の組で起動し直し、残っていなければ起動しない
+- 回答のスキーマの検査は起動 1 回につき 1 回にし、その結果から使用量ログの `outcome` と打ち直しの判断の両方を作る
 - `outcome` は `valid`・`invalid`・`timeout`・`unknown`。`timeout` は、子プロセスを起動した後の期限切れ（`Failure.TIMEOUT`）である。効果指標は 1 回目が `valid` なら 1、`invalid` か `timeout` なら 0（2 回目で合っても、2 回目が期限切れでも 0 は変わらない）、`unknown` と起動できない場合は null
 - 値を取得する作業場所は `Path.cwd()`。stop-wait の判定（`judge_child`）は変えない
 
@@ -271,7 +279,7 @@ src/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `delegate` | 設定の誤り | `launch_choice` | 起動の前 | 呼び出し元へ返す | `stopped`・`precondition` | 起動しない |
 | `delegate` | 基準の組の拒否 | 使えないモデル | `MODEL_REFUSED` と `base_fallback` が None | 止める | `stopped`・`precondition`。理由と `.ndf/launch.json` を示す | 設定を直して再実行 |
-| `delegate` | 残りの期限が無い | 拒否に時間がかかった | 打ち直しの前 | 止める | `stopped`・`interrupted` | 再実行は基準の組 |
+| `delegate` | 残りの期限が無い | 拒否に時間がかかった | 打ち直しの前 | 止める。拒否の行も切り替えの行も書かない | `stopped`・`interrupted` | 再実行は、同じ単位の期間の中の割り付けを引き継ぎ、元の組で起動する。拒否の件数で候補から外す規則は新しく割り付けるときの抽選だけに効き、既にある割り付けには効かない（[allocation の「割り付けの流れ」](./issue-2944-design-allocation.md#割り付けの流れ)）。元の組がまた拒否されれば、判定と同じ手順で基準の組へ切り替える |
 
 ### 単体テストの観点
 
