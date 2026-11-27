@@ -231,3 +231,18 @@ def test_report_reads_the_records_and_leaves_the_rates_file_alone(repo, capsys, 
     got = last_result(capsys.readouterr().out)
     assert [i["kind"] for i in got["items"]] == ["launch_group", "arm", "arm"] and got["metrics"]["usage_rows"] == 2
     assert not (store / mc.facts.value("ndf-files", mc.WEIGHTS, "path")).exists()
+
+
+def test_a_since_before_the_kept_period_reports_what_is_left_and_says_so(repo, capsys, last_result, monkeypatch):
+    monkeypatch.setattr(mc, "utc_now", lambda: datetime(2026, 11, 30, tzinfo=UTC))
+    assert cli.main(["models", "report", "--since", "2025-01-01", "--until", "2026-11-30"]) == 0
+    got = last_result(capsys.readouterr().out)
+    assert got["status"] == "ok" and "残っている分" in got["summary"]
+    assert got["metrics"]["kept_since"] == "2026-09-01"
+
+
+def test_a_since_within_the_kept_period_adds_no_notice(repo, capsys, last_result, monkeypatch):
+    monkeypatch.setattr(mc, "utc_now", lambda: datetime(2026, 11, 30, tzinfo=UTC))
+    assert cli.main(ARGV) == 0
+    got = last_result(capsys.readouterr().out)
+    assert "残っている分" not in got["summary"] and "kept_since" not in got["metrics"]

@@ -315,7 +315,12 @@ def _report(a: argparse.Namespace) -> int:
     items = report_rows(usage_rows, rows, since, until, a.stage, allocation)
     period = f"{a.since}..{a.until}"
     summary = f"{period} の集計 {len(items)} 件" if items else f"{period}: {NO_RECORDS}"
-    metrics = {"usage_rows": len(usage_rows), "experiment_rows": len(rows), "broken_rows": len(broken)}
+    metrics: dict[str, Any] = {"usage_rows": len(usage_rows), "experiment_rows": len(rows), "broken_rows": len(broken)}
+    # 月の掃除は window_days ＋ kept_extra_days より前の記録を消す。--since がそれより前なら、残っている分だけだと添える
+    kept = model_choice.utc_now() - timedelta(days=allocation["window_days"] + model_choice.records_rule()["kept_extra_days"])
+    if since < kept:
+        metrics["kept_since"] = kept.date().isoformat()
+        summary += f"（実験の記録は保持の期間より前が消えている。{metrics['kept_since']} 以後の残っている分だけを出した）"
     return result.emit(result.result(TOOL, result.OK, summary, items=items, metrics=metrics))
 
 

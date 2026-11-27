@@ -13,7 +13,8 @@
       "properties": {
         "usage_rows": {"type": "integer", "minimum": 0, "description": "読んだ使用量ログの行の数（同じ launch_id の重なりを含む）"},
         "experiment_rows": {"type": "integer", "minimum": 0, "description": "読んだ実験の記録の行の数"},
-        "broken_rows": {"type": "integer", "minimum": 0, "description": "使用量ログのうち形が違って読めなかった行の数"}
+        "broken_rows": {"type": "integer", "minimum": 0, "description": "使用量ログのうち形が違って読めなかった行の数"},
+        "kept_since": {"type": "string", "format": "date", "description": "--since が実験の記録の保持の期間（window_days ＋ kept_extra_days）より前を指したときだけ置く。記録が残っている最初の日（UTC）で、集計はこの日以後の残っている分だけである"}
       }
     },
     "items": {
