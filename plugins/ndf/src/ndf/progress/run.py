@@ -743,7 +743,7 @@ def _step_gap_detail(step: stages.StepDef, report: Mapping[str, Any], errs: list
     ref = step.output_ref
 
     def missing() -> list[str]:
-        outputs = report.get("outputs") if isinstance(report.get("outputs"), dict) else {}
+        outputs = result.outputs_of(report)
         return [n for n in definition.required_outputs(ref) if n not in outputs] if ref else []
 
     return definition.gap_failure_detail([report], missing, f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")

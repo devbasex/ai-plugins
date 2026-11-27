@@ -52,7 +52,7 @@ def _output_gap(report: Mapping[str, Any], name: str, version_number: bool = Fal
     形は結果 JSON の `$defs/outputs` に加えて、工程の文脈の形（`contracts.internal.CONTEXT`。後の工程が読む形）でも確かめる。
     `version_number` が真なら `product_version` を `$defs/version_number`（バージョン番号の形）でも確かめる（#4513）。
     """
-    have = outputs if isinstance(outputs := report.get("outputs"), dict) else {}
+    have = result.outputs_of(report)
     if name not in have:
         return {"kind": "output", "name": name, "reason": "作業の結果ファイルの outputs に無い"}
     errs = contracts.schema_errors({name: have[name]}, OUTPUTS_SCHEMA) or contracts.schema_errors({name: have[name]}, internal.CONTEXT)

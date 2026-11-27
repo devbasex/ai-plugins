@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Optional, TextIO
 
 from ndf import contracts, identity
@@ -177,6 +177,12 @@ def newer(obj: Any) -> bool:
     if isinstance(found, bool) or not isinstance(found, (int, float)):
         return False
     return found > internal.version() and found % 1 == 0  # JSON の 2.0 はスキーマでは整数
+
+
+def outputs_of(obj: Mapping[str, Any]) -> dict[str, Any]:
+    """結果や事象の `outputs`。dict でなければ空の dict。"""
+    found = obj.get("outputs")
+    return found if isinstance(found, dict) else {}
 
 
 def received(obj: Any) -> Optional[dict[str, Any]]:
