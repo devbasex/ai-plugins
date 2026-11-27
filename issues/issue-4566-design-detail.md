@@ -126,7 +126,7 @@ docs/{glossary.md, glossary/}
 | `_default_launch` | `src/ndf/progress/refactor_values.py` | 変更 | 今のまま | 手段が必須のチェックなら `["--required", *名前]`、手元のテストなら `["--local-test"]` を渡す。無しなら None |
 | `refactor_launch` | `src/ndf/core/route/__init__.py` | 変更 | `refactor_launch(branch: str, base_ref: str, gate: Sequence[str]) -> list[str]` | 第 3 引数を、必須のチェックの名前の並びから、合否の確かめ先の引数の並びに変える |
 
-これまで `_default_launch` は `ci.required_checks` を直接読んでいた。この PR により `means.decide` だけを読み、条件の語と同じ答えになる（設計文書の不変条件 I1）。CI テストの設定があり必須のチェックが無ければ None を返す。
+これまで `_default_launch` は `ci.required_checks` を直接読んでいた。この PR により `means.decide` だけを読む。そのため、起動を組めるかどうかが、条件の語 `tests_verifiable` の値と一致する（設計文書の不変条件 I1）。CI テストの設定があり必須のチェックが無ければ None を返す。
 
 ### 単体テストの観点
 
@@ -287,8 +287,8 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 
 - どこかの階層が `.ndf`
 - 名前が、決まった名前の一覧に当たる（`fnmatch`）
-- テストのコマンドを分けた単語をパスとして正規化し、そのパスに当たる。そのパスの親のディレクトリをファイルかリンクに置き換える変更も、その親のパスに当たる。ツリーに無いパスも当たる。パスがシンボリックリンクなら、リンクとリンク先の両方が当たる
-- `/` を含まないコマンドの単語について、`search` のどれかの要素の下にある、その単語と同じ名前のパスに当たる。`search` は `PATH` の相対の要素で、空と `.` はルートを表す。`search` は `protection_at` が、テストを打つ環境の `PATH` から作る
+- テストのコマンドを分けた単語をパスとして正規化し、そのパスに当たる。そのパスの親のディレクトリをファイルかリンクに置き換える変更も、その親のパスに当たる。コマンドの語が指すパスは、ツリーにまだ無くても当たる。パスがシンボリックリンクなら、リンクとリンク先の両方が当たる
+- `/` を含まないコマンドの単語について、`search` のどれかの要素の下にある、その単語と同じ名前のパスに当たる。`search` は `PATH` の相対の要素で、空と `.` はリポジトリのルートを表す。`search` は `protection_at` が、テストを打つ環境の `PATH` から作る
 - `test.protected_files` の指定の中（`scoped.in_scope`）
 
 コマンドの語は `weight.split_commands` で分け、`=` を含む単語は、`=` より後ろの部分もパスとして照らす。正規化は `posixpath.normpath` で、ルートの外を指す結果（`..` で始まる）は捨てる。リンクはコミットのツリーの中だけでたどり、ツリーの外を指せばリンク自体だけを保護する。
