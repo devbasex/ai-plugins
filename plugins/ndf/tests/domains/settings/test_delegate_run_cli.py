@@ -170,3 +170,27 @@ def test_a_usage_error_goes_only_to_standard_error(repo: Path, execs, capsys, ar
     assert cli.main(["delegate-run", *argv]) == PRECONDITION
     out = capsys.readouterr()
     assert execs == [] and out.out == "" and out.err
+
+
+@pytest.mark.parametrize(
+    ("runtime", "out", "err", "hit"),
+    [
+        ("codex", "", "ERROR: You've hit your usage limit.\n", True),
+        ("codex", "quota exceeded は引用しただけ\n", "", False),  # codex の標準出力（調査の結果）は読まない
+        ("codex", "", "log: the word quota exceeded in the middle\n", False),
+        ("claude", '{"type":"result","api_error_status":429}\n', "", True),
+        ("claude", '{"type":"result","api_error_status":200}\n', "", False),
+    ],
+)
+def test_usage_limit_judges_with_the_monitor_conditions(tmp_path: Path, execs, capsys, runtime: str, out: str, err: str, hit: bool) -> None:
+    (tmp_path / "o").write_text(out, encoding="utf-8")
+    (tmp_path / "e").write_text(err, encoding="utf-8")
+    argv = ["--runtime", runtime, "--usage-limit", "--stdout", str(tmp_path / "o"), "--stderr", str(tmp_path / "e")]
+    code = drc.main(argv)
+    assert execs == []
+    assert (code, bool(capsys.readouterr().out)) == ((causes.exit_code("usage_limit"), True) if hit else (0, False))
+
+
+def test_claude_cannot_be_launched_through_delegate_run(repo: Path, execs) -> None:
+    assert drc.main(["--runtime", "claude", "--", "claude", "{args}"]) == PRECONDITION
+    assert execs == []

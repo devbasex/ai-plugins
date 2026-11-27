@@ -11,6 +11,11 @@ CLI のコマンドは、そのランタイムの実行ファイルと決まっ�
 CLI を起動せず、理由を標準エラーだけに書いて停止理由 `precondition` の終了コードで終える。結果 JSON は出さない
 （標準出力は CLI に渡すため。`cli.NO_RESULT_COMMANDS`）。安全装置の引数だけを返すコマンドは作らない（取得の後の取り消しを
 確かめられないため。設計書の「安全装置を外す指定」）。
+
+    ndf delegate-run --runtime <ランタイム> --usage-limit --stdout <ファイル> --stderr <ファイル>
+
+は CLI を起動せず、終わった起動の出力が利用上限を告げているかを、NDF の監視と同じ条件（`agents.launch_usage_limit`）で
+判定する。手順書の回収が、AI に正規表現を読ませずに監視と同じ結論を得るための口である。
 """
 
 from __future__ import annotations
@@ -106,14 +111,41 @@ def _workdir_args(runtime: str, cwd: Path) -> list[str]:
 
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="外部 AI への委譲を、安全装置の引数を入れて起動する")
-    p.add_argument("--runtime", required=True, choices=_delegates(), help="起動するランタイム")
+    p.add_argument(
+        "--runtime",
+        required=True,
+        choices=[r["id"] for r in facts.rows(RUNTIMES)],
+        help=f"起動するランタイム（起動は {'・'.join(_delegates())}。--usage-limit はすべて）",
+    )
     p.add_argument("--use", choices=ls.USES, default="delegate", help="用途（読むだけの委譲は review）")
+    p.add_argument(
+        "--usage-limit",
+        action="store_true",
+        help="CLI を起動せず、終わった起動の出力が利用上限を告げているかを NDF の監視と同じ条件で判定する（--stdout と --stderr を読む）",
+    )
+    p.add_argument("--stdout", type=Path, help="判定する起動の標準出力のファイル（--usage-limit だけ）")
+    p.add_argument("--stderr", type=Path, help="判定する起動の標準エラー出力のファイル（--usage-limit だけ）")
     heads = "、".join(f"`{' '.join(_prefix(r, facts.row(RUNTIMES, r)))}`" for r in _delegates())
     p.add_argument("command", nargs=argparse.REMAINDER, help=f"`--` の後に起動コマンドを指定する。{PLACE} は {heads} の直後に置く")
     return p
 
 
+def judge_usage_limit(a: argparse.Namespace) -> int:
+    """`--usage-limit`: 起動の出力が利用上限を告げていれば、判定の根拠の行を標準出力へ書き、停止理由 `usage_limit` の
+    終了コードで終える。告げていなければ何も書かず 0。条件は監視と同じ `agents.launch_usage_limit` で、回収する AI に
+    正規表現を読ませない（AI の読み方で成否が分かれないようにする）。"""
+    if a.stdout is None or a.stderr is None or a.command:
+        raise _fail("--usage-limit は --stdout と --stderr を取り、起動コマンドを取らない")
+    hit = agents.launch_usage_limit(a.runtime, a.stdout, a.stderr)
+    if hit is None:
+        return 0
+    print(hit)
+    return causes.exit_code("usage_limit")
+
+
 def _launch(a: argparse.Namespace) -> None:
+    if a.runtime not in _delegates() or a.stdout is not None or a.stderr is not None:
+        raise _fail(f"起動できるランタイムは {'・'.join(_delegates())}。--stdout と --stderr は --usage-limit だけで使う")
     command = a.command[1:] if a.command[:1] == [OPTIONS_END] else a.command
     cwd = Path.cwd()
     build_command(a.runtime, command, [])  # 使い方の誤り（安全装置の引数の競合を含む）は、承認の案内より先に示す
@@ -132,6 +164,8 @@ def _launch(a: argparse.Namespace) -> None:
 def main(argv: list[str]) -> int:
     try:
         a = _parser().parse_args(argv)
+        if a.usage_limit:
+            return judge_usage_limit(a)
         _launch(a)
     except SystemExit as exc:
         if exc.code in (0, None):

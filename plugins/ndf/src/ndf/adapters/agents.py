@@ -250,16 +250,23 @@ def _report_warnings(w: _Watch) -> None:
         diag(f"[{w.spec.agent}] 早期の警告（{kind}）: {text}", kind=kind, agent=w.spec.agent)
 
 
-def _out_usage_limit(spec: Launch) -> Optional[str]:
-    """claude の標準出力の結果の JSON に利用上限があれば、その旨の文を返す（他の CLI の標準出力は読まない）。"""
-    if spec.agent != "claude" or not CLAUDE_USAGE_LIMIT_JSON.search(tail(spec.paths.out)):
-        return None
-    return "標準出力の結果の JSON に api_error_status 429"
+def launch_usage_limit(agent: str, out: Path, err: Path) -> Optional[str]:
+    """起動の出力が利用上限を告げていれば、その行か旨の文を返す。無ければ None。
+
+    標準エラー（`err`）は上限の行（`USAGE_LIMIT_LINES`）で見る。標準出力（`out`）は claude の結果の JSON だけを見て、
+    他の CLI の標準出力は読まない（調査の結果が行頭に `quota exceeded` を引用しても利用上限にしない）。
+    監視（`_verdict`）と、手順書の回収（`ndf delegate-run --usage-limit`）が同じ条件で判定するよう、ここだけに置く。"""
+    hit = usage_limit(tail(err))
+    if hit:
+        return hit
+    if agent == "claude" and CLAUDE_USAGE_LIMIT_JSON.search(tail(out)):
+        return "標準出力の結果の JSON に api_error_status 429"
+    return None
 
 
 def _verdict(w: _Watch, code: Optional[int], now: float) -> Optional[tuple[str, str]]:
     """終わり方を決める。まだ続くなら None。利用上限は終了コードより先に見る。"""
-    hit = usage_limit(tail(w.spec.paths.err)) or _out_usage_limit(w.spec)
+    hit = launch_usage_limit(w.spec.agent, w.spec.paths.out, w.spec.paths.err)
     if hit:
         return AgentState.USAGE_LIMIT, hit
     if code is not None:
