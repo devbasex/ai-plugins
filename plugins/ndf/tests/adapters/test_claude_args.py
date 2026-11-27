@@ -214,17 +214,99 @@ def test_issue_3955_readable_places_restrict_the_launch(tmp_path):
         claude.ClaudeCall(system="s", readable=(tmp_path,))
 
 
-# ---------------------------------------------------------------- #1959 Task 1: 今の full の起動の形を固定する
+# ---------------------------------------------------------------- #1959: full の起動を承認した Tool と MCP に絞る
 
 
 @pytest.mark.parametrize("resume", [True, False])
-def test_issue_1959_full_launch_keeps_the_user_settings_and_the_thirteen_tools(tmp_path, monkeypatch, resume):
-    """#1959: full の起動は利用者の設定を読み（`--setting-sources` を付けない）、同梱の 13 個を尋ねずに許し、会話の指定を最後に置く。"""
+def test_issue_1959_full_launch_keeps_the_user_settings_and_loads_only_the_listed_tools(tmp_path, monkeypatch, resume):
+    """#1959: full の起動は利用者の設定を読み（`--setting-sources` を付けない）、読み込む Tool を 16 個に絞り、同梱の 13 個を 1 件 1 引数で
+    尋ねずに許し、環境の MCP を読まない（`--strict-mcp-config`）。会話の指定は最後に置く。Skill・サブエージェント・編集の Tool は残る。"""
     monkeypatch.setattr(claude, "list_plugins", lambda **_: [])
     session = claude.Session("abc", resume)
     argv = claude.claude_args(claude.ClaudeCall(system="sys", permission=claude.Permission.FULL, session=session), root=tmp_path)
 
-    assert "--setting-sources" not in argv and "--strict-mcp-config" not in argv and "--tools" not in argv
-    assert len(claude.FULL_TOOLS.split(",")) == 13
-    assert argv[1:8] == [*claude.PRINT_JSON, "--permission-mode", "acceptEdits", "--allowed-tools", claude.FULL_TOOLS]
+    assert "--setting-sources" not in argv and "--mcp-config" not in argv
+    allowed = claude.FULL_TOOLS.split(",")
+    loaded = claude.LOAD_TOOLS.split(",")
+    assert len(allowed) == 13 and len(loaded) == 16 and {"Skill", "Agent", "Edit", "Write"} <= set(allowed) <= set(loaded)
+    assert argv[1:6] == [*claude.PRINT_JSON, "--permission-mode", "acceptEdits"]
+    assert argv[6:8] == ["--tools", claude.LOAD_TOOLS]
+    assert argv[8 : 9 + len(allowed)] == ["--allowed-tools", *allowed]
+    assert argv[9 + len(allowed)] == "--strict-mcp-config"
     assert argv[-4:] == ["--append-system-prompt", "sys", *claude.session_args(session)]
+
+
+class _Grant:
+    def __init__(self, load=(), allow=(), inherit=False, mcp_files=()):
+        self.load, self.allow, self.inherit, self.mcp_files = tuple(load), tuple(allow), inherit, tuple(mcp_files)
+
+
+def _full(grant, tmp_path, monkeypatch):
+    monkeypatch.setattr(claude, "list_plugins", lambda **_: [])
+    return claude.claude_args(claude.ClaudeCall(system="sys", permission=claude.Permission.FULL, grant=grant), root=tmp_path)
+
+
+def _values(argv, flag):
+    """値を複数取る引数 `flag` の値（次の `--` で始まる引数の前まで）。"""
+    at = argv.index(flag) + 1
+    end = next(i for i in range(at, len(argv)) if argv[i].startswith("--"))
+    return argv[at:end]
+
+
+def test_issue_1959_load_goes_only_to_tools_and_allow_only_to_allowed_tools(tmp_path, monkeypatch):
+    """条件 12: `load` の名前は `--tools` だけに、`allow` の指定は `--allowed-tools` だけに入る。空白を含む指定も 1 つの引数になる。"""
+    argv = _full(_Grant(load=("LSP",), allow=("Bash(git log:*)", "mcp__search__query")), tmp_path, monkeypatch)
+    assert _values(argv, "--tools") == [claude.LOAD_TOOLS + ",LSP"]
+    assert _values(argv, "--allowed-tools") == [*claude.FULL_TOOLS.split(","), "Bash(git log:*)", "mcp__search__query"]
+    assert "--strict-mcp-config" in argv and "--mcp-config" not in argv
+
+
+def test_issue_1959_an_empty_grant_is_the_same_as_no_grant(tmp_path, monkeypatch):
+    assert _full(_Grant(), tmp_path, monkeypatch) == _full(None, tmp_path, monkeypatch)
+
+
+def test_issue_1959_definition_files_go_to_mcp_config_with_strict(tmp_path, monkeypatch):
+    """条件 4・5: 定義ファイルを指定した工程は、環境の MCP を読まずに指定の定義（コピー）だけを `--mcp-config` で読む。"""
+    copies = (tmp_path / "0.json", tmp_path / "1.json")
+    argv = _full(_Grant(mcp_files=copies), tmp_path, monkeypatch)
+    at = argv.index("--strict-mcp-config")
+    assert argv[at + 1 : at + 4] == ["--mcp-config", str(copies[0]), str(copies[1])]
+    assert argv[at + 4].startswith("--")  # 値を複数取る引数の終わり（プラグインの引数か --append-system-prompt）
+
+
+def test_issue_1959_inherit_reads_the_environment_mcp(tmp_path, monkeypatch):
+    """`inherit` の工程は `--strict-mcp-config` を付けず、環境の MCP をそのまま読む。Tool の絞り込みは残る。"""
+    argv = _full(_Grant(inherit=True), tmp_path, monkeypatch)
+    assert "--strict-mcp-config" not in argv and "--mcp-config" not in argv and "--tools" in argv
+
+
+@pytest.mark.parametrize("permission", [claude.Permission.JUDGE, claude.Permission.TOOLS])
+def test_issue_1959_a_grant_is_only_for_the_full_launch(permission):
+    tools = "Read" if permission is claude.Permission.TOOLS else None
+    with pytest.raises(ValueError):
+        claude.ClaudeCall(system="sys", permission=permission, tools=tools, grant=_Grant())
+
+
+def _launch(monkeypatch, verify):
+    """スロット・下限・実プロセスを差し替えて `call_claude` を 1 回打ち、起動した子の数と回答を返す。"""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def slot(agent, *, cwd=None, env=None, wait=None, ensure=True):
+        yield {}
+
+    launched: list[list[str]] = []
+    monkeypatch.setattr(claude.launch_slot, "gate", slot)
+    monkeypatch.setattr(claude.cli_floor, "require", lambda *a, **k: None)
+    monkeypatch.setattr(claude, "_run_claude", lambda argv, *a: launched.append(list(argv)) or claude.ClaudeReply(True, None, "", 0.0))
+    monkeypatch.setattr(claude, "relay_checks", None)
+    reply = claude.call_claude(["claude", "-p"], "質問", 1.0, options=claude.LaunchOptions(verify=verify))
+    return launched, reply
+
+
+def test_issue_1959_the_check_right_before_the_launch_stops_a_changed_approval(monkeypatch):
+    """条件 11・I5: 子を起動する直前の照らし直しが理由を返せば起動せず `Failure.LAUNCH`（停止理由は precondition）。"""
+    launched, reply = _launch(monkeypatch, lambda: "承認の後に変わった")
+    assert launched == [] and reply.failure is claude.Failure.LAUNCH and reply.error == "承認の後に変わった"
+    launched, reply = _launch(monkeypatch, lambda: None)
+    assert len(launched) == 1 and reply.ok

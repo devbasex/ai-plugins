@@ -920,7 +920,7 @@ def calls():
     seen: list[dict] = []
     box = {"reply": _reply()}
 
-    def fake(argv, prompt, timeout, cwd=None):
+    def fake(argv, prompt, timeout, cwd=None, options=None):
         seen.append({"argv": list(argv), "prompt": prompt, "timeout": timeout, "cwd": cwd})
         return box["reply"]
 

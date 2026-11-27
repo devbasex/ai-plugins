@@ -28,6 +28,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -37,7 +38,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
-from ndf.adapters import claude, git, github
+from ndf.adapters import claude, git, github, launch_settings
 from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
 from ndf.contracts import facts, internal, limits, result, worker_paths
@@ -191,8 +192,8 @@ class StageResult:
 Runner = Callable[[list[str], Path, dict[str, str]], "subprocess.CompletedProcess[str]"]
 
 
-# Skill を回す `claude -p` を打つ関数（argv・質問・上限の秒・作業ディレクトリ → 回答）。テストが差し替える
-SkillCaller = Callable[[Sequence[str], str, float, Optional[Path]], claude.ClaudeReply]
+# Skill を回す `claude -p` を打つ関数（argv・質問・上限の秒・作業ディレクトリ・起動の前置きの選び方 → 回答）。テストが差し替える
+SkillCaller = Callable[[Sequence[str], str, float, Optional[Path], claude.LaunchOptions], claude.ClaudeReply]
 
 
 def stage_inputs(environ: Mapping[str, str]) -> Optional[dict[str, Any]]:
@@ -885,10 +886,18 @@ def _skill_cause(failure: Optional[claude.Failure]) -> str:
 
 
 def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResult:
-    schema = contracts.load_json(contracts.schema_path("result"))
-    call = claude.ClaudeCall(system=SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema)
-    argv, notice = claude.claude_launch(call, cwd=cwd)
-    reply = call_claude(argv, skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd)
+    """Skill を full で 1 回回す。起動の設定の Skill の名前の指定が壊れているか未承認なら起動せずに `precondition` で止める（#1959）。"""
+    held = contextlib.ExitStack()
+    try:
+        grant = held.enter_context(launch_settings.prepared(run.name, cwd))
+    except internal.InternalError as exc:
+        return StageResult(result.stopped(SKILL, exc.kind, f"Skill {run.name} を起動しない: {exc}"), {})
+    with held:
+        schema = contracts.load_json(contracts.schema_path("result"))
+        call = claude.ClaudeCall(system=SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema, grant=grant)
+        argv, notice = claude.claude_launch(call, cwd=cwd)
+        options = claude.LaunchOptions(verify=grant.verifier)
+        reply = call_claude(argv, skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd, options)
     if not reply.ok:
         kind = _skill_cause(reply.failure)
         got = StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
