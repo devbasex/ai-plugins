@@ -58,12 +58,12 @@ _SHARE_NAME = "{number}.json"
 # NDF の一時ファイルの名前の形（`<本番の PR>.json.<16 進 16 文字>.ndf-tmp`）。作る側（`_tmp_name`）も掃除の照合
 # （`_SHARE_TMP_NAME`）もこの 1 つの形から組み立て、片側だけ形が変わって掃除が一時ファイルを見落とすことを防ぐ
 _SHARE_TMP_FORMAT = _SHARE_NAME + ".{token}" + _SHARE_TMP
-# 形の中の値ごとの照合の正規表現
+# 形の中の値ごとの照合の正規表現（名前付きの組で、掃除は `number` から同じ PR のロックを取る）
 _SHARE_TMP_FIELDS = {"number": r"\d+", "token": rf"[0-9a-f]{{{2 * _SHARE_TMP_TOKEN}}}"}
 # 掃除はこの名前だけを消す
 _SHARE_TMP_NAME = re.compile(
     "".join(
-        re.escape(literal) + (_SHARE_TMP_FIELDS[field] if field is not None else "")
+        re.escape(literal) + (f"(?P<{field}>{_SHARE_TMP_FIELDS[field]})" if field is not None else "")
         for literal, field, _, _ in string.Formatter().parse(_SHARE_TMP_FORMAT)
     )
 )
@@ -486,16 +486,27 @@ def _drop_stale(path: Path, older_than: float, now: Callable[[], float]) -> None
         return
 
 
-def _drop_stale_tmp(path: Path, older_than: float, now: Callable[[], float]) -> None:
-    """NDF だけが作るディレクトリに中断で残った一時ファイル `path` を、作ってから `older_than` 秒より長く経っていれば消す。
+def _drop_stale_tmp(share: Path, path: Path, number: int, older_than: float, now: Callable[[], float]) -> None:
+    """NDF だけが作るディレクトリに中断で残った本番の PR `number` の一時ファイル `path` を、作ってから `older_than` 秒より
+    長く経っていれば消す。
 
-    中身は読まない（途中まで書かれたものも消す）。リンクをたどらず、通常のファイルだけを消す。"""
+    書く側は一時ファイルを前処理の前に作り、前処理の間も保存先のロックを持つ。前処理が `older_than` より長くかかっても
+    消さないよう、同じ PR のロックをすぐ取れたときだけ、ロックの中で経った時間を確かめ直して消す。中身は読まない
+    （途中まで書かれたものも消す）。リンクをたどらず、通常のファイルだけを消す。"""
     try:
-        got = path.lstat()
-        if stat.S_ISREG(got.st_mode) and now() - got.st_mtime > older_than:
-            path.unlink(missing_ok=True)
-    except OSError:  # noqa: NDF401 ファイル: 消えた一時ファイルは残す
+        if not _stale_regular(path, older_than, now):
+            return
+        with FileLock(str(_share_path(share, number)) + ".lock", timeout=0):
+            if _stale_regular(path, older_than, now):
+                path.unlink(missing_ok=True)
+    except (OSError, Timeout):  # noqa: NDF401 ファイル: 書いている途中の一時ファイルと消えた一時ファイルは残す
         return
+
+
+def _stale_regular(path: Path, older_than: float, now: Callable[[], float]) -> bool:
+    """`path` がリンクでない通常のファイルで、作ってから `older_than` 秒より長く経っていれば真。"""
+    got = path.lstat()
+    return stat.S_ISREG(got.st_mode) and now() - got.st_mtime > older_than
 
 
 def sweep_shares(share: Path, older_than: float, now: Callable[[], float] = time.time) -> None:
@@ -511,8 +522,9 @@ def sweep_shares(share: Path, older_than: float, now: Callable[[], float] = time
     except OSError:  # noqa: NDF401 ファイル: 無い・列挙できない一時ファイルのディレクトリは掃除せず、記録へ進む
         return
     for path in names:
-        if _SHARE_TMP_NAME.fullmatch(path.name):
-            _drop_stale_tmp(path, older_than, now)
+        matched = _SHARE_TMP_NAME.fullmatch(path.name)
+        if matched is not None:
+            _drop_stale_tmp(share, path, int(matched["number"]), older_than, now)
 
 
 def _trusted_state(hub: GitHub, number: int, version: str, commit: str, comments: Optional[Sequence[Authored]] = None) -> record.Candidates:

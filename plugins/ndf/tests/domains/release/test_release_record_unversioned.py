@@ -679,6 +679,22 @@ def test_shared_prefix_releases_the_lock_before_computing_when_it_cannot_create_
     assert locked == [False] and not (share / f"{PROD}.json").exists() and not list((share / "tmp").iterdir())
 
 
+def test_sweep_shares_keeps_a_temporary_file_while_its_pull_is_locked(tmp_path: Path) -> None:
+    share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
+    (share / "tmp").mkdir(parents=True)
+    opened = record_unversioned._open_tmp(share, PROD)
+    assert opened is not None
+    fd, path = opened
+    os.close(fd)
+    late = path.stat().st_mtime + 3600
+    # 書く側が前処理の間ロックを持っていれば、期限を過ぎていても消さない
+    with FileLock(str(share / f"{PROD}.json") + ".lock", timeout=0):
+        record_unversioned.sweep_shares(share, 60, now=lambda: late)
+        assert path.exists()
+    record_unversioned.sweep_shares(share, 60, now=lambda: late)
+    assert not path.exists()
+
+
 def test_sweep_shares_skips_a_temporary_directory_it_cannot_list(monkeypatch, tmp_path: Path) -> None:
     share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
     (share / "tmp").mkdir(parents=True)
