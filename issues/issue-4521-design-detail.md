@@ -30,7 +30,7 @@ contracts/
 | `src/ndf/domains/project/measure_ci.py` | 変更 | 必須のチェックだけを測る | `measure_repo` | `measure_ci` | 変更: `measure` |
 | `src/ndf/domains/project/cli.py` | 変更 | 測定の組み立て | 下の全部 | `cli`・`MeasurementContext` | 変更: `_ci_items`・`measure_project`。削除: `_instruction_notes` |
 | `src/ndf/domains/project/write.py` | 変更 | 設定の値と、書くファイルの計画を作る | `check`・`analysis_record` | `write` | 変更: `plan`・`p_number`・`_build_record`・`_project_file` |
-| `src/ndf/domains/project/analysis_record.py` | 変更 | 旧い形のキー | `items` | `analysis_record` | 変更: `strip_item`・`strip_legacy`。削除: 配列の各行の中の旧いキーを探す分岐 |
+| `src/ndf/domains/project/analysis_record.py` | 変更 | 旧い形のキー | `items` | `analysis_record` | 変更: `strip_item`・`strip_legacy`。新設: `legacy_paths`。削除: 配列の各行の中の旧いキーを探す分岐 |
 | `src/ndf/domains/project/check.py` | 変更 | 解析器のバージョン | — | `check` | 変更: 定数 `ANALYZER` |
 | `contracts/schemas/ndf-settings/project.schema.json` と `skills/development-workflow/schemas/project.schema.json` | 変更 | 設定の形（後者は `ndf project schema` の生成物） | — | — | — |
 | `contracts/domains/ndf-files.json` | 変更 | NDF が書くファイルの表 | — | — | — |
@@ -86,7 +86,8 @@ contracts/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `strip_item` | `analysis_record.py` | 変更 | `(key, value) -> tuple[Any, list[str]]` | `ci` の中の旧いキーを取り除く。値が配列のときに各行の中の旧いキーを取り除く分岐は消す（対象は `languages[].files` だけで、`languages` は項目ごと消える） |
-| `strip_legacy` | `analysis_record.py` | 変更 | `(doc) -> tuple[dict, list[str]]` | 6 項目を項目ごと取り除く |
+| `strip_legacy` | `analysis_record.py` | 変更 | `(doc) -> tuple[dict, list[str]]` | 6 項目を項目ごと取り除く。取り除く位置は `legacy_paths` から得る。返すキーの名前は、位置の要素を `.` でつないだ表示用の文字列で、今と同じ形である |
+| `legacy_paths` | `analysis_record.py` | 新設 | `(doc) -> list[tuple[str, ...]]` | 取り除く旧い形のキーの位置を、JSON のキーを要素ごとに持つタプルで返す。例は `("test_duration",)`・`("ci", "workflows")`・`("analysis", "legacy.token")`。入力を書き換えない |
 | `plan` | `write.py` | 変更 | シグネチャは今のまま | 回答できる項目を、`status: question` のうち `ITEM_KEYS` にあるものに絞る。ほかの回答は `ignored` の行にする |
 | `p_number` | `write.py` | 変更 | `(key, default) -> str` | 項目と番号（`measure`・`write` の出力で項目を指す `P2` などの表示）の対応表を、`test`（P2）・`ci`（P4）だけにする |
 | `_build_record` | `write.py` | 変更 | シグネチャは今のまま | `analyzer` に測定の結果の `analyzer` を書く。1 以上の整数でない値は、記録の形の確かめより前に止める |
@@ -94,7 +95,10 @@ contracts/
 
 - `analysis_record` の定数は、6 項目の並び `UNREAD_ITEMS` を足し、`OLD_ITEMS` を `test_duration` と `UNREAD_ITEMS` にする。`_OLD_IN_ITEMS` から `languages[].files` を消す
 - 6 項目の指紋は、`merge_project` が `analysis.written` を `ITEM_KEYS` の項目だけで作り直すので消える。足す処理は無い
-- `_project_file` は、伏せるキーを `analysis_record.strip_legacy` が返すキーの名前から決め、`write.py` に別の一覧を持たない。名前が `<項目>` ならその項目の値を、`<項目>.<キー>` ならそのキーの値を置き換える。対象には、6 項目のほかに `test_duration`・`ci.workflows`・`ci.provider`・`analysis` の `written` 以外が入る。置き換えは、差分の文を作る前に今の設定のコピーに対して行う
+- `_project_file` は、値を伏せる位置を `analysis_record.legacy_paths` から受け取り、`write.py` に別の一覧を持たない
+  - 差分の文を作る前に、今の設定のコピーで、タプルの要素を順にたどった先の値を置き換える
+  - 対象には、6 項目のほかに `test_duration`・`ci.workflows`・`ci.provider`・`analysis` の `written` 以外が入る
+  - `strip_legacy` が返すキーの名前を `.` で区切って位置を復元しない。`analysis` では `written` 以外のどのキーも取り除くので、`analysis["legacy.token"]` のようにドットを含むキーがありうる。区切ると位置を取り違え、値が差分に残る
 - `_project_file` が置き換えるのは差分の前の側（`File.old`）だけで、書く中身（`File.new`）は旧い形のキーを持たない
 - 不正な `analyzer` を記録の形の確かめ（`contracts.schema_errors`）に渡さない。そのエラー文は検証した値を含み、`write` は `WriteError` の文を出力と結果 JSON にそのまま載せるためである
 - ブランチの構成は、#4580 の `_measured_branches` と `_record_branches` をそのまま使う
@@ -133,6 +137,7 @@ contracts/
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `service_names`・`instruction_notes` | `compose_services`・`_old_guide_notes`・`instruction_files` | `measure_repo.py` を読んだ | 使う |
+| `legacy_paths` | `strip_legacy`・`strip_item` | `analysis_record.py` を読んだ | 返すのは `.` でつないだ名前だけで、キーの区切りが分からないので新設する。旧いキーの定義（`OLD_ITEMS`・`_OLD_IN_ITEMS`）は使う |
 
 ## 単体テストの観点
 
@@ -145,6 +150,7 @@ contracts/
 | `service_names` | 2 ファイルの名前が整列して 1 回ずつ出る | compose が無ければ空 | 読めないファイルは数えない |
 | `instruction_notes` | 古い案内の注記 | 指示書が無い | — |
 | `strip_legacy` | 6 項目を取り除き、キーの名前を返す | 6 項目の無い設定は変わらない | 値がスキーマに合わない 6 項目も取り除く |
+| `legacy_paths` | 旧いキーの位置を、キーを要素ごとに持つタプルで返す | 旧いキーの無い設定は空 | `analysis` の下のドットを含むキー（`legacy.token`）は 1 つの要素になる |
 | `plan` | `test` の回答は適用される | 旧版の測定の結果の `issues` の回答は `ignored` | — |
 | `_build_record` | `analyzer` に測定の結果の値を書く | 1 は通る | 文字列・真偽値・小数・0・欠落は `WriteError`。文に入力された値が無い |
-| `_project_file` | 取り除くキーが差分に出て、値は伏せる。6 項目も、`test_duration` などの以前からの旧いキーも同じである | 旧い形のキーの無い設定の差分は今と同じ | — |
+| `_project_file` | 取り除くキーが差分に出て、値は伏せる。6 項目も、`test_duration` などの以前からの旧いキーも同じである。`analysis["legacy.token"]` の値も、通常の書き出しと `--dry-run` の両方で伏せる | 旧い形のキーの無い設定の差分は今と同じ | — |
