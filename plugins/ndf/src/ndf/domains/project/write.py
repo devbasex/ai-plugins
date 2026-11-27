@@ -312,13 +312,25 @@ def _record_files(inp: Inputs, record: dict[str, Any], project: Optional[File]) 
     return out
 
 
+def _measured_branches(inp: Inputs) -> dict[str, Any]:
+    """測定の結果のブランチの構成（`branch_state`）。今の構成と違えば `WriteError`。
+
+    必須のチェック（`ci.required_checks`）は計測時の既定ブランチから取るので、書き出しまでに構成が変わった計測を記録に残すと、
+    旧いブランチの値を「新しい」と判定させてしまう。違うときは書かずに計測からやり直させる。"""
+    now = check.branch_state(git.Git(inp.root), check.declared_branches(inp.existing))
+    measured = inp.measure.get("branch_state")
+    if measured != now:
+        raise WriteError(f"計測の後にブランチの構成が変わった（計測時 {measured} → 今 {now}）。ndf project measure からやり直す")
+    return now
+
+
 def _build_record(inp: Inputs, doc: dict[str, Any]) -> dict[str, Any]:
     """書き出す設定 `doc` に対する解析の記録を組み立てる。形に合わなければ `WriteError`。"""
     record = {
         "version": analysis_record.RECORD_VERSION,
         "analyzer": check.ANALYZER,
         "inputs": obj(inp.measure.get("inputs")),
-        "branches": check.branch_state(git.Git(inp.root), check.declared_branches(inp.existing)),
+        "branches": _measured_branches(inp),
         "written_digest": analysis_record.written_digest(doc),
     }
     errs = contracts.schema_errors(record, analysis_record.SCHEMA)

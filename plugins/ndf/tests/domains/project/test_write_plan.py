@@ -33,6 +33,9 @@ def repo(tmp_path, monkeypatch) -> Path:
 
 
 def _plan(repo: Path, existing=None, measure=MEASURE, answers=None, record=None) -> write.Plan:
+    """計画を決める。測定の結果にブランチの構成が無ければ、今の構成を計測時の値として入れる。"""
+    if "branch_state" not in measure:
+        measure = {**measure, "branch_state": check.branch_state(write.git.Git(repo), check.declared_branches(existing))}
     return write.plan(write.Inputs(repo, repo, existing, measure, answers or {}, record))
 
 
@@ -119,3 +122,10 @@ def test_a_plan_that_does_not_fit_the_schema_is_refused(repo, existing, inputs, 
     with pytest.raises(write.WriteError) as caught:
         _plan(repo, existing=existing, measure={"items": {}, "inputs": inputs})
     assert str(caught.value).startswith(head)
+
+
+def test_a_plan_whose_branches_changed_after_the_measure_is_refused(repo):
+    stale = {**MEASURE, "branch_state": {"head": "develop", "present": ["develop"]}}
+    with pytest.raises(write.WriteError) as caught:
+        _plan(repo, measure=stale)
+    assert str(caught.value).startswith("計測の後にブランチの構成が変わった")

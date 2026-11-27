@@ -149,8 +149,11 @@ def test_unknown_subcommand_is_a_usage_error():
 def _measure_file(tmp_path: Path, items: dict, repo: Path | None = None) -> Path:
     """測定の結果。`repo` を渡せば、入力のファイルのハッシュをそのリポジトリの今の HEAD から入れる。"""
     inputs = check.inputs(check.git.Git(repo)) if repo is not None else {}
+    data = {"analyzer": check.ANALYZER, "items": items, "inputs": inputs, "notes": ["注記"]}
+    if repo is not None:
+        data["branch_state"] = check.branch_state(check.git.Git(repo), check.declared_branches(check.load(repo)))
     path = tmp_path / "measure.json"
-    path.write_text(json.dumps({"analyzer": check.ANALYZER, "items": items, "inputs": inputs, "notes": ["注記"]}), encoding="utf-8")
+    path.write_text(json.dumps(data), encoding="utf-8")
     return path
 
 
@@ -199,6 +202,7 @@ def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_resul
     measured = _measure_file(
         tmp_path,
         {"checks": {"status": "measured", "value": {"tools": []}}, "test": {"status": "question", "candidates": {}, "evidence": []}},
+        repo,
     )
     answers = _answers(tmp_path, {"test": {"value": {"suites": []}}, "nope": {"value": 1}})
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers), "--dry-run"]) == 0
@@ -228,7 +232,7 @@ def test_issue_4580_write_keeps_the_flow(repo, tmp_path, capsys, last_result):
     }
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text(json.dumps({"version": 1, "workflow": flow}, ensure_ascii=False), encoding="utf-8")
-    measured = _measure_file(tmp_path, {"checks": {"status": "measured", "value": {"tools": []}}})
+    measured = _measure_file(tmp_path, {"checks": {"status": "measured", "value": {"tools": []}}}, repo)
     answers = _answers(tmp_path, {"test": {"value": {"suites": []}}})
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
     last_result(capsys.readouterr().out)
