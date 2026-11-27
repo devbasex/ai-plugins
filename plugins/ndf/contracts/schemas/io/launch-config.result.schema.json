@@ -36,9 +36,15 @@
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["kind"],
         "properties": {
-          "kind": {"enum": ["launch-target", "question"], "description": "launch-target は承認の対象の一覧（MCP の定義の中身を含まない）、question は AskUserQuestion にそのまま渡す入力（input）"}
+          "kind": {"enum": ["launch-target", "question"], "description": "launch-target は承認の対象の一覧（MCP の定義の中身を含まない）、question は AskUserQuestion にそのまま渡す入力（input）"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "launch-target: 承認の対象のハッシュ"},
+          "steps": {"type": "object", "description": "launch-target: 工程ごとの load・allow・mcp の指定"},
+          "unsandboxed": {"type": "array", "items": {"type": "string"}, "description": "launch-target: 安全装置を外してよいランタイム"},
+          "files": {"type": "array", "items": {"type": "object"}, "description": "launch-target: MCP の定義ファイルの場所・ハッシュ・サーバ名・コマンド名（定義の中身を含まない）"},
+          "input": {"type": "object", "description": "question: AskUserQuestion にそのまま渡す入力"}
         }
       }
     }

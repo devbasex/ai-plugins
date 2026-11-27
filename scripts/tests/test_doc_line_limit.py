@@ -32,7 +32,7 @@ def output_of(result: subprocess.CompletedProcess) -> str:
 def repo(tmp_path: Path) -> Path:
     """git が追跡する `.md` を持つ最小のリポジトリ。
 
-    `EXEMPT` の指し先（`CHANGELOG.md`・`docs/archive/scripts-map/inventory.md`）を置く。
+    `EXEMPT` の指し先（`CHANGELOG.md`・`docs/archive/scripts-map/inventory.md`・`plugins/ndf/docs/contracts/commands.md`）を置く。
     **除外の指し先が無いこと自体を失敗として扱う**ため、置かないとチェックそのものが落ちる（#417 の 6）。
     """
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
@@ -41,6 +41,8 @@ def repo(tmp_path: Path) -> Path:
     (tmp_path / "docs" / "short.md").write_text("x\n" * 10, encoding="utf-8")
     (tmp_path / "CHANGELOG.md").write_text("x\n" * 900, encoding="utf-8")
     (tmp_path / "docs" / "archive" / "scripts-map" / "inventory.md").write_text("x\n" * 900, encoding="utf-8")
+    (tmp_path / "plugins" / "ndf" / "docs" / "contracts").mkdir(parents=True)
+    (tmp_path / "plugins" / "ndf" / "docs" / "contracts" / "commands.md").write_text("x\n" * 900, encoding="utf-8")
     subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True, capture_output=True)
     return tmp_path
 
@@ -154,6 +156,7 @@ def test_a_scan_that_is_empty_after_the_exclusions_is_a_failure(repo: Path) -> N
     untrack(repo, "docs/short.md")
     untrack(repo, "CHANGELOG.md")
     untrack(repo, "docs/archive/scripts-map/inventory.md")
+    untrack(repo, "plugins/ndf/docs/contracts/commands.md")
     track(repo, "issues/plan.md", 900)
     result = run(repo)
     assert result.returncode == 2, output_of(result)
