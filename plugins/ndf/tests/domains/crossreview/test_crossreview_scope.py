@@ -677,13 +677,25 @@ def test_a_mode_only_fix_does_not_count_a_binary_as_read(wt: Path) -> None:
     assert _new(wt, changes.Range(base, head), moved) == ("blob.bin",)
 
 
-def test_a_removal_before_an_inserted_line_is_new_when_the_base_file_changed(wt: Path) -> None:
-    """#3780: ベース側が変わったファイルでは、今回足した行の直前の削除は前の位置へ直せないので返す。"""
+@pytest.mark.parametrize("replaced", [None, "pr"], ids=["removed", "replaced"])
+def test_a_read_removal_stays_read_when_a_line_is_put_in_its_place(wt: Path, replaced: str | None) -> None:
+    """#3780: ベースの別の行が変わっても、読んだ削除の跡へ足した行や、読んだ置き換えの書き直しは新しい変更に数えない。"""
     base = _start(wt, {"a.txt": _lines()})
-    head = _write(wt, {"a.txt": _lines().replace("line 20\n", "")}, "PR")
+    first = _lines().replace("line 20\n", "") if replaced is None else _lines((20, replaced))
+    head = _write(wt, {"a.txt": first}, "PR")
     moved = _move_base(wt, {"a.txt": _lines((2, "base"))})
     _merge_target(wt)
-    _write(wt, {"a.txt": _lines((2, "base"), (20, "同じ場所へ足した"))}, "直し")
+    _write(wt, {"a.txt": _lines((2, "base"), (20, "直し"))}, "直し")
+    assert _new(wt, changes.Range(base, head), moved) == ()
+
+
+def test_a_removal_added_by_the_base_next_to_a_read_one_is_new(wt: Path) -> None:
+    """#3780: ベースが同じ文の行を増やし、読んだ削除と同じ箇所の削除が読んだ件数を超えれば返す。"""
+    base = _start(wt, {"a.txt": _lines()})
+    head = _write(wt, {"a.txt": _lines().replace("line 20\n", "")}, "PR")
+    moved = _move_base(wt, {"a.txt": _lines((20, "line 20\nline 20"))})
+    sh(wt, "merge", "-q", "--no-edit", "-X", "ours", "target")
+    _write(wt, {"a.txt": _lines((20, "同じ場所へ足した"))}, "直し")
     assert _new(wt, changes.Range(base, head), moved) == ("a.txt",)
 
 

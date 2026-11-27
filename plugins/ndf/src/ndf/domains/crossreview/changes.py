@@ -389,18 +389,31 @@ def _changed_rows(hunks: Sequence[Hunk]) -> tuple[list[tuple[int, str]], list[tu
     return added, removed
 
 
+def _gap(steps: Sequence[Hunk], at: Optional[int]) -> Sequence[Optional[int]]:
+    """今の head の `at` 行目の直前で消した行が、前の head で取りうる位置（消した箇所のすぐ後ろの行の番号）。`steps` は
+    前の head からの差分の hunk。前後の、前の head に対応のある行に挟まれた区間で、`at` が None（消したファイル）なら
+    None だけ。"""
+    if at is None:
+        return (None,)
+    low, high = at - 1, at
+    while low and _base_lines(steps, low) is None:
+        low -= 1
+    while (end := _base_lines(steps, high)) is None:
+        high += 1
+    start = _base_lines(steps, low) if low else 0
+    assert start is not None
+    return range(start + 1, end + 1)
+
+
 def _has_unread_lines(path: str, now: _Delta, seen: _Delta, since: _Delta) -> bool:
     """今の PR の差分の `path` に、今回渡す差分にも既読の差分にも同じ位置で現れない足した行か消した行があるか。位置は今の head の
     行の番号で、既読の差分とは前の head の行の番号へ直して比べる。消したファイルには残る行が無いので、本文だけを比べる。
-    消した箇所の後ろの行が今回足した行なら、ファイルのベース側の blob が前と同じときだけ先の行へ進め、違えば未読にする
-    （ベースの変更で増えた削除を、別の位置の読んだ削除に当てない）。"""
+    消した行は、消した箇所の前後で前の head に対応のある行に挟まれた区間（`_gap`）の読んだ削除と、本文と件数で照らす。"""
     entry = now.entries[path]
     deleted = entry.status == "D"
     step = since.entries.get(path)
     before = step.old if step is not None else path
     steps = since.hunks[path] if path in since.hunks else ()
-    read_entry = seen.entries.get(before)
-    same_base = read_entry is not None and read_entry.blobs[0] == entry.blobs[0]
     added, removed = _changed_rows(now.hunks[path] if path in now.hunks else ())
     since_added, since_removed = _changed_rows(steps)
     seen_added, seen_removed = _changed_rows(seen.hunks[before] if before in seen.hunks else ())
@@ -413,15 +426,12 @@ def _has_unread_lines(path: str, now: _Delta, seen: _Delta, since: _Delta) -> bo
     left -= Counter((None if deleted else at, text) for at, text in since_removed)
     gone = Counter((None if deleted else at, text) for at, text in seen_removed)
     for (at, text), count in left.items():
-        # すぐ後ろの行が今回足した行なら、前の head の位置へ直せない。ベース側が同じなら、対応のある最初の行まで進める
-        prev = None
-        while at is not None and (prev := _base_lines(steps, at)) is None:
-            if not same_base:
-                return True
-            at += 1
-        if gone[(prev, text)] < count:
+        for prev in _gap(steps, at):
+            taken = min(count, gone[(prev, text)])
+            gone[(prev, text)] -= taken
+            count -= taken
+        if count:
             return True
-        gone[(prev, text)] -= count
     return False
 
 
