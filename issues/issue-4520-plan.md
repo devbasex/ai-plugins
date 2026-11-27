@@ -162,3 +162,8 @@
 - [ ] 受け入れ条件 1〜23 をすべて満たし、条件ごとに検証手段と結果が対応している
 - [ ] `pytest plugins/ndf/tests` と `ndf check` が通る
 - [ ] 「出荷前の確かめ」の 2 つの開き直しで、デプロイの工程が終了したことを `ndf progress show` で確かめ、各工程で止まった箇所と再開の打ち方と結果（直した場合は再試行の結果）が PR に書かれている
+
+## 実装中の取り決め（conductor、2026-11-28 JST）
+
+- `plugins/ndf/tests/domains/records/test_usage.py::test_usage_report_counts_closed_issues_of_the_origin_repo_with_one_search` は、この変更と無関係に落ちる（#4702）。単位の完了の判定からはこの 1 件だけを除き、止まらずに次のタスクへ進む
+- 設計承認で残った懸念 1・3（課題 #4520 の本文の「設計承認で残った懸念」）は、実装の中で扱いを決め、決めた内容と理由を実装の Pull Request に記録する
