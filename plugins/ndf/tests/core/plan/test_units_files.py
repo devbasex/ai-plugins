@@ -405,13 +405,15 @@ def test_load_does_not_copy_the_content_into_a_schema_error(tmp_path):
     assert "s3cret" not in str(stopped.value) and "token-key" not in str(stopped.value)
 
 
-def test_differs_ignores_only_the_actual_lines_and_the_path():
-    base = ud.parse(_doc(tasks=[_task("T1"), _task("T2")], units=[_unit("A", "T1"), _unit("B", "T2")]), "a")
-    written = base._replace(path="b", units=(base.units[0]._replace(actual_lines=5), base.units[1]))
+def test_differs_ignores_only_the_actual_lines():
+    base = _doc(tasks=[_task("T1"), _task("T2")], units=[_unit("A", "T1"), _unit("B", "T2")])
+    first, second = base["tasks"]
 
-    assert uf.differs(base, written) is False
-    assert uf.differs(base, base._replace(units=base.units[::-1])) is True
-    assert uf.differs(base, base._replace(tasks=(base.tasks[0]._replace(lines=11), base.tasks[1]))) is True
+    assert uf.differs(base, {**base, "units": [{**base["units"][0], "actual_lines": 5}, base["units"][1]]}) is False
+    assert uf.differs(base, {**base, "units": base["units"][::-1]}) is True
+    assert uf.differs(base, {**base, "tasks": [{**first, "lines": 11}, second]}) is True
+    # 型にすると同じ値になる、`issue` の明示と省略も違いに数える
+    assert uf.differs(base, {**base, "tasks": [{**first, "issue": 7}, second]}) is True
 
 
 # --- ndf plan units ----------------------------------------------------------------------------

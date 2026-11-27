@@ -352,6 +352,16 @@ def test_mismatches_reports_a_changed_or_removed_units_file(work):
     assert "issue-7-plan.units.json" in removed
 
 
+def test_mismatches_reports_a_units_file_moved_to_another_name_of_the_same_issue(work):
+    _units_file(work, 7)
+    record = _record(work, 7)
+
+    (work / "issues" / "issue-7-plan.units.json").rename(work / "issues" / "issue-07-plan.units.json")
+
+    [found] = _mismatches(record, work, _context(7))
+    assert "issue-07-plan.units.json" in found and "issue-7-plan.units.json" in found
+
+
 def test_mismatches_reports_an_unreadable_units_file(work):
     _units_file(work, 7)
     record = _record(work, 7)

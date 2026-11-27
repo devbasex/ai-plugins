@@ -172,7 +172,7 @@ contracts/
 | `collect` | 同上 | 新設 | `(tree, issues, omitted) -> Collected` | 課題ごとの扱いを当て、読むファイルと欠落を返す |
 | `check` | 同上 | 新設 | `(tree, issues, omitted, limits, criteria, docs: bool) -> Report` | `judge` の結果に、単位のファイルが無い課題の確かめ（欠落の確かめ）を足す。`docs` が真なら、実装計画のタスクの番号が重ならないことと、実装計画と単位のファイルのタスクの集合の一致と、実装計画の 2 つの表の一致も足す |
 | `render_tables` | 同上 | 新設 | `(plan: str, views: Sequence[View]) -> str` | 実装計画の「レビューの単位」と「並列と直列」のセクションを書き直した全文 |
-| `differs` | 同上 | 新設 | `(a: UnitFile, b: UnitFile) -> bool` | `actual_lines` を除いて、並びと中身を比べる |
+| `differs` | 同上 | 新設 | `(a: Mapping, b: Mapping) -> bool` | 検査を通した JSON を、`units[].actual_lines` だけを除いて、並びと中身で比べる。型にしないので、`issue` の明示と省略は違いになる。JSON は `documents(tree, paths, listing)` がまとめて読み、パスの一致は呼び手が確かめる |
 | `design_handlings` | `inputs_decide.py` | 新設 | `(text: str) -> dict[int, tuple[str, Optional[int]]]` | 「設計の結果」の表の（扱い, 統合先） |
 
 ### 内部のデータと定数

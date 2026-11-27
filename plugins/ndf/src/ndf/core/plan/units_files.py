@@ -213,6 +213,15 @@ def load(tree: Tree, path: str) -> ud.UnitFile:
 
 
 def _load(path: str, text: Optional[str]) -> ud.UnitFile:
+    return ud.parse(_document(path, text), path)
+
+
+def documents(tree: Tree, paths: Sequence[str], listing: Mapping[str, Optional[tuple[str, str, str]]]) -> dict[str, dict[str, Any]]:
+    """`load` と同じ検査を通した JSON をまとめて読む。型にしないので、書いたキーの有無が残る。`listing` は `tree.listing()`。"""
+    return {path: _document(path, text) for path, text in tree.read_all(paths, listing).items()}
+
+
+def _document(path: str, text: Optional[str]) -> dict[str, Any]:
     if text is None:
         raise UnitsFileError(f"{path}: 単位のファイルが無い")
     try:
@@ -226,7 +235,7 @@ def _load(path: str, text: Optional[str]) -> ud.UnitFile:
     named = _numbers_in(_UNITS_PATH, path)
     if named and named != frozenset(doc["issues"]):
         raise UnitsFileError(f"{path}: issues がファイル名の番号と違う: {doc['issues']}")
-    return ud.parse(doc, path)
+    return doc
 
 
 def _with_task_id(error: str, doc: Any) -> str:
@@ -455,11 +464,11 @@ def _task_gap(plan: str, text: str, unit_file: ud.UnitFile) -> Optional[TaskGap]
     return TaskGap(plan, duplicated, only_plan, only_units) if duplicated or only_plan or only_units else None
 
 
-def differs(a: ud.UnitFile, b: ud.UnitFile) -> bool:
-    """パスと実際の行数を除いて、並びと中身が違うか。"""
+def differs(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
+    """`documents` の JSON 2 つが、`units[].actual_lines` を除いて、並びと中身が違うか。パスは呼び手が比べる。"""
 
-    def bare(f: ud.UnitFile) -> ud.UnitFile:
-        return f._replace(path="", units=tuple(u._replace(actual_lines=None) for u in f.units))
+    def bare(doc: Mapping[str, Any]) -> dict[str, Any]:
+        return {**doc, "units": [{k: v for k, v in u.items() if k != "actual_lines"} for u in doc["units"]]}
 
     return bare(a) != bare(b)
 

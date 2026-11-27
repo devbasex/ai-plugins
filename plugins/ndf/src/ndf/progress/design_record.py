@@ -240,16 +240,23 @@ def _fetch_missing(root: Path, commit: str) -> Optional[str]:
 
 
 def _file_mismatches(recorded: units_files.Tree, tree: units_files.Tree, issues: Sequence[int]) -> list[str]:
-    """単位のファイルの違い。JSON として読み、実際の行数を除いて比べる。"""
-    before, after = units_files.find(recorded, issues), units_files.find(tree, issues)
+    """単位のファイルの違い。パスが同じものは、JSON として読み、実際の行数を除いて比べる。一覧と本文は側ごとにまとめて読む。"""
+    listed, now_listed = recorded.listing(), tree.listing()
+    before = units_files.find(recorded, issues, sorted(listed))
+    after = units_files.find(tree, issues, sorted(now_listed))
     pairs = dict.fromkeys((before.get(n), after.get(n)) for n in sorted(issues))
+    same = [old for old, new in pairs if old is not None and old == new]
+    old_docs = units_files.documents(recorded, same, listed)
+    new_docs = units_files.documents(tree, same, now_listed)
     found = []
     for old, new in pairs:
         if old is None and new is not None:
             found.append(f"{new}: 承認の記録に無い単位のファイルがある")
         elif old is not None and new is None:
             found.append(f"{old}: 承認した単位のファイルが無い")
-        elif old is not None and new is not None and units_files.differs(units_files.load(recorded, old), units_files.load(tree, new)):
+        elif old != new:
+            found.append(f"{new}: 単位のファイルのパスが承認した {old} と違う")
+        elif old is not None and units_files.differs(old_docs[old], new_docs[old]):
             found.append(f"{new}: 単位のファイルが承認した中身と違う")
     return found
 
