@@ -289,7 +289,7 @@ contracts/
 | `build` | 同上 | 新設 | `(record_dir: Path) -> dict` | 3 つのファイルと `checked.json` から記録を組み、書く |
 | `stale` | 同上 | 新設 | `(record: Mapping, repo, pr, head, base) -> list[str]` | 今の PR と記録の違い |
 | `reset_drafts` | 同上 | 新設 | `(v, stage: stages.StageDef, why: str) -> list[EventDraft]` | 工程の先頭から設計承認ゲートまでを未了に戻すイベント |
-| `approved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「ドキュメントレビュー」の最新の回答が承認なら、その `design_target`。後の変更要求か、設計承認ゲートのステップを未了に戻すイベントがあれば None |
+| `approved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「ドキュメントレビュー」の設計承認ゲートの最新の回答が承認なら、その `design_target` を返す。その承認より後にゲートのステップを未了に戻すイベントがあれば None を返す。最新の回答が承認でない場合（承認の後の変更要求など）も None |
 | `mismatches` | 同上 | 新設 | `(record, tree, context) -> list[str]` | 設計書の決定 11 の表の 4 つの比較（単位のファイル・スプリントの課題・課題ごとの扱いと統合先・実装計画を省いた課題）。スプリントの課題は全体を比べ、ほかの比較は記録の `targets.issues` に絞る |
 | `without_issues` | 同上 | 新設 | `(record, drop, files) -> dict` | 課題を外す回答の記録の絞り込み。外せない形なら `Refused` |
 | `converted` | 同上 | 新設 | `(repo, head, branch, context, limits, checked: Checked) -> dict` | 変換の再承認の記録。`design-target.json` と同じ形で、`sprint_branch` は `branch`、`review.pr` は null、`head` は単位のファイルを含むコミット |
