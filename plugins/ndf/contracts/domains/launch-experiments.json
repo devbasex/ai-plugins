@@ -5,7 +5,7 @@
   "columns": {
     "kind": {
       "type": "string",
-      "summary": "行の種類。stage は工程（id が工程の名前）、order はランタイムの順位（id がランタイム。表 runtimes の id）、defaults は実験の既定（1 行だけ）"
+      "summary": "行の種類。stage は工程（id が工程の名前）、order はランタイムの順位（id がランタイム。表 runtimes の id）、defaults は実験の既定（1 行だけ）、records は実験の記録の扱い（1 行だけ。リポジトリは置き換えられない）"
     },
     "launches": {
       "type": "object",
@@ -70,6 +70,21 @@
     "allocation": {
       "type": "object",
       "summary": "defaults の行: 割り付けの値（floor は候補の組の下限の出現率、min_units は調整を始める前に集める単位の数、margin は効果指標の許す低下の幅、window_days は数える期間の日数）",
+      "optional": true
+    },
+    "refusal_days": {
+      "type": "integer",
+      "summary": "records の行: 起動できない組を数える直近の日数。実測で決めた値ではない",
+      "optional": true
+    },
+    "refusals": {
+      "type": "integer",
+      "summary": "records の行: この日数の中で、同じリポジトリ・工程・ランタイム・互換性のキー・組のモデルを理由にした拒否がこの件数以上なら、その組を候補から外す（基準の組は外さない）。実測で決めた値ではない",
+      "optional": true
+    },
+    "kept_extra_days": {
+      "type": "integer",
+      "summary": "records の行: 実験の記録を残す期間のうち、window_days に足す日数。月の最後の日時がこれより前の月のファイルを、確認なしに消す",
       "optional": true
     }
   },
@@ -156,6 +171,13 @@
       "kind": "defaults",
       "enabled": true,
       "allocation": {"floor": 0.05, "min_units": 10, "margin": 0.1, "window_days": 60}
+    },
+    {
+      "id": "records",
+      "kind": "records",
+      "refusal_days": 7,
+      "refusals": 2,
+      "kept_extra_days": 30
     }
   ]
 }

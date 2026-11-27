@@ -146,6 +146,8 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("NDF_STATE_HOME", raising=False)
     # 中継の子の会話から打っても、その会話の共有の設定の保存先を読まない
     monkeypatch.delenv("NDF_SHARED_CONFIG_DIR", raising=False)
+    # 起動の値を選ぶ処理の月の掃除（#2944）が、テストを流す人の使用量ログの保存先の実験の記録を消さない
+    monkeypatch.delenv("NDF_USAGE_DIR", raising=False)
     monkeypatch.delenv(OK_TOOLS_OUT_ENV, raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))

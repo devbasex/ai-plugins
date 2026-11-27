@@ -52,19 +52,37 @@ def whole_rows(path: Path) -> list[dict[str, Any]]:
 
     バイト列のまま改行で区切り、行ごとに復号する。1 行の書きかけ（多バイト文字の途中で切れた行など）でほかの行を捨てないためである。
     """
+    return rows_from(path, 0)[0]
+
+
+def rows_from(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
+    """バイトの位置 `offset` から後の、改行で終わる行と、読み終えた位置（最後の改行の後）。続きはその位置から読む。
+
+    規則は `whole_rows` と同じ。読めないか所有者だけの形でなければ空で、位置は `offset` のまま。
+    """
+    try:
+        return rows_after(path, offset)
+    except OSError:
+        return [], offset
+
+
+def rows_after(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
+    """`rows_from` と同じ読み方で、無いファイルだけを空にする。読めないか所有者だけの形でなければ `OSError`。
+
+    無いファイル（まだ書いていない月など）と、権限などで読めないファイルを呼び手が分けるためである。
+    """
     try:
         fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return []
-    try:
-        with os.fdopen(fd, "rb") as f:
-            if not private_to_me(f.fileno()):
-                return []
-            data = f.read()
-    except OSError:
-        return []
-    rows = (_parsed_row(line) for line in data.split(b"\n")[:-1])  # 最後の要素は改行で終わらない書きかけか空
-    return [row for row in rows if row is not None]
+    except FileNotFoundError:
+        return [], offset
+    with os.fdopen(fd, "rb") as f:
+        if not private_to_me(f.fileno()):
+            raise PermissionError(f"{path} が所有者だけの読み書きでない。所有者を自分にし、`chmod 600` にしてから打ち直す")
+        f.seek(offset)
+        data = f.read()
+    whole = data[: data.rfind(b"\n") + 1]  # 改行で終わらない末尾は書きかけ
+    rows = (_parsed_row(line) for line in whole.split(b"\n")[:-1])
+    return [row for row in rows if row is not None], offset + len(whole)
 
 
 def _parsed_row(line: bytes) -> Optional[dict[str, Any]]:

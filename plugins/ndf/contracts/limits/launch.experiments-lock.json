@@ -1,0 +1,7 @@
+{
+  "summary": "モデルと effort の実験の記録（launch-experiments-<YYYY-MM>.jsonl）へ追記する排他と、出現率のファイル（launch-weights.json）を書き換える排他の待ちの上限。待ちきれなければ記録を書かずに起動を続ける（#2944）",
+  "seconds": 5,
+  "read_by": [
+    "ndf.adapters.model_choice"
+  ]
+}
