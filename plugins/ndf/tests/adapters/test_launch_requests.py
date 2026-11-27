@@ -740,40 +740,56 @@ def test_the_cleanup_keeps_a_file_put_under_the_name_after_it_was_checked(tmp_pa
 
 
 def test_the_cleanup_removes_the_copy_only_after_moving_it_into_its_own_directory(tmp_path, monkeypatch):
-    """一時ファイルは共有のディレクトリの名前のまま消さず、NDF が作った専用のディレクトリへ移してから確かめて消す（Value 6）。"""
+    """一時ファイルは共有のディレクトリの名前のまま消さず、NDF が作った専用のディレクトリへ移してから確かめて消す。
+    移す前に、そのディレクトリの名前と実体を途中の記録に書く（Value 6）。"""
     target = _worktree(tmp_path)
     tmp = target.with_name(".launch.json.placing-0")
     tmp.write_bytes(b"ndf")
     found = os.lstat(tmp)
     rename = os.rename
-    moves: list[tuple[Path, bool]] = []
+    moves: list[tuple[Path, bool, dict]] = []
 
     def watched(src, dst):
-        moves.append((Path(dst), Path(dst).parent.is_dir() and not os.listdir(Path(dst).parent)))
+        box = Path(dst).parent
+        moves.append((Path(dst), box.is_dir() and not os.listdir(box), la.read_launch_record(la.reflected_file(target, la.PENDING))))
         rename(src, dst)
 
     monkeypatch.setattr(la.os, "rename", watched)
     la._drop_placing(target, {"placing": str(tmp), "placed": [found.st_dev, found.st_ino]})
-    box = target.with_name(".launch.json.dropping-0")
-    assert moves == [(box / la._DROPPING_FILE, True)]  # 移す先は、作ったばかりの空の専用のディレクトリの中
+    [(dst, empty, noted)] = moves
+    box = dst.parent
+    assert dst.name == la._DROPPING_FILE and box.name.startswith(".launch.json.dropping-") and empty
+    assert noted["dropping"] == str(box) and noted["box"]  # 移す前に、作成元を確かめる名前と実体を記録している
     assert not tmp.exists() and not box.exists()
 
 
-def test_the_cleanup_finishes_a_move_before_removal_only_for_the_recorded_name(tmp_path):
-    """消す前に専用のディレクトリへ移した直後に止まった一時ファイルは、記録した名前から決まるディレクトリだけを片付け、ほかは見ない（Value 6）。"""
+def test_the_cleanup_finishes_a_move_before_removal_only_for_the_recorded_directory(tmp_path):
+    """消す前に専用のディレクトリへ移した直後に止まった一時ファイルは、記録した名前と実体のディレクトリだけを片付ける（Value 6）。"""
     target = _worktree(tmp_path)
-    box = target.with_name(".launch.json.dropping-0")  # 記録した名前 `.launch.json.placing-0` を移す専用のディレクトリ
+    box = target.with_name(".launch.json.dropping-0")
     box.mkdir()
     moved = box / la._DROPPING_FILE
     moved.write_bytes(b"ndf")
     other = target.with_name(".launch.json.dropping-1")  # 記録に無い名前は、実体が同じでも見ない
     os.link(moved, other)
-    found = os.lstat(moved)
-    rec = {"placing": str(target.with_name(".launch.json.placing-0"))}
-    la._drop_placing(target, rec)  # 実体が記録に無ければ移した先も消さない
+    found, made = os.lstat(moved), os.lstat(box)
+    rec = {"placing": str(target.with_name(".launch.json.placing-0")), "dropping": str(box)}
+    la._drop_placing(target, {**rec, "box": [made.st_dev, made.st_ino]})  # 一時ファイルの実体が記録に無ければ消さない
     assert moved.exists()
-    la._drop_placing(target, {**rec, "placed": [found.st_dev, found.st_ino]})
+    la._drop_placing(target, {**rec, "placed": [found.st_dev, found.st_ino], "box": [made.st_dev, made.st_ino]})
     assert not box.exists() and other.exists()
+
+
+def test_the_cleanup_keeps_a_directory_whose_maker_it_cannot_confirm(tmp_path):
+    """記録した名前でも、作った直後の実体が記録に無いか違うディレクトリは、空でも利用者のものかもしれないので消さない（Value 6）。"""
+    target = _worktree(tmp_path)
+    box = target.with_name(".launch.json.dropping-0")
+    box.mkdir()
+    made = os.lstat(box)
+    rec = {"placing": str(target.with_name(".launch.json.placing-0")), "placed": [0, 0], "dropping": str(box)}
+    la._drop_placing(target, rec)
+    la._drop_placing(target, {**rec, "box": [made.st_dev, made.st_ino + 1]})
+    assert box.is_dir()
 
 
 @pytest.mark.parametrize("body", [b'{"version": 1, "mine": 1}\n', b""])
