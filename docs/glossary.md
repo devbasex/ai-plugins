@@ -5,7 +5,7 @@
 | コンテキスト | 意味 | 語の数 | ファイル |
 | --- | --- | ---: | --- |
 | プロジェクトの用語集（`project-glossary`） | 各プロジェクトが持つユビキタス言語。語・意味・コンテキスト・廃止した語・SSOT | 15 | `docs/glossary/project-glossary.md` |
-| NDF の開発ワークフロー（`ndf-workflow`） | NDF が提供する工程・承認ゲート・モード・ステップの語。development-workflow/references/glossary.md が持つ | 138 | `docs/glossary/ndf-workflow.md` |
+| NDF の開発ワークフロー（`ndf-workflow`） | NDF が提供する工程・承認ゲート・モード・ステップの語。development-workflow/references/glossary.md が持つ | 139 | `docs/glossary/ndf-workflow.md` |
 | NDF の並列の計画（`ndf-parallel`） | 並列の計画がレーンを同時に進め、オーガナイザーがレーンのリクエストへ答え、エピックを進めるときの語。レーン・一時レーン・計画のジャーナル・マシンの上限 | 113 | `docs/glossary/ndf-parallel.md` |
 | NDF の開発ループと MVV（`ndf-loop`） | 開発ループがスプリントを続けて選び、pace と MVV 判定で承認ゲートを通すときの語。選定・予算・止まる条件・出し直しの指摘・MVV | 50 | `docs/glossary/ndf-loop.md` |
 | NDF のプランの実行（`ndf-supervise`） | supervise.py がプランをキューで流し、ステップを進めて結果を残すときの語。プラン・ステップ・ステージ・上限・進捗ログ | 63 | `docs/glossary/ndf-supervise.md` |
@@ -13,7 +13,7 @@
 | NDF の CI とテスト（`ndf-ci-test`） | テストの戦略・範囲テストと全体テスト・CI のチェックの待ちと必須のチェックの突き合わせ・差分の種類の語 | 51 | `docs/glossary/ndf-ci-test.md` |
 | NDF の文脈と使用量（`ndf-context`） | context window の量を測り、工程境界で会話を続けるか切るかを決め、使用量を記録するときの語 | 34 | `docs/glossary/ndf-context.md` |
 | NDF の設計（`ndf-design`） | 設計 Pull Request・設計文書・設計の結果・決定の記録・外部の調査・代表のリポジトリの語 | 48 | `docs/glossary/ndf-design.md` |
-| NDF のブランチ戦略（`ndf-branch-strategy`） | ブランチ戦略の設定がベースブランチ・スプリントブランチ・リリース方式・レビューの単位・承認の受け方を決めるときの語 | 36 | `docs/glossary/ndf-branch-strategy.md` |
+| NDF のブランチ戦略（`ndf-branch-strategy`） | ブランチ戦略の設定がベースブランチ・スプリントブランチ・リリース方式・レビューの単位・承認の受け方を決めるときの語 | 39 | `docs/glossary/ndf-branch-strategy.md` |
 | NDF のコードの構造（`ndf-code-structure`） | NDF のスクリプトの構造・エントリポイントとコントラクト・公開する面・依存のバージョン・AI の兆候の検査の語 | 50 | `docs/glossary/ndf-code-structure.md` |
 | NDF のプロジェクトの設定（`ndf-project-settings`） | プロジェクトの設定（.ndf/）を解析で作り、選べる値と旧いキーの改名を扱うときの語 | 18 | `docs/glossary/ndf-project-settings.md` |
 | NDF の作り直し（`ndf-rebuild`） | #1142 の作り直し（ndf-next）と、旧いプラグインからの入れ替えの語。子の表・振り分け表・11.x の子 | 29 | `docs/glossary/ndf-rebuild.md` |
