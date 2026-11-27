@@ -614,6 +614,8 @@ def _work_tmp(result: Path, retry: bool = True, drop_on_error: bool = False) -> 
     作る前に消されたら作り直す。`retry` が偽なら作り直さずに None を返す。親のディレクトリが消えたときは止める。
     `drop_on_error` が真なら、ディレクトリか一時ファイルを作れずに止まる前に、空の専用ディレクトリを片付ける。排他を取る前の
     呼び出し（`_create_locked`）だけが真にする。排他を取った後の呼び出しは、片付けを `_exclusive` の `finally` の 1 回に任せる。
+    作ったディレクトリに印を置けなかったときは、`drop_on_error` によらず、そのディレクトリをこの場で消してから止まる。印の無い
+    ディレクトリは `_drop_work_dir` が残すためである。
     """
     parent = result.absolute().parent
     while True:
@@ -629,7 +631,18 @@ def _work_tmp(result: Path, retry: bool = True, drop_on_error: bool = False) -> 
                 dfd = _open_dir(work)
                 if dfd is None:
                     continue
-                key = _mark(dfd, secrets.token_bytes(WORK_KEY_BYTES)) if made else None
+                key = None
+                if made:
+                    try:
+                        key = _mark(dfd, secrets.token_bytes(WORK_KEY_BYTES))
+                    except OSError:
+                        # 印を置けなかったディレクトリは `_drop_work_dir` が judge のものと見分けられない。この起動が作った
+                        # ことは確かなので、名前がまだ同じディレクトリを指すときだけ、ここで消す（空でなければ消えない）
+                        if _same_dir(dfd, work):
+                            with contextlib.suppress(OSError):
+                                os.rmdir(work)
+                        os.close(dfd)
+                        raise
                 if key is None:
                     # 既にあったディレクトリか、作った直後に別の起動が印を置いた
                     key = _marked(dfd)
@@ -707,16 +720,24 @@ def _open_dir(work: Path) -> Optional[int]:
 def _mark(dfd: int, key: bytes) -> Optional[bytes]:
     """開いた専用ディレクトリに、鍵 `key` を書いた、judge が作ったことを示す印のファイルを置き、`key` を返す。
 
-    既に印のファイルがあれば、書かずに None を返す。
+    既に印のファイルがあれば、書かずに None を返す。鍵を書き切れない（容量不足など）ときは、作りかけた印のファイルを消してから
+    `OSError` を伝える。鍵の欠けた印は judge が作った印として読めず、どの起動も片付けられないためである。
     """
     try:
         fd = os.open(WORK_MARK, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd)
     except FileExistsError:
         return None
+    data = key.hex().encode("ascii")
     try:
-        os.write(fd, key.hex().encode("ascii"))
-    finally:
-        os.close(fd)
+        try:
+            if os.write(fd, data) != len(data):
+                raise OSError(f"印のファイル（{WORK_MARK}）に鍵を書き切れない")
+        finally:
+            os.close(fd)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(WORK_MARK, dir_fd=dfd)
+        raise
     return key
 
 
