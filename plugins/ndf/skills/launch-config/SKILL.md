@@ -53,6 +53,33 @@ NDF が非対話で起動する AI（プランの worker・Skill を回す起動
 | `mcp` | MCP の定義ファイル（リポジトリの根からの相対パス）の配列か、環境の MCP をすべて読む `"inherit"` |
 | `permissions.unsandboxed` | サンドボックスが使えない環境で、安全装置を外して起動してよいランタイム（`claude` 以外）。利用者は、このマシンが外側で隔離されていることを自分で確かめてから承認する |
 
+### モデルと effort の実験（`experiments`）
+
+NDF は工程ごとの選択肢（モデルと effort の組）を同梱し、設定が無くても実験で選ぶ。`experiments` は同梱の値のうち書いたキーだけを置き換える。
+
+```json
+{
+  "version": 1,
+  "experiments": {
+    "enabled": true,
+    "stages": {"impl": {"arms": {"claude": [{}, {"model": "sonnet", "effort": "medium"}]}}},
+    "allocation": {"window_days": 60}
+  }
+}
+```
+
+| キー | 意味 |
+| --- | --- |
+| `enabled` | 偽なら実験を止め、どの工程も基準の組（先頭の組）で起動する |
+| `stages.<工程>.arms.<ランタイム>` | その工程の選択肢。先頭が基準の組で、`{}` は指定なし（CLI の既定）。1 組だけならその値に固定する。工程とランタイムは同梱の表（`contracts/domains/launch-experiments.json`）にあるものだけ |
+| `allocation` | 割り付けの値（`floor`・`min_units`・`margin`・`window_days`）。省いたキーは同梱の値 |
+
+- **`experiments` は承認の対象ではない。** 承認のハッシュに入らないので、書き換えても承認をやり直さない。ただし `.ndf/launch.json` の書き換えなので、
+  手順 2〜4 のとおり候補を直して、反映の前に利用者に確かめる
+- effort が順位に無い・選択肢が空か重なる・値の制約に外れると、値を使う起動が理由と直す場所を示して止まる。`ndf models pick --layer worker --name impl`
+  で、今の設定から選ばれる値を確かめられる
+- 一時的に上書きするときは、設定を書き換えずに環境変数 `NDF_LAUNCH_MODEL`・`NDF_LAUNCH_EFFORT`（Codex は `NDF_LAUNCH_CODEX_MODEL`・`NDF_LAUNCH_CODEX_EFFORT`）を使う。上書きした起動は実験に数えない
+
 ## 手順
 
 ### 1. 今の指定と状態を読む
