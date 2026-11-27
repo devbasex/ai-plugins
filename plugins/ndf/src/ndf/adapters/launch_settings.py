@@ -178,14 +178,17 @@ def _mcp_definition(path: Path, rel: str) -> dict[str, Any]:
 
 def approval_target(settings: Settings) -> Target:
     """承認の対象（`permissions`・全工程の定義ファイル・`inherit` があれば `.mcp.json`）のハッシュと一覧。"""
-    files = _target_files(settings)
-    sha = launch_approval.target_digest(settings.permissions, files)
+    files, sha = _read_target(settings)
     return Target(sha, _listing(settings, files, sha))
 
 
-def _target_sha(settings: Settings) -> str:
-    """承認の対象のハッシュだけ（一覧と定義ファイルごとのハッシュを作らない。起動の直前の照らし直しに使う）。"""
-    return launch_approval.target_digest(settings.permissions, _target_files(settings))
+def _read_target(settings: Settings) -> tuple[dict[str, Any], str]:
+    """承認の対象の定義ファイルを読み、読んだ中身と対象全体のハッシュを返す。承認の対象のハッシュはここだけで求める。
+
+    一覧（定義ファイルごとのハッシュを含む）は作らない。一覧が要る経路（`approval_target` と未承認の停止）だけが作る。
+    """
+    files = _target_files(settings)
+    return files, launch_approval.target_digest(settings.permissions, files)
 
 
 def _target_files(settings: Settings) -> dict[str, Any]:
@@ -252,7 +255,7 @@ class Grant:
         if self.sha256 is None or self.root is None or self.repo is None:
             return None
         try:
-            now = _target_sha(load(self.root))
+            now = _read_target(load(self.root))[1]
         except internal.InternalError as exc:
             return f"起動の直前に起動の設定を読み直せない: {exc}"
         if now != self.sha256:
@@ -301,13 +304,12 @@ def prepared(name: str, cwd: Path) -> Iterator[Grant]:
         yield Grant(root=root)
         return
     try:
-        files = _target_files(settings)
+        files, sha = _read_target(settings)
     except internal.InternalError as exc:
         raise _precondition(
             f"工程 {name} の起動を止めた。承認の要る起動は、すべての工程の MCP の定義ファイルをまとめて承認と照らすため、"
             f"どれか 1 つでも読めないと止まる: {exc}"
         ) from None
-    sha = launch_approval.target_digest(settings.permissions, files)
     repo = launch_approval.repo_key(root)
     if not launch_approval.is_approved(repo, sha):
         listing = json.dumps(_listing(settings, files, sha), ensure_ascii=False)
