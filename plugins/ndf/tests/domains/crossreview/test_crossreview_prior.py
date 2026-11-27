@@ -252,6 +252,18 @@ def test_protect_kinds_are_carried_from_the_record() -> None:
     assert held.merged == ["r1-1"]
 
 
+def test_finding_whose_id_collides_with_another_text_is_carried_under_a_free_id() -> None:
+    """#4363: 別の保存先の指摘は id が重なる。本文が違えば空いている id で入れ、保護の種類を失わない。読み直しても増えない。"""
+    journal = FindingJournal()
+    first = prior_decide.Carried("p-r1-1", None, "A が止まる", "codex", "major", None, None)
+    second = first._replace(text="利用者のデータが消える", protect=("user_data",))
+    assert journal.carry([first]) == ["p-r1-1"]
+    assert journal.carry([second]) == ["p-r1-1-2"]
+    row = journal.rows["p-r1-1-2"]
+    assert (row["id"], row["text"], row["protect"]) == ("p-r1-1-2", "利用者のデータが消える", ["user_data"])
+    assert journal.carry([second]) == []
+
+
 def test_unresolved_finding_without_a_thread_is_carried_from_the_record(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """PR 3944 の r1-11: 別の保存先で始めた実行は、スレッドの無い未解決の指摘を記録のコメントから戻し、修正担当へ渡す。"""
     hub.port.existing = [_record([_OPEN_NO_THREAD], {}, "2026-11-20T00:00:00Z")]

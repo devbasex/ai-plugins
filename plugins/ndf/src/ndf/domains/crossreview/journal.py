@@ -447,10 +447,20 @@ class FindingJournal:
         row |= {"key": oscillation.finding_key(error["text"]), "text": error["text"], "severity": criteria_decide.at_least_blocking(None)}
         row |= {CITATION_KEY: key, "cited": error["cited"], "unknown": error["unknown"], JUDGED: mvv}
 
+    def _free_id(self, wanted: str) -> str:
+        """`wanted` が空いていればそのまま、使われていれば `-2` からの番号を添えた空いている id。"""
+        fid, n = wanted, 1
+        while fid in self.rows:
+            n += 1
+            fid = f"{wanted}-{n}"
+        return fid
+
     def carry(self, carried: Sequence[prior_decide.Carried], items: Sequence[str] = (), mvv: Optional[str] = None) -> list[str]:
-        """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じ id か同じキーの行が
-        あれば入れず（スレッドと記録のコメントの両方から来た指摘・状態ファイルが既に持つ指摘を重ねない）、MVV の判定と保護の種類
-        だけをその行へ重ねる（`merge_marks`）。`items` は承認済みの MVV の項目、`mvv` はその識別子で、同じ MVV での判定だけを戻す。"""
+        """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じキーの行か、
+        同じスレッドの行（id が `t<コメントの id>`）があれば入れず（スレッドと記録のコメントの両方から来た指摘・状態ファイルが既に持つ指摘を重ねない）、MVV の判定と保護の種類
+        だけをその行へ重ねる（`merge_marks`）。`items` は承認済みの MVV の項目、`mvv` はその識別子で、同じ MVV での判定だけを戻す。
+
+        スレッドの無い指摘の id が本文の違う行と重なれば、空いている id で別の指摘として入れる（指摘と保護の種類を失わない）。"""
         added = []
         unknown = []
         self.merged = []
@@ -464,15 +474,14 @@ class FindingJournal:
                 if self.merge_marks(str(known["id"]), c._asdict(), items, mvv, place):
                     self.merged.append(str(known["id"]))
                 continue
-            if c.id in self.rows:
-                continue
-            row = _journal_row(c.id, 0, c.text, _text(c.by), key, _text(c.section))
+            fid = self._free_id(c.id)
+            row = _journal_row(fid, 0, c.text, _text(c.by), key, _text(c.section))
             located = _located({"severity": c.severity, "path": c.path, "line": c.line})
-            row = self.rows[c.id] = by_key[key] = row | located
+            row = self.rows[fid] = by_key[key] = row | located
             _protect(row, c.protect)
             if not _restore(row, c, items, mvv):
-                unknown.append(c.id)
-            added.append(c.id)
+                unknown.append(fid)
+            added.append(fid)
         self.warnings = [_unknown_items("引き継いだ指摘", unknown)] if unknown else []
         return added
 
