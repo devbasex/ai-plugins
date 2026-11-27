@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
-from ndf.adapters import llm, publish, run_log
+from ndf.adapters import github, llm, publish, run_log
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, Pull, Unread
 from ndf.contracts import internal, limits
@@ -504,9 +504,8 @@ def _table_numbers(got: Mapping[str, Any], paths: Sequence[str]) -> dict[str, Op
     """
     out: dict[str, Optional[tuple[str, ...]]] = {}
     for p in paths:
-        node = got.get(p)
-        text = node.get("text") if isinstance(node, dict) and node.get("isTruncated") is False else None
-        rows = design_check_rules.redline_rows(text) if isinstance(text, str) else None
+        text = github.whole_text(got.get(p))
+        rows = design_check_rules.redline_rows(text) if text is not None else None
         out[p] = None if rows is None else tuple(dict.fromkeys(n for r in rows for n in r.numbers))
     return out
 
@@ -517,8 +516,7 @@ def _target(hub: GitHub, pull: Pull, paths: Sequence[str]) -> tuple[dict[str, An
     マージ先の設定と head の本文を `GitHub.branch_file_with` で読む（承認ゲートを省く判定でだけ打つ。設計の費用表の増分に記録する）。
     マージ先の設定を読めなければ本番へ反映され得るとして扱う。最初の要求の失敗は `GitHubError` を送出する。
     """
-    selection = "{ ... on Blob { oid text isTruncated } }"
-    selections = {p: f"object(expression: {json.dumps(f'{pull.head_sha}:{p}')}) {selection}" for p in paths}
+    selections = {p: github.whole_blob_at(pull.head_sha, p) for p in paths}
     found, got, unread = hub.branch_file_with(pull.base_ref, production_merge.PROJECT_FILE, selections)
     verdict = production_merge.judge_project_text(found.text, pull.base_ref, source_repo=found.repo, repo=hub.repo)
     production = production_merge.reaches_production(verdict)

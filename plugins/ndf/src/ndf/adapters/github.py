@@ -16,6 +16,7 @@ Issue・コメント・PR の本文を書く操作は、公開範囲を読むエ
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import time
@@ -46,6 +47,8 @@ T = TypeVar("T")
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")  # GraphQL のエイリアスで引ける番号つきの節点
 # `issueOrPullRequest`（union）から本文を選ぶ選択。union なので、body は型ごとのインラインフラグメントで選ぶ（#3908 の r2-1）
 BODY_FIELDS = "... on Issue { body } ... on PullRequest { body }"
+# 1 つのファイルの本文を切り詰めの有無と合わせて読む選択（`object(expression:)` の後ろに置く。`whole_text` で取り出す）
+WHOLE_BLOB = "{ ... on Blob { oid text isTruncated } }"
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
 # 認証の値を読む環境変数（先のものを優先する。利用者の手順へ渡さないときに消す名前も同じ）
@@ -172,6 +175,17 @@ class MergeExpect(NamedTuple):
 def same_repo(a: str, b: str) -> bool:
     """2 つのリポジトリ名（`<所有者>/<リポジトリ>`）が同じか。GitHub の名前は大文字小文字を区別しない。"""
     return a.lower() == b.lower()
+
+
+def whole_blob_at(rev: str, path: str) -> str:
+    """コミット `rev` のファイル `path` の本文を、切り詰めの有無と合わせて読む `repository` の下の選択（`WHOLE_BLOB`）。"""
+    return f"object(expression: {json.dumps(f'{rev}:{path}')}) {WHOLE_BLOB}"
+
+
+def whole_text(node: Any) -> Optional[str]:
+    """`whole_blob_at` で読んだ応答の節点の本文。Blob でない・応答に無い・切り詰められた（`isTruncated`）本文は None。"""
+    text = node.get("text") if isinstance(node, dict) and node.get("isTruncated") is False else None
+    return text if isinstance(text, str) else None
 
 
 def landed(pull: Pull, method: str, base_ref: str, repo: git.Git) -> bool:
