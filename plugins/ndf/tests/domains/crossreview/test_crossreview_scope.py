@@ -313,17 +313,25 @@ def test_issue_3702_sections_reviewed_against_another_target_are_reviewed_again(
 
 
 @pytest.mark.parametrize(
-    ("recorded", "now", "reviewed"),
-    [("m1", "m1", {A, B}), ("m1", "m2", set()), (None, "m1", set()), ("m1", None, set()), (None, None, {A, B})],
+    ("recorded", "base", "pinned", "reviewed"),
+    [
+        ("m1", "m1", True, {A, B}),
+        ("m1", "m2", True, set()),
+        (None, "m1", True, set()),
+        ("m1", "m2", False, {A, B}),
+        (None, "m1", False, {A, B}),
+    ],
 )
-def test_pr_4638_r1_2_sections_reviewed_from_another_pinned_start_are_reviewed_again(
-    recorded: str | None, now: str | None, reviewed: set[str]
+def test_pr_4638_r2_sections_are_kept_while_the_start_of_the_diff_is_the_same(
+    recorded: str | None, base: str, pinned: bool, reviewed: set[str]
 ) -> None:
-    """`--base` がコミットの起動では、比較元のブランチ（PR のマージ先）が同じでも、差分の起点の merge-base が違う記録は引き継がない。"""
+    """`--base` がコミットの起動は、差分の起点の merge-base が違う記録を引き継がない（r1-2）。起点は入力の形によらず merge-base の
+    SHA で記録するので、ブランチ名で通した記録も同じ merge-base のコミットの起動で引き継ぐ（r2-2）。ブランチの起動は起点を照らさない。"""
     state = {store.REVIEWED: [A, B], store.REVIEWED_MVV: APPROVED, store.REVIEWED_BASE_BRANCH: "main"}
     if recorded:
         state[store.REVIEWED_BASE_COMMIT] = recorded
-    assert scope_decide.reviewed_of(state, APPROVED, "main", now) == reviewed
+    basis = scope_decide.Basis(base, mvv=APPROVED, base_branch="main")
+    assert scope_decide.reviewed_for(state, basis, pinned) == reviewed
 
 
 @pytest.mark.parametrize(("recorded", "head"), [("main", "h1"), ("sprint/y", None), (None, None)])

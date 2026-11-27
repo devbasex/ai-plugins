@@ -79,16 +79,25 @@ def reviewed_of(
     値 `mvv`（None は確かめない）と違う MVV で通ったセクションは、通っていないとみなす（#4076）。今の比較元のブランチ
     `base_branch`（None は確かめない）と違う比較元で通ったセクションも、通っていないとみなす。`run` はどの起動でも今の比較元を
     渡す（`--base` やマージ先を変えれば、新しい全差分のセクションを詳細レビューに通す。比較元が違う記録を範囲の決定に使うと、
-    今の比較元の名前で済んだと書き直す。#3702・PR 4638 の r2-2・r3-1）。`pinned` は `--base` がコミットの起動での差分の起点
-    （そのコミットと HEAD の merge-base。ブランチなら None）で、記録の起点と違えば通っていないとみなす。比較元のブランチは
-    PR のマージ先なので、同じ PR で別のコミットを渡しても一致する（PR 4638 の r1-2）。"""
+    今の比較元の名前で済んだと書き直す。#3702・PR 4638 の r2-2・r3-1）。`pinned` は差分の起点の merge-base の SHA（None は
+    確かめない）で、記録の起点と違えば通っていないとみなす。`run` と `review-scope` は `reviewed_for` から呼ぶ。"""
     if mvv is not None and _known(state.get(store.REVIEWED_MVV)) != mvv:
         return set()
     if base_branch is not None and state.get(store.REVIEWED_BASE_BRANCH) != base_branch:
         return set()
-    if state.get(store.REVIEWED_BASE_COMMIT) != pinned:
+    if pinned is not None and state.get(store.REVIEWED_BASE_COMMIT) != pinned:
         return set()
     return set(store.list_of(state, store.REVIEWED))
+
+
+def reviewed_for(state: Mapping[str, Any], basis: Basis, pinned: bool) -> set[str]:
+    """`run` と `review-scope` が共通に使う、今の起動で引き継げる詳細レビューの記録（PR 4638 の r2-1・r2-2）。MVV・比較元の
+    ブランチを `basis` で照らし、`pinned`（`--base` がコミット）なら差分の起点の merge-base（`basis.base`）も照らす。
+    コミットの起動では比較元のブランチが PR のマージ先になり、別のコミットを渡しても一致するためである（r1-2）。ブランチの起動は
+    起点を照らさない（マージ先を PR へマージして merge-base が進んでも、詳細レビューを繰り返さない）。起点は入力の形によらず
+    merge-base の SHA で記録するので、ブランチ名から同じ merge-base の SHA へ替えても引き継ぐ。照らす値はどれも `basis` の
+    値なので、記録を外す起動では最後のラウンドも `basis` に合わず、`run` は前回の収束を返さない（`_reusable`）。"""
+    return reviewed_of(state, basis.mvv, basis.base_branch, basis.base if pinned else None)
 
 
 def _known(value: object) -> str:

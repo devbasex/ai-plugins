@@ -782,7 +782,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     sections = changes.sections(changed.docs)
     head = run.g.rev_parse("HEAD")
     merge_base = _merge_base(run, head)
-    reviewed = scope_decide.reviewed_of(run.data, run.mvv, run.mvv_branch, merge_base if cfg.base_pinned else None)
+    reviewed = scope_decide.reviewed_for(run.data, _basis(run, head), cfg.base_pinned)
     prev = round_scope.previous_head(run.g, run.data, _basis(run, head), head)
     scope = scope_decide.review_scope(cfg.every_section, round_no, prev, sections, reviewed)
     diff = since = _write_diff(run, round_no, ".diff", scope.base or merge_base, head)
@@ -901,8 +901,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         return fin.INCOMPLETE_REVIEWERS
     if prep.scope.kind == scope_decide.FULL:
         run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
-        pinned = prep.base if run.cfg.base_pinned else None
-        run.data.update({store.REVIEWED_MVV: run.mvv, store.REVIEWED_BASE_BRANCH: run.mvv_branch, store.REVIEWED_BASE_COMMIT: pinned})
+        run.data.update({store.REVIEWED_MVV: run.mvv, store.REVIEWED_BASE_BRANCH: run.mvv_branch, store.REVIEWED_BASE_COMMIT: prep.base})
     open_, handed = run.journal.pending(run.cfg.handed)
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:
