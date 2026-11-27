@@ -100,7 +100,7 @@ def keep_seat(run: Held, seat: str, chosen: claude_choice.ChoiceRun) -> None:
 
 def meta_of(name: str, chosen: claude_choice.ChoiceRun) -> dict[str, Any]:
     """使用量ログの行の工程の欄と、選んだ値の欄。"""
-    return {**claude.launch_meta(name, chosen.repo), **chosen.meta()}
+    return chosen.meta(name)
 
 
 def claude_row(log: claude.LaunchLog, output: str, status: agents.AgentStatus) -> claude.ClaudeReply:

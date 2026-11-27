@@ -133,11 +133,11 @@ class ChoiceRun:
         """再開する会話の起動の子の環境。値を選んだ起動は effort の変数を最初の起動の扱いに固定する（引き継いだなら最初の値、ほかは外す）。"""
         return {} if self.choice is None else {identity.env_name("claude-effort-level"): None, **self.env_changes()}
 
-    def meta(self) -> dict[str, Any]:
-        """使用量ログの行に足す値の欄（値の無い欄は省く）。"""
+    def meta(self, name: str) -> dict[str, Any]:
+        """使用量ログの行の工程の欄（`claude.launch_meta`。`name` は工程の名前）と、選んだ値の欄（値の無い欄は省く）。"""
         values = {} if self.choice is None else self.choice.row_fields()
         fields = {**values, **dict(request_id=self.request_id, request_try=self.request_try, charge_to=self.charge_to)}
-        return {k: v for k, v in fields.items() if v is not None}
+        return {**claude.launch_meta(name, self.repo), **{k: v for k, v in fields.items() if v is not None}}
 
     def next_try(self, log: claude.LaunchLog) -> None:
         """同じ会話を再開する前に、リクエストの中の番号（`request_try`）を 1 つ進め、行の書き手の欄にも反映する。"""

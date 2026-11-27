@@ -81,7 +81,7 @@ def first_launch(
 
 def launch_log(kind: str, session: str, run: claude_choice.ChoiceRun, report: Callable[[], Any]) -> claude.LaunchLog:
     """会話 1 つの行の書き手。`report` は結果ファイルを読んで解く（無ければ None、読めなければ `EntryError`）。"""
-    meta = {**claude.launch_meta(kind, run.repo), **run.meta(), "session_id": session}
+    meta = {**run.meta(kind), "session_id": session}
     return claude.LaunchLog(meta, lambda reply: {"outcome": end_of(reply, report)})
 
 
