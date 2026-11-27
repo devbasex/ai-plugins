@@ -422,19 +422,32 @@ def test_issue_4363_ask_points_the_mvv_criterion_at_the_copies_in_the_input_dire
 def test_issue_4363_filled_read_gives_the_diffs_read_by_the_seats_of_the_finding(key: str, names: list) -> None:
     filled = reviewing.FilledRead(Path("full.diff"), frozenset({"filled", "both"}), frozenset({"other", "both"}))
     assert [d.name for d in filled.diffs(key, Path("round2.diff"))] == names
+    assert filled.reads_round(key) == ("round2.diff" in names)
     # 全差分でレビューし直すラウンドは、埋めていない席が前の head からの差分も読む
     since = [d.name for d in filled.diffs(key, Path("round2.diff"), Path("round2-since.diff"))]
     assert since == [n for name in names for n in ([name, "round2-since.diff"] if name == "round2.diff" else [name])]
 
 
-def test_issue_4363_excerpt_lines_keep_only_the_changes_the_full_diff_does_not_show() -> None:
-    """判定役へ足すのは、削除された行と全差分に追加行として載らない追加行と、そのファイルと範囲の見出しだけである。"""
+def test_issue_4363_excerpt_lines_give_the_numbers_of_the_deleted_and_added_lines() -> None:
+    """判定役へ足すのは、削除された行（両側の行番号と本文）と追加された行の範囲（本文は無し）と、そのファイルの見出しである。"""
     head = ["diff --git a/a.md b/a.md", "--- a/a.md", "+++ b/a.md"]
-    since = [*head, "@@ -1,3 +1,3 @@", " 前の行", "--- 区切り", "+載る行", "+戻した行", "@@ -9 +9 @@", "+載る別の行"]
-    full = [*head, "@@ -1,2 +2 @@", "+載る行", "@@ -9 +9 @@", "+載る別の行"]
-    got = verify_decide.excerpt_lines("\n".join(since) + "\n", "\n".join(full) + "\n")
-    assert got.split("\n") == [verify_decide.EXCERPT_NOTE, *head, "@@ -1,3 +1,3 @@", "--- 区切り", "+戻した行", ""]
-    assert verify_decide.excerpt_lines("\n".join(full), "\n".join(full)) == ""
+    since = [
+        *head,
+        "@@ -1,4 +1,5 @@",
+        " 前の行",
+        "--- 区切り",
+        " 間の行",
+        "+足した行",
+        "+次の行",
+        " 後の行",
+        "@@ -9 +10 @@",
+        "-旧い行",
+        "+新しい行",
+    ]
+    got = verify_decide.excerpt_lines("\n".join(since) + "\n")
+    changes = ["削除 旧2 新2: -- 区切り", "追加 新3-4", "削除 旧9 新10: 旧い行", "追加 新10-10"]
+    assert got.split("\n") == [verify_decide.EXCERPT_NOTE, *head, *changes, ""]
+    assert verify_decide.excerpt_lines("") == ""
 
 
 def test_issue_4363_ask_lists_the_diffs_of_each_finding_when_they_differ(tmp_path: Path) -> None:

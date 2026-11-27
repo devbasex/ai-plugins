@@ -41,6 +41,7 @@ import shutil
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -545,7 +546,7 @@ def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
 def _confirm_heavy(
     run: _Run,
     round_no: int,
-    round_diffs: tuple[Path, ...],
+    judged: Callable[[], tuple[Path, ...]],
     launch: Launcher,
     use_tracks: bool = False,
     filled: Optional[reviewing.FilledRead] = None,
@@ -554,11 +555,14 @@ def _confirm_heavy(
     無ければ起動しない。`use_tracks` は、回答の指摘の種類を使う処理があるラウンドで真にする。
 
     判定役の起動は 1 回で、指摘ごとに、それを出した席に合う差分を渡す。席を埋めたラウンド（`filled`）の埋めた席の指摘は
-    全差分、ほかは `round_diffs`（`reviewing.judge_diffs`）である（一方の差分に載る変更が、他方に載るとは限らない）。"""
+    全差分、ほかは `judged`（`reviewing.judge_diffs`）の返す差分である（一方の差分に載る変更が、他方に載るとは限らない）。
+    `judged` は、その差分を使う指摘を渡すときだけ呼ぶ（呼ぶと差分を読んで抜粋を作る）。"""
     heavy = [row for row in map(run.journal.rows.__getitem__, run.journal.fresh) if _heavy(row.get("severity"))]
     asked = verify_decide.select(heavy, use_tracks)
     if not asked:
         return Checked()
+    needed = filled is None or any(filled.reads_round(row.get("key")) for row in asked)
+    round_diffs = judged() if needed else ()
     diffs = {str(row["id"]): round_diffs if filled is None else filled.diffs(row.get("key"), *round_diffs) for row in asked}
     answers = verify.ask(run, round_no, asked, diffs, launch)
     run.warnings += [f"round {round_no}: {warning}" for warning in answers.warnings]
@@ -646,7 +650,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
     # 確認で下げた指摘は、振動の判定のキーに数えない
-    judged = reviewing.judge_diffs(run, round_no, prep)
+    judged = partial(reviewing.judge_diffs, run, round_no, prep)
     checked = _confirm_heavy(run, round_no, judged, _keeping(run, round_no, prep, got, launch), filled=got.filled)
     run.history.append(keys - checked.lowered)
     record = _round_record(run, round_no, prep)

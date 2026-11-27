@@ -19,12 +19,13 @@ from ndf.domains.records import mvv_decide
 
 # ラウンドの記録で、そのラウンドが判定役の起動を試み、出力を保存できたときの名前（ファイル名の拡張子より前）を持つキー。回答の有無は表さない
 ROUND_KEY = "judge_output"
-# 前の head からの差分の抜粋（`excerpt_lines`）の先頭の行
+# 前の head からの差分の抜粋（`excerpt_lines`）の先頭の行。行の書き方も判定役へ伝える
 EXCERPT_NOTE = (
-    "前の head からの差分のうち、削除された行と、全差分に追加行として載らない追加行だけの抜粋である。ほかの行と前後の行は含まない。"
+    "前の head からの差分の抜粋である。削除行は「削除 旧<前の head の行番号> 新<今の行番号>: <本文>」と書く（新は、削除した所の直後に"
+    "今ある行）。追加行は「追加 新<最初の行番号>-<最後の行番号>」と範囲だけを書き、本文は載せない（今のファイルで読む）。"
 )
-# hunk の見出し。取り出すのは head の側の最初の行の番号
-_HUNK_HEAD = re.compile(r"@@ -\S+ \+(\d+)")
+# hunk の見出し。取り出すのは、前の側と今の側の最初の行の番号
+_HUNK_HEAD = re.compile(r"@@ -(\d+)(?:,\d+)? \+(\d+)")
 # 指示に載せる指摘の欄（書いた相手役 `by` は載せない）
 _SHOWN = ("id", "severity", "text", "impact", "path", "line", "section", "diffs")
 
@@ -73,47 +74,43 @@ def select(rows: Sequence[Mapping[str, Any]], use_tracks: bool = False) -> list[
     return []
 
 
-def _hunk_lines(diff: str) -> Iterator[tuple[tuple[str, ...], str, int, str]]:
-    """差分の hunk の行ごとに、ファイルの見出し、範囲の見出し、head の側の行の番号、行を返す。"""
+def _changes(diff: str) -> Iterator[tuple[tuple[str, ...], str]]:
+    """差分の削除行と、続く追加行の範囲を、ファイルの見出しと抜粋の 1 行にして順に返す。"""
     header: list[str] = []
-    hunk, number = "", 0
-    for line in diff.split("\n"):
+    old = new = first = 0  # first は、続いている追加行の最初の番号（無ければ 0）
+    in_hunk = False
+    for line in (*diff.split("\n"), ""):
+        if first and not line.startswith("+"):
+            yield tuple(header), f"追加 新{first}-{new - 1}"
+            first = 0
         if line.startswith("diff --git "):
-            header, hunk = [line], ""
+            header, in_hunk = [line], False
         elif found := _HUNK_HEAD.match(line):
-            hunk, number = line, int(found[1])
-        elif not hunk:
+            old, new, in_hunk = int(found[1]), int(found[2]), True
+        elif not in_hunk:
             header.append(line)
-        else:
-            yield tuple(header), hunk, number, line
-            number += line.startswith((" ", "+"))
+        elif line.startswith("-"):
+            yield tuple(header), f"削除 旧{old} 新{new}: {line[1:]}"
+            old += 1
+        elif line.startswith("+"):
+            first = first or new
+            new += 1
+        elif line.startswith(" "):
+            old, new = old + 1, new + 1
 
 
-def _place(header: Sequence[str], number: int) -> tuple[str, int]:
-    """追加行の場所（head の側のパスの見出しと、行の番号）。"""
-    return next((line for line in header if line.startswith("+++ ")), ""), number
+def excerpt_lines(since: str) -> str:
+    """前の head からの差分 `since` を、削除された行と追加された行の範囲だけにする。変わった行が無ければ空。
 
-
-def excerpt_lines(since: str, full: str) -> str:
-    """前の head からの差分 `since` のうち、全差分 `full` から分からない変更の行と、その場所が分かる見出し（ファイルと範囲）を
-    抜き出す。無ければ空。どちらの差分も新しい側は同じ head である。
-
-    抜き出すのは削除された行と、`full` の同じ場所に追加行として載らない追加行（分岐点にあった行を戻したもの）である。
-    判定役へ `since` の全体を渡すと入力トークンが増えるので、ほかの行は渡さない。"""
-    listed = {_place(header, number) for header, _, number, line in _hunk_lines(full) if line.startswith("+")}
+    直前の修正で何を変えたかは、全差分からは分からない（削除は載らないことがあり、追加は前からの追加と見分けられない）。
+    `since` の全体を渡すと入力トークンが増えるので、今のファイルで読める追加行の本文と前後の行は渡さない。"""
     out: list[str] = []
-    shown_header: tuple[str, ...] = ()
-    shown_hunk = ""
-    for header, hunk, number, line in _hunk_lines(since):
-        if not (line.startswith("-") or (line.startswith("+") and _place(header, number) not in listed)):
-            continue
-        if header != shown_header:
+    shown: tuple[str, ...] = ()
+    for header, change in _changes(since):
+        if header != shown:
             out += header
-            shown_header, shown_hunk = header, ""
-        if hunk != shown_hunk:
-            out.append(hunk)
-            shown_hunk = hunk
-        out.append(line)
+            shown = header
+        out.append(change)
     return "".join(f"{line}\n" for line in (EXCERPT_NOTE, *out)) if out else ""
 
 
