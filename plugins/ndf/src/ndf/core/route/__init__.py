@@ -456,6 +456,14 @@ def _by_refactor_gate(name: str, plan: Mapping[str, Any], values: Mapping[str, V
         return dict(plan)
     if not local:
         return without_steps(plan, ["follow"])
+    return _local_refactor_plan(plan)
+
+
+def _local_refactor_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
+    """`cross-refactoring` の手元の経路のプラン。`push`・`fix-push` を外し、`refactor` のステップを組み替える。
+
+    `refactor` には `--pushed-out` を足し `on_cause.incomplete` を消す（残すと `follow` を通らずに成功で終わる）。
+    """
     steps = []
     for step in without_steps(plan, ["push", "fix-push"])["steps"]:
         if step["id"] == "refactor":
