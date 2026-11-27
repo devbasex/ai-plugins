@@ -571,7 +571,7 @@ def test_prune_sweeps_months_no_setting_uses_from_other_repos(store):
     files = {m: _month_file(store.parent / ("a" * 16), m) for m in ("2026-01", "2026-02")}
     mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
     assert [m for m, p in files.items() if p.exists()] == ["2026-02"]
-    assert (store.parent / ("a" * 16)).is_dir()  # ディレクトリとロックのファイルは残す
+    assert (store.parent / ("a" * 16)).is_dir()  # 月が残るディレクトリは残す
     assert (store.parent / "launch-swept").read_text(encoding="utf-8") == "2027-03"
 
 
@@ -599,7 +599,7 @@ def test_prune_reads_and_drops_months_inside_the_record_lock(store, monkeypatch)
     real, held = mc._drop_months, []
 
     def check(root, edge):
-        if root == store and not held:  # 最初の呼び出しが自分の月の削除（片付けは後で自分のディレクトリも通る）
+        if root == store and not held:  # 自分の月の削除（片付けは自分のディレクトリを通らない）
             with pytest.raises(Timeout):
                 FileLock(str(store / "launch-experiments.lock"), timeout=0).acquire()
             held.append(root)
@@ -608,6 +608,49 @@ def test_prune_reads_and_drops_months_inside_the_record_lock(store, monkeypatch)
     monkeypatch.setattr(mc, "_drop_months", check)
     mc.prune(NOW, 60, store)
     assert held == [store]
+
+
+def test_a_busy_lock_of_another_repo_does_not_hold_up_the_own_prune(store):
+    # ほかのリポジトリの出現率のロックが使用中でも、待たずに飛ばし、自分の掃除と片付けの済みを今月にする
+    from filelock import FileLock
+
+    other = store.parent / ("a" * 16)
+    old = _month_file(other, "2026-01")
+    with FileLock(str(other / "launch-weights.json.lock")):
+        mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
+    assert (store / "launch-pruned").read_text(encoding="utf-8") == "2027-03"
+    assert (store.parent / "launch-swept").read_text(encoding="utf-8") == "2027-03"
+    assert not old.exists() and other.is_dir()  # 古い月はロックなしで消え、使用中のディレクトリは残る
+
+
+def test_the_sweep_is_retried_after_the_own_prune_is_done(store):
+    # 自分の掃除が今月済みでも、片付けが済んでいなければ次の起動が片付ける
+    old = _month_file(store.parent / ("a" * 16), "2026-01")
+    _month_file(store, "2027-03")
+    (store / "launch-pruned").write_text("2027-03", encoding="utf-8")
+    mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
+    assert not old.exists() and (store.parent / "launch-swept").read_text(encoding="utf-8") == "2027-03"
+
+
+def test_the_sweep_removes_a_repo_with_nothing_left(store):
+    other = store.parent / ("a" * 16)
+    _month_file(other, "2026-01")
+    for name in ("launch-weights.json", "launch-pruned", "launch-experiments.lock", "launch-pruned.lock", "launch-weights.json.lock"):
+        (other / name).write_text('{"entries": []}' if name.endswith(".json") else "", encoding="utf-8")
+    mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
+    assert not other.exists()
+
+
+def test_the_sweep_keeps_a_repo_with_weights_or_unknown_files(store):
+    kept, unknown = store.parent / ("a" * 16), store.parent / ("b" * 16)
+    _month_file(kept, "2026-01")
+    entry = {"at": _at(datetime(2027, 3, 1, tzinfo=UTC)), "allocation": {"window_days": 60}}
+    (kept / "launch-weights.json").write_text(json.dumps({"entries": [entry]}), encoding="utf-8")
+    _month_file(unknown, "2026-01")
+    (unknown / "notes.txt").write_text("", encoding="utf-8")
+    mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
+    assert (kept / "launch-weights.json").exists() and (unknown / "notes.txt").exists()
+    assert not (unknown / "launch-experiments.lock").exists()  # 知らない名前のファイルだけが残り、ディレクトリは残す
 
 
 def test_records_of_two_repos_are_kept_apart(tmp_path, store, clock):
