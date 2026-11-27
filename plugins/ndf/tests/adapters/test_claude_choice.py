@@ -204,7 +204,7 @@ def test_a_refused_model_switches_to_the_base_once_without_counting_a_retry(judg
     assert got.ok and got.attempts == 1 and _value(calls.argv[1], "--model") is None
     assert [(r["request_try"], "assign_id" in r) for r in recorder.rows] == [(1, True), (2, False)]
     assert recorder.outcomes == []  # 切り替えた単位は数えない
-    assert [r["switched"] for r in _experiments(tmp_path / "store", "launch_error")] == [True]
+    assert [(r["switched"], r["reason"]) for r in _experiments(tmp_path / "store", "launch_error")] == [(True, "model_refused")]
 
 
 def test_the_switch_checks_the_material_before_launching_again(judge_repo, recorder) -> None:

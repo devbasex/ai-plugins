@@ -111,7 +111,7 @@ class ChoiceRun:
             return False
         if ready is not None and not ready():
             return False
-        back = launch_chooser.base_fallback(self.choice, reply.error or str(reply.failure))
+        back = launch_chooser.base_fallback(self.choice, str(claude.Failure.MODEL_REFUSED))  # CLI の出力の本文は記録に残さない
         if back is None:
             return False
         self.choice, self.request_try, self.switched = back, self.request_try + 1, True
