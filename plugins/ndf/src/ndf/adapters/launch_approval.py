@@ -719,7 +719,8 @@ def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
     一時ファイルは乱数の名前（`.launch.json.placing-<値>`）で、作る前にその名前を途中の記録の `placing` に書き、名前が空いている
     ときだけ成功する作り方（`O_EXCL`）で作る。名前が重なれば、そのファイルには触れずに別の値で取り直す。中身は実体を途中の記録に
     書いた後に書く。プロセスが強制終了しても、次の `recover` が途中の記録から一時ファイルを特定し、NDF が作ったと確かめられる
-    ものだけを消す（`_drop_placing`）。例外で止まったときの片付けも、呼び手の `recover` に任せる。
+    ものだけを消す（`_drop_placing`）。例外で止まったときの片付けも、呼び手の `recover` に任せる。通常の終わりでも名前を直接は消さず、
+    その名前が作った実体のままのときだけ `_drop_placing` で消す（反映の間に利用者が同じ名前へ保存したファイルを消さないため）。
     """
     target.parent.mkdir(parents=True, exist_ok=True)
     pending = reflected_file(target, PENDING)
@@ -739,7 +740,8 @@ def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
         launch_candidates.write_launch_record(pending, rec)
         out.write(data)
     placed = _replace(target, tmp, rec["base"])
-    tmp.unlink()
+    # 名前を直接消さない。反映の間に利用者が同じ名前へ保存していたら、作った実体と違うので残す
+    _drop_placing(target, rec)
     return placed
 
 
@@ -852,8 +854,12 @@ def finished(candidate: Path, target: Path, sha256: str, request_id: Optional[st
 
 
 def _write_done(target: Path, rec: Mapping[str, Any]) -> None:
+    """完了の記録を書く。反映の途中の記録は消さない。
+
+    途中の記録は置き換えの一時ファイルの名前を持つので、一時ファイルの片付けが済んだ後に呼び手が消す。完了を書いた直後に
+    中断しても、次の `recover` が一時ファイルを特定できるようにするためである。
+    """
     launch_candidates.write_launch_record(reflected_file(target, DONE), {**rec, "target": str(target)})
-    reflected_file(target, PENDING).unlink(missing_ok=True)
 
 
 def _candidate_version(made: Path) -> Optional[str]:
@@ -869,6 +875,7 @@ def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> Non
     失わないため）。まだ人の回答で承認を済ませられるリクエストの候補（`_live`）も、`draft` の掃除と同じく退避しない。退避した候補は次の掃除が比べ直してから消す。
     """
     _write_done(target, rec)
+    reflected_file(target, PENDING).unlink(missing_ok=True)  # 一時ファイルは `_place` が片付け済み
     _tidy_after_reflect(target, candidate, rec)
 
 
@@ -904,7 +911,8 @@ def recover(target: Path) -> Optional[Path]:
     反映先を消すことも一時の名前へ移すこともしない。別の名前は、退避を消す前に途中の記録の `saved` に書き、完了の記録にも残す。
     退避を消した後に中断しても、次の片付けと打ち直しがそのパスを結果に載せられるようにするためである。
     最後に、途中の記録が名前を残した置き換えの一時ファイルのうち、NDF が作ったと確かめられるものを消す（`_drop_placing`。強制終了した
-    実行の設定案の写しを作業場所に残さず、利用者の作ったファイルには触れない）。
+    実行の設定案の写しを作業場所に残さず、利用者の作ったファイルには触れない）。途中の記録は完了の記録を書いた後も残し、
+    一時ファイルの片付けが済んでから消す（片付けの前に再び中断しても、次の片付けが一時ファイルの名前を読めるようにするため）。
     """
     pending_path = reflected_file(target, PENDING)
     rec = read_launch_record(pending_path)
