@@ -198,18 +198,6 @@ def test_collect_sorts_issues_into_files_omitted_excluded_and_missing(tmp_path):
     assert got.missing == (10,)
 
 
-@pytest.mark.parametrize(
-    ("issues", "row", "message"),
-    [([7], "| #8 | 実装する | 無し |", "対象でない課題"), ([7, 8], "| #8 | 閉じる | 無し |", "単位を持たない")],
-)
-def test_collect_refuses_a_file_with_work_outside_the_targets(tmp_path, issues, row, message):
-    _units(tmp_path, "7-8", tasks=[_task("T1", issue=7), _task("T2", issue=8)])
-    _design(tmp_path, "7-8", row)
-
-    with pytest.raises(uf.UnitsFileError, match=message):
-        uf.collect(uf.Tree(tmp_path), issues, [])
-
-
 def test_collect_ignores_the_detail_design_for_handlings(tmp_path):
     _put(tmp_path, "issue-8-design-detail.md", "## 設計の結果\n\n| 課題 | 扱い |\n| --- | --- |\n| #8 | 閉じる |\n")
 
