@@ -230,3 +230,13 @@ def test_version_record_key_reports_the_key_and_whether_it_is_recorded(tmp_path,
     assert cli_floor.version_record_key(str(exe))[1] is False
     assert cli_floor.version_record_key(str(tmp_path / "none")) is None and cli_floor.version_record_key(None) is None
     assert len(ran) == 1
+
+
+def test_issue_1959_require_reports_whether_it_waited_for_the_version(tmp_path, monkeypatch):
+    # #1959: `require` は、記録に無く `--version` を読んだときだけ真を返す（呼び手は待った間の取り消しを確かめ直す）
+    exe = tmp_path / "claude"
+    exe.write_text("", encoding="utf-8")
+    exe.chmod(0o755)
+    monkeypatch.setattr(cli_floor, "_read_version", lambda *a: "9.0.0")
+    assert cli_floor.require("claude", str(exe)) is True
+    assert cli_floor.require("claude", str(exe)) is False

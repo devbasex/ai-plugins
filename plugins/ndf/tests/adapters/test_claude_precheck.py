@@ -40,6 +40,7 @@ class Seen:
         self.popen: list[list[str]] = []
         self.ended: list[bool] = []
         self.too_old: Optional[cli_floor.TooOld] = None
+        self.waited = True  # 下限の確かめが `claude --version` の終わりを待ったか（偽なら記録を再利用した）
 
 
 @pytest.fixture
@@ -56,6 +57,7 @@ def seen(monkeypatch) -> Seen:
         got.floor.append((name, argv0, dict(env or {}), cwd))
         if got.too_old is not None:
             raise got.too_old
+        return got.waited
 
     def popen(argv, **kwargs):
         got.order.append("launch")
@@ -179,6 +181,14 @@ def test_issue_1959_verify_runs_before_the_floor_and_ready_after_every_check(see
     got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen))
 
     assert got.ok and seen.order == ["slot", "recheck", "verify", "floor", "verify", "ready", "launch"]
+
+
+def test_issue_1959_a_floor_from_the_record_verifies_only_once(seen, tmp_path):
+    """下限の確かめが記録を再利用して待たなかった起動は、照らし直しを 1 回で済ませる。"""
+    seen.waited = False
+    got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen))
+
+    assert got.ok and seen.order == ["slot", "recheck", "verify", "floor", "ready", "launch"]
 
 
 def test_issue_1959_a_revoke_during_the_floor_check_stops_the_launch(seen, tmp_path):

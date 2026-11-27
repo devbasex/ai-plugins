@@ -414,12 +414,11 @@ def test_candidates_outside_the_cleanup_conditions_are_not_inspected(tmp_path, m
 
 
 def test_draft_reclaims_what_an_interrupted_draft_or_sweep_left(tmp_path):
-    """候補の錠の中で見つかる作業中のディレクトリは中断の残り。作成途中は消し、消す途中で直されていた候補は元へ戻す。"""
+    """候補の錠の中で見つかる作業中のディレクトリは中断の残り。記録のある作成途中は消し、消す途中で直されていた候補は元へ戻す。"""
     target = _worktree(tmp_path)
     edited = _candidate(target)
     home = edited.parents[1]
-    drafting = home / f"{lc.DRAFTING}half"
-    drafting.mkdir()
+    drafting = lc.start_draft(home, "half")
     removing = home / f"{lc.REMOVING}{edited.parent.name}"
     edited.parent.rename(removing)
     la.new_candidate("/r", target).candidate
@@ -428,21 +427,47 @@ def test_draft_reclaims_what_an_interrupted_draft_or_sweep_left(tmp_path):
 
 def test_draft_reclaims_only_what_the_draft_record_identifies(tmp_path):
     """Value 6: 作成途中の名前の形だけでは消さない。記録と実体が合う作成途中は NDF のファイルだけを消し、利用者の項目を残す。
-    記録の無い作成途中は、中身があれば消さない。"""
+    記録の無い作成途中は、空でも中身があっても消さない。"""
     target = _worktree(tmp_path)
     home = la.new_candidate("/r", target).candidate.parents[1]
-    users = home / f"{lc.DRAFTING}users"
+    users, empty = home / f"{lc.DRAFTING}users", home / f"{lc.DRAFTING}empty"
     users.mkdir()
+    empty.mkdir()
     (users / lc.CANDIDATE_NAME).write_text("利用者の設定案", encoding="utf-8")
     recorded = lc.start_draft(home, "half")
     (recorded / lc.CANDIDATE_NAME).write_bytes(NEW)
     (recorded / "利用者のメモ").write_text("x", encoding="utf-8")
     la.new_candidate("/r", target)
-    assert (users / lc.CANDIDATE_NAME).read_text(encoding="utf-8") == "利用者の設定案"
+    assert (users / lc.CANDIDATE_NAME).read_text(encoding="utf-8") == "利用者の設定案" and empty.is_dir()
     assert sorted(p.name for p in recorded.iterdir()) == ["利用者のメモ"]
     (recorded / "利用者のメモ").unlink()
     la.new_candidate("/r", target)
     assert not recorded.exists() and not recorded.with_name(recorded.name + lc.DRAFT_RECORD).exists()
+
+
+# 作成途中の記録の中身ごとに、片付けの後に残るもの（ディレクトリ, 記録）。ディレクトリは空で作っておく
+INTERRUPTED = {
+    "torn_head": (True, False),  # 名前の行を書き終える前に落ちた（ディレクトリは NDF が作ったものでない）
+    "head": (False, False),  # 名前の行の後、実体の行を書き終える前に落ちた（空のディレクトリは NDF が作った）
+    "torn_body": (False, False),  # 実体の行の途中で落ちた
+    "foreign": (True, True),  # NDF の記録の形でない
+}
+
+
+@pytest.mark.parametrize("state", list(INTERRUPTED))
+def test_draft_reclaims_a_record_left_at_each_step(tmp_path, state):
+    """作成途中の記録は一時ファイルを使わずに書くので、どこで落ちても隣の記録 1 つだけが残り、中身で片付け方が決まる。"""
+    target = _worktree(tmp_path)
+    home = la.new_candidate("/r", target).candidate.parents[1]
+    drafting = home / f"{lc.DRAFTING}half"
+    drafting.mkdir()
+    head = lc._draft_head("half")
+    texts = {"torn_head": head[:5], "head": head, "torn_body": head + '{"dev": 12', "foreign": "利用者のメモ\n"}
+    record = drafting.with_name(drafting.name + lc.DRAFT_RECORD)
+    record.write_text(texts[state], encoding="utf-8")
+    la.new_candidate("/r", target)
+    assert (drafting.exists(), record.exists()) == INTERRUPTED[state]
+    assert not [p.name for p in home.iterdir() if p.name.startswith("..")]  # 記録の一時ファイルを残さない
 
 
 def test_reflect_replaces_the_target_once_and_the_retry_succeeds_without_writing(tmp_path):

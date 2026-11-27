@@ -36,10 +36,11 @@ src/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/adapters/launch_settings.py` | 新設 | 起動の設定を読んで検証し、起動 1 回の指定を返す | launch_approval・agents・git・contracts | `Settings`・`StepSpec`・`Grant` | N: `load`・`step_spec`・`check_definitions`・`approval_target`・`prepared`・`safety_args` |
 | `src/ndf/adapters/launch_approval.py` | 新設 | 承認のハッシュと記録を持つ | identity・git | モジュール | N: `repo_key`・`digest`・`approved`・`append`・`put_question`・`record_answer`・`approve_by_answer`・`pending_request`・`new_candidate`・`reflect`・`recover`・`reflected` |
-| `src/ndf/adapters/launch_candidates.py` | 新設 | 候補のディレクトリ内の記録を読む。読む対象は通常ファイルに限り、シンボリックリンクはたどらない。候補の中が NDF の作ったものだけかを確かめ、退避・消去・元の名前へ戻す。作成途中の候補のディレクトリは、隣に残した実体の記録と照らして片付ける。どの候補を片付けるかは `launch_approval` が履歴から決める | — | `Read` | N: `write_launch_record`・`raw_record`・`record_object`・`ownership`・`stamped_version`・`regular_version`・`same_stamp`・`set_aside`・`settle_aside`・`restore_aside`（`launch_approval.py` から分ける）・`start_draft`・`finish_draft`・`reclaim_drafts` |
+| `src/ndf/adapters/launch_candidates.py` | 新設 | 候補のディレクトリ内の記録を読む。読む対象は通常ファイルに限り、シンボリックリンクはたどらない。候補の中が NDF の作ったものだけかを確かめ、退避・消去・元の名前へ戻す。作成途中の候補のディレクトリは、作る前から隣に残す記録で NDF が作ったと確かめたものだけを片付ける。どの候補を片付けるかは `launch_approval` が履歴から決める | — | `Read` | N: `write_launch_record`・`raw_record`・`record_object`・`ownership`・`stamped_version`・`regular_version`・`same_stamp`・`set_aside`・`settle_aside`・`restore_aside`（`launch_approval.py` から分ける）・`start_draft`・`finish_draft`・`reclaim_drafts` |
 | `src/ndf/adapters/secret_forms.py` | 新設 | 秘密の形の表と、当たる文字列を伏せる処理 | — | モジュール | N: `SECRET_VALUE`・`ASSIGNED_SECRET`・`MASK`・`redact`（`domains/project/secret.py` から移す） |
 | `src/ndf/domains/project/secret.py` | 変更 | 移した表と処理を `secret_forms` から読み込む | secret_forms | モジュール | C: 定義の移動 |
 | `src/ndf/adapters/claude.py` | 変更 | 起動の引数と結果 | launch_settings | `ClaudeCall`・`ClaudeReply`・`LaunchOptions`・`LaunchRecorder` | C: `permission_args`・`_full_args`・`call_claude`・`_precheck`・`_parse_reply`・`context_window`・`_accounted`。N: `main_model`・`set_launch_recorder`・`report_launch` |
+| `src/ndf/adapters/cli_floor.py` | 変更 | CLI の最低バージョンの確認が、`--version` の終了を待ったかを返す（呼び出し元が待った間の取り消しを確かめ直すため） | — | モジュール | C: `require`（戻り値を `bool` にする）。N: `_version_read` |
 | `src/ndf/adapters/agents.py` | 変更 | 相手役の起動 | identity | `Launch` | C: `_start`・`_guarded_run`・`Launch`（`verify`） |
 | `src/ndf/core/worker.py` | 変更 | worker の起動 | launch_settings・claude | `Caller` | C: `delegate`・`_args_for`・`_resume_until_written` |
 | `src/ndf/progress/invoke.py` | 変更 | Skill を回す起動 | launch_settings・claude | `SkillCaller` | C: `_call_skill` |
@@ -291,7 +292,7 @@ src/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_precheck` | 承認の対象が変わった | 起動の直前の書き換え・取り消し。CLI の最低バージョンの確認（`claude --version` の終了を待つ）の間の取り消しを含む | `options.verify`（最低バージョンの確認の前と、確認した起動では後にも打つ） | 呼び出し元へ返す | 呼び出し元の `precondition`。承認の案内のコマンドには、読み直した現在のハッシュを `--sha256` に載せる | 子を起動しない。承認して再実行 |
+| `_precheck` | 承認の対象が変わった | 起動の直前の書き換え・取り消し。CLI の最低バージョンの確認（`claude --version` の終了を待つ）の間の取り消しを含む | `options.verify`（最低バージョンの確認の前と、確認で `claude --version` の終了を待った起動では後にも打つ） | 呼び出し元へ返す | 呼び出し元の `precondition`。承認の案内のコマンドには、読み直した現在のハッシュを `--sha256` に載せる | 子を起動しない。承認して再実行 |
 | `report_launch` | 書き込み処理が無い | エントリポイントを通らない呼び出し | None の判定 | 既定値（書かない）で続ける | 出力なし | — |
 | `_parse_reply` | 欄が無い・形が違う | CLI の出力の変化、JSON でない | 読み取り | 欄を None にして続ける | 行の `usage` が `unknown` | — |
 

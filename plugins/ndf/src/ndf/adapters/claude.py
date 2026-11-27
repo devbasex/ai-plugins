@@ -668,19 +668,24 @@ def _accounted(
     return reply if again is None else _prefaced(again, prompt, timeout, cwd, options)
 
 
-def require_claude(run: AccountRun, cwd: Optional[Path], check: bool) -> Optional[ClaudeReply]:
-    """CLI の下限を確かめる。古ければ起動しない回答、下限を満たすか `check` が偽（確かめない）なら None。"""
+def require_claude(run: AccountRun, cwd: Optional[Path], check: bool, waited: Optional[list[bool]] = None) -> Optional[ClaudeReply]:
+    """CLI の下限を確かめる。古ければ起動しない回答、下限を満たすか `check` が偽（確かめない）なら None。
+
+    `waited` を渡すと、確かめで `claude --version` を打って終わりを待ったか（記録を再利用したなら偽）を 1 つ足す。
+    """
     try:
-        if check:
-            cli_floor.require("claude", run.argv[0], run.env, cwd)
+        got = cli_floor.require("claude", run.argv[0], run.env, cwd) if check else False
     except cli_floor.TooOld as exc:
         return ClaudeReply.failed("", str(exc), failure=Failure.REFUSED)
+    if waited is not None:
+        waited.append(bool(got))
     return None
 
 
 def _precheck(run: AccountRun, cwd: Optional[Path], options: LaunchOptions) -> Optional[ClaudeReply]:
     """起動の直前の確かめ。`run.recheck` が 1 行を返せば `Failure.REFUSED`、次に `options.verify` が 1 行を返せば
-    `Failure.LAUNCH`、次に CLI の下限（`require_claude`）。下限を確かめた起動は、本体を起動する直前に `options.verify` をもう一度打つ。
+    `Failure.LAUNCH`、次に CLI の下限（`require_claude`）。下限の確かめで `claude --version` の終わりを待った起動は、本体を起動する直前に
+    `options.verify` をもう一度打つ（記録を再利用して待たなかった起動は 1 回で済ませる）。
     すべて通れば `options.ready` を打って None。
 
     照らし直しは子プロセスを起動しないので、`claude --version` を打つ下限より前に打つ（取り消しで止まる起動に `--version` を打たない）。
@@ -693,10 +698,11 @@ def _precheck(run: AccountRun, cwd: Optional[Path], options: LaunchOptions) -> O
     changed = options.verify() if options.verify is not None else None
     if changed is not None:
         return ClaudeReply.failed("", changed, failure=Failure.LAUNCH)
-    too_old = require_claude(run, cwd, options.cli_floor)
+    waited: list[bool] = []
+    too_old = require_claude(run, cwd, options.cli_floor, waited)
     if too_old is not None:
         return too_old
-    changed = options.verify() if options.verify is not None and options.cli_floor else None
+    changed = options.verify() if options.verify is not None and any(waited) else None
     if changed is not None:
         return ClaudeReply.failed("", changed, failure=Failure.LAUNCH)
     if options.ready is not None:
