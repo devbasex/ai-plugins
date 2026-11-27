@@ -88,6 +88,7 @@ def test_issue_4363_read_keeps_the_judges_free_text_out_of_the_public_comment() 
         _answer("a", True, path="p", result="r"),
         _answer("a", False, reason=" "),
         _answer("a", False, tracks=None),
+        _answer("a", False, tracks="delivered"),
         {"id": "a", "holds": False, "reason": "tracks が無い"},
         _answer("a", "false"),
         _answer("a", 0),
@@ -114,9 +115,16 @@ def test_issue_4363_read_does_not_decide_a_repeated_id_and_keeps_every_track(fir
     assert len(answers.warnings) == 1 and "a" in answers.warnings[0]
 
 
-@pytest.mark.parametrize("tracks, unknown", [(["delivered", "速さ"], True), ("secret", True), ([1], True), ([], False)])
+@pytest.mark.parametrize("tracks, unknown", [(["delivered", "速さ"], True), ([1], True), ([], False)])
 def test_issue_4363_read_marks_tracks_outside_the_table(tracks: object, unknown: bool) -> None:
     assert verify_decide.read([_answer("a", tracks=tracks)], ["a"]).verdicts["a"].unknown is unknown
+
+
+@pytest.mark.parametrize("holds", [False, None])
+def test_issue_4363_read_keeps_a_protect_kind_written_as_one_string(holds: object) -> None:
+    """#4363: `tracks` が配列でない回答は下げる根拠にせず、書かれた保護の種類は残す。"""
+    verdict = verify_decide.read([_answer("a", holds, tracks="secret")], ["a"]).verdicts["a"]
+    assert (verdict.holds, verdict.tracks) == (None, ("secret",))
 
 
 @pytest.mark.parametrize("tracks", [(), ("delivered",), ("delivered", "approval")])

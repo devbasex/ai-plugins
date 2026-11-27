@@ -92,18 +92,19 @@ def _filled(value: object) -> str:
 
 
 def _tracks(value: object) -> tuple[tuple[str, ...], bool]:
-    """回答の `tracks` を、表にある種類（表の順）と、表に無い値があったかに分ける。並びでない値は表に無い値とする。"""
+    """回答の `tracks` を、表にある種類（表の順）と、回答の形から外れた値があったかに分ける。並びでない値は形から外れた値と
+    するが、表の種類を 1 つの文字列で書いたものは、分類を失わないように種類として拾う。"""
     if value is None:
         return (), False
-    if not isinstance(value, list):
-        return (), True
     kinds = criteria_decide.track_kinds()
+    if not isinstance(value, list):
+        return tuple(k for k in kinds if k == value), True
     return tuple(k for k in kinds if k in value), any(v not in kinds for v in value)
 
 
 def _verdict(fid: str, item: Mapping[str, Any]) -> Optional[Verdict]:
-    """回答の 1 件。起きると示せたのに条件・経路・結果が欠ける、成り立たないのに理由か `tracks` が無い（分類を確かめられ
-    ない）、`holds` が無いか真偽値でも null でもない回答は None（不正）。"""
+    """回答の 1 件。起きると示せたのに条件・経路・結果が欠ける、成り立たないのに理由か `tracks` の配列が無い（分類を確かめ
+    られない）、`holds` が無いか真偽値でも null でもない回答は None（不正）。"""
     if "holds" not in item:
         return None
     holds = item["holds"]
@@ -111,7 +112,7 @@ def _verdict(fid: str, item: Mapping[str, Any]) -> Optional[Verdict]:
     if holds is True:
         valid = bool(condition and path and result)
     elif holds is False:
-        valid = bool(reason) and item.get("tracks") is not None
+        valid = bool(reason) and isinstance(item.get("tracks"), list)
     else:
         valid = holds is None
     if not valid:
