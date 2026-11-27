@@ -75,7 +75,6 @@ def instruction(listed: Path, diffs: Sequence[Path], worktree: Path, criteria: S
     kinds = {"protect": "・".join(criteria_decide.protect_kinds()), "all": "・".join(criteria_decide.track_kinds())}
     return "\n".join(
         [
-            text["system"],
             *text["steps"],
             f"作業場所: {worktree}",
             f"このラウンドの差分: {diffs[0]}"

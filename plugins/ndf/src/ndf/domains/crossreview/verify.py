@@ -3,7 +3,8 @@
 判定役は、修正担当・相手役とは別の、読むだけの claude の起動である（`participants.read_only_launch`）。読める場所は
 レビューする worktree と、この実行の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV の写し）だけである。
 指摘の文はプロセスの引数に載せず一覧のファイルで渡す。一覧は、実行者だけが開ける資料のディレクトリに置く。判定役の出力は
-起動ごとに新しく作る実行者だけが開けるディレクトリに書かせ、起動の後で記録を起動ごとの名前で状態の保存先へ移してディレクトリを消す。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の `drive` である。
+起動ごとに新しく作る実行者だけが開けるディレクトリに書かせ、起動の後で記録を起動ごとの名前で状態の保存先へ移してディレクトリを消す。残す期間
+（`RECORD_KEEP`）を過ぎた記録は、次に判定役を起動するときに消す。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の `drive` である。
 
 失敗しても例外で駆動を止めず、起動し直さない。回答なしと注意にする（どの指摘も下がらない）。注意は PR の記録に載るので、
 手元の絶対パス・指摘の本文・回答の中身を書かない。詳しい原因は過程にだけ残す。
@@ -12,18 +13,26 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
 from ndf.adapters import agents
+from ndf.contracts import limits
 from ndf.core.converge import participants
 from ndf.domains.crossreview import criteria_decide, verify_decide
 from ndf.domains.crossreview.fixer import Launcher
 from ndf.domains.crossreview.settings import RunConfig
 from ndf.domains.records import mvv
+
+# 判定役の記録を残す秒
+RECORD_KEEP = "cross-review.judge-record.keep"
+# `_keep_records` が付ける記録の名前（接尾辞は `tempfile.mkdtemp` の 8 字）。この形のファイルだけを古さで消す
+_RECORD = re.compile(r"round\d+-verify-[a-z0-9_]{8}(\.out|\.err\.log|-launch\.json|-progress\.log)")
 
 
 class VerifyRun(Protocol):
@@ -67,6 +76,19 @@ def _keep_records(run: VerifyRun, round_no: int, held: Path, stem: Path) -> None
     shutil.rmtree(held, ignore_errors=True)
 
 
+def _drop_old_records(run: VerifyRun, round_no: int, state_dir: Path) -> None:
+    """状態の保存先 `state_dir` の判定役の記録のうち、残す期間を過ぎた通常のファイル（リンクは除く）を消す。"""
+    cutoff = time.time() - limits.seconds(RECORD_KEEP)
+    for record in state_dir.glob("round*-verify-*"):
+        if not _RECORD.fullmatch(record.name) or record.is_symlink() or not record.is_file():
+            continue
+        try:
+            if record.stat().st_mtime < cutoff:
+                record.unlink()
+        except OSError as exc:  # 古い記録を消せなくても、判定の結果と駆動は変えない
+            run.note(round_no, "verify", f"古い判定役の記録 {record.name} を消せない（{exc}）")
+
+
 def _unanswered(run: VerifyRun, round_no: int, count: int, why: str, warning: str) -> verify_decide.Answers:
     """回答の得られなかった起動。原因 `why` は過程にだけ残す。"""
     run.note(round_no, "verify", f"判定役へ {count} 件、回答無し（{why}）")
@@ -85,6 +107,7 @@ def ask(
     into = used[0].parent
     listed = into / f"round{round_no}-verify-findings.jsonl"
     stem = run.round_stem(round_no, "-verify")
+    _drop_old_records(run, round_no, stem.parent)
     try:
         snap = _readable_mvv(run.snapshot, into)
         listed.write_text(verify_decide.listing(shown), encoding="utf-8")
@@ -100,8 +123,11 @@ def ask(
         return _unanswered(run, round_no, count, f"起動していない: {exc}", warning)
     system = str(criteria_decide.verify_text()["system"])
     spec = participants.read_only_launch(system, run.cfg.worktree, prompt, held / stem.name, readable=(into,))
+    held_mvv = criteria_decide.approved(snap)
+    # MVV の本文と共通原則の写しも、読めなければ確かめにならない資料である
+    copied = () if held_mvv is None else tuple(p for p in (held_mvv.path, held_mvv.principles_path) if p is not None)
     try:
-        return _answers(run, round_no, rows, spec, (*used, listed), launch)
+        return _answers(run, round_no, rows, spec, (*used, listed, *copied), launch)
     finally:
         _keep_records(run, round_no, held, stem)
 

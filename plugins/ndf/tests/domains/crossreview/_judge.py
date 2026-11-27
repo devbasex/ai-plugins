@@ -13,8 +13,8 @@ from ndf.domains.crossreview import criteria_decide
 
 
 def is_judge(spec: agents.Launch) -> bool:
-    """判定役の起動か（指示が判定役の system の文を持つ）。"""
-    return criteria_decide.verify_text()["system"] in spec.argv[-1]
+    """判定役の起動か（引数が判定役の system の文を持つ）。"""
+    return criteria_decide.verify_text()["system"] in spec.argv
 
 
 def listed_rows(spec: agents.Launch) -> list[dict]:

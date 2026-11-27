@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -12,7 +14,7 @@ from typing import Any, Optional
 import pytest
 
 from ndf.adapters import agents
-from ndf.contracts import writing
+from ndf.contracts import limits, writing
 from ndf.core.converge import participants
 from ndf.domains.crossreview import criteria_decide, report_decide, reviewing, verify, verify_decide
 from ndf.domains.crossreview import finish_decide as fin
@@ -285,6 +287,26 @@ def test_issue_4363_ask_keeps_the_records_of_every_launch_and_replaces_nothing(t
     assert first != second and all("verdicts" in p.read_text(encoding="utf-8") for p in (first, second))
     assert third.read_text(encoding="utf-8") == "前の記録" and not seen[2].paths.out.parent.exists()
     assert [note for note in run.notes if "移せない" in note[2]]
+
+
+def test_issue_4363_ask_drops_only_its_own_records_past_the_keep_period(tmp_path: Path) -> None:
+    old = [tmp_path / f"round1-verify-ab12_cd3{suffix}" for suffix in (".out", ".err.log")]
+    kept = [tmp_path / "round1-verify-new00000.out", tmp_path / "round1-codex.out", tmp_path / "round1-verify-notes.txt"]
+    for path in (*old, *kept):
+        path.write_text("記録", encoding="utf-8")
+    past = time.time() - limits.seconds(verify.RECORD_KEEP) - 60
+    for path in (*old, *kept[1:]):
+        os.utime(path, (past, past))
+    verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher([], []))
+    assert not any(p.exists() for p in old) and all(p.exists() for p in kept)
+
+
+@pytest.mark.parametrize("source", ["path", "principles_path"])
+def test_issue_4363_ask_does_not_answer_when_reading_the_mvv_copy_is_denied(tmp_path: Path, source: str) -> None:
+    snap, diff = _approved(tmp_path), _diff(tmp_path)
+    denied = diff.parent / getattr(snap, source).name
+    answers = verify.ask(_AskRun(tmp_path, snap), 1, [_row()], {"r1-1": [diff]}, _launcher([], [holding(_row())], denied=denied))
+    assert answers.verdicts == {} and denied.name in answers.warnings[0]
 
 
 def test_issue_4363_ask_points_the_mvv_criterion_at_the_copies_in_the_input_directory(tmp_path: Path) -> None:

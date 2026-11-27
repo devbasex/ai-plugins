@@ -302,7 +302,7 @@ plugins/ndf/
     1. 承認済みの MVV があれば（`criteria_decide.approved(run.snapshot)`）、MVV の本文（`path`）と共通原則（`principles_path`）を `run.input_dir` へ写す。元のファイルは利用者の状態の保存先にあり、判定役は読めないためである。読める場所は増やさない
     2. `criteria_decide.criteria_lines(run.cfg.settings.focus, snapshot)` を呼ぶ。`snapshot` は、承認済みの MVV があれば `run.snapshot._replace(path=<本文の写し>, principles_path=<共通原則の写し>)`、無ければ `run.snapshot` である
     3. 2 の戻り値の後に `criteria_decide.document_line(run.documents, rows)` の戻り値を加え、`instruction` に渡す
-  - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は、状態の保存先に起動ごとに作るディレクトリ（`tempfile.mkdtemp`。権限 0700）の `round<n>-verify.*` に書く。前からあるファイルやシンボリックリンクは開かない。起動の後は、成功でも失敗でも、出力のファイルを権限 0600 にして状態の保存先へ移し、作ったディレクトリを消す。移し先の名前は、ファイル名の `round<n>-verify` を作ったディレクトリの名前（`round<n>-verify-<接尾辞>`。起動ごとに違う）に替えたものである。移すには `os.link` を使い、前からあるファイルやリンクは置き換えない（「[設計との食い違い](#設計との食い違い)」）。指摘の一覧は、権限 0700 の資料のディレクトリに書く。過程の行と注意を `run.note` で足す
+  - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は、状態の保存先に起動ごとに作るディレクトリ（`tempfile.mkdtemp`。権限 0700）の `round<n>-verify.*` に書く。前からあるファイルやシンボリックリンクは開かない。起動の後は、成功でも失敗でも、出力のファイルを権限 0600 にして状態の保存先へ移し、作ったディレクトリを消す。移し先の名前は、ファイル名の `round<n>-verify` を作ったディレクトリの名前（`round<n>-verify-<接尾辞>`。起動ごとに違う）に替えたものである。移すには `os.link` を使い、前からあるファイルやリンクは置き換えない（「[設計との食い違い](#設計との食い違い)」）。指摘の一覧は、権限 0700 の資料のディレクトリに書く。起動の前に、状態の保存先の `round<n>-verify-<接尾辞>.*` の形の通常のファイルのうち、更新から `cross-review.judge-record.keep`（30 日）を過ぎたものを消す。ほかの名前のファイルとリンクは消さない。過程の行と注意を `run.note` で足す
 
 ### 異常系の処理
 
@@ -310,7 +310,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `ask` | 資料か出力のファイルを用意できない | MVV の写し元が無い・指摘の一覧を書けない・出力のディレクトリを作れない | 起動の前の `OSError` | 起動せず、既定値で続ける | `warnings` に 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
 | `ask` | 起動が終わらない | 利用上限・無進捗・監視の上限・起動の拒否 | `launch` の返す状態が `done` でない | 既定値で続ける（どの指摘も下げない） | `warnings` に状態を 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
-| `ask` | 差分か指摘の一覧を読めない | claude の `permission_denials` にそのファイルがある | `participants.denied_reads` | 既定値で続ける | `warnings` にファイル名（絶対パスは過程にだけ） | 同上 |
+| `ask` | 差分・指摘の一覧・MVV の本文と共通原則の写しのどれかを読めない | claude の `permission_denials` にそのファイルがある | `participants.denied_reads` | 既定値で続ける | `warnings` にファイル名（絶対パスは過程にだけ） | 同上 |
 | `ask` | 回答が読めない | 出力が無い・JSON でない・`verdicts` の配列が無い | `participants.claude_answer` と `listed_of` | 既定値で続ける | `warnings` に 1 行 | 同上 |
 | `ask` | 出力の記録を状態の保存先へ移せない | 移し先が書けない・同じ名前のファイル・リンク・ディレクトリがある・保存先がハードリンクを作れない | 起動の後の `OSError` | 回答の扱いは変えず、記録を作ったディレクトリと一緒に消す | 過程にだけ 1 行。終了コードは変えない | 記録は残らない |
 
@@ -464,7 +464,7 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
 | --- | --- | --- | --- |
 | `_confirm_heavy`（`ndf cross-review run` を偽の起動で通す） | 成り立たない major だけのラウンドは、修正担当を起動せずに収束する。示せた major は修正担当へ渡る | `redline` の指摘だけ・MVV の指摘だけ・`protect` の指摘だけのラウンドは判定役を起動しない | 判定役が失敗したラウンドは今のとおり修正へ回り、警告が載る |
 
-偽の起動（テストの `Fake`）は、指示に判定役の system の文を持つ claude の起動を判定役として扱う。
+偽の起動（テストの `Fake`）は、引数（system prompt）に判定役の system の文を持つ claude の起動を判定役として扱う。
 
 ## 記録のコメント（report_decide）
 
