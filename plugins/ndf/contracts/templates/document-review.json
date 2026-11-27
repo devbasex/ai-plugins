@@ -9,9 +9,9 @@
     "worktree": "{{worktree}}",
     "steps": [
       {"id": "review", "run": ["{{review}}"], "on_cause": {"incomplete": "design-check"}},
-      {"id": "design-check", "run": ["ndf", "records", "design", "check", "--result", "{state_dir}/design-check.json", "--base", "{{base}}", "--remote", "{{remote}}"], "on_cause": {"check_failed": "design-check-repeat"}, "next": "push"},
-      {"id": "design-check-repeat", "run": ["ndf", "route", "repeat", "--result", "{state_dir}/design-check.json", "--log", "{state_dir}/design-check-causes.jsonl"], "next": "design-check-fix"},
-      {"id": "design-check-fix", "run": ["{{worker}}", "design-check-fix"], "next": "review-fixed"},
+      {"use": "design-check"},
+      {"use": "design-check-repeat"},
+      {"use": "design-check-fix", "next": "review-fixed"},
       {"id": "review-fixed", "run": ["{{review}}"], "next": "design-check"},
       {"use": "push", "on_fail": "fix-push", "next": "end"},
       {"use": "fix-push", "next": "design-check"}

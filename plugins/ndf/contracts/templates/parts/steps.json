@@ -10,6 +10,22 @@
       "run": ["ndf", "route", "repeat", "--result", "{state_dir}/test.json", "--log", "{state_dir}/test-causes.jsonl"],
       "next": "fix"
     },
+    "design-check": {
+      "id": "design-check",
+      "run": ["ndf", "records", "design", "check", "--result", "{state_dir}/design-check.json", "--base", "{{base}}", "--remote", "{{remote}}"],
+      "on_cause": {"check_failed": "design-check-repeat"},
+      "next": "push"
+    },
+    "design-check-repeat": {
+      "id": "design-check-repeat",
+      "run": ["ndf", "route", "repeat", "--result", "{state_dir}/design-check.json", "--log", "{state_dir}/design-check-causes.jsonl"],
+      "next": "design-check-fix"
+    },
+    "design-check-fix": {
+      "id": "design-check-fix",
+      "run": ["{{worker}}", "design-check-fix"],
+      "next": "design-check"
+    },
     "worker": {
       "id": "work",
       "run": ["{{worker}}", "impl"]
