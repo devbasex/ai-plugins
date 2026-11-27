@@ -463,25 +463,19 @@ def _holding_pulls(hub: GitHub, shape: _Shape, version: str, environments: Seque
     valid = {shape.holder: shape.state.valid, **{n: _trusted_state(hub, n, version, shape.commit).valid for n in shape.included[1:]}}
     out = {}
     for environment in environments:
-        probe = record_decide.Record(version, shape.pull.number, shape.included, None, (environment,), shape.targets, shape.commit)
+        probe = _environment_record(shape, version, environment)
         out[environment] = frozenset(n for n, rows in valid.items() if _has(rows, probe))
     return out
 
 
+def _environment_record(shape: _Shape, version: str, environment: str) -> record_decide.Record:
+    """届け先 1 つ分の記録の共通部分（push・確かめの種類・証拠を持たない）。確かめ 7 の照合と書く記録の両方がこれから作る。"""
+    return record_decide.Record(version, shape.pull.number, shape.included, None, (environment,), shape.targets, shape.commit)
+
+
 def _made(shape: _Shape, prefix: Prefix, version: str, environment: str, got: record_decide.Confirmation) -> record_decide.Record:
     evidence = {environment: got.evidence} if got.evidence is not None else None
-    return record_decide.Record(
-        version,
-        shape.pull.number,
-        shape.included,
-        None,
-        (environment,),
-        shape.targets,
-        shape.commit,
-        prefix.push,
-        {environment: str(got.kind)},
-        evidence,
-    )
+    return _environment_record(shape, version, environment)._replace(push=prefix.push, confirmation={environment: str(got.kind)}, evidence=evidence)
 
 
 def _command_tree(hands: Hands, hub: GitHub, production: str, prefix: Prefix, names: Sequence[str]) -> ContextManager[Optional[Path]]:
