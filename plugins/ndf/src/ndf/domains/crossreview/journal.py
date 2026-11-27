@@ -15,7 +15,7 @@ from typing import Any, NamedTuple, Optional
 from ndf.core.converge import oscillation
 from ndf.domains.crossreview import criteria_decide, prior_decide, store, verify_decide
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, UNPINNED
+from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, SIBLING, UNPINNED
 from ndf.domains.records import jsonl
 from ndf.domains.records.mvv_decide import DEFERS, REVIEW_ALSO_REDLINES, REVIEW_DEFER, REVIEW_FIXED_AT, State, also_redlines_note
 
@@ -54,11 +54,6 @@ SKIPPED_MVV = "skipped_mvv"
 FIXER_REASON = "fixer_reason"
 # 根拠の記述の誤りの指摘が、次の確かめで同じ誤りかを見分ける欄（`citation_key`）
 CITATION_KEY = "citation_key"
-
-
-# 同じ照合キーの本文が、承認の要る操作の報告と、位置か内容の違う別の不具合の両方を指すときに、後の行のキーへ足す印
-# （`finding_key` は空白をそろえるので、改行を含むキーは本文から作られない。#4363）
-SIBLING = "\n2"
 
 
 def new_occurrence() -> str:
@@ -194,15 +189,17 @@ def _skip_is_void(row: dict[str, Any], named: Optional[str], mvv: Optional[str])
 
 
 def _carried_key(by_key: Mapping[Any, dict[str, Any]], c: prior_decide.Carried, items: Sequence[str]) -> str:
-    """引き継ぐ指摘 `c` を重ねる行のキー。承認の要る操作かどうかが違い、ファイルか見出しも違う行には重ねない（`_row_keys`）。"""
+    """引き継ぐ指摘 `c` を重ねる行のキー。前の実行が分けた行（`c.split`）は後の方のキーに戻す。どちらのキーでも、承認の要る
+    操作かどうかが違い、ファイルか見出しも違う行には重ねない（`_row_keys`）。"""
     base = oscillation.finding_key(c.text)
     asks = any(criteria_decide.redline(i) for i in _judged_items(c._asdict(), items))
     spot = _Spot(c.path, None, _text(c.section))
-    for key in (base, base + SIBLING):
+    slots = (base + SIBLING, base) if c.split else (base, base + SIBLING)
+    for key in slots:
         row = by_key.get(key)
         if row is None or bool(row.get(fin.REDLINE)) == asks or not _apart(spot, _spot(row)):
             return key
-    return base
+    return slots[0]
 
 
 def _judged_items(marks: Mapping[str, Any], items: Sequence[str]) -> list[str]:
@@ -301,26 +298,41 @@ def _row_keys(by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str
             spots.setdefault(base, []).append(_spot(item))
     out: list[Optional[str]] = []
     for item, base, asks in zip(raised, bases, approval):
-        out.append(None if base is None else _row_key(by_key, base, item, asks, spots.get(base, [])))
+        out.append(None if base is None else _row_key(by_key, base, item, items, asks, spots.get(base, [])))
     return out
 
 
-def _row_key(by_key: Mapping[Any, dict[str, Any]], base: str, item: Mapping[str, Any], asks: bool, spots: Sequence[_Spot]) -> str:
+def _row_key(
+    by_key: Mapping[Any, dict[str, Any]],
+    base: str,
+    item: Mapping[str, Any],
+    items: Sequence[str],
+    asks: bool,
+    spots: Sequence[_Spot],
+) -> str:
     """本文のキーが `base` の報告 1 件を重ねる行のキー。`asks` は承認の要る操作の報告か、`spots` はこのラウンドの承認の要る
-    操作の報告が指す所。"""
+    操作の報告が指す所。重いかは、MVV の項目で重さを固定した後（`_classify`）で決める。"""
     slots = (base, base + SIBLING)
     held = next((k for k in slots if k in by_key and by_key[k].get(fin.REDLINE)), None)
-    approving = held or base
-    if held is None and base in by_key and spots:
-        row = by_key[base]
-        if row.get("outcome") == fin.UNRESOLVED and _blocking(row) and all(_apart(s, _spot(row)) for s in spots):
-            approving = slots[1]
+    approving = held
+    if approving is None:
+        # 引き継ぎは、分けた行の後の方だけを戻すことがある
+        approving = next((k for k in slots if k in by_key), base)
+        if approving in by_key and spots:
+            row = by_key[approving]
+            if row.get("outcome") == fin.UNRESOLVED and _blocking(row) and all(_apart(s, _spot(row)) for s in spots):
+                approving = slots[1] if approving == base else base
     if asks:
         return approving
-    known = [*([_spot(by_key[held])] if held else []), *spots]
     fixing = slots[1] if approving == base else base
-    heavy = criteria_decide.blocking(_raised(dict(item))["severity"])
-    if known and (heavy or fixing in by_key) and all(_apart(_spot(item), s) for s in known):
+    known = [*([_spot(by_key[held])] if held else []), *spots]
+    spot = _spot(item)
+    named = criteria_decide.mvv_item(item.get("mvv"), items)
+    heavy = named is not None or criteria_decide.blocking(_raised(dict(item))["severity"])
+    if known and (heavy or fixing in by_key) and all(_apart(spot, s) for s in known):
+        return fixing
+    # 引き継いだ承認の要る行は 1 文を持たず、1 文だけが違う報告を見分けられないので、分けた行があればそちらへ重ねる
+    if held and spot.impact and fixing in by_key and by_key[held].get("impact") is None and not _apart(spot, _spot(by_key[fixing])):
         return fixing
     return approving
 
@@ -542,6 +554,8 @@ class FindingJournal:
         self.revived: list[str] = []
         # 最後の `enter` で新しく出たか戻った指摘の id（判定役へ渡す候補。1 文の無いまま戻った指摘と、違う位置の重い報告が並ぶ指摘は除く。#4363）
         self.fresh: list[str] = []
+        # 最後の `enter` で新しく出たか戻った指摘の id ごとの、その行へ重ねた報告が全差分を読んだ席のものか（`FULL_DIFF`）
+        self.read_full: dict[str, frozenset[bool]] = {}
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
         # 最後の `carry` で、前の実行が残した MVV の判定を重ねて変わった、既にある指摘の id
@@ -608,6 +622,7 @@ class FindingJournal:
             touched[key] = known
             same.setdefault(str(known["id"]), []).append(item)
         self.fresh = self._align_fresh(fresh, same, denied, set(self.revived[before:]), items)
+        self.read_full = {fid: frozenset(bool(i.get(criteria_decide.FULL_DIFF)) for i in same[fid]) for fid in self.fresh}
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
 

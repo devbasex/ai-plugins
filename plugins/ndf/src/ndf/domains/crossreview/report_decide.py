@@ -39,6 +39,11 @@ REDLINE_ITEMS = mvv_decide.REVIEW_REDLINE_ITEMS
 JUDGED = mvv_decide.REVIEW_JUDGED
 # 上の 5 つの欄
 MARKS = (MVV, PINNED, REDLINE_ITEMS, JUDGED, UNPINNED)
+# 同じ照合キーの本文を 2 行に分けたとき、後の行のキーへ足す印（`finding_key` は空白をそろえるので、改行を含むキーは本文から
+# 作られない。#4363）
+SIBLING = "\n2"
+# 記録のコメントの一覧で、キーに `SIBLING` を持つ行を表す欄。本文や起きることの 1 文を足さずに、分けた行を引き継ぐ
+SPLIT = "split"
 # NDF が機械で確かめて作った指摘の `by`
 BY_NDF = mvv_decide.BY_NDF
 # 状態ファイルのキー（書いた記録のコメントの URL。次からは同じコメントを書き換える）
@@ -303,6 +308,8 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
         # 保護の種類は許可した値だけを書く（持たない指摘は欄を足さない。#4363）
         if kinds := criteria_decide.protect_of(f.get(criteria_decide.PROTECT)):
             keep[criteria_decide.PROTECT] = list(kinds)
+        if str(f.get("key") or "").endswith(SIBLING):
+            keep[SPLIT] = True
         items.append({**keep, "thread": thread if type(thread) is int else None})
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):

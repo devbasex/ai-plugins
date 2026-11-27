@@ -559,7 +559,8 @@ def _confirm_heavy(
     asked = verify_decide.select(heavy, use_tracks)
     if not asked:
         return Checked()
-    diffs = {str(row["id"]): (diff,) if filled is None else filled.diffs(row.get("key"), diff) for row in asked}
+    read_full = run.journal.read_full
+    diffs = {str(row["id"]): (diff,) if filled is None else filled.diffs(read_full[str(row["id"])], diff) for row in asked}
     answers = verify.ask(run, round_no, asked, diffs, launch)
     run.warnings += [f"round {round_no}: {warning}" for warning in answers.warnings]
     return run.journal.apply_checks(list(diffs), answers.verdicts)._replace(record=answers.record)

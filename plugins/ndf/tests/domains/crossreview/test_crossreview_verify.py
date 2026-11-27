@@ -416,12 +416,12 @@ def test_issue_4363_ask_points_the_mvv_criterion_at_the_copies_in_the_input_dire
 
 
 @pytest.mark.parametrize(
-    "key, names",
-    [("other", ["round2.diff"]), ("filled", ["full.diff"]), ("both", ["round2.diff", "full.diff"])],
+    "read_full, names",
+    [({False}, ["round2.diff"]), ({True}, ["full.diff"]), ({True, False}, ["round2.diff", "full.diff"])],
 )
-def test_issue_4363_filled_read_gives_the_diffs_read_by_the_seats_of_the_finding(key: str, names: list) -> None:
-    filled = reviewing.FilledRead(Path("full.diff"), frozenset({"filled", "both"}), frozenset({"other", "both"}))
-    assert [d.name for d in filled.diffs(key, Path("round2.diff"))] == names
+def test_issue_4363_filled_read_gives_the_diffs_read_by_the_seats_of_the_finding(read_full: set, names: list) -> None:
+    filled = reviewing.FilledRead(Path("full.diff"))
+    assert [d.name for d in filled.diffs(read_full, Path("round2.diff"))] == names
 
 
 def test_issue_4363_ask_lists_the_diffs_of_each_finding_when_they_differ(tmp_path: Path) -> None:

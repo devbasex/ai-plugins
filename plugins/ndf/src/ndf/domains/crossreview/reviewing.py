@@ -7,13 +7,13 @@ PR の既存のコメントと差分のファイルを用意し、指示（指�
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters import git, run_log
 from ndf.contracts import limits
-from ndf.core.converge import oscillation, participants
+from ndf.core.converge import participants
 from ndf.domains.crossreview import changes, criteria_decide, prior_decide, scope_decide, seats, store
 from ndf.domains.crossreview.fixer import Launcher
 from ndf.domains.crossreview.journal import FindingJournal
@@ -126,20 +126,14 @@ def review_prompt(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Opt
 
 
 class FilledRead(NamedTuple):
-    """埋めた席が読んだ全差分のファイル `diff` と、埋めた席が出した指摘のキー `keys`、ほかの席が出した指摘のキー `others`。"""
+    """埋めた席が読んだ全差分のファイル `diff`。どの報告がそれを読んだ席のものかは、報告の欄 `FULL_DIFF` が持つ。"""
 
     diff: Path
-    keys: frozenset[str]
-    others: frozenset[str]
 
-    def diffs(self, key: object, round_diff: Path) -> tuple[Path, ...]:
-        """キー `key` の指摘を出した席が読んだ差分。両方の席が出した指摘は、ラウンドの差分 `round_diff` と全差分の両方。
-        行を分けた指摘のキー（印は改行より後ろ）は、本文のキーで引く。"""
-        if isinstance(key, str):
-            key = key.partition("\n")[0]
-        if key not in self.keys:
-            return (round_diff,)
-        return tuple(dict.fromkeys((round_diff, self.diff))) if key in self.others else (self.diff,)
+    def diffs(self, read_full: Collection[bool], round_diff: Path) -> tuple[Path, ...]:
+        """指摘の行へ重ねた報告を出した席が読んだ差分。`read_full` は、報告が全差分を読んだ席のものか（`journal.read_full`）。"""
+        read = ((self.diff if full else round_diff) for full in sorted(read_full))
+        return tuple(dict.fromkeys(read)) or (round_diff,)
 
 
 class Reviewed(NamedTuple):
@@ -151,11 +145,6 @@ class Reviewed(NamedTuple):
     silent: bool
     filled: Optional[FilledRead] = None
     full_seats: tuple[str, ...] = ()
-
-
-def _keys(raised: Sequence[Mapping[str, Any]]) -> frozenset[str]:
-    """相手役の指摘の、ジャーナルが同じ指摘と見分けるキー。"""
-    return frozenset(oscillation.finding_key(t.strip()) for f in raised if isinstance(t := f.get("text"), str))
 
 
 def review_round(
@@ -186,9 +175,9 @@ def review_round(
         more += again_found
         merged = {**again, **{s: unread[s] for s in unread if s not in retry}}
         unread = {s: merged[s] for s in run.seats if s in merged}
-    # 全差分を読んだ席の指摘と、ラウンドの差分を読んだ席の指摘を分ける（判定役へ渡す差分が違う）
-    from_full = [f for f in more if f["by"] in before.full_seats]
-    from_round = [f for f in more if f["by"] not in before.full_seats]
+    # 全差分を読んだ席の指摘に印を付ける（判定役へ渡す差分が違う）
+    for f in more:
+        f[criteria_decide.FULL_DIFF] = f["by"] in before.full_seats
     raised = before.raised + more
     targets = () if len(unread) == len(run.seats) else participants.fill_targets(run.seats, unread)
     filled_now: tuple[str, ...] = ()
@@ -196,15 +185,9 @@ def review_round(
         request = _full_request(run, round_no, prep, remarks, full)
         full = request[0]
         found, left, filled_now = _fill_seats(run, round_no, {t: unread[t] for t in targets}, request, launch)
-        raised += found
-        from_full += found
+        raised += [{**f, criteria_decide.FULL_DIFF: True} for f in found]
         unread = left
-    read = None
-    if full is not None:
-        old = before.filled
-        others = _keys(before.raised) if old is None else old.others
-        keys = frozenset() if old is None else old.keys
-        read = FilledRead(full, keys | _keys(from_full), others | _keys(from_round))
+    read = None if full is None else FilledRead(full)
     full_seats = tuple(s for s in (*before.full_seats, *filled_now) if s in unread)
     return Reviewed(raised, unread, len(unread) == len(run.seats), read, full_seats)
 
@@ -247,10 +230,9 @@ def _handed(run: ReviewingRun) -> list[list[str]]:
 def pending(run: ReviewingRun, record: Mapping[str, Any], prep: Prepared, got: Reviewed) -> dict[str, Any]:
     """相手役の結果を、判定待ちのラウンドとして状態に残す形にする（#4363）。指摘は出した席（`by`）を持ち、結果の無い席は
     `unread`、そのうち起動し直すときに全差分を渡す席は `full_seats` に残す。差分は中身を持たず、作り直せる範囲
-    （`record` の head と比較基点、`scope_base`）と、指摘ごとの差分を選ぶキーを持つ。`unreviewed` は相手役へ詳細レビューを
+    （`record` の head と比較基点、`scope_base`）と、全差分を使ったか（`filled`）を持つ。指摘ごとの差分は `raised` の欄で選ぶ。`unreviewed` は相手役へ詳細レビューを
     求めたセクション、`handed` は確かめさせた足すべき内容である。`history` は振動の判定に使う、前の 2 ラウンドの指摘のキー
     （このラウンドの分は、打ち直しが指摘を入れ直して作る）。"""
-    filled = got.filled
     return {
         "record": dict(record),
         "scope_base": prep.scope.base,
@@ -260,7 +242,7 @@ def pending(run: ReviewingRun, record: Mapping[str, Any], prep: Prepared, got: R
         "raised": got.raised,
         "unread": list(got.unread),
         "full_seats": list(got.full_seats),
-        "filled": None if filled is None else {"keys": sorted(filled.keys), "others": sorted(filled.others)},
+        "filled": got.filled is not None,
     }
 
 
@@ -283,11 +265,9 @@ def kept(run: ReviewingRun, round_no: int, prep: Prepared, basis: scope_decide.B
     filled = scope_decide.filled_of(record)
     run.warnings += [seats.filled_warning(f, f"中断した round {round_no}") for f in filled if f not in run.filled]
     run.filled[:] = filled
-    keys = held["filled"]
     read = None
-    if keys is not None:
-        full = prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep)
-        read = FilledRead(full, frozenset(keys["keys"]), frozenset(keys["others"]))
+    if held["filled"]:
+        read = FilledRead(prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep))
     # 結果の無い席の理由は、起動し直した結果で作り直す
     unread = {seat: seats.Unread("", "", "") for seat in held["unread"]}
     started = f"結果の無い席（{'・'.join(unread)}）だけを起動する" if unread else "相手役を起動しない"

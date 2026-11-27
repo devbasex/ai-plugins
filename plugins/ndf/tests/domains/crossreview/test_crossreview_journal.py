@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ndf.domains.crossreview import criteria_decide, drive, journal as journal_mod, prior_decide
+from ndf.domains.crossreview import criteria_decide, drive, journal as journal_mod, prior_decide, report_decide
 from ndf.domains.records.mvv_decide import REVIEW_FIXED_AT
 from ndf.domains.crossreview import finish_decide as fin
 
@@ -302,6 +302,41 @@ def test_issue_4363_every_operation_that_needs_approval_keeps_its_report() -> No
     again.carry([prior_decide.Carried("t1", None, row["text"], None, None, None, None)])
     again.enter(1, [_told("A")])
     assert list(again.rows) == ["t1"]
+
+
+def test_issue_4363_defect_split_by_the_text_reaches_the_judge_with_its_own_diff_only() -> None:
+    """行を分けた指摘の差分は、その行へ重ねた報告の席が読んだものだけを選ぶ。"""
+    journal = drive.FindingJournal()
+    approval = _told("A", mvv="C7", path="auth.py", line=1, full_diff=True)
+    journal.enter(1, [approval, _told("A", path="config.py", line=2)], ("C7",), V11)
+    [fixing] = [r["id"] for r in journal.handable()]
+    assert journal.read_full[fixing] == {False}
+
+
+def test_issue_4363_split_rows_stay_apart_when_another_state_directory_takes_them_over() -> None:
+    """同じファイルで起きることの 1 文だけが違う 2 行は、記録のコメントから戻しても分かれたままで、1 文は公開しない。"""
+    journal = drive.FindingJournal()
+    approval = _told("A", mvv="C7", path="x.py", line=1)
+    defect = _told("A", path="x.py", line=1, impact="設定が壊れる")
+    journal.enter(1, [approval, defect], ("C7",), V11)
+    body = report_decide.open_block({"findings": list(journal.rows.values())})
+    assert "設定が壊れる" not in body
+    listed, _ = prior_decide.recorded([prior_decide.Remark("comment", "ndf", f"{report_decide.MARKER}\n{body}", trusted=True)])
+    again = drive.FindingJournal()
+    again.carry(listed, ("C7",), V11)
+    assert len(again.rows) == 2 and len(again.handable()) == 1
+    again.enter(1, [approval, defect], ("C7",), V11)
+    assert len(again.rows) == 2 and len(again.handable()) == 1
+
+
+@pytest.mark.parametrize("severity", ["major", "minor"])
+def test_issue_4363_mvv_defect_without_impact_is_split_from_the_approval(severity: str) -> None:
+    """MVV の項目で重さを固定する報告は、起きることの 1 文が無くても承認の要る行へ吸収しない。"""
+    journal = drive.FindingJournal()
+    approval = _told("A", mvv="C7", path="auth.py", line=1)
+    defect = {"text": "A", "severity": severity, "mvv": "Value 5", "path": "config.py", "line": 2, "by": "kiro"}
+    journal.enter(1, [approval, defect], ("Value 5", "C7"), V11)
+    assert [r["path"] for r in journal.handable()] == ["config.py"]
 
 
 def test_issue_4363_reports_that_name_different_sections_are_both_kept() -> None:

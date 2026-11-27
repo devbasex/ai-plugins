@@ -168,6 +168,7 @@ def _marks_of(item: Mapping[str, Any]) -> dict[str, Any]:
         report_decide.JUDGED: _opt_text(item.get(report_decide.JUDGED)),
         report_decide.UNPINNED: criteria_decide.severity_of(item.get(report_decide.UNPINNED)),
         criteria_decide.PROTECT: criteria_decide.protect_of(item.get(criteria_decide.PROTECT)),
+        **({report_decide.SPLIT: True} if item.get(report_decide.SPLIT) is True else {}),
     }
 
 
