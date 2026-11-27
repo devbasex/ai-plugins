@@ -98,7 +98,7 @@ def test_a_launch_stopped_by_a_check_before_it_keeps_the_previous_result(tmp_pat
         reason = options.verify()
         if reason is not None:
             return claude.ClaudeReply.failed("", reason, failure=claude.Failure.LAUNCH)
-        if stop == "old_cli":  # 照らし直しの後の CLI の下限で止まる（`claude._precheck` は起動の準備 `ready` を打たない）
+        if stop == "old_cli":  # 照らし直しの後の CLI の下限で止まる（`claude_precheck.precheck_claude` は起動の準備 `ready` を打たない）
             return claude.ClaudeReply.failed("", "claude が古い", failure=claude.Failure.REFUSED)
         options.ready()
         launched.append(list(argv))

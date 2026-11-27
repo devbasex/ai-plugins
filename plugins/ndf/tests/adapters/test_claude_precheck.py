@@ -1,4 +1,4 @@
-"""`_prefaced` の起動の直前の確かめ（`recheck` と CLI の下限）と `require_claude` の今の振る舞い（I-010 の作り直しの前の固定）。
+"""`_prefaced` の起動の直前の確かめ（`recheck` と CLI の下限）と `claude_precheck.require_claude` の今の振る舞い（I-010 の作り直しの前の固定）。
 
 スロットの取得（`launch_slot.gate`）・`Popen`・CLI の下限の確かめは偽物にし、実プロセスを起動しない。
 """
@@ -12,7 +12,7 @@ from typing import Optional
 
 import pytest
 
-from ndf.adapters import claude, cli_floor, launch_slot
+from ndf.adapters import claude, claude_precheck, cli_floor, launch_slot
 
 REPLY = json.dumps({"type": "result", "is_error": False, "result": "{}", "total_cost_usd": 0.0})
 # 偽のスロットが子へ足す環境
@@ -65,7 +65,7 @@ def seen(monkeypatch) -> Seen:
         return FakeProc()
 
     monkeypatch.setattr(launch_slot, "gate", gate)
-    monkeypatch.setattr(claude.cli_floor, "require", require)
+    monkeypatch.setattr(claude_precheck.cli_floor, "require", require)
     monkeypatch.setattr(claude.subprocess, "Popen", popen)
     return got
 
@@ -150,22 +150,22 @@ def test_i010_require_claude_without_check_returns_none_without_checking(seen, t
     """`require_claude` は check が偽なら確かめずに None。"""
     seen.too_old = cli_floor.TooOld("claude", "/opt/claude", "1.0.0", "2.0.0")
 
-    assert claude.require_claude(claude.AccountRun({}, ["claude"]), tmp_path, False) is None and seen.floor == []
+    assert claude_precheck.require_claude(claude.AccountRun({}, ["claude"]), tmp_path, False) is None and seen.floor == []
 
 
 def test_i010_require_claude_passing_floor_returns_none(seen, tmp_path):
     """`require_claude` は下限を満たせば None（argv[0]・env・cwd を渡す）。"""
-    got = claude.require_claude(claude.AccountRun({"B": "2"}, ["/x/claude", "-p"]), tmp_path, True)
+    got = claude_precheck.require_claude(claude.AccountRun({"B": "2"}, ["/x/claude", "-p"]), tmp_path, True)
 
     assert got is None and seen.floor == [("claude", "/x/claude", {"B": "2"}, tmp_path)]
 
 
 def test_i010_require_claude_too_old_returns_refused_reply(seen, tmp_path):
-    """`require_claude` は古ければ `TooOld` の文を誤りにした `Failure.REFUSED` の回答。"""
+    """`require_claude` は古ければ `TooOld` の文を理由にした `Check.FLOOR` の `Stop`（`_prefaced` が `Failure.REFUSED` の回答にする）。"""
     seen.too_old = cli_floor.TooOld("claude", "/x/claude", "1.0.0", "2.0.0")
-    got = claude.require_claude(claude.AccountRun({}, ["/x/claude"]), None, True)
+    got = claude_precheck.require_claude(claude.AccountRun({}, ["/x/claude"]), None, True)
 
-    assert got == claude.ClaudeReply(False, None, "", 0.0, str(seen.too_old), claude.Failure.REFUSED)
+    assert got == claude_precheck.Stop(claude_precheck.Check.FLOOR, str(seen.too_old))
 
 
 def _verify_logged(seen: Seen, reason: Optional[str] = None) -> claude.LaunchOptions:

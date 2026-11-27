@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Protocol, Sequence, Union
 
 from ndf import identity, process_group
-from ndf.adapters import cli_floor, launch_slot, transcript
+from ndf.adapters import claude_precheck, cli_floor, launch_slot, transcript
 from ndf.adapters.agents import usage_limit
 from ndf.adapters.run_log import child_process_env, record_cost
 from ndf.contracts import facts, limits
@@ -743,6 +743,13 @@ class LaunchOptions:
 # 選び方を省いた起動（今までどおり）
 DEFAULT_LAUNCH = LaunchOptions()
 
+# 起動の直前の確かめ（`claude_precheck.precheck_claude`）で止まった起動の失敗の理由。止めた確かめごとに決まる
+PRECHECK_FAILURES = {
+    claude_precheck.Check.RECHECK: Failure.REFUSED,
+    claude_precheck.Check.VERIFY: Failure.LAUNCH,
+    claude_precheck.Check.FLOOR: Failure.REFUSED,
+}
+
 
 def call_claude(
     argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path] = None, options: LaunchOptions = DEFAULT_LAUNCH
@@ -789,48 +796,6 @@ def _accounted(
     return reply if again is None else _prefaced(again, prompt, timeout, cwd, options)
 
 
-def require_claude(run: AccountRun, cwd: Optional[Path], check: bool, waited: Optional[list[bool]] = None) -> Optional[ClaudeReply]:
-    """CLI の下限を確かめる。古ければ起動しない回答、下限を満たすか `check` が偽（確かめない）なら None。
-
-    `waited` を渡すと、確かめの間に待ったか（`claude --version` の終わりか、別の起動の `--version` を待つ錠。`cli_floor.require`）を 1 つ足す。
-    """
-    try:
-        got = cli_floor.require("claude", run.argv[0], run.env, cwd) if check else False
-    except cli_floor.TooOld as exc:
-        return ClaudeReply.failed("", str(exc), failure=Failure.REFUSED)
-    if waited is not None:
-        waited.append(bool(got))
-    return None
-
-
-def _precheck(run: AccountRun, cwd: Optional[Path], options: LaunchOptions) -> Optional[ClaudeReply]:
-    """起動の直前の確かめ。`run.recheck` が 1 行を返せば `Failure.REFUSED`、次に `options.verify` が 1 行を返せば
-    `Failure.LAUNCH`、次に CLI の下限（`require_claude`）。下限の確かめで待った起動（自分か別の起動の `claude --version` の終わりを待った）は、
-    本体を起動する直前に `options.verify` をもう一度打つ（待たずに記録を再利用した起動は 1 回で済ませる）。
-    すべて通れば `options.ready` を打って None。
-
-    照らし直しは子プロセスを起動しないので、`claude --version` を打つ下限より前に打つ（取り消しで止まる起動に `--version` を打たない）。
-    下限の確かめは、キャッシュが無ければ `claude --version` の終了を待つ。その間に承認が取り消されても取り消した許可で起動しないよう、
-    下限の後にも照らし直す。起動の準備（`ready`）は確かめをすべて通った後に打つので、どの確かめで止まった起動でも準備をしない。
-    """
-    refused = run.recheck() if run.recheck is not None else None
-    if refused is not None:
-        return ClaudeReply.failed("", refused, failure=Failure.REFUSED)
-    changed = options.verify() if options.verify is not None else None
-    if changed is not None:
-        return ClaudeReply.failed("", changed, failure=Failure.LAUNCH)
-    waited: list[bool] = []
-    too_old = require_claude(run, cwd, options.cli_floor, waited)
-    if too_old is not None:
-        return too_old
-    changed = options.verify() if options.verify is not None and any(waited) else None
-    if changed is not None:
-        return ClaudeReply.failed("", changed, failure=Failure.LAUNCH)
-    if options.ready is not None:
-        options.ready()
-    return None
-
-
 def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path], options: LaunchOptions) -> ClaudeReply:
     """`_launch_once` を打ち、起動した子が終わったその場で使用量ログの行を `options.log` へ渡す（#1959 の決定 6）。"""
     reply = _launch_once(run, prompt, timeout, cwd, options)
@@ -851,9 +816,9 @@ def _launch_once(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Pat
             "claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=options.slot_wait, ensure=options.ensure_training
         ) as slot_env:
             run = run._replace(env={**run.env, **slot_env, identity.env_name("ai-child"): "1"})
-            stopped = _precheck(run, cwd, options)
+            stopped = claude_precheck.precheck_claude(run, cwd, options)
             if stopped is not None:
-                return stopped
+                return ClaudeReply.failed("", stopped.detail, failure=PRECHECK_FAILURES[stopped.check])
             at, started = _now()
             if run.gate is None:
                 launched = True

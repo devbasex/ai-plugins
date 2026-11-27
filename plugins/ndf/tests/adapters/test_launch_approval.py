@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from ndf import identity
-from ndf.adapters import agents, claude, git, launch_approval as la
+from ndf.adapters import agents, claude, claude_precheck, git, launch_approval as la
 
 SHA = "a" * 64
 
@@ -153,7 +153,7 @@ def test_claude_children_carry_the_ai_child_flag_in_the_final_environment(monkey
         return claude.ClaudeReply(True, None, "", 0.0)
 
     monkeypatch.setattr(claude.launch_slot, "gate", slot)
-    monkeypatch.setattr(claude.cli_floor, "require", lambda *a, **k: None)
+    monkeypatch.setattr(claude_precheck.cli_floor, "require", lambda *a, **k: None)
     monkeypatch.setattr(claude, "_run_claude", run)
     monkeypatch.setattr(claude, "relay_checks", DroppingChecks() if relayed else None)
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "work1")

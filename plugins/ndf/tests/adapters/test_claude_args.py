@@ -7,7 +7,7 @@ import json
 import pytest
 
 from ndf import identity
-from ndf.adapters import claude
+from ndf.adapters import claude, claude_precheck
 
 
 MINIMAL_HEAD = ["-p", "--output-format", "json", "--no-session-persistence", "--setting-sources", "", "--strict-mcp-config"]
@@ -297,7 +297,7 @@ def _launch(monkeypatch, verify):
 
     launched: list[list[str]] = []
     monkeypatch.setattr(claude.launch_slot, "gate", slot)
-    monkeypatch.setattr(claude.cli_floor, "require", lambda *a, **k: None)
+    monkeypatch.setattr(claude_precheck.cli_floor, "require", lambda *a, **k: None)
     monkeypatch.setattr(claude, "_run_claude", lambda argv, *a: launched.append(list(argv)) or claude.ClaudeReply(True, None, "", 0.0))
     monkeypatch.setattr(claude, "relay_checks", None)
     reply = claude.call_claude(["claude", "-p"], "質問", 1.0, options=claude.LaunchOptions(verify=verify))

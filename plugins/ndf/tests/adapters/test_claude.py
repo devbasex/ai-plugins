@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from ndf import slot_pool
-from ndf.adapters import claude, launch_slot
+from ndf.adapters import claude, claude_precheck, launch_slot
 from ndf.testing import limits as test_limits
 from ndf.testing import slots
 
@@ -54,7 +54,7 @@ def launches(monkeypatch) -> Launches:
         seen.floor.append(argv0)
 
     monkeypatch.setattr(claude.subprocess, "Popen", popen)
-    monkeypatch.setattr(claude.cli_floor, "require", require)
+    monkeypatch.setattr(claude_precheck.cli_floor, "require", require)
     return seen
 
 
