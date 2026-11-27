@@ -420,23 +420,32 @@ def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optiona
     hub = github.GitHub(ctx.repo, github.client())
     merged = github_pulls.merged_pulls(hub, [b for _, b in pairs], ctx.branch)
     items: list[dict[str, Any]] = []
+    landed: Optional[github_pulls.MergedPull] = None
     for unit, branch in pairs:
         if branch in merged:
-            items.append(_unit_item(unit, merged[branch].number, "already_merged"))
+            landed = merged[branch]
+            items.append(_unit_item(unit, landed.number, "already_merged"))
             continue
         try:
-            items.append(_one_unit(ctx, unit, branch, ports))
+            item, landed = _one_unit(ctx, unit, branch, ports)
         except UnitsStopped as exc:
             return _unit_stopped(ctx, items, unit, branch, exc)
+        items.append(item)
     last = pairs[-1][1] if pairs else None
-    landed = merged.get(last) if last is not None and last in merged else _last_unit_pull(hub, ctx, last)
-    return _after_units(ctx, items, ports, landed)
+    return _after_units(ctx, items, ports, lambda: _last_unit_pull(hub, ctx, last, landed))
 
 
-def _last_unit_pull(hub: github.GitHub, ctx: Context, branch: Optional[str]) -> Optional[github_pulls.MergedPull]:
-    """この実行でマージした最後の単位の PR（マージコミットを持つ）。単位が無ければ None。"""
-    if branch is None:
+def _last_unit_pull(
+    hub: github.GitHub, ctx: Context, branch: Optional[str], landed: Optional[github_pulls.MergedPull]
+) -> Optional[github_pulls.MergedPull]:
+    """最後の単位の PR（マージコミットを持つ）。単位が無ければ None。
+
+    開始時の一覧かマージの応答がマージコミットを持てば、それを使う。持たないときだけ GitHub へ読み直す。
+    """
+    if branch is None or landed is None:
         return None
+    if landed.merge_sha:
+        return landed
     found = github_pulls.merged_pulls(hub, [branch], ctx.branch)
     if branch not in found:
         raise UnitsStopped("precondition", f"単位のブランチ {branch} の、{ctx.branch} へマージ済みの PR を GitHub から読めない")
@@ -483,8 +492,10 @@ def _unit_item(unit: Unit, pr: Optional[int], status: str) -> dict[str, Any]:
     return {"kind": "unit", "name": unit.name, "issue": unit.issue, "pr": pr, "status": status}
 
 
-def _one_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> dict[str, Any]:
+def _one_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> tuple[dict[str, Any], github_pulls.MergedPull]:
     """単位 1 つを、作業場所の用意 → 打ち直しの判定 → スプリントブランチの HEAD のマージ → `impl` → マージの順に流す。
+
+    結果の項目と、マージした PR（マージの応答にマージコミットが無ければ `merge_sha` は空）を返す。
 
     マージだけを打ち直す判定はスプリントブランチをマージする前の HEAD で行う（マージするとレビューした HEAD と合わなくなる）。
     """
@@ -500,8 +511,16 @@ def _one_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> dict[str, 
         _write_record(round_dir, STOPPED_HEAD_FILE, g.rev_parse("HEAD") + "\n")
         if got.status != result.OK:
             raise _unit_stop_of(got.report, "impl が止まった", _ci_note(ctx, got.report))
-    merge_unit(ctx, branch, worktree, round_dir, ports)
-    return _unit_item(unit, _pr_number(round_dir), "merged")
+    report = merge_unit(ctx, branch, worktree, round_dir, ports)
+    number = _pr_number(round_dir)
+    return _unit_item(unit, number, "merged"), github_pulls.MergedPull(int(number or 0), _merge_sha(report))
+
+
+def _merge_sha(report: Mapping[str, Any]) -> str:
+    """`ndf ci merge` の結果の PR の項目が持つマージコミット。無ければ空。"""
+    rows = report["items"] if isinstance(report.get("items"), list) else []
+    sha = next((r.get("merge_sha") for r in rows if isinstance(r, Mapping) and r.get("kind") == "pr"), None)
+    return sha if isinstance(sha, str) else ""
 
 
 def _next_round(state: RoundState) -> Path:
@@ -545,11 +564,16 @@ def _unit_stopped(ctx: Context, items: list[dict[str, Any]], unit: Unit, branch:
     return StageResult(report, {})
 
 
-def _after_units(ctx: Context, items: list[dict[str, Any]], ports: Ports, landed: Optional[github_pulls.MergedPull]) -> StageResult:
-    """すべての単位がマージ済みになった後に、スプリントの PR を開いた結果。開けなければ止まった単位を持たない `stopped`。"""
+def _after_units(
+    ctx: Context, items: list[dict[str, Any]], ports: Ports, landed: Callable[[], Optional[github_pulls.MergedPull]]
+) -> StageResult:
+    """すべての単位がマージ済みになった後に、スプリントの PR を開いた結果。開けなければ止まった単位を持たない `stopped`。
+
+    最後の単位の PR を GitHub から読み直せないときも、PR を開けなかった停止として、すべての単位の項目と `metrics.unit_ci` を持たせる。
+    """
     metrics = {"unit_ci": ctx.unit_ci}
     try:
-        opened = sprint_pr(ctx, ports, landed)
+        opened = sprint_pr(ctx, ports, landed())
     except UnitsStopped as exc:
         return StageResult(result.stopped(plan_runner.TOOL, exc.kind, exc.detail, items=items, metrics=metrics), {})
     if opened.status != result.OK:
@@ -721,23 +745,37 @@ def sprint_pr(ctx: Context, ports: Ports, landed: Optional[github_pulls.MergedPu
     """スプリントの作業場所を最後の単位のマージコミット（`landed`）まで進め、リモートのスプリントブランチの HEAD と同じことを
     確かめてから、テンプレート `pr` を push のステップなしで流す。
 
-    進めるのは、自分でマージした単位の結果までである。リモートの HEAD がそれと違えば、マージも push もせずに止める。
-    違うコミットは単位のレビューを経ていないので、利用者が確かめてから打ち直す。
+    進めるのは、自分でマージした単位の結果までである。リモートの HEAD がそれと違えば、それ以上は進めず、push もせずに止める。
+    違うコミットは単位のレビューを経ていないので、利用者が確かめ、作業場所をリモートの HEAD まで自分で進めてから打ち直す。
+    打ち直しは `prepare` を通らない（`units.json` を読む）ので、手元を進めるのは利用者の操作だけである。
     """
     g = Git(ctx.sprint)
     tip = _fetch_sprint(g, ctx)
     head = _catch_up_to(g, ctx, landed)
     if tip != head:
-        detail = (
-            f"{ctx.remote} の {ctx.branch} の HEAD（{tip}）がスプリントの作業場所の HEAD（{head}）と違う。"
-            f"リモートにだけあるコミットは {head}..{tip}、手元にだけあるコミットは {tip}..{head} である。"
-            "その変更をスプリントの PR に含めてよいと確かめてから ndf progress next を打ち直す"
-        )
-        raise UnitsStopped("precondition", detail)
+        raise UnitsStopped("precondition", _tip_mismatch(g, ctx, tip, head))
     t = route.templates()["pr"]
     template = replace(t, plan=route.without_steps(route.expanded(t), SPRINT_PR_DROP))
     run = replace(ctx.run.plain(), name=t.name, template=template, overrides={"remote": ctx.remote}, env_extra={GH_REPO_ENV: ctx.repo})
     return ports.call_plan(run, ctx.work_dir / SPRINT_PR_DIR)
+
+
+def _tip_mismatch(g: Git, ctx: Context, tip: str, head: str) -> str:
+    """リモートの HEAD（`tip`）が作業場所の HEAD（`head`）と違うときの停止の理由。両方の SHA、片方にだけあるコミットの範囲、
+    確かめた後に作業場所を揃えて打ち直す手順を書く。"""
+    found = (
+        f"{ctx.remote} の {ctx.branch} の HEAD（{tip}）がスプリントの作業場所 {ctx.sprint} の HEAD（{head}）と違う。"
+        f"リモートにだけあるコミットは {head}..{tip}、手元にだけあるコミットは {tip}..{head} である。"
+        "これらは単位のレビューを経ていない。"
+    )
+    if g.is_ancestor(head, tip):
+        step = (
+            f"その変更をスプリントの PR に含めてよいと確かめたら、git -C {ctx.sprint} merge --ff-only {tip} で作業場所を進めてから "
+            "ndf progress next を打ち直す"
+        )
+    else:
+        step = f"手元にだけあるコミットを {ctx.remote} へ push するか取り消して、作業場所を {ctx.remote} の {ctx.branch} と揃えてから ndf progress next を打ち直す"
+    return found + step
 
 
 def _catch_up_to(g: Git, ctx: Context, landed: Optional[github_pulls.MergedPull]) -> str:
