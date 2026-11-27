@@ -11,7 +11,7 @@ import git_sandbox
 import pytest
 
 from ndf.adapters import git
-from ndf.domains.crossrefactor import local_gate, store, workspace
+from ndf.domains.crossrefactor import cli, local_gate, store, workspace
 
 DAY = 86_400.0
 KEEP = 30 * DAY
@@ -126,3 +126,14 @@ def test_sweep_verify_trees_respects_the_lock_kinds(tmp_path, monkeypatch):
     assert paths["user"].exists() and stray.exists()
     assert len(kept) == 2
     assert json.dumps(state["verify_trees"]) == json.dumps([str(paths["user"]), str(stray)])
+
+
+def test_release_keeps_the_path_of_a_verify_dir_it_could_not_remove(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, "a", monkeypatch)
+    root = tmp_path / "rf7"
+    stray = root / "verify-abc"
+    stray.mkdir(parents=True)
+    store.save(store.path_of(root), {"items": [], "verify_trees": [str(stray)], "gate_logs": []})
+    kept, _ = cli._release_held(repo, root)
+    assert stray.exists() and len(kept) == 1
+    assert store.load(store.path_of(root)) == {"gate_logs": [], "verify_trees": [str(stray)]}

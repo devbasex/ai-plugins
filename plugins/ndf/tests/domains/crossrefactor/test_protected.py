@@ -40,6 +40,14 @@ def test_a_link_protects_the_link_and_its_target_inside_the_tree():
     assert got.covers("real/run.sh")
 
 
+def test_a_file_reached_through_a_linked_directory_is_protected():
+    tree = {"scripts": "tools/ci", "tools/ci/test.sh": None, "tools/ci/other.sh": None}
+    got = _of(tree=tree, commands=["sh scripts/test.sh"])
+    assert got.covers("scripts/test.sh") and got.covers("scripts")
+    assert got.covers("tools/ci/test.sh")
+    assert not got.covers("tools/ci/other.sh")
+
+
 def test_a_link_out_of_the_tree_protects_only_the_link():
     got = _of(tree={"scripts/test.sh": "../../outside.sh"})
     assert got.covers("scripts/test.sh")

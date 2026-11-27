@@ -124,7 +124,8 @@ def test_a_passing_change_is_tested_once_and_its_sha_is_pushed(tmp_path, monkeyp
     assert not w.state.get("verify_trees")
     # ログは伏せ字にして、実行ユーザーだけが読める権限で書く
     logs = sorted((w.root / "logs").glob("local-gate-*.log"))
-    assert [p.name for p in logs] == ["local-gate-0-head-1.log", "local-gate-0-head-2.log"]
+    assert [p.name.split("-", 3)[3] for p in logs] == ["0-head-1.log", "0-head-2.log"]
+    assert len({p.name.split("-")[2] for p in logs}) == 1
     assert "ghp_" not in logs[0].read_text(encoding="utf-8")
     assert stat.S_IMODE(logs[0].stat().st_mode) == 0o600
     assert stat.S_IMODE((w.root / "logs").stat().st_mode) == 0o700
@@ -222,14 +223,21 @@ def test_a_push_rejected_because_the_branch_moved_rebases_and_tests_again(tmp_pa
 
 def test_a_push_rejected_without_a_move_is_push_rejected(tmp_path, monkeypatch):
     w = make_world(tmp_path, monkeypatch)
-    hook = w.origin / "hooks" / "pre-receive"
-    hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
-    hook.chmod(0o755)
     commit(w.work, {"src/a.py": "x = 3\n"})
+    held = git.Git.attempt
+
+    def rejected(self: git.Git, *args: str) -> git.Completed:
+        # push だけを拒まれた結果に差し替える（取得し直したリモートの先頭は動いていない）
+        if args and args[0] == "push":
+            return git.Completed(1, "", "rejected")
+        return held(self, *args)
+
+    monkeypatch.setattr(git.Git, "attempt", rejected)
     with pytest.raises(final_gate.GateStopped) as got:
         _run(w, FakeExec())
     assert got.value.kind == "push_rejected"
     assert "pushing" not in w.state
+    assert w.remote_tip() == w.tip
 
 
 def test_the_total_limit_stops_with_fix_limit(tmp_path, monkeypatch):
@@ -317,6 +325,21 @@ def test_a_fix_outside_the_scope_or_on_a_protected_file_is_undone(tmp_path, monk
     assert sh(w.work, "rev-parse", "HEAD") == bad
 
 
+def test_a_restart_after_the_fixer_committed_checks_the_scope_of_the_fix(tmp_path, monkeypatch):
+    w = make_world(tmp_path, monkeypatch)
+    bad = commit(w.work, {"src/a.py": "x = 2\n"})
+    # 修正担当が範囲外をコミットした後、範囲の検査の前に中断した
+    commit(w.work, {"docs/x.md": "d\n"})
+    w.state["fixing"] = {"before": bad, "tip": w.tip, "labels": ["#1 unit"]}
+    fake = FakeExec()
+    with pytest.raises(final_gate.GateStopped) as got:
+        _run(w, fake)
+    assert got.value.kind == "refused"
+    assert sh(w.work, "rev-parse", "HEAD") == bad
+    assert "fixing" not in w.state
+    assert fake.seen == [] and w.remote_tip() == w.tip
+
+
 def test_a_command_pointing_into_the_work_tree_is_a_precondition(tmp_path, monkeypatch):
     w = make_world(tmp_path, monkeypatch)
     project = {"test": {"suites": [{"name": "u", "command": f"pytest {w.main}/tests"}]}}
@@ -363,7 +386,7 @@ def test_fix_excerpt_redacts_before_cutting():
     assert len(got) < 500 + 8_000 + 200
 
 
-def test_write_private_log_replaces_without_touching_a_linked_file(tmp_path):
+def test_write_private_log_keeps_an_existing_file_of_the_same_name(tmp_path):
     logs = tmp_path / "logs"
     logs.mkdir(mode=0o755)
     os.chmod(logs, 0o755)
@@ -373,9 +396,13 @@ def test_write_private_log_replaces_without_touching_a_linked_file(tmp_path):
     state: dict[str, Any] = {}
     path = workspace.write_private_log(logs, "local-gate-0-head-1.log", "new\n", state, lambda: None)
     assert path.read_text(encoding="utf-8") == "new\n"
+    assert path.name != "local-gate-0-head-1.log" and path.name.startswith("local-gate-0-head-1-")
+    assert (logs / "local-gate-0-head-1.log").read_text(encoding="utf-8") == "keep\n"
     assert outside.read_text(encoding="utf-8") == "keep\n"
     assert stat.S_IMODE(logs.stat().st_mode) == 0o700
-    assert set(state["gate_logs"][0]) == {"name", "tmp", "st_dev", "st_ino"}
+    [entry] = state["gate_logs"]
+    assert set(entry) == {"name", "tmp", "st_dev", "st_ino"} and entry["name"] == path.name
+    assert not (logs / entry["tmp"]).exists()
 
 
 def test_write_private_log_refuses_a_linked_directory(tmp_path):

@@ -6,7 +6,8 @@
 - どこかの階層が `.ndf`
 - 名前が決まった名前の一覧（`PROTECTED_NAMES`）に当たる（どの階層でも）
 - テストのコマンドの語をパスにしたもの。親のディレクトリをファイルかリンクに置き換える変更（親のパスそのもの）も当たる。
-  ツリーにまだ無いパスも当たる。シンボリックリンクはリンクとリンク先（ツリーの中だけ）の両方
+  ツリーにまだ無いパスも当たる。シンボリックリンクはリンクとリンク先（ツリーの中だけ）の両方。途中のディレクトリが
+  リンクのパスも、要素ごとに解決して実際に使われるファイルを保護する
 - `/` を含まない語について、`search`（`PATH` の相対の要素。空と `.` はルート）の下の同じ名前のパス
 - 設定 `test.protected_files` の指定の中（`scoped.in_scope`）
 """
@@ -97,19 +98,34 @@ def _closure(path: str, tree: Mapping[str, str | None]) -> set[str]:
 
 
 def _link_targets(path: str, tree: Mapping[str, str | None]) -> list[str]:
-    """`path` がツリーのリンクなら、ツリーの中のリンク先を順にたどった並び（外を指せば止める）。"""
+    """`path` の要素（途中のディレクトリと末尾）にツリーのリンクがあれば、先頭のリンクから 1 つずつ解決した並び。
+
+    途中のディレクトリがリンクでも、実際に使われるファイルのパスまでたどる。ツリーの外を指せば止める。
+    """
     found: list[str] = []
     current = path
     for _ in range(LINK_HOPS):
-        target = tree[current] if current in tree else None
-        if target is None:
-            break
-        nxt = normalize(posixpath.join(posixpath.dirname(current), target)) if not target.startswith("/") else None
+        nxt = _resolve_first(current, tree)
         if nxt is None or nxt in found or nxt == path:
             break
         found.append(nxt)
         current = nxt
     return found
+
+
+def _resolve_first(path: str, tree: Mapping[str, str | None]) -> str | None:
+    """`path` の要素を先頭から見て、最初のリンクをリンク先へ置き換えたパス。リンクが無いか外を指せば None。"""
+    parts = path.split("/")
+    for i in range(1, len(parts) + 1):
+        prefix = "/".join(parts[:i])
+        target = tree[prefix] if prefix in tree else None
+        if target is None:
+            continue
+        if target.startswith("/"):
+            return None
+        base = normalize(posixpath.join(posixpath.dirname(prefix), target))
+        return None if base is None else "/".join([base, *parts[i:]])
+    return None
 
 
 def protected_of(tree: Mapping[str, str | None], commands: Sequence[str], declared: Sequence[str], search: Sequence[str] = ()) -> Protected:

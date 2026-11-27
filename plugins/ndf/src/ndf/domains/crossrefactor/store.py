@@ -16,7 +16,8 @@
 | `onto`・`rebasing` | 手元の経路の載せ直しの起点と、載せ直しの途中の記録（`{head, tip}`。#4566） |
 | `local_passed`・`local_base_failed` | 手元のテスト全体の合格の記録と、基準側の不合格の記録（`{sha, digest, path_digest, run}`） |
 | `pushing` | 手元の経路で push を打つ直前に書く、送る SHA と合格の組 |
-| `verify_trees` | 手元の最終ゲートの検証用の作業場所のパス（作る前に書き、取り除いた後に消す） |
+| `fixing` | 手元の経路で最終ゲート修正の担当を起動する直前に書く、直す前の SHA・取得した先頭・落ちた suite（`{before, tip, labels}`）。範囲の検査を終えたら消す。残っていれば再開の頭で範囲を検査する |
+| `verify_trees` | 手元の最終ゲートの検証用の作業場所のパス（作る前に書き、取り除いた後に消す。取り除けずに残したものは `release` の後も残す） |
 | `gate_logs` | NDF が書いた手元の最終ゲートのログの記録（`{name, tmp, st_dev, st_ino}`。`release` の後も残す） |
 | `repo` | 前のバージョンが `NDF_WORKTREE_BASE` の直下に作った場所を使い続けるときの、git の共通ディレクトリの実パス |
 """

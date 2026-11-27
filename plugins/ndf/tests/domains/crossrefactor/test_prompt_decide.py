@@ -143,3 +143,13 @@ def test_final_fix_local_stays_under_the_byte_limit_and_counts_the_dropped():
     kept = sum(1 for b in blocks if b in got)
     assert 0 < kept < len(blocks)
     assert f"ほかに {len(blocks) - kept} 件" in got
+
+
+def test_final_fix_local_bounds_a_long_scope_too():
+    # 変更ファイルの多いスプリントでも、対象範囲を含む指示文全体が上限に収まる
+    scope = tuple(f"src/module_{i:05d}/file.py" for i in range(10_000))
+    blocks = [f"- #{i} 単体（終了コード 1）\n" + "あ" * 7_000 for i in range(1, 11)]
+    got = prompt_decide.final_fix(7, scope, blocks, local=True)
+    assert len(got.encode("utf-8")) <= prompt_decide.PROMPT_BYTES
+    assert scope[0] in got and scope[-1] not in got
+    assert any(b in got for b in blocks)

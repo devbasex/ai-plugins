@@ -126,10 +126,28 @@ def flaky(pending: Mapping[str, Any]) -> str:
 
 # 手元の経路の指示文全体の上限（UTF-8 のバイト）。Linux が引数 1 つに許す 131,072 バイトから、起動の側が足す文の余裕を引いた値（#4566）
 PROMPT_BYTES = 60_000
+# 手元の経路の指示文に載せる対象範囲の上限（UTF-8 のバイト）。残りを落ちた suite の抜粋に使う
+SCOPE_BYTES = 20_000
+
+
+def _size(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+def _scope_text(scope: Sequence[str]) -> str:
+    """対象範囲を `SCOPE_BYTES` 以下で並べる。載せきれない分は件数だけを書く（範囲の検査は全体で行う）。"""
+    shown: list[str] = []
+    for entry in scope:
+        if _size(", ".join([*shown, entry])) > SCOPE_BYTES:
+            break
+        shown.append(entry)
+    rest = len(scope) - len(shown)
+    return ", ".join(shown) + (f" ほか {rest} 件（指示文の上限で載せていない）" if rest else "")
 
 
 def final_fix(pr: int, scope: Sequence[str], failed: Sequence[str], *, local: bool = False) -> str:
-    """最終ゲート修正の指示文。`local` なら `failed` は `local_gate.fix_excerpt` の抜粋で、全体を `PROMPT_BYTES` 以下にする。"""
+    """最終ゲート修正の指示文。`local` なら `failed` は `local_gate.fix_excerpt` の抜粋で、対象範囲・省略の件数を含む全体を
+    `PROMPT_BYTES` 以下にする。"""
     if not local:
         return (
             f"PR #{pr} の CI で次のテストが落ちた。リファクタリング計画の対象範囲（{', '.join(scope)}）の中だけを変えて直し、"
@@ -138,19 +156,17 @@ def final_fix(pr: int, scope: Sequence[str], failed: Sequence[str], *, local: bo
     head = (
         f"PR #{pr} の変更を手元でテストしたところ、次のテストの suite が落ちた。これらの suite は、取得した PR のブランチの先頭"
         "（この実行の変更を載せる前）では合格した。原因はこの実行の変更と確定していない（非決定的なテストや外部の状態の変化でも"
-        f"同じ結果になる）。リファクタリング計画の対象範囲（{', '.join(scope)}）の中だけを変えて直し、コミットする（push しない）。\n"
+        f"同じ結果になる）。リファクタリング計画の対象範囲（{_scope_text(scope)}）の中だけを変えて直し、コミットする（push しない）。\n"
     )
     tail = "\n" + COMMIT_RESULT
 
-    def size(text: str) -> int:
-        return len(text.encode("utf-8"))
+    def note(rest: int) -> str:
+        return f"\nほかに {rest} 件が失敗した（指示文の上限で載せていない）" if rest else ""
 
     body: list[str] = []
     for i, block in enumerate(failed):
-        rest = len(failed) - i - 1
-        note = f"\nほかに {rest} 件が失敗した（指示文の上限で載せていない）" if rest else ""
-        if size(head + "\n\n".join([*body, block]) + note + tail) > PROMPT_BYTES:
-            dropped = len(failed) - i
-            return head + "\n\n".join(body) + f"\nほかに {dropped} 件が失敗した（指示文の上限で載せていない）" + tail
+        # 載せた抜粋・残りの件数・前後の文を合わせた全体で上限を見る
+        if _size(head + "\n\n".join([*body, block]) + note(len(failed) - i - 1) + tail) > PROMPT_BYTES:
+            return head + "\n\n".join(body) + note(len(failed) - i) + tail
         body.append(block)
     return head + "\n\n".join(body) + tail

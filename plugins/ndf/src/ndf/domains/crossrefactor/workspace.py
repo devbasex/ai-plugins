@@ -219,9 +219,10 @@ def gate_logs(state: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def write_private_log(logs: Path, name: str, text: str, state: dict[str, Any], save: Callable[[], None]) -> Path:
-    """実行ユーザーだけが読めるログ `logs/<name>` を書く。ファイルを作る前に所有を状態の `gate_logs` へ記録する。
+    """実行ユーザーだけが読めるログ `logs/<name>` を書き、書いたパスを返す。ファイルを作る前に所有を状態の `gate_logs` へ記録する。
 
-    前からあるファイルは開かずに置き換える（リンク先の中身と権限を変えない）。失敗すれば一時ファイルを消し、記録は残す。
+    前からある同じ名前のファイルは開かず、上書きもしない（前の起動のログも利用者のファイルも残す）。その名前が使われていれば
+    `<name の拡張子の前>-<ランダム>` の名前で書く。失敗すれば一時ファイルを消し、記録は残す。
     """
     private_dir(logs)
     tmp = f"{GATE_LOG_PREFIX}{uuid.uuid4().hex}.tmp"
@@ -240,11 +241,34 @@ def write_private_log(logs: Path, name: str, text: str, state: dict[str, Any], s
             os.close(fd)
         entry.update(st_dev=info.st_dev, st_ino=info.st_ino)
         save()
-        os.replace(path, logs / name)
+        final = _link_new(path, logs, name, entry, save)
+        path.unlink()
     except OSError:
         path.unlink(missing_ok=True)
         raise
-    return logs / name
+    return final
+
+
+# 同じ名前が使われていたときに別の名前を試す回数
+NAME_TRIES = 5
+
+
+def _link_new(tmp: Path, logs: Path, name: str, entry: dict[str, Any], save: Callable[[], None]) -> Path:
+    """`tmp` を、使われていない名前で `logs/` にハードリンクする（`os.link` は既存の名前を上書きしない）。
+
+    名前を変えたら記録の `name` を書き直して保存してからリンクする。
+    """
+    stem, dot, suffix = name.rpartition(".")
+    for attempt in range(NAME_TRIES):
+        if attempt:
+            entry["name"] = f"{stem}-{uuid.uuid4().hex[:8]}{dot}{suffix}" if dot else f"{name}-{uuid.uuid4().hex[:8]}"
+            save()
+        try:
+            os.link(tmp, logs / str(entry["name"]), follow_symlinks=False)
+        except FileExistsError:  # noqa: NDF401 ファイル: 使われている名前は上書きせずに別の名前を試す
+            continue
+        return logs / str(entry["name"])
+    raise FileExistsError(f"ログの名前がすべて使われている: {logs / name}")
 
 
 def _same(path: Path, entry: Mapping[str, Any], *, tmp: bool) -> bool:

@@ -16,7 +16,7 @@
     },
     "follow": {
       "id": "follow",
-      "run": ["sh", "-c", "s=$(cat \"$2\") && [ -n \"$s\" ] && { [ \"$(git rev-parse HEAD)\" = \"$s\" ] || { git fetch -q -- \"$1\" \"refs/heads/$0\" && git merge -q --ff-only --no-overwrite-ignore \"$s\" && [ \"$(git rev-parse HEAD)\" = \"$s\" ]; }; } || exit 1", "{{branch}}", "{{remote}}", "{state_dir}/pushed-sha"],
+      "run": ["ndf", "refactor", "follow", "--pushed", "{state_dir}/pushed-sha", "--branch", "{{branch}}", "--remote", "{{remote}}"],
       "exit_cause": {"1": "precondition"}
     },
     "push": {

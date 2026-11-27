@@ -26,8 +26,9 @@ import sys
 import tempfile
 import time
 import uuid
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any, Optional
 
@@ -43,6 +44,8 @@ NAME_CHARS = 100
 COMMAND_CHARS = 500
 OUTPUT_LINES = 100
 OUTPUT_CHARS = 8_000
+# ログの名前に入れる起動の識別値の文字数
+RUN_CHARS = 12
 # シェルがコマンドを起動できなかったときの終了コード（基準側と比べてから環境の問題かを決める）
 ENV_CODES = frozenset({126, 127})
 # 上限で止めた停止理由（drive の安全網も同じ）
@@ -167,16 +170,56 @@ def settings_at(g: git.Git, commit: str, repo_work: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _tree_links(g: git.Git, commit: str) -> dict[str, Optional[str]]:
-    """コミットのツリー（パス → リンク先。リンクでなければ None）。"""
-    tree: dict[str, Optional[str]] = {}
-    for row in g.run("ls-tree", "-r", "-z", commit).split("\0"):
-        if not row:
-            continue
-        meta, _, path = row.partition("\t")
-        mode, _, sha = meta.split(" ")
-        tree[path] = g.run("cat-file", "blob", sha) if mode == "120000" else None
-    return tree
+class _LinkTree(Mapping[str, Optional[str]]):
+    """コミットのツリー（パス → リンク先。リンクでなければ None）。
+
+    リンク先の blob は、保護の判定が名指しのパスの解決で引いたリンクの分だけ読み、読んだものは覚える。
+    """
+
+    def __init__(self, g: git.Git, commit: str) -> None:
+        self._g = g
+        self._links: dict[str, str] = {}
+        self._paths: set[str] = set()
+        self._read: dict[str, str] = {}
+        for row in g.run("ls-tree", "-r", "-z", commit).split("\0"):
+            if not row:
+                continue
+            meta, _, path = row.partition("\t")
+            mode, _, sha = meta.split(" ")
+            self._paths.add(path)
+            if mode == "120000":
+                self._links[path] = sha
+
+    def __getitem__(self, path: str) -> Optional[str]:
+        if path not in self._paths:
+            raise KeyError(path)
+        if path not in self._links:
+            return None
+        if path not in self._read:
+            self._read[path] = self._g.run("cat-file", "blob", self._links[path])
+        return self._read[path]
+
+    def __contains__(self, path: object) -> bool:
+        return path in self._paths
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._paths)
+
+    def __len__(self) -> int:
+        return len(self._paths)
+
+
+# 同じコミットのツリーを、最終ゲートの周をまたいで使い回す（コミットの SHA が同じならツリーも同じ）
+Trees = dict[str, _LinkTree]
+
+
+def _tree_links(g: git.Git, commit: str, trees: Optional[Trees] = None) -> _LinkTree:
+    """コミットのツリー。`trees` があれば、同じ SHA のツリーを読み直さずに使う。"""
+    if trees is None:
+        return _LinkTree(g, commit)
+    if commit not in trees:
+        trees[commit] = _LinkTree(g, commit)
+    return trees[commit]
 
 
 def _search_path(environ: Mapping[str, str]) -> list[str]:
@@ -184,8 +227,13 @@ def _search_path(environ: Mapping[str, str]) -> list[str]:
     return [e for e in _str(environ, "PATH").split(os.pathsep) if not e.startswith("/")]
 
 
-def protection_at(g: git.Git, commit: str, project: Mapping[str, Any], repo_work: Path) -> protected_decide.Protected:
-    """そのコミットのツリーと設定から、保護するファイルの判定を組む。コマンドが `--work` の配下を絶対パスで指せば `precondition`。"""
+def protection_at(
+    g: git.Git, commit: str, project: Mapping[str, Any], repo_work: Path, trees: Optional[Trees] = None
+) -> protected_decide.Protected:
+    """そのコミットのツリーと設定から、保護するファイルの判定を組む。コマンドが `--work` の配下を絶対パスで指せば `precondition`。
+
+    `trees` を渡せば、同じコミットのツリーを周をまたいで使い回す。
+    """
     found = means.decide(project)
     roots = [str(repo_work.absolute()), os.path.realpath(repo_work)]
     for i, suite in enumerate(found.declarations, 1):
@@ -198,7 +246,7 @@ def protection_at(g: git.Git, commit: str, project: Mapping[str, Any], repo_work
                     "検証用の作業場所ではないコードを確かめることになるので打たない。リポジトリの中のファイルは相対パスで指す"
                 )
                 raise final_gate.GateStopped("precondition", detail)
-    return protected_decide.protected_of(_tree_links(g, commit), found.commands, found.protected, _search_path(os.environ))
+    return protected_decide.protected_of(_tree_links(g, commit, trees), found.commands, found.protected, _search_path(os.environ))
 
 
 def _ndf_lock(repo: git.Git, path: Path) -> Optional[str]:
@@ -345,6 +393,7 @@ class _Gate:
     ex: Exec
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     pd: str = field(default_factory=path_digest)
+    trees: Trees = field(default_factory=dict)
     budget: TestBudget = field(init=False)
 
     def __post_init__(self) -> None:
@@ -366,11 +415,12 @@ class _Gate:
         self.save()
 
     def writer(self, label: str) -> LogWriter:
-        """ログ `local-gate-<周>-<対象>-<順番>.log` を書く関数。"""
+        """ログ `local-gate-<起動>-<周>-<対象>-<順番>.log` を書く関数。`<起動>` は起動ごとのランダムな値で、前の起動のログと重ならない。"""
         logs = self.cfg.root / "logs"
+        run = self.run_id[:RUN_CHARS]
 
         def write(index: int, text: str) -> None:
-            workspace.write_private_log(logs, f"{workspace.GATE_LOG_PREFIX}{label}-{index}.log", text, self.state, self.save)
+            workspace.write_private_log(logs, f"{workspace.GATE_LOG_PREFIX}{run}-{label}-{index}.log", text, self.state, self.save)
 
         return write
 
@@ -499,6 +549,7 @@ def run_local_gate(
 ) -> dict[str, Any]:
     """取得と載せ直し → テスト → push か直し、を周の上限まで回し、最終ゲートの記録を返す。止まれば `final_gate.GateStopped`。"""
     gate = _Gate(g, cfg, state, save, ex)
+    _check_pending_fix(gate)
     remote = g.remote()
     tip: Optional[str] = None
     for round_no in range(cfg.max_fix + 1):
@@ -510,7 +561,7 @@ def run_local_gate(
         found = means.decide(project)
         if found.kind != means.Kind.LOCAL_TEST:
             raise final_gate.GateStopped("precondition", f"取得した先頭 {tip} の設定では、テストを確かめる手段が手元のテストでない")
-        protected = protection_at(g, tip, project, cfg.repo_work)
+        protected = protection_at(g, tip, project, cfg.repo_work, gate.trees)
         if head == tip:
             return _resend_sent(gate, tip, found, round_no)
         changed = paths_changed_between(g, tip, head)
@@ -535,10 +586,43 @@ def run_local_gate(
             continue
         own = _compare(gate, tip, head, found, failed, round_no)
         labels = [f.label for f in own]
-        final_gate.fix_or_undo(g, head, lambda: fix(fix_excerpt(own), round_no + 1), _record("work_stopped", round_no, head))
-        final_gate.check_fix(g, head, labels, cfg.scope, protected.covers)
+        # 担当のコミットの後・範囲の検査の前に中断しても、再開で検査できるよう直す前の SHA を残す
+        state["fixing"] = {"before": head, "tip": tip, "labels": labels}
+        save()
+        stopped = _record("work_stopped", round_no, head)
+        _checked_fix(
+            gate, partial(final_gate.fix_or_undo, g, head, partial(fix, fix_excerpt(own), round_no + 1), stopped), head, labels, protected
+        )
         tip = None
     raise AssertionError("最終ゲートの回数の上限の後に戻った")
+
+
+def _checked_fix(
+    gate: _Gate, launch: Callable[[], None], before: str, labels: Sequence[str], protected: protected_decide.Protected
+) -> None:
+    """修正担当を起動し（`launch`）、直しの範囲を検査してから `fixing` を消す。止まれば消してから止める。
+
+    担当のコミットの後・検査の前に中断すれば `fixing` が残り、再開の頭の `_check_pending_fix` が同じ検査をする。
+    """
+    try:
+        launch()
+        final_gate.check_fix(gate.g, before, labels, gate.cfg.scope, protected.covers)
+    except final_gate.GateStopped:
+        gate.state.pop("fixing", None)
+        gate.save()
+        raise
+    gate.state.pop("fixing", None)
+    gate.save()
+
+
+def _check_pending_fix(gate: _Gate) -> None:
+    """前の起動が最終ゲート修正の範囲の検査の前に中断していれば、その直しの範囲を検査する（範囲外なら戻して `refused`）。"""
+    pending = gate.state["fixing"] if "fixing" in gate.state else None
+    if not isinstance(pending, Mapping):
+        return
+    tip = str(pending["tip"])
+    protected = protection_at(gate.g, tip, settings_at(gate.g, tip, gate.cfg.repo_work), gate.cfg.repo_work, gate.trees)
+    _checked_fix(gate, lambda: None, str(pending["before"]), [str(x) for x in pending["labels"]], protected)
 
 
 def suite_seconds(project: Mapping[str, Any]) -> Optional[float]:
@@ -582,6 +666,26 @@ def write_pushed(out: Path, head: str) -> None:
         os.replace(tmp, out)
     except OSError as exc:
         raise final_gate.GateStopped("precondition", f"--pushed-out の出力先に書けない: {out}: {exc}") from None
+
+
+def follow_pushed(g: git.Git, pushed: Path, remote: str, branch: str) -> str:
+    """呼び出し元の作業場所を、手元の最終ゲートが送った SHA（`--pushed-out` のファイル）へ早送りし、その SHA を返す。
+
+    すでにその SHA なら何もしない。SHA のコミットが手元にあれば取得せずに早送りし、無いときだけ PR のブランチを取得する。
+    ファイルが無いか空、早送りできない（先へ進んでいる・無視したファイルを上書きする）なら `precondition`。
+    """
+    sha = pushed.read_text(encoding="utf-8").strip() if pushed.is_file() else ""
+    if not sha:
+        raise final_gate.GateStopped("precondition", f"送った SHA のファイルが無いか空: {pushed}")
+    if g.rev_parse("HEAD") == sha:
+        return sha
+    if g.attempt("cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
+        g.run("fetch", "-q", "--", remote, f"refs/heads/{branch}")
+    done = g.attempt("merge", "-q", "--ff-only", "--no-overwrite-ignore", sha)
+    if done.returncode != 0 or g.rev_parse("HEAD") != sha:
+        detail = f"呼び出し元の作業場所を送った SHA {sha} へ早送りできない（先へ進んでいるか、無視したファイルを上書きする）"
+        raise final_gate.GateStopped("precondition", detail)
+    return sha
 
 
 def paths_changed_between(g: git.Git, base: str, head: str) -> list[str]:

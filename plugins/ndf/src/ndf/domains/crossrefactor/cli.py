@@ -10,6 +10,7 @@
     ndf refactor state --pr <N> [--work <dir>]
     ndf refactor scope-args --base <起点> [--tests <保存先>...] [--scope <保存先>...] [--work <dir>]
     ndf refactor release --pr <N> [--work <dir>]
+    ndf refactor follow --pushed <ファイル> --branch <head> --remote <リモート> [--work <dir>]
 
 - `touched`: 課題が触る関数（#622）と、着手前の範囲テストへ渡す範囲の配下のテストのファイル（#2096）。`--symbols` を
   渡せば差分から引かずにそれを使う
@@ -24,6 +25,8 @@
 - `state`: 状態ファイルの中身（項目・工程の起点・最終ゲートの記録）を出す
 - `scope-args`: 検査のプランが `run` の `--scope` へ渡す範囲を組む（#1484）
 - `release`: 作業場所を片付ける（NDF の lock だけを外す）。worktree が残らなければ状態ファイルをログの記録だけにする
+- `follow`: 手元の経路で `run` が送った SHA（`--pushed-out` のファイル）へ、呼び出し元の作業場所を早送りする。SHA のコミットが
+  手元にあれば取得しない（工程のプランのステップ `follow`。#4566）
 
 結果 JSON を標準出力の最後の 1 行に出す。停止理由は `ndf.contracts.causes` の種類で返す。
 """
@@ -160,6 +163,11 @@ def _scope_args(a: argparse.Namespace) -> dict[str, Any]:
     return result.result(TOOL, "ok", f"範囲 {len(got)} 件: {' '.join(got)}", [{"kind": "scope", "paths": got}], {"paths": len(got)})
 
 
+def _follow(a: argparse.Namespace) -> dict[str, Any]:
+    sha = local_gate.follow_pushed(git.Git(Path(a.work)), Path(a.pushed), a.remote, a.branch)
+    return result.result(TOOL, "ok", f"送った SHA {sha} へ合わせた", [{"kind": "followed", "sha": sha}], {})
+
+
 def _release(a: argparse.Namespace) -> dict[str, Any]:
     repo = git.Git(Path(a.work))
     root = _root(a)
@@ -181,7 +189,11 @@ def _release(a: argparse.Namespace) -> dict[str, Any]:
 
 
 def _release_held(repo: git.Git, root: Path) -> tuple[list[str], list[Path]]:
-    """ロックを持って片付ける。`rf<PR>/` の下に worktree が残らなければ、状態ファイルをログの記録だけにする（#4566）。"""
+    """ロックを持って片付ける。`rf<PR>/` の下に worktree が残らなければ、状態ファイルをログの記録だけにする（#4566）。
+
+    取り除けずに残した検証用の作業場所（登録の無いディレクトリを含む）のパスは `verify_trees` に残し、調べる人と次の
+    `run` か `release` が見つけられるようにする。
+    """
     ws = workspace.layout(root, (*participants.assign(), participants.FIXER))
     kept = workspace.release(repo, ws)
     path = store.path_of(root)
@@ -190,7 +202,8 @@ def _release_held(repo: git.Git, root: Path) -> tuple[list[str], list[Path]]:
     swept = worktree.sweep_orphans(repo)
     below = [e for e in repo.worktrees() if Path(e.path).resolve().is_relative_to(root.resolve())]
     if not below and path.is_file():
-        store.save(path, {k: state[k] for k in workspace.LOG_ONLY_KEYS if k in state})
+        left = local_gate.listed(state, "verify_trees")
+        store.save(path, {**{k: state[k] for k in workspace.LOG_ONLY_KEYS if k in state}, **({"verify_trees": left} if left else {})})
     workspace.sweep(repo, root, time.time())
     return kept, swept
 
@@ -203,6 +216,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
     "state": _state,
     "scope-args": _scope_args,
     "release": _release,
+    "follow": _follow,
 }
 
 
@@ -248,7 +262,11 @@ def _drive_parsers(sub: Any) -> tuple[argparse.ArgumentParser, ...]:
     sa.add_argument("--base", required=True)
     sa.add_argument("--tests", nargs="*", default=[])
     sa.add_argument("--scope", nargs="*", default=[])
-    return r, st, rl, sa
+    fo = sub.add_parser("follow", help="呼び出し元の作業場所を、手元の経路で送った SHA へ早送りする")
+    fo.add_argument("--pushed", required=True)
+    fo.add_argument("--branch", required=True)
+    fo.add_argument("--remote", required=True)
+    return r, st, rl, sa, fo
 
 
 # 例外 → 停止理由の種類。上から見て最初に当たった行を採る（ValueError の派生を先に置くため、並びを保つ）
