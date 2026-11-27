@@ -93,7 +93,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `table` | `adapters/model_choice.py` | 新設 | `table(root: Path, settings: Optional[Settings] = None) -> Table` | 同梱とリポジトリの `experiments` を重ね、値の制約を検証する。`settings` を渡されれば `.ndf/launch.json` を読み直さずに使う。同梱の値はスキーマに照らさない（配布の後に変わらないので、CI のテストが `bundled_errors` で確かめる） |
 | `bundled_errors` | 同 | 新設 | `bundled_errors() -> list[str]` | 同梱の値が起動の設定のスキーマに合わない箇所を返す。起動の経路では呼ばず、CI のテストが呼ぶ |
 | `stage_of` | 同 | 新設 | `stage_of(layer: str, name: str) -> Optional[str]` | 層と作業の名前から工程を引く |
-| `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, unit: Optional[str] = None, charge_to: Optional[str] = None, retry: Optional[str] = None, mode: Optional[str] = None, argument: tuple[Optional[str], Optional[str]] = (None, None), environ: Optional[Mapping] = None, settings: Optional[Settings] = None) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる。`settings` は `table` へ渡す |
+| `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, unit: Optional[str] = None, charge_to: Optional[str] = None, retry: Optional[str] = None, mode: Optional[str] = None, argument: tuple[Optional[str], Optional[str]] = (None, None), environ: Optional[Mapping] = None, settings: Optional[Settings] = None, key_of: Optional[Callable[[Path], str]] = None) -> Choice`（`unit`・`charge_to`・`retry`・`mode`・`argument`・`argument_at`・`key_of` は `**request` で受けて `Request` にする） | 優先の順で値を決め、要れば割り付けて引き上げる。`settings` は `table` へ渡す |
 | `raised` | 同 | 新設 | `raised(runtime: str, model: Optional[str], effort: Optional[str]) -> tuple[Optional[str], Optional[str]]` | 設計書の「引き上げる起動」の上げ方の表を当てる |
 | `base_fallback` | 同 | 新設 | `base_fallback(choice: Choice, reason: str) -> Optional[Choice]` | 切り替える条件に当たれば `launch_error` の行を書き、基準の組の値を返す。当たらなければ None。行は `append_row(row, choice.store)` で、割り付けたときと同じ保存先に書く。呼び出しで環境変数を差し替えて保存先が既定と違っても、次の起動が同じ保存先から切り替えを読めるようにするためである |
 | `candidates` | 同 | 新設 | `candidates(arms: Sequence, rows: Sequence, entry: Optional[Mapping], now: datetime, where: Where) -> list[int]` | 打ち切った組と起動できない組を除いた添字。`launch_error` は割り付け ID で割り付けの行を引き、`where`（`repo`・`stage`・`runtime`・`key` を持つ組）が同じものだけを数える。引数の多い関数の検査（PLR0913）に合わせ、4 つのキーを 1 つの値にまとめた |
@@ -155,7 +155,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `read_experiments`・`ledger`・`append_row` | `domains/records/jsonl.py` | 層の順序（adapters は domains を読めない） | 使えない。`filelock` と `contracts` の形の確認を使う |
 | `table` | `launch_settings.load` | #1959 の詳細設計 | 使う |
 | `compatibility_key` | `launch_approval.digest` の形 | 同上 | 同じ「キーの順にそろえた JSON の SHA-256」にする |
-| `launch_choice` のリポジトリのキー | `launch_approval.repo_key` | #1959 の詳細設計 | 使う。値の選択（単位のある起動）と起動の承認の確認（指定のある起動）は別々に呼び、呼ぶたびに `git rev-parse` を 1 回起動する。キーは呼び出しの間でも、プロセスの中でも共有しない。1 回は中央値 1.6 ms・95 パーセンタイル 2.2 ms（2026-11-27、このリポジトリの worktree で 200 回）である。覚えても両方を通る起動で 1 回分しか減らないので、キーの写しを持たない。同じ値をファイルから求める関数を別に持つと、`.git` と `commondir` を読む処理がほかの 3 か所と重なる（重複の検査）。起動する CLI に比べて子プロセス 1 つの費用は小さい |
+| `launch_choice` のリポジトリのキー | `launch_approval.repo_key` | #1959 の詳細設計 | 使う。値の選択（単位のある起動）と起動の承認の確認（指定のある起動）の両方がキーを使う。worker と Skill は起動の準備ごとにキーの解き方（`key_of`。`functools.cache` で包んだ `repo_key`）を 1 つ作って両方へ渡し、`git rev-parse` を準備 1 回につき多くても 1 回にする。解いた値は次の起動の準備へ持ち越さない。1 回の `git rev-parse` は中央値 1.6 ms・95 パーセンタイル 2.2 ms である（2026-11-27、このリポジトリの worktree で 200 回）。同じ値をファイルから求める関数を別に持つと、`.git` と `commondir` を読む処理がほかの 3 か所と重なる（重複の検査）。起動する CLI に比べて子プロセス 1 つの費用は小さい |
 | `stage_of` | `contracts/worker/kinds.json` | `ls contracts/worker` | 作業の名前は同じ。工程の対応は持たないので表に置く |
 | `raised`・`candidates`・`base_fallback` | — | `grep -rn "effort" src/ndf`（該当なし） | 新設する |
 | `report_outcome`・`record_outcome` | `report_launch`・`record_cli`（#1959） | #1959 の詳細設計 | 同じ差し込みに関数を足す |
@@ -267,7 +267,12 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - `charge_to`（費用を手戻りとして負う割り付け ID）は、作業が `fix`・`ci-fix` のときの `NDF_CHARGE_TO` の値である。ほかの作業は `charge_to` を書かず、子の環境から `NDF_CHARGE_TO` を外す
 - `outcome` は、結果ファイルがあればその `status`、無ければ `no_result`、起動の失敗の回答は `unknown`。基準へ切り替える打ち直しは `RESUMES` に数えない
 - worker と Skill は、拒否の行を書く前に、残りの期限と起動の承認の対象（`Grant.verify`）を確かめる。承認の対象が変わったか承認が取り消されていれば、行を書かずに `precondition` で止まる
-- 基準の組で起動し直すときは、期限そのものを起動の部品へ渡す（`LaunchOptions.left`）。起動の部品はスロットの待ちと起動の前の確かめの後に残りを測り直し、残りが無ければ起動せず `interrupted`、あれば残りを子の期限にする
+- 基準の組で起動し直す起動は、最初の起動の前に決めた期限を超えない。`LaunchOptions.left` には、単調時計で管理する期限までの残り秒数を呼び出すたびに計算する関数を渡す。起動の部品はこの関数を次のように使う
+  - 重い起動のスロットを待つ上限は、元の上限と残り秒数の小さい方にする。残りが無くなってスロットを取れなければ `interrupted` で止まる
+  - スロットを取った直後に残りが無ければ、承認の再確認と CLI の下限の確認をせずに `interrupted` で止まる
+  - 子を起動する直前と、中継の起動で子の実行を許す直前に残りを確かめ、無ければ起動せず `interrupted` で止まる
+  - 回答を待つ上限は、待ち始める時点の残り秒数にする
+- 残りが無くて起動し直せないときは、worker も Skill も、元のモデルの拒否ではなく期限切れの `interrupted` を返す
 - `--mode` は、`ndf answer work` が作業の値に `mode` を持つ場合に渡す（`progress/gate/entry.py`）
 
 ### 異常系の処理

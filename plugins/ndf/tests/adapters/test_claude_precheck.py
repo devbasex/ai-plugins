@@ -225,7 +225,38 @@ def test_issue_2944_a_deadline_used_up_while_waiting_stops_the_launch(seen, tmp_
     spent = claude.LaunchOptions(left=lambda: 0.0, ready=lambda: seen.order.append("ready"))
     got = claude._prefaced(_run(seen), "q", 30, tmp_path, spent)
 
-    assert got.failure is claude.Failure.TIMEOUT and seen.order == ["slot", "floor"] and seen.ended == [False]
+    assert got.failure is claude.Failure.TIMEOUT and seen.order == ["slot"] and seen.ended == [False]
+
+
+@pytest.mark.parametrize(("remaining", "failure"), [(0.0, claude.Failure.TIMEOUT), (5.0, claude.Failure.NO_SLOT)])
+def test_issue_2944_the_slot_wait_is_bounded_by_the_deadline(seen, tmp_path, monkeypatch, remaining, failure):
+    waits: list[float] = []
+
+    @contextmanager
+    def gate(agent, *, cwd=None, env=None, wait=None, ensure=True):
+        waits.append(wait)
+        raise launch_slot.NoSlot("空かない")
+        yield {}
+
+    monkeypatch.setattr(launch_slot, "gate", gate)
+    options = claude.LaunchOptions(left=lambda: remaining, slot_wait=60.0)
+    got = claude._prefaced(_run(seen), "q", 30, tmp_path, options)
+
+    assert waits == [remaining] and got.failure is failure and seen.popen == []
+
+
+@pytest.mark.parametrize("at", ["ready", "attach"])
+def test_issue_2944_a_deadline_ending_just_before_the_launch_stops_it(seen, tmp_path, monkeypatch, at):
+    """起動の準備の間か、中継の関所を開ける前に期限が切れたら、claude を実行させない。"""
+    remaining = [7.0]
+    monkeypatch.setattr(claude, "_stop", lambda proc: None)  # 偽の子（pid 0）の組へ信号を送らない
+    run = _run(seen)
+    if at == "attach":
+        run = run._replace(gate=lambda argv, r, w: list(argv), attach=lambda pid: remaining.__setitem__(0, 0.0))
+    ready = (lambda: remaining.__setitem__(0, 0.0)) if at == "ready" else None
+    got = claude._prefaced(run, "q", 30, tmp_path, claude.LaunchOptions(left=lambda: remaining[0], ready=ready))
+
+    assert got.failure is claude.Failure.TIMEOUT and not got.launched and seen.ended == [False]
 
 
 def test_issue_2944_the_child_gets_the_time_left_after_the_checks(seen, tmp_path, monkeypatch):

@@ -146,4 +146,4 @@ def test_the_skill_does_not_relaunch_when_recording_the_switch_used_up_the_time(
     seen: list[list[str]] = []
     refused = claude._parse_reply(json.dumps(REFUSED))._replace(launched=True)
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=_replying([refused], seen))
-    assert len(seen) == 1 and got.status == "stopped"
+    assert len(seen) == 1 and got.status == "stopped" and got.cause["kind"] == "interrupted"

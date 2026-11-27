@@ -64,12 +64,12 @@ import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from functools import partial
+from functools import cache, partial
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import cli, identity
-from ndf.adapters import claude, claude_choice, git, launch_settings, run_log
+from ndf.adapters import claude, claude_choice, git, launch_approval, launch_settings, run_log
 from ndf.contracts import causes, exit_codes, facts, limits, result, worker_kinds, worker_paths, writing
 from ndf.contracts.exit_codes import OK
 from ndf.core import durable_locks, worker_append, worker_choice
@@ -405,8 +405,8 @@ def delegate(
     リンクになったか読めなければ、再起動せずに `bad_report` にする。指定の停止は `InternalError` で上げる（`ndf.cli` が結果 JSON にする）。
     """
     out = Delivery(session=session or str(uuid.uuid4()))
-    run = worker_choice.choose_values(handoff)  # 値と設定の誤りは起動せずに止まる
-    with launch_settings.prepared(handoff.kind, handoff.cwd) as grant:  # 起動できない指定なら、前の結果ファイルを消す前に止まる
+    run = worker_choice.choose_values(handoff, key_of := cache(launch_approval.repo_key))  # 誤りは起動せずに止まる。git は 1 回
+    with launch_settings.prepared(handoff.kind, handoff.cwd, key_of) as grant:  # 起動できない指定なら、前の結果ファイルを消す前に止まる
         base, out.notice = _args_for(system, root, handoff.cwd, grant)
         try:
             _resume_until_written(handoff, out, base, call, FreshResult(wd, handoff.result_file.name, grant.verifier), run)

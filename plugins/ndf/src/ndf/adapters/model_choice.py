@@ -385,6 +385,7 @@ def _from_base(base: Optional[Mapping[str, str]], key: str) -> tuple[Optional[st
 class Request:
     """`launch_choice` に渡す起動の手がかり。`charge_to` は手戻りの費用を負う割り付け ID（実験の記録を書くときに使う）。"""
 
+    key_of: Optional[Callable[[Path], str]] = None  # リポジトリのキーの解き方（省けば `repo_key`）
     unit: Optional[str] = None
     charge_to: Optional[str] = None
     retry: Optional[str] = None
@@ -988,7 +989,7 @@ def launch_choice(
     if stage is None or store is None or (req.unit is None and req.charge_to is None):
         return choice if manual.given or req.retry is None or stage is None else _raised_once(choice)
     metric = metric_of(stage)
-    where = Where(launch_approval.repo_key(root), stage, runtime, compatibility_key(arms, metric))
+    where = Where((req.key_of or launch_approval.repo_key)(root), stage, runtime, compatibility_key(arms, metric))
     experiment = got.enabled and len(arms) > 1 and metric is not None
     u = _Unit(req.unit, req.mode, tuple(arms), got.allocation, experiment, got.enabled, where, now, store)
     if manual.given:

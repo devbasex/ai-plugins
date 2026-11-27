@@ -752,7 +752,7 @@ class LaunchOptions:
     - `ready`: 起動の前の確かめをすべて通った後、子を起動する直前に 1 回打つ準備（worker が前の結果ファイルを消すなど）。
       どの確かめで止まった起動でも打たない
     - `log`: 起動した子が終わるたびに使用量ログの行を渡す先（`LaunchLog`。#1959 の決定 6）。None なら渡さない
-    - `left`: 起動の期限の残りの秒を返す。確かめの後に残りが無ければ起動せず `Failure.TIMEOUT`、あれば子の期限を残りにする（#2944）
+    - `left`: 起動の期限の残りの秒を返す。スロット待ちと子の期限を残りに収め、残りが無ければ起動せず `Failure.TIMEOUT`（#2944）
     """
 
     slot_wait: Optional[float] = None
@@ -840,35 +840,35 @@ def _launch_once(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Pat
     launched = False
     try:
         with launch_slot.gate(
-            "claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=options.slot_wait, ensure=options.ensure_training
+            "claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=claude_precheck.slot_wait(options), ensure=options.ensure_training
         ) as slot_env:
             run = run._replace(env={**run.env, **slot_env, identity.env_name("ai-child"): "1"})
             stopped = claude_precheck.precheck_claude(run, cwd, options)
             if stopped is not None:
                 return ClaudeReply.failed("", stopped.detail, failure=PRECHECK_FAILURES[stopped.check])
             at, started = _now()
-            timeout = timeout if options.left is None else options.left()  # 待ちの後に測り直した残り
+            if (late := claude_precheck.spent(options.left)) is not None:  # 起動の直前に残りを測り直す
+                return ClaudeReply.failed("", late, failure=Failure.TIMEOUT)
+            timeout = claude_precheck.time_left(options.left, timeout)
             if run.gate is None:
                 launched = True
                 return _timed(_run_claude(run.argv, prompt, timeout, cwd, run.env, options.new_group), at, started)
-            proc = _gated(run, cwd)
+            proc = _gated(run, cwd, options.left)
             if isinstance(proc, ClaudeReply):
                 return proc
             launched = True
-            return _timed(_talk(proc, prompt, timeout), at, started)
+            return _timed(_talk(proc, prompt, claude_precheck.time_left(options.left, timeout)), at, started)
     except launch_slot.NotLaunched as exc:
-        return ClaudeReply.failed("", exc.detail, failure=Failure(exc.kind))
+        return ClaudeReply.failed("", exc.detail, failure=Failure(claude_precheck.slot_failure(options.left, exc.kind)))
     finally:
         run.end(launched)
 
 
-def _now() -> tuple[str, float]:
-    """今の時刻（UTC の ISO 8601）と、かかった秒を測る単調な時計の値。"""
+def _now() -> tuple[str, float]:  # 今の時刻（UTC の ISO 8601）と、かかった秒を測る単調な時計の値
     return datetime.now(UTC).isoformat(timespec="seconds"), time.monotonic()
 
 
-def _timed(reply: ClaudeReply, at: str, started: float) -> ClaudeReply:
-    """起動した子の回答に、起動した時刻とかかった秒を持たせる。起動できなかった回答はそのまま返す。"""
+def _timed(reply: ClaudeReply, at: str, started: float) -> ClaudeReply:  # 起動した子の回答に、起動した時刻とかかった秒を持たせる
     if not reply.launched:
         return reply
     return reply._replace(launched_at=at, seconds=round(_now()[1] - started, 3))
@@ -882,12 +882,11 @@ def _absolute_config(env: dict[str, str], cwd: Optional[Path]) -> dict[str, str]
     return {**env, "CLAUDE_CONFIG_DIR": str(_workdir(cwd) / conf)}
 
 
-def _workdir(cwd: Optional[Path]) -> Path:
-    """子の作業ディレクトリ。`cwd` を省けばこのプロセスの場所（`Popen(cwd=None)` と同じ）。"""
+def _workdir(cwd: Optional[Path]) -> Path:  # 子の作業ディレクトリ。`cwd` を省けばこのプロセスの場所（`Popen(cwd=None)` と同じ）
     return cwd if cwd is not None else Path.cwd()
 
 
-def _gated(run: AccountRun, cwd: Optional[Path]) -> "subprocess.Popen | ClaudeReply":
+def _gated(run: AccountRun, cwd: Optional[Path], left: Optional[Callable[[], float]] = None) -> "subprocess.Popen | ClaudeReply":
     """関所で起動し、`attach` に通ったら開けて claude になったかを確かめる。なれなければ組を止めて `Failure.LAUNCH`。
 
     子を作った後の失敗（`attach` の例外・関所の口の `OSError`）も組を止めて回収してから返す（届けは呼び出し元が回収の後に消す）。
@@ -907,7 +906,7 @@ def _gated(run: AccountRun, cwd: Optional[Path]) -> "subprocess.Popen | ClaudeRe
         finally:
             os.close(r)
             os.close(sw)
-        why = _open_gate(run, proc, w, sr)
+        why = _open_gate(run, proc, w, sr, left)
     except OSError as exc:
         if proc is None:
             return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
@@ -921,7 +920,8 @@ def _gated(run: AccountRun, cwd: Optional[Path]) -> "subprocess.Popen | ClaudeRe
     if why is None:
         return proc
     _stop(proc)
-    return ClaudeReply.failed("", f"claude を関所で起動できない: {why}", failure=Failure.LAUNCH)
+    failure = Failure.TIMEOUT if why == claude_precheck.EXPIRED else Failure.LAUNCH
+    return ClaudeReply.failed("", f"claude を関所で起動できない: {why}", failure=failure)
 
 
 def _close_fds(fds: Sequence[int]) -> None:
@@ -932,9 +932,9 @@ def _close_fds(fds: Sequence[int]) -> None:
             pass
 
 
-def _open_gate(run: AccountRun, proc: subprocess.Popen, w: int, sr: int) -> Optional[str]:
-    """`attach` に通ったら関所を開け、起動の知らせを読む。claude になれば None、なれなければ理由の符号。"""
-    why = run.attach(proc.pid) if run.attach is not None else None
+def _open_gate(run: AccountRun, proc: subprocess.Popen, w: int, sr: int, left: Optional[Callable[[], float]]) -> Optional[str]:
+    """`attach` に通り起動の期限が残っていれば関所を開け、起動の知らせを読む。claude になれば None、なれなければ理由の符号。"""
+    why = (run.attach(proc.pid) if run.attach is not None else None) or claude_precheck.spent(left)
     if why is not None:
         return why
     os.write(w, b"1")
