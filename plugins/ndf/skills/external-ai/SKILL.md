@@ -88,8 +88,9 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 LLM が決めるのは **どの CLI に渡すか**（上の表）と **プロンプトの中身**、**結果の解釈**だけである。
 NDF には 4 つの CLI をまとめて起動するサブコマンドが無いため、起動・上限つきの待ち・回収は次の手順で行う。
 
-1. プロンプトをファイルへ書く（ファイル書き込みツールで。テンプレートは「プロンプト設計」）。出力先のファイル
-   （下の `<結果>`）をプロンプトに書く
+1. プロンプトをファイルへ書く（ファイル書き込みツールで。テンプレートは「プロンプト設計」）。書き込みを伴う委譲では、出力先のファイル
+   （下の `<結果>`）を絶対パスでプロンプトに書く。読むだけの委譲（下の `--use review`）では出力先を書かず、結果を最終応答で返すことと、
+   ファイルを変更しないことを書く
 2. CLI の有無と認証を確かめる（`command -v <CLI>` と、補助ファイルのインストールとログインのセクションの確かめ方）。Claude Code と Codex では
    `ndf training check --runtime <claude|codex>` も打ち、学習に使わない設定を確かめる
 3. 補助ファイルの起動の形（codex・agy は「起動コマンド」、claude・kiro は「非対話実行」）を、`timeout <秒>` で包んで打つ。Claude Code では Bash の
@@ -98,18 +99,22 @@ NDF には 4 つの CLI をまとめて起動するサブコマンドが無い�
    指定は書かず、`'{args}'` を 1 つ置く。`'{args}'` の位置は決まっていて、codex は `codex exec` の、kiro は `kiro-cli chat --no-interactive` の、
    agy は `agy` のすぐ後に置く（ほかの位置は拒まれる）。codex の作業ディレクトリは、`ndf delegate-run` が今のディレクトリを `-C` で入れる
 
+   次の例は、読むだけのレビューを codex に頼む起動である。対象のディレクトリへ移れた場合だけ起動するよう、`cd` と `timeout` を `&&` でつなぐ。
+   書き込みを伴う委譲の起動は、`corder` エージェントの「Codex CLI」の節にある
+
    ```bash
-   cd <対象のディレクトリ>
-   timeout 1320 ndf delegate-run --runtime codex -- codex exec '{args}' --config model_reasoning_effort=medium \
-     < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
+   cd <対象のディレクトリ> && timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}' \
+     --config model_reasoning_effort=medium < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
    ```
 
    - `ndf delegate-run` は、サンドボックスが使えればその中で起動し、使えなければ起動の設定（`.ndf/launch.json` の `permissions.unsandboxed`）で
      そのランタイムを承認したときだけ安全装置を外す。Kiro と agy の作業委譲は、起動の設定でそのランタイムの承認が有効な場合に実行できる。
      同じ設定であれば、起動ごとに承認し直す必要はない
    - 承認が無いと CLI を起動せず、理由と承認の手順を標準エラーに出して止まる（終了コード 3）。`/ndf:launch-config` で承認してから打ち直す
-   - 読むだけの委譲は `--use review` を付ける（codex は `-s read-only`、kiro は読むだけの指定で起動し、agy は止まる）。
-     読むだけの委譲では結果ファイルを書けないので、プロンプトで結果を最終応答に返すよう指示し、標準出力を回収する
+   - 読むだけの委譲は `--use review` を付け、プロンプトで結果を最終応答に返すよう指示し、標準出力を回収する。
+     codex はサンドボックスが使える場合に `-s read-only` で起動する。kiro はサンドボックスの有無によらず読むだけの指定で起動し、agy は止まる。
+     サンドボックスが使えず、codex のサンドボックスなしの起動を承認している場合は、`--use review` でも codex はファイルを変更できる。
+     そのため、どちらの場合もプロンプトに「ファイルを変更しないこと」と書く
    - コマンドが安全装置の引数（`-s`・`--sandbox`・`--dangerously-bypass-approvals-and-sandbox`・`--trust-all-tools`・`--trust-tools`・
      `--dangerously-skip-permissions` など）や作業ディレクトリの指定（codex の `-C`・`--cd`）を自分で持つと拒まれる
 
@@ -120,7 +125,7 @@ NDF には 4 つの CLI をまとめて起動するサブコマンドが無い�
 |---|---|---|
 | 結果ファイルか標準出力に本文がある | 成功 | 本文を読む |
 | どれにも本文が無い | tool 呼び出しだけで終わった | 標準エラー出力の末尾を読み、プロンプトを直すか別の CLI へ渡す |
-| 終了コード 124（`timeout` が止めた） | 上限に当たった | 読むファイルを絞るか観点を分けて渡し直す |
+| 終了コード 124（`timeout` が止めた） | 上限に当たった | 読むファイルを絞るか観点を分けて渡し直す。省いたファイルや観点は未確認として結果とともに返す |
 | 標準エラー出力に利用上限の語がある | 利用上限 | 同じ CLI では解けない。別の CLI へ渡す |
 | CLI が無い・認証が切れている | 起動できない | 補助ファイルのログイン・インストールの手順を行う |
 

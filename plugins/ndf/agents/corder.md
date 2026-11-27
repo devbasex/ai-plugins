@@ -54,26 +54,33 @@ description: |
 どちらの用途も、対象のディレクトリに移れた場合だけ起動する（`cd` と `timeout` を `&&` でつなぐ）。移れないまま起動すると、元のディレクトリの承認で別の worktree を Codex に処理させてしまう。
 安全装置の引数と作業ディレクトリの指定（`-C <今のディレクトリ>`）は `ndf delegate-run` が `'{args}'` に入れるので、自分では書かない。
 
-まず共通の準備をする。
+起動の前に一時ディレクトリを作り、その絶対パスを決めてからプロンプトを書く。プロンプトに書く出力先は、変数名ではなく絶対パスにする。
+プロンプトのファイルの中の `$TMP` や `$FINAL` はシェルが展開しないので、変数名のまま書くと、Codex は呼び出し元が回収する場所に結果を書けない。
 
-```bash
-# プロンプトを一意の一時ファイルに書く（本文はファイル書き込みツールで $TMP/prompt.md に置く）
-TMP=$(mktemp -d)
-```
+1. 一時ディレクトリを作り、表示された絶対パスを控える。書き込みを伴う作業では、結果ファイル `$FINAL` もそのディレクトリの `codex-result.md` に決める
 
-次に、依頼された用途のコマンドを 1 つだけ起動する。2 つとも起動すると、同じプロンプトが書き込みのできる Codex にも渡り、ログも上書きされる。
+   ```bash
+   TMP=$(mktemp -d)
+   FINAL="$TMP/codex-result.md"   # 書き込みを伴う作業のときだけ使う
+   echo "$TMP"
+   ```
 
-読むだけのレビュー（上限は 1200 + 120 秒）。プロンプトには、レビュー結果を最終応答で返すことと、ファイルを変更しないことを書く。
+2. ファイル書き込みツールで、プロンプトを `<控えた絶対パス>/prompt.md` に保存する。
+   読むだけのレビューでは、レビュー結果を最終応答で返すことと、ファイルを変更しないことを書く。
+   書き込みを伴う作業では、結果を `<控えた絶対パス>/codex-result.md` に書くことを、絶対パスで書く
+3. プロンプトを保存してから、依頼された用途のコマンドを 1 つだけ起動する。2 つとも起動すると、同じプロンプトが書き込みのできる Codex にも渡り、ログも上書きされる
+   1 と別の Bash の実行で起動するなら、変数は引き継がれないので、コマンドの `$TMP` を控えた絶対パスに置き換える
+
+読むだけのレビュー（上限は 1200 + 120 秒）:
 
 ```bash
 cd "<対象のディレクトリ>" && timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}' \
   --config model_reasoning_effort=medium < "$TMP/prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
 ```
 
-書き込みを伴う作業（上限は 3600 + 120 秒）。プロンプトには出力先 `$FINAL` を書く。
+書き込みを伴う作業（上限は 3600 + 120 秒）:
 
 ```bash
-FINAL="$TMP/codex-result.md"
 cd "<対象のディレクトリ>" && timeout 3720 ndf delegate-run --runtime codex -- codex exec '{args}' \
   --config model_reasoning_effort=medium < "$TMP/prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
 ```
