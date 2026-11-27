@@ -647,9 +647,7 @@ def plan_start(work_dir: Path) -> Optional[str]:
     if record is None:
         return None
     again = plan_runs.from_of(done["next"]) if done is not None and done["status"] == result.STOPPED and "next" in done else None
-    if again is not None:
-        return _before_pr_number(work_dir, record, again)
-    start = record["start"] if "start" in record else None
+    start = again if again is not None else record.get("start")
     return _before_pr_number(work_dir, record, start) if isinstance(start, str) else None
 
 
