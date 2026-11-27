@@ -165,6 +165,12 @@ class Line(NamedTuple):
     base: Optional[int]
     head: Optional[int]
     text: str
+    newline: bool = True
+
+    @property
+    def key(self) -> str:
+        """行を比べるときの値。末尾に改行の無い行は、同じ本文の改行のある行と別の値にする（本文は改行を含まない）。"""
+        return self.text if self.newline else f"{self.text}\n"
 
 
 class Hunk(NamedTuple):
@@ -227,6 +233,11 @@ def _read_name(line: str, names: dict[bool, Optional[str]]) -> None:
             names[of_base] = _path(line.removeprefix(start), prefix)
 
 
+def _end_without_newline(lines: Sequence[Line]) -> tuple[Line, ...]:
+    """`lines` の最後の行を、末尾に改行の無い行にする（`\\ No newline at end of file` は直前の行を指す）。"""
+    return (*lines[:-1], lines[-1]._replace(newline=False))
+
+
 def _hunk(header: re.Match[str], rest: Iterator[str]) -> Hunk:
     """見出し `header` の hunk を、示された行数だけ `rest` から読む（見出しに見える本文の行を読み違えない）。"""
     base_left, head_left = (int(n) if n is not None else 1 for n in (header[2], header[4]))
@@ -237,7 +248,7 @@ def _hunk(header: re.Match[str], rest: Iterator[str]) -> Hunk:
     while base_left or head_left:
         line = next(rest)
         if line.startswith("\\"):
-            # `\ No newline at end of file` は行でない
+            lines = list(_end_without_newline(lines))
             continue
         in_base, in_head = line[0] != "+", line[0] != "-"
         lines.append(Line(base if in_base else None, head if in_head else None, line[1:]))
@@ -256,6 +267,10 @@ def _file_blocks(text: str) -> list[tuple[dict[bool, Optional[str]], list[Hunk]]
             files.append(({}, []))
         elif header is not None:
             files[-1][1].append(_hunk(header, rest))
+        elif line.startswith("\\"):
+            # hunk の最後の行を指すものは、示された行数を読み終えた後に来る
+            last = files[-1][1][-1]
+            files[-1][1][-1] = last._replace(lines=_end_without_newline(last.lines))
         elif files:
             _read_name(line, files[-1][0])
     return files
@@ -342,7 +357,19 @@ class _Delta(NamedTuple):
     hunks: dict[str, tuple[Hunk, ...]]
 
 
-def _listing(g: git.Git, span: str) -> tuple[dict[str, _Entry], frozenset[str]]:
+# 差分の範囲から、その一覧（変わったファイルと、そのうち行で比べられないもの）。呼び手が空の辞書を作り、同じラウンドの
+# `new_in_pr` と `since_diff` へ渡して、同じ範囲の一覧を 2 回読まない
+Listings = dict[str, tuple[dict[str, _Entry], frozenset[str]]]
+
+
+def _listing(g: git.Git, span: str, listed: Listings) -> tuple[dict[str, _Entry], frozenset[str]]:
+    """差分 `span` の一覧。`listed` に無ければ読んで入れる。"""
+    if span not in listed:
+        listed[span] = _read_listing(g, span)
+    return listed[span]
+
+
+def _read_listing(g: git.Git, span: str) -> tuple[dict[str, _Entry], frozenset[str]]:
     """差分 `span` の変わったファイルと、そのうち行で比べられないもの。UTF-8 でないパスは、git へ渡し直せる形で読む。"""
     fields = iter(g.run_bytes(*_LISTING, span).decode("utf-8", errors="surrogateescape").split("\0"))
     entries: dict[str, _Entry] = {}
@@ -364,8 +391,8 @@ def _listing(g: git.Git, span: str) -> tuple[dict[str, _Entry], frozenset[str]]:
     return entries, frozenset(binary)
 
 
-def _delta(g: git.Git, span: str) -> _Delta:
-    entries, binary = _listing(g, span)
+def _delta(g: git.Git, span: str, listed: Listings) -> _Delta:
+    entries, binary = _listing(g, span, listed)
     hunks: dict[str, tuple[Hunk, ...]] = {}
     text = g.run_bytes(*_DIFF, span).decode("utf-8", errors="surrogateescape")
     for names, found in _file_blocks(text):
@@ -383,10 +410,10 @@ def _changed_rows(hunks: Sequence[Hunk]) -> tuple[list[tuple[int, str]], list[tu
         at = hunk.head
         for line in hunk.lines:
             if line.head is None:
-                removed.append((at, line.text))
+                removed.append((at, line.key))
                 continue
             if line.base is None:
-                added.append((line.head, line.text))
+                added.append((line.head, line.key))
             at = line.head + 1
     return added, removed
 
@@ -401,8 +428,17 @@ class _Block(NamedTuple):
     removed: tuple[str, ...]
 
 
+def _append_block(blocks: list[_Block], block: _Block) -> None:
+    """`block` を `blocks` の後ろへ足す。前のかたまりとの間に残る行が無ければ 1 つにする。"""
+    if blocks and (blocks[-1].end, blocks[-1].base + len(blocks[-1].removed)) == (block.start, block.base):
+        before = blocks.pop()
+        block = _Block(before.start, block.end, before.base, before.removed + block.removed)
+    blocks.append(block)
+
+
 def _changed_blocks(hunks: Sequence[Hunk]) -> list[_Block]:
-    """`hunks` の変えた行のかたまりを、行の順に返す。"""
+    """`hunks` の変えた行のかたまりを、行の順に返す。間に残る行の無いかたまりは 1 つにする（種別の変更は、削除と追加が
+    同じ位置の別の hunk になる）。"""
     blocks: list[_Block] = []
     offset = 0
     for hunk in hunks:
@@ -411,7 +447,7 @@ def _changed_blocks(hunks: Sequence[Hunk]) -> list[_Block]:
             lines = list(group)
             end = head + sum(x.head is not None for x in lines)
             if changed_here:
-                blocks.append(_Block(head, end, base, tuple(x.text for x in lines if x.head is None)))
+                _append_block(blocks, _Block(head, end, base, tuple(x.key for x in lines if x.head is None)))
             base += sum(x.base is not None for x in lines)
             head = end
         offset = base - head
@@ -483,27 +519,35 @@ def _has_unread_lines(path: str, now: _Delta, seen: _Delta, since: _Delta) -> bo
 
 def _has_unread(path: str, kinds: frozenset[tuple], now: _Delta, seen: _Delta, since: _Delta) -> bool:
     """今の PR の差分の `path` の変更に、読んでおらず今回も渡らないものがあるか。`kinds` は既読の差分と今回渡す差分の
-    変更の形。行で比べられないファイルは、今回渡す差分が中身（blob）を変えないなら（権限だけ・名前だけ）、読んだ変更前後の
-    blob と照らす。"""
+    変更の形。行で比べられないファイルは `_binary_unread` で照らす。"""
     entry = now.entries[path]
     if entry.kind not in kinds:
         return True
     if path not in now.binary:
         return _has_unread_lines(path, now, seen, since)
+    return _binary_unread(path, now, seen, since)
+
+
+def _binary_unread(path: str, now: _Delta, seen: _Delta, since: _Delta) -> bool:
+    """行で比べられない `path` の今の PR の変更に、相手役が確かめる材料が渡っていないか。材料は差分のブロックの変更前後の
+    blob ID（`index` の行）で、相手役は作業場所のリポジトリからその ID の中身を読む。変更後の blob は、今回渡す差分か既読の
+    差分が持つ。変更前の blob が、そのどちらの変更前とも違えば未読にする（ベースが同じファイルを変えた）。今回渡す差分が
+    中身を変えない（権限だけ・名前だけ）なら、既読の差分の変更前だけと照らす。"""
     step = since.entries.get(path)
-    if step is not None and step.blobs[0] != step.blobs[1]:
-        return False
     read = seen.entries.get(step.old if step is not None else path)
-    return read is None or read.blobs != entry.blobs
+    given = [read] if read is not None else []
+    if step is not None and step.blobs[0] != step.blobs[1]:
+        given.append(step)
+    return now.entries[path].blobs[0] not in {entry.blobs[0] for entry in given}
 
 
-def new_in_pr(g: git.Git, previous: Range, current: Range) -> Optional[tuple[str, ...]]:
+def new_in_pr(g: git.Git, previous: Range, current: Range, listed: Listings) -> Optional[tuple[str, ...]]:
     """比較基点が変わったことで PR の変更になり、前のラウンドで読んでおらず今回の前の head からの差分にも出ない変更のある
     ファイル（#3780）。`previous.head` は `current.head` の祖先であること。比べるコミットや blob が手元に無ければ None。"""
     try:
-        seen = _delta(g, f"{previous.base}...{previous.head}")
-        now = _delta(g, f"{current.base}...{current.head}")
-        since = _delta(g, f"{previous.head}..{current.head}")
+        seen = _delta(g, f"{previous.base}...{previous.head}", listed)
+        now = _delta(g, f"{current.base}...{current.head}", listed)
+        since = _delta(g, f"{previous.head}..{current.head}", listed)
     except git.GitError:  # noqa: NDF401 外部コマンド: 比べられないことを None で返し、呼び手は全差分にする
         return None
     kinds = frozenset(e.kind for delta in (seen, since) for e in delta.entries.values())
@@ -520,11 +564,11 @@ def _diff_of(g: git.Git, span: str, paths: Sequence[str]) -> str:
     return g.run_bytes("--literal-pathspecs", *_DIFF, span, "--", *paths).decode("utf-8", errors="replace")
 
 
-def since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str]) -> str:
+def since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str:
     """前の head からの差分（PR が前のラウンドの時点か今に変えるファイルに絞る。ベースのマージで入った PR に関係の無い変更を
     読ませない）に、`added`（`new_in_pr` の返り）の今の PR の差分を続けて返す（#3780）。"""
-    seen, _ = _listing(g, f"{previous.base}...{previous.head}")
-    now, _ = _listing(g, f"{current.base}...{current.head}")
+    seen, _ = _listing(g, f"{previous.base}...{previous.head}", listed)
+    now, _ = _listing(g, f"{current.base}...{current.head}", listed)
     paths = sorted({p for e in (*seen.values(), *now.values()) for p in (e.old, e.new)})
     # パスの指定の無い `git diff` は全差分になるので、絞るファイルが無ければ打たない
     if not paths:

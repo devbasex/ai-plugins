@@ -601,7 +601,7 @@ def _merge_target(wt: Path) -> None:
 
 
 def _new(wt: Path, previous: changes.Range, base: str) -> tuple[str, ...] | None:
-    return changes.new_in_pr(git.Git.offline(wt), previous, changes.Range(base, _head(wt)))
+    return changes.new_in_pr(git.Git.offline(wt), previous, changes.Range(base, _head(wt)), {})
 
 
 def test_clean_merge_of_the_base_adds_no_new_files(wt: Path) -> None:
@@ -730,7 +730,42 @@ _REMOVALS = {
         "@@ -1,3 +1,4 @@\n P\n-A\n+R1\n+R2\n Z\n",
         False,
     ),
+    # 読んだのは改行のある `x` の削除で、今の PR の差分は改行の無い `x` を消す
+    "newline-at-the-end": (
+        "@@ -1 +1 @@\n-x\n+y\n",
+        "",
+        "@@ -1 +1 @@\n-x\n\\ No newline at end of file\n+y\n",
+        True,
+    ),
+    # 種別の変更（通常のファイル → シンボリックリンク）は、削除と追加が同じ位置の別の hunk になる
+    "type-change": (
+        "",
+        "@@ -1,2 +0,0 @@\n-P\n-Q\n@@ -0,0 +1 @@\n+t\n\\ No newline at end of file\n",
+        "@@ -1,2 +0,0 @@\n-P\n-Q\n@@ -0,0 +1 @@\n+t\n\\ No newline at end of file\n",
+        False,
+    ),
 }
+
+
+def _binary(before: str, after: str) -> changes._Delta:
+    entry = changes._Entry("M", "a.bin", "a.bin", ("100644", "100644"), (before, after))
+    return changes._Delta({"a.bin": entry}, frozenset({"a.bin"}), {})
+
+
+@pytest.mark.parametrize(
+    ("seen", "since", "now", "unread"),
+    [
+        (("B", "A"), ("A", "C"), ("B", "C"), False),
+        (("X", "A"), ("A", "C"), ("A", "C"), False),
+        # ベースも同じバイナリを変え、今の PR の変更前の blob はどの差分にも無い
+        (("X", "A"), ("A", "C"), ("B", "C"), True),
+    ],
+    ids=["read-before", "passed-before", "before-changed-by-the-base"],
+)
+def test_a_binary_is_read_only_when_both_of_its_blobs_were_given(seen: tuple, since: tuple, now: tuple, unread: bool) -> None:
+    """#3780: バイナリは、今の PR の変更前後の blob ID が読んだ差分か今回渡す差分にあるときだけ読んだとみなす。"""
+    kinds = frozenset({_binary(*now).entries["a.bin"].kind})
+    assert changes._has_unread("a.bin", kinds, _binary(*now), _binary(*seen), _binary(*since)) is unread
 
 
 @pytest.mark.parametrize(("seen", "since", "now", "unread"), list(_REMOVALS.values()), ids=list(_REMOVALS))
@@ -743,13 +778,14 @@ def test_a_commit_that_is_not_local_gives_none_or_a_git_error(wt: Path) -> None:
     """比べるコミットが無ければ、`new_in_pr` は None を返し（呼び手は全差分にする）、`since_diff` は例外を返す。"""
     head = _head(wt)
     previous, current = changes.Range("0" * 40, head), changes.Range(head, head)
-    assert changes.new_in_pr(git.Git.offline(wt), previous, current) is None
+    assert changes.new_in_pr(git.Git.offline(wt), previous, current, {}) is None
     with pytest.raises(git.GitError):
-        changes.since_diff(git.Git.offline(wt), previous, current, ())
+        changes.since_diff(git.Git.offline(wt), previous, current, (), {})
 
 
-def test_since_diff_is_limited_to_pr_files_and_appends_the_new_ones(wt: Path) -> None:
-    """#3780: 前の head からの差分は PR が変えるファイルだけにし、新しく PR の変更になったファイルは今の PR の差分も続ける。"""
+def test_since_diff_is_limited_to_pr_files_and_appends_the_new_ones(wt: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#3780: 前の head からの差分は PR が変えるファイルだけにし、新しく PR の変更になったファイルは今の PR の差分も続ける。
+    `new_in_pr` が読んだ一覧は読み直さない。"""
     base = _start(wt, {"a[1].txt": _lines(), "old.txt": _lines()})
     head = _write(wt, {"a[1].txt": _lines((10, "pr")), "old.txt": None, "名前.txt": _lines()}, "PR")
     moved = _move_base(wt, {"other.txt": "マージしただけ\n"})
@@ -757,9 +793,13 @@ def test_since_diff_is_limited_to_pr_files_and_appends_the_new_ones(wt: Path) ->
     _write(wt, {"a[1].txt": _lines((10, "直し"))}, "直し")
     previous, current = changes.Range(base, head), changes.Range(moved, _head(wt))
     g = git.Git.offline(wt)
-    plain = changes.since_diff(g, previous, current, ())
+    listed: changes.Listings = {}
+    assert changes.new_in_pr(g, previous, current, listed) == ()
+    calls = count_git(monkeypatch)
+    plain = changes.since_diff(g, previous, current, (), listed)
+    assert not any("--raw" in c for c in calls)
     assert "+直し" in plain and "other.txt" not in plain and "名前.txt" not in plain
-    added = changes.since_diff(g, previous, current, ("名前.txt",))
+    added = changes.since_diff(g, previous, current, ("名前.txt",), listed)
     assert added.startswith(plain)
     assert "rename from old.txt" in added[len(plain) :] and "a[1].txt" not in added[len(plain) :]
 
@@ -768,4 +808,4 @@ def test_since_diff_without_pr_files_is_empty(wt: Path) -> None:
     """絞るファイルが無いときに、パスの指定の無い `git diff`（全差分）を打たない。"""
     base = _head(wt)
     moved = commit(wt, "other.txt", "x\n", "比較先")
-    assert changes.since_diff(git.Git.offline(wt), changes.Range(base, base), changes.Range(moved, moved), ()) == ""
+    assert changes.since_diff(git.Git.offline(wt), changes.Range(base, base), changes.Range(moved, moved), (), {}) == ""
