@@ -86,19 +86,22 @@ def _save_record(record: Path, to: Path) -> None:
 def _keep_records(run: VerifyRun, round_no: int, held: Path, stem: Path) -> bool:
     """起動ごとのディレクトリ `held` の記録を `stem` の隣へ保存し（`_save_record`）、`held` を消す。保存先の名前は、`stem` の
     名前の部分を `held` の名前（起動ごとに違う）に替えたものである。保存できない記録はディレクトリと一緒に消える。
+    保存中に割り込まれても `held` は消してから、割り込みを伝える。
     1 つでも保存できたら真。"""
     saved = False
-    for record in held.iterdir():
-        if record.is_symlink() or not record.is_file():
-            continue
-        name = held.name + record.name.removeprefix(stem.name)
-        try:
-            _save_record(record, stem.parent / name)
-            saved = True
-        except OSError as exc:  # 診断の記録を移せなくても、判定の結果と駆動は変えない
-            run.note(round_no, "verify", f"判定役の記録 {name} を移せない（{type(exc).__name__}）")
-            _private_log(run, round_no, stem, f"{name}: {exc}")
-    shutil.rmtree(held, ignore_errors=True)
+    try:
+        for record in held.iterdir():
+            if record.is_symlink() or not record.is_file():
+                continue
+            name = held.name + record.name.removeprefix(stem.name)
+            try:
+                _save_record(record, stem.parent / name)
+                saved = True
+            except OSError as exc:  # 診断の記録を移せなくても、判定の結果と駆動は変えない
+                run.note(round_no, "verify", f"判定役の記録 {name} を移せない（{type(exc).__name__}）")
+                _private_log(run, round_no, stem, f"{name}: {exc}")
+    finally:  # 保存中に割り込まれても、この起動で作ったディレクトリは残さない
+        shutil.rmtree(held, ignore_errors=True)
     return saved
 
 

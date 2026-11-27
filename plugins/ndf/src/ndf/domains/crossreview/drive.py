@@ -37,7 +37,6 @@ merge-base の SHA）と MVV とレビューの単位の指示が今と同じで
 
 from __future__ import annotations
 
-import copy
 import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -617,12 +616,13 @@ def _reviewed(run: _Run, round_no: int, prep: reviewing.Prepared, launch: Launch
 
 def _keeping(run: _Run, round_no: int, prep: reviewing.Prepared, got: reviewing.Reviewed, launch: Launcher) -> Launcher:
     """判定役の起動の直前に、判定待ちのラウンドを保存する起動（判定役の待ちで中断しても、打ち直しがレビューからやり直さない。
-    起動しないラウンドは書かない。#4363）。保存するのは、このラウンドの指摘をジャーナルへ入れる前の状態である（打ち直しが
-    同じ指摘を入れ直し、同じように判定役へ渡す）。ジャーナルへ入れる前に呼ぶ。"""
-    held = reviewing.pending(_round_record(run, round_no, prep), prep, got)
-    data = copy.deepcopy({**run.data, store.FINDINGS: list(run.journal.rows.values()), store.PENDING_REVIEW: held})
+    起動しないラウンドは、状態を読みも書きも複製もしない。#4363）。足す先は状態ファイルの中身である。ラウンドの途中では
+    状態ファイルを書かないので、このラウンドの指摘をジャーナルへ入れる前の状態が残り、打ち直しが同じ指摘を入れ直して同じように
+    判定役へ渡す。"""
 
     def judging(spec: agents.Launch) -> agents.AgentStatus:
+        data = store.read_state(run.ref)
+        data[store.PENDING_REVIEW] = reviewing.pending(_round_record(run, round_no, prep), prep, got)
         store.write_object(run.ref.path, data)
         return launch(spec)
 
@@ -635,12 +635,11 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     prep = _prepare_round(run, round_no)
     got = _reviewed(run, round_no, prep, launch)
     raised, unread = got.raised, {s: u.hint for s, u in got.unread.items()}
-    judge = _keeping(run, round_no, prep, got, launch)
     keys = run.journal.enter(round_no, raised, run.mvv_items, run.mvv)
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
     # 確認で下げた指摘は、振動の判定のキーに数えない
-    checked = _confirm_heavy(run, round_no, prep.diff, judge, filled=got.filled)
+    checked = _confirm_heavy(run, round_no, prep.diff, _keeping(run, round_no, prep, got, launch), filled=got.filled)
     run.history.append(keys - checked.lowered)
     record = _round_record(run, round_no, prep)
     if checked.record:  # 中断した起動の出力も保存先に残るので、このラウンドの起動の保存できた出力を名指す（回答の有無は表さない）

@@ -386,7 +386,8 @@ def test_issue_4363_ask_leaves_no_partial_record_when_copying_is_interrupted(tmp
     seen: list = []
     with pytest.raises(KeyboardInterrupt):
         verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher(seen, [holding(_row())]))
-    assert not (tmp_path / f"{seen[0].paths.out.parent.name}.out").exists()
+    held = seen[0].paths.out.parent
+    assert not (tmp_path / f"{held.name}.out").exists() and not held.exists()
 
 
 @pytest.mark.parametrize("asked, resumed", [((), True), (("a.md#見出し",), False)], ids=["unsent-head", "other-sections"])
