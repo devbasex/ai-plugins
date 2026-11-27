@@ -146,7 +146,7 @@ def test_claude_children_carry_the_ai_child_flag_in_the_final_environment(monkey
 
     launched: list[dict] = []
 
-    def run(argv, prompt, timeout, cwd, env, new_group):
+    def run(argv, prompt, timeout, cwd, env, options):
         launched.append(dict(env))
         if relayed and len(launched) == 1:
             return claude.ClaudeReply.failed("", "上限", failure=claude.Failure.USAGE_LIMIT)

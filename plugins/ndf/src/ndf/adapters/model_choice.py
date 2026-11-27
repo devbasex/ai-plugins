@@ -82,8 +82,7 @@ def _env_names() -> dict[str, str]:
     }
 
 
-def _order_env(order: Mapping[str, Any], column: str) -> Optional[str]:
-    """順位の行の列 `column` が指す環境変数の名前。列が無ければ None。"""
+def _order_env(order: Mapping[str, Any], column: str) -> Optional[str]:  # 順位の行の列 `column` が指す環境変数の名前。列が無ければ None
     return _env_names()[order[column]] if column in order else None
 
 
@@ -122,6 +121,10 @@ class Choice:
     inherited_effort: Optional[str] = None
     retry: Optional[str] = None
     store: Optional[Path] = None
+
+    @property
+    def switchable(self) -> bool:  # モデルを理由に拒まれたら基準へ切り替える対象（割り付けた、基準でない組）
+        return self.assign_id is not None and self.arm is not None and self.arm != self.base_arm
 
     def cli_args(self) -> list[str]:
         """CLI に渡す引数（表 runtimes の `choice_args` の形。値の無い側は足さない）。"""
@@ -181,8 +184,7 @@ def _order_row(runtime: str) -> dict[str, Any]:
     return found[runtime]
 
 
-def _launch_stages() -> dict[tuple[str, str], str]:
-    """(層, 作業の名前) → 工程。"""
+def _launch_stages() -> dict[tuple[str, str], str]:  # (層, 作業の名前) → 工程
     return {(layer, name): r["id"] for r in _stage_rows() for layer, names in r["launches"].items() for name in names}
 
 
@@ -199,8 +201,7 @@ def _retries() -> set[str]:
     return {reason for r in _stage_rows() if "retries" in r for reason in r["retries"]}
 
 
-def _bundled() -> dict[str, Any]:
-    """同梱の値を起動の設定の `experiments` と同じ形で返す。"""
+def _bundled() -> dict[str, Any]:  # 同梱の値を起動の設定の `experiments` と同じ形で返す
     defaults = facts.rows(TABLE, kind="defaults")
     if len(defaults) != 1:
         raise _fail(f"{_bundled_path()} の defaults の行が {len(defaults)} 行ある（1 行だけ要る）")
@@ -208,8 +209,7 @@ def _bundled() -> dict[str, Any]:
     return {"enabled": defaults[0]["enabled"], "stages": stages, "allocation": defaults[0]["allocation"]}
 
 
-def _given(given: Mapping[str, Any], key: str) -> Mapping[str, Any]:
-    """リポジトリが書いたオブジェクトのキー。無ければ空（同梱の値を使う）。"""
+def _given(given: Mapping[str, Any], key: str) -> Mapping[str, Any]:  # リポジトリが書いたオブジェクトのキー。無ければ空（同梱の値を使う）
     return given[key] if key in given else {}
 
 
@@ -924,7 +924,7 @@ def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
     基準の組と割り付けの無い起動は None。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなくても基準の値を返す。
     引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、基準の組から引き上げ直す。
     """
-    if choice.assign_id is None or choice.arm is None or choice.arm == choice.base_arm:
+    if not choice.switchable:
         return None
     row = {"kind": "launch_error", "at": _time_text(utc_now()), "assign_id": choice.assign_id, "stage": choice.stage}
     append_row({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}, choice.store)

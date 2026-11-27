@@ -242,6 +242,13 @@ def test_a_changed_approval_stops_the_switch_without_the_switch_row(tmp_path, cl
     assert not any(r["kind"] == "launch_error" for r in _ledger())
 
 
+def test_a_refusal_that_cannot_switch_stays_a_refusal_after_the_deadline(tmp_path, clock) -> None:
+    # PR 4694 の r4-4: 割り付けの無い起動の拒否は、期限が切れていても期限切れに置き換えない
+    h = _handoff(tmp_path, timeout=5)
+    done = _delegate(h, Fake(h, [_refused(seconds=5.0)], clock=clock), tmp_path)
+    assert done.cause == "precondition" and "launch.json" in done.detail
+
+
 def test_a_broken_effort_stops_before_any_launch(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv(identity.env_name("launch-effort"), "huge")
     h = _handoff(tmp_path)

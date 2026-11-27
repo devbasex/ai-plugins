@@ -506,8 +506,7 @@ def result_line(text: str) -> Optional[dict[str, Any]]:
     return found if isinstance(found, dict) and found.get("type") == "result" else None
 
 
-def _int(value: Any) -> Optional[int]:
-    """真偽値でない整数ならその値、ほかは None。"""
+def _int(value: Any) -> Optional[int]:  # 真偽値でない整数ならその値、ほかは None
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
@@ -522,8 +521,7 @@ def context_tokens(result: Optional[Mapping[str, Any]]) -> Optional[int]:
     return sum(values) if len(values) == len(found) else None
 
 
-def _count(value: Any) -> int:
-    """整数ならその値、ほか（無い・整数でない）は 0 と数える。"""
+def _count(value: Any) -> int:  # 整数ならその値、ほか（無い・整数でない）は 0 と数える
     found = _int(value)
     return 0 if found is None else found
 
@@ -766,6 +764,7 @@ class LaunchOptions:
     left: Optional[Callable[[], float]] = None
 
 
+Left = Optional[Callable[[], float]]  # 起動の期限の残りの秒を返す関数（`LaunchOptions.left`）
 # 選び方を省いた起動（今までどおり）
 DEFAULT_LAUNCH = LaunchOptions()
 
@@ -849,10 +848,9 @@ def _launch_once(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Pat
             at, started = _now()
             if (late := claude_precheck.spent(options.left)) is not None:  # 起動の直前に残りを測り直す
                 return ClaudeReply.failed("", late, failure=Failure.TIMEOUT)
-            timeout = claude_precheck.time_left(options.left, timeout)
             if run.gate is None:
                 launched = True
-                return _timed(_run_claude(run.argv, prompt, timeout, cwd, run.env, options.new_group), at, started)
+                return _timed(_run_claude(run.argv, prompt, timeout, cwd, run.env, options), at, started)
             proc = _gated(run, cwd, options.left)
             if isinstance(proc, ClaudeReply):
                 return proc
@@ -886,7 +884,7 @@ def _workdir(cwd: Optional[Path]) -> Path:  # 子の作業ディレクトリ。`
     return cwd if cwd is not None else Path.cwd()
 
 
-def _gated(run: AccountRun, cwd: Optional[Path], left: Optional[Callable[[], float]] = None) -> "subprocess.Popen | ClaudeReply":
+def _gated(run: AccountRun, cwd: Optional[Path], left: Left = None) -> "subprocess.Popen | ClaudeReply":
     """関所で起動し、`attach` に通ったら開けて claude になったかを確かめる。なれなければ組を止めて `Failure.LAUNCH`。
 
     子を作った後の失敗（`attach` の例外・関所の口の `OSError`）も組を止めて回収してから返す（届けは呼び出し元が回収の後に消す）。
@@ -932,14 +930,16 @@ def _close_fds(fds: Sequence[int]) -> None:
             pass
 
 
-def _open_gate(run: AccountRun, proc: subprocess.Popen, w: int, sr: int, left: Optional[Callable[[], float]]) -> Optional[str]:
+def _open_gate(run: AccountRun, proc: subprocess.Popen, w: int, sr: int, left: Left) -> Optional[str]:
     """`attach` に通り起動の期限が残っていれば関所を開け、起動の知らせを読む。claude になれば None、なれなければ理由の符号。"""
     why = (run.attach(proc.pid) if run.attach is not None else None) or claude_precheck.spent(left)
     if why is not None:
         return why
     os.write(w, b"1")
-    got = process_group.read_status(sr, limits.seconds("relay.gate-exec"))
-    return "gate_timeout" if got is None else f"launch_failed errno {_errno_name(got)}" if got else None
+    got = process_group.read_status(sr, claude_precheck.time_left(left, limits.seconds("relay.gate-exec")))
+    if got is None:  # 起動の期限の残りで打ち切ったら、期限切れを理由にする
+        return claude_precheck.spent(left) or "gate_timeout"
+    return f"launch_failed errno {_errno_name(got)}" if got else None
 
 
 def _errno_name(got: bytes) -> str:
@@ -966,13 +966,13 @@ def _popen(
 
 
 def _run_claude(
-    argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path], env: dict[str, str], new_group: bool = True
+    argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path], env: dict[str, str], options: LaunchOptions = DEFAULT_LAUNCH
 ) -> ClaudeReply:
     try:
-        proc = _popen(argv, cwd, env, new_group=new_group)
+        proc = _popen(argv, cwd, env, new_group=options.new_group)
     except OSError as exc:
         return _launch_failed(exc)
-    return _talk(proc, prompt, timeout)
+    return _talk(proc, prompt, claude_precheck.time_left(options.left, timeout))  # 起動の後に残りを測り直す
 
 
 def _launch_failed(exc: OSError) -> ClaudeReply:  # 子を起動できなかったときの回答

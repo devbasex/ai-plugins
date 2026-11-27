@@ -138,6 +138,8 @@ class ChoiceRun:
         """
         if reply.failure is not claude.Failure.MODEL_REFUSED or self.switched or launch_chooser is None or self.choice is None:
             return False
+        if not self.choice.switchable:  # 切り替える対象でない拒否は、期限も材料も確かめず、拒否のまま返す
+            return False
         if ready is not None and not ready():
             return False
         back = launch_chooser.base_fallback(self.choice, str(claude.Failure.MODEL_REFUSED))  # CLI の出力の本文は記録に残さない
@@ -154,7 +156,8 @@ class ChoiceRun:
         切り替えの記録の前に、期限の残り・起動の承認の対象（`verify`。`launch_settings.Grant.verifier`）・もう一度期限の残りの順に
         確かめる。残りが無ければ切り替えず記録も書かずに 0 を返し、承認の対象が変わったか承認が取り消されていれば、記録を書かずに
         `InternalError`（precondition）を送る。切り替えたら、記録を書いた後（錠の待ちを含む）に測り直した残りの秒を返す（0 以下なら
-        呼び手が起動し直さない）。切り替えなければ None。起動し直しには `LaunchOptions.left` で `deadline` の残りを渡す。
+        呼び手が起動し直さない）。切り替えなければ None。割り付けの無い起動と基準の組の拒否は、期限が切れていても None。
+        起動し直しには `LaunchOptions.left` で `deadline` の残りを渡す。
         """
         expired = False
 

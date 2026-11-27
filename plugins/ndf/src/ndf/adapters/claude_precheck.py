@@ -73,15 +73,23 @@ def spent(left: Optional[Callable[[], float]]) -> Optional[str]:
 
 
 def time_left(left: Optional[Callable[[], float]], timeout: float) -> float:
-    """子の期限の秒。起動の期限を持つ起動は今の残り（0 未満にしない）、持たなければ `timeout`。"""
-    return timeout if left is None else max(0.0, left())
+    """待つ上限の秒。起動の期限を持つ起動は `timeout` と今の残りの小さい方（0 未満にしない）、持たなければ `timeout`。"""
+    return timeout if left is None else min(timeout, max(0.0, left()))
 
 
-def slot_wait(options: PrecheckOptions) -> Optional[float]:
-    """重い起動のスロットを待つ上限の秒。起動の期限を持つ起動は、元の上限（`slot_wait`。None なら設定の上限）と残りの小さい方。"""
+def slot_wait(options: PrecheckOptions) -> float | Callable[[], float] | None:
+    """`launch_slot.gate` の `wait`。起動の期限を持たない起動は `slot_wait` のまま。持つ起動は、スロットを待ち始める時点で
+    元の上限（`slot_wait`。None なら設定の上限）と期限の残りの小さい方を返す関数。残りが無ければ関数が `launch_slot.Expired` を送る。
+    """
     if options.left is None:
         return options.slot_wait
-    return min(launch_slot.wait_policy()[0] if options.slot_wait is None else options.slot_wait, time_left(options.left, 0.0))
+
+    def bounded() -> float:
+        if (late := spent(options.left)) is not None:
+            raise launch_slot.Expired(late)
+        return time_left(options.left, launch_slot.wait_policy()[0] if options.slot_wait is None else options.slot_wait)
+
+    return bounded
 
 
 def slot_failure(left: Optional[Callable[[], float]], kind: str) -> str:
