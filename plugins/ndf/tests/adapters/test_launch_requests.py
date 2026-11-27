@@ -632,3 +632,27 @@ def test_a_record_replaced_by_a_fifo_after_the_ownership_check_does_not_stop_dra
 
     monkeypatch.setattr(la, "_ownership", then_fifo)
     la.new_candidate("/r", target)
+
+
+def test_an_approved_candidate_that_can_no_longer_be_placed_is_swept(tmp_path):
+    """答えで承認の行を書いた候補でも、反映先が反映元の版とも候補とも違えば反映できないので、作ったときの中身のままなら片付ける。"""
+    target = _worktree(tmp_path)
+    candidate = la.new_candidate("/r", target).candidate
+    _asked(target, candidate=candidate)
+    with la.records_lock(la.state_file(la.APPROVALS)):
+        assert la.approve_by_answer("/r", SHA, "q1") == "人"
+    target.write_bytes(NEW)
+    la.new_candidate("/r", target)
+    assert not candidate.exists() and _aside(candidate).exists()
+
+
+def test_the_sweep_reads_the_approvals_only_when_a_candidate_has_a_request(tmp_path, monkeypatch):
+    """依頼の無い候補しか無い掃除は、承認の記録を読まない。"""
+    target = _worktree(tmp_path)
+    la.new_candidate("/r", target)
+    target.write_bytes(NEW)
+    whole_rows, reads = la.records.whole_rows, []
+    monkeypatch.setattr(la.records, "whole_rows", lambda path: reads.append(path) or whole_rows(path))
+    la.new_candidate("/r", target)
+    la.cleanup_targets("/r")
+    assert la.state_file(la.APPROVALS) not in reads

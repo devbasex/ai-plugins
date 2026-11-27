@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import errno
+import functools
 import hashlib
 import json
 import os
@@ -84,16 +85,7 @@ def state_file(file_id: str) -> Path:
 
 def is_approved(repo: str, sha256: str) -> bool:
     """同じリポジトリのキーとハッシュの最後の行が `approve` か。読む側はロックを取らない。"""
-    return _approved_in(records.whole_rows(state_file(APPROVALS)), repo, sha256)
-
-
-def _approved_in(approvals: list[dict[str, Any]], repo: Any, sha256: Any) -> bool:
-    """読み終えた承認の記録 `approvals` で、同じリポジトリのキーとハッシュの最後の行が `approve` か。"""
-    last = None
-    for row in approvals:
-        if row.get("repo") == repo and row.get("sha256") == sha256:
-            last = row.get("action")
-    return last == Action.APPROVE
+    return _Approvals(records.whole_rows(state_file(APPROVALS))).approved(repo, sha256)
 
 
 def records_lock(path: Path) -> Any:
@@ -236,15 +228,11 @@ def _judged(label: Any, request: Mapping[str, Any]) -> tuple[Optional[str], Opti
     return None, None
 
 
-def _latest_request(requests: list[dict[str, Any]], request_id: str) -> Optional[int]:
-    return next((i for i in reversed(range(len(requests))) if requests[i].get("request_id") == request_id), None)
-
-
 def request_answer(request_id: str) -> tuple[Optional[str], Optional[str]]:
     """リクエストへの最後の回答（`approve`・`deny`・None）と承認者の名前。"""
-    requests = records.whole_rows(state_file(QUESTIONS))
-    index = _latest_request(requests, request_id)
-    return (None, None) if index is None else _judged(_last_labels().get(request_id), requests[index])
+    requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
+    index = requests.by_id.get(request_id)
+    return (None, None) if index is None else _judged(_last_labels().get(request_id), requests.rows[index])
 
 
 def approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]:
@@ -253,17 +241,17 @@ def approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]:
     同じリクエストの承認の行があり承認済みなら、行を足さずに承認者を返す（中断の後の打ち直し）。リクエストの後の取り消しは、
     リクエストを作った時点の承認の記録の行数より後ろの行で見分ける（時刻は秒の単位なので、同じ秒の取り消しと区別できない）。
     """
-    requests = records.whole_rows(state_file(QUESTIONS))
-    index = _latest_request(requests, request_id)
+    requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
+    index = requests.by_id.get(request_id)
     if index is None:
         return None
-    req = requests[index]
+    req = requests.rows[index]
     if (req.get("repo"), req.get("action"), req.get("sha256")) != (repo, Action.APPROVE, sha256):
         return None
-    approvals = records.whole_rows(state_file(APPROVALS))
-    used = _used_rows(approvals, req)
-    if used and _approved_in(approvals, repo, sha256):
-        return used[-1].get("approver")
+    approvals = _Approvals(records.whole_rows(state_file(APPROVALS)))
+    used = approvals.used_row(req)
+    if used is not None and approvals.approved(repo, sha256):
+        return used.get("approver")
     answer, name = _judged(_last_labels().get(request_id), req)
     if answer != "approve" or _lapsed(requests, index, approvals, content_version(Path(req["target"]))):
         return None
@@ -271,63 +259,102 @@ def approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]:
     return name
 
 
-def _used_rows(approvals: list[dict[str, Any]], req: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """依頼 `req` の答えで書いた承認の行（同じ依頼の識別子・リポジトリ・ハッシュ）。"""
-    key = (req.get("request_id"), req.get("repo"), req.get("sha256"))
-    return [r for r in approvals if (r.get("request_id"), r.get("repo"), r.get("sha256")) == key]
+class _Requests:
+    """依頼の履歴を 1 回だけ走査して作る索引。`by_id` は依頼の識別子ごと、`latest` は候補ごと、`newest` は反映先ごとの最新の位置。"""
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.rows = rows
+        self.by_id: dict[Any, int] = {}
+        self.latest: dict[Any, int] = {}
+        self.newest: dict[Any, int] = {}
+        for i, row in enumerate(rows):
+            self.by_id[row.get("request_id")] = i
+            self.newest[row.get("target")] = i
+            if row.get("candidate") is not None:
+                self.latest[row.get("candidate")] = i
+
+    def newer(self, index: int) -> bool:
+        """`rows[index]` と同じ反映先に、より新しい依頼があるか。"""
+        return self.newest.get(self.rows[index].get("target"), index) > index
 
 
-def _lapsed(requests: list[dict[str, Any]], index: int, approvals: list[dict[str, Any]], now: Optional[str]) -> bool:
-    """依頼 `requests[index]` の答えが、設計書の「人の確認」の表のとおり使えなくなったか。`now` は反映先の今のバージョン。
+class _Approvals:
+    """承認の記録を 1 回だけ走査して作る索引。内容（リポジトリのキーとハッシュ）ごとの最後の操作と最後の取り消しの位置、
+    依頼ごとの最後の承認の行を持つ。"""
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.last_action: dict[tuple[Any, Any], Any] = {}
+        self.last_revoke: dict[tuple[Any, Any], int] = {}
+        self.used: dict[tuple[Any, Any, Any], dict[str, Any]] = {}
+        for i, row in enumerate(rows):
+            key = (row.get("repo"), row.get("sha256"))
+            self.last_action[key] = row.get("action")
+            if row.get("action") == Action.REVOKE:
+                self.last_revoke[key] = i
+            self.used[(row.get("request_id"), *key)] = row
+
+    def approved(self, repo: Any, sha256: Any) -> bool:
+        """同じリポジトリのキーとハッシュの最後の行が `approve` か。"""
+        return self.last_action.get((repo, sha256)) == Action.APPROVE
+
+    def used_row(self, req: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+        """依頼 `req` の答えで書いた最後の承認の行（同じ依頼の識別子・リポジトリ・ハッシュ）。無ければ None。"""
+        return self.used.get((req.get("request_id"), req.get("repo"), req.get("sha256")))
+
+    def revoked_after(self, req: Mapping[str, Any]) -> bool:
+        """依頼を作った時点の承認の記録の行数（`approvals_seen`）より後ろに、同じ内容の `revoke` があるか。行数が無ければ全体を見る。"""
+        seen = req.get("approvals_seen")
+        start = seen if isinstance(seen, int) and not isinstance(seen, bool) and seen >= 0 else 0
+        return self.last_revoke.get((req.get("repo"), req.get("sha256")), -1) >= start
+
+
+def _lapsed(requests: _Requests, index: int, approvals: _Approvals, now: Optional[str]) -> bool:
+    """依頼 `requests.rows[index]` の答えが、設計書の「人の確認」の表のとおり使えなくなったか。`now` は反映先の今のバージョン。
 
     同じ反映先により新しい依頼がある・反映先が依頼の反映元の版とも候補とも違う・依頼の後に同じ内容の `revoke` がある、のどれか。
     依頼の後の取り消しは、依頼を作った時点の承認の記録の行数より後ろの行で見分ける（時刻は秒の単位なので、同じ秒の取り消しと
     区別できない）。`approve_by_answer` と掃除（`_live`）が同じ条件を使う。
     """
-    req = requests[index]
-    newer = any(r.get("target") == req.get("target") for r in requests[index + 1 :])
+    req = requests.rows[index]
     moved = now not in (req.get("base"), req.get("candidate_version"))
-    seen = req.get("approvals_seen")
-    after = approvals[seen:] if isinstance(seen, int) and not isinstance(seen, bool) and seen >= 0 else approvals
-    key = (req.get("repo"), req.get("sha256"))
-    revoked = any(r.get("action") == Action.REVOKE and (r.get("repo"), r.get("sha256")) == key for r in after)
-    return newer or moved or revoked
+    return requests.newer(index) or moved or approvals.revoked_after(req)
 
 
-@dataclass(frozen=True)
 class _History:
-    """掃除が 1 回ずつ読んだ、依頼・回答・承認の記録。`latest` は候補ごとの最新の依頼の位置。"""
+    """掃除が 1 回ずつ読んだ、依頼・回答の記録の索引。承認の記録は、照らす候補が出たときに初めて読む（`approvals`）。"""
 
-    requests: list[dict[str, Any]]
-    labels: dict[Any, Any]
-    approvals: list[dict[str, Any]]
-    latest: dict[Any, int]
+    def __init__(self) -> None:
+        self.requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
+        self.labels = _last_labels()
+        self._approvals: Optional[_Approvals] = None
+
+    @property
+    def approvals(self) -> _Approvals:
+        if self._approvals is None:
+            self._approvals = _Approvals(records.whole_rows(state_file(APPROVALS)))
+        return self._approvals
 
 
-def _history() -> _History:
-    requests = records.whole_rows(state_file(QUESTIONS))
-    latest = {row.get("candidate"): i for i, row in enumerate(requests) if row.get("candidate") is not None}
-    return _History(requests, _last_labels(), records.whole_rows(state_file(APPROVALS)), latest)
-
-
-def _live(history: _History, candidate: Path, now: Optional[str]) -> bool:
-    """候補の最新の依頼が、まだ人の答えで承認を済ませられるか。`now` は反映先の今のバージョン。
+def _live(history: _History, candidate: Path, now: Optional[str], current: Callable[[], Optional[str]]) -> bool:
+    """候補の最新の依頼が、まだ人の答えでこの候補の反映まで済ませられるか。`now` は反映先の今のバージョン、`current` は候補の今のバージョンを返す。
 
     真になるのは、その依頼の反映の完了の記録が無く、次のどちらかのときである。依頼の答えで書いた承認の行があり、その内容が
-    承認済み（`approve` を打ち直せば反映まで進む）。または、答えが「承認しない」でなく（回答待ちを含む）、`_lapsed` に当たらない。
-    この候補は、人が答えた後の `approve --candidate` が承認を済ませる入口なので、掃除は退避も一覧への掲載もしない。
+    承認済みで、反映先が依頼の反映元の版か候補の今の中身と同じ（`reflect` がこの候補を置けるか、置いたものとして済ませられる）。
+    または、答えが「承認しない」でなく（回答待ちを含む）、`_lapsed` に当たらない。この候補は、人が答えた後の `approve --candidate`
+    が承認を済ませる入口なので、掃除は退避も一覧への掲載もしない。
     """
-    index = history.latest.get(str(candidate))
+    index = history.requests.latest.get(str(candidate))
     if index is None:
         return False
-    req = history.requests[index]
+    req = history.requests.rows[index]
     if read_launch_record(reflected_file(Path(str(req.get("target"))), DONE)).get("request_id") == req.get("request_id"):
         return False
-    if _used_rows(history.approvals, req) and _approved_in(history.approvals, req.get("repo"), req.get("sha256")):
-        return True
+    approvals = history.approvals
+    if approvals.used_row(req) is not None and approvals.approved(req.get("repo"), req.get("sha256")):
+        return now == req.get("base") or now == current()
     if _judged(history.labels.get(req.get("request_id")), req)[0] == "deny":
         return False
-    return not _lapsed(history.requests, index, history.approvals, now)
+    return not _lapsed(history.requests, index, approvals, now)
 
 
 def pending_request(repo: str, target: Path) -> Optional[Mapping[str, Any]]:
@@ -707,14 +734,14 @@ def _sweep_reasons(home: Path) -> dict[Path, _Due]:
     `source.json` は 1 回だけ読む。リクエストの履歴・回答の履歴・承認の記録・候補の一覧は 1 回ずつ読み、反映先のバージョンは反映先ごとに
     1 回だけ求める。
     """
-    history = _history()
+    history = _History()
     versions: dict[str, tuple[bool, Optional[str]]] = {}
     reasons: dict[Path, _Due] = {}
     for made in _candidates(home):
         raw = _raw(made / SOURCE_NAME)
         source = _parsed(raw)
-        index = history.latest.get(str(made / CANDIDATE_NAME))
-        req = None if index is None else history.requests[index]
+        index = history.requests.latest.get(str(made / CANDIDATE_NAME))
+        req = None if index is None else history.requests.rows[index]
         if req is not None and _judged(history.labels.get(req.get("request_id")), req)[0] == "deny":
             due = _inspect(made, raw, source, "denied")
         elif _worktree_gone(source.get("target")):
@@ -742,20 +769,21 @@ def _moved_target(
     """反映先が反映元のバージョンから変わった候補の判定（`reflected` か `outdated`）。変わっていないか、反映先か候補を読めなければ None。
 
     反映先のバージョンは `versions` に残し、同じ反映先の候補では読み直さない。候補は NDF の作ったものだけと確かめてから読む。
-    まだ人の答えで承認を済ませられる依頼（`_live`。回答待ちと、答えで書いた承認の行があり反映が済んでいない依頼を含む）の
-    候補は、どちらの理由にもしない（人が答えた後の `approve --candidate` がこの候補で承認を済ませる）。
+    まだ人の答えでこの候補の反映まで済ませられる依頼（`_live`。回答待ちと、答えで書いた承認の行があり反映が済んでいない依頼を
+    含む）の候補は、どちらの理由にもしない（人が答えた後の `approve --candidate` がこの候補で承認を済ませる）。候補の今の中身を
+    読んでから照らす。
     """
     target = str(source.get("target"))
     if target not in versions:
         versions[target] = _regular_version(Path(target), strict=False)
     readable, now = versions[target]
-    if not readable or now == source.get("base") or _live(history, made / CANDIDATE_NAME, now):
+    if not readable or now == source.get("base"):
         return None
     due = _inspect(made, raw, source, "outdated")
     if due is None:
         return None
     ok, current = _stamped_version(made, due.stamp)
-    if not ok:
+    if not ok or _live(history, made / CANDIDATE_NAME, now, lambda: current):
         return None
     if now is not None and current == now:
         return _Due("reflected", due.stamp, due.written, now, True, current)
@@ -941,6 +969,11 @@ def _write_done(target: Path, rec: Mapping[str, Any]) -> None:
     reflected_file(target, PENDING).unlink(missing_ok=True)
 
 
+def _candidate_version(made: Path) -> Optional[str]:
+    """候補の今のバージョン（`_regular_version`）。読めなければ None。"""
+    return _regular_version(made / CANDIDATE_NAME)[1]
+
+
 def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> None:
     """完了の記録を書いてから、候補の錠の中で、反映した候補と、反映元のバージョンが合わなくなった同じ反映先の候補を退避する。
 
@@ -955,12 +988,15 @@ def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> Non
         restored = _reclaim(home)
         if candidate.parent.name not in restored:
             _discard(candidate.parent, rec.get("content"))
-        history = _history()
+        history: Optional[_History] = None
         for made in _candidates(home):
             if made.name in restored or made == candidate.parent:
                 continue
             source = _parsed(_raw(made / SOURCE_NAME))
-            if source.get("target") == str(target) and source.get("base") != now and not _live(history, made / CANDIDATE_NAME, now):
+            if source.get("target") != str(target) or source.get("base") == now:
+                continue
+            history = history or _History()  # 照らす候補が出たときに初めて読む
+            if not _live(history, made / CANDIDATE_NAME, now, functools.partial(_candidate_version, made)):
                 _discard(made)
 
 
