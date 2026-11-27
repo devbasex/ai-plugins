@@ -42,6 +42,15 @@ def test_sections_skip_headings_inside_code_blocks() -> None:
     assert scope_decide.sections_of("d.md", text) == ["d.md#題", "d.md#セクション A"]
 
 
+def test_pr_4638_r7_1_setext_headings_are_sections_and_parents() -> None:
+    """PR 4638 の r7-1: 下線の Setext 見出しもセクションと親の見出しに数え、親が変わったセクションは引き継がない。
+    front matter とコードブロックの中の下線は見出しでない。"""
+    text = "---\ntitle: x\n---\n本番\n====\n## 実行手順\n手順\n\n```\n例\n---\n```\n注意\n----\n"
+    assert scope_decide.sections_of("d.md", text) == ["d.md#本番", "d.md#実行手順", "d.md#注意"]
+    before, after = "本番\n====\n## 実行手順\n手順\n", "検証\n====\n## 実行手順\n手順\n"
+    assert scope_decide._changed_sections("d.md", before, after) == {"d.md#本番", "d.md#検証", "d.md#実行手順"}
+
+
 def test_issue_3181_design_pr_keeps_the_full_diff_until_every_section_had_a_detailed_review() -> None:
     """#3181: 設計の PR は、詳細レビューを通らないセクションが残る間は 2 ラウンド目以降も全差分を見る。"""
     got = scope_decide.review_scope(True, 2, "abc1234", [A, B], {A})

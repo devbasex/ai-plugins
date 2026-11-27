@@ -57,17 +57,67 @@ class Scope(NamedTuple):
     unreviewed: tuple[str, ...]
 
 
+def _atx(line: str) -> Optional[tuple[int, str]]:
+    """行頭の `#` の見出しなら（見出しの深さ, 見出し）。"""
+    title = line.lstrip("#").strip()
+    return (len(line) - len(line.lstrip("#")), title) if line.startswith("#") and title else None
+
+
+def _underline(line: str) -> Optional[int]:
+    """Setext 見出しの下線（`=` だけなら 1、`-` だけなら 2）。下線でなければ None。"""
+    mark = line.strip()
+    if len(line) - len(line.lstrip(" ")) > 3 or not mark:
+        return None
+    return 1 if set(mark) == {"="} else 2 if set(mark) == {"-"} else None
+
+
+def _paragraph(line: str) -> bool:
+    """Setext 見出しの本文になれる行か（空行・`#` の見出し・リストの項目・引用は段落の行として数えない）。"""
+    body = line.strip()
+    return bool(body) and _atx(line) is None and not body.startswith((">", "- ", "* ", "+ ")) and _underline(line) is None
+
+
 def _lines(text: str) -> Iterator[tuple[str, Optional[tuple[int, str]]]]:
-    """本文の各行と、その行が見出しなら（見出しの深さ, 見出し）。コードブロックの中の `#` は見出しでない。レビューの対象の
-    セクション（`sections_of`）と、起点どうしの本文の比較（`_bodies`）は、この判定だけでセクションを分ける（PR 4638 の r6-3）。"""
+    """本文の各行と、その行が見出しなら（見出しの深さ, 見出し）。行頭の `#` の見出しと、次の行に `=` か `-` だけの下線を持つ
+    Setext 見出しを認識する（PR 4638 の r7-1）。コードブロックの中と、先頭の YAML front matter の中は見出しでない。レビューの
+    対象のセクション（`sections_of`）と、起点どうしの本文の比較（`_bodies`）は、この判定だけでセクションを分ける（PR 4638 の r6-3）。"""
+    lines = text.splitlines()
+    plain = [False] * len(lines)
+    start = 0
+    if lines and lines[0].strip() == "---":
+        close = next((i for i in range(1, len(lines)) if lines[i].strip() in ("---", "...")), None)
+        start = close + 1 if close is not None else 0
     fenced = False
-    for line in text.splitlines():
-        if line.lstrip().startswith(_FENCES):
+    for i in range(start, len(lines)):
+        if lines[i].lstrip().startswith(_FENCES):
             fenced = not fenced
-            yield line, None
+        elif not fenced:
+            plain[i] = True
+    i = 0
+    while i < len(lines):
+        if not plain[i]:
+            yield lines[i], None
+            i += 1
             continue
-        title = line.lstrip("#").strip()
-        yield line, ((len(line) - len(line.lstrip("#")), title) if not fenced and line.startswith("#") and title else None)
+        atx = _atx(lines[i])
+        if atx is not None or not _paragraph(lines[i]):
+            yield lines[i], atx
+            i += 1
+            continue
+        # 段落の行を集め、直後が下線なら段落全体を 1 つの見出しにする
+        end = i
+        while end + 1 < len(lines) and plain[end + 1] and _paragraph(lines[end + 1]):
+            end += 1
+        level = _underline(lines[end + 1]) if end + 1 < len(lines) and plain[end + 1] else None
+        if level is None:
+            for j in range(i, end + 1):
+                yield lines[j], None
+            i = end + 1
+            continue
+        yield lines[i], (level, " ".join(lines[j].strip() for j in range(i, end + 1)))
+        for j in range(i + 1, end + 2):
+            yield lines[j], None
+        i = end + 2
 
 
 def sections_of(path: str, text: str) -> list[str]:
