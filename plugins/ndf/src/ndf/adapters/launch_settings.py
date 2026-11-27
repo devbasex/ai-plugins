@@ -329,12 +329,13 @@ class SafetyArgs:
     verify: Optional[Callable[[], Optional[str]]] = None
 
 
-def safety_args(runtime: str, use: str, cwd: Path) -> SafetyArgs:
+def safety_args(runtime: str, use: str, cwd: Path, settings: Optional[Settings] = None) -> SafetyArgs:
     """ランタイム `runtime` を用途 `use` で `cwd` から起動するときの安全装置の引数（設計書の「安全装置を外す指定」の表）。
 
     安全装置の列を 1 つも持たない行（claude）は引数なし。サンドボックスの引数を持ち、それが使える（名前空間が要らないか作れる）なら
     その引数。review でサンドボックスの引数が無ければ止める。ほかは、`permissions.unsandboxed` にランタイムがあり今の内容が
-    承認済みのときだけ外す引数を返し、無ければ止める。
+    承認済みのときだけ外す引数を返し、無ければ止める。`settings`（`cwd` の起動の設定を読んだもの）を渡されれば読み直さずに使う。
+    起動の直前の照らし直し（`verify`）は、渡された設定を使い回さずにファイルを読み直す。
     """
     if use not in USES:
         raise _precondition(f"安全装置の引数の用途 use は {' か '.join(USES)}（渡された値: {use}）")
@@ -346,13 +347,14 @@ def safety_args(runtime: str, use: str, cwd: Path) -> SafetyArgs:
         return SafetyArgs(list(sandboxed))
     if use == "review" and sandboxed is None:
         raise _precondition(f"{runtime} は読むだけの起動を持たないので、review に使えない")
-    return _unsandboxed(runtime, row, cwd)
+    return _unsandboxed(runtime, row, cwd, settings)
 
 
-def _unsandboxed(runtime: str, row: Mapping[str, Any], cwd: Path) -> SafetyArgs:
+def _unsandboxed(runtime: str, row: Mapping[str, Any], cwd: Path, settings: Optional[Settings] = None) -> SafetyArgs:
     """承認があれば外す引数と照らし直しを返す。無ければ承認の手順を載せて止める。"""
     root = launch_root(cwd)
-    settings = load(root)
+    if settings is None:
+        settings = load(root)
     why = f"{runtime} はこの環境でサンドボックスを使えない（名前空間を作れないか、サンドボックスの引数を持たない）"
     if runtime not in _given_words(settings.permissions, "unsandboxed") or UNSANDBOXED not in row:
         raise _precondition(

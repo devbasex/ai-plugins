@@ -243,8 +243,8 @@ def _arms_errors(stage: str, runtime: str, arms: list[Any]) -> list[str]:
     for i, arm in enumerate(arms):
         if arm in arms[:i]:
             errs.append(f"{at}/{i}: 同じ組を 2 回書いている")
-        if "effort" in arm and arm["effort"] not in efforts:
-            errs.append(f"{at}/{i}/effort: {arm['effort']} は順位に無い（{'・'.join(efforts)}）")
+        if "effort" in arm and arm["effort"] not in efforts:  # 値は載せない（誤って入れた秘密を標準エラーへ漏らさない）
+            errs.append(f"{at}/{i}/effort: 順位に無い値（使える値は {'・'.join(efforts)}）")
         if "model" in arm and (not arm["model"] or _NEWLINE.search(arm["model"])):
             errs.append(f"{at}/{i}/model: 空か改行を含む")
     return errs
@@ -271,9 +271,13 @@ def bundled_errors() -> list[str]:
     return contracts.broken_places({"version": 1, "experiments": _bundled()}, launch_settings.SCHEMA)
 
 
-def table(root: Path) -> Table:
-    """同梱の表とリポジトリ `root` の `experiments` を重ね、値の制約を確かめる。外れれば直す場所を載せて `precondition`。"""
-    settings = launch_settings.load(root)
+def table(root: Path, settings: Optional[launch_settings.Settings] = None) -> Table:
+    """同梱の表とリポジトリ `root` の `experiments` を重ね、値の制約を確かめる。外れれば直す場所を載せて `precondition`。
+
+    `settings`（`root` の起動の設定を読んだもの）を渡されれば読み直さずに使う。
+    """
+    if settings is None:
+        settings = launch_settings.load(root)
     given = settings.experiments
     bundled = _bundled()
     _given_keys(given, bundled, settings.path)
@@ -309,8 +313,8 @@ def raised(runtime: str, model: Optional[str], effort: Optional[str]) -> tuple[O
 
 def _check_effort(value: str, runtime: str, where: str) -> None:
     efforts = _order_row(runtime)["efforts"]
-    if value not in efforts:
-        raise _fail(f"{where} の effort {value} は {runtime} の順位に無い（{'・'.join(efforts)}）")
+    if value not in efforts:  # 値は載せない（誤って入れた秘密を標準エラーへ漏らさない）
+        raise _fail(f"{where} の effort は {runtime} の順位に無い値（使える値は {'・'.join(efforts)}）")
 
 
 def _check_model(value: str, where: str) -> None:
@@ -339,16 +343,20 @@ class _Manual:
         return self.model is not None or self.effort is not None or self.inherited is not None
 
 
-def _manual(runtime: str, argument: tuple[Optional[str], Optional[str]], environ: Mapping[str, str]) -> _Manual:
-    """引数と環境変数の指定を読む。モデルと effort それぞれで優先の順に値を決めてから、使う値だけを確かめる。誤りは `precondition`。"""
+def _manual(
+    runtime: str, argument: tuple[Optional[str], Optional[str]], environ: Mapping[str, str], argument_at: tuple[str, str]
+) -> _Manual:
+    """引数と環境変数の指定を読む。モデルと effort それぞれで優先の順に値を決めてから、使う値だけを確かめる。誤りは `precondition`。
+
+    `argument_at` は起動の引数を誤りの文で指す言い方（モデル・effort の順）。"""
     order = _order_row(runtime)
     model_env, effort_env = _order_env(order, "model_env"), _order_env(order, "effort_env")
     model = _first_given(
-        (argument[0], Source.ARGUMENT, "引数 --model"),
+        (argument[0], Source.ARGUMENT, argument_at[0]),
         (environ[model_env] if model_env in environ else None, Source.ENVIRONMENT, f"環境変数 {model_env}"),
     )
     effort = _first_given(
-        (argument[1], Source.ARGUMENT, "引数 --effort"),
+        (argument[1], Source.ARGUMENT, argument_at[1]),
         (environ[effort_env] if effort_env in environ else None, Source.ENVIRONMENT, f"環境変数 {effort_env}"),
     )
     if model is not None:
@@ -380,6 +388,8 @@ class Request:
     retry: Optional[str] = None
     mode: Optional[str] = None
     argument: tuple[Optional[str], Optional[str]] = (None, None)
+    # 起動の引数を誤りの文で指す言い方（モデル・effort の順）。CLI ごとに引数の名前が違う起動（codex の委譲は `-c`）が変える
+    argument_at: tuple[str, str] = ("引数 --model", "引数 --effort")
 
 
 # --- 実験の記録 --------------------------------------------------------------------------------------
@@ -898,12 +908,19 @@ def _raised_once(choice: Choice) -> Choice:
 
 
 def launch_choice(
-    layer: str, name: str, runtime: str = "claude", *, cwd: Path, environ: Optional[Mapping[str, str]] = None, **request: Any
+    layer: str,
+    name: str,
+    runtime: str = "claude",
+    *,
+    cwd: Path,
+    environ: Optional[Mapping[str, str]] = None,
+    settings: Optional[launch_settings.Settings] = None,
+    **request: Any,
 ) -> Choice:
     """優先の順で値を決め、要れば割り付け、`retry` があれば引き上げる。値の誤り・壊れた設定は `precondition`。
 
-    `request` は `Request` の欄（`unit`・`charge_to`・`retry`・`mode`・`argument`）。起動のたびに最初に月の掃除をする。
-    `unit` の無い起動と工程の無い起動は、実験の記録を読み書きしない。
+    `request` は `Request` の欄（`unit`・`charge_to`・`retry`・`mode`・`argument`・`argument_at`）。起動のたびに最初に月の掃除をする。
+    `unit` の無い起動と工程の無い起動は、実験の記録を読み書きしない。`settings` は `table` へ渡す（渡されれば起動の設定を読み直さない）。
     """
     req = Request(**request)
     env = os.environ if environ is None else environ
@@ -911,8 +928,8 @@ def launch_choice(
     if req.retry is not None and req.retry not in _retries():
         raise _fail(f"打ち直しの理由 {req.retry} は無い（{'・'.join(sorted(_retries()))}）")
     root = launch_settings.launch_root(cwd)
-    got = table(root)
-    manual = _manual(runtime, req.argument, env)
+    got = table(root, settings)
+    manual = _manual(runtime, req.argument, env, req.argument_at)
     arms = got.arms[stage][runtime] if stage is not None and runtime in got.arms[stage] else ()
     base = arms[0] if arms else None
     now = _utc_now()

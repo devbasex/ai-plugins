@@ -47,17 +47,27 @@ echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/00-local-user
 
 ```bash
 cd <workdir>
-ndf delegate-run --runtime codex -- codex exec '{args}' --config model_reasoning_effort=medium \
-  [--model M] < <prompt> > <stem>-stdout.log 2> <stem>-err.log
+ndf delegate-run --runtime codex -- codex exec '{args}' \
+  < <prompt> > <stem>-stdout.log 2> <stem>-err.log
 ```
 
 | オプション | 用途 |
 |---|---|
-| `'{args}'` | `ndf delegate-run` が、安全装置の引数と作業ディレクトリの指定（`-C <今のディレクトリ>`）を入れる位置。`codex exec` のすぐ後でないと拒まれる。`-s` や `-C` を自分で書いても拒まれる |
-| `--config model_reasoning_effort=medium` | `high` だと思考へ偏り最終 message を返さない頻度が上がるため、既定で `medium` を推奨 |
+| `'{args}'` | `ndf delegate-run` が、モデルと effort の指定・安全装置の引数・作業ディレクトリの指定（`-C <今のディレクトリ>`）をこの順に入れる位置。`codex exec` のすぐ後でないと拒まれる。`-s` や `-C` を自分で書いても拒まれる |
+| （モデルと effort） | 通常は書かない（明示する方法は下の表）。`ndf delegate-run` が起動の設定（`.ndf/launch.json` の `experiments`、無ければ同梱の表）から選んで `'{args}'` に入れる（`-c model_reasoning_effort=<値>`） |
 | `-o <file>` | 最終 message を、呼び出した側が決めたファイルへ書かせる。プロンプトに出力先を書けないときに使う。最終 message が無ければ中身は得られない |
 | `--json` | JSON Lines でイベントを出力。`event.type=assistant_message` を grep すれば確実に本文を取れる |
 | `codex resume` | 長時間ジョブで親エージェントが再起動した場合にセッションを再開する |
+
+通常はモデルと effort を省略し、リポジトリの起動の設定に従わせる。明示が必要な場合だけ、設定より優先する次の方法を使う。
+
+`ndf delegate-run` は、モデルと effort を別々に、次の表の上の行から最初に指定があるもので選ぶ。上の行で指定した側は、下の行の値を確かめない。たとえば effort をコマンドに書けば、環境変数 `NDF_LAUNCH_CODEX_EFFORT` に無効な値が残っていても起動は止まらない。
+
+| 順 | モデルの指定 | effort の指定 |
+|---:|---|---|
+| 1 | コマンドの `'{args}'` より後に `--model M`（`-m M`）を書く。`ndf delegate-run` はこの値で選び、自分ではモデルを足さない | コマンドの `'{args}'` より後に `--config model_reasoning_effort=<値>`（`-c` でもよい）を書く。`ndf delegate-run` はこの値で選び、自分では effort を足さない。値が同梱の表 `launch-experiments.json` の codex の順位に無ければ、起動する前に止まる |
+| 2 | 環境変数 `NDF_LAUNCH_CODEX_MODEL`（その起動の間だけの上書き） | 環境変数 `NDF_LAUNCH_CODEX_EFFORT`（同梱の表 `launch-experiments.json` の codex の順位にある値だけ。ほかの値では起動しない） |
+| 3 | 起動の設定（`.ndf/launch.json` の `experiments`、無ければ同梱の表） | 同じ |
 
 ## 実際に動いたモデル
 
@@ -96,7 +106,7 @@ Codex は最終 message を返さなくても `apply_patch` でファイルを�
 書き出し後、念のため stdout にも同じ内容を出力してください（冪等で問題ありません）。
 ```
 
-補助策として `--config model_reasoning_effort=medium` へ下げる、`--json` でイベントを採取する、
+補助策として effort を下げる指定（`--config model_reasoning_effort=<値>`）を `'{args}'` より後に置く（上の「起動コマンド」の優先順位の表の順 1）、`--json` でイベントを採取する、
 プロンプト末尾に「tool 呼び出しのみで終了しないこと」を明記する、の 3 つを併用する。
 
 回収は **ファイル → stdout → stderr** の順で行う。
@@ -115,7 +125,7 @@ Codex は最終 message を返さなくても `apply_patch` でファイルを�
 | 1 | 終了コード 3 で、stderr に `ndf delegate-run` の理由がある | Codex を起動していない | 渡し直さない | 理由に従う（承認が要るなら呼び出し元へ返す） |
 | 2 | stderr に認証・利用上限・サンドボックスの失敗がある | Codex では解けない | 渡し直さない | SKILL.md の「共通の実行手順」の表と、下の Q2・Q4 に従う |
 | 3 | 終了コード 124 | 上限に当たった | プロンプトを変えて 1 回だけ | 読むファイルを絞るか観点を分けたプロンプトにして渡し直す。同じプロンプトでは同じく止まる。最初に頼まれたファイルや観点の一部を省いたら、下の「範囲を絞って渡し直したとき」に従う |
-| 4 | stderr に `^tokens used$` がある（セッションは最後まで進んだ） | 最終応答を返さずにセッションが終わった（上の現象） | 同じ内容で 1 回だけ | 上の補助策を足して渡し直す。CLI の引数で `--config model_reasoning_effort=medium` を指定し、プロンプトの末尾に「tool 呼び出しのみで終了しないこと」を追記する。書き込みを伴う作業なら出力先の指示もプロンプトに足す。読むだけのレビューは `--use review` のまま渡し直し、書き込みできる用途に変えない。サンドボックスを利用できない環境では書き込みが止まらないので、プロンプトの「ファイルを変更しないこと」も残す |
+| 4 | stderr に `^tokens used$` がある（セッションは最後まで進んだ） | 最終応答を返さずにセッションが終わった（上の現象） | 同じ内容で 1 回だけ | 上の補助策を足して渡し直す。CLI の引数で effort を下げる指定（`--config model_reasoning_effort=<値>`）を `'{args}'` より後に置き、プロンプトの末尾に「tool 呼び出しのみで終了しないこと」を追記する。書き込みを伴う作業なら出力先の指示もプロンプトに足す。読むだけのレビューは `--use review` のまま渡し直し、書き込みできる用途に変えない。サンドボックスを利用できない環境では書き込みが止まらないので、プロンプトの「ファイルを変更しないこと」も残す |
 | 5 | どれにも当たらない | 分からない | 渡し直さない | stderr の末尾を添えて呼び出し元へ返す |
 
 渡し直しても本文が無ければ、もう渡し直さずに呼び出し元へ返す。
@@ -139,7 +149,7 @@ stderr の `^tokens used$` sentinel と結果ファイルで見て、上限は�
 
 ```bash
 # プロンプト（レビュー結果を最終応答で返すことと、ファイルを変更しないことを書く）はファイル書き込みツールで $TMP/review-prompt.md に置く
-cd /workspace && timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}' --config model_reasoning_effort=medium \
+cd /workspace && timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}' \
   < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
 # => $TMP/codex-stdout.log を読む。空なら、上の「最終出力をファイル経由で保証する」の末尾の表を上の行から順に照らして次の手を決める
 ```

@@ -80,6 +80,15 @@ def test_table_stops_on_a_broken_value_with_where_to_fix(tmp_path, experiments, 
     root = _repo(tmp_path, experiments)
     detail = _stopped(lambda: mc.table(root))
     assert where in detail and str(root / ".ndf" / "launch.json") in detail
+    assert "turbo" not in detail  # 誤った値は載せない（誤って入れた秘密を標準エラーへ漏らさない）
+
+
+def test_given_settings_are_used_without_reading_the_file_again(tmp_path, monkeypatch):
+    root = _repo(tmp_path, {"stages": {"delegate": {"arms": {"codex": [{"effort": "high"}]}}}})
+    settings = mc.launch_settings.load(root)
+    monkeypatch.setattr(mc.launch_settings, "load", lambda *a, **kw: pytest.fail("読み直した"))
+    assert mc.table(root, settings=settings).arms["delegate"]["codex"] == ({"effort": "high"},)
+    assert _pick(root, "seat", "delegate", "codex", settings=settings).cli_args() == ["-c", "model_reasoning_effort=high"]
 
 
 def test_a_broken_unused_value_still_stops_the_launch(tmp_path):
@@ -240,7 +249,7 @@ def test_a_retry_does_not_raise_manual_values_or_the_top(tmp_path):
 )
 def test_a_wrong_value_stops_before_the_launch(tmp_path, kw):
     root = _repo(tmp_path)
-    _stopped(lambda: _pick(root, **kw))
+    assert "turbo" not in _stopped(lambda: _pick(root, **kw))
 
 
 def test_row_fields_hold_only_present_values(tmp_path):

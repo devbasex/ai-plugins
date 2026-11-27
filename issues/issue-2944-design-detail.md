@@ -436,12 +436,12 @@ src/ndf/
 | `_pick_command` | 同 | 新設 | `_pick_command(a: Namespace) -> int` | `--args` が無ければ結果 JSON、あれば 1 行 1 引数 |
 | `_report` | 同 | 新設 | `_report(a: Namespace) -> int` | 使用量ログと実験の記録を読んで結果を出す |
 | `report_rows` | 同 | 新設 | `report_rows(usage_rows, experiment_rows, since, until, stage) -> list[dict]` | 設計書の「集計」の順と区分で値を組む |
-| `main` | `domains/settings/delegate_run_cli.py` | 変更 | 引数は #1959 のまま | codex は `settings = launch_settings.load(launch_settings.launch_root(cwd))` で起動の設定を読み、同じ `cwd` と `settings` を渡した `launch_choice("seat", "delegate", "codex", cwd=cwd, settings=settings)` の引数と `safety_args("codex", "delegate", cwd, settings=settings)` の引数の並びを続けて `{args}` に入れる。kiro と agy は `launch_choice` を呼ばず、`safety_args` の引数だけを入れる |
+| `main` | `domains/settings/delegate_run_cli.py` | 変更 | 引数は #1959 のまま | codex は `settings = launch_settings.load(launch_settings.launch_root(cwd))` で起動の設定を読み、同じ `cwd` と `settings` を渡した `launch_choice("seat", "delegate", "codex", cwd=cwd, settings=settings, argument=(<コマンドが明示したモデル>, <コマンドが明示した effort>))` の引数と `safety_args("codex", a.use, cwd, settings=settings)`（用途は `--use` で受けた値。省けば `delegate`）の引数の並び、作業ディレクトリの引数（`-C <今のディレクトリ>`。ランタイムの表の `workdir_options` の先頭の名前）を、この順に続けて `{args}` に入れる。コマンドが `-m`・`--model`（ランタイムの表の `model_options`）でモデルを、`-c`・`--config`（同じく `effort_options`）の `model_reasoning_effort=<値>` で effort を明示すれば、その値を起動の引数として渡し（設計書の「値の優先」の順 1。下位の環境変数は確かめない）、明示した側の引数は足さない。kiro と agy は `launch_choice` を呼ばず、`safety_args` の引数だけを入れる |
 | `safety_args` | `adapters/launch_settings.py` | 変更 | `safety_args(runtime: str, use: str, cwd: Path, settings: Optional[Settings] = None) -> SafetyArgs` | #1959 の判定表のまま。サンドボックスなしで起動する経路で、`settings` を渡されれば `.ndf/launch.json` を読み直さずに使う。起動の直前の照らし直し（`verify`）は、これまでどおりファイルを読み直して承認と照らす |
 
 - `delegate-run` の codex の委譲では、`.ndf/launch.json` の読み取りと全体のスキーマ検証を、起動の引数を組み立てる段階で 1 回にまとめる。`launch_choice` と `safety_args` がそれぞれ読むと、サンドボックスなしの経路で読み取りと検証が 1 回ずつ増えるためである
   - サンドボックスなしで起動する経路では、起動の直前の承認の確認（`verify`）で、もう 1 回読み取りと検証を行う。`verify` は最初に読んだ `Settings` を使い回さず、ファイルを読み直す。使い回すと、引数を組み立てた後に `permissions.unsandboxed` から codex を外しても、古い設定のまま安全装置を外して起動するためである。読み取りと検証は合わせて 2 回になる
-  - `verify` が見つけるのは、承認のハッシュの対象（`permissions` と、そこから参照する MCP の定義ファイル）の変更と、承認の取り消しだけである。`experiments` だけの変更は、スキーマに合う限り見つけず、委譲を止めない。モデルと effort は、引数を組み立てる段階で最初に読んだ設定から選ぶ
+  - `verify` が見つけるのは、承認のハッシュの対象（`permissions` と、そこから参照する MCP の定義ファイル。工程の指定に `mcp: "inherit"` があればリポジトリ直下の `.mcp.json` も入り、無いこと自体も対象になる）の変更と、承認の取り消しだけである。読み直しで起動の設定か対象の定義ファイルを読めない・JSON でない・スキーマや定義の形に合わないときも、理由を返して起動を止める（`launch_settings._target_files`・`_mcp_definition`・`Grant.verify`）。`experiments` だけの変更は、スキーマに合う限り見つけず、委譲を止めない。モデルと effort は、引数を組み立てる段階で最初に読んだ設定から選ぶ
 - `_pick_command` の `--args` の形は、`InternalError` を自分で受けて標準エラーへ書き、標準出力に何も出さずに 0 以外で終える。`delegate-run` の失敗の扱いは #1959 の詳細設計のとおりで、`launch_choice` の失敗も CLI を起動せずに同じ形で終える
 - `report` は呼ばれた時点で計算し直し、出現率のファイルを書き換えない
 
