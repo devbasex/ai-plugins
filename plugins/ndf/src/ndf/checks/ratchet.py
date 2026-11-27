@@ -40,7 +40,7 @@ class Baseline:
 COLUMNS = frozenset(f.name for f in fields(Baseline))
 
 
-def limits_of(data: bytes, where: str) -> dict[str, Baseline]:
+def baselines_of(data: bytes, where: str) -> dict[str, Baseline]:
     """基準のファイルの中身 `data` の、規則ごとの基準。壊れている・知らないバージョン・形が違うときは `CheckError`（`where` は出所）。"""
     try:
         doc = contracts.parse_file(Path(where), data.decode("utf-8"))
@@ -60,7 +60,7 @@ def limits_of(data: bytes, where: str) -> dict[str, Baseline]:
 def baseline(path: Path) -> dict[str, Baseline]:
     """規則ごとの基準。ファイルが無い・壊れている・形が違うときは `CheckError`。"""
     try:
-        return limits_of(path.read_bytes(), str(path))
+        return baselines_of(path.read_bytes(), str(path))
     except OSError as exc:
         raise CheckError(f"ラチェットの基準を読めない: {path}: {exc}") from exc
 

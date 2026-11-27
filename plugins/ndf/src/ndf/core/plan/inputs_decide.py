@@ -113,6 +113,11 @@ def cell(value: str) -> str:
     return value.replace("\r\n", "\n").replace("|", "\\|").replace("\n", _CELL_BREAK)
 
 
+def pipe_row(values: Sequence[str]) -> str:
+    """表の 1 行を書く。値は `cell` で書ける形にしてから渡す。"""
+    return "| " + " | ".join(values) + " |"
+
+
 def split_row(line: str) -> list[str]:
     """Markdown の表の 1 行の列。エスケープしたパイプ（`\\|`）は列を区切らず、列の中では `|` に戻す。"""
     inner = line.strip().removeprefix("|")

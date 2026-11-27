@@ -76,7 +76,7 @@ def test_a_missing_or_undecodable_limit_file_stops(tmp_path):
     with pytest.raises(CheckError):
         ratchet.baseline(tmp_path / "none.json")
     with pytest.raises(CheckError):
-        ratchet.limits_of(b"\xff", "x")
+        ratchet.baselines_of(b"\xff", "x")
 
 
 def test_lower_rewrites_only_the_rules_below_their_limit(tmp_path):

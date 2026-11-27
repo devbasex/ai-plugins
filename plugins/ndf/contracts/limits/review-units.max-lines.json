@@ -1,0 +1,7 @@
+{
+  "summary": "レビューの単位 1 つの見込みの差分の行数の上限（行。追加と削除の和）。超えると止めて分け方の案を返す。設定の workflow.review_units.max_lines が先に効く",
+  "count": 1000,
+  "read_by": [
+    "ndf.core.plan.units_files"
+  ]
+}

@@ -81,10 +81,18 @@ class _Heading(NamedTuple):
 
 
 class _Table(NamedTuple):
-    """表 1 つ。`rows` は (見出しの行, データ行...) のセル。"""
+    """表 1 つ。`at` は最初の行、`end` は最後の行の次の行の番号、`rows` は (見出しの行, データ行...) のセル。"""
 
     at: int
+    end: int
     rows: list[list[str]]
+
+
+class Slot(NamedTuple):
+    """セクション 1 つの中の、表を書き換える場所。`end` はセクションの次の行の番号（文書の終わりなら行の数）。"""
+
+    end: int
+    table: Optional[range]
 
 
 class _Doc(NamedTuple):
@@ -117,7 +125,7 @@ def _parse(text: str) -> _Doc:
         elif token.type == "table_open":
             # 2 行目は区切りの行
             rows = [inputs_decide.split_row(line) for line in (lines[start], *lines[start + 2 : end])]
-            tables.append(_Table(start, rows))
+            tables.append(_Table(start, end, rows))
     return _Doc(tuple(headings), tuple(tables))
 
 
@@ -141,6 +149,28 @@ def _named_section(doc: _Doc, title: str) -> range:
 def _first_table(doc: _Doc, section: range) -> Optional[_Table]:
     """セクションの最初の表。表が無ければ None。"""
     return next((table for table in doc.tables if table.at in section), None)
+
+
+def task_numbers(text: str) -> list[int]:
+    """「タスク分解」の `### Task N` の番号を、出てくる順に返す（重なりも残す）。"""
+    return _task_numbers(_parse(text))
+
+
+def _task_numbers(doc: _Doc) -> list[int]:
+    section = _named_section(doc, TASKS_HEADING)
+    titles = (_TASK_TITLE.match(h.title) for h in doc.headings if h.at in section and h.level == 3)
+    return [int(m.group(1)) for m in titles if m]
+
+
+def table_slot(text: str, title: str) -> Optional[Slot]:
+    """`title` のセクション（`UNITS_HEADING` は単位の見出し）の終わりと、最初の表の行の範囲。セクションが無ければ None。"""
+    doc = _parse(text)
+    found = _unit_headings(doc) if title == UNITS_HEADING else [h for h in doc.headings if h.level >= 2 and h.title == title]
+    if not found:
+        return None
+    section = _section(doc, found[0])
+    table = _first_table(doc, section)
+    return Slot(min(section.stop, len(text.split("\n"))), None if table is None else range(table.at, table.end))
 
 
 def _cell_elements(cell: str) -> list[str]:
@@ -289,9 +319,7 @@ def _ordered(doc: _Doc, tasks: Sequence[int], rows: Sequence[tuple[int, Unit]], 
 def _plan_units(plan: PlanDoc, criteria: Mapping[int, int], sprint: frozenset[int]) -> tuple[list[Unit], list[str]]:
     """実装計画 1 つの (流す順の単位, 読めない理由)。"""
     doc = _parse(plan.text)
-    section = _named_section(doc, TASKS_HEADING)
-    titles = (_TASK_TITLE.match(h.title) for h in doc.headings if h.at in section and h.level == 3)
-    tasks = list(dict.fromkeys(int(m.group(1)) for m in titles if m))
+    tasks = list(dict.fromkeys(_task_numbers(doc)))
     scope = _Scope(plan, tasks, criteria, sprint)
     try:
         table = _unit_rows(doc)
