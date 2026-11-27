@@ -741,3 +741,190 @@ def test_records_cli_pr_body_only_refuses_a_selection(monkeypatch: pytest.Monkey
     assert code == 0 and out["outputs"]["bodies"][0]["number"] == 11
     code, out = _records_cli(monkeypatch, capsys, hub, "--pr-body-only", "--version", "main abc1234")
     assert code == 3 and out["cause"]["kind"] == "precondition"
+
+
+# --- #4580: バージョンの無いリリース記録の確かめ（純粋な判定） ---
+
+
+@pytest.mark.parametrize(
+    ("value", "matches"),
+    [
+        ("main abc1234", True),
+        ("main ABC1234", True),  # 大文字の 16 進
+        ("abc12340", True),  # 7 文字より長い先頭
+        ("main-abc1234", True),
+        ("main abc123", False),  # 6 文字の語は数えない
+        ("main abc1235", False),
+        ("main", False),
+        (X + "0", False),  # SHA より長い語
+    ],
+)
+def test_value_matches_a_hex_word_of_seven_or_more(value: str, matches: bool) -> None:
+    assert record_decide.value_matches(value, X) is matches
+
+
+def test_production_deliveries_take_the_production_channel_and_manual_ones() -> None:
+    rows = [
+        {"target": "a"},
+        {"target": "b", "channel": None, "kind": "manual"},
+        {"target": "c", "channel": "production"},
+        {"target": "d", "channel": "base"},
+        {"target": "e", "production": False},  # channel を省いた検証環境
+        {"target": "f", "production": True},
+    ]
+    assert [r["target"] for r in record_decide.production_deliveries(rows)] == ["a", "b", "c", "f"]
+
+
+# 期待値は git 2.53 の `git ls-files ':(glob)<パターン>'` で確かめた
+@pytest.mark.parametrize(
+    ("pattern", "path", "matches"),
+    [
+        ("web/**", "web/a/b/z.ts", True),
+        ("web/**", "webx.ts", False),
+        ("**/z.ts", "web/a/b/z.ts", True),
+        ("**/r.md", "r.md", True),  # `**/` が 0 階層に当たる
+        ("web/**/x.ts", "web/x.ts", True),
+        ("web/**/b/**", "web/a/b/z.ts", True),
+        ("web/*", "web/x.ts", True),
+        ("web/*", "web/a/y.ts", False),  # `*` が `/` を越えない
+        ("*.md", "docs/r.md", False),
+        ("**.md", "docs/r.md", False),
+        ("web/a**", "web/a/b/z.ts", True),  # 末尾の `**` は `/` を越える
+        ("w**/x.ts", "web/x.ts", True),
+        ("web/?.ts", "web/X.ts", True),
+        ("web/[xy].ts", "web/X.ts", False),  # 大文字と小文字を区別する
+        ("web/[!x].ts", "web/X.ts", True),
+        ("web/[^x].ts", "web/x.ts", False),
+        ("web/[a-c]bc.ts", "web/abc.ts", True),
+        ("web/[]x].ts", "web/x.ts", True),
+        ("web/a?y.ts", "web/a/y.ts", False),
+        ("web", "web/a/y.ts", True),  # ワイルドカードの無いパターンはディレクトリの下に当たる
+        ("web/", "web/x.ts", True),
+        ("web", "webx.ts", False),
+        ("web/a*", "web/ab/c.ts", False),
+    ],
+)
+def test_glob_matches_like_the_glob_pathspec_of_git(pattern: str, path: str, matches: bool) -> None:
+    assert record_decide.glob_matches(pattern, path) is matches
+
+
+DECLARED = [
+    {"target": "api"},  # paths を持たない
+    {"target": WEB, "paths": ["web/**"]},
+    {"target": WORKER, "paths": ["worker/**", "shared/*.py"]},
+    {"target": "stage", "channel": "base", "paths": ["web/**"]},  # 本番の届け先でない
+]
+
+
+def test_targets_of_takes_deliveries_without_paths_and_paths_in_both_diffs() -> None:
+    moved = frozenset({"worker/old.py", "lib/new.py"})  # 移動の前のパスで当たる
+    assert record_decide.targets_of(DECLARED, moved, moved) == ("api", WORKER)
+    both = frozenset({"web/a.ts", "shared/x.py"})
+    assert record_decide.targets_of(DECLARED, both, both) == ("api", WEB, WORKER)
+    # push の差分に出ないパス（同じ push の中で打ち消された変更）は数えない
+    assert record_decide.targets_of(DECLARED, both, frozenset({"web/a.ts"})) == ("api", WEB)
+    assert record_decide.targets_of(DECLARED[1:], both, frozenset()) == ()
+
+
+def _update(before: str, after: str) -> dict:
+    return {"before": before, "after": after, "ref": "refs/heads/main", "activity_type": "merge_queue_merge"}
+
+
+def test_push_of_takes_the_push_that_brought_the_landed_commit() -> None:
+    # merge queue が c1〜c3 を 1 回の push で入れ、後の push が c5 まで進めた。反映したコミットは途中の c1
+    landed = frozenset({"c1", "c2", "c3", "c4", "c5"})
+    activities = [_update("c3", "c5"), _update("c0", "c3"), _update("b9", "c0")]
+    assert record_decide.push_of(activities, landed) == record_decide.Push("c0", "c3")
+    # 新しい順で after が集合の外に出たら打ち切る
+    assert record_decide.push_of([_update("z1", "z2"), _update("c0", "c3")], landed) is None
+    assert record_decide.push_of([_update("c3", "c5")], landed) is None
+    assert record_decide.push_of([], landed) is None
+
+
+def test_value_commit_conflict_finds_the_pair_on_either_side() -> None:
+    first = _unversioned()
+    assert record_decide.value_commit_conflict([first], X, "main abc1234") is None
+    assert record_decide.value_commit_conflict([], X, "main abc1234") is None
+    # 同じコミットを違う長さの SHA で書いた値で止まる
+    assert record_decide.value_commit_conflict([first], X, "main abc12340") == ("main abc1234", X)
+    # 2 つの SHA を含む同じ値を別のコミットで打つと止まる
+    two = _unversioned(version="main abc1234 def5678")
+    assert record_decide.value_commit_conflict([two], Y, "main abc1234 def5678") == ("main abc1234 def5678", X)
+    # 無効にした記録（後に書かれた負けた側）は数えない
+    loser = _unversioned(version="main def5678", commit=X)
+    assert record_decide.value_commit_conflict([first, loser], Y, "main def5678") is None
+
+
+def test_has_unversioned_needs_the_same_value_environments_and_targets() -> None:
+    found = [_unversioned(environments=(WEB,))]
+    assert record_decide.has_unversioned(found, "main abc1234", (WEB,), TARGETS)
+    assert not record_decide.has_unversioned(found, "main abc1234", (WORKER,), TARGETS)
+    assert not record_decide.has_unversioned(found, "main abc1234", (WEB,), (WEB,))
+    assert not record_decide.has_unversioned(found, "main def5678", (WEB,), TARGETS)
+    versioned = [record_decide.Record("main abc1234", RELEASE, (11,))]
+    assert not record_decide.has_unversioned(versioned, "main abc1234", (), TARGETS)
+
+
+DOC = {"foo": ["bar", "baz"], "": 0, "a/b": 1, "m~n": 8, "build": {"commit": None}}
+
+
+@pytest.mark.parametrize(
+    ("pointer", "value"),
+    [
+        ("", DOC),
+        ("/foo", ["bar", "baz"]),
+        ("/foo/0", "bar"),
+        ("/", 0),
+        ("/a~1b", 1),
+        ("/m~0n", 8),
+        ("/build/commit", None),  # 値が null でも在る
+    ],
+)
+def test_json_pointer_reads_one_value(pointer: str, value: object) -> None:
+    assert record_decide.json_pointer(DOC, pointer) == value
+
+
+@pytest.mark.parametrize("pointer", ["/foo/2", "/foo/-", "/foo/01", "/foo/x", "/none", "/foo/0/x", "foo"])
+def test_json_pointer_of_nothing_is_missing(pointer: str) -> None:
+    assert record_decide.json_pointer(DOC, pointer) is record_decide._MISSING
+
+
+AFTER = "c3" + "0" * 38  # push の after
+OBSERVE = {"url": "https://example.invalid/version", "pointer": "/build/commit"}
+CD = {"target": WEB, "result": {"workflow": "deploy.yml"}, "observe": OBSERVE}
+SUCCESS = {"status": "completed", "conclusion": "success"}
+FAILURE = {"status": "completed", "conclusion": "failure"}
+RUNNING = {"status": "in_progress", "conclusion": None}
+
+
+def test_confirm_takes_cd_observed_and_attested() -> None:
+    assert record_decide.confirm(CD, SUCCESS, record_decide._MISSING, AFTER) == record_decide.Confirmation("ok", "cd", None, None)
+    got = record_decide.confirm(CD, RUNNING, AFTER[:7], AFTER)
+    assert got == record_decide.Confirmation("ok", "observed", None, record_decide.Evidence(OBSERVE["url"], AFTER[:7]))
+    manual = {"target": WEB, "kind": "manual"}
+    assert record_decide.confirm(manual, None, record_decide._MISSING, AFTER) == record_decide.Confirmation("ok", "attested", None, None)
+    command = {"target": WEB, "result": {"command": "./status {revision}"}}
+    assert record_decide.confirm(command, SUCCESS, record_decide._MISSING, AFTER).kind == "cd"
+
+
+def test_confirm_does_not_count_a_sha_outside_the_pointer() -> None:
+    # 応答のほかの場所（次に出すバージョンの候補）に after があっても、pointer の値が古ければ未確定
+    response = {"build": {"commit": "b9" + "0" * 38}, "next": AFTER}
+    got = record_decide.confirm(CD, RUNNING, record_decide.json_pointer(response, OBSERVE["pointer"]), AFTER)
+    assert got.state == "pending" and got.kind is None and got.reason
+
+
+@pytest.mark.parametrize(
+    ("delivery", "run", "observed", "state"),
+    [
+        (CD, FAILURE, AFTER, "failed"),  # CD の失敗は実環境の確認で覆さない
+        (CD, RUNNING, record_decide._MISSING, "pending"),
+        (CD, None, record_decide._MISSING, "pending"),  # 実行がまだ無い
+        ({**CD, "observe": None}, RUNNING, AFTER, "pending"),  # 届け先の設定に observe が無い
+        (CD, RUNNING, "b9" + "0" * 38, "pending"),  # pointer の値が after と一致しない
+        (CD, RUNNING, 1234567, "pending"),  # 文字列でない値
+    ],
+)
+def test_confirm_does_not_write_a_failed_or_unsettled_delivery(delivery: dict, run: dict | None, observed: object, state: str) -> None:
+    got = record_decide.confirm(delivery, run, observed, AFTER)
+    assert (got.state, got.kind, got.evidence) == (state, None, None) and got.reason

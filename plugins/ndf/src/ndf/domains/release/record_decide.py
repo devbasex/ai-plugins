@@ -35,6 +35,10 @@ VERIFICATION_MARK = f"<!-- {_NS}:release-verification -->"
 CORRECTION_MARK = f"<!-- {_NS}:release-targets-correction -->"
 # 実環境の確認で反映を確かめた届け先の `confirmation` の値（この届け先だけが `evidence` を持つ）
 OBSERVED = "observed"
+# 値の 16 進の語と SHA の一致に要る最小の長さ（確かめ 2 と実環境の確認の両方が読む）
+SHA_PREFIX = 7
+# JSON Pointer が指す値が無いこと（null の値と見分ける）
+_MISSING: Any = object()
 # 組み立てがリリースのコミットへ書く、承認資料の「含む PR」の行（git のトレーラーの形。値は `#<番号>` の空白区切りか `none`）
 INCLUDED_TRAILER = "Ndf-Included-Pulls"
 _INCLUDED_LINE = re.compile(rf"^{INCLUDED_TRAILER}: (?P<value>.*)$", re.MULTILINE)
@@ -284,6 +288,19 @@ def value_pairs(found: Sequence[Record]) -> tuple[dict[str, str], list[Record]]:
     return by_value, valid
 
 
+def value_commit_conflict(found: Sequence[Record], commit: str, version: str) -> tuple[str, str] | None:
+    """値とコミットの組（`value_pairs`）で、今回のコミットが別の値と組か、今回の値が別のコミットと組なら、その組の (値, コミット)。"""
+    by_value, _valid = value_pairs(found)
+    if version in by_value and by_value[version] != commit:
+        return version, by_value[version]
+    return next(((v, c) for v, c in by_value.items() if c == commit and v != version), None)
+
+
+def has_unversioned(found: Sequence[Record], version: str, environments: tuple[str, ...], targets: tuple[str, ...]) -> bool:
+    """同じ値・同じ `environments`・正の `targets`（`targets`）の記録が既にあるか（重ねて書かない）。`found` は有効な記録。"""
+    return any(r.version == version and r.environments == environments and r.targets == targets for r in found)
+
+
 def authoritative_targets(found: Sequence[Record], corrections: Sequence[Correction], version: str) -> tuple[str, ...] | None:
     """値 `version` の正の対象の一覧。最後の訂正の一覧、無ければ同じ値の最初の記録の一覧。記録が無ければ None。
 
@@ -434,3 +451,144 @@ def landed_trailers(message: str) -> tuple[int, str] | None:
     if TRAILER_PR not in found or TRAILER_HEAD not in found or not found[TRAILER_PR].isdigit():
         return None
     return int(found[TRAILER_PR]), found[TRAILER_HEAD]
+
+
+class Confirmation(NamedTuple):
+    """届け先 1 つの反映の確かめ。`state` は `ok`・`failed`・`pending`、`kind` は `ok` のときの `cd`・`observed`・`attested`。
+    `reason` は書かない届け先の理由、`evidence` は `observed` のときの証跡。"""
+
+    state: str
+    kind: str | None = None
+    reason: str | None = None
+    evidence: Evidence | None = None
+
+
+_HEX_WORD = re.compile(r"[0-9A-Za-z]+")
+
+
+def value_matches(value: str, sha: str) -> bool:
+    """値の中に、SHA `sha` の先頭 `SHA_PREFIX` 文字以上と一致する 16 進の語があるか（大文字と小文字を問わない）。"""
+    sha = sha.lower()
+    words = (w.lower() for w in _HEX_WORD.findall(value))
+    return any(len(w) >= SHA_PREFIX and sha.startswith(w) and all(c in "0123456789abcdef" for c in w) for w in words)
+
+
+def production_deliveries(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """届け先の設定の行のうち本番の届け先（`channel` が `production`・省略・null で、`production` が false でない。手動も含む）。"""
+    return [r for r in rows if r.get("channel") in (None, "production") and r.get("production") is not False]
+
+
+def _bracket(pattern: str, start: int) -> tuple[str, int] | None:
+    """`pattern[start]` の `[` で始まる括弧の正規表現と、閉じ括弧の次の位置。閉じ括弧が無ければ None。"""
+    i = start + 1
+    negate = i < len(pattern) and pattern[i] in "!^"
+    i += negate
+    body = i
+    if i < len(pattern) and pattern[i] == "]":
+        i += 1  # 先頭の `]` は文字そのもの
+    end = pattern.find("]", i)
+    if end < 0:
+        return None
+    chars = "".join("-" if c == "-" else re.escape(c) for c in pattern[body:end])
+    return (f"[^/{chars}]" if negate else f"(?!/)[{chars}]"), end + 1
+
+
+def _glob_regex(pattern: str) -> str:
+    """git の `:(glob)` のパターンを正規表現にする（`*`・`?`・括弧は `/` を越えない。末尾の `**` と、`/` に挟まれた `**/` は越える）。"""
+    out, i, n = [], 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "*":
+            j = i
+            while j < n and pattern[j] == "*":
+                j += 1
+            double = j - i >= 2
+            if double and j == n:
+                out.append(".*")
+            elif double and (i == 0 or pattern[i - 1] == "/") and pattern[j] == "/":
+                out.append("(?:[^/]*/)*")
+                j += 1
+            else:
+                out.append("[^/]*")
+            i = j
+            continue
+        got = _bracket(pattern, i) if c == "[" else None
+        if got is not None:
+            out.append(got[0])
+            i = got[1]
+            continue
+        out.append("[^/]" if c == "?" else re.escape(c))
+        i += 1
+    return "".join(out)
+
+
+def glob_matches(pattern: str, path: str) -> bool:
+    """パス `path` が git の pathspec の `:(glob)` のパターン `pattern` に当たるか（大文字と小文字を区別する）。
+    ワイルドカードの無いパターンは、同じパスと、そのディレクトリの下のパスに当たる（git と同じ）。"""
+    if not any(c in pattern for c in "*?["):
+        stem = pattern.rstrip("/")
+        return path == stem or path.startswith(stem + "/")
+    return re.fullmatch(_glob_regex(pattern), path) is not None
+
+
+def targets_of(rows: Sequence[Mapping[str, Any]], pr_paths: frozenset[str], push_paths: frozenset[str]) -> tuple[str, ...]:
+    """今回の対象の届け先（設定の順）。本番の届け先のうち、`paths` を持たないものと、本番の PR の差分と push の差分の
+    両方に出るパスが `paths` のどれかに当たるもの。"""
+    changed = pr_paths & push_paths
+    picked = []
+    for row in production_deliveries(rows):
+        paths = row.get("paths")
+        if paths is None or any(glob_matches(p, path) for p in paths for path in changed):
+            picked.append(row["target"])
+    return tuple(picked)
+
+
+def push_of(activities: Iterable[Mapping[str, Any]], landed: frozenset[str]) -> Push | None:
+    """反映したコミットを本番ブランチへ入れた push。`activities` はブランチの更新の新しい順、`landed` は反映したコミットから
+    本番ブランチの HEAD までの第一親のコミット。`after` が `landed` にあり `before` が無い最初の更新を返し、`after` が
+    `landed` の外の更新（反映したコミットより前）に当たれば None。"""
+    for activity in activities:
+        before, after = activity.get("before"), activity.get("after")
+        if after not in landed:
+            return None
+        if before not in landed:
+            return Push(str(before), str(after))
+    return None
+
+
+def json_pointer(doc: Any, pointer: str) -> Any:
+    """RFC 6901 の JSON Pointer `pointer` が `doc` の中で指す 1 つの値。無ければ `_MISSING`。"""
+    if pointer == "":
+        return doc
+    if not pointer.startswith("/"):
+        return _MISSING
+    for token in (t.replace("~1", "/").replace("~0", "~") for t in pointer[1:].split("/")):
+        if isinstance(doc, dict) and token in doc:
+            doc = doc[token]
+        elif isinstance(doc, list) and re.fullmatch(r"0|[1-9][0-9]*", token) and int(token) < len(doc):
+            doc = doc[int(token)]
+        else:
+            return _MISSING
+    return doc
+
+
+def confirm(delivery: Mapping[str, Any], run: Mapping[str, Any] | None, observed: Any, after: str) -> Confirmation:
+    """届け先 1 つの反映を何で確かめたか（設計書の届け先ごとの反映の確かめの表を 1 回評価する）。
+
+    `run` は push の `after` の CD の結果（`gh run list` の `status`・`conclusion` の形。まだ無ければ None）、`observed` は
+    実環境の確認で `observe.pointer` が指した値（確かめを指定していないか、読めなければ `_MISSING`）、`after` は push の `after`。"""
+    result = delivery.get("result")
+    if not isinstance(result, Mapping) or not (result.get("workflow") or result.get("command")):
+        return Confirmation("ok", "attested")
+    if run is not None and run.get("status") == "completed":
+        if run.get("conclusion") == "success":
+            return Confirmation("ok", "cd")
+        return Confirmation("failed", reason=f"CD の結果が失敗（{run.get('conclusion')}）")
+    observe = delivery.get("observe")
+    if not isinstance(observe, Mapping):
+        return Confirmation("pending", reason="CD の結果が未確定で、届け先の設定に実環境の確認（observe）が無い")
+    if observed is _MISSING:
+        return Confirmation("pending", reason="CD の結果が未確定で、実環境の確認を指定していないか、値を読めなかった")
+    if not isinstance(observed, str) or not value_matches(observed, after):
+        return Confirmation("pending", reason=f"CD の結果が未確定で、実環境の値が push の after（{after}）と一致しない")
+    return Confirmation("ok", OBSERVED, evidence=Evidence(str(observe.get("url")), observed))
