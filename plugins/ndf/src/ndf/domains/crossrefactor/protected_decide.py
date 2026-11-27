@@ -18,17 +18,20 @@ import posixpath
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
+from ndf import identity
+from ndf.domains.crossrefactor import symbols_decide
 from ndf.testing import scoped, weight
 
-NDF_DIR = ".ndf"
+NDF_DIR = identity.FIXED_WORDS["ndf_settings_dir"]
 # 依存とテストの定義の決まった名前と、テストランナーが自動で読むファイル（どの階層でも。設計文書の表）
-PROTECTED_NAMES = (
-    "package.json", "composer.json", "pyproject.toml", "setup.cfg", "pytest.ini", "tox.ini", "phpunit.xml*",
-    "vitest.config.*", "jest.config.*", "Makefile", "Gemfile", "Rakefile", "go.mod", "Cargo.toml", "pom.xml",
-    "build.gradle*", "settings.gradle*", "compose*.y*ml", "docker-compose*.y*ml",
-    "conftest.py", "noxfile.py", ".coveragerc", "jest.setup.*", "vitest.setup.*", "vitest.workspace.*", ".mocharc*",
-    "karma.conf.*", "playwright.config.*", "cypress.config.*", ".rspec", "spec_helper.rb", "rails_helper.rb",
-)  # fmt: skip
+PROTECTED_NAMES = tuple(
+    """
+    package.json composer.json pyproject.toml setup.cfg pytest.ini tox.ini phpunit.xml* vitest.config.* jest.config.*
+    Makefile Gemfile Rakefile go.mod Cargo.toml pom.xml build.gradle* settings.gradle* compose*.y*ml docker-compose*.y*ml
+    conftest.py noxfile.py .coveragerc jest.setup.* vitest.setup.* vitest.workspace.* .mocharc* karma.conf.*
+    playwright.config.* cypress.config.* .rspec spec_helper.rb rails_helper.rb
+    """.split()
+)
 # リンクをたどる回数の上限（循環するリンクで止まらないため）
 LINK_HOPS = 40
 
@@ -43,7 +46,7 @@ def normalize(word: str) -> str | None:
     return path
 
 
-def _parents(path: str) -> list[str]:
+def _ancestors(path: str) -> list[str]:
     parts = path.split("/")
     return ["/".join(parts[:i]) for i in range(1, len(parts))]
 
@@ -67,15 +70,29 @@ class Protected:
         return p in self.exact or (bool(self.declared) and scoped.in_scope(p, self.declared))
 
 
+def _word_parts(word: str) -> tuple[str, ...]:
+    """語と、`=` を含む語の `=` より後ろ。"""
+    return (word, word.split("=", 1)[1]) if "=" in word else (word,)
+
+
 def _words(commands: Iterable[str]) -> list[str]:
     """コマンドの語と、`=` を含む語の `=` より後ろ。"""
-    out: list[str] = []
-    for text in commands:
-        for words in weight.split_commands(text):
-            for w in words:
-                out.append(w)
-                if "=" in w:
-                    out.append(w.split("=", 1)[1])
+    return [part for text in commands for words in weight.split_commands(text) for w in words for part in _word_parts(w)]
+
+
+def _named(word: str, search: Sequence[str]) -> set[str]:
+    """語が名指すパス。`/` を含まない語は `search` の要素の下の同じ名前も。"""
+    candidates = [word]
+    if word and "/" not in word:
+        candidates += [posixpath.join(e, word) if e not in ("", ".") else word for e in search]
+    return {p for p in (normalize(c) for c in candidates) if p is not None}
+
+
+def _closure(path: str, tree: Mapping[str, str | None]) -> set[str]:
+    """パスと親と、ツリーの中のリンク先とその親。"""
+    out = {path, *_ancestors(path)}
+    for target in _link_targets(path, tree):
+        out.update({target, *_ancestors(target)})
     return out
 
 
@@ -84,7 +101,7 @@ def _link_targets(path: str, tree: Mapping[str, str | None]) -> list[str]:
     found: list[str] = []
     current = path
     for _ in range(LINK_HOPS):
-        target = tree.get(current)
+        target = tree[current] if current in tree else None
         if target is None:
             break
         nxt = normalize(posixpath.join(posixpath.dirname(current), target)) if not target.startswith("/") else None
@@ -95,27 +112,10 @@ def _link_targets(path: str, tree: Mapping[str, str | None]) -> list[str]:
     return found
 
 
-def protected_of(
-    tree: Mapping[str, str | None], commands: Sequence[str], declared: Sequence[str], search: Sequence[str] = ()
-) -> Protected:
+def protected_of(tree: Mapping[str, str | None], commands: Sequence[str], declared: Sequence[str], search: Sequence[str] = ()) -> Protected:
     """ツリー（パス → リンク先。リンクでなければ None）から、保護するファイルの判定を組む。"""
-    named: set[str] = set()
-    for word in _words(commands):
-        path = normalize(word)
-        if path is not None:
-            named.add(path)
-        if "/" not in word and word:
-            for element in search:
-                joined = normalize(posixpath.join(element, word) if element not in ("", ".") else word)
-                if joined is not None:
-                    named.add(joined)
-    exact: set[str] = set()
-    for path in named:
-        exact.add(path)
-        exact.update(_parents(path))
-        for target in _link_targets(path, tree):
-            exact.add(target)
-            exact.update(_parents(target))
+    named = {p for word in _words(commands) for p in _named(word, search)}
+    exact = {p for path in named for p in _closure(path, tree)}
     clean = tuple(p for p in (normalize(d.rstrip("/")) for d in declared) if p is not None)
     return Protected(frozenset(exact), clean)
 
@@ -123,16 +123,12 @@ def protected_of(
 def inside_work(commands: Sequence[str], roots: Sequence[str]) -> tuple[str, ...]:
     """コマンドの語（リダイレクト先を含む）のうち、`roots` の配下（ルートそのものを含む）を指す絶対パスの語。"""
     bases = [posixpath.normpath(r) for r in roots if r.startswith("/")]
-    hits: list[str] = []
-    for text in commands:
-        for word in weight.all_words(text):
-            for part in (word, *([word.split("=", 1)[1]] if "=" in word else [])):
-                if not part.startswith("/"):
-                    continue
-                path = posixpath.normpath(part)
-                if any(path == b or path.startswith(b.rstrip("/") + "/") for b in bases):
-                    hits.append(word)
-                    break
+
+    def under(part: str) -> bool:
+        path = posixpath.normpath(part)
+        return part.startswith("/") and any(path == b or path.startswith(b.rstrip("/") + "/") for b in bases)
+
+    hits = [word for text in commands for word in weight.all_words(text) if any(under(p) for p in _word_parts(word))]
     return tuple(dict.fromkeys(hits))
 
 
@@ -148,3 +144,11 @@ def narrow(scope: Sequence[str], tracked: Sequence[str], protected: Protected) -
         if not drop:
             kept.append(entry)
     return tuple(kept)
+
+
+def unprotected(touched: symbols_decide.Touched, protected: Protected | None) -> symbols_decide.Touched:
+    """触る関数とファイルから保護するファイルを外す（`protected` が None ならそのまま）。"""
+    if protected is None:
+        return touched
+    symbols = {p: s for p, s in touched.symbols.items() if not protected.covers(p)}
+    return symbols_decide.Touched(symbols, tuple(p for p in touched.whole_files if not protected.covers(p)))

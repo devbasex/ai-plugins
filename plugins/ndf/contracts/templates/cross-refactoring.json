@@ -1,7 +1,7 @@
 {
   "template": "cross-refactoring",
   "purpose": "refactor",
-  "summary": "リファクタリング: リファクタリングの起動 → push。終わり切らなくても（incomplete）push まで進める",
+  "summary": "リファクタリング: リファクタリングの起動 → push。終わり切らなくても（incomplete）push まで進める。手元の経路（--local-test）は push・fix-push の代わりに follow で、テストに合格して送った SHA へ呼び出し元を早送りする（#4566）",
   "params": ["repo", "worktree", "branch", "remote", "refactor", "worker"],
   "plan": {
     "name": "cross-refactoring-{{branch}}",
@@ -9,6 +9,7 @@
     "worktree": "{{worktree}}",
     "steps": [
       {"id": "refactor", "run": ["{{refactor}}"], "on_cause": {"incomplete": "push"}},
+      {"use": "follow"},
       {"use": "push", "on_fail": "fix-push", "next": "end"},
       {"use": "fix-push"}
     ]

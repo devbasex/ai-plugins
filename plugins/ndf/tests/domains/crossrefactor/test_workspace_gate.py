@@ -51,12 +51,12 @@ def test_an_owned_legacy_root_is_kept_and_an_unknown_one_is_not_used(tmp_path, m
 
 
 def test_hold_is_exclusive_and_the_lock_file_is_outside_the_root(tmp_path):
-    first = workspace.hold(tmp_path, 7)
+    first = workspace.hold_pr(tmp_path, 7)
     assert first is not None
-    assert workspace.hold(tmp_path, 7) is None
+    assert workspace.hold_pr(tmp_path, 7) is None
     assert (tmp_path / "locks" / "rf7.lock").exists()
     first.release()
-    again = workspace.hold(tmp_path, 7)
+    again = workspace.hold_pr(tmp_path, 7)
     assert again is not None
     again.release()
 
@@ -88,7 +88,8 @@ def test_sweep_keeps_a_file_put_later_under_the_same_name(tmp_path):
     own = tmp_path / "rf7"
     state: dict[str, Any] = {}
     path = _log(own, "local-gate-0-head-1.log", KEEP + DAY, now, state)
-    path.unlink()
+    # ログを移した後に同じ名前へ別のファイルを置く（移したファイルは残るので inode は再利用されない）
+    path.rename(tmp_path / "moved.log")
     path.write_text("user", encoding="utf-8")
     os.utime(path, (0, 0))
     assert workspace.sweep_gate_logs(tmp_path, None, "r", own, KEEP, now) == 0
@@ -100,7 +101,7 @@ def test_sweep_skips_a_locked_pr_and_removes_the_state_when_only_logs_remain(tmp
     own, other = tmp_path / "rf7", tmp_path / "rf8"
     state8: dict[str, Any] = {}
     _log(other, "local-gate-0-head-1.log", KEEP + DAY, now, state8)
-    held = workspace.hold(tmp_path, 8)
+    held = workspace.hold_pr(tmp_path, 8)
     assert workspace.sweep_gate_logs(tmp_path, None, "r", own, KEEP, now) == 0
     held.release()
     assert workspace.sweep_gate_logs(tmp_path, None, "r", own, KEEP, now) == 1

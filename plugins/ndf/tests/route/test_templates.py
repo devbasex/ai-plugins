@@ -213,7 +213,7 @@ def test_impl_acceptance_defaults_to_the_issue():
 def test_refactor_launch_wraps_the_refactor_run_with_the_branch_and_the_base():
     # #3908 の決定 7: 設定が無いときの {{refactor}}。PR の番号と触るファイルは打つ時点に読むので、包みの位置引数に
     # ブランチ（$0）と起点（$1）を渡し、$2 以降を ndf refactor run の argv にする
-    got = route.refactor_launch("sprint/s1", "origin/develop", ["test", "lint"])
+    got = route.refactor_launch("sprint/s1", "origin/develop", ["--required", "test", "lint"])
     assert got[:5] == ["bash", "-c", route.REFACTOR_WITH_PR, "sprint/s1", "origin/develop"]
     assert got[5:] == ["ndf", "refactor", "run", "--branch", "sprint/s1", "--base", "origin/develop", "--required", "test", "lint"]
 
@@ -242,7 +242,7 @@ def _run_refactor_wrap(tmp_path, gh_body: str) -> list[str]:
     (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
     git("add", "a.py")
     git("commit", "-q", "-m", "add")
-    argv = route.refactor_launch("sprint/s1", "start", ["test"])
+    argv = route.refactor_launch("sprint/s1", "start", ["--required", "test"])
     argv[argv.index("ndf")] = str(entry)
     args = tmp_path / "args"
     env = {**os.environ, "PATH": f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}", "ARGS_FILE": str(args)}

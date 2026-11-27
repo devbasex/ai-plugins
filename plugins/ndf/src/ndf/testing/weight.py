@@ -31,7 +31,7 @@ def _tokens(text: str) -> list[str] | None:
     lexer.whitespace_split = True
     try:
         return list(lexer)
-    except ValueError:
+    except ValueError:  # noqa: NDF401 利用者の入力: 閉じない引用符のコマンドは語に分けられない
         return None
 
 

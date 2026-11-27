@@ -81,6 +81,12 @@
             "type": "string"
           }
         },
+        "--local-test": {
+          "type": "boolean"
+        },
+        "--pushed-out": {
+          "type": "string"
+        },
         "--ci-test": {
           "type": "array",
           "items": {
@@ -122,8 +128,7 @@
         "--pr",
         "--branch",
         "--base",
-        "--scope",
-        "--required"
+        "--scope"
       ]
     },
     {

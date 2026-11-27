@@ -136,7 +136,7 @@ def final_fix(pr: int, scope: Sequence[str], failed: Sequence[str], *, local: bo
             "コミットする（push しない）。\n" + "\n".join(f"- {f}" for f in failed) + "\n" + COMMIT_RESULT
         )
     head = (
-        f"PR #{pr} の変更を手元でテストしたところ、次のテストの suite が落ちた。これらの suite は、取り込んだ PR のブランチの先頭"
+        f"PR #{pr} の変更を手元でテストしたところ、次のテストの suite が落ちた。これらの suite は、取得した PR のブランチの先頭"
         "（この実行の変更を載せる前）では合格した。原因はこの実行の変更と確定していない（非決定的なテストや外部の状態の変化でも"
         f"同じ結果になる）。リファクタリング計画の対象範囲（{', '.join(scope)}）の中だけを変えて直し、コミットする（push しない）。\n"
     )

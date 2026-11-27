@@ -14,6 +14,11 @@
       "id": "work",
       "run": ["{{worker}}", "impl"]
     },
+    "follow": {
+      "id": "follow",
+      "run": ["sh", "-c", "s=$(cat \"$2\") && [ -n \"$s\" ] && { [ \"$(git rev-parse HEAD)\" = \"$s\" ] || { git fetch -q -- \"$1\" \"refs/heads/$0\" && git merge -q --ff-only --no-overwrite-ignore \"$s\" && [ \"$(git rev-parse HEAD)\" = \"$s\" ]; }; } || exit 1", "{{branch}}", "{{remote}}", "{state_dir}/pushed-sha"],
+      "exit_cause": {"1": "precondition"}
+    },
     "push": {
       "id": "push",
       "run": ["git", "push", "--", "{{remote}}", "HEAD:refs/heads/{{branch}}"],

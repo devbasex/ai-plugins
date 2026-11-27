@@ -129,7 +129,7 @@ def test_propose_prompt_with_empty_candidates_is_the_same_as_without_them():
 
 
 def test_final_fix_local_switches_from_ci_and_carries_the_excerpts():
-    # #4566: 手元で落ちた抜粋をそのまま載せる（文言は照合しない）
+    # #4566: 手元で落ちた抜粋をそのまま載せる（文言は比べない）
     ci = prompt_decide.final_fix(7, ("src",), ["- #1 unit（終了コード 1）"])
     local = prompt_decide.final_fix(7, ("src",), ["- #1 unit（終了コード 1）"], local=True)
     assert ci != local

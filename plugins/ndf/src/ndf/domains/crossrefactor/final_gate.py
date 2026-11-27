@@ -19,6 +19,7 @@ from ndf.adapters import ci, git, github
 from ndf.contracts import limits
 from ndf.core.converge import worktree
 from ndf.domains.crossrefactor import final_gate_decide
+from ndf.testing import means
 
 CI_WAIT_POLICY = "test-run.ci-wait"
 CHECK_WAIT_POLICY = "test-triage.check-wait"
@@ -141,7 +142,7 @@ def _names(checks: Sequence[ci.Check]) -> list[str]:
 
 
 # 最終ゲートの記録の `means`（必須のチェックの経路。手元の経路は `local_gate`）
-MEANS = "required_checks"
+MEANS = means.Kind.REQUIRED_CHECKS.value
 
 
 def _record(status: str, round_no: int, sha: str) -> dict[str, Any]:

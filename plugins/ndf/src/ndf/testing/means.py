@@ -27,8 +27,12 @@ from typing import Any
 from ndf.testing import scoped, weight
 
 
+# 必須のチェックを持つ設定のキーの道
+REQUIRED_CHECKS_KEYS = ("ci", "required_checks")
+
+
 class Kind(StrEnum):
-    REQUIRED_CHECKS = "required_checks"
+    REQUIRED_CHECKS = REQUIRED_CHECKS_KEYS[1]
     LOCAL_TEST = "local_test"
     NONE = "none"
 
@@ -39,7 +43,7 @@ class Means:
 
     - `required`: 必須のチェックの名前
     - `suites`: 手元で打つテストの suite の (名前, コマンド)（設定の順）
-    - `declarations`: テストの suite の宣言そのもの（`slots.run_command` の重さの判定へ渡す）
+    - `declarations`: テストの suite の設定そのもの（`slots.run_command` の重さの判定へ渡す）
     - `commands`: 保護の判定に使う `command` と `scope_command`
     - `digest`: テストの設定の識別値（suite ごとの `name`・`command`・`scope_command`・`paths` の SHA-256）
     - `protected`: `test.protected_files`
@@ -77,7 +81,8 @@ def _digest(suites: list[Mapping[str, Any]]) -> str:
 
 def decide(project: Mapping[str, Any]) -> Means:
     """設定の中身から手段と、手元で打つ内容を返す（モジュールの説明の表）。"""
-    required = _strings(_obj(project.get("ci")).get("required_checks"))
+    section, key = REQUIRED_CHECKS_KEYS
+    required = _strings(_obj(project.get(section)).get(key))
     if required:
         return Means(Kind.REQUIRED_CHECKS, required=required)
     test = _obj(project.get("test"))

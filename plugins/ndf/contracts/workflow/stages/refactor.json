@@ -25,7 +25,7 @@
       "phase": "implement",
       "when": [
         "code_in_diff",
-        "ci_declared"
+        "tests_verifiable"
       ],
       "inputs": [
         "worktree",
