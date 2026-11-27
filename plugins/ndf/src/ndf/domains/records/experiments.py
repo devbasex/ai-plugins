@@ -176,6 +176,35 @@ def _group_units(seen: Sequence[_Seen], observed: Optional[str] = None) -> list[
     return same + ([u for u in unknown if u.at >= min(after)] if after else [])
 
 
+def unit_pool(rows: Sequence[Mapping[str, Any]], usage: UsageIndex, *, where: mc.Where) -> list[_Seen]:
+    """`where`（リポジトリ・工程・ランタイム・互換性のキー）が同じで、今の指標の効果（null でない）がある単位のうち、停止と基準への
+    切り替えの無いもの（割り付けの日時では絞らない）。実験の記録を 1 回だけ走査し、範囲ごとの絞り込みは `pick_units` が行う。"""
+    left, effects = _left(rows), _effects(rows, mc.metric_of(where.stage))
+    costs, models = usage.costs, usage.models
+    seen = []
+    for a in rows:
+        aid = a["assign_id"] if a["kind"] == "assign" else None
+        if aid is None or not where.of(a) or aid in left or aid not in effects or effects[aid]["quality"] is None:
+            continue
+        value = UnitValue(aid, a["chosen"], tuple(a["probs"]), _time(a), effects[aid]["quality"], costs.get(aid), models.get(aid))
+        seen.append(_Seen(value, mc.model_group(a["arms"][a["chosen"]], a["arms"]), _time(effects[aid])))
+    return seen
+
+
+def pick_units(
+    pool: Sequence[_Seen], start: datetime, end: Optional[datetime] = None, observed: Optional[Mapping[str, str]] = None
+) -> list[UnitValue]:
+    """`pool` のうち `start` 以降（`end` があればその前まで）に割り付けた単位を、実際のモデルで絞って割り付けの日時の順に返す。
+
+    割り付けの日時で先に絞ってから、まとまりの今のモデルを決める。範囲の外の単位の評価で、範囲の中の単位を除かないためである。
+    """
+    observed = {} if observed is None else observed
+    seen = [s for s in pool if start <= s.value.at and (end is None or s.value.at < end)]
+    groups = sorted({s.group for s in seen})
+    found = [u for g in groups for u in _group_units([s for s in seen if s.group == g], observed.get(g))]
+    return sorted(found, key=lambda u: (u.at, u.assign_id))
+
+
 def unit_values(
     rows: Sequence[Mapping[str, Any]],
     usage: UsageIndex,
@@ -191,20 +220,7 @@ def unit_values(
 
     `observed` は、まとまり → 最も新しい `observed` の行のモデル（`model_choice.observed_models`）。あるまとまりは、その
     モデルを今のモデルとする。`usage` は使用量ログから求めた単位の費用と実際のモデル（`usage_index`）で、呼び手が 1 回だけ求めて渡す。"""
-    observed = {} if observed is None else observed
-    start = now - timedelta(days=window_days)
-    left, effects = _left(rows), _effects(rows, mc.metric_of(where.stage))
-    costs, models = usage.costs, usage.models
-    seen = []
-    for a in rows:
-        aid = a["assign_id"] if a["kind"] == "assign" else None
-        if aid is None or not where.of(a) or _time(a) < start or aid in left or aid not in effects or effects[aid]["quality"] is None:
-            continue
-        value = UnitValue(aid, a["chosen"], tuple(a["probs"]), _time(a), effects[aid]["quality"], costs.get(aid), models.get(aid))
-        seen.append(_Seen(value, mc.model_group(a["arms"][a["chosen"]], a["arms"]), _time(effects[aid])))
-    groups = sorted({s.group for s in seen})
-    found = [u for g in groups for u in _group_units([s for s in seen if s.group == g], observed.get(g))]
-    return sorted(found, key=lambda u: (u.at, u.assign_id))
+    return pick_units(unit_pool(rows, usage, where=where), now - timedelta(days=window_days), observed=observed)
 
 
 def seed_of(where: mc.Where, allocation: Mapping[str, Any], units: Sequence[UnitValue]) -> int:

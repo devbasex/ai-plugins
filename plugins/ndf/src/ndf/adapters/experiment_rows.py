@@ -109,17 +109,26 @@ def refused_until(arms: Sequence[Mapping[str, str]], rows: Sequence[Mapping[str,
 def observed_models(rows: Sequence[Mapping[str, Any]], where: Where, arms: Sequence[Mapping[str, str]], start: datetime) -> dict[str, str]:
     """まとまり → `start` 以降の同じキーの最も新しい `observed` の行の実際のモデル。割り付け（`entry_fits`）と出現率の計算
     （`experiments.refresh`）が同じ観測でモデルを決めるために共有する。
+    """
+    return {g: model for g, (_, model) in observed_latest(rows, where, arms, start).items()}
+
+
+def observed_latest(
+    rows: Sequence[Mapping[str, Any]], where: Where, arms: Sequence[Mapping[str, str]], start: datetime
+) -> dict[str, tuple[datetime, str]]:
+    """まとまり → `start` 以降の同じキーの最も新しい `observed` の行の日時と実際のモデル。
 
     最も新しい行は記録の順でなく行の日時で選ぶ。並行する起動の観測は、ロックの待ちで日時と逆の順に記録されることがある。
+    日時も返すので、広い範囲で 1 回だけ求めれば、それより後に始まる範囲の観測は日時で絞るだけで得られる（`ndf models report`）。
     """
     found = assigns(rows)
-    latest: dict[str, Mapping[str, Any]] = {}
+    latest: dict[str, tuple[datetime, str]] = {}
     for r in rows:
         if r["kind"] == "observed" and row_time(r) >= start and where.of(found.get(r["assign_id"])):
             group = model_group(r["arm"], arms)
-            if group not in latest or row_time(r) >= row_time(latest[group]):
-                latest[group] = r
-    return {g: r["model"] for g, r in latest.items()}
+            if group not in latest or row_time(r) >= latest[group][0]:
+                latest[group] = (row_time(r), r["model"])
+    return latest
 
 
 def unpriced_models(rows: Sequence[Mapping[str, Any]], where: Where, start: datetime) -> list[str]:

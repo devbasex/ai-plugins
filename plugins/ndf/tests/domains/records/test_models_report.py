@@ -263,6 +263,14 @@ def test_the_best_probability_comes_only_from_the_units_of_the_period():
     assert (base["units"], other["units"]) == (1, 1) and "best" not in base and "best" not in other
 
 
+def test_a_unit_of_another_model_assigned_after_the_period_does_not_remove_a_unit_in_the_period():
+    later = UNTIL + timedelta(days=1)
+    rows = [_assign("a-old", 0), _outcome("a-old", 0.8), _assign("a-new", 0, later), _outcome("a-new", 0.8, later)]
+    launches = [_row("l-old", assign_id="a-old", model="m-old"), _row("l-new", later, assign_id="a-new", model="m-new")]
+    base, _ = _arms(_report(launches, rows))
+    assert base["units"] == 1
+
+
 def test_an_arm_without_units_says_no_records():
     rows, launches = _units(0, 2, 0.8, 1.0)
     base, other = _arms(_report(launches, rows))

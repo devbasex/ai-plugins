@@ -35,7 +35,7 @@ src/ndf/
 | パス | 種類 | 役割 | 依存する先 | クラスまたはモジュール | 新設（N）と変更（C） |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/adapters/model_choice.py` | 新設 | 値と出所を返す | launch_settings・launch_approval | `Choice` | N: `table`・`bundled_errors`・`stage_of`・`launch_choice`・`raised`・`base_fallback`・`candidates`・`compatibility_key`・`read_experiments`・`ledger`・`append_row`・`read_weights`・`update_weights`・`weights_entry`・`probs_fit`・`entry_fits`・`model_group`・`assigns`・`records_rule`・`utc_now`（B2 で出現率の計算が使う読み書きと時計を公開した）・`refused_until`・`unpriced_models`・`oldest_kept`（B2b） |
-| `src/ndf/adapters/experiment_rows.py` | 新設（B2b） | 実験の記録の行を読むだけの判定 | — | `Where` | N: `records_rule`・`assigns`・`candidates`・`refused_until`・`observed_models`・`unpriced_models`・`model_group`・`probs_fit`・`entry_fits`。`model_choice` が同じ名前で公開し直す。`model_choice` が行数の安全網（1,000 行）を超えるので、ファイルの読み書きと時計を使わない判定をここへ分けた |
+| `src/ndf/adapters/experiment_rows.py` | 新設（B2b） | 実験の記録の行を読むだけの判定 | — | `Where` | N: `records_rule`・`assigns`・`candidates`・`refused_until`・`observed_models`・`observed_latest`・`unpriced_models`・`model_group`・`probs_fit`・`entry_fits`。`model_choice` が同じ名前で公開し直す。`model_choice` が行数の安全網（1,000 行）を超えるので、ファイルの読み書きと時計を使わない判定をここへ分けた |
 | `src/ndf/adapters/launch_settings.py` | 変更 | `experiments` を返す | — | `Settings` | C: `load` |
 | `src/ndf/adapters/claude.py` | 変更 | 引数と拒否の判定 | — | `ClaudeCall`・`LaunchRecorder` | C: `claude_launch`・`_error_reply`。N: `report_outcome` |
 | `src/ndf/adapters/llm.py` | 変更 | 判定の単位 | model_choice | モジュール | C: `ask` |
@@ -51,7 +51,7 @@ src/ndf/
 | `src/ndf/progress/invoke.py` | 変更 | Skill の起動 | model_choice | モジュール | C: `_call_skill` |
 | `src/ndf/progress/gate/entry.py` | 変更 | `ndf worker run` の引数に `--mode` を足す | — | モジュール | 呼ぶ引数を足すだけ |
 | `src/ndf/domains/records/usage.py` | 変更 | 行と指標の受け口 | experiments | モジュール | N: `codex_cost`・`record_outcome`（`experiments.write_outcome` を呼ぶ） |
-| `src/ndf/domains/records/experiments.py` | 新設 | 効果指標と出現率 | model_choice・allocation_decide | `UnitValue`・`UsageIndex` | N: `write_outcome`・`unit_values`・`usage_index`・`seed_of`・`refresh`・`records_since`・`refused_launches`・`rows_for_units`（B2b） |
+| `src/ndf/domains/records/experiments.py` | 新設 | 効果指標と出現率 | model_choice・allocation_decide | `UnitValue`・`UsageIndex` | N: `write_outcome`・`unit_values`・`unit_pool`・`pick_units`・`usage_index`・`seed_of`・`refresh`・`records_since`・`refused_launches`・`rows_for_units`（B2b） |
 | `src/ndf/domains/records/allocation_decide.py` | 新設 | 計算 | — | `Entry`・`Judgement`・`Stats`・`Verdict`（単位は型 `Unit`、乱数は型 `Sampler` で受ける） | N: `weighted`・`comparable`（`report` も比べる単位の絞り込みに使う）・`eliminated`・`probabilities`・`judgement` |
 | `src/ndf/domains/records/usage_decide.py` | 変更 | `launch_id` ごとの行と費用 | — | モジュール | N: `launch_rows` |
 | `src/ndf/domains/records/models_cli.py` | 新設 | `ndf models` | model_choice・experiments・allocation_decide・usage・usage_decide | モジュール | N: `main`・`_pick_command`・`_report`・`report_rows` |
@@ -471,7 +471,8 @@ src/ndf/
 - `report` の期間は、`--since` の日の 0 時（JST）を含み、`--until` の翌日の 0 時（JST）を含まない。使用量ログと実験の記録は日時をマイクロ秒まで持つので、最後の日の 23:59:59 で切ると、その 1 秒の間の行が連続する日付のどちらの集計にも入らないためである
 - 実験の組（`arm`）は、作業ディレクトリのリポジトリの割り付けだけを集計する。打ち切り・段階・出現率の計算には、作業ディレクトリのリポジトリにある `.ndf/launch.json` の `experiments.allocation` を使い、この値はリポジトリごとに違う。記録の保存先は複数のリポジトリで共有するので、別のリポジトリの割り付けに作業ディレクトリの設定を当てると、実行する場所によって結果が変わる。出現率の計算（`experiments.refresh`）も、作業ディレクトリと別のリポジトリの割り付けは計算しない
 - `arm` の値は 2 つの単位の集まりから求める。表示する効果・費用・ROI・優劣は、期間に割り付けた単位から求める。打ち切り・候補・段階・出現率は、期間の終わりの時点で割り付けが使う値を示すため、期間の終わりまでの直近 `window_days` 日に割り付けた単位から求める。期間を `window_days` より長く取っても、期限の切れた打ち切りを表示しないためである。
-  - 実際のモデルは、集まりごとに、その範囲の観測（`observed`）と単位だけから決める。開始日を早めた期間の古い観測で、直近の単位を除かないためである
+  - 実際のモデルは、集まりごとに、その範囲の観測（`observed`）と単位だけから決める。開始日を早めた期間の古い観測で直近の単位を除かず、期間の終わりより後に割り付けた別のモデルの評価で期間の中の単位を除かないためである。そのため、割り付けの日時で範囲に絞ってから、まとまりの今のモデルを決める
+  - 単位の候補（`experiments.unit_pool`）と観測（`observed_latest`。日時も返す）は、2 つの範囲を覆う広さで実験のキーごとに 1 回だけ集める。範囲ごとの処理は、集めた結果を割り付けの日時と観測の日時で絞ってモデルを決めること（`experiments.pick_units`）だけである。範囲ごとに集め直すと、実験の記録の全行の走査が範囲の数だけ増えるためである
   - 表示する最良である確率（`best`）は、期間の単位から求めた値だけを出す。期間の件数が足りず求められなければ出さない
   - 2 つの集まりが同じなら、単位は 1 回だけ求め、最良である確率は `probabilities` の結果を `judgement` に渡して標本を引き直さない
 - 期間の終わりより後の実験の記録は、用途で扱いを分ける。効果指標と停止は、期間の後に書かれた行も読む。評価や費用が後日届いた単位も、期間の単位として数えるためである。実際のモデル（`observed`）・起動の拒否（`launch_error`）・費用を計算できないモデル（`unpriced`）は、期間の終わりまでの行だけを読む。起動の拒否は、候補の判定にも、基準へ切り替えた単位を除く判定にも、期間の終わりまでの行だけを使う。期間の後のモデルの更新や起動の拒否で、当時の単位を除いたり候補を打ち切ったりしないためである

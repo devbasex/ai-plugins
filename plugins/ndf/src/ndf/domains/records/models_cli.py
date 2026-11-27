@@ -271,24 +271,23 @@ class _Records:
     span: _Span
 
 
-def _units_from(where: model_choice.Where, arms: Sequence[Mapping[str, str]], rec: _Records, start: datetime) -> list:
-    """`where` のキーの、`start` から期間の終わりまでに割り付けた単位。実際のモデルは、同じ範囲の観測と単位だけから決める。"""
-    end = rec.span.end
-    observed = model_choice.observed_models(rec.upto, where, arms, start)
-    days = math.ceil((end - start) / timedelta(days=1))
-    found = experiments.unit_values(rec.rows, rec.usage, where=where, now=end, window_days=days, observed=observed)
-    return [u for u in found if start <= u.at < end]
-
-
 def _units_of(where: model_choice.Where, arms: Sequence[Mapping[str, str]], rec: _Records) -> tuple[list, list]:
     """`where` のキーの、期間に割り付けた単位と、期間の終わりまでの直近 `window_days` 日に割り付けた単位。
 
-    前者は表示する値と優劣、後者は打ち切りと出現率（期間の終わりの時点で割り付けが使う値）に使う。範囲ごとに観測の開始日を
-    分け、片方の範囲の古い観測でもう片方の単位を除かない。2 つの範囲が同じなら 1 回だけ求める。
+    前者は表示する値と優劣、後者は打ち切りと出現率（期間の終わりの時点で割り付けが使う値）に使う。単位の候補と観測は 2 つの範囲を
+    覆う広さで 1 回だけ集め、範囲ごとに割り付けの日時と観測の日時で絞ってから実際のモデルを決める。片方の範囲の観測や評価で、
+    もう片方の単位を除かないためである。2 つの範囲が同じなら絞り込みも 1 回にする。
     """
-    edge = rec.span.end - timedelta(days=rec.allocation["window_days"])
-    period = _units_from(where, arms, rec, rec.span.since)
-    return period, period if edge == rec.span.since else _units_from(where, arms, rec, edge)
+    since, end = rec.span.since, rec.span.end
+    edge = end - timedelta(days=rec.allocation["window_days"])
+    latest = model_choice.observed_latest(rec.upto, where, arms, min(since, edge))
+    pool = experiments.unit_pool(rec.rows, rec.usage, where=where)
+
+    def pick(start: datetime) -> list:
+        return experiments.pick_units(pool, start, end, {g: model for g, (at, model) in latest.items() if at >= start})
+
+    period = pick(since)
+    return period, period if edge == since else pick(edge)
 
 
 def _experiment_items(where: model_choice.Where, assigned: Sequence[Mapping[str, Any]], rec: _Records) -> list[dict]:
