@@ -238,15 +238,27 @@ experimental/ndf/
 - `_design_check`
   - 副作用: `--result` のファイルを書く（親のディレクトリを作る）
 
-`from_base` が起動する git は次の 5 種類である。4 だけは対象のファイルごとに 1 回起動し、ほかはファイルの数によらない。
+`from_base` が起動する git は次の 5 種類で、どれも対象のファイルの数によらず 1 回ずつである。4 は追跡済みの対象が 1 件以上あるときだけ打つ。
 
 | 順 | 起動 | 目的 |
 | --- | --- | --- |
 | 1 | `start_point.resolve` の `rev-parse`（と、読めなければ `git remote`） | 起点の参照と SHA |
 | 2 | `Git.merge_base(<起点>, "HEAD")` | 分岐点 |
 | 3 | `git diff --name-status -z --find-renames --no-ext-diff --no-textconv <分岐点> --` と `git ls-files --others --exclude-standard -z` | 足した・変えた・名前を変えたパスと未追跡のパス |
-| 4 | 対象ごとに `git -c core.quotePath=false diff -U0 --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ <分岐点> -- <パス>` | 足した・変えた行と、見出しに触れたか |
+| 4 | `git -c core.quotePath=false diff -U0 --find-renames --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ <分岐点> -- <パス>...` を 1 回。パスには、追跡済みの対象の新しいパスと、名前を変えた対象の前のパスを全部渡す | 対象ごとの、足した・変えた行と、見出しに触れたか |
 | 5 | `Git.blobs` に `<分岐点>:<前のパス>` をまとめて 1 回 | `anchors_lost` と `heading_touched` に渡す分岐点の本文 |
+
+4 で前のパスも渡すのは、Git が改名を見つけるのは比べる両側のパスがパスの指定に入っているときだけだからである。新しいパスだけを渡すと、Git は名前を変えたファイルを新規の追加として出し、全行を足した行として返す。その結果、変えていない既存の行まで検査に掛かり、利用者は今回の変更の外の書き直しを求められる。`--find-renames` を明示するのは、利用者の `diff.renames` の設定によらず、3 と同じ改名の組を得るためである。
+
+4 の出力は、`diff --git` の行ごとにファイル単位へ分け、各部分を `added_lines` と `heading_touched` に渡す。各部分を対象に結び付けるときは、パスに空白があっても誤らないよう、`diff --git` の行ではなく、部分の中の `rename to <パス>`（改名）か `+++ b/<パス>`（それ以外）から新しいパスを読む。4 の出力に部分が無い対象は、差分が無いとして扱う。
+
+名前を変えたファイルの検査の範囲は、次のとおりである。
+
+| 改名の形 | 見る行 |
+| --- | --- |
+| 本文を変えない改名（`R100`。4 の部分は `rename from`・`rename to` だけで hunk を持たない） | 無し。`added_lines` は空の集合を返し、分岐点の本文と作業ツリーの本文が同じなので `anchors_lost` と `heading_touched` も偽になる |
+| 名前を変えて一部を直した改名 | 直した行だけ。`anchors_lost` か `heading_touched` が真なら全行 |
+| Git が改名と見なさない大きな書き換え（3 で削除と追加に分かれる） | 新しいパスの全行（新規のファイルとして扱う） |
 
 ### 異常系の処理
 
@@ -289,7 +301,7 @@ experimental/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `from_base` | Git のアダプターを差し替えた偽物（`git diff --name-status`・`ls-files`・`diff -U0`・`blobs` の出力を文字列で返す）で、追加・変更・名前の変更と、未コミット・未追跡のファイルを対象にし、削除のファイルを除く | 対象 0 件。表の行を消したファイル・見出しを足したファイル・読めない hunk の見出しを返したファイルが全行になる。表に行を足しただけのファイルは足した行だけ。`diff` に渡す引数が `--no-ext-diff`・`--no-textconv`・`--no-color` を含む | 起点が無いと `precondition`（ローカルブランチが無いだけでは失敗しない）。`GitError` で `precondition` |
+| `from_base` | Git のアダプターを差し替えた偽物（`git diff --name-status`・`ls-files`・`diff -U0`・`blobs` の出力を文字列で返す）で、追加・変更・名前の変更と、未コミット・未追跡のファイルを対象にし、削除のファイルを除く | 対象 0 件。表の行を消したファイル・見出しを足したファイル・読めない hunk の見出しを返したファイルが全行になる。表に行を足しただけのファイルは足した行だけ。名前を変えて一部を直したファイルは直した行だけで、本文を変えない改名は 0 行。行番号を取る `diff` は対象が複数でも 1 回で、名前を変えた対象の前のパスも渡し、`--find-renames`・`--no-ext-diff`・`--no-textconv`・`--no-color` を含む。空白を含むパスの部分を正しい対象に結び付ける | 起点が無いと `precondition`（ローカルブランチが無いだけでは失敗しない）。`GitError` で `precondition` |
 
 単体テストでは git を起動しない。`from_base` は起点の解決から差分の取得まで git を何度も起動するので、一時リポジトリで打つと、テストのケースごとに子のプロセスが増えるためである。テストは Git のアダプター（`ndf.adapters.git.Git`）を差し替え、実際の `git` の出力の形は、`added_lines` と `heading_touched` に渡す文字列の例（1 行の追加・置き換え、件数を省いた見出し）で縛る。実際の `git` との接続（未コミット・未追跡・マージ先だけの変更が期待どおりに集まるか）は、実装の後に手元の一時リポジトリで打って確かめ、単体テストに置かない（実装計画の Task 8）。
 | `from_files` | 設計成果物でない名前のファイルも全行を見る | 空のファイル | 無いファイルで `precondition` |
