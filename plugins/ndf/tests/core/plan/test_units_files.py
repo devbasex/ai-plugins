@@ -714,3 +714,21 @@ def test_cli_record_check_names_the_review_launch_setting(reviewed, work, capsys
     _, out = _run(capsys, "check")
 
     assert "workflow.launch.review" in out["cause"]["detail"] and "--reviewed-base-out" in out["cause"]["detail"]
+
+
+def test_replace_file_keeps_the_original_when_the_write_fails_and_keeps_the_mode(tmp_path, monkeypatch):
+    target = tmp_path / "plan.md"
+    target.write_text("元の本文", encoding="utf-8")
+    target.chmod(0o640)
+
+    cli._replace_file(target, "新しい本文", 0o640)
+    assert (target.read_text(encoding="utf-8"), target.stat().st_mode & 0o777) == ("新しい本文", 0o640)
+
+    def fail(*_):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cli.os, "replace", fail)
+    with pytest.raises(OSError):
+        cli._replace_file(target, "途中の本文", 0o640)
+    assert target.read_text(encoding="utf-8") == "新しい本文"
+    assert list(tmp_path.iterdir()) == [target]

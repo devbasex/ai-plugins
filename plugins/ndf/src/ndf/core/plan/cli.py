@@ -28,6 +28,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -373,15 +374,25 @@ def _discard_checked(target: Path) -> None:
     target.unlink()
 
 
-def _write_checked(target: Path, value: dict[str, Any]) -> None:
-    """新しく作った一意の名前へ書いてから置き換える（固定の一時の名前にある既存のファイルやリンクの先を上書きしない）。"""
+def _replace_file(target: Path, text: str, mode: Optional[int] = None) -> None:
+    """同じディレクトリに新しく作った一意の名前へ書き終えてから置き換える。改行は LF のまま書く。
+
+    書き込みに失敗しても元のファイルが残り、固定の一時の名前にある既存のファイルやリンクの先も上書きしない。
+    `mode` を省くと、本人だけが読み書きできる権限になる。
+    """
     fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as out:
-            json.dump({files.RECORD_KIND_KEY: CHECKED_KIND, **value}, out, ensure_ascii=False)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as out:
+            out.write(text)
+        if mode is not None:
+            os.chmod(tmp, mode)
         os.replace(tmp, target)
     finally:
         Path(tmp).unlink(missing_ok=True)
+
+
+def _write_checked(target: Path, value: dict[str, Any]) -> None:
+    _replace_file(target, json.dumps({files.RECORD_KIND_KEY: CHECKED_KIND, **value}, ensure_ascii=False))
 
 
 def _record(path: Path, targets: _Targets) -> _Record:
@@ -459,7 +470,8 @@ def _render(targets: _Targets) -> None:
     tree = units_files.Tree(targets.root)
     limits_held = units_files.limits_of(units_files.project_of(tree))
     for plan, text in units_files.rendered(tree, targets.issues, targets.omitted, limits_held).items():
-        (targets.root / plan).write_text(text, encoding="utf-8", newline="\n")
+        target = targets.root / plan
+        _replace_file(target, text, stat.S_IMODE(target.stat().st_mode))
 
 
 def _units(a: argparse.Namespace) -> dict[str, Any]:

@@ -228,7 +228,7 @@ contracts/
 
 - 読み元は作業ツリーではなく、`NDF_DESIGN_RECORD_DIR` が指す保存先（下の「承認の記録」で説明する工程「ドキュメントレビュー」の保存先）にある `reviewed-head` が示すコミットにする。作業場所の HEAD がそのコミットと違えば `stopped`（`approval_stale`）
 - `--docs` を指定しなくても、実装計画と突き合わせる。タスクか表が食い違えば `stopped`（`invalid`）にし、`checked.json` を書かない。突き合わせていない内容を承認へ進めないためである
-- 通ったら、保存先の `checked.json` に `{"ndf_record", "head", "branch", "issues", "handling", "omitted", "limits", "criteria", "units"}` を書く。`branch` は入力の `branch`（スプリントブランチ）で、無ければ `stopped`（`precondition`）にする。`units` は結果の `items` と同じで、`criteria` は課題ごとの受け入れ条件の数である。`ndf_record` は値が `design-units-check` の記録の種別で、前の `checked.json` はこの種別を持つものだけを消す。持たなければ変えずに `stopped`（`refused`）にする。書くときは新しく作った一意の名前の一時ファイルから置き換える
+- 通ったら、保存先の `checked.json` に `{"ndf_record", "head", "branch", "issues", "handling", "omitted", "limits", "criteria", "units"}` を書く。`branch` は入力の `branch`（スプリントブランチ）で、無ければ `stopped`（`precondition`）にする。`units` に入れるのは、結果の `items` のうち `kind: unit` の項目だけである。分け方の案（`kind: split`）は、通った結果の `items` にあっても記録に入れない。`criteria` は課題ごとの受け入れ条件の数である。`ndf_record` は値が `design-units-check` の記録の種別で、前の `checked.json` はこの種別を持つものだけを消す。持たなければ変えずに `stopped`（`refused`）にする。書くときは新しく作った一意の名前の一時ファイルから置き換える
 - 入力に `design_pr` があれば、保存先の `reviewed-pr` の番号と比べ、違えば `stopped`（`refused`）
 - 結果の `outputs.design_pr` に `reviewed-pr` の番号を返す。設計承認ゲートの質問は、文脈に `design_pr` が無くてもこの値を読む
 - `reviewed-pr` などのファイルが無く、`workflow.launch.review` が指定されていれば、理由にこのキーと直し方（設計書の「影響と危険」）を書く
