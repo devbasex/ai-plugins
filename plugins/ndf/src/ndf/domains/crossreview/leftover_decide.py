@@ -184,10 +184,10 @@ def issue_parts(text: str, impact: str, place: str, pr_urls: Sequence[str], iden
     return title, "\n\n".join(parts) + "\n"
 
 
-def trusted(author: str, association: str, me: str, logins: Collection[str]) -> bool:
-    """起票の記録と Issue の作者を信用してよいか（第三者が目印を書いて起票を止めないようにする）。"""
-    # 所有者・メンバー・共同作業者
-    return association in ("OWNER", "MEMBER", "COLLABORATOR") or (bool(author) and (author == me or author in logins))
+def trusted(author: str, me: str, logins: Collection[str]) -> bool:
+    """起票の記録と Issue の作者が、実行している login か、前に起票に使った login か。ほかの作者は、呼び手が対象リポジトリの
+    権限で確かめる（`GitHub.trusts`）。"""
+    return bool(author) and (author == me or author in logins)
 
 
 def _prose(text: str) -> str:

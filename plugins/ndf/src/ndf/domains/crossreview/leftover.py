@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters.github import BOT_SUFFIX
-from ndf.adapters.github_pulls import PER_PAGE
+from ndf.adapters.github_pulls import PER_PAGE, Authored
 from ndf.contracts import limits
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import leftover_decide, settings, store, threads
@@ -56,6 +56,8 @@ class Port(Protocol):
     """起票の読み書きの口（テストは GitHub の偽物）。失敗は例外で、GitHub が断ったものは HTTP の状態 `status` を持つ。"""
 
     def viewer(self) -> str: ...
+
+    def trusts(self, author: str, association: str) -> bool: ...
 
     def pr_url(self, pr: int) -> str: ...
 
@@ -171,7 +173,7 @@ class _Filing:
             entry.setdefault("at", found.updated_at)
 
     def _trusts(self, author: str, association: str) -> bool:
-        return leftover_decide.trusted(author, association, self.me, self.logins())
+        return leftover_decide.trusted(author, self.me, self.logins()) or self.port.trusts(author, association)
 
     def _usable(self, comment: Comment) -> bool:
         return comment.body.startswith(leftover_decide.RECORD_MARK) and self._trusts(comment.author, comment.association)
@@ -206,7 +208,7 @@ class _Filing:
     def _match(self, ident: str, listed: Sequence[Listed]) -> Optional[str]:
         """この指摘を扱う、信用する作者の Issue の URL。"""
         for issue in listed:
-            if self._trusts(issue.author, issue.association) and leftover_decide.matches_finding(issue, ident, self.ref.origin_pr):
+            if leftover_decide.matches_finding(issue, ident, self.ref.origin_pr) and self._trusts(issue.author, issue.association):
                 return issue.url
         return None
 
@@ -265,13 +267,17 @@ class _Filing:
             return
         try:
             read = self.port.issues(list(urls.values()))
+            usable = {
+                ident
+                for ident, url in urls.items()
+                if (issue := read[url]) and leftover_decide.names_finding(issue, ident) and self._trusts(issue.author, issue.association)
+            }
         except Exception as exc:  # noqa: BLE001 ネットワーク: 確かめられない URL は使わず、打ち直しで確かめる
             for ident in urls:
                 self.fail(ident, _reason(exc))
             return
         for ident, url in urls.items():
-            issue = read[url]
-            if issue and self._trusts(issue.author, issue.association) and leftover_decide.names_finding(issue, ident):
+            if ident in usable:
                 self.done(ident, url)
             else:
                 del self.entries[ident]["url"]
@@ -344,7 +350,7 @@ class _Filing:
         self.known()
         try:
             fresh, found = self.sort(manual)
-        except Exception as exc:  # noqa: BLE001 ネットワーク: 伏せ字を通せなければ、URL の無い候補を起票しない
+        except Exception as exc:  # noqa: BLE001 ネットワーク: 伏せ字か作者の権限の確かめに失敗すれば起票しない
             for ident in self.rows:
                 if not self.url_of(ident):
                     self.fail(ident, _reason(exc))
@@ -459,6 +465,10 @@ class GitHubIssues:
         if self._me is None:
             self._me = self._read_viewer()
         return self._me
+
+    def trusts(self, author: str, association: str) -> bool:
+        """所有者か、対象リポジトリで write 以上の権限を持つメンバー・共同作業者か（`GitHub.trusts`）。"""
+        return bool(self.hub.trusts(Authored(author, association, "")))
 
     def pr_url(self, pr: int) -> str:
         return f"https://github.com/{self.hub.repo}/pull/{int(pr)}"

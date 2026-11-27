@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from ndf.adapters import publish
-from ndf.adapters.github import PUBLIC, GitHubError
+from ndf.adapters.github import PUBLIC, GitHub, GitHubError
 from ndf.adapters.github_pulls import PER_PAGE
 from ndf.domains.crossreview import leftover, leftover_decide, store
 from ndf.domains.crossreview.leftover_decide import Filed, Listed
@@ -23,6 +23,7 @@ class FakeGitHub:
     `indexed` が偽なら、作った Issue は検索にまだ出ない。"""
 
     repo = REPO
+    trusts = GitHub.trusts  # 本物の判定を、偽の権限に当てる
 
     def __init__(self) -> None:
         self.records: list[dict[str, Any]] = []
@@ -32,6 +33,7 @@ class FakeGitHub:
         self.indexed = True
         self.login = "me"
         self.viewed = 0
+        self.permissions: dict[str, str] = {}
         self._tick = 0
 
     def now(self) -> str:
@@ -41,6 +43,9 @@ class FakeGitHub:
     def viewer(self) -> str:
         self.viewed += 1
         return self.login
+
+    def permission(self, login: str) -> str:
+        return self.permissions.get(login, "none")
 
     def visibilities(self, repos) -> dict[str, str]:
         return {r: PUBLIC for r in repos}
@@ -176,11 +181,24 @@ def test_issue_3780_matches_finding_needs_the_mark_and_the_url_outside_quotes() 
 
 
 @pytest.mark.parametrize(
-    ("author", "association", "wanted"),
-    [("x", "OWNER", True), ("x", "COLLABORATOR", True), ("me", "NONE", True), ("app[bot]", "NONE", True), ("x", "CONTRIBUTOR", False)],
+    ("author", "association", "permission", "wanted"),
+    [
+        ("x", "OWNER", "none", True),
+        ("x", "MEMBER", "write", True),
+        ("x", "MEMBER", "read", False),
+        ("x", "COLLABORATOR", "none", False),
+        ("x", "CONTRIBUTOR", "write", False),
+        ("me", "NONE", "none", True),
+        ("app[bot]", "NONE", "none", True),
+    ],
 )
-def test_trusted_authors(author: str, association: str, wanted: bool) -> None:
-    assert leftover_decide.trusted(author, association, "me", ["app[bot]"]) is wanted
+def test_trusted_authors(author: str, association: str, permission: str, wanted: bool) -> None:
+    github = FakeGitHub()
+    github.permissions[author] = permission
+    run = Run(github)
+    run.data["issue_logins"] = ["app[bot]"]
+    filing = leftover._Filing(run.data, run.ref, run.port, lambda: None, {}, me="me")
+    assert filing._trusts(author, association) is wanted
 
 
 def test_the_record_reads_back_what_it_writes_and_a_broken_body_is_empty() -> None:
@@ -354,6 +372,7 @@ def test_issue_3780_a_rerun_that_redacts_differently_finds_the_issue() -> None:
 )
 def test_a_record_url_that_is_not_the_issue_of_the_finding_is_not_used(url: str) -> None:
     github = FakeGitHub()
+    github.permissions["x"] = "write"
     github.issue("無関係")
     run = Run(github)
     ident = leftover_decide.identity(7, run.row["text"])

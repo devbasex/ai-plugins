@@ -179,7 +179,7 @@ flowchart TD
 
 起票の記録と Issue は、次に挙げる作者のものだけを使う。
 
-- リポジトリの所有者・メンバー・共同作業者（`author_association` が `OWNER`・`MEMBER`・`COLLABORATOR`）
+- リポジトリの所有者（`author_association` が `OWNER`）と、対象リポジトリで write 以上の権限を持つメンバー・共同作業者（`MEMBER`・`COLLABORATOR`。`GitHub.trusts` で権限を読んで確かめる）
 - 実行している login 自身
 - `issue_logins` にある login。bot が起票した後に、人のアカウントで打ち直しても見つけるためである
 
@@ -200,6 +200,7 @@ flowchart TD
 | 起票の記録の読み取り（GET） | 1 回。`issue_record_id` が無いときは、元の PR のコメントの一覧をページごとに読んで探す |
 | 記録の URL が指す Issue の読み取り（GraphQL） | 状態ファイルの行に `issue` がなく、起票の記録に URL がある候補を、`github.graphql-batch` 件（100 件）ずつ 1 回で読む。保存先が同じかは問わない。別の保存先で打ち直したときのほか、起票の記録に URL を書いた後、状態を保存する前に中断して同じ保存先で打ち直したときにも起きる |
 | 起票の記録の書き込み | 作成の前に 1 回、作成の結果を書くのに 1 回 |
+| 作者の権限の読み取り（GET） | 実行の login と `issue_logins` に無い `MEMBER`・`COLLABORATOR` の作者ごとに最大 1 回 |
 | 識別値の検索（GET） | 作成の結果が分からない候補ごとに 1 回 |
 | 新しく作られた順の Issue の一覧（GET） | 作成の結果が分からない候補が検索で見つからないときだけ。試みた時刻に達するまでのページで、最大 `github.list-pages` 回。同じ起動の候補で共有する |
 | 実行している login の取得 | 同じ起動でまだ読んでいないときだけ、最大 1 回。スレッドの書き手を確かめるために読む `viewer`（`threads.GitHubPort`）を使い回す |
@@ -365,6 +366,14 @@ flowchart TD
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
 | #3780 | 実装する | — | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/round_scope.py`、`plugins/ndf/src/ndf/domains/crossreview/changes.py`、`plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/leftover.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/threads.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/contracts/limits/cross-review.max-rounds.json`、`plugins/ndf/contracts/limits/cross-review.max-rounds.design.json`（新設）、`plugins/ndf/contracts/schemas/io/cross-review.result.schema.json`、`plugins/ndf/contracts/schemas/io/cross-review.args.schema.json`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_leftover.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/src/ndf/domains/crossreview/local_scope.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/prior_decide.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/contracts/limits/github.list-pages.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`、`plugins/ndf/tests/domains/crossreview/conftest.py` |
+
+## 設計との食い違い
+
+承認された設計から、次の 1 点を変えた。2026-11-27 にこのスプリントの conductor（AI）が決めた。利用者の承認ではない。信用する作者を狭める側の変更である。
+
+| 承認された設計 | 変えた後 | 理由 |
+| --- | --- | --- |
+| 起票の記録と Issue の作者は、`author_association` が `MEMBER`・`COLLABORATOR` なら信用する | 対象リポジトリで write 以上の権限を持つときだけ信用する（`GitHub.trusts`）。実行している login と `issue_logins` の扱いは変えない | 権限を持たないメンバー・共同作業者の書いた記録や Issue が、起票の判断に使われる |
 
 ## 未確認のまま残ること
 
