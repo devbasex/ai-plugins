@@ -315,7 +315,7 @@ experimental/ndf/
 | `check` | 指摘なしは `ok` | 対象 0 件で `ok` | 指摘ありは `check_failed` と `items` の 3 つの欄 |
 | `_design_check` | `--result` に標準出力と同じ結果を書く | — | 入力が無い・両方ある組で `invalid` |
 
-単体テストでは git を起動しない。`from_base` は起点の解決から差分の取得まで git を何度も起動するので、一時リポジトリで打つと、テストのケースごとに子のプロセスが増えるためである。テストは Git のアダプター（`ndf.adapters.git.Git`）を差し替え、実際の `git` の出力の形は、`added_lines` と `heading_touched` に渡す文字列の例（1 行の追加・置き換え、件数を省いた見出し）で縛る。実際の `git` との接続（未コミット・未追跡・マージ先だけの変更が期待どおりに集まるか）は、実装の後に手元の一時リポジトリで打って確かめ、単体テストに置かない（実装計画の Task 8）。
+単体テストでは git を起動しない。`from_base` は起点の解決から差分の取得まで git を何度も起動するので、一時リポジトリで打つと、テストのケースごとに子のプロセスが増えるためである。テストは Git のアダプター（`ndf.adapters.git.Git`）を差し替え、実際の `git` の出力の形は、`added_lines` と `heading_touched` に渡す文字列の例（1 行の追加・置き換え、件数を省いた見出し）で縛る。実際の `git` との接続（未コミットと未追跡のファイルが対象に入り、マージ先だけで進んだ変更が対象から外れるか）は、実装の後に手元の一時リポジトリで打って確かめ、単体テストに置かない（実装計画の Task 8）。
 
 ## 設計・詳細設計のプランのテンプレート
 
@@ -334,11 +334,11 @@ experimental/ndf/
 | ステップ `review-fixed` | 設定値（`run` は `review` のステップと同じ `["{{review}}", "--findings", "{state_dir}/rebuild.json"]`、`next`: `design-check-reviewed`。`on_cause` を持たないので、`incomplete` を含め完了しなければプランが止まる） | `templates/design.json` | — |
 | 値 `base` | 設定値（`params` に足す） | `templates/design-detail.json` | `route.derived_locally` の `default_base` |
 
-`review-fixed` には、最初のレビューで扱った組み直しの指摘を再送しない。ただし `--findings` は外さず、`review` と同じ `rebuild.json` を渡す。最初のレビューが `incomplete` で終わっても検査へ進む経路があり、そのときは組み直しの指摘の一部が未解決のまま残るためである。外すと、未解決の指摘は `review-fixed` の完了の条件から消え、別の直しが入った版が、組み直しの指摘を確かめないまま承認へ届く。
+`review-fixed` にも、`review` と同じ `--findings {state_dir}/rebuild.json` を渡す。解決済みの指摘をファイルから除く処理は書かない。直した・見送った指摘を修正担当へ渡さないのは cross-review の側の働きで、その仕組みは次の段落にある。`--findings` を外さないのは、最初のレビューが `incomplete` で終わっても検査へ進む経路があり、そのときは組み直しの指摘の一部が未解決のまま残るためである。外すと、未解決の指摘は `review-fixed` の完了の条件から消え、別の直しが入った版が、組み直しの指摘を確かめないまま承認へ届く。
 
 同じファイルを渡しても、解決済みの指摘は再送されない。`{{review}}` の既定の起動は、どちらのステップでも同じ状態の置き場 `{state_dir}/cross-review`（`route.REVIEW_STATE`）を使う。cross-review は、引き継いだ指摘のうち、その置き場の記録で直した・見送ったと決まっていない件だけを修正担当へ渡す（`journal.pending`）。終わり方も、決まっていない件が残れば `incomplete` にする（`finish_decide._handed`）。このため `review-fixed` が見るのは、直した版と、最初のレビューで未解決のまま残った組み直しの指摘と、新しく出る指摘である。未解決の組み直しの指摘が残れば `review-fixed` は完了せず、プランが止まる。`document-review` の `review-fixed` は、最初の `review` と同じく `["{{review}}"]` で、`--findings` を持たない（組み直しを経ないため）。
 
-`design.json` でつなぎ直す分岐は次のとおりである（設計文書の「処理の流れ」の表）。
+`design.json` では、push へ向かう今の分岐をすべて、手前の検査へつなぎ直す。`rebuild` の次と `fix-push` の `next` は `push` から `design-check` へ変える。`review` の `incomplete` とその次、`ci-fix`・`base-sync`・`fix-base`・`fix-push-reviewed` の `next` は、`push-reviewed` から `design-check-reviewed` へ変える。つなぎ直した後は、どの経路も検査に合格してから push する。同じ中身を次の表に並べる（設計文書の「処理の流れ」の、つなぎ直しの表と同じ）。
 
 | ステップ | 今の行き先 | 新しい行き先 |
 | --- | --- | --- |
@@ -357,6 +357,8 @@ experimental/ndf/
 | `design-detail` のプラン | `work` → `design-check` → `push` | `fix-push` の後に検査へ戻る | `base` を渡さずに組むと、`.ndf/project.json` の `branch_strategy` のスプリントの PR のマージ先が入る。その宣言が無ければ `RouteError` |
 
 ## 文書レビューのプランのテンプレートと工程の定義
+
+この節は、プランのテンプレート `document-review` の新設と、設計の工程とドキュメントレビューの工程が流すレビューのプランを `cross-review` から `document-review` へ付け替える変更を扱う。MVV 判定（`mvv_gate.py`）の変更は、次の節「MVV 判定のステップ」にある。
 
 満たす決定: 決定 2、受け入れ条件 4
 
@@ -396,6 +398,8 @@ experimental/ndf/
 | テンプレートの一覧 | `route.templates()` が `document-review` を含み、`model.parse` を通る | — | — |
 
 ## MVV 判定のステップ
+
+この節は、`mvv_gate.py` の判定に、省ける判定のときだけ表を読む確かめを足す変更を扱う。
 
 満たす決定: 決定 7、受け入れ条件 5c・6
 
