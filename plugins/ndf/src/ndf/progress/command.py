@@ -46,6 +46,7 @@ from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes, facts, internal, limits, result
 from ndf.core import branch_strategy, durable
 from ndf.progress import definition, model, stages, store
+from ndf.testing import means
 
 # 結果 JSON の tool の名前はサブコマンドの名前（パッケージの名前）と同じ
 TOOL = __package__.rpartition(".")[2]
@@ -377,7 +378,10 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
     known: dict[str, Callable[[], bool]] = {
         **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
         "code_in_unreviewed_diff": lambda: code_in_unreviewed_diff(context, cwd),
+        # 古い工程の定義が持つ語（#4566 の決定 7。更新の前に作ったスプリントのために残す）
         "ci_declared": lambda: definition.dig(ndf_settings(cwd, PROJECT_FILE), "test", "ci", "only") is True,
+        # テストを確かめる手段がある（#4566。既定の起動の組み立て `refactor_values` と同じ `means.decide` を通す）
+        "tests_verifiable": lambda: means.decide(ndf_settings(cwd, PROJECT_FILE)).kind != means.Kind.NONE,
         "prod_branch": lambda: separate_production(cwd),
         "release_record": lambda: "product_version" in context,
         "design_pr": lambda: "design_pr" in context,

@@ -145,3 +145,11 @@ def test_classify_word_list_current_behavior(words, suites, kind):
 )
 def test_targets_current_behavior(args, targets):
     assert weight._targets(args) == targets
+
+
+def test_all_words_keeps_the_redirect_targets_that_split_commands_drops():
+    # #4566: `inside_work` はリダイレクト先の絶対パスも調べる
+    text = "pytest -q > /w/r.txt; cat < in.txt >> out"
+    assert weight.split_commands(text) == [["pytest", "-q"], ["cat"]]
+    assert weight.all_words(text) == ["pytest", "-q", "/w/r.txt", "cat", "in.txt", "out"]
+    assert weight.all_words("echo 'unterminated") == []

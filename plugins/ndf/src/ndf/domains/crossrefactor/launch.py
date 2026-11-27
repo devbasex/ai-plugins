@@ -101,13 +101,13 @@ def _collect_file(submit: Path, collect: Path) -> Optional[dict[str, Any]]:
     return data if isinstance(data, dict) else None
 
 
-def _stem(req: Request, dirs: Dirs) -> Path:
+def _log_stem(req: Request, dirs: Dirs) -> Path:
     return dirs.logs / f"{req.runtime}-{req.phase}-{req.stem}"
 
 
 def cost(req: Request, dirs: Dirs) -> Optional[float]:
     """終わった起動の費用（USD）。claude 以外のランタイム・出力が無い・報告が無いときは None（不明）。"""
-    out = agents.AgentPaths.at(_stem(req, dirs)).out
+    out = agents.AgentPaths.at(_log_stem(req, dirs)).out
     if req.runtime != participants.FIXER or not out.is_file():
         return None
     return cost_decide.reported(out.read_text(encoding="utf-8", errors="replace"))
@@ -116,7 +116,7 @@ def cost(req: Request, dirs: Dirs) -> Optional[float]:
 def run(req: Request, dirs: Dirs, launcher: Launcher = agents.run_agent) -> tuple[Optional[dict[str, Any]], agents.AgentStatus]:
     """担当を起動して結果を回収する。返すのは (結果。出さなければ None, 監視の結果)。"""
     where = location_of(req, dirs)
-    stem = _stem(req, dirs)
+    stem = _log_stem(req, dirs)
     read_only = req.phase in launch_decide.read_only_phases()
     if read_only:
         spec = _read_only(req, Path(where.workdir), stem)

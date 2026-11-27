@@ -362,9 +362,12 @@ class Git:
             return Completed(128, "", str(e))
         return self.attempt("checkout", "-q", "--detach", sha)
 
-    def merge_ff(self, ref: str) -> Completed:
-        """`ref` を fast-forward だけでマージする。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
-        return self.attempt("merge", "--ff-only", "-q", END_OF_OPTIONS, ref)
+    def merge_ff(self, ref: str, *options: str) -> Completed:
+        """`ref` を fast-forward だけでマージする。結果はそのまま返す。`ref` を option として読ませない（3364-7）。
+
+        `options` は `git merge` に足す引数（`ref` の前に置く）。
+        """
+        return self.attempt("merge", "--ff-only", "-q", *options, END_OF_OPTIONS, ref)
 
     def changed_files(self, base: str, head: str, *options: str) -> list[str]:
         """`base...head`（分岐点から head まで）で変わったファイルのパス。`options` は `git diff` に足す引数。
