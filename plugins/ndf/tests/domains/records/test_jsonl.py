@@ -84,3 +84,25 @@ def test_a_row_after_a_cut_off_write_is_kept_and_only_the_fragment_is_dropped(tm
     rows, broken = jsonl.read_rows(path, kind="usage")
     assert rows == [{**ROW, "version": 1}] and [b.line for b in broken] == [1]
     assert jsonl.read_rows_after(path, 0, kind="usage") == ([{**ROW, "version": 1}], 1, path.stat().st_size)
+
+
+@pytest.mark.parametrize("before", ["", json.dumps({**ROW, "version": 1}) + "\n"], ids=["empty", "ended"])
+def test_a_row_written_right_after_another_writer_was_cut_off_is_still_read(tmp_path, monkeypatch, before):
+    """末尾を確かめた後に別の書き手の書き込みが途中で終わり、改行の無い断片の後ろに行がつながっても、その行は読める。"""
+    path = tmp_path / "u.jsonl"
+    path.write_text(before, encoding="utf-8")
+    fstat = jsonl.os.fstat
+
+    def cut_in(fd):
+        got = fstat(fd)
+        with path.open("ab") as f:  # 確かめた後で、別の書き手の行が文字の途中で切れる
+            f.write(b'{"version": 1, "step": "' + "区".encode("utf-8")[:2])
+        return got
+
+    monkeypatch.setattr(jsonl.os, "fstat", cut_in)
+    jsonl.append(path, {**ROW, "step": "後"}, kind="usage")
+    monkeypatch.undo()
+    rows, broken = jsonl.read_rows(path, kind="usage")
+    kept = [{**ROW, "version": 1}] if before else []
+    assert rows == [*kept, {**ROW, "version": 1, "step": "後"}] and [b.line for b in broken] == [len(kept) + 1]
+    assert jsonl.read_rows_after(path, 0, kind="usage") == (rows, 1, path.stat().st_size)

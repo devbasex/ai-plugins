@@ -18,6 +18,10 @@ from filelock import FileLock
 from ndf.contracts import internal, limits
 
 
+# `append` が書く行の始まり。`internal.write_record` が `version` を先頭に置き、`json.dumps` がその順で書く
+ROW_START = b'{"version": '
+
+
 def now() -> str:
     """記録の行の時刻（UTC・秒まで・ISO 8601。行の `at`）。"""
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -49,15 +53,14 @@ def read_rows(
     rows: list[dict[str, Any]] = []
     broken: list[Broken] = []
     for number, chunk in enumerate(path.read_bytes().split(b"\n"), 1):
-        line = _decoded(chunk)
-        if line is None:  # 途中で切れた書き込みの断片。この行だけを除く
-            broken.append(Broken(number, "UTF-8 として読めない", len(rows), None))
+        if not chunk.strip():
             continue
-        if not line.strip():
+        raw, cut = _raw(chunk)
+        if cut is not None:  # 途中で切れた書き込みの断片。断片だけを除き、後ろにつながった行は読む
+            broken.append(Broken(number, cut, len(rows), None))
+        if raw is None:
             continue
-        raw: Any = None
         try:
-            raw = internal.parse_line(line)
             if wanted(raw):
                 rows.append(internal.read_record(kind, raw))
             else:
@@ -89,14 +92,13 @@ def read_rows_after(
     rows: list[dict[str, Any]] = []
     broken = 0
     for chunk in data[:end].split(b"\n"):
-        line = _decoded(chunk)
-        if line is None:
-            broken += 1
+        if not chunk.strip():
             continue
-        if not line.strip():
+        raw, cut = _raw(chunk)
+        broken += cut is not None
+        if raw is None:
             continue
         try:
-            raw = internal.parse_line(line)
             if wanted(raw):
                 rows.append(internal.read_record(kind, raw))
         except internal.InternalError as exc:
@@ -106,12 +108,35 @@ def read_rows_after(
     return rows, broken, start + end
 
 
-def _decoded(chunk: bytes) -> Optional[str]:
-    """1 行のバイト列を UTF-8 として解く。文字の途中で切れた断片なら None（ファイル全体の読み取りを止めない）。"""
+def _raw(chunk: bytes) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """1 行のバイト列を辞書にし、読めなかった部分の理由を添えて返す。
+
+    行全体が読めれば（辞書, None）。読めなければ、行の中で `append` の書いた行の始まり（`ROW_START`）を後ろへ順に探し、
+    そこから行末までを 1 つの辞書として読み直す。追記が途中で終わると、改行の無い断片の後ろに次の書き手の行がつながるため
+    である（`append` は末尾の改行を確かめるが、確かめてから書くまでに別の書き手の書き込みが途中で終わることがある）。
+    行の始まりだけから読み直すので、断片の中の入れ子の辞書を行として拾わない。読めれば（後ろの辞書, 断片の理由）、
+    どこからも読めなければ（None, 理由）。読み直すのは読めない行だけなので、読める行の費用は変わらない。
+    """
+    whole = _parsed(chunk)
+    if isinstance(whole, dict):
+        return whole, None
+    start = chunk.find(ROW_START, 1)
+    while start != -1:
+        tail = _parsed(chunk[start:])
+        if isinstance(tail, dict):
+            return tail, whole
+        start = chunk.find(ROW_START, start + 1)
+    return None, whole
+
+
+def _parsed(chunk: bytes) -> dict[str, Any] | str:
+    """バイト列を UTF-8 の 1 つの辞書として読む。読めなければ、その理由の文字列。"""
     try:
-        return chunk.decode("utf-8")
+        return internal.parse_line(chunk.decode("utf-8"))
     except UnicodeDecodeError:
-        return None
+        return "UTF-8 として読めない"
+    except internal.InternalError as exc:
+        return str(exc)
 
 
 def broken_items(path: Path, broken: list[Broken]) -> list[dict[str, Any]]:
@@ -158,8 +183,9 @@ def append(path: Path, row: Mapping[str, Any], *, kind: str) -> dict[str, Any]:
 
     錠が要るかは呼び手が決める（既存の行を読んでから書く呼び手は `lock` の中で打つか `append_locked` を使う）。行全体を
     追記の形（`O_APPEND`）の 1 回の書き込みで足すので、錠を取らない書き手どうしでも行は混ざらない。前の書き込みが
-    途中で終わってファイルが改行で終わっていなければ、改行を先に足して断片を 1 行に閉じ込め、この行を巻き込ませない
-    （読み手は断片の行だけを読めない行として除く）。一部しか書けなければ `OSError`。
+    途中で終わってファイルが改行で終わっていなければ、改行を先に足して断片を 1 行に閉じ込める。確かめてから書くまでに
+    別の書き手の書き込みが途中で終われば、この行は断片の後ろにつながる。その場合も読み手（`read_rows`・`read_rows_after`）が
+    行の始まり（`ROW_START`）から読み直し、断片だけを読めない行として除く。一部しか書けなければ `OSError`。
     """
     out = internal.write_record(kind, row)
     data = (json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8")
