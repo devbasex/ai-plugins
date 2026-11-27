@@ -634,19 +634,31 @@ def _ready(args: argparse.Namespace) -> tuple[RunConfig, Optional[str]] | int:
 
 def _begin_run(args: argparse.Namespace) -> Optional[int]:
     """前の起動が書いた `--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out` を消し、`--repo` の対象のリポジトリを
-    子の `gh` へ渡す。`--repo` の形が違うか、`--reviewed-base-out` を `--reviewed-out` なしで渡せば、止まった結果を出した
-    終了コードを返す（書かれないと分かっている出力のために、レビューの token と時間を使わない。#3702）。"""
+    子の `gh` へ渡す。`--repo` の形が違うか、`--reviewed-base-out` を `--reviewed-out` なしで渡すか、出力先に書けなければ、
+    止まった結果を出した終了コードを返す（書かれないと分かっている出力のために、レビューの token と時間を使わない。#3702）。"""
     if args.reviewed_base_out and not args.reviewed_out:
         return _stop("invalid", "--reviewed-base-out は --reviewed-out と併用する（レビューした HEAD を書かない起動は比較元も書かない）")
     for stale in (args.reviewed_out, args.reviewed_pr_out, args.reviewed_base_out):
         if stale:
-            Path(stale).unlink(missing_ok=True)
+            try:
+                _clear_output(Path(stale))
+            except OSError as exc:
+                # 出力先の不備は始めに分かるので、相手役を起動する前に止める（レビューの後に書けないと分かっても遅い。#3702）
+                return _stop("precondition", f"出力先 {stale} に書けない: {exc}")
     if args.repo is not None:
         try:
             os.environ[GH_REPO_ENV] = repo.resolve_target_repo(args.repo, None, Path.cwd()).slug
         except repo.RepoUnresolved as exc:
             return _stop("invalid", str(exc))
     return None
+
+
+def _clear_output(path: Path) -> None:
+    """前の起動が書いた出力を消し、同じ場所へファイルを作って消せるかを確かめる（親が無い・書けない出力先は `OSError`）。
+    本番の値はレビューの後に書くので、確かめた後は何も残さない。"""
+    path.unlink(missing_ok=True)
+    path.open("x", encoding="utf-8").close()
+    path.unlink()
 
 
 def _write_reviewed(args: argparse.Namespace, got: drive.Outcome) -> Optional[int]:

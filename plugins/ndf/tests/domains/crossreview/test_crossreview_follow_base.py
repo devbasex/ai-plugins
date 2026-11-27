@@ -103,11 +103,12 @@ def test_issue_3702_unreadable_target_stops_before_any_launch(wt: Path, tmp_path
 
 
 def test_issue_3702_unwritable_reviewed_base_out_is_precondition(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """`--reviewed-base-out` を書けなければ precondition。"""
+    """`--reviewed-base-out` を書けなければ、相手役を起動する前に precondition で止まる（レビューの後に分かっても遅い）。"""
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     missing = tmp_path / "no-such-dir" / "base"
     code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(missing))
-    assert got["cause"]["kind"] == "precondition" and "base" in got["cause"]["detail"]
+    assert (got["cause"]["kind"], fake.calls) == ("precondition", [])
+    assert str(missing) in got["cause"]["detail"]
 
 
 @pytest.mark.parametrize("fetched", ["fork/repo", None], ids=["other-repo", "unknown"])

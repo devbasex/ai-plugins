@@ -410,7 +410,7 @@ contracts/
 | 失敗 | 扱い |
 | --- | --- |
 | PR のマージ先を読めない | 今の `_merge_target` と同じく `precondition` |
-| `--reviewed-base-out` を書けない | `precondition` |
+| `--reviewed-base-out` を書けない | `precondition`。出力先に書けるかは相手役を起動する前に確かめ、書けなければレビューを始めずに止まる |
 
 単体テストの観点: 起動の間にマージ先が変われば全差分を読み直して新しい名前を書く。`--verify-merged` なしのマージ済みは今のまま `ok`。`ndf ci watch --head` は、待つ間に HEAD が変われば成功にしない。`rest_fallback=False` は利用枠の失敗をそのまま上げる。
 
