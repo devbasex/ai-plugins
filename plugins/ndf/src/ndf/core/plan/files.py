@@ -1,24 +1,14 @@
 """状態の保存先の JSON の記録を読み書きする（`runner`・`steps`・`queue_run`・`cli` が使う）。
 
-書くときは一時ファイルへ書いてから置き換え、読む側に書きかけを見せない。一時ファイルは、記録と同じディレクトリの下の
-NDF 専用の領域（`.ndf-writing/`）に、書き込みごとに一意な名前（`<記録の名前>.<32 桁の 16 進数>.ndf-tmp`）で排他的に
-新規作成し、書く間はロックを持つ。同じ記録への書き込みが重なっても、作ったプロセスだけがそのファイルを記録へ置き換える。
-強制終了で残った一時ファイルは、同じディレクトリの記録の次の書き込みで消す。掃除が消すのはこの領域の中の、
-名前の形が合い、ロックを誰も持たないファイルだけである。
+書くときは一時の名前へ書いてから置き換え、読む側に書きかけを見せない。
 """
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
-import re
-import uuid
 from pathlib import Path
 from typing import Any, Optional
-
-WRITING_DIR = ".ndf-writing"  # NDF の一時ファイルを置く領域
-_MADE = re.compile(r".+\.[0-9a-f]{32}\.ndf-tmp")  # `write_json` が作る一時ファイルの名前
 
 
 def read_json(path: Path) -> Optional[dict[str, Any]]:
@@ -30,32 +20,7 @@ def read_json(path: Path) -> Optional[dict[str, Any]]:
 
 
 def write_json(path: Path, value: dict[str, Any]) -> None:
-    area = path.parent / WRITING_DIR
-    area.mkdir(parents=True, exist_ok=True)
-    _remove_left(area)
-    text = json.dumps(value, ensure_ascii=False)
-    while True:
-        tmp = area / f"{path.name}.{uuid.uuid4().hex}.ndf-tmp"
-        # "x" は排他的な新規作成（O_EXCL）。権限は umask に従う（`mkstemp` の 0600 にすると、読める人が変わる）
-        with tmp.open("x", encoding="utf-8") as fh:
-            fcntl.flock(fh, fcntl.LOCK_EX)
-            if os.fstat(fh.fileno()).st_nlink == 0:  # 作ってからロックを取るまでの間に、別の書き込みの掃除が消した
-                continue
-            fh.write(text)
-            fh.flush()
-            os.replace(tmp, path)
-            return
-
-
-def _remove_left(area: Path) -> None:
-    """領域に残った一時ファイルを消す。名前の形が違うもの・書き込み中（ロックがある）・リンク・開けないものは残す。"""
-    for left in [p for p in area.iterdir() if _MADE.fullmatch(p.name)]:
-        try:
-            fd = os.open(left, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                left.unlink(missing_ok=True)
-            finally:
-                os.close(fd)
-        except OSError:  # noqa: NDF401 ファイル: 掃除できない残りは次の書き込みに回し、記録の書き込みは続ける
-            continue
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)

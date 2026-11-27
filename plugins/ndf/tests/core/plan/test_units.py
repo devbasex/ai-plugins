@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import fcntl
 from pathlib import Path
 
 import pytest
@@ -14,7 +13,7 @@ from ndf import identity
 from ndf.adapters import claude_choice
 from ndf.contracts.exit_codes import OK, STOPPED
 from ndf.core import loop, route
-from ndf.core.plan import files, model, records, runner, steps, transition_decide
+from ndf.core.plan import model, records, runner, steps, transition_decide
 from ndf.core.plan.transition_decide import SLEPT, Outcome, RunStep, Sleep, retry_reason
 
 UNIT, CHARGE, RETRY, MODE = (identity.env_name(k) for k in ("unit-id", "charge-to", "retry-cause", "workflow-mode"))
@@ -304,33 +303,3 @@ def test_the_models_of_another_run_are_not_reported(tmp_path):
     assert records.recorded_models(tmp_path, "run-1") == {}
     records._add_models(tmp_path, "run-1", "fix", {"name": "fix"})
     assert records.recorded_models(tmp_path, "run-1") == {"fix": {"name": "fix"}}
-
-
-def _temporary(state_dir: Path, digit: str) -> Path:
-    return state_dir / files.WRITING_DIR / f"{records.MODELS_FILE}.{digit * 32}.ndf-tmp"
-
-
-def test_writing_a_record_keeps_the_files_it_did_not_make(tmp_path):
-    victim = tmp_path / "victim"
-    victim.write_text("keep", encoding="utf-8")
-    # 一時ファイルと同じ形の名前でも、専用の領域の外のファイルは利用者のもの
-    outside = tmp_path / f".{records.MODELS_FILE}.{'d' * 32}.tmp"
-    outside.write_text("user", encoding="utf-8")
-    _temporary(tmp_path, "a").parent.mkdir()
-    _temporary(tmp_path, "a").symlink_to(victim)
-    inside = _temporary(tmp_path, "a").parent / "notes.txt"  # 領域の中でも、名前の形が違うものは消さない
-    inside.write_text("user", encoding="utf-8")
-    records._add_models(tmp_path, "run-1", "work", {"name": "impl"})
-    assert (victim.read_text(encoding="utf-8"), outside.read_text(encoding="utf-8")) == ("keep", "user")
-    assert _temporary(tmp_path, "a").is_symlink()
-    assert inside.read_text(encoding="utf-8") == "user"
-
-
-def test_the_next_write_removes_only_a_left_temporary_file_nobody_writes(tmp_path):
-    left, writing = _temporary(tmp_path, "b"), _temporary(tmp_path, "c")
-    left.parent.mkdir()
-    left.write_text("{", encoding="utf-8")  # 書き込みの途中で強制終了した残り
-    with writing.open("x", encoding="utf-8") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)  # 別の書き込みが書いている途中
-        records._add_models(tmp_path, "run-1", "work", {"name": "impl"})
-        assert (left.exists(), writing.exists()) == (False, True)
