@@ -7,10 +7,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from ndf.domains.crossreview import reviewed_pr
+
 from ._repos import Repos, commit, sh
 from .test_crossreview_run import Fake, Recording, _push_to_pr, _run, _state
 
 SPRINT = "sprint/y"
+
+
+@pytest.fixture(autouse=True)
+def _fetches_from_the_pr_repo(monkeypatch: pytest.MonkeyPatch, hub) -> None:
+    """テストのリモートはローカルのパスなので、取得元を PR のベースリポジトリと同じと読ませる。"""
+    monkeypatch.setattr(reviewed_pr, "fetch_repo", lambda g, remote: hub.port.repo_name)
 
 
 def _sprint_branch(repos: Repos) -> None:
@@ -98,3 +108,22 @@ def test_issue_3702_unwritable_reviewed_base_out_is_precondition(wt: Path, tmp_p
     missing = tmp_path / "no-such-dir" / "base"
     code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(missing))
     assert got["cause"]["kind"] == "precondition" and "base" in got["cause"]["detail"]
+
+
+@pytest.mark.parametrize("fetched", ["fork/repo", None], ids=["other-repo", "unknown"])
+def test_issue_3702_target_fetched_from_another_repo_stops_before_any_launch(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, fetched
+) -> None:
+    """取得するリモートが PR のベースリポジトリと違うか確かめられなければ、担当を起動する前に precondition で止まる。"""
+    monkeypatch.setattr(reviewed_pr, "fetch_repo", lambda g, remote: fetched)
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(tmp_path / "b"))
+    assert (got["cause"]["kind"], fake.calls) == ("precondition", [])
+    assert not (tmp_path / "b").exists()
+
+
+def test_issue_3702_reviewed_base_out_without_reviewed_out_is_invalid(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """`--reviewed-base-out` だけを渡すと、レビューを始める前に invalid で止まる。"""
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-base-out", str(tmp_path / "b"))
+    assert (got["cause"]["kind"], fake.calls) == ("invalid", [])

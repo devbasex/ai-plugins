@@ -274,6 +274,7 @@ def _sync(cfg: RunConfig, g: git.Git, reader_for: Optional[ReaderFor]) -> _Based
 
     if cfg.follow_base:
         branch = _merge_target(cfg, reader_for)
+        reviewed_pr.check_base_source(cfg, reader_for, g, remote, branch)
         synced = sync(branch)
         return _Based(synced, branch, synced.base, remote)
     synced, base = worktree.fetch_base(g, cfg.base, remote, sync, lambda: _merge_target(cfg, reader_for))

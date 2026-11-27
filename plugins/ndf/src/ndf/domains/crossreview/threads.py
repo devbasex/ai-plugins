@@ -100,9 +100,12 @@ class ReadPr(NamedTuple):
 class Reader(Protocol):
     """PR のコメントを読む口（テストは偽物）。失敗は例外。`comments` は PR コメント（引き継ぎの確かめに要る記録のコメントを
     含む）、`reviews` はインラインのレビューコメントとレビュー本文（相手役へ渡す参考資料にだけ使う）。`base` は PR の
-    マージ先のブランチの名前、`read_pr` は `open_threads` が読んだ PR（読めていなければ None。要求を足さない）。"""
+    マージ先のブランチの名前、`repo` はその PR のベースリポジトリ（`<所有者>/<リポジトリ>`）、`read_pr` は `open_threads` が
+    読んだ PR（読めていなければ None。要求を足さない）。"""
 
     def base(self) -> str: ...
+
+    def repo(self) -> str: ...
 
     def read_pr(self) -> Optional[ReadPr]: ...
 
@@ -526,6 +529,10 @@ class GitHubPort:
         if not self._base:
             raise self.errors(f"PR #{self.pr} のマージ先のブランチを読めない（応答に無い）")
         return self._base
+
+    def repo(self) -> str:
+        """PR のベースリポジトリ（`<所有者>/<リポジトリ>`。読む先のリポジトリで、要求を足さない）。"""
+        return str(self.hub.repo)
 
     def read_pr(self) -> Optional[ReadPr]:
         """スレッドの一覧と同じ応答から読んだ PR（読んでいないか、応答に head が無ければ None。要求を足さない）。"""

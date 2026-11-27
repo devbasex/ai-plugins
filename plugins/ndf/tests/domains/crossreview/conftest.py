@@ -69,6 +69,8 @@ class FakePort:
         self.changed_reads = 0
         # PR のマージ先のブランチ（None なら読み取りに失敗する）と、読んだ回数
         self.base_ref: str | None = "main"
+        # PR のベースリポジトリ（`--reviewed-base-out` の起動は、取得するリモートがこれと一致するかを確かめる。#3702）
+        self.repo_name = "octo/repo"
         self.base_reads = 0
 
     def at(self, pr: int) -> "FakePort":
@@ -93,6 +95,9 @@ class FakePort:
         if self.base_ref is None:
             raise RuntimeError("PR を読めない")
         return self.base_ref
+
+    def repo(self):
+        return self.repo_name
 
     def read_pr(self):
         return None

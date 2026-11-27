@@ -5,13 +5,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Optional, Protocol
 
 from ndf.adapters import git
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import store, threads
-from ndf.domains.crossreview.settings import RunConfig
+from ndf.domains.crossreview.settings import DriveStopped, RunConfig
 
 
 class Run(Protocol):
@@ -88,3 +88,33 @@ def _pushes_to(run: Run, head_repo: str) -> bool:
         "読んだ PR を記録しない"
     )
     return False
+
+
+def fetch_repo(g: git.Git, remote: str) -> Optional[str]:
+    """リモートの取得元の `<所有者>/<リポジトリ>`。GitHub の URL でないか読めなければ None。"""
+    try:
+        return g.remote_repo(remote)
+    except git.GitError:  # noqa: NDF401 外部コマンド: 取得元を読めなければ、呼び手が一致を確かめられないとして止める
+        return None
+
+
+def check_base_source(cfg: RunConfig, reader_for: Optional[Callable[[int], threads.Reader]], g: git.Git, remote: str, branch: str) -> None:
+    """PR の今のマージ先 `branch` を取得するリモートが、PR のベースリポジトリと一致すると確かめる。確かめられなければ、担当を
+    起動する前に止める（`--reviewed-base-out` の起動。#3702）。
+
+    マージ先の名前は GitHub の PR から読むが、ブランチは作業場所のリモートから取得する。`--repo` やフォークで両者が別の
+    リポジトリだと、同名の別のブランチとの差分をレビューした結果を、承認へ渡す比較元として書いてしまう。
+    """
+    pr = store.state_pr(cfg.state_dir, cfg.pr).current_pr
+    try:
+        # 読む口が無い起動は、呼び手がマージ先を読む時点で止めている
+        target = reader_for(pr).repo() if reader_for is not None else ""
+    except Exception as exc:
+        raise DriveStopped("precondition", f"PR #{pr} のベースリポジトリを読めないので、比較元を決められない: {exc}") from exc
+    fetched = fetch_repo(g, remote)
+    if not target or fetched is None or fetched.lower() != target.lower():
+        raise DriveStopped(
+            "precondition",
+            f"リモート {remote} の取得元（{fetched or '不明'}）が PR #{pr} のベースリポジトリ {target or '（不明）'} と"
+            f"一致すると確かめられないので、マージ先 {branch} を比較元にできない",
+        )

@@ -630,7 +630,10 @@ def _ready(args: argparse.Namespace) -> tuple[RunConfig, Optional[str]] | int:
 
 def _begin_run(args: argparse.Namespace) -> Optional[int]:
     """前の起動が書いた `--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out` を消し、`--repo` の対象のリポジトリを
-    子の `gh` へ渡す。`--repo` の形が違えば、止まった結果を出した終了コードを返す。"""
+    子の `gh` へ渡す。`--repo` の形が違うか、`--reviewed-base-out` を `--reviewed-out` なしで渡せば、止まった結果を出した
+    終了コードを返す（書かれないと分かっている出力のために、レビューの token と時間を使わない。#3702）。"""
+    if args.reviewed_base_out and not args.reviewed_out:
+        return _stop("invalid", "--reviewed-base-out は --reviewed-out と併用する（レビューした HEAD を書かない起動は比較元も書かない）")
     for stale in (args.reviewed_out, args.reviewed_pr_out, args.reviewed_base_out):
         if stale:
             Path(stale).unlink(missing_ok=True)
@@ -802,7 +805,9 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument(
         "--reviewed-base-out",
         help="--reviewed-out と併用する。--base でなく PR の今のマージ先を比較元にし、レビューした HEAD のラウンドの比較元の"
-        "ブランチ名を指定ファイルに書く。マージ先が前のラウンドと違えば、新しいマージ先との全差分を読ませる",
+        "ブランチ名を指定ファイルに書く。マージ先が前のラウンドと違えば、新しいマージ先との全差分を読ませる。"
+        "--reviewed-out なしで渡すと、レビューを始めずに invalid で停止する。マージ先を取得するリモートが PR のベースリポジトリと"
+        "一致すると確かめられなければ、レビューを始めずに precondition で停止する",
     )
 
 
