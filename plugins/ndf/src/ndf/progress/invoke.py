@@ -685,12 +685,12 @@ def plan_attempt(run: StageRun, work_dir: Path) -> int:
     """
     path = work_dir / ATTEMPT_FILE
     held = plan_files.read_json(path)
-    attempt = int(held["attempt"]) if held is not None else 0
-    seen = int(held["retries"]) if held is not None else 0
+    attempt, seen = (int(held["attempt"]), int(held["retries"])) if held is not None else (0, 0)
+    retried = run.retries > seen
     _, done = plan_runs.previous(work_dir)
-    if (run.again or run.retries > seen) and done is not None:
+    if (run.again or retried) and done is not None:
         attempt += 1
-    if held is None or attempt != held["attempt"] or run.retries > seen:
+    if held is None or attempt != held["attempt"] or retried:
         plan_files.write_json(path, {"attempt": attempt, "retries": max(seen, run.retries)})
     return attempt
 
