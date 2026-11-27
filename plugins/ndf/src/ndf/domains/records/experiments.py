@@ -176,6 +176,11 @@ def _group_units(seen: Sequence[_Seen], observed: Optional[str] = None) -> list[
     return same + ([u for u in unknown if u.at >= min(after)] if after else [])
 
 
+def _in_range(at: datetime, start: datetime, end: Optional[datetime]) -> bool:
+    """割り付けの日時 `at` が範囲にあるか: `start` を含み、`end`（あれば）を含まない。`unit_pool` と `pick_units` が共有する。"""
+    return start <= at and (end is None or at < end)
+
+
 def unit_pool(
     rows: Sequence[Mapping[str, Any]], usage: UsageIndex, *, where: mc.Where, start: datetime, end: Optional[datetime] = None
 ) -> list[_Seen]:
@@ -190,7 +195,7 @@ def unit_pool(
         if aid is None or not where.of(a) or aid in left or aid not in effects or effects[aid]["quality"] is None:
             continue
         at = _time(a)
-        if at < start or (end is not None and at >= end):
+        if not _in_range(at, start, end):
             continue
         value = UnitValue(aid, a["chosen"], tuple(a["probs"]), at, effects[aid]["quality"], costs.get(aid), models.get(aid))
         seen.append(_Seen(value, mc.model_group(a["arms"][a["chosen"]], a["arms"]), _time(effects[aid])))
@@ -205,7 +210,7 @@ def pick_units(
     割り付けの日時で先に絞ってから、まとまりの今のモデルを決める。範囲の外の単位の評価で、範囲の中の単位を除かないためである。
     """
     observed = {} if observed is None else observed
-    seen = [s for s in pool if start <= s.value.at and (end is None or s.value.at < end)]
+    seen = [s for s in pool if _in_range(s.value.at, start, end)]
     groups = sorted({s.group for s in seen})
     found = [u for g in groups for u in _group_units([s for s in seen if s.group == g], observed.get(g))]
     return sorted(found, key=lambda u: (u.at, u.assign_id))
