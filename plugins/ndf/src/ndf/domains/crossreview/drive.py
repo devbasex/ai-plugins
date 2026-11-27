@@ -45,6 +45,7 @@ from ndf.core.converge import oscillation, participants, worktree
 from ndf.domains.crossreview import (
     changes,
     criteria_decide,
+    experiment,
     fixer,
     fixgate_decide,
     prior_decide,
@@ -714,6 +715,8 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
     """要約を書いて結果を返す。`rounds` は今回の起動で終えたラウンドの数（前回の結果を返すときは状態ファイルのラウンドの数）。
     前回の結果は、根拠の記述を確かめ終えた head のものだけを返すので、確かめ直さない（`scope_decide.read_by_all_head`）。"""
     check = _FinalCheck(True) if reused else _check_final_head(run, final, rounds)
+    if not reused:  # 前回の結果を返すだけの打ち直しは、別の費用を負う先に指標を書かない
+        experiment.record(run.data, list(run.journal.rows.values()), run.seats, final)
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, run.journal.findings(), check.checked, check.unsent)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
@@ -860,6 +863,8 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         local = [u.local for u in got.unread.values()]
         raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(local))
     run.history.append(run.journal.enter(round_no, raised, run.mvv_items, run.mvv))
+    if round_no == 1:  # 設計と実装の効果指標は修正の前の指摘だけを数える（後のラウンドで同じ指摘が出ると行の round が変わる。#2944）
+        experiment.keep_first(run.data, run.journal.entered)
     run.warnings += run.journal.warnings
     _detach_revived(run)
     record = _round_record(run, round_no, prep)
@@ -948,6 +953,8 @@ def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[ReaderFor]) 
     run.remarks = [*prior.comments, *_read_reviews(prs, run.warnings)]
     run.warnings += [seats.filled_warning(f, "起動の前") for f in cfg.prefilled]
     seats.fill_refused(run)
+    if experiment.start_run(run.data):
+        _save(run)  # 実行の ID は、席の起動で止まっても打ち直しで同じ値にする
     final, done = fin.MAX_ROUNDS, 0
     first = len(store.list_of(run.data, store.ROUNDS)) + 1
     for round_no in range(first, first + cfg.max_rounds):

@@ -5,16 +5,18 @@
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, NamedTuple, Optional, Protocol
 
-from ndf.adapters import agents, claude, git
+from ndf.adapters import agents, claude, claude_choice, git
 from ndf.contracts import limits
 from ndf.core.converge import participants
-from ndf.domains.crossreview import criteria_decide, push, resume_decide, store
+from ndf.domains.crossreview import criteria_decide, experiment, push, resume_decide, store
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.journal import FindingJournal
 from ndf.domains.crossreview.settings import RunConfig
@@ -85,16 +87,53 @@ def _fix_prompt(run: FixRun, open_: Sequence[dict[str, Any]], handed: Sequence[f
     return "\n".join(lines)
 
 
-def _fixer_launch(run: FixRun, round_no: int, prompt: str, session: Optional[claude.Session], suffix: str = FIX_SUFFIX) -> agents.Launch:
-    """修正担当の 1 回の起動。`session` は会話の指定（None なら会話を残さない。#4013）、出力の名前は `round<n><suffix>`。"""
+class _Held(NamedTuple):
+    """修正担当の 1 つの会話で変えないもの: 最初に選んだ値と、使用量ログの行の書き手（`session_seq` を数える。#2944）。"""
+
+    chosen: claude_choice.ChoiceRun
+    log: claude.LaunchLog
+
+
+def _held(run: FixRun, session: Optional[claude.Session]) -> _Held:
+    """新しい会話の値を選ぶ。工程が無いので実験せず、起動の引数と環境変数の指定だけが効く。費用は `NDF_CHARGE_TO` の割り付けが負う。"""
+    charged = experiment.charge_to()
+    picked = claude_choice.pick_values("seat", "fix", cwd=run.cfg.worktree, runtime=run.cfg.fixer, charge_to=charged)
+    chosen = claude_choice.ChoiceRun(picked, charge_to=charged)
+    meta = experiment.meta_of("fix", chosen)
+    return _Held(chosen, claude.LaunchLog(meta if session is None else {**meta, "session_id": session.id}))
+
+
+def _resumed(held: _Held) -> _Held:
+    """続ける会話は値を選び直さず、リクエストの中の番号だけを進める。"""
+    held.chosen.request_try += 1
+    held.log.meta["request_try"] = held.chosen.request_try
+    return held
+
+
+def _fixer_launch(
+    run: FixRun, round_no: int, prompt: str, session: Optional[claude.Session], suffix: str = FIX_SUFFIX, held: Optional[_Held] = None
+) -> agents.Launch:
+    """修正担当の 1 回の起動。`session` は会話の指定（None なら会話を残さない。#4013）、出力の名前は `round<n><suffix>`、値は会話の
+    最初に選んだもの（`held`）。"""
     # 結果はファイルで受けるので標準出力を逐次にし、作業中の修正担当を無進捗と誤って止めない（#3945）
     call = claude.ClaudeCall(
         system="cross-review の修正担当", permission=claude.Permission.TOOLS, tools=FIXER_TOOLS, stream=True, session=session
     )
     paths = agents.AgentPaths.at(run.round_stem(round_no, suffix))
-    return agents.Launch(
+    spec = agents.Launch(
         run.cfg.fixer, (*claude.claude_args(call), prompt), run.cfg.worktree, paths, limits.seconds(participants.REVIEW_TIMEOUT)
     )
+    if held is None or held.chosen.choice is None:
+        return spec
+    return replace(participants.with_choice(spec, held.chosen.choice), env=held.chosen.conversation_env())
+
+
+def _run_fixer_child(spec: agents.Launch, held: _Held, launch: Launcher) -> agents.AgentStatus:
+    """修正担当を起動し、値を選んだ起動なら使用量ログの行を書く（出力は逐次なので、結果の行を回答として読む）。"""
+    status = launch(spec)
+    if held.chosen.choice is not None:
+        experiment.claude_row(held.log, json.dumps(claude.result_line(agents.tail(spec.paths.out))), status)
+    return status
 
 
 def _fix_record(
@@ -176,22 +215,27 @@ def _launch_fixer(run: FixRun, round_no: int, prompt: str, result_path: Path, la
     """会話の指定を決めて修正担当を起動し、続けた会話が見つからなければ 1 度だけ新しい会話で起動し直す（#4013）。
     最後に起動した方の記録を `run.fixer_last`・`run.fixer_growth` に置き、状態と過程の行の後ろを返す。"""
     if not run.cfg.settings.fixer_sessions:
-        return launch(_fixer_launch(run, round_no, prompt, None)), _how(UNSAVED)
+        held = _held(run, None)
+        return _run_fixer_child(_fixer_launch(run, round_no, prompt, None, held=held), held, launch), _how(UNSAVED)
     choice = resume_decide.choose(run.fixer_last, run.fixer_growth, int(limits.value(RESUME_MARGIN, "count")))
     last = run.fixer_last if choice.resume else None
     session = _new_session() if last is None else claude.Session(last.session_id, True)
-    spec = _fixer_launch(run, round_no, prompt, session)
-    status, reason = launch(spec), choice.reason
+    held = _held(run, session) if last is None or last.carry is None else _resumed(last.carry)
+    spec = _fixer_launch(run, round_no, prompt, session, held=held)
+    status, reason = _run_fixer_child(spec, held, launch), choice.reason
     if (
         session.resume
         and not result_path.is_file()
         and claude.conversation_missing(agents.tail(spec.paths.out), agents.tail(spec.paths.err))
     ):
         session, reason = _new_session(), MISSING
-        spec = _fixer_launch(run, round_no, prompt, session, FRESH_SUFFIX)
-        status = launch(spec)
+        held = _held(run, session)
+        spec = _fixer_launch(run, round_no, prompt, session, FRESH_SUFFIX, held)
+        status = _run_fixer_child(spec, held, launch)
     carried = last.context if last is not None and session.resume else None
     _keep_fixer(run, session, status, spec.paths.out, carried)
+    if held.chosen.choice is not None:
+        run.fixer_last = run.fixer_last._replace(carry=held)
     return status, _how(reason)
 
 

@@ -30,6 +30,7 @@ def _plain(rows) -> list[dict]:
     out = []
     for row in rows:
         row = dict(row)
+        row.pop(journal_mod.RAISERS, None)  # 挙げた席は test_crossreview_experiment が確かめる
         occurrence = row.pop(journal_mod.OCCURRENCE, None)
         assert occurrence is None or len(occurrence) == 12
         fixed_at = row.pop(REVIEW_FIXED_AT, None)

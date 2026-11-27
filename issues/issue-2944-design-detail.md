@@ -27,7 +27,7 @@ src/ndf/
     records/allocation_decide.py *    出現率の計算（純粋な関数）
     records/models_cli.py *           ndf models
     settings/delegate_run_cli.py     ndf delegate-run
-    crossreview/seats.py・fixer.py・journal.py・drive.py  シートの単位・修正担当・指摘の担当・効果指標
+    crossreview/seats.py・fixer.py・journal.py・drive.py・experiment.py *  シートの単位・修正担当・指摘の担当・効果指標と行
 ```
 
 依存の向き: 層は下から contracts・adapters・core・progress・domains の順で、下の層は上の層を読み込まない。値を選ぶ処理は全部の層から呼ぶので adapters に置き、割り付けに要る実験の記録と出現率のファイルの読み書きもそこに置く。`domains/records/experiments.py` は、adapters のこの読み書きを使って読む。adapters と core から出現率の計算（domains）を呼ぶ所は、下の層が上の層を読み込めないため、#1959 の起動記録のインターフェースに効果指標の関数を足して、差し込みで呼ぶ。
@@ -61,10 +61,11 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `src/ndf/domains/records/usage_decide.py` | 変更 | `launch_id` ごとの行と費用 | — | モジュール | N: `launch_rows` |
 | `src/ndf/domains/records/models_cli.py` | 新設 | `ndf models` | model_choice・experiments・allocation_decide・usage・usage_decide | モジュール | N: `main`・`_pick_command`・`_report`・`report_rows` |
 | `src/ndf/domains/settings/delegate_run_cli.py` | 変更 | 委譲の起動にモデルと effort を足す | model_choice・launch_settings | モジュール | C: `main` |
-| `src/ndf/domains/crossreview/seats.py` | 変更 | シートの単位 | model_choice・usage | `SeatRun` | C: `launch_reviewers`・`_seat_launch`・`_seat_result` |
-| `src/ndf/domains/crossreview/fixer.py` | 変更 | 修正担当の値 | model_choice・usage | `FixRun` | C: `_fixer_launch`・`_launch_fixer`・`_keep_fixer` |
+| `src/ndf/domains/crossreview/seats.py` | 変更 | シートの単位 | claude_choice・experiment | `SeatRun` | C: `launch_reviewers`・`_seat_launch`・`_seat_result`。N: `_run_seat` |
+| `src/ndf/domains/crossreview/experiment.py` | 新設（B5） | 実験の記録と使用量ログの行 | claude_choice・usage・journal | モジュール | N: `start_run`・`keep_first`・`choose_seat`・`keep_seat`・`seat_row`・`claude_row`・`record` |
+| `src/ndf/domains/crossreview/fixer.py` | 変更 | 修正担当の値 | claude_choice・experiment | `FixRun` | C: `_fixer_launch`・`_launch_fixer`・`_keep_fixer`。N: `_held`・`_resumed`・`_run_fixer_child` |
 | `src/ndf/domains/crossreview/journal.py` | 変更 | 挙げた担当を全員持つ | — | `FindingJournal` | C: `enter`。N: `experiment_values` |
-| `src/ndf/domains/crossreview/drive.py` | 変更 | 効果指標を渡す | experiments | `_Run` | C: `_round`・`_summary`。N: `_record_experiment` |
+| `src/ndf/domains/crossreview/drive.py` | 変更 | 効果指標を渡す | experiment | `_Run` | C: `_round`・`_summary`・`_drive_rounds` |
 | `src/ndf/cli.py` | 変更 | サブコマンドの登録 | — | `COMMANDS` | C: 行の追加 |
 
 表と手順書:
@@ -370,7 +371,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `codex_cost` | `domains/records/usage.py` | 新設 | `codex_cost(used: Any, model: Optional[str]) -> tuple[str, Optional[float]]`（`used` は `agents.CodexUsage`） | 換算に使ったモデルの名前と、単価表から求めた USD を返す。単価の無いモデルの USD は None |
 | `record_codex` | 同 | 新設 | `record_codex(used: Any, meta: Mapping[str, Any], choice: Any) -> None` | `caller` が `codex-exec` の行を使用量ログに書く。費用の欄と `unpriced` を記録する条件は、表の下の「Codex の費用と `unpriced` の記録」に従う |
 | `_seat_launch`・`launch_reviewers`・`_seat_result` | `domains/crossreview/seats.py` | 変更 | `_seat_launch(run, seat, prompt, stem, choice)` | シートの単位で値を取得し、起動ごとに行を書き、Codex の回答を `answer_text` で読む |
-| `_fixer_launch`・`_launch_fixer`・`_keep_fixer` | `domains/crossreview/fixer.py` | 変更 | 変えない | 修正担当の値と `charge_to`・`session_seq` を状態ファイルに残して再開に使う |
+| `_fixer_launch`・`_launch_fixer`・`_keep_fixer` | `domains/crossreview/fixer.py` | 変更 | 変えない | 修正担当の値と `charge_to`・`session_seq` を 1 回の駆動の中だけで持ち、同じ駆動の中の会話の再開に使う（状態ファイルには残さない） |
 | `enter` | `domains/crossreview/journal.py` | 変更 | 変えない | 同じ指摘を挙げた担当を `raisers` にすべて残す |
 | `experiment_values` | 同 | 新設 | `experiment_values(rows: Sequence, first: Collection[str], seats: Sequence[str]) -> tuple[Optional[int], dict[str, Optional[float]]]` | 1 ラウンド目の採用された重大な指摘の数（裁定していない重大な指摘があれば None）と、シートごとの挙げた割合を返す |
 | `_record_experiment` | `domains/crossreview/drive.py` | 新設 | `_record_experiment(run: _Run, final: str) -> None` | シートと、`NDF_CHARGE_TO` の単位の効果指標を書く |
@@ -380,6 +381,8 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - `_record_experiment` は、終わり方が収束かラウンドの上限のときに書く。結果を読めないシートがあって終わった場合と、誤りで終わった場合は書かない。design と impl の指標は `1 / (1 + 1 ラウンド目の採用された重大な指摘の数)` で、数が None なら null
 - 修正担当は `launch_choice("seat", "fix")`（工程が無いので実験の引数を足さない）。環境変数と引数の指定は効く
 - シートの子の環境から `NDF_CHARGE_TO` を外す
+- モデルか effort を理由に拒まれた基準でない組は、シートの中で基準の組へ 1 回切り替える（`_run_seat`。判定は `agents.codex_refused` と claude の `Failure.MODEL_REFUSED`）
+- 値を選ぶ処理の差し込みが無い起動は、引数を足さず、行も状態ファイルのキーも書かない
 - Codex の回答の読み方
   - 回答のファイルは、標準出力のログのファイル名に `.answer` を足したものである。標準出力のログが `review.out` なら、回答のファイルは `review.out.answer` になる
   - 回答先の指定、起動前の削除、読み取りは、どれも `agents.codex_answer_path(out)`（`out` は標準出力のログのパス）で求めたパスを使う
@@ -395,7 +398,10 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - 回答のファイル（パスは上の「Codex の回答の読み方」）を回答先に指定した起動は、起動の前にそのファイルを消す（`_start`）。codex は失敗すると前の中身を残すためである。指定しない起動は消さない。`answer_text` が回答のファイルを読むのは codex の `--json` の出力だけなので、残った古い回答は読まれない
 - 実装で設計の形を変えた理由（B5）。振る舞いは変えていない
   - 値を起動の組み立ての関数の引数にしないのは、引数を足すと上限（PLR0913。6）を超え、cross-refactoring が呼ぶ関数の形も変わるためである
-  - 使用量を辞書で持たないのは、欄の名前の文字列を複数のファイルに置くと重複の検査が落とすためである
+  - 使用量を辞書で持たないのは、欄の名前の文字列を複数のファイルに置くと重複の検査が落とすためである。`codex_cost` の返り値の 1 つ目は換算に使ったモデルの名前で、行を書くのは `usage.record_codex`、行の `caller` は `codex-exec` である
+  - シートの単位・行・`_record_experiment` にあたる処理（`record`）を `crossreview/experiment.py` に置くのは、`drive.py` が行数の安全網（1,000 行）の近くにあるためである。状態ファイルのキーは `experiment_units` である
+  - 修正担当の値・`charge_to`・`session_seq` を状態ファイルに残さず、駆動の中の前の修正担当の記録（`resume_decide.Previous.carry`）に持つのは、修正担当の会話を続けるのが 1 回の駆動の中だけ（#4013。`fixer._launch_fixer` は `drive._Run.fixer_last` に記録があるときだけ続け、駆動の始めにこの欄は空）で、状態ファイルに書いても読む処理が無いためである
+- 工程の無い起動（修正担当）の手動指定でも、費用を負う先の単位に停止の行を書く（`launch_choice`。I2）
 - Codex の使用量ログの行は `session_seq` が 0 である
 - Codex の費用と `unpriced` の記録
   - 費用は `codex_cost` の値を、使用量ログの `session_cost_usd` に書く

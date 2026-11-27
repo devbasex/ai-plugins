@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 FIRST = "その起動で初めて"
 FAILED = "前の修正担当が正常に終わらなかった"
@@ -18,7 +18,8 @@ LARGE = "前の会話の文脈が窓に収まらない"
 
 class Previous(NamedTuple):
     """その起動で最後に起動した修正担当の会話の ID・DONE で終わったか・結果をマージできたか・出力に自動の要約の行が
-    あったか・最後の文脈のトークン数・主モデルの文脈の窓。"""
+    あったか・最後の文脈のトークン数・主モデルの文脈の窓。`carry` は続けるときに引き継ぐ値（会話の最初に選んだモデルと effort と
+    使用量ログの行の書き手。#2944）で、判断には使わない。"""
 
     session_id: str
     finished: bool
@@ -26,6 +27,7 @@ class Previous(NamedTuple):
     compacted: bool
     context: Optional[int]
     window: Optional[int]
+    carry: Any = None
 
 
 class Choice(NamedTuple):

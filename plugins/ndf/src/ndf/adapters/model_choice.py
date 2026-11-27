@@ -908,6 +908,9 @@ def launch_choice(
         effort, effort_source = None, Source.ENVIRONMENT
     extra = dict(unit=req.unit, base_arm=base, inherited_effort=manual.inherited, retry=None if manual.given else req.retry, store=store)
     choice = Choice(layer, name, runtime, stage, req.mode, model, effort, model_source, effort_source, **extra)
+    if stage is None and store is not None and manual.given and req.charge_to is not None:  # 修正担当の手動指定（I2）
+        nowhere = Where("", "", runtime, "")
+        _halt_manual(_Unit(None, req.mode, (), got.allocation, False, got.enabled, nowhere, now, store), req.charge_to)
     if stage is None or store is None or (req.unit is None and req.charge_to is None):
         return choice if manual.given or req.retry is None or stage is None else _raised_once(choice)
     metric = metric_of(stage)

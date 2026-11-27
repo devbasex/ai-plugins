@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any, Optional
 
 from ndf.core.converge import oscillation
@@ -43,6 +43,8 @@ SKIPPED_MVV = "skipped_mvv"
 FIXER_REASON = "fixer_reason"
 # 根拠の記述の誤りの指摘が、次の確かめで同じ誤りかを見分ける欄（`citation_key`）
 CITATION_KEY = "citation_key"
+# 指摘を挙げた相手役の席の並び（#2944 の効果指標。`by` は最初に挙げた席だけを持つ）
+RAISERS = "raisers"
 
 
 def new_occurrence() -> str:
@@ -213,6 +215,29 @@ def _mvv_warnings(round_no: int, unknown: Sequence[str], unexplained: Sequence[s
     return out
 
 
+def _serious(row: Mapping[str, Any]) -> bool:
+    """重大な指摘（critical か major）か。重要度の分からない指摘は数えない。"""
+    severity = criteria_decide.severity_of(row.get("severity"))
+    return severity is not None and criteria_decide.blocking(severity)
+
+
+def experiment_values(
+    rows: Sequence[Mapping[str, Any]], first: Optional[Collection[str]], seats: Sequence[str]
+) -> tuple[Optional[int], dict[str, Optional[float]]]:
+    """効果指標の元の数（#2944）: 1 ラウンド目（`first` の id）の採用された重大な指摘の数と、シートごとの挙げた割合。
+
+    採用は修正担当が直した指摘で、相手役が挙げたもの（`raisers`）だけを数える。数は、`first` が無いか、1 ラウンド目の重大な指摘に
+    決めていないものがあれば None。割合は、シートが 2 つ以上で採用が 1 件以上のときだけ値を持つ。
+    """
+    major = [r for r in rows if _serious(r) and store.list_of(r, RAISERS)]
+    mine = [r for r in major if first is not None and r["id"] in first]
+    unknown = first is None or any(r["outcome"] not in fin.DECIDED for r in mine)
+    count = None if unknown else sum(r["outcome"] == fin.FIXED for r in mine)
+    adopted = [store.list_of(r, RAISERS) for r in major if r["outcome"] == fin.FIXED]
+    valued = len(seats) > 1 and bool(adopted)
+    return count, {s: sum(s in by for by in adopted) / len(adopted) if valued else None for s in seats}
+
+
 class FindingJournal:
     """指摘のジャーナル（id から行の辞書。状態ファイルの findings に並べる形のまま持つ）と、その規則。
 
@@ -225,6 +250,8 @@ class FindingJournal:
         self.rows: dict[str, dict[str, Any]] = {str(f["id"]): f for f in rows if isinstance(f, dict) and "id" in f}
         # 直した・見送ったのに出し直されて未解決へ戻した指摘の id（呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
         self.revived: list[str] = []
+        # 最後の `enter` で相手役が挙げた指摘の id
+        self.entered: list[str] = []
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
         # 最後の `carry` で、前の実行が残した MVV の判定を重ねて変わった、既にある指摘の id
@@ -262,6 +289,8 @@ class FindingJournal:
                 by_key[key] = known
             else:
                 self._raised_again(known, item, round_no, named, mvv)
+            if isinstance(item.get("by"), str):
+                known[RAISERS] = list(dict.fromkeys([*store.list_of(known, RAISERS), item["by"]]))
             if named is not None and known.get("by") != BY_NDF:
                 _classify(known, item, named, items, mvv)
                 if _text(item.get("impact")) is None:
@@ -270,6 +299,7 @@ class FindingJournal:
                 unknown.append(str(known["id"]))
             touched[key] = known
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
+        self.entered = [str(row["id"]) for row in touched.values()]
         return frozenset(key for key, row in touched.items() if _blocking(row))
 
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
