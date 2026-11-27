@@ -204,3 +204,13 @@
 
 どちらの場合も、リリース後テストで打つまで、その受け入れ条件を済みと記録しない。
 </content>
+
+## 設計との食い違い
+
+実装で、詳細設計書の名前と置き場を次の 3 点で変えた。振る舞いは変えていない。スプリントの Pull Request の本文に載せる。
+
+| 詳細設計書 | 実装 | 理由 |
+| --- | --- | --- |
+| 判定の関数を `design_check_decide.py` に置く（`markdown.tables`・`named`） | `design_check_rules.py` に置き、`markdown.gfm_tables`・`named_in_table` と名付けた | `_decide` で終わるモジュールは `ndf.adapters` を読まないというリポジトリの規則（`ndf check` の decide-pure）に、表を読むアダプターを使う判定が反するため。名前の変更は、重複の検査（copy-dup）に掛かる同名の関数を避けるため |
+| 新設の `ndf.core.start_point` の子の表の行を書いていない | 子の表（`plugins/ndf/src/ndf/checks/children.json`）の C3 に `ndf.core.start_point` を足した | 規則 child-deps が、表に無いパッケージを落とすため。表の規則は設計書の「子の表の変更」のセクションに行を書くよう求めるが、この設計書にそのセクションは無い |
+| 差分の形を固定する引数を、設計の検査が自分で持つ | `ndf.adapters.git.FIXED_DIFF` にまとめ、設計の検査・`mvv.LOCAL_DIFF`・cross-review の `changes` がそこから組む（値は同じ） | 同じ事実を 1 か所に置く規則（const-fact）に合わせるため |
