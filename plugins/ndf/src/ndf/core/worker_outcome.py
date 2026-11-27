@@ -71,13 +71,19 @@ class Checked(NamedTuple):
     missing: tuple[str, ...]
 
 
+def _values_of(report: Mapping[str, Any], names: Sequence[str]) -> dict[str, Any]:
+    """確かめを通った名前 `names` の値（結果ファイルの `outputs` から取り出す）。"""
+    return {n: report["outputs"][n] for n in names}
+
+
 def _gate_outputs(report: dict[str, Any], required: Sequence[str], version_number: bool) -> Checked:
     """判断を求めた（gate の）結果ファイルの確かめ。欠けで止めずに gate のまま返し、通った値と通らなかった名前を分ける（#4513）。"""
     passed = [n for n in required if _output_gap(report, n, version_number) is None]
-    missing = tuple(n for n in required if n not in passed)
+    passed_names = set(passed)
+    missing = tuple(n for n in required if n not in passed_names)
     if not passed:
         return Checked(report, None, missing)
-    return Checked(report, {n: report["outputs"][n] for n in passed}, missing)
+    return Checked(report, _values_of(report, passed), missing)
 
 
 def require_outputs(report: Any, required: Sequence[str], *, version_number: bool = False) -> Checked:
