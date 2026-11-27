@@ -183,6 +183,17 @@ def read(found: Optional[Sequence[Mapping[str, Any]]], ids: Sequence[str]) -> An
     return Answers(verdicts, _warnings(ids, verdicts, repeated, unknown))
 
 
+def unlowering(answers: Answers) -> Answers:
+    """資料のほかのファイルの読み取りを拒否された起動の回答。拒否は指摘に対応づけられないので、成り立たないとした回答は
+    どれも判断できないにする（指摘の種類は残す）。起きると示せた回答は変えない。"""
+    refused = [v.id for v in answers.verdicts.values() if v.holds is False]
+    if not refused:
+        return answers
+    verdicts = {fid: v._replace(holds=None) if fid in refused else v for fid, v in answers.verdicts.items()}
+    warning = f"判定役がファイルの読み取りを拒否されたので、成り立たないとした回答を採らず下げない: {'・'.join(refused)}"
+    return answers._replace(verdicts=verdicts, warnings=(*answers.warnings, warning))
+
+
 def lowers(row: Mapping[str, Any], verdict: Verdict) -> bool:
     """指摘 `row` を、回答 `verdict` を理由に軽い扱いへ下げてよいか。成り立たないとした指摘のうち、下げない指摘
     （`_never_asked`・`_never_lowered`）と、回答の種類が保護の種類か表に無い値を持つものを除く。"""

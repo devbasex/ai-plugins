@@ -294,6 +294,20 @@ def test_issue_4363_ask_does_not_answer_when_reading_the_mvv_copy_is_denied(tmp_
     assert answers.verdicts == {} and denied.name in answers.warnings[0]
 
 
+def test_issue_4363_ask_does_not_take_a_negative_answer_when_reading_the_implementation_is_denied(tmp_path: Path) -> None:
+    """資料でないファイルの拒否は指摘に対応づけられないので、否定の回答は採らず、起きるとした回答と指摘の種類は残す。"""
+    run, diff = _AskRun(tmp_path), _diff(tmp_path)
+    given = [_answer("r1-1", tracks=["secret"]), holding(_row("r1-2"))]
+    launch = _launcher([], given, denied=run.cfg.worktree / "src" / "settings.py")
+    rows = [_row("r1-1"), _row("r1-2")]
+    answers = verify.ask(run, 1, rows, {"r1-1": [diff], "r1-2": [diff]}, launch)
+    first, second = answers.verdicts["r1-1"], answers.verdicts["r1-2"]
+    assert (first.holds, first.tracks, second.holds) == (None, ("secret",), True)
+    [warning] = answers.warnings
+    assert "r1-1" in warning and "r1-2" not in warning and str(tmp_path) not in warning + str(run.notes)
+    assert "settings.py" in (tmp_path / f"{answers.record}.detail.log").read_text(encoding="utf-8")
+
+
 def test_issue_4363_ask_points_the_mvv_criterion_at_the_copies_in_the_input_directory(tmp_path: Path) -> None:
     """MVV の本文と共通原則は、判定役が読める資料のディレクトリへ写してから基準 5 で指す。"""
     snap, diff, seen = _approved(tmp_path), _diff(tmp_path), []
