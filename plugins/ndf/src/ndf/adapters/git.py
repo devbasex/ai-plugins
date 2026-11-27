@@ -6,6 +6,7 @@ git を起動するのはこのモジュールの `Git` だけで、呼ぶ側は
 
 from __future__ import annotations
 
+import fnmatch
 import functools
 import json
 import os
@@ -102,21 +103,114 @@ def configured_remote_url(git_dir: Path) -> Optional[str]:
     """git を起動せずに、共通の git ディレクトリ `git_dir` の `config` から、この作業場所のリモート名（`remote_of`）の URL を読む。
 
     リモート名はメインディレクトリ（`git_dir` の親）の設定から決める（`Git.remote()` と同じ設定）。設定かリモートを読めなければ None。
+    `include.path` と、`gitdir:`・`gitdir/i:` の条件の `includeIf` が読み込む設定ファイルも、git と同じ位置で読む（リモートを別の
+    設定ファイルに分けた構成でも、git が解決する URL を得る）。ほかの条件（`onbranch:`・`hasconfig:`）の `includeIf` は読まない。
     `insteadOf` などの書き換えは当てない（`git remote get-url` と違いうる）。
     """
     try:
-        header = f'[remote "{remote_of(git_dir.parent)}"]'
-        text = (git_dir / "config").read_text(encoding="utf-8")
-    except (OSError, RemoteError):  # noqa: NDF401 ファイル: 設定かリモートを読めなければリモートは不明
+        name = remote_of(git_dir.parent)
+    except RemoteError:  # noqa: NDF401 ファイル: リモート名を決められなければリモートは不明
         return None
-    section = ""
+    urls = _config_values(git_dir / "config", git_dir, ("remote", name), "url", set())
+    return urls[0] if urls else None
+
+
+# 設定ファイルの見出し（`[name]`・`[name "sub"]`・古い形の `[name.sub]`）と、`key = value` の行
+_CONFIG_SECTION = re.compile(r'^\[\s*([A-Za-z0-9.-]+)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]')
+_CONFIG_ENTRY = re.compile(r"^([A-Za-z][A-Za-z0-9-]*)\s*(?:=\s*(.*))?$")
+
+
+def _config_values(path: Path, git_dir: Path, want: tuple[str, str], key: str, seen: set[Path]) -> list[str]:
+    """設定ファイル `path` と、そこから読み込む設定ファイルにある、見出し `want`（小文字の名前と、下位の名前）の `key` の値（現れた順）。
+
+    読めないファイルは空として扱う。同じファイルを 2 度読まない（読み込みの循環で止まらない）。
+    """
+    real = Path(os.path.realpath(path))
+    if real in seen:
+        return []
+    seen.add(real)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    found: list[str] = []
+    for heading, name, value in _config_entries(text):
+        if heading == want and name == key:
+            found.append(value)
+        elif name == "path" and _includes(heading, path, git_dir):
+            target = Path(os.path.expanduser(value))
+            found.extend(_config_values(target if target.is_absolute() else path.parent / target, git_dir, want, key, seen))
+    return found
+
+
+def _config_entries(text: str) -> Iterable[tuple[tuple[str, str], str, str]]:
+    """設定ファイルの本文の、値の行ごとの（見出し、小文字のキー、値）。見出しは小文字の名前と、下位の名前の組。"""
+    heading = ("", "")
     for raw in text.splitlines():
         line = raw.strip()
-        if line.startswith("["):
-            section = line
-        elif section == header and line.replace(" ", "").startswith("url="):
-            return line.split("=", 1)[1].strip()
-    return None
+        head = _CONFIG_SECTION.match(line)
+        if head is not None:
+            heading = _heading(head.group(1), head.group(2))
+            line = line[head.end() :].strip()
+        entry = _CONFIG_ENTRY.match(line)
+        if entry is not None:
+            yield heading, entry.group(1).lower(), _config_value(entry.group(2) if entry.group(2) is not None else "true")
+
+
+def _heading(name: str, sub: Optional[str]) -> tuple[str, str]:
+    """見出しの名前と下位の名前を、比べる形（名前は小文字、下位の名前はエスケープを外した文字）にする。"""
+    if sub is None:
+        name, _, sub = name.partition(".")
+    return name.lower(), re.sub(r"\\(.)", r"\1", sub)
+
+
+def _config_value(text: str) -> str:
+    """設定の値の右辺。引用符を外し、引用符の外の `#`・`;` から後ろ（注釈）を除く。"""
+    out, quoted, i = [], False, 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and i + 1 < len(text):
+            out.append(text[i + 1])  # URL とパスの値に要るのは `\"` と `\\` だけ（`\n` などの制御文字は扱わない）
+            i += 2
+            continue
+        if ch == '"':
+            quoted = not quoted
+        elif ch in "#;" and not quoted:
+            break
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out).strip()
+
+
+def _includes(section: tuple[str, str], path: Path, git_dir: Path) -> bool:
+    """見出し `section` の `path` が読み込む対象か（`include`、または条件が `git_dir` に当たる `includeIf`）。"""
+    name, sub = section
+    if name == "include":
+        return True
+    if name != "includeif":
+        return False
+    for prefix, fold in (("gitdir:", False), ("gitdir/i:", True)):
+        if sub.startswith(prefix):
+            return _gitdir_matches(sub[len(prefix) :], path, git_dir, fold)
+    return False
+
+
+def _gitdir_matches(pattern: str, path: Path, git_dir: Path, fold: bool) -> bool:
+    """`includeIf "gitdir:<pattern>"` の条件が git のディレクトリに当たるか（git の説明書の規則: `~/` と `./` の展開、
+    相対の形の先頭に `**/`、`/` で終われば `**` を足す）。git の `**` の一致は、`fnmatch` の `*` で近似する。"""
+    if pattern.startswith("~/"):
+        pattern = os.path.expanduser(pattern)
+    elif pattern.startswith("./"):
+        pattern = str(path.parent / pattern[2:])
+    if not (pattern.startswith("/") or re.match(r"^[A-Za-z]:[\\/]", pattern)):
+        pattern = "**/" + pattern
+    if pattern.endswith("/"):
+        pattern += "**"
+    candidates = {str(git_dir), os.path.realpath(git_dir)}
+    if fold:
+        pattern, candidates = pattern.lower(), {c.lower() for c in candidates}
+    return any(fnmatch.fnmatchcase(c, pattern) for c in candidates)
 
 
 def slug_of_url(url: str) -> Optional[str]:
@@ -129,10 +223,10 @@ def slug_of_url(url: str) -> Optional[str]:
 
 
 def configured_remote_slug(git_dir: Path) -> Optional[str]:
-    """読み手役の確認の記録と、hook の guard `reading-check` の照合に使うリポジトリの識別子。
+    """読み手役の確認の記録と、hook の guard `reading-check` が照らし合わせに使うリポジトリの識別子。
 
     `configured_remote_url` が読んだ URL の `owner/repo`（`slug_of_url`）で、読めなければ None。記録する側・照らす側・
-    質問を出せるかを決める側が、この 1 つの関数で同じ値を得る（`insteadOf` や `include` を当てた後の URL とは違いうるため）。
+    質問を出せるかを決める側が、この 1 つの関数で同じ値を得る（`insteadOf` を当てた後の URL とは違いうるため）。
     """
     url = configured_remote_url(git_dir)
     return slug_of_url(url) if url is not None else None

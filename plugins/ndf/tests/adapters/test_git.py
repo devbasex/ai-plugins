@@ -88,6 +88,24 @@ def test_remote_repo_refuses_non_github_remote() -> None:
     assert "s3cret" not in str(exc.value)
 
 
+@pytest.mark.parametrize("section", ["include", 'includeIf "gitdir:{git_dir}/"', 'includeIf "gitdir/i:{upper}/"'])
+def test_configured_remote_slug_reads_included_config_files(tmp_path: Path, section: str) -> None:
+    git_dir = tmp_path / "main" / ".git"
+    git_dir.mkdir(parents=True)
+    (tmp_path / "remote.conf").write_text('[remote "origin"]\n\turl = "https://github.com/a/b.git" # 注釈\n', encoding="utf-8")
+    head = section.format(git_dir=git_dir, upper=str(git_dir).upper())
+    (git_dir / "config").write_text(f"[core]\n\tbare = false\n[{head}]\n\tpath = ../../remote.conf\n", encoding="utf-8")
+    assert git.configured_remote_slug(git_dir) == "a/b"
+
+
+def test_configured_remote_slug_skips_include_whose_gitdir_does_not_match(tmp_path: Path) -> None:
+    git_dir = tmp_path / "main" / ".git"
+    git_dir.mkdir(parents=True)
+    (tmp_path / "remote.conf").write_text('[remote "origin"]\n\turl = https://github.com/a/b.git\n', encoding="utf-8")
+    (git_dir / "config").write_text('[includeIf "gitdir:/elsewhere/"]\n\tpath = ../../remote.conf\n', encoding="utf-8")
+    assert git.configured_remote_slug(git_dir) is None
+
+
 def test_parse_shortstat_sums_insertions_and_deletions() -> None:
     assert git.parse_shortstat(" 7 files changed, 671 insertions(+), 10 deletions(-)") == 681
     assert git.parse_shortstat(" 1 file changed, 3 deletions(-)") == 3
