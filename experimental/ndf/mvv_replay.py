@@ -67,9 +67,10 @@ WORK_KEY_BYTES = 32
 WORK_KEY_PATTERN = re.compile(rf"[0-9a-f]{{{WORK_KEY_BYTES * 2}}}")
 # 専用ディレクトリの名前の候補の数。印の無い同名のディレクトリが続いても、候補を探し続けないための上限
 WORK_TRIES = 100
-# 片付けで、印を消す前に専用ディレクトリを移す名前の終わり（専用ディレクトリの基本の名前に、これと 16 桁の 16 進数の乱数を続ける）。
-# 印を消した後に強制終了しても、この名前の形で judge が片付けの途中だったと確かめ、空なら次の起動が消す
-WORK_DROP_INFIX = ".drop-"
+# 片付けで、印を消す前に専用ディレクトリを移す名前の始まり。これに、結果のファイル名の SHA-256 の先頭 16 桁、`-`、16 桁の
+# 16 進数の乱数を続ける（50 バイトで、結果のファイル名の長さによらない）。印を消した後に強制終了しても、この名前の形で
+# judge が片付けの途中だったと確かめ、空なら次の起動が消す
+WORK_DROP_PREFIX = ".mvv-replay.drop-"
 WORK_DROP_HEX = 16
 # judge が専用ディレクトリに作る一時ファイルの名前（`judge-` + 乱数 16 桁 + 印の鍵で乱数から作った HMAC-SHA256 の先頭 16 桁 +
 # `.tmp`）。回収するのは、この名前で、HMAC が印の鍵と合うものだけ（judge が作ったことを名前で確かめる）
@@ -579,9 +580,14 @@ def _work_name(result: Path, i: int) -> str:
     return base if i == 0 else f"{base}-{i}"
 
 
+def _drop_head(result: Path) -> str:
+    """`result` の片付けの途中の名前の、乱数より前の部分（`WORK_DROP_PREFIX` + 結果のファイル名の SHA-256 の先頭 16 桁 + `-`）。"""
+    return f"{WORK_DROP_PREFIX}{hashlib.sha256(os.fsencode(result.name)).hexdigest()[:WORK_DROP_HEX]}-"
+
+
 def _drop_pattern(result: Path) -> re.Pattern[str]:
-    """片付けの途中の専用ディレクトリの名前（`_work_base` + `WORK_DROP_INFIX` + 16 桁の 16 進数）に合う正規表現。"""
-    return re.compile(rf"{re.escape(_work_base(result) + WORK_DROP_INFIX)}[0-9a-f]{{{WORK_DROP_HEX}}}")
+    """`result` の片付けの途中の専用ディレクトリの名前（`_drop_head` + 16 桁の 16 進数）に合う正規表現。"""
+    return re.compile(rf"{re.escape(_drop_head(result))}[0-9a-f]{{{WORK_DROP_HEX}}}")
 
 
 def _work_existing(result: Path) -> list[Path]:
@@ -766,7 +772,7 @@ def _drop_work_dir(result: Path) -> None:
                 if os.listdir(dfd) != [WORK_MARK] or not _same_dir(dfd, work):
                     continue
                 if not drop.fullmatch(work.name):
-                    moved = work.with_name(_work_base(result) + WORK_DROP_INFIX + secrets.token_hex(WORK_DROP_HEX // 2))
+                    moved = work.with_name(_drop_head(result) + secrets.token_hex(WORK_DROP_HEX // 2))
                     os.rename(work, moved)
                     if not _same_dir(dfd, moved):
                         # 確かめた後に名前が別のディレクトリを指した。移したものを元の名前へ戻す
