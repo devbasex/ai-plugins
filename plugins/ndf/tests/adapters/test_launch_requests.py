@@ -794,6 +794,22 @@ def test_reflection_stops_without_touching_the_record_while_a_copy_is_left(tmp_p
     assert tmp.read_bytes() == b"ndf" and la.read_launch_record(pending) == rec
 
 
+def test_a_saved_path_reaches_the_caller_even_if_a_later_cleanup_step_fails(tmp_path, monkeypatch):
+    """利用者の保存を別の名前で残した後、一時ファイルの片付けが OSError で止まっても、そのパスは呼び手の一覧に入る。"""
+    target, _, aside = _interrupted(tmp_path)
+    aside.write_bytes(b'{"version": 1, "saved": 1}\n')
+
+    def fail(target, rec, **_):
+        raise PermissionError("mkdir")
+
+    monkeypatch.setattr(la, "_drop_placing", fail)
+    kept: list[Path] = []
+    with pytest.raises(internal.InternalError) as raised:
+        la._recover_into(target, kept)
+    assert raised.value.kind == "precondition"
+    assert len(kept) == 1 and kept[0].read_bytes() == b'{"version": 1, "saved": 1}\n'
+
+
 def test_the_cleanup_finishes_a_move_before_removal_only_for_the_recorded_directory(tmp_path):
     """消す前に専用のディレクトリへ移した直後に止まった一時ファイルは、記録した名前と実体のディレクトリだけを片付ける（Value 6）。"""
     target = _worktree(tmp_path)

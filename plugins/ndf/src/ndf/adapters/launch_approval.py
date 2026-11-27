@@ -710,12 +710,17 @@ def _recover_into(target: Path, kept: list[Path]) -> None:
     そのまま次の反映へ進むと、`_place` が同じ記録を新しい一時ファイルの名前で上書きするか、`_after_reflect` が記録を消し、
     残った一時ファイルを次の片付けで特定できなくなる。そこで、途中の記録が残っていれば、`kept` に足した後で `precondition` で止める
     （記録と一時ファイルはそのまま残し、打ち直しの `recover` が片付け直す）。
+    片付けのファイル操作が `OSError` で止まったときも、残した保存のパスを `kept` に足した後で `precondition` にして止める
+    （呼び手は `InternalError` の文に `kept` を添えて利用者に示す）。
     """
     from ndf.contracts import internal
 
-    saved = recover(target)
-    if saved is not None:
-        kept.append(saved)
+    try:
+        recover(target, kept)
+    except OSError as exc:
+        raise internal.InternalError(
+            "precondition", f"{target} の前の反映を片付けられない（{type(exc).__name__}）。同じコマンドを打ち直す"
+        ) from None
     pending = reflected_file(target, PENDING)
     if pending.exists():
         left = read_launch_record(pending).get("placing")
@@ -1026,10 +1031,11 @@ def _tidy_after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -
                 launch_candidates.set_aside(made)
 
 
-def recover(target: Path) -> Optional[Path]:
+def recover(target: Path, kept: Optional[list[Path]] = None) -> Optional[Path]:
     """錠の中で、退避（`launch.json.reflecting`）と反映の途中の記録を設計書の「退避が残っている場合の判定」の表で片付ける。
 
-    利用者の保存を別の名前（`launch.json.saved-<値>`）で残したらそのパスを返す。反映先が NDF の置いた候補のファイルのまま
+    利用者の保存を別の名前（`launch.json.saved-<値>`）で残したらそのパスを返す。`kept` を渡せば、残した時点でそのパスを足す
+    （後の完了の記録や一時ファイルの片付けが例外で止まっても、呼び手が保存の場所を結果に載せられるようにするため）。反映先が NDF の置いた候補のファイルのまま
     （`_placed`。途中の記録の実体と同じで、中身も候補のまま）なら、反映は済んでいるので、途中の記録（同意した人と確認の経路を含む）
     から完了の記録を書く。退避が無い場合（反映先が無い状態から置いた・退避を消した直後の中断）も、退避に利用者の保存があって
     別の名前で残した場合も同じである。途中の記録は人の同意を確かめた後にだけ書くので、記録の承認者をそのまま引き継げる。
@@ -1047,22 +1053,29 @@ def recover(target: Path) -> Optional[Path]:
     rec = read_launch_record(pending_path)
     aside = target.with_name(target.name + REFLECTING)
     saved = None
+
+    def tell(path: Optional[Path]) -> Optional[Path]:
+        # 別の名前で残した時点で呼び手の一覧へ足す（後のファイル操作が例外で止まっても、呼び手が結果に載せられる）
+        if path is not None and kept is not None and path not in kept:
+            kept.append(path)
+        return path
+
     if aside.exists():
-        kept = content_version(aside)
+        asided = content_version(aside)
         if content_version(target) is None:
-            saved = _link_back(aside, target, rec)
+            saved = tell(_link_back(aside, target, rec))
         elif _placed(target, rec):
-            if kept == rec.get("base"):
+            if asided == rec.get("base"):
                 aside.unlink()
             else:
-                saved = _keep_as_saved(aside, target, rec)
+                saved = tell(_keep_as_saved(aside, target, rec))
             _write_done(target, rec)
-        elif kept == rec.get("base"):
+        elif asided == rec.get("base"):
             aside.unlink()
         else:
-            saved = _keep_as_saved(aside, target, rec)
+            saved = tell(_keep_as_saved(aside, target, rec))
     else:
-        saved = _noted_saved(rec)  # 退避を別の名前で残し、退避を消した直後の中断
+        saved = tell(_noted_saved(rec))  # 退避を別の名前で残し、退避を消した直後の中断
         if _placed(target, rec):
             _write_done(target, rec)
     # 置き換えの途中で止まったか強制終了した実行の一時ファイル。写しを移す先を記録できず残したときは、
