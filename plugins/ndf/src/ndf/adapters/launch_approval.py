@@ -210,9 +210,14 @@ def _put_request(request: Mapping[str, Any], question: Mapping[str, Any], candid
     _append_row(QUESTIONS, row)
 
 
+def _keyable(row: Mapping[str, Any], *fields: str) -> bool:
+    """索引のキーに使う欄がどれも文字列か無いか。型の壊れた行（欄が配列など）は索引から外し、ほかの行の判定を続ける。"""
+    return all(isinstance(row.get(field), (str, type(None))) for field in fields)
+
+
 def _last_labels() -> dict[Any, Any]:
-    """リクエストの識別子ごとの最後の回答のラベル。回答の記録は 1 回だけ読む。"""
-    return {row.get("request_id"): row.get("label") for row in records.whole_rows(state_file(ANSWERS))}
+    """リクエストの識別子ごとの最後の回答のラベル。回答の記録は 1 回だけ読む。識別子の型が壊れた行は外す。"""
+    return {row.get("request_id"): row.get("label") for row in records.whole_rows(state_file(ANSWERS)) if _keyable(row, "request_id")}
 
 
 def _judged(label: Any, request: Mapping[str, Any]) -> tuple[Optional[str], Optional[str]]:
@@ -260,14 +265,17 @@ def approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]:
 
 
 class _Requests:
-    """依頼の履歴を 1 回だけ走査して作る索引。`by_id` は依頼の識別子ごと、`latest` は候補ごと、`newest` は反映先ごとの最新の位置。"""
+    """依頼の履歴を 1 回だけ走査して作る索引。`by_id` は依頼の識別子ごと、`latest` は候補ごと、`newest` は反映先ごとの最新の位置。
+
+    キーに使う欄（識別子・反映先・候補）の型が壊れた行は `rows` に入れない（位置は `rows` の中の位置）。
+    """
 
     def __init__(self, rows: list[dict[str, Any]]) -> None:
-        self.rows = rows
+        self.rows = [row for row in rows if _keyable(row, "request_id", "target", "candidate")]
         self.by_id: dict[Any, int] = {}
         self.latest: dict[Any, int] = {}
         self.newest: dict[Any, int] = {}
-        for i, row in enumerate(rows):
+        for i, row in enumerate(self.rows):
             self.by_id[row.get("request_id")] = i
             self.newest[row.get("target")] = i
             if row.get("candidate") is not None:
@@ -280,13 +288,16 @@ class _Requests:
 
 class _Approvals:
     """承認の記録を 1 回だけ走査して作る索引。内容（リポジトリのキーとハッシュ）ごとの最後の操作と最後の取り消しの位置、
-    依頼ごとの最後の承認の行を持つ。"""
+    依頼ごとの最後の承認の行を持つ。キーに使う欄（依頼の識別子・リポジトリのキー・ハッシュ）の型が壊れた行は飛ばす。位置は記録の
+    全体の行で数える（依頼の `approvals_seen` は記録の全体の行数なので）。"""
 
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self.last_action: dict[tuple[Any, Any], Any] = {}
         self.last_revoke: dict[tuple[Any, Any], int] = {}
         self.used: dict[tuple[Any, Any, Any], dict[str, Any]] = {}
         for i, row in enumerate(rows):
+            if not _keyable(row, "request_id", "repo", "sha256"):
+                continue
             key = (row.get("repo"), row.get("sha256"))
             self.last_action[key] = row.get("action")
             if row.get("action") == Action.REVOKE:
@@ -359,7 +370,9 @@ def _live(history: _History, candidate: Path, now: Optional[str], current: Calla
 
 def pending_request(repo: str, target: Path) -> Optional[Mapping[str, Any]]:
     """その反映先の最新のリクエストで、「承認する」と回答があり、反映（候補が無ければ承認の行）が済んでいないもの。"""
-    rows = [r for r in records.whole_rows(state_file(QUESTIONS)) if r.get("repo") == repo and r.get("target") == str(target)]
+    rows = [
+        r for r in _Requests(records.whole_rows(state_file(QUESTIONS))).rows if r.get("repo") == repo and r.get("target") == str(target)
+    ]
     if not rows or _judged(_last_labels().get(rows[-1].get("request_id")), rows[-1])[0] != "approve":
         return None
     req = rows[-1]
@@ -729,8 +742,9 @@ def _sweep_reasons(home: Path) -> dict[Path, _Due]:
     承認を済ませられるリクエスト（`_live`。回答待ちを含む）の候補は、どちらの理由にもしない。「承認しない」の判定は
     候補ごとの最新のリクエストで行う。直したかどうかはここでは見ない（片付ける側が `_untouched` か読んだ `current` で見る）。
 
-    条件はまず履歴と反映先だけで決め、当たらない候補のディレクトリは調べない。当たった候補だけ、中身を読む前に NDF が作ったもの
-    だけかを確かめ（`_ownership`）、そうでない候補と、過去の反映先か候補が普通のファイルでなく読めない候補は外す。各候補の
+    依頼の否認、worktree の有無、反映先のバージョンから、片付けの対象になり得る候補を絞り、当たらない候補のディレクトリは
+    調べない。候補の中身が要る判定（承認済みの依頼がまだ使えるか、`reflected` か `outdated` か）では、先に NDF が作ったもの
+    だけかを確かめ（`_ownership`）、候補を読んでから決める。そうでない候補と、過去の反映先か候補が普通のファイルでなく読めない候補は外す。各候補の
     `source.json` は 1 回だけ読む。リクエストの履歴・回答の履歴・承認の記録・候補の一覧は 1 回ずつ読み、反映先のバージョンは反映先ごとに
     1 回だけ求める。
     """
@@ -768,10 +782,11 @@ def _moved_target(
 ) -> Optional[_Due]:
     """反映先が反映元のバージョンから変わった候補の判定（`reflected` か `outdated`）。変わっていないか、反映先か候補を読めなければ None。
 
-    反映先のバージョンは `versions` に残し、同じ反映先の候補では読み直さない。候補は NDF の作ったものだけと確かめてから読む。
-    まだ人の答えでこの候補の反映まで済ませられる依頼（`_live`。回答待ちと、答えで書いた承認の行があり反映が済んでいない依頼を
-    含む）の候補は、どちらの理由にもしない（人が答えた後の `approve --candidate` がこの候補で承認を済ませる）。候補の今の中身を
-    読んでから照らす。
+    反映先のバージョンは `versions` に残し、同じ反映先の候補では読み直さない。まだ人の答えでこの候補の反映まで済ませられる依頼
+    （`_live`。回答待ちと、答えで書いた承認の行があり反映が済んでいない依頼を含む）の候補は、どちらの理由にもしない（人が答えた後の
+    `approve --candidate` がこの候補で承認を済ませる）。`_live` は履歴と反映先だけで決まれば候補を読まず、承認済みの依頼で
+    候補の今のバージョンが結果を左右するときだけ `look` を呼ぶ。`look` は NDF の作ったものだけと確かめてから候補を読み、結果を
+    残すので、続く判定では読み直さない。
     """
     target = str(source.get("target"))
     if target not in versions:
@@ -779,11 +794,18 @@ def _moved_target(
     readable, now = versions[target]
     if not readable or now == source.get("base"):
         return None
-    due = _inspect(made, raw, source, "outdated")
-    if due is None:
+    looked: list[tuple[Optional[_Due], bool, Optional[str]]] = []
+
+    def look() -> tuple[Optional[_Due], bool, Optional[str]]:
+        if not looked:
+            owned = _inspect(made, raw, source, "outdated")
+            looked.append((owned, *((False, None) if owned is None else _stamped_version(made, owned.stamp))))
+        return looked[0]
+
+    if _live(history, made / CANDIDATE_NAME, now, lambda: look()[2]):
         return None
-    ok, current = _stamped_version(made, due.stamp)
-    if not ok or _live(history, made / CANDIDATE_NAME, now, lambda: current):
+    due, ok, current = look()
+    if due is None or not ok:
         return None
     if now is not None and current == now:
         return _Due("reflected", due.stamp, due.written, now, True, current)
