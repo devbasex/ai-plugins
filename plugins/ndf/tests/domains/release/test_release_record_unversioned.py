@@ -618,12 +618,17 @@ def test_shared_prefix_keeps_a_file_it_did_not_write_and_sweeps_its_own_leftover
     share.mkdir(parents=True)
     foreign = share / f"{PROD}.json"
     foreign.write_text("{", encoding="utf-8")
-    leftover = share / f"{PROD}.json.abc.ndf-tmp"
-    leftover.write_text("{", encoding="utf-8")
+    empty = share / f"{PROD}.json.abc.ndf-tmp"
+    empty.write_text("", encoding="utf-8")
+    written = share / f"{PROD}.json.def.ndf-tmp"
+    written.write_text(json.dumps(made.as_json()), encoding="utf-8")
+    users = share / f"{PROD}.json.ghi.ndf-tmp"
+    users.write_text("{", encoding="utf-8")
     assert record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: made) == made
     record_unversioned.drop_share(share, PROD)
-    record_unversioned.sweep_shares(share, 60, now=lambda: foreign.stat().st_mtime + 61)
-    assert foreign.read_text(encoding="utf-8") == "{" and not leftover.exists()
+    record_unversioned.sweep_shares(share, 60, now=lambda: foreign.stat().st_mtime + 3600)
+    assert foreign.read_text(encoding="utf-8") == "{" and users.read_text(encoding="utf-8") == "{"
+    assert not empty.exists() and not written.exists()
 
 
 def _correction_hub() -> FakeHub:

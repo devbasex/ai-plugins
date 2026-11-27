@@ -333,15 +333,24 @@ def _share_path(share: Path, number: int) -> Path:
     return share / f"{int(number)}.json"
 
 
+def _kind_of(text: str) -> Optional[Mapping[str, Any]]:
+    """`text` が `kind` の `_SHARE_KIND` な JSON のオブジェクトならその中身、そうでなければ None。"""
+    try:
+        raw = json.loads(text)
+    except ValueError:  # noqa: NDF401 ファイル: 壊れた中身は None で返し、NDF が書いたものとして扱わない
+        return None
+    return raw if isinstance(raw, dict) and raw.get("kind") == _SHARE_KIND else None
+
+
 def _ours(path: Path) -> Optional[Mapping[str, Any]]:
     """NDF が書いた保存先の中身（名前が `<本番の PR>.json` で、`kind` が `_SHARE_KIND`）。それ以外・無い・壊れていれば None。"""
     if not path.stem.isdigit():
         return None
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # noqa: NDF401 ファイル: 無い・壊れた保存先は None で返して作り直す
+        text = path.read_text(encoding="utf-8")
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 無い・読めない保存先は None で返して作り直す
         return None
-    return raw if isinstance(raw, dict) and raw.get("kind") == _SHARE_KIND else None
+    return _kind_of(text)
 
 
 def _read_share(path: Path, commit: str, push: Optional[record_decide.Push] = None) -> Optional[Prefix]:
@@ -382,11 +391,15 @@ def shared_prefix(
 
 
 def _publish(path: Path, got: Prefix) -> None:
-    """前処理を同じディレクトリの一時ファイルに書き終えてから `path` へ差し替える。中断しても `path` が書きかけにならない。"""
+    """前処理を同じディレクトリの一時ファイルに書き終えてから `path` へ差し替える。中断しても `path` が書きかけにならない。
+
+    一時ファイルは `mkstemp` で新しく作り、JSON の全体を 1 回で書く。中断で残る一時ファイルは、作っただけの空のファイルか、
+    `kind` の入った JSON のどちらかになり、掃除はその 2 つだけを NDF が作ったものとして消す（`_ours_tmp`）。"""
+    data = json.dumps(got.as_json(), ensure_ascii=False).encode("utf-8")
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=_SHARE_TMP)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as out:
-            out.write(json.dumps(got.as_json(), ensure_ascii=False))
+        with os.fdopen(fd, "wb") as out:
+            out.write(data)
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
@@ -414,10 +427,22 @@ def _drop_stale(path: Path, older_than: float, now: Callable[[], float]) -> None
         return
 
 
-def _drop_stale_tmp(path: Path, older_than: float, now: Callable[[], float]) -> None:
-    """中断で残った NDF の書きかけの一時ファイル `path` を、作ってから `older_than` 秒より長く経っていれば消す。"""
+def _ours_tmp(path: Path) -> bool:
+    """一時ファイル `path` を NDF が作ったと確かめられるか（空のファイルか、`kind` が `_SHARE_KIND` の JSON）。
+
+    中身のあるほかのファイルは、名前の形が同じでも利用者のものとして残す。空のファイルは消しても失う中身が無い。"""
     try:
-        if now() - path.stat().st_mtime > older_than:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない一時ファイルは NDF が作ったと確かめられないので残す
+        return False
+    return text == "" or _kind_of(text) is not None
+
+
+def _drop_stale_tmp(path: Path, older_than: float, now: Callable[[], float]) -> None:
+    """中断で残った一時ファイル `path` を、NDF が作ったと確かめられ（`_ours_tmp`）、作ってから `older_than` 秒より長く
+    経っていれば消す。"""
+    try:
+        if now() - path.stat().st_mtime > older_than and _ours_tmp(path):
             path.unlink(missing_ok=True)
     except OSError:  # noqa: NDF401 ファイル: 消えた一時ファイルは残す
         return
