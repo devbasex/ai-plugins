@@ -273,6 +273,24 @@ def test_sorting_prefers_the_report_on_a_changed_line(first: dict) -> None:
     assert (row["path"], row["line"]) == ("a.py", 10)
 
 
+@pytest.mark.parametrize(
+    "first",
+    [pytest.param({"severity": "critical"}, id="no-path"), pytest.param({"severity": "critical", "path": "a.py"}, id="file-only")],
+)
+def test_an_unparking_report_without_a_line_takes_the_line_of_another_report(first: dict) -> None:
+    journal, row = _parked()
+    journal.enter(3, [_told(**first), _told(path="a.py"), _told(path="a.py", line=7)])
+    assert (row["path"], row["line"]) == ("a.py", 7)
+
+
+def test_sorting_prefers_a_report_with_a_line_over_a_file_only_one() -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(2, [_told(path="a.py"), _told(**UNCHANGED)])
+    assert journal.sort(TOUCHED, {"r2-1"}) == frozenset()
+    row = journal.rows["r2-1"]
+    assert (row["path"], row["line"]) == ("a.py", 5)
+
+
 def test_the_thread_commit_of_a_moved_finding_is_the_head_of_the_placed_round() -> None:
     rounds = [{"round": 2, "head": "old"}, {"round": 3, "head": "new"}]
     assert threads._placed_head(rounds, {"round": 2}) == "old"

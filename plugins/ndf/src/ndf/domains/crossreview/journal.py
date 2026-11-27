@@ -426,10 +426,11 @@ class FindingJournal:
             touched[key] = known
             same.setdefault(str(known["id"]), []).append(item)
         for fid, item in unparked.items():
-            # 残していた行の位置は前の head の行番号なので、見送りを解いた出し直しのものにする。位置が無ければ、同じラウンドの
-            # ほかの出し直しから補う
-            places = map(_place, (item, *same[fid]))
-            _move(self.rows[fid], next((p for p in places if "path" in p), {}), round_no)
+            # 残していた行の位置は前の head の行番号なので、見送りを解いた出し直しのものにする。`path` か行番号が無ければ、同じ
+            # ラウンドのほかの出し直しから補う（`path` があれば、同じ `path` の出し直しからだけ）
+            own, *others = map(_place, (item, *same[fid]))
+            places = [own, *(p for p in others if own.get("path") in (None, p.get("path")))]
+            _move(self.rows[fid], max(places, key=lambda p: ("line" in p, "path" in p)), round_no)
         back = set(self.revived[before:])
         self.fresh = [fid for fid in dict.fromkeys(fresh) if _askable(self.rows[fid], same[fid], items, fid in back)]
         self.raised_ids, self._arrived, self._reports = list(same), frozenset(fresh), same
@@ -508,8 +509,8 @@ class FindingJournal:
         `unconfirmed` は判定役へ渡して有効な回答の無かった指摘の id。
 
         位置は今回の出し直しのものを 1 件ずつ当てる（残していた指摘の行の位置は、前の head の行番号である）。どれか 1 件が
-        進めば進める。指摘の行の位置は、進んだ出し直しのうち、変えた行を指すもの、`path` を持つものの順に選んで置き換える
-        （どれにも `path` が無ければ元の位置を残す。`_move`。#3780）。"""
+        進めば進める。指摘の行の位置は、進んだ出し直しのうち、変えた行を指すもの、行番号を持つもの、`path` を持つものの順に
+        選んで置き換える（どれにも `path` が無ければ元の位置を残す。`_move`。#3780）。"""
         parked: set[str] = set()
         for fid in self.raised_ids:
             row = self.rows[fid]
@@ -527,7 +528,8 @@ class FindingJournal:
                 parked.add(row["key"])
             else:
                 row.pop(PARKED, None)
-                _move(row, max(passed, key=lambda p: (leftover_decide.on_touched_line(p, touched), "path" in p)), self._round)
+                best = max(passed, key=lambda p: (leftover_decide.on_touched_line(p, touched), "line" in p, "path" in p))
+                _move(row, best, self._round)
         return frozenset(parked)
 
     def ingest_citations(
