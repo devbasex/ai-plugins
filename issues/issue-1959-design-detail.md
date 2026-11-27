@@ -249,7 +249,7 @@ src/ndf/
     - `reflected` は、`--candidate` を付けた `show` のうち、質問を作らない結果（`--question` を付けない呼び出しと、端末のコマンドを返す結果）にだけ入れる。質問を作る結果には入れない。質問を作る結果を受けた手順は、反映したかを使わないためである
   - 質問を出せるかの事前の確認: 読み手役の確認の記録（`ndf records reading add`）は、GitHub のリモートの `<所有者>/<リポジトリ>`（`Git.remote_repo()`）で記録する。`show` も `Git.remote_repo()` が求められるかで質問を出せるかを決める。求められない作業場所（リモートが無い・GitHub のリモートでないなど）では、記録を作れず質問を出しても止まるので、最初から端末のコマンドを返す
     - 費用: 質問を作るたびに、`Git.remote_repo()` が `git worktree list` と `git remote get-url` で git を 2 回起動する
-    - 共有のモジュール（`adapters/git.py`・hook の `strict.py`・`records/reading.py`）は変えない。記録は `git remote get-url`（`insteadOf` を当てた後）の URL から、guard `reading-check` の照合は `.git/config` に書いた URL から識別子を求めるので、`insteadOf` か `include` でリモートの URL を変えるリポジトリでは 2 つが食い違い、質問が止まる。この食い違いは A2b の前からある、範囲の外の不具合として別の課題で直す
+    - 共有のモジュール（`adapters/git.py`・hook の `strict.py`・`records/reading.py`）は変えない。記録は `git remote get-url`（`insteadOf` を当てた後）の URL から、guard `reading-check` の照合は `.git/config` に書いた URL から識別子を求めるので、`insteadOf` でリモートの URL を書き換えるリポジトリでは 2 つが食い違って質問が止まり、リモートの URL を `include` で読み込む設定ファイルに書いたリポジトリでは guard が識別子を求められず、確かめずに通す。この食い違いは A2b の前からある、範囲の外の不具合として別の課題で直す
   - 比べて採らなかった案は次の 2 つである
     - 確かめずに質問を作り、`reading add` が拒んだら Skill が端末の経路へ切り替える: 拒まれた後に `show` を打ち直すので起動が増え、手順書の分岐も増える
     - 記録・guard・`show` が同じ識別子を求める関数を共有のモジュールに足す: 単位 A2b の範囲（`launch-config` のコマンドと Skill）の外の変更になる
