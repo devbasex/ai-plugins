@@ -65,13 +65,19 @@ from ndf.domains.release import version_store as store_mod
 TOOL = cli.tool_of(__name__)
 
 
+def _cached_common_dir(args: argparse.Namespace) -> Optional[Path]:
+    """`args` に置いた共通の git ディレクトリのうち、今の `--root` で解決した値（無ければ None）。"""
+    cached = getattr(args, "_common_dir", None)
+    return cached[1] if cached is not None and cached[0] == Path(args.root) else None
+
+
 def _root_common_dir(args: argparse.Namespace) -> Optional[Path]:
     """`--root` の共通の git ディレクトリ（git の外なら None）。解決できた値は `--root` ごとに `args` に置いて使い回し、
     1 回の実行で設定・リモート名・リリース記録の共有の保存先を読むたびに git を起動し直さない。"""
+    cached = _cached_common_dir(args)
+    if cached is not None:
+        return cached
     root = Path(args.root)
-    cached = getattr(args, "_common_dir", None)
-    if cached is not None and cached[0] == root:
-        return cached[1]
     try:
         common = git_mod.Git(root).common_dir()
     except git_mod.GitError:  # noqa: NDF401 外部コマンド: git の外はメインディレクトリが無いので None
@@ -255,9 +261,7 @@ def _record_args(args: argparse.Namespace, strategy: branch_strategy.Strategy) -
 
 def _hands(args: argparse.Namespace) -> record_unversioned.Hands:
     # 共通の git ディレクトリは、先に設定を読んだとき（`_strategy`）に解決した値を使い、git を起動し直さない
-    cached = getattr(args, "_common_dir", None)
-    common = cached[1] if cached is not None and cached[0] == Path(args.root) else None
-    return record_unversioned.Hands(git_mod.Git(Path(args.root)), common=common)
+    return record_unversioned.Hands(git_mod.Git(Path(args.root)), common=_cached_common_dir(args))
 
 
 def _unversioned_result(args: argparse.Namespace, strategy: branch_strategy.Strategy, given: record_unversioned.Unversioned) -> dict:
