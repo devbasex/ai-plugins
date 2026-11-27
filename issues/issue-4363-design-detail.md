@@ -342,7 +342,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `enter` | `journal.py` | 変更 | `enter(self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = (), mvv: Optional[str] = None) -> frozenset[str]` | 今の登録に加え、このラウンドで新しく出たか戻った行の番号を `self.fresh` に残す。それらの行の本文・`impact`・位置は、出し直しをすべて重ねた後で、`impact` を持つ出し直しのうち最も重い 1 件のものにそろえる。戻った行で、どの出し直しにも `impact` が無いものは `self.fresh` に入れない |
+| `enter` | `journal.py` | 変更 | `enter(self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = (), mvv: Optional[str] = None) -> frozenset[str]` | 今の登録に加え、このラウンドで新しく出たか戻った行の番号を `self.fresh` に残す。それらの行の本文・`impact`・位置は、出し直しをすべて重ねた後で、`impact` を持つ出し直しのうち最も重い 1 件のものにそろえる。戻った行で、どの出し直しにも `impact` が無いものは `self.fresh` に入れない。承認や保護の根拠となる出し直しが無く、`impact` を持つ重い出し直しが違うパス・行・見出しを指す行は、それらを本文に書き足し、`self.fresh` に入れない |
 | `apply_checks` | `journal.py` | 新設 | `apply_checks(self, asked: Sequence[str], verdicts: Mapping[str, verify_decide.Verdict]) -> Checked` | 確認の結果を行に書き、下げる行を下げる |
 | `_raised_again` | `journal.py` | 変更 | シグネチャは変えない | 出し直しの `protect` を足し、下げた行の重要度の扱いを分ける |
 | `_revive` | `journal.py` | 変更 | シグネチャは変えない | 戻った行から `check` を外す（`protect` は残す） |

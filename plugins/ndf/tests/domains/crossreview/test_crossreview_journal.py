@@ -241,6 +241,17 @@ def test_issue_4363_finding_coming_back_without_impact_stays_major_and_is_not_as
 
 
 @pytest.mark.parametrize("order", [1, -1])
+def test_issue_4363_heavy_reports_at_different_places_are_kept_and_not_asked(order: int) -> None:
+    """同じ本文で別々の経路を指す重い報告は、1 つの経路の否定で下がらないように判定役へ渡さず、どの位置も本文に残す。"""
+    journal = drive.FindingJournal()
+    journal.enter(1, [_told(path="a.py", line=1), _told(path="b.py", line=2, by="kiro")][::order])
+    row = journal.rows["r1-1"]
+    assert (row["severity"], journal.fresh) == ("major", [])
+    other = "b.py:2" if row["path"] == "a.py" else "a.py:1"
+    assert other in row["text"]
+
+
+@pytest.mark.parametrize("order", [1, -1])
 @pytest.mark.parametrize("basis", [{"mvv": "C7"}, {"mvv": "Value 5"}, {"protect": ["irreversible"]}])
 def test_issue_4363_finding_keeps_the_text_and_the_place_of_the_report_that_marked_it(basis: dict, order: int) -> None:
     """承認や保護の根拠となる報告に 1 文が無くても、行は別の報告で上書きせず、1 文のある報告は本文に書き足す。"""

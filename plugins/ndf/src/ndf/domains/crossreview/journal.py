@@ -323,14 +323,15 @@ def _merge_reports(row: dict[str, Any], text: object) -> bool:
     return added
 
 
-def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]], items: Sequence[str]) -> bool:
+def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]], items: Sequence[str]) -> Optional[bool]:
     """このラウンドで新しく出たか戻った行の本文・1 文・位置を、出し直し 1 件のものにそろえ、判定役へ渡せる 1 文がこのラウンドに
     あるかを返す。`same` はこのラウンドのその指摘の出し直しである。
 
     承認や保護の根拠となる出し直し（`_report_rank`）があれば、利用者と修正担当に別の操作の説明を見せないよう、1 文が無くてもその
     1 件を使う。根拠の強さが同じなら 1 文を持つもの、次に重いもの、次に先のものを選ぶ。根拠が無ければ 1 文を持つもののうちで選び、
     1 件も無ければ何も変えない。指摘のキーは本文の先頭だけで決まるので、判定役がある報告の発生条件を別の報告の位置で確かめない
-    ためでもある。
+    ためでもある。根拠が無いのに、1 文を持つ重い出し直しが選んだ 1 件と違う位置（パス・行・見出し）にもあれば、それも本文に
+    書き足して None を返す。呼び手は判定役に渡さない（1 つの経路の否定で、ほかの経路の指摘まで下げないため）。
 
     根拠の 1 件を選んだときは、ほかの報告のうち次のものを本文に書き足す（`_add_report`）。必ず人の承認が要る操作を挙げた報告の
     すべてと、選んだ 1 件に 1 文が無いか、より重い場合の、1 文を持つ最も重い報告である。根拠のある指摘は確認で下げないので、
@@ -358,7 +359,22 @@ def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]], items:
     if rank[0]:
         for other in _other_reports(same, items, new if rank[1] else None):
             _add_report(row, other)
-    return told
+        return told
+    elsewhere = _heavy_elsewhere(row, same)
+    for other in elsewhere:
+        _add_report(row, other)
+    return None if elsewhere else told
+
+
+def _heavy_elsewhere(row: Mapping[str, Any], same: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """出し直し `same` のうち、重い扱いで、行と違う位置（パス・行・見出し）を示すもの。"""
+    out = []
+    for item in same:
+        new = _raised(dict(item))
+        place = new.get("path"), new.get("line"), _text(item.get("section"))
+        if criteria_decide.blocking(new["severity"]) and place != (row.get("path"), row.get("line"), row.get("section")):
+            out.append(item)
+    return out
 
 
 def _other_reports(same: Sequence[Mapping[str, Any]], items: Sequence[str], chosen: Optional[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
@@ -396,7 +412,7 @@ class FindingJournal:
         self.rows: dict[str, dict[str, Any]] = {str(f["id"]): f for f in rows if isinstance(f, dict) and "id" in f}
         # 直した・見送ったのに出し直されて未解決へ戻した指摘の id（呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
         self.revived: list[str] = []
-        # 最後の `enter` で新しく出たか戻った指摘の id（判定役へ渡す候補。1 文の無いまま戻った指摘は除く。#4363）
+        # 最後の `enter` で新しく出たか戻った指摘の id（判定役へ渡す候補。1 文の無いまま戻った指摘と、違う位置の重い報告が並ぶ指摘は除く。#4363）
         self.fresh: list[str] = []
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
@@ -417,7 +433,8 @@ class FindingJournal:
         直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら（同じラウンドの中でも）重い方を残す。
         収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。新しく出たか戻った行の本文・1 文・位置は、
         すべての指摘を重ねた後にそろえる（`_align_report`。承認や保護の根拠となる出し直しがあれば、その 1 件にする）。戻った指摘にこのラウンドの 1 文が 1 つも無ければ、行は前の 1 文と
-        重さを持ち続けるが、`fresh` に入れず判定役に渡さない（前の経路の 1 文で下げないため。#4363）。"""
+        重さを持ち続けるが、`fresh` に入れず判定役に渡さない（前の経路の 1 文で下げないため）。承認や保護の根拠が
+        無く、違う位置の重い報告が並ぶ指摘も `fresh` に入れない（`_align_report` が None を返す。#4363）。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
@@ -459,7 +476,7 @@ class FindingJournal:
             same.setdefault(str(known["id"]), []).append(item)
         back = set(self.revived[before:])
         told = {fid: _align_report(self.rows[fid], same[fid], items) for fid in dict.fromkeys(fresh)}
-        self.fresh = [fid for fid, aligned in told.items() if aligned or fid not in back]
+        self.fresh = [fid for fid, aligned in told.items() if aligned is not None and (aligned or fid not in back)]
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
 
