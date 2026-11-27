@@ -582,12 +582,17 @@ def _limit_hit(payload: dict, text: str) -> bool:
     return payload.get("api_error_status") == 429 or usage_limit(text) is not None
 
 
+def _total_cost(payload: Mapping[str, Any]) -> Optional[float]:  # 結果の `total_cost_usd` が真偽値でない数値ならその値、ほかは None
+    spent = payload.get("total_cost_usd")
+    return float(spent) if isinstance(spent, (int, float)) and not isinstance(spent, bool) else None
+
+
 def parse_reply(stdout: str) -> ClaudeReply:
     payload = _payload(stdout)
     if isinstance(payload, ClaudeReply):
         return payload
-    spent = payload.get("total_cost_usd")
-    cost = float(spent) if isinstance(spent, (int, float)) and not isinstance(spent, bool) else 0.0
+    spent = _total_cost(payload)
+    cost = 0.0 if spent is None else spent
     text = claude_body(payload, stdout)
     reply = _error_reply(payload, text, cost) if payload.get("is_error") else _answer_reply(payload, text, cost)
     return _with_usage(reply, payload)
@@ -595,13 +600,13 @@ def parse_reply(stdout: str) -> ClaudeReply:
 
 def _with_usage(reply: ClaudeReply, payload: Mapping[str, Any]) -> ClaudeReply:
     """回答に、使用量ログの行の元になる結果の値を持たせる。形の違う値は None にする（#1959）。"""
-    sid, usage, models, spent = (payload.get(k) for k in ("session_id", "usage", "modelUsage", "total_cost_usd"))
+    sid, usage, models = (payload.get(k) for k in ("session_id", "usage", "modelUsage"))
     return reply._replace(
         denials=claude_denials(payload),
         session_id=sid if isinstance(sid, str) and sid else None,
         usage=usage if isinstance(usage, Mapping) else None,
         model_usage=models if isinstance(models, Mapping) else None,
-        session_cost_usd=float(spent) if isinstance(spent, (int, float)) and not isinstance(spent, bool) else None,
+        session_cost_usd=_total_cost(payload),
     )
 
 
