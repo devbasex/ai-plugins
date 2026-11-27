@@ -142,6 +142,7 @@ class _Run:
     mvv: Optional[str] = None
     mvv_branch: Optional[str] = None
     base_branch: str = ""  # 差分の比較元のブランチ（`follow_base` なら PR の今のマージ先。ラウンドの記録に残す。#3702）
+    followed: Optional[str] = None  # `follow_base` の比較元。同じマージ先のラウンドと詳細レビューの記録だけを使う（#3702）
     # PR に届いたと分かっている最後のコミット（始めの同期で取得した先頭か、この起動で送ったコミット）
     sent: str = ""
     # 始めに読めて、head ブランチとその先頭がレビューするブランチの取得した先頭と一致した PR
@@ -322,6 +323,7 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide
         mvv=snap.identity,
         mvv_branch=based.branch,
         base_branch=based.branch,
+        followed=based.branch if cfg.follow_base else None,
         sent=synced.remote,
         remote=based.remote,
         synced_head=synced.remote,
@@ -779,7 +781,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     changed = changes.changed(run.g, cfg.base_commit, cfg.worktree)
     _oversized_docs(run, changed.docs)
     run.documents = any(p.endswith(".md") for p in changed.files)
-    reviewed = scope_decide.reviewed_of(run.data, run.mvv, _followed_base(run))
+    reviewed = scope_decide.reviewed_of(run.data, run.mvv, run.followed)
     sections = changes.sections(changed.docs)
     head = run.g.rev_parse("HEAD")
     merge_base = _merge_base(run, head)
@@ -823,14 +825,7 @@ def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
     unit = scope_decide.unit_id(run.cfg.unit)
     # 確認を求める起動は、読んだ PR が無ければラウンドの前に止まっている
     pr = run.read_pr.ident if run.cfg.check_pr and run.read_pr is not None else None
-    branch = _followed_base(run)
-    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr, branch)
-
-
-def _followed_base(run: _Run) -> Optional[str]:
-    """マージ先に合わせる起動の比較元のブランチ（合わせない起動は None）。この起動は、同じマージ先と比べたラウンドと詳細レビューの
-    記録だけを使う（変われば新しいマージ先との全差分を読み、そのセクションを詳細レビューに通す。#3702）。"""
-    return run.base_branch if run.cfg.follow_base else None
+    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr, run.followed)
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
@@ -909,8 +904,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         return fin.INCOMPLETE_REVIEWERS
     if prep.scope.kind == scope_decide.FULL:
         run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
-        run.data[store.REVIEWED_MVV] = run.mvv
-        run.data[store.REVIEWED_BASE_BRANCH] = run.base_branch
+        run.data.update({store.REVIEWED_MVV: run.mvv, store.REVIEWED_BASE_BRANCH: run.base_branch})
     open_, handed = run.journal.pending(run.cfg.handed)
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:

@@ -119,7 +119,7 @@
         },
         "--verify-merged": {
           "type": "boolean",
-          "description": "--approved-head・--approved-base と組で渡す。マージ済みの PR も HEAD とマージ先を承認の値と照らし、違えば refused で止まる"
+          "description": "--pr・--approved-head・--approved-base と組で渡す。指定した PR がマージ済みの場合も、HEAD とマージ先が承認時の値と同じかを確かめる。値が違えば refused で止まる"
         },
         "--required": {
           "type": "array",
@@ -190,7 +190,7 @@
         },
         "--head": {
           "type": "string",
-          "description": "待つ PR の HEAD。このコミットのチェックだけを読み、作業場所の HEAD は追わない。待ちの開始か成功の確定の時点で PR の HEAD が違えば approval_stale で止まる"
+          "description": "待つ PR の HEAD。このコミットのチェックだけを読み、作業場所の HEAD は追わない。待ちの開始か成功の確定の時点で PR の HEAD が違えば approval_stale で止まる。成功を確定する前に PR を 1 回読み直すので、成功 1 回につき PR を読む GitHub API の呼び出しが 1 回増える（待つ間に HEAD が動けば、読んだチェックの結果は承認した HEAD のものと言えないため）"
         }
       },
       "required": [

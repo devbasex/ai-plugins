@@ -66,7 +66,9 @@ def _watch_parser(sub: Any) -> None:
     w.add_argument(
         "--head",
         help="待つ PR の HEAD。このコミットのチェックだけを読み、作業場所の HEAD は追わない。"
-        "待ちの開始か成功の確定の時点で PR の HEAD が違えば approval_stale で止まる",
+        "待ちの開始か成功の確定の時点で PR の HEAD が違えば approval_stale で止まる。"
+        "成功を確定する前に PR を 1 回読み直すので、成功 1 回につき PR を読む GitHub API の呼び出しが 1 回増える"
+        "（待つ間に HEAD が動けば、読んだチェックの結果は承認した HEAD のものと言えないため）",
     )
     w.set_defaults(run=_watch)
 
@@ -104,7 +106,8 @@ def _parser() -> argparse.ArgumentParser:
     m.add_argument(
         "--verify-merged",
         action="store_true",
-        help="--approved-head・--approved-base と組で渡す。マージ済みの PR も HEAD とマージ先を承認の値と照らし、違えば refused で止まる",
+        help="--pr・--approved-head・--approved-base と組で渡す。指定した PR がマージ済みの場合も、HEAD とマージ先が承認時の値と"
+        "同じかを確かめる。値が違えば refused で止まる",
     )
     m.add_argument(
         "--required",
@@ -590,8 +593,9 @@ def _invalid_args(args: argparse.Namespace) -> Optional[dict]:
         return result.stopped(TOOL, "invalid", "--branch か --pr のどちらかを渡す")
     if (args.approved_head is None) != (args.approved_base is None):
         return result.stopped(TOOL, "invalid", "--approved-head と --approved-base は組で渡す")
-    if args.verify_merged and args.approved_head is None:
-        return result.stopped(TOOL, "invalid", "--verify-merged は --approved-head・--approved-base と組で渡す")
+    if args.verify_merged and (args.pr is None or args.approved_head is None):
+        # 番号を渡さない経路は開いている PR しか探さないので、マージ済みの PR を承認の値と照らせない（#3702）
+        return result.stopped(TOOL, "invalid", "--verify-merged は --pr・--approved-head・--approved-base と組で渡す")
     if args.required and args.budget is None:
         return result.stopped(TOOL, "invalid", "--required を渡すときは --budget も渡す")
     return None

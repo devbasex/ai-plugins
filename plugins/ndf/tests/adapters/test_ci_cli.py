@@ -838,9 +838,13 @@ def test_issue_3702_without_verify_merged_a_merged_pr_is_ok_as_before(monkeypatc
     assert _out(capsys, last_result)["metrics"]["merge"] == "already"
 
 
-def test_issue_3702_verify_merged_needs_the_approved_target(monkeypatch, capsys, last_result) -> None:
+@pytest.mark.parametrize(
+    "argv", [["--pr", "7", "--verify-merged"], ["--branch", "feature", *APPROVED, "--verify-merged"]], ids=["no-approved", "no-pr"]
+)
+def test_issue_3702_verify_merged_needs_the_pr_and_the_approved_target(monkeypatch, capsys, last_result, argv: list[str]) -> None:
+    """番号を渡さない経路は開いている PR しか探さないので、`--pr` も承認の値も無ければ GitHub を読まずに invalid。"""
     hub = _use(monkeypatch, merge_hub.MergeHub(pulls_of={7: merge_hub.pull(merged=True)}))
-    assert ci_cli.main(["merge", "--pr", "7", "--verify-merged"]) == causes.exit_code("invalid")
+    assert ci_cli.main(["merge", *argv]) == causes.exit_code("invalid")
     assert hub.calls == []
 
 
