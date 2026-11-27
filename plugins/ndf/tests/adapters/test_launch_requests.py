@@ -567,7 +567,7 @@ def test_a_short_write_is_retried_as_a_whole_line_without_breaking_other_rows(tm
 
 
 def _matching_request(tmp_path: Path, label: str | None) -> tuple[Path, Path]:
-    """候補に依頼を作り（`label` が None なら回答待ち）、別の編集で反映先を候補と同じ中身にする。"""
+    """候補にリクエストを作り（`label` が None なら回答待ち）、別の編集で反映先を候補と同じ中身にする。"""
     target = _worktree(tmp_path)
     candidate = _candidate(target)
     _asked(target, candidate=candidate, label=label)
@@ -577,7 +577,7 @@ def _matching_request(tmp_path: Path, label: str | None) -> tuple[Path, Path]:
 
 @pytest.mark.parametrize("label", [None, la.APPROVE_LABEL.format("人")])
 def test_a_candidate_with_a_request_still_usable_is_neither_set_aside_nor_listed(tmp_path, label):
-    """回答待ちか承認済みで、まだ使える依頼の候補は、反映先と同じ中身でも掃除せず、人が答えた後の approve で反映を済ませられる。"""
+    """回答待ちか承認済みで、まだ使えるリクエストの候補は、反映先と同じ中身でも掃除せず、人が回答した後の approve で反映を済ませられる。"""
     target, candidate = _matching_request(tmp_path, label)
     assert la.new_candidate("/r", target).cleanup_targets == [] and la.cleanup_targets("/r") == []
     assert candidate.exists()
@@ -587,7 +587,7 @@ def test_a_candidate_with_a_request_still_usable_is_neither_set_aside_nor_listed
 
 
 def test_a_candidate_whose_approval_was_revoked_after_the_request_is_swept(tmp_path):
-    """依頼の後に同じ内容を取り消した候補は、答えが使えないので、反映先と同じ中身なら片付ける。"""
+    """リクエストの後に同じ内容を取り消した候補は、回答が使えないので、反映先と同じ中身なら片付ける。"""
     target, candidate = _matching_request(tmp_path, la.APPROVE_LABEL.format("人"))
     la.append("/r", SHA, la.Action.REVOKE)
     la.new_candidate("/r", target)
@@ -635,7 +635,7 @@ def test_a_record_replaced_by_a_fifo_after_the_ownership_check_does_not_stop_dra
 
 
 def test_an_approved_candidate_that_can_no_longer_be_placed_is_swept(tmp_path):
-    """答えで承認の行を書いた候補でも、反映先が反映元の版とも候補とも違えば反映できないので、作ったときの中身のままなら片付ける。"""
+    """回答で承認の行を書いた候補でも、反映先が反映元のバージョンとも候補とも違えば反映できないので、作ったときの中身のままなら片付ける。"""
     target = _worktree(tmp_path)
     candidate = la.new_candidate("/r", target).candidate
     _asked(target, candidate=candidate)
@@ -647,7 +647,7 @@ def test_an_approved_candidate_that_can_no_longer_be_placed_is_swept(tmp_path):
 
 
 def test_the_sweep_reads_the_approvals_only_when_a_candidate_has_a_request(tmp_path, monkeypatch):
-    """依頼の無い候補しか無い掃除は、承認の記録を読まない。"""
+    """リクエストの無い候補しか無い掃除は、承認の記録を読まない。"""
     target = _worktree(tmp_path)
     la.new_candidate("/r", target)
     target.write_bytes(NEW)

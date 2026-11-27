@@ -265,7 +265,7 @@ def approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]:
 
 
 class _Requests:
-    """依頼の履歴を 1 回だけ走査して作る索引。`by_id` は依頼の識別子ごと、`latest` は候補ごと、`newest` は反映先ごとの最新の位置。
+    """リクエストの履歴を 1 回だけ走査して作る索引。`by_id` はリクエストの識別子ごと、`latest` は候補ごと、`newest` は反映先ごとの最新の位置。
 
     キーに使う欄（識別子・反映先・候補と、承認の記録を引くリポジトリのキー・ハッシュ）の型が壊れた行は `rows` に入れない
     （位置は `rows` の中の位置）。型の検査と索引の更新は同じ 1 回の走査で行う。
@@ -287,14 +287,14 @@ class _Requests:
                 self.latest[row.get("candidate")] = i
 
     def newer(self, index: int) -> bool:
-        """`rows[index]` と同じ反映先に、より新しい依頼があるか。"""
-        return self.newest.get(self.rows[index].get("target"), index) > index
+        """`rows[index]` と同じ反映先に、より新しいリクエストがあるか。"""
+        return self.newest[self.rows[index].get("target")] > index  # 索引に入れた行は、どれも自分の反映先の位置を `newest` に持つ
 
 
 class _Approvals:
     """承認の記録を 1 回だけ走査して作る索引。内容（リポジトリのキーとハッシュ）ごとの最後の操作と最後の取り消しの位置、
-    依頼ごとの最後の承認の行を持つ。キーに使う欄（依頼の識別子・リポジトリのキー・ハッシュ）の型が壊れた行は飛ばす。位置は記録の
-    全体の行で数える（依頼の `approvals_seen` は記録の全体の行数なので）。"""
+    リクエストごとの最後の承認の行を持つ。キーに使う欄（リクエストの識別子・リポジトリのキー・ハッシュ）の型が壊れた行は飛ばす。位置は記録の
+    全体の行で数える（リクエストの `approvals_seen` は記録の全体の行数なので）。"""
 
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self.last_action: dict[tuple[Any, Any], Any] = {}
@@ -314,21 +314,22 @@ class _Approvals:
         return self.last_action.get((repo, sha256)) == Action.APPROVE
 
     def used_row(self, req: Mapping[str, Any]) -> Optional[dict[str, Any]]:
-        """依頼 `req` の答えで書いた最後の承認の行（同じ依頼の識別子・リポジトリ・ハッシュ）。無ければ None。"""
+        """リクエスト `req` の回答で書いた最後の承認の行（同じリクエストの識別子・リポジトリ・ハッシュ）。無ければ None。"""
         return self.used.get((req.get("request_id"), req.get("repo"), req.get("sha256")))
 
     def revoked_after(self, req: Mapping[str, Any]) -> bool:
-        """依頼を作った時点の承認の記録の行数（`approvals_seen`）より後ろに、同じ内容の `revoke` があるか。行数が無ければ全体を見る。"""
+        """リクエストを作った時点の承認の記録の行数（`approvals_seen`）より後ろに、同じ内容の `revoke` があるか。行数が無ければ全体を見る。"""
         seen = req.get("approvals_seen")
         start = seen if isinstance(seen, int) and not isinstance(seen, bool) and seen >= 0 else 0
-        return self.last_revoke.get((req.get("repo"), req.get("sha256")), -1) >= start
+        key = (req.get("repo"), req.get("sha256"))
+        return key in self.last_revoke and self.last_revoke[key] >= start
 
 
 def _lapsed(requests: _Requests, index: int, approvals: _Approvals, now: Optional[str]) -> bool:
-    """依頼 `requests.rows[index]` の答えが、設計書の「人の確認」の表のとおり使えなくなったか。`now` は反映先の今のバージョン。
+    """リクエスト `requests.rows[index]` の回答が、設計書の「人の確認」の表のとおり使えなくなったか。`now` は反映先の今のバージョン。
 
-    同じ反映先により新しい依頼がある・反映先が依頼の反映元の版とも候補とも違う・依頼の後に同じ内容の `revoke` がある、のどれか。
-    依頼の後の取り消しは、依頼を作った時点の承認の記録の行数より後ろの行で見分ける（時刻は秒の単位なので、同じ秒の取り消しと
+    同じ反映先により新しいリクエストがある・反映先がリクエストの反映元のバージョンとも候補とも違う・リクエストの後に同じ内容の `revoke` がある、のどれか。
+    リクエストの後の取り消しは、リクエストを作った時点の承認の記録の行数より後ろの行で見分ける（時刻は秒の単位なので、同じ秒の取り消しと
     区別できない）。`approve_by_answer` と掃除（`_live`）が同じ条件を使う。
     """
     req = requests.rows[index]
@@ -337,7 +338,7 @@ def _lapsed(requests: _Requests, index: int, approvals: _Approvals, now: Optiona
 
 
 class _History:
-    """掃除が 1 回ずつ読んだ、依頼・回答の記録の索引。承認の記録は、照らす候補が出たときに初めて読む（`approvals`）。"""
+    """掃除が 1 回ずつ読んだ、リクエスト・回答の記録の索引。承認の記録は、照らす候補が出たときに初めて読む（`approvals`）。"""
 
     def __init__(self) -> None:
         self.requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
@@ -352,12 +353,12 @@ class _History:
 
 
 def _live(history: _History, candidate: Path, now: Optional[str], current: Callable[[], Optional[str]]) -> bool:
-    """候補の最新の依頼が、まだ人の答えでこの候補の反映まで済ませられるか。`now` は反映先の今のバージョン、`current` は候補の今のバージョンを返す。
+    """候補の最新のリクエストが、まだ人の回答でこの候補の反映まで済ませられるか。`now` は反映先の今のバージョン、`current` は候補の今のバージョンを返す。
 
-    真になるのは、その依頼の反映の完了の記録が無く、次のどちらかのときである。依頼の答えで書いた承認の行があり、その内容が
-    承認済みで、反映先が依頼の反映元の版か候補の今の中身と同じ（`reflect` がこの候補を置けるか、置いたものとして済ませられる）。
-    または、答えが「承認しない」でなく（回答待ちを含む）、`_lapsed` に当たらない。この候補は、人が答えた後の `approve --candidate`
-    が承認を済ませる入口なので、掃除は退避も一覧への掲載もしない。
+    真になるのは、そのリクエストの反映の完了の記録が無く、次のどちらかのときである。リクエストの回答で書いた承認の行があり、その内容が
+    承認済みで、反映先がリクエストの反映元のバージョンか候補の今の中身と同じ（`reflect` がこの候補を置けるか、置いたものとして済ませられる）。
+    または、回答が「承認しない」でなく（回答待ちを含む）、`_lapsed` に当たらない。この候補は、人が回答した後の `approve --candidate`
+    が承認を済ませるエントリポイントなので、掃除は退避も一覧への掲載もしない。
     """
     index = history.requests.latest.get(str(candidate))
     if index is None:
@@ -417,7 +418,7 @@ def _stamped_version(made: Path, stamp: frozenset[tuple[str, int, int, int]]) ->
         read = _read_regular(made / CANDIDATE_NAME)
     except FileNotFoundError:  # 無い候補は「無し」のバージョン。調べた時にあった候補が消えていれば、同じ状態ではない
         return all(entry[0] != CANDIDATE_NAME for entry in stamp), None
-    except OSError:  # noqa: NDF401 ファイル: 読めない候補は、その候補だけを掃除から外す（呼び手が飛ばす）
+    except OSError:  # 読めない候補は、その候補だけを掃除から外す（呼び手が飛ばす）
         return False, None
     return (CANDIDATE_NAME, *read.ident[1:]) in stamp, hashlib.sha256(read.data).hexdigest()
 
@@ -606,7 +607,7 @@ def _ownership(folder: Path, known: Optional[Mapping[str, Optional[_Read]]] = No
     if found is None:
         return None
     top, stats = found
-    known = known or {}
+    known = {} if known is None else known
     present = {name for name, _ in stats}
     if any(read is not None and name not in present for name, read in known.items()):
         return None
@@ -743,12 +744,12 @@ def _sweep_reasons(home: Path) -> dict[Path, _Due]:
     上から順に当てはめ、最初に当たった理由だけを使う。最新のリクエストに「承認しない」と回答した（`denied`）。反映先の worktree が
     無い（`worktree_gone`）。反映先が反映元のバージョンから変わり、候補の中身が反映先の今の中身と一致する（`reflected`。比べる
     バージョンに反映先の今の中身を足す。反映の完了の記録は照らさない）。反映先が反映元のバージョンから変わった（`outdated`。この
-    候補では `reflect` が拒む）。後の 2 つは、否認の後に作り直したリクエストの候補にも当てはめる。ただし、まだ人の答えで
+    候補では `reflect` が拒む）。後の 2 つは、否認の後に作り直したリクエストの候補にも当てはめる。ただし、まだ人の回答で
     承認を済ませられるリクエスト（`_live`。回答待ちを含む）の候補は、どちらの理由にもしない。「承認しない」の判定は
-    候補ごとの最新のリクエストで行う。直したかどうかはここでは見ない（片付ける側が `_untouched` か読んだ `current` で見る）。
+    候補ごとの最新のリクエストで行う。直したかどうかはここでは見ない（片付ける側の `_discard` か、読んだ `current` で見る）。
 
-    依頼の否認、worktree の有無、反映先のバージョンから、片付けの対象になり得る候補を絞り、当たらない候補のディレクトリは
-    調べない。候補の中身が要る判定（承認済みの依頼がまだ使えるか、`reflected` か `outdated` か）では、先に NDF が作ったもの
+    リクエストの否認、worktree の有無、反映先のバージョンから、片付けの対象になり得る候補を絞り、当たらない候補のディレクトリは
+    調べない。候補の中身が要る判定（承認済みのリクエストがまだ使えるか、`reflected` か `outdated` か）では、先に NDF が作ったもの
     だけかを確かめ（`_ownership`）、候補を読んでから決める。そうでない候補と、過去の反映先か候補が普通のファイルでなく読めない候補は外す。各候補の
     `source.json` は 1 回だけ読む。リクエストの履歴・回答の履歴・承認の記録・候補の一覧は 1 回ずつ読み、反映先のバージョンは反映先ごとに
     1 回だけ求める。
@@ -787,9 +788,9 @@ def _moved_target(
 ) -> Optional[_Due]:
     """反映先が反映元のバージョンから変わった候補の判定（`reflected` か `outdated`）。変わっていないか、反映先か候補を読めなければ None。
 
-    反映先のバージョンは `versions` に残し、同じ反映先の候補では読み直さない。まだ人の答えでこの候補の反映まで済ませられる依頼
-    （`_live`。回答待ちと、答えで書いた承認の行があり反映が済んでいない依頼を含む）の候補は、どちらの理由にもしない（人が答えた後の
-    `approve --candidate` がこの候補で承認を済ませる）。`_live` は履歴と反映先だけで決まれば候補を読まず、承認済みの依頼で
+    反映先のバージョンは `versions` に残し、同じ反映先の候補では読み直さない。まだ人の回答でこの候補の反映まで済ませられるリクエスト
+    （`_live`。回答待ちと、回答で書いた承認の行があり反映が済んでいないリクエストを含む）の候補は、どちらの理由にもしない（人が回答した後の
+    `approve --candidate` がこの候補で承認を済ませる）。`_live` は履歴と反映先だけで決まれば候補を読まず、承認済みのリクエストで
     候補の今のバージョンが結果を左右するときだけ `look` を呼ぶ。`look` は NDF の作ったものだけと確かめてから候補を読み、結果を
     残すので、続く判定では読み直さない。
     """
@@ -1006,7 +1007,7 @@ def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> Non
 
     先に前の掃除が退避した候補を片付ける（`_reclaim`）。そこで元の名前へ戻した候補は、この掃除では退避しない。反映した候補は、反映した中身か作った時の中身のままなら退避する。
     ほかの候補は、作った時の中身のままのものだけを退避する。作った後に直した候補は、反映元が変わっても残す（書いた設定案を
-    失わないため）。まだ人の答えで承認を済ませられる依頼の候補（`_live`）も、`draft` の掃除と同じく退避しない。退避した候補は次の掃除が比べ直してから消す。
+    失わないため）。まだ人の回答で承認を済ませられるリクエストの候補（`_live`）も、`draft` の掃除と同じく退避しない。退避した候補は次の掃除が比べ直してから消す。
     """
     _write_done(target, rec)
     now = content_version(target)
