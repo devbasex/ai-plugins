@@ -677,16 +677,22 @@ def test_the_placing_copy_is_removed_after_a_forced_stop_or_a_failed_write(tmp_p
     assert not made[0].exists() and target.read_bytes() == OLD and users.exists()
 
 
-def test_the_cleanup_keeps_a_file_the_record_names_but_ndf_did_not_make(tmp_path):
-    """途中の記録が名前を残していても、記録した実体と違い空でもないファイルは、利用者の作ったものかもしれないので消さない（Value 6）。"""
+@pytest.mark.parametrize("body", [b'{"version": 1, "mine": 1}\n', b""])
+def test_the_cleanup_keeps_a_file_the_record_names_but_ndf_did_not_make(tmp_path, body):
+    """途中の記録が名前を残していても、記録した実体と違うファイルは、利用者の作ったものかもしれないので消さない（Value 6）。
+
+    空のファイルで実体の記録が無い場合（名前を記録した後に利用者の空のファイルと重なり、次の名前を記録する前に止まった）も消さない。
+    """
     target, _, aside = _interrupted(tmp_path)
     aside.unlink()
     users = target.with_name(".launch.json.placing-" + "0" * 32)
-    users.write_bytes(b'{"version": 1, "mine": 1}\n')
-    pending = la.read_launch_record(la.reflected_file(target, la.PENDING))
+    users.write_bytes(body)
+    pending = dict(la.read_launch_record(la.reflected_file(target, la.PENDING)))
+    if not body:
+        pending.pop("placed", None)
     lc.write_launch_record(la.reflected_file(target, la.PENDING), {**pending, "placing": str(users)})
     la.recover(target)
-    assert users.read_bytes() == b'{"version": 1, "mine": 1}\n'
+    assert users.read_bytes() == body
 
 
 def test_an_interruption_after_removing_the_aside_still_reports_the_saved_path(tmp_path, monkeypatch):

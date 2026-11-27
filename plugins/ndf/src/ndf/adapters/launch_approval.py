@@ -12,7 +12,6 @@ import functools
 import hashlib
 import json
 import os
-import stat
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -752,8 +751,9 @@ _PLACING_HEAD = ".{}.placing-"
 def _drop_placing(target: Path, rec: Mapping[str, Any]) -> None:
     """途中の記録 `rec` が名前を残した一時ファイルのうち、NDF が作ったと確かめられるものを消す。
 
-    確かめる条件は、記録した実体（`placed`）と同じか、実体を記録する前に止まった空のファイルである（中身は実体を記録した後に書く）。
-    名前が記録に無い・反映先と別のディレクトリ・頭が違う・条件に当たらないファイルは消さない（利用者の作ったものかもしれないため）。
+    確かめる条件は、記録した実体（`placed`）と同じことだけである。実体を記録する前に止まった場合は、その名前のファイルが空でも消さない。
+    名前が重なった利用者の空のファイルと見分けられないためで、NDF が作った空のファイルが残っても中身（設定案の写し）は無い。
+    名前が記録に無い・反映先と別のディレクトリ・頭が違う・実体が違うファイルも消さない（利用者の作ったものかもしれないため）。
     """
     name = rec.get("placing")
     if not isinstance(name, str):
@@ -765,9 +765,7 @@ def _drop_placing(target: Path, rec: Mapping[str, Any]) -> None:
         found = os.lstat(tmp)
     except FileNotFoundError:  # noqa: NDF401 ファイル: 一時ファイルが無ければ片付けるものも無い
         return
-    mark = rec.get("placed")
-    ours = mark == [found.st_dev, found.st_ino] if mark is not None else (stat.S_ISREG(found.st_mode) and found.st_size == 0)
-    if ours:
+    if rec.get("placed") == [found.st_dev, found.st_ino]:
         tmp.unlink(missing_ok=True)
 
 
