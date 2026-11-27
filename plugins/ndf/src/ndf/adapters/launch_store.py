@@ -121,13 +121,8 @@ def _weights(path: Path, now: datetime) -> Optional[tuple[Optional[dict[str, Any
     """出現率のファイルの中身と、期限の前の項目。ファイルが無ければ (None, [])、壊れていれば None。"""
     if not path.is_file():
         return None, []
-    return _parsed_weights(path.read_bytes(), now)
-
-
-def _parsed_weights(raw: bytes, now: datetime) -> Optional[tuple[Optional[dict[str, Any]], list[Any]]]:
-    """出現率のファイルの中身 `raw` と、期限の前の項目。NDF の書く形でなければ None。"""
     try:
-        data = json.loads(raw.decode("utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
         return data, [e for e in data["entries"] if not past(e, now)]
     except (ValueError, KeyError, TypeError):  # noqa: NDF401 ファイル: 壊れた出現率のファイルは出現率の計算が作り直す
         return None
@@ -152,15 +147,11 @@ def _store_lock(base: Path, *, shared: bool = True) -> ReadWriteLock:
 
 
 @contextmanager
-def _as_store_error(path: Path, *, acquiring: bool = False) -> Iterator[None]:
-    """共有ロックの SQLite の失敗（壊れたデータベース・読み書きの誤り）を `OSError` に変える。呼び手は記録の失敗として起動を続ける。
-
-    取るとき（`acquiring`）は、filelock がロックに使えないと拒むデータベース（WAL モード・大きすぎるスキーマ）の `ValueError` も変える。
-    """
-    refused: tuple[type[Exception], ...] = (sqlite3.Error, ValueError) if acquiring else (sqlite3.Error,)
+def _as_store_error(path: Path) -> Iterator[None]:
+    """共有ロックの SQLite の失敗（壊れたデータベース・読み書きの誤り）を `OSError` に変える。呼び手は記録の失敗として起動を続ける。"""
     try:
         yield
-    except refused as exc:
+    except sqlite3.Error as exc:
         raise OSError(f"保存先の共有ロック {path} を使えない: {exc}") from exc
 
 
@@ -168,7 +159,7 @@ def _as_store_error(path: Path, *, acquiring: bool = False) -> Iterator[None]:
 def using(base: Path, timeout: float) -> Iterator[None]:
     """保存先 `base` の共有ロックを読み手で持つ。リポジトリのディレクトリのロックは、この中で取る。回収が終わるのを最長 `timeout` 秒待つ。"""
     path = store_file(base, STORE_LOCK)
-    with _as_store_error(path, acquiring=True):
+    with _as_store_error(path):
         lock = _store_lock(base)
         lock.acquire_read(timeout, blocking=timeout > 0)
     try:
@@ -207,40 +198,21 @@ def sweep(base: Path, now: datetime, own: Path, edge: datetime) -> None:
 def _pruned_month(root: Path) -> Optional[str]:
     """リポジトリの月の掃除が `launch-pruned` に書いた月。無いか月の形でなければ None。"""
     path = store_file(root, PRUNED)
-    return _month_in(path.read_bytes(), path) if path.is_file() else None
-
-
-def _month_in(raw: bytes, path: Path) -> Optional[str]:
-    """掃除の記録 `path` の中身 `raw` の月。月の形でない（UTF-8 として読めないものを含む）なら None。"""
-    try:
-        text = raw.decode("utf-8").strip()
-    except UnicodeDecodeError:  # noqa: NDF401 ファイル: NDF が書いた記録でないものは、掃除の記録が無いものとして扱う
-        log.warning("掃除の記録を UTF-8 として読めないので、このリポジトリは記録が無いものとして扱う: %s", path)
-        return None
+    text = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
     return text if _MONTH_FORM.fullmatch(text) else None
 
 
-def _idle(root: Path, fd: int, files: Mapping[str, os.stat_result], now: datetime) -> bool:
-    """回収してよいか。共有ロックを書き手で持つ間に、開いたディレクトリ `fd`（`root`）の最新の状態を読んで確かめる。
+def _idle(root: Path, now: datetime) -> bool:
+    """回収してよいか。共有ロックを書き手で持つ間に、最新の状態を読んで確かめる。
 
-    `files` は `_ndf_files` が確かめた NDF のファイル（名前 → 状態）。`launch-pruned` に記録された最後の掃除の月が先月より前で、
-    出現率のファイルが無いか、NDF の書く形で期限の前の項目を持たないもの。
+    `launch-pruned` に記録された最後の掃除の月が先月より前で、ディレクトリの中が NDF の作るファイル（`_ndf_files`）だけで、
+    期限の前の出現率の項目が無いもの。
     """
-    pruned, weights = (store_file(root, n) for n in (PRUNED, WEIGHTS))
-    last = _month_in(_read_at(fd, pruned.name), pruned) if pruned.name in files else None
-    if last is None or last >= month(month_start(month(now), -1)):
+    last = _pruned_month(root)
+    if last is None or last >= month(month_start(month(now), -1)) or _ndf_files(root) is None:
         return False
-    if weights.name not in files:
-        return True
-    got = _parsed_weights(_read_at(fd, weights.name), now)
+    got = _weights(store_file(root, WEIGHTS), now)
     return got is not None and not got[1]
-
-
-def _read_at(fd: int, name: str) -> bytes:
-    """開いたディレクトリ `fd` の中のファイル `name` を、シンボリックリンクをたどらずに読む。"""
-    file_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
-    with os.fdopen(file_fd, "rb") as f:
-        return f.read()
 
 
 def _tidied(root: Path, now: datetime, edge: datetime) -> bool:
@@ -280,11 +252,11 @@ def _reclaim(base: Path, roots: list[Path], now: datetime) -> None:
     """保存先の共有ロックを書き手として待たずに取り、候補 `roots` を 1 つずつ確かめ直して回収する。取れなければ翌月に回す。
 
     書き手を持つ間は、どの起動もリポジトリのディレクトリのロックを持たず、待ってもいないので、ロックのファイルも消せる。
-    1 つの候補で失敗しても警告を出して次の候補へ進む。途中で例外が出ても、書き手を返してからデータベースを閉じる。
+    1 つの候補で失敗しても警告を出して次の候補へ進む。
     """
     path = store_file(base, STORE_LOCK)
     try:
-        with _as_store_error(path, acquiring=True):
+        with _as_store_error(path):
             lock = _store_lock(base, shared=False)
             lock.acquire_write(timeout=0, blocking=False)
     except Timeout:
@@ -293,64 +265,47 @@ def _reclaim(base: Path, roots: list[Path], now: datetime) -> None:
     except OSError as exc:
         log.warning("保存先の共有ロックを取れないので、役目を終えたリポジトリの回収を翌月に回す: %s", exc)
         return
+    for root in roots:
+        _reclaim_repo(root, now)
     try:
-        base_fd = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            for root in roots:
-                _reclaim_repo(base_fd, root, now)
-        finally:
-            os.close(base_fd)
-    finally:
-        _let_go(lock, path)
+        with _as_store_error(path):
+            lock.release()
+            lock.close()
+    except OSError as exc:
+        log.warning("保存先の共有ロックを返せない（プロセスの終了で外れる）: %s", exc)
 
 
-def _let_go(lock: ReadWriteLock, path: Path) -> None:
-    """書き手を返し、返せなくてもデータベースを閉じる（閉じれば書き手も外れる）。どちらの失敗も警告にとどめる。"""
-    for step in (lock.release, lock.close):
-        try:
-            with _as_store_error(path):
-                step()
-        except OSError as exc:
-            log.warning("保存先の共有ロックを返せない（プロセスの終了で外れる）: %s", exc)
-
-
-def _reclaim_repo(base_fd: int, root: Path, now: datetime) -> None:
-    """候補 `root` を、シンボリックリンクをたどらずに開き、そのディレクトリの中だけを確かめて消す。"""
+def _reclaim_repo(root: Path, now: datetime) -> None:
     try:
-        fd = os.open(root.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=base_fd)
+        if _idle(root, now):
+            _drop_dir(root)
     except OSError as exc:
         log.warning("役目を終えたリポジトリの実験の記録を回収できない（翌月にやり直す）: %s: %s", root, exc)
-        return
-    try:
-        files = _ndf_files(root, fd)
-        if files is not None and _idle(root, fd, files, now):
-            _drop_dir(base_fd, root, fd, files)
-    except OSError as exc:
-        log.warning("役目を終えたリポジトリの実験の記録を回収できない（翌月にやり直す）: %s: %s", root, exc)
-    finally:
-        os.close(fd)
 
 
-def _ndf_files(root: Path, fd: int) -> Optional[dict[str, os.stat_result]]:
-    """開いたディレクトリ `fd`（`root`）の中身が、NDF が作ったと確かめられるファイルだけなら、名前と状態を返す。そうでなければ None。
+def _regular_own(path: Path) -> bool:
+    """`path` が、この利用者の持つ通常のファイルか（シンボリックリンク・ディレクトリ・ほかの利用者のファイルでない）。"""
+    st = os.lstat(path)
+    return stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid()
+
+
+def _ndf_files(root: Path) -> Optional[list[Path]]:
+    """ディレクトリ `root` の中身が、NDF の作るファイルだけなら、消す順（`launch-pruned` を最後）に並べて返す。そうでなければ None。
 
     NDF の作るファイルは、`_RETIRE_FILES` の名前と、`write_replacing` の書きかけの一時ファイルで、この利用者の持つ通常のファイルに
-    限る。さらに中身や作り方で確かめる。ロックのファイルは filelock が何も書かないので空、一時ファイルは所有者だけが読み書きできる形
-    （0600）、掃除の記録と出現率のファイルは `_idle` が NDF の書く形かを読んで確かめる。ほかの名前のもの・シンボリックリンク・
-    ほかの利用者のファイル・形の合わないファイルが 1 つでもあれば、利用者が置いたものとして何も消さない。
+    限る。ほかの名前のもの・シンボリックリンク・ほかの利用者のファイルが 1 つでもあれば、利用者が置いたものとして何も消さない。
     """
     names = {store_file(root, n).name for n in _RETIRE_FILES}
-    locks = {store_file(root, n).name for n in (LEDGER_LOCK, WEIGHTS_LOCK, PRUNED_LOCK)}
-    found: dict[str, os.stat_result] = {}
-    for name in os.listdir(fd):
-        st = os.stat(name, dir_fd=fd, follow_symlinks=False)
-        tmp = any(_tmp_of(name, n) for n in names)
-        made = stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid() and (name in names or tmp)
-        if not made or (name in locks and st.st_size) or (tmp and stat.S_IMODE(st.st_mode) != 0o600):
-            log.info("NDF が作ったと確かめられないものがあるので、回収しない: %s", root / name)
-            return None
-        found[name] = st
-    return found
+    found: list[Path] = []
+    with os.scandir(root) as entries:
+        for e in entries:
+            known = e.name in names or any(_tmp_of(e.name, n) for n in names)
+            if not known or not _regular_own(Path(e.path)):
+                log.info("NDF の作るファイルでないものがあるので、回収しない: %s", e.path)
+                return None
+            found.append(Path(e.path))
+    marker = store_file(root, PRUNED)
+    return sorted(found, key=lambda p: p == marker)
 
 
 def _tmp_of(name: str, target: str) -> bool:
@@ -359,18 +314,17 @@ def _tmp_of(name: str, target: str) -> bool:
     return name.startswith(head) and name.endswith(tail) and _TMP_ID.fullmatch(name[len(head) : -len(tail)]) is not None
 
 
-def _drop_dir(base_fd: int, root: Path, fd: int, files: Mapping[str, os.stat_result]) -> None:
-    """開いたディレクトリ `fd` から `_ndf_files` が確かめたファイル `files` を消してから、ディレクトリを消す。
+def _drop_dir(root: Path) -> None:
+    """NDF の作るファイルを消してから、ディレクトリを消す。掃除の記録（`launch-pruned`）は最後に消す。
 
-    掃除の記録（`launch-pruned`）は最後に消す。途中で失敗しても `launch-pruned` が残るので、翌月の回収がまた候補として扱う。
-    ディレクトリを消せない（親に書けない）ときは、何も消さずに止める。保存先の `root` の名前が開いたディレクトリと別のものに
-    置き換わっていれば、ディレクトリは消さない。
+    途中で失敗しても `launch-pruned` が残るので、翌月の回収がまた候補として扱う。ディレクトリを消せない（親に書けない）ときは、
+    何も消さずに止める。
     """
-    if not os.access(".", os.W_OK | os.X_OK, dir_fd=base_fd):
+    if not os.access(root.parent, os.W_OK | os.X_OK):
         raise PermissionError(f"{root.parent} に書けないので {root} を消せない")
-    marker = store_file(root, PRUNED).name
-    for name in sorted(files, key=lambda n: n == marker):
-        os.unlink(name, dir_fd=fd)
-    if not os.path.samestat(os.fstat(fd), os.stat(root.name, dir_fd=base_fd, follow_symlinks=False)):
-        raise FileExistsError(f"{root} が回収の途中で別のものに置き換わった")
-    os.rmdir(root.name, dir_fd=base_fd)
+    files = _ndf_files(root)
+    if files is None:
+        raise FileExistsError(f"{root} に NDF の作るファイルでないものが現れた")
+    for path in files:
+        path.unlink()
+    root.rmdir()

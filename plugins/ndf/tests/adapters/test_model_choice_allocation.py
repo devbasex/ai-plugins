@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -701,119 +700,23 @@ def test_the_sweep_keeps_a_repo_whose_files_are_links(tmp_path, store):
 
 def test_the_sweep_removes_a_half_written_file_ndf_left(store):
     other = _idle_repo(store.parent / ("a" * 16))
-    tmp = other / f".launch-weights.json.{'0' * 32}.tmp"
-    tmp.write_text("{", encoding="utf-8")
-    tmp.chmod(0o600)  # write_replacing は所有者だけが読み書きできる形で作る
+    (other / f".launch-weights.json.{'0' * 32}.tmp").write_text("{", encoding="utf-8")
     mc.prune(SWEEP_AT, 60, store)
     assert not other.exists()
 
 
 def test_a_failed_removal_keeps_its_mark_and_the_next_repo_goes_on(store, monkeypatch):
     broken, fine = _idle_repo(store.parent / ("a" * 16)), _idle_repo(store.parent / ("b" * 16))
-    real, where = os.unlink, os.stat(broken)
+    real = Path.unlink
 
-    def refuse(name, *, dir_fd=None):
-        if name == "launch-weights.json" and dir_fd is not None and os.path.samestat(os.fstat(dir_fd), where):
+    def refuse(self, missing_ok=False):
+        if self.parent == broken and self.name == "launch-weights.json":
             raise PermissionError("拒否")
-        return real(name, dir_fd=dir_fd)
+        return real(self, missing_ok=missing_ok)
 
-    monkeypatch.setattr(os, "unlink", refuse)
+    monkeypatch.setattr(Path, "unlink", refuse)
     mc.prune(SWEEP_AT, 60, store)
     assert not fine.exists() and (broken / "launch-pruned").exists()  # launch-pruned は最後に消すので、翌月も候補になる
-
-
-def test_the_store_lock_is_returned_when_a_candidate_raises(store, monkeypatch):
-    # 候補の処理が想定外の例外で止まっても書き手を返すので、次の起動は共有ロックを待たずに取れる
-    from ndf.adapters import launch_store
-
-    _idle_repo(store.parent / ("a" * 16))
-
-    def boom(*args):
-        raise RuntimeError("想定外")
-
-    monkeypatch.setattr(launch_store, "_reclaim_repo", boom)
-    with pytest.raises(RuntimeError):
-        mc.prune(SWEEP_AT, 60, store)
-    with launch_store.using(store.parent, 0):
-        pass
-
-
-def test_a_failed_release_still_closes_the_store_lock(store, monkeypatch, caplog):
-    # 書き手を返すのに失敗してもデータベースを閉じるので、次の起動は共有ロックを待たずに取れる
-    import sqlite3
-
-    from ndf.adapters import launch_store
-
-    _idle_repo(store.parent / ("a" * 16))
-    real = launch_store._store_lock
-
-    def broken():
-        raise sqlite3.OperationalError("cannot rollback")
-
-    def store_lock(base, *, shared=True):
-        lock = real(base, shared=shared)
-        if not shared:
-            lock.release = broken
-        return lock
-
-    monkeypatch.setattr(launch_store, "_store_lock", store_lock)
-    with caplog.at_level(logging.WARNING):
-        mc.prune(SWEEP_AT, 60, store)
-    assert "共有ロックを返せない" in caplog.text
-    with launch_store.using(store.parent, 0):
-        pass
-
-
-def test_an_unreadable_prune_record_of_another_repo_is_skipped(store, caplog):
-    # UTF-8 として読めない掃除の記録は、そのリポジトリだけを記録の無いものとして扱い、起動と片付けを続ける
-    odd, fine = _idle_repo(store.parent / ("a" * 16)), _idle_repo(store.parent / ("b" * 16))
-    (odd / "launch-pruned").write_bytes(b"\xff\xfe")
-    with caplog.at_level(logging.WARNING):
-        mc.prune(SWEEP_AT, 60, store)
-    assert (odd / "launch-pruned").exists() and not fine.exists() and "UTF-8" in caplog.text
-    assert (store.parent / "launch-swept").read_text(encoding="utf-8") == "2027-03"
-
-
-def test_the_sweep_keeps_files_ndf_cannot_have_made(store):
-    # 名前が同じでも、中身のあるロックのファイルと、所有者だけの形でない一時ファイルは、利用者が置いたものとして残す
-    filled, loose = _idle_repo(store.parent / ("a" * 16)), _idle_repo(store.parent / ("b" * 16))
-    (filled / "launch-experiments.lock").write_text("退避", encoding="utf-8")
-    tmp = loose / f".launch-weights.json.{'0' * 32}.tmp"
-    tmp.write_text("{", encoding="utf-8")
-    tmp.chmod(0o644)
-    mc.prune(SWEEP_AT, 60, store)
-    assert (filled / "launch-experiments.lock").exists() and tmp.exists()
-
-
-def test_a_candidate_swapped_for_a_link_is_not_followed(tmp_path, store, monkeypatch):
-    # 候補を選んだ後に、その名前が別のディレクトリへのリンクに置き換わっても、リンク先は消さない
-    from ndf.adapters import launch_store
-
-    other = _idle_repo(store.parent / ("a" * 16))
-    outside = _idle_repo(tmp_path / "outside")
-    real = launch_store._reclaim
-
-    def swap(base, roots, now):
-        shutil.rmtree(other)
-        other.symlink_to(outside, target_is_directory=True)
-        return real(base, roots, now)
-
-    monkeypatch.setattr(launch_store, "_reclaim", swap)
-    mc.prune(SWEEP_AT, 60, store)
-    assert (outside / "launch-pruned").exists() and other.is_symlink()
-
-
-def test_a_store_lock_filelock_refuses_launches_without_records(tmp_path, store, clock, monkeypatch, caplog):
-    # filelock が WAL モードのデータベースなどを ValueError で拒んでも、割り付けなしで起動を続ける
-    from ndf.adapters import launch_store
-
-    def refused(self, *args, **kwargs):
-        raise ValueError("refusing a WAL-mode lock database")
-
-    monkeypatch.setattr(launch_store.ReadWriteLock, "acquire_read", refused)
-    with caplog.at_level(logging.WARNING):
-        choice = _pick(_repo(tmp_path), unit="u")
-    assert choice.assign_id is None and "共有ロック" in caplog.text
 
 
 def test_a_broken_store_lock_launches_without_records(tmp_path, store, clock, monkeypatch, caplog):
