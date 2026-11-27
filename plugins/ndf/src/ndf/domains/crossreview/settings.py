@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from dataclasses import dataclass, field, replace
@@ -18,6 +17,7 @@ from ndf.contracts import facts, limits
 from ndf.core.converge import participants
 from ndf.domains.crossreview import criteria_decide, scope_decide
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.records import mvv
 
 # ラウンドの上限の既定の方針（contracts/limits/）
 MAX_ROUNDS = "cross-review.max-rounds"
@@ -118,12 +118,6 @@ FOCUS_DIFFERS = (
 )
 
 
-def blob_id(raw: bytes, width: int) -> str:
-    """`raw` を Git の blob にしたときの ID（`width` 桁。64 桁なら SHA-256 のリポジトリ）。"""
-    algo = hashlib.sha256 if width == 64 else hashlib.sha1
-    return algo(b"blob %d\0" % len(raw) + raw).hexdigest()
-
-
 def proposed_differs(g: git.Git, head: str, raw: Optional[bytes]) -> bool:
     """PR の head（`head`。未送信のコミットを載せ直す前に取得した SHA。載せ直した後の HEAD は手元の変更が PR の設定を
     隠す。PR 3944 の r5-4）のツリーの `.ndf/review.json` が実行者の設定（`raw`）と違うか。作業場所のファイルを
@@ -135,7 +129,7 @@ def proposed_differs(g: git.Git, head: str, raw: Optional[bytes]) -> bool:
     mode, kind, oid = entry.split("\t", 1)[0].split()
     if raw is None or kind != "blob" or mode not in git.REGULAR_MODES:
         return True
-    return oid != blob_id(raw, len(oid))
+    return oid != mvv.blob_id(raw, len(oid))
 
 
 def outside_checkout(cfg: RunConfig) -> RunConfig:
