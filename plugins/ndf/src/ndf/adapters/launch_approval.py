@@ -215,6 +215,19 @@ def request_answer(request_id: str) -> tuple[Optional[str], Optional[str]]:
     return (None, None) if index is None else _judged(_last_labels().get(request_id), requests.rows[index])
 
 
+def answered_request(request_id: str) -> tuple[Optional[str], Optional[Mapping[str, Any]]]:
+    """リクエストへの最後の回答（`approve`・`deny`・None）と、そのリクエストの行（無ければ None）。
+
+    `approve` が回答と、質問で示した候補との照合の両方に使うので、質問の記録を 1 回だけ読んで両方を返す（PR 4683 の r15-4）。
+    """
+    requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
+    index = requests.by_id.get(request_id)
+    if index is None:
+        return None, None
+    req = requests.rows[index]
+    return _judged(_last_labels().get(request_id), req)[0], req
+
+
 def consent_by_answer(request_id: str, repo: str, sha256: str, target: Path, candidate: Optional[Path]) -> Optional[str]:
     """リクエストへの「承認する」の回答を、今回の操作（リポジトリ・承認の対象のハッシュ・反映先・候補）への人の同意として照らし、承認者を返す。
 
