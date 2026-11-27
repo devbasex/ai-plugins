@@ -72,6 +72,8 @@ FINAL_LABEL = {
 OUTCOME_LABEL = {fin.FIXED: "直した", fin.SKIPPED: "見送った", fin.UNRESOLVED: "未解決"}
 # 収束の妨げにならない重さで残した指摘の表示（修正担当へ渡さない。#3941）
 LIGHT_LABEL = "軽い（直さずに残した）"
+# 判定役の確認で下げた指摘の理由の欄（判定役が書いた文は公開せず、状態ファイルの `check` で読む。#4363）
+LOWERED_REASON = "判定役の確認で成り立たないと分かった"
 # 必ず人の承認が要る操作に当たる指摘の表示（修正担当へ渡さない。#4076）
 REDLINE_LABEL = "人の承認を待つ（直さずに残した）"
 
@@ -218,15 +220,21 @@ def _light(f: Mapping[str, Any]) -> bool:
 
 
 def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
+    """指摘の表。判定役の確認で下げた指摘は、元の重要度と定型の理由を出す（`check` の自由記述は写さない。#4363）。"""
     rows = ["| 番号 | 担当 | 重要度 | 場所 | 指摘 | 終わり方 | 見送った理由 |", "| --- | --- | --- | --- | --- | --- | --- |"]
     for f in findings:
         outcome = f.get("outcome")
         shown = OUTCOME_LABEL[outcome] if outcome in OUTCOME_LABEL else outcome
         if outcome == fin.UNRESOLVED and (f.get(fin.REDLINE) or _light(f)):
             shown = REDLINE_LABEL if f.get(fin.REDLINE) else LIGHT_LABEL
+        severity, reason = _cell(criteria_decide.severity_of(f.get("severity"))), f.get("reason")
+        check = f.get(criteria_decide.CHECK)
+        if isinstance(check, Mapping) and check.get(criteria_decide.LOWERED):
+            severity = f"{severity}（確認の前は {_cell(criteria_decide.severity_of(f.get('raised_severity')))}）"
+            reason = LOWERED_REASON
         rows.append(
-            f"| {_cell(f.get('id'))} | {_cell(f.get('by'))} | {_cell(criteria_decide.severity_of(f.get('severity')))} | {_cell(_place(f))} "
-            f"| {_cell(f.get('text'))} | {_cell(shown)} | {_cell(f.get('reason'))} |"
+            f"| {_cell(f.get('id'))} | {_cell(f.get('by'))} | {severity} | {_cell(_place(f))} "
+            f"| {_cell(f.get('text'))} | {_cell(shown)} | {_cell(reason)} |"
         )
     return rows
 
@@ -278,7 +286,7 @@ def _open_value(value: Any) -> str:
 def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
     """未解決の重い指摘と、重さによらず載せる指摘（必ず人の承認が要る操作に当たるもの・NDF が機械で確かめて作ったもの）の一覧を
     HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初のコメントの id（スレッドが無ければ null）。自由記述の値は JSON にする前に `clean`（書き先に応じた伏せ字。値の並びを
-    1 回で受けて同じ順に返す）へ値ごとに通し、JSON にした後の本文全体の伏せ字が一覧の構造を壊さない形に escape する
+    1 回で受けて同じ順に返す）へ値ごとに通し（保護の種類は許可した値だけなので通さない）、JSON にした後の本文全体の伏せ字が一覧の構造を壊さない形に escape する
     （PR 3944 の r6-4）。"""
     done = data.get(THREADS) if isinstance(data.get(THREADS), Mapping) else {}
     items = []
@@ -290,6 +298,9 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
         mark = done.get(f.get("id"))
         thread = mark.get("comment") if isinstance(mark, Mapping) else None
         keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section", *MARKS)}
+        # 保護の種類は許可した値だけを書く（持たない指摘は欄を足さない。#4363）
+        if kinds := criteria_decide.protect_of(f.get(criteria_decide.PROTECT)):
+            keep[criteria_decide.PROTECT] = list(kinds)
         items.append({**keep, "thread": thread if type(thread) is int else None})
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):

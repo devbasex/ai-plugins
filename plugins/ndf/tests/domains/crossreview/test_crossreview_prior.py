@@ -6,8 +6,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from ndf.core.converge import oscillation
 from ndf.domains.crossreview import carry, cli, drive, prior_decide, report_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.crossreview.journal import FindingJournal
 
 from ._repos import BRANCH, Repos, commit, run_cli, sh
 from .test_crossreview_run import PR, Fake, Recording, _run, _state
@@ -235,6 +237,33 @@ def test_record_comment_keeps_unresolved_findings_for_the_next_run() -> None:
     ]
 
 
+def test_protect_kinds_are_carried_from_the_record() -> None:
+    """#4363: 記録のコメントは保護の種類を許可した値だけで持ち、次の実行は新しい行にも既にある行にも合わせる。"""
+    finding = {**_OPEN_NO_THREAD, "protect": ["user_data", "unknown-kind"]}
+    remark = _record([finding], {}, "2026-11-20T00:00:00Z")
+    assert report_decide.open_items(remark.body)[0]["protect"] == ["user_data"]
+    carried = prior_decide.recorded([remark])[0]
+    fresh = FindingJournal()
+    fresh.carry(carried)
+    assert fresh.rows["p-r1-1"]["protect"] == ["user_data"]
+    held = FindingJournal([{**_OPEN_NO_THREAD, "key": oscillation.finding_key(_OPEN_NO_THREAD["text"]), "protect": ["secret"]}])
+    held.carry(carried)
+    assert held.rows["r1-1"]["protect"] == ["secret", "user_data"]
+    assert held.merged == ["r1-1"]
+
+
+def test_finding_whose_id_collides_with_another_text_is_carried_under_a_free_id() -> None:
+    """#4363: 別の保存先の指摘は id が重なる。本文が違えば空いている id で入れ、保護の種類を失わない。読み直しても増えない。"""
+    journal = FindingJournal()
+    first = prior_decide.Carried("p-r1-1", None, "A が止まる", "codex", "major", None, None)
+    second = first._replace(text="利用者のデータが消える", protect=("user_data",))
+    assert journal.carry([first]) == ["p-r1-1"]
+    assert journal.carry([second]) == ["p-r1-1-2"]
+    row = journal.rows["p-r1-1-2"]
+    assert (row["id"], row["text"], row["protect"]) == ("p-r1-1-2", "利用者のデータが消える", ["user_data"])
+    assert journal.carry([second]) == []
+
+
 def test_unresolved_finding_without_a_thread_is_carried_from_the_record(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """PR 3944 の r1-11: 別の保存先で始めた実行は、スレッドの無い未解決の指摘を記録のコメントから戻し、修正担当へ渡す。"""
     hub.port.existing = [_record([_OPEN_NO_THREAD], {}, "2026-11-20T00:00:00Z")]
@@ -412,7 +441,6 @@ def test_finding_that_comes_back_after_its_thread_was_resolved_is_detached(wt: P
         "severity": "major",
         "path": "doc.md",
     }
-    from ndf.core.converge import oscillation
 
     row["key"] = oscillation.finding_key(row["text"])
     done = {"r1-1": {"comment": 77, "replied": True, "resolved": True}}

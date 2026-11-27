@@ -1,6 +1,6 @@
 """指摘のジャーナル（`drive.py` から分けた。#3941）。
 
-相手役の指摘を番号を付けて重ねずに入れ、修正担当の結果・前の実行から引き継いだ指摘・再発を読み込み、
+相手役の指摘を番号を付けて重ねずに入れ、判定役の確認の結果・修正担当の結果・前の実行から引き継いだ指摘・再発を読み込み、
 終わり方の判定（`finish_decide`）へ渡す形にする。状態ファイルの `findings` の行の形を持つのはここだけである。
 """
 
@@ -10,10 +10,10 @@ import hashlib
 import json
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf.core.converge import oscillation
-from ndf.domains.crossreview import criteria_decide, prior_decide, store
+from ndf.domains.crossreview import criteria_decide, prior_decide, store, verify_decide
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, UNPINNED
 from ndf.domains.records import jsonl
@@ -34,7 +34,11 @@ OCCURRENCE = "occurrence"
 
 
 # 指摘に一度でも示された保護の種類の欄（`criteria_decide.protect_kinds`。足した値は外さない。#4363）
-PROTECT = "protect"
+PROTECT = criteria_decide.PROTECT
+# 判定役の確認の結果の欄（有効な回答のあった指摘だけが持つ。直した指摘が戻れば外す。#4363）
+CHECK = criteria_decide.CHECK
+# `CHECK` の中の欄。下げた指摘が出し直しで下げた扱いを抜けた（#4363）
+UNLOWERED = "unlowered"
 # 指摘がプロジェクト MVV に反するときの欄のうち、手元の状態ファイルだけに持つもの（#4076。記録のコメントにも載せる欄は
 # `report_decide.MARKS`、必ず人の承認が要る操作に当たるかの欄は `finish_decide.REDLINE`）。識別子は、どの MVV かを表す文字列である
 # MVV が変わって外した判定の並び（追記だけ）
@@ -219,6 +223,66 @@ def _mvv_warnings(round_no: int, unknown: Sequence[str], unexplained: Sequence[s
     return out
 
 
+def _lowered(row: Mapping[str, Any]) -> bool:
+    """判定役の確認で下げた指摘か。"""
+    check = row.get(CHECK)
+    return isinstance(check, Mapping) and bool(check.get(criteria_decide.LOWERED))
+
+
+def _protect(row: dict[str, Any], kinds: object) -> None:
+    """指摘に保護の種類を足す（足すものが無ければ何もしない。足した値は外さない）。"""
+    added = criteria_decide.protect_of(kinds)
+    if added:
+        row[PROTECT] = list(criteria_decide.protect_of([*store.list_of(row, PROTECT), *added]))
+
+
+def _inherit_protect(row: dict[str, Any], kinds: object) -> bool:
+    """前の実行が残した保護の種類を指摘に合わせ、変わったら真。この保存先で確認により下げていた指摘は、下げた扱いを解除して
+    元の重要度へ戻す（保護の対象は確認を理由に下げない。#4363）。"""
+    before = dict(row)
+    _protect(row, kinds)
+    if PROTECT in row and _lowered(row):
+        row[CHECK] = row[CHECK] | {criteria_decide.LOWERED: False, UNLOWERED: True}
+        _restore_lowered(row)
+    return before != row
+
+
+def _unlower(by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str]) -> None:
+    """判定役の確認で下げた指摘のうち、このラウンドの出し直し `raised` のどれかが保護の種類か、MVV の項目か必ず人の承認が
+    要る操作を挙げたものは、下げた扱いを解除する。
+
+    重要度を重ねる前に解除するので、同じラウンドのほかの出し直しの重要度は、処理の順によらず重ねられる。分類は
+    `_classify`、元の重要度へ戻すのは `_restore_lowered` が行う。#4363"""
+    for item in raised:
+        text = item.get("text")
+        row = by_key.get(oscillation.finding_key(text.strip())) if isinstance(text, str) and text.strip() else None
+        if row is None or not _lowered(row):
+            continue
+        if criteria_decide.protect_of(item.get(PROTECT)) or criteria_decide.mvv_item(item.get("mvv"), items) is not None:
+            row[CHECK] |= {criteria_decide.LOWERED: False, UNLOWERED: True}
+
+
+def _restore_lowered(row: dict[str, Any]) -> None:
+    """下げた扱いを抜けた指摘が保護の種類を持てば、元の重要度（最低 major）まで上げる（今の重さのほうが重ければそのまま）。
+
+    出し直しのたびに当て直すので、戻した後に元の重要度が上がっても、MVV の項目だけの出し直しが先に下げた扱いを抜けても、
+    出し直しの順で重さが変わらない。固定する前の重さも上げ、MVV が変わって固定を外しても下げた値にしない。#4363"""
+    check = row.get(CHECK)
+    if PROTECT not in row or not isinstance(check, Mapping) or not check.get(UNLOWERED):
+        return
+    restored = criteria_decide.at_least_blocking(criteria_decide.severity_of(row.get("raised_severity")))
+    for key in ("severity", UNPINNED):
+        if key in row:
+            row[key] = criteria_decide.heavier(criteria_decide.severity_of(row[key]), restored)
+
+
+class Checked(NamedTuple):
+    """確認の結果を当てた後に、駆動が使う値。`lowered` は下げた指摘のキー、`unconfirmed` は有効な回答の無かった指摘の id。"""
+
+    lowered: frozenset[str] = frozenset()
+    unconfirmed: frozenset[str] = frozenset()
+
+
 class FindingJournal:
     """指摘のジャーナル（id から行の辞書。状態ファイルの findings に並べる形のまま持つ）と、その規則。
 
@@ -231,6 +295,8 @@ class FindingJournal:
         self.rows: dict[str, dict[str, Any]] = {str(f["id"]): f for f in rows if isinstance(f, dict) and "id" in f}
         # 直した・見送ったのに出し直されて未解決へ戻した指摘の id（呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
         self.revived: list[str] = []
+        # 最後の `enter` で、新しく出たか戻った指摘の id（判定役へ渡す候補。#4363）
+        self.fresh: list[str] = []
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
         # 最後の `carry` で、前の実行が残した MVV の判定を重ねて変わった、既にある指摘の id
@@ -253,6 +319,8 @@ class FindingJournal:
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
         unexplained: list[str] = []
+        fresh: list[str] = []
+        _unlower(by_key, raised, items)
         for item in raised:
             text = item.get("text")
             text = text.strip() if isinstance(text, str) else ""
@@ -266,8 +334,11 @@ class FindingJournal:
                 row = _journal_row(fid, round_no, text, item.get("by"), key, _text(item.get("section")))
                 known = self.rows[fid] = row | _raised(item, named)
                 by_key[key] = known
+                fresh.append(fid)
             else:
+                revived = len(self.revived)
                 self._raised_again(known, item, round_no, named, mvv)
+                fresh += self.revived[revived:]
             if named is not None and known.get("by") != BY_NDF:
                 _classify(known, item, named, items, mvv)
                 if _text(item.get("impact")) is None:
@@ -275,6 +346,7 @@ class FindingJournal:
             elif named is None and items and _named_any(item):
                 unknown.append(str(known["id"]))
             touched[key] = known
+        self.fresh = list(dict.fromkeys(fresh))
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
 
@@ -282,24 +354,26 @@ class FindingJournal:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
         未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
         1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
-        行の値に今回の値を足す（#4363）。"""
+        行の値に今回の値を足す。判定役の確認で下げたままの指摘の重要度は変えず（下げた扱いの解除は先に `_unlower` が行う）、
+        下げた扱いを抜けた指摘に保護の種類が付けば元へ戻す（`_restore_lowered`。#4363）。"""
         new = _raised(item, named)
         if known.get(JUDGED) not in (None, mvv):
             _unclassify(known)
         if known.get("outcome") == fin.FIXED or _skip_is_void(known, named, mvv):
             self._revive(known, new, _text(item.get("section")), round_no)
-        severity = criteria_decide.heavier(criteria_decide.severity_of(known.get("severity")), new["severity"])
-        if severity is not None:
-            known["severity"] = severity
-        if UNPINNED in known:
-            known[UNPINNED] = criteria_decide.heavier(criteria_decide.severity_of(known[UNPINNED]), new["severity"])
-        if "impact" not in known and "impact" in new:
-            known["impact"] = new["impact"]
-        if PROTECT in new:
-            known[PROTECT] = list(criteria_decide.protect_of([*store.list_of(known, PROTECT), *new[PROTECT]]))
+        _protect(known, new.get(PROTECT))
         if "raised_severity" in known:
             raised = criteria_decide.severity_of(known["raised_severity"])
             known["raised_severity"] = criteria_decide.heavier_raised(raised, new["raised_severity"])
+        if not _lowered(known):
+            severity = criteria_decide.heavier(criteria_decide.severity_of(known.get("severity")), new["severity"])
+            if severity is not None:
+                known["severity"] = severity
+        if UNPINNED in known:
+            known[UNPINNED] = criteria_decide.heavier(criteria_decide.severity_of(known[UNPINNED]), new["severity"])
+        _restore_lowered(known)
+        if "impact" not in known and "impact" in new:
+            known["impact"] = new["impact"]
 
     def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
         """直した・見送った指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
@@ -308,10 +382,33 @@ class FindingJournal:
         self.revived.append(str(known["id"]))
         # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
         # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
-        for stale in ("path", "line", SKIPPED_MVV, REVIEW_DEFER):
+        for stale in ("path", "line", SKIPPED_MVV, REVIEW_DEFER, CHECK):
             known.pop(stale, None)
         known |= {k: v for k, v in new.items() if k in ("path", "line")}
         known["section"] = section
+
+    def apply_checks(self, asked: Sequence[str], verdicts: Mapping[str, verify_decide.Verdict]) -> Checked:
+        """判定役へ渡した指摘 `asked` に回答 `verdicts` を当てる。有効な回答は行の `check` に残し、下げてよい指摘
+        （`verify_decide.lowers`）は minor にする。判断できない回答と回答の無い指摘の重要度は変えない。回答の種類のうち
+        保護の種類は、行に足す（#4363）。"""
+        lowered: set[str] = set()
+        unconfirmed: set[str] = set()
+        for fid in asked:
+            row, verdict = self.rows[fid], verdicts.get(fid)
+            if verdict is not None:
+                _protect(row, verdict.tracks)
+            if verdict is None or verdict.holds is None:
+                unconfirmed.add(fid)
+                continue
+            lower = verify_decide.lowers(row, verdict)
+            answered = {k: v for k, v in verdict._asdict().items() if k not in ("id", "unknown", "invalid")}
+            row[CHECK] = answered | {"tracks": list(verdict.tracks), criteria_decide.LOWERED: lower}
+            if lower:
+                # 引き継いだ指摘は元の重要度を持たないので、下げる前の重要度を残す
+                row.setdefault("raised_severity", criteria_decide.severity_of(row.get("severity")))
+                row["severity"] = criteria_decide.heaviest_light()
+                lowered.add(row["key"])
+        return Checked(frozenset(lowered), frozenset(unconfirmed))
 
     def ingest_citations(
         self, errors: Optional[Sequence[Mapping[str, Any]]], mvv: Optional[str], round_no: int, *, recorded: bool = True
@@ -350,10 +447,20 @@ class FindingJournal:
         row |= {"key": oscillation.finding_key(error["text"]), "text": error["text"], "severity": criteria_decide.at_least_blocking(None)}
         row |= {CITATION_KEY: key, "cited": error["cited"], "unknown": error["unknown"], JUDGED: mvv}
 
+    def _free_id(self, wanted: str) -> str:
+        """`wanted` が空いていればそのまま、使われていれば `-2` からの番号を添えた空いている id。"""
+        fid, n = wanted, 1
+        while fid in self.rows:
+            n += 1
+            fid = f"{wanted}-{n}"
+        return fid
+
     def carry(self, carried: Sequence[prior_decide.Carried], items: Sequence[str] = (), mvv: Optional[str] = None) -> list[str]:
-        """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じ id か同じキーの行が
-        あれば入れず（スレッドと記録のコメントの両方から来た指摘・状態ファイルが既に持つ指摘を重ねない）、MVV の判定だけをその行へ
-        重ねる（`merge_marks`）。`items` は承認済みの MVV の項目、`mvv` はその識別子で、同じ MVV での判定だけを戻す。"""
+        """前の実行が PR に残した未解決の指摘をジャーナルへ入れ（ラウンド 0）、入れた id を返す。同じキーの行か、
+        同じスレッドの行（id が `t<コメントの id>`）があれば入れず（スレッドと記録のコメントの両方から来た指摘・状態ファイルが既に持つ指摘を重ねない）、MVV の判定と保護の種類
+        だけをその行へ重ねる（`merge_marks`）。`items` は承認済みの MVV の項目、`mvv` はその識別子で、同じ MVV での判定だけを戻す。
+
+        スレッドの無い指摘の id が本文の違う行と重なれば、空いている id で別の指摘として入れる（指摘と保護の種類を失わない）。"""
         added = []
         unknown = []
         self.merged = []
@@ -367,33 +474,35 @@ class FindingJournal:
                 if self.merge_marks(str(known["id"]), c._asdict(), items, mvv, place):
                     self.merged.append(str(known["id"]))
                 continue
-            if c.id in self.rows:
-                continue
-            row = _journal_row(c.id, 0, c.text, _text(c.by), key, _text(c.section))
+            fid = self._free_id(c.id)
+            row = _journal_row(fid, 0, c.text, _text(c.by), key, _text(c.section))
             located = _located({"severity": c.severity, "path": c.path, "line": c.line})
-            row = self.rows[c.id] = by_key[key] = row | located
+            row = self.rows[fid] = by_key[key] = row | located
+            _protect(row, c.protect)
             if not _restore(row, c, items, mvv):
-                unknown.append(c.id)
-            added.append(c.id)
+                unknown.append(fid)
+            added.append(fid)
         self.warnings = [_unknown_items("引き継いだ指摘", unknown)] if unknown else []
         return added
 
     def merge_marks(
         self, fid: str, marks: Mapping[str, Any], items: Sequence[str], mvv: Optional[str], place: Optional[Mapping[str, Any]] = None
     ) -> bool:
-        """前の実行が残した MVV の判定 `marks` のうち、今回と同じ MVV `mvv` でのものを、既にある指摘 `fid` に重ねる。変わったら真。
+        """前の実行が残した保護の種類（`marks` の `protect`）と、MVV の判定のうち今回と同じ MVV `mvv` でのものを、既にある指摘
+        `fid` に重ねる。変わったら真。保護の種類は MVV によらず重ねる。
 
         閉じた指摘は、必ず人の承認が要る操作と今回初めて分かったときだけ未解決へ戻す。`place`（位置とセクション）があれば別の場所で
         見つかった再発として戻し（`_revive`）、無ければ開いたままの同じスレッドの指摘として、スレッドを持ったまま戻す。"""
         row = self.rows[fid]
+        protected = _inherit_protect(row, marks.get(PROTECT))
         named = _judged_items(marks, items)
         if not named or mvv is None or marks.get(JUDGED) != mvv or row.get("by") == BY_NDF:
-            return False
+            return protected
         before = dict(row)
         closed = row.get("outcome") != fin.UNRESOLVED
         known = bool(row.get(fin.REDLINE)) and row.get(JUDGED) == mvv
         if closed and (known or not any(criteria_decide.redline(i) for i in named)):
-            return False
+            return protected
         if row.get(JUDGED) not in (None, mvv):
             _unclassify(row)
         if closed and place is not None:
@@ -403,7 +512,7 @@ class FindingJournal:
             row.pop(SKIPPED_MVV, None)
         for item in named:
             _classify(row, {}, item, items, mvv)
-        return before != row
+        return protected or before != row
 
     def restate(self, mvv: Optional[str]) -> list[str]:
         """`mvv` と違う MVV で決めた判定を外し、外した指摘の id を返す（出し直されない指摘に前の判定を残さない）。"""

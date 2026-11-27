@@ -19,7 +19,7 @@
 | `src/ndf/domains/crossreview/criteria_decide.py` | `protect_kinds`・`track_kinds`・`protect_of`・`document_line`、`reviewer_block`・`downgraded` |
 | `src/ndf/domains/crossreview/journal.py` | `protect`・`check`・`fresh`・`apply_checks` |
 | `src/ndf/domains/crossreview/drive.py` | 移動と `_confirm` |
-| `src/ndf/domains/crossreview/report_decide.py` | 下げた行の元の重要度と理由 |
+| `src/ndf/domains/crossreview/report_decide.py` | 下げた行の元の重要度と定型の理由 |
 | `contracts/data/review-criteria.json` | 指摘の種類の一覧、`protect` と判定役の指示の文 |
 | `contracts/limits/cross-review.remark-chars.json`・`cross-review.remarks-total.json` | 読み手のモジュール名（`ndf check` の `limit-readers` が実際の読み手と照らすため） |
 | `skills/cross-review/docs/01-state-and-review.md` | 「1 ラウンド」「指摘の基準」 |
@@ -48,14 +48,14 @@
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 4: 判定役の判断とジャーナルへの適用
-- **対象ファイル:** `verify_decide.py`、`journal.py`、`criteria_decide.py`、`test_crossreview_verify.py`（新設）、`test_crossreview_journal.py`
-- **変更内容:** `select`・`instruction`・`read`・`lowers`、`apply_checks`、下げた行の出し直し（設計の不変条件 I1・I4）、`downgraded`。外部のコマンドを打たない部分だけで、まだ駆動からは呼ばない
+- **対象ファイル:** `verify_decide.py`、`journal.py`、`criteria_decide.py`、`report_decide.py`、`test_crossreview_verify.py`（新設）、`test_crossreview_journal.py`、`test_crossreview_report.py`
+- **変更内容:** `select`・`instruction`・`read`・`lowers`、`apply_checks`、下げた行の出し直し（設計の不変条件 I1・I4）、`downgraded`、記録のコメントの元の重要度と定型の理由（判定役が書いた文は出さない）。外部のコマンドを打たない部分だけで、まだ駆動からは呼ばない
 - **満たす受け入れ条件:** 4363:1・3・4・5
 - **進め方:** 失敗するテスト（詳細設計の単体テストの観点の `select`・`read`・`lowers`・`apply_checks`・`_raised_again`・`_revive`）→ 最小実装 → 整理
 
 ### Task 5: 判定役を起動して駆動へ組み込む
-- **対象ファイル:** `verify.py`、`drive.py`、`report_decide.py`、`review-criteria.json`、`test_crossreview_verify.py`、`test_crossreview_report.py`
-- **変更内容:** `ask`、`_confirm`、記録のコメントの元の重要度と理由
+- **対象ファイル:** `verify.py`、`drive.py`、`review-criteria.json`、`test_crossreview_verify.py`
+- **変更内容:** `ask`、`_confirm`
 - **満たす受け入れ条件:** 4363:3・4
 - **進め方:** 偽の起動で `ndf cross-review run` を通す失敗するテスト（成り立たない major だけなら修正担当を起動せずに収束する・判定役の失敗では下げない・渡す指摘が無ければ起動しない）→ 最小実装 → 整理
 
@@ -87,7 +87,7 @@
 
 | リスク | 対処 |
 | --- | --- |
-| 判定役が正しい指摘を下げる | 保護の対象・MVV・承認の要る操作の指摘は下げない。下げた行は元の重要度と理由を残し、リリース後に全件を読む |
+| 判定役が正しい指摘を下げる | 保護の対象・MVV・承認の要る操作の指摘は下げない。下げた行は元の重要度と理由を状態ファイルに残し（公開の記録のコメントに出すのは元の重要度と定型の理由だけ）、リリース後に全件を読む |
 | 下げた行に MVV の項目を挙げた出し直しが来る場合を、設計の不変条件 I1 が定めていない | 詳細設計では固定した重さにする（受け入れ条件 5）。設計の承認で確かめる |
 
 ## 切り戻し手順
