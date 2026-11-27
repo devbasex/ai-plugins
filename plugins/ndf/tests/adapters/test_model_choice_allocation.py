@@ -313,13 +313,26 @@ def test_weights_that_do_not_match_are_not_used(tmp_path, store, clock, entry):
 
 
 def test_probabilities_shorter_than_the_arms_are_not_drawn(tmp_path, store, clock):
-    # ほかの組を打ち切って基準の組だけが候補に残った項目の確率は、選択肢の数より短いので使わず、均等に抽選する
+    # 出現率の計算は候補外の組にも 0 を入れて選択肢の数だけ保存する（3 組なら [1, 0, 0]）。この短い配列は、
+    # 保存された長さが現在の選択肢の数と異なる入力の例で、使わずに残った候補の組から均等に抽選する
     root = _repo(tmp_path)
     until = _at(NOW + timedelta(days=1))
     _weights(store, root, candidates=[0], probs=[1.0], cutoffs=[{"arm": 1, "until": until}, {"arm": 2, "until": until}])
     _pick(root, unit="u")
     (row,) = _rows(store, "assign")
     assert row["phase"] == "burn_in" and row["probs"] == [1, 0, 0]
+
+
+def test_an_entry_missing_a_key_does_not_hide_the_matching_entry(tmp_path, store, clock, draw):
+    # 別の工程の項目にキーが欠けていても、探索を打ち切らずに同じキーの項目の確率で抽選する
+    root = _repo(tmp_path)
+    good = _weights(store, root)
+    broken = {k: v for k, v in good.items() if k != "stage"}
+    (store / "launch-weights.json").write_text(json.dumps({"version": 1, "entries": [broken, "x", good]}), encoding="utf-8")
+    draw["x"] = 0.15
+    _pick(root, unit="u")
+    (row,) = _rows(store, "assign")
+    assert row["phase"] == "adaptive" and row["probs"] == [0.1, 0.1, 0.8] and row["chosen"] == 1
 
 
 def test_a_newer_actual_model_stops_using_the_weights(tmp_path, store, clock):

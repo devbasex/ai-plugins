@@ -605,8 +605,11 @@ class Where:
     key: str
 
     def of(self, row: Optional[Mapping[str, Any]]) -> bool:
-        """`row`（割り付けの行か出現率の項目）が同じキーを持つか。"""
-        return row is not None and all(row[k] == v for k, v in vars(self).items())
+        """`row`（割り付けの行か出現率の項目）が同じキーを持つか。
+
+        キーが欠けた行や辞書でない行は、例外を出さずに「持たない」とする。別の工程の壊れた項目で、正常な項目の探索を打ち切らないためである。
+        """
+        return isinstance(row, Mapping) and all(row.get(k) == v for k, v in vars(self).items())
 
     def at(self, row: Mapping[str, Any]) -> bool:
         """`row`（割り付けの行か停止の行）が同じリポジトリ・工程・ランタイムか（互換性のキーは見ない）。
