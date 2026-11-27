@@ -151,7 +151,7 @@ def _measure_file(tmp_path: Path, items: dict, repo: Path | None = None) -> Path
     inputs = check.inputs(check.git.Git(repo)) if repo is not None else {}
     data = {"analyzer": check.ANALYZER, "items": items, "inputs": inputs, "notes": ["注記"]}
     if repo is not None:
-        data["branch_state"] = check.branch_state(check.git.Git(repo), check.declared_branches(check.load(repo)))
+        data["branch_state"] = {"head": None, "present": []}  # 一時のリポジトリにはリモートが無い
     path = tmp_path / "measure.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     return path

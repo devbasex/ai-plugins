@@ -83,9 +83,9 @@ def required_contexts(rules: Any) -> list[str]:
 
 
 def _required_checks(gh: Gh, branch: Optional[str]) -> list[str]:
-    """既定ブランチ `branch` の必須のチェック。取れなければ `GhUnavailable`（未認証などで空と読み違えて既存の値を消さない）。"""
+    """既定ブランチ `branch` の必須のチェック。既定ブランチが分からない・取れなければ `GhUnavailable`（空と読み違えて既存の値を消さない）。"""
     if not branch:
-        return []
+        raise GhUnavailable("リモートの既定ブランチが分からない（refs/remotes/<リモート>/HEAD が無い）")
     return required_contexts(gh.get(f"repos/{gh.repo}/rules/branches/{branch}"))
 
 
@@ -104,7 +104,7 @@ def _measure_merges(gh: Gh) -> tuple[dict[str, int], list[str]]:
 def measure(tree: Tree, repo: Optional[str], head: Optional[str], deadline: float) -> dict[str, Any]:
     """P4 と、P6・P8 の GitHub の分を測る。返すのは `{"ci", "merges", "github_issues", "hosts", "notes"}`。
 
-    `gh` を呼ぶのは `rules/branches/<head>`（`head` があるとき）・閉じた PR・課題の 3 回だけである。
+    `gh` を呼ぶのは `rules/branches/<head>`（`head` があるとき。無ければ `ci` を不明にする）・閉じた PR・課題の 3 回だけである。
     """
     out: dict[str, Any] = {"merges": None, "github_issues": None, "hosts": [], "notes": []}
     if not repo:
