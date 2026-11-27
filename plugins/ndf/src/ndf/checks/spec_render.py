@@ -328,6 +328,20 @@ def _props_text(schema: Any) -> str:
     return "・".join(f"{code(k)}（{type_word(v)}）" for k, v in sorted(opt(schema, "properties", {}).items()))
 
 
+def _items_text(schema: Any) -> str:
+    """結果の `items` の要素の文。要素が `oneOf` で形を分けていれば、形ごとに説明の最初の文・`kind` の値・項目を箇条書きにする。"""
+    shapes = opt(schema, "oneOf", None) if isinstance(schema, dict) else None
+    if not isinstance(shapes, list) or not shapes:
+        return f"`items` の要素: {_props_text(schema)}"
+    lines = [f"`items` の要素は次の {len(shapes)} つの形のどれかである。各項目の意味は結果のスキーマにある。\n"]
+    for shape in shapes:
+        kind = opt(opt(opt(shape, "properties", {}), "kind", {}), "const", None) if isinstance(shape, dict) else None
+        title = str(opt(shape, "description", "")).split("。")[0] if isinstance(shape, dict) else ""
+        mark = f"（`kind` が {code(kind)}）" if kind is not None else ""
+        lines.append(f"- {title}{mark}: {_props_text(shape)}")
+    return "\n".join(lines)
+
+
 def _command(command: CommandSpec) -> list[str]:
     links = f"[引数のスキーマ](../../{args_rel(command.name)})・[結果のスキーマ](../../{result_rel(command.name)})"
     out = [f"## `{ENTRY} {command.name}`\n", f"{SURFACE_WORDS[command.surface]}。{links}\n"]
@@ -338,7 +352,7 @@ def _command(command: CommandSpec) -> list[str]:
         for path, args in leaves(command.args)
     ]
     props = opt(command.result_schema, "properties", {}) if command.result_schema is not None else {}
-    result = f"結果の `metrics`: {_props_text(opt(props, 'metrics', None))}。`items` の要素: {_props_text(opt(opt(props, 'items', {}), 'items', None))}\n"
+    result = f"結果の `metrics`: {_props_text(opt(props, 'metrics', None))}。{_items_text(opt(opt(props, 'items', {}), 'items', None))}\n"
     return [*out, md_table(["呼び方", "引数"], rows), result]
 
 

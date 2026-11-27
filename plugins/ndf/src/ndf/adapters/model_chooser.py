@@ -26,10 +26,10 @@ def observed(choice: model_choice.Choice, model: str) -> None:
     if choice.assign_id is None or choice.arm is None or choice.raised:
         return
     now = model_choice.utc_now()
-    row = {"kind": "observed", "at": now.isoformat(), "assign_id": choice.assign_id, "arm": dict(choice.arm)}
+    row = dict(kind="observed", at=now.isoformat(), assign_id=choice.assign_id, arm=dict(choice.arm))
     try:
         with model_choice.ledger(now - timedelta(days=model_choice.LONGEST_WINDOW), choice.store) as led:
-            if not any(r["kind"] == "observed" and r["assign_id"] == choice.assign_id for r in led.rows):
+            if not model_choice.has_observed(led.rows, choice.assign_id):
                 led.append({**row, "model": model})
     except model_choice.STORE_ERRORS as exc:
         log.warning("実験の記録へ実際のモデルを書けない（割り付け %s）: %s", choice.assign_id, exc)

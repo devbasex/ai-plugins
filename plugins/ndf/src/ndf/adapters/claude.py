@@ -605,10 +605,9 @@ def _with_usage(reply: ClaudeReply, payload: Mapping[str, Any]) -> ClaudeReply:
 
 
 def launch_meta(name: str, repo: Optional[str] = None) -> dict[str, Any]:
-    """使用量ログの行の工程の欄。`name` は工程の名前（作業種別か Skill の名前）、`repo` は呼び出し元が解決済みの `<所有者>/<リポジトリ>`。
+    """使用量ログの行の工程の欄。`name` は工程の名前（作業種別か Skill の名前）、`repo` は呼び出し元が解決済みのリポジトリの識別子（`launch_approval.repo_digest` の値）。
 
     `repo` を得るためだけに git を起動しない（起動 1 回ごとに git のプロセスが増えるため）。解決済みの値が無ければ欄を省く。
-
     プランの実行の子なら、プランの実行の id・ステップの id・何回目かを環境変数から足す（#1959 の「子へ渡す環境変数」）。
     無い値と、整数でない回数は欄を省く。
     """
@@ -674,8 +673,9 @@ def _launch_row(child: ClaudeReply, meta: Mapping[str, Any], session: Optional[s
         "launched_at": child.launched_at,
         "seconds": child.seconds,
     }
-    if tokens:  # モデルの無い結果は欄を置かない
-        row["model_usage"] = tokens
+    row |= {"model_usage": tokens} if tokens else {}  # モデルの無い結果は欄を置かない
+    if child.failure is Failure.MODEL_REFUSED:  # 実験の記録の掃除の後も、使用量ログだけで見分ける（#2944）
+        row["model_refused"] = True
     return row
 
 

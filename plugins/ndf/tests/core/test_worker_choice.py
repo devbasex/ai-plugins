@@ -125,6 +125,7 @@ def test_a_unit_launches_with_its_arm_and_the_resume_keeps_the_values(tmp_path, 
     assert _value(fake.argv[1], "--resume") == "s-1"
     assert [r["outcome"] for r in rows] == ["no_result", "ok"] and {r["unit"] for r in rows} == {"run-1:impl"}
     assert {r["assign_id"] for r in rows} == {done.launch["assign_id"]} and rows[0]["mode"] == "standard"
+    assert all(r["repo"] for r in rows)  # 報告が組をリポジトリで絞れるように行へ書く
     assert done.launch["model"] == "claude-sonnet-5-5" and done.launch["requested_model"] == "sonnet"
     assert [r["request_try"] for r in rows] == [1, 2] and len({r["request_id"] for r in rows}) == 1  # 再開は同じリクエストの次の番号
 

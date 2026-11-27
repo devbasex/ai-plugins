@@ -19,7 +19,7 @@
     "step": {"type": "string", "description": "プランのステップの id"},
     "attempt": {"type": "integer", "minimum": 1, "description": "そのプランの実行でそのステップを実行した何回目か（最初が 1。打ち直しと、遷移で戻った実行の両方で 1 増える）"},
     "launched_at": {"$ref": "common.schema.json#/$defs/time", "description": "起動した時刻（書いた時刻とは別の値）"},
-    "repo": {"type": "string", "description": "対象のリポジトリ（<所有者>/<リポジトリ>）"},
+    "repo": {"type": "string", "description": "対象のリポジトリの識別子（リポジトリのキーのハッシュの先頭 16 桁。launch_approval.repo_digest）。パスは書かない。解決済みの起動だけ"},
     "session_id": {"type": "string", "description": "起動した会話のセッション（呼び手が指定した id か、結果の session_id）"},
     "session_seq": {"type": "integer", "minimum": 0, "description": "その会話の中で何番目の起動か（最初が 0）。番号の飛びは書けなかった起動を示す"},
     "session_cost_usd": {"type": "number", "minimum": 0, "description": "結果の total_cost_usd。会話の累計で、起動 1 回の費用は同じ会話の 1 つ前の行との差で集計の時に求める（usage_decide.launch_costs）"},
@@ -40,6 +40,7 @@
     "effort_source": {"enum": ["argument", "environment", "experiment", "base", "default"], "description": "effort の出所（model_source と同じ語）"},
     "raised": {"type": "boolean", "description": "同じ失敗への 2 回目以降の起動で、値を 1 つ上げたか"},
     "outcome": {"enum": ["ok", "gate", "stopped", "no_result", "bad_report", "valid", "invalid", "timeout", "done", "failed", "usage_limit", "stalled", "unknown"], "description": "起動の終わり方（#2944）。worker と Skill は結果の status（ok・gate・stopped）か no_result（worker の結果が無い）・bad_report（Skill の報告が形に合わない）、判定は valid・invalid（回答が形に合わない）・timeout（起動の後の期限切れ）、相手役は監視の終わり方（done・failed・usage_limit・stalled・timeout）。分からなければ unknown"},
+    "model_refused": {"const": true, "description": "モデルか effort の指定を理由に、実行を始める前に拒否された起動（#2944）。拒否でなければ無し。ndf models report はリクエストの区分をこの欄で決める"},
     "model_usage": {"type": "object", "description": "モデルの名前 → そのモデルの使用量（token。結果の modelUsage の inputTokens・outputTokens・cacheReadInputTokens・cacheCreationInputTokens）。会話の累計で、起動 1 回分は session_cost_usd と同じ求め方（同じ会話の 1 つ前の行との差）で集計の時に求める", "additionalProperties": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}}
   }
 }

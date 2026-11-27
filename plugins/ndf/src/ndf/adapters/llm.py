@@ -188,7 +188,7 @@ def _judge_once(run: claude_choice.ChoiceRun, q: _Ask, prompt: str, timeout: flo
     """起動 1 回。子が終わるたびに行を渡す（差し替えた呼び出しは呼び出しの後に 1 行渡す）。"""
     call = claude.ClaudeCall(SYSTEM, claude.Permission.JUDGE, json_schema=q.schema, model=run.model, effort=run.effort)
     argv = claude.claude_args(call)
-    log = claude.LaunchLog({**claude.launch_meta("ask"), **run.meta()}, lambda r: {"outcome": q.checks.of(r)[0]})
+    log = claude.LaunchLog({**claude.launch_meta("ask", run.repo), **run.meta()}, lambda r: {"outcome": q.checks.of(r)[0]})
     with run_log.overlay_env(run.env_changes()):
         if q.call is None:
             reply = claude.call_claude(argv, prompt, timeout, None, claude.LaunchOptions(log=log))

@@ -690,11 +690,11 @@ timeout 1320 ndf delegate-run --runtime codex -- codex exec '{args}' < "$TMP/pro
 | `model` | 主モデルの名前。決め方は下の「モデルの欄」 | 欄を置かない |
 | `model_usage` | 結果の `modelUsage` の、モデルごとのトークン数。会話の累計のまま書き、起動 1 回分は `session_cost_usd` と同じ求め方（同じ会話の 1 つ前の行との差）で集計の時に求める | 欄を置かない |
 | `seconds`・`launched_at` | 起動した時刻と、子が終わるまでの秒 | 同じ |
-| `repo` | 呼び出し元が解決済みの `<所有者>/<リポジトリ>`。worker と Skill を回す起動は解決済みの値を持たないので欄を省く | 同じ |
+| `repo` | 呼び出し元が解決済みのリポジトリの識別子。リポジトリのキー（下の「リポジトリのキー」）のハッシュの先頭 16 桁で、パスは書かない。判定の起動は、実験の割り付け（#2944）で解決したキーから作る。worker と Skill を回す起動は解決済みの値を持たないので欄を省く | 同じ |
 
 子プロセスを起動できなかった場合（CLI のバージョンが下限より古い、同時起動のスロットが取れないなど）は、使った量が無いので行を書かない。
 
-`repo` を得るためだけに git を起動しないのは、worker の委譲と Skill の呼び出しのたびに、同期の git のプロセス（`git worktree list` と `git remote get-url`）が 2 つ増えるためである。集計は `repo` を使わないので、欄を省いても費用の比較は変わらない。
+`repo` を得るためだけに git を起動しないのは、worker の委譲と Skill の呼び出しのたびに、同期の git のプロセスが増えるためである。`ndf models report`（#2944）の起動の区分は `repo` で分けるので、欄の無い起動はリポジトリを区別せずにまとまる。
 
 **結果の値の範囲（実測）。** 2026-11-27 に Claude Code 2.1.332 で、haiku の同じ会話を `--resume` で 2 回再開して 3 回の結果を測った。`usage` は起動 1 回分で、3 回とも `input_tokens` 2・`output_tokens` 11 だった。`modelUsage` と `total_cost_usd` は会話の累計で、`modelUsage` の `inputTokens` は 2→4→6、`cacheReadInputTokens` は 1670→6145→11061 と各回の `usage` の和に一致し、`costUSD` は `total_cost_usd` と同じ値だった。そこで `usage` はそのまま書き、`model_usage` と `session_cost_usd` は累計のまま書いて、起動 1 回分は集計の時に差で求める。書き込みの時に差を取らないのは、前の行を読むために使用量ログの錠の中で全体を読むことになり、書けなかった起動があると差が誤るためである。起動 1 回分の `model_usage` を返す関数は、読み手が現れるまで足さない
 

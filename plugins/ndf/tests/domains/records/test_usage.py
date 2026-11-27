@@ -259,7 +259,7 @@ def test_usage_report_counts_closed_issues_of_the_origin_repo_with_one_search(
     ]
 
 
-# 現状固定（I-013 の前）: transcript_usage が会話の記録を読むときの行の扱い（usage._records）
+# 現状固定（I-013 の前）: transcript_usage が会話の記録を読むときの行の扱い（usage._transcript_records）
 def test_transcript_usage_returns_unknown_when_the_file_cannot_be_read(tmp_path: Path) -> None:
     assert usage.transcript_usage(tmp_path / "none.jsonl") == ud.UNKNOWN
     assert usage.transcript_usage(tmp_path) == ud.UNKNOWN

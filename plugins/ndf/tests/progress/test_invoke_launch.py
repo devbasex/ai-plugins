@@ -95,6 +95,7 @@ def test_skill_launches_with_the_unit_arm_and_writes_the_row(tmp_path: Path, uni
     assert argv[argv.index("--model") + 1 :][:3] == ["sonnet", "--effort", "high"]
     ((row,),) = [unit_rows]
     assert (row["layer"], row["unit"], row["mode"], row["outcome"]) == ("skill", "run-1:design", "light", "ok")
+    assert row["repo"]  # 割り付けた起動の行は、報告が絞るリポジトリの識別子を持つ
 
 
 def test_skill_without_a_unit_is_not_assigned(tmp_path: Path, unit_rows, monkeypatch) -> None:

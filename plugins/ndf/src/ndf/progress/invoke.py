@@ -913,7 +913,9 @@ def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResu
 
         def launch(timeout: float, bound: Optional[Callable[[], float]] = None) -> claude.ClaudeReply:
             # 組んだ引数に選んだ値の引数を足して 1 回起動する。`bound` は起動し直しの期限の残り
-            log = claude.LaunchLog({**claude.launch_meta(run.name), **picked.meta()}, lambda r: {"outcome": skill_outcome(r, checked)})
+            log = claude.LaunchLog(
+                {**claude.launch_meta(run.name, picked.repo), **picked.meta()}, lambda r: {"outcome": skill_outcome(r, checked)}
+            )
             options = claude.LaunchOptions(verify=grant.verifier, log=log, left=bound)
             with run_log.overlay_env(picked.env_changes()):
                 got = call_claude([*base, *picked.cli_args()], skill_prompt(run), timeout, cwd, options)

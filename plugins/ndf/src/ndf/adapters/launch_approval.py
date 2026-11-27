@@ -65,6 +65,11 @@ def repo_key(root: Path) -> str:
         return os.path.realpath(root)
 
 
+def repo_digest(key: str) -> str:
+    """リポジトリのキーから作る、パスを含まない識別子。使用量ログと `ndf models report` の結果は、共有されるのでキーでなくこれを持つ。"""
+    return canonical_sha(key)[:16]
+
+
 def state_file(file_id: str) -> Path:
     """状態の保存先の記録のファイル（表 ndf-files の `file_id` の行）。"""
     from ndf.contracts import facts

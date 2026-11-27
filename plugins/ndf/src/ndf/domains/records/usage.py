@@ -46,7 +46,7 @@ def usage_log_path(env: Optional[Mapping[str, str]] = None) -> Path:
     return where / facts.value("ndf-files", "usage-log-file", "path")
 
 
-def _records(path: Path) -> list[dict[str, Any]]:
+def _transcript_records(path: Path) -> list[dict[str, Any]]:
     # usage を持たない行は JSON として読まない。書きかけ・辞書でない行は応答として数えない
     lines = [line for line in path.read_text(encoding="utf-8").splitlines() if '"usage"' in line]
     return jsonl.parse_lines(lines)[0]
@@ -55,7 +55,7 @@ def _records(path: Path) -> list[dict[str, Any]]:
 def transcript_usage(path: Path, since: Optional[datetime] = None, until: Optional[datetime] = None) -> ud.Usage | str:
     """会話の記録 1 本の使用量。読めなければ `UNKNOWN`（使用量ログの行は unknown になる。hook を落とさない）。"""
     try:
-        records = _records(path)
+        records = _transcript_records(path)
     except (OSError, UnicodeDecodeError):
         return ud.UNKNOWN
     return ud.transcript_total(records, since, until)

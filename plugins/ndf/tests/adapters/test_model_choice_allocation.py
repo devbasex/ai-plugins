@@ -219,7 +219,8 @@ def test_a_retry_raises_the_assigned_arm(tmp_path, store, clock):
 
 def _refusal(store: Path, assign: dict, when: datetime) -> None:
     arm = assign["arms"][assign["chosen"]]
-    row = {"kind": "launch_error", "at": _at(when), "assign_id": assign["assign_id"], "stage": "impl", "runtime": "claude"}
+    row = {"kind": "launch_error", "at": _at(when), "assign_id": assign["assign_id"], "stage": "impl"}
+    row["runtime"] = "claude"
     _write(store, {**row, "arm": arm, "reason": "model_refused", "switched": True})
 
 
