@@ -547,6 +547,16 @@ class GitHub:
         """Issue（か PR）のコメントを古い順にすべて読む（`github.list-pages` ページまで。超えたら `GitHubError`）。"""
         return [Authored.from_rest(c) for c in self._pages(f"/repos/{self.repo}/issues/{int(number)}/comments")]
 
+    def commit_pulls(self, sha: str) -> list[int]:
+        """コミット `sha` に紐づく PR の番号（`GET /commits/<sha>/pulls`。PR のブランチにあるコミットと、PR を入れたコミット）。
+        GitHub に無いコミットは状態 422 の `GitHubError`。"""
+        body = self.rest("GET", f"/repos/{self.repo}/commits/{quote(sha, safe='')}/pulls", params={"per_page": PER_PAGE})
+        return [int(p["number"]) for p in body]
+
+    def pull_commit_count(self, number: int) -> int:
+        """PR `number` のコミットの数（REST の `commits`）。"""
+        return int(self.rest("GET", f"/repos/{self.repo}/pulls/{int(number)}")["commits"])
+
     def delete_comment(self, comment_id: int) -> None:
         """コメント `comment_id` を消す（`DELETE /issues/comments/<id>`。#4580 で自分が書いたコメントを消す）。失敗は `GitHubError`。"""
         self.rest("DELETE", f"/repos/{self.repo}/issues/comments/{int(comment_id)}")

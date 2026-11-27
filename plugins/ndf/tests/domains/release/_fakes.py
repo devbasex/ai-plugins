@@ -76,6 +76,10 @@ class FakeHub:
     deleted: list[int] = field(default_factory=list)
     # 消すのに失敗するコメントの ID
     undeletable: set[int] = field(default_factory=set)
+    # PR のコミットの数（無ければ 1）・コミットに紐づく PR の番号（例外なら照会の失敗）と、照会したコミット
+    commit_counts: dict[int, int] = field(default_factory=dict)
+    linked: dict[str, Any] = field(default_factory=dict)
+    linked_asked: list[str] = field(default_factory=list)
 
     def pull(self, number: int) -> Pull:
         return self.pulls[number]
@@ -135,6 +139,16 @@ class FakeHub:
     def workflow_runs(self, workflow: str, branch: str, commit: str, timeout: float | None = None) -> list[dict]:
         self.run_queries.append((workflow, branch, commit, timeout))
         return list(self.cd_runs.pop(0) if len(self.cd_runs) > 1 else self.cd_runs[0]) if self.cd_runs else []
+
+    def pull_commit_count(self, number: int) -> int:
+        return self.commit_counts.get(number, 1)
+
+    def commit_pulls(self, sha: str) -> list[int]:
+        self.linked_asked.append(sha)
+        got = self.linked.get(sha, [])
+        if isinstance(got, Exception):
+            raise got
+        return list(got)
 
     def delete_comment(self, comment_id: int) -> None:
         if comment_id in self.undeletable:

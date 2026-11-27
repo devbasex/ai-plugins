@@ -68,3 +68,17 @@ def test_delete_comment_sends_delete_and_raises_on_failure() -> None:
     assert [r.method for r in server.seen] == ["DELETE"]
     with pytest.raises(github.GitHubError):
         hub(REPO, server).delete_comment(42)
+
+
+def test_commit_pulls_and_pull_commit_count() -> None:
+    """#4580: コミットに紐づく PR の番号と、PR のコミットの数（rebase の PR の差分の起点を決める）。"""
+    routes = {
+        ("GET", f"/repos/{REPO}/commits/{HEAD}/pulls"): [httpx.Response(200, json=[{"number": 4485}, {"number": 12}])],
+        ("GET", f"/repos/{REPO}/pulls/4485"): [httpx.Response(200, json={"number": 4485, "commits": 26})],
+    }
+    server = RouteServer(routes)
+    assert hub(REPO, server).commit_pulls(HEAD) == [4485, 12]
+    assert hub(REPO, server).pull_commit_count(4485) == 26
+    failing = RouteServer({("GET", f"/repos/{REPO}/commits/{HEAD}/pulls"): [httpx.Response(422, json={"message": "No commit found"})]})
+    with pytest.raises(github.GitHubError):
+        hub(REPO, failing).commit_pulls(HEAD)

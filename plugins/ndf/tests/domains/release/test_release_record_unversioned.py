@@ -74,9 +74,14 @@ class Repo(FakeGit):
             else {(f"{COMMIT}^1", COMMIT): ["web/a.ts", "worker/b.py"], (BEFORE, AFTER): ["web/a.ts", "worker/b.py"]}
         )
         self.revs: list[str] = []
+        # 反映したコミットから第一親をたどったコミット（新しい順）
+        self.chain = [COMMIT, "r2" * 20, "r1" * 20, "m0" * 20]
 
     def run(self, *args: str) -> str:
         self.calls.append(args)
+        if any(a.startswith("--max-count=") for a in args):
+            count = int(next(a for a in args if a.startswith("--max-count=")).split("=")[1])
+            return "".join(f"{c}\n" for c in self.chain[:count])
         return f"{AFTER}\n{COMMIT}\n"
 
     def diff_between(self, a: str, b: str, *options: str) -> str:
@@ -202,6 +207,40 @@ def test_checks_one_to_six_write_nothing(tmp_path: Path, args: Any, change: str 
         repo.diffs[(BEFORE, AFTER)] = ["docs/readme.md"]
     with pytest.raises(record.RecordError, match=match):
         _write(hub, repo, args)
+    assert hub.comments_of == {} and hub.run_queries == []
+
+
+R2, R1 = "r2" * 20, "r1" * 20
+
+
+@pytest.mark.parametrize(
+    ("commits", "linked", "base", "asked"),
+    [
+        (3, {R2: [11]}, f"{COMMIT}^1", [R2]),  # squash: 1 つ前は別の PR のコミット
+        (3, {R2: [PROD], R1: [PROD, 70]}, f"{R1}^1", [R2, R1]),  # rebase で 3 コミット
+        (3, {R2: [77], R1: [PROD]}, f"{COMMIT}^1", [R2]),  # 途中に別の PR のコミットが挟まる
+        (1, {R2: [PROD]}, f"{COMMIT}^1", []),  # PR のコミットが 1 つなら照会しない
+    ],
+)
+def test_the_pull_diff_starts_below_the_commits_linked_to_the_pull(
+    tmp_path: Path, commits: int, linked: dict, base: str, asked: list
+) -> None:
+    """本番の PR の差分の起点は、反映したコミットから第一親をたどり、同じ PR に紐づく最後のコミットの第一親（PR のコミットの数まで）。"""
+    hub = _push_activity(_hub(cd_runs=[[SUCCESS]]))
+    hub.commit_counts[PROD], hub.linked = commits, linked
+    repo = Repo(tmp_path, diffs={(base, COMMIT): ["web/a.ts"], (BEFORE, AFTER): ["web/a.ts"]})
+    got = _write(hub, repo, _args(WEB))
+    assert got.record.targets == (WEB,) and hub.linked_asked == asked
+
+
+def test_the_pull_diff_stops_when_links_cannot_be_read(tmp_path: Path) -> None:
+    from ndf.adapters.github import GitHubError
+
+    hub = _push_activity(_hub(cd_runs=[[SUCCESS]]))
+    hub.commit_counts[PROD] = 3
+    hub.linked = {R2: GitHubError("No commit found", 422)}
+    with pytest.raises(record.RecordError, match="打ち直す"):
+        _write(hub, Repo(tmp_path), _args(WEB))
     assert hub.comments_of == {} and hub.run_queries == []
 
 

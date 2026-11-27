@@ -145,9 +145,31 @@ def _diff_paths(repo_git: Git, base: str, head: str) -> frozenset[str]:
     return frozenset(p for p in repo_git.diff_between(base, head, "--name-only", "-z", "--no-renames").split("\0") if p)
 
 
-def scope_paths(repo_git: Git, commit: str, push: record_decide.Push) -> tuple[frozenset[str], frozenset[str]]:
-    """「対象を決める変更の範囲」の 2 つの差分（本番の PR の差分と push の差分）のパス。git の起動は 2 回。"""
-    return _diff_paths(repo_git, f"{commit}^1", commit), _diff_paths(repo_git, push.before, push.after)
+def pull_base(hub: GitHub, repo_git: Git, number: int, commit: str) -> str:
+    """本番の PR `number` の差分の起点。反映したコミット `commit` から第一親を PR のコミットの数までたどり、同じ PR に紐づく
+    最後のコミットの第一親（squash とマージのコミットでは `commit` の第一親、rebase では PR のコミットの範囲の下）。
+    マージの方式は見分けない。紐づく PR を照会できなければ推測せずに `RecordError`。"""
+    count = hub.pull_commit_count(number)
+    chain = repo_git.run("rev-list", "--first-parent", f"--max-count={count}", commit).split() if count > 1 else [commit]
+    last = commit
+    for sha in chain[1:]:  # PR のコミットの数までで、別の PR のコミットに当たれば止まる
+        try:
+            linked = hub.commit_pulls(sha)
+        except GitHubError as exc:
+            if exc.retry_after is not None:
+                raise
+            raise RecordError(
+                f"コミット {sha} に紐づく PR を照会できず、#{number} の差分の起点を決められない（{exc}）。時間を置いて打ち直す"
+            ) from exc
+        if number not in linked:
+            break
+        last = sha
+    return f"{last}^1"
+
+
+def scope_paths(repo_git: Git, base: str, commit: str, push: record_decide.Push) -> tuple[frozenset[str], frozenset[str]]:
+    """「対象を決める変更の範囲」の 2 つの差分（本番の PR の差分 `base`..`commit` と push の差分）のパス。git の起動は 2 回。"""
+    return _diff_paths(repo_git, base, commit), _diff_paths(repo_git, push.before, push.after)
 
 
 def find_push(hub: GitHub, repo_git: Git, production: str, commit: str, tip: str) -> record_decide.Push:
@@ -162,15 +184,18 @@ def find_push(hub: GitHub, repo_git: Git, production: str, commit: str, tip: str
     return push
 
 
-def _prefix(hub: GitHub, hands: Hands, production: str, commit: str, tip: str, known: Optional[record_decide.Push]) -> Prefix:
-    """worktree に届け先の設定があるリポジトリの前処理（push・push の時点の設定・差分）。止まるときは `RecordError`。"""
+def _prefix(hub: GitHub, hands: Hands, production: str, pull: Pull, tip: str, known: Optional[record_decide.Push]) -> Prefix:
+    """worktree に届け先の設定があるリポジトリの前処理（push・push の時点の設定・差分）。`pull` は本番へ入った PR
+    （`merge_sha` が反映したコミット）。止まるときは `RecordError`。"""
+    commit = pull.merge_sha
     push = known if known is not None else find_push(hub, hands.repo_git, production, commit, tip)
     at = delivery_confirm.deliveries_at(hands.repo_git, push.after)
     if at.kind in (delivery_confirm.MISSING_REF, delivery_confirm.BROKEN):
         raise RecordError(f"{at.reason}。CD の結果が失敗のときと同じく、課題は人が確かめてから閉じる" if at.kind == "broken" else at.reason)
     if at.kind == delivery_confirm.ABSENT:
         return Prefix(commit, push, at, frozenset(), frozenset())
-    return Prefix(commit, push, at, *scope_paths(hands.repo_git, commit, push))
+    base = pull_base(hub, hands.repo_git, pull.number, commit)
+    return Prefix(commit, push, at, *scope_paths(hands.repo_git, base, commit, push))
 
 
 def _share_path(repo_git: Git, number: int) -> Path:
@@ -283,7 +308,7 @@ def _shape(hub: GitHub, hands: Hands, number: int, production: str, release: Map
         prefix = Prefix(commit, None, None, frozenset(), frozenset())
     else:
         known = next((r.push for r in state.valid if r.version == args.version and r.push is not None), None)
-        prefix = shared_prefix(hands.repo_git, number, commit, lambda: _prefix(hub, hands, production, commit, args.tip, known))
+        prefix = shared_prefix(hands.repo_git, number, commit, lambda: _prefix(hub, hands, production, pull, args.tip, known))
     targets = _record_targets(prefix, args)
     _check_names(targets, args)
     _check_records(state, targets, args.version, commit, number)
