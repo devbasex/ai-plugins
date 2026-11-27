@@ -15,6 +15,11 @@ NDF が書いたファイルとはみなさない（PR 4638 の r1-4）。
 起動は始めに記録のファイルに錠（`filelock`）を取り、終わるまで持つ（`claim`）。同じ出力先を使う起動が重なれば、後の起動は
 片付けの前に止まり、実行中の起動の一時のファイルや出力を消さない（PR 4638 の r3-4）。記録は置き換えでなく、錠を持った
 ファイルへその場で書く。置き換えると錠が新しいファイルへ移らないためで、記録のための一時のファイルも作らない（PR 4638 の r3-5）。
+出力や一時のファイルを指す記録は、前の記録の後ろへ 1 行として足し、読むときは最後の完全な行を使う。書き込みの途中で終了しても
+前の記録が残り、書き切れなかった行は読み飛ばす。何も指さない記録だけは切り詰めてから書き、記録を小さく保つ（PR 4638 の r4-5）。
+記録には書く中身を残すので、所有者のほかに読み書きの権限がある既存の記録は使わずに止まる（PR 4638 の r4-4）。
+片付けや書き込みの後始末に失敗した起動は、記録が指す出力と一時のファイルを次の起動が片付けられるよう、記録を消さない
+（PR 4638 の r4-6・r4-7）。
 
 無い出力は一時のファイルへ書き、記録を残してから出力の名前へ置き換える（PR 4638 の r1-4）。置き換えは inode と更新時刻を
 変えないので、記録はそのまま公開後の出力を指す。一時のファイルの名前と書く中身は作る前に記録へ書き、書いた後に同一性を書く。
@@ -50,6 +55,8 @@ RECORD_KIND = "cross-review-output"
 WRITTEN_KEY = "written"
 WRITING_KEY = "writing"
 STAGING_KEY = "staging"
+# 何も指さない記録の行（途中で切れた書き込みも、指す物の無い空の記録と同じに読む。PR 4638 の r4-5）
+_BARE = json.dumps({RECORD_KIND_KEY: RECORD_KIND}, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
 
 
 class Unowned(Exception):
@@ -140,23 +147,41 @@ class Claim:
         # 消してよい記録か（この起動が作った・NDF の種別の記録だった）。利用者が先に作った空のファイルは残す
         self._ours = created
         self._written = False
+        # 記録が、片付けの済んでいない出力か一時のファイルを指しているか。指していれば消さない（PR 4638 の r4-6・r4-7）
+        self._pointing = False
 
     def _read(self) -> Optional[dict[str, Any]]:
-        """記録の中身。空なら `{}`（NDF は作った直後に種別を書くので、空の記録は消さずに使うだけにする）、NDF の種別の記録で
-        なければ None。"""
+        """記録の中身（最後の完全な行）。空か、何も指さない記録を書く途中で切れたなら `{}`（NDF は作った直後に種別を書くので、
+        空の記録は消さずに使うだけにする）、NDF の種別の記録でなければ None。"""
         raw = os.pread(self._fd, os.fstat(self._fd).st_size, 0)
-        if not raw:
+        found: Optional[dict[str, Any]] = None
+        for line in raw.split(b"\n"):
+            if not line:
+                continue
+            try:
+                value = json.loads(line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):  # noqa: NDF401 ファイル: 書き切れずに終了した行は読み飛ばす（PR 4638 の r4-5）
+                continue
+            if not (isinstance(value, dict) and value.get(RECORD_KIND_KEY) == RECORD_KIND):
+                return None
+            found = value
+        if found is None and _BARE.startswith(raw):
             return {}
-        try:
-            found = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):  # noqa: NDF401 ファイル: 読めない記録は、NDF が書いたと確かめられない
-            return None
-        return found if isinstance(found, dict) and found.get(RECORD_KIND_KEY) == RECORD_KIND else None
+        return found
 
     def _put(self, value: dict[str, Any]) -> None:
-        """記録をその場で書き直す。小さい 1 回の書き込みなので、途中で切れた中身は残らない。"""
-        os.ftruncate(self._fd, 0)
-        os.pwrite(self._fd, json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8"), 0)
+        """記録を書く。出力か一時のファイルを指す記録は前の記録の後ろへ足し、途中で終了しても前の記録を残す。何も指さない記録は
+        切り詰めてから書く（途中で切れても、指す物の無い空の記録と同じに読む）。書き切れなければ `OSError`（PR 4638 の r4-5）。"""
+        line = json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
+        if value.keys() <= {RECORD_KIND_KEY}:
+            os.ftruncate(self._fd, 0)
+            offset = 0
+        else:
+            offset = os.fstat(self._fd).st_size
+            # 前の行が書き切れずに終わっていても、新しい行を別の行にする
+            line = b"\n" + line
+        if os.pwrite(self._fd, line, offset) != len(line):
+            raise OSError(f"出力の記録 {self.record} を書き切れない")
 
     def clear(self) -> None:
         """前の起動の出力を片付ける（`claim` の説明のとおり）。"""
@@ -168,11 +193,14 @@ class Claim:
             raise OSError(f"出力の記録の保存先 {self.record} に、NDF が書いたと確かめられないファイルがある")
         if found:
             self._ours = True
+            # 片付けを終えるまでは記録を消さない。途中で止まっても、次の起動が同じ記録で確かめて片付ける（PR 4638 の r4-6・r4-7）
+            self._pointing = bool(found.keys() - {RECORD_KIND_KEY})
             _collect_staging(self.path, found)
         if self.path.exists():
             _clear_output(self.path, found)
-        if found.keys() - {RECORD_KIND_KEY}:
+        if self._pointing:
             self._put(_record())
+            self._pointing = False
         if not self.path.exists():
             # 出力の名前にファイルを作れるか（公開は同じディレクトリの一時のファイルからの置き換え）
             self.path.open("x", encoding="utf-8").close()
@@ -189,13 +217,18 @@ class Claim:
 
     def _write_into(self, text: str) -> None:
         """先に作られた空のファイルへ、書きかけの記録を残してから、その inode と権限のまま書く。"""
+        self._pointing = True
         try:
             self._put(_writing_record(self.path, text))
             self.path.write_text(text, encoding="utf-8")
             self._put(_record(**{WRITTEN_KEY: _file_identity(self.path)}))
         except BaseException as exc:
-            self.path.open("w", encoding="utf-8").close()
-            self._reset(exc)
+            try:
+                self.path.open("w", encoding="utf-8").close()
+            except OSError as undo:
+                exc.add_note(f"出力 {self.path} を空へ戻せない（次の起動が記録で確かめて片付ける）: {undo}")
+            else:
+                self._reset(exc)
             raise
 
     def _publish(self, text: str) -> None:
@@ -203,6 +236,7 @@ class Claim:
         staging: dict[str, Any] = {"tmp": f".{self.path.name}.{secrets.token_hex(8)}.tmp", "text": text}
         tmp = self.path.parent / staging["tmp"]
         made = False
+        self._pointing = True
         try:
             self._put(_record(**{STAGING_KEY: staging}))
             # `write_text` と同じ作成時の権限で作る。umask と親のデフォルト ACL が引かれたまま公開する（PR 4638 の r2-6）
@@ -215,9 +249,13 @@ class Claim:
             self._put(_record(**{STAGING_KEY: staging, WRITTEN_KEY: _file_identity(tmp)}))
             os.replace(tmp, self.path)
         except BaseException as exc:
-            if made:
-                tmp.unlink(missing_ok=True)
-            self._reset(exc)
+            try:
+                if made:
+                    tmp.unlink(missing_ok=True)
+            except OSError as undo:
+                exc.add_note(f"一時のファイル {tmp} を消せない（次の起動が記録で確かめて片付ける）: {undo}")
+            else:
+                self._reset(exc)
             raise
 
     def _reset(self, cause: BaseException) -> None:
@@ -225,13 +263,15 @@ class Claim:
         片付けが消す）。"""
         try:
             self._put(_record())
+            self._pointing = False
         except OSError as exc:  # 元の失敗を返すのを優先し、戻せなかったことは書き添える
             cause.add_note(f"出力の記録 {self.record} を戻せない: {exc}")
 
     def release(self) -> None:
-        """錠を外す。出力を書かなかった起動は、消してよい記録を消す（書いた起動の記録は次の起動が読む）。"""
+        """錠を外す。出力を書かなかった起動は、消してよい記録を消す（書いた起動の記録と、片付けの済んでいない物を指す記録は
+        次の起動が読む）。"""
         try:
-            if not self._written and self._ours:
+            if not self._written and self._ours and not self._pointing:
                 self.record.unlink(missing_ok=True)
         finally:
             os.close(self._fd)
@@ -258,6 +298,17 @@ def _lock(path: Path) -> Claim:
         lock.release()
         raise
     held = Claim(path, fd, lock, created)
+    try:
+        mode = stat.S_IMODE(os.fstat(fd).st_mode)
+    except BaseException:
+        held.release()
+        raise
+    if mode & 0o077:
+        # 記録には書く中身（ブランチ名・コミットの SHA）を残すので、他の利用者が読める既存の記録は使わない。利用者の
+        # ファイルかもしれないので、権限を変えず、消さずに止まる（PR 4638 の r4-4）
+        held._ours = False
+        held.release()
+        raise OSError(f"出力の記録 {record} に所有者のほかの読み書きの権限がある（{mode:o}）。権限を 600 にしてから打ち直す")
     if created:
         try:
             # 強制終了で残っても次の起動が NDF の記録と分かるよう、作った直後に種別を書く

@@ -152,7 +152,8 @@ def test_pr_4638_r2_5_record_not_written_by_ndf_is_kept(tmp_path: Path, output: 
 
 
 def test_pr_4638_r2_7_staging_file_that_does_not_match_the_record_is_kept(tmp_path: Path) -> None:
-    """PR 4638 の r2-7: 記録の指す一時のファイルでも、inode が記録と違えば利用者のファイルとみなして消さない。"""
+    """PR 4638 の r2-7・r4-7: 記録の指す一時のファイルでも、inode が記録と違えば利用者のファイルとみなして消さない。
+    記録も消さず、次の起動も同じ照合で止まる。"""
     out = tmp_path / "h"
     tmp = tmp_path / ".h.0.tmp"
     tmp.write_text("利用者のファイル", encoding="utf-8")
@@ -160,7 +161,7 @@ def test_pr_4638_r2_7_staging_file_that_does_not_match_the_record_is_kept(tmp_pa
     store.write_object(outputs.owner_record(out), outputs._record(**{outputs.STAGING_KEY: staging}))
     with pytest.raises(OSError):
         outputs.clear_stale(out)
-    assert tmp.read_text(encoding="utf-8") == "利用者のファイル"
+    assert (tmp.read_text(encoding="utf-8"), outputs.owner_record(out).exists()) == ("利用者のファイル", True)
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
@@ -183,3 +184,65 @@ def test_pr_4638_r3_4_output_in_use_by_a_running_review_is_not_cleared(tmp_path:
     assert out.read_text(encoding="utf-8") == HEAD
     outputs.clear_stale(out)
     assert not out.exists()
+
+
+def test_pr_4638_r4_4_record_readable_by_others_is_refused(tmp_path: Path) -> None:
+    """PR 4638 の r4-4: 他の利用者が読める既存の記録には書く中身を残さず、権限も変えずに止まる。"""
+    out = tmp_path / "h"
+    out.touch()
+    record = outputs.owner_record(out)
+    record.touch()
+    record.chmod(0o644)
+    with pytest.raises(OSError):
+        outputs.write_output(out, HEAD)
+    assert (stat.S_IMODE(record.stat().st_mode), record.read_bytes(), out.read_text(encoding="utf-8")) == (0o644, b"", "")
+
+
+def test_pr_4638_r4_5_cut_record_update_keeps_the_previous_record(tmp_path: Path) -> None:
+    """PR 4638 の r4-5: 書いた後の記録を足す途中で終了しても、前の書きかけの記録が残り、次の起動はそれで確かめて空へ戻す。"""
+    out = tmp_path / "h"
+    out.touch()
+    before = out.stat().st_ino
+    record = outputs.owner_record(out)
+    store.write_object(record, outputs._writing_record(out, HEAD))
+    out.write_text(HEAD, encoding="utf-8")
+    with record.open("ab") as cut:
+        cut.write(b'\n{"ndf_record": "cross-review-output", "wri')
+    outputs.clear_stale(out)
+    assert (out.stat().st_ino, out.read_text(encoding="utf-8"), record.exists()) == (before, "", False)
+
+
+def test_pr_4638_r4_5_short_record_write_is_detected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """PR 4638 の r4-5: 記録を書き切れなければ `OSError` で止まり、出力を書く前の状態へ戻す。"""
+    pwrite = os.pwrite
+
+    def short(fd, data, offset):
+        return pwrite(fd, data[:-1] if data.startswith(b"\n") else data, offset)
+
+    out = tmp_path / "h"
+    monkeypatch.setattr(outputs.os, "pwrite", short)
+    with pytest.raises(OSError):
+        outputs.write_output(out, HEAD)
+    monkeypatch.undo()
+    outputs.clear_stale(out)
+    assert sorted(p.name for p in tmp_path.iterdir()) == []
+
+
+def test_pr_4638_r4_6_record_is_kept_when_clearing_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """PR 4638 の r4-6: 書きかけの出力を空へ戻せずに止まっても記録を消さず、原因を直した次の起動がその記録で片付ける。"""
+    out = tmp_path / "h"
+    out.touch()
+    record = outputs.owner_record(out)
+    store.write_object(record, outputs._writing_record(out, HEAD))
+    out.write_text(HEAD, encoding="utf-8")
+
+    def denied(path, found):
+        raise PermissionError("空へ戻せない")
+
+    monkeypatch.setattr(outputs, "_clear_output", denied)
+    with pytest.raises(OSError):
+        outputs.clear_stale(out)
+    assert record.exists()
+    monkeypatch.undo()
+    outputs.clear_stale(out)
+    assert (out.read_text(encoding="utf-8"), record.exists()) == ("", False)
