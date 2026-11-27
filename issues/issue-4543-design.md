@@ -123,19 +123,31 @@ graph TD
 ### 決定 6: 要らない入力に費用を払わせないため、書き分けが要らないと分かる経路では小見出しを外して渡す
 
 - **質問**: 基準の本文を AI への指示に入れる経路は 3 つある（読み手役、作業の AI、cross-review）。小見出しをどの経路に渡すか
-- **選んだ案**: 正本は 3 章の小見出しの 1 か所のままにし、指示を組むときに、次の表の条件で小見出しを外す
+- **選んだ案**: 正本は 3 章の小見出しの 1 か所のままにし、指示を組むときに、次の表の条件で小見出しを外す。外す範囲は、正本の小見出しの前後に置く目印のコメント（`<!-- ndf:distinction-begin -->` と `<!-- ndf:distinction-end -->`）で決める。プログラムは見出しの文を持たないので、見出しを書き換えても外せる
 
 | 経路 | 小見出しを渡すとき | 外すとき | 判定の材料 |
 | --- | --- | --- | --- |
 | 読み手役（`ndf records reading prompt`） | 下の「外すとき」以外のすべて。指定が無ければ渡す | 確定仕様、変更履歴、README・利用者への案内を読ませるとき | 頼む側が指示の JSON の任意のキー `distinction` に `false` を書く |
 | 作業の AI（基準の全文を受け取る作業） | 設計（`design`）、詳細設計（`design-detail`）、設計の検査の直し（`design-check-fix`）、要求（`requirements`） | 素材集め（`document-sources`）、実装計画（`implementation-plan`）、確定仕様化（`plan-to-spec`）、振り返り（`retrospective`） | 作業の定義 `contracts/worker/kinds.json` の作業ごとの値 |
-| cross-review（レビュー担当と修正担当） | PR の変更に、課題の設計書か要求仕様のコピーがある | どちらも無い（基準の残りはこれまでどおり渡す） | 変更したファイルの名前。形は `ndf/core/issue_docs.py` に置く |
+| cross-review（レビュー担当と修正担当） | PR の変更に、課題の設計書か要求仕様のコピーがある | どちらも無い（基準の残りはこれまでどおり渡す） | 変更したファイルの名前。名前の形は `ndf/core/issue_docs.py` だけに置く |
 
+- 採らなかった案: 小見出しの見出しの文で外す範囲を探す（同じ文を基準とプログラムの 2 か所に持ち、見出しだけを直すと外れなくなる）
 - 採らなかった案: どの経路にも常に渡す（プログラムを変えずに済むが、書き分けを扱わない作業やレビューでも、起動のたびに約 1,100〜1,800 トークンが増える）
 - 採らなかった案: 読み手役の `questions_kind` で判定する（承認資料も、文書の一部だけを読ませるときも `none` なので、対象と対象外を分けられない）
 - 採らなかった案: 読んで確かめる文書の中身から対象かをプログラムで推し量る（誤ると指摘が黙って抜ける）
 - **代償**: プログラムとテストが増える。cross-review は、設計書も要求仕様のコピーも無い PR の文書では、現状と案の区別を指摘しない。要求の受け入れ条件が指摘を求めるのは読み手役で、cross-review ではない。読み手役の指定を頼む側が忘れた場合は、小見出しが渡って費用が増えるだけで、指摘は抜けない
-- 根拠: Value 2「安く使える」の「文脈は最適な量に保たれる」（MVV バージョン 11）
+- 根拠: Value 2「安く使える」（MVV バージョン 11）。書き分けを扱わない起動の入力を増やさず、文脈を最適な量に保つ
+
+### 決定 7: 要求仕様と課題の本文を食い違わせないため、cross-review の修正担当は課題の本文を直してからコピーを作り直す
+
+- **質問**: cross-review が要求仕様のコピーへの指摘を出したとき、修正担当はどこを直すか。要求の正本は課題の本文で、コピーだけを直すことは禁じられている（`requirements-design` の手順 7）
+- **選んだ案**: PR の変更に要求仕様のコピーがあるときは、修正担当への指示に次の扱いを足す。指示の文は、ほかの指摘の基準と同じ `contracts/data/review-criteria.json` に置く
+  - コピーへの指摘を直すときは、手順 7 のとおりに課題の本文を直し（`## 進行` より前だけを書き替える）、本文からコピーを作り直してコミットする
+  - 課題の本文を書き替えられないときは、コピーも変えず、利用者の判断が要る指摘（`needs_user`）として返す。本文の案は見送りの理由に書く
+- 採らなかった案: コピーを通常のファイルとして直す（設計 PR の要求仕様と課題の本文が食い違う）
+- 採らなかった案: コピーへの指摘をすべて利用者へ返す（文の直しだけでも工程が止まる）
+- **代償**: 修正担当が課題の本文を書き替える。要求仕様のコピーを含む PR では、修正担当への指示が数行増える
+- 根拠: Value 8「正しいデータ構造で作られる」（MVV バージョン 11）。コピーは正本の課題の本文から作る
 
 ## 影響と危険
 
@@ -145,7 +157,7 @@ graph TD
 - **当たるモード**（`development-workflow` が変更ごとに選ぶ工程の区分）: 概要を書くすべてのモード。設計書のテンプレートの指示は、設計書を書く `standard` と `legacy-refactor` に当たる
 - **今の決まりとの関係**: `document-style` の「変更履歴を本文に残さない」は、文書を直した経緯を残さない決まりである。変える対象の現状を過去形で書くことと混同されないよう、1 文を足す。確定仕様を現在形で書く指示と、PR の「利用者向けの変化」に今の決まりだけを書く指示は変えない。書き分けの小見出しの「当てない文章」の項目が、この 2 つを外す。承認資料のうち、リリースの変更点の一覧は変更履歴から写すので対象にしない
 - **同じファイルを触る別の変更**: PR 4548 が先にマージされた場合、「承認する人が読む欄」は新しいファイル `design/references/design-writing.md` へ移る。実装は、欄の表がある方のファイルへ指示を足す
-- **壊れうる箇所**: 基準の 3 章の中に `## ` の見出しを足すと、読み手役への指示がそこで切れる。小見出しは `### ` にする。小見出しの見出しの文を変えると、外すプログラムが見つけられず、全部の経路に渡る
+- **壊れうる箇所**: 基準の 3 章の中に `## ` の見出しを足すと、読み手役への指示がそこで切れる。小見出しは `### ` にする。小見出しを囲む目印のコメントを消すか書き換えると、プログラムが外す範囲を見つけられず、全部の経路に渡る
 
 ### 代表のリポジトリでの振る舞い
 
@@ -167,7 +179,8 @@ graph TD
 | --- | --- | --- |
 | 1. 概要を書く指示に書き分けがある | 設計書のテンプレートと PR を作る手順書のそれぞれから、リンクをたどると 2 行の表に着く。工程のプランの経路では、設計と実装の両方のプランが `--body-file` に渡すのは課題の本文なので、要求を書く手順書の手順 7 から同じ表に着くことと、書き分けの小見出しの「概要」の項目に本文の「何が起きたか」「目的」が入っていることを確かめる。参照切れの検査が通る | 手順書のリンクを消すか、小見出しの名前を変えると、たどり着けない。書き分けの小見出しの「概要」の項目から課題の本文を外すと、工程のプランの PR に規則が当たらない |
 | 2. 読み手役が指摘する | 要求の「何が起きたか」の書き分ける前と後の引用（[PR 4509](https://github.com/devbasex/ai-plugins/pull/4509) をもとにした比較用の例で、前の引用は現状と案をともに現在形にしてある）を、引用ブロックを外して「## 何が起きたか」の下の地の文にし、1 つずつ別の入力として読ませる。下の「読み手役に読ませる例」の例も 1 つずつ読ませる。2 つの引用と各例の結果が、そのセクションの末尾の「期待する結果」の表と一致する | 小見出しを 3 章の外へ置くと、読み手役への指示に入らず、負例の指摘が出ない。打ち切った後に前置きの語をまた及ぼす指示にすると、箇条書きの例の 3 つ目の箇条が挙がらない。指摘しない文の定め（参照先の案内と文書自体の説明）を消すと、正例の前の段落が挙がる |
-| 決定 6 の渡し分け | 指示を組む 3 つの経路の出力を、子のプロセスを起動しないテストで見る。決定 6 の表の「渡すとき」では小見出しがあり、「外すとき」では無い。読み手役の指示の JSON に `distinction` が無ければある | 外す処理を消すと「外すとき」の出力に小見出しが残る。小見出しの見出しだけを変えると、外すテストが落ちる |
+| 決定 6 の渡し分け | 指示を組む 3 つの経路の出力を、子のプロセスを起動しないテストで見る。決定 6 の表の「渡すとき」では小見出しがあり、「外すとき」では無い。読み手役の指示の JSON に `distinction` が無ければある。小見出しの見出しの文を変えた本文でも、「外すとき」には無い | 外す処理を消すと「外すとき」の出力に小見出しが残る。見出しの文で範囲を探す作りにすると、見出しを変えた本文で小見出しが残る。正本の目印のコメントを消すと、「外すとき」のテストが落ちる |
+| 決定 7 の要求仕様の指摘 | 子のプロセスを起動しないテストで修正担当の指示を組み、変更に要求仕様のコピーがあるときだけ決定 7 の扱いが入ることを見る。実装の後に修正担当がコピーを変えた設計 PR では、`design` の手順 7 の比較でコピーと課題の本文が一致する | 扱いを足す処理を消すと、指示に入らない。修正担当がコピーだけを直すと、比較が食い違う |
 | 決定 4 の見出しの扱い | 下の境界例を読ませる。同じ文が「解き方の全体像」の下では挙がり、「今の姿」の下では挙がらない | 書き分けの小見出しから概要の扱いを消すと、「解き方の全体像」の下の文が挙がらない |
 | 引用の扱い | 要求仕様の全体を読ませる。比較用の書き分ける前の引用も、「リクエスト（原文）」の見出しの下の引用も、現状と案の区別では挙がらない | 書き分けの小見出しの「当てない文章」の項目から引用を消すと、比較用の引用か原文が挙がる。「比較例」を書き忘れると比較用の書き分ける前の引用が挙がり、「直上の見出し」を書き忘れると「リクエスト（原文）」の下の引用が挙がる |
 | 3. 最初の設計 PR で書き分けられる | リリースの後に、人が最初の設計 PR の実際の本文（`gh pr view <番号> --json body`。工程のプランの経路では課題の本文）の概要と、設計書の概要を 1 文ずつ読む。同じ確かめを最初の実装 PR の本文にも行い、受け入れ条件 1 の指示が届いたことを見る。確かめる課題は、この変更を含む版で本文を書いたものにする | 要求を書く手順書か設計書のテンプレートの指示が無いと、変える内容が現在形で書かれる |
@@ -277,15 +290,17 @@ graph TD
 
 ## どこを変えるか
 
-詳細設計はこのセクションに畳む。新設する関数は小見出しを外す 1 つだけで、シグネチャを変える関数は 0 のため。外す関数は、渡された本文から小見出しを除いて返し、各経路の呼ぶ側が決定 6 の条件で呼ぶ。
+詳細設計はこのセクションに畳む。新設する関数は小見出しを外す 1 つだけで、シグネチャを変える関数は 0 のため。外す関数は、渡された本文から目印のコメントで囲まれた範囲を除いて返し、各経路の呼ぶ側が決定 6 の条件で呼ぶ。
 
 | ファイル | 変える中身 | 決定 |
 | --- | --- | --- |
-| `plugins/ndf/contracts/data/writing-criteria.md` | 3 章の末尾に書き分けの小見出し「現状と改善の案の書き分け」を足す（中身は次の表） | 1・2・3・4 |
-| `plugins/ndf/src/ndf/contracts/writing.py` | 小見出しの見出しの定数と、本文から小見出しを外す関数を足す | 6 |
+| `plugins/ndf/contracts/data/writing-criteria.md` | 3 章の末尾に書き分けの小見出し「現状と改善の案の書き分け」を足し（中身は次の表）、前後を決定 6 の目印のコメントで囲む | 1・2・3・4・6 |
+| `plugins/ndf/src/ndf/contracts/writing.py` | 目印のコメントの定数と、本文から目印で囲まれた範囲を外す関数を足す | 6 |
 | `plugins/ndf/src/ndf/domains/records/reading.py` | 指示の JSON の任意のキー `distinction`（真偽。省けば真）を受け取り、偽なら小見出しを外す | 6 |
 | `plugins/ndf/src/ndf/core/worker.py` と `plugins/ndf/contracts/worker/kinds.json` | 決定 6 の表の 4 つの作業の定義にだけ、小見出しを渡す値を持たせる。ほかの作業へ渡す全文からは外す | 6 |
-| `plugins/ndf/src/ndf/domains/crossreview/drive.py`・`fixer.py` と `plugins/ndf/src/ndf/core/issue_docs.py` | 要求仕様のコピーの名前の形を足す。変更に設計書も要求仕様のコピーも無ければ、文書の基準の全文から小見出しを外す | 6 |
+| `plugins/ndf/src/ndf/core/issue_docs.py` と `plugins/ndf/src/ndf/domains/docrebuild/drive.py` | 要求仕様のコピーの名前の形を `issue_docs.py` に置く。`drive.py` の `REQUIREMENTS_FILE` は定義をやめ、`issue_docs.py` の定義を参照する | 6 |
+| `plugins/ndf/src/ndf/domains/crossreview/drive.py`・`fixer.py` | 変更に設計書も要求仕様のコピーも無ければ、文書の基準の全文から小見出しを外す。変更に要求仕様のコピーがあれば、修正担当への指示に決定 7 の扱いを足す | 6・7 |
+| `plugins/ndf/contracts/data/review-criteria.json` | 修正担当へ足す、要求仕様のコピーへの指摘の扱いの文を置く | 7 |
 | `plugins/ndf/skills/document-rebuild/SKILL.md` | `prompt` の JSON の説明に、確定仕様、変更履歴、README・利用者への案内では `distinction` を `false` にすると足す | 6 |
 | `plugins/ndf/skills/design/references/design-template.md` | 「承認する人が読む欄」のセクションに「要約の段落と解き方の全体像は書き分けの小見出しに従って書く」という指示を足し、その小見出しを指す。テンプレート本体のコードブロックにある「解き方の全体像」の説明は、「この設計では〜」と分かる形で書くように直す。`legacy-refactor` の「目的」「目指す姿」にも同じ指示を足す | 1 |
 | `plugins/ndf/skills/pr/SKILL.md` | 「PR の作成・更新」の本文の書き方に、概要（`## Summary`・`## 概要`）は書き分けの小見出しに従って書くと足す。設計 PR と実装 PR の両方に当たると書き、「利用者向けの変化」「移行の手順」は対象外とする | 1 |
@@ -310,7 +325,7 @@ graph TD
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4543 | 実装する | — | `plugins/ndf/contracts/data/writing-criteria.md`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/contracts/writing.py`、`plugins/ndf/src/ndf/domains/records/reading.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/issue_docs.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/pr/SKILL.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/decision-request/SKILL.md`、`plugins/ndf/skills/document-style/SKILL.md`、`plugins/ndf/skills/document-rebuild/SKILL.md` |
+| #4543 | 実装する | — | `plugins/ndf/contracts/data/writing-criteria.md`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/contracts/writing.py`、`plugins/ndf/src/ndf/domains/records/reading.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/issue_docs.py`、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/pr/SKILL.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/decision-request/SKILL.md`、`plugins/ndf/skills/document-style/SKILL.md`、`plugins/ndf/skills/document-rebuild/SKILL.md` |
 
 ## 未確認のまま残ること
 
