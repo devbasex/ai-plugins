@@ -153,6 +153,22 @@ def experiment_changes(root: Path, cand: Optional[Path]) -> list[dict[str, Any]]
     return [{**c, "before": MASKED} if "before" in c and _has_secret(c["before"]) else c for c in changes]
 
 
+def experiments_sha(data: bytes) -> Optional[str]:
+    """候補のバイト列の `experiments`（書いていなければ空）のハッシュ。JSON のオブジェクトでなければ None。"""
+    try:
+        raw = json.loads(data)
+    except ValueError:  # noqa: NDF401 利用者の入力: 読めない候補は、示した内容と一致しないとして拒む
+        return None
+    return launch_records.canonical_sha(raw["experiments"] if isinstance(raw, dict) and "experiments" in raw else {}) if isinstance(raw, dict) else None
+
+
+def asked_experiments(request_id: str) -> Optional[str]:
+    """リクエストの質問を作ったときに示した `experiments` のハッシュ（質問の記録の最後の行）。無ければ None。"""
+    key = la.CONTINUATION[1]  # リクエストの識別子の欄
+    found = [r for r in la.records.whole_rows(la.state_file(la.QUESTIONS)) if key in r and r[key] == request_id]
+    return found[-1]["experiments_sha"] if found and "experiments_sha" in found[-1] else None
+
+
 def _has_secret(value: Any) -> bool:
     """値の中のキーと文字列のどれかが秘密の形か。1 つずつ当てる（JSON にするとエスケープで語の境が変わり、見逃すため。r7-2）。"""
     if isinstance(value, str):
@@ -273,6 +289,8 @@ def _show_result(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: 
             _check_destination(cand, target)
         t = shown["t"] = ls.approval_target(ls.load(root, cand))
         changes = shown["changes"] = experiment_changes(root, cand)
+        if cand is not None:  # 示した experiments をリクエストに残し、approve が反映する候補と照らす（r7-1）
+            asked["experiments_sha"] = experiments_sha(cand.read_bytes())
         if cand is not None:
             head = f"この作業場所の {target} を候補の内容で置き換え、以下の起動時の許可を反映してよいですか"
             effect = "この内容で起動してよい。承認を記録し、候補の内容で起動の設定を置き換える"
@@ -394,6 +412,8 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
         return _refused_config(str(exc))
     if t.sha256 != a.sha256:
         return _refused_config(f"示した内容（{a.sha256[:12]}…）と今の内容が違う。show で示し直して承認を取り直す")
+    if a.request is not None and cand is not None and asked_experiments(a.request) != experiments_sha(data):
+        return _refused_config("質問で示したモデルと effort の選択肢（experiments）と、反映する候補の内容が違う。show で示し直して承認を取り直す")
     needed = _widens(t) and not la.is_approved(repo, t.sha256)
     # 承認の行を足す条件（起動の許可）と、反映を許す条件（今回の書き換えへの同意）は別に判定する。書き換えは毎回人に確かめる
     asks = needed or cand is not None

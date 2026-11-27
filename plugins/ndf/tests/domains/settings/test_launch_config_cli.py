@@ -453,3 +453,17 @@ def test_a_secret_after_a_tab_is_found_before_serialization(repo, capsys):
     code = cli.main([lc.TOOL, "show", "--candidate", str(candidate), "--question", "approve"])
     got = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert code != 0 and got["cause"]["kind"] == "refused"
+
+
+def test_an_answer_does_not_reflect_experiments_changed_after_the_question(repo, capsys):
+    """r7-1: 質問の後に候補のモデルや effort を変えると、前の回答では反映しない。示した内容に戻せば反映する。"""
+    target = repo / ".ndf" / "launch.json"
+    candidate = _draft(capsys, ARMS)
+    _, question, approve = _ask(capsys, candidate)
+    _answer(question, la.APPROVE_LABEL.format("人"))
+    changed = json.loads(json.dumps(ARMS))
+    changed["experiments"]["stages"]["impl"]["arms"]["claude"][1]["model"] = "opus"
+    candidate.write_text(json.dumps(changed), encoding="utf-8")
+    assert _run(capsys, *approve)["cause"]["kind"] == "refused" and not target.exists()
+    candidate.write_text(json.dumps(ARMS), encoding="utf-8")
+    assert _run(capsys, *approve)["status"] == "ok" and json.loads(target.read_text()) == ARMS
