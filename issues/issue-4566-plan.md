@@ -72,7 +72,11 @@
 
 1 つの課題で差分が 1,000 行を超える見込みなので、依存の向きで 3 つに分ける。単位 1 は呼び出し元の無い部品、単位 2 は直接打つコマンド、単位 3 はスプリントの自動の経路である。単位 3 をマージするまで、工程の振る舞いは変わらない。
 
-行数は `git diff --shortstat <ベース>...HEAD -- . ':(exclude)issues' ':(exclude)plugins/ndf/docs/contracts/commands.md' ':(exclude)plugins/ndf/contracts/schemas/io' ':(exclude)plugins/ndf/skills/development-workflow/schemas'` で数える。除くのは、生成して作るファイルとコピーである。
+行数は次のコマンドで数える。除くのは、生成して作るファイルとコピーである。
+
+```bash
+git diff --shortstat <ベース>...HEAD -- . ':(exclude)issues' ':(exclude)plugins/ndf/docs/contracts/commands.md' ':(exclude)plugins/ndf/contracts/schemas/io' ':(exclude)plugins/ndf/skills/development-workflow/schemas'
+```
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
@@ -86,7 +90,7 @@
 
 | 時機 | 対象 | 理由 |
 | --- | --- | --- |
-| 実装の前（準備のリファクタリング） | しない | `drive.py` は 806 行で、触るのは 6 タスク中 1 タスク。手元の経路の処理は新しい `local_gate.py` に置き、`drive.py` に足すのは経路の分岐だけである。`command.py`（984 行）に足すのは条件の語の 1 行だけ。`test_drive.py` は 14 件、`test_templates.py` は 23 件のテストがある |
+| 実装の前（プレリファクタリング） | しない | `drive.py` は 806 行で、触るのは 6 タスク中 1 タスク。手元の経路の処理は新しい `local_gate.py` に置き、`drive.py` に足すのは経路の分岐だけである。`command.py`（984 行）に足すのは条件の語の 1 行だけ。`test_drive.py` は 14 件、`test_templates.py` は 23 件のテストがある |
 | 実装の中 | 各タスクで行う | `tdd-cycle` のリファクタリングのステップ |
 | スプリントの終わり（cross-refactoring） | `final_gate.py` と `local_gate.py` の周の回し方と直しの呼び出し、`verify.py` と `local_gate.py` のテストの起動 | 2 つの最終ゲートが同じ形の処理を持つ。起動の上限の扱いが 2 か所になる |
 

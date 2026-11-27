@@ -1,10 +1,10 @@
 # #4566 の詳細設計: CI テストの設定が無いリポジトリでもリファクタリングを通す
 
-[設計文書](./issue-4566-design.md)の「構成要素」を、ファイルと関数の単位まで下ろした文書である。受け入れ条件の番号は[要求仕様](./issue-4566-requirements.md)を指す。パスは、特に書かなければ `plugins/ndf/` からの相対である。
+**この文書は、Issue #4566（ https://github.com/devbasex/ai-plugins/issues/4566 ）の実装が満たす仕様を定める。** [設計文書](./issue-4566-design.md)の「構成要素」を、ファイルと関数の単位まで下ろした文書である。既存のコードを変える所は、表の「種類」の列の「変更」と、各セクションの説明で示す。
+
+受け入れ条件の番号は[要求仕様](./issue-4566-requirements.md)を指す。パスは、特に書かなければ `plugins/ndf/` からの相対である。
 
 `--work` は `ndf refactor run` の今の引数で、対象のリポジトリの中の位置（呼び出し元の作業ツリー。既定は `.`）を渡す。担当の AI が書く作業場所（`rf<PR>/work`）とは別のものである。
-
-**この文書は、Issue #4566（ https://github.com/devbasex/ai-plugins/issues/4566 ）の実装が満たす仕様を定める。** 既存のコードを変える所は、表の「種類」の列の「変更」と、各セクションの説明で示す。
 
 ## 地図
 
@@ -212,7 +212,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
   - 副作用: git の読み取りだけ。ツリーに在るかは `git ls-tree` で見る。無いファイルでは終了コード 0 で何も出さないことを 2026-11-26 に確かめた
 - `verify_tree`
   - 事後条件: 作る前にパスを状態の `verify_trees` へ保存し、取り除いた後に消す。名前は `rf<PR>/verify-<ランダム>` で、実行のたびに違う
-  - 副作用: `git worktree add --detach`、`worktree.lock_review_worktree`、取り除きは `git worktree unlock` と `git worktree remove --force`
+  - 副作用: 作るときは `git worktree add --detach` と `worktree.lock_review_worktree`。取り除くときは `git worktree unlock` と `git worktree remove --force`
 - `write_private_log`
   - 事後条件: `logs/` は 0700、ログファイルは 0600。umask に頼らない。ディレクトリは `mkdir(mode=0o700, exist_ok=True)` の後に `chmod` する
   - 事後条件: 前からあるファイルは開かず、書き換えない。同じ名前がハードリンクやシンボリックリンクでも、リンク先の中身と権限は変わらない
