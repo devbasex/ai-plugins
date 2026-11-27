@@ -8,6 +8,7 @@ from pathlib import Path
 import git_sandbox
 import pytest
 
+from ndf.core.plan import review_units_decide
 from ndf.core.plan import units_decide as ud
 from ndf.core.plan import units_files as uf
 
@@ -359,6 +360,26 @@ def test_render_tables_leaves_units_that_touch_the_same_file_out_of_the_parallel
     text = uf.render_tables(_plan(1, 2), ud.judge([unit_file], LIMITS, {7: 0}).views)
 
     assert _rows(text, "並列と直列") == ["| 1 | A、B | A: 無し<br>B: 無し | 無し |"]
+
+
+def test_the_reader_picks_the_generated_table_after_a_note_table():
+    first, views = _two_files()
+    note = "| 単位 | 備考 |\n| --- | --- |\n| 形 | 残る |"
+    units = "| 単位 | 含むタスク | 満たす受け入れ条件 |\n| --- | --- | --- |\n| 旧 | Task 1 | 無し |"
+    plan = _plan(1, 2, 3) + f"\n## レビューの単位\n\n{note}\n\n{units}\n"
+
+    once = uf.render_tables(plan, views, first.path)
+    read = review_units_decide.lineup([review_units_decide.PlanDoc("p", frozenset({7}), once)], {7: 2}, [7])
+
+    assert [u.name for u in read] == ["形", "読む|側"]
+
+
+def test_render_tables_keeps_an_omitted_issue_out_of_the_parallel_column():
+    unit_file = ud.parse(_doc(), "issues/issue-7-plan.units.json")
+    views = ud.judge([unit_file, ud.single(8)], LIMITS, {7: 0, 8: 0}).views
+
+    assert _rows(uf.render_tables(_plan(1), views, unit_file.path), "並列と直列") == ["| 1 | A | A: 無し | 無し |"]
+    assert _rows(uf.render_tables(_plan(1), views), "並列と直列") == ["| 1 | A、issue-8 | A: 無し<br>issue-8: 無し | 無し |"]
 
 
 def test_read_refuses_a_path_outside_the_repository(tmp_path):

@@ -403,7 +403,10 @@ def _closures(views: Sequence[ud.View]) -> dict[tuple[str, str], set[tuple[str, 
 
 
 def _parallel_rows(mine: Sequence[ud.View], views: Sequence[ud.View]) -> list[list[str]]:
-    """実行順ごとの 1 行。並列に流れる単位は、どちらからも依存で届かず、触るファイルが重ならない単位である。"""
+    """実行順ごとの 1 行。並列に流れる単位は、どちらからも依存で届かず、触るファイルが重ならない単位である。
+
+    計画を省いた課題の単位（`units_decide.single`。パスが空）は触るファイルが分からず直列に流すので、並列の相手にしない。
+    """
     closure = _closures(views)
     rows = []
     for order in sorted({v.order for v in mine}):
@@ -411,7 +414,7 @@ def _parallel_rows(mine: Sequence[ud.View], views: Sequence[ud.View]) -> list[li
         parallel, serial = [], []
         for v in group:
             name, key = _namer(v, views), (v.file, v.name)
-            apart = ((o.file, o.name) for o in views if not set(o.touches) & set(v.touches))
+            apart = ((o.file, o.name) for o in views if v.file and o.file and not set(o.touches) & set(v.touches))
             others = [name(k) for k in apart if k != key and k not in closure[key] and key not in closure[k]]
             parallel.append(f"{v.name}: {_JOIN.join(others) or _NONE}")
             serial += [f"{name((f, n))} → {v.name}: {reason}" for f, n, reason in v.after]

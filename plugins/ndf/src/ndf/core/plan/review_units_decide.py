@@ -155,6 +155,13 @@ def _first_table(doc: _Doc, section: range) -> Optional[_Table]:
     return next((table for table in doc.tables if table.at in section), None)
 
 
+def _headed_table(doc: _Doc, section: range, columns: Sequence[str]) -> Optional[_Table]:
+    """下位の見出しより手前にあり、列の見出しに `columns` のすべてを持つ最初の表。無ければ None。読み手と書き手が同じ表を選ぶ。"""
+    sub = next((h.at for h in doc.headings if h.at in section), section.stop)
+    body = range(section.start, sub)
+    return next((table for table in doc.tables if table.at in body and set(columns) <= set(table.rows[0])), None)
+
+
 def task_numbers(text: str) -> list[int]:
     """「タスク分解」の `### Task N` の番号を、出てくる順に返す（重なりも残す）。"""
     return _task_numbers(_parse(text))
@@ -169,7 +176,7 @@ def _task_numbers(doc: _Doc) -> list[int]:
 def table_slot(text: str, title: str, columns: Sequence[str]) -> Optional[Slot]:
     """`title` のセクション（`UNITS_HEADING` は単位の見出し）の表を書き換える場所。セクションが無ければ None。
 
-    置き換える表は、下位の見出しより手前にあり、列の見出しに `columns` のすべてを持つ最初の表である。
+    置き換える表は `_headed_table` が選ぶ。
     """
     doc = _parse(text)
     found = _unit_headings(doc) if title == UNITS_HEADING else [h for h in doc.headings if h.level >= 2 and h.title == title]
@@ -178,7 +185,7 @@ def table_slot(text: str, title: str, columns: Sequence[str]) -> Optional[Slot]:
     section = _section(doc, found[0])
     end = min(section.stop, len(text.split("\n")))
     sub = next((h.at for h in doc.headings if h.at in section), end)
-    table = next((t for t in doc.tables if t.at in range(section.start, sub) and set(columns) <= set(t.rows[0])), None)
+    table = _headed_table(doc, section, columns)
     first = _first_table(doc, section)
     at = sub if first is None else min(sub, first.at)
     return Slot(end, at, None if table is None else range(table.at, table.end))
@@ -282,7 +289,9 @@ def _unit_rows(doc: _Doc) -> list[dict[str, str]]:
     headings = _unit_headings(doc)
     if len(headings) > 1:
         raise _Bad(f"「{UNITS_HEADING}」の見出しが 2 つ以上ある")
-    table = _first_table(doc, _section(doc, headings[0]))
+    section = _section(doc, headings[0])
+    # 必須の列を持つ表が無ければ最初の表を読み、足りない列を理由にする
+    table = _headed_table(doc, section, REQUIRED_COLUMNS) or _first_table(doc, section)
     if table is None:
         raise _Bad(f"「{UNITS_HEADING}」のセクションに表が無い")
     head, *rows = table.rows
