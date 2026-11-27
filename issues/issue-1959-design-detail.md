@@ -24,7 +24,6 @@ src/ndf/
   progress/invoke.py             Skill の起動の指定と記録
   domains/
     records/usage.py・usage_decide.py   行の書き込み・費用の計算
-    records/jsonl.py             1 行の追記・壊れた行を除く読み取り
     settings/launch_config_cli.py *     ndf launch-config
     settings/delegate_run_cli.py *      ndf delegate-run
     hooks/guards/launch_answer.py *     承認の問いの答えの記録
@@ -51,7 +50,6 @@ src/ndf/
 | `src/ndf/core/plan/steps.py` | 変更 | 子の環境を重ねて起動する | run_log | `StepContext` | C: `_launch` |
 | `src/ndf/core/converge/participants.py` | 変更 | 相手役の引数 | launch_settings | モジュール | C: `_sandbox_args`・`_review_args` |
 | `src/ndf/domains/records/usage.py` | 変更 | `claude -p` の行を書く | jsonl | モジュール | C: `record_cli` |
-| `src/ndf/domains/records/jsonl.py` | 変更 | 1 行を 1 回の書き込みで足す。途中で終わった書き込みの断片を、次の行と読み取りから切り離す | — | モジュール | C: `append`・`read_rows`・`read_rows_after`。N: `ROW_START`・`_raw`・`_parsed`・`_decoded`・`_skip_space` |
 | `src/ndf/domains/records/usage_decide.py` | 変更 | 起動 1 回の費用を求める | — | モジュール | N: `launch_costs` |
 | `src/ndf/domains/settings/launch_config_cli.py` | 新設 | `ndf launch-config` の 4 つのサブコマンド | launch_settings・launch_approval | モジュール | N: `main`・`_draft`・`_show`・`_approve`・`_confirm_terminal`・`_revoke` |
 | `src/ndf/domains/settings/delegate_run_cli.py` | 新設 | `ndf delegate-run`（委譲の起動） | launch_settings | モジュール | N: `main`・`build_command` |
@@ -417,9 +415,7 @@ src/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `record_cli` | `domains/records/usage.py` | 変更 | 変えない | `meta` の足した欄を書く。値が None の欄は置かない。使用量ログの錠を取らずに `jsonl.append` で書く（設計書の「行を書く時点」の「書き方」） |
-| `append` | `domains/records/jsonl.py` | 変更 | 変えない | 種類 `kind` の形を確かめてから、1 行全体を `O_APPEND` の 1 回の `os.write` で足し、書いた行を返す。錠は取らず、要る呼び手が `lock` の中で打つ（`append_locked` も同じ関数を使う）。ファイルの末尾が改行でなければ、追記するバイト列の先頭に改行を付ける。補った改行と新しい JSONL の行は、同じ 1 回の `os.write` で追記する（それでも行がつながった場合の復旧は読む側が行う）。形が違えば書かずに `InternalError`、一部しか書けなければ `OSError` |
-| `read_rows`・`read_rows_after` | `domains/records/jsonl.py` | 変更 | 変えない | 通常は行全体を UTF-8 としてデコードし、JSON の辞書として読む。失敗した場合は、デコードできないバイトを `surrogateescape` で保持して行全体を文字列にし、行の先頭から `json.JSONDecoder.raw_decode` で辞書を 1 つずつ読む。`raw_decode` は `surrogateescape` が変換した不正なバイトも JSON の文字列値の一部として受け付けるので、解析の成功だけでは採用しない。`raw_decode` が返した辞書は、入力上の開始位置から終了位置までを厳密な UTF-8 で再エンコードできる場合に限って採用し、その終了位置から次を読む。解析に失敗した場合と、読み取った範囲を UTF-8 に再エンコードできない場合は、そこを断片とする。どちらの場合も、`JSONDecodeError.pos` ではなく、`raw_decode` に渡した開始位置の次の文字から `ROW_START`（`{"version": `）を探し、見つかった位置から読み続ける。例外の位置を基準にしないのは、前の記録がカンマの直後で切れると、例外の位置が次の正常な記録の `{` を指し、その次の文字から探すとその記録を飛ばすためである。採用した辞書（改行だけが欠けてつながった行も含む）はすべて使い、断片があればその行を読めない行として 1 回数える。どこからも読めなければ行ごと除く。どちらの場合も、ほかの行の読み取りは続ける |
+| `record_cli` | `domains/records/usage.py` | 変更 | 変えない | `meta` の足した欄を書く。値が None の欄は置かない |
 | `launch_costs` | `domains/records/usage_decide.py` | 新設 | `launch_costs(rows: Iterable[Mapping]) -> dict[str, Optional[float]]` | 同じ会話の累計の差から、`launch_id` ごとの費用を返す。不明は None |
 
 - `__main__.py` は `claude.set_launch_recorder(usage)` を呼ぶ
