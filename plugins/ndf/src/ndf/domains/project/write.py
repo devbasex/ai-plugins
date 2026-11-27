@@ -317,16 +317,8 @@ def _record_files(inp: Inputs, record: dict[str, Any], project: Optional[File]) 
     return out
 
 
-def plan(inp: Inputs) -> Plan:
-    """書くファイルと出力の行を決める（何も書かない）。書き出す設定か解析の記録が形に合わなければ `WriteError`。"""
-    questions = {k for k, m in obj(inp.measure.get("items")).items() if obj(m).get("status") == QUESTION}
-    rows = [{"kind": "ignored", "key": k} for k in inp.answers if k not in questions]
-    written_before = written_digests(inp.existing)
-    doc, item_rows = merge_project(inp.existing, inp.measure, inp.answers, written_before)
-    doc, ci_row = _declare_ci_tests(doc, inp.existing, written_before, inp.root)
-    errs = contracts.schema_errors(doc, check.SCHEMA)
-    if errs:
-        raise WriteError(f"書き出す設定が形に合わない（解析器の誤り）: {'; '.join(errs[:3])}")
+def _build_record(inp: Inputs, doc: dict[str, Any]) -> dict[str, Any]:
+    """書き出す設定 `doc` に対する解析の記録を組み立てる。形に合わなければ `WriteError`。"""
     record = {
         "version": analysis_record.RECORD_VERSION,
         "analyzer": check.ANALYZER,
@@ -337,11 +329,30 @@ def plan(inp: Inputs) -> Plan:
     errs = contracts.schema_errors(record, analysis_record.SCHEMA)
     if errs:
         raise WriteError(f"書き出す解析の記録が形に合わない（解析器の誤り）: {'; '.join(errs[:3])}")
-    project = None
-    if inp.existing is None or value_digest(inp.existing) != value_digest(doc):
-        path = files.path(inp.main, "project")
-        old = path.read_text(encoding="utf-8") if inp.existing is not None else None
-        project = File(path, files.relpath("project"), old, dumps(doc))
+    return record
+
+
+def _project_file(inp: Inputs, doc: dict[str, Any]) -> Optional[File]:
+    """設定の File。今の設定と同じなら None（File を読まない）。"""
+    if inp.existing is not None and value_digest(inp.existing) == value_digest(doc):
+        return None
+    path = files.path(inp.main, "project")
+    old = path.read_text(encoding="utf-8") if inp.existing is not None else None
+    return File(path, files.relpath("project"), old, dumps(doc))
+
+
+def plan(inp: Inputs) -> Plan:
+    """書くファイルと出力の行を決める（何も書かない）。書き出す設定か解析の記録が形に合わなければ `WriteError`。"""
+    questions = {k for k, m in obj(inp.measure.get("items")).items() if obj(m).get("status") == QUESTION}
+    rows = [{"kind": "ignored", "key": k} for k in inp.answers if k not in questions]
+    written_before = written_digests(inp.existing)
+    doc, item_rows = merge_project(inp.existing, inp.measure, inp.answers, written_before)
+    doc, ci_row = _declare_ci_tests(doc, inp.existing, written_before, inp.root)
+    errs = contracts.schema_errors(doc, check.SCHEMA)
+    if errs:
+        raise WriteError(f"書き出す設定が形に合わない（解析器の誤り）: {'; '.join(errs[:3])}")
+    record = _build_record(inp, doc)
+    project = _project_file(inp, doc)
     out = _record_files(inp, record, project)
     notes = [{"kind": "note", "key": "notes", "text": n} for n in seq(inp.measure.get("notes"))]
     ignored = check_ignored(inp.main, [files.relpath("project"), files.relpath("project-analysis")])  # 書き込みの前の確かめも兼ねる
