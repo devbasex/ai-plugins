@@ -77,12 +77,11 @@ def _effects(rows: Sequence[Mapping[str, Any]], metric: Optional[str]) -> dict[s
     return out
 
 
-def _costs(usage_rows: Sequence[Mapping[str, Any]]) -> dict[str, Optional[float]]:
+def _costs(usage_rows: Sequence[Mapping[str, Any]], per_launch: Mapping[str, Optional[float]]) -> dict[str, Optional[float]]:
     """割り付け ID → 単位の費用。`assign_id` か `charge_to` がその ID の起動の費用を、`launch_id` ごとに 1 回足す。
 
     費用の分からない起動があるか、合計が 0 なら None（0 は対数にも割る数にも使えない）。
     """
-    per_launch = ud.launch_costs(usage_rows)
     launches: dict[str, dict[str, Optional[float]]] = defaultdict(dict)
     for row in usage_rows:
         lid = row["launch_id"] if "launch_id" in row else ""  # launch_id の無い行は費用を求められない
@@ -109,6 +108,35 @@ def _models(usage_rows: Sequence[Mapping[str, Any]]) -> dict[str, str]:
         if row["assign_id"] not in first or when < first[row["assign_id"]][0]:
             first[row["assign_id"]] = (when, row["model"] if "model" in row else None)
     return {aid: model for aid, (_, model) in first.items() if model is not None}
+
+
+@dataclass(frozen=True)
+class UsageIndex:
+    """使用量ログから求めた、割り付け ID → 単位の費用（`_costs`）と、割り付け ID → 最初の起動の実際のモデル（`_models`）。
+
+    どちらも全部の使用量ログを走査するので、実験のキーをいくつも集計する呼び手（`ndf models report`）は 1 回だけ求めて渡す。
+    """
+
+    costs: Mapping[str, Optional[float]]
+    models: Mapping[str, str]
+
+
+def usage_index(
+    usage_rows: Sequence[Mapping[str, Any]], launches: Optional[Sequence[tuple[Mapping[str, Any], Optional[float]]]] = None
+) -> UsageIndex:
+    """使用量ログの全部の行から `UsageIndex` を求める。`launches` は同じ行の `usage_decide.launch_rows` の結果で、呼び手が求めて
+    いれば渡す（重なった `launch_id` を除く走査をやり直さない）。"""
+    pairs = ud.launch_rows(usage_rows) if launches is None else launches
+    per_launch = {row["launch_id"]: cost for row, cost in pairs}
+    return UsageIndex(_costs(usage_rows, per_launch), _models(usage_rows))
+
+
+def rows_for_units(rows: Sequence[Mapping[str, Any]], end: datetime) -> list[Mapping[str, Any]]:
+    """過去の期間の単位を作る記録: `launch_error` の行は `end` より前のものだけ、ほかの行はすべて。
+
+    効果指標と停止は期間の後に届いても期間の単位に数え、期間の後に基準へ切り替えた単位は過去の集計から除かない（`ndf models report`）。
+    """
+    return [r for r in rows if r["kind"] != "launch_error" or _time(r) < end]
 
 
 @dataclass(frozen=True)
@@ -143,9 +171,49 @@ def _group_units(seen: Sequence[_Seen], observed: Optional[str] = None) -> list[
     return same + ([u for u in unknown if u.at >= min(after)] if after else [])
 
 
+def _in_range(at: datetime, start: datetime, end: Optional[datetime]) -> bool:
+    """割り付けの日時 `at` が範囲にあるか: `start` を含み、`end`（あれば）を含まない。`unit_pool` と `pick_units` が共有する。"""
+    return start <= at and (end is None or at < end)
+
+
+def unit_pool(
+    rows: Sequence[Mapping[str, Any]], usage: UsageIndex, *, where: mc.Where, start: datetime, end: Optional[datetime] = None
+) -> list[_Seen]:
+    """`where`（リポジトリ・工程・ランタイム・互換性のキー）が同じで、`start` 以降（`end` があればその前まで）に割り付け、今の指標の
+    効果（null でない）がある単位のうち、停止と基準への切り替えの無いもの。実験の記録を 1 回だけ走査し、範囲の外の割り付けは
+    単位の値に変換しない。範囲が複数ある呼び手は、すべてを覆う範囲を渡し、範囲ごとの絞り込みを `pick_units` に任せる。"""
+    left, effects = _left(rows), _effects(rows, mc.metric_of(where.stage))
+    costs, models = usage.costs, usage.models
+    seen = []
+    for a in rows:
+        aid = a["assign_id"] if a["kind"] == "assign" else None
+        if aid is None or not where.of(a) or aid in left or aid not in effects or effects[aid]["quality"] is None:
+            continue
+        at = _time(a)
+        if not _in_range(at, start, end):
+            continue
+        value = UnitValue(aid, a["chosen"], tuple(a["probs"]), at, effects[aid]["quality"], costs.get(aid), models.get(aid))
+        seen.append(_Seen(value, mc.model_group(a["arms"][a["chosen"]], a["arms"]), _time(effects[aid])))
+    return seen
+
+
+def pick_units(
+    pool: Sequence[_Seen], start: datetime, end: Optional[datetime] = None, observed: Optional[Mapping[str, str]] = None
+) -> list[UnitValue]:
+    """`pool` のうち `start` 以降（`end` があればその前まで）に割り付けた単位を、実際のモデルで絞って割り付けの日時の順に返す。
+
+    割り付けの日時で先に絞ってから、まとまりの今のモデルを決める。範囲の外の単位の評価で、範囲の中の単位を除かないためである。
+    """
+    observed = {} if observed is None else observed
+    seen = [s for s in pool if _in_range(s.value.at, start, end)]
+    groups = sorted({s.group for s in seen})
+    found = [u for g in groups for u in _group_units([s for s in seen if s.group == g], observed.get(g))]
+    return sorted(found, key=lambda u: (u.at, u.assign_id))
+
+
 def unit_values(
     rows: Sequence[Mapping[str, Any]],
-    usage_rows: Sequence[Mapping[str, Any]],
+    usage: UsageIndex,
     *,
     where: mc.Where,
     now: datetime,
@@ -157,21 +225,9 @@ def unit_values(
     実際のモデルがまとまりの今のモデルと同じもの（設計の「出現率の再利用」「期限切れの単位とモデルの変化」）。
 
     `observed` は、まとまり → 最も新しい `observed` の行のモデル（`model_choice.observed_models`）。あるまとまりは、その
-    モデルを今のモデルとする。"""
-    observed = {} if observed is None else observed
+    モデルを今のモデルとする。`usage` は使用量ログから求めた単位の費用と実際のモデル（`usage_index`）で、呼び手が 1 回だけ求めて渡す。"""
     start = now - timedelta(days=window_days)
-    left, effects = _left(rows), _effects(rows, mc.metric_of(where.stage))
-    costs, models = _costs(usage_rows), _models(usage_rows)
-    seen = []
-    for a in rows:
-        aid = a["assign_id"] if a["kind"] == "assign" else None
-        if aid is None or not where.of(a) or _time(a) < start or aid in left or aid not in effects or effects[aid]["quality"] is None:
-            continue
-        value = UnitValue(aid, a["chosen"], tuple(a["probs"]), _time(a), effects[aid]["quality"], costs.get(aid), models.get(aid))
-        seen.append(_Seen(value, mc.model_group(a["arms"][a["chosen"]], a["arms"]), _time(effects[aid])))
-    groups = sorted({s.group for s in seen})
-    found = [u for g in groups for u in _group_units([s for s in seen if s.group == g], observed.get(g))]
-    return sorted(found, key=lambda u: (u.at, u.assign_id))
+    return pick_units(unit_pool(rows, usage, where=where, start=start), start, observed=observed)
 
 
 def seed_of(where: mc.Where, allocation: Mapping[str, Any], units: Sequence[UnitValue]) -> int:
@@ -196,7 +252,7 @@ class _Known:
     rows: Sequence[Mapping[str, Any]]
 
 
-def _since(now: datetime, window_days: int) -> datetime:
+def records_since(now: datetime, window_days: int) -> datetime:
     """出現率の計算に要る記録の読み始め（期間と、起動できない組を数える日数の長いほう）。"""
     return now - timedelta(days=max(window_days, mc.records_rule()["refusal_days"]))
 
@@ -262,7 +318,7 @@ def write_outcome(assign_id: str, quality: Optional[float], detail: Mapping[str,
     now, cwd = mc.utc_now(), Path.cwd()
     got = _table_here(cwd)
     longest = now - timedelta(days=mc.LONGEST_WINDOW + mc.records_rule()["kept_extra_days"])
-    since = _since(now, got.allocation["window_days"]) if got is not None else longest
+    since = records_since(now, got.allocation["window_days"]) if got is not None else longest
     try:
         known = _logged(assign_id, quality, detail, now, since, longest)
     except (*mc.STORE_ERRORS, internal.InternalError, contracts.ContractError) as exc:
@@ -348,7 +404,7 @@ def _recomputed(assign: Mapping[str, Any], now: datetime, cwd: Path, got: Option
     if s is None:
         return False
     window = s.allocation["window_days"]
-    since = _since(now, window)
+    since = records_since(now, window)
     rows = _rows_for(known, since, s.store)
     observed = mc.observed_models(rows, s.where, s.arms, now - timedelta(days=window))
     entry = mc.weights_entry(s.store, s.where, now)
@@ -359,7 +415,7 @@ def _recomputed(assign: Mapping[str, Any], now: datetime, cwd: Path, got: Option
     if launch_approval.repo_key(root) != s.where.repo:
         return False  # 作業ディレクトリが割り付けと別のリポジトリなので、その設定では計算しない
     usage_rows, _ = jsonl.read_rows(s.store / facts.value("ndf-files", USAGE_LOG, "path"), kind="usage")
-    units = unit_values(rows, usage_rows, where=s.where, now=now, window_days=window, observed=observed)
+    units = unit_values(rows, usage_index(usage_rows), where=s.where, now=now, window_days=window, observed=observed)
     mc.update_weights(s.store, now, _computed(units, rows, entry, s, observed))
     return True
 

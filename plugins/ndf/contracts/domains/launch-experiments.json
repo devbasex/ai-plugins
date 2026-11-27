@@ -91,6 +91,21 @@
       "type": "integer",
       "summary": "records の行: 効果指標を書いた後に出現率を計算し直す間隔の分。前の計算からこれより短ければ、候補・割り付けの値・実際のモデルが変わらない限り計算し直さない（使用量ログの読み取りの費用を抑える）",
       "optional": true
+    },
+    "success_outcomes": {
+      "type": "array",
+      "summary": "records の行: ndf models report が成功として数える起動の終わり方（使用量ログの outcome）。ここに無く uncounted_outcomes にも無い値は失敗",
+      "optional": true
+    },
+    "uncounted_outcomes": {
+      "type": "array",
+      "summary": "records の行: ndf models report が成功率の分母に入れない起動の終わり方（人の判断待ち）",
+      "optional": true
+    },
+    "step_layers": {
+      "type": "array",
+      "summary": "records の行: ndf models report がステップのやり直し率に数える起動の層（stage の行の launches のキー）",
+      "optional": true
     }
   },
   "rows": [
@@ -183,7 +198,10 @@
       "refusal_days": 7,
       "refusals": 2,
       "kept_extra_days": 30,
-      "refresh_minutes": 60
+      "refresh_minutes": 60,
+      "success_outcomes": ["ok", "valid", "done"],
+      "uncounted_outcomes": ["gate"],
+      "step_layers": ["worker", "skill"]
     }
   ]
 }

@@ -108,7 +108,7 @@ def _unit(aid: str, chosen: int, quality: float | None, cost: float | None, when
 def _values(*units: tuple, extra=(), extra_usage=()) -> list[ex.UnitValue]:
     rows = [r for u in units for r in u[0]] + list(extra)
     usage = [r for u in units for r in u[1]] + list(extra_usage)
-    return ex.unit_values(rows, usage, where=WHERE, now=NOW, window_days=60)
+    return ex.unit_values(rows, ex.usage_index(usage), where=WHERE, now=NOW, window_days=60)
 
 
 # --- 単位の値 ---
@@ -149,7 +149,14 @@ def test_units_that_are_out_of_scope_or_left_the_experiment_are_not_used():
         ),
         internal.write_record(
             "experiment",
-            {"kind": "launch_error", "at": _at(NOW), "assign_id": "switched", "stage": "impl", "runtime": "claude", "arm": ARMS[2]}
+            {
+                "kind": "launch_error",
+                "at": _at(NOW),
+                "assign_id": "switched",
+                "stage": "impl",
+                "runtime": "claude",
+                "arm": ARMS[2],
+            }
             | {"reason": "model_refused", "switched": True},
         ),
     ]

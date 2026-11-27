@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 class LaunchChooser(Protocol):
     """起動の値を選ぶ処理（`ndf.adapters.model_choice` が満たす）。値（Choice）は `model`・`effort`・`assign_id`・
-    `cli_args()`・`env_changes()`・`row_fields()` を持つ。"""
+    `repo`・`cli_args()`・`env_changes()`・`row_fields()` を持つ。"""
 
     def launch_choice(self, layer: str, name: str, runtime: str = "claude", *, cwd: Path, **request: Any) -> Any: ...
 
@@ -82,6 +82,11 @@ class ChoiceRun:
     @property
     def assign_id(self) -> Optional[str]:
         return None if self.choice is None else self.choice.assign_id
+
+    @property
+    def repo(self) -> Optional[str]:
+        """値を選ぶときに解決したリポジトリの識別子。解決していなければ None。"""
+        return None if self.choice is None else self.choice.repo
 
     def env_changes(self) -> dict[str, Optional[str]]:
         """子の環境の変更（None の名前は外す）。"""
