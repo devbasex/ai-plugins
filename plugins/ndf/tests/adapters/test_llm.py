@@ -158,11 +158,15 @@ def test_ask_stops_at_once_on_failures_retrying_cannot_fix(failure, kind):
     assert got.cause == {"kind": kind, "detail": "claude の失敗"}
 
 
-# 退行を縛る（#2944 の Task 1）: 値を選ぶ処理を入れる前の判定の起動の引数
+# 退行を縛る（#2944 の Task 1）: 実験を止めたときの判定の起動の引数
 
 
-def test_ask_launches_both_tries_with_the_same_arguments_and_no_model_or_effort():
-    """判定は 1 回目と打ち直しの 2 回目を同じ引数で起動し、モデルと effort を指定しない（CLI の既定で動く）。"""
+def test_ask_launches_both_tries_with_the_same_arguments_and_no_model_or_effort(tmp_path, monkeypatch, launch_chooser):
+    """実験が止まっている（enabled が偽）と、判定は 1 回目と打ち直しの 2 回目を同じ引数で起動し、モデルと effort を指定しない。"""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "launch.json").write_text(json.dumps({"version": 1, "experiments": {"enabled": False}}))
+    monkeypatch.chdir(tmp_path)
     fake = FakeClaude(reply(good("wait")), reply(good()))
 
     llm.ask("q", "m", llm.answer_schema(choices=["fix"]), 30, call=fake)

@@ -18,10 +18,12 @@ import re
 import shutil
 import sys
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, MutableMapping, Optional
 
 from ndf import identity
 from ndf.contracts import causes, facts, limits, result
@@ -465,15 +467,38 @@ def clip(text: str, limit: int, what: str) -> str:
     return text[:limit]
 
 
-def child_process_env(extra: Optional[dict[str, str]] = None) -> dict[str, str]:
-    """子のプロセスへ渡す環境。今の環境へ `extra`、開いている記録の `child_env` の順に重ねる（#2338）。"""
+def child_process_env(extra: Optional[Mapping[str, Optional[str]]] = None) -> dict[str, str]:
+    """子のプロセスへ渡す環境。今の環境へ `extra`、開いている記録の `child_env` の順に重ねる（#2338）。
+
+    `extra` の値が None の名前は子の環境から外す（#2944。親から継いだ値を子へ渡さない）。
+    """
     env = dict(os.environ)
-    if extra:
-        env.update(extra)
+    if extra is not None:
+        _overlay_into(env, extra)
     log = current()
     if log:
         env.update(log.child_env())
     return env
+
+
+@contextmanager
+def overlay_env(changes: Mapping[str, Optional[str]]) -> Iterator[None]:
+    """このプロセスの環境を、中の処理の間だけ `changes` で上書きし（None の名前は外す）、例外でも元へ戻す（#2944）。"""
+    before = {name: os.environ.get(name) for name in changes}
+    try:
+        _overlay_into(os.environ, changes)
+        yield
+    finally:
+        _overlay_into(os.environ, before)
+
+
+def _overlay_into(env: MutableMapping[str, str], changes: Mapping[str, Optional[str]]) -> None:
+    """`env` へ `changes` を重ねる。値が None の名前は外す。"""
+    for name, value in changes.items():
+        if value is None:
+            env.pop(name, None)
+        else:
+            env[name] = value
 
 
 def record(event: str, **fields: Any) -> None:

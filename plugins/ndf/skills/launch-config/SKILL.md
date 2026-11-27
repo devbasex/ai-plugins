@@ -55,9 +55,12 @@ NDF が非対話で起動する AI（プランの worker・Skill を回す起動
 
 ### モデルと effort の実験（`experiments`）
 
-今の `experiments` は、`ndf models pick` が返すモデルと effort を変えるだけで、worker や委譲の実際の起動には効かない。
+`experiments` は、NDF が起動する AI のモデルと effort を変える。効くのは worker（`ndf worker run`）・Skill を回す起動・判定の起動・
+Codex への委譲（`ndf delegate-run`）である。cross-review の相手役にはまだ効かない。
 
-NDF は工程ごとの選択肢（モデルと effort の組）を同梱している。各工程の選択肢の先頭の組を、基準の組と呼ぶ。`ndf models pick` は、設定で上書きした工程・ランタイムの基準の組を返す。`experiments` は同梱の値のうち書いたキーだけを置き換える。`enabled` による抽選の切り替えと、実際の起動への反映は今後対応する。利用者には、設定を書き換えても今の worker や委譲の起動のモデルと effort は変わらないと伝える。
+NDF は工程ごとの選択肢（モデルと effort の組）を同梱している。各工程の選択肢の先頭の組を、基準の組と呼ぶ。割り付けの単位を持つ起動は、
+単位ごとに選択肢から 1 組を抽選し、同じ単位の起動はすべて同じ組を使う。単位の無い起動は基準の組を使う。`experiments` は同梱の値のうち
+書いたキーだけを置き換える。利用者には、設定を書き換えると次の起動からモデルと effort が変わると伝える。
 
 ```json
 {
@@ -70,20 +73,20 @@ NDF は工程ごとの選択肢（モデルと effort の組）を同梱して�
 }
 ```
 
-| キー | 今の動き（`ndf models pick` の結果） | 今後の動き（実際の起動への反映と抽選が入った後） |
-| --- | --- | --- |
-| `enabled` | 今は `enabled` の値を選択に使わない。モデルか effort のどちらかを環境変数で指定した場合は、再試行時も指定した値を使い、指定のない項目には基準の組の値があれば使う。再試行の値を確かめるときは `--retry <失敗の理由>` を指定する。省くと値は上がらない。指定できる理由は、同梱の表 `contracts/domains/launch-experiments.json` のいずれかの工程の `retries` に載っている値である。選択対象の工程に `retries` が無くても受け付ける（たとえば `test_failed`）。どの工程にも載っていない理由を渡すと、コマンドはエラーで終了する。モデルと effort のどちらにも手動指定がなければ、基準の組に引き上げの規則を適用する。規則に該当する値がなければ、基準の組の値をそのまま返す | 偽なら抽選を止め、手動指定がない項目には基準の組の値を使う。環境変数などによる手動指定は引き続き優先する |
-| `stages.<工程>.arms.<ランタイム>` | 上書きや再試行時の引き上げが無ければ、先頭の組（基準の組）を使う。`{}` はモデルも effort も指定しない組である。NDF の環境変数（`NDF_LAUNCH_*`）で上書きした項目は、引数を返す。Claude 自身の effort の環境変数（`CLAUDE_CODE_EFFORT_LEVEL`）を引き継ぐときは、effort の引数を返さない | その工程の選択肢。単位ごとに選択肢から抽選する。1 組だけならその値に固定する |
-| `allocation` | 効かない。値の制約だけを確かめる | 割り付けの値（`floor`・`min_units`・`margin`・`window_days`）。省いたキーは同梱の値 |
+| キー | 意味 |
+| --- | --- |
+| `enabled` | 偽なら抽選を止め、初回の起動には基準の組を使う。判定の打ち直しなど起動をやり直すときは、基準の組に引き上げの規則を適用する。環境変数などで指定した値は優先する |
+| `stages.<工程>.arms.<ランタイム>` | その工程の選択肢（先頭が基準の組）。1 組だけならその値に固定する。`{}` はモデルも effort も指定しない組である |
+| `allocation` | 割り付けの値（`floor`・`min_units`・`margin`・`window_days`）。省いたキーは同梱の値 |
 
 工程とランタイムは、同梱の表（`contracts/domains/launch-experiments.json`）にあるものだけを書ける。
 
 - **`experiments` は承認の対象ではない。** 承認のハッシュに入らないので、書き換えても承認をやり直さない。ただし `.ndf/launch.json` の書き換えなので、
   手順 2〜4 のとおり候補を直して、反映の前に利用者に確かめる
-- effort が順位に無い・選択肢が空か重なる・値の制約に外れると、`ndf models pick` が理由と直す場所を示して止まる。書き換えた後は
+- effort が順位に無い・選択肢が空か重なる・値の制約に外れると、その値を使う起動と `ndf models pick` が、理由と直す場所を示して止まる（黙って別の値で起動しない）。書き換えた後は
   `ndf models pick` で、今の設定から選ばれる値を確かめる。変更した工程に対応する `--layer` と `--name` を指定し、Codex を確かめるときは
   `--runtime codex` を付ける。たとえば Claude の実装 worker なら `ndf models pick --layer worker --name impl` と打つ
-- 一時的に上書きするときは、設定を書き換えずに環境変数 `NDF_LAUNCH_MODEL`・`NDF_LAUNCH_EFFORT`（Codex は `NDF_LAUNCH_CODEX_MODEL`・`NDF_LAUNCH_CODEX_EFFORT`）を使う。今は `ndf models pick` の結果だけが変わる。抽選が入った後は、上書きした起動を実験に数えない
+- 一時的に上書きするときは、設定を書き換えずに環境変数 `NDF_LAUNCH_MODEL`・`NDF_LAUNCH_EFFORT`（Codex は `NDF_LAUNCH_CODEX_MODEL`・`NDF_LAUNCH_CODEX_EFFORT`）を使う。上書きした起動は実験に数えない
 
 ## 手順
 
@@ -125,6 +128,15 @@ ndf launch-config show --question approve --candidate <候補のパス>
 - MCP の定義ファイルごとの場所・ハッシュ・サーバ名・コマンド名
 - 安全装置を外してよいランタイム（`unsandboxed`）
 - 承認の対象のハッシュ（`metrics.sha256`）
+
+`items` に `launch-experiments` があれば、モデルと effort の変更前後の値も、承認を聞く前に利用者に示す。この変更は承認の対象ではないが、
+反映すると次の起動からモデルと effort が変わる。
+
+- `launch-experiments` の `changes` から、変わる選択肢・抽選の切り替え・割り付けの値を取り出す。`before` が今の値、`after` が候補の値で、
+  欄が無い側は同梱の値を使う
+- 質問の文には、変わる場所（工程とランタイム）と、選択肢の組の数か 1 つの値の前後しか載らない。組の数が同じままモデルや effort だけが
+  変わる場合も、どのモデルと effort がどう変わるかを `changes` から示す
+- 端末で利用者が確認する場合は、表示に値の全体が載る
 
 **承認の対象が空か承認済みでも、手順 4 を飛ばさない。** 手順 4 の進め方は、この結果の形で分かれる。
 

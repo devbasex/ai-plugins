@@ -139,6 +139,24 @@ def _namespaces_made(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_launch_chooser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """起動の値を選ぶ処理を差し込まない（エントリポイントを打ったテストの差し込みを後のテストへ残さない。#2944）。"""
+    from ndf.adapters import claude_choice
+
+    monkeypatch.setattr(claude_choice, "launch_chooser", None)
+
+
+@pytest.fixture
+def launch_chooser(monkeypatch: pytest.MonkeyPatch):
+    """起動の値を選ぶ処理（`model_choice`）をエントリポイントと同じく差し込む。リポジトリのキーは git を起動せず、作業場所の実体にする。"""
+    from ndf.adapters import claude_choice, model_choice, model_chooser
+
+    monkeypatch.setattr(model_choice.launch_approval, "repo_key", lambda root: os.path.realpath(root))
+    monkeypatch.setattr(claude_choice, "launch_chooser", model_chooser)
+    return model_chooser
+
+
+@pytest.fixture(autouse=True)
 def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """実行した人の状態の保存先とほかのプラグインの根を読まない。"""
     monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
