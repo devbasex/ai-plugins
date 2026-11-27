@@ -109,13 +109,20 @@ def recorded_step_gaps(state_dir: Path) -> dict[str, list[dict[str, Any]]]:
     }
 
 
-def _keep_step_missing(state_dir: Path, step_id: str, names: Optional[list[str]]) -> None:
-    """ステップ `step_id` の最後の回が確かめを通さなかった必須の出力の名前を残す。無ければ前の回の記録を外す（#4513）。"""
+def _keep_step_missing(state_dir: Path, step_id: str, status: str, names: Optional[list[str]]) -> None:
+    """判断を求めた（`status` が gate の）ステップ `step_id` が確かめを通さなかった必須の出力の名前を残す。無ければ前の回の記録を外す（#4513）。
+
+    記録を読むのは、承認ゲートで止まった最後のステップのぶんだけである（`runner.final_result`）。そのステップは止まった回に
+    ここを通って記録を書き直しているので、ほかの結果の回は読みも書きもしない。内容が変わらなければ書かない。
+    """
+    if status != GATE:
+        return
     found = read_json(state_dir / STEP_MISSING_FILE)
-    kept = {k: v for k, v in (found if isinstance(found, dict) else {}).items() if k != step_id}
+    before = found if isinstance(found, dict) else {}
+    kept = {k: v for k, v in before.items() if k != step_id}
     if names:
         kept[step_id] = list(names)
-    if kept or found is not None:
+    if kept != before:
         write_json(state_dir / STEP_MISSING_FILE, kept)
 
 

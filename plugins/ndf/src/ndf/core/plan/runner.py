@@ -196,7 +196,7 @@ def run_step(spec: dict[str, Any], step_id: str, attempt: int) -> dict[str, Any]
     if out["outputs"] or out["status"] == GATE:
         _add_outputs(ctx.state_dir, step_id, out["status"], out["outputs"])
     _keep_step_gaps(ctx.state_dir, step_id, out["gaps"])
-    _keep_step_missing(ctx.state_dir, step_id, out[result.MISSING_OUTPUTS])
+    _keep_step_missing(ctx.state_dir, step_id, out["status"], out[result.MISSING_OUTPUTS])
     return out
 
 

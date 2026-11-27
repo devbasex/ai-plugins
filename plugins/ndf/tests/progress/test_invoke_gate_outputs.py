@@ -38,7 +38,7 @@ def _gate_at(tmp_path: Path, monkeypatch, last: str, outputs=None, missing=None,
     if earlier:
         plan_records._add_outputs(work, "a", "ok", earlier)
     plan_records._add_outputs(work, last, "gate", outputs)
-    plan_records._keep_step_missing(work, last, missing)
+    plan_records._keep_step_missing(work, last, "gate", missing)
     final = {"status": "gate", "kind": None, "detail": f"ステップ {last} が承認ゲートで止まった: {WORKER}", "last": last, "count": 2}
     out = plan_runner.final_result(inv, final, "SUCCESS")
     plan_files.write_json(inv.result_path, out)
