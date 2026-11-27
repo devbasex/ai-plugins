@@ -153,7 +153,8 @@ def keep(run: Noting, round_no: int, held: Path, stem: Path) -> None:
 def _drop_if_expired(run: Noting, round_no: int, directory: int, mark: re.Match[str], cutoff: float) -> None:
     """登録ファイル `mark` の記録が `cutoff` より古ければ、記録と登録ファイルを消す。中身が名前と違うものは NDF の登録では
     ないので残す。登録ファイルと合う記録が無ければ（保存の途中で止まった・消された・別のファイルがある）、古い登録ファイル
-    だけを消す。新しい登録ファイルは、並行する保存がまだ公開していない場合があるので残す。"""
+    だけを消す。新しい登録ファイルは、並行する保存がまだ公開していない場合があるので残す。登録ファイルと、あれば記録の
+    更新時刻がどちらも期限内なら今回は何も消さないので、記録の内容は読まない。"""
     name = mark["record"]
     try:
         registered = _signed(directory, mark.string, mark.string)
@@ -163,6 +164,8 @@ def _drop_if_expired(run: Noting, round_no: int, directory: int, mark: re.Match[
             found = os.stat(name, dir_fd=directory, follow_symlinks=False)
         except FileNotFoundError:
             found = None
+        if registered.st_mtime >= cutoff and (found is None or found.st_mtime >= cutoff):
+            return
         ours = (
             found is not None and stat.S_ISREG(found.st_mode) and _record_identity(name, int(mark["size"]), directory) == mark["identity"]
         )
