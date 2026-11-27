@@ -949,7 +949,7 @@ def test_skill_is_called_with_full_permission_the_result_schema_and_the_implemen
     schema = contracts.load_json(contracts.schema_path("result"))
     want = claude.claude_args(claude.ClaudeCall(system=invoke.SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema))
     assert seen == [{"argv": want, "prompt": invoke.skill_prompt(run), "timeout": limits.seconds(invoke.SKILL_LIMIT), "cwd": tmp_path}]
-    assert got.status == "ok" and got.outputs == {"pr": 3} and got.warnings == ()
+    assert got.status == "ok" and got.outputs == {"pr": 3} and got.warnings == () and not {"--model", "--effort"} & set(want)  # #2944
     # Skill の作業はプランの保存先を作らない
     assert not (tmp_path / "w").exists()
 
@@ -997,14 +997,3 @@ def test_skill_answer_keeps_only_declared_outputs(tmp_path, calls):
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake)
     # outputs のキーは文脈の閉じた語彙なので、設定に無いキーは語彙の中の別のキーで確かめる
     assert got.outputs == {"pr": 3} and got.warnings and "branch" in got.warnings[0]
-
-
-def test_skill_is_launched_without_model_or_effort(tmp_path, calls, monkeypatch):
-    """退行を縛る（#2944 の Task 1）: Skill を回す起動はモデルと effort を指定しない（CLI の既定で動く）。"""
-    from ndf.adapters import claude
-
-    monkeypatch.setattr(claude, "list_plugins", lambda **k: [])
-    box, seen, fake = calls
-    box["reply"] = _reply(answer=result.result("skill", "ok", "済んだ", outputs={"pr": 3}))
-    invoke.invoke(_skill_run(), tmp_path, tmp_path / "w", call_claude=fake)
-    assert len(seen) == 1 and not {"--model", "--effort"} & set(seen[0]["argv"])

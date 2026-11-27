@@ -12,6 +12,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `ANTHROPIC_ORGANIZATION_ID` | user | string | — | 認証のプロファイルの組織（認証の優先順位でログインより上に来る源）。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
 | `ANTHROPIC_PROFILE` | user | string | — | 認証のプロファイルの名前（認証の優先順位でログインより上に来る源）。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
 | `CLAUDECODE` | runtime | flag | — | Claude Code の中で動いているマーカー（ホストの推定）。中継が起動するセッションへ渡さない（残ると claude が入れ子の起動を断る） | 内部（予告なく変えてよい） |
+| `CLAUDE_CODE_EFFORT_LEVEL` | user | string | — | Claude Code が読む effort の指定で、子の中で --effort より優先する。NDF は値を検証しない（#2944）。あれば NDF の起動は選択肢の effort を足さずに子へ引き継ぎ、実験に数えない。NDF_LAUNCH_EFFORT か起動の引数で effort を指定した起動では子の環境から外す | 内部（予告なく変えてよい） |
 | `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` | ndf | string | — | 中継が起動する claude へ false を渡し、入力欄のサジェストを止める（人の入力と取り違えない） | 内部（予告なく変えてよい） |
 | `CLAUDE_CODE_OAUTH_SCOPES` | user | string | — | Claude Code の OAuth のスコープ。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
 | `CLAUDE_CODE_OAUTH_TOKEN` | user | string | 秘密 | Claude Code の OAuth のトークン（ログインより上の認証の源）。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
@@ -55,6 +56,10 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_FACTORY_RUN` | service | flag | — | サービスの実行ジョブの中で動いているマーカー | 公開 |
 | `NDF_HOOK_OFF` | user | string | — | 止める guard の名前をカンマでつなぐ。all で全部を止める。無ければ全部の guard が働く。閾値はこの変数で受けず、上限の設定から読む | 内部（予告なく変えてよい） |
 | `NDF_ISSUE_REQUEST_FILE` | service | path | — | 作業のリポジトリと別の起票先への起票を、承認資料を書かずにリクエストの 1 行（{repo, title, body, labels} の JSON）として足すファイル。サービスが起票するかを決める。無ければ承認資料で止まる | 公開 |
+| `NDF_LAUNCH_CODEX_EFFORT` | user | string | — | NDF が起動する Codex の推論の強さ（model_reasoning_effort）の一時的な上書き（#2944）。値は表 launch-experiments の codex の順位にあるものだけで、無い値は起動しない。効いた起動は実験に数えない。無ければ実験の割り付けか基準の組の値 | 内部（予告なく変えてよい） |
+| `NDF_LAUNCH_CODEX_MODEL` | user | string | — | NDF が起動する Codex のモデルの一時的な上書き（#2944）。効いた起動は実験に数えない。無ければ実験の割り付けか基準の組の値。改行を含む値は起動しない | 内部（予告なく変えてよい） |
+| `NDF_LAUNCH_EFFORT` | user | string | — | NDF が起動する claude -p の effort の一時的な上書き（#2944）。値は表 launch-experiments の claude の順位にあるものだけで、無い値は起動しない。効いた起動は実験に数えず、子の環境から CLAUDE_CODE_EFFORT_LEVEL を外す。無ければ CLAUDE_CODE_EFFORT_LEVEL か実験の値 | 内部（予告なく変えてよい） |
+| `NDF_LAUNCH_MODEL` | user | string | — | NDF が起動する claude -p のモデルの一時的な上書き（#2944）。すべての層（worker・Skill を回す起動・判定・相手役）に効き、効いた起動は実験に数えない。無ければ実験の割り付けか基準の組の値。改行を含む値は起動しない | 内部（予告なく変えてよい） |
 | `NDF_LOCK_DIR` | user | path | — | 旧い NDF の Issue の本文を守る錠の保存先。無ければ ~/.claude/<名前>/locks。新しい NDF は読むだけで、状態の保存先の退避がこの保存先を含まないかを確かめる | 内部（予告なく変えてよい） |
 | `NDF_LOOP_EXCLUDE` | service | string | — | 開発ループの選定から、そのループの 1 回だけ外す課題の番号（, か空白で区切る）。同じリポジトリの別の実行が持つ課題をサービスが渡す。無ければ外さない | 公開 |
 | `NDF_MVV_STATE_DIR` | service | path | — | 判断の記録（ask.jsonl）と承認ゲートの変更要求の記録（gate-rejections.jsonl）の保存先。無ければ状態の保存先 | 公開 |

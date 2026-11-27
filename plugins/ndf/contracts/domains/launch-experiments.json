@@ -1,6 +1,7 @@
 {
   "summary": "モデルと effort の実験の同梱の既定（#2944）。工程ごとの選択肢（先頭が基準の組）と効果指標、層と作業の名前から工程を引く対応、ランタイムごとの effort とモデルの順位、実験の有効と割り付けの値を持つ。リポジトリは起動の設定（.ndf/launch.json）の experiments で、有効か・工程とランタイムごとの選択肢・割り付けの値を置き換える。対応・順位・指標・打ち直しの理由は置き換えられない。読み手は ndf.adapters.model_choice",
   "owner": "#2944（ndf.adapters.model_choice）",
+  "shared_names": true,
   "columns": {
     "kind": {
       "type": "string",
@@ -39,6 +40,11 @@
     "models": {
       "type": "array",
       "summary": "order の行: 引き上げに使うモデルの順位（低い順）。無いランタイムはモデルを上げない。順位に無い名前（完全な ID など）は、引き上げで「順位に無い」に当たる",
+      "optional": true
+    },
+    "raise_at": {
+      "type": "string",
+      "summary": "order の行: 引き上げの表の境の effort（設計書の「引き上げる起動」の high）。これより低い effort は 1 つ上げ、これ自身も 1 つ上げる。モデルの順位にある最上位でないモデルは、effort がこれ以上か指定なしならモデルを 1 つ上げる",
       "optional": true
     },
     "model_env": {
@@ -132,6 +138,7 @@
       "kind": "order",
       "efforts": ["low", "medium", "high", "xhigh", "max"],
       "models": ["haiku", "sonnet", "opus"],
+      "raise_at": "high",
       "model_env": "launch-model",
       "effort_env": "launch-effort",
       "inherited_effort_env": "claude-effort-level"
@@ -140,6 +147,7 @@
       "id": "codex",
       "kind": "order",
       "efforts": ["low", "medium", "high", "xhigh"],
+      "raise_at": "high",
       "model_env": "launch-codex-model",
       "effort_env": "launch-codex-effort"
     },

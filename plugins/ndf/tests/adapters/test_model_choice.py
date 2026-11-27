@@ -145,7 +145,7 @@ def test_raised(runtime, before, after):
 
 def test_a_launch_without_any_choice_adds_no_arguments(tmp_path):
     got = _pick(_repo(tmp_path), unit="run-1:impl")
-    assert (got.model, got.effort, got.model_source, got.effort_source) == (None, None, mc.DEFAULT, mc.DEFAULT)
+    assert (got.model, got.effort, got.model_source, got.effort_source) == (None, None, mc.Source.DEFAULT, mc.Source.DEFAULT)
     assert got.cli_args() == [] and got.env_changes() == {} and got.assign_id is None
 
 
@@ -153,39 +153,39 @@ def test_a_fixed_choice_launches_with_its_values(tmp_path):
     """選択肢を 1 つにすると、その値に固定する（受け入れ条件 7・19）。"""
     root = _repo(tmp_path, {"stages": {"design": {"arms": {"claude": [{"model": "opus", "effort": "high"}]}}}})
     got = _pick(root, name="design-detail", unit="run-1:design")
-    assert (got.model_source, got.effort_source, got.stage) == (mc.BASE, mc.BASE, "design")
+    assert (got.model_source, got.effort_source, got.stage) == (mc.Source.BASE, mc.Source.BASE, "design")
     assert got.cli_args() == ["--model", "opus", "--effort", "high"]
 
 
 def test_a_stopped_experiment_uses_the_base_choice(tmp_path):
     root = _repo(tmp_path, {"enabled": False, "stages": {"impl": {"arms": {"claude": [{"model": "sonnet"}, {"model": "opus"}]}}}})
     got = _pick(root, unit="run-1:impl")
-    assert (got.model, got.effort, got.model_source, got.effort_source) == ("sonnet", None, mc.BASE, mc.DEFAULT)
+    assert (got.model, got.effort, got.model_source, got.effort_source) == ("sonnet", None, mc.Source.BASE, mc.Source.DEFAULT)
 
 
 def test_an_argument_on_one_side_takes_the_base_value_on_the_other(tmp_path):
     root = _repo(tmp_path, {"stages": {"impl": {"arms": {"claude": [{"model": "sonnet", "effort": "medium"}, {}]}}}})
     got = _pick(root, argument=(None, "high"), environ={MODEL_ENV: "opus", INHERITED_ENV: "low"})
-    assert (got.model, got.model_source, got.effort, got.effort_source) == ("opus", mc.ENVIRONMENT, "high", mc.ARGUMENT)
+    assert (got.model, got.model_source, got.effort, got.effort_source) == ("opus", mc.Source.ENVIRONMENT, "high", mc.Source.ARGUMENT)
     assert got.env_changes() == {INHERITED_ENV: None}  # NDF が effort を渡すので、子の中で優先する変数を外す
 
 
 def test_the_argument_comes_before_the_environment(tmp_path):
     got = _pick(_repo(tmp_path), argument=("haiku", None), environ={MODEL_ENV: "opus", EFFORT_ENV: "low"})
-    assert (got.model, got.model_source, got.effort, got.effort_source) == ("haiku", mc.ARGUMENT, "low", mc.ENVIRONMENT)
+    assert (got.model, got.model_source, got.effort, got.effort_source) == ("haiku", mc.Source.ARGUMENT, "low", mc.Source.ENVIRONMENT)
 
 
 def test_the_runtimes_own_effort_variable_is_inherited_and_not_passed(tmp_path):
     root = _repo(tmp_path, {"stages": {"impl": {"arms": {"claude": [{"model": "sonnet", "effort": "medium"}]}}}})
     got = _pick(root, environ={INHERITED_ENV: "whatever"})  # 値は検証しない
-    assert (got.effort, got.effort_source, got.model_source) == (None, mc.ENVIRONMENT, mc.BASE)
+    assert (got.effort, got.effort_source, got.model_source) == (None, mc.Source.ENVIRONMENT, mc.Source.BASE)
     assert got.cli_args() == ["--model", "sonnet"] and got.env_changes() == {INHERITED_ENV: "whatever"}
 
 
 def test_codex_takes_its_own_variables_and_argument_form(tmp_path):
     root = _repo(tmp_path)
     got = _pick(root, "seat", "review", "codex", environ={EFFORT_ENV: "max"})  # claude の変数は効かない
-    assert (got.effort, got.effort_source) == ("low", mc.BASE) and got.cli_args() == ["-c", "model_reasoning_effort=low"]
+    assert (got.effort, got.effort_source) == ("low", mc.Source.BASE) and got.cli_args() == ["-c", "model_reasoning_effort=low"]
     got = _pick(root, "seat", "review", "codex", argument=("gpt-9", None), environ={CODEX_EFFORT_ENV: "high"})
     assert got.cli_args() == ["-c", "model_reasoning_effort=high", "-m", "gpt-9"] and got.env_changes() == {}
 
@@ -199,7 +199,7 @@ def test_a_launch_without_a_stage_takes_only_the_manual_values(tmp_path):
 def test_a_retry_raises_the_chosen_values_once(tmp_path):
     root = _repo(tmp_path, {"stages": {"fix": {"arms": {"claude": [{"model": "sonnet", "effort": "medium"}]}}}})
     got = _pick(root, name="fix", retry="test_failed")
-    assert (got.model, got.effort, got.raised, got.effort_source) == ("sonnet", "high", True, mc.BASE)
+    assert (got.model, got.effort, got.raised, got.effort_source) == ("sonnet", "high", True, mc.Source.BASE)
     assert got.row_fields()["raised"] is True
 
 
@@ -233,8 +233,8 @@ def test_row_fields_hold_only_present_values(tmp_path):
         "runtime": "claude",
         "mode": "light",
         "unit": "run-1:impl",
-        "model_source": mc.DEFAULT,
-        "effort_source": mc.DEFAULT,
+        "model_source": mc.Source.DEFAULT,
+        "effort_source": mc.Source.DEFAULT,
         "raised": False,
     }
 
@@ -246,3 +246,10 @@ def test_row_fields_fit_the_usage_log_row(tmp_path):
     root = _repo(tmp_path, {"stages": {"fix": {"arms": {"claude": [{"model": "sonnet", "effort": "medium"}]}}}})
     fields = _pick(root, name="fix", retry="test_failed", mode="standard").row_fields()
     assert rows.write_record("usage", {"caller": "claude-p", "usage": "unknown", **fields})["raised"] is True
+
+
+def test_codex_reads_the_process_environment_without_an_inherited_variable(tmp_path, monkeypatch):
+    """環境変数を渡さない起動（os.environ を読む）でも、自身の effort の変数を持たないランタイムは止まらない。"""
+    monkeypatch.delenv(CODEX_EFFORT_ENV, raising=False)
+    got = mc.pick("seat", "review", "codex", cwd=_repo(tmp_path))
+    assert got.effort == "low" and got.env_changes() == {}

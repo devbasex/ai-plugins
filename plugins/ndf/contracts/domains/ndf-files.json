@@ -35,7 +35,7 @@
     {"id": "backlog-before", "location": "backlog-state", "path": "<repo>/before-<id>.json", "kind": "record", "tracked": false, "writer": "棚卸し（M6）", "ends": "kept"},
     {"id": "backlog-depths", "location": "backlog-state", "path": "<repo>/depths.jsonl", "kind": "record", "tracked": false, "writer": "棚卸し（M6）", "ends": "kept"},
     {"id": "backlog-journal", "location": "backlog-state", "path": "<repo>/journal.json", "kind": "record", "tracked": false, "writer": "棚卸し（M6）", "ends": "kept"},
-    {"id": "launch", "location": "ndf", "path": "launch.json", "kind": "ndf_settings", "tracked": true, "writer": "人（Skill launch-config の承認の後の反映か、手の編集。#1959）", "ends": "kept", "keys": ["permissions"]},
+    {"id": "launch", "location": "ndf", "path": "launch.json", "kind": "ndf_settings", "tracked": true, "writer": "人（Skill launch-config の承認の後の反映か、手の編集。#1959）", "ends": "kept", "keys": ["permissions", "experiments"]},
     {"id": "runtime-policy", "location": "ndf", "path": "runtimes.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["allowed"], "main_keys": ["allowed"]},
     {"id": "ask", "location": "ndf", "path": "ask.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["mode", "allow", "cost", "extra"]},
     {"id": "estimate", "location": "ndf", "path": "estimate.json", "kind": "ndf_settings", "tracked": true, "writer": "人", "ends": "kept", "keys": ["records_dir", "size_unit_seconds", "scale", "allocation_minutes"]},
