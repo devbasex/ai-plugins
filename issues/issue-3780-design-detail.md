@@ -121,8 +121,10 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `origin_record` | `scope_decide.py` | 新設 | `origin_record(state: Mapping[str, Any], basis: Basis) -> Optional[Mapping[str, Any]]` | 相手役の全員が読んだ最後のラウンドの記録を返す。今回の席と読んだ PR だけを照らし、比較基点・重点・単位の指示・MVV は見ない |
-| `read_origin` | `round_scope.py` | 新設 | `read_origin(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str) -> Optional[changes.Range]` | `origin_record` の head が `head` の祖先なら、その比較基点と head を返す |
-| `line_origin` | `round_scope.py` | 新設 | `line_origin(g: git.Git, state: Mapping[str, Any], head: str, confirmed: Optional[str] = None) -> Optional[changes.Range]`（`confirmed` は確かめ済みの差分の起点の head。同じなら祖先を確かめ直さない） | 線引きの起点（担当した相手役が全員結果を返した最後のラウンドの、比較基点と head）を返す |
+| `read_origin` | `round_scope.py` | 新設 | `read_origin(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str, confirmed: Optional[str] = None) -> Optional[changes.Range]` | `origin_record` の head が `head` の祖先なら、その比較基点と head を返す |
+| `line_origin` | `round_scope.py` | 新設 | `line_origin(g: git.Git, state: Mapping[str, Any], head: str, confirmed: Optional[str] = None) -> Optional[changes.Range]` | 線引きの起点（担当した相手役が全員結果を返した最後のラウンドの、比較基点と head）を返す |
+
+`line_origin` の引数 `confirmed` には、差分の起点の head のうち、今回の `head` の祖先であることを今回の起動で確認済みのものを渡す。線引きの起点の head が `confirmed` と一致するときは、祖先関係を再確認しない。一致しないときと、`confirmed` が None のときは確認する。以前のラウンドで確認した結果は使わない。履歴が書き換えられると、そのコミットが今の `head` の祖先でなくなることがあるためである。`line_origin` は `confirmed` をそのまま `read_origin` の `confirmed` に渡す。
 
 `line_origin` が探すのは、そのラウンドを担当した相手役が全員結果を返した（`incomplete_reviewers` で終わっていない）最後のラウンドである。そのラウンドを読んだ顔ぶれが今回の相手役と同じか、読んだ PR が今回と同じかは問わない。`origin_record` に条件の無い `Basis()` を渡すと、この 2 つの照合をしない。
 
