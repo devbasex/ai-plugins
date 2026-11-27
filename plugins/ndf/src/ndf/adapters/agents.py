@@ -328,6 +328,10 @@ def _os_error_public(exc: OSError) -> str:
     return why if exc.filename is None else f"{why}: {Path(os.fsdecode(exc.filename)).name}"
 
 
+# 照らし直しで起動を止めたときの公開用の文面（理由は設定のパスと承認のコマンドを含むので、PR などへはこちらを載せる。#1959）
+VERIFY_REFUSED_PUBLIC = "起動の直前に読み直した起動の設定が、承認を確かめた後に変わったか取り消されていたので起動しなかった。launch-config で承認してから打ち直す"
+
+
 def _not_started(spec: Launch, state: AgentState, detail: str, public: Optional[str] = None) -> AgentStatus:
     record("agent", agent=spec.agent, state=state, exit=None, warnings=[])
     return AgentStatus(spec.agent, state, None, detail, (), public=public)
@@ -354,7 +358,7 @@ def _guarded_run(spec: Launch, poll: Optional[float]) -> AgentStatus:
     # スロットと CLI の確かめで待った間の取り消しも見るため、子を起動する直前に照らし直す（#1959）
     why = spec.verify() if spec.verify is not None else None
     if why is not None:
-        return _not_started(spec, AgentState.REFUSED, why)
+        return _not_started(spec, AgentState.REFUSED, why, VERIFY_REFUSED_PUBLIC)
     guard = kiro_guard(spec.cwd, spec.paths) if spec.agent == "kiro" else contextlib.nullcontext({})
     with guard as kept:
         status = _start_and_watch(spec, poll)

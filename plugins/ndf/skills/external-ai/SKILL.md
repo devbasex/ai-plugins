@@ -100,7 +100,7 @@ NDF には 4 つの CLI をまとめて起動するサブコマンドが無い�
    agy は `agy` のすぐ後に置く（ほかの位置は拒まれる）。codex の作業ディレクトリは、`ndf delegate-run` が今のディレクトリを `-C` で入れる
 
    次の例は、読むだけのレビューを codex に頼む起動である。対象のディレクトリへ移れた場合だけ起動するよう、`cd` と `timeout` を `&&` でつなぐ。
-   書き込みを伴う委譲の起動は、`corder` エージェントの「Codex CLI」の節にある
+   書き込みを伴う委譲の起動は、`corder` エージェントの「Codex CLI」のセクションにある
 
    ```bash
    cd <対象のディレクトリ> && timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}' \
