@@ -909,6 +909,18 @@
       ]
     },
     {
+      "term": "判定役",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review で、相手役が書いた重い指摘が実際に起きるかを確かめる読むだけの AI",
+      "source": "plugins/ndf/skills/cross-review/docs/01-state-and-review.md"
+    },
+    {
+      "term": "直さずに残す指摘",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review で、修正担当へ渡さず、次のラウンドを始める理由にも数えない指摘。Issue か PR の記録のコメントに残す",
+      "source": "plugins/ndf/skills/cross-review/docs/01-state-and-review.md"
+    },
+    {
       "term": "指摘",
       "context": "ndf-cross-review",
       "meaning": "担当が出した 1 件の主張（review_findings[] の 1 要素）",
