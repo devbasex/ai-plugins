@@ -121,16 +121,19 @@ def _run_seat(
 
     モデルを理由に拒まれたら、監視の上限の残りの時間で基準の組の起動へ 1 回だけ替える。
     """
-    spec = spec_of(chosen.choice)
-    deadline = claude_choice.deadline_after(spec.timeout)
-    status = launch(spec)
-    reply = experiment.seat_row(spec, status, chosen)
+
+    def attempt(spec: agents.Launch) -> tuple[agents.Launch, agents.AgentStatus, Optional[claude.ClaudeReply]]:
+        status = launch(spec)
+        return spec, status, experiment.seat_row(spec, status, chosen)
+
+    first = spec_of(chosen.choice)
+    deadline = claude_choice.deadline_after(first.timeout)
+    ran = attempt(first)
+    reply = ran[2]
     left = None if reply is None else chosen.fall_back_until(reply, deadline)
     if left is not None and left > 0:
-        spec = replace(spec_of(chosen.choice), timeout=left)
-        status = launch(spec)
-        reply = experiment.seat_row(spec, status, chosen)
-    return spec, status, reply
+        ran = attempt(replace(spec_of(chosen.choice), timeout=left))
+    return ran
 
 
 class _Cause(NamedTuple):
