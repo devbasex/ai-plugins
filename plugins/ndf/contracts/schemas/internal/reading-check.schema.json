@@ -39,7 +39,9 @@
           "reader": {"type": "string", "minLength": 1, "description": "読み手の立場"},
           "round": {"enum": [1, 2], "description": "その立場で何回目の読みか"},
           "result": {"enum": ["passed", "remained"], "description": "合格か、残ったか（2 回目にも残ったか、直さない文書の 1 回目の不合格）"}
-        }
+        },
+        "if": {"properties": {"result": {"const": "remained"}, "name": {"enum": ["question", "material"]}}, "required": ["result", "name"]},
+        "then": {"properties": {"round": {"const": 2}}}
       }
     }
   }

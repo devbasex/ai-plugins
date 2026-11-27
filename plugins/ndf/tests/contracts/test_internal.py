@@ -221,6 +221,8 @@ def test_write_refuses_a_row_that_does_not_fit(row):
         {"reads": [{**READING["reads"][0], "name": "material"}]},
         {"reads": [{**READING["reads"][0], "round": 3}]},
         {"reads": [{**READING["reads"][0], "result": "failed"}]},
+        # 質問の文と承認資料は直せるので、残るのは 2 回目だけ（#4599 で文書だけ 1 回目の remained を許した）
+        {"reads": [{**READING["reads"][0], "result": "remained"}]},
         {"reads": [{**READING["reads"][0], "quote": "x"}]},
         {"prs": [{"number": 1, "branch": "design/x"}]},
         {"question_key": "a"},

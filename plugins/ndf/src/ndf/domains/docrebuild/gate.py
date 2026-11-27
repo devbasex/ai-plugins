@@ -83,12 +83,13 @@ class GateArgs:
 
 @dataclass(frozen=True)
 class Read:
-    """読ませる対象 1 件（名前・読ませるファイル・立場・一部だけ読ませるなら、抜き出しの元にした前の中身）。"""
+    """読ませる対象 1 件（名前・読ませるファイル・立場。一部だけ読ませるなら、抜き出しの元にした前の中身と、作った時点の抜き出しの blob の id）。"""
 
     name: str
     file: Path
     reader: str
     old: Optional[str] = None
+    part_blob: Optional[str] = None
 
     @property
     def partial(self) -> bool:
@@ -389,7 +390,9 @@ def _plan_doc(run: Run, plan: Plan, rows: Sequence[Mapping[str, Any]], path: str
     else:
         before = old.decode("utf-8", "replace")
         part = gd.changed_part(before, now.decode("utf-8", "replace"))
-        plan.targets.append(Read(path, _put_file(run.state(PARTS_DIR) / path.replace("/", "__"), part), reading.ENGINEER, before))
+        file = _put_file(run.state(PARTS_DIR) / path.replace("/", "__"), part)
+        # 読ませた抜き出しの id は作った時点で決める（worker の終了後に読み直すと、書き換えられた中身で読み替えてしまう）
+        plan.targets.append(Read(path, file, reading.ENGINEER, before, mvv.blob_id(part.encode("utf-8"), len(blob))))
     if not run.args.no_doc_fix:
         plan.fixable.append(path)
 
@@ -497,18 +500,25 @@ def verify_worker(run: Run, plan: Plan, report: Mapping[str, Any], before: Mappi
 def _as_whole(run: Run, plan: Plan, t: Read, rec: Mapping[str, Any]) -> Mapping[str, Any]:
     """抜き出しを読ませた文書の記録の、確かめのハッシュを文書の全体の blob に読み替える（#4599）。
 
-    worker は読ませたファイル（抜き出し）のハッシュを書くことがある。読ませた抜き出しのハッシュは抜き出しの元の head の blob に、
+    worker は読ませたファイル（抜き出し）のハッシュを書くことがある。作った時点の抜き出しのハッシュは抜き出しの元の head の blob に、
     文書の今の中身から作り直した抜き出しのハッシュは今の blob に読み替える。どちらでもない値は読み替えず、変わったかの判定に任せる。
+    抜き出しのファイルは読み直さない（worker が書き換えても、読ませていない中身で読み替えない）。文書はバイト列から読む（改行を変えない）。
     記録の行は文書の全体の blob で書く（次の確認が差分の元に使う）。"""
     checks = rec["checks"] if isinstance(rec.get("checks"), list) else None
-    if t.old is None or checks is None:
+    if t.old is None or t.part_blob is None or checks is None:
         return rec
-    width = len(plan.docs[t.name])
+    try:
+        now = doc_file(run, t.name).read_bytes().decode("utf-8", "replace")
+    except OSError as exc:
+        raise Precondition(f"{t.name} を読めない: {exc.strerror or exc}") from None
     whole = {
-        mvv.blob_id(_file_text(t.file).encode("utf-8"), width): plan.docs[t.name],
-        mvv.blob_id(gd.changed_part(t.old, _file_text(doc_file(run, t.name))).encode("utf-8"), width): current_hash(run, plan, t.name),
+        t.part_blob: plan.docs[t.name],
+        mvv.blob_id(gd.changed_part(t.old, now).encode("utf-8"), len(plan.docs[t.name])): current_hash(run, plan, t.name),
     }
-    renamed = [{**c, "hash": whole[c["hash"]]} if isinstance(c, Mapping) and c.get("hash") in whole else c for c in checks]
+    renamed = [
+        {**c, "hash": whole[c["hash"]]} if isinstance(c, Mapping) and isinstance(c.get("hash"), str) and c["hash"] in whole else c
+        for c in checks
+    ]
     return {**rec, "checks": renamed}
 
 

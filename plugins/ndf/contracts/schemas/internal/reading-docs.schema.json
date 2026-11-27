@@ -33,6 +33,7 @@
   "allOf": [
     {"if": {"properties": {"kind": {"const": "read"}}}, "then": {"required": ["check", "branch", "gate", "pr", "name", "hash", "reader", "round", "verdict"]}},
     {"if": {"properties": {"kind": {"const": "read"}, "verdict": {"const": "remained"}}, "required": ["verdict"]}, "then": {"required": ["quotes"]}},
+    {"if": {"properties": {"kind": {"const": "read"}, "verdict": {"const": "remained"}, "name": {"enum": ["question", "material"]}}, "required": ["verdict", "name"]}, "then": {"properties": {"round": {"const": 2}}}},
     {"if": {"properties": {"kind": {"const": "done"}}}, "then": {"required": ["check", "branch", "gate", "pr", "question_key", "head", "material_sha256", "material_file_sha256", "body_sha256", "fingerprint"]}},
     {"if": {"properties": {"kind": {"enum": ["review_pending", "review_resolved", "review_cancelled"]}}}, "then": {"required": ["branch", "commit"]}},
     {"if": {"properties": {"kind": {"const": "review_pending"}}}, "then": {"required": ["check", "docs"]}},
