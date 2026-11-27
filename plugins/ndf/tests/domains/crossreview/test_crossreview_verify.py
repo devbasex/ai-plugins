@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from ndf.contracts import writing
-from ndf.domains.crossreview import criteria_decide, drive, report_decide, verify_decide
+from ndf.domains.crossreview import criteria_decide, report_decide, verify_decide
 
 NDF_BY = "ndf"
 
@@ -79,17 +79,6 @@ def test_issue_4363_read_keeps_the_judges_free_text_out_of_the_public_comment() 
     warnings = verify_decide.read(found, ["a"]).warnings
     body = report_decide.comment(1, {}, None, warnings)
     assert warnings and private not in body
-
-
-def test_issue_4363_the_reason_of_a_lowered_finding_stays_out_of_the_public_comment() -> None:
-    """下げた指摘の `check.reason`（作り物の値）は、記録のコメントのどこにも出ない。"""
-    private = "sample-corp-internal-endpoint"
-    journal = drive.FindingJournal()
-    journal.enter(1, [{"text": "保存が止まる", "severity": "major", "impact": "入力が消える", "by": "codex"}])
-    journal.apply_checks(["r1-1"], verify_decide.read([_answer("r1-1", reason=private)], ["r1-1"]).verdicts)
-    assert journal.rows["r1-1"]["check"]["reason"] == private
-    body = report_decide.comment(1, {"findings": list(journal.rows.values())}, None)
-    assert "保存が止まる" in body and private not in body
 
 
 @pytest.mark.parametrize(

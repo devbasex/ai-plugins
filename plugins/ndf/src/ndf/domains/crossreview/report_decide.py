@@ -72,6 +72,8 @@ FINAL_LABEL = {
 OUTCOME_LABEL = {fin.FIXED: "直した", fin.SKIPPED: "見送った", fin.UNRESOLVED: "未解決"}
 # 収束の妨げにならない重さで残した指摘の表示（修正担当へ渡さない。#3941）
 LIGHT_LABEL = "軽い（直さずに残した）"
+# 判定役の確認で下げた指摘の理由の欄（判定役が書いた文は公開せず、状態ファイルの `check` で読む。#4363）
+LOWERED_REASON = "判定役の確認で成り立たないと分かった"
 # 必ず人の承認が要る操作に当たる指摘の表示（修正担当へ渡さない。#4076）
 REDLINE_LABEL = "人の承認を待つ（直さずに残した）"
 
@@ -218,15 +220,21 @@ def _light(f: Mapping[str, Any]) -> bool:
 
 
 def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
+    """指摘の表。判定役の確認で下げた指摘は、元の重要度と定型の理由を出す（`check` の自由記述は写さない。#4363）。"""
     rows = ["| 番号 | 担当 | 重要度 | 場所 | 指摘 | 終わり方 | 見送った理由 |", "| --- | --- | --- | --- | --- | --- | --- |"]
     for f in findings:
         outcome = f.get("outcome")
         shown = OUTCOME_LABEL[outcome] if outcome in OUTCOME_LABEL else outcome
         if outcome == fin.UNRESOLVED and (f.get(fin.REDLINE) or _light(f)):
             shown = REDLINE_LABEL if f.get(fin.REDLINE) else LIGHT_LABEL
+        severity, reason = _cell(criteria_decide.severity_of(f.get("severity"))), f.get("reason")
+        check = f.get(criteria_decide.CHECK)
+        if isinstance(check, Mapping) and check.get(criteria_decide.LOWERED):
+            severity = f"{severity}（確認の前は {_cell(criteria_decide.severity_of(f.get('raised_severity')))}）"
+            reason = LOWERED_REASON
         rows.append(
-            f"| {_cell(f.get('id'))} | {_cell(f.get('by'))} | {_cell(criteria_decide.severity_of(f.get('severity')))} | {_cell(_place(f))} "
-            f"| {_cell(f.get('text'))} | {_cell(shown)} | {_cell(f.get('reason'))} |"
+            f"| {_cell(f.get('id'))} | {_cell(f.get('by'))} | {severity} | {_cell(_place(f))} "
+            f"| {_cell(f.get('text'))} | {_cell(shown)} | {_cell(reason)} |"
         )
     return rows
 

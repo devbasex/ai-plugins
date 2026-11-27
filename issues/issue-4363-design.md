@@ -34,7 +34,7 @@ flowchart TD
     B -->|ある| C[判定役を 1 回起動して<br>まとめて確かめる]
     C --> D{起きる条件・経路・結果は<br>成り立つか}
     D -->|示せた・対象外| E[重いまま]
-    D -->|成り立たないと分かった| G[minor へ下げる<br>元の重要度と理由を残す]
+    D -->|成り立たないと分かった| G[minor へ下げる<br>元の重要度と理由は状態ファイルに残す]
     D -->|資料が足りず判断できない| E
     E --> F
     G --> F
@@ -313,6 +313,14 @@ MVV に反する指摘と保護の対象の指摘は、確認しても重要度�
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
 | #4363 | 実装する | — | `plugins/ndf/src/ndf/domains/crossreview/verify_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/verify.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_verify.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/src/ndf/domains/crossreview/carry.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/reviewing.py`（新設）、`plugins/ndf/contracts/limits/cross-review.remark-chars.json`、`plugins/ndf/contracts/limits/cross-review.remarks-total.json`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_citations.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_documents.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py` |
+
+## 設計との食い違い
+
+承認された設計から、次の 1 点を変えた。2026-11-27 にこのスプリントのオーガナイザー（AI）が決めた。利用者の承認ではない。公開する中身を狭める側の変更で、必ず人の承認が要る操作には当たらない。
+
+| 承認された設計 | 変えた後 | 理由 |
+| --- | --- | --- |
+| 下げた指摘は、状態ファイルと公開の記録のコメントに、元の重要度と判定役の理由が残る。コメントの理由の欄には `check.reason` を出す | 記録のコメントに出すのは、元の重要度と定型の理由「判定役の確認で成り立たないと分かった」だけにする。判定役の理由の全文は公開せず、実行したサーバーの状態ファイルの `check.reason` に残す | 判定役の理由の全文は、公開前の伏せ字で防げない未公開の情報を含みうる（伏せ字の対象は秘密の環境変数の値と既知の形式だけである）。公開した情報は取り消せない |
 
 ## 未確認のまま残ること
 

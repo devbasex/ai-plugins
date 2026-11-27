@@ -14,7 +14,7 @@ from ndf.adapters import publish
 from ndf.adapters.github import GitHubError
 from ndf.contracts import result
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview import journal, report_decide, store, threads
+from ndf.domains.crossreview import journal, report_decide, store, threads, verify_decide
 from ndf.domains.records.mvv import Snapshot
 
 from .conftest import FakePort
@@ -524,3 +524,17 @@ def test_issue_3955_round_table_names_the_seats_and_whose_seat_was_filled() -> N
     assert rows[0].startswith("| ラウンド | 相手役 |")
     assert "| codex・claude（kiro の席） |" in rows[2]
     assert len({r.count(" | ") for r in rows}) == 1
+
+
+def test_issue_4363_a_lowered_finding_shows_the_raised_severity_and_only_the_fixed_reason() -> None:
+    """下げた指摘は、元の重要度と定型の理由を表に出す。判定役が書いた文（作り物の非公開の値）は出さず、状態の記録に残す。"""
+    private = "sample-corp-internal-endpoint"
+    rows = journal.FindingJournal()
+    rows.enter(1, [{"text": "保存が止まる", "severity": "major", "impact": "入力が消える", "by": "codex"}])
+    answer = {"id": "r1-1", "holds": False, "condition": private, "path": private, "result": private, "reason": private, "tracks": []}
+    rows.apply_checks(["r1-1"], verify_decide.read([answer], ["r1-1"]).verdicts)
+    assert rows.rows["r1-1"]["check"]["reason"] == private
+    body = report_decide.comment(1, {"findings": list(rows.rows.values())}, None)
+    assert "| minor（確認の前は major） |" in body
+    assert "| 判定役の確認で成り立たないと分かった |" in body
+    assert private not in body
