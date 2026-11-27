@@ -21,6 +21,7 @@ VERSION_LINE = {"gh": "gh version {v} (2026-01-01)", "claude": "{v} (Claude Code
 def _fresh_cache(monkeypatch):
     """比べの結果の再利用をテストごとに空から始める。"""
     monkeypatch.setattr(cli_floor, "_SEEN", {})
+    monkeypatch.setattr(cli_floor, "_GATES", {})
 
 
 # ---------------------------------------------------------------- 表
@@ -46,9 +47,9 @@ RESTRICTED = ("-p", "--restricted", "--add-dir", "/x", "--permission-mode", "don
 
 
 def _claude_at(monkeypatch, found):
-    """claude の実行ファイルを `/bin/claude` に見せ、`--version` の回答を `found`（None は読めない）にする（子のプロセスを起動しない）。"""
+    """claude の実行ファイルを `/bin/claude` に見せ、`--version` の回答を `found`（None は読めない）にし、待たずに記録を再利用したことにする（子のプロセスを起動しない）。"""
     monkeypatch.setattr(cli_floor, "resolve", lambda argv0, env=None, cwd=None: "/bin/claude")
-    monkeypatch.setattr(cli_floor, "_version", lambda name, path, row, env, cwd: found)
+    monkeypatch.setattr(cli_floor, "_version_read", lambda name, path, row, env, cwd: (found, False))
 
 
 # 見つからない実行ファイル（`_claude_at` を当てず、PATH に無い）
@@ -113,7 +114,7 @@ GUARDS = {
     "require",
     "refuse_old",  # adapters/cli_floor.py: 古ければ起動の箇所の例外へ直す
     "require_claude",  # relay/account_login.py: 古い claude を LoginError("precondition") に直す
-    "_precheck",  # adapters/claude.py: 起動の直前の確かめ（recheck の後に require_claude）
+    "precheck_claude",  # adapters/claude_precheck.py: 起動の直前の確かめ（recheck の後に require_claude）
 }
 # 表の実行ファイルを起動するが比べを持たない関数と、その理由
 EXEMPT = {
@@ -230,3 +231,39 @@ def test_version_record_key_reports_the_key_and_whether_it_is_recorded(tmp_path,
     assert cli_floor.version_record_key(str(exe))[1] is False
     assert cli_floor.version_record_key(str(tmp_path / "none")) is None and cli_floor.version_record_key(None) is None
     assert len(ran) == 1
+
+
+def test_issue_1959_require_reports_whether_it_waited_for_the_version(tmp_path, monkeypatch):
+    # #1959: `require` は、記録に無く `--version` を読んだときだけ真を返す（呼び手は待った間の取り消しを確かめ直す）
+    exe = tmp_path / "claude"
+    exe.write_text("", encoding="utf-8")
+    exe.chmod(0o755)
+    monkeypatch.setattr(cli_floor, "_read_version", lambda *a: "9.0.0")
+    assert cli_floor.require("claude", str(exe)) is True
+    assert cli_floor.require("claude", str(exe)) is False
+
+
+def test_issue_1959_require_waiting_for_another_threads_version_counts_as_waited(tmp_path, monkeypatch):
+    # #1959: 同じ実行ファイルの `--version` を別のスレッドが打っている間に待った `require` は、待った後に記録に当たっても真を返す。
+    # 錠の取得の結果を差し替え、待つ間に別のスレッドが記録を書き終えたことを同じスレッドで再現する（実スレッドも時間の待ちも使わない）
+    exe = tmp_path / "claude"
+    exe.write_text("", encoding="utf-8")
+    exe.chmod(0o755)
+    st = exe.stat()
+    key = (str(exe), st.st_mtime_ns, st.st_size)
+
+    class Busy:
+        """待たずには取れず、待つと別のスレッドが記録を書き終えた後に取れる錠。"""
+
+        def acquire(self, blocking: bool = True) -> bool:
+            if blocking:
+                cli_floor._SEEN[key] = "9.0.0"
+            return blocking
+
+        def release(self) -> None:
+            pass
+
+    monkeypatch.setattr(cli_floor, "_gate", Busy)
+    monkeypatch.setattr(cli_floor, "_read_version", lambda *a: pytest.fail("待った後は記録を使い、--version を打たない"))
+    assert cli_floor.require("claude", str(exe)) is True
+    assert cli_floor.require("claude", str(exe)) is False  # 記録に当たるだけなら、キーごとの錠を取らず、待ったとしない

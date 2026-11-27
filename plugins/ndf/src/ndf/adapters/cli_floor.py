@@ -32,7 +32,11 @@ TABLE = "cli-floors"
 VERSION_POLICY = "cli-floor.version"
 # (実パス, st_mtime_ns, st_size) → 読めたバージョン（読めなければ None）
 _SEEN: dict[tuple[str, int, int], Optional[str]] = {}
+# `_SEEN` と `_GATES` を読み書きする間だけ取る錠。`--version` の終わりはこの錠では待たない
 _LOCK = threading.Lock()
+# 記録のキーごとの、`--version` を打つ間の錠。同じキーを読んでいる別のスレッドの終わりだけを待つ（別の実行ファイルとキャッシュの参照では待たない）
+_GATES: dict[tuple[str, int, int], threading.Lock] = {}
+_gate = threading.Lock
 
 
 class TooOld(Exception):
@@ -117,19 +121,39 @@ def _parse_version(out: str, pattern: str) -> Optional[str]:
 
 def _version(name: str, path: str, row: Mapping[str, object], env: Optional[Mapping[str, str]], cwd: Optional[Path]) -> Optional[str]:
     """実行ファイルのバージョン（同じ実パス・更新時刻・大きさなら再利用）。初めて読めなかったときに 1 行を出す。"""
+    return _version_read(name, path, row, env, cwd)[0]
+
+
+def _version_read(
+    name: str, path: str, row: Mapping[str, object], env: Optional[Mapping[str, str]], cwd: Optional[Path]
+) -> tuple[Optional[str], bool]:
+    """`_version` と、確かめの間に待ったか。自分が `--version` を打って終わりを待ったときと、同じキーの `--version` を
+    別のスレッドが打っている間にその終わりを待ったときに真。待たずに記録を再利用したとき（記録の読み書きの錠 `_LOCK` だけを待ったときを含む）は偽。"""
     try:
         st = os.stat(path)
-    except OSError:  # noqa: NDF401 外部コマンド: 消えた実行ファイルは比べずに通し、起動の失敗は今の起動の箇所が扱う
-        return None
+    except OSError:  # 外部コマンド: 消えた実行ファイルは比べずに通し、起動の失敗は今の起動の箇所が扱う
+        return None, False
     key = (path, st.st_mtime_ns, st.st_size)
     with _LOCK:
         if key in _SEEN:
-            return _SEEN[key]
+            return _SEEN[key], False
+        gate = _GATES.setdefault(key, _gate())
+    queued = not gate.acquire(blocking=False)
+    if queued:
+        gate.acquire()
+    try:
+        with _LOCK:
+            if key in _SEEN:  # 別のスレッドが記録を書き終えていた。その終わりを錠で待ったときだけ真
+                return _SEEN[key], queued
         version = _read_version(path, row, env, cwd)
-        _SEEN[key] = version
+        with _LOCK:
+            _SEEN[key] = version
+            _GATES.pop(key, None)
         if version is None:
             diag(f"{name} のバージョンを読めない（{path}）。下限 {row['min_version']} と比べずに起動する", kind="cli_floor", cli=name)
-        return version
+        return version, True
+    finally:
+        gate.release()
 
 
 def refuse_old(name: str, argv0: str, error: type[Exception], env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> None:
@@ -147,22 +171,27 @@ def _flag_floor(row: Mapping[str, object], args: Sequence[str]) -> Optional[str]
     return max(found, key=semver.Version.parse) if found else None
 
 
-def require(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None, args: Sequence[str] = ()) -> None:
+def require(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None, args: Sequence[str] = ()) -> bool:
     """`argv0` で起動する外部 CLI `name` が下限より古ければ `TooOld`。表に無い名前と、見つからない・読めない CLI は通す。
-    起動の引数 `args` が行の `flag_floors` の引数を含めば、その下限と比べ、バージョンを確かめられなければ `Unverified`（#3955）。"""
+    起動の引数 `args` が行の `flag_floors` の引数を含めば、その下限と比べ、バージョンを確かめられなければ `Unverified`（#3955）。
+
+    通したときは、確かめの間に待ったかを返す（自分の `--version` の終わりか、同じ実行ファイルの `--version` を打つ別のスレッドの
+    終わり）。記録を再利用したときは偽。待った間の変化を確かめ直す呼び手が使う。
+    """
     if name not in facts.ids(TABLE):
-        return
+        return False
     row = facts.row(TABLE, name)
     strict = _flag_floor(row, args)
     floor = strict if strict is not None else str(row["min_version"])
     path = resolve(argv0, env, cwd)
-    found = _version(name, path, row, env, cwd) if path is not None else None
+    found, waited = _version_read(name, path, row, env, cwd) if path is not None else (None, False)
     if found is None:
         if strict is not None:
             raise Unverified(name, path, strict)
-        return
+        return waited
     if semver.Version.parse(found) < semver.Version.parse(floor):
         raise TooOld(name, str(path), found, floor)
+    return waited
 
 
 def version(name: str, argv0: str, env: Optional[Mapping[str, str]] = None, cwd: Optional[Path] = None) -> Optional[str]:

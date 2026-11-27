@@ -1,5 +1,5 @@
 {
-  "summary": "起動の承認の記録（launch-approvals.jsonl）へ 1 行足す排他の待ちの上限（#1959）",
+  "summary": "起動の承認の記録（launch-approvals.jsonl・launch-questions.jsonl）へ 1 行足す排他と、起動の設定の候補の作成と掃除の排他の待ちの上限（#1959）",
   "seconds": 5,
   "read_by": [
     "ndf.adapters.launch_approval"

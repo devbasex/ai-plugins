@@ -74,6 +74,7 @@
       {"words": ["DAYS"], "keys": ["count"]}
     ],
     "limit_constants": [
+      {"name": "ndf.adapters.launch_records.WRITE_ATTEMPTS", "kind": "implementation", "reason": "起動の承認の記録へ 1 行を書ききれなかったときに、同じ行を 1 回の write で書き直す回数（#1959）。書ききれないのは空きが無いときなどで、待ちや運用の方針ではなく、hook の import の表の都合で上限の設定を読まない"},
       {"name": "ndf.adapters.launch_settings.OWNER_ATTEMPTS", "kind": "implementation", "reason": "MCP の定義のコピーの管理ファイルの錠を、作った直後に別の起動の掃除と取り合って取り損ねたときに、別の <id> で取り直す回数（初回を含む）。待ちの上限ではなく取り合いの回避で、#1959 の詳細設計で 3 回に固定した値。運用で変えない"},
       {"name": "ndf.adapters.llm.ATTEMPTS", "kind": "implementation", "reason": "判断の呼び出しの、初回を含む試行回数の上限（回答の形が合わないときの打ち直しは 1 回まで）。形の確かめの設計（docs/specifications/ndf-rebuild-scripted-flow.md の決定 60）で 2 回に固定した値で、運用で変えない"},
       {"name": "ndf.contracts.named_cap.CAP_FILE_VERSION", "kind": "implementation", "reason": "マシンの設定ファイルの形の版。上限の値ではなく、読み手の形を変えるときだけ変える"},

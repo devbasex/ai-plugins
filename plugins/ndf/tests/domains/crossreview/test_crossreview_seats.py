@@ -70,7 +70,7 @@ def _guarded(claude_version: Optional[str]) -> Callable[..., Fake]:
         fake = _Guarded(state_dir, script)
         monkeypatch.setattr(cli_floor, "resolve", lambda argv0, env=None, cwd=None: f"/bin/{argv0}")
         versions = {"claude": claude_version, "codex": "0.200.0"}
-        monkeypatch.setattr(cli_floor, "_version", lambda name, path, row, env, cwd: versions.get(name))
+        monkeypatch.setattr(cli_floor, "_version_read", lambda name, path, row, env, cwd: (versions.get(name), False))
         monkeypatch.setattr(agents, "_start_and_watch", lambda spec, poll: Fake.__call__(fake, spec))
         monkeypatch.setattr(agents, "kiro_guard", lambda cwd, paths: __import__("contextlib").nullcontext({}))
         monkeypatch.setattr(agents, "record_cost_file", lambda out: None)
