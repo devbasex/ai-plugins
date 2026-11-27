@@ -665,15 +665,16 @@ class _Unit:
 def _weights_entry(u: _Unit) -> Optional[dict[str, Any]]:
     """出現率のファイルの、同じリポジトリ・工程・ランタイム・互換性のキーの項目。無いか読めなければ None。
 
-    ファイルは書き手と同じ内部データの検証（`internal.check_record`）で確かめ、合わなければ項目なしとする。抽選に使えない確率を
-    持つ項目で起動を止めないためである。
+    使う項目は、ファイルの外形（バージョン）と合わせて、書き手と同じ内部データの検証（`internal.check_record`）で確かめ、合わなければ
+    項目なしとする。抽選に使えない確率を持つ項目で起動を止めないためである。起動のたびに全項目を確かめないよう、使う 1 項目だけを確かめる。
     """
     path = _store_file(u.store, WEIGHTS)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        internal.check_record(WEIGHTS, data)
         found = [e for e in data["entries"] if u.where.of(e) and not _past(e, u.now)]  # 掃除の後に期限を過ぎた項目も使わない
-    except (OSError, ValueError, KeyError, TypeError, internal.InternalError):  # noqa: NDF401 ファイル: 無いか形の違う出現率のファイルは項目なし（均等に抽選する）
+        if found:
+            internal.check_record(WEIGHTS, {"version": data["version"], "entries": [found[-1]]})
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, internal.InternalError):  # noqa: NDF401 ファイル: 無いか形の違う出現率のファイルは項目なし（均等に抽選する）
         return None
     return found[-1] if found else None
 
@@ -724,7 +725,8 @@ def _assignment(rows: Sequence[Mapping[str, Any]], u: _Unit) -> dict[str, Any]:
     w = u.where
     cands = candidates(u.arms, rows, entry, u.now, w)
     unpriced = _has_unpriced(rows, u)
-    if entry is not None and entry.get("phase") == "adaptive" and entry.get("candidates") == cands and not unpriced:
+    usable = entry is not None and entry["phase"] == "adaptive" and entry["candidates"] == cands and len(entry["probs"]) == len(u.arms)
+    if usable and not unpriced:  # 確率の数が選択肢の数と違う項目は、割り付けの行に書けないので使わない
         probs, phase = list(entry["probs"]), "adaptive"
     else:
         probs, phase = [1 / len(cands) if i in cands else 0 for i in range(len(u.arms))], "uniform" if unpriced else "burn_in"
