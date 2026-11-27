@@ -833,6 +833,10 @@ def test_production_deliveries_take_the_production_channel_and_manual_ones() -> 
         ("web/[a-].ts", "web/-.ts", True),
         ("web/[]-a]", "web/^", True),
         ("web/[]-a]", "web/x", False),
+        ("web/[![:alpha:]].ts", "web/猫.ts", False),  # git は 1 バイトずつ照らす（猫は UTF-8 の 3 バイト）
+        ("web/???.ts", "web/猫.ts", True),
+        ("web/*.ts", "web/猫.ts", True),
+        ("web/猫", "web/猫/a.ts", True),
     ],
 )
 def test_glob_matches_like_the_glob_pathspec_of_git(pattern: str, path: str, matches: bool) -> None:

@@ -57,6 +57,11 @@ NO_LAZY_FETCH = {"GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": ""}
 END_OF_OPTIONS = "--end-of-options"
 
 
+def tracking_refspec(remote: str, name: str) -> str:
+    """ブランチ `name` を追跡参照 `refs/remotes/<remote>/<name>` へ取る refspec（`remote.<remote>.fetch` の設定によらない）。"""
+    return f"+refs/heads/{name}:refs/remotes/{remote}/{name}"
+
+
 class GitError(Exception):
     """git が失敗した・出力が読めない・引数が誤り。"""
 
@@ -468,7 +473,7 @@ class Git:
 
     def fetch_branch(self, remote: str, name: str) -> Completed:
         """ブランチ 1 本を `refs/remotes/<remote>/<name>` へマージする（`FETCH_HEAD` を読まない。#3317）。結果はそのまま返す。"""
-        return self.fetch(remote, f"+refs/heads/{name}:refs/remotes/{remote}/{name}")
+        return self.fetch(remote, tracking_refspec(remote, name))
 
     def fetch_branch_or_raise(self, remote: str, name: str) -> None:
         """`fetch_branch` を打ち、マージできなければ `GitError`（`<remote> の <name> をマージできない`）。"""

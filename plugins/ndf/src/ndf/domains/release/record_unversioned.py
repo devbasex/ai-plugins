@@ -23,7 +23,7 @@ from typing import Any, ContextManager, NamedTuple, Optional
 
 from filelock import FileLock, Timeout
 
-from ndf.adapters.git import Git, GitError
+from ndf.adapters.git import Git, GitError, tracking_refspec
 from ndf.adapters.github import Authored, GitHub, GitHubError, Pull
 from ndf.adapters.publish import Publisher
 from ndf.contracts import limits
@@ -148,25 +148,34 @@ def _diff_paths(repo_git: Git, base: str, head: str) -> frozenset[str]:
 def pull_base(hub: GitHub, repo_git: Git, number: int, commit: str) -> str:
     """本番の PR `number` の差分の起点。反映したコミット `commit` から第一親を PR のコミットの数までたどり、同じ PR に紐づく
     最後のコミットの第一親（squash とマージのコミットでは `commit` の第一親、rebase では PR のコミットの範囲の下）。
-    マージの方式は見分けない。PR のコミットの数の照会が 1 回、紐づく PR の照会がたどったコミットをまとめた 1 回
-    （`github.graphql-batch` 件ごと。コミットが 1 つなら 0 回）。紐づく PR を照会できなければ推測せずに `RecordError`。"""
+    マージの方式は見分けない。PR のコミットの数の照会が 1 回と、紐づく PR の照会がたどったコミットを `github.graphql-batch`
+    件ずつまとめた 1 回ずつ。バッチごとに判定し、別の PR のコミットに当たって起点が決まれば、後のバッチは照会しない
+    （squash とマージのコミットでは 1 回。コミットが 1 つなら 0 回）。紐づく PR を照会できなければ推測せずに `RecordError`。"""
     count = hub.pull_commit_count(number)
     chain = repo_git.run("rev-list", "--first-parent", f"--max-count={count}", commit).split() if count > 1 else [commit]
+    size = int(limits.value("github.graphql-batch", "count"))
+    last = commit
+    for start in range(1, len(chain), size):
+        batch = chain[start : start + size]
+        linked = _linked_pulls(hub, number, batch)
+        for sha in batch:  # PR のコミットの数までで、別の PR のコミットに当たれば止まる
+            got = linked.get(sha)
+            if got is None:
+                raise RecordError(f"コミット {sha} が GitHub に無く、#{number} の差分の起点を決められない。時間を置いて打ち直す")
+            if number not in got:
+                return f"{last}^1"
+            last = sha
+    return f"{last}^1"
+
+
+def _linked_pulls(hub: GitHub, number: int, batch: Sequence[str]) -> Mapping[str, Optional[list[int]]]:
+    """`batch` のコミットに紐づく PR（1 回の照会）。照会できなければ `RecordError`（待つ時間が分かるレート制限はそのまま）。"""
     try:
-        linked = hub.commits_pulls(chain[1:]) if len(chain) > 1 else {}
+        return hub.commits_pulls(batch)
     except GitHubError as exc:
         if exc.retry_after is not None:
             raise
         raise RecordError(f"#{number} のコミットに紐づく PR を照会できず、差分の起点を決められない（{exc}）。時間を置いて打ち直す") from exc
-    last = commit
-    for sha in chain[1:]:  # PR のコミットの数までで、別の PR のコミットに当たれば止まる
-        got = linked.get(sha)
-        if got is None:
-            raise RecordError(f"コミット {sha} が GitHub に無く、#{number} の差分の起点を決められない。時間を置いて打ち直す")
-        if number not in got:
-            break
-        last = sha
-    return f"{last}^1"
 
 
 def scope_paths(repo_git: Git, base: str, commit: str, push: record_decide.Push) -> tuple[frozenset[str], frozenset[str]]:
@@ -175,10 +184,22 @@ def scope_paths(repo_git: Git, base: str, commit: str, push: record_decide.Push)
 
 
 def _fetch_hint(production: str, tip: str) -> str:
-    """手元の追跡参照が古いときに打つ取得のコマンド（`tip` は `refs/remotes/<リモート>/<本番ブランチ>`）。"""
+    """手元の追跡参照が古いときに打つ取得のコマンド（`tip` は `refs/remotes/<リモート>/<本番ブランチ>`）。取得元と取得先の
+    参照を明示する。`git fetch <リモート> <ブランチ>` だけでは、本番ブランチが `remote.<リモート>.fetch` の対象外
+    （別のブランチだけを clone した場合など）のとき、`record` が読む追跡参照が更新されないため。"""
     parts = tip.split("/")
-    remote = parts[2] if len(parts) > 3 and parts[:2] == ["refs", "remotes"] else "origin"
-    return f"git fetch {remote} {production}"
+    remote = parts[2] if len(parts) > 3 and parts[:2] == ["refs", "remotes"] else "<リモート>"
+    return f"git fetch {remote} {tracking_refspec(remote, production)}"
+
+
+def _declared_at(repo_git: Git, commit: str, fetch: str) -> bool:
+    """反映したコミット `commit` の時点に届け先の設定があるか（`git cat-file --batch` の起動 1 回）。worktree の設定で
+    決めると、同じリリースでも設定を外す前と後で対象の出典が変わり、外す前に失敗した CD の届け先を `--target` で
+    記録できてしまう。コミットが手元に無ければ、`fetch` を示して `RecordError`。"""
+    at = delivery_confirm.deliveries_at(repo_git, commit)
+    if at.kind == delivery_confirm.MISSING_REF:
+        raise RecordError(f"反映したコミット {commit} が手元に無い。{fetch} で本番ブランチを取得してから打ち直す")
+    return at.kind != delivery_confirm.ABSENT
 
 
 def find_push(hub: GitHub, repo_git: Git, production: str, commit: str, tip: str) -> record_decide.Push:
@@ -287,7 +308,7 @@ def _record_targets(prefix: Prefix, args: Unversioned) -> tuple[str, ...]:
     at = prefix.deliveries
     if at is None or at.kind == delivery_confirm.ABSENT:
         if not args.targets:
-            where = "届け先の設定（release.deliveries）が無い" if at is None else "push の時点に届け先の設定が無い"
+            where = "反映したコミットの時点に届け先の設定（release.deliveries）が無い" if at is None else "push の時点に届け先の設定が無い"
             raise RecordError(f"{where}。--target で今回の対象の届け先を 1 つ以上渡して打ち直す")
         return _target_set(args.targets)
     if args.targets:
@@ -330,10 +351,10 @@ def _shape(hub: GitHub, hands: Hands, number: int, production: str, release: Map
     pull, commit = _landed_value(hub, number, production, args.version, args.production_sha)
     included = _record_pulls(hub, pull, production, names_decide.formats_of(release))
     state = _trusted_state(hub, included[0], args.version, commit)
-    # 同じ値の記録に push があれば、今の設定の有無によらずその push の時点の設定で決める（設定を外した後の打ち直しでも、
-    # その push で要った CD の確かめを飛ばさない）
+    # 対象の出典は worktree でなく本番へ反映した時点で決める。同じ値の記録に push があればその push の時点の設定、無ければ
+    # 反映したコミットの時点に設定があれば push を決めてその時点の設定、どちらも無ければ `--target`
     known = _known_push(state, args.version)
-    if record_decide.declared_deliveries(release) is None and known is None:
+    if known is None and not _declared_at(hands.repo_git, commit, _fetch_hint(production, args.tip)):
         prefix = Prefix(commit, None, None, frozenset(), frozenset())
     else:
         prefix = shared_prefix(hands.repo_git, number, commit, lambda: _prefix(hub, hands, production, pull, args.tip, known))
@@ -552,22 +573,23 @@ def correct_targets(
     if not same:
         raise RecordError(f"記録の PR #{holder} に値 {version} の信用するリリース記録が無い。先に record --version を打つ")
     _check_records(state, state.authoritative[version], version, commit, number)
-    _refuse_declared(hands, release, _known_push(state, version))
+    _refuse_declared(hands, production, commit, _known_push(state, version))
     _require_writer(hub)
     made = record_decide.Correction(version, commit, _target_set(targets), state.authoritative[version], reason)
     return Publisher(hub).comment(holder, record_decide.render_correction(made)).url
 
 
-def _refuse_declared(hands: Hands, release: Mapping[str, Any], push: Optional[record_decide.Push]) -> None:
-    """対象の一覧が設定で決まる記録の訂正を断る。同じ値の記録に push があれば、今の設定の有無によらず、その push の `after`
-    の時点に設定が無いときだけ受ける（設定を外した後でも、設定で決まった一覧を手で書き換えさせない）。push が無ければ、
-    今の設定が無いときだけ受ける。"""
+def _refuse_declared(hands: Hands, production: str, commit: str, push: Optional[record_decide.Push]) -> None:
+    """対象の一覧が設定で決まる記録の訂正を断る。worktree の設定は見ず、`record` と同じく本番へ反映した時点で決める。同じ値の
+    記録に push があれば、その push の `after` の時点に設定が無いときだけ受ける。push が無ければ、反映したコミット
+    `commit` の時点に設定が無いときだけ受ける（設定を外した後でも、設定で決まった一覧を手で書き換えさせない）。"""
+    fetch = _fetch_hint(production, "")
     if push is None:
-        if record_decide.declared_deliveries(release) is not None:
-            raise RecordError("届け先の設定があり、対象の一覧は設定から決まる。--correct-targets では直せない")
+        if _declared_at(hands.repo_git, commit, fetch):
+            raise RecordError("反映したコミットの時点に届け先の設定があり、対象の一覧は設定から決まる。--correct-targets では直せない")
         return
     at = delivery_confirm.deliveries_at(hands.repo_git, push.after)
     if at.kind == delivery_confirm.MISSING_REF:
-        raise RecordError(at.reason)
+        raise RecordError(f"push の after {push.after} が手元に無い。{fetch} で本番ブランチを取得してから打ち直す")
     if at.kind != delivery_confirm.ABSENT:
         raise RecordError("push の時点に届け先の設定があり、対象の一覧は設定から決まる。--correct-targets では直せない")

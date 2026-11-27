@@ -2,6 +2,7 @@
   "summary": "番号ごとの読み取りを GraphQL のエイリアスで 1 回のクエリへまとめる件数",
   "count": 100,
   "read_by": [
-    "ndf.adapters.github"
+    "ndf.adapters.github",
+    "ndf.domains.release.record_unversioned"
   ]
 }

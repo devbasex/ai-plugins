@@ -603,11 +603,20 @@ def _glob_regex(pattern: str) -> str | None:
     return "".join(out)
 
 
+def _bytewise(text: str) -> str:
+    """`text` の UTF-8 のバイト列を、1 バイトを 1 文字（U+0000〜U+00FF）にした文字列（git と同じ単位で照らすため）。"""
+    return text.encode("utf-8", "surrogateescape").decode("latin-1")
+
+
 def glob_matches(pattern: str, path: str) -> bool:
     """パス `path` が git の pathspec の `:(glob)` のパターン `pattern` に当たるか（大文字と小文字を区別する）。
 
     git と同じく、先にパターンを文字そのままとして比べ、同じパスと、そのディレクトリの下のパスに当てる。ワイルドカード
-    （`*`・`?`・`[`・`\\`）があれば、続けて wildmatch で照らす。括弧は POSIX の文字クラス（`[[:alpha:]]` など）も受ける。"""
+    （`*`・`?`・`[`・`\\`）があれば、続けて wildmatch で照らす。括弧は POSIX の文字クラス（`[[:alpha:]]` など）も受ける。
+
+    git の wildmatch は 1 バイトずつ照らすので、パターンもパスも UTF-8 のバイト列にして、1 バイトを 1 文字として照らす
+    （`?` と括弧は日本語の 1 文字でなく 1 バイトに当たる）。"""
+    pattern, path = _bytewise(pattern), _bytewise(path)
     if path == pattern or (path.startswith(pattern) and (pattern.endswith("/") or path[len(pattern)] == "/")):
         return True
     if not any(c in pattern for c in "*?[\\"):

@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from ndf.adapters.github import Authored
+from ndf.adapters.github import Authored, GitHubError
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import record, record_decide, record_unversioned
 
@@ -62,10 +62,9 @@ class Repo(FakeGit):
         project = section("web-trunk")
         if deliveries is not None:
             project["release"]["deliveries"] = deliveries
-        objects = {
-            f"{AFTER}^{{commit}}": b"c",
-            f"{AFTER}:.ndf/project.json": json.dumps({"version": 1, "branch_strategy": project}).encode(),
-        }
+        # push の after と反映したコミットの時点の設定（どちらも `deliveries`）
+        body = json.dumps({"version": 1, "branch_strategy": project}).encode()
+        objects = {f"{sha}{suffix}": got for sha in (AFTER, COMMIT) for suffix, got in (("^{commit}", b"c"), (":.ndf/project.json", body))}
         super().__init__(objects, tmp_path)
         self.common = tmp_path / ".git"
         self.diffs = (
@@ -195,7 +194,7 @@ def test_all_pending_or_failed_write_nothing(tmp_path: Path) -> None:
         (_args("db"), None, "今回の対象の届け先"),  # 確かめ 4
         (_args(WEB, observed=frozenset({WORKER})), None, "--observed"),  # 確かめ 4
         (_args(WEB), "no_push", "時間を置いて打ち直す"),  # push を決められない
-        (_args(WEB), "stale", "git fetch origin main"),  # 手元の追跡参照に反映したコミットがまだ無い
+        (_args(WEB), "stale", r"git fetch origin \+refs/heads/main:refs/remotes/origin/main"),  # 手元の追跡参照に反映したコミットがまだ無い
         (_args(WEB), "cancelled", "打ち消された"),  # 確かめ 3: 対象が空
     ],
 )
@@ -237,6 +236,24 @@ def test_the_pull_diff_starts_below_the_commits_linked_to_the_pull(
     assert got.record.targets == (WEB,) and hub.linked_asked == asked and hub.linked_batches == (1 if asked else 0)
 
 
+@pytest.mark.parametrize(
+    ("linked", "asked"),
+    [
+        ({R2: [11], R1: GitHubError("後のバッチ", 502)}, [R2]),  # 起点が決まれば後のバッチは照会しない
+        ({R2: [PROD], R1: [PROD]}, [R2, R1]),  # 同じ PR のコミットが続けば次のバッチも読む
+    ],
+)
+def test_the_pull_diff_reads_links_batch_by_batch(monkeypatch, tmp_path: Path, linked: dict, asked: list) -> None:
+    original = record_unversioned.limits.value
+    monkeypatch.setattr(record_unversioned.limits, "value", lambda name, key: 1 if name == "github.graphql-batch" else original(name, key))
+    hub = _push_activity(_hub(cd_runs=[[SUCCESS]]))
+    hub.commit_counts[PROD], hub.linked = 3, linked
+    base = f"{COMMIT}^1" if asked == [R2] else f"{R1}^1"
+    repo = Repo(tmp_path, diffs={(base, COMMIT): ["web/a.ts"], (BEFORE, AFTER): ["web/a.ts"]})
+    assert _write(hub, repo, _args(WEB)).record.targets == (WEB,)
+    assert hub.linked_asked == asked and hub.linked_batches == len(asked)
+
+
 def test_the_pull_diff_stops_when_links_cannot_be_read(tmp_path: Path) -> None:
     from ndf.adapters.github import GitHubError
 
@@ -262,13 +279,33 @@ def test_targets_come_from_the_push_time_paths_and_moved_files(tmp_path: Path) -
 
 def test_a_repository_without_deliveries_takes_targets_and_attests(tmp_path: Path) -> None:
     with pytest.raises(record.RecordError, match="--target"):
-        _write(_hub(), Repo(tmp_path), _args(WEB), _release(None))
+        _write(_hub(), Repo(tmp_path, deliveries=None), _args(WEB), _release(None))
     hub = _hub()
-    repo = Repo(tmp_path)
+    repo = Repo(tmp_path, deliveries=None)
     got = _write(hub, repo, _args(WEB, targets=(WORKER, WEB)), _release(None))
     assert got.recorded == (WEB,) and got.record.targets == (WEB, WORKER) and got.missing == (WORKER,)
     assert [r.confirmation for r in _written(hub, 11)] == [{WEB: "attested"}] and [r.push for r in _written(hub, 11)] == [None]
-    assert repo.calls == [] and hub.activities == [] and not [r for r in hub.requests if r[1].endswith("/activity")]
+    # 反映したコミットの時点の設定を読む 1 回だけで、push も差分も読まない
+    assert [c[0] for c in repo.calls] == ["cat-file"] and not [r for r in hub.requests if r[1].endswith("/activity")]
+
+
+def test_the_first_record_after_removing_the_setting_uses_the_setting_of_the_commit(tmp_path: Path) -> None:
+    """設定を外した後に、外す前の push を初めて記録しても、反映したコミットの時点の設定で対象と CD の確かめを決める。"""
+    hub = _push_activity(_hub(cd_runs=[[FAILURE]]))
+    repo = Repo(tmp_path)
+    with pytest.raises(record.RecordError, match="--target を渡さず"):
+        _write(hub, repo, _args(WEB, targets=(WEB,)), _release(None))
+    got = _write(hub, repo, _args(WEB), _release(None))
+    assert set(got.failed) == {WEB} and got.record.targets == (WEB, WORKER)
+    with pytest.raises(record.RecordError, match="直せない"):
+        record_unversioned.correct_targets(_correction_hub(), _hands(repo), PROD, "main", _release(None), (VALUE, (WEB,), "理由", None))
+
+
+def test_a_commit_missing_locally_stops_with_an_explicit_fetch(tmp_path: Path) -> None:
+    repo = Repo(tmp_path, deliveries=None)
+    repo.objects = {}
+    with pytest.raises(record.RecordError, match=r"git fetch origin \+refs/heads/main:refs/remotes/origin/main"):
+        _write(_hub(), repo, _args(WEB, targets=(WEB,)), _release(None))
 
 
 def test_a_rerun_after_removing_the_setting_still_uses_the_setting_of_the_push(tmp_path: Path) -> None:
@@ -308,18 +345,18 @@ def test_targets_different_from_the_first_record_stop_with_the_correction_comman
     hub = _hub()
     _other_writer(hub, 11, _made(WEB, (WEB,)))
     with pytest.raises(record.RecordError, match="--correct-targets --target web"):
-        _write(hub, Repo(tmp_path), _args(WORKER, targets=(WEB, WORKER)), _release(None))
+        _write(hub, Repo(tmp_path, deliveries=None), _args(WORKER, targets=(WEB, WORKER)), _release(None))
     # 信用しない書き手の最初の記録は正の一覧にならない
     hub = _hub()
     _other_writer(hub, 11, _made(WEB, (WEB,)), author="stranger")
-    assert _write(hub, Repo(tmp_path), _args(WORKER, targets=(WEB, WORKER)), _release(None)).recorded == (WORKER,)
+    assert _write(hub, Repo(tmp_path, deliveries=None), _args(WORKER, targets=(WEB, WORKER)), _release(None)).recorded == (WORKER,)
 
 
 def test_one_commit_with_two_values_stops(tmp_path: Path) -> None:
     hub = _hub()
     _other_writer(hub, 11, _made(WEB, (WEB,), version=f"main {COMMIT[:9]}"))
     with pytest.raises(record.RecordError, match="別の値"):
-        _write(hub, Repo(tmp_path), _args(WEB, targets=(WEB,)), _release(None))
+        _write(hub, Repo(tmp_path, deliveries=None), _args(WEB, targets=(WEB,)), _release(None))
 
 
 class RacingHub(FakeHub):
@@ -344,14 +381,14 @@ def _racing(racer: record_decide.Record) -> RacingHub:
 def test_a_parallel_run_with_other_targets_wins_and_we_remove_ours(tmp_path: Path) -> None:
     hub = _racing(_made(WEB, (WEB,)))
     with pytest.raises(record.RecordError, match="正の一覧（web）"):
-        _write(hub, Repo(tmp_path), _args(WEB, targets=(WEB, WORKER)), _release(None))
+        _write(hub, Repo(tmp_path, deliveries=None), _args(WEB, targets=(WEB, WORKER)), _release(None))
     assert [r.targets for r in _written(hub, 11)] == [(WEB,)] and 12 not in hub.comments_of and len(hub.deleted) == 1
 
 
 def test_a_parallel_run_with_a_longer_sha_value_wins_and_we_remove_ours(tmp_path: Path) -> None:
     hub = _racing(_made(WEB, (WEB,), version=f"main {COMMIT[:9]}"))
     with pytest.raises(record.RecordError, match="値とコミットの組"):
-        _write(hub, Repo(tmp_path), _args(WEB, targets=(WEB,)), _release(None))
+        _write(hub, Repo(tmp_path, deliveries=None), _args(WEB, targets=(WEB,)), _release(None))
     assert [r.version for r in _written(hub, 11)] == [f"main {COMMIT[:9]}"]
 
 
@@ -366,7 +403,7 @@ def test_two_parallel_runs_with_the_same_arguments_end_with_one_record(tmp_path:
         return RacingHub.rest(hub, method, path, payload, params)
 
     hub.rest = racing_others  # type: ignore[method-assign]
-    got = _write(hub, Repo(tmp_path), _args(WEB, targets=(WEB,)), _release(None))
+    got = _write(hub, Repo(tmp_path, deliveries=None), _args(WEB, targets=(WEB,)), _release(None))
     assert got.recorded == (WEB,) and [len(_written(hub, n)) for n in (11, 12, PROD)] == [1, 1, 1]
     assert sorted(w.result for w in got.written if w.number in (11, 12)) == [record_unversioned.REMOVED, record_unversioned.REMOVED]
 
@@ -374,13 +411,13 @@ def test_two_parallel_runs_with_the_same_arguments_end_with_one_record(tmp_path:
 def test_complete_counts_a_parallel_run_that_wrote_after_our_first_read(tmp_path: Path) -> None:
     """届け先ごとに並べて打った別の呼び出しが、こちらの確かめの後に書いた記録も、書いた後の読み直しで complete に数える。"""
     hub = _racing(_made(WORKER, (WEB, WORKER)))
-    got = _write(hub, Repo(tmp_path), _args(WEB, targets=(WEB, WORKER)), _release(None))
+    got = _write(hub, Repo(tmp_path, deliveries=None), _args(WEB, targets=(WEB, WORKER)), _release(None))
     assert got.recorded == (WEB,) and (got.complete, got.missing) == (True, ())
 
 
 def test_check_seven_reads_each_included_pull_once_for_any_number_of_environments(tmp_path: Path) -> None:
     hub = _hub()
-    repo = Repo(tmp_path)
+    repo = Repo(tmp_path, deliveries=None)
     _write(hub, repo, _args(WEB, WORKER, targets=(WEB, WORKER)), _release(None))
     reads: list[int] = []
     original = hub.comments
@@ -398,7 +435,7 @@ def test_a_comment_that_cannot_be_removed_stops_with_its_url(tmp_path: Path) -> 
     hub = _racing(_made(WEB, (WEB,)))
     hub.undeletable = {2}  # 差し込んだ記録が 1、自分が書いたコメントが 2
     with pytest.raises(record_unversioned.CommentLeft) as caught:
-        _write(hub, Repo(tmp_path), _args(WEB, targets=(WEB, WORKER)), _release(None))
+        _write(hub, Repo(tmp_path, deliveries=None), _args(WEB, targets=(WEB, WORKER)), _release(None))
     assert caught.value.urls == ("https://example.invalid/11",)
 
 
@@ -441,27 +478,27 @@ def _correction_hub() -> FakeHub:
 def test_correct_targets_adds_a_correction_and_keeps_the_records(tmp_path: Path) -> None:
     hub = _correction_hub()
     fix = (VALUE, (WORKER, WEB), "worker を落としていた", None)
-    url = record_unversioned.correct_targets(hub, _hands(Repo(tmp_path)), PROD, "main", _release(None), fix)
+    url = record_unversioned.correct_targets(hub, _hands(Repo(tmp_path, deliveries=None)), PROD, "main", _release(None), fix)
     assert url == "https://example.invalid/11"
     bodies = [c.body for c in hub.comments(11)]
     assert record_decide.parse_correction(bodies[-1]) == record_decide.Correction(VALUE, COMMIT, (WEB, WORKER), (WEB,), fix[2])
     assert len(_written(hub, 11)) == 1
     # 訂正の後は新しい一覧で打ち直せる（前の一覧の記録は正と違うので数えない）
-    got = _write(hub, Repo(tmp_path), _args(WEB, targets=(WEB, WORKER)), _release(None))
+    got = _write(hub, Repo(tmp_path, deliveries=None), _args(WEB, targets=(WEB, WORKER)), _release(None))
     assert got.recorded == (WEB,) and got.missing == (WORKER,)
 
 
 def test_correct_targets_refuses_without_records_with_a_setting_or_an_untrusted_token(tmp_path: Path) -> None:
     fix = (VALUE, (WEB,), "理由", None)
     with pytest.raises(record.RecordError, match="先に record --version"):
-        record_unversioned.correct_targets(_hub(), _hands(Repo(tmp_path)), PROD, "main", _release(None), fix)
+        record_unversioned.correct_targets(_hub(), _hands(Repo(tmp_path, deliveries=None)), PROD, "main", _release(None), fix)
     with pytest.raises(record.RecordError, match="--correct-targets では直せない"):
         record_unversioned.correct_targets(_correction_hub(), _hands(Repo(tmp_path)), PROD, "main", _release(), fix)
     hub = _correction_hub()
     hub.trusted = {"octocat"}
     hub.token_trusted = lambda: False  # type: ignore[method-assign]
     with pytest.raises(record.RecordError, match="write 以上"):
-        record_unversioned.correct_targets(hub, _hands(Repo(tmp_path)), PROD, "main", _release(None), fix)
+        record_unversioned.correct_targets(hub, _hands(Repo(tmp_path, deliveries=None)), PROD, "main", _release(None), fix)
     assert len(hub.comments(11)) == 1
 
 

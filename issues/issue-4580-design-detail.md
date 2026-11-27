@@ -38,7 +38,7 @@
 | 0 | 引数の組。`--version` と `--environment` はそろえて、バージョン番号を持たないリポジトリでだけ受ける。`--target` の要否は、push の時点の宣言を読むかで決まるので確かめ 3 で確かめる |
 | 1 | 本番の PR が本番ブランチへ入ったか（マージ済みか、`--production-sha` が正規の squash か）。入れたコミットを「反映したコミット」と呼ぶ |
 | 2 | 値の中に、反映したコミットの SHA の先頭 7 文字以上と一致する 16 進の語があるか |
-| 3 | 作業ツリーに配布先の宣言（`branch_strategy.release.deliveries`）があるか、記録の PR の同じ値の信用する記録が `push` を持てば、push の `after` の宣言を `deliveries_at` で 1 回だけ読む（出典の「配布先の宣言を読む時点」）。作業ツリーの宣言を外した後の打ち直しでも、push の時点の宣言で決めるためである。push の時点に宣言があれば `--target` を受けず、無ければ要る。どちらでもなければ push を読まず、`--target` が 1 つ以上要る。今回の対象の配布先（`targets`）を決める。宣言があれば、`paths` を持たない配布先と、本番の PR の差分と push の差分の両方に出るパスが当たる配布先。無ければ `--target` の集合。空なら止まる |
+| 3 | 作業ツリーの宣言は見ない。記録の PR の同じ値の信用する記録が `push` を持てば、その push の `after` の配布先の宣言（`branch_strategy.release.deliveries`）を `deliveries_at` で 1 回だけ読む。持たなければ、反映したコミットの時点の宣言を `deliveries_at` で読み、宣言があれば push を決めてその `after` の宣言を読む（出典の「配布先の宣言を読む時点」）。対象の出典を配布した時点に固定し、宣言を外した後の初回の記録でも `--target` を受けないためである。push の時点に宣言があれば `--target` を受けず、無ければ要る。反映したコミットの時点に宣言が無ければ push を読まず、`--target` が 1 つ以上要る。今回の対象の配布先（`targets`）を決める。宣言があれば、`paths` を持たない配布先と、本番の PR の差分と push の差分の両方に出るパスが当たる配布先。無ければ `--target` の集合。空なら止まる |
 | 4 | `--environment` が `targets` の部分集合か、`--observed` が `--environment` に含まれるか |
 | 5 | 今回の `targets` が正の `targets` と同じか |
 | 6 | 値とコミットが 1 対 1 か（同じコミットの記録が別の値で無いか、同じ値の記録が別のコミットで無いか） |
@@ -413,7 +413,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 - `write_unversioned`
   - 事前条件: バージョン番号を持たないリポジトリである。`args.environments` が 1 つ以上
   - 事後条件: 確かめ 0〜6 で止まれば、どの PR にも書いていない。書いた配布先ごとに、含めた PR の各々に、同じ値・同じ `environments`・正の `targets` の信用する記録がちょうど 1 件ある
-  - 副作用: GitHub のコメントの読み取り・書き込み・自分が書いたコメントの削除、git の起動 4 回（差分などの 3 回と、`git cat-file --batch` による宣言の読み取りの 1 回。作業ツリーに配布先の宣言が無ければ 0 回。共有の置き場を使えたときも 0 回）、`result.command` の配布先があれば作業場所の追加と削除の 2 回、共有の置き場の読み書きと削除、CD の実行の照会、`observe.url` の HTTP の読み取り
+  - 副作用: GitHub のコメントの読み取り・書き込み・自分が書いたコメントの削除、git の起動は、記録が `push` を持たなければ反映したコミットの時点の宣言の読み取り 1 回と、push の時点の宣言を読むときに 4 回（差分などの 3 回と、`git cat-file --batch` による宣言の読み取りの 1 回。共有の置き場を使えたときは 0 回）、`result.command` の配布先があれば作業場所の追加と削除の 2 回、共有の置き場の読み書きと削除、CD の実行の照会、`observe.url` の HTTP の読み取り
 - `_candidates`（番号は設計書の読み取りの手順のまま。「取得」はコメントを読むこと、「照会」は書き手の照会）
   - 手順 1: 記録の PR のコメントを 1 回だけ取得し（ページ送りを含む）、マーカーを持つコメントを候補にする
   - 手順 2: JSON の形が誤った候補を、照会せずに除く。バージョン番号を持つリポジトリの記録とテストの記録は、`--version`・`--release`・`--unit` のうち渡したものが一致する候補だけを残す
@@ -436,7 +436,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_record_args` | 引数の組の誤り | 確かめ 0 の「止まるとき」 | `_record_args` | 止める | `precondition`（3） | 何も書いていない。直して打ち直せる |
 | `_landed_commit` | 本番へ入っていない | 未マージで `--production-sha` が無いか正規の squash でない | `landed_squash` | 止める（`NotReleased`） | 今と同じ | 同上 |
 | `write_unversioned` | 値と反映したコミットが対応しない | 確かめ 2 | `value_matches` | 止める | `precondition`（3）。反映したコミットの SHA を載せる | 同上 |
-| `_find_push` | push を決められない | 手元の追跡参照が古い（GitHub でマージした直後に取得していない） | 反映したコミットがコミットの集合 S に無いか、`git rev-list` が失敗した | 止める（アクティビティは読まない） | `precondition`（3）。`git fetch <リモート> <本番ブランチ>` で取得してから打ち直すよう示す | 同上 |
+| `_find_push` | push を決められない | 手元の追跡参照が古い（GitHub でマージした直後に取得していない） | 反映したコミットがコミットの集合 S に無いか、`git rev-list` が失敗した | 止める（アクティビティは読まない） | `precondition`（3）。`git fetch <リモート> +refs/heads/<本番ブランチ>:refs/remotes/<リモート>/<本番ブランチ>` で取得してから打ち直すよう示す（取得先の追跡参照まで明示する） | 同上 |
 | `_find_push` | push を決められない | アクティビティにまだ載っていないか、追跡参照が古く新しい更新が S の外にある | `push_of` が None | 止める | `precondition`（3）。追跡参照が古ければ `git fetch` で取得し、push の直後なら時間を置いて打ち直すよう示す | 同上 |
 | `write_unversioned` | 対象が空・正と違う・同じコミットに別の値 | 確かめ 3・5・6 | 各確かめ | 止める | `precondition`（3）。正の一覧と訂正の打ち方、または既にある値を載せる | 同上 |
 | `_confirm_delivery` | CD が失敗 | 実行の `conclusion` が `success` 以外 | `confirm` | 呼び出し元へ返す（`failed`） | 書けた配布先があれば `ok`（0）、無ければ `refused`（1） | その配布先は打ち直さず、配布の失敗として報告する |
