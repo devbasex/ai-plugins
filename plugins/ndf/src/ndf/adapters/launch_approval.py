@@ -753,6 +753,8 @@ def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
 
 # 置き換えの一時ファイルの名前の頭（後ろに乱数の値が付く）
 _PLACING_HEAD = ".{}.placing-"
+# 消す前に一時ファイルを移す名前の頭（後ろに乱数の値が付く）。どの記録にも書かない名前で、移した後に実体を確かめてから消す
+_DROPPING_HEAD = ".{}.dropping-"
 
 
 def _drop_placing(target: Path, rec: Mapping[str, Any]) -> None:
@@ -761,19 +763,50 @@ def _drop_placing(target: Path, rec: Mapping[str, Any]) -> None:
     確かめる条件は、記録した実体（`placed`）と同じことだけである。実体を記録する前に止まった場合は、その名前のファイルが空でも消さない。
     名前が重なった利用者の空のファイルと見分けられないためで、NDF が作った空のファイルが残っても中身（設定案の写し）は無い。
     名前が記録に無い・反映先と別のディレクトリ・頭が違う・実体が違うファイルも消さない（利用者の作ったものかもしれないため）。
+    消す前に移す名前（`_DROPPING_HEAD`）のファイルも、記録した実体と同じものだけを消す。移した直後に強制終了した分を片付けるためである。
     """
     name = rec.get("placing")
-    if not isinstance(name, str):
+    placed = rec.get("placed")
+    if not isinstance(name, str) or placed is None:
         return
     tmp = Path(name)
     if tmp.parent != target.parent or not tmp.name.startswith(_PLACING_HEAD.format(target.name)):
         return
+    for path in (tmp, *sorted(target.parent.glob(_DROPPING_HEAD.format(target.name) + "*"))):
+        _drop_if_made(target, path, placed)
+
+
+def _made(path: Path, placed: Any) -> bool:
+    """`path` が記録した実体 `placed`（`st_dev`・`st_ino`）か。"""
     try:
-        found = os.lstat(tmp)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 一時ファイルが無ければ片付けるものも無い
+        found = os.lstat(path)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 無ければ NDF の作ったものも無い
+        return False
+    return placed == [found.st_dev, found.st_ino]
+
+
+def _drop_if_made(target: Path, path: Path, placed: Any) -> None:
+    """`path` が記録した実体なら消す。確かめた実体と消す実体が同じになるよう、どの記録にも無い名前へ移してから確かめ直して消す。
+
+    確かめてから消すまでの間に `path` の名前が利用者のファイルへ置き換わっても、移した先で実体が違うと分かるので消さず、元の名前へ
+    戻す（元の名前が埋まっていれば、移した先の名前のまま残す）。移した先の名前はこの実行だけが知るので、確かめてから消すまでの間に
+    ほかのファイルが置かれることはない。
+    """
+    if not _made(path, placed):
         return
-    if rec.get("placed") == [found.st_dev, found.st_ino]:
-        tmp.unlink(missing_ok=True)
+    aside = target.with_name(f"{_DROPPING_HEAD.format(target.name)}{uuid.uuid4().hex}")
+    try:
+        os.rename(path, aside)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 確かめた後に消えていれば片付けるものも無い
+        return
+    if _made(aside, placed):
+        aside.unlink(missing_ok=True)
+        return
+    try:
+        os.link(aside, path, follow_symlinks=False)  # 名前が空いているときだけ戻し、置かれた利用者のファイルを上書きしない
+    except OSError:  # noqa: NDF401 ファイル: 戻せない利用者のファイルは、移した先の名前のまま残す
+        return
+    aside.unlink()
 
 
 def _replace(target: Path, tmp: Path, base: Optional[str]) -> bool:

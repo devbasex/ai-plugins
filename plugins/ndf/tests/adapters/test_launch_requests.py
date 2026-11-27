@@ -696,6 +696,49 @@ def test_the_placing_copy_is_removed_when_its_identity_cannot_be_recorded(tmp_pa
     assert made and not made[0].exists() and target.read_bytes() == OLD
 
 
+def test_a_failed_identity_write_leaves_no_temporary_record(tmp_path, monkeypatch):
+    """実体を書いた途中の記録の付け替えに失敗しても、記録の一時ファイルと作業場所の一時ファイルを残さない（Value 6）。"""
+    target = _worktree(tmp_path)
+    candidate = _candidate(target)
+    pending = la.reflected_file(target, la.PENDING)
+    replace = os.replace
+    made: list[Path] = []
+
+    def fail_on_the_identity(src, dst):
+        if Path(dst) == pending and "placed" in json.loads(Path(src).read_bytes()):
+            made.append(Path(json.loads(Path(src).read_bytes())["placing"]))
+            raise OSError("付け替えられない")
+        replace(src, dst)
+
+    monkeypatch.setattr(lc.os, "replace", fail_on_the_identity)
+    with pytest.raises(internal.InternalError):
+        _reflect(candidate, lambda: None, SHA)
+    assert made and not made[0].exists() and target.read_bytes() == OLD
+    assert not list(pending.parent.glob(f".{pending.name}.*"))
+
+
+def test_the_cleanup_keeps_a_file_put_under_the_name_after_it_was_checked(tmp_path, monkeypatch):
+    """確かめた後に一時ファイルの名前へ利用者のファイルが置かれたら、消さずに元の名前へ戻す（Value 6）。"""
+    target = _worktree(tmp_path)
+    tmp = target.with_name(".launch.json.placing-0")
+    tmp.write_bytes(b"ndf")
+    found = os.lstat(tmp)
+    made = la._made
+
+    def swapped(path, placed):
+        result = made(path, placed)
+        if path == tmp:  # 確かめた直後に、利用者が同じ名前へ保存する
+            users = target.with_name("users")
+            users.write_bytes(b"mine")
+            os.replace(users, tmp)
+        return result
+
+    monkeypatch.setattr(la, "_made", swapped)
+    la._drop_placing(target, {"placing": str(tmp), "placed": [found.st_dev, found.st_ino]})
+    assert tmp.read_bytes() == b"mine"
+    assert not list(target.parent.glob(".launch.json.dropping-*"))
+
+
 @pytest.mark.parametrize("body", [b'{"version": 1, "mine": 1}\n', b""])
 def test_the_cleanup_keeps_a_file_the_record_names_but_ndf_did_not_make(tmp_path, body):
     """途中の記録が名前を残していても、記録した実体と違うファイルは、利用者の作ったものかもしれないので消さない（Value 6）。
