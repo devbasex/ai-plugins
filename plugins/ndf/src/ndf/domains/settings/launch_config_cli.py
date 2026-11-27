@@ -159,7 +159,11 @@ def experiments_sha(data: bytes) -> Optional[str]:
         raw = json.loads(data)
     except ValueError:  # noqa: NDF401 利用者の入力: 読めない候補は、示した内容と一致しないとして拒む
         return None
-    return launch_records.canonical_sha(raw["experiments"] if isinstance(raw, dict) and "experiments" in raw else {}) if isinstance(raw, dict) else None
+    return (
+        launch_records.canonical_sha(raw["experiments"] if isinstance(raw, dict) and "experiments" in raw else {})
+        if isinstance(raw, dict)
+        else None
+    )
 
 
 def asked_experiments(request_id: str) -> Optional[str]:
@@ -413,7 +417,9 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
     if t.sha256 != a.sha256:
         return _refused_config(f"示した内容（{a.sha256[:12]}…）と今の内容が違う。show で示し直して承認を取り直す")
     if a.request is not None and cand is not None and asked_experiments(a.request) != experiments_sha(data):
-        return _refused_config("質問で示したモデルと effort の選択肢（experiments）と、反映する候補の内容が違う。show で示し直して承認を取り直す")
+        return _refused_config(
+            "質問で示したモデルと effort の選択肢（experiments）と、反映する候補の内容が違う。show で示し直して承認を取り直す"
+        )
     needed = _widens(t) and not la.is_approved(repo, t.sha256)
     # 承認の行を足す条件（起動の許可）と、反映を許す条件（今回の書き換えへの同意）は別に判定する。書き換えは毎回人に確かめる
     asks = needed or cand is not None
