@@ -89,12 +89,24 @@ def _local_sections(g: git.Git, base: str, wt: Path) -> tuple[list[str], Optiona
         return [], f"変わった文書のセクションを手元のオブジェクトだけで読めないので、全差分を範囲にした: {exc}"
 
 
+def _implementation(
+    g: git.Git, data: Mapping[str, Any], seats: tuple[str, ...], current: changes.Range
+) -> tuple[scope_decide.Scope, list[str]]:
+    """実装の PR の範囲と注意（`run` と同じ `round_scope.read_since`。#3780）。"""
+    since = round_scope.read_since(g, data, scope_decide.Basis(reviewers=seats), current)
+    if since is not None and not since.comparable:
+        return scope_decide.Scope(scope_decide.FULL, None, ()), [round_scope.UNCOMPARABLE]
+    prev = None if since is None else since.previous.head
+    return scope_decide.review_scope(False, len(store.list_of(data, store.ROUNDS)) + 1, prev, (), ()), []
+
+
 def decide(
     wt: Path, base: str, every_section: Callable[[], bool], data: Mapping[str, Any], resolved: ScopeSettings
 ) -> tuple[scope_decide.Scope, list[str]]:
     """次のラウンドの範囲と注意を、手元のオブジェクトと状態の記録 `data` から決める（リモートから取得しない）。
 
-    `every_section` は、範囲がセクションの読み取りで全差分に決まらないときだけ呼ぶ（呼ぶとルートのテンプレートを読んで検証する）。
+    `every_section`（設計の PR か）は、範囲がセクションの読み取りで全差分に決まらないときだけ呼ぶ（呼ぶとルートのテンプレートを
+    読んで検証する）。実装の PR の範囲は MVV で変わらないので、MVV は設計の PR のときだけ読む（#3780）。
     """
     rounds = store.list_of(data, store.ROUNDS)
     g = git.Git.offline(wt)
@@ -106,10 +118,12 @@ def decide(
     if unread is not None:
         # 全差分に決まっているので、範囲を変えない MVV を読まない
         return scope_decide.Scope(scope_decide.FULL, None, ()), [unread]
+    if not every_section():
+        return _implementation(g, data, resolved.seats.names, changes.Range(merge_base, "HEAD"))
     now, unsure = _local_mvv(wt, based.mvv_ref)
     unit = scope_decide.unit_id(resolved.unit)
     basis = scope_decide.Basis(merge_base, resolved.seats.names, resolved.settings.focus, now, unit=unit)
     prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_of(data, basis.mvv)
-    found = scope_decide.review_scope(every_section(), len(rounds) + 1, prev, sections, reviewed)
+    found = scope_decide.review_scope(True, len(rounds) + 1, prev, sections, reviewed)
     got = round_scope.descended(g, found, "HEAD")
     return got, unsure if rounds else []

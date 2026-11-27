@@ -133,7 +133,7 @@ def _run_with(capsys, monkeypatch, fake: Fake, wt: Path, base: str = "origin/mai
 
 def test_converged_review_runs_again_when_the_merge_base_moves(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """PR 3944 の r1-10・r2-1: 比較基点は `--base` の名前でなく merge-base の SHA で比べる。同じ名前でも参照先が動いて
-    merge-base が変われば、同じ head でも前回の収束を返さず全差分から読み直す。"""
+    merge-base が変われば、同じ head でも前回の収束を返さず回し直す。実装の PR の範囲は前の head からの差分である（#3780）。"""
     state_dir = tmp_path / "st"
     sh(wt, "push", "-q", "origin", "origin/main:refs/heads/stack")
     _run_with(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt, "stack")
@@ -146,7 +146,7 @@ def test_converged_review_runs_again_when_the_merge_base_moves(wt: Path, tmp_pat
     assert sorted(moved.calls) == ["codex", "kiro"]
     rounds = _state(state_dir)["rounds"]
     assert rounds[0]["base"] != rounds[1]["base"] == sh(wt, "rev-parse", "HEAD").strip()
-    assert [r["scope"] for r in rounds] == ["full", "full"]
+    assert [r["scope"] for r in rounds] == ["full", "since"]
 
 
 def test_reviewer_who_did_not_read_the_full_diff_reads_it_again(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

@@ -25,7 +25,8 @@ def _with_merge_base(data, sha: str):
     （`review-scope` も今回の相手役で決める。PR 3944 の r3-4）。"""
     if isinstance(data, dict) and isinstance(data.get("rounds"), list):
         seats = list(participants.assign())
-        rounds = [{"reviewers": seats, **r, "base": sha} if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
+        rounds = [{"reviewers": seats, **r} if isinstance(r, dict) else r for r in data["rounds"]]
+        rounds = [{**r, "base": sha} if isinstance(r, dict) and r.get("base") == MB else r for r in rounds]
         return {**data, "rounds": rounds}
     return data
 
@@ -94,7 +95,8 @@ def scope_run(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
             data = _with_merge_base(data, sha)
             if isinstance(data, dict) and isinstance(data.get("rounds"), list):
                 data["rounds"] = [
-                    {**r, "head": heads.get(r.get("head"), r.get("head"))} if isinstance(r, dict) else r for r in data["rounds"]
+                    {k: heads.get(v, v) if k in ("head", "base") else v for k, v in r.items()} if isinstance(r, dict) else r
+                    for r in data["rounds"]
                 ]
             store.write_object(path, data)
         return run_cli(
@@ -128,12 +130,19 @@ def test_scope_without_a_state_file_is_round_one_full(scope_run) -> None:
             "round 2 の範囲は since（詳細レビューを通らないセクション 0 件）",
             _scope(scope_decide.SINCE, "abc", []),
         ),
-        # 前のラウンドの比較基点（merge-base の SHA）が違う（記録が無い）なら PR の全差分が変わり得るので全差分（PR 3944 の r1-10）
+        # #3780: 比較基点が違っても、実装の PR は前の head からの差分を見る
         (
-            {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": "origin/develop"}]},
+            {"pr": 8, "rounds": [{"round": 1, "head": "def", "base": "def"}]},
+            "round 2 の範囲は since（詳細レビューを通らないセクション 0 件）",
+            _scope(scope_decide.SINCE, "def", []),
+        ),
+        # 比較基点のコミットが手元に無く、読んでいない変更を探せなければ全差分
+        (
+            {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": "0" * 40}]},
             "round 2 の範囲は full（詳細レビューを通らないセクション 0 件）",
             _scope(scope_decide.FULL, None, []),
         ),
+        # 比較基点の記録が無ければ起点にしない
         (
             {"pr": 8, "rounds": [{"round": 1, "head": "abc"}]},
             "round 2 の範囲は full（詳細レビューを通らないセクション 0 件）",
@@ -154,6 +163,28 @@ def test_scope_reads_rounds_of_the_state_file(scope_run, data: dict, summary: st
     code, got = scope_run("check", data)
     item = {**item, "base": scope_run.heads.get(item["base"], item["base"])}
     assert (code, got["summary"], got["items"]) == (0, summary, [item])
+
+
+def test_scope_of_an_implementation_pr_says_why_it_could_not_compare_the_bases(scope_run) -> None:
+    """#3780: 比較基点が変わって読んでいない変更を探せないときは、理由を注意に載せて全差分を返す。"""
+    code, got = scope_run("check", {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": "0" * 40}]})
+    assert (code, got["items"][0]["scope"]) == (0, scope_decide.FULL)
+    [warning] = got["warnings"]
+    assert "全差分" in warning
+
+
+def test_scope_of_a_design_pr_keeps_the_full_diff_when_the_base_changed(scope_run) -> None:
+    """#3780: 設計の PR の起点の条件は変えない（比較基点が違えば全差分）。"""
+    rounds = [{"round": 1, "head": "def", "base": "def"}]
+    got = scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})[1]
+    assert got["items"] == [_scope(scope_decide.FULL, None, [])]
+
+
+def test_scope_of_an_implementation_pr_does_not_read_the_mvv(scope_run, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#3780: 実装の PR の範囲は MVV で変わらないので、`review-scope` は MVV を読まない。"""
+    monkeypatch.setattr(mvv, "identity_at", lambda *a: pytest.fail("範囲を変えない MVV を読んだ"))
+    got = scope_run("check", {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": MB}]})[1]
+    assert got["items"][0]["scope"] == scope_decide.SINCE and "warnings" not in got
 
 
 def test_scope_of_a_design_pr_treats_a_broken_reviewed_list_as_empty(scope_run) -> None:

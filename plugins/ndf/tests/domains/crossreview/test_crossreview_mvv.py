@@ -464,13 +464,13 @@ def test_review_scope_compares_with_the_fetched_base(repos: Repos, wt: Path, tmp
 
 
 def test_review_scope_is_full_when_the_mvv_cannot_be_read(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """ベースの MVV の本文が承認された内容と違えば、前回の範囲を使わずに全差分を返し、理由を注意に載せる。"""
+    """ベースの MVV の本文が承認された内容と違えば、設計の PR は前回の範囲を使わずに全差分を返し、理由を注意に載せる。"""
     _push_base(repos)
     fake = _clean(tmp_path)
-    _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    _run(capsys, monkeypatch, fake, wt, "--base", "main", "--purpose", "design")
     _push_base(repos, 12, text=BODY + "勝手に足した\n", approved=BODY)
     sh(wt, "fetch", "-q", "origin")
-    got = _scope_of(capsys, fake, wt)
+    got = _scope_of(capsys, fake, wt, "--purpose", "design")
     assert got["items"][0]["scope"] == "full"
     [warning] = got["warnings"]
     assert "全差分" in warning and "承認の記録と合わない" in warning
@@ -480,23 +480,23 @@ def test_review_scope_is_full_when_the_mvv_cannot_be_read(repos: Repos, wt: Path
 def test_review_scope_of_a_commit_base_reads_the_branch_run_recorded(
     form: str, repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch
 ) -> None:
-    """`--base` がコミットなら、`review-scope` は `run` が記録した PR のマージ先のブランチの MVV を見る。記録が無ければ、
-    渡されたコミットの MVV で代用せずに全差分を返す。"""
+    """`--base` がコミットなら、設計の PR の `review-scope` は `run` が記録した PR のマージ先のブランチの MVV を見る。記録が
+    無ければ、渡されたコミットの MVV で代用せずに全差分を返す。"""
     gathered = _gathered_in_sprint_branch(repos)
     sh(wt, "fetch", "-q", "origin")
     base = gathered if form == "full" else gathered[:10]
     fake = _clean(tmp_path)
-    _run(capsys, monkeypatch, fake, wt, "--base", base)
+    _run(capsys, monkeypatch, fake, wt, "--base", base, "--purpose", "design")
     assert _state(fake.state_dir)["rounds"][0]["mvv"] == {"id": _identity(11), "mvv_branch": "main"}
-    assert _scope_of(capsys, fake, wt, "--base", base)["items"][0]["scope"] == "since"
+    assert _scope_of(capsys, fake, wt, "--base", base, "--purpose", "design")["items"][0]["scope"] == "since"
     path = store.state_pr(fake.state_dir, PR).path
     data = store.read_object(path)
     del data["rounds"][0]["mvv"]["mvv_branch"]
     store.write_object(path, data)
-    got = _scope_of(capsys, fake, wt, "--base", base)
+    got = _scope_of(capsys, fake, wt, "--base", base, "--purpose", "design")
     assert got["items"][0]["scope"] == "full" and "ブランチ" in got["warnings"][0]
     data["rounds"][0]["mvv"]["mvv_branch"] = "main"
     store.write_object(path, data)
     _push_base(repos, 12, text=BODY + "3. **三つ目**\n")
     sh(wt, "fetch", "-q", "origin")
-    assert _scope_of(capsys, fake, wt, "--base", base)["items"][0]["scope"] == "full"
+    assert _scope_of(capsys, fake, wt, "--base", base, "--purpose", "design")["items"][0]["scope"] == "full"

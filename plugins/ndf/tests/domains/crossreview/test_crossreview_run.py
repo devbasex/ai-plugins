@@ -835,22 +835,6 @@ def test_pr_settings_hidden_by_an_unsent_commit_are_warned(repos: Repos, wt: Pat
     assert (code, got["status"]) == (0, "ok") and any("review.json" in w for w in got["warnings"])
 
 
-def test_changed_focus_reviews_the_full_diff_again(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """PR 3944 の r4-3: 収束した PR を、重点を足して同じ head で打ち直すと、前回の収束を返さず全差分を足した重点で読ませる。"""
-    state_dir = tmp_path / "st"
-    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
-    (repos.main / ".ndf").mkdir(exist_ok=True)
-    (repos.main / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["足した重点"]}), encoding="utf-8")
-    fake = Recording(state_dir, {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt)
-    assert (code, got["status"]) == (0, "ok") and fake.prompts
-    assert all(_focus_line("足した重点") in p and "範囲: full" in p for _, _, p in fake.prompts)
-    assert _state(state_dir)["rounds"][-1]["focus"] == ["足した重点"]
-    again = Recording(state_dir, {"codex": [[]], "kiro": [[]]})
-    _run(capsys, monkeypatch, again, wt)
-    assert again.prompts == []
-
-
 def test_unresolved_policy_location_stops_before_any_launch(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """PR 3944 の r2-7: ランタイムの設定の保存先（メインディレクトリ）を決められなければ、設定が無いときと分けて、どの担当も
     起動する前に precondition で止める。"""
