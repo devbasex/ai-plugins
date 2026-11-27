@@ -507,9 +507,13 @@ class Ledger:
     rows: list[dict[str, Any]]
 
     def append(self, row: Mapping[str, Any]) -> dict[str, Any]:
-        """行の形を確かめて、行の日時の月のファイルへ足す（書きかけの末尾は閉じてから足す）。形が違えば `InternalError`。"""
+        """行の形を確かめて、行の日時の月のファイルへ足す。形が違えば `InternalError`。
+
+        ロックを持っていても、末尾を確かめずに毎回、書きかけを閉じるバイト列と行を 1 回の `write` で書く（`locked=False`）。同じファイルへは
+        `append_unread` がロックを取らずに書くので、末尾を確かめてから書くまでの間にその書きかけが入ると、この行がつながって読まれなくなる。
+        """
         out = internal.write_record("experiment", row)
-        launch_records.write_row(_month_file(self.root, out["at"][:7]), out)
+        launch_records.write_row(_month_file(self.root, out["at"][:7]), out, locked=False)
         self.rows.append(out)
         return out
 
@@ -549,8 +553,8 @@ def append_unread(row: Mapping[str, Any], root: Optional[Path] = None) -> bool:
 
     割り付けの判断を伴わない追記（拒否と基準の組への切り替え）が使う。`append_row` は割り付けと同じロックを取り、当月の記録を先頭から
     読むので、並んだ割り付けがロックを持つ間は待つ。切り替えの判断と起動し直しの期限をその待ちに使わせず、読む費用も払わないためである。
-    ロックを持つ書き手と混ざっても行が壊れないように、hook の回答と同じく、毎回、行の前に書きかけを閉じるバイト列を付けて 1 回の
-    `write` で書く（`launch_records.write_row` の `locked=False`）。
+    ほかの書き手と混ざっても行が壊れないように、hook の回答と同じく、毎回、行の前に書きかけを閉じるバイト列を付けて 1 回の
+    `write` で書く（`launch_records.write_row` の `locked=False`）。ロックの中の追記（`Ledger.append`）も同じ書き方をする。
     """
     try:
         out = internal.write_record("experiment", row)

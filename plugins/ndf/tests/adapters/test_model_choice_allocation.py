@@ -376,6 +376,15 @@ def test_read_rows_skips_broken_lines_and_append_closes_a_torn_end(tmp_path, sto
     assert [r["unit"] for r in rows] == ["u"]
 
 
+def test_append_in_the_lock_always_closes_the_end_in_the_same_write(store, clock):
+    # ロックを取らない書き手が、末尾を確かめた後に書きかけを残しても、ロックの中の行がそれにつながらない
+    row = {"kind": "halted", "at": _at(NOW), "unit": "u", **SCOPE, "assign_id": None, "reason": "manual"}
+    _write(store, row)
+    _write(store, {**row, "unit": "v"})
+    data = (store / "launch-experiments-2026-11.jsonl").read_bytes()
+    assert data.count(mc.launch_records.TORN_END + b'{"') == 2
+
+
 def test_append_refuses_a_row_of_the_wrong_shape(store, clock):
     with pytest.raises(Exception, match="experiment"):
         _write(store, {"kind": "halted", "at": _at(NOW), "unit": "u", **SCOPE, "reason": "manual", "extra": 1})
