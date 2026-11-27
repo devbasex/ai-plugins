@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from filelock import FileLock
 
 from ndf.adapters.git import GitError
 from ndf.adapters.github import Authored, GitHubError
@@ -627,7 +628,9 @@ def test_shared_prefix_keeps_a_file_it_did_not_write_and_sweeps_its_own_leftover
     # 書く側が作って中断で残した一時ファイルは、空・書き終えたもの・途中まで書かれたもののどれも消す
     leftovers = []
     for text in ("", whole, whole[:5]):
-        fd, path = record_unversioned._open_tmp(foreign, ours)
+        opened = record_unversioned._open_tmp(share, PROD)
+        assert opened is not None
+        fd, path = opened
         with os.fdopen(fd, "w", encoding="utf-8") as out:
             out.write(text)
         leftovers.append(path)
@@ -650,6 +653,30 @@ def test_shared_prefix_uses_its_own_result_when_the_temporary_directory_is_block
     (share / "tmp").write_text("利用者のメモ", encoding="utf-8")
     assert record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: made) == made
     assert not (share / f"{PROD}.json").exists() and (share / "tmp").read_text(encoding="utf-8") == "利用者のメモ"
+
+
+def test_shared_prefix_releases_the_lock_before_computing_when_it_cannot_create_a_temporary_file(monkeypatch, tmp_path: Path) -> None:
+    share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
+    made = record_unversioned.Prefix(COMMIT, record_decide.Push(BEFORE, AFTER), None, frozenset({"a"}), frozenset())
+    (share / "tmp").mkdir(parents=True)
+    real = os.open
+
+    def denied(path: Any, *args: Any, **kwargs: Any) -> int:
+        if str(path).endswith(".ndf-tmp"):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", denied)
+    locked: list[bool] = []
+
+    def compute() -> record_unversioned.Prefix:
+        # 前処理の間はロックを外しているので、ほかの呼び出しがすぐに取れる
+        with FileLock(str(share / f"{PROD}.json") + ".lock", timeout=0):
+            locked.append(False)
+        return made
+
+    assert record_unversioned.shared_prefix(share, PROD, COMMIT, compute) == made
+    assert locked == [False] and not (share / f"{PROD}.json").exists() and not list((share / "tmp").iterdir())
 
 
 def test_sweep_shares_skips_a_temporary_directory_it_cannot_list(monkeypatch, tmp_path: Path) -> None:
