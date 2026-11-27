@@ -98,7 +98,7 @@ stateDiagram-v2
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | スプリントのステートマシン | 承認ゲートを持つ工程が終了になるのは、「有効な承認」（定義は「処理の流れ」）があるときだけ。設計承認ゲートでは、承認した HEAD がマージ済みであることも要る。デプロイの工程を手の経路で終えるときは、PR に残ったリリース記録で、出力のバージョンが本番へ出たと確かめられることも要る（「リリース済みの確かめ」）。この改修より前の記録は除く | 終了を書かない |
+| I1 | スプリントのステートマシン | 承認ゲートを持つ工程が終了になるのは、「有効な承認」（定義は「処理の流れ」）があるときだけ。設計承認ゲートでは、承認した HEAD がマージ済みであることも要る。デプロイの工程を手の経路で終えるときは、リリース記録と CD の結果の確かめ（「リリース済みの確かめ」）か、リリースしなかった記録（「リリースしないで終える」）も要る。この改修より前の記録は除く | 終了を書かない |
 | I2 | 同上 | 開き直しより前のステップの結果・出力・承認は、次の手の判断に使わない。ただし変更要求と却下の回答は、開き直しの後も、MVV 判定で承認を省かないための判断に使う（決定 4） | — |
 | I3 | 同上 | 事象は追記だけ | 書く関数が追記しか持たない |
 | I4 | 同上 | 工程を流す作業が動いている間は開き直さない | 操作を断る |
@@ -130,7 +130,7 @@ stateDiagram-v2
 | 畳み込み（ステップの進みと文脈） | `reopened` で進みを捨てて世代を上げる。手で終えた回答待ちを表す。開き直しより前の出力を文脈から外す |
 | 承認の判定（新設） | 工程の事象の列と今の対象から「有効な承認があるか」と「承認でない回答が残っているか」を返す純粋な処理 |
 | 開き直し（新設） | 対象の工程と後ろの工程を決め、`reopened` を書き、取り消されない操作の一覧を作る |
-| 手で終える操作（`finish`） | 承認ゲートの有無と有効な承認を見て、終了か回答待ちかを書き分ける。設計の回答待ちでは MVV 判定を打つ。デプロイではリリース記録を確かめる。承認の証跡は書かない |
+| 手で終える操作（`finish`） | 承認ゲートの有無と有効な承認を見て、終了か回答待ちかを書き分ける。設計の回答待ちでは MVV 判定を打つ。デプロイではリリース記録と CD の結果を確かめる。承認の証跡は書かない |
 | 質問の作成（`ndf progress question`、新設） | 待っていない承認ゲートの工程の質問・承認資料・回答のコマンドを作る |
 | 回答の記録（`ndf answer`） | 待っている質問に加え、上で作った質問への回答を受ける。リリースの後の回答は追認として記録する |
 | 依頼の有効性の問い合わせ（`ndf progress request-status`、新設） | 外のオーガナイザーが持つ依頼の ID が、今の質問のものかを答える |
@@ -179,7 +179,7 @@ graph TD
 
 | コマンド | 変わる中身 |
 | --- | --- |
-| `ndf progress finish <ID> <工程> --output <JSON> --reason <理由> [--record-pr <番号>]` | `--record-pr` はデプロイの工程だけで受ける（「リリース済みの確かめ」）。承認ゲートを持つ工程で有効な承認が無ければ、結果は `ok` で「回答を待つ」と返し、`next` に `ndf progress next` を載せる。設計の工程で有効な承認があっても承認した PR が未マージなら、何も書かずに断る |
+| `ndf progress finish <ID> <工程> --output <JSON> --reason <理由> [--record-pr <番号>] [--no-release]` | `--record-pr` と `--no-release` はデプロイの工程だけで受ける（「リリース済みの確かめ」「リリースしないで終える」）。承認ゲートを持つ工程で有効な承認が無ければ、結果は `ok` で「回答を待つ」と返し、`next` に `ndf progress next` を載せる。設計の工程で有効な承認があっても承認した PR が未マージなら、何も書かずに断る |
 | `ndf progress retry <ID> <工程> --reason <理由> [--later reopen\|keep]` | 終了と手で終えた回答待ちの工程では `--later` が必須。失敗の工程では受けない |
 | `ndf progress question <ID> <工程> [--pr <番号>]` | 新設。結果は `gate` で、回答ごとの `ndf answer` を返す。回答待ちの工程には今の質問を返す。設計承認ゲートでは対象の PR が必要である。文脈に対象の PR が無いときは `--pr` で指定し、文脈に対象があるときは省ける。文脈の対象と違う番号は断る。ほかの承認ゲートは文脈の `pr` だけを対象にし、`--pr` を受けない |
 | `ndf answer <ID> --gate <質問の id> ...` | 引数は変わらない。`question` が作った質問の id を受ける |
@@ -199,7 +199,7 @@ graph TD
 
 | 事象 | 書ける状態 | 後の状態 | payload |
 | --- | --- | --- | --- |
-| `finish_held`（新設） | 未着手・失敗 | 実行中 | 承認ゲートのステップ、出力のファイル、MVV 判定を打ったときはその結果（決定 7） |
+| `finish_held`（新設） | 未着手・失敗 | 実行中 | 承認ゲートのステップ、出力のファイル、MVV 判定を打ったときはその結果（決定 7）。デプロイでは `record_pr`・`no_release`・`cd_result`（「リリース済みの確かめ」） |
 | `reopened`（新設） | 未着手・実行中・失敗・終了 | 未着手 | きっかけ（`retry` か回答）、変更要求の指摘 |
 | `answered` | 未着手・実行中・失敗・終了（未着手と終了を足す） | 変えない | 待っていない質問への回答と、開き直しを起こす回答には `late: true` |
 | `failed` | 実行中・未着手（未着手を足す） | 失敗 | 今と同じ |
@@ -278,12 +278,21 @@ graph TD
 
 **依頼が今も有効かの確かめ。** 取り下げた依頼を、ファイルの有無で見分けることはできない。中身が違うファイルと、この改修より前に出したファイルは残るためである。外のオーガナイザーが依頼を読み込んだ後に取り下げることもある。そこで、NDF が依頼の ID の有効性を答えるコマンドを足し、外のオーガナイザーとの取り決め（`plugins/ndf/contracts/`）に次を書く。
 
-- 外のオーガナイザーは、依頼を利用者へ示す前と、回答を書く前に、`ndf progress request-status <依頼の sprint_state> <依頼の ID> --cwd <レーンのリポジトリ>` を打つ
-- 結果が `valid: true` でなければ、依頼を捨て、利用者へ承認を求めない。コマンドが失敗したときは、示さずに打ち直す
+- 外のオーガナイザーは、依頼を利用者へ示す前に 1 回、`ndf progress request-status <依頼の sprint_state> <依頼の ID> --cwd <レーンのリポジトリ>` を打つ
+- 結果が `valid: true` でなければ、依頼を捨て、利用者へ承認を求めない。コマンドが失敗したときは、示さずに打ち直す。回答を書く前には打たない
 - NDF が `valid: true` を返すのは、そのステートマシンが今回答を待つ質問の、依頼の ID と一致するときだけである。ステートマシンの記録だけを読み、GitHub は読まない
-- NDF は、取り下げた依頼の ID への回答を読まない。確かめた直後に取り下げられて回答が書かれても、承認にはならない
+- NDF は、取り下げた依頼の ID への回答を読まない。確かめた後に取り下げられて回答が書かれても、承認にはならない
 
 並行開発の計画へ出したリクエストは、計画の事象 `request_closed` で閉じるので、この確かめは要らない。
+
+確かめを表示前の 1 回にした理由は次のとおりである。外部の承認 1 件につき、CLI の起動が 1 回増える。
+
+| 案 | 増える起動 | 採否と理由 |
+| --- | --- | --- |
+| 表示前に 1 回確かめる。回答の受理は、NDF の今の ID の照合に任せる | 1 件につき 1 回 | 採る。利用者が、開き直し前の依頼に回答するために手を止めることを防げる |
+| 確かめず、NDF の受理時の照合だけに任せる | 0 回 | 採らない。誤った承認は防げるが、利用者が古い依頼に回答した後で、同じことをもう一度聞かれる |
+| 表示前と回答を書く前の 2 回確かめる | 1 件につき 2 回 | 採らない。回答の前の確かめで防げる誤りは、受理時の照合が防ぐ。表示の後に取り下げられた場合は、利用者の回答の手間がもう掛かっている |
+| NDF が取り下げをファイルで通知し、表示前にそれを読む | 0 回 | 採らない。発行先の記録が無い依頼は、通知を置く先が分からない。通知のファイルの後片付けも要る |
 
 **進み具合の表の再同期。** 本文の更新に失敗しても、回答を記録し直さずに直せるようにする。`ndf progress resync <ID>`（今あるコマンド）が、確定済みの記録から課題と PR の表を書き直す。開き直しで文脈の `pr` が外れた場合、PR の欄の宛先は、開き直しより前に最後に記録した `pr` にする。同じ冪等のキーの送り直しでは書き直さない。表が正しいときも、送り直しのたびに本文の読み取りが増えるためである。
 
@@ -396,7 +405,7 @@ MVV 判定で省くときの順序は次のとおりである。
 | --- | --- | --- |
 | 設計 | 承認の記録（人の回答か、`next` が書く `service:mvv` の承認）→ conductor が承認した HEAD の設計 PR をマージする（`ndf answer head` の値を `--expect-head` へ渡す）→ `next` | `next` と `finish` は、承認した HEAD がマージ済みでなければ終了を書かない |
 | 設計（承認した HEAD がマージ済み。差分が無く前の設計 PR を承認した場合など） | 承認の記録 → `next`。マージは打たない | `next` は、承認した HEAD がマージ済みと確かめて終了を書き、マージの案内を返さない |
-| リリース | `question` → 承認の記録 → conductor がリリースする → 工程の出力を添えて `finish` | `finish` は、リリース記録で本番へ出たと確かめられなければ断る（「リリース済みの確かめ」） |
+| リリース | `question` → 承認の記録 → conductor がリリースする → 工程の出力を添えて `finish` | `finish` は、リリース記録と CD の結果が条件に合わなければ断る（「リリース済みの確かめ」） |
 
 **リリースには、実行の前の承認が要る。** これは今の決まりで、この改修は変えない。承認の無いままリリースする経路は、上の表にも、ほかのどこにも足さない。
 
@@ -404,7 +413,7 @@ MVV 判定で省くときの順序は次のとおりである。
 
 手の経路では、決まりに反して、または承認の対象が変わった後にリリースされ、その後に `finish` が打たれることがある。起きたリリースは取り消せないので、`finish` は終了を書かずに回答待ち（`finish_held`）にし、利用者の回答を求める。この回答は事前の承認ではなく追認である。承認済みのリリースと取り違えないように、次のようにする。
 
-- デプロイの工程の回答待ち（手で終えた）への回答は、`answered` の payload に `after_release: true` を持つ。`ndf progress show` と `ndf answer list` は、この回答を「追認」と表示する
+- リリースを済ませたデプロイの工程の回答待ち（手で終えた。`no_release` でないもの）への回答は、`answered` の payload に `after_release: true` を持つ。`ndf progress show` と `ndf answer list` は、この回答を「追認」と表示する
 - 質問と承認資料には、「リリースは実行済みで、この回答は事前の承認ではない」と書く
 - 追認の承認では、PR にマージの承認の証跡を書かない。後のマージを通す根拠にしないためである。承認しない回答の却下の証跡は、今と同じく書く
 - リリースのリクエストを、計画にも外のオーガナイザーにも出さない。受け取った側がもう一度リリースしないためである
@@ -415,21 +424,64 @@ NDF が前後を見分けられるのは、記録の順だけである。承認�
 
 #### リリース済みの確かめ
 
-工程の出力の `product_version`（出したバージョン）と `delivery`（届けた先）は、書いた側の申告で、リリースが成功した証拠ではない。そこで、手の経路でデプロイの工程に `finished` か `finish_held` を書く前に、`finish` と `next` は PR のリリース記録を読む。今のリリースの手順は、どの形でもリリースの後にこの記録を置き、反映に失敗したら `段階: 反映失敗` を書く（`release` の Skill）。
+工程の出力の `product_version`（出したバージョン）と `delivery`（届けた先）は、書いた側の申告で、リリースが成功した証拠ではない。そこで、手の経路でデプロイの工程に `finished` か `finish_held` を書く前に、`finish` と `next` は、PR のリリース記録と CD の実行の結果を確かめる。1 つでも条件に合わないか、読めなければ、`finished` も `finish_held` も書かずに断り、足りないものと打ち直し方を返す。承認の有無は問わない。リリースしない場合は、次の「リリースしないで終える」に従う。
 
-| 項目 | 決め方 |
+**読む PR。** `finish --record-pr <番号>` で指定する。省けば文脈の `release_pr`、無ければ文脈の `pr` を読む。`finish` は、実際に読んだ PR の番号を `finish_held`（終了まで進むときは `finished`）の payload の `record_pr` に残す。回答待ちの後の `next` は、文脈から決め直さず、この番号を読む。
+
+**対象の記録を選ぶ。** 1 つの PR には、複数のリリース単位（`unit`。単位ごとに別のバージョンを持つ）の記録が並ぶことがある。そのため、PR の最後の記録を 1 件読むのではなく、先に対象で絞る。
+
+1. 信用する書き手（今の `ndf release-steps records` と同じ）の記録を読む。release の workflow が書いた記録と、手で置いた `## リリース記録` の両方が対象である
+2. 文脈の `pr` を含み、バージョンが出力の `product_version` と同じ記録だけを残す。workflow の記録は `included` か `release`、手で置いた記録は `スプリント:` の行で `pr` を見る。手で置いた記録のバージョンの取り出し方は、[context.schema.json](../plugins/ndf/contracts/workflow/context.schema.json) の `product_version` の説明に合わせる
+3. 残った記録をリリース単位ごとに分け、それぞれの最新の記録を対象にする。単位の名前を持たない記録（手で置いた記録と、単位が 1 つのリリースの記録）は、まとめて 1 つの組にする。組が 2 つ以上残る場合は、すべてが下の条件を満たすことを求める
+
+**記録の条件。**
+
+| 対象の記録 | `finish` の扱い |
 | --- | --- |
-| 読む PR | `finish --record-pr <番号>`。省けば文脈の `release_pr`、無ければ文脈の `pr` |
-| 読む記録 | 信用する書き手（今の `ndf release-steps records` と同じ）の最後のリリース記録。workflow の `record` が書いた記録と、手で置いた `## リリース記録` の両方を読む |
-| バージョンの照合 | 記録のバージョンが出力の `product_version` と同じ。手で置いた記録の取り出し方は、[context.schema.json](../plugins/ndf/contracts/workflow/context.schema.json) の `product_version` の説明に合わせる |
-| 対象の照合 | 記録が文脈の `pr` を含む。workflow の記録は `included` か `release`、手で置いた記録は `スプリント:` の行で見る |
-| 段階 | 手で置いた記録は `段階: 本番` であること。`反映失敗`・`デプロイなし`・`検証` は確かめられない扱いにする |
+| 無い | 断る |
+| workflow が書いた記録 | 本番ブランチへマージした記録として受け、下の CD の結果を確かめる |
+| 手で置いた記録で `段階: 本番` | 受け、下の CD の結果を確かめる |
+| 手で置いた記録で `段階: 反映失敗`・`検証` | 断る |
 
-1 つでも合わないか、記録を読めなければ、何も書かずに断り、足りないものと打ち直し方を返す。承認の有無は問わない。そのため、手で終えた回答待ちのデプロイの工程は、本番への記録があるものだけである。CD の結果が未確定の場合は、今の決まりのまま扱う。記録の段階は本番で、リリース後テストが本番の状態を直接確かめる。
+**CD の結果の条件。** workflow の記録が示すのは本番ブランチへのマージまでで、その後の公開は失敗しうる。そこで、プロジェクトの宣言が CD を指す場合は、CD の実行の結果も読む。
 
-増える費用は、手の経路のデプロイの工程の `finish` と、終了を書く `next` の 1 回につき、記録を持つ PR の本文とコメントの読み取りが 1 回である。
+- 読む workflow は、本番ブランチの `.ndf/project.json` の `branch_strategy.release.deliveries` のうち、`target` が出力の `delivery.target` と同じ行の `result.workflow` である。`deliveries` が無ければ `release.cd.workflow` を使う。どちらも無ければ CD は読まず、記録の条件だけで決める
+- 読む実行は、本番ブランチで、リリースの PR のマージコミットに対するものである。リリースの PR は、workflow の記録では `release`、手で置いた記録では読んだ PR である
+- 同じコミットの実行のうち、`push` で起きたものを数える。無ければ `workflow_dispatch` で起きたものを数える。ほかのイベントの実行は、公開の結果を表さないので数えない。数えた中の最新の実行を使う
 
-承認を記録しただけで `finish` していないデプロイの工程は、終了にならない。工程が未着手のまま `next` を打つと、`next` は後ろの工程へ進まず、自動の流れでデプロイの工程を始める。有効な承認があれば、リリースも自動の流れが行う。
+| CD の実行 | 手で置いた記録の `CD の結果:` | `finish` の扱い |
+| --- | --- | --- |
+| 成功で完了 | 問わない | 受ける |
+| 成功以外で完了 | 問わない | 断る |
+| 実行が見つからない・完了していない・マージコミットが分からない | `未確定` | 受ける。payload に `cd_result: unknown` を残し、結果の `warnings` に載せる |
+| 同上 | それ以外か、記録が無い（workflow の記録だけ） | 断る。CD の完了を待って打ち直すか、未確定の記録を置く |
+
+「未確定を受ける」のは、今の `release` の Skill の手順に合わせるためである。この手順は、待ちの上限に当たったら記録に未確定と書き、次のリリース後テストで本番の状態を直接確かめる。ここで断ると、実行が見つからないプロジェクトはデプロイの工程を終えられない。終了にしても CD が成功したとは記録せず、`cd_result: unknown` として区別する。
+
+**回答待ちの後の確かめ直し。** `next` は終了を書く直前に、同じ条件で確かめ直す。待っている間に `反映失敗` の記録が足されることがあるためである。
+
+**読み取りの回数。** 同じ呼び出しの中では、取得した内容を使い回す。
+
+| 読むもの | 使い回し | 1 回の呼び出しで増える回数 |
+| --- | --- | --- |
+| 記録を持つ PR の本文と書き手 | 承認対象の確かめで同じ PR を読んでいれば、その応答を使う | 同じ PR なら 0、別の PR なら 1 |
+| その PR のコメント | 同じ呼び出しで同じ PR のコメントを読む処理があれば共有する | 1（ページ分け） |
+| リリースの PR のマージコミット | リリースの PR が、記録を持つ PR か承認対象の PR と同じなら、その応答を使う | 0 か 1 |
+| CD の実行の一覧 | CD を読む場合だけ | 0 か 1 |
+
+`finish` と後の `next` は別の呼び出しで、その間に記録と CD の結果が変わるので、読み直す。
+
+#### リリースしないで終える
+
+`release` の Skill は、リリース対象に差分が無い場合と、版数の記載と説明文書だけの場合に、リリースを飛ばして `段階: デプロイなし（<理由>）` の記録を置く。手の経路では、この場合を `finish --no-release` で終える。
+
+- 条件は、読む PR の最新のリリース記録が `段階: デプロイなし` で、`スプリント:` の行が文脈の `pr` を含むことである。後から本番の記録が足されていれば断る
+- 出力の `product_version`・`delivery`・`mvv_gate` は求めない。`product_version` か `delivery` が書かれていれば断る。`ndf progress check` も `--no-release` を受ける。バージョンと CD の結果は読まない
+- 承認ゲートは省かない。有効な承認が無ければ回答待ちにし、質問と承認資料に「リリースせずにこの工程を終える」と理由を載せる。この回答では、マージの承認の証跡を書かず、リリースのリクエストも出さない
+- `finish_held` と `finished` の payload に `no_release: true` と `record_pr` を残す。回答待ちの後の `next` は同じ記録を確かめ直す
+- 終了を書くときに、入力に `product_version` を持つ未着手の工程（リリース後テスト）を、理由「デプロイなし」で無効にする。このデプロイの工程を開き直すと、この理由で無効にした工程を有効に戻す
+
+**`finish` の前の状態。** 承認を記録しただけで `finish` していないデプロイの工程は、終了にならない。工程が未着手のまま `next` を打つと、`next` は後ろの工程へ進まず、自動の流れでデプロイの工程を始める。有効な承認があれば、リリースも自動の流れが行う。
 
 ### MVV 判定の承認の証跡
 
@@ -679,7 +731,7 @@ NDF が前後を見分けられるのは、記録の順だけである。承認�
 - **働く範囲**: 利用先のリポジトリでも働く（`ndf progress` と `ndf answer`）
 - **プロジェクトごとに違うもの**: 足さない。承認ゲートの有無は工程の定義、省ける進め方はステートマシンの文脈が持つ
 - **当たるモード**: ステートマシンを作るすべてのモード。承認ゲートの扱いは、設計かデプロイの承認ゲートを持つモード
-- **打ち方が変わる箇所**: 手の経路の設計とデプロイは、承認を記録するまで次へ進まない。設計は、承認した PR をマージするまで次へ進まない。手の経路のデプロイの `finish` は、PR にリリース記録が無ければ断る
+- **打ち方が変わる箇所**: 手の経路の設計とデプロイは、承認を記録するまで次へ進まない。設計は、承認した PR をマージするまで次へ進まない。手の経路のデプロイの `finish` は、リリース記録か CD の結果が条件に合わなければ断る。リリースを飛ばした場合は `--no-release` を付け、承認を記録する
 - **流し直しで当たる外の状態**: 済んだマージ・リリースは取り消されない。設計は現在のベースから作り直して新しい PR に載せる（「開き直した設計を新しい PR に載せる」）。ほかの工程のステップが、マージ済みの PR やブランチを前に止まる可能性がある（未確認）
 - **PR の承認の証跡**: `retry` の開き直しは、PR に書いた承認の証跡を取り消さない。ステートマシンの中では改めて承認を求める
 - **リリースのリクエスト**: リリース承認の待ちを開き直すと、その承認ゲートの開いたリクエストを、開き直しと同じトランザクションで閉じる（`request_closed`）。`ndf lanes wait` には、出し直したリクエストだけが出る。利用者の操作は要らない。計画の外のオーガナイザーへ書いたリクエストのファイルは、中身が記録と一致すれば、開き直しを確定する前に NDF が消す。一致したファイルの削除に失敗した場合だけ、開き直さない。中身が一致しないファイルと、この改修より前に出したファイルは、消さずに警告して開き直す（「外への書き込みの順序」）。外のオーガナイザーには、依頼を示す前と回答を書く前に、依頼の ID が有効かを確かめてもらう（「依頼が今も有効かの確かめ」）
@@ -715,8 +767,13 @@ NDF が前後を見分けられるのは、記録の順だけである。承認�
 | 2 | 承認を記録し、PR をマージした後の `next` が次の工程を始める | 回答待ちの承認の読み取りを外す |
 | I1（マージ） | 設計の承認の後でも PR が未マージなら、`next` と `finish` は終了を書かず、後ろは始まらない | マージの確かめを外す |
 | I1（デプロイ済み） | 承認を記録してもデプロイしていなければ、デプロイの工程は終了にならない。出力にバージョンと届け先があっても、リリース記録が無い・`反映失敗`・バージョンか対象の PR が違う場合の `finish` は、承認の有無によらず断る | 承認だけで終了を書く・出力の値だけでリリース済みにする・段階や対象を見ない |
+| CD の結果 | workflow の記録があっても CD が失敗なら何も書かない。未確定は、手の記録が `未確定` のときだけ受け、`cd_result: unknown` を残す | 記録だけで終了にする・未確定を成功として記録する |
+| 記録の対象 | 別のリリース単位の記録が後に書かれていても、対象の単位の最新の記録で決まる | PR の最後の記録を選んでから照らす |
+| 記録の PR | `--record-pr` で回答待ちにした後の `next` は、同じ PR を読んで終了を書く | 文脈の既定の PR を引き直す |
+| リリースなし | `デプロイなし` の記録と `--no-release` と承認がそろえば、バージョンの無い出力で終了になり、リリース後テストは無効になる。デプロイを開き直すと有効に戻る。承認が無ければ回答待ちである | 記録を見ずに終える・承認を省く・無効にした工程を戻さない |
+| 確かめの読み取り | 記録の PR が承認対象と同じ呼び出しでは、PR の読み取りは増えず、コメントの読み取りが 1 回だけ増える | PR を読み直す |
 | 追認 | 承認の無いまま `finish` したデプロイの工程への承認は `after_release` を持ち、承認の証跡もリリースのリクエストも出ない | 事前の承認と同じに記録する・証跡やリクエストを出す |
-| 依頼の有効性 | `request-status` は、今の質問の依頼の ID だけに `valid: true` を返す。開き直した後の古い ID は、ファイルが残っていても偽である | ファイルの有無で答える・過去の ID を有効にする |
+| 依頼の有効性 | `request-status` は、今の質問の依頼の ID だけに `valid: true` を返す。開き直した後の古い ID は、ファイルが残っていても偽である。取り下げ後に書かれた回答は読まない | ファイルの有無で答える・過去の ID を有効にする |
 | 判定の対象 | 判定の後に、HEAD は同じで PR のマージ先かマージ先の設定が変わると、`next` は承認も証跡も書かず、人へ質問する | PR の番号と HEAD だけを比べる |
 | I5（MVV の通過） | 本番へ反映される設計 PR は、省く条件を満たせば `next` が `service:mvv` の承認と「本番へ反映される: はい」の証跡を書く。`ndf answer` の AI の承認は断る | 本番へ反映される対象で省かない・AI の回答を受ける |
 | 対象の読み取り（読み直し無し） | ステップを流さない `next` の 1 回の呼び出しで、PR とマージ先の設定の読み取りは 1 回ずつである | 照合ごとに読み直す |
@@ -775,7 +832,7 @@ NDF が前後を見分けられるのは、記録の順だけである。承認�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4520 | 実装する | — | `plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/run_view.py`、`plugins/ndf/src/ndf/progress/approval.py`（新設）、`plugins/ndf/src/ndf/progress/reopening.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/stage_inputs.py`、`plugins/ndf/src/ndf/domains/worktree/merged.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/gate/release.py`、`plugins/ndf/src/ndf/progress/plan/external.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/core/merge_approval.py`、`plugins/ndf/tests/progress/test_reopen_operations.py`（新設）、`plugins/ndf/tests/progress/test_manual_gate.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-answer.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-workflow.md`、`docs/glossary.md` |
+| #4520 | 実装する | — | `plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/run_view.py`、`plugins/ndf/src/ndf/progress/approval.py`（新設）、`plugins/ndf/src/ndf/progress/reopening.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/stage_inputs.py`、`plugins/ndf/src/ndf/domains/worktree/merged.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/gate/release.py`、`plugins/ndf/src/ndf/progress/plan/external.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/core/merge_approval.py`、`plugins/ndf/tests/progress/test_reopen_operations.py`（新設）、`plugins/ndf/tests/progress/test_manual_gate.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-answer.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-workflow.md`、`docs/glossary.md` |
 
 [#3957](https://github.com/devbasex/ai-plugins/issues/3957)（手で終えると回答を待たずに次の工程が始まる）の受け入れ条件 3 件は、要求仕様の受け入れ条件 1・2・4 に含まれる。
 
