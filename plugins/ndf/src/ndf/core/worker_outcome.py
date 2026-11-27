@@ -71,7 +71,7 @@ class Checked(NamedTuple):
     missing: tuple[str, ...]
 
 
-def _values_of(report: Mapping[str, Any], names: Sequence[str]) -> dict[str, Any]:
+def _passed_outputs(report: Mapping[str, Any], names: Sequence[str]) -> dict[str, Any]:
     """確かめを通った名前 `names` の値（結果ファイルの `outputs` から取り出す）。"""
     return {n: report["outputs"][n] for n in names}
 
@@ -83,7 +83,7 @@ def _gate_outputs(report: dict[str, Any], required: Sequence[str], version_numbe
     missing = tuple(n for n in required if n not in passed_names)
     if not passed:
         return Checked(report, None, missing)
-    return Checked(report, _values_of(report, passed), missing)
+    return Checked(report, _passed_outputs(report, passed), missing)
 
 
 def require_outputs(report: Any, required: Sequence[str], *, version_number: bool = False) -> Checked:

@@ -97,13 +97,6 @@ VALUES_FILE = "values.json"
 VALUES_SHAPE = {"plan": str, "values": dict, "inputs": dict, "local_tests": bool, "at": str}
 
 
-# 承認を記録する時点のバージョンの保存先の種類（`store_kind_of` が返し、`Recorded.store`・`released_store` に残す）
-STORE_NONE = "none"
-STORE_VERSIONED = "versioned"
-STORE_UNKNOWN = "unknown"
-STORE_KINDS = (STORE_NONE, STORE_VERSIONED, STORE_UNKNOWN)
-
-
 class Recorded(NamedTuple):
     """記録済みの値（#4513）。まとめたリリースでオーガナイザーが記録したリリースの識別子・届け先・承認の時点の保存先の種類。
 
@@ -118,12 +111,12 @@ class Recorded(NamedTuple):
     @property
     def store_unknown(self) -> bool:
         """承認の時点で設定を読めず、保存先の種類が決まらなかったか。"""
-        return self.store == STORE_UNKNOWN
+        return self.store == store_kind_of(None)
 
     @property
     def with_number(self) -> bool:
         """承認の時点でバージョン番号を持つリポジトリだったか。"""
-        return self.store == STORE_VERSIONED
+        return self.store == store_kind_of(True)
 
 
 # values.json に記録済みの値を残すキー（`VALUES_SHAPE` に足さない。直す前の NDF が書いた values.json も読む）
@@ -131,10 +124,18 @@ RELEASED_KEYS = ("released_version", "released_delivery", "released_store")
 
 
 def store_kind_of(has_version_number: Optional[bool]) -> str:
-    """承認を記録する時点のバージョンの保存先の種類。設定を読めなければ（None）`unknown`。"""
+    """承認を記録する時点のバージョンの保存先の種類。設定を読めなければ（None）`unknown`。
+
+    種類の語（`none`・`versioned`・`unknown`）はここだけに置く（`Recorded.store`・`released_store` に残す）。最上位の定数にしないのは、
+    テスト環境の値（`testing.testenv.NONE`）や参照の置き換えの目印（`core.refs._PLACEHOLDERS`）と同じ文字列でも別の事実だからである。
+    """
     if has_version_number is None:
-        return STORE_UNKNOWN
-    return STORE_VERSIONED if has_version_number else STORE_NONE
+        return "unknown"
+    return "versioned" if has_version_number else "none"
+
+
+# 保存先の 3 つの種類（`none`・`versioned`・`unknown` の順。語は `store_kind_of` が持つ）
+STORE_KINDS = (store_kind_of(False), store_kind_of(True), store_kind_of(None))
 
 
 def _released_fields(value: Optional[Recorded]) -> dict[str, Any]:
