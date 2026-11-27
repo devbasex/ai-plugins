@@ -212,7 +212,7 @@
     "allow_names": ["check", "main"]
   },
   "internal_names": {
-    "writers": {"write_record": 0, "append": null, "append_locked": null}
+    "writers": {"write_record": 0, "append": null, "append_locked": null, "append_unlocked": null}
   },
   "child_deps": {
     "max_per_slot": 2

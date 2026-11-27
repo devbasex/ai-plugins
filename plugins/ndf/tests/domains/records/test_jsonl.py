@@ -65,7 +65,7 @@ def _wanted(row: Mapping[str, Any]) -> bool:
     return row.get("agent_id") == "a"
 
 
-@pytest.mark.parametrize("fn", [jsonl.append, jsonl.append_locked])
+@pytest.mark.parametrize("fn", [jsonl.append, jsonl.append_locked, jsonl.append_unlocked])
 def test_append_writes_the_stamped_row_and_nothing_when_it_does_not_fit(tmp_path, fn):
     path = tmp_path / "u.jsonl"
     assert fn(path, ROW, kind="usage") == {**ROW, "version": 1}

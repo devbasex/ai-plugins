@@ -24,6 +24,7 @@ src/ndf/
   progress/invoke.py             Skill の起動の指定と記録
   domains/
     records/usage.py・usage_decide.py   行の書き込み・費用の計算
+    records/jsonl.py             錠を取らない 1 行の追記
     settings/launch_config_cli.py *     ndf launch-config
     settings/delegate_run_cli.py *      ndf delegate-run
     hooks/guards/launch_answer.py *     承認の問いの答えの記録
@@ -50,6 +51,8 @@ src/ndf/
 | `src/ndf/core/plan/steps.py` | 変更 | 子の環境を重ねて起動する | run_log | `StepContext` | C: `_launch` |
 | `src/ndf/core/converge/participants.py` | 変更 | 相手役の引数 | launch_settings | モジュール | C: `_sandbox_args`・`_review_args` |
 | `src/ndf/domains/records/usage.py` | 変更 | `claude -p` の行を書く | jsonl | モジュール | C: `record_cli` |
+| `src/ndf/domains/records/jsonl.py` | 変更 | 錠を取らずに 1 行を 1 回の書き込みで足す | — | モジュール | N: `append_unlocked` |
+| `src/ndf/checks/rules.json` | 変更 | 記録の種類を書く関数の一覧に `append_unlocked` を足す | — | — | — |
 | `src/ndf/domains/records/usage_decide.py` | 変更 | 起動 1 回の費用を求める | — | モジュール | N: `launch_costs` |
 | `src/ndf/domains/settings/launch_config_cli.py` | 新設 | `ndf launch-config` の 4 つのサブコマンド | launch_settings・launch_approval | モジュール | N: `main`・`_draft`・`_show`・`_approve`・`_confirm_terminal`・`_revoke` |
 | `src/ndf/domains/settings/delegate_run_cli.py` | 新設 | `ndf delegate-run`（委譲の起動） | launch_settings | モジュール | N: `main`・`build_command` |
@@ -415,7 +418,8 @@ src/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `record_cli` | `domains/records/usage.py` | 変更 | 変えない | `meta` の足した欄を書く。値が None の欄は置かない |
+| `record_cli` | `domains/records/usage.py` | 変更 | 変えない | `meta` の足した欄を書く。値が None の欄は置かない。使用量ログの錠を取らずに `append_unlocked` で書く（設計書の「行を書く時点」の「書き方」） |
+| `append_unlocked` | `domains/records/jsonl.py` | 新設 | `append_unlocked(path: Path, row: Mapping[str, Any], *, kind: str) -> dict[str, Any]` | 種類 `kind` の形を確かめてから、1 行全体を `O_APPEND` の 1 回の `os.write` で足し、書いた行を返す。形が違えば書かずに `InternalError`、一部しか書けなければ `OSError` |
 | `launch_costs` | `domains/records/usage_decide.py` | 新設 | `launch_costs(rows: Iterable[Mapping]) -> dict[str, Optional[float]]` | 同じ会話の累計の差から、`launch_id` ごとの費用を返す。不明は None |
 
 - `__main__.py` は `claude.set_launch_recorder(usage)` を呼ぶ

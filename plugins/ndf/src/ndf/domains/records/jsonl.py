@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -148,3 +149,22 @@ def append_locked(path: Path, row: Mapping[str, Any], *, kind: str) -> dict[str,
     """錠を取って 1 行足し、書いた行を返す。"""
     with lock(path):
         return append(path, row, kind=kind)
+
+
+def append_unlocked(path: Path, row: Mapping[str, Any], *, kind: str) -> dict[str, Any]:
+    """錠を取らずに 1 行足し、書いた行を返す。形が違えば書かずに `InternalError`。
+
+    行全体を追記の形（`O_APPEND`）で 1 回の書き込みにするので、ほかの書き手の行と混ざらない。錠を持つ書き手が
+    既存の行を読んでいる間も待たない。錠の中で読んで差を書く書き手（`usage.record_subagent`）の結果を変えない行だけに使う。
+    """
+    out = internal.write_record(kind, row)
+    data = (json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
+    try:
+        written = os.write(fd, data)
+    finally:
+        os.close(fd)
+    if written != len(data):
+        raise OSError(f"{path} へ行の一部しか書けなかった（{written}/{len(data)} バイト）")
+    return out

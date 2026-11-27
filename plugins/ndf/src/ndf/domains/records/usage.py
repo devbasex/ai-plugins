@@ -91,14 +91,18 @@ def record_cli(usage: Any, meta: Mapping[str, Any], env: Optional[Mapping[str, s
     """`claude -p` の起動した子 1 つを、サブエージェントと同じ使用量ログへ 1 行書く。書けなければ None（#1959 の決定 6）。
 
     `meta` の欄は `contracts/schemas/internal/usage.schema.json` にあるものだけで、値が None の欄は置かない。使用量が
-    辞書でなければ（結果の JSON が無い起動）unknown にする。権限・容量・ロックの待ち・行の形の誤りで書けなくても
+    辞書でなければ（結果の JSON が無い起動）unknown にする。権限・容量・行の形の誤りで書けなくても
     例外を外へ出さず、標準エラーへ 1 行出す（工程の結果を変えない。I4）。
+
+    使用量ログの錠は取らない。この行は `agent_id` を持たず、錠の中で同じ `agent_id` の行を読んで差を書く
+    `record_subagent` の結果を変えないためである。錠を取ると、サブエージェントの停止が錠の中でログ全体を読む間、
+    子が終わってから結果を返すまで工程が待つ。
     """
     u = ud.usage_of(usage)
     filled = {key: value for key, value in meta.items() if value is not None}
     row = {"at": jsonl.now(), "caller": CLAUDE_CLI, **filled, "usage": u.as_dict() if u is not None else ud.UNKNOWN}
     try:
-        return jsonl.append_locked(usage_log_path(env), row, kind="usage")
+        return jsonl.append_unlocked(usage_log_path(env), row, kind="usage")
     except (LookupError, OSError, InternalError) as exc:
         print(f"使用量の使用量ログへ書けない: {exc}", file=sys.stderr)
         return None
