@@ -7,11 +7,12 @@ from pathlib import Path
 import pytest
 
 from ndf.core.converge import participants
-from ndf.domains.crossreview import scope_decide, store
+from ndf.domains.crossreview import scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 
-from ._repos import Repos, commit, count_git, run_cli, sh
+from ._repos import BRANCH, Repos, commit, count_git, run_cli, sh
+from .test_crossreview_run import Recording, _run
 
 A, B = "issues/d.md#セクション A", "issues/d.md#セクション B"
 # ラウンドの記録の比較基点（`--base` と HEAD の merge-base の SHA。PR 3944 の r2-1）。状態ファイルを書く前に本物の SHA へ置き換える
@@ -218,6 +219,56 @@ def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
 
 
 APPROVED = "approved:11:aaa:ccc"
+
+
+def test_converged_run_is_reused_only_for_the_same_unit_and_pr(
+    wt: Path, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch, hub
+) -> None:
+    """#3780 の現状固定: 同じ head の打ち直しは、単位の指示と読んだ PR が同じなら前回の収束を返し、どちらかが変われば相手役を
+    起動し直す。比較基点と相手役の変更は `test_crossreview_prior.py`、重点の変更は `test_crossreview_run.py` が確かめる。"""
+    head = sh(wt, "rev-parse", "HEAD").strip()
+    read = {"ident": "o/r#41"}
+    monkeypatch.setattr(hub.port, "read_pr", lambda: threads.ReadPr(read["ident"], BRANCH, head, "o/r"))
+    unit = tmp_path / "unit.md"
+    unit.write_text("単位 u1\n", encoding="utf-8")
+    monkeypatch.setenv("NDF_UNIT_FILE", str(unit))
+
+    def launched() -> set[str]:
+        fake = Recording(tmp_path / "st", {})
+        code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-pr-out", str(tmp_path / "reviewed-pr"))
+        assert (code, got["status"]) == (0, "ok")
+        return {agent for agent, _, _ in fake.prompts}
+
+    both = {"codex", "kiro"}
+    assert launched() == both
+    assert launched() == set()
+    unit.write_text("単位 u2\n", encoding="utf-8")
+    assert launched() == both
+    read["ident"] = "o/r#42"
+    assert launched() == both
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"base": "origin/develop"},
+        {"reviewers": ["codex"]},
+        {"focus": ["前の重点"]},
+        {"unit": "前の単位"},
+        {scope_decide.MVV: {"id": APPROVED}},
+    ],
+)
+def test_design_pr_reads_the_full_diff_again_when_the_conditions_changed(scope_run, changed: dict) -> None:
+    """#3780 の現状固定: 設計の PR は、全セクションが詳細レビューを通っていても、前のラウンドの条件が違えば全差分を見る。"""
+    row = {"round": 1, "head": "abc", "base": MB, **changed}
+    got = scope_run("design", {"pr": 8, "rounds": [row], store.REVIEWED: _SECTIONS})[1]["items"][0]
+    assert (got["scope"], got["base"]) == (scope_decide.FULL, None)
+
+
+@pytest.mark.parametrize("every_section", [True, False])
+def test_round_one_is_the_full_diff_even_with_a_previous_head(every_section: bool) -> None:
+    """#3780 の受け入れ条件 4: 1 ラウンド目は、起点にできる head があっても差分の全体を見る。"""
+    assert scope_decide.review_scope(every_section, 1, "abc1234", [A], {A}) == scope_decide.Scope(scope_decide.FULL, None, ())
 
 
 def _read_with(mvv: object) -> dict:

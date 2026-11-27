@@ -13,7 +13,7 @@
     ndf cross-review review-scope <worktree> --state-dir D --pr N --purpose P --base B [--reviewer R ...]   # レビューの範囲（#3181）
     ndf cross-review finish --summary F [--findings F2]            # 終わり方から結果（#2370・#2444）
     ndf cross-review run --pr N --state-dir D --base B [--worktree W] [--branch B2] [--purpose P]
-        [--reviewer R ...] [--max-rounds 3] [--findings F] [--reviewed-out F3]
+        [--reviewer R ...] [--max-rounds N] [--findings F] [--reviewed-out F3]
         [--repo R] [--stop-on-hold] [--reviewed-pr-out F4]
                                                                    # 収束ループを 1 回の起動で回して終わり方から結果。指摘のスレッドと記録を PR へ書く（#3939）
     ndf cross-review report --state-dir D --pr N [--repo R]       # 状態ファイルから指摘のスレッドと記録を PR へ書く（#3939）
@@ -34,7 +34,7 @@ from typing import Any, Callable, ContextManager, NamedTuple, Optional, TypeVar
 
 from ndf import cli, identity
 from ndf.adapters import agents, git, run_log
-from ndf.contracts import limits, result, writing
+from ndf.contracts import result, writing
 from ndf.core import route
 from ndf.core.converge import location, participants, worktree
 from ndf.domains.crossreview import (
@@ -52,10 +52,10 @@ from ndf.domains.crossreview import (
 )
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.settings import (
-    MAX_ROUNDS,
     DriveStopped,
     ReviewSettings,
     RunConfig,
+    default_max_rounds,
     outside_checkout,
     read_settings,
 )
@@ -433,17 +433,18 @@ def _run_config(args: argparse.Namespace) -> RunConfig:
     # 子へ渡すパスの基準を打った場所の cwd にそろえる（相対の --state-dir と別の --worktree で基準が割れない）
     wt = (Path(args.worktree) if args.worktree else Path.cwd()).absolute()
     got = _resolve(wt, args.reviewer)
+    every_section = _every_section(args.purpose)
     return RunConfig(
         worktree=wt,
         branch=args.branch or _branch_of(wt),
         base=args.base,
         pr=args.pr,
         state_dir=Path(args.state_dir).absolute(),
-        every_section=_every_section(args.purpose),
+        every_section=every_section,
         reviewers=got.seats.names,
         may_fill=got.seats.may_fill,
         prefilled=tuple(scope_decide.Filled(s, None, str(got.seats.reason)) for s in got.seats.added),
-        max_rounds=args.max_rounds,
+        max_rounds=default_max_rounds(every_section) if args.max_rounds is None else args.max_rounds,
         handed=_handed(args.findings),
         main=got.policy.main,
         settings=got.settings,
@@ -707,7 +708,7 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--branch")
     r.add_argument("--purpose", default=TOOL)
     r.add_argument("--reviewer", action="append")
-    r.add_argument("--max-rounds", type=int, default=int(limits.value(MAX_ROUNDS, "count")))
+    r.add_argument("--max-rounds", type=int)
     r.add_argument("--findings")
     r.add_argument("--reviewed-out")
     r.add_argument("--repo", help="対象のリポジトリ（<所有者>/<リポジトリ>）。保存済みの状態と作業場所のリモートより優先する")

@@ -285,8 +285,7 @@
           }
         },
         "--max-rounds": {
-          "type": "integer",
-          "default": 3
+          "type": "integer"
         },
         "--findings": {
           "type": "string"

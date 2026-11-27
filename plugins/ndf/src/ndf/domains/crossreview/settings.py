@@ -19,8 +19,14 @@ from ndf.domains.crossreview import criteria_decide, scope_decide
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 
-# ラウンドの上限の既定の方針（contracts/limits/）
+# ラウンドの上限の既定の方針（contracts/limits/）。実装の PR と、設計の PR で分ける（#3780）
 MAX_ROUNDS = "cross-review.max-rounds"
+DESIGN_MAX_ROUNDS = "cross-review.max-rounds.design"
+
+
+def default_max_rounds(every_section: bool) -> int:
+    """`--max-rounds` を省いたときの上限（`every_section` なら設計の PR の値）。"""
+    return int(limits.value(DESIGN_MAX_ROUNDS if every_section else MAX_ROUNDS, "count"))
 
 
 class DriveStopped(Exception):
@@ -48,7 +54,7 @@ class RunConfig:
     state_dir: Path
     every_section: bool
     reviewers: tuple[str, ...]
-    max_rounds: int = field(default_factory=lambda: int(limits.value(MAX_ROUNDS, "count")))
+    max_rounds: int = field(default_factory=lambda: default_max_rounds(False))
     handed: tuple[fin.Handed, ...] = ()
     fixer: str = participants.FIXER
     # 実行者のメインディレクトリと、そこから同期の前に読んだレビューの設定（認可と同じ解決を使う。PR 3944 の r4-1・r4-4）
