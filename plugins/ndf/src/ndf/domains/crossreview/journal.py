@@ -143,6 +143,18 @@ def _move(row: dict[str, Any], place: Mapping[str, Any], round_no: int) -> None:
         row[PLACED_ROUND] = round_no
 
 
+def _post_place(places: Sequence[Mapping[str, Any]], touched: leftover_decide.Touched) -> dict[str, Any]:
+    """出し直しの位置 `places` のうち、投稿に使うもの。行コメントを付けられる行を指すものを先にし、その中では変えた行を指すものを
+    先にする。そのような行が無ければ `line` を除き、ファイルの位置にする（PR の差分に載らない行は投稿で拒まれて呼び出しが
+    増える）。"""
+    best = max(
+        places,
+        key=lambda p: (leftover_decide.on_commentable_line(p, touched), leftover_decide.on_touched_line(p, touched), "path" in p),
+    )
+    keep = leftover_decide.on_commentable_line(best, touched)
+    return {k: v for k, v in best.items() if keep or k != "line"}
+
+
 def _named_any(item: dict[str, Any]) -> bool:
     """相手役が `mvv` に何か書いたか（キーが無い・null・空白だけなら偽）。"""
     value = item.get("mvv")
@@ -364,6 +376,8 @@ class FindingJournal:
         # 最後の `enter` で新しく出たか戻った指摘の id（`fresh` と違い、判定役へ渡さないものも含む）と、指摘ごとの出し直し、
         # そのラウンド
         self._arrived: frozenset[str] = frozenset()
+        # 最後の `enter` が `parked` を外して位置を置き換えた指摘と、その位置の候補（`sort` が投稿できる位置かを確かめる）
+        self._moved: dict[str, list[dict[str, Any]]] = {}
         self._reports: dict[str, list[Mapping[str, Any]]] = {}
         self._round = 0
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
@@ -425,12 +439,16 @@ class FindingJournal:
                 unparked[str(known["id"])] = item
             touched[key] = known
             same.setdefault(str(known["id"]), []).append(item)
+        self._moved = {}
         for fid, item in unparked.items():
             # 残していた行の位置は前の head の行番号なので、見送りを解いた出し直しのものにする。`path` か行番号が無ければ、同じ
             # ラウンドのほかの出し直しから補う（`path` があれば、同じ `path` の出し直しからだけ）
             own, *others = map(_place, (item, *same[fid]))
             places = [own, *(p for p in others if own.get("path") in (None, p.get("path")))]
-            _move(self.rows[fid], max(places, key=lambda p: ("line" in p, "path" in p)), round_no)
+            best = max(places, key=lambda p: ("line" in p, "path" in p))
+            _move(self.rows[fid], best, round_no)
+            if "path" in best:
+                self._moved[fid] = places
         back = set(self.revived[before:])
         self.fresh = [fid for fid in dict.fromkeys(fresh) if _askable(self.rows[fid], same[fid], items, fid in back)]
         self.raised_ids, self._arrived, self._reports = list(same), frozenset(fresh), same
@@ -506,12 +524,16 @@ class FindingJournal:
     def sort(self, touched: leftover_decide.Touched, unconfirmed: Collection[str] = ()) -> frozenset[str]:
         """直前の `enter` で出た指摘のうち、新しく出たか戻った指摘と、直さずに残していた指摘に線引き
         （`leftover_decide.proceeds`）を当て、残した指摘のキーを返す。前から修正へ進むと決まっている指摘は分け直さない。
+        `enter` が `parked` を外して置き換えた位置は、行コメントを付けられない行のときだけ選び直す。
         `unconfirmed` は判定役へ渡して有効な回答の無かった指摘の id。
 
         位置は今回の出し直しのものを 1 件ずつ当てる（残していた指摘の行の位置は、前の head の行番号である）。どれか 1 件が
-        進めば進める。指摘の行の位置は、進んだ出し直しから投稿できる位置を選んで置き換える。行コメントを付けられる行を指すものを
-        先にし、その中では変えた行を指すものを先にする。そのような行が無ければ、選んだ出し直しの `line` を除き、ファイルの位置に
-        する（どれにも `path` が無ければ元の位置を残す。`_move`。#3780）。"""
+        進めば進める。指摘の行の位置は、進んだ出し直しから投稿できる位置（`_post_place`）を選んで置き換える（どれにも
+        `path` が無ければ元の位置を残す。`_move`。#3780）。"""
+        for fid, places in self._moved.items():
+            row = self.rows[fid]
+            if "line" in row and not leftover_decide.on_commentable_line(row, touched):
+                _move(row, _post_place(places, touched), self._round)
         parked: set[str] = set()
         for fid in self.raised_ids:
             row = self.rows[fid]
@@ -529,18 +551,7 @@ class FindingJournal:
                 parked.add(row["key"])
             else:
                 row.pop(PARKED, None)
-                best = max(
-                    passed,
-                    key=lambda p: (
-                        leftover_decide.on_commentable_line(p, touched),
-                        leftover_decide.on_touched_line(p, touched),
-                        "path" in p,
-                    ),
-                )
-                # PR の差分に載らない行は投稿で拒まれて呼び出しが増えるので、行を除いてファイルの位置にする
-                if not leftover_decide.on_commentable_line(best, touched):
-                    best.pop("line", None)
-                _move(row, best, self._round)
+                _move(row, _post_place(passed, touched), self._round)
         return frozenset(parked)
 
     def ingest_citations(

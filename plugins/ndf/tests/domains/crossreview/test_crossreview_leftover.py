@@ -315,6 +315,17 @@ def test_sorting_never_places_a_line_outside_the_pr_diff(reports: tuple[int, ...
     assert (row["path"], row.get("line")) == ("a.py", line)
 
 
+@pytest.mark.parametrize(
+    ("others", "line"),
+    [pytest.param((), None, id="file-only"), pytest.param((7,), 7, id="another-report")],
+)
+def test_sorting_replaces_an_unparking_line_outside_the_pr_diff(others: tuple[int, ...], line) -> None:
+    journal, row = _parked()
+    journal.enter(3, [_told(severity="critical", path="a.py", line=99), *(_told(path="a.py", line=n) for n in others)])
+    journal.sort(TOUCHED)
+    assert (row["path"], row.get("line"), row[journal_mod.PLACED_ROUND]) == ("a.py", line, 3)
+
+
 def test_the_thread_commit_of_a_moved_finding_is_the_head_of_the_placed_round() -> None:
     rounds = [{"round": 2, "head": "old"}, {"round": 3, "head": "new"}]
     assert threads._placed_head(rounds, {"round": 2}) == "old"
