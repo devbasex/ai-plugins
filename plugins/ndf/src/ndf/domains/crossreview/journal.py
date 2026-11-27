@@ -285,10 +285,10 @@ def _place(row: dict[str, Any], new: Mapping[str, Any], section: Optional[str]) 
     row["section"] = section
 
 
-def _align_impact(row: dict[str, Any], same: Sequence[Mapping[str, Any]]) -> None:
-    """このラウンドで新しく出たか戻った行の 1 文と位置を、同じ出し直し 1 件のものにそろえる。`same` はこのラウンドのその指摘の
-    出し直しで、1 文を持つもののうち最も重い（同じ重さなら先の）1 件を使う。1 件も 1 文を持たなければ何も変えない。判定役が、
-    ある位置の指摘を別の経路の 1 文で確かめないためである。#4363"""
+def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]]) -> bool:
+    """このラウンドで新しく出たか戻った行の本文・1 文・位置を、出し直し 1 件のものにそろえる。`same` はこのラウンドのその指摘の
+    出し直しで、1 文を持つもののうち最も重い（同じ重さなら先の）1 件を使う。1 件も 1 文を持たなければ何も変えずに偽を返す。
+    指摘のキーは本文の先頭だけで決まるので、判定役がある報告の発生条件を別の報告の位置で確かめないためである。#4363"""
     best: Optional[tuple[Mapping[str, Any], dict[str, Any]]] = None
     for item in same:
         new = _raised(dict(item))
@@ -297,10 +297,11 @@ def _align_impact(row: dict[str, Any], same: Sequence[Mapping[str, Any]]) -> Non
         if best is None or criteria_decide.heavier(best[1]["severity"], new["severity"]) != best[1]["severity"]:
             best = item, new
     if best is None:
-        return
+        return False
     item, new = best
-    row["impact"] = new["impact"]
+    row |= {"text": str(item["text"]).strip(), "impact": new["impact"]}
     _place(row, new, _text(item.get("section")))
+    return True
 
 
 class Checked(NamedTuple):
@@ -324,7 +325,7 @@ class FindingJournal:
         self.rows: dict[str, dict[str, Any]] = {str(f["id"]): f for f in rows if isinstance(f, dict) and "id" in f}
         # 直した・見送ったのに出し直されて未解決へ戻した指摘の id（呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
         self.revived: list[str] = []
-        # 最後の `enter` で、新しく出たか戻った指摘の id（判定役へ渡す候補。#4363）
+        # 最後の `enter` で新しく出たか戻った指摘の id（判定役へ渡す候補。1 文の無いまま戻った指摘は除く。#4363）
         self.fresh: list[str] = []
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
@@ -343,8 +344,9 @@ class FindingJournal:
         """指摘をジャーナルへ入れ、このラウンドで出た収束の妨げになるキーを返す（振動の判定に使う）。`items` は承認済みの
         MVV の項目、`mvv` はその識別子。見送り済みは扱わず（MVV が変わっていれば判定し直す）、
         直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら（同じラウンドの中でも）重い方を残す。
-        収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。新しく出たか戻った行の 1 文と位置は、
-        すべての指摘を重ねた後にそろえる（`_align_impact`）。"""
+        収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。新しく出たか戻った行の本文・1 文・位置は、
+        すべての指摘を重ねた後にそろえる（`_align_report`）。戻った指摘にこのラウンドの 1 文が 1 つも無ければ、行は前の 1 文と
+        重さを持ち続けるが、`fresh` に入れず判定役に渡さない（前の経路の 1 文で下げないため。#4363）。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
@@ -352,6 +354,7 @@ class FindingJournal:
         fresh: list[str] = []
         same: dict[str, list[Mapping[str, Any]]] = {}
         _unlower(by_key, raised, items)
+        before = len(self.revived)
         for item in raised:
             text = item.get("text")
             text = text.strip() if isinstance(text, str) else ""
@@ -378,9 +381,9 @@ class FindingJournal:
                 unknown.append(str(known["id"]))
             touched[key] = known
             same.setdefault(str(known["id"]), []).append(item)
-        self.fresh = list(dict.fromkeys(fresh))
-        for fid in self.fresh:
-            _align_impact(self.rows[fid], same[fid])
+        back = set(self.revived[before:])
+        told = {fid: _align_report(self.rows[fid], same[fid]) for fid in dict.fromkeys(fresh)}
+        self.fresh = [fid for fid, aligned in told.items() if aligned or fid not in back]
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
 

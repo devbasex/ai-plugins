@@ -216,17 +216,27 @@ def test_issue_4014_fixed_finding_coming_back_without_impact_stays_major_with_th
 
 @pytest.mark.parametrize("order", [1, -1])
 def test_issue_4363_fixed_finding_coming_back_takes_the_impact_and_the_place_of_this_time(order: int) -> None:
-    """直した指摘が別の経路で戻ると、判定役が読む 1 文と位置は、出し直しの順によらず今回の同じ 1 件のものになる。"""
+    """直した指摘が別の経路で戻ると、判定役が読む本文・1 文・位置は、出し直しの順によらず今回の同じ 1 件のものになる。"""
     journal = drive.FindingJournal()
     journal.enter(1, [{"text": "A", "severity": "major", "impact": IMPACT, "path": "x.py", "line": 3, "by": "codex"}])
     journal.rows["r1-1"]["outcome"] = fin.FIXED
     again = [
         {"text": "A", "severity": "minor", "path": "x.py", "line": 9, "by": "codex"},
-        {"text": "A", "severity": "major", "impact": "別の経路で保存が止まる", "path": "y.py", "line": 5, "by": "kiro"},
+        {"text": "a", "severity": "major", "impact": "別の経路で保存が止まる", "path": "y.py", "line": 5, "by": "kiro"},
     ]
     journal.enter(2, again[::order])
     row = journal.rows["r1-1"]
-    assert (row["impact"], row["path"], row["line"]) == ("別の経路で保存が止まる", "y.py", 5)
+    assert (row["text"], row["impact"], row["path"], row["line"]) == ("a", "別の経路で保存が止まる", "y.py", 5)
+    assert journal.fresh == ["r1-1"]
+
+
+def test_issue_4363_finding_coming_back_without_impact_stays_major_and_is_not_asked() -> None:
+    """今回の 1 文が無いまま戻った指摘は重さを保ち、前の経路の 1 文で下げられないように判定役へ渡さない。"""
+    journal = drive.FindingJournal()
+    journal.enter(1, [{"text": "A", "severity": "major", "impact": IMPACT, "path": "x.py", "line": 3, "by": "codex"}])
+    journal.rows["r1-1"]["outcome"] = fin.FIXED
+    journal.enter(2, [{"text": "A", "severity": "major", "path": "y.py", "line": 5, "by": "kiro"}])
+    assert journal.rows["r1-1"]["severity"] == "major" and journal.fresh == []
 
 
 def test_issue_4014_carried_rows_are_not_rated_again() -> None:
