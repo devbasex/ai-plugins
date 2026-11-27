@@ -61,8 +61,8 @@ __all__ = [
     "check_removable",
     "check_unshared",
     "check_writable",
+    "create_private",
     "dir_id",
-    "drop_darwin_acl",
     "entry_state",
     "has_darwin_acl",
     "held_dir",
@@ -413,13 +413,19 @@ def has_darwin_acl(fd: int) -> bool:
     return sys.platform == "darwin" and _has_acl_darwin(fd)
 
 
-def drop_darwin_acl(fd: int, name: str) -> None:
-    """macOS で呼び手が作ったファイル `fd` が親から継いだ拡張 ACL を外す。外せなければ `EntryUnsafe`（`acl`）。ほかの OS は何もしない。
+def create_private(path: Path) -> None:
+    """`path` が無ければ、呼んだ利用者だけがアクセスできる空のファイルを作る（あれば何もしない）。
 
-    Linux の継いだ ACL はモードのグループのビットで抑えられ、`read_file(owned=True)` が拒まないので残す。
+    macOS で親から継いだ拡張 ACL の許可は作った時点で効き、その間に開かれた記述子は後から取り消せない。そのため `open_lock` と
+    同じく、継いだ ACL を外した私有の一時ディレクトリで作ってから `path` へ公開する。ほかの OS の継いだ ACL は、モードの
+    グループのビット（ACL のマスク）が 0 なので効かず、その場で作る。
     """
     if sys.platform == "darwin":
-        _drop_acl_darwin(fd, name)
+        with open_workdir(path.parent.resolve()) as wd:
+            _publish_lock(wd, path.name)
+        return
+    with contextlib.suppress(FileExistsError):  # noqa: NDF402 ファイル: あるファイルはそのまま使う
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600))
 
 
 def check_removable(wd: WorkDir, name: str) -> Optional[os.stat_result]:

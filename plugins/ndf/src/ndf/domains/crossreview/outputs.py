@@ -3,16 +3,18 @@
 出力を書くとき、書く中身と出力のファイルの同一性（デバイス番号と inode）を、出力の隣の記録（`.<名前>.ndf-output.json`）に
 残す。次の起動の始めには、出力が記録と同じファイルで、中身のバイト列全体が記録の中身と一致するときだけ空に戻す（前の起動の
 値を今回の結果と取り違えない）。中身が一部でも違うファイルと、同じ中身でも別のファイルは、利用者が作ったか編集したかもしれない
-ので触らずに `Unowned` を上げる（PR 4638 の C4・r1-2・r2-5）。空に戻すのは、消して作り直すと権限が umask で決まり、呼び手が
-0600 で用意した出力が他の利用者に読めるようになるためである（r1-3）。記録は所有者だけが読める権限（0600）で作る。
+ので触らずに `Unowned` を上げる（PR 4638 の C4・r1-2・r2-5）。空に戻すのは、消して作り直すと、呼び手が出力に設定した権限と
+グループが失われるためである（r1-3）。記録は所有者だけが読める権限（0600）で作る。
 
 書く順序は、出力を空にして開く → 記録を 1 回の書き込みで書く → 出力の中身を 1 回の書き込みで書く、である。出力が空か、記録と
 出力全体が一致していれば、同じ引数で打ち直して続く（r2-6・r2-7）。記録を作った直後に終了して空の記録が残っても、失う中身が無い
-ので記録が無いのと同じに扱う。一時のファイルは作らない（名前の長さの上限と、強制終了で残るファイルを増やさない。r3-2・r3-5）。
+ので記録が無いのと同じに扱う。中身を一時のファイルから置き換えない（名前の長さの上限と、強制終了で残るファイルを増やさない。r3-2・r3-5。
+macOS で空のファイルを公開する一時ディレクトリは、名前の長さが出力の名前に依らない）。
 書き込みの失敗・書き切れなかったことに気づいた起動は、その場で出力を空に戻し記録を消してから失敗を返す（r3-3・r3-4）。
-出力は承認の記録を組む `build`（`worker_paths.read_file(owned=True)`）が読むので、読める形にする。書くときにグループとほかの
-利用者の書き込み権限を外し、新しく作ったファイルが親から継いだ macOS の拡張 ACL は所有者限定の権限に絞ってから外す。オーナーが違う・ハードリンクがある・
-拡張 ACL のある既存の出力は、直すと利用者の設定が変わるので、`check` が相手役を起動する前に止める（PR 4686）。
+出力は承認の記録を組む `build`（`worker_paths.read_file(owned=True)`）が読むので、読める形にする。無い出力と記録は、呼んだ
+利用者だけがアクセスできるファイルとして作る（`worker_paths.create_private`。macOS では親の拡張 ACL を継いでいない状態で
+公開する。PR 4686 の r3-1・r3-2）。既存の出力は、書くときにグループとほかの利用者の書き込み権限を外す。オーナーが違う・
+ハードリンクがある・拡張 ACL のある既存の出力は、直すと利用者の設定が変わるので、`check` が相手役を起動する前に止める。
 
 1 回の書き込みの途中で電源断などにより止まり、出力か記録の一部だけが残った場合は、変えずに `precondition` で止まる。
 
@@ -37,12 +39,8 @@ TEXT_KEY = "written"
 FILE_KEY = "identity"
 # 記録には出力と同じ値（レビューした SHA・PR・ブランチ名）を書くので、出力の権限によらず所有者だけに読ませる（r1-3）
 RECORD_MODE = 0o600
-# 無い出力を作るときの権限。umask が 002 でも、承認の記録の読み手が拒むグループの書き込みを付けない
-OUTPUT_MODE = 0o644
 # 承認の記録の読み手が拒むので、出力へ書くときに外す権限
 OTHERS_WRITE = stat.S_IWGRP | stat.S_IWOTH
-# 親から拡張 ACL を継いだ新しい出力の権限
-OWNER_ONLY = 0o600
 
 
 class Unowned(Exception):
@@ -81,9 +79,17 @@ def _recorded(record: Path) -> Optional[dict[str, Any]]:
     return held
 
 
+def _create_private(path: Path) -> None:
+    """無いファイルを、呼んだ利用者だけがアクセスできる状態で作る（あれば何もしない）。作れなければ `OSError`。"""
+    try:
+        worker_paths.create_private(path)
+    except worker_paths.EntryError as exc:
+        raise OSError(f"{path} を作れない") from exc
+
+
 def _probe_create(path: Path) -> None:
     """無いファイルを実際に作れるかを、作って消して確かめる（作れなければ `OSError`）。"""
-    path.open("x", encoding="utf-8").close()
+    _create_private(path)
     path.unlink()
 
 
@@ -153,19 +159,11 @@ def _write_once(fd: int, data: bytes, path: Path) -> None:
         raise OSError(f"{path} に書き切れない")
 
 
-def _make_readable(fd: int, path: Path) -> None:
+def _make_readable(fd: int) -> None:
     """空の出力 `fd` を、中身を書く前に承認の記録の読み手が読める権限にする。できなければ `OSError`。"""
     mode = stat.S_IMODE(os.fstat(fd).st_mode)
     if mode & OTHERS_WRITE:
         os.fchmod(fd, mode & ~OTHERS_WRITE)
-    # 拡張 ACL のある既存の出力は `check` が止めるので、ここで見つかるのは新しく作ったファイルが継いだものだけである
-    if worker_paths.has_darwin_acl(fd):
-        # 継いだ ACL は読み取りを拒む項目を持ちうる。外した後に読める人が広がらないよう、先に所有者限定にする（PR 4686 の r2-2）
-        os.fchmod(fd, OWNER_ONLY)
-    try:
-        worker_paths.drop_darwin_acl(fd, path.name)
-    except worker_paths.EntryError as exc:
-        raise OSError(f"{path} の拡張 ACL を外せない") from exc
 
 
 def write_recorded(path: Path, text: str) -> None:
@@ -176,11 +174,13 @@ def write_recorded(path: Path, text: str) -> None:
     書けなければ、出力を空に戻し記録を消してから `OSError` を返す。次の起動は同じ引数で続く（r3-3・r3-4）。
     """
     record = owner_record(path)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, OUTPUT_MODE)
+    _create_private(path)
+    fd = os.open(path, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
     try:
-        _make_readable(fd, path)
+        _make_readable(fd)
         body = json.dumps({KIND_KEY: RECORD_KIND, TEXT_KEY: text, FILE_KEY: _file_of(os.fstat(fd))}, ensure_ascii=False)
-        rfd = os.open(record, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, RECORD_MODE)
+        _create_private(record)
+        rfd = os.open(record, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
         try:
             os.fchmod(rfd, RECORD_MODE)
             _write_once(rfd, body.encode("utf-8"), record)

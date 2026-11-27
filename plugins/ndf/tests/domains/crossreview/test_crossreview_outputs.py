@@ -30,14 +30,14 @@ def test_output_written_by_the_previous_run_is_emptied_in_place(tmp_path: Path) 
     assert not outputs.owner_record(out).exists()
 
 
-def test_new_output_is_not_writable_by_the_group(tmp_path: Path) -> None:
+def test_new_output_is_accessible_only_by_the_owner(tmp_path: Path) -> None:
     out = tmp_path / "reviewed-head"
     old = os.umask(0o002)
     try:
         outputs.write_recorded(out, "a" * 40 + "\n")
     finally:
         os.umask(old)
-    assert stat.S_IMODE(out.stat().st_mode) == 0o644
+    assert stat.S_IMODE(out.stat().st_mode) == 0o600
 
 
 def test_group_write_is_removed_from_an_existing_output(tmp_path: Path) -> None:
@@ -51,14 +51,19 @@ def test_group_write_is_removed_from_an_existing_output(tmp_path: Path) -> None:
     assert (out.stat().st_ino, stat.S_IMODE(out.stat().st_mode)) == (ino, 0o644)
 
 
-def test_new_output_with_an_inherited_acl_is_owner_only_before_the_acl_is_dropped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """継いだ拡張 ACL が読み取りを拒んでいても、外した後に読める人が広がらない（PR 4686 の r2-2）。"""
+def test_on_macos_the_inherited_acl_is_dropped_before_the_files_appear(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """出力と記録は、親から継いだ拡張 ACL を外してから最終の名前へ公開する（PR 4686 の r3-1・r3-2）。"""
     out = tmp_path / "reviewed-head"
-    seen: list[int] = []
-    monkeypatch.setattr(outputs.worker_paths, "has_darwin_acl", lambda _fd: True)
-    monkeypatch.setattr(outputs.worker_paths, "drop_darwin_acl", lambda fd, _name: seen.append(stat.S_IMODE(os.fstat(fd).st_mode)))
+    record = outputs.owner_record(out)
+    appeared: dict[str, bool] = {}
+    monkeypatch.setattr(outputs.worker_paths.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        outputs.worker_paths, "_drop_inherited_acl", lambda _fd, name: appeared.setdefault(name, (tmp_path / name).exists())
+    )
     outputs.write_recorded(out, "x\n")
-    assert seen == [0o600] and stat.S_IMODE(out.stat().st_mode) == 0o600
+    assert appeared[out.name] is False and appeared[record.name] is False
+    assert [stat.S_IMODE(p.stat().st_mode) for p in (out, record)] == [0o600, 0o600]
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted([out.name, record.name])
 
 
 def test_hardlinked_output_is_refused_before_the_review(tmp_path: Path) -> None:
