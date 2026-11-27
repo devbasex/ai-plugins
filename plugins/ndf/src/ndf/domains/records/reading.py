@@ -221,7 +221,8 @@ def select_reads(
         newest = matched[-1]["check"]
         last = [r for r in matched if r["check"] == newest][-1]
         if name in keep:
-            out.append({"name": name, "reader": reader, "round": 2, "result": REMAINED})
+            # 直さない文書は 1 回目の不合格で残る（#4599）。回は残った行のものを使う
+            out.append({"name": name, "reader": reader, "round": last["round"] if last["verdict"] == REMAINED else 2, "result": REMAINED})
         elif last["verdict"] in ("passed", REMAINED):
             out.append({"name": name, "reader": reader, "round": last["round"], "result": last["verdict"]})
     return out

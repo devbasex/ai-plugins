@@ -134,9 +134,10 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _blob_id(data: bytes) -> str:
-    """Git の blob の id（Git を起動せずに元のバイト列から求める）。"""
-    return hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest()
+def blob_id(raw: bytes, width: int = 40) -> str:
+    """`raw` を Git の blob にしたときの ID（Git を起動しない。`width` 桁。64 桁なら SHA-256 のリポジトリ）。"""
+    algo = hashlib.sha256 if width == 64 else hashlib.sha1
+    return algo(b"blob %d\0" % len(raw) + raw, usedforsecurity=False).hexdigest()
 
 
 def _commit_of(g: git_mod.Git, ref: str) -> str:
@@ -290,10 +291,10 @@ def _read(g: git_mod.Git, root: Path, ref: str, allow_mismatch: bool) -> tuple[S
         raise MvvError(f"{commit} の MVV の設定（{decl_path()}）を読めない: {held}")
     decl = decl_from(raw, commit, root)
     if md.status(decl, None) == md.State.UNAPPROVED:
-        return _without_approval(md.State.UNAPPROVED, {decl_path(): _blob_id(raw)}, commit), b"", b""
+        return _without_approval(md.State.UNAPPROVED, {decl_path(): blob_id(raw)}, commit), b"", b""
     path = md.body_path(decl)
     body = guess if path == usual and guess is not None else _blob(g, f"{commit}:{path}", f"{commit} の MVV の本文（{path}）")
-    blobs = {decl_path(): _blob_id(raw), path: _blob_id(body)}
+    blobs = {decl_path(): blob_id(raw), path: blob_id(body)}
     body = md.approved_form(decl, body)
     sha = _sha256(body)
     state = md.status(decl, sha)
