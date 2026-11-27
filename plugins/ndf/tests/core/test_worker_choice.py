@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from ndf import identity
-from ndf.adapters import claude, model_choice, model_chooser, run_log
+from ndf.adapters import claude, claude_choice, model_choice, model_chooser, run_log
 from ndf.contracts import internal, worker_paths
 from ndf.core import worker, worker_choice
 
@@ -41,6 +41,23 @@ class Recorder:
         self.rows.append(dict(meta))
 
 
+class Clock:
+    """単調時計の代わり。`Fake` が起動のたびに進める。"""
+
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch) -> Clock:
+    got = Clock()
+    monkeypatch.setattr(claude_choice, "_monotonic", got)
+    return got
+
+
 @pytest.fixture
 def rows(monkeypatch) -> list[dict]:
     rec = Recorder()
@@ -55,8 +72,10 @@ def _refused(seconds: float = 0.0) -> claude.ClaudeReply:
 class Fake:
     """回答を順に返し、渡された引数と子の環境の変数を残す。`write_on` 回目の起動で結果ファイルを書く。"""
 
-    def __init__(self, h: worker.Handoff, replies: list[claude.ClaudeReply], write_on: int | None = None) -> None:
-        self.h, self.replies, self.write_on = h, replies, write_on
+    def __init__(
+        self, h: worker.Handoff, replies: list[claude.ClaudeReply], write_on: int | None = None, clock: Clock | None = None
+    ) -> None:
+        self.h, self.replies, self.write_on, self.clock = h, replies, write_on, clock
         self.argv: list[list[str]] = []
         self.timeouts: list[float] = []
         self.effort_env: list[str | None] = []
@@ -71,6 +90,8 @@ class Fake:
         if len(self.argv) == self.write_on:
             self.h.result_file.write_text('{"status": "ok"}', encoding="utf-8")
         reply = self.replies.pop(0) if self.replies else claude.ClaudeReply(True, None, "", 0.0, launched=True, model_usage=MODELS)
+        if self.clock is not None and reply.seconds is not None:
+            self.clock.now += reply.seconds  # 子が動いた秒だけ時計が進む
         options.log.report(reply)
         return reply
 
@@ -103,6 +124,7 @@ def test_a_unit_launches_with_its_arm_and_the_resume_keeps_the_values(tmp_path, 
     assert [r["outcome"] for r in rows] == ["no_result", "ok"] and {r["unit"] for r in rows} == {"run-1:impl"}
     assert {r["assign_id"] for r in rows} == {done.launch["assign_id"]} and rows[0]["mode"] == "standard"
     assert done.launch["model"] == "claude-sonnet-5-5" and done.launch["requested_model"] == "sonnet"
+    assert [r["request_try"] for r in rows] == [1, 2] and len({r["request_id"] for r in rows}) == 1  # 再開は同じリクエストの次の番号
 
 
 def test_the_first_real_model_is_observed_once_for_the_unit(tmp_path, rows) -> None:
@@ -156,15 +178,35 @@ def test_a_retry_cause_raises_the_value_and_the_row_keeps_it(tmp_path, rows) -> 
     assert rows[0]["raised"] is True and done.launch["raised"] is True
 
 
-def test_a_refused_arm_switches_to_the_base_in_a_new_conversation_once(tmp_path, rows) -> None:
+def test_a_refused_arm_switches_to_the_base_in_a_new_conversation_once(tmp_path, rows, clock) -> None:
     h = _handoff(tmp_path, unit="run-1:impl", timeout=30)
-    fake = Fake(h, [_refused(seconds=10.0)], write_on=2)
+    fake = Fake(h, [_refused(seconds=10.0)], write_on=2, clock=clock)
     done = _delegate(h, fake, tmp_path)
     assert done.cause is None and done.attempts == 2 and fake.timeouts == [30, 20]
     assert _value(fake.argv[1], "--model") is None and _value(fake.argv[1], "--session-id") not in (None, "s-1")
     assert done.session == _value(fake.argv[1], "--session-id")
     assert [(r["request_try"], r["outcome"]) for r in rows] == [(1, "unknown"), (2, "ok")]
     assert "assign_id" not in rows[1] and "assign_id" not in done.launch
+
+
+def test_the_resume_after_the_switch_continues_the_request_number(tmp_path, rows, clock) -> None:
+    h = _handoff(tmp_path, unit="run-1:impl", timeout=30)
+    done = _delegate(h, Fake(h, [_refused(seconds=1.0)], write_on=3, clock=clock), tmp_path)
+    assert done.cause is None and [r["request_try"] for r in rows] == [1, 2, 3] and len({r["request_id"] for r in rows}) == 1
+
+
+def test_time_spent_outside_the_child_counts_against_the_switch(tmp_path, rows, clock, monkeypatch) -> None:
+    h = _handoff(tmp_path, unit="run-1:impl", timeout=30)
+    real = model_chooser.base_fallback
+
+    def slow_record(choice, reason):  # 切り替えの記録の錠の待ちで期限を使い切る
+        clock.now += 30
+        return real(choice, reason)
+
+    monkeypatch.setattr(model_chooser, "base_fallback", slow_record)
+    fake = Fake(h, [_refused(seconds=1.0)], clock=clock)
+    done = _delegate(h, fake, tmp_path)
+    assert done.cause == "interrupted" and len(fake.argv) == 1
 
 
 def test_a_second_refusal_stops_with_the_place_to_fix(tmp_path) -> None:
@@ -180,9 +222,9 @@ def test_a_refused_base_stops_without_switching(tmp_path) -> None:
     assert done.cause == "precondition" and len(fake.argv) == 1
 
 
-def test_no_time_left_after_a_refusal_stops_as_interrupted_without_the_switch_row(tmp_path) -> None:
+def test_no_time_left_after_a_refusal_stops_as_interrupted_without_the_switch_row(tmp_path, clock) -> None:
     h = _handoff(tmp_path, unit="run-1:impl", timeout=5)
-    fake = Fake(h, [_refused(seconds=5.0)])
+    fake = Fake(h, [_refused(seconds=5.0)], clock=clock)
     done = _delegate(h, fake, tmp_path)
     assert done.cause == "interrupted" and len(fake.argv) == 1
     assert not any(r["kind"] == "launch_error" for r in _ledger())
@@ -195,6 +237,14 @@ def test_a_broken_effort_stops_before_any_launch(tmp_path, monkeypatch) -> None:
     with pytest.raises(internal.InternalError) as got:
         _delegate(h, fake, tmp_path)
     assert got.value.kind == "precondition" and fake.argv == []
+
+
+def test_a_broken_retry_cause_names_the_variable_but_not_the_value(tmp_path) -> None:
+    h = _handoff(tmp_path, "fix", retry="sk-secret-value")
+    fake = Fake(h, [])
+    with pytest.raises(internal.InternalError) as got:
+        _delegate(h, fake, tmp_path)
+    assert identity.env_name("retry-cause") in str(got.value) and "sk-secret-value" not in str(got.value) and fake.argv == []
 
 
 @pytest.mark.parametrize("kind,kept", [("fix", "a-9"), ("impl", None)])

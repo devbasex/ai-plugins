@@ -423,10 +423,10 @@ def _resume_until_written(
 ) -> None:
     """`delegate` の起動と再起動（子ごとに `fresh.options` の照らし直しが起動の直前に打たれる）。結果ファイルが読めなければ `EntryError` を上げる。
     起動した子が終わるたびに使用量ログへ値と終わり方の 1 行を渡す（会話ごとの `claude.LaunchLog` が番号を進める。#1959 の決定 6）。
-    再開は会話の最初の起動と同じ引数と環境で打つ。最初の起動がモデルを理由に拒まれ基準の組へ切り替えれば、`RESUMES` に数えずに
-    新しい会話で 1 回だけ残りの秒で起動し直す。残りが無ければ `interrupted`、2 回目の拒否は `_reply_failed` が止める（#2944）。"""
+    再開は最初の起動と同じ引数と環境で打ち、リクエストの番号（`request_try`）を 1 つ進める。拒否で基準の組へ切り替えれば `RESUMES` に数えず、
+    新しい会話で 1 回だけ、最初の起動の前から単調時計で持つ期限の残りで起動し直す（`ChoiceRun.fall_back_until`）。残りが無ければ `interrupted`、2 回目の拒否は `_reply_failed` が止める（#2944）。"""
     wd, first = fresh.wd, f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
-    prompt, timeout, resumes, opening = first, handoff.timeout, 0, True
+    prompt, timeout, resumes, opening, deadline = first, handoff.timeout, 0, True, claude_choice.deadline_after(handoff.timeout)
     read = partial(_read_result, wd, handoff.result_file.name, owned=handoff.owned)  # 子が起動した後は前の結果を消してある
     while resumes <= RESUMES:
         if opening:  # 会話の最初の起動: 引数・環境・行の書き手をここで決め、再開でも使う
@@ -436,7 +436,7 @@ def _resume_until_written(
         run.seen(reply)
         out.attempts, out.cost, out.launch = out.attempts + 1, out.cost + reply.cost, worker_choice.launch_metrics(out.launch, run, reply)
         out.replies.append(reply.raw[:200])
-        if (left := worker_choice.fall_back(run, reply, timeout) if resumes == 0 else None) is not None:
+        if (left := run.fall_back_until(reply, deadline) if resumes == 0 else None) is not None:
             if left <= 0:
                 out.cause, out.detail = "interrupted", f"作業 {handoff.kind} の worker を基準の組で起動し直す期限が残っていない"
                 return
@@ -445,7 +445,8 @@ def _resume_until_written(
         written = fresh.cleared and _written(wd, handoff.result_file.name)  # 前の結果を消す前は、残った前の結果を数えない
         if (written and not _missing_record(handoff, wd)) or _reply_failed(reply, out):
             return
-        argv = base + worker_choice.value_args(run) + ["--resume", out.session]
+        argv = base + run.cli_args() + ["--resume", out.session]
+        worker_choice.next_try(run, log)
         prompt, timeout, resumes = (RECORD_PROMPT if written else RESUME_PROMPT), handoff.timeout, resumes + 1
     out.cause = "work_stopped"
     out.detail = _stopped_detail(handoff, wd)

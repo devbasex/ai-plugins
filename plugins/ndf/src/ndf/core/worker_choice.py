@@ -57,11 +57,6 @@ def choose_values(h: Request) -> claude_choice.ChoiceRun:
     return claude_choice.ChoiceRun(claude_choice.pick_values("worker", h.kind, cwd=h.cwd, **request), charge_to=h.charge_to)
 
 
-def value_args(run: claude_choice.ChoiceRun) -> list[str]:
-    """選んだ値の引数（`--model`・`--effort`）。値を選ばなかった起動は足さない。"""
-    return [] if run.choice is None else list(run.choice.cli_args())
-
-
 def conversation_env(kind: str, wd: worker_paths.WorkDir, run: claude_choice.ChoiceRun) -> dict[str, Optional[str]]:
     """会話の起動の間だけ子へ重ねる環境（`run_log.overlay_env`。None の名前は外す）。
 
@@ -84,7 +79,7 @@ def first_launch(
     kind: str, session: str, base: list[str], wd: worker_paths.WorkDir, run: claude_choice.ChoiceRun, report: Callable[[], Any]
 ) -> tuple[list[str], dict[str, Optional[str]], claude.LaunchLog]:
     """会話の最初の起動の引数・子の環境・行の書き手。再開は同じ環境と書き手を使い、引数は会話の指定だけを替える。"""
-    return base + value_args(run) + ["--session-id", session], conversation_env(kind, wd, run), launch_log(kind, session, run, report)
+    return base + run.cli_args() + ["--session-id", session], conversation_env(kind, wd, run), launch_log(kind, session, run, report)
 
 
 def launch_log(kind: str, session: str, run: claude_choice.ChoiceRun, report: Callable[[], Any]) -> claude.LaunchLog:
@@ -105,18 +100,10 @@ def end_of(reply: claude.ClaudeReply, report: Callable[[], Any]) -> str:
     return status if status in STATUSES else "no_result"
 
 
-def fall_back(run: claude_choice.ChoiceRun, reply: claude.ClaudeReply, timeout: float) -> Optional[float]:
-    """モデルを理由に拒まれた会話の最初の起動を、基準の組へ切り替える。
-
-    切り替えたら残りの秒、残りが無ければ 0（切り替えず、切り替えの行も書かない）、切り替えなければ None を返す。2 回目の拒否と
-    基準の組の拒否は切り替えない（呼び手が `precondition` で止める）。
-    """
-    if reply.failure is not claude.Failure.MODEL_REFUSED or run.switched or run.choice is None:
-        return None
-    left = timeout - (reply.seconds if reply.seconds is not None else 0.0)
-    if left <= 0:
-        return 0.0
-    return left if run.fall_back(reply) else None
+def next_try(run: claude_choice.ChoiceRun, log: claude.LaunchLog) -> None:
+    """同じ会話を再開する前に、リクエストの中の番号（`request_try`）を 1 つ進め、行の書き手の欄にも反映する。"""
+    run.request_try += 1
+    log.meta["request_try"] = run.request_try
 
 
 def launch_metrics(last: Mapping[str, Any], run: claude_choice.ChoiceRun, reply: claude.ClaudeReply) -> dict[str, Any]:

@@ -890,25 +890,41 @@ def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResu
     `precondition` で止める（#1959・#2944）。
 
     モデルと effort は `NDF_UNIT_ID` を単位に差し込まれた処理で選び（差し込みが無ければ選ばない）、モデルを理由に拒まれたら
-    残りの期限で基準の組で 1 回だけ起動し直す。起動した子が終わるたびに使用量ログへ値と終わり方（`outcome`）の 1 行を渡す
-    （工程の名前は Skill の名前。会話を再開しないので番号は会話ごとに 0 から。書けなくても結果を変えない。#1959 の決定 6）。"""
+    残りの期限で基準の組で 1 回だけ起動し直す。期限は最初の起動の前から単調時計で持ち、切り替えの記録の前と後に残りを測る。
+    起動の引数（導入済みのプラグインの確かめを含む）は 1 回だけ組み、起動し直すときは値の引数だけを替える。起動した子が終わるたびに
+    使用量ログへ値と終わり方（`outcome`）の 1 行を渡す（工程の名前は Skill の名前。会話を再開しないので番号は会話ごとに 0 から。
+    書けなくても結果を変えない。#1959 の決定 6）。回答の検証は行と工程の結果で 1 回を使い回す（`_Checked`）。"""
     held = contextlib.ExitStack()
     try:
         picked = claude_choice.ChoiceRun(_skill_choice(run, cwd))
         grant = held.enter_context(launch_settings.prepared(run.name, cwd))
     except internal.InternalError as exc:
         return StageResult(result.stopped(SKILL, exc.kind, f"Skill {run.name} を起動しない: {exc}"), {})
+    checked = _Checked()
     with held:
         limit = limits.seconds(SKILL_LIMIT)
-        reply, notice = _skill_launch(run, cwd, call_claude, picked, grant, limit)
-        left = limit - (reply.seconds if reply.seconds is not None else 0.0)
-        if picked.fall_back(reply, ready=lambda: left > 0):
-            reply, notice = _skill_launch(run, cwd, call_claude, picked, grant, left)
+        deadline = claude_choice.deadline_after(limit)
+        schema = contracts.load_json(contracts.schema_path("result"))
+        base, notice = claude.claude_launch(
+            claude.ClaudeCall(SKILL_SYSTEM, claude.Permission.FULL, json_schema=schema, grant=grant), cwd=cwd
+        )
+
+        def launch(timeout: float) -> claude.ClaudeReply:  # 組んだ引数に選んだ値の引数を足して 1 回起動する
+            log = claude.LaunchLog({**claude.launch_meta(run.name), **picked.meta()}, lambda r: {"outcome": skill_outcome(r, checked)})
+            options = claude.LaunchOptions(verify=grant.verifier, log=log)
+            with run_log.overlay_env(picked.env_changes()):
+                got = call_claude([*base, *picked.cli_args()], skill_prompt(run), timeout, cwd, options)
+            picked.seen(got)
+            return got
+
+        reply = launch(limit)
+        if (left := picked.fall_back_until(reply, deadline)) is not None and left > 0:
+            reply = launch(left)
     if not reply.ok:
         kind = _skill_cause(reply.failure)
         got = StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
     else:
-        report = result.received(reply.answer)
+        report = checked.report(reply)
         got = finished(run, report) if report is not None else bad_report(run, "回答が結果 JSON の形に合わない")
     return got if notice is None else replace(got, warnings=(*got.warnings, notice))
 
@@ -920,27 +936,24 @@ def _skill_choice(run: StageRun, cwd: Path) -> Any:
     return claude_choice.pick_values("skill", run.name, cwd=cwd, unit=None if unit == "" else unit, mode=mode)
 
 
-def _skill_launch(
-    run: StageRun, cwd: Path, call_claude: SkillCaller, picked: claude_choice.ChoiceRun, grant: launch_settings.Grant, timeout: float
-) -> tuple[claude.ClaudeReply, Optional[str]]:
-    """選んだ値で Skill の `claude -p` を 1 回起動し、回答と導入済みの一覧を読めなかった知らせを返す。"""
-    schema = contracts.load_json(contracts.schema_path("result"))
-    call = claude.ClaudeCall(
-        SKILL_SYSTEM, claude.Permission.FULL, json_schema=schema, model=picked.model, effort=picked.effort, grant=grant
-    )
-    argv, notice = claude.claude_launch(call, cwd=cwd)
-    log = claude.LaunchLog({**claude.launch_meta(run.name), **picked.meta()}, lambda r: {"outcome": skill_outcome(r)})
-    with run_log.overlay_env(picked.env_changes()):
-        reply = call_claude(argv, skill_prompt(run), timeout, cwd, claude.LaunchOptions(verify=grant.verifier, log=log))
-    picked.seen(reply)
-    return reply, notice
+class _Checked:
+    """Skill の回答の検証（`result.received`）を、回答 1 つにつき 1 回にする。使用量ログの終わり方と工程の結果が同じ検証を使う。"""
+
+    def __init__(self) -> None:
+        self._last: Optional[tuple[Any, Optional[dict[str, Any]]]] = None
+
+    def report(self, reply: claude.ClaudeReply) -> Optional[dict[str, Any]]:
+        """回答の結果 JSON。形に合わなければ None。同じ回答（`answer` の同じオブジェクト）は検証し直さない。"""
+        if self._last is None or self._last[0] is not reply.answer:
+            self._last = (reply.answer, result.received(reply.answer))
+        return self._last[1]
 
 
-def skill_outcome(reply: claude.ClaudeReply) -> str:
+def skill_outcome(reply: claude.ClaudeReply, checked: Optional[_Checked] = None) -> str:
     """Skill の起動 1 回の終わり方: 結果 JSON の status、形に合わなければ `bad_report`、回答を返せなければ `unknown`。"""
     if not reply.ok:
         return "unknown"
-    report = result.received(reply.answer)
+    report = (checked if checked is not None else _Checked()).report(reply)
     return str(report["status"]) if report is not None else "bad_report"
 
 

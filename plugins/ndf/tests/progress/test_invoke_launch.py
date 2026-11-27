@@ -118,3 +118,32 @@ def test_a_broken_effort_stops_the_skill_without_launching(tmp_path: Path, unit_
     seen: list = []
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=lambda *a: seen.append(a))
     assert seen == [] and got.cause["kind"] == "precondition"
+
+
+def test_the_switch_reads_the_plugin_list_once_and_checks_the_answer_once(tmp_path: Path, unit_rows, monkeypatch) -> None:
+    listed, checked = [], []
+    monkeypatch.setattr(claude, "list_plugins", lambda **_: listed.append(1) or [])
+    real = result.received
+    monkeypatch.setattr(result, "received", lambda obj: checked.append(1) or real(obj))
+    refused = claude._parse_reply(json.dumps(REFUSED))._replace(launched=True)
+    done = claude.ClaudeReply(True, result.result("design", result.OK, "済"), "", 0.0, launched=True)
+    got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=_replying([refused, done], []))
+    assert got.status == "ok" and unit_rows[-1]["outcome"] == "ok" and (len(listed), len(checked)) == (1, 1)
+
+
+def test_the_skill_does_not_relaunch_when_recording_the_switch_used_up_the_time(tmp_path: Path, unit_rows, monkeypatch) -> None:
+    from ndf.adapters import claude_choice, model_chooser
+
+    now = [0.0]
+    monkeypatch.setattr(claude_choice, "_monotonic", lambda: now[0])
+    real = model_chooser.base_fallback
+
+    def slow_record(choice, reason):  # 切り替えの記録の錠の待ちで期限を使い切る
+        now[0] += invoke.limits.seconds(invoke.SKILL_LIMIT)
+        return real(choice, reason)
+
+    monkeypatch.setattr(model_chooser, "base_fallback", slow_record)
+    seen: list[list[str]] = []
+    refused = claude._parse_reply(json.dumps(REFUSED))._replace(launched=True)
+    got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=_replying([refused], seen))
+    assert len(seen) == 1 and got.status == "stopped"

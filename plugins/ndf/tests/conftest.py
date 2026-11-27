@@ -146,6 +146,14 @@ def _no_launch_chooser(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(claude_choice, "launch_chooser", None)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_repo_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """プロセスの中で覚えたリポジトリのキー（`launch_approval._repo_keys`）を、前のテストから引き継がない（#2944）。"""
+    from ndf.adapters import launch_approval
+
+    monkeypatch.setattr(launch_approval, "_repo_keys", {})
+
+
 @pytest.fixture
 def launch_chooser(monkeypatch: pytest.MonkeyPatch):
     """起動の値を選ぶ処理（`model_choice`）をエントリポイントと同じく差し込む。リポジトリのキーは git を起動せず、作業場所の実体にする。"""

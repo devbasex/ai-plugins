@@ -81,7 +81,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_RELAY_SPIN` | user | seconds | — | 再起動ループとみなすセグメントの秒。0 で検出を切る。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_STOP_WAIT` | user | seconds | — | 名前つきの stop がラッパーの終わりを待つ上限。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_TMUX` | user | path | — | リレーハブが呼ぶ tmux の実行ファイル。無ければ PATH の tmux | 内部（予告なく変えてよい） |
-| `NDF_RETRY_CAUSE` | ndf | string | — | プランの実行が、同じ失敗への 2 回目以降の修正のステップの子へ渡す失敗の理由（#2944。表 launch-experiments の retries の値）。ndf worker run は値を選ぶ処理の引き上げの理由に渡し、値を 1 つ上げる。無いか空なら上げない。表に無い値は起動しない | 内部（予告なく変えてよい） |
+| `NDF_RETRY_CAUSE` | ndf | string | — | プランの実行が、同じ失敗への 2 回目以降の修正のステップの子へ渡す失敗の理由（#2944。表 launch-experiments の retries の値）。ndf worker run は失敗の理由をもとに、引き上げの規則に従ってモデルか effort を 1 段階上げる。手動の指定（引数か環境変数）が優先される場合や、規則で上げられる値が無い場合は、選んだ値のまま起動する。無いか空なら上げない。表に無い値なら起動せずに止まり、誤りの文に値を出さない | 内部（予告なく変えてよい） |
 | `NDF_RUNTIME_SESSION` | user | string | — | ランタイムのセッションを <pid>:<開始時刻> で指定する（テストと CI）。無ければ祖先のプロセスから探す | 内部（予告なく変えてよい） |
 | `NDF_SHARED_CONFIG_DIR` | ndf | path | — | アカウントの子の中で、元の CLAUDE_CONFIG_DIR を持つ（空なら ~/.claude）。アカウントの登録の保存先を決める。登録済みアカウントの子には、親にあれば親の値、無ければ子へ渡す前の CLAUDE_CONFIG_DIR（無ければ空文字）を入れる | 内部（予告なく変えてよい） |
 | `NDF_STATE_HOME` | user | path | — | 状態の保存先の根。保存先は <値>/<プラグイン名>（XDG_STATE_HOME と同じ読み方。入れ替えの前に旧い NDF と同じ値を渡されても、旧い保存先を退避しない）。無ければ XDG_STATE_HOME の下 | 公開 |
