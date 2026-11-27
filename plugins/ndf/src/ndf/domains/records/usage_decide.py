@@ -6,6 +6,7 @@
 - 集計は、会話の記録を読めるサブエージェントは記録の合計を正とし、使用量ログの行の抜け（停止の hook が最後の応答を
   読む前に書いた分）を補う。読めないものは使用量ログの行の合計にする
 - 使用量ログの保存先は書き手によらず 1 つ（`NDF_USAGE_DIR` → 状態の保存先の usage）
+- `claude -p` の行の `session_cost_usd` は会話の累計なので、起動 1 回の費用は同じ会話の 1 つ前の行との差で、集計の時に求める（#1959）
 """
 
 from __future__ import annotations
@@ -159,3 +160,48 @@ def reconcile(
     counted = [_row_usage(row) for row in rows if _counted_row(row, transcripts, since, until)]
     unknown = sum(1 for u in counted if u is None)
     return read.plus(total_of(u for u in counted if u is not None)), unknown
+
+
+def _session_cost(row: Mapping[str, Any]) -> Optional[float]:
+    value = row.get("session_cost_usd")
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _first_per_launch(rows: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """`launch_id` ごとに数える 1 行（値を持つ行のうち最初の行、無ければ最初の行）を、最初に現れた順に並べる。"""
+    kept: dict[str, Mapping[str, Any]] = {}
+    for row in rows:
+        launch = row.get("launch_id")
+        if not isinstance(launch, str):
+            continue
+        if launch not in kept or (_session_cost(kept[launch]) is None and _session_cost(row) is not None):
+            kept[launch] = row
+    return list(kept.values())
+
+
+def launch_costs(rows: Iterable[Mapping[str, Any]]) -> dict[str, Optional[float]]:
+    """`launch_id` → 起動 1 回の費用（USD）。求められなければ None（#1959 の「起動の費用の求め方」）。
+
+    `session_cost_usd` は同じ会話の累計である。`session_seq` が 0 の行（`session_id` の無い行を含む）はその値、
+    ほかは同じ `session_id` の番号が 1 つ前の行との差にする。値が無い、1 つ前の行に値が無い、差が負なら None。
+    期間で絞る前の全部の行を受ける（集計期間より前の行も前の行として読む）。
+    """
+    kept = _first_per_launch(rows)
+    totals = {
+        (row["session_id"], row["session_seq"]): _session_cost(row)
+        for row in kept
+        if isinstance(row.get("session_id"), str) and isinstance(row.get("session_seq"), int)
+    }
+    return {row["launch_id"]: _launch_cost(row, totals) for row in kept}
+
+
+def _launch_cost(row: Mapping[str, Any], totals: Mapping[tuple[str, int], Optional[float]]) -> Optional[float]:
+    value, seq, session = _session_cost(row), row.get("session_seq"), row.get("session_id")
+    if value is None or not isinstance(seq, int) or isinstance(seq, bool):
+        return None
+    if seq == 0:
+        return value
+    before = totals.get((session, seq - 1)) if isinstance(session, str) else None
+    if before is None or value < before:
+        return None
+    return value - before

@@ -886,7 +886,9 @@ def _skill_cause(failure: Optional[claude.Failure]) -> str:
 
 
 def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResult:
-    """Skill を full で 1 回回す。起動の設定の Skill の名前の指定が壊れているか未承認なら起動せずに `precondition` で止める（#1959）。"""
+    """Skill を full で 1 回回す。起動の設定の Skill の名前の指定が壊れているか未承認なら起動せずに `precondition` で止める（#1959）。
+
+    起動した子ごとに使用量ログへ 1 行渡す（工程の名前は Skill の名前。書けなくても結果を変えない）。"""
     held = contextlib.ExitStack()
     try:
         grant = held.enter_context(launch_settings.prepared(run.name, cwd))
@@ -898,6 +900,9 @@ def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResu
         argv, notice = claude.claude_launch(call, cwd=cwd)
         options = claude.LaunchOptions(verify=grant.verifier)
         reply = call_claude(argv, skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd, options)
+    claude.report_launch(
+        reply, claude.launch_meta(run.name, git.repo_or_none(cwd)), 0
+    )  # 会話を再開しないので番号は 0 から（#1959 の決定 6）
     if not reply.ok:
         kind = _skill_cause(reply.failure)
         got = StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})

@@ -21,7 +21,10 @@ import errno
 import json
 import os
 import subprocess
+import time
+import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Protocol, Sequence, Union
@@ -432,11 +435,33 @@ def set_relay_checks(checks: Optional[RelayChecks]) -> None:
     relay_checks = checks
 
 
+class LaunchRecorder(Protocol):
+    """起動した子 1 つの使用量の行を書く処理（`ndf.domains.records.usage` が満たす。#1959 の決定 6）。"""
+
+    def record_cli(self, usage: Any, meta: Mapping[str, Any]) -> Any: ...
+
+
+# 差し込まれた使用量ログの書き込み処理。None なら書かない（エントリポイントを通らない呼び出しとテスト）
+launch_recorder: Optional[LaunchRecorder] = None
+
+
+def set_launch_recorder(recorder: Optional[LaunchRecorder]) -> None:
+    """使用量ログの書き込み処理を差し込む（一番上のエントリポイントが起動時に 1 回呼ぶ）。"""
+    global launch_recorder
+    launch_recorder = recorder
+
+
 class ClaudeReply(NamedTuple):
     """`claude -p --output-format json` の 1 回の回答。`answer` は縛った回答（`structured_output`）か本文の JSON。
 
     `failure` は打ち直しても直らない失敗の理由（`Failure`）。None の失敗（誤りで終えた・出力が JSON でない）は
     打ち直せば直りうる。
+
+    使用量ログの行の元（#1959 の決定 6）: `session_id`・`usage`・`model_usage`（結果の `modelUsage`）・`session_cost_usd`
+    （結果の `total_cost_usd`）は結果の JSON の値で、読めなければ None。`usage` は起動 1 回分、`model_usage` と
+    `session_cost_usd` は会話の累計である（2026-11-27 に Claude Code 2.1.332 で同じ会話を 2 回再開して測った）。
+    `launched` は子プロセスを起動できたか（スロット・下限・照らし直しで止まった起動と、起動に失敗した起動は偽）、
+    `launched_at`・`seconds` は起動した時刻（UTC）とかかった秒。`earlier` は、アカウントを替えて打ち直す前に起動した子の回答である。
     """
 
     ok: bool
@@ -445,6 +470,14 @@ class ClaudeReply(NamedTuple):
     cost: float
     error: Optional[str] = None
     failure: Optional[Failure] = None
+    session_id: Optional[str] = None
+    usage: Optional[Mapping[str, Any]] = None
+    model_usage: Optional[Mapping[str, Any]] = None
+    session_cost_usd: Optional[float] = None
+    launched: bool = False
+    launched_at: Optional[str] = None
+    seconds: Optional[float] = None
+    earlier: tuple["ClaudeReply", ...] = ()
 
     @classmethod
     def failed(cls, raw: str, error: str, cost: float = 0.0, failure: Optional[Failure] = None) -> "ClaudeReply":
@@ -492,16 +525,19 @@ def _model_tokens(row: Mapping[str, Any]) -> int:
     return sum(_count(row.get(k)) for k in MODEL_TOKEN_FIELDS)
 
 
+def main_model(models: Mapping[str, Any]) -> Optional[tuple[str, Mapping[str, Any]]]:
+    """`modelUsage` の主モデル（トークンの和が最も大きく、同じなら窓の小さい方）の名前と値。無いか空なら None（#1959・#4013）。"""
+    rows = ((name, row) for name, row in models.items() if isinstance(row, Mapping))
+    return max(rows, key=lambda nr: (_model_tokens(nr[1]), -_count(nr[1].get("contextWindow"))), default=None)
+
+
 def context_window(result: Optional[Mapping[str, Any]]) -> Optional[int]:
-    """結果の行の主モデル（トークンの和が最も大きく、同じなら窓の小さい方）の `contextWindow`。読めなければ None（#4013）。"""
+    """結果の行の主モデル（`main_model`）の `contextWindow`。読めなければ None（#4013）。"""
     models = result.get("modelUsage") if isinstance(result, Mapping) else None
-    if not isinstance(models, Mapping):
+    found = main_model(models) if isinstance(models, Mapping) else None
+    if found is None:
         return None
-    rows = (r for r in models.values() if isinstance(r, Mapping))
-    main = max(rows, key=lambda r: (_model_tokens(r), -_count(r.get("contextWindow"))), default=None)
-    if main is None:
-        return None
-    window = _int(main.get("contextWindow"))
+    window = _int(found[1].get("contextWindow"))
     return window if window is not None and window > 0 else None
 
 
@@ -545,11 +581,74 @@ def _parse_reply(stdout: str) -> ClaudeReply:
     if isinstance(payload, ClaudeReply):
         return payload
     spent = payload.get("total_cost_usd")
-    cost = float(spent) if isinstance(spent, (int, float)) else 0.0
+    cost = float(spent) if isinstance(spent, (int, float)) and not isinstance(spent, bool) else 0.0
     text = payload.get("result") if isinstance(payload.get("result"), str) else stdout
-    if payload.get("is_error"):
-        return _error_reply(payload, text, cost)
-    return _answer_reply(payload, text, cost)
+    reply = _error_reply(payload, text, cost) if payload.get("is_error") else _answer_reply(payload, text, cost)
+    return _with_usage(reply, payload)
+
+
+def _with_usage(reply: ClaudeReply, payload: Mapping[str, Any]) -> ClaudeReply:
+    """回答に、使用量ログの行の元になる結果の値を持たせる。形の違う値は None にする（#1959）。"""
+    sid, usage, models, spent = (payload.get(k) for k in ("session_id", "usage", "modelUsage", "total_cost_usd"))
+    return reply._replace(
+        session_id=sid if isinstance(sid, str) and sid else None,
+        usage=usage if isinstance(usage, Mapping) else None,
+        model_usage=models if isinstance(models, Mapping) else None,
+        session_cost_usd=float(spent) if isinstance(spent, (int, float)) and not isinstance(spent, bool) else None,
+    )
+
+
+def launch_meta(name: str, repo: Optional[str]) -> dict[str, Any]:
+    """使用量ログの行の工程の欄。`name` は工程の名前（作業種別か Skill の名前）、`repo` は `<所有者>/<リポジトリ>`（読めなければ None）。
+
+    プランの実行の子なら、プランの実行の id・ステップの id・何回目かを環境変数から足す（#1959 の「子へ渡す環境変数」）。
+    無い値と、整数でない回数は欄を省く。
+    """
+    meta: dict[str, Any] = {"name": name}
+    if repo:
+        meta["repo"] = repo
+    for field_name, env in (("run_id", identity.env_name("plan-run-id")), ("step", identity.env_name("step-id"))):
+        value = os.environ.get(env)
+        if value:
+            meta[field_name] = value
+    raw = os.environ.get(identity.env_name("step-attempt"), "")
+    if raw.isdigit() and int(raw) > 0:
+        meta["attempt"] = int(raw)
+    return meta
+
+
+def report_launch(reply: ClaudeReply, meta: Mapping[str, Any], seq: int) -> int:
+    """起動した子ごとに使用量ログの行を 1 つ書き込み処理へ渡し、起動した子の数を返す（#1959 の決定 6）。
+
+    子は `reply.earlier` の順に続けて `reply`。起動しなかった子（`launched` が偽）は行を渡さない。`seq` は最初の子の
+    `session_seq` で、子ごとに 1 進める。`meta` の `session_id` が無ければ結果の会話の id を書く。書き込み処理が
+    差し込まれていなければ渡さない。行に質問と回答の本文を入れない。
+    """
+    children = [child for child in (*reply.earlier, reply) if child.launched]
+    for offset, child in enumerate(children):
+        if launch_recorder is not None:
+            launch_recorder.record_cli(child.usage, _launch_row(child, meta, seq + offset))
+    return len(children)
+
+
+def _launch_row(child: ClaudeReply, meta: Mapping[str, Any], seq: int) -> dict[str, Any]:
+    """子 1 つの行の欄（使用量を除く）。値の無い欄は None のまま渡し、書き込み処理が省く。"""
+    models = child.model_usage if child.model_usage is not None else {}
+    main = main_model(models)
+    tokens = {n: {k: _count(r.get(k)) for k in MODEL_TOKEN_FIELDS} for n, r in models.items() if isinstance(r, Mapping)}
+    row = {
+        **meta,
+        "launch_id": uuid.uuid4().hex,
+        "session_id": meta["session_id"] if "session_id" in meta else child.session_id,
+        "session_seq": seq,
+        "session_cost_usd": child.session_cost_usd,
+        "model": main[0] if main is not None else None,
+        "launched_at": child.launched_at,
+        "seconds": child.seconds,
+    }
+    if tokens:  # モデルの無い結果は欄を置かない
+        row["model_usage"] = tokens
+    return row
 
 
 def _payload(stdout: str) -> dict | ClaudeReply:
@@ -665,7 +764,10 @@ def _accounted(
     if reply.failure is not Failure.USAGE_LIMIT or not options.switch_account:
         return reply
     again = checks.retry(base.argv, base.env, where, keys)
-    return reply if again is None else _prefaced(again, prompt, timeout, cwd, options)
+    if again is None:
+        return reply
+    retried = _prefaced(again, prompt, timeout, cwd, options)
+    return retried._replace(earlier=(*reply.earlier, reply, *retried.earlier))  # 前の子の使用量の行を残す（#1959）
 
 
 def require_claude(run: AccountRun, cwd: Optional[Path], check: bool) -> Optional[ClaudeReply]:
@@ -714,18 +816,26 @@ def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path],
             stopped = _precheck(run, cwd, options)
             if stopped is not None:
                 return stopped
+            at, started = datetime.now(UTC).isoformat(timespec="seconds"), time.monotonic()
             if run.gate is None:
                 launched = True
-                return _run_claude(run.argv, prompt, timeout, cwd, run.env, options.new_group)
+                return _timed(_run_claude(run.argv, prompt, timeout, cwd, run.env, options.new_group), at, started)
             proc = _gated(run, cwd)
             if isinstance(proc, ClaudeReply):
                 return proc
             launched = True
-            return _talk(proc, prompt, timeout)
+            return _timed(_talk(proc, prompt, timeout), at, started)
     except launch_slot.NotLaunched as exc:
         return ClaudeReply.failed("", exc.detail, failure=Failure(exc.kind))
     finally:
         run.end(launched)
+
+
+def _timed(reply: ClaudeReply, at: str, started: float) -> ClaudeReply:
+    """起動した子の回答に、起動した時刻とかかった秒を持たせる。起動できなかった回答はそのまま返す。"""
+    if not reply.launched:
+        return reply
+    return reply._replace(launched_at=at, seconds=round(time.monotonic() - started, 3))
 
 
 def _absolute_config(env: dict[str, str], cwd: Optional[Path]) -> dict[str, str]:
@@ -835,6 +945,11 @@ def _launch_failed(exc: OSError) -> ClaudeReply:
 
 
 def _talk(proc: subprocess.Popen, prompt: str, timeout: float) -> ClaudeReply:
+    """起動した子に質問を渡して回答を読み、起動した子の回答（`launched` が真）にする。"""
+    return _read_answer(proc, prompt, timeout)._replace(launched=True)
+
+
+def _read_answer(proc: subprocess.Popen, prompt: str, timeout: float) -> ClaudeReply:
     """質問を標準入力で渡して回答を読む。期限を超えたら組ごと止めて回収する。"""
     try:
         stdout, stderr = proc.communicate(prompt, timeout=timeout)

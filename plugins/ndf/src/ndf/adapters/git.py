@@ -171,6 +171,14 @@ def repo_of_url(url: str) -> Optional[str]:
     return f"{m.group('owner')}/{m.group('name')}" if m else None
 
 
+def repo_or_none(cwd: Path) -> Optional[str]:
+    """作業場所 `cwd` のリモートの `<所有者>/<リポジトリ>`。git の誤り・リモートが無い・GitHub でない URL なら None（使用量ログの行の `repo`。#1959）。"""
+    try:
+        return Git(cwd).remote_repo()
+    except GitError:  # noqa: NDF401 外部コマンド: リモートの無い作業場所は行の repo の欄を省く
+        return None
+
+
 class WorktreeEntry(NamedTuple):
     """`git worktree list` の 1 件。`branch` は detached HEAD なら `None`。"""
 

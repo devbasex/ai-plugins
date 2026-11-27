@@ -431,13 +431,16 @@ def delegate(
 
 
 def _resume_until_written(handoff: Handoff, out: Delivery, base: list[str], call: Caller, fresh: FreshResult) -> None:
-    """`delegate` の起動と再起動（子ごとに `fresh.options` の照らし直しが起動の直前に打たれる）。結果ファイルが読めなければ `EntryError` を上げる。"""
+    """`delegate` の起動と再起動（子ごとに `fresh.options` の照らし直しが起動の直前に打たれる）。結果ファイルが読めなければ `EntryError` を上げる。
+    起動した子ごとに使用量ログへ 1 行渡し（`claude.report_launch`）、会話の中の番号 `seq` を進める（#1959 の決定 6）。"""
     wd = fresh.wd
     argv = base + ["--session-id", out.session]
     prompt = f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
+    meta, seq = {**claude.launch_meta(handoff.kind, git.repo_or_none(handoff.cwd)), "session_id": out.session}, 0
     for attempt in range(RESUMES + 1):
         with _worker_env(handoff.kind, wd):
             reply = call(argv, prompt, handoff.timeout, handoff.cwd, fresh.options)
+        seq += claude.report_launch(reply, meta, seq)
         out.attempts, out.cost = attempt + 1, out.cost + reply.cost
         out.replies.append(reply.raw[:200])
         written = fresh.cleared and _written(wd, handoff.result_file.name)  # 前の結果を消す前は、残った前の結果を数えない
