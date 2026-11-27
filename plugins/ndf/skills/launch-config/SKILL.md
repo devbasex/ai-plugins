@@ -1,0 +1,144 @@
+---
+name: launch-config
+description: "Approve and apply .ndf/launch.json. Use when a step needs an MCP or extra tool, or a launch stopped as unapproved（起動の設定・起動の承認・MCPを工程で使う）."
+allowed-tools:
+  - Bash
+  - Read
+---
+
+# 起動の設定の承認（launch-config）
+
+NDF が非対話で起動する AI（プランの worker・Skill を回す起動）は、既定では決まった Tool だけを読み込み、MCP を読まない。
+工程で MCP や Tool を足したいとき、委譲や相手役でサンドボックスを外してよいときは、リポジトリの `.ndf/launch.json` に書き、
+**利用者がこのマシンで承認する**。承認していない指定を使う起動は止まり、止まった文がこの Skill を指す。
+
+例: 工程 `impl` で社内検索の MCP を使いたい。`draft` で候補を作り、候補に `"impl": {"mcp": [".ndf/mcp/search.json"], "allow": ["mcp__search__query"]}`
+を書き、利用者に承認の対象を示し、承認の質問に「承認する」と回答してもらってから `.ndf/launch.json` へ反映する。
+
+**`ndf` のコマンドは 1 回の Bash の呼び出しで 1 つだけ打ち、対象のリポジトリ（worktree）の中で打つ。** どのコマンドも結果 JSON を
+標準出力の最後の 1 行に出す。
+
+## 守ること
+
+- **`.ndf/launch.json` を書き換える前に、毎回利用者に確かめる。** 承認の対象が空の場合も、承認済みの場合も同じである（手順 4）。
+  `.ndf/` の書き換えは、共通原則の「必ず人の承認が要る操作」の C7 に当たる。`.ndf/launch.json` を直接編集しない。直すのは `draft` が作った候補だけである
+- **承認を確定するのは人だけである。** 利用者の回答が無いまま `approve` を打たない。「承認しない」と回答されたら記録も反映もしない
+- **MCP の定義ファイルと `.mcp.json` を読まず、作らず、編集しない。** 定義の引数・`env`・URL には資格情報が書かれうる。定義ファイルは利用者が書き、
+  中身は利用者が自分で開いて読む
+- **`allow` の指定子に資格情報を書かない。** 資格情報は環境変数で渡し、指定子には `$名前` の参照だけを書く。秘密の形の値があると `show` が止まる
+- **`show --question approve` が返した質問は、1 字も変えずに出す。** 警告の文（`unsandboxed` があるとき）はコマンドが入れる。Skill は文を足さない。
+  変えると回答が記録されず、`approve` が拒む
+
+## 設定の形
+
+```json
+{
+  "version": 1,
+  "permissions": {
+    "steps": {
+      "*": {"load": ["LSP"]},
+      "design": {"mcp": "inherit"},
+      "impl": {"mcp": [".ndf/mcp/search.json"], "allow": ["mcp__search__query"]}
+    },
+    "unsandboxed": ["codex"]
+  }
+}
+```
+
+| キー | 意味 |
+| --- | --- |
+| `permissions.steps.<工程>` | `<工程>` は worker の作業の名前か Skill の名前。`*` はすべての工程。工程の指定のキーは `*` の同じキーを置き換える |
+| `load` | 読み込みに足す組み込みの Tool の名前（英字だけ）。足しただけでは、尋ねずに使えるようにはならない |
+| `allow` | 尋ねずに使ってよい許可の指定（Tool の名前・`Bash(git log:*)` の形・`mcp__<サーバ>__<Tool>`） |
+| `mcp` | MCP の定義ファイル（リポジトリの根からの相対パス）の配列か、環境の MCP をすべて読む `"inherit"` |
+| `permissions.unsandboxed` | サンドボックスが使えない環境で、安全装置を外して起動してよいランタイム（`claude` 以外）。利用者は、このマシンが外側で隔離されていることを自分で確かめてから承認する |
+
+## 手順
+
+### 1. 今の指定と状態を読む
+
+```bash
+ndf launch-config show
+```
+
+- `metrics.approved` が今の内容がこのマシンで承認済みか、`items` の `launch-target` が承認の対象の一覧である
+- 結果に `next` があれば、回答済みで反映が済んでいない承認がある。先に `next.argv` のコマンドをそのまま打って片付ける
+- `metrics.cleanup_targets` は、利用者が手で消してよい候補の一覧である。利用者に示すときは、その候補を開いているエディタを閉じてから消すよう添える
+- **`stopped`（`precondition`）で止まっても、手順はそこで終えない。** 止まった文のファイルと位置を利用者に伝え、元のファイルは変えずに次へ進む
+  - 壊れているのが `.ndf/launch.json` なら、手順 2 の候補の中身を読んで直す（`--candidate` を付けた `show` と `approve` は今の `.ndf/launch.json` を解析しない）
+  - 壊れているのが MCP の定義ファイルか `.mcp.json` なら、利用者が直してから手順 1 をやり直す。AI は直さない
+
+### 2. 候補を作って直す
+
+```bash
+ndf launch-config draft
+```
+
+結果の `metrics.candidate` が候補のパス（利用者の状態の保存先の下の `candidate.json`）で、中身は今の `.ndf/launch.json` の写しである。
+利用者のリクエストに合わせて、この候補を編集する。MCP の定義ファイルが要るなら、パスを候補に書き、ファイルは利用者に書いてもらう。
+NDF が起動した AI の中（`NDF_AI_CHILD`）では `draft` は拒まれる。
+
+### 3. 承認の対象を示す
+
+```bash
+ndf launch-config show --candidate <候補のパス>
+```
+
+`items` の `launch-target` から次を利用者に示す。MCP の定義の中身は出ないので、ファイルを開いて読むよう伝える。
+
+- 工程ごとの `load`・`allow`・`mcp` の指定
+- MCP の定義ファイルごとの場所・ハッシュ・サーバ名・コマンド名
+- 安全装置を外してよいランタイム（`unsandboxed`）
+- 承認の対象のハッシュ（`metrics.sha256`）
+
+### 4. 承認の質問を出し、承認されたら反映する
+
+```bash
+ndf launch-config show --question approve --candidate <候補のパス>
+```
+
+**承認の対象が空か承認済みでも、この手順を飛ばさない。** 結果の形で分かれる。
+
+**`items` に `question` がある（Claude Code の対話の会話）**
+
+1. **読み手役に読ませる。** `items` の `question` の `input.questions[0].question`（質問の文）と、手順 3 で利用者に示した説明を 1 つのファイルに書き、
+   `ndf records reading prompt --file <JSON>` で読み手役への指示を作る。JSON は `files`（そのファイルのパス）・`reader`（`position`・`words`・`knowledge`。
+   読み手は起動の設定を承認する利用者）・`questions_kind`（`none`）を持つ。指示の文だけを渡して読み手役を起動する（Claude Code では新しい `ndf:worker`、
+   `description` は `検証: 読み手役（起動の承認・利用者）`）。直してよいのは手順 3 の説明だけで、質問の文は直さない
+2. **確認を記録する。** `input` の `questions` をそのまま入れた JSON を書き、`ndf records reading add --file <JSON>` を打つ。JSON は
+   `questions`・`prs`（空の配列）・`reads`（`question` と `material` の 2 行。`result` は合格なら `passed`、2 回目にも残ったなら `remained`）を持つ。
+   記録が無いと、hook の guard `reading-check` が質問を止める
+3. **質問を出す。** `input` を 1 字も変えずに `AskUserQuestion` へ渡す。区分は `input.metadata.source` の `ndf-ask:redline:C7`（利用者の設定の書き換え）である
+4. 利用者が「承認する」を選んだら、`routes.approved.argv` のコマンドをそのまま打つ（`approve --sha256 <値> --request <リクエスト> --candidate <候補>`）。
+   `ok` なら反映が済んだ。「承認しない」を選んだら何も打たず、記録も反映もしていないこと、`.ndf/launch.json` は変わっていないことを伝える
+5. 選択肢の承認者の名前は `git config user.name` から作る。利用者が名前が違うと回答したら、利用者に直してもらってから手順 4 をやり直す
+
+**`items` に `question` が無く、`metrics.terminal` がある（回答を記録できない会話）**
+
+NDF が起動した AI・人のいない実行・計画のレーン・外のオーガナイザーのレーンと、`AskUserQuestion` の無いランタイム（Codex など）がここに当たる。
+`metrics.terminal` のコマンドを、区分の名前 `ndf-ask:redline:C7` を先頭に書いた文で利用者に伝え、利用者自身に端末で打ってもらう。
+コマンドは承認の対象を表示し、許可が広がる内容なら名前とハッシュの先頭 8 文字の入力を求める。打ち終えたと聞いたら、`routes.approved.argv`
+（`show`）を打って `metrics.approved` を確かめる。伝える文は、手順 4 の 1 と同じく読み手役に読ませてから出す（質問ではないので記録はしない）。
+
+### `approve` が拒んだとき
+
+`stopped`（`refused`）の文のとおりにする。
+
+| 文の中身 | すること |
+| --- | --- |
+| 示した内容と今の内容が違う | 候補か定義ファイルが変わった。手順 3 から示し直す |
+| 承認の回答が無いか使えない | 未回答・より新しい質問・取り消し・設定の変更のどれか。手順 4 の質問を出し直す |
+| 候補を作った後に設定が別の作業で変わった | 手順 2 からやり直す。利用者の保存を別の名前で残したと書かれていれば、そのパスを伝える |
+| 候補が無く、反映も確かめられない | 手順 2 からやり直す |
+
+## 承認を取り消す
+
+```bash
+ndf launch-config revoke --sha256 <ハッシュ>
+```
+
+取り消すと、その内容を使う起動は止まる（許可は広がらない）。NDF が起動した AI の中では拒まれる。
+
+## 完了の報告
+
+反映したか（しなかったなら理由）、承認の対象のハッシュの先頭 8 文字、承認者、`metrics.cleanup_targets` に残った候補を書く。

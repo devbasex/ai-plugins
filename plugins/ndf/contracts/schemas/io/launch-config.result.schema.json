@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "launch-config.result.schema.json",
+  "title": "ndf launch-config の結果 JSON",
+  "description": "ndf launch-config が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す",
+  "allOf": [{"$ref": "../result.schema.json"}],
+  "properties": {
+    "tool": {"const": "launch-config"},
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "承認の対象のハッシュ"},
+        "approved": {"type": "boolean", "description": "このマシンでそのハッシュが承認済みか（show）"},
+        "candidate": {"type": "string", "description": "作った候補のパス（draft）"},
+        "request": {"type": "string", "description": "作った承認のリクエストの識別子（show --question approve）"},
+        "terminal": {"type": "string", "description": "利用者が端末で打つ approve のコマンド（回答を記録できない会話の show --question approve）"},
+        "cleanup_targets": {
+          "type": "array",
+          "description": "利用者が手で片付けてよい候補（draft・show）。対象が無ければ空配列",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["candidate", "reason"],
+            "properties": {
+              "candidate": {"type": "string", "description": "候補ファイル candidate.json の絶対パス"},
+              "reason": {"enum": ["denied", "worktree_gone", "reflected", "outdated"], "description": "片付けの理由"}
+            }
+          }
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+          "kind": {"enum": ["launch-target", "question"], "description": "launch-target は承認の対象の一覧（MCP の定義の中身を含まない）、question は AskUserQuestion にそのまま渡す入力（input）"}
+        }
+      }
+    }
+  }
+}

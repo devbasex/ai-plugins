@@ -19,13 +19,8 @@ from ndf.domains.hooks import tables
 from ndf.domains.hooks.verdict import Verdict, passing
 
 
-def unattended(env) -> bool:
-    """回答を人でなく AI が返しうる会話か（`launch-config show` も同じ判定で質問を作らない）。"""
-    return any(env.get(name) for name in ("NDF_AI_CHILD", "NDF_FACTORY_RUN", "NDF_RELAY_PLAN", "NDF_ORGANIZER_DIR"))
-
-
 def check(ctx, svc) -> Verdict:
-    if unattended(ctx.env):
+    if records.unattended(ctx.env):
         return passing()
     questions = ctx.tool_input.get("questions")
     response = ctx.payload.get("tool_response")
