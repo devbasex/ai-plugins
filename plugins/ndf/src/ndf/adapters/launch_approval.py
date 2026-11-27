@@ -12,6 +12,7 @@ import functools
 import hashlib
 import json
 import os
+import stat
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -753,8 +754,10 @@ def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
 
 # 置き換えの一時ファイルの名前の頭（後ろに乱数の値が付く）
 _PLACING_HEAD = ".{}.placing-"
-# 消す前に一時ファイルを移す名前の頭。後ろには、一時ファイルの名前と同じ乱数の値か、どの記録にも書かない乱数の値が付く
+# 消す前に一時ファイルを移す、NDF 専用のディレクトリの名前の頭。後ろには一時ファイルの名前と同じ乱数の値が付く
 _DROPPING_HEAD = ".{}.dropping-"
+# 専用のディレクトリの中で、移した一時ファイルに付ける名前
+_DROPPING_FILE = "placing"
 
 
 def _drop_placing(target: Path, rec: Mapping[str, Any]) -> None:
@@ -763,8 +766,8 @@ def _drop_placing(target: Path, rec: Mapping[str, Any]) -> None:
     確かめる条件は、記録した実体（`placed`）と同じことだけである。実体を記録する前に止まった場合は、その名前のファイルが空でも消さない。
     名前が重なった利用者の空のファイルと見分けられないためで、NDF が作った空のファイルが残っても中身（設定案の写し）は無い。
     名前が記録に無い・反映先と別のディレクトリ・頭が違う・実体が違うファイルも消さない（利用者の作ったものかもしれないため）。
-    対象は、記録した名前と、その名前から決まる移し先（`_dropping_name`）の 2 つだけで、ディレクトリは走査しない。移し先は、前の実行が
-    消す前に移した直後に強制終了した分を片付けるために見る。実体が記録に無ければ、どちらも消さない。
+    対象は、記録した名前と、その名前から決まる専用のディレクトリ（`_dropping_box`）の中の 1 つだけで、ほかは走査しない。
+    専用のディレクトリは、前の実行が消す前に移した直後に強制終了した分を片付けるために先に見る。実体が記録に無ければ、どれも消さない。
     """
     name = rec.get("placing")
     placed = rec.get("placed")
@@ -774,15 +777,36 @@ def _drop_placing(target: Path, rec: Mapping[str, Any]) -> None:
     head = _PLACING_HEAD.format(target.name)
     if tmp.parent != target.parent or not tmp.name.startswith(head):
         return
-    aside = _dropping_name(target, tmp.name[len(head) :])
-    # 前の実行が移した先は、どの記録にも無い名前へ移し直してから確かめる（その名前のまま確かめて消さない）
-    _drop_if_made(aside, _dropping_name(target, uuid.uuid4().hex), placed)
-    _drop_if_made(tmp, aside, placed)
+    box = _dropping_box(target, tmp.name[len(head) :])
+    _empty_box(box, placed)  # 前の実行が移した後に止まった分
+    _drop_if_made(tmp, box, placed)
 
 
-def _dropping_name(target: Path, value: str) -> Path:
-    """消す前に一時ファイルを移す名前（`.<反映先の名前>.dropping-<値>`）。"""
+def _dropping_box(target: Path, value: str) -> Path:
+    """消す前に一時ファイルを移す、NDF 専用のディレクトリ（`.<反映先の名前>.dropping-<値>`）。
+
+    名前は一時ファイルの名前の値から決まるので、移した直後に強制終了しても、次の `recover` が途中の記録から特定できる。
+    """
     return target.with_name(f"{_DROPPING_HEAD.format(target.name)}{value}")
+
+
+def _empty_box(box: Path, placed: Any) -> None:
+    """専用のディレクトリ `box` の中の一時ファイルが記録した実体なら消し、空になったディレクトリを消す。
+
+    中身があるディレクトリ（実体が違って戻せなかった利用者のファイルを含む）と、ディレクトリでないもの（シンボリックリンクを含む）は残す。
+    """
+    try:
+        if not stat.S_ISDIR(os.lstat(box).st_mode):
+            return
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 移した後に止まった分は無い
+        return
+    inside = box / _DROPPING_FILE
+    if _made(inside, placed):
+        inside.unlink(missing_ok=True)
+    try:
+        os.rmdir(box)
+    except OSError:  # noqa: NDF401 ファイル: 中身が残るディレクトリは消さない
+        return
 
 
 def _made(path: Path, placed: Any) -> bool:
@@ -794,26 +818,33 @@ def _made(path: Path, placed: Any) -> bool:
     return placed == [found.st_dev, found.st_ino]
 
 
-def _drop_if_made(path: Path, aside: Path, placed: Any) -> None:
-    """`path` が記録した実体なら消す。確かめた実体と消す実体が同じになるよう、`aside` へ移してから確かめ直して消す。
+def _drop_if_made(path: Path, box: Path, placed: Any) -> None:
+    """`path` が記録した実体なら消す。共有のディレクトリの名前を確かめた結果に頼らないよう、専用のディレクトリ `box` へ移してから確かめ直して消す。
 
-    確かめてから消すまでの間に `path` の名前が利用者のファイルへ置き換わっても、移した先で実体が違うと分かるので消さず、元の名前へ
-    戻す（元の名前が埋まっていれば、移した先の名前のまま残す）。`aside` にファイルがあれば、上書きしないよう移さずに残す。
+    `box` は、名前が空いているときだけ成功する `os.mkdir` で作る（所有者だけが使える権限）。利用者のエディタなどは `box` の中へ書かないので、
+    移した後に確かめたファイルと消すファイルは同じになる。確かめてから移すまでの間に `path` の名前が利用者のファイルへ置き換わっていれば、
+    `box` の中で実体が違うと分かるので消さず、元の名前へ戻す（元の名前が埋まっていれば `box` の中に残す）。`box` を作れなければ
+    （同じ名前のものが残っている）、移さずに残す。
     """
-    if not _made(path, placed) or os.path.lexists(aside):
+    if not _made(path, placed):
         return
     try:
-        os.rename(path, aside)
+        os.mkdir(box, 0o700)
+    except FileExistsError:  # noqa: NDF401 ファイル: 片付けられなかった同じ名前のものには触れず、一時ファイルは移さずに残す
+        return
+    inside = box / _DROPPING_FILE
+    try:
+        os.rename(path, inside)
     except FileNotFoundError:  # noqa: NDF401 ファイル: 確かめた後に消えていれば片付けるものも無い
+        os.rmdir(box)
         return
-    if _made(aside, placed):
-        aside.unlink(missing_ok=True)
-        return
-    try:
-        os.link(aside, path, follow_symlinks=False)  # 名前が空いているときだけ戻し、置かれた利用者のファイルを上書きしない
-    except OSError:  # noqa: NDF401 ファイル: 戻せない利用者のファイルは、移した先の名前のまま残す
-        return
-    aside.unlink()
+    if not _made(inside, placed):
+        try:
+            os.link(inside, path, follow_symlinks=False)  # 名前が空いているときだけ戻し、置かれた利用者のファイルを上書きしない
+        except OSError:  # noqa: NDF401 ファイル: 戻せない利用者のファイルは、専用のディレクトリの中に残す
+            return
+    inside.unlink()
+    os.rmdir(box)
 
 
 def _replace(target: Path, tmp: Path, base: Optional[str]) -> bool:

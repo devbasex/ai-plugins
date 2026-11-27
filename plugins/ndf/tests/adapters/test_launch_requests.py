@@ -739,19 +739,41 @@ def test_the_cleanup_keeps_a_file_put_under_the_name_after_it_was_checked(tmp_pa
     assert not list(target.parent.glob(".launch.json.dropping-*"))
 
 
-def test_the_cleanup_finishes_a_move_before_removal_only_for_the_recorded_name(tmp_path):
-    """消す前に移した直後に止まった一時ファイルは、記録した名前から決まる移し先だけを片付け、ほかの同じ頭のファイルは見ない（Value 6）。"""
+def test_the_cleanup_removes_the_copy_only_after_moving_it_into_its_own_directory(tmp_path, monkeypatch):
+    """一時ファイルは共有のディレクトリの名前のまま消さず、NDF が作った専用のディレクトリへ移してから確かめて消す（Value 6）。"""
     target = _worktree(tmp_path)
-    moved = target.with_name(".launch.json.dropping-0")  # 記録した名前 `.launch.json.placing-0` を移した先
+    tmp = target.with_name(".launch.json.placing-0")
+    tmp.write_bytes(b"ndf")
+    found = os.lstat(tmp)
+    rename = os.rename
+    moves: list[tuple[Path, bool]] = []
+
+    def watched(src, dst):
+        moves.append((Path(dst), Path(dst).parent.is_dir() and not os.listdir(Path(dst).parent)))
+        rename(src, dst)
+
+    monkeypatch.setattr(la.os, "rename", watched)
+    la._drop_placing(target, {"placing": str(tmp), "placed": [found.st_dev, found.st_ino]})
+    box = target.with_name(".launch.json.dropping-0")
+    assert moves == [(box / la._DROPPING_FILE, True)]  # 移す先は、作ったばかりの空の専用のディレクトリの中
+    assert not tmp.exists() and not box.exists()
+
+
+def test_the_cleanup_finishes_a_move_before_removal_only_for_the_recorded_name(tmp_path):
+    """消す前に専用のディレクトリへ移した直後に止まった一時ファイルは、記録した名前から決まるディレクトリだけを片付け、ほかは見ない（Value 6）。"""
+    target = _worktree(tmp_path)
+    box = target.with_name(".launch.json.dropping-0")  # 記録した名前 `.launch.json.placing-0` を移す専用のディレクトリ
+    box.mkdir()
+    moved = box / la._DROPPING_FILE
     moved.write_bytes(b"ndf")
     other = target.with_name(".launch.json.dropping-1")  # 記録に無い名前は、実体が同じでも見ない
     os.link(moved, other)
     found = os.lstat(moved)
     rec = {"placing": str(target.with_name(".launch.json.placing-0"))}
-    la._drop_placing(target, rec)  # 実体が記録に無ければ移し先も消さない
+    la._drop_placing(target, rec)  # 実体が記録に無ければ移した先も消さない
     assert moved.exists()
     la._drop_placing(target, {**rec, "placed": [found.st_dev, found.st_ino]})
-    assert not moved.exists() and other.exists()
+    assert not box.exists() and other.exists()
 
 
 @pytest.mark.parametrize("body", [b'{"version": 1, "mine": 1}\n', b""])
