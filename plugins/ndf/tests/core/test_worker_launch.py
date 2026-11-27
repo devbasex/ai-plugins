@@ -82,6 +82,28 @@ def test_an_approved_spec_launches_with_the_copy_and_checks_again_before_each_re
     assert not Path(seen[0][0][seen[0][0].index("--mcp-config") + 1]).exists()
 
 
+def test_a_revocation_while_waiting_to_launch_keeps_the_previous_result(tmp_path: Path, monkeypatch) -> None:
+    """起動を待つ間に承認を取り消すと、子は起動せず、前の結果ファイルを残す。今回の結果とは見なさない。"""
+    root = _repo_with_mcp(tmp_path, monkeypatch)
+    sha = launch_settings.approval_target(launch_settings.load(root)).sha256
+    launch_settings.launch_approval.append(str(root), sha, launch_settings.launch_approval.Action.APPROVE, approver="人")
+    h = worker.Handoff("fix", "直す", tmp_path / "result.json", root, tmp_path / "state")
+    h.result_file.write_text('{"status": "ok"}', encoding="utf-8")
+    launched: list[list[str]] = []
+
+    def fake(argv, prompt, timeout, cwd, options):
+        launch_settings.launch_approval.append(str(root), sha, launch_settings.launch_approval.Action.REVOKE)  # 起動の枠を待つ間
+        reason = options.verify()
+        if reason is not None:
+            return claude.ClaudeReply.failed("", reason, failure=claude.Failure.LAUNCH)
+        launched.append(list(argv))
+        return claude.ClaudeReply(True, None, "終えた", 0.0)
+
+    with worker_paths.open_workdir(tmp_path) as wd:
+        done = worker.delegate(h, "規則", root=tmp_path, wd=wd, call=fake, session="s-1")
+    assert launched == [] and done.cause is not None and h.result_file.exists()
+
+
 @pytest.mark.parametrize(
     ("agent", "namespaces", "expected"),
     [
