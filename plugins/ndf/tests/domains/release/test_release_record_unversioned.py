@@ -169,7 +169,7 @@ def test_writes_each_environment_to_every_included_pull_with_the_push_and_target
         assert {tuple(r.confirmation.items()) for r in rows} == {((WEB, "cd"),), ((WORKER, "cd"),)}
     # CD は push の after で照会し、共通の前処理の保存先は complete で消える
     assert {q[2] for q in hub.run_queries} == {AFTER} and not (repo.common / "ndf" / "release-record" / f"{PROD}.json").exists()
-    # 共有の置き場は CLI が解決済みの共通の git ディレクトリの下に置き、git を起動して解決し直さない
+    # 共有の保存先は CLI が解決済みの共通の git ディレクトリの下に置き、git を起動して解決し直さない
     assert "rev-parse" not in [c[0] for c in repo.calls]
 
 
@@ -323,7 +323,7 @@ def test_a_repository_without_deliveries_takes_targets_and_attests(tmp_path: Pat
     got = _write(hub, repo, _args(WEB, targets=(WORKER, WEB)), _release(None))
     assert got.recorded == (WEB,) and got.record.targets == (WEB, WORKER) and got.missing == (WORKER,)
     assert [r.confirmation for r in _written(hub, 11)] == [{WEB: "attested"}] and [r.push for r in _written(hub, 11)] == [None]
-    # 第一親の履歴と設定のファイルの変更の 1 回と、設定の読み取りの 1 回だけで、push も差分も読まず、置き場にも書かない
+    # 第一親の履歴と設定のファイルの変更の 1 回と、設定の読み取りの 1 回だけで、push も差分も読まず、保存先にも書かない
     assert [c[0] for c in repo.calls] == ["log", "cat-file"]
     assert not [r for r in hub.requests if r[1].endswith("/activity")]
     assert not list((repo.common / "ndf" / "release-record").glob("*.json"))
@@ -388,7 +388,7 @@ def test_targets_are_refused_when_the_history_does_not_reach_the_commit(
 
 
 def test_a_later_parallel_call_reuses_the_shared_push_without_deciding_again(tmp_path: Path) -> None:
-    """並べて打った後の呼び出しは、前の呼び出しが push を読んで置き場に書いた結果を使い、判定の git も起動しない。"""
+    """並べて打った後の呼び出しは、前の呼び出しが push を読んで保存先に書いた結果を使い、判定の git も起動しない。"""
     hub = _push_activity(_hub(cd_runs=[[SUCCESS]]))
     repo = Repo(tmp_path)
     _write(hub, repo, _args(WORKER))
@@ -398,7 +398,7 @@ def test_a_later_parallel_call_reuses_the_shared_push_without_deciding_again(tmp
 
 
 def test_a_left_share_is_swept_even_when_the_push_is_not_read(tmp_path: Path) -> None:
-    """宣言を外した後に --target だけで記録しても、期限を過ぎて残った置き場を消す。"""
+    """設定を外した後に --target だけで記録しても、期限を過ぎて残った保存先を消す。"""
     repo = Repo(tmp_path, deliveries=None)
     left = repo.common / "ndf" / "release-record" / "59.json"
     left.parent.mkdir(parents=True)
@@ -621,7 +621,7 @@ def test_shared_prefix_keeps_a_file_it_did_not_write_and_sweeps_its_own_leftover
     ours.mkdir(parents=True)
     foreign = share / f"{PROD}.json"
     foreign.write_text("{", encoding="utf-8")
-    # 利用者が置き場のディレクトリに置いたファイルは、名前の形と中身が NDF の一時ファイルと同じでも残す
+    # 利用者が保存先のディレクトリに置いたファイルは、名前の形と中身が NDF の一時ファイルと同じでも残す
     users = {share / f"{PROD}.json.{name}.ndf-tmp": text for name, text in (("a", ""), ("b", whole), ("c", "{"))}
     for path, text in users.items():
         path.write_text(text, encoding="utf-8")

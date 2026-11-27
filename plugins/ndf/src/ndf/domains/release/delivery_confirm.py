@@ -152,7 +152,7 @@ def deliveries_at(repo_git: Git, after: str) -> DeliveriesAt:
     )
     if commit is None:
         return DeliveriesAt(MISSING_REF, reason=f"push の after {after} が手元に無い。本番ブランチを取得してから打ち直す")
-    return _classify(raw, after)
+    return _deliveries_at(raw, after)
 
 
 class Since(NamedTuple):
@@ -174,11 +174,11 @@ def declared_since(repo_git: Git, tip: str, commit: str, later: Sequence[str]) -
     at_tip, head, *raws = _batch_objects(repo_git.run_bytes("cat-file", "--batch", stdin=stdin), len(names) + 2)
     if head is None:
         return None
-    declared = any(_classify(None if raw is None else raw[1], at).kind != ABSENT for raw, at in zip(raws, names))
+    declared = any(_deliveries_at(None if raw is None else raw[1], at).kind != ABSENT for raw, at in zip(raws, names))
     return Since(at_tip[0] if at_tip is not None else None, declared)
 
 
-def _classify(raw: Optional[bytes], after: str) -> DeliveriesAt:
+def _deliveries_at(raw: Optional[bytes], after: str) -> DeliveriesAt:
     """`after` の時点の `.ndf/project.json` の中身 `raw`（無ければ None）の分類。"""
     if raw is None:
         return DeliveriesAt(ABSENT)

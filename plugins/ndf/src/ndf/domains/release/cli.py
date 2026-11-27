@@ -65,16 +65,16 @@ from ndf.domains.release import version_store as store_mod
 TOOL = cli.tool_of(__name__)
 
 
-def _common_dir(args: argparse.Namespace) -> Optional[Path]:
+def _root_common_dir(args: argparse.Namespace) -> Optional[Path]:
     """`--root` の共通の git ディレクトリ（git の外なら None）。解決できた値は `--root` ごとに `args` に置いて使い回し、
-    1 回の実行で設定・リモート名・リリース記録の共有の置き場を読むたびに git を起動し直さない。"""
+    1 回の実行で設定・リモート名・リリース記録の共有の保存先を読むたびに git を起動し直さない。"""
     root = Path(args.root)
     cached = getattr(args, "_common_dir", None)
     if cached is not None and cached[0] == root:
         return cached[1]
     try:
         common = git_mod.Git(root).common_dir()
-    except git_mod.GitError:  # git の外はメインディレクトリが無いので None
+    except git_mod.GitError:  # noqa: NDF401 外部コマンド: git の外はメインディレクトリが無いので None
         return None
     args._common_dir = (root, common)
     return common
@@ -83,7 +83,7 @@ def _common_dir(args: argparse.Namespace) -> Optional[Path]:
 def _main_dir(args: argparse.Namespace) -> Path:
     """メインディレクトリ（作業場所の設定は PR の変更でマージの主体・方式を差し替えられるため読まない）。
     git の外ならメインディレクトリを持たないので `--root`。"""
-    common = _common_dir(args)
+    common = _root_common_dir(args)
     return common.parent if common is not None else Path(args.root)
 
 

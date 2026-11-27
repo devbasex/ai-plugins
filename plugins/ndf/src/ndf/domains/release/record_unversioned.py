@@ -55,10 +55,10 @@ _SHARE_TMP_DIR = "tmp"
 _SHARE_TMP_TOKEN = 8
 # 保存先の名前の形（`{number}` は本番の PR の番号）
 _SHARE_NAME = "{number}.json"
-# NDF の一時ファイルの名前の形（`<本番の PR>.json.<16 進 16 文字>.ndf-tmp`）。作る側（`_tmp_name`）も掃除の照合
+# NDF の一時ファイルの名前の形（`<本番の PR>.json.<16 進 16 文字>.ndf-tmp`）。作る側（`_tmp_name`）も掃除の一致の判定
 # （`_SHARE_TMP_NAME`）もこの 1 つの形から組み立て、片側だけ形が変わって掃除が一時ファイルを見落とすことを防ぐ
 _SHARE_TMP_FORMAT = _SHARE_NAME + ".{token}" + _SHARE_TMP
-# 形の中の値ごとの照合の正規表現（名前付きの組で、掃除は `number` から同じ PR のロックを取る）
+# 形の中の値ごとの一致を見る正規表現（名前付きの組で、掃除は `number` から同じ PR のロックを取る）
 _SHARE_TMP_FIELDS = {"number": r"\d+", "token": rf"[0-9a-f]{{{2 * _SHARE_TMP_TOKEN}}}"}
 # 掃除はこの名前だけを消す
 _SHARE_TMP_NAME = re.compile(
@@ -345,7 +345,7 @@ def _prefix(
 
 
 def share_dir(hands: Hands) -> Path:
-    """共有の置き場のディレクトリ（共通の git ディレクトリの下）。呼び手が解決済みなら git を起動せず、無ければ 1 回起動する。"""
+    """共有の保存先のディレクトリ（共通の git ディレクトリの下）。呼び手が解決済みなら git を起動せず、無ければ 1 回起動する。"""
     common = hands.common if hands.common is not None else hands.repo_git.common_dir()
     return common / identity.load().name / _SHARE_DIR
 
@@ -382,7 +382,7 @@ def _kind_of(text: str) -> Optional[Mapping[str, Any]]:
     return raw if isinstance(raw, dict) and raw.get("kind") == _SHARE_KIND else None
 
 
-def _ours(path: Path) -> Optional[Mapping[str, Any]]:
+def _ndf_share(path: Path) -> Optional[Mapping[str, Any]]:
     """NDF が書いた保存先の中身（名前が `<本番の PR>.json` で、`kind` が `_SHARE_KIND`）。それ以外・無い・壊れていれば None。"""
     if not path.stem.isdigit():
         return None
@@ -394,7 +394,7 @@ def _read_share(path: Path, commit: str, push: Optional[record_decide.Push] = No
     """保存先の前処理（NDF が書き、反映したコミットが今と同じで、`push` を渡せばその push と同じときだけ）。当たらなければ None。
 
     同じ値の信用する記録の push（`push`）は保存先より優先する。保存先が別の push を指していれば使わずに作り直す。"""
-    raw = _ours(path)
+    raw = _ndf_share(path)
     if raw is None:
         return None
     try:
@@ -421,7 +421,7 @@ def shared_prefix(
         got = _read_share(path, commit, push)
         if got is not None:
             return got
-        opened = _open_tmp(share, number) if not path.exists() or _ours(path) is not None else None
+        opened = _open_tmp(share, number) if not path.exists() or _ndf_share(path) is not None else None
         if opened is not None:
             return _publish(path, opened, compute)
     # 同じ名前のファイルがあるか、一時ファイルを作れないので共有できない。その呼び出しだけで使う
@@ -469,18 +469,18 @@ def drop_share(share: Path, number: int) -> None:
     """本番の PR の保存先を消す（push を読み、`complete` が真になった呼び出し）。NDF が書いたものでなければ残す。"""
     path = _share_path(share, number)
     with FileLock(str(path) + ".lock", timeout=limits.seconds(SHARE_LOCK)):
-        if _ours(path) is not None:
+        if _ndf_share(path) is not None:
             path.unlink(missing_ok=True)
 
 
 def _drop_stale(path: Path, older_than: float, now: Callable[[], float]) -> None:
     """NDF が書き、ロックされておらず、作ってから `older_than` 秒より長く経った保存先 `path` を消す（ほかのファイルは残す）。"""
-    if _ours(path) is None:
+    if _ndf_share(path) is None:
         return
     try:
         with FileLock(str(path) + ".lock", timeout=0):
             # ロックを取る前の確かめの後に置き換わっていないかを、ロックの中で確かめ直す
-            if _ours(path) is not None and now() - path.stat().st_mtime > older_than:
+            if _ndf_share(path) is not None and now() - path.stat().st_mtime > older_than:
                 path.unlink(missing_ok=True)
     except (OSError, Timeout):  # noqa: NDF401 ファイル: 使っている保存先と消えた保存先は残す
         return
@@ -586,7 +586,7 @@ def _check_records(state: record.Candidates, targets: tuple[str, ...], version: 
 
 
 class _Decided(NamedTuple):
-    """確かめ 1〜6 の結果。`share` は共有の置き場のディレクトリ。"""
+    """確かめ 1〜6 の結果。`share` は共有の保存先のディレクトリ。"""
 
     shape: _Shape
     prefix: Prefix
@@ -598,11 +598,11 @@ def _shape(hub: GitHub, hands: Hands, number: int, production: str, release: Map
     pull, commit = _landed_value(hub, number, production, args.version, args.production_sha)
     included = _record_pulls(hub, pull, production, names_decide.formats_of(release))
     state = _trusted_state(hub, included[0], args.version, commit)
-    # 残った置き場の掃除は push を読むかによらず毎回行う（置き場の解決は CLI が済ませた値を使い、git を起動しない）
+    # 残った保存先の掃除は push を読むかによらず毎回行う（保存先の解決は CLI が済ませた値を使い、git を起動しない）
     share = share_dir(hands)
     sweep_shares(share, _share_age(release))
-    # 対象の出典は worktree でなく本番へ反映した時点で決める。並べて打った別の呼び出しが push を読んで置き場に書いて
-    # いれば、判定もやり直さずに使う。push を読まないと決めた結果は置き場に書かない（判定は git の起動 2 回で済む）
+    # 対象の出典は worktree でなく本番へ反映した時点で決める。並べて打った別の呼び出しが push を読んで保存先に書いて
+    # いれば、判定もやり直さずに使う。push を読まないと決めた結果は保存先に書かない（判定は git の起動 2 回で済む）
     known = _known_push(state, args.version)
     prefix = _read_share(_share_path(share, number), commit, known)
     if prefix is None:
