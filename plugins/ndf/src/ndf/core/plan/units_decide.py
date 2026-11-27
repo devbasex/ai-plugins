@@ -1,7 +1,7 @@
 """単位の判定（純粋な関数。issues/issue-3702-design-detail.md の「単位の判定」、設計の決定 4・5・6）。
 
-単位のファイル（`contracts/workflow/review-units.schema.json`）から、実行順・マージの順などの導く値と、規則 U1〜U6 の違反・W1 の警告を返す。
-ファイル・git・環境変数を読まない。例外は投げず、判定できないことは `Finding` で返す。分け方の案（`split`）は後の単位で足す。
+単位のファイル（`contracts/workflow/review-units.schema.json`）から、実行順・マージの順などの導く値と、規則 U1〜U6 の違反・W1 の警告、
+大きすぎる単位の分け方の案を返す。ファイル・git・環境変数を読まない。例外は投げず、判定できないことは `Finding` で返す。
 """
 
 from __future__ import annotations
@@ -92,6 +92,8 @@ class Judgement(NamedTuple):
 
 _Key = tuple[int, str]  # (ファイルの位置, 単位の名前)
 
+_SPLIT_REASON = "分け方の案: 依存の順"
+
 
 def parse(doc: Mapping, path: str) -> UnitFile:
     """スキーマを通った辞書を型にする。`issue` を省いたタスクはファイルの唯一の課題になる。"""
@@ -124,10 +126,96 @@ def single(issue: int) -> UnitFile:
 
 
 def judge(files: Sequence[UnitFile], limits: Limits, criteria: Mapping[int, int]) -> Judgement:
-    """全ファイルを 1 つのグラフにし、導く値・違反・警告を返す。`criteria` は対象の課題ごとの受け入れ条件の数。
+    """全ファイルを 1 つのグラフにし、導く値・違反・警告・分け方の案を返す。`criteria` は対象の課題ごとの受け入れ条件の数。
 
     参照の解決に失敗しても（U1）、残りの規則は評価できる範囲で続ける。
+    案は、上限を超える単位と、目安を超えてタスクが 2 つ以上ある単位に作る。
     """
+    views, bad, warn = _check(files, limits, criteria)
+    over = dict.fromkeys(
+        (v.file, v.name) for v in views if v.lines is not None and (v.lines > limits.max or (v.lines > limits.target and len(v.tasks) > 1))
+    )
+    return Judgement(views, bad, warn, tuple(split(files, key, limits) for key in over))
+
+
+def split(files: Sequence[UnitFile], key: tuple[str, str], limits: Limits) -> Proposal:
+    """単位 `key`（ファイルのパス, 単位の名前）を、依存の順に目安で区切った直列の単位にする案。ファイルは書き換えない。
+
+    1 つで上限を超えるタスクがあれば、区切らずに `resplit` へ返す。区切りが 1 つなら `units` は空。
+    元の単位の依存は最初の区切りが引き継ぎ、元の単位を指す依存は最後の区切りへ付け替える。
+    `remaining` は、案を当てた後に残る違反（受け入れ条件の参照は区切っても変わらないので見ない）。
+    """
+    at = next(i for i, f in enumerate(files) if f.path == key[0])
+    unit = next(u for u in files[at].units if u.name == key[1])
+    tasks = _in_dependency_order(_unit_tasks({t.id: t for t in files[at].tasks}, unit))
+    if any(t.lines is None for t in tasks):  # 実装計画を省いた課題の単位は行数が無く、区切れない
+        return Proposal(unit.name, (), (), ())
+    resplit = tuple(t.id for t in tasks if t.lines > limits.max)
+    pieces = [] if resplit else _pieces(tasks, limits.target)
+    if len(pieces) < 2:
+        return Proposal(unit.name, (), resplit, ())
+    names = [f"{unit.name} {n}" for n in range(1, len(pieces) + 1)]
+    units = tuple(
+        UnitDef(name, tuple(t.id for t in piece), unit.after if i == 0 else (Edge(names[i - 1], _SPLIT_REASON),))
+        for i, (name, piece) in enumerate(zip(names, pieces))
+    )
+    _, remaining, _ = _check(_apply(files, at, unit.name, units), limits, None)
+    return Proposal(unit.name, units, (), remaining)
+
+
+def _in_dependency_order(tasks: Sequence[Task]) -> list[Task]:
+    """単位の中の依存の深さの順、同じ深さはタスクの番号の順。輪（U1）で進めない残りは番号の順に並べる。"""
+    left = sorted(tasks, key=lambda t: int(t.id[1:]))
+    inside = {t.id for t in left}
+    placed: set[str] = set()
+    ordered: list[Task] = []
+    while left:
+        ready = [t for t in left if all(a in placed or a not in inside for a in t.after)]
+        if not ready:
+            ready = left
+        ordered += ready
+        placed.update(t.id for t in ready)
+        left = [t for t in left if t.id not in placed]
+    return ordered
+
+
+def _pieces(tasks: Sequence[Task], target: int) -> list[list[Task]]:
+    """前から足して目安を超える手前で区切る。1 つで目安を超えるタスクは、それだけで 1 区切りになる。"""
+    pieces: list[list[Task]] = []
+    size = 0
+    for t in tasks:
+        if not pieces or size + t.lines > target:
+            pieces.append([])
+            size = 0
+        pieces[-1].append(t)
+        size += t.lines
+    return pieces
+
+
+def _apply(files: Sequence[UnitFile], at: int, name: str, units: tuple[UnitDef, ...]) -> list[UnitFile]:
+    """`at` のファイルの単位 `name` を `units` に置き換え、その単位を指していた依存を最後の区切りへ付け替える。"""
+    owner = _issue_owners(files, [])
+
+    def moved(where: int, e: Edge) -> Edge:
+        target = where if e.issue is None else owner.get(e.issue)
+        return e._replace(unit=units[-1].name) if (target, e.unit) == (at, name) else e
+
+    applied = []
+    for where, f in enumerate(files):
+        kept: list[UnitDef] = []
+        for u in f.units:
+            if (where, u.name) == (at, name):
+                kept += units
+            else:
+                kept.append(u._replace(after=tuple(moved(where, e) for e in u.after)))
+        applied.append(f._replace(units=tuple(kept)))
+    return applied
+
+
+def _check(
+    files: Sequence[UnitFile], limits: Limits, criteria: Optional[Mapping[int, int]]
+) -> tuple[tuple[View, ...], tuple[Finding, ...], tuple[Finding, ...]]:
+    """導く値・違反・警告。`criteria` が None なら受け入れ条件の参照を確かめない。"""
     bad: list[Finding] = []
     owner = _issue_owners(files, bad)
     homes: dict[_Key, UnitDef] = {}
@@ -156,7 +244,7 @@ def judge(files: Sequence[UnitFile], limits: Limits, criteria: Mapping[int, int]
             bad.append(Finding("U6", v.name, f"{v.file}: 見込みの {v.lines} 行が上限の {limits.max} 行を超える"))
         elif v.lines > limits.target:
             warn.append(Finding("W1", v.name, f"{v.file}: 見込みの {v.lines} 行が目安の {limits.target} 行を超える"))
-    return Judgement(views, tuple(bad), tuple(warn), ())
+    return views, tuple(bad), tuple(warn)
 
 
 def _issue_owners(files: Sequence[UnitFile], bad: list[Finding]) -> dict[int, int]:
@@ -184,7 +272,7 @@ def _name_rules(f: UnitFile, ids: Mapping[str, Task], bad: list[Finding]) -> Non
 
 
 def _task_rules(
-    f: UnitFile, at: int, member: Mapping[tuple[int, str], list[_Key]], criteria: Mapping[int, int], bad: list[Finding]
+    f: UnitFile, at: int, member: Mapping[tuple[int, str], list[_Key]], criteria: Optional[Mapping[int, int]], bad: list[Finding]
 ) -> None:
     """空の計画・タスクの無い単位・タスクの所属・課題・受け入れ条件（U2）。計画を省く課題は `single` で表すので、空は誤り。
 
@@ -201,7 +289,7 @@ def _task_rules(
             bad.append(Finding("U2", "", f"{f.path}: タスク {t.id} が {count} 個の単位にある"))
         if t.issue not in f.issues:
             bad.append(Finding("U2", "", f"{f.path}: タスク {t.id} の #{t.issue} がファイルの課題に無い"))
-        for ref in t.criteria:
+        for ref in t.criteria if criteria is not None else ():
             issue, _, number = ref.partition(":")
             limit = criteria.get(int(issue))
             if limit is None:
