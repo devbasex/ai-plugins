@@ -126,7 +126,7 @@ docs/{glossary.md, glossary/}
 | `_default_launch` | `src/ndf/progress/refactor_values.py` | 変更 | 今のまま | 手段が必須のチェックなら `["--required", *名前]`、手元のテストなら `["--local-test"]` を渡す。無しなら None |
 | `refactor_launch` | `src/ndf/core/route/__init__.py` | 変更 | `refactor_launch(branch: str, base_ref: str, gate: Sequence[str]) -> list[str]` | 第 3 引数を、必須のチェックの名前の並びから、合否の確かめ先の引数の並びに変える |
 
-これまで `_default_launch` は `ci.required_checks` を直接読んでいた。この PR により `means.decide` だけを読み、条件の語と同じ答えになる（不変条件 I1）。CI テストの設定があり必須のチェックが無ければ None を返す。
+これまで `_default_launch` は `ci.required_checks` を直接読んでいた。この PR により `means.decide` だけを読み、条件の語と同じ答えになる（設計文書の不変条件 I1）。CI テストの設定があり必須のチェックが無ければ None を返す。
 
 ### 単体テストの観点
 
@@ -173,7 +173,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 | --- | --- | --- | --- | --- |
 | `protected_of` | `protected_decide.py` | 新設 | `protected_of(tree: Mapping[str, str \| None], commands: Sequence[str], declared: Sequence[str], search: Sequence[str] = ()) -> Protected` | ツリー（パス → リンク先）から、保護するファイルの判定を組む。`declared` には設定 `test.protected_files` の指定を渡す |
 | `inside_work` | `protected_decide.py` | 新設 | `inside_work(commands: Sequence[str], roots: Sequence[str]) -> tuple[str, ...]` | `roots` の配下を指す絶対パスの語を返す |
-| `narrow` | `protected_decide.py` | 新設 | `narrow(scope: Sequence[str], tracked: Sequence[str], protected: Protected) -> tuple[str, ...]` | 保護しないファイルを 1 つも含まない指定を対象範囲から外す |
+| `narrow` | `protected_decide.py` | 新設 | `narrow(scope: Sequence[str], tracked: Sequence[str], protected: Protected) -> tuple[str, ...]` | 対象範囲の指定のうち、当たるファイルがすべて保護するファイルであるもの（保護しないファイルを 1 つも含まないもの）を外す |
 | `verify_final_fix` | `final_gate_decide.py` | 変更 | `verify_final_fix(changed_by_commit, target_scope, excluded: Callable[[str], bool] \| None = None)` | `excluded` が真のファイルは、範囲の中でも範囲の外として扱う |
 | `check_fix` | `final_gate.py` | 変更 | `check_fix(g, before: str, failed: Sequence[str], scope: Sequence[str], excluded=None) -> None` | 直しが範囲の外を変えていれば `before` へ戻して `refused`。2 つの経路で使う |
 | `fix_or_undo` | `final_gate.py` | 変更 | 今のまま（名前の `_` を外す） | 担当が結果を出さなければ戻す |
@@ -237,7 +237,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 - `rf<PR>/` のリポジトリへのひもづけ（`drive` と `_release`）
   - 保存先を共有すると、2 つのリポジトリの同じ番号の PR が同じ `rf<PR>/` を指す。そのため、自分の排他ロックを取った直後、状態や作業場所に触れる前に、この `rf<PR>/` が自分のリポジトリのものかを確かめる
   - 状態ファイルに `repo` があり、`repo_id` と違えば、何も変えずに `precondition` で停止する。理由には、ほかのリポジトリが同じ保存先で同じ番号の PR を扱っていることと、`NDF_WORKTREE_BASE` をリポジトリごとに分ける直し方を載せる
-  - `repo` が無ければ（状態ファイルを新しく作る、または更新の前に作った状態）、`rf<PR>/work` が在る場合はその git の共通ディレクトリを読み、`repo_id` と違えば同じく停止する。一致するか作業場所が無ければ、`repo` を書く
+  - `repo` が無ければ（状態ファイルを新しく作る場合か、この変更より前の NDF が作った状態ファイルの場合）、`rf<PR>/work` が在る場合はその git の共通ディレクトリを読み、`repo_id` と違えば同じく停止する。一致するか作業場所が無ければ、`repo` を書く
   - `repo` は、無いときにだけ書く。在る値を書き換えない
 - `redact_output`
   - 事後条件: 次の順に掛ける。秘密鍵のブロックを最初に原文で探すのは、手順 3 の関数が `-----BEGIN` を含む行を丸ごと置き換え、その後では開始の行を見つけられないためである
@@ -262,7 +262,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 
 | 順 | 条件 | 結果 |
 | --- | --- | --- |
-| 1 | リモートの先頭を `worktree.fetch_tips` で取得する。取得した先頭が `HEAD` の祖先（同じ SHA を含む）なら載せ直さず、`HEAD` の SHA を保つ。祖先でなければ、`rebasing` を保存してから、取得した先頭を `worktree.sync_fetched` へ渡して載せ直し、`onto` の書き換えと `rebasing` の削除を 1 回の保存で行う。以後の順は、ここで取得した先頭を「取り込んだ先頭」として使う。直前の周が順 7 で取得していれば、その先頭を使い、取得し直さない | 載せ直しが衝突したら `base_conflict` |
+| 1 | リモートの先頭を `worktree.fetch_tips` で取得する。取得した先頭が `HEAD` の祖先（同じ SHA を含む）なら載せ直さず、`HEAD` の SHA を保つ。この場合の `onto` の扱いは、「内部のデータと定数」の `onto` の行のとおりである。祖先でなければ、`rebasing` を保存してから、取得した先頭を `worktree.sync_fetched` へ渡して載せ直し、`onto` の書き換えと `rebasing` の削除を 1 回の保存で行う。以後の順は、ここで取得した先頭を「取り込んだ先頭」として使う。直前の周が順 7 で取得していれば、その先頭を使い、取得し直さない | 載せ直しが衝突したら `base_conflict` |
 | 2 | 取り込んだ先頭の設定の手段が手元のテストでない | `precondition` |
 | 3 | `HEAD` が取り込んだ先頭と同じ（送るコミットが無い） | 取り込んだ先頭が「この実行が送った SHA」（状態の `pushing` の SHA か、テストを打って完了した `done` の `head`）でなければ、テストを打たずに合格（`tests: skipped`）。送った SHA なら、今の組（その SHA・今の先頭の設定の識別値・今の `PATH` の SHA-256）が `local_passed` にあれば、テストを打たずに送った結果（`tests: passed`、送った SHA、識別値）を復元して完了する。無ければ、その SHA でテスト全体を打ち直す。合格なら組を記録して同じ結果で完了し、落ちれば `test_failed`（送った後なので直さない） |
 | 4 | 取り込んだ先頭から `HEAD` までの変更（`git diff --name-only --no-renames -z`）が保護するファイルに当たる | `refused` |
@@ -287,8 +287,8 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 
 - どこかの階層が `.ndf`
 - 名前が、決まった名前の一覧に当たる（`fnmatch`）
-- テストのコマンドを分けた単語をパスとして正規化し、そのパスか、その親のパス（ディレクトリがファイルやリンクに置き換わった場合）に当たる。ツリーに無いパスも当たる。パスがシンボリックリンクなら、リンクとリンク先の両方が当たる
-- `search`（`PATH` の相対の要素。空と `.` はルート）のどれかの下の、`/` を含まない単語と同じ名前に当たる。`search` は `protection_at` が、テストを打つ環境の `PATH` から作る
+- テストのコマンドを分けた単語をパスとして正規化し、そのパスに当たる。そのパスの親のディレクトリをファイルかリンクに置き換える変更も、その親のパスに当たる。ツリーに無いパスも当たる。パスがシンボリックリンクなら、リンクとリンク先の両方が当たる
+- `/` を含まないコマンドの単語について、`search` のどれかの要素の下にある、その単語と同じ名前のパスに当たる。`search` は `PATH` の相対の要素で、空と `.` はルートを表す。`search` は `protection_at` が、テストを打つ環境の `PATH` から作る
 - `test.protected_files` の指定の中（`scoped.in_scope`）
 
 コマンドの語は `weight.split_commands` で分け、`=` を含む単語は、`=` より後ろの部分もパスとして照らす。正規化は `posixpath.normpath` で、ルートの外を指す結果（`..` で始まる）は捨てる。リンクはコミットのツリーの中だけでたどり、ツリーの外を指せばリンク自体だけを保護する。
@@ -418,7 +418,7 @@ NDF はテストの実行を隔離しないので、これらによる検証用�
 | `check` | 有り | `RouteUnsupported`（`RouteError` の派生） |
 | ほか | — | 変えない |
 
-`follow` のステップは `parts/steps.json` に足す。引数は順にブランチ、リモート、SHA のファイルである。失敗はどれも終了コード 1 にそろえ、`exit_cause` を `precondition` にする。
+`follow` のステップは `parts/steps.json` に足す。引数は順にブランチ（`$0`）、リモート（`$1`）、SHA のファイル（`$2`）である。失敗はどれも終了コード 1 にそろえ、`exit_cause` を `precondition` にする。
 
 ```bash
 s=$(cat "$2") && [ -n "$s" ] && { [ "$(git rev-parse HEAD)" = "$s" ] || { git fetch -q -- "$1" "refs/heads/$0" && git merge -q --ff-only --no-overwrite-ignore "$s" && [ "$(git rev-parse HEAD)" = "$s" ]; }; } || exit 1
