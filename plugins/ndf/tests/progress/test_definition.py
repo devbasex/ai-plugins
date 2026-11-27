@@ -131,7 +131,9 @@ def test_each_mode_keeps_its_current_stages_steps_and_gate_positions(mode):
     snap = definition.load_definition(mode)
     assert tuple((s.name, tuple(st.id for st in s.steps)) for s in snap.stages) == CURRENT_ROWS[mode]
     gated = {s.name: s.gates for s in snap.stages if s.gates}
-    assert gated == ({"設計": ("design",), "デプロイ": ("release",)} if "design-gate" in dict(CURRENT_ROWS[mode])["設計"] else {"デプロイ": ("release",)})
+    assert gated == (
+        {"設計": ("design",), "デプロイ": ("release",)} if "design-gate" in dict(CURRENT_ROWS[mode])["設計"] else {"デプロイ": ("release",)}
+    )
 
 
 def test_gate_steps_name_which_gate_they_are():

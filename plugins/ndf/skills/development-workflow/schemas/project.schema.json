@@ -207,7 +207,7 @@
     },
     "workflow": {
       "type": "object",
-      "description": "工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch）",
+      "description": "工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch）と、レビューの単位の行数の目安と上限（review_units）",
       "properties": {
         "stages": {
           "type": "object",
@@ -215,6 +215,23 @@
           "additionalProperties": {
             "$ref": "#/$defs/StageToggle"
           }
+        },
+        "review_units": {
+          "type": "object",
+          "description": "レビューの単位の見込みの行数の目安と上限。片方だけ書けば、もう片方は上限の設定 review-units.target-lines・review-units.max-lines の既定を使う。目安が上限以上なら設定の誤りとして止まる",
+          "properties": {
+            "target_lines": {
+              "type": "integer",
+              "description": "目安の行数。超えると警告し、分け方の案を返す",
+              "minimum": 1
+            },
+            "max_lines": {
+              "type": "integer",
+              "description": "上限の行数。超えると止め、分け方の案を返す",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
         },
         "launch": {
           "type": "object",

@@ -140,12 +140,24 @@ UNIT_FILE = {
     "version": 1,
     "issues": [3672],
     "tasks": [
-        {"id": "T1", "title": "既定の表を置く", "files": ["plugins/ndf/contracts/domains/a.json"], "lines": 320, "criteria": ["3672:2"], "after": []},
+        {
+            "id": "T1",
+            "title": "既定の表を置く",
+            "files": ["plugins/ndf/contracts/domains/a.json"],
+            "lines": 320,
+            "criteria": ["3672:2"],
+            "after": [],
+        },
         {"id": "T2", "title": "読む部品", "files": [".github/workflows/x.yml"], "lines": 0, "criteria": [], "after": ["T1"], "issue": 3672},
     ],
     "units": [
         {"name": "コントラクト", "tasks": ["T1"], "after": []},
-        {"name": "読む部品", "tasks": ["T2"], "after": [{"unit": "コントラクト", "reason": "既定の表を読む", "issue": 3672}], "actual_lines": 12},
+        {
+            "name": "読む部品",
+            "tasks": ["T2"],
+            "after": [{"unit": "コントラクト", "reason": "既定の表を読む", "issue": 3672}],
+            "actual_lines": 12,
+        },
     ],
 }
 
@@ -158,7 +170,9 @@ def test_the_unit_file_of_the_design_example_fits_the_schema():
     assert contracts.schema_errors(UNIT_FILE, UNITS) == []
 
 
-@pytest.mark.parametrize("path", ["/a.py", "a/", "a//b.py", "./a.py", "a/./b.py", "a/../b.py", "a/..", "..", "a*.py", "a?.py", "a[b].py", ""])
+@pytest.mark.parametrize(
+    "path", ["/a.py", "a/", "a//b.py", "./a.py", "a/./b.py", "a/../b.py", "a/..", "..", "a*.py", "a?.py", "a[b].py", ""]
+)
 def test_the_unit_file_refuses_paths_that_are_not_a_single_concrete_file(path):
     assert contracts.schema_errors(_task(files=[path]), UNITS)
 
@@ -194,7 +208,9 @@ def test_the_unit_file_requires_the_lines_and_the_title_of_each_task():
 def test_the_project_declares_the_limits_of_a_unit_with_either_or_both_values(schema):
     def errors(review_units) -> list[str]:
         workflow = {"review_units": review_units}
-        return contracts.schema_errors(workflow if schema.endswith("project-workflow.schema.json") else {"version": 1, "workflow": workflow}, schema)
+        return contracts.schema_errors(
+            workflow if schema.endswith("project-workflow.schema.json") else {"version": 1, "workflow": workflow}, schema
+        )
 
     assert errors({"target_lines": 300, "max_lines": 800}) == []
     assert errors({"max_lines": 800}) == [] and errors({"target_lines": 300}) == [] and errors({}) == []
