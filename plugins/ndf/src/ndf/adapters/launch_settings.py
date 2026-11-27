@@ -180,6 +180,11 @@ def approval_target(settings: Settings) -> Target:
     return Target(sha, _listing(settings, files, sha))
 
 
+def _target_sha(settings: Settings) -> str:
+    """承認の対象のハッシュだけ（一覧と定義ファイルごとのハッシュを作らない。起動の直前の照らし直しに使う）。"""
+    return launch_approval.target_digest(settings.permissions, _target_files(settings))
+
+
 def _target_files(settings: Settings) -> dict[str, Any]:
     """承認の対象の定義ファイル（リポジトリの根からの相対パスから中身への対応。`inherit` の `.mcp.json` が無ければ None）。"""
     steps = _given_object(settings.permissions, "steps")
@@ -244,7 +249,7 @@ class Grant:
         if self.sha256 is None or self.root is None or self.repo is None:
             return None
         try:
-            now = approval_target(load(self.root)).sha256
+            now = _target_sha(load(self.root))
         except internal.InternalError as exc:
             return f"起動の直前に起動の設定を読み直せない: {exc}"
         if now != self.sha256:
