@@ -63,11 +63,16 @@ class Delivery(NamedTuple):
     trigger: str
 
 
+def reaches(row: Mapping[str, Any], channel: str) -> bool:
+    """届け先の行が承認資料のチャネル（`production`・`dev`）に当たるか（`channel` が `null`・省略の行はどれにも当たる）。"""
+    # 開発版はベースブランチから届く（届け先の行の channel の語は base）
+    want = "base" if channel == version_decide.DEV else channel
+    return row.get("channel") in (None, want)
+
+
 def deliveries_of(rows: Sequence[Mapping[str, Any]], channel: str) -> tuple[Delivery, ...]:
     """設定の届け先の行のうち、承認資料のチャネル（`production`・`dev`）に当たる行（`channel` が `null` の行を含む）。"""
-    # 開発版はベースブランチから届く（届け先の行の channel の語は base）。`null` の行はどのチャネルにも当たる
-    want = "base" if channel == version_decide.DEV else channel
-    return tuple(Delivery(r["target"], r["kind"], r["trigger"]) for r in rows if r.get("channel") in (None, want))
+    return tuple(Delivery(r["target"], r["kind"], r["trigger"]) for r in rows if reaches(r, channel))
 
 
 def delivery_line(d: Delivery) -> str:

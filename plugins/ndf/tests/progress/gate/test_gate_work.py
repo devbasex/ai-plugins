@@ -506,3 +506,71 @@ def test_settings_that_cannot_be_read_are_none(tmp_path, monkeypatch, error):
     monkeypatch.setattr(Git, "run", fail)
     monkeypatch.setattr(branch_strategy, "load", fail)
     assert entry._strategy_at(tmp_path) is None
+
+
+# --- #4513: 記録済みの値で worker を起動せずに終える（承認の時点の種類で決める） --------------------------------------------
+
+ROW = {"target": "本番", "kind": "manual", "trigger": "手で出す", "channel": "production", "versioned": False}
+
+
+def _recorded_state(tmp_path, recorded):
+    state = tmp_path.resolve()
+    invoke.write_values(state, "release", {"repo": str(state)}, {"pr": 3}, True, recorded)
+    return state
+
+
+@pytest.mark.parametrize(
+    ("recorded", "strategy", "want"),
+    [
+        (worker_kinds.Recorded("main abc1234", ROW, "none"), None, "ok"),
+        (worker_kinds.Recorded("main abc1234", ROW, "none"), _strategy("plugin_json"), "ok"),
+        (worker_kinds.Recorded("main abc1234", None, "none"), None, "stopped"),
+        (worker_kinds.Recorded("main abc1234", ROW, "unknown"), None, "stopped"),
+        (worker_kinds.Recorded("1.2.3", None, "versioned"), None, None),
+        (worker_kinds.Recorded("main abc1234", None, None), _strategy("none"), "stopped"),
+        (worker_kinds.Recorded("1.2.3", None, None), _strategy("plugin_json"), None),
+        (worker_kinds.Recorded("1.2.3", None, None), None, None),
+        (None, _strategy("none"), None),
+    ],
+)
+def test_released_outcome_follows_the_store_kind_recorded_at_the_approval(tmp_path, recorded, strategy, want):
+    saved = worker_kinds.read_values(_recorded_state(tmp_path, recorded))
+    got = entry.released_outcome("release", saved, strategy)
+    assert (got["status"] if got else None) == want
+    if want == "ok":
+        assert got["outputs"] == {"product_version": "main abc1234", "delivery": ROW} and result.errors(got) == []
+    if want == "stopped":
+        assert got["cause"]["kind"] == "precondition" and "ndf progress finish" in got["cause"]["detail"]
+
+
+def test_a_work_without_delivery_and_product_version_is_not_finished_by_the_recorded_value(tmp_path):
+    state = tmp_path.resolve()
+    invoke.write_values(state, "fix", {"worktree": str(state), "branch": "b"}, {}, True, worker_kinds.Recorded("x", ROW, "none"))
+    assert entry.released_outcome("fix", worker_kinds.read_values(state), None) is None
+
+
+@pytest.mark.parametrize("value", ["main abc1234", "--candidate", "rev {repo} {state_dir}"])
+def test_ndf_answer_work_finishes_with_the_recorded_value_without_launching(tmp_path, monkeypatch, capsys, value):
+    # #4513 の受け入れ条件 2: 承認の時点の種類が none なら、作業の時点で設定を読めなくても worker を起動しない
+    state = _recorded_state(tmp_path, worker_kinds.Recorded(value, ROW, "none"))
+    monkeypatch.setattr(entry, "_strategy_at", lambda _w: pytest.fail("承認の時点の種類があるので読まない"))
+    code = gate._cmd_work(["--state-dir", str(state), "release"], lambda exe, argv: pytest.fail("worker を起動しない"))
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == 0 and out["outputs"] == {"product_version": value, "delivery": ROW}
+    assert not worker_paths.report_paths(state, "release", resolve=False).prompt.exists()
+
+
+def test_ndf_answer_work_stops_when_the_store_kind_is_unknown(tmp_path, monkeypatch, capsys):
+    state = _recorded_state(tmp_path, worker_kinds.Recorded("main abc1234", None, "unknown"))
+    monkeypatch.setattr(entry, "_strategy_at", lambda _w: pytest.fail("読まない"))
+    code = gate._cmd_work(["--state-dir", str(state), "release"], lambda exe, argv: pytest.fail("worker を起動しない"))
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == 3 and out["status"] == "stopped" and out["cause"]["kind"] == "precondition"
+
+
+def test_a_versioned_record_launches_the_worker_with_the_version_number_shape(tmp_path, monkeypatch):
+    state = _recorded_state(tmp_path, worker_kinds.Recorded("1.2.3", None, "versioned"))
+    monkeypatch.setattr(entry, "_strategy_at", lambda _w: pytest.fail("読まない"))
+    handoff = entry._work_handoff("release", state, None)
+    os.close(handoff.fd)
+    assert handoff.version_number is True

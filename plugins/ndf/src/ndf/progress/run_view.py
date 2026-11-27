@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf.contracts.worker_kinds import DELIVERY, PRODUCT_VERSION, Recorded
 from ndf.progress import invoke, model, stages
 
 ACTOR = invoke.ACTOR
@@ -141,3 +142,73 @@ def migration_drafts(v: View) -> list[model.EventDraft]:
     # 開いた PR で止まったクリーンアップは、デプロイの後に流し直すまで結果を使わない（失敗を待ちへ戻す）
     why = "クリーンアップをデプロイの後へ移したので、デプロイの後に流し直す"
     return [moved, model.EventDraft(RETRY_EVENT, CONDUCTOR, cleanup, reason=why, rev=v.rev)]
+
+
+_UNSEEN: Any = object()
+
+
+class StageAnswers:
+    """工程の事象を新しい順にたどる走査を 1 本だけ持つ（#4513）。
+
+    たどった事象ごとに「最新の承認の回答」と「リリース承認ゲートへの最後の回答とその次の事象」の両方を照らし、最初に当たった
+    ものを覚える。`approved` と `release_gate` は、覚えた値があればそれを返し、無ければ止まった所から古い方へ続ける。
+    どの順で何回呼んでも、たどる事象の数は工程の事象の数を超えない。
+    """
+
+    def __init__(self, v: View, stage: str) -> None:
+        self._events = iter(reversed(v.events))
+        self.machine_id = v.machine_id
+        self._stage = stage
+        self._newer: Optional[model.Event] = None
+        self._approved: Any = _UNSEEN
+        self._gate: Any = _UNSEEN
+
+    def _advance(self) -> bool:
+        """事象を 1 つ古い方へ進める。尽きたら覚えていない値を None にして偽を返す。"""
+        ev = next(self._events, None)
+        if ev is None:
+            self._approved = None if self._approved is _UNSEEN else self._approved
+            self._gate = None if self._gate is _UNSEEN else self._gate
+            return False
+        if ev.draft.kind == ANSWERED and ev.draft.row_key == self._stage:
+            p = event_payload(ev)
+            if self._approved is _UNSEEN and p.get("answer") == invoke.APPROVED:
+                self._approved = ev
+            if self._gate is _UNSEEN and p.get("kind") == invoke.LISTEN and p.get("gate") == model.release_gate():
+                self._gate = (ev, self._newer)
+        self._newer = ev
+        return True
+
+    def approved(self) -> Optional[model.Event]:
+        """工程の最新の承認の回答の事象。無ければ None。"""
+        while self._approved is _UNSEEN and self._advance():
+            pass
+        return self._approved
+
+    def release_gate(self) -> Optional[tuple[model.Event, Optional[model.Event]]]:
+        """リリース承認ゲートへの最後の回答と、その次の事象（無ければ None）。回答が無ければ None。"""
+        while self._gate is _UNSEEN and self._advance():
+            pass
+        return self._gate
+
+
+def released_answer(answers: StageAnswers) -> Optional[Recorded]:
+    """リリース承認ゲートへの最後の回答がオーガナイザーの承認で、次の事象が値を書いていれば、その記録済みの値（#4513）。
+
+    値は `product_version` と、同じ事象に書いた `delivery`・`release_store`（無ければ None）。ほかは None。
+    """
+    found = answers.release_gate()
+    if found is None:
+        return None
+    ev, after = found
+    p = event_payload(ev)
+    if p.get("answer") != invoke.APPROVED or p.get("by") != ORGANIZER or after is None or after.draft.kind != stages.OUTPUTS_EVENT:
+        return None
+    q = event_payload(after)
+    outputs = q.get("outputs") if isinstance(q.get("outputs"), dict) else {}
+    version = outputs.get(PRODUCT_VERSION)
+    if not (isinstance(version, str) and version.strip()):
+        return None
+    delivery = outputs.get(DELIVERY)
+    store_kind = q.get("release_store")
+    return Recorded(version, dict(delivery) if isinstance(delivery, dict) else None, store_kind if isinstance(store_kind, str) else None)

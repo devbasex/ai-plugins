@@ -275,3 +275,18 @@ def test_impl_acceptance_takes_the_list_as_given():
     acceptance = ["--issue", "1", "--criteria", "1:1", "--criteria", "1:2"]
     step = _impl_steps(acceptance=acceptance)["acceptance"]
     assert step["run"] == ["ndf", "loop", "acceptance", "check", *acceptance]
+
+
+def test_rendered_returns_the_same_plan_and_the_kinds_from_one_expansion():
+    # #4513: 記録済みの値を使うプランかの判定に使う作業の名前は、組んだプランと同じ展開から取る
+    for t in route.templates().values():
+        for local_tests in (True, False):
+            plan, kinds = route.rendered(t, values(t.purpose), local_tests=local_tests)
+            assert plan == route.render(t, values(t.purpose), local_tests=local_tests)
+            assert kinds == route.kinds_of(t, local_tests)
+
+
+def test_rendered_refuses_the_same_way_as_render():
+    t = route.choose("release")
+    with pytest.raises(route.RouteError):
+        route.rendered(t, {})

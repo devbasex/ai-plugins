@@ -593,3 +593,6 @@ class Answer:
     seen: Target = field(default_factory=Target)
     drop: tuple[int, ...] = ()
     outputs: Mapping[str, Any] = field(default_factory=dict)
+    # 承認を記録した時点のバージョンの保存先の種類（`none`・`versioned`・`unknown`）。回答が値を運ぶとき、出力の事象の
+    # payload に `outputs` と並べて書く。後の工程へ渡す値でなく承認の時点の事実なので文脈へは書かない（#4513）
+    release_store: Optional[str] = None

@@ -283,3 +283,108 @@ def test_current_a_rejection_closes_the_open_plan_request_once(st, lane_sprint, 
     assert key == req.key and req.closed is not None
     with store.transaction(st) as conn:
         assert answering._reject_release(conn, q, _rejection(q)) is None  # 閉じたリクエストは閉じ直さない
+
+
+# --- #4513: バージョン番号を持たないリポジトリで、オーガナイザーの承認と一緒に届け先を記録し、デプロイの工程が worker を起動せずに終える ---
+
+
+from ndf.contracts import result, worker_kinds  # noqa: E402
+from ndf.core import branch_strategy  # noqa: E402
+from ndf.progress import invoke  # noqa: E402
+from ndf.progress.gate import entry  # noqa: E402
+from result_json import last_result  # noqa: E402
+
+from .conftest import lanes as gate_lanes  # noqa: E402
+
+DIST = "main abc1234"
+ROW = {"target": "本番", "kind": "manual", "trigger": "手で出す", "channel": "production", "versioned": False}
+
+
+def _strategy(kind: str, rows=(ROW,)) -> branch_strategy.Strategy:
+    return branch_strategy.Strategy({"release": {"version_store": {"kind": kind}, "deliveries": list(rows)}})
+
+
+def _organizer_released(st, lane_sprint, flow, monkeypatch, strategy, version=DIST):
+    """オーガナイザーが `version` を記録して承認するまで流す。承認を記録する時点の設定は `strategy`（例外なら読めない）。"""
+
+    def load(_root):
+        if isinstance(strategy, Exception):
+            raise strategy
+        return strategy
+
+    monkeypatch.setattr(branch_strategy, "load", load)
+    pid, tid = lane_sprint()
+    q = _at_release(st, tid, flow)
+    sent = gate.request_release(st, run.read(st, tid), q, {})
+    with store.transaction(st) as conn:
+        plan.record_release(conn, pid, [sent["request"]], plan.ReleaseAnswer(plan.RELEASED, "出した", version, "https://x/pull/9"))
+    assert gate.take_reply(st, tid, {})["status"] == "ok"
+    return tid
+
+
+def test_the_organizers_approval_records_the_delivery_and_the_store_kind_without_a_version_number(st, lane_sprint, flow, monkeypatch):
+    tid = _organizer_released(st, lane_sprint, flow, monkeypatch, _strategy("none"))
+    v = run.read(st, tid)
+    out = v.events[-1].draft.payload
+    assert out["outputs"]["product_version"] == DIST and out["outputs"]["delivery"] == ROW and out["release_store"] == "none"
+    assert run.released_answer(run.StageAnswers(v, "デプロイ")) == worker_kinds.Recorded(DIST, ROW, "none")
+
+
+@pytest.mark.parametrize(
+    ("strategy", "store_kind"),
+    [
+        (_strategy("plugin_json"), "versioned"),
+        (_strategy("none", rows=()), "none"),
+        (_strategy("none", rows=(ROW, {**ROW, "target": "別"})), "none"),
+        (_strategy("none", rows=({**ROW, "target": ""},)), "none"),
+        (branch_strategy.StrategyError("読めない"), "unknown"),
+    ],
+)
+def test_the_delivery_is_not_recorded_when_it_is_not_one_row(st, lane_sprint, flow, monkeypatch, strategy, store_kind):
+    # バージョン番号を持つ・本番の行が 0 か 2 つ・形に合わない・設定を読めない、のどれでも回答は書かれ、届け先だけが無い
+    tid = _organizer_released(st, lane_sprint, flow, monkeypatch, strategy, "11.0.0" if store_kind == "versioned" else DIST)
+    out = run.read(st, tid).events[-1].draft.payload
+    assert "delivery" not in out["outputs"] and out["release_store"] == store_kind
+
+
+def _deploy_env(flow_env_values, capsys, launched, ran):
+    """デプロイの工程のステップ release を、記録済みの値を書いた values.json と ndf answer work で流す偽の作業（worker は起動しない）。"""
+
+    def invoker(r, cwd, work_dir, answer):
+        if r.step != "release":
+            return gate_lanes.ok_result(r, flow_env_values)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        ran.append(r.released())
+        worker_kinds.write_values(work_dir, "release", {"repo": str(cwd)}, r.inputs, True, r.released())
+        code = entry._cmd_work(["--state-dir", str(work_dir), "release"], lambda exe, argv: launched.append(argv))
+        out = last_result(capsys.readouterr().out)
+        assert code == 0 and out["status"] == "ok", out
+        return invoke.finished(r, result.result("plan", "ok", "release を終えた", outputs=out["outputs"]))
+
+    return invoker
+
+
+def test_the_deploy_stage_ends_with_the_recorded_value_and_launches_no_worker(st, lane_sprint, flow, monkeypatch, capsys, env):
+    # #4513 の受け入れ条件 1・2: 判断の求めで止まらずに工程が終わり、product_version が記録した値のまま。worker を起動しない
+    tid = _organizer_released(st, lane_sprint, flow, monkeypatch, _strategy("none"))
+    monkeypatch.setattr(entry, "_strategy_at", lambda _w: pytest.fail("承認の時点の種類があるので作業の時点の設定を読まない"))
+    launched: list = []
+    ran: list = []
+    values = gate_lanes.values(flow.repo, "sprint/s1")
+    deploy = run.Env(**{**env.__dict__, "invoker": _deploy_env(values, capsys, launched, ran)})
+    for _ in range(4):
+        flow.turn(tid, deploy)
+    v = run.read(st, tid)
+    assert launched == [] and ran == [worker_kinds.Recorded(DIST, ROW, "none")]
+    assert v.context()["product_version"] == DIST and v.context()["delivery"] == ROW
+    assert any(e.draft.kind == "finished" and e.draft.row_key == "デプロイ" for e in v.events)
+
+
+def test_the_released_reader_is_called_once_per_step(st, lane_sprint, flow, monkeypatch):
+    # 記録済みの値を求める走査は 1 回のプランの呼び出しで 1 回だけ（prepare と plan_path の両方が呼んでも）
+    tid = _organizer_released(st, lane_sprint, flow, monkeypatch, _strategy("none"))
+    calls = []
+    real = run.released_answer
+    monkeypatch.setattr(run, "released_answer", lambda answers: calls.append(1) or real(answers))
+    reader = run._released_reader(run.StageAnswers(run.read(st, tid), "デプロイ"))
+    assert reader() == reader() == worker_kinds.Recorded(DIST, ROW, "none") and calls == [1]

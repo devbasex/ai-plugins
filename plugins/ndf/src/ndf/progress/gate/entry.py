@@ -30,7 +30,16 @@ from typing import Any, NamedTuple, Optional
 from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result, worker_paths
-from ndf.contracts.worker_kinds import PRODUCT_VERSION, kind_gaps, kind_values, values_in, work_dir_of, work_kinds
+from ndf.contracts.worker_kinds import (
+    DELIVERY,
+    PRODUCT_VERSION,
+    kind_gaps,
+    kind_values,
+    released_of,
+    values_in,
+    work_dir_of,
+    work_kinds,
+)
 from ndf.core import branch_strategy, route
 from ndf.progress import command, invoke, model, run, store
 from ndf.progress.gate.answering import (
@@ -315,6 +324,42 @@ def _work_dir(kind: str, saved: Mapping[str, Any], cwd: Optional[str]) -> Path:
     return Path(found).resolve()
 
 
+class Released(NamedTuple):
+    """worker を起動せずに終えるときの結果 JSON（`ok` か `stopped`。#4513）。`_cmd_work` がそのまま出す。"""
+
+    outcome: dict[str, Any]
+
+
+def released_outcome(work: str, saved: Mapping[str, Any], strategy: Optional[branch_strategy.Strategy]) -> Optional[dict[str, Any]]:
+    """記録済みの値で、worker を起動せずに返す結果 JSON（`ok` か `stopped`）。起動するときは None（#4513）。
+
+    作業の出力が `product_version` と `delivery` を持ち（今は `release`）、記録済みの値があるときだけ、承認の時点の保存先の種類で
+    決める。`none` ならオーガナイザーが出し終えているので、記録した届け先があれば ok、無ければ止まる。`unknown` も止まる。
+    `versioned` は起動する。種類が記録に無い（この変更の前に承認された）ときだけ、作業の時点の設定 `strategy` で決める。
+    届け先は今の設定から選び直さない（設定は後から直せるので、過去の届け先の根拠にならない）。
+    """
+    outputs = work_kinds()[work]["outputs"]
+    recorded = released_of(saved)
+    if recorded is None or PRODUCT_VERSION not in outputs or DELIVERY not in outputs:
+        return None
+    if recorded.with_number:
+        return None
+    unknown = recorded.store_unknown
+    if recorded.store is None and (strategy is None or strategy.has_version_number):
+        return None
+    if not unknown and recorded.delivery is not None:
+        out = {PRODUCT_VERSION: recorded.version, DELIVERY: dict(recorded.delivery)}
+        summary = f"作業 {work} はオーガナイザーが出した値で終えた（worker を起動しない。バージョン番号を持たないリポジトリ）"
+        return result.result(TOOL, result.OK, summary, outputs=out)
+    why = "承認を記録した時点で設定を読めず" if unknown else "承認を記録した時点で本番の届け先が 1 つに決まらず"
+    detail = (
+        f"オーガナイザーが出した後だが、{why}、このリリースの届け先が記録から確かめられない（worker を起動しない）。"
+        "設定を直して retry しても終わらない。次の操作: 実際の届け先を確かめ、ndf progress finish で delivery と "
+        "product_version を渡して工程を手で終える"
+    )
+    return result.stopped(TOOL, "precondition", detail)
+
+
 class WorkHandoff(NamedTuple):
     """`ndf worker run` へ渡すもの。保存先は開いて解いた場所（`state_dir`）とその `(st_dev, st_ino)`（`dir_id`）。
 
@@ -331,12 +376,13 @@ class WorkHandoff(NamedTuple):
     version_number: bool = False
 
 
-def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff:
+def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff | Released:
     """作業の名前と差し込みの値を確かめ、作業場所を決め、起動指示を書いて、`ndf worker run` へ渡すものを返す。
 
     保存先は祖先のリンクを解きながら 1 回だけ開き（`open_resolved`。macOS の `/tmp`・`/var` を経る保存先も開く。`..` が打ち消す
     要素がリンクなら止める）、`values.json` の読み取り（`values_in`）と報告の初期化・起動指示の書き込みを同じ記述子で
-    行う。読んだ場所と書く場所が食い違わない。起動指示を継ぐ記述子（`_held_prompt`）は初期化より先に用意し、用意できなければ
+    行う。読んだ場所と書く場所が食い違わない。記録済みの値で終える作業は、起動指示も報告の初期化もせずに `Released` を返す
+    （#4513）。起動指示を継ぐ記述子（`_held_prompt`）は初期化より先に用意し、用意できなければ
     前の報告一式を残して止まる。起動指示とコマンドの見本のパスは解いた場所で組む（worker の
     `ndf worker append`・`ndf contracts emit --out` がリンクを経ずに開ける）。
     """
@@ -354,7 +400,17 @@ def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff
         if gaps:
             raise invoke.KindInputsMissing(saved["plan"], gaps)
         workdir = _work_dir(kind, saved, cwd)
-        version_number = _version_aware(kind) and _needs_version_number(_strategy_at(workdir))
+        recorded = released_of(saved)
+        aware = _version_aware(kind)
+        # 承認の時点の種類が記録にあれば、作業の時点の設定で決め直さない（読まない）
+        strategy = _strategy_at(workdir) if aware and (recorded is None or recorded.store is None) else None
+        finished = released_outcome(kind, saved, strategy) if aware else None
+        if finished is not None:
+            return Released(finished)
+        if recorded is not None and recorded.store is not None:
+            version_number = aware and recorded.with_number
+        else:
+            version_number = aware and _needs_version_number(strategy)
         body = work_prompt(kind, saved, workdir, paths, version_number=version_number)
         fd = _held_prompt(body)  # 前の報告一式を初期化する前に用意する（用意できなければ何も消さずに止まる）
         try:
@@ -410,6 +466,9 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
         kind = next(c for t, c in WORK_STOPS if isinstance(exc, t))
         items = exc.items if isinstance(exc, invoke.KindInputsMissing) else []
         return result.emit(result.stopped(TOOL, kind, str(exc), items=items))
+    if isinstance(handoff, Released):
+        log.info("worker を起動せずに作業を終えた", extra={"kind": a.kind, "status": handoff.outcome["status"]})
+        return result.emit(handoff.outcome)
     fd = handoff.fd
     try:
         args = work_argv(

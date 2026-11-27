@@ -89,3 +89,44 @@ def test_plan_values_error_message_for_a_missing_key(key):
 @pytest.mark.parametrize("over", [{"plan": 1}, {"values": []}, {"inputs": None}, {"local_tests": 1}])
 def test_plan_values_error_message_for_a_wrong_type(over):
     assert wk.plan_values_error({wk.PLAN_KEY: _plan(**over)}) == PLAN_ERROR
+
+
+# --- #4513: values.json の記録済みの値 ----------------------------------------------------------------------------------------
+
+ROW = {"target": "本番", "kind": "manual", "trigger": "手で出す", "versioned": False}
+
+
+@pytest.mark.parametrize("version", ["main abc1234", "--candidate", "rev {repo}"])
+def test_released_of_returns_the_recorded_value_as_it_is(version):
+    held = {**_held(), "released_version": version, "released_delivery": ROW, "released_store": "none"}
+    assert wk.released_of(held) == wk.Recorded(version, ROW, "none")
+
+
+@pytest.mark.parametrize("version", ["", "  ", None, 3])
+def test_released_of_is_none_without_a_one_word_version(version):
+    assert wk.released_of({**_held(), "released_version": version}) is None
+    assert wk.released_of(_held()) is None
+
+
+@pytest.mark.parametrize(("delivery", "store_kind"), [(None, None), ("行", "other"), ([ROW], 3)])
+def test_released_of_drops_a_delivery_that_is_not_an_object_and_an_unknown_store_kind(delivery, store_kind):
+    held = {**_held(), "released_version": "v", "released_delivery": delivery, "released_store": store_kind}
+    assert wk.released_of(held) == wk.Recorded("v", None, None)
+
+
+def test_write_released_changes_only_the_recorded_keys(tmp_path):
+    wk.write_values(tmp_path, "release", {"repo": "/r"}, {"pr": 3}, True)
+    before = wk.read_values(tmp_path)
+    wk.write_released(tmp_path, wk.Recorded("main abc1234", ROW, "none"))
+    after = wk.read_values(tmp_path)
+    assert wk.released_of(after) == wk.Recorded("main abc1234", ROW, "none")
+    assert {k: v for k, v in after.items() if k not in wk.RELEASED_KEYS} == before
+    wk.write_released(tmp_path, wk.Recorded("x", None, None))
+    assert not {"released_delivery", "released_store"} & set(wk.read_values(tmp_path))
+    wk.write_released(tmp_path, None)
+    assert not set(wk.RELEASED_KEYS) & set(wk.read_values(tmp_path))
+
+
+def test_write_released_without_values_raises(tmp_path):
+    with pytest.raises(OSError):
+        wk.write_released(tmp_path, wk.Recorded("x", None, None))
