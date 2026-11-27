@@ -82,8 +82,9 @@ def test_an_approved_spec_launches_with_the_copy_and_checks_again_before_each_re
     assert not Path(seen[0][0][seen[0][0].index("--mcp-config") + 1]).exists()
 
 
-def test_a_revocation_while_waiting_to_launch_keeps_the_previous_result(tmp_path: Path, monkeypatch) -> None:
-    """起動を待つ間に承認を取り消すと、子は起動せず、前の結果ファイルを残す。今回の結果とは見なさない。"""
+@pytest.mark.parametrize("stop", ["revoke", "old_cli"])
+def test_a_launch_stopped_by_a_check_before_it_keeps_the_previous_result(tmp_path: Path, monkeypatch, stop: str) -> None:
+    """起動の前の確かめで止まる（待つ間の承認の取り消し・古い CLI）と、子は起動せず、前の結果ファイルを残す。今回の結果とは見なさない。"""
     root = _repo_with_mcp(tmp_path, monkeypatch)
     sha = launch_settings.approval_target(launch_settings.load(root)).sha256
     launch_settings.launch_approval.append(str(root), sha, launch_settings.launch_approval.Action.APPROVE, approver="人")
@@ -92,6 +93,8 @@ def test_a_revocation_while_waiting_to_launch_keeps_the_previous_result(tmp_path
     launched: list[list[str]] = []
 
     def fake(argv, prompt, timeout, cwd, options):
+        if stop == "old_cli":  # 照らし直しより前の CLI の下限で止まる（`claude._precheck` は照らし直しを打たない）
+            return claude.ClaudeReply.failed("", "claude が古い", failure=claude.Failure.REFUSED)
         launch_settings.launch_approval.append(str(root), sha, launch_settings.launch_approval.Action.REVOKE)  # 起動のスロットを待つ間
         reason = options.verify()
         if reason is not None:

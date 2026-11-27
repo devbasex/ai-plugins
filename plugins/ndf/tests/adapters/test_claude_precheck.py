@@ -164,3 +164,26 @@ def test_i010_require_claude_too_old_returns_refused_reply(seen, tmp_path):
     got = claude.require_claude(claude.AccountRun({}, ["/x/claude"]), None, True)
 
     assert got == claude.ClaudeReply(False, None, "", 0.0, str(seen.too_old), claude.Failure.REFUSED)
+
+
+def _verify_logged(seen: Seen, reason: Optional[str] = None) -> claude.LaunchOptions:
+    def verify() -> Optional[str]:
+        seen.order.append("verify")
+        return reason
+
+    return claude.LaunchOptions(verify=verify)
+
+
+def test_issue_1959_verify_is_the_last_check_before_the_launch(seen, tmp_path):
+    """照らし直し（`verify`）は確かめ直しと下限の後に最後に打つ。通った後に呼び手が起動の準備をするためである。"""
+    got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen))
+
+    assert got.ok and seen.order == ["slot", "recheck", "floor", "verify", "launch"]
+
+
+def test_issue_1959_a_too_old_cli_stops_before_verify(seen, tmp_path):
+    """下限より古ければ照らし直しを打たない（worker は前の結果ファイルを消さない）。"""
+    seen.too_old = cli_floor.TooOld("claude", "/opt/claude", "1.0.0", "2.0.0")
+    got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen))
+
+    assert got.failure is claude.Failure.REFUSED and seen.order == ["slot", "recheck", "floor"] and seen.popen == []
