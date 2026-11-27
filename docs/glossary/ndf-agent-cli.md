@@ -40,3 +40,11 @@ cross-review / cross-refactoring が参加者の CLI を選び、起動し、監
 | 既定のモデルへの切り替え | `default_models` | 引数で明示していないモデルを引けない CLI を、既定のモデルで担当に入れること（participants.default_models） | — | — | `docs/specifications/cross-participant-admission-check.md` |
 | 相手役 | — | cross-review のレビュー担当、cross-refactoring の提案・実装の担当として、ホストから CLI プロセスで起動されるランタイム（#2231） | — | — | `docs/specifications/ndf-distribution-runtimes.md` |
 | 下限（外部 CLI の） | — | NDF が動くために要る外部 CLI と本体（gh・claude・codex）の最も古いバージョン。NDF は起動の前に比べ、古ければ起動しない | — | — | `docs/specifications/dependency-updates-renovate-and-supply-chain.md` |
+| 起動の設定 | — | NDF が AI を起動するときの、リポジトリごとの指定を持つ .ndf/launch.json。工程ごとの MCP と Tool の指定、安全装置を外すランタイム、起動の実験の指定を持つ | — | — | `issues/issue-1959-design.md` |
+| 起動の承認 | — | 起動の設定の許可を広げる指定を、利用者がそのマシンで認めた記録。内容のハッシュで持つ | — | — | `issues/issue-1959-design.md` |
+| 起動の選択肢 | — | 工程とランタイムごとに設定する、起動で選べるモデルと effort の組の並び。先頭が基準の組 | — | — | `issues/issue-2944-design.md` |
+| 実験の単位 | — | 起動の組を 1 つ割り付け、効果指標を 1 つ記録する作業のまとまり | — | — | `issues/issue-2944-design.md` |
+| 効果指標 | — | 実験の単位の成果の良さを 0〜1 で表す値 | — | — | `issues/issue-2944-design.md` |
+| 出現率 | — | 実験の割り付けで、組が選ばれる確率 | — | — | `issues/issue-2944-design.md` |
+| 値の出所 | — | 起動のモデルか effort を決めた元（引数・環境変数・実験の割り付け・指定なし） | — | — | `issues/issue-2944-design.md` |
+| 値の引き上げ | — | 同じ失敗への 2 回目以降の起動で、モデルか effort を 1 つ上にすること | — | — | `issues/issue-2944-design.md` |

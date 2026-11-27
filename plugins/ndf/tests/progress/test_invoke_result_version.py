@@ -1,4 +1,4 @@
-"""作業の結果の形のバージョンの確かめ（`invoke.read_report` と Skill の回答。#2339 の受け入れ条件 1）。"""
+"""作業の結果の形のバージョンの確かめ（`plan_runs.read_report` と Skill の回答。#2339 の受け入れ条件 1）。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 
 from ndf.adapters import claude
 from ndf.contracts import result
-from ndf.progress import invoke
+from ndf.progress import invoke, plan_runs
 
 
 def _report(**extra):
@@ -39,11 +39,11 @@ def _installed_plugins(monkeypatch):
 
 @pytest.mark.parametrize("extra", [{}, {"version": 1}])
 def test_read_report_takes_a_result_of_the_current_version(extra):
-    assert invoke.read_report(json.dumps(_report(**extra))) == _report(**extra)
+    assert plan_runs.read_report(json.dumps(_report(**extra))) == _report(**extra)
 
 
 def test_read_report_turns_a_result_of_a_newer_version_into_stopped():
-    got = invoke.read_report(json.dumps(_report(version=2)))
+    got = plan_runs.read_report(json.dumps(_report(version=2)))
     assert got is not None and got["status"] == "stopped" and got["cause"]["kind"] == "precondition" and "outputs" not in got
 
 

@@ -7735,6 +7735,12 @@
       "source": "docs/specifications/ndf-next-ci-failed-tests-junit.md"
     },
     {
+      "term": "テストを確かめる手段",
+      "context": "ndf-ci-test",
+      "meaning": "工程「リファクタリング」が変更の後のテストの合否を確かめる先。必須のチェックがある場合は、指定されたチェックの通過を CI で確認する。テストの合否まで分かるのは、そのチェックにテストが含まれる場合である。必須のチェックが無ければ、CI テストの設定（test.ci.only）が無効で、実行コマンドを持つテストの suite（kind が lint でないもの。省けば test）がある場合に手元で確かめる。どちらも使えなければ、既定の実行条件では理由を記録して工程を飛ばす",
+      "pending_source": "issues/issue-4566-requirements.md"
+    },
+    {
       "term": "収集の確かめ",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring が、足したテストを全体の実行が収集するかを suite の `collect_command` で確かめる工程。成功と読む終了コードは suite の設定から読み、設定が無ければ 0 だけ",
@@ -7886,7 +7892,7 @@
     {
       "term": "設計の検査",
       "context": "ndf-design",
-      "meaning": "設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査（design-survey.py check。設計のプランのステップ survey-check）",
+      "meaning": "設計文書を書いた後に走らせる、言語モデルを呼ばない決まった検査（ndf records design check。設計のプランのステップ design-check）",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
@@ -8552,6 +8558,54 @@
       "source": "",
       "pending_source": "issues/issue-4517-design.md",
       "code": "repo-knowledge"
+    },
+    {
+      "term": "起動の設定",
+      "context": "ndf-agent-cli",
+      "meaning": "NDF が AI を起動するときの、リポジトリごとの指定を持つ .ndf/launch.json。工程ごとの MCP と Tool の指定、安全装置を外すランタイム、起動の実験の指定を持つ",
+      "source": "issues/issue-1959-design.md"
+    },
+    {
+      "term": "起動の承認",
+      "context": "ndf-agent-cli",
+      "meaning": "起動の設定の許可を広げる指定を、利用者がそのマシンで認めた記録。内容のハッシュで持つ",
+      "source": "issues/issue-1959-design.md"
+    },
+    {
+      "term": "起動の選択肢",
+      "context": "ndf-agent-cli",
+      "meaning": "工程とランタイムごとに設定する、起動で選べるモデルと effort の組の並び。先頭が基準の組",
+      "source": "issues/issue-2944-design.md"
+    },
+    {
+      "term": "実験の単位",
+      "context": "ndf-agent-cli",
+      "meaning": "起動の組を 1 つ割り付け、効果指標を 1 つ記録する作業のまとまり",
+      "source": "issues/issue-2944-design.md"
+    },
+    {
+      "term": "効果指標",
+      "context": "ndf-agent-cli",
+      "meaning": "実験の単位の成果の良さを 0〜1 で表す値",
+      "source": "issues/issue-2944-design.md"
+    },
+    {
+      "term": "出現率",
+      "context": "ndf-agent-cli",
+      "meaning": "実験の割り付けで、組が選ばれる確率",
+      "source": "issues/issue-2944-design.md"
+    },
+    {
+      "term": "値の出所",
+      "context": "ndf-agent-cli",
+      "meaning": "起動のモデルか effort を決めた元（引数・環境変数・実験の割り付け・指定なし）",
+      "source": "issues/issue-2944-design.md"
+    },
+    {
+      "term": "値の引き上げ",
+      "context": "ndf-agent-cli",
+      "meaning": "同じ失敗への 2 回目以降の起動で、モデルか effort を 1 つ上にすること",
+      "source": "issues/issue-2944-design.md"
     }
   ]
 }

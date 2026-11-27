@@ -284,7 +284,8 @@ def _kinds_in_templates() -> dict[str, set[str]]:
 def test_work_kinds_are_the_names_the_templates_hand_to_the_worker():
     kinds = gate.work_kinds()
     assert set(kinds) == set(_kinds_in_templates())
-    assert len(kinds) == 18 and all(set(k) == KIND_KEYS for k in kinds.values())
+    # 空でよい入力（optional_inputs）は持つ作業だけが書く（#4369）
+    assert len(kinds) == 18 and all(set(k) - {"optional_inputs"} == KIND_KEYS for k in kinds.values())
 
 
 def test_templates_using_a_work_in_the_worktree_take_the_worktree():

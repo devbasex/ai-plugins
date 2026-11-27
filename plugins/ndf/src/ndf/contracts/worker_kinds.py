@@ -28,7 +28,7 @@ NO_SOURCES: Mapping[str, str] = MappingProxyType({})
 
 @contracts.cached_reader
 def work_kinds() -> dict[str, dict[str, Any]]:
-    """作業の名前 → 定義（`work`・`summary`・`skills`・`excerpt`・`inputs`・`cwd`・`outputs`）。"""
+    """作業の名前 → 定義（`work`・`summary`・`skills`・`excerpt`・`inputs`・`optional_inputs`（持つ作業だけ）・`cwd`・`outputs`）。"""
     return contracts.load_json(KINDS_FILE)["kinds"]
 
 
@@ -37,14 +37,17 @@ def _filled(value: Any) -> bool:
 
 
 def kind_values(kind: str, values: Mapping[str, Any], inputs: Mapping[str, Any]) -> dict[str, Any]:
-    """作業の定義の `inputs` の名前ごとの値。差し込みの値（`values`）にあればそれを、無ければ工程の入力（`inputs`）を取る。"""
+    """作業の定義の `inputs` の名前ごとの値。差し込みの値（`values`）にあればそれを、無ければ工程の入力（`inputs`）を取る。
+    空でよい入力（`optional_inputs`）は、値が空でないときだけ足す（欠けの検査には数えない。#4369）。"""
+    spec = work_kinds()[kind]
+    optional = spec["optional_inputs"] if "optional_inputs" in spec else ()
     out: dict[str, Any] = {}
-    for name in work_kinds()[kind]["inputs"]:
+    for name in (*spec["inputs"], *optional):
         if name in values:
             out[name] = values[name]
         elif name in inputs:
             out[name] = inputs[name]
-    return out
+    return {n: v for n, v in out.items() if n not in optional or _filled(v)}
 
 
 def work_dir_of(kind: str, values: Mapping[str, Any]) -> Optional[str]:
