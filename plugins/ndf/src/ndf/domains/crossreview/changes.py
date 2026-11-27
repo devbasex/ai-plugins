@@ -13,7 +13,7 @@ from __future__ import annotations
 import ast
 import re
 from bisect import bisect_right
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterator, Mapping, Sequence
 from itertools import groupby
 from pathlib import Path
@@ -401,7 +401,7 @@ class _Block(NamedTuple):
     removed: tuple[str, ...]
 
 
-def _blocks(hunks: Sequence[Hunk]) -> list[_Block]:
+def _changed_blocks(hunks: Sequence[Hunk]) -> list[_Block]:
     """`hunks` の変えた行のかたまりを、行の順に返す。"""
     blocks: list[_Block] = []
     offset = 0
@@ -433,12 +433,12 @@ def _removals_unread(
     removed: Sequence[tuple[int, str]], seen_removed: Sequence[tuple[int, str]], blocks: Sequence[_Block], starts: Sequence[int]
 ) -> bool:
     """今の PR の差分が消した行 `removed` に、読んでおらず今回も消さないものがあるか。消した箇所の前後の残る行に挟まれた
-    区間ごとに、既読の削除と今回の削除を前の head の順に並べ、その並びに同じ順で現れるかを確かめる。今回の削除に当てるのは、
-    今の head での位置も同じときだけである（同じ区間の別の位置で同じ本文を消した変更は、今回渡る差分に出ない）。"""
-    seen: dict[int, list[tuple[Optional[int], str]]] = {}
+    範囲ごとに、既読の削除と今回の削除を前の head の順に並べ、その並びに同じ順で現れるかを確かめる。今回の削除に当てるのは、
+    今の head での位置も同じときだけである（同じ範囲の別の位置で同じ本文を消した変更は、今回渡る差分に出ない）。"""
+    seen: defaultdict[int, list[tuple[Optional[int], str]]] = defaultdict(list)
     for at, text in seen_removed:
-        # 既読の削除は区間の中のどこでも当たる（位置は None）
-        seen.setdefault(at, []).append((None, text))
+        # 既読の削除は範囲の中のどこでも当たる（位置は None）
+        seen[at].append((None, text))
     # キーに `_Block` を入れると、消した行ごとに `removed` の全体をハッシュする
     gaps: dict[tuple[int, Optional[int]], list[tuple[int, str]]] = {}
     for at, text in removed:
@@ -448,8 +448,8 @@ def _removals_unread(
         if index is not None:
             block = blocks[index]
             for number, gone in enumerate(block.removed, block.base):
-                known += [*seen.get(number, ()), (block.start, gone)]
-        rest = iter([*known, *seen.get(end, ())])
+                known += [*seen[number], (block.start, gone)]
+        rest = iter([*known, *seen[end]])
         # `any` は `rest` を一致した所まで進めるので、順序も確かめる
         if not all(any(text == gone and where in (None, at) for where, gone in rest) for at, text in rows):
             return True
@@ -464,7 +464,7 @@ def _has_unread_lines(path: str, now: _Delta, seen: _Delta, since: _Delta) -> bo
     step = since.entries.get(path)
     before = step.old if step is not None else path
     steps = since.hunks[path] if path in since.hunks else ()
-    blocks = _blocks(steps)
+    blocks = _changed_blocks(steps)
     starts = [block.start for block in blocks]
     added, removed = _changed_rows(now.hunks[path] if path in now.hunks else ())
     since_added, since_removed = _changed_rows(steps)

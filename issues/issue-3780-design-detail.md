@@ -55,7 +55,7 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py` | 新設 | 指摘が進むか、残すなら起票か記録かを決め、起票の文を組む | `criteria_decide` | モジュール、`Touched`・`Listed` | 新設: `normalized`・`proceeds`・`kinds_of`・`files_issue`・`identity`・`issue_parts`・`trusted`・`matches`・`record_entries`・`record_body`・`result_fields`・`summary_line`・`decisions` |
 | `plugins/ndf/src/ndf/domains/crossreview/leftover.py` | 新設 | 残す指摘を起票し、URL を行に書く | `leftover_decide`・`store`・`threads`・`settings`・`publish`・`github` | `Port`（Protocol）、`GitHubIssues` | 新設: `primary_of`・`file_issues` |
 | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py` | 変更 | 起点の条件と、収束を使い回す条件を分ける | `store` | モジュール | 新設: `origin_record` |
-| `plugins/ndf/src/ndf/domains/crossreview/round_scope.py` | 変更 | 起点と線引きの起点を git で確かめる | `scope_decide`・`changes` | モジュール | 新設: `origin`・`line_origin` |
+| `plugins/ndf/src/ndf/domains/crossreview/round_scope.py` | 変更 | 起点と線引きの起点を git で確かめる | `scope_decide`・`changes` | モジュール | 新設: `read_origin`・`line_origin` |
 | `plugins/ndf/src/ndf/domains/crossreview/changes.py` | 変更 | 新しく PR の変更になったファイル・渡す差分・変えた行を読む | `git`・`leftover_decide` | モジュール、`Range` | 新設: `new_in_pr`・`since_diff`・`touched` |
 | `plugins/ndf/src/ndf/domains/crossreview/journal.py` | 変更 | 残す指摘に `parked` を付け、進む条件に当たれば外す | `leftover_decide` | `FindingJournal` | 新設: `sort` / 変更: `enter`・`_revive`・`_classify`・`carry`・`handable`・`findings` |
 | `plugins/ndf/src/ndf/domains/crossreview/finish_decide.py` | 変更 | `parked` の指摘を欠けから除く | `leftover_decide` | `Finding` | 変更: `_finding_gaps`・`_counts`・`as_findings` |
@@ -98,7 +98,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `decide` | `local_scope.py` | 変更 | `decide(wt: Path, base: str, every_section: bool, data: Mapping[str, Any], resolved: ScopeSettings) -> tuple[scope_decide.Scope, list[str]]` | 次のラウンドの範囲と注意を、手元のオブジェクトと状態の記録から決める |
 
-実装の PR では、起点を `round_scope.origin`（下の「範囲の起点」）で選ぶ。起点と比較基点が違えば `changes.new_in_pr` を手元のオブジェクトで呼び、比べられなければ全差分にする。設計の PR は今のとおり `scope_decide.read_by_all_head` を使う。
+実装の PR では、起点を `round_scope.read_origin`（下の「範囲の起点」）で選ぶ。起点と比較基点が違えば `changes.new_in_pr` を手元のオブジェクトで呼び、比べられなければ全差分にする。設計の PR は今のとおり `scope_decide.read_by_all_head` を使う。
 
 ### 異常系の処理
 
@@ -121,12 +121,12 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `origin_record` | `scope_decide.py` | 新設 | `origin_record(state: Mapping[str, Any], basis: Basis) -> Optional[Mapping[str, Any]]` | 相手役の全員が読んだ最後のラウンドの記録を返す。今回の席と読んだ PR だけを照らし、比較基点・重点・単位の指示・MVV は見ない |
-| `origin` | `round_scope.py` | 新設 | `origin(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str) -> Optional[changes.Range]` | `origin_record` の head が `head` の祖先なら、その比較基点と head を返す |
+| `read_origin` | `round_scope.py` | 新設 | `read_origin(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str) -> Optional[changes.Range]` | `origin_record` の head が `head` の祖先なら、その比較基点と head を返す |
 | `line_origin` | `round_scope.py` | 新設 | `line_origin(g: git.Git, state: Mapping[str, Any], head: str) -> Optional[changes.Range]` | 線引きの起点（担当した相手役が全員結果を返した最後のラウンドの、比較基点と head）を返す |
 
 `line_origin` が探すのは、そのラウンドを担当した相手役が全員結果を返した（`incomplete_reviewers` で終わっていない）最後のラウンドである。そのラウンドを読んだ顔ぶれが今回の相手役と同じか、読んだ PR が今回と同じかは問わない。`origin_record` に条件の無い `Basis()` を渡すと、この 2 つの照合をしない。
 
-`line_origin` を `origin` と分けるのは、設計の決定 2 が「範囲が全差分に戻ったラウンドでも、前に全員が読んだ head があれば線引きする」と定めるためである。読んでいない相手役がいて全差分になったラウンドでも、線引きの起点は残る。
+`line_origin` を `read_origin` と分けるのは、設計の決定 2 が「範囲が全差分に戻ったラウンドでも、前に全員が読んだ head があれば線引きする」と定めるためである。読んでいない相手役がいて全差分になったラウンドでも、線引きの起点は残る。
 
 - `_reusable`（前回の収束をそのまま返すかの判定）と `read_by_all_head` は変えない
 
@@ -134,22 +134,22 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `origin`・`line_origin` | head が祖先でないか、コミットが手元に無い | PR の作り直し | `round_scope._reachable_from` | 既定値で続ける（None。全差分・線引きなし） | 無し | 打ち直せる |
+| `read_origin`・`line_origin` | head が祖先でないか、コミットが手元に無い | PR の作り直し | `round_scope._reachable_from` | 既定値で続ける（None。全差分・線引きなし） | 無し | 打ち直せる |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `origin_record` | `scope_decide.read_by_all_head`・`_seated_read` | `grep -rn "def .*origin\b\|def .*previous_head\|def read_by_all" --include=*.py src/ndf` | 席の照らし合わせは `_seated_read` を使う。`read_by_all_head` は収束の使い回し用の条件のまま残す |
-| `origin` | `round_scope.previous_head`・`_reachable_from` | 同上 | 祖先の確かめは `_reachable_from` を使う |
-| `line_origin` | 同上 | 同上 | `origin` と同じ中身を、条件の無い `Basis()` で呼ぶ |
+| `read_origin` | `round_scope.previous_head`・`_reachable_from` | 同上 | 祖先の確かめは `_reachable_from` を使う |
+| `line_origin` | 同上 | 同上 | `read_origin` と同じ中身を、条件の無い `Basis()` で呼ぶ |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `origin_record` | 比較基点・重点・単位の指示・MVV・根拠の確認が違っても記録を返す | 一部が読めなかったラウンドを飛ばす | 読んでいない相手役・PR の違い・ラウンドが無いときは None |
-| `origin`・`line_origin` | 祖先の head を返す | 読んでいない相手役がいるとき、`origin` は None で `line_origin` は値 | 祖先でない・コミットが無いときは None |
+| `read_origin`・`line_origin` | 祖先の head を返す | 読んでいない相手役がいるとき、`read_origin` は None で `line_origin` は値 | 祖先でない・コミットが無いときは None |
 
 ## 新しく PR の変更になったファイルと変えた行（changes）
 
@@ -161,7 +161,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `new_in_pr` | `changes.py` | 新設 | `new_in_pr(g: git.Git, previous: Range, current: Range) -> Optional[tuple[str, ...]]` | 比較基点が変わったことで、既読の差分にも今回渡す差分にも無い変更を持つファイルを返す。比べられなければ None |
 | `since_diff` | `changes.py` | 新設 | `since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str]) -> str` | 前の head からの差分（PR が変えるファイルに絞る）に、`added` の今の PR の差分を続けて返す |
-| `touched` | `changes.py` | 新設 | `touched(g: git.Git, since: str, head: str) -> leftover_decide.Touched` | `since` の後に変わったファイルと、足した行・書き換えた行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`origin`）ではない |
+| `touched` | `changes.py` | 新設 | `touched(g: git.Git, since: str, head: str) -> leftover_decide.Touched` | `since` の後に変わったファイルと、足した行・書き換えた行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`read_origin`）ではない |
 
 - `new_in_pr`
   - 事前条件: `previous.head` は `current.head` の祖先
@@ -472,7 +472,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_ranges` | `drive.py` | 新設 | `_ranges(run: _Run, merge_base: str, head: str) -> Ranges` | 目的ごとに、差分を渡す起点（`origin`）・足すファイル・線引きの起点（`line_origin`）を決める |
+| `_ranges` | `drive.py` | 新設 | `_ranges(run: _Run, merge_base: str, head: str) -> Ranges` | 目的ごとに、差分を渡す起点（`read_origin`）・足すファイル・線引きの起点（`line_origin`）を決める |
 | `_sort_leftovers` | `drive.py` | 新設 | `_sort_leftovers(run: _Run, prep: Prepared, checked: Checked) -> frozenset[str]` | 線引きの対象のラウンドなら、`changes.touched(g, prep.lines, prep.head)` で変えた行を読んで `journal.sort` を呼ぶ |
 | `default_max_rounds` | `settings.py` | 新設 | `default_max_rounds(every_section: bool) -> int` | `--max-rounds` を省いたときの上限（設計の PR は 3、ほかは 4） |
 | `_with_leftovers` | `cli.py` | 新設 | `_with_leftovers(verdict: fin.Verdict, items: list[dict[str, Any]], data: Mapping[str, Any]) -> fin.Verdict` | 結果の `items` に残し方を足し、要約の行と MVV の判断を足す |
@@ -497,11 +497,11 @@ plugins/ndf/
 | 目的 | `_ranges` の結果 |
 | --- | --- |
 | 設計の PR（`every_section`） | 今のとおり `round_scope.previous_head`。線引きの起点は無し |
-| 実装の PR で `origin` が無い | 全差分。線引きの起点は `line_origin`（あれば） |
-| 実装の PR で `origin` があり、比較基点が同じ | 起点は `origin.head`、足すファイル無し |
+| 実装の PR で `read_origin` が無い | 全差分。線引きの起点は `line_origin`（あれば） |
+| 実装の PR で `read_origin` があり、比較基点が同じ | 起点は `read_origin.head`、足すファイル無し |
 | 実装の PR で比較基点が違う | `new_in_pr` の結果を足す。None なら全差分で線引きなし |
 
-線引きをするのは、実装の PR で、状態ファイルの通算で 2 ラウンド目以降で、`line_origin` があり、比較基点の変化で足すファイルが無いラウンドである。足すファイルの有無は、`origin` が無くて全差分になるラウンドでも、`line_origin` の比較基点が今と違えば `new_in_pr` で確かめる。`_confirm_heavy` の `use_tracks` を真にするのは、線引きをするラウンドで、このラウンドの新しい重い指摘に、MVV の項目を持ち `proceeds` が偽のものがある場合だけである。その指摘は、回答の指摘の種類によって、進むか（保護の種類が付く）、起票するかが変わる。
+線引きをするのは、実装の PR で、状態ファイルの通算で 2 ラウンド目以降で、`line_origin` があり、比較基点の変化で足すファイルが無いラウンドである。足すファイルの有無は、`read_origin` が無くて全差分になるラウンドでも、`line_origin` の比較基点が今と違えば `new_in_pr` で確かめる。`_confirm_heavy` の `use_tracks` を真にするのは、線引きをするラウンドで、このラウンドの新しい重い指摘に、MVV の項目を持ち `proceeds` が偽のものがある場合だけである。その指摘は、回答の指摘の種類によって、進むか（保護の種類が付く）、起票するかが変わる。
 
 保護の対象の指摘は `proceeds` の順 7 で進むと決まっていて、起票もしない。critical や変えた行の MVV の指摘も進むと決まっている。これらだけのラウンドでは、判定役を起動しない（ほかの理由で起動するラウンドでは、今のとおり一緒に渡る）。`proceeds` に渡す `touched` は、`_confirm_heavy` の前に 1 回読み、`_sort_leftovers` でも使う。
 

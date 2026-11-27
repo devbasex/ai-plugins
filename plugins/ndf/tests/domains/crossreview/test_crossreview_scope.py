@@ -549,13 +549,13 @@ def test_origin_needs_an_ancestor_head_and_line_origin_does_not_ask_who_read(wt:
     g = git.Git.offline(wt)
     row = _record(head=first, base=base, reviewers=["codex"])
     both = scope_decide.Basis(reviewers=("codex", "kiro"))
-    assert round_scope.origin(g, {"rounds": [row]}, scope_decide.Basis(reviewers=("codex",)), head) == changes.Range(base, first)
-    assert round_scope.origin(g, {"rounds": [row]}, both, head) is None
+    assert round_scope.read_origin(g, {"rounds": [row]}, scope_decide.Basis(reviewers=("codex",)), head) == changes.Range(base, first)
+    assert round_scope.read_origin(g, {"rounds": [row]}, both, head) is None
     assert round_scope.line_origin(g, {"rounds": [row]}, head) == changes.Range(base, first)
     sh(wt, "reset", "-q", "--hard", base)
     other = commit(wt, "b.txt", "x\n", "巻き直し")
     for gone in (row, _record(head="0" * 40, base=base), {k: v for k, v in row.items() if k != "base"}):
-        assert round_scope.origin(g, {"rounds": [gone]}, scope_decide.Basis(), other) is None
+        assert round_scope.read_origin(g, {"rounds": [gone]}, scope_decide.Basis(), other) is None
         assert round_scope.line_origin(g, {"rounds": [gone]}, other) is None
 
 
@@ -735,7 +735,7 @@ _REMOVALS = {
 
 @pytest.mark.parametrize(("seen", "since", "now", "unread"), list(_REMOVALS.values()), ids=list(_REMOVALS))
 def test_a_removal_is_matched_in_order_and_at_the_position_of_the_current_fix(seen: str, since: str, now: str, unread: bool) -> None:
-    """#3780: 消した行は区間の中の順序で照らし、今回渡す差分の削除には今の head の位置も合わせる（差分を入力にして確かめる）。"""
+    """#3780: 消した行は範囲の中の順序で照らし、今回渡す差分の削除には今の head の位置も合わせる（差分を入力にして確かめる）。"""
     assert changes._has_unread_lines("a.txt", _delta(now), _delta(seen), _delta(since)) is unread
 
 
