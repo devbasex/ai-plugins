@@ -8,6 +8,7 @@ import os
 import shlex
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -319,7 +320,7 @@ def _left(state: str) -> tuple[Path, Path]:
     ident = "4194399-00000000000000aa"
     where, owner = ls.copies_dir() / ident, _owner(ident)
     where.mkdir(parents=True)
-    record = json.dumps(ls._owner_record(ident, where.lstat()))
+    record = json.dumps(ls._owner_record(ident, where.lstat())) + ls.RECORD_END
     if state in ("left", "in_use", "halfway", "replaced", "forged"):
         (where / "0.json").write_text("{}", encoding="utf-8")
     if state == "replaced":  # 記録の後に、別の実体のディレクトリへ置き換わった（同時にあるので inode は違う）
@@ -330,7 +331,8 @@ def _left(state: str) -> tuple[Path, Path]:
         other.rename(where)
     if state == "halfway":  # 消す途中で落ち、ディレクトリを消し終えて管理ファイルだけが残った
         shutil.rmtree(where)
-    owner.write_text({"users": "", "creating": "", "forged": "利用者のメモ"}.get(state, record), encoding="utf-8")
+    texts = {"users": "", "creating": "", "torn": record[:20], "forged": "利用者のメモ" + ls.RECORD_END}
+    owner.write_text(texts.get(state, record), encoding="utf-8")
     if state == "users":
         owner.unlink()
         (where / "利用者のデータ").write_text("x", encoding="utf-8")
@@ -342,6 +344,7 @@ SWEPT = {
     "left": (False, False),  # NDF の記録が合い、使っていない
     "halfway": (False, False),  # 管理ファイルだけが残った途中の消し残り
     "creating": (False, False),  # 記録を書く前に落ちた（空の管理ファイルと空のディレクトリ）
+    "torn": (False, False),  # 記録を書く途中で落ちた（終わりの印の無い管理ファイルと空のディレクトリ）
     "in_use": (True, True),  # ほかのコンテナのオーナーが錠を取っている
     "users": (True, False),  # 管理ファイルの無い利用者のディレクトリ（同じ形の名前）
     "forged": (True, True),  # 管理ファイルの中身が NDF の記録でない
@@ -367,6 +370,38 @@ def test_the_sweep_removes_only_what_ndf_made_and_no_one_uses(repo: Path, state:
     finally:
         if fd is not None:
             os.close(fd)
+
+
+def test_the_owner_takes_a_new_name_when_a_sweep_takes_the_lock_first(tmp_path: Path, monkeypatch) -> None:
+    """作った直後の管理ファイルの錠を別の起動の掃除に先に取られても、別の名前で取り直して起動を続ける。"""
+    real, tried = ls._owner_lock, []
+
+    def lock(base: Path, ident: str):
+        tried.append(ident)
+        if len(tried) == 1:  # 1 回目は掃除と重なった
+            return SimpleNamespace(acquire=lambda: (_ for _ in ()).throw(ls.Timeout(str(base / ident))))
+        return real(base, ident)
+
+    monkeypatch.setattr(ls, "_owner_lock", lock)
+    ident, got = ls._take_owner(tmp_path)
+    try:
+        assert got.is_locked and ident == tried[1] != tried[0]
+    finally:
+        got.release()
+
+
+def test_the_owner_gives_up_after_the_attempts(tmp_path: Path, monkeypatch) -> None:
+    """取り直しは `OWNER_ATTEMPTS` 回まで。すべて取り損ねたら `Timeout` を上げ、呼び手が保存先のエラーにする。"""
+    tried: list[str] = []
+
+    def lock(base: Path, ident: str):
+        tried.append(ident)
+        return SimpleNamespace(acquire=lambda: (_ for _ in ()).throw(ls.Timeout(str(base / ident))))
+
+    monkeypatch.setattr(ls, "_owner_lock", lock)
+    with pytest.raises(ls.Timeout):
+        ls._take_owner(tmp_path)
+    assert len(set(tried)) == ls.OWNER_ATTEMPTS
 
 
 def test_a_copy_in_use_survives_the_next_launch_and_is_removed_on_exit(repo: Path) -> None:

@@ -111,10 +111,10 @@ class Uncleared(Exception):
 
 
 class FreshResult:
-    """前の試行の結果ファイル `name` を、最初の子の起動の直前に消す。`cleared` が偽の間は、残った前の結果を今回の結果と見なさない。
+    """前の試行の結果ファイル `name` を消す時点を決める。`cleared` が偽の間は、残った前の結果を今回の結果と見なさない。
 
-    照らし直し `verify` が無ければ（承認を調べない起動）、作った時点で消す。あれば、照らし直しが通った最初の 1 回で消す。
-    照らし直しは起動の前の確かめの最後に打たれるので、どの確かめで止まった起動でも、前の結果ファイルを残す。
+    承認の再確認が要る起動（照らし直し `verify` がある）では、最初の子の起動の前の確かめがすべて通った後に消す
+    （`LaunchOptions.ready`）。承認の再確認が要らない起動では、作った時点で消す。
     """
 
     def __init__(self, wd: worker_paths.WorkDir, name: str, verify: Optional[Callable[[], Optional[str]]]) -> None:
@@ -130,14 +130,14 @@ class FreshResult:
             raise Uncleared(str(exc)) from None
         self.cleared = True
 
-    def check(self) -> Optional[str]:
-        """子を起動する直前の照らし直し（`LaunchOptions.verify`）。通った最初の 1 回で前の結果ファイルを消す。"""
-        reason = self._verify() if self._verify is not None else None
-        if reason is None and not self.cleared:
+    def ready(self) -> None:
+        """子を起動する直前、起動の前の確かめがすべて通った後に打つ（`LaunchOptions.ready`）。最初の 1 回で前の結果ファイルを消す。"""
+        if not self.cleared:
             self._clear()
-        return reason
 
     @property
     def options(self) -> claude.LaunchOptions:
-        """子の起動の選び方。照らし直しの無い起動は `verify` を置かない（起動の費用を足さない）。"""
-        return claude.LaunchOptions(verify=self.check if self._verify is not None else None)
+        """子の起動の選び方。照らし直しの無い起動は `verify` と `ready` を置かない（起動の費用を足さない）。"""
+        if self._verify is None:
+            return claude.LaunchOptions()
+        return claude.LaunchOptions(verify=self._verify, ready=self.ready)

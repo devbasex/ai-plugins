@@ -93,12 +93,14 @@ def test_a_launch_stopped_by_a_check_before_it_keeps_the_previous_result(tmp_pat
     launched: list[list[str]] = []
 
     def fake(argv, prompt, timeout, cwd, options):
-        if stop == "old_cli":  # 照らし直しより前の CLI の下限で止まる（`claude._precheck` は照らし直しを打たない）
-            return claude.ClaudeReply.failed("", "claude が古い", failure=claude.Failure.REFUSED)
-        launch_settings.launch_approval.append(str(root), sha, launch_settings.launch_approval.Action.REVOKE)  # 起動のスロットを待つ間
+        if stop == "revoke":
+            launch_settings.launch_approval.append(str(root), sha, launch_settings.launch_approval.Action.REVOKE)  # 起動のスロットを待つ間
         reason = options.verify()
         if reason is not None:
             return claude.ClaudeReply.failed("", reason, failure=claude.Failure.LAUNCH)
+        if stop == "old_cli":  # 照らし直しの後の CLI の下限で止まる（`claude._precheck` は起動の準備 `ready` を打たない）
+            return claude.ClaudeReply.failed("", "claude が古い", failure=claude.Failure.REFUSED)
+        options.ready()
         launched.append(list(argv))
         return claude.ClaudeReply(True, None, "終えた", 0.0)
 

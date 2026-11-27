@@ -603,8 +603,11 @@ class LaunchOptions:
       偽なら確かめ直さずに `Failure.REFUSED`（アカウントの設定の API を呼ばず、設定も変えない）
     - `switch_account`: 中継の起動先を継いだ起動が利用上限に当たったとき、替え先のアカウントで 1 回だけ打ち直すか。
       偽なら打ち直さずに `Failure.USAGE_LIMIT` を返す（1 回の判定で 1 回だけ起動すると決めた呼び手）
-    - `verify`: 子を起動する直前（スロット・アカウントの確かめ直し・CLI の下限の後）に最後に打つ照らし直し。理由の 1 行を返せば起動せず `Failure.LAUNCH`。
-      承認を確かめた起動の設定が、確かめた後に変わったか取り消されたかを見る（`launch_settings.Grant.verify`。#1959）
+    - `verify`: 子を起動する直前（スロット・アカウントの確かめ直しの後、CLI の下限の前）に打つ照らし直し。理由の 1 行を返せば起動せず `Failure.LAUNCH`。
+      承認を確かめた起動の設定が、確かめた後に変わったか取り消されたかを見る（`launch_settings.Grant.verify`。#1959）。
+      子プロセスを起動しない確かめなので、`claude --version` を打つ CLI の下限より前に打つ（止まる起動に `--version` を打たない）
+    - `ready`: 起動の前の確かめをすべて通った後、子を起動する直前に 1 回打つ準備（worker が前の結果ファイルを消すなど）。
+      どの確かめで止まった起動でも打たない
     """
 
     slot_wait: Optional[float] = None
@@ -613,6 +616,7 @@ class LaunchOptions:
     ensure_training: bool = True
     switch_account: bool = True
     verify: Optional[Callable[[], Optional[str]]] = None
+    ready: Optional[Callable[[], None]] = None
 
 
 # 選び方を省いた起動（今までどおり）
@@ -675,20 +679,24 @@ def require_claude(run: AccountRun, cwd: Optional[Path], check: bool) -> Optiona
 
 
 def _precheck(run: AccountRun, cwd: Optional[Path], options: LaunchOptions) -> Optional[ClaudeReply]:
-    """起動の直前の確かめ。`run.recheck` が 1 行を返せば `Failure.REFUSED`、次に CLI の下限（`require_claude`）、
-    最後に `options.verify` が 1 行を返せば `Failure.LAUNCH`。通れば None。
+    """起動の直前の確かめ。`run.recheck` が 1 行を返せば `Failure.REFUSED`、次に `options.verify` が 1 行を返せば
+    `Failure.LAUNCH`、最後に CLI の下限（`require_claude`）。すべて通れば `options.ready` を打って None。
 
-    `verify` を最後に打つのは、通った後に呼び手が起動の準備（worker の前の結果ファイルを消すなど）をするためである。
-    ほかの確かめで止まる起動では、`verify` を打たない。
+    照らし直しは子プロセスを起動しないので、`claude --version` を打つ下限より前に打つ（取り消しで止まる起動に `--version` を打たない）。
+    起動の準備（`ready`）は確かめをすべて通った後に打つので、どの確かめで止まった起動でも準備をしない。
     """
     refused = run.recheck() if run.recheck is not None else None
     if refused is not None:
         return ClaudeReply.failed("", refused, failure=Failure.REFUSED)
+    changed = options.verify() if options.verify is not None else None
+    if changed is not None:
+        return ClaudeReply.failed("", changed, failure=Failure.LAUNCH)
     too_old = require_claude(run, cwd, options.cli_floor)
     if too_old is not None:
         return too_old
-    changed = options.verify() if options.verify is not None else None
-    return None if changed is None else ClaudeReply.failed("", changed, failure=Failure.LAUNCH)
+    if options.ready is not None:
+        options.ready()
+    return None
 
 
 def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path], options: LaunchOptions) -> ClaudeReply:

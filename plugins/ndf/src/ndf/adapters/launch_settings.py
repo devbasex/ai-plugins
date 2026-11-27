@@ -44,6 +44,10 @@ COPIES = "launch-mcp"
 OWNER_SUFFIX = ".owner"
 # コピーの `<id>`（`<PID>-<一意な値>`）の形。掃除はこの形の名前だけを見る
 COPY_ID = re.compile(r"[0-9]+-[0-9a-f]{16}")
+# 管理ファイルの錠を、作った直後に別の起動の掃除と取り合って取り損ねたとき、別の `<id>` で取り直す回数（最初の 1 回を含む）
+OWNER_ATTEMPTS = 3
+# 記録の終わりの印。記録は JSON の後にこの 1 文字を付けて書く。これで終わらない中身は、書き込みの途中で落ちた記録である
+RECORD_END = "\n"
 
 Mcp = Union[None, str, tuple[str, ...]]
 
@@ -343,12 +347,10 @@ def _copies(definitions: list[Any]) -> Iterator[tuple[Path, ...]]:
     消すときは、ディレクトリを消し終えてから管理ファイルを消す。どこで落ちても、次の掃除が残りを見分けて消せる（`_sweep_copies`）。
     """
     base = copies_dir()
-    ident = f"{os.getpid()}-{secrets.token_hex(8)}"
-    lock = _owner_lock(base, ident)
     try:
         base.mkdir(parents=True, exist_ok=True)
         _sweep_copies(base)
-        lock.acquire()
+        ident, lock = _take_owner(base)
     except (OSError, Timeout) as exc:
         raise _precondition(f"MCP の定義のコピーの保存先 {base} を作れない（{type(exc).__name__}）") from None
     where = base / ident
@@ -366,6 +368,26 @@ def _copies(definitions: list[Any]) -> Iterator[tuple[Path, ...]]:
         lock.release()
 
 
+def _take_owner(base: Path) -> tuple[str, FileLock]:
+    """新しい `<id>` の管理ファイルを作って錠を取る。取り損ねたら別の `<id>` で取り直す（`OWNER_ATTEMPTS` 回まで）。
+
+    管理ファイルを作ってから錠を取るまでの間に、別の起動の掃除が空の管理ファイルを見つけて先に錠を取り、消すことがある。
+    filelock はこのとき、待たない錠を `Timeout` で返す。その名前は掃除に任せ、別の名前で取り直す。
+    """
+    left = OWNER_ATTEMPTS
+    while True:
+        ident = f"{os.getpid()}-{secrets.token_hex(8)}"
+        lock = _owner_lock(base, ident)
+        left -= 1
+        try:
+            lock.acquire()
+        except Timeout:
+            if not left:
+                raise
+            continue  # 掃除と重なった名前は捨て、別の名前で取り直す
+        return ident, lock
+
+
 def _owner_lock(base: Path, ident: str) -> FileLock:
     """コピー `<id>` の管理ファイルの錠。待たずに取る（使用中なら `Timeout`）。flock の錠はカーネルが持つので、状態の保存先を
     共有する PID 名前空間の違うコンテナどうしでも、使用中と分かる。filelock は開くときにファイルを切り詰めないので、記録は残る。"""
@@ -374,15 +396,16 @@ def _owner_lock(base: Path, ident: str) -> FileLock:
 
 def _owner_record(ident: str, st: os.stat_result) -> dict[str, Any]:
     """管理ファイルに書く記録。表 ndf-files の行の名前（`row`）、ディレクトリの名前（`id`）、作った直後のディレクトリの
-    実体（`lstat` の `dev`・`ino`）。掃除は JSON の値として比べ、書式（空白・キーの順）は問わない。"""
+    実体（`lstat` の `dev`・`ino`）。掃除は JSON の値として比べ、終わりの `RECORD_END` のほかは書式（空白・キーの順）を問わない。"""
     return {"row": COPIES, "id": ident, "dev": st.st_dev, "ino": st.st_ino}
 
 
 def _write_record(base: Path, ident: str, st: os.stat_result) -> None:
-    """錠を取った管理ファイル（空）に記録を書く。"""
+    """錠を取った管理ファイル（空）に記録を書く。記録の終わりに `RECORD_END` を付け、途中で落ちた書き込みを完成した記録と
+    見分けられるようにする（JSON の中に改行は無いので、途中までの中身は `RECORD_END` で終わらない）。"""
     fd = os.open(base / f"{ident}{OWNER_SUFFIX}", os.O_WRONLY | os.O_NOFOLLOW)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(json.dumps(_owner_record(ident, st), ensure_ascii=False))
+        f.write(json.dumps(_owner_record(ident, st), ensure_ascii=False) + RECORD_END)
 
 
 def _write_private(path: Path, text: str) -> Path:
@@ -422,28 +445,29 @@ def _reclaim_locked(base: Path, ident: str) -> None:
 
     | 管理ファイルの中身 | ディレクトリ `<id>` | 消すもの |
     | --- | --- | --- |
-    | 空（記録を書く前に落ちた） | 無いか空 | 空のディレクトリと管理ファイル（中身が無いので利用者のデータは失われない） |
-    | 空 | 中身がある | 何も消さない（NDF が作ったと確かめられない） |
-    | 記録が合う | 記録の `dev`・`ino` と同じ実体か、無い | ディレクトリと管理ファイル |
-    | 記録が合う | 実体が違う（記録の後に置き換わった） | 管理ファイルだけ（ディレクトリは NDF が作ったものでない） |
-    | 記録の形でない | — | 何も消さない |
+    | 空か、`RECORD_END` で終わらない（記録を書き終える前に落ちた） | 無いか空 | 空のディレクトリと管理ファイル（中身が無いので利用者のデータは失われない） |
+    | 空か、`RECORD_END` で終わらない | 中身がある | 何も消さない（NDF が作ったと確かめられない） |
+    | 記録の形で、`id` が名前と同じ | 記録の `dev`・`ino` と同じ実体か、無い | ディレクトリと管理ファイル |
+    | 記録の形で、`id` が名前と同じ | 記録の `dev`・`ino` と違う実体（リンクを含む。記録の後に置き換わった） | 管理ファイルだけ（ディレクトリは NDF が作ったものでない） |
+    | `RECORD_END` で終わるが、記録の形でないか `id` が違う | — | 何も消さない |
     """
     owner, where = base / f"{ident}{OWNER_SUFFIX}", base / ident
     text = _read_owner(owner)
     if text is None:
         return
-    if not text:
+    if not text.endswith(RECORD_END):  # 空か、書き込みの途中で落ちた記録
         _remove_if_empty(where)
-    else:
-        record = _parsed_record(text)
-        if record is None or record["id"] != ident:
-            return
+        if where.exists():
+            return  # 中身のあるディレクトリがある。NDF が作ったと確かめられない
+        owner.unlink(missing_ok=True)
+        return
+    record = _parsed_record(text)
+    if record is None or record["id"] != ident:
+        return
+    if _is_recorded_dir(where, record):
+        shutil.rmtree(where, ignore_errors=True)
         if _is_recorded_dir(where, record):
-            shutil.rmtree(where, ignore_errors=True)
-    if not text and where.exists():
-        return  # 空の管理ファイルの隣に中身のあるディレクトリがある。NDF が作ったと確かめられない
-    if text and where.exists() and _is_recorded_dir(where, _parsed_record(text)):
-        return  # 消し切れなかった。記録を残して、次の掃除に任せる
+            return  # 消し切れなかった。記録を残して、次の掃除に任せる
     owner.unlink(missing_ok=True)
 
 

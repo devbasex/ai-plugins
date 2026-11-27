@@ -171,19 +171,26 @@ def _verify_logged(seen: Seen, reason: Optional[str] = None) -> claude.LaunchOpt
         seen.order.append("verify")
         return reason
 
-    return claude.LaunchOptions(verify=verify)
+    return claude.LaunchOptions(verify=verify, ready=lambda: seen.order.append("ready"))
 
 
-def test_issue_1959_verify_is_the_last_check_before_the_launch(seen, tmp_path):
-    """照らし直し（`verify`）は確かめ直しと下限の後に最後に打つ。通った後に呼び手が起動の準備をするためである。"""
+def test_issue_1959_verify_runs_before_the_floor_and_ready_after_every_check(seen, tmp_path):
+    """照らし直し（`verify`）は確かめ直しの後・下限の前に打ち、起動の準備（`ready`）は確かめをすべて通った後に打つ。"""
     got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen))
 
-    assert got.ok and seen.order == ["slot", "recheck", "floor", "verify", "launch"]
+    assert got.ok and seen.order == ["slot", "recheck", "verify", "floor", "ready", "launch"]
 
 
-def test_issue_1959_a_too_old_cli_stops_before_verify(seen, tmp_path):
-    """下限より古ければ照らし直しを打たない（worker は前の結果ファイルを消さない）。"""
+def test_issue_1959_a_refused_verify_stops_before_the_floor(seen, tmp_path):
+    """照らし直しで止まる起動は、下限（`claude --version`）を確かめず、起動の準備も打たない。"""
+    got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen, "取り消された"))
+
+    assert got.failure is claude.Failure.LAUNCH and seen.order == ["slot", "recheck", "verify"] and seen.floor == []
+
+
+def test_issue_1959_a_too_old_cli_stops_before_ready(seen, tmp_path):
+    """下限より古ければ起動の準備を打たない（worker は前の結果ファイルを消さない）。"""
     seen.too_old = cli_floor.TooOld("claude", "/opt/claude", "1.0.0", "2.0.0")
     got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen))
 
-    assert got.failure is claude.Failure.REFUSED and seen.order == ["slot", "recheck", "floor"] and seen.popen == []
+    assert got.failure is claude.Failure.REFUSED and seen.order == ["slot", "recheck", "verify", "floor"] and seen.popen == []
