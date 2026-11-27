@@ -57,7 +57,7 @@ class FakeGit:
 
     def _put(self, path: str, text: str) -> None:
         (self.cwd / path).parent.mkdir(parents=True, exist_ok=True)
-        (self.cwd / path).write_text(text, encoding="utf-8")
+        (self.cwd / path).write_bytes(text.encode())
         self.objects[blob(text)] = text.encode()
 
     def remote(self) -> str:
@@ -81,7 +81,7 @@ class FakeGit:
 
     def status_paths(self) -> list[str]:
         tree = self.trees[self.head]
-        return sorted(p for p in tree if (self.cwd / p).read_text(encoding="utf-8") != tree[p])
+        return sorted(p for p in tree if (self.cwd / p).read_bytes().decode() != tree[p])
 
     def fetch(self, remote: str, *refspecs: str) -> git.Completed:
         return git.Completed(0, "", "")
@@ -106,12 +106,12 @@ class FakeGit:
             tree, paths = self.trees[args[2]], args[args.index("--") + 1 :]
             return "".join(f"{self.modes.get(p, '100644')} blob {blob(tree[p])}\t{p}\0" for p in paths)
         if args[0] == "hash-object":
-            return "".join(blob((self.cwd / p).read_text(encoding="utf-8")) + "\n" for p in args[args.index("--") + 1 :])
+            return "".join(blob((self.cwd / p).read_bytes().decode()) + "\n" for p in args[args.index("--") + 1 :])
         if args[0] == "add":
             return ""
         if args[0] == "commit":
             new = hashlib.sha1(self.head.encode()).hexdigest()
-            self.trees[new] = {p: (self.cwd / p).read_text(encoding="utf-8") for p in self.trees[self.head]}
+            self.trees[new] = {p: (self.cwd / p).read_bytes().decode() for p in self.trees[self.head]}
             for text in self.trees[new].values():
                 self.objects[blob(text)] = text.encode()
             self.head = new
@@ -171,7 +171,7 @@ def HASH(name: str, state_dir: Path) -> str:  # noqa: N802 テストの道具: �
         return rd.question_key(json.loads((state_dir / gate.QUESTIONS_FILE).read_text(encoding="utf-8"))["questions"])
     if name == reading.MATERIAL:
         return reading.sha256((state_dir / gate.MATERIAL_FILE).read_text(encoding="utf-8"))
-    return blob((state_dir.parent / name).read_text(encoding="utf-8"))
+    return blob((state_dir.parent / name).read_bytes().decode())
 
 
 def failing(name: str, quote: str) -> Behave:
@@ -317,6 +317,183 @@ def test_run_rows_are_used_by_branch_and_only_the_changed_part_is_read(tmp_path:
     assert w.run(worker)["status"] == "ok"
     part = next(line for line in worker.prompts[0].splitlines() if line.startswith(f"- `{DESIGN}`")).split("`")[3]
     assert Path(part).read_text(encoding="utf-8") == "第 1 の段落。\n\n第 2 の段落を直した。\n\n第 3 の段落。\n"
+
+
+def _hashing_the_read_file(state_dir: Path, targets: list[tuple[str, Path]]) -> list[dict[str, Any]]:
+    """文書には、読ませたファイル（抜き出しならその抜き出し）の `git hash-object` を書く worker（#4599）。"""
+    out = passing(state_dir, targets)
+    files = dict(targets)
+    for rec in out:
+        if rec["name"] == DESIGN:
+            data = files[DESIGN].read_bytes()  # git hash-object と同じく、改行を変えずにバイト列から求める
+            rec["checks"][0]["hash"] = hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+    return out
+
+
+@pytest.mark.parametrize("eol", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_a_record_of_the_read_part_matches_and_is_stored_as_the_whole_document(tmp_path: Path, eol: str) -> None:
+    """#4599: 抜き出しを読ませた文書は、抜き出しのハッシュの記録を「読ませた後に変わった」としない（CRLF の文書も）。
+    記録の行は文書の全体の blob で書き、次の確認は同じ blob の文書を読ませない。"""
+    old = "# 設計\n\n第 1 の段落。\n\n第 2 の段落。\n\n第 3 の段落。\n\n第 4 の段落。\n".replace("\n", eol)
+    new = "# 設計\n\n第 1 の段落。\n\n第 2 の段落を直した。\n\n第 3 の段落。\n\n第 4 の段落。\n".replace("\n", eol)
+    w = world(tmp_path, {DESIGN: old})
+    assert w.run(FakeWorker())["status"] == "ok"
+    objects = w.git.objects
+    w.git = FakeGit(tmp_path, {DESIGN: new}, head=H2)
+    w.git.objects.update(objects)
+    w.hub.head = H2
+    worker = FakeWorker(_hashing_the_read_file)
+    got = w.run(worker)
+    assert got["status"] == "ok", got
+    assert "/parts/" in next(line for line in worker.prompts[0].splitlines() if line.startswith(f"- `{DESIGN}`"))
+    rows = [r for r in reading.doc_rows() if r.get("kind") == "read" and r["name"] == DESIGN]
+    assert rows[-1]["hash"] == blob(new)
+    third = FakeWorker()
+    assert w.run(third)["status"] == "ok" and third.calls == 0
+
+
+OLD_DOC = "# 設計\n\n第 1 の段落。\n\n第 2 の段落。\n\n第 3 の段落。\n\n第 4 の段落。\n"
+NEW_DOC = "# 設計\n\n第 1 の段落。\n\n第 2 の段落を直した。\n\n第 3 の段落。\n\n第 4 の段落。\n"
+FIXED_DOC = "# 設計\n\n第 1 の段落。\n\n第 2 の段落を読み手役の指摘で直した。\n\n第 3 の段落。\n\n第 4 の段落。\n"
+
+
+def _partial_world(tmp_path: Path) -> World:
+    """1 回目で OLD_DOC を全体で読ませ、head を NEW_DOC へ進めた世界（次の確認は抜き出しを読ませる）。"""
+    w = world(tmp_path, {DESIGN: OLD_DOC})
+    assert w.run(FakeWorker())["status"] == "ok"
+    objects = w.git.objects
+    w.git = FakeGit(tmp_path, {DESIGN: NEW_DOC}, head=H2)
+    w.git.objects.update(objects)
+    w.hub.head = H2
+    w.hub.on_fetch = lambda hub: setattr(hub, "head", w.git.head)
+    return w
+
+
+def _part_file(state_dir: Path) -> Path:
+    return state_dir / gate.PARTS_DIR / DESIGN.replace("/", "__")
+
+
+def _fix_partial_doc(state_dir: Path) -> None:
+    (state_dir.parent / DESIGN).write_text(FIXED_DOC, encoding="utf-8")
+
+
+def _fixed_then(last_hash: Callable[[Path], str]) -> Behave:
+    """文書を 1 回目で不合格にし、2 回目の合格の確かめに `last_hash` のハッシュを書く worker。"""
+
+    def behave(state_dir: Path, targets: list[tuple[str, Path]]) -> list[dict[str, Any]]:
+        out = passing(state_dir, targets)
+        first = blob(gate_decide.changed_part(OLD_DOC, NEW_DOC))
+        for rec in out:
+            if rec["name"] == DESIGN:
+                rec.update(checks=[
+                    {"verdict": "fail", "hash": first, "restatements": ["要点"], "reason": "通じない"},
+                    {"verdict": "pass", "hash": last_hash(state_dir), "restatements": ["要点"]},
+                ])  # fmt: skip
+        return out
+
+    return behave
+
+
+def test_a_stale_part_hash_after_fixing_the_document_is_incomplete(tmp_path: Path) -> None:
+    """#4599 (a): 抜き出しを読ませた後に文書を直し、最後の確かめのハッシュが直す前の抜き出しのままなら止める。"""
+    w = _partial_world(tmp_path)
+    got = w.run(FakeWorker(_fixed_then(lambda s: blob(gate_decide.changed_part(OLD_DOC, NEW_DOC))), edit=_fix_partial_doc))
+    assert got["cause"]["kind"] == "incomplete" and got["gaps"][0]["reason"] == "最後に読ませた後に中身が変わった", got
+
+
+def test_a_rewritten_part_file_is_not_taken_as_read(tmp_path: Path) -> None:
+    """#4599 (b): worker が抜き出しのファイルを書き換え、そのハッシュを書いても、読ませた抜き出しとして読み替えない。"""
+    w = _partial_world(tmp_path)
+
+    def rewrite(state_dir: Path) -> None:
+        _part_file(state_dir).write_text("書き換えた抜き出し。\n", encoding="utf-8")
+
+    got = w.run(FakeWorker(_hashing_the_read_file, edit=rewrite))
+    assert got["cause"]["kind"] == "incomplete" and got["gaps"][0]["reason"] == "最後に読ませた後に中身が変わった", got
+
+
+def test_a_part_remade_from_the_fixed_document_is_taken_as_the_current_blob(tmp_path: Path) -> None:
+    """#4599 (c): 直した文書から作り直した抜き出しのハッシュは、今の blob に読み替わり、設計のレビューへ戻す。"""
+    w = _partial_world(tmp_path)
+    got = w.run(FakeWorker(_fixed_then(lambda s: blob(gate_decide.changed_part(OLD_DOC, FIXED_DOC))), edit=_fix_partial_doc))
+    assert got["status"] == "ok" and got["outputs"]["review_again"]["docs"] == [DESIGN], got
+    rows = [r for r in reading.doc_rows() if r.get("kind") == "read" and r["name"] == DESIGN]
+    assert rows[-1]["hash"] == blob(FIXED_DOC) and rows[-2]["hash"] == blob(NEW_DOC)
+
+
+def test_one_failed_check_without_quotes_is_a_gap_even_if_the_document_must_not_be_fixed(tmp_path: Path) -> None:
+    """#4599 (d): 直さない文書でも、quotes の無い 1 回の不合格は欠け。"""
+    w = world(tmp_path)
+
+    def behave(state_dir: Path, targets: list[tuple[str, Path]]) -> list[dict[str, Any]]:
+        out = passing(state_dir, targets)
+        for rec in out:
+            if rec["name"] == DESIGN:
+                rec.update(
+                    verdict="fail", checks=[{"verdict": "fail", "hash": HASH(DESIGN, state_dir), "restatements": ["要点"], "reason": "x"}]
+                )
+        return out
+
+    got = w.run(FakeWorker(behave), no_doc_fix=True)
+    assert got["cause"]["kind"] == "incomplete" and "quotes" in got["gaps"][0]["reason"], got
+
+
+def test_a_hash_that_is_not_a_string_is_a_gap_not_an_error(tmp_path: Path) -> None:
+    """#4599: 抜き出しを読ませた文書の記録で hash が文字列でなくても、例外で落ちずに欠けとして返す。"""
+    w = _partial_world(tmp_path)
+
+    def behave(state_dir: Path, targets: list[tuple[str, Path]]) -> list[dict[str, Any]]:
+        out = passing(state_dir, targets)
+        for rec in out:
+            if rec["name"] == DESIGN:
+                rec["checks"][0]["hash"] = ["x"]
+        return out
+
+    got = w.run(FakeWorker(behave))
+    assert got["cause"]["kind"] == "incomplete" and got["gaps"][0]["name"] == DESIGN, got
+
+
+def _failing_once(name: str, quote: str) -> Behave:
+    """`name` を 1 回の確かめの不合格（引用 `quote`）で終え、ほかを合格にする worker（#4599）。"""
+
+    def behave(state_dir: Path, targets: list[tuple[str, Path]]) -> list[dict[str, Any]]:
+        out = passing(state_dir, targets)
+        for rec in out:
+            if rec["name"] == name:
+                bad = {"verdict": "fail", "hash": HASH(name, state_dir), "restatements": ["要点"], "reason": "通じない",
+                       "quotes": [{"quote": quote, "why": "語が通じない"}]}  # fmt: skip
+                rec.update(verdict="fail", checks=[bad])
+        return out
+
+    return behave
+
+
+@pytest.mark.parametrize("no_doc_fix", [True, False], ids=["not-fixable", "fixable"])
+def test_one_failed_check_ends_only_a_document_that_must_not_be_fixed(tmp_path: Path, no_doc_fix: bool) -> None:
+    """#4599: 直してよいファイルに入らない文書は、quotes つきの 1 回の不合格で終えてよく、残った文になる。
+    直してよい文書には、今どおり 2 回の確かめを求める。"""
+    w = world(tmp_path)
+    got = w.run(FakeWorker(_failing_once(DESIGN, "第 2 の段落。")), no_doc_fix=no_doc_fix)
+    if not no_doc_fix:
+        assert got["cause"]["kind"] == "incomplete" and "2 回の確かめ" in got["gaps"][0]["reason"], got
+        return
+    assert got["status"] == "ok", got
+    assert got["items"][0]["doc"] == DESIGN and "第 2 の段落。" in got["items"][0]["text"]
+    assert {"name": DESIGN, "reader": reading.ENGINEER, "round": 1, "result": "remained"} in checks_rows()[-1]["reads"]
+
+
+@pytest.mark.parametrize("name", [reading.QUESTION, reading.MATERIAL])
+def test_one_failed_check_ends_the_question_but_not_the_material(tmp_path: Path, name: str) -> None:
+    """#4621: 質問の文は直してよいファイルに入らないので、quotes つきの 1 回の不合格で終えてよい（欠けにしない）。
+    直してよい承認資料には、今どおり 2 回の確かめを求める。"""
+    w = world(tmp_path)
+    got = w.run(FakeWorker(_failing_once(name, "公開してよいですか")))
+    gaps = [g for g in got.get("gaps", []) if g["name"] == name]
+    if name == reading.MATERIAL:
+        assert gaps and "2 回の確かめ" in gaps[0]["reason"], got
+        return
+    assert gaps == [] and got["status"] == "ok", got
+    assert {"name": reading.QUESTION, "reader": reading.APPROVER, "round": 1, "result": "remained"} in checks_rows()[-1]["reads"]
 
 
 # --- 止まる経路（条件 2・5） ---------------------------------------------------------------------------------

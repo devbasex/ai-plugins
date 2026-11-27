@@ -41,15 +41,17 @@ from ndf.core.plan.records import (
     PROGRESS_FILE,
     _add_models,
     _add_outputs,
+    _keep_step_missing,
     _add_prs,
     _keep_step_gaps,
     read_result,
-    read_units,
+    read_assigns,
     recorded_models,
     recorded_outputs,
+    recorded_step_missing,
     recorded_prs,
     recorded_step_gaps,
-    write_units,
+    write_assigns,
 )
 from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcome, RunStep, Sleep
 
@@ -205,7 +207,7 @@ def _work_stage(step: model.Step) -> Optional[str]:
 
 def _run_units(state_dir: Path, run_id: Optional[str]) -> dict[str, Any]:
     """回 `run_id` の割り付けの記録。前の回の記録は使わない。"""
-    found = read_units(state_dir)
+    found = read_assigns(state_dir)
     return found if found.get("run") == run_id else {"run": run_id}
 
 
@@ -286,7 +288,7 @@ def _after_unit(state_dir: Path, step: model.Step, out: Mapping[str, Any]) -> No
     if new == {"assigns": {}, "pending": [], **held}:
         return
     try:
-        write_units(state_dir, new)
+        write_assigns(state_dir, new)
     except OSError as exc:  # ファイル: 記録を書けなくても工程の結果は変えない（その単位は数えない）
         log.warning("割り付けの記録を %s へ書けない: %s", state_dir, exc)
 
@@ -321,9 +323,11 @@ def run_step(spec: dict[str, Any], step_id: str, attempt: int, nth: int = 1, ret
         write_json(step_presented_path(ctx.state_dir, step_id), {"step": step_id, "run": spec.get("run_id"), **shown})
     if out["prs"]:
         _add_prs(ctx.state_dir, out["prs"])
-    if out["outputs"]:
-        _add_outputs(ctx.state_dir, out["outputs"])
+    # 判断を求めたステップは値が無くても打つ（前の回の同じステップの値を外す。#4513）
+    if out["outputs"] or out["status"] == GATE:
+        _add_outputs(ctx.state_dir, step_id, out["status"], out["outputs"])
     _keep_step_gaps(ctx.state_dir, step_id, out["gaps"])
+    _keep_step_missing(ctx.state_dir, step_id, out["status"], out[result.MISSING_OUTPUTS])
     return out
 
 
@@ -360,7 +364,7 @@ def _perform(spec: dict[str, Any], act: Any) -> Outcome:
     """手を実行する。ステップは耐久ステップ、待ちは耐久の recv で行う。"""
     if isinstance(act, RunStep):
         out = run_step(spec, act.step, act.attempt, act.nth, act.retry)
-        return Outcome(out["status"], out["kind"], out["retry_after"])
+        return Outcome(out["status"], out["kind"], out["retry_after"], summary=out["summary"])
     if isinstance(act, Sleep):
         durable.recv(TOPIC_RETRY, act.seconds)
         return Outcome(SLEPT)
@@ -801,6 +805,10 @@ def final_result(inv: Invocation, final: Optional[dict[str, Any]], status: Optio
     if models:
         metrics["models"] = models
     outputs, warnings = recorded_outputs(inv.state_dir)
+    missing = recorded_step_missing(inv.state_dir).get(final["last"]) if final and final["status"] == GATE else None
+    if missing:
+        # 承認ゲートで止まったステップが確かめを通さなかった必須の出力（承認の後に工程の進行が失敗にする。#4513）
+        metrics[result.MISSING_OUTPUTS] = missing
     shared = {"outputs": outputs, "warnings": warnings, "run_id": inv.run_id}
     return _result_of(inv, final, status, _FinalRecords(items, metrics, outputs, shared, recorded_step_gaps(inv.state_dir)))
 

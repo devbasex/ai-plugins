@@ -12,9 +12,11 @@ from dataclasses import dataclass
 from pathlib import PurePath
 
 from ndf.contracts import facts
+from ndf.core import route
 
 PHASES = "loop-phases"
-SKILL = "cross-refactoring"
+# Skill の名前（工程のプランのテンプレートの名前と同じ）
+SKILL = route.REFACTOR_TEMPLATE
 RESULT_DIR = ".cross_refactoring"
 IGNORE_ENTRY = f"{RESULT_DIR}/"
 

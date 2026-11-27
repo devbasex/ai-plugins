@@ -29,7 +29,7 @@ from filelock import FileLock, Timeout
 
 from ndf import contracts, identity
 from ndf.adapters import agents, launch_approval
-from ndf.adapters.secret_forms import holds_secret
+from ndf.adapters.secret_lines import holds_secret
 from ndf.contracts import facts, internal
 
 SCHEMA = "schemas/ndf-settings/launch.schema.json"
@@ -431,7 +431,7 @@ def _copies(definitions: list[Any]) -> Iterator[tuple[Path, ...]]:
         try:
             where.mkdir(mode=0o700)
             os.chmod(where, 0o700)
-            _write_record(base, ident, where.lstat(), names)
+            _write_owner_record(base, ident, where.lstat(), names)
             paths = tuple(_write_private(where / name, json.dumps(raw, ensure_ascii=False)) for name, raw in zip(names, definitions))
         except OSError as exc:
             raise _precondition(f"MCP の定義のコピーを {where} に書けない（{type(exc).__name__}）") from None
@@ -474,7 +474,7 @@ def _owner_record(ident: str, st: os.stat_result, files: tuple[str, ...]) -> dic
     return {"row": COPIES, "id": ident, "dev": st.st_dev, "ino": st.st_ino, "files": list(files)}
 
 
-def _write_record(base: Path, ident: str, st: os.stat_result, files: tuple[str, ...]) -> None:
+def _write_owner_record(base: Path, ident: str, st: os.stat_result, files: tuple[str, ...]) -> None:
     """錠を取った管理ファイル（空）に記録を書く。記録の終わりに `RECORD_END` を付け、途中で落ちた書き込みを完成した記録と
     見分けられるようにする（JSON の中に改行は無いので、途中までの中身は `RECORD_END` で終わらない）。"""
     fd = os.open(base / f"{ident}{OWNER_SUFFIX}", os.O_WRONLY | os.O_NOFOLLOW)

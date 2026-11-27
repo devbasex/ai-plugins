@@ -70,9 +70,16 @@ def _parser() -> argparse.ArgumentParser:
         "merge",
         help="PR を、前段の確かめ（決めていない残リスク・HEAD の食い違い・本番チャネルへの承認の証跡）を通してマージする",
     )
-    which = m.add_mutually_exclusive_group(required=True)
-    which.add_argument("--branch", help="PR の head のブランチ（作業場所の HEAD を添える）")
-    which.add_argument("--pr", type=int, help="PR の番号（作業場所が無くても打てる。マージ済みなら何もしない）")
+    m.add_argument("--branch", help="PR の head のブランチ（作業場所の HEAD を添える）。--branch か --pr は必須")
+    m.add_argument(
+        "--pr",
+        type=int,
+        help="PR の番号。--branch か --base を添えると、まず PR がその指定に合うかを確かめる。"
+        "head のブランチ名かマージ先が指定と違う PR、フォークからの PR、マージされずに閉じた PR は refused で止まる。"
+        "--branch と --base を両方省くと、この確かめを省く。確かめを通った後も、省いた後も、次に PR がマージ済みかを調べる。マージ済みなら、マージ操作をせずに ok を返す。"
+        "作業場所が無いときは、--branch を省き、--pr と --repo を渡す",
+    )
+    m.add_argument("--base", help="期待するマージ先。対象の PR のマージ先が違えばマージしない")
     m.add_argument("--repo", help="<所有者>/<リポジトリ>。省けば作業場所の origin")
     m.add_argument("--method", help="マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭")
     m.add_argument("--reviewed", help="レビューを経た HEAD。作業場所の HEAD と違えばマージしない")
@@ -300,8 +307,9 @@ def _held_target(shown: dict) -> Optional[merge_approval.MergeTarget]:
         return None
 
 
-def _pr_item_list(number: int) -> list[dict]:
-    return [{"kind": "pr", "number": number}]
+def _pr_item_list(number: int, merge_sha: str = "") -> list[dict]:
+    """PR の項目。マージした・マージ済みだった PR は、GitHub が返したマージコミットを持つ（単位を流す処理が、スプリントの作業場所を最後の単位のマージ結果まで進めるのに使う。#4369）。"""
+    return [{"kind": "pr", "number": number, **({"merge_sha": merge_sha} if merge_sha else {})}]
 
 
 def _asking(target: merge_approval.MergeTarget, verdict: Verdict, out: Optional[str], summary: str) -> dict:
@@ -361,22 +369,54 @@ def _approved_mismatch(args: argparse.Namespace, pull: Pull) -> Optional[str]:
     return None
 
 
-def _merge_pull(args: argparse.Namespace, hub: GitHub) -> tuple[Optional[Pull], Optional[dict]]:
-    """マージする PR。`--pr` でマージ済みなら何もせずに ok を返す（方式の問い合わせ・設定の読み取りをしない。決定 5）。"""
-    if args.pr is not None:
-        pull = hub.pulls([args.pr])[args.pr]
-        if pull is None:
-            return None, result.stopped(TOOL, "precondition", f"#{args.pr} は PR でない")
-        if pull.merged:
-            summary = f"#{pull.number} は既にマージ済み"
-            return None, result.result(TOOL, result.OK, summary, items=_pr_item_list(pull.number), metrics={"merge": "already"})
-        if pull.state != "open":
-            return None, result.stopped(TOOL, "precondition", f"#{pull.number} は閉じている")
-        return pull, None
-    pull = _open_pull(hub, args.branch)
+def _foreign(args: argparse.Namespace, pull: Pull) -> Optional[str]:
+    """番号の PR が `--branch`・`--base` の指すものと違えば理由。どちらも無ければ照らさない（番号だけの呼び出し）。"""
+    if args.branch is None and args.base is None:
+        return None
+    if args.branch is not None and pull.head_ref != args.branch:
+        return f"head が {pull.head_ref} で、{args.branch} でない"
+    if args.base is not None and pull.base_ref != args.base:
+        return f"マージ先が {pull.base_ref} で、{args.base} でない"
+    if pull.cross_repository:
+        return "head がフォークのブランチ"
+    if pull.state != "open" and not pull.merged:
+        return "PR がマージされないまま閉じている"
+    return None
+
+
+def _numbered_target(hub: GitHub, args: argparse.Namespace) -> Pull | dict:
+    """`--pr` の PR。マージ済みなら何もせずに ok を返す（方式の問い合わせ・設定の読み取りをしない。決定 5）。
+
+    マージ先などの確かめは、マージ済みの確かめより先にする。
+    """
+    pull = hub.pulls([args.pr])[args.pr]
     if pull is None:
-        return None, _no_open_pull(args.branch)
-    return pull, None
+        return result.stopped(TOOL, "precondition", f"#{args.pr} は PR でない")
+    foreign = _foreign(args, pull)
+    if foreign is not None:
+        detail = f"#{pull.number} の{foreign}"
+        return result.stopped(TOOL, "refused", detail, instance=pull.head_sha, items=_pr_item_list(pull.number))
+    if pull.merged:
+        summary = f"#{pull.number} は既にマージ済み"
+        return result.result(TOOL, result.OK, summary, items=_pr_item_list(pull.number, pull.merge_sha), metrics={"merge": "already"})
+    if pull.state != "open":
+        return result.stopped(TOOL, "precondition", f"#{pull.number} は閉じている")
+    return pull
+
+
+def _target(hub: GitHub, args: argparse.Namespace) -> Pull | dict:
+    """マージする PR。決められなければ（マージ済みも含めて）返す結果。
+
+    `--pr` が無く `--base` があれば、ブランチの開いた PR のうちマージ先が `--base` のものを選ぶ（フォークの PR は除く）。
+    """
+    if args.pr is not None:
+        return _numbered_target(hub, args)
+    if args.base is None:
+        pull = _open_pull(hub, args.branch)
+        return pull if pull is not None else _no_open_pull(args.branch)
+    # 同じリポジトリの head とマージ先が同じ開いた PR は 1 件だけなので、見つかった時点で読み終える
+    opened = hub.open_pulls_of_head(args.branch, enough=1, base=args.base)
+    return opened[0] if opened else result.stopped(TOOL, "precondition", f"{args.branch} の {args.base} 宛ての開いた PR が無い")
 
 
 def _worktree_head(args: argparse.Namespace) -> tuple[Optional[str], Optional[dict]]:
@@ -456,9 +496,50 @@ def _merged(
         metrics: dict[str, Any] = {"merge": "merged", "verdict": verdict.value}
         if approved_by is not None:
             metrics["approved_by"] = approved_by
-        return result.result(TOOL, result.OK, outcome.detail, items=items, metrics=metrics)
+        return result.result(TOOL, result.OK, outcome.detail, items=_pr_item_list(target.number, outcome.merge_sha), metrics=metrics)
     kind = outcome.kind if outcome.kind is not None else "unknown"
     return result.stopped(TOOL, kind, outcome.detail, instance=outcome.head_sha, items=items)
+
+
+class _Rejudge:
+    """`GitHub.merge` の直前の確かめで、読み直したプロジェクトのファイルから本番チャネルを判定し直す関数（`MergeExpect.rejudge`）。
+
+    判定し直してマージへ進むときは、判定し直した値を `verdict` に採り、成功の結果へ引き継ぐ（だれの承認でどの経路のマージを
+    したかを結果に残す）。承認が要れば今の承認の対象への証跡の担い手を `approved_by` に採り、要らなければ空にする。
+    判定し直さなかったとき（設定の oid が同じ）は初めの判定と担い手のまま。
+    """
+
+    def __init__(self, hub: GitHub, pull: Pull, target: merge_approval.MergeTarget, verdict: Verdict, approved_by: Optional[str]) -> None:
+        self._hub, self._pull, self._target = hub, pull, target
+        self.verdict, self.approved_by = verdict, approved_by
+
+    def __call__(self, text: Optional[str]) -> Optional[MergeOutcome]:
+        again = _verdict_of(self._hub, self._pull.base_ref, text, self._hub.repo)
+        if not production_merge.needs_approval(again):
+            # 承認の要らない経路でマージするので、初めの判定で読んだ担い手を結果に残さない
+            self.verdict, self.approved_by = again, None
+            return None
+        try:
+            row = _approval(self._hub, self._target)
+        except merge_approval.TrailError as exc:
+            # 初めの判定と同じく、token の利用者を読めなければ precondition（approval_stale にしない）。
+            # キューにある PR は、`GitHub.merge` が確かめの応答の最新のキューの状態で外す
+            return MergeOutcome(False, "precondition", str(exc), self._pull.head_sha)
+        if row is not None:
+            self.verdict, self.approved_by = again, row.by
+            return None
+        return MergeOutcome(False, _REJUDGED, again.value, self._pull.head_sha)
+
+
+def _invalid_args(args: argparse.Namespace) -> Optional[dict]:
+    """`_merge` の引数の組み合わせを確かめ、足りなければ `invalid` で止まる結果を返す。"""
+    if args.branch is None and args.pr is None:
+        return result.stopped(TOOL, "invalid", "--branch か --pr のどちらかを渡す")
+    if (args.approved_head is None) != (args.approved_base is None):
+        return result.stopped(TOOL, "invalid", "--approved-head と --approved-base は組で渡す")
+    if args.required and args.budget is None:
+        return result.stopped(TOOL, "invalid", "--required を渡すときは --budget も渡す")
+    return None
 
 
 def _merge(args: argparse.Namespace) -> dict:
@@ -466,23 +547,24 @@ def _merge(args: argparse.Namespace) -> dict:
 
     本文に決めていない「マージの前に決める」残リスクの行（`- [ ]`）が残れば、マージせずに `refused` で止まり、残った行を理由に出す。
     `--reviewed`（レビューを経た HEAD）が作業場所の HEAD と違えば、PR を読まずに `refused` で止まる（#3879 決定 2）。
+    `--pr` に `--branch`・`--base` を添えた呼び出しは、head・マージ先・リポジトリの違う PR と、マージされず閉じた PR を
+    要求を送らずに `refused` にする（#4369）。直前の確かめは、判定の前に読んだマージ先と照らすので、`--base` も守られる。
     `--approved-head`・`--approved-base` を受けたら、判定の前に今の PR と照らし、違えば判定によらず `approval_stale` で止まる。
     マージ先が自動反映の本番チャネル（判定の値が `automatic`・`unset`・`unknown`）なら、今の承認の対象への証跡があるときだけ
     マージし、無ければ `--production-gate` の形で終える。
     `--required` を受けたら、承認した対象を今の PR と照らした後に、マージする HEAD のチェックを待つ。マージ済みの PR は待たない。
     待つ間に HEAD かマージ先が変われば、`GitHub.merge` の直前の確かめが止める。
     """
-    if (args.approved_head is None) != (args.approved_base is None):
-        return result.stopped(TOOL, "invalid", "--approved-head と --approved-base は組で渡す")
-    if args.required and args.budget is None:
-        return result.stopped(TOOL, "invalid", "--required を渡すときは --budget も渡す")
+    invalid = _invalid_args(args)
+    if invalid is not None:
+        return invalid
     head, refused = _worktree_head(args)
     if refused is not None:
         return refused
     hub = _hub(args)
-    pull, done = _merge_pull(args, hub)
-    if pull is None:
-        return done if done is not None else result.stopped(TOOL, "unknown", "PR を決められない")
+    pull = _target(hub, args)
+    if isinstance(pull, dict):
+        return pull
     target = _pr_target(hub, pull)
     stopped = _held_mismatch(args, pull, target)
     if stopped is not None:
@@ -497,23 +579,10 @@ def _merge(args: argparse.Namespace) -> dict:
     approved_by, unapproved = _approved_by(args, hub, pull, target, verdict)
     if unapproved is not None:
         return unapproved
-
-    def rejudge(text: Optional[str]) -> Optional[MergeOutcome]:
-        again = _verdict_of(hub, pull.base_ref, text, hub.repo)
-        if not production_merge.needs_approval(again):
-            return None
-        try:
-            if _approval(hub, target) is not None:
-                return None
-        except merge_approval.TrailError as exc:
-            # 初めの判定と同じく、token の利用者を読めなければ precondition（approval_stale にしない）。
-            # キューにある PR は、`GitHub.merge` が確かめの応答の最新のキューの状態で外す
-            return MergeOutcome(False, "precondition", str(exc), pull.head_sha)
-        return MergeOutcome(False, _REJUDGED, again.value, pull.head_sha)
-
+    rejudge = _Rejudge(hub, pull, target, verdict, approved_by)
     expect = MergeExpect(pull, pull.base_ref, pull.head_sha, PROJECT_FILE, oid, rejudge)
     outcome = hub.merge(pull.number, expect_head=head if head is not None else pull.head_sha, method=args.method, expect=expect)
-    return _merged(args, target, outcome, verdict, approved_by)
+    return _merged(args, target, outcome, rejudge.verdict, rejudge.approved_by)
 
 
 def _ask_approval(args: argparse.Namespace) -> dict:

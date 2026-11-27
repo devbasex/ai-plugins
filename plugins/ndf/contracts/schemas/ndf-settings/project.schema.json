@@ -40,7 +40,7 @@
         }
       ],
       "default": null,
-      "description": "言語ごとの名前・フレームワーク・ファイルの数・バージョンの並び。解析（M7）が書く"
+      "description": "言語ごとの名前・フレームワーク・バージョンの並び（名前の順）。解析（M7）が書く"
     },
     "test": {
       "anyOf": [
@@ -70,7 +70,7 @@
         }
       ],
       "default": null,
-      "description": "CI の提供元・ワークフロー・必須のチェック"
+      "description": "CI の必須のチェック"
     },
     "services": {
       "anyOf": [
@@ -187,27 +187,11 @@
         }
       ],
       "default": null,
-      "description": "解析（M7）が書いた入力の sha256・ブランチ・書いたセクションの記録。人は書かない"
-    },
-    "test_duration": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/TestDuration"
-        },
-        {
-          "$ref": "#/$defs/Unknown"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "読み手は読まない（今のバージョンの読み手が読む値。11.0.0 の後に消す）",
-      "deprecated": true
+      "description": "解析（M7）が書いた値の指紋。人は書かない。解析の記録は .ndf/analysis/project.json（git で追跡しない）にある"
     },
     "workflow": {
       "type": "object",
-      "description": "工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch）",
+      "description": "工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch）と、課題を閉じる条件の要否（close）",
       "properties": {
         "stages": {
           "type": "object",
@@ -215,6 +199,19 @@
           "additionalProperties": {
             "$ref": "#/$defs/StageToggle"
           }
+        },
+        "close": {
+          "type": "object",
+          "description": "課題を閉じる条件の要否。省いた条件は求める。外すときは reason が要る。外せるのはリリース後テストの記録（release_verification）と「振り返り:」の行（retrospective_line）だけ",
+          "properties": {
+            "release_verification": {
+              "$ref": "#/$defs/CloseRule"
+            },
+            "retrospective_line": {
+              "$ref": "#/$defs/CloseRule"
+            }
+          },
+          "additionalProperties": false
         },
         "launch": {
           "type": "object",
@@ -279,6 +276,10 @@
     {
       "by": "ndf progress",
       "when": "ステートマシンを作るときに workflow.stages の工程の有効・無効を読む"
+    },
+    {
+      "by": "ndf records close-check",
+      "when": "課題を閉じてよいかを決めるときに workflow.close の条件の要否を読む"
     }
   ],
   "examples": [
@@ -299,25 +300,6 @@
     "Analysis": {
       "additionalProperties": false,
       "properties": {
-        "analyzer": {
-          "minimum": 1,
-          "title": "Analyzer",
-          "type": "integer"
-        },
-        "at": {
-          "title": "At",
-          "type": "string"
-        },
-        "inputs": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Inputs",
-          "type": "object"
-        },
-        "branches": {
-          "$ref": "#/$defs/BranchState"
-        },
         "written": {
           "additionalProperties": {
             "type": "string"
@@ -327,40 +309,7 @@
           "type": "object"
         }
       },
-      "required": [
-        "analyzer",
-        "at",
-        "inputs",
-        "branches"
-      ],
       "title": "Analysis",
-      "type": "object"
-    },
-    "BranchState": {
-      "additionalProperties": false,
-      "properties": {
-        "head": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Head"
-        },
-        "present": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Present",
-          "type": "array"
-        }
-      },
-      "title": "BranchState",
       "type": "object"
     },
     "BranchStrategy": {
@@ -1504,17 +1453,6 @@
     "Ci": {
       "additionalProperties": false,
       "properties": {
-        "provider": {
-          "title": "Provider",
-          "type": "string"
-        },
-        "workflows": {
-          "items": {
-            "$ref": "#/$defs/Workflow"
-          },
-          "title": "Workflows",
-          "type": "array"
-        },
         "required_checks": {
           "default": [],
           "items": {
@@ -1524,10 +1462,6 @@
           "type": "array"
         }
       },
-      "required": [
-        "provider",
-        "workflows"
-      ],
       "title": "Ci",
       "type": "object"
     },
@@ -1553,6 +1487,38 @@
       ],
       "title": "CiExempt",
       "type": "object"
+    },
+    "CloseRule": {
+      "type": "object",
+      "description": "課題を閉じる条件 1 つの要否。外すときは理由が要る",
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "条件を求めるか"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "条件を外す理由"
+        }
+      },
+      "required": [
+        "required"
+      ],
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "required": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reason"
+        ]
+      },
+      "title": "CloseRule"
     },
     "CodeMeasure": {
       "additionalProperties": false,
@@ -1701,6 +1667,52 @@
           ],
           "default": null,
           "title": "Publishes Release"
+        },
+        "paths": {
+          "anyOf": [
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "この届け先の CD が配るパス（git の pathspec の :(glob) の形。例 web/**）。本番の PR の差分と push の差分の両方に出るパスが当たる届け先だけをリリース記録の対象にする。無ければ毎回対象にする（#4580）"
+        },
+        "observe": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "url",
+                "pointer"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "pattern": "^https?://",
+                  "description": "この届け先で稼働しているバージョンを JSON で返す、認証の要らない URL"
+                },
+                "pointer": {
+                  "type": "string",
+                  "pattern": "^(/.*)?$",
+                  "description": "応答の中で稼働しているバージョンのコミットの SHA を持つ項目の JSON Pointer（RFC 6901。例 /build/commit）"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "実環境の確認（record --observed）で読む URL と項目。CD の結果が未確定のとき、値が push の after と一致すればリリース記録を書ける（#4580）"
         }
       },
       "required": [
@@ -1752,6 +1764,26 @@
           ],
           "default": null,
           "title": "Timeout Seconds"
+        },
+        "env": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "title": "result.env の予約した名前",
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "not": {
+                  "pattern": "^(GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|SSH_AUTH_SOCK|GIT_.*|NDF_.*)$"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "結果を読むコマンド（command）へ渡す環境変数の名前。PATH・HOME・LANG・LC_ALL・TZ・TMPDIR のほかはここに書いた名前だけを渡す。GitHub・git・NDF の操作に使う名前（not の pattern）は書けない（#4580）"
         }
       },
       "title": "DeliveryResult",
@@ -1805,36 +1837,6 @@
         }
       },
       "title": "Docs",
-      "type": "object"
-    },
-    "Duration": {
-      "additionalProperties": false,
-      "properties": {
-        "seconds": {
-          "minimum": 0,
-          "title": "Seconds",
-          "type": "number"
-        },
-        "source": {
-          "enum": [
-            "ndf-record",
-            "ci-junit",
-            "ci-steps"
-          ],
-          "title": "Source",
-          "type": "string"
-        },
-        "detail": {
-          "title": "Detail",
-          "type": "string"
-        }
-      },
-      "required": [
-        "seconds",
-        "source",
-        "detail"
-      ],
-      "title": "Duration",
       "type": "object"
     },
     "Environment": {
@@ -1963,16 +1965,10 @@
           },
           "title": "Frameworks",
           "type": "array"
-        },
-        "files": {
-          "minimum": 0,
-          "title": "Files",
-          "type": "integer"
         }
       },
       "required": [
-        "name",
-        "files"
+        "name"
       ],
       "title": "Language",
       "type": "object"
@@ -2473,6 +2469,29 @@
           },
           "title": "Ci Exempt",
           "type": "array"
+        },
+        "protected_files": {
+          "default": [],
+          "description": "手元の経路のリファクタリングがこの実行で変えないテストの定義のファイルかディレクトリ（#4566）。当て方は suite の paths と同じ",
+          "items": {
+            "type": "string"
+          },
+          "title": "Protected Files",
+          "type": "array"
+        },
+        "local_total_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "手元の経路のリファクタリングの最終ゲートで、テスト全体の実行の累計の上限（分。#4566）。書けば suite 1 つの上限も累計の残りだけになる",
+          "title": "Local Total Minutes"
         }
       },
       "required": [
@@ -2523,24 +2542,6 @@
         }
       },
       "title": "TestCi",
-      "type": "object"
-    },
-    "TestDuration": {
-      "additionalProperties": false,
-      "properties": {
-        "measured": {
-          "items": {
-            "$ref": "#/$defs/Duration"
-          },
-          "minItems": 1,
-          "title": "Measured",
-          "type": "array"
-        }
-      },
-      "required": [
-        "measured"
-      ],
-      "title": "TestDuration",
       "type": "object"
     },
     "TestedDocs": {
@@ -2699,38 +2700,6 @@
         "aggregate_only"
       ],
       "title": "UsageScope",
-      "type": "object"
-    },
-    "Workflow": {
-      "additionalProperties": false,
-      "properties": {
-        "path": {
-          "title": "Path",
-          "type": "string"
-        },
-        "jobs": {
-          "minimum": 0,
-          "title": "Jobs",
-          "type": "integer"
-        },
-        "wall_seconds": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Wall Seconds"
-        }
-      },
-      "required": [
-        "path",
-        "jobs"
-      ],
-      "title": "Workflow",
       "type": "object"
     }
   }

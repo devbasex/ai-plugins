@@ -6,11 +6,10 @@ import fnmatch
 import json
 from typing import Any
 
-from ndf.adapters.secret_forms import MASK, SECRET_VALUE, redact
+# 書かない値の形と行ごとの伏せ字は、cross-refactoring の手元の最終ゲートも使うので下の層に置く（#4566）
+from ndf.adapters.secret_lines import ASSIGNED_SECRET, MASK, SECRET_VALUE, redact  # noqa: F401
 
-__all__ = ["MASK", "SECRET_NAMES", "has_secret", "is_secret_path", "mask", "redact"]
-
-# 秘密の 2 ステップの表: 開かないファイルの名前（ここ）と、書かない値の形（`adapters/secret_forms`。下の層の起動の設定の検査と同じ表を使う）。`.env.example` も開かない（テンプレートに実際の値が入っている例がある）
+# 秘密の 2 ステップの表: 開かないファイルの名前と、書かない値の形。`.env.example` も開かない（テンプレートに実際の値が入っている例がある）
 SECRET_NAMES = (".env*", "*.pem", "*.key", "id_rsa*", "*credential*", "*secret*", ".npmrc", ".pypirc", "auth.json")
 
 

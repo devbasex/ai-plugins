@@ -8,6 +8,7 @@ import dataclasses
 import pytest
 
 from ndf import contracts
+from ndf.contracts import internal
 from ndf.progress import definition, invoke, model, run, stages
 
 import scenes
@@ -561,3 +562,39 @@ def test_mode_definition_scenes(request, scene, values):
 def test_find_enum_scenes(request, scene, values):
     """出力のコントラクトの木から回答の enum を探す _find_enum の場面。"""
     scenes.play(request, scene, values)
+
+
+@pytest.mark.parametrize(("stage", "mode"), [("リリース後テスト", "standard"), ("体裁レビュー", "documentation")])
+def test_the_after_release_stages_take_a_distribution_id_that_is_not_a_version_number(stage, mode):
+    # #4513 の受け入れ条件 4: バージョン番号を持たないリポジトリの product_version で、後の工程の入力が組める
+    s = definition.load_definition(mode).stage(stage)
+    assert invoke.resolve_inputs(s, {"product_version": "main abc1234"}) == {"product_version": "main abc1234"}
+    with pytest.raises(invoke.StageInputInvalid):
+        invoke.resolve_inputs(s, {"product_version": "main\nabc1234"})
+
+
+def test_required_outputs_reads_the_nested_required_keys_of_the_contract():
+    # #4513: release-result は allOf の 2 つ目に入れ子で outputs.product_version を必須とする
+    step = next(st for st in definition.load_definition("standard").stage("デプロイ").steps if st.id == "release")
+    assert definition.required_outputs(step.output_ref) == ("product_version",)
+    gate = next(st for st in definition.load_definition("standard").stage("デプロイ").steps if st.id == "release-gate")
+    assert definition.required_outputs(gate.output_ref) == ()
+    with pytest.raises(contracts.ContractError):
+        definition.required_outputs("file:///workflow/no-such.schema.json#/$defs/x")
+
+
+def test_a_stage_declaring_per_unit_is_kept_through_the_snapshot_and_old_snapshots_read_false():
+    steps = [_step("work", "work", "none")]
+    docs = {"a": _stage_doc("a", "甲", steps, per_unit=True), "b": _stage_doc("b", "乙", steps)}
+    snap = definition.build(_mode_doc([("甲", "a"), ("乙", "b")]), docs)
+    assert [s.per_unit for s in snap.stages] == [True, False]
+    raw = {**stages.snapshot_dict(snap), "context": {}, "enablement": {}}
+    assert stages.snapshot_from(internal.read_record("stage-snapshot", raw)) == snap
+    for stage in raw["stages"]:
+        del stage["per_unit"]
+    assert [s.per_unit for s in stages.snapshot_from(raw).stages] == [False, False]
+
+
+def test_per_unit_is_declared_only_as_true():
+    docs = {"a": _stage_doc("a", "甲", [_step("work", "work", "none")], per_unit=False)}
+    assert any("per_unit" in e or "True was expected" in e for e in _errors(_mode_doc([("甲", "a")]), docs))

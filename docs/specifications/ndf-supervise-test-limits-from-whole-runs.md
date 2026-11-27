@@ -2,6 +2,10 @@
 
 ## 概要
 
+この文書は、テストの所要時間を `.ndf/project.json` に保存していた当時の仕様を記録する。
+本文の `w` は当時の `test_duration`、`m` は直近の全体テストの実測、`c` は CI の壁時計の秒を指す。
+[解析で取得・保存する項目の見直し](https://github.com/devbasex/ai-plugins/issues/4516)で `test_duration` の測定と保存を廃止した。
+
 **`supervise.py` のプランと `test-run.py` が使う予算なしのテストの上限（`whole_timeout`・`test_timeout`・`init_test_timeout`）は、
 `.ndf/project.json` の所要の記録 w と、同じリポジトリで先に走った全体テストの実測 m の大きい方の 3 倍（`ceil(3·max(w, m))`）である。**
 手元の全体検証が上限の中で終わるたびに、その秒をリポジトリの git の共通ディレクトリへ 1 行追記する。範囲テストと全体テストの
@@ -29,7 +33,7 @@
 | `test-run.py scope` / `whole` の `--limit` | [`test-run.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/test-run.py) の冒頭の説明と `--help` |
 | ステップの開始の決め直し | [`supervise_lib/steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/steps.py) の `fill_test_limit` |
 | `with_margin` の式（10%・最低 30 秒） | [`supervise_lib/verify_steps.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/supervise_lib/verify_steps.py)。理由は [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md) |
-| 所要の記録（`test_duration`）の測り方 | [project-decl-ci-representative-run.md](project-decl-ci-representative-run.md) と `development-workflow` の [`references/project-analysis.md`](../../plugins/ndf/skills/development-workflow/references/project-analysis.md) |
+| 所要の記録（`test_duration`）の測り方 | #4516 で測るのをやめた（それまでの測り方は git の履歴の `project-decl-ci-representative-run.md` に残る）。今の解析が測るものは `development-workflow` の [`references/project-analysis.md`](../../plugins/ndf/skills/development-workflow/references/project-analysis.md) |
 | 予算を持つ呼び出し（cross-refactoring）の上限 | [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md)・[cross-refactoring-init-test-and-phase-windows.md](cross-refactoring-init-test-and-phase-windows.md) と `cross-refactoring` の `docs/02-plan-and-implement.md` |
 
 この文書は、その形に**なぜしたか**（背景・決定と理由・常に成り立つ条件・データの形・既知の限界・テスト観点）を残す。
@@ -37,8 +41,8 @@
 
 ## 用語
 
-「所要の記録」「全体テストの実測」「テストの上限」「全体テストの鍵」の定義は用語集（[docs/glossary.md](../glossary.md)）が正である。
-この文書の w は所要の記録、m は直近の全体テストの実測、c は CI の壁時計の秒を指す。
+「全体テストの実測」「テストの上限」「全体テストの鍵」の定義は用語集（[docs/glossary.md](../glossary.md)）が正である。
+w・m・c の意味は冒頭の「概要」に書いた。当時の「所要の記録」（w）は、`test_duration` の廃止とともに用語集から消した。
 
 コンテキストは NDF の開発ワークフロー（`ndf-workflow`）の 1 つである。cross-refactoring の着手前のテストは同じコンテキストの中の
 呼び出し元で、全体テストの実測を同じ関数（`whole_runs.record_whole`）で書く。
@@ -295,5 +299,4 @@ classDiagram
 - Pull Request: [#2238](https://github.com/devbasex/ai-plugins/pull/2238)（実装）・[#2247](https://github.com/devbasex/ai-plugins/pull/2247)（スプリント m1426）
 - 用語集: [docs/glossary.md](../glossary.md)
 - ステップの `timeout` の余裕（`with_margin`）: [ndf-supervise-step-budgets.md](ndf-supervise-step-budgets.md)
-- 所要の記録の測り方: [project-decl-ci-representative-run.md](project-decl-ci-representative-run.md)
 - 予算を持つ呼び出しの上限: [cross-refactoring-time-budget.md](cross-refactoring-time-budget.md)・[cross-refactoring-init-test-and-phase-windows.md](cross-refactoring-init-test-and-phase-windows.md)

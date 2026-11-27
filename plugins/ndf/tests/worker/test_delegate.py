@@ -175,11 +175,11 @@ def test_an_ok_report_without_a_required_output_is_incomplete(tmp_path):
     path.write_text(json.dumps({"status": "ok", "summary": "済んだ", "outputs": {"worktree": "/r/.worktrees/b"}}), encoding="utf-8")
     with worker_paths.open_workdir(tmp_path) as wd:
         report = worker._read_result(wd, path.name)
-    checked, outputs = worker_outcome.require_outputs(report, ["worktree", "branch"])
+    checked, outputs, _ = worker_outcome.require_outputs(report, ["worktree", "branch"])
     got = worker_outcome.outcome_of("worktree", path, checked, [], {"attempts": 1}, outputs=outputs)
     assert result.errors(got) == [] and got["status"] == "stopped" and got["cause"]["kind"] == "incomplete"
     assert [(g["kind"], g["name"]) for g in got["gaps"]] == [("output", "branch")] and outputs is None
-    checked, outputs = worker_outcome.require_outputs(report, ["worktree"])
+    checked, outputs, _ = worker_outcome.require_outputs(report, ["worktree"])
     got = worker_outcome.outcome_of("worktree", path, checked, [], {"attempts": 1}, outputs=outputs)
     assert got["status"] == "ok" and got["outputs"] == {"worktree": "/r/.worktrees/b"}
     assert "outputs" not in worker_outcome.outcome_of("worktree", path, report, [], {"attempts": 1})
@@ -188,7 +188,7 @@ def test_an_ok_report_without_a_required_output_is_incomplete(tmp_path):
 def test_an_ok_report_with_a_malformed_required_output_is_incomplete(tmp_path):
     # PR 4307 の r8-1: 必須の名前があっても、値が結果 JSON の outputs の形に合わなければ欠けにして渡さない
     report = {"status": "ok", "summary": "済んだ", "outputs": {"worktree": "", "branch": 3}}
-    checked, outputs = worker_outcome.require_outputs(report, ["worktree", "branch"])
+    checked, outputs, _ = worker_outcome.require_outputs(report, ["worktree", "branch"])
     got = worker_outcome.outcome_of("worktree", tmp_path / "r.json", checked, [], {"attempts": 1}, outputs=outputs)
     assert result.errors(got) == [] and got["cause"]["kind"] == "incomplete" and outputs is None
     assert [(g["kind"], g["name"]) for g in got["gaps"]] == [("output", "worktree"), ("output", "branch")]

@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/domains/crossrefactor/protected_decide.py",
+  "name": "pytest",
+  "kind": "not-a-violation",
+  "reason": "保護するテストの定義のファイルの名前を、言語とテストランナーごとに一覧で並べた行の 1 つ（#4566 の決定 6）。対象リポジトリが pytest を使うとは仮定せず、無いファイルは当たらないだけで振る舞いは変わらない。リポジトリに固有のファイルは宣言 test.protected_files で足す",
+  "count": 1
+}

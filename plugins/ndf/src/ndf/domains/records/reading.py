@@ -221,7 +221,8 @@ def select_reads(
         newest = matched[-1]["check"]
         last = [r for r in matched if r["check"] == newest][-1]
         if name in keep:
-            out.append({"name": name, "reader": reader, "round": 2, "result": REMAINED})
+            # 直さない文書は 1 回目の不合格で残る（#4599）。回は残った行のものを使う
+            out.append({"name": name, "reader": reader, "round": last["round"] if last["verdict"] == REMAINED else 2, "result": REMAINED})
         elif last["verdict"] in ("passed", REMAINED):
             out.append({"name": name, "reader": reader, "round": last["round"], "result": last["verdict"]})
     return out
@@ -368,7 +369,7 @@ def comment_has(comments: Iterable[str], file_sha256: str) -> bool:
 def release_form(root: Path) -> Optional[str]:
     """設定のリリースの形（`branch_strategy.release.form`）。無ければ None（質問を作れずに止まる）。読めなければ `FormMissing`。"""
     try:
-        section = branch_strategy.load(Path(Git(root).run("rev-parse", "--show-toplevel").strip())).section
+        section = branch_strategy.load(Git(root).toplevel()).section
     except (GitError, branch_strategy.StrategyError) as exc:
         raise FormMissing(f"設定のブランチ戦略を読めない: {exc}") from None
     release = section["release"] if isinstance(section.get("release"), dict) else {}

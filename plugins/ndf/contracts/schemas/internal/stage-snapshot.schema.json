@@ -30,6 +30,7 @@
         "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}},
         "when": {"$ref": "#/$defs/keys"},
         "per_issue": {"type": "boolean"},
+        "per_unit": {"type": "boolean"},
         "inputs": {"$ref": "#/$defs/keys"},
         "outputs": {"$ref": "#/$defs/keys"},
         "optional_inputs": {"$ref": "#/$defs/keys"},

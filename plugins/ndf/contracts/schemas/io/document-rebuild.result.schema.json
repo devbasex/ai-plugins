@@ -43,7 +43,7 @@
               "name": {"type": "string", "minLength": 1, "description": "文書のパスか question・material"},
               "reader": {"type": "string", "minLength": 1, "description": "読み手の立場"},
               "round": {"enum": [1, 2], "description": "その立場で何回目の読みか"},
-              "verdict": {"enum": ["passed", "failed", "remained"], "description": "合格・不合格・2 回目にも残った"}
+              "verdict": {"enum": ["passed", "failed", "remained"], "description": "合格・不合格・残った（2 回目にも残ったか、直さない文書の 1 回目の不合格）"}
             }
           }
         }

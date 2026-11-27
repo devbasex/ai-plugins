@@ -34,8 +34,7 @@
 | Runner が付かなかった取り消し | — | 結論が `cancelled` で、ジョブのステップが 0 件、Runner の名前が空の CI のジョブ。GitHub Actions の障害や Runner 不足で起き、REST のジョブの照会で見分ける | — | — | `docs/specifications/ndf-ci-wait-superseded-failures-and-infra-wait.md` |
 | push 前の検査 | — | `core.hooksPath` の `pre-push` フックが `git push` の前に打つ検査。不合格なら push が拒まれる。中身はプロジェクトごとに違う | — | — | `docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md` |
 | push の修正 | — | 実装のプランで、push 前の検査の不合格を直してコミットし、`pr` のステップを打ち直させる修正の worker（`fix-push` のステップ） | — | — | `docs/specifications/ndf-sprint-acceptance-check-and-prepush-fix.md` |
-| 所要の記録 | — | `.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。設定の解析が書き、プランの作成と test-run.py が読む | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
-| 全体テストの実測 | — | 同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
+| 全体テストの実測 | — | 同じリポジトリで先に走った全体テストの壁時計の秒。後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | テストの上限 | `limits` | test_strategy.limits が返す init_test_timeout・test_timeout・whole_timeout（秒）。ステップの timeout はこれに with_margin の余裕を足した値で、テストの上限には余裕を足さない | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | 全体テストのキー | `whole_key` | 戦略の全体テストのコマンドの集合から作る識別子（whole_key）。全体テストの実測をコマンドごとに分け、コマンドの違う実測を混ぜない（#1631） | — | — | `docs/specifications/ndf-supervise-test-limits-from-whole-runs.md` |
 | 文書のファイル | — | 差分のうち、文章として読まれるファイル。既定は Markdown と、用語集の設定が指す用語集のファイルで、プロジェクトの設定（.ndf/project.json の docs）で変えられる | — | — | `docs/specifications/ndf-diff-kinds-and-docs-only-checks.md` |
@@ -56,3 +55,4 @@
 | 測る場所 | — | 秒数の上限と、同じマシンの上で測る相対の比を測るマシン。CI のランナーのように、スペックが設定で固定され、ほかの処理と CPU を取り合わない場所に限る。共有の開発機は当たらない | — | — | — |
 | JUnit の成果物 | `junit_artifacts` | CI のジョブが上げた artifact のうち、JUnit の XML を持つもの。設定ファイルの `test.ci.junit_artifacts` が名前の glob で指し、CI で落ちたテストをログより先に読む元になる | — | — | `docs/specifications/ndf-next-ci-failed-tests-junit.md` |
 | ログのパーサー | — | 1 つのテストランナー（suite の `runner`）の CI のログの形から、落ちたテストを `<テストのファイル>::<テストの名前>` の並びで読む部品。外部ライブラリを呼ぶ唯一のモジュールの意味の「アダプター」とは別 | — | — | `docs/specifications/ndf-next-ci-failed-tests-junit.md` |
+| テストを確かめる手段 | — | 工程「リファクタリング」が変更の後のテストの合否を確かめる先。必須のチェックがある場合は、指定されたチェックの通過を CI で確認する。テストの合否まで分かるのは、そのチェックにテストが含まれる場合である。必須のチェックが無ければ、CI テストの設定（test.ci.only）が無効で、実行コマンドを持つテストの suite（kind が lint でないもの。省けば test）がある場合に手元で確かめる。どちらも使えなければ、既定の実行条件では理由を記録して工程を飛ばす | — | — | `docs/specifications/cross-refactoring-local-test-gate.md` |

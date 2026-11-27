@@ -101,6 +101,8 @@ class Published(NamedTuple):
     number: int
     url: str
     dropped: dict[str, int]
+    # 書いたコメントの ID（REST の `id`。自分が書いたコメントを消すのに使う。#4580）。コメントでないか、読めなければ 0
+    comment_id: int = 0
 
 
 def local_accounts() -> frozenset[str]:
@@ -382,7 +384,10 @@ class Publisher:
     def comment(self, number: int, body: str) -> Published:
         (safe,), dropped = self.guarded(body)
         made = self.hub.rest("POST", f"/repos/{self.hub.repo}/issues/{int(number)}/comments", {"body": safe})
-        return Published(int(number), str(made["html_url"]), dropped)
+        made_id = made.get("id")
+        return Published(
+            int(number), str(made["html_url"]), dropped, made_id if isinstance(made_id, int) and not isinstance(made_id, bool) else 0
+        )
 
     def comment_unchanged(self, number: int, body: str, exposed_before: bool = False) -> Optional[Published]:
         """検査しても変わらない本文だけをコメントで足す。伏せる所があれば何も書かずに None（本文のハッシュを別に持つ呼び手が、

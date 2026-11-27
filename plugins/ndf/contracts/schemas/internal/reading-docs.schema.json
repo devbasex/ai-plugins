@@ -18,7 +18,7 @@
     "hash": {"type": "string", "minLength": 1, "description": "読ませた対象の全体の中身のハッシュ（文書は blob の SHA、承認資料は残した文のセクションを除いた本文の SHA-256、質問の文は質問のキー）"},
     "reader": {"type": "string", "minLength": 1, "description": "読み手の立場"},
     "round": {"enum": [1, 2], "description": "その立場で何回目の読みか（確認ごとに 1 から数える）"},
-    "verdict": {"enum": ["passed", "failed", "remained"], "description": "合格・不合格（直して次の回へ）・2 回目にも残った"},
+    "verdict": {"enum": ["passed", "failed", "remained"], "description": "合格・不合格（直して次の回へ）・残った（2 回目にも残ったか、直さない文書と質問の文の 1 回目の不合格。#4621）"},
     "quotes": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["quote", "why"], "properties": {"quote": {"type": "string", "minLength": 1, "description": "残った文の引用"}, "why": {"type": "string", "description": "読み手がつまずく理由"}, "redacted": {"const": true, "description": "PR へ書く前に伏せて quote が変わったことを示す。元の引用も、元の引用から計算した値も残さない。次の確認は固定の文の所をその種類の値の形として対象から探す"}}}, "description": "verdict が remained の行の、残った文の引用と理由"},
     "question_key": {"type": ["string", "null"], "description": "done の行: 記録した質問のキー"},
     "head": {"type": ["string", "null"], "description": "done の行: 基準の head"},
@@ -32,7 +32,8 @@
   },
   "allOf": [
     {"if": {"properties": {"kind": {"const": "read"}}}, "then": {"required": ["check", "branch", "gate", "pr", "name", "hash", "reader", "round", "verdict"]}},
-    {"if": {"properties": {"kind": {"const": "read"}, "verdict": {"const": "remained"}}, "required": ["verdict"]}, "then": {"required": ["quotes"], "properties": {"round": {"const": 2}}}},
+    {"if": {"properties": {"kind": {"const": "read"}, "verdict": {"const": "remained"}}, "required": ["verdict"]}, "then": {"required": ["quotes"]}},
+    {"if": {"properties": {"kind": {"const": "read"}, "verdict": {"const": "remained"}, "name": {"const": "material"}}, "required": ["verdict", "name"]}, "then": {"properties": {"round": {"const": 2}}}},
     {"if": {"properties": {"kind": {"const": "done"}}}, "then": {"required": ["check", "branch", "gate", "pr", "question_key", "head", "material_sha256", "material_file_sha256", "body_sha256", "fingerprint"]}},
     {"if": {"properties": {"kind": {"enum": ["review_pending", "review_resolved", "review_cancelled"]}}}, "then": {"required": ["branch", "commit"]}},
     {"if": {"properties": {"kind": {"const": "review_pending"}}}, "then": {"required": ["check", "docs"]}},

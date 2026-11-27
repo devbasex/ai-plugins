@@ -211,8 +211,6 @@ workflow の一覧の表（trigger・permissions・job・artifact）は
   失敗の課題は、直す PR（版を上げる PR かアダプタの修正）のマージの後に閉じる
 - 定期の起動は既定ブランチ（main）の workflow で動く。workflow を変えても、リリースで main に載るまで
   定期の起動には効かない。ブランチの上の変更は `workflow_dispatch` の `ref` で試す
-- 新しい workflow は `.ndf/project.json` の `ci.workflows` に自動では載らない。解析を走らせ直すまで
-  食い違う
 
 ## テスト観点
 

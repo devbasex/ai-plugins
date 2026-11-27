@@ -21,7 +21,7 @@ from typing import Any, Optional
 from ndf import cli, contracts, identity
 from ndf.adapters import git
 from ndf.contracts import result
-from ndf.core import issue_docs
+from ndf.core import issue_docs, start_point
 from ndf.domains.docrebuild import gate_decide
 from ndf.domains.docrebuild import select_decide as sd
 from ndf.domains.records import mvv, reading
@@ -39,7 +39,6 @@ REQUIREMENTS_FILE = "issues/issue-{number}-requirements.md"
 ADD_PREFIX, READER_PREFIX = contracts.schema_enum(RESULT_SCHEMA, "/$defs/id_prefix")
 # `git diff A...B` で分岐点が無いときの終了コード（設計書の実測）
 NO_MERGE_BASE = 128
-WORKTREE_REMOTE = f"{git.WORKTREE_NDF_SETTINGS} の remote"
 # 確かめの記録の verdict（すべて）と、読み手役の確かめの verdict
 VERDICTS = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/verdict")
 CHECKED = contracts.schema_enum(RESULT_SCHEMA, "/$defs/reader/properties/checks/items/properties/verdict")
@@ -89,43 +88,12 @@ class BadReport(Stop):
     kind = "bad_report"
 
 
-def _resolve(g: git.Git, ref: str) -> Optional[str]:
-    """参照のコミットの SHA。読めなければ None、git の失敗は `Precondition`。"""
-    try:
-        return g.commit_or_none(ref)
-    except git.GitError as exc:
-        raise Precondition(f"{ref} を読めない: {exc}") from None
-
-
 def _head_sha(g: git.Git) -> str:
     """`HEAD` の SHA。読めなければ `Precondition`。"""
     try:
         return g.rev_parse("HEAD")
     except git.GitError as exc:
         raise Precondition(f"HEAD を読めない: {exc}") from None
-
-
-def start_point(g: git.Git, base: str, remote: str) -> tuple[str, str]:
-    """起点の参照の名前と SHA（設計書の「処理の流れ」の表）。
-
-    リモート追跡ブランチが読めればそれを使う。読めないときは、求めた名前のリモートが登録済みか、リモートが 1 つも
-    無いときだけ手元の参照を使う。ほかの名前のリモートだけがあるとき・どちらも読めないときは `Precondition`。
-    """
-    tracking = f"refs/remotes/{remote}/{base}"
-    sha = _resolve(g, tracking)
-    if sha is not None:
-        return tracking, sha
-    try:
-        names = g.run("remote").split()
-    except git.GitError as exc:
-        raise Precondition(f"登録済みのリモートを読めない: {exc}") from None
-    if names and remote not in names:
-        raise Precondition(f"リモート {remote} が登録されていない（登録済み: {', '.join(names)}）。{WORKTREE_REMOTE} を直す")
-    local = f"refs/heads/{base}"
-    sha = _resolve(g, local)
-    if sha is None:
-        raise Precondition(f"起点の参照 {tracking} と {local} をどちらも読めない")
-    return local, sha
 
 
 def diff_paths(g: git.Git, start: str, head: str) -> list[str]:
@@ -530,7 +498,10 @@ def start_and_changes(g: git.Git, base: str, remote: str) -> tuple[str, list[str
     """
     try:
         head = _head_sha(g)
-        ref, start = start_point(g, base, remote)
+        try:
+            ref, start = start_point.resolve(g, base, remote)
+        except start_point.StartPointError as exc:
+            raise Precondition(exc.detail) from None
         try:
             changed = diff_paths(g, start, head)
         except Precondition as exc:

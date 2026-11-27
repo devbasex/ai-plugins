@@ -3,12 +3,14 @@
     ndf refactor touched --base <起点> --scope <保存先>... [--head HEAD] [--symbols <ファイル>:<名前>...] [--work <dir>]
     ndf refactor tests --changed <ファイル>... [--work <dir>]
     ndf refactor collected --paths <ファイル>... [--timeout <秒>] [--work <dir>]
-    ndf refactor run --pr <N> --branch <head> --base <起点> --scope <保存先>... --required <チェック>... [--ci-test <名前>...]
+    ndf refactor run --pr <N> --branch <head> --base <起点> --scope <保存先>...
+                     (--required <チェック>... [--ci-test <名前>...] | --local-test [--pushed-out <ファイル>])
                      [--symbols <ファイル>:<名前>...] [--participants <ランタイム>...] [--max-fix <回>]
                      [--budget-minutes <分>] [--safety-net-minutes <分>] [--candidates <ファイル>] [--work <dir>]
     ndf refactor state --pr <N> [--work <dir>]
     ndf refactor scope-args --base <起点> [--tests <保存先>...] [--scope <保存先>...] [--work <dir>]
     ndf refactor release --pr <N> [--work <dir>]
+    ndf refactor follow --pushed <ファイル> --branch <head> --remote <リモート> [--work <dir>]
 
 - `touched`: 課題が触る関数（#622）と、着手前の範囲テストへ渡す範囲の配下のテストのファイル（#2096）。`--symbols` を
   渡せば差分から引かずにそれを使う
@@ -17,10 +19,14 @@
 - `run`: 1 回の実行を提案から最終ゲートまで進める（`drive`）。止まれば状態ファイルを残し、同じ引数で打ち直すと続ける。
   `--budget-minutes` は採る項目を選ぶ実装の予算、`--safety-net-minutes` はコードを書く工程の起動の秒の累計の上限
   （無ければ実効の予算 × 設定の倍率）。安全網で止まったら、上限を大きくして打ち直すと続ける。`--candidates` は実装計画が
-  挙げたスプリントの終わりの候補のファイルで、提案の指示文に載る。中身が前回と違えば前回の結果も未完了の状態も使わない
+  挙げたスプリントの終わりの候補のファイルで、提案の指示文に載る。中身が前回と違えば前回の結果も未完了の状態も使わない。
+  最終ゲートの確かめ先は `--required`（必須のチェックを CI で待つ）と `--local-test`（手元でテスト全体を打つ。設定の手段が
+  手元のテストのときだけ受ける）のどちらか 1 つ（#4566）。`--pushed-out` は手元の経路で合わせる先の SHA を書き出すファイル
 - `state`: 状態ファイルの中身（項目・工程の起点・最終ゲートの記録）を出す
 - `scope-args`: 検査のプランが `run` の `--scope` へ渡す範囲を組む（#1484）
-- `release`: 作業場所を片付ける（NDF の lock だけを外す）
+- `release`: 作業場所を片付ける（NDF の lock だけを外す）。worktree が残らなければ状態ファイルをログの記録だけにする
+- `follow`: 手元の経路で `run` が送った SHA（`--pushed-out` のファイル）へ、呼び出し元の作業場所を早送りする。SHA のコミットが
+  手元にあれば取得しない（工程のプランのステップ `follow`。#4566）
 
 結果 JSON を標準出力の最後の 1 行に出す。停止理由は `ndf.contracts.causes` の種類で返す。
 """
@@ -28,6 +34,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Any, Optional
@@ -36,8 +43,8 @@ from ndf import cli, identity
 from ndf.adapters import git, github
 from ndf.contracts import causes, limits, result
 from ndf.core.converge import participants, worktree
-from ndf.domains.crossrefactor import collect, drive, final_gate, items_decide, scope, store, workspace
-from ndf.testing import declared
+from ndf.domains.crossrefactor import collect, drive, final_gate, items_decide, local_gate, scope, store, workspace
+from ndf.testing import declared, means
 from ndf.testing import slots
 
 TOOL = cli.tool_of(__name__)
@@ -74,8 +81,28 @@ def _collected(a: argparse.Namespace) -> dict[str, Any]:
     return result.result(TOOL, "ok", summary, items, metrics)
 
 
+def _check_gate(a: argparse.Namespace) -> None:
+    """最終ゲートの確かめ先の引数と設定の手段の組み合わせを確かめる（#4566 の決定 3）。合わなければ `ValueError`（`invalid`）。
+
+    `--required` は設定の手段に関わらず受ける。`--local-test` は `--work` の設定の手段が手元のテストのときだけ受ける。
+    """
+    if bool(a.required) == bool(a.local_test):
+        raise ValueError("--required <チェック>... と --local-test のどちらか 1 つを渡す")
+    if not a.local_test:
+        return
+    if a.ci_test:
+        raise ValueError("--local-test と --ci-test は併せて渡せない（--ci-test は必須のチェックの経路だけが使う）")
+    project = local_gate.work_settings(Path(a.work))
+    if not isinstance(project, dict):
+        raise final_gate.GateStopped("precondition", "テストの設定のファイルがオブジェクトでない")
+    kind = means.decide(project).kind
+    if kind != means.Kind.LOCAL_TEST:
+        raise ValueError(f"設定のテストを確かめる手段が手元のテストでない（{kind.value}）ので --local-test を受けない")
+
+
 def run_config(a: argparse.Namespace) -> drive.RunConfig:
     """`run` の引数から 1 回の実行の引数を組む。候補のファイルは起動の頭でここだけ読む。"""
+    _check_gate(a)
     candidates = Path(a.candidates).read_text(encoding="utf-8") if a.candidates is not None else ""
     return drive.RunConfig(
         Path(a.work),
@@ -92,6 +119,8 @@ def run_config(a: argparse.Namespace) -> drive.RunConfig:
         budget_minutes=a.budget_minutes,
         safety_net_minutes=a.safety_net_minutes,
         candidates=candidates,
+        local_test=a.local_test,
+        pushed_out=Path(a.pushed_out) if a.pushed_out is not None and a.local_test else None,
     )
 
 
@@ -130,11 +159,21 @@ def _scope_args(a: argparse.Namespace) -> dict[str, Any]:
     return result.result(TOOL, "ok", f"範囲 {len(got)} 件: {' '.join(got)}", [{"kind": "scope", "paths": got}], {"paths": len(got)})
 
 
+def _follow_pushed(a: argparse.Namespace) -> dict[str, Any]:
+    sha = local_gate.follow_pushed(git.Git(Path(a.work)), Path(a.pushed), a.remote, a.branch)
+    return result.result(TOOL, "ok", f"送った SHA {sha} へ合わせた", [{"kind": "followed", "sha": sha}], {})
+
+
 def _release(a: argparse.Namespace) -> dict[str, Any]:
     repo = git.Git(Path(a.work))
-    ws = workspace.layout(_root(a), (*participants.assign(), participants.FIXER))
-    kept = workspace.release(repo, ws)
-    swept = worktree.sweep_orphans(repo)
+    root = _root(a)
+    held = workspace.hold_pr(root.parent, a.pr)
+    if held is None:
+        return result.stopped(TOOL, "precondition", workspace.held_elsewhere(a.pr))
+    try:
+        kept, swept = _release_held(repo, root)
+    finally:
+        held.release()
     items = [{"kind": "kept", "reason": k} for k in kept]
     return result.result(
         TOOL,
@@ -145,6 +184,26 @@ def _release(a: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _release_held(repo: git.Git, root: Path) -> tuple[list[str], list[Path]]:
+    """ロックを持って片付ける。`rf<PR>/` の下に worktree が残らなければ、状態ファイルをログの記録だけにする（#4566）。
+
+    取り除けずに残した検証用の作業場所（登録の無いディレクトリを含む）のパスは `verify_trees` に残し、調べる人と次の
+    `run` か `release` が見つけられるようにする。
+    """
+    ws = workspace.layout(root, (*participants.assign(), participants.FIXER))
+    kept = workspace.release(repo, ws)
+    path = store.path_of(root)
+    state = store.load(path)
+    kept += local_gate.sweep_verify_trees(repo, state, lambda: store.save(path, state))
+    swept = worktree.sweep_orphans(repo)
+    below = [e for e in repo.worktrees() if Path(e.path).resolve().is_relative_to(root.resolve())]
+    if not below and path.is_file():
+        left = local_gate.listed(state, "verify_trees")
+        store.save(path, {**{k: state[k] for k in workspace.LOG_ONLY_KEYS if k in state}, **({"verify_trees": left} if left else {})})
+    workspace.sweep(repo, root, time.time())
+    return kept, swept
+
+
 HANDLERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
     "touched": _touched,
     "tests": _tests,
@@ -153,6 +212,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
     "state": _state,
     "scope-args": _scope_args,
     "release": _release,
+    "follow": _follow_pushed,
 }
 
 
@@ -180,7 +240,9 @@ def _drive_parsers(sub: Any) -> tuple[argparse.ArgumentParser, ...]:
     r.add_argument("--branch", required=True)
     r.add_argument("--base", required=True)
     r.add_argument("--scope", nargs="+", required=True)
-    r.add_argument("--required", nargs="+", required=True)
+    r.add_argument("--required", nargs="+", default=[])
+    r.add_argument("--local-test", action="store_true")
+    r.add_argument("--pushed-out")
     r.add_argument("--ci-test", nargs="*", default=[])
     r.add_argument("--symbols", nargs="*", default=[])
     r.add_argument("--participants", nargs="*", default=[])
@@ -196,7 +258,11 @@ def _drive_parsers(sub: Any) -> tuple[argparse.ArgumentParser, ...]:
     sa.add_argument("--base", required=True)
     sa.add_argument("--tests", nargs="*", default=[])
     sa.add_argument("--scope", nargs="*", default=[])
-    return r, st, rl, sa
+    fo = sub.add_parser("follow", help="呼び出し元の作業場所を、手元の経路で送った SHA へ早送りする")
+    fo.add_argument("--pushed", required=True)
+    fo.add_argument("--branch", required=True)
+    fo.add_argument("--remote", required=True)
+    return r, st, rl, sa, fo
 
 
 # 例外 → 停止理由の種類。上から見て最初に当たった行を採る（ValueError の派生を先に置くため、並びを保つ）

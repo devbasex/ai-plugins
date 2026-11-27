@@ -31,8 +31,17 @@ from ndf import contracts, identity
 from ndf.adapters import claude_choice
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import internal, result, worker_paths
-from ndf.contracts.worker_kinds import kind_gaps, kind_values, values_in, work_dir_of, work_kinds
-from ndf.core import route
+from ndf.contracts.worker_kinds import (
+    DELIVERY,
+    PRODUCT_VERSION,
+    kind_gaps,
+    kind_values,
+    released_of,
+    values_in,
+    work_dir_of,
+    work_kinds,
+)
+from ndf.core import branch_strategy, route
 from ndf.progress import command, invoke, model, run, store
 from ndf.progress.gate.answering import (
     Answer,
@@ -166,17 +175,54 @@ def _arg(value: Any) -> str:
     return shlex.quote(str(value))
 
 
-def _outputs_of(kind: str, result_file: Path) -> str:
-    """結果ファイルに必ず入れる `outputs` のキーと `ndf contracts emit --outputs` の見本（無ければ「無し」の 1 行）。"""
+def _outputs_of(kind: str, result_file: Path, version_number: bool = False) -> str:
+    """結果ファイルに必ず入れる `outputs` のキーと `ndf contracts emit --outputs` の見本（無ければ「無し」の 1 行）。
+
+    出力に `product_version` を持つ作業には、返す値の形を 1 行で書く。形は `version_number`（`_work_handoff` が決め、
+    `work_argv` の `--require-version-number` と同じ値）に従う（#4513）。
+    """
     names = work_kinds()[kind]["outputs"]
     if not names:
         return "結果ファイルに必ず入れる outputs: 無し"
     shown = _arg(json.dumps({n: "<値>" for n in names}, ensure_ascii=False))
     sample = f'ndf contracts emit --tool worker --status ok --summary "<1 行>" --outputs {shown} --out {_arg(result_file)}'
-    return f"結果ファイルに必ず入れる outputs: {'・'.join(names)}\n見本: {sample}"
+    lines = [f"結果ファイルに必ず入れる outputs: {'・'.join(names)}", f"見本: {sample}"]
+    if PRODUCT_VERSION in names:
+        lines.append(VERSION_NUMBER_LINE if version_number else DISTRIBUTION_ID_LINE)
+    return "\n".join(lines)
 
 
-def work_prompt(kind: str, saved: Mapping[str, Any], workdir: Path, paths: worker_paths.ReportPaths) -> str:
+# 起動指示に書く product_version の形の 1 行（#4513）
+VERSION_NUMBER_LINE = "product_version はバージョン番号（例 1.2.3）"
+DISTRIBUTION_ID_LINE = "product_version は出したものを指す空白だけでない 1 行の文字列（例 main abc1234）。バージョン番号を作らない"
+
+
+def _version_aware(kind: str) -> bool:
+    """作業の出力に `product_version` があるか（作業の定義の `outputs` で決め、作業の名前を比べない）。"""
+    return PRODUCT_VERSION in work_kinds()[kind]["outputs"]
+
+
+def _strategy_at(workdir: Path) -> Optional[branch_strategy.Strategy]:
+    """作業場所のリポジトリのブランチ戦略の設定。読めなければ None（バージョン番号を持つ扱い）。
+
+    根は `command.settings_root`（`git rev-parse --show-toplevel` を 1 回）で決める。作業場所（`--cwd` は任意の場所を指せる）に
+    `.ndf/project.json` があっても根とはみなさない（#4513）。
+    """
+    try:
+        return branch_strategy.load(command.settings_root(workdir))
+    except (branch_strategy.StrategyError, GitError, OSError) as exc:  # 設定: 読めなければバージョン番号を持つ扱いで形を確かめる
+        log.info("ブランチ戦略の設定を読めないのでバージョン番号を持つ扱いにする", extra={"workdir": str(workdir), "error": str(exc)})
+        return None
+
+
+def _needs_version_number(strategy: Optional[branch_strategy.Strategy]) -> bool:
+    """設定が無いか、バージョンの保存先の種類が `none` でなければ、`product_version` をバージョン番号の形で確かめる。"""
+    return strategy is None or strategy.has_version_number
+
+
+def work_prompt(
+    kind: str, saved: Mapping[str, Any], workdir: Path, paths: worker_paths.ReportPaths, *, version_number: bool = False
+) -> str:
     """共通のテンプレート（`contracts/worker/prompt.md`）と作業の定義と `values.json` の中身から起動指示の本文を組む。
 
     差し込みの欠けは `substitute` が `KeyError` で止める（決定 6）。作業が読む値の内訳の欠けは 1 つの字面に隠れるので、
@@ -188,7 +234,7 @@ def work_prompt(kind: str, saved: Mapping[str, Any], workdir: Path, paths: worke
         "work": spec["work"],
         "summary": spec["summary"],
         "inputs": _inputs_of(kind, saved),
-        "outputs": _outputs_of(kind, paths.result),
+        "outputs": _outputs_of(kind, paths.result, version_number),
         "workdir": str(workdir),
         "steps": _steps_of(kind),
         "skills": _skills_of(kind),
@@ -225,13 +271,12 @@ def work_argv(
     *,
     prompt_file: Optional[str] = None,
     result_dir_id: Optional[tuple[int, int]] = None,
-    mode: Optional[str] = None,
+    version_number: bool = False,
 ) -> list[str]:
     """作業名を `ndf worker run` の必須の引数へ合わせる。4 つのファイルの名前は `report_paths` が持つ（字面を持たない）。
 
     `prompt_file` は起動指示を読む場所（`ndf answer work` は継いだ記述子の `/dev/fd/<番号>` を渡す。省くと保存先の起動指示）。
     `result_dir_id` は開いた保存先の `(st_dev, st_ino)` で、`ndf worker run` が結果ファイルの保存先を開き直したときに突き合わせる。
-    `mode` は工程の入力のモードで、あれば `--mode` で渡す（使用量ログと実験の記録に残す。#2944）。
     """
     spec = _known(kind)
     try:
@@ -241,8 +286,8 @@ def work_argv(
     files = ("--prompt-file", prompt_file or str(paths.prompt), "--result-file", str(paths.result))
     held = ("--result-dir-id", f"{result_dir_id[0]}:{result_dir_id[1]}") if result_dir_id is not None else ()
     required = [arg for name in spec["outputs"] for arg in ("--require-output", name)]
-    modes = ("--mode", mode) if mode else ()
-    return ["run", "--kind", kind, *files, *held, "--cwd", str(cwd), "--state-dir", str(state_dir), *required, *modes]
+    shape = ["--require-version-number"] if version_number else []
+    return ["run", "--kind", kind, *files, *held, "--cwd", str(cwd), "--state-dir", str(state_dir), *required, *shape]
 
 
 def work_parser() -> argparse.ArgumentParser:
@@ -279,6 +324,78 @@ def _work_dir(kind: str, saved: Mapping[str, Any], cwd: Optional[str]) -> Path:
     return Path(found).resolve()
 
 
+class Released(NamedTuple):
+    """worker を起動せずに終えるときの結果 JSON（`ok` か `stopped`。#4513）。`_cmd_work` がそのまま出す。"""
+
+    outcome: dict[str, Any]
+
+
+def released_outcome(work: str, saved: Mapping[str, Any], strategy: Optional[branch_strategy.Strategy]) -> Optional[dict[str, Any]]:
+    """記録済みの値で、worker を起動せずに返す結果 JSON（`ok` か `stopped`）。起動するときは None（#4513）。
+
+    作業の出力が `product_version` と `delivery` を持ち（今は `release`）、記録済みの値があるときだけ、承認の時点の保存先の種類で
+    決める。`none` ならオーガナイザーが出し終えているので、記録した届け先があれば ok、無ければ止まる。`unknown` も止まる。
+    `versioned` は起動する。種類が記録に無い（この変更の前に承認されたか、外のオーガナイザーが書かなかった）ときだけ、作業の時点の設定 `strategy` で決める。
+    届け先は今の設定から選び直さない（設定は後から直せるので、過去の届け先の根拠にならない）。
+    """
+    outputs = work_kinds()[work]["outputs"]
+    recorded = released_of(saved)
+    if recorded is None or PRODUCT_VERSION not in outputs or DELIVERY not in outputs:
+        return None
+    if recorded.with_number:
+        return None
+    unknown = recorded.store_unknown
+    if recorded.store is None and _needs_version_number(strategy):
+        return None
+    if not unknown and recorded.delivery is not None:
+        out = {PRODUCT_VERSION: recorded.version, DELIVERY: dict(recorded.delivery)}
+        summary = f"作業 {work} はオーガナイザーが出した値で終えた（worker を起動しない。バージョン番号を持たないリポジトリ）"
+        return result.result(TOOL, result.OK, summary, outputs=out)
+    if unknown:
+        why = "承認を記録した時点で設定を読めず"
+    elif recorded.store is None:
+        why = "承認の記録に届け先が無く"
+    else:
+        why = "承認を記録した時点で本番の届け先が 1 つに決まらず"
+    detail = (
+        f"オーガナイザーが出した後だが、{why}、このリリースの届け先が記録から確かめられない（worker を起動しない）。"
+        "設定を直して retry しても終わらない。次の操作: 実際の届け先を確かめ、次の JSON をファイルに書き、"
+        "ndf progress finish <ID> デプロイ --output <JSONファイル> --reason <理由> で工程を終える: "
+        f"{json.dumps(manual_finish_example(recorded.version), ensure_ascii=False)}。{MANUAL_FINISH_FILL}"
+        "finish は書く前に同じ確かめをし、合わなければ何も書かずに断る。書かずに形だけ確かめたいときは、"
+        "代わりに ndf progress check <ID> デプロイ --output <JSONファイル> を打てる"
+    )
+    return result.stopped(TOOL, "precondition", detail)
+
+
+# 手で終える出力の例（`manual_finish_example`）の置き換える所の説明。SSOT はここで、詳細設計書は写さずにここを指す
+MANUAL_FINISH_FILL = (
+    "outputs.delivery は、実際にリリースした先に対応する届け先のオブジェクト全体で置き換える"
+    "（設定 project.json の branch_strategy.release.deliveries の 1 行と同じ形）。"
+    "outputs.mvv_gate は、ndf progress show <ID> の metrics.history で payload.step が release-mvv の最後の記録から、"
+    "payload.report.outputs.mvv_gate をそのままコピーする。"
+)
+
+
+def manual_finish_example(version: str) -> dict[str, Any]:
+    """届け先が記録から決まらずに止まったデプロイの工程を、`ndf progress finish` で手で終える出力の例（#4513）。
+
+    工程の出力の規約（`stage-io.schema.json` の `stage-out`）が必須とする `summary`・`steps` と、デプロイの工程の `outputs` の
+    3 つ（`product_version`・`delivery`・`mvv_gate`）を持つ。`product_version` は記録済みのリリースの識別子を入れる。`delivery` と
+    `mvv_gate` は値全体を置き換える目印の文字列にする（届け先の一部だけを固定値で示すと、利用者が実際と違う属性を残しうる）。
+    `finish` は文脈にある値で出力の欠けを補わないので、記録済みの `mvv_gate` も入れる。
+    """
+    return {
+        "summary": "届け先を確かめてデプロイの工程を手で終えた",
+        "steps": [],
+        "outputs": {
+            PRODUCT_VERSION: version,
+            DELIVERY: "<実際にリリースした先に対応する届け先のオブジェクト>",
+            "mvv_gate": "<記録済みの mvv_gate のオブジェクト>",
+        },
+    }
+
+
 class WorkHandoff(NamedTuple):
     """`ndf worker run` へ渡すもの。保存先は開いて解いた場所（`state_dir`）とその `(st_dev, st_ino)`（`dir_id`）。
 
@@ -292,14 +409,17 @@ class WorkHandoff(NamedTuple):
     prompt: str
     fd: int
     mode: Optional[str] = None  # 工程の入力のモード（#2944）
+    # 起動指示に書いた product_version の形。`work_argv` の `--require-version-number` へ同じ値で渡す（#4513）
+    version_number: bool = False
 
 
-def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff:
+def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff | Released:
     """作業の名前と差し込みの値を確かめ、作業場所を決め、起動指示を書いて、`ndf worker run` へ渡すものを返す。
 
     保存先は祖先のリンクを解きながら 1 回だけ開き（`open_resolved`。macOS の `/tmp`・`/var` を経る保存先も開く。`..` が打ち消す
     要素がリンクなら止める）、`values.json` の読み取り（`values_in`）と報告の初期化・起動指示の書き込みを同じ記述子で
-    行う。読んだ場所と書く場所が食い違わない。起動指示を継ぐ記述子（`_held_prompt`）は初期化より先に用意し、用意できなければ
+    行う。読んだ場所と書く場所が食い違わない。記録済みの値で終える作業は、起動指示も報告の初期化もせずに `Released` を返す
+    （#4513）。起動指示を継ぐ記述子（`_held_prompt`）は初期化より先に用意し、用意できなければ
     前の報告一式を残して止まる。モデルと effort の値の誤り（`claude_choice.precheck_values`。`precondition`）も初期化の前に
     確かめ、誤りなら前の報告一式を残して止まる（#2944）。起動指示とコマンドの見本のパスは解いた場所で組む（worker の
     `ndf worker append`・`ndf contracts emit --out` がリンクを経ずに開ける）。
@@ -318,15 +438,27 @@ def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff
         if gaps:
             raise invoke.KindInputsMissing(saved["plan"], gaps)
         workdir = _work_dir(kind, saved, cwd)
+        recorded = released_of(saved)
+        aware = _version_aware(kind)
+        # 承認の時点の種類が記録にあれば、作業の時点の設定で決め直さない（読まない）
+        strategy = _strategy_at(workdir) if aware and (recorded is None or recorded.store is None) else None
+        finished = released_outcome(kind, saved, strategy) if aware else None
+        if finished is not None:
+            return Released(finished)
+        if recorded is not None and recorded.store is not None:
+            version_number = aware and recorded.with_number
+        else:
+            version_number = aware and _needs_version_number(strategy)
         # モデルと effort の値の誤り（`ndf worker run` が起動の前に止まるもの）を、前の報告一式を初期化する前に確かめる（#2944）
         retry = os.environ.get(identity.env_name("retry-cause"))
         claude_choice.precheck_values(cwd=workdir, retry=None if retry == "" else retry)
-        body = work_prompt(kind, saved, workdir, paths)
+        body = work_prompt(kind, saved, workdir, paths, version_number=version_number)
         fd = _held_prompt(body)  # 前の報告一式を初期化する前に用意する（用意できなければ何も消さずに止まる）
         try:
             _write_prompt(wd, paths, body)
-            mode = saved["inputs"].get("mode")
-            return WorkHandoff(kind, wd.path, worker_paths.dir_id(wd), workdir, body, fd, mode if isinstance(mode, str) else None)
+            given = saved["inputs"].get("mode")
+            mode = given if isinstance(given, str) else None
+            return WorkHandoff(kind, wd.path, worker_paths.dir_id(wd), workdir, body, fd, mode=mode, version_number=version_number)
         except BaseException:
             os.close(fd)
             raise
@@ -379,11 +511,21 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
         return result.emit(result.stopped(TOOL, kind, str(exc), items=items))
     except internal.InternalError as exc:  # モデルと effort の値の誤り（`claude_choice.precheck_values`）。前の報告一式は残っている
         return result.emit(result.stopped(TOOL, exc.kind, str(exc)))
+    if isinstance(handoff, Released):
+        log.info("worker を起動せずに作業を終えた", extra={"kind": a.kind, "status": handoff.outcome["status"]})
+        return result.emit(handoff.outcome)
     fd = handoff.fd
     try:
         args = work_argv(
-            handoff.kind, handoff.state_dir, handoff.workdir, prompt_file=f"/dev/fd/{fd}", result_dir_id=handoff.dir_id, mode=handoff.mode
+            handoff.kind,
+            handoff.state_dir,
+            handoff.workdir,
+            prompt_file=f"/dev/fd/{fd}",
+            result_dir_id=handoff.dir_id,
+            version_number=handoff.version_number,
         )
+        if handoff.mode:  # 工程の入力のモードは `--mode` で渡す（使用量ログと実験の記録に残す。#2944）
+            args += ["--mode", handoff.mode]
         # -I: 作業場所と呼び出し元の PYTHONPATH の ndf.py・ndf/ を NDF の src より先に読まない。置き換えた先も、呼び出し元が読む
         # 今の標準出力・標準エラーの文字コードで書く（プランのステップはロケールで読む。#4029）
         argv = invoke.ndf_command("worker", *args, keep_streams=True)

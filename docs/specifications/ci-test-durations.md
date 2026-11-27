@@ -303,4 +303,3 @@ NDF のテストは引数でファイルを渡さないので、各ジョブは�
 
 - [issue #4331](https://github.com/devbasex/ai-plugins/issues/4331)
 - [ndf-split-tables-toolchain-and-budget.md](ndf-split-tables-toolchain-and-budget.md) — テストの件数の上限 `budget.tests` を ai-plugins で置かないこと
-- [project-decl-ci-representative-run.md](project-decl-ci-representative-run.md) — `ndf project measure` が CI の代表の実行を選ぶ規則

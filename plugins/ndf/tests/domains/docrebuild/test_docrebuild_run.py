@@ -20,6 +20,7 @@ import pytest
 from ndf.adapters import git
 from ndf.contracts import causes
 from ndf.domains.crossreview import finish_decide
+from ndf.core import start_point
 from ndf.domains.docrebuild import cli, drive
 from ndf.domains.records import reading
 from ndf.domains.docrebuild.select_decide import Target
@@ -175,11 +176,11 @@ def test_start_point(tmp_path: Path, refs: dict, remotes: tuple, base: str, remo
     """起点はリモート追跡ブランチ、無ければ手元の参照。決められなければ理由（並びの語）を示して止まる。"""
     fake = FakeGit(refs, remotes=remotes)
     if isinstance(wanted, tuple):
-        assert drive.start_point(fake.git_of(tmp_path), base, remote) == wanted
+        assert start_point.resolve(fake.git_of(tmp_path), base, remote) == wanted
         assert wanted[0].startswith("refs/heads/") or not any(c == ["remote"] for c in fake.calls)
         return
-    with pytest.raises(drive.Precondition) as caught:
-        drive.start_point(fake.git_of(tmp_path), base, remote)
+    with pytest.raises(start_point.StartPointError) as caught:
+        start_point.resolve(fake.git_of(tmp_path), base, remote)
     assert all(w in caught.value.detail for w in wanted)
 
 
@@ -577,7 +578,7 @@ def test_stop_exceptions_carry_their_detail(cls: type[Exception]) -> None:
         (RaisingGit({"HEAD": HEAD}, "rev-parse"), "HEAD を読めない: git を起動できない: 無い"),
         (
             FakeGit({"HEAD": HEAD}, remotes=("upstream",)),
-            f"リモート origin が登録されていない（登録済み: upstream）。{drive.WORKTREE_REMOTE} を直す",
+            f"リモート origin が登録されていない（登録済み: upstream）。{start_point.WORKTREE_REMOTE} を直す",
         ),
         (FakeGit({"HEAD": HEAD}), "起点の参照 refs/remotes/origin/main と refs/heads/main をどちらも読めない"),
         (BrokenRemoteGit({"HEAD": HEAD}), "登録済みのリモートを読めない: "),

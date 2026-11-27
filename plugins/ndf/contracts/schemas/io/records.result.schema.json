@@ -192,7 +192,15 @@
           },
           "name": {
             "type": "string",
-            "description": "確かめの名前（preflight）"
+            "description": "確かめの名前（preflight）か、指摘した行の「パス:行」（design check）"
+          },
+          "rule": {
+            "type": "string",
+            "description": "指摘の規則（design check の unnamed_redline）"
+          },
+          "text": {
+            "type": "string",
+            "description": "指摘した行の文（design check）"
           },
           "status": {
             "type": "string",

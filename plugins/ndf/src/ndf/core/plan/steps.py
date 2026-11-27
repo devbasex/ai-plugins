@@ -128,12 +128,6 @@ def last_json(stdout: str) -> Optional[dict[str, Any]]:
     return found if known else None
 
 
-def _prs(found: dict[str, Any]) -> list[int]:
-    """結果 JSON の items の PR の番号（`{"kind": "pr", "number": <整数>}`）。"""
-    items = found.get("items") if isinstance(found.get("items"), list) else []
-    return [i["number"] for i in items if isinstance(i, dict) and i.get("kind") == "pr" and type(i.get("number")) is int]
-
-
 def _plain(status: str, kind: Optional[str], summary: str, code: Optional[int]) -> dict[str, Any]:
     """結果 JSON を持たないステップの結果。"""
     return {
@@ -146,6 +140,7 @@ def _plain(status: str, kind: Optional[str], summary: str, code: Optional[int]) 
         "prs": [],
         "outputs": None,
         "gaps": None,
+        result.MISSING_OUTPUTS: None,
     }
 
 
@@ -170,9 +165,10 @@ def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
         "routes": found.get("routes") if found["status"] == GATE else None,
         "summary": str(found.get("summary")),
         "code": code,
-        "prs": _prs(found),
+        "prs": result.pr_numbers(found),
         "outputs": outputs if isinstance(outputs, dict) and outputs else None,
         "gaps": gaps if found["status"] == STOPPED and isinstance(gaps, list) and gaps else None,
+        result.MISSING_OUTPUTS: _missing_outputs(found),
         "presented_id": _presented_id(found),
         "presentation_path": _presentation_path(found),
         "production": _gate_reaches_production(found),
@@ -185,6 +181,13 @@ def _launch_values(found: dict[str, Any]) -> Optional[dict[str, Any]]:
     metrics = found.get("metrics")
     got = metrics.get("launch") if isinstance(metrics, dict) else None
     return got if isinstance(got, dict) and got else None
+
+
+def _missing_outputs(found: dict[str, Any]) -> Optional[list[str]]:
+    """判断を求めた結果が確かめを通さなかった必須の出力の名前（`metrics.missing_outputs`。#4513）。名前の並びでなければ None。"""
+    metrics = found.get("metrics")
+    got = metrics.get(result.MISSING_OUTPUTS) if isinstance(metrics, dict) else None
+    return list(got) if isinstance(got, list) and got and all(isinstance(n, str) for n in got) else None
 
 
 def _presented_id(found: dict[str, Any]) -> Optional[str]:

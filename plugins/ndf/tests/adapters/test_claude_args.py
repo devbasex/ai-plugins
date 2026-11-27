@@ -310,3 +310,16 @@ def test_issue_1959_the_check_right_before_the_launch_stops_a_changed_approval(m
     assert launched == [] and reply.failure is claude.Failure.LAUNCH and reply.error == "承認の後に変わった"
     launched, reply = _launch(monkeypatch, lambda: None)
     assert len(launched) == 1 and reply.ok
+
+
+# ---------------------------------------------------------------- #2912: CLI が拒む最上位の `$schema`
+
+
+def test_issue_2912_json_schema_drops_the_top_level_dialect_for_the_cli():
+    """CLI 2.1.332 は最上位の `$schema`（draft 2020-12）を持つスキーマを拒む。渡すときだけ外し、`$id` と中身は残す。
+    元の dict は変えない（`llm` の jsonschema の確かめは同じ dict を使う）。"""
+    schema = {"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "x.schema.json", "type": "object"}
+    args = claude.claude_args(claude.ClaudeCall(system="sys", json_schema=schema))
+    sent = json.loads(args[args.index("--json-schema") + 1])
+    assert sent == {"$id": "x.schema.json", "type": "object"}
+    assert "$schema" in schema

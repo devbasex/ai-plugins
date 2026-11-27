@@ -32,10 +32,10 @@
 | --- | --- |
 | `ndf ci answer` | `--branch`（string・必須）: PR の head のブランチ<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--answer-record`（string・必須）: ndf plan next --answer が書いた回答の記録<br>`--presented`（string・必須）: 承認待ちのステップが書いた承認の対象のファイル |
 | `ndf ci ask` | `--branch`（string・必須）: PR の head のブランチ<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--presented-out`（string・必須）: 承認の対象を書くファイル（ndf ci answer が読む） |
-| `ndf ci merge` | `--branch`（string・任意）: PR の head のブランチ（作業場所の HEAD を添える）<br>`--pr`（integer・任意）: PR の番号（作業場所が無くても打てる。マージ済みなら何もしない）<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--method`（string・任意）: マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭<br>`--reviewed`（string・任意）: レビューを経た HEAD。作業場所の HEAD と違えばマージしない<br>`--production-gate`（string・任意・既定 `"stop"`・値 `stop`・`defer`・`stale`）: 自動反映の本番チャネルへ承認の証跡が無いとき: stop は承認待ち、defer はマージせずに ok、stale は approval_stale<br>`--approved-head`（string・任意）: 工程の承認ゲートで承認した HEAD（--approved-base と組で渡す）<br>`--approved-base`（string・任意）: 工程の承認ゲートで承認したマージ先<br>`--presented-out`（string・任意）: stop で止まるときに承認の対象を書くファイル（ndf ci answer が読む）<br>`--required`（array of string・任意）: マージの前に、マージする HEAD の結論を待つ必須のチェック。渡さなければ待たない<br>`--test`（array of string・任意）: --required で待つときのテストのチェックの名前<br>`--budget`（number・任意）: --required で待つ合計の秒 |
+| `ndf ci merge` | `--branch`（string・任意）: PR の head のブランチ（作業場所の HEAD を添える）。--branch か --pr は必須<br>`--pr`（integer・任意）: PR の番号。--branch か --base を添えると、まず PR がその指定に合うかを確かめる。head のブランチ名かマージ先が指定と違う PR、フォークからの PR、マージされずに閉じた PR は refused で止まる。--branch と --base を両方省くと、この確かめを省く。確かめを通った後も、省いた後も、次に PR がマージ済みかを調べる。マージ済みなら、マージ操作をせずに ok を返す。作業場所が無いときは、--branch を省き、--pr と --repo を渡す<br>`--base`（string・任意）: 期待するマージ先。対象の PR のマージ先が違えばマージしない<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--method`（string・任意）: マージの方式（squash・merge・rebase）。省けば基底のブランチで許された方式の先頭<br>`--reviewed`（string・任意）: レビューを経た HEAD。作業場所の HEAD と違えばマージしない<br>`--production-gate`（string・任意・既定 `"stop"`・値 `stop`・`defer`・`stale`）: 自動反映の本番チャネルへ承認の証跡が無いとき: stop は承認待ち、defer はマージせずに ok、stale は approval_stale<br>`--approved-head`（string・任意）: 工程の承認ゲートで承認した HEAD（--approved-base と組で渡す）<br>`--approved-base`（string・任意）: 工程の承認ゲートで承認したマージ先<br>`--presented-out`（string・任意）: stop で止まるときに承認の対象を書くファイル（ndf ci answer が読む）<br>`--required`（array of string・任意）: マージの前に、マージする HEAD の結論を待つ必須のチェック。渡さなければ待たない<br>`--test`（array of string・任意）: --required で待つときのテストのチェックの名前<br>`--budget`（number・任意）: --required で待つ合計の秒 |
 | `ndf ci watch` | `--pr`（integer・必須）<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば作業場所の origin<br>`--required`（array of string・必須）: 待つ必須のチェック（PR の HEAD の設定から渡す）<br>`--test`（array of string・任意）: テストのチェックの名前（分割ジョブも数える）<br>`--budget`（number・必須）: 待ちの合計の秒（ランナーの割り当ての待ちは数えない）<br>`--after-merge`（boolean・任意）: マージの段階が落ちた後の判定<br>`--merge-failed`（array of string・任意）: マージの段階が落ちたと読んだチェックの名前 |
 
-結果の `metrics`: `answer`（string）・`approved_by`（string）・`elapsed`（number）・`failed_test_reads`（array of object）・`failed_tests`（array of string）・`gate`（const "production-merge"）・`junit_artifacts`（string）・`log_error`（string）・`merge`（string）・`presented_id`（string）・`production`（boolean）・`queued_for`（number）・`rounds`（integer）・`test_files`（array of string）・`verdict`（string）・`written`（boolean）。`items` の要素: `job`（integer）・`kind`（string）・`name`（string）・`number`（integer）・`result`（string）・`test`（boolean）
+結果の `metrics`: `answer`（string）・`approved_by`（string）・`elapsed`（number）・`failed_test_reads`（array of object）・`failed_tests`（array of string）・`gate`（const "production-merge"）・`junit_artifacts`（string）・`log_error`（string）・`merge`（string）・`presented_id`（string）・`production`（boolean）・`queued_for`（number）・`rounds`（integer）・`test_files`（array of string）・`verdict`（string）・`written`（boolean）。`items` の要素: `job`（integer）・`kind`（string）・`merge_sha`（string）・`name`（string）・`number`（integer）・`result`（string）・`test`（boolean）
 
 ## `ndf contracts`
 
@@ -66,7 +66,7 @@
 | `ndf cross-review release` | `worktree`（string・必須・位置）<br>`--repo-dir`（string・必須） |
 | `ndf cross-review report` | `--state-dir`（string・必須）<br>`--pr`（integer・必須）<br>`--repo`（string・任意） |
 | `ndf cross-review review-scope` | `worktree`（string・必須・位置）<br>`--purpose`（string・必須）<br>`--base`（string・必須）<br>`--reviewer`（array of string・任意）<br>`--state-dir`（string・必須）<br>`--pr`（integer・必須） |
-| `ndf cross-review run` | `--pr`（integer・必須）<br>`--state-dir`（string・必須）<br>`--base`（string・必須）<br>`--worktree`（string・任意）<br>`--branch`（string・任意）<br>`--purpose`（string・任意・既定 `"cross-review"`）<br>`--reviewer`（array of string・任意）<br>`--max-rounds`（integer・任意・既定 `3`）<br>`--findings`（string・任意）<br>`--reviewed-out`（string・任意） |
+| `ndf cross-review run` | `--pr`（integer・必須）<br>`--state-dir`（string・必須）<br>`--base`（string・必須）<br>`--worktree`（string・任意）<br>`--branch`（string・任意）<br>`--purpose`（string・任意・既定 `"cross-review"`）<br>`--reviewer`（array of string・任意）<br>`--max-rounds`（integer・任意・既定 `3`）<br>`--findings`（string・任意）<br>`--reviewed-out`（string・任意）<br>`--repo`（string・任意）: 対象のリポジトリ（<所有者>/<リポジトリ>）。保存済みの状態と作業場所のリモートより優先する<br>`--stop-on-hold`（boolean・任意）: 人の判断を待つ指摘が残れば incomplete で終える<br>`--reviewed-pr-out`（string・任意）: --reviewed-out と併用する。対象 PR の HEAD（起動時の head か、同じ起動でその PR のブランチへ push した修正コミット）をレビューしたと確認できた場合、指定ファイルに <所有者>/<リポジトリ>#<番号> を書く。指定した実行は、起動時に対象 PR を確認できなければレビューを始めずに precondition で停止し、同じ PR を読んだ記録だけを差分の起点や収束結果の再利用に使う |
 | `ndf cross-review state-file` | `--state-dir`（string・必須）<br>`--pr`（integer・必須）<br>`--current`（integer・任意） |
 | `ndf cross-review sync` | `worktree`（string・必須・位置）<br>`--branch`（string・必須） |
 | `ndf cross-review target-repo` | `--repo`（string・任意）<br>`--state-dir`（string・任意）<br>`--pr`（integer・任意） |
@@ -194,7 +194,7 @@
 
 | 呼び方 | 引数 |
 | --- | --- |
-| `ndf loop acceptance check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（array of integer・必須）: 照らす課題（繰り返せる）<br>`--criteria`（array of string・任意）: '<課題>:<条件の番号>'。その課題はこの条件だけを照らす |
+| `ndf loop acceptance check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（array of integer・必須）: 照らす課題（繰り返せる）<br>`--criteria`（array of string・任意）: '<課題>:<条件の番号>'。その課題はこの条件だけを照らす<br>`--no-criteria`（boolean・任意）: 受け入れ条件を持たないレビュー単位では、記録を確認せずに ok を返す。--criteria と同時には指定できない |
 | `ndf loop acceptance record` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--pre-merge`（array of string・任意）: '<条件の番号>=<手段（テスト名・実行したコマンド）>'<br>`--post-release`（array of integer・任意）: リリースの後でしか確かめられない条件の番号<br>`--issue`（integer・必須） |
 | `ndf loop acceptance show` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--issue`（integer・必須） |
 | `ndf loop answer` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`name`（string・必須・位置）<br>`--pr`（integer・必須）<br>`--answer`（string・必須・値 `approved`・`request_changes`・`rejected`）<br>`--note`（string・任意・既定 `""`）: 変更要求の理由など |
@@ -316,7 +316,8 @@
 | 呼び方 | 引数 |
 | --- | --- |
 | `ndf records cleanup-stage` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`prs`（array of integer・必須・位置） |
-| `ndf records close-check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`issue`（integer・必須・位置）<br>`--verification`（string・任意）: リリース後テストの記録（release-verification のスキーマの JSON）<br>`--require`（boolean・任意）: 記録が無ければ閉じない |
+| `ndf records close-check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`issue`（integer・必須・位置）<br>`--verification`（string・任意）: リリース後テストの記録（release-verification のスキーマの JSON）<br>`--records`（string・任意）: release-steps records --version の出力（結果 JSON）を保存したファイル。届け先ごとに判定する<br>`--require`（boolean・任意）: 記録が無ければ閉じない |
+| `ndf records design check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`files`（array of string・任意・位置）: 全行を検査するファイル（名前を問わない。--base とどちらか一方）<br>`--base`（string・任意）: マージ先のブランチ名。分岐点からの差分の設計成果物の、変えた行を検査する<br>`--remote`（string・任意）: 起点のリモート名（既定は .ndf/worktree.json の remote）<br>`--result`（string・任意）: 標準出力と同じ結果を書くファイル |
 | `ndf records glossary meanings` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf records glossary render` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--check`（boolean・任意）: 書かずに、今と違うファイルを出す |
 | `ndf records gws-check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
@@ -334,7 +335,7 @@
 | `ndf records usage report` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--since`（string・必須）<br>`--until`（string・必須） |
 | `ndf records usage stop` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 
-結果の `metrics`: `bytes`（integer）・`commit`（string）・`lines`（integer）・`prompt`（string）・`revision_due`（boolean）。`items` の要素: `agent_id`（string）・`at`（string）・`broken_rows`（integer）・`caller`（string）・`cause`（object）・`closable`（boolean）・`closed_issues`（integer）・`context`（string）・`error`（string）・`files`（array of string）・`gate`（—）・`issue`（integer）・`kind`（string）・`lines`（integer か array）・`missing`（string）・`missing_path`（string）・`moved`（string）・`mvv_version`（integer か null）・`name`（string）・`overrides`（integer）・`path`（string）・`pr`（—）・`prs`（array of object）・`question_key`（string）・`reads`（array of object）・`reason`（string）・`repo`（string）・`result`（string）・`since`（string）・`state`（—）・`status`（string）・`summary`（string）・`term`（string）・`transcript`（string）・`unknown`（integer）・`unknown_pass`（integer）・`unknown_rows`（integer）・`until`（string）・`usage`（object か string）・`version`（integer）・`violation`（string）・`warnings`（array of string）・`word`（string）
+結果の `metrics`: `bytes`（integer）・`commit`（string）・`lines`（integer）・`prompt`（string）・`revision_due`（boolean）。`items` の要素: `agent_id`（string）・`at`（string）・`broken_rows`（integer）・`caller`（string）・`cause`（object）・`closable`（boolean）・`closed_issues`（integer）・`context`（string）・`error`（string）・`files`（array of string）・`gate`（—）・`issue`（integer）・`kind`（string）・`lines`（integer か array）・`missing`（string）・`missing_path`（string）・`moved`（string）・`mvv_version`（integer か null）・`name`（string）・`overrides`（integer）・`path`（string）・`pr`（—）・`prs`（array of object）・`question_key`（string）・`reads`（array of object）・`reason`（string）・`repo`（string）・`result`（string）・`rule`（string）・`since`（string）・`state`（—）・`status`（string）・`summary`（string）・`term`（string）・`text`（string）・`transcript`（string）・`unknown`（integer）・`unknown_pass`（integer）・`unknown_rows`（integer）・`until`（string）・`usage`（object か string）・`version`（integer）・`violation`（string）・`warnings`（array of string）・`word`（string）
 
 ## `ndf refactor`
 
@@ -343,8 +344,9 @@
 | 呼び方 | 引数 |
 | --- | --- |
 | `ndf refactor collected` | `--paths`（array of string・必須）<br>`--timeout`（number・任意）<br>`--work`（string・任意・既定 `"."`） |
+| `ndf refactor follow` | `--pushed`（string・必須）<br>`--branch`（string・必須）<br>`--remote`（string・必須）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor release` | `--pr`（integer・必須）<br>`--work`（string・任意・既定 `"."`） |
-| `ndf refactor run` | `--pr`（integer・必須）<br>`--branch`（string・必須）<br>`--base`（string・必須）<br>`--scope`（array of string・必須）<br>`--required`（array of string・必須）<br>`--ci-test`（array of string・任意）<br>`--symbols`（array of string・任意）<br>`--participants`（array of string・任意）<br>`--max-fix`（integer・任意・既定 `2`）<br>`--budget-minutes`（integer・任意）<br>`--safety-net-minutes`（number・任意）<br>`--candidates`（string・任意）<br>`--work`（string・任意・既定 `"."`） |
+| `ndf refactor run` | `--pr`（integer・必須）<br>`--branch`（string・必須）<br>`--base`（string・必須）<br>`--scope`（array of string・必須）<br>`--required`（array of string・任意）<br>`--local-test`（boolean・任意）<br>`--pushed-out`（string・任意）<br>`--ci-test`（array of string・任意）<br>`--symbols`（array of string・任意）<br>`--participants`（array of string・任意）<br>`--max-fix`（integer・任意・既定 `2`）<br>`--budget-minutes`（integer・任意）<br>`--safety-net-minutes`（number・任意）<br>`--candidates`（string・任意）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor scope-args` | `--base`（string・必須）<br>`--tests`（array of string・任意）<br>`--scope`（array of string・任意）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor state` | `--pr`（integer・必須）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor tests` | `--changed`（array of string・必須）<br>`--work`（string・任意・既定 `"."`） |
@@ -411,12 +413,12 @@
 | `ndf release-steps present` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--material`（string・任意）: 承認資料のファイル（省けば PR の本文） |
 | `ndf release-steps publish` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--revision`（string・必須）<br>`--since`（string・任意）: 前の push の先頭。祖先なら --revision までの first-parent のコミットを古い順にすべて公開する |
 | `ndf release-steps pull-checks` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須） |
-| `ndf release-steps record` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--production`（string・必須）<br>`--production-sha`（string・任意）: 本番へ入れたコミット（strict の squash で閉じた PR の記録に要る） |
-| `ndf release-steps records` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須） |
+| `ndf release-steps record` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--production`（string・必須）<br>`--production-sha`（string・任意）: 本番へ入れたコミット（strict の squash で閉じた PR の記録に要る）<br>`--version`（string・任意）: 出したものを指す値（例 'main abc1234'。バージョンの保存先が none のリポジトリだけ）<br>`--environment`（array of string・任意）: 反映を確かめた届け先（繰り返せる。--version と一緒に）<br>`--target`（array of string・任意）: 今回の対象の届け先（push の時点に届け先の設定が無いときだけ。繰り返せる）<br>`--observed`（array of string・任意）: CD が未完了なら実環境の確認（設定の observe）で確かめる届け先（繰り返せる）<br>`--correct-targets`（boolean・任意）: 値の対象の一覧を --target の集合へ訂正する（--reason が要る）<br>`--reason`（string・任意）: 対象の一覧を訂正する理由（--correct-targets と一緒に） |
+| `ndf release-steps records` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--version`（string・任意）: 閉じるリリースの値（リリース記録の version）。渡した値の記録だけから代表とテストの記録を選ぶ<br>`--release`（integer・任意）: 本番の PR の番号。渡すとその本番の PR の記録だけから選ぶ<br>`--unit`（string・任意）: リリースの単位の名前（単位が 2 つ以上のリリース）。渡すとその単位の記録だけから選ぶ<br>`--bodies`（boolean・任意）: 代表のリリース記録の含めた PR の本文と、書き手を信用するかも返す<br>`--issues`（array of integer・任意）: テストする組（to_test）を作る課題の番号。渡すと含めた PR の本文を読まない<br>`--pr-body-only`（boolean・任意）: リリース記録を選ばず、--pr の PR の本文だけを返す（デプロイを飛ばした経路） |
 | `ndf release-steps sync-base` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--main-dir`（string・必須）<br>`--base`（string・必須） |
 | `ndf release-steps verification-record` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--record`（string・必須）: リリース後テストの記録の JSON（スキーマ release-verification） |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `change`（string）・`checks`（integer）・`checks_passed`（integer）・`checks_skipped`（integer）・`failed`（array of string）・`kind`（string）・`name`（string）・`number`（integer）・`path`（string）・`reason`（string）・`result`（string）
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `change`（string）・`checks`（integer）・`checks_passed`（integer）・`checks_skipped`（integer）・`failed`（array of string）・`kind`（string）・`name`（string）・`number`（integer）・`path`（string）・`reason`（string）・`result`（string）・`url`（string）
 
 ## `ndf route`
 
@@ -500,7 +502,8 @@
 | `ndf worker plan-edit` | `plan`（string・必須・位置）<br>`--new`（string・必須）<br>`--reason`（string・必須）<br>`--state-dir`（string・任意） |
 | `ndf worker plan-edits` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意） |
 | `ndf worker prepare` | `--dir`（string・必須）<br>`--name`（string・必須） |
-| `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--unit`（string・任意）<br>`--mode`（string・任意）<br>`--timeout`（number・任意）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意） |
+| `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--unit`（string・任意）<br>`--mode`（string・任意）<br>`--timeout`（number・任意）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意）<br>`--require-version-number`（boolean・任意） |
+| `ndf worker write` | `--path`（string・必須）: 書き込むファイル。書き込み先は、`ndf worker run` の `--result-file` に指定したファイルの親ディレクトリの配下に限る。`--state-dir` の指定は、書き込める範囲に影響しない。相対パスは、このコマンドを実行する作業ディレクトリから解決する。本文は標準入力に渡し、ファイルの全文を置き換える。このコマンドは、書き込み先のディレクトリが `ndf worker run` の開いたディレクトリと同じかを確かめる。`ndf worker run` は、開いたディレクトリのデバイス番号・inode 番号とパスを環境変数 `NDF_WORKER_RESULT_DIR` で worker へ渡す。このコマンドは自分で開いた書き込み先のディレクトリの番号をその値と比べ、違えば書かずに止まる（precondition）。環境変数は呼び出し元が変えられるので、呼び出し元が `ndf worker run` の起動した worker かどうかは検証しない。信頼できる呼び出し元だけが使う |
 
 結果の `metrics`: `attempts`（integer）・`attention`（integer）・`edits`（integer）・`expectation_search`（object か null）・`launch`（object）・`paths`（object）・`report`（string）。`items` の要素: `action`（string）・`at`（—）・`backup`（string）・`diff`（string か null）・`kind`（string）・`path`（string）・`plan`（string か null）・`reason`（string か null）・`result_file`（string）・`session`（string か null）・`sha`（string）・`state`（string）・`subject`（string）・`text`（—）・`words`（array of string）
 

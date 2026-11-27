@@ -1,0 +1,9 @@
+{
+  "summary": "バージョンの無いリリース記録（record --version）で、届け先 1 つの CD の結果を待つ上限の秒（届け先の設定の result.timeout_seconds が無いとき）と、照会し直す間隔の秒。--environment が 1 つの呼び出しだけが待つ",
+  "seconds": 1800,
+  "interval": 30,
+  "read_by": [
+    "ndf.domains.release.delivery_confirm",
+    "ndf.domains.release.record_unversioned"
+  ]
+}

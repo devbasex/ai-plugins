@@ -60,7 +60,7 @@ def sandbox_failed(paths: "AgentPaths") -> Optional[str]:
 
     失敗は最初のコマンドで出て、その後の回答のログに埋もれるので、末尾でなく全体を読む。`--json` の起動は失敗を標準エラーに
     出さず、失敗で終わったコマンドの出力が `bwrap:` で始まる。"""
-    err = whole_text(paths.err)
+    err = whole_output(paths.err)
     found = _SANDBOX_LINE.search(err)
     if found:
         return _line_at(err, found.start())
@@ -85,7 +85,7 @@ def codex_answer_path(out: Path) -> Path:
     return out.with_name(out.name + ".answer")
 
 
-def whole_text(path: Path) -> str:
+def whole_output(path: Path) -> str:
     """ファイル全体を文字で読む。無ければ空。"""
     try:
         return path.read_text(encoding="utf-8", errors="replace")
@@ -111,7 +111,7 @@ def _starts_codex_stream(first_line: str) -> bool:
 
 def codex_events(out: Path) -> list[dict[str, Any]]:
     """`codex exec --json` の出力のイベント。最初の行が `thread.started` でなければ（`--json` の出力でなければ）空。"""
-    lines = whole_text(out).split("\n")
+    lines = whole_output(out).split("\n")
     if not _starts_codex_stream(lines[0]):
         return []
     return [e for e in map(_codex_event, lines) if e is not None]

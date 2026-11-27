@@ -27,3 +27,17 @@ def test_design_issues_compares_numbers_not_prefixes() -> None:
 
 def test_plan_file_formats_the_issue_number() -> None:
     assert issue_docs.PLAN_FILE.format(number=12) == "issues/issue-12-plan.md"
+
+
+@pytest.mark.parametrize(
+    ("path", "numbers"),
+    [
+        ("issues/issue-7-8-plan.md", {7, 8}),
+        ("issues/issue-78-plan.md", {78}),
+        ("issues/issue-7-design.md", set()),
+        ("issues/sub/issue-7-plan.md", set()),
+        ("issues/issue-7-plan-detail.md", set()),
+    ],
+)
+def test_plan_issues_reads_the_numbers_in_the_name(path: str, numbers: set[int]) -> None:
+    assert issue_docs.plan_issues(path) == frozenset(numbers)

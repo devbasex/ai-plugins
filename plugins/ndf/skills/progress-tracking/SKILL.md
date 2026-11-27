@@ -80,6 +80,10 @@ ndf progress show <ステートマシンの ID>
 **工程名は工程表の行名で渡す。** 一覧は `development-workflow` の「モードごとに起動する Skill」の表が唯一の基準で、
 この Skill は持たない。値は引用符で囲む（`Pull Request` のように空白を含む工程名がある）。
 
+**判断の求めへ `approved` と回答した後に `bad_report` で失敗し、理由が `足りない出力:` で始まるときは、worker が値を返さずに判断を求めていた。**
+理由には、足りない値の名前、worker が判断を求めた理由の要約、次の操作が並ぶ。同じ判断の求めは自動では出し直されない。
+要約を読んで足りない値を返せる状態にしてから `ndf progress retry` で工程を打ち直すか、値が分かっていれば `finish` で手で終える。
+
 **本文を書けなくても工程は止めない。** 本文の書き直しに失敗しても工程は進み、結果 JSON に書けなかった保存先が載る。
 `summary` を作業の報告の「見つけたもの」へ載せて先へ進む。
 
@@ -109,34 +113,75 @@ ndf progress show <ステートマシンの ID>
 
 ### 手順
 
-閉じる操作のサブコマンドは無い。条件 2 の判定だけを `ndf records close-check` で行い、ほかは `gh` で読んで手で閉じる。
+閉じる操作のサブコマンドは無い。記録と本文の読み取りを `ndf release-steps records` で、閉じる条件の判定を
+`ndf records close-check` で行い、閉じるのは `gh` で手で行う。
 
-1. **記録の PR を決める。** リリース記録を持つ PR である（下の「リリース記録」。別の実行なら `retrospective` の
-   「Pull Request の番号を特定する」で引く）。`gh pr view <記録のPR> --json body,comments` で最後のリリース記録を読む。
-   **workflow でリリースする形では、そのリリース記録の `included` のうち番号が最も小さい PR を記録の PR にする。**
-   リリース後テストの記録はその 1 本にだけあり、書く側（`release-verification` の「出力物」）も同じ規則で選ぶ
-2. **スプリント課題を集める。** リリース記録の `included` の PR ごとに `gh pr view <PR> --json body` で本文を読み、
-   closing keywords（`Closes #N` などの記法）と参照（`Refs #N`。下の「既定ブランチ宛ての Pull Request の参照」）が指す課題を集める。PR の本文が
-   指さない課題（`pace: fast` の実装 PR など）は、閉じる理由を確かめてから足す。0 件なら推測で足さず、PR が参照した番号を
-   報告に並べて止まる
-3. **課題ごとに閉じる条件を確かめる**（下の「閉じる条件」）。条件 2 はリリース後テストの記録の JSON をファイルへ写して打つ
+1. **記録の PR と値を決め、記録を読む。** 記録の PR はリリース記録を持つ PR である（下の「リリース記録」。別の実行なら
+   `retrospective` の「Pull Request の番号を特定する」で引く）。**workflow でリリースする形とバージョン番号を持たないリポジトリでは、
+   リリース記録の `included` のうち番号が最も小さい PR を記録の PR にする。** リリース後テストの記録はその 1 本にだけあり、
+   書く側（`release-verification` の「出力物」）も同じ規則で選ぶ。値は、デプロイの工程の出力 `product_version`（並列の計画の
+   レーンでは `ndf lanes release --version` で受け取った値）である。次を打ち、出力をファイルへ保存する
 
    ```bash
-   ndf records close-check <課題> --verification <リリース後テストの記録の JSON> [--require]
+   ndf release-steps records --pr <記録の PR> --version <値> [--unit <リリースの単位>] [--release <本番の PR>] --bodies > <作業の保存先>/records.json
+   ```
+
+   リリースが単位を 2 つ以上持つとき（並列の計画のレーン）は、`--unit` に自分のスプリントブランチの名前を渡す。同じ記録の PR に
+   ほかのリリースのリリース記録が並んでいても、今回のリリース記録だけを選ぶためである。本番の PR の番号が分かれば `--release` も渡す。
+   `records` は、対象のリポジトリで write 以上の権限を持つ書き手のコメントと本文だけを使う。**結果が `ok` でなければ
+   （書き手の権限を照会できなかったときを含む）、記録が無いとは扱わず、課題を閉じずに「失敗」と報告する。**
+
+   **デプロイを飛ばした実行**（ステートマシンに飛ばした記録がある）では、リリース記録が無いので、スプリントの PR の本文だけを読む。
+   スプリントの PR は `retrospective` の「Pull Request の番号を特定する」で引く
+
+   ```bash
+   ndf release-steps records --pr <スプリントの PR> --pr-body-only > <作業の保存先>/records.json
+   ```
+2. **スプリント課題を集める。** `gh` を打たず、手順 1 の出力の `outputs.bodies` の本文から、closing keywords（`Closes #N` などの記法）と
+   参照（`Refs #N`。下の「既定ブランチ宛ての Pull Request の参照」）が指す課題を集める。**`trusted` が偽の本文からは集めず、**
+   その PR の番号と「本文の書き手に write 以上の権限が無い」を報告に載せる。PR の本文が指さない課題（`pace: fast` の実装 PR など）は、
+   閉じる理由を確かめてから足す。0 件なら推測で足さず、PR が参照した番号を報告に並べて止まる
+3. **課題ごとに閉じる条件を確かめる**（下の「閉じる条件」）。手順 1 で保存したファイルを渡す
+
+   ```bash
+   ndf records close-check <課題> --records <作業の保存先>/records.json [--require]
    ```
 
    リリース後テストを通る経路（最終工程が `リリース後テスト`、または後に振り返りが続く）では `--require` を付ける。
+   **デプロイを飛ばした実行では `--records` を渡さない**（条件 1 は飛ばした記録で満たす）。テストの記録 1 件を渡す
+   `--verification <JSON>` は、バージョン番号を持たないリポジトリでは受けず `precondition` で止まる。今回のリリースと
+   `version`・`unit` が同じテストの記録を選ぶのは `close-check` で、手順書の AI は選ばない。
    結果が `ok` でなければ、その課題は閉じない（`items[].reason` が理由）。結果は次の 3 つである
 
    | 結果 | 意味 | 続き |
    | --- | --- | --- |
    | `ok`（0） | 閉じてよい | 手順 4 へ |
-   | `stopped`（`refused`・1） | 閉じない（`failed` の行がある。`--require` で記録が無い） | 報告の「閉じなかった」に理由を載せる |
+   | `stopped`（`refused`・1） | 閉じない（`failed` の行がある。反映の記録がそろっていない（`outputs.release.missing`）。`--require` で記録が無い） | 報告の「閉じなかった」に理由を載せる |
+   | `stopped`（`precondition`・3） | 渡したファイルを読めない・`records` の成功の結果でない・引数の組が誤り | 報告の「失敗」に理由を載せる |
    | `gate`（10） | 人が決める（`failed` が無く `not_run` の行がある） | 報告の「閉じなかった」に、人が決めることを理由として載せる。止まらずに次の課題へ進む |
+
+   **設定で外した条件は、結果の `outputs.conditions` で読む。** 設定（`.ndf/project.json` の `workflow.close`）で外した条件は
+   `excluded` が真で、`reason` に理由がある。その名前と理由を閉じる報告に転記する。条件 3 の扱いは次のとおりである
+
+   | 結果の値 | 条件 3 の扱い |
+   | --- | --- |
+   | `conditions.release_verification.excluded` が真 | 最終工程が `リリース後テスト` でも、テストの記録の存在を求めない（渡した記録の不合格と保留は `close-check` が引き続き見る） |
+   | `conditions.retrospective_line.enforced` が偽 | 最終工程が `振り返り` でも、「振り返り:」の行を確かめない |
+
+   `outputs.release.unconfirmed` に載った届け先は、反映を CD の結果でなく、実環境の確認（`observed`）か申告（`attested`）で
+   記録した届け先である。閉じる報告に届け先の名前と区分を載せる
 4. **閉じる。** 条件を満たした課題だけを `gh issue close <課題> --comment "<最終工程> を終えたので閉じる（記録: <記録の PR の URL>）"`
    で閉じ、`gh issue view <課題> --json state` で `CLOSED` を確かめる。条件 2 を満たした課題は、閉じる前に本文の
    `## 受け入れ条件` のチェックボックスへマーカー（`[x]`）を付ける（`gh issue edit <課題> --body-file <ファイル>`。変えるのは
-   チェックボックスの空白 1 文字だけで、セクションの外と説明の行は変えない）。他のリポジトリの課題の本文は書かない
+   チェックボックスの空白 1 文字だけで、セクションの外と説明の行は変えない）。他のリポジトリの課題の本文は書かない。
+   次の 2 つの経路では、条件 2 を満たしたかでなく、`close-check` の結果の `outputs.verified` が真のときだけマーカーを付ける。
+   偽なら本文を変えず、閉じる報告に「テストで未確認」と書く
+
+   | 経路 | マーカーを付ける条件 |
+   | --- | --- |
+   | バージョン番号を持たないリポジトリ（`branch_strategy.release.version_store.kind` が `none`） | `outputs.verified` が真 |
+   | `conditions.release_verification.excluded` が真 | `outputs.verified` が真 |
+   | ほか | 条件 2 を満たした |
 5. **報告する。** 課題ごとに次のどれかを表にして載せる
 
 | 結果 | 意味 | 報告に載せるもの |
@@ -153,8 +198,8 @@ ndf progress show <ステートマシンの ID>
 
 | # | 条件 | 満たさないとき |
 | --- | --- | --- |
-| 1 | 本番へ入れたバージョンのリリース記録がある（デプロイを飛ばした実行は、飛ばした記録がある） | スプリント課題すべてを OPEN のまま残す |
-| 2 | リリース後テストの記録がある経路では、その課題の行に不合格（`failed`）が無く、保留（`not_run`）も無い。`not_run` があれば閉じるかを人が決める。`--require` では記録そのものが要る | その課題を OPEN のまま残す（`not_run` なら人が決める課題として報告する） |
+| 1 | 本番へ入れたバージョンのリリース記録がある（デプロイを飛ばした実行は、飛ばした記録がある）。バージョン番号を持たないリポジトリでは、今回の対象の届け先のすべてに反映の記録がある（`close-check` の `outputs.release.complete`） | スプリント課題すべてを OPEN のまま残す |
+| 2 | リリース後テストの記録がある経路では、その課題の行に不合格（`failed`）が無く、保留（`not_run`）も無い。`not_run` があれば閉じるかを人が決める。`--require` では記録そのものが要る。バージョン番号を持たないリポジトリでは、対象の届け先ごとに判定し、その課題の行が無い届け先があれば `--require` で閉じない | その課題を OPEN のまま残す（`not_run` なら人が決める課題として報告する） |
 | 3 | その課題の最終工程の記録がある。`デプロイ` は条件 1、`リリース後テスト` は条件 2 がそれに当たる。`振り返り` は課題の本文に行頭から `振り返り: https://github.com/<所有者>/<リポジトリ>/(issues\|pull)/<番号>#issuecomment-<識別子>` の行があり、記録の PR の最後のリリース記録より後に書かれたものである。前の実行の振り返りの行は数えない | その課題を OPEN のまま残す |
 
 **開発版のデプロイは閉じる条件を満たさない。** 利用者が常用するバージョンにまだ届いていない段階で、
@@ -177,11 +222,12 @@ ndf progress show <ステートマシンの ID>
 
 | 記録 | 見分け方 | 機械が読む中身 |
 | --- | --- | --- |
-| リリース記録 | マーカーの行 `<!-- ndf:release-record -->` | 後に続く JSON のコードブロックの `version`（v の前置きの無い版数）・`release`（リリースの PR の番号）・`included`（含めた PR の番号） |
-| リリース後テストの記録 | マーカーの行 `<!-- ndf:release-verification -->` | 後に続く JSON のコードブロック（[release-verification のスキーマ](../../contracts/schemas/release-verification.schema.json) の `version` と `issues`） |
+| リリース記録 | マーカーの行 `<!-- ndf:release-record -->` | 後に続く JSON のコードブロックの `version`（v の前置きの無い版数か、出したものを指す値）・`release`（リリースの PR の番号）・`included`（含めた PR の番号）。バージョン番号を持たないリポジトリでは、加えて `environments`（反映を確かめた届け先）・`targets`（今回の対象の届け先）・`commit`（反映したコミット）・`confirmation`（届け先ごとの確かめ方） |
+| リリース後テストの記録 | マーカーの行 `<!-- ndf:release-verification -->` | 後に続く JSON のコードブロック（[release-verification のスキーマ](../../contracts/schemas/release-verification.schema.json) の `version`・`issues` と、バージョン番号を持たないリポジトリでは `environments`（テストした届け先）・`unit`・行の `retest_reason`） |
 
-**読むのは JSON のコードブロックだけで、見出しや本文の文から読まない。** 同じマーカーのコメントが複数あれば、
-条件 1 は本番のバージョンと `version` が一致する最後の記録を、条件 2 は同じバージョンの最後のリリース後テストの記録を使う。
+**読むのは JSON のコードブロックだけで、見出しや本文の文から読まない。** 同じマーカーのコメントが複数あるときに、
+今回のリリース記録とテストの記録を選ぶのは `ndf release-steps records` と `ndf records close-check` である（手順 1・3）。
+バージョン番号を持たないリポジトリでは、リリース記録は届け先ごとに並び、課題と届け先の組の行を投稿の順によらずに合わせて判定する。
 
 ## 関連
 

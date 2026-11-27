@@ -99,7 +99,7 @@ def test_a_command_without_one_place_holder_or_of_another_cli_is_refused(command
 )
 def test_a_safety_argument_given_by_the_command_itself_is_refused(runtime: str, word: str) -> None:
     """安全装置の引数は NDF だけが入れる。利用者のコマンドが自分で持てば、判定を迂回するので拒む。"""
-    head = drc._prefix(runtime, drc.facts.row("runtimes", runtime))
+    head = drc._command_head(runtime, drc.facts.row("runtimes", runtime))
     with pytest.raises(internal.InternalError) as got:
         drc.build_command(runtime, [*head, "{args}", word, "x"], [])
     assert got.value.kind == "precondition" and word.split("=")[0][:2] in str(got.value)

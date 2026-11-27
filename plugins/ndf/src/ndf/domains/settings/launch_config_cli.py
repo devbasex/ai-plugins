@@ -30,7 +30,7 @@ from typing import Any, Optional
 
 from ndf import cli, identity
 from ndf.adapters import git, launch_approval as la, launch_candidates, launch_records, launch_settings as ls
-from ndf.adapters.secret_forms import holds_secret
+from ndf.adapters.secret_lines import holds_secret
 from ndf.contracts import internal, result
 
 TOOL = cli.tool_of(__name__)

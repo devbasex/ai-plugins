@@ -29,7 +29,7 @@ from jsonschema import Draft202012Validator
 
 from ndf import cli, contracts, identity
 from ndf.contracts import causes, result
-from ndf.core import route
+from ndf.core import route, start_point
 from ndf.core.plan import files
 from ndf.adapters import github
 from ndf.domains.docrebuild import drive, gate, select_decide
@@ -53,7 +53,7 @@ def _parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="action", required=True)
     r = sub.add_parser("run", help="組み直す文書を選び、worker を 1 回起動して結果を確かめる")
     r.add_argument("--base", required=True, help="ベースブランチの名前（スプリントの PR のマージ先）")
-    r.add_argument("--remote", required=True, help="起点の参照を探すリモートの名前")
+    r.add_argument(start_point.REMOTE_OPTION, required=True, help="起点の参照を探すリモートの名前")
     r.add_argument("--issue", type=int, action="append", required=True, help="工程が扱う課題の番号（1 回以上）")
     r.add_argument("--kind", choices=select_decide.KINDS, action="append", required=True, help="選ぶ文書の種類（1 回以上）")
     r.add_argument("--state-dir", required=True, help="起動指示と worker の結果ファイルの保存先")

@@ -17,18 +17,18 @@ MVV とレッドラインのパスは PR のベースのコミットから 1 度
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
-from ndf.adapters import llm, publish, run_log
+from ndf.adapters import github, llm, publish, run_log
 from ndf.adapters.git import Git, GitError
-from ndf.adapters.github import GitHub, GitHubError, Pull
+from ndf.adapters.github import GitHub, GitHubError, Pull, Unread
 from ndf.contracts import internal, limits
-from ndf.core import approval_words, merge_approval, production_merge
-from ndf.domains.records import files, jsonfile, jsonl, mvv
+from ndf.core import approval_words, issue_docs, merge_approval, production_merge
+from ndf.domains.records import design_check_rules, files, jsonfile, jsonl, mvv
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress import definition
@@ -50,6 +50,9 @@ RELEASE_KEPT = "リリース承認ゲートは、保留を読む PR の範囲が
 NO_DECL = "MVV の設定が手元の HEAD にもリモートの追跡ブランチにも無いため、MVV 判定を打たない"
 # 記録を読めないときの保留の頭（#3959）
 RECORDS_UNREADABLE = "MVV の記録（mvv-validation.jsonl）を読めない: "
+# 省ける判定のときに読む設計文書の「人へ残す判断」の表で、省かない理由の頭の文（#2912 の決定 7）
+TABLE_KEPT = "設計文書の『人へ残す判断』の表に、レッドラインに当たる判断がある: "
+TABLE_UNREADABLE = "設計文書の本文を読めないため、『人へ残す判断』の表を確かめられない: "
 # 判定の 1 回の呼び出し（質問・材料・回答のスキーマ・上限の秒 → 回答。キーワード `before_retry` は打ち直しの起動の直前に呼ぶ
 # 確かめ。`llm.ask` と同じ）。テストはスタブへ差し替える
 Ask = Callable[..., llm.JudgeAnswer]
@@ -253,7 +256,14 @@ def failure_text(kind: str, exc: BaseException | str, where: Mapping[str, Any]) 
     `where` の `gate`・`pr`・`head` を記録に写し（無ければ null）、`root` があれば記録の `repo` を解く。記録に書けなくても例外を
     出さず「<定型文>（診断の記録に書けない）」を返す。GitHub も公開範囲の照会も呼ばない。
     """
-    text = mm.STOP_REASONS[kind]
+    return f"{mm.STOP_REASONS[kind]}（{diagnosis(kind, exc, where)}）"
+
+
+def diagnosis(kind: str, exc: BaseException | str, where: Mapping[str, Any]) -> str:
+    """`failure_text` の括弧の中（「診断の記録 <id>」か「診断の記録に書けない」）。診断の記録を 1 件だけ書く。
+
+    1 つの失敗を複数の理由に載せるときは、これを 1 回だけ呼び、どの理由からも同じ識別子を指す。
+    """
     row = {
         "at": jsonl.now(),
         "repo": _repo_of(where),
@@ -263,9 +273,9 @@ def failure_text(kind: str, exc: BaseException | str, where: Mapping[str, Any]) 
     }
     try:
         ident = mvv.record_failure(row)
-    except (OSError, internal.InternalError):
-        return f"{text}（診断の記録に書けない）"
-    return f"{text}（診断の記録 {ident}）"
+    except (OSError, internal.InternalError):  # noqa: NDF401 ファイル: 記録に書けないことを理由の文に残して呼ぶ側へ返す
+        return "診断の記録に書けない"
+    return f"診断の記録 {ident}"
 
 
 def judge_with(ask: Ask, before_retry: Optional[Callable[[], None]] = None) -> mvv.Judge:
@@ -433,36 +443,112 @@ def _judged(
         return j.posted_if_current(j.stopped("llm_no_answer", why, noted=False, holds=rec.holds))
     why = [] if unrecorded is None else ["判定を記録（mvv-validation.jsonl）に書けない: " + j.text("records_unwritable", unrecorded)]
     verdict = _verdict(row)
-    # 手順 (8): 進め方と区分は省くかだけを決める。記録に行の無い判定では省かない
+    skip, why = _skip_decision(facts, verdict, gate_name, inputs.get("pace"), recorded=unrecorded is None, why=why)
+    outcome = _bound(j, rows, mm.gate_outcome(gate_name, verdict, skip, why, rec.holds, pull=(number, j.pull.head_sha)))
+    return j.posted_if_current(outcome)
+
+
+def _skip_decision(
+    facts: MvvFacts, verdict: Any, gate_name: str, pace: Any, *, recorded: bool, why: Sequence[str]
+) -> tuple[bool, list[str]]:
+    """手順 (8): 承認ゲートを省くかと、省かない理由（`why` の後ろへ足したもの）を返す。副作用は無い。
+
+    進め方 `pace` と区分 `gate_name` は省くかだけを決める。記録に行の無い判定（`recorded` が偽）では省かない。
+    """
     ok, reasons = may_skip(facts, verdict, gate_name)
-    skip = ok and unrecorded is None
-    why += reasons
-    if inputs.get("pace") not in MVV_PACES:
-        skip, why = False, [f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない", *why]
+    skip = ok and recorded
+    out = [*why, *reasons]
+    if pace not in MVV_PACES:
+        skip, out = False, [f"進め方 {pace} は承認ゲートを MVV 判定で省かない", *out]
     if gate_name not in MVV_SKIP_GATES:
-        skip, why = False, [*why, RELEASE_KEPT]
-    return j.posted_if_current(_bound(j, mm.gate_outcome(gate_name, verdict, skip, why, rec.holds, pull=(number, j.pull.head_sha))))
+        skip, out = False, [*out, RELEASE_KEPT]
+    return skip, out
 
 
-def _bound(j: _Judging, outcome: dict[str, Any]) -> dict[str, Any]:
-    """承認ゲートを省く判定にだけ承認の対象 `target` を持たせる。マージ先の設定を読めなければ、判定を保ったまま省かない（#4409）。"""
+def _design_paths(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    """差分の設計文書のうち、head に本文があるもの（削除したものは読まない）。"""
+    return [str(r["filename"]) for r in rows if issue_docs.DESIGN_FILE.match(str(r["filename"])) and r.get("status") != "removed"]
+
+
+def _bound(j: _Judging, rows: Sequence[Mapping[str, Any]], outcome: dict[str, Any]) -> dict[str, Any]:
+    """承認ゲートを省く判定にだけ、承認の対象 `target` を持たせ、差分の設計文書の「人へ残す判断」の表を確かめる。
+
+    最初の要求でマージ先の設定と、残りのスロットに収まる設計文書の head の本文を読み、残った文書は上限の件数ごとに分けて読む
+    （#4409・#2912 の決定 7）。最初の要求が失敗すれば、設定とすべての文書を読めなかったとして省かない。後続の要求だけが
+    失敗したときは、その要求に載せた文書だけを読めなかったとし、要求ごとに 1 件の診断の記録を指す。表に番号を持つ行か、
+    本文の無い・切られた・読めなかった設計文書があれば、`skip` を偽にして `target` を外し、`why` にパスごとの理由を足す。
+    前に人が承認した行かは問わない。省けない判定では何も読まない。
+    """
     if not outcome["skip"]:
         return outcome
+    paths = _design_paths(rows)
     try:
-        return {**outcome, "target": _target(j.hub, j.pull)}
+        target, found, unread = _target(j.hub, j.pull, paths)
     except (GitHubError, GitError) as exc:
-        why = [*outcome["why"], "マージ先の設定を読めない: " + j.text("base_unreadable", exc)]
+        # 設定と本文は同じ要求なので、失敗の診断の記録は 1 件だけ書き、どの理由からも同じ識別子を指す
+        ref = diagnosis("base_unreadable", exc, j.where)
+        why = [*outcome["why"], f"マージ先の設定を読めない: {mm.STOP_REASONS['base_unreadable']}（{ref}）"]
+        why += [_table_unreadable(p, ref) for p in paths]
         return {**outcome, "skip": False, "why": why}
+    kept = _kept_reasons(found, _unread_refs(j, unread))
+    if kept:
+        return {**outcome, "skip": False, "why": [*outcome["why"], *kept]}
+    return {**outcome, "target": target}
 
 
-def _target(hub: GitHub, pull: Pull) -> dict[str, Any]:
-    """判定した PR の承認の対象（出力 `mvv_gate.target`。承認ゲートを省くときだけ持つ）。マージ先の設定を読めなければ本番へ反映され得るとして扱う。
+def _table_unreadable(path: str, ref: str) -> str:
+    """設計文書 `path` の本文を読めなかったときの省かない理由。`ref` は診断の記録を指す括弧の中（`diagnosis`）。"""
+    return f"{TABLE_UNREADABLE}{path}（{mm.STOP_REASONS['table_unreadable']}。{ref}）"
 
-    マージ先の設定の読み取り（GraphQL 1 回）は、承認ゲートを省く判定でだけ打つ（設計の費用表の増分に記録する）。"""
-    found = hub.branch_file(pull.base_ref, production_merge.PROJECT_FILE)
+
+def _unread_refs(j: _Judging, unread: Sequence[Unread]) -> dict[str, str]:
+    """失敗した後続の要求ごとに診断の記録を要求の順に 1 件だけ書き、その要求に載せた文書のパスから同じ識別子を引けるようにする。"""
+    refs: dict[str, str] = {}
+    for u in unread:
+        ref = diagnosis("table_unreadable", u.error, j.where)
+        for p in u.names:
+            refs[p] = ref
+    return refs
+
+
+def _kept_reasons(found: Mapping[str, Optional[tuple[str, ...]]], refs: Mapping[str, str]) -> list[str]:
+    """設計文書ごとの省かない理由を `found` の順に返す（読めなかった・本文が無い・表に番号を持つ行がある）。"""
+    kept: list[str] = []
+    for p, numbers in found.items():
+        if p in refs:
+            kept.append(_table_unreadable(p, refs[p]))
+        elif numbers is None:
+            kept.append(f"{TABLE_UNREADABLE}{p}（本文が無い）")
+        elif numbers:
+            kept.append(f"{TABLE_KEPT}{p}（{'・'.join(numbers)}）")
+    return kept
+
+
+def _table_numbers(got: Mapping[str, Any], paths: Sequence[str]) -> dict[str, Optional[tuple[str, ...]]]:
+    """応答 `got` のパスごとの本文から、「人へ残す判断」の表の番号を出てくる順に重複なく返す。
+
+    本文が無い（Blob でない・応答に無い）パスと、切り詰められた（`isTruncated`）パスは None。
+    切られた本文では後ろにある表の行を見落とし、省く側へ倒れるので読まない。
+    """
+    out: dict[str, Optional[tuple[str, ...]]] = {}
+    for p in paths:  # noqa: NDF201 上限: PR の差分の設計文書の数（数件）。応答の dict を読む純粋な関数で外部へは出ない
+        text = github.whole_text(got.get(p))
+        out[p] = None if text is None else design_check_rules.redline_numbers(text)
+    return out
+
+
+def _target(hub: GitHub, pull: Pull, paths: Sequence[str]) -> tuple[dict[str, Any], dict[str, Optional[tuple[str, ...]]], list[Unread]]:
+    """判定した PR の承認の対象（出力 `mvv_gate.target`）、設計文書 `paths` の表の番号（`_table_numbers`）、読めなかった後続の要求。
+
+    マージ先の設定と head の本文を `GitHub.branch_file_with` で読む（承認ゲートを省く判定でだけ打つ。設計の費用表の増分に記録する）。
+    マージ先の設定を読めなければ本番へ反映され得るとして扱う。最初の要求の失敗は `GitHubError` を送出する。
+    """
+    selections = {p: github.whole_blob_at(pull.head_sha, p) for p in paths}  # noqa: NDF201 上限: PR の差分の設計文書の数（数件）。選択の文字列を組む純粋な関数で外部へは出ない
+    found, got, unread = hub.branch_file_with(pull.base_ref, production_merge.PROJECT_FILE, selections)
     verdict = production_merge.judge_project_text(found.text, pull.base_ref, source_repo=found.repo, repo=hub.repo)
     production = production_merge.reaches_production(verdict)
-    return {"repo": hub.repo, "pr": pull.number, "base": pull.base_ref, "head": pull.head_sha, "production": production}
+    target = {"repo": hub.repo, "pr": pull.number, "base": pull.base_ref, "head": pull.head_sha, "production": production}
+    return target, _table_numbers(got, paths), unread
 
 
 def post_note(hub: GitHub, number: int, text: str) -> publish.Published:

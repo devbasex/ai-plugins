@@ -1,0 +1,7 @@
+{
+  "path": "plugins/ndf/src/ndf/core/plan/review_units_decide.py",
+  "name": "spec-dir",
+  "kind": "not-a-violation",
+  "reason": "振る舞いの出所として NDF 自身の確定仕様のセクションと決定を示す注記（#4369）",
+  "count": 2
+}

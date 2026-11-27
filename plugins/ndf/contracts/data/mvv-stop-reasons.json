@@ -12,6 +12,7 @@
     "llm_no_answer": "判定する AI が回答しない。判定を打ち直す",
     "records_unreadable": "手元の MVV の記録を読めない。判定を打った環境の記録のファイルを確かめる",
     "records_unwritable": "判定を手元の MVV の記録に書けない。判定を打った環境の記録の保存先を確かめる",
+    "table_unreadable": "設計文書の本文を GitHub から読めない。GitHub への接続と権限を確かめる",
     "note_unwritten": "判定の記録を PR のコメントに書けない。GitHub への接続と書き込みの権限を確かめて判定を打ち直す",
     "cite_precondition": "承認資料のファイルか、ベースブランチの承認済みの MVV を読めない。ファイルのパスと取得をやり直して確かめ直す",
     "cite_lookup_failed": "参照先の公開範囲を GitHub に照会できない。GitHub への接続を確かめて確かめ直す"

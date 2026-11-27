@@ -28,6 +28,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `CLAUDE_PLUGIN_ROOT` | runtime | path | — | プラグインの根。無ければ読み手の位置から求める。ホストの推定では Claude Code のマーカー。bin/ndf が自分の根を入れるため、中継が起動するセッションへ渡さない（セッションの hook には Claude Code が入れる） | 内部（予告なく変えてよい） |
 | `CODEX_HOME` | runtime | path | — | Codex の設定の保存先（ホストの推定と使用量の読み取り） | 内部（予告なく変えてよい） |
 | `CODEX_PLUGIN_ROOT` | runtime | path | — | Codex のプラグインの根（ホストの推定） | 内部（予告なく変えてよい） |
+| `GH_REPO` | ndf | string | — | gh の対象の owner/repo。ndf cross-review run --repo が相手役と修正担当の gh へ渡す値を入れる。gh pr merge を止める hook は、利用者の置いた値をマージ先のリポジトリの判定に読む | 内部（予告なく変えてよい） |
 | `GH_TOKEN` | user | string | 秘密 | GitHub の API のトークン | 公開 |
 | `GITHUB_EVENT_PATH` | ci | path | — | GitHub Actions の事象の JSON。検査が PR 本文を読む | 内部（予告なく変えてよい） |
 | `GITHUB_REPOSITORY` | ci | string | — | GitHub Actions が渡す owner/repo | 内部（予告なく変えてよい） |
@@ -36,6 +37,8 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `HOME` | user | path | — | 利用者のホームディレクトリ。worktree の書き込み先の判定が ~ で始まるパスを解くときと、学習の結果のキャッシュの保存先を求めるときに読む。無ければ ~ を空として解く | 内部（予告なく変えてよい） |
 | `KIRO_AGENT` | runtime | string | — | Kiro のエージェントの名前（ホストの推定） | 内部（予告なく変えてよい） |
 | `KIRO_PLUGIN_ROOT` | runtime | path | — | Kiro のプラグインの根（ホストの推定） | 内部（予告なく変えてよい） |
+| `LANG` | user | string | — | 利用者のロケール。届け先の結果を読むコマンドへそのまま渡す。無ければ渡さない | 内部（予告なく変えてよい） |
+| `LC_ALL` | user | string | — | 利用者のロケールの上書き。届け先の結果を読むコマンドへそのまま渡す。無ければ渡さない | 内部（予告なく変えてよい） |
 | `NDF_ACCOUNTS_DIR` | user | path | — | アカウントの登録の保存先（ndf relay account の登録のサブコマンド）。無ければ <共有の設定ディレクトリ>/ndf/accounts（旧いプラグインと同じ保存先） | 内部（予告なく変えてよい） |
 | `NDF_ACCOUNT_GENERATION` | ndf | string | — | 登録済みアカウントの子で、起動を確かめた登録の世代（空文字は世代の無い登録）。子の ndf plan がリースと上限の後の替え先の判断に使う。従量の接続と API キーの子には渡さない | 内部（予告なく変えてよい） |
 | `NDF_AI_CHILD` | ndf | flag | — | NDF が非対話で起動した AI の子（worker・Skill を回す起動・判定・相手役・修正担当・委譲）のマーカー。起動の承認と取り消しはこの値があれば拒む（#1959）。無ければ NDF が起動した AI の中ではない。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
@@ -88,6 +91,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_STEP_ATTEMPT` | ndf | integer | — | プランの実行がステップの子へ渡す、そのプランの実行でそのステップを実行した何回目か（最初が 1。打ち直しと、遷移で戻った実行の両方で 1 増える）。使用量ログの行の attempt になる（#1959）。無いか 1 以上の整数でなければ行の欄を省く。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_STEP_ID` | ndf | string | — | プランの実行がステップの子へ渡す、ステップの id。使用量ログの行の step になる（#1959）。無ければプランの外の起動で、行の欄を省く。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_SUPERVISE_CLAUDE_FALLBACK` | user | string | 秘密 | 従量の接続の設定（KEY=VALUE を空白区切り）。定義されていれば保存した設定（metered.json）より先に読む | 内部（予告なく変えてよい） |
+| `NDF_UNIT_FILE` | ndf | path | — | レビューの単位の指示（単位の範囲）のファイル。ndf cross-review run が相手役と修正担当の指示に中身と例外を足す。無ければ単位の指示を足さない。指すファイルを読めなければ invalid で止まる | 内部（予告なく変えてよい） |
 | `NDF_UNIT_ID` | ndf | string | — | プランの実行がステップの子へ渡す、モデルと effort の割り付けの単位の ID（#2944）。ndf worker run は --unit が無ければこの値を単位にし、Skill を回す起動も読む。無いか空なら割り付けない。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_UPKEEP_STATE_DIR` | user | path | — | 棚卸しの状態（候補・順位・却下・見積・付け直しの前の状態・深さの記録）の保存先。無ければメインディレクトリの .ndf/backlog/state | 内部（予告なく変えてよい） |
 | `NDF_USAGE_DIR` | user | path | — | 使用量の使用量ログ（usage.jsonl）の保存先。hook から書いてもスクリプトから書いても同じ保存先になる。無ければ状態の保存先の usage | 内部（予告なく変えてよい） |
@@ -96,6 +100,8 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `PATH` | user | string | — | 外部 CLI（gh・claude・codex）の実行ファイルを探す道。下限の比べ（cli_floor）が、起動へ渡す環境に無ければこのプロセスの値で、起動と同じ実行ファイルを解く。どちらにも無ければ既定の道（os.defpath） | 内部（予告なく変えてよい） |
 | `SLACK_BOT_TOKEN` | user | string | 秘密 | Slack の通知のトークン。無ければ通知しない | 内部（予告なく変えてよい） |
 | `SLACK_CHANNEL_ID` | user | string | — | Slack の通知先のチャンネル | 内部（予告なく変えてよい） |
+| `TMPDIR` | user | path | — | 一時ファイルの置き先。届け先の結果を読むコマンドへそのまま渡す。無ければ渡さない | 内部（予告なく変えてよい） |
+| `TZ` | user | string | — | 利用者のタイムゾーン。届け先の結果を読むコマンドへそのまま渡す。無ければ渡さない | 内部（予告なく変えてよい） |
 | `UV_PROJECT_ENVIRONMENT` | ndf | path | — | bin/ndf が NDF の依存の環境（<キャッシュ>/ndf/venv/<バージョン>）を指して uv へ渡す。中継が起動するセッションへ渡すと、セッションの中の uv run が NDF の環境を書き換えるため渡さない | 内部（予告なく変えてよい） |
 | `UV_RUN_RECURSION_DEPTH` | runtime | integer | — | uv run が入れ子の深さとして入れる。中継が起動するセッションへ渡すと、セッションの中の uv run の深さを誤って数えるため渡さない | 内部（予告なく変えてよい） |
 | `VIRTUAL_ENV` | runtime | path | — | uv run が NDF の依存の環境を指して入れる。中継が起動するセッションへ渡すと、セッションの中の uv と python が NDF の環境を使うため渡さない | 内部（予告なく変えてよい） |

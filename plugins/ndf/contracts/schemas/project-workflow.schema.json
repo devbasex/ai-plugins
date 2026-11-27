@@ -2,13 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "project-workflow.schema.json",
   "title": "プロジェクトの設定の workflow",
-  "description": ".ndf/project.json の workflow の形。読む側は ndf.progress.invoke（launch をテンプレートの差し込み review・rebuild・refactor へ写す）と ndf.progress.command（stages を工程の有効と無効へ写す）",
+  "description": ".ndf/project.json の workflow の形。読む側は ndf.progress.invoke（launch をテンプレートの差し込み review・rebuild・refactor へ写す）と ndf.progress.command（stages を工程の有効と無効へ写す）と ndf.progress.flow（close を課題を閉じる条件の要否へ写す。ndf records close-check が読む）。unit_required_checks は工程「実装」を単位ごとに流す処理が読む",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "stages": {
       "type": "object",
-      "description": "工程の名前 → 有効と理由。無効にするときは reason が要る",
+      "x-ndf-flow": true,
+      "description": "工程の名前 → 有効と理由。無効にするときは reason が要る。x-ndf-flow が真の項目は流れの設定に数える（ndf.progress.flow）",
       "additionalProperties": {
         "type": "object",
         "required": ["enabled"],
@@ -18,6 +19,21 @@
         },
         "if": {"properties": {"enabled": {"const": false}}},
         "then": {"required": ["reason"]}
+      }
+    },
+    "unit_required_checks": {
+      "type": "array",
+      "description": "実装計画のレビューの単位の Pull Request で待つ CI のチェックの名前。空の並びは単位の中で CI を待たない",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "close": {
+      "type": "object",
+      "x-ndf-flow": true,
+      "additionalProperties": false,
+      "description": "課題を閉じる条件の要否（#4580）。省いた条件は求める（required: true と同じ）。外すときは reason が要る。外せるのはリリース後テストの記録（release_verification）と課題の本文の「振り返り:」の行（retrospective_line）だけで、渡したリリース後テストの記録の不合格はどの設定でも閉じない",
+      "properties": {
+        "release_verification": {"$ref": "#/$defs/close_rule", "x-ndf-require-flag": true, "description": "リリース後テストの記録。ndf records close-check の --require が求める条件（x-ndf-require-flag）"},
+        "retrospective_line": {"$ref": "#/$defs/close_rule", "description": "課題の本文の「振り返り:」の行（手順書の AI が確かめる）"}
       }
     },
     "launch": {
@@ -32,6 +48,18 @@
     }
   },
   "$defs": {
-    "command": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+    "command": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "close_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "閉じる条件 1 つの要否。required が false なら reason（外す理由）が要る",
+      "required": ["required"],
+      "properties": {
+        "required": {"type": "boolean"},
+        "reason": {"type": "string", "minLength": 1}
+      },
+      "if": {"properties": {"required": {"const": false}}},
+      "then": {"required": ["reason"]}
+    }
   }
 }

@@ -205,10 +205,16 @@ def plan_remove(root: Path) -> WritePlan:
     return plan_files(root, {"project.json": after}, lambda: plan_remove(root))
 
 
+def lock_at(common: Path) -> Path:
+    """解決済みの git の共通ディレクトリから、`.ndf/project.json` を書く錠のファイルのパスを作る（git を起動しない）。
+    ブランチ戦略の書き込みと解析の書き出し（`ndf project write`）が共有する。"""
+    return common / LOCK_NAME
+
+
 def lock_path(root: Path) -> Path:
     """書く錠のファイル（git の共通ディレクトリ）。git の外なら `WriteError`。"""
     try:
-        return Git(cwd=Path(root)).common_dir() / LOCK_NAME
+        return lock_at(Git(cwd=Path(root)).common_dir())
     except GitError as exc:
         raise WriteError(f"{root}: git の共通ディレクトリを読めない（{exc}）", bs.UNREADABLE) from None
 

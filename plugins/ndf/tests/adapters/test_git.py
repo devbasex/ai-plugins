@@ -76,6 +76,14 @@ def test_is_ancestor_raises_on_git_failure() -> None:
         ("ssh://git@github.com/devbasex/ai-plugins.git", "devbasex/ai-plugins"),
         ("https://evil.example/github.com/devbasex/ai-plugins", None),
         ("git@github.com:devbasex/ai-plugins.git?token=secret", None),
+        ("ssh://git@ssh.github.com:443/devbasex/ai-plugins.git", "devbasex/ai-plugins"),
+        ("https://x-access-token:dummy@github.com/devbasex/ai-plugins.git", "devbasex/ai-plugins"),
+        ("https://example.invalid/github.com/example/project.git", None),
+        ("git@example.invalid:github.com/example/project.git", None),
+        ("https://github.com.example.invalid/example/project.git", None),
+        ("https://ssh.github.com/example/project.git", None),
+        ("/srv/github.com/example/project.git", None),
+        ("https://github.com/example", None),
     ],
 )
 def test_repo_of_url(url: str, repo: str | None) -> None:

@@ -20,7 +20,7 @@ from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import records as plan_records
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, invoke, issue_values, model, stages
+from ndf.progress import definition, invoke, issue_values, model, plan_runs, stages
 
 
 # 定義の読み込みは工程の文書をスキーマで確かめるため 1 回 0.3 秒ほどかかる。スナップショットは不変なのでモードごとに 1 回だけ読む
@@ -119,10 +119,10 @@ def test_listen_step_is_not_invoked():
 
 def test_read_report_takes_the_last_line_and_refuses_bad_shapes():
     good = result.result("plan", "ok", "済んだ")
-    assert invoke.read_report(f"途中の行\n{json.dumps(good)}\n") == good
-    assert invoke.read_report("") is None
-    assert invoke.read_report("JSON でない") is None
-    assert invoke.read_report(json.dumps({"status": "ok"})) is None
+    assert plan_runs.read_report(f"途中の行\n{json.dumps(good)}\n") == good
+    assert plan_runs.read_report("") is None
+    assert plan_runs.read_report("JSON でない") is None
+    assert plan_runs.read_report(json.dumps({"status": "ok"})) is None
 
 
 def test_finished_keeps_only_declared_outputs_and_warns_about_the_rest():
@@ -289,7 +289,7 @@ def _filled_plan(tmp_path, monkeypatch, name):
     held = route.params()
     patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
     work.mkdir()
@@ -311,7 +311,7 @@ def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tm
     # 題と本文は代表の課題（番号の最も小さい #3）からコピーする（#3908 の決定 7）
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     run = _stage_run_of("impl", repo, [4, 3])
     run = replace(run, inputs={**run.inputs, "acceptance": ["--issue", "3", "--issue", "4"]})
@@ -388,7 +388,7 @@ def test_ci_only_ndf_settings_builds_the_impl_plan_without_local_tests(tmp_path,
     repo = _sprint_repo(tmp_path, project)
     held = route.params()
     monkeypatch.setattr(route, "params", lambda: {n: replace(p, default=["ndf-worker"]) if n == "worker" else p for n, p in held.items()})
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"
     work.mkdir()
     argv = invoke.plan_argv(_stage_run_of("impl", repo, [3473]), work, None, repo)
@@ -563,7 +563,7 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_preconditio
     # 題と本文は欠けとして、信用しない出所を挙げて止まり、本文のファイルは書かない
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)  # 課題に依存しない差し込みがそろわないと課題を読まない
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: None)
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: None)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
     work = tmp_path / "w"
     work.mkdir()
@@ -577,7 +577,7 @@ def test_an_issue_by_an_untrusted_author_is_not_written_and_stops_as_preconditio
 def test_a_sprint_of_several_issues_takes_the_values_from_the_smallest_numbered_issue(tmp_path, monkeypatch):
     # #3908 の決定 7: 課題が 2 件以上なら、番号の最も小さい課題を代表にして title・body_file・issue をコピーする
     repo = _sprint_repo(tmp_path, PROJECT)
-    monkeypatch.setattr(issue_values, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"
     work.mkdir()
     got = issue_values.issue_values(_stage_run_of("impl", repo, [4211, 3908]).inputs, work, repo)
@@ -605,7 +605,7 @@ def test_the_issue_is_read_once_and_later_calls_use_the_copy_in_the_work_dir(tmp
     repo = _sprint_repo(tmp_path, PROJECT)
     reads = []
 
-    def read(location, n):
+    def read(location, n, repo=None):
         reads.append(n)
         return (f"#{n} の題（{len(reads)} 回目）", f"#{n} の本文（{len(reads)} 回目）")
 
@@ -635,7 +635,7 @@ def test_a_failure_to_read_the_issue_stops_with_its_reason_not_as_missing_values
     repo = _sprint_repo(tmp_path, PROJECT)
     sprint_fixture.with_worker(monkeypatch)  # 課題に依存しない差し込みがそろわないと課題を読まない
 
-    def fail(location, n):
+    def fail(location, n, repo=None):
         raise error
 
     monkeypatch.setattr(issue_values, "issue_text", fail)
@@ -792,7 +792,7 @@ def test_release_result_takes_the_version_from_the_outputs_of_the_plan_result(tm
     # PR 3464 の指摘: プランの結果はバージョンを outputs に集め、metrics には回とステップの数だけを載せる
     work = tmp_path / "w"
     inv = plan_runner.prepare(tmp_path / "root", _plan_file(tmp_path, "release"), None, str(work), tmp_path)
-    plan_records._add_outputs(work, {"product_version": "11.0.0"})
+    plan_records._add_outputs(work, "b", "ok", {"product_version": "11.0.0"})
     out = plan_runner.final_result(inv, {"status": result.OK, "kind": None, "detail": "", "last": "b", "count": 2}, "SUCCESS")
     step = next(s for s in _stage("デプロイ").steps if s.id == "release")
     assert "product_version" not in out["metrics"]
@@ -851,7 +851,7 @@ def test_plan_is_run_with_the_package_on_the_import_path_and_the_notes(tmp_path,
     # #4029: src は子の argv（sys.path）で渡し、PYTHONPATH には入れない（プランのステップへ渡らない）
     assert seen["argv"][: len(cli.ndf_command())] == cli.ndf_command()
     assert seen["env"].get("PYTHONPATH") == os.environ.get("PYTHONPATH")
-    assert seen["env"][invoke.NOTES_ENV] == "直す所"
+    assert seen["env"][plan_runs.NOTES_ENV] == "直す所"
     assert (tmp_path / "w").is_dir()
 
 

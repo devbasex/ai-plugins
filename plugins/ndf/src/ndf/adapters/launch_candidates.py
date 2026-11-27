@@ -64,9 +64,9 @@ def _untouched(made: Path, owned: _Owned, kept: Optional[str] = None) -> bool:
 
 
 def stamped_version(made: Path, stamp: frozenset[tuple[str, int, int, int]]) -> tuple[bool, Optional[str]]:
-    """候補 `candidate.json` を `_read_regular` で読んだバージョン。`stamp`（ディレクトリを調べた時の状態）と同じファイルでなければ偽。"""
+    """候補 `candidate.json` を `_read_opened_regular` で読んだバージョン。`stamp`（ディレクトリを調べた時の状態）と同じファイルでなければ偽。"""
     try:
-        read = _read_regular(made / CANDIDATE_NAME)
+        read = _read_opened_regular(made / CANDIDATE_NAME)
     except FileNotFoundError:  # 無い候補は「無し」のバージョン。調べた時にあった候補が消えていれば、同じ状態ではない
         return all(entry[0] != CANDIDATE_NAME for entry in stamp), None
     except OSError:  # 読めない候補は、その候補だけを掃除から外す（呼び手が飛ばす）
@@ -80,12 +80,12 @@ def unedited(now: Optional[str], written: Any, kept: Optional[str]) -> bool:
 
 
 def regular_version(path: Path, strict: bool = True) -> tuple[bool, Optional[str]]:
-    """普通のファイルだと確かめてから読んだ中身のバージョン（`_read_regular`）。無ければ `(True, None)`、FIFO・ディレクトリなど読めなければ `(False, None)`。
+    """普通のファイルだと確かめてから読んだ中身のバージョン（`_read_opened_regular`）。無ければ `(True, None)`、FIFO・ディレクトリなど読めなければ `(False, None)`。
 
     掃除が過去の反映先や候補を読むときに使う。利用者が置き換えた項目 1 つで、掃除の全体が止まらないようにするためである。
     """
     try:
-        return True, hashlib.sha256(_read_regular(path, strict).data).hexdigest()
+        return True, hashlib.sha256(_read_opened_regular(path, strict).data).hexdigest()
     except FileNotFoundError:  # 無い反映先は「無し」のバージョンとして照らす
         return True, None
     except OSError:  # 読めない項目は、その候補だけを掃除から外す（呼び手が飛ばす）
@@ -105,7 +105,7 @@ def _ident(st: os.stat_result) -> tuple[int, int, int, int]:
     return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns
 
 
-def _read_regular(path: Path, strict: bool = True) -> Read:
+def _read_opened_regular(path: Path, strict: bool = True) -> Read:
     """ファイルを開いた記述子で普通のファイルと確かめてから読む。FIFO は開く段階で待たない（`O_NONBLOCK`）。
 
     `strict` なら、親のディレクトリとファイルのどちらもリンクをたどらない（候補のディレクトリの中の項目）。偽なら、利用者の
@@ -185,12 +185,12 @@ RECORD_KEYS = {SOURCE_NAME: frozenset({"target", "base", "written"}), DISCARD_NA
 
 
 def raw_record(path: Path) -> Optional[Read]:
-    """記録を、親のディレクトリと記録のどちらもリンクをたどらずに開き、開いた記述子で普通のファイルと確かめてから読む（`_read_regular`）。
+    """記録を、親のディレクトリと記録のどちらもリンクをたどらずに開き、開いた記述子で普通のファイルと確かめてから読む（`_read_opened_regular`）。
 
     無い・読めない・普通のファイルでない・読む間に変わった記録は None。FIFO は開く段階で待たない。
     """
     try:
-        return _read_regular(path)
+        return _read_opened_regular(path)
     except OSError:  # noqa: NDF401 ファイル: 無い・読めない記録は「記録が無い」と同じに扱い、所有の確かめで外す
         return None
 
