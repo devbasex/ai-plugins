@@ -27,6 +27,7 @@ from typing import Any, NamedTuple
 
 from ndf import identity
 from ndf.core.branch_strategy import TRAILER_HEAD, TRAILER_PR
+from ndf.core.production_merge import DELIVERIES
 
 _NS = identity.FIXED_WORDS["workflow_namespace"]
 # リリース記録のマーカーと、リリース後テストの記録のマーカー
@@ -37,8 +38,6 @@ CORRECTION_MARK = f"<!-- {_NS}:release-targets-correction -->"
 OBSERVED = "observed"
 # 値の 16 進の語と SHA の一致に要る最小の長さ（確かめ 2 と実環境の確認の両方が読む）
 SHA_PREFIX = 7
-# 設定の `release` の届け先の行のキー
-DELIVERIES = "deliveries"
 # JSON Pointer が指す値が無いこと（null の値と見分ける）
 MISSING: Any = object()
 # 組み立てがリリースのコミットへ書く、承認資料の「含む PR」の行（git のトレーラーの形。値は `#<番号>` の空白区切りか `none`）

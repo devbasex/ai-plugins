@@ -259,7 +259,7 @@ def _unversioned_result(args: argparse.Namespace, strategy: branch_strategy.Stra
         kind = "infra_wait" if exc.retry_after is not None else "unknown"
         return result.stopped(TOOL, kind, str(exc), retry_after=exc.retry_after, items=[{"kind": "comment", "url": u} for u in exc.urls])
     outputs = {
-        "release": got.record.as_json(),
+        "product_version": got.record.version,
         "included": list(got.record.included),
         "targets": list(got.record.targets if got.record.targets is not None else ()),
         "recorded": list(got.recorded),

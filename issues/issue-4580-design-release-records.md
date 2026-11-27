@@ -532,7 +532,7 @@ CD の完了を待つ配布先が複数あるときは、配布先ごとの `rec
 
 | 場面 | 使うもの | コマンドの起動 |
 | --- | --- | --- |
-| デプロイの工程で、最初の `record` が返った後 | `ndf release-steps records --pr <記録の PR> --version <値> --bodies` の出力。課題の一覧（`issues`）と `to_test` を、作業の保存先へ保存する。`to_test` の組を起動し、起動済みの組に足す | 1 回 |
+| デプロイの工程で、最初の `record` が返った後 | `ndf release-steps records --pr <記録の PR> --version <値> --bodies` の出力。`bodies` のうち書き手を信用する本文（`trusted` が真）から閉じる指定の課題を集めて課題の一覧にし（出力は課題の一覧を持たない。キーは詳細設計の `records_outputs` のとおり）、`to_test` と一緒に作業の保存先へ保存する。`to_test` の組を起動し、起動済みの組に足す | 1 回 |
 | デプロイの工程で、2 つ目以降の配布先の `record` が返った後 | その `record` の `recorded` の配布先と、保存した課題の一覧の組から、起動済みの組を差し引いたもの。残った組を起動し、起動済みの組に足す | 0 回 |
 | リリース後テストの工程の始め | `ndf release-steps records --pr <記録の PR> --version <値> --issues <保存した課題>` の出力の `to_test`。`--issues` を渡すと、含めた PR の本文を読まない | 1 回 |
 | 実行が止まって再開した後 | 保存した課題の一覧があれば `--issues`、無ければ `--bodies` で `records` を打ち、`to_test` を引き直す。`record` の書き込みの直後に止まると、打ち直しではその配布先が `kept` になり、`recorded` には入らないためである。`to_test` の組は、前の担当を待たずに起動する。起動済みの組は、`to_test` で引き直した組で置き換える | 1 回 |

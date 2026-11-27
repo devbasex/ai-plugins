@@ -82,5 +82,48 @@
         ]
       }
     }
+  },
+  "$defs": {
+    "records_outputs": {
+      "description": "release-steps records の --version・--release・--unit・--bodies・--issues・--pr-body-only を渡した読み取りの outputs の形。書き手（cmd_records）と読み手（records close-check --records の _records_view）が同じこの定義を使う。各キーの型は結果のコントラクト（result.schema.json の $defs/outputs）が持つ（#4580）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "selection",
+        "release",
+        "releases",
+        "targets",
+        "verifications",
+        "bodies",
+        "to_test"
+      ],
+      "properties": {
+        "command": {
+          "const": "records"
+        },
+        "selection": {
+          "$ref": "schemas/result.schema.json#/$defs/outputs/properties/selection"
+        },
+        "release": {
+          "$ref": "schemas/result.schema.json#/$defs/outputs/properties/release"
+        },
+        "releases": {
+          "$ref": "schemas/result.schema.json#/$defs/outputs/properties/releases"
+        },
+        "targets": {
+          "$ref": "schemas/result.schema.json#/$defs/outputs/properties/targets"
+        },
+        "verifications": {
+          "$ref": "schemas/result.schema.json#/$defs/outputs/properties/verifications"
+        },
+        "bodies": {
+          "$ref": "schemas/result.schema.json#/$defs/outputs/properties/bodies"
+        },
+        "to_test": {
+          "$ref": "schemas/result.schema.json#/$defs/outputs/properties/to_test"
+        }
+      }
+    }
   }
 }

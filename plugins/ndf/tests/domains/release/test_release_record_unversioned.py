@@ -489,7 +489,7 @@ def test_cmd_record_ends_as_the_table_says(monkeypatch, tmp_path: Path, outcome:
     got = release_cli.cmd_record(args)
     assert got["status"] == status and (kind is None or got["cause"]["kind"] == kind)
     assert result.errors(got) == []
-    assert got["outputs"]["release"]["version"] == VALUE and got["outputs"]["pending"] == outcome.pending
+    assert got["outputs"]["product_version"] == VALUE and "release" not in got["outputs"] and got["outputs"]["pending"] == outcome.pending
     reasons = {i["name"]: i["reason"] for i in got["items"] if i["kind"] == "delivery"}
     assert reasons == {**outcome.failed, **outcome.pending}
 

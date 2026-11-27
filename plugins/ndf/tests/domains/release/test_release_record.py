@@ -575,6 +575,20 @@ def test_read_release_takes_the_given_value_and_unit_and_counts_a_duplicate_once
     assert got["selection"] == {"version": "main abc1234", "release": None, "unit": "a"} and got["command"] == "records"
 
 
+RECORDS_OUTPUTS = "schemas/io/release-steps.result.schema.json#/$defs/records_outputs"
+
+
+def test_records_outputs_match_the_one_definition_the_reader_checks() -> None:
+    """書き手（`read_release`・`pr_body_only`）の outputs は、`close-check --records` が確かめる `$defs.records_outputs` に合う。"""
+    from ndf import contracts
+
+    hub = _records_hub(_rec("octocat", _unversioned()))
+    hub.bodies_of = {n: Authored("octocat", "OWNER", "Closes #3") for n in (11, 12)}
+    for got in (_read(hub, bodies=True), _read(hub, version="main def5678"), record.pr_body_only(hub, 11)):
+        assert contracts.schema_errors(got, RECORDS_OUTPUTS) == []
+    assert contracts.schema_errors({**_read(hub), "command": "read"}, RECORDS_OUTPUTS) != []
+
+
 def test_read_release_keeps_the_authoritative_record_and_skips_writers_of_other_releases() -> None:
     right, wrong = _unversioned(), _unversioned(environments=(WORKER,), targets=(WORKER,))
     other = _unversioned(version="main def5678", commit=Y)

@@ -125,7 +125,7 @@
         "admin": {"type": "boolean", "description": "release-steps merge: 管理者の迂回でマージしたか"},
         "admin_record": {"type": "string", "minLength": 1, "description": "release-steps merge: 迂回の記録のコメントの URL"},
         "included": {"type": "array", "items": {"type": "integer", "minimum": 1}, "description": "release-steps record: リリース記録に含めた PR"},
-        "release": {"type": ["object", "null"], "description": "release-steps records: 最新のリリース記録。--version・--release・--unit などを渡せば閉じる判定に使う代表の記録（無ければ null）。release-steps record --version: 届け先を持たない代表の記録（#4580）"},
+        "release": {"type": ["object", "null"], "description": "release-steps records: 最新のリリース記録。--version・--release・--unit などを渡せば閉じる判定に使う代表の記録（無ければ null）。records close-check --records: 反映がそろったか（complete・missing・unconfirmed。#4580）"},
         "recorded": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "release-steps record --version: この呼び出しが反映を確かめて記録を書いた届け先（#4580）"},
         "kept": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "release-steps record --version: 同じ値・正の一覧の記録が含めた PR のすべてに既にあった届け先（#4580）"},
         "failed": {"type": "object", "additionalProperties": {"type": "string"}, "description": "release-steps record --version: CD の結果が失敗して書かなかった届け先 → 理由（#4580）"},
