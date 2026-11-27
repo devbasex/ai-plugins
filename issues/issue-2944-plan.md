@@ -62,6 +62,7 @@
 - **変更内容:** 詳細設計の「cross-review と相手役」。`codex exec --json` を実際に打ち、使用量の欄の内訳（`cached_input_tokens` が `input_tokens` の内数か）、利用上限とサンドボックスの失敗の検出を確かめる
 - **満たす受け入れ条件:** 3・4・13・15・16
 - **B1b のレビューで持ち越した項目:** 割り付けの「費用を計算できないモデルの単位があれば均等に抽選する」判定（`adapters/model_choice.py` の `_has_unpriced`）は、単価表がまだ無いので、記録したモデルが今の単価表に載っているかを見ていない。単価表（`contracts/data/codex-prices.json`）を足すこのタスクで、載ったモデルの `unpriced` の行を数えないようにする（[allocation の「割り付けの流れ」](./issue-2944-design-allocation.md#割り付けの流れ)の条件）
+- **B1b で決めた出現率ファイルの形式:** 月の掃除・保存先全体の片付け・回収は、内部データの種類 `launch-weights` のスキーマ（`contracts/schemas/internal/launch-weights.schema.json`）に合う出現率ファイルだけを変える。B2 の出現率の計算は、このスキーマで確かめてから書き出す（`internal.write_record("launch-weights", ...)`）。項目に欄を足すときはスキーマに足す。足さずに書くと、掃除と回収がそのファイルを利用者のものとみなして変えなくなる（[allocation の「出現率ファイルの形式」](./issue-2944-design-allocation.md#実験の記録と出現率)）
 - **進め方:** 実際の出力を見本にしてテストを先に書く
 
 ### Task 7: 委譲の起動にモデルと effort の選択を足す
