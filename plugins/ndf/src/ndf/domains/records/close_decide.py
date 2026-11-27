@@ -32,10 +32,27 @@ def _rows_of(issue: int, verification: Iterable[Mapping[str, Any]]) -> list[Mapp
     return [r for r in verification if r.get("number") == issue]
 
 
+class _Outcomes(NamedTuple):
+    """課題の行の、すべて合格か・failed の行・not_run の行。"""
+
+    passed: bool
+    failed: list[Mapping[str, Any]]
+    not_run: list[Mapping[str, Any]]
+
+
+def _outcomes(mine: list[Mapping[str, Any]]) -> _Outcomes:
+    """その課題に絞り込み済みの行から、合格の判定と failed・not_run の行。"""
+    return _Outcomes(
+        passed=bool(mine) and all(r.get("result") == "passed" for r in mine),
+        failed=[r for r in mine if r.get("result") == "failed"],
+        not_run=[r for r in mine if r.get("result") == "not_run"],
+    )
+
+
 def _rows_with(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], outcome: str) -> list[Mapping[str, Any]]:
     if verification is None:
         return []
-    return [r for r in _rows_of(issue, verification) if r.get("result") == outcome]
+    return getattr(_outcomes(_rows_of(issue, verification)), outcome)
 
 
 def blocking_rows(issue: int, verification: Optional[Iterable[Mapping[str, Any]]]) -> list[Mapping[str, Any]]:
@@ -57,12 +74,6 @@ class Verdict(NamedTuple):
     release: Optional[dict[str, Any]] = None
 
 
-def _all_passed(issue: int, rows: list[Mapping[str, Any]]) -> bool:
-    """記録にその課題の行があり、すべて合格か。"""
-    mine = _rows_of(issue, rows)
-    return bool(mine) and all(r.get("result") == "passed" for r in mine)
-
-
 def verdict(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], enforced: bool) -> Verdict:
     """課題を閉じてよいかと理由。`enforced` は記録を求める（記録が無ければ閉じない）。
 
@@ -72,15 +83,12 @@ def verdict(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], enf
         if enforced:
             return Verdict(KEEP, "リリース後テストの記録が無い", False)
         return Verdict(CLOSE, "リリース後テストの記録が無い（条件 2 を見ない）", False)
-    mine = _rows_of(issue, verification)
-    verified = bool(mine) and all(r.get("result") == "passed" for r in mine)
-    bad = [r for r in mine if r.get("result") == "failed"]
-    if bad:
-        return Verdict(KEEP, f"リリース後テストに不合格の行が {len(bad)} 件ある", verified)
-    waiting = [r for r in mine if r.get("result") == "not_run"]
-    if waiting:
-        return Verdict(ASK, f"保留（not_run）の行が {len(waiting)} 件ある。閉じるかを人が決める", verified)
-    return Verdict(CLOSE, "リリース後テストに不合格と保留の行が無い", verified)
+    got = _outcomes(_rows_of(issue, verification))
+    if got.failed:
+        return Verdict(KEEP, f"リリース後テストに不合格の行が {len(got.failed)} 件ある", got.passed)
+    if got.not_run:
+        return Verdict(ASK, f"保留（not_run）の行が {len(got.not_run)} 件ある。閉じるかを人が決める", got.passed)
+    return Verdict(CLOSE, "リリース後テストに不合格と保留の行が無い", got.passed)
 
 
 def _last_check(view: Mapping[str, Any], rep: Mapping[str, Any]) -> Optional[list[Mapping[str, Any]]]:
