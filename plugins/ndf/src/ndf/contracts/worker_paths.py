@@ -48,6 +48,7 @@ __all__ = [
     "NAME_RE",
     "NameInvalid",
     "Origin",
+    "OutsideHeldDir",
     "PROMPT_SUFFIX",
     "REPORT_SUFFIX",
     "RESULT_SUFFIX",
@@ -64,6 +65,7 @@ __all__ = [
     "entry_state",
     "held_dir",
     "held_dir_id",
+    "held_target",
     "names_a_directory",
     "open_lock",
     "open_or_create",
@@ -169,6 +171,31 @@ def names_a_directory(raw: str) -> bool:
         if sep:
             last = last.rsplit(sep, 1)[-1]
     return last in ("", ".", "..")
+
+
+class OutsideHeldDir(EntryError):
+    """書き先が、`ndf worker run` が渡した結果の保存先（`--result-file` の親）の配下のファイルでない。"""
+
+
+def held_target(raw: str) -> Optional[tuple[Path, tuple[str, ...]]]:
+    """`ndf worker write --path` の書き先を、結果の保存先と、そこからの相対の要素に分ける。worker の外（`held_dir` が無い）なら None。
+
+    ディレクトリを指す形（末尾の `/`・`/.`。`Path` はこれを落とすので生の文字列で見る）・`..` を含む・保存先の外・保存先
+    そのものは `OutsideHeldDir`。保存先は祖先のリンクを解いたパスで渡る（`ndf worker run` の `_result_dir`）ので、解く前の
+    パスで書かれたときだけ親を解いて比べる。書くときは保存先の記述子から 1 要素ずつたどる（呼び出し側）。
+    """
+    held = held_dir()
+    if held is None:
+        return None
+    base = held[0]
+    if names_a_directory(raw):
+        raise OutsideHeldDir(f"{raw} はディレクトリを指す（ファイルのパスを渡す）")
+    path = Path(raw).absolute()
+    if ".." not in path.parts and not path.is_relative_to(base):
+        path = Path(os.path.realpath(path.parent)) / path.name
+    if ".." in path.parts or not path.is_relative_to(base) or path == base:
+        raise OutsideHeldDir(f"{raw} は結果の保存先 {base}（ndf worker run --result-file の親）の配下のファイルでない")
+    return base, path.relative_to(base).parts
 
 
 def _check_worker_name(name: str) -> None:

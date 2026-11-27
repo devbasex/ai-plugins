@@ -592,3 +592,16 @@ def test_write_checks_the_result_dir_before_a_file_in_a_subdir(tmp_path, capsys,
         assert material.read_text(encoding="utf-8") == "前\n"
     else:
         assert code == 0 and material.read_text(encoding="utf-8") == "後\n"
+
+
+@pytest.mark.parametrize("tail", ["/", "/."])
+def test_write_refuses_a_path_that_names_a_directory(tmp_path, capsys, monkeypatch, tail):
+    # PR 4591 の r1-2: 末尾の `/`・`/.` は `Path` が落とすので、生の引数で拒み、同名のファイルを上書きしない
+    state = tmp_path / "state"
+    state.mkdir()
+    material = state / "material.md"
+    material.write_text("前\n", encoding="utf-8")
+    _hold(monkeypatch, state)
+    monkeypatch.setattr("sys.stdin", io.StringIO("後\n"))
+    code, out = _run(capsys, "write", "--path", str(material) + tail)
+    assert _invalid(code, out) and material.read_text(encoding="utf-8") == "前\n"

@@ -463,7 +463,7 @@
 | `ndf worker plan-edits` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意） |
 | `ndf worker prepare` | `--dir`（string・必須）<br>`--name`（string・必須） |
 | `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--timeout`（number・任意）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意） |
-| `ndf worker write` | `--path`（string・必須）: `ndf worker run` で起動された worker の中で使う。その起動に渡された結果の保存先の配下のファイルを指定する。本文は標準入力に渡し、全文を置き換える |
+| `ndf worker write` | `--path`（string・必須）: `ndf worker run` が起動した worker の中で使う。`ndf worker run --result-file` に指定したファイルの親ディレクトリを基準に、その配下のファイルを指定する（`--state-dir` は基準にならない）。本文は標準入力に渡し、全文を置き換える |
 
 結果の `metrics`: `attempts`（integer）・`attention`（integer）・`edits`（integer）・`expectation_search`（object か null）・`paths`（object）・`report`（string）。`items` の要素: `action`（string）・`at`（—）・`backup`（string）・`diff`（string か null）・`kind`（string）・`path`（string）・`plan`（string か null）・`reason`（string か null）・`result_file`（string）・`session`（string か null）・`sha`（string）・`state`（string）・`subject`（string）・`text`（—）・`words`（array of string）
 

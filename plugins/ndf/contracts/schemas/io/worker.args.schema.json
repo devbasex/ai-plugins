@@ -229,7 +229,7 @@
         },
         "--path": {
           "type": "string",
-          "description": "`ndf worker run` で起動された worker の中で使う。その起動に渡された結果の保存先の配下のファイルを指定する。本文は標準入力に渡し、全文を置き換える"
+          "description": "`ndf worker run` が起動した worker の中で使う。`ndf worker run --result-file` に指定したファイルの親ディレクトリを基準に、その配下のファイルを指定する（`--state-dir` は基準にならない）。本文は標準入力に渡し、全文を置き換える"
         }
       },
       "required": [

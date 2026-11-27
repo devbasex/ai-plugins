@@ -587,6 +587,7 @@ def held_dir() -> Optional[tuple[Path, tuple[int, int]]]:
     """`ndf worker run` が渡した結果の保存先（`identity.WORKER_RESULT_DIR_ENV`）のパスと `(st_dev, st_ino)`。
 
     worker の外か、値の形が違えば None。保存先の配下だけを書く手（`ndf worker write`）は、None なら書かずに止める。
+    この値は呼び出し元が変えられるので、開いた場所との一致を確かめるのに使い、`ndf worker run` が起動したプロセスだという証明には使わない。
     """
     raw = os.environ.get(identity.WORKER_RESULT_DIR_ENV, "")
     dev, _, rest = raw.partition(":")
