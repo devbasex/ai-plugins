@@ -607,11 +607,23 @@ def test_shared_prefix_is_computed_once_and_redone_for_another_commit(tmp_path: 
     record_unversioned.shared_prefix(share, PROD, "f" * 40, lambda: compute("f" * 40))
     assert calls == [COMMIT, "f" * 40]
     path = repo.common / "ndf" / "release-record" / f"{PROD}.json"
-    path.write_text("{", encoding="utf-8")
-    record_unversioned.shared_prefix(share, PROD, COMMIT, compute)
-    assert calls[-1] == COMMIT and len(calls) == 3
+    assert not list(path.parent.glob("*.ndf-tmp"))
     record_unversioned.sweep_shares(share, 60, now=lambda: path.stat().st_mtime + 61)
     assert not path.exists()
+
+
+def test_shared_prefix_keeps_a_file_it_did_not_write_and_sweeps_its_own_leftovers(tmp_path: Path) -> None:
+    share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
+    made = record_unversioned.Prefix(COMMIT, record_decide.Push(BEFORE, AFTER), None, frozenset({"a"}), frozenset())
+    share.mkdir(parents=True)
+    foreign = share / f"{PROD}.json"
+    foreign.write_text("{", encoding="utf-8")
+    leftover = share / f"{PROD}.json.abc.ndf-tmp"
+    leftover.write_text("{", encoding="utf-8")
+    assert record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: made) == made
+    record_unversioned.drop_share(share, PROD)
+    record_unversioned.sweep_shares(share, 60, now=lambda: foreign.stat().st_mtime + 61)
+    assert foreign.read_text(encoding="utf-8") == "{" and not leftover.exists()
 
 
 def _correction_hub() -> FakeHub:

@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -42,6 +44,8 @@ SHARE_LOCK = "release-record.share-lock"
 _SHARE_DIR = "release-record"
 # 保存先の JSON の `kind`。NDF が書いた保存先だけを読み、掃除する
 _SHARE_KIND = "ndf-release-record.prefix/v1"
+# 書きかけの一時ファイルの接尾辞。書き終えてから保存先へ差し替えるので、中断で残るのはこの名前のファイルだけである
+_SHARE_TMP = ".ndf-tmp"
 
 
 class Unversioned(NamedTuple):
@@ -362,16 +366,31 @@ def shared_prefix(
     """届け先ごとに並べて打った呼び出しで共有する前処理（`share` は `share_dir`）。保存先のロックを取り、反映したコミットが
     同じもの（`push` を渡せばその push のもの）があれば読み、無いか違えば `compute` で作って書く。
 
-    NDF が書いたものでないファイルが同じ名前で置かれていれば、上書きせずに `compute` の結果をそのまま返す（Value 6）。"""
+    NDF が書いたものでないファイルが同じ名前で置かれていれば、そのファイルを残し、ロックを外してから `compute` で作って
+    その呼び出しだけで使う。共有できない前処理で、並べて打った呼び出しを待たせないためである（Value 5・6）。"""
     path = _share_path(share, number)
     path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(path) + ".lock", timeout=limits.seconds(SHARE_LOCK)):
         got = _read_share(path, commit, push)
-        if got is None:
+        if got is not None:
+            return got
+        if not path.exists() or _ours(path) is not None:
             got = compute()
-            if not path.exists() or _ours(path) is not None:
-                path.write_text(json.dumps(got.as_json(), ensure_ascii=False), encoding="utf-8")
-    return got
+            _publish(path, got)
+            return got
+    return compute()
+
+
+def _publish(path: Path, got: Prefix) -> None:
+    """前処理を同じディレクトリの一時ファイルに書き終えてから `path` へ差し替える。中断しても `path` が書きかけにならない。"""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=_SHARE_TMP)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(json.dumps(got.as_json(), ensure_ascii=False))
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def drop_share(share: Path, number: int) -> None:
@@ -395,10 +414,22 @@ def _drop_stale(path: Path, older_than: float, now: Callable[[], float]) -> None
         return
 
 
+def _drop_stale_tmp(path: Path, older_than: float, now: Callable[[], float]) -> None:
+    """中断で残った NDF の書きかけの一時ファイル `path` を、作ってから `older_than` 秒より長く経っていれば消す。"""
+    try:
+        if now() - path.stat().st_mtime > older_than:
+            path.unlink(missing_ok=True)
+    except OSError:  # noqa: NDF401 ファイル: 消えた一時ファイルは残す
+        return
+
+
 def sweep_shares(share: Path, older_than: float, now: Callable[[], float] = time.time) -> None:
-    """`complete` にならずに残った保存先のうち、ロックされておらず `older_than` 秒より長く経ったものを消す。"""
+    """`complete` にならずに残った保存先と、中断で残った書きかけの一時ファイルのうち、`older_than` 秒より長く経ったものを
+    消す（保存先はロックされていないものだけ）。"""
     for path in share.glob("*.json"):
         _drop_stale(path, older_than, now)
+    for path in share.glob(f"*.json.*{_SHARE_TMP}"):
+        _drop_stale_tmp(path, older_than, now)
 
 
 def _trusted_state(hub: GitHub, number: int, version: str, commit: str, comments: Optional[Sequence[Authored]] = None) -> record.Candidates:
