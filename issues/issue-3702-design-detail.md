@@ -757,7 +757,7 @@ contracts/
 | 関数 | 定義するファイル | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `github_target` | `adapters/git.py` | 新設 | `(url: str) -> Optional[GitHubTarget]` | URL の全体が 3 つの形に合えば `repo`（`<所有者>/<リポジトリ>`）と `secret`（認証情報を含むか）。合わなければ None |
-| `Git.push_urls` | 同上 | 新設 | `(remote: str) -> list[str]` | `git remote get-url --push --all` の行 |
+| `Git.push_urls` | 同上 | 新設 | `(remote: str) -> list[str]` | `git remote get-url --push --all` の出力を LF だけで区切った値（末尾の CR は URL に残す） |
 | `Git.rewrites_again` | 同上 | 新設 | `(url: str) -> bool` | 引数に渡した URL を git が別の値に読み替えうるか |
 | `push_url` | `units_sync.py` | 新設 | `(git, repo: str, url: Optional[str] = None) -> tuple[Optional[str], list[str]]` | 下の表の「送り先の URL」の条件。通れば URL を返す。`url` を渡せば読み直さずに同じ値を確かめる |
 | `destination_errors` | 同上 | 新設 | `(git, record, context, machine_repo: str, url: Optional[str] = None) -> tuple[Optional[str], list[str]]` | 照合した URL と、送り先のリポジトリとブランチがゲートの記録とスプリントの状態に合わない点 |

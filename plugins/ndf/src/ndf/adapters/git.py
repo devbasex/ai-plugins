@@ -462,8 +462,13 @@ class Git:
         return [repo_of_url(url) for url in self.run("remote", "get-url", "--push", "--all", "--", remote).splitlines()]
 
     def push_urls(self, remote: str) -> list[str]:
-        """`git push <remote>` の送り先の URL（`pushurl`・`insteadOf`・`pushInsteadOf` を 1 回当てた値）。認証情報を含み得る。"""
-        return self.run("remote", "get-url", "--push", "--all", "--", remote).splitlines()
+        """`git push <remote>` の送り先の URL（`pushurl`・`insteadOf`・`pushInsteadOf` を 1 回当てた値）。認証情報を含み得る。
+
+        バイト列で読み、git が URL ごとに足す LF だけで区切る。テキストで読んで `splitlines` すると、URL の末尾の CR が落ちて
+        設定の値と違う URL になる。UTF-8 でないバイトは、引数に渡すと元のバイトへ戻る形で持つ。
+        """
+        out = self.run_bytes("remote", "get-url", "--push", "--all", "--", remote)
+        return [line.decode("utf-8", "surrogateescape") for line in out.split(b"\n")[:-1]]
 
     def rewrites_again(self, url: str) -> bool:
         """`url` を `git fetch`・`git push` の引数に渡すと、git が別の値に読み替えうるか。

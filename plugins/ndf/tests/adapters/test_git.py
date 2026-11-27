@@ -634,6 +634,16 @@ def test_push_urls_lists_every_push_url_after_rewriting(tmp_path: Path) -> None:
         g.push_urls("nothing")
 
 
+def test_push_urls_keeps_a_trailing_cr_so_the_url_is_refused(tmp_path: Path) -> None:
+    g = _repo_with_config(tmp_path)
+    # 末尾の CR を引用せずに書く git があるので、設定ファイルへ引用した値を直接足す
+    with (g.cwd / ".git" / "config").open("ab") as config:
+        config.write(b'[remote "origin"]\n\turl = "git@github.com:o/r.git\r"\n')
+    urls = g.push_urls("origin")
+    assert urls == ["git@github.com:o/r.git\r"]
+    assert git.github_target(urls[0]) is None
+
+
 @pytest.mark.parametrize(
     ("key", "value", "expected"),
     [
