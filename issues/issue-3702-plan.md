@@ -24,8 +24,6 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
 ### Task 1: 今の工程の並びを縛る退行テストと、単位のファイルの形・上限・設計の結果の読み手
 - **対象ファイル:**
   - `plugins/ndf/contracts/workflow/review-units.schema.json`
-  - `plugins/ndf/contracts/limits/review-units.target-lines.json`
-  - `plugins/ndf/contracts/limits/review-units.max-lines.json`
   - `plugins/ndf/contracts/schemas/project-workflow.schema.json`
   - `plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`
   - `plugins/ndf/src/ndf/core/plan/inputs_decide.py`
@@ -33,9 +31,10 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/tests/progress/test_definition.py`
 - **変更内容:**
   - 先に、今の工程の並び（モードごとの流れるステップと設計承認ゲートの位置）を縛る退行テストを足す
-  - そのあとで、次の 3 つを足す。単位のファイルのスキーマ、上限の 2 つの設定と宣言 `workflow.review_units`、「設計の結果」の表の扱いと統合先の読み手 `design_handlings`
+  - そのあとで、次の 3 つを足す。単位のファイルのスキーマ、宣言 `workflow.review_units`、「設計の結果」の表の扱いと統合先の読み手 `design_handlings`
+  - 上限の 2 つの設定（`contracts/limits/review-units.*.json`）は Task 6 で読み手 `limits_of` と一緒に足す。設定だけを先に足すと、読み手の無い上限の設定として `ndf check` の規則 `limit-readers` が落ちるためである。この単位のブランチに先に足した 2 つのファイルは消す
   - 呼び出し元の無い `design_gaps` とそのテストを消す
-- **満たす受け入れ条件:** 6
+- **満たす受け入れ条件:** 無し（条件 6 の上限の設定は Task 6 で満たす）
 - **進め方:** 退行テストは今のまま通る形で足す。ほかは失敗するテスト → 通す最小実装 → 整理
 
 ### Task 2: 実行順と確かめの規則
@@ -81,7 +80,9 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
 - **対象ファイル:**
   - `plugins/ndf/src/ndf/core/plan/units_files.py`
   - `plugins/ndf/tests/core/plan/test_units_files.py`
-- **変更内容:** 詳細設計の「単位のファイルの読み書き」の `find`・`load`・`limits_of`・`collect`・`check`・`render_tables`・`differs`（先に要る: Task 1・2）
+  - `plugins/ndf/contracts/limits/review-units.target-lines.json`
+  - `plugins/ndf/contracts/limits/review-units.max-lines.json`
+- **変更内容:** 詳細設計の「単位のファイルの読み書き」の `find`・`load`・`limits_of`・`collect`・`check`・`render_tables`・`differs`。上限の 2 つの設定（既定 400 行・1,000 行）を読み手 `limits_of` と一緒に足す（先に要る: Task 1・2）
 - **満たす受け入れ条件:** 3・4・6
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -276,15 +277,15 @@ Task 15 が使うので、番号の順でなくここに置く。
 
 ## レビューの単位
 
-見込みは追加と削除の和で、テストと生成する文書を含む。合計は約 6,500 行である。数えないパスは無い。どの単位も 1,000 行以下で、400 行を超える単位は無い。どの単位も、終えた時点で今の流れが動く。工程の並び（設計承認ゲートの位置）が新しくなるのは「工程の並びの切り替え」からである。
+見込みは追加と削除の和で、テストと生成する文書を含む。合計は約 6,500 行である。数えないパスは無い。どの単位も 1,000 行以下で、400 行を超えるのは「単位のファイルの読み書き」（410 行。上限の設定を読み手と一緒に足すため）だけである。どの単位も、終えた時点で今の流れが動く。工程の並び（設計承認ゲートの位置）が新しくなるのは「工程の並びの切り替え」からである。
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実行順 | 先に要る単位 | マージの順 | 実際の行数 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 単位の形と上限 | Task 1 | 3702:6 | 320 | 1 | 無し | 1 | |
+| 単位の形と上限 | Task 1 | 無し | 300 | 1 | 無し | 1 | |
 | 実行順と規則 | Task 2 | 3702:2・3702:3・3702:5・3702:7 | 390 | 1 | 無し | 2 | |
 | 分け方の案 | Task 3 | 3702:5・3702:7・3702:8 | 330 | 2 | 実行順と規則（案は実行順と規則の判定を使う） | 5 | |
 | レビューとマージの引数 | Task 4・5 | 3702:1 | 400 | 1 | 無し | 3 | |
-| 単位のファイルの読み書き | Task 6 | 3702:3・3702:4・3702:6 | 390 | 2 | 単位の形と上限（読み手が形・上限・設計の結果の読み手を使う）、実行順と規則（読んだファイルを判定へ渡す） | 6 | |
+| 単位のファイルの読み書き | Task 6 | 3702:3・3702:4・3702:6 | 410 | 2 | 単位の形と上限（読み手が形・上限・設計の結果の読み手を使う）、実行順と規則（読んだファイルを判定へ渡す） | 6 | |
 | 単位のコマンド | Task 7 | 3702:2・3702:3・3702:5・3702:6 | 340 | 3 | 分け方の案（check の結果に分け方の案を載せる）、単位のファイルの読み書き（コマンドが読み書きを呼ぶ）、レビューとマージの引数（コマンドの一覧の同じファイルを生成し直す） | 7 | |
 | 承認の記録 | Task 8 | 3702:1 | 380 | 3 | 単位のファイルの読み書き（記録の照合が単位のファイルの比較を使う） | 8 | |
 | ゲートと記録のつなぎ | Task 9 | 3702:1 | 400 | 4 | 承認の記録（ゲートが記録を組み、比べる） | 9 | |
