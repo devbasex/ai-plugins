@@ -1,7 +1,7 @@
-"""バージョンの無いリリース記録を届け先ごとに確かめて書く（`record --version`。#4580）。
+"""バージョンの無いリリース記録を届け先ごとに確かめて書き、対象の一覧を訂正する（`record --version`・`--correct-targets`。#4580）。
 
 手順は設計書の分けたファイル（issues/issue-4580-design-release-records.md）の「バージョンの無いリリース記録の書き方」の
-確かめ 1〜8（確かめ 0 は引数の受け口の `cli._record_args`）と書く順の手順 1〜4 のとおりである。
+確かめ 1〜8（確かめ 0 は引数の受け口の `cli._record_args`）と書く順の手順 1〜4、「対象の一覧の訂正」のとおりである。
 
 - 確かめ 1〜7 は、記録の PR・リポジトリ・push の記録だけで決まるので、CD を照会する確かめ 8 より先に行う。1〜6 のどれかに
   当たれば、どの PR にも書かずに `RecordError` で止まる
@@ -464,3 +464,36 @@ def _share_age(release: Mapping[str, Any]) -> float:
     results = [r["result"] for r in rows if isinstance(r, Mapping) and isinstance(r.get("result"), Mapping)]
     got = [float(r["timeout_seconds"]) for r in results if isinstance(r.get("timeout_seconds"), int)]
     return max(got) if got else limits.seconds(delivery_confirm.WAIT_LIMIT)
+
+
+def correct_targets(
+    hub: GitHub,
+    hands: Hands,
+    number: int,
+    production: str,
+    release: Mapping[str, Any],
+    fix: tuple[str, tuple[str, ...], str, Optional[str]],
+) -> str:
+    """`record --correct-targets`。`fix` は (値, 新しい一覧, 理由, `--production-sha`)。確かめ 1・2・6 と訂正だけの確かめを通し、
+    記録の PR へ訂正の記録を 1 件書いて、その URL を返す。"""
+    version, targets, reason, production_sha = fix
+    pull, commit = _landed_value(hub, number, production, version, production_sha)
+    holder = _record_pulls(hub, pull, production, names_decide.formats_of(release))[0]
+    state = _trusted_state(hub, holder, version, commit)
+    same = [r for r in state.valid if r.version == version and r.targets is not None]
+    if not same:
+        raise RecordError(f"記録の PR #{holder} に値 {version} の信用するリリース記録が無い。先に record --version を打つ")
+    _check_records(state, state.authoritative[version], version, commit, number)
+    if record_decide.declared_deliveries(release) is not None:
+        _refuse_declared(hands, same)
+    _require_writer(hub)
+    made = record_decide.Correction(version, commit, _target_set(targets), state.authoritative[version], reason)
+    return Publisher(hub).comment(holder, record_decide.render_correction(made)).url
+
+
+def _refuse_declared(hands: Hands, same: Sequence[record_decide.Record]) -> None:
+    """worktree に届け先の設定があるリポジトリでは、記録の push の `after` の時点に設定が無いときだけ訂正を受ける。"""
+    push = next((r.push for r in same if r.push is not None), None)
+    at = delivery_confirm.deliveries_at(hands.repo_git, push.after) if push is not None else None
+    if at is None or at.kind != delivery_confirm.ABSENT:
+        raise RecordError("push の時点に届け先の設定があり、対象の一覧は設定から決まる。--correct-targets では直せない")

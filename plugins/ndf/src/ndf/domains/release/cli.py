@@ -10,7 +10,7 @@
 | `approval-state` | 会話のセッション | `land.approval_state`（`merge` と同じ承認の条件の判定を読むだけ） |
 | `pull-checks` | 会話のセッション | `record.pinned_included` と `gather.pull_facts`（版上げの PR に含まれる各 PR の最新の CI の結果を取得し、対象の PR と検査の結果を承認資料に貼れる形で出力する） |
 | `merge` | workflow | `land`（証跡の後に、ブランチ戦略の設定の主体と方式で入れ、要ればベースブランチへ戻す PR） |
-| `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後）。`--version` は `record_unversioned.write_unversioned`（バージョンの無いリリース記録を届け先ごとに確かめて書く） |
+| `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後）。`--version` は `record_unversioned.write_unversioned`（バージョンの無いリリース記録を届け先ごとに確かめて書く）、`--correct-targets` は `record_unversioned.correct_targets` |
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く。リリースの PR なら記録を持つ PR を示して止まる） |
 | `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む）。`--version` などを渡すと `record.read_release`（閉じる手順の読み取り）、`--pr-body-only` は `record.pr_body_only` |
 | `publish` | workflow | `tagging`（タグと GitHub Release） |
@@ -218,9 +218,19 @@ def cmd_merge(args: argparse.Namespace) -> dict:
 
 def _record_args(args: argparse.Namespace, strategy: branch_strategy.Strategy) -> record_unversioned.Unversioned | None:
     """確かめ 0。`record` の引数の組。バージョンの無いリリース記録の引数なら `Unversioned`（`tip` は呼び手が埋める）、
-    今の記録（バージョン番号を持つリポジトリ）なら None。誤りは `RecordError`。"""
+    今の記録（バージョン番号を持つリポジトリ）なら None。`--correct-targets` は訂正の引数の規則で確かめて None。誤りは `RecordError`。"""
     none_store = strategy.version_store["kind"] == "none"
     declared = record_decide.declared_deliveries(strategy.section["release"]) is not None
+    if args.correct_targets:
+        if not none_store:
+            raise record.RecordError("--correct-targets はバージョンの保存先が none のリポジトリでだけ受ける")
+        if args.version is None or not args.target or not args.reason:
+            raise record.RecordError("--correct-targets には --version・--target（1 つ以上）・--reason が要る")
+        if args.environment or args.observed:
+            raise record.RecordError("--correct-targets は --environment と --observed を受けない")
+        return None
+    if args.reason is not None:
+        raise record.RecordError("--reason は --correct-targets と一緒にだけ渡す")
     if args.version is None and not args.environment and not args.target and not args.observed:
         return None
     if not none_store:
@@ -288,6 +298,10 @@ def _listed_names(names: tuple[str, ...]) -> str:
 def cmd_record(args: argparse.Namespace) -> dict:
     strategy = _strategy(args)
     given = _record_args(args, strategy)
+    if args.correct_targets:
+        fix = (args.version, tuple(args.target), args.reason, args.production_sha)
+        url = record_unversioned.correct_targets(_hub(args), _hands(args), args.pr, args.production, strategy.section["release"], fix)
+        return result.result(TOOL, result.OK, f"値 {args.version} の対象の一覧を {', '.join(sorted(set(args.target)))} へ訂正した: {url}")
     if given is not None:
         return _unversioned_result(args, strategy, given)
     formats = names_decide.formats_of(strategy.section["release"])
@@ -463,6 +477,8 @@ def _unversioned(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--observed", action="append", default=[], help="CD が未完了なら実環境の確認（設定の observe）で確かめる届け先（繰り返せる）"
     )
+    p.add_argument("--correct-targets", action="store_true", help="値の対象の一覧を --target の集合へ訂正する（--reason が要る）")
+    p.add_argument("--reason", help="対象の一覧を訂正する理由（--correct-targets と一緒に）")
 
 
 def _verification(p: argparse.ArgumentParser) -> None:

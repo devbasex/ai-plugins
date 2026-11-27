@@ -407,6 +407,8 @@ def test_release_steps_parser_current_behavior() -> None:
             ("--environment", False, [], None, None, "_AppendAction"),
             ("--target", False, [], None, None, "_AppendAction"),
             ("--observed", False, [], None, None, "_AppendAction"),
+            ("--correct-targets", False, False, None, None, "_StoreTrueAction"),
+            opt("--reason"),
         ],
         "verification-record": common + [pr, req("--record")],
         "records": common

@@ -1,4 +1,4 @@
-"""バージョンの無いリリース記録を書く（`record --version`。#4580）。
+"""バージョンの無いリリース記録を書く・対象の一覧を訂正する（`record --version`・`--correct-targets`。#4580）。
 
 GitHub と git は偽物で、並行した書き込みは偽の GitHub のコメントの順で作る。子のプロセスを起動せず、本物の時間を待たない。
 """
@@ -345,6 +345,39 @@ def test_shared_prefix_is_computed_once_and_redone_for_another_commit(tmp_path: 
     assert not path.exists()
 
 
+def _correction_hub() -> FakeHub:
+    hub = _hub()
+    _other_writer(hub, 11, _made(WEB, (WEB,)))
+    return hub
+
+
+def test_correct_targets_adds_a_correction_and_keeps_the_records(tmp_path: Path) -> None:
+    hub = _correction_hub()
+    fix = (VALUE, (WORKER, WEB), "worker を落としていた", None)
+    url = record_unversioned.correct_targets(hub, _hands(Repo(tmp_path)), PROD, "main", _release(None), fix)
+    assert url == "https://example.invalid/11"
+    bodies = [c.body for c in hub.comments(11)]
+    assert record_decide.parse_correction(bodies[-1]) == record_decide.Correction(VALUE, COMMIT, (WEB, WORKER), (WEB,), fix[2])
+    assert len(_written(hub, 11)) == 1
+    # 訂正の後は新しい一覧で打ち直せる（前の一覧の記録は正と違うので数えない）
+    got = _write(hub, Repo(tmp_path), _args(WEB, targets=(WEB, WORKER)), _release(None))
+    assert got.recorded == (WEB,) and got.missing == (WORKER,)
+
+
+def test_correct_targets_refuses_without_records_with_a_setting_or_an_untrusted_token(tmp_path: Path) -> None:
+    fix = (VALUE, (WEB,), "理由", None)
+    with pytest.raises(record.RecordError, match="先に record --version"):
+        record_unversioned.correct_targets(_hub(), _hands(Repo(tmp_path)), PROD, "main", _release(None), fix)
+    with pytest.raises(record.RecordError, match="--correct-targets では直せない"):
+        record_unversioned.correct_targets(_correction_hub(), _hands(Repo(tmp_path)), PROD, "main", _release(), fix)
+    hub = _correction_hub()
+    hub.trusted = {"octocat"}
+    hub.token_trusted = lambda: False  # type: ignore[method-assign]
+    with pytest.raises(record.RecordError, match="write 以上"):
+        record_unversioned.correct_targets(hub, _hands(Repo(tmp_path)), PROD, "main", _release(None), fix)
+    assert len(hub.comments(11)) == 1
+
+
 def _cli_args(**more: Any) -> argparse.Namespace:
     base = {
         "version": None,
@@ -365,6 +398,9 @@ def _cli_args(**more: Any) -> argparse.Namespace:
         ("web-trunk", {"version": VALUE}, "そろえて"),
         ("web-trunk", {"environment": [WEB]}, "そろえて"),
         ("web-trunk", {"version": VALUE, "environment": [WEB]}, "--target"),
+        ("web-trunk", {"correct_targets": True, "version": VALUE, "target": [WEB]}, "--reason"),
+        ("web-trunk", {"correct_targets": True, "version": VALUE, "target": [WEB], "reason": "r", "environment": [WEB]}, "受けない"),
+        ("web-trunk", {"reason": "r"}, "--correct-targets と一緒"),
     ],
 )
 def test_record_args_check_zero(kind: str, given: dict, match: str) -> None:

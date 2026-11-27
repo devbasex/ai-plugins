@@ -493,6 +493,14 @@
             "type": "string"
           },
           "description": "CD が未完了なら実環境の確認（設定の observe）で確かめる届け先（繰り返せる）"
+        },
+        "--correct-targets": {
+          "type": "boolean",
+          "description": "値の対象の一覧を --target の集合へ訂正する（--reason が要る）"
+        },
+        "--reason": {
+          "type": "string",
+          "description": "対象の一覧を訂正する理由（--correct-targets と一緒に）"
         }
       },
       "required": [
