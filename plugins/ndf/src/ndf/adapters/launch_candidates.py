@@ -368,7 +368,7 @@ def _draft_state(text: str, name: str) -> tuple[str, Optional[dict[str, int]]]:
         return ("pending", None) if "\n" not in body and DRAFT_BODY_FORM.startswith(re.sub(r"[0-9]+", "0", body)) else ("foreign", None)
     try:
         obj = json.loads(body)
-    except ValueError:  # noqa: NDF401 ファイル: 壊れた実体の行は、NDF の記録の形でない
+    except ValueError:  # ファイル: 壊れた実体の行は、NDF の記録の形でない
         return "foreign", None
     if not isinstance(obj, dict) or set(obj) != {"dev", "ino"} or not all(type(v) is int for v in obj.values()):
         return "foreign", None
@@ -402,7 +402,7 @@ def reclaim_drafts(home: Path) -> None:
         read = raw_record(record)
         try:
             text = read.data.decode("utf-8") if read is not None else None
-        except UnicodeDecodeError:  # noqa: NDF401 ファイル: 読めない記録は NDF の記録と確かめられないので消さない
+        except UnicodeDecodeError:  # ファイル: 読めない記録は NDF の記録と確かめられないので消さない
             text = None
         if text is None:
             continue
@@ -410,7 +410,7 @@ def reclaim_drafts(home: Path) -> None:
         if state == "foreign":
             continue
         if state == "pending" and _is_dir(drafting):
-            with contextlib.suppress(OSError):  # noqa: NDF401 ファイル: 中身のあるディレクトリは NDF が作ったものでないので残す
+            with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 中身のあるディレクトリは NDF が作ったものでないので残す
                 drafting.rmdir()
         if state == "made" and obj is not None and _same_dir(drafting, obj):
             _remove_draft_files(drafting)
@@ -438,12 +438,22 @@ def _same_dir(where: Path, obj: Mapping[str, Any]) -> bool:
 
 def _remove_draft_files(drafting: Path) -> None:
     """作成途中のディレクトリの中の、NDF が作る普通のファイルだけを消し、空になればディレクトリを消す。ほかの項目には触れない。"""
-    with contextlib.suppress(OSError):  # noqa: NDF401 ファイル: 消せなかった残りは、ディレクトリごと次の掃除に任せる
-        with os.scandir(drafting) as it:
-            for entry in list(it):
-                if (entry.name in DRAFT_FILES or DRAFT_TEMP.fullmatch(entry.name)) and entry.is_file(follow_symlinks=False):
-                    os.unlink(entry.path)
+    with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 消せなかった残りは、ディレクトリごと次の掃除に任せる
+        for entry in _entries(drafting):
+            if _is_draft_file(entry):
+                os.unlink(entry.path)
         drafting.rmdir()
+
+
+def _entries(where: Path) -> list[os.DirEntry[str]]:
+    """`where` の中の項目。読めなければ `OSError` を呼び手へ上げる。"""
+    with os.scandir(where) as it:
+        return list(it)
+
+
+def _is_draft_file(entry: os.DirEntry[str]) -> bool:
+    """NDF が作成途中のディレクトリに書く普通のファイル（`DRAFT_FILES` と書く途中の一時ファイル）か。リンクはたどらない。"""
+    return bool(entry.name in DRAFT_FILES or DRAFT_TEMP.fullmatch(entry.name)) and entry.is_file(follow_symlinks=False)
 
 
 def settle_aside(home: Path) -> set[str]:

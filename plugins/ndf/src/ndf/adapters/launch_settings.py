@@ -487,10 +487,10 @@ def _remove_recorded(where: Path, files: list[str]) -> None:
     """記録にあるコピー（`files`）のうち普通のファイルだけを消し、ディレクトリが空になれば消す。ほかの項目には触れない。"""
     for name in files:
         path = where / name
-        with contextlib.suppress(OSError):  # noqa: NDF401 ファイル: 消せなかったコピーは残し、ディレクトリごと次の掃除に任せる
+        with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 消せなかったコピーは残し、ディレクトリごと次の掃除に任せる
             if stat.S_ISREG(path.lstat().st_mode):
                 path.unlink()
-    with contextlib.suppress(OSError):  # noqa: NDF401 ファイル: 利用者の項目が残ったディレクトリは消さない
+    with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 利用者の項目が残ったディレクトリは消さない
         where.rmdir()
 
 

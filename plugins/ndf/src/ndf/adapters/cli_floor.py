@@ -131,7 +131,7 @@ def _version_read(
     別のスレッドが打っている間にその終わりを待ったときに真。待たずに記録を再利用したとき（記録の読み書きの錠 `_LOCK` だけを待ったときを含む）は偽。"""
     try:
         st = os.stat(path)
-    except OSError:  # noqa: NDF401 外部コマンド: 消えた実行ファイルは比べずに通し、起動の失敗は今の起動の箇所が扱う
+    except OSError:  # 外部コマンド: 消えた実行ファイルは比べずに通し、起動の失敗は今の起動の箇所が扱う
         return None, False
     key = (path, st.st_mtime_ns, st.st_size)
     with _LOCK:
