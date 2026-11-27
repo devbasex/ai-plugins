@@ -391,14 +391,14 @@ def test_an_unreadable_denied_candidate_is_left_out_and_other_drafts_continue(tm
     first, other = _worktree(tmp_path / "a"), _worktree(tmp_path / "b")
     candidate = la.new_candidate("/r", first).candidate
     _asked(first, candidate=candidate, label=la.DENY_LABEL)
-    read_bytes = Path.read_bytes
+    read_regular = la._read_regular
 
-    def denied_read(self):
-        if self == candidate:
-            raise PermissionError(13, "Permission denied", str(self))
-        return read_bytes(self)
+    def denied_read(path, strict=True):
+        if path == candidate:
+            raise PermissionError(13, "Permission denied", str(path))
+        return read_regular(path, strict)
 
-    monkeypatch.setattr(Path, "read_bytes", denied_read)
+    monkeypatch.setattr(la, "_read_regular", denied_read)
     assert la.new_candidate("/r", other).cleanup_targets == [] and la.cleanup_targets("/r") == []
     assert candidate.parent.is_dir()
 
@@ -564,3 +564,71 @@ def test_a_short_write_is_retried_as_a_whole_line_without_breaking_other_rows(tm
     monkeypatch.setattr(os, "write", short_then_other)
     la.write_row(path, {"request_id": "mine"}, locked=locked)
     assert [row["request_id"] for row in la.records.whole_rows(path)] == ["other", "mine"]
+
+
+def _matching_request(tmp_path: Path, label: str | None) -> tuple[Path, Path]:
+    """候補に依頼を作り（`label` が None なら回答待ち）、別の編集で反映先を候補と同じ中身にする。"""
+    target = _worktree(tmp_path)
+    candidate = _candidate(target)
+    _asked(target, candidate=candidate, label=label)
+    target.write_bytes(NEW)
+    return target, candidate
+
+
+@pytest.mark.parametrize("label", [None, la.APPROVE_LABEL.format("人")])
+def test_a_candidate_with_a_request_still_usable_is_neither_set_aside_nor_listed(tmp_path, label):
+    """回答待ちか承認済みで、まだ使える依頼の候補は、反映先と同じ中身でも掃除せず、人が答えた後の approve で反映を済ませられる。"""
+    target, candidate = _matching_request(tmp_path, label)
+    assert la.new_candidate("/r", target).cleanup_targets == [] and la.cleanup_targets("/r") == []
+    assert candidate.exists()
+    if label is None:
+        _answer("q1", la.APPROVE_LABEL.format("人"))
+    assert la.reflect(candidate, lambda: None, SHA, "q1")
+
+
+def test_a_candidate_whose_approval_was_revoked_after_the_request_is_swept(tmp_path):
+    """依頼の後に同じ内容を取り消した候補は、答えが使えないので、反映先と同じ中身なら片付ける。"""
+    target, candidate = _matching_request(tmp_path, la.APPROVE_LABEL.format("人"))
+    la.append("/r", SHA, la.Action.REVOKE)
+    la.new_candidate("/r", target)
+    assert not candidate.exists() and _aside(candidate).exists()
+
+
+def test_the_sweep_after_a_reflection_keeps_another_candidate_with_a_usable_approval(tmp_path):
+    """別の候補の反映で反映先が承認済みの候補と同じ中身になっても、反映の後の掃除はその候補を退避しない。"""
+    target = _worktree(tmp_path)
+    other, approved = _candidate(target), _candidate(target)
+    _asked(target, candidate=approved)
+    assert la.reflect(other, lambda: None, SHA, None)
+    assert approved.exists()
+    assert la.reflect(approved, lambda: None, SHA, "q1")
+
+
+def test_a_record_replaced_by_a_fifo_does_not_stop_draft_or_show(tmp_path):
+    """候補の source.json が書き手のいない FIFO に置き換わっていても、draft と show は待たずに続け、その候補には触れない。"""
+    target = _worktree(tmp_path)
+    candidate = la.new_candidate("/r", target).candidate
+    _asked(target, candidate=candidate, label=la.DENY_LABEL)
+    (candidate.parent / la.SOURCE_NAME).unlink()
+    os.mkfifo(candidate.parent / la.SOURCE_NAME)
+    assert la.new_candidate("/r", target).cleanup_targets == [] and la.cleanup_targets("/r") == []
+    assert candidate.exists()
+
+
+def test_a_record_replaced_by_a_fifo_after_the_ownership_check_does_not_stop_draft(tmp_path, monkeypatch):
+    """所有を確かめた直後に記録が FIFO に置き換わっても、退避の判定は確かめた時に読んだ記録を使い、開き直さない。"""
+    target = _worktree(tmp_path)
+    candidate = la.new_candidate("/r", target).candidate
+    _asked(target, candidate=candidate, label=la.DENY_LABEL)
+    ownership = la._ownership
+
+    def then_fifo(folder, known=None):
+        owned = ownership(folder, known)
+        source = folder / la.SOURCE_NAME
+        if known is None and source.is_file():
+            source.unlink()
+            os.mkfifo(source)
+        return owned
+
+    monkeypatch.setattr(la, "_ownership", then_fifo)
+    la.new_candidate("/r", target)
