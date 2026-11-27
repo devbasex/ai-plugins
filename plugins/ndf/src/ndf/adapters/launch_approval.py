@@ -367,7 +367,7 @@ def _live(history: _History, candidate: Path, now: Optional[str], current: Calla
     if index is None:
         return False
     req = history.requests.rows[index]
-    if read_launch_record(reflected_file(Path(str(req.get("target"))), DONE)).get("request_id") == req.get("request_id"):
+    if _completed_by(read_launch_record(reflected_file(Path(str(req.get("target"))), DONE)), req):
         return False
     approvals = history.approvals
     if approvals.used_row(req) is not None and approvals.approved(req.get("repo"), req.get("sha256")):
@@ -385,8 +385,7 @@ def pending_request(repo: str, target: Path) -> Optional[Mapping[str, Any]]:
     if not rows or _judged(_last_labels().get(rows[-1].get("request_id")), rows[-1])[0] != "approve":
         return None
     req = rows[-1]
-    done = read_launch_record(reflected_file(target, DONE))
-    if done.get("request_id") == req["request_id"]:
+    if _completed_by(read_launch_record(reflected_file(target, DONE)), req):
         return None
     if req.get("candidate") is None and any(r.get("request_id") == req["request_id"] for r in records.whole_rows(state_file(APPROVALS))):
         return None
@@ -638,10 +637,9 @@ def reflect(
             "candidate": candidate.parent.name,
             "base": source.get("base"),
             "content": wanted,
-            "sha256": sha256,
-            "request_id": request_id,
             "route": "answer" if request_id is not None else "terminal",
-            "confirmed": [[sha256, request_id]],  # 候補が無い打ち直しで照らす組。反映した人と経路（来歴）とは分けて足していく
+            # 承認の対象のハッシュと依頼の組は、初回の分もここだけに置く。先頭が来歴（反映した人と経路）の組で、書き換えない再実行が後ろへ足す
+            "confirmed": [[sha256, request_id]],
         }
         if now != wanted and now != source.get("base"):
             return Reflection(False, saved)
@@ -816,6 +814,18 @@ def reflected(candidate: Path, sha256: str, request_id: Optional[str], target: P
     if (rec.get("candidate"), rec.get("target")) != (candidate.parent.name, str(target)):
         return False
     return [sha256, request_id] in _confirmed_pairs(rec) and _still_placed(rec)
+
+
+def _completed_by(done: Mapping[str, Any], req: Mapping[str, Any]) -> bool:
+    """完了の記録 `done` が、依頼 `req` の候補の反映を、その依頼で済ませたものか。
+
+    候補の識別子が一致し、依頼の識別子が `confirmed` の組のどれかにあれば真。書き換えない再実行で足した組も含むので、
+    `pending_request` と掃除（`_live`）が、初回と再実行のどちらで済んだ依頼も同じ条件で処理済みとみなす。
+    """
+    candidate = req.get("candidate")
+    if candidate is None or done.get("candidate") != Path(str(candidate)).parent.name:
+        return False
+    return any(len(pair) == 2 and pair[1] == req.get("request_id") for pair in _confirmed_pairs(done))
 
 
 def _confirmed_pairs(done: Mapping[str, Any]) -> list[list[Any]]:

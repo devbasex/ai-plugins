@@ -656,9 +656,14 @@ def test_a_rerun_without_rewriting_keeps_who_rewrote_the_target(tmp_path):
     candidate.parent.mkdir(parents=True, exist_ok=True)
     candidate.write_bytes(data)  # 候補を退避できない環境と同じく、候補が残っている
     lc.write_launch_record(candidate.parent / lc.SOURCE_NAME, {"target": str(target), "base": None, "written": None})
+    _asked(target, "q9", candidate)
+    assert la.pending_request("/r", target)["request_id"] == "q9"
     assert _reflect(candidate, lambda: "別の人", SHA, "q9")
     done = la.read_launch_record(la.reflected_file(target, la.DONE))
     assert (done["approver"], done["route"]) == ("人", "terminal")
+    # 組は初回の分も confirmed だけに置き、書き換えない再実行で済ませた依頼も処理済みとして案内しない
+    assert done["confirmed"] == [[SHA, None], [SHA, "q9"]] and "request_id" not in done and "sha256" not in done
+    assert la.pending_request("/r", target) is None
     # 候補を片付けた後の打ち直しは、最初の反映の組でも、後から成功した再実行の組でも反映済みとして通す
     assert la.reflected(candidate, SHA, None, target) and la.reflected(candidate, SHA, "q9", target)
     assert not la.reflected(candidate, SHA, "q8", target)
