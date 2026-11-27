@@ -188,10 +188,10 @@ def refusal_kind(after: Pull, sent_sha: str) -> str:
 
 @dataclass(frozen=True)
 class _MergeRoute:
-    """マージの要求の打ち方。`send` が要求を打ち、`refused` が真とみなした誤りは断られたとして扱う。`how` は成功の文に
+    """マージの要求の打ち方。`send` が要求を打ってマージコミット（応答に無ければ空）を返し、`refused` が真とみなした誤りは断られたとして扱う。`how` は成功の文に
     添える迂回のマーカー。`require_method` が真なら、キューの方式が選んだ方式と違うときキューへ入れずに断る。"""
 
-    send: Callable[[int, "Pull", str], None]
+    send: Callable[[int, "Pull", str], str]
     refused: Callable[["GitHubError"], bool]
     how: str
     require_method: bool = False
@@ -760,13 +760,18 @@ class GitHub:
         """
         return self._merge_with(number, expect_head, method, _MergeRoute(self._send_admin_merge, _refused_by_graphql, "管理者の迂回で"))
 
-    def _send_rest_merge(self, number: int, pull: Pull, chosen: str) -> None:
-        self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
+    def _send_rest_merge(self, number: int, pull: Pull, chosen: str) -> str:
+        body = self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
+        return text_of(body.get("sha")) if isinstance(body, dict) else ""
 
-    def _send_admin_merge(self, number: int, pull: Pull, chosen: str) -> None:
+    def _send_admin_merge(self, number: int, pull: Pull, chosen: str) -> str:
         node = self.repository(github_merge.PULL_ID_QUERY, {"number": int(number)})["pullRequest"]
         variables = {"id": text_of(node["id"]), "head": pull.head_sha, "method": github_merge.GRAPHQL_MERGE_METHODS[chosen]}
-        self.graphql(github_merge.ADMIN_MERGE_MUTATION, variables)
+        data = self.graphql(github_merge.ADMIN_MERGE_MUTATION, variables)
+        payload = data.get("mergePullRequest")
+        merged = payload.get("pullRequest") if isinstance(payload, dict) else None
+        commit = merged.get("mergeCommit") if isinstance(merged, dict) else None
+        return text_of(commit.get("oid")) if isinstance(commit, dict) else ""
 
     def _merge_with(
         self, number: int, expect_head: Optional[str], method: Optional[str], route: "_MergeRoute", expect: Optional[MergeExpect] = None
@@ -788,7 +793,7 @@ class GitHub:
             if stop is not None:
                 return stop
         try:
-            route.send(number, pull, chosen)
+            landed = route.send(number, pull, chosen)
         except GitHubError as exc:
             if not route.refused(exc):
                 raise
@@ -798,7 +803,7 @@ class GitHub:
                 return queued
             after = self.pull(number)
             return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
-        return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha)
+        return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha, landed)
 
     def _enqueue(
         self, pull: Pull, method: Optional[str], jump: bool = False, expect: Optional[MergeExpect] = None

@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import sprint_fixture
 import strategy_fixture
 
 from ndf.contracts import result, worker_kinds
@@ -56,6 +57,7 @@ def sprint(repo, monkeypatch):
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
     subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "集めた"], cwd=repo, check=True)
     gathered = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    sprint_fixture.with_remote(repo)
     return _sprint(repo, monkeypatch, gathered)
 
 

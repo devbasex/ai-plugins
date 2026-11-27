@@ -46,7 +46,7 @@ from ndf.core import durable, production_merge, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, issue_values, merge_pending, model, plan_runs, rebuild_values, refactor_values, stages
+from ndf.progress import definition, issue_values, merge_pending, model, plan_runs, rebuild_values, refactor_values, stages, units_invoke
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.progress.plan_runs import StageResult, StageRun
 from ndf.testing import scoped, weight
@@ -577,12 +577,18 @@ class PreparedPlan(NamedTuple):
     local_tests: bool
 
 
-def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
+def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> Optional[PreparedPlan]:
     """プランの差し込みを 1 回だけ組み、作業ごとの入力と作業場所を確かめて `values.json` に残す（#3908 の決定 2・4）。
 
     設定は 1 回だけ読み、差し込みは `template_values` で組む。決まらなければ `TemplateValuesMissing`、`{{worker}}` の作業が読む
     入力か作業場所が決まらなければ `KindInputsMissing` を上げ、どちらも `values.json` を書かない。テンプレートが無ければ `model.Refused`。
+    単位ごとに流す工程（`per_unit`）は開始前の確かめ（`units_invoke.prepare`）を行い、単位の経路なら None（単位ごとの値は
+    単位を流すときに組む）、これまでの経路なら単位に分けない呼び出し（`StageRun.plain`）で組む（#4369）。
     """
+    if run.per_unit:
+        if units_invoke.prepare(run, work_dir, cwd) is not None:
+            return None
+        run = run.plain()
     t = _template_of(run)
     if t is None:
         raise model.Refused(f"プランのテンプレート {run.name} が無い")
@@ -607,7 +613,9 @@ def _prepared(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
     t, held = _template_of(run), read_values(work_dir)
     if t is not None and held is not None and held["plan"] == run.name:
         return PreparedPlan(t, held["values"], held["local_tests"])
-    return prepare_plan(run, work_dir, cwd)
+    prepared = prepare_plan(run, work_dir, cwd)
+    assert prepared is not None  # 単位に分けない呼び出し（`invoke` が `plain` にしたもの）だけがここへ来る
+    return prepared
 
 
 def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
@@ -775,7 +783,8 @@ def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
     """
     if isinstance(exc, plan_runs.UnitsStopped):
         # 工程のステートマシンは `cause` だけを残すので、理由は `detail` の文に持たせる（#4369）
-        return result.stopped(PLAN, exc.kind, f"プラン {name} を単位ごとに流せない: {exc.detail}", items=exc.items)
+        detail = f"プラン {name} を単位ごとに流せない: {exc.detail}"
+        return result.stopped(PLAN, exc.kind, detail, retry_after=exc.retry_after, items=exc.items)
     if isinstance(exc, (TemplateValuesMissing, KindInputsMissing)):
         detail = f"プラン {name} の差し込み {', '.join(exc.missing)} を決められない"
         return result.stopped(PLAN, "precondition", detail, items=exc.items)
@@ -889,6 +898,11 @@ def invoke(
     `runner` は plan・script の子プロセスを、`call_claude` は skill の `claude -p` を打つ。skill と script は、入力に
     作業場所（`worktree`）があればそこで打つ（プランは埋めたプランの作業場所で受ける）。
     """
+    if run.kind == PLAN and run.per_unit:
+        units = _units_stage(run, cwd, work_dir, runner)
+        if units is not None:
+            return units
+        run = run.plain()
     if run.kind == PLAN:
         return _call_plan(run, cwd, work_dir, answer, runner)
     if run.kind not in (SCRIPT, SKILL):
@@ -899,6 +913,21 @@ def invoke(
     if run.kind == SCRIPT:
         return _call_script(run, location, runner)
     return _call_skill(run, location, call_claude)
+
+
+def _units_stage(run: StageRun, cwd: Path, work_dir: Path, runner: Runner) -> Optional[StageResult]:
+    """単位ごとに流す工程を `units_invoke.run_stage` で流した結果。これまでの経路なら None（#4369）。
+
+    単位のプランは単位の作業場所で組んで流し（`_call_plan`）、コマンドは `runner` で打つ。組めない例外は `plan_failure` が分ける。
+    """
+    ports = units_invoke.Ports(lambda r, wd: _call_plan(r, work_location(r, cwd), wd, None, runner), runner)
+    try:
+        return units_invoke.run_stage(run, work_dir, cwd, ports)
+    except PLAN_FAILURES as exc:
+        failed = plan_failure(run.name, exc)
+        if failed is None:
+            raise
+        return StageResult(failed, {})
 
 
 def work_location(run: StageRun, cwd: Path) -> Path:
