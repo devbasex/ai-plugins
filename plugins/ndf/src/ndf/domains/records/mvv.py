@@ -542,9 +542,10 @@ def record_key(text: str) -> str:
     """cross-review の指摘の本文 `text` を見分ける値。起動をまたいで同じ指摘に同じ値になる。
 
     秘密を伏せてから、空白と大文字小文字の違いを除いて切り詰めた本文の SHA-256 にする。順を逆にすると、小文字にした秘密や切り詰めで
-    分かれた秘密が伏せられずに残る。
+    分かれた秘密が伏せられずに残る。後から書き足した別の報告（`md.REVIEW_ALSO` より後）は値に入れない（#4363）。
     """
-    return _sha256(oscillation.finding_key(str(run_log.redact(text))).encode("utf-8"))
+    base = text.split(md.REVIEW_ALSO, 1)[0]
+    return _sha256(oscillation.finding_key(str(run_log.redact(base))).encode("utf-8"))
 
 
 class ReviewTarget(NamedTuple):

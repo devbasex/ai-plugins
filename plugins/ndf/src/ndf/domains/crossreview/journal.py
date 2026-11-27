@@ -17,7 +17,7 @@ from ndf.domains.crossreview import criteria_decide, prior_decide, store, verify
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, UNPINNED
 from ndf.domains.records import jsonl
-from ndf.domains.records.mvv_decide import DEFERS, REVIEW_DEFER, REVIEW_FIXED_AT, State
+from ndf.domains.records.mvv_decide import DEFERS, REVIEW_ALSO, REVIEW_DEFER, REVIEW_FIXED_AT, State
 
 
 def _text(value: object) -> Optional[str]:
@@ -50,7 +50,7 @@ FIXER_REASON = "fixer_reason"
 # 根拠の記述の誤りの指摘が、次の確かめで同じ誤りかを見分ける欄（`citation_key`）
 CITATION_KEY = "citation_key"
 # 指摘の本文の後ろへ別の報告を書き足すときの区切り。照合キーはこの区切りより前の本文で作る（#4363）
-ALSO = " ／ 同じ指摘の別の報告: "
+ALSO = REVIEW_ALSO
 
 
 def new_occurrence() -> str:
@@ -297,19 +297,30 @@ def _basis(item: Mapping[str, Any], items: Sequence[str]) -> int:
 
 
 def _add_report(row: dict[str, Any], item: Mapping[str, Any]) -> None:
-    """指摘の本文の後ろに、別の報告 `item` の本文・位置・起きることの 1 文を書き足す（行と同じ本文と位置の報告と、書き足し済みの
+    """指摘の本文の後ろに、別の報告 `item` の本文・位置（パスと行、見出し）・起きることの 1 文を書き足す（行と同じ本文と位置の報告と、書き足し済みの
     報告は足さない。起きることの 1 文が行と違う報告は足す）。欄を分けず本文に足すのは、修正担当・判定役・承認資料・記録のコメントがどれも本文を読み、公開の前の伏せ字も
     本文に掛かるためである。#4363"""
     new = _raised(dict(item))
     text = str(item["text"]).strip()
-    path, line = new.get("path"), new.get("line")
-    same_place = (text, path, line) == (row["text"].split(ALSO)[0], row.get("path"), row.get("line"))
+    path, line, section = new.get("path"), new.get("line"), _text(item.get("section"))
+    same_place = (text, path, line, section) == (row["text"].split(ALSO)[0], row.get("path"), row.get("line"), row.get("section"))
     if same_place and new.get("impact") in (None, row.get("impact")):
         return
-    place = f"{path}:{line}" if path and line else path or _text(item.get("section"))
+    place = "、".join(p for p in (f"{path}:{line}" if path and line else path, section) if p)
     added = ALSO + text + (f"（{place}）" if place else "") + criteria_decide.fixer_impact(new)
     if added not in row["text"]:
         row["text"] += added
+
+
+def _merge_reports(row: dict[str, Any], text: object) -> bool:
+    """前の実行が残した本文 `text` に書き足された別の報告のうち、行に無いものを足し、足したら真。同じ指摘のスレッドは投稿した後に
+    書き換わらないので、書き足しは記録のコメントから届く。#4363"""
+    added = False
+    for part in text.split(ALSO)[1:] if isinstance(text, str) else ():
+        if ALSO + part not in row["text"]:
+            row["text"] += ALSO + part
+            added = True
+    return added
 
 
 def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]], items: Sequence[str]) -> bool:
@@ -588,21 +599,22 @@ class FindingJournal:
     def merge_marks(
         self, fid: str, marks: Mapping[str, Any], items: Sequence[str], mvv: Optional[str], place: Optional[Mapping[str, Any]] = None
     ) -> bool:
-        """前の実行が残した保護の種類（`marks` の `protect`）と、MVV の判定のうち今回と同じ MVV `mvv` でのものを、既にある指摘
-        `fid` に重ねる。変わったら真。保護の種類は MVV によらず重ねる。
+        """前の実行が残した保護の種類（`marks` の `protect`）・本文に書き足した別の報告（`marks` の `text`）と、MVV の判定のうち
+        今回と同じ MVV `mvv` でのものを、既にある指摘 `fid` に重ねる。変わったら真。保護の種類と別の報告は MVV によらず重ねる。
 
         閉じた指摘は、必ず人の承認が要る操作と今回初めて分かったときだけ未解決へ戻す。`place`（位置とセクション）があれば別の場所で
         見つかった再発として戻し（`_revive`）、無ければ開いたままの同じスレッドの指摘として、スレッドを持ったまま戻す。"""
         row = self.rows[fid]
-        protected = _inherit_protect(row, marks.get(PROTECT))
+        reported = _merge_reports(row, marks.get("text"))
+        kept = _inherit_protect(row, marks.get(PROTECT)) or reported
         named = _judged_items(marks, items)
         if not named or mvv is None or marks.get(JUDGED) != mvv or row.get("by") == BY_NDF:
-            return protected
+            return kept
         before = dict(row)
         closed = row.get("outcome") != fin.UNRESOLVED
         known = bool(row.get(fin.REDLINE)) and row.get(JUDGED) == mvv
         if closed and (known or not any(criteria_decide.redline(i) for i in named)):
-            return protected
+            return kept
         if row.get(JUDGED) not in (None, mvv):
             _unclassify(row)
         if closed and place is not None:
@@ -612,7 +624,7 @@ class FindingJournal:
             row.pop(SKIPPED_MVV, None)
         for item in named:
             _classify(row, {}, item, items, mvv)
-        return protected or before != row
+        return kept or before != row
 
     def restate(self, mvv: Optional[str]) -> list[str]:
         """`mvv` と違う MVV で決めた判定を外し、外した指摘の id を返す（出し直されない指摘に前の判定を残さない）。"""

@@ -42,6 +42,8 @@ MVV_REVIEW = "mvv-review"
 # cross-review の指摘（ジャーナルの行）の欄: 反する項目・判定したときの MVV を見分ける値・必ず人の承認が要る操作に当たるかと、
 # 当たる操作の番号
 REVIEW_ITEM, REVIEW_JUDGED, REVIEW_REDLINE, REVIEW_REDLINE_ITEMS = "mvv", "judged_mvv", "redline", "redline_items"
+# 指摘の本文の後ろへ別の報告を書き足すときの区切り。指摘を見分ける値はこの区切りより前の本文で作る（#4363）
+REVIEW_ALSO = " ／ 同じ指摘の別の報告: "
 # 指摘の終わり方。必ず人の承認が要る操作に当たる指摘は、記録では終わり方によらず `REVIEW_REDLINE` にする
 REVIEW_FIXED, REVIEW_DEFERRED, REVIEW_UNRESOLVED = "fixed", "deferred", "unresolved"
 # 同じキーの指摘が 2 件あるとき、後のものほど優先して記録する終わり方の順

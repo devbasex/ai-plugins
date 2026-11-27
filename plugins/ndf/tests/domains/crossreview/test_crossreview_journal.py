@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from ndf.domains.crossreview import criteria_decide, drive, journal as journal_mod, prior_decide, verify_decide
+from ndf.domains.crossreview import criteria_decide, drive, journal as journal_mod, prior_decide, report_decide, verify_decide
+from ndf.domains.records import mvv as mvv_records
 from ndf.domains.records.mvv_decide import REVIEW_FIXED_AT
 from ndf.domains.crossreview import finish_decide as fin
 
@@ -266,6 +267,25 @@ def test_issue_4363_every_operation_that_needs_approval_keeps_its_report() -> No
     again.carry([prior_decide.Carried("t1", None, row["text"], None, None, None, None)])
     again.enter(1, [_told("A")])
     assert list(again.rows) == ["t1"]
+
+
+def test_issue_4363_reports_that_name_different_sections_are_both_kept() -> None:
+    journal = drive.FindingJournal()
+    journal.enter(1, [_told("A", mvv="C7", section=f"doc.md#{name}") for name in ("認証", "移行")], ("C7",), V11)
+    assert "doc.md#移行" in journal.rows["r1-1"]["text"]
+
+
+def test_issue_4363_appended_reports_keep_the_record_key_and_reach_another_run() -> None:
+    """書き足しは承認記録のキーを変えず、古い本文のスレッドを引き継ぐ実行にも記録のコメントから届く。"""
+    text = f"A{journal_mod.ALSO}a（move.py:1）"
+    assert mvv_records.record_key(text) == mvv_records.record_key("A")
+    body = f"{report_decide.MARKER}\n**cross-review の指摘 r1-1**（codex・ラウンド 1・major）\n\nA\n"
+    thread = prior_decide.Thread(7, body, False, "auth.py", 1, True)
+    [carried] = prior_decide.carried([thread], set(), {7: {"text": text}})
+    assert carried.text == text
+    held = drive.FindingJournal([_row("r1-1", "A", 1)])
+    assert held.merge_marks("r1-1", {"text": text}, (), None) and held.rows["r1-1"]["text"] == text
+    assert not held.merge_marks("r1-1", {"text": text}, (), None)
 
 
 def test_issue_4014_carried_rows_are_not_rated_again() -> None:
