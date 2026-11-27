@@ -49,6 +49,11 @@
 
 1. リクエストの中身（レーン・`questions`）を読み、区分ごとに `AskUserQuestion` で利用者へ問う（`metadata.source` は中身の質問の区分）。
    各問いにはレーン名・課題・設計 PR の URL か作業の場所を添える
+   - **レーンから中継された承認ゲートの質問は、オーガナイザーが書かない。** まとめたリリースの版上げの PR の質問は中継では届かないので、下の
+     「まとめたリリース」の手順で作る。中継された質問では、[approval-request.md の「承認ゲートの質問」](approval-request.md#承認ゲートの質問) の
+     `check --gate` で質問を作り直して記録と突き合わせ、記録した `questions` を変えずに、ゲートごとに 1 回ずつ出す。添えるのは、PR と承認資料から
+     コピーした一覧（順・PR の URL・題・承認資料の場所）だけである。合わなければ `ndf progress reread <sprint_id>` を打つ（読み手役のステップは
+     スプリントの作業場所で打たれる）。読み手役は起動しない
 2. 回答をレーンのスプリントへ届ける。スプリントのステートマシンの ID は `ndf lanes status p1` の行の `sprint_id` にある
    - 承認ゲートの質問なら、質問に添えられた承認ゲートの結果（質問の id `metrics.gate.id` と回答ごとのルート）から、
      ルートの `ndf answer <スプリントの ID> --gate <質問の id> --result <回答の語> --reason <理由> --by organizer --key <冪等のキー>` を打つ
@@ -61,10 +66,20 @@
 計画のレーンのスプリントがリリース承認ゲートに着くと、`ndf progress` がリリースのリクエスト（`lane-release`。中身にレーン・PR・課題・
 スプリントのステートマシンの ID `sprint_state`）を計画のステートマシンへ書く。同じ質問には 1 回だけ書く。
 
-1. 届いているリリースのリクエストを 1 本のリリースにまとめ、利用者のリリース承認ゲートを通して出す（手順は `release` の Skill）
-2. 結果を `ndf lanes release p1 <リクエスト>... --result released --version <バージョン> --release <リリース記録の PR> --reason <理由>` で記録する。
+1. 届いているリリースのリクエストを 1 本のリリースにまとめる。版上げの PR は workflow の `assemble` で作る（手順は `release` の Skill）
+2. 版上げの PR のリリース承認ゲートは、会話のセッションのリリースと同じ経路で通す。まとめるリリースが 1 本だけでも同じである。
+   オーガナイザーは承認資料を用意して下の順に打つ。判断の材料と質問の文は自分で書かず、読み手役も自分で起動しない
+   （詳しくは [approval-request.md の「承認ゲートの質問」](approval-request.md#承認ゲートの質問)）
+   1. 承認資料を用意する（[release-steps.md の「承認資料の対象のコミットを合わせる」](../../release/references/release-steps.md#承認資料の対象のコミットを合わせる)）
+   2. 承認を問う直前に `ndf document-rebuild gate --gate release --pr <番号> --material <承認資料> --state-dir <保存先> --out <結果>` を打つ。
+      この中で読み手役が起動され、質問と資料が記録される。`<保存先>` と `<結果>` はリポジトリの外に置く
+   3. `ndf records reading check --gate release --pr <番号> --material <outputs.material.path> --questions-out <ファイル>` で突き合わせる
+   4. `ndf release-steps present --pr <番号> --material <outputs.material.path>` で提示し、3 が書き出した質問を 1 字も変えずに
+      `AskUserQuestion`（`ndf-gate:2`）で問う
+   5. `present` の routes の `ndf release-steps answer ... --presented <HEAD> --material-sha256 <資料の SHA-256>` に `--by user` を足して打つ
+3. 結果を `ndf lanes release p1 <リクエスト>... --result released --version <バージョン> --release <リリース記録の PR> --reason <理由>` で記録する。
    承認されなければ `--result rejected`。まとめたリクエストは同じトランザクションで閉じる
-3. リクエストごとに `ndf lanes answered <sprint_state> --answer <released か rejected>` を打つ。起きたレーンの conductor がスプリントを続けると、`ndf progress` が
+4. リクエストごとに `ndf lanes answered <sprint_state> --answer <released か rejected>` を打つ。起きたレーンの conductor がスプリントを続けると、`ndf progress` が
    記録した回答を承認ゲートの回答（`by: organizer`）として書き、出したバージョンとリリース記録の PR をスプリントの文脈へ写す
 
 リクエストを出した後に PR の head が変わっていれば、回答は承認ゲートに断られ、待ちへ戻る。

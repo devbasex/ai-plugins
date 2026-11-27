@@ -7,16 +7,20 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ndf import contracts
-from ndf.contracts import internal
+from ndf.contracts import internal, result
 from ndf.progress import model
 
 
 # --- 工程の定義の型 ----------------------------------------------------------------------
+
+
+# 承認ゲートのステップの種類と、その直前に置く読み手役のステップの種類（`gate` を書いてよい種類の並び。#4446）
+GATE_KIND, READING_KIND = contracts.schema_enum(model.NDF_SCHEMA, "/$defs/gated_kind")
 
 
 @dataclass(frozen=True)
@@ -50,17 +54,33 @@ class StageDef:
     optional_inputs: tuple[str, ...] = ()
     input_ref: Optional[str] = None
     output_ref: Optional[str] = None
+    # 実装計画のレビューの単位ごとに流す工程（#4369）
+    per_unit: bool = False
 
     @property
     def gates(self) -> tuple[str, ...]:
-        """工程が持つ承認ゲートの種類。1 つでもあれば工程を無効にできない（3364-2）。"""
-        return tuple(st.gate for st in self.steps if st.gate)
+        """工程が持つ承認ゲートの種類。1 つでもあれば工程を無効にできない（3364-2）。読み手役のステップの `gate` は数えない（#4446）。"""
+        return tuple(st.gate for st in self.steps if st.kind == GATE_KIND and st.gate)
 
     def before(self, step_id: str) -> Optional[str]:
         """ステップ `step_id` の直前のステップの id（先頭か、工程に無ければ None）。"""
         ids = [st.id for st in self.steps]
         at = ids.index(step_id) if step_id in ids else 0
         return ids[at - 1] if at > 0 else None
+
+    def mvv_before(self, step_id: str) -> Optional[str]:
+        """承認ゲート `step_id` の前の MVV 判定のステップの id。読み手役のステップがあればその直前、無ければ承認ゲートの直前（#4446）。"""
+        gate = next((st.gate for st in self.steps if st.id == step_id), None)
+        reading = self.reading_for(gate) if gate else None
+        return self.before(reading.id if reading is not None else step_id)
+
+    def gate_index(self, gate: Optional[str]) -> Optional[int]:
+        """承認ゲート `gate` のステップの、工程の中の位置。無ければ None。"""
+        return next((i for i, st in enumerate(self.steps) if st.kind == GATE_KIND and st.gate == gate), None)
+
+    def reading_for(self, gate: Optional[str]) -> Optional[StepDef]:
+        """同じ工程で、承認ゲート `gate` の前の読み手役のステップ。無ければ None（読み手役のステップの無い古い定義）。"""
+        return next((st for st in self.steps if st.kind == READING_KIND and st.gate == gate), None)
 
 
 @dataclass(frozen=True)
@@ -183,9 +203,54 @@ def _duplicate_errors(steps: list[StepDef]) -> list[str]:
     return errs + [f"I10: 範囲 {r} のテストが {n} つある" for r, n in sorted(tests.items()) if n > 1]
 
 
+# --- 読み手役のステップと設計のレビューへの戻し（#4446） -------------------------------------------------
+
+
+# ステップを未了に戻す記録の status・読み手役が文書を直して push した出力のキー・読み手役のステップの結果ファイルの名前
+RESET, REVIEW_AGAIN, READING_OUT = "reset", "review_again", "gate.result.json"
+
+
+def review_again_of(report: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """読み手役のステップの結果の `outputs.review_again`（直した文書を push したコミットと文書のパス）。無ければ None。"""
+    outputs = report["outputs"] if isinstance(report.get("outputs"), dict) else {}
+    held = outputs[REVIEW_AGAIN] if REVIEW_AGAIN in outputs else None
+    return dict(held) if isinstance(held, dict) and isinstance(held.get("commit"), str) else None
+
+
+def review_again_steps(stage: StageDef, gate: Optional[str]) -> list[str]:
+    """設計のレビューへ戻すときに未了に戻すステップ。承認ゲート `gate` の前の最後のレビューから、ゲートの直前（読み手役か、
+    読み手役の無い古い定義では MVV 判定）まで。"""
+    ids = [st.id for st in stage.steps]
+    found = stage.gate_index(gate)
+    at = len(ids) if found is None else found
+    reviews = [i for i, st in enumerate(stage.steps[:at]) if st.kind == "review"]
+    return ids[reviews[-1] if reviews else max(at - 1, 0) : at]
+
+
+def reading_flags(stage: StageDef, again: Sequence[Mapping[str, Any]], finished_at: Mapping[str, int]) -> list[str]:
+    """読み手役のステップ（`ndf document-rebuild gate`）へ足す引数。`again` は同じ承認ゲートの前に戻した記録（事象の番号 `seq`・
+    コミット）、`finished_at` はステップごとの最後の終わりの事象の番号。最後に戻した後に設計のレビューが済んでいれば
+    `--reviewed <コミット>` を、戻した記録が 1 件以上あれば `--no-doc-fix`（往復の上限）を足す。"""
+    if not again:
+        return []
+    last = again[-1]
+    reviewed = any(st.id in finished_at and finished_at[st.id] > last["seq"] for st in stage.steps if st.kind == "review")
+    return [*(["--reviewed", str(last["commit"])] if reviewed else []), "--no-doc-fix"]
+
+
+def _reading_errors(steps: list[StepDef]) -> list[str]:
+    """読み手役のステップの直後は、同じ工程の同じ種類の承認ゲートにする（#4446）。"""
+    errs = []
+    for at, st in enumerate(steps):
+        nxt = steps[at + 1] if at + 1 < len(steps) else None
+        if st.kind == READING_KIND and (nxt is None or nxt.stage != st.stage or nxt.kind != GATE_KIND or nxt.gate != st.gate):
+            errs.append(f"I11: {_where(st)} の読み手役のステップの直後が、同じ工程の承認ゲート {st.gate} でない")
+    return errs
+
+
 def check_order(steps: list[StepDef]) -> list[str]:
     """モードの全ステップを並びの順に平らにした一覧で、順序・範囲・重複の決まりを確かめ、破った理由を返す。"""
-    return _range_errors(steps) + _after_release_errors(steps) + _duplicate_errors(steps)
+    return _range_errors(steps) + _after_release_errors(steps) + _duplicate_errors(steps) + _reading_errors(steps)
 
 
 def check_unique_stage_names(stages: Iterable[StageDef]) -> list[str]:
@@ -294,6 +359,46 @@ def keep_declared(declared: Iterable[str], outputs: Mapping[str, Any]) -> tuple[
     names = set(declared)
     kept = {k: v for k, v in outputs.items() if k in names}
     return kept, sorted(set(outputs) - set(kept))
+
+
+# 結果の items の PR で補う工程の出力のキー。プラン design は設計 PR を items にだけ載せ、outputs に design_pr を
+# 書かない（共通のステップ pr は番号を items に返す）。補わないと設計承認ゲートの質問が PR を持たず（#4495）、
+# 工程「設計」が「文脈のキー design_pr が無い」で失敗する（#4455）
+DESIGN_PR = "design_pr"
+ITEM_PR_OUTPUTS = (DESIGN_PR,)
+
+
+def step_outputs(stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """工程 `stage` の済んだステップ（`done`: ステップの id → 結果）の outputs を、定義の順に重ねる。
+
+    工程が `ITEM_PR_OUTPUTS` のキーを出力に持ち、どのステップの outputs にも無ければ、種類が work（工程の成果物を作る作業。レビュー・記録・マージは除く）の
+    ステップの items の PR（番号が 1 つに決まるときだけ）で補う。outputs に明示した値は、どのステップのものでも補った値より
+    優先する。記録済みの結果（11.0.43 までに始めたステートマシン）にも効くよう、読む側で補う。"""
+    explicit, filled = _split_outputs(stage, done)
+    return {**filled, **explicit}
+
+
+def item_only_outputs(stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """`step_outputs` のうち、どのステップの outputs にも無く items の PR から補った値だけ。"""
+    explicit, filled = _split_outputs(stage, done)
+    return {k: v for k, v in filled.items() if k not in explicit}
+
+
+def _split_outputs(stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """済んだステップの outputs に明示した値と、items の PR から補える値の組。"""
+    explicit: dict[str, Any] = {}
+    filled: dict[str, Any] = {}
+    keys = set(stage.outputs) & set(ITEM_PR_OUTPUTS)
+    for st in stage.steps:
+        if st.id not in done:
+            continue
+        report = done[st.id]
+        if isinstance(report.get("outputs"), dict):
+            explicit.update(report["outputs"])
+        prs = set(result.pr_numbers(report)) if st.kind == "work" and keys else set()
+        if len(prs) == 1:
+            filled.update(dict.fromkeys(keys, next(iter(prs))))
+    return explicit, filled
 
 
 def outputs_draft(stage: StageDef, rev: int, outputs: Mapping[str, Any], actor: str) -> tuple[Optional[model.EventDraft], list[str]]:

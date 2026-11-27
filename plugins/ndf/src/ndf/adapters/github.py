@@ -36,20 +36,18 @@ from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome,
 
 # 呼び手（`ndf.domains.release.land`）が github から読む、github_merge の名前
 from ndf.adapters.github_merge import MERGE_COMMIT as MERGE_COMMIT
+
+# `Pull`・`Authored`・`text_of` は呼び手が github から読む名前でもある
+from ndf.adapters.github_pulls import PER_PAGE, PULL_FIELDS, Authored, Pull, account_id_of, graphql_string, target_of, text_of
 from ndf.adapters.github_rules import NO_RULES, RuleFacts, classic_facts_of, merge_facts, rule_facts_of
 from ndf.contracts import limits
 
 T = TypeVar("T")
-# GraphQL のエイリアスで引ける番号つきの節点
-NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")
-PULL_FIELDS = (  # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
-    "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation mergeCommit { oid }"
-    " isInMergeQueue isCrossRepository"
-)
+NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")  # GraphQL のエイリアスで引ける番号つきの節点
+# `issueOrPullRequest`（union）から本文を選ぶ選択。union なので、body は型ごとのインラインフラグメントで選ぶ（#3908 の r2-1）
+BODY_FIELDS = "... on Issue { body } ... on PullRequest { body }"
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
-# 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は contracts/limits/ の github.check-runs・github.list-pages）
-PER_PAGE = 100
 # 認証の値を読む環境変数（先のものを優先する。利用者の手順へ渡さないときに消す名前も同じ）
 TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
 # GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く。#3506）
@@ -143,99 +141,11 @@ def client(
     return Client(auth if auth is not None else token(), http_cache=True, auto_retry=retry, transport=transport, **options)
 
 
-def text_of(value: Any) -> str:
-    """文字列ならそのまま、ほかの値（None など）は空文字。"""
-    return value if isinstance(value, str) else ""
-
-
-def _login(user: Any) -> str:
-    """書き手の login。消えたアカウント（REST の `user`・GraphQL の `author` が null）は空文字。"""
-    return text_of(user["login"]) if isinstance(user, dict) else ""
-
-
-def _account_id(raw: Any) -> int:
-    """GitHub が発行するアカウント ID（REST の `user.id`・GraphQL の `databaseId`）。無い・読めなければ 0。"""
-    if not isinstance(raw, dict):
-        return 0
-    got = raw["id"] if "id" in raw else raw["databaseId"] if "databaseId" in raw else None
-    return got if isinstance(got, int) and not isinstance(got, bool) and got > 0 else 0
-
-
 class Viewer(NamedTuple):
     """token の利用者。`account_id` は GitHub が発行するアカウント ID で、読めなければ 0（`login` は表示に使うだけ）。"""
 
     login: str
     account_id: int
-
-
-class Authored(NamedTuple):
-    """書き手の付いた本文（Issue・PR・コメント）。`association` は GitHub の author_association（大文字）。
-
-    信用の区分は対象リポジトリでの権限で決まるため、`GitHub.trusts` が判定する（#3364）。
-    """
-
-    author: str
-    association: str
-    body: str
-    # コメントの URL（REST の `html_url`。迂回の記録が照らした証跡を指す。#3506）。無ければ空
-    url: str = ""
-    # 作成の後に編集されたか（REST の `updated_at` が `created_at` と違う）。編集された証跡は承認に数えない（#3506）
-    edited: bool = False
-    # 書き手のアカウント ID（REST の `user.id`）。同じ名前の別のアカウントを分けるのに使う（#4409）。無ければ 0
-    author_id: int = 0
-
-    @classmethod
-    def from_rest(cls, raw: dict) -> Authored:
-        url = text_of(raw["html_url"]) if isinstance(raw.get("html_url"), str) else ""
-        created, updated = raw.get("created_at"), raw.get("updated_at")
-        edited = isinstance(created, str) and isinstance(updated, str) and updated != created
-        user = raw["user"]
-        return cls(_login(user), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited, _account_id(user))
-
-
-class Pull(NamedTuple):
-    """PR の状態。`state` は `open`・`closed`、`merge_state` は GitHub の mergeStateStatus の小文字。"""
-
-    number: int
-    state: str
-    merged: bool
-    head_sha: str
-    head_ref: str
-    base_ref: str
-    body: str
-    merge_state: str
-    author: str
-    association: str
-    merge_sha: str = ""  # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
-    # マージキューに入っているか（GraphQL で読んだときだけ分かる。REST では偽。#4409 の決定 8）
-    queued: bool = False
-    cross_repository: bool = False  # head のブランチがフォークにあるか（GraphQL で読んだときだけ埋める）
-
-    @property
-    def authored(self) -> Authored:
-        """PR の本文と書き手（信用の区分は `GitHub.trusts`）。"""
-        return Authored(self.author, self.association, self.body)
-
-    @classmethod
-    def from_rest(cls, raw: dict) -> Pull:
-        head, base = raw["head"], raw["base"]
-        return cls(
-            int(raw["number"]), text_of(raw["state"]).lower(), bool(raw["merged"]), text_of(head["sha"]),
-            text_of(head["ref"]), text_of(base["ref"]), text_of(raw["body"]), text_of(raw["mergeable_state"]).lower(),
-            _login(raw["user"]), text_of(raw["author_association"]).upper(),
-            text_of(raw.get("merge_commit_sha")) if raw["merged"] else "",
-        )  # fmt: skip
-
-    @classmethod
-    def from_graphql(cls, raw: dict) -> Pull:
-        state = text_of(raw["state"]).lower()
-        return cls(
-            int(raw["number"]), "open" if state == "open" else "closed", bool(raw["merged"]), text_of(raw["headRefOid"]),
-            text_of(raw["headRefName"]), text_of(raw["baseRefName"]), text_of(raw["body"]), text_of(raw["mergeStateStatus"]).lower(),
-            _login(raw["author"]), text_of(raw["authorAssociation"]).upper(),
-            text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
-            raw.get("isInMergeQueue") is True, bool(raw.get("isCrossRepository")),
-        )  # fmt: skip
 
 
 class MergeExpect(NamedTuple):
@@ -278,10 +188,10 @@ def refusal_kind(after: Pull, sent_sha: str) -> str:
 
 @dataclass(frozen=True)
 class _MergeRoute:
-    """マージの要求の打ち方。`send` が要求を打ち、`refused` が真とみなした誤りは断られたとして扱う。`how` は成功の文に
+    """マージの要求の打ち方。`send` が要求を打ってマージコミット（応答に無ければ空）を返し、`refused` が真とみなした誤りは断られたとして扱う。`how` は成功の文に
     添える迂回のマーカー。`require_method` が真なら、キューの方式が選んだ方式と違うときキューへ入れずに断る。"""
 
-    send: Callable[[int, "Pull", str], None]
+    send: Callable[[int, "Pull", str], str]
     refused: Callable[["GitHubError"], bool]
     how: str
     require_method: bool = False
@@ -303,9 +213,7 @@ def _file_at(repo: dict, key: str) -> FileAt:
 
 def _verified(repo: dict) -> Verified:
     node = repo.get("pullRequest") if isinstance(repo.get("pullRequest"), dict) else {}
-    return Verified(
-        text_of(node.get("baseRefName")), text_of(node.get("headRefOid")), text_of(repo.get("nameWithOwner")), _file_at(repo, "config")
-    )
+    return Verified(*target_of(node), text_of(repo.get("nameWithOwner")), _file_at(repo, "config"))
 
 
 def _verify(number: int, fresh: Verified, expect: MergeExpect, repo: str) -> Optional[MergeOutcome]:
@@ -435,6 +343,9 @@ class GitHub:
                     raise
                 raise GitHubError.of(limited) from None
 
+    # ページの上限の失敗（このモジュールの外の一覧の読み手 `github_pulls.merged_pulls` も使う）
+    too_many_pages = staticmethod(_too_many_pages)
+
     def _owner_name(self) -> dict[str, str]:
         owner, name = self.repo.split("/", 1)
         return {"owner": owner, "name": name}
@@ -470,14 +381,18 @@ class GitHub:
         got = self.aliased({str(n): f"{node}(number: {n}) {{ {fields} }}" for n in wanted}, batch)
         return {n: got[str(n)] if isinstance(got[str(n)], dict) else {} for n in wanted}
 
-    def pulls(self, numbers: Iterable[int]) -> dict[int, Optional[Pull]]:
+    def pulls(self, numbers: Iterable[int], spare: Iterable[int] = ()) -> dict[int, Optional[Pull]]:
         """番号ごとの PR を 1 回のクエリ（100 件ごと）で読む。PR でない・無い番号は None。
 
         GraphQL のスロットが一次の上限なら、`github.rest-fallback` 件までは REST のスロットで読み替える（不足 g。二次レート制限は読み替えない）。
+        `spare`（ついでに読めればよい番号）は、`numbers` を読むクエリの 100 件に満たない残りの分だけを読み、呼び出しの回数と読み替えの
+        可否を変えない。残りに入らない番号と、REST へ読み替えたときの番号は、返す辞書に載らない。
         """
         wanted = sorted({int(n) for n in numbers})
+        free = -len(wanted) % int(limits.value("github.graphql-batch", "count"))
+        extra = sorted({int(n) for n in spare} - set(wanted))[:free]
         try:
-            raw = self.nodes(wanted, "pullRequest", PULL_FIELDS)
+            raw = self.nodes([*wanted, *extra], "pullRequest", PULL_FIELDS)
         except GitHubError as exc:
             if exc.quota != GRAPHQL or exc.secondary or len(wanted) > int(limits.value("github.rest-fallback", "count")):
                 raise
@@ -502,17 +417,17 @@ class GitHub:
         """head のブランチごとの PR（新しい順に 5 件まで）を 1 回のクエリ（100 件ごと）で読む。"""
         wanted = sorted(set(branches))
         selection = "pullRequests(headRefName: {}, first: {}, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ {} }} }}"
-        got = self.aliased({b: selection.format(_graphql_string(b), PULLS_PER_HEAD, PULL_FIELDS) for b in wanted})
+        got = self.aliased({b: selection.format(graphql_string(b), PULLS_PER_HEAD, PULL_FIELDS) for b in wanted})
         return {b: [Pull.from_graphql(p) for p in got[b]["nodes"]] if got[b] else [] for b in wanted}
 
-    def open_pulls_of_head(self, branch: str, enough: int) -> list[Pull]:
+    def open_pulls_of_head(self, branch: str, enough: int, base: Optional[str] = None) -> list[Pull]:
         """head のブランチが `branch` で、このリポジトリの開いた PR（フォークの同名ブランチを除く。新しい順）。
 
-        取得の時点で開いた PR に絞り、同じリポジトリの候補が `enough` 件そろうか一覧を読み終えるまでページを送る
+        取得の時点で開いた PR に絞り（`base` があればマージ先も GitHub 側で絞る）、同じリポジトリの候補が `enough` 件そろうか一覧を読み終えるまでページを送る
         （候補が 1 件だけかを、取得の範囲から外れた古い PR で取り違えない）。`github.list-pages` ページを超えたら `GitHubError`。
         """
         pages = _page_cap("github.list-pages")
-        variables: dict[str, Any] = {"head": branch, "after": None}
+        variables: dict[str, Any] = {"head": branch, "base": base, "after": None}
         found: list[Pull] = []
         for _ in range(pages):
             conn = self.repository(_OPEN_HEAD_PAGE, variables)["pullRequests"]
@@ -798,7 +713,7 @@ class GitHub:
         if self._viewer:
             return
         login = node.get("login") if isinstance(node, dict) else None
-        self._viewer.append(Viewer(login if isinstance(login, str) else "", _account_id(node)))
+        self._viewer.append(Viewer(login if isinstance(login, str) else "", account_id_of(node)))
 
     def viewer(self) -> Viewer:
         """この token の利用者（1 回だけ読む。`branch_file` が読んでいれば、空だったときも要求を送らない）。
@@ -845,13 +760,18 @@ class GitHub:
         """
         return self._merge_with(number, expect_head, method, _MergeRoute(self._send_admin_merge, _refused_by_graphql, "管理者の迂回で"))
 
-    def _send_rest_merge(self, number: int, pull: Pull, chosen: str) -> None:
-        self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
+    def _send_rest_merge(self, number: int, pull: Pull, chosen: str) -> str:
+        body = self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
+        return text_of(body.get("sha")) if isinstance(body, dict) else ""
 
-    def _send_admin_merge(self, number: int, pull: Pull, chosen: str) -> None:
+    def _send_admin_merge(self, number: int, pull: Pull, chosen: str) -> str:
         node = self.repository(github_merge.PULL_ID_QUERY, {"number": int(number)})["pullRequest"]
         variables = {"id": text_of(node["id"]), "head": pull.head_sha, "method": github_merge.GRAPHQL_MERGE_METHODS[chosen]}
-        self.graphql(github_merge.ADMIN_MERGE_MUTATION, variables)
+        data = self.graphql(github_merge.ADMIN_MERGE_MUTATION, variables)
+        payload = data.get("mergePullRequest")
+        merged = payload.get("pullRequest") if isinstance(payload, dict) else None
+        commit = merged.get("mergeCommit") if isinstance(merged, dict) else None
+        return text_of(commit.get("oid")) if isinstance(commit, dict) else ""
 
     def _merge_with(
         self, number: int, expect_head: Optional[str], method: Optional[str], route: "_MergeRoute", expect: Optional[MergeExpect] = None
@@ -873,7 +793,7 @@ class GitHub:
             if stop is not None:
                 return stop
         try:
-            route.send(number, pull, chosen)
+            landed = route.send(number, pull, chosen)
         except GitHubError as exc:
             if not route.refused(exc):
                 raise
@@ -883,7 +803,7 @@ class GitHub:
                 return queued
             after = self.pull(number)
             return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
-        return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha)
+        return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha, landed)
 
     def _enqueue(
         self, pull: Pull, method: Optional[str], jump: bool = False, expect: Optional[MergeExpect] = None
@@ -967,11 +887,11 @@ _ISSUE_PAGE = (
     " totalCount pageInfo { hasNextPage endCursor } nodes { number } } } }"
 )
 
-# head のブランチの開いた PR の 1 ページ（`GitHub.open_pulls_of_head`。新しい順）。1 ブランチ専用の照会なので、
+# head のブランチの開いた PR の 1 ページ（`GitHub.open_pulls_of_head`。新しい順。`$base` が null ならマージ先で絞らない）。1 ブランチ専用の照会なので、
 # フォークの同名ブランチが先に並んでも往復が増えないよう、上限の件数（`PER_PAGE`）で読む
 _OPEN_HEAD_PAGE = (
-    "query($owner: String!, $name: String!, $head: String!, $after: String) {"
-    f" repository(owner: $owner, name: $name) {{ pullRequests(headRefName: $head, states: [OPEN], first: {PER_PAGE},"
+    "query($owner: String!, $name: String!, $head: String!, $base: String, $after: String) {"
+    f" repository(owner: $owner, name: $name) {{ pullRequests(headRefName: $head, baseRefName: $base, states: [OPEN], first: {PER_PAGE},"
     f" after: $after, orderBy: {{field: CREATED_AT, direction: DESC}}) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {PULL_FIELDS} }} }} }} }}"
 )
 
@@ -981,7 +901,7 @@ def _visibility_query(repos: Sequence[str]) -> str:
     parts = []
     for i, repo in enumerate(repos):
         owner, name = repo.split("/", 1)
-        parts.append(f"{_alias(i)}: repository(owner: {_graphql_string(owner)}, name: {_graphql_string(name)}) {{ visibility }}")
+        parts.append(f"{_alias(i)}: repository(owner: {graphql_string(owner)}, name: {graphql_string(name)}) {{ visibility }}")
     return "query { " + " ".join(parts) + " }"
 
 
@@ -989,9 +909,3 @@ def _visibility_of(data: Any, i: int) -> str:
     """`_visibility_query` の応答の `i` 番目のリポジトリの公開範囲（大文字）。読めなければ `UNKNOWN`。"""
     node = data[_alias(i)] if isinstance(data, dict) and _alias(i) in data else None
     return text_of(node["visibility"]).upper() if isinstance(node, dict) else UNKNOWN
-
-
-def _graphql_string(value: str) -> str:
-    """GraphQL の文字列の値（JSON の文字列と同じ書き方）。"""
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'

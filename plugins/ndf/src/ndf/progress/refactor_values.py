@@ -13,14 +13,14 @@ from typing import Any, Optional
 from ndf.adapters.git import Git
 from ndf.core import branch_strategy, issue_docs, route
 from ndf.core.plan import inputs_decide as plan_inputs
+from ndf.core.plan import review_units_decide as review_units
 from ndf.progress import command, definition
 
 
 REFACTOR_CANDIDATES = "refactor-candidates.md"
-# implementation-plan の「リファクタリングの時機」の表（時機 | 対象 | 理由）の見出しと、スプリントの終わりの行の時機
-TIMING_HEADING = "リファクタリングの時機"
+# implementation-plan の「リファクタリングの時機」の表（時機 | 対象 | 理由）の、スプリントの終わりの行の時機。
+# 見出しと「しない」は単位の表の読み手が持つ
 SPRINT_END = "スプリントの終わり"
-NO_TARGET = "しない"
 
 
 def _cells(line: str) -> list[str]:
@@ -34,7 +34,9 @@ def _sprint_end_rows(text: str) -> list[tuple[str, str]]:
     見出しが無ければ空。対象が「しない」の行は含めない。
     """
     lines = text.splitlines()
-    heading = next((i for i, line in enumerate(lines) if line.startswith("#") and line.lstrip("#").strip() == TIMING_HEADING), None)
+    heading = next(
+        (i for i, line in enumerate(lines) if line.startswith("#") and line.lstrip("#").strip() == review_units.TIMING_HEADING), None
+    )
     if heading is None:
         return []
     found = []
@@ -42,7 +44,7 @@ def _sprint_end_rows(text: str) -> list[tuple[str, str]]:
         if line.startswith("#"):
             break
         cells = _cells(line) if line.startswith("|") else []
-        if len(cells) == 3 and cells[0].startswith(SPRINT_END) and cells[1] != NO_TARGET:
+        if len(cells) == 3 and cells[0].startswith(SPRINT_END) and cells[1] != review_units.NO_TARGET:
             found.append((cells[1], cells[2]))
     return found
 

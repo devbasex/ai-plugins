@@ -77,6 +77,7 @@ sequenceDiagram
 | `context` | 工程どうしで引き継ぐ値 | `progress/command.py` の `_new_doc` | `progress/stages.py` の `compose_context` | `version` → `product_version` |
 | `stage-snapshot` | スプリントを始めた時点の工程の定義 | `progress/command.py` の `_new_doc` | `progress/command.py` の `read_current` | `version` → `definition_version`。各工程の入出力の `version` → `product_version` |
 | `reading-check` | 読み手役（想定した読み手の立場で文書を読む AI）が、質問の文と文書を確認した記録（[ndf-writing-criteria-and-reading-check.md](ndf-writing-criteria-and-reading-check.md)） | `records/reading.py` | `records/reading.py`・`hooks/guards/reading_check.py`（hook は `internal` を読み込まず、使う欄だけを確かめる） | 古い形式は無い |
+| `reading-docs` | 読み手役に読ませたもの（文書・承認資料・質問の文）と、確認の完了・再レビュー待ち・変更要求（[ndf-reading-check-before-approval-gate.md](ndf-reading-check-before-approval-gate.md)） | `records/reading.py` | `records/reading.py` | 新しい種類で、古い形式は無い |
 
 スキーマは `contracts/schemas/internal/<種類>.schema.json` にある（`context` だけは `contracts/workflow/context.schema.json`）。コードのパスは、
 `progress/` は `src/ndf/` の下、ほかは `src/ndf/domains/` の下である。種類を足すときは、スキーマを置き、`KINDS` に 1 行を足す。

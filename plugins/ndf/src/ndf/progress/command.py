@@ -112,6 +112,11 @@ def ndf_settings(cwd: Path, name: str) -> dict[str, Any]:
     return _read_ndf_settings(ndf_settings_path(cwd, name))
 
 
+def ndf_settings_in(root: Path, name: str) -> dict[str, Any]:
+    """解決済みのリポジトリの根 `root` の設定のファイル（`ndf_settings` と同じ読み方で、根を git で求め直さない）。"""
+    return _read_ndf_settings(root / name)
+
+
 # --- 工程の定義の条件（`when`）の語のうち、ステートマシンの外（git の差分と設定のファイル・スプリントの文脈）から求める語 ---
 # `ndf.progress.run` の `Env.facts` の既定（`facts_of`）。ステートマシンから求める語（`run.TABLE_FACTS`）はここに無い。
 
@@ -868,6 +873,9 @@ def parser() -> argparse.ArgumentParser:
     )
     gathered.add_argument("--branch", help="スプリントブランチ（省けば worktree のブランチ）")
     gathered.add_argument("--remote", help="リモート名（省けば worktree の設定の remote か既定）")
+    sub.add_parser("reread", help="承認の前の確認をやり直し、承認ゲートの待ちを出し直す").add_argument(
+        "machine_id"
+    )  # 受けるのは gate.entry
     add_cwd(sub.choices.values())
     return ap
 

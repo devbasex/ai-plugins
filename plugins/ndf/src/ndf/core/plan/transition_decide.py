@@ -6,7 +6,8 @@
 - `Sleep`: 打ち直しの前に待つ（ES2）。待った後に同じステップを打つ。打ち直しはステップの数に数えない
 - `AwaitAnswer`: 承認の回答を待つ。回答から `on_answer` のルートへ進む
 
-止まったステップのルートは `ndf.contracts.routing.pick` だけが選ぶ（IS4・IS5）。`summary` などの文は読まない（IS7）。
+止まったステップのルートは `ndf.contracts.routing.pick` だけが選ぶ（IS4・IS5）。ルートの選択に `summary` などの文は使わない（IS7）。
+ステップの `summary` は、プランが止まるときの説明（`detail`）の末尾へ写すだけである。
 ルートを選ぶたび（止まったステップのルート・承認の回答のルート）に、選択（`Choice`）を状態の `choices` へ足す。
 書き手（`runner`）が足した分を選択の記録（`ndf.contracts.chosen`）として進捗記録へ 1 件ずつ書く。
 ステップの数が上限を超えるか、知らないステップへ進めば必ず終わる。DBOS も入出力も読まない。
@@ -62,12 +63,13 @@ class Choice(NamedTuple):
 
 
 class Outcome(NamedTuple):
-    """手の実行の結果。`kind` は停止理由の種類、`answer` は承認の回答（期限までに無ければ None）。"""
+    """手の実行の結果。`kind` は停止理由の種類、`answer` は承認の回答（期限までに無ければ None）、`summary` はステップの説明。"""
 
     status: str
     kind: Optional[str] = None
     retry_after: Optional[float] = None
     answer: Optional[str] = None
+    summary: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -173,7 +175,7 @@ def _after_stop(plan: Plan, state: StepState, step: Step, done: Outcome) -> Next
     if route.to == routing.STEP and not state.prelude:
         return _run(plan, replace(state, kind=kind), route.target)
     # stop・conductor・human と、前置きの中の止まりは、その種類で止まる（ルートは停止理由の表が持つ）
-    return _finish(state, STOPPED, kind, detail)
+    return _finish(state, STOPPED, kind, f"{detail}: {done.summary}" if done.summary else detail)
 
 
 def _after_gate(state: StepState, step: Step) -> Next:

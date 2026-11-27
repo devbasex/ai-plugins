@@ -262,6 +262,10 @@ def test_pulls_batches_numbers_into_one_query_per_hundred() -> None:
     assert len(queries) == 2
     assert [len(_aliases(q)) for q in queries] == [100, 50]
     assert got[150] is not None and got[150].head_ref == "b150" and got[150].state == "open"
+    # ついでに読む番号は、クエリの残りに入る分だけを足し、呼び出しの回数を変えない
+    queries.clear()
+    got = hub.pulls(range(1, 100), spare=[1, 200, 201])
+    assert len(queries) == 1 and 200 in got and 201 not in got
 
 
 def test_nodes_keeps_read_numbers_when_only_not_found_errors() -> None:
@@ -315,6 +319,19 @@ def test_open_pulls_of_head_pages_until_two_same_repo_candidates() -> None:
     got = _hub(handler).open_pulls_of_head("design/x", enough=2)
     assert [p.number for p in got] == [5, 4]
     assert [v["after"] for v in seen] == [None, "c1", "c2"] and all(v["head"] == "design/x" for v in seen)
+
+
+def test_open_pulls_of_head_filters_the_base_on_github_and_stops_at_the_first_candidate() -> None:
+    sent: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        conn = {"pageInfo": {"hasNextPage": True, "endCursor": "c1"}, "nodes": [{**_pr_node(5), "isCrossRepository": False}]}
+        return httpx.Response(200, json={"data": {"repository": {"pullRequests": conn}}})
+
+    got = _hub(handler).open_pulls_of_head("unit/a", enough=1, base="sprint/x")
+    assert [p.number for p in got] == [5] and len(sent) == 1
+    assert "baseRefName: $base" in sent[0]["query"] and sent[0]["variables"]["base"] == "sprint/x"
 
 
 def test_nodes_refuses_unknown_node() -> None:

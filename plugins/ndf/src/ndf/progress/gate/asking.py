@@ -22,7 +22,7 @@ from filelock import FileLock
 from ndf import cli
 from ndf.contracts import limits, result
 from ndf.core import merge_approval
-from ndf.progress import lane, model, plan, run
+from ndf.progress import lane, model, plan, run, stages
 from ndf.progress.run_view import MATERIAL_DIR
 
 # 結果 JSON の tool（サブコマンドの表がこのパッケージを指す）
@@ -54,6 +54,7 @@ class Target:
     `repo`・`pr`・`base` は承認の対象（ベースリポジトリ・PR の番号・マージ先）、`production` は承認でマージが本番へ
     反映され得るか（判定の部品の `reaches_production`）。マージの承認の証跡はこの組に結び付ける（#4409 の決定 7）。
     `presentation` は資料を書いた（出し直した）ときに発行した提示の識別子（`write_material`）。分からなければ None。
+    `body`・`title` は PR の本文と題の sha256（承認の質問の文は題から作る。#4446）。分からなければ None。
     """
 
     head: Optional[str] = None
@@ -63,6 +64,8 @@ class Target:
     base: Optional[str] = None
     production: Optional[bool] = None
     presentation: Optional[str] = None
+    body: Optional[str] = None
+    title: Optional[str] = None
 
     def binding(self) -> Optional[merge_approval.MergeTarget]:
         """承認の対象の 4 つの値がそろえば `merge_approval.MergeTarget`、欠ければ None。"""
@@ -71,17 +74,23 @@ class Target:
         return merge_approval.MergeTarget(self.repo, int(self.pr), self.base, self.head)
 
     def differs(self, seen: Target) -> list[str]:
-        """回答した者が見た対象 `seen` と今の対象の違い（今の側が分かる項目だけを比べる）。"""
+        """回答した者が見た対象 `seen` と今の対象の違い（今の側が分かる項目だけを比べる）。
+
+        本文と題は、見た側も値を持つときだけ比べる。MVV 判定で省いた回答は head だけを見て書くためである。"""
         out = []
         for name, now, then in (("head の SHA", self.head, seen.head), ("承認資料の sha256", self.material, seen.material)):
             if now is not None and then != now:
                 out.append(f"{name}（見た値 {then or '無し'}・今の値 {now}）")
+        for name, now, then in (("PR の本文の sha256", self.body, seen.body), ("PR の題の sha256", self.title, seen.title)):
+            if now is not None and then is not None and then != now:
+                out.append(f"{name}（見た値 {then}・今の値 {now}）")
         return out
 
     def as_dict(self) -> dict[str, Any]:
         """見た対象を記録する形（事象の payload の `seen` と、リクエストの隣の `.seen.json`）。承認の対象の値は分かるときだけ置く。"""
         extra = {"repo": self.repo, "pr": self.pr, "base": self.base, "production": self.production, "presentation": self.presentation}
-        return {"head": self.head, "material_sha256": self.material, **{k: v for k, v in extra.items() if v is not None}}
+        seen = {"head": self.head, "material_sha256": self.material, "body_sha256": self.body, "title_sha256": self.title}
+        return {**seen, **{k: v for k, v in extra.items() if v is not None}}
 
     @classmethod
     def from_dict(cls, raw: Any) -> Target:
@@ -98,11 +107,13 @@ class Target:
             raw.get("base") if isinstance(raw.get("base"), str) else None,
             production if isinstance(production, bool) else None,
             raw.get("presentation") if isinstance(raw.get("presentation"), str) and raw.get("presentation") else None,
+            raw.get("body_sha256"),
+            raw.get("title_sha256"),
         )
 
     def presented(self, now: "Target") -> "Target":
-        """提示した対象（承認の対象と本番へ反映されるか）に、回答した者が見た `now` の head と承認資料を重ねた対象。"""
-        return replace(self, head=now.head, material=now.material)
+        """提示した対象（承認の対象と本番へ反映されるか）に、回答した者が見た `now` の head・承認資料・本文と題を重ねた対象。"""
+        return replace(self, head=now.head, material=now.material, body=now.body, title=now.title)
 
 
 @dataclass(frozen=True)
@@ -134,15 +145,13 @@ def pr_url(repo: Optional[str], number: Optional[int]) -> Optional[str]:
     return f"https://github.com/{repo}/pull/{number}" if repo and number else None
 
 
-def _waiting_context(v: run.View, prog: run.StepProgress) -> dict[str, Any]:
+def _waiting_context(v: run.View, stage: stages.StageDef, prog: run.StepProgress) -> dict[str, Any]:
     """待っている工程から見た文脈。スプリントの文脈に、その工程の終わったステップの出力を順に重ねる。
 
     工程の出力（`outputs_recorded`）は工程が終わる時にだけ書かれるため、工程の途中の承認ゲート（設計承認ゲートの
-    設計 PR など）はステップの記録（`step_recorded` の report.outputs）から読む。"""
+    設計 PR など）はステップの記録（`step_recorded` の report.outputs。設計 PR は items でも補う: `stages.step_outputs`）から読む。"""
     out = v.context()
-    for report in prog.done.values():
-        if isinstance(report.get("outputs"), dict):
-            out.update(report["outputs"])
+    out.update(stages.step_outputs(stage, prog.done))
     return out
 
 
@@ -150,8 +159,8 @@ def question(v: run.View, m: run.Move, *, repo: Optional[str] = None, target: Ta
     """待っている手 `m`（`run.Action.GATE`）の質問。PR は設計承認ゲートなら設計 PR、ほかはスプリントの PR。"""
     if m.action != run.Action.GATE or m.stage is None or m.step is None or m.progress is None:
         raise model.Refused("回答を待つ工程が無い")
-    ctx = _waiting_context(v, m.progress)
-    key = "design_pr" if m.step.gate == DESIGN_GATE else "pr"
+    ctx = _waiting_context(v, m.stage, m.progress)
+    key = stages.DESIGN_PR if m.step.gate == DESIGN_GATE else "pr"
     number = ctx[key] if isinstance(ctx.get(key), int) else None
     qid = question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
     return Question(qid, v.machine_id, m.stage.name, m.step.id, m.step.gate, tuple(run.choices(m)), number, pr_url(repo, number), target)
@@ -183,6 +192,10 @@ def routes(q: Question) -> dict[str, Any]:
         seen += ["--head", q.target.head]
     if q.target.material:
         seen += ["--material-sha256", q.target.material]
+    if q.target.body:
+        seen += ["--body-sha256", q.target.body]
+    if q.target.title:
+        seen += ["--title-sha256", q.target.title]
     if q.target.presentation:
         seen += ["--presentation", q.target.presentation]
     return {a: result.command(TOOL, q.machine_id, "--gate", q.id, "--result", a, *seen, ask=_asks(q, a)) for a in q.choices}
@@ -201,6 +214,8 @@ def describe(q: Question) -> dict[str, Any]:
         "pr_url": q.pr_url,
         "head": q.target.head,
         "material_sha256": q.target.material,
+        "body_sha256": q.target.body,
+        "title_sha256": q.target.title,
         "choices": list(q.choices),
     }
 
@@ -217,6 +232,11 @@ def gate_result(q: Question, metrics: Optional[Mapping[str, Any]] = None, presen
 
 def material_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def text_sha256(text: str) -> str:
+    """PR の本文と題の sha256（UTF-8 のバイト列。`ndf records reading` の本文のハッシュと同じ計算）。"""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 # --- 承認資料 -------------------------------------------------------------------------------------

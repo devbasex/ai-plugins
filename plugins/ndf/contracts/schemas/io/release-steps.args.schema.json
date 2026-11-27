@@ -35,6 +35,10 @@
           "type": "string",
           "description": "提示した HEAD の SHA（present の outputs.head）"
         },
+        "--material-sha256": {
+          "type": "string",
+          "description": "回答した承認資料のファイル全体の SHA-256（--by user で必須。present の routes が固定する。#4446）"
+        },
         "--by": {
           "type": "string",
           "enum": [
@@ -80,6 +84,32 @@
         "subcommand",
         "--pr",
         "--production"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "approval-state",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--pr": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr"
       ]
     },
     {
@@ -384,6 +414,32 @@
       "required": [
         "subcommand",
         "--revision"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "pull-checks",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--root": {
+          "type": "string",
+          "default": ".",
+          "description": "リポジトリの根"
+        },
+        "--repo": {
+          "type": "string",
+          "description": "<所有者>/<リポジトリ>。省けば origin"
+        },
+        "--pr": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pr"
       ]
     },
     {

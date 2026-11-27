@@ -519,7 +519,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
         {"fix": {"fixed": ["r1-1", "r1-2"], "reported": 2}, "round": 1, "scope": "full", "verdict": drive.CHANGES_REQUIRED},
         {"round": 2, "scope": "since", "verdict": fin.CONVERGED},
     ]
-    made_by_reviewer = {"mvv": None, "redline": False, "by_ndf": False}
+    made_by_reviewer = {"mvv": None, "redline": False, "by_ndf": False, "defer": None}
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME) == {
         "final": fin.CONVERGED,
         "findings": [

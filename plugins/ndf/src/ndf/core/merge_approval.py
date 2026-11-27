@@ -2,7 +2,7 @@
 
 `ndf ci merge`・`ndf ci answer` と、工程の承認ゲート（`progress.gate`）・承認ゲートの直前の MVV 判定（`domains.records.mvv_gate`）・
 リリースの手順（`domains.release.trail`）が同じ行の形と判定を使う。工程（`ndf.progress`）とドメイン（`ndf.domains`）の
-両方から読むので、その下の層に置く。証跡の担い手の語と、証跡を書けないときの例外 `TrailError` もここが持つ。
+両方から読むので、その下の層に置く。証跡を書けないときの例外 `TrailError` もここが持つ（担い手の語は `core.approval_words`）。
 
 承認の対象は 4 つの値（ベースリポジトリ・PR の番号・マージ先・HEAD）で、証跡の行はその対象・回答・担い手・
 「本番へ反映されるか」・回答の記録の識別子を持つ。
@@ -11,28 +11,12 @@
 from __future__ import annotations
 
 import re
-from enum import StrEnum
 from typing import NamedTuple, Sequence
 
 from ndf import identity
 from ndf.adapters.github import Authored, GitHub, Viewer
 from ndf.adapters.publish import Publisher
-from ndf.core.approval_words import ANSWERS, APPROVED
-
-# 証跡の担い手の行。迂回の前提に数えるのは利用者の証跡だけ（#3506 の I9）
-BY_LINE = "担い手:"
-
-
-class By(StrEnum):
-    """証跡の担い手（旧いプラグインの `approve --by` と同じ値）。"""
-
-    USER = "user"  # 利用者
-    MVV = "mvv"  # MVV 判定
-
-
-USER_BY, MVV_BY = By.USER.value, By.MVV.value
-BY_CHOICES = tuple(b.value for b in By)
-
+from ndf.core.approval_words import ANSWERS, APPROVED, BY_CHOICES, BY_LINE, MVV_BY, USER_BY, By  # noqa: F401
 
 # マージの承認の証跡のマーカー（#4409 の決定 7）。リリースの PR の証跡（`ndf:release-approval`）と別で、`ndf ci merge` だけが読む。
 # CD の workflow の承認の検査はリリースのマーカーを含むコメントだけで起動するので、この文字列はそれを含まない

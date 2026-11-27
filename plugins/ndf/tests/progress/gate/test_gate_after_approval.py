@@ -16,8 +16,8 @@ from ndf.progress.gate import answering, asking
 BY = "human:reviewer"
 
 
-def _approve(st, tid, q, head, key="k-release", value="approved"):
-    return gate.answer(st, tid, gate.Answer(q.id, value, "出してよい", BY, key, seen=gate.Target(head=head)))
+def _approve(st, tid, q, head, key="k-release", value="approved", body=None):
+    return gate.answer(st, tid, gate.Answer(q.id, value, "出してよい", BY, key, seen=gate.Target(head=head, body=body)))
 
 
 # （提示した対象の「本番へ反映されるか」（None は提示した対象が無く分からない）・リリースのプランへ差し込む承認の head
@@ -40,6 +40,7 @@ def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new
     why = gate.recheck(st, tid, moved, lambda seen, now: (seen, now) == ("h1", "h2"))
     if injected is None:
         assert why is not None and "対象が変わった" in why
+        flow.turn(tid)  # 未了に戻した読み手役のステップを打ち直してから待つ（#4446）
         new = gate.waiting(run.read(st, tid))
         assert new is not None and new.id != q.id and new.gate == "release"
         assert gate.approved_head(run.read(st, tid), "release", st.root) == "h1"
@@ -57,12 +58,15 @@ def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new
     assert got["approved_head"] == injected
 
 
-def test_a_range_with_code_after_the_release_approval_asks_again(st, new_table, release_question):
+@pytest.mark.parametrize(("body", "docs"), [("b1", False), ("b2", True)], ids=["code-range", "changed-body"])
+def test_a_range_with_code_or_a_changed_body_after_the_release_approval_asks_again(st, new_table, release_question, flow, body, docs):
     tid = new_table()
     old = release_question(tid)
-    _approve(st, tid, old, "h1")
-    why = gate.recheck(st, tid, lambda q, **_: gate.Target(head="h2"), lambda seen, now: False)
+    _approve(st, tid, old, "h1", body="b1")
+    # 本文が変わっていれば、加わった範囲が文書だけでも出し直す
+    why = gate.recheck(st, tid, lambda q, **_: gate.Target(head="h2", body=body), lambda seen, now: docs)
     assert why is not None and "対象が変わった" in why
+    flow.turn(tid)  # 未了に戻した読み手役のステップを打ち直してから待つ（#4446）
     new = gate.waiting(run.read(st, tid))
     assert new is not None and new.id != old.id and new.gate == "release"
 
@@ -73,6 +77,7 @@ def test_the_design_gate_asks_again_even_for_docs_only(st, new_table, flow):
     q = gate.waiting(run.read(st, tid))
     _approve(st, tid, q, "h1")
     gate.recheck(st, tid, lambda q, **_: gate.Target(head="h2"), lambda seen, now: True)
+    flow.turn(tid)
     assert gate.waiting(run.read(st, tid)) is not None
 
 
@@ -154,7 +159,7 @@ def _material(st, q, head, text="資料 A\n"):
 
 
 def _hub(head):
-    return SimpleNamespace(pull=lambda n: SimpleNamespace(head_sha=head))
+    return SimpleNamespace(pull=lambda n: SimpleNamespace(head_sha=head, body="本文", title="題"))
 
 
 DOCS_ONLY = lambda seen, now: (seen, now) == ("hA", "hB")  # noqa: E731
@@ -177,7 +182,7 @@ SEEN = {
 
 
 @pytest.mark.parametrize("case", SEEN.values(), ids=SEEN.keys())
-def test_the_recheck_compares_only_the_material_the_answerer_saw(st, repo, new_table, release_question, monkeypatch, case):
+def test_the_recheck_compares_only_the_material_the_answerer_saw(st, repo, new_table, release_question, flow, monkeypatch, case):
     placed, hashed, change, now, expect, reads = case
     tid = new_table()
     q = release_question(tid)
@@ -200,6 +205,7 @@ def test_the_recheck_compares_only_the_material_the_answerer_saw(st, repo, new_t
     if expect == CARRIED:
         assert gate.approved_head(run.read(st, tid), "release", st.root) == "hB"
     if expect is not None and expect != CARRIED:
+        flow.turn(tid)  # 未了に戻した読み手役のステップを打ち直してから待つ（#4446）
         assert gate.waiting(run.read(st, tid)) is not None
     if expect == "head の SHA":
         assert "sha256" not in why

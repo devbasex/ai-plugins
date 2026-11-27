@@ -229,7 +229,7 @@ def _perform(spec: dict[str, Any], act: Any) -> Outcome:
     """手を実行する。ステップは耐久ステップ、待ちは耐久の recv で行う。"""
     if isinstance(act, RunStep):
         out = run_step(spec, act.step, act.attempt)
-        return Outcome(out["status"], out["kind"], out["retry_after"])
+        return Outcome(out["status"], out["kind"], out["retry_after"], summary=out["summary"])
     if isinstance(act, Sleep):
         durable.recv(TOPIC_RETRY, act.seconds)
         return Outcome(SLEPT)

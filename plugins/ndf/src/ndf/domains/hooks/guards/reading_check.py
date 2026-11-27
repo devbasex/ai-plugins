@@ -43,6 +43,13 @@ REASON = (
     "`ndf records reading add --file <JSON>` で記録してから、同じ文の質問を出し直す。"
     "手順は Skill development-workflow の references/approval-request.md の「読み手役の確認」にある。"
 )
+# 承認ゲートの質問は、問う側が読み手役を起動しない。読み手役のステップを打ち直して質問を作り直す（#4446）
+GATE_REASON = (
+    "{kind}を止めた（{words}）。{why}。読み手役を自分で起動せず、`ndf records reading check --gate <種類> --pr <番号> "
+    "--questions-out <ファイル>` で確かめ、合わなければ、工程の承認ゲートでは `ndf progress reread <ステートマシンの ID>`、"
+    "会話のセッションのリリースでは `ndf document-rebuild gate --gate release --pr <番号> --material <ファイル>` を打ち直してから、"
+    "記録した質問を 1 字も変えずに出す。手順は Skill development-workflow の references/approval-request.md にある。"
+)
 
 
 def check(ctx, svc) -> Verdict:
@@ -66,7 +73,8 @@ def check(ctx, svc) -> Verdict:
 
 def denial(kind: str, words: Sequence[str]) -> str:
     """止める理由。区分と語だけで決まる固定の文（同じ理由の拒否を数えるため、質問の文やハッシュ値を入れない）。"""
-    return REASON.format(kind=dict(_KINDS)[kind], words="・".join(words), why="。".join(_REASONS[w] for w in words))
+    template = GATE_REASON if kind == GATE else REASON
+    return template.format(kind=dict(_KINDS)[kind], words="・".join(words), why="。".join(_REASONS[w] for w in words))
 
 
 def _kind(metadata: Any) -> Optional[str]:

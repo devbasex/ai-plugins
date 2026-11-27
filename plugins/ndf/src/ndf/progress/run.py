@@ -13,8 +13,7 @@
   直前の MVV 判定が省けると決めた承認ゲートは、回答した者 `service:mvv` の承認を書いて人へ質問せずに通す（#3745）
 - スプリントの完了と同じトランザクションで `Env.ended` を打つ（レーンの行を終える口。決定 17。`ndf.progress.gate.lane_env`）
 - 工程の出力は工程の出力の規約で照らしてから終了のマーカーを付ける。合わなければマーカーを付けず失敗にする（受け入れ条件 8）
-- 課題の工程表とスプリント PR の「通した工程」は終了のマーカーから作る（受け入れ条件 6）。書けなくても工程は進め、
-  `resync` で何度でも同じ結果へ揃え直せる（3377-9）
+- 課題の工程表とスプリント PR の「通した工程」は終了のマーカーから作る（受け入れ条件 6）。書けなくても工程は進め、`resync` で揃え直せる（3377-9）
 """
 
 from __future__ import annotations
@@ -36,6 +35,7 @@ from ndf.contracts import causes, facts, limits, result
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
 from ndf.progress import command, definition, invoke, issue_values, model, stages, store
+from ndf.progress.folding import REQUEST_CHANGES, StepProgress, answer_word, step_progress
 from ndf.progress.records import Records, github_records, sync_records
 from ndf.progress.run_view import (
     ACTOR,
@@ -56,15 +56,9 @@ from ndf.progress.run_view import (
 TOOL = __package__.rpartition(".")[2]
 
 
-def _answer(word: str) -> str:
-    """回答の語（表 answers の行）。表に無ければ import の時点で `FactsError`。"""
-    return str(facts.row(result.ANSWERS, word)["id"])
-
-
 # 回答の語（承認・変更要求・承認しない）
 APPROVED = invoke.APPROVED
-REQUEST_CHANGES = _answer("request_changes")
-REJECTED = _answer("rejected")
+REJECTED = answer_word("rejected")
 # 外から待つ問い合わせの間隔と、作業が排他を取るまでの待ちの間隔（どちらも設定の値）
 WAIT_POLL = plan_cli.WAIT_POLL
 LOCK_POLL = durable.POLL
@@ -111,91 +105,6 @@ def append(
 
 def _write(st: store.Store, machine_id: str, *drafts: model.EventDraft) -> list[int]:
     return append(st, machine_id, lambda _v: list(drafts))
-
-
-# --- 工程の中のステップの進み ---------------------------------------------------------------
-
-
-@dataclass
-class StepProgress:
-    """実行中の行のステップの進み。`generation` は変更要求の回数で、変更を要求するとステップを初めから流し直す。
-
-    `anchor` は回答を数え始める事象の番号（行の開始・ステップの記録・変更要求の後の回答だけを使う）。
-    `retries` は行の打ち直し（失敗の後の開始）の回数で、作業へ渡す（プランは打ち直すたびに新しい回を始める。同じ回のキーで
-    打つと、プランは終わった回のバックアップの結果を返すだけだからである）。`redo` は工程全体の出力が規約に合わずに行が失敗したか。
-    真なら次の開始（`retry` の後）で終わったステップの記録を無効にし、ステップを初めから流し直す（同じ出力を照らし直すだけにしない）。
-    """
-
-    generation: int = 0
-    retries: int = 0
-    done: dict[str, dict[str, Any]] = field(default_factory=dict)
-    waiting: Optional[dict[str, Any]] = None
-    anchor: int = 0
-    answer: Optional[model.Event] = None
-    notes: Optional[str] = None
-    failed: bool = False
-    redo: bool = False
-
-    def next_step(self, stage: stages.StageDef) -> Optional[stages.StepDef]:
-        for st in stage.steps:
-            if st.id not in self.done:
-                return st
-        return None
-
-    def answer_value(self) -> Optional[str]:
-        return str(event_payload(self.answer)["answer"]) if self.answer is not None else None
-
-    def see(self, ev: model.Event) -> None:
-        """事象 1 つを読んで進みを書き換える。変更要求（承認ゲートの request_changes）なら世代を上げてステップを初めから流し直す。"""
-        handle = _SEES.get(ev.draft.kind)
-        if handle is not None:
-            handle(self, ev, event_payload(ev))
-
-    def _started(self, ev: model.Event, _p: dict[str, Any]) -> None:
-        """行の開始。数え始めをここへ移し、失敗の後の開始なら打ち直しを数える（出力の失敗なら済んだステップも捨てる）。"""
-        self.anchor, self.answer, self.waiting = ev.seq, None, None
-        if self.failed:
-            self.retries += 1
-            self.done = {} if self.redo else self.done
-            self.failed = self.redo = False
-
-    def _failed(self, _ev: model.Event, p: dict[str, Any]) -> None:
-        """行の失敗。止まったステップが無い（工程全体の出力が規約に合わない）なら、次の開始で初めから流し直す。"""
-        self.failed = True
-        self.redo = "step" in p and p["step"] is None
-
-    def _recorded(self, ev: model.Event, p: dict[str, Any]) -> None:
-        """ステップの記録。終わったなら結果を残し、ほかは待ちにする。数え始めをここへ移す。"""
-        if p["status"] == FINISHED:
-            self.done[p["step"]], self.waiting = p["report"], None
-        else:
-            self.waiting = p
-        self.anchor, self.answer = ev.seq, None
-
-    def _answered(self, ev: model.Event, p: dict[str, Any]) -> None:
-        """回答。承認ゲートの変更要求なら世代を上げて初めから流し直し、ほかは数え始めの後の回答だけを残す。"""
-        if p["answer"] == REQUEST_CHANGES and p["kind"] == invoke.LISTEN:
-            self.generation += 1
-            self.done, self.waiting, self.answer, self.anchor = {}, None, None, ev.seq
-            self.notes = p["notes"]
-        elif ev.seq > self.anchor:
-            self.answer = ev
-
-
-# 事象の種類 → 進みを書き換える StepProgress のメソッド（表に無い種類は進みを変えない）
-_SEES: dict[str, Callable[[StepProgress, model.Event, dict[str, Any]], None]] = {
-    ANSWERED: StepProgress._answered,
-    STARTED: StepProgress._started,
-    FAILED: StepProgress._failed,
-    STEP_EVENT: StepProgress._recorded,
-}
-
-
-def step_progress(v: View, stage: str) -> StepProgress:
-    prog = StepProgress()
-    for ev in v.row_events(stage):
-        prog.see(ev)
-    return prog
 
 
 # --- 次の 1 手（純粋な判断） ----------------------------------------------------------------
@@ -262,7 +171,8 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
     listen = invoke.is_listen(step)
     answer = None if _void_answer(v, prog.answer, step.gate) else prog.answer
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
-    skip = listen and prog.waiting is None and model.mvv_skip(prog.done, s.before(step.id), step.gate) is not None
+    held = prog.waiting is not None or step.id in prog.held
+    skip = listen and not held and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None
     if waiting and answer is None and not skip:
         return Move(Action.GATE, s, step, prog)
     return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, answer)
@@ -423,6 +333,8 @@ class Env:
     records: Callable[[Path], Records] = github_records
     sleep: Callable[[float], None] = time.sleep
     ended: Callable[[Any, str], Any] = lambda _conn, _machine_id: None  # スプリントの完了と同じトランザクションで打つ
+    # スプリントが計画のレーンの行にあるか（読み手役のステップを済ませる判定。レーンは `ndf.progress.gate.lane_env` が読む）
+    in_lane: Callable[[store.Store, str], bool] = lambda _st, _machine_id: False
 
 
 def work_root(root: Path, machine_id: str) -> Path:
@@ -589,7 +501,7 @@ def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     if m.event is not None and model.mvv_answer_void(event_payload(m.event), m.step.gate):
         return report(v, waiting)
     if m.event is None:
-        held = model.mvv_skip(m.progress.done, m.stage.before(m.step.id), m.step.gate)
+        held = model.mvv_skip(m.progress.done, m.stage.mvv_before(m.step.id), m.step.gate)
         if held is None:
             return report(v, waiting)
         qid = model.question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
@@ -624,7 +536,7 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     if m.step is None:
         _finish_stage(d, v, m.stage)
     else:
-        d.write(_run_step(d, v, m.stage, m.step))
+        d.write(*_run_step(d, v, m.stage, m.step))
     if decide(read(d.st, d.machine_id)).stage != m.stage:
         d.synced()
     return None
@@ -796,25 +708,87 @@ def _failed(s: stages.StageDef, step: Optional[str], rev: int, kind: str, detail
     return _failed_with(s, step, rev, causes.cause(kind, detail))
 
 
-def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepProgress, res: invoke.StageResult) -> model.EventDraft:
+def step_event(v: View, stage: str, payload: dict[str, Any]) -> model.EventDraft:
+    """工程 `stage` のステップ記録の事象の下書き。"""
+    return model.EventDraft(STEP_EVENT, ACTOR, stage, payload=payload, rev=v.rev)
+
+
+def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepProgress, res: invoke.StageResult) -> list[model.EventDraft]:
     """ステップの結果を事象にする。終われば出力の規約で照らし、承認ゲートで止まれば待ちを残し、止まれば失敗にする。
 
-    出力の規約は終わった結果（ok）だけに当てる。承認ゲートの待ちの結果は出力を持たないためである。
+    出力の規約は終わった結果（ok）だけに当てる。承認ゲートの待ちの結果は出力を持たないためである。読み手役のステップが
+    文書を直して `outputs.review_again` を返したら、続けて設計のレビューから流し直す事象を足す（`review_again_drafts`。#4446）。
     """
     if res.status == result.STOPPED:
         cause = res.cause if res.cause is not None else causes.cause("unknown", "作業が理由なく止まった")
-        return _failed_with(s, step.id, v.rev, cause)
+        return [_failed_with(s, step.id, v.rev, cause)]
     errs = definition.validate_io(step.output_ref, res.report) if step.output_ref and res.status == result.OK else []
     if errs:
-        return _failed(s, step.id, v.rev, "bad_report", f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")
+        return [_failed(s, step.id, v.rev, "bad_report", f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")]
     status = FINISHED if res.status == result.OK else "waiting"
     payload = {"step": step.id, "status": status, "report": res.report, "generation": prog.generation, "warnings": list(res.warnings)}
-    return model.EventDraft(STEP_EVENT, ACTOR, s.name, payload=payload, rev=v.rev)
+    done = step_event(v, s.name, payload)
+    again = review_again_drafts(v, s, step.gate, res.report) if status == FINISHED and step.kind == stages.READING_KIND else []
+    return [done, *again]
+
+
+def review_again_drafts(v: View, s: stages.StageDef, gate: Optional[str], report: Mapping[str, Any]) -> list[model.EventDraft]:
+    """`outputs.review_again` を受けて、設計のレビューから承認ゲート `gate` の前までのステップを未了に戻す事象（#4446）。
+    最初の事象が戻したことと `review_again` のコミットを持ち、工程の記録に残る（`reading_args` が読む）。"""
+    again = stages.review_again_of(report)
+    if again is None:
+        return []
+    gen, why = step_progress(v, s.name).generation, f"読み手役の直しで文書を push した（{again['commit']}）ので、設計のレビューから流し直す"
+    drafts = [
+        {"step": i, "status": stages.RESET, "report": None, "generation": gen, "reason": why} for i in stages.review_again_steps(s, gate)
+    ]
+    drafts[0].update({stages.REVIEW_AGAIN: again, "gate": gate})
+    return [step_event(v, s.name, p) for p in drafts]
+
+
+def reading_args(v: View, s: stages.StageDef, gate: Optional[str]) -> list[str]:
+    """読み手役のステップへ足す引数を、工程の記録とゲートの名前だけから作る（`stages.reading_flags`。#4446 の計画の (7)）。"""
+    prog = step_progress(v, s.name)
+    return stages.reading_flags(s, [a for a in prog.again if a["gate"] == gate], prog.finished_at)
+
+
+def _reading_run(v: View, s: stages.StageDef, step: stages.StepDef, run: invoke.StageRun, work_dir: Path) -> invoke.StageRun:
+    """読み手役のステップの argv に、保存先・結果ファイルと工程の記録から作る引数（`reading_args`）を足す。"""
+    out = ["--state-dir", str(work_dir), "--out", str(work_dir / stages.READING_OUT)]
+    args = {**run.args, "argv": [*run.args["argv"], *out, *reading_args(v, s, step.gate)]}
+    return replace(run, inputs=_reading_inputs(v, s, step.gate, run.inputs), args=args)
+
+
+def _reading_inputs(v: View, s: stages.StageDef, gate: Optional[str], inputs: Mapping[str, Any]) -> dict[str, Any]:
+    """読み手役のステップの入力の MVV 判定を、同じ工程の判定のステップの記録に差し替える。文脈は工程が終わるまで
+    書かれず、前の工程の判定が残るためである。判定が無ければ渡さない。"""
+    got = {k: value for k, value in inputs.items() if k != model.MVV_KEY}
+    step = model.MVV_GATE_STEPS.get(gate) if gate else None
+    done = step_progress(v, s.name).done
+    outputs = done[step].get("outputs") if step in done else None
+    held = outputs.get(model.MVV_KEY) if isinstance(outputs, dict) else None
+    if isinstance(held, dict) and model.MVV_KEY in (*s.inputs, *s.optional_inputs):
+        got[model.MVV_KEY] = held
+    return got
+
+
+def _reading_skipped(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef, prog: StepProgress) -> Optional[list[model.EventDraft]]:
+    """読み手役のステップを打たずに済ませるなら、済ませた記録の事象。打つなら None（`model.reading_skip`）。"""
+    gate = next((st for st in s.steps if st.kind == stages.GATE_KIND and st.gate == step.gate), None)
+    waiting_gate = gate is not None and gate.id in prog.held
+    in_lane = step.gate == model.release_gate() and d.env.in_lane(d.st, v.machine_id)
+    if not model.reading_skip(prog.done, s.before(step.id), step.gate, waiting_gate, in_lane):
+        return None
+    why = "計画のレーンの行にあるスプリントなので" if in_lane else "直前の MVV 判定が承認ゲートを省くので"
+    rep = result.result(TOOL, result.OK, f"{why}、読み手役のステップ {step.id} を打たずに済ませた")
+    payload = {"step": step.id, "status": FINISHED, "report": rep, "generation": prog.generation, "warnings": []}
+    return [step_event(v, s.name, payload)]
 
 
 def step_location(step: str, prog: StepProgress) -> str:
-    """ステップのプランの実行の保存先の名前。変更要求（世代）で新しい保存先にする（打ち直しは同じ保存先の新しい回）。"""
-    return f"{step}-g{prog.generation}"
+    """ステップのプランの実行の保存先の名前。変更要求（世代）と未了に戻した記録（#4446）で新しい保存先にする（打ち直しは同じ保存先の新しい回）。"""
+    reset = prog.resets[step] if step in prog.resets else 0
+    return f"{step}-g{prog.generation}" + (f"-r{reset}" if reset else "")
 
 
 def step_dir(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> Path:
@@ -843,17 +817,24 @@ def approved_seen(v: View, stage: str, root: Path) -> Optional[dict[str, Any]]:
     return None
 
 
-def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> model.EventDraft:
-    """ステップを 1 つ呼ぶ。打ち直しで直る止まりは方針どおりに打ち直す（SF8）。"""
+def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> list[model.EventDraft]:
+    """ステップを 1 つ呼ぶ。打ち直しで直る止まりは方針どおりに打ち直す（SF8）。読み手役のステップは済ませるかを先に決める（#4446）。"""
     prog = step_progress(v, s.name)
+    skipped = _reading_skipped(d, v, s, step, prog) if step.kind == stages.READING_KIND else None
+    if skipped is not None:
+        return skipped
     try:
         inputs = invoke.resolve_inputs(s, v.context())
     except invoke.StageInputError as exc:
-        return _failed(s, step.id, v.rev, exc.kind, str(exc))
-    run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries, approved=approved_seen(v, s.name, d.st.root))
+        return [_failed(s, step.id, v.rev, exc.kind, str(exc))]
+    approved = approved_seen(v, s.name, d.st.root)
+    run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries, approved=approved)
     waited = prog.waiting is not None and prog.waiting["step"] == step.id
     ans = prog.answer_value() if waited else None
     work_dir = step_dir(d, v, s, step)
+    if step.kind == stages.READING_KIND:
+        work_dir.mkdir(parents=True, exist_ok=True)
+        run = _reading_run(v, s, step, run, work_dir)
     res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
     return _step_draft(v, s, step, prog, res)
 
@@ -861,10 +842,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> mo
 def _stage_output(s: stages.StageDef, prog: StepProgress) -> tuple[dict[str, Any], dict[str, Any]]:
     """工程の出力（ステップの結果の並び・要約・定義したキーの出力）と、ステップが出した出力のすべて。"""
     reports = [prog.done[st.id] for st in s.steps]
-    merged: dict[str, Any] = {}
-    for rep in reports:
-        if isinstance(rep.get("outputs"), dict):
-            merged.update(rep["outputs"])
+    merged = stages.step_outputs(s, prog.done)
     out: dict[str, Any] = {"steps": reports, "summary": f"{s.name} の {len(reports)} ステップが終わった"}
     kept, _ = stages.keep_declared(s.outputs, merged)
     if kept:

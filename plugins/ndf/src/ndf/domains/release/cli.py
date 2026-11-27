@@ -7,6 +7,8 @@
 | `present` | 会話のセッション | `trail.present`（承認資料の提示。承認ゲート） |
 | `answer` | 会話のセッション | `trail.answer`（回答を証跡に書き、届いたかを確かめる） |
 | `approval-check` | workflow | `trail.check`（証跡の判定を commit status へ） |
+| `approval-state` | 会話のセッション | `land.approval_state`（`merge` と同じ承認の条件の判定を読むだけ） |
+| `pull-checks` | 会話のセッション | `record.pinned_included` と `gather.pull_facts`（版上げの PR に含まれる各 PR の最新の CI の結果を取得し、対象の PR と検査の結果を承認資料に貼れる形で出力する） |
 | `merge` | workflow | `land`（証跡の後に、ブランチ戦略の設定の主体と方式で入れ、要ればベースブランチへ戻す PR） |
 | `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後） |
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く。リリースの PR なら記録を持つ PR を示して止まる） |
@@ -39,6 +41,7 @@ from ndf.domains.release import (
     assemble,
     cleanup,
     forms_decide,
+    gather,
     land,
     materials_decide,
     names_decide,
@@ -125,7 +128,7 @@ def cmd_present(args: argparse.Namespace) -> dict:
     hub = _hub(args)
     material = Path(args.material).read_text(encoding="utf-8") if args.material else hub.pull(args.pr).body
     shown = trail.present(hub, args.pr, material)
-    head = shown.head
+    head, sha = shown.head, trail.material_digest(material)
     if not shown.asked:
         detail = f"#{args.pr}（{head[:12]}）には今の HEAD への回答が既にあり、質問を送らない: {shown.judgment.detail}"
         return result.result(TOOL, result.OK, detail, outputs={"head": head, "state": shown.judgment.state, "writer": writer})
@@ -133,22 +136,24 @@ def cmd_present(args: argparse.Namespace) -> dict:
         TOOL,
         result.GATE,
         f"#{args.pr}（{head[:12]}）の承認資料を提示した。回答を待つ",
-        routes=present_routes(args.pr, head),
+        routes=present_routes(args.pr, head, sha),
         outputs={"head": head},
     )
 
 
-def present_routes(pr: int, head: str) -> dict:
-    """回答ごとに打つ `answer`。担い手（`by`）は打つ側が埋める（`ask` はキーの名前で、打つ側が `--by <値>` を足す）。"""
+def present_routes(pr: int, head: str, material_sha256: str) -> dict:
+    """回答ごとに打つ `answer`。担い手（`by`）は打つ側が埋める（`ask` はキーの名前で、打つ側が `--by <値>` を足す）。
+    提示した資料の SHA-256 を固定する（利用者の回答は最新の提示の資料と照らす。#4446）。"""
+    fixed = ("--presented", head, "--material-sha256", material_sha256)
     return {
-        answer: result.command(TOOL, "answer", "--pr", str(pr), "--answer", answer, "--presented", head, ask=("by",))
+        answer: result.command(TOOL, "answer", "--pr", str(pr), "--answer", answer, *fixed, ask=("by",))
         for answer in approval_decide.ANSWERS
     }
 
 
 def cmd_answer(args: argparse.Namespace) -> dict:
     writer = trail.trail_writer(_strategy(args), merged_by_human=False)
-    judgment = trail.answer(_hub(args), args.pr, args.answer, args.by, args.presented, writer)
+    judgment = trail.answer(_hub(args), args.pr, args.answer, args.by, trail.Shown(args.presented, args.material_sha256), writer)
     return result.result(TOOL, result.OK, f"#{args.pr} の回答が証跡に届いた: {judgment.detail}", outputs={"state": judgment.state})
 
 
@@ -168,6 +173,24 @@ def cmd_approval_check(args: argparse.Namespace) -> dict:
     return result.result(
         TOOL, result.OK, f"#{args.pr} の承認の判定: {got.judgment.detail}", outputs={"state": got.judgment.state, "head": got.pull.head_sha}
     )
+
+
+def cmd_approval_state(args: argparse.Namespace) -> dict:
+    got = land.approval_state(_hub(args), _strategy(args), args.pr)
+    outputs = {"state": got.judgment.state, "head": got.pull.head_sha}
+    return result.result(TOOL, result.OK, f"#{args.pr} の承認の判定: {got.judgment.detail}", outputs=outputs)
+
+
+def cmd_pull_checks(args: argparse.Namespace) -> dict:
+    hub, strategy = _hub(args), _strategy(args)
+    formats = names_decide.formats_of(strategy.section["release"])
+    numbers = record.pinned_included(hub, args.pr, strategy.production, formats)
+    pulls = tuple(gather.pull_facts(hub, numbers))
+    missing = sorted(set(numbers) - {p.number for p in pulls})
+    if missing:
+        return result.stopped(TOOL, "precondition", f"CI の結果を読めない PR がある: {', '.join(f'#{n}' for n in missing)}")
+    print("\n".join(materials_decide.pull_sections(pulls)))
+    return result.result(TOOL, result.OK, f"#{args.pr} の含む PR {len(pulls)} 件の CI の結果を読んだ", materials_decide.pull_items(pulls))
 
 
 def cmd_merge(args: argparse.Namespace) -> dict:
@@ -313,6 +336,9 @@ def _answer_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--answer", choices=approval_decide.ANSWERS, required=True)
     p.add_argument("--presented", required=True, help="提示した HEAD の SHA（present の outputs.head）")
     p.add_argument(
+        "--material-sha256", help="回答した承認資料のファイル全体の SHA-256（--by user で必須。present の routes が固定する。#4446）"
+    )
+    p.add_argument(
         "--by",
         required=True,
         choices=merge_approval.BY_CHOICES,
@@ -372,6 +398,8 @@ ARGS: dict[Callable[[argparse.Namespace], dict], tuple[Callable[[argparse.Argume
     cmd_present: (_pr, _material),
     cmd_answer: (_pr, _answer_args),
     cmd_approval_check: (_pr, _production),
+    cmd_approval_state: (_pr,),
+    cmd_pull_checks: (_pr,),
     cmd_merge: (_pr, _budget),
     cmd_record: (_pr, _production, _production_sha),
     cmd_verification_record: (_pr, _verification),
