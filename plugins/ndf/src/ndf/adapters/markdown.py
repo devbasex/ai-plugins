@@ -132,7 +132,8 @@ def gfm_tables(text: str) -> list[Table]:
 def _rows_to_close(tokens: tuple[Token, ...], start: int) -> list[TableRow]:
     """`start` から表の閉じまでの行（見出しの行を先頭に含む）。"""
     rows: list[TableRow] = []
-    for token in tokens[start:]:
+    for i in range(start, len(tokens)):
+        token = tokens[i]
         if token.type == "table_close":
             break
         if token.type == "tr_open":
