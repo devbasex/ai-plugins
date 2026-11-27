@@ -152,6 +152,7 @@ STREAM_RESULT_KEYS = (
     PERMISSION_DENIALS,
     "num_turns",
     "duration_ms",
+    values.CLAUDE_COST_KEY,  # 判定役の起動ごとの費用。共通の費用のジャーナルは起動の記録と対応づけられない
     "stop_reason",
 )
 STREAM_CALL_ARGS = ("file_path", "path", "offset", "limit")

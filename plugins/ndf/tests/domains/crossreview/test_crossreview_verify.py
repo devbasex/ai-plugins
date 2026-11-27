@@ -381,12 +381,13 @@ def test_issue_4363_recordable_output_keeps_only_the_result_and_the_tool_calls()
         " " + json.dumps({"message": done["message"], "tool_use_result": done["tool_use_result"], "type": "user"}),
         json.dumps({"type": "tool_output", "content": "読んだ中身"}),
         json.dumps({"type": "assistant", "message": {"content": [text, *use["message"]["content"], *done["message"]["content"]]}}),
-        json.dumps({"type": "result", "result": "回答", "permission_denials": [], "extra": "読んだ中身"}),
+        json.dumps({"type": "result", "result": "回答", "permission_denials": [], "total_cost_usd": 0.25, "extra": "読んだ中身"}),
         '{"type":"user","message":"読んだ中身',
     ]
     saved = participants.recordable_output("\n".join(rows).encode()).decode()
     assert "読んだ中身" not in saved and "\\u8aad" not in saved
     assert "/wt/secret.env" in saved and "回答" in saved and len(saved.splitlines()) == 2
+    assert json.loads(saved.splitlines()[-1])["total_cost_usd"] == 0.25
 
 
 def test_issue_4363_ask_does_not_take_a_negative_answer_when_reading_the_implementation_is_denied(tmp_path: Path) -> None:

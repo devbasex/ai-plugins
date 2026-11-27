@@ -13,7 +13,7 @@
 失敗しても例外で駆動を止めず、起動し直さない。回答なしと注意にする（どの指摘も下がらない）。資料のほかのファイルの読み取りを
 拒否された起動と、外側の JSON の結果か拒否の一覧を確かめられない起動と、差分と指摘の一覧を最後の行まで `Read` した記録の無い起動は、
 成り立たないとした回答だけを採らない（`verify_decide.unlowering`）。記録を確かめるため出力は 1 歩ごとの行にし、保存する
-記録には結果の行と Tool の呼び出しだけを残す（読んだファイルの中身を残さない）。注意は PR の記録に載るので、
+記録には結果の行と Tool の呼び出しだけを残す（Tool が返したファイルの内容は残さない。判定役の回答の引用は残りうる）。注意は PR の記録に載るので、
 手元の絶対パス・指摘の本文・回答の中身を書かない。過程も結果 JSON に出るので、載せるのはエラーの種別と資料の種類・ファイル名までで、
 起動の状態の詳細（標準エラーの原文を含みうる）と絶対パスを含む詳細は、標準エラーのログとは別の、実行者だけが読める記録に残す。
 監視の早期の警告も種類だけを知らせ、標準エラーの行は載せない（`agents.Launch.private`）。
@@ -85,7 +85,7 @@ def _save_records(run: VerifyRun, round_no: int, written: Path, stem: Path, name
         to = stem.with_name(name + record.name.removeprefix(stem.name))
         try:
             data = record.read_bytes()
-            if record.suffix == ".out":  # 読んだファイルの中身は、状態の保存先に残さない
+            if record.suffix == ".out":  # Tool が返したファイルの内容は、状態の保存先に残さない
                 data = participants.recordable_output(data)
         except OSError as exc:
             run.note(round_no, "verify", f"判定役の記録 {to.name} を読めない（{type(exc).__name__}）")
