@@ -92,11 +92,7 @@ def _check_gate(a: argparse.Namespace) -> None:
         return
     if a.ci_test:
         raise ValueError("--local-test と --ci-test は併せて渡せない（--ci-test は必須のチェックの経路だけが使う）")
-    try:
-        found = declared.read_ndf_settings(Path(a.work))
-    except declared.NdfSettingsError as exc:
-        raise final_gate.GateStopped("precondition", f"設定を読めない: {exc}") from None
-    project = found[1] if found is not None else {}
+    project = local_gate.work_settings(Path(a.work))
     if not isinstance(project, dict):
         raise final_gate.GateStopped("precondition", "テストの設定のファイルがオブジェクトでない")
     kind = means.decide(project).kind

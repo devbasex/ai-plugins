@@ -162,12 +162,17 @@ def settings_at(g: git.Git, commit: str, repo_work: Path) -> dict[str, Any]:
         except ValueError as exc:
             raise final_gate.GateStopped("precondition", f"設定が JSON でない（{where}）: {exc}") from None
     else:
-        try:
-            found = declared.read_ndf_settings(repo_work)
-        except declared.NdfSettingsError as exc:
-            raise final_gate.GateStopped("precondition", f"設定を読めない: {exc}") from None
-        data = found[1] if found is not None else {}
+        data = work_settings(repo_work)
     return data if isinstance(data, dict) else {}
+
+
+def work_settings(repo_work: Path) -> Any:
+    """`--work` の設定の中身（無ければ `{}`）。オブジェクトとは限らない。読めなければ `precondition`。"""
+    try:
+        found = declared.read_ndf_settings(repo_work)
+    except declared.NdfSettingsError as exc:
+        raise final_gate.GateStopped("precondition", f"設定を読めない: {exc}") from None
+    return found[1] if found is not None else {}
 
 
 class _LinkTree(Mapping[str, Optional[str]]):
