@@ -393,13 +393,18 @@ def _read_listing(g: git.Git, span: str) -> tuple[dict[str, _Entry], frozenset[s
 
 def _delta(g: git.Git, span: str, listed: Listings) -> _Delta:
     entries, binary = _listing(g, span, listed)
+    return _Delta(entries, binary, _hunks(g, span))
+
+
+def _hunks(g: git.Git, span: str) -> dict[str, tuple[Hunk, ...]]:
+    """差分 `span` の行の差分を、後ろの側のパス（消したファイルは前のパス）ごとに返す。一覧は読まない。"""
     hunks: dict[str, tuple[Hunk, ...]] = {}
     text = g.run_bytes(*_DIFF, span).decode("utf-8", errors="surrogateescape")
     for names, found in _file_blocks(text):
         path = names.get(False) or names.get(True)
         if path is not None:
             hunks[path] = (*(hunks[path] if path in hunks else ()), *found)
-    return _Delta(entries, binary, hunks)
+    return hunks
 
 
 def _changed_rows(hunks: Sequence[Hunk]) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
@@ -616,8 +621,9 @@ def touched_since(g: git.Git, since: str, current: Range, listed: Listings) -> l
     （`current`）に載る head の側の行の番号（#3780）。行で比べられないファイルは行を持たない。`listed` は同じラウンドで読んだ
     一覧（`new_in_pr` が読んだ範囲なら読み直さない）。コミットが手元に無ければ `git.GitError`。"""
     delta = _delta(g, f"{since}..{current.head}", listed)
+    # PR の差分は行の番号だけを使うので、一覧は読まない
+    shown = _hunks(g, f"{current.base}...{current.head}")
     lines = {path: frozenset(n for b in _changed_blocks(hunks) for n in _touched_rows(b)) for path, hunks in delta.hunks.items()}
-    shown = _delta(g, f"{current.base}...{current.head}", listed).hunks
     commentable = {path: frozenset(x.head for h in hunks for x in h.lines if x.head is not None) for path, hunks in shown.items()}
     return leftover_decide.Touched(frozenset(delta.entries), lines, commentable)
 

@@ -14,8 +14,8 @@ from ndf.domains.crossreview.leftover_decide import PARKED, Touched
 from .test_crossreview_journal import ITEMS, V11, _told
 from .test_crossreview_scope import _head, _lines, _write
 
-# a.py の 10 行目だけを変えたラウンド
-TOUCHED = Touched(frozenset({"a.py"}), {"a.py": frozenset({10})})
+# a.py の 10 行目だけを変えたラウンド（PR の差分には 2〜13 行目が載る）
+TOUCHED = Touched(frozenset({"a.py"}), {"a.py": frozenset({10})}, {"a.py": frozenset(range(2, 14))})
 UNCHANGED = {"path": "a.py", "line": 5}
 
 
@@ -291,6 +291,18 @@ def test_sorting_prefers_a_line_over_a_file_only_report_only_when_it_takes_a_com
     journal = journal_mod.FindingJournal()
     journal.enter(2, [_told(path="a.py"), _told(**UNCHANGED)])
     assert journal.sort(TOUCHED._replace(commentable={"a.py": commentable}), {"r2-1"}) == frozenset()
+    row = journal.rows["r2-1"]
+    assert (row["path"], row.get("line")) == ("a.py", line)
+
+
+@pytest.mark.parametrize(
+    ("reports", "line"),
+    [pytest.param((10, 5), 5, id="postable-over-touched"), pytest.param((10,), None, id="touched-outside-pr-diff")],
+)
+def test_sorting_never_places_a_line_outside_the_pr_diff(reports: tuple[int, ...], line) -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(2, [_told(path="a.py", line=n) for n in reports])
+    assert journal.sort(TOUCHED._replace(commentable={"a.py": frozenset({5})})) == frozenset()
     row = journal.rows["r2-1"]
     assert (row["path"], row.get("line")) == ("a.py", line)
 
