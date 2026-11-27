@@ -27,10 +27,15 @@ KEEP = "keep"
 ASK = "ask"
 
 
+def _rows_of(issue: int, verification: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """記録のうち、その課題の行。"""
+    return [r for r in verification if r.get("number") == issue]
+
+
 def _rows_with(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], outcome: str) -> list[Mapping[str, Any]]:
     if verification is None:
         return []
-    return [r for r in verification if r.get("number") == issue and r.get("result") == outcome]
+    return [r for r in _rows_of(issue, verification) if r.get("result") == outcome]
 
 
 def blocking_rows(issue: int, verification: Optional[Iterable[Mapping[str, Any]]]) -> list[Mapping[str, Any]]:
@@ -54,7 +59,7 @@ class Verdict(NamedTuple):
 
 def _all_passed(issue: int, rows: list[Mapping[str, Any]]) -> bool:
     """記録にその課題の行があり、すべて合格か。"""
-    mine = [r for r in rows if r.get("number") == issue]
+    mine = _rows_of(issue, rows)
     return bool(mine) and all(r.get("result") == "passed" for r in mine)
 
 
