@@ -23,7 +23,7 @@ from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
 from ndf.core import merge_approval
 from ndf.domains.records import jsonl, mvv, mvv_gate
-from ndf.progress import model
+from ndf.progress import definition, invoke, model
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress.gate.checks import MvvFacts
@@ -674,3 +674,13 @@ def test_diff_rows_restores_quoted_paths() -> None:
         mm.unquote_path('"\\377"')
     with pytest.raises(mm.DiffError):
         mm.diff_rows("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n-x\n")
+
+
+def test_a_repository_without_an_approved_mvv_keeps_a_null_verdict(repo: Path, notes: list[tuple[int, str]]) -> None:
+    # Task 1・前提 2: 承認済みの MVV が無いリポジトリでは verdict: null のまま人へ質問し、PR へも書かない
+    _base(repo, {".ndf/mvv.json": None, ".ndf/mvv.md": None})
+    ask = Ask(FOLLOW)
+    full = {"issues": [3959], "worktree": str(repo), "mode": "standard", "pace": "fast", "mvv_ref": None, "design_pr": 9}
+    inputs = invoke.resolve_inputs(definition.load_definition("standard").stage("設計"), full)
+    out = mvv_gate.gate(repo, "design", inputs, _hub(5, DOCS), ask)
+    assert out["skip"] is False and out["verdict"] is None and ask.calls == [] and notes == []

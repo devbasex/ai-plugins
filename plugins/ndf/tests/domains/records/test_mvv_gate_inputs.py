@@ -22,7 +22,7 @@ from ndf.progress import command, definition, invoke, model, stage_inputs, store
 
 from . import test_mvv_gate as base
 from ._mvv_gate_records import failures as _failures
-from .test_mvv_gate import DOCS, FOLLOW, HEAD, SHA, Ask, Hub, _base, _hub, _stopped
+from .test_mvv_gate import DOCS, FOLLOW, HEAD, SHA, Ask, Hub, _hub, _stopped
 
 # 設計のブランチの作業場所と、PR のコメントへ書く判定の記録（`test_mvv_gate` の fixture）
 repo = base.repo
@@ -43,14 +43,6 @@ def test_the_flat_plan_input_keeps_todays_outcome(repo: Path, notes: list[tuple[
     out = mvv_gate.gate(repo, "design", _plan_inputs(repo), _hub(5, DOCS), Ask(FOLLOW))
     assert (out["gate"], out["skip"], out["why"], out["verdict"]["verdict"], out["head"]) == ("design", True, [], "follow", HEAD)
     assert [n for n, _ in notes] == [5]
-
-
-def test_a_repository_without_an_approved_mvv_keeps_a_null_verdict(repo: Path, notes: list[tuple[int, str]]) -> None:
-    # Task 1・前提 2: 承認済みの MVV が無いリポジトリでは verdict: null のまま人へ質問し、PR へも書かない
-    _base(repo, {".ndf/mvv.json": None, ".ndf/mvv.md": None})
-    ask = Ask(FOLLOW)
-    out = mvv_gate.gate(repo, "design", _plan_inputs(repo, mvv_ref=None), _hub(5, DOCS), ask)
-    assert out["skip"] is False and out["verdict"] is None and ask.calls == [] and notes == []
 
 
 def test_the_gate_steps_are_steps_of_the_named_stage_documents() -> None:
