@@ -364,7 +364,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `with_choice` | `core/converge/participants.py` | 新設 | `with_choice(spec: agents.Launch, choice: Optional[Any]) -> agents.Launch` | `review_launch`・`read_only_launch`・`reading_launch` が組み立てた起動に組の引数と環境を足し、Codex は `usage_args` を足す |
-| `answer_text` | 同 | 変更 | 変えない | codex の `--json` の出力で `<出力>.answer` があれば、その本文を読む |
+| `answer_text` | 同 | 変更 | 変えない | 結果を探す本文を返す。Codex の `--json` の出力では `<出力>.answer` の末尾を返し、ファイルが無い場合は表の下の「Codex の回答の読み方」に従う |
 | `_start_and_watch` | `adapters/agents.py` | 変更 | 変えない | `AgentStatus.seconds` に起動から終了までの秒を入れる |
 | `codex_usage` | 同 | 新設 | `codex_usage(out: Path) -> Optional[CodexUsage]` | `turn.completed` の行の `usage` を足し合わせる |
 | `codex_cost` | `domains/records/usage.py` | 新設 | `codex_cost(used: Any, model: Optional[str]) -> tuple[str, Optional[float]]`（`used` は `agents.CodexUsage`） | 換算に使ったモデルの名前と、単価表から求めた USD を返す。単価の無いモデルの USD は None |
@@ -380,6 +380,11 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - `_record_experiment` は、終わり方が収束かラウンドの上限のときに書く。結果を読めないシートがあって終わった場合と、誤りで終わった場合は書かない。design と impl の指標は `1 / (1 + 1 ラウンド目の採用された重大な指摘の数)` で、数が None なら null
 - 修正担当は `launch_choice("seat", "fix")`（工程が無いので実験の引数を足さない）。環境変数と引数の指定は効く
 - シートの子の環境から `NDF_CHARGE_TO` を外す
+- Codex の回答の読み方
+  - `--json` の出力を出した起動の回答は、回答のファイルにある。標準出力は回答の代わりにならない
+  - 回答のファイルが無い場合も、`answer_text` は標準出力の末尾を返し、回答の有無は判定しない
+  - この末尾はイベントの行である。回答やコマンドの出力はイベントの中の文字列になっているので、呼び出し元が結果の JSON（`findings` など）を探しても見つからず、回答なしになる
+  - `--json` でない出力の起動は、標準出力の末尾が回答である
 - `codex exec --json` は失敗の理由を標準エラーに出さないので、利用上限とサンドボックスの失敗は標準出力のイベントからも検出する
   - 監視中の利用上限の検出は、`error`・`turn.failed` の行の文を `usage_limit` で調べる。`CodexTail` で追記された完全な行だけを読み、起動の終了時には改行のない最後の行も読む
   - サンドボックスの失敗の検出（`sandbox_failed`）は、`codex_events` で標準出力全体を読み、`type` が `item.completed` のイベントから `item.type` が `command_execution` のものを抽出する。その `item` の `exit_code` が 0 以外で、かつ `aggregated_output` が `bwrap:` で始まる場合に、サンドボックスの失敗と判定する
@@ -399,7 +404,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `answer_text` | 回答のファイルが無い | 途中で終わった | 読み取り | 呼び出し元へ返す（回答なし） | 今の「読めなかった」と同じ | 起動の前に前の回答のファイルを消す |
+| `answer_text` | 回答のファイルが無い | 途中で終わった | 呼び出し元の結果の JSON の検索 | 標準出力の末尾を返す。呼び出し元は結果が見つからないので回答なしと扱う | 今の「読めなかった」と同じ | 起動の前に前の回答のファイルを消す |
 | `codex_usage` | 使用量の行が無い | 失敗した起動 | 解析 | None | 行の `usage` が `unknown` | — |
 | `codex_cost` | 単価が無い | 新しいモデル | 単価表 | None | `report` に不明の件数 | 単価表を足すと次から計算する |
 | `launch_reviewers` | 設定の誤り | `launch_choice` | 起動の前 | 呼び出し元へ返す | `stopped`・`precondition` | どのシートも起動しない |
