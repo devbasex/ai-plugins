@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import fcntl
 from pathlib import Path
 
 import pytest
@@ -305,15 +306,24 @@ def test_the_models_of_another_run_are_not_reported(tmp_path):
     assert records.recorded_models(tmp_path, "run-1") == {"fix": {"name": "fix"}}
 
 
-def test_writing_a_record_does_not_follow_a_planted_link(tmp_path):
+def _temporary(state_dir: Path, digit: str) -> Path:
+    return state_dir / f".{records.MODELS_FILE}.{digit * 32}.tmp"
+
+
+def test_writing_a_record_keeps_the_files_it_did_not_make(tmp_path):
     victim = tmp_path / "victim"
     victim.write_text("keep", encoding="utf-8")
-    (tmp_path / "models.tmp").symlink_to(victim)
+    (tmp_path / "models.tmp").write_text("user", encoding="utf-8")
+    _temporary(tmp_path, "a").symlink_to(victim)
     records._add_models(tmp_path, "run-1", "work", {"name": "impl"})
-    assert victim.read_text(encoding="utf-8") == "keep"
+    assert (victim.read_text(encoding="utf-8"), (tmp_path / "models.tmp").read_text(encoding="utf-8")) == ("keep", "user")
+    assert _temporary(tmp_path, "a").is_symlink()
 
 
-def test_the_next_write_removes_a_left_temporary_file(tmp_path):
-    (tmp_path / "models.tmp").write_text("{", encoding="utf-8")  # 書き込みの途中で強制終了した残り
-    records._add_models(tmp_path, "run-1", "work", {"name": "impl"})
-    assert [p.name for p in tmp_path.iterdir()] == [records.MODELS_FILE]
+def test_the_next_write_removes_only_a_left_temporary_file_nobody_writes(tmp_path):
+    left, writing = _temporary(tmp_path, "b"), _temporary(tmp_path, "c")
+    left.write_text("{", encoding="utf-8")  # 書き込みの途中で強制終了した残り
+    with writing.open("x", encoding="utf-8") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)  # 別の書き込みが書いている途中
+        records._add_models(tmp_path, "run-1", "work", {"name": "impl"})
+        assert (left.exists(), writing.exists()) == (False, True)
