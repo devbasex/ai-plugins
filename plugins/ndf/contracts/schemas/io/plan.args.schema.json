@@ -140,6 +140,72 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "units check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--issue": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "スプリントの課題の番号"
+        },
+        "--omitted": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "実装計画を省いた課題の番号"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "単位のファイルを直に指す（--issue と併せて渡さない）",
+          "x-ndf-positional": true
+        },
+        "--docs": {
+          "type": "boolean",
+          "description": "実装計画のタスクの集合と 2 つの表も突き合わせる"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "units render",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--issue": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "スプリントの課題の番号"
+        },
+        "--omitted": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "実装計画を省いた課題の番号"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "wait",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },

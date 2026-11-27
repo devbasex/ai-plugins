@@ -32,7 +32,7 @@ from ndf.contracts import facts, result, worker_paths
 from ndf.core import branch_strategy, json_pointer, route
 from ndf.core.issue_docs import plan_issues
 from ndf.core.plan import files as plan_files
-from ndf.core.plan import inputs_decide
+from ndf.core.plan import inputs_decide, units_files
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, acceptance_args, has_units, lineup
 from ndf.progress import issue_values, plan_runs, refactor_values
@@ -42,7 +42,7 @@ from ndf.progress.plan_runs import StageResult, StageRun, UnitsStopped
 from ndf.testing import scoped
 
 # 単位の回の保存先のファイル（`reviewed-head` は `impl` のプラン、`stopped-head` と `merge.json` は単位を流す処理が書く）
-REVIEWED_HEAD_FILE = "reviewed-head"
+REVIEWED_HEAD_FILE = units_files.REVIEWED_HEAD
 STOPPED_HEAD_FILE = "stopped-head"
 MERGE_FILE = "merge.json"
 # 打ち直しの判定の、レビューのステップ（ほかのステップと停止理由の語は `resume_of` が持つ。定数にすると同じ語の別の事実と重なる）

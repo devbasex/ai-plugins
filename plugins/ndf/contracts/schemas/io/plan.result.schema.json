@@ -56,6 +56,18 @@
         "waves": {
           "type": "integer",
           "description": "同時に流せる組の数（check）"
+        },
+        "units": {
+          "type": "integer",
+          "description": "単位の数（units check・render）"
+        },
+        "violations": {
+          "type": "integer",
+          "description": "止める理由の数（units check・render）"
+        },
+        "warnings": {
+          "type": "integer",
+          "description": "目安の行数を超えた単位の数（units check・render）"
         }
       }
     },
@@ -74,13 +86,15 @@
               "run",
               "wave",
               "violation",
-              "path"
+              "path",
+              "unit",
+              "split"
             ],
             "description": "項目の種類"
           },
           "name": {
             "type": "string",
-            "description": "プランの名前（plan）"
+            "description": "プランの名前（plan）か単位の名前（unit）"
           },
           "step": {
             "type": [
@@ -148,11 +162,101 @@
           },
           "reason": {
             "type": "string",
-            "description": "プランの誤り（violation）"
+            "description": "プランか単位の誤り（violation）"
           },
           "path": {
             "type": "string",
             "description": "保存先のパス（path）"
+          },
+          "file": {
+            "type": "string",
+            "description": "単位のファイル（unit・split）。実装計画を省いた課題の単位は空"
+          },
+          "order": {
+            "type": "integer",
+            "description": "実行順（unit）。0 は依存の輪で決まらないこと"
+          },
+          "merge": {
+            "type": "integer",
+            "description": "マージの順（unit）"
+          },
+          "after": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "先に要る単位の file・unit・reason（unit）"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "単位が含む課題（unit）"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "担当するタスクの id と課題の番号 issue（unit）"
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "満たす受け入れ条件の <課題>:<番号>（unit）"
+          },
+          "lines": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "見込みの差分の行数（unit）。実装計画を省いた課題の単位は null"
+          },
+          "touches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "触るファイル（unit）"
+          },
+          "rule": {
+            "type": "string",
+            "description": "規則の番号（U1〜U6）か missing・tasks・tables（violation）"
+          },
+          "unit": {
+            "type": "string",
+            "description": "単位の名前（violation・split）。単位に結び付かない違反は空"
+          },
+          "units": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "置き換える単位の name・tasks・after（split）。空なら区切れなかった"
+          },
+          "resplit": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "切り直すタスク（split）"
+          },
+          "remaining": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "案を当てた後に残る違反の rule・unit・reason（split）"
+          },
+          "repoint": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "最後の区切りへ付け替える依存の file・unit・issue（split）"
           }
         },
         "required": [

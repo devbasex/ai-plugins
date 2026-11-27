@@ -52,11 +52,13 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_CLAUDE_KEY_ACCOUNT` | ndf | string | — | API キーで起動した子が、キーを外したときに戻る登録済みのアカウントの名前 | 内部（予告なく変えてよい） |
 | `NDF_CONTEXT_DIR` | user | path | — | 文脈の切り替えの判定の記録と費用の見込みの保存先（ndf relay context）。無ければ旧い状態の根の context（旧いプラグインと同じ保存先） | 内部（予告なく変えてよい） |
 | `NDF_CONTEXT_LIMIT` | user | integer | — | 文脈の量の運用上限（正の整数）。guard・中継のラッパー・ndf relay context resolve が読む。判断開始の値がこれを上回れば同じ値へ下げる。正の整数でなければ無視する | 内部（予告なく変えてよい） |
+| `NDF_DESIGN_RECORD_DIR` | ndf | path | — | 工程「ドキュメントレビュー」の承認の記録の保存先。ndf progress がステップの子へ渡し、ndf plan units check はレビューした HEAD のコミットを読んで checked.json を書く。無ければ worktree のファイルを読み、記録を書かない | 内部（予告なく変えてよい） |
 | `NDF_FACTORY_RUN` | service | flag | — | サービスの実行ジョブの中で動いているマーカー | 公開 |
 | `NDF_HOOK_OFF` | user | string | — | 止める guard の名前をカンマでつなぐ。all で全部を止める。無ければ全部の guard が働く。閾値はこの変数で受けず、上限の設定から読む | 内部（予告なく変えてよい） |
 | `NDF_ISSUE_REQUEST_FILE` | service | path | — | 作業のリポジトリと別の起票先への起票を、承認資料を書かずにリクエストの 1 行（{repo, title, body, labels} の JSON）として足すファイル。サービスが起票するかを決める。無ければ承認資料で止まる | 公開 |
 | `NDF_LOCK_DIR` | user | path | — | 旧い NDF の Issue の本文を守る錠の保存先。無ければ ~/.claude/<名前>/locks。新しい NDF は読むだけで、状態の保存先の退避がこの保存先を含まないかを確かめる | 内部（予告なく変えてよい） |
 | `NDF_LOOP_EXCLUDE` | service | string | — | 開発ループの選定から、そのループの 1 回だけ外す課題の番号（, か空白で区切る）。同じリポジトリの別の実行が持つ課題をサービスが渡す。無ければ外さない | 公開 |
+| `NDF_MACHINE_ID` | ndf | string | — | ステートマシンの ID。ndf progress が承認の記録の保存先と一緒にステップの子へ渡す | 内部（予告なく変えてよい） |
 | `NDF_MVV_STATE_DIR` | service | path | — | 判断の記録（ask.jsonl）と承認ゲートの変更要求の記録（gate-rejections.jsonl）の保存先。無ければ状態の保存先 | 公開 |
 | `NDF_ORGANIZER_DIR` | ndf | path | — | 外のオーガナイザーとファイルでやり取りする保存先。あればこのセッションは外のオーガナイザーのレーン | 公開 |
 | `NDF_ORGANIZER_LANE` | ndf | string | — | 外のオーガナイザーのレーンの名前。NDF_ORGANIZER_DIR と組で渡す | 公開 |

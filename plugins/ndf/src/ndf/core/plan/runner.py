@@ -48,6 +48,8 @@ from ndf.core.plan.transition_decide import ANSWERED, SLEPT, AwaitAnswer, Outcom
 
 # 結果 JSON の tool の名前はサブコマンドの名前（サブコマンドの表から引く）
 TOOL = cli.tool_of(f"{__package__}.cli")
+# 承認した HEAD・マージ先が変わったときの停止理由の語
+APPROVAL_STALE = "approval_stale"
 CLI_NAME = result.ENTRY
 RUN_FILE = "run.json"
 # 状態の保存先を 1 つの `next` に限るロック（回を選ぶ・ステップの子を打つ間）
@@ -503,7 +505,7 @@ def _deliver(inv: Invocation, baseline: Optional[dict[str, Any]], reply: Reply) 
     mismatch = _pin_mismatch(baseline, reply)
     if mismatch is not None:
         detail = f"{inv.plan.name} への回答を記録しない: {mismatch}（ndf plan wait で今の承認待ちと資料を読み直して回答する）"
-        return result.stopped(TOOL, "approval_stale", detail)
+        return result.stopped(TOOL, APPROVAL_STALE, detail)
     if is_unconfirmed(baseline):
         return _unconfirmed_stop(inv, baseline)
     try:

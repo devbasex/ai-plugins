@@ -12,6 +12,11 @@ ndf plan pending
     チェックアウトの保存先から、待ちを抱えた（PENDING・ENQUEUED・DELAYED）実行を並べる（B5）
 ndf plan check <plan.json>...
     プランの形と、キューの組（触るファイルの重なり・前提）を確かめる
+ndf plan units check [--issue N]... [--omitted N]... [<単位のファイル>...] [--docs]
+    単位のファイルを 1 つのグラフにして確かめる。`--issue` が無ければ環境変数 `NDF_STAGE_INPUT` の `issues`・`plan_omitted`・
+    `worktree` を使う。`NDF_DESIGN_RECORD_DIR` があれば、レビューした HEAD のコミットを読み、通れば `checked.json` を書く
+ndf plan units render [--issue N]... [--omitted N]...
+    実装計画の「レビューの単位」と「並列と直列」の表を書き直し、続けて `check --docs` をする
 
 結果 JSON を標準出力へ 1 行で出す。
 """
@@ -19,7 +24,9 @@ ndf plan check <plan.json>...
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -28,15 +35,30 @@ from pathlib import Path
 from typing import Any, NamedTuple, NoReturn, Optional
 
 from ndf import identity
+from ndf.adapters import github
+from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes, exit_codes, internal, limits, result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import actors, durable
-from ndf.core.plan import files, model, queue_decide, queue_run, runner, wait_decide
+from ndf.core.plan import files, inputs_decide, model, queue_decide, queue_run, runner, units_files, wait_decide
 
 TOOL = runner.TOOL
 # 待ちの上限の既定と、見回りの間隔の方針（contracts/limits/）
 WAIT_DEFAULT = "supervise.wait-default"
 WAIT_POLL = "durable.wait-from-poll"
+# `units` が読む、工程の入力と承認の記録の保存先（`contracts/domains/env.json`）
+STAGE_INPUT_ENV = "NDF_STAGE_INPUT"
+RECORD_DIR_ENV = identity.env_name("design-record-dir")
+# 保存先のファイル。前の 2 つ（と `units_files.REVIEWED_HEAD`）は設計の Pull Request のレビューが書き、後の 1 つは `units check` が書く
+REVIEWED_PR = "reviewed-pr"
+REVIEWED_BASE = "reviewed-base"
+CHECKED_FILE = "checked.json"
+_REVIEWED_PR_FORM = re.compile(r"[^/\s]+/[^#\s]+#([1-9][0-9]*)")
+_REVIEW_LAUNCH_HINT = (
+    "。workflow.launch.review でレビューの起動を差し替えているときは、起動の後ろの --reviewed-out・--reviewed-pr-out・"
+    "--reviewed-base-out・--findings を受けて 3 つのファイルを書き、--reviewed-base-out を受けたら PR の今のマージ先を比較元にする。"
+    "または、この設定を削って既定の起動に戻す"
+)
 
 
 def wait_default_seconds() -> float:
@@ -216,6 +238,221 @@ def _cmd_check(a: argparse.Namespace) -> int:
     )
 
 
+class _UnitsStopped(Exception):
+    """`units` を止める理由。`kind` は停止理由の語。"""
+
+    def __init__(self, kind: str, detail: str) -> None:
+        super().__init__(detail)
+        self.kind = kind
+
+
+class _StageInput(NamedTuple):
+    """`NDF_STAGE_INPUT` のうち `units` が使うキー。工程の外で打てばすべて空。"""
+
+    issues: tuple[int, ...] = ()
+    worktree: str = ""
+    plan_omitted: tuple[int, ...] = ()
+    branch: Optional[str] = None
+    design_pr: Optional[int] = None
+
+
+class _Targets(NamedTuple):
+    """確かめる対象。`paths`（直に指したファイル。根からの相対）か `issues` のどちらか。`inputs` は工程の入力。"""
+
+    root: Path
+    issues: tuple[int, ...]
+    omitted: tuple[int, ...]
+    paths: tuple[str, ...]
+    inputs: _StageInput = _StageInput()
+
+
+class _Record(NamedTuple):
+    """承認の記録の保存先と、そこから読んだレビューした HEAD と PR の番号。"""
+
+    path: Path
+    head: str
+    pr: int
+
+
+def _hub(root: Path) -> github.GitHub:
+    """作業場所のリポジトリの GitHub。テストが差し替える。"""
+    return github.GitHub(Git(root).remote_repo(), github.client())
+
+
+def _criteria_counts(root: Path, issues: tuple[int, ...]) -> dict[int, int]:
+    """課題ごとの受け入れ条件の数（本文を 1 回の一括読み取りで読み、数えるためだけに使う）。"""
+    if not issues:
+        return {}
+    bodies = _hub(root).nodes(issues, "issue", "body")
+    unread = [n for n in issues if n not in bodies or not isinstance(bodies[n].get("body"), str)]
+    if unread:
+        raise _UnitsStopped("precondition", f"課題 {', '.join(f'#{n}' for n in unread)} の本文を読めない")
+    return {n: len(inputs_decide.criteria(bodies[n]["body"])) for n in issues}
+
+
+def _repo_root(cwd: Path) -> Path:
+    return Path(Git(cwd).run("rev-parse", "--show-toplevel").strip())
+
+
+def _positive_ints(held: Any) -> bool:
+    return isinstance(held, list) and all(type(n) is int and n > 0 for n in held)
+
+
+def _stage_input(raw: str) -> _StageInput:
+    """`NDF_STAGE_INPUT` の値。`units` が使うキーの型を確かめる。"""
+    try:
+        held = json.loads(raw)
+    except json.JSONDecodeError:
+        raise _UnitsStopped("invalid", f"環境変数 {STAGE_INPUT_ENV} を JSON として読めない") from None
+    forms = dict(
+        issues=lambda v: _positive_ints(v) and bool(v),
+        worktree=lambda v: isinstance(v, str) and Path(v).is_absolute() and Path(v).is_dir(),
+        plan_omitted=_positive_ints,
+        branch=lambda v: isinstance(v, str) and bool(v),
+        design_pr=lambda v: type(v) is int and v > 0,
+    )
+    if not isinstance(held, dict):
+        raise _UnitsStopped("invalid", f"環境変数 {STAGE_INPUT_ENV} は JSON の object にする")
+    bad = [key for key, fits in forms.items() if key in held and not fits(held[key])]
+    bad += [key for key in ("issues", "worktree") if key not in held]
+    if bad:
+        raise _UnitsStopped("invalid", f"環境変数 {STAGE_INPUT_ENV} のキーが無いか形が違う: {', '.join(bad)}")
+    return _StageInput(**{key: tuple(held[key]) if isinstance(held[key], list) else held[key] for key in forms if key in held})
+
+
+def _relative(root: Path, cwd: Path, given: str) -> str:
+    """引数のファイルを根からの相対パスにする。ファイル自体のリンクは解かない（読み手が断る）。"""
+    full = cwd / given
+    try:
+        return (Path(os.path.realpath(full.parent)) / full.name).relative_to(root.resolve()).as_posix()
+    except ValueError:
+        raise _UnitsStopped("invalid", f"{given}: リポジトリの中のファイルでない") from None
+
+
+def _targets(a: argparse.Namespace, cwd: Path) -> _Targets:
+    issues = tuple(sorted(set(a.issues))) if a.issues is not None else ()
+    omitted = tuple(a.omitted) if a.omitted is not None else ()
+    given = a.files if a.units_cmd == "check" else []
+    if given:
+        if issues or omitted:
+            raise _UnitsStopped("invalid", "単位のファイルを直に指すときは --issue・--omitted を渡さない")
+        root = _repo_root(cwd)
+        return _Targets(root, (), (), tuple(_relative(root, cwd, f) for f in given))
+    if issues:
+        return _Targets(_repo_root(cwd), issues, omitted, ())
+    raw = os.environ.get(STAGE_INPUT_ENV) if a.units_cmd == "check" else None
+    if raw is None or omitted:
+        raise _UnitsStopped("invalid", "確かめる課題が無い（--issue を渡す）")
+    held = _stage_input(raw)
+    return _Targets(Path(held.worktree), tuple(sorted(set(held.issues))), held.plan_omitted, (), held)
+
+
+def _held(path: Path) -> str:
+    """保存先のファイルの中身。無いか読めなければ空。"""
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 無い・読めないものは、足りないファイルとして名前を挙げる
+        return ""
+
+
+def _record(path: Path, targets: _Targets) -> _Record:
+    """保存先を読み、レビューの後に対象が変わっていないことを確かめる。前の `checked.json` は始めに消す。"""
+    (path / CHECKED_FILE).unlink(missing_ok=True)
+    if targets.paths:
+        raise _UnitsStopped("invalid", f"{RECORD_DIR_ENV} があるときは、単位のファイルを直に指さず課題で確かめる")
+    held = {name: _held(path / name) for name in (units_files.REVIEWED_HEAD, REVIEWED_PR, REVIEWED_BASE)}
+    pr = _REVIEWED_PR_FORM.fullmatch(held[REVIEWED_PR])
+    lack = [name for name, value in held.items() if not value or (name == REVIEWED_PR and pr is None)]
+    if lack:
+        launch = units_files.project_of(units_files.Tree(targets.root)).get("workflow")
+        launch = launch.get("launch") if isinstance(launch, dict) else None
+        hint = _REVIEW_LAUNCH_HINT if isinstance(launch, dict) and "review" in launch else ""
+        raise _UnitsStopped("precondition", f"{path} に読めるレビューの記録が無い: {', '.join(lack)}{hint}")
+    now = Git(targets.root).run("rev-parse", "HEAD").strip()
+    head = held[units_files.REVIEWED_HEAD]
+    if now != head:
+        raise _UnitsStopped(runner.APPROVAL_STALE, f"作業場所の HEAD（{now}）がレビューした HEAD（{head}）と違う")
+    assert pr is not None
+    number = int(pr.group(1))
+    given = targets.inputs.design_pr
+    if given is not None and given != number:
+        raise _UnitsStopped("refused", f"入力の設計の PR（#{given}）がレビューした PR（#{number}）と違う")
+    if targets.inputs.branch is None:
+        raise _UnitsStopped("precondition", f"入力にスプリントブランチ（{STAGE_INPUT_ENV} の branch）が無い")
+    return _Record(path, head, number)
+
+
+def _checked_units(a: argparse.Namespace, targets: _Targets, record: Optional[_Record], docs: bool) -> dict[str, Any]:
+    """確かめの結果。`record` があればレビューした HEAD のコミットを読み、通れば `checked.json` を書く。"""
+    tree = units_files.Tree(targets.root, None if record is None else record.head)
+    limits_held = units_files.limits_of(units_files.project_of(tree))
+    if targets.paths:
+        loaded = [units_files.load(tree, path) for path in targets.paths]
+        counts = _criteria_counts(targets.root, units_files.issues_referred(loaded))
+        report = units_files.check_files(tree, loaded, limits_held, counts, docs)
+    else:
+        counts = _criteria_counts(targets.root, targets.issues)
+        report = units_files.check(tree, targets.issues, targets.omitted, limits_held, counts, docs)
+    bad = [{"kind": "violation", **found._asdict()} for found in units_files.findings(report)]
+    warnings = [f"{w.rule} {w.unit}: {w.reason}" for w in report.judgement.warnings]
+    metrics = {"units": len(report.judgement.views), "violations": len(bad), "warnings": len(warnings)}
+    splits = units_files.split_items(report)
+    if bad:
+        summary = f"単位の確かめの違反が {len(bad)} 件ある（最初: {bad[0]['rule']} {bad[0]['reason']}）"
+        return result.stopped(TOOL, "invalid", summary, items=bad + splits, metrics=metrics, warnings=warnings)
+    units = units_files.unit_items(report)
+    summary = f"{len(units)} 個の単位の確かめを通った（警告 {len(warnings)} 件）"
+    outputs = None
+    if record is not None:
+        handled = units_files.handlings(tree, targets.issues)
+        files.write_json(
+            record.path / CHECKED_FILE,
+            dict(
+                head=record.head,
+                branch=targets.inputs.branch,
+                issues=list(targets.issues),
+                handling={str(n): dict(handling=handling, into=into) for n, (handling, into) in handled.items()},
+                omitted=[f.issues[0] for f in report.files if f.whole],
+                limits=limits_held._asdict(),
+                criteria={str(n): count for n, count in counts.items()},
+                units=units,
+            ),
+        )
+        outputs = dict(design_pr=record.pr)
+    return result.result(TOOL, OK, summary, units + splits, metrics, warnings=warnings, outputs=outputs)
+
+
+def _render(targets: _Targets) -> None:
+    """実装計画の 2 つの表を書き直す。"""
+    tree = units_files.Tree(targets.root)
+    limits_held = units_files.limits_of(units_files.project_of(tree))
+    for plan, text in units_files.rendered(tree, targets.issues, targets.omitted, limits_held).items():
+        (targets.root / plan).write_text(text, encoding="utf-8", newline="\n")
+
+
+def _units(a: argparse.Namespace) -> dict[str, Any]:
+    targets = _targets(a, Path.cwd())
+    if a.units_cmd == "render":
+        _render(targets)
+        return _checked_units(a, targets, None, docs=True)
+    held = os.environ.get(RECORD_DIR_ENV)
+    record = None if held is None else _record(Path(held), targets)
+    return _checked_units(a, targets, record, a.docs)
+
+
+def _cmd_units(a: argparse.Namespace) -> int:
+    try:
+        return result.emit(_units(a))
+    except _UnitsStopped as exc:
+        return result.emit(result.stopped(TOOL, exc.kind, str(exc)))
+    except units_files.UnitsFileError as exc:
+        return result.emit(result.stopped(TOOL, "invalid", str(exc)))
+    except github.GitHubError as exc:
+        return result.emit(result.stopped(TOOL, "transient" if exc.passing else "precondition", f"GitHub を読めない: {exc}"))
+    except (GitError, OSError) as exc:
+        return result.emit(result.stopped(TOOL, "precondition", str(exc)))
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=TOOL, description="プランの実行の回を流す・待つ")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -249,6 +486,15 @@ def _parser() -> argparse.ArgumentParser:
     ck = sub.add_parser("check", help="プランの形とキューの組を確かめる")
     ck.add_argument("plans", nargs="+")
     ck.set_defaults(fn=_cmd_check)
+    us = sub.add_parser("units", help="レビューの単位を確かめ、実装計画の表を書く").add_subparsers(dest="units_cmd", required=True)
+    uc = us.add_parser("check", help="単位のファイルを確かめる")
+    ur = us.add_parser("render", help="実装計画の表を書き直して確かめる")
+    for one in (uc, ur):
+        one.add_argument("--issue", dest="issues", type=int, action="append", help="スプリントの課題の番号")
+        one.add_argument("--omitted", type=int, action="append", help="実装計画を省いた課題の番号")
+        one.set_defaults(fn=_cmd_units)
+    uc.add_argument("files", nargs="*", help="単位のファイルを直に指す（--issue と併せて渡さない）")
+    uc.add_argument("--docs", action="store_true", help="実装計画のタスクの集合と 2 つの表も突き合わせる")
     return p
 
 

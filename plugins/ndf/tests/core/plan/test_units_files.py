@@ -8,7 +8,9 @@ from pathlib import Path
 import git_sandbox
 import pytest
 
-from ndf.core.plan import review_units_decide
+from ndf.adapters import github
+from ndf.adapters.git import Git
+from ndf.core.plan import cli, review_units_decide
 from ndf.core.plan import units_decide as ud
 from ndf.core.plan import units_files as uf
 
@@ -408,3 +410,276 @@ def test_differs_ignores_only_the_actual_lines_and_the_path():
     assert uf.differs(base, written) is False
     assert uf.differs(base, base._replace(units=base.units[::-1])) is True
     assert uf.differs(base, base._replace(tasks=(base.tasks[0]._replace(lines=11), base.tasks[1]))) is True
+
+
+# --- ndf plan units ----------------------------------------------------------------------------
+
+_BODY = "## 受け入れ条件\n\n- [ ] 1. 一\n- [ ] 2. 二\n"
+
+
+class _Hub:
+    """課題の本文を返す GitHub の代わり。`asked` に読んだ課題の番号を残す。"""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.asked: list[list[int]] = []
+        self.error = error
+
+    def nodes(self, numbers, node, fields):
+        if self.error is not None:
+            raise self.error
+        self.asked.append(sorted(numbers))
+        return {n: {"body": _BODY} if node == "issue" else {} for n in numbers}
+
+
+@pytest.fixture
+def hub(monkeypatch):
+    made = _Hub()
+    monkeypatch.setattr(cli, "_hub", lambda root: made)
+    monkeypatch.delenv("NDF_STAGE_INPUT", raising=False)
+    monkeypatch.delenv("NDF_DESIGN_RECORD_DIR", raising=False)
+    return made
+
+
+@pytest.fixture
+def work(tmp_path, monkeypatch) -> Path:
+    root = H.make_repo(tmp_path / "repo")
+    monkeypatch.chdir(root)
+    return root
+
+
+def _run(capsys, *argv: str) -> tuple[int, dict]:
+    code = cli.main(["units", *argv])
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    return code, out
+
+
+def _kinds(out: dict, kind: str) -> list[dict]:
+    return [item for item in out["items"] if item["kind"] == kind]
+
+
+def _two_units(root: Path, first: int = 10, second: int = 10) -> None:
+    _units(
+        root,
+        "7",
+        tasks=[_task("T1", lines=first, files=["a.py"], criteria=["7:1"]), _task("T2", lines=second, files=["b.py"], after=["T1"])],
+        units=[_unit("A", "T1"), _unit("B", "T2", after=[{"unit": "A", "reason": "形を使う"}])],
+    )
+
+
+def test_cli_check_returns_one_item_per_unit(hub, work, capsys):
+    _two_units(work)
+
+    code, out = _run(capsys, "check", "--issue", "7")
+
+    assert (code, out["status"]) == (0, "ok")
+    assert _kinds(out, "unit")[1] == {
+        "kind": "unit",
+        "name": "B",
+        "file": "issues/issue-7-plan.units.json",
+        "order": 2,
+        "merge": 2,
+        "after": [{"file": "issues/issue-7-plan.units.json", "unit": "A", "reason": "形を使う"}],
+        "issues": [7],
+        "tasks": [{"id": "T2", "issue": 7}],
+        "criteria": [],
+        "lines": 10,
+        "touches": ["b.py"],
+    }
+    assert out["metrics"] == {"units": 2, "violations": 0, "warnings": 0}
+    assert hub.asked == [[7]]
+
+
+def test_cli_check_warns_over_the_target_and_stops_over_the_max(hub, work, capsys):
+    _units(work, "7", tasks=[_task("T1", lines=300), _task("T2", lines=300)])
+
+    code, out = _run(capsys, "check", "--issue", "7")
+
+    assert (code, out["status"], len(out["warnings"])) == (0, "ok", 1)
+    [split] = _kinds(out, "split")
+    assert [u["tasks"] for u in split["units"]] == [["T1"], ["T2"]]
+
+    _units(work, "7", tasks=[_task("T1", lines=900), _task("T2", lines=200)])
+    code, out = _run(capsys, "check", "--issue", "7")
+
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "invalid")
+    assert code != 0
+    assert [v["rule"] for v in _kinds(out, "violation")] == ["U6"]
+    assert len(_kinds(out, "split")) == 1 and _kinds(out, "unit") == []
+
+
+def test_cli_check_takes_the_limits_from_the_declaration(hub, work, capsys):
+    _two_units(work)
+    _declare(work, {"review_units": {"target_lines": 5, "max_lines": 8}})
+
+    _, out = _run(capsys, "check", "--issue", "7")
+
+    assert [v["rule"] for v in _kinds(out, "violation")] == ["U6", "U6"]
+
+
+def _declare(root: Path, workflow: dict) -> None:
+    (root / ".ndf").mkdir(exist_ok=True)
+    (root / ".ndf" / "project.json").write_text(json.dumps({"workflow": workflow}), encoding="utf-8")
+
+
+def test_cli_check_stops_on_a_missing_file_unless_omitted(hub, work, capsys):
+    _two_units(work)
+
+    _, out = _run(capsys, "check", "--issue", "7", "--issue", "8")
+    [lack] = _kinds(out, "violation")
+    assert (lack["rule"], "#8" in lack["reason"]) == ("missing", True)
+
+    _, out = _run(capsys, "check", "--issue", "7", "--issue", "8", "--omitted", "8")
+    omitted = [u for u in _kinds(out, "unit") if u["name"] == "issue-8"]
+    assert (out["status"], omitted[0]["file"], omitted[0]["lines"], omitted[0]["tasks"]) == ("ok", "", None, [{"id": "T1", "issue": 8}])
+
+
+def test_cli_render_writes_the_tables_and_then_passes_the_docs_check(hub, work, capsys):
+    _two_units(work)
+    plan = work / "issues" / "issue-7-plan.md"
+    plan.write_text(_plan(1, 2), encoding="utf-8")
+
+    _, out = _run(capsys, "check", "--issue", "7", "--docs")
+    assert [v["rule"] for v in _kinds(out, "violation")] == ["tables"]
+    assert plan.read_text(encoding="utf-8") == _plan(1, 2)
+
+    code, out = _run(capsys, "render", "--issue", "7")
+    written = plan.read_text(encoding="utf-8")
+    assert (code, out["status"]) == (0, "ok")
+    assert "## レビューの単位" in written and "## 並列と直列" in written
+
+    _, again = _run(capsys, "check", "--issue", "7", "--docs")
+    assert again["status"] == "ok"
+
+
+def test_cli_docs_check_reports_the_tasks_on_one_side_only(hub, work, capsys):
+    _two_units(work)
+    (work / "issues" / "issue-7-plan.md").write_text(_plan(1, 3), encoding="utf-8")
+
+    _, out = _run(capsys, "render", "--issue", "7")
+
+    [gap] = _kinds(out, "violation")
+    assert gap["rule"] == "tasks" and "T3" in gap["reason"] and "T2" in gap["reason"]
+
+
+def test_cli_check_reads_the_stage_input(hub, work, capsys, tmp_path, monkeypatch):
+    _two_units(work)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps({"issues": [7, 8], "plan_omitted": [8], "worktree": str(work)}))
+
+    _, out = _run(capsys, "check")
+
+    assert out["status"] == "ok"
+    assert sorted(u["name"] for u in _kinds(out, "unit")) == ["A", "B", "issue-8"]
+
+
+@pytest.mark.parametrize("given", ["{", "[]", json.dumps({"issues": []}), json.dumps({"issues": ["7"]})])
+def test_cli_check_refuses_a_broken_stage_input(hub, work, capsys, monkeypatch, given):
+    monkeypatch.setenv("NDF_STAGE_INPUT", given)
+
+    _, out = _run(capsys, "check")
+
+    assert out["cause"]["kind"] == "invalid"
+
+
+def test_cli_check_of_named_files_reads_every_referred_issue(hub, work, capsys):
+    path = _units(work, "7", tasks=[_task("T1", criteria=["9:2"])])
+
+    _, out = _run(capsys, "check", path)
+
+    assert out["status"] == "ok"
+    assert hub.asked == [[7, 9]]
+
+
+@pytest.mark.parametrize("argv", [[], ["--issue", "7", "issues/issue-7-plan.units.json"], ["../outside.units.json"]])
+def test_cli_check_refuses_targets_it_cannot_decide(hub, work, capsys, argv):
+    _, out = _run(capsys, "check", *argv)
+
+    assert out["cause"]["kind"] == "invalid"
+
+
+@pytest.mark.parametrize(("unreached", "kind"), [(True, "transient"), (False, "precondition")])
+def test_cli_check_stops_with_the_github_failure_and_no_violation(hub, work, capsys, unreached, kind):
+    _two_units(work)
+    hub.error = github.GitHubError("読めない", unreached=unreached)
+
+    _, out = _run(capsys, "check", "--issue", "7")
+
+    assert (out["cause"]["kind"], out["items"]) == (kind, [])
+
+
+# --- 承認の前の確かめ（NDF_DESIGN_RECORD_DIR） --------------------------------------------------
+
+
+def _commit(root: Path) -> str:
+    git_sandbox.sh(root, "add", "-A", identity=True)
+    git_sandbox.sh(root, "commit", "-q", "-m", "units", identity=True)
+    return Git(root).run("rev-parse", "HEAD").strip()
+
+
+@pytest.fixture
+def reviewed(hub, work, tmp_path, monkeypatch) -> Path:
+    """レビューした HEAD・PR・マージ先を持つ保存先と、単位をコミットした作業場所。"""
+    _two_units(work)
+    _design(work, "7", "| #7 | 実装する | — |")
+    record = tmp_path / "record"
+    record.mkdir()
+    (record / "reviewed-head").write_text(_commit(work) + "\n", encoding="utf-8")
+    (record / "reviewed-pr").write_text("o/r#12\n", encoding="utf-8")
+    (record / "reviewed-base").write_text("main\n", encoding="utf-8")
+    monkeypatch.setenv("NDF_DESIGN_RECORD_DIR", str(record))
+    _stage(monkeypatch, work)
+    return record
+
+
+def _stage(monkeypatch, work: Path, **extra) -> None:
+    held = {"issues": [7], "worktree": str(work), "branch": "sprint/7", **extra}
+    monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps({k: v for k, v in held.items() if v is not None}))
+
+
+def test_cli_record_check_writes_checked_json_from_the_reviewed_commit(reviewed, work, capsys):
+    (work / "issues" / "issue-7-plan.units.json").write_text("壊れた", encoding="utf-8")
+
+    _, out = _run(capsys, "check")
+
+    assert (out["status"], out["outputs"]) == ("ok", {"design_pr": 12})
+    checked = json.loads((reviewed / "checked.json").read_text(encoding="utf-8"))
+    assert checked == {
+        "head": Git(work).run("rev-parse", "HEAD").strip(),
+        "branch": "sprint/7",
+        "issues": [7],
+        "handling": {"7": {"handling": "実装する", "into": None}},
+        "omitted": [],
+        "limits": {"target": 400, "max": 1000},
+        "criteria": {"7": 2},
+        "units": _kinds(out, "unit"),
+    }
+
+
+@pytest.mark.parametrize(
+    ("change", "kind"),
+    [("head", "approval_stale"), ("no_branch", "precondition"), ("other_pr", "refused"), ("no_file", "precondition")],
+)
+def test_cli_record_check_writes_nothing_when_it_stops(reviewed, work, capsys, monkeypatch, change, kind):
+    (reviewed / "checked.json").write_text("{}", encoding="utf-8")
+    if change == "head":
+        git_sandbox.sh(work, "commit", "-q", "--allow-empty", "-m", "next", identity=True)
+    elif change == "no_branch":
+        _stage(monkeypatch, work, branch=None)
+    elif change == "other_pr":
+        _stage(monkeypatch, work, design_pr=13)
+    else:
+        (reviewed / "reviewed-pr").unlink()
+
+    _, out = _run(capsys, "check")
+
+    assert out["cause"]["kind"] == kind
+    assert not (reviewed / "checked.json").exists()
+
+
+def test_cli_record_check_names_the_review_launch_setting(reviewed, work, capsys):
+    _declare(work, {"launch": {"review": ["my-review"]}})
+    (reviewed / "reviewed-head").write_text("", encoding="utf-8")
+
+    _, out = _run(capsys, "check")
+
+    assert "workflow.launch.review" in out["cause"]["detail"] and "--reviewed-base-out" in out["cause"]["detail"]
