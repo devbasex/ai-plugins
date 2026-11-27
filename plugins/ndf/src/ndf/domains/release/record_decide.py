@@ -319,9 +319,9 @@ def authoritative_targets(found: Sequence[Record], corrections: Sequence[Correct
     """値 `version` の正の対象の一覧。最後の訂正の一覧、無ければ同じ値の最初の記録の一覧。記録が無ければ None。
 
     `found` は引数で絞る前の有効な記録（`value_pairs`）、`corrections` は信用する書き手の、組のコミットに合う訂正（古い順）。"""
-    fixed = [c for c in corrections if c.version == version]
-    if fixed:
-        return fixed[-1].targets
+    fixed = next((c for c in reversed(corrections) if c.version == version), None)
+    if fixed is not None:
+        return fixed.targets
     return next((r.targets for r in found if r.version == version and r.targets is not None), None)
 
 
