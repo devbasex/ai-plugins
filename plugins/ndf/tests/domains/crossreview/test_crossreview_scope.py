@@ -699,14 +699,44 @@ def test_a_removal_added_by_the_base_next_to_a_read_one_is_new(wt: Path) -> None
     assert _new(wt, changes.Range(base, head), moved) == ("a.txt",)
 
 
-def test_a_removal_the_base_moved_past_a_line_removed_now_is_new(wt: Path) -> None:
-    """#3780: ベースが今回消す行の後ろへ移した行の削除は、移す前の位置で読んだ削除に当てない。"""
-    base = _start(wt, {"a.txt": "P\nX\nA\nZ\n"})
-    head = _write(wt, {"a.txt": "P\nA\nZ\n"}, "PR")
-    moved = _move_base(wt, {"a.txt": "P\nA\nX\nZ\n"})
-    sh(wt, "merge", "-q", "--no-edit", "-X", "ours", "target")
-    _write(wt, {"a.txt": "P\nR\nZ\n"}, "直し")
-    assert _new(wt, changes.Range(base, head), moved) == ("a.txt",)
+def _hunks(body: str) -> tuple[changes.Hunk, ...]:
+    return tuple(changes._file_blocks(f"diff --git a/a.txt b/a.txt\n{body}")[0][1])
+
+
+def _delta(body: str) -> changes._Delta:
+    entry = changes._Entry("M", "a.txt", "a.txt", ("100644", "100644"), ("1", "2"))
+    return changes._Delta({"a.txt": entry}, frozenset(), {"a.txt": _hunks(body)})
+
+
+# (既読の差分, 今回渡す差分, 今の PR の差分, 未読があるか)
+_REMOVALS = {
+    # ベースが `X` を今回消す `A` の後ろへ移した。移す前の位置で読んだ `X` の削除には当てない
+    "moved-by-the-base": (
+        "@@ -1,4 +1,3 @@\n P\n-X\n A\n Z\n",
+        "@@ -1,3 +1,3 @@\n P\n-A\n+R\n Z\n",
+        "@@ -1,4 +1,3 @@\n P\n-A\n-X\n+R\n Z\n",
+        True,
+    ),
+    # 今回の差分は `R1` の前の `A` を消し、今の PR の差分は `R2` の前の `A` を消す
+    "same-text-at-another-position": (
+        "",
+        "@@ -1,3 +1,4 @@\n P\n-A\n+R1\n+R2\n Z\n",
+        "@@ -1,5 +1,4 @@\n P\n R1\n-A\n R2\n Z\n",
+        True,
+    ),
+    "same-position": (
+        "",
+        "@@ -1,3 +1,4 @@\n P\n-A\n+R1\n+R2\n Z\n",
+        "@@ -1,3 +1,4 @@\n P\n-A\n+R1\n+R2\n Z\n",
+        False,
+    ),
+}
+
+
+@pytest.mark.parametrize(("seen", "since", "now", "unread"), list(_REMOVALS.values()), ids=list(_REMOVALS))
+def test_a_removal_is_matched_in_order_and_at_the_position_of_the_current_fix(seen: str, since: str, now: str, unread: bool) -> None:
+    """#3780: 消した行は区間の中の順序で照らし、今回渡す差分の削除には今の head の位置も合わせる（差分を入力にして確かめる）。"""
+    assert changes._has_unread_lines("a.txt", _delta(now), _delta(seen), _delta(since)) is unread
 
 
 def test_a_commit_that_is_not_local_gives_none_or_a_git_error(wt: Path) -> None:

@@ -418,35 +418,40 @@ def _blocks(hunks: Sequence[Hunk]) -> list[_Block]:
     return blocks
 
 
-def _locate(blocks: Sequence[_Block], starts: Sequence[int], at: int) -> tuple[int, Optional[_Block]]:
-    """今の head の `at` 行目に当たる前の head の行の番号と、`at` がかたまりの中かすぐ後ろならそのかたまり。かたまりの
-    中の行（足した行）の番号は、かたまりのすぐ後ろの行の番号にする。`starts` は `blocks` の `start`。"""
+def _locate(blocks: Sequence[_Block], starts: Sequence[int], at: int) -> tuple[int, Optional[int]]:
+    """今の head の `at` 行目に当たる前の head の行の番号と、`at` がかたまりの中かすぐ後ろならそのかたまりの `blocks` の番号。
+    かたまりの中の行（足した行）の番号は、かたまりのすぐ後ろの行の番号にする。`starts` は `blocks` の `start`。"""
     index = bisect_right(starts, at) - 1
     if index < 0:
         return at, None
     block = blocks[index]
     after = block.base + len(block.removed)
-    return (after, block) if at <= block.end else (at + after - block.end, None)
+    return (after, index) if at <= block.end else (at + after - block.end, None)
 
 
 def _removals_unread(
     removed: Sequence[tuple[int, str]], seen_removed: Sequence[tuple[int, str]], blocks: Sequence[_Block], starts: Sequence[int]
 ) -> bool:
     """今の PR の差分が消した行 `removed` に、読んでおらず今回も消さないものがあるか。消した箇所の前後の残る行に挟まれた
-    区間ごとに、既読の削除と今回の削除を前の head の順に並べ、その並びに同じ順で現れるかを確かめる。"""
-    seen: dict[int, list[str]] = {}
+    区間ごとに、既読の削除と今回の削除を前の head の順に並べ、その並びに同じ順で現れるかを確かめる。今回の削除に当てるのは、
+    今の head での位置も同じときだけである（同じ区間の別の位置で同じ本文を消した変更は、今回渡る差分に出ない）。"""
+    seen: dict[int, list[tuple[Optional[int], str]]] = {}
     for at, text in seen_removed:
-        seen.setdefault(at, []).append(text)
-    gaps: dict[tuple[int, Optional[_Block]], list[str]] = {}
+        # 既読の削除は区間の中のどこでも当たる（位置は None）
+        seen.setdefault(at, []).append((None, text))
+    # キーに `_Block` を入れると、消した行ごとに `removed` の全体をハッシュする
+    gaps: dict[tuple[int, Optional[int]], list[tuple[int, str]]] = {}
     for at, text in removed:
-        gaps.setdefault(_locate(blocks, starts, at), []).append(text)
-    for (end, block), texts in gaps.items():
-        known: list[str] = []
-        for number, gone in enumerate(block.removed if block else (), block.base if block else end):
-            known += [*(seen[number] if number in seen else ()), gone]
-        rest = iter([*known, *(seen[end] if end in seen else ())])
-        # `in` は `rest` を一致した所まで進めるので、順序も確かめる
-        if not all(text in rest for text in texts):
+        gaps.setdefault(_locate(blocks, starts, at), []).append((at, text))
+    for (end, index), rows in gaps.items():
+        known: list[tuple[Optional[int], str]] = []
+        if index is not None:
+            block = blocks[index]
+            for number, gone in enumerate(block.removed, block.base):
+                known += [*seen.get(number, ()), (block.start, gone)]
+        rest = iter([*known, *seen.get(end, ())])
+        # `any` は `rest` を一致した所まで進めるので、順序も確かめる
+        if not all(any(text == gone and where in (None, at) for where, gone in rest) for at, text in rows):
             return True
     return False
 
