@@ -300,6 +300,11 @@ def own_commits(g: git.Git, remote: str, head: str) -> list[str]:
     return g.run("rev-list", "--reverse", "--no-merges", "--cherry-pick", "--right-only", f"{remote}...{head}").split()
 
 
+def tracked_files(g: git.Git, commit: str) -> list[str]:
+    """コミットのツリーの追跡ファイル。"""
+    return [p for p in g.run("ls-tree", "-r", "--name-only", "-z", commit).split("\0") if p]
+
+
 def untracked_in_the_way(g: git.Git, commit: str) -> list[str]:
     """未追跡のファイル（ignored を含む）のうち、`commit` が追跡するパスと重なる（`commit` へ reset すると上書き・削除される）もの。
 
@@ -309,7 +314,7 @@ def untracked_in_the_way(g: git.Git, commit: str) -> list[str]:
     untracked = [p for p in g.run("ls-files", "--others", "-z").split("\0") if p]
     if not untracked:
         return []
-    files = {p for p in g.run("ls-tree", "-r", "--name-only", "-z", commit).split("\0") if p}
+    files = set(tracked_files(g, commit))
     dirs = {d for f in files for d in _parents(f)}
     return [p for p in untracked if _clashes(p, files, dirs)]
 

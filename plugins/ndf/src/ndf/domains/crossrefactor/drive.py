@@ -241,7 +241,7 @@ def _init(run: _Run) -> None:
     protected: Optional[protected_decide.Protected] = None
     if cfg.local_test:
         protected = _protection(run, run.pr_head)
-        target = protected_decide.narrow(cfg.scope, local_gate.tracked_files(run.work, run.pr_head), protected)
+        target = protected_decide.narrow(cfg.scope, worktree.tracked_files(run.work, run.pr_head), protected)
         run.state["onto"] = run.pr_head
     touched = scope.touched_or_explicit(run.ws.work, run.diff_base, "HEAD", target, cfg.symbols) if target else symbols_decide.Touched()
     run.state.update(
@@ -278,7 +278,7 @@ def _resume_protection(run: _Run) -> None:
         raise DriveStopped(
             "refused", f"作業コミットが保護するファイルを変えている: {', '.join(hits)}。" + local_gate.RECOVER.format(pr=run.cfg.pr)
         )
-    state["target_scope"] = list(protected_decide.narrow(state["target_scope"], local_gate.tracked_files(work, run.pr_head), protected))
+    state["target_scope"] = list(protected_decide.narrow(state["target_scope"], worktree.tracked_files(work, run.pr_head), protected))
     state["touched"] = protected_decide.unprotected(_touched(run), protected).as_json()
     for item in local_gate.listed(state, "items"):
         if item["status"] == Status.OPEN.value and "path" in item and protected.covers(item["path"]):

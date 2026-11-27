@@ -671,11 +671,6 @@ def total_seconds(project: Mapping[str, Any], safety_net_minutes: float) -> floa
     return (given if given is not None else safety_net_minutes) * 60
 
 
-def tracked_files(g: git.Git, commit: str) -> list[str]:
-    """コミットのツリーの追跡ファイル。"""
-    return [p for p in g.run("ls-tree", "-r", "--name-only", "-z", commit).split("\0") if p]
-
-
 # 再開で作業コミットが新しい保護に当たったときの復旧の手順
 RECOVER = (
     "復旧の手順: (1) ndf refactor release --pr {pr} で作業場所と状態を片付けてから同じコマンドを打ち直す（採った項目と作業コミットを捨て、"
