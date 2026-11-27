@@ -15,6 +15,7 @@ src/ndf/
     agents.py                    相手役の子の環境
     launch_settings.py *         起動の設定の読み取り・指定の解決・安全装置の引数
     launch_approval.py *         ハッシュ・承認の記録・依頼と答え
+    launch_candidates.py *       候補のディレクトリの読み取り・所有の確かめ・退避と中断の後の片付け
     secret_forms.py *            秘密の形の表と伏せる処理（domains/project/secret.py から移す）
   core/
     worker.py                    指定の取得・子プロセスごとの記録
@@ -35,6 +36,7 @@ src/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/adapters/launch_settings.py` | 新設 | 起動の設定を読んで検証し、起動 1 回の指定を返す | launch_approval・agents・git・contracts | `Settings`・`StepSpec`・`Grant` | N: `load`・`step_spec`・`check_definitions`・`approval_target`・`prepared`・`safety_args` |
 | `src/ndf/adapters/launch_approval.py` | 新設 | 承認のハッシュと記録を持つ | identity・git | モジュール | N: `repo_key`・`digest`・`approved`・`append`・`put_question`・`record_answer`・`approve_by_answer`・`pending_request`・`new_candidate`・`reflect`・`recover`・`reflected` |
+| `src/ndf/adapters/launch_candidates.py` | 新設 | 候補のディレクトリを、普通のファイルとして読み、NDF が作ったものだけかを確かめ、退避・消去・元の名前へ戻す（どの候補を片付けるかは `launch_approval` が履歴から決める） | — | `Read` | N: `write_launch_record`・`raw_record`・`record_object`・`ownership`・`stamped_version`・`regular_version`・`same_stamp`・`set_aside`・`settle_aside`・`restore_aside`（`launch_approval.py` から分ける） |
 | `src/ndf/adapters/secret_forms.py` | 新設 | 秘密の形の表と、当たる文字列を伏せる処理 | — | モジュール | N: `SECRET_VALUE`・`ASSIGNED_SECRET`・`MASK`・`redact`（`domains/project/secret.py` から移す） |
 | `src/ndf/domains/project/secret.py` | 変更 | 移した表と処理を `secret_forms` から読み込む | secret_forms | モジュール | C: 定義の移動 |
 | `src/ndf/adapters/claude.py` | 変更 | 起動の引数と結果 | launch_settings | `ClaudeCall`・`ClaudeReply`・`LaunchOptions`・`LaunchRecorder` | C: `permission_args`・`_full_args`・`call_claude`・`_precheck`・`_parse_reply`・`context_window`・`_accounted`。N: `main_model`・`set_launch_recorder`・`report_launch` |
