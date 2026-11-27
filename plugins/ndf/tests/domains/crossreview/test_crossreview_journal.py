@@ -338,9 +338,11 @@ def test_mvv_finding_is_held_at_a_blocking_severity_with_the_one_before() -> Non
 
 @pytest.mark.parametrize("severity", ["major", "critical"])
 def test_mvv_finding_without_impact_is_not_lowered_but_warned(severity: str) -> None:
+    """1 文の無い重い指摘でも、MVV に反するなら重いまま修正担当へ渡り、下げた行に数えない（#4363 の受け入れ条件 5）。"""
     journal = _entered(_named("A", "Value 5", severity, impact=" "))
     [row] = journal.handable()
     assert (row["severity"], row["unpinned_severity"]) == (severity, "minor")
+    assert not criteria_decide.downgraded(row)
     [warning] = journal.warnings
     assert "r1-1" in warning and "起きること" in warning
 
@@ -354,16 +356,6 @@ def test_redline_without_impact_is_not_lowered_but_warned(item: str, raised: str
     assert not criteria_decide.downgraded(row)
     [warning] = journal.warnings
     assert "r1-1" in warning and "起きること" in warning
-
-
-def test_issue_4363_5_mvv_and_redline_findings_are_not_lowered() -> None:
-    """#4363 の受け入れ条件 5: 1 文の無い major でも、MVV に反する指摘は重いまま修正担当へ渡り、必ず人の承認が要る操作の指摘は
-    重さを保って人の承認を待つ。どちらも下げた行に数えない。"""
-    journal = _entered(_named("A", "Value 5", impact=None), _named("B", "P1", impact=None))
-    mvv_row, redline_row = journal.rows.values()
-    assert (mvv_row["severity"], redline_row["severity"], redline_row["redline"]) == ("major", "major", True)
-    assert [r["text"] for r in journal.handable()] == ["A"]
-    assert not any(criteria_decide.downgraded(r) for r in journal.rows.values())
 
 
 @pytest.mark.parametrize("order", [("Value 5", "P1"), ("P1", "Value 5"), (None, "P1"), ("P1", None)])
