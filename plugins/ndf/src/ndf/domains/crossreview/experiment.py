@@ -18,6 +18,7 @@ from ndf.adapters import agents, claude, claude_choice, launch_approval, launch_
 from ndf.contracts import facts
 from ndf.core.converge import participants
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.crossreview import scope_decide, store
 from ndf.domains.crossreview.journal import experiment_values, undecided_serious
 from ndf.domains.records import usage
 
@@ -132,7 +133,16 @@ def seat_row(spec: agents.Launch, status: agents.AgentStatus, chosen: claude_cho
     return claude.ClaudeReply.failed("", "codex の起動の結果", failure=failure)
 
 
-def record(data: dict[str, Any], rows: Sequence[dict[str, Any]], seats: Sequence[str], final: str) -> None:
+def read_seats(data: dict[str, Any]) -> list[str]:
+    """このレビュー（同じ状態の保存先で続けた起動を含む）で、いずれかのラウンドの差分を読んだシート。指摘のジャーナルと同じ範囲である。"""
+    seen: dict[str, None] = {}
+    for r in store.list_of(data, store.ROUNDS):
+        unread = store.list_of(r, scope_decide.UNREAD)
+        seen.update(dict.fromkeys(s for s in store.list_of(r, scope_decide.REVIEWERS) if s not in unread))
+    return list(seen)
+
+
+def record(data: dict[str, Any], rows: Sequence[dict[str, Any]], final: str) -> None:
     """収束かラウンドの上限で終わったレビューの効果指標を書く: シートの単位と、費用を負う割り付け（評価した設計か実装の単位）。
 
     書けなくても警告だけで、レビューの結果は変えない。同じ割り付け ID の 2 回目の指標は書き込み処理が足さないので、ラウンドの
@@ -141,7 +151,7 @@ def record(data: dict[str, Any], rows: Sequence[dict[str, Any]], seats: Sequence
     """
     if final not in RECORDED or KEY not in data:
         return
-    held = data[KEY]
+    held, seats = data[KEY], read_seats(data)
     count, shares = experiment_values(rows, held.get("first"), seats)
     pending = final == fin.MAX_ROUNDS and undecided_serious(rows)
     for seat in seats:

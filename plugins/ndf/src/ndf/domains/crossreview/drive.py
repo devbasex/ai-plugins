@@ -717,7 +717,7 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
     前回の結果は、根拠の記述を確かめ終えた head のものだけを返すので、確かめ直さない（`scope_decide.read_by_all_head`）。"""
     check = _FinalCheck(True) if reused else _check_final_head(run, final, rounds)
     if not reused:  # 前回の結果を返すだけの打ち直しは、別の費用を負う先に指標を書かない
-        experiment.record(run.data, list(run.journal.rows.values()), run.seats, final)
+        experiment.record(run.data, list(run.journal.rows.values()), final)
     path = run.cfg.state_dir / SUMMARY_NAME
     review = fin.Review(final, rounds, run.journal.findings(), check.checked, check.unsent)
     store.write_object(path, fin.summary_of(review, run.ref.origin_pr))
@@ -872,7 +872,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     rounds.append(record)
     if unread:
         # 読めなかった相手役の分を収束に数えない（#3941）。読めた相手役の指摘はジャーナルに残し、次の起動で続ける
-        record["verdict"] = fin.INCOMPLETE_REVIEWERS
+        record["verdict"], record[scope_decide.UNREAD] = fin.INCOMPLETE_REVIEWERS, list(unread)
         names = "・".join(unread)
         run.warnings.append(
             f"round {round_no} は相手役 {names} が起動し直しても（claude の席は起動し直さない）差分を読めなかったので、収束に数えずに止める:\n"

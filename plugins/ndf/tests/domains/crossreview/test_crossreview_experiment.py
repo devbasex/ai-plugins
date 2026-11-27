@@ -213,7 +213,8 @@ def _major(text: str, by: str, severity: str = "major") -> dict:
 
 
 def _data() -> dict:
-    return {experiment.KEY: {"id": "run", "seats": {"codex": "a-codex", "kiro": "a-kiro"}}}
+    held = {"id": "run", "seats": {"codex": "a-codex", "kiro": "a-kiro"}}
+    return {experiment.KEY: held, "rounds": [{"reviewers": ["codex", "kiro"]}]}
 
 
 def _entered(data: dict, journal: FindingJournal, round_no: int, *items: dict, complete: bool = True) -> None:
@@ -227,7 +228,7 @@ def _decide(journal: FindingJournal, outcome: str) -> None:
 
 
 def _record(data: dict, journal: FindingJournal, final: str) -> None:
-    experiment.record(data, list(journal.rows.values()), ["codex", "kiro"], final)
+    experiment.record(data, list(journal.rows.values()), final)
 
 
 def test_a_converged_review_records_the_share_of_the_seat_and_of_the_charged_unit(monkeypatch, outcomes) -> None:
@@ -238,6 +239,20 @@ def test_a_converged_review_records_the_share_of_the_seat_and_of_the_charged_uni
     _record(data, journal, fin.CONVERGED)
     assert (outcomes["a-codex"][0], outcomes["a-kiro"][0]) == (0.5, 1.0)
     assert outcomes["design-unit"] == (pytest.approx(1 / 3), {"major": 2})
+
+
+def test_the_share_covers_the_seats_that_read_in_any_run_of_the_review(outcomes) -> None:
+    data, journal = _data(), FindingJournal()
+    data["rounds"].append({"reviewers": ["codex"]})  # 相手役を 1 つに絞った再開
+    _entered(data, journal, 1, _major("一つ目", "kiro"))
+    _decide(journal, fin.FIXED)
+    _record(data, journal, fin.CONVERGED)
+    assert (outcomes["a-codex"], outcomes["a-kiro"]) == ((0.0, {"seats": 2}), (1.0, {"seats": 2}))
+
+
+def test_a_seat_that_never_read_the_diff_is_not_counted() -> None:
+    data = {"rounds": [{"reviewers": ["codex", "kiro"], "unread": ["kiro"]}, {"reviewers": ["codex"]}]}
+    assert experiment.read_seats(data) == ["codex"]
 
 
 def test_a_review_that_ends_with_an_unread_seat_records_nothing(monkeypatch, outcomes) -> None:
