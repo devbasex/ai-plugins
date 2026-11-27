@@ -97,6 +97,13 @@ VALUES_FILE = "values.json"
 VALUES_SHAPE = {"plan": str, "values": dict, "inputs": dict, "local_tests": bool, "at": str}
 
 
+# 承認を記録する時点のバージョンの保存先の種類（`store_kind_of` が返し、`Recorded.store`・`released_store` に残す）
+STORE_NONE = "none"
+STORE_VERSIONED = "versioned"
+STORE_UNKNOWN = "unknown"
+STORE_KINDS = (STORE_NONE, STORE_VERSIONED, STORE_UNKNOWN)
+
+
 class Recorded(NamedTuple):
     """記録済みの値（#4513）。まとめたリリースでオーガナイザーが記録したリリースの識別子・届け先・承認の時点の保存先の種類。
 
@@ -111,17 +118,17 @@ class Recorded(NamedTuple):
     @property
     def without_number(self) -> bool:
         """承認の時点でバージョン番号を持たないリポジトリだったか（保存先の種類が `none`）。"""
-        return self.store == "none"
+        return self.store == STORE_NONE
 
     @property
     def store_unknown(self) -> bool:
         """承認の時点で設定を読めず、保存先の種類が決まらなかったか。"""
-        return self.store == "unknown"
+        return self.store == STORE_UNKNOWN
 
     @property
     def with_number(self) -> bool:
         """承認の時点でバージョン番号を持つリポジトリだったか。"""
-        return self.store == "versioned"
+        return self.store == STORE_VERSIONED
 
 
 # values.json に記録済みの値を残すキー（`VALUES_SHAPE` に足さない。直す前の NDF が書いた values.json も読む）
@@ -131,8 +138,8 @@ RELEASED_KEYS = ("released_version", "released_delivery", "released_store")
 def store_kind_of(has_version_number: Optional[bool]) -> str:
     """承認を記録する時点のバージョンの保存先の種類。設定を読めなければ（None）`unknown`。"""
     if has_version_number is None:
-        return "unknown"
-    return "versioned" if has_version_number else "none"
+        return STORE_UNKNOWN
+    return STORE_VERSIONED if has_version_number else STORE_NONE
 
 
 def _released_fields(value: Optional[Recorded]) -> dict[str, Any]:
@@ -157,7 +164,7 @@ def released_of(held: Mapping[str, Any]) -> Optional[Recorded]:
         return None
     delivery = held.get("released_delivery")
     store = held.get("released_store")
-    known = store if store in (store_kind_of(None), store_kind_of(True), store_kind_of(False)) else None
+    known = store if store in STORE_KINDS else None
     return Recorded(version, dict(delivery) if isinstance(delivery, dict) else None, known)
 
 

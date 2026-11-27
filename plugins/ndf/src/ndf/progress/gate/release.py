@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from ndf.contracts.worker_kinds import DELIVERY, PRODUCT_VERSION, store_kind_of
+from ndf.contracts.worker_kinds import DELIVERY, PRODUCT_VERSION, STORE_KINDS, store_kind_of
 from ndf.core import production_delivery, production_merge
 from ndf.progress import lane, model, plan, run, store
 from ndf.progress.gate.answering import Answer, Observe, Post, answer, no_observe, no_post
@@ -132,7 +132,7 @@ def _organizer_reply(st: store.Store, q: Question, env: Mapping[str, str]) -> Op
 # まとめたリリースの回答のキー → スプリントの文脈のキー（デプロイの出力）
 RELEASED_OUTPUTS = {"version": PRODUCT_VERSION, "release": "release_pr"}
 # 回答に残せるバージョンの保存先の種類（`ndf lanes release` が記録し、外のオーガナイザーは回答のファイルに書ける）
-RELEASE_STORES = (store_kind_of(False), store_kind_of(True), store_kind_of(None))
+RELEASE_STORES = STORE_KINDS
 
 
 def _recorded_where(reply: Mapping[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
