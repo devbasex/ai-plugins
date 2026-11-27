@@ -1,11 +1,12 @@
 """判定役の起動の記録（標準出力・標準エラーなど）を残し、期限を過ぎたものを片付ける（#4363）。
 
 記録は状態の保存先の下の記録専用のディレクトリ（`RECORD_DIR`）に置く。記録を公開する前に、記録ごとの登録ファイル（名前が
-記録の名前と inode 番号を持ち、中身がその名前と同じファイル）を同じディレクトリに作る。起動ごとの出力のディレクトリには、
-中身がディレクトリの名前と同じ所有ファイルを置く。片付けで消すのは、中身まで合う登録ファイル、その番号と inode 番号が合う
-記録、中身の合う所有ファイルを持つ出力のディレクトリ（起動中か保存の途中でプロセスが止まって残ったもの）だけである。名前の形が同じ
-だけのファイル・リンク・ディレクトリは消さない。登録ファイルは記録ごとに独立しているので、並行する実行が互いの登録を
-失わない。専用のディレクトリはリンクをたどらずに開き、保存と削除は開いたディレクトリを基準にする（確かめた後でリンクへ
+記録の名前と inode 番号を持ち、中身がその名前と同じファイル）と、記録への固定用のハードリンク（`<記録の名前>.pin`）を同じ
+ディレクトリに作る。固定用のリンクがある間は、記録を消してもその inode 番号は別のファイルに使われない。起動ごとの出力の
+ディレクトリには、中身がディレクトリの名前と同じ所有ファイルを置く。片付けで消すのは、中身まで合う登録ファイル、その番号の
+固定用のリンク、固定用のリンクと同じファイルである記録、中身の合う所有ファイルを持つ出力のディレクトリ（起動中か保存の途中で
+プロセスが止まって残ったもの）だけである。名前の形や inode 番号が同じだけの
+ファイル・リンク・ディレクトリは消さない。登録ファイルは記録ごとに独立しているので、並行する実行が互いの登録を失わない。専用のディレクトリはリンクをたどらずに開き、保存と削除は開いたディレクトリを基準にする（確かめた後でリンクへ
 差し替えられても、先を触らない）。失敗は過程に残すだけで、判定の結果と駆動は変えない。
 """
 
@@ -34,6 +35,8 @@ _HELD = re.compile(_HELD_NAME)
 _OWNER = "ndf-owner"
 # 登録ファイルの名前は `<記録の名前>.owned-<記録の inode 番号>`
 _MARK_INFIX = ".owned-"
+# 固定用のハードリンクの名前は `<記録の名前>.pin`
+_PIN_SUFFIX = ".pin"
 _MARK = re.compile(
     rf"(?P<record>{_HELD_NAME}(?:\.out|\.err\.log|-launch\.json|-progress\.log))" + re.escape(_MARK_INFIX) + r"(?P<inode>\d+)"
 )
@@ -77,6 +80,14 @@ def _signed(directory: int, name: str, signature: str) -> Optional[os.stat_resul
         os.close(fd)
 
 
+def _entry_stat(directory: int, name: str) -> Optional[os.stat_result]:
+    """開いたディレクトリ `directory` の `name` の状態（リンクはたどらない）。無ければ None。"""
+    try:
+        return os.stat(name, dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 無いことは呼び手が扱う
+        return None
+
+
 def new_held(stem: Path) -> Path:
     """起動ごとの出力のディレクトリ（0700）を `stem` の隣に作り、所有ファイルを置く。作れなければ `OSError`。"""
     held = Path(tempfile.mkdtemp(prefix=f"{stem.name}-", dir=stem.parent))
@@ -89,7 +100,7 @@ def new_held(stem: Path) -> Path:
 
 
 def _link_into(run: Noting, round_no: int, held: Path, stem: Path, into: int) -> None:
-    """`held` の通常のファイルを、登録ファイルを置いてから、開いたディレクトリ `into` へハードリンクする。"""
+    """`held` の通常のファイルを、登録ファイルと固定用のリンクを置いてから、開いたディレクトリ `into` へハードリンクする。"""
     for record in list(held.iterdir()):  # 下で作る登録ファイルの元は、記録として数えない
         if record.name == _OWNER or record.is_symlink() or not record.is_file():
             continue
@@ -100,6 +111,7 @@ def _link_into(run: Noting, round_no: int, held: Path, stem: Path, into: int) ->
             mark = f"{name}{_MARK_INFIX}{record.stat().st_ino}"
             _sign(held / mark, mark)
             os.link(held / mark, mark, dst_dir_fd=into)  # 中身を書き終えたものだけが現れる
+            os.link(record, name + _PIN_SUFFIX, dst_dir_fd=into)
             os.link(record, name, dst_dir_fd=into)
         except OSError as exc:  # 診断の記録を移せなくても、判定の結果と駆動は変えない
             run.note(round_no, "verify", f"判定役の記録 {name} を移せない（{exc}）")
@@ -120,24 +132,26 @@ def keep(run: Noting, round_no: int, held: Path, stem: Path) -> None:
 
 
 def _drop_if_expired(run: Noting, round_no: int, directory: int, mark: re.Match[str], cutoff: float) -> None:
-    """登録ファイル `mark` の記録が `cutoff` より古ければ、記録と登録ファイルを消す。中身が名前と違うものは NDF の登録では
-    ないので残す。登録ファイルと合う記録が無ければ（保存の途中で止まった・消された・別のファイルがある）、古い登録ファイル
-    だけを消す。新しい登録ファイルは、並行する保存がまだ公開していない場合があるので残す。"""
+    """登録ファイル `mark` の記録が `cutoff` より古ければ、記録・固定用のリンク・登録ファイルを消す。中身が名前と違うものは
+    NDF の登録ではないので残す。固定用のリンクと同じファイルの記録が無ければ（保存の途中で止まった・消された・別のファイルが
+    ある）、古い登録ファイルと固定用のリンクだけを消す。固定用のリンクが無ければ、inode 番号が合っても再利用された番号かも
+    しれないので記録は残す。新しい登録ファイルは、並行する保存がまだ公開していない場合があるので残す。"""
     name = mark["record"]
     try:
         registered = _signed(directory, mark.string, mark.string)
         if registered is None:
             return
-        try:
-            found = os.stat(name, dir_fd=directory, follow_symlinks=False)
-        except FileNotFoundError:
-            found = None
-        ours = found is not None and stat.S_ISREG(found.st_mode) and found.st_ino == int(mark["inode"])
+        pin = name + _PIN_SUFFIX
+        pinned, found = _entry_stat(directory, pin), _entry_stat(directory, name)
+        held = pinned is not None and stat.S_ISREG(pinned.st_mode) and pinned.st_ino == int(mark["inode"])
+        ours = held and found is not None and os.path.samestat(found, pinned)
         dated = found if ours else registered
         if dated.st_mtime >= cutoff:
             return
         if ours:
             os.unlink(name, dir_fd=directory)
+        if held:  # 記録より後に消す（間で止まっても、記録を NDF のものと確かめられる）
+            os.unlink(pin, dir_fd=directory)
         os.unlink(mark.string, dir_fd=directory)
     except FileNotFoundError:  # noqa: NDF401 ファイル: 並行する片付けが先に消した
         return

@@ -311,13 +311,17 @@ def test_issue_4363_ask_drops_only_the_registered_records_past_the_keep_period(t
     for path in (unmarked, replaced):
         path.write_text("利用者の退避", encoding="utf-8")
     stale = _registered(records, replaced.name, replaced.stat().st_ino + 1)
+    # 消された記録の inode 番号を別のファイルが再利用した状態（番号は合うが固定用のリンクが無い）
+    reused = records / "round1-verify-qr34_st5.out"
+    reused.write_text("利用者の退避", encoding="utf-8")
+    taken = _registered(records, reused.name, reused.stat().st_ino)
     # 保存の途中で止まった登録ファイルは古ければ消し、新しければ並行する保存のために残す
     left = _registered(records, "round1-verify-ij78_kl9.out", 1)
     fresh = _registered(records, "round1-verify-mn01_op2.out", 1)
-    _aged(unmarked, replaced, stale, left, *saved)
+    _aged(unmarked, replaced, stale, reused, taken, left, *saved)
     verify.ask(run, 2, [_row()], {"r1-1": [diff]}, _launcher([], []))
-    assert saved and not any(p.exists() for p in (*saved, stale, left))
-    assert unmarked.exists() and replaced.exists() and fresh.exists()
+    assert [p for p in saved if p.name.endswith(".pin")] and not any(p.exists() for p in (*saved, stale, taken, left))
+    assert unmarked.exists() and replaced.exists() and reused.exists() and fresh.exists()
 
 
 def test_issue_4363_ask_keeps_what_only_has_the_shape_of_a_registration_or_an_output_directory(tmp_path: Path) -> None:
