@@ -20,7 +20,7 @@ from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 from ndf.domains.records import mvv_decide as md
 
-from ._judge import holding, materials, output
+from ._judge import holding, lines, materials, output, read_rows
 from .test_crossreview_run import FAIL, IMPACT, Fake, _run, _state
 
 NDF_BY = "ndf"
@@ -352,6 +352,43 @@ def test_issue_4363_ask_does_not_take_a_negative_answer_without_reading_the_mate
     assert "tool_use" in saved and "読んだ中身" not in saved
 
 
+@pytest.mark.parametrize(
+    "ranges, taken",
+    [([(1, 442)], False), ([(1, 442), (600, 902)], False), ([(443, 1059), (1, 442)], True)],
+    ids=["head-only", "gap", "continued"],
+)
+def test_issue_4363_ask_takes_a_negative_answer_only_after_every_line_was_read(tmp_path: Path, ranges: list, taken: bool) -> None:
+    """大きいファイルは先頭だけが成功の結果で返るので、返った行を合わせて最後まで届いたときだけ否定の回答を採る。"""
+
+    def launch(spec: agents.Launch) -> agents.AgentStatus:
+        listed, diff = materials(spec)
+        rows = read_rows(0, listed)
+        for n, (start, count) in enumerate(ranges, 1):
+            rows += read_rows(n, diff, start, count, 1501)
+        body = {"result": json.dumps({"verdicts": [_answer()]}, ensure_ascii=False), "permission_denials": []}
+        spec.paths.out.write_text(lines([*rows, {"type": "result", **body}]), encoding="utf-8")
+        return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
+
+    answers = verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, launch)
+    assert answers.verdicts["r1-1"].holds is (False if taken else None)
+
+
+def test_issue_4363_recordable_output_keeps_only_the_result_and_the_tool_calls() -> None:
+    """キーの順や空白が違う行、知らない種類の行、途中で切れた行に読んだ中身があっても、保存する記録に残さない。"""
+    use, done = read_rows(0, "/wt/secret.env")
+    text = {"type": "text", "text": "読んだ中身"}
+    rows = [
+        " " + json.dumps({"message": done["message"], "tool_use_result": done["tool_use_result"], "type": "user"}),
+        json.dumps({"type": "tool_output", "content": "読んだ中身"}),
+        json.dumps({"type": "assistant", "message": {"content": [text, *use["message"]["content"], *done["message"]["content"]]}}),
+        json.dumps({"type": "result", "result": "回答", "permission_denials": [], "extra": "読んだ中身"}),
+        '{"type":"user","message":"読んだ中身',
+    ]
+    saved = participants.recordable_output("\n".join(rows).encode()).decode()
+    assert "読んだ中身" not in saved and "\\u8aad" not in saved
+    assert "/wt/secret.env" in saved and "回答" in saved and len(saved.splitlines()) == 2
+
+
 def test_issue_4363_ask_does_not_take_a_negative_answer_when_reading_the_implementation_is_denied(tmp_path: Path) -> None:
     """資料でないファイルの拒否は指摘に対応づけられないので、否定の回答は採らず、起きるとした回答と指摘の種類は残す。"""
     run, diff = _AskRun(tmp_path), _diff(tmp_path)
@@ -458,13 +495,14 @@ def test_issue_4363_ask_saves_the_output_when_the_launch_is_interrupted(tmp_path
 
     def interrupted(spec: agents.Launch) -> agents.AgentStatus:
         seen.append(spec)
-        spec.paths.out.write_text("書きかけ", encoding="utf-8")
+        spec.paths.out.write_text(lines(read_rows(0, "/wt/a.py")[:1]) + "書きかけ", encoding="utf-8")
         raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
         verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, interrupted)
     [record] = tmp_path.glob("round1-verify-*.out")
-    assert record.read_text(encoding="utf-8") == "書きかけ" and not seen[0].paths.out.parent.exists()
+    saved = record.read_text(encoding="utf-8")
+    assert "/wt/a.py" in saved and "書きかけ" not in saved and not seen[0].paths.out.parent.exists()
 
 
 @pytest.mark.parametrize(
@@ -497,6 +535,10 @@ def test_issue_4363_kept_review_needs_the_same_request_but_not_the_citation_chec
     got = reviewing.kept(run, 1, now, basis)
     assert (got is not None and got.raised == [HEAVY]) is resumed
     assert run.history == ([frozenset({"a"})] if resumed else [])
+    if resumed:
+        # 振動の判定の履歴を持たない記録も、相手役の結果は使う
+        run.data[store.PENDING_REVIEW] = {k: v for k, v in held.items() if k != "history"}
+        assert reviewing.kept(run, 1, now, basis).raised == [HEAVY]
     # 足すべき内容を持たない前のバージョンの記録は使わない（例外で止めない）
     run.data[store.PENDING_REVIEW] = {k: v for k, v in held.items() if k != "handed"}
     assert reviewing.kept(run, 1, now, basis) is None

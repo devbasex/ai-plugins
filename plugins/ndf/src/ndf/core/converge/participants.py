@@ -310,18 +310,18 @@ def claude_answer(out: Path) -> ClaudeAnswer:
 
 
 def read_files(out: Path, workdir: Path) -> frozenset[Path]:
-    """1 歩ごとの行の出力（stream-json）から、`Read` が成功したファイル。相対パスは claude の作業ディレクトリ `workdir` から
-    解決する。出力を読めなければ空。"""
+    """1 歩ごとの行の出力（stream-json）から、`Read` で最後の行まで読んだファイル。相対パスは claude の作業ディレクトリ
+    `workdir` から解決する。出力を読めなければ空。"""
     try:
         lines = out.read_text(encoding="utf-8", errors="replace").split("\n")
     except OSError:  # 出力の無い起動は、読んだファイルが無い
         return frozenset()
-    return transcript.succeeded_reads(lines, workdir)
+    return transcript.whole_reads(lines, workdir)
 
 
-def without_tool_results(data: bytes) -> bytes:
-    """1 歩ごとの行の出力から、Tool の結果の行（読んだファイルの中身を持つ）を除く。保存する記録に使う。"""
-    return b"".join(line for line in data.splitlines(keepends=True) if not line.startswith(b'{"type":"user"'))
+def recordable_output(data: bytes) -> bytes:
+    """1 歩ごとの行の出力を、保存してよい項目だけにする（`transcript.recordable`）。"""
+    return "".join(f"{line}\n" for line in transcript.recordable(data.decode("utf-8", errors="replace").split("\n"))).encode()
 
 
 def answer_text(runtime: str, out: Path) -> str:

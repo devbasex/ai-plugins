@@ -141,35 +141,85 @@ def _tool_ids(rec: Mapping[str, Any]) -> set:
     return {e["id"] for e in _elements(rec) if e.get("type") == "tool_use" and isinstance(e.get("id"), str)}
 
 
-def _line_elements(line: str) -> list:
-    """1 行の応答の要素。途中で切れた行、JSON の辞書でない行、`message` の無い行は空。"""
+# `claude -p --output-format stream-json` の出力のうち、保存してよい結果の行の項目と、Tool の呼び出しの引数（claude 2.1.332 で形を確かめた）
+PERMISSION_DENIALS = "permission_denials"
+STREAM_RESULT_KEYS = (
+    "type",
+    "subtype",
+    "is_error",
+    "api_error_status",
+    "result",
+    PERMISSION_DENIALS,
+    "num_turns",
+    "duration_ms",
+    "stop_reason",
+)
+STREAM_CALL_ARGS = ("file_path", "path", "offset", "limit")
+
+
+def _stream_row(line: str) -> dict[str, Any]:
+    """出力の 1 行の JSON の辞書。途中で切れた行と、JSON の辞書でない行は空。"""
     try:
-        rec = json.loads(line)
+        found = json.loads(line)
     except ValueError:  # 途中で切れた行と、JSON でない行
-        return []
-    return _elements(rec) if isinstance(rec, dict) and isinstance(rec.get("message"), dict) else []
+        return {}
+    return found if isinstance(found, dict) else {}
 
 
-def _read_path(part: Mapping[str, Any], workdir: Path) -> Optional[Path]:
-    """`Read` の呼び出しの要素が読むファイル。ほかの要素は None。"""
-    args = part.get("input")
-    if part.get("type") != "tool_use" or part.get("name") != "Read" or not isinstance(args, dict):
+def _read_range(row: Mapping[str, Any]) -> Optional[tuple[str, int, int, int]]:
+    """`Read` の結果の行の、ファイル・返した最初の行・返した行の数・ファイルの行の数。ほかの行と失敗した `Read` は None。"""
+    result = row.get("tool_use_result")
+    found = result.get("file") if isinstance(result, dict) and result.get("type") == "text" else None
+    if row.get("type") != "user" or not isinstance(found, dict):
         return None
-    value = args.get("file_path")
-    return Path(os.path.normpath(Path(workdir, value))) if isinstance(value, str) else None
+    path = found.get("filePath")
+    start, count, total = (found.get(key) for key in ("startLine", "numLines", "totalLines"))
+    if not isinstance(path, str) or not all(values.is_int(v) for v in (start, count, total)):
+        return None
+    return path, start, count, total
 
 
-def succeeded_reads(lines: Iterable[str], workdir: Path) -> frozenset[Path]:
-    """会話の行（stream-json の出力の行も同じ形）から、`Read` が成功したファイル。相対パスは `workdir` から解決する。"""
-    asked: dict[str, Path] = {}
-    done: set[Path] = set()
-    for part in (part for line in lines for part in _line_elements(line)):
-        path = _read_path(part, workdir)
-        if path is not None:
-            asked[str(part.get("id"))] = path
-        elif part.get("type") == "tool_result" and not part.get("is_error") and str(part.get("tool_use_id")) in asked:
-            done.add(asked[str(part.get("tool_use_id"))])
-    return frozenset(done)
+def _covers(ranges: list[tuple[int, int, int]]) -> bool:
+    """読んだ範囲（最初の行・行の数・ファイルの行の数）を合わせると、1 行目から最後の行まで途切れないか。"""
+    need = 1
+    for start, count, _ in sorted(ranges):
+        if start > need:
+            break
+        need = max(need, start + count)
+    return need > max(total for *_, total in ranges)
+
+
+def whole_reads(lines: Iterable[str], workdir: Path) -> frozenset[Path]:
+    """stream-json の出力の行から、`Read` の結果を合わせて最後の行まで読んだファイル。大きいファイルは先頭だけが成功の結果で
+    返る（`truncatedByTokenCap`）ので、成功したかでなく返した行の範囲で確かめる。相対パスは `workdir` から解決する。"""
+    ranges: dict[str, list[tuple[int, int, int]]] = {}
+    for line in lines:
+        found = _read_range(_stream_row(line))
+        if found is not None:
+            ranges.setdefault(found[0], []).append(found[1:])
+    return frozenset(Path(os.path.normpath(Path(workdir, path))) for path, got in ranges.items() if _covers(got))
+
+
+def _recordable_row(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """出力の 1 行のうち保存してよい項目。結果の行と、応答の行の Tool の呼び出し（場所と範囲の引数だけ）で、ほかは None。"""
+    if row.get("type") == "result":
+        return {key: row[key] for key in STREAM_RESULT_KEYS if key in row}
+    if row.get("type") != ASSISTANT or not isinstance(row.get("message"), dict):
+        return None
+    calls = []
+    for part in _elements(row):
+        args = part.get("input")
+        if part.get("type") == "tool_use" and isinstance(args, dict):
+            shown = {key: args[key] for key in STREAM_CALL_ARGS if key in args}
+            calls.append({"type": "tool_use", "id": part.get("id"), "name": part.get("name"), "input": shown})
+    return {"type": ASSISTANT, "message": {"content": calls}} if calls else None
+
+
+def recordable(lines: Iterable[str]) -> list[str]:
+    """stream-json の出力の行を、保存してよい項目だけの行にする。Tool の結果（読んだファイルの中身）はどの形の行にあっても
+    残さないよう、除くものでなく残すものを決める。形を確かめられない行は残さない。"""
+    kept = (_recordable_row(_stream_row(line)) for line in lines)
+    return [json.dumps(row, ensure_ascii=False, separators=(",", ":")) for row in kept if row is not None]
 
 
 def _squeeze(text: str) -> str:

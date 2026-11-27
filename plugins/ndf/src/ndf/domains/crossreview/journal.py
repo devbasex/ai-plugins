@@ -492,16 +492,17 @@ class FindingJournal:
         すべての指摘を重ねた後にそろえる（`_align_report`。承認や保護の根拠となる出し直しがあれば、その 1 件にする）。戻った指摘にこのラウンドの 1 文が 1 つも無ければ、行は前の 1 文と
         重さを持ち続けるが、`fresh` に入れず判定役に渡さない（前の経路の 1 文で下げないため）。承認や保護の根拠が
         無く、位置か内容の違う重い報告が並ぶ指摘も `fresh` に入れない（`_align_report` が None を返す）。確認で下げた指摘が
-        別のファイル・起きることの 1 文・見出しの重い報告で出し直されたら、下げた扱いを解除してその報告の指摘にし、判定役には渡さない
-        （`_revive_elsewhere`。確認の結果を持つ行は `fresh` に入れない。#4363）。"""
+        別のファイル・起きることの 1 文・見出しの重い報告で出し直されたら、下げた扱いを解除してその報告の指摘にする
+        （`_revive_elsewhere`。同じファイルなら `fresh` に入れて確かめ直し、違うファイルなら確認の結果を持つので入れない。
+        #4363）。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
         unexplained: list[str] = []
         same: dict[str, list[Mapping[str, Any]]] = {}
         before = len(self.revived)
-        denied = self._revive_elsewhere(by_key, raised, items, round_no)
-        fresh = self.revived[before:]
+        denied, recheck = self._revive_elsewhere(by_key, raised, items, round_no)
+        fresh = [*self.revived[before:], *recheck]
         _unlower(by_key, raised, items)
         # この呼び出しの前から行が持つ、必ず人の承認が要る操作の番号
         approvals = {fid: tuple(store.list_of(row, REDLINE_ITEMS)) for fid, row in self.rows.items()}
@@ -559,27 +560,45 @@ class FindingJournal:
 
     def _revive_elsewhere(
         self, by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str], round_no: int
-    ) -> dict[str, _Denied]:
+    ) -> tuple[dict[str, _Denied], list[str]]:
         """確認で下げた指摘が、確かめたものと違うファイル・起きることの 1 文・見出しの重い報告で出し直されたら、下げた扱いを
-        解除してその報告の指摘に戻し、戻した指摘の id と、否定した指摘を返す。キーは本文の先頭だけで決まるので、同じキーでも
-        別の経路や発生条件の不具合でありうる。確認の結果は下げた扱いを抜けたことを書き加えて残すので、判定役には渡し直さず（呼び出し元と呼び出し先を
-        交互に指す同じ指摘を、何度も確かめない）、保護の対象なら元の重要度へ戻る（`_restore_lowered`）。行の番号は修正で
-        ずれるので比べず、どちらかにファイルが無ければ戻さない。1 文の言い換えだけでも戻すが、戻した指摘は下げ直さないので、
-        修正担当へ渡るのは指摘 1 件につき 1 回までである。#4363"""
-        denied: dict[str, _Denied] = {}
+        解除してその報告の指摘にする。解除した指摘の id から否定した指摘への対応と、判定役にもう一度確かめる id を返す。
+        キーは本文の先頭だけで決まるので、同じキーでも別の経路や発生条件の不具合でありうる。行の番号は修正でずれるので
+        比べず、どちらかにファイルが無ければ解除しない。
+
+        - 同じファイルで 1 文か見出しだけが違う指摘は、言い換えか別の条件かを文字列では決められないので、確認の結果を外して
+          判定役にもう一度確かめる（言い換えならまた下がり、修正担当へは渡らない）
+        - 違うファイルの指摘（承認や保護の根拠がある出し直しを含むときも）は、直したとした指摘と同じに未解決へ戻し、確認の
+          結果は下げた扱いを抜けたことを書き加えて残す。判定役には渡し直さず（呼び出し元と呼び出し先を交互に指す同じ指摘を、
+          何度も確かめない）、保護の対象なら元の重要度へ戻る（`_restore_lowered`）。#4363"""
+        found: dict[str, tuple[dict[str, Any], _Denied, list[Mapping[str, Any]]]] = {}
+        marked: set[str] = set()
         for item in raised:
             text = item.get("text")
             row = by_key.get(oscillation.finding_key(text.strip())) if isinstance(text, str) and text.strip() else None
             if row is None or not _lowered(row) or not row.get("path"):
                 continue
+            fid = str(row["id"])
+            if _report_rank(item, items):
+                marked.add(fid)
             held = _Denied(row["path"], row.get("impact"), row.get("section"))
             if _heavy_elsewhere_than(item, items, held):
-                new = _raised(dict(item), criteria_decide.mvv_item(item.get("mvv"), items))
-                denied[str(row["id"])] = held
-                check = row[CHECK] | {criteria_decide.LOWERED: False, UNLOWERED: True}
-                self._revive(row, new, _text(item.get("section")), round_no)
-                row[CHECK] = check
-        return denied
+                found.setdefault(fid, (row, held, []))[2].append(item)
+        recheck = []
+        for fid, (row, held, reports) in found.items():
+            new = _raised(dict(reports[0]), criteria_decide.mvv_item(reports[0].get("mvv"), items))
+            section = _text(reports[0].get("section"))
+            if fid not in marked and all(_located(r).get("path") == held.path for r in reports):
+                # 同じ指摘のままなので、発生の値（PR のスレッドの結び付け）は変えない。位置は今のラウンドの差分のものにする
+                row.pop(CHECK)
+                row["round"] = round_no
+                _place(row, new, section)
+                recheck.append(fid)
+                continue
+            check = row[CHECK] | {criteria_decide.LOWERED: False, UNLOWERED: True}
+            self._revive(row, new, section, round_no)
+            row[CHECK] = check
+        return {fid: held for fid, (_, held, _reports) in found.items()}, recheck
 
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は

@@ -31,15 +31,25 @@ def materials(spec: agents.Launch) -> list[str]:
     return [*listed, *diffs.split("・")]
 
 
-def output(body: dict, read: list[str]) -> str:
-    """ファイル `read` を `Read` してから結果 `body` を返した、claude の 1 歩ごとの行の出力。"""
-    rows: list[dict] = []
-    for n, path in enumerate(read):
-        use = {"type": "tool_use", "id": f"t{n}", "name": "Read", "input": {"file_path": path}}
-        done = {"type": "tool_result", "tool_use_id": f"t{n}", "content": "読んだ中身"}
-        rows += [{"type": "assistant", "message": {"content": [use]}}, {"type": "user", "message": {"content": [done]}}]
-    rows.append({"type": "result", **body})
+def read_rows(n: int, path: str, start: int = 1, count: int = 1, total: int = 1) -> list[dict]:
+    """`Read` の呼び出しと結果の行（claude 2.1.332 の stream-json の形。`total` 行のファイルの `start` 行目から `count` 行）。"""
+    use = {"type": "tool_use", "id": f"t{n}", "name": "Read", "input": {"file_path": path}}
+    done = {"type": "tool_result", "tool_use_id": f"t{n}", "content": "1\t読んだ中身"}
+    got = {"filePath": path, "content": "読んだ中身", "numLines": count, "startLine": start, "totalLines": total}
+    return [
+        {"type": "assistant", "message": {"role": "assistant", "content": [use]}},
+        {"type": "user", "message": {"role": "user", "content": [done]}, "tool_use_result": {"type": "text", "file": got}},
+    ]
+
+
+def lines(rows: list[dict]) -> str:
     return "".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n" for row in rows)
+
+
+def output(body: dict, read: list[str]) -> str:
+    """ファイル `read` を最後の行まで `Read` してから結果 `body` を返した、claude の 1 歩ごとの行の出力。"""
+    rows = [row for n, path in enumerate(read) for row in read_rows(n, path)]
+    return lines([*rows, {"type": "result", **body}])
 
 
 def holding(row: dict) -> dict:

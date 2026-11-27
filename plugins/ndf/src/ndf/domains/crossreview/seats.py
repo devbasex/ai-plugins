@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
-from ndf.adapters import agents
+from ndf.adapters import agents, transcript
 from ndf.contracts import facts
 from ndf.core.converge import participants
 from ndf.domains.crossreview import scope_decide, store
@@ -22,7 +22,7 @@ from ndf.domains.crossreview.settings import DriveStopped, RunConfig
 # 席の claude の system の文
 SEAT_SYSTEM = "cross-review の相手役（読むだけ）"
 # claude の席が渡した差分のファイルの読み取りを拒否された理由の頭（結果の無い席の理由と過程に載せる）
-DENIED_READ = "permission_denials"
+DENIED_READ = transcript.PERMISSION_DENIALS
 # その席の直し方（ログインでなく、読み取りの権限を確かめさせる。PR 4461 の r3-2）
 DENIED_FIX = "claude が理由に示した差分のファイルを読める設定か（`--restricted`・`--add-dir` の読み取りの範囲と、利用者の permissions の deny）を確かめる"
 

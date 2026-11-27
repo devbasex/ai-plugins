@@ -263,10 +263,14 @@ def test_issue_4363_heavy_reports_of_different_conditions_at_one_place_are_not_a
 
 
 @pytest.mark.parametrize("other", [{"impact": "既存データの更新で失敗する"}, {"section": "doc.md#移行"}])
-def test_issue_4363_lowered_finding_raised_for_another_condition_in_the_same_file_is_unlowered(other: dict) -> None:
+def test_issue_4363_lowered_finding_raised_differently_in_the_same_file_is_checked_again(other: dict) -> None:
+    """同じファイルで 1 文か見出しだけが違う出し直しは、判定役に確かめ直し、否定されればまた下げて修正担当へ渡さない。"""
     journal, row = _lowered(path="a.py", line=1, section="doc.md#保存")
+    occurrence = row[journal_mod.OCCURRENCE]
     journal.enter(2, [_told(path="a.py", line=9, section="doc.md#保存")])
-    assert (row["severity"], row["line"]) == ("minor", 1)
+    assert (row["severity"], row["line"], journal.fresh) == ("minor", 1, [])
     journal.enter(3, [_told(**{"path": "a.py", "line": 20, "section": "doc.md#保存", **other})])
-    assert (row["severity"], row["line"], row["check"]["lowered"]) == ("major", 20, False)
-    assert journal.handable() == [row] and journal.fresh == []
+    assert (row["severity"], row["line"], row["round"], "check" in row) == ("major", 20, 3, False)
+    assert journal.fresh == ["r1-1"] and journal.revived == [] and row[journal_mod.OCCURRENCE] == occurrence
+    journal.apply_checks(journal.fresh, _answered())
+    assert (row["severity"], journal.handable()) == ("minor", [])
