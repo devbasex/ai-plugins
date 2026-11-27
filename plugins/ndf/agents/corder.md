@@ -85,7 +85,8 @@ cd "<対象のディレクトリ>" && timeout 3720 ndf delegate-run --runtime co
   --config model_reasoning_effort=medium < "$TMP/prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
 ```
 
-- 書き込みを伴う作業では、起動の前に `git rev-parse HEAD` と `git status --porcelain` の出力を `$TMP` へ記録する。上限で止まったときに、起動前と比べて適用済みの変更を確かめるためである
+- 書き込みを伴う作業は、未コミットの変更が無い作業ツリーで起動し、プロンプトに「コミットしないこと」と書く。途中で止まったときに、委譲先が適用した変更だけを作業ツリーから確かめるためである。
+  既存の変更を含む作業ツリーで起動するしかない場合の記録と、止まった後の確かめ方は、`/ndf:external-ai` skill の「共通の実行手順」の「上限に当たったとき」に従う
 - Claude Code では Bash の `run_in_background: true` で、選んだ用途のコマンドを起動し、完了通知を 1 回受ける（決まりは `development-workflow/references/waiting.md`）
 - 本文を読む前に、`/ndf:external-ai` skill の「共通の実行手順」の回収の表で、失敗（上限に当たった 124・起動拒否・認証切れ・利用上限）を先に判定する。
   本文があっても、失敗に当たればその行の手に従う（124 なら「上限に当たったとき」）
