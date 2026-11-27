@@ -20,9 +20,6 @@ SINCE = "since"
 # ラウンドの記録のキー（そのラウンドの比較基点。`--base` と HEAD の merge-base の SHA。ブランチ名だと参照先が動いても
 # 同じ値になり、変わった PR の全差分を見落とす。PR 3944 の r2-1）
 BASE = "base"
-# ラウンドの記録のキー（そのラウンドの比較元のブランチの名前。`--reviewed-base-out` の起動は PR の今のマージ先。マージ先が
-# 変わると merge-base が同じでも PR の差分の相手が変わるので、名前でも比べる。#3702）
-BASE_BRANCH = "base_branch"
 # ラウンドの記録のキー（そのラウンドを読んだ相手役の並び。PR 3944 の r2-2）
 REVIEWERS = "reviewers"
 # ラウンドの記録のキー（そのラウンドに claude が座っている、埋めた席の並び。`Filled.record()` の形。#3955）
@@ -36,7 +33,9 @@ UNIT = "unit"
 PR = "pr"
 # ラウンドの記録のキー（そのラウンドのレビューに使った MVV。#4076）と、その中身のキー。`MVV_ID` は MVV を見分ける値
 # （`mvv_decide.identity_of`）、`MVV_BRANCH` は MVV を読んだブランチ（`--base` がコミットのときに、`review-scope` が
-# GitHub へ問い合わせずに同じブランチの MVV を読むのに使う）
+# GitHub へ問い合わせずに同じブランチの MVV を読むのに使う）。MVV を読んだブランチはそのラウンドの比較元のブランチと同じ値なので、
+# 比較元のブランチの記録もこのキーだけにする（`--reviewed-base-out` の起動は PR の今のマージ先。マージ先が変わると merge-base が
+# 同じでも PR の差分の相手が変わるので、名前でも比べる。別のキーを足すと、足す前のバージョンが書いたラウンドを使えない。#3702・PR 4638 の r1-4・r1-5）
 MVV = "mvv"
 MVV_ID = "id"
 MVV_BRANCH = "mvv_branch"
@@ -171,7 +170,8 @@ class Basis(NamedTuple):
 
 def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
     """ラウンドの記録が `basis` に合うか。`basis` の値があれば、比較基点（`BASE`）が違う・そのラウンドを読んだ相手役
-    （`REVIEWERS`）に無い相手役がいる・重点（`FOCUS`）か単位の指示（`UNIT`）か読んだ PR（`PR`）か MVV（`MVV`）が違うときは合わない。承認済みの MVV があるのに、
+    （`REVIEWERS`）に無い相手役がいる・重点（`FOCUS`）か単位の指示（`UNIT`）か読んだ PR（`PR`）か MVV（`MVV`）か比較元のブランチ
+    （`MVV_BRANCH`）が違うときは合わない。承認済みの MVV があるのに、
     そのラウンドの head で根拠の記述を確かめ終えていない（`finish_decide.MVV_CHECKED`）ときも合わない（#4090）。"""
     if basis.base is not None and record.get(BASE) != basis.base:
         return False
@@ -184,7 +184,7 @@ def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
         return False
     if basis.pr is not None and (record[PR] if PR in record else None) != basis.pr:
         return False
-    if basis.base_branch is not None and (record[BASE_BRANCH] if BASE_BRANCH in record else None) != basis.base_branch:
+    if basis.base_branch is not None and _mvv_record(record).get(MVV_BRANCH) != basis.base_branch:
         return False
     if basis.mvv is None:
         return True

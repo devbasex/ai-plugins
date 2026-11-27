@@ -478,13 +478,12 @@ def _findings(state: dict) -> list[dict]:
 
 def _rounds_without_heads(state: dict) -> list[dict]:
     """ラウンドの記録から、コミットの時刻で変わる SHA（head・commit・pushed）と、どのテストも同じ比較基点（base。merge-base の
-    SHA）と比較元のブランチ（base_branch）と相手役の並び（reviewers）と重点（focus）と、MVV が無いときの MVV の記録（mvv）を外す。"""
+    SHA）と相手役の並び（reviewers）と重点（focus）と、MVV が無いときの MVV の記録（mvv）を外す。"""
     out = []
     for r in state["rounds"]:
         assert re.fullmatch(r"[0-9a-f]{40}", r["base"]) and r["reviewers"] == ["codex", "kiro"] and r["focus"] == []
-        assert (r["mvv"], r["mvv_checked"], r["base_branch"]) == ({"id": "absent:::", "mvv_branch": "main"}, True, "main")
-        dropped = ("head", "base", "base_branch", "reviewers", "focus", "mvv", "mvv_checked")
-        row = {k: v for k, v in r.items() if k not in dropped}
+        assert (r["mvv"], r["mvv_checked"]) == ({"id": "absent:::", "mvv_branch": "main"}, True)
+        row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers", "focus", "mvv", "mvv_checked")}
         if "fix" in row:
             row["fix"] = {k: v for k, v in row["fix"].items() if k not in ("commit", "pushed")}
         out.append(row)

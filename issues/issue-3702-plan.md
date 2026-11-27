@@ -61,7 +61,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/src/ndf/domains/crossreview/settings.py`
   - `plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`
   - `plugins/ndf/docs/contracts/commands.md`
-- **変更内容:** `--reviewed-base-out` と `RunConfig.follow_base`。ラウンドの記録の `base_branch`、マージ先が変わったときの全差分。コマンドの一覧を生成し直す
+- **変更内容:** `--reviewed-base-out` と `RunConfig.follow_base`。ラウンドの比較元のブランチを `mvv.mvv_branch` で照らすこと、マージ先が変わったときの全差分。コマンドの一覧を生成し直す
 - **満たす受け入れ条件:** 無し（条件 1 の部品。条件 1 は Task 18 の単位で確かめる）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 

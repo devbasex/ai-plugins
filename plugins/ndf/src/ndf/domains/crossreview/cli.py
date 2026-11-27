@@ -638,10 +638,14 @@ def _ready(args: argparse.Namespace) -> tuple[RunConfig, Optional[str]] | int:
 
 def _begin_run(args: argparse.Namespace) -> Optional[int]:
     """前の起動が書いた `--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out` を消し、`--repo` の対象のリポジトリを
-    子の `gh` へ渡す。`--repo` の形が違うか、`--reviewed-base-out` を `--reviewed-out` なしで渡すか、出力先に書けなければ、
-    止まった結果を出した終了コードを返す（書かれないと分かっている出力のために、レビューの token と時間を使わない。#3702）。"""
+    子の `gh` へ渡す。`--repo` の形が違うか、`--reviewed-base-out` を `--reviewed-out` なしで渡すか、出力先が重なるか、出力先に
+    書けなければ、止まった結果を出した終了コードを返す（書かれないと分かっている出力のために、レビューの token と時間を使わない。#3702）。"""
     if args.reviewed_base_out and not args.reviewed_out:
         return _stop("invalid", "--reviewed-base-out は --reviewed-out と併用する（レビューした HEAD を書かない起動は比較元も書かない）")
+    shared = _shared_output(args)
+    if shared is not None:
+        # 後に書く値が先の値を上書きし、承認と照らすのに要る HEAD・PR・比較元のどれかが失われる。消す前に止める（PR 4638 の r1-3）
+        return _stop("invalid", f"出力先 {shared} を --reviewed-out・--reviewed-pr-out・--reviewed-base-out の 2 つ以上に渡している")
     for stale in (args.reviewed_out, args.reviewed_pr_out, args.reviewed_base_out):
         if stale:
             try:
@@ -654,6 +658,19 @@ def _begin_run(args: argparse.Namespace) -> Optional[int]:
             os.environ[GH_REPO_ENV] = repo.resolve_target_repo(args.repo, None, Path.cwd()).slug
         except repo.RepoUnresolved as exc:
             return _stop("invalid", str(exc))
+    return None
+
+
+def _shared_output(args: argparse.Namespace) -> Optional[str]:
+    """`--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out` のうち、同じファイルを指す出力先（重ならなければ None）。
+    リンクと相対パスは解決してから比べる。"""
+    seen: set[Path] = set()
+    for given in (args.reviewed_out, args.reviewed_pr_out, args.reviewed_base_out):
+        if given:
+            path = Path(given).resolve()
+            if path in seen:
+                return given
+            seen.add(path)
     return None
 
 
@@ -826,7 +843,7 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
         "--reviewed-base-out",
         help="--reviewed-out と併用する。--base でなく PR の今のマージ先を比較元にし、レビューした HEAD のラウンドの比較元の"
         "ブランチ名を指定ファイルに書く。マージ先が前のラウンドと違えば、新しいマージ先との全差分を読ませる。"
-        "--reviewed-out なしで渡すと、レビューを始めずに invalid で停止する。マージ先を取得するリモートが PR のベースリポジトリと"
+        "--reviewed-out なしで渡すか、--reviewed-out・--reviewed-pr-out と同じ保存先を渡すと、レビューを始めずに invalid で停止する。マージ先を取得するリモートが PR のベースリポジトリと"
         "一致すると確かめられなければ、レビューを始めずに precondition で停止する",
     )
 

@@ -25,10 +25,15 @@ def _with_merge_base(data, sha: str):
     比較元のブランチをラウンドに記録する（`review-scope` も今回の相手役と比較元で決める。PR 3944 の r3-4・PR 4638 の r1-1）。"""
     if isinstance(data, dict) and isinstance(data.get("rounds"), list):
         seats = list(participants.assign())
-        on_main = {"reviewers": seats, scope_decide.BASE_BRANCH: "main"}
-        rounds = [{**on_main, **r, "base": sha} if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
+        rounds = [_on_main(r, seats, sha) if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
         return {**data, "rounds": rounds}
     return data
+
+
+def _on_main(r: dict, seats: list[str], sha: str) -> dict:
+    """ラウンドの記録に、既定の相手役と比較基点と、MVV を読んだ（比較元の）ブランチ `main` を足す（記録の値を優先する）。"""
+    mvv = {scope_decide.MVV_BRANCH: "main", **(r.get(scope_decide.MVV) or {})}
+    return {"reviewers": seats, **r, "base": sha, scope_decide.MVV: mvv}
 
 
 def test_sections_skip_headings_inside_code_blocks() -> None:
@@ -305,6 +310,14 @@ def test_issue_3702_sections_reviewed_against_another_target_are_reviewed_again(
     if recorded:
         state[store.REVIEWED_BASE_BRANCH] = recorded
     assert scope_decide.reviewed_of(state, APPROVED, now) == reviewed
+
+
+@pytest.mark.parametrize(("recorded", "head"), [("main", "h1"), ("sprint/y", None), (None, None)])
+def test_issue_3702_round_base_branch_is_read_from_the_mvv_record(recorded: str | None, head: str | None) -> None:
+    """PR 4638 の r1-4・r1-5: ラウンドの比較元のブランチは MVV を読んだブランチの記録で照らす（前のバージョンが書いたラウンドも使える）。"""
+    mvv = {"id": "absent:::"} if recorded is None else {"id": "absent:::", scope_decide.MVV_BRANCH: recorded}
+    state = {"rounds": [{"round": 1, "head": "h1", "verdict": "converged", scope_decide.MVV: mvv}]}
+    assert scope_decide.read_by_all_head(state, scope_decide.Basis(base_branch="main")) == head
 
 
 def test_issue_3702_changed_base_sends_every_section_to_the_detailed_review(scope_run) -> None:

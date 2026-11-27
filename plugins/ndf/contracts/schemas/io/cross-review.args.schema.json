@@ -308,7 +308,7 @@
         },
         "--reviewed-base-out": {
           "type": "string",
-          "description": "--reviewed-out と併用する。--base でなく PR の今のマージ先を比較元にし、レビューした HEAD のラウンドの比較元のブランチ名を指定ファイルに書く。マージ先が前のラウンドと違えば、新しいマージ先との全差分を読ませる。--reviewed-out なしで渡すと、レビューを始めずに invalid で停止する。マージ先を取得するリモートが PR のベースリポジトリと一致すると確かめられなければ、レビューを始めずに precondition で停止する"
+          "description": "--reviewed-out と併用する。--base でなく PR の今のマージ先を比較元にし、レビューした HEAD のラウンドの比較元のブランチ名を指定ファイルに書く。マージ先が前のラウンドと違えば、新しいマージ先との全差分を読ませる。--reviewed-out なしで渡すか、--reviewed-out・--reviewed-pr-out と同じ保存先を渡すと、レビューを始めずに invalid で停止する。マージ先を取得するリモートが PR のベースリポジトリと一致すると確かめられなければ、レビューを始めずに precondition で停止する"
         }
       },
       "required": [

@@ -396,20 +396,24 @@ contracts/
 | 関数 | 定義するファイル | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_sync` | `domains/crossreview/drive.py` | 変更 | 変えない | `RunConfig.follow_base` が真なら、`--base` でなく PR の今のマージ先を読んで取得し、比較元にする |
-| `_reusable` | 同上 | 変更 | 変えない | 起動の引数によらず、前のラウンドに記録した比較元のブランチ（`base_branch`）が今回と違えば偽 |
-| `cmd_run` | `domains/crossreview/cli.py` | 変更 | 変えない | `--reviewed-base-out` を受け、始めに消し、`--reviewed-out` を書くときに最後のラウンドの `base_branch` を書く |
+| `_reusable` | 同上 | 変更 | 変えない | 起動の引数によらず、前のラウンドに記録した比較元のブランチ（`mvv.mvv_branch`）が今回と違えば偽 |
+| `cmd_run` | `domains/crossreview/cli.py` | 変更 | 変えない | `--reviewed-base-out` を受け、始めに消し、`--reviewed-out` を書くときに最後のラウンドの比較元のブランチを書く。`--reviewed-out`・`--reviewed-pr-out` と同じ保存先なら、消す前に `invalid` で止まる |
 | `_merge_pull` | `ci_cli.py` | 変更 | 変えない | `--verify-merged` があり、マージ済みの PR の head か base が承認の値と違えば `refused` |
 | `_watch` | 同上 | 変更 | 変えない | `--head <SHA>` があれば、待ちの開始時と必須チェックが通った時点に PR の HEAD を読み、指定した SHA と違えば `approval_stale` |
 | `pulls` | `adapters/github.py` | 変更 | `(numbers, spare=(), *, rest_fallback: bool = True)` | 偽なら REST へ読み替えない |
 
-- `RunConfig`（`settings.py`）に `follow_base: bool = False` を足し、`--reviewed-base-out` を渡した起動だけ真にする。ラウンドの記録に `base_branch` を足す
+- `RunConfig`（`settings.py`）に `follow_base: bool = False` を足し、`--reviewed-base-out` を渡した起動だけ真にする
+- ラウンドの比較元のブランチは、ラウンドの記録の `mvv.mvv_branch` で照らす。別のキーは足さない
+  - MVV を読むブランチと比較元のブランチは、どの起動でも同じ値（`_sync` が決めたブランチ）から書く
+  - キーを分けると、このキーの無い前のバージョンのラウンドをすべて不一致とみなし、バージョンを上げた後に収束済みの PR を同じ条件で打ち直しても、全差分を読み直す
 - 比較元のブランチが前のラウンドと違う起動は、前の head からの差分も前回の収束結果も使わず、新しい比較元との全差分を渡す。作り方は `--base` からの全差分と同じである
   - 比較元のブランチが変わるのは、`follow_base` の起動で PR のマージ先が変わったときと、`--base` を別のブランチへ替えたときである
   - merge-base が同じでも比べる。`main` から 1 コミット進めた `sprint/y` のように、merge-base が同じまま比較元だけが変わることがある。HEAD・merge-base・MVV だけで比べると、新しい比較元で詳細レビューをせずに、前回の収束結果を返してしまう
 - 詳細レビューを通ったセクションは、比較元のブランチが今と同じ記録だけを引き継ぐ。MVV が同じでも、差分の相手が変われば、前の詳細レビューは新しい差分を確かめていないためである
   - 記録には、そのときの比較元のブランチ（`reviewed_base_branch`）を残す
   - 比べるのは、ラウンドの範囲を決める時点である。`follow_base` の起動か、`--base` を変えた起動かによらない。比較元が違う記録は引き継がず、新しい全差分のセクションをすべて詳細レビューに通す
-  - 範囲を決める時点で比べないと、前の比較元で通った同じ名前のセクションが詳細レビューの指示から外れる。さらにラウンドの後、そのセクションが今の比較元で通ったと記録される。`review-scope` も `run` と同じ範囲を返すように、同じ比較元のブランチで比べる
+  - 範囲を決める時点で比べないと、前の比較元で通った同じ名前のセクションが詳細レビューの指示から外れる。さらにラウンドの後、そのセクションが今の比較元で通ったと記録される
+  - `review-scope` は、指定された `--base` を比較元とする。PR のマージ先に合わせる `run` の範囲を事前に確認する場合は、現在のマージ先を取得し、そのブランチを `review-scope --base` に渡す
 - `--verify-merged` は `--pr`・`--approved-head`・`--approved-base` と組でだけ受ける（どれかが無ければ `invalid`）。番号を渡さない経路は開いている PR しか探さず、マージ済みの PR を承認の値と照らせないためである
 
 `ndf ci watch --head <SHA>` が返すチェック結果は、指定した SHA のものである。待ちの開始時と、必須チェックが通った時点に PR の HEAD を読み、指定した SHA と違えば `approval_stale` を返す。取得したチェック結果がどの SHA のものかを確かめるだけでは足りない。結果は指定した SHA に固定して読んでいるので、PR の HEAD が動いても一致し、成功を返してしまうためである。

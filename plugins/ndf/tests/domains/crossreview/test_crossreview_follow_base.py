@@ -45,7 +45,7 @@ def test_issue_3702_reviewed_base_out_compares_with_the_pr_target_not_the_given_
     assert (code, got["status"]) == (0, "ok")
     assert base_out.read_text(encoding="utf-8") == f"{SPRINT}\n"
     last = _state(fake.state_dir)["rounds"][-1]
-    assert last["base_branch"] == SPRINT
+    assert last["mvv"]["mvv_branch"] == SPRINT
     assert last["base"] == sh(wt, "merge-base", f"origin/{SPRINT}", "HEAD").strip()
 
 
@@ -67,7 +67,7 @@ def test_issue_3702_changed_target_reviews_the_full_diff_against_the_new_target(
     assert (code, got["status"]) == (0, "ok") and fake.prompts
     assert all("範囲: full" in p for _, _, p in fake.prompts)
     assert base_out.read_text(encoding="utf-8") == f"{SPRINT}\n"
-    assert _state(state_dir)["rounds"][-1]["base_branch"] == SPRINT
+    assert _state(state_dir)["rounds"][-1]["mvv"]["mvv_branch"] == SPRINT
 
 
 def test_issue_3702_same_target_reuses_the_converged_round(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -95,7 +95,7 @@ def test_issue_3702_changed_base_with_the_same_merge_base_reviews_again(
     assert (code, got["status"]) == (0, "ok") and fake.prompts
     assert all("範囲: full" in p for _, _, p in fake.prompts)
     rounds = _state(state_dir)["rounds"]
-    assert rounds[-1]["base"] == rounds[0]["base"] and rounds[-1]["base_branch"] == SPRINT
+    assert rounds[-1]["base"] == rounds[0]["base"] and rounds[-1]["mvv"]["mvv_branch"] == SPRINT
 
 
 def test_issue_3702_without_reviewed_base_out_the_given_base_is_kept(
@@ -107,7 +107,7 @@ def test_issue_3702_without_reviewed_base_out_the_given_base_is_kept(
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"], hub.port.base_reads) == (0, "ok", 0)
-    assert _state(fake.state_dir)["rounds"][-1]["base_branch"] == "main"
+    assert _state(fake.state_dir)["rounds"][-1]["mvv"]["mvv_branch"] == "main"
 
 
 def test_issue_3702_unreadable_target_stops_before_any_launch(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -144,6 +144,20 @@ def test_issue_3702_reviewed_base_out_without_reviewed_out_is_invalid(wt: Path, 
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-base-out", str(tmp_path / "b"))
     assert (got["cause"]["kind"], fake.calls) == ("invalid", [])
+
+
+@pytest.mark.parametrize("other", ["--reviewed-out", "--reviewed-pr-out"])
+def test_issue_3702_shared_output_is_invalid_and_kept(wt: Path, tmp_path: Path, capsys, monkeypatch, other: str) -> None:
+    """PR 4638 の r1-3: 出力先を重ねると、消す前に invalid で止まる（後に書く値で先の値が失われる）。"""
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    shared = tmp_path / "out"
+    shared.write_text("前の値\n", encoding="utf-8")
+    head = shared if other == "--reviewed-out" else tmp_path / "h"
+    extra = ("--reviewed-out", str(head), "--reviewed-base-out", str(shared))
+    if other == "--reviewed-pr-out":
+        extra += ("--reviewed-pr-out", str(tmp_path / "." / "out"))
+    code, got = _run(capsys, monkeypatch, fake, wt, *extra)
+    assert (got["cause"]["kind"], fake.calls, shared.read_text(encoding="utf-8")) == ("invalid", [], "前の値\n")
 
 
 def test_issue_3702_target_resolved_from_the_remote_is_not_read_again(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:

@@ -138,10 +138,10 @@ class _Run:
     remarks: Sequence[prior_decide.Remark] = ()
     # 起動の始めにベースブランチ（`--base` がコミットなら PR のマージ先）から読んだプロジェクト MVV（#4076）
     snapshot: Optional[mvv.Snapshot] = None
-    # MVV を見分ける値と、MVV を読んだブランチ（ラウンドの記録に残す。#4076）
+    # MVV を見分ける値と、MVV を読んだブランチ（ラウンドの記録に残す。#4076）。後者は差分の比較元のブランチでもある
+    # （`follow_base` なら PR の今のマージ先。#3702）
     mvv: Optional[str] = None
     mvv_branch: Optional[str] = None
-    base_branch: str = ""  # 差分の比較元のブランチ（`follow_base` なら PR の今のマージ先。ラウンドの記録に残す。#3702）
     # PR に届いたと分かっている最後のコミット（始めの同期で取得した先頭か、この起動で送ったコミット）
     sent: str = ""
     # 始めに読めて、head ブランチとその先頭がレビューするブランチの取得した先頭と一致した PR
@@ -321,7 +321,6 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide
         snapshot=snap,
         mvv=snap.identity,
         mvv_branch=based.branch,
-        base_branch=based.branch,
         sent=synced.remote,
         remote=based.remote,
         synced_head=synced.remote,
@@ -737,7 +736,7 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
     read = reviewed_pr.read_by_all_this_run(run.data, rounds)
     # 注意を足すことがあるので、`run.warnings` を写す前に確かめる
     pr = reviewed_pr.confirmed(run, read)
-    base = run.base_branch if read is not None else None
+    base = run.mvv_branch if read is not None else None
     return Outcome(review, path, tuple(run.warnings), tuple(run.process), read, reused, results, failed, pr, base)
 
 
@@ -779,7 +778,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     changed = changes.changed(run.g, cfg.base_commit, cfg.worktree)
     _oversized_docs(run, changed.docs)
     run.documents = any(p.endswith(".md") for p in changed.files)
-    reviewed = scope_decide.reviewed_of(run.data, run.mvv, run.base_branch)
+    reviewed = scope_decide.reviewed_of(run.data, run.mvv, run.mvv_branch)
     sections = changes.sections(changed.docs)
     head = run.g.rev_parse("HEAD")
     merge_base = _merge_base(run, head)
@@ -823,9 +822,7 @@ def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
     unit = scope_decide.unit_id(run.cfg.unit)
     # 確認を求める起動は、読んだ PR が無ければラウンドの前に止まっている
     pr = run.read_pr.ident if run.cfg.check_pr and run.read_pr is not None else None
-    return scope_decide.Basis(
-        _merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr, run.base_branch
-    )
+    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr, run.mvv_branch)
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
@@ -860,7 +857,6 @@ def _round_record(run: _Run, round_no: int, prep: _Prepared) -> dict[str, Any]:
         "round": round_no,
         "head": prep.head,
         scope_decide.BASE: prep.base,
-        scope_decide.BASE_BRANCH: run.base_branch,
         scope_decide.REVIEWERS: list(run.seats),
         scope_decide.FOCUS: list(run.cfg.settings.focus),
         scope_decide.MVV: {scope_decide.MVV_ID: run.mvv, scope_decide.MVV_BRANCH: run.mvv_branch},
@@ -904,7 +900,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         return fin.INCOMPLETE_REVIEWERS
     if prep.scope.kind == scope_decide.FULL:
         run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
-        run.data.update({store.REVIEWED_MVV: run.mvv, store.REVIEWED_BASE_BRANCH: run.base_branch})
+        run.data.update({store.REVIEWED_MVV: run.mvv, store.REVIEWED_BASE_BRANCH: run.mvv_branch})
     open_, handed = run.journal.pending(run.cfg.handed)
     record["verdict"] = _verdict(run, open_, handed)
     if record["verdict"] != CHANGES_REQUIRED:
