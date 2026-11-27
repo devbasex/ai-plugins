@@ -30,6 +30,8 @@ _ENTRY = ndf_identity.FIXED_WORDS["entrypoint"]
 # 起票の記録のコメントの先頭の目印と、記録の中身を埋める最後の行の前
 RECORD_MARK = f"<!-- {_ENTRY}:cross-review-leftover-record -->"
 _ENTRIES_MARK = f"<!-- {_ENTRY}:cross-review-leftover-entries "
+# 引き継いだ記録の 2 行目の目印。この目印のある記録は、書き手が所有者・メンバー・共同作業者のときだけ使う
+_TAKEN_OVER_MARK = f"<!-- {_ENTRY}:cross-review-leftover-taken-over -->"
 # 本文の先頭の `<名前>:<行>`
 _LOCATION = re.compile(r"^\s*`?([\w./-]+):(\d+)")
 
@@ -223,11 +225,18 @@ def names_finding(listed: Listed, ident: str) -> bool:
     return not listed.is_pull and _issue_mark(ident) in listed.body
 
 
-def record_body(entries: Mapping[str, Mapping[str, Any]]) -> str:
-    """起票の記録のコメントの本文（識別値ごとの試みた時刻 `at`・Issue の `url`・起票した login の `by`）。"""
+def taken_over(body: str) -> bool:
+    """起票の記録の本文が、引き継いで投稿したものか。"""
+    return _lines_of(body)[:2] == [RECORD_MARK, _TAKEN_OVER_MARK]
+
+
+def record_body(entries: Mapping[str, Mapping[str, Any]], over: bool = False) -> str:
+    """起票の記録のコメントの本文（識別値ごとの試みた時刻 `at`・Issue の `url`・起票した login の `by`）。`over` は引き継いだ記録で、
+    目印を足す。"""
     payload = json.dumps({k: dict(v) for k, v in entries.items()}, sort_keys=True)
     note = "cross-review が起票を試みた指摘の記録（同じ指摘を 2 件起票しないために読む。書き換えない）。"
-    return f"{RECORD_MARK}\n{note}\n\n{_ENTRIES_MARK}{payload} -->"
+    head = f"{RECORD_MARK}\n{_TAKEN_OVER_MARK}" if over else RECORD_MARK
+    return f"{head}\n{note}\n\n{_ENTRIES_MARK}{payload} -->"
 
 
 def record_entries(body: str) -> dict[str, dict[str, Any]]:

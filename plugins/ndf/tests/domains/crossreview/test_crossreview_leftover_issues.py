@@ -403,6 +403,23 @@ def test_issue_3780_an_account_others_cannot_trust_does_not_take_over_the_record
     assert first.go() == [] and github.created() == 2
 
 
+@pytest.mark.parametrize("login", ["outsider", "app[bot]"])
+def test_issue_3780_a_take_over_that_could_not_be_removed_is_not_used_by_anyone(login: str) -> None:
+    github = FakeGitHub()
+    github.login, github.edits_others = "app[bot]", False
+    Run(github).go()
+    github.login = "outsider"
+    github.fail[("DELETE", "comments/501")] = 502
+    second = _row("r2-2", "別の指摘")
+    assert Run(github, second).go() and len(github.records) == 2
+    # 残ったコメントを、投稿者本人の打ち直しも別のアカウントも起票の根拠にしない
+    github.login = login
+    again = Run(github, _row("r2-2", "別の指摘"))
+    again.data["issue_logins"] = ["outsider"]
+    again.go()
+    assert github.created() == (2 if login == "app[bot]" else 1)
+
+
 def test_a_url_removed_from_the_newest_record_does_not_come_back() -> None:
     github = FakeGitHub()
     first = Run(github)

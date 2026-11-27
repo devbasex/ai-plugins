@@ -3,7 +3,8 @@
 起票の記録は、元の PR（状態ファイルの `pr`）に置く専用のコメントである。Issue を作る前に、試みる指摘の識別値を書く。状態の
 保存先が違う打ち直しも同じコメントを読み、URL の無い識別値は検索と一覧で確かめてから起票する（2 件作らない）。記録の URL は、
 指す Issue を読んで確かめてから使う。今のアカウントで編集できない記録は、中身を引き継いだ新しいコメントにし（所有者・メンバー・共同作業者の
-アカウントだけ）、以後は一番新しい記録だけを読み書きする。何を起票するかと、
+アカウントだけ。引き継いだ記録は目印を持ち、書き手がそれ以外なら
+誰も使わない）、以後は一番新しい記録だけを読み書きする。何を起票するかと、
 文と記録の形は `leftover_decide` が持つ。GitHub の失敗では指摘を失わず、行の `issue_error` と注意に残す。
 """
 
@@ -153,6 +154,8 @@ class _Filing:
     errors: dict[str, str] = field(default_factory=dict)
     entries: Entries = field(default_factory=dict)
     record_id: Optional[int] = None
+    # 今の記録が引き継いだものか（編集しても目印を残す）
+    over: bool = False
     # 識別値ごとの伏せた後の (本文, 起きること, 場所) と、元の PR と今の PR の URL
     texts: dict[str, tuple[str, str, str]] = field(default_factory=dict)
     urls: list[str] = field(default_factory=list)
@@ -176,6 +179,7 @@ class _Filing:
         if found is None:
             return
         self.record_id = found.id
+        self.over = leftover_decide.taken_over(found.body)
         self.entries = leftover_decide.record_entries(found.body)
         for entry in self.entries.values():
             entry.setdefault("at", found.updated_at)
@@ -190,7 +194,12 @@ class _Filing:
         return leftover_decide.trusted(author, association, self.me, logins)
 
     def _usable(self, comment: Comment) -> bool:
-        return comment.body.startswith(leftover_decide.RECORD_MARK) and self._trusts(comment.author, comment.association)
+        if not comment.body.startswith(leftover_decide.RECORD_MARK):
+            return False
+        # 引き継いだ記録は、投稿者本人も含め、書き手の区分だけで決める（消す前に通信が切れて残っても、誰も使わない）
+        if leftover_decide.taken_over(comment.body):
+            return leftover_decide.associated(comment.association)
+        return self._trusts(comment.author, comment.association)
 
     def _record(self) -> Optional[Comment]:
         """今の起票の記録（一番新しいもの）。引き継いだ記録は後ろに足されるので、元の PR のコメントの一覧を最後まで読む。
@@ -303,7 +312,7 @@ class _Filing:
 
     def write(self) -> str:
         """起票の記録を書き、GitHub が記録した更新時刻を返す。記録が無ければ投稿し、今のアカウントで編集できなければ引き継ぐ。"""
-        body = leftover_decide.record_body(self.entries)
+        body = leftover_decide.record_body(self.entries, self.over)
         if self.record_id is None:
             written = self.port.post(self.ref.origin_pr, body)
         else:
@@ -312,15 +321,17 @@ class _Filing:
             except Exception as exc:
                 if not _not_editable(exc):
                     raise
-                written = self._take_over(body)
+                written = self._take_over()
         self.record_id = written.id
         return written.updated_at
 
-    def _take_over(self, body: str) -> Comment:
+    def _take_over(self) -> Comment:
         """全項目を持つ新しいコメントを投稿する。書き手が所有者・メンバー・共同作業者でなければ、ほかのアカウントと保存先は
-        この記録を読めず同じ指摘を 2 件起票するので、投稿したコメントを消して `NotShared`。"""
-        made = self.port.post(self.ref.origin_pr, body)
+        この記録を読めず同じ指摘を 2 件起票するので、投稿したコメントを消して `NotShared`。区分は投稿の応答で分かる。先に投稿しても、
+        引き継ぎの目印があるので、区分の当たらない記録は消せずに残っても使われない。"""
+        made = self.port.post(self.ref.origin_pr, leftover_decide.record_body(self.entries, True))
         if leftover_decide.associated(made.association):
+            self.over = True
             return made
         self.port.delete(made.id)
         raise NotShared
