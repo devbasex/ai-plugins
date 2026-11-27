@@ -273,8 +273,7 @@ def _resume_protection(run: _Run) -> None:
         run.save()
     protected = _protection(run, run.pr_head)
     onto = state["onto"] if "onto" in state else run.pr_head
-    changed = local_gate.paths_changed_between(work, onto, work.rev_parse("HEAD"))
-    hits = sorted(p for p in changed if protected.covers(p))
+    hits = local_gate.protected_changes(work, onto, work.rev_parse("HEAD"), protected)
     if hits:
         raise DriveStopped(
             "refused", f"作業コミットが保護するファイルを変えている: {', '.join(hits)}。" + local_gate.RECOVER.format(pr=run.cfg.pr)

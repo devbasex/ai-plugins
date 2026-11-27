@@ -602,7 +602,7 @@ def _means_at(gate: _Gate, tip: str) -> tuple[means.Means, protected_decide.Prot
 
 def _refuse_protected_change(gate: _Gate, tip: str, head: str, protected: protected_decide.Protected, round_no: int) -> None:
     """この実行のコミット（`tip` から `head`）がテストの定義のファイルを変えていれば、送らずに止める。"""
-    hits = sorted(p for p in paths_changed_between(gate.g, tip, head) if protected.covers(p))
+    hits = protected_changes(gate.g, tip, head, protected)
     if hits:
         detail = f"この実行のコミットがテストの定義のファイルを変えたので送らない: {', '.join(hits)}"
         raise final_gate.GateStopped("refused", detail, _record("refused", round_no, head, protected_files=hits))
@@ -727,3 +727,8 @@ def follow_pushed(g: git.Git, pushed: Path, remote: str, branch: str) -> str:
 def paths_changed_between(g: git.Git, base: str, head: str) -> list[str]:
     """`base` から `head` までに変わったパス（改名を検出しないので、削除したパスと改名前のパスも含む）。"""
     return [p for p in g.run("diff-tree", "-r", "--name-only", "-z", base, head).split("\0") if p]
+
+
+def protected_changes(g: git.Git, base: str, head: str, protected: protected_decide.Protected) -> list[str]:
+    """`base` から `head` までに変わったパスのうち、保護するファイルに当たるもの（並べ替え済み）。"""
+    return sorted(p for p in paths_changed_between(g, base, head) if protected.covers(p))
