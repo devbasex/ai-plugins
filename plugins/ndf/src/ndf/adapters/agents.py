@@ -103,11 +103,16 @@ def _codex_event(line: str) -> Optional[dict[str, Any]]:
     return found if isinstance(found, dict) else None
 
 
+def _starts_codex_stream(first_line: str) -> bool:
+    """出力の最初の行が `thread.started` のイベントか（`--json` の出力か）。"""
+    first = _codex_event(first_line)
+    return first is not None and first.get("type") == _CODEX_STARTED
+
+
 def codex_events(out: Path) -> list[dict[str, Any]]:
     """`codex exec --json` の出力のイベント。最初の行が `thread.started` でなければ（`--json` の出力でなければ）空。"""
     lines = _whole_text(out).split("\n")
-    first = _codex_event(lines[0])
-    if first is None or first.get("type") != _CODEX_STARTED:
+    if not _starts_codex_stream(lines[0]):
         return []
     return [e for e in map(_codex_event, lines) if e is not None]
 
@@ -141,8 +146,7 @@ class CodexTail:
         self.offset += len(data)
         lines = data.decode("utf-8", errors="replace").split("\n")
         if not self.started:
-            first = _codex_event(lines[0])
-            self.started = first is not None and first.get("type") == _CODEX_STARTED
+            self.started = _starts_codex_stream(lines[0])
             self.other = not self.started
             if self.other:
                 return []

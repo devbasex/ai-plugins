@@ -366,7 +366,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `_start_and_watch` | `adapters/agents.py` | 変更 | 変えない | `AgentStatus.seconds` に起動から終了までの秒を入れる |
 | `codex_usage` | 同 | 新設 | `codex_usage(out: Path) -> Optional[CodexUsage]` | `turn.completed` の行の `usage` を足し合わせる |
 | `codex_cost` | `domains/records/usage.py` | 新設 | `codex_cost(used: Any, model: Optional[str]) -> tuple[str, Optional[float]]`（`used` は `agents.CodexUsage`） | 換算に使ったモデルの名前と、単価表から求めた USD を返す。単価の無いモデルの USD は None |
-| `record_codex` | 同 | 新設 | `record_codex(used: Any, meta: Mapping[str, Any], choice: Any) -> None` | `caller` が `codex-exec` の行を書き、単価の無いモデルは実験の記録に `unpriced` の行を足す |
+| `record_codex` | 同 | 新設 | `record_codex(used: Any, meta: Mapping[str, Any], choice: Any) -> None` | `caller` が `codex-exec` の行を使用量ログに書く。単価が無い場合は `session_cost_usd` を省き、実験への割り付け ID がある場合は、その ID を付けて実験の記録に `unpriced` を記録する |
 | `_seat_launch`・`launch_reviewers`・`_seat_result` | `domains/crossreview/seats.py` | 変更 | `_seat_launch(run, seat, prompt, stem, choice)` | シートの単位で値を取得し、起動ごとに行を書き、Codex の回答を `answer_text` で読む |
 | `_fixer_launch`・`_launch_fixer`・`_keep_fixer` | `domains/crossreview/fixer.py` | 変更 | 変えない | 修正担当の値と `charge_to`・`session_seq` を状態ファイルに残して再開に使う |
 | `enter` | `domains/crossreview/journal.py` | 変更 | 変えない | 同じ指摘を挙げた担当を `raisers` にすべて残す |
@@ -378,12 +378,17 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - `_record_experiment` は、終わり方が収束かラウンドの上限のときに書く。結果を読めないシートがあって終わった場合と、誤りで終わった場合は書かない。design と impl の指標は `1 / (1 + 1 ラウンド目の採用された重大な指摘の数)` で、数が None なら null
 - 修正担当は `launch_choice("seat", "fix")`（工程が無いので実験の引数を足さない）。環境変数と引数の指定は効く
 - シートの子の環境から `NDF_CHARGE_TO` を外す
-- `codex exec --json` は理由を標準エラーに出さないので、利用上限は `error`・`turn.failed` の行の文を `usage_limit` で読み、サンドボックスの失敗は終了コードが 0 でない `command_execution` の出力が `bwrap:` で始まるかを `sandbox_failed` が読む。コマンドの出力で見つけた失敗は、出力の行でなく固定の文を返す。行は手元のパスやコマンドが出したデータを含み得て、PR のコメントに載るためである。監視の間の利用上限の確認は、追記された行だけを読む（`CodexTail`）。どちらも、最初の行が `thread.started` の出力だけを `--json` の出力と扱う（`codex_events`）
+- `codex exec --json` は失敗の理由を標準エラーに出さないので、利用上限とサンドボックスの失敗は標準出力のイベントからも検出する
+  - 監視中の利用上限の検出は、`error`・`turn.failed` の行の文を `usage_limit` で調べる。`CodexTail` で追記された完全な行だけを読み、起動の終了時には改行のない最後の行も読む
+  - サンドボックスの失敗の検出（`sandbox_failed`）は、`codex_events` で出力全体を読み、終了コードが 0 でない `command_execution` の出力が `bwrap:` で始まるかを調べる
+  - どちらも、先頭のイベントが `thread.started` の場合だけ Codex のイベントとして扱う
+  - コマンドの出力で見つけた失敗は、出力の行でなく固定の文を返す。返す値は PR のコメントに載り、出力の行は手元のパスやコマンドが出したデータを含み得るためである
 - 起動の前に回答のファイル（`<出力>.out.answer`）を消す（`_start`）。codex は失敗すると前の中身を残すためである
 - 実装で設計の形を変えた理由（B5）。振る舞いは変えていない
   - 値を起動の組み立ての関数の引数にしないのは、引数を足すと上限（PLR0913。6）を超え、cross-refactoring が呼ぶ関数の形も変わるためである
   - 使用量を辞書で持たないのは、欄の名前の文字列を複数のファイルに置くと重複の検査が落とすためである
-- Codex の行は `session_seq` 0、費用は `codex_cost` の値を `session_cost_usd` に書く。単価が無ければ欄を置かず、`unpriced` の行を足す
+- Codex の使用量ログの行は `session_seq` が 0 で、費用は `codex_cost` の値を `session_cost_usd` に書く。使用量が取れない起動では、この欄を省く
+- 単価が無い場合も、使用量ログの `session_cost_usd` を省く。実験への割り付け ID がある場合は、その ID を付けて実験の記録に `unpriced` を記録する。割り付け ID が無い起動では `unpriced` を記録しない
 
 ### 異常系の処理
 
