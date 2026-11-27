@@ -285,6 +285,7 @@ def test_issue_4363_ask_keeps_the_records_of_every_launch_and_replaces_nothing(t
     assert first != second and all("verdicts" in p.read_text(encoding="utf-8") for p in (first, second))
     assert third.read_text(encoding="utf-8") == "前の記録" and not seen[2].paths.out.parent.exists()
     assert [note for note in run.notes if "移せない" in note[2]]
+    assert str(tmp_path) not in str(run.notes)
 
 
 @pytest.mark.parametrize("source", ["path", "principles_path"])
@@ -362,12 +363,26 @@ def test_issue_4363_ask_keeps_the_failure_detail_out_of_the_process_and_in_the_p
     assert err.read_text(encoding="utf-8") == "usage limit"
 
 
+def test_issue_4363_ask_copies_the_records_when_the_state_dir_has_no_hard_links(tmp_path: Path, monkeypatch) -> None:
+    def no_link(*_: object) -> None:
+        raise PermissionError("hard links are not supported")
+
+    monkeypatch.setattr(verify.os, "link", no_link)
+    answers = verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher([], [holding(_row())]))
+    record = tmp_path / f"{answers.record}.out"
+    assert record.stat().st_mode & 0o777 == 0o600 and "verdicts" in record.read_text(encoding="utf-8")
+
+
 def test_issue_4363_ask_does_not_launch_when_the_mvv_cannot_be_copied(tmp_path: Path) -> None:
     snap = _approved(tmp_path)._replace(path=tmp_path / "無い.md")
     seen: list = []
-    answers = verify.ask(_AskRun(tmp_path, snap), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher(seen, []))
+    run = _AskRun(tmp_path, snap)
+    answers = verify.ask(run, 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher(seen, []))
     assert answers.verdicts == {} and len(answers.warnings) == 1 and seen == []
-    assert str(tmp_path) not in answers.warnings[0]
+    # 注意も過程も結果 JSON に出るので、絶対パスを含む詳細は実行者だけが読めるログにだけ残す
+    assert str(tmp_path) not in answers.warnings[0] + str(run.notes)
+    [log] = tmp_path.glob("round1-verify-*.detail.log")
+    assert str(tmp_path) in log.read_text(encoding="utf-8") and log.stat().st_mode & 0o777 == 0o600
 
 
 # --- 駆動への組み込み（ndf cross-review run） -------------------------------------------
@@ -443,3 +458,24 @@ def test_issue_4363_lowered_finding_is_not_counted_as_a_return(wt: Path, tmp_pat
     _run(capsys, monkeypatch, fake, wt)
     rounds = _state(fake.state_dir)["rounds"]
     assert [r["verdict"] for r in rounds] == ["changes_required"] * 3
+
+
+def test_issue_4363_run_resumes_from_the_judge_without_launching_the_reviewers_again(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """判定役の待ちで中断した打ち直しは、保存した相手役の指摘から続ける。"""
+
+    def interrupted(_: dict) -> Optional[dict]:
+        raise KeyboardInterrupt
+
+    first = Fake(tmp_path / "st", {"codex": [[HEAVY]], "kiro": [[]]})
+    first.verdict = interrupted
+    with pytest.raises(KeyboardInterrupt):
+        _run(capsys, monkeypatch, first, wt)
+    second = Fake(tmp_path / "st", {})
+    second.verdict = _broken
+    code, got = _run(capsys, monkeypatch, second, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert second.calls == [] and len(second.judged) == 1
+    state = _state(second.state_dir)
+    [row] = state["findings"]
+    assert (row["id"], row["check"]["lowered"]) == ("r1-1", True)
+    assert len(state["rounds"]) == 1 and "pending_review" not in state

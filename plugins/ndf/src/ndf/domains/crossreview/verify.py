@@ -4,12 +4,12 @@
 レビューする worktree と、この実行の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV の写し）だけである。
 指摘の文はプロセスの引数に載せず一覧のファイルで渡す。一覧は、実行者だけが開ける資料のディレクトリに置く。判定役の出力は
 起動ごとに新しく作る実行者だけが開けるディレクトリに書かせ、起動の後で記録を起動ごとの名前で状態の保存先へ移してディレクトリを
-消す。移した記録は残すだけで、片付けない。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の
+消す。ハードリンクを作れない保存先では、排他的に新規作成して写す。移した記録は残すだけで、片付けない。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の
 `drive` である。
 
 失敗しても例外で駆動を止めず、起動し直さない。回答なしと注意にする（どの指摘も下がらない）。注意は PR の記録に載るので、
-手元の絶対パス・指摘の本文・回答の中身を書かない。過程も結果 JSON に出るので、起動の状態の詳細（標準エラーの原文を含みうる）は
-載せず、標準エラーのログとは別の、実行者だけが読める記録に残す。
+手元の絶対パス・指摘の本文・回答の中身を書かない。過程も結果 JSON に出るので、載せるのはエラーの種別と資料の種類・ファイル名までで、
+起動の状態の詳細（標準エラーの原文を含みうる）と絶対パスを含む詳細は、標準エラーのログとは別の、実行者だけが読める記録に残す。
 """
 
 from __future__ import annotations
@@ -54,20 +54,60 @@ def _readable_mvv(snap: Optional[mvv.Snapshot], into: Path) -> Optional[mvv.Snap
     return held._replace(path=copies[0], principles_path=copies[1])
 
 
-def _keep_records(run: VerifyRun, round_no: int, held: Path, stem: Path) -> None:
-    """起動ごとのディレクトリ `held` の記録を、実行者だけが読めるファイルにして `stem` の隣へ移し、`held` を消す。移し先の
-    名前は、`stem` の名前の部分を `held` の名前（起動ごとに違う）に替えたものである。前からある同じ名前のファイルやリンクは
-    置き換えない（`os.link` は移し先があれば失敗する）。移せない記録はディレクトリと一緒に消える。"""
+def _private_log(run: VerifyRun, round_no: int, stem: Path, text: str) -> None:
+    """絶対パスを含みうる詳細を、状態の保存先の実行者だけが読める新しいファイル（`stem` の名前で始まる `.detail.log`）に残す。"""
+    try:
+        fd, _ = tempfile.mkstemp(prefix=f"{stem.name}-", suffix=".detail.log", dir=stem.parent)
+        with open(fd, "w", encoding="utf-8") as out:
+            out.write(f"{text}\n")
+    except OSError as exc:  # 保存先に書けなくても判定の結果と駆動は変えない
+        run.note(round_no, "verify", f"判定役の失敗の詳細を書けない（{type(exc).__name__}）")
+
+
+def _save_record(record: Path, to: Path) -> None:
+    """記録 `record` を、実行者だけが読める新しいファイル `to` にする。前からある同じ名前のファイルやリンクは置き換えない
+    （`FileExistsError`）。ハードリンクを作れない保存先では、排他的に新規作成して中身を写し、写し切れなければ消す。"""
+    record.chmod(0o600)
+    try:
+        os.link(record, to)
+        return
+    except FileExistsError:
+        raise
+    except OSError:
+        fd = os.open(to, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with open(fd, "wb") as out, record.open("rb") as source:
+            shutil.copyfileobj(source, out)
+    except OSError:
+        to.unlink(missing_ok=True)
+        raise
+
+
+def _keep_records(run: VerifyRun, round_no: int, held: Path, stem: Path) -> bool:
+    """起動ごとのディレクトリ `held` の記録を `stem` の隣へ保存し（`_save_record`）、`held` を消す。保存先の名前は、`stem` の
+    名前の部分を `held` の名前（起動ごとに違う）に替えたものである。保存できない記録はディレクトリと一緒に消える。
+    1 つでも保存できたら真。"""
+    saved = False
     for record in held.iterdir():
         if record.is_symlink() or not record.is_file():
             continue
         name = held.name + record.name.removeprefix(stem.name)
         try:
-            record.chmod(0o600)
-            os.link(record, stem.parent / name)
+            _save_record(record, stem.parent / name)
+            saved = True
         except OSError as exc:  # 診断の記録を移せなくても、判定の結果と駆動は変えない
-            run.note(round_no, "verify", f"判定役の記録 {name} を移せない（{exc}）")
+            run.note(round_no, "verify", f"判定役の記録 {name} を移せない（{type(exc).__name__}）")
+            _private_log(run, round_no, stem, f"{name}: {exc}")
     shutil.rmtree(held, ignore_errors=True)
+    return saved
+
+
+def _detail(run: VerifyRun, round_no: int, spec: agents.Launch, text: str) -> None:
+    """起動の詳細を出力と同じディレクトリの別の記録に書く（出力と一緒に 0600 で移る。子プロセスが書いた標準エラーのログは変えない）。"""
+    try:
+        spec.paths.out.with_name(f"{spec.paths.out.stem}.detail.log").write_text(f"{text}\n", encoding="utf-8")
+    except OSError as exc:  # 書けなくても判定の結果と駆動は変えない
+        run.note(round_no, "verify", f"判定役の起動の詳細を書けない（{exc.strerror}）")
 
 
 def _unanswered(run: VerifyRun, round_no: int, count: int, why: str, warning: str) -> verify_decide.Answers:
@@ -88,8 +128,10 @@ def ask(
     into = used[0].parent
     listed = into / f"round{round_no}-verify-findings.jsonl"
     stem = run.round_stem(round_no, "-verify")
+    material = "MVV の写し"
     try:
         snap = _readable_mvv(run.snapshot, into)
+        material = "指摘の一覧"
         listed.write_text(verify_decide.listing(shown), encoding="utf-8")
         criteria = [
             *criteria_decide.criteria_lines(run.cfg.settings.focus, snap),
@@ -97,19 +139,23 @@ def ask(
         ]
         prompt = verify_decide.instruction(listed, used, run.cfg.worktree, criteria)
         # 回答は非公開の内容を含みうる。出力の先は新しく作り（0700）、前からあるファイルやリンクを開かない
+        material = "出力の保存先"
         held = Path(tempfile.mkdtemp(prefix=f"{stem.name}-", dir=stem.parent))
     except OSError as exc:
         warning = "判定役の資料（指摘の一覧・MVV の本文と共通原則の写し）か出力の保存先を用意できないので、判定役を起動せず下げない"
-        return _unanswered(run, round_no, count, f"起動していない: {exc}", warning)
+        _private_log(run, round_no, stem, f"{material}: {exc}")
+        return _unanswered(run, round_no, count, f"起動していない: {material}で {type(exc).__name__}", warning)
     system = str(criteria_decide.verify_text()["system"])
     spec = participants.read_only_launch(system, run.cfg.worktree, prompt, held / stem.name, readable=(into,))
     held_mvv = criteria_decide.approved(snap)
     # MVV の本文と共通原則の写しも、読めなければ確かめにならない資料である
     copied = () if held_mvv is None else tuple(p for p in (held_mvv.path, held_mvv.principles_path) if p is not None)
     try:
-        return _answers(run, round_no, rows, spec, (*used, listed, *copied), launch)._replace(record=held.name)
+        answers = _answers(run, round_no, rows, spec, (*used, listed, *copied), launch)
     finally:
-        _keep_records(run, round_no, held, stem)
+        saved = _keep_records(run, round_no, held, stem)
+    # 保存できた出力が無ければ、ラウンドの記録から参照させない
+    return answers._replace(record=held.name if saved else "")
 
 
 def _answers(
@@ -125,12 +171,8 @@ def _answers(
     status = launch(spec)
     if status.state != agents.AgentState.DONE:
         warning = f"判定役が終わらなかった（{status.state}）ので下げない"
-        # 詳細は接続先やアカウントを含みうるので過程に載せない。起動できなかった詳細は標準エラーに無いので別の記録に書き、
-        # 子プロセスが書いた標準エラーのログは変えない。記録は出力と一緒に 0600 で移る
-        try:
-            spec.paths.out.with_name(f"{spec.paths.out.stem}.detail.log").write_text(f"{status.detail}\n", encoding="utf-8")
-        except OSError as exc:  # 書けなくても判定の結果と駆動は変えない
-            run.note(round_no, "verify", f"判定役の起動の詳細を書けない（{exc.strerror}）")
+        # 詳細は接続先やアカウントを含みうるので過程に載せない。起動できなかった詳細は標準エラーに無いので別の記録に書く
+        _detail(run, round_no, spec, str(status.detail))
         return _unanswered(run, round_no, count, str(status.state), warning)
     try:
         answer = participants.claude_answer(spec.paths.out)
@@ -139,7 +181,8 @@ def _answers(
     denied = participants.denied_reads(answer.denials, required, spec.cwd)
     if denied:
         warning = f"判定役が資料のファイル {'・'.join(p.name for p in denied)} の読み取りを拒否されたので下げない"
-        return _unanswered(run, round_no, count, f"permission_denials: {' / '.join(map(str, denied))}", warning)
+        _detail(run, round_no, spec, f"permission_denials: {' / '.join(map(str, denied))}")
+        return _unanswered(run, round_no, count, f"permission_denials: {'・'.join(p.name for p in denied)}", warning)
     ids = [str(row["id"]) for row in rows]
     answers = verify_decide.read(participants.listed_of(answer.text, "verdicts"), ids)
     valid = sum(1 for verdict in answers.verdicts.values() if verdict.holds is not None)

@@ -1,8 +1,8 @@
 """相手役へ渡す資料と指示を組み、席を起動する（`drive.py` から分けた。#4363）。
 
 PR の既存のコメントと差分のファイルを用意し、指示（指摘の基準・出力の形）を組んで今の席を並べて起動する。結果の無い claude
-以外の席は 1 度だけ起動し直し、それでも無ければ claude の読むだけの起動で埋める（`review_round`）。ラウンドの範囲を決めるのと
-記録は呼び手の `drive` がする。
+以外の席は 1 度だけ起動し直し、それでも無ければ claude の読むだけの起動で埋める（`review_round`）。受け取った結果は判定待ちの
+ラウンドとして状態に入れ（`keep`）、打ち直しが同じ対象なら使う（`kept`）。ラウンドの範囲を決めるのと記録と保存は呼び手の `drive` がする。
 """
 
 from __future__ import annotations
@@ -49,6 +49,7 @@ class ReviewingRun(seats.SeatRun, Protocol):
     mvv: Optional[str]
     documents: bool
     last_target: Optional[changes.Target]
+    process: list[dict[str, str]]
 
     def input_path(self, round_no: int, suffix: str) -> Path: ...
 
@@ -184,6 +185,44 @@ def _fill_seats(
     for absent, why in targets.items():
         prompts[seats.fill_seat(run, absent, why.cause, f"round {round_no}")] = prompt
     return *seats.launch_reviewers(run, round_no, prompts, _prompt_diffs(run, fresh), launch), full
+
+
+def keep(run: ReviewingRun, record: Mapping[str, Any], prep: Prepared, got: Reviewed) -> None:
+    """相手役の結果を、判定待ちのラウンドとして状態に入れる（保存は呼び手がする。#4363）。差分は中身を持たず、作り直せる範囲
+    （`record` の head と比較基点、`scope_base`）と、指摘ごとの差分を選ぶキーを持つ。"""
+    filled = got.filled
+    run.data[store.PENDING_REVIEW] = {
+        "record": dict(record),
+        "scope_base": prep.scope.base,
+        "raised": got.raised,
+        "unread": {seat: u.hint for seat, u in got.unread.items()},
+        "filled": None if filled is None else {"keys": sorted(filled.keys), "others": sorted(filled.others)},
+    }
+
+
+def kept(run: ReviewingRun, round_no: int, prep: Prepared, basis: scope_decide.Basis) -> Optional[Reviewed]:
+    """判定待ちで残ったラウンドが、今回のラウンドと同じ番号・head・範囲で、`basis` に合えば、その相手役の結果と席を返す
+    （相手役を起動しない）。合わなければ None。"""
+    held = run.data.get(store.PENDING_REVIEW)
+    if not isinstance(held, Mapping):
+        return None
+    record = held["record"]
+    seated = store.list_of(record, scope_decide.REVIEWERS)
+    same = (record["round"], record["scope"], held["scope_base"]) == (round_no, prep.scope.kind, prep.scope.base)
+    if not same or len(seated) != len(run.seats) or scope_decide.read_by_all_head({store.ROUNDS: [record]}, basis) != prep.head:
+        return None
+    run.seats[:] = seated
+    filled = scope_decide.filled_of(record)
+    run.warnings += [seats.filled_warning(f, f"中断した round {round_no}") for f in filled if f not in run.filled]
+    run.filled[:] = filled
+    keys = held["filled"]
+    read = None
+    if keys is not None:
+        full = prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep)
+        read = FilledRead(full, frozenset(keys["keys"]), frozenset(keys["others"]))
+    run.process.append({"run": f"round {round_no}", "result": "判定待ちで残った相手役の結果を使い、相手役を起動しない"})
+    unread = {seat: seats.Unread(hint, "", hint) for seat, hint in held["unread"].items()}
+    return Reviewed(list(held["raised"]), unread, False, read)
 
 
 def _prompt_diffs(run: ReviewingRun, prep: Prepared) -> tuple[Path, ...]:
