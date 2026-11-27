@@ -33,7 +33,8 @@ plugins/ndf/
 │   ├── core/
 │   │   ├── worker.py
 │   │   ├── worker_outcome.py
-│   │   └── plan/{steps.py, transition_decide.py, runner.py, records.py *}
+│   │   ├── plan/{steps.py, transition_decide.py, runner.py, records.py *}
+│   │   └── route/__init__.py *
 │   └── domains/release/forms_decide.py *
 ├── skills/
 │   ├── release/{SKILL.md, references/release-steps.md}
@@ -44,6 +45,7 @@ plugins/ndf/
     ├── contracts/{test_result.py, test_worker_kinds_shape.py}
     ├── core/{test_worker_outcome.py, plan/test_steps.py, plan/test_transition.py, plan/test_runner.py}
     ├── domains/release/{test_release_forms.py, test_release_record.py}
+    ├── route/test_templates.py
     └── progress/{test_definition.py, test_invoke.py, test_invoke_values.py, test_run.py, test_plan.py, test_plan_external.py, gate/test_gate_work.py, gate/test_gate_release.py}
 ```
 
@@ -75,7 +77,7 @@ plugins/ndf/
 | `src/ndf/core/plan/records.py` | 変更 | プランの記録のファイル | — | モジュール | `_add_outputs`・`recorded_outputs`（変更）・`_stored_entries`・`_keep_step_missing`・`recorded_step_missing`（新設）・`_stored_outputs`（削除） |
 | `skills/` の 5 ファイル | 変更 | 手順書の説明 | — | — | — |
 
-`forms_decide.py`・`progress/plan/__init__.py` と、テストの `test_plan.py`・`test_invoke_values.py`・`test_worker_kinds_shape.py`・`test_steps.py`・`test_release_forms.py`・`test_release_record.py`・`test_definition.py` も、設計文書の「設計の結果」の触るファイルに入れた（届け先の条件を 1 か所にするためと、変える関数の既存のテストがそこにあるため。`test_release_record.py` は受け入れ条件 4 の記録の経路を確かめる）。`external.py`・`answering.py`・`contracts/__init__.py` と `test_plan_external.py` も同じく触るファイルに入れる（外のオーガナイザーの回答を同じ規則で確かめるため、承認の時点のバージョンの保存先の種類を記録するため、リリース後テストの記録の定義から文脈の定義を参照するため）。
+`forms_decide.py`・`progress/plan/__init__.py` と、テストの `test_plan.py`・`test_invoke_values.py`・`test_worker_kinds_shape.py`・`test_steps.py`・`test_release_forms.py`・`test_release_record.py`・`test_definition.py` も、設計文書の「設計の結果」の触るファイルに入れた（届け先の条件を 1 か所にするためと、変える関数の既存のテストがそこにあるため。`test_release_record.py` は受け入れ条件 4 の記録の経路を確かめる）。`external.py`・`answering.py`・`contracts/__init__.py` と `test_plan_external.py` も同じく触るファイルに入れる（外のオーガナイザーの回答を同じ規則で確かめるため、承認の時点のバージョンの保存先の種類を記録するため、リリース後テストの記録の定義から文脈の定義を参照するため）。`core/route/__init__.py` と `tests/route/test_templates.py` も触るファイルに入れる（プランを組むときの展開から作業の一覧を返す `rendered` を足すため。「工程の進行: 記録済みの値の読み方」）。
 
 ## 結果 JSON とリリース後テストの記録の定義
 
