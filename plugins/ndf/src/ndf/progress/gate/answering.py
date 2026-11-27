@@ -468,7 +468,7 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     `ndf answer` が書いた回答（質問の id と見た対象を持つ）だけを比べる。どのサブコマンドでも、回答が読まれる前に打つ。待ちへ戻すのは承認ゲートのステップの
     待ちの記録で、回答はその後の回答だけが読まれる（`run.StepProgress`）。回答が課題を外していれば、同じトランザクションで
     文脈の `issues` を回答の前へ戻し、外した課題を入れたレーンの行を取り消す（回答し直しで同じ課題を外せる）。
-    設計 PR の head を見ずに記録した設計の承認（#4495 の直しの前のバージョンの承認）は、対象と比べる前に、消費済みでもマージの前なら同じ取り消しで
+    設計 PR に結び付けずに記録した設計の承認（#4495 の直しの前のバージョンの承認）は、対象と比べる前に、消費済みでもマージの前なら同じ取り消しで
     待ちへ戻す（`_unbound_approval`・`_reopen_unbound`。#4495）。
     """
     v = run.read(st, machine_id)
@@ -519,7 +519,8 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
 
 # 対象に結び付かない設計の承認を待ちへ戻す理由（承認ゲートの待ちの記録に残る）
 UNBOUND_REASON = (
-    "設計 PR の head を見ずに記録した設計の承認（設計 PR を items から読まなかったバージョンの承認）なので、今の設計 PR で承認し直す"
+    "設計 PR（PR・マージ先・head）に結び付けずに記録した設計の承認（設計 PR を items から読まなかったバージョンの承認）なので、"
+    "今の設計 PR で承認し直す"
 )
 
 
@@ -535,10 +536,11 @@ class _Unbound:
 
 
 def _unbound_approval(v: run.View) -> Optional[_Unbound]:
-    """今の工程の設計承認ゲートの承認が、items から補った設計 PR の head を見ずに記録されたものなら、その承認（#4495 の直しの前のバージョン）。
+    """今の工程の設計承認ゲートの承認が、items から補った設計 PR に結び付かずに記録されたものなら、その承認（#4495 の直しの前のバージョン）。
 
-    今のバージョンの回答は、設計 PR が特定できれば提示した対象（head を含む）を `seen` に記録する。items を読まなかった前のバージョンは、
-    設計 PR が items にだけあると質問に PR が無く、head の無い承認を記録した。そのまま読むと対象に結び付かない承認で設計 PR の
+    今のバージョンの回答は、設計 PR が特定できれば提示した承認の対象（PR・マージ先・head。`Target.binding`）を `seen` に記録する。
+    items を読まなかった前のバージョンは、設計 PR が items にだけあると質問に PR が無く、対象に結び付かない承認を記録した。
+    `ndf answer --head` で回答していれば `seen` は head を持つが、PR とマージ先を持たないので、head の有無では分けない（#4606）。そのまま読むと対象に結び付かない承認で設計 PR の
     マージへ進むので、読む前（`run.Action.CONSUME`）と、消費して承認ゲートのステップが済んだ後でも後ろのステップ（マージ）が
     済む前なら拾う。outputs に明示した設計 PR は前のバージョンも質問に載せて head を記録したので、ここでは見ない。"""
     m = run.decide(v)
@@ -563,9 +565,8 @@ def _unbound_approval(v: run.View) -> Optional[_Unbound]:
     p = run.event_payload(answered)
     if p.get("answer") != run.APPROVED or p.get("by") == model.MVV_SERVICE:
         return None
-    seen = p.get("seen") if isinstance(p.get("seen"), dict) else {}
     filled = stages.item_only_outputs(s, prog.done)
-    if seen.get("head") is not None or type(filled.get(stages.DESIGN_PR)) is not int:
+    if Target.from_dict(p.get("seen")).binding() is not None or type(filled.get(stages.DESIGN_PR)) is not int:
         return None
     return _Unbound(s, step, prog.generation, answered, consumed)
 

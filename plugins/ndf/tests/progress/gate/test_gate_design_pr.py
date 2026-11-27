@@ -128,17 +128,24 @@ def test_the_design_stage_finishes_with_the_design_pr_of_the_plan_items(st, env,
     assert "設計" not in [p.name for p in v.snap.stages if run.step_progress(v, p.name).failed]
 
 
-def _old_approval(st, env, lane_sprint, flow):
-    """設計 PR を items から読まなかったバージョンの承認（見た head が無い。課題 3092 を外した）を記録したスプリント。
+def _old_approval(st, env, lane_sprint, flow, seen):
+    """設計 PR を items から読まなかったバージョンの承認（課題 3092 を外した）を記録したスプリント。
 
-    （計画の ID, ステートマシンの ID, 回答の結果）を返す。"""
+    前のバージョンの質問は設計 PR を持たないので、承認は対象（PR・マージ先）に結び付かない。`seen` は回答した者が見た対象で、
+    `ndf answer --head` を付けた回答なら head だけを持つ。（計画の ID, ステートマシンの ID, 回答の結果）を返す。"""
     pid, tid = lane_sprint("--issues", "3092", "5")
     flow.turn(tid, _like_the_plan(env))
     q = gate.waiting(run.read(st, tid))
     assert q is not None and q.gate == "design"
-    out = gate.answer(st, tid, gate.Answer(q.id, "approved", "設計を承認", "human:reviewer", "k-old", drop=(3092,)))
+    out = gate.answer(st, tid, gate.Answer(q.id, "approved", "設計を承認", "human:reviewer", "k-old", seen=seen, drop=(3092,)))
+    assert gate.Target.from_dict(run.event_payload(_answered(st, tid)).get("seen")).binding() is None
     assert run.read(st, tid).context()["issues"] == [5]
     return pid, tid, out
+
+
+def _answered(st, tid):
+    """設計の工程の最後の回答の事象。"""
+    return [ev for ev in run.read(st, tid).row_events("設計") if ev.draft.kind == run.ANSWERED][-1]
 
 
 def _consume_as_the_old_version(st, tid):
@@ -157,10 +164,12 @@ def _carried(st, pid, key):
         return next(r for r in lane.read_view(conn, pid)[1]["a"] if r.key == key)
 
 
+@pytest.mark.parametrize("seen", [gate.Target(), gate.Target("a4542683a")], ids=["without_head", "with_head_only"])
 @pytest.mark.parametrize("consumed", [False, True], ids=["before_consuming", "consumed_before_the_merge"])
-def test_an_old_approval_without_the_design_pr_head_is_undone_and_asked_again(st, env, lane_sprint, flow, consumed):
-    # 対象に結び付いていない承認は、読む前でも、消費した後のマージの前でも、外した課題・繰越の行・読み手役の確認ごと取り消す
-    pid, tid, out = _old_approval(st, env, lane_sprint, flow)
+def test_an_old_approval_without_the_design_pr_binding_is_undone_and_asked_again(st, env, lane_sprint, flow, consumed, seen):
+    # 対象に結び付いていない承認は、見た head の有無を問わず、読む前でも、消費した後のマージの前でも、
+    # 外した課題・繰越の行・読み手役の確認ごと取り消す
+    pid, tid, out = _old_approval(st, env, lane_sprint, flow, seen)
     if consumed:
         _consume_as_the_old_version(st, tid)
     assert gate.recheck(st, tid, gate.no_observe) is not None
@@ -174,6 +183,16 @@ def test_an_old_approval_without_the_design_pr_head_is_undone_and_asked_again(st
     again = gate.waiting(run.read(st, tid))
     assert again is not None and again.gate == "design" and again.pr == DESIGN_PR
     assert gate.recheck(st, tid, gate.no_observe) is None
+
+
+def test_an_approval_bound_to_the_design_pr_is_not_undone(st, repo, design_gate):
+    # 今のバージョンの回答は提示した対象（PR・マージ先・head）を記録するので、待ちへ戻さずに読む
+    tid, q = design_gate
+    _approve(st, repo, tid, q, "human:reviewer")
+    seen = gate.Target.from_dict(run.event_payload(_answered(st, tid)).get("seen"))
+    assert seen.binding() is not None
+    assert gate.recheck(st, tid, gate.github_observe(repo, st.root, lambda: _hub("h1"))) is None
+    assert gate.waiting(run.read(st, tid)) is None
 
 
 def _design_stage(*kinds):
