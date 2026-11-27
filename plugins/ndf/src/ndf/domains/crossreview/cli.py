@@ -96,7 +96,10 @@ class Hub(NamedTuple):
 
 def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -> Hub:
     """対象のリポジトリ（`repo.resolve_target_repo` の順で決める）の GitHub へ書く口。書く本文は `publish.Publisher` を通す。"""
-    slug = repo.resolve_target_repo(repo_arg, state_repo, cwd).slug
+    target = repo.resolve_target_repo(repo_arg, state_repo, cwd)
+    slug = target.slug
+    # 作業場所のリモートの URL から決めたなら、その値が取得元（マージ先の取得元の確かめで読み直さない。#3702）
+    fetched = slug if target.source == repo.REMOTE else None
     gh = load_github()
     from ndf.adapters import publish, write_gate
 
@@ -119,6 +122,7 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
         # PR ごとに 1 つの口を使い回す（読んだスレッドの一覧を resolve で取り直さない。PR 3944 の r6-8）
         if pr not in ports:
             ports[pr] = threads.GitHubPort(hub, publisher, pr, gh.GitHubError, block=gate.block)
+            ports[pr].fetched_repo = fetched
         return ports[pr]
 
     def clean(texts: Sequence[str]) -> list[str]:

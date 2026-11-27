@@ -108,10 +108,12 @@ def check_base_source(cfg: RunConfig, reader_for: Optional[Callable[[int], threa
     pr = store.state_pr(cfg.state_dir, cfg.pr).current_pr
     try:
         # 読む口が無い起動は、呼び手がマージ先を読む時点で止めている
-        target = reader_for(pr).repo() if reader_for is not None else ""
+        reader = reader_for(pr) if reader_for is not None else None
+        target, known = (reader.repo(), reader.fetched()) if reader is not None else ("", None)
     except Exception as exc:
         raise DriveStopped("precondition", f"PR #{pr} のベースリポジトリを読めないので、比較元を決められない: {exc}") from exc
-    fetched = fetch_repo(g, remote)
+    # 対象を作業場所の同じリモートの URL から決めていれば、その値が取得元である（`git remote get-url` を打ち直さない）
+    fetched = known if known is not None else fetch_repo(g, remote)
     if not target or fetched is None or fetched.lower() != target.lower():
         raise DriveStopped(
             "precondition",

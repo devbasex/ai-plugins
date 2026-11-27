@@ -71,6 +71,8 @@ class FakePort:
         self.base_ref: str | None = "main"
         # PR のベースリポジトリ（`--reviewed-base-out` の起動は、取得するリモートがこれと一致するかを確かめる。#3702）
         self.repo_name = "octo/repo"
+        # 対象を作業場所のリモートから決めたときのその値（None なら取得元を読み直す）
+        self.fetched_from: str | None = None
         self.base_reads = 0
 
     def at(self, pr: int) -> "FakePort":
@@ -98,6 +100,9 @@ class FakePort:
 
     def repo(self):
         return self.repo_name
+
+    def fetched(self):
+        return self.fetched_from
 
     def read_pr(self):
         return None

@@ -127,3 +127,12 @@ def test_issue_3702_reviewed_base_out_without_reviewed_out_is_invalid(wt: Path, 
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-base-out", str(tmp_path / "b"))
     assert (got["cause"]["kind"], fake.calls) == ("invalid", [])
+
+
+def test_issue_3702_target_resolved_from_the_remote_is_not_read_again(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """対象のリポジトリを作業場所のリモートの URL から決めていれば、その値を取得元として使い、取得元を読み直さない。"""
+    hub.port.fetched_from = hub.port.repo_name
+    monkeypatch.setattr(reviewed_pr, "fetch_repo", lambda g, remote: pytest.fail("取得元を読み直した"))
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(tmp_path / "b"))
+    assert (code, got["status"]) == (0, "ok")
