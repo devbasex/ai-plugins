@@ -296,6 +296,17 @@ def _report_rank(item: Mapping[str, Any], items: Sequence[str]) -> int:
     return 1 if criteria_decide.protect_of(item.get(PROTECT)) else 0
 
 
+def _heavy_in_other_file(item: Mapping[str, Any], items: Sequence[str], path: str) -> bool:
+    """出し直し 1 件が、`path` と違うファイルを指す重い報告（下げた扱いを解除する条件）か。"""
+    new = _raised(dict(item), criteria_decide.mvv_item(item.get("mvv"), items))
+    return criteria_decide.blocking(new["severity"]) and new.get("path") not in (None, path)
+
+
+def _denied_report(item: Mapping[str, Any], items: Sequence[str], path: Optional[str]) -> bool:
+    """出し直し 1 件が、承認や保護の根拠が無いまま、確認で否定したファイル `path`（無ければ None）を指すか。"""
+    return path is not None and not _report_rank(item, items) and _located(item).get("path") == path
+
+
 def _add_report(row: dict[str, Any], item: Mapping[str, Any]) -> None:
     """指摘の本文の後ろに、別の報告 `item` の本文・位置（パスと行、見出し）・起きることの 1 文を書き足す（行と同じ本文と位置の報告と、書き足し済みの
     報告は足さない。起きることの 1 文が行と違う報告は足す）。欄を分けず本文に足すのは、修正担当・判定役・承認資料・記録のコメントがどれも本文を読み、公開の前の伏せ字も
@@ -323,7 +334,9 @@ def _merge_reports(row: dict[str, Any], text: object) -> bool:
     return added
 
 
-def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]], items: Sequence[str]) -> Optional[bool]:
+def _align_report(
+    row: dict[str, Any], same: Sequence[Mapping[str, Any]], items: Sequence[str], denied: Optional[str] = None
+) -> Optional[bool]:
     """このラウンドで新しく出たか戻った行の本文・1 文・位置を、出し直し 1 件のものにそろえ、判定役へ渡せる 1 文がこのラウンドに
     あるかを返す。`same` はこのラウンドのその指摘の出し直しである。
 
@@ -335,14 +348,17 @@ def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]], items:
 
     根拠の 1 件を選んだときは、ほかの報告のうち次のものを本文に書き足す（`_add_report`）。必ず人の承認が要る操作を挙げた報告の
     すべてと、選んだ 1 件に 1 文が無いか、より重い場合の、1 文を持つ最も重い報告である。根拠のある指摘は確認で下げないので、
-    書き足しても指摘を下げる材料は混ざらない。#4363"""
+    書き足しても指摘を下げる材料は混ざらない。
+
+    `denied` は、下げた扱いを解除した行で、確認で否定したファイルである。このとき根拠の無い 1 件は、解除の条件を満たした出し直し
+    （`_heavy_in_other_file`）からだけ選ぶ。位置の無い重い報告は、選ばずに本文へ書き足す。#4363"""
     best: Optional[tuple[tuple[int, bool], Mapping[str, Any], dict[str, Any]]] = None
     told = False
     for item in same:
         new = _raised(dict(item))
         rank = _report_rank(item, items), "impact" in new
         told = told or rank[1]
-        if not any(rank):
+        if not any(rank) or (denied is not None and not rank[0] and not _heavy_in_other_file(item, items, denied)):
             continue
         heavier = best is not None and criteria_decide.heavier(best[2]["severity"], new["severity"]) != best[2]["severity"]
         if best is None or rank > best[0] or (rank == best[0] and heavier):
@@ -462,7 +478,8 @@ class FindingJournal:
                 known = self.rows[fid] = row | _raised(item, named)
                 by_key[key] = known
                 fresh.append(fid)
-            else:
+            elif not _denied_report(item, items, denied.get(str(known["id"]))):
+                # 確認で否定したファイルの根拠の無い報告は、重要度にも重ねない
                 revived = len(self.revived)
                 self._raised_again(known, item, round_no, named, mvv)
                 fresh += self.revived[revived:]
@@ -490,11 +507,11 @@ class FindingJournal:
         items: Sequence[str],
     ) -> list[str]:
         """新しく出たか戻った行 `fresh` を出し直し `same` の 1 件にそろえ（`_align_report`）、判定役へ渡す候補の id を返す。
-        `denied` の行は、否定した位置のファイルの報告（承認や保護の根拠が無いもの）からは選ばない。`back` は戻った行。"""
+        `denied` の行は、否定した位置のファイルの報告（`_denied_report`）を除いてそろえる。`back` は戻った行。"""
         out = []
         for fid in dict.fromkeys(fresh):
-            reports = [i for i in same[fid] if fid not in denied or _report_rank(i, items) or _located(i).get("path") != denied[fid]]
-            aligned = _align_report(self.rows[fid], reports, items)
+            reports = [i for i in same[fid] if not _denied_report(i, items, denied.get(fid))]
+            aligned = _align_report(self.rows[fid], reports, items, denied.get(fid))
             if CHECK not in self.rows[fid] and aligned is not None and (aligned or fid not in back):
                 out.append(fid)
         return out
@@ -513,8 +530,8 @@ class FindingJournal:
             row = by_key.get(oscillation.finding_key(text.strip())) if isinstance(text, str) and text.strip() else None
             if row is None or not _lowered(row) or not row.get("path"):
                 continue
-            new = _raised(dict(item), criteria_decide.mvv_item(item.get("mvv"), items))
-            if criteria_decide.blocking(new["severity"]) and new.get("path") not in (None, row["path"]):
+            if _heavy_in_other_file(item, items, row["path"]):
+                new = _raised(dict(item), criteria_decide.mvv_item(item.get("mvv"), items))
                 denied[str(row["id"])] = row["path"]
                 check = row[CHECK] | {criteria_decide.LOWERED: False, UNLOWERED: True}
                 self._revive(row, new, _text(item.get("section")), round_no)

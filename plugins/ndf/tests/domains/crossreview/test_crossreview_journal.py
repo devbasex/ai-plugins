@@ -869,6 +869,24 @@ def test_issue_4363_lowered_finding_raised_in_another_file_is_unlowered_and_not_
     assert (row["severity"], journal.fresh) == ("major", [])
 
 
+@pytest.mark.parametrize("order", [1, -1])
+def test_issue_4363_report_without_a_place_does_not_lead_the_unlowered_finding(order: int) -> None:
+    """下げた扱いを解除した指摘の代表は、解除の条件を満たした報告にする。位置の無い重い報告は本文に残す。"""
+    journal, row = _lowered(path="a.py", line=1)
+    placeless = _told(severity="critical", impact="位置を示せない不具合")
+    journal.enter(2, [placeless, _told(path="b.py", line=2)][::order])
+    assert (row["severity"], row["path"], row["line"]) == ("critical", "b.py", 2)
+    assert "位置を示せない不具合" in row["text"]
+
+
+@pytest.mark.parametrize("order", [1, -1])
+def test_issue_4363_denied_report_does_not_weigh_on_the_unlowered_finding(order: int) -> None:
+    """確認で否定したファイルの根拠の無い報告は、解除するラウンドの重要度に重ねない。"""
+    journal, row = _lowered(path="a.py", line=1)
+    journal.enter(2, [_told(severity="critical", path="a.py", line=1), _told(path="b.py", line=2)][::order])
+    assert (row["severity"], row["raised_severity"], row["path"]) == ("major", "major", "b.py")
+
+
 def test_issue_4363_protected_report_in_another_file_gets_the_first_severity_back() -> None:
     journal, row = _lowered(severity="critical", path="a.py")
     journal.enter(2, [_told(path="b.py", protect=["secret"])])
