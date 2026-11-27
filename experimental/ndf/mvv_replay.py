@@ -34,7 +34,6 @@ import hashlib
 import json
 import os
 import shlex
-import stat
 import subprocess
 import sys
 import tempfile
@@ -363,33 +362,25 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
             raise Stop(f"{key} が期待した値と違う（期待: {want} / 今: {info[key]}）。判定せずに止める", 2)
     # 材料は最初の保存の前に読む（読めずに止まるとき、前の結果ファイルを書き換えない）
     materials = _materials(args.materials)
-    # 同じ結果ファイルを補う起動を並べると、起動時に読んだ状態で互いの行を上書きするので、結果ファイルごとに 1 つだけ動かす。
-    # ロックは利用者のファイルと重ならないよう NDF の状態の保存先に置き、消さない（消さないので、消える前に開いた古いファイルを
-    # 掴んで排他が崩れることも、利用者のファイルを片付けることも無い）
-    lock_path = _lock_path(args.result)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    # 結果は名前の置き換えで保存するので、最後の要素がシンボリックリンクだと初回の保存でリンクが消え、次の起動が別の宛先を読む
+    if args.result.is_symlink():
+        raise Stop(f"--result（{args.result}）はシンボリックリンク。リンクの先のパスを渡す")
+    # 同じ結果ファイルを補う起動を並べると、起動時に読んだ状態で互いの行を上書きするので、結果ファイルのディレクトリを排他で
+    # ロックし、そのディレクトリに保存する judge を 1 つだけ動かす。ディレクトリそのものをロックするので、ロックのためのファイルを
+    # 作らず（片付けるものが残らない）、状態の保存先の環境変数が違う起動どうしでも同じロックを取る
+    folder = args.result.absolute().parent
+    folder.mkdir(parents=True, exist_ok=True)
+    lock = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
-        # 置き場に FIFO などがあっても待たずに開き、通常のファイルかを確かめる
-        lock = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
-    except OSError as exc:
-        raise Stop(f"判定のロック {lock_path} を開けない: {exc}") from None
-    try:
-        if not stat.S_ISREG(os.fstat(lock).st_mode):
-            raise Stop(f"判定のロック {lock_path} が通常のファイルでない。取り除いてから打ち直す")
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise Stop(f"同じ --result（{args.result}）の judge が動いている。終わってから打ち直す") from None
+            raise Stop(
+                f"同じディレクトリ（{folder}）に結果を保存する judge が動いている。終わってから打ち直すか、別のディレクトリの --result を渡す"
+            ) from None
         return _judge_locked(args, question, info, materials)
     finally:
         os.close(lock)
-
-
-def _lock_path(result: Path) -> Path:
-    """`--result` ごとのロックのパス（NDF の状態の保存先の下。名前は結果ファイルの絶対パスの SHA-256）。"""
-    from ndf import identity
-
-    return identity.load().state_dir / "mvv-replay" / "judge-locks" / f"{_sha(str(result.resolve()))}.lock"
 
 
 def _judge_locked(args: argparse.Namespace, question: str, info: Mapping[str, Any], materials: Mapping[int, Optional[Material]]) -> int:
@@ -693,15 +684,16 @@ def _is_sha256(value: Any) -> bool:
 def _redo_hint(args: argparse.Namespace, pairs: Sequence[Sequence[Mapping[str, Any]]], i: int, side: int, name: str) -> str:
     """指示文のハッシュが無い 1 つの結果ファイルを判定し直す案内。
 
-    残す結果と同じ Claude Code の版と、同じ側のほかの回の指示文のハッシュ（あれば）を照合の引数に入れ、judge が LLM を呼ぶ前に
+    残す結果と同じ Claude Code の版と、同じ側のハッシュを持つ回の指示文のハッシュ（あれば）を照合の引数に入れ、judge が LLM を呼ぶ前に
     不一致で止まるようにする。指示文の取得元がコミットで決まるのは比較の基準の側だけである。変更後の側は `--prompt-commit` を
     省いた起動（読み込んだ ndf の指示文）と見分けられないので、コマンドを示さず、元の起動方法を確かめる案内にする。
     """
-    row = pairs[i - 1][side]
-    hashes = sorted({p[side]["prompt_sha256"] for p in pairs if _is_sha256(p[side].get("prompt_sha256"))})
+    # 期待する条件は残す結果（同じ側のハッシュを持つ回。呼び出し元が条件の一致を確かめ済み）から取る。無ければこの結果の条件
+    kept = next((p[side] for p in pairs if _is_sha256(p[side].get("prompt_sha256"))), None)
+    row = kept or pairs[i - 1][side]
     check = ["--expect-claude-version", str(row.get("claude_version"))]
-    if len(hashes) == 1:
-        check += ["--expect-prompt-sha256", hashes[0]]
+    if kept is not None:
+        check += ["--expect-prompt-sha256", str(kept["prompt_sha256"])]
     where = f"{i}回目の{name}: {args.judged[i - 1][side]}"
     if side == 0:
         return (
@@ -729,6 +721,12 @@ def _cmd_tally(args: argparse.Namespace) -> int:
         if (new["model"], new["claude_version"]) != (old["model"], old["claude_version"]):
             raise Stop("比べる 2 つの判定でモデル ID か Claude Code のバージョンが違う")
     # 回ごとに指示文や実行環境を変えると、公開する指示文で再現を確かめていない改善が合格になるので、側ごとに全回の条件を揃える
+    # 照合は指示文のハッシュを持つ結果どうしで先に行う。残す結果どうしの条件が両立しなければ、欠けた結果を判定し直しても集計へ
+    # 進めないので、判定し直しを案内する前に止める（費用を払ってから止まらない）
+    for side, name in ((0, "変更後"), (1, PREV_COMMIT)):
+        conditions = {tuple(pair[side].get(k) for k in JUDGE_CONDITIONS) for pair in pairs if _is_sha256(pair[side].get("prompt_sha256"))}
+        if len(conditions) > 1:
+            raise Stop(f"{name}の判定の条件（{', '.join(JUDGE_CONDITIONS)}）が回によって違う: {sorted(map(str, conditions))}")
     # 指示文のハッシュを持たない結果（この変更より前の形式）は、実際に送った指示文を照合できないので比べない。前の結果ファイルは
     # judge が条件の違いで続きに使わないので、欠けた側と回のファイルだけを挙げ、新しい保存先で打ち直す打ち方を示す
     redo = [
@@ -742,10 +740,6 @@ def _cmd_tally(args: argparse.Namespace) -> int:
             "送った指示文の SHA-256 が無い判定結果がある。次の側と回だけを判定し直す。以前の結果ファイルは残す。"
             "次の tally では、該当する --judged の引数に新しい結果ファイルのパスを渡す:\n" + "\n".join(redo)
         )
-    for side, name in ((0, "変更後"), (1, PREV_COMMIT)):
-        conditions = {tuple(pair[side].get(k) for k in JUDGE_CONDITIONS) for pair in pairs}
-        if len(conditions) > 1:
-            raise Stop(f"{name}の判定の条件（{', '.join(JUDGE_CONDITIONS)}）が回によって違う: {sorted(map(str, conditions))}")
     rounds = [_round(materials, pair, reviewed) for pair in pairs]
     verdict, reason = _verdict(rounds)
     selected = {n: latest_review(reviewed, m, n) for n, m in materials.items() if m is not None}
