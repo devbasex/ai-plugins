@@ -472,14 +472,9 @@ def _month_file(root: Path, month: str) -> Path:
     return root / Path(facts.value("ndf-files", LEDGER, "path")).name.replace(MONTH, month)
 
 
-@contextmanager
-def _lock(path: Path) -> Iterator[None]:
-    """リポジトリのディレクトリのロック `path` を、保存先の共有ロック（`launch_store.using`）の中で取る。回収と重ならない。"""
-    limit = limits.seconds(LOCK_LIMIT)
-    with launch_store.using(path.parent.parent, limit):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with FileLock(str(path), timeout=limit):
-            yield
+def _lock(path: Path) -> FileLock:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return FileLock(str(path), timeout=limits.seconds(LOCK_LIMIT))
 
 
 def read_experiments(since: datetime, root: Path) -> list[dict[str, Any]]:
@@ -538,30 +533,19 @@ def prune(now: datetime, window_days: int, root: Path) -> None:
     読み取りと削除は記録のロックの中で行い、読めない月があれば何も消さない。掃除の錠を待たずに取れた起動だけが掃除し、全部成功したら
     `launch-pruned` に今月を書く。片付けの済みは `launch-swept` が別に持つので、片付けが済まなくても自分の掃除はやり直さない。
     """
-    if not _pruned(_store_file(root, PRUNED), _month(now)):
-        with launch_store.using(root.parent, limits.seconds(LOCK_LIMIT)):  # 回収と重ならないよう、掃除の錠もこの中で取る
-            if not _prune_own(root, now, window_days):
-                return  # ほかの起動が掃除と片付けをしている。失敗すれば次の起動がやり直す
-    launch_store.sweep(root.parent, now, root, now - timedelta(days=WINDOW_LIMIT + _rule()["kept_extra_days"]))
-
-
-def _prune_own(root: Path, now: datetime, window_days: int) -> bool:
-    """掃除の錠を待たずに取り、まだ今月でなければ掃除して `launch-pruned` に今月を書く。錠を取れなければ偽。
-
-    掃除の中のロックの待ちの超過は、錠の取り合いでないので呼び手へ送る。
-    """
     done, month = _store_file(root, PRUNED), _month(now)
-    root.mkdir(parents=True, exist_ok=True)
-    lock = FileLock(str(_store_file(root, PRUNED_LOCK)), timeout=0)
-    if not launch_store.locked_now(lock):
-        return False
-    try:
-        if not _pruned(done, month):
-            _prune_now(root, now, window_days)
-            _write_replacing(done, month)
-    finally:
-        lock.release()
-    return True
+    if not _pruned(done, month):
+        root.mkdir(parents=True, exist_ok=True)
+        lock = FileLock(str(_store_file(root, PRUNED_LOCK)), timeout=0)
+        if not launch_store.locked_now(lock):
+            return  # ほかの起動が掃除と片付けをしている。失敗すれば次の起動がやり直す
+        try:  # 掃除の中のロックの待ちの超過は錠の取り合いでないので、呼び手へ送る
+            if not _pruned(done, month):
+                _prune_now(root, now, window_days)
+                _write_replacing(done, month)
+        finally:
+            lock.release()
+    launch_store.sweep(root.parent, now, root, now - timedelta(days=WINDOW_LIMIT + _rule()["kept_extra_days"]))
 
 
 def _prune_now(root: Path, now: datetime, window_days: int) -> None:

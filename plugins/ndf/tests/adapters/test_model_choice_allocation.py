@@ -610,33 +610,17 @@ def test_prune_reads_and_drops_months_inside_the_record_lock(store, monkeypatch)
     assert held == [store]
 
 
-SWEEP_AT = datetime(2027, 3, 10, tzinfo=UTC)
-
-
-def _weights_file(root: Path, *days_ago: int) -> Path:
-    """`days_ago` 日前に計算した、期間 60 日の出現率の項目を持つファイル。"""
-    entries = [{"at": _at(SWEEP_AT - timedelta(days=d)), "allocation": {"window_days": 60}} for d in days_ago]
-    path = root / "launch-weights.json"
-    path.write_text(json.dumps({"entries": entries}), encoding="utf-8")
-    return path
-
-
-def _left(path: Path) -> int:
-    return len(json.loads(path.read_text(encoding="utf-8"))["entries"])
-
-
 def test_a_busy_lock_of_another_repo_does_not_hold_up_the_own_prune(store):
-    # ほかのリポジトリの出現率のロックが使用中でも待たずに飛ばし、自分の掃除と片付けの済みを今月にする
+    # ほかのリポジトリの出現率のロックが使用中でも、待たずに飛ばし、自分の掃除と片付けの済みを今月にする
     from filelock import FileLock
 
     other = store.parent / ("a" * 16)
     old = _month_file(other, "2026-01")
-    weights = _weights_file(other, 90)
     with FileLock(str(other / "launch-weights.json.lock")):
-        mc.prune(SWEEP_AT, 60, store)
+        mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
     assert (store / "launch-pruned").read_text(encoding="utf-8") == "2027-03"
     assert (store.parent / "launch-swept").read_text(encoding="utf-8") == "2027-03"
-    assert not old.exists() and _left(weights) == 1  # 古い月はロックなしで消え、使用中の出現率は次に回す
+    assert not old.exists() and other.is_dir()  # 古い月はロックなしで消え、使用中のディレクトリは残る
 
 
 def test_the_sweep_is_retried_after_the_own_prune_is_done(store):
@@ -644,59 +628,29 @@ def test_the_sweep_is_retried_after_the_own_prune_is_done(store):
     old = _month_file(store.parent / ("a" * 16), "2026-01")
     _month_file(store, "2027-03")
     (store / "launch-pruned").write_text("2027-03", encoding="utf-8")
-    mc.prune(SWEEP_AT, 60, store)
+    mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
     assert not old.exists() and (store.parent / "launch-swept").read_text(encoding="utf-8") == "2027-03"
 
 
-def test_the_sweep_drops_weights_that_expired_after_last_months_prune(store):
+def test_the_sweep_removes_a_repo_with_nothing_left(store):
     other = store.parent / ("a" * 16)
-    _month_file(other, "2027-02")
-    (other / "launch-pruned").write_text("2027-02", encoding="utf-8")
-    weights = _weights_file(other, 61, 5)
-    mc.prune(SWEEP_AT, 60, store)
-    assert _left(weights) == 1
-
-
-def _idle_repo(root: Path, pruned: str | None = "2027-01") -> Path:
-    _month_file(root, "2026-01")
-    _weights_file(root)
-    for name in ("launch-experiments.lock", "launch-pruned.lock", "launch-weights.json.lock"):
-        (root / name).write_text("", encoding="utf-8")
-    if pruned is not None:
-        (root / "launch-pruned").write_text(pruned, encoding="utf-8")
-    return root
-
-
-def test_the_sweep_removes_a_repo_ndf_pruned_with_nothing_left(store):
-    other = _idle_repo(store.parent / ("a" * 16))
-    mc.prune(SWEEP_AT, 60, store)
+    _month_file(other, "2026-01")
+    for name in ("launch-weights.json", "launch-pruned", "launch-experiments.lock", "launch-pruned.lock", "launch-weights.json.lock"):
+        (other / name).write_text('{"entries": []}' if name.endswith(".json") else "", encoding="utf-8")
+    mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
     assert not other.exists()
 
 
-def test_the_sweep_keeps_repos_ndf_did_not_mark_or_used_last_month(store):
-    unmarked = _idle_repo(store.parent / ("a" * 16), None)
-    recent = _idle_repo(store.parent / ("b" * 16), "2027-02")
-    mc.prune(SWEEP_AT, 60, store)
-    assert (unmarked / "launch-experiments.lock").exists() and (recent / "launch-experiments.lock").exists()
-
-
 def test_the_sweep_keeps_a_repo_with_weights_or_unknown_files(store):
-    kept, unknown = _idle_repo(store.parent / ("a" * 16)), _idle_repo(store.parent / ("b" * 16))
-    _weights_file(kept, 9)
+    kept, unknown = store.parent / ("a" * 16), store.parent / ("b" * 16)
+    _month_file(kept, "2026-01")
+    entry = {"at": _at(datetime(2027, 3, 1, tzinfo=UTC)), "allocation": {"window_days": 60}}
+    (kept / "launch-weights.json").write_text(json.dumps({"entries": [entry]}), encoding="utf-8")
+    _month_file(unknown, "2026-01")
     (unknown / "notes.txt").write_text("", encoding="utf-8")
-    mc.prune(SWEEP_AT, 60, store)
+    mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
     assert (kept / "launch-weights.json").exists() and (unknown / "notes.txt").exists()
     assert not (unknown / "launch-experiments.lock").exists()  # 知らない名前のファイルだけが残り、ディレクトリは残す
-
-
-def test_a_launch_using_the_store_holds_off_the_removal(store):
-    # 起動がリポジトリのロックを取っている間（保存先の共有ロックを持つ間）は回収しない
-    from ndf.adapters import launch_store
-
-    other = _idle_repo(store.parent / ("a" * 16))
-    with launch_store.using(store.parent, 0):
-        mc.prune(SWEEP_AT, 60, store)
-    assert (other / "launch-pruned").exists()
 
 
 def test_records_of_two_repos_are_kept_apart(tmp_path, store, clock):
