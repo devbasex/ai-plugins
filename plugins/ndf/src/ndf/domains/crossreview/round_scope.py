@@ -10,7 +10,7 @@ from collections.abc import Collection, Mapping
 from typing import Any, Optional
 
 from ndf.adapters import git
-from ndf.domains.crossreview import scope_decide
+from ndf.domains.crossreview import changes, scope_decide
 
 
 def previous_head(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str) -> Optional[str]:
@@ -33,12 +33,12 @@ def _base_texts(g: git.Git, start: str, now: str, kept: Collection[str]) -> Opti
     """2 つの起点の間で変わったファイルのうち、`kept` のセクションを含む文書の、両方の起点の本文。変わったファイルの名前を
     1 回、該当する文書があればその本文を 1 回読む（git の起動は 1〜2 回）。どちらかの起点が手元に無いなどで読めなければ None。"""
     try:
-        names = g.diff_between(start, now, "--name-only", "-z", "--no-renames", "--no-relative").split("\0")
+        names = g.diff_between(start, now, "--name-only", "-z", changes.NO_RENAMES, "--no-relative").split("\0")
         paths = [p for p in names if p and any(s.startswith(f"{p}#") for s in kept)]
         if not paths:
             return {}
         got = g.blobs(*(f"{c}:{p}" for p in paths for c in (start, now)))
-    except git.GitError:
+    except git.GitError:  # noqa: NDF401 外部コマンド: 起点が手元に無いなどで読めなければ、引き継がずに詳細レビューへ回す
         return None
     text = [b.decode("utf-8", errors="replace") if b is not None else None for b in got]
     return {p: (text[2 * i], text[2 * i + 1]) for i, p in enumerate(paths)}

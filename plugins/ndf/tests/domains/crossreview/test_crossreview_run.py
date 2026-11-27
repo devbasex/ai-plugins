@@ -21,7 +21,7 @@ from ndf.contracts import result
 from ndf.domains.crossreview import cli, drive, fixer, report_decide, settings, store
 from ndf.domains.crossreview import finish_decide as fin
 
-from ._repos import BRANCH, Repos, commit, run_cli, sh
+from ._repos import BRANCH, Repos, commit, previous_output, run_cli, sh
 
 PR = 41
 FAIL = "fail"
@@ -178,7 +178,8 @@ def test_reviewed_out_is_the_head_the_last_round_read_not_the_fix(repos: Repos, 
     読んだ（修正の前の）HEAD を書く。始めに前の起動の値を消す。"""
     before = sh(wt, "rev-parse", "HEAD").strip()
     out = tmp_path / "reviewed-head"
-    out.write_text("0" * 40 + "\n", encoding="utf-8")
+    (tmp_path / "st").mkdir()
+    previous_output(tmp_path / "st", out, "0" * 40 + "\n")
     fake = Fake(tmp_path / "st", {"codex": [["一つ目"]], "kiro": [[]]})
     _run(capsys, monkeypatch, fake, wt, "--max-rounds", "1", "--reviewed-out", str(out))
     after = sh(wt, "rev-parse", "HEAD").strip()
@@ -689,6 +690,8 @@ def test_reviewed_out_skips_a_round_some_reviewers_could_not_read(wt: Path, tmp_
     rounds = _state(fake.state_dir)["rounds"]
     assert rounds[-1]["verdict"] == fin.INCOMPLETE_REVIEWERS
     assert out.read_text().strip() == rounds[0]["head"] != rounds[1]["head"]
+    (tmp_path / "st2").mkdir()
+    previous_output(tmp_path / "st2", out, out.read_text(encoding="utf-8"))
     again = Fake(tmp_path / "st2", {"codex": [FAIL, FAIL], "kiro": [[]], "claude": [FAIL]})
     _run(capsys, monkeypatch, again, wt, "--reviewed-out", str(out))
     assert not out.exists()

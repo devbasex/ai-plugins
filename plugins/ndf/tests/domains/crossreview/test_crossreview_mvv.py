@@ -12,7 +12,7 @@ import pytest
 
 from ndf.adapters import git
 from ndf.core.converge import worktree
-from ndf.domains.crossreview import criteria_decide, report_decide, store, threads
+from ndf.domains.crossreview import criteria_decide, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 
@@ -393,7 +393,8 @@ def test_review_without_an_mvv_record_is_reused_only_when_there_is_no_mvv(
     _run(capsys, monkeypatch, _clean(tmp_path), wt, "--base", "main")
     path = store.state_pr(tmp_path / "st", PR).path
     data = store.read_object(path)
-    del data["rounds"][0]["mvv"], data["reviewed_mvv"]
+    # MVV を見分ける値だけを消す（比較元のブランチの記録は #3702 から照らすので残す）
+    del data["rounds"][0]["mvv"][scope_decide.MVV_ID], data["reviewed_mvv"]
     store.write_object(path, data)
     same = _clean(tmp_path)
     _run(capsys, monkeypatch, same, wt, "--base", "main")

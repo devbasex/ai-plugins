@@ -14,7 +14,7 @@ from ndf.domains.crossreview import cli, drive, journal, reviewed_pr, scope_deci
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.settings import RunConfig
 
-from ._repos import run_cli
+from ._repos import previous_output, run_cli
 
 
 def _summary(tmp_path: Path, final: str, rounds: int, findings: list[dict]) -> Path:
@@ -291,7 +291,7 @@ def test_run_removes_the_previous_reviewed_pr_and_writes_it_only_with_the_head(
 ) -> None:
     """前の起動のファイルは消し、HEAD を書かない起動は PR も書かない。引数が無ければ結果は今のまま。"""
     pr_out = tmp_path / "reviewed-pr"
-    pr_out.write_text("o/r#1\n", encoding="utf-8")
+    previous_output(tmp_path / "state", pr_out, "o/r#1\n")
     code, got, made = _in_process_run(
         monkeypatch, capsys, tmp_path, "--reviewed-pr-out", str(pr_out), "--reviewed-out", str(tmp_path / "head"), head=None
     )
@@ -300,14 +300,16 @@ def test_run_removes_the_previous_reviewed_pr_and_writes_it_only_with_the_head(
 
 
 @pytest.mark.parametrize("slug", ["norepo", "a/b/c", "/r"])
-def test_run_refuses_a_malformed_repository_and_removes_the_previous_file(
+def test_run_refuses_a_malformed_repository_and_keeps_the_previous_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, slug: str
 ) -> None:
+    """起動できない打ち方では、前の起動の出力も消さない（PR 4638 の C4）。"""
     monkeypatch.setenv("GH_REPO", "before/repo")
     pr_out = tmp_path / "reviewed-pr"
-    pr_out.write_text("o/r#1\n", encoding="utf-8")
+    (tmp_path / "state").mkdir()
+    previous_output(tmp_path / "state", pr_out, "o/r#1\n")
     code, got, made = _in_process_run(monkeypatch, capsys, tmp_path, "--repo", slug, "--reviewed-pr-out", str(pr_out))
-    assert got["cause"]["kind"] == "invalid" and not made and not pr_out.exists()
+    assert got["cause"]["kind"] == "invalid" and not made and pr_out.read_text(encoding="utf-8") == "o/r#1\n"
     assert os.environ["GH_REPO"] == "before/repo"
 
 

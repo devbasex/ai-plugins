@@ -35,11 +35,10 @@ def _sprint_branch(repos: Repos) -> None:
 def test_issue_3702_reviewed_base_out_compares_with_the_pr_target_not_the_given_base(
     repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub
 ) -> None:
-    """`--reviewed-base-out` を渡すと、`--base` でなく PR の今のマージ先を取得して比較元にし、その名前を書く（前の値は消す）。"""
+    """`--reviewed-base-out` を渡すと、`--base` でなく PR の今のマージ先を取得して比較元にし、その名前を書く。"""
     _sprint_branch(repos)
     hub.port.base_ref = SPRINT
     base_out = tmp_path / "reviewed-base"
-    base_out.write_text("main\n", encoding="utf-8")
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "head"), "--reviewed-base-out", str(base_out))
     assert (code, got["status"]) == (0, "ok")
@@ -167,3 +166,21 @@ def test_issue_3702_target_resolved_from_the_remote_is_not_read_again(wt: Path, 
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(tmp_path / "b"))
     assert (code, got["status"]) == (0, "ok")
+
+
+def test_existing_output_not_written_by_ndf_is_kept_and_stops(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 4638 の C4: 前の起動が書いたと記録に無い既存のファイルは消さず、相手役を起動する前に precondition で止まる。"""
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    mine = tmp_path / "mine.txt"
+    mine.write_text("利用者のデータ\n", encoding="utf-8")
+    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(mine))
+    assert (got["cause"]["kind"], fake.calls, mine.read_text(encoding="utf-8")) == ("precondition", [], "利用者のデータ\n")
+
+
+def test_findings_input_given_as_an_output_is_invalid_and_kept(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """PR 4638 の C4: 入力の --findings を出力先にも渡すと、読む前に消さず invalid で止まる。"""
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    given = tmp_path / "findings.json"
+    given.write_text('{"items": []}', encoding="utf-8")
+    code, got = _run(capsys, monkeypatch, fake, wt, "--findings", str(given), "--reviewed-out", str(given))
+    assert (got["cause"]["kind"], fake.calls, given.is_file()) == ("invalid", [], True)

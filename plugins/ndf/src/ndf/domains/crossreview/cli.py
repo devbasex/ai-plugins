@@ -644,22 +644,68 @@ def _begin_run(args: argparse.Namespace) -> Optional[int]:
     if args.reviewed_base_out and not args.reviewed_out:
         return _stop("invalid", "--reviewed-base-out は --reviewed-out と併用する（レビューした HEAD を書かない起動は比較元も書かない）")
     shared = _shared_output(args)
+    if args.findings and shared is None and _same_file(args.findings, _output_paths(args)):
+        # 入力の指摘を読む前に片付けで消してしまう（PR 4638 の C4）
+        return _stop("invalid", f"入力 --findings {args.findings} を出力先にも渡している")
     if shared is not None:
         # 後に書く値が先の値を上書きし、承認と照らすのに要る HEAD・PR・比較元のどれかが失われる。消す前に止める（PR 4638 の r1-3）
         return _stop("invalid", f"出力先 {shared} を --reviewed-out・--reviewed-pr-out・--reviewed-base-out の 2 つ以上に渡している")
-    for stale in (args.reviewed_out, args.reviewed_pr_out, args.reviewed_base_out):
-        if stale:
-            try:
-                _clear_output(Path(stale))
-            except OSError as exc:
-                # 出力先の不備は始めに分かるので、相手役を起動する前に止める（レビューの後に書けないと分かっても遅い。#3702）
-                return _stop("precondition", f"出力先 {stale} に書けない: {exc}")
-    if args.repo is not None:
+    try:
+        # 起動できない打ち方では何も消さないよう、出力を片付ける前に確かめる（PR 4638 の C4）
+        slug = repo.resolve_target_repo(args.repo, None, Path.cwd()).slug if args.repo is not None else None
+    except repo.RepoUnresolved as exc:
+        return _stop("invalid", str(exc))
+    written = _outputs_written(args)
+    for stale in _output_paths(args):
+        if Path(stale).exists() and written.get(str(Path(stale).resolve())) != _held_output_text(Path(stale)):
+            # 前の起動が書いたと確かめられない既存のファイルは利用者のデータかもしれないので消さない（PR 4638 の C4）
+            return _stop("precondition", f"出力先 {stale} に、前の起動が書いた出力と確かめられないファイルがある。別のパスを渡す")
         try:
-            os.environ[GH_REPO_ENV] = repo.resolve_target_repo(args.repo, None, Path.cwd()).slug
-        except repo.RepoUnresolved as exc:
-            return _stop("invalid", str(exc))
+            _clear_output(Path(stale))
+        except OSError as exc:
+            # 出力先の不備は始めに分かるので、相手役を起動する前に止める（レビューの後に書けないと分かっても遅い。#3702）
+            return _stop("precondition", f"出力先 {stale} に書けない: {exc}")
+    if slug is not None:
+        os.environ[GH_REPO_ENV] = slug
     return None
+
+
+# 前の起動が書いた出力の記録（状態の保存先の中。片付けてよい出力かを確かめる。PR 4638 の C4）
+WRITTEN_FILE = "written-outputs.json"
+
+
+def _output_paths(args: argparse.Namespace) -> list[str]:
+    return [p for p in (args.reviewed_out, args.reviewed_pr_out, args.reviewed_base_out) if p]
+
+
+def _same_file(given: str, others: Sequence[str]) -> bool:
+    return Path(given).resolve() in {Path(o).resolve() for o in others}
+
+
+def _held_output_text(path: Path) -> Optional[str]:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない既存のファイルは前の出力と確かめられないとして消さない
+        return None
+
+
+def _outputs_written(args: argparse.Namespace) -> dict[str, str]:
+    """この状態の保存先で前の起動が書いた出力（解決したパス → 中身）。読めなければ空。"""
+    path = Path(args.state_dir) / WRITTEN_FILE if args.state_dir else None
+    if path is None or not path.is_file():
+        return {}
+    try:
+        held = store.read_object(path)
+    except store.StateBroken:
+        return {}
+    return {k: v for k, v in held.items() if isinstance(v, str)}
+
+
+def _write_output(args: argparse.Namespace, path: Path, text: str) -> None:
+    """出力を書き、書いた中身を状態の保存先へ残す（次の起動が消してよい出力かを確かめる。PR 4638 の C4）。"""
+    path.write_text(text, encoding="utf-8")
+    if args.state_dir:
+        store.write_object(Path(args.state_dir) / WRITTEN_FILE, {**_outputs_written(args), str(path.resolve()): text})
 
 
 def _shared_output(args: argparse.Namespace) -> Optional[str]:
@@ -689,15 +735,15 @@ def _write_reviewed(args: argparse.Namespace, got: drive.Outcome) -> Optional[in
     出した終了コードを返す。"""
     if not args.reviewed_out or got.reviewed_head is None:
         return None
-    Path(args.reviewed_out).write_text(got.reviewed_head + "\n", encoding="utf-8")
+    _write_output(args, Path(args.reviewed_out), got.reviewed_head + "\n")
     if args.reviewed_base_out and got.reviewed_base is not None:
         try:
-            Path(args.reviewed_base_out).write_text(got.reviewed_base + "\n", encoding="utf-8")
+            _write_output(args, Path(args.reviewed_base_out), got.reviewed_base + "\n")
         except OSError as exc:
             return _stop("precondition", f"レビューの比較元のブランチを {args.reviewed_base_out} へ書けない: {exc}")
     if args.reviewed_pr_out and got.reviewed_pr is not None:
         try:
-            _write_reviewed_pr(Path(args.reviewed_pr_out), got.reviewed_pr)
+            _write_output(args, Path(args.reviewed_pr_out), f"{got.reviewed_pr}\n")
         except OSError as exc:
             return _stop("precondition", f"読んだ PR を {args.reviewed_pr_out} へ書けない: {exc}")
     return None
@@ -708,7 +754,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     `--reviewed-out` を渡せば、今回の起動で相手役の全員が読めた最後のラウンドの HEAD をそのファイルへ書く（#3879。一部が
     読めなかったラウンドの HEAD は書かない。PR 3944 の r2-3）。最後のラウンドの
-    修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。始めに消すので、
+    修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。前の起動が書いた出力は始めに消す（記録に無い既存のファイルは消さずに止まる）ので、
     書けなかった起動の後に前の起動の値が残らない。
 
     単位の経路の引数（#4369）: `--repo` は保存済みの状態と作業場所のリモートより優先する対象のリポジトリで、子の `gh` にも

@@ -393,7 +393,8 @@ def test_scope_uses_the_same_reviewers_as_run(repos: Repos, tmp_path: Path, caps
     state = tmp_path / "state"
     state.mkdir()
     sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
-    rounds = [{"round": 1, "head": sha, "base": sha, "reviewers": ["codex"], "verdict": "changes_required"}]
+    mvv = {scope_decide.MVV_BRANCH: "main"}
+    rounds = [{"round": 1, "head": sha, "base": sha, "reviewers": ["codex"], "verdict": "changes_required", scope_decide.MVV: mvv}]
     store.write_object(state / store.STATE_NAME.format(pr=8), {store.ORIGIN_KEY: 8, "rounds": rounds})
     base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main", "--purpose", "check"]
     assert run_cli(capsys, *base, "--reviewer", "codex")[1]["items"][0]["scope"] == scope_decide.SINCE

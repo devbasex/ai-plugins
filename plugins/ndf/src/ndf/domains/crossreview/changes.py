@@ -118,7 +118,7 @@ def sections(docs: dict[str, str]) -> list[str]:
 def changed_sections(g: git.Git, base: str, root: Path) -> list[str]:
     """`base...HEAD` で変わった Markdown のセクション（`<パス>#<見出し>`）。改名を調べない（調べると部分クローンで前の本文が
     要る。改名前のパスは HEAD に無く、セクションは同じになる）。HEAD に無いパスは、ツリーを読まなくて済むように除く。"""
-    return sections(_docs(g, g.changed_files(base, "HEAD", "--no-renames", "--diff-filter=d"), root))
+    return sections(_docs(g, g.changed_files(base, "HEAD", NO_RENAMES, "--diff-filter=d"), root))
 
 
 # --- 差分 -----------------------------------------------------------------------------------
@@ -148,6 +148,9 @@ _DIFF = (
     "--submodule=short",
 )
 # hunk の見出し（行数の省略は 1 行）
+# 名前を変えたファイルを削除と追加の 2 つに分けて数える（`round_scope` の起点どうしの比較も同じ）
+NO_RENAMES = "--no-renames"
+
 _HUNK = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 # パスの行の始まりと、その行が示す側（ベースか）・パスの接頭辞
 _NAMES = {"--- ": (True, "a/"), "+++ ": (False, "b/"), "rename from ": (True, ""), "rename to ": (False, "")}

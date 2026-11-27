@@ -397,7 +397,7 @@ contracts/
 | --- | --- | --- | --- | --- |
 | `_sync` | `domains/crossreview/drive.py` | 変更 | 変えない | `RunConfig.follow_base` が真なら、`--base` でなく PR の今のマージ先を読んで取得し、比較元にする |
 | `_reusable` | 同上 | 変更 | 変えない | 起動の引数によらず、前のラウンドに記録した比較元のブランチ（`mvv.mvv_branch`）が今回と違えば偽 |
-| `cmd_run` | `domains/crossreview/cli.py` | 変更 | 変えない | `--reviewed-base-out` を受け、始めに消し、`--reviewed-out` を書くときに最後のラウンドの比較元のブランチを書く。`--reviewed-out`・`--reviewed-pr-out` と同じ保存先なら、消す前に `invalid` で止まる |
+| `cmd_run` | `domains/crossreview/cli.py` | 変更 | 変えない | `--reviewed-base-out` を受け、始めに消し、`--reviewed-out` を書くときに最後のラウンドの比較元のブランチを書く。`--reviewed-out`・`--reviewed-pr-out` と同じ保存先か、入力の `--findings` と同じファイルなら、消す前に `invalid` で止まる。3 つの出力先は、状態の保存先の記録（`written-outputs.json`）にある前の起動の出力と中身が一致するときだけ消す。記録に無い既存のファイルは利用者のデータかもしれないので消さず、相手役を起動する前に `precondition` で止まる。`--repo` の形はこれらを消す前に確かめる |
 | `_merge_pull` | `ci_cli.py` | 変更 | 変えない | `--verify-merged` があり、マージ済みの PR の head か base が承認の値と違えば `refused` |
 | `_watch` | 同上 | 変更 | 変えない | `--head <SHA>` があれば、待ちの開始時と必須チェックが通った時点に PR の HEAD を読み、指定した SHA と違えば `approval_stale` |
 | `pulls` | `adapters/github.py` | 変更 | `(numbers, spare=(), *, rest_fallback: bool = True)` | 偽なら REST へ読み替えない |

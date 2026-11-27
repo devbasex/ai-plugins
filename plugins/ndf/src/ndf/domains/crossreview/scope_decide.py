@@ -82,17 +82,7 @@ def _lines(text: str) -> Iterator[tuple[str, Optional[tuple[int, str]]]]:
     Setext 見出しを認識する（PR 4638 の r7-1）。コードブロックの中と、先頭の YAML front matter の中は見出しでない。レビューの
     対象のセクション（`sections_of`）と、起点どうしの本文の比較（`_bodies`）は、この判定だけでセクションを分ける（PR 4638 の r6-3）。"""
     lines = text.splitlines()
-    plain = [False] * len(lines)
-    start = 0
-    if lines and lines[0].strip() == "---":
-        close = next((i for i in range(1, len(lines)) if lines[i].strip() in ("---", "...")), None)
-        start = close + 1 if close is not None else 0
-    fenced = False
-    for i in range(start, len(lines)):
-        if lines[i].lstrip().startswith(_FENCES):
-            fenced = not fenced
-        elif not fenced:
-            plain[i] = True
+    plain = _heading_candidates(lines)
     i = 0
     while i < len(lines):
         if not plain[i]:
@@ -118,6 +108,22 @@ def _lines(text: str) -> Iterator[tuple[str, Optional[tuple[int, str]]]]:
         for j in range(i + 1, end + 2):
             yield lines[j], None
         i = end + 2
+
+
+def _heading_candidates(lines: Sequence[str]) -> list[bool]:
+    """各行が見出しになりうるか（コードブロックの中と、先頭の YAML front matter の中は偽）。"""
+    plain = [False] * len(lines)
+    start = 0
+    if lines and lines[0].strip() == "---":
+        close = next((i for i in range(1, len(lines)) if lines[i].strip() in ("---", "...")), None)
+        start = close + 1 if close is not None else 0
+    fenced = False
+    for i in range(start, len(lines)):
+        if lines[i].lstrip().startswith(_FENCES):
+            fenced = not fenced
+        elif not fenced:
+            plain[i] = True
+    return plain
 
 
 def sections_of(path: str, text: str) -> list[str]:
@@ -171,7 +177,7 @@ def _bodies(path: str, text: Optional[str]) -> dict[str, list[tuple[tuple[str, .
     out: dict[str, list[tuple[tuple[str, ...], list[str]]]] = {}
     parents: list[tuple[int, str]] = []
     current: Optional[list[str]] = None
-    for line, heading in _lines(text or ""):
+    for line, heading in _lines(text) if text is not None else ():
         if heading is not None:
             while parents and parents[-1][0] >= heading[0]:
                 parents.pop()
