@@ -25,16 +25,28 @@ WHOLE = "whole"
 SCOPE = "scope"
 
 
-def split_commands(text: str) -> list[list[str]]:
-    """シェルのコマンドの文字列を単純コマンドの語の並びへ分ける。読めない文字列は空の一覧を返す。"""
+def _tokens(text: str) -> list[str] | None:
     lexer = shlex.shlex(text, posix=True, punctuation_chars="();<>|&\n")
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     try:
-        tokens = list(lexer)
+        return list(lexer)
     except ValueError:
+        return None
+
+
+def split_commands(text: str) -> list[list[str]]:
+    """シェルのコマンドの文字列を単純コマンドの語の並びへ分ける。読めない文字列は空の一覧を返す。"""
+    tokens = _tokens(text)
+    return _group_tokens(tokens) if tokens is not None else []
+
+
+def all_words(text: str) -> list[str]:
+    """`split_commands` と同じ字句の分け方で、リダイレクト先を含むすべての語（区切りとリダイレクトの記号を除く）。"""
+    tokens = _tokens(text)
+    if tokens is None:
         return []
-    return _group_tokens(tokens)
+    return [t for t in tokens if not set(t) <= _SEPARATOR_CHARS and not _is_redirect(t)]
 
 
 def _group_tokens(tokens: list[str]) -> list[list[str]]:

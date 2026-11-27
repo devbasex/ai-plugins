@@ -335,15 +335,28 @@ def _refuse_lossy_sync(g: git.Git, remote: str, before: str) -> None:
         )
 
 
+def refuse_dirty(g: git.Git) -> None:
+    """追跡ファイルに commit していない変更があれば `SyncRefused`。"""
+    if g.run("status", "--porcelain", "--untracked-files=no").strip():
+        raise SyncRefused("worktree に commit していない変更がある。commit してから流し直す")
+
+
 def sync_worktree(g: git.Git, head_branch: str, remote: Optional[str] = None, base_branch: Optional[str] = None) -> SyncResult:
     """worktree を origin の先頭へ合わせ、送っていない自分のコミットだけを載せ直す（#2440）。失うものがあれば何も変えずに `SyncRefused`。
 
     `base_branch` があれば同じ 1 回の取得でベースも取り、その先頭のコミットを `base` に返す。
     """
-    if g.run("status", "--porcelain", "--untracked-files=no").strip():
-        raise SyncRefused("worktree に commit していない変更がある。commit してから流し直す")
-    before = g.rev_parse("HEAD")
+    refuse_dirty(g)
     tip, base = fetch_tips(g, head_branch, remote, base_branch)
+    return sync_fetched(g, tip, base)
+
+
+def sync_fetched(g: git.Git, tip: str, base: str = "") -> SyncResult:
+    """取得済みの先頭 `tip` へ合わせ、送っていない自分のコミットを載せ直す。取得はしない（#4566。`sync_worktree` の後半）。
+
+    失うものがあれば何も変えずに `SyncRefused`。衝突したら前の HEAD へ戻して衝突したファイルを返す。
+    """
+    before = g.rev_parse("HEAD")
     _refuse_lossy_sync(g, tip, before)
     own = own_commits(g, tip, before)
     g.run("reset", "--hard", tip)

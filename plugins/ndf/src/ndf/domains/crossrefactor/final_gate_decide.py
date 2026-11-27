@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,15 +46,22 @@ class FinalFixVerdict:
         }
 
 
-def verify_final_fix(changed_by_commit: Mapping[str, Iterable[str]], target_scope: Sequence[str]) -> FinalFixVerdict:
-    """コミット → 変えたファイルの並び（古い順）から、範囲外を変えたコミットを分ける。対象範囲が空なら `ValueError`。"""
+def verify_final_fix(
+    changed_by_commit: Mapping[str, Iterable[str]],
+    target_scope: Sequence[str],
+    excluded: Callable[[str], bool] | None = None,
+) -> FinalFixVerdict:
+    """コミット → 変えたファイルの並び（古い順）から、範囲外を変えたコミットを分ける。対象範囲が空なら `ValueError`。
+
+    `excluded` が真のファイルは、範囲の中でも範囲の外として扱う（手元の経路のテストの定義のファイル。#4566）。
+    """
     if not target_scope:
         raise ValueError("リファクタリング計画の対象範囲（target_scope）が無い")
     scope = tuple(target_scope)
     accepted: list[str] = []
     outside: list[tuple[str, str]] = []
     for sha, paths in changed_by_commit.items():
-        bad = [(sha, p) for p in sorted(set(paths)) if not in_scope(p, scope)]
+        bad = [(sha, p) for p in sorted(set(paths)) if not in_scope(p, scope) or (excluded is not None and excluded(p))]
         outside.extend(bad)
         if not bad:
             accepted.append(sha)

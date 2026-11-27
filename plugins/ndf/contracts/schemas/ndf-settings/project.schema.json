@@ -2473,6 +2473,29 @@
           },
           "title": "Ci Exempt",
           "type": "array"
+        },
+        "protected_files": {
+          "default": [],
+          "description": "手元の経路のリファクタリングがこの実行で変えないテストの定義のファイルかディレクトリ（#4566）。当て方は suite の paths と同じ",
+          "items": {
+            "type": "string"
+          },
+          "title": "Protected Files",
+          "type": "array"
+        },
+        "local_total_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "手元の経路のリファクタリングの最終ゲートで、テスト全体の実行の累計の上限（分。#4566）。書けば suite 1 つの上限も累計の残りだけになる",
+          "title": "Local Total Minutes"
         }
       },
       "required": [

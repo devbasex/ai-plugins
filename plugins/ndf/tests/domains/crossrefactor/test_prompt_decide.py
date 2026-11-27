@@ -126,3 +126,20 @@ def test_propose_prompt_keeps_the_result_line_apart_from_candidates_without_a_tr
 def test_propose_prompt_with_empty_candidates_is_the_same_as_without_them():
     touched = Touched({"src/geo.py": frozenset({"area"})})
     assert prompt_decide.propose(7, touched, "") == prompt_decide.propose(7, touched)
+
+
+def test_final_fix_local_switches_from_ci_and_carries_the_excerpts():
+    # #4566: 手元で落ちた抜粋をそのまま載せる（文言は照合しない）
+    ci = prompt_decide.final_fix(7, ("src",), ["- #1 unit（終了コード 1）"])
+    local = prompt_decide.final_fix(7, ("src",), ["- #1 unit（終了コード 1）"], local=True)
+    assert ci != local
+    assert "- #1 unit（終了コード 1）" in local
+
+
+def test_final_fix_local_stays_under_the_byte_limit_and_counts_the_dropped():
+    blocks = [f"- #{i} 単体（終了コード 1）\n" + "あ" * 7_000 for i in range(1, 11)]
+    got = prompt_decide.final_fix(7, ("src",), blocks, local=True)
+    assert len(got.encode("utf-8")) <= prompt_decide.PROMPT_BYTES
+    kept = sum(1 for b in blocks if b in got)
+    assert 0 < kept < len(blocks)
+    assert f"ほかに {len(blocks) - kept} 件" in got
