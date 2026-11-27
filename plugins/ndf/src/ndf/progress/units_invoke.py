@@ -354,14 +354,17 @@ def _write_record(round_dir: Path, name: str, text: str) -> None:
 
 def round_state(unit_dir: Path) -> RoundState:
     """`run.json` を持つ最新の回の、結果・マージの結果・`reviewed-head`・`stopped-head`。記録の無い空の回は数えない。"""
-    rounds = sorted(
-        (n, p)
-        for p in (unit_dir.iterdir() if unit_dir.is_dir() else [])
-        if (n := _round_number(p)) is not None and (p / plan_runner.RUN_FILE).is_file()
+    latest = max(
+        (
+            (n, p)
+            for p in (unit_dir.iterdir() if unit_dir.is_dir() else [])
+            if (n := _round_number(p)) is not None and (p / plan_runner.RUN_FILE).is_file()
+        ),
+        default=None,
     )
-    if not rounds:
-        return RoundState(unit_dir / "1", False, None, None, None, None)
-    path = rounds[-1][1]
+    if latest is None:
+        return RoundState(round_dir=unit_dir / "1", ran=False, done=None, merge=None, reviewed=None, stopped_head=None)
+    path = latest[1]
     _, done = plan_runs.previous(path)
     kind, stopped = _own_records(path)
     return RoundState(path, True, done, kind, _saved_head(path / REVIEWED_HEAD_FILE), stopped)
