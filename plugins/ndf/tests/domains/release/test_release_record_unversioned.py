@@ -167,7 +167,7 @@ def test_writes_each_environment_to_every_included_pull_with_the_push_and_target
         }
         assert {tuple(r.confirmation.items()) for r in rows} == {((WEB, "cd"),), ((WORKER, "cd"),)}
     # CD は push の after で照会し、共通の前処理の保存先は complete で消える
-    assert {q[2] for q in hub.run_queries} == {AFTER} and not (repo.common / "ndf-release-record" / f"{PROD}.json").exists()
+    assert {q[2] for q in hub.run_queries} == {AFTER} and not (repo.common / "ndf" / "release-record" / f"{PROD}.json").exists()
     # 共有の置き場は CLI が解決済みの共通の git ディレクトリの下に置き、git を起動して解決し直さない
     assert "rev-parse" not in [c[0] for c in repo.calls]
 
@@ -325,7 +325,7 @@ def test_a_repository_without_deliveries_takes_targets_and_attests(tmp_path: Pat
     # 第一親の履歴と設定のファイルの変更の 1 回と、設定の読み取りの 1 回だけで、push も差分も読まず、置き場にも書かない
     assert [c[0] for c in repo.calls] == ["log", "cat-file"]
     assert not [r for r in hub.requests if r[1].endswith("/activity")]
-    assert not list((repo.common / "ndf-release-record").glob("*.json"))
+    assert not list((repo.common / "ndf" / "release-record").glob("*.json"))
 
 
 def test_a_later_change_without_deliveries_does_not_read_the_push(tmp_path: Path) -> None:
@@ -399,7 +399,7 @@ def test_a_later_parallel_call_reuses_the_shared_push_without_deciding_again(tmp
 def test_a_left_share_is_swept_even_when_the_push_is_not_read(tmp_path: Path) -> None:
     """宣言を外した後に --target だけで記録しても、期限を過ぎて残った置き場を消す。"""
     repo = Repo(tmp_path, deliveries=None)
-    left = repo.common / "ndf-release-record" / "59.json"
+    left = repo.common / "ndf" / "release-record" / "59.json"
     left.parent.mkdir(parents=True)
     made = record_unversioned.Prefix(COMMIT, record_decide.Push(BEFORE, AFTER), None, frozenset(), frozenset())
     left.write_text(json.dumps(made.as_json()), encoding="utf-8")
@@ -457,7 +457,7 @@ def test_a_rerun_after_removing_the_setting_still_uses_the_setting_of_the_push(t
     hub = _push_activity(_hub(cd_runs=[[SUCCESS]]))
     repo = Repo(tmp_path)
     _write(hub, repo, _args(WEB))
-    (repo.common / "ndf-release-record" / f"{PROD}.json").unlink()
+    (repo.common / "ndf" / "release-record" / f"{PROD}.json").unlink()
     hub.activities = []  # 記録の push を使い、更新の記録を読まない
     with pytest.raises(record.RecordError, match="--target を渡さず"):
         _write(hub, repo, _args(WORKER, targets=(WEB, WORKER)), _release(None))
@@ -606,7 +606,7 @@ def test_shared_prefix_is_computed_once_and_redone_for_another_commit(tmp_path: 
     assert record_unversioned.shared_prefix(share, PROD, COMMIT, compute) == first and calls == [COMMIT]
     record_unversioned.shared_prefix(share, PROD, "f" * 40, lambda: compute("f" * 40))
     assert calls == [COMMIT, "f" * 40]
-    path = repo.common / "ndf-release-record" / f"{PROD}.json"
+    path = repo.common / "ndf" / "release-record" / f"{PROD}.json"
     path.write_text("{", encoding="utf-8")
     record_unversioned.shared_prefix(share, PROD, COMMIT, compute)
     assert calls[-1] == COMMIT and len(calls) == 3

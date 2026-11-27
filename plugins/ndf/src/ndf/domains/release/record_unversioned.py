@@ -6,7 +6,7 @@
 - 確かめ 1〜7 は、記録の PR・リポジトリ・push の記録だけで決まるので、CD を照会する確かめ 8 より先に行う。1〜6 のどれかに
   当たれば、どの PR にも書かずに `RecordError` で止まる
 - push を読むと決めたときの push・push の時点の届け先の設定・差分のパスは、届け先ごとに並べて打った呼び出しで 1 回だけ
-  作り、共通の git ディレクトリの下の保存先（`ndf-release-record/<本番の PR>.json`）で共有する（`shared_prefix`）。
+  作り、共通の git ディレクトリの下の保存先（`ndf/release-record/<本番の PR>.json`）で共有する（`shared_prefix`）。
   保存先があれば、後の呼び出しは push を読むかの判定もやり直さない。push を読まないと決めた結果は保存しない
 - 確かめ 8 と書き込みは届け先ごとにスレッドで並べ、互いを待たない。並行した書き込みの重なりは、書いた後の読み直しで
   自分のコメントを消して戻す（GitHub のコメントに条件つきの書き込みが無いため）
@@ -24,6 +24,7 @@ from typing import Any, ContextManager, NamedTuple, Optional
 
 from filelock import FileLock, Timeout
 
+from ndf import identity
 from ndf.adapters.git import Git, GitError, tracking_refspec
 from ndf.adapters.github import Authored, GitHub, GitHubError, Pull
 from ndf.adapters.publish import Publisher
@@ -37,7 +38,8 @@ from ndf.domains.release.record import KEPT, WRITTEN, RecordError, Selection, Wr
 REMOVED = "removed"
 # 共通の前処理の保存先のロックを待つ上限
 SHARE_LOCK = "release-record.share-lock"
-_SHARE_DIR = "ndf-release-record"
+# 保存先のディレクトリ（共通の git ディレクトリの下の `<NDF の名前>/release-record`）
+_SHARE_DIR = "release-record"
 # 保存先の JSON の `kind`。NDF が書いた保存先だけを読み、掃除する
 _SHARE_KIND = "ndf-release-record.prefix/v1"
 
@@ -320,7 +322,7 @@ def _prefix(
 def share_dir(hands: Hands) -> Path:
     """共有の置き場のディレクトリ（共通の git ディレクトリの下）。呼び手が解決済みなら git を起動せず、無ければ 1 回起動する。"""
     common = hands.common if hands.common is not None else hands.repo_git.common_dir()
-    return common / _SHARE_DIR
+    return common / identity.load().name / _SHARE_DIR
 
 
 def _share_path(share: Path, number: int) -> Path:
@@ -358,22 +360,26 @@ def shared_prefix(
     share: Path, number: int, commit: str, compute: Callable[[], Prefix], push: Optional[record_decide.Push] = None
 ) -> Prefix:
     """届け先ごとに並べて打った呼び出しで共有する前処理（`share` は `share_dir`）。保存先のロックを取り、反映したコミットが
-    同じもの（`push` を渡せばその push のもの）があれば読み、無いか違えば `compute` で作って書く。"""
+    同じもの（`push` を渡せばその push のもの）があれば読み、無いか違えば `compute` で作って書く。
+
+    NDF が書いたものでないファイルが同じ名前で置かれていれば、上書きせずに `compute` の結果をそのまま返す（Value 6）。"""
     path = _share_path(share, number)
     path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(path) + ".lock", timeout=limits.seconds(SHARE_LOCK)):
         got = _read_share(path, commit, push)
         if got is None:
             got = compute()
-            path.write_text(json.dumps(got.as_json(), ensure_ascii=False), encoding="utf-8")
+            if not path.exists() or _ours(path) is not None:
+                path.write_text(json.dumps(got.as_json(), ensure_ascii=False), encoding="utf-8")
     return got
 
 
 def drop_share(share: Path, number: int) -> None:
-    """本番の PR の保存先を消す（push を読み、`complete` が真になった呼び出し）。"""
+    """本番の PR の保存先を消す（push を読み、`complete` が真になった呼び出し）。NDF が書いたものでなければ残す。"""
     path = _share_path(share, number)
     with FileLock(str(path) + ".lock", timeout=limits.seconds(SHARE_LOCK)):
-        path.unlink(missing_ok=True)
+        if _ours(path) is not None:
+            path.unlink(missing_ok=True)
 
 
 def _drop_stale(path: Path, older_than: float, now: Callable[[], float]) -> None:
@@ -382,7 +388,8 @@ def _drop_stale(path: Path, older_than: float, now: Callable[[], float]) -> None
         return
     try:
         with FileLock(str(path) + ".lock", timeout=0):
-            if now() - path.stat().st_mtime > older_than:
+            # ロックを取る前の確かめの後に置き換わっていないかを、ロックの中で確かめ直す
+            if _ours(path) is not None and now() - path.stat().st_mtime > older_than:
                 path.unlink(missing_ok=True)
     except (OSError, Timeout):  # noqa: NDF401 ファイル: 使っている保存先と消えた保存先は残す
         return
