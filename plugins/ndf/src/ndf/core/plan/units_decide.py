@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from graphlib import CycleError, TopologicalSorter
 from typing import NamedTuple, Optional
@@ -131,19 +132,22 @@ def judge(files: Sequence[UnitFile], limits: Limits, criteria: Mapping[int, int]
     owner = _issue_owners(files, bad)
     homes: dict[_Key, UnitDef] = {}
     member: dict[tuple[int, str], list[_Key]] = {}
+    index = [{t.id: t for t in f.tasks} for f in files]  # ファイルごとのタスクの索引。1 度だけ作る
     for at, f in enumerate(files):
-        _name_rules(f, bad)
-        _task_rules(f, criteria, bad)
-        _task_cycle(f, bad)
         for u in f.units:
             homes.setdefault((at, u.name), u)
             for tid in u.tasks:
                 member.setdefault((at, tid), []).append((at, u.name))
+    for at, f in enumerate(files):
+        _name_rules(f, index[at], bad)
+        _task_rules(f, at, member, criteria, bad)
+        _task_cycle(f, index[at], bad)
     graph, edges = _unit_graph(files, homes, owner, bad)
     closure, order = _closures_and_orders(graph, bad)
     _u3(files, {k: v[0] for k, v in member.items() if len(v) == 1}, closure, bad)
-    _u4(files, homes, closure, bad)
-    views = _views(files, homes, edges, order)
+    tasks_of = {k: _unit_tasks(index[k[0]], u) for k, u in homes.items()}
+    _u4(files, tasks_of, closure, bad)
+    views = _views(files, homes, edges, order, tasks_of)
     warn: list[Finding] = []
     for v in views:
         if v.lines is None:
@@ -166,25 +170,30 @@ def _issue_owners(files: Sequence[UnitFile], bad: list[Finding]) -> dict[int, in
     return owner
 
 
-def _name_rules(f: UnitFile, bad: list[Finding]) -> None:
-    """タスクの番号と単位の名前の重なり・単位が指すタスクの欠落（U1）と、理由の無い依存（U5）。"""
-    ids = [t.id for t in f.tasks]
-    names = [u.name for u in f.units]
-    bad += [Finding("U1", "", f"{f.path}: タスク {dup} が重なる") for dup in sorted({x for x in ids if ids.count(x) > 1})]
-    bad += [Finding("U1", dup, f"{f.path}: 単位の名前が重なる") for dup in sorted({x for x in names if names.count(x) > 1})]
+def _name_rules(f: UnitFile, ids: Mapping[str, Task], bad: list[Finding]) -> None:
+    """タスクの番号と単位の名前の重なり・単位が指すタスクの欠落（U1）と、理由の無い依存（U5）。`ids` はファイルのタスクの索引。"""
+    id_counts = Counter(t.id for t in f.tasks)
+    name_counts = Counter(u.name for u in f.units)
+    bad += [Finding("U1", "", f"{f.path}: タスク {dup} が重なる") for dup in sorted(x for x, n in id_counts.items() if n > 1)]
+    bad += [Finding("U1", dup, f"{f.path}: 単位の名前が重なる") for dup in sorted(x for x, n in name_counts.items() if n > 1)]
     bad += [Finding("U1", u.name, f"{f.path}: 単位のタスク {tid} が無い") for u in f.units for tid in u.tasks if tid not in ids]
     bad += [Finding("U5", u.name, f"{f.path}: 先に要る単位 {e.unit} の理由が空") for u in f.units for e in u.after if not e.reason.strip()]
 
 
-def _task_rules(f: UnitFile, criteria: Mapping[int, int], bad: list[Finding]) -> None:
-    """空の計画・タスクの無い単位・タスクの所属・課題・受け入れ条件（U2）。計画を省く課題は `single` で表すので、空は誤り。"""
+def _task_rules(
+    f: UnitFile, at: int, member: Mapping[tuple[int, str], list[_Key]], criteria: Mapping[int, int], bad: list[Finding]
+) -> None:
+    """空の計画・タスクの無い単位・タスクの所属・課題・受け入れ条件（U2）。計画を省く課題は `single` で表すので、空は誤り。
+
+    所属の数は `judge` が集めた `member`（(ファイルの位置, タスクの番号) → 載せる単位）から数える。
+    """
     if not f.tasks:
         bad.append(Finding("U2", "", f"{f.path}: タスクが無い"))
     if not f.units:
         bad.append(Finding("U2", "", f"{f.path}: 単位が無い"))
     bad += [Finding("U2", u.name, f"{f.path}: 単位にタスクが無い") for u in f.units if not u.tasks]
     for t in f.tasks:
-        count = sum(u.tasks.count(t.id) for u in f.units)
+        count = len(member.get((at, t.id), ()))
         if count != 1:
             bad.append(Finding("U2", "", f"{f.path}: タスク {t.id} が {count} 個の単位にある"))
         if t.issue not in f.issues:
@@ -198,11 +207,11 @@ def _task_rules(f: UnitFile, criteria: Mapping[int, int], bad: list[Finding]) ->
                 bad.append(Finding("U2", "", f"{f.path}: タスク {t.id} の受け入れ条件 {ref} が #{issue} の本文に無い"))
 
 
-def _task_cycle(f: UnitFile, bad: list[Finding]) -> None:
-    """タスクの依存の指す先の欠落と輪（U1）。"""
-    known = {t.id for t in f.tasks}
+def _task_cycle(f: UnitFile, known: Mapping[str, Task], bad: list[Finding]) -> None:
+    """タスクの依存の指す先の欠落と輪（U1）。`known` はファイルのタスクの索引。"""
     bad += [Finding("U1", "", f"{f.path}: タスク {t.id} の先に要るタスク {a} が無い") for t in f.tasks for a in t.after if a not in known]
-    graph = {t.id: {a for a in t.after if a in known} for t in f.tasks}
+    # 集合にすると輪の診断がハッシュシードで変わるので、入力順のタプルで渡す
+    graph = {t.id: tuple(dict.fromkeys(a for a in t.after if a in known)) for t in f.tasks}
     try:
         TopologicalSorter(graph).prepare()
     except CycleError as e:
@@ -211,21 +220,22 @@ def _task_cycle(f: UnitFile, bad: list[Finding]) -> None:
 
 def _unit_graph(files, homes, owner, bad):
     """単位のグラフ（キー → 先に要るキー）と、解決した直接の依存 `(キー, 理由)` を返す。`Edge.issue` は指す先のファイルを探すためだけに使う。"""
-    graph: dict[_Key, set[_Key]] = {k: set() for k in homes}
+    # 集合にすると並びがハッシュシードで変わるので、入力順を保つ辞書を順序付きの集合として使う
+    graph: dict[_Key, dict[_Key, None]] = {k: {} for k in homes}
     edges: dict[_Key, list[tuple[_Key, str]]] = {k: [] for k in homes}
     for key, u in homes.items():
         for e in u.after:
             where = key[0] if e.issue is None else owner.get(e.issue)
             target = (-1, e.unit) if where is None else (where, e.unit)
             if target in homes:
-                graph[key].add(target)
+                graph[key][target] = None
                 edges[key].append((target, e.reason))
             else:
                 bad.append(Finding("U1", u.name, f"{files[key[0]].path}: 先に要る単位 {e.unit} が無い"))
     return graph, edges
 
 
-def _closure(key: _Key, graph: Mapping[_Key, set[_Key]]) -> frozenset[_Key]:
+def _closure(key: _Key, graph: Mapping[_Key, Mapping[_Key, None]]) -> frozenset[_Key]:
     """間接を含む先に要る単位の集合（輪にかかる単位だけに使う）。"""
     seen: set[_Key] = set()
     stack = list(graph[key])
@@ -275,17 +285,17 @@ def _u3(files, unit_of, closure, bad) -> None:
             bad.append(Finding("U3", mine[1], f"{f.path}: タスク {t.id} が先に要る {a}（単位 {theirs[1]}）を単位の依存が覆わない"))
 
 
-def _u4(files, homes, closure, bad) -> None:
+def _u4(files, tasks_of, closure, bad) -> None:
     """依存（間接を含む）で前後が決まらない 2 単位が同じファイルを触る（U4）。
 
     ファイルから触る単位を引く索引を作り、各単位について、入力順で後ろにあり同じファイルを触る単位だけを重複なく集める。
-    索引をたどる量（ファイルごとの触る単位の数の 2 乗の和）が全組の数（単位の数の 2 乗）を超えるときは、
-    多くのファイルを共有していて索引が組を何度も数えるので、入力順で後ろの単位すべてと組にする。
-    どちらでも、依存で前後の決まる相手は、重なるファイルを求める前に外す。
+    切り替えの目安には単位の数の 2 乗を使う。ファイルごとの触る単位の数の 2 乗の和がこの値を超えたら、
+    索引では同じ組を何度もたどるので、入力順で後ろにあるすべての単位を候補にする。
+    どちらでも、依存で前後の決まる相手は、並べる前と重なるファイルを求める前に外す。
     """
-    keys = list(homes)
+    keys = list(tasks_of)
     position = {k: i for i, k in enumerate(keys)}
-    touches = {k: frozenset(_touches(files[k[0]], homes[k])) for k in keys}
+    touches = {k: frozenset(_touches(tasks_of[k])) for k in keys}
     by_path: dict[str, list[_Key]] = {}
     for k in keys:
         for p in touches[k]:
@@ -293,13 +303,11 @@ def _u4(files, homes, closure, bad) -> None:
     scan_all = sum(len(ks) ** 2 for ks in by_path.values()) > len(keys) ** 2
     for i, a in enumerate(keys):
         if scan_all:
-            later = keys[i + 1 :]
+            later = [b for b in keys[i + 1 :] if a not in closure[b] and b not in closure[a]]
         else:
             partners = {b for p in touches[a] for b in by_path[p] if position[b] > i}
-            later = sorted(partners, key=position.__getitem__)
+            later = sorted((b for b in partners if a not in closure[b] and b not in closure[a]), key=position.__getitem__)
         for b in later:
-            if a in closure[b] or b in closure[a]:
-                continue
             common = touches[a] & touches[b]
             if not common:
                 continue
@@ -307,20 +315,20 @@ def _u4(files, homes, closure, bad) -> None:
             bad.append(Finding("U4", a[1], f"{where} が前後なしに {'・'.join(sorted(common))} を触る"))
 
 
-def _unit_tasks(f: UnitFile, u: UnitDef) -> list[Task]:
-    by_id = {t.id: t for t in f.tasks}
+def _unit_tasks(by_id: Mapping[str, Task], u: UnitDef) -> list[Task]:
+    """単位のタスク。`by_id` はファイルのタスクの索引（`judge` がファイルごとに 1 度だけ作る）。"""
     return [by_id[tid] for tid in u.tasks if tid in by_id]
 
 
-def _touches(f: UnitFile, u: UnitDef) -> tuple[str, ...]:
-    return tuple(sorted({p for t in _unit_tasks(f, u) for p in t.files}))
+def _touches(tasks: Sequence[Task]) -> tuple[str, ...]:
+    return tuple(sorted({p for t in tasks for p in t.files}))
 
 
-def _views(files, homes, edges, order) -> tuple[View, ...]:
+def _views(files, homes, edges, order, tasks_of) -> tuple[View, ...]:
     """マージの順は実行順、同じ実行順は (単位の最小の課題の番号, ファイルとファイルの中の並び) の順に 1 から振る。"""
 
     def issues_of(k: _Key) -> tuple[int, ...]:
-        return tuple(sorted({t.issue for t in _unit_tasks(files[k[0]], homes[k])})) or files[k[0]].issues
+        return tuple(sorted({t.issue for t in tasks_of[k]})) or files[k[0]].issues
 
     position = {k: i for i, k in enumerate(homes)}
     ranked = sorted((k for k in homes if order[k]), key=lambda k: (order[k], min(issues_of(k)), position[k]))
@@ -329,12 +337,12 @@ def _views(files, homes, edges, order) -> tuple[View, ...]:
     views = []
     for k, u in homes.items():
         f = files[k[0]]
-        tasks = _unit_tasks(f, u)
+        tasks = tasks_of[k]
         sizes = [t.lines for t in tasks if t.lines is not None]
         lines = None if f.whole or len(sizes) < len(tasks) else sum(sizes)
         criteria = tuple(dict.fromkeys(c for t in tasks for c in t.criteria))
         after = tuple((files[t[0]].path, t[1], reason) for t, reason in edges[k])
         views.append(
-            View(f.path, u.name, order[k], merge[k], after, issues_of(k), u.tasks, criteria, lines, u.actual_lines, _touches(f, u))
+            View(f.path, u.name, order[k], merge[k], after, issues_of(k), u.tasks, criteria, lines, u.actual_lines, _touches(tasks))
         )
     return tuple(views)
