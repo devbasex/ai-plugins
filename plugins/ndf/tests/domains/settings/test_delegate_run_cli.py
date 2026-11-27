@@ -180,6 +180,7 @@ def test_a_usage_error_goes_only_to_standard_error(repo: Path, execs, capsys, ar
         ("codex", "", "log: the word quota exceeded in the middle\n", False),
         ("claude", '{"type":"result","api_error_status":429}\n', "", True),
         ("claude", '{"type":"result","api_error_status":200}\n', "", False),
+        ("claude", '{"type":"result","result":{"cases":[{"api_error_status":429}]}}\n', "", False),  # 入れ子の 429 は結果のデータ
     ],
 )
 def test_usage_limit_judges_with_the_monitor_conditions(tmp_path: Path, execs, capsys, runtime: str, out: str, err: str, hit: bool) -> None:
@@ -194,3 +195,10 @@ def test_usage_limit_judges_with_the_monitor_conditions(tmp_path: Path, execs, c
 def test_claude_cannot_be_launched_through_delegate_run(repo: Path, execs) -> None:
     assert drc.main(["--runtime", "claude", "--", "claude", "{args}"]) == PRECONDITION
     assert execs == []
+
+
+def test_usage_limit_stops_when_a_log_is_missing(tmp_path: Path, capsys) -> None:
+    (tmp_path / "o").write_text("", encoding="utf-8")
+    argv = ["--runtime", "codex", "--usage-limit", "--stdout", str(tmp_path / "o"), "--stderr", str(tmp_path / "missing")]
+    assert drc.main(argv) == PRECONDITION
+    assert capsys.readouterr().out == ""

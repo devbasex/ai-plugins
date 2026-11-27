@@ -29,15 +29,15 @@
         },
         "--usage-limit": {
           "type": "boolean",
-          "description": "CLI を起動せず、終わった起動の出力が利用上限を告げているかを NDF の監視と同じ条件で判定する（--stdout と --stderr を読む）"
+          "description": "CLI を起動せず、終わった起動の出力が利用上限を告げているかを NDF の監視と同じ条件で判定する。指定する場合は --stdout と --stderr の両方が必須で、起動コマンドは指定できない"
         },
         "--stdout": {
           "type": "string",
-          "description": "判定する起動の標準出力のファイル（--usage-limit だけ）"
+          "description": "判定する起動の標準出力のファイル。--usage-limit を指定する場合は必須で、それ以外では指定できない"
         },
         "--stderr": {
           "type": "string",
-          "description": "判定する起動の標準エラー出力のファイル（--usage-limit だけ）"
+          "description": "判定する起動の標準エラー出力のファイル。--usage-limit を指定する場合は必須で、それ以外では指定できない"
         },
         "command": {
           "type": "array",

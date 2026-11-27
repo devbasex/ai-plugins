@@ -121,10 +121,15 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--usage-limit",
         action="store_true",
-        help="CLI を起動せず、終わった起動の出力が利用上限を告げているかを NDF の監視と同じ条件で判定する（--stdout と --stderr を読む）",
+        help="CLI を起動せず、終わった起動の出力が利用上限を告げているかを NDF の監視と同じ条件で判定する。"
+        "指定する場合は --stdout と --stderr の両方が必須で、起動コマンドは指定できない",
     )
-    p.add_argument("--stdout", type=Path, help="判定する起動の標準出力のファイル（--usage-limit だけ）")
-    p.add_argument("--stderr", type=Path, help="判定する起動の標準エラー出力のファイル（--usage-limit だけ）")
+    p.add_argument(
+        "--stdout", type=Path, help="判定する起動の標準出力のファイル。--usage-limit を指定する場合は必須で、それ以外では指定できない"
+    )
+    p.add_argument(
+        "--stderr", type=Path, help="判定する起動の標準エラー出力のファイル。--usage-limit を指定する場合は必須で、それ以外では指定できない"
+    )
     heads = "、".join(f"`{' '.join(_prefix(r, facts.row(RUNTIMES, r)))}`" for r in _delegates())
     p.add_argument("command", nargs=argparse.REMAINDER, help=f"`--` の後に起動コマンドを指定する。{PLACE} は {heads} の直後に置く")
     return p
@@ -133,9 +138,15 @@ def _parser() -> argparse.ArgumentParser:
 def judge_usage_limit(a: argparse.Namespace) -> int:
     """`--usage-limit`: 起動の出力が利用上限を告げていれば、判定の根拠の行を標準出力へ書き、停止理由 `usage_limit` の
     終了コードで終える。告げていなければ何も書かず 0。条件は監視と同じ `agents.launch_usage_limit` で、回収する AI に
-    正規表現を読ませない（AI の読み方で成否が分かれないようにする）。"""
+    正規表現を読ませない（AI の読み方で成否が分かれないようにする）。
+
+    ログのファイルが無ければ判定せず `precondition` で止める。監視の `tail` は起動の前の無いファイルを空として読むが、
+    終わった起動のログが無いのはパスの取り違えで、空として読むと利用上限で止まった起動を成功として回収させる。"""
     if a.stdout is None or a.stderr is None or a.command:
-        raise _fail("--usage-limit は --stdout と --stderr を取り、起動コマンドを取らない")
+        raise _fail("--usage-limit は --stdout と --stderr の両方を取り、起動コマンドを取らない")
+    missing = [str(p) for p in (a.stdout, a.stderr) if not p.is_file()]
+    if missing:
+        raise _fail(f"判定するログのファイルが無い（{'・'.join(missing)}）。起動のときに逃がした先のパスを渡す")
     hit = agents.launch_usage_limit(a.runtime, a.stdout, a.stderr)
     if hit is None:
         return 0
