@@ -320,7 +320,9 @@ def claude_launch(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[
     else:
         args = minimal_args(call.system, call.stream, call.session) + permission_args(call.permission, call.tools, call.readable)
     if call.json_schema is not None:
-        args += ["--json-schema", json.dumps(call.json_schema, ensure_ascii=False)]
+        # CLI（2.1.332 で実測）は最上位の `$schema` を解決できずに拒むので、渡すときだけ外す（#2912）
+        sent = {k: v for k, v in call.json_schema.items() if k != "$schema"}
+        args += ["--json-schema", json.dumps(sent, ensure_ascii=False)]
     if call.model:
         args += ["--model", call.model]
     return PluginArgs([*base, *args], notice)

@@ -3,6 +3,7 @@
 - マージの方式の唯一の定義（`_MERGE_METHOD_SPECS`）と、規則・リポジトリの設定・マージキューが許す方式の選び方
 - マージの要求・確かめ・マージキューの GraphQL の形と、マージの結果の値（`MergeOutcome`・`FileAt`・`Verified`）
 - 要求を送らずに返すマージの結果（`preflight`・`method_refusal`・`queue_method_refusal`）
+- 送る直前の確かめの応答の読み方（`verified_of`・`verify`）、断りの種類（`refusal_kind`）と、基底に含まれたかの確かめ（`landed`）
 
 GitHub への読み書きは `ndf.adapters.github.GitHub` が持ち、ここは送る形と、応答の値から方式を決める規則だけを持つ。
 ruleset と従来のブランチ保護の事実は `ndf.adapters.github_rules` が持つ。
@@ -11,10 +12,12 @@ ruleset と従来のブランチ保護の事実は `ndf.adapters.github_rules` �
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters import git
+from ndf.adapters.github_pulls import Pull, target_of, text_of
 from ndf.adapters.github_rules import PULL_REQUEST_RULE
 
 # マージの方式 → 「基底に含まれたか」の確かめ方（3378-2）。ancestry は head が基底の祖先か、merged は PR がマージ済み
@@ -218,3 +221,101 @@ def queue_method_refusal(pull: PullFacts, method: str, queue_method: Optional[st
         f"求めた {method} と違う。キューへ入れずに止める（キューのマージの方式を {method} にする）"
     )
     return MergeOutcome(False, "refused", detail, pull.head_sha)
+
+
+# マージの拒否を、拒否の後に読み直した `mergeStateStatus` で種類へ分ける（SF4）。標準エラーの文は読まない
+_REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_ci", "draft": "not_ci"}
+
+
+class MergeExpect(NamedTuple):
+    """`ndf ci merge` が判定に使った値（#4409 の決定 8）。`pull` は判定の前に読んだ PR で、先の確認と方式の選択に使う。
+
+    `rejudge` は確かめの応答の設定の本文（無ければ None）で判定をやり直し、送ってよければ None、止めるなら結果を返す。
+    """
+
+    pull: "Pull"
+    base: str
+    head: str
+    config_path: str
+    config_oid: Optional[str]
+    rejudge: Callable[[Optional[str]], Optional["MergeOutcome"]]
+
+
+def same_repo(a: str, b: str) -> bool:
+    """2 つのリポジトリ名（`<所有者>/<リポジトリ>`）が同じか。GitHub の名前は大文字小文字を区別しない。"""
+    return a.lower() == b.lower()
+
+
+def landed(pull: Pull, method: str, base_ref: str, repo: git.Git) -> bool:
+    """PR の head が基底 `base_ref`（`origin/develop` など）に含まれたかを、マージの方式ごとに確かめる（3378-2）。
+
+    merge は head が基底の祖先か（git）、squash と rebase は PR がマージ済みか（`merged_at`）で読む。
+    """
+    if method not in MERGE_METHODS:
+        raise ValueError(f"知らないマージの方式: {method}（{', '.join(MERGE_METHODS)}）")
+    if MERGE_METHODS[method] == ANCESTRY:
+        return repo.is_ancestor(pull.head_sha, base_ref)
+    return pull.merged
+
+
+def refusal_kind(after: Pull, sent_sha: str) -> str:
+    """マージを断られた後に読み直した PR から、停止理由の種類を決める（SF4）。"""
+    if after.head_sha != sent_sha:
+        return "refused"
+    return _REFUSAL_KINDS.get(after.merge_state, "unknown")  # noqa: NDF502 ネットワーク: 表に無い mergeStateStatus（clean・unstable・unknown）は種類を決められない
+
+
+class Failure(Protocol):
+    """断りかを読む失敗の欄（`ndf.adapters.github.GitHubError` が満たす。import の輪を作らないための形）。"""
+
+    status: int
+    unreached: bool
+    quota: Optional[str]
+
+
+@dataclass(frozen=True)
+class MergeRoute:
+    """マージの要求の打ち方。`send` が要求を打ってマージコミット（応答に無ければ空）を返し、`refused` が真とみなした誤りは断られたとして扱う。`how` は成功の文に
+    添える迂回のマーカー。`require_method` が真なら、キューの方式が選んだ方式と違うときキューへ入れずに断る。"""
+
+    send: Callable[[int, "Pull", str], str]
+    refused: Callable[[Failure], bool]
+    how: str
+    require_method: bool = False
+    jump: bool = False
+
+
+def refused_by_graphql(exc: Failure) -> bool:
+    """GraphQL の誤りが GitHub の断り（届いて断られた。上限でない）か。届かなかった・上限なら偽（呼び手が投げ直す）。"""
+    return exc.status == 0 and not exc.unreached and exc.quota is None
+
+
+def file_at(repo: dict, key: str) -> FileAt:
+    """`object(expression)` の応答（キー `key`）を `FileAt` にする。Blob でない・無いなら本文と oid が None。"""
+    node = repo.get(key)
+    blob = node if isinstance(node, dict) and isinstance(node.get("oid"), str) else None
+    text = blob.get("text") if blob is not None and isinstance(blob.get("text"), str) else None
+    return FileAt(text_of(repo.get("nameWithOwner")), text, blob["oid"] if blob is not None else None)
+
+
+def verified_of(repo: dict) -> Verified:
+    node = repo.get("pullRequest") if isinstance(repo.get("pullRequest"), dict) else {}
+    return Verified(*target_of(node), text_of(repo.get("nameWithOwner")), file_at(repo, "config"))
+
+
+def verify(number: int, fresh: Verified, expect: MergeExpect, repo: str) -> Optional[MergeOutcome]:
+    """確かめの応答 `fresh` と判定に使った値を比べる。マージ先・HEAD が違えば `TARGET_MOVED`、
+    ベースリポジトリが違えば `refused`。設定の oid だけが違えば、同じ応答の本文で判定をやり直す（設定を読み直す要求を
+    足さない）。送ってよければ None。"""
+    moved = TARGET_MOVED
+    if fresh.base != expect.base:
+        return MergeOutcome(
+            False, moved, f"#{number} のマージ先が判定した {expect.base} から {fresh.base} へ変わった（判定からやり直す）", fresh.head
+        )
+    if not git.sha_matches(expect.head, fresh.head):
+        return MergeOutcome(False, moved, f"#{number} の HEAD が判定した {expect.head[:12]} から {fresh.head[:12]} へ動いた", fresh.head)
+    if not same_repo(fresh.repo, repo):
+        return MergeOutcome(False, "refused", f"#{number} のベースリポジトリ {fresh.repo} が {repo} と違う", fresh.head)
+    if fresh.config.oid != expect.config_oid:
+        return expect.rejudge(fresh.config.text)
+    return None

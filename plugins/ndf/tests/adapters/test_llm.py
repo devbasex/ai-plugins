@@ -83,7 +83,8 @@ def test_ask_passes_schema_to_claude_and_accepts_first_answer():
 
     assert got == llm.JudgeAnswer(True, good(), None, 1, 0.5) and checked == []
     argv = fake.calls[0][0]
-    assert json.loads(argv[argv.index("--json-schema") + 1]) == schema
+    # CLI へは最上位の `$schema` を外して渡す（#2912）。ほかは同じ
+    assert json.loads(argv[argv.index("--json-schema") + 1]) == {k: v for k, v in schema.items() if k != "$schema"}
     assert "--setting-sources" in argv
 
 

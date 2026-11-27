@@ -524,8 +524,9 @@ def _as_whole(run: Run, plan: Plan, t: Read, rec: Mapping[str, Any]) -> Mapping[
 
 def _target_gap(run: Run, plan: Plan, t: Read, found: Mapping[str, Mapping[str, Any]]) -> Optional[dict[str, str]]:
     rec = found[t.name] if t.name in found else None
-    # 直してよいファイルに入らない文書は、2 回目を立てられないので 1 回の不合格で終えてよい（#4599）
-    fixed_never = t.name in plan.docs and t.name not in plan.fixable
+    # 直してよいファイルに入らない文書は、2 回目を立てられないので 1 回の不合格で終えてよい（#4599）。
+    # 質問の文も同じ（#4621）。読ませるファイルは直してよいファイルに入らず、題の案は質問の文を変えず変更要求の材料になる
+    fixed_never = (t.name in plan.docs and t.name not in plan.fixable) or (t.name == reading.QUESTION and str(t.file) not in plan.fixable)
     why = "記録が無い" if rec is None else gd.record_gap(rec, one_fail_ends=fixed_never)
     if why is None and rec is not None and rec["checks"][-1]["hash"] != current_hash(run, plan, t.name):
         why = "最後に読ませた後に中身が変わった"

@@ -158,7 +158,7 @@ def test_add_fills_the_row_and_keeps_no_text(repo: Path, capsys, last_result) ->
     [
         {"reads": [READS[1]]},
         {"reads": [{**READS[0], "result": "failed"}]},
-        {"reads": [{**READS[0], "result": "remained"}]},
+        {"reads": [{**READS[0], "name": "material", "result": "remained"}]},
         {"prs": [{"number": 7, "branch": "design/x"}]},
         {"prs": [{**PRS[0], "branch": "*"}]},
         {"questions": []},

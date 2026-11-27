@@ -64,7 +64,7 @@ def test_every_stop_reason_is_a_fixed_sentence_without_values_from_the_pr() -> N
     assert set(mm.STOP_REASONS) == {
         "no_gate", "no_pr", "mvv_unapproved", "base_unreadable", "diff_unreadable", "pr_moved", "pr_reread_failed",
         "incomplete_patches", "llm_no_answer", "records_unreadable", "records_unwritable", "note_unwritten",
-        "cite_precondition", "cite_lookup_failed",
+        "cite_precondition", "cite_lookup_failed", "table_unreadable",
     }  # fmt: skip
     assert all(text and "{" not in text for text in mm.STOP_REASONS.values())
 

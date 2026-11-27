@@ -17,6 +17,7 @@ Issue・コメント・PR の本文を書く操作は、公開範囲を読むエ
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import subprocess
 import time
@@ -31,15 +32,17 @@ import httpx
 from githubkit import GitHub as Client
 from githubkit.exception import GraphQLFailed, PrimaryRateLimitExceeded, RateLimitExceeded, RequestError, RequestFailed
 
-from ndf.adapters import cli_floor, git, github_limits, github_merge, github_pulls, write_gate
+from ndf.adapters import cli_floor, github_limits, github_merge, github_pulls, write_gate
 from ndf.adapters.github_limits import GRAPHQL, REST, RetryWithin
-from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome, Verified
+from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeExpect, MergeOutcome
 
-# 呼び手（`ndf.domains.release.land`）が github から読む、github_merge の名前
+# 呼び手（`ndf.domains.release.land`・`publish`・`ci_cli`）が github から読む、github_merge の名前
 from ndf.adapters.github_merge import MERGE_COMMIT as MERGE_COMMIT
+from ndf.adapters.github_merge import landed as landed
+from ndf.adapters.github_merge import same_repo as same_repo
 
 # `Pull`・`Authored`・`text_of` は呼び手が github から読む名前でもある
-from ndf.adapters.github_pulls import PER_PAGE, PULL_FIELDS, Authored, Pull, account_id_of, graphql_string, target_of, text_of
+from ndf.adapters.github_pulls import PER_PAGE, PULL_FIELDS, Authored, Pull, account_id_of, graphql_string, text_of
 from ndf.adapters.github_rules import NO_RULES, RuleFacts, classic_facts_of, merge_facts, rule_facts_of
 from ndf.contracts import limits
 
@@ -47,14 +50,14 @@ T = TypeVar("T")
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")  # GraphQL のエイリアスで引ける番号つきの節点
 # `issueOrPullRequest`（union）から本文を選ぶ選択。union なので、body は型ごとのインラインフラグメントで選ぶ（#3908 の r2-1）
 BODY_FIELDS = "... on Issue { body } ... on PullRequest { body }"
+# 1 つのファイルの本文を切り詰めの有無と合わせて読む選択（`object(expression:)` の後ろに置く。`whole_text` で取り出す）
+WHOLE_BLOB = "{ ... on Blob { oid text isTruncated } }"
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
 # 認証の値を読む環境変数（先のものを優先する。利用者の手順へ渡さないときに消す名前も同じ）
 TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
 # GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く。#3506）
 BOT_SUFFIX = "[bot]"
-# マージの拒否を、拒否の後に読み直した `mergeStateStatus` で種類へ分ける（SF4）。標準エラーの文は読まない
-_REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_ci", "draft": "not_ci"}
 # マージ先の設定の読み取りに、token の利用者の login とアカウント ID（`viewer`）も同じ 1 回の要求で載せる（承認の証跡の書き手を照らす。#4409）
 _BRANCH_FILE = (
     "query($owner: String!, $name: String!, $expr: String!) { viewer { login databaseId } repository(owner: $owner, name: $name) {"
@@ -159,90 +162,22 @@ class Viewer(NamedTuple):
     account_id: int
 
 
-class MergeExpect(NamedTuple):
-    """`ndf ci merge` が判定に使った値（#4409 の決定 8）。`pull` は判定の前に読んだ PR で、先の確認と方式の選択に使う。
+class Unread(NamedTuple):
+    """`GitHub.branch_file_with` の後続の要求のうち失敗した 1 回。`names` はその要求に載せた選択の名前、`error` は失敗。"""
 
-    `rejudge` は確かめの応答の設定の本文（無ければ None）で判定をやり直し、送ってよければ None、止めるなら結果を返す。
-    """
-
-    pull: "Pull"
-    base: str
-    head: str
-    config_path: str
-    config_oid: Optional[str]
-    rejudge: Callable[[Optional[str]], Optional["MergeOutcome"]]
+    names: tuple[str, ...]
+    error: GitHubError
 
 
-def same_repo(a: str, b: str) -> bool:
-    """2 つのリポジトリ名（`<所有者>/<リポジトリ>`）が同じか。GitHub の名前は大文字小文字を区別しない。"""
-    return a.lower() == b.lower()
+def whole_blob_at(rev: str, path: str) -> str:
+    """コミット `rev` のファイル `path` の本文を、切り詰めの有無と合わせて読む `repository` の下の選択（`WHOLE_BLOB`）。"""
+    return f"object(expression: {json.dumps(f'{rev}:{path}')}) {WHOLE_BLOB}"
 
 
-def landed(pull: Pull, method: str, base_ref: str, repo: git.Git) -> bool:
-    """PR の head が基底 `base_ref`（`origin/develop` など）に含まれたかを、マージの方式ごとに確かめる（3378-2）。
-
-    merge は head が基底の祖先か（git）、squash と rebase は PR がマージ済みか（`merged_at`）で読む。
-    """
-    if method not in github_merge.MERGE_METHODS:
-        raise ValueError(f"知らないマージの方式: {method}（{', '.join(github_merge.MERGE_METHODS)}）")
-    if github_merge.MERGE_METHODS[method] == github_merge.ANCESTRY:
-        return repo.is_ancestor(pull.head_sha, base_ref)
-    return pull.merged
-
-
-def refusal_kind(after: Pull, sent_sha: str) -> str:
-    """マージを断られた後に読み直した PR から、停止理由の種類を決める（SF4）。"""
-    if after.head_sha != sent_sha:
-        return "refused"
-    return _REFUSAL_KINDS.get(after.merge_state, "unknown")  # noqa: NDF502 ネットワーク: 表に無い mergeStateStatus（clean・unstable・unknown）は種類を決められない
-
-
-@dataclass(frozen=True)
-class _MergeRoute:
-    """マージの要求の打ち方。`send` が要求を打ってマージコミット（応答に無ければ空）を返し、`refused` が真とみなした誤りは断られたとして扱う。`how` は成功の文に
-    添える迂回のマーカー。`require_method` が真なら、キューの方式が選んだ方式と違うときキューへ入れずに断る。"""
-
-    send: Callable[[int, "Pull", str], str]
-    refused: Callable[["GitHubError"], bool]
-    how: str
-    require_method: bool = False
-    jump: bool = False
-
-
-def _refused_by_graphql(exc: GitHubError) -> bool:
-    """GraphQL の誤りが GitHub の断り（届いて断られた。上限でない）か。届かなかった・上限なら偽（呼び手が投げ直す）。"""
-    return exc.status == 0 and not exc.unreached and exc.quota is None
-
-
-def _file_at(repo: dict, key: str) -> FileAt:
-    """`object(expression)` の応答（キー `key`）を `FileAt` にする。Blob でない・無いなら本文と oid が None。"""
-    node = repo.get(key)
-    blob = node if isinstance(node, dict) and isinstance(node.get("oid"), str) else None
-    text = blob.get("text") if blob is not None and isinstance(blob.get("text"), str) else None
-    return FileAt(text_of(repo.get("nameWithOwner")), text, blob["oid"] if blob is not None else None)
-
-
-def _verified(repo: dict) -> Verified:
-    node = repo.get("pullRequest") if isinstance(repo.get("pullRequest"), dict) else {}
-    return Verified(*target_of(node), text_of(repo.get("nameWithOwner")), _file_at(repo, "config"))
-
-
-def _verify(number: int, fresh: Verified, expect: MergeExpect, repo: str) -> Optional[MergeOutcome]:
-    """確かめの応答 `fresh` と判定に使った値を比べる。マージ先・HEAD が違えば `github_merge.TARGET_MOVED`、
-    ベースリポジトリが違えば `refused`。設定の oid だけが違えば、同じ応答の本文で判定をやり直す（設定を読み直す要求を
-    足さない）。送ってよければ None。"""
-    moved = github_merge.TARGET_MOVED
-    if fresh.base != expect.base:
-        return MergeOutcome(
-            False, moved, f"#{number} のマージ先が判定した {expect.base} から {fresh.base} へ変わった（判定からやり直す）", fresh.head
-        )
-    if not git.sha_matches(expect.head, fresh.head):
-        return MergeOutcome(False, moved, f"#{number} の HEAD が判定した {expect.head[:12]} から {fresh.head[:12]} へ動いた", fresh.head)
-    if not same_repo(fresh.repo, repo):
-        return MergeOutcome(False, "refused", f"#{number} のベースリポジトリ {fresh.repo} が {repo} と違う", fresh.head)
-    if fresh.config.oid != expect.config_oid:
-        return expect.rejudge(fresh.config.text)
-    return None
+def whole_text(node: Any) -> Optional[str]:
+    """`whole_blob_at` で読んだ応答の節点の本文。Blob でない・応答に無い・切り詰められた（`isTruncated`）本文は None。"""
+    text = node.get("text") if isinstance(node, dict) and node.get("isTruncated") is False else None
+    return text if isinstance(text, str) else None
 
 
 def _response_body(resp: Any) -> Any:
@@ -795,7 +730,48 @@ class GitHub:
         """
         data = self.graphql(_BRANCH_FILE, {**self._owner_name(), "expr": f"{base}:{path}"})
         self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
-        return _file_at(self._repository_of(data), "object")
+        return github_merge.file_at(self._repository_of(data), "object")
+
+    def branch_file_with(self, base: str, path: str, selections: dict[str, str]) -> tuple[FileAt, dict[str, Any], list[Unread]]:
+        """`branch_file` と同じ読み取りに、`repository` の下の選択 `selections`（名前 → 選択）を同じ要求で載せる。
+
+        返すのは `branch_file` の値、`aliased` と同じ形の辞書（すべての名前をキーに持ち、読めなければ None）、読めなかった
+        後続の要求ごとの `Unread` である。1 回の要求に載せる件数の上限（`github.graphql-batch`）には設定も 1 件と数え、
+        最初の要求は設定と選択を上限−1 件まで、残りの選択は上限の件数ごとに分けて読む。最初の要求の失敗は `GitHubError` を
+        送出する（設定を読めない）。後続の要求の失敗は送出せず、その要求に載せた名前と例外を `Unread` に入れる。
+
+        後続の失敗の後に残りを送るのは、GitHub が要求を受けてその要求の中身を断った失敗（GraphQL の誤りなど）のときだけである。
+        別の要求に載せた選択は読める見込みがあり、選択ごとに読めた・読めなかったを診断に残せる。不達・5xx・上限・認証の失敗
+        （`passing`・`quota`・状態 401 と 403）は残りの要求も同じ理由で読めないので、残りを送らず 1 つの `Unread` にまとめる。
+        このため要求の数は、分けた後続の要求の数を超えず、失敗した要求を打ち直すこともない。
+        """
+        names = list(selections)
+        size = int(limits.value("github.graphql-batch", "count"))
+        first = names[: max(size - 1, 0)]
+        chunk = {_alias(i): selections[k] for i, k in enumerate(first)}
+        body = " ".join(f"{alias}: {sel}" for alias, sel in chunk.items())
+        query = (
+            "query($owner: String!, $name: String!, $expr: String!) { viewer { login databaseId } "
+            f"repository(owner: $owner, name: $name) {{ nameWithOwner object(expression: $expr) {{ ... on Blob {{ oid text }} }} {body} }} }}"
+        )
+        data = self.graphql(query, {**self._owner_name(), "expr": f"{base}:{path}"})
+        self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
+        repo = self._repository_of(data)
+        out: dict[str, Any] = {k: repo[alias] if alias in repo else None for alias, k in zip(chunk, first)}
+        unread: list[Unread] = []
+        batches = list(_batches(names[len(first) :]))
+        for i, keys in enumerate(batches):
+            try:
+                out.update(self.aliased({k: selections[k] for k in keys}))
+            except GitHubError as exc:
+                if exc.passing or exc.quota is not None or exc.status in (401, 403):
+                    rest = tuple(k for b in batches[i:] for k in b)
+                    out.update(dict.fromkeys(rest))
+                    unread.append(Unread(rest, exc))
+                    break
+                out.update(dict.fromkeys(keys))
+                unread.append(Unread(tuple(keys), exc))
+        return github_merge.file_at(repo, "object"), out, unread
 
     def _remember_viewer(self, node: Any) -> None:
         if self._viewer:
@@ -839,14 +815,18 @@ class GitHub:
         `expect`（`ndf ci merge` の判定の値）があれば、PR を読み直さずに `expect.pull` で先の確認をし、要求を送る直前に
         マージ先・HEAD・設定の oid を照らす（#4409 の決定 8）。
         """
-        route = _MergeRoute(self._send_rest_merge, lambda exc: exc.status in github_merge.MERGE_REFUSED_STATUS, "", require_method, jump)
+        route = github_merge.MergeRoute(
+            self._send_rest_merge, lambda exc: exc.status in github_merge.MERGE_REFUSED_STATUS, "", require_method, jump
+        )
         return self._merge_with(number, expect_head, method, route, expect)
 
     def merge_as_admin(self, number: int, expect_head: str, method: Optional[str] = None) -> MergeOutcome:
         """PR を管理者の迂回でマージする（#3506 の決定 5）。`merge` と同じ先の確認を通り、GraphQL の `mergePullRequest` を
         読んだ HEAD（`expectedHeadOid`）を添えて打つ。断られたら PR を読み直して種類を返し、届かない・上限は投げ直す。
         """
-        return self._merge_with(number, expect_head, method, _MergeRoute(self._send_admin_merge, _refused_by_graphql, "管理者の迂回で"))
+        return self._merge_with(
+            number, expect_head, method, github_merge.MergeRoute(self._send_admin_merge, github_merge.refused_by_graphql, "管理者の迂回で")
+        )
 
     def _send_rest_merge(self, number: int, pull: Pull, chosen: str) -> str:
         body = self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
@@ -862,10 +842,15 @@ class GitHub:
         return text_of(commit.get("oid")) if isinstance(commit, dict) else ""
 
     def _merge_with(
-        self, number: int, expect_head: Optional[str], method: Optional[str], route: "_MergeRoute", expect: Optional[MergeExpect] = None
+        self,
+        number: int,
+        expect_head: Optional[str],
+        method: Optional[str],
+        route: "github_merge.MergeRoute",
+        expect: Optional[MergeExpect] = None,
     ) -> MergeOutcome:
         """`merge`・`merge_as_admin` の共通の手順。先の確認と方式の選択を通り、`route.send` で要求を打つ。`route.refused` が
-        真とみなした誤りは PR を読み直して種類を返し、ほかは投げ直す（`route` の各項目は `_MergeRoute`）。
+        真とみなした誤りは PR を読み直して種類を返し、ほかは投げ直す（`route` の各項目は `github_merge.MergeRoute`）。
         `expect` があれば最初の読み直しをやめ、方式の問い合わせの後・送る直前に照らす。"""
         pull = expect.pull if expect is not None else self.pull(number)
         early = github_merge.preflight(pull, number, expect_head)
@@ -890,7 +875,7 @@ class GitHub:
             if queued is not None:
                 return queued
             after = self.pull(number)
-            return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
+            return MergeOutcome(False, github_merge.refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
         return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha, landed)
 
     def _enqueue(
@@ -926,9 +911,9 @@ class GitHub:
         return self.repository(github_merge.MERGE_QUEUE_VERIFY_QUERY, {**variables, "expr": f"{expect.base}:{expect.config_path}"})
 
     def _verify_before_send(self, number: int, repo: dict[str, Any], expect: MergeExpect) -> Optional[MergeOutcome]:
-        """確かめの応答 `repo` を `_verify` で照らす。止めるとき（設定が変わり承認が要るようになった等）は、PR が
+        """確かめの応答 `repo` を `github_merge.verify` で照らす。止めるとき（設定が変わり承認が要るようになった等）は、PR が
         マージキューにあれば外す（止めた PR をキューがマージしない。読み直しの要求を足さない）。"""
-        stop = _verify(number, _verified(repo), expect, self.repo)
+        stop = github_merge.verify(number, github_merge.verified_of(repo), expect, self.repo)
         node = repo.get("pullRequest")
         if stop is not None and isinstance(node, dict) and node.get("isInMergeQueue") is True:
             self._leave_queue(node["id"])

@@ -11,6 +11,8 @@
     ndf records mvv answer [--version <バージョン>]         # 承認ゲートの回答（標準入力の JSON）を覆しの記録へ写す
     ndf records mvv gate --gate design|release [--machine <ID>] [--expect-pr <番号>]   # 承認ゲートの直前の MVV 判定（工程の入力は環境変数 NDF_STAGE_INPUT か --machine）
     ndf records mvv cite --gate design|release --base <ブランチ> <ファイル>...   # 承認資料の根拠の行を承認済みの MVV で確かめる
+    ndf records design check [--result <F>] (<ファイル>... | --base <ブランチ> [--remote <名前>])
+                                                   # 番号の無い「人へ残す判断」の行を止める設計の検査（#2912）
     ndf records preflight                          # 手順 0 の 3 つの確かめ（worktree の設定・設定・MVV）
     ndf records cleanup-stage <PR番号>...           # クリーンアップを終えた PR が閉じる課題に工程の記録を付ける
     ndf records close-check <課題> [--verification <JSON> | --records <records の出力>] [--require]   # 課題を閉じてよいか（流れの設定の close を読む）
@@ -25,9 +27,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import os
+import secrets
+import stat
 import sys
 from datetime import date
 from pathlib import Path
@@ -40,8 +45,21 @@ from ndf.adapters import github as github_mod
 from ndf.adapters import publish
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
-from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, reading, spec, usage
-from ndf.core import branch_strategy, durable
+from ndf.domains.records import (
+    cleanup_stage,
+    close_decide,
+    design_check,
+    glossary,
+    gws,
+    handoff,
+    mvv,
+    mvv_gate,
+    preflight,
+    reading,
+    spec,
+    usage,
+)
+from ndf.core import branch_strategy, durable, start_point
 from ndf.progress import command, definition, flow, invoke, model, stage_inputs
 from ndf.progress.invoke import INPUT_ENV
 from ndf.domains.records import glossary_decide as gd
@@ -549,6 +567,107 @@ def _add_mvv(sub: Any) -> None:
     cite.set_defaults(handler=_mvv_cite)
 
 
+def _write_result(dest: Path, root: Path, inputs: list[str], text: str) -> str | None:
+    """`--result` の `dest` へ `text` を書く。書けないときは書かずに理由を返す（書けたら None）。
+
+    親のディレクトリを 1 度だけ開いて記述子に固定し、以後の確かめと書き込みはすべてその記述子からの名前で行う（途中の階層が
+    差し替えられても、確かめた場所と書く場所がずれない）。末尾の名前はリンクをたどらずに開き、開いた記述子で確かめる。
+    シンボリックリンクと通常ファイルでないものは書かない。検査した文書と同じファイルは書かない（未コミットの本文を消さない）。
+    既にあるファイルは、前の検査の結果（`tool` がこの CLI の結果 JSON）だけを置き換える（プランが同じ保存先を打ち直すため）。
+    書き込みは、同じディレクトリに所有者だけが読める（0600）一時ファイルを排他的に作り、名前の置き換えで差し替える。既にある
+    ファイルを切り詰めないので、確かめた後に名前が差し替えられても、別のファイルの中身は消えない。結果には設計文書の行の
+    原文が入るので、置き換えた後のファイルも 0600 になる。
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dfd = os.open(dest.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        refused = _existing_refusal(dfd, dest, root, inputs)
+        if refused is not None:
+            return refused
+        tmp = f".{dest.name}.{secrets.token_hex(8)}.tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                os.fchmod(f.fileno(), 0o600)
+                f.write(text)
+            os.replace(tmp, dest.name, src_dir_fd=dfd, dst_dir_fd=dfd)
+        except BaseException:
+            with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 書けなかった一時ファイルの後始末。元の失敗を上げる
+                os.unlink(tmp, dir_fd=dfd)
+            raise
+        return None
+    finally:
+        os.close(dfd)
+
+
+def _existing_refusal(dfd: int, dest: Path, root: Path, inputs: list[str]) -> str | None:
+    """固定したディレクトリ `dfd` の `dest.name` が、置き換えてよいもの（無いか、前の検査の結果）か。開いた記述子で確かめる。"""
+    try:
+        fd = os.open(dest.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 無ければ置き換えてよい
+        return None
+    except OSError:
+        # ELOOP（シンボリックリンク）と、開けないもの
+        return f"--result の {dest} はシンボリックリンクか開けないファイルなので書かない"
+    # fdopen はディレクトリの記述子で IsADirectoryError を出すので、種別は開く前に確かめる
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
+        os.close(fd)
+        return f"--result の {dest} は通常ファイルでないので書かない"
+    with os.fdopen(fd, "rb") as f:
+        same = _same_input(root, inputs, st)
+        if same is not None:
+            return f"--result に検査する文書 {same} を指定した（検査結果で本文を上書きしない）"
+        try:
+            prev = json.loads(f.read().decode("utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            prev = None
+    if not (isinstance(prev, dict) and prev.get("tool") == TOOL):
+        return f"--result の {dest} は前の検査結果でない既存のファイルなので上書きしない"
+    return None
+
+
+def _same_input(root: Path, inputs: list[str], st: os.stat_result) -> str | None:
+    """`inputs` のうち、`st` と同じファイル（デバイスと inode が一致）を指す最初のパス。無ければ None。"""
+    for p in inputs:
+        with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 調べられない文書は同じファイルとみなさない
+            other = os.stat(root / p)
+            if (other.st_dev, other.st_ino) == (st.st_dev, st.st_ino):
+                return p
+    return None
+
+
+def _design_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    """ファイルか `--base` のどちらか一方で対象を集めて検査し、`--result` があれば同じ結果をそのファイルへも書く。"""
+    if bool(args.files) == (args.base is not None):
+        return result.stopped(TOOL, "invalid", "検査するファイルか --base のどちらか一方を渡す")
+    try:
+        if args.files:
+            targets = design_check.from_files(root, args.files)
+        else:
+            targets = design_check.from_base(root, args.base, args.remote if args.remote is not None else Git(root).remote())
+    except design_check.DesignCheckError as exc:
+        targets = []
+        out = result.stopped(TOOL, "precondition", str(exc))
+    else:
+        out = design_check.check(targets)
+    if args.result is not None:
+        inputs = [*args.files, *(t.path for t in targets)]
+        refused = _write_result(args.result, root, inputs, json.dumps(out, ensure_ascii=False) + "\n")
+        if refused is not None:
+            return result.stopped(TOOL, "invalid", refused)
+    return out
+
+
+def _add_design(sub: Any) -> None:
+    d = sub.add_parser("design").add_subparsers(dest="action", required=True).add_parser("check")
+    d.add_argument("files", nargs="*", metavar="ファイル", help="全行を検査するファイル（名前を問わない。--base とどちらか一方）")
+    d.add_argument("--base", default=None, help="マージ先のブランチ名。分岐点からの差分の設計成果物の、変えた行を検査する")
+    d.add_argument(start_point.REMOTE_OPTION, default=None, help=f"起点のリモート名（既定は {start_point.WORKTREE_REMOTE}）")
+    d.add_argument("--result", type=Path, default=None, help="標準出力と同じ結果を書くファイル")
+    d.set_defaults(handler=_design_check)
+
+
 def _add_reading(sub: Any) -> None:
     r = sub.add_parser("reading").add_subparsers(dest="action", required=True)
     for action in _READING:
@@ -590,6 +709,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_handoff(sub)
     _add_usage(sub)
     _add_mvv(sub)
+    _add_design(sub)
     c = sub.add_parser("cleanup-stage")
     c.add_argument("prs", nargs="+", type=int, metavar="PR番号")
     c.set_defaults(handler=_cleanup_stage)
