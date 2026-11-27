@@ -785,6 +785,18 @@ def test_the_sweep_keeps_files_ndf_cannot_have_made(store):
     assert (filled / "launch-experiments.lock").exists() and tmp.exists()
 
 
+@pytest.mark.parametrize(
+    "data",
+    [{"entries": {}, "memo": "退避データ"}, {"entries": ""}, {"entries": [], "memo": "x"}, {"entries": [{"at": "x"}]}],
+)
+def test_the_sweep_keeps_a_json_that_is_not_ndf_weights(store, data):
+    # 名前が出現率ファイルでも、NDF の書く形（キーは entries だけで、項目の配列）でなければ、ディレクトリごと残す
+    other = _idle_repo(store.parent / ("a" * 16))
+    (other / "launch-weights.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    mc.prune(SWEEP_AT, 60, store)
+    assert (other / "launch-weights.json").exists() and (other / "launch-pruned").exists()
+
+
 def test_a_candidate_swapped_for_a_link_is_not_followed(tmp_path, store, monkeypatch):
     # 候補を選んだ後に、その名前が別のディレクトリへのリンクに置き換わっても、リンク先は消さない
     from ndf.adapters import launch_store

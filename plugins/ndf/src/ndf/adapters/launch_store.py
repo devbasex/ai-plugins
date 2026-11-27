@@ -233,7 +233,22 @@ def _idle(root: Path, fd: int, files: Mapping[str, os.stat_result], now: datetim
     if weights.name not in files:
         return True
     got = _parsed_weights(_read_at(fd, weights.name), now)
-    return got is not None and not got[1]
+    return got is not None and _ndf_weights(got[0]) and not got[1]
+
+
+def _ndf_weights(data: Any) -> bool:
+    """`data` が NDF の書く出現率のファイルの形か。キーは `entries` だけで、その値は項目の配列。項目は日時の文字列 `at` と、
+    整数の `window_days` を持つ割り付けの値 `allocation` を持つ。形が違えば利用者が置いたものとして回収しない。
+    """
+    if not isinstance(data, dict) or set(data) != {"entries"} or not isinstance(data["entries"], list):
+        return False
+    return all(
+        isinstance(e, dict)
+        and isinstance(e.get("at"), str)
+        and isinstance(e.get("allocation"), dict)
+        and type(e["allocation"].get("window_days")) is int
+        for e in data["entries"]
+    )
 
 
 def _read_at(fd: int, name: str) -> bytes:
@@ -362,7 +377,8 @@ def _tmp_of(name: str, target: str) -> bool:
 def _drop_dir(base_fd: int, root: Path, fd: int, files: Mapping[str, os.stat_result]) -> None:
     """開いたディレクトリ `fd` から `_ndf_files` が確かめたファイル `files` を消してから、ディレクトリを消す。
 
-    掃除の記録（`launch-pruned`）は最後に消す。途中で失敗しても `launch-pruned` が残るので、翌月の回収がまた候補として扱う。
+    掃除の記録（`launch-pruned`）は最後に消す。ほかのファイルの削除で失敗すれば `launch-pruned` が残り、翌月の回収がやり直す。
+    `launch-pruned` を消した後にディレクトリを消せなければ、呼び手が警告を出し、翌月の回収の候補にはならない。
     ディレクトリを消せない（親に書けない）ときは、何も消さずに止める。保存先の `root` の名前が開いたディレクトリと別のものに
     置き換わっていれば、ディレクトリは消さない。
     """
