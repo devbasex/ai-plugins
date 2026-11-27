@@ -245,10 +245,13 @@ src/ndf/
     - この関数は、リモートを別の設定ファイルに分けた構成でも git と同じ URL を得るために、設定ファイルの読み込みを git と同じ規則でたどる
       - 共通の git ディレクトリの `config` から、`include` と、`gitdir:`・`gitdir/i:` の条件の `includeIf` が読み込む設定ファイルをたどる。`onbranch:` などほかの条件の `includeIf` はたどらない
       - `gitdir:` と `gitdir/i:` の条件は、実行中の作業場所の git ディレクトリに照らして判定する。linked worktree では、共通の git ディレクトリではなく `.git/worktrees/<名前>` に照らす（git と同じ）。2 つのディレクトリは、作業場所の `.git` ファイルの `gitdir:` の行と、その先の `commondir` から求める（`git.git_dirs`）
-      - 条件の比べ方は git の [条件付きの読み込み](https://git-scm.com/docs/git-config#_conditional_includes) と同じである。`*`・`?`・`[...]` は `/` をまたがず、`**/` は 0 個以上の階層に当たる
+      - 条件の比べ方は git の [条件付きの読み込み](https://git-scm.com/docs/git-config#_conditional_includes) と同じで、git 2.53.0 の `wildmatch.c` と `config.c` の `include_by_gitdir` を移す。`*`・`?`・`[...]` は `/` をまたがず、`**/` は 0 個以上の階層に当たる。`[[:digit:]]` などの POSIX 文字クラスも評価し、逆順の範囲（`[z-a]`）は何にも当たらない
+      - `./` で始まる条件は、その条件を書いた設定ファイルの実体があるディレクトリに置き換え、置き換えた部分は文字どおりに比べる。末尾の `/` には `**` を足す
       - 最初のリモートの URL を見つけた時点で読むのをやめる。使うのは最初の URL だけなので、その後の `include` は開かない
     - 3 か所が同じ関数を使うのは、`git remote get-url` の URL（`insteadOf` を当てた後）と設定に書いた URL が違いうるためである。違う値を使うと、`insteadOf` で GitHub の URL を社内のミラーへ置き換えている利用者で、記録と照合が食い違い、質問が止まる
-    - 費用: `show`・`reading add`・guard のどれも、作業場所の `.git`、共通の git ディレクトリの下の `config`（と、そこから読み込む設定ファイル）、メインディレクトリの `.ndf/worktree.json` を読むだけで、git を起動しない（`reading add` は、以前の `Git.remote_repo()` の 2 回の起動が無くなる）
+    - 費用: リモートの URL を求める処理では git を起動しない。読むのは、作業場所の `.git`、共通の git ディレクトリの下の `config`（と、そこから読み込む設定ファイル）、メインディレクトリの `.ndf/worktree.json` だけである
+      - コマンド全体では、`show` は承認の記録のキー（`la.repo_key`）を求めるために、`reading add` は作業場所のルート（`git rev-parse --show-toplevel`）を求めるために、それぞれ git を 1 回起動する
+      - `reading add` は、以前の `Git.remote_repo()` が使っていた 2 回の起動が無くなる
   - 比べて採らなかった案は次の 3 つである
     - `Git.remote_repo()` で確かめる: 質問を作るたびに `git worktree list` と `git remote get-url` の 2 回の起動が増え、guard の照合とも識別子が食い違う
     - 確かめずに質問を作り、`reading add` が拒んだら Skill が端末の経路へ切り替える: 拒まれた後に `show` を打ち直すので起動が増え、手順書の分岐も増える
