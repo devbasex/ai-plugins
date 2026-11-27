@@ -63,7 +63,7 @@ flowchart TD
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | 指摘のジャーナル | 下の「出直しの形」の表でまとめると決めた指摘は、新しい行にならず、未解決にもならない | 判定できなければ新しい指摘として扱う |
-| I2 | ラウンドの記録 | 最後の収束より後のラウンドの数が上限以上なら、新しいラウンドを始めない | 超える起動はラウンドを回さない |
+| I2 | ラウンドの記録 | 最後の収束より後のラウンドの数が `--max-rounds`（自分の保存先で数える）か `limits.rounds`（同じ PR のレビューの保存先を合わせて数える）以上なら、新しいラウンドを始めない | 超える起動はラウンドを回さない |
 | I3 | ラウンドの記録 | 秒か費用の合計が上限以上になった後は、相手役・判定役・修正担当を起動しない | 起動中の 1 回は止めない |
 | I4 | キューの記録 | 同じステップの停止が 2 回のプランは、`--resume` で起動しない | `--retry` の指定か、`--resume` を付けない起動で数え直す |
 
@@ -99,11 +99,14 @@ flowchart TD
 | 状態ファイルのラウンドの記録 | `spent.seconds` | そのラウンドの開始から終わりまでの秒 |
 | 同じ | `spent.usd` | そのラウンドで起動した claude の `total_cost_usd` の和。対象は、修正担当、相手役の席に座る claude（名指しした claude と、結果の無い相手役の席を埋める読むだけの claude。起動の入口は `seats.launch_reviewers`）、指摘を確かめる判定役の各起動である |
 | 同じ | `spent.unread` | 費用を読めなかった claude の起動の数 |
+| 同じ | `spent.ended_at` | ラウンドを終えた時刻。保存先をまたいで順に並べるのに使う |
+| 同じ | `stopped_limit` | 上限のために修正担当を起動しなかったときの、到達した上限の名前。`verdict` は書き換えない |
 | 同じ | `verdict` が `incomplete_reviewers` | 相手役の一部か全員が結果を返せなかったラウンド。読んだ証跡に使わない |
 | 状態ファイルの指摘の行 | `reraised` | 見送った後に出直したラウンドの番号 |
 | `queue.json` のプランの行 | `stop.step`・`stop.count` | 続けて止まっているステップと回数 |
 
 - 合計は持たず、ラウンドの記録から毎回足す。数える範囲は、最後の `converged` のラウンドより後である
+- プロジェクトの上限（`limits.rounds`・`seconds`・`usd`。省いた秒と費用の既定を含む）は、同じ PR のレビューが保存先を分けても 1 つの量として数える。新しい引数 `--budget-state <保存先>` で渡した状態のラウンドと自分の状態のラウンドを `spent.ended_at` の順に並べ、最後の `converged` より後を足す。渡した保存先に状態が無ければ 0 とする。`--max-rounds` は自分の保存先のラウンドだけを数える
 - `spent` の無いラウンドは、ラウンド数には含めるが、秒と費用は足さない
 - 相手役の全員が結果を返せないと、今はラウンドの記録を作らずに `precondition` で止まる。この場合も、止める前に `verdict: incomplete_reviewers` と `spent` を持つラウンドの記録を保存する。ラウンド数・秒・費用に数え、どの head を読んだ証跡にもしない（範囲の起点と「読んだ head」の判定は、今もこの `verdict` を飛ばす）
 - 停止の回数は、同じステップで止まれば 1 増え、違うステップで止まれば 1 になり、完了で消える。承認の待ちと、起動せずに返した結果（`repeated_stop`・前提のプランの未完了）では変えない
@@ -133,7 +136,7 @@ flowchart TD
 | `seconds` | 正の数 | 3600 | ラウンドにかかった秒の和。打ち直しの間の待ちは含めない |
 | `usd` | 正の数 | 20 | 読めた claude の費用の和 |
 
-- ラウンドの上限は、`--max-rounds`（省けば #3780 が決める既定。`--purpose design` は 3、ほかは 4。[issue-3780-design.md](./issue-3780-design.md) の決定 6）と `limits.rounds` の小さい方である
+- ラウンドの上限は、`--max-rounds`（省けば #3780 が決める既定。`--purpose design` は 3、ほかは 4。[issue-3780-design.md](./issue-3780-design.md) の決定 6）と `limits.rounds` の 2 つで、先に達した方で止まる
 - 形の違う値は、今の `focus` の誤りと同じく `invalid` で止まる
 
 ### `ndf cross-review run`
@@ -142,21 +145,52 @@ flowchart TD
 | --- | --- |
 | `seconds` か `usd` に当たった | 終わり方 `limit`。要約にどの上限かと使った量を出す。結果は下の表 |
 | ラウンド数の上限に当たった | 終わり方 `max_rounds`。結果は下の表 |
-| 起動の時点で上限を使い切っている | 相手役を起動しない。終わり方は、使い切ったのがラウンド数なら `max_rounds`、秒か費用なら `limit`。結果は下の表で、同じ head で直前に上限で終わった起動と同じになる |
+| 起動の時点で上限を使い切っている | 相手役を起動しない。終わり方は、使い切ったのがラウンド数なら `max_rounds`、秒か費用なら `limit`。結果は下の表で、head と相手役が同じなら、直前に上限で終わった起動と同じになる |
 | 出直した見送り・上限で残った指摘 | `items` の `finding` に `disposition` と `url` を足す |
 
-上限で終わった起動の結果は、相手役が今の head を読んだかと、欠け（直したとも見送ったとも決まらない重い指摘など。結果の `gaps`）の有無で決める。
+上限で終わった起動の結果は、今の head（PR に届いた最後のコミット）を相手役が読んだかで決める。
 
-| 今の head | 欠け | 結果 |
-| --- | --- | --- |
-| 読んだ | 無し | `ok`。上限を使い切ったことと続け方（上限を上げて打ち直す）を警告に出す |
-| 読んだ | 有り | `incomplete` |
-| 読んでいない | 有り | `incomplete`。欠けに、読んでいない head を足す |
-| 読んでいない | 無し | `status: stopped`・`cause.kind: unreviewed`（終了コードは前提の欠け）。要約に、使い切った上限・読んでいない head・続け方を出す |
+**全員が読めた head** は、次の条件をすべて満たすラウンドの head である。条件は、#3780 が全差分に戻す条件と同じものを使う。
 
-今の head（PR に届いた最後のコミット）を「読んだ」と言えるのは、状態ファイルで相手役の全員が読めた最後のラウンドの head と同じときだけである。最後のラウンドで修正を送った直後に上限で終わる場合、修正のコミットは誰も読んでいないので「読んでいない」に当たる。`mvv_unresolved` と `mvv_record_failed` は、今と同じくこの表より優先する。
+- 状態ファイルで、相手役の全員が結果を返した最後のラウンドである
+- 今回の席の全員がそのラウンドを読んでいる（埋めた席は、前回の収束を返す判定と同じく、欠けた相手役の代わりに数える）
+- 読んだ PR が今回と同じである
+- その head が今の head かその祖先である
 
-上限で終わった起動は、ラウンドを回さなかった場合も、`--reviewed-out` に全員が読めた最後の head を書く。実装のプランは、レビューのステップの `on_cause` に `unreviewed` を足して次のステップへ進める。後ろのステップは今の head と読んだ head の違いを見つけ、読んでいない分の差分のレビュー（別の保存先）を回す。差分のレビューが `unreviewed` で終われば、プランは止まる。設計・点検・cross-review のプランは、`unreviewed` で止まって呼び出し元へ返る。
+今の head を「読んだ」と言えるのは、全員が読めた head が今の head と同じときだけである。相手役を足して打ち直した場合、足した相手役はどのラウンドも読んでいないので、全員が読めた head は無い。最後のラウンドで修正を送った直後に上限で終わる場合、修正のコミットは誰も読んでいないので「読んでいない」に当たる。
+
+欠け（直したとも見送ったとも決まらない重い指摘など。結果の `gaps`）の有無と合わせて、結果は次のようになる。`mvv_unresolved` と `mvv_record_failed` は、今と同じくこの表より優先する。
+
+| 今の head | 欠け | ほかの条件 | 結果 |
+| --- | --- | --- | --- |
+| 読んだ | 無し | — | `ok`。到達した上限と続け方を警告に出す |
+| 読んだ | 有り | — | `incomplete` |
+| 読んでいない | 有り | — | `incomplete`。欠けに、読んでいない head を足す |
+| 読んでいない | 無し | 全員が読めた head があり、当たったのが `--max-rounds` だけ | `status: stopped`・`cause.kind: unreviewed`（終了コードは前提の欠け）。読んでいない分を差分のレビューで読める |
+| 読んでいない | 無し | 全員が読めた head が無いか、プロジェクトの上限に当たった | `status: stopped`・`cause.kind: precondition`。差分のレビューへは進めない |
+
+どの結果でも、要約には到達した上限をすべて並べ、上限ごとに変える値を示す。
+
+| 到達した上限 | 続けるために変える値 |
+| --- | --- |
+| `--max-rounds`（省いたときの既定を含む） | `--max-rounds` を大きくして打ち直す |
+| `limits.rounds`・`limits.seconds`・`limits.usd` | 実行者のメインディレクトリの `.ndf/review.json` の同じキーを大きくする。秒と費用の既定に当たった場合は、そのキーを足す。引数では超えられない |
+
+全員が読めた head が無い場合は、到達した上限を上げて打ち直すと PR の全差分から読むことも示す。
+
+#### 差分のレビューへの引き継ぎ
+
+上限で終わった起動は、ラウンドを回さなかった場合も、全員が読めた head があれば `--reviewed-out` に書く。無ければファイルを作らない。`--reviewed-pr-out` を渡した起動は、その head のラウンドの記録にある PR が今回読んだ PR と同じなら、PR も書く。今は、この起動の head か送ったコミットのときだけ書いている。
+
+実装のプランは次のように変える。
+
+- レビューのステップの `on_cause` に `unreviewed` を足して、次のステップへ進める。次のステップは今の head と読んだ head の違いを見つけ、読んでいない分の差分のレビュー（別の保存先）を回す
+- `precondition` には経路を足さない。全員が読めた head が無いときとプロジェクトの上限に当たったときは、レビューのステップで止まる
+- レビューと差分のレビューのステップは、互いの保存先を `--budget-state` で渡す。プロジェクトの上限の残りが、差分のレビューへ引き継がれる。差分のレビューが上限で終われば、プランは止まる
+
+単位の実装プランは、レビューの起動を包むスクリプト（`UNIT_REVIEW`）も変える。今は終了コードが 0 と 6（`incomplete`）以外だと `--reviewed-out` のファイルを消すので、`unreviewed` の後に差分のレビューの起点が無くなる。対象の PR を確かめられた起動（`--reviewed-pr-out` の中身が対象の PR と一致する）は、終了コードによらずファイルを残す。確かめられない起動で消す扱いは変えない。
+
+設計・点検・cross-review のプランは経路を足さず、`unreviewed` でも `precondition` でも止まって呼び出し元へ返る。
 
 `--max-rounds` の意味は「この起動の回数」から「収束していない打ち直しの合計」に変わる。
 
@@ -192,10 +226,17 @@ sequenceDiagram
 | 出直しの形 | 扱い |
 | --- | --- |
 | MVV が前の見送りから変わった・必ず人の承認が要る操作に当たると初めて指摘された | 前の見送りを適用しない。本文の全体が一致すれば、今と同じく元の行を未解決へ戻す（`journal._revive`）。一致しなければ新しい指摘として登録する。どちらも今の MVV で重要度と人の承認の要否を決め直す |
-| 本文の全体（空白と大文字小文字をそろえた値）が見送りの行と一致 | 判定役を待たずに、新しい指摘として登録せず、元の行に `reraised` を付ける |
+| 本文の全体（空白と大文字小文字をそろえた値）が見送りの行と一致 | 判定役を待たずに同じ行として扱う。まず今回の `protect` と重要度を行へ反映し、下の「同じ行へ反映した後」の表で修正へ戻すかを決める |
 | 相手役の `protect` か判定役の `tracks` が保護の種類（[#4363 の「回答の形」](./issue-4363-design.md)） | `same_as` や先頭の一致があってもまとめず、新しい指摘として登録する |
 | 判定役が `same_as` で見送りの行を指した | 新しい指摘として登録せず、指した行に `reraised` を付ける |
 | ほか（先頭だけが一致して `same_as` が空・判定役の回答が無い・指した番号が一覧に無い・判定役が失敗したか上限で起動しなかった） | 新しい指摘として扱う |
+
+**同じ行へ反映した後**（本文の全体が一致した場合）は次のとおりである。
+
+| 行 | 修正へ戻す条件 | 戻さないとき |
+| --- | --- | --- |
+| #3780 の直さずに残した行（`parked`） | critical・変えた行・保護の対象のどれかに当たれば `parked` を外す | 残したままにする |
+| 見送りの行 | 今回の `protect` で保護の種類が増えるか、重要度が上がれば、未解決へ戻す（`journal._revive`） | `reraised` を付ける |
 
 本文の先頭だけが見送りの行と一致する critical・major は、判定役へ渡す指摘に含める。先頭が一致して別の行にする指摘は、行のキー（ジャーナルが同じ指摘を引く値）を本文の全体にする。minor・nit は収束を止めないので、今と同じく先頭の一致でまとめる。
 
@@ -204,7 +245,7 @@ MVV が変わった見送りの行は、判定役へ渡す見送り済みの一�
 直さずに残す指摘の分け方は次のとおりである。表の 2 つの欄は、記録する者が違う。
 
 - **見送りの区分**（行の `defer`）: 修正担当が指摘を見送るときに書く。`needs_user` は利用者の判断が要る、`filed` は範囲外として起票し番号を理由に書いた、`not_applicable` は指摘の前提が違うか意図どおり、である
-- **指摘の種類**: 相手役の `protect` と判定役の `tracks` を合わせたものである。`delivered`・`safety`・`secret`・`user_data`・`irreversible`・`approval` のどれかがあれば、起票してよい指摘である（[#3780 の決定 5](./issue-3780-design.md)）。`authz` だけの指摘は起票しない
+- **指摘の種類**: 行の `protect` と判定役の `tracks` を合わせたものである。`delivered`・`safety`・`secret`・`user_data`・`irreversible`・`approval` のどれかがあれば、起票してよい指摘である（[#3780 の決定 5](./issue-3780-design.md)）。`authz` だけの指摘は起票しない
 
 上の行ほど優先する。見送りの区分が `filed`・`not_applicable` なら、指摘の種類を見ない。
 
@@ -219,10 +260,10 @@ MVV が変わった見送りの行は、判定役へ渡す見送り済みの一�
 
 | 時点 | ラウンドの数 | 秒と費用 |
 | --- | --- | --- |
-| ラウンドを始める前 | 確かめる。収束より後のラウンドの数が上限以上なら始めない | 終わったラウンドの合計 |
+| ラウンドを始める前 | 確かめる。収束より後のラウンドの数が上限（I2）以上なら始めない | 終わったラウンドの合計 |
 | 判定役を起動する前・修正担当を起動する前 | 確かめない。上限ちょうどの最後のラウンドも修正まで行う | 終わったラウンドの合計に、進行中のラウンドの経過秒と、終わった起動の費用を足す |
 
-進行中のラウンドの `spent` は、ラウンドの記録を作るときに書き、修正の後に書き直す。秒か費用に当たって修正担当を起動せずに終えるラウンドは、`verdict` を `limit` にする。`changes_required` のままにすると、次の起動が修正の記録の欠けで止まる。
+進行中のラウンドの `spent` は、ラウンドの記録を作るときに書き、修正の後に書き直す。秒か費用に当たって修正担当を起動せずに終えるラウンドは、`verdict` を変えずに `stopped_limit` を書く。次の起動は、`stopped_limit` のあるラウンドを修正の記録の欠けとして止めない。`verdict` を別の値に書き換えると、相手役の一部が読めなかった記録（`incomplete_reviewers`）が失われ、その head が読んだ証跡に使われる。
 
 ## 決定の記録
 
@@ -244,7 +285,7 @@ MVV が変わった見送りの行は、判定役へ渡す見送り済みの一�
 - **選んだ案**: 状態ファイルの、最後の `converged` より後のラウンド。誤りや読めない相手役で終わったラウンドも数える。収束した後に差分を足した PR は 0 から数える
 - 採らなかった案: PR の全ラウンドを数える（収束の後の打ち直しが回せなくなる）
 - 採らなかった案: 修正を送ったラウンドだけを数える（費用はどのラウンドにもかかる）
-- **代償**: AI の利用上限などの失敗で終わったラウンドも上限に数えるので、上限を上げて打ち直す場合がある。別の保存先の実行は合計しない
+- **代償**: AI の利用上限などの失敗で終わったラウンドも上限に数えるので、到達した上限を上げて打ち直す場合がある。`--budget-state` で渡さない別の保存先の実行は合計しない
 - 根拠: Value 2 / Value 3（MVV バージョン 11）
 
 ### 決定 3: 上限を書かないプロジェクトでも止まるため、秒と費用に既定を置く
@@ -255,10 +296,10 @@ MVV が変わった見送りの行は、判定役へ渡す見送り済みの一�
 - **代償**: 大きい PR は途中で止まる。費用は claude の分だけで、全体の費用の上限ではない
 - 根拠: Value 2 / Value 13（MVV バージョン 11）
 
-### 決定 4: プロジェクトの上限を引数で超えないため、ラウンドは引数と設定の小さい方にする
+### 決定 4: プロジェクトの上限を引数で超えないため、ラウンドは引数と設定の先に達した方で止める
 
 - **質問**: `--max-rounds` と `limits.rounds` が食い違うときにどちらを使うか
-- **選んだ案**: 小さい方。`--max-rounds` は NDF の既定より優先し、設定はプロジェクト全体の上限とする
+- **選んだ案**: 先に達した方で止まる（同じ保存先なら小さい方になる）。`--max-rounds` は NDF の既定より優先し、設定はプロジェクト全体の上限とする
 - 採らなかった案: `--max-rounds` を設定より優先する（受け入れ条件 4 の「どれかに当たると止まる」が、引数を渡すプランで働かない）
 - **代償**: 1 回だけ多く回したいときは、設定を書き換える
 - 根拠: Value 2 / Value 1（MVV バージョン 11）
@@ -289,10 +330,12 @@ MVV が変わった見送りの行は、判定役へ渡す見送り済みの一�
 ### 決定 7: 確かめていない修正を済んだとしないため、上限で終わった起動の読んでいない head は `unreviewed` にする
 
 - **質問**: 最後のラウンドの修正を送った直後に上限へ達したとき、結果を何にするか
-- **選んだ案**: 相手役が実際に読んだ head だけを読んだとみなし、起動したその場でも打ち直しでも同じ結果にする。実装のプランは、今ある差分のレビューで残りを読む
+- **選んだ案**: 相手役が実際に読んだ head だけを読んだとみなし、起動したその場でも打ち直しでも同じ結果にする。実装のプランは、`--max-rounds` に当たっただけでプロジェクトの上限が残る場合に、今ある差分のレビューで残りを読む。プロジェクトの上限は差分のレビューと合わせて数える
 - 採らなかった案: 修正を送ったコミット（`fix.pushed`）も読んだとみなす（誰も読んでいない修正が、確かめたものとして扱われる）
 - 採らなかった案: 打ち直したときだけ `unreviewed` にする（同じ状態で結果が変わる）
-- **代償**: 上限で終わる起動は、最後に修正を送っていれば `ok` にならない。設計・点検・cross-review のプランは呼び出し元へ戻る回数が増える。差分のレビューは別の保存先なので、上限を別に数える
+- 採らなかった案: 差分のレビューは上限を別に数える（プロジェクトが決めた秒・費用・ラウンドを使い切った後に、同じ PR のレビューが新しい枠で続く）
+- 採らなかった案: `--max-rounds` も差分のレビューと合わせて数える（`--max-rounds` に当たった後の差分のレビューが 1 ラウンドも回せず、最後の修正を読む経路が無くなる）
+- **代償**: 上限で終わる起動は、最後に修正を送っていれば `ok` にならない。設計・点検・cross-review のプランは呼び出し元へ戻る回数が増える。実装のプランの差分のレビューは、`--max-rounds` の分だけ追加でラウンドを回しうる
 - 根拠: Value 13 / Value 3（MVV バージョン 11）
 
 ## 影響と危険
@@ -305,10 +348,10 @@ MVV が変わった見送りの行は、判定役へ渡す見送り済みの一�
 
 | 箇所 | 扱い |
 | --- | --- |
-| 収束せずに上限に達した PR は、打ち直しても回らない | 警告に続け方を出し、手順書の「ラウンドを足す」を書き換える |
-| 上限で終わって、今の head を誰も読んでいない起動（今は欠けが無ければ `ok`） | `unreviewed` か、欠けのある `incomplete` にする。実装のプランは差分のレビューへ進み、ほかのプランは止まる |
-| 前の起動で上限まで回した状態ファイル | 次の起動はラウンドを回さない。`--max-rounds` を上げる |
-| 差分のレビュー（別の保存先） | 合計は別に数える |
+| 収束せずに上限に達した PR は、打ち直しても回らない | 到達した上限と変える値を結果に出し、手順書の「ラウンドを足す」を書き換える |
+| 上限で終わって、今の head を誰も読んでいない起動（今は欠けが無ければ `ok`） | `unreviewed`・`precondition`・欠けのある `incomplete` のどれかにする。実装のプランは `unreviewed` なら差分のレビューへ進み、ほかは止まる |
+| 前の起動で上限まで回した状態ファイル | 次の起動はラウンドを回さない。到達した上限を上げる |
+| 差分のレビュー（別の保存先） | `--max-rounds` は保存先ごとに数え、プロジェクトの上限は合わせて数える |
 | #4363・#3780 と同じファイルを変える | 2 つの後に実装する |
 
 ### 代表のリポジトリでの振る舞い
@@ -332,12 +375,16 @@ MVV が変わった見送りの行は、判定役へ渡す見送り済みの一�
 | 条件 1・I1 | 見送った指摘が同じ文でも言い換えでも出直したラウンドは収束し、起票か記録の URL が `items` に載る。先頭だけが同じで保護の対象の指摘と、判定役が失敗したときの先頭だけが同じ指摘は、新しい未解決の指摘になる。承認の要る操作と初めて指摘されたものはまとめない | `same_as` を無視すると落ちる。先頭の一致だけでまとめると落ちる。保護の対象をまとめると落ちる。区分 `filed` を起票し直すと落ちる |
 | 条件 2 | 指摘 0 件のラウンドは `converged` になる | 指摘が 0 件でも、相手役の判定の文字を理由に未収束にすると落ちる |
 | 条件 3・I2 | 収束せずに終えた後の打ち直しは、残りの回数だけ回る。収束の後は 0 から数える | 起動ごとに数え直すと落ちる |
-| 条件 4・I3 | 秒・費用・ラウンドのそれぞれで止まり、残りが残し方のとおり報告に載る。上限ちょうどのラウンドは修正まで行い、秒か費用が上限ちょうどなら判定役も修正担当も起動しない。修正を起動せずに終えた後の打ち直しは、修正の記録の欠けで止まらない | 上限の確認を外すと落ちる。進行中のラウンドの分を足さないと落ちる |
-| 起動の時点の使い切り・決定 7 | 最後のラウンドで修正を送って上限に当たった起動と、その打ち直しは、どちらも `unreviewed`。修正が無く head が読まれていれば `ok`。欠けがあれば `incomplete`。実装のプランは `unreviewed` の後に差分のレビューを回す | `fix.pushed` を読んだ head とみなすと落ちる。プランの `on_cause` が無いと落ちる |
+| 条件 4・I3 | 秒・費用・ラウンドのそれぞれで止まり、残りが残し方のとおり報告に載る。上限ちょうどのラウンドは修正まで行い、秒か費用が上限ちょうどなら判定役も修正担当も起動しない。修正を起動せずに終えた後の打ち直しは続けられる | 上限の確認を外すと落ちる。進行中のラウンドの分を足さないと落ちる |
+| 起動の時点の使い切り・決定 7 | 最後のラウンドで修正を送って上限に当たった起動と、その打ち直しは、同じ結果になる。修正が無く head が読まれていれば `ok`。欠けがあれば `incomplete`。相手役を足した打ち直しは、同じ head でも `ok` にならない | `fix.pushed` を読んだ head とみなすと落ちる。head の一致だけで判定すると落ちる |
+| 差分のレビューへの引き継ぎ | `--max-rounds` だけに当たれば `unreviewed` で、単位の実装プランでも `--reviewed-out` が残り、差分のレビューへ進む。全員が読めた head が無ければファイルを作らず `precondition`。プロジェクトの上限に当たれば差分のレビューへ進まず、差分のレビューは本レビューの使った量を足して数える | プランの `on_cause` が無いと落ちる。包むスクリプトがファイルを消すと落ちる。`--budget-state` を渡さないと落ちる |
+| 到達した上限の案内 | 当たった上限をすべて並べ、引数か `.ndf/review.json` のキーかを示す | 常に `--max-rounds` を案内すると落ちる |
+| 修正を起動しないラウンドの記録 | `stopped_limit` が付き `verdict` は変わらない。次の起動は修正の記録の欠けで止まらず、読めない相手役のいた head を読んだとみなさない | `verdict` を書き換えると落ちる |
+| 同じ本文の出直し | 今回初めて `user_data` が付いた見送りの行と残した行は、修正へ戻る | 分類を反映する前にまとめると落ちる |
 | 全員が結果を返せない起動 | ラウンドの記録と `spent` が残り、打ち直しの上限に数える。その head は読んだ head にならない | 記録を作らないと落ちる。読んだ証跡に使うと落ちる |
 | 条件 5・I4 | 同じステップで 2 回止まったプランの `--resume` は起動せず `repeated_stop` で、`next` の `--from` は止まったステップになる。`next` に `--retry` を足すと起動する。違うステップは数え直す。`--resume` なしの起動は数え直して起動し、前段が止まって起動しなかった後段のプランの回数も消える。`repeated_stop` を返しても回数は変わらない | 回数を持たないと落ちる。起動の前に消した記録を保存しないと落ちる。`next` が元の開始点を使うと落ちる |
 | 条件 6 | `limits` の無い `version: 1` が読める。形の違う `limits` は `invalid` | `limits` を必須にすると落ちる |
-| 決定 4 | 引数と設定の小さい方で止まる | 引数だけを使うと落ちる |
+| 決定 4 | 引数と設定の先に達した方で止まる | 引数だけを使うと落ちる |
 | 決定 5 | 費用を読めない起動があっても止まらず、数が警告に出る | 読めないことで止めると落ちる |
 
 時間の上限は、時計を差し替えて確かめる。実時間は待たない。
@@ -346,7 +393,7 @@ MVV が変わった見送りの行は、判定役へ渡す見送り済みの一�
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #2468 | 実装する | — | `plugins/ndf/src/ndf/domains/crossreview/verify_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/leftover.py`、`plugins/ndf/src/ndf/domains/crossreview/budget_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/core/plan/queue_decide.py`、`plugins/ndf/src/ndf/core/plan/queue_run.py`、`plugins/ndf/src/ndf/core/plan/cli.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/contracts/schemas/ndf-settings/review.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/limits/cross-review.max-seconds.json`（新設）、`plugins/ndf/contracts/limits/cross-review.max-usd.json`（新設）、`plugins/ndf/contracts/causes/repeated_stop.json`（新設）、`plugins/ndf/contracts/templates/impl.json`、`plugins/ndf/tests/route/test_flows.py`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_limits.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_leftover.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/core/plan/test_queue.py`、`plugins/ndf/tests/core/plan/test_queue_run.py` |
+| #2468 | 実装する | — | `plugins/ndf/src/ndf/domains/crossreview/verify_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/leftover.py`、`plugins/ndf/src/ndf/domains/crossreview/budget_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/core/plan/queue_decide.py`、`plugins/ndf/src/ndf/core/plan/queue_run.py`、`plugins/ndf/src/ndf/core/plan/cli.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/contracts/schemas/ndf-settings/review.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/limits/cross-review.max-seconds.json`（新設）、`plugins/ndf/contracts/limits/cross-review.max-usd.json`（新設）、`plugins/ndf/contracts/causes/repeated_stop.json`（新設）、`plugins/ndf/contracts/templates/impl.json`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/reviewed_pr.py`、`plugins/ndf/contracts/schemas/io/cross-review.args.schema.json`、`plugins/ndf/tests/route/test_templates.py`、`plugins/ndf/tests/route/test_flows.py`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_limits.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_leftover.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/core/plan/test_queue.py`、`plugins/ndf/tests/core/plan/test_queue_run.py` |
 
 ## 未確認のまま残ること
 
