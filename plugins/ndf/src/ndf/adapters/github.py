@@ -59,10 +59,16 @@ TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
 # GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く。#3506）
 BOT_SUFFIX = "[bot]"
 # マージ先の設定の読み取りに、token の利用者の login とアカウント ID（`viewer`）も同じ 1 回の要求で載せる（承認の証跡の書き手を照らす。#4409）
-_BRANCH_FILE = (
-    "query($owner: String!, $name: String!, $expr: String!) { viewer { login databaseId } repository(owner: $owner, name: $name) {"
-    " nameWithOwner object(expression: $expr) { ... on Blob { oid text } } } }"
-)
+def _branch_file_query(body: str = "") -> str:
+    """マージ先の設定を読む問い合わせ文。`body` は `repository` の下へ並べて載せる選択（空なら載せない）。"""
+    extra = f" {body}" if body else ""
+    return (
+        "query($owner: String!, $name: String!, $expr: String!) { viewer { login databaseId } repository(owner: $owner, name: $name) {"
+        f" nameWithOwner object(expression: $expr) {{ ... on Blob {{ oid text }} }}{extra} }} }}"
+    )
+
+
+_BRANCH_FILE = _branch_file_query()
 # token の利用者の login だけを読む問い合わせ。REST の `/user` と違い、GitHub App のインストールトークンと Actions の
 # `GITHUB_TOKEN` でもボットの login を返す
 _VIEWER = "query { viewer { login databaseId } }"
@@ -756,11 +762,7 @@ class GitHub:
         first = names[: max(size - 1, 0)]
         chunk = {_alias(i): selections[k] for i, k in enumerate(first)}
         body = " ".join(f"{alias}: {sel}" for alias, sel in chunk.items())
-        query = (
-            "query($owner: String!, $name: String!, $expr: String!) { viewer { login databaseId } "
-            f"repository(owner: $owner, name: $name) {{ nameWithOwner object(expression: $expr) {{ ... on Blob {{ oid text }} }} {body} }} }}"
-        )
-        data = self.graphql(query, {**self._owner_name(), "expr": f"{base}:{path}"})
+        data = self.graphql(_branch_file_query(body), {**self._owner_name(), "expr": f"{base}:{path}"})
         self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
         repo = self._repository_of(data)
         out: dict[str, Any] = {k: repo[alias] if alias in repo else None for alias, k in zip(chunk, first)}
