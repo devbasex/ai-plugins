@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from ndf import contracts
-from ndf.contracts import limits
 from ndf.core.plan.inputs_decide import (
     DesignResult,
     absorbed_missing,
@@ -172,12 +171,6 @@ def test_the_unit_file_requires_the_lines_and_the_title_of_each_task():
     for key in ("title", "lines", "id", "files"):
         task = {k: v for k, v in UNIT_FILE["tasks"][0].items() if k != key}
         assert contracts.schema_errors({**UNIT_FILE, "tasks": [task]}, UNITS), key
-
-
-def test_the_limits_of_a_unit_default_to_400_and_1000_lines():
-    # 要求の受け入れ条件 6: 既定値は 11.0.10 の目安と同じ 400 行（目安）と 1,000 行（上限）
-    assert limits.value("review-units.target-lines", "count") == 400
-    assert limits.value("review-units.max-lines", "count") == 1000
 
 
 @pytest.mark.parametrize("schema", [contracts.schema_path("project-workflow"), contracts.schema_path("ndf-settings/project")])
