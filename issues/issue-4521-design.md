@@ -41,6 +41,8 @@ graph TB
 
 GitHub の閉じた PR と課題の呼び出しは、`issues` の質問の根拠にしか使っていない。
 
+この後の `main` には [#4580](https://github.com/devbasex/ai-plugins/issues/4580) が入った（コミット `7504f88a3`）。`write` は、測定の `branch_state` と今のブランチの構成が違えば、何も書かずに終了コード 1 で終わる。必須のチェックを取れない場合の `ci` は不明になる。この設計は、どちらもそのまま使う。
+
 以下で使う呼び名は、次のものを指す。
 
 - **指紋**: 書き出しが項目ごとに残す、書いた値の SHA-256。`.ndf/project.json` の `analysis.written` に持つ。次の書き出しは、今の値の指紋が一致すれば解析が書いた値とみなして置き換え、違えば人が直した値として残す
@@ -92,6 +94,7 @@ graph TB
 | リポジトリの測定（`measure_repo.py`） | `test`・`materials` の 2 項目を返す。指示書の注記と compose のサービス名を、項目にせず返す。言語・静的解析の Tool・方針・データベースを測る処理と、それだけが使う表を消す |
 | CI の測定（`measure_ci.py`） | 必須のチェックだけを測る。閉じた PR・課題の呼び出しと、`issues` の質問を消す |
 | 測定の組み立て（`cli.py`） | 指示書の注記と CI の注記を、測定の結果の注記に今と同じ順で並べる。質問の項目には、今の設定の値を秘密の検査をしてから `current` に載せる（決定 7）。結果に測った場所とブランチ `context` を載せる（決定 8）。`--out` は `mkstemp` と `os.replace` で書く（下の「入出力のコントラクト」） |
+| 回答の判定（新しいモジュール `answer_decide.py`）と秘密の判定（`secret.py`） | `current` の形と比べる値、回答の順序表、回答が秘密を含むかの判定（決定 7）。`measure` と `write` が同じ処理を使う |
 | 書き出し（`write.py`） | 項目の番号の表（`p_number`）から 6 項目を消す。この番号（`P1` など）は、`measure` と `write` の出力の行と、開発の作業の開始の `不明 <番号>` の表示で、項目を指すために使う。残る `test`（P2）と `ci`（P4）の番号は振り直さない。回答できる項目は、測定の結果で `status: question` であり、かつ今の解析が書く項目に限る。`test` の測定の結果が空の suite の一覧で、今の値に suite があるときは、今の値を残して案内の行を出す（決定 6）。`test.ci.only` を決めるときと案内の行を作るときは、同じ処理で `--root` の中のパスだけの存在を確かめる（決定 6）。解析の記録の `analyzer` と `branches` には、測定の結果の `analyzer` と `branch_state` を書く。人が書いた 6 項目を取り除くときは確認を求める案内の行を出し（決定 1）、回答の元にした値が変わったか確かめられなければ回答を適用せず、伏せる形の値は行に載せない（決定 7）。適用しなかった回答は保管する（決定 8）（どれも下の「入出力のコントラクト」） |
 | 旧い形のキー（`analysis_record.py`） | 項目ごと消すキーに 6 項目を足す。言語の行の中のキー（`languages[].files`）は、`languages` の項目ごと消える。そのため、配列の中のキーを取り除く処理は消す |
 | 判定（`check.py`） | 解析器のバージョンを上げる。再開を待つ保管した回答があれば「古い」にする（決定 8） |
@@ -111,7 +114,7 @@ graph TB
 | `ndf project measure --out` の書き方 | 実行した人の umask の権限。`--out` がシンボリックリンクなら、行き先へ書く | 所有者だけが読み書きできる 0600。保存先と同じディレクトリに、`tempfile.mkstemp`（新規作成に限る `O_EXCL`、0600）で一時ファイルを作り、`os.replace` で置き換える。`--out` は親のディレクトリだけを解決し、末尾のリンクはたどらない。ほかの人も書けるディレクトリで、先に置かれたファイルやリンクへ書かないためである。`current` には、秘密の形に当たらなくても公開していないコマンドや環境の値が入りうる |
 | `ndf project write` の回答 | `test`・`issues`・`ndf_policies`・`materials` | `test`・`materials`。ほかのキーは「無視した回答」と出る。今回消す項目が、旧版の測定の結果に `status: question` で入っていても、同じく無視する |
 | `ndf project write` が解析の記録に書く `analyzer` | 書き出す側の解析器のバージョン（`check.ANALYZER`） | 測定の結果の `analyzer`（実際に測ったバージョン）。測定の結果に正の整数の `analyzer` が無ければ、何も書かずに終了コード 1（`result: remeasure` の行を出す） |
-| `ndf project write` が解析の記録に書く `branches` | 書き出すときに取り直したブランチの構成 | 測定の結果の `branch_state`（測ったときの構成）。`branch_state` が無い、または形が合わなければ、何も書かずに終了コード 1（`result: remeasure` の行を出す）。測定の後にブランチの構成が変わっていれば、次の `check` は「古い」（終了コード 3）になる |
+| `ndf project write` が解析の記録に書く `branches` | 書き出すときに取り直したブランチの構成。測定の `branch_state` と違えば、何も書かずに終了コード 1（#4580） | 測定の結果の `branch_state`（測ったときの構成）。`branch_state` が無い、または形が合わなければ、何も書かずに終了コード 1（`result: remeasure` の行を出す）。測定の後にブランチの構成が変わっていれば、#4580 の確かめで何も書かずに終了コード 1 になり、前の記録が残る。次の `check` は「古い」（終了コード 3）になる |
 | 版 4 の測定の結果を版 5 の `write` で書き出した直後の `ndf project check` | 終了コード 0（記録に版 5 が残る） | 終了コード 3、理由は「解析器のバージョンが古い（4 < 5）」。次に開発の作業を始めたとき、版 5 の解析器が測り直す |
 | 同じ版 4 の測定の結果で、版 5 の `write` をもう 1 回打つ | — | 記録の `analyzer` は 4 のままで、`check` は終了コード 3 のまま。`write` が版を 5 へ繰り上げることはない。受け入れ条件 11 の「同じ入力」は、版 5 の測定の結果とその回答を指す |
 | `ndf project write`（6 項目のうち、人が書いた値を取り除く） | — | 取り除く前の値の控えをメインディレクトリの `.ndf/analysis/removed/` に残してから取り除き、キーごとに `kind: note` の行を足す。値は行に書かない（決定 1） |
@@ -672,7 +675,7 @@ detached HEAD でコミットを含めるのは、同じ worktree で別のコ�
 | 7 | 指示書が無いリポジトリと、古い案内のマーカーを持つファイルを読み込むリポジトリで、書き出しの出力に案内の行が出る | 注記を測定の結果へ入れないと落ちる |
 | 8 | `issues`・`ndf_policies` の回答は「無視した回答」と出て、終了コード 0 で、設定に書かれない。旧版の測定の結果（2 項目を `status: question` で持つ）と旧版の回答を組み合わせて確かめる。結果 JSON の `items` に 2 項目の `kind: ignored` があり、回答のファイルは変わらない | 回答を設定へ書くか、回答できる項目を今の項目の一覧で絞らないか、`ignored` の行を落とすと落ちる |
 | 14（決定 4） | 版 4 の測定の結果を書き出すと、直後の判定は終了コード 3 で、理由に解析器のバージョンが出る。同じ入力でもう 1 回書き出しても同じである | 解析の記録に `check.ANALYZER` を書くと、終了コード 0 になって落ちる |
-| 14（決定 4・ブランチ） | 測定の後にリモートの既定ブランチを変えて書き出すと、直後の判定は終了コード 3 で、理由にブランチの構成が出る | 解析の記録に書き出し時の構成を書くと、終了コード 0 になって落ちる |
+| 14（決定 4・ブランチ） | 前の記録がある状態で、測定の後にリモートの既定ブランチを変えて書き出すと、何も書かれずに終了コード 1 になり、直後の判定は終了コード 3 で、理由にブランチの構成が出る | 構成の比較（#4580）を外して解析の記録に書き出し時の構成を書くと、終了コード 0 になって落ちる |
 | 15（決定 7・照合） | 測った後に、同じ項目を別の回答で書き出してから、元の回答を書き出すと、後の値が残り、`mismatch` と測り直しの案内の行が出る。同じ回答の打ち直しと、`ci.only` だけが違う場合（回答の値が `ci.only` を持つ場合を含む）は適用される。適用しなかった書き出しの `items` には `result: answer_held` の行があり、すべて適用した書き出しには無い | 照合を外すと古い回答で置き換わって落ちる。`ci.only` を含めて比べるか、片方の値だけから除くと、適用すべき回答が落ちる。`answer_held` を落とすと落ちる |
 | —（決定 7・旧い入力） | 版 4 の測定の結果と回答は、設定に値がある項目を置き換えず、キーが無い項目と、値が `{"unknown": …}` の項目には適用する（後の 2 つは `remeasure_v4` の行が出ない）。版 5 の測定の結果から `current` を消すと、終了コード 1 で何も書かれず、`result: remeasure` の行が出る。ロックが取れない失敗では出ない | `current` が無いだけで適用するか、版を見ずに旧版とみなすか、不明を値に数えると落ちる |
 | —（決定 7・秘密） | 秘密の形と、代入の形（`password=…`）の値を持つ設定を測ると、測定の結果のどこにもその値が無く、`current` は `withheld`。決定 7 の順 1・2・4・5 の組み合わせ（今の値が書かない値の形、回答が書かない値の形、今の値が代入の形、回答の値が代入の形）ごとに、保存値と結果の行が表のとおりになる。今の値が代入の形の項目へ形に合わない回答を渡しても、保管のファイルは作られない。回答の値が代入の形なら、キーが無い設定にも手で書いた値の設定にも、その値は書かれない。測定の後に今の値を代入の形へ変えた場合と、回答の値だけが代入の形の場合も、行に値が無く、保管のファイルにも値が無い | `current` に値をそのまま載せるか伏せ字に置き換えた値を載せる、行や保管に値を載せる、代入の形の今の値を不明に置き換える、照合を秘密の検査より先に置く、代入の形の回答の値を適用する、今の値が代入の形の項目の回答を保管すると、それぞれ落ちる |
@@ -682,7 +685,7 @@ detached HEAD でコミットを含めるのは、同じ worktree で別のコ�
 | 15（決定 8・消し方） | 保管の値と違う値を適用しても回答は残り、同じ値の適用、適用された回答の `resolves`、`discard` で消える。適用されなかった回答の `resolves` では消えない。項目が質問でない測定の結果でも `discard` で消え、`ignored` の行は出ない。worktree とブランチの両方を削除した回答は、次の `write` で消える。`git worktree move` だけ、ブランチの改名だけ、その両方をした回答は残る。detached HEAD の worktree を移してコミットを足した回答も残る。同じ項目の 2 つの違う回答は 2 件残り、同じ回答の打ち直しでは増えない。`measure` の `held` は 1 件と残りの件数だけを持つ。再開を待つ回答の後に再開を待たない回答を足すと、`held` は再開を待つ回答である。入力の指紋が今と違う `resume: true` の回答が新しくても、`held` は今の入力に合う回答である。同じ測定の結果と回答で打ち直すと、`at` と `held` の回答は変わらない。測定 A で保管し、測定 B で同じ値を保管した後に A を打ち直しても、B の `at`・`resume` と `held` の回答は変わらない | 値を見ずに消す、パスとブランチ名が無いことだけで消す、新しい回答で置き換える、`discard` を質問の絞り込みの後で処理する、全件を `held` に載せる、`resume` を見ずに最新を選ぶ、`check` と違う条件で選ぶ、打ち直しで `at` を更新する、最後の `measure_id` だけを残すと、それぞれ落ちる |
 | 15（決定 8・不正な `id`） | `discard` と `resolves` に、`../` を含む値、絶対パス、`.ndf/project.json` を指す値、別の場所の回答の `id` を入れても、置き場の外のファイルと別の場所の回答は変わらず、案内の行が出る | `id` からパスを組み立てて消すと落ちる |
 | 15（決定 8・`resume`） | 再開した回答が同じ値でもう一度適用されないと、その回答の `resume` は `true` のままである。同じ書き出しで保管しなかった回答は、`held` で渡した回答だけが `false` になり、渡していない回答と別の場所の回答は変わらない。項目が `status: unknown` の測定の結果を `--answers` なしで書き出すと、その項目の回答は `false` になり、`check` は保管を理由にした終了コード 3 を返さない | 保管し直した回答か、渡していない回答の `resume` を下げると落ちる。`unknown` の項目を `--answers` があるときだけ下げても落ちる |
-| 15（決定 8・失敗） | 設定の書き込みを失敗させると終了コード 1 で、前からある保管の回答は残る。壊れた保管のファイルがあると、そのファイルは変わらず、案内の行にパスが出て、ほかの回答の保管と削除は進む。削除を失敗させると、終了コード 0 で `result: held_delete_failed` の行が出て、行の `id` を `discard` に並べた打ち直しで消える。`resume` の更新の失敗は `held_resume_failed` になり、`unresume` で `false` になる。打ち直しの前に別の `write` が同じ項目の設定を変えても、打ち直しは対象の回答を片付け、設定を変えず、回答を足さない。置き場のファイルを git に追跡させると、終了コード 1 で、理由に「追跡されている」とパスが出て、何も変わらない。置き場の `.gitignore` を書き換えて、書くパスが無視されないようにすると、終了コード 1 で、控え・回答・設定は書かれない。控えと回答を同じ書き出しで作る場合に、一方のパスだけが無視されないようにしても、同じ結果になる | 後処理の打ち直しで設定を書くか元の `value` を保管する、設定より先に回答を消す、読めないファイルを無いものとして書き直す、追跡の確かめを `.gitignore` を作る回だけにする、無視の対象外でも書く、`git check-ignore` の終了コードだけで判定すると、それぞれ落ちる |
+| 15（決定 8・失敗） | 設定の書き込みを失敗させると終了コード 1 で、前からある保管の回答は残る。壊れた保管のファイルがあると、そのファイルは変わらず、案内の行にパスが出て、ほかの回答の保管と削除は進む。削除を失敗させると、終了コード 0 で `result: held_delete_failed` の行が出て、行の `id` を `discard` に並べた打ち直しで消える。`resume` の更新の失敗は `held_resume_failed` になり、`unresume` で `false` になる。打ち直しの前に別の `write` が同じ項目の設定を変えても、打ち直しは対象の回答を片付け、設定を変えず、回答を足さない。置き場のファイルを git に追跡させると、終了コード 1 で、理由に「追跡されている」とパスが出て、何も変わらない。親の `.ndf/analysis/.gitignore` の指定を外したうえで置き場の `.gitignore` を書き換えて、書くパスが無視されないようにすると（親の `*` が効く間は、置き場の中の指定は読まれない）、終了コード 1 で、控え・回答・設定は書かれない。控えと回答を同じ書き出しで作る場合に、一方のパスだけが無視されないようにしても、同じ結果になる | 後処理の打ち直しで設定を書くか元の `value` を保管する、設定より先に回答を消す、読めないファイルを無いものとして書き直す、追跡の確かめを `.gitignore` を作る回だけにする、無視の対象外でも書く、`git check-ignore` の終了コードだけで判定すると、それぞれ落ちる |
 | 15（決定 7・回答の秘密） | 形に合わない回答の値、辞書のキー、`evidence`、無視する項目の回答に、代入の形の値かトークンの形の値を入れると、行は値を持たず `result: answer_secret` を持ち、保管のファイルは作られず、`answer_held` の案内も出ない | 辞書のキーか `evidence` を調べない、判定を `mismatch` の行か保管だけに掛けると、それぞれ落ちる |
 | 16（`measure --out` の書き方） | umask が 022 でも `--out` のファイルは 0600 になる。`--out` が別のファイルを指すリンクなら、指す先は変わらない | 権限の指定を外すか、末尾のリンクを解決すると落ちる |
 | 16（決定 1・控え） | 人が直した 6 項目の値を持つ設定を書き出すと、書き換え前の値の控えが 0600 でメインディレクトリの `.ndf/analysis/removed/` に作られ、git に無視され、案内の行にパスが出て、値は行に無い。指紋が一致する値だけなら控えは作られない。打ち直しても控えは増えない。控えを作れなければ終了コード 1 で設定は変わらない | 控えを作らない、設定を書いた後に作る、解析が書いた値でも作ると、それぞれ落ちる |
@@ -701,11 +704,15 @@ detached HEAD でコミットを含めるのは、同じ worktree で別のコ�
 
 この変更で消す処理を確かめる今のテスト（言語の行・サービス・指示書の読み込み・`issues` の質問・配列の中の旧いキー）は消すか書き換える。書き出しのテストが例に使う `checks` は、残る項目へ置き換える。
 
+## どこを変えるか
+
+ファイル配置・関数の責務・異常系の処理は [issue-4521-design-detail.md](./issue-4521-design-detail.md) にある。新設する関数が 2 つ以上あり、シグネチャを変える関数もあるので、別ファイルにした。分け方と順序は [issue-4521-plan.md](./issue-4521-plan.md) にある。
+
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4521 | 実装する | — | `plugins/ndf/src/ndf/domains/project/measure_repo.py`、`plugins/ndf/src/ndf/domains/project/measure_ci.py`、`plugins/ndf/src/ndf/domains/project/cli.py`、`plugins/ndf/src/ndf/domains/project/write.py`、`plugins/ndf/src/ndf/domains/project/analysis_record.py`、`plugins/ndf/src/ndf/domains/project/check.py`、`plugins/ndf/src/ndf/domains/project/held.py`、`plugins/ndf/contracts/schemas/internal/project-held-answers.schema.json`、`plugins/ndf/tests/domains/project/test_project_held.py`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/languages.json`、`plugins/ndf/docs/contracts/ndf-settings.md`、`plugins/ndf/contracts/schemas/io/project.args.schema.json`、`plugins/ndf/contracts/schemas/io/project.result.schema.json`（`items` の `result` の説明）、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`docs/specifications/ndf-project-analysis-record.md`、`.ndf/project.json`、`plugins/ndf/tests/domains/project/test_project_measure.py`、`plugins/ndf/tests/domains/project/test_project_cli.py`、`plugins/ndf/tests/domains/project/test_analysis_record.py`、`plugins/ndf/tests/domains/project/test_measure_project_branch_state.py` |
+| #4521 | 実装する | — | `plugins/ndf/src/ndf/domains/project/measure_repo.py`、`plugins/ndf/src/ndf/domains/project/measure_ci.py`、`plugins/ndf/src/ndf/domains/project/cli.py`、`plugins/ndf/src/ndf/domains/project/write.py`、`plugins/ndf/src/ndf/domains/project/analysis_record.py`、`plugins/ndf/src/ndf/domains/project/check.py`、`plugins/ndf/src/ndf/domains/project/held.py`、`plugins/ndf/src/ndf/domains/project/answer_decide.py`、`plugins/ndf/src/ndf/domains/project/items.py`、`plugins/ndf/src/ndf/domains/project/secret.py`、`plugins/ndf/contracts/data/internal-names.json`、`plugins/ndf/tests/domains/project/test_answer_decide.py`、`plugins/ndf/tests/domains/project/test_write_plan.py`、`plugins/ndf/contracts/schemas/internal/project-held-answers.schema.json`、`plugins/ndf/tests/domains/project/test_project_held.py`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/languages.json`、`plugins/ndf/docs/contracts/ndf-settings.md`、`plugins/ndf/contracts/schemas/io/project.args.schema.json`、`plugins/ndf/contracts/schemas/io/project.result.schema.json`（`items` の `result` の説明）、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`docs/specifications/ndf-project-analysis-record.md`、`.ndf/project.json`、`plugins/ndf/tests/domains/project/test_project_measure.py`、`plugins/ndf/tests/domains/project/test_project_cli.py`、`plugins/ndf/tests/domains/project/test_analysis_record.py`、`plugins/ndf/tests/domains/project/test_measure_project_branch_state.py` |
 
 ## 人へ残す判断
 
