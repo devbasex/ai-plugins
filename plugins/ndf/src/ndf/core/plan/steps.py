@@ -27,10 +27,12 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 import time
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -54,11 +56,12 @@ class StepRefused(Exception):
 
 @dataclass(frozen=True)
 class StepContext:
-    """ステップを打つ文脈。`values` は差し込みの値（`state_dir` など）。"""
+    """ステップを打つ文脈。`values` は差し込みの値（`state_dir` など）、`env` は子の環境に重ねる値（#1959 の「子へ渡す環境変数」）。"""
 
     plan: Plan
     state_dir: Path
     values: dict[str, str]
+    env: Mapping[str, str] = field(default_factory=dict)
 
 
 def usable_worktree(path: Optional[str]) -> bool:
@@ -219,8 +222,9 @@ def _log_path(ctx: StepContext, step: Step) -> Path:
 def _launch(ctx: StepContext, step: Step) -> subprocess.Popen:
     args = assemble_decide.fill(step.run, ctx.values)
     _log_path(ctx, step).parent.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, **ctx.env} if ctx.env else None
     return subprocess.Popen(
-        args, cwd=workdir(ctx.plan, step), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
+        args, cwd=workdir(ctx.plan, step), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
     )
 
 
