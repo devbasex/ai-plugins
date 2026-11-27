@@ -1,6 +1,6 @@
 """バージョンの無いリリース記録で、届け先ごとの反映を何で確かめたかを決める（確かめ 8。#4580）。
 
-確定仕様（docs/specifications/ndf-project-flow-close-and-unversioned-records.md）の確かめ 8 と、「対象の届け先の決め方」・
+確定仕様（ndf-project-flow-close-and-unversioned-records.md）の確かめ 8 と、「対象の届け先の決め方」・
 「届け先ごとの反映の確かめ」・「セキュリティ」（結果を読むコマンドの実行の境界）のとおりに動く。
 
 - 届け先の設定は、push の `after` の時点のものを `git cat-file --batch` の 1 回で読み、5 つ（`missing_ref`・`absent`・

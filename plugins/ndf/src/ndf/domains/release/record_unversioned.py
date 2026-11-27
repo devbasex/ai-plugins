@@ -1,6 +1,6 @@
 """バージョンの無いリリース記録を届け先ごとに確かめて書き、対象の一覧を訂正する（`record --version`・`--correct-targets`。#4580）。
 
-手順は確定仕様（docs/specifications/ndf-project-flow-close-and-unversioned-records.md）の
+手順は確定仕様（ndf-project-flow-close-and-unversioned-records.md）の
 「バージョンの無いリリース記録の書き方」の確かめ 1〜8（確かめ 0 は引数の受け口の `cli._record_args`）と書く順の手順 1〜4、
 「対象の一覧の訂正」のとおりである。
 
