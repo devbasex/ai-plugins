@@ -444,7 +444,7 @@ def clear_private_residue(path: Path) -> None:
 
     公開の直後に終了すると、一時ディレクトリの `data` と `path` が同じ inode を指したままになるので、`data` の名前を
     消して `path` のリンク数を 1 に戻す。NDF が作ったと確かめられるものだけを消す。呼んだ利用者だけの一時ディレクトリと、
-    その中の呼んだ利用者の空の通常のファイル `data` である。違えば `EntryUnsafe`、ほかのファイルがあれば `OSError`。
+    その中の呼んだ利用者の空の通常のファイル `data` である。違うか、`data` のほかの項目があれば、何も消さずに `EntryUnsafe`。
     """
     if sys.platform != "darwin":
         return
@@ -456,6 +456,8 @@ def clear_private_residue(path: Path) -> None:
             return
         try:
             owned = _tmp_owned(tmp, tmp_fd)
+            if set(os.listdir(tmp_fd)) - {"data"}:  # data を消す前に、すべての項目を確かめる
+                raise EntryUnsafe(tmp, "other")
             with contextlib.suppress(FileNotFoundError):  # noqa: NDF402 ファイル: data を作る前か消した後に終了した
                 st = os.stat("data", dir_fd=tmp_fd, follow_symlinks=False)
                 if not (stat.S_ISREG(st.st_mode) and st.st_uid == os.geteuid() and st.st_size == 0):

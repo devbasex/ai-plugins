@@ -83,6 +83,19 @@ def test_on_macos_the_residue_of_a_killed_publish_is_removed(tmp_path: Path, mon
     assert out.stat().st_nlink == 1
 
 
+def test_on_macos_a_temporary_directory_with_another_entry_is_left_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`data` のほかの項目がある一時ディレクトリは、`data` も消さずに `OSError`（PR 4686 の r5-3）。"""
+    out = tmp_path / "reviewed-head"
+    monkeypatch.setattr(outputs.worker_paths.sys, "platform", "darwin")
+    tmp = tmp_path / outputs.worker_paths._private_tmp_name(out.name)
+    tmp.mkdir(mode=0o700)
+    (tmp / "data").touch(mode=0o600)
+    (tmp / "other").touch()
+    with pytest.raises(OSError, match="片付けられない"):
+        outputs.check(out)
+    assert sorted(p.name for p in tmp.iterdir()) == ["data", "other"]
+
+
 def test_on_macos_an_existing_file_gets_no_temporary_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """既にある出力には、公開用の一時ディレクトリを作らない（PR 4686 の r4-4）。"""
     out = tmp_path / "reviewed-head"
