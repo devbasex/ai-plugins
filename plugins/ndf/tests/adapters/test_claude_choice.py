@@ -249,7 +249,7 @@ def test_a_refusal_with_no_time_left_does_not_switch_nor_check_the_material(judg
 
 def test_a_check_that_uses_up_the_time_stops_the_switch(judge_repo, recorder, tmp_path, monkeypatch) -> None:
     clock = [0.0]
-    monkeypatch.setattr(llm, "_clock", lambda: clock[0])
+    monkeypatch.setattr(claude_choice, "_monotonic", lambda: clock[0])
     calls = Calls(_parsed(REFUSED)._replace(launched=True, seconds=2.0), _answer(GOOD))
     got = llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=lambda: clock.__setitem__(0, 30.0))
     assert not got.ok and len(calls.argv) == 1 and _refused_only(tmp_path / "store")
@@ -258,7 +258,7 @@ def test_a_check_that_uses_up_the_time_stops_the_switch(judge_repo, recorder, tm
 def test_no_time_left_after_writing_the_switch_row_stops_the_base_launch(judge_repo, recorder, tmp_path, monkeypatch) -> None:
     """r7-4: 切り替えの記録を書く間に期限を使い切れば、基準の組を起動しない。"""
     clock = [0.0]
-    monkeypatch.setattr(llm, "_clock", lambda: clock[0])
+    monkeypatch.setattr(claude_choice, "_monotonic", lambda: clock[0])
     real = model_choice.base_fallback
 
     def slow(choice, reason):
