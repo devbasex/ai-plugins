@@ -315,16 +315,18 @@ def test_issue_3702_sections_reviewed_against_another_target_are_reviewed_again(
 
 @pytest.mark.parametrize(
     ("recorded", "base", "reviewed"),
-    [("m1", "m1", {A, B}), ("m1", "m2", {A, B}), ("m2", "m1", set()), ("x", "m1", set()), (None, "m1", set())],
+    [("m1", "m1", {A, B}), ("m1", "m2", set()), ("m2", "m1", set()), (None, "m1", set())],
 )
-def test_pr_4638_r3_1_sections_are_kept_only_while_the_range_does_not_grow(recorded: str | None, base: str, reviewed: set[str]) -> None:
-    """詳細レビューの記録は、記録の起点が今の起点と同じかその祖先のときだけ引き継ぐ（`--base` がブランチかコミットかは問わない）。
-    ここでは m1 が m2 の祖先。起点が前へ戻った・つながらない・起点の記録が無いなら、前に読んでいない変更が範囲に入りうるので外す。"""
+def test_pr_4638_r4_1_sections_are_kept_only_while_the_start_of_the_diff_is_the_same(
+    recorded: str | None, base: str, reviewed: set[str]
+) -> None:
+    """詳細レビューの記録は、記録の起点が今の起点と同じときだけ引き継ぐ（`--base` がブランチかコミットかは問わない）。記録の起点が
+    今の起点の祖先でも、同じ HEAD に対する差分の中身が変わり、前に読んでいない変更が現れうるので外す。起点の記録が無いときも外す。"""
     state = {store.REVIEWED: [A, B], store.REVIEWED_MVV: APPROVED, store.REVIEWED_BASE_BRANCH: "main"}
     if recorded:
         state[store.REVIEWED_BASE_COMMIT] = recorded
     basis = scope_decide.Basis(base, mvv=APPROVED, base_branch="main")
-    assert scope_decide.reviewed_for(state, basis, lambda start, now: (start, now) == ("m1", "m2")) == reviewed
+    assert scope_decide.reviewed_for(state, basis) == reviewed
 
 
 @pytest.mark.parametrize(("recorded", "head"), [("main", "h1"), ("sprint/y", None), (None, None)])

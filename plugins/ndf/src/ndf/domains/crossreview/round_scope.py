@@ -20,12 +20,6 @@ def previous_head(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basi
     return prev if prev is not None and _reachable_from(g, prev, head) else None
 
 
-def reviewed(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis) -> set[str]:
-    """今の起動で引き継げる詳細レビューの記録（`scope_decide.reviewed_for`）。記録の起点が今の起点の祖先かを git で確かめ、
-    確かめられなければ引き継がない。`run` と `review-scope` の両方がこれを呼ぶ（PR 4638 の r3-1）。"""
-    return scope_decide.reviewed_for(state, basis, lambda start, now: _reachable_from(g, start, now))
-
-
 def descended(g: git.Git, scope: scope_decide.Scope, head: str) -> scope_decide.Scope:
     """前の head を git で確かめる前に決めた範囲のうち、前の head からの差分（`SINCE`）は、その head が `head` の祖先のときだけ
     使い、ほかは PR の全差分へ戻す。全差分の範囲には git を起動しない（`review-scope` は範囲だけを返すので、前の head が要らない）。"""

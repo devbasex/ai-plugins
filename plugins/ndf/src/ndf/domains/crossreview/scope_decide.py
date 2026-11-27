@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf.domains.crossreview import finish_decide as fin
@@ -84,19 +84,17 @@ def reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None, base_branch
     return set(store.list_of(state, store.REVIEWED))
 
 
-def reviewed_for(state: Mapping[str, Any], basis: Basis, contains: Callable[[str, str], bool]) -> set[str]:
-    """`run` と `review-scope` が共通に使う、今の起動で引き継げる詳細レビューの記録（PR 4638 の r2-1・r3-1）。MVV と比較元の
-    ブランチを `basis` で照らし、差分の起点（`basis.base`。merge-base の SHA）も照らす。記録の起点が今の起点と同じか、その
-    祖先（`contains(記録の起点, 今の起点)`）のときだけ引き継ぐ。今の範囲が前の範囲に含まれ、前に読んでいない変更が範囲に
-    入らないためである。起点が前へ戻った（コミットの `--base` から分岐点の前のブランチへ戻した）なら、間の変更を読んでいない
-    ので引き継がない。起点を記録しない前のバージョンの記録も引き継がない。`--base` がブランチかコミットかは問わない。"""
+def reviewed_for(state: Mapping[str, Any], basis: Basis) -> set[str]:
+    """`run` と `review-scope` が共通に使う、今の起動で引き継げる詳細レビューの記録（PR 4638 の r2-1・r3-1・r4-1）。MVV と比較元の
+    ブランチを `basis` で照らし、差分の起点（`basis.base`。merge-base の SHA）も照らす。記録の起点が今の起点と同じときだけ
+    引き継ぐ。起点が違えば、記録の起点が今の起点の祖先でも、同じ HEAD に対する差分の中身が変わり、前に読んでいない変更が
+    現れうる（起点 A で 0、途中の B で 1、HEAD で 0 なら、B を起点にした差分にだけ 1 から 0 への変更が現れる）。起点を記録
+    しない前のバージョンの記録も引き継がない。`--base` がブランチかコミットかは問わない。比べるのは記録の値どうしなので、
+    git を起動しない（r4-2）。"""
     kept = reviewed_of(state, basis.mvv, basis.base_branch)
     if not kept or basis.base is None:
         return kept
-    start = state.get(store.REVIEWED_BASE_COMMIT)
-    if not isinstance(start, str) or not start:
-        return set()
-    return kept if start == basis.base or contains(start, basis.base) else set()
+    return kept if state.get(store.REVIEWED_BASE_COMMIT) == basis.base else set()
 
 
 def _known(value: object) -> str:
