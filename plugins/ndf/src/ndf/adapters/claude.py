@@ -31,7 +31,7 @@ from typing import Any, Callable, Mapping, NamedTuple, Optional, Protocol, Seque
 
 from ndf import identity, process_group
 from ndf.adapters import claude_precheck, cli_floor, launch_slot, transcript
-from ndf.adapters.agents import usage_limit
+from ndf.adapters.agents import claude_body, claude_denials, usage_limit
 from ndf.adapters.run_log import child_process_env, record_cost
 from ndf.contracts import facts, limits
 
@@ -587,7 +587,7 @@ def parse_reply(stdout: str) -> ClaudeReply:
         return payload
     spent = payload.get("total_cost_usd")
     cost = float(spent) if isinstance(spent, (int, float)) and not isinstance(spent, bool) else 0.0
-    text = payload.get("result") if isinstance(payload.get("result"), str) else stdout
+    text = claude_body(payload, stdout)
     reply = _error_reply(payload, text, cost) if payload.get("is_error") else _answer_reply(payload, text, cost)
     return _with_usage(reply, payload)
 
@@ -596,7 +596,7 @@ def _with_usage(reply: ClaudeReply, payload: Mapping[str, Any]) -> ClaudeReply:
     """回答に、使用量ログの行の元になる結果の値を持たせる。形の違う値は None にする（#1959）。"""
     sid, usage, models, spent = (payload.get(k) for k in ("session_id", "usage", "modelUsage", "total_cost_usd"))
     return reply._replace(
-        denials=tuple(d for d in found if isinstance(d, dict)) if isinstance(found := payload.get("permission_denials"), list) else (),
+        denials=claude_denials(payload),
         session_id=sid if isinstance(sid, str) and sid else None,
         usage=usage if isinstance(usage, Mapping) else None,
         model_usage=models if isinstance(models, Mapping) else None,

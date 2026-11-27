@@ -166,6 +166,15 @@ def _classify(row: dict[str, Any], item: dict[str, Any], named: str, items: Sequ
     row |= {MVV: found[0], PINNED: True, JUDGED: mvv, "severity": criteria_decide.heavier(*pinned)}
 
 
+def _keep_heavier(row: dict[str, Any], raised: Optional[str]) -> None:
+    """同じ指摘の別の報告の重要度 `raised` を `row` に重ねる（重い方を残す。重さを固定した指摘は固定する前の重さも同じ）。"""
+    severity = criteria_decide.heavier(criteria_decide.severity_of(row.get("severity")), raised)
+    if severity is not None:
+        row["severity"] = severity
+    if UNPINNED in row:
+        row[UNPINNED] = criteria_decide.heavier(criteria_decide.severity_of(row[UNPINNED]), raised)
+
+
 def _skip_is_void(row: dict[str, Any], named: Optional[str], mvv: Optional[str]) -> bool:
     """出し直された見送り済みの指摘を、判定し直すか。別の MVV での見送りと、必ず人の承認が要る操作と今回初めて言われた
     指摘（修正担当が見送りを決められない）が当たる。"""
@@ -218,14 +227,6 @@ def _mvv_warnings(round_no: int, unknown: Sequence[str], unexplained: Sequence[s
 def _serious(row: Mapping[str, Any]) -> bool:
     """重大な指摘（critical か major）か。重要度の分からない指摘は数えない。"""
     severity = criteria_decide.severity_of(row.get("severity"))
-    return severity is not None and criteria_decide.blocking(severity)
-
-
-def _accepted_serious(item: dict[str, Any], named: Optional[str]) -> bool:
-    """相手役の 1 件が、このラウンドで受け付けた重要度で重大か。行に残る前のラウンドの重さは見ない。"""
-    if named is not None and not criteria_decide.redline(named):  # MVV に反する指摘は重さを妨げになる側に固定する
-        return True
-    severity = _raised(item, named)["severity"]
     return severity is not None and criteria_decide.blocking(severity)
 
 
@@ -288,7 +289,8 @@ class FindingJournal:
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
         unexplained: list[str] = []
-        serious: dict[str, None] = {}
+        # このラウンドの報告だけを指摘ごとに重ねた重さ（前のラウンドの重さを持つ行とは別の値。#2944）
+        this_round: dict[str, dict[str, Any]] = {}
         for item in raised:
             text = item.get("text")
             text = text.strip() if isinstance(text, str) else ""
@@ -306,17 +308,19 @@ class FindingJournal:
                 self._raised_again(known, item, round_no, named, mvv)
             if isinstance(item.get("by"), str):
                 known[RAISERS] = list(dict.fromkeys([*store.list_of(known, RAISERS), item["by"]]))
+            new = _raised(item, named)
+            seen = this_round.setdefault(str(known["id"]), {"severity": new["severity"]})
+            _keep_heavier(seen, new["severity"])
             if named is not None and known.get("by") != BY_NDF:
                 _classify(known, item, named, items, mvv)
+                _classify(seen, item, named, items, mvv)
                 if _text(item.get("impact")) is None:
                     unexplained.append(str(known["id"]))
             elif named is None and items and _named_any(item):
                 unknown.append(str(known["id"]))
             touched[key] = known
-            if _accepted_serious(item, named):
-                serious[str(known["id"])] = None
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
-        self.entered_serious = list(serious)
+        self.entered_serious = [fid for fid, seen in this_round.items() if _serious(seen)]
         return frozenset(key for key, row in touched.items() if _blocking(row))
 
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
@@ -328,11 +332,7 @@ class FindingJournal:
             _unclassify(known)
         if known.get("outcome") == fin.FIXED or _skip_is_void(known, named, mvv):
             self._revive(known, new, _text(item.get("section")), round_no)
-        severity = criteria_decide.heavier(criteria_decide.severity_of(known.get("severity")), new["severity"])
-        if severity is not None:
-            known["severity"] = severity
-        if UNPINNED in known:
-            known[UNPINNED] = criteria_decide.heavier(criteria_decide.severity_of(known[UNPINNED]), new["severity"])
+        _keep_heavier(known, new["severity"])
         if "impact" not in known and "impact" in new:
             known["impact"] = new["impact"]
         if "raised_severity" in known:

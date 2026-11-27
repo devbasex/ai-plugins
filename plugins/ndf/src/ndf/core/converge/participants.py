@@ -284,10 +284,15 @@ class ClaudeAnswer(NamedTuple):
 
 
 def claude_answer(out: Path) -> ClaudeAnswer:
-    """claude の出力を 1 回だけ読み、本文と拒否を取り出す（読めなければ `OSError`）。外側が JSON でなければ（途中で切れた出力）、
-    本文は出力のままになる。"""
-    reply = claude.parse_reply(out.read_text(encoding="utf-8", errors="replace"))
-    return ClaudeAnswer(reply.raw, reply.denials)
+    """claude の出力を 1 回だけ読み、本文と拒否を取り出す（読めなければ `OSError`）。本文の JSON は解析しない。"""
+    raw = out.read_text(encoding="utf-8", errors="replace")
+    try:
+        payload = json.loads(raw)
+    except ValueError:  # 外側が JSON でなければ（途中で切れた出力）そのまま探す
+        payload = None
+    if not isinstance(payload, dict):
+        return ClaudeAnswer(raw, ())
+    return ClaudeAnswer(agents.claude_body(payload, raw), agents.claude_denials(payload))
 
 
 def answer_text(runtime: str, out: Path) -> str:

@@ -367,6 +367,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `with_choice` | `core/converge/participants.py` | 新設 | `with_choice(spec: agents.Launch, choice: Optional[Any]) -> agents.Launch` | `review_launch`・`read_only_launch`・`reading_launch` が組み立てた起動に組の引数と環境を足し、Codex は `usage_args` を足す |
 | `answer_text` | 同 | 変更 | 変えない | 結果を探す本文を返す。Codex の `--json` の出力では回答のファイルの末尾を返す。回答のファイルのパスと、ファイルが無い場合の扱いは、表の下の「Codex の回答の読み方」に従う |
 | `_start_and_watch` | `adapters/agents.py` | 変更 | 変えない | `AgentStatus.seconds` に起動から終了までの秒を入れる |
+| `claude_body`・`claude_denials` | 同 | 新設 | `claude_body(payload: Mapping, stdout: str) -> str`、`claude_denials(payload: Mapping) -> tuple[dict, ...]` | `claude -p` の外側の JSON から、本文と読み取りの拒否を取り出す。`claude.parse_reply` と `participants.claude_answer` が共有し、本文の JSON は解析しない |
 | `codex_usage` | 同 | 新設 | `codex_usage(events: Sequence) -> Optional[CodexUsage]`（`events` は `codex_events` の値。拒否の判定 `codex_refused(events)` と 1 回の読み取りを共有する） | `turn.completed` の行の `usage` を足し合わせる |
 | `codex_cost` | `domains/records/usage.py` | 新設 | `codex_cost(used: Any, model: Optional[str]) -> tuple[str, Optional[float]]`（`used` は `agents.CodexUsage`） | 換算に使ったモデルの名前と、単価表から求めた USD を返す。単価の無いモデルの USD は None |
 | `record_codex` | 同 | 新設 | `record_codex(used: Any, meta: Mapping[str, Any], choice: Any) -> None` | `caller` が `codex-exec` の行を使用量ログに書く。費用の欄と `unpriced` を記録する条件は、表の下の「Codex の費用と `unpriced` の記録」に従う |
@@ -376,7 +377,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `experiment_values` | 同 | 新設 | `experiment_values(rows: Sequence, first: Collection[str], seats: Sequence[str]) -> tuple[Optional[int], dict[str, Optional[float]]]` | 1 ラウンド目の採用された重大な指摘の数と、シートごとの挙げた割合を返す。`first` は 1 ラウンド目で受け付けた重要度が重大だった指摘の id で、その中に裁定していない指摘があれば数は None |
 | `_record_experiment` | `domains/crossreview/drive.py` | 新設 | `_record_experiment(run: _Run, final: str) -> None` | シートと、`NDF_CHARGE_TO` の単位の効果指標を書く |
 
-- シートの単位は `<cross-review の実行の ID>:<シート>`。実行の ID は状態ファイルに 1 回だけ作り、打ち直しでも同じ値。1 ラウンド目で出た指摘のうち、そのラウンドで受け付けた重要度が重大だったものの id も状態ファイルに残す。前のラウンドの重い重要度は引き継がない。後のラウンドで担当が同じ指摘をもう一度挙げると、ジャーナルの行の `round` と重要度がそのラウンドの値に書き換わり、1 ラウンド目の指摘と当時の重要度が見分けられなくなるためである
+- シートの単位は `<cross-review の実行の ID>:<シート>`。実行の ID は状態ファイルに 1 回だけ作り、打ち直しでも同じ値。1 ラウンド目で出た指摘のうち、そのラウンドで受け付けた重要度が重大だったものの id も状態ファイルに残す。前のラウンドの重い重要度は引き継がない。同じラウンドの同じ指摘への複数の報告は、ジャーナルの行と同じ規則で 1 つに重ねてから判定する。MVV の項目が付けば重要度を引き上げ、人の承認が必要な項目も付けば、そちらを優先して引き上げない。後のラウンドで担当が同じ指摘をもう一度挙げると、ジャーナルの行の `round` と重要度がそのラウンドの値に書き換わり、1 ラウンド目の指摘と当時の重要度が見分けられなくなるためである
 - 残した id は、その時の `NDF_CHARGE_TO` の割り付け ID と対にする。後の起動で `NDF_CHARGE_TO` が別の ID になったら、その起動の最初のラウンドの指摘で残し直す。同じ状態の保存先で別の実装の変更を続けてレビューした場合に、前の実装の指摘で評価しないためである。`NDF_CHARGE_TO` の無い起動は残し直さない
 - 差分を読めないシートがあって止まったラウンドでは、残す id を確定しない（状態ファイルの `partial`）。再開して全シートが読んだ最初のラウンドまで、重大な指摘の id を足し合わせる。読めなかったシートが再開後に初めて挙げた指摘を、数え漏らさないためである
 - 採用された指摘は修正担当が直した（`fixed`）指摘で、見送りと、ラウンドの上限で終わって裁定していない指摘は含めない。重大は critical か major。review の指標は、同じレビューに 2 つ以上のシートがあり、採用が 1 件以上の場合だけ値を持つ
@@ -386,7 +387,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | 指標 | 上限で値が決まる条件 |
 | --- | --- |
 | design・impl | 残した id の指摘が、すべて裁定済み（修正か見送り）である |
-| review（シートの割合） | 全ラウンドの重大な指摘がすべて裁定済みで、修正が 1 件以上ある。未裁定が 1 件でもあれば、再開後の裁定で分母と分子が変わるので書かない |
+| review（シートの割合） | 全ラウンドでシート（レビュー担当）が挙げた重大な指摘がすべて裁定済みで、そのうち修正された指摘が 1 件以上ある。NDF の機械検査が追加した指摘は数えない。未裁定が 1 件でもあれば、再開後の裁定で分母と分子が変わるので書かない |
 
 上限で書いたシートの割合は、その後にレビューを再開して新しい指摘が出ても書き直さない。
 

@@ -257,6 +257,18 @@ def usage_limit(text: str) -> Optional[str]:
     return None
 
 
+def claude_body(payload: Mapping[str, Any], stdout: str) -> str:
+    """claude の外側の JSON のオブジェクトの、結果を探す本文: `result` の文字列。無ければ出力のまま。本文の JSON は解析しない。"""
+    body = payload.get("result")
+    return body if isinstance(body, str) else stdout
+
+
+def claude_denials(payload: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+    """claude の外側の JSON のオブジェクトの `permission_denials` の要素（辞書だけ）。"""
+    found = payload.get("permission_denials")
+    return tuple(d for d in found if isinstance(d, dict)) if isinstance(found, list) else ()
+
+
 def _denials_warning(stdout: str) -> Optional[str]:
     """claude が成功で終わり拒否が残ったときの警告の文（拒否は致命にしない）。
 

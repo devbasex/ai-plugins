@@ -289,6 +289,18 @@ def test_a_new_charged_unit_counts_the_severity_of_its_own_round(monkeypatch, ou
     assert data[experiment.KEY]["first"] == []
 
 
+@pytest.mark.parametrize("order", [("Value 1", "P1"), ("P1", "Value 1")])
+def test_reports_of_one_round_are_merged_with_the_approval_item_first(order: tuple[str, str]) -> None:
+    """承認が必要な項目が付いた指摘は重さを固定しないので、軽い報告だけなら重大に数えない。"""
+    reports = [_major("同じ指摘", by, "minor") | {"mvv": item} for by, item in zip(("codex", "kiro"), order)]
+    journal = FindingJournal()
+    journal.enter(1, reports, ("Value 1", "P1"), "v")
+    assert journal.entered_serious == []
+    alone = FindingJournal()
+    alone.enter(1, [r for r in reports if r["mvv"] == "Value 1"], ("Value 1", "P1"), "v")
+    assert alone.entered_serious == ["r1-1"]
+
+
 def test_the_round_limit_holds_the_seat_shares_while_a_serious_finding_is_undecided(outcomes) -> None:
     data, journal = _data(), FindingJournal()
     _entered(data, journal, 1, _major("一つ目", "codex"), _major("二つ目", "kiro"))
