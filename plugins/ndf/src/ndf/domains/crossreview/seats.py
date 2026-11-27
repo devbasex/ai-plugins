@@ -108,7 +108,7 @@ def _seat_launch(run: SeatRun, seat: str, prompt: str, stem: Path, choice: Optio
     readable = () if run.input_dir is None else (run.input_dir,)
     spec = participants.reading_launch(seat, participants.ClaudeReader(SEAT_SYSTEM, readable), run.cfg.worktree, prompt, stem)
     spec = participants.with_choice(spec, choice)
-    return agents.adding_env(spec, {identity.env_name("charge-to"): None})
+    return agents.adding_env(spec, {experiment.charge_env(): None})
 
 
 def _run_seat(

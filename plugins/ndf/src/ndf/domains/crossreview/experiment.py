@@ -41,9 +41,14 @@ def keep_first(data: dict[str, Any], entered: Sequence[str]) -> None:
         data[KEY]["first"] = list(entered)
 
 
+def charge_env() -> str:
+    """費用を手戻りとして負う割り付け ID を持つ環境変数の名前。"""
+    return identity.env_name("charge-to")
+
+
 def charge_to() -> Optional[str]:
     """このレビューと修正の費用を負う割り付け ID（環境変数。無いか空なら None）。"""
-    value = os.environ.get(identity.env_name("charge-to"))
+    value = os.environ.get(charge_env())
     return None if value == "" else value
 
 
