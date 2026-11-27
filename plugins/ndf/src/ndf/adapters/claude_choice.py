@@ -85,7 +85,7 @@ class ChoiceRun:
 
     @property
     def repo(self) -> Optional[str]:
-        """値を選ぶときに解決したリポジトリのキー。解決していなければ None。"""
+        """値を選ぶときに解決したリポジトリの識別子。解決していなければ None。"""
         return None if self.choice is None else self.choice.repo
 
     def env_changes(self) -> dict[str, Optional[str]]:

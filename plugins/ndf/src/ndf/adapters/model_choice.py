@@ -115,7 +115,7 @@ class Choice:
     `inherited_effort` は、ランタイム自身の effort の環境変数を子へ引き継ぐときの値（そのとき `effort` は None で、
     `--effort` を足さない）。`retry` は引き上げを求めた理由（引数か環境変数の指定の起動は None）で、`raised` は値が実際に
     変わったか。`store` は選んだときの実験の記録の保存先で、`base_fallback` が同じ保存先へ書くために持つ。`repo` は割り付けと停止の
-    判定で解決したリポジトリのキー（解決しない起動は None）で、使用量ログの行に書く呼び手が読む。
+    判定で解決したリポジトリの識別子（`launch_approval.repo_digest`。解決しない起動は None）で、使用量ログの行に書く呼び手が読む。
     """
 
     layer: str
@@ -908,7 +908,7 @@ def launch_choice(
     metric = metric_of(stage)
     where = Where(launch_approval.repo_key(root), stage, runtime, compatibility_key(arms, metric))
     experiment = got.enabled and len(arms) > 1 and metric is not None
-    choice = replace(choice, repo=where.repo)  # 割り付けの無い起動と基準への切り替えでも、行に書けるように持つ
+    choice = replace(choice, repo=launch_approval.repo_digest(where.repo))  # 割り付けの無い起動と基準への切り替えでも、行に書けるように持つ
     u = _Unit(req.unit, req.mode, tuple(arms), got.allocation, experiment, got.enabled, where, now, store)
     if manual.given:
         _halt_manual(u, req.charge_to)

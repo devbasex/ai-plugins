@@ -240,7 +240,14 @@ def _interval(s: ad.Stats) -> Optional[list[float]]:
 
 def _arm_item(where: model_choice.Where, arm: Mapping[str, str], s: ad.Stats, base_roi: Optional[float]) -> dict:
     roi = s.quality / s.cost if s.units and s.cost else None  # 費用の平均は正の値か None
-    item = {"kind": "arm", **where.fields(), "key": where.key, **dict(arm), "units": s.units}
+    item = {
+        "kind": "arm",
+        **where.fields(),
+        "repo": launch_approval.repo_digest(where.repo),
+        "key": where.key,
+        **dict(arm),
+        "units": s.units,
+    }
     item |= {"quality": s.quality if s.units else None, "quality_interval": _interval(s), "cost_usd": s.cost}
     ratio = roi / base_roi if roi is not None and base_roi else None  # 効果 0 の組の ROI 0 は比 0。基準の ROI が 0 なら比べられない
     return item | {"unpriced_units": s.units - s.cost_units, "roi": roi, "roi_ratio": ratio}
@@ -393,11 +400,12 @@ def _report(a: argparse.Namespace) -> int:
         kept = model_choice.oldest_kept(store)
     except model_choice.STORE_ERRORS as exc:
         raise internal.InternalError("precondition", f"使用量ログか実験の記録を読めない: {exc}") from exc
-    items = report_rows(usage_rows, rows, Scope(since, end, a.stage, allocation, launch_approval.repo_key(root)))
+    repo = launch_approval.repo_key(root)
+    items = report_rows(usage_rows, rows, Scope(since, end, a.stage, allocation, repo))
     period = f"{a.since}..{a.until}"
     summary = f"{period} の集計 {len(items)} 件" if items else f"{period}: {NO_RECORDS}"
     metrics: dict[str, Any] = {"usage_rows": len(usage_rows), "experiment_rows": len(rows), "broken_rows": len(broken)}
-    metrics["broken_experiment_rows"] = broken_experiments
+    metrics |= {"broken_experiment_rows": broken_experiments, "repo": launch_approval.repo_digest(repo)}  # どの区分が今のリポジトリかを引く
     # 月の掃除が消した月は戻らない。--since が残っている最も古い月より前なら、実験の組はその月からの記録だけだと添える
     if kept is not None and since < kept:
         metrics["kept_since"] = kept.date().isoformat()

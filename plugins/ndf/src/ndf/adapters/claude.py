@@ -607,7 +607,7 @@ def _with_usage(reply: ClaudeReply, payload: Mapping[str, Any]) -> ClaudeReply:
 
 
 def launch_meta(name: str, repo: Optional[str] = None) -> dict[str, Any]:
-    """使用量ログの行の工程の欄。`name` は工程の名前（作業種別か Skill の名前）、`repo` は呼び出し元が解決済みのリポジトリのキー（`launch_approval.repo_key` の値）。
+    """使用量ログの行の工程の欄。`name` は工程の名前（作業種別か Skill の名前）、`repo` は呼び出し元が解決済みのリポジトリの識別子（`launch_approval.repo_digest` の値）。
 
     `repo` を得るためだけに git を起動しない（起動 1 回ごとに git のプロセスが増えるため）。解決済みの値が無ければ欄を省く。
 

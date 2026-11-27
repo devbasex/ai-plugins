@@ -336,6 +336,8 @@ def test_report_reads_the_records_and_leaves_the_rates_file_alone(repo, capsys, 
     got = last_result(capsys.readouterr().out)
     assert [i["kind"] for i in got["items"]] == ["launch_group", "arm", "arm"] and got["metrics"]["usage_rows"] == 2
     assert got["metrics"]["broken_experiment_rows"] == 1
+    assert {i["repo"] for i in got["items"] if i["kind"] == "arm"} == {got["metrics"]["repo"]}
+    assert os.path.realpath(repo) not in json.dumps(got["items"])  # 結果にパスを出さない
     assert not (store / mc.facts.value("ndf-files", mc.WEIGHTS, "path")).exists()
 
 

@@ -19,7 +19,7 @@
     "step": {"type": "string", "description": "プランのステップの id"},
     "attempt": {"type": "integer", "minimum": 1, "description": "そのプランの実行でそのステップを実行した何回目か（最初が 1。打ち直しと、遷移で戻った実行の両方で 1 増える）"},
     "launched_at": {"$ref": "common.schema.json#/$defs/time", "description": "起動した時刻（書いた時刻とは別の値）"},
-    "repo": {"type": "string", "description": "対象のリポジトリのキー（git の共通ディレクトリの実体の絶対パス。launch_approval.repo_key）。解決済みの起動だけ"},
+    "repo": {"type": "string", "description": "対象のリポジトリの識別子（リポジトリのキーのハッシュの先頭 16 桁。launch_approval.repo_digest）。パスは書かない。解決済みの起動だけ"},
     "session_id": {"type": "string", "description": "起動した会話のセッション（呼び手が指定した id か、結果の session_id）"},
     "session_seq": {"type": "integer", "minimum": 0, "description": "その会話の中で何番目の起動か（最初が 0）。番号の飛びは書けなかった起動を示す"},
     "session_cost_usd": {"type": "number", "minimum": 0, "description": "結果の total_cost_usd。会話の累計で、起動 1 回の費用は同じ会話の 1 つ前の行との差で集計の時に求める（usage_decide.launch_costs）"},

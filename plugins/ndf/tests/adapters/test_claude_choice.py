@@ -167,6 +167,11 @@ SCHEMA = llm.answer_schema(choices=["fix", "stop"])
 GOOD = {"decision": "fix", "reason": "r", "basis": []}
 
 
+def _repo_digest(root: Path) -> str:
+    """行に書くのはパスを含まない識別子。"""
+    return model_choice.launch_approval.repo_digest(model_choice.launch_approval.repo_key(root))
+
+
 def _experiments(store: Path, kind: str) -> list[dict]:
     rows = [r for p in sorted(store.glob("launch-experiments-*.jsonl")) for r in model_choice.launch_records.whole_rows(p)]
     return [r for r in rows if r["kind"] == kind]
@@ -207,7 +212,7 @@ def test_a_refused_model_switches_to_the_base_once_without_counting_a_retry(judg
     errors = _experiments(tmp_path / "store", "launch_error")
     assert [(r["switched"], r["reason"]) for r in errors] == [(True, "model_refused")]
     assert [r.get("model_refused") for r in recorder.rows] == [True, None]  # 拒否された起動を使用量ログで見分ける
-    assert recorder.rows[0]["repo"] == recorder.rows[1]["repo"] == model_choice.launch_approval.repo_key(judge_repo)  # 切り替えた後も持つ
+    assert recorder.rows[0]["repo"] == recorder.rows[1]["repo"] == _repo_digest(judge_repo)  # 切り替えた後も持つ
 
 
 def test_the_switch_checks_the_material_before_launching_again(judge_repo, recorder) -> None:

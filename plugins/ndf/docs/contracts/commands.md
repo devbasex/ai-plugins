@@ -244,7 +244,7 @@
 | `ndf models pick` | `--layer`（string・必須）: 起動の層（worker・skill・judge・seat）<br>`--name`（string・必須）: 作業の名前（worker の作業の名前・Skill の名前など）<br>`--runtime`（string・任意・既定 `"claude"`）: ランタイム（claude か codex）<br>`--unit`（string・任意）: 単位の ID（省けば割り付けない）<br>`--retry`（string・任意）: 同じ失敗への 2 回目以降の起動の理由（省けば引き上げない）<br>`--args`（boolean・任意）: CLI に渡す引数を 1 行に 1 つずつ出す（省けば結果 JSON） |
 | `ndf models report` | `--since`（string・必須）: 期間の最初の日（JST。YYYY-MM-DD）<br>`--until`（string・必須）: 期間の最後の日（JST。YYYY-MM-DD）<br>`--stage`（string・任意）: 工程（impl など。省けばすべて） |
 
-結果の `metrics`: `broken_experiment_rows`（integer）・`broken_rows`（integer）・`experiment_rows`（integer）・`kept_since`（string）・`usage_rows`（integer）。`items` の要素は次の 3 つの形のどれかである。各項目の意味は結果のスキーマにある。
+結果の `metrics`: `broken_experiment_rows`（integer）・`broken_rows`（integer）・`experiment_rows`（integer）・`kept_since`（string）・`repo`（string）・`usage_rows`（integer）。`items` の要素は次の 3 つの形のどれかである。各項目の意味は結果のスキーマにある。
 
 - pick の起動の値（1 件）: `args`（array of string）・`assign_id`（string）・`effort`（string）・`effort_source`（string）・`layer`（string）・`mode`（string）・`model_source`（string）・`name`（string）・`raised`（boolean）・`requested_model`（string）・`runtime`（string）・`stage`（string）・`unit`（string）
 - report の起動の区分（工程 × 行の指定値）ごとの値（`kind` が `launch_group`）: `cost_usd`（number）・`effort`（string）・`judge_requests`（integer）・`judge_retry_rate`（number か null）・`judge_returned`（integer）・`kind`（const "launch_group"）・`launch_count`（integer）・`mismatched`（integer）・`mode`（string）・`repo`（string）・`requested_model`（string）・`requests`（integer）・`retry_rate`（number か null）・`runtime`（string）・`seconds`（number）・`stage`（string）・`steps`（integer）・`success_rate`（number か null）・`tokens`（object）・`unpriced_launches`（integer）
