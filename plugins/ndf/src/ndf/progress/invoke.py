@@ -60,7 +60,7 @@ CALLS = {"ndf.plan": PLAN, "ndf.skill": SKILL, "ndf.script": SCRIPT, definition.
 # 作業種別 → 呼ぶものの名前を持つ with のキー（listen は作業を呼ばないので無い）
 NAME_ARG = {PLAN: "plan", SKILL: "skill", SCRIPT: "argv"}
 # script の作業へ入力を渡す環境変数
-INPUT_ENV = "NDF_STAGE_INPUT"
+INPUT_ENV = plan_cli.STAGE_INPUT_ENV
 # skill の作業の上限（Skill 1 本を回す起動は実装の工程と同じ桁）
 SKILL_LIMIT = "monitor.phase.implement"
 SKILL_SYSTEM = "工程の作業を 1 つ行い、最後に結果 JSON（統一 JSON レポート）だけを回答する。"

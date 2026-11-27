@@ -17,6 +17,7 @@ from typing import Any, NamedTuple, Optional
 from ndf import contracts
 from ndf.adapters.git import END_OF_OPTIONS, Git
 from ndf.contracts import limits
+from ndf.core.production_merge import PROJECT_FILE
 from ndf.core.plan import inputs_decide, review_units_decide
 from ndf.core.plan import units_decide as ud
 
@@ -28,8 +29,12 @@ _UNITS_PATH = re.compile(r"^issues/issue-(\d+(?:-\d+)*)-plan\.units\.json$")
 _DESIGN_PATH = re.compile(r"^issues/issue-(\d+(?:-\d+)*)-design\.md$")
 UNITS_SUFFIX = "-plan.units.json"
 PLAN_SUFFIX = "-plan.md"
+# 承認の記録の保存先の、レビューした HEAD のファイル（`ndf cross-review run` の `--reviewed-out` の出力先）
+REVIEWED_HEAD = "reviewed-head"
 # 独立した単位を持たない扱い（設計書の「設計の結果」の表の値）
 EXCLUDED_HANDLINGS = frozenset({inputs_decide.MERGE_HANDLING, "閉じる"})
+# 設計書の無い課題（設計書を省いた課題）の扱い
+IMPLEMENT_HANDLING = "実装する"
 
 _SYMLINK_MODE = "120000"
 _TASK_ID = re.compile(r"T[1-9][0-9]*")
@@ -147,12 +152,13 @@ def _decode(path: str, data: Optional[bytes]) -> Optional[str]:
 
 class Collected(NamedTuple):
     """スプリントの課題の振り分け。`omitted` は実装計画を省いた課題、`excluded` は扱いが「マージする」「閉じる」の課題、
-    `missing` はどちらでもないのに単位のファイルが無い課題。"""
+    `missing` はどちらでもないのに単位のファイルが無い課題。`handlings` は課題ごとの（扱い, 統合先）。"""
 
     files: tuple[ud.UnitFile, ...]
     omitted: tuple[int, ...]
     excluded: tuple[int, ...]
     missing: tuple[int, ...]
+    handlings: Mapping[int, tuple[str, Optional[int]]]
 
 
 class TaskGap(NamedTuple):
@@ -165,12 +171,17 @@ class TaskGap(NamedTuple):
 
 
 class Report(NamedTuple):
-    """確かめの結果。`task_gaps`・`stale_tables`（表を書き直すと変わる実装計画）は `docs` を指定したときだけ入る。"""
+    """確かめの結果。`task_gaps`・`stale_tables`（表を書き直すと変わる実装計画）は `docs` を指定したときだけ入る。
+
+    `files` は判定した単位のファイル（省いた課題の 1 単位を含む）である。`handlings` は課題から確かめたときだけ入る。
+    """
 
     judgement: ud.Judgement
     missing: tuple[int, ...]
     task_gaps: tuple[TaskGap, ...]
     stale_tables: tuple[str, ...]
+    files: tuple[ud.UnitFile, ...]
+    handlings: Mapping[int, tuple[str, Optional[int]]]
 
 
 # --- 読み手 -------------------------------------------------------------------------------------
@@ -250,29 +261,63 @@ def collect(tree: Tree, issues: Sequence[int], omitted: Sequence[int]) -> Collec
 
 def _collect(tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int], omitted: Sequence[int]) -> Collected:
     wanted = tuple(sorted(set(issues)))
-    dropped = _excluded_by_design(tree, listing, wanted)
-    excluded = tuple(n for n in wanted if n in dropped)
+    handled, excluded = _handlings(tree, listing, wanted)
     skipped = tuple(n for n in wanted if n in set(omitted) and n not in excluded)
     rest = [n for n in wanted if n not in excluded and n not in skipped]
     found = find(tree, rest, sorted(listing))
     paths = list(dict.fromkeys(found[n] for n in rest if n in found))
     texts = tree.read_all(paths, listing)
     files = tuple(_load(path, texts[path]) for path in paths)
-    return Collected(files, skipped, excluded, tuple(n for n in rest if n not in found))
+    return Collected(files, skipped, excluded, tuple(n for n in rest if n not in found), handled)
 
 
-def _excluded_by_design(tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int]) -> set[int]:
-    """設計書の「設計の結果」の扱いが「マージする」か「閉じる」の課題。設計書が無いか、扱いが割れる課題は含めない。"""
+def _design_rows(
+    tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int]
+) -> dict[int, list[tuple[str, Optional[int]]]]:
+    """課題ごとの、名前の番号にその課題を持つ設計書の「設計の結果」の（扱い, 統合先）。設計書のパスの順に並ぶ。"""
     named = {path: _numbers_in(_DESIGN_PATH, path) & set(issues) for path in sorted(listing)}
     texts = tree.read_all([path for path, found in named.items() if found], listing)
-    handlings: dict[int, set[str]] = {}
+    rows: dict[int, list[tuple[str, Optional[int]]]] = {}
     for path, text in texts.items():
         if text is None:
             continue
         table = inputs_decide.design_handlings(text)
-        for issue in named[path] & table.keys():
-            handlings.setdefault(issue, set()).add(table[issue][0])
-    return {issue for issue, found in handlings.items() if found <= EXCLUDED_HANDLINGS}
+        for issue in sorted(named[path] & table.keys()):
+            rows.setdefault(issue, []).append(table[issue])
+    return rows
+
+
+def _handlings(
+    tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int]
+) -> tuple[dict[int, tuple[str, Optional[int]]], tuple[int, ...]]:
+    """課題ごとの（扱い, 統合先）と、独立した単位を持たない課題。
+
+    扱いが割れる課題は独立した単位を持つ扱いを取り、設計書に行の無い課題は「実装する」である。
+    """
+    rows = _design_rows(tree, listing, issues)
+    out: dict[int, tuple[str, Optional[int]]] = {}
+    for issue in issues:
+        found = rows[issue] if issue in rows else [(IMPLEMENT_HANDLING, None)]
+        out[issue] = next((row for row in found if row[0] not in EXCLUDED_HANDLINGS), found[0])
+    return out, tuple(n for n in issues if out[n][0] in EXCLUDED_HANDLINGS)
+
+
+def project_of(tree: Tree) -> dict[str, Any]:
+    """読み元の `.ndf/project.json`。無いか、オブジェクトでなければ空。JSON として読めなければ `UnitsFileError`。"""
+    text = tree.read(PROJECT_FILE)
+    if text is None:
+        return {}
+    try:
+        found = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise UnitsFileError(f"{PROJECT_FILE}: {exc.lineno} 行目が JSON として読めない（{exc.msg}）") from None
+    return found if isinstance(found, dict) else {}
+
+
+def issues_referred(files: Sequence[ud.UnitFile]) -> tuple[int, ...]:
+    """ファイルの課題と、タスクの受け入れ条件が指すすべての課題。"""
+    referred = {int(ref.partition(":")[0]) for f in files for t in f.tasks for ref in t.criteria}
+    return tuple(sorted(referred.union(*(f.issues for f in files))))
 
 
 def check(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: ud.Limits, criteria: Mapping[int, int], docs: bool) -> Report:
@@ -282,10 +327,27 @@ def check(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: ud.
     """
     listing = tree.listing()
     found = _collect(tree, listing, issues, omitted)
-    judgement = ud.judge([*found.files, *map(ud.single, found.omitted)], limits, criteria)
+    files = [*found.files, *map(ud.single, found.omitted)]
+    return _report(tree, listing, files, ud.judge(files, limits, criteria), docs)._replace(missing=found.missing, handlings=found.handlings)
+
+
+def check_files(tree: Tree, files: Sequence[ud.UnitFile], limits: ud.Limits, criteria: Mapping[int, int], docs: bool) -> Report:
+    """直に指したファイルを確かめる。課題から探さないので、欠落は見ない。"""
+    return _report(tree, tree.listing(), files, ud.judge(files, limits, criteria), docs)
+
+
+def _report(
+    tree: Tree,
+    listing: Mapping[str, Optional[tuple[str, str, str]]],
+    files: Sequence[ud.UnitFile],
+    judgement: ud.Judgement,
+    docs: bool,
+) -> Report:
+    """判定の結果に、`docs` なら実装計画との突き合わせを足す。`missing` は空で返す。"""
     gaps: list[TaskGap] = []
     stale: list[str] = []
-    plans = {f.path.removesuffix(UNITS_SUFFIX) + PLAN_SUFFIX: f for f in (found.files if docs else ())}
+    # 省いた課題の 1 単位はパスが空で、組の実装計画が無い
+    plans = {paired_plan(f.path): f for f in (files if docs else ()) if f.path}
     for plan, text in tree.read_all(list(plans), listing).items():
         unit_file = plans[plan]
         # 実装計画が無ければ、単位のファイルのタスクがすべて片側だけになる
@@ -294,7 +356,91 @@ def check(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: ud.
             gaps.append(gap)
         if text is not None and render_tables(text, judgement.views, unit_file.path) != _newlines(text):
             stale.append(plan)
-    return Report(judgement, found.missing, tuple(gaps), tuple(stale))
+    return Report(judgement, (), tuple(gaps), tuple(stale), tuple(files), {})
+
+
+def paired_plan(units_path: str) -> str:
+    """単位のファイルと組の実装計画のパス。"""
+    return units_path.removesuffix(UNITS_SUFFIX) + PLAN_SUFFIX
+
+
+class Rewrite(NamedTuple):
+    """実装計画 1 つの、読んだ本文（`before`）と表を書き直した全文（`after`）。"""
+
+    before: str
+    after: str
+
+
+def rendered(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: ud.Limits) -> dict[str, Rewrite]:
+    """表を書き直すと中身が変わる実装計画の {パス: `Rewrite`}。実装計画の無いファイルは含めない（書くのは呼び手）。"""
+    listing = tree.listing()
+    found = _collect(tree, listing, issues, omitted)
+    # 表に出る値は受け入れ条件の数に依らないので、数は渡さない（参照の違反は確かめが返す）
+    views = ud.judge([*found.files, *map(ud.single, found.omitted)], limits, {}, propose=False).views
+    files = {paired_plan(f.path): f.path for f in found.files}
+    out: dict[str, Rewrite] = {}
+    for plan, text in tree.read_all(list(files), listing).items():
+        if text is None:
+            continue
+        new = render_tables(text, views, files[plan])
+        if new != _newlines(text):
+            out[plan] = Rewrite(text, new)
+    return out
+
+
+# --- 結果の項目 ---------------------------------------------------------------------------------
+
+
+def unit_items(report: Report) -> list[dict[str, Any]]:
+    """単位ごとの `kind: unit`。省いた課題の単位は `file` が空で `lines` が null である。"""
+    issue_of = {(f.path, t.id): t.issue for f in report.files for t in f.tasks}
+    items = []
+    for v in report.judgement.views:
+        item = {key: list(value) if isinstance(value, tuple) else value for key, value in v._asdict().items()}
+        del item["actual_lines"]
+        item["after"] = [{"file": f, "unit": n, "reason": reason} for f, n, reason in v.after]
+        # 省いた課題の単位はパスがどれも空だが、合成のタスクの課題は単位の課題と同じである
+        item["tasks"] = [{"id": t, "issue": issue_of[(v.file, t)] if v.file else v.issues[0]} for t in v.tasks]
+        items.append({"kind": "unit", **item})
+    return items
+
+
+def findings(report: Report) -> list[ud.Finding]:
+    """止める理由の並び。規則の番号のほか、欠落は `missing`、タスクの食い違いは `tasks`、表の食い違いは `tables`。"""
+    found = [ud.Finding("missing", "", f"#{issue} の単位のファイルが無い") for issue in report.missing]
+    for gap in report.task_gaps:
+        sides = (
+            ("重なる番号", gap.duplicated),
+            ("実装計画だけにある", gap.only_plan),
+            ("単位のファイルだけにある", gap.only_units),
+        )
+        reason = "、".join(f"{label} {'・'.join(ids)}" for label, ids in sides if ids)
+        found.append(ud.Finding("tasks", "", f"{gap.plan}: タスクが一致しない（{reason}）"))
+    found += [
+        ud.Finding("tables", "", f"{plan}: 表が単位のファイルと違う（ndf plan units render で書き直す）") for plan in report.stale_tables
+    ]
+    return [*report.judgement.violations, *found]
+
+
+def split_items(report: Report) -> list[dict[str, Any]]:
+    """分け方の案ごとの `kind: split`。"""
+    return [
+        {
+            "kind": "split",
+            "file": p.file,
+            "unit": p.unit,
+            "units": [{"name": u.name, "tasks": list(u.tasks), "after": [_edge_doc(e) for e in u.after]} for u in p.units],
+            "resplit": list(p.resplit),
+            "remaining": [f._asdict() for f in p.remaining],
+            "repoint": [{"file": f, "unit": u, "issue": issue} for f, u, issue in p.repoint],
+        }
+        for p in report.judgement.proposals
+    ]
+
+
+def _edge_doc(edge: ud.Edge) -> dict[str, Any]:
+    """単位のファイルの `after` の形。"""
+    return {key: value for key, value in edge._asdict().items() if value is not None}
 
 
 def _task_gap(plan: str, text: str, unit_file: ud.UnitFile) -> Optional[TaskGap]:

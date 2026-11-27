@@ -23,7 +23,9 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-KIND_KEY = "ndf_record"
+from ndf.core.plan import files
+
+KIND_KEY = files.RECORD_KIND_KEY
 RECORD_KIND = "cross-review-output"
 TEXT_KEY = "written"
 FILE_KEY = "identity"

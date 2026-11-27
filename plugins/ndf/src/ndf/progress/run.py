@@ -34,6 +34,7 @@ from ndf import process_group
 from ndf.contracts import causes, facts, limits, result
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
+from ndf.core.plan import runner as plan_runner
 from ndf.progress import command, definition, invoke, issue_values, model, stages, store
 from ndf.progress.folding import REQUEST_CHANGES, StepProgress, answer_word, step_progress
 from ndf.progress.records import Records, github_records, sync_records
@@ -241,7 +242,7 @@ def failed_routes(machine_id: str, stage: str) -> dict[str, Any]:
 
 
 # 承認の後に承認の対象が変わった・有効な承認が無いマージの停止理由（`ndf ci merge --production-gate stale`。#4409）
-APPROVAL_STALE = "approval_stale"
+APPROVAL_STALE = plan_runner.APPROVAL_STALE
 
 
 def stale_routes(machine_id: str, stage: str) -> tuple[dict[str, Any], dict[str, Any]]:

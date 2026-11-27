@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+# NDF が書いた記録の JSON が、記録の種別を持つキー。消す前にこの値で NDF の記録かを確かめる
+RECORD_KIND_KEY = "ndf_record"
+
+
 def read_json(path: Path) -> Optional[dict[str, Any]]:
     try:
         found = json.loads(path.read_text(encoding="utf-8"))
