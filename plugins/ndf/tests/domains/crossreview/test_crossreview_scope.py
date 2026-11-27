@@ -783,9 +783,8 @@ def test_a_commit_that_is_not_local_gives_none_or_a_git_error(wt: Path) -> None:
         changes.since_diff(git.Git.offline(wt), previous, current, (), {})
 
 
-def test_since_diff_is_limited_to_pr_files_and_appends_the_new_ones(wt: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """#3780: 前の head からの差分は PR が変えるファイルだけにし、新しく PR の変更になったファイルは今の PR の差分も続ける。
-    `new_in_pr` が読んだ一覧は読み直さない。"""
+def test_since_diff_is_limited_to_pr_files_and_appends_the_new_ones(wt: Path) -> None:
+    """#3780: 前の head からの差分は PR が変えるファイルだけにし、新しく PR の変更になったファイルは今の PR の差分も続ける。"""
     base = _start(wt, {"a[1].txt": _lines(), "old.txt": _lines()})
     head = _write(wt, {"a[1].txt": _lines((10, "pr")), "old.txt": None, "名前.txt": _lines()}, "PR")
     moved = _move_base(wt, {"other.txt": "マージしただけ\n"})
@@ -793,15 +792,28 @@ def test_since_diff_is_limited_to_pr_files_and_appends_the_new_ones(wt: Path, mo
     _write(wt, {"a[1].txt": _lines((10, "直し"))}, "直し")
     previous, current = changes.Range(base, head), changes.Range(moved, _head(wt))
     g = git.Git.offline(wt)
-    listed: changes.Listings = {}
-    assert changes.new_in_pr(g, previous, current, listed) == ()
-    calls = count_git(monkeypatch)
-    plain = changes.since_diff(g, previous, current, (), listed)
-    assert not any("--raw" in c for c in calls)
+    plain = changes.since_diff(g, previous, current, (), {})
     assert "+直し" in plain and "other.txt" not in plain and "名前.txt" not in plain
-    added = changes.since_diff(g, previous, current, ("名前.txt",), listed)
+    added = changes.since_diff(g, previous, current, ("名前.txt",), {})
     assert added.startswith(plain)
     assert "rename from old.txt" in added[len(plain) :] and "a[1].txt" not in added[len(plain) :]
+
+
+def test_the_listing_read_by_new_in_pr_is_not_read_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#3780: 同じ `listed` を渡した `since_diff` は、`new_in_pr` が読んだ一覧を読み直さない（git の応答を差し替える）。"""
+    listed_spans: list[str] = []
+
+    def run_bytes(self: git.Git, *args: str, **kw: object) -> bytes:
+        if "--raw" in args:
+            listed_spans.append(args[-1])
+        return b""
+
+    monkeypatch.setattr(git.Git, "run_bytes", run_bytes)
+    previous, current = changes.Range("b1", "h1"), changes.Range("b2", "h2")
+    listed: changes.Listings = {}
+    assert changes.new_in_pr(git.Git(), previous, current, listed) == ()
+    assert changes.since_diff(git.Git(), previous, current, (), listed) == ""
+    assert listed_spans == ["b1...h1", "b2...h2", "h1..h2"]
 
 
 def test_since_diff_without_pr_files_is_empty(wt: Path) -> None:
