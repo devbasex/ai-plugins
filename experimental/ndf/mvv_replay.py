@@ -405,9 +405,10 @@ def _exclusive(result: Path) -> Iterator[_Held]:
     結果ファイルそのものに flock を掛ける。ロックは inode に付くので、結果の保存先を共有するプロセスどうしなら、ネットワーク
     名前空間の違う別のコンテナから同じボリュームへ保存する起動とも排他になる。別の結果ファイルとは競合しない。保存は名前の置き換えで
     inode が変わるので、`_write_json` が新しい中身にロックを掛けてから置き換え、ロックを引き継ぐ。置き換えの前の中身を開いて
-    ロックを取った起動は、取れた中身が今のパスのものかを確かめ、違えば開き直す。結果ファイルが無ければ空のファイルを排他的に作って
-    ロックし、保存しないまま終わったときは、その起動が作ったファイル（作った inode のまま）だけを消す。利用者が置いた空のファイルは
-    消さない。ロックのためのファイルを別に作らず、プロセスが終われば自動で外れ、状態の
+    ロックを取った起動は、取れた中身が今のパスのものかを確かめ、違えば開き直す。結果ファイルが無ければ、同じディレクトリの一時
+    ファイルにロックを掛けてから `os.link` で結果のパスへ置く（`_create_locked`）。結果のパスに現れた時点で作った起動がロックを
+    持っているので、並べた起動のどれが先に開いても、作った起動より先にロックを取る起動は無い。保存しないまま終わったときは、その起動が
+    作ったファイル（作った inode のまま）だけを消す。利用者が置いた空のファイルは消さない。ロックのためのファイルを別に作らず、プロセスが終われば自動で外れ、状態の
     保存先の環境変数にも依らない。
     """
     result.absolute().parent.mkdir(parents=True, exist_ok=True)
@@ -416,26 +417,27 @@ def _exclusive(result: Path) -> Iterator[_Held]:
     while True:
         made: Optional[tuple[int, int]] = None
         try:
-            try:
-                # 無ければ、この起動が作ったと分かるよう排他的に作る
-                fd = os.open(result, flags | os.O_CREAT | os.O_EXCL, 0o600)
-                got = os.fstat(fd)
-                made = (got.st_dev, got.st_ino)
-            except FileExistsError:
-                fd = os.open(result, flags)
+            fd = os.open(result, flags)
         except FileNotFoundError:
-            # 作ろうとした後、開く前に別の起動が消した
-            continue
+            # 無ければ作る。作るときの失敗（親のディレクトリが消えたなど）は、作る側で止める
+            created = _create_locked(result)
+            if created is None:
+                # 開いた後、置く前に別の起動が置いた
+                continue
+            fd = created
+            got = os.fstat(fd)
+            made = (got.st_dev, got.st_ino)
         except OSError as exc:
             raise Stop(f"--result（{result}）を開けない: {exc}") from None
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            os.close(fd)
-            raise Stop(f"--result（{result}）が通常のファイルでない")
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(fd)
-            raise Stop(f"同じ --result（{result}）の judge が動いている。終わってから打ち直す") from None
+        if made is None:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                os.close(fd)
+                raise Stop(f"--result（{result}）が通常のファイルでない")
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(fd)
+                raise Stop(f"同じ --result（{result}）の judge が動いている。終わってから打ち直す") from None
         if _same_inode(fd, result):
             break
         # 先の起動が置き換えた後の古い中身か、消した空のファイルのロックを取った
@@ -450,6 +452,31 @@ def _exclusive(result: Path) -> Iterator[_Held]:
             # 置き換えた新しい中身を指すので、ここには来ない）
             result.unlink(missing_ok=True)
         os.close(held.fd)
+
+
+def _create_locked(result: Path) -> Optional[int]:
+    """空の結果ファイルを、ロックを掛けた状態で結果のパスへ置き、その記述子を返す。名前が既に埋まっていれば None を返す。
+
+    一時ファイルを作ってロックしてから `os.link` で置くので、結果のパスに現れた時点でこの起動がロックを持っている。作れないとき
+    （親のディレクトリが消えたなど）は、開き直しを繰り返さずに止める。
+    """
+    try:
+        fd, tmp = tempfile.mkstemp(dir=result.absolute().parent, prefix=f".{result.name}.", suffix=".tmp")
+    except OSError as exc:
+        raise Stop(f"--result（{result}）を作れない: {exc}") from None
+    try:
+        # 作ったばかりで誰も開いていないので、待たずに取れる
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.link(tmp, result)
+    except FileExistsError:
+        os.close(fd)
+        return None
+    except OSError as exc:
+        os.close(fd)
+        raise Stop(f"--result（{result}）を作れない: {exc}") from None
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+    return fd
 
 
 def _same_inode(fd: int, path: Path) -> bool:
