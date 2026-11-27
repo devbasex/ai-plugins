@@ -252,8 +252,9 @@ def test_a_wrong_value_stops_before_the_launch(tmp_path, kw):
     assert "turbo" not in _stopped(lambda: _pick(root, **kw))
 
 
-def test_row_fields_hold_only_present_values(tmp_path):
+def test_row_fields_hold_only_present_values(tmp_path, monkeypatch):
     """割り付けを受けていない起動は、単位を渡されても使用量ログの欄に unit を置かない。"""
+    monkeypatch.setattr(mc.launch_approval, "repo_key", str)  # 単位のある起動はリポジトリのキーを求める。git を起動しない
     got = _pick(_repo(tmp_path, {"enabled": False}), mode="light", unit="run-1:impl")
     assert got.row_fields() == {
         "layer": "worker",
