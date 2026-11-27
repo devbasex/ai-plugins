@@ -344,7 +344,7 @@ def released_outcome(work: str, saved: Mapping[str, Any], strategy: Optional[bra
     if recorded.with_number:
         return None
     unknown = recorded.store_unknown
-    if recorded.store is None and (strategy is None or strategy.has_version_number):
+    if recorded.store is None and _needs_version_number(strategy):
         return None
     if not unknown and recorded.delivery is not None:
         out = {PRODUCT_VERSION: recorded.version, DELIVERY: dict(recorded.delivery)}
