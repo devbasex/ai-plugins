@@ -304,6 +304,8 @@ graph TD
 | `model_source`・`effort_source` | `argument`・`environment`・`experiment`・`base`（基準の組の値を抽選せずに使った）・`default`（指定なし） |
 | `raised` | 引き上げたか |
 | `outcome` | 下の表の値 |
+| `model_refused` | モデルを理由に拒否された起動の行だけに真を置く。`report` はリクエスト（依頼）の区分をこの欄で決める |
+| `repo` | #1959 が持つ欄。判定の起動は、割り付けのために解決したリポジトリのキーを、割り付けの無い起動と基準への切り替えでも書く |
 
 所要時間は、#1959 の設計の `seconds` の欄を使う。`claude -p` は呼び出し元が子プロセスの起動から終了まで、Codex のシートは監視する側が測る。手順書に従って AI が打つ委譲（`external-ai`・`corder`）は、`ndf delegate-run` が自分を CLI に置き換えた後の終了を NDF のコードが見ないので、行を書かない。
 

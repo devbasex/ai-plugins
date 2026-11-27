@@ -180,7 +180,12 @@ def _first_per_launch(rows: Iterable[Mapping[str, Any]]) -> list[Mapping[str, An
 
 
 def launch_costs(rows: Iterable[Mapping[str, Any]]) -> dict[str, Optional[float]]:
-    """`launch_id` → 起動 1 回の費用（USD）。求められなければ None（#1959 の「起動の費用の求め方」）。
+    """`launch_id` → 起動 1 回の費用（USD）。求められなければ None（`launch_rows` の組を引ける形にしたもの）。"""
+    return {row["launch_id"]: cost for row, cost in launch_rows(rows)}
+
+
+def launch_rows(rows: Iterable[Mapping[str, Any]]) -> list[tuple[Mapping[str, Any], Optional[float]]]:
+    """`launch_id` ごとに数える 1 行と、その起動 1 回の費用（USD。求められなければ None）の組（#1959 の「起動の費用の求め方」）。
 
     `session_cost_usd` は同じ会話の累計である。`session_seq` が 0 の行（`session_id` の無い行を含む）はその値、
     ほかは同じ `session_id` の番号が 1 つ前の行との差にする。値が無い、1 つ前の行に値が無い、差が負なら None。
@@ -192,13 +197,7 @@ def launch_costs(rows: Iterable[Mapping[str, Any]]) -> dict[str, Optional[float]
         for row in kept
         if isinstance(row.get("session_id"), str) and isinstance(row.get("session_seq"), int)
     }
-    return {row["launch_id"]: _launch_cost(row, totals) for row in kept}
-
-
-def launch_rows(rows: Iterable[Mapping[str, Any]]) -> list[tuple[Mapping[str, Any], Optional[float]]]:
-    """`launch_id` ごとに数える 1 行と、その起動 1 回の費用（求められなければ None）の組。重なった行を 1 回だけ数える集計が使う。"""
-    costs = launch_costs(rows)
-    return [(row, costs[row["launch_id"]]) for row in _first_per_launch(rows)]
+    return [(row, _launch_cost(row, totals)) for row in kept]
 
 
 def _launch_cost(row: Mapping[str, Any], totals: Mapping[tuple[str, int], Optional[float]]) -> Optional[float]:

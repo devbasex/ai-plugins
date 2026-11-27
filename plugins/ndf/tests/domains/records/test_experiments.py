@@ -153,7 +153,6 @@ def test_units_that_are_out_of_scope_or_left_the_experiment_are_not_used():
                 "kind": "launch_error",
                 "at": _at(NOW),
                 "assign_id": "switched",
-                "launch_id": "l-switched",
                 "stage": "impl",
                 "runtime": "claude",
                 "arm": ARMS[2],

@@ -114,7 +114,8 @@ class Choice:
 
     `inherited_effort` は、ランタイム自身の effort の環境変数を子へ引き継ぐときの値（そのとき `effort` は None で、
     `--effort` を足さない）。`retry` は引き上げを求めた理由（引数か環境変数の指定の起動は None）で、`raised` は値が実際に
-    変わったか。`store` は選んだときの実験の記録の保存先で、`base_fallback` が同じ保存先へ書くために持つ。
+    変わったか。`store` は選んだときの実験の記録の保存先で、`base_fallback` が同じ保存先へ書くために持つ。`repo` は割り付けと停止の
+    判定で解決したリポジトリのキー（解決しない起動は None）で、使用量ログの行に書く呼び手が読む。
     """
 
     layer: str
@@ -134,6 +135,7 @@ class Choice:
     inherited_effort: Optional[str] = None
     retry: Optional[str] = None
     store: Optional[Path] = None
+    repo: Optional[str] = None
 
     def cli_args(self) -> list[str]:
         """CLI に渡す引数（表 runtimes の `choice_args` の形。値の無い側は足さない）。"""
@@ -832,16 +834,15 @@ def _prepared_store(env: Mapping[str, str], now: datetime, window_days: int) -> 
     return store
 
 
-def base_fallback(choice: Choice, reason: str, launch_id: str) -> Optional[Choice]:
+def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
     """割り付けた基準でない組の起動がモデルを理由に拒否されたとき、基準へ切り替えたことを持つ `launch_error` の行を書き、基準の組の値を返す。
 
-    `launch_id` は拒否された起動の使用量ログの行の `launch_id`。割り付け ID は同じ単位の複数の起動が共有するので、`ndf models report`
-    は拒否された起動をこの値で見分ける。基準の組と割り付けの無い起動は None。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなくても基準の値を返す。
+    基準の組と割り付けの無い起動は None。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなくても基準の値を返す。
     引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、基準の組から引き上げ直す。
     """
     if choice.assign_id is None or choice.arm is None or choice.arm == choice.base_arm:
         return None
-    row = dict(kind="launch_error", at=_time_text(utc_now()), assign_id=choice.assign_id, launch_id=launch_id, stage=choice.stage)
+    row = dict(kind="launch_error", at=_time_text(utc_now()), assign_id=choice.assign_id, stage=choice.stage)
     row |= {"runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}
     append_row(row, choice.store)
     log.warning("組 %s は起動できなかったので、基準の組で続ける（工程 %s・単位 %s）", _arm_text(choice.arm), choice.stage, choice.unit)
@@ -907,6 +908,7 @@ def launch_choice(
     metric = metric_of(stage)
     where = Where(launch_approval.repo_key(root), stage, runtime, compatibility_key(arms, metric))
     experiment = got.enabled and len(arms) > 1 and metric is not None
+    choice = replace(choice, repo=where.repo)  # 割り付けの無い起動と基準への切り替えでも、行に書けるように持つ
     u = _Unit(req.unit, req.mode, tuple(arms), got.allocation, experiment, got.enabled, where, now, store)
     if manual.given:
         _halt_manual(u, req.charge_to)

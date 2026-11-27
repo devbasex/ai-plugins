@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import random
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -77,12 +77,11 @@ def _effects(rows: Sequence[Mapping[str, Any]], metric: Optional[str]) -> dict[s
     return out
 
 
-def _costs(usage_rows: Sequence[Mapping[str, Any]]) -> dict[str, Optional[float]]:
+def _costs(usage_rows: Sequence[Mapping[str, Any]], per_launch: Mapping[str, Optional[float]]) -> dict[str, Optional[float]]:
     """割り付け ID → 単位の費用。`assign_id` か `charge_to` がその ID の起動の費用を、`launch_id` ごとに 1 回足す。
 
     費用の分からない起動があるか、合計が 0 なら None（0 は対数にも割る数にも使えない）。
     """
-    per_launch = ud.launch_costs(usage_rows)
     launches: dict[str, dict[str, Optional[float]]] = defaultdict(dict)
     for row in usage_rows:
         lid = row["launch_id"] if "launch_id" in row else ""  # launch_id の無い行は費用を求められない
@@ -122,18 +121,14 @@ class UsageIndex:
     models: Mapping[str, str]
 
 
-def usage_index(usage_rows: Sequence[Mapping[str, Any]]) -> UsageIndex:
-    """使用量ログの全部の行から `UsageIndex` を求める。"""
-    return UsageIndex(_costs(usage_rows), _models(usage_rows))
-
-
-def refused_launches(rows: Sequence[Mapping[str, Any]]) -> Callable[[Mapping[str, Any]], bool]:
-    """使用量ログの行が、モデルを理由に拒否された起動の行かを返す判定。拒否された起動は `launch_error` の行の `launch_id` で見分ける。
-
-    割り付け ID は同じ単位のほかの起動（先に形が合わなかった判定など）も持つので、見分けるのに使わない。
-    """
-    ids = {r["launch_id"] for r in rows if r["kind"] == "launch_error"}
-    return lambda row: "launch_id" in row and row["launch_id"] in ids
+def usage_index(
+    usage_rows: Sequence[Mapping[str, Any]], launches: Optional[Sequence[tuple[Mapping[str, Any], Optional[float]]]] = None
+) -> UsageIndex:
+    """使用量ログの全部の行から `UsageIndex` を求める。`launches` は同じ行の `usage_decide.launch_rows` の結果で、呼び手が求めて
+    いれば渡す（重なった `launch_id` を除く走査をやり直さない）。"""
+    pairs = ud.launch_rows(usage_rows) if launches is None else launches
+    per_launch = {row["launch_id"]: cost for row, cost in pairs}
+    return UsageIndex(_costs(usage_rows, per_launch), _models(usage_rows))
 
 
 def rows_for_units(rows: Sequence[Mapping[str, Any]], end: datetime) -> list[Mapping[str, Any]]:

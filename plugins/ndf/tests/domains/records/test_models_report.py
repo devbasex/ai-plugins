@@ -67,8 +67,8 @@ def _report(usage_rows=(), rows=(), stage=None, since=SINCE, end=UNTIL, repo="/r
     return mo.report_rows(list(usage_rows), list(rows), mo.Scope(since, end, stage, ALLOCATION, repo))
 
 
-def _refusal(aid: str, lid: str, arm: dict, when: datetime = NOW) -> dict:
-    row = {"kind": "launch_error", "at": _at(when), "assign_id": aid, "launch_id": lid, "stage": "impl", "runtime": "claude"}
+def _refusal(aid: str, arm: dict, when: datetime = NOW) -> dict:
+    row = {"kind": "launch_error", "at": _at(when), "assign_id": aid, "stage": "impl", "runtime": "claude"}
     return internal.write_record("experiment", {**row, "arm": arm, "reason": "404", "switched": True})
 
 
@@ -101,16 +101,16 @@ def test_a_launch_whose_actual_model_differs_from_the_requested_one_is_counted()
 
 
 def test_a_request_switched_to_the_base_counts_as_a_success_of_the_base():
-    refused = _row("l1", outcome="stopped", effort="high", assign_id="a1", request_id="q")
+    refused = _row("l1", outcome="stopped", effort="high", assign_id="a1", request_id="q", model_refused=True)
     base = _row("l2", request_id="q", request_try=2)
-    items = _report([refused, base], [_assign("a1", 1), _refusal("a1", "l1", {"effort": "high"})])
+    items = _report([refused, base])  # 実験の記録が掃除された後も、使用量ログだけで区分が決まる
     assert (_launches(items, effort=None)["requests"], _launches(items, effort=None)["success_rate"]) == (1, 1.0)
     assert (_launches(items, effort="high")["launch_count"], _launches(items, effort="high")["requests"]) == (1, 0)
 
 
 def test_a_request_whose_launches_were_all_refused_is_a_failure_of_the_last_launch():
-    refused = _row("l1", outcome="stopped", effort="high", assign_id="a1")
-    one = _launches(_report([refused], [_assign("a1", 1), _refusal("a1", "l1", {"effort": "high"})]), effort="high")
+    refused = _row("l1", outcome="stopped", effort="high", assign_id="a1", model_refused=True)
+    one = _launches(_report([refused]), effort="high")
     assert (one["requests"], one["success_rate"]) == (1, 0.0)
 
 
@@ -118,8 +118,8 @@ def test_only_the_refused_launch_is_left_out_of_a_judge_request_sharing_the_assi
     def judge(lid: str, step: int, outcome: str, **fields) -> dict:
         return _row(lid, layer="judge", name="ask", request_id="q", request_try=step, outcome=outcome, **fields)
 
-    rows = [judge("l1", 1, "invalid", assign_id="a1"), judge("l2", 2, "stopped", assign_id="a1"), judge("l3", 3, "valid")]
-    one = _launches(_report(rows, [_assign("a1", 1), _refusal("a1", "l2", {"effort": "high"})]), stage="judge")
+    rows = [judge("l1", 1, "invalid", assign_id="a1"), judge("l2", 2, "stopped", assign_id="a1", model_refused=True)]
+    one = _launches(_report([*rows, judge("l3", 3, "valid")]), stage="judge")
     assert (one["judge_requests"], one["judge_retry_rate"], one["success_rate"]) == (1, 1.0, 1.0)
 
 
@@ -195,6 +195,14 @@ def test_a_cheaper_arm_of_the_same_effect_rises_and_is_decided():
     assert base["quality_interval"][0] < 0.9 < base["quality_interval"][1]
 
 
+def test_a_floor_too_large_for_the_arms_of_a_past_key_leaves_out_the_probability():
+    rows, launches = _units(0, 30, 0.9, 1.0)
+    more, more_launches = _units(1, 30, 0.9, 0.5)
+    scope = mo.Scope(SINCE, UNTIL, None, {**ALLOCATION, "floor": 0.6}, "/r")
+    base, other = _arms(mo.report_rows(launches + more_launches, rows + more, scope))
+    assert "probability" not in base and "probability" not in other and mo.FLOOR_UNFIT in other["note"]
+
+
 def test_a_unit_with_an_unknown_cost_is_left_out_of_the_cost_mean():
     rows, launches = _units(0, 2, 0.8, 2.0)
     more, more_launches = _units(1, 1, 0.8, None)
@@ -218,10 +226,10 @@ def test_assignments_of_another_repository_are_not_reported():
 def test_an_arm_refused_twice_says_when_it_returns_and_later_refusals_do_not_count():
     rows, launches = _units(0, 2, 0.8, 1.0)
     more, more_launches = _units(1, 2, 0.8, 1.0)
-    refusals = [_refusal("a1-0", "x1", ARMS[1], UNTIL - timedelta(days=2)), _refusal("a1-1", "x2", ARMS[1], UNTIL - timedelta(days=1))]
+    refusals = [_refusal("a1-0", ARMS[1], UNTIL - timedelta(days=2)), _refusal("a1-1", ARMS[1], UNTIL - timedelta(days=1))]
     _, other = _arms(_report(launches + more_launches, rows + more + refusals))
     assert (other["dropped"], other["dropped_until"]) == ("refused", internal.stamp((UNTIL + timedelta(days=5)).timestamp()))
-    later = [_refusal("a1-0", "x1", ARMS[1], UNTIL + timedelta(hours=1)), _refusal("a1-1", "x2", ARMS[1], UNTIL + timedelta(hours=2))]
+    later = [_refusal("a1-0", ARMS[1], UNTIL + timedelta(hours=1)), _refusal("a1-1", ARMS[1], UNTIL + timedelta(hours=2))]
     assert "dropped" not in _arms(_report(launches + more_launches, rows + more + later))[1]
 
 
@@ -250,7 +258,7 @@ def test_an_unpriced_model_outside_the_window_does_not_make_it_uniform():
 def test_a_switch_to_the_base_after_the_period_keeps_the_unit_in_the_period():
     rows, launches = _units(0, 2, 0.8, 1.0)
     more, more_launches = _units(1, 2, 0.8, 1.0)
-    later = _refusal("a1-0", "x1", ARMS[1], UNTIL + timedelta(hours=1))
+    later = _refusal("a1-0", ARMS[1], UNTIL + timedelta(hours=1))
     assert _arms(_report(launches + more_launches, rows + more + [later]))[1]["units"] == 2
 
 
@@ -299,6 +307,12 @@ def test_report_without_records_says_so(repo, capsys, last_result):
     assert cli.main(ARGV) == 0
     got = last_result(capsys.readouterr().out)
     assert (got["status"], got["items"]) == ("ok", []) and "記録なし" in got["summary"]
+
+
+def test_a_since_after_until_is_an_error(repo, capsys, last_result):
+    assert cli.main(["models", "report", "--since", "2026-11-30", "--until", "2026-11-01"]) != 0
+    got = last_result(capsys.readouterr().out)
+    assert got["status"] != "ok" and "--since" in json.dumps(got, ensure_ascii=False)
 
 
 def _month_file(store: Path, month: str) -> Path:

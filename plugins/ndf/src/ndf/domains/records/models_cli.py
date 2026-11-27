@@ -20,7 +20,7 @@ import math
 import random
 import sys
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -90,6 +90,7 @@ VERDICT_TEXT = {
 COLLECTING = "件数を集めている"
 UNPRICED_NOTE = "費用を計算できないモデルがあり均等に抽選する"
 NO_RECORDS = "記録なし"
+FLOOR_UNFIT = "今の設定の floor × 候補の数が 1 を超えるので出現率を出さない"
 
 
 @dataclass
@@ -164,18 +165,15 @@ def _launch_end(row: Mapping[str, Any]) -> Optional[str]:
     return row["outcome"] if "outcome" in row else None
 
 
-Refused = Callable[[Mapping[str, Any]], bool]
-
-
-def _add_request(tally: Mapping[tuple, _Tally], group: Sequence[Mapping[str, Any]], refused: Refused, rule: Mapping[str, Any]) -> None:
+def _add_request(tally: Mapping[tuple, _Tally], group: Sequence[Mapping[str, Any]], rule: Mapping[str, Any]) -> None:
     """リクエスト 1 件。区分は拒否された行を除いた最初の行（すべて拒否なら最後の行）、結果は最後の行の `outcome`。
 
-    拒否された行は、モデルを理由に拒否された起動の行（`experiments.refused_launches` が見分ける）で、成功でない行。すべて拒否なら
+    拒否された行は、モデルを理由に拒否された起動の行（使用量ログの `model_refused` の欄を持つ行）。すべて拒否なら
     失敗に数え、判定のやり直し率では分母だけに数える。
     """
     success = rule["success_outcomes"]
     rows = sorted(group, key=lambda r: r["request_try"] if "request_try" in r else 1)
-    valid = [r for r in rows if not (refused(r) and _launch_end(r) not in success)]
+    valid = [r for r in rows if "model_refused" not in r]
     first = valid[0] if valid else rows[-1]
     t, last = tally[_segment(first)], _launch_end(rows[-1]) if valid else None
     if not valid or (last is not None and last not in rule["uncounted_outcomes"]):
@@ -205,10 +203,10 @@ def _last_in(group: Sequence[Mapping[str, Any]], span: _Span) -> bool:
     return span.has(max(group, key=lambda r: r["at"]))
 
 
-def _launch_items(usage_rows: Sequence[Mapping[str, Any]], refused: Refused, span: _Span, stage: Optional[str]) -> list[dict]:
-    """起動の値・成功率・やり直し率の区分ごとの値（設計書の「期間と区分」の表）。重なった `launch_id` は 1 行にする。"""
+def _launch_items(launches: Sequence[tuple[Mapping[str, Any], Optional[float]]], span: _Span, stage: Optional[str]) -> list[dict]:
+    """起動の値・成功率・やり直し率の区分ごとの値（設計書の「期間と区分」の表）。`launches` は `launch_id` ごとに 1 行にした組。"""
     rule = model_choice.records_rule()
-    pairs = [(r, cost) for r, cost in ud.launch_rows(usage_rows) if "layer" in r and _row_stage(r) is not None]
+    pairs = [(r, cost) for r, cost in launches if "layer" in r and _row_stage(r) is not None]
     rows = [r for r, _ in pairs]
     tally: dict[tuple, _Tally] = defaultdict(_Tally)
     for row, cost in pairs:
@@ -216,7 +214,7 @@ def _launch_items(usage_rows: Sequence[Mapping[str, Any]], refused: Refused, spa
             _add_launch(tally[_segment(row)], row, cost)
     for group in _grouped(rows, lambda r: r["request_id"] if "request_id" in r else id(r)):
         if _last_in(group, span):
-            _add_request(tally, group, refused, rule)
+            _add_request(tally, group, rule)
     stepped = [r for r in rows if r["layer"] in rule["step_layers"] and "run_id" in r and "step" in r]
     for group in _grouped(stepped, lambda r: (r["run_id"], r["step"])):
         if _last_in(group, span):
@@ -305,6 +303,9 @@ def _key_items(where: model_choice.Where, assigned: Sequence[Mapping[str, Any]],
     shared = entry.best if units == recent else None  # 同じ単位なら最良である確率の標本を引き直さない
     judge = ad.judgement(units, cands, allocation, random.Random(seed), best=shared)
     phase = "uniform" if unpriced else entry.phase
+    # 過去のキーは今の設定より組が多いことがある。floor × 候補の数が 1 を超えると出現率の式が負になるので、出さずに理由を添える
+    probs = None if unpriced else entry.probs  # 確率は adaptive の段階だけが持つ
+    unfit = probs is not None and allocation["floor"] * len(cands) > 1
     used = ad.comparable(units, cands)
     stats = [ad.weighted([u for u in used if u.arm == i]) for i in range(len(arms))]
     base_roi = stats[0].quality / stats[0].cost if stats[0].units and stats[0].cost else None
@@ -317,7 +318,10 @@ def _key_items(where: model_choice.Where, assigned: Sequence[Mapping[str, Any]],
         item["modes"] = {m: n for m, n in item["modes"].items() if n}
         item["note"] = _arm_note(phase, judge.verdict) if stats[i].units else NO_RECORDS
         item |= {"best": best[i]} if best is not None else {}
-        item |= {"probability": entry.probs[i]} if not unpriced and entry.probs is not None else {}  # 確率は adaptive だけが持つ
+        if unfit:
+            item["note"] = f"{item['note']}・{FLOOR_UNFIT}"
+        elif probs is not None:
+            item["probability"] = probs[i]
         item |= {"leader": True} if judge.leader == i else {}
         if i not in cands:  # 打ち切りと拒否が重なれば、候補へ戻るのは遅いほうの期限
             reasons = ([("cutoff", cut[i])] if i in cut and end < cut[i] else []) + ([("refused", refused[i])] if i in refused else [])
@@ -345,9 +349,12 @@ class Scope:
 def report_rows(usage_rows: Sequence[Mapping[str, Any]], experiment_rows: Sequence[Mapping[str, Any]], scope: Scope) -> list[dict]:
     """設計書の「`ndf models report` は次の順で集計する」の順と区分で、起動の区分ごとの値と、実験のキーの組ごとの値を組む。"""
     span, stage = _Span(scope.since, scope.end), scope.stage
-    items = _launch_items(usage_rows, experiments.refused_launches(experiment_rows), span, stage)
+    launches = ud.launch_rows(usage_rows)  # 重なった行を除く走査と起動の費用は 1 回だけ求め、両方の集計で使う
+    items = _launch_items(launches, span, stage)
     upto = [r for r in experiment_rows if datetime.fromisoformat(r["at"]) < span.end]
-    rec = _Records(experiments.rows_for_units(experiment_rows, span.end), upto, experiments.usage_index(usage_rows), scope.allocation, span)
+    rec = _Records(
+        experiments.rows_for_units(experiment_rows, span.end), upto, experiments.usage_index(usage_rows, launches), scope.allocation, span
+    )
     assigned = model_choice.assigns(experiment_rows).values()
     found = [a for a in assigned if span.has(a) and a["repo"] == scope.repo and stage in (None, a["stage"])]
     keys = sorted({(a["repo"], a["stage"], a["runtime"], a["key"]) for a in found})
@@ -373,6 +380,8 @@ def _checked(raw: Sequence[Mapping[str, Any]]) -> tuple[list[dict], int]:
 
 def _report(a: argparse.Namespace) -> int:
     """使用量ログと実験の記録を読み、集計した結果を出す。記録が無ければ「記録なし」。出現率のファイルは書き換えない。"""
+    if a.since > a.until:
+        raise internal.InternalError("invalid", f"--since（{a.since}）が --until（{a.until}）より後。開始日を終了日以前にして指定し直す")
     since, end = jst_span(a.since, a.until)
     root = launch_settings.launch_root(Path.cwd())
     allocation = model_choice.table(root).allocation

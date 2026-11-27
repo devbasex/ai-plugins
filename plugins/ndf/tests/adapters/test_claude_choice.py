@@ -206,7 +206,8 @@ def test_a_refused_model_switches_to_the_base_once_without_counting_a_retry(judg
     assert recorder.outcomes == []  # 切り替えた単位は数えない
     errors = _experiments(tmp_path / "store", "launch_error")
     assert [(r["switched"], r["reason"]) for r in errors] == [(True, "model_refused")]
-    assert errors[0]["launch_id"] == recorder.rows[0]["launch_id"] != recorder.rows[1]["launch_id"]  # 拒否された起動を見分ける
+    assert [r.get("model_refused") for r in recorder.rows] == [True, None]  # 拒否された起動を使用量ログで見分ける
+    assert recorder.rows[0]["repo"] == recorder.rows[1]["repo"] == model_choice.launch_approval.repo_key(judge_repo)  # 切り替えた後も持つ
 
 
 def test_the_switch_checks_the_material_before_launching_again(judge_repo, recorder) -> None:
@@ -253,9 +254,9 @@ def test_no_time_left_after_writing_the_switch_row_stops_the_base_launch(judge_r
     monkeypatch.setattr(llm, "_clock", lambda: clock[0])
     real = model_choice.base_fallback
 
-    def slow(choice, reason, launch_id):
+    def slow(choice, reason):
         clock[0] = 30.0  # 記録の読み取りと錠の待ちで期限を使い切った
-        return real(choice, reason, launch_id)
+        return real(choice, reason)
 
     monkeypatch.setattr(model_choice, "base_fallback", slow)
     monkeypatch.setattr(model_chooser, "base_fallback", slow)

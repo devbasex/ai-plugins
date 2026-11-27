@@ -20,11 +20,11 @@ log = logging.getLogger(__name__)
 
 class LaunchChooser(Protocol):
     """起動の値を選ぶ処理（`ndf.adapters.model_choice` が満たす）。値（Choice）は `model`・`effort`・`assign_id`・
-    `cli_args()`・`env_changes()`・`row_fields()` を持つ。"""
+    `repo`・`cli_args()`・`env_changes()`・`row_fields()` を持つ。"""
 
     def launch_choice(self, layer: str, name: str, runtime: str = "claude", *, cwd: Path, **request: Any) -> Any: ...
 
-    def base_fallback(self, choice: Any, reason: str, launch_id: str) -> Optional[Any]: ...
+    def base_fallback(self, choice: Any, reason: str) -> Optional[Any]: ...
 
     def observed(self, choice: Any, model: str) -> None: ...
 
@@ -61,8 +61,7 @@ class ChoiceRun:
     """選んだ値で `claude -p` を起動するリクエスト 1 件。`choice` は選んだ値（差し込みが無ければ None で、値を付けない）。
 
     `request_id` はリクエストごとの一意な値、`request_try` はそのリクエストの中の何番目の起動か（最初が 1）。`charge_to` は費用を
-    手戻りとして負う割り付け ID。`switched` は基準の組へ切り替えたか（リクエストの中で 1 回だけ）。`_last` は使用量ログへ渡した
-    最後の子の回答とその `launch_id` で、拒否された起動の `launch_id` を切り替えの行へ書くために持つ。
+    手戻りとして負う割り付け ID。`switched` は基準の組へ切り替えたか（リクエストの中で 1 回だけ）。
     """
 
     choice: Optional[Any]
@@ -71,7 +70,6 @@ class ChoiceRun:
     charge_to: Optional[str] = None
     switched: bool = False
     _seen: bool = False
-    _last: Optional[tuple[claude.ClaudeReply, str]] = None
 
     @property
     def model(self) -> Optional[str]:
@@ -85,6 +83,11 @@ class ChoiceRun:
     def assign_id(self) -> Optional[str]:
         return None if self.choice is None else self.choice.assign_id
 
+    @property
+    def repo(self) -> Optional[str]:
+        """値を選ぶときに解決したリポジトリのキー。解決していなければ None。"""
+        return None if self.choice is None else self.choice.repo
+
     def env_changes(self) -> dict[str, Optional[str]]:
         """子の環境の変更（None の名前は外す）。"""
         return {} if self.choice is None else self.choice.env_changes()
@@ -94,12 +97,6 @@ class ChoiceRun:
         values = {} if self.choice is None else self.choice.row_fields()
         fields = {**values, **dict(request_id=self.request_id, request_try=self.request_try, charge_to=self.charge_to)}
         return {k: v for k, v in fields.items() if v is not None}
-
-    def launch_fields(self, reply: claude.ClaudeReply) -> dict[str, str]:
-        """子 1 つの使用量ログの行に書く `launch_id`（`claude.LaunchLog` の `after` で渡す）。子ごとに作り、最後の子の値を持つ。"""
-        launch_id = uuid.uuid4().hex
-        self._last = (reply, launch_id)
-        return dict(launch_id=launch_id)
 
     def seen(self, reply: claude.ClaudeReply) -> None:
         """実際のモデルを返した最初の起動で、割り付けの単位の `observed` の行を足す（足すかは差し込まれた処理が決める）。"""
@@ -113,15 +110,13 @@ class ChoiceRun:
 
         `ready` は切り替える前に呼ぶ（期限と材料の確かめ）。偽を返すか例外を投げれば切り替えず、記録も書かない。その後の
         `base_fallback` が基準の組の値を返し、切り替えたことを持つ `launch_error` の行を書く。行は基準の組を起動する前に書かれる
-        （基準の組の値を受け取るのと記録が同じ呼び出しのため）。行の `launch_id` は `reply` の使用量ログの行の値で、行を
-        渡していない回答（使用量ログの書き込み処理が無い）は、どの行とも重ならない新しい値にする。
+        （基準の組の値を受け取るのと記録が同じ呼び出しのため）。
         """
         if reply.failure is not claude.Failure.MODEL_REFUSED or self.switched or launch_chooser is None or self.choice is None:
             return False
         if ready is not None and not ready():
             return False
-        launch_id = self._last[1] if self._last is not None and self._last[0] is reply else uuid.uuid4().hex
-        back = launch_chooser.base_fallback(self.choice, str(claude.Failure.MODEL_REFUSED), launch_id)  # CLI の出力の本文は記録に残さない
+        back = launch_chooser.base_fallback(self.choice, str(claude.Failure.MODEL_REFUSED))  # CLI の出力の本文は記録に残さない
         if back is None:
             return False
         self.choice, self.request_try, self.switched = back, self.request_try + 1, True
