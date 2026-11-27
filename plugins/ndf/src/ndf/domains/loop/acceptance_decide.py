@@ -90,9 +90,9 @@ def merged(body: str, pre_merge: Mapping[int, str], post_release: Iterable[int])
 
 def checks_table(checks: Mapping[int, Check]) -> str:
     """`## 受け入れ条件の確認` のセクションの表（番号の順）。手段の `|` と改行は `inputs.cell` で書き、`read_checks` が元へ戻す。"""
-    head = "| " + " | ".join(_head()) + " |"
-    rule = "| " + " | ".join(":---" for _ in _head()) + " |"
-    rows = [f"| {n} | {c.kind} | {inputs.cell(c.means) if c.kind == PRE_MERGE else NO_MEANS} |" for n, c in sorted(checks.items())]
+    head = inputs.pipe_row(_head())
+    rule = inputs.pipe_row([":---" for _ in _head()])
+    rows = [inputs.pipe_row([str(n), c.kind, inputs.cell(c.means) if c.kind == PRE_MERGE else NO_MEANS]) for n, c in sorted(checks.items())]
     return "\n".join([head, rule, *rows])
 
 

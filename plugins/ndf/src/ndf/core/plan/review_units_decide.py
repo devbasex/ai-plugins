@@ -81,10 +81,22 @@ class _Heading(NamedTuple):
 
 
 class _Table(NamedTuple):
-    """表 1 つ。`rows` は (見出しの行, データ行...) のセル。"""
+    """表 1 つ。`at` は最初の行、`end` は最後の行の次の行の番号、`rows` は (見出しの行, データ行...) のセル。"""
 
     at: int
+    end: int
     rows: list[list[str]]
+
+
+class Slot(NamedTuple):
+    """セクション 1 つの中の、表を書き換える場所。`end` はセクションの次の行の番号（文書の終わりなら行の数）。
+
+    `table` は置き換える表の行の範囲、`at` は表を足すときの行の番号（最初の表か下位の見出しの手前。無ければ `end`）。
+    """
+
+    end: int
+    at: int
+    table: Optional[range]
 
 
 class _Doc(NamedTuple):
@@ -117,7 +129,7 @@ def _parse(text: str) -> _Doc:
         elif token.type == "table_open":
             # 2 行目は区切りの行
             rows = [inputs_decide.split_row(line) for line in (lines[start], *lines[start + 2 : end])]
-            tables.append(_Table(start, rows))
+            tables.append(_Table(start, end, rows))
     return _Doc(tuple(headings), tuple(tables))
 
 
@@ -141,6 +153,42 @@ def _named_section(doc: _Doc, title: str) -> range:
 def _first_table(doc: _Doc, section: range) -> Optional[_Table]:
     """セクションの最初の表。表が無ければ None。"""
     return next((table for table in doc.tables if table.at in section), None)
+
+
+def _headed_table(doc: _Doc, section: range, columns: Sequence[str]) -> Optional[_Table]:
+    """下位の見出しより手前にあり、列の見出しに `columns` のすべてを持つ最初の表。無ければ None。読み手と書き手が同じ表を選ぶ。"""
+    sub = next((h.at for h in doc.headings if h.at in section), section.stop)
+    body = range(section.start, sub)
+    return next((table for table in doc.tables if table.at in body and set(columns) <= set(table.rows[0])), None)
+
+
+def task_numbers(text: str) -> list[int]:
+    """「タスク分解」の `### Task N` の番号を、出てくる順に返す（重なりも残す）。"""
+    return _task_numbers(_parse(text))
+
+
+def _task_numbers(doc: _Doc) -> list[int]:
+    section = _named_section(doc, TASKS_HEADING)
+    titles = (_TASK_TITLE.match(h.title) for h in doc.headings if h.at in section and h.level == 3)
+    return [int(m.group(1)) for m in titles if m]
+
+
+def table_slot(text: str, title: str, columns: Sequence[str]) -> Optional[Slot]:
+    """`title` のセクション（`UNITS_HEADING` は単位の見出し）の表を書き換える場所。セクションが無ければ None。
+
+    置き換える表は `_headed_table` が選ぶ。
+    """
+    doc = _parse(text)
+    found = _unit_headings(doc) if title == UNITS_HEADING else [h for h in doc.headings if h.level >= 2 and h.title == title]
+    if not found:
+        return None
+    section = _section(doc, found[0])
+    end = min(section.stop, len(text.split("\n")))
+    sub = next((h.at for h in doc.headings if h.at in section), end)
+    table = _headed_table(doc, section, columns)
+    first = _first_table(doc, section)
+    at = sub if first is None else min(sub, first.at)
+    return Slot(end, at, None if table is None else range(table.at, table.end))
 
 
 def _cell_elements(cell: str) -> list[str]:
@@ -241,7 +289,9 @@ def _unit_rows(doc: _Doc) -> list[dict[str, str]]:
     headings = _unit_headings(doc)
     if len(headings) > 1:
         raise _Bad(f"「{UNITS_HEADING}」の見出しが 2 つ以上ある")
-    table = _first_table(doc, _section(doc, headings[0]))
+    section = _section(doc, headings[0])
+    # 必須の列を持つ表が無ければ最初の表を読み、足りない列を理由にする
+    table = _headed_table(doc, section, REQUIRED_COLUMNS) or _first_table(doc, section)
     if table is None:
         raise _Bad(f"「{UNITS_HEADING}」のセクションに表が無い")
     head, *rows = table.rows
@@ -289,9 +339,7 @@ def _ordered(doc: _Doc, tasks: Sequence[int], rows: Sequence[tuple[int, Unit]], 
 def _plan_units(plan: PlanDoc, criteria: Mapping[int, int], sprint: frozenset[int]) -> tuple[list[Unit], list[str]]:
     """実装計画 1 つの (流す順の単位, 読めない理由)。"""
     doc = _parse(plan.text)
-    section = _named_section(doc, TASKS_HEADING)
-    titles = (_TASK_TITLE.match(h.title) for h in doc.headings if h.at in section and h.level == 3)
-    tasks = list(dict.fromkeys(int(m.group(1)) for m in titles if m))
+    tasks = list(dict.fromkeys(_task_numbers(doc)))
     scope = _Scope(plan, tasks, criteria, sprint)
     try:
         table = _unit_rows(doc)

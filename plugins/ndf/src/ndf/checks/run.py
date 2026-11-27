@@ -190,7 +190,7 @@ def _ratchet_base(scope: Scope, path: Path, ref: Optional[str]) -> dict[str, rat
     objects = _git_objects(_git_stdout(scope.repo_root, "cat-file", "--batch", stdin=f"{ref}^{{commit}}\n{where}\n"))
     if len(objects) != 2 or objects[0] is None:
         raise CheckError(f"ラチェットの変更の前の commit を読めない: {ref}")
-    return ratchet.limits_of(objects[1], where) if objects[1] is not None else {}
+    return ratchet.baselines_of(objects[1], where) if objects[1] is not None else {}
 
 
 def ratcheted(
