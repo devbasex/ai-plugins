@@ -647,6 +647,20 @@ def test_reflect_places_an_owner_only_file_and_records_who_consented(tmp_path):
     assert [p.name for p in target.parent.iterdir() if p.name.startswith(".launch.json.")] == []
 
 
+def test_a_rerun_without_rewriting_keeps_who_rewrote_the_target(tmp_path):
+    """反映済みの候補を別の人が打ち直しても、書き換えた人と経路の完了の記録を上書きしない。"""
+    target = _worktree(tmp_path)
+    candidate = _candidate(target)
+    data = candidate.read_bytes()
+    assert _reflect(candidate, lambda: "人", SHA)
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_bytes(data)  # 候補を退避できない環境と同じく、候補が残っている
+    lc.write_launch_record(candidate.parent / lc.SOURCE_NAME, {"target": str(target), "base": None, "written": None})
+    assert _reflect(candidate, lambda: "別の人", SHA, "q9")
+    done = la.read_launch_record(la.reflected_file(target, la.DONE))
+    assert (done["approver"], done["route"]) == ("人", "terminal")
+
+
 def test_reflect_returns_the_refusal_of_record_without_placing(tmp_path):
     target = _worktree(tmp_path)
     candidate = _candidate(target)

@@ -649,7 +649,10 @@ def reflect(
         except Refused as exc:
             return Reflection(False, saved, refusal=str(exc))
         if now == wanted:
-            _after_reflect(target, candidate, rec)
+            # 同じ候補・反映先・中身の完了の記録があれば、書き換えた人と経路の記録を、書き換えない再実行で上書きしない
+            done = read_launch_record(reflected_file(target, DONE))
+            kept = (done.get("candidate"), done.get("target"), done.get("content")) == (candidate.parent.name, str(target), wanted)
+            _after_reflect(target, candidate, {**done, "target": str(target)} if kept else rec)
             return Reflection(True, saved)
         return _put_candidate(target, candidate, data, rec, saved)
 

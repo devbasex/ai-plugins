@@ -338,7 +338,13 @@ def _approval_input(root: Path, cand: Optional[Path], target: Path) -> tuple[ls.
     if cand is None:
         with la.records_lock(la.state_file(la.APPROVALS)):
             saved = la.recover(target)
-        return ls.approval_target(ls.load(root)), b"", saved
+        try:
+            return ls.approval_target(ls.load(root)), b"", saved
+        except internal.InternalError as exc:
+            if saved is None:
+                raise
+            # 回復で移した利用者の保存先は、設定を読めずに止まる結果にも載せる
+            raise internal.InternalError(exc.kind, f"{exc}。利用者の保存を {saved} に残した") from None
     _check_destination(cand, target)
     return (*_checked_target(root, cand), None)
 
