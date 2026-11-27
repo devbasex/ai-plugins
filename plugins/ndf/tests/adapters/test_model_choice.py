@@ -149,7 +149,7 @@ def test_raised(runtime, before, after):
 
 
 def test_a_launch_without_any_choice_adds_no_arguments(tmp_path):
-    got = _pick(_repo(tmp_path), unit="run-1:impl")
+    got = _pick(_repo(tmp_path))
     assert (got.model, got.effort, got.model_source, got.effort_source) == (None, None, mc.Source.DEFAULT, mc.Source.DEFAULT)
     assert got.cli_args() == [] and got.env_changes() == {} and got.assign_id is None
 
@@ -245,7 +245,7 @@ def test_a_wrong_value_stops_before_the_launch(tmp_path, kw):
 
 def test_row_fields_hold_only_present_values(tmp_path):
     """割り付けを受けていない起動は、単位を渡されても使用量ログの欄に unit を置かない。"""
-    got = _pick(_repo(tmp_path), mode="light", unit="run-1:impl")
+    got = _pick(_repo(tmp_path, {"enabled": False}), mode="light", unit="run-1:impl")
     assert got.row_fields() == {
         "layer": "worker",
         "name": "impl",
