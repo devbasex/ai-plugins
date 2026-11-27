@@ -61,7 +61,8 @@ class Thread(NamedTuple):
 class Carried(NamedTuple):
     """前の実行から引き継ぐ未解決の指摘 1 件。`comment` は開いたままのスレッドの最初のコメントの id（記録のコメントから
     戻した指摘は None）。`mvv` から `unpinned_severity` までは、記録のコメントにある MVV の判定（欄の意味は `report_decide.MARKS`）。
-    `thread` は、記録のコメントから戻した指摘が持っていたスレッドの最初のコメントの id。"""
+    `thread` は、記録のコメントから戻した指摘が持っていたスレッドの最初のコメントの id。`protect` は記録のコメントにある
+    保護の種類（#4363）。"""
 
     id: str
     comment: Optional[int]
@@ -77,6 +78,7 @@ class Carried(NamedTuple):
     judged_mvv: Optional[str] = None
     unpinned_severity: Optional[str] = None
     thread: Optional[int] = None
+    protect: Sequence[str] = ()
 
 
 # 記録のコメントから戻した指摘の id の頭（`p-<元の id>`。新しい実行の `r<ラウンド>-<n>` と重ねない）
@@ -157,7 +159,7 @@ def _opt_text(value: object) -> Optional[str]:
 
 
 def _marks_of(item: Mapping[str, Any]) -> dict[str, Any]:
-    """一覧の 1 件が持つ MVV の判定（形の違う値は None）。"""
+    """一覧の 1 件が持つ MVV の判定と保護の種類（形の違う値は None、保護の種類は空）。"""
     redlines = item.get(report_decide.REDLINE_ITEMS)
     return {
         report_decide.MVV: _opt_text(item.get(report_decide.MVV)),
@@ -165,6 +167,7 @@ def _marks_of(item: Mapping[str, Any]) -> dict[str, Any]:
         report_decide.REDLINE_ITEMS: [i for i in redlines if isinstance(i, str)] if isinstance(redlines, list) else None,
         report_decide.JUDGED: _opt_text(item.get(report_decide.JUDGED)),
         report_decide.UNPINNED: criteria_decide.severity_of(item.get(report_decide.UNPINNED)),
+        criteria_decide.PROTECT: criteria_decide.protect_of(item.get(criteria_decide.PROTECT)),
     }
 
 
@@ -193,7 +196,7 @@ def recorded(
 ) -> tuple[list[Carried], dict[int, Mapping[str, Any]]]:
     """最新の記録のコメント（`MARKER` で始まる PR コメントのうち、書き手が信頼でき、最終更新の時刻が最も新しいもの）に残った
     未解決の指摘のうち、スレッドの無いもの（スレッドのある指摘は `carried` が引き継ぐ）と NDF が機械で確かめて作ったものと、
-    スレッドのある指摘の MVV の判定（スレッドの最初のコメントの id → 判定）。同じ保存先の打ち直しは記録の
+    スレッドのある指摘の MVV の判定と保護の種類（スレッドの最初のコメントの id → 判定）。同じ保存先の打ち直しは記録の
     コメントを書き換えるので、作った時刻でなく最終更新の時刻で選ぶ（PR 3944 の r2-5）。
 
     それが今の保存先の書いたコメント（`own` の URL）なら、状態ファイルが持つ指摘（`held` の id）は戻さない。コメントの本文は秘密や

@@ -286,7 +286,7 @@ def _open_value(value: Any) -> str:
 def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
     """未解決の重い指摘と、重さによらず載せる指摘（必ず人の承認が要る操作に当たるもの・NDF が機械で確かめて作ったもの）の一覧を
     HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初のコメントの id（スレッドが無ければ null）。自由記述の値は JSON にする前に `clean`（書き先に応じた伏せ字。値の並びを
-    1 回で受けて同じ順に返す）へ値ごとに通し、JSON にした後の本文全体の伏せ字が一覧の構造を壊さない形に escape する
+    1 回で受けて同じ順に返す）へ値ごとに通し（保護の種類は許可した値だけなので通さない）、JSON にした後の本文全体の伏せ字が一覧の構造を壊さない形に escape する
     （PR 3944 の r6-4）。"""
     done = data.get(THREADS) if isinstance(data.get(THREADS), Mapping) else {}
     items = []
@@ -298,6 +298,9 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
         mark = done.get(f.get("id"))
         thread = mark.get("comment") if isinstance(mark, Mapping) else None
         keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section", *MARKS)}
+        # 保護の種類は許可した値だけを書く（持たない指摘は欄を足さない。#4363）
+        if kinds := criteria_decide.protect_of(f.get(criteria_decide.PROTECT)):
+            keep[criteria_decide.PROTECT] = list(kinds)
         items.append({**keep, "thread": thread if type(thread) is int else None})
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):

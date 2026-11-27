@@ -105,7 +105,7 @@ def _settle_resolved(run: CarryRun, left: Sequence[prior_decide.Thread], done: d
 def carry(run: CarryRun, prior: Prior) -> bool:
     """前の実行が PR に残した未解決の自分の指摘を未解決の指摘としてジャーナルへ入れる。開いたままのスレッドは `threads` に
     結び（閉じたら返信して resolve する）、スレッドの無い指摘と、スレッドから引き継げなかった NDF の指摘（resolve 済みなど）は
-    最新の記録のコメントから戻す。状態ファイルが既に持つスレッド・指摘は引き継がずに MVV の判定だけを重ね、そのうち別の実行が
+    最新の記録のコメントから戻す。状態ファイルが既に持つスレッド・指摘は引き継がずに MVV の判定と保護の種類だけを重ね、そのうち別の実行が
     resolve したスレッドの指摘は修正の対象から外す。状態が変わったかを返す（保存は呼び手がする）。"""
     done = run.data.setdefault(threads.THREADS, {})
     settled = _settle_resolved(run, prior.threads, done)
@@ -127,7 +127,9 @@ def carry(run: CarryRun, prior: Prior) -> bool:
     if added:
         run.process.append({"run": "start", "result": f"PR に残った未解決の指摘 {len(added)} 件を引き継いだ"})
     if merged:
-        run.process.append({"run": "start", "result": f"記録のコメントにある MVV の判定を、既にある指摘 {len(merged)} 件に重ねた"})
+        run.process.append(
+            {"run": "start", "result": f"記録のコメントにある MVV の判定と保護の種類を、既にある指摘 {len(merged)} 件に重ねた"}
+        )
     return bool(settled or added or merged)
 
 
@@ -138,7 +140,7 @@ def _merge_tracked(
     marks: Mapping[int, Mapping[str, Any]],
     items: Sequence[str],
 ) -> set[str]:
-    """状態ファイルが追うスレッドの指摘に、記録のコメントにある同じスレッドの MVV の判定を重ね、変わった指摘の id を返す。
+    """状態ファイルが追うスレッドの指摘に、記録のコメントにある同じスレッドの MVV の判定と保護の種類を重ね、変わった指摘の id を返す。
     閉じた指摘には、スレッドが開いていると読めたときだけ重ねる（人が resolve した指摘を戻さない）。"""
     opened = {t.comment for t in left if not t.resolved}
     merged = set()
