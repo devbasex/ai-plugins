@@ -495,9 +495,13 @@ def _findings(state: dict) -> list[dict]:
     return [{k: v for k, v in f.items() if k not in ("occurrence", "fixed_at", "check")} for f in state["findings"]]
 
 
+JUDGED = "<判定役の出力の名前>"
+
+
 def _rounds_without_heads(state: dict) -> list[dict]:
     """ラウンドの記録から、コミットの時刻で変わる SHA（head・commit・pushed）と、どのテストも同じ比較基点（base。merge-base の
-    SHA）と相手役の並び（reviewers）と重点（focus）と、MVV が無いときの MVV の記録（mvv）を外す。"""
+    SHA）と相手役の並び（reviewers）と重点（focus）と、MVV が無いときの MVV の記録（mvv）を外す。起動ごとに接尾辞が変わる
+    判定役の出力の名前（judge_output）は、ラウンドの番号を持つ形を確かめて `JUDGED` に置き換える。"""
     out = []
     for r in state["rounds"]:
         assert re.fullmatch(r"[0-9a-f]{40}", r["base"]) and r["reviewers"] == ["codex", "kiro"] and r["focus"] == []
@@ -505,6 +509,9 @@ def _rounds_without_heads(state: dict) -> list[dict]:
         row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers", "focus", "mvv", "mvv_checked")}
         if "fix" in row:
             row["fix"] = {k: v for k, v in row["fix"].items() if k not in ("commit", "pushed")}
+        if "judge_output" in row:
+            assert re.fullmatch(rf"round{r['round']}-verify-\w+", row["judge_output"])
+            row["judge_output"] = JUDGED
         out.append(row)
     return out
 
@@ -536,7 +543,13 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert state["pr"] == PR
     assert state["reviewed_sections"] == ["doc.md#セクション A", "doc.md#セクション B", "doc.md#設計"]
     assert _rounds_without_heads(state) == [
-        {"fix": {"fixed": ["r1-1", "r1-2"], "reported": 2}, "round": 1, "scope": "full", "verdict": drive.CHANGES_REQUIRED},
+        {
+            "fix": {"fixed": ["r1-1", "r1-2"], "reported": 2},
+            "judge_output": JUDGED,
+            "round": 1,
+            "scope": "full",
+            "verdict": drive.CHANGES_REQUIRED,
+        },
         {"round": 2, "scope": "since", "verdict": fin.CONVERGED},
     ]
     made_by_reviewer = {"mvv": None, "redline": False, "by_ndf": False, "defer": None}
@@ -629,7 +642,7 @@ def test_run_fixer_without_a_result_is_a_warning_and_errored(wt: Path, tmp_path:
     assert got["process"][-1] == {"run": "round 1 claude", "result": f"結果無し（failed）（新しい会話: {fixer.UNSAVED}）"}
     state = _state(fake.state_dir)
     assert _findings(state) == [_entry("r1-1", "codex", "直す", fin.UNRESOLVED, 1)]
-    assert _rounds_without_heads(state) == [{"round": 1, "scope": "full", "verdict": fin.ERROR}]
+    assert _rounds_without_heads(state) == [{"round": 1, "scope": "full", "verdict": fin.ERROR, "judge_output": JUDGED}]
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME)["final"] == fin.ERROR
     again = Fake(fake.state_dir, {"codex": [["直す"], []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, again, wt)
