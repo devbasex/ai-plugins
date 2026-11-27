@@ -150,14 +150,17 @@ def redlines(*texts: str) -> dict[str, str]:
     return out
 
 
-def patch_material(files: Sequence[Mapping[str, Any]]) -> str:
-    """PR の変えたファイルと差分（GitHub の files の行。`filename`・`status`・任意の `patch`）を材料の本文にする。"""
+def patch_material(files: Sequence[Mapping[str, Any]], limit: Optional[int] = PATCH_LINES) -> str:
+    """PR の変えたファイルと差分（GitHub の files の行。`filename`・`status`・任意の `patch`）を材料の本文にする。
+
+    差分は `limit` 行で切る。None なら切らない（判定の比較の実験版だけが渡す。#2912）。
+    """
     parts = []
     for f in files:
         lines = str(f["patch"]).splitlines() if f.get("patch") else []
-        cut = "\n（以下略）" if len(lines) > PATCH_LINES else ""
+        cut = "\n（以下略）" if limit is not None and len(lines) > limit else ""
         head = f"### {f['filename']}（{f['status']}）"
-        parts.append(f"{head}\n\n```diff\n" + "\n".join(lines[:PATCH_LINES]) + f"\n```{cut}" if lines else head)
+        parts.append(f"{head}\n\n```diff\n" + "\n".join(lines[:limit]) + f"\n```{cut}" if lines else head)
     return "\n\n".join(parts)
 
 
