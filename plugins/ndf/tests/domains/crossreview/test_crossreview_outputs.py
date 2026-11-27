@@ -89,3 +89,45 @@ def test_pr_4638_r3_5_parent_without_write_permission_is_refused(tmp_path: Path)
             outputs.clear_stale(out)
     finally:
         out.parent.chmod(0o700)
+
+
+def test_pr_4638_r1_4_record_is_written_before_the_output_is_published(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """PR 4638 の r1-4: 無い出力は、記録を残してから出力の名前へ置き換える。置き換えの前に落ちて記録だけが残っても、次の起動は
+    その記録を消して続く。"""
+    out = tmp_path / "h"
+    seen = []
+    replace = os.replace
+
+    def watching(src, dst):
+        seen.append(outputs.owner_record(out).exists())
+        raise KeyboardInterrupt  # 置き換えの直前に止まった起動
+
+    monkeypatch.setattr(outputs.os, "replace", watching)
+    with pytest.raises(KeyboardInterrupt):
+        outputs.write_output(out, HEAD)
+    monkeypatch.setattr(outputs.os, "replace", replace)
+    store.write_object(outputs.owner_record(out), {"sha256": "0"})  # 例外処理も走らずに残った記録
+    outputs.clear_stale(out)
+    assert (seen, out.exists(), outputs.owner_record(out).exists()) == ([True], False, False)
+
+
+def test_pr_4638_r1_4_write_into_an_empty_output_is_resumable(tmp_path: Path) -> None:
+    """PR 4638 の r1-4: 空の出力先へ書いた後、書いた後の記録を残す前に落ちても、次の起動は書きかけの記録で今回の書き込みと
+    確かめ、inode を保ったまま空へ戻して続く。"""
+    out = tmp_path / "h"
+    out.touch()
+    before = out.stat().st_ino
+    store.write_object(outputs.owner_record(out), outputs._writing_record(out, HEAD))
+    out.write_text(HEAD, encoding="utf-8")
+    outputs.clear_stale(out)
+    assert (out.stat().st_ino, out.read_text(encoding="utf-8"), outputs.owner_record(out).exists()) == (before, "", False)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
+def test_pr_4638_r1_5_write_only_empty_output_is_refused(tmp_path: Path) -> None:
+    """PR 4638 の r1-5: 書いた後に記録を作るために読み直すので、読めない空の出力先は始めの確かめで `OSError`。"""
+    out = tmp_path / "h"
+    out.touch()
+    out.chmod(0o200)
+    with pytest.raises(OSError):
+        outputs.clear_stale(out)
