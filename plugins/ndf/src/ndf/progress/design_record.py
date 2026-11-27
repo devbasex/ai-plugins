@@ -138,6 +138,9 @@ def _checked(wd: worker_paths.WorkDir, head: str) -> dict[str, Any]:
     errs = contracts.broken_rules(found, CHECKED_SCHEMA) or _unpaired(found)
     if errs:
         raise RecordUnreadable(f"{path} の形が違う: {'; '.join(errs)}")
+    # 単位・課題・扱いは確かめた結果のままだけを承認の対象にする
+    if not plan_files.unchanged_record(found, plan_files.CHECKED_KIND):
+        raise RecordUnreadable(f"{path} は単位の確かめが書いた後に中身が変わっている（退けてから確かめを打ち直す）")
     return found
 
 
@@ -229,7 +232,7 @@ def approved_of(v: View) -> Optional[dict[str, Any]]:
     """工程「ドキュメントレビュー」の設計承認ゲートの最新の回答が承認なら、その記録。
 
     ほかの回答か、記録が無ければ None。回答の後にゲートのステップが未了に戻っていれば（`reset_drafts`）、その承認は
-    取り消されているので None。
+    取り消されているので None。最新の回答が数えない MVV 判定の回答（`model.mvv_answer_void`）でも、前の承認へさかのぼらず None。
     """
     stage = next((s for s in v.snap.stages if s.id == _REVIEW_STAGE), None)
     if stage is None:
@@ -258,6 +261,8 @@ def _latest_target(
             return None
         payload = event_payload(ev)
         if ev.draft.kind == ANSWERED and counts(payload):
+            if model.mvv_answer_void(payload, _GATE):
+                return None
             held = payload.get(TARGET_KEY)
             return dict(held) if payload.get("answer") == _APPROVED and isinstance(held, dict) else None
     return None
@@ -269,7 +274,7 @@ def _latest_target(
 def mismatches(record: Mapping[str, Any], tree: units_files.Tree, context: Mapping[str, Any]) -> list[str]:
     """承認の記録と今の中身の違い（設計の決定 11 の表の 4 つの比較）。空なら承認した分け方のままである。
 
-    `tree` は今の読み元（スプリントの作業場所）、`context` はスプリントの文脈。スプリントの課題は全体を比べ、ほかの比較は記録の
+    `tree` は今の読み元（スプリントの作業場所の HEAD）、`context` はスプリントの文脈。スプリントの課題は全体を比べ、ほかの比較は記録の
     課題に絞る（課題を外す回答の後も、文脈の `plan_omitted` と設計書の表には外した課題が残る）。
     """
     targets = record["targets"]

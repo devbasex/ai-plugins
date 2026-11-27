@@ -12,7 +12,8 @@ import pytest
 
 from ndf.adapters import github
 from ndf.adapters.git import Git
-from ndf.core.plan import cli, review_units_decide
+from ndf.contracts import worker_paths
+from ndf.core.plan import cli, files, review_units_decide
 from ndf.core.plan import units_decide as ud
 from ndf.core.plan import units_files as uf
 
@@ -650,6 +651,7 @@ def test_cli_record_check_writes_checked_json_from_the_reviewed_commit(reviewed,
 
     assert (out["status"], out["outputs"]) == ("ok", {"design_pr": 12})
     checked = json.loads((reviewed / "checked.json").read_text(encoding="utf-8"))
+    assert checked.pop("ndf_digest")
     assert checked == {
         "ndf_record": "design-units-check",
         "head": Git(work).run("rev-parse", "HEAD").strip(),
@@ -668,7 +670,8 @@ def test_cli_record_check_writes_checked_json_from_the_reviewed_commit(reviewed,
     [("head", "approval_stale"), ("no_branch", "precondition"), ("other_pr", "refused"), ("no_file", "precondition")],
 )
 def test_cli_record_check_writes_nothing_when_it_stops(reviewed, work, capsys, monkeypatch, change, kind):
-    (reviewed / "checked.json").write_text(json.dumps({"ndf_record": "design-units-check"}), encoding="utf-8")
+    with worker_paths.open_resolved(reviewed) as wd:
+        files.publish_record(wd, "checked.json", "design-units-check", {})
     if change == "head":
         git_sandbox.sh(work, "commit", "-q", "--allow-empty", "-m", "next", identity=True)
     elif change == "no_branch":

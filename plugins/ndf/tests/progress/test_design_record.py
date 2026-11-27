@@ -159,6 +159,7 @@ def test_build_joins_the_review_files_and_the_check_and_writes_the_record(checke
     assert (record["limits"], record["criteria"]) == ({"target": 400, "max": 1000}, {"7": 2})
     assert [u["name"] for u in record["units"]] == ["U7"]
     written = json.loads((record_dir / "design-target.json").read_text(encoding="utf-8"))
+    assert written.pop("ndf_digest")
     assert written == {"ndf_record": "design-target", **record}
     assert design_record.mismatches(record, uf.Tree(work), _context(7)) == []
 
@@ -232,6 +233,33 @@ def test_build_does_not_follow_a_linked_input_or_quote_it(tmp_path):
         design_record.build(record_dir)
 
     assert "secret-token" not in str(caught.value)
+
+
+def _append(path: Path, **changed: Any) -> bytes:
+    held = json.loads(path.read_text(encoding="utf-8")) | changed
+    path.write_text(json.dumps(held), encoding="utf-8")
+    return path.read_bytes()
+
+
+def test_build_keeps_a_target_file_changed_after_ndf_wrote_it(checked):
+    record_dir, _ = checked
+    design_record.build(record_dir)
+    held = _append(record_dir / "design-target.json", memo="keep")
+
+    with pytest.raises(design_record.RecordUnreadable, match="design-target.json"):
+        design_record.build(record_dir)
+
+    assert (record_dir / "design-target.json").read_bytes() == held
+
+
+def test_build_refuses_a_check_whose_units_changed_after_it_was_written(checked):
+    record_dir, _ = checked
+    _append(record_dir / "checked.json", units=[])
+
+    with pytest.raises(design_record.RecordUnreadable, match="中身が変わっている"):
+        design_record.build(record_dir)
+
+    assert not (record_dir / "design-target.json").exists()
 
 
 def _check_record(**changed: Any) -> dict[str, Any]:
@@ -381,6 +409,12 @@ def test_approved_of_is_none_after_a_later_answer_or_without_the_target(later):
     held = [_answered("approved", design_target={"n": 1}), *later] if later else [_answered("approved")]
 
     assert design_record.approved_of(_view(*held)) is None
+
+
+def test_approved_of_does_not_go_back_past_a_void_mvv_answer():
+    void = _answered("approved", by=model.MVV_SERVICE, design_target={"n": 2})
+
+    assert design_record.approved_of(_view(_answered("approved", design_target={"n": 1}), void)) is None
 
 
 def test_approved_of_is_none_after_the_gate_returns_to_unfinished():

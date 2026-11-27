@@ -234,6 +234,7 @@ contracts/
   | キー | 値 |
   | --- | --- |
   | `ndf_record` | NDF の記録の種別（`design-units-check`） |
+  | `ndf_digest` | このキーを除く記録の中身の SHA-256。書いた後に中身が変わった記録を見分ける |
   | `head` | 確かめで読んだコミット（`reviewed-head` の値）の ID。文字列 |
   | `issues` | 確かめた課題の番号の配列。扱いが「マージする」「閉じる」の課題も含む |
   | `handling` | 課題の扱い。`issues` の全課題について、課題の番号の文字列をキーにし、値を `{"handling": "<扱い>", "into": <番号か null>}` にするオブジェクト。たとえば `{"7": {"handling": "実装する", "into": null}}` |
@@ -245,7 +246,7 @@ contracts/
   | `criteria` | 課題ごとの受け入れ条件の数 |
   | `units` | 結果の `items` のうち `kind: unit` の項目 |
 
-- 前の `checked.json` は、記録の種別が `design-units-check` のものだけを始めに消す。ほかのファイルは変えずに `stopped`（`refused`）にする
+- 前の `checked.json` は、記録の種別が `design-units-check` で、中身が `ndf_digest` と合うものだけを始めに消す。ほかのファイルは変えずに `stopped`（`refused`）にする
 - 書くときは、一意の名前の一時ファイルに書き終えてから、`checked.json` の名前が空いているときだけ公開する。埋まっていれば `stopped`（`refused`）にする
 - 入力に `design_pr` があれば、保存先の `reviewed-pr` の番号と比べ、違えば `stopped`（`refused`）
 - 結果の `outputs.design_pr` に `reviewed-pr` の番号を返す。設計承認ゲートの質問は、文脈に `design_pr` が無くてもこの値を読む
@@ -273,15 +274,17 @@ contracts/
 | --- | --- | --- |
 | `reviewed-pr`・`reviewed-head`・`reviewed-base` | `ndf cross-review run`（テンプレート `design-pr-review`） | `<所有者>/<リポジトリ>#<番号>`、SHA、ブランチ名 |
 | `checked.json` | `ndf plan units check` | 上の「コマンド」 |
-| `design-target.json` | `build` | `{"ndf_record": "design-target", "version": 1, "review": {"repo","pr","head","base"}, "sprint_branch": "<ブランチ>", "targets": {"issues","handling","omitted"}, "limits": {"target","max"}, "criteria": {"<課題>": 数}, "units": [...]}` |
+| `design-target.json` | `build` | `{"ndf_record": "design-target", "ndf_digest": "<SHA-256>", "version": 1, "review": {"repo","pr","head","base"}, "sprint_branch": "<ブランチ>", "targets": {"issues","handling","omitted"}, "limits": {"target","max"}, "criteria": {"<課題>": 数}, "units": [...]}` |
 
-承認の回答のイベント（`answered`）の payload は、承認の記録をキー `design_target` で持つ。回答の SSOT はイベントで、ファイルは資料を作るための作業用である。回答イベントの `design_target` には `build` または `converted` が返した記録（課題を外す回答では `without_issues` が返した記録）を保存する。`ndf_record` は作業用ファイルの保存時にだけ付ける。
+承認の回答のイベント（`answered`）の payload は、承認の記録をキー `design_target` で持つ。回答の SSOT はイベントで、ファイルは資料を作るための作業用である。回答イベントの `design_target` には `build` または `converted` が返した記録（課題を外す回答では `without_issues` が返した記録）を保存する。`ndf_record` と `ndf_digest` は作業用ファイルの保存時にだけ付ける。
 
 `build` が読む 4 つの入力は、保存先の直下の通常ファイルに限る。シンボリックリンクはたどらない。保存先と途中のディレクトリは、`.git`（か `.ndf`）より上のリンクだけを解き、そこから下は 1 要素ずつリンクをたどらずに開く。理由の文に載せるコミットの ID は、ID の形（16 進の 40 桁か 64 桁）を確かめた値だけにする。保存先の外にあるファイルの中身が、停止の理由に出ないようにするためである。
 
 `build` は `checked.json` の形を `contracts/workflow/design-units-check.schema.json` で確かめる。`handling` と `criteria` のキーが `issues` の課題と違う場合と、`omitted` に `issues` に無い課題がある場合も、形の違いとして扱う。違えば、ファイル名を理由に含む `RecordUnreadable` にする。承認ゲートが、壊れた検査の結果を承認資料や回答の記録にしないためである。
 
-ファイルの `ndf_record` は記録の種別で、`build` は前の `design-target.json` をこの種別のものだけ消し、名前が空いているときだけ公開する（`checked.json` と同じ）。ほかのファイルは変えずに `RecordUnreadable` にする。
+ファイルの `ndf_record` は記録の種別、`ndf_digest` はそれ以外の中身の SHA-256 である。`build` は前の `design-target.json` を、この種別で中身が `ndf_digest` と合うものだけ消し、名前が空いているときだけ公開する（`checked.json` と同じ）。ほかのファイルは変えずに `RecordUnreadable` にする。種別だけで消すと、利用者が追記した記録や、同じ種別を持つ別の JSON まで消えるためである。
+
+`build` は、中身が `ndf_digest` と合わない `checked.json` も `RecordUnreadable` にする。確かめの後に単位や課題が書き換わった記録を、承認の対象にしないためである。
 
 ### 関数の仕様
 
@@ -291,7 +294,7 @@ contracts/
 | `build` | 同上 | 新設 | `(record_dir: Path) -> dict` | 3 つのファイルと `checked.json` から記録を組み、書く |
 | `stale` | 同上 | 新設 | `(record: Mapping, repo, pr, head, base) -> list[str]` | 今の PR と記録の違い |
 | `reset_drafts` | 同上 | 新設 | `(v, stage: stages.StageDef, why: str) -> list[EventDraft]` | 工程の先頭から設計承認ゲートまでを未了に戻すイベント |
-| `approved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「ドキュメントレビュー」の設計承認ゲートの最新の回答が承認なら、その `design_target` を返す。その承認より後にゲートのステップを未了に戻すイベントがあれば None を返す。最新の回答が承認でない場合（承認の後の変更要求など）も None |
+| `approved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「ドキュメントレビュー」の設計承認ゲートの最新の回答が承認なら、その `design_target` を返す。その承認より後にゲートのステップを未了に戻すイベントがあれば None を返す。最新の回答が承認でない場合（承認の後の変更要求など）も None。最新の回答が数えない MVV 判定の回答（`model.mvv_answer_void`）なら、前の承認へさかのぼらず None |
 | `mismatches` | 同上 | 新設 | `(record, tree, context) -> list[str]` | 設計書の決定 11 の表の 4 つの比較（単位のファイル・スプリントの課題・課題ごとの扱いと統合先・実装計画を省いた課題）。スプリントの課題は全体を比べ、ほかの比較は記録の `targets.issues` に絞る |
 | `without_issues` | 同上 | 新設 | `(record, drop, files) -> dict` | 課題を外す回答の記録の絞り込み。外せない形なら `Refused` |
 | `converted` | 同上 | 新設 | `(repo, head, branch, context, limits, checked: Checked) -> dict` | 変換の再承認の記録。`build` の戻り値と同じ形で返す。`ndf_record` は作業用ファイルに書くときだけ付ける。`sprint_branch` は引数 `branch`、`review.pr` は null、`review.head` は単位のファイルを含むコミット |
@@ -327,6 +330,8 @@ contracts/
 `mismatches` は、最初にスプリントの課題を比べる。文脈の今の `issues`（`--drop` があれば外した後の値）の全体が、記録の `targets.issues` と同じでなければ違いにする。承認の後に課題を追加しても、見落とさないためである。
 
 扱い・統合先と省いた課題の比較は、記録の `targets.issues` の課題に絞る。今の `_dropped` は文脈の `issues` だけを変えるので、文脈の `plan_omitted` と設計書の「設計の結果」の表には外した課題が残るためである。`mismatches` が扱いを読む `handlings` も、`collect` と `lineup_from_files` も、記録の課題だけを読む。
+
+`mismatches` に渡す `tree` は、スプリントの作業場所の HEAD を指す。単位のファイルと設計書はそのコミットから読み、作業場所の未コミットの変更は照合に入れない。例外は下の「この変更より前のスプリントの変換」の照合で、変換したコミットを指す。
 
 ### 異常系の処理
 
