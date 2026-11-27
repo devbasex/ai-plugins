@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import os
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -225,11 +226,10 @@ def _write(args: argparse.Namespace) -> int:
     """書き出す。`--dry-run` でなければ、設定と記録を読む前から最後のファイルを書くまで、ブランチ戦略の書き込みと同じロックを持つ。"""
     try:
         dirs = check.repo_dirs(Path(args.root).resolve())
-        if args.dry_run:
+        lock = nullcontext() if args.dry_run else FileLock(str(bw.lock_at(dirs.common)), timeout=limits.seconds(bw.LOCK_LIMIT))
+        with lock:
             planned = write.plan(_inputs(args, dirs))
-        else:
-            with FileLock(str(bw.lock_at(dirs.common)), timeout=limits.seconds("branch-strategy.write-lock")):
-                planned = write.plan(_inputs(args, dirs))
+            if not args.dry_run:
                 _commit(dirs.main, planned)
     except Timeout:  # OSError の子なので、ロックのファイルを作れないときより先に見る
         return result.emit(result.stopped(TOOL, "check_failed", "別の実行が設定を書いています。終わってから打ち直してください"))
