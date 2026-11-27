@@ -55,7 +55,10 @@ class Limits(NamedTuple):
 
 
 class View(NamedTuple):
-    """単位 1 つの導いた値。`after` は解決した `(ファイルのパス, 単位の名前, 理由)` の並び。順の 0 は依存の輪で決まらないこと。"""
+    """単位 1 つの導いた値。`after` は解決した `(ファイルのパス, 単位の名前, 理由)` の並び。順の 0 は依存の輪で決まらないこと。
+
+    `reach` は間接を含む先に要る単位の `(ファイルのパス, 単位の名前)` で、結果の項目には出さない。
+    """
 
     file: str
     name: str
@@ -68,6 +71,7 @@ class View(NamedTuple):
     lines: Optional[int]
     actual_lines: Optional[int]
     touches: tuple[str, ...]
+    reach: frozenset[tuple[str, str]]
 
 
 class Finding(NamedTuple):
@@ -255,7 +259,7 @@ def _check(
     _u3(files, {k: v[0] for k, v in member.items() if len(v) == 1}, closure, bad)
     tasks_of = {k: _unit_tasks(index[k[0]], u) for k, u in homes.items()}
     _u4(files, tasks_of, closure, bad)
-    views = _views(files, homes, edges, order, tasks_of)
+    views = _views(files, homes, edges, closure, order, tasks_of)
     warn: list[Finding] = []
     for v in views:
         if v.lines is None:
@@ -436,7 +440,7 @@ def _touches(tasks: Sequence[Task]) -> tuple[str, ...]:
     return tuple(sorted({p for t in tasks for p in t.files}))
 
 
-def _views(files, homes, edges, order, tasks_of) -> tuple[View, ...]:
+def _views(files, homes, edges, closure, order, tasks_of) -> tuple[View, ...]:
     """マージの順は実行順、同じ実行順は (単位の最小の課題の番号, ファイルとファイルの中の並び) の順に 1 から振る。"""
 
     def issues_of(k: _Key) -> tuple[int, ...]:
@@ -467,6 +471,7 @@ def _views(files, homes, edges, order, tasks_of) -> tuple[View, ...]:
                 lines,
                 u.actual_lines,
                 _touches(tasks),
+                frozenset((files[at].path, name) for at, name in closure[k]),
             )
         )
     return tuple(views)

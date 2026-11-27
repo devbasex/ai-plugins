@@ -268,7 +268,22 @@ def _collect(tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], 
     paths = list(dict.fromkeys(found[n] for n in rest if n in found))
     texts = tree.read_all(paths, listing)
     files = tuple(_load(path, texts[path]) for path in paths)
+    _refuse_outside(files, wanted, excluded)
     return Collected(files, skipped, excluded, tuple(n for n in rest if n not in found), handled)
+
+
+def _refuse_outside(files: Sequence[ud.UnitFile], wanted: Sequence[int], excluded: Sequence[int]) -> None:
+    """対象でない課題を持つファイルと、独立した単位を持たない課題のタスクは `UnitsFileError`。"""
+    for f in files:
+        outside = [f"#{n}" for n in f.issues if n not in wanted]
+        if outside:
+            raise UnitsFileError(f"{f.path}: 対象でない課題が載っている: {_JOIN.join(outside)}")
+        for task in f.tasks:
+            if task.issue in excluded:
+                raise UnitsFileError(
+                    f"{f.path}: タスク {task.id} の #{task.issue} は扱いが「マージする」か「閉じる」なので単位を持たない"
+                    "（統合する作業は統合先の課題のタスクにする）"
+                )
 
 
 def _design_rows(
@@ -397,7 +412,7 @@ def unit_items(report: Report) -> list[dict[str, Any]]:
     items = []
     for v in report.judgement.views:
         item = {key: list(value) if isinstance(value, tuple) else value for key, value in v._asdict().items()}
-        del item["actual_lines"]
+        del item["actual_lines"], item["reach"]
         item["after"] = [{"file": f, "unit": n, "reason": reason} for f, n, reason in v.after]
         # 省いた課題の単位はパスがどれも空だが、合成のタスクの課題は単位の課題と同じである
         item["tasks"] = [{"id": t, "issue": issue_of[(v.file, t)] if v.file else v.issues[0]} for t in v.tasks]
@@ -532,28 +547,12 @@ def _unit_cells(mine: Sequence[ud.View], views: Sequence[ud.View]) -> list[list[
     return rows
 
 
-def _closures(views: Sequence[ud.View]) -> dict[tuple[str, str], set[tuple[str, str]]]:
-    """単位ごとの、間接を含む先に要る単位。"""
-    direct = {(v.file, v.name): [(f, n) for f, n, _ in v.after] for v in views}
-    out: dict[tuple[str, str], set[tuple[str, str]]] = {}
-    for key in direct:
-        seen: set[tuple[str, str]] = set()
-        stack = list(direct[key])
-        while stack:
-            found = stack.pop()
-            if found not in seen:
-                seen.add(found)
-                stack += direct[found]
-        out[key] = seen
-    return out
-
-
 def _parallel_rows(mine: Sequence[ud.View], views: Sequence[ud.View]) -> list[list[str]]:
     """実行順ごとの 1 行。並列に流れる単位は、どちらからも依存で届かず、触るファイルが重ならない単位である。
 
     計画を省いた課題の単位（`units_decide.single`。パスが空）は触るファイルが分からず直列に流すので、並列の相手にしない。
     """
-    closure = _closures(views)
+    reach = {(v.file, v.name): v.reach for v in views}
     rows = []
     for order in sorted({v.order for v in mine}):
         group = [v for v in mine if v.order == order]
@@ -561,7 +560,7 @@ def _parallel_rows(mine: Sequence[ud.View], views: Sequence[ud.View]) -> list[li
         for v in group:
             name, key = _namer(v, views), (v.file, v.name)
             apart = ((o.file, o.name) for o in views if v.file and o.file and not set(o.touches) & set(v.touches))
-            others = [name(k) for k in apart if k != key and k not in closure[key] and key not in closure[k]]
+            others = [name(k) for k in apart if k != key and k not in v.reach and key not in reach[k]]
             parallel.append(f"{v.name}: {_JOIN.join(others) or _NONE}")
             serial += [f"{name((f, n))} → {v.name}: {reason}" for f, n, reason in v.after]
         rows.append([str(order), _JOIN.join(v.name for v in group), "\n".join(parallel), "\n".join(serial) or _NONE])
