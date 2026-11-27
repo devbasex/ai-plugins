@@ -60,7 +60,7 @@
 
 #### Task 4: 閉じる手順の読み取り（権限を照会できない書き手で止まる）
 
-- **対象ファイル:** `plugins/ndf/src/ndf/adapters/github.py`（`Authored.comment_id`・`PermissionUnknown`・`permission_strict`・`trusts_strict`）、`plugins/ndf/src/ndf/domains/release/record_decide.py`（`Record` の項目と、その項目の型 `Push`・`Confirmation`・`parse_record`・`Correction`・`render_correction`・`parse_correction`・`value_pairs`・`authoritative_targets`・`representative`・`decisive_row`・`to_test`・`complete_of`）、`plugins/ndf/src/ndf/domains/release/record.py`（`Selection`・`Candidates`・`_candidates`・`read_release`・`pr_body_only`）、`plugins/ndf/src/ndf/domains/release/cli.py`（`cmd_records`）、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`（`records` の引数）、`plugins/ndf/tests/adapters/test_github.py`、`test_release_record.py`
+- **対象ファイル:** `plugins/ndf/src/ndf/adapters/github.py`（`Authored.comment_id`・`PermissionUnknown`・`permission_strict`・`trusts_strict`）、`plugins/ndf/src/ndf/domains/release/record_decide.py`（`Record` の項目と、その項目の型 `Push`・`Confirmation`・`parse_record`・`Correction`・`render_correction`・`parse_correction`・`value_pairs`・`authoritative_targets`・`representative`・`pair_verdict`・`to_test`・`complete_of`）、`plugins/ndf/src/ndf/domains/release/record.py`（`Selection`・`Candidates`・`_candidates`・`read_release`・`pr_body_only`）、`plugins/ndf/src/ndf/domains/release/cli.py`（`cmd_records`）、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`（`records` の引数）、`plugins/ndf/tests/adapters/test_github.py`、`test_release_record.py`
 - **変更内容:** 設計書の「閉じる手順の読み取り」の手順 1〜6 と、`--version`・`--release`・`--unit`・`--bodies`・`--issues`・`--pr-body-only`。値とコミットの組（`value_pairs`）は読み取りの手順 3 が最初に使うので、関数とそのテストをこのタスクに置き、Task 5 の確かめ 6（`value_commit_conflict`）はこれを呼ぶ
 - **満たす受け入れ条件:** 9（読む側）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
@@ -131,7 +131,7 @@
 | U7 設定の確かめ | 2 回目 | Task 10 | 10 | 約 300 | |
 | U8 流れの文書 | 2 回目 | Task 11 | 12 | 約 350 | |
 
-依存の向きは U1 → U2 → U3 → U4 → U5（U2 の `Record` の項目と `decisive_row` を U3〜U5 が使う）、U1 → U6 → U7 → U8（U6 は U1 の `flow.py` に足す）である。どの単位も単独でテストが通り、終えた後も今の振る舞いを保つ（足した引数と項目は任意）。U4 は 400 行の目安を超えるが、確かめ 0〜8 と書く順は 1 つの `record` の呼び出しの中で互いを前提にしており、途中で切ると単位が単独で読めないため分けない。実装の途中で 1,000 行を超えそうなら、訂正（`correct_targets`）を別の単位へ分ける。
+依存の向きは U1 → U2 → U3 → U4 → U5（U2 の `Record` の項目と `pair_verdict` を U3〜U5 が使う）、U1 → U6 → U7 → U8（U6 は U1 の `flow.py` に足す）である。どの単位も単独でテストが通り、終えた後も今の振る舞いを保つ（足した引数と項目は任意）。U4 は 400 行の目安を超えるが、確かめ 0〜8 と書く順は 1 つの `record` の呼び出しの中で互いを前提にしており、途中で切ると単位が単独で読めないため分けない。実装の途中で 1,000 行を超えそうなら、訂正（`correct_targets`）を別の単位へ分ける。
 
 ## リファクタリングの時機
 
