@@ -475,7 +475,9 @@ def _environment_record(shape: _Shape, version: str, environment: str) -> record
 
 def _made(shape: _Shape, prefix: Prefix, version: str, environment: str, got: record_decide.Confirmation) -> record_decide.Record:
     evidence = {environment: got.evidence} if got.evidence is not None else None
-    return _environment_record(shape, version, environment)._replace(push=prefix.push, confirmation={environment: str(got.kind)}, evidence=evidence)
+    return _environment_record(shape, version, environment)._replace(
+        push=prefix.push, confirmation={environment: str(got.kind)}, evidence=evidence
+    )
 
 
 def _command_tree(hands: Hands, hub: GitHub, production: str, prefix: Prefix, names: Sequence[str]) -> ContextManager[Optional[Path]]:
