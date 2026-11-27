@@ -96,7 +96,7 @@ src/ndf/
 | `read_experiments` | 同 | 新設 | `read_experiments(since: datetime, root: Optional[Path] = None) -> list[dict]` | `since` の月から今月までの実験の記録を読む（ロックを取らない） |
 | `ledger` | 同 | 新設 | `ledger(since: datetime, root: Optional[Path] = None) -> ContextManager[Ledger]` | 設計書の「読み書き」の順で、読んだ行（`rows`）と追記（`append`）を、実験の記録のロックの中で渡す |
 | `append_row` | 同 | 新設 | `append_row(row: Mapping) -> bool` | `ledger` を開いて 1 行足す |
-| `prune` | 同 | 新設 | `prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)の月の掃除。`window_days` は今の設定の値で、月の最後の日時が `now` − (`window_days` ＋ 30 日) より前の月のファイルを消す。`launch-pruned` の月が今月なら何もしない。違えば、古い月のファイルと出現率の項目を消し（出現率のファイルはロックの中で読み直してから変える）、全部成功したら今月を書く。`launch_choice` が呼び、失敗しても起動は続ける |
+| `prune` | 同 | 新設 | `prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)の月の掃除。`window_days` は今の設定の値である。残す日数は、この値と、記録に残る割り付けの行の `window_days` のうち最も大きい値に 30 日を足した日数で、`now` からその日数を引いた日時より前に終わった月のファイルを消す。`launch-pruned` の月が今月なら何もしない。違えば、古い月のファイルと出現率の項目を消し（出現率のファイルはロックの中で読み直してから変える）、全部成功したら今月を書く。`launch_choice` が呼び、失敗しても起動は続ける |
 
 - `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm` を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄。`unit` は割り付けを受けた起動、つまり `assign_id` がある起動だけに置く）を返す
 - `launch_choice`
@@ -149,7 +149,7 @@ src/ndf/
 | `read_experiments`・`ledger`・`append_row` | `domains/records/jsonl.py` | 層の順序（adapters は domains を読めない） | 使えない。`filelock` と `contracts` の形の確認を使う |
 | `table` | `launch_settings.load` | #1959 の詳細設計 | 使う |
 | `compatibility_key` | `launch_approval.digest` の形 | 同上 | 同じ「キーの順にそろえた JSON の SHA-256」にする |
-| `launch_choice` のリポジトリのキー | `launch_approval.repo_key` | 同上 | 使う |
+| `launch_choice` のリポジトリのキー | `launch_approval.repo_key` | 実装（`git rev-parse` を 1 回起動する） | 使わない。同じ値を `.git` と `commondir` のファイルから求める `model_choice.repo_key` を新設する。単位のある起動のたびに求めるので、子プロセスを増やさないためである。呼び出し元からキーを受け取る案は、B3〜B5 の呼び出し元すべてに同じ計算を持たせることになるので採らない |
 | `stage_of` | `contracts/worker/kinds.json` | `ls contracts/worker` | 作業の名前は同じ。工程の対応は持たないので表に置く |
 | `raised`・`candidates`・`base_fallback` | — | `grep -rn "effort" src/ndf`（該当なし） | 新設する |
 | `report_outcome`・`record_outcome` | `report_launch`・`record_cli`（#1959） | #1959 の詳細設計 | 同じ差し込みに関数を足す |

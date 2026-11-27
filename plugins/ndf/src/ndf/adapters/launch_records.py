@@ -61,17 +61,25 @@ def rows_from(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
     規則は `whole_rows` と同じ。読めないか所有者だけの形でなければ空で、位置は `offset` のまま。
     """
     try:
-        fd = os.open(path, os.O_RDONLY)
+        return read_rows(path, offset)
     except OSError:
         return [], offset
+
+
+def read_rows(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
+    """`rows_from` と同じ読み方で、無いファイルだけを空にする。読めないか所有者だけの形でなければ `OSError`。
+
+    無いファイル（まだ書いていない月など）と、権限などで読めないファイルを呼び手が分けるためである。
+    """
     try:
-        with os.fdopen(fd, "rb") as f:
-            if not private_to_me(f.fileno()):
-                return [], offset
-            f.seek(offset)
-            data = f.read()
-    except OSError:
+        fd = os.open(path, os.O_RDONLY)
+    except FileNotFoundError:
         return [], offset
+    with os.fdopen(fd, "rb") as f:
+        if not private_to_me(f.fileno()):
+            raise PermissionError(f"{path} が所有者だけの読み書きでない。所有者を自分にし、`chmod 600` にしてから打ち直す")
+        f.seek(offset)
+        data = f.read()
     whole = data[: data.rfind(b"\n") + 1]  # 改行で終わらない末尾は書きかけ
     rows = (_parsed_row(line) for line in whole.split(b"\n")[:-1])
     return [row for row in rows if row is not None], offset + len(whole)

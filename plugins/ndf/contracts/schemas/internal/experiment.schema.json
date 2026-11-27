@@ -15,7 +15,7 @@
       "type": "object",
       "additionalProperties": false,
       "description": "割り付け（単位の最初の起動で 1 行）",
-      "required": ["version", "at", "kind", "assign_id", "unit", "stage", "runtime", "repo", "arms", "probs", "chosen", "key", "phase"],
+      "required": ["version", "at", "kind", "assign_id", "unit", "stage", "runtime", "repo", "arms", "probs", "chosen", "key", "phase", "window_days"],
       "properties": {
         "version": {"$ref": "common.schema.json#/$defs/version"},
         "at": {"$ref": "common.schema.json#/$defs/time"},
@@ -24,13 +24,14 @@
         "unit": {"$ref": "#/$defs/id", "description": "単位の ID"},
         "stage": {"type": "string", "description": "工程"},
         "runtime": {"type": "string", "description": "ランタイム（表 runtimes の id）"},
-        "repo": {"type": "string", "description": "リポジトリのキー（launch_approval.repo_key）"},
+        "repo": {"type": "string", "description": "リポジトリのキー（model_choice.repo_key。git を起動せずに求めた git の共通ディレクトリの実体）"},
         "mode": {"type": "string", "description": "工程のモード。分かる起動だけ"},
         "arms": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/arm"}, "description": "そのときの選択肢（先頭が基準の組）"},
         "probs": {"type": "array", "minItems": 2, "items": {"type": "number", "minimum": 0, "maximum": 1}, "description": "選択肢ごとの確率。候補は 0 より大きく、ほかは 0"},
         "chosen": {"type": "integer", "minimum": 0, "description": "選んだ組の添字"},
         "key": {"type": "string", "description": "互換性のキー（選択肢の並びと指標の名前とバージョンのハッシュ）"},
-        "phase": {"enum": ["burn_in", "adaptive", "uniform"], "description": "burn_in は件数を集める間か使える出現率が無い、adaptive は調整した出現率、uniform は費用を計算できないモデルがあり均等"}
+        "phase": {"enum": ["burn_in", "adaptive", "uniform"], "description": "burn_in は件数を集める間か使える出現率が無い、adaptive は調整した出現率、uniform は費用を計算できないモデルがあり均等"},
+        "window_days": {"type": "integer", "minimum": 1, "maximum": 365, "description": "割り付けたときの選択の計算に使う期間（日）。月の掃除が、保存先を共有するリポジトリのうち最も長い期間の記録を残すために読む"}
       }
     },
     "outcome": {
@@ -70,12 +71,15 @@
       "type": "object",
       "additionalProperties": false,
       "description": "単位を実験の対象外にした",
-      "required": ["version", "at", "kind", "unit", "assign_id", "reason"],
+      "required": ["version", "at", "kind", "unit", "repo", "stage", "runtime", "assign_id", "reason"],
       "properties": {
         "version": {"$ref": "common.schema.json#/$defs/version"},
         "at": {"$ref": "common.schema.json#/$defs/time"},
         "kind": {"const": "halted"},
         "unit": {"$ref": "#/$defs/id"},
+        "repo": {"type": "string", "description": "リポジトリのキー（model_choice.repo_key）。単位の ID は呼び出し元が付けるので、停止はリポジトリ・工程・ランタイムで絞る"},
+        "stage": {"type": "string", "description": "工程"},
+        "runtime": {"type": "string", "description": "ランタイム（表 runtimes の id）"},
         "assign_id": {"oneOf": [{"$ref": "#/$defs/id"}, {"type": "null"}], "description": "単位の割り付け ID。無ければ null"},
         "reason": {"enum": ["disabled", "fixed", "changed", "manual"], "description": "disabled は停止、fixed は選択肢が 1 つ、changed は選択肢か指標の変更、manual は引数か環境変数の指定"}
       }

@@ -61,6 +61,7 @@
 - **対象ファイル:** `core/converge/participants.py`・`adapters/agents.py`、`domains/crossreview/seats.py`・`fixer.py`・`journal.py`・`drive.py`、`domains/records/usage.py`（`codex_cost`）、`contracts/data/codex-prices.json`・`runtimes.json`
 - **変更内容:** 詳細設計の「cross-review と相手役」。`codex exec --json` を実際に打ち、使用量の欄の内訳（`cached_input_tokens` が `input_tokens` の内数か）、利用上限とサンドボックスの失敗の検出を確かめる
 - **満たす受け入れ条件:** 3・4・13・15・16
+- **B1b のレビューで持ち越した項目:** 割り付けの「費用を計算できないモデルの単位があれば均等に抽選する」判定（`adapters/model_choice.py` の `_has_unpriced`）は、単価表がまだ無いので、記録したモデルが今の単価表に載っているかを見ていない。単価表（`contracts/data/codex-prices.json`）を足すこのタスクで、載ったモデルの `unpriced` の行を数えないようにする（[allocation の「割り付けの流れ」](./issue-2944-design-allocation.md#割り付けの流れ)の条件）
 - **進め方:** 実際の出力を見本にしてテストを先に書く
 
 ### Task 7: 委譲の起動にモデルと effort の選択を足す

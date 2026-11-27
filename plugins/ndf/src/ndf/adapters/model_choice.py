@@ -42,7 +42,7 @@ from typing import Any, Mapping, Optional
 from filelock import FileLock, Timeout
 
 from ndf import contracts, identity
-from ndf.adapters import launch_approval, launch_records, launch_settings
+from ndf.adapters import launch_records, launch_settings
 from ndf.contracts import facts, internal, limits
 
 # 同梱の表
@@ -99,7 +99,8 @@ class Choice:
     """1 回の起動の値と出所。`arm` は割り付けた組（実験でなければ None）、`base_arm` は工程の基準の組（工程が無ければ None）。
 
     `inherited_effort` は、ランタイム自身の effort の環境変数を子へ引き継ぐときの値（そのとき `effort` は None で、
-    `--effort` を足さない）。
+    `--effort` を足さない）。`retry` は引き上げを求めた理由（引数か環境変数の指定の起動は None）で、`raised` は値が実際に
+    変わったか。`store` は選んだときの実験の記録の保存先で、`base_fallback` が同じ保存先へ書くために持つ。
     """
 
     layer: str
@@ -117,6 +118,8 @@ class Choice:
     arm: Optional[Mapping[str, str]] = None
     base_arm: Optional[Mapping[str, str]] = None
     inherited_effort: Optional[str] = None
+    retry: Optional[str] = None
+    store: Optional[Path] = None
 
     def cli_args(self) -> list[str]:
         """CLI に渡す引数（表 runtimes の `choice_args` の形。値の無い側は足さない）。"""
@@ -492,16 +495,20 @@ class Ledger:
 
 @contextmanager
 def ledger(since: datetime, root: Optional[Path] = None) -> Iterator[Ledger]:
-    """ロックの外で `since` の月から読み、ロックを取ってからは追記された分（月が替われば新しい月のファイル）だけを読み足して渡す。"""
+    """ロックの外で `since` の月から読み、ロックを取ってからは追記された分（月が替われば新しい月のファイル）だけを読み足して渡す。
+
+    無い月は空として読む。ある月を読めなければ `OSError` を送る（読めない月を空とみなすと、その月の割り付けを見失って同じ単位に
+    別の組を割り付けるため）。
+    """
     root = records_dir() if root is None else root
     months = _months(_month(since), _month(_utc_now()))
-    rows = [r for m in months[:-1] for r in launch_records.whole_rows(_month_file(root, m))]
-    last, offset = launch_records.rows_from(_month_file(root, months[-1]), 0)
+    rows = [r for m in months[:-1] for r in launch_records.read_rows(_month_file(root, m), 0)[0]]
+    last, offset = launch_records.read_rows(_month_file(root, months[-1]), 0)
     rows += last
     with _lock(_store_file(root, LEDGER_LOCK)):
-        rows += launch_records.rows_from(_month_file(root, months[-1]), offset)[0]
+        rows += launch_records.read_rows(_month_file(root, months[-1]), offset)[0]
         for m in _months(months[-1], _month(_utc_now()))[1:]:
-            rows += launch_records.whole_rows(_month_file(root, m))
+            rows += launch_records.read_rows(_month_file(root, m), 0)[0]
         yield Ledger(root, rows)
 
 
@@ -517,25 +524,42 @@ def append_row(row: Mapping[str, Any], root: Optional[Path] = None) -> bool:
 
 
 def _write_replacing(path: Path, text: str) -> None:
+    """一時ファイルに書いてから置き換える。一時ファイルは作るときから所有者だけが読み書きできる（0600）。
+
+    出現率のファイルはリポジトリの絶対パスを持つので、umask で広がった権限のファイルに置き換えない。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    tmp.write_text(text, encoding="utf-8")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
     os.replace(tmp, path)
 
 
 def prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None:
-    """月の掃除。`launch-pruned` が今月なら何もしない。違えば、月の最後の日時が `window_days` ＋ 記録を残す日数より前の月の
-    ファイルと、期間を過ぎた出現率の項目を消し、全部成功したら今月を書く。失敗は呼び手へ送る（次の起動がやり直す）。"""
+    """月の掃除。`launch-pruned` が今月なら何もしない。違えば古い月のファイルと期間を過ぎた出現率の項目を消し、全部成功したら
+    今月を書く。失敗は呼び手へ送る（次の起動がやり直す）。
+
+    消すのは、掃除する日時から「残す日数」を引いた日時より前に終わった月である。残す日数は、`window_days` と、記録に残る割り付けの
+    行の `window_days` の最大値に、記録を残す日数（records の行の `kept_extra_days`）を足したもの。保存先はリポジトリで
+    分かれないので、`window_days` の長い別のリポジトリが使う月を、短い側の掃除が消さないためである。
+    """
     root = records_dir() if root is None else root
     done = _store_file(root, PRUNED)
     month = _month(now)
     if done.is_file() and done.read_text(encoding="utf-8").strip() == month:
         return
-    edge = now - timedelta(days=window_days + _rule()["kept_extra_days"])
     head, tail = facts.value("ndf-files", LEDGER, "path").split(MONTH)
+    found: dict[str, Path] = {}
     for path in root.glob(f"{head}*{tail}"):
-        found = path.name[len(head) : len(path.name) - len(tail)]
-        if _MONTH_FORM.fullmatch(found) and _month_start(found, 1) <= edge:
+        name = path.name[len(head) : len(path.name) - len(tail)]
+        if _MONTH_FORM.fullmatch(name):
+            found[name] = path
+    rows = [r for p in found.values() for r in launch_records.whole_rows(p)]  # 読めない月は割り付けにも使われないので飛ばす
+    days = max([window_days] + [r["window_days"] for r in rows if r["kind"] == "assign" and "window_days" in r])
+    edge = now - timedelta(days=days + _rule()["kept_extra_days"])
+    for name, path in found.items():
+        if _month_start(name, 1) <= edge:
             path.unlink(missing_ok=True)
     _prune_weights(root, now)
     _write_replacing(done, month)
@@ -561,6 +585,32 @@ def _prune_weights(root: Path, now: datetime) -> None:
 
 
 # --- 割り付け ----------------------------------------------------------------------------------------
+
+
+def repo_key(root: Path) -> str:
+    """実験の記録のリポジトリのキー: git の共通ディレクトリの実体の絶対パス。`.git` が無いか読めなければ `root` の実体。
+
+    `launch_approval.repo_key` と同じ値を、git を起動せずに `.git` と `commondir` のファイルから求める。単位のある起動の
+    たびに求めるので、`git rev-parse` の子プロセスを増やさないためである（`root` は `launch_root` が `.git` を見つけた所）。
+    リンクされた worktree の `.git` はファイルで `gitdir: <場所>` を持ち、その場所の `commondir` が共通ディレクトリを指す。
+    """
+    dot = root / ".git"
+    try:
+        if dot.is_file():
+            text = dot.read_text(encoding="utf-8").strip()
+            if not text.startswith("gitdir:"):
+                return os.path.realpath(root)
+            gitdir = root / text.removeprefix("gitdir:").strip()
+        elif dot.is_dir():
+            gitdir = dot
+        else:
+            return os.path.realpath(root)
+        common = gitdir / "commondir"
+        if common.is_file():
+            gitdir = gitdir / common.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない `.git` は git の外と同じく `root` の実体をキーにする
+        return os.path.realpath(root)
+    return os.path.realpath(gitdir)
 
 
 def compatibility_key(arms: Sequence[Mapping[str, str]], metric: Optional[str]) -> str:
@@ -594,6 +644,17 @@ class Where:
     def of(self, row: Optional[Mapping[str, Any]]) -> bool:
         """`row`（割り付けの行か出現率の項目）が同じキーを持つか。"""
         return row is not None and all(row[k] == v for k, v in vars(self).items())
+
+    def at(self, row: Mapping[str, Any]) -> bool:
+        """`row`（割り付けの行か停止の行）が同じリポジトリ・工程・ランタイムか（互換性のキーは見ない）。
+
+        単位の ID は呼び出し元が付けるので、別のリポジトリ・工程・ランタイムが同じ名前を使っても混ぜない。
+        """
+        return (row["repo"], row["stage"], row["runtime"]) == (self.repo, self.stage, self.runtime)
+
+    def fields(self) -> dict[str, str]:
+        """停止の行に書く範囲の欄。"""
+        return {"repo": self.repo, "stage": self.stage, "runtime": self.runtime}
 
 
 def candidates(
@@ -643,7 +704,7 @@ def _weights_entry(u: _Unit) -> Optional[dict[str, Any]]:
     path = _store_file(u.store, WEIGHTS)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        found = [e for e in data["entries"] if u.where.of(e)]
+        found = [e for e in data["entries"] if u.where.of(e) and not _past(e, u.now)]  # 掃除の後に期限を過ぎた項目も使わない
     except (OSError, ValueError, KeyError, TypeError):  # noqa: NDF401 ファイル: 無いか壊れた出現率のファイルは項目なし（均等に抽選する）
         return None
     return found[-1] if found else None
@@ -655,13 +716,19 @@ def _model_group(arm: Mapping[str, str], arms: Sequence[Mapping[str, str]]) -> s
 
 
 def _models_agree(entry: Mapping[str, Any], rows: Sequence[Mapping[str, Any]], u: _Unit) -> bool:
-    """項目の実際のモデルが、期間の中の同じキーの最も新しい `observed` の行と、まとまりごとに食い違わないか。"""
-    assigns, latest = _assigns(rows), {}
+    """項目の実際のモデルが、期間の中の同じキーの最も新しい `observed` の行と、まとまりごとに食い違わないか。
+
+    最も新しい行は記録の順でなく行の日時で選ぶ。並行する起動の観測は、ロックの待ちで日時と逆の順に記録されることがある。
+    """
+    assigns = _assigns(rows)
+    latest: dict[str, Mapping[str, Any]] = {}
     for r in rows:
         if r["kind"] == "observed" and _row_time(r) >= u.start and u.where.of(assigns.get(r["assign_id"])):
-            latest[_model_group(r["arm"], u.arms)] = r["model"]
+            group = _model_group(r["arm"], u.arms)
+            if group not in latest or _row_time(r) >= _row_time(latest[group]):
+                latest[group] = r
     models = entry["models"] if "models" in entry else {}
-    return all(latest[g] == m for g, m in models.items() if g in latest)
+    return all(latest[g]["model"] == m for g, m in models.items() if g in latest)
 
 
 def _has_unpriced(rows: Sequence[Mapping[str, Any]], u: _Unit) -> bool:
@@ -707,28 +774,34 @@ def _assignment(rows: Sequence[Mapping[str, Any]], u: _Unit) -> dict[str, Any]:
         "chosen": _drawn(probs),
         "key": w.key,
         "phase": phase,
+        "window_days": u.allocation["window_days"],
     }
     return {k: v for k, v in row.items() if v is not None}
 
 
-def _halt(led: Ledger, u_now: datetime, start: datetime, unit: str, assign_id: Optional[str], reason: Halt) -> None:
-    """停止の行を足す。期間の中に同じ単位の同じ理由の行があれば足さない。"""
-    if any(r["kind"] == "halted" and r["unit"] == unit and r["reason"] == reason and _row_time(r) >= start for r in led.rows):
+def _halted(r: Mapping[str, Any], unit: str, where: Where) -> bool:
+    return r["kind"] == "halted" and r["unit"] == unit and where.at(r)
+
+
+def _halt(led: Ledger, u_now: datetime, start: datetime, unit: str, where: Where, assign_id: Optional[str], reason: Halt) -> None:
+    """停止の行を足す。期間の中に、同じリポジトリ・工程・ランタイムの同じ単位の同じ理由の行があれば足さない。"""
+    if any(_halted(r, unit, where) and r["reason"] == reason and _row_time(r) >= start for r in led.rows):
         return
-    led.append({"kind": "halted", "at": _time_text(u_now), "unit": unit, "assign_id": assign_id, "reason": str(reason)})
+    row = {"kind": "halted", "at": _time_text(u_now), "unit": unit, **where.fields(), "assign_id": assign_id, "reason": str(reason)}
+    led.append(row)
 
 
-def _own(rows: Sequence[Mapping[str, Any]], unit: str, start: datetime) -> list[Mapping[str, Any]]:
-    """期間の中のその単位の割り付けの行（古い順）。"""
-    return [r for r in rows if r["kind"] == "assign" and r["unit"] == unit and _row_time(r) >= start]
+def _own(rows: Sequence[Mapping[str, Any]], u: _Unit) -> list[Mapping[str, Any]]:
+    """期間の中の、同じリポジトリ・工程・ランタイムのその単位の割り付けの行（古い順）。"""
+    return [r for r in rows if r["kind"] == "assign" and r["unit"] == u.unit and u.where.at(r) and _row_time(r) >= u.start]
 
 
 def _left_experiment(rows: Sequence[Mapping[str, Any]], u: _Unit, own: Sequence[Mapping[str, Any]]) -> bool:
-    """単位に、期間の中の停止の行か、基準の組への切り替えの行があるか。"""
+    """単位に、期間の中の停止の行（同じリポジトリ・工程・ランタイム）か、基準の組への切り替えの行があるか。"""
     ids = {a["assign_id"] for a in own}
     return any(
         _row_time(r) >= u.start
-        and ((r["kind"] == "halted" and r["unit"] == u.unit) or (r["kind"] == "launch_error" and r["switched"] and r["assign_id"] in ids))
+        and (_halted(r, u.unit, u.where) or (r["kind"] == "launch_error" and r["switched"] and r["assign_id"] in ids))
         for r in rows
     )
 
@@ -746,18 +819,18 @@ def _with_assignment(choice: Choice, row: Mapping[str, Any]) -> Choice:
 
 def _decide_assignment(led: Ledger, u: _Unit, choice: Choice) -> Choice:
     """設計書の「割り付けの流れ」の 2〜5（停止と固定・停止か切り替えの記録・既にある割り付け・抽選）。"""
-    own = _own(led.rows, u.unit, u.start)
+    own = _own(led.rows, u)
     last = own[-1] if own else None
     if not u.experiment:
         if last is not None:
-            _halt(led, u.now, u.start, u.unit, last["assign_id"], Halt.FIXED if u.enabled else Halt.DISABLED)
+            _halt(led, u.now, u.start, u.unit, u.where, last["assign_id"], Halt.FIXED if u.enabled else Halt.DISABLED)
         return choice
     if _left_experiment(led.rows, u, own):
         return choice
     if last is not None:
         if last["key"] == u.where.key:
             return _with_assignment(choice, last)
-        _halt(led, u.now, u.start, u.unit, last["assign_id"], Halt.CHANGED)
+        _halt(led, u.now, u.start, u.unit, u.where, last["assign_id"], Halt.CHANGED)
         return choice
     return _with_assignment(choice, led.append(_assignment(led.rows, u)))
 
@@ -779,11 +852,12 @@ def _halt_manual(u: _Unit, charge_to: Optional[str]) -> None:
     try:
         with ledger(u.since, u.store) as led:
             if u.unit is not None:
-                own = _own(led.rows, u.unit, u.start)
-                _halt(led, u.now, u.start, u.unit, own[-1]["assign_id"] if own else None, Halt.MANUAL)
+                own = _own(led.rows, u)
+                _halt(led, u.now, u.start, u.unit, u.where, own[-1]["assign_id"] if own else None, Halt.MANUAL)
             charged = _assigns(led.rows).get(charge_to) if charge_to is not None else None
             if charged is not None:
-                _halt(led, u.now, u.start, charged["unit"], charged["assign_id"], Halt.MANUAL)
+                at = Where(charged["repo"], charged["stage"], charged["runtime"], charged["key"])
+                _halt(led, u.now, u.start, charged["unit"], at, charged["assign_id"], Halt.MANUAL)
     except _STORE_ERRORS as exc:
         log.warning("実験の記録へ手動の指定の停止を書けない（単位 %s）: %s", u.unit, exc)
 
@@ -805,16 +879,17 @@ def _prepared_store(env: Mapping[str, str], now: datetime, window_days: int) -> 
 def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
     """割り付けた基準でない組の起動がモデルを理由に拒否されたとき、基準へ切り替えたことを持つ `launch_error` の行を書き、基準の組の値を返す。
 
-    基準の組と割り付けの無い起動は None。行を書けなくても基準の値を返す。引き上げた起動は、基準の組から引き上げ直す。
+    基準の組と割り付けの無い起動は None。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなくても基準の値を返す。
+    引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、基準の組から引き上げ直す。
     """
     if choice.assign_id is None or choice.arm is None or choice.arm == choice.base_arm:
         return None
     row = {"kind": "launch_error", "at": _time_text(_utc_now()), "assign_id": choice.assign_id, "stage": choice.stage}
-    append_row({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True})
+    append_row({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}, choice.store)
     log.warning("組 %s は起動できなかったので、基準の組で続ける（工程 %s・単位 %s）", _arm_text(choice.arm), choice.stage, choice.unit)
     (model, ms), (effort, es) = _from_base(choice.base_arm, "model"), _from_base(choice.base_arm, "effort")
     back = replace(choice, model=model, effort=effort, model_source=ms, effort_source=es, assign_id=None, arm=None, raised=False)
-    return _raised_once(back) if choice.raised else back
+    return _raised_once(back) if choice.retry is not None else back
 
 
 def _raised_once(choice: Choice) -> Choice:
@@ -859,11 +934,13 @@ def launch_choice(
         unit=req.unit,
         base_arm=base,
         inherited_effort=manual.inherited,
+        retry=None if manual.given else req.retry,
+        store=store,
     )
     if stage is None or store is None or (req.unit is None and req.charge_to is None):
         return choice if manual.given or req.retry is None or stage is None else _raised_once(choice)
     metric = metric_of(stage)
-    where = Where(launch_approval.repo_key(root), stage, runtime, compatibility_key(arms, metric))
+    where = Where(repo_key(root), stage, runtime, compatibility_key(arms, metric))
     experiment = got.enabled and len(arms) > 1 and metric is not None
     u = _Unit(req.unit, req.mode, tuple(arms), got.allocation, experiment, got.enabled, where, now, store)
     if manual.given:

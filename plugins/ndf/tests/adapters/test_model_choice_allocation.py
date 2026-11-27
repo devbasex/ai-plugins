@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -11,11 +12,12 @@ from pathlib import Path
 import pytest
 
 from ndf import identity
-from ndf.adapters import launch_approval
 from ndf.adapters import model_choice as mc
 
 NOW = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
 MODEL_ENV = identity.env_name("launch-model")
+# 停止の行の範囲（記録の読み書きだけを確かめるテストの値）
+SCOPE = {"repo": "/r", "stage": "impl", "runtime": "claude"}
 
 
 @pytest.fixture
@@ -69,7 +71,9 @@ def _write(store: Path, row: dict) -> None:
         led.append(row)
 
 
-def _assign(store: Path, root: Path, unit: str, chosen: int, when: datetime = NOW, *, arms=None, stage="impl", aid=None, repo=None) -> dict:
+def _assign(
+    store: Path, root: Path, unit: str, chosen: int, when: datetime = NOW, *, arms=None, stage="impl", aid=None, repo=None, window=60
+) -> dict:
     arms = arms if arms is not None else list(mc.table(root).arms[stage]["claude"])
     row = {
         "kind": "assign",
@@ -78,12 +82,13 @@ def _assign(store: Path, root: Path, unit: str, chosen: int, when: datetime = NO
         "unit": unit,
         "stage": stage,
         "runtime": "claude",
-        "repo": repo or launch_approval.repo_key(root),
+        "repo": repo or mc.repo_key(root),
         "arms": arms,
         "probs": [1 / len(arms)] * len(arms),
         "chosen": chosen,
         "key": mc.compatibility_key(arms, mc.metric_of(stage)),
         "phase": "burn_in",
+        "window_days": window,
     }
     _write(store, row)
     return row
@@ -102,7 +107,7 @@ def test_the_first_launch_of_a_unit_draws_and_the_next_takes_the_same_arm(tmp_pa
     assert (first.model, first.effort, first.model_source) == ("sonnet", "medium", mc.Source.EXPERIMENT)
     assert first.arm == again.arm == {"model": "sonnet", "effort": "medium"}
     assert row["chosen"] == 1 and row["phase"] == "burn_in" and row["probs"] == pytest.approx([1 / 3] * 3)
-    assert row["repo"] == launch_approval.repo_key(root) and row["mode"] == "standard" and row["unit"] == "r1:impl"
+    assert row["repo"] == mc.repo_key(root) and row["mode"] == "standard" and row["unit"] == "r1:impl"
     assert row["key"] == mc.compatibility_key(row["arms"], mc.metric_of("impl"))
     assert (store / "launch-experiments-2026-11.jsonl").is_file()
 
@@ -216,7 +221,7 @@ def _candidates(root: Path, store: Path, entry=None, now: datetime = NOW, repo=N
     arms = list(mc.table(root).arms["impl"]["claude"])
     rows = mc.read_experiments(now - timedelta(days=60), store)
     key = mc.compatibility_key(arms, mc.metric_of("impl"))
-    return mc.candidates(arms, rows, entry, now, mc.Where(repo or launch_approval.repo_key(root), "impl", "claude", key))
+    return mc.candidates(arms, rows, entry, now, mc.Where(repo or mc.repo_key(root), "impl", "claude", key))
 
 
 def test_two_refusals_in_seven_days_drop_the_arm_until_they_age(tmp_path, store, clock):
@@ -258,7 +263,7 @@ def test_a_refused_arm_is_not_drawn(tmp_path, store, clock, draw):
 def _weights(store: Path, root: Path, **entry) -> dict:
     arms = list(mc.table(root).arms["impl"]["claude"])
     base = {
-        "repo": launch_approval.repo_key(root),
+        "repo": mc.repo_key(root),
         "stage": "impl",
         "runtime": "claude",
         "key": mc.compatibility_key(arms, mc.metric_of("impl")),
@@ -356,20 +361,20 @@ def test_read_rows_skips_broken_lines_and_append_closes_a_torn_end(tmp_path, sto
     store.mkdir(parents=True)
     path.write_bytes(b'not json\n{"kind": "halted"')
     path.chmod(0o600)
-    _write(store, {"kind": "halted", "at": _at(NOW), "unit": "u", "assign_id": None, "reason": "manual"})
+    _write(store, {"kind": "halted", "at": _at(NOW), "unit": "u", **SCOPE, "assign_id": None, "reason": "manual"})
     rows = mc.read_experiments(NOW, store)
     assert [r["unit"] for r in rows] == ["u"]
 
 
 def test_append_refuses_a_row_of_the_wrong_shape(store, clock):
     with pytest.raises(Exception, match="experiment"):
-        _write(store, {"kind": "halted", "at": _at(NOW), "unit": "u", "reason": "manual", "extra": 1})
+        _write(store, {"kind": "halted", "at": _at(NOW), "unit": "u", **SCOPE, "reason": "manual", "extra": 1})
 
 
 def test_append_row_returns_false_when_it_cannot_write(store, clock, caplog):
     store.parent.mkdir(parents=True, exist_ok=True)
     store.write_text("", encoding="utf-8")
-    assert not mc.append_row({"kind": "halted", "at": _at(NOW), "unit": "u", "assign_id": None, "reason": "manual"})
+    assert not mc.append_row({"kind": "halted", "at": _at(NOW), "unit": "u", **SCOPE, "assign_id": None, "reason": "manual"})
 
 
 # --- 月の掃除 ---
@@ -379,6 +384,7 @@ def _month_file(store: Path, month: str) -> Path:
     store.mkdir(parents=True, exist_ok=True)
     path = store / f"launch-experiments-{month}.jsonl"
     path.write_text("", encoding="utf-8")
+    path.chmod(0o600)
     return path
 
 
@@ -422,3 +428,101 @@ def test_a_failed_prune_is_retried_and_the_launch_goes_on(tmp_path, store, clock
     monkeypatch.setattr(Path, "unlink", real)
     _pick(_repo(tmp_path, {"enabled": False}))
     assert not old.exists() and (store / "launch-pruned").read_text(encoding="utf-8") == "2026-11"
+
+
+def test_prune_keeps_months_a_longer_window_of_another_repo_uses(tmp_path, store):
+    # 呼んだ側は 60 日でも、記録に 200 日の割り付けがあれば 200 + 30 日より前に終わった月だけを消す
+    root = _repo(tmp_path)
+    files = {m: _month_file(store, m) for m in ("2026-01", "2026-05")}
+    _assign(store, root, "long", 1, datetime(2026, 5, 2, tzinfo=UTC), repo="/other", window=200)
+    mc.prune(NOW, 60, store)
+    assert [m for m, p in files.items() if p.exists()] == ["2026-05"]
+
+
+def test_prune_writes_the_weights_only_for_the_owner(tmp_path, store, monkeypatch):
+    root = _repo(tmp_path)
+    kept = _weights(store, root)
+    path = store / "launch-weights.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["entries"].append({**kept, "stage": "fix", "at": _at(NOW - timedelta(days=61))})
+    path.write_text(json.dumps(data), encoding="utf-8")
+    path.chmod(0o600)
+    old = os.umask(0o022)
+    try:
+        mc.prune(NOW, 60, store)
+    finally:
+        os.umask(old)
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+# --- 範囲と読めない記録 ---
+
+
+def test_the_same_unit_name_in_another_repo_or_runtime_is_a_new_unit(tmp_path, store, clock):
+    root = _repo(tmp_path)
+    other = _assign(store, root, "r1:impl", 2, repo="/other", aid="other")
+    _write(store, {"kind": "halted", "at": _at(NOW), "unit": "r1:impl", **SCOPE, "assign_id": "other", "reason": "manual"})
+    choice = _pick(root, unit="r1:impl")
+    assert choice.assign_id not in (None, other["assign_id"])
+    assert len(_rows(store, "assign")) == 2
+
+
+def test_a_month_that_cannot_be_read_does_not_draw_again(tmp_path, store, clock, caplog):
+    root = _repo(tmp_path)
+    _assign(store, root, "r1:impl", 2, NOW - timedelta(days=30))
+    (store / "launch-experiments-2026-10.jsonl").chmod(0o644)  # 所有者だけの形でない前月は読めない
+    with caplog.at_level(logging.WARNING):
+        choice = _pick(root, unit="r1:impl")
+    assert choice.assign_id is None and choice.model is None and "記録" in caplog.text
+    assert not (store / "launch-experiments-2026-11.jsonl").exists()
+
+
+def test_the_newest_observation_by_time_decides_the_model(tmp_path, store, clock):
+    root = _repo(tmp_path)
+    _weights(store, root, models={"default": "claude-new"})
+    old = _assign(store, root, "prev", 0, NOW - timedelta(days=2), aid="prev")
+    for when, model in ((NOW - timedelta(days=1), "claude-new"), (NOW - timedelta(days=2), "claude-old")):  # 古い観測が後から届く
+        _write(store, {"kind": "observed", "at": _at(when), "assign_id": old["assign_id"], "arm": {}, "model": model})
+    _pick(root, unit="u")
+    assert [r["phase"] for r in _rows(store, "assign") if r["unit"] == "u"] == ["adaptive"]
+
+
+def test_weights_past_their_window_are_not_used_before_the_next_prune(tmp_path, store, clock):
+    root = _repo(tmp_path)
+    _weights(store, root, at=_at(NOW - timedelta(days=61)))
+    (store / "launch-pruned").write_text("2026-11", encoding="utf-8")  # 今月の掃除は済んでいる
+    _pick(root, unit="u")
+    (row,) = _rows(store, "assign")
+    assert row["phase"] == "burn_in"
+
+
+def test_fallback_writes_to_the_store_the_choice_used(tmp_path, monkeypatch, clock, draw):
+    monkeypatch.delenv("NDF_USAGE_DIR", raising=False)
+    other = tmp_path / "usage"
+    root = _repo(tmp_path)
+    draw["x"] = 0.9
+    choice = _pick(root, unit="u", environ={"NDF_USAGE_DIR": str(other)})
+    assert mc.base_fallback(choice, "model_refused") is not None
+    assert [r["switched"] for r in _rows(other, "launch_error")] == [True]
+    assert _pick(root, unit="u", environ={"NDF_USAGE_DIR": str(other)}).assign_id is None
+
+
+def test_fallback_raises_from_the_base_when_the_arm_was_at_its_top(tmp_path, store, clock):
+    root = _repo(tmp_path, {"stages": {"fix": {"arms": {"claude": [{"effort": "medium"}, {"model": "opus", "effort": "max"}]}}}})
+    _assign(store, root, "r1:fix", 1, stage="fix")
+    picked = _pick(root, "fix", unit="r1:fix", retry="test_failed")
+    assert (picked.model, picked.effort, picked.raised) == ("opus", "max", False)
+    back = mc.base_fallback(picked, "model_refused")
+    assert back is not None and (back.effort, back.raised) == ("high", True)
+
+
+def test_the_repo_key_of_a_linked_worktree_is_the_main_git_dir_without_git(tmp_path, monkeypatch):
+    main = tmp_path / "main"
+    (main / ".git" / "worktrees" / "w").mkdir(parents=True)
+    (main / ".git" / "worktrees" / "w" / "commondir").write_text("../..\n", encoding="utf-8")
+    tree = tmp_path / "w"
+    tree.mkdir()
+    (tree / ".git").write_text(f"gitdir: {main / '.git' / 'worktrees' / 'w'}\n", encoding="utf-8")
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: pytest.fail("git を起動した"))
+    assert mc.repo_key(tree) == mc.repo_key(main) == os.path.realpath(main / ".git")
+    assert mc.repo_key(tmp_path) == os.path.realpath(tmp_path)
