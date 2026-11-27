@@ -233,7 +233,11 @@ contracts/
   | キー | 値 |
   | --- | --- |
   | `ndf_record` | NDF の記録の種別（`design-units-check`） |
-  | `head`・`issues`・`handling`・`omitted`・`limits` | 確かめに使った値 |
+  | `head` | 確かめで読んだコミット（`reviewed-head` の値）の ID。文字列 |
+  | `issues` | 確かめた課題の番号の配列。扱いが「マージする」「閉じる」の課題も含む |
+  | `handling` | 課題の扱い。`issues` の全課題について、課題の番号の文字列をキーにし、値を `{"handling": "<扱い>", "into": <番号か null>}` にするオブジェクト。たとえば `{"7": {"handling": "実装する", "into": null}}`。`handling` は設計書の「設計の結果」の表の「扱い」の文字列で、表に行の無い課題は「実装する」。`into` は扱いが「マージする」の行の統合先の課題の番号で、それ以外と統合先を読めないときは `null` |
+  | `omitted` | 実装計画を省き、課題全体を 1 単位にした課題の番号の配列。扱いが「マージする」「閉じる」の課題は含まない |
+  | `limits` | 単位の見込みの行数の上限。`{"target": <目安>, "max": <最大>}` |
   | `branch` | 入力の `branch`（スプリントブランチ）。無ければ `stopped`（`precondition`） |
   | `criteria` | 課題ごとの受け入れ条件の数 |
   | `units` | 結果の `items` のうち `kind: unit` の項目 |

@@ -625,7 +625,7 @@ def reviewed(hub, work, tmp_path, monkeypatch) -> Path:
     _design(work, "7", "| #7 | 実装する | — |")
     _put(work, "issue-7-plan.md", _plan(1, 2))
     for path, text in uf.rendered(uf.Tree(work), [7], [], LIMITS).items():
-        (work / path).write_text(text, encoding="utf-8")
+        (work / path).write_text(text.after, encoding="utf-8")
     record = tmp_path / "record"
     record.mkdir()
     (record / "reviewed-head").write_text(_commit(work) + "\n", encoding="utf-8")

@@ -364,20 +364,27 @@ def paired_plan(units_path: str) -> str:
     return units_path.removesuffix(UNITS_SUFFIX) + PLAN_SUFFIX
 
 
-def rendered(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: ud.Limits) -> dict[str, str]:
-    """表を書き直すと中身が変わる実装計画の {パス: 書き直した全文}。実装計画の無いファイルは含めない（書くのは呼び手）。"""
+class Rewrite(NamedTuple):
+    """実装計画 1 つの、読んだ本文（`before`）と表を書き直した全文（`after`）。"""
+
+    before: str
+    after: str
+
+
+def rendered(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: ud.Limits) -> dict[str, Rewrite]:
+    """表を書き直すと中身が変わる実装計画の {パス: `Rewrite`}。実装計画の無いファイルは含めない（書くのは呼び手）。"""
     listing = tree.listing()
     found = _collect(tree, listing, issues, omitted)
     # 表に出る値は受け入れ条件の数に依らないので、数は渡さない（参照の違反は確かめが返す）
     views = ud.judge([*found.files, *map(ud.single, found.omitted)], limits, {}, propose=False).views
     files = {paired_plan(f.path): f.path for f in found.files}
-    out: dict[str, str] = {}
+    out: dict[str, Rewrite] = {}
     for plan, text in tree.read_all(list(files), listing).items():
         if text is None:
             continue
         new = render_tables(text, views, files[plan])
         if new != _newlines(text):
-            out[plan] = new
+            out[plan] = Rewrite(text, new)
     return out
 
 

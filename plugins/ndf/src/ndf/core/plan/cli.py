@@ -35,7 +35,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Iterable, Mapping, NamedTuple, NoReturn, Optional
+from typing import Any, Mapping, NamedTuple, NoReturn, Optional
 
 from ndf import identity
 from ndf.adapters import github
@@ -457,10 +457,11 @@ def _checked_units(a: argparse.Namespace, targets: _Targets, record: Optional[_R
     return result.result(TOOL, OK, summary, units + splits, metrics, warnings=warnings, outputs=outputs)
 
 
-def _refuse_changed(root: Path, plans: Iterable[str], before: Mapping[str, bytes]) -> None:
-    """表を作る前に読んだ中身（`before` はファイル名ごと）と今が違う実装計画があれば止まる。"""
-    for plan in plans:
-        if (root / plan).read_bytes() != before.get(Path(plan).name):
+def _refuse_changed(root: Path, texts: Mapping[str, units_files.Rewrite]) -> None:
+    """表を作るときに読んだ本文と今の中身が違う実装計画があれば止まる。"""
+    for plan, text in texts.items():
+        # 本文は改行を変えずに UTF-8 で読んでいるので、符号化し直すと読んだバイト列に戻る
+        if (root / plan).read_bytes() != text.before.encode("utf-8"):
             raise _UnitsStopped("precondition", f"{plan} が読んだ後に変わったので、実装計画を書き換えない（打ち直す）")
 
 
@@ -468,8 +469,6 @@ def _render(targets: _Targets) -> None:
     """実装計画の 2 つの表を書き直す。"""
     tree = units_files.Tree(targets.root)
     limits_held = units_files.limits_of(units_files.project_of(tree))
-    # 置き換える直前に比べるため、表を作る前の中身を持つ
-    before = {p.name: p.read_bytes() for p in (targets.root / "issues").glob("*-plan.md") if p.is_file()}
     texts = units_files.rendered(tree, targets.issues, targets.omitted, limits_held)
     if not texts:
         return
@@ -478,9 +477,9 @@ def _render(targets: _Targets) -> None:
     try:
         with worker_paths.open_resolved(targets.root / "issues") as wd, contextlib.ExitStack() as staged:
             for plan, text in texts.items():
-                staged.enter_context(worker_paths.staged_write(wd, Path(plan).name, text))
+                staged.enter_context(worker_paths.staged_write(wd, Path(plan).name, text.after))
             # `ExitStack` の中で上げると、どの実装計画も置き換わらない
-            _refuse_changed(targets.root, texts, before)
+            _refuse_changed(targets.root, texts)
     except worker_paths.EntryUnsafe as exc:
         raise _UnitsStopped(
             "precondition", f"issues/{exc.name} は今のアクセス権を保って置き換えられないので、実装計画を書き換えない（{exc.kind}）"
