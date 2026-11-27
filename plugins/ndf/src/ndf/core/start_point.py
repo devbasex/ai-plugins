@@ -10,6 +10,8 @@ from typing import Optional
 from ndf.adapters import git
 
 WORKTREE_REMOTE = f"{git.WORKTREE_NDF_SETTINGS} の remote"
+# 起点のリモート名を受ける CLI の引数（ドキュメント再構成と設計の検査が同じ名前で受ける）
+REMOTE_OPTION = "--remote"
 
 
 class StartPointError(Exception):

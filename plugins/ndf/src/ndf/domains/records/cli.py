@@ -525,7 +525,7 @@ def _add_design(sub: Any) -> None:
     d = sub.add_parser("design").add_subparsers(dest="action", required=True).add_parser("check")
     d.add_argument("files", nargs="*", metavar="ファイル", help="全行を検査するファイル（名前を問わない。--base とどちらか一方）")
     d.add_argument("--base", default=None, help="マージ先のブランチ名。分岐点からの差分の設計成果物の、変えた行を検査する")
-    d.add_argument("--remote", default=None, help=f"起点のリモート名（既定は {start_point.WORKTREE_REMOTE}）")
+    d.add_argument(start_point.REMOTE_OPTION, default=None, help=f"起点のリモート名（既定は {start_point.WORKTREE_REMOTE}）")
     d.add_argument("--result", type=Path, default=None, help="標準出力と同じ結果を書くファイル")
     d.set_defaults(handler=_design_check)
 
