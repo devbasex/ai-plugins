@@ -26,7 +26,7 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.chdir(root)
     monkeypatch.setattr(la, "repo_key", lambda _root: "/r")
     monkeypatch.setattr(lc, "_approver_name", lambda _root: "人")
-    monkeypatch.setattr(lc, "_reading_recordable", lambda _repo: True)
+    monkeypatch.setattr(lc, "_reading_recordable", lambda *_: True)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s1")
     for name in ("NDF_AI_CHILD", "NDF_FACTORY_RUN", "NDF_RELAY_PLAN", "NDF_ORGANIZER_DIR"):
         monkeypatch.delenv(name, raising=False)
@@ -235,7 +235,7 @@ def test_where_answers_are_not_recorded_show_gives_the_terminal_command(repo, ca
 
 def test_without_a_github_remote_show_gives_the_terminal_command(repo, capsys, monkeypatch):
     candidate = _draft(capsys)
-    monkeypatch.setattr(lc, "_reading_recordable", lambda _repo: False)  # 読み手役の確認を記録できない
+    monkeypatch.setattr(lc, "_reading_recordable", lambda *_: False)  # 読み手役の確認を記録できない
     got = _run(capsys, "show", "--candidate", str(candidate), "--question", "approve")
     assert "terminal" in got["metrics"] and not la.state_file(la.QUESTIONS).exists()
 
@@ -255,6 +255,31 @@ def test_the_terminal_route_with_a_candidate_can_be_confirmed_after_the_reflecti
     confirmed = _run(capsys, *got["routes"]["approved"]["argv"][2:])
     assert confirmed["status"] == "ok" and confirmed["metrics"]["reflected"]
     assert got["metrics"]["required"] and confirmed["metrics"]["approved"]
+    again = _run(capsys, "show", "--candidate", str(candidate), "--question", "approve")  # 同じ質問の打ち直しも済んだ状態
+    assert again["status"] == "ok" and again["metrics"]["reflected"] and "terminal" not in again["metrics"]
+    done = la.read_launch_record(la.reflected_file(repo / ".ndf" / "launch.json", la.DONE))
+    assert (done["approver"], done["route"]) == ("山田", "terminal")
+
+
+def test_a_retry_in_another_worktree_does_not_report_this_reflection(repo, capsys, monkeypatch):
+    candidate = _draft(capsys, EMPTY)
+    sha = _run(capsys, "show", "--candidate", str(candidate))["metrics"]["sha256"]
+    _typed(monkeypatch, sha)
+    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["status"] == "ok"
+    other = repo.parent / "other"
+    (other / ".git").mkdir(parents=True)
+    monkeypatch.chdir(other)  # 候補が片付いた後に、別の作業場所で打ち直す
+    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["cause"]["kind"] == "refused"
+    assert not (other / ".ndf" / "launch.json").exists()
+
+
+def test_the_answer_route_records_who_consented_even_without_an_approval_row(repo, capsys):
+    candidate = _draft(capsys, EMPTY)
+    _, question, approve = _ask(capsys, candidate)
+    _answer(question, la.APPROVE_LABEL.format("人"))
+    assert _run(capsys, *approve)["status"] == "ok" and _approve_rows() == []
+    done = la.read_launch_record(la.reflected_file(repo / ".ndf" / "launch.json", la.DONE))
+    assert (done["approver"], done["route"]) == ("人", "question")
 
 
 def test_an_unreflected_candidate_with_the_same_hash_as_no_setting_is_not_reported_as_reflected(repo, capsys, monkeypatch):
@@ -380,3 +405,19 @@ def test_revoke_adds_a_row(repo, capsys):
     assert la.is_approved("/r", "a" * 64)
     assert _run(capsys, "revoke", "--sha256", "a" * 64)["status"] == "ok"
     assert not la.is_approved("/r", "a" * 64)
+
+
+def test_reading_recordable_asks_git_only_for_the_remote_url(tmp_path, monkeypatch):
+    """メインディレクトリの `.git` が共通ディレクトリなら、`git worktree list` を起動せずにリモートの URL だけを引く。"""
+    asked: list[str] = []
+
+    def url(self, remote=None):
+        asked.append(remote)
+        return "https://github.com/o/r.git" if remote == "origin" else "https://gitlab.com/o/r.git"
+
+    monkeypatch.setattr(lc.git.Git, "remote_url", url)
+    monkeypatch.setattr(lc.git.Git, "worktrees", lambda self: pytest.fail("git worktree list を起動した"))
+    monkeypatch.setattr(lc.git, "remote_of", lambda main: "origin" if main == tmp_path else "up")
+    assert lc._reading_recordable(tmp_path, str(tmp_path / ".git")) and asked == ["origin"]
+    monkeypatch.setattr(lc.git, "remote_of", lambda main: "up")
+    assert not lc._reading_recordable(tmp_path, str(tmp_path / ".git"))

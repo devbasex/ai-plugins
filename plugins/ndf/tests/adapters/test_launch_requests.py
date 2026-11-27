@@ -521,9 +521,9 @@ def test_reflect_replaces_the_target_once_and_the_retry_succeeds_without_writing
     assert not candidate.exists() and not untouched.exists()  # 反映元のバージョンが合わなくなった、直していない候補は消す
     assert edited.exists()  # 直した候補は、反映元のバージョンが合わなくなっても残す
     assert not target.with_name("launch.json.reflecting").exists()
-    assert la.reflected(candidate, SHA, None)
+    assert la.reflected(candidate, target, SHA, None)
     target.write_bytes(OLD)
-    assert not la.reflected(candidate, SHA, None)
+    assert not la.reflected(candidate, target, SHA, None)
 
 
 def test_reflect_into_a_missing_target(tmp_path):

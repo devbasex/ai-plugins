@@ -88,14 +88,21 @@ def _approver_name(root: Path) -> str:
     return name if name else getpass.getuser()
 
 
-def _reading_recordable(root: Path) -> bool:
+def _reading_recordable(root: Path, repo: str) -> bool:
     """読み手役の確認を記録できるか。`ndf records reading add` は GitHub のリモートの `<所有者>/<リポジトリ>`
-    （`Git.remote_repo`）で記録するため、それを求められない作業場所では質問の前の記録を作れない（質問ではなく端末のコマンドを返す）。"""
+    （`Git.remote_repo`）で記録するため、それを求められない作業場所では質問の前の記録を作れない（質問ではなく端末のコマンドを返す）。
+
+    `repo`（`la.repo_key` が求めた git の共通ディレクトリ）が `.git` という名前なら、その親がメインディレクトリなので、
+    `Git.remote_repo` と同じリモート名（`remote_of`）を `git worktree list` を起動せずに求め、`git remote get-url` の 1 回だけで決める。
+    ほか（bare のリポジトリなど）は `Git.remote_repo` で決める。"""
+    g, common = git.Git(root), Path(repo)
     try:
-        git.Git(root).remote_repo()
+        if common.name != ".git":
+            g.remote_repo()
+            return True
+        return git.repo_of_url(g.remote_url(git.remote_of(common.parent))) is not None
     except (git.GitError, OSError):  # noqa: NDF401 外部コマンド: 識別子を求められなければ質問の前の記録を作れない
         return False
-    return True
 
 
 def _widens(t: ls.Target) -> bool:
@@ -177,7 +184,7 @@ def _show(a: argparse.Namespace) -> dict[str, Any]:
 def _show_result(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: str, target: Path, extra: dict[str, Any]) -> dict[str, Any]:
     """`show` の結果（続きのコマンド `extra` を添える）。設定を読めなければ `InternalError`。"""
     session = _answer_session() if a.question else None
-    if session is not None and not _reading_recordable(root):
+    if session is not None and not _reading_recordable(root, repo):
         session = None
     if a.question is None or session is None:
         return _status_or_terminal(a, root, cand, repo, target, extra)
@@ -227,8 +234,10 @@ def _status_or_terminal(
         t = _candidate_target(root, cand) if cand else ls.approval_target(ls.load(root))
     metrics = {**_base_metrics(repo, t), **({"reflected": reflected} if cand else {})}
     items = [{"kind": "launch-target", **t.listing}]
-    if a.question is None:
-        return result.result(TOOL, result.OK, "承認の対象と状態。" + CLEANUP_NOTE, items, metrics, **extra)
+    if a.question is None or reflected:
+        # 反映済みの候補で質問を打ち直しても、1 回目の後と同じく済んだ状態を返す（片付けた候補の記録は読まない）
+        head = "候補はこの作業場所へ反映済み。" if reflected else ""
+        return result.result(TOOL, result.OK, head + "承認の対象と状態。" + CLEANUP_NOTE, items, metrics, **extra)
     if cand is not None:
         _check_destination(cand, target)  # 端末のコマンドを返す前に、反映先がこの作業場所かを確かめる
     terminal = "cd {} && {}".format(
@@ -283,7 +292,8 @@ def _before_approve(a: argparse.Namespace, cand: Optional[Path]) -> Optional[dic
     if _in_ai_child():
         return _refused_config("NDF が起動した AI の中では承認できない。利用者が端末で打つ")
     if cand is not None and not cand.exists():
-        if la.reflected(cand, a.sha256, a.request):
+        # 今の作業場所の反映先の完了の記録だけを照らす（別の worktree の反映を、この作業場所の反映としない）
+        if la.reflected(cand, ls.launch_file(_worktree_root()), a.sha256, a.request):
             return result.result(TOOL, result.OK, "反映は済んでいる", metrics={"sha256": a.sha256})
         return _refused_config("候補が無く、反映も確かめられない（反映の後に設定が変わったか、候補が別の内容）。draft からやり直す")
     if a.request is not None and la.request_answer(a.request)[0] == "deny":
@@ -335,19 +345,30 @@ def _approval_input(root: Path, cand: Optional[Path], target: Path) -> tuple[ls.
     return _checked_target(root, cand)
 
 
-def _record_approval(request: Optional[str], repo: str, t: ls.Target, target: Path, cand: Optional[Path], approver: Optional[str]) -> None:
-    """承認の記録の錠の中で呼ばれる。回答はこの操作（反映先・候補・内容）への同意かを錠の中で照らし、錠の外で見た「承認済み」も照らし直す。"""
-    if request is not None and la.consent_by_answer(request, repo, t.sha256, target, cand) is None:
-        raise _NoConsent
-    if not _widens(t) or la.is_approved(repo, t.sha256):
-        return
-    if request is not None:
-        if la.approve_by_answer(repo, t.sha256, request) is None:
+def _record_approval(
+    request: Optional[str], repo: str, t: ls.Target, target: Path, cand: Optional[Path], approver: Optional[str]
+) -> dict[str, Any]:
+    """承認の記録の錠の中で呼ばれる。回答はこの操作（反映先・候補・内容）への同意かを錠の中で照らし、錠の外で見た「承認済み」も照らし直す。
+
+    返すのは、この操作に同意した人（`approver`）と確認の経路（`route`: 端末の入力は `terminal`、質問への回答は `question`）。
+    承認の行を書くかにかかわらず返し、`reflect` が完了の記録に入れる。依頼と回答の記録は 1 回だけ読み、同意の確認と承認の行で共有する。
+    """
+    history = la.answer_history() if request is not None else None
+    if history is not None:
+        approver = la.consent_by_answer(request, repo, t.sha256, target, cand, history)
+        if approver is None:
+            raise _NoConsent
+    consent = {"approver": approver, "route": "terminal" if request is None else "question"} if approver is not None else {}
+    if not _widens(t) or (history.approved(repo, t.sha256) if history is not None else la.is_approved(repo, t.sha256)):
+        return consent
+    if history is not None:
+        if la.approve_by_answer(repo, t.sha256, request, history) is None:
             raise _NoConsent
     elif approver is not None:
         la.write_row(la.state_file(la.APPROVALS), la.approval_row(repo, t.sha256, la.Action.APPROVE, approver))
     else:
         raise _Revoked
+    return consent
 
 
 def _approve_and_place(cand: Optional[Path], record: Any, t: ls.Target, request: Optional[str], data: bytes, target: Path) -> Optional[str]:

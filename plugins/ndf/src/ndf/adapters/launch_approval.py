@@ -215,13 +215,17 @@ def request_answer(request_id: str) -> tuple[Optional[str], Optional[str]]:
     return (None, None) if index is None else _judged(_last_labels().get(request_id), requests.rows[index])
 
 
-def consent_by_answer(request_id: str, repo: str, sha256: str, target: Path, candidate: Optional[Path]) -> Optional[str]:
+def consent_by_answer(
+    request_id: str, repo: str, sha256: str, target: Path, candidate: Optional[Path], history: Optional[_History] = None
+) -> Optional[str]:
     """リクエストへの「承認する」の回答を、今回の操作（リポジトリ・承認の対象のハッシュ・反映先・候補）への人の同意として照らし、承認者を返す。
 
     リクエストが無い・操作が違う（別の反映先か別の候補への質問）・同じ反映先により新しいリクエストがある・回答が「承認する」でなければ None。
     承認の行を足すかとは別に、設定を書き換えてよいかを決める（承認の対象が空か承認済みでも、書き換えには毎回人の同意が要る）。
+    `history` を渡せば、その索引を使い、リクエストと回答の記録を読み直さない（同じ錠の中で `approve_by_answer` と共有する）。
     """
-    requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
+    history = history if history is not None else _History()
+    requests = history.requests
     index = requests.by_id.get(request_id)
     if index is None:
         return None
@@ -229,7 +233,7 @@ def consent_by_answer(request_id: str, repo: str, sha256: str, target: Path, can
     asked = (req.get("repo"), req.get("action"), req.get("sha256"), req.get("target"), req.get("candidate"))
     if asked != (repo, Action.APPROVE, sha256, str(target), str(candidate) if candidate is not None else None) or requests.newer(index):
         return None
-    answer, name = _judged(_last_labels().get(request_id), req)
+    answer, name = _judged(history.labels.get(request_id), req)
     return name if answer == "approve" else None
 
 
@@ -243,24 +247,26 @@ def _source_record(candidate: Path) -> dict[str, Any]:
     return launch_candidates.record_object(launch_candidates.raw_record(candidate.parent / SOURCE_NAME))
 
 
-def approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]:
+def approve_by_answer(repo: str, sha256: str, request_id: str, history: Optional[_History] = None) -> Optional[str]:
     """承認の記録の錠の中で、リクエストの回答を設計書の「人の確認」の条件で照らし、承認の行を足して承認者を返す。使えなければ None。
 
     同じリクエストの承認の行があり承認済みなら、行を足さずに承認者を返す（中断の後の打ち直し）。リクエストの後の取り消しは、
     リクエストを作った時点の承認の記録の行数より後ろの行で見分ける（時刻は秒の単位なので、同じ秒の取り消しと区別できない）。
+    `history` を渡せば、その索引（リクエスト・回答・承認の記録）を使い、読み直さない。
     """
-    requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
+    history = history if history is not None else _History()
+    requests = history.requests
     index = requests.by_id.get(request_id)
     if index is None:
         return None
     req = requests.rows[index]
     if (req.get("repo"), req.get("action"), req.get("sha256")) != (repo, Action.APPROVE, sha256):
         return None
-    approvals = _Approvals(records.whole_rows(state_file(APPROVALS)))
+    approvals = history.approvals
     used = approvals.used_row(req)
     if used is not None and approvals.approved(repo, sha256):
         return used.get("approver")
-    answer, name = _judged(_last_labels().get(request_id), req)
+    answer, name = _judged(history.labels.get(request_id), req)
     if answer != "approve" or _lapsed(requests, index, approvals, content_version(Path(req["target"]))):
         return None
     write_row(state_file(APPROVALS), approval_row(repo, sha256, Action.APPROVE, name, request_id))
@@ -353,6 +359,16 @@ class _History:
         if self._approvals is None:
             self._approvals = _Approvals(records.whole_rows(state_file(APPROVALS)))
         return self._approvals
+
+    def approved(self, repo: str, sha256: str) -> bool:
+        """`is_approved` と同じ判定を、この索引の承認の記録で行う。"""
+        return self.approvals.approved(repo, sha256)
+
+
+def answer_history() -> _History:
+    """リクエスト・回答の記録を 1 回ずつ読んだ索引（承認の記録は初めて使うときに読む）。承認の記録の錠の中で
+    `consent_by_answer` と `approve_by_answer` に同じものを渡し、履歴の走査を 1 回にする。"""
+    return _History()
 
 
 def _live(history: _History, candidate: Path, now: Optional[str], current: Callable[[], Optional[str]]) -> bool:
@@ -607,7 +623,13 @@ class Reflection:
 
 
 def reflect(
-    candidate: Path, record: Callable[[], None], sha256: str, request_id: Optional[str] = None, *, data: bytes, expected: Path
+    candidate: Path,
+    record: Callable[[], Optional[Mapping[str, Any]]],
+    sha256: str,
+    request_id: Optional[str] = None,
+    *,
+    data: bytes,
+    expected: Path,
 ) -> Reflection:
     """承認の記録の錠の中で候補の中身 `data` を反映先へ置く。置いたか反映済みなら真、反映先が変わっていたか途中で保存を見つけたら偽の結果を返す。
 
@@ -615,7 +637,8 @@ def reflect(
     `expected`（今の作業場所の `.ndf/launch.json`）と違うか、候補の今の中身が `data` と違えば、何も書かずに `refusal` 付きの偽を返す。
     先に `recover` で退避を片付け、反映先が反映元のバージョンと同じときだけ `record`（人の同意を照らし、要れば承認の行を書く）を呼んで置き換える。
     反映先がすでに候補と同じ中身（手で同じ内容を書いた・置いた直後の中断）でも `record` を呼ぶ。承認の行が無いと次の起動が止まるためで、
-    `record` は承認済みなら何も書かない形にする。
+    `record` は承認済みなら何も書かない形にする。`record` が返した欄（書き換えに同意した人 `approver` と確認の経路 `route`）は、
+    承認の行を書いたかにかかわらず、反映の途中の記録と完了の記録に入れる（だれがどの経路で書き換えを認めたかを残す）。
     書けなければ片付けてから `precondition` で止める（承認の行は残る）。片付けで利用者の保存を別の名前で残したら、そのパスを
     結果の `saved` か、止める文に載せる。
     """
@@ -642,12 +665,12 @@ def reflect(
             "request_id": request_id,
         }
         if now == wanted:
-            record()
+            rec.update(record() or {})
             _after_reflect(target, candidate, rec)
             return Reflection(True, saved)
         if now != source.get("base"):
             return Reflection(False, saved)
-        record()
+        rec.update(record() or {})
         launch_candidates.write_launch_record(reflected_file(target, PENDING), rec)
         try:
             placed = _replace(target, data, rec["base"])
@@ -751,15 +774,6 @@ def recover(target: Path) -> Optional[Path]:
     return saved
 
 
-def _done_of(candidate: Path) -> Optional[dict[str, Any]]:
-    """候補を反映した完了の記録（反映先ごとに最後の 1 件）。無ければ None。"""
-    for path in _store(REFLECTED).glob("*" + DONE):
-        rec = read_launch_record(path)
-        if rec.get("candidate") == candidate.parent.name and isinstance(rec.get("target"), str):
-            return rec
-    return None
-
-
 def reflected_candidate(candidate: Path, target: Path) -> bool:
     """反映先 `target` の最後の完了の記録がこの候補のもので、反映先が今もその中身か。候補が残っていれば、候補もその中身か。何も書かない。
 
@@ -776,7 +790,12 @@ def _still_placed(rec: Optional[Mapping[str, Any]]) -> bool:
     return rec is not None and content_version(Path(str(rec["target"]))) == rec.get("content")
 
 
-def reflected(candidate: Path, sha256: str, request_id: Optional[str]) -> bool:
-    """候補が無い打ち直しで、完了の記録と反映先の中身を照らす。何も書かない。"""
-    rec = _done_of(candidate)
-    return rec is not None and (rec.get("sha256"), rec.get("request_id")) == (sha256, request_id) and _still_placed(rec)
+def reflected(candidate: Path, target: Path, sha256: str, request_id: Optional[str]) -> bool:
+    """候補が無い打ち直しで、今の作業場所の反映先 `target` の完了の記録と反映先の中身を照らす。何も書かない。
+
+    ほかの作業場所の完了の記録は見ない（別の worktree で打ち直したとき、その作業場所へ反映していないのに済んだとしないため）。
+    """
+    rec = read_launch_record(reflected_file(target, DONE))
+    if rec.get("candidate") != candidate.parent.name or rec.get("target") != str(target):
+        return False
+    return (rec.get("sha256"), rec.get("request_id")) == (sha256, request_id) and _still_placed(rec)
