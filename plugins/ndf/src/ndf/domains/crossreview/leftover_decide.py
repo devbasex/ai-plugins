@@ -5,14 +5,20 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 from ndf.domains.crossreview import criteria_decide
 from ndf.domains.records import mvv_decide
 
 # 直さずに残す指摘の行の欄。修正担当へ渡さず、次のラウンドを始める理由にも数えない
 PARKED = "parked"
+# 直さずに残した指摘の行番号が、その位置の基準のコミットの PR の差分に載らないことの記録（行番号は起票の場所に使うので残し、
+# 見送りが解けたら除く）
+OFF_DIFF = "off_diff"
+# 本文の先頭の `<名前>:<行>`
+_LOCATION = re.compile(r"^\s*`?([\w./-]+):(\d+)")
 
 
 class Touched(NamedTuple):
@@ -48,6 +54,25 @@ def _path(row: Mapping[str, Any]) -> str | None:
     """指摘の `path`（`plain_path` の形）。無ければ None。"""
     path = row.get("path")
     return plain_path(path) if isinstance(path, str) else None
+
+
+def location(finding: Mapping[str, Any]) -> tuple[Optional[str], Optional[int]]:
+    """指摘が指すファイルのパスと行（分からなければ None）。相手役が返した `path`・`line` を先に使う。"""
+    given = finding.get("path")
+    if isinstance(given, str) and given.strip():
+        line = finding.get("line")
+        return given.strip(), line if type(line) is int and line > 0 else None
+    section = finding.get("section")
+    path = section.split("#", 1)[0] if isinstance(section, str) and section else None
+    if not path:
+        return None, None
+    text = finding.get("text")
+    found = _LOCATION.match(text) if isinstance(text, str) else None
+    if found is None:
+        return path, None
+    named = found.group(1)
+    same = named == path or path.endswith("/" + named)
+    return path, int(found.group(2)) if same else None
 
 
 def on_touched_line(row: Mapping[str, Any], touched: Touched) -> bool:

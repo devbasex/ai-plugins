@@ -162,7 +162,7 @@ plugins/ndf/
 | `new_in_pr` | `changes.py` | 新設 | `new_in_pr(g: git.Git, previous: Range, current: Range, listed: Listings) -> Optional[tuple[str, ...]]` | 比較基点が変わったことで、既読の差分にも今回渡す差分にも無い変更を持つファイルを返す。比べられなければ None |
 | `since_diff` | `changes.py` | 新設 | `since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str` | 前の head からの差分（比較基点が違えば PR が変えるファイルに絞る）に、`added` の今の PR の差分を続けて返す |
 | `since_files` | `changes.py` | 新設 | `since_files(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> tuple[str, ...]` | `since_diff` が渡すファイルのパスを返す。足して渡す PR の差分に改名があれば、`since_diff` と同じく、改名前と改名後の両方のパスを返す。PR に既にあるインラインのコメントを選ぶ `reviewing.remarks` が使う |
-| `touched_since` | `changes.py` | 新設 | `touched_since(g: git.Git, since: str, current: Range, listed: Listings, since_lines: Optional[str] = None) -> leftover_decide.Touched` | `since` の後に変わったファイル、足した行・書き換えた行の番号、今の PR の差分（`current`）に載る行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`read_origin`）ではない |
+| `touched_since` | `changes.py` | 新設 | `touched_since(g: git.Git, since: str, current: Range, listed: Listings, since_lines: Optional[str] = None, pr_lines: Optional[str] = None) -> leftover_decide.Touched` | `since` の後に変わったファイル、足した行・書き換えた行の番号、今の PR の差分（`current`）に載る行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`read_origin`）ではない |
 
 - `new_in_pr`
   - 事前条件: `previous.head` は `current.head` の祖先
@@ -228,7 +228,7 @@ plugins/ndf/
 | --- | --- | --- |
 | 比較基点が変わった | `new_in_pr`（3 つの差分）と `since_diff` | `new_in_pr` が 6 回。`since_diff` は行の差分だけで 1 回、足すファイルがあれば 2 回 |
 | 比較基点が同じ | `since_diff` だけ | 行の差分 1 回 |
-| 線引きをする（上の 2 つに加わる） | `touched_since` | `since..head` の行の差分が 1 回（`since_lines` を渡せば 0 回）、その一覧が 1 回（`listed` にあれば 0 回）、今の PR の差分の行の差分が 1 回。合わせて 1〜3 回 |
+| 線引きをする（上の 2 つに加わる） | `touched_since` | `since..head` の行の差分が 1 回（`since_lines` を渡せば 0 回）、その一覧が 1 回（`listed` にあれば 0 回）、今の PR の差分の行の差分が 1 回（`pr_lines` を渡せば 0 回）。合わせて 0〜3 回 |
 
 `since_diff` が取得した行の差分は、次のすべてに当たるラウンドで `touched_since` の `since_lines` に渡す。比較基点が同じなら、`since_diff` の返りは `since..head` の行の差分そのものだからである。
 
@@ -237,6 +237,10 @@ plugins/ndf/
 - 差分を渡す起点の head が、線引きの起点の head と同じ
 
 どれかに当たらないラウンドでは、`since..head` の行の差分を 1 回読む。比較基点が違うときの返りはファイルを絞ってあり、起点の head が違えば範囲が違うためである。渡す文字列は、改行を変換せずに持ち回る。
+
+今の PR の全差分（`current.base...current.head`）を同じラウンドで取得してあれば、`pr_lines` に渡す。取得してあるのは、相手役へ渡す差分が全差分のときと、根拠の確かめや席の穴埋めのために全差分のファイルを書いたときである。ファイルから読むときは、改行を変換せずに読む（`read_bytes().decode("utf-8")`）。
+
+取得済みの差分は、UTF-8 でないバイトを置き換え文字にしてある。そのため `since_lines` と `pr_lines` は、パスに置き換え文字があれば使わず、git から読み直す。
 
 `touched_since` は、今の PR の差分からは行の番号だけを使う。そのため、この差分の一覧は読まない。
 
@@ -496,6 +500,16 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 - 載らなければ、`enter` が候補にした出し直しから、上の番号付きの 2 つの順で選び直す。差分に載る行を指す出し直しが無ければ、ファイルの位置になる
 
 位置を置き換えるのは、位置を取る出し直しに `path` があるときだけである。同じラウンドのどの出し直しからも `path` を取れなければ、元の `path`・`line`・`placed_round` をそのまま残す。投稿の処理は `path` の無い指摘の位置を `section` と本文の先頭の行番号から読むので、後の head を組み合わせると別の行を指すためである。
+
+`sort` は最後に、このラウンドで出た指摘の投稿に使う行を確かめる。投稿の処理と同じ関数（`leftover_decide.location`）で読むので、`path` の無い指摘は `section` と本文の先頭から読んだ行が対象になる。基準のコミットの PR の差分に載らない行は、投稿が拒否されて API 呼び出しが増えるので、次のとおり扱う。
+
+| 指摘 | 扱い |
+| --- | --- |
+| 位置の基準がこのラウンドで、修正へ進む | `line` を除き、読んだ `path` のファイルの位置にする |
+| 位置の基準がこのラウンドで、直さずに残す | 起票の場所に使うので `line` は残し、行の欄 `off_diff` を真にする |
+| 位置の基準が前のラウンドで、`off_diff` があり、修正へ進むことになった | `line` を除き、ファイルの位置にする |
+
+位置の基準は変えない。位置を置き換えるか、直した指摘が戻ったときは、`off_diff` を消す。
 
 指摘の行の位置を置き換えるときは、指摘が出たラウンド（`round`）を変えない。`path`・`line` と、その行番号の基準になるラウンド（`placed_round`）を一緒に書き換える。ジャーナルから投稿の処理（`threads.py`）へ渡す位置の取り決めは次のとおりである。
 

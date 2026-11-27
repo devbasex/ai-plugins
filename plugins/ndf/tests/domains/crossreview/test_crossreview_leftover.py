@@ -326,6 +326,25 @@ def test_sorting_replaces_an_unparking_line_outside_the_pr_diff(others: tuple[in
     assert (row["path"], row.get("line"), row[journal_mod.PLACED_ROUND]) == ("a.py", line, 3)
 
 
+@pytest.mark.parametrize(("number", "line"), [(5, 5), (99, None)])
+def test_sorting_checks_the_line_the_thread_reads_from_the_text(number: int, line) -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(2, [_told(f"a.py:{number} が落ちる", severity="critical", section="a.py#f")])
+    journal.sort(TOUCHED)
+    assert threads.location(journal.rows["r2-1"]) == ("a.py", line)
+
+
+def test_a_parked_line_outside_the_pr_diff_is_dropped_when_it_proceeds_without_a_path() -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(2, [_told(path="a.py", line=99)])
+    journal.sort(TOUCHED)
+    row = journal.rows["r2-1"]
+    assert (row[PARKED], row["line"]) == (True, 99)
+    journal.enter(3, [_told(severity="critical")])
+    journal.sort(TOUCHED)
+    assert threads.location(row) == ("a.py", None)
+
+
 def test_the_thread_commit_of_a_moved_finding_is_the_head_of_the_placed_round() -> None:
     rounds = [{"round": 2, "head": "old"}, {"round": 3, "head": "new"}]
     assert threads._placed_head(rounds, {"round": 2}) == "old"
@@ -357,6 +376,15 @@ def test_touched_since_does_not_read_the_line_diff_it_is_given(monkeypatch: pyte
     listed: changes.Listings = {"h1..h2": ({}, frozenset())}
     got = changes.touched_since(git.Git(), "h1", changes.Range("b", "h2"), listed, text)
     assert (got.lines, spans) == ({"a.py": frozenset({1})}, ["b...h2"])
+
+
+@pytest.mark.parametrize(("name", "spans"), [("a.py", []), ("\ufffd.py", ["h1..h2", "b...h2"])])
+def test_touched_since_reads_only_the_diffs_it_cannot_use(monkeypatch: pytest.MonkeyPatch, name: str, spans: list[str]) -> None:
+    read: list[str] = []
+    monkeypatch.setattr(git.Git, "run_bytes", lambda self, *args: read.append(args[-1]) or b"")
+    text = f"diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -1 +1 @@\n-x\n+y\n"
+    changes.touched_since(git.Git(), "h1", changes.Range("b", "h2"), {"h1..h2": ({}, frozenset())}, text, text)
+    assert read == spans
 
 
 def test_touched_since_a_commit_that_is_not_local_raises(wt: Path) -> None:

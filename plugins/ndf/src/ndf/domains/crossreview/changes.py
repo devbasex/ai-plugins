@@ -620,16 +620,34 @@ def _touched_rows(block: _Block) -> range:
     return range(block.start, block.end) if block.end > block.start else range(max(block.start - 1, 1), block.start + 1)
 
 
-def touched_since(g: git.Git, since: str, current: Range, listed: Listings, since_lines: Optional[str] = None) -> leftover_decide.Touched:
+def _given_or_read(g: git.Git, span: str, text: Optional[str]) -> dict[str, tuple[Hunk, ...]]:
+    """差分 `span` の行の差分。取得済みの本文 `text` があれば git を起動しない。`text` のパスに置き換え文字があれば
+    （`review_diff` は UTF-8 でない字を置き換えるので、元のパスが分からない）読み直す。"""
+    if text is not None:
+        hunks = _parsed_hunks(text)
+        if not any("\ufffd" in path for path in hunks):
+            return hunks
+    return _hunks(g, span)
+
+
+def touched_since(
+    g: git.Git,
+    since: str,
+    current: Range,
+    listed: Listings,
+    since_lines: Optional[str] = None,
+    pr_lines: Optional[str] = None,
+) -> leftover_decide.Touched:
     """`since` の後、今の head（`current.head`）までに変わったファイルと、head の側の変えた行の番号、今の PR の差分
     （`current`）に載る head の側の行の番号（#3780）。行で比べられないファイルは行を持たない。`listed` は同じラウンドで読んだ
     一覧（`new_in_pr` が読んだ範囲なら読み直さない）。`since_lines` は取得済みの `since..head` の行の差分（比較基点が起点と
-    同じラウンドの `since_diff` の返り）で、渡せば行の差分を読み直さない。コミットが手元に無ければ `git.GitError`。"""
+    同じラウンドの `since_diff` の返り）、`pr_lines` は取得済みの `current.base...current.head` の全差分（`review_diff` の返り）。
+    渡せばその行の差分を読み直さない（ファイルから読むときは改行を変換しない）。コミットが手元に無ければ `git.GitError`。"""
     span = f"{since}..{current.head}"
     entries, _ = _listing(g, span, listed)
-    changed = _hunks(g, span) if since_lines is None else _parsed_hunks(since_lines)
+    changed = _given_or_read(g, span, since_lines)
     # PR の差分は行の番号だけを使うので、一覧は読まない
-    shown = _hunks(g, f"{current.base}...{current.head}")
+    shown = _given_or_read(g, f"{current.base}...{current.head}", pr_lines)
     lines = {path: frozenset(n for b in _changed_blocks(hunks) for n in _touched_rows(b)) for path, hunks in changed.items()}
     commentable = {path: frozenset(x.head for h in hunks for x in h.lines if x.head is not None) for path, hunks in shown.items()}
     return leftover_decide.Touched(frozenset(entries), lines, commentable)

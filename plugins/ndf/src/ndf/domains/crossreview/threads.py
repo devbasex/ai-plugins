@@ -31,7 +31,7 @@ from typing import Any, NamedTuple, Optional, Protocol, TypeVar
 
 from ndf.adapters.github_pulls import target_of
 from ndf.contracts import limits
-from ndf.domains.crossreview import criteria_decide, journal, prior_decide, report_decide, store, throttle_decide
+from ndf.domains.crossreview import criteria_decide, journal, leftover_decide, prior_decide, report_decide, store, throttle_decide
 from ndf.domains.crossreview import finish_decide as fin
 
 T = TypeVar("T")
@@ -40,8 +40,8 @@ T = TypeVar("T")
 THREADS = report_decide.THREADS
 # 指摘の発生の値（`journal` が書く）
 OCCURRENCE = journal.OCCURRENCE
-# 本文の先頭の `<名前>:<行>`
-_LOCATION = re.compile(r"^\s*`?([\w./-]+):(\d+)")
+# 指摘が指すファイルのパスと行（線引きも同じ読み方で投稿の位置を確かめる）
+location = leftover_decide.location
 # 最初のコメントと返信の本文に置く発生の値の行
 OCCURRENCE_LINE = "<!-- ndf-occurrence: {value} -->"
 _OCCURRENCE = re.compile(r"<!-- ndf-occurrence: (\S+) -->")
@@ -112,25 +112,6 @@ class Reader(Protocol):
     def reviews(self) -> list[prior_decide.Remark]: ...
 
     def open_threads(self) -> list[prior_decide.Thread]: ...
-
-
-def location(finding: Mapping[str, Any]) -> tuple[Optional[str], Optional[int]]:
-    """指摘が指すファイルのパスと行（分からなければ None）。相手役が返した `path`・`line` を先に使う。"""
-    given = finding.get("path")
-    if isinstance(given, str) and given.strip():
-        line = finding.get("line")
-        return given.strip(), line if type(line) is int and line > 0 else None
-    section = finding.get("section")
-    path = section.split("#", 1)[0] if isinstance(section, str) and section else None
-    if not path:
-        return None, None
-    text = finding.get("text")
-    found = _LOCATION.match(text) if isinstance(text, str) else None
-    if found is None:
-        return path, None
-    named = found.group(1)
-    same = named == path or path.endswith("/" + named)
-    return path, int(found.group(2)) if same else None
 
 
 def _round_head(rounds: Sequence[Mapping[str, Any]], round_no: Any) -> Optional[str]:

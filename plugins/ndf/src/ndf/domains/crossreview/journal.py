@@ -136,7 +136,7 @@ def _move(row: dict[str, Any], place: Mapping[str, Any], round_no: int) -> None:
     組み合わせない）。"""
     if "path" not in place:
         return
-    for stale in ("path", "line", PLACED_ROUND):
+    for stale in ("path", "line", PLACED_ROUND, leftover_decide.OFF_DIFF):
         row.pop(stale, None)
     row |= place
     if round_no != row.get("round"):
@@ -499,7 +499,7 @@ class FindingJournal:
         self.revived.append(str(known["id"]))
         # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
         # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
-        for stale in ("path", "line", PLACED_ROUND, SKIPPED_MVV, REVIEW_DEFER, CHECK, PARKED):
+        for stale in ("path", "line", PLACED_ROUND, leftover_decide.OFF_DIFF, SKIPPED_MVV, REVIEW_DEFER, CHECK, PARKED):
             known.pop(stale, None)
         known |= {k: v for k, v in new.items() if k in ("path", "line")}
         known["section"] = section
@@ -535,7 +535,7 @@ class FindingJournal:
 
         位置は今回の出し直しのものを 1 件ずつ当てる（残していた指摘の行の位置は、前の head の行番号である）。どれか 1 件が
         進めば進める。指摘の行の位置は、進んだ出し直しから投稿できる位置（`_post_place`）を選んで置き換える（どれにも
-        `path` が無ければ元の位置を残す。`_move`。#3780）。"""
+        `path` が無ければ元の位置を残す。`_move`。#3780）。最後に、投稿に使う位置を `_check_post_line` で確かめる。"""
         for fid, places in self._moved.items():
             row = self.rows[fid]
             if "line" in row and not leftover_decide.on_commentable_line(row, touched):
@@ -558,7 +558,29 @@ class FindingJournal:
             else:
                 row.pop(PARKED, None)
                 _move(row, _post_place(passed, touched), self._round)
+        for fid in self.raised_ids:
+            self._check_post_line(self.rows[fid], touched)
         return frozenset(parked)
+
+    def _check_post_line(self, row: dict[str, Any], touched: leftover_decide.Touched) -> None:
+        """投稿に使う行（`leftover_decide.location`。`path` が無ければ `section` と本文の先頭から読む）が、基準のコミットの PR の
+        差分に載らなければ、ファイルの位置にする。`touched` で確かめられるのは、位置の基準がこのラウンドの行だけである。直さずに
+        残す指摘は行番号を残して `OFF_DIFF` を付け、後のラウンドで元の位置のまま進むときに除く。"""
+        path, line = leftover_decide.location(row)
+        if path is None or line is None:
+            return
+        if (row.get(PLACED_ROUND) or row.get("round")) == self._round:
+            row.pop(leftover_decide.OFF_DIFF, None)
+            if leftover_decide.on_commentable_line({"path": path, "line": line}, touched):
+                return
+            if row.get(PARKED):
+                row[leftover_decide.OFF_DIFF] = True
+                return
+        elif row.get(PARKED) or not row.get(leftover_decide.OFF_DIFF):
+            return
+        row.pop(leftover_decide.OFF_DIFF, None)
+        row.pop("line", None)
+        row["path"] = leftover_decide.plain_path(path)
 
     def ingest_citations(
         self, errors: Optional[Sequence[Mapping[str, Any]]], mvv: Optional[str], round_no: int, *, recorded: bool = True
