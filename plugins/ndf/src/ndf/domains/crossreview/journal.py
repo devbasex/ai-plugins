@@ -274,21 +274,14 @@ def _askable(row: dict[str, Any], reports: Sequence[Mapping[str, Any]], items: S
     )
 
 
-def _unlower(
-    by_key: Mapping[Any, dict[str, Any]], raised: Sequence[dict[str, Any]], items: Sequence[str]
-) -> list[tuple[dict[str, Any], dict[str, Any], Optional[str]]]:
+def _unlower(by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str]) -> None:
     """判定役の確認で下げた指摘のうち、このラウンドの出し直し `raised` のどれかが保護の種類か、MVV の項目か必ず人の承認が
     要る操作を挙げたもの、または内容の違う重い報告（`_other_content`）のものは、下げた扱いを解除する。内容の違う重い報告が
-    あれば、重要度を元の重要度（最低 major）へ戻す。
-
-    返すのは、内容の違う重い報告のある行と、その報告（いちばん重いもの。同じ重さなら先のもの）と、報告が反する MVV の
-    項目である。行の本文と位置は、呼び手（`FindingJournal._retell`）がその報告へ置き換える。
+    あれば、重要度を元の重要度（最低 major）へ戻す。本文と位置は行のまま変えない。
 
     重要度を重ねる前に解除するので、同じラウンドのほかの出し直しの重要度は、処理の順によらず重ねられる。分類は
     `_classify`、保護の対象を元の重要度へ戻すのは `_restore_lowered` が行う。#4363"""
     lowered = {key for key, row in by_key.items() if _lowered(row)}
-    unlowered: list[dict[str, Any]] = []
-    others: dict[Any, tuple[dict[str, Any], dict[str, Any], Optional[str], Optional[str]]] = {}
     for item in raised:
         text = item.get("text")
         key = oscillation.finding_key(text.strip()) if isinstance(text, str) and text.strip() else None
@@ -298,18 +291,9 @@ def _unlower(
         named = criteria_decide.mvv_item(item.get("mvv"), items)
         differs = _other_content(row, item, named)
         if differs or named is not None or criteria_decide.protect_of(item.get(PROTECT)):
-            unlowered.append(row)
+            row[CHECK] |= {criteria_decide.LOWERED: False, UNLOWERED: True}
         if differs:
-            severity = _raised(item, named)["severity"]
-            held = others.get(key)
-            if held is None or criteria_decide.heavier(held[3], severity) != held[3]:
-                others[key] = (row, item, named, severity)
-    # 内容は下げた時の行と比べるので、すべての出し直しを比べた後で行を変える
-    for row in unlowered:
-        row[CHECK] |= {criteria_decide.LOWERED: False, UNLOWERED: True}
-    for row, *_ in others.values():
-        row["severity"] = criteria_decide.at_least_blocking(criteria_decide.severity_of(row.get("raised_severity")))
-    return [(row, item, named) for row, item, named, _ in others.values()]
+            row["severity"] = criteria_decide.at_least_blocking(criteria_decide.severity_of(row.get("raised_severity")))
 
 
 def _restore_lowered(row: dict[str, Any]) -> None:
@@ -345,8 +329,7 @@ class FindingJournal:
 
     def __init__(self, rows: Sequence[Any] = ()):
         self.rows: dict[str, dict[str, Any]] = {str(f["id"]): f for f in rows if isinstance(f, dict) and "id" in f}
-        # 直した・見送ったのに出し直されて未解決へ戻した指摘と、下げた後に本文を置き換えた指摘（`_retell`）の id
-        # （呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
+        # 直した・見送ったのに出し直されて未解決へ戻した指摘の id（呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
         self.revived: list[str] = []
         # 最後の `enter` で新しく出たか戻った指摘のうち、判定役へ渡す候補の id（`_askable`。#4363）
         self.fresh: list[str] = []
@@ -376,8 +359,7 @@ class FindingJournal:
         fresh: list[str] = []
         same: dict[str, list[Mapping[str, Any]]] = {}
         before = len(self.revived)
-        for row, item, named in _unlower(by_key, raised, items):
-            self._retell(row, item, named, round_no)
+        _unlower(by_key, raised, items)
         for item in raised:
             text = item.get("text")
             text = text.strip() if isinstance(text, str) else ""
@@ -433,18 +415,6 @@ class FindingJournal:
         _restore_lowered(known)
         if "impact" not in known and "impact" in new:
             known["impact"] = new["impact"]
-
-    def _retell(self, known: dict[str, Any], item: dict[str, Any], named: Optional[str], round_no: int) -> None:
-        """下げた指摘に内容の違う重い報告 `item` が出たとき、行の本文・1 文・位置・セクションを今回の報告へ置き換える。行の
-        本文と位置は成り立たないと分かった報告のものなので、残すと修正担当が今回の不具合を直せない。スレッドも前の本文の
-        ものなので、再発（`_revive`）と同じく発生の値を新しくして切り離す。#4363"""
-        known |= {"text": str(item["text"]).strip(), "round": round_no, OCCURRENCE: new_occurrence()}
-        self.revived.append(str(known["id"]))
-        for stale in ("path", "line", "impact"):
-            known.pop(stale, None)
-        new = _raised(item, named)
-        known |= {k: v for k, v in new.items() if k in ("path", "line", "impact")}
-        known["section"] = _text(item.get("section"))
 
     def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
         """直した・見送った指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、

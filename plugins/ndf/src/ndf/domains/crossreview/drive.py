@@ -41,7 +41,6 @@ import shutil
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -546,7 +545,7 @@ def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
 def _confirm_heavy(
     run: _Run,
     round_no: int,
-    judged: Callable[[], tuple[Path, ...]],
+    diff: Path,
     launch: Launcher,
     use_tracks: bool = False,
     filled: Optional[reviewing.FilledRead] = None,
@@ -554,16 +553,13 @@ def _confirm_heavy(
     """直前の `enter` で新しく出たか戻った critical・major を判定役に確かめ、回答をジャーナルへ当てる（#4363）。渡す指摘が
     無ければ起動しない。`use_tracks` は、回答の指摘の種類を使う処理があるラウンドで真にする。
 
-    判定役の起動は 1 回で、指摘ごとに、それを出した席に合う差分を渡す。席を埋めたラウンド（`filled`）の埋めた席の指摘は
-    全差分、ほかは `judged`（`reviewing.judge_diffs`）の返す差分である（一方の差分に載る変更が、他方に載るとは限らない）。
-    `judged` は、その差分を使う指摘を渡すときだけ呼ぶ（呼ぶと差分を読んで抜粋を作る）。"""
+    判定役の起動は 1 回で、指摘ごとに、それを出した席が読んだ差分を渡す。席を埋めたラウンド（`filled`）の埋めた席の指摘は
+    全差分、ほかはラウンドの差分 `diff` である（一方の差分に載る変更が、他方に載るとは限らない）。"""
     heavy = [row for row in map(run.journal.rows.__getitem__, run.journal.fresh) if _heavy(row.get("severity"))]
     asked = verify_decide.select(heavy, use_tracks)
     if not asked:
         return Checked()
-    needed = filled is None or any(filled.reads_round(row.get("key")) for row in asked)
-    round_diffs = judged() if needed else ()
-    diffs = {str(row["id"]): round_diffs if filled is None else filled.diffs(row.get("key"), *round_diffs) for row in asked}
+    diffs = {str(row["id"]): (diff,) if filled is None else filled.diffs(row.get("key"), diff) for row in asked}
     answers = verify.ask(run, round_no, asked, diffs, launch)
     run.warnings += [f"round {round_no}: {warning}" for warning in answers.warnings]
     return run.journal.apply_checks(list(diffs), answers.verdicts)._replace(record=answers.record)
@@ -650,8 +646,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
     # 確認で下げた指摘は、振動の判定のキーに数えない
-    judged = partial(reviewing.judge_diffs, run, round_no, prep)
-    checked = _confirm_heavy(run, round_no, judged, _keeping(run, round_no, prep, got, launch), filled=got.filled)
+    checked = _confirm_heavy(run, round_no, prep.diff, _keeping(run, round_no, prep, got, launch), filled=got.filled)
     run.history.append(keys - checked.lowered)
     record = _round_record(run, round_no, prep)
     if checked.record:  # 中断した起動の出力も保存先に残るので、このラウンドの起動の保存できた出力を名指す（回答の有無は表さない）

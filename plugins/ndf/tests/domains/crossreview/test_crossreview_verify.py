@@ -422,45 +422,6 @@ def test_issue_4363_ask_points_the_mvv_criterion_at_the_copies_in_the_input_dire
 def test_issue_4363_filled_read_gives_the_diffs_read_by_the_seats_of_the_finding(key: str, names: list) -> None:
     filled = reviewing.FilledRead(Path("full.diff"), frozenset({"filled", "both"}), frozenset({"other", "both"}))
     assert [d.name for d in filled.diffs(key, Path("round2.diff"))] == names
-    assert filled.reads_round(key) == ("round2.diff" in names)
-    # 全差分でレビューし直すラウンドは、埋めていない席が前の head からの差分も読む
-    since = [d.name for d in filled.diffs(key, Path("round2.diff"), Path("round2-since.diff"))]
-    assert since == [n for name in names for n in ([name, "round2-since.diff"] if name == "round2.diff" else [name])]
-
-
-def test_issue_4363_excerpt_lines_give_the_text_of_the_lines_the_full_diff_does_not_show() -> None:
-    """削除行と全差分に載らない追加行は行番号と本文を、全差分に載る追加行はファイルごとに 1 行の範囲だけを書く。"""
-    head = ["diff --git a/a.md b/a.md", "--- a/a.md", "+++ b/a.md"]
-    since = [
-        *head,
-        "@@ -1,3 +1,5 @@",
-        " 前の行",
-        "--- 区切り",
-        "+載る行",
-        "+次の行",
-        "+戻した行",
-        " 後の行",
-        "@@ -9 +10 @@",
-        "-旧い行",
-        "+載る別の行",
-    ]
-    full = [*head, "@@ -1,2 +2,2 @@", "+載る行", "+次の行", "@@ -9 +10 @@", "+載る別の行"]
-    got = verify_decide.excerpt_lines("\n".join(since) + "\n", "\n".join(full) + "\n")
-    changes = ["削除 旧2 新2: -- 区切り", "追加 新4: 戻した行", "削除 旧9 新10: 旧い行", "追加（本文は全差分） 新2-3,10-10"]
-    assert got.split("\n") == [verify_decide.EXCERPT_NOTE, *head, *changes, ""]
-    assert verify_decide.excerpt_lines("", "") == ""
-
-
-def test_issue_4363_judge_diffs_reads_the_diffs_without_converting_a_lone_cr(tmp_path: Path) -> None:
-    """全差分の行の中の単独の CR の後ろを追加行と読み違えず、全差分に載らない追加行の本文を抜粋に書く。"""
-    full, since, excerpt = tmp_path / "round2.diff", tmp_path / "since.diff", tmp_path / "excerpt.diff"
-    head = b"diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n"
-    full.write_bytes(head + b"@@ -1 +1 @@\n-old\n+a\r+b\n")
-    since.write_bytes(head + b"@@ -1 +1,2 @@\n a\n+restored\n")
-    run = SimpleNamespace(documents=True, input_path=lambda round_no, suffix: excerpt)
-    prep = SimpleNamespace(diff=full, previous=SimpleNamespace(diff=since))
-    assert reviewing.judge_diffs(run, 2, prep) == (full, excerpt)
-    assert "追加 新2: restored" in excerpt.read_text(encoding="utf-8").split("\n")
 
 
 def test_issue_4363_ask_lists_the_diffs_of_each_finding_when_they_differ(tmp_path: Path) -> None:
