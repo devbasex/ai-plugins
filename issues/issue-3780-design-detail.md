@@ -52,11 +52,11 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/domains/crossreview/local_scope.py` | 新設 | `review-scope` の範囲を手元の git と状態の記録から決める | `scope_decide`・`round_scope`・`changes` | モジュール、`ScopeSettings`（Protocol）、`_LocalBase` | 変更（移動）: `decide`（今の `_local_scope`）・`_local_base`・`_local_mvv`・`_local_sections` |
-| `plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py` | 新設 | 指摘が進むか、残すなら起票か記録かを決め、起票の文を組む | `criteria_decide` | モジュール、`Touched`・`Listed` | 新設: `normalized`・`proceeds`・`kinds_of`・`files_issue`・`identity`・`issue_parts`・`trusted`・`matches`・`record_entries`・`record_body`・`result_fields`・`summary_line`・`decisions` |
+| `plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py` | 新設 | 指摘が進むか、残すなら起票か記録かを決め、起票の文を組む | `criteria_decide` | モジュール、`Touched`・`Listed` | 新設: `normalized`・`proceeds`・`finding_kinds`・`files_issue`・`identity`・`issue_parts`・`trusted`・`matches`・`record_entries`・`record_body`・`result_fields`・`summary_line`・`decisions` |
 | `plugins/ndf/src/ndf/domains/crossreview/leftover.py` | 新設 | 残す指摘を起票し、URL を行に書く | `leftover_decide`・`store`・`threads`・`settings`・`publish`・`github` | `Port`（Protocol）、`GitHubIssues` | 新設: `primary_of`・`file_issues` |
 | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py` | 変更 | 起点の条件と、収束を使い回す条件を分ける | `store` | モジュール | 新設: `origin_record` |
 | `plugins/ndf/src/ndf/domains/crossreview/round_scope.py` | 変更 | 起点と線引きの起点を git で確かめる | `scope_decide`・`changes` | モジュール | 新設: `read_origin`・`line_origin` |
-| `plugins/ndf/src/ndf/domains/crossreview/changes.py` | 変更 | 新しく PR の変更になったファイル・渡す差分・変えた行を読む | `git`・`leftover_decide` | モジュール、`Range` | 新設: `new_in_pr`・`since_diff`・`touched` |
+| `plugins/ndf/src/ndf/domains/crossreview/changes.py` | 変更 | 新しく PR の変更になったファイル・渡す差分・変えた行を読む | `git`・`leftover_decide` | モジュール、`Range` | 新設: `new_in_pr`・`since_diff`・`touched_since` |
 | `plugins/ndf/src/ndf/domains/crossreview/journal.py` | 変更 | 残す指摘に `parked` を付け、進む条件に当たれば外す | `leftover_decide` | `FindingJournal` | 新設: `sort` / 変更: `enter`・`_revive`・`_classify`・`carry`・`handable`・`findings` |
 | `plugins/ndf/src/ndf/domains/crossreview/finish_decide.py` | 変更 | `parked` の指摘を欠けから除く | `leftover_decide` | `Finding` | 変更: `_finding_gaps`・`_counts`・`as_findings` |
 | `plugins/ndf/src/ndf/domains/crossreview/report_decide.py` | 変更 | 表に残し方と URL を出し、一覧に起票済みを載せる | `leftover_decide` | モジュール | 変更: `_finding_rows`・`open_block` |
@@ -162,7 +162,7 @@ plugins/ndf/
 | `new_in_pr` | `changes.py` | 新設 | `new_in_pr(g: git.Git, previous: Range, current: Range, listed: Listings) -> Optional[tuple[str, ...]]` | 比較基点が変わったことで、既読の差分にも今回渡す差分にも無い変更を持つファイルを返す。比べられなければ None |
 | `since_diff` | `changes.py` | 新設 | `since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str` | 前の head からの差分（比較基点が違えば PR が変えるファイルに絞る）に、`added` の今の PR の差分を続けて返す |
 | `since_files` | `changes.py` | 新設 | `since_files(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> tuple[str, ...]` | `since_diff` が渡すファイルのパスを返す。足して渡す PR の差分に改名があれば、`since_diff` と同じく、改名前と改名後の両方のパスを返す。PR に既にあるインラインのコメントを選ぶ `reviewing.remarks` が使う |
-| `touched` | `changes.py` | 新設 | `touched(g: git.Git, since: str, head: str) -> leftover_decide.Touched` | `since` の後に変わったファイルと、足した行・書き換えた行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`read_origin`）ではない |
+| `touched_since` | `changes.py` | 新設 | `touched_since(g: git.Git, since: str, head: str) -> leftover_decide.Touched` | `since` の後に変わったファイルと、足した行・書き換えた行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`read_origin`）ではない |
 
 - `new_in_pr`
   - 事前条件: `previous.head` は `current.head` の祖先
@@ -179,7 +179,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `new_in_pr` | 比べられない | 前の比較基点か前の head のコミットが手元に無い | `git.GitError` | 呼び出し元へ返す（None。呼び手は全差分にする） | 呼び手の注意 | 打ち直せる |
 | `since_diff` | 差分を読めない | 同上 | `git.GitError` | 呼び出し元へ返す（例外。今の `precondition`） | `git の操作が失敗した` で終了コードは前提の欠け | 打ち直せる |
-| `touched` | 差分を読めない | 同上 | `git.GitError` | 呼び出し元へ返す。呼び手は線引きをしない | 注意を 1 行 | 打ち直せる |
+| `touched_since` | 差分を読めない | 同上 | `git.GitError` | 呼び出し元へ返す。呼び手は線引きをしない | 注意を 1 行 | 打ち直せる |
 
 ### 処理の手順
 
@@ -247,7 +247,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | 一覧と行の差分 | NUL 区切りの一覧と行の差分を 1 つの出力にすると、両方を切り分ける読み取りを新しく作ることになる | `git diff --raw --numstat -p -z` で 1 回にまとめる（`new_in_pr` の起動が 3 回減る） |
 | `since_diff` の行の差分 | 比較基点が違うときに渡す差分は PR が変えるファイルに絞る。`new_in_pr` が読んだ差分は絞っていない。比較基点が同じラウンドは `new_in_pr` を呼ばない | `new_in_pr` が読んだ差分の文字列を、ファイルごとに切り分けて組み立てる（起動が 1〜2 回減る） |
 
-`touched` の「変えた行」は、`since..head` の差分で足した行と書き換えた行の番号である。行を消しただけの箇所は、前後の行の番号を入れる。
+`touched_since` の「変えた行」は、`since..head` の差分で足した行と書き換えた行の番号である。行を消しただけの箇所は、前後の行の番号を入れる。
 
 ### 内部のデータと定数
 
@@ -262,7 +262,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | --- | --- | --- | --- |
 | `new_in_pr` | `changes._diff_files`・`_base_lines`・`review_diff` | `grep -rn "def .*new_files\|def .*touched\|def .*changed_lines\|def _base_lines\|--raw" --include=*.py src/ndf` | 差分の読み取りは `_diff_files` と `review_diff` の中身を使う。行の対応は、`_base_lines` が呼ぶたびに hunk を先頭からたどるので、1 回だけ作る索引を別に持つ。`git.Git.changed_lines` は行数の和を返すもので使えない |
 | `since_diff` | `changes.review_diff`・`git.Git.changed_files` | 同上 | 同じ差分の引数（`_DIFF`）に `--literal-pathspecs` とパスの指定を足して作る |
-| `touched` | `crossrefactor.scope.touched`（記号の単位） | 同上 | 返す単位が違うので使えない。`_diff_files` の行を使う |
+| `touched_since` | `crossrefactor.scope.touched`（記号の単位） | 同上 | 返す単位が違うので使えない。`_diff_files` の行を使う |
 
 ### 単体テストの観点
 
@@ -270,7 +270,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | --- | --- | --- | --- |
 | `new_in_pr` | 分岐したブランチへ比較先を変えると、新しく PR の変更になったファイルが返る。取り込みの競合を解消して前の head の内容に戻したファイルも返る | 競合の無いベースの取り込みは空。head が同じまま比較先を変えて実行権限の変更が現れる。同じ文の追加が同じファイルの別の関数にある。比較先を変えて差分から消えただけのファイルは返らない。末尾の改行の有無だけが違う行は別の行にし、種別の変更の削除と追加は 1 つにまとめる。バイナリは変更前の blob が渡っていなければ返す（この 3 つは差分を入力にして確かめる）。消した行は、今回渡す差分と同じ内容でも位置が違えば未読にする（上の `R1`・`R2` の例。差分を入力にして確かめ、git を起動しない） | コミットが無ければ None |
 | `since_diff` | PR に関係の無いベースの変更を含まない。`added` のファイルの今の差分を含む | 比較基点が違い、絞るファイルが無ければ空文字列 | コミットが手元に無ければ `git.GitError` |
-| `touched` | 足したソースの行と書き換えたソースの行 | 行を消しただけの箇所は前後の行。バイナリはファイルだけ | コミットが手元に無ければ `git.GitError` |
+| `touched_since` | 足したソースの行と書き換えたソースの行 | 行を消しただけの箇所は前後の行。バイナリはファイルだけ | コミットが手元に無ければ `git.GitError` |
 
 ## 線引きと残し方（leftover_decide）
 
@@ -282,7 +282,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | --- | --- | --- | --- | --- |
 | `normalized` | `leftover_decide.py` | 新設 | `normalized(text: str) -> str` | 空白をまとめ大文字小文字をそろえた本文の全体を返す（#2468 も同じ指摘の判定に使う） |
 | `proceeds` | `leftover_decide.py` | 新設 | `proceeds(row: Mapping[str, Any], touched: Touched, *, returned: bool = False, unconfirmed: bool = False) -> bool` | 指摘を直さずに残さないか（真なら `parked` を付けない） |
-| `kinds_of` | `leftover_decide.py` | 新設 | `kinds_of(row: Mapping[str, Any]) -> frozenset[str]` | 指摘の種類（行の `protect` と `check.tracks` の和） |
+| `finding_kinds` | `leftover_decide.py` | 新設 | `finding_kinds(row: Mapping[str, Any]) -> frozenset[str]` | 指摘の種類（行の `protect` と `check.tracks` の和） |
 | `files_issue` | `leftover_decide.py` | 新設 | `files_issue(row: Mapping[str, Any]) -> bool` | 重い指摘（critical・major）が起票してよい種類を持つか |
 | `identity` | `leftover_decide.py` | 新設 | `identity(origin_pr: int, text: str) -> str` | 元の PR の番号と `normalized(text)` の SHA-256 の先頭 12 字 |
 | `issue_parts` | `leftover_decide.py` | 新設 | `issue_parts(text: str, impact: str, place: str, pr_urls: Sequence[str], ident: str) -> tuple[str, str]` | 伏せ終えた値から起票の題と本文を組む |
@@ -318,7 +318,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 
 `path` は先頭の `./` を除いて照らす。順 1 を先頭に置くので、前の確認で `check.tracks` が付いた指摘や、直さずに残した指摘に後から承認の要る操作が指摘された場合も、必ず進む側になる。
 
-`files_issue` は `severity` が critical か major で、`kinds_of` が `review-criteria.json` の `kinds.filed`（`delivered`・`safety`・`secret`・`user_data`・`irreversible`・`approval`）と重なる場合だけ真である。この課題の線引きで残るのは major だけだが（critical は `proceeds` の順 5 で進む）、#2468 は上限で残った critical も同じ関数で起票するかを決めるためである。
+`files_issue` は `severity` が critical か major で、`finding_kinds` が `review-criteria.json` の `kinds.filed`（`delivered`・`safety`・`secret`・`user_data`・`irreversible`・`approval`）と重なる場合だけ真である。この課題の線引きで残るのは major だけだが（critical は `proceeds` の順 5 で進む）、#2468 は上限で残った critical も同じ関数で起票するかを決めるためである。
 
 ### 内部のデータと定数
 
@@ -334,7 +334,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `normalized` | `oscillation.finding_key` | `grep -rn "def finding_key" src/ndf` | `finding_key` は先頭だけを返すので使えない。そろえ方（空白と大文字小文字）は同じにする |
-| `proceeds`・`kinds_of`・`files_issue` | `journal._blocking`・`criteria_decide.protect_kinds` | `journal.py`・`criteria_decide.py` を読んだ | 種類の一覧は `criteria_decide` を使う。線引きの関数は無い |
+| `proceeds`・`finding_kinds`・`files_issue` | `journal._blocking`・`criteria_decide.protect_kinds` | `journal.py`・`criteria_decide.py` を読んだ | 種類の一覧は `criteria_decide` を使う。線引きの関数は無い |
 | `identity` | `journal.citation_key`・`scope_decide.unit_id`（どちらも SHA-256） | `grep -rn "sha256(" --include=*.py src/ndf/domains/crossreview` | 入力と切り出す長さが違うので新しく書く |
 | `issue_parts` | `publish.Publisher.create_issue`・`backlog.issues_gh.create_issue` | `grep -rn "def create_issue" src/ndf` | 作成は `Publisher.create_issue` を使い、文の組み立てだけを新しく書く |
 | `trusted` | `github.GitHub.trusts` | `grep -rn "author_association\|authorAssociation" --include=*.py src/ndf` | `trusts` は write 権限まで読み、設計の条件（所有者・メンバー・共同作業者・実行の login・`issue_logins`）と違うので使わない |
@@ -447,7 +447,11 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `findings` | `journal.py` | 変更 | シグネチャは変えない | `Finding.parked` を渡す |
 | `_recorded_one` | `prior_decide.py` | 変更 | シグネチャは変えない | `Carried` に `parked: bool` と `issue: Optional[str]` を読む |
 
-`sort` が分け直すのは、このラウンドで出た指摘（`raised_ids`）のうち、新しく出たか戻った指摘（`fresh`）と、`parked` を持つ指摘だけである。前から未解決で `parked` の無い指摘は、出し直されても分け直さない（I2: 一度修正へ進むと決めた指摘は、直すか見送るまで進む）。`proceeds` が偽なら `parked` を付けて `self.filed` の URL を `issue` に戻し、真なら `parked` を外す。収束を止める指摘の判定（`_blocking`）は `parked` の指摘を外す。
+`sort` が分け直すのは、このラウンドで出た指摘（`raised_ids`）のうち、新しく出たか戻った指摘と、`parked` を持つ指摘だけである。新しく出たか戻った指摘は、判定役へ渡す候補の `fresh` ではなく、絞る前の一覧を使う。内容の違う重い報告が重なって判定役へ渡さない新しい指摘も、線引きするためである。前から未解決で `parked` の無い指摘は、出し直されても分け直さない（I2: 一度修正へ進むと決めた指摘は、直すか見送るまで進む）。
+
+`proceeds` に渡す位置は、今回の出し直しのものを 1 件ずつ当てる。直さずに残した指摘の行の位置は、前の head の行番号だからである。どれか 1 件が真なら進め、`parked` を外すときは行の位置をその出し直しのものに置き換える。どれも偽なら `parked` を付けて `self.filed` の URL を `issue` に戻す。
+
+`parked` の指摘を修正担当へ渡さないのは `handable` である。重さの判定（`_blocking`）は変えない。`enter` が返すキーには残していた指摘も含め、駆動が `sort` の返りを除く。出し直しで進むことになった指摘のキーが、振動の判定の履歴から抜けないためである。
 
 ### 既存の部品の再利用
 
@@ -509,7 +513,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_ranges` | `drive.py` | 新設 | `_ranges(run: _Run, merge_base: str, head: str) -> Ranges` | 目的ごとに、差分を渡す起点（`read_origin`）・足すファイル・線引きの起点（`line_origin`）を決める |
-| `_sort_leftovers` | `drive.py` | 新設 | `_sort_leftovers(run: _Run, prep: Prepared, checked: Checked) -> frozenset[str]` | 線引きの対象のラウンドなら、`changes.touched(g, prep.lines, prep.head)` で変えた行を読んで `journal.sort` を呼ぶ |
+| `_sort_leftovers` | `drive.py` | 新設 | `_sort_leftovers(run: _Run, prep: Prepared, checked: Checked) -> frozenset[str]` | 線引きの対象のラウンドなら、`changes.touched_since(g, prep.lines, prep.head)` で変えた行を読んで `journal.sort` を呼ぶ |
 | `default_max_rounds` | `settings.py` | 新設 | `default_max_rounds(every_section: bool) -> int` | `--max-rounds` を省いたときの上限（設計の PR は 3、ほかは 4） |
 | `_with_leftovers` | `cli.py` | 新設 | `_with_leftovers(verdict: fin.Verdict, items: list[dict[str, Any]], data: Mapping[str, Any]) -> fin.Verdict` | 結果の `items` に残し方を足し、要約の行と MVV の判断を足す |
 | `_prepare_round` | `drive.py` | 変更 | シグネチャは変えない（返りの `Prepared` に `lines: Optional[str]` を足す） | 実装の PR は起点からの差分を `since_diff` で作る。`lines` には線引きの起点（`line_origin` の head）を入れ、線引きをしないラウンドは None にする |
@@ -548,7 +552,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `_ranges` | 比べられない | コミットが手元に無い | `new_in_pr` が None | 既定値で続ける（全差分） | 注意を 1 行 | 打ち直せる |
-| `_sort_leftovers` | 変えた行を読めない | `git.GitError` | `changes.touched` | 既定値で続ける（線引きなし。すべて進む） | 注意を 1 行 | 打ち直せる |
+| `_sort_leftovers` | 変えた行を読めない | `git.GitError` | `changes.touched_since` | 既定値で続ける（線引きなし。すべて進む） | 注意を 1 行 | 打ち直せる |
 
 ### 既存の部品の再利用
 

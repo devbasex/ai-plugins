@@ -62,8 +62,8 @@
 - **進め方:** 失敗するテスト → 最小実装 → 整理
 
 ### Task 6: 線引きの判断と、残した指摘のジャーナル
-- **対象ファイル:** `leftover_decide.py`、`changes.py`（`touched`）、`journal.py`、`review-criteria.json`、`test_crossreview_leftover.py`（新設）
-- **変更内容:** `normalized`・`proceeds`・`kinds_of`・`touched`・`sort`、`enter` の `raised_ids`・`returned`、`_classify` が `parked` を外す。**必ず人の承認が要る操作の指摘は直さずに残さないことを確かめるテストを最初に書く。** 変えていない行の major で起票する種類を持つ場合、以前の確認で指摘の種類（`check.tracks`）が付いた行に後から承認の要る操作が指摘された場合、直さずに残した行（`parked`）に後から指摘された場合の 3 つで、`parked` が付かないか外れ、起票されず、人の判断を待つ
+- **対象ファイル:** `leftover_decide.py`、`changes.py`（`touched_since`）、`journal.py`、`review-criteria.json`、`test_crossreview_leftover.py`（新設）
+- **変更内容:** `normalized`・`proceeds`・`finding_kinds`・`touched_since`・`sort`、`enter` の `raised_ids`・`returned`、`_classify` が `parked` を外す。**必ず人の承認が要る操作の指摘は直さずに残さないことを確かめるテストを最初に書く。** 変えていない行の major で起票する種類を持つ場合、以前の確認で指摘の種類（`check.tracks`）が付いた行に後から承認の要る操作が指摘された場合、直さずに残した行（`parked`）に後から指摘された場合の 3 つで、`parked` が付かないか外れ、起票されず、人の判断を待つ
 - **満たす受け入れ条件:** 3780:5
 - **進め方:** 失敗するテスト → 最小実装 → 整理
 

@@ -1,7 +1,7 @@
 """変更の読み取りと、PR が足した MVV の根拠の記述の確かめ（#4076）。
 
 `base...HEAD` で変わったファイルと、Markdown の本文・セクション、差分とそのファイルごとの行を読む。2 ラウンド目以降に渡す
-前の head からの差分と、比較基点の変化で新しく PR の変更になったファイル（#3780）も読む。差分の行の番号は git の
+前の head からの差分と、比較基点の変化で新しく PR の変更になったファイル、線引きに使う変えた行（#3780）も読む。差分の行の番号は git の
 数え方（`\\n` だけで区切る）なので、Markdown の解析の行の番号（`\\r` でも区切る）とは `_markdown_rows` で対応させる。
 
 根拠の記述は、`- 根拠: Value 5（MVV バージョン 11）` のように、決定がどの MVV の項目に基づくかを書いた行である。`citations` が、
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters import git
-from ndf.domains.crossreview import criteria_decide, scope_decide, settings
+from ndf.domains.crossreview import criteria_decide, leftover_decide, scope_decide, settings
 from ndf.domains.records import mvv, mvv_decide
 
 
@@ -604,6 +604,19 @@ def since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str]
     if added:
         text += _diff_of(g, f"{current.base}...{current.head}", _added_paths(g, current, added, listed))
     return text
+
+
+def _touched_rows(block: _Block) -> range:
+    """かたまり `block` の変えた行の番号。足した行と書き換えた行が無ければ（消しただけ）、消した箇所の前後の行。"""
+    return range(block.start, block.end) if block.end > block.start else range(max(block.start - 1, 1), block.start + 1)
+
+
+def touched_since(g: git.Git, since: str, head: str) -> leftover_decide.Touched:
+    """`since` の後、`head` までに変わったファイルと、`head` の側の変えた行の番号（#3780）。行で比べられないファイルは
+    行を持たない。コミットが手元に無ければ `git.GitError`。"""
+    delta = _delta(g, f"{since}..{head}", {})
+    lines = {path: frozenset(n for b in _changed_blocks(hunks) for n in _touched_rows(b)) for path, hunks in delta.hunks.items()}
+    return leftover_decide.Touched(frozenset(delta.entries), lines)
 
 
 # --- 根拠の記述の確かめ -------------------------------------------------------------------------
