@@ -241,13 +241,13 @@ experimental/ndf/
 - `_design_check`
   - 副作用: `--result` のファイルを書く（親のディレクトリを作る）
 
-`from_base` が起動する git は次の 5 種類で、どれも対象のファイルの数によらず 1 回ずつである。4 は追跡済みの対象が 1 件以上あるときだけ打つ。
+`from_base` が起動する git は次の 5 種類で、どれも対象のファイルの数によらず 1 回ずつである。4 は追跡済みの対象が 1 件以上あるときだけ打つ。3 と 4 の `git diff` は、上の「差分の形の固定」の引数をすべて付ける。
 
 | 順 | 起動 | 目的 |
 | --- | --- | --- |
 | 1 | `start_point.resolve` の `rev-parse`（と、読めなければ `git remote`） | 起点の参照と SHA |
 | 2 | `Git.merge_base(<起点>, "HEAD")` | 分岐点 |
-| 3 | `git diff --name-status -z --find-renames --no-ext-diff --no-textconv <分岐点> --` と `git ls-files --others --exclude-standard -z` | 足した・変えた・名前を変えたパスと未追跡のパス |
+| 3 | `git -c core.quotePath=false diff --name-status -z --find-renames --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ <分岐点> --` と `git ls-files --others --exclude-standard -z` | 足した・変えた・名前を変えたパスと未追跡のパス |
 | 4 | `git -c core.quotePath=false diff -U0 --inter-hunk-context=0 --find-renames --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ <分岐点> -- <パス>...` を 1 回。パスには、追跡済みの対象の新しいパスと、名前を変えた対象の前のパスを全部渡す | 対象ごとの、足した・変えた行と、見出しに触れたか |
 | 5 | `Git.blobs` に `<分岐点>:<前のパス>` をまとめて 1 回 | `anchors_lost` と `heading_touched` に渡す分岐点の本文 |
 
