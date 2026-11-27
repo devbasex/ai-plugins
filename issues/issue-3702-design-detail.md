@@ -913,9 +913,9 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 
 **削除されたスプリントブランチの作り直し**: マージした head ブランチを GitHub が自動で削除する設定では、設計 PR のマージの後、送り先にスプリントブランチが無い。`sync` は承認した SHA でブランチを作り直し、届いたことを確かめてから `ok` にする。工程「実装」の開始前の確かめは手元の HEAD をリモート名で push するので、作り直しを任せると、承認していないコミットも公開され、届く前に取り込みが完了と記録される。
 
-1. 手順 5 の PR の確かめを通す。作り直すのは、承認した head のままマージされた設計 PR の内容だけである
+1. `sync` の手順 5 の PR の確かめを通す。作り直すのは、承認した head のままマージされた設計 PR の内容だけである
 2. `git rev-list <記録の head>..HEAD` が空であることを確かめる。コミットがあれば、何も push せずに `stopped`（`refused`）にし、そのコミットを示す。後の開始前の確かめがそのコミットを公開しないように、送るか戻すかを利用者が決める
-3. 手順 2 で照合した URL に `git push --no-follow-tags --recurse-submodules=no -- <URL> <記録の head の SHA>:refs/heads/<記録の sprint_branch>` を打つ。強制はしない。拒否されれば `stopped`（`precondition`）
+3. `sync` の手順 2 で照合した URL に `git push --no-follow-tags --recurse-submodules=no -- <URL> <記録の head の SHA>:refs/heads/<記録の sprint_branch>` を打つ。強制はしない。拒否されれば `stopped`（`precondition`）
 4. 同じ URL から先端を読み直し、記録の head を含めば `ok`。読めないか含まなければ `stopped`（`precondition`）
 
 **中断した取り込みの再開**: 手順 7 の途中で中断すると、取り込みの変更がインデックスと作業ツリーに残る。コミットの前に中断した場合、打ち直しは、次の条件をすべて満たすファイルを自分の途中の状態とみなし、手順 7 をやり直す。
