@@ -642,7 +642,7 @@ def test_issue_4363_lowered_finding_is_not_counted_as_a_return(wt: Path, tmp_pat
     other, third = {**HEAVY, "text": "読み込みが止まる"}, {**HEAVY, "text": "削除が止まる"}
     fake = Fake(tmp_path / "st", {"codex": [[HEAVY, other], [third], [{**HEAVY, "protect": ["user_data"]}]], "kiro": [[], [], []]})
     fake.verdict = lambda row: _broken(row) if row["text"] == HEAVY["text"] else holding(row)
-    _run(capsys, monkeypatch, fake, wt)
+    _run(capsys, monkeypatch, fake, wt, "--max-rounds", "3")
     rounds = _state(fake.state_dir)["rounds"]
     assert [r["verdict"] for r in rounds] == ["changes_required"] * 3
 

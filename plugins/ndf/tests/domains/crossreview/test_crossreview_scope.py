@@ -240,7 +240,13 @@ def test_converged_round_is_not_reused_when_the_conditions_changed(now: scope_de
 
 @pytest.mark.parametrize(
     "changed",
-    [{"base": "origin/develop"}, {"reviewers": ["codex"]}, {"focus": ["前の重点"]}, {"unit": "前の単位"}, {scope_decide.MVV: {"id": APPROVED}}],
+    [
+        {"base": "origin/develop"},
+        {"reviewers": ["codex"]},
+        {"focus": ["前の重点"]},
+        {"unit": "前の単位"},
+        {scope_decide.MVV: {"id": APPROVED}},
+    ],
 )
 def test_design_pr_reads_the_full_diff_again_when_the_conditions_changed(scope_run, changed: dict) -> None:
     """#3780 の現状固定: 設計の PR は、全セクションが詳細レビューを通っていても、前のラウンドの条件が違えば全差分を見る。"""
