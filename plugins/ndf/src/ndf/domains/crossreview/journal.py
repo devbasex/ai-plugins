@@ -351,7 +351,7 @@ def _align_report(
     書き足しても指摘を下げる材料は混ざらない。
 
     `denied` は、下げた扱いを解除した行で、確認で否定したファイルである。このとき根拠の無い 1 件は、解除の条件を満たした出し直し
-    （`_heavy_in_other_file`）からだけ選ぶ。位置の無い重い報告は、選ばずに本文へ書き足す。#4363"""
+    （`_heavy_in_other_file`）からだけ選ぶ。位置の無い重い報告は、1 件の選び方によらず本文へ書き足す。#4363"""
     best: Optional[tuple[tuple[int, bool], Mapping[str, Any], dict[str, Any]]] = None
     told = False
     for item in same:
@@ -373,7 +373,8 @@ def _align_report(
         row.pop("impact", None)
     _place(row, new, _text(item.get("section")))
     if rank[0]:
-        for other in _other_reports(same, items, new if rank[1] else None):
+        placeless = [] if denied is None else [i for i in _heavy_elsewhere(row, same) if "path" not in _located(i)]
+        for other in [*_other_reports(same, items, new if rank[1] else None), *placeless]:
             _add_report(row, other)
         return told
     elsewhere = _heavy_elsewhere(row, same)
