@@ -520,6 +520,17 @@ def _rejudge_of(hub: GitHub, pull: Pull, target: merge_approval.MergeTarget) -> 
     return rejudge
 
 
+def _invalid_args(args: argparse.Namespace) -> Optional[dict]:
+    """`_merge` の引数の組み合わせを確かめ、足りなければ `invalid` で止まる結果を返す。"""
+    if args.branch is None and args.pr is None:
+        return result.stopped(TOOL, "invalid", "--branch か --pr のどちらかを渡す")
+    if (args.approved_head is None) != (args.approved_base is None):
+        return result.stopped(TOOL, "invalid", "--approved-head と --approved-base は組で渡す")
+    if args.required and args.budget is None:
+        return result.stopped(TOOL, "invalid", "--required を渡すときは --budget も渡す")
+    return None
+
+
 def _merge(args: argparse.Namespace) -> dict:
     """PR を、確かめ・本番チャネルの判定・承認の証跡の確かめを通してから `GitHub.merge` でマージする（#2602・#4409）。
 
@@ -533,12 +544,9 @@ def _merge(args: argparse.Namespace) -> dict:
     `--required` を受けたら、承認した対象を今の PR と照らした後に、マージする HEAD のチェックを待つ。マージ済みの PR は待たない。
     待つ間に HEAD かマージ先が変われば、`GitHub.merge` の直前の確かめが止める。
     """
-    if args.branch is None and args.pr is None:
-        return result.stopped(TOOL, "invalid", "--branch か --pr のどちらかを渡す")
-    if (args.approved_head is None) != (args.approved_base is None):
-        return result.stopped(TOOL, "invalid", "--approved-head と --approved-base は組で渡す")
-    if args.required and args.budget is None:
-        return result.stopped(TOOL, "invalid", "--required を渡すときは --budget も渡す")
+    invalid = _invalid_args(args)
+    if invalid is not None:
+        return invalid
     head, refused = _worktree_head(args)
     if refused is not None:
         return refused
