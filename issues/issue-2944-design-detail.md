@@ -32,22 +32,26 @@ src/ndf/
 
 依存の向き: 層は下から contracts・adapters・core・progress・domains の順で、下の層は上の層を読み込まない。値を選ぶ処理は全部の層から呼ぶので adapters に置き、割り付けに要る実験の記録と出現率のファイルの読み書きもそこに置く。`domains/records/experiments.py` は、adapters のこの読み書きを使って読む。adapters と core から出現率の計算（domains）を呼ぶ所は、下の層が上の層を読み込めないため、#1959 の起動記録のインターフェースに効果指標の関数を足して、差し込みで呼ぶ。
 
+値を選ぶ処理（`model_choice`）も、`claude -p` の起動の部品（`claude`・`llm`。子の表 `checks/children.json` の AD3）、worker（C5）、Skill の起動（P1b）からは直接読まない。`model_choice` の子（MC1）はこれらより後の順番で、子の表の依存の検査（IG1・IG2）が直接の import を拒むためである。`adapters/claude_choice.py`（AD3）が値を選ぶ処理の口（`LaunchChooser`・`set_launch_chooser`）と、選んだ値で起動する部品（`ChoiceRun`・`report_outcome`）を持ち、一番上のエントリポイント（`ndf.__main__`。子 X9 の先に要るものに MC1 を足した）が `model_choice` を差し込む（`claude.set_launch_recorder` と同じ形）。差し込みが無い呼び出し（エントリポイントを通らない呼び出しとテスト）は値を選ばずに起動する（2026-11-27、B3 の実装で決定）。
+
 | パス | 種類 | 役割 | 依存する先 | クラスまたはモジュール | 新設（N）と変更（C） |
 | --- | --- | --- | --- | --- | --- |
 | `src/ndf/adapters/model_choice.py` | 新設 | 値と出所を返す | launch_settings・launch_approval | `Choice` | N: `table`・`bundled_errors`・`stage_of`・`launch_choice`・`raised`・`base_fallback`・`candidates`・`compatibility_key`・`read_experiments`・`ledger`・`append_row` |
 | `src/ndf/adapters/launch_settings.py` | 変更 | `experiments` を返す | — | `Settings` | C: `load` |
-| `src/ndf/adapters/claude.py` | 変更 | 引数と拒否の判定 | — | `ClaudeCall`・`LaunchRecorder` | C: `claude_launch`・`_error_reply`。N: `report_outcome` |
-| `src/ndf/adapters/llm.py` | 変更 | 判定の単位 | model_choice | モジュール | C: `ask` |
+| `src/ndf/adapters/claude.py` | 変更 | 引数と拒否の判定 | — | `ClaudeCall`・`LaunchRecorder`・`LaunchLog` | C: `claude_launch`・`_error_reply`。N: `model_refused` |
+| `src/ndf/adapters/claude_choice.py` | 新設 | 値を選ぶ処理の差し込みと、選んだ値で起動する部品 | claude | `LaunchChooser`・`ChoiceRun` | N: `set_launch_chooser`・`choose`・`report_outcome` |
+| `src/ndf/__main__.py` | 変更 | 値を選ぶ処理の差し込み | claude_choice・model_choice | モジュール | 差し込みの 1 行 |
+| `src/ndf/adapters/llm.py` | 変更 | 判定の単位 | claude_choice | モジュール | C: `ask` |
 | `src/ndf/adapters/run_log.py` | 変更 | 子の環境 | — | モジュール | C: `child_process_env`。N: `overlay_env` |
 | `src/ndf/adapters/agents.py` | 変更 | 監視の結果 | — | `AgentStatus` | C: `_start_and_watch`。N: `codex_usage` |
-| `src/ndf/core/worker.py` | 変更 | worker の起動 | model_choice | `Handoff` | C: `_add_run`・`delegate`・`_resume_until_written`・`_cmd_run` |
+| `src/ndf/core/worker.py` | 変更 | worker の起動 | claude_choice | `Handoff` | C: `_add_run`・`delegate`・`_resume_until_written`・`_cmd_run` |
 | `src/ndf/core/converge/participants.py` | 変更 | 相手役の引数 | model_choice | モジュール | C: `review_launch`・`read_only_launch`・`reading_launch`・`answer_text` |
 | `src/ndf/core/plan/transition_decide.py` | 変更 | 打ち直しの理由を数える | — | `RunStep`・`StepState` | N: `retry_reason`。C: `_run` |
 | `src/ndf/core/plan/runner.py` | 変更 | 単位の ID と効果指標 | model_choice・claude | モジュール | C: `run_step`・`final_result`。N: `_step_env`・`_after_unit` |
 | `src/ndf/core/plan/steps.py` | 変更 | 子の結果の起動の値を拾う | — | モジュール | C: `outcome_of` |
 | `src/ndf/core/plan/model.py` | 変更 | ステップの定義の読み取り | — | `Step` | C: `verifies` を読む |
 | `src/ndf/core/plan/records.py` | 変更 | 回をまたぐ記録 | — | モジュール | N: `_add_models`・`recorded_models`・`read_units`・`write_units` |
-| `src/ndf/progress/invoke.py` | 変更 | Skill の起動 | model_choice | モジュール | C: `_call_skill` |
+| `src/ndf/progress/invoke.py` | 変更 | Skill の起動 | claude_choice | モジュール | C: `_call_skill` |
 | `src/ndf/progress/gate/entry.py` | 変更 | `ndf worker run` の引数に `--mode` を足す | — | モジュール | 呼ぶ引数を足すだけ |
 | `src/ndf/domains/records/usage.py` | 変更 | 行と指標の受け口 | experiments | モジュール | N: `codex_cost`・`record_outcome` |
 | `src/ndf/domains/records/experiments.py` | 新設 | 効果指標と出現率 | model_choice・allocation_decide | `UnitValue` | N: `record_outcome`・`unit_values`・`refresh` |
@@ -186,7 +190,7 @@ src/ndf/
 | --- | --- | --- | --- | --- |
 | `claude_launch` | `adapters/claude.py` | 変更 | 変えない | `ClaudeCall.effort` があれば `--effort` を足す |
 | `_error_reply` | 同 | 変更 | 変えない | 4 つの条件（`is_error` が真、`api_error_status` が 404、4 つのトークン数が欄として在って 0、`modelUsage` が空）がそろう誤りを `Failure.MODEL_REFUSED` にする |
-| `report_outcome` | 同 | 新設 | `report_outcome(assign_id: str, quality: Optional[float], detail: Mapping) -> None` | 差し込まれた処理の `record_outcome` を呼ぶ |
+| `report_outcome` | `adapters/claude_choice.py` | 新設 | `report_outcome(assign_id: str, quality: Optional[float], detail: dict) -> None` | 差し込まれた処理の `record_outcome` を呼ぶ |
 | `child_process_env` | `adapters/run_log.py` | 変更 | `child_process_env(extra: Optional[Mapping[str, Optional[str]]] = None)` | 値が None の名前を子の環境から外す |
 | `overlay_env` | 同 | 新設 | `overlay_env(changes: Mapping[str, Optional[str]]) -> ContextManager[None]` | このプロセスの環境を一時的に上書きし、戻す |
 

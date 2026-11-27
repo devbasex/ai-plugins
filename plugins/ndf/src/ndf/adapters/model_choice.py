@@ -51,6 +51,8 @@ TABLE = "launch-experiments"
 ARGS_COLUMN = "choice_args"
 # 引数の形の値に入れる位置（`{model}`・`{effort}`）
 _PLACE = re.compile(r"\{(model|effort)\}")
+# 割り付けの期間（`window_days`）の上限の日数
+MAX_WINDOW_DAYS = 365
 # 改行（モデル名に含むと引数の 1 行 1 語の形が壊れる）
 _NEWLINE = re.compile(r"[\r\n]")
 
@@ -261,8 +263,8 @@ def _allocation_errors(allocation: Mapping[str, Any], widest: int) -> list[str]:
         errs.append(f"{at}/min_units: 2 以上")
     if not 0 <= margin <= 1:
         errs.append(f"{at}/margin: 0 以上 1 以下")
-    if not 1 <= days <= 365:
-        errs.append(f"{at}/window_days: 1 以上 365 以下")
+    if not 1 <= days <= MAX_WINDOW_DAYS:
+        errs.append(f"{at}/window_days: 1 以上 {MAX_WINDOW_DAYS} 以下")
     return errs
 
 
@@ -874,6 +876,21 @@ def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
     (model, ms), (effort, es) = _from_base(choice.base_arm, "model"), _from_base(choice.base_arm, "effort")
     back = replace(choice, model=model, effort=effort, model_source=ms, effort_source=es, assign_id=None, arm=None, raised=False)
     return _raised_once(back) if choice.retry is not None else back
+
+
+def observed(choice: Choice, model: str) -> None:
+    """割り付けを受けた単位の、引き上げでも基準への切り替えでもない起動が返した実際のモデルを、割り付け ID ごとに最初の 1 回だけ足す。
+
+    読むのは割り付けの期間の上限の日数で、掃除が消した月のファイルは無いとして読む。書けなければ警告を出して続ける。
+    """
+    if choice.assign_id is None or choice.arm is None or choice.raised:
+        return
+    try:
+        with ledger(_utc_now() - timedelta(days=MAX_WINDOW_DAYS), choice.store) as led:
+            if not any(r["kind"] == "observed" and r["assign_id"] == choice.assign_id for r in led.rows):
+                led.append({"kind": "observed", "at": _time_text(_utc_now()), "assign_id": choice.assign_id, "arm": dict(choice.arm), "model": model})
+    except _STORE_ERRORS as exc:
+        log.warning("実験の記録へ実際のモデルを書けない（割り付け %s）: %s", choice.assign_id, exc)
 
 
 def _raised_once(choice: Choice) -> Choice:

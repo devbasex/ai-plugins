@@ -380,3 +380,36 @@ def test_revoke_adds_a_row(repo, capsys):
     assert la.is_approved("/r", "a" * 64)
     assert _run(capsys, "revoke", "--sha256", "a" * 64)["status"] == "ok"
     assert not la.is_approved("/r", "a" * 64)
+
+
+# --- #2944 の r1-1: 確認の画面に experiments の変更を載せる ---------------------------------------------
+
+ARMS = {"version": 1, "experiments": {"stages": {"impl": {"arms": {"claude": [{}, {"model": "sonnet", "effort": "medium"}]}}}}}
+
+
+def test_the_question_and_the_items_show_the_model_and_effort_changes(repo, capsys):
+    _settings(repo, {"version": 1, "experiments": {"enabled": True}})
+    got, question, _ = _ask(capsys, _draft(capsys, ARMS))
+    (changes,) = [i["changes"] for i in got["items"] if i["kind"] == "launch-experiments"]
+    assert changes == [
+        {"path": "experiments/enabled", "before": True},
+        {"path": "experiments/stages", "after": ARMS["experiments"]["stages"]},
+    ]
+    assert "モデルと effort の変更 experiments/stages" in question["questions"][0]["question"]
+
+
+def test_the_terminal_confirmation_shows_the_changes(repo, capsys, monkeypatch):
+    candidate = _draft(capsys, ARMS)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    got = _run(capsys, "show", "--candidate", str(candidate), "--question", "approve")
+    assert any(i["kind"] == "launch-experiments" for i in got["items"])
+    _typed(monkeypatch, got["metrics"]["sha256"])
+    shown: list[str] = []
+    monkeypatch.setattr(lc, "print", lambda text, **kw: shown.append(text), raising=False)
+    assert _run(capsys, "approve", "--sha256", got["metrics"]["sha256"], "--candidate", str(candidate))["status"] == "ok"
+    assert any("モデルと effort の変更 experiments/stages" in t for t in shown)
+
+
+def test_no_experiment_item_without_a_change(repo, capsys):
+    got, _, _ = _ask(capsys, _draft(capsys, LSP))
+    assert not any(i["kind"] == "launch-experiments" for i in got["items"])

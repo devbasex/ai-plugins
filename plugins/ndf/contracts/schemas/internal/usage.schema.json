@@ -39,6 +39,7 @@
     "model_source": {"enum": ["argument", "environment", "experiment", "base", "default"], "description": "モデルの出所（argument は起動の引数、environment は環境変数、experiment は実験の割り付け、base は基準の組を抽選せずに使った、default は指定なし）"},
     "effort_source": {"enum": ["argument", "environment", "experiment", "base", "default"], "description": "effort の出所（model_source と同じ語）"},
     "raised": {"type": "boolean", "description": "同じ失敗への 2 回目以降の起動で、値を 1 つ上げたか"},
+    "outcome": {"enum": ["ok", "gate", "stopped", "no_result", "bad_report", "unknown", "valid", "invalid", "timeout", "done", "failed", "usage_limit", "stalled"], "description": "起動 1 回の終わり方（#2944）。worker は結果ファイルの status か no_result、Skill は結果 JSON の status か bad_report、判定は valid・invalid・timeout、相手役は監視の終わり方（done・failed・usage_limit・stalled・timeout）。起動の失敗の回答は unknown"},
     "model_usage": {"type": "object", "description": "モデルの名前 → そのモデルの使用量（token。結果の modelUsage の inputTokens・outputTokens・cacheReadInputTokens・cacheCreationInputTokens）。会話の累計で、起動 1 回分は session_cost_usd と同じ求め方（同じ会話の 1 つ前の行との差）で集計の時に求める", "additionalProperties": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}}
   }
 }

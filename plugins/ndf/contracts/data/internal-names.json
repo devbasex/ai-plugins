@@ -15,6 +15,7 @@
     "スプリント状態の名前": {"key": "state", "aliases_removed": [], "where": ["mvv-signals"]},
     "ループの 1 回の終わり方": {"key": "outcome", "aliases_removed": [], "where": ["loop-event"]},
     "cross-review の指摘の終わり方": {"key": "outcome", "aliases_removed": [], "where": ["mvv-validation"]},
+    "起動 1 回の終わり方": {"key": "outcome", "aliases_removed": [], "where": ["usage"]},
     "読み手役の確認の結果": {"key": "result", "aliases_removed": [], "where": ["reading-check"]}
   }
 }
