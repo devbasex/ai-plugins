@@ -331,7 +331,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | 9 | `unconfirmed`（判定を依頼して確認できなかった） | 進む |
 | 10 | ほか | 残す |
 
-`path` は先頭の `./` を除いて照らす。順 1 を先頭に置くので、前の確認で `check.tracks` が付いた指摘や、直さずに残した指摘に後から承認の要る操作が指摘された場合も、必ず進む側になる。
+`path` は先頭の `./` を除いて照らす。指摘の行へ保存するときも除く（`plain_path`）。投稿の処理は `path` を PR の変更ファイルの一覧と突き合わせるので、`./` が残るとスレッドが作られないためである。順 1 を先頭に置くので、前の確認で `check.tracks` が付いた指摘や、直さずに残した指摘に後から承認の要る操作が指摘された場合も、必ず進む側になる。
 
 `files_issue` は `severity` が critical か major で、`finding_kinds` が `review-criteria.json` の `kinds.filed`（`delivered`・`safety`・`secret`・`user_data`・`irreversible`・`approval`）と重なる場合だけ真である。この課題の線引きで残るのは major だけだが（critical は `proceeds` の順 5 で進む）、#2468 は上限で残った critical も同じ関数で起票するかを決めるためである。
 

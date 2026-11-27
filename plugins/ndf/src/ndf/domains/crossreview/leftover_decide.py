@@ -39,10 +39,15 @@ def finding_kinds(row: Mapping[str, Any]) -> frozenset[str]:
     return frozenset(found)
 
 
+def plain_path(path: str) -> str:
+    """git の一覧と同じ形のパス（前後の空白と先頭の `./` を除く）。"""
+    return path.strip().removeprefix("./")
+
+
 def _path(row: Mapping[str, Any]) -> str | None:
-    """指摘の `path`（先頭の `./` を除く）。無ければ None。"""
+    """指摘の `path`（`plain_path` の形）。無ければ None。"""
     path = row.get("path")
-    return path.removeprefix("./") if isinstance(path, str) else None
+    return plain_path(path) if isinstance(path, str) else None
 
 
 def on_touched_line(row: Mapping[str, Any], touched: Touched) -> bool:

@@ -100,7 +100,7 @@ def _located(item: Mapping[str, Any]) -> dict[str, Any]:
         out["severity"] = severity
     path = _text(item.get("path"))
     if path is not None:
-        out["path"] = path.strip()
+        out["path"] = leftover_decide.plain_path(path)
         line = item.get("line")
         if type(line) is int and line > 0:
             out["line"] = line

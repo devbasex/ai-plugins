@@ -158,6 +158,13 @@ def test_issue_3780_5_parked_finding_raised_again_is_unparked(again: dict) -> No
     assert (row["path"], row["line"]) == (again["path"], again["line"])
 
 
+def test_a_dot_slash_path_is_saved_without_it() -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(2, [_told(path="./a.py", line=10)])
+    journal.sort(TOUCHED)
+    assert journal.rows["r2-1"]["path"] == "a.py"
+
+
 def test_issue_3780_any_report_of_the_round_on_a_changed_line_proceeds() -> None:
     journal = journal_mod.FindingJournal()
     journal.enter(2, [_told(**UNCHANGED), _told(path="a.py", line=10)])
