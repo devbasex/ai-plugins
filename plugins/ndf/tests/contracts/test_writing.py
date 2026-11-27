@@ -29,6 +29,12 @@ def test_types_section_is_cut_at_the_next_section() -> None:
     assert [line for line in section.splitlines() if line.startswith("## ")] == [writing.TYPES_HEADING]
 
 
+def test_readers_section_is_cut_at_the_next_heading() -> None:
+    section = writing.readers_section()
+    assert section in writing.criteria()
+    assert [line for line in section.splitlines() if line.startswith("#")] == [writing.READERS_HEADING]
+
+
 def test_types_section_keeps_subsections_and_reads_to_the_end(criteria_file: Path) -> None:
     criteria_file.write_text(f"# 基準\n\n{writing.TYPES_HEADING}\n\n型\n\n### 区分\n\n2 つ\n", encoding="utf-8")
     assert writing.types_section() == f"{writing.TYPES_HEADING}\n\n型\n\n### 区分\n\n2 つ"
