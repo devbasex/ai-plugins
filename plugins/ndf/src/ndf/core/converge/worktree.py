@@ -330,14 +330,14 @@ def _clashes(path: str, files: set[str], dirs: set[str]) -> bool:
     return path in files or path in dirs or any(p in files for p in _parents(path))
 
 
-def _refuse_lossy_sync(g: git.Git, remote: str, before: str) -> None:
+def _refuse_lossy_sync(g: git.Git, tip: str, before: str) -> None:
     """合わせると失うもの（送っていないマージのコミット・上書きされる未追跡のファイル）があれば `SyncRefused`。"""
-    merges = g.run("rev-list", "--merges", f"{remote}..{before}").split()
+    merges = g.run("rev-list", "--merges", f"{tip}..{before}").split()
     if merges:
         raise SyncRefused(
             f"送っていないマージのコミットがあり、載せ直すとマージで足した変更が消える。送ってから流し直す: {', '.join(merges)}"
         )
-    clashing = untracked_in_the_way(g, remote)
+    clashing = untracked_in_the_way(g, tip)
     if clashing:
         raise SyncRefused(
             f"未追跡のファイルが origin の先頭の追跡するパスと重なり、合わせると上書きされる。移してから流し直す: {', '.join(clashing)}"
