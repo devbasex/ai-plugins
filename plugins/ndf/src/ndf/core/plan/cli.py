@@ -14,8 +14,9 @@ ndf plan check <plan.json>...
     プランの形と、キューの組（触るファイルの重なり・前提）を確かめる
 ndf plan units check [--issue N]... [--omitted N]... [<単位のファイル>...] [--docs]
     単位のファイルを 1 つのグラフにして確かめる。`--issue` が無ければ環境変数 `NDF_STAGE_INPUT` の `issues`・`plan_omitted`・
-    `worktree` を使う。`NDF_DESIGN_RECORD_DIR` があれば、レビューした HEAD のコミットを読み、通れば `checked.json` を書く
-ndf plan units render [--issue N]... [--omitted N]...
+    `worktree` を使う。`NDF_DESIGN_RECORD_DIR` があれば、レビューした HEAD のコミットを読み、`--docs` が無くても
+    実装計画と突き合わせて、通れば `checked.json` を書く
+ndf plan units render --issue N... [--omitted N]...
     実装計画の「レビューの単位」と「並列と直列」の表を書き直し、続けて `check --docs` をする
 
 結果 JSON を標準出力へ 1 行で出す。
@@ -340,7 +341,7 @@ def _targets(a: argparse.Namespace, cwd: Path) -> _Targets:
         return _Targets(root, (), (), tuple(_relative(root, cwd, f) for f in given))
     if issues:
         return _Targets(_repo_root(cwd), issues, omitted, ())
-    raw = os.environ.get(STAGE_INPUT_ENV) if a.units_cmd == "check" else None
+    raw = os.environ.get(STAGE_INPUT_ENV)
     if raw is None or omitted:
         raise _UnitsStopped("invalid", "確かめる課題が無い（--issue を渡す）")
     held = _stage_input(raw)
@@ -404,14 +405,13 @@ def _checked_units(a: argparse.Namespace, targets: _Targets, record: Optional[_R
     summary = f"{len(units)} 個の単位の確かめを通った（警告 {len(warnings)} 件）"
     outputs = None
     if record is not None:
-        handled = units_files.handlings(tree, targets.issues)
         files.write_json(
             record.path / CHECKED_FILE,
             dict(
                 head=record.head,
                 branch=targets.inputs.branch,
                 issues=list(targets.issues),
-                handling={str(n): dict(handling=handling, into=into) for n, (handling, into) in handled.items()},
+                handling={str(n): dict(handling=handling, into=into) for n, (handling, into) in report.handlings.items()},
                 omitted=[f.issues[0] for f in report.files if f.whole],
                 limits=limits_held._asdict(),
                 criteria={str(n): count for n, count in counts.items()},
@@ -437,7 +437,8 @@ def _units(a: argparse.Namespace) -> dict[str, Any]:
         return _checked_units(a, targets, None, docs=True)
     held = os.environ.get(RECORD_DIR_ENV)
     record = None if held is None else _record(Path(held), targets)
-    return _checked_units(a, targets, record, a.docs)
+    # 承認の記録を書くときは、`--docs` が無くても実装計画と突き合わせる
+    return _checked_units(a, targets, record, a.docs or record is not None)
 
 
 def _cmd_units(a: argparse.Namespace) -> int:
@@ -489,12 +490,23 @@ def _parser() -> argparse.ArgumentParser:
     us = sub.add_parser("units", help="レビューの単位を確かめ、実装計画の表を書く").add_subparsers(dest="units_cmd", required=True)
     uc = us.add_parser("check", help="単位のファイルを確かめる")
     ur = us.add_parser("render", help="実装計画の表を書き直して確かめる")
+    uc.add_argument(
+        "--issue",
+        dest="issues",
+        type=int,
+        action="append",
+        help=f"課題の番号。省くときは、単位のファイルを位置引数で指定するか、工程の入力 {STAGE_INPUT_ENV} を渡す",
+    )
+    ur.add_argument("--issue", dest="issues", type=int, action="append", required=True, help="スプリントの全課題の番号（1 つ以上）")
     for one in (uc, ur):
-        one.add_argument("--issue", dest="issues", type=int, action="append", help="スプリントの課題の番号")
         one.add_argument("--omitted", type=int, action="append", help="実装計画を省いた課題の番号")
         one.set_defaults(fn=_cmd_units)
-    uc.add_argument("files", nargs="*", help="単位のファイルを直に指す（--issue と併せて渡さない）")
-    uc.add_argument("--docs", action="store_true", help="実装計画のタスクの集合と 2 つの表も突き合わせる")
+    uc.add_argument("files", nargs="*", help="単位のファイルを直に指す（--issue・--omitted と併せて渡さない）")
+    uc.add_argument(
+        "--docs",
+        action="store_true",
+        help="実装計画のタスクの集合と 2 つの表も突き合わせる（承認の記録を書くときは指定しなくても突き合わせる）",
+    )
     return p
 
 

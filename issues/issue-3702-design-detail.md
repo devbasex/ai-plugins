@@ -222,11 +222,12 @@ contracts/
 | サブコマンド | 引数 | 動き |
 | --- | --- | --- |
 | `check` | `[--issue N]... [--omitted N]... [<ファイル>...] [--docs]` | `check` の結果 JSON。`--issue` が無く、環境変数 `NDF_STAGE_INPUT` があれば、入力の `issues`・`plan_omitted`・`worktree` を使う（工程の `script` のステップは引数を組めないため） |
-| `render` | `[--issue N]... [--omitted N]...` | 表を書き直してから、同じプロセスで `check --docs` を返す |
+| `render` | `--issue N... [--omitted N]...` | 表を書き直してから、同じプロセスで `check --docs` を返す |
 
 環境変数 `NDF_DESIGN_RECORD_DIR` があるとき（工程「ドキュメントレビュー」の `units-check`）は、次のように動く。
 
 - 読み元は作業ツリーではなく、`NDF_DESIGN_RECORD_DIR` が指す保存先（下の「承認の記録」で説明する工程「ドキュメントレビュー」の保存先）にある `reviewed-head` が示すコミットにする。作業場所の HEAD がそのコミットと違えば `stopped`（`approval_stale`）
+- `--docs` を指定しなくても、実装計画と突き合わせる。タスクか表が食い違えば `stopped`（`invalid`）にし、`checked.json` を書かない。突き合わせていない内容を承認へ進めないためである
 - 通ったら、保存先の `checked.json` に `{"head", "branch", "issues", "handling", "omitted", "limits", "criteria", "units"}` を書く。`branch` は入力の `branch`（スプリントブランチ）で、無ければ `stopped`（`precondition`）にする。`units` は結果の `items` と同じで、`criteria` は課題ごとの受け入れ条件の数である
 - 入力に `design_pr` があれば、保存先の `reviewed-pr` の番号と比べ、違えば `stopped`（`refused`）
 - 結果の `outputs.design_pr` に `reviewed-pr` の番号を返す。設計承認ゲートの質問は、文脈に `design_pr` が無くてもこの値を読む

@@ -148,7 +148,7 @@
           "items": {
             "type": "integer"
           },
-          "description": "スプリントの課題の番号"
+          "description": "課題の番号。省くときは、単位のファイルを位置引数で指定するか、工程の入力 NDF_STAGE_INPUT を渡す"
         },
         "--omitted": {
           "type": "array",
@@ -162,12 +162,12 @@
           "items": {
             "type": "string"
           },
-          "description": "単位のファイルを直に指す（--issue と併せて渡さない）",
+          "description": "単位のファイルを直に指す（--issue・--omitted と併せて渡さない）",
           "x-ndf-positional": true
         },
         "--docs": {
           "type": "boolean",
-          "description": "実装計画のタスクの集合と 2 つの表も突き合わせる"
+          "description": "実装計画のタスクの集合と 2 つの表も突き合わせる（承認の記録を書くときは指定しなくても突き合わせる）"
         }
       },
       "required": [
@@ -187,7 +187,7 @@
           "items": {
             "type": "integer"
           },
-          "description": "スプリントの課題の番号"
+          "description": "スプリントの全課題の番号（1 つ以上）"
         },
         "--omitted": {
           "type": "array",
@@ -198,7 +198,8 @@
         }
       },
       "required": [
-        "subcommand"
+        "subcommand",
+        "--issue"
       ]
     },
     {

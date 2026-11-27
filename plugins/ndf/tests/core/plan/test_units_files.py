@@ -621,6 +621,9 @@ def reviewed(hub, work, tmp_path, monkeypatch) -> Path:
     """レビューした HEAD・PR・マージ先を持つ保存先と、単位をコミットした作業場所。"""
     _two_units(work)
     _design(work, "7", "| #7 | 実装する | — |")
+    _put(work, "issue-7-plan.md", _plan(1, 2))
+    for path, text in uf.rendered(uf.Tree(work), [7], [], LIMITS).items():
+        (work / path).write_text(text, encoding="utf-8")
     record = tmp_path / "record"
     record.mkdir()
     (record / "reviewed-head").write_text(_commit(work) + "\n", encoding="utf-8")
@@ -657,7 +660,13 @@ def test_cli_record_check_writes_checked_json_from_the_reviewed_commit(reviewed,
 
 @pytest.mark.parametrize(
     ("change", "kind"),
-    [("head", "approval_stale"), ("no_branch", "precondition"), ("other_pr", "refused"), ("no_file", "precondition")],
+    [
+        ("head", "approval_stale"),
+        ("no_branch", "precondition"),
+        ("other_pr", "refused"),
+        ("no_file", "precondition"),
+        ("other_tasks", "invalid"),
+    ],
 )
 def test_cli_record_check_writes_nothing_when_it_stops(reviewed, work, capsys, monkeypatch, change, kind):
     (reviewed / "checked.json").write_text("{}", encoding="utf-8")
@@ -667,6 +676,9 @@ def test_cli_record_check_writes_nothing_when_it_stops(reviewed, work, capsys, m
         _stage(monkeypatch, work, branch=None)
     elif change == "other_pr":
         _stage(monkeypatch, work, design_pr=13)
+    elif change == "other_tasks":
+        _put(work, "issue-7-plan.md", _plan(1, 3))
+        (reviewed / "reviewed-head").write_text(_commit(work) + "\n", encoding="utf-8")
     else:
         (reviewed / "reviewed-pr").unlink()
 

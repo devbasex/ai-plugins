@@ -134,15 +134,17 @@ def single(issue: int) -> UnitFile:
     return UnitFile("", (issue,), (task,), (UnitDef(f"issue-{issue}", ("T1",), ()),), whole=True)
 
 
-def judge(files: Sequence[UnitFile], limits: Limits, criteria: Mapping[int, int]) -> Judgement:
+def judge(files: Sequence[UnitFile], limits: Limits, criteria: Mapping[int, int], propose: bool = True) -> Judgement:
     """全ファイルを 1 つのグラフにし、導く値・違反・警告・分け方の案を返す。`criteria` は対象の課題ごとの受け入れ条件の数。
 
     参照の解決に失敗しても（U1）、残りの規則は評価できる範囲で続ける。
-    案は、上限を超える単位と、目安を超えてタスクが 2 つ以上ある単位に作る。
+    案は、上限を超える単位と、目安を超えてタスクが 2 つ以上ある単位に作る。案を使わない呼び手は `propose=False` で作らせない。
     """
     views, bad, warn = _check(files, limits, criteria)
     over = dict.fromkeys(
-        (v.file, v.name) for v in views if v.lines is not None and (v.lines > limits.max or (v.lines > limits.target and len(v.tasks) > 1))
+        (v.file, v.name)
+        for v in views
+        if propose and v.lines is not None and (v.lines > limits.max or (v.lines > limits.target and len(v.tasks) > 1))
     )
     return Judgement(views, bad, warn, tuple(split(files, key, limits, criteria) for key in over))
 

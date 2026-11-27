@@ -152,12 +152,13 @@ def _decode(path: str, data: Optional[bytes]) -> Optional[str]:
 
 class Collected(NamedTuple):
     """スプリントの課題の振り分け。`omitted` は実装計画を省いた課題、`excluded` は扱いが「マージする」「閉じる」の課題、
-    `missing` はどちらでもないのに単位のファイルが無い課題。"""
+    `missing` はどちらでもないのに単位のファイルが無い課題。`handlings` は課題ごとの（扱い, 統合先）。"""
 
     files: tuple[ud.UnitFile, ...]
     omitted: tuple[int, ...]
     excluded: tuple[int, ...]
     missing: tuple[int, ...]
+    handlings: Mapping[int, tuple[str, Optional[int]]]
 
 
 class TaskGap(NamedTuple):
@@ -172,7 +173,7 @@ class TaskGap(NamedTuple):
 class Report(NamedTuple):
     """確かめの結果。`task_gaps`・`stale_tables`（表を書き直すと変わる実装計画）は `docs` を指定したときだけ入る。
 
-    `files` は判定した単位のファイル（省いた課題の 1 単位を含む）である。
+    `files` は判定した単位のファイル（省いた課題の 1 単位を含む）である。`handlings` は課題から確かめたときだけ入る。
     """
 
     judgement: ud.Judgement
@@ -180,6 +181,7 @@ class Report(NamedTuple):
     task_gaps: tuple[TaskGap, ...]
     stale_tables: tuple[str, ...]
     files: tuple[ud.UnitFile, ...]
+    handlings: Mapping[int, tuple[str, Optional[int]]]
 
 
 # --- 読み手 -------------------------------------------------------------------------------------
@@ -259,21 +261,14 @@ def collect(tree: Tree, issues: Sequence[int], omitted: Sequence[int]) -> Collec
 
 def _collect(tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int], omitted: Sequence[int]) -> Collected:
     wanted = tuple(sorted(set(issues)))
-    dropped = _excluded_by_design(tree, listing, wanted)
-    excluded = tuple(n for n in wanted if n in dropped)
+    handled, excluded = _handlings(tree, listing, wanted)
     skipped = tuple(n for n in wanted if n in set(omitted) and n not in excluded)
     rest = [n for n in wanted if n not in excluded and n not in skipped]
     found = find(tree, rest, sorted(listing))
     paths = list(dict.fromkeys(found[n] for n in rest if n in found))
     texts = tree.read_all(paths, listing)
     files = tuple(_load(path, texts[path]) for path in paths)
-    return Collected(files, skipped, excluded, tuple(n for n in rest if n not in found))
-
-
-def _excluded_by_design(tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int]) -> set[int]:
-    """設計書の「設計の結果」の扱いが「マージする」か「閉じる」の課題。設計書が無いか、扱いが割れる課題は含めない。"""
-    found = _design_rows(tree, listing, issues)
-    return {issue for issue, rows in found.items() if {handling for handling, _ in rows} <= EXCLUDED_HANDLINGS}
+    return Collected(files, skipped, excluded, tuple(n for n in rest if n not in found), handled)
 
 
 def _design_rows(
@@ -292,14 +287,19 @@ def _design_rows(
     return rows
 
 
-def handlings(tree: Tree, issues: Sequence[int]) -> dict[int, tuple[str, Optional[int]]]:
-    """課題ごとの（扱い, 統合先）。扱いが割れる課題は独立した単位を持つ扱いを取り、設計書に行の無い課題は「実装する」である。"""
-    rows = _design_rows(tree, tree.listing(), issues)
+def _handlings(
+    tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int]
+) -> tuple[dict[int, tuple[str, Optional[int]]], tuple[int, ...]]:
+    """課題ごとの（扱い, 統合先）と、独立した単位を持たない課題。
+
+    扱いが割れる課題は独立した単位を持つ扱いを取り、設計書に行の無い課題は「実装する」である。
+    """
+    rows = _design_rows(tree, listing, issues)
     out: dict[int, tuple[str, Optional[int]]] = {}
-    for issue in sorted(set(issues)):
+    for issue in issues:
         found = rows[issue] if issue in rows else [(IMPLEMENT_HANDLING, None)]
         out[issue] = next((row for row in found if row[0] not in EXCLUDED_HANDLINGS), found[0])
-    return out
+    return out, tuple(n for n in issues if out[n][0] in EXCLUDED_HANDLINGS)
 
 
 def project_of(tree: Tree) -> dict[str, Any]:
@@ -328,7 +328,7 @@ def check(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: ud.
     listing = tree.listing()
     found = _collect(tree, listing, issues, omitted)
     files = [*found.files, *map(ud.single, found.omitted)]
-    return _report(tree, listing, files, ud.judge(files, limits, criteria), docs)._replace(missing=found.missing)
+    return _report(tree, listing, files, ud.judge(files, limits, criteria), docs)._replace(missing=found.missing, handlings=found.handlings)
 
 
 def check_files(tree: Tree, files: Sequence[ud.UnitFile], limits: ud.Limits, criteria: Mapping[int, int], docs: bool) -> Report:
@@ -356,7 +356,7 @@ def _report(
             gaps.append(gap)
         if text is not None and render_tables(text, judgement.views, unit_file.path) != _newlines(text):
             stale.append(plan)
-    return Report(judgement, (), tuple(gaps), tuple(stale), tuple(files))
+    return Report(judgement, (), tuple(gaps), tuple(stale), tuple(files), {})
 
 
 def paired_plan(units_path: str) -> str:
@@ -369,7 +369,7 @@ def rendered(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: 
     listing = tree.listing()
     found = _collect(tree, listing, issues, omitted)
     # 表に出る値は受け入れ条件の数に依らないので、数は渡さない（参照の違反は確かめが返す）
-    views = ud.judge([*found.files, *map(ud.single, found.omitted)], limits, {}).views
+    views = ud.judge([*found.files, *map(ud.single, found.omitted)], limits, {}, propose=False).views
     files = {paired_plan(f.path): f.path for f in found.files}
     out: dict[str, str] = {}
     for plan, text in tree.read_all(list(files), listing).items():
