@@ -300,9 +300,11 @@ MVV に反する指摘と保護の対象の指摘は、確認しても重要度�
 
 ## 設計の結果
 
+詳細設計（ファイルと関数の粒度）は [issue-4363-design-detail.md](./issue-4363-design-detail.md) にある。触るファイルのうち、`drive.py` の行数の上限のための移動と、それに伴う上限の読み手とテストの参照名は詳細設計でコードを読んで足した（理由は詳細設計の地図）。
+
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4363 | 実装する | — | `plugins/ndf/src/ndf/domains/crossreview/verify_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/verify.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_verify.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py` |
+| #4363 | 実装する | — | `plugins/ndf/src/ndf/domains/crossreview/verify_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/verify.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_verify.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/src/ndf/domains/crossreview/carry.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/reviewing.py`（新設）、`plugins/ndf/contracts/limits/cross-review.remark-chars.json`、`plugins/ndf/contracts/limits/cross-review.remarks-total.json`、`plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_citations.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_documents.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py` |
 
 ## 未確認のまま残ること
 

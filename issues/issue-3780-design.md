@@ -147,7 +147,9 @@ flowchart TD
 
 ### 起票の形
 
-題は指摘の本文の先頭、本文は指摘の本文・起きること・場所・PR の URL・目印（`<!-- ndf:cross-review-leftover <識別値> -->`）である。ラベルは付けない。PR の URL には、元の PR（状態ファイルの `pr`）の URL を必ず書く。PR を巻き直した（閉じて新しい番号で出し直した）後の起票では、今の PR の URL も添える。
+題は指摘の本文の先頭、本文は指摘の本文・起きること・場所・PR の URL・目印（`<!-- ndf:cross-review-leftover <識別値> -->`）である。ラベルは付けない。
+
+秘密を伏せる処理（伏せ字）は、指摘の本文の**全文**に先に当て、その結果から題の先頭を切り出す。起きること・場所も、切り詰める前の全文に当てる。先に切り出すと、途中で切れた秘密は秘密の形に当たらなくなり、伏せられないまま公開されうるためである。PR の URL には、元の PR（状態ファイルの `pr`）の URL を必ず書く。PR を巻き直した（閉じて新しい番号で出し直した）後の起票では、今の PR の URL も添える。
 
 識別値は、状態ファイルの元の PR 番号と、指摘の本文の全体（空白をまとめ、大文字小文字をそろえた値）をつないだ文字列の SHA-256 の先頭 12 字である。本文の先頭だけを使うと、書き出しが同じ別の指摘が同じ値になる。指摘の発生の値（`occurrence`）は、指摘が戻ったときと別の保存先で引き継いだときに変わるので使わない。
 
@@ -339,13 +341,17 @@ flowchart TD
 | I1 | 残した指摘は欠け（MVV の欠けを含む）・スレッド・引き継ぎに出ない。MVV に反する残した指摘は `outputs.mvv.findings` に未解決で載り、`decisions` にも出る | 未解決として数えると落ちる。MVV の結果から消すと落ちる |
 | I2 | 進むと決めた指摘は、後のラウンドでも修正へ回る | ラウンドごとに分け直すと落ちる |
 | 確認できない指摘と判定対象外 | 判定を依頼して確認できなかった、変えていない行の major は修正へ回る（直さずに残した指摘の出し直しも `parked` を外す）。判定対象外の指摘は、回答が無いことを理由に進めない | 2 つを区別せずに回答の無い指摘をすべて進めるか、すべて残すと落ちる |
+| 起票の伏せ字 | 題の切り出しの長さの境目をまたぐ偽の秘密を本文に持つ指摘を起票すると、題にも本文にも秘密の断片が残らない | 題を切り出してから伏せると落ちる |
+| 承認の要る操作の指摘（線引きの順 1） | 必ず人の承認が要る操作の指摘は、変えていない行の major で起票する種類を持っていても `parked` が付かず、起票されず、人の判断を待つ。以前の確認で指摘の種類（`check.tracks`）が付いた行、直さずに残した行に、後の出し直しで承認の要る操作が指摘された場合も同じで、`parked` が外れる | 線引きの順で承認の要る操作を後ろに置くと落ちる。残っている `check.tracks` や `parked` を優先すると落ちる |
 | I3 | 起票の失敗で指摘が記録に残り、打ち直しで 1 回だけ起票する。起票に成功して URL の保存に失敗した後の打ち直しは、同じ保存先でも別の保存先でも、PR を巻き直した後でも、URL を戻して起票しない。検索に反映される前は一覧で見つける。無関係な Issue の更新が多くても、読むページは試みた時刻より後に作られた分だけである。起票の記録を書けなければ起票しない。作成を試みていない候補だけなら、検索も Issue の一覧の取得もしない。`author_association` が当たらない bot で起票し、同じ保存先を別のアカウントで打ち直しても同じである。目印を引用しただけの Issue と、目印を持つ Pull Request は使わない。`issues.primary` が `github` でないか未設定なら起票しない | 失敗で行を落とすと落ちる。打ち直しで 2 件起票すると落ちる。作成の前に記録を書かないと落ちる。記録を状態ファイルだけに持つと落ちる。元の PR の作成時刻から読むと落ちる。作成を試みていない候補で検索すると落ちる。作った人で絞ると落ちる。`issue_logins` を読まないと落ちる。読み済みの login があるのに取り直すと落ちる。目印の一致だけで URL を使うと落ちる。未設定で起票すると落ちる |
 
 ## 設計の結果
 
+詳細設計（ファイルと関数の粒度）は [issue-3780-design-detail.md](./issue-3780-design-detail.md) にある。触るファイルのうち、`cli.py` の分離、起票済みの引き継ぎ、読み手の追加、生成物、テストの偽物は詳細設計でコードを読んで足した（理由は詳細設計の地図）。
+
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3780 | 実装する | — | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/round_scope.py`、`plugins/ndf/src/ndf/domains/crossreview/changes.py`、`plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/leftover.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/threads.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/contracts/limits/cross-review.max-rounds.json`、`plugins/ndf/contracts/limits/cross-review.max-rounds.design.json`（新設）、`plugins/ndf/contracts/schemas/io/cross-review.result.schema.json`、`plugins/ndf/contracts/schemas/io/cross-review.args.schema.json`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_leftover.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py` |
+| #3780 | 実装する | — | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/round_scope.py`、`plugins/ndf/src/ndf/domains/crossreview/changes.py`、`plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/leftover.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/threads.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/contracts/limits/cross-review.max-rounds.json`、`plugins/ndf/contracts/limits/cross-review.max-rounds.design.json`（新設）、`plugins/ndf/contracts/schemas/io/cross-review.result.schema.json`、`plugins/ndf/contracts/schemas/io/cross-review.args.schema.json`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_leftover.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/src/ndf/domains/crossreview/local_scope.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/prior_decide.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/contracts/limits/github.list-pages.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`、`plugins/ndf/tests/domains/crossreview/conftest.py` |
 
 ## 未確認のまま残ること
 
