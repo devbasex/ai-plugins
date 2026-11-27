@@ -164,3 +164,13 @@ def test_decide_returns_the_same_next_for_the_same_input():
     first = transition_decide.decide(plan, state, None)
     done = Outcome("stopped", "ci_pending")
     assert transition_decide.decide(plan, first.state, done) == transition_decide.decide(plan, first.state, done)
+
+
+def test_a_gate_without_routes_carries_the_summary_of_the_step_it_stopped_at():
+    # #4513: 承認ゲートで終えるプランの要約に、判断を求めたステップの要約（worker の理由）を含める
+    plan = _plan({"id": "a"}, {"id": "release"})
+    _, final = _drive(plan, {"release": [Outcome("gate", summary="作業 release の worker が判断を求めた: バージョンを返せない")]})
+    assert final.status == "gate"
+    assert final.detail == "ステップ release が承認ゲートで止まった: 作業 release の worker が判断を求めた: バージョンを返せない"
+    _, plain = _drive(plan, {"release": [Outcome("gate")]})
+    assert plain.detail == "ステップ release が承認ゲートで止まった"

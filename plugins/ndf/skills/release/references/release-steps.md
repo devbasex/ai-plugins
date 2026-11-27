@@ -195,6 +195,9 @@ workflow を置かないリポジトリ（ほかの CI・手元）では、workf
 | workflow でリリースするもの | 本番ブランチへのマージの後に、workflow が `ndf release-steps record --pr <リリースの PR> --production <本番ブランチ> [--production-sha <本番へ入れたコミット>]` を打ち、含めた PR の各々へ書く。同じバージョンの記録が既にある PR には書かない |
 | それ以外 | SKILL.md の「出力物」と同じ 3 行の `## リリース記録` を、デプロイした値で記録の Pull Request へコメントで足す |
 
+**バージョン番号を持たないリポジトリでは、記録の `バージョン:` に出したものを指す値（例: `main abc1234`）を書く。**
+デプロイの工程の `product_version` と同じ値にする。後の工程（リリース後テスト・課題を閉じる処理）は値の形を問わない。
+
 書いた記録は `ndf release-steps records --pr <PR>` で読む。`record` は書く token の書き手が読み手に信用されるか（write 以上の権限）を
 先に確かめ、信用されなければ 1 件も書かずに `precondition`（3）で止まる。`github.token` で書いた記録は読まれない。
 

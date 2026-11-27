@@ -13,7 +13,8 @@ ndf lanes request close <計画> <リクエスト> --reason <理由>
 ndf lanes question <計画> --wrapper <ラッパーの名前> --question <question.json>
                                                  レーンの質問（AskUserQuestion）をリクエストとして載せる（中継のラッパーが打つ）
 ndf lanes release <計画> <リクエスト>... --result released|rejected --reason <理由> [--version <バージョン>] [--release <PR>]
-                                                 まとめたリリースの回答を記録し、まとめたリクエストを閉じる
+                                                 まとめたリリースの回答を記録し、まとめたリクエストを閉じる。released なら、打った
+                                                 作業ディレクトリ（リリースしたリポジトリ）の設定から届け先と保存先の種類も記録する
 ndf lanes answered <スプリントのステートマシンの ID> --answer <回答>
 ndf lanes row add|move|cancel|carry|start|end|resumed ...   （レーンの conductor が打つ。レーンのステートマシン）
 
@@ -27,6 +28,7 @@ from __future__ import annotations
 import argparse
 import functools
 import json
+import logging
 import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -44,6 +46,7 @@ from ndf.progress.plan import (
     LANE_SCHEMA,
     PLAN_SCHEMA,
     RELEASE_RESULTS,
+    RELEASED,
     TOOL,
     PlanInputError,
     ReleaseAnswer,
@@ -57,11 +60,15 @@ from ndf.progress.plan import (
     plan_id,
     read_doc,
     record_release,
+    released_where,
     start_plan,
     status_of,
     stop_plan,
 )
+from ndf.progress.command import FactUnknown
 from ndf.progress.plan import run, wait
+
+log = logging.getLogger(__name__)
 
 Command = Callable[[argparse.Namespace, sa.Connection, str], dict[str, Any]]
 
@@ -165,8 +172,25 @@ def _read_question(path: Path) -> dict[str, Any]:
     return data
 
 
+def _read_delivered(a: argparse.Namespace, cwd: Path) -> None:
+    """リリースした回答なら、打った作業ディレクトリ（リリースしたリポジトリ）の設定から届け先と保存先の種類を決めて `a.delivered` に置く
+    （#4513）。レーンが回答を受け取る時点の設定で決め直すと、その間に設定が変わったとき、リリースしていない届け先を記録する。
+    設定を読めなければ種類を `unknown` にし、届け先は記録しない（回答は断らない）。"""
+    if a.result != RELEASED:
+        a.delivered = (None, None)
+        return
+    try:
+        found: Any = command.strategy(cwd)
+    except (FactUnknown, GitError, OSError) as exc:  # 設定: 読めなければ種類を unknown として記録する
+        log.info("ブランチ戦略の設定を読めないので届け先を記録しない", extra={"cwd": str(cwd), "error": str(exc)})
+        found = None
+    a.delivered = released_where(found)
+
+
 def _cmd_release(a: argparse.Namespace, conn: sa.Connection, repo: str) -> dict[str, Any]:
-    record_release(conn, _pid(conn, repo, a.plan), a.requests, ReleaseAnswer(a.result, a.reason, a.version, a.release))
+    store_kind, delivery = a.delivered
+    answer = ReleaseAnswer(a.result, a.reason, a.version, a.release, store_kind, delivery)
+    record_release(conn, _pid(conn, repo, a.plan), a.requests, answer)
     return _ok(
         f"計画 {a.plan} のまとめたリリースの回答（{a.result}）をリクエスト {len(a.requests)} 件へ記録した",
         requests=a.requests,
@@ -368,12 +392,17 @@ def _detach_run(out: dict[str, Any], cwd: Path) -> None:
 
 # トランザクションと保存先を閉じた後に打つ、サブコマンドごとの後処理
 _AFTER: dict[str, Callable[[dict[str, Any], Path], None]] = {"start": _detach_run}
+# トランザクションを開く前に打つ、サブコマンドごとの前処理（設定のファイルを DB のトランザクションの外で読む）
+_BEFORE: dict[str, Callable[[argparse.Namespace, Path], None]] = {"release": _read_delivered}
 
 
 def _dispatch(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
     if a.action in SESSIONS:
         return SESSIONS[a.action](a, _where(cwd))
     where = _where(cwd)
+    before = _BEFORE.get(a.action)
+    if before is not None:
+        before(a, cwd)
     with store.open_store(where.url, where.root) as st:
         with store.transaction(st) as conn:
             out = COMMANDS[a.action](a, conn, where.repo)

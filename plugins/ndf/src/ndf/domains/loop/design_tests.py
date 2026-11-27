@@ -129,7 +129,7 @@ def _designs(g: git.Git, root: Path, a: argparse.Namespace) -> list[tuple[str, s
 def run(a: argparse.Namespace) -> dict[str, Any]:
     g = git.Git(a.cwd)
     try:
-        root = Path(g.run("rev-parse", "--show-toplevel").strip())
+        root = g.toplevel()
         designs = _designs(g, root, a)
         files = set(g.run("ls-tree", "-r", "--name-only", "HEAD").splitlines())
     except (OSError, UnicodeDecodeError, GitError) as exc:

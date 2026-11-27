@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Optional, TextIO
 
 from ndf import contracts, identity
@@ -23,6 +23,8 @@ from ndf.contracts import causes, exit_codes, facts, internal, text_view
 from ndf.contracts.exit_codes import GATE, OK, STATUSES, STOPPED
 
 SCHEMA = contracts.schema_path("result")
+# 判断を求めた結果の metrics で、確かめを通らなかった必須の出力の名前を載せるキー（worker・プラン・工程の進行が読み書きする。#4513）
+MISSING_OUTPUTS = "missing_outputs"
 
 
 # 任意の項目のうち配列のもの（置くときは写しの list にする）
@@ -175,6 +177,12 @@ def newer(obj: Any) -> bool:
     if isinstance(found, bool) or not isinstance(found, (int, float)):
         return False
     return found > internal.version() and found % 1 == 0  # JSON の 2.0 はスキーマでは整数
+
+
+def outputs_of(obj: Mapping[str, Any]) -> dict[str, Any]:
+    """結果や事象の `outputs`。dict でなければ空の dict。"""
+    found = obj.get("outputs")
+    return found if isinstance(found, dict) else {}
 
 
 def received(obj: Any) -> Optional[dict[str, Any]]:

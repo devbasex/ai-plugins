@@ -33,7 +33,7 @@ class DepthError(Exception):
 def ndf_settings_path(cwd: Path) -> Path:
     """今の worktree の `.ndf/backlog.json`。"""
     try:
-        top = Git(cwd).run("rev-parse", "--show-toplevel").strip()
+        top = Git(cwd).toplevel()
     except (GitError, OSError) as exc:
         raise DepthError(f"リポジトリの根を解けない: {exc}") from exc
     location = facts.value(state.FILES, "backlog", "location")

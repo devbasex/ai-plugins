@@ -30,6 +30,11 @@
       "id": "work",
       "run": ["{{worker}}", "impl"]
     },
+    "follow": {
+      "id": "follow",
+      "run": ["ndf", "refactor", "follow", "--pushed", "{state_dir}/pushed-sha", "--branch", "{{branch}}", "--remote", "{{remote}}"],
+      "exit_cause": {"1": "precondition"}
+    },
     "push": {
       "id": "push",
       "run": ["git", "push", "--", "{{remote}}", "HEAD:refs/heads/{{branch}}"],

@@ -214,7 +214,7 @@ def test_impl_acceptance_defaults_to_the_issue():
 def test_refactor_launch_wraps_the_refactor_run_with_the_branch_and_the_base():
     # #3908 の決定 7: 設定が無いときの {{refactor}}。PR の番号と触るファイルは打つ時点に読むので、包みの位置引数に
     # ブランチ（$0）と起点（$1）を渡し、$2 以降を ndf refactor run の argv にする
-    got = route.refactor_launch("sprint/s1", "origin/develop", ["test", "lint"])
+    got = route.refactor_launch("sprint/s1", "origin/develop", ["--required", "test", "lint"])
     assert got[:5] == ["bash", "-c", route.REFACTOR_WITH_PR, "sprint/s1", "origin/develop"]
     assert got[5:] == ["ndf", "refactor", "run", "--branch", "sprint/s1", "--base", "origin/develop", "--required", "test", "lint"]
 
@@ -243,7 +243,7 @@ def _run_refactor_wrap(tmp_path, gh_body: str) -> list[str]:
     (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
     git("add", "a.py")
     git("commit", "-q", "-m", "add")
-    argv = route.refactor_launch("sprint/s1", "start", ["test"])
+    argv = route.refactor_launch("sprint/s1", "start", ["--required", "test"])
     argv[argv.index("ndf")] = str(entry)
     args = tmp_path / "args"
     env = {**os.environ, "PATH": f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}", "ARGS_FILE": str(args)}
@@ -292,6 +292,21 @@ def test_document_reviews_use_the_plan_with_the_design_check():
     }
     assert plans == {"design": "document-review", "docs": "document-review", "code": "cross-review"}
     assert not any("design-check" in str(s) for s in found["cross-review"].plan["steps"])
+
+
+def test_rendered_returns_the_same_plan_and_the_kinds_from_one_expansion():
+    # #4513: 記録済みの値を使うプランかの判定に使う作業の名前は、組んだプランと同じ展開から取る
+    for t in route.templates().values():
+        for local_tests in (True, False):
+            plan, kinds = route.rendered(t, values(t.purpose), local_tests=local_tests)
+            assert plan == route.render(t, values(t.purpose), local_tests=local_tests)
+            assert kinds == route.kinds_of(t, local_tests)
+
+
+def test_rendered_refuses_the_same_way_as_render():
+    t = route.choose("release")
+    with pytest.raises(route.RouteError):
+        route.rendered(t, {})
 
 
 # --- PR の番号の保存とフォークの除外（#4369） ---

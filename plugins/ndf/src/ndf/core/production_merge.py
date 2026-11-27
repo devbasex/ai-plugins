@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import json
 from enum import Enum
+from collections.abc import Mapping
 from typing import Optional
 
 from ndf import identity
 
 # 判定に読むマージ先の設定のファイル（リポジトリの根からのパス）
 PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
+# `branch_strategy.release` の届け先の行の並びのキー
+DELIVERIES = "deliveries"
 
 
 class Verdict(str, Enum):
@@ -41,9 +44,23 @@ GATES = (STOP, DEFER, STALE)
 _NEEDS_APPROVAL = frozenset({Verdict.AUTOMATIC, Verdict.UNSET, Verdict.UNKNOWN})
 
 
+def on_channel(row: object, channel: str) -> bool:
+    """届け先の行がチャネルの語 `channel`（`production`・`base`）に当たるか。`channel` の省略・`null` の行はどのチャネルにも当たる。
+
+    届け先の選び方の規則はここだけに置く。`ndf ci merge` と hook の判定、承認資料の届け先（`forms_decide.reaches`）、
+    リリース記録の届け先（`production_delivery.production_delivery`）が同じ規則を使う。
+    """
+    return isinstance(row, Mapping) and row.get("channel") in (None, channel)
+
+
+def on_production_channel(row: object) -> bool:
+    """届け先の行が本番チャネル（`channel` の語 `production`）に当たるか。"""
+    return on_channel(row, "production")
+
+
 def _automatic_row(row: object) -> bool:
-    """本番に適用される自動反映の行か。`channel` の省略・`null` はどのチャネルにも当たる（`forms_decide.deliveries_of` と同じ）。"""
-    return isinstance(row, dict) and row.get("channel") in (None, "production") and row.get("kind") != "manual"
+    """本番に適用される自動反映の行か。"""
+    return on_production_channel(row) and isinstance(row, dict) and row.get("kind") != "manual"
 
 
 def automatic_rows(section: object) -> Verdict:
@@ -51,8 +68,8 @@ def automatic_rows(section: object) -> Verdict:
     release = section.get("release") if isinstance(section, dict) else None
     if not isinstance(release, dict):
         return Verdict.UNKNOWN
-    if "deliveries" in release:
-        rows = release["deliveries"]
+    if DELIVERIES in release:
+        rows = release[DELIVERIES]
         if not isinstance(rows, list):
             return Verdict.UNKNOWN
         return Verdict.AUTOMATIC if any(_automatic_row(r) for r in rows) else Verdict.MANUAL

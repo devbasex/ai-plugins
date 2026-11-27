@@ -73,7 +73,7 @@ VERIFICATION = "release-verification"
 
 def _root(args: argparse.Namespace) -> Path:
     where = args.cwd if args.cwd is not None else Path.cwd()
-    return Path(Git(where).run("rev-parse", "--show-toplevel").strip())
+    return Git(where).toplevel()
 
 
 def _hub(root: Path, remote: str | None = None) -> github_mod.GitHub:

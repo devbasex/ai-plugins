@@ -74,7 +74,7 @@ def declared_threshold(root: Path) -> int:
 def run(a: argparse.Namespace) -> dict[str, Any]:
     g = Git(a.cwd)
     try:
-        threshold = a.threshold if a.threshold is not None else declared_threshold(Path(g.run("rev-parse", "--show-toplevel").strip()))
+        threshold = a.threshold if a.threshold is not None else declared_threshold(g.toplevel())
         got = judge_lines(g, a.base, a.head, a.exclude, threshold)
     except (ValueError, GitError) as exc:
         return result.stopped(TOOL, "invalid", f"検査のトリガーを判定できない: {exc}")

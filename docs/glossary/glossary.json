@@ -909,6 +909,18 @@
       ]
     },
     {
+      "term": "判定役",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review で、相手役が書いた重い指摘が実際に起きるかを確かめる読むだけの AI",
+      "source": "plugins/ndf/skills/cross-review/docs/01-state-and-review.md"
+    },
+    {
+      "term": "直さずに残す指摘",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review で、修正担当へ渡さず、次のラウンドを始める理由にも数えない指摘。Issue か PR の記録のコメントに残す",
+      "source": "plugins/ndf/skills/cross-review/docs/01-state-and-review.md"
+    },
+    {
       "term": "指摘",
       "context": "ndf-cross-review",
       "meaning": "担当が出した 1 件の主張（review_findings[] の 1 要素）",
@@ -7738,7 +7750,7 @@
       "term": "テストを確かめる手段",
       "context": "ndf-ci-test",
       "meaning": "工程「リファクタリング」が変更の後のテストの合否を確かめる先。必須のチェックがある場合は、指定されたチェックの通過を CI で確認する。テストの合否まで分かるのは、そのチェックにテストが含まれる場合である。必須のチェックが無ければ、CI テストの設定（test.ci.only）が無効で、実行コマンドを持つテストの suite（kind が lint でないもの。省けば test）がある場合に手元で確かめる。どちらも使えなければ、既定の実行条件では理由を記録して工程を飛ばす",
-      "pending_source": "issues/issue-4566-requirements.md"
+      "source": "docs/specifications/cross-refactoring-local-test-gate.md"
     },
     {
       "term": "収集の確かめ",
@@ -8558,6 +8570,13 @@
       "source": "",
       "pending_source": "issues/issue-4517-design.md",
       "code": "repo-knowledge"
+    },
+    {
+      "term": "流れの設定",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/project.json` の `workflow` のうち、リポジトリの種類・工程の要否・閉じる条件を指定する項目。書くのは利用者で、無ければ NDF の既定の流れになる",
+      "source": "",
+      "pending_source": "issues/issue-4580-design.md"
     },
     {
       "term": "起動の設定",

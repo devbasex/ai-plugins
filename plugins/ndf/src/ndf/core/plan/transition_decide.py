@@ -178,10 +178,14 @@ def _after_stop(plan: Plan, state: StepState, step: Step, done: Outcome) -> Next
     return _finish(state, STOPPED, kind, f"{detail}: {done.summary}" if done.summary else detail)
 
 
-def _after_gate(state: StepState, step: Step) -> Next:
-    """承認ゲートを返したステップ。ルートの表があれば回答を待ち、無ければプランを承認ゲートで終える。"""
+def _after_gate(state: StepState, step: Step, summary: Optional[str] = None) -> Next:
+    """承認ゲートを返したステップ。ルートの表があれば回答を待ち、無ければプランを承認ゲートで終える。
+
+    終えるときの要約に、止まったステップの要約（worker が判断を求めた理由など）を含める（#4513）。
+    """
     if not step.on_answer:
-        return _finish(state, GATE, None, f"ステップ {step.id} が承認ゲートで止まった")
+        said = f"ステップ {step.id} が承認ゲートで止まった"
+        return _finish(state, GATE, None, f"{said}: {summary}" if summary else said)
     nxt = replace(state, gates=state.gates + 1)
     return Next.step(AwaitAnswer(step.id, nxt.gates), nxt)
 
@@ -210,5 +214,5 @@ def decide(plan: Plan, state: StepState, done: Optional[Outcome]) -> Next:
     if done.status == OK:
         return _after_ok(plan, state, step)
     if done.status == GATE:
-        return _after_gate(state, step)
+        return _after_gate(state, step, done.summary)
     return _after_stop(plan, state, step, done)

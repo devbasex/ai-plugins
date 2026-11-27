@@ -219,7 +219,7 @@ def test_final_result_ok_carries_the_recorded_prs_and_outputs(two_steps):
 def test_final_result_moves_outputs_recorded_before_the_rename(tmp_path):
     records.write_json(tmp_path / records.OUTPUTS_FILE, {"version": "11.0.23", "pr": 5})
     assert records.recorded_outputs(tmp_path) == ({"product_version": "11.0.23", "pr": 5}, [])
-    records._add_outputs(tmp_path, {"product_version": "11.0.24"})
+    records._add_outputs(tmp_path, "release", "ok", {"product_version": "11.0.24"})
     assert records.recorded_outputs(tmp_path) == ({"product_version": "11.0.24", "pr": 5}, [])
 
 

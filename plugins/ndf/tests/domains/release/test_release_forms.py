@@ -6,6 +6,7 @@ import pytest
 
 from ndf import contracts
 from ndf.contracts import facts
+from ndf.core import production_delivery
 from ndf.domains.release import forms_decide
 
 SCHEMA = "schemas/ndf-settings/project.schema.json"
@@ -46,3 +47,36 @@ def test_unsupported_form_stops_with_the_name_table_and_reason() -> None:
 def test_unknown_form_lists_the_known_forms() -> None:
     with pytest.raises(forms_decide.FormUnsupported, match="取れる形: package-plugin"):
         forms_decide.form_of("kiosk")
+
+
+# --- #4513: 本番に届く届け先の行を 1 つ選ぶ ----------------------------------------------------------------------------------
+
+PROD = {"target": "本番", "kind": "manual", "trigger": "手で出す", "channel": "production", "versioned": False}
+
+
+@pytest.mark.parametrize(("channel", "want"), [("production", True), (None, True), ("base", False)])
+def test_reaches_takes_the_production_and_the_unset_channel(channel, want):
+    assert forms_decide.reaches({"channel": channel}, "production") is want
+    assert forms_decide.reaches({}, "production") is True
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [PROD],
+        [{**PROD, "channel": "base", "target": "検証"}, PROD],
+        [{**PROD, "branch": "main"}],
+    ],
+)
+def test_production_delivery_is_the_one_row_that_reaches_production(rows):
+    want = [r for r in rows if r["channel"] != "base"][0]
+    assert production_delivery.production_delivery(_settings(rows)) == want
+
+
+@pytest.mark.parametrize("rows", [[], [PROD, {**PROD, "target": "別"}], [{**PROD, "target": ""}], "x"])
+def test_production_delivery_is_none_unless_one_row_fits_the_context(rows):
+    assert production_delivery.production_delivery(_settings(rows)) is None
+
+
+def _settings(rows) -> dict:
+    return {"release": {"version_store": {"kind": "none"}, "deliveries": rows}}

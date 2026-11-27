@@ -306,8 +306,9 @@
 | 呼び方 | 引数 |
 | --- | --- |
 | `ndf refactor collected` | `--paths`（array of string・必須）<br>`--timeout`（number・任意）<br>`--work`（string・任意・既定 `"."`） |
+| `ndf refactor follow` | `--pushed`（string・必須）<br>`--branch`（string・必須）<br>`--remote`（string・必須）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor release` | `--pr`（integer・必須）<br>`--work`（string・任意・既定 `"."`） |
-| `ndf refactor run` | `--pr`（integer・必須）<br>`--branch`（string・必須）<br>`--base`（string・必須）<br>`--scope`（array of string・必須）<br>`--required`（array of string・必須）<br>`--ci-test`（array of string・任意）<br>`--symbols`（array of string・任意）<br>`--participants`（array of string・任意）<br>`--max-fix`（integer・任意・既定 `2`）<br>`--budget-minutes`（integer・任意）<br>`--safety-net-minutes`（number・任意）<br>`--candidates`（string・任意）<br>`--work`（string・任意・既定 `"."`） |
+| `ndf refactor run` | `--pr`（integer・必須）<br>`--branch`（string・必須）<br>`--base`（string・必須）<br>`--scope`（array of string・必須）<br>`--required`（array of string・任意）<br>`--local-test`（boolean・任意）<br>`--pushed-out`（string・任意）<br>`--ci-test`（array of string・任意）<br>`--symbols`（array of string・任意）<br>`--participants`（array of string・任意）<br>`--max-fix`（integer・任意・既定 `2`）<br>`--budget-minutes`（integer・任意）<br>`--safety-net-minutes`（number・任意）<br>`--candidates`（string・任意）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor scope-args` | `--base`（string・必須）<br>`--tests`（array of string・任意）<br>`--scope`（array of string・任意）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor state` | `--pr`（integer・必須）<br>`--work`（string・任意・既定 `"."`） |
 | `ndf refactor tests` | `--changed`（array of string・必須）<br>`--work`（string・任意・既定 `"."`） |
@@ -463,7 +464,7 @@
 | `ndf worker plan-edit` | `plan`（string・必須・位置）<br>`--new`（string・必須）<br>`--reason`（string・必須）<br>`--state-dir`（string・任意） |
 | `ndf worker plan-edits` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意） |
 | `ndf worker prepare` | `--dir`（string・必須）<br>`--name`（string・必須） |
-| `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--timeout`（number・任意）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意） |
+| `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--timeout`（number・任意）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意）<br>`--require-version-number`（boolean・任意） |
 | `ndf worker write` | `--path`（string・必須）: 書き込むファイル。書き込み先は、`ndf worker run` の `--result-file` に指定したファイルの親ディレクトリの配下に限る。`--state-dir` の指定は、書き込める範囲に影響しない。相対パスは、このコマンドを実行する作業ディレクトリから解決する。本文は標準入力に渡し、ファイルの全文を置き換える。このコマンドは、書き込み先のディレクトリが `ndf worker run` の開いたディレクトリと同じかを確かめる。`ndf worker run` は、開いたディレクトリのデバイス番号・inode 番号とパスを環境変数 `NDF_WORKER_RESULT_DIR` で worker へ渡す。このコマンドは自分で開いた書き込み先のディレクトリの番号をその値と比べ、違えば書かずに止まる（precondition）。環境変数は呼び出し元が変えられるので、呼び出し元が `ndf worker run` の起動した worker かどうかは検証しない。信頼できる呼び出し元だけが使う |
 
 結果の `metrics`: `attempts`（integer）・`attention`（integer）・`edits`（integer）・`expectation_search`（object か null）・`paths`（object）・`report`（string）。`items` の要素: `action`（string）・`at`（—）・`backup`（string）・`diff`（string か null）・`kind`（string）・`path`（string）・`plan`（string か null）・`reason`（string か null）・`result_file`（string）・`session`（string か null）・`sha`（string）・`state`（string）・`subject`（string）・`text`（—）・`words`（array of string）

@@ -95,6 +95,11 @@ class Strategy:
         return self.section["release"]["version_store"]
 
     @property
+    def has_version_number(self) -> bool:
+        """バージョン番号を持つか（版数の保存先の種類 `release.version_store.kind` が `none` でない。#4513）。"""
+        return self.version_store.get("kind") != "none"
+
+    @property
     def release_plugin(self) -> Optional[str]:
         """版数を持つプラグインの名前（`release.plugin`。無ければ None）。"""
         return self.section["release"].get("plugin")
