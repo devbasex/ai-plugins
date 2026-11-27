@@ -137,3 +137,18 @@ def test_a_revoke_after_the_arguments_makes_the_check_before_the_launch_return_a
 
 def test_an_unknown_use_stops(repo: Path) -> None:
     assert "use" in _stops("codex", "write", repo)
+
+
+def test_given_settings_are_used_without_reading_the_file_again_but_the_check_before_the_launch_reads_it(repo: Path, monkeypatch) -> None:
+    """渡された設定で判定し、照らし直しは使い回さずに読み直す（引数の後に外した codex で安全装置を外さない）。"""
+    _namespaces(monkeypatch, False)
+    _unsandboxed(repo, ["codex"])
+    settings = ls.load(repo)
+    real = ls.load
+    seen: list[Path] = []
+    monkeypatch.setattr(ls, "load", lambda *a, **kw: seen.append(a[0]) or real(*a, **kw))
+    got = ls.safety_args("codex", "delegate", repo, settings=settings)
+    assert got.args == CODEX_OFF and seen == []
+    _unsandboxed(repo, [], approve=False)
+    reason = got.verify()
+    assert reason is not None and len(seen) == 1

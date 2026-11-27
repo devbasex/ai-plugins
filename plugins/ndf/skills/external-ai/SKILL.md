@@ -97,14 +97,16 @@ NDF には 4 つの CLI をまとめて起動するサブコマンドが無い�
    `run_in_background: true` で起動し、完了通知を 1 回受ける。標準出力と標準エラー出力は別のファイルへ逃がす。
    codex・agy・kiro は、対象のディレクトリへ移ってから `ndf delegate-run --runtime <名前> -- <CLI のコマンド>` で打つ。安全装置の引数と作業ディレクトリの
    指定は書かず、`'{args}'` を 1 つ置く。`'{args}'` の位置は決まっていて、codex は `codex exec` の、kiro は `kiro-cli chat --no-interactive` の、
-   agy は `agy` のすぐ後に置く（ほかの位置は拒まれる）。codex の作業ディレクトリは、`ndf delegate-run` が今のディレクトリを `-C` で入れる
+   agy は `agy` のすぐ後に置く（ほかの位置は拒まれる）。codex の作業ディレクトリは、`ndf delegate-run` が今のディレクトリを `-C` で入れる。
+   codex のモデルと effort も書かない。`ndf delegate-run` が起動の設定（`.ndf/launch.json` の `experiments`、無ければ同梱の表）から選んで
+   `'{args}'` に入れる。kiro と agy には入れないので、モデルは `--model` で自分で書く
 
    次の例は、読むだけのレビューを codex に頼む起動である。対象のディレクトリへ移れた場合だけ起動するよう、`cd` と `timeout` を `&&` でつなぐ。
    書き込みを伴う委譲の起動は、`corder` エージェントの「Codex CLI」のセクションにある
 
    ```bash
    cd <対象のディレクトリ> && timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}' \
-     --config model_reasoning_effort=medium < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
+     < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
    ```
 
    - `ndf delegate-run` は、サンドボックスが使えればその中で起動し、使えなければ起動の設定（`.ndf/launch.json` の `permissions.unsandboxed`）で

@@ -10,13 +10,18 @@ from pathlib import Path
 
 import pytest
 
-from ndf import cli
+from ndf import cli, identity
 from ndf.adapters import agents
 from ndf.adapters import launch_settings as ls
+from ndf.adapters import model_choice
 from ndf.contracts import causes, internal
 from ndf.domains.settings import delegate_run_cli as drc
 
 PRECONDITION = causes.exit_code("precondition")
+# 同梱の表の委譲（工程 delegate）の codex の基準の組
+EFFORT = ["-c", "model_reasoning_effort=medium"]
+# 値の制約に外れる（スキーマには合う）選択肢。値を選ぶ起動だけが止まる
+BROKEN_EXPERIMENTS = {"stages": {"delegate": {"arms": {"codex": []}}}}
 
 
 @pytest.fixture
@@ -26,6 +31,8 @@ def repo(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.setattr(ls.launch_approval, "repo_key", lambda r: str(r))
     monkeypatch.chdir(root)
     monkeypatch.delenv("NDF_AI_CHILD", raising=False)
+    for key in ("launch-codex-model", "launch-codex-effort"):
+        monkeypatch.delenv(identity.env_name(key), raising=False)
     return root
 
 
@@ -37,10 +44,11 @@ def execs(monkeypatch) -> list[tuple[str, list[str], dict[str, str]]]:
     return seen
 
 
-def _approve_unsandboxed(root: Path, runtimes: list[str]) -> str:
+def _approve_unsandboxed(root: Path, runtimes: list[str], experiments: dict | None = None) -> str:
     path = root / ".ndf" / "launch.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"version": 1, "permissions": {"unsandboxed": runtimes}}), encoding="utf-8")
+    raw = {"version": 1, "permissions": {"unsandboxed": runtimes}, **({"experiments": experiments} if experiments else {})}
+    path.write_text(json.dumps(raw), encoding="utf-8")
     sha = ls.approval_target(ls.load(root)).sha256
     ls.launch_approval.append(str(root), sha, ls.launch_approval.Action.APPROVE, approver="人")
     return sha
@@ -108,7 +116,7 @@ def test_the_delegate_replaces_itself_with_the_cli_marked_as_an_ai_child(repo: P
     monkeypatch.setattr(agents, "user_namespaces", lambda: True)
     drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", "-"])
     (file, argv, env) = execs[0]
-    assert file == "codex" and argv == ["codex", "exec", "-s", "workspace-write", "-C", str(repo), "-"]
+    assert file == "codex" and argv == ["codex", "exec", *EFFORT, "-s", "workspace-write", "-C", str(repo), "-"]
     assert env["NDF_AI_CHILD"] == "1"
     assert capsys.readouterr().out == ""
 
@@ -116,7 +124,7 @@ def test_the_delegate_replaces_itself_with_the_cli_marked_as_an_ai_child(repo: P
 def test_a_read_only_delegate_takes_the_review_row(repo: Path, monkeypatch, execs) -> None:
     monkeypatch.setattr(agents, "user_namespaces", lambda: True)
     drc.main(["--runtime", "codex", "--use", "review", "--", "codex", "exec", "{args}"])
-    assert execs[0][1] == ["codex", "exec", "-s", "read-only", "-C", str(repo)]
+    assert execs[0][1] == ["codex", "exec", *EFFORT, "-s", "read-only", "-C", str(repo)]
 
 
 def test_without_namespaces_and_an_approval_it_stops_before_the_cli(repo: Path, monkeypatch, execs, capsys) -> None:
@@ -130,7 +138,7 @@ def test_an_approved_delegate_without_namespaces_takes_the_unsandboxed_arguments
     monkeypatch.setattr(agents, "user_namespaces", lambda: False)
     _approve_unsandboxed(repo, ["codex"])
     drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}"])
-    assert execs[0][1] == ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "-C", str(repo)]
+    assert execs[0][1] == ["codex", "exec", *EFFORT, "--dangerously-bypass-approvals-and-sandbox", "-C", str(repo)]
 
 
 def test_a_revoke_between_the_arguments_and_the_launch_stops_it(repo: Path, monkeypatch, execs, capsys) -> None:
@@ -139,8 +147,8 @@ def test_a_revoke_between_the_arguments_and_the_launch_stops_it(repo: Path, monk
     sha = _approve_unsandboxed(repo, ["codex"])
     real = ls.safety_args
 
-    def then_revoke(*a):
-        got = real(*a)
+    def then_revoke(*a, **kw):
+        got = real(*a, **kw)
         ls.launch_approval.append(str(repo), sha, ls.launch_approval.Action.REVOKE)
         return got
 
@@ -163,6 +171,111 @@ def test_kiro_takes_the_safety_arguments_after_its_non_interactive_chat(repo: Pa
     _approve_unsandboxed(repo, ["kiro"])
     drc.main(["--runtime", "kiro", "--", "kiro-cli", "chat", "--no-interactive", "{args}", "--model", "m"])
     assert execs[0][1] == ["kiro-cli", "chat", "--no-interactive", "--trust-all-tools", "--model", "m"]
+
+
+def test_values_given_in_the_command_win_over_the_variables(repo: Path, monkeypatch, execs) -> None:
+    """コマンドが明示したモデルと effort は起動の引数として選択に渡り、下位の環境変数を確かめない（壊れた値でも止まらない）。
+    明示した側の引数は足さない。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    monkeypatch.setenv(identity.env_name("launch-codex-model"), "a\nb")
+    monkeypatch.setenv(identity.env_name("launch-codex-effort"), "turbo")
+    given = ["--model", "gpt-x", "-c", "model_reasoning_effort=low"]
+    drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", *given])
+    assert execs[0][1] == ["codex", "exec", "-s", "workspace-write", "-C", str(repo), *given]
+
+
+@pytest.mark.parametrize("setting", ['model_reasoning_effort="low"', "model_reasoning_effort= low", 'model_reasoning_effort = "low"'])
+def test_an_effort_setting_is_read_like_codex(repo: Path, monkeypatch, execs, setting: str) -> None:
+    """codex は `-c` の `=` の左右の空白を除き、値を TOML として読む。引用符つき・空白つきの指定も明示の low として選択に渡り
+    （下位の環境変数の壊れた値で止まらない）、子へは書いたままの引数を渡す。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    monkeypatch.setenv(identity.env_name("launch-codex-effort"), "turbo")
+    given = ["-c", setting]
+    drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", *given])
+    assert execs[0][1] == ["codex", "exec", "-s", "workspace-write", "-C", str(repo), *given]
+
+
+def test_short_options_with_an_equals_separator_are_read_like_clap(repo: Path, monkeypatch, execs) -> None:
+    """codex が使う Clap は短いオプションに続く区切りの `=` を除いて値を読む。`-m=gpt-x`・`-c=model_reasoning_effort=low` も
+    明示の値として選択に渡り（下位の環境変数の壊れた値で止まらない）、その側の引数は足さない。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    monkeypatch.setenv(identity.env_name("launch-codex-model"), "a\nb")
+    monkeypatch.setenv(identity.env_name("launch-codex-effort"), "turbo")
+    given = ["-m=gpt-x", "-c=model_reasoning_effort=low"]
+    drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", *given])
+    assert execs[0][1] == ["codex", "exec", "-s", "workspace-write", "-C", str(repo), *given]
+
+
+@pytest.mark.parametrize("variable", [None, "low", "turbo"])
+def test_an_empty_effort_in_the_command_stops_at_the_codex_option(repo: Path, monkeypatch, execs, capsys, variable: str | None) -> None:
+    """明示した空の effort は、下位の環境変数の値によらず、`-c`・`--config` を指して起動前に止まる。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    if variable is not None:
+        monkeypatch.setenv(identity.env_name("launch-codex-effort"), variable)
+    command = ["codex", "exec", "{args}", "-c", 'model_reasoning_effort=""']
+    assert drc.main(["--runtime", "codex", "--", *command]) == PRECONDITION
+    err = capsys.readouterr().err
+    assert execs == [] and "-c・--config の model_reasoning_effort=" in err and identity.env_name("launch-codex-effort") not in err
+
+
+@pytest.mark.parametrize("given", [["-m="], ["--model="], ["-m", ""], ["--model", ""], ["--model", "gpt-x", "-m="]])
+def test_an_empty_model_in_the_command_stops_at_the_codex_option(repo: Path, monkeypatch, execs, capsys, given: list[str]) -> None:
+    """最後に明示したモデルが空なら、下位の環境変数の壊れた値より先に、`-m`・`--model` を指して起動前に止まる。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    monkeypatch.setenv(identity.env_name("launch-codex-model"), "a\nb")
+    assert drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", *given]) == PRECONDITION
+    err = capsys.readouterr().err
+    assert execs == [] and "-m・--model" in err and identity.env_name("launch-codex-model") not in err
+
+
+def test_a_wrong_effort_in_the_command_names_the_codex_option(repo: Path, monkeypatch, execs, capsys) -> None:
+    """誤った effort の停止は、codex の委譲で使う `-c`・`--config` の model_reasoning_effort を指し、codex に無い --effort を案内しない。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    assert drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", "-c", "model_reasoning_effort=turbo"]) == PRECONDITION
+    err = capsys.readouterr().err
+    assert execs == [] and "-c・--config の model_reasoning_effort=" in err and "--effort" not in err
+
+
+@pytest.mark.parametrize(("can", "reads"), [(True, 1), (False, 2)])
+def test_codex_reads_the_launch_settings_once_to_build_the_arguments(repo: Path, monkeypatch, execs, can: bool, reads: int) -> None:
+    """引数の組み立てで読むのは 1 回。サンドボックスなしの経路だけ、起動の直前の照らし直しがもう 1 回読む。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: can)
+    _approve_unsandboxed(repo, ["codex"])
+    real = ls.load
+    seen: list[Path] = []
+
+    def counted(*a, **kw):
+        seen.append(a[0])
+        return real(*a, **kw)
+
+    monkeypatch.setattr(ls, "load", counted)
+    drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}"])
+    assert len(execs) == 1 and len(seen) == reads
+
+
+@pytest.mark.parametrize("can", [True, False])
+def test_a_broken_choice_stops_the_codex_delegate_before_the_cli(repo: Path, monkeypatch, execs, capsys, can: bool) -> None:
+    monkeypatch.setattr(agents, "user_namespaces", lambda: can)
+    _approve_unsandboxed(repo, ["codex"], BROKEN_EXPERIMENTS)
+    assert drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}"]) == PRECONDITION
+    out = capsys.readouterr()
+    assert execs == [] and out.out == "" and "experiments" in out.err
+
+
+@pytest.mark.parametrize(
+    ("runtime", "head", "args"),
+    [("kiro", ["kiro-cli", "chat", "--no-interactive"], ["--trust-all-tools"]), ("agy", ["agy"], ["--dangerously-skip-permissions"])],
+)
+def test_kiro_and_agy_take_only_the_safety_arguments_even_with_a_broken_choice(repo: Path, monkeypatch, execs, runtime, head, args) -> None:
+    """kiro と agy は値を選ばない（モデルは手順書が `--model` で書く）。選択肢の誤りでは止まらない。"""
+    _approve_unsandboxed(repo, [runtime], BROKEN_EXPERIMENTS)
+
+    def never(*a, **kw):
+        raise AssertionError("launch_choice を呼んだ")
+
+    monkeypatch.setattr(model_choice, "launch_choice", never)
+    drc.main(["--runtime", runtime, "--", *head, "{args}", "x"])
+    assert execs[0][1] == [*head, *args, "x"]
 
 
 @pytest.mark.parametrize("argv", [["--runtime", "codex"], ["--runtime", "nobody", "--", "x", "{args}"], ["--", "codex", "{args}"]])
