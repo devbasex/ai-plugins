@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -54,6 +55,8 @@ RECORD_DIR_ENV = identity.env_name("design-record-dir")
 REVIEWED_PR = "reviewed-pr"
 REVIEWED_BASE = "reviewed-base"
 CHECKED_FILE = "checked.json"
+# `checked.json` の記録の種別（`files.RECORD_KIND_KEY` の値）。種別の違うファイルは消さず、上書きもしない
+CHECKED_KIND = "design-units-check"
 _REVIEWED_PR_FORM = re.compile(r"[^/\s]+/[^#\s]+#([1-9][0-9]*)")
 _REVIEW_LAUNCH_HINT = (
     "。workflow.launch.review でレビューの起動を差し替えているときは、起動の後ろの --reviewed-out・--reviewed-pr-out・"
@@ -356,9 +359,38 @@ def _held(path: Path) -> str:
         return ""
 
 
+def _discard_checked(target: Path) -> None:
+    """前の確かめが書いた `checked.json` を消す。NDF の記録と読めないもの（リンクを含む）は消さずに止まる。"""
+    if not os.path.lexists(target):
+        return
+    held = None if target.is_symlink() else _held(target)
+    try:
+        found = json.loads(held) if held else None
+    except json.JSONDecodeError:
+        found = None
+    if not isinstance(found, dict) or found.get(files.RECORD_KIND_KEY) != CHECKED_KIND:
+        raise _UnitsStopped("refused", f"{target} は NDF が書いた記録と確かめられないので消さない（中身を調べて退けてから打ち直す）")
+    target.unlink()
+
+
+def _write_checked(target: Path, value: dict[str, Any]) -> None:
+    """新しく作った一意の名前へ書いてから置き換える（固定の一時の名前にある既存のファイルやリンクの先を上書きしない）。"""
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            json.dump({files.RECORD_KIND_KEY: CHECKED_KIND, **value}, out, ensure_ascii=False)
+        os.replace(tmp, target)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
 def _record(path: Path, targets: _Targets) -> _Record:
-    """保存先を読み、レビューの後に対象が変わっていないことを確かめる。前の `checked.json` は始めに消す。"""
-    (path / CHECKED_FILE).unlink(missing_ok=True)
+    """保存先を読み、レビューの後に対象が変わっていないことを確かめる。前の `checked.json` は始めに消す。
+
+    マージ先（`reviewed-base`）はここでは有無だけを見る。PR の今のマージ先と比べるのは、承認の判定
+    （`ndf records mvv gate`）が受け持つ。
+    """
+    _discard_checked(path / CHECKED_FILE)
     if targets.paths:
         raise _UnitsStopped("invalid", f"{RECORD_DIR_ENV} があるときは、単位のファイルを直に指さず課題で確かめる")
     held = {name: _held(path / name) for name in (units_files.REVIEWED_HEAD, REVIEWED_PR, REVIEWED_BASE)}
@@ -405,7 +437,7 @@ def _checked_units(a: argparse.Namespace, targets: _Targets, record: Optional[_R
     summary = f"{len(units)} 個の単位の確かめを通った（警告 {len(warnings)} 件）"
     outputs = None
     if record is not None:
-        files.write_json(
+        _write_checked(
             record.path / CHECKED_FILE,
             dict(
                 head=record.head,

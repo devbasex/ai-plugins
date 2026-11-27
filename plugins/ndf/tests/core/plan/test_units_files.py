@@ -652,6 +652,7 @@ def test_cli_record_check_writes_checked_json_from_the_reviewed_commit(reviewed,
     assert asked_docs == [True]
     checked = json.loads((reviewed / "checked.json").read_text(encoding="utf-8"))
     assert checked == {
+        "ndf_record": "design-units-check",
         "head": Git(work).run("rev-parse", "HEAD").strip(),
         "branch": "sprint/7",
         "issues": [7],
@@ -668,7 +669,7 @@ def test_cli_record_check_writes_checked_json_from_the_reviewed_commit(reviewed,
     [("head", "approval_stale"), ("no_branch", "precondition"), ("other_pr", "refused"), ("no_file", "precondition")],
 )
 def test_cli_record_check_writes_nothing_when_it_stops(reviewed, work, capsys, monkeypatch, change, kind):
-    (reviewed / "checked.json").write_text("{}", encoding="utf-8")
+    (reviewed / "checked.json").write_text(json.dumps({"ndf_record": "design-units-check"}), encoding="utf-8")
     if change == "head":
         git_sandbox.sh(work, "commit", "-q", "--allow-empty", "-m", "next", identity=True)
     elif change == "no_branch":
@@ -682,6 +683,28 @@ def test_cli_record_check_writes_nothing_when_it_stops(reviewed, work, capsys, m
 
     assert out["cause"]["kind"] == kind
     assert not (reviewed / "checked.json").exists()
+
+
+@pytest.mark.parametrize("held", [b"{}", b"memo", b"\xff"])
+def test_cli_record_check_keeps_a_checked_json_that_ndf_did_not_write(reviewed, work, capsys, held):
+    (reviewed / "checked.json").write_bytes(held)
+
+    _, out = _run(capsys, "check")
+
+    assert out["cause"]["kind"] == "refused"
+    assert (reviewed / "checked.json").read_bytes() == held
+
+
+def test_cli_record_check_does_not_write_through_an_existing_temporary_name(reviewed, work, capsys, tmp_path):
+    other = tmp_path / "other"
+    other.write_text("keep", encoding="utf-8")
+    (reviewed / "checked.tmp").symlink_to(other)
+
+    _, out = _run(capsys, "check")
+
+    assert out["status"] == "ok"
+    assert other.read_text(encoding="utf-8") == "keep"
+    assert (reviewed / "checked.tmp").is_symlink()
 
 
 def test_cli_record_check_names_the_review_launch_setting(reviewed, work, capsys):
