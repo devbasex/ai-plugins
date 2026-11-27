@@ -535,3 +535,33 @@ def test_without_refuses_files_that_do_not_hold_the_remaining_units(work):
 
     with pytest.raises(model.Refused, match="issue-8-plan.units.json"):
         design_record.without_issues(record, [7], ())
+
+
+@pytest.mark.parametrize("linked", ["record", "above_record"])
+def test_build_does_not_read_through_a_linked_directory_under_the_git_directory(checked, tmp_path, linked):
+    record_dir, _ = checked
+    held = tmp_path / "repo" / ".git" / "ndf" / "stage" / "record"
+    held.parent.parent.mkdir(parents=True)
+    if linked == "record":
+        held.parent.mkdir()
+        held.symlink_to(record_dir, target_is_directory=True)
+    else:
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        record_dir.rename(outside / "record")
+        held.parent.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(design_record.RecordUnreadable):
+        design_record.build(held)
+
+
+def test_build_reads_through_a_link_above_the_git_directory(checked, tmp_path):
+    record_dir, head = checked
+    real = tmp_path / "home"
+    (real / "repo" / ".git").mkdir(parents=True)
+    record_dir.rename(real / "repo" / ".git" / "record")
+    (tmp_path / "linked-home").symlink_to(real, target_is_directory=True)
+
+    record = design_record.build(tmp_path / "linked-home" / "repo" / ".git" / "record")
+
+    assert record["review"]["head"] == head

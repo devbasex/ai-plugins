@@ -13,14 +13,14 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import stat
 from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
+from ndf import identity
 from ndf.adapters.git import Git, GitError, mask_urls
+from ndf.contracts import worker_paths
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import inputs_decide, units_files
@@ -43,8 +43,8 @@ _APPROVED = folding.answer_word("approved")
 _REDO = "変更を求めて実装計画を分け直す"
 # コミットの ID の形（理由の文に載せてよいかを確かめる）
 _COMMIT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
-# 入力はリンクをたどらずに開き、FIFO でも待たない
-_INPUT_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+# NDF の保存先を持つディレクトリの名前。これより下の要素にリンクがあれば、保存先を読まない
+_STORE_DIRS = (".git", identity.FIXED_WORDS["ndf_settings_dir"])
 
 
 class RecordUnreadable(Exception):
@@ -86,22 +86,27 @@ def build(record_dir: Path) -> dict[str, Any]:
     return record
 
 
+def _real_record_dir(record_dir: Path) -> Path:
+    """保存先のパスのうち、`_STORE_DIRS` のディレクトリより上のリンクだけを解いた形。それより下のリンクは解かずに残し、開くときに断る。
+
+    上を解くのは、ホームディレクトリがリンクの環境でも読めるようにするためである。該当するディレクトリが無いパスは、全部の要素を残す。
+    """
+    parts = record_dir.absolute().parts
+    at = next((i for i in range(len(parts) - 1, -1, -1) if parts[i] in _STORE_DIRS), None)
+    return record_dir if at is None else Path(*parts[:at]).resolve().joinpath(*parts[at:])
+
+
 def _text(record_dir: Path, name: str) -> str:
-    """保存先の直下の通常ファイルの中身。リンクや通常でないファイルは読まない（保存先の外の中身を理由の文に出さない）。"""
+    """保存先の直下の通常ファイルの中身。保存先と途中のディレクトリ、ファイルのリンクは辿らない（外の中身を理由の文に出さない）。"""
     path = record_dir / name
     try:
-        fd = os.open(path, _INPUT_FLAGS)
-        try:
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
-                raise RecordUnreadable(f"{path} は通常のファイルでないので読まない")
-            with os.fdopen(fd, encoding="utf-8", closefd=False) as held:
-                found = held.read().strip()
-        finally:
-            os.close(fd)
-    except (OSError, UnicodeDecodeError) as exc:
+        with worker_paths.open_workdir(_real_record_dir(record_dir)) as wd:
+            held = worker_paths.read_file(wd, name)
+    except (worker_paths.EntryError, OSError) as exc:
         raise RecordUnreadable(f"{path} を読めない（{type(exc).__name__}）") from None
+    found = "" if held is None else held.strip()
     if not found:
-        raise RecordUnreadable(f"{path} が空")
+        raise RecordUnreadable(f"{path} が無いか空")
     return found
 
 
