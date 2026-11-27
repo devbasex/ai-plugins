@@ -206,8 +206,9 @@ def test_a_set_aside_candidate_held_open_is_put_back_instead_of_deleted(tmp_path
     _asked(target, candidate=candidate, label=la.DENY_LABEL)
     la.new_candidate("/r", target).candidate
     with open(_aside(candidate), "rb"):
-        la.new_candidate("/r", target).candidate
+        drafted = la.new_candidate("/r", target)
     assert candidate.read_bytes() == OLD  # 戻した候補は、同じ掃除で退避し直さない
+    assert drafted.cleanup_targets == []  # 開いたままで戻した候補は、手で消す一覧にも載せない
     la.new_candidate("/r", target).candidate
     assert not candidate.exists() and _aside(candidate).exists()  # 閉じた後の掃除で、もう一度退避する
 
@@ -338,6 +339,30 @@ def test_draft_reads_the_requests_once_for_both_the_sweep_and_the_list(tmp_path,
     monkeypatch.setattr(la, "_sweep_reasons", lambda home: calls.append(home) or reasons(home))
     assert la.new_candidate("/r", target).cleanup_targets == [{"candidate": str(candidate), "reason": "denied"}]
     assert len(calls) == 1
+
+
+def test_an_unreadable_old_target_or_candidate_only_leaves_that_candidate_out(tmp_path, monkeypatch):
+    """過去の反映先や候補がディレクトリに置き換わっていても、その候補だけを外し、別の worktree の draft と show は続ける。"""
+    monkeypatch.setattr(la, "_settleable", lambda: False)
+    first, second, other = _worktree(tmp_path / "a"), _worktree(tmp_path / "b"), _worktree(tmp_path / "c")
+    broken_candidate, broken_target = la.new_candidate("/r", first).candidate, la.new_candidate("/r", second).candidate
+    first.write_bytes(NEW)
+    broken_candidate.unlink()
+    broken_candidate.mkdir()
+    second.unlink()
+    second.mkdir()
+    assert la.new_candidate("/r", other).cleanup_targets == [] and la.cleanup_targets("/r") == []
+    assert broken_candidate.is_dir() and broken_target.exists()
+
+
+def test_the_list_reuses_the_candidate_read_by_the_sweep(tmp_path, monkeypatch):
+    """反映元のバージョンが変わった候補は、判定で読んだ中身のハッシュを一覧でも使い、読み直さない。"""
+    monkeypatch.setattr(la, "_settleable", lambda: False)
+    target = _worktree(tmp_path)
+    candidate = la.new_candidate("/r", target).candidate
+    target.write_bytes(NEW)
+    monkeypatch.setattr(la, "_untouched", lambda *a: pytest.fail("候補を読み直さない"))
+    assert la.cleanup_targets("/r") == [{"candidate": str(candidate), "reason": "outdated"}]
 
 
 def test_draft_reclaims_what_an_interrupted_draft_or_sweep_left(tmp_path):

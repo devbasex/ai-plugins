@@ -297,8 +297,27 @@ def _candidates(home: Path) -> list[Path]:
 
 def _untouched(made: Path, kept: Optional[str] = None) -> bool:
     """候補が、作った時（`written`）か `kept` のバージョンのままか。作った後に直した候補（Skill か利用者が設定案を書いた候補）は掃除で消さない。"""
-    now = content_version(made / CANDIDATE_NAME)
+    return _unchanged(made, content_version(made / CANDIDATE_NAME), kept)
+
+
+def _unchanged(made: Path, now: Optional[str], kept: Optional[str]) -> bool:
+    """読み終えた候補のバージョン `now` が、作った時（`written`）か `kept` のバージョンか（無い候補は真）。"""
     return now is None or now in (read_launch_record(made / SOURCE_NAME).get("written"), kept)
+
+
+def _regular_version(path: Path) -> tuple[bool, Optional[str]]:
+    """普通のファイルだと確かめてから読んだ中身のバージョン。無ければ `(True, None)`、ディレクトリなど読めなければ `(False, None)`。
+
+    掃除が過去の反映先や候補を読むときに使う。利用者が置き換えた項目 1 つで、掃除の全体が止まらないようにするためである。
+    """
+    try:
+        if not stat.S_ISREG(path.stat().st_mode):
+            return False, None
+        return True, hashlib.sha256(path.read_bytes()).hexdigest()
+    except FileNotFoundError:  # 無い反映先は「無し」のバージョンとして照らす
+        return True, None
+    except OSError:  # 読めない項目は、その候補だけを掃除から外す（呼び手が飛ばす）
+        return False, None
 
 
 def _settleable() -> bool:
@@ -315,7 +334,7 @@ def _discard(made: Path, kept: Optional[str] = None) -> bool:
     元のパスで開けるかどうかが変わるためである。その候補は `cleanup_targets` が理由と共に返す。NDF が作ったファイルのほかに
     項目がある候補も退避しない（次の掃除で消さずに戻すだけで、利用者の項目を退避の名前の下へ移すことになるため）。
     """
-    if not _settleable() or not _untouched(made, kept) or _own_inodes(made) is None:
+    if not _settleable() or _own_inodes(made) is None or not _untouched(made, kept):
         return False
     aside = made.with_name(REMOVING + made.name)
     try:
@@ -480,49 +499,82 @@ def _restore(candidate: Path) -> None:
             return
 
 
-def _sweep_reasons(home: Path) -> dict[Path, tuple[str, Optional[str]]]:
-    """片付けの条件に当たる候補と、その理由と、作った時の中身のほかに比べるバージョン（無ければ None）。
+@dataclass(frozen=True)
+class _Due:
+    """片付けの条件に当たる候補の判定。`kept` は作った時の中身のほかに比べるバージョン、`current` は判定で読んだ候補のバージョン
+    （`read` が偽なら判定では読んでいない）。"""
 
-    理由は次の 4 つ。最新のリクエストに「承認しない」と回答した（`denied`）。反映先の worktree が無い（`worktree_gone`）。
-    反映先がその候補の中身へ変わった（`reflected`。比べるバージョンは反映先の今の中身）。反映先が反映元のバージョンから変わった
-    （`outdated`。この候補では `reflect` が拒む）。「承認しない」の判定は、候補ごとの最新のリクエストで行う。否認の後に同じ候補で
-    作り直したリクエストが回答待ちか承認済みなら、その候補は入れない。直したかどうかはここでは見ない（片付ける側が `_untouched` で見る）。
-    リクエストの履歴・回答の履歴・候補の一覧は 1 回ずつ読み、反映先のバージョンは反映先ごとに 1 回だけ求める。
+    reason: str
+    kept: Optional[str] = None
+    read: bool = False
+    current: Optional[str] = None
+
+
+def _sweep_reasons(home: Path) -> dict[Path, _Due]:
+    """片付けの条件に当たる候補と、その判定。
+
+    上から順に当てはめ、最初に当たった理由だけを使う。最新のリクエストに「承認しない」と回答した（`denied`）。反映先の worktree が
+    無い（`worktree_gone`）。反映先が反映元のバージョンから変わり、候補の中身が反映先の今の中身と一致する（`reflected`。比べる
+    バージョンに反映先の今の中身を足す。反映の完了の記録は照らさない）。反映先が反映元のバージョンから変わった（`outdated`。この
+    候補では `reflect` が拒む）。後の 2 つは、否認の後に作り直したリクエストが回答待ちの候補にも当てはめる。「承認しない」の判定は
+    候補ごとの最新のリクエストで行う。直したかどうかはここでは見ない（片付ける側が `_untouched` か読んだ `current` で見る）。
+
+    NDF が作ったファイルのほかに項目がある候補（`_own_inodes` が None）は、中身を読む前に外す。片付けも一覧への掲載もしないからである。
+    過去の反映先が普通のファイルでなく読めない候補も外す。リクエストの履歴・回答の履歴・候補の一覧は 1 回ずつ読み、反映先の
+    バージョンは反映先ごとに 1 回だけ求める。
     """
     latest: dict[Any, dict[str, Any]] = {}
     for row in records.whole_rows(state_file(QUESTIONS)):
         if row.get("candidate") is not None:
             latest[row.get("candidate")] = row
     labels = _last_labels()
-    versions: dict[str, Optional[str]] = {}
-    reasons: dict[Path, tuple[str, Optional[str]]] = {}
+    versions: dict[str, tuple[bool, Optional[str]]] = {}
+    reasons: dict[Path, _Due] = {}
     for made in _candidates(home):
+        if _own_inodes(made) is None:
+            continue
         req = latest.get(str(made / CANDIDATE_NAME))
         source = read_launch_record(made / SOURCE_NAME)
-        target = source.get("target")
         if req is not None and _judged(labels.get(req.get("request_id")), req)[0] == "deny":
-            reasons[made] = ("denied", None)
-        elif _worktree_gone(target):
-            reasons[made] = ("worktree_gone", None)
+            due: Optional[_Due] = _Due("denied")
+        elif _worktree_gone(source.get("target")):
+            due = _Due("worktree_gone")
         else:
-            if target not in versions:
-                versions[target] = content_version(Path(target))
-            now = versions[target]
-            if now != source.get("base"):
-                reflected_here = now is not None and content_version(made / CANDIDATE_NAME) == now
-                reasons[made] = ("reflected", now) if reflected_here else ("outdated", None)
+            due = _moved_target(made, source, versions)
+        if due is not None:
+            reasons[made] = due
     return reasons
 
 
-def _listed(reasons: Mapping[Path, tuple[str, Optional[str]]], gone: set[Path]) -> list[dict[str, str]]:
+def _moved_target(made: Path, source: Mapping[str, Any], versions: dict[str, tuple[bool, Optional[str]]]) -> Optional[_Due]:
+    """反映先が反映元のバージョンから変わった候補の判定（`reflected` か `outdated`）。変わっていないか、反映先か候補を読めなければ None。
+
+    反映先のバージョンは `versions` に残し、同じ反映先の候補では読み直さない。
+    """
+    target = str(source.get("target"))
+    if target not in versions:
+        versions[target] = _regular_version(Path(target))
+    readable, now = versions[target]
+    if not readable or now == source.get("base"):
+        return None
+    ok, current = _regular_version(made / CANDIDATE_NAME)
+    if not ok:
+        return None
+    if now is not None and current == now:
+        return _Due("reflected", now, True, current)
+    return _Due("outdated", None, True, current)
+
+
+def _listed(reasons: Mapping[Path, _Due], left_out: set[Path]) -> list[dict[str, str]]:
     """元のパスに残った片付けの条件に当たる候補のうち、利用者が消しても設定案と利用者の項目を失わないもの（`cleanup_targets` の形）。
 
-    `gone` は退避した候補で、一覧に入れない。直した候補と、NDF が作ったファイルのほかに項目がある候補も入れない。
+    `left_out`（退避した候補と、開いたままのファイルなどで同じ掃除が元の名前へ戻した候補）と、直した候補は入れない。判定で読んだ
+    候補のバージョンがあれば、読み直さずに使う。
     """
     return [
-        {"candidate": str(made / CANDIDATE_NAME), "reason": reason}
-        for made, (reason, kept) in reasons.items()
-        if made not in gone and _untouched(made, kept) and _own_inodes(made) is not None
+        {"candidate": str(made / CANDIDATE_NAME), "reason": due.reason}
+        for made, due in reasons.items()
+        if made not in left_out and (_unchanged(made, due.current, due.kept) if due.read else _untouched(made, due.kept))
     ]
 
 
@@ -531,12 +583,14 @@ def _sweep(home: Path, restored: set[str]) -> list[dict[str, str]]:
 
     「承認しない」は反映を断る回答で、利用者が書いた設定案を消してよいという回答ではないので、リクエストの前に直した候補も残す。
     リクエストは同じ錠の中で作るので（`put_question`）、ここで読んだリクエストの一覧は退避を決めるまで変わらない。
-    同じ錠の中の `_reclaim` が元の名前へ戻した候補（`restored`）は、この掃除では退避しない。返す一覧は `cleanup_targets` と同じ形で、
-    同じ判定の結果から作る（履歴と候補を読み直さない）。
+    同じ錠の中の `_reclaim` が元の名前へ戻した候補（`restored`）は、この掃除では退避せず、一覧にも載せない。開いたままの
+    ファイルを見つけて戻した候補を利用者が消すと、その後のエディタの保存が失われるためである。返す一覧は `cleanup_targets` と同じ
+    形で、同じ判定の結果から作る（履歴と候補を読み直さない）。退避の直前には、`_discard` が候補をもう一度読んで確かめる。
     """
     reasons = _sweep_reasons(home)
-    gone = {made for made, (_, kept) in reasons.items() if made.name not in restored and _discard(made, kept)}
-    return _listed(reasons, gone)
+    back = {made for made in reasons if made.name in restored}
+    gone = {made for made, due in reasons.items() if made not in back and _discard(made, due.kept)}
+    return _listed(reasons, gone | back)
 
 
 def cleanup_targets(repo: str) -> list[dict[str, str]]:
@@ -544,7 +598,8 @@ def cleanup_targets(repo: str) -> list[dict[str, str]]:
 
     各要素は `candidate`（候補ファイルのパス）と `reason`（`denied`・`worktree_gone`・`reflected`・`outdated`）を持つ。対象が無ければ
     空のリスト。`show` はこれを結果に載せる（`draft` は `new_candidate` が返す同じ形の一覧を載せる）。`/proc` の無い環境では掃除が
-    候補を退避しないので、利用者はこの一覧を見て不要な候補を自分で消す。何も書かない。
+    候補を退避しないので、利用者はこの一覧を見て不要な候補を自分で消す。消す前に、その候補を開いているエディタを閉じる
+    （開いたまま消すと、その後の保存で設定案を失う）。何も書かない。
     """
     home = _store(CANDIDATES) / _short_hash(repo)
     return _listed(_sweep_reasons(home), set())

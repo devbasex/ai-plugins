@@ -147,7 +147,7 @@ src/ndf/
 | `approve_by_answer` | 同 | 新設 | `approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]` | `reflect` か自分が取ったロックの中で、依頼の答えを設計書の「人の確認」の条件の表で照らし、承認の行を足して承認者を返す。同じ依頼の承認の行があり承認済みなら、行を足さずに承認者を返す |
 | `pending_request` | 同 | 新設 | `pending_request(repo: str, target: Path) -> Optional[Mapping]` | その反映先で「承認する」と答えがあり、反映が済んでいない使える依頼を返す |
 | `new_candidate` | 同 | 新設 | `new_candidate(repo: str, target: Path) -> Draft` | `launch-candidates/<キーのハッシュ>/<一意な値>/` に候補（反映先の写し）と、反映先・反映元の版の記録を作る。その前に、設計書の「候補の掃除」のとおり、前の掃除が退避した候補を消すか元の名前へ戻し、片付けの条件（「承認しない」の依頼、反映先の worktree が無い、反映先が反映元の版から変わった）に当たる候補を退避し、反映先の worktree が無い完了の記録を消す。返す `Draft` は、作った候補のパス（`candidate`）と、掃除の後も元のパスに残った片付けの対象の一覧（`cleanup_targets`。形は `cleanup_targets` 関数と同じ）を持つ。一覧は掃除で求めた判定の結果から作り、依頼と回答の記録と候補の一覧を読み直さない |
-| `cleanup_targets` | 同 | 新設 | `cleanup_targets(repo: str) -> list[dict]` | 片付けの条件に当たるが元のパスに残っている候補のうち、利用者が消しても設定案と利用者の項目を失わないものを返す。対象は、比べる版のどれかと中身が一致し、ディレクトリの中に NDF が作ったファイルしか無い候補である。各要素は `candidate`（候補ファイルのパス）と `reason`（片付けの理由。設計書の「候補の掃除」の `denied`・`worktree_gone`・`reflected`・`outdated`）を持つ。対象が無ければ空のリストを返す。何も書かない。`/proc` の無い環境では掃除が候補を退避しないので、`_show` がこの一覧を結果に載せる |
+| `cleanup_targets` | 同 | 新設 | `cleanup_targets(repo: str) -> list[dict]` | 片付けの条件に当たるが元のパスに残っている候補のうち、利用者が消しても設定案と利用者の項目を失わないものを返す。対象は、比べる版のどれかと中身が一致し、ディレクトリの中に NDF が作ったファイルしか無い候補である。`new_candidate` が返す一覧は、同じ掃除で開いたままのファイルを見つけて元の名前へ戻した候補も外す。過去の反映先か `candidate.json` が普通のファイルでなく読めない候補は、その候補だけを判定から外し、ほかの候補の判定と呼び手の処理を続ける。各要素は `candidate`（候補ファイルのパス）と `reason`（片付けの理由。設計書の「候補の掃除」の `denied`・`worktree_gone`・`reflected`・`outdated`）を持つ。対象が無ければ空のリストを返す。何も書かない。`/proc` の無い環境では掃除が候補を退避しないので、`_show` がこの一覧を結果に載せる |
 | `reflect` | 同 | 新設 | `reflect(candidate: Path, record: Callable[[], None]) -> bool` | 承認の記録のロックの中で、`recover` を呼んでから、反映先を反映元の版と候補に照らす。版が同じなら `record` を呼び、設計書の「置き換えの手順」で置き、完了の記録を書いてから使えなくなった候補を消す。候補と同じなら完了の記録を書いて真、どちらでもないか途中で保存を見つけたら偽 |
 | `recover` | 同 | 新設 | `recover(target: Path) -> Optional[Path]` | 承認の記録のロックの中で、設計書の「退避が残っている場合の判定」の表のとおりに退避と反映の途中の記録を片付ける。利用者の保存を別の名前で残した場合はそのパスを返す |
 | `reflected` | 同 | 新設 | `reflected(candidate: Path, sha256: str, request_id: Optional[str]) -> bool` | 候補が無い打ち直しで、完了の記録と反映先の中身を照らす。何も書かない |
@@ -219,8 +219,9 @@ src/ndf/
 
 - `draft` と `show` の結果の `cleanup_targets`: 利用者が手で片付けてよい候補を、結果 JSON の `cleanup_targets` 配列で出す。`/proc` の無い環境では掃除が候補を退避しないので、利用者はこの一覧を見て候補のディレクトリを消す
   - 各要素は `candidate`（候補ファイル `candidate.json` の絶対パスの文字列）と `reason`（片付けの理由の文字列）の 2 つのキーを持つ
-  - `reason` の値は `denied`（最新の依頼に「承認しない」と回答した）・`worktree_gone`（反映先の worktree が無くなった）・`reflected`（候補の中身を反映した）・`outdated`（反映先が反映元の版から変わり、この候補は反映できない）のどれか
+  - `reason` の値は `denied`（最新の依頼に「承認しない」と回答した）・`worktree_gone`（反映先の worktree が無くなった）・`reflected`（反映先が反映元の版から変わり、候補の中身が反映先の今の中身と一致する。反映の完了の記録とは照らさないので、この候補を承認して反映したことを表さない）・`outdated`（反映先が反映元の版から変わり、候補の中身が反映先の今の中身と違うので、この候補は反映できない）のどれか
   - 対象が無ければ空配列 `[]` を出す。キーを省かない
+  - 結果の文には、候補を消す前にその候補を開いているエディタでの編集を終えて閉じることを添える。開いたまま消すと、その後の保存で設定案が失われる
   - 例: `"cleanup_targets": [{"candidate": "/home/u/.local/state/ndf/launch-candidates/3f2a…/9c1e…/candidate.json", "reason": "reflected"}]`
 - `_approve`
   - 事前条件: `--sha256` が必須
