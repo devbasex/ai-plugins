@@ -202,21 +202,28 @@ def _put(f: write.File) -> None:
         raise write.WriteError(f"設定を書けない: {exc}") from None
 
 
-def _commit(main: Path, planned: write.Plan) -> None:
-    """計画のファイルを順に書く。記録のディレクトリの下へ書くときは、どのファイルを書くよりも前に、記録が git に無視されることを
-    確かめる（止めるときは何も書かずに `WriteError`）。`.gitignore` を作るときは、記録のディレクトリの下に追跡されたファイルが
+def _guard_record(main: Path, planned: write.Plan, creates_ignore: bool) -> None:
+    """記録のディレクトリの下へ書く計画なら、記録が git に無視されることを確かめる（確かめられなければ `WriteError`）。
+    `.gitignore` を作るときは、記録のディレクトリの下に追跡されたファイルが
     無いことを確かめる。同じディレクトリの `.gitignore` の `*` はどの除外の設定より優先されるので、追跡されていなければ記録は無視される。
     `.gitignore` が既にあるときは、計画の `git check-ignore` の結果を使う。どちらの回も、計画の `git check-ignore` が判定できなかったら止める。"""
     record = files.relpath("project-analysis")
     folder = str(Path(record).parent)
+    if not any(f.path.parent == main / folder for f in planned.files):
+        return
+    if planned.ignored.error is not None:  # 記録のパスを git が扱えない（保存先が別の場所へのリンクなど）。作る回も書かない
+        raise _unsure(folder, planned.ignored.error)
+    if creates_ignore:
+        _untracked(git.Git(main), folder)
+    else:
+        _ignored(planned.ignored, folder, record)
+
+
+def _commit(main: Path, planned: write.Plan) -> None:
+    """計画のファイルを順に書く（`.gitignore` が先）。記録のディレクトリの下へ書くときは、どのファイルを書くよりも前に、記録が git に
+    無視されることを確かめる（止めるときは何も書かずに `WriteError`）。"""
     ignore = [f for f in planned.files if f.path == files.path(main, "project-analysis-ignore")]
-    if any(f.path.parent == main / folder for f in planned.files):
-        if planned.ignored.error is not None:  # 記録のパスを git が扱えない（保存先が別の場所へのリンクなど）。作る回も書かない
-            raise _unsure(folder, planned.ignored.error)
-        if ignore:
-            _untracked(git.Git(main), folder)
-        else:
-            _ignored(planned.ignored, folder, record)
+    _guard_record(main, planned, bool(ignore))
     for f in ignore + [f for f in planned.files if f not in ignore]:
         _put(f)
 
