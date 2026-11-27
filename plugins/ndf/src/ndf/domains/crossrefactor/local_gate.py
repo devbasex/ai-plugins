@@ -646,7 +646,8 @@ def _refuse_untracked_in(g: git.Git, before: str) -> None:
     hits = worktree.untracked_in_the_way(g, before)
     if hits:
         raise worktree.SyncRefused(
-            "最終ゲート修正の前へ戻すと上書きする未追跡のファイルがある。移すかコミットしてから流し直す: " + ", ".join(hits)
+            # コミットを勧めない: 同じブランチのコミットは再開の範囲の検査（before..HEAD）に入り、範囲外の直しと一緒に外れる
+            "最終ゲート修正の前へ戻すと上書き・削除する未追跡のファイルがある。作業場所の外へ退避してから流し直す: " + ", ".join(hits)
         )
 
 
