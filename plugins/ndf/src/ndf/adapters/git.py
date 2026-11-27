@@ -178,7 +178,7 @@ def repo_of_url(url: str) -> Optional[str]:
     text = url.strip()
     if "://" in text:
         parts = urlsplit(text)
-        if (parts.hostname or "").lower() != "github.com":
+        if parts.hostname is None or parts.hostname.lower() != "github.com":
             return None
         path = parts.path
     else:
