@@ -268,6 +268,13 @@ class Git:
             raise _failed(args, done.returncode, done.stderr.decode("utf-8", "replace"))
         return done.stdout
 
+    def toplevel(self) -> Path:
+        """作業場所の worktree の根（`git rev-parse --show-toplevel`。サブモジュールならそのworktree）。失敗は `GitError`。
+
+        設定を読むリポジトリの根の解き方はここだけに置く（`route.repo_root`・`progress.settings_roots.settings_root` が使う。#4513）。
+        """
+        return Path(self.run("rev-parse", "--show-toplevel").strip())
+
     def rev_parse(self, ref: str) -> str:
         """参照（短い SHA・ブランチ・タグ）をコミットの完全な SHA へ解決する（#2041）。"""
         sha = self.run("rev-parse", "--verify", "--quiet", END_OF_OPTIONS, f"{ref}^{{commit}}").strip()
@@ -362,9 +369,12 @@ class Git:
             return Completed(128, "", str(e))
         return self.attempt("checkout", "-q", "--detach", sha)
 
-    def merge_ff(self, ref: str) -> Completed:
-        """`ref` を fast-forward だけでマージする。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
-        return self.attempt("merge", "--ff-only", "-q", END_OF_OPTIONS, ref)
+    def merge_ff(self, ref: str, *options: str) -> Completed:
+        """`ref` を fast-forward だけでマージする。結果はそのまま返す。`ref` を option として読ませない（3364-7）。
+
+        `options` は `git merge` に足す引数（`ref` の前に置く）。
+        """
+        return self.attempt("merge", "--ff-only", "-q", *options, END_OF_OPTIONS, ref)
 
     def changed_files(self, base: str, head: str, *options: str) -> list[str]:
         """`base...head`（分岐点から head まで）で変わったファイルのパス。`options` は `git diff` に足す引数。

@@ -17,12 +17,16 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
 from ndf.contracts import internal, worker_paths
 
 KINDS_FILE = "worker/kinds.json"
+# 出したものを指す値の文脈のキー（作業の outputs・まとめたリリースの回答が書く。#4513）
+PRODUCT_VERSION = "product_version"
+# 届け先の文脈のキー（作業 release の outputs・オーガナイザーの承認の記録が書く。#4513）
+DELIVERY = "delivery"
 NO_SOURCES: Mapping[str, str] = MappingProxyType({})
 
 
@@ -93,7 +97,101 @@ VALUES_FILE = "values.json"
 VALUES_SHAPE = {"plan": str, "values": dict, "inputs": dict, "local_tests": bool, "at": str}
 
 
-def write_values(state_dir: Path, plan: str, values: Mapping[str, Any], inputs: Mapping[str, Any], local_tests: bool) -> None:
+class Recorded(NamedTuple):
+    """記録済みの値（#4513）。まとめたリリースでオーガナイザーが記録したリリースの識別子・届け先・承認の時点の保存先の種類。
+
+    `delivery` は承認と一緒に記録した届け先（記録できなければ None）。`store` は承認を記録した時点のバージョンの保存先の種類
+    （`none`・`versioned`・`unknown`。この変更の前に承認された記録と、外のオーガナイザーが種類を書かなかった記録は None）。
+    """
+
+    version: str
+    delivery: Optional[dict[str, Any]]
+    store: Optional[str]
+
+    @property
+    def store_unknown(self) -> bool:
+        """承認の時点で設定を読めず、保存先の種類が決まらなかったか。"""
+        return self.store == store_kind_of(None)
+
+    @property
+    def with_number(self) -> bool:
+        """承認の時点でバージョン番号を持つリポジトリだったか。"""
+        return self.store == store_kind_of(True)
+
+
+# values.json に記録済みの値を残すキー（`VALUES_SHAPE` に足さない。直す前の NDF が書いた values.json も読む）
+RELEASED_KEYS = ("released_version", "released_delivery", "released_store")
+
+
+def store_kind_of(has_version_number: Optional[bool]) -> str:
+    """承認を記録する時点のバージョンの保存先の種類。設定を読めなければ（None）`unknown`。
+
+    種類の語（`none`・`versioned`・`unknown`）はここだけに置く（`Recorded.store`・`released_store` に残す）。最上位の定数にしないのは、
+    テスト環境の値（`testing.testenv.NONE`）や参照の置き換えの目印（`core.refs._PLACEHOLDERS`）と同じ文字列でも別の事実だからである。
+    """
+    if has_version_number is None:
+        return "unknown"
+    return "versioned" if has_version_number else "none"
+
+
+# 保存先の 3 つの種類（`none`・`versioned`・`unknown` の順。語は `store_kind_of` が持つ）
+STORE_KINDS = (store_kind_of(False), store_kind_of(True), store_kind_of(None))
+
+
+def _released_fields(value: Optional[Recorded]) -> dict[str, Any]:
+    if value is None:
+        return {}
+    fields: dict[str, Any] = {"released_version": value.version}
+    if value.delivery is not None:
+        fields["released_delivery"] = dict(value.delivery)
+    if value.store is not None:
+        fields["released_store"] = value.store
+    return fields
+
+
+def recorded_of(version: Any, delivery: Any, store: Optional[str]) -> Optional[Recorded]:
+    """記録済みの値の識別子と届け先を確かめた `Recorded`。`version` が空白だけでない文字列でなければ None。
+
+    `delivery` がオブジェクトでなければ届け先は記録されていないものとする。`store` は呼び手が確かめた種類をそのまま入れる。
+    """
+    if not (isinstance(version, str) and version.strip()):
+        return None
+    return Recorded(version, dict(delivery) if isinstance(delivery, dict) else None, store)
+
+
+def released_of(held: Mapping[str, Any]) -> Optional[Recorded]:
+    """読んだ `values.json` の記録済みの値。`released_version` が空白だけでない文字列でなければ None。
+
+    `released_delivery` がオブジェクトでなければ届け先は記録されていないものとし、`released_store` が 3 つの種類のどれでも
+    なければ種類は記録されていないものとする（手で書き換えた値で worker の起動の判断を誤らない）。
+    """
+    store = held.get("released_store")
+    return recorded_of(held.get("released_version"), held.get("released_delivery"), store if store in STORE_KINDS else None)
+
+
+def write_released(state_dir: Path, value: Optional[Recorded]) -> None:
+    """既にある `values.json` の記録済みの値のキー（`RELEASED_KEYS`）だけを書き換える。ほかのキーは元のまま。
+
+    `value` が None なら 3 つのキーを消す。書き方は `write_values` と同じ（開いた保存先の記述子を起点に、ほかの利用者が
+    書き込めないファイルとして公開する）。`values.json` が無い・形が違えば `OSError`（呼び手の `plan_failure` が precondition にする）。
+    """
+    with worker_paths.open_resolved(state_dir) as wd:
+        held = values_in(wd)
+        if held is None:
+            raise OSError(f"保存先 {state_dir} に {VALUES_FILE} が無いので記録済みの値を書けない")
+        kept = {k: v for k, v in held.items() if k not in RELEASED_KEYS}
+        body = {**kept, **_released_fields(value)}
+        worker_paths.write_file(wd, VALUES_FILE, json.dumps(body, ensure_ascii=False), private=True)
+
+
+def write_values(
+    state_dir: Path,
+    plan: str,
+    values: Mapping[str, Any],
+    inputs: Mapping[str, Any],
+    local_tests: bool,
+    released: Optional[Recorded] = None,
+) -> None:
     """プランの名前・差し込みの値・工程の入力・手元のテストを含めるか・書いた時刻を `<保存先>/values.json` へ書く。
 
     保存先はあった要素までを祖先のリンクを解きながら確かめ（`worker_paths.resolve_existing`。macOS の `/tmp`・`/var` も通る）、
@@ -104,9 +202,11 @@ def write_values(state_dir: Path, plan: str, values: Mapping[str, Any], inputs: 
     直さないので、共有の保存先で名前をリンクへ差し替えられても、呼んだ利用者の別のファイルを切り詰めることもアクセス権を
     変えることも無い。公開したファイルは `read_values` と `ndf answer work` の `read_file(owned=True)` を通る。
     書けなければ `OSError`・`worker_paths.EntryError` をそのまま上げる（呼び手の `plan_failure` が precondition にする）。
+    `released` が None でなければ記録済みの値（`RELEASED_KEYS`）も同じ書き込みで書く（#4513）。
     """
     at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     held = {"plan": plan, "values": dict(values), "inputs": dict(inputs), "local_tests": local_tests, "at": at}
+    held.update(_released_fields(released))
     with worker_paths.open_or_create(state_dir) as wd:
         worker_paths.write_file(wd, VALUES_FILE, json.dumps(held, ensure_ascii=False), private=True)
 

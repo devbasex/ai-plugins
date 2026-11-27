@@ -46,6 +46,8 @@ from ndf.adapters.git import Git, GitError
 from ndf.contracts import causes, facts, internal, limits, result
 from ndf.core import branch_strategy, durable
 from ndf.progress import definition, model, stages, store
+from ndf.progress.settings_roots import roots_once, settings_root
+from ndf.testing import means
 
 # 結果 JSON の tool の名前はサブコマンドの名前（パッケージの名前）と同じ
 TOOL = __package__.rpartition(".")[2]
@@ -99,7 +101,7 @@ def read_json(path: Path, failure: str = "を JSON として読めない") -> An
 
 def ndf_settings_path(cwd: Path, name: str) -> Path:
     """リポジトリの根の設定のファイルのパス。"""
-    return Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()) / name
+    return settings_root(cwd) / name
 
 
 def _read_ndf_settings(path: Path) -> dict[str, Any]:
@@ -161,7 +163,7 @@ def behavior_declared(cwd: Path) -> bool:
 def strategy(cwd: Path) -> branch_strategy.Strategy:
     """リポジトリの根のブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）。読めなければ `FactUnknown`。"""
     try:
-        return branch_strategy.load(Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()))
+        return branch_strategy.load(settings_root(cwd))
     except branch_strategy.StrategyError as exc:
         raise FactUnknown(f"ブランチ戦略の設定を読めない: {exc.reason}") from exc
 
@@ -190,7 +192,8 @@ def base_refs_once() -> Iterator[None]:
     """
     token = _BASE_REFS.set({})
     try:
-        yield
+        with roots_once():
+            yield
     finally:
         _BASE_REFS.reset(token)
 
@@ -252,10 +255,11 @@ def docs_only(git: Git, rng: str, cwd: Path) -> bool:
 
 
 def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
-    """スプリントの差分を分ける（`range_diff_kinds`）。"""
+    """スプリントの差分を分ける（`range_diff_kinds`）。ブランチ戦略と `docs` の設定は、1 回だけ求めた同じ根から読む。"""
     try:
-        git, rng = _sprint_range(context, cwd)
-        return range_diff_kinds(git, rng, cwd)
+        with roots_once():
+            git, rng = _sprint_range(context, cwd)
+            return range_diff_kinds(git, rng, cwd)
     except GitError as exc:
         raise FactUnknown(f"差分を求められない: {exc}") from exc
 
@@ -377,7 +381,10 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
     known: dict[str, Callable[[], bool]] = {
         **{w: (lambda w=w: kinds()[w]) for w in DIFF_WORDS},
         "code_in_unreviewed_diff": lambda: code_in_unreviewed_diff(context, cwd),
+        # 古い工程の定義が持つ語（#4566 の決定 7。更新の前に作ったスプリントのために残す）
         "ci_declared": lambda: definition.dig(ndf_settings(cwd, PROJECT_FILE), "test", "ci", "only") is True,
+        # テストを確かめる手段がある（#4566。既定の起動の組み立て `refactor_values` と同じ `means.decide` を通す）
+        "tests_verifiable": lambda: means.decide(ndf_settings(cwd, PROJECT_FILE)).kind != means.Kind.NONE,
         "prod_branch": lambda: separate_production(cwd),
         "release_record": lambda: "product_version" in context,
         "design_pr": lambda: "design_pr" in context,
@@ -386,11 +393,12 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
     if unknown:
         raise FactUnknown(f"条件 {unknown[0]} を求める手段が無い")
     out = {}
-    for w in words:
-        try:
-            out[w] = known[w]()
-        except FactUnknown as exc:
-            raise FactUnknown(f"条件 {w} を求められない（{exc}）") from exc
+    with roots_once():  # 語ごとに設定を読んでも、根は 1 回だけ求める
+        for w in words:
+            try:
+                out[w] = known[w]()
+            except FactUnknown as exc:
+                raise FactUnknown(f"条件 {w} を求められない（{exc}）") from exc
     return out
 
 

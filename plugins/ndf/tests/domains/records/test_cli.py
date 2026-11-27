@@ -126,7 +126,8 @@ def test_close_check_reads_the_record_path_as_given(
     [
         [{"number": 7, "result": "failed", "evidence": "落ちた"}],
         {"version": "1.2.3", "issues": []},
-        {"version": "v1.2.3", "issues": [{"number": 7, "result": "passed", "evidence": "通った"}]},
+        # version は 1 行のリリースの識別子（#4513。バージョン番号の形でない値は受け、改行を含む値は断る）
+        {"version": "1.2.3\n1.2.4", "issues": [{"number": 7, "result": "passed", "evidence": "通った"}]},
         {"version": "1.2.3", "issues": [{"number": 7, "result": "skipped", "evidence": "x"}]},
         {"version": "1.2.3"},
         "null",

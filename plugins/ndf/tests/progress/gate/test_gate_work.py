@@ -14,7 +14,7 @@ import pytest
 from ndf import cli, contracts, identity
 from ndf.contracts import causes, result, worker_kinds, worker_paths
 from ndf.core import route, worker
-from ndf.progress import gate, invoke, model
+from ndf.progress import command, definition, gate, invoke, model
 from ndf.progress.gate import entry
 
 KIND_KEYS = {"work", "summary", "skills", "excerpt", "inputs", "cwd", "outputs"}
@@ -438,3 +438,147 @@ def test_a_handoff_file_that_cannot_be_made_keeps_the_previous_report(tmp_path, 
     assert code == causes.exit_code("precondition") and got == [] and out["cause"]["kind"] == "precondition"
     assert paths.report.read_text(encoding="utf-8") == "前の報告"
     assert paths.done.exists() and paths.result.read_text(encoding="utf-8") == "{}"
+
+
+# --- #4513: product_version の形を起動指示と ndf worker run の確かめで同じ値から決める ---------------------------------------
+
+from ndf.adapters.git import Git, GitError  # noqa: E402
+from ndf.core import branch_strategy  # noqa: E402
+
+
+def _strategy(kind: str) -> branch_strategy.Strategy:
+    return branch_strategy.Strategy({"release": {"version_store": {"kind": kind}}})
+
+
+def _release_handoff(tmp_path, monkeypatch, strategy):
+    """`release` の作業の `_work_handoff` を、設定を差し替えて打つ（git も worker も起動しない）。"""
+    state = tmp_path.resolve()
+    invoke.write_values(state, "release", {"repo": str(state)}, {"pr": 3}, True)
+    monkeypatch.setattr(entry, "_strategy_at", lambda _w: strategy)
+    handoff = entry._work_handoff("release", state, None)
+    os.close(handoff.fd)
+    return handoff
+
+
+@pytest.mark.parametrize(
+    ("strategy", "want"),
+    [(None, True), (_strategy("plugin_json"), True), (_strategy("none"), False)],
+)
+def test_the_version_number_shape_goes_to_the_prompt_and_the_argv_from_one_value(tmp_path, monkeypatch, strategy, want):
+    # 設定を読めないとき（None）と none 以外はバージョン番号の形を確かめる（#4513 の受け入れ条件 8）。none なら確かめない（条件 3）
+    handoff = _release_handoff(tmp_path, monkeypatch, strategy)
+    assert handoff.version_number is want
+    line = entry.VERSION_NUMBER_LINE if want else entry.DISTRIBUTION_ID_LINE
+    assert line in handoff.prompt
+    argv = gate.work_argv("release", handoff.state_dir, handoff.workdir, version_number=handoff.version_number)
+    assert worker._parser().parse_args(argv).require_version_number is want
+
+
+def test_a_work_without_product_version_reads_no_settings(tmp_path, monkeypatch):
+    state = tmp_path.resolve()
+    invoke.write_values(state, "fix", {"worktree": str(state), "branch": "b"}, {}, True)
+    monkeypatch.setattr(entry, "_strategy_at", lambda _w: pytest.fail("設定を読まない"))
+    handoff = entry._work_handoff("fix", state, "/w")
+    os.close(handoff.fd)
+    assert handoff.version_number is False and "product_version は" not in handoff.prompt
+    assert "--require-version-number" not in gate.work_argv("fix", state, Path("/w"))
+
+
+@pytest.mark.parametrize("read", [entry._strategy_at, command.strategy])
+def test_the_root_settings_are_read_even_when_the_subdirectory_has_its_own(tmp_path, monkeypatch, read):
+    # サブディレクトリに別の .ndf/project.json があっても、git が返したリポジトリの根の設定を読む（git の起動は 1 回）
+    sub = tmp_path / "sub"
+    (sub / ".ndf").mkdir(parents=True)
+    (sub / ".ndf" / "project.json").write_text("{}", encoding="utf-8")
+    calls, roots = [], []
+    monkeypatch.setattr(Git, "run", lambda self, *args: calls.append(args) or f"{tmp_path}\n")
+    monkeypatch.setattr(branch_strategy, "load", lambda root: roots.append(root) or _strategy("none"))
+    assert read(sub).version_store == {"kind": "none"}
+    assert roots == [tmp_path] and calls == [("rev-parse", "--show-toplevel")]
+
+
+@pytest.mark.parametrize("error", [GitError("外"), branch_strategy.StrategyError("読めない"), OSError("無い")])
+def test_settings_that_cannot_be_read_are_none(tmp_path, monkeypatch, error):
+    def fail(*_a, **_k):
+        raise error
+
+    monkeypatch.setattr(Git, "run", fail)
+    monkeypatch.setattr(branch_strategy, "load", fail)
+    assert entry._strategy_at(tmp_path) is None
+
+
+# --- #4513: 記録済みの値で worker を起動せずに終える（承認の時点の種類で決める） --------------------------------------------
+
+ROW = {"target": "本番", "kind": "manual", "trigger": "手で出す", "channel": "production", "versioned": False}
+
+
+def _recorded_state(tmp_path, recorded):
+    state = tmp_path.resolve()
+    invoke.write_values(state, "release", {"repo": str(state)}, {"pr": 3}, True, recorded)
+    return state
+
+
+@pytest.mark.parametrize(
+    ("recorded", "strategy", "want"),
+    [
+        (worker_kinds.Recorded("main abc1234", ROW, "none"), None, "ok"),
+        (worker_kinds.Recorded("main abc1234", ROW, "none"), _strategy("plugin_json"), "ok"),
+        (worker_kinds.Recorded("main abc1234", None, "none"), None, "stopped"),
+        (worker_kinds.Recorded("main abc1234", ROW, "unknown"), None, "stopped"),
+        (worker_kinds.Recorded("1.2.3", None, "versioned"), None, None),
+        (worker_kinds.Recorded("main abc1234", None, None), _strategy("none"), "stopped"),
+        (worker_kinds.Recorded("1.2.3", None, None), _strategy("plugin_json"), None),
+        (worker_kinds.Recorded("1.2.3", None, None), None, None),
+        (None, _strategy("none"), None),
+    ],
+)
+def test_released_outcome_follows_the_store_kind_recorded_at_the_approval(tmp_path, recorded, strategy, want):
+    saved = worker_kinds.read_values(_recorded_state(tmp_path, recorded))
+    got = entry.released_outcome("release", saved, strategy)
+    assert (got["status"] if got else None) == want
+    if want == "ok":
+        assert got["outputs"] == {"product_version": "main abc1234", "delivery": ROW} and result.errors(got) == []
+    if want == "stopped":
+        assert got["cause"]["kind"] == "precondition" and "ndf progress finish" in got["cause"]["detail"]
+
+
+def test_a_work_without_delivery_and_product_version_is_not_finished_by_the_recorded_value(tmp_path):
+    state = tmp_path.resolve()
+    invoke.write_values(state, "fix", {"worktree": str(state), "branch": "b"}, {}, True, worker_kinds.Recorded("x", ROW, "none"))
+    assert entry.released_outcome("fix", worker_kinds.read_values(state), None) is None
+
+
+@pytest.mark.parametrize("value", ["main abc1234", "--candidate", "rev {repo} {state_dir}"])
+def test_ndf_answer_work_finishes_with_the_recorded_value_without_launching(tmp_path, monkeypatch, capsys, value):
+    # #4513 の受け入れ条件 2: 承認の時点の種類が none なら、作業の時点で設定を読めなくても worker を起動しない
+    state = _recorded_state(tmp_path, worker_kinds.Recorded(value, ROW, "none"))
+    monkeypatch.setattr(entry, "_strategy_at", lambda _w: pytest.fail("承認の時点の種類があるので読まない"))
+    code = gate._cmd_work(["--state-dir", str(state), "release"], lambda exe, argv: pytest.fail("worker を起動しない"))
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == 0 and out["outputs"] == {"product_version": value, "delivery": ROW}
+    assert not worker_paths.report_paths(state, "release", resolve=False).prompt.exists()
+
+
+def test_ndf_answer_work_stops_when_the_store_kind_is_unknown(tmp_path, monkeypatch, capsys):
+    state = _recorded_state(tmp_path, worker_kinds.Recorded("main abc1234", None, "unknown"))
+    monkeypatch.setattr(entry, "_strategy_at", lambda _w: pytest.fail("読まない"))
+    code = gate._cmd_work(["--state-dir", str(state), "release"], lambda exe, argv: pytest.fail("worker を起動しない"))
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code == 3 and out["status"] == "stopped" and out["cause"]["kind"] == "precondition"
+
+
+def test_a_versioned_record_launches_the_worker_with_the_version_number_shape(tmp_path, monkeypatch):
+    state = _recorded_state(tmp_path, worker_kinds.Recorded("1.2.3", None, "versioned"))
+    monkeypatch.setattr(entry, "_strategy_at", lambda _w: pytest.fail("読まない"))
+    handoff = entry._work_handoff("release", state, None)
+    os.close(handoff.fd)
+    assert handoff.version_number is True
+
+
+def test_the_manual_finish_example_fits_the_deploy_stage_once_the_placeholders_are_filled():
+    # 停止理由が示す例の <…> を実際の届け先と記録済みの mvv_gate に置き換えれば、ndf progress finish の確かめを通る
+    example = entry.manual_finish_example("main abc1234")
+    example["outputs"]["delivery"] = ROW
+    example["outputs"]["mvv_gate"] = {"gate": "release", "skip": False, "why": ["人へ問う"]}
+    stage = definition.load_definition("standard").stage("デプロイ")
+    assert definition.check_stage_output(stage, example)[0] == []

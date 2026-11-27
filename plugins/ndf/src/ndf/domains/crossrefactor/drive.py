@@ -21,6 +21,9 @@
 - 修正が停滞か振動した項目は、修正担当と別のランタイムに成立を判定させる（`judge_decide`）
 - 打ち直すと通る失敗はフレーキーとして項目の失敗に数えず、実行の中で 1 度だけ直しをリクエストする（`flaky_decide`）
 - 結果の出口（完了・止まった）で、PR のリファクタリング計画のコメントを書き、logs へ完了報告を置く（`report_decide`）
+- 同じ PR の `run` と `release` は排他ロックを待たずに取り、取れなければ何も変えずに止まる（#4566）
+- `--local-test`（手元の経路。#4566）は、テストの定義のファイルを対象範囲から外し、最終ゲートを `local_gate` で回す。
+  対象範囲が空なら担当を起動せずに最終ゲートへ進む。再開のたびに保護するファイルを判定し直す（`_resume_protection`）
 
 止まった実行は状態ファイルを残し、同じ引数で打ち直すと終わった工程を流し直さずに続ける。
 """
@@ -53,7 +56,9 @@ from ndf.domains.crossrefactor import (
     judge_decide,
     launch,
     launch_decide,
+    local_gate,
     phase_decide,
+    protected_decide,
     prompt_decide,
     report_decide,
     scope,
@@ -66,7 +71,7 @@ from ndf.domains.crossrefactor import (
 )
 from ndf.domains.records import mvv
 from ndf.testing import declared
-from ndf.testing import scoped, slots
+from ndf.testing import means, scoped, slots
 
 Status = items_decide.Status
 
@@ -95,6 +100,9 @@ class RunConfig:
     budget_minutes: Optional[int] = None
     safety_net_minutes: Optional[float] = None
     candidates: str = ""
+    # 手元の経路（#4566）と、合わせる先の SHA を書き出すファイル（結果を変えないので args に入れない）
+    local_test: bool = False
+    pushed_out: Optional[Path] = None
 
     def args(self) -> list[str]:
         """結果を変える引数の並び。安全網の上限は入れない（大きくして打ち直すと、止まった所から続ける）。
@@ -102,8 +110,9 @@ class RunConfig:
         候補はファイルのパスでなく中身の SHA-256 で載せる（パスはプランごとに変わる）。候補が無ければ並びは前のバージョンと同じ。
         """
         planned = ["--candidates-sha256", hashlib.sha256(self.candidates.encode("utf-8")).hexdigest()] if self.candidates else []
+        gate = ["--local-test"] if self.local_test else ["--required", *self.required, "--ci-test", *self.tests]
         return [
-            self.base, *self.scope, "--required", *self.required, "--ci-test", *self.tests, "--symbols", *self.symbols,
+            self.base, *self.scope, *gate, "--symbols", *self.symbols,
             "--participants", *self.participants, "--max-fix", str(self.max_fix), "--budget-minutes", str(self.budget),
             *planned,
         ]  # fmt: skip
@@ -123,6 +132,8 @@ class Ports:
     comment: Optional[Callable[[git.Git, int, str], str]] = None
     clock: Callable[[], float] = time.monotonic
     ci: final_gate.CiPort = field(default_factory=final_gate.CiPort)
+    # 手元の最終ゲートのテストの起動と時計（#4566）
+    tests: local_gate.Exec = field(default_factory=local_gate.Exec)
 
     def github(self, work: git.Git) -> github.GitHub:
         """作業場所の origin の GitHub。"""
@@ -167,6 +178,8 @@ class _Run:
     diff_base: str
     # 提案と計画の担当へ渡す、プロジェクト MVV を読ませる文（承認済みの MVV が無ければ空）
     mvv: str = ""
+    # 起動の始めに取得した PR の先頭のコミット
+    pr_head: str = ""
 
     @property
     def work(self) -> git.Git:
@@ -187,27 +200,89 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def _reused(cfg: RunConfig, state: Mapping[str, Any], path: Path) -> Optional[Finish]:
-    """完了の記録から前回の結果を返すか決める（#2057）。打ち直すなら None。"""
+def _reused(cfg: RunConfig, state: Mapping[str, Any], path: Path, head: str) -> Optional[Finish]:
+    """完了の記録から前回の結果を返すか決める（#2057）。打ち直すなら None。
+
+    手元の経路でテストを打って完了した実行は、今の PR の先頭の設定の識別値と今の `PATH` が記録と同じときだけ再利用する（#4566）。
+    """
     if "done" not in state:
         return None
     done = state["done"]
-    head = worktree.fetch_head(git.Git(cfg.repo), cfg.branch)
     recorded = (done["head"] if "head" in done else None, done["args"] if "args" in done else None)
     hint = f"状態ファイル {path} を消してから同じコマンドを打ち直す"
     got = finished_decide.finished(recorded, (head, cfg.args()), reopen_flag=None, discard_hint=hint)
-    return Finish.from_json(done["result"], got.notes) if got.keep else None
+    if not got.keep or (cfg.local_test and done.get("tests") == "passed" and not _same_tests(cfg, done, head)):
+        return None
+    return Finish.from_json(done["result"], got.notes)
+
+
+def _same_tests(cfg: RunConfig, done: Mapping[str, Any], head: str) -> bool:
+    """テストを打って完了した記録の識別値と `PATH` が、今の PR の先頭の設定と今の `PATH` と同じか。"""
+    repo = git.Git(cfg.repo)
+    digest = means.decide(local_gate.settings_at(repo, head, cfg.repo)).digest
+    return done.get("digest") == digest and done.get("path_digest") == local_gate.path_digest()
+
+
+def _reverify(cfg: RunConfig, state: Mapping[str, Any], head: str) -> bool:
+    """手元の経路で、テストを打って完了した記録の先頭と引数が今と同じか（状態を捨てずに送った SHA を確かめ直す）。"""
+    done = state["done"]
+    return cfg.local_test and done.get("tests") == "passed" and done.get("head") == head and done.get("args") == cfg.args()
 
 
 def _init(run: _Run) -> None:
-    """起点・対象範囲・課題が触る関数を記録する（済んでいれば何もしない）。"""
+    """起点・対象範囲・課題が触る関数を記録する（済んでいれば何もしない）。
+
+    手元の経路では、着手時の PR の先頭から求めた保護するファイルを、対象範囲と触る関数から外す（#4566）。
+    """
     if "touched" in run.state:
         return
     cfg = run.cfg
-    touched = scope.touched_or_explicit(run.ws.work, run.diff_base, "HEAD", cfg.scope, cfg.symbols)
+    target = cfg.scope
+    protected: Optional[protected_decide.Protected] = None
+    if cfg.local_test:
+        protected = _protection(run, run.pr_head)
+        target = protected_decide.narrow(cfg.scope, worktree.tracked_files(run.work, run.pr_head), protected)
+        run.state["onto"] = run.pr_head
+    touched = scope.touched_or_explicit(run.ws.work, run.diff_base, "HEAD", target, cfg.symbols) if target else symbols_decide.Touched()
     run.state.update(
-        pr=cfg.pr, branch=cfg.branch, base=cfg.base, args=cfg.args(), target_scope=list(cfg.scope), touched=touched.as_json(), phases={}
-    )
+        pr=cfg.pr, branch=cfg.branch, base=cfg.base, args=cfg.args(), target_scope=list(target),
+        touched=protected_decide.unprotected(touched, protected).as_json(), phases={},
+    )  # fmt: skip
+    run.save()
+
+
+def _protection(run: _Run, commit: str) -> protected_decide.Protected:
+    """`commit` の設定とツリーから保護するファイルを求める。止まれば `DriveStopped`。"""
+    try:
+        return local_gate.protection_at(run.work, commit, local_gate.settings_at(run.work, commit, run.cfg.repo), run.cfg.repo)
+    except final_gate.GateStopped as exc:
+        raise DriveStopped(exc.kind, exc.detail) from None
+
+
+def _resume_protection(run: _Run) -> None:
+    """手元の経路の再開で、担当を起動する前に保護するファイルを判定し直す（#4566）。
+
+    載せ直しの途中で中断していれば載せ直す前へ戻す。作業コミット（`onto` から `HEAD` まで）が保護に当たれば `refused`。
+    当たらなければ対象範囲・触る関数・未実装の項目を絞り直し、範囲がすべて保護に当たる項目は見送る。
+    """
+    state, work = run.state, run.work
+    if "rebasing" in state:
+        work.attempt("cherry-pick", "--abort")
+        work.run("reset", "-q", "--hard", state["rebasing"]["head"])
+        state.pop("rebasing")
+        run.save()
+    protected = _protection(run, run.pr_head)
+    onto = state["onto"] if "onto" in state else run.pr_head
+    hits = local_gate.protected_changes(work, onto, work.rev_parse("HEAD"), protected)
+    if hits:
+        raise DriveStopped(
+            "refused", f"作業コミットが保護するファイルを変えている: {', '.join(hits)}。" + local_gate.RECOVER.format(pr=run.cfg.pr)
+        )
+    state["target_scope"] = list(protected_decide.narrow(state["target_scope"], worktree.tracked_files(work, run.pr_head), protected))
+    state["touched"] = protected_decide.unprotected(_touched(run), protected).as_json()
+    for item in local_gate.listed(state, "items"):
+        if item["status"] == Status.OPEN.value and "path" in item and protected.covers(item["path"]):
+            item.update(status=Status.DEFERRED.value, reason="保護するファイルになった")
     run.save()
 
 
@@ -248,7 +323,7 @@ def _launch_status(run: _Run, req: launch.Request) -> tuple[Optional[dict[str, A
     _record_spent(run, req, run.ports.clock() - began)
     run.save()
     if capped and status.state == agents.AgentState.TIMEOUT:
-        raise DriveStopped("fix_limit", _net(run).reason())
+        raise DriveStopped(local_gate.LIMIT_KIND, _net(run).reason())
     return got, status
 
 
@@ -261,7 +336,7 @@ def _guarded(run: _Run, req: launch.Request) -> tuple[launch.Request, bool]:
         return req, False
     net = _net(run)
     if net.halted:
-        raise DriveStopped("fix_limit", net.reason())
+        raise DriveStopped(local_gate.LIMIT_KIND, net.reason())
     capped = net.remaining_seconds < launch.phase_limit(req.phase)
     return replace(req, timeout=min(launch.phase_limit(req.phase), net.remaining_seconds)), capped
 
@@ -607,25 +682,52 @@ def _items(run: _Run) -> None:
 
 
 def _final(run: _Run) -> None:
-    """最終ゲートを回して記録する（済んでいれば何もしない）。"""
+    """最終ゲートを回して記録する（済んでいれば何もしない）。手元の経路は `local_gate` で回す（#4566）。"""
     if "final" in run.state and run.state["final"]["status"] == "passed":
+        return
+    if run.cfg.local_test:
+        _final_local(run)
         return
     cfg = run.cfg
     gate = final_gate.GateConfig(cfg.pr, cfg.branch, cfg.required, cfg.tests, cfg.scope, cfg.max_fix)
+    fix = _final_fixer(run, cfg.scope)
+    hub = run.ports.github(run.work)
+    _record_final(run, lambda: final_gate.run_gate(run.work, hub, gate, fix, run.ports.sleep, run.ports.ci))
+
+
+def _final_fixer(run: _Run, scope: Sequence[str], *, local: bool = False) -> Callable[[Sequence[str], int], bool]:
+    """最終ゲートの落ちた周で修正担当を起動する関数を返す（起動できれば真）。"""
 
     def fix(failed: Sequence[str], round_no: int) -> bool:
         _record_phase(run, "final-fix")
-        prompt = prompt_decide.final_fix(cfg.pr, cfg.scope, failed)
+        prompt = prompt_decide.final_fix(run.cfg.pr, scope, failed, local=local)
         return _launch(run, launch.Request("final-fix", participants.FIXER, prompt, f"r{round_no}")) is not None
 
-    hub = run.ports.github(run.work)
+    return fix
+
+
+def _record_final(run: _Run, gate: Callable[[], dict[str, Any]]) -> None:
+    """最終ゲートを回して記録を保存する。止まれば止まった記録を保存して `DriveStopped` にする。"""
     try:
-        run.state["final"] = final_gate.run_gate(run.work, hub, gate, fix, run.ports.sleep, run.ports.ci)
+        run.state["final"] = gate()
     except final_gate.GateStopped as exc:
         run.state["final"] = exc.record
         run.save()
         raise DriveStopped(exc.kind, exc.detail) from None
     run.save()
+
+
+def _final_local(run: _Run) -> None:
+    cfg = run.cfg
+    scope = tuple(run.state["target_scope"]) or cfg.scope
+    found = declared.read_ndf_settings(cfg.repo)
+    work_project = found[1] if found is not None and isinstance(found[1], dict) else {}
+    gate = local_gate.LocalGateConfig(
+        cfg.pr, cfg.branch, scope, cfg.max_fix, cfg.repo, run.ws.root,
+        local_gate.total_seconds(work_project, _net(run).limit_minutes), local_gate.suite_seconds(work_project),
+    )  # fmt: skip
+    fix = _final_fixer(run, scope, local=True)
+    _record_final(run, lambda: local_gate.run_local_gate(run.work, gate, run.state, run.save, fix, run.ports.tests))
 
 
 def _step_metrics(run: _Run) -> dict[str, Any]:
@@ -652,7 +754,7 @@ def _summary(run: _Run) -> Finish:
         "skipped": len(run.state["skipped"]),
         "fix_rounds": sum(max(len(i["history"]) - 1, 0) for i in items if "history" in i),
     }
-    detail = f"項目 {len(items)} 件のうち採った {counts[Status.ADOPTED.value]} 件・戻した {counts[Status.REVERTED.value]} 件・見送った {counts[Status.DEFERRED.value]} 件。最終ゲートを通った"
+    detail = f"項目 {len(items)} 件のうち採った {counts[Status.ADOPTED.value]} 件・戻した {counts[Status.REVERTED.value]} 件・見送った {counts[Status.DEFERRED.value]} 件。{_gate_text(run.state['final'])}"
     shown = [
         {
             "kind": "item",
@@ -662,6 +764,16 @@ def _summary(run: _Run) -> Finish:
         for i in items
     ]
     return Finish("ok", detail, shown + [{"kind": "final", **run.state["final"]}], {**metrics, **_step_metrics(run)})
+
+
+def _gate_text(final: Mapping[str, Any]) -> str:
+    """最終ゲートで確かめたもの（#4566）。必須のチェックの経路は「テストに合格した」と書かない。"""
+    if final.get("means") == means.Kind.LOCAL_TEST.value:
+        if final.get("tests") == "passed":
+            return "最終ゲートを通った（手元のテスト全体が通った）"
+        return "最終ゲートを通った（変更が無いのでテストは打っていない）"
+    checks = final.get("checks")
+    return f"最終ゲートを通った（必須のチェック {', '.join(checks)} が通った）" if checks else "最終ゲートを通った"
 
 
 def _plan_comment(run: _Run, outcome: str) -> str:
@@ -748,16 +860,22 @@ def _read_mvv(run: _Run) -> str:
     return prompt_decide.mvv_text(snap)
 
 
-def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish]]:
-    repo = git.Git(cfg.repo)
-    root = workspace.root_of(repo, cfg.pr)
+# 状態を空にするときも引き継ぐ、片付けのための記録（#4566）
+KEEP_ON_RESET = (*sorted(workspace.LOG_ONLY_KEYS), "verify_trees")
+
+
+def _open(cfg: RunConfig, ports: Ports, repo: git.Git, root: Path) -> tuple[Optional[_Run], Optional[Finish]]:
     path = store.path_of(root)
     state = store.load(path)
-    reused = _reused(cfg, state, path)
-    if reused is not None:
-        return None, reused
+    for kept in local_gate.sweep_verify_trees(repo, state, lambda: store.save(path, state)):
+        print(f"ℹ 検証用の作業場所を残した: {kept}", file=sys.stderr)
     if "done" in state:
-        state = {}
+        head = worktree.fetch_head(repo, cfg.branch)
+        reused = _reused(cfg, state, path, head)
+        if reused is not None:
+            return None, _with_pushed(cfg, reused, str(state["done"]["head"]))
+        if not _reverify(cfg, state, head):
+            state = {k: state[k] for k in KEEP_ON_RESET if k in state}
     mismatch = _resume_mismatch(cfg, state, path)
     if mismatch is not None:
         return None, mismatch
@@ -767,7 +885,18 @@ def _open(cfg: RunConfig, ports: Ports) -> tuple[Optional[_Run], Optional[Finish
     except DriveStopped as exc:
         return None, Finish(exc.kind, exc.detail)
     ws = workspace.prepare(repo, cfg.pr, fetched.head, runtimes)
-    return _Run(cfg, ports, ws, state, path, fetched.base_branch, fetched.base_tip, fetched.diff_base), None
+    return _Run(cfg, ports, ws, state, path, fetched.base_branch, fetched.base_tip, fetched.diff_base, pr_head=fetched.head), None
+
+
+def _with_pushed(cfg: RunConfig, finish: Finish, head: str) -> Finish:
+    """完了の結果に、`--pushed-out` を書いた結果を重ねる（書けなければ止める）。"""
+    if cfg.pushed_out is None:
+        return finish
+    try:
+        local_gate.write_pushed(cfg.pushed_out, head)
+    except final_gate.GateStopped as exc:
+        return Finish(exc.kind, exc.detail)
+    return finish
 
 
 def _ready(run: _Run) -> None:
@@ -778,20 +907,56 @@ def _ready(run: _Run) -> None:
 
 
 def drive(cfg: RunConfig, ports: Optional[Ports] = None) -> Finish:
-    """1 回の実行を進める。止まれば `Finish` の `kind` に停止理由の種類を入れて返す（状態ファイルは残す）。"""
-    run, reused = _open(cfg, ports if ports is not None else Ports())
+    """1 回の実行を進める。止まれば `Finish` の `kind` に停止理由の種類を入れて返す（状態ファイルは残す）。
+
+    始めに PR の排他ロックを取り（取れなければ何も変えずに `precondition`）、期限切れの手元の最終ゲートのログを消す。
+    """
+    repo = git.Git(cfg.repo)
+    root = workspace.root_of(repo, cfg.pr)
+    held = workspace.hold_pr(root.parent, cfg.pr)
+    if held is None:
+        return Finish("precondition", workspace.held_elsewhere(cfg.pr))
+    try:
+        workspace.sweep(repo, root, time.time())
+        return _drive_held(cfg, ports if ports is not None else Ports(), repo, root)
+    finally:
+        held.release()
+
+
+def _steps(run: _Run) -> None:
+    """提案から最終ゲートまで。手元の経路は保護の判定を先に行い、対象範囲が空なら担当を起動せずに最終ゲートへ進む。"""
+    if run.cfg.local_test:
+        if "done" in run.state:
+            # 送った SHA を確かめ直す（完了の記録を再利用できなかった。提案と実装は通らない）
+            run.state.pop("final", None)
+            _final(run)
+            return
+        if "touched" in run.state:
+            _resume_protection(run)
+        _init(run)
+        if not run.state["target_scope"]:
+            run.state.setdefault("items", [])
+            run.state.setdefault("skipped", [])
+            run.save()
+            _final(run)
+            return
+    _ready(run)
+    run.mvv = _read_mvv(run)
+    _init(run)
+    _plan(run)
+    _items(run)
+    _final(run)
+
+
+def _drive_held(cfg: RunConfig, ports: Ports, repo: git.Git, root: Path) -> Finish:
+    run, reused = _open(cfg, ports, repo, root)
     if reused is not None:
         for note in reused.notes:
             print(note, file=sys.stderr)
         return reused
     assert run is not None
     try:
-        _ready(run)
-        run.mvv = _read_mvv(run)
-        _init(run)
-        _plan(run)
-        _items(run)
-        _final(run)
+        _steps(run)
     except (DriveStopped, slots.Stopped) as exc:
         # テストのスロットの待ちの諦めとメモリの停止は、落ちたテストに数えずに停止理由にする（状態ファイルは残す）
         kind, detail = (exc.kind, exc.detail) if isinstance(exc, DriveStopped) else (exc.cause, exc.summary())
@@ -800,7 +965,19 @@ def drive(cfg: RunConfig, ports: Optional[Ports] = None) -> Finish:
     finish = _publish(run, _summary(run))
     # 配分の履歴は最終ゲートを通った実行だけを足す（止まった実行は足さない）
     allocation.record_run(run.work, run.state, _now())
-    run.state["done"] = {"head": run.work.rev_parse("HEAD"), "args": cfg.args(), "result": finish.as_json()}
+    run.state["done"] = _done(run, finish)
+    run.state.pop("pushing", None)
     run.save()
-    workspace.release(git.Git(cfg.repo), run.ws)
-    return finish
+    workspace.release(repo, run.ws)
+    return _with_pushed(cfg, finish, str(run.state["done"]["head"]))
+
+
+def _done(run: _Run, finish: Finish) -> dict[str, Any]:
+    """完了の記録。手元の経路は最終ゲートの SHA と、テストを打った完了なら識別値と `PATH` の SHA-256 を持つ（#4566）。"""
+    final = run.state["final"]
+    if not run.cfg.local_test:
+        return {"head": run.work.rev_parse("HEAD"), "args": run.cfg.args(), "result": finish.as_json()}
+    done = {"head": final["head"], "args": run.cfg.args(), "result": finish.as_json(), "tests": final["tests"]}
+    if final["tests"] == "passed":
+        done.update(digest=final["digest"], path_digest=local_gate.path_digest())
+    return done

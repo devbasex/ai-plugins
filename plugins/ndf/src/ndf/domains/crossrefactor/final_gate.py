@@ -19,6 +19,7 @@ from ndf.adapters import ci, git, github
 from ndf.contracts import limits
 from ndf.core.converge import worktree
 from ndf.domains.crossrefactor import final_gate_decide
+from ndf.testing import means
 
 CI_WAIT_POLICY = "test-run.ci-wait"
 CHECK_WAIT_POLICY = "test-triage.check-wait"
@@ -93,11 +94,24 @@ def changed_by_commit(g: git.Git, before: str) -> dict[str, list[str]]:
     return out
 
 
-def _check_fix(g: git.Git, before: str, failed: Sequence[str], cfg: GateConfig) -> None:
-    """最後の修正の直しを確かめる。範囲外を変えていれば `before` へ戻して `refused` で止める（#3038）。"""
-    verdict = final_gate_decide.verify_final_fix(changed_by_commit(g, before), cfg.target_scope)
+def check_fix(
+    g: git.Git,
+    before: str,
+    failed: Sequence[str],
+    scope: Sequence[str],
+    excluded: Optional[Callable[[str], bool]] = None,
+    before_undo: Optional[Callable[[], None]] = None,
+) -> None:
+    """最後の修正の直しを確かめる。範囲外を変えていれば `before` へ戻して `refused` で止める（#3038）。
+
+    `excluded` が真のファイル（手元の経路のテストの定義のファイル。#4566）は、範囲の中でも範囲の外として扱う。
+    `before_undo` は戻すと決まった後・戻す前にだけ呼ぶ（戻すと失うものがあれば、そこで止める。#4566）。
+    """
+    verdict = final_gate_decide.verify_final_fix(changed_by_commit(g, before), scope, excluded)
     if verdict.ok:
         return
+    if before_undo is not None:
+        before_undo()
     g.run("reset", "-q", "--hard", before)
     record = {"status": "refused", "outside_failures": verdict.record(failed)}
     raise GateStopped("refused", str(verdict.cause()["detail"]), record)
@@ -116,7 +130,7 @@ class CiPort:
     failed_tests: Callable[[github.GitHub, ci.WatchResult, ci.FailedTestSource], list[str]] = _failed_tests
 
 
-def _fix_or_undo(g: git.Git, before: str, fix: Callable[[], bool], record: dict[str, Any]) -> None:
+def fix_or_undo(g: git.Git, before: str, fix: Callable[[], bool], record: dict[str, Any]) -> None:
     """最後の修正担当を起動する。結果を出さずに終わるか途中で止まれば、検査していない変更を `before` へ戻す。
 
     戻さないと、同じコマンドの再開の送信が範囲外の変更を検査せずに PR へ送る。
@@ -133,6 +147,10 @@ def _fix_or_undo(g: git.Git, before: str, fix: Callable[[], bool], record: dict[
 
 def _names(checks: Sequence[ci.Check]) -> list[str]:
     return [c.name for c in checks]
+
+
+# 最終ゲートの記録の `means`（必須のチェックの経路。手元の経路は `local_gate`）
+MEANS = means.Kind.REQUIRED_CHECKS.value
 
 
 def _record(status: str, round_no: int, sha: str) -> dict[str, Any]:
@@ -156,13 +174,14 @@ def run_gate(
         watched = port.wait(hub, sha, cfg)
         kind = watched.cause(cfg.tests)
         if kind is None:
-            return _record("passed", round_no, sha)
+            # 確かめたのは指定したチェックが通ったことまで（テストを含むかは NDF には分からない。#4566）
+            return {**_record("passed", round_no, sha), "means": MEANS, "checks": list(cfg.required)}
         if kind != "test_failed" or round_no == cfg.max_fix:
             raise GateStopped(kind, f"最終ゲートの CI が通らない（{watched.reading.verdict}）", _record(kind, round_no, sha))
         source = ci.FailedTestSource.from_work(g.cwd if g.cwd is not None else Path.cwd())
         nodes = port.failed_tests(hub, watched, source)
         failed = nodes if nodes else _names(watched.reading.failed_tests)
         before = g.rev_parse("HEAD")
-        _fix_or_undo(g, before, lambda: fix(failed, round_no + 1), _record("work_stopped", round_no, sha))
-        _check_fix(g, before, failed, cfg)
+        fix_or_undo(g, before, lambda: fix(failed, round_no + 1), _record("work_stopped", round_no, sha))
+        check_fix(g, before, failed, cfg.target_scope)
     raise AssertionError("最終ゲートの回数の上限の後に戻った")

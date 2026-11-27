@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import subprocess
@@ -32,6 +33,7 @@ from typing import Any, Optional
 
 from ndf import process_group
 from ndf.contracts import causes, facts, limits, result
+from ndf.contracts.worker_kinds import Recorded
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
 from ndf.progress import command, definition, invoke, issue_values, model, stages, store
@@ -46,11 +48,13 @@ from ndf.progress.run_view import (
     ORGANIZER,
     STARTED,
     STEP_EVENT,
+    StageAnswers,
     View,
     migrated_order,
     migration_drafts,
     event_payload,
     read_accepted_head,
+    released_answer,
 )
 
 TOOL = __package__.rpartition(".")[2]
@@ -452,7 +456,8 @@ def _prepare(d: Drive, v: View, s: stages.StageDef, inputs: dict[str, Any]) -> O
     step = s.steps[0] if prog.redo else prog.next_step(s)
     if step is None or invoke.kind_of(step) != invoke.PLAN:
         return None
-    run = replace(invoke.stage_run(s, step, inputs), approved=approved_seen(v, s.name, d.st.root))
+    answers = StageAnswers(v, s.name)
+    run = replace(invoke.stage_run(s, step, inputs), approved=approved_seen(answers, d.st.root), released=_released_reader(answers))
     if invoke.template(run.name) is None:
         return None  # テンプレートの無いプランは、流すときの _call_plan が precondition で止める
     try:
@@ -724,12 +729,24 @@ def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepPro
         return [_failed_with(s, step.id, v.rev, cause)]
     errs = definition.validate_io(step.output_ref, res.report) if step.output_ref and res.status == result.OK else []
     if errs:
-        return [_failed(s, step.id, v.rev, "bad_report", f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")]
+        return [_failed(s, step.id, v.rev, "bad_report", _step_gap_detail(step, res.report, errs))]
     status = FINISHED if res.status == result.OK else "waiting"
     payload = {"step": step.id, "status": status, "report": res.report, "generation": prog.generation, "warnings": list(res.warnings)}
     done = step_event(v, s.name, payload)
     again = review_again_drafts(v, s, step.gate, res.report) if status == FINISHED and step.kind == stages.READING_KIND else []
     return [done, *again]
+
+
+def _step_gap_detail(step: stages.StepDef, report: Mapping[str, Any], errs: list[str]) -> str:
+    """ステップの出力が規約に合わない失敗の理由。承認の回答を経た結果（`metrics.waited`）なら、規約が必須とするキーのうち
+    結果に無い名前と、判断を求めたステップの要約と、次の操作を示す（#4513）。ほかは今の文。"""
+    ref = step.output_ref
+
+    def missing() -> list[str]:
+        outputs = result.outputs_of(report)
+        return [n for n in definition.required_outputs(ref) if n not in outputs] if ref else []
+
+    return definition.gap_failure_detail([report], missing, f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")
 
 
 def review_again_drafts(v: View, s: stages.StageDef, gate: Optional[str], report: Mapping[str, Any]) -> list[model.EventDraft]:
@@ -796,25 +813,30 @@ def step_dir(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> Pat
     return work_root(d.st.root, v.machine_id) / s.id / step_location(step.id, step_progress(v, s.name))
 
 
-def approved_seen(v: View, stage: str, root: Path) -> Optional[dict[str, Any]]:
-    """工程 `stage` の承認ゲートの最新の承認の回答が見た対象（事象の `seen`）。無ければ None（#4409 の決定 5）。
+def approved_seen(answers: StageAnswers, root: Path) -> Optional[dict[str, Any]]:
+    """工程の承認ゲートの最新の承認の回答が見た対象（事象の `seen`）。無ければ None（#4409 の決定 5）。
 
     利用者の回答でも、MVV 判定が通した回答（`service:mvv`）でも同じ形で読む。マージが本番へ反映されない（`production` が偽）
     承認は、出し直さずに繰り上げた head（`gate.recheck`）を重ねる。分からない・本番へ反映される承認には重ねない。
-    `root` は状態の保存先。
+    `root` は状態の保存先。最新の承認の回答は `answers` の走査から得る（#4513）。
     """
-    for ev in reversed(v.events):
-        p = event_payload(ev)
-        if ev.draft.kind == ANSWERED and ev.draft.row_key == stage and p.get("answer") == APPROVED:
-            seen = p.get("seen")
-            if not isinstance(seen, dict):
-                return None
-            gate_id = p.get("gate_id")
-            carried = None
-            if seen.get("production") is False and gate_id:
-                carried = read_accepted_head(work_root(root, v.machine_id), str(gate_id))
-            return {**seen, "head": carried} if carried else dict(seen)
-    return None
+    ev = answers.approved()
+    if ev is None:
+        return None
+    p = event_payload(ev)
+    seen = p.get("seen")
+    if not isinstance(seen, dict):
+        return None
+    gate_id = p.get("gate_id")
+    carried = None
+    if seen.get("production") is False and gate_id:
+        carried = read_accepted_head(work_root(root, answers.machine_id), str(gate_id))
+    return {**seen, "head": carried} if carried else dict(seen)
+
+
+def _released_reader(answers: StageAnswers) -> Callable[[], Optional[Recorded]]:
+    """記録済みの値を初回の呼び出しで 1 回だけ求める関数（リリースの識別子を使うプランだけが呼ぶ。呼ばれるまで履歴をたどらない）。"""
+    return functools.cache(lambda: released_answer(answers))
 
 
 def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> list[model.EventDraft]:
@@ -827,8 +849,11 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
         inputs = invoke.resolve_inputs(s, v.context())
     except invoke.StageInputError as exc:
         return [_failed(s, step.id, v.rev, exc.kind, str(exc))]
-    approved = approved_seen(v, s.name, d.st.root)
+    answers = StageAnswers(v, s.name)
+    approved = approved_seen(answers, d.st.root)
     run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries, approved=approved)
+    if invoke.kind_of(step) == invoke.PLAN:
+        run = replace(run, released=_released_reader(answers))
     waited = prog.waiting is not None and prog.waiting["step"] == step.id
     ans = prog.answer_value() if waited else None
     work_dir = step_dir(d, v, s, step)
@@ -853,9 +878,10 @@ def _stage_output(s: stages.StageDef, prog: StepProgress) -> tuple[dict[str, Any
 def _finish_stage(d: Drive, v: View, s: stages.StageDef) -> None:
     """全ステップが終わった工程の出力を工程の出力の規約で照らし、合えば出力を文脈へ書いて終了のマーカーを付ける。"""
     out, merged = _stage_output(s, step_progress(v, s.name))
-    errs = definition.validate_stage_output(s, out)
+    errs, gaps = definition.check_stage_output(s, out)
     if errs:
-        d.write(_failed(s, None, v.rev, "bad_report", f"工程 {s.name} の出力が規約に合わない: {'; '.join(errs)}"))
+        why = f"工程 {s.name} の出力が規約に合わない: {'; '.join(errs)}"
+        d.write(_failed(s, None, v.rev, "bad_report", definition.gap_failure_detail(out["steps"], lambda: [k for k, _ in gaps], why)))
         return
     draft, warnings = stages.outputs_draft(s, v.rev, merged, ACTOR)
     done = model.EventDraft(FINISHED, ACTOR, s.name, reason=out["summary"], payload={"steps": len(out["steps"])}, rev=v.rev)

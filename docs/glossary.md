@@ -19,7 +19,7 @@
 | NDF の作り直し（`ndf-rebuild`） | #1142 の作り直し（ndf-next）と、旧いプラグインからの入れ替えの語。子の表・振り分け表・11.x の子 | 29 | `docs/glossary/ndf-rebuild.md` |
 | NDF の Slack 通知（`ndf-notification`） | 利用者の手を待つ時点・その種類・通知の本文と復帰先 | 3 | `docs/glossary/ndf-notification.md` |
 | NDF の外部 CLI 委譲（`ndf-agent-cli`） | cross-review / cross-refactoring が参加者の CLI を選び、起動し、監視し、結果を読むときの語。ランタイム・ホスト・参加者プール・起動結果 | 42 | `docs/glossary/ndf-agent-cli.md` |
-| NDF の cross-review（`ndf-cross-review`） | Pull Request のレビューを CLI へ委譲し、新しい指摘が出なくなるまで回す収束ループの語。指摘・反証・総評・修正担当 | 45 | `docs/glossary/ndf-cross-review.md` |
+| NDF の cross-review（`ndf-cross-review`） | Pull Request のレビューを CLI へ委譲し、新しい指摘が出なくなるまで回す収束ループの語。指摘・反証・総評・修正担当 | 47 | `docs/glossary/ndf-cross-review.md` |
 | NDF の cross-refactoring（`ndf-cross-refactoring`） | 想定最大時間に収まるリファクタリング計画を立てて通す語。改善候補・改善項目・配分テーブル・最終ゲート | 73 | `docs/glossary/ndf-cross-refactoring.md` |
 | NDF のラッパー（`ndf-relay`） | ラッパーがセッションを切り替え、シェルの設定へ組み込まれるときの語 | 94 | `docs/glossary/ndf-relay.md` |
 | NDF のリリース（`ndf-release`） | release が走らせるリリースの種別・リリースコマンド・公開操作・リリース記録の語 | 121 | `docs/glossary/ndf-release.md` |

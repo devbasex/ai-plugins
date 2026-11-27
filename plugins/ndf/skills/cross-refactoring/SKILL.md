@@ -1,7 +1,7 @@
 ---
 name: cross-refactoring
 description: "Refactor a PR across runtimes: participants propose once, claude plans, tests, applies and verifies items fitting a budget. Use when structural improvement should be done across runtimes（クロスリファクタリング・多AIリファクタリング・予算内のリファクタリング）."
-argument-hint: "--pr N --branch NAME --base BRANCH --scope PATH... --required CHECK... [--ci-test NAME...] [--symbols FILE:NAME...] [--participants RUNTIME...] [--max-fix N] [--budget-minutes N] [--safety-net-minutes N] [--work DIR]"
+argument-hint: "--pr N --branch NAME --base BRANCH --scope PATH... (--required CHECK... [--ci-test NAME...] | --local-test [--pushed-out FILE]) [--symbols FILE:NAME...] [--participants RUNTIME...] [--max-fix N] [--budget-minutes N] [--safety-net-minutes N] [--work DIR]"
 allowed-tools:
   - Bash
   - Read
@@ -66,8 +66,10 @@ allowed-tools:
 | `--branch NAME` | PR の head ブランチ | 必須 |
 | `--base BRANCH` | 差分の起点（プランと同じく、ブランチ戦略のスプリントの PR のマージ先） | 必須 |
 | `--scope PATH...` | 対象範囲。**提案が無制限に広がらないよう必須。** 検証にも効くので、現状固定テストの置く場所も含める。検査のプランと同じ範囲は `ndf refactor scope-args --base <B>` の `items[0].paths` から組める | 必須 |
-| `--required CHECK...` | 最終ゲートで待つ必須のチェック（`.ndf/project.json` の `ci.required_checks`） | 必須 |
-| `--ci-test NAME...` | CI のテストのチェックの名前。落ちたら最終ゲート修正へ回す | なし |
+| `--required CHECK...` | 最終ゲートで待つ必須のチェック（`.ndf/project.json` の `ci.required_checks`）。必須のチェックで確かめるときに渡す | `--required` か `--local-test` のどちらか 1 つが必須 |
+| `--local-test` | 最終ゲートで、手元でテスト全体を打つ。手元のテストで確かめるときに渡す（値は取らない） | 同上 |
+| `--ci-test NAME...` | CI のテストのチェックの名前。落ちたら最終ゲート修正へ回す。`--required` と併せてだけ渡す | なし |
+| `--pushed-out FILE` | 手元の経路で、呼び出し元を合わせる先の SHA を書くファイル。テストに合格して送った場合は送信した SHA、変更が無くテストを省いた場合はマージしたリモートの先頭の SHA を書く。テストを省いた場合の SHA は、この実行ではテストしていない。`--local-test` と併せてだけ効く | なし |
 | `--symbols FILE:NAME...` | 課題が触る関数を差分から引かずに渡す（`ndf refactor touched` と同じ形） | 差分から引く |
 | `--participants RUNTIME...` | 提案の参加者 | 既定の席 |
 | `--max-fix N` | 項目ごとの修正と、最終ゲート修正の回数の上限 | `2` |
@@ -78,7 +80,10 @@ allowed-tools:
 ```text
 ndf refactor run --pr 130 --branch feat/x --base <ベースブランチ> --scope src/services tests/services --required test
 ndf refactor run --pr 130 --branch feat/x --base <ベースブランチ> --scope src tests --required test lint --budget-minutes 30 --safety-net-minutes 90
+ndf refactor run --pr 130 --branch feat/x --base <ベースブランチ> --scope src tests --local-test
 ```
+
+**最終ゲートで変更を確かめる手段に合わせて、引数を 1 つだけ渡す（#4566）。** 必須のチェックを使う場合は `--required <チェック>...` を渡す。手元のテストを使う場合は `--local-test` を渡す。両方を渡すか、どちらも渡さなければ `invalid` で止まる。`--required` は設定の手段に関わらず受ける。`--local-test` は、設定の手段が手元のテスト（必須のチェックが無く、CI テストの設定が無いか `false` で、`command` を持つテストの suite がある）のときだけ受ける。手元の経路は、テストの定義のファイル（`.ndf/`・`package.json`・`conftest.py`・suite のコマンドが名指すパス・`test.protected_files`）を対象範囲から外し、PR のブランチの先頭を取得してから検証用の作業場所でテスト全体を打ち、合格した SHA だけを push する。変更が残らなければテストを打たずに完了する。`--pushed-out <ファイル>` には呼び出し元を合わせる先の SHA を書く。停止理由は `test_failed`（直しの上限でも落ちる・元から落ちる suite）・`refused`（テストの定義のファイルを変えた）・`precondition`（手段が手元のテストでなくなった・起動できない・コマンドが `--work` を絶対パスで指す・同じ PR の別の実行）・`fix_limit`（累計の上限。`test.local_total_minutes` で延ばす）・`push_rejected`。必須のチェックの経路の結果は「通ったチェックの名前」を載せ、テストに合格したとは書かない。
 
 **CI テストの設定（`test.ci.only`）があるリポジトリでは、テストを手元で走らせない。** 合否は最終ゲートが待つ CI の
 必須のチェックで読む。
@@ -148,7 +153,7 @@ flowchart TD
 
 ## 実行
 
-メインが決めるのは `--scope`・`--required`（と、あれば `--ci-test`・`--symbols`）である。`--scope` は検査のプランと同じく
+メインが決めるのは `--scope` と、最終ゲートの手段の引数（必須のチェックを使う場合は `--required` と、あれば `--ci-test`。手元のテストを使う場合は `--local-test`）、あれば `--symbols` である。`--scope` は検査のプランと同じく
 `ndf refactor scope-args --base <マージ先のブランチ>` の結果の `items[0].paths` から組んでよい。決めたら「前提」と同じ対象の
 リポジトリの中で次の 1 行を打ち、最後の行の結果 JSON の `status` と終了コードを見る。
 
@@ -156,16 +161,23 @@ flowchart TD
 1 回受ける。NDF のコマンドは 1 回の呼び出しに 1 つだけ打つ（`&&`・`;`・パイプ・ループでつなぐと hook が止める）。
 
 ```bash
+# 必須のチェックを使う場合
 ndf refactor run --pr <PR> --branch <head ブランチ> --base <マージ先のブランチ> --scope <範囲...> --required <必須のチェック...> \
   [--ci-test <名前...>] [--symbols <ファイル>:<名前>...] [--participants <ランタイム...>] [--max-fix N] \
+  [--budget-minutes N] [--safety-net-minutes N]
+# 手元のテストを使う場合
+ndf refactor run --pr <PR> --branch <head ブランチ> --base <マージ先のブランチ> --scope <範囲...> --local-test \
+  [--pushed-out <ファイル>] [--symbols <ファイル>:<名前>...] [--participants <ランタイム...>] [--max-fix N] \
   [--budget-minutes N] [--safety-net-minutes N]
 ```
 
 | 引数 | 意味 |
 | --- | --- |
 | `--scope` | 対象範囲（「引数」の `--scope`） |
-| `--required` | 最終ゲートで待つ必須のチェック（`.ndf/project.json` の `ci.required_checks`） |
-| `--ci-test` | CI のテストのチェックの名前（落ちたら最終ゲート修正へ回す） |
+| `--required` | 最終ゲートで待つ必須のチェック（`.ndf/project.json` の `ci.required_checks`）。必須のチェックを使う場合だけ渡す |
+| `--ci-test` | CI のテストのチェックの名前（落ちたら最終ゲート修正へ回す）。`--required` と併せてだけ渡す |
+| `--local-test` | 最終ゲートで手元でテスト全体を打つ。手元のテストを使う場合だけ渡す |
+| `--pushed-out` | 手元の経路で、呼び出し元を合わせる先の SHA を書くファイル。どの SHA を書くかは「引数」の `--pushed-out FILE` の行にある |
 | `--symbols` | 課題が触る関数を差分から引かずに渡す（`ndf refactor touched` と同じ形） |
 | `--participants` | 提案の参加者（省けば既定の参加者） |
 | `--max-fix` | 項目ごとの修正と、最終ゲート修正の回数の上限（既定 2） |
@@ -230,7 +242,7 @@ ndf refactor run --pr <PR> --branch <head ブランチ> --base <マージ先の�
 読み直さない。コメントの該当する項目の状態を手で「取り消し」に直す（`gh pr view <PR> --comments` でコメントを探し、GitHub の画面で
 書き換える）。
 
-最終ゲートは起動のされ方によらず CI の必須のチェック（`--required`）で判定する（[docs/04-verify-and-report.md](docs/04-verify-and-report.md)）。
+最終ゲートは、`--required` を渡せば CI の必須のチェックで、`--local-test` を渡せば手元のテスト全体で判定する（[docs/04-verify-and-report.md](docs/04-verify-and-report.md)）。
 単独起動で Pull Request 全体を承認収束にかけるなら、`run` が `ok` で終わった後に `/ndf:cross-review <PR>` を打つ。最終ゲート修正は
 `--max-fix` の回数まで回し、尽きたら取り消さずに止めて人へ渡す（`test_failed`）。
 

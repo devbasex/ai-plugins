@@ -117,6 +117,7 @@ def test_enablement_priority_is_sprint_then_project_then_definition():
             "docs_only_diff",
             "behavior_docs_in_diff",
             "ci_declared",
+            "tests_verifiable",
             "prod_branch",
             "release_record",
             "retro_enabled",

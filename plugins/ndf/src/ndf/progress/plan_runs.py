@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Optional
 
 from ndf.contracts import result
+from ndf.contracts.worker_kinds import Recorded
 from ndf.core import durable, route
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 
 # 変更要求の指摘の本文を作業へ渡す環境変数
 NOTES_ENV = "NDF_STAGE_NOTES"
+
+
+def _no_released() -> Optional[Recorded]:
+    """記録済みの値を読まない呼び出しの既定（工程の外の呼び出しとテスト）。"""
+    return None
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,8 @@ class StageRun:
     approved: Optional[dict[str, Any]] = None
     # 工程が承認ゲートを持つか（light の設計のように持たない工程のマージは、承認をデプロイへ先送りする。#4409）
     gated: bool = False
+    # 記録済みの値（まとめたリリースでオーガナイザーが記録した値）を読む関数。リリースの識別子を使うプランだけが呼ぶ（#4513）
+    released: Callable[[], Optional[Recorded]] = field(default=_no_released, compare=False)
     # 以下は工程を単位ごとに流すための欄（#4369）。既定のままの呼び出しは、欄が無いときと同じに動く
     # 工程の定義の `per_unit`
     per_unit: bool = False
