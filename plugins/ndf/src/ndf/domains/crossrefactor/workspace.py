@@ -265,7 +265,7 @@ def _link_new(tmp: Path, logs: Path, name: str, entry: dict[str, Any], save: Cal
             save()
         try:
             os.link(tmp, logs / str(entry["name"]), follow_symlinks=False)
-        except FileExistsError:  # noqa: NDF401 ファイル: 使われている名前は上書きせずに別の名前を試す
+        except FileExistsError:  # noqa: S112 ファイル: 使われている名前は上書きせずに別の名前を試す
             continue
         return logs / str(entry["name"])
     raise FileExistsError(f"ログの名前がすべて使われている: {logs / name}")

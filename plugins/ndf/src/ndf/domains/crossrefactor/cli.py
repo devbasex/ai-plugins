@@ -163,7 +163,7 @@ def _scope_args(a: argparse.Namespace) -> dict[str, Any]:
     return result.result(TOOL, "ok", f"範囲 {len(got)} 件: {' '.join(got)}", [{"kind": "scope", "paths": got}], {"paths": len(got)})
 
 
-def _follow(a: argparse.Namespace) -> dict[str, Any]:
+def _follow_pushed(a: argparse.Namespace) -> dict[str, Any]:
     sha = local_gate.follow_pushed(git.Git(Path(a.work)), Path(a.pushed), a.remote, a.branch)
     return result.result(TOOL, "ok", f"送った SHA {sha} へ合わせた", [{"kind": "followed", "sha": sha}], {})
 
@@ -216,7 +216,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
     "state": _state,
     "scope-args": _scope_args,
     "release": _release,
-    "follow": _follow,
+    "follow": _follow_pushed,
 }
 
 

@@ -36,6 +36,35 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "follow",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--pushed": {
+          "type": "string"
+        },
+        "--branch": {
+          "type": "string"
+        },
+        "--remote": {
+          "type": "string"
+        },
+        "--work": {
+          "type": "string",
+          "default": "."
+        }
+      },
+      "required": [
+        "subcommand",
+        "--pushed",
+        "--branch",
+        "--remote"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "release",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },

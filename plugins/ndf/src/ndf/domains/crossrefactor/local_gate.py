@@ -559,18 +559,10 @@ def run_local_gate(
         if tip is None:
             tip = worktree.fetch_tips(g, cfg.branch, remote, None)[0]
         head = _take_in(gate, tip)
-        project = settings_at(g, tip, cfg.repo_work)
-        found = means.decide(project)
-        if found.kind != means.Kind.LOCAL_TEST:
-            raise final_gate.GateStopped("precondition", f"取得した先頭 {tip} の設定では、テストを確かめる手段が手元のテストでない")
-        protected = protection_at(g, tip, project, cfg.repo_work, gate.trees)
+        found, protected = _means_at(gate, tip)
         if head == tip:
             return _resend_sent(gate, tip, found, round_no)
-        changed = paths_changed_between(g, tip, head)
-        hits = sorted(p for p in changed if protected.covers(p))
-        if hits:
-            detail = f"この実行のコミットがテストの定義のファイルを変えたので送らない: {', '.join(hits)}"
-            raise final_gate.GateStopped("refused", detail, _record("refused", round_no, head, protected_files=hits))
+        _refuse_protected_change(gate, tip, head, protected, round_no)
         known = gate.passed(head, found.digest)
         failed = () if known else gate.test(head, found, f"{round_no}-head")
         if not failed:
@@ -597,6 +589,23 @@ def run_local_gate(
         )
         tip = None
     raise AssertionError("最終ゲートの回数の上限の後に戻った")
+
+
+def _means_at(gate: _Gate, tip: str) -> tuple[means.Means, protected_decide.Protected]:
+    """取得した先頭 `tip` の設定から、テストを確かめる手段とテストの定義のファイルを読む。手段が手元のテストでなければ止める。"""
+    project = settings_at(gate.g, tip, gate.cfg.repo_work)
+    found = means.decide(project)
+    if found.kind != means.Kind.LOCAL_TEST:
+        raise final_gate.GateStopped("precondition", f"取得した先頭 {tip} の設定では、テストを確かめる手段が手元のテストでない")
+    return found, protection_at(gate.g, tip, project, gate.cfg.repo_work, gate.trees)
+
+
+def _refuse_protected_change(gate: _Gate, tip: str, head: str, protected: protected_decide.Protected, round_no: int) -> None:
+    """この実行のコミット（`tip` から `head`）がテストの定義のファイルを変えていれば、送らずに止める。"""
+    hits = sorted(p for p in paths_changed_between(gate.g, tip, head) if protected.covers(p))
+    if hits:
+        detail = f"この実行のコミットがテストの定義のファイルを変えたので送らない: {', '.join(hits)}"
+        raise final_gate.GateStopped("refused", detail, _record("refused", round_no, head, protected_files=hits))
 
 
 def _checked_fix(
@@ -708,7 +717,7 @@ def follow_pushed(g: git.Git, pushed: Path, remote: str, branch: str) -> str:
         return sha
     if g.attempt("cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
         g.run("fetch", "-q", "--", remote, f"refs/heads/{branch}")
-    done = g.attempt("merge", "-q", "--ff-only", "--no-overwrite-ignore", sha)
+    done = g.merge_ff(sha, "--no-overwrite-ignore")
     if done.returncode != 0 or g.rev_parse("HEAD") != sha:
         detail = f"呼び出し元の作業場所を送った SHA {sha} へ早送りできない（先へ進んでいるか、無視したファイルを上書きする）"
         raise final_gate.GateStopped("precondition", detail)
