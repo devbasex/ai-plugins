@@ -51,6 +51,11 @@ class _Revoked(Exception):
     """承認済みとして進めた内容の承認が、記録の錠を取るまでに取り消された（人の確認が要るようになった）。"""
 
 
+def _candidate_path(given: Optional[str]) -> Optional[Path]:
+    """`--candidate` の絶対パス。`..` を畳む（端末のコマンドの `cd` の後も、候補の記録と同じパスを指すため）。"""
+    return Path(os.path.abspath(given)) if given else None
+
+
 def _worktree_root() -> Path:
     return ls.launch_root(Path.cwd())
 
@@ -141,7 +146,7 @@ def _base_metrics(repo: str, t: ls.Target) -> dict[str, Any]:
 
 def _show(a: argparse.Namespace) -> dict[str, Any]:
     root = _worktree_root()
-    cand = Path(a.candidate).absolute() if a.candidate else None
+    cand = _candidate_path(a.candidate)
     repo, target = la.repo_key(root), ls.launch_file(root)
     pending = la.pending_request(repo, target)
     extra = {"next": result.command(TOOL, *_approve_args(*(pending[k] for k in la.CONTINUATION)))} if pending else {}
@@ -245,7 +250,7 @@ def _before_approve(a: argparse.Namespace, cand: Optional[Path]) -> Optional[dic
 
 
 def _approve(a: argparse.Namespace) -> dict[str, Any]:
-    cand = Path(a.candidate).absolute() if a.candidate else None
+    cand = _candidate_path(a.candidate)
     early = _before_approve(a, cand)
     if early is not None:
         return early
