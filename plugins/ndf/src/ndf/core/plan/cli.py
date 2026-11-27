@@ -31,10 +31,11 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, NamedTuple, NoReturn, Optional
+from typing import Any, Iterable, Mapping, NamedTuple, NoReturn, Optional
 
 from ndf import identity
 from ndf.adapters import github
@@ -374,9 +375,16 @@ def _discard_checked(target: Path) -> None:
 
 
 def _write_checked(target: Path, value: dict[str, Any]) -> None:
-    """一時ファイルに書き終えてから置き換える（固定の一時の名前にある既存のファイルやリンクの先を上書きしない）。"""
-    with worker_paths.open_resolved(target.parent) as wd:
-        worker_paths.write_file(wd, target.name, json.dumps({files.RECORD_KIND_KEY: CHECKED_KIND, **value}, ensure_ascii=False))
+    """一意の一時の名前へ書き終えてから、`target` の名前が空いているときだけ公開する（確かめの間に置かれたファイルは残す）。"""
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            json.dump({files.RECORD_KIND_KEY: CHECKED_KIND, **value}, out, ensure_ascii=False)
+        os.link(tmp, target)
+    except FileExistsError:
+        raise _UnitsStopped("refused", f"{target} が確かめの間に置かれたので上書きしない（中身を調べて退けてから打ち直す）") from None
+    finally:
+        Path(tmp).unlink(missing_ok=True)
 
 
 def _record(path: Path, targets: _Targets) -> _Record:
@@ -449,10 +457,19 @@ def _checked_units(a: argparse.Namespace, targets: _Targets, record: Optional[_R
     return result.result(TOOL, OK, summary, units + splits, metrics, warnings=warnings, outputs=outputs)
 
 
+def _refuse_changed(root: Path, plans: Iterable[str], before: Mapping[str, bytes]) -> None:
+    """表を作る前に読んだ中身（`before` はファイル名ごと）と今が違う実装計画があれば止まる。"""
+    for plan in plans:
+        if (root / plan).read_bytes() != before.get(Path(plan).name):
+            raise _UnitsStopped("precondition", f"{plan} が読んだ後に変わったので、実装計画を書き換えない（打ち直す）")
+
+
 def _render(targets: _Targets) -> None:
     """実装計画の 2 つの表を書き直す。"""
     tree = units_files.Tree(targets.root)
     limits_held = units_files.limits_of(units_files.project_of(tree))
+    # 置き換える直前に比べるため、表を作る前の中身を持つ
+    before = {p.name: p.read_bytes() for p in (targets.root / "issues").glob("*-plan.md") if p.is_file()}
     texts = units_files.rendered(tree, targets.issues, targets.omitted, limits_held)
     if not texts:
         return
@@ -462,6 +479,8 @@ def _render(targets: _Targets) -> None:
         with worker_paths.open_resolved(targets.root / "issues") as wd, contextlib.ExitStack() as staged:
             for plan, text in texts.items():
                 staged.enter_context(worker_paths.staged_write(wd, Path(plan).name, text))
+            # `ExitStack` の中で上げると、どの実装計画も置き換わらない
+            _refuse_changed(targets.root, texts, before)
     except worker_paths.EntryUnsafe as exc:
         raise _UnitsStopped(
             "precondition", f"issues/{exc.name} は今のアクセス権を保って置き換えられないので、実装計画を書き換えない（{exc.kind}）"

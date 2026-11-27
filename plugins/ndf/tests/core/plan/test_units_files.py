@@ -641,17 +641,12 @@ def _stage(monkeypatch, work: Path, **extra) -> None:
     monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps({k: v for k, v in held.items() if v is not None}))
 
 
-def test_cli_record_check_writes_checked_json_from_the_reviewed_commit(reviewed, work, capsys, monkeypatch):
-    asked_docs: list[bool] = []
-    check = uf.check
-    monkeypatch.setattr(uf, "check", lambda *args: asked_docs.append(args[-1]) or check(*args))
+def test_cli_record_check_writes_checked_json_from_the_reviewed_commit(reviewed, work, capsys):
     (work / "issues" / "issue-7-plan.units.json").write_text("壊れた", encoding="utf-8")
 
     _, out = _run(capsys, "check")
 
     assert (out["status"], out["outputs"]) == ("ok", {"design_pr": 12})
-    # `--docs` を渡さなくても、記録を書く前に実装計画と突き合わせる（食い違いの判定は test_check_docs_* が確かめる）
-    assert asked_docs == [True]
     checked = json.loads((reviewed / "checked.json").read_text(encoding="utf-8"))
     assert checked == {
         "ndf_record": "design-units-check",
@@ -685,6 +680,33 @@ def test_cli_record_check_writes_nothing_when_it_stops(reviewed, work, capsys, m
 
     assert out["cause"]["kind"] == kind
     assert not (reviewed / "checked.json").exists()
+
+
+def test_cli_record_check_refuses_a_reviewed_table_mismatch_without_docs(reviewed, work, capsys):
+    plan = work / "issues" / "issue-7-plan.md"
+    plan.write_text(_plan(1, 2), encoding="utf-8")
+    (reviewed / "reviewed-head").write_text(_commit(work) + "\n", encoding="utf-8")
+
+    _, out = _run(capsys, "check")
+
+    assert out["cause"]["kind"] == "invalid"
+    assert not (reviewed / "checked.json").exists()
+
+
+def test_cli_record_check_keeps_a_file_put_there_during_the_check(reviewed, work, capsys, monkeypatch):
+    check = uf.check
+
+    def put_then_check(*args):
+        (reviewed / "checked.json").write_text("memo", encoding="utf-8")
+        return check(*args)
+
+    monkeypatch.setattr(uf, "check", put_then_check)
+
+    _, out = _run(capsys, "check")
+
+    assert out["cause"]["kind"] == "refused"
+    assert (reviewed / "checked.json").read_text(encoding="utf-8") == "memo"
+    assert [p.name for p in reviewed.glob(".checked.json.*")] == []
 
 
 @pytest.mark.parametrize("held", [b"{}", b"memo", b"\xff"])
@@ -749,3 +771,20 @@ def test_render_changes_no_plan_when_one_of_them_cannot_be_replaced(tmp_path, pr
         cli._render(cli._Targets(tmp_path, (7, 8), (), ()))
     assert [plan.read_text(encoding="utf-8") for plan in plans] == [_plan(1), _plan(1)]
     assert sorted((tmp_path / "issues").iterdir()) == before
+
+
+def test_render_keeps_a_plan_edited_after_it_was_read(tmp_path, monkeypatch):
+    _units(tmp_path, "7")
+    plan = tmp_path / _put(tmp_path, "issue-7-plan.md", _plan(1))
+    rendered = uf.rendered
+
+    def render_then_edit(*args):
+        texts = rendered(*args)
+        plan.write_text(_plan(1) + "追記\n", encoding="utf-8")
+        return texts
+
+    monkeypatch.setattr(uf, "rendered", render_then_edit)
+
+    with pytest.raises(cli._UnitsStopped):
+        cli._render(cli._Targets(tmp_path, (7,), (), ()))
+    assert plan.read_text(encoding="utf-8") == _plan(1) + "追記\n"
