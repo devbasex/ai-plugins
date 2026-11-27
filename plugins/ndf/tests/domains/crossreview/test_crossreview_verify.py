@@ -394,6 +394,24 @@ def test_issue_4363_ask_leaves_no_partial_record_when_copying_is_interrupted(tmp
     assert "verdicts" in (held / seen[0].paths.out.name).read_text(encoding="utf-8")
 
 
+def test_issue_4363_ask_does_not_move_records_when_the_watch_is_interrupted(tmp_path: Path) -> None:
+    """監視中の割り込みでは判定役が書いている途中なので、記録を移さず、目印と一緒に残して回収に任せる。"""
+    run, seen = _AskRun(tmp_path), []
+
+    def interrupted(spec: agents.Launch) -> agents.AgentStatus:
+        seen.append(spec)
+        spec.paths.out.write_text("書きかけ", encoding="utf-8")
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        verify.ask(run, 1, [_row()], {"r1-1": [_diff(tmp_path)]}, interrupted)
+    held = seen[0].paths.out.parent
+    saved = tmp_path / f"{held.name}.out"
+    assert seen[0].paths.out.exists() and not saved.exists() and (tmp_path / f"{held.name}.held").exists()
+    verify.recover(run)
+    assert saved.read_text(encoding="utf-8") == "書きかけ" and not held.exists()
+
+
 def _left(root: Path, name: str, output: str = "出力") -> Path:
     """前の起動が残した、目印のある出力のディレクトリ。"""
     held = root / name
