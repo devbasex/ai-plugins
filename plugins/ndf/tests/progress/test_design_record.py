@@ -220,6 +220,19 @@ def test_build_refuses_a_check_of_another_head(checked):
         design_record.build(record_dir)
 
 
+def test_build_does_not_follow_a_linked_input_or_quote_it(tmp_path):
+    secret = tmp_path / "credentials"
+    secret.write_text("secret-token", encoding="utf-8")
+    record_dir = tmp_path / "record"
+    record_dir.mkdir()
+    (record_dir / "reviewed-head").symlink_to(secret)
+
+    with pytest.raises(design_record.RecordUnreadable, match="reviewed-head") as caught:
+        design_record.build(record_dir)
+
+    assert "secret-token" not in str(caught.value)
+
+
 # --- stale -------------------------------------------------------------------------------------
 
 
@@ -333,6 +346,15 @@ def test_approved_of_is_none_after_a_later_answer_or_without_the_target(later):
     held = [_answered("approved", design_target={"n": 1}), *later] if later else [_answered("approved")]
 
     assert design_record.approved_of(_view(*held)) is None
+
+
+def test_approved_of_is_none_after_the_gate_returns_to_unfinished():
+    approved = _answered("approved", design_target={"n": 1})
+    drafts = design_record.reset_drafts(_view(approved), _review_stage(), "head が変わった")
+
+    assert design_record.approved_of(_view(approved, *drafts)) is None
+    again = _answered("approved", design_target={"n": 2})
+    assert design_record.approved_of(_view(approved, *drafts, again)) == {"n": 2}
 
 
 def test_approved_of_ignores_answers_to_other_waits_of_the_stage():

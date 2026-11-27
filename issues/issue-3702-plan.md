@@ -102,7 +102,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
 - **対象ファイル:**
   - `plugins/ndf/src/ndf/progress/design_record.py`
   - `plugins/ndf/tests/progress/test_design_record.py`
-- **変更内容:** `progress/design_record.py` の `required`・`build`・`stale`・`reset_drafts`・`approved_of`・`mismatches`・`without`・`converted`・`reapproved_of`。まだどこからも呼ばない（先に要る: Task 6）
+- **変更内容:** `progress/design_record.py` の `required`・`build`・`stale`・`reset_drafts`・`approved_of`・`mismatches`・`without_issues`・`converted`・`reapproved_of`。まだどこからも呼ばない（先に要る: Task 6）
 - **満たす受け入れ条件:** 無し（条件 1 の部品。条件 1 は Task 18 の単位で確かめる）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 

@@ -311,6 +311,13 @@ def _handlings(
     return out, tuple(n for n in issues if out[n][0] in EXCLUDED_HANDLINGS)
 
 
+def handlings(
+    tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int]
+) -> dict[int, tuple[str, Optional[int]]]:
+    """課題ごとの（扱い, 統合先）。設計書だけを読み、単位のファイルは読まない。`listing` は `tree.listing()`。"""
+    return _handlings(tree, listing, tuple(sorted(set(issues))))[0]
+
+
 def project_of(tree: Tree) -> dict[str, Any]:
     """読み元の `.ndf/project.json`。無いか、オブジェクトでなければ空。JSON として読めなければ `UnitsFileError`。"""
     text = tree.read(PROJECT_FILE)

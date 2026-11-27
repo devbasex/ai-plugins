@@ -13,6 +13,9 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import stat
 from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -38,6 +41,10 @@ _GATE = next(gate for gate in model.table()["gates"] if gate == "design")
 _REVIEW_STAGE, _IMPLEMENT_ROW = "document-review", "実装"
 _APPROVED = folding.answer_word("approved")
 _REDO = "変更を求めて実装計画を分け直す"
+# コミットの ID の形（理由の文に載せてよいかを確かめる）
+_COMMIT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+# 入力はリンクをたどらずに開き、FIFO でも待たない
+_INPUT_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 
 
 class RecordUnreadable(Exception):
@@ -80,9 +87,17 @@ def build(record_dir: Path) -> dict[str, Any]:
 
 
 def _text(record_dir: Path, name: str) -> str:
+    """保存先の直下の通常ファイルの中身。リンクや通常でないファイルは読まない（保存先の外の中身を理由の文に出さない）。"""
     path = record_dir / name
     try:
-        found = path.read_text(encoding="utf-8").strip()
+        fd = os.open(path, _INPUT_FLAGS)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise RecordUnreadable(f"{path} は通常のファイルでないので読まない")
+            with os.fdopen(fd, encoding="utf-8", closefd=False) as held:
+                found = held.read().strip()
+        finally:
+            os.close(fd)
     except (OSError, UnicodeDecodeError) as exc:
         raise RecordUnreadable(f"{path} を読めない（{type(exc).__name__}）") from None
     if not found:
@@ -92,14 +107,18 @@ def _text(record_dir: Path, name: str) -> str:
 
 def _checked(record_dir: Path, head: str) -> dict[str, Any]:
     path = record_dir / plan_cli.CHECKED_FILE
+    if not _COMMIT_ID.fullmatch(head):
+        raise RecordUnreadable(f"{record_dir / units_files.REVIEWED_HEAD}: コミットの ID の形でない")
     try:
         found = json.loads(_text(record_dir, plan_cli.CHECKED_FILE))
     except json.JSONDecodeError:
         found = None
     if not isinstance(found, dict) or found.get(plan_files.RECORD_KIND_KEY) != plan_cli.CHECKED_KIND:
         raise RecordUnreadable(f"{path} は単位の確かめの記録でない")
-    if found.get("head") != head:
-        raise RecordUnreadable(f"{path} が確かめたコミット（{found.get('head')}）はレビューした HEAD（{head}）と違う")
+    seen = found.get("head")
+    if seen != head:
+        shown = f"（{seen}）" if isinstance(seen, str) and _COMMIT_ID.fullmatch(seen) else ""
+        raise RecordUnreadable(f"{path} が確かめたコミット{shown}はレビューした HEAD（{head}）と違う")
     return found
 
 
@@ -179,9 +198,22 @@ def reset_drafts(v: View, stage: stages.StageDef, why: str) -> list[model.EventD
 
 
 def approved_of(v: View) -> Optional[dict[str, Any]]:
-    """工程「ドキュメントレビュー」の設計承認ゲートの最新の回答が承認なら、その記録。ほかの回答か、記録が無ければ None。"""
-    row = next((s.name for s in v.snap.stages if s.id == _REVIEW_STAGE), None)
-    return None if row is None else _latest_target(v, row, lambda p: p.get("gate") == _GATE)
+    """工程「ドキュメントレビュー」の設計承認ゲートの最新の回答が承認なら、その記録。
+
+    ほかの回答か、記録が無ければ None。回答の後にゲートのステップが未了に戻っていれば（`reset_drafts`）、その承認は
+    取り消されているので None。
+    """
+    stage = next((s for s in v.snap.stages if s.id == _REVIEW_STAGE), None)
+    if stage is None:
+        return None
+    at = stage.gate_index(_GATE)
+    gate_step = None if at is None else stage.steps[at].id
+
+    def revoked(ev: model.Event) -> bool:
+        payload = event_payload(ev)
+        return ev.draft.kind == STEP_EVENT and payload.get("step") == gate_step and payload.get("status") == stages.RESET
+
+    return _latest_target(v, stage.name, lambda p: p.get("gate") == _GATE, revoked)
 
 
 def reapproved_of(v: View) -> Optional[dict[str, Any]]:
@@ -189,9 +221,13 @@ def reapproved_of(v: View) -> Optional[dict[str, Any]]:
     return _latest_target(v, _IMPLEMENT_ROW, lambda _p: True)
 
 
-def _latest_target(v: View, row: str, counts: Callable[[Mapping[str, Any]], bool]) -> Optional[dict[str, Any]]:
-    """行 `row` の、`counts` が数える最新の回答が承認なら、その payload の記録。"""
+def _latest_target(
+    v: View, row: str, counts: Callable[[Mapping[str, Any]], bool], revoked: Callable[[model.Event], bool] = lambda _e: False
+) -> Optional[dict[str, Any]]:
+    """行 `row` の、`counts` が数える最新の回答が承認なら、その payload の記録。回答より後に `revoked` の事象があれば None。"""
     for ev in reversed(v.row_events(row)):
+        if revoked(ev):
+            return None
         payload = event_payload(ev)
         if ev.draft.kind == ANSWERED and counts(payload):
             held = payload.get(TARGET_KEY)
@@ -219,8 +255,9 @@ def mismatches(record: Mapping[str, Any], tree: units_files.Tree, context: Mappi
     if unfetched is not None:
         return [*found, f"承認の記録のコミット {head} が手元に無いので、単位のファイルを比べられない（{unfetched}）"]
     try:
-        found += _file_mismatches(units_files.Tree(tree.root, head), tree, issues)
-        found += _handling_mismatches(targets, tree, issues)
+        listing = tree.listing()
+        found += _file_mismatches(units_files.Tree(tree.root, head), tree, listing, issues)
+        found += _handling_mismatches(targets, tree, listing, issues)
     except units_files.UnitsFileError as exc:
         found.append(str(exc))
     found += _omitted_mismatches(targets, context, issues)
@@ -245,9 +282,14 @@ def _fetch_missing(root: Path, commit: str) -> Optional[str]:
     return f"取得できない: {mask_urls(done.stderr.strip())}"
 
 
-def _file_mismatches(recorded: units_files.Tree, tree: units_files.Tree, issues: Sequence[int]) -> list[str]:
+def _file_mismatches(
+    recorded: units_files.Tree,
+    tree: units_files.Tree,
+    now_listed: Mapping[str, Optional[tuple[str, str, str]]],
+    issues: Sequence[int],
+) -> list[str]:
     """単位のファイルの違い。パスが同じものは、JSON として読み、実際の行数を除いて比べる。一覧と本文は側ごとにまとめて読む。"""
-    listed, now_listed = recorded.listing(), tree.listing()
+    listed = recorded.listing()
     before = units_files.find(recorded, issues, sorted(listed))
     after = units_files.find(tree, issues, sorted(now_listed))
     pairs = dict.fromkeys((before.get(n), after.get(n)) for n in sorted(issues))
@@ -267,9 +309,14 @@ def _file_mismatches(recorded: units_files.Tree, tree: units_files.Tree, issues:
     return found
 
 
-def _handling_mismatches(targets: Mapping[str, Any], tree: units_files.Tree, issues: Sequence[int]) -> list[str]:
-    """課題ごとの扱いと統合先の違い。"""
-    now = units_files.collect(tree, issues, targets["omitted"]).handlings
+def _handling_mismatches(
+    targets: Mapping[str, Any],
+    tree: units_files.Tree,
+    listing: Mapping[str, Optional[tuple[str, str, str]]],
+    issues: Sequence[int],
+) -> list[str]:
+    """課題ごとの扱いと統合先の違い。単位のファイルは `_file_mismatches` が読んだので、設計書だけを読む。"""
+    now = units_files.handlings(tree, listing, issues)
     found = []
     for n in sorted(issues):
         held = targets["handling"][str(n)]

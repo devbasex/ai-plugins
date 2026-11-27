@@ -52,12 +52,12 @@ contracts/
 | パス | 種類 | 役割 | 依存する先 | 最上位の関数 |
 | --- | --- | --- | --- | --- |
 | `src/ndf/core/plan/units_decide.py` | 新設 | 実行順・導く値・違反・警告・分け方の案を返す | `graphlib` | `parse`・`judge`・`split`・`single` |
-| `src/ndf/core/plan/units_files.py` | 新設 | 単位のファイル・実装計画・上限を読み、表を作る | 上・`inputs_decide`・`git`・`contracts` | `find`・`load`・`limits_of`・`collect`・`check`・`render_tables`・`differs` |
+| `src/ndf/core/plan/units_files.py` | 新設 | 単位のファイル・実装計画・上限を読み、表を作る | 上・`inputs_decide`・`git`・`contracts` | `find`・`load`・`limits_of`・`collect`・`handlings`・`check`・`render_tables`・`differs` |
 | `src/ndf/core/plan/cli.py` | 変更 | `ndf plan units render`・`check` | `units_files` | `_cmd_units` |
 | `src/ndf/core/plan/inputs_decide.py` | 変更 | 「設計の結果」の表の「扱い」と「統合先」の列を読む。`design_gaps` を消す | — | `design_handlings`（新設） |
 | `src/ndf/core/plan/queue_decide.py` | 変更 | `RESUME_ALWAYS` に `guard` を足す | — | — |
 | `src/ndf/core/plan/review_units_decide.py` | 変更 | #4369 の `Unit` に並列で使う欄を足す | — | — |
-| `src/ndf/progress/design_record.py` | 新設 | 承認の記録を組む・照らす・読む | `units_files`・`folding` | `build`・`stale`・`reset_drafts`・`approved_of`・`required`・`mismatches`・`without`・`converted`・`reapproved_of` |
+| `src/ndf/progress/design_record.py` | 新設 | 承認の記録を組む・照らす・読む | `units_files`・`folding` | `build`・`stale`・`reset_drafts`・`approved_of`・`required`・`mismatches`・`without_issues`・`converted`・`reapproved_of` |
 | `src/ndf/progress/units_invoke.py` | 変更 | 単位の読み元を単位のファイルにし、承認と照らし、並列に流す | 下の 3 つ・`units_files` | `prepare`・`run_stage`（変更）・`advance`（新設） |
 | `src/ndf/progress/units_queue.py` | 新設 | マージキューで待つ単位の状態を読む | `github` | `read`・`action` |
 | `src/ndf/progress/units_convert.py` | 新設 | この変更より前の表を単位のファイルへ変換する | `review_units_decide`・`units_files`・`design_record`・`units_sync` | `convert`・`compare` |
@@ -170,6 +170,7 @@ contracts/
 | `load` | 同上 | 新設 | `(tree: Tree, path: str) -> UnitFile` | スキーマとパスを検査して `parse` する |
 | `limits_of` | 同上 | 新設 | `(project: Mapping) -> Limits` | `workflow.review_units` を既定より先に当てる |
 | `collect` | 同上 | 新設 | `(tree, issues, omitted) -> Collected` | 課題ごとの扱いを当て、読むファイルと欠落を返す |
+| `handlings` | 同上 | 新設 | `(tree, listing, issues) -> dict[int, tuple[str, Optional[int]]]` | 課題ごとの（扱い, 統合先）。設計書だけを読む。`listing` は `tree.listing()` の値 |
 | `check` | 同上 | 新設 | `(tree, issues, omitted, limits, criteria, docs: bool) -> Report` | `judge` の結果に、単位のファイルが無い課題の確かめ（欠落の確かめ）を足す。`docs` が真なら、実装計画のタスクの番号が重ならないことと、実装計画と単位のファイルのタスクの集合の一致と、実装計画の 2 つの表の一致も足す |
 | `render_tables` | 同上 | 新設 | `(plan: str, views: Sequence[View]) -> str` | 実装計画の「レビューの単位」と「並列と直列」のセクションを書き直した全文 |
 | `differs` | 同上 | 新設 | `(a: Mapping, b: Mapping) -> bool` | 単位のファイル 2 つの中身が違うかを返す。引数は検査を通した JSON で、`units[].actual_lines` を除いて比べる。配列は要素の順序も比べる。JSON オブジェクトはキーと値を比べ、キーの順序は問わない。型 `UnitFile` に変換せずに比べるので、タスクに `issue` を書いた場合と省いた場合は違いになる。JSON は `documents(tree, paths, listing)` でまとめて読む。ファイルのパスが同じかは呼び出し側が確かめる |
@@ -274,7 +275,11 @@ contracts/
 | `checked.json` | `ndf plan units check` | 上の「コマンド」 |
 | `design-target.json` | `build` | `{"ndf_record": "design-target", "version": 1, "review": {"repo","pr","head","base"}, "sprint_branch": "<ブランチ>", "targets": {"issues","handling","omitted"}, "limits": {"target","max"}, "criteria": {"<課題>": 数}, "units": [...]}` |
 
-承認の回答のイベント（`answered`）の payload に、`design-target.json` の中身をキー `design_target` で持つ。回答の SSOT はイベントで、ファイルは資料を作るための作業用である。ファイルの `ndf_record` は記録の種別で、`build` は前の `design-target.json` をこの種別のものだけ消し、名前が空いているときだけ公開する（`checked.json` と同じ）。ほかのファイルは変えずに `RecordUnreadable` にする。
+承認の回答のイベント（`answered`）の payload は、承認の記録をキー `design_target` で持つ。回答の SSOT はイベントで、ファイルは資料を作るための作業用である。回答イベントの `design_target` には `build` または `converted` が返した記録（課題を外す回答では `without_issues` が返した記録）を保存する。`ndf_record` は作業用ファイルの保存時にだけ付ける。
+
+`build` が読む 4 つの入力は、保存先の直下の通常ファイルに限る。シンボリックリンクはたどらない。理由の文に載せるコミットの ID は、ID の形（16 進の 40 桁か 64 桁）を確かめた値だけにする。保存先の外にあるファイルの中身が、停止の理由に出ないようにするためである。
+
+ファイルの `ndf_record` は記録の種別で、`build` は前の `design-target.json` をこの種別のものだけ消し、名前が空いているときだけ公開する（`checked.json` と同じ）。ほかのファイルは変えずに `RecordUnreadable` にする。
 
 ### 関数の仕様
 
@@ -284,11 +289,13 @@ contracts/
 | `build` | 同上 | 新設 | `(record_dir: Path) -> dict` | 3 つのファイルと `checked.json` から記録を組み、書く |
 | `stale` | 同上 | 新設 | `(record: Mapping, repo, pr, head, base) -> list[str]` | 今の PR と記録の違い |
 | `reset_drafts` | 同上 | 新設 | `(v, stage: stages.StageDef, why: str) -> list[EventDraft]` | 工程の先頭から設計承認ゲートまでを未了に戻すイベント |
-| `approved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「ドキュメントレビュー」の最新の回答が承認なら、その `design_target`。後の変更要求があれば None |
+| `approved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「ドキュメントレビュー」の最新の回答が承認なら、その `design_target`。後の変更要求か、設計承認ゲートのステップを未了に戻すイベントがあれば None |
 | `mismatches` | 同上 | 新設 | `(record, tree, context) -> list[str]` | 設計書の決定 11 の表の 4 つの比較（単位のファイル・スプリントの課題・課題ごとの扱いと統合先・実装計画を省いた課題）。スプリントの課題は全体を比べ、ほかの比較は記録の `targets.issues` に絞る |
-| `without` | 同上 | 新設 | `(record, drop, files) -> dict` | 課題を外す回答の記録の絞り込み。外せない形なら `Refused` |
-| `converted` | 同上 | 新設 | `(repo, head, branch, context, limits, report) -> dict` | 変換の再承認の記録。`design-target.json` と同じ形で、`sprint_branch` は `branch`、`review.pr` は null、`head` は単位のファイルを含むコミット |
+| `without_issues` | 同上 | 新設 | `(record, drop, files) -> dict` | 課題を外す回答の記録の絞り込み。外せない形なら `Refused` |
+| `converted` | 同上 | 新設 | `(repo, head, branch, context, limits, checked: Checked) -> dict` | 変換の再承認の記録。`design-target.json` と同じ形で、`sprint_branch` は `branch`、`review.pr` は null、`head` は単位のファイルを含むコミット |
 | `reapproved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「実装」の最新の回答が承認なら、その `design_target` |
+
+`Checked` は `design_record.py` の型で、`report`（`units_files.check` が返した `Report`）と `criteria`（`check` に渡した、課題ごとの受け入れ条件の数）を持つ。`Report` は受け入れ条件の数を持たないので、呼び手が 2 つを組にして `converted` へ渡す。
 
 ### 承認ゲートとのつなぎ
 
@@ -302,7 +309,7 @@ contracts/
 | `run.approved_seen` | 返す辞書に `design_target` を含める |
 | `folding.StepProgress._recorded` | 未了に戻すイベントの対象が待ちのステップなら、`waiting` を消す |
 
-**課題を外す回答**（`--drop`）: `without` が記録を残る課題へ絞り、承認の回答の `design_target` にする。
+**課題を外す回答**（`--drop`）: `without_issues` が記録を残る課題へ絞り、承認の回答の `design_target` にする。
 
 | 記録の欄 | 絞り方 |
 | --- | --- |
@@ -317,13 +324,13 @@ contracts/
 
 `mismatches` は、最初にスプリントの課題を比べる。文脈の今の `issues`（`--drop` があれば外した後の値）の全体が、記録の `targets.issues` と同じでなければ違いにする。承認の後に課題を追加しても、見落とさないためである。
 
-扱い・統合先と省いた課題の比較は、記録の `targets.issues` の課題に絞る。今の `_dropped` は文脈の `issues` だけを変えるので、文脈の `plan_omitted` と設計書の「設計の結果」の表には外した課題が残るためである。`collect` と `lineup_from_files` も、記録の課題だけを読む。
+扱い・統合先と省いた課題の比較は、記録の `targets.issues` の課題に絞る。今の `_dropped` は文脈の `issues` だけを変えるので、文脈の `plan_omitted` と設計書の「設計の結果」の表には外した課題が残るためである。`mismatches` が扱いを読む `handlings` も、`collect` と `lineup_from_files` も、記録の課題だけを読む。
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 扱い |
 | --- | --- | --- |
-| `build` | 4 つのファイルのどれかが無い・読めない | 資料を出さず、`reset_drafts`。理由にファイル名 |
+| `build` | 4 つのファイルのどれかが無い・読めない・通常ファイルでない | 資料を出さず、`reset_drafts`。理由にファイル名 |
 | `stale` | PR を読めない | `model.Refused`（待ちのまま。今の `github_observe` と同じ） |
 | `approved_of` | 承認の回答に `design_target` が無い | None（記録を取れない。決定 11 の表） |
 | `mismatches` | 記録の HEAD が手元に無い | 取得を 1 回試し、無ければ理由に載せる |
@@ -334,7 +341,7 @@ contracts/
 | --- | --- | --- | --- |
 | `required` | `standard`・`legacy-refactor` が真 | 古い保存した定義は偽 | — |
 | `build`・`stale` | 記録の形 | head だけ違う、base だけ違う | ファイルの欠け |
-| `approved_of` | 承認 | 承認の後の変更要求、MVV の回答 | payload に記録が無い |
+| `approved_of` | 承認 | 承認の後の変更要求、承認の後に未了へ戻したゲート、MVV の回答 | payload に記録が無い |
 | `mismatches` | 記録と同じ | `--drop` の後は違いなし | 承認の後にスプリントへ課題を追加した |
 | ゲートとのつなぎ | 違えば未了へ戻る、承認の payload に記録、MVV の判定の対象が head は同じで base だけ違えば未了へ戻る | 省いた課題・統合元と統合先の両方を外し、残りが照合を通る | 混ざったファイルの課題を外す、統合元か統合先の片方を外す |
 
