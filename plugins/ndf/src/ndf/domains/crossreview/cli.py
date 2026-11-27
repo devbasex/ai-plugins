@@ -640,7 +640,7 @@ def _ready(args: argparse.Namespace) -> tuple[RunConfig, Optional[str]] | int:
 
 
 def _begin_run(args: argparse.Namespace) -> Optional[int]:
-    """`--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out` の前の起動が書いた出力を消し（`outputs.clear_previous`）、`--repo` の対象のリポジトリを
+    """`--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out` の前の起動が書いた出力を空に戻し（`outputs.check` で全部を確かめてから `outputs.clear_previous`）、`--repo` の対象のリポジトリを
     子の `gh` へ渡す。`--repo` の形が違うか、`--reviewed-base-out` を `--reviewed-out` なしで渡すか、出力先が重なるか、出力先に
     書けなければ、止まった結果を出した終了コードを返す（書かれないと分かっている出力のために、レビューの token と時間を使わない。#3702）。"""
     if args.reviewed_base_out and not args.reviewed_out:
@@ -657,9 +657,20 @@ def _begin_run(args: argparse.Namespace) -> Optional[int]:
         slug = repo.resolve_target_repo(args.repo, None, Path.cwd()).slug if args.repo is not None else None
     except repo.RepoUnresolved as exc:
         return _stop("invalid", str(exc))
+    stopped = _settle_outputs(args)
+    if stopped is not None:
+        return stopped
+    if slug is not None:
+        os.environ[GH_REPO_ENV] = slug
+    return None
+
+
+def _settle_outputs(args: argparse.Namespace) -> Optional[int]:
+    """出力先をすべて確かめてから、前の起動の出力を片付ける。止めるなら結果を出した終了コードを返す。"""
     for stale in _output_paths(args):
         try:
-            outputs.clear_previous(Path(stale))
+            # 全部の出力先を確かめてから片付ける。後の出力先で止まるときに先の出力を空にしない（PR 4638 の r1-9）
+            outputs.check(Path(stale))
         except outputs.Unowned:
             # NDF が書いたと確かめられない既存のファイルは利用者のデータかもしれないので消さない（PR 4638 の C4）
             return _stop(
@@ -670,8 +681,11 @@ def _begin_run(args: argparse.Namespace) -> Optional[int]:
         except OSError as exc:
             # 出力先の不備は始めに分かるので、相手役を起動する前に止める（レビューの後に書けないと分かっても遅い。#3702）
             return _stop("precondition", f"出力先 {stale} に書けない: {exc}")
-    if slug is not None:
-        os.environ[GH_REPO_ENV] = slug
+    for stale in _output_paths(args):
+        try:
+            outputs.clear_previous(Path(stale))
+        except OSError as exc:
+            return _stop("precondition", f"出力先 {stale} の前の出力を片付けられない: {exc}")
     return None
 
 
@@ -739,7 +753,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     `--reviewed-out` を渡せば、今回の起動で相手役の全員が読めた最後のラウンドの HEAD をそのファイルへ書く（#3879。一部が
     読めなかったラウンドの HEAD は書かない。PR 3944 の r2-3）。最後のラウンドの
-    修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。前の起動が書いた出力は始めに消す（空のファイルは消さずに使い、NDF が書いたと確かめられない中身のあるファイルは消さずに止まる。`outputs.clear_previous`）ので、
+    修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。前の起動が書いた出力は始めに空に戻す（空のファイルはそのまま使い、NDF が書いたと確かめられない中身のあるファイルは変えずに止まる。`outputs.check`・`outputs.clear_previous`）ので、
     書けなかった起動の後に前の起動の値が残らない。
 
     単位の経路の引数（#4369）: `--repo` は保存済みの状態と作業場所のリモートより優先する対象のリポジトリで、子の `gh` にも
@@ -849,9 +863,10 @@ def _parser() -> argparse.ArgumentParser:
 
 # 出力の 3 つの引数に共通する、既存のファイルの扱い（`outputs.clear_previous`。PR 4638 の C4、利用者が選んだ判断 A）
 _OUTPUT_RULE = (
-    "前の起動が書いた出力は始めに消す（書けなかった起動の後に前の値を残さない）。消すのは、中身が出力の隣の記録"
-    "（.<名前>.ndf-output.json）と一致するファイルだけである。空のファイルは消さずに使う。記録と一致しない中身のあるファイル・"
-    "シンボリックリンク・NDF の記録と読めない記録があれば、何も消さずに、レビューを始めずに precondition で停止する"
+    "前の起動が書いた出力は始めに空に戻す（書けなかった起動の後に前の値を残さない。ファイルと権限は残す）。空に戻すのは、"
+    "出力の隣の記録（.<名前>.ndf-output.json。権限 0600）が指すのと同じファイルで、中身が記録と一致するものだけである。"
+    "空のファイルはそのまま使う。同じ中身でも記録と別のファイル・記録の無い中身のあるファイル・シンボリックリンク・NDF の記録と"
+    "読めない記録があるか、出力か記録を作れなければ、どの出力先も変えずに、レビューを始めずに precondition で停止する"
 )
 
 

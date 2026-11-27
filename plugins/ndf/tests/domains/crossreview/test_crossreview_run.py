@@ -197,7 +197,7 @@ def test_reviewed_out_is_not_written_when_no_reviewer_answers_this_run(wt: Path,
     code, got = _run(capsys, monkeypatch, Fake(state_dir, {"codex": [FAIL, FAIL], "kiro": [FAIL, FAIL]}), wt, "--reviewed-out", str(out))
     # 全員が読めなければ precondition で止まる（#3893）
     assert got["cause"]["kind"] == "precondition"
-    assert not out.exists()
+    assert out.read_text() == ""  # 前の起動の出力は同じファイルのまま空に戻す（PR 4638 の r1-3）
 
 
 def test_issue_2370_limit_with_unresolved_is_incomplete_with_gaps_in_outputs(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
@@ -693,7 +693,7 @@ def test_reviewed_out_skips_a_round_some_reviewers_could_not_read(wt: Path, tmp_
     # 状態の保存先が違う起動（差分のレビュー）も、前の起動が書いた出力を片付ける（PR 4638 の r1-1）
     again = Fake(tmp_path / "st2", {"codex": [FAIL, FAIL], "kiro": [[]], "claude": [FAIL]})
     _run(capsys, monkeypatch, again, wt, "--reviewed-out", str(out))
-    assert not out.exists()
+    assert out.read_text() == ""  # 前の起動の出力は同じファイルのまま空に戻す（PR 4638 の r1-3）
 
 
 def test_focus_comes_from_the_main_directory_not_the_pr_head(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
