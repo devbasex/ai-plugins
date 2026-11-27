@@ -97,7 +97,7 @@ plugins/ndf/
 | worker の結果（`ndf worker run`） | 下の「worker の結果の確かめ」の文脈の形の確かめ | `ok` では欠け、`gate` では `missing` |
 
 - `release_answer_errors(result: str, version: Optional[str]) -> list[str]` は、`result` が `released` のときだけ、`{"product_version": version}` を文脈のスキーマ全体（`contracts.internal.CONTEXT`）で確かめた誤りを返す。`rejected` の回答は `version` を持たなくてよいので空を返す。`progress/plan/__init__.py` に置くのは、`external.py` が既にこのモジュールから `RELEASE_RESULTS` を読んでおり、向きの逆の依存を足さずに済むためである
-- 外の回答は、回答のファイルを読む時点で断る。承認の取り込み（`answering._outputs`）まで進んでから断ると、理由が「工程への回答が運ぶ値が文脈の形に合わない」になり、どのファイルのどの項目を直せばよいかが出ないためである。読む時点で断れば、`ndf lanes release` と同じ規則・同じ文で、回答のファイルの `version` の誤りとして出る
+- 外部からの `released` の回答で `version` が配布識別子の制約に合わない場合は、`external.read_answer` でファイルを読んだ時点でエラーを返す。制約に合う回答と `rejected` の回答は、今と同じく取り込む。読む時点で断るのは、承認の取り込み（`answering._outputs`）まで進んでから断ると、理由が「工程への回答が運ぶ値が文脈の形に合わない」になり、どのファイルのどの項目を直せばよいかが出ないためである。読む時点で断れば、`ndf lanes release` と同じ規則・同じ文で、回答のファイルの `version` の誤りとして出る
 
 `ndf worker run` がバージョン番号の形を確かめるときは、`$defs/version_number` を参照して確かめる（下の「worker の結果の確かめ」）。正規表現をコードに写さない。
 
@@ -149,10 +149,10 @@ plugins/ndf/
 | `released_answer` | `src/ndf/progress/run.py` | 新設 | `released_answer(answers: StageAnswers) -> Optional[Recorded]` | `answers.release_gate()` が返したリリース承認ゲートへの最後の回答がオーガナイザーの承認で、次の事象が値を書いていれば、`product_version` と、一緒に書いた `delivery`・`release_store`（無ければ `None`）を返す |
 | `StageRun.released` | `src/ndf/progress/invoke.py` | 新設 | `released: Callable[[], Optional[Recorded]] = _no_released`（データクラスの欄。既定は `None` を返す関数） | 記録済みの値を読む関数を、ステップの呼び出しへ渡す。呼ばれるまで履歴をたどらない |
 | `_run_step`・`_prepare` | `src/ndf/progress/run.py` | 変更 | 今のまま | ステップを 1 つ呼ぶごとに `StageAnswers(v, s.name)` を 1 つ作り、`approved_seen` に渡す。ステップがプランのとき（`invoke.kind_of(step) == invoke.PLAN`）は、同じ `StageAnswers` で `released_answer` を初回の呼び出しで 1 回だけ打つ関数（`functools.cache` で包む）を `StageRun.released` に入れる。ここでは呼ばない |
-| `PreparedPlan` | `src/ndf/progress/invoke.py` | 変更 | 欄 `released: Optional[Recorded]` を足す | 組んだか読んだ `values.json` が今持つ記録済みの値を渡す |
-| `prepare_plan` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 入力の検査で回している作業の一覧（`route.kinds_of`）を `uses_released` に渡して判定する。使うプランのときだけ `run.released()` を呼び、`write_values` に渡して最初の書き込みで `released_version`・`released_delivery`・`released_store` まで書く。使わないプランでは呼ばない |
-| `_prepared` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 使い回す `values.json` から `released_of` で読んだ値を `PreparedPlan.released` に入れる。判定はしない |
-| `plan_path` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | `route.render` の代わりに `route.rendered` でプランを組み、一緒に返る作業の一覧を `uses_released` に渡して判定する。`uses_released` が真のときだけ `run.released()` を呼ぶ。その値が `PreparedPlan.released` と違うときだけ、プランを書く前に `write_released(work_dir, 値)` を打つ。偽なら `run.released()` を呼ばない |
+| `PreparedPlan` | `src/ndf/progress/invoke.py` | 変更 | 欄 `released: Optional[Recorded]` と `uses_released: Optional[bool]` を足す | 組んだか読んだ `values.json` が今持つ記録済みの値を渡す。`uses_released` は、`prepare_plan` が初回に判定した結果を `plan_path` へ引き継ぐ。`_prepared` が使い回す回は `None`（判定していない） |
+| `prepare_plan` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 入力の検査で回している作業の一覧（`route.kinds_of`）を `uses_released` に渡して判定し、結果を `PreparedPlan.uses_released` に入れる。使うプランのときだけ `run.released()` を呼び、`write_values` に渡して最初の書き込みで `released_version`・`released_delivery`・`released_store` まで書く。使わないプランでは呼ばない |
+| `_prepared` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | 使い回す `values.json` から `released_of` で読んだ値を `PreparedPlan.released` に入れる。判定はしない（`PreparedPlan.uses_released` は `None`） |
+| `plan_path` | `src/ndf/progress/invoke.py` | 変更 | 今のまま | `PreparedPlan.uses_released` が `None` でない（工程の初回で、`prepare_plan` が判定済み）ときは、今のまま `route.render` でプランを組み、その判定をそのまま使う。作業の一覧を取り直さず、`uses_released` も呼ばない。`None`（保存済みの `values.json` を使い回してプランを再開する回）のときだけ、`route.render` の代わりに `route.rendered` でプランを組み、一緒に返る作業の一覧を `uses_released` に渡して判定する。判定が真のときだけ `run.released()` を呼ぶ。その値が `PreparedPlan.released` と違うときだけ、プランを書く前に `write_released(work_dir, 値)` を打つ。偽なら `run.released()` を呼ばない |
 | `_built` | `src/ndf/core/route/__init__.py` | 新設 | `_built(t: Template, given: Mapping[str, Value], local_tests: bool) -> tuple[dict[str, Any], dict[str, Any]]` | 今の `render` の中身を移し、組んだプランと、埋める前に開いたプランの形（`expanded` の戻り値）を返す |
 | `rendered` | `src/ndf/core/route/__init__.py` | 新設 | `rendered(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> tuple[dict[str, Any], list[str]]` | `_built` が返した開いた形から `work_names` で作業の名前（重なりを除く）を取り、組んだプランと一緒に返す |
 | `render` | `src/ndf/core/route/__init__.py` | 変更 | 今のまま | `_built` の 1 つ目の値を返す。`work_names` は打たない |
@@ -165,11 +165,11 @@ plugins/ndf/
 
 判定は `values.json` に残さず、プランを書くたびに今のテンプレートから求める。判定を残すと、NDF を更新して同じ名前のプランに `release` の作業が加わったとき、進行中の工程を再開しても前の NDF が残した判定が使われる。その結果、承認済みの配布識別子が渡らないまま worker が起動してしまう。
 
-判定には、プランを組むときに開いたテンプレートの形をそのまま使い、判定のためにテンプレートを開き直さない。`route.render` は差し込みを埋める前に、テンプレートの `use` を開いた形（`route.expanded`）を作る。作業の名前はこの形から取れるので、`route.rendered` が組んだプランと一緒に返す。これで、`values.json` を使い回す回も、判定のための展開が増えない。作業の一覧の走査（`work_names`）は、判定の要る `plan_path` の 1 回だけになる。工程の初回は、`prepare_plan` が入力の検査のために作業の一覧をすでに回しているので、その一覧を判定にも使う。
+判定には、プランを組むときに開いたテンプレートの形をそのまま使い、判定のためにテンプレートを開き直さない。`route.render` は差し込みを埋める前に、テンプレートの `use` を開いた形（`route.expanded`）を作る。作業の名前はこの形から取れるので、`route.rendered` が組んだプランと一緒に返す。これで、`values.json` を使い回す回も、判定のための展開が増えない。工程の初回は、`prepare_plan` が入力の検査のために作業の一覧をすでに回しているので、その一覧で判定し、結果を `PreparedPlan.uses_released` で `plan_path` へ引き継ぐ。初回の `plan_path` は作業の一覧を取り直さない。作業の一覧の走査（`work_names`）を `plan_path` で打つのは、保存済みの値からプランを再開する回の 1 回だけになる。どの回も、判定は 1 つの一覧で 1 回だけ行う。
 
 #### 履歴の走査
 
-**リリース承認ゲートの回答は、プランが配布識別子を使うと分かってから探す。** プランが配布識別子を使うかは、作業の一覧（`prepare_plan` の入力の検査の一覧と、`plan_path` の `route.rendered` の一覧）を見るまで分からない。工程の進行は、プランを呼ぶ前に探すかどうかを決めない。探す関数を `StageRun.released` に入れて渡し、`prepare_plan` と `plan_path` が `uses_released` を真と判定したときだけ呼ぶ。`approved_seen` は、今と同じく直近の承認で探索を終える。そのため、配布識別子を使わないプランでは、リリース承認が無くても残りの履歴をたどらない。
+**リリース承認ゲートの回答は、プランが配布識別子を使うと分かってから探す。** プランが配布識別子を使うかは、作業の一覧（初回は `prepare_plan` の入力の検査の一覧、再開する回は `plan_path` の `route.rendered` の一覧）を見るまで分からない。工程の進行は、プランを呼ぶ前に探すかどうかを決めない。探す関数を `StageRun.released` に入れて渡し、判定が真のときだけ `prepare_plan` と `plan_path` が呼ぶ。`approved_seen` は、今と同じく直近の承認で探索を終える。そのため、配布識別子を使わないプランでは、リリース承認が無くても残りの履歴をたどらない。
 
 **配布識別子を使うプランでも、履歴は 1 回しかたどらない。** `approved_seen` と `released_answer` は同じ `StageAnswers` を使い、走査を共有する。`approved_seen` が直近の承認で止まった後に `released_answer` を呼ぶと、止まった所から古い方へ続け、既に見た事象は見直さない。走査は、たどった事象ごとに両方の条件を照らすので、`approved_seen` の途中で見たリリース承認ゲートへの回答（たとえば、より新しい却下の回答）も覚えている。
 
@@ -208,7 +208,7 @@ plugins/ndf/
 
 | 案 | 判定のために増える処理 | NDF を更新してプランに `release` が加わった後の再開 | 採否 |
 | --- | --- | --- | --- |
-| `route.render` と同じ展開から作業の一覧を受け取る（`route.rendered`） | `plan_path` で作業の一覧の走査が 1 回（展開は増えない） | 今のテンプレートで判定する | 採る |
+| `route.render` と同じ展開から作業の一覧を受け取る（`route.rendered`） | 保存済みの値からプランを再開する回の `plan_path` で、作業の一覧の走査が 1 回（展開は増えない）。工程の初回は `prepare_plan` の判定を引き継ぐので増えない | 今のテンプレートで判定する | 採る |
 | `plan_path` の前に `route.kinds_of` で判定し直す | プランを組むたびに展開と走査が各 1 回（上の費用） | 今のテンプレートで判定する | 採らない。同じ結果を得るのに展開を 1 回余分に回す |
 | 判定を `values.json` に残す | 無い | 前の NDF が残した判定を使い、承認済みの配布識別子が渡らない | 採らない。理由は上の「判定は `values.json` に残さず」で始まる段落 |
 
