@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from ndf import identity
+from ndf.adapters import launch_settings as ls
 from ndf.adapters import model_choice as mc
 
 NOW = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
@@ -21,9 +22,11 @@ SCOPE = {"repo": "/r", "stage": "impl", "runtime": "claude"}
 
 
 @pytest.fixture
-def store(monkeypatch) -> Path:
+def store(monkeypatch, tmp_path) -> Path:
+    """`_repo` が作るリポジトリの、実験の記録のディレクトリ。"""
     monkeypatch.delenv("NDF_USAGE_DIR", raising=False)
-    return mc.records_dir()
+    (tmp_path / "repo" / ".git").mkdir(parents=True)
+    return mc.repo_store(mc.records_dir(), ls.repo_key(tmp_path / "repo"))
 
 
 @pytest.fixture
@@ -82,7 +85,7 @@ def _assign(
         "unit": unit,
         "stage": stage,
         "runtime": "claude",
-        "repo": repo or mc.repo_key(root),
+        "repo": repo or ls.repo_key(root),
         "arms": arms,
         "probs": [1 / len(arms)] * len(arms),
         "chosen": chosen,
@@ -107,7 +110,7 @@ def test_the_first_launch_of_a_unit_draws_and_the_next_takes_the_same_arm(tmp_pa
     assert (first.model, first.effort, first.model_source) == ("sonnet", "medium", mc.Source.EXPERIMENT)
     assert first.arm == again.arm == {"model": "sonnet", "effort": "medium"}
     assert row["chosen"] == 1 and row["phase"] == "burn_in" and row["probs"] == pytest.approx([1 / 3] * 3)
-    assert row["repo"] == mc.repo_key(root) and row["mode"] == "standard" and row["unit"] == "r1:impl"
+    assert row["repo"] == ls.repo_key(root) and row["mode"] == "standard" and row["unit"] == "r1:impl"
     assert row["key"] == mc.compatibility_key(row["arms"], mc.metric_of("impl"))
     assert (store / "launch-experiments-2026-11.jsonl").is_file()
 
@@ -221,7 +224,7 @@ def _candidates(root: Path, store: Path, entry=None, now: datetime = NOW, repo=N
     arms = list(mc.table(root).arms["impl"]["claude"])
     rows = mc.read_experiments(now - timedelta(days=60), store)
     key = mc.compatibility_key(arms, mc.metric_of("impl"))
-    return mc.candidates(arms, rows, entry, now, mc.Where(repo or mc.repo_key(root), "impl", "claude", key))
+    return mc.candidates(arms, rows, entry, now, mc.Where(repo or ls.repo_key(root), "impl", "claude", key))
 
 
 def test_two_refusals_in_seven_days_drop_the_arm_until_they_age(tmp_path, store, clock):
@@ -263,7 +266,7 @@ def test_a_refused_arm_is_not_drawn(tmp_path, store, clock, draw):
 def _weights(store: Path, root: Path, **entry) -> dict:
     arms = list(mc.table(root).arms["impl"]["claude"])
     base = {
-        "repo": mc.repo_key(root),
+        "repo": ls.repo_key(root),
         "stage": "impl",
         "runtime": "claude",
         "key": mc.compatibility_key(arms, mc.metric_of("impl")),
@@ -430,11 +433,11 @@ def test_a_failed_prune_is_retried_and_the_launch_goes_on(tmp_path, store, clock
     assert not old.exists() and (store / "launch-pruned").read_text(encoding="utf-8") == "2026-11"
 
 
-def test_prune_keeps_months_a_longer_window_of_another_repo_uses(tmp_path, store):
-    # 呼んだ側は 60 日でも、記録に 200 日の割り付けがあれば 200 + 30 日より前に終わった月だけを消す
+def test_prune_keeps_months_a_longer_window_of_another_worktree_uses(tmp_path, store):
+    # 呼んだ側は 60 日でも、同じリポジトリの記録に 200 日の割り付けがあれば 200 + 30 日より前に終わった月だけを消す
     root = _repo(tmp_path)
     files = {m: _month_file(store, m) for m in ("2026-01", "2026-05")}
-    _assign(store, root, "long", 1, datetime(2026, 5, 2, tzinfo=UTC), repo="/other", window=200)
+    _assign(store, root, "long", 1, datetime(2026, 5, 2, tzinfo=UTC), window=200)
     mc.prune(NOW, 60, store)
     assert [m for m, p in files.items() if p.exists()] == ["2026-05"]
 
@@ -503,7 +506,7 @@ def test_fallback_writes_to_the_store_the_choice_used(tmp_path, monkeypatch, clo
     draw["x"] = 0.9
     choice = _pick(root, unit="u", environ={"NDF_USAGE_DIR": str(other)})
     assert mc.base_fallback(choice, "model_refused") is not None
-    assert [r["switched"] for r in _rows(other, "launch_error")] == [True]
+    assert [r["switched"] for r in _rows(mc.repo_store(other, ls.repo_key(root)), "launch_error")] == [True]
     assert _pick(root, unit="u", environ={"NDF_USAGE_DIR": str(other)}).assign_id is None
 
 
@@ -524,8 +527,8 @@ def test_the_repo_key_of_a_linked_worktree_is_the_main_git_dir_without_git(tmp_p
     tree.mkdir()
     (tree / ".git").write_text(f"gitdir: {main / '.git' / 'worktrees' / 'w'}\n", encoding="utf-8")
     monkeypatch.setattr("subprocess.run", lambda *a, **k: pytest.fail("git を起動した"))
-    assert mc.repo_key(tree) == mc.repo_key(main) == os.path.realpath(main / ".git")
-    assert mc.repo_key(tmp_path) == os.path.realpath(tmp_path)
+    assert ls.repo_key(tree) == ls.repo_key(main) == os.path.realpath(main / ".git")
+    assert ls.repo_key(tmp_path) == os.path.realpath(tmp_path)
 
 
 def test_a_prune_another_launch_is_running_is_skipped_without_waiting(store):
@@ -535,3 +538,56 @@ def test_a_prune_another_launch_is_running_is_skipped_without_waiting(store):
     with FileLock(str(store / "launch-pruned.lock")):
         mc.prune(NOW, 60, store)
     assert old.exists() and not (store / "launch-pruned").exists()
+
+
+def test_a_month_that_cannot_be_read_stops_the_prune_until_the_next_launch(store):
+    old = _month_file(store, "2020-01")
+    _month_file(store, "2026-10").chmod(0o644)  # 所有者だけの形でない月は、長い window_days の行を持つかもしれない
+    with pytest.raises(OSError):
+        mc.prune(NOW, 60, store)
+    assert old.exists() and not (store / "launch-pruned").exists()
+
+
+def test_each_repo_keeps_its_own_window_whichever_prunes_first(tmp_path, monkeypatch):
+    # 60 日と 300 日のリポジトリ。どちらが先に掃除しても、各リポジトリは自分の設定で消し（300 + 30 日前は 2026-02-14）、
+    # 相手のディレクトリは設定によらない 365 + 30 日の境でしか消さないので、同じ月が残る
+    monkeypatch.delenv("NDF_USAGE_DIR", raising=False)
+    base = mc.records_dir()
+    now = datetime(2027, 1, 10, tzinfo=UTC)
+    kept = []
+    for order in (("short", "long"), ("long", "short")):
+        dirs = {name: base / f"{order[0]}-first" / name for name in order}
+        for d in dirs.values():
+            for m in ("2026-01", "2026-09"):
+                _month_file(d, m)
+        for name in order:
+            mc.prune(now, {"short": 60, "long": 300}[name], dirs[name])
+        kept.append({name: sorted(mc._month_files(d)) for name, d in dirs.items()})
+    assert kept[0] == kept[1] == {"short": [], "long": ["2026-09"]}
+
+
+def test_prune_sweeps_months_no_setting_uses_from_other_repos(store):
+    # 2027-03-10 から 365 + 30 日前は 2026-02-08。ほかのリポジトリの 2026-01 は消え、2026-02 は境なので残る
+    gone, busy, used = (store.parent / name for name in ("gone", "busy", "used"))
+    _month_file(gone, "2025-12")
+    _month_file(busy, "2026-01")
+    files = {m: _month_file(used, m) for m in ("2026-01", "2026-02")}
+    from filelock import FileLock
+
+    with FileLock(str(busy / "launch-experiments.lock")):
+        mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
+    assert not gone.exists()  # 月のファイルが残らないディレクトリは片付く
+    assert busy.is_dir() and not mc._month_files(busy)  # 記録を書いている間はディレクトリを残す
+    assert [m for m, p in files.items() if p.exists()] == ["2026-02"]
+
+
+def test_records_of_two_repos_are_kept_apart(tmp_path, store, clock):
+    root = _repo(tmp_path)
+    other = tmp_path / "other"
+    (other / ".git").mkdir(parents=True)
+    (other / ".ndf").mkdir()
+    (other / ".ndf" / "launch.json").write_text(json.dumps({"version": 1, "experiments": {}}), encoding="utf-8")
+    _pick(root, unit="u")
+    _pick(other, unit="u")
+    assert [r["repo"] for r in _rows(store, "assign")] == [ls.repo_key(root)]
+    assert [r["repo"] for r in _rows(mc.repo_store(store.parent.parent, ls.repo_key(other)), "assign")] == [ls.repo_key(other)]
