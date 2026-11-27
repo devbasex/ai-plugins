@@ -102,9 +102,7 @@ class Choice:
 
     `inherited_effort` は、ランタイム自身の effort の環境変数を子へ引き継ぐときの値（そのとき `effort` は None で、
     `--effort` を足さない）。`retry` は引き上げを求めた理由（引数か環境変数の指定の起動は None）で、`raised` は値が実際に
-    変わったか。`store` は選んだときの実験の記録の保存先で、`record_base_switch` が同じ保存先へ書くために持つ。`repo` は選ぶときに
-    解決したリポジトリのキー（同じリクエストの打ち直しが解決し直さないために持つ）。`assigned_at` は割り付けの行の日時で、
-    `observed` が読む月をその月からに絞るために持つ。
+    変わったか。`store` は選んだときの実験の記録の保存先で、`base_fallback` が同じ保存先へ書くために持つ。
     """
 
     layer: str
@@ -124,8 +122,6 @@ class Choice:
     inherited_effort: Optional[str] = None
     retry: Optional[str] = None
     store: Optional[Path] = None
-    repo: Optional[str] = None
-    assigned_at: Optional[str] = None
 
     def cli_args(self) -> list[str]:
         """CLI に渡す引数（表 runtimes の `choice_args` の形。値の無い側は足さない）。"""
@@ -387,11 +383,7 @@ def _from_base(base: Optional[Mapping[str, str]], key: str) -> tuple[Optional[st
 
 @dataclass(frozen=True)
 class Request:
-    """`launch_choice` に渡す起動の手がかり。`charge_to` は手戻りの費用を負う割り付け ID（実験の記録を書くときに使う）。
-
-    `repo` は呼び手が解決済みのリポジトリのキー（同じリクエストの打ち直しが前の値の `Choice.repo` を渡す）。渡されれば git を起動して
-    解決し直さない。
-    """
+    """`launch_choice` に渡す起動の手がかり。`charge_to` は手戻りの費用を負う割り付け ID（実験の記録を書くときに使う）。"""
 
     unit: Optional[str] = None
     charge_to: Optional[str] = None
@@ -400,7 +392,6 @@ class Request:
     argument: tuple[Optional[str], Optional[str]] = (None, None)
     # 起動の引数を誤りの文で指す言い方（モデル・effort の順）。CLI ごとに引数の名前が違う起動（codex の委譲は `-c`）が変える
     argument_at: tuple[str, str] = ("引数 --model", "引数 --effort")
-    repo: Optional[str] = None
 
 
 # --- 実験の記録 --------------------------------------------------------------------------------------
@@ -538,23 +529,6 @@ def append_row(row: Mapping[str, Any], root: Optional[Path] = None) -> bool:
     try:
         with ledger(_utc_now(), root) as led:
             led.append(row)
-    except _STORE_ERRORS as exc:
-        log.warning("実験の記録へ %s の行を書けない: %s", row["kind"], exc)
-        return False
-    return True
-
-
-def append_unread(row: Mapping[str, Any], root: Optional[Path] = None) -> bool:
-    """記録を読まず、ロックも取らずに 1 行足す。書けなければ警告を出して偽。
-
-    割り付けの判断を伴わない追記（拒否と基準の組への切り替え）が使う。`append_row` は割り付けと同じロックを取り、当月の記録を先頭から
-    読むので、並んだ割り付けがロックを持つ間は待つ。切り替えの判断と起動し直しの期限をその待ちに使わせず、読む費用も払わないためである。
-    ロックを持つ書き手と混ざっても行が壊れないように、hook の回答と同じく、毎回、行の前に書きかけを閉じるバイト列を付けて 1 回の
-    `write` で書く（`launch_records.write_row` の `locked=False`）。
-    """
-    try:
-        out = internal.write_record("experiment", row)
-        launch_records.write_row(_month_file(records_dir() if root is None else root, out["at"][:7]), out, locked=False)
     except _STORE_ERRORS as exc:
         log.warning("実験の記録へ %s の行を書けない: %s", row["kind"], exc)
         return False
@@ -809,10 +783,12 @@ def _own(rows: Sequence[Mapping[str, Any]], u: _Unit) -> list[Mapping[str, Any]]
 
 
 def _left_experiment(rows: Sequence[Mapping[str, Any]], u: _Unit, own: Sequence[Mapping[str, Any]]) -> bool:
-    """単位に、期間の中の停止の行（同じリポジトリ・工程・ランタイム）か、基準の組への切り替えの行（`base_switch`）があるか。"""
+    """単位に、期間の中の停止の行（同じリポジトリ・工程・ランタイム）か、基準の組への切り替えの行があるか。"""
     ids = {a["assign_id"] for a in own}
     return any(
-        _row_time(r) >= u.start and (_halted(r, u.unit, u.where) or (r["kind"] == "base_switch" and r["assign_id"] in ids)) for r in rows
+        _row_time(r) >= u.start
+        and (_halted(r, u.unit, u.where) or (r["kind"] == "launch_error" and r["switched"] and r["assign_id"] in ids))
+        for r in rows
     )
 
 
@@ -824,9 +800,7 @@ def _from_arm(arm: Mapping[str, str], key: str) -> tuple[Optional[str], Source]:
 def _with_assignment(choice: Choice, row: Mapping[str, Any]) -> Choice:
     arm = row["arms"][row["chosen"]]
     (model, ms), (effort, es) = _from_arm(arm, "model"), _from_arm(arm, "effort")
-    return replace(
-        choice, model=model, effort=effort, model_source=ms, effort_source=es, assign_id=row["assign_id"], arm=arm, assigned_at=row["at"]
-    )
+    return replace(choice, model=model, effort=effort, model_source=ms, effort_source=es, assign_id=row["assign_id"], arm=arm)
 
 
 def _decide_assignment(led: Ledger, u: _Unit, choice: Choice) -> Choice:
@@ -888,78 +862,33 @@ def _prepared_store(env: Mapping[str, str], now: datetime, window_days: int) -> 
     return store
 
 
-def base_choice(choice: Choice) -> Optional[Choice]:
-    """割り付けた基準でない組の起動がモデルを理由に拒否されたときの、基準の組の値。記録は書かない（`base_fallback` と `record_base_switch` が書く）。
+def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
+    """割り付けた基準でない組の起動がモデルを理由に拒否されたとき、基準へ切り替えたことを持つ `launch_error` の行を書き、基準の組の値を返す。
 
-    基準の組と割り付けの無い起動は None。引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、
-    基準の組から引き上げ直す。
+    基準の組と割り付けの無い起動は None。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなくても基準の値を返す。
+    引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、基準の組から引き上げ直す。
     """
     if choice.assign_id is None or choice.arm is None or choice.arm == choice.base_arm:
         return None
+    row = {"kind": "launch_error", "at": _time_text(_utc_now()), "assign_id": choice.assign_id, "stage": choice.stage}
+    append_row({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}, choice.store)
+    log.warning("組 %s は起動できなかったので、基準の組で続ける（工程 %s・単位 %s）", _arm_text(choice.arm), choice.stage, choice.unit)
     (model, ms), (effort, es) = _from_base(choice.base_arm, "model"), _from_base(choice.base_arm, "effort")
     back = replace(choice, model=model, effort=effort, model_source=ms, effort_source=es, assign_id=None, arm=None, raised=False)
     return _raised_once(back) if choice.retry is not None else back
 
 
-def record_refusal(choice: Choice, reason: str) -> None:
-    """組 `choice` の起動がモデルを理由に拒否されたことを持つ `launch_error` の行を書く。
-
-    呼び手は拒否を受けたその場で、基準の組で起動し直す前に呼ぶ。基準の組の応答を待つ間に並んで割り付ける起動も、`candidates` で
-    この拒否を数えて同じ組を選ばないようにするためである。行は割り付けと同じ保存先（`choice.store`）へ `append_unread` で書く。
-    書けなければ警告を出して呼び手へ戻る（例外は投げない）。
-    """
-    if choice.assign_id is None or choice.arm is None:
-        return
-    row = {"kind": "launch_error", "at": _time_text(_utc_now()), "assign_id": choice.assign_id, "stage": choice.stage}
-    append_unread({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason}, choice.store)
-
-
-def record_base_switch(choice: Choice) -> None:
-    """拒否された組 `choice` の単位が基準の組で起動し直したことを持つ `base_switch` の行を書き、警告を出す。
-
-    呼び手は基準の組の子プロセスを実際に起動した（回答の `launched` が真）と確かめた後にだけ呼ぶ。起動前に止まった切り替えを、
-    切り替え済みと記録しないためである。行は割り付けと同じ保存先（`choice.store`）へ `append_unread` で書く。書けなければ警告を
-    出して呼び手へ戻る（例外は投げない）。
-    """
-    if choice.assign_id is None or choice.arm is None:
-        return
-    append_unread({"kind": "base_switch", "at": _time_text(_utc_now()), "assign_id": choice.assign_id}, choice.store)
-    log.warning("組 %s は起動できなかったので、基準の組で続ける（工程 %s・単位 %s）", _arm_text(choice.arm), choice.stage, choice.unit)
-
-
-def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
-    """起動前の処理: `base_choice` の値を返し、切り替えられるなら拒否の行（`record_refusal`）を書く。
-
-    切り替えの行は書かない。呼び手が基準の組で起動し、`launched` が真と確かめてから `record_base_switch` で書く。拒否の行を
-    書けなくても、基準の組の値を返す。
-    """
-    back = base_choice(choice)
-    if back is not None:
-        record_refusal(choice, reason)
-    return back
-
-
 def observed(choice: Choice, model: str) -> None:
     """割り付けを受けた単位の、引き上げでも基準への切り替えでもない起動が返した実際のモデルを、割り付け ID ごとに最初の 1 回だけ足す。
 
-    読むのは割り付けの行の月から今月まで（同じ割り付け ID の `observed` の行は割り付けの後にしか無い）。割り付けの日時が無ければ
-    割り付けの期間の上限の日数を読む。掃除が消した月のファイルは無いとして読む。書けなければ警告を出して続ける。
+    読むのは割り付けの期間の上限の日数で、掃除が消した月のファイルは無いとして読む。書けなければ警告を出して続ける。
     """
     if choice.assign_id is None or choice.arm is None or choice.raised:
         return
-    since = _row_time({"at": choice.assigned_at}) if choice.assigned_at is not None else _utc_now() - timedelta(days=MAX_WINDOW_DAYS)
     try:
-        with ledger(since, choice.store) as led:
+        with ledger(_utc_now() - timedelta(days=MAX_WINDOW_DAYS), choice.store) as led:
             if not any(r["kind"] == "observed" and r["assign_id"] == choice.assign_id for r in led.rows):
-                led.append(
-                    {
-                        "kind": "observed",
-                        "at": _time_text(_utc_now()),
-                        "assign_id": choice.assign_id,
-                        "arm": dict(choice.arm),
-                        "model": model,
-                    }
-                )
+                led.append({"kind": "observed", "at": _time_text(_utc_now()), "assign_id": choice.assign_id, "arm": dict(choice.arm), "model": model})
     except _STORE_ERRORS as exc:
         log.warning("実験の記録へ実際のモデルを書けない（割り付け %s）: %s", choice.assign_id, exc)
 
@@ -981,7 +910,7 @@ def launch_choice(
 ) -> Choice:
     """優先の順で値を決め、要れば割り付け、`retry` があれば引き上げる。値の誤り・壊れた設定は `precondition`。
 
-    `request` は `Request` の欄（`unit`・`charge_to`・`retry`・`mode`・`argument`・`argument_at`・`repo`）。起動のたびに最初に月の掃除をする。
+    `request` は `Request` の欄（`unit`・`charge_to`・`retry`・`mode`・`argument`・`argument_at`）。起動のたびに最初に月の掃除をする。
     `unit` の無い起動と工程の無い起動は、実験の記録を読み書きしない。`settings` は `table` へ渡す（渡されれば起動の設定を読み直さない）。
     """
     req = Request(**request)
@@ -1019,8 +948,7 @@ def launch_choice(
     if stage is None or store is None or (req.unit is None and req.charge_to is None):
         return choice if manual.given or req.retry is None or stage is None else _raised_once(choice)
     metric = metric_of(stage)
-    choice = replace(choice, repo=req.repo or launch_approval.repo_key(root))  # 解決したキーを値に持たせ、打ち直しへ渡す
-    where = Where(choice.repo, stage, runtime, compatibility_key(arms, metric))
+    where = Where(launch_approval.repo_key(root), stage, runtime, compatibility_key(arms, metric))
     experiment = got.enabled and len(arms) > 1 and metric is not None
     u = _Unit(req.unit, req.mode, tuple(arms), got.allocation, experiment, got.enabled, where, now, store)
     if manual.given:

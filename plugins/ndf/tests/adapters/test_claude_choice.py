@@ -204,8 +204,7 @@ def test_a_refused_model_switches_to_the_base_once_without_counting_a_retry(judg
     assert got.ok and got.attempts == 1 and _value(calls.argv[1], "--model") is None
     assert [(r["request_try"], "assign_id" in r) for r in recorder.rows] == [(1, True), (2, False)]
     assert recorder.outcomes == []  # 切り替えた単位は数えない
-    store = tmp_path / "store"
-    assert len(_experiments(store, "launch_error")) == len(_experiments(store, "base_switch")) == 1
+    assert [r["switched"] for r in _experiments(tmp_path / "store", "launch_error")] == [True]
 
 
 def test_the_switch_checks_the_material_before_launching_again(judge_repo, recorder) -> None:
@@ -216,8 +215,8 @@ def test_the_switch_checks_the_material_before_launching_again(judge_repo, recor
 
 
 def _refused_only(store: Path) -> bool:
-    """拒否の行だけがあり、切り替えの行が無いか。"""
-    return len(_experiments(store, "launch_error")) == 1 and _experiments(store, "base_switch") == []
+    """切り替えの行が無いか（切り替えないと決めた拒否は記録しない）。"""
+    return _experiments(store, "launch_error") == []
 
 
 def test_a_stale_material_stops_the_switch_without_a_switch_row(judge_repo, recorder, tmp_path) -> None:
@@ -246,41 +245,25 @@ def test_a_check_that_uses_up_the_time_stops_the_switch(judge_repo, recorder, tm
     assert not got.ok and len(calls.argv) == 1 and _refused_only(tmp_path / "store")
 
 
-def test_the_refusal_row_is_there_before_the_base_launch_and_the_switch_row_after(judge_repo, recorder, tmp_path) -> None:
+def test_the_switch_row_is_written_before_the_base_launch(judge_repo, recorder, tmp_path) -> None:
+    """限界: 切り替えの行は基準の組の値を受け取るときに書かれ、基準の組の起動より前にある（B1b の base_fallback の形）。"""
     store = tmp_path / "store"
-    rows_at_launch: list[tuple[int, int]] = []
+    seen: list[int] = []
     calls = Calls(_parsed(REFUSED)._replace(launched=True, seconds=2.0), _answer(GOOD))
 
     def launch(argv, prompt, timeout):
-        rows_at_launch.append((len(_experiments(store, "launch_error")), len(_experiments(store, "base_switch"))))
+        seen.append(len(_experiments(store, "launch_error")))
         return calls(argv, prompt, timeout)
 
-    assert llm.ask("質問", "材料", SCHEMA, 30, call=launch).ok
-    assert rows_at_launch == [(0, 0), (1, 0)] and len(_experiments(store, "base_switch")) == 1
+    assert llm.ask("質問", "材料", SCHEMA, 30, call=launch).ok and seen == [0, 1]
 
 
-def test_a_base_launch_stopped_before_starting_is_not_a_switch(judge_repo, recorder, tmp_path) -> None:
-    refused = _parsed(REFUSED)._replace(launched=True, seconds=2.0)
-    calls = Calls(refused, claude.ClaudeReply.failed("", "スロットが空かない", failure=claude.Failure.NO_SLOT))
-    got = llm.ask("質問", "材料", SCHEMA, 30, call=calls)
-    assert not got.ok and len(calls.argv) == 2 and _refused_only(tmp_path / "store")
-    assert recorder.outcomes[0][1] is None  # 切り替えていないので、割り付けの単位として指標を書く（拒否は取れない値）
-
-
-def test_the_retry_reuses_the_repository_key_and_the_answer_is_checked_once(judge_repo, recorder, monkeypatch) -> None:
-    keys: list[Path] = []
-    monkeypatch.setattr(model_choice.launch_approval, "repo_key", lambda root: keys.append(root) or os.path.realpath(root))
+def test_the_answer_is_checked_once_per_launch(judge_repo, recorder, monkeypatch) -> None:
     checks: list[object] = []
     real = llm.check_answer
     monkeypatch.setattr(llm, "check_answer", lambda answer, schema: checks.append(answer) or real(answer, schema))
     assert llm.ask("質問", "材料", SCHEMA, 30, call=Calls(_answer({"decision": "?"}), _answer(GOOD))).ok
-    assert len(keys) == 1 and len(checks) == 2
-
-
-def test_a_key_given_by_the_caller_is_not_resolved_again(judge_repo, monkeypatch) -> None:
-    monkeypatch.setattr(model_choice.launch_approval, "repo_key", lambda root: pytest.fail("解決し直した"))
-    got = model_choice.launch_choice("judge", "ask", cwd=judge_repo, unit="u", repo="/r")
-    assert got.repo == "/r" and got.assign_id is not None
+    assert len(checks) == 2
 
 
 def test_a_broken_effort_stops_the_judge_before_any_launch(judge_repo, monkeypatch) -> None:

@@ -36,10 +36,10 @@ src/ndf/
 
 | パス | 種類 | 役割 | 依存する先 | クラスまたはモジュール | 新設（N）と変更（C） |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/adapters/model_choice.py` | 新設 | 値と出所を返す | launch_settings・launch_approval | `Choice` | N: `table`・`bundled_errors`・`stage_of`・`launch_choice`・`raised`・`base_choice`・`record_refusal`・`record_base_switch`・`base_fallback`・`candidates`・`compatibility_key`・`read_experiments`・`ledger`・`append_row`・`append_unread` |
+| `src/ndf/adapters/model_choice.py` | 新設 | 値と出所を返す | launch_settings・launch_approval | `Choice` | N: `table`・`bundled_errors`・`stage_of`・`launch_choice`・`raised`・`base_fallback`・`candidates`・`compatibility_key`・`read_experiments`・`ledger`・`append_row` |
 | `src/ndf/adapters/launch_settings.py` | 変更 | `experiments` を返す | — | `Settings` | C: `load` |
 | `src/ndf/adapters/claude.py` | 変更 | 引数と拒否の判定 | — | `ClaudeCall`・`LaunchRecorder`・`LaunchLog` | C: `claude_launch`・`_error_reply`。N: `model_refused` |
-| `src/ndf/adapters/claude_choice.py` | 新設 | 値を選ぶ処理の差し込みと、選んだ値で起動する部品 | claude | `LaunchChooser`・`ChoiceRun` | N: `set_launch_chooser`・`choose`・`report_outcome` |
+| `src/ndf/adapters/claude_choice.py` | 新設 | 値を選ぶ処理の差し込みと、選んだ値で起動する部品 | claude | `LaunchChooser`・`ChoiceRun` | N: `set_launch_chooser`・`pick_values`・`report_outcome` |
 | `src/ndf/__main__.py` | 変更 | 値を選ぶ処理の差し込み | claude_choice・model_choice | モジュール | 差し込みの 1 行 |
 | `src/ndf/adapters/llm.py` | 変更 | 判定の単位 | claude_choice | モジュール | C: `ask` |
 | `src/ndf/adapters/run_log.py` | 変更 | 子の環境 | — | モジュール | C: `child_process_env`。N: `overlay_env` |
@@ -92,40 +92,22 @@ src/ndf/
 | `table` | `adapters/model_choice.py` | 新設 | `table(root: Path, settings: Optional[Settings] = None) -> Table` | 同梱とリポジトリの `experiments` を重ね、値の制約を検証する。`settings` を渡されれば `.ndf/launch.json` を読み直さずに使う。同梱の値はスキーマに照らさない（配布の後に変わらないので、CI のテストが `bundled_errors` で確かめる） |
 | `bundled_errors` | 同 | 新設 | `bundled_errors() -> list[str]` | 同梱の値が起動の設定のスキーマに合わない箇所を返す。起動の経路では呼ばず、CI のテストが呼ぶ |
 | `stage_of` | 同 | 新設 | `stage_of(layer: str, name: str) -> Optional[str]` | 層と作業の名前から工程を引く |
-| `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, unit: Optional[str] = None, charge_to: Optional[str] = None, retry: Optional[str] = None, mode: Optional[str] = None, argument: tuple[Optional[str], Optional[str]] = (None, None), environ: Optional[Mapping] = None, settings: Optional[Settings] = None, repo: Optional[str] = None) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる。`settings` は `table` へ渡す。`repo`（`Request` の欄）は呼び手が解決済みのリポジトリのキーで、渡されれば git を起動して解決し直さない。値の `repo` に解決したキーを持たせ、同じリクエストの打ち直しはそれを渡す |
+| `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, unit: Optional[str] = None, charge_to: Optional[str] = None, retry: Optional[str] = None, mode: Optional[str] = None, argument: tuple[Optional[str], Optional[str]] = (None, None), environ: Optional[Mapping] = None, settings: Optional[Settings] = None) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる。`settings` は `table` へ渡す |
 | `raised` | 同 | 新設 | `raised(runtime: str, model: Optional[str], effort: Optional[str]) -> tuple[Optional[str], Optional[str]]` | 設計書の「引き上げる起動」の上げ方の表を当てる |
-| `base_choice` | 同 | 新設 | `base_choice(choice: Choice) -> Optional[Choice]` | 切り替える条件に当たれば基準の組の値を返す。当たらなければ None。記録は書かない |
-| `record_refusal` | 同 | 新設 | `record_refusal(choice: Choice, reason: str) -> None` | 組がモデルを理由に拒否されたことを持つ `launch_error` の行を書く。判定は拒否を受けたその場で、基準の組で起動し直す前に呼ぶ。基準の組の応答を待つ間に並んで割り付ける起動も、`candidates` でこの拒否を数えられるようにするためである |
-| `record_base_switch` | 同 | 新設 | `record_base_switch(choice: Choice) -> None` | 拒否された組の単位が基準の組で起動し直したことを持つ `base_switch` の行を書く。判定は基準の組の子プロセスを実際に起動した後（回答の `launched` が真）にだけ呼ぶ。起動前に止まった切り替えを、切り替え済みと記録しないためである |
-| `base_fallback` | 同 | 新設 | `base_fallback(choice: Choice, reason: str) -> Optional[Choice]` | 基準の組で起動し直す前の処理をまとめる。`base_choice` の値を返し、切り替えられるなら `record_refusal` で拒否の行を書く。切り替えの行は書かない。呼び手が基準の組で起動し、回答の `launched` が真と確かめてから `record_base_switch` で書く |
+| `base_fallback` | 同 | 新設 | `base_fallback(choice: Choice, reason: str) -> Optional[Choice]` | 切り替える条件に当たれば `launch_error` の行を書き、基準の組の値を返す。当たらなければ None。行は `append_row(row, choice.store)` で、割り付けたときと同じ保存先に書く。呼び出しで環境変数を差し替えて保存先が既定と違っても、次の起動が同じ保存先から切り替えを読めるようにするためである |
 | `candidates` | 同 | 新設 | `candidates(arms: Sequence, rows: Sequence, entry: Optional[Mapping], now: datetime, where: Where) -> list[int]` | 打ち切った組と起動できない組を除いた添字。`launch_error` は割り付け ID で割り付けの行を引き、`where`（`repo`・`stage`・`runtime`・`key` を持つ組）が同じものだけを数える。引数の多い関数の検査（PLR0913）に合わせ、4 つのキーを 1 つの値にまとめた |
 | `compatibility_key` | 同 | 新設 | `compatibility_key(arms: Sequence, metric: str) -> str` | 選択肢の並びと指標のハッシュ |
 | `read_experiments` | 同 | 新設 | `read_experiments(since: datetime, root: Optional[Path] = None) -> list[dict]` | `since` の月から今月までの実験の記録を読む（ロックを取らない） |
 | `ledger` | 同 | 新設 | `ledger(since: datetime, root: Optional[Path] = None) -> ContextManager[Ledger]` | 設計書の「読み書き」の順で、読んだ行（`rows`）と追記（`append`）を、実験の記録のロックの中で渡す |
 | `append_row` | 同 | 新設 | `append_row(row: Mapping, root: Optional[Path] = None) -> bool` | `ledger` を開いて 1 行足す。`root` は記録の保存先で、省くと既定の保存先（`records_dir()`）に書く。書けなければ警告を出して偽を返す |
-| `append_unread` | 同 | 新設 | `append_unread(row: Mapping, root: Optional[Path] = None) -> bool` | 記録を読まず、ロックも取らずに 1 行足す。行の前に書きかけを閉じるバイト列を毎回付け、1 回の `write` で書く（`launch_records.write_row` の `locked=False`）。`root` の扱いと、書けないときの戻り値は `append_row` と同じ |
 | `prune` | 同 | 新設 | `prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)の月の掃除。`window_days` は今の設定の値である。残す日数は、この値と、記録に残る割り付けの行の `window_days` のうち最も大きい値に 30 日を足した日数で、`now` からその日数を引いた日時より前に終わった月のファイルを消す。`launch-pruned` の月が今月なら何もしない。違えば、古い月のファイルと出現率の項目を消し（出現率のファイルはロックの中で読み直してから変える）、全部成功したら今月を書く。`launch_choice` が呼び、失敗しても起動は続ける |
 
-- `record_refusal` と `record_base_switch` は、記録を読まずロックも取らない `append_unread(row, choice.store)` で行を書く。理由は次の 2 つである
-  - 拒否と切り替えの行は、どちらも割り付けの判断に使わない追記である。書く前に記録を読む必要が無い
-  - `append_row` で書くと、並んだ割り付けがロックを持つ間は待つ。判定の起動では、その待ちが基準の組で起動し直す残りの期限を減らし、待ちが長ければ拒否のまま止まる。さらに、切り替えが 1 回成り立つごとに、当月の記録の読み込みとロックの取得が 2 回ずつ増える
-- 書く先は割り付けたときと同じ保存先（`choice.store`）である。呼び出しで環境変数を差し替えて保存先が既定と違っても、次の起動が同じ保存先から拒否と切り替えを読めるようにするためである
-- 比べた案と、採らなかった理由は次のとおりである
-
-  | 案 | 待ち | 記録の読み込み | 採らなかった理由 |
-  | --- | --- | --- | --- |
-  | `append_row`（ロックを取り、当月の記録を先頭から読む） | ロックの上限まで | 1 行ごとに当月の全件 | 待ちが起動し直しの期限を減らし、読む費用もかかる |
-  | ロックの待ちの上限を、残りの期限で短くする | 残りの期限まで | 1 行ごとに当月の全件 | 待ちは減るが無くならない。上限で諦めると、並んだ割り付けから拒否が見えない。読む費用は残る |
-  | 拒否と切り替えの行を 1 回のロックでまとめて書く | ロックの上限まで | 1 回 | 拒否の行は起動し直す前に、切り替えの行は起動の後に書く必要があり、時点が違うのでまとめられない |
-  | 採った案: `append_unread`（ロックを取らず、読まない） | 無い | 無い | — |
-
-- ロックを取らない書き手が混ざっても、ロックを持つ書き手の行は壊れない。ロックを取らない書き手は、行の前に毎回書きかけを閉じるバイト列（`launch_records.TORN_END`）を付け、1 行を 1 回の `write` で書く（hook `launch-answer` の回答と同じ書き方）。`ledger` はロックを取った後に追記分を読み足すので、ロックを持つ間に足された行は、その割り付けには見えず、次の割り付けから見える
 - `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm`・`store`（割り付けに使った記録の保存先。決められなければ None）を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄。`unit` は割り付けを受けた起動、つまり `assign_id` がある起動だけに置く）を返す
 - `launch_choice`
   - 事前条件: `layer` は `worker`・`skill`・`judge`・`seat`
   - 事後条件: 引数か環境変数で、モデルと effort の片方でも指定があれば割り付けず、無い側は基準の組の値。`unit` が無い場合、`enabled` が偽の場合、選択肢が 1 つの場合は、基準の組の値（出所は `base`、組が値を持たなければ `default`）で、割り付けの行を書かない。停止（`enabled` が偽）・固定（選択肢が 1 つ）・互換性のキーの変更で基準を使う単位に割り付けがあれば `halted` の行を足す。引数か環境変数の指定がある起動は、`unit` があれば割り付けの有無に関わらず理由 `manual` の `halted` の行を足し、`charge_to` があればその割り付けの単位にも足す。同じ単位の同じ理由の行は重ねて足さない。工程が無い層と作業の名前の起動には、引数を足さない（環境変数と起動の引数の指定は効く）
   - 副作用: `ledger` の中で、割り付けの判定と行の追記をする
-- ロックを取るのは `ledger` だけである。`Ledger.append` はロックを取らないので、`launch_choice` と `record_outcome` は開いた `ledger` の `append` を呼び、`append_row` を中から呼ばない（同じロックを取り直さない）。実際のモデル・`unpriced` の行のように、`ledger` の外から 1 行を足す呼び出しは `append_row` を使う。拒否と切り替えの行は、上のとおり `append_unread` で書く
+- ロックを取るのは `ledger` だけである。`Ledger.append` はロックを取らないので、`launch_choice` と `record_outcome` は開いた `ledger` の `append` を呼び、`append_row` を中から呼ばない（同じロックを取り直さない）。拒否・実際のモデル・`unpriced` の行のように、`ledger` の外から 1 行を足す呼び出しは `append_row` を使う
 - `Ledger.append` は、行の形を確かめ、記録が改行で終わらなければ書きかけの行を閉じるバイト列（`launch_records.TORN_END`）を先に足す
 
 ### 異常系の処理
@@ -136,7 +118,7 @@ src/ndf/
 | `launch_choice` | 値の誤り | 環境変数か引数の effort が順位に無い、モデル名に改行、表に無い `layer`・`retry` | 引数の確認 | 呼び出し元へ返す | 同上 | 起動しない |
 | `launch_choice` | 記録を書けない | 権限・容量・ロックの待ち | 追記 | 既定値（指定なし、割り付け ID なし）で続ける | 標準エラーに警告 | 単位は実験に数えない |
 | `read_experiments` | 壊れた行 | 書きかけ | 解析 | 飛ばして続ける | 出力なし | — |
-| `record_refusal`・`record_base_switch`・`base_fallback` | 拒否か切り替えの記録を書けない | 権限・容量 | 追記 | 追記に失敗したら、記録できなかった行の種類を警告に出し、例外は投げずに呼び出し元へ戻る。`base_fallback` は、拒否の行を書けなくても基準の組の値を返す。呼び出し元は残りの期限に従って処理を続け、基準の組で起動し直す | 標準エラーに、記録できなかった行の種類 | 書けなかった行は書き直さない |
+| `base_fallback` | 切り替えの記録を書けない | 同上 | 追記 | 基準の値を返して続ける | 警告に起動できなかった組と基準で続けたこと | — |
 
 ### 処理の手順
 
@@ -156,7 +138,7 @@ src/ndf/
 | --- | --- | --- | --- |
 | 工程・選択肢・順位・指標・割り付けの値 | 設定値 | `contracts/domains/launch-experiments.json` | 設計書の表 |
 | 起動できない組の条件 | 定数 | 同上 | 同じリポジトリ・工程・ランタイム・互換性のキー・組で、直近 7 日に、モデルを理由にした拒否が 2 件 |
-| 実験の記録の行 | 型 | `contracts/schemas/internal/experiment.schema.json` | `assign`・`outcome`・`launch_error`・`base_switch`・`halted`・`observed`・`unpriced` |
+| 実験の記録の行 | 型 | `contracts/schemas/internal/experiment.schema.json` | `assign`・`outcome`・`launch_error`・`halted`・`observed`・`unpriced` |
 
 ### 並行と排他
 
@@ -195,7 +177,7 @@ src/ndf/
 | `stage_of` | 表の各行 | 工程が「無し」の組 | 表に無い組 |
 | `launch_choice` | 同じ単位は同じ組。並列でも 1 行 | `unit` なし、`enabled` 偽、片側の指定、割り付けの後の手動指定と選択肢の削除、月をまたぐ割り付け | 壊れた設定。記録を書けない場合 |
 | `raised` | 表の各行 | `opus` の `xhigh` は変えない | 順位に無いモデル名 |
-| `base_fallback` | 基準の組の値と拒否の行が 1 つ。切り替えの行は書かない | 基準の組の拒否は None | 2 件で候補から外れ、7 日で戻る。別のリポジトリと別のキーの行は数えない |
+| `base_fallback` | 基準へ切り替え、行が 1 つ | 基準の組の拒否は None | 2 件で候補から外れ、7 日で戻る。別のリポジトリと別のキーの行は数えない |
 | `candidates` | 打ち切りの期限の後に戻る | 全部の非基準が外れると基準だけ | — |
 
 ## claude の起動と拒否の判定
@@ -238,16 +220,8 @@ src/ndf/
 | --- | --- | --- | --- | --- |
 | `ask` | `adapters/llm.py` | 変更 | 変えない | `request_id` を単位にして値を取得し、起動ごとに行を渡し、効果指標を書く |
 
-- 2 回目は `retry="invalid_answer"`。`MODEL_REFUSED` で `base_choice` が値を返せば、判定の打ち直しの回数に数えずに 1 回だけ打ち直し、`request_try` を 1 増やす。期限は残りの時間
-- 期限は単調時計で持つ。起動がモデルを理由に拒否されたら、次の順で進める。回答の形の不備で打ち直す 2 回目の判定（`retry="invalid_answer"`）でも同じ順で進め、打ち直す前の回答は返さない
-  1. `base_fallback` で基準の組の値を受け取る。切り替えられなければ、今回の起動で受け取ったモデル拒否の結果を返す
-  2. 切り替えられる場合、`base_fallback` はその中で拒否の行を書く。基準の組の応答を待つ間に並んで割り付ける起動も、この拒否を数えて同じ組を選ばないようにするためである。行は記録を読まずロックも取らずに書くので、残りの期限を待ちに使わない。以下で起動し直さなかった場合も、この行は残す（拒否は起きた事実なので）
-  3. 残りの期限を測る。使い切っていれば、材料を確かめずに、今回の起動で受け取ったモデル拒否の結果を返す
-  4. 打ち直しと同じく、呼び手の `before_retry` で材料が古くなっていないかを確かめる。古ければ例外で止める
-  5. もう一度残りの期限を測る。使い切っていれば、今回の起動で受け取ったモデル拒否の結果を返す
-  6. 残りの期限で基準の組を起動し直す
-  7. 基準の組の子プロセスを実際に起動した（回答の `launched` が真）ときだけ、`record_base_switch` で切り替えの行を書き、切り替えたと数える。起動前のチェックやスロットの取得で止まった場合と、3・5 で起動し直さなかった場合は、切り替えの行を書かず、切り替えたとも数えない。その単位は割り付けの単位として効果指標を書く
-- 2 回目の値の選択には、1 回目の値が持つリポジトリのキー（`Choice.repo`）を渡し、git を起動し直さない
+- 2 回目は `retry="invalid_answer"`。`MODEL_REFUSED` で `base_fallback` が値を返せば、判定の打ち直しの回数に数えずに 1 回だけ打ち直し、`request_try` を 1 増やす。期限は残りの時間
+- 切り替えの前に、単調時計で残りの期限を測り、残っていれば `before_retry` で材料が古くなっていないかを確かめ、もう一度期限を測る。どちらかで止まれば `base_fallback` を呼ばず、切り替えの行を書かない。通れば `base_fallback` が切り替えの行（`launch_error` の `switched` が真）を書いて基準の組の値を返し、基準の組で起動し直す
 - 回答のスキーマの検査は起動 1 回につき 1 回にし、その結果から使用量ログの `outcome` と打ち直しの判断の両方を作る
 - `outcome` は `valid`・`invalid`・`timeout`・`unknown`。`timeout` は、子プロセスを起動した後の期限切れ（`Failure.TIMEOUT`）である。効果指標は 1 回目が `valid` なら 1、`invalid` か `timeout` なら 0（2 回目で合っても、2 回目が期限切れでも 0 は変わらない）、`unknown` と起動できない場合は null
 - 値を取得する作業場所は `Path.cwd()`。stop-wait の判定（`judge_child`）は変えない
@@ -281,7 +255,7 @@ src/ndf/
 | --- | --- | --- | --- | --- |
 | `_add_run` | `core/worker.py` | 変更 | 変えない | `--unit`・`--mode` を足す |
 | `_cmd_run` | 同 | 変更 | 変えない | `--unit` が無ければ `NDF_UNIT_ID`、`launch_choice` の `retry` には `NDF_RETRY_CAUSE` の値を渡し、結果の `metrics.launch` に値・割り付け ID・実際のモデルを載せる |
-| `delegate` | 同 | 変更 | `delegate(handoff, system, *, wd, root, call, session)`（`Handoff` に `unit`・`mode`・`retry`・`charge_to`） | 会話の最初に値を決め、引数と環境を再開でも同じにする。拒否は 1 回だけ新しい会話で打ち直す。打ち直す前に `base_fallback` で基準の組の値を受け取り、拒否の行を書く。基準の組の回答の `launched` が真なら、その後に `record_base_switch` で切り替えの行を書く |
+| `delegate` | 同 | 変更 | `delegate(handoff, system, *, wd, root, call, session)`（`Handoff` に `unit`・`mode`・`retry`・`charge_to`） | 会話の最初に値を決め、引数と環境を再開でも同じにする。拒否は 1 回だけ新しい会話で打ち直す |
 | `_resume_until_written` | 同 | 変更 | `_resume_until_written(…, choice: Choice)` | 子ごとに値と `outcome` を行にする |
 | `_call_skill` | `progress/invoke.py` | 変更 | 変えない | `launch_choice("skill", run.name, unit=NDF_UNIT_ID)` の値で起動し、行にする |
 
@@ -297,7 +271,7 @@ src/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `delegate` | 設定の誤り | `launch_choice` | 起動の前 | 呼び出し元へ返す | `stopped`・`precondition` | 起動しない |
 | `delegate` | 基準の組の拒否 | 使えないモデル | `MODEL_REFUSED` と `base_fallback` が None | 止める | `stopped`・`precondition`。理由と `.ndf/launch.json` を示す | 設定を直して再実行 |
-| `delegate` | 残りの期限が無いか、基準の組が起動前に止まった | 拒否に時間がかかった。起動前のチェックかスロットの取得で止まった | 打ち直しの前か、基準の組の回答の `launched` が偽 | 切り替えの行を書かずに止める（拒否の行は残る） | `stopped`。理由は、期限が無ければ `interrupted`、起動前に止まれば表 `claude-failures` の `work_cause` | 再実行は同じ割り付けの組でもう一度起動し、拒否されれば基準の組へ切り替える。切り替えの行が無いので、単位は実験から外れていない |
+| `delegate` | 残りの期限が無い | 拒否に時間がかかった | 打ち直しの前 | 止める | `stopped`・`interrupted` | 再実行は基準の組 |
 
 ### 単体テストの観点
 

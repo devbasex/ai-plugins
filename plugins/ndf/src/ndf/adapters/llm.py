@@ -138,8 +138,8 @@ class _Checks:
         return self._last[1]
 
 
-def _choice(unit: str, retry: Optional[str] = None, repo: Optional[str] = None) -> Any:
-    return claude_choice.pick_values("judge", "ask", cwd=Path.cwd(), unit=unit, retry=retry, repo=repo)
+def _choice(unit: str, retry: Optional[str] = None) -> Any:
+    return claude_choice.pick_values("judge", "ask", cwd=Path.cwd(), unit=unit, retry=retry)
 
 
 @dataclass(frozen=True)
@@ -163,9 +163,9 @@ def _clock() -> float:
 def _launch_judge(run: claude_choice.ChoiceRun, q: _Ask, prompt: str) -> claude.ClaudeReply:
     """選んだ値で 1 回起動する。モデルを理由に拒まれ基準へ切り替えられれば、残りの期限で 1 回だけ起動し直す。
 
-    期限は単調時計で持つ。拒否の記録は切り替えられると分かったその場で書く（`fall_back`）。その後に残りの期限を測り、使い切っていれば
-    材料を確かめずに拒否の回答を返す。残っていれば、打ち直しと同じく `before_retry` で材料が古くなっていないかを確かめ（例外はそのまま
-    送る）、その直後にもう一度期限を測る。切り替えの記録は、基準の組の子プロセスを実際に起動した後に書く（`record_switch`）。
+    期限は単調時計で持つ。拒否を受けたら残りの期限を測り、使い切っていれば材料を確かめずに拒否の回答を返す。残っていれば、打ち直しと
+    同じく `before_retry` で材料が古くなっていないかを確かめ（例外はそのまま送る）、その直後にもう一度期限を測る。どちらかで止まれば
+    切り替えの記録を書かない。通れば `fall_back` が切り替えの記録を書き、基準の組で起動し直す。
     """
     deadline = _clock() + q.timeout
     reply = _judge_once(run, q, prompt, q.timeout)
@@ -182,7 +182,6 @@ def _launch_judge(run: claude_choice.ChoiceRun, q: _Ask, prompt: str) -> claude.
 
     if run.fall_back(reply, ready=ready):
         reply = _judge_once(run, q, prompt, left[-1])
-        run.record_switch(reply)
     return reply
 
 
@@ -215,8 +214,7 @@ def ask(
     `detail` に持つ。claude が誤りで終えた・出力が JSON でないときは 1 回の外れと数える。起動できない・期限切れ・
     利用上限・基準でも拒まれたモデルはその回で止め、打ち直さない。`before_retry` は打ち直しの起動の直前に呼ぶ（1 回目の回答を待つ間に材料が
     古くなっていないかを呼び手が確かめる）。モデルを理由に拒まれて基準の組で起動し直す前にも呼ぶ。例外を投げれば打ち直さず、例外を
-    そのまま外へ出す。値の設定の誤りは起動せずに `precondition`。リポジトリのキーは 1 回目の値の選択で解決し、打ち直しの選択は
-    同じキーを使う（git を起動し直さない）。
+    そのまま外へ出す。値の設定の誤りは起動せずに `precondition`。
     """
     request = uuid.uuid4().hex
     try:
@@ -249,7 +247,7 @@ def _attempts(run: claude_choice.ChoiceRun, q: _Ask, ends: list[str]) -> JudgeAn
         if attempt > 1:
             if q.before_retry is not None:
                 q.before_retry()
-            run.choice, run.request_try = _choice(run.request_id, RETRY, run.repo), run.request_try + 1
+            run.choice, run.request_try = _choice(run.request_id, RETRY), run.request_try + 1
         reply = _launch_judge(run, q, _prompt(q.question, q.material, errors))
         cost += reply.cost
         outcome, errors = q.checks.of(reply)

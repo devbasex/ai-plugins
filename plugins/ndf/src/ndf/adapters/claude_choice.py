@@ -19,14 +19,12 @@ log = logging.getLogger(__name__)
 
 
 class LaunchChooser(Protocol):
-    """起動の値を選ぶ処理（`ndf.adapters.model_choice` が満たす）。値（Choice）は `model`・`effort`・`assign_id`・`repo`・
-    `cli_args()`・`env_changes()`・`row_fields()` を持つ。`repo` は選ぶときに解決したリポジトリのキー（解決しなければ None）。"""
+    """起動の値を選ぶ処理（`ndf.adapters.model_choice` が満たす）。値（Choice）は `model`・`effort`・`assign_id`・
+    `cli_args()`・`env_changes()`・`row_fields()` を持つ。"""
 
     def launch_choice(self, layer: str, name: str, runtime: str = "claude", *, cwd: Path, **request: Any) -> Any: ...
 
     def base_fallback(self, choice: Any, reason: str) -> Optional[Any]: ...
-
-    def record_base_switch(self, choice: Any) -> None: ...
 
     def observed(self, choice: Any, model: str) -> None: ...
 
@@ -63,7 +61,7 @@ class ChoiceRun:
     """選んだ値で `claude -p` を起動するリクエスト 1 件。`choice` は選んだ値（差し込みが無ければ None で、値を付けない）。
 
     `request_id` はリクエストごとの一意な値、`request_try` はそのリクエストの中の何番目の起動か（最初が 1）。`charge_to` は費用を
-    手戻りとして負う割り付け ID。`switched` は基準の組の子プロセスを実際に起動して切り替えを確定したか（リクエストの中で 1 回だけ）。
+    手戻りとして負う割り付け ID。`switched` は基準の組へ切り替えたか（リクエストの中で 1 回だけ）。
     """
 
     choice: Optional[Any]
@@ -72,7 +70,6 @@ class ChoiceRun:
     charge_to: Optional[str] = None
     switched: bool = False
     _seen: bool = False
-    _refused: Optional[Any] = None  # 拒否された組の値。基準の組へ切り替えると決めたときに持つ
 
     @property
     def model(self) -> Optional[str]:
@@ -85,11 +82,6 @@ class ChoiceRun:
     @property
     def assign_id(self) -> Optional[str]:
         return None if self.choice is None else self.choice.assign_id
-
-    @property
-    def repo(self) -> Optional[str]:
-        """値を選んだときに解決したリポジトリのキー。打ち直しの選択へ渡し、解決し直さない。"""
-        return None if self.choice is None else self.choice.repo
 
     def env_changes(self) -> dict[str, Optional[str]]:
         """子の環境の変更（None の名前は外す）。"""
@@ -111,29 +103,16 @@ class ChoiceRun:
     def fall_back(self, reply: claude.ClaudeReply, ready: Optional[Callable[[], bool]] = None) -> bool:
         """`reply` がモデルを理由にした拒否で、基準の組へ切り替えられたら真。値を替え、`request_try` を 1 増やす。2 回目は切り替えない。
 
-        `base_fallback` で基準の組の値を受け取り、拒否の記録を先に書く（基準の組の応答を待つ間に並んで割り付ける起動も、この拒否を
-        数えられるように。記録は読まずロックも取らずに書くので、待ちは無い）。
-        `ready` はその後に呼ぶ。偽を返すか例外を投げれば切り替えない。切り替えの記録はここでは書かず、基準の組を実際に起動した後に
-        `record_switch` で書く。それまで `switched` は偽のままである。
+        `ready` は切り替える前に呼ぶ（期限と材料の確かめ）。偽を返すか例外を投げれば切り替えず、記録も書かない。その後の
+        `base_fallback` が基準の組の値を返し、切り替えたことを持つ `launch_error` の行を書く。行は基準の組を起動する前に書かれる
+        （基準の組の値を受け取るのと記録が同じ呼び出しのため）。
         """
-        if reply.failure is not claude.Failure.MODEL_REFUSED or self._refused is not None or launch_chooser is None or self.choice is None:
+        if reply.failure is not claude.Failure.MODEL_REFUSED or self.switched or launch_chooser is None or self.choice is None:
+            return False
+        if ready is not None and not ready():
             return False
         back = launch_chooser.base_fallback(self.choice, reply.error or str(reply.failure))
         if back is None:
             return False
-        if ready is not None and not ready():
-            return False
-        self._refused = self.choice
-        self.choice, self.request_try = back, self.request_try + 1
+        self.choice, self.request_try, self.switched = back, self.request_try + 1, True
         return True
-
-    def record_switch(self, reply: claude.ClaudeReply) -> None:
-        """基準の組の起動の回答 `reply` を受け、子プロセスを実際に起動していれば切り替えを確定して記録を書く。
-
-        起動前に止まった（`reply.launched` が偽）なら、記録を書かず `switched` も偽のままにする。
-        """
-        if self._refused is None or self.switched or not reply.launched:
-            return
-        self.switched = True
-        if launch_chooser is not None:
-            launch_chooser.record_base_switch(self._refused)

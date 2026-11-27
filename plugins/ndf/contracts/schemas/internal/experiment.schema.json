@@ -53,8 +53,8 @@
     "launch_error": {
       "type": "object",
       "additionalProperties": false,
-      "description": "単位を持つ起動がモデルを理由にした拒否で終えた。拒否を受けたその場で書き、基準の組へ切り替えたかは base_switch の行が持つ",
-      "required": ["version", "at", "kind", "assign_id", "stage", "runtime", "arm", "reason"],
+      "description": "単位を持つ起動がモデルを理由にした拒否で終えた",
+      "required": ["version", "at", "kind", "assign_id", "stage", "runtime", "arm", "reason", "switched"],
       "properties": {
         "version": {"$ref": "common.schema.json#/$defs/version"},
         "at": {"$ref": "common.schema.json#/$defs/time"},
@@ -63,19 +63,8 @@
         "stage": {"type": "string"},
         "runtime": {"type": "string"},
         "arm": {"$ref": "#/$defs/arm", "description": "起動できなかった組"},
-        "reason": {"type": "string", "description": "拒否の理由"}
-      }
-    },
-    "base_switch": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "拒否された組の単位が、基準の組で起動し直した。その単位は以後基準の組を使い、効果と費用の計算に数えない",
-      "required": ["version", "at", "kind", "assign_id"],
-      "properties": {
-        "version": {"$ref": "common.schema.json#/$defs/version"},
-        "at": {"$ref": "common.schema.json#/$defs/time"},
-        "kind": {"const": "base_switch"},
-        "assign_id": {"$ref": "#/$defs/id", "description": "拒否された組の割り付け ID"}
+        "reason": {"type": "string", "description": "拒否の理由"},
+        "switched": {"type": "boolean", "description": "基準の組へ切り替えたか"}
       }
     },
     "halted": {
@@ -130,7 +119,6 @@
     {"$ref": "#/$defs/assign"},
     {"$ref": "#/$defs/outcome"},
     {"$ref": "#/$defs/launch_error"},
-    {"$ref": "#/$defs/base_switch"},
     {"$ref": "#/$defs/halted"},
     {"$ref": "#/$defs/observed"},
     {"$ref": "#/$defs/unpriced"}
