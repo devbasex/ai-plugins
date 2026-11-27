@@ -92,7 +92,7 @@ def test_each_seat_launch_writes_a_row_and_the_repository_key_is_resolved_once(t
     rows = _rows(name="review", runtime="codex")
     assert [(r["caller"], r["layer"], r["outcome"], r["seconds"]) for r in rows] == [("codex-exec", "seat", "done", 1.5)] * 2
     held = run.data[experiment.KEY]
-    assert {r["unit"] for r in rows} == {f"{held['id']}:codex"} and run.seat_assigns["codex"] == rows[0]["assign_id"]
+    assert {r["unit"] for r in rows} == {f"{held['id']}:codex"} and held["seats"]["codex"] == rows[0]["assign_id"]
     assert rows[0]["assign_id"] == rows[1]["assign_id"]
     assert rows[0]["effort"] and rows[0]["session_cost_usd"] > 0 and "charge_to" not in rows[0]
     codex = [s for s in fake.launches if s.agent == "codex"][0]
@@ -138,7 +138,7 @@ def test_a_refused_codex_arm_is_launched_once_more_with_the_base_arm(tmp_path: P
     first, second = _rows(name="review", runtime="codex")
     assert (first["model_refused"], first["effort"], second["effort"], second["request_try"]) == (True, "high", "low", 2)
     assert first["request_id"] == second["request_id"] and "assign_id" not in second
-    assert run.seat_assigns == {}
+    assert run.data[experiment.KEY]["seats"] == {}
 
 
 def test_a_bad_value_stops_before_any_seat_is_launched(tmp_path: Path, monkeypatch, outcomes) -> None:
@@ -213,9 +213,7 @@ def _major(text: str, by: str, severity: str = "major") -> dict:
 
 
 def _data() -> dict:
-    seats = {"codex": "a-codex", "kiro": "a-kiro"}
-    rounds = [{"reviewers": ["codex", "kiro"], experiment.SEAT_ASSIGNS: dict(seats)}]
-    return {experiment.KEY: {"id": "run"}, "rounds": rounds}
+    return {experiment.KEY: {"id": "run", "seats": {"codex": "a-codex", "kiro": "a-kiro"}}}
 
 
 def _entered(data: dict, journal: FindingJournal, round_no: int, *items: dict, complete: bool = True) -> None:
@@ -229,7 +227,7 @@ def _decide(journal: FindingJournal, outcome: str) -> None:
 
 
 def _record(data: dict, journal: FindingJournal, final: str) -> None:
-    experiment.record(data, list(journal.rows.values()), final)
+    experiment.record(data, list(journal.rows.values()), ["codex", "kiro"], final)
 
 
 def test_a_converged_review_records_the_share_of_the_seat_and_of_the_charged_unit(monkeypatch, outcomes) -> None:
@@ -240,53 +238,6 @@ def test_a_converged_review_records_the_share_of_the_seat_and_of_the_charged_uni
     _record(data, journal, fin.CONVERGED)
     assert (outcomes["a-codex"][0], outcomes["a-kiro"][0]) == (0.5, 1.0)
     assert outcomes["design-unit"] == (pytest.approx(1 / 3), {"major": 2})
-
-
-def test_the_share_covers_the_seats_that_read_in_any_run_of_the_review(outcomes) -> None:
-    data, journal = _data(), FindingJournal()
-    data["rounds"].append({"reviewers": ["codex"], experiment.SEAT_ASSIGNS: {"codex": "a-codex"}})  # 相手役を 1 つに絞った再開
-    _entered(data, journal, 1, _major("一つ目", "kiro"))
-    _decide(journal, fin.FIXED)
-    _record(data, journal, fin.CONVERGED)
-    assert (outcomes["a-codex"], outcomes["a-kiro"]) == ((0.0, {"seats": 2}), (1.0, {"seats": 2}))
-
-
-def test_a_seat_that_never_read_the_diff_is_not_counted() -> None:
-    data = {"rounds": [{"reviewers": ["codex", "kiro"], "unread": ["kiro"]}, {"reviewers": ["codex"]}]}
-    assert experiment.read_seats(data) == ({"codex": {None}}, True)
-
-
-def test_a_resume_after_an_old_style_stop_leaves_the_share_unknown(outcomes) -> None:
-    """読めなかった相手役を残していない中断の記録からは、読了もシートの数も決めない。"""
-    data, journal = _data(), FindingJournal()
-    resumed = {"reviewers": ["codex"], experiment.SEAT_ASSIGNS: {"codex": "a-codex"}}
-    data["rounds"] = [{"reviewers": ["codex", "kiro"], "verdict": fin.INCOMPLETE_REVIEWERS}, resumed]
-    assert experiment.read_seats(data) == ({"codex": {"a-codex", None}}, False)
-    data["rounds"][0]["reviewers"] = ["kiro", "agy"]
-    _entered(data, journal, 2, _major("一つ目", "codex"))
-    _decide(journal, fin.FIXED)
-    _record(data, journal, fin.CONVERGED)
-    assert outcomes == {"a-codex": (None, {"seats": None})}
-
-
-def test_a_seat_that_read_with_two_assignments_records_nothing(outcomes) -> None:
-    """割り付けの期間をまたいだ再開では、前の組の指摘を新しい組の成果にしない。"""
-    data, journal = _data(), FindingJournal()
-    data["rounds"].append({"reviewers": ["codex"], experiment.SEAT_ASSIGNS: {"codex": "a-codex-next"}})
-    _entered(data, journal, 1, _major("一つ目", "codex"))
-    _decide(journal, fin.FIXED)
-    _record(data, journal, fin.CONVERGED)
-    assert outcomes == {"a-kiro": (0.0, {"seats": 2})}
-
-
-def test_a_round_keeps_the_assignment_of_each_seat(tmp_path: Path, outcomes) -> None:
-    run = _held(tmp_path)
-    _review(run, 1, Seats(), "codex", "kiro")
-    (row,) = _rows(name="review", runtime="codex")
-    assert experiment.round_assigns(run, ["codex", "kiro"]) == {experiment.SEAT_ASSIGNS: {"codex": row["assign_id"]}}
-    assert list(run.data[experiment.KEY]) == ["id"]  # 割り付け ID はラウンドの記録のほかに残さない
-    run.data = {}
-    assert experiment.round_assigns(run, ["codex"]) == {}
 
 
 def test_a_review_that_ends_with_an_unread_seat_records_nothing(monkeypatch, outcomes) -> None:

@@ -1,8 +1,8 @@
 """cross-review の実験の記録と、起動した AI の子の使用量ログの行（#2944）。
 
-状態ファイルの `experiment_units` は、実行の ID（`id`。1 回だけ作り、打ち直しでも同じ）・評価する設計か
+状態ファイルの `experiment_units` は、実行の ID（`id`。1 回だけ作り、打ち直しでも同じ）・シートの割り付け ID（`seats`）・評価する設計か
 実装の割り付け ID（`charged`）と、その最初のレビューのラウンドで重大だった指摘の id（`first`）を持つ。読めない相手役がいる間は
-`partial` を持つ。シートの割り付け ID は、ラウンドの記録（`seat_assigns`）だけに残す。シートの単位は `<実行の ID>:<シート>` である。値を選ぶ処理の差し込みが無い起動は、状態ファイルに何も足さず、行も書かない。
+`partial` を持つ。シートの単位は `<実行の ID>:<シート>` である。値を選ぶ処理の差し込みが無い起動は、状態ファイルに何も足さず、行も書かない。
 """
 
 from __future__ import annotations
@@ -18,14 +18,11 @@ from ndf.adapters import agents, claude, claude_choice, launch_approval, launch_
 from ndf.contracts import facts
 from ndf.core.converge import participants
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview import scope_decide, store
 from ndf.domains.crossreview.journal import experiment_values, undecided_serious
 from ndf.domains.records import usage
 
 # 状態ファイルのキー
 KEY = "experiment_units"
-# ラウンドの記録のキー（そのラウンドの相手役ごとの割り付け ID。割り付けの無い席は持たない）
-SEAT_ASSIGNS = "seat_assigns"
 # 効果指標を書く終わり方（結果を読めないシートがあって終わった場合・振動・誤りは書かない）
 RECORDED = (fin.CONVERGED, fin.MAX_ROUNDS)
 
@@ -34,7 +31,7 @@ def start_run(data: dict[str, Any]) -> bool:
     """値を選ぶ処理があるのに状態ファイルに `experiment_units` が無ければ、実行の ID を作って足し、真を返す（呼び手が保存する）。"""
     if claude_choice.launch_chooser is None or KEY in data:
         return False
-    data[KEY] = {"id": uuid.uuid4().hex}
+    data[KEY] = {"id": uuid.uuid4().hex, "seats": {}}
     return True
 
 
@@ -72,11 +69,10 @@ def keep_first(data: dict[str, Any], round_no: int, serious: Sequence[str], comp
 
 
 class Held(Protocol):
-    """状態ファイルの中身・解決したリポジトリのキー・シートの割り付け ID を持つ 1 回の起動の値（`drive._Run`）。"""
+    """状態ファイルの中身と、解決したリポジトリのキーを持つ 1 回の起動の値（`drive._Run`）。"""
 
     data: dict[str, Any]
     repo_key: Optional[str]
-    seat_assigns: dict[str, str]
 
 
 def choose_seat(run: Held, seat: str, cwd: Path) -> claude_choice.ChoiceRun:
@@ -93,18 +89,13 @@ def choose_seat(run: Held, seat: str, cwd: Path) -> claude_choice.ChoiceRun:
 
 
 def keep_seat(run: Held, seat: str, chosen: claude_choice.ChoiceRun) -> None:
-    """起動を終えたシートの割り付け ID を、ラウンドの記録を作るまで持つ。割り付けの無い値（停止・手動指定・基準の組への切り替え）なら外す。"""
+    """シートの割り付け ID を残す。割り付けの無い値（停止・手動指定・基準の組への切り替え）なら外す。"""
+    if chosen.choice is None:
+        return
     if chosen.assign_id is not None:
-        run.seat_assigns[seat] = chosen.assign_id
+        run.data[KEY]["seats"][seat] = chosen.assign_id
     else:
-        run.seat_assigns.pop(seat, None)
-
-
-def round_assigns(run: Held, seats: Sequence[str]) -> dict[str, Any]:
-    """ラウンドの記録に足す、相手役ごとの割り付け ID（相手役の起動を終えた後に呼ぶ）。実験をしていなければ何も足さない。"""
-    if KEY not in run.data:
-        return {}
-    return {SEAT_ASSIGNS: {s: run.seat_assigns[s] for s in seats if s in run.seat_assigns}}
+        run.data[KEY]["seats"].pop(seat, None)
 
 
 def meta_of(name: str, chosen: claude_choice.ChoiceRun) -> dict[str, Any]:
@@ -141,50 +132,21 @@ def seat_row(spec: agents.Launch, status: agents.AgentStatus, chosen: claude_cho
     return claude.ClaudeReply.failed("", "codex の起動の結果", failure=failure)
 
 
-def _read_unrecorded(r: Any) -> bool:
-    """読めた相手役を残していない旧形式の中断の記録か（`reviewers` に差分を読めなかった相手役も入っている）。"""
-    return isinstance(r, dict) and r.get("verdict") == fin.INCOMPLETE_REVIEWERS and scope_decide.UNREAD not in r
-
-
-def read_seats(data: dict[str, Any]) -> tuple[dict[str, set[Optional[str]]], bool]:
-    """このレビュー（同じ状態の保存先で続けた起動を含む。指摘のジャーナルと同じ範囲）で差分を読んだと確かめられたシートと、
-    シートの数が確定するか。
-
-    シートの値は、読んだラウンドで使った割り付け ID の集まりである（割り付けの無いラウンドは None）。旧形式の中断の記録は
-    読了の根拠にしない。その記録の相手役にほかのラウンドで読了を確かめられないシートがあれば、数は確定しない。
-    """
-    rounds = store.list_of(data, store.ROUNDS)
-    read: dict[str, set[Optional[str]]] = {}
-    for r in (r for r in rounds if not _read_unrecorded(r)):
-        unread = store.list_of(r, scope_decide.UNREAD)
-        for seat in (s for s in store.list_of(r, scope_decide.REVIEWERS) if s not in unread):
-            read.setdefault(seat, set()).add(r.get(SEAT_ASSIGNS, {}).get(seat))
-    known = True
-    for seat in (s for r in rounds if _read_unrecorded(r) for s in store.list_of(r, scope_decide.REVIEWERS)):
-        if seat in read:
-            read[seat].add(None)  # 中断したラウンドも読んでいた場合、その割り付けは分からない
-        else:
-            known = False
-    return read, known
-
-
-def record(data: dict[str, Any], rows: Sequence[dict[str, Any]], final: str) -> None:
+def record(data: dict[str, Any], rows: Sequence[dict[str, Any]], seats: Sequence[str], final: str) -> None:
     """収束かラウンドの上限で終わったレビューの効果指標を書く: シートの単位と、費用を負う割り付け（評価した設計か実装の単位）。
 
     書けなくても警告だけで、レビューの結果は変えない。同じ割り付け ID の 2 回目の指標は書き込み処理が足さないので、ラウンドの
     上限では値の決まらない指標（null）を書かず、再開して裁定した後の値を書けるようにする。シートの割合は、上限で裁定していない
-    重大な指摘がある間は決まらない。シートの数が確定しなければ割合は null で、読んだラウンドの割り付けが 1 つにそろわない
-    シートは指摘を割り付けごとに分けられないので書かない。
+    重大な指摘がある間は決まらない。
     """
     if final not in RECORDED or KEY not in data:
         return
-    held, (read, known) = data[KEY], read_seats(data)
-    count, shares = experiment_values(rows, held.get("first"), list(read))
+    held = data[KEY]
+    count, shares = experiment_values(rows, held.get("first"), seats)
     pending = final == fin.MAX_ROUNDS and undecided_serious(rows)
-    for seat, used in read.items():
-        assigned = next(iter(used)) if len(used) == 1 else None
-        if assigned is not None and not pending:
-            _report(assigned, shares[seat] if known else None, {"seats": len(read) if known else None}, final)
+    for seat in seats:
+        if seat in held["seats"] and not pending:
+            _report(held["seats"][seat], shares[seat], {"seats": len(seats)}, final)
     charged = charge_to()
     if charged is not None:
         _report(charged, None if count is None else 1 / (1 + count), {"major": count}, final)
