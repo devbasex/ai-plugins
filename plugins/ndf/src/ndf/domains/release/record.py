@@ -356,14 +356,13 @@ def write_verification(
         raise RecordError(f"リリース後テストの記録の形が違う: {'; '.join(errors)}")
     if unversioned:
         _check_unversioned(hub, number, payload)
-        require_trusted_writer(hub)
-        return Publisher(hub).comment(number, record_decide.render_verification(payload)).url
-    version = payload["version"]
-    found = record_decide.records(_trusted_bodies(hub, number))
-    if record_decide.has_record_of(found, version):
-        require_trusted_writer(hub)
-        return Publisher(hub).comment(number, record_decide.render_verification(payload)).url
-    _raise_without_record(hub, number, version, found, names)
+    else:
+        version = payload["version"]
+        found = record_decide.records(_trusted_bodies(hub, number))
+        if not record_decide.has_record_of(found, version):
+            _raise_without_record(hub, number, version, found, names)
+    require_trusted_writer(hub)
+    return Publisher(hub).comment(number, record_decide.render_verification(payload)).url
 
 
 def _check_unversioned(hub: GitHub, number: int, payload: Mapping[str, Any]) -> None:
