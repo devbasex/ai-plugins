@@ -273,7 +273,7 @@ def diagnosis(kind: str, exc: BaseException | str, where: Mapping[str, Any]) -> 
     }
     try:
         ident = mvv.record_failure(row)
-    except (OSError, internal.InternalError):
+    except (OSError, internal.InternalError):  # noqa: NDF401 ファイル: 記録に書けないことを理由の文に残して呼ぶ側へ返す
         return "診断の記録に書けない"
     return f"診断の記録 {ident}"
 
@@ -463,7 +463,7 @@ def _design_paths(rows: Sequence[Mapping[str, Any]]) -> list[str]:
 def _bound(j: _Judging, rows: Sequence[Mapping[str, Any]], outcome: dict[str, Any]) -> dict[str, Any]:
     """承認ゲートを省く判定にだけ、承認の対象 `target` を持たせ、差分の設計文書の「人へ残す判断」の表を確かめる。
 
-    最初の要求でマージ先の設定と、残りの枠に収まる設計文書の head の本文を読み、残った文書は上限の件数ごとに分けて読む
+    最初の要求でマージ先の設定と、残りのスロットに収まる設計文書の head の本文を読み、残った文書は上限の件数ごとに分けて読む
     （#4409・#2912 の決定 7）。最初の要求が失敗すれば、設定とすべての文書を読めなかったとして省かない。後続の要求だけが
     失敗したときは、その要求に載せた文書だけを読めなかったとし、要求ごとに 1 件の診断の記録を指す。表に番号を持つ行か、
     本文の無い・切られた・読めなかった設計文書があれば、`skip` を偽にして `target` を外し、`why` にパスごとの理由を足す。

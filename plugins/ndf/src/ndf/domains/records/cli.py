@@ -530,7 +530,7 @@ def _write_result(dest: Path, root: Path, inputs: list[str], text: str) -> str |
                 f.write(text)
             os.replace(tmp, dest.name, src_dir_fd=dfd, dst_dir_fd=dfd)
         except BaseException:
-            with contextlib.suppress(OSError):
+            with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 書けなかった一時ファイルの後始末。元の失敗を上げる
                 os.unlink(tmp, dir_fd=dfd)
             raise
         return None
@@ -542,7 +542,7 @@ def _existing_refusal(dfd: int, dest: Path, root: Path, inputs: list[str]) -> st
     """固定したディレクトリ `dfd` の `dest.name` が、置き換えてよいもの（無いか、前の検査の結果）か。開いた記述子で確かめる。"""
     try:
         fd = os.open(dest.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
-    except FileNotFoundError:
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 無ければ置き換えてよい
         return None
     except OSError:
         # ELOOP（シンボリックリンク）と、開けないもの
@@ -553,17 +553,25 @@ def _existing_refusal(dfd: int, dest: Path, root: Path, inputs: list[str]) -> st
         os.close(fd)
         return f"--result の {dest} は通常ファイルでないので書かない"
     with os.fdopen(fd, "rb") as f:
-        for p in inputs:
-            with contextlib.suppress(OSError):
-                other = os.stat(root / p)
-                if (other.st_dev, other.st_ino) == (st.st_dev, st.st_ino):
-                    return f"--result に検査する文書 {p} を指定した（検査結果で本文を上書きしない）"
+        same = _same_input(root, inputs, st)
+        if same is not None:
+            return f"--result に検査する文書 {same} を指定した（検査結果で本文を上書きしない）"
         try:
             prev = json.loads(f.read().decode("utf-8"))
         except (OSError, UnicodeDecodeError, ValueError):
             prev = None
     if not (isinstance(prev, dict) and prev.get("tool") == TOOL):
         return f"--result の {dest} は前の検査結果でない既存のファイルなので上書きしない"
+    return None
+
+
+def _same_input(root: Path, inputs: list[str], st: os.stat_result) -> str | None:
+    """`inputs` のうち、`st` と同じファイル（デバイスと inode が一致）を指す最初のパス。無ければ None。"""
+    for p in inputs:
+        with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 調べられない文書は同じファイルとみなさない
+            other = os.stat(root / p)
+            if (other.st_dev, other.st_ino) == (st.st_dev, st.st_ino):
+                return p
     return None
 
 

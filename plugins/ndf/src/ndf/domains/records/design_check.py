@@ -61,15 +61,15 @@ def _worktree_text(root: Path, path: str) -> str:
 
 
 def _tree_text(root: Path, path: str) -> str:
-    """差分から列挙した `path` を、シンボリックリンクをたどらず作業ツリーの中の通常ファイルとして読む。
+    """差分から列挙した `path` を、シンボリックリンクをたどらず worktree の中の通常ファイルとして読む。
 
-    どこかの階層がリンクなら（解決した先が `root` の下の同じパスでなければ）読まず止める。作業ツリーの外の文書の行を
+    どこかの階層がリンクなら（解決した先が `root` の下の同じパスでなければ）読まず止める。worktree の外の文書の行を
     結果の `items[].text` へ出さないため。
     """
     top = root.resolve()
     p = top / path
     if p.resolve() != p or p.is_symlink() or not p.is_file():
-        raise DesignCheckError(f"{path} は作業ツリーの中の通常ファイルでない（シンボリックリンクはたどらない）")
+        raise DesignCheckError(f"{path} は worktree の中の通常ファイルでない（シンボリックリンクはたどらない）")
     return _worktree_text(top, path)
 
 
