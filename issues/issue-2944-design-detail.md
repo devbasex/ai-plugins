@@ -122,7 +122,6 @@ src/ndf/
 - 同じ実験の記録のファイルに追記する書き手は、ロックを持つ `Ledger.append` も持たない `append_unread` も、毎回、書きかけを閉じるバイト列（`launch_records.TORN_END`）と行を 1 回の `write` でまとめて書く（`launch_records.write_row` の `locked=False`。hook `launch-answer` の回答と同じ書き方）
   - 理由: ロックを持つ書き手が末尾の改行を確かめてから書くと、確かめた後、書く前に、ロックを取らない書き手の書きかけが入りうる。その後に書いた行は書きかけにつながり、`write` は成功しても読み手に捨てられる。割り付けの行が失われると、同じ単位の再実行が別の組に割り付けられる
   - 増えるのは、読み手が飛ばす `TORN_END` の行だけである
-  - `TORN_END` は改行を含み、その前に UTF-8 として読めない 1 バイトを置く。改行だけで閉じると、JSON を書き終えたところで中断した行が、有効な行として読まれるためである
 - `ledger` は、ロックを取った後に追記分を読み足す。その読み取りに含まれた行を今回の割り付けの判定に使い、それより後に追記された行は後続の割り付けで読む。ロックを取らずに書かれた拒否の行も、この読み取りまでに書かれていれば今回の判定で数える
 - `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm`・`store`（割り付けに使った記録の保存先。決められなければ None）を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄。`unit` は割り付けを受けた起動、つまり `assign_id` がある起動だけに置く）を返す
 - `launch_choice`
