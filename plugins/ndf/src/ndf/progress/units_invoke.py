@@ -754,13 +754,14 @@ def sprint_pr(ctx: Context, ports: Ports, landed: Optional[github_pulls.MergedPu
     確かめてから、テンプレート `pr` を push のステップなしで流す。
 
     進めるのは、自分でマージした単位の結果までである。リモートの HEAD がそれと違えば、それ以上は進めず、push もせずに止める。
-    違うコミットは単位のレビューを経ていないので、利用者が確かめ、停止の理由が示す手順で作業場所とリモートを揃えてから打ち直す。
-    打ち直しは `prepare` を通らない（`units.json` を読む）ので、手元を進めるのは利用者の操作だけである。
+    違うコミットは単位のレビューを経ていないので、利用者が確かめてから揃えて打ち直す。打ち直しは `prepare` を通らない
+    （`units.json` を読む）ので、手元を進めるのは利用者の操作だけである。
     """
     g = Git(ctx.sprint)
     tip = _fetch_sprint(g, ctx)
     head = _catch_up_to(g, ctx, landed)
     if tip != head:
+        _check_sprint_branch(g, ctx)
         raise UnitsStopped("precondition", _tip_mismatch(g, ctx, tip, head))
     t = route.templates()["pr"]
     template = replace(t, plan=route.without_steps(route.expanded(t), SPRINT_PR_DROP))
@@ -768,31 +769,45 @@ def sprint_pr(ctx: Context, ports: Ports, landed: Optional[github_pulls.MergedPu
     return ports.call_plan(run, ctx.work_dir / SPRINT_PR_DIR)
 
 
-def _tip_mismatch(g: Git, ctx: Context, tip: str, head: str) -> str:
-    """リモートの HEAD（`tip`）が作業場所の HEAD（`head`）と違うときの停止の理由。両方の SHA、片方にだけあるコミットの範囲と、
-    確かめた後に作業場所を揃えて打ち直す手順を、履歴の関係（リモートが進んでいる・手元が進んでいる・分かれている）で分けて書く。
+def _check_sprint_branch(g: Git, ctx: Context) -> None:
+    """スプリントの作業場所が今もスプリントブランチにいなければ、切り替えだけを示して止める。
 
-    コマンドはシェルへそのまま貼れるように引数を引用し、先にスプリントブランチへ切り替える（別のブランチを進めない）。
+    別のブランチの HEAD で差分の範囲を示すと、利用者が確かめた範囲と、切り替えた後に進める範囲が食い違う。打ち直しで
+    スプリントブランチの HEAD から範囲を取り直す。
     """
-    where = ["git", "-C", str(ctx.sprint)]
+    current = _current_branch(g)
+    if current != ctx.branch:
+        command = shlex.join(["git", "-C", str(ctx.sprint), "switch", ctx.branch])
+        detail = (
+            f"スプリントの作業場所のブランチ {current or '（ブランチに居ない）'} が {ctx.branch} と違う。"
+            f"{ctx.branch} へ切り替えてから ndf progress next を打ち直す。コマンド: {command}"
+        )
+        raise UnitsStopped("precondition", detail)
+
+
+def _tip_mismatch(g: Git, ctx: Context, tip: str, head: str) -> str:
+    """リモートの HEAD（`tip`）がスプリントブランチの HEAD（`head`）と違うときの停止の理由。両方の SHA、片方にだけあるコミットの
+    範囲と、確かめた後の手順を書く。
+
+    コマンドを示すのは、リモートだけが進んでいる（`head` が `tip` の祖先）ときの、確かめた `tip` までの fast-forward だけである。
+    手元にだけあるコミットは、NDF から送る案内をしない（送ると単位のレビューもコードレビューも経ずに `gathered` の前に入る）。
+    """
     found = (
         f"{ctx.remote} の {ctx.branch} の HEAD（{tip}）がスプリントの作業場所 {ctx.sprint} の HEAD（{head}）と違う。"
         f"リモートにだけあるコミットは {head}..{tip}、手元にだけあるコミットは {tip}..{head} である。"
         "これらは単位のレビューを経ていない。"
     )
-    switch = shlex.join([*where, "switch", ctx.branch])
     if g.is_ancestor(head, tip):
-        command = f"{switch} && {shlex.join([*where, 'merge', '--ff-only', tip])}"
-        step = f"その変更をスプリントの PR に含めてよいと確かめたら、作業場所を進めてから ndf progress next を打ち直す。コマンド: {command}"
-    elif g.is_ancestor(tip, head):
-        command = f"{switch} && {shlex.join([*where, 'push', '--', ctx.remote, f'HEAD:{HEADS}{ctx.branch}'])}"
-        step = f"手元にだけあるコミットをスプリントの PR に含めてよいと確かめたら、{ctx.remote} へ送ってから ndf progress next を打ち直す。コマンド: {command}"
-    else:
-        step = (
-            "履歴が分かれているので、push も fast-forward もできない。両方の差分を確かめ、手元の変更を別のブランチへ退避してから"
-            f"作業場所を {ctx.remote} の {ctx.branch} に揃え、ndf progress next を打ち直す。手元の変更が要るなら、別の PR でレビューを経て取り込む"
+        command = shlex.join(["git", "-C", str(ctx.sprint), "merge", "--ff-only", tip])
+        return (
+            found
+            + f"その変更をスプリントの PR に含めてよいと確かめたら、作業場所を進めてから ndf progress next を打ち直す。コマンド: {command}"
         )
-    return found + step
+    return found + (
+        "手元にだけあるコミットは、NDF からは送らず、履歴も付け替えない。利用者本人が差分を確かめ、要る変更は別のブランチに"
+        "コミットして、別の PR でレビューを経て取り込む。未コミットの変更は git status で確かめ、ブランチを作るだけでは残らないので"
+        f" git stash などで別に保全する。そのうえで作業場所を {ctx.remote} の {ctx.branch} の HEAD に揃えて、ndf progress next を打ち直す"
+    )
 
 
 def _catch_up_to(g: Git, ctx: Context, landed: Optional[github_pulls.MergedPull]) -> str:
@@ -807,10 +822,7 @@ def _catch_up_to(g: Git, ctx: Context, landed: Optional[github_pulls.MergedPull]
     sha = landed.merge_sha
     if not sha or sha == head or g.commit_or_none(sha) is None or not g.is_ancestor(head, sha):
         return head
-    current = _current_branch(g)
-    if current != ctx.branch:
-        detail = f"スプリントの作業場所のブランチ {current or '（ブランチに居ない）'} が {ctx.branch} と違う。{ctx.branch} へ切り替えてから打ち直す"
-        raise UnitsStopped("precondition", detail)
+    _check_sprint_branch(g, ctx)
     moved = g.merge_ff(sha)
     if moved.returncode != 0:
         raise UnitsStopped(

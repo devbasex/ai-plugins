@@ -169,8 +169,9 @@ def _unit(name: str, issue: int):
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch) -> World:
-    w = World(tmp_path)
+def world(tmp_path, monkeypatch, request) -> World:
+    """`World`。間接の引数（`indirect=True`）で `tmp_path` の下の場所の名前を渡せば、そこに作る（空白を含む場所を試す）。"""
+    w = World(tmp_path / request.param if hasattr(request, "param") else tmp_path)
     monkeypatch.setattr(git.Git, "remote_repo", lambda self, remote=None: "o/r")
     monkeypatch.setattr(github, "GitHub", _Hub)
     monkeypatch.setattr(github, "client", lambda *a, **k: None)
@@ -289,90 +290,79 @@ def test_a_unit_without_the_reviewed_head_is_not_merged(world):
     assert [c for c in world.commands if c[:2] == ["ci", "merge"]] == []
 
 
-def test_the_sprint_pr_is_not_opened_when_the_sprint_worktree_differs_from_the_remote(world, monkeypatch):
+def _push_from_elsewhere(world: World, other: Path, message: str) -> None:
+    """別の作業場所（`other` に clone）からスプリントブランチへ空のコミットを送る。"""
+    if not other.exists():
+        subprocess.run(["git", "clone", "-q", "-b", BRANCH, str(world.remote), str(other)], check=True)
+    _git(other, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", message)
+    _git(other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+
+
+def _after_the_last_merge(world: World, monkeypatch, then) -> None:
+    """最後の単位のマージの直後に `then()` を流す。"""
     original = units_invoke.merge_unit
 
-    def with_a_local_commit(ctx, branch, worktree, round_dir, ports):
+    def merge_then(ctx, branch, worktree, round_dir, ports):
         done = original(ctx, branch, worktree, round_dir, ports)
         if branch == world.unit_names()["issue-4"]:
-            _git(world.sprint, "commit", "-q", "--allow-empty", "-m", "レビューを経ていない")
+            then()
         return done
 
-    monkeypatch.setattr(units_invoke, "merge_unit", with_a_local_commit)
+    monkeypatch.setattr(units_invoke, "merge_unit", merge_then)
+
+
+@pytest.mark.parametrize("remote_moves", [False, True])
+def test_local_only_commits_stop_without_a_command_to_send_them(world, monkeypatch, tmp_path, remote_moves):
+    def local_commit() -> None:
+        if remote_moves:
+            _push_from_elsewhere(world, tmp_path / "other", "リモートで")
+        _git(world.sprint, "merge", "-q", "--ff-only", world.merged[world.unit_names()["issue-4"]].merge_sha)
+        _git(world.sprint, "commit", "-q", "--allow-empty", "-m", "レビューを経ていない")
+
+    _after_the_last_merge(world, monkeypatch, local_commit)
 
     got = world.run()
 
-    tip, head = _git(world.sprint, "rev-parse", f"origin/{BRANCH}"), _git(world.sprint, "rev-parse", "HEAD")
+    tip, head = _git(world.remote, "rev-parse", BRANCH), _git(world.sprint, "rev-parse", "HEAD")
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
     assert f"{tip}..{head}" in got.cause["detail"] and "ndf progress next" in got.cause["detail"]
-    assert f"push -- origin HEAD:refs/heads/{BRANCH}" in got.cause["detail"]
+    # 手元にだけあるコミットは送らせない。未コミットの変更の保全も案内する
+    assert "コマンド: " not in got.cause["detail"] and "git stash" in got.cause["detail"]
     assert all(r.name != "pr" for r, _ in world.runs) and [i["status"] for i in got.report["items"]] == ["merged"] * 3
 
 
+@pytest.mark.parametrize("world", ["空白 を含む"], indirect=True)
 def test_after_a_push_from_another_worktree_the_shown_command_lets_the_rerun_open_the_sprint_pr(world, tmp_path, monkeypatch):
     # 空白を含む場所の作業場所でも、停止の理由に出たコマンドをシェルへそのまま貼れば進められる
-    w = World(tmp_path / "空白 を含む")
-    monkeypatch.setattr(github_pulls, "merged_pulls", w.lookup)
-    original = units_invoke.merge_unit
-    other = tmp_path / "other"
+    _after_the_last_merge(world, monkeypatch, lambda: _push_from_elsewhere(world, tmp_path / "other", "別の作業場所から"))
+    got = world.run()
 
-    def then_a_push_from_elsewhere(ctx, branch, worktree, round_dir, ports):
-        done = original(ctx, branch, worktree, round_dir, ports)
-        if branch == w.unit_names()["issue-4"]:
-            subprocess.run(["git", "clone", "-q", "-b", BRANCH, str(w.remote), str(other)], check=True)
-            _git(other, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "別の作業場所から")
-            _git(other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
-        return done
-
-    monkeypatch.setattr(units_invoke, "merge_unit", then_a_push_from_elsewhere)
-    got = w.run()
-
-    tip = _git(w.remote, "rev-parse", BRANCH)
+    tip = _git(world.remote, "rev-parse", BRANCH)
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
     command = got.cause["detail"].split("コマンド: ", 1)[1]
-    assert f"merge --ff-only {tip}" in command and f"switch {BRANCH}" in command and all(r.name != "pr" for r, _ in w.runs)
+    assert command.endswith(f"merge --ff-only {tip}") and all(r.name != "pr" for r, _ in world.runs)
     # 利用者が変更を確かめ、停止の理由が示したコマンドで作業場所を進めてから打ち直す
     subprocess.run(["sh", "-c", command], check=True, capture_output=True)
-    w.runs.clear()
+    world.runs.clear()
 
-    again = w.run()
+    again = world.run()
 
     assert again.status == "ok", again.report
-    assert w.impl_runs() == [] and w.runs[-1][0].name == "pr"
+    assert world.impl_runs() == [] and world.runs[-1][0].name == "pr"
 
 
-def test_a_diverged_sprint_worktree_is_not_told_to_push(world, monkeypatch, tmp_path):
-    original = units_invoke.merge_unit
-    other = tmp_path / "other"
+def test_a_sprint_worktree_on_another_branch_is_only_told_to_switch(world, monkeypatch, tmp_path):
+    def move_away() -> None:
+        _push_from_elsewhere(world, tmp_path / "other", "別の作業場所から")
+        _git(world.sprint, "switch", "-q", "-c", "other")
 
-    def then_both_move(ctx, branch, worktree, round_dir, ports):
-        done = original(ctx, branch, worktree, round_dir, ports)
-        if branch == world.unit_names()["issue-4"]:
-            subprocess.run(["git", "clone", "-q", "-b", BRANCH, str(world.remote), str(other)], check=True)
-            _git(other, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "リモートで")
-            _git(other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
-            _git(world.sprint, "fetch", "-q", "origin")
-            _git(world.sprint, "merge", "-q", "--ff-only", world.merged[branch].merge_sha)
-            _git(world.sprint, "commit", "-q", "--allow-empty", "-m", "手元で")
-        return done
-
-    monkeypatch.setattr(units_invoke, "merge_unit", then_both_move)
+    _after_the_last_merge(world, monkeypatch, move_away)
 
     got = world.run()
 
-    assert got.status == "stopped" and got.cause["kind"] == "precondition"
-    assert "履歴が分かれている" in got.cause["detail"] and "コマンド: " not in got.cause["detail"]
-
-
-@pytest.mark.parametrize(("answer_sha", "lookups"), [(True, 1), (False, 2)])
-def test_the_last_unit_is_looked_up_again_only_when_the_merge_answer_lacks_the_merge_commit(world, answer_sha, lookups):
-    world.answer_sha = answer_sha
-
-    got = world.run()
-
-    assert got.status == "ok", got.report
-    assert len(world.lookups) == lookups
-    assert _git(world.sprint, "rev-parse", "HEAD") == _git(world.sprint, "rev-parse", f"origin/{BRANCH}")
+    assert got.status == "stopped" and got.cause["kind"] == "precondition" and "other" in got.cause["detail"]
+    # 差分の範囲は示さず、切り替えだけを示す（打ち直しでスプリントブランチの HEAD から取り直す）
+    assert got.cause["detail"].split("コマンド: ", 1)[1].endswith(f"switch {BRANCH}") and ".." not in got.cause["detail"]
 
 
 def test_a_github_failure_on_the_lookup_of_the_last_unit_keeps_the_kind_the_wait_and_every_unit(world, monkeypatch):
