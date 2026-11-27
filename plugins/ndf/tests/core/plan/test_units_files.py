@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 from pathlib import Path
 
 import git_sandbox
@@ -717,30 +718,34 @@ def test_cli_record_check_names_the_review_launch_setting(reviewed, work, capsys
     assert "workflow.launch.review" in out["cause"]["detail"] and "--reviewed-base-out" in out["cause"]["detail"]
 
 
-def test_replace_file_keeps_the_original_when_the_write_fails_and_keeps_the_mode(tmp_path, monkeypatch):
-    target = tmp_path / "plan.md"
-    target.write_text("元の本文", encoding="utf-8")
-    target.chmod(0o640)
-
-    cli._replace_file(target, "新しい本文", 0o640)
-    assert (target.read_text(encoding="utf-8"), target.stat().st_mode & 0o777) == ("新しい本文", 0o640)
-
-    def fail(*_):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(cli.os, "replace", fail)
-    with pytest.raises(OSError):
-        cli._replace_file(target, "途中の本文", 0o640)
-    assert target.read_text(encoding="utf-8") == "新しい本文"
-    assert list(tmp_path.iterdir()) == [target]
+def _make_read_only(path: Path) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root は読み取り専用のファイルにも書ける")
+    path.chmod(0o444)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root は読み取り専用のファイルにも書ける")
-def test_render_keeps_a_read_only_plan(tmp_path):
-    _units(tmp_path, "7")
-    target = tmp_path / _put(tmp_path, "issue-7-plan.md", _plan(1))
-    target.chmod(0o444)
+def _add_acl(path: Path) -> None:
+    # POSIX ACL（形式 2）: 所有者 rw-、uid 65534 は拒否、グループ r--、mask r--、その他 r--
+    entries = [(0x01, 6, 0xFFFFFFFF), (0x02, 0, 65534), (0x04, 4, 0xFFFFFFFF), (0x10, 4, 0xFFFFFFFF), (0x20, 4, 0xFFFFFFFF)]
+    acl = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in entries)
+    try:
+        os.setxattr(path, "system.posix_acl_access", acl)
+    except (AttributeError, OSError):
+        pytest.skip("POSIX ACL を持てない OS かファイルシステム")
 
-    with pytest.raises(PermissionError):
-        cli._render(cli._Targets(tmp_path, (7,), (), ()))
-    assert target.read_text(encoding="utf-8") == _plan(1)
+
+@pytest.mark.parametrize(
+    ("protect", "error"), [(_make_read_only, PermissionError), (_add_acl, cli._UnitsStopped)], ids=["read_only", "acl"]
+)
+def test_render_changes_no_plan_when_one_of_them_cannot_be_replaced(tmp_path, protect, error):
+    plans = []
+    for issue in ("7", "8"):
+        _units(tmp_path, issue)
+        plans.append(tmp_path / _put(tmp_path, f"issue-{issue}-plan.md", _plan(1)))
+    protect(plans[1])
+    before = sorted((tmp_path / "issues").iterdir())
+
+    with pytest.raises(error):
+        cli._render(cli._Targets(tmp_path, (7, 8), (), ()))
+    assert [plan.read_text(encoding="utf-8") for plan in plans] == [_plan(1), _plan(1)]
+    assert sorted((tmp_path / "issues").iterdir()) == before

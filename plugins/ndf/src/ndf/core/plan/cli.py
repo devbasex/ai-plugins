@@ -25,13 +25,12 @@ ndf plan units render --issue N [--issue N]... [--omitted N]...
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
-import stat
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -40,7 +39,7 @@ from typing import Any, NamedTuple, NoReturn, Optional
 from ndf import identity
 from ndf.adapters import github
 from ndf.adapters.git import Git, GitError
-from ndf.contracts import causes, exit_codes, internal, limits, result
+from ndf.contracts import causes, exit_codes, internal, limits, result, worker_paths
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 from ndf.core import actors, durable
 from ndf.core.plan import files, inputs_decide, model, queue_decide, queue_run, runner, units_files, wait_decide
@@ -374,25 +373,10 @@ def _discard_checked(target: Path) -> None:
     target.unlink()
 
 
-def _replace_file(target: Path, text: str, mode: Optional[int] = None) -> None:
-    """同じディレクトリに新しく作った一意の名前へ書き終えてから置き換える。改行は LF のまま書く。
-
-    書き込みに失敗しても元のファイルが残り、固定の一時の名前にある既存のファイルやリンクの先も上書きしない。
-    `mode` を省くと、本人だけが読み書きできる権限になる。
-    """
-    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as out:
-            out.write(text)
-        if mode is not None:
-            os.chmod(tmp, mode)
-        os.replace(tmp, target)
-    finally:
-        Path(tmp).unlink(missing_ok=True)
-
-
 def _write_checked(target: Path, value: dict[str, Any]) -> None:
-    _replace_file(target, json.dumps({files.RECORD_KIND_KEY: CHECKED_KIND, **value}, ensure_ascii=False))
+    """一時ファイルに書き終えてから置き換える（固定の一時の名前にある既存のファイルやリンクの先を上書きしない）。"""
+    with worker_paths.open_resolved(target.parent) as wd:
+        worker_paths.write_file(wd, target.name, json.dumps({files.RECORD_KIND_KEY: CHECKED_KIND, **value}, ensure_ascii=False))
 
 
 def _record(path: Path, targets: _Targets) -> _Record:
@@ -469,11 +453,19 @@ def _render(targets: _Targets) -> None:
     """実装計画の 2 つの表を書き直す。"""
     tree = units_files.Tree(targets.root)
     limits_held = units_files.limits_of(units_files.project_of(tree))
-    for plan, text in units_files.rendered(tree, targets.issues, targets.omitted, limits_held).items():
-        target = targets.root / plan
-        # 置き換えは親ディレクトリの権限だけで通る。読み取り専用の計画を上書きしないよう、切り詰めずに書き込み用で開いて確かめる
-        os.close(os.open(target, os.O_WRONLY))
-        _replace_file(target, text, stat.S_IMODE(target.stat().st_mode))
+    texts = units_files.rendered(tree, targets.issues, targets.omitted, limits_held)
+    if not texts:
+        return
+    # 実装計画はどれも `issues/` の直下にある。全部の準備（権限・ACL・所有者の確かめと一時ファイルへの書き込み）が済むまで
+    # どれも置き換えない。置き換えは `ExitStack` を抜けるときに行われる
+    try:
+        with worker_paths.open_resolved(targets.root / "issues") as wd, contextlib.ExitStack() as staged:
+            for plan, text in texts.items():
+                staged.enter_context(worker_paths.staged_write(wd, Path(plan).name, text))
+    except worker_paths.EntryUnsafe as exc:
+        raise _UnitsStopped(
+            "precondition", f"issues/{exc.name} は今のアクセス権を保って置き換えられないので、実装計画を書き換えない（{exc.kind}）"
+        ) from None
 
 
 def _units(a: argparse.Namespace) -> dict[str, Any]:
@@ -496,7 +488,7 @@ def _cmd_units(a: argparse.Namespace) -> int:
         return result.emit(result.stopped(TOOL, "invalid", str(exc)))
     except github.GitHubError as exc:
         return result.emit(result.stopped(TOOL, "transient" if exc.passing else "precondition", f"GitHub を読めない: {exc}"))
-    except (GitError, OSError) as exc:
+    except (GitError, OSError, worker_paths.EntryError) as exc:
         return result.emit(result.stopped(TOOL, "precondition", str(exc)))
 
 
