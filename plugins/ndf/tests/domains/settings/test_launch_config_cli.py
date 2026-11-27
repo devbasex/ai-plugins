@@ -443,3 +443,13 @@ def test_a_candidate_removing_a_secret_shaped_value_shows_the_change_with_the_va
         }
     ]
     assert fake not in json.dumps(got, ensure_ascii=False) and fake not in question["questions"][0]["question"]
+
+
+def test_a_secret_after_a_tab_is_found_before_serialization(repo, capsys):
+    """r7-2: タブの直後の秘密の形の値も、JSON にする前の値で見つけて拒む。"""
+    fake = "a\t" + "sk" + "-" + "A" * 40  # 秘密の形の作り物の値
+    content = {"version": 1, "experiments": {"stages": {"impl": {"arms": {"claude": [{}, {"model": fake}]}}}}}
+    candidate = _draft(capsys, content)
+    code = cli.main([lc.TOOL, "show", "--candidate", str(candidate), "--question", "approve"])
+    got = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert code != 0 and got["cause"]["kind"] == "refused"

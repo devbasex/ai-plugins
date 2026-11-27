@@ -143,14 +143,25 @@ def experiment_changes(root: Path, cand: Optional[Path]) -> list[dict[str, Any]]
     if cand is None:
         return []
     after = ls.load(root, cand).experiments
-    if holds_secret(json.dumps(after, ensure_ascii=False)):
+    if _has_secret(after):
         raise _Refused("候補の experiments に秘密の形の値がある（値は表示しない）。秘密を書かずに候補を直してから示し直す")
     try:
         before = ls.load(root).experiments
     except internal.InternalError:  # ファイル: 壊れた今の設定は候補が直す。変更は空の設定からの差として示す
         before = {}
     changes = _changes(before, after, "experiments")
-    return [{**c, "before": MASKED} if "before" in c and holds_secret(json.dumps(c["before"], ensure_ascii=False)) else c for c in changes]
+    return [{**c, "before": MASKED} if "before" in c and _has_secret(c["before"]) else c for c in changes]
+
+
+def _has_secret(value: Any) -> bool:
+    """値の中のキーと文字列のどれかが秘密の形か。1 つずつ当てる（JSON にするとエスケープで語の境が変わり、見逃すため。r7-2）。"""
+    if isinstance(value, str):
+        return holds_secret(value)
+    if isinstance(value, Mapping):
+        return any(holds_secret(str(k)) or _has_secret(v) for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(_has_secret(v) for v in value)
+    return False
 
 
 def _changes(before: Any, after: Any, at: str) -> list[dict[str, Any]]:
