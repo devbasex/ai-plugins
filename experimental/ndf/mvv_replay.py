@@ -405,15 +405,27 @@ def _exclusive(result: Path) -> Iterator[_Held]:
     結果ファイルそのものに flock を掛ける。ロックは inode に付くので、結果の保存先を共有するプロセスどうしなら、ネットワーク
     名前空間の違う別のコンテナから同じボリュームへ保存する起動とも排他になる。別の結果ファイルとは競合しない。保存は名前の置き換えで
     inode が変わるので、`_write_json` が新しい中身にロックを掛けてから置き換え、ロックを引き継ぐ。置き換えの前の中身を開いて
-    ロックを取った起動は、取れた中身が今のパスのものかを確かめ、違えば開き直す。結果ファイルが無ければ空のファイルを作ってロックし、
-    保存しないまま終わったときはその空のファイルを消す。ロックのためのファイルを別に作らず、プロセスが終われば自動で外れ、状態の
+    ロックを取った起動は、取れた中身が今のパスのものかを確かめ、違えば開き直す。結果ファイルが無ければ空のファイルを排他的に作って
+    ロックし、保存しないまま終わったときは、その起動が作ったファイル（作った inode のまま）だけを消す。利用者が置いた空のファイルは
+    消さない。ロックのためのファイルを別に作らず、プロセスが終われば自動で外れ、状態の
     保存先の環境変数にも依らない。
     """
     result.absolute().parent.mkdir(parents=True, exist_ok=True)
+    # FIFO などがあっても待たずに開き、通常のファイルかを確かめる
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
     while True:
+        made: Optional[tuple[int, int]] = None
         try:
-            # FIFO などがあっても待たずに開き、通常のファイルかを確かめる
-            fd = os.open(result, os.O_RDONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
+            try:
+                # 無ければ、この起動が作ったと分かるよう排他的に作る
+                fd = os.open(result, flags | os.O_CREAT | os.O_EXCL, 0o600)
+                got = os.fstat(fd)
+                made = (got.st_dev, got.st_ino)
+            except FileExistsError:
+                fd = os.open(result, flags)
+        except FileNotFoundError:
+            # 作ろうとした後、開く前に別の起動が消した
+            continue
         except OSError as exc:
             raise Stop(f"--result（{result}）を開けない: {exc}") from None
         if not stat.S_ISREG(os.fstat(fd).st_mode):
@@ -432,8 +444,10 @@ def _exclusive(result: Path) -> Iterator[_Held]:
     try:
         yield held
     finally:
-        if os.fstat(held.fd).st_size == 0 and _same_inode(held.fd, result):
-            # 保存する前に止まった（作った空のファイルを残さない。ロックを持ったまま消す）
+        now = os.fstat(held.fd)
+        if made == (now.st_dev, now.st_ino) and _same_inode(held.fd, result):
+            # この起動が作ったファイルを、保存する前に止まったまま持っている（ロックを持ったまま消す。保存すれば held は
+            # 置き換えた新しい中身を指すので、ここには来ない）
             result.unlink(missing_ok=True)
         os.close(held.fd)
 
