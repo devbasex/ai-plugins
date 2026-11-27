@@ -12,9 +12,10 @@
       "additionalProperties": false,
       "properties": {
         "usage_rows": {"type": "integer", "minimum": 0, "description": "読んだ使用量ログの行の数（同じ launch_id の重なりを含む）"},
-        "experiment_rows": {"type": "integer", "minimum": 0, "description": "読んだ実験の記録の行の数"},
+        "experiment_rows": {"type": "integer", "minimum": 0, "description": "読んだ実験の記録のうち、形に合って集計に使った行の数"},
         "broken_rows": {"type": "integer", "minimum": 0, "description": "使用量ログのうち形が違って読めなかった行の数"},
-        "kept_since": {"type": "string", "format": "date", "description": "--since が実験の記録の保持の期間（window_days ＋ kept_extra_days）より前を指したときだけ置く。記録が残っている最初の日（UTC）で、集計はこの日以後の残っている分だけである"}
+        "broken_experiment_rows": {"type": "integer", "minimum": 0, "description": "実験の記録のうち、形（experiment.schema.json）に合わず集計から除いた行の数"},
+        "kept_since": {"type": "string", "format": "date", "description": "保存先に残っている最も古い月のファイルの月初め（UTC）。--since がこの日より前のときだけ置く。月の掃除が消した月と、記録の無かった月は区別しない。実験の組の集計は、この日からの割り付けだけである"}
       }
     },
     "items": {
@@ -90,7 +91,7 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "description": "report の実験のキー（リポジトリ × 工程 × ランタイム × 互換性のキー）の組ごとの値。期間に割り付けた単位を、呼ばれた時点で計算し直す",
+            "description": "report の実験のキー（リポジトリ × 工程 × ランタイム × 互換性のキー）の組ごとの値。割り付けの値（.ndf/launch.json の allocation）を読んだ作業ディレクトリのリポジトリの割り付けだけを対象に、期間に割り付けた単位を呼ばれた時点で計算し直す。打ち切り・候補・段階・出現率は、期間の最後の日の終わりの時点で、その時点までの直近 window_days 日の単位と記録から求める",
             "required": ["kind", "repo", "stage", "runtime", "key", "arm", "units", "modes", "quality", "quality_interval", "cost_usd", "unpriced_units", "roi", "roi_ratio", "phase", "verdict", "note"],
             "properties": {
               "kind": {"const": "arm"},
@@ -116,8 +117,8 @@
               "note": {"type": "string", "description": "段階と優劣の表示の文。単位の無い組は「記録なし」"},
               "leader": {"const": true, "description": "判断できるときの最良の組だけに置く"},
               "dropped": {"enum": ["cutoff", "refused"], "description": "候補から外した理由（打ち切り・起動できない組）"},
-              "dropped_until": {"type": "string", "description": "打ち切りの期限"},
-              "unpriced_models": {"type": "array", "items": {"type": "string"}, "description": "費用を計算できないモデル（段階が uniform のとき）"}
+              "dropped_until": {"type": "string", "description": "候補へ戻る日時。打ち切りは期限、起動できない組は拒否の件数がしきい値（launch-experiments の records の行の refusals）を下回る日時"},
+              "unpriced_models": {"type": "array", "items": {"type": "string"}, "description": "費用を計算できないモデル（段階が uniform のとき）。期間の最後の日の終わりまでの直近 window_days 日に割り付けた単位のもの"}
             }
           }
         ]

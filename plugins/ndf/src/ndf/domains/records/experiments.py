@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import random
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -112,6 +112,31 @@ def _models(usage_rows: Sequence[Mapping[str, Any]]) -> dict[str, str]:
 
 
 @dataclass(frozen=True)
+class UsageIndex:
+    """使用量ログから求めた、割り付け ID → 単位の費用（`_costs`）と、割り付け ID → 最初の起動の実際のモデル（`_models`）。
+
+    どちらも全部の使用量ログを走査するので、実験のキーをいくつも集計する呼び手（`ndf models report`）は 1 回だけ求めて渡す。
+    """
+
+    costs: Mapping[str, Optional[float]]
+    models: Mapping[str, str]
+
+
+def usage_index(usage_rows: Sequence[Mapping[str, Any]]) -> UsageIndex:
+    """使用量ログの全部の行から `UsageIndex` を求める。"""
+    return UsageIndex(_costs(usage_rows), _models(usage_rows))
+
+
+def refused_launches(rows: Sequence[Mapping[str, Any]]) -> Callable[[Mapping[str, Any]], bool]:
+    """使用量ログの行が、モデルを理由に拒否された起動の行かを返す判定。拒否された起動は `launch_error` の行の `launch_id` で見分ける。
+
+    割り付け ID は同じ単位のほかの起動（先に形が合わなかった判定など）も持つので、見分けるのに使わない。
+    """
+    ids = {r["launch_id"] for r in rows if r["kind"] == "launch_error"}
+    return lambda row: "launch_id" in row and row["launch_id"] in ids
+
+
+@dataclass(frozen=True)
 class _Seen:
     """実際のモデルで絞る前の単位と、そのまとまり（`model_choice.model_group`）・評価した日時。"""
 
@@ -145,7 +170,7 @@ def _group_units(seen: Sequence[_Seen], observed: Optional[str] = None) -> list[
 
 def unit_values(
     rows: Sequence[Mapping[str, Any]],
-    usage_rows: Sequence[Mapping[str, Any]],
+    usage: UsageIndex,
     *,
     where: mc.Where,
     now: datetime,
@@ -157,11 +182,11 @@ def unit_values(
     実際のモデルがまとまりの今のモデルと同じもの（設計の「出現率の再利用」「期限切れの単位とモデルの変化」）。
 
     `observed` は、まとまり → 最も新しい `observed` の行のモデル（`model_choice.observed_models`）。あるまとまりは、その
-    モデルを今のモデルとする。"""
+    モデルを今のモデルとする。`usage` は使用量ログから求めた単位の費用と実際のモデル（`usage_index`）で、呼び手が 1 回だけ求めて渡す。"""
     observed = {} if observed is None else observed
     start = now - timedelta(days=window_days)
     left, effects = _left(rows), _effects(rows, mc.metric_of(where.stage))
-    costs, models = _costs(usage_rows), _models(usage_rows)
+    costs, models = usage.costs, usage.models
     seen = []
     for a in rows:
         aid = a["assign_id"] if a["kind"] == "assign" else None
@@ -196,7 +221,7 @@ class _Known:
     rows: Sequence[Mapping[str, Any]]
 
 
-def _since(now: datetime, window_days: int) -> datetime:
+def records_since(now: datetime, window_days: int) -> datetime:
     """出現率の計算に要る記録の読み始め（期間と、起動できない組を数える日数の長いほう）。"""
     return now - timedelta(days=max(window_days, mc.records_rule()["refusal_days"]))
 
@@ -262,7 +287,7 @@ def write_outcome(assign_id: str, quality: Optional[float], detail: Mapping[str,
     now, cwd = mc.utc_now(), Path.cwd()
     got = _table_here(cwd)
     longest = now - timedelta(days=mc.LONGEST_WINDOW + mc.records_rule()["kept_extra_days"])
-    since = _since(now, got.allocation["window_days"]) if got is not None else longest
+    since = records_since(now, got.allocation["window_days"]) if got is not None else longest
     try:
         known = _logged(assign_id, quality, detail, now, since, longest)
     except (*mc.STORE_ERRORS, internal.InternalError, contracts.ContractError) as exc:
@@ -348,7 +373,7 @@ def _recomputed(assign: Mapping[str, Any], now: datetime, cwd: Path, got: Option
     if s is None:
         return False
     window = s.allocation["window_days"]
-    since = _since(now, window)
+    since = records_since(now, window)
     rows = _rows_for(known, since, s.store)
     observed = mc.observed_models(rows, s.where, s.arms, now - timedelta(days=window))
     entry = mc.weights_entry(s.store, s.where, now)
@@ -359,7 +384,7 @@ def _recomputed(assign: Mapping[str, Any], now: datetime, cwd: Path, got: Option
     if launch_approval.repo_key(root) != s.where.repo:
         return False  # 作業ディレクトリが割り付けと別のリポジトリなので、その設定では計算しない
     usage_rows, _ = jsonl.read_rows(s.store / facts.value("ndf-files", USAGE_LOG, "path"), kind="usage")
-    units = unit_values(rows, usage_rows, where=s.where, now=now, window_days=window, observed=observed)
+    units = unit_values(rows, usage_index(usage_rows), where=s.where, now=now, window_days=window, observed=observed)
     mc.update_weights(s.store, now, _computed(units, rows, entry, s, observed))
     return True
 

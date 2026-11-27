@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -53,18 +53,23 @@ def _outcome(aid: str, quality: float, when: datetime = NOW) -> dict:
     return internal.write_record("experiment", {**row, "quality": quality, "detail": {"major": 0}})
 
 
-def _units(arm: int, count: int, quality: float, cost: float | None, mode: str | None = None) -> tuple[list, list]:
-    """組 `arm` の単位を `count` 個（割り付け・効果指標・起動 1 回ずつ）。"""
+def _units(arm: int, count: int, quality: float, cost: float | None, mode: str | None = None, at: datetime = NOW) -> tuple[list, list]:
+    """組 `arm` の単位を `count` 個（割り付け・効果指標・起動 1 回ずつ）。`at` から 1 分ずつ前に割り付ける。"""
     rows, launches = [], []
     for i in range(count):
-        aid, when = f"a{arm}-{i}", NOW - timedelta(minutes=i)
+        aid, when = f"a{arm}-{i}", at - timedelta(minutes=i)
         rows += [_assign(aid, arm, when, mode), _outcome(aid, quality, when)]
         launches.append(_row(f"l{arm}-{i}", when, cost, assign_id=aid, **({"effort": "high"} if arm else {})))
     return rows, launches
 
 
-def _report(usage_rows=(), rows=(), stage=None) -> list[dict]:
-    return mo.report_rows(list(usage_rows), list(rows), SINCE, UNTIL, stage, ALLOCATION)
+def _report(usage_rows=(), rows=(), stage=None, since=SINCE, end=UNTIL, repo="/r") -> list[dict]:
+    return mo.report_rows(list(usage_rows), list(rows), mo.Scope(since, end, stage, ALLOCATION, repo))
+
+
+def _refusal(aid: str, lid: str, arm: dict, when: datetime = NOW) -> dict:
+    row = {"kind": "launch_error", "at": _at(when), "assign_id": aid, "launch_id": lid, "stage": "impl", "runtime": "claude"}
+    return internal.write_record("experiment", {**row, "arm": arm, "reason": "404", "switched": True})
 
 
 def _launches(items: list[dict], **key) -> dict:
@@ -98,19 +103,31 @@ def test_a_launch_whose_actual_model_differs_from_the_requested_one_is_counted()
 def test_a_request_switched_to_the_base_counts_as_a_success_of_the_base():
     refused = _row("l1", outcome="stopped", effort="high", assign_id="a1", request_id="q")
     base = _row("l2", request_id="q", request_try=2)
-    error = internal.write_record("experiment", {"kind": "launch_error", "at": _at(NOW), "assign_id": "a1", "stage": "impl",
-                                                 "runtime": "claude", "arm": {"effort": "high"}, "reason": "404", "switched": True})  # fmt: skip
-    items = _report([refused, base], [_assign("a1", 1), error])
+    items = _report([refused, base], [_assign("a1", 1), _refusal("a1", "l1", {"effort": "high"})])
     assert (_launches(items, effort=None)["requests"], _launches(items, effort=None)["success_rate"]) == (1, 1.0)
     assert (_launches(items, effort="high")["launch_count"], _launches(items, effort="high")["requests"]) == (1, 0)
 
 
 def test_a_request_whose_launches_were_all_refused_is_a_failure_of_the_last_launch():
     refused = _row("l1", outcome="stopped", effort="high", assign_id="a1")
-    error = internal.write_record("experiment", {"kind": "launch_error", "at": _at(NOW), "assign_id": "a1", "stage": "impl",
-                                                 "runtime": "claude", "arm": {"effort": "high"}, "reason": "404", "switched": True})  # fmt: skip
-    one = _launches(_report([refused], [_assign("a1", 1), error]), effort="high")
+    one = _launches(_report([refused], [_assign("a1", 1), _refusal("a1", "l1", {"effort": "high"})]), effort="high")
     assert (one["requests"], one["success_rate"]) == (1, 0.0)
+
+
+def test_only_the_refused_launch_is_left_out_of_a_judge_request_sharing_the_assignment():
+    def judge(lid: str, step: int, outcome: str, **fields) -> dict:
+        return _row(lid, layer="judge", name="ask", request_id="q", request_try=step, outcome=outcome, **fields)
+
+    rows = [judge("l1", 1, "invalid", assign_id="a1"), judge("l2", 2, "stopped", assign_id="a1"), judge("l3", 3, "valid")]
+    one = _launches(_report(rows, [_assign("a1", 1), _refusal("a1", "l2", {"effort": "high"})]), stage="judge")
+    assert (one["judge_requests"], one["judge_retry_rate"], one["success_rate"]) == (1, 1.0, 1.0)
+
+
+def test_a_launch_in_the_last_second_of_the_last_day_is_in_the_period():
+    since, end = mo.jst_span(date(2026, 11, 30), date(2026, 11, 30))
+    assert end - since == timedelta(days=1)
+    rows = [_row("l1", end - timedelta(microseconds=500_000)), _row("l2", end)]
+    assert _launches(_report(rows, since=since, end=end), stage="impl")["launch_count"] == 1
 
 
 def test_a_gate_is_left_out_of_the_success_rate():
@@ -186,6 +203,50 @@ def test_a_unit_with_an_unknown_cost_is_left_out_of_the_cost_mean():
     assert (other["cost_usd"], other["unpriced_units"], other["units"]) == (None, 1, 1)
 
 
+def test_an_arm_of_zero_effect_has_a_roi_ratio_of_zero():
+    rows, launches = _units(0, 2, 0.8, 1.0)
+    more, more_launches = _units(1, 2, 0.0, 1.0)
+    base, other = _arms(_report(launches + more_launches, rows + more))
+    assert (other["roi"], other["roi_ratio"], base["roi_ratio"]) == (0.0, 0.0, 1.0)
+
+
+def test_assignments_of_another_repository_are_not_reported():
+    rows, launches = _units(0, 2, 0.8, 1.0)
+    assert _arms(_report(launches, rows, repo="/other")) == []
+
+
+def test_an_arm_refused_twice_says_when_it_returns_and_later_refusals_do_not_count():
+    rows, launches = _units(0, 2, 0.8, 1.0)
+    more, more_launches = _units(1, 2, 0.8, 1.0)
+    refusals = [_refusal("a1-0", "x1", ARMS[1], UNTIL - timedelta(days=2)), _refusal("a1-1", "x2", ARMS[1], UNTIL - timedelta(days=1))]
+    _, other = _arms(_report(launches + more_launches, rows + more + refusals))
+    assert (other["dropped"], other["dropped_until"]) == ("refused", internal.stamp((UNTIL + timedelta(days=5)).timestamp()))
+    later = [_refusal("a1-0", "x1", ARMS[1], UNTIL + timedelta(hours=1)), _refusal("a1-1", "x2", ARMS[1], UNTIL + timedelta(hours=2))]
+    assert "dropped" not in _arms(_report(launches + more_launches, rows + more + later))[1]
+
+
+def test_a_cutoff_is_reported_only_while_its_units_are_in_the_window():
+    rows, launches = _units(0, 30, 0.9, 1.0)
+    more, more_launches = _units(1, 30, 0.1, 1.0)
+    assert _arms(_report(launches + more_launches, rows + more))[1]["dropped"] == "cutoff"
+    old, old_launches = _units(0, 30, 0.9, 1.0, at=NOW - timedelta(days=100))
+    older, older_launches = _units(1, 30, 0.1, 1.0, at=NOW - timedelta(days=100))
+    _, other = _arms(_report(old_launches + older_launches, old + older, since=NOW - timedelta(days=120)))
+    assert other["units"] == 30 and "dropped" not in other
+
+
+def test_an_unpriced_model_outside_the_window_does_not_make_it_uniform():
+    rows, launches = _units(0, 2, 0.8, 1.0, at=NOW - timedelta(days=100))
+    unpriced = internal.write_record(
+        "experiment", {"kind": "unpriced", "at": _at(NOW - timedelta(days=100)), "assign_id": "a0-0", "model": "m"}
+    )
+    base, _ = _arms(_report(launches, [*rows, unpriced], since=NOW - timedelta(days=120)))
+    assert base["phase"] != "uniform" and "unpriced_models" not in base
+    recent, recent_launches = _units(0, 2, 0.8, 1.0)
+    fresh = internal.write_record("experiment", {"kind": "unpriced", "at": _at(NOW), "assign_id": "a0-0", "model": "m"})
+    assert _arms(_report(recent_launches, [*recent, fresh]))[0]["unpriced_models"] == ["m"]
+
+
 def test_an_arm_without_units_says_no_records():
     rows, launches = _units(0, 2, 0.8, 1.0)
     base, other = _arms(_report(launches, rows))
@@ -216,13 +277,19 @@ def test_report_without_records_says_so(repo, capsys, last_result):
     assert (got["status"], got["items"]) == ("ok", []) and "記録なし" in got["summary"]
 
 
+def _month_file(store: Path, month: str) -> Path:
+    return store / mc.facts.value("ndf-files", mc.LEDGER, "path").replace(mc.MONTH, month)
+
+
 def test_report_reads_the_records_and_leaves_the_rates_file_alone(repo, capsys, last_result, tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_USAGE_DIR", str(tmp_path / "usage"))  # エントリポイントが形の古い状態の保存先を退避しても残る場所
     rows, launches = _units(0, 2, 0.8, 1.0)
     store = mc.records_dir()
     with mc.ledger(NOW - timedelta(days=60), store) as led:
         for row in rows:
-            led.append(row)
+            led.append({**row, "repo": os.path.realpath(repo)} if row["kind"] == "assign" else row)
+    with _month_file(store, "2026-11").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"version": 1, "kind": "assign", "at": _at(NOW)}) + "\n")  # 必須の欄の無い行
     path = usage.usage_log_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     for row in launches:
@@ -230,14 +297,17 @@ def test_report_reads_the_records_and_leaves_the_rates_file_alone(repo, capsys, 
     assert cli.main([*ARGV, "--stage", "impl"]) == 0
     got = last_result(capsys.readouterr().out)
     assert [i["kind"] for i in got["items"]] == ["launch_group", "arm", "arm"] and got["metrics"]["usage_rows"] == 2
+    assert got["metrics"]["broken_experiment_rows"] == 1
     assert not (store / mc.facts.value("ndf-files", mc.WEIGHTS, "path")).exists()
 
 
-def test_a_since_before_the_kept_period_reports_what_is_left_and_says_so(repo, capsys, last_result, monkeypatch):
+def test_a_since_before_the_oldest_kept_month_reports_what_is_left_and_says_so(repo, capsys, last_result, monkeypatch, tmp_path):
+    monkeypatch.setenv("NDF_USAGE_DIR", str(tmp_path / "usage"))
     monkeypatch.setattr(mc, "utc_now", lambda: datetime(2026, 11, 30, tzinfo=UTC))
+    mc.append_row(_assign("a1", 0, datetime(2026, 9, 15, tzinfo=UTC)), mc.records_dir())
     assert cli.main(["models", "report", "--since", "2025-01-01", "--until", "2026-11-30"]) == 0
     got = last_result(capsys.readouterr().out)
-    assert got["status"] == "ok" and "残っている分" in got["summary"]
+    assert got["status"] == "ok" and "2026-09-01 からの月だけが残っている" in got["summary"]
     assert got["metrics"]["kept_since"] == "2026-09-01"
 
 
@@ -245,4 +315,4 @@ def test_a_since_within_the_kept_period_adds_no_notice(repo, capsys, last_result
     monkeypatch.setattr(mc, "utc_now", lambda: datetime(2026, 11, 30, tzinfo=UTC))
     assert cli.main(ARGV) == 0
     got = last_result(capsys.readouterr().out)
-    assert "残っている分" not in got["summary"] and "kept_since" not in got["metrics"]
+    assert "からの月だけが残っている" not in got["summary"] and "kept_since" not in got["metrics"]

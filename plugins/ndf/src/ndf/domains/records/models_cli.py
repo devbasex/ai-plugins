@@ -8,7 +8,9 @@ items に載せる。`--args` を付けると、CLI に渡す引数を 1 行に 
 失敗は標準出力に何も出さず、理由を標準エラーに書いて停止理由の終了コード（`precondition` など）で終える。
 
 `report` は使用量ログと実験の記録を、呼ばれた時点で集計し直す（出現率のファイルは読まず、書き換えない）。期間は JST の日付で、
-両端の日を含む。集計の順と区分は設計書（issue-2944-design.md）の「`ndf models report` は次の順で集計する」に従う。
+両端の日を含む（最後の日の翌日 0 時を含まない上限にする）。集計の順と区分は設計書（issue-2944-design.md）の「`ndf models report`
+は次の順で集計する」に従う。実験の組の集計は、割り付けの値（`.ndf/launch.json` の `allocation`）を読んだ作業ディレクトリの
+リポジトリの割り付けだけを対象にする。
 """
 
 from __future__ import annotations
@@ -18,14 +20,14 @@ import math
 import random
 import sys
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
 from ndf import cli
-from ndf.adapters import launch_settings, model_choice
+from ndf.adapters import launch_approval, launch_settings, model_choice
 from ndf.contracts import causes, internal, result
 from ndf.domains.records import allocation_decide as ad
 from ndf.domains.records import experiments, jsonl, usage
@@ -111,11 +113,21 @@ class _Tally:
 
 @dataclass(frozen=True)
 class _Span:
+    """集計の期間。`since` を含み、`end`（最後の日の翌日の 0 時）を含まない。行の日時はマイクロ秒まで持つので、上限を含まない形にする。"""
+
     since: datetime
-    until: datetime
+    end: datetime
 
     def has(self, row: Mapping[str, Any]) -> bool:
-        return self.since <= datetime.fromisoformat(row["at"]) <= self.until
+        return self.since <= datetime.fromisoformat(row["at"]) < self.end
+
+    def holds(self, at: datetime) -> bool:
+        return self.since <= at < self.end
+
+
+def jst_span(since: date, until: date) -> tuple[datetime, datetime]:
+    """日付の期間の JST の両端（`<since>T00:00:00+09:00` と、含まない上限の `<until の翌日>T00:00:00+09:00`）。"""
+    return datetime.combine(since, time(0), ud.JST), datetime.combine(until + timedelta(days=1), time(0), ud.JST)
 
 
 def _row_stage(row: Mapping[str, Any]) -> Optional[str]:
@@ -152,15 +164,18 @@ def _launch_end(row: Mapping[str, Any]) -> Optional[str]:
     return row["outcome"] if "outcome" in row else None
 
 
-def _add_request(tally: Mapping[tuple, _Tally], group: Sequence[Mapping[str, Any]], refused: set[str], rule: Mapping[str, Any]) -> None:
+Refused = Callable[[Mapping[str, Any]], bool]
+
+
+def _add_request(tally: Mapping[tuple, _Tally], group: Sequence[Mapping[str, Any]], refused: Refused, rule: Mapping[str, Any]) -> None:
     """リクエスト 1 件。区分は拒否された行を除いた最初の行（すべて拒否なら最後の行）、結果は最後の行の `outcome`。
 
-    拒否された行は、モデルを理由にした拒否（`launch_error` の行）の割り付け ID を持ち、成功でない行。すべて拒否なら失敗に数え、
-    判定のやり直し率では分母だけに数える。
+    拒否された行は、モデルを理由に拒否された起動の行（`experiments.refused_launches` が見分ける）で、成功でない行。すべて拒否なら
+    失敗に数え、判定のやり直し率では分母だけに数える。
     """
     success = rule["success_outcomes"]
     rows = sorted(group, key=lambda r: r["request_try"] if "request_try" in r else 1)
-    valid = [r for r in rows if not ("assign_id" in r and r["assign_id"] in refused and _launch_end(r) not in success)]
+    valid = [r for r in rows if not (refused(r) and _launch_end(r) not in success)]
     first = valid[0] if valid else rows[-1]
     t, last = tally[_segment(first)], _launch_end(rows[-1]) if valid else None
     if not valid or (last is not None and last not in rule["uncounted_outcomes"]):
@@ -190,7 +205,7 @@ def _last_in(group: Sequence[Mapping[str, Any]], span: _Span) -> bool:
     return span.has(max(group, key=lambda r: r["at"]))
 
 
-def _launch_items(usage_rows: Sequence[Mapping[str, Any]], refused: set[str], span: _Span, stage: Optional[str]) -> list[dict]:
+def _launch_items(usage_rows: Sequence[Mapping[str, Any]], refused: Refused, span: _Span, stage: Optional[str]) -> list[dict]:
     """起動の値・成功率・やり直し率の区分ごとの値（設計書の「期間と区分」の表）。重なった `launch_id` は 1 行にする。"""
     rule = model_choice.records_rule()
     pairs = [(r, cost) for r, cost in ud.launch_rows(usage_rows) if "layer" in r and _row_stage(r) is not None]
@@ -226,10 +241,11 @@ def _interval(s: ad.Stats) -> Optional[list[float]]:
 
 
 def _arm_item(where: model_choice.Where, arm: Mapping[str, str], s: ad.Stats, base_roi: Optional[float]) -> dict:
-    roi = s.quality / s.cost if s.units and s.cost else None
+    roi = s.quality / s.cost if s.units and s.cost else None  # 費用の平均は正の値か None
     item = {"kind": "arm", **where.fields(), "key": where.key, **dict(arm), "units": s.units}
     item |= {"quality": s.quality if s.units else None, "quality_interval": _interval(s), "cost_usd": s.cost}
-    return item | {"unpriced_units": s.units - s.cost_units, "roi": roi, "roi_ratio": roi / base_roi if roi and base_roi else None}
+    ratio = roi / base_roi if roi is not None and base_roi else None  # 効果 0 の組の ROI 0 は比 0。基準の ROI が 0 なら比べられない
+    return item | {"unpriced_units": s.units - s.cost_units, "roi": roi, "roi_ratio": ratio}
 
 
 def _arm_note(phase: str, verdict: ad.Verdict) -> str:
@@ -238,30 +254,55 @@ def _arm_note(phase: str, verdict: ad.Verdict) -> str:
     return "・".join([*shown, VERDICT_TEXT[verdict]])
 
 
-def _arm_values(where: model_choice.Where, assigned: Sequence[Mapping[str, Any]], rows, usage_rows, span: _Span) -> list:
-    """`where` のキーの、期間に割り付けた単位の値（`experiments.unit_values` の絞り込みと同じ）。"""
-    days = math.ceil((span.until - span.since) / timedelta(days=1)) + 1
-    observed = model_choice.observed_models(rows, where, assigned[0]["arms"], span.since)
-    found = experiments.unit_values(rows, usage_rows, where=where, now=span.until, window_days=days, observed=observed)
-    return [u for u in found if span.since <= u.at <= span.until]
+@dataclass(frozen=True)
+class _Records:
+    """実験の組の集計に使う記録と値。
+
+    `rows` はすべての実験の記録で、効果指標と停止を引く（評価や費用が期間の後に届いた単位も期間の単位として数える）。`upto` は期間の
+    終わりまでの行で、期間の終わりの時点の実際のモデル・起動できない組・費用を計算できないモデルを決める（期間の後の変化を当てない）。
+    `usage` は使用量ログから 1 回だけ求めた費用と実際のモデル。
+    """
+
+    rows: Sequence[Mapping[str, Any]]
+    upto: Sequence[Mapping[str, Any]]
+    usage: experiments.UsageIndex
+    allocation: Mapping[str, Any]
+    span: _Span
 
 
-def _experiment_items(where, assigned, rows, usage_rows, span: _Span, allocation: Mapping[str, Any]) -> list[dict]:
-    """キー 1 つの組ごとの値。打ち切りの判定 → 候補 → 段階と確率（出現率の計算と同じ順）を、記録から計算し直す。"""
-    arms = assigned[0]["arms"]
-    units = _arm_values(where, assigned, rows, usage_rows, span)
-    seed = experiments.seed_of(where, allocation, units)
-    cut = ad.eliminated(units, range(len(arms)), allocation["margin"], allocation["window_days"], random.Random(seed))
-    cands = [i for i in model_choice.candidates(arms, rows, None, span.until, where) if i not in cut]
-    ids = {a["assign_id"] for a in assigned}
-    unpriced = sorted({r["model"] for r in rows if r["kind"] == "unpriced" and r["assign_id"] in ids})
-    entry = ad.probabilities(units, cands, allocation, random.Random(seed))
-    judge = ad.judgement(units, cands, allocation, random.Random(seed))
+def _units_of(where: model_choice.Where, arms: Sequence[Mapping[str, str]], rec: _Records) -> tuple[list, list]:
+    """`where` のキーの、期間に割り付けた単位と、期間の終わりまでの直近 `window_days` 日に割り付けた単位。
+
+    前者は表示する値と優劣、後者は打ち切りと出現率（期間の終わりの時点で割り付けが使う値）に使う。
+    """
+    span = rec.span
+    edge = span.end - timedelta(days=rec.allocation["window_days"])
+    start = min(span.since, edge)
+    observed = model_choice.observed_models(rec.upto, where, arms, start)
+    days = math.ceil((span.end - start) / timedelta(days=1))
+    found = experiments.unit_values(rec.rows, rec.usage, where=where, now=span.end, window_days=days, observed=observed)
+    found = [u for u in found if u.at < span.end]
+    return [u for u in found if span.holds(u.at)], [u for u in found if u.at >= edge]
+
+
+def _experiment_items(where: model_choice.Where, assigned: Sequence[Mapping[str, Any]], rec: _Records) -> list[dict]:
+    """キー 1 つの組ごとの値。打ち切りの判定 → 候補 → 段階と確率（出現率の計算と同じ順）を、期間の終わりの時点で計算し直す。"""
+    arms, allocation, end = assigned[0]["arms"], rec.allocation, rec.span.end
+    units, recent = _units_of(where, arms, rec)
+    seed = experiments.seed_of(where, allocation, recent)
+    cut = ad.eliminated(recent, range(len(arms)), allocation["margin"], allocation["window_days"], random.Random(seed))
+    cutoffs = [{"arm": i, "until": internal.stamp(t.timestamp())} for i, t in sorted(cut.items())]
+    cands = model_choice.candidates(arms, rec.upto, {"cutoffs": cutoffs}, end, where)
+    refused = model_choice.refused_until(arms, rec.upto, end, where)
+    unpriced = model_choice.unpriced_models(rec.upto, where, end - timedelta(days=allocation["window_days"]))
+    entry = ad.probabilities(recent, cands, allocation, random.Random(seed))
+    shared = entry.best if units == recent else None  # 同じ単位なら最良である確率の標本を引き直さない
+    judge = ad.judgement(units, cands, allocation, random.Random(seed), best=shared)
     phase = "uniform" if unpriced else entry.phase
     used = ad.comparable(units, cands)
     stats = [ad.weighted([u for u in used if u.arm == i]) for i in range(len(arms))]
     base_roi = stats[0].quality / stats[0].cost if stats[0].units and stats[0].cost else None
-    modes = {a["assign_id"]: a["mode"] for a in assigned if "mode" in a}
+    modes = {aid: a["mode"] for aid, a in model_choice.assigns(assigned).items() if "mode" in a}
     best = judge.best or entry.best
     items = []
     for i, arm in enumerate(arms):
@@ -270,57 +311,81 @@ def _experiment_items(where, assigned, rows, usage_rows, span: _Span, allocation
         item["modes"] = {m: n for m, n in item["modes"].items() if n}
         item["note"] = _arm_note(phase, judge.verdict) if stats[i].units else NO_RECORDS
         item |= {"best": best[i]} if best is not None else {}
-        item |= {"probability": entry.probs[i]} if phase == "adaptive" and entry.probs is not None else {}
+        item |= {"probability": entry.probs[i]} if not unpriced and entry.probs is not None else {}  # 確率は adaptive だけが持つ
         item |= {"leader": True} if judge.leader == i else {}
-        item |= ({"dropped": "cutoff", "dropped_until": internal.stamp(cut[i].timestamp())} if i in cut else
-                 {"dropped": "refused"} if i not in cands else {})  # fmt: skip
+        if i not in cands:
+            dropped, until = ("cutoff", cut[i]) if i in cut and end < cut[i] else ("refused", refused[i])
+            item |= {"dropped": dropped, "dropped_until": internal.stamp(until.timestamp())}
         items.append(item | ({"unpriced_models": unpriced} if unpriced else {}))
     return items
 
 
-def report_rows(
-    usage_rows: Sequence[Mapping[str, Any]],
-    experiment_rows: Sequence[Mapping[str, Any]],
-    since: datetime,
-    until: datetime,
-    stage: Optional[str],
-    allocation: Mapping[str, Any],
-) -> list[dict]:
-    """設計書の「`ndf models report` は次の順で集計する」の順と区分で、起動の区分ごとの値と、実験のキーの組ごとの値を組む。
+@dataclass(frozen=True)
+class Scope:
+    """集計の範囲。期間は `since` を含み `end` を含まない。`stage` は工程（None ならすべて）。
 
-    `allocation` は計算に使う割り付けの値（今の設定の `floor`・`min_units`・`margin`・`window_days`）。
+    `allocation` は計算に使う割り付けの値（`repo` のリポジトリの今の設定の `floor`・`min_units`・`margin`・`window_days`）。
+    割り付けの値はリポジトリごとに違うので、実験の組は `repo` の割り付けだけを集計する。
     """
-    span = _Span(since, until)
-    refused = {r["assign_id"] for r in experiment_rows if r["kind"] == "launch_error"}
-    items = _launch_items(usage_rows, refused, span, stage)
-    found = [a for a in model_choice.assigns(experiment_rows).values() if span.has(a) and stage in (None, a["stage"])]
+
+    since: datetime
+    end: datetime
+    stage: Optional[str]
+    allocation: Mapping[str, Any]
+    repo: str
+
+
+def report_rows(usage_rows: Sequence[Mapping[str, Any]], experiment_rows: Sequence[Mapping[str, Any]], scope: Scope) -> list[dict]:
+    """設計書の「`ndf models report` は次の順で集計する」の順と区分で、起動の区分ごとの値と、実験のキーの組ごとの値を組む。"""
+    span, stage = _Span(scope.since, scope.end), scope.stage
+    items = _launch_items(usage_rows, experiments.refused_launches(experiment_rows), span, stage)
+    upto = [r for r in experiment_rows if datetime.fromisoformat(r["at"]) < span.end]
+    rec = _Records(experiment_rows, upto, experiments.usage_index(usage_rows), scope.allocation, span)
+    assigned = model_choice.assigns(experiment_rows).values()
+    found = [a for a in assigned if span.has(a) and a["repo"] == scope.repo and stage in (None, a["stage"])]
     keys = sorted({(a["repo"], a["stage"], a["runtime"], a["key"]) for a in found})
     for where in (model_choice.Where(*k) for k in keys):
-        assigned = [a for a in found if where.of(a)]
-        items += _experiment_items(where, assigned, experiment_rows, usage_rows, span, allocation)
+        items += _experiment_items(where, [a for a in found if where.of(a)], rec)
     return items
+
+
+def _checked(raw: Sequence[Mapping[str, Any]]) -> tuple[list[dict], int]:
+    """実験の記録の行を形（experiment.schema.json）で確かめ、合う行と、合わずに除いた行の数を返す。
+
+    必須の欄の無い行が 1 行あっても、ほかの行の集計を止めないためである。
+    """
+    rows: list[dict] = []
+    broken = 0
+    for row in raw:
+        try:
+            rows.append(internal.read_record("experiment", row))
+        except internal.InternalError:
+            broken += 1
+    return rows, broken
 
 
 def _report(a: argparse.Namespace) -> int:
     """使用量ログと実験の記録を読み、集計した結果を出す。記録が無ければ「記録なし」。出現率のファイルは書き換えない。"""
-    since, until = ud.jst_bounds(a.since, a.until)
-    allocation = model_choice.table(launch_settings.launch_root(Path.cwd())).allocation
+    since, end = jst_span(a.since, a.until)
+    root = launch_settings.launch_root(Path.cwd())
+    allocation = model_choice.table(root).allocation
     try:
         store = model_choice.records_dir()
         usage_rows, broken = jsonl.read_rows(usage.usage_log_path(), kind="usage")
-        first = min(since, until - timedelta(days=model_choice.records_rule()["refusal_days"]))
-        rows = model_choice.read_experiments(first, store)
+        first = min(since, experiments.records_since(end, allocation["window_days"]))  # 期間の終わりの時点の計算に要る範囲も読む
+        rows, broken_experiments = _checked(model_choice.read_experiments(first, store))
+        kept = model_choice.oldest_kept(store)
     except model_choice.STORE_ERRORS as exc:
         raise internal.InternalError("precondition", f"使用量ログか実験の記録を読めない: {exc}") from exc
-    items = report_rows(usage_rows, rows, since, until, a.stage, allocation)
+    items = report_rows(usage_rows, rows, Scope(since, end, a.stage, allocation, launch_approval.repo_key(root)))
     period = f"{a.since}..{a.until}"
     summary = f"{period} の集計 {len(items)} 件" if items else f"{period}: {NO_RECORDS}"
     metrics: dict[str, Any] = {"usage_rows": len(usage_rows), "experiment_rows": len(rows), "broken_rows": len(broken)}
-    # 月の掃除は window_days ＋ kept_extra_days より前の記録を消す。--since がそれより前なら、残っている分だけだと添える
-    kept = model_choice.utc_now() - timedelta(days=allocation["window_days"] + model_choice.records_rule()["kept_extra_days"])
-    if since < kept:
+    metrics["broken_experiment_rows"] = broken_experiments
+    # 月の掃除が消した月は戻らない。--since が残っている最も古い月より前なら、実験の組はその月からの記録だけだと添える
+    if kept is not None and since < kept:
         metrics["kept_since"] = kept.date().isoformat()
-        summary += f"（実験の記録は保持の期間より前が消えている。{metrics['kept_since']} 以後の残っている分だけを出した）"
+        summary += f"（実験の記録は {metrics['kept_since']} からの月だけが残っている。それより前の割り付けは実験の組の集計に入らない）"
     return result.emit(result.result(TOOL, result.OK, summary, items=items, metrics=metrics))
 
 

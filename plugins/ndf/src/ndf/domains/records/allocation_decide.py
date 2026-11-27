@@ -231,9 +231,18 @@ def eliminated(units: Sequence[Unit], arms: Sequence[int], margin: float, window
     return out
 
 
-def judgement(units: Sequence[Unit], candidates: Sequence[int], allocation: Mapping[str, Any], rng: Sampler) -> Judgement:
+def judgement(
+    units: Sequence[Unit],
+    candidates: Sequence[int],
+    allocation: Mapping[str, Any],
+    rng: Sampler,
+    best: Optional[Sequence[float]] = None,
+) -> Judgement:
     """`report` の優劣の表示。比べる組がそろって候補だった単位が無ければ比較できない、30 件未満の組があれば件数が足りない、
-    最良である確率（`probabilities` と同じ効果の下限を当てる）が 0.95 以上の組があれば判断できる、無ければ優劣を判定できない。"""
+    最良である確率（`probabilities` と同じ効果の下限を当てる）が 0.95 以上の組があれば判断できる、無ければ優劣を判定できない。
+
+    `best` は、同じ単位・候補・割り付けの値と同じ種の乱数で `probabilities` が求めた `Entry.best`。渡されれば標本を引き直さずに使う
+    （件数のしきい値はそれぞれで当てる）。"""
     cands = sorted(candidates)
     used = comparable(units, cands)
     stats = _by_arm(used, cands)
@@ -244,9 +253,9 @@ def judgement(units: Sequence[Unit], candidates: Sequence[int], allocation: Mapp
         return Judgement(Verdict.SHORT, counts)
     if not _enough(stats, ENOUGH_UNITS):
         return Judgement(Verdict.UNDECIDED, counts)  # 費用の分かる単位が足りず、効果 ÷ 費用を比べられない
-    best = _best(stats, allocation["margin"], rng)
-    shown = _per_arm(best, len(counts))
-    leader = max(best, key=lambda a: best[a])
-    if best[leader] >= DECIDED:
+    found = {a: best[a] for a in cands} if best is not None else _best(stats, allocation["margin"], rng)
+    shown = _per_arm(found, len(counts))
+    leader = max(found, key=lambda a: found[a])
+    if found[leader] >= DECIDED:
         return Judgement(Verdict.DECIDED, counts, shown, leader)
     return Judgement(Verdict.UNDECIDED, counts, shown)

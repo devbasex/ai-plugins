@@ -31,7 +31,6 @@ import os
 import random
 import re
 import uuid
-from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -43,10 +42,21 @@ from filelock import FileLock, Timeout
 
 from ndf import contracts, identity
 from ndf.adapters import launch_approval, launch_records, launch_settings
+from ndf.adapters.experiment_rows import TABLE as TABLE
+from ndf.adapters.experiment_rows import Where as Where
+from ndf.adapters.experiment_rows import arm_text as _arm_text
+from ndf.adapters.experiment_rows import assigns as assigns
+from ndf.adapters.experiment_rows import candidates as candidates
+from ndf.adapters.experiment_rows import entry_fits as entry_fits
+from ndf.adapters.experiment_rows import model_group as model_group
+from ndf.adapters.experiment_rows import observed_models as observed_models
+from ndf.adapters.experiment_rows import probs_fit as probs_fit
+from ndf.adapters.experiment_rows import records_rule as records_rule
+from ndf.adapters.experiment_rows import refused_until as refused_until
+from ndf.adapters.experiment_rows import row_time as _row_time
+from ndf.adapters.experiment_rows import unpriced_models as unpriced_models
 from ndf.contracts import facts, internal, limits
 
-# 同梱の表
-TABLE = "launch-experiments"
 # 値の引数の形の列（表 runtimes）
 ARGS_COLUMN = "choice_args"
 # 引数の形の値に入れる位置（`{model}`・`{effort}`）
@@ -397,7 +407,7 @@ class Request:
 # --- 実験の記録 --------------------------------------------------------------------------------------
 
 # 表 ndf-files の行（保存先は使用量ログと同じ）
-LEDGER = "launch-experiments"
+LEDGER = TABLE  # 表 ndf-files の行の id も同梱の表と同じ名前
 LEDGER_LOCK = "launch-experiments-lock"
 WEIGHTS = "launch-weights"
 WEIGHTS_LOCK = "launch-weights-lock"
@@ -408,7 +418,6 @@ _MONTH_FORM = re.compile(r"\d{4}-\d{2}")
 # 錠の待ちの上限（contracts/limits）
 LOCK_LIMIT = "launch.experiments-lock"
 # 確率の合計が 1 とみなす誤差
-_SUM_TOLERANCE = 1e-6
 # 記録を読み書きできない原因（起動は続ける）
 STORE_ERRORS = (OSError, Timeout, LookupError, identity.IdentityError)
 
@@ -438,10 +447,6 @@ def _time_text(at: datetime) -> str:
     return at.astimezone(UTC).isoformat(timespec="microseconds")
 
 
-def _row_time(row: Mapping[str, Any]) -> datetime:
-    return datetime.fromisoformat(row["at"])
-
-
 def _month(at: datetime) -> str:
     return f"{at.astimezone(UTC):%Y-%m}"
 
@@ -457,11 +462,6 @@ def _months(first: str, last: str) -> list[str]:
     while out[-1] < last:
         out.append(_month(_month_start(out[-1], 1)))
     return out
-
-
-def records_rule() -> dict[str, Any]:
-    """表 launch-experiments の records の行（起動できない組の条件と記録を残す期間）。"""
-    return facts.rows(TABLE, kind="records")[0]
 
 
 def records_dir(env: Optional[Mapping[str, str]] = None) -> Path:
@@ -558,6 +558,27 @@ def _write_replacing(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def _month_files(root: Path) -> dict[str, Path]:
+    """保存先にある月別の実験の記録のファイル（月 → パス）。"""
+    head, tail = facts.value("ndf-files", LEDGER, "path").split(MONTH)
+    found: dict[str, Path] = {}
+    for path in root.glob(f"{head}*{tail}"):
+        name = path.name[len(head) : len(path.name) - len(tail)]
+        if _MONTH_FORM.fullmatch(name):
+            found[name] = path
+    return found
+
+
+def oldest_kept(root: Optional[Path] = None) -> Optional[datetime]:
+    """保存先に残っている最も古い月のファイルの月初め（UTC）。ファイルが 1 つも無ければ None。
+
+    月の掃除は保存先を共有するリポジトリの最長の `window_days` で月ごとに消すので、残っている範囲は今の設定から決まらない。
+    実際に残っているファイルから求める。
+    """
+    found = _month_files(records_dir() if root is None else root)
+    return _month_start(min(found)) if found else None
+
+
 def prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None:
     """月の掃除。`launch-pruned` が今月なら何もしない。違えば古い月のファイルと期間を過ぎた出現率の項目を消し、全部成功したら
     今月を書く。失敗は呼び手へ送る（次の起動がやり直す）。
@@ -571,12 +592,7 @@ def prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None:
     month = _month(now)
     if done.is_file() and done.read_text(encoding="utf-8").strip() == month:
         return
-    head, tail = facts.value("ndf-files", LEDGER, "path").split(MONTH)
-    found: dict[str, Path] = {}
-    for path in root.glob(f"{head}*{tail}"):
-        name = path.name[len(head) : len(path.name) - len(tail)]
-        if _MONTH_FORM.fullmatch(name):
-            found[name] = path
+    found = _month_files(root)
     rows = [r for p in found.values() for r in launch_records.whole_rows(p)]  # 読めない月は割り付けにも使われないので飛ばす
     days = max([window_days] + [r["window_days"] for r in rows if r["kind"] == "assign" and "window_days" in r])
     edge = now - timedelta(days=days + records_rule()["kept_extra_days"])
@@ -639,58 +655,6 @@ def metric_of(stage: str) -> Optional[str]:
     return f"{row['metric']}/{row['metric_version']}" if "metric" in row else None
 
 
-def _arm_text(arm: Mapping[str, str]) -> str:
-    return json.dumps(dict(arm), sort_keys=True)
-
-
-def assigns(rows: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
-    """割り付け ID → 割り付けの行。"""
-    return {r["assign_id"]: r for r in rows if r["kind"] == "assign"}
-
-
-@dataclass(frozen=True)
-class Where:
-    """割り付けの行と出現率の項目を照らすキー（リポジトリ・工程・ランタイム・互換性のキー）。B2 の出現率の計算も使う。"""
-
-    repo: str
-    stage: str
-    runtime: str
-    key: str
-
-    def of(self, row: Optional[Mapping[str, Any]]) -> bool:
-        """`row`（割り付けの行か出現率の項目）が同じキーを持つか。"""
-        return row is not None and all(row[k] == v for k, v in vars(self).items())
-
-    def at(self, row: Mapping[str, Any]) -> bool:
-        """`row`（割り付けの行か停止の行）が同じリポジトリ・工程・ランタイムか（互換性のキーは見ない）。
-
-        単位の ID は呼び出し元が付けるので、別のリポジトリ・工程・ランタイムが同じ名前を使っても混ぜない。
-        """
-        return (row["repo"], row["stage"], row["runtime"]) == (self.repo, self.stage, self.runtime)
-
-    def fields(self) -> dict[str, str]:
-        """停止の行に書く範囲の欄。"""
-        return {"repo": self.repo, "stage": self.stage, "runtime": self.runtime}
-
-
-def candidates(
-    arms: Sequence[Mapping[str, str]], rows: Sequence[Mapping[str, Any]], entry: Optional[Mapping[str, Any]], now: datetime, where: Where
-) -> list[int]:
-    """打ち切った組（出現率の項目の期限の前）と起動できない組を除いた添字。基準の組（添字 0）は除かない。
-
-    起動できない組は、直近 `refusal_days` 日の `launch_error` の行のうち、割り付け ID で引いた割り付けの行がリポジトリ・工程・
-    ランタイム・互換性のキーで今と同じで、組が同じものが `refusals` 件以上ある組。割り付けの行を引けない拒否は数えない。
-    """
-    rule, found = records_rule(), assigns(rows)
-    since = now - timedelta(days=rule["refusal_days"])
-    refused = Counter(
-        _arm_text(r["arm"]) for r in rows if r["kind"] == "launch_error" and _row_time(r) >= since and where.of(found.get(r["assign_id"]))
-    )
-    cutoffs = entry["cutoffs"] if entry is not None else []
-    cut = {c["arm"] for c in cutoffs if now < datetime.fromisoformat(c["until"])}
-    return [i for i, arm in enumerate(arms) if i == 0 or (i not in cut and refused[_arm_text(arm)] < rule["refusals"])]
-
-
 @dataclass(frozen=True)
 class _Unit:
     """割り付ける単位と、そのときの設定。"""
@@ -724,60 +688,9 @@ def weights_entry(store: Path, where: Where, now: datetime) -> Optional[dict[str
     return found[-1] if found else None
 
 
-def probs_fit(entry: Mapping[str, Any], arms: int) -> bool:
-    """項目の添字と確率が `arms` 組の選択肢に合うか。候補と打ち切りの添字が範囲の中にあり、`adaptive` の確率は組の数だけあって、
-    候補が 0 より大きく、ほかが 0 で、合計が 1。読み手（割り付け）と書き手（出現率の計算）の両方が確かめる。"""
-    indexes = list(entry["candidates"]) + [c["arm"] for c in entry["cutoffs"]]
-    if any(i >= arms for i in indexes):
-        return False
-    if entry["phase"] != "adaptive":
-        return True
-    probs = entry["probs"]
-    cands = set(entry["candidates"])
-    shape = len(probs) == arms and all((p > 0) == (i in cands) for i, p in enumerate(probs))
-    return shape and abs(sum(probs) - 1) <= _SUM_TOLERANCE
-
-
-def model_group(arm: Mapping[str, str], arms: Sequence[Mapping[str, str]]) -> str:
-    """実際のモデルのまとまり: モデルを指定しない組すべては `default`、指定する組は添字。"""
-    return "default" if "model" not in arm else str(list(arms).index(arm)) if arm in arms else "?"
-
-
-def entry_fits(
-    entry: Mapping[str, Any], observed: Mapping[str, str], arms: Sequence[Mapping[str, str]], allocation: Mapping[str, Any]
-) -> bool:
-    """項目を今の割り付けに使えるか: 割り付けの値が今の設定と同じで、添字と確率が選択肢に合い（`probs_fit`）、実際のモデルが
-    期間の中の同じキーの最も新しい `observed` の行（呼び手が `observed_models` で求めた `observed`）と、まとまりごとに食い違わない。
-
-    観測は呼び手が 1 回だけ求め、出現率の計算は同じ結果を単位の絞り込みにも使う。
-    """
-    if entry["allocation"] != dict(allocation) or not probs_fit(entry, len(arms)):
-        return False
-    return all(observed[g] == m for g, m in entry["models"].items() if g in observed)
-
-
-def observed_models(rows: Sequence[Mapping[str, Any]], where: Where, arms: Sequence[Mapping[str, str]], start: datetime) -> dict[str, str]:
-    """まとまり → `start` 以降の同じキーの最も新しい `observed` の行の実際のモデル。割り付け（`entry_fits`）と出現率の計算
-    （`experiments.refresh`）が同じ観測でモデルを決めるために共有する。
-
-    最も新しい行は記録の順でなく行の日時で選ぶ。並行する起動の観測は、ロックの待ちで日時と逆の順に記録されることがある。
-    """
-    found = assigns(rows)
-    latest: dict[str, Mapping[str, Any]] = {}
-    for r in rows:
-        if r["kind"] == "observed" and _row_time(r) >= start and where.of(found.get(r["assign_id"])):
-            group = model_group(r["arm"], arms)
-            if group not in latest or _row_time(r) >= _row_time(latest[group]):
-                latest[group] = r
-    return {g: r["model"] for g, r in latest.items()}
-
-
 def _has_unpriced(rows: Sequence[Mapping[str, Any]], u: _Unit) -> bool:
     """直近 `window_days` 日に割り付けた、同じキーの単位に `unpriced` の行があるか。"""
-    found = assigns(rows)
-    return any(
-        r["kind"] == "unpriced" and u.where.of(a := found.get(r["assign_id"])) and a is not None and _row_time(a) >= u.start for r in rows
-    )
+    return bool(unpriced_models(rows, u.where, u.start))
 
 
 def _drawn(probs: Sequence[float]) -> int:
@@ -917,16 +830,18 @@ def _prepared_store(env: Mapping[str, str], now: datetime, window_days: int) -> 
     return store
 
 
-def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
+def base_fallback(choice: Choice, reason: str, launch_id: str) -> Optional[Choice]:
     """割り付けた基準でない組の起動がモデルを理由に拒否されたとき、基準へ切り替えたことを持つ `launch_error` の行を書き、基準の組の値を返す。
 
-    基準の組と割り付けの無い起動は None。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなくても基準の値を返す。
+    `launch_id` は拒否された起動の使用量ログの行の `launch_id`。割り付け ID は同じ単位の複数の起動が共有するので、`ndf models report`
+    は拒否された起動をこの値で見分ける。基準の組と割り付けの無い起動は None。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなくても基準の値を返す。
     引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、基準の組から引き上げ直す。
     """
     if choice.assign_id is None or choice.arm is None or choice.arm == choice.base_arm:
         return None
-    row = {"kind": "launch_error", "at": _time_text(utc_now()), "assign_id": choice.assign_id, "stage": choice.stage}
-    append_row({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}, choice.store)
+    row = dict(kind="launch_error", at=_time_text(utc_now()), assign_id=choice.assign_id, launch_id=launch_id, stage=choice.stage)
+    row |= {"runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}
+    append_row(row, choice.store)
     log.warning("組 %s は起動できなかったので、基準の組で続ける（工程 %s・単位 %s）", _arm_text(choice.arm), choice.stage, choice.unit)
     (model, ms), (effort, es) = _from_base(choice.base_arm, "model"), _from_base(choice.base_arm, "effort")
     back = replace(choice, model=model, effort=effort, model_source=ms, effort_source=es, assign_id=None, arm=None, raised=False)

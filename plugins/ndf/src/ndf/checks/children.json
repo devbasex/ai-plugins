@@ -62,7 +62,7 @@
     "S3": {"issue": 3412, "packages": [], "needs": ["S2"], "order": 11, "lane": "lrebuild", "closed": false},
     "AD4": {"issue": 3616, "packages": [], "needs": ["AD1", "C3", "T1"], "order": 6, "lane": "lci-junit", "closed": false},
     "LC1": {"issue": 1959, "packages": ["ndf.adapters.launch_approval", "ndf.adapters.launch_candidates", "ndf.adapters.launch_records", "ndf.adapters.launch_settings", "ndf.adapters.secret_forms", "ndf.domains.settings.launch_config_cli"], "needs": ["X0", "D1", "AD1"], "order": 4, "lane": "lmodel", "closed": false},
-    "MC1": {"issue": 2944, "packages": ["ndf.adapters.model_choice", "ndf.domains.settings.delegate_run_cli"], "needs": ["X0", "D1", "AD1", "LC1"], "order": 5, "lane": "lmodel", "closed": false}
+    "MC1": {"issue": 2944, "packages": ["ndf.adapters.experiment_rows", "ndf.adapters.model_choice", "ndf.domains.settings.delegate_run_cli"], "needs": ["X0", "D1", "AD1", "LC1"], "order": 5, "lane": "lmodel", "closed": false}
   },
   "tables": {
     "contracts/causes/": ["D1", "D1+"],
