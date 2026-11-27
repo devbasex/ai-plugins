@@ -58,7 +58,7 @@ def _approvals() -> list[dict]:
 
 
 def _candidate(target: Path, content: bytes = NEW) -> Path:
-    candidate = la.new_candidate("/r", target)
+    candidate = la.new_candidate("/r", target).candidate
     candidate.write_bytes(content)
     return candidate
 
@@ -118,45 +118,45 @@ def test_an_answer_long_after_the_request_is_still_pending_until_reflected(tmp_p
 
 def test_two_candidates_are_separate_files_and_record_the_target_and_base(tmp_path):
     target = _worktree(tmp_path)
-    first, second = la.new_candidate("/r", target), la.new_candidate("/r", target)
+    first, second = la.new_candidate("/r", target).candidate, la.new_candidate("/r", target).candidate
     assert first != second and first.read_bytes() == second.read_bytes() == OLD
     source = {"target": str(target), "base": la.content_version(target), "written": la.content_version(target)}
     assert json.loads((first.parent / la.SOURCE_NAME).read_text()) == source
     assert [p.name for p in first.parents[1].iterdir() if p.name.startswith(la.DRAFTING)] == []
     missing = _worktree(tmp_path / "x", content=None)
-    assert json.loads(la.new_candidate("/r", missing).read_text()) == {"version": 1}
+    assert json.loads(la.new_candidate("/r", missing).candidate.read_text()) == {"version": 1}
 
 
 def test_draft_sweeps_candidates_of_a_removed_worktree_and_of_a_denied_request(tmp_path):
     gone, kept = _worktree(tmp_path / "a"), _worktree(tmp_path / "b")
-    stale, denied = la.new_candidate("/r", gone), la.new_candidate("/r", kept)
+    stale, denied = la.new_candidate("/r", gone).candidate, la.new_candidate("/r", kept).candidate
     _asked(kept, candidate=denied, label=la.DENY_LABEL)
     (gone.parent / "launch.json").unlink()
     gone.parent.rmdir()
     gone.parents[1].rmdir()
-    fresh = la.new_candidate("/r", kept)
+    fresh = la.new_candidate("/r", kept).candidate
     assert not stale.exists() and not denied.exists() and fresh.exists()
 
 
 def test_draft_keeps_edited_candidates(tmp_path):
     gone, kept = _worktree(tmp_path / "a"), _worktree(tmp_path / "b")
-    edited, denied = _candidate(gone), la.new_candidate("/r", kept)
+    edited, denied = _candidate(gone), la.new_candidate("/r", kept).candidate
     _asked(kept, candidate=denied, label=la.DENY_LABEL)
     denied.write_bytes(NEW)  # 「承認しない」と回答した後に直した
     (gone.parent / "launch.json").unlink()
     gone.parent.rmdir()
     gone.parents[1].rmdir()
-    la.new_candidate("/r", kept)
+    la.new_candidate("/r", kept).candidate
     assert edited.exists() and denied.exists()
 
 
 def test_draft_keeps_a_denied_candidate_that_was_asked_again(tmp_path):
     """否認の後に同じ候補で作り直したリクエストが回答待ちなら、否認と同じ中身でも消さない。"""
     target = _worktree(tmp_path)
-    candidate = la.new_candidate("/r", target)
+    candidate = la.new_candidate("/r", target).candidate
     _asked(target, candidate=candidate, label=la.DENY_LABEL)
     _asked(target, "q2", candidate=candidate, label=None)
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     assert candidate.exists()
 
 
@@ -167,25 +167,25 @@ def _aside(candidate: Path) -> Path:
 def test_a_swept_candidate_is_set_aside_and_deleted_by_the_next_sweep_only_if_still_untouched(tmp_path):
     """掃除は候補をその場で消さずに退避する。次の掃除で、直されていなければ消し、直されていれば元へ戻す。"""
     target = _worktree(tmp_path)
-    kept, gone = la.new_candidate("/r", target), la.new_candidate("/r", target)
+    kept, gone = la.new_candidate("/r", target).candidate, la.new_candidate("/r", target).candidate
     _asked(target, candidate=kept, label=la.DENY_LABEL)
     _asked(target, "q2", candidate=gone, label=la.DENY_LABEL)
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     assert _aside(kept).exists() and _aside(gone).exists()
     _aside(kept).write_bytes(NEW)  # 退避の後も開いていたファイルへの保存
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     assert kept.read_bytes() == NEW and not _aside(gone).parent.exists() and not gone.exists()
 
 
 def test_asking_again_with_a_set_aside_candidate_puts_it_back(tmp_path):
     target = _worktree(tmp_path)
-    candidate = la.new_candidate("/r", target)
+    candidate = la.new_candidate("/r", target).candidate
     _asked(target, candidate=candidate, label=la.DENY_LABEL)
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     assert not candidate.exists()
     _asked(target, "q2", candidate=candidate, label=None)
     assert candidate.exists() and not (candidate.parent / la.DISCARD_NAME).exists()
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     assert candidate.exists()
 
 
@@ -194,44 +194,44 @@ def test_a_denied_candidate_edited_before_the_request_is_kept(tmp_path):
     target = _worktree(tmp_path)
     candidate = _candidate(target)
     _asked(target, candidate=candidate, label=la.DENY_LABEL)
-    la.new_candidate("/r", target)
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
+    la.new_candidate("/r", target).candidate
     assert candidate.read_bytes() == NEW
 
 
 def test_a_set_aside_candidate_held_open_is_put_back_instead_of_deleted(tmp_path):
     """比べてから消すまでの間の書き込みを検出できない候補（ほかに開いたままの fd がある）は、消さずに元の名前へ戻す。"""
     target = _worktree(tmp_path)
-    candidate = la.new_candidate("/r", target)
+    candidate = la.new_candidate("/r", target).candidate
     _asked(target, candidate=candidate, label=la.DENY_LABEL)
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     with open(_aside(candidate), "rb"):
-        la.new_candidate("/r", target)
+        la.new_candidate("/r", target).candidate
     assert candidate.read_bytes() == OLD  # 戻した候補は、同じ掃除で退避し直さない
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     assert not candidate.exists() and _aside(candidate).exists()  # 閉じた後の掃除で、もう一度退避する
 
 
 def test_set_aside_candidates_are_checked_for_open_files_in_one_scan(tmp_path, monkeypatch):
     """退避した候補が何件あっても、開いたままのプロセスの走査は掃除 1 回につき 1 回。"""
     target = _worktree(tmp_path)
-    first, second = la.new_candidate("/r", target), la.new_candidate("/r", target)
+    first, second = la.new_candidate("/r", target).candidate, la.new_candidate("/r", target).candidate
     _asked(target, candidate=first, label=la.DENY_LABEL)
     _asked(target, "q2", candidate=second, label=la.DENY_LABEL)
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     scans, scan = [], la._open_inodes
     monkeypatch.setattr(la, "_open_inodes", lambda wanted: scans.append(len(wanted)) or scan(wanted))
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     assert len(scans) == 1 and not _aside(first).parent.exists() and not _aside(second).parent.exists()
 
 
 def test_a_question_is_not_made_for_a_candidate_that_is_gone(tmp_path):
     """候補が消えていれば、質問の中身を作らず、リクエストも足さない。"""
     target = _worktree(tmp_path)
-    candidate = la.new_candidate("/r", target)
+    candidate = la.new_candidate("/r", target).candidate
     _asked(target, candidate=candidate, label=la.DENY_LABEL)
-    la.new_candidate("/r", target)
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
+    la.new_candidate("/r", target).candidate
     assert not candidate.exists() and not _aside(candidate).exists()
     with pytest.raises(internal.InternalError) as raised:
         la.put_question(_request("q2", target), lambda: pytest.fail("質問を作らない"), candidate)
@@ -240,9 +240,9 @@ def test_a_question_is_not_made_for_a_candidate_that_is_gone(tmp_path):
 
 
 def _denied_and_set_aside(target: Path, request_id: str = "q1") -> Path:
-    candidate = la.new_candidate("/r", target)
+    candidate = la.new_candidate("/r", target).candidate
     _asked(target, request_id, candidate=candidate, label=la.DENY_LABEL)
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     assert _aside(candidate).exists()
     return candidate
 
@@ -252,19 +252,19 @@ def test_a_set_aside_candidate_with_a_users_file_beside_it_is_put_back(tmp_path)
     target = _worktree(tmp_path)
     candidate = _denied_and_set_aside(target)
     (_aside(candidate).parent / "mine.json").write_bytes(b"{}\n")
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     assert candidate.exists() and (candidate.parent / "mine.json").read_bytes() == b"{}\n"
 
 
 def test_a_dangling_symlink_beside_a_candidate_does_not_stop_the_sweep(tmp_path):
     """状態を読めない項目のある候補は元の名前へ戻し、ほかの候補の片付けと候補の作成は続ける。"""
     target = _worktree(tmp_path)
-    linked, plain = la.new_candidate("/r", target), la.new_candidate("/r", target)
+    linked, plain = la.new_candidate("/r", target).candidate, la.new_candidate("/r", target).candidate
     _asked(target, candidate=linked, label=la.DENY_LABEL)
     _asked(target, "q2", candidate=plain, label=la.DENY_LABEL)
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     (_aside(linked).parent / "link").symlink_to(tmp_path / "gone")
-    assert la.new_candidate("/r", target).exists()
+    assert la.new_candidate("/r", target).candidate.exists()
     assert linked.exists() and (linked.parent / "link").is_symlink()
     assert not plain.exists() and not _aside(plain).parent.exists()
 
@@ -273,12 +273,71 @@ def test_without_proc_a_cleanup_target_stays_at_its_path_and_is_listed(tmp_path,
     """消してよいかを確かめられない環境では退避せず、何度 draft を打っても元のパスに残り、理由と共に一覧に出る。"""
     monkeypatch.setattr(la, "_settleable", lambda: False)
     target = _worktree(tmp_path)
-    candidate = la.new_candidate("/r", target)
+    candidate = la.new_candidate("/r", target).candidate
     _asked(target, candidate=candidate, label=la.DENY_LABEL)
     for _ in range(3):
-        la.new_candidate("/r", target)
+        la.new_candidate("/r", target).candidate
         assert candidate.exists() and not _aside(candidate).exists()
     assert la.cleanup_targets("/r") == [{"candidate": str(candidate), "reason": "denied"}]
+
+
+def test_a_record_replaced_by_the_user_is_not_deleted_by_the_sweep(tmp_path):
+    """`source.json` を利用者が同じ名前の別のファイルへ置き換えた候補は、NDF が作ったままと確かめられないので消さずに戻す。"""
+    target = _worktree(tmp_path)
+    candidate = _denied_and_set_aside(target)
+    mine = b'{"target": "mine"}\n'
+    (_aside(candidate).parent / la.SOURCE_NAME).write_bytes(mine)
+    la.new_candidate("/r", target)
+    assert candidate.exists() and (candidate.parent / la.SOURCE_NAME).read_bytes() == mine
+
+
+def test_a_directory_named_like_the_discard_record_is_kept_and_the_draft_continues(tmp_path):
+    """`discard.json` という名前の利用者のディレクトリがある候補は、そのディレクトリに触れずに戻し、候補の作成は続ける。"""
+    target = _worktree(tmp_path)
+    candidate = _denied_and_set_aside(target)
+    (_aside(candidate).parent / la.DISCARD_NAME).mkdir()
+    assert la.new_candidate("/r", target).candidate.exists()
+    assert candidate.exists() and (candidate.parent / la.DISCARD_NAME).is_dir()
+    assert la.new_candidate("/r", target).candidate.exists()
+
+
+def test_cleanup_targets_leave_out_candidates_with_the_users_items(tmp_path, monkeypatch):
+    """一覧は利用者が消す手がかりなので、候補の隣に利用者の項目があるディレクトリは載せない。"""
+    monkeypatch.setattr(la, "_settleable", lambda: False)
+    target = _worktree(tmp_path)
+    candidate = la.new_candidate("/r", target).candidate
+    _asked(target, candidate=candidate, label=la.DENY_LABEL)
+    (candidate.parent / "mine.json").write_bytes(b"{}\n")
+    assert la.cleanup_targets("/r") == [] and la.new_candidate("/r", target).cleanup_targets == []
+
+
+def _by_path(items: list[dict]) -> list[dict]:
+    return sorted(items, key=lambda item: item["candidate"])
+
+
+def test_without_proc_reflected_and_outdated_candidates_are_listed(tmp_path, monkeypatch):
+    """`/proc` の無い環境では、反映した候補と、反映で古くなった直していない候補を一覧に載せる。直した候補は載せない。"""
+    monkeypatch.setattr(la, "_settleable", lambda: False)
+    target = _worktree(tmp_path)
+    candidate, edited, untouched = _candidate(target), _candidate(target, b"{}\n"), la.new_candidate("/r", target).candidate
+    assert la.reflect(candidate, lambda: None, SHA)
+    assert candidate.exists() and untouched.exists()
+    expected = [{"candidate": str(candidate), "reason": "reflected"}, {"candidate": str(untouched), "reason": "outdated"}]
+    assert _by_path(la.cleanup_targets("/r")) == _by_path(expected)
+    assert _by_path(la.new_candidate("/r", target).cleanup_targets) == _by_path(expected)
+    assert edited.exists()
+
+
+def test_draft_reads_the_requests_once_for_both_the_sweep_and_the_list(tmp_path, monkeypatch):
+    """`draft` の一覧は掃除の判定の結果から作り、リクエストと候補を読み直さない。"""
+    monkeypatch.setattr(la, "_settleable", lambda: False)
+    target = _worktree(tmp_path)
+    candidate = la.new_candidate("/r", target).candidate
+    _asked(target, candidate=candidate, label=la.DENY_LABEL)
+    calls, reasons = [], la._sweep_reasons
+    monkeypatch.setattr(la, "_sweep_reasons", lambda home: calls.append(home) or reasons(home))
+    assert la.new_candidate("/r", target).cleanup_targets == [{"candidate": str(candidate), "reason": "denied"}]
+    assert len(calls) == 1
 
 
 def test_draft_reclaims_what_an_interrupted_draft_or_sweep_left(tmp_path):
@@ -290,13 +349,13 @@ def test_draft_reclaims_what_an_interrupted_draft_or_sweep_left(tmp_path):
     drafting.mkdir()
     removing = home / f"{la.REMOVING}{edited.parent.name}"
     edited.parent.rename(removing)
-    la.new_candidate("/r", target)
+    la.new_candidate("/r", target).candidate
     assert not drafting.exists() and not removing.exists() and edited.read_bytes() == NEW
 
 
 def test_reflect_replaces_the_target_once_and_the_retry_succeeds_without_writing(tmp_path):
     target = _worktree(tmp_path)
-    candidate, edited, untouched = _candidate(target), _candidate(target, b"{}\n"), la.new_candidate("/r", target)
+    candidate, edited, untouched = _candidate(target), _candidate(target, b"{}\n"), la.new_candidate("/r", target).candidate
     calls: list[int] = []
     assert la.reflect(candidate, lambda: calls.append(1), SHA)
     assert target.read_bytes() == NEW and calls == [1]

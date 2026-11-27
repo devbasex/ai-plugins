@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -285,7 +286,8 @@ def pending_request(repo: str, target: Path) -> Optional[Mapping[str, Any]]:
 
 def _worktree_gone(target: object) -> bool:
     """反映先の worktree（`<worktree>/.ndf/launch.json` の 2 つ上）が無いか。"""
-    return not isinstance(target, str) or not Path(target).parents[1].exists()
+    parents = Path(target).parents if isinstance(target, str) else ()
+    return len(parents) < 2 or not parents[1].exists()
 
 
 def _candidates(home: Path) -> list[Path]:
@@ -304,23 +306,25 @@ def _settleable() -> bool:
     return Path("/proc/self/fd").is_dir()
 
 
-def _discard(made: Path, kept: Optional[str] = None) -> None:
-    """候補の錠の中で、直していない候補を、消す前の退避（`REMOVING` の名前）へ移す。中身はその場では消さない。
+def _discard(made: Path, kept: Optional[str] = None) -> bool:
+    """候補の錠の中で、直していない候補を、消す前の退避（`REMOVING` の名前）へ移し、移したかを返す。中身はその場では消さない。
 
     名前を変えた後は、元のパスへの保存はディレクトリが無いので失敗し、エディタの中の設定案は残る。名前を変える前に保存された
     中身と、変えた後も開いたままのファイルへ書かれた中身は退避の中に残り、次の掃除（`_reclaim`）が比べて元の名前へ戻す。
     消してよいかを確かめられない環境（`_settleable` が偽）では退避しない。退避しても次の掃除で戻すだけで、`draft` のたびに
-    元のパスで開けるかどうかが変わるためである。その候補は `cleanup_targets` が理由と共に返す。
+    元のパスで開けるかどうかが変わるためである。その候補は `cleanup_targets` が理由と共に返す。NDF が作ったファイルのほかに
+    項目がある候補も退避しない（次の掃除で消さずに戻すだけで、利用者の項目を退避の名前の下へ移すことになるため）。
     """
-    if not _settleable() or not _untouched(made, kept):
-        return
+    if not _settleable() or not _untouched(made, kept) or _own_inodes(made) is None:
+        return False
     aside = made.with_name(REMOVING + made.name)
     try:
         os.rename(made, aside)
     except FileNotFoundError:  # noqa: NDF401 ファイル: 退避の前に無くなった候補は、退避するものが無い
-        return
+        return False
     if kept is not None:
         write_launch_record(aside / DISCARD_NAME, {"kept": kept})
+    return True
 
 
 def _open_inodes(wanted: set[tuple[int, int]]) -> Optional[set[tuple[int, int]]]:
@@ -346,19 +350,40 @@ def _fd_target(fd: Path) -> Optional[tuple[int, int]]:
 
 # 候補のディレクトリの中で NDF が作るファイル。掃除が消すのはこれだけで、ほかの項目がある候補は消さずに元の名前へ戻す
 OWN_FILES = frozenset({CANDIDATE_NAME, SOURCE_NAME, DISCARD_NAME})
+# NDF が作る記録の欄。中身がこの欄だけを `write_launch_record` が書く形のまま持つ記録だけを、NDF が作ったままの記録とみなす
+# （`candidate.json` は中身を比べるバージョンと照らす `_untouched` が見る）
+RECORD_KEYS = {SOURCE_NAME: frozenset({"target", "base", "written"}), DISCARD_NAME: frozenset({"kept"})}
+
+
+def _ndf_record(path: Path) -> bool:
+    """`path` が、NDF が書いたままの記録（普通のファイルで、`RECORD_KEYS` の欄だけを `write_launch_record` の形で持つ）か。
+
+    利用者が同じ名前の別のファイルやディレクトリへ置き換えていれば偽で、呼び手はそれを消さない。
+    """
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return False
+        data = path.read_bytes()
+        obj = json.loads(data)
+    except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない・壊れた記録は、NDF が書いたままと確かめられないので消さない
+        return False
+    return isinstance(obj, dict) and obj.keys() == RECORD_KEYS[path.name] and json.dumps(obj, ensure_ascii=False).encode("utf-8") == data
 
 
 def _own_inodes(folder: Path) -> Optional[set[tuple[int, int]]]:
     """候補のディレクトリの中が NDF の作った普通のファイルだけなら、ディレクトリとそれらの `(st_dev, st_ino)`。
 
     リンクをたどらずに調べる（`lstat`）。ほかの項目（利用者のファイル・シンボリックリンク・ディレクトリ）があるか、
-    調べる途中で状態を読めなければ None を返し、呼び手はその候補を消さない。ディレクトリの fd からファイルを開く書き手も見分ける。
+    記録（`source.json`・`discard.json`）が NDF の書いたままでないか（`_ndf_record`）、調べる途中で状態を読めなければ None を返し、
+    呼び手はその候補を消さない。ディレクトリの fd からファイルを開く書き手も見分ける。
     """
     try:
         top = os.lstat(folder)
         with os.scandir(folder) as it:
             entries = list(it)
         if any(e.name not in OWN_FILES or not e.is_file(follow_symlinks=False) for e in entries):
+            return None
+        if not all(_ndf_record(Path(e.path)) for e in entries if e.name != CANDIDATE_NAME):
             return None
         keys = {(top.st_dev, top.st_ino)} | {(st.st_dev, st.st_ino) for st in (e.stat(follow_symlinks=False) for e in entries)}
     except OSError:  # noqa: NDF401 ファイル: 状態を読めない候補は、消してよいと確かめられないので消さない（呼び手が元の名前へ戻す）
@@ -373,15 +398,27 @@ def _original_name(aside: Path) -> str:
     return aside.name[len(REMOVING) :]
 
 
-def _put_back(aside: Path) -> Path:
-    (aside / DISCARD_NAME).unlink(missing_ok=True)
+def _put_back(aside: Path) -> Optional[Path]:
+    """退避か隔離の候補を元の名前へ戻し、戻したパスを返す。戻せなければ None（その候補は残し、次の掃除でやり直す）。
+
+    `discard.json` は NDF が書いたままのときだけ消す。同じ名前の利用者の項目（ファイル・ディレクトリ）には触れない。
+    """
+    discard = aside / DISCARD_NAME
     back = aside.with_name(_original_name(aside))
-    os.rename(aside, back)
+    try:
+        if _ndf_record(discard):
+            discard.unlink()
+        os.rename(aside, back)
+    except OSError:  # noqa: NDF401 ファイル: 戻せない候補は隔離の名前のまま残し、ほかの候補と呼び手の操作を続ける
+        return None
     return back
 
 
 def _remove_own(aside: Path) -> None:
-    """NDF が作ったファイルだけを消してから、空になったディレクトリを消す。ほかの項目が増えていれば、ディレクトリを消せずに `OSError`。"""
+    """NDF が作ったファイルだけを消してから、空になったディレクトリを消す。ほかの項目が増えていれば、ディレクトリを消せずに `OSError`。
+
+    呼び手は、記録が NDF の書いたままであることを `_own_inodes` で確かめてから呼ぶ。
+    """
     for name in OWN_FILES:
         (aside / name).unlink(missing_ok=True)
     aside.rmdir()
@@ -411,7 +448,9 @@ def _reclaim(home: Path) -> set[str]:
         own = keys[aside]
         removable = held is not None and own is not None and not own & held
         if not (removable and _untouched(aside, read_launch_record(aside / DISCARD_NAME).get("kept")) and _removed(aside)):
-            restored.add(_put_back(aside).name)
+            back = _put_back(aside)
+            if back is not None:
+                restored.add(back.name)
     return restored
 
 
@@ -437,54 +476,78 @@ def _restore(candidate: Path) -> None:
     if candidate.parent.exists():
         return
     for aside in [home / f"{REMOVING}{name}", *home.glob(f"{SETTLING}*.{name}")]:
-        if aside.exists():
-            _put_back(aside)
+        if aside.exists() and _put_back(aside) is not None:
             return
 
 
-def _sweep_reasons(home: Path) -> dict[Path, str]:
-    """反映先の worktree が無い候補（`worktree_gone`）と、最新のリクエストに「承認しない」と回答した候補（`denied`）と、その理由。
+def _sweep_reasons(home: Path) -> dict[Path, tuple[str, Optional[str]]]:
+    """片付けの条件に当たる候補と、その理由と、作った時の中身のほかに比べるバージョン（無ければ None）。
 
-    「承認しない」の判定は、候補ごとの最新のリクエストで行う。否認の後に同じ候補で作り直したリクエストが回答待ちか承認済みなら、
-    その候補は入れない。直したかどうかはここでは見ない（片付ける側が `_untouched` で見る）。
+    理由は次の 4 つ。最新のリクエストに「承認しない」と回答した（`denied`）。反映先の worktree が無い（`worktree_gone`）。
+    反映先がその候補の中身へ変わった（`reflected`。比べるバージョンは反映先の今の中身）。反映先が反映元のバージョンから変わった
+    （`outdated`。この候補では `reflect` が拒む）。「承認しない」の判定は、候補ごとの最新のリクエストで行う。否認の後に同じ候補で
+    作り直したリクエストが回答待ちか承認済みなら、その候補は入れない。直したかどうかはここでは見ない（片付ける側が `_untouched` で見る）。
+    リクエストの履歴・回答の履歴・候補の一覧は 1 回ずつ読み、反映先のバージョンは反映先ごとに 1 回だけ求める。
     """
     latest: dict[Any, dict[str, Any]] = {}
     for row in records.whole_rows(state_file(QUESTIONS)):
         if row.get("candidate") is not None:
             latest[row.get("candidate")] = row
     labels = _last_labels()
-    reasons = {}
+    versions: dict[str, Optional[str]] = {}
+    reasons: dict[Path, tuple[str, Optional[str]]] = {}
     for made in _candidates(home):
         req = latest.get(str(made / CANDIDATE_NAME))
+        source = read_launch_record(made / SOURCE_NAME)
+        target = source.get("target")
         if req is not None and _judged(labels.get(req.get("request_id")), req)[0] == "deny":
-            reasons[made] = "denied"
-        elif _worktree_gone(read_launch_record(made / SOURCE_NAME).get("target")):
-            reasons[made] = "worktree_gone"
+            reasons[made] = ("denied", None)
+        elif _worktree_gone(target):
+            reasons[made] = ("worktree_gone", None)
+        else:
+            if target not in versions:
+                versions[target] = content_version(Path(target))
+            now = versions[target]
+            if now != source.get("base"):
+                reflected_here = now is not None and content_version(made / CANDIDATE_NAME) == now
+                reasons[made] = ("reflected", now) if reflected_here else ("outdated", None)
     return reasons
 
 
-def _sweep(home: Path, restored: set[str]) -> None:
-    """候補の錠の中で、`_sweep_reasons` の候補のうち、作った時の中身のままのものを退避する（直したものは残す）。
+def _listed(reasons: Mapping[Path, tuple[str, Optional[str]]], gone: set[Path]) -> list[dict[str, str]]:
+    """元のパスに残った片付けの条件に当たる候補のうち、利用者が消しても設定案と利用者の項目を失わないもの（`cleanup_targets` の形）。
+
+    `gone` は退避した候補で、一覧に入れない。直した候補と、NDF が作ったファイルのほかに項目がある候補も入れない。
+    """
+    return [
+        {"candidate": str(made / CANDIDATE_NAME), "reason": reason}
+        for made, (reason, kept) in reasons.items()
+        if made not in gone and _untouched(made, kept) and _own_inodes(made) is not None
+    ]
+
+
+def _sweep(home: Path, restored: set[str]) -> list[dict[str, str]]:
+    """候補の錠の中で、`_sweep_reasons` の候補のうち、作った時の中身のままのものを退避し、元のパスに残った候補の一覧を返す。
 
     「承認しない」は反映を断る回答で、利用者が書いた設定案を消してよいという回答ではないので、リクエストの前に直した候補も残す。
     リクエストは同じ錠の中で作るので（`put_question`）、ここで読んだリクエストの一覧は退避を決めるまで変わらない。
-    同じ錠の中の `_reclaim` が元の名前へ戻した候補（`restored`）は、この掃除では退避しない。
+    同じ錠の中の `_reclaim` が元の名前へ戻した候補（`restored`）は、この掃除では退避しない。返す一覧は `cleanup_targets` と同じ形で、
+    同じ判定の結果から作る（履歴と候補を読み直さない）。
     """
-    for made in _sweep_reasons(home):
-        if made.name not in restored:
-            _discard(made)
+    reasons = _sweep_reasons(home)
+    gone = {made for made, (_, kept) in reasons.items() if made.name not in restored and _discard(made, kept)}
+    return _listed(reasons, gone)
 
 
 def cleanup_targets(repo: str) -> list[dict[str, str]]:
-    """片付けの条件に当たるが元のパスに残っている、作った時の中身のままの候補と、その理由（`denied`・`worktree_gone`）。
+    """片付けの条件に当たるが元のパスに残っている候補のうち、利用者が消しても失うものの無い候補と、その理由。
 
-    `draft` と `show` は、これを結果に載せる。`/proc` の無い環境では掃除が候補を退避しないので、利用者はこの一覧を見て
-    不要な候補を自分で消す。何も書かない。
+    各要素は `candidate`（候補ファイルのパス）と `reason`（`denied`・`worktree_gone`・`reflected`・`outdated`）を持つ。対象が無ければ
+    空のリスト。`show` はこれを結果に載せる（`draft` は `new_candidate` が返す同じ形の一覧を載せる）。`/proc` の無い環境では掃除が
+    候補を退避しないので、利用者はこの一覧を見て不要な候補を自分で消す。何も書かない。
     """
     home = _store(CANDIDATES) / _short_hash(repo)
-    return [
-        {"candidate": str(made / CANDIDATE_NAME), "reason": reason} for made, reason in _sweep_reasons(home).items() if _untouched(made)
-    ]
+    return _listed(_sweep_reasons(home), set())
 
 
 def _snapshot(target: Path) -> tuple[bytes, Optional[str]]:
@@ -496,8 +559,17 @@ def _snapshot(target: Path) -> tuple[bytes, Optional[str]]:
     return data, hashlib.sha256(data).hexdigest()
 
 
-def new_candidate(repo: str, target: Path) -> Path:
-    """反映先の写しの候補と、反映先・反映元のバージョン・作った時の候補のバージョンの記録を作り、候補のパスを返す。
+@dataclass(frozen=True)
+class Draft:
+    """`new_candidate` の結果。`candidate` は作った候補のパス、`cleanup_targets` は掃除の後も元のパスに残った候補の一覧
+    （`cleanup_targets` 関数と同じ形。作った候補は入らない）。"""
+
+    candidate: Path
+    cleanup_targets: list[dict[str, str]]
+
+
+def new_candidate(repo: str, target: Path) -> Draft:
+    """反映先の写しの候補と、反映先・反映元のバージョン・作った時の候補のバージョンの記録を作り、候補のパスと残った候補の一覧を返す。
 
     リポジトリごとの候補の錠の中で、中断の残りを片付け、掃除（`_sweep`）をしてから作る。完了の記録も、反映先の worktree が
     無ければ消す。候補は作成途中の名前（`DRAFTING`）のディレクトリで候補と記録をそろえてから付け替え、途中で失敗すれば消す。
@@ -505,7 +577,7 @@ def new_candidate(repo: str, target: Path) -> Path:
     """
     home = _store(CANDIDATES) / _short_hash(repo)
     with records_lock(home):
-        _sweep(home, _reclaim(home))
+        leftovers = _sweep(home, _reclaim(home))
         for record in _store(REFLECTED).glob("*" + DONE):
             if _worktree_gone(read_launch_record(record).get("target")):
                 record.unlink(missing_ok=True)
@@ -519,7 +591,7 @@ def new_candidate(repo: str, target: Path) -> Path:
         except BaseException:
             shutil.rmtree(drafting, ignore_errors=True)
             raise
-    return made / CANDIDATE_NAME
+    return Draft(made / CANDIDATE_NAME, leftovers)
 
 
 @dataclass(frozen=True)
