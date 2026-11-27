@@ -584,6 +584,8 @@ def _interrupted(tmp_path: Path) -> tuple[Path, Path, Path]:
         "content": la.content_version(candidate),
         "sha256": SHA,
         "request_id": None,
+        "approver": "山田",
+        "route": "terminal",
     }
     lc.write_launch_record(la.reflected_file(target, la.PENDING), pending)
     os.rename(target, aside)
@@ -591,11 +593,41 @@ def _interrupted(tmp_path: Path) -> tuple[Path, Path, Path]:
     return target, candidate, aside
 
 
+def _done(target: Path) -> dict:
+    return la.read_launch_record(la.reflected_file(target, la.DONE))
+
+
 def test_after_an_interruption_right_after_placing_the_retry_succeeds(tmp_path):
+    """同じ操作の打ち直しは、途中の記録から完了を確定し、record を呼ばない（同意した人と経路は中断の前のまま）。"""
     target, candidate, aside = _interrupted(tmp_path)
+    assert _reflect(candidate, lambda: pytest.fail("確認を取り直した"), SHA)
+    assert target.read_bytes() == NEW and not aside.exists()
+    assert (_done(target)["approver"], _done(target)["route"]) == ("山田", "terminal")
+
+
+def test_after_an_interruption_without_an_aside_the_pending_record_completes(tmp_path):
+    """退避を消した直後か、反映先が無い状態から置いた直後の中断でも、途中の記録から完了の記録を書く。"""
+    target, candidate, aside = _interrupted(tmp_path)
+    aside.unlink()
+    assert la.finished(candidate, target, SHA, None, candidate.read_bytes())
+    assert _done(target)["approver"] == "山田" and not la.reflected_file(target, la.PENDING).exists()
+
+
+def test_finished_is_false_for_another_operation_or_a_changed_target(tmp_path):
+    target, candidate, _ = _interrupted(tmp_path)
+    assert not la.finished(candidate, target, SHA, "q-other", candidate.read_bytes())  # 別のリクエストの操作
+    assert la.reflected_file(target, la.PENDING).exists()  # 別の操作の途中の記録は片付けない
+    target.write_bytes(b'{"version": 1, "a": 1}\n')
+    assert not la.finished(candidate, target, SHA, None, candidate.read_bytes())
+
+
+def test_a_hand_saved_copy_of_the_candidate_still_asks_for_consent(tmp_path):
+    """利用者が候補と同じ中身を手で保存した場合は、完了の記録が無いので record を呼ぶ。"""
+    target = _worktree(tmp_path)
+    candidate = _candidate(target)
+    target.write_bytes(candidate.read_bytes())
     calls: list[int] = []
-    assert _reflect(candidate, lambda: calls.append(1), SHA)  # 反映先が候補と同じでも、承認の行を確かめに record を呼ぶ
-    assert target.read_bytes() == NEW and not aside.exists() and calls == [1]
+    assert _reflect(candidate, lambda: calls.append(1), SHA) and calls == [1]
 
 
 def test_after_an_interruption_a_save_into_the_aside_is_put_back(tmp_path):

@@ -313,6 +313,9 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
         return _refused_config(str(exc))
     if t.sha256 != a.sha256:
         return _refused_config(f"示した内容（{a.sha256[:12]}…）と今の内容が違う。show で示し直して承認を取り直す")
+    if cand is not None and la.finished(cand, target, t.sha256, a.request, data):
+        # 置いた直後の中断の後の打ち直し。人の確認を求め直さず、中断の前の完了の記録（同意した人と経路）を残す
+        return result.result(TOOL, result.OK, "反映は済んでいる（中断の前に置いた設定をそのまま使う）", metrics={"sha256": t.sha256})
     needed = _widens(t) and not la.is_approved(repo, t.sha256)
     # 承認の行を足す条件（起動の許可）と、反映を許す条件（今回の書き換えへの同意）は別に判定する。書き換えは毎回人に確かめる
     asks = needed or cand is not None

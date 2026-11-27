@@ -635,9 +635,11 @@ def reflect(
 
     `data` は呼び手が承認の対象のハッシュを照らした候補のバイト列で、置くのはこのバイト列である。錠の中で、候補の記録の反映先が
     `expected`（今の作業場所の `.ndf/launch.json`）と違うか、候補の今の中身が `data` と違えば、何も書かずに `refusal` 付きの偽を返す。
-    先に `recover` で退避を片付け、反映先が反映元のバージョンと同じときだけ `record`（人の同意を照らし、要れば承認の行を書く）を呼んで置き換える。
-    反映先がすでに候補と同じ中身（手で同じ内容を書いた・置いた直後の中断）でも `record` を呼ぶ。承認の行が無いと次の起動が止まるためで、
-    `record` は承認済みなら何も書かない形にする。`record` が返した欄（書き換えに同意した人 `approver` と確認の経路 `route`）は、
+    先に `recover` で退避と反映の途中の記録を片付ける。反映先が候補と同じ中身なら、反映元のバージョンとも同じでも置き換えず、次のように扱う。
+    `recover` か前の実行が、この操作（候補・反映先・承認の対象のハッシュ・リクエスト）の完了の記録を確定していれば、`record` を呼ばずに
+    その記録を残して真を返す（中断の後の打ち直し。後から同じ反映先に新しいリクエストができても、反映済みの操作を拒まない）。
+    そうでなければ（利用者が候補と同じ中身を手で保存したなど）`record` を呼ぶ。承認の行が無いと次の起動が止まるためで、
+    `record` は承認済みなら何も書かない形にする。反映先が反映元のバージョンと同じときだけ `record` を呼んで置き換える。`record` が返した欄（書き換えに同意した人 `approver` と確認の経路 `route`）は、
     承認の行を書いたかにかかわらず、反映の途中の記録と完了の記録に入れる（だれがどの経路で書き換えを認めたかを残す）。
     書けなければ片付けてから `precondition` で止める（承認の行は残る）。片付けで利用者の保存を別の名前で残したら、そのパスを
     結果の `saved` か、止める文に載せる。
@@ -665,6 +667,10 @@ def reflect(
             "request_id": request_id,
         }
         if now == wanted:
+            done = _done_for(candidate, target, sha256, request_id, wanted)
+            if done is not None:  # 中断の前に置いた同じ操作の完了。同意した人と経路は記録のまま残す
+                _tidy_after_reflect(target, candidate, done)
+                return Reflection(True, saved)
             rec.update(record() or {})
             _after_reflect(target, candidate, rec)
             return Reflection(True, saved)
@@ -710,6 +716,44 @@ def _replace(target: Path, data: bytes, base: Optional[str]) -> bool:
     return True
 
 
+def _same_operation(rec: Mapping[str, Any], candidate: Path, sha256: str, request_id: Optional[str], content: str) -> bool:
+    """反映の途中か完了の記録 `rec` が、この操作（候補・承認の対象のハッシュ・リクエスト・置く中身）のものか。"""
+    return (rec.get("candidate"), rec.get("sha256"), rec.get("request_id"), rec.get("content")) == (
+        candidate.parent.name,
+        sha256,
+        request_id,
+        content,
+    )
+
+
+def _done_for(candidate: Path, target: Path, sha256: str, request_id: Optional[str], content: str) -> Optional[dict[str, Any]]:
+    """反映先 `target` の完了の記録がこの操作のもので、反映先が今もその中身なら、その記録。そうでなければ None。"""
+    rec = read_launch_record(reflected_file(target, DONE))
+    if rec.get("target") != str(target) or not _same_operation(rec, candidate, sha256, request_id, content):
+        return None
+    return rec if content_version(target) == content else None
+
+
+def finished(candidate: Path, target: Path, sha256: str, request_id: Optional[str], data: bytes) -> bool:
+    """人の確認を求める前に、この操作の反映が中断の前に済んでいるかを確かめる。済んでいれば候補を片付けて真。
+
+    承認の記録の錠の中で、反映先が候補の中身 `data` と同じで、反映の途中の記録がこの操作のものなら `recover` で完了の記録を確定する。
+    反映先が別の中身なら何も片付けない（利用者の保存を残した場所は、続く `reflect` の `recover` が結果に載せる）。
+    完了の記録がこの操作のものなら真を返す。端末で名前とハッシュを入れ直させず、同じ反映先の新しいリクエストで拒みもしない。
+    """
+    content = hashlib.sha256(data).hexdigest()
+    with records_lock(state_file(APPROVALS)):
+        if content_version(target) != content:
+            return False
+        if _same_operation(read_launch_record(reflected_file(target, PENDING)), candidate, sha256, request_id, content):
+            recover(target)
+        done = _done_for(candidate, target, sha256, request_id, content)
+        if done is None:
+            return False
+        _tidy_after_reflect(target, candidate, done)
+        return True
+
+
 def _write_done(target: Path, rec: Mapping[str, Any]) -> None:
     launch_candidates.write_launch_record(reflected_file(target, DONE), {**rec, "target": str(target)})
     reflected_file(target, PENDING).unlink(missing_ok=True)
@@ -728,6 +772,11 @@ def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> Non
     失わないため）。まだ人の回答で承認を済ませられるリクエストの候補（`_live`）も、`draft` の掃除と同じく退避しない。退避した候補は次の掃除が比べ直してから消す。
     """
     _write_done(target, rec)
+    _tidy_after_reflect(target, candidate, rec)
+
+
+def _tidy_after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> None:
+    """`_after_reflect` のうち、完了の記録を書いた後の候補の片付け（完了の記録は書き直さない）。"""
     now = content_version(target)
     home = candidate.parent.parent
     with records_lock(home):
@@ -749,7 +798,9 @@ def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> Non
 def recover(target: Path) -> Optional[Path]:
     """錠の中で、退避（`launch.json.reflecting`）と反映の途中の記録を設計書の「退避が残っている場合の判定」の表で片付ける。
 
-    利用者の保存を別の名前（`launch.json.saved-<値>`）で残したらそのパスを返す。
+    利用者の保存を別の名前（`launch.json.saved-<値>`）で残したらそのパスを返す。退避が無く（反映先が無い状態から置いた・退避を
+    消した直後の中断）、反映先が途中の記録の中身と同じなら、反映は済んでいるので、途中の記録（同意した人と確認の経路を含む）から
+    完了の記録を書く。途中の記録は人の同意を確かめた後にだけ書くので、記録の承認者をそのまま引き継げる。
     """
     pending_path = reflected_file(target, PENDING)
     rec = read_launch_record(pending_path)
@@ -770,6 +821,8 @@ def recover(target: Path) -> Optional[Path]:
         else:
             saved = target.with_name(f"{target.name}.saved-{uuid.uuid4().hex[:8]}")
             os.rename(aside, saved)
+    elif rec.get("content") is not None and content_version(target) == rec.get("content"):
+        _write_done(target, rec)
     pending_path.unlink(missing_ok=True)
     return saved
 

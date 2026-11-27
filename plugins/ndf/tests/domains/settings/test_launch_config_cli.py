@@ -421,3 +421,25 @@ def test_reading_recordable_asks_git_only_for_the_remote_url(tmp_path, monkeypat
     assert lc._reading_recordable(tmp_path, str(tmp_path / ".git")) and asked == ["origin"]
     monkeypatch.setattr(lc.git, "remote_of", lambda main: "up")
     assert not lc._reading_recordable(tmp_path, str(tmp_path / ".git"))
+
+
+def test_a_retry_after_an_interruption_right_after_placing_does_not_ask_again(repo, capsys, monkeypatch):
+    """端末で反映し、完了の記録を書く前に中断した後の打ち直しは、名前とハッシュを求め直さず、中断の前の同意者を残す。"""
+    target = repo / ".ndf" / "launch.json"
+    candidate = _draft(capsys, EMPTY)
+    sha = _run(capsys, "show", "--candidate", str(candidate))["metrics"]["sha256"]
+    _typed(monkeypatch, sha)
+    write_done = la._write_done
+
+    def interrupted(*_args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(la, "_write_done", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        cli.main([lc.TOOL, "approve", "--sha256", sha, "--candidate", str(candidate)])
+    capsys.readouterr()
+    monkeypatch.setattr(la, "_write_done", write_done)
+    monkeypatch.setattr(lc, "_terminal", lambda: False)  # 入力を求めれば拒まれる
+    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["status"] == "ok"
+    done = la.read_launch_record(la.reflected_file(target, la.DONE))
+    assert (done["approver"], done["route"]) == ("山田", "terminal")
