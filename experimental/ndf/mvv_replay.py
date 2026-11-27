@@ -30,12 +30,10 @@ import argparse
 import ast
 import contextlib
 import dataclasses
-import errno
 import fcntl
 import hashlib
 import json
 import os
-import socket
 import shlex
 import subprocess
 import sys
@@ -373,42 +371,31 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
     # 結果は名前の置き換えで保存するので、最後の要素がシンボリックリンクだと初回の保存でリンクが消え、次の起動が別の宛先を読む
     if args.result.is_symlink():
         raise Stop(f"--result（{args.result}）はシンボリックリンク。リンクの先のパスを渡す")
-    # 同じ結果ファイルを補う起動を並べると、起動時に読んだ状態で互いの行を上書きするので、結果ファイルごとに 1 つだけ動かす
+    # 同じ結果ファイルを補う起動を並べると、起動時に読んだ状態で互いの行を上書きするので、結果ファイルのディレクトリごとに 1 つだけ動かす
     with _exclusive(args.result):
         return _judge_locked(args, question, info, materials)
 
 
 @contextlib.contextmanager
 def _exclusive(result: Path) -> Iterator[None]:
-    """結果ファイルごとの排他。取れなければ止める。
+    """結果ファイルを置くディレクトリの排他。取れなければ止める。
 
-    Linux では、結果ファイルの絶対パスの SHA-256 を名前にした抽象名前空間の UNIX ソケットを bind する。ファイルを作らないので
-    片付けるものが残らず、プロセスが終われば自動で外れ、状態の保存先の環境変数にも依らない。抽象名前空間の無い OS では、
-    結果ファイルのディレクトリに flock を掛ける（同じディレクトリの別の結果ファイルとも排他になる）。
+    ディレクトリそのものに flock を掛ける。ロックはディレクトリの inode に付くので、同じ保存先を共有するプロセスどうしなら、
+    ネットワーク名前空間の違う別のコンテナから同じボリュームへ保存する起動とも排他になる。ロックのためのファイルを作らないので
+    片付けるものが残らず、プロセスが終われば自動で外れ、状態の保存先の環境変数にも依らない。同じディレクトリの別の結果ファイルとも
+    排他になるので、独立した測定は別のディレクトリの --result で並べる。
     """
     folder = result.absolute().parent
     folder.mkdir(parents=True, exist_ok=True)
-    # 祖先のリンクは解き、最後の要素は解かない（最後の要素のリンクは呼び出し元が拒む）
-    target = folder.resolve() / result.name
-    if sys.platform.startswith("linux"):
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            try:
-                sock.bind(f"\0ndf-mvv-replay-judge-{_sha(str(target))}")
-            except OSError as exc:
-                if exc.errno != errno.EADDRINUSE:
-                    raise Stop(f"結果ファイルごとの排他を取れない: {exc}") from None
-                raise Stop(f"同じ --result（{result}）の judge が動いている。終わってから打ち直す") from None
-            yield
-        finally:
-            sock.close()
-        return
     fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise Stop(f"同じディレクトリ（{folder}）に結果を保存する judge が動いている。終わってから打ち直す") from None
+            raise Stop(
+                f"同じディレクトリ（{folder}）に結果を保存する judge が動いている。同じ測定なら終わってから打ち直す。"
+                "別の測定なら、別のディレクトリの --result を渡せばすぐに始められる"
+            ) from None
         yield
     finally:
         os.close(fd)
@@ -717,16 +704,17 @@ def _kept(pairs: Sequence[Sequence[Mapping[str, Any]]], side: int) -> Optional[M
     return next((p[side] for p in pairs if _is_sha256(p[side].get("prompt_sha256"))), None)
 
 
-def _redo_hint(args: argparse.Namespace, pairs: Sequence[Sequence[Mapping[str, Any]]], i: int, side: int, name: str) -> str:
+def _redo_hint(
+    args: argparse.Namespace, pairs: Sequence[Sequence[Mapping[str, Any]]], env: Mapping[str, Any], i: int, side: int, name: str
+) -> str:
     """指示文のハッシュが無い 1 つの結果ファイルを判定し直す案内。
 
-    照合の引数を入れ、judge が LLM を呼ぶ前に不一致で止まるようにする。モデルと Claude Code の版は組の 2 つで揃える必要があるので、
-    どちらかの側に残す結果があればそれから取る。指示文のコミットとハッシュは、同じ側に残す結果があればそれから取る。指示文の
-    取得元がコミットで決まるのは比較の基準の側だけである。変更後の側は `--prompt-commit` を省いた起動（読み込んだ ndf の指示文）と
+    照合の引数を入れ、judge が LLM を呼ぶ前に不一致で止まるようにする。モデルと Claude Code の版は、組の 2 つでも側ごとの全回でも
+    揃える必要があるので、呼び出し元が全回に共通の値（`env`）を 1 つ決めて渡す。指示文のコミットとハッシュは、同じ側に残す結果が
+    あればそれから取る。指示文の取得元がコミットで決まるのは比較の基準の側だけである。変更後の側は `--prompt-commit` を省いた起動（読み込んだ ndf の指示文）と
     見分けられないので、コマンドを示さず、元の起動方法を確かめる案内にする。
     """
     same = _kept(pairs, side)
-    env = same or _kept(pairs, 1 - side) or pairs[i - 1][side]
     row = same or pairs[i - 1][side]
     check = ["--expect-claude-version", str(env.get("claude_version"))]
     if same is not None:
@@ -742,7 +730,7 @@ def _redo_hint(args: argparse.Namespace, pairs: Sequence[Sequence[Mapping[str, A
         head += ["--plugin-root", str(row["plugin_root"])]
     argv = [*head, "judge", "--materials", str(args.materials), "--model", str(env.get("model"))]
     argv += ["--prompt-commit", str(row.get("prompt_commit")), *check]
-    return f"{where}（<新しいパス> を新しい結果ファイルのパスに置き換えて打つ: {shlex.join(argv)} --result <新しいパス>）"
+    return f"{where}（コマンド例。末尾の --result の後に新しい結果ファイルのパスをシェル向けに引用して足す: {shlex.join([*argv, '--result'])}）"
 
 
 def _cmd_tally(args: argparse.Namespace) -> int:
@@ -755,8 +743,6 @@ def _cmd_tally(args: argparse.Namespace) -> int:
     for new, old in pairs:
         if not str(old["prompt_commit"]).startswith(PREV_COMMIT) or str(new["prompt_commit"]).startswith(PREV_COMMIT):
             raise Stop(f"組の指示文が違う（1 つ目は変更後、2 つ目は {PREV_COMMIT}）: {new['prompt_commit']} / {old['prompt_commit']}")
-        if (new["model"], new["claude_version"]) != (old["model"], old["claude_version"]):
-            raise Stop("比べる 2 つの判定でモデル ID か Claude Code のバージョンが違う")
     # 回ごとに指示文や実行環境を変えると、公開する指示文で再現を確かめていない改善が合格になるので、側ごとに全回の条件を揃える
     # 照合は指示文のハッシュを持つ結果どうしで先に行う。残す結果どうしの条件が両立しなければ、欠けた結果を判定し直しても集計へ
     # 進めないので、判定し直しを案内する前に止める（費用を払ってから止まらない）
@@ -770,8 +756,11 @@ def _cmd_tally(args: argparse.Namespace) -> int:
         raise Stop("残す判定結果のモデル ID か Claude Code のバージョンが側によって違う。どちらかの側をすべての回で判定し直す")
     # 指示文のハッシュを持たない結果（この変更より前の形式）は、実際に送った指示文を照合できないので比べない。前の結果ファイルは
     # judge が条件の違いで続きに使わないので、欠けた側と回のファイルだけを挙げ、新しい保存先で打ち直す打ち方を示す
+    # 判定し直す結果のモデルと Claude Code の版は全回で 1 つに決める（回ごとに旧結果から取ると、案内どおりに判定し直しても
+    # 側ごとの条件を揃える照合で止まる）。残す結果があればそれに揃え、無ければ 1 回目の変更後の結果に揃える
+    env = kept[0] if kept else pairs[0][0]
     redo = [
-        _redo_hint(args, pairs, i, side, name)
+        _redo_hint(args, pairs, env, i, side, name)
         for i, pair in enumerate(pairs, 1)
         for side, name in ((0, "変更後"), (1, PREV_COMMIT))
         if not _is_sha256(pair[side].get("prompt_sha256"))
@@ -779,8 +768,14 @@ def _cmd_tally(args: argparse.Namespace) -> int:
     if redo:
         raise Stop(
             "送った指示文の SHA-256 が無い判定結果がある。次の側と回だけを判定し直す。以前の結果ファイルは残す。"
+            f"モデルと Claude Code の版はすべて {env.get('model')} / {env.get('claude_version')} に揃える。"
             "次の tally では、該当する --judged の引数に新しい結果ファイルのパスを渡す:\n" + "\n".join(redo)
         )
+    # 集計に使う組の 2 つは、モデルと Claude Code の版が揃っていなければ比べない（指示文のハッシュを持たない結果は上で判定し直しへ
+    # 回すので、ここではすべてハッシュを持つ）
+    for new, old in pairs:
+        if (new["model"], new["claude_version"]) != (old["model"], old["claude_version"]):
+            raise Stop("比べる 2 つの判定でモデル ID か Claude Code のバージョンが違う")
     rounds = [_round(materials, pair, reviewed) for pair in pairs]
     verdict, reason = _verdict(rounds)
     selected = {n: latest_review(reviewed, m, n) for n, m in materials.items() if m is not None}
