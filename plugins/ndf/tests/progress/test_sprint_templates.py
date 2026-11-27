@@ -236,7 +236,7 @@ def _worktree_plan(repo: Path, plan_path: Path, report: dict, monkeypatch) -> di
     monkeypatch.setattr(runner, "_head", lambda plan: "0" * 40)
     inv = runner.prepare(repo / ".git" / "ndf" / "state", plan_path, None, None, repo)
     inv.state_dir.mkdir(parents=True, exist_ok=True)
-    checked, outputs = worker_outcome.require_outputs(report, worker_kinds.work_kinds()["worktree"]["outputs"])
+    checked, outputs, _ = worker_outcome.require_outputs(report, worker_kinds.work_kinds()["worktree"]["outputs"])
     said = worker_outcome.outcome_of("worktree", repo / "result.json", checked, [], {"attempts": 1}, outputs=outputs)
 
     def perform(act: transition_decide.RunStep) -> transition_decide.Outcome:

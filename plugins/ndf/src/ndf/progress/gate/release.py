@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf.contracts.worker_kinds import PRODUCT_VERSION
 from ndf.progress import lane, model, plan, run, store
 from ndf.progress.gate.answering import Answer, Observe, Post, answer, no_observe, no_post
 from ndf.progress.gate.asking import (
@@ -128,7 +129,7 @@ def _organizer_reply(st: store.Store, q: Question, env: Mapping[str, str]) -> Op
 
 
 # まとめたリリースの回答のキー → スプリントの文脈のキー（デプロイの出力）
-RELEASED_OUTPUTS = {"version": "product_version", "release": "release_pr"}
+RELEASED_OUTPUTS = {"version": PRODUCT_VERSION, "release": "release_pr"}
 
 
 def _released(reply: Mapping[str, Any], value: str) -> dict[str, Any]:

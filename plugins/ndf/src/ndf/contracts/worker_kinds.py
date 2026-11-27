@@ -23,6 +23,8 @@ from ndf import contracts
 from ndf.contracts import internal, worker_paths
 
 KINDS_FILE = "worker/kinds.json"
+# 出したものを指す値の文脈のキー（作業の outputs・まとめたリリースの回答が書く。#4513）
+PRODUCT_VERSION = "product_version"
 NO_SOURCES: Mapping[str, str] = MappingProxyType({})
 
 

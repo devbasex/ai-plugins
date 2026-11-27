@@ -122,7 +122,7 @@ def test_a_reply_to_a_request_whose_pr_head_moved_is_refused(st, new_table, flow
     env = {"NDF_ORGANIZER_DIR": str(tmp_path / "org"), "NDF_ORGANIZER_LANE": "a", "NDF_VERSION": "11.0.0"}
     gate.request_release(st, run.read(st, tid), q, env)
     (tmp_path / "org" / "answers").mkdir()
-    (tmp_path / "org" / "answers" / f"{gate.request_id(q)}.json").write_text(json.dumps({"result": "released"}))
+    (tmp_path / "org" / "answers" / f"{gate.request_id(q)}.json").write_text(json.dumps({"result": "released", "version": "11.0.0"}))
     with pytest.raises(model.Refused, match="対象が変わった"):
         gate.take_reply(st, tid, env, observe=lambda _q: gate.Target(head="new"))
     assert run.decide(run.read(st, tid)).action == run.Action.GATE

@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "release-verification.schema.json",
   "title": "リリース後テストの記録",
-  "description": "リリース後テストの結果を機械が読む形。課題を閉じる判定はこの記録の version と issues だけを読み、PR のコメントの見出しや本文の文から読まない。version はプラグイン名や v の前置きを持たない版数で、本番のバージョンと文字列のまま検証できる",
+  "description": "リリース後テストの結果を機械が読む形。課題を閉じる判定はこの記録の version と issues だけを読み、PR のコメントの見出しや本文の文から読まない。version は出したものを指す 1 行の値（文脈の product_version と同じリリースの識別子。バージョン番号を持つリポジトリではプラグイン名や v の前置きを持たないバージョン番号）で、本番のバージョンと文字列のまま検証できる",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "issues"],
   "properties": {
     "version": {
-      "type": "string",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$"
+      "$ref": "workflow/context.schema.json#/$defs/distribution_id",
+      "description": "出したものを指す 1 行の値（文脈の product_version と同じリリースの識別子。バージョン番号を持たないリポジトリではバージョン番号の形でない値もある。#4513）"
     },
     "issues": {
       "type": "array",

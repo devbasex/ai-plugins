@@ -5,6 +5,8 @@
 - `--require-output` の名前（作業の定義の outputs。#3908）は、結果ファイルの `outputs` にあり、値が結果 JSON の
   `outputs` の形（`contracts/schemas/result.schema.json` の `$defs/outputs`）に合うかを確かめる。無いか形が違えば
   欠け（`kind` が `output`）にし、そろえば ok の結果の `outputs` に載せる（プランのステップが標準出力から読み、後の工程へ渡す）
+- `product_version` のバージョン番号の形は、結果 JSON の定義でなく `--require-version-number` を受けたときだけ確かめる
+  （バージョン番号を持たないリポジトリでは出したものを指す値を返す。#4513）
 """
 
 from __future__ import annotations
@@ -12,16 +14,19 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import cli, contracts
-from ndf.contracts import result
+from ndf.contracts import internal, result
+from ndf.contracts.worker_kinds import PRODUCT_VERSION
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 
 # 結果 JSON の tool（このモジュールは `ndf worker run` の部品なので、サブコマンド `worker` の名前を使う）
 TOOL = cli.tool_of("ndf.core.worker")
 # 工程どうしで渡す値の形（結果 JSON の outputs）
 OUTPUTS_SCHEMA = result.SCHEMA + "#/$defs/outputs"
+# バージョン番号の形（バージョン番号を持つリポジトリの product_version。#4513）
+VERSION_NUMBER_SCHEMA = result.SCHEMA + "#/$defs/version_number"
 
 
 def _gap_of(raw: object) -> dict[str, str]:
@@ -41,31 +46,45 @@ def gaps_of(report: Mapping[str, Any]) -> list[dict[str, str]]:
     return [_gap_of(g) for g in (raw if isinstance(raw, list) else [raw])]
 
 
-def _output_gap(report: Mapping[str, Any], name: str) -> Optional[dict[str, str]]:
-    """必須の名前 `name` の欠け。結果ファイルの `outputs` に無いか、値が outputs の形に合わなければ欠け、合えば None。"""
+def _output_gap(report: Mapping[str, Any], name: str, version_number: bool = False) -> Optional[dict[str, str]]:
+    """必須の名前 `name` の欠け。結果ファイルの `outputs` に無いか、値が形に合わなければ欠け、合えば None。
+
+    形は結果 JSON の `$defs/outputs` に加えて、工程の文脈の形（`contracts.internal.CONTEXT`。後の工程が読む形）でも確かめる。
+    `version_number` が真なら `product_version` を `$defs/version_number`（バージョン番号の形）でも確かめる（#4513）。
+    """
     have = outputs if isinstance(outputs := report.get("outputs"), dict) else {}
     if name not in have:
-        reason = "作業の結果ファイルの outputs に無い"
-    elif errs := contracts.schema_errors({name: have[name]}, OUTPUTS_SCHEMA):
-        reason = f"作業の結果ファイルの outputs の値の形が違う: {'; '.join(errs)}"
-    else:
+        return {"kind": "output", "name": name, "reason": "作業の結果ファイルの outputs に無い"}
+    errs = contracts.schema_errors({name: have[name]}, OUTPUTS_SCHEMA) or contracts.schema_errors({name: have[name]}, internal.CONTEXT)
+    if not errs and version_number and name == PRODUCT_VERSION:
+        errs = [f"バージョン番号（例 1.2.3）でない: {e}" for e in contracts.schema_errors(have[name], VERSION_NUMBER_SCHEMA)]
+    if not errs:
         return None
-    return {"kind": "output", "name": name, "reason": reason}
+    return {"kind": "output", "name": name, "reason": f"作業の結果ファイルの outputs の値の形が違う: {'; '.join(errs)}"}
 
 
-def require_outputs(report: Any, required: Sequence[str]) -> tuple[Any, Optional[dict[str, Any]]]:
-    """ok の結果ファイルの `outputs` を `required`（`--require-output`）の名前で確かめ、（結果ファイル, 確かめた outputs）を返す（#3908）。
+class Checked(NamedTuple):
+    """`require_outputs` の結果。`report` は欠けを足した（か元の）結果ファイル、`outputs` は確かめを通った値、`missing` は通らなかった名前。"""
 
-    欠け（無い・形の違う値）があれば欠けを `gaps` に足したコピーと None、無ければ `report` と確かめた名前の値だけの outputs。
-    ok でないか `required` が空なら `report` と None。欠けの付いた ok は `outcome_of` が incomplete にする。
+    report: Any
+    outputs: Optional[dict[str, Any]]
+    missing: tuple[str, ...]
+
+
+def require_outputs(report: Any, required: Sequence[str], *, version_number: bool = False) -> Checked:
+    """ok の結果ファイルの `outputs` を `required`（`--require-output`）の名前で確かめる（#3908）。
+
+    欠け（無い・形の違う値）があれば欠けを `gaps` に足したコピーと None と欠けた名前、無ければ `report` と確かめた名前の値だけの
+    outputs。ok でないか `required` が空なら `report` と None。欠けの付いた ok は `outcome_of` が incomplete にする。
+    `version_number` が真なら `product_version` をバージョン番号の形でも確かめる（`ndf answer work` が決める。#4513）。
     確かめた outputs を結果ファイルの中へ戻さないのは、worker が同じキーを結果ファイルに書いて確かめを迂回できないためである。
     """
     if not (isinstance(report, dict) and report.get("status") == OK and required):
-        return report, None
-    missing = [g for name in required if (g := _output_gap(report, name))]
+        return Checked(report, None, ())
+    missing = [g for name in required if (g := _output_gap(report, name, version_number))]
     if missing:
-        return {**report, "gaps": gaps_of(report) + missing}, None
-    return report, {name: report["outputs"][name] for name in required}
+        return Checked({**report, "gaps": gaps_of(report) + missing}, None, tuple(g["name"] for g in missing))
+    return Checked(report, {name: report["outputs"][name] for name in required}, ())
 
 
 def outcome_of(

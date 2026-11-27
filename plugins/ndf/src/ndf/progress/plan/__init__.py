@@ -25,6 +25,7 @@ import sqlalchemy as sa
 from ndf import cli as top
 from ndf import contracts
 from ndf.contracts import internal, limits, named_cap, result
+from ndf.contracts.worker_kinds import PRODUCT_VERSION
 from ndf.progress import lane, model, store
 from ndf.progress.lane import launch, liveness, machine
 
@@ -298,6 +299,17 @@ class ReleaseAnswer:
     release: Optional[str] = None
 
 
+def release_answer_errors(result: str, version: Optional[str]) -> list[str]:
+    """まとめたリリースの回答の `version` が、文脈の `product_version`（1 行のリリースの識別子）に合わない誤り（#4513）。
+
+    `released` の回答だけを確かめる（`rejected` は `version` を持たなくてよい）。オーガナイザーの記録（`record_release`）と
+    外のオーガナイザーの回答のファイル（`external.read_answer`）の 2 つの受け口で同じ規則を使う。
+    """
+    if result != RELEASED:
+        return []
+    return contracts.schema_errors({PRODUCT_VERSION: version}, internal.CONTEXT)
+
+
 def record_release(conn: sa.Connection, pid: str, keys: list[str], answer: ReleaseAnswer) -> None:
     """まとめたリリースの回答を計画のステートマシンへ記録する（オーガナイザー）。
 
@@ -311,6 +323,8 @@ def record_release(conn: sa.Connection, pid: str, keys: list[str], answer: Relea
         raise model.Refused("まとめたリリースのリクエストが無いか、同じリクエストが重なっている")
     if answer.result == RELEASED and not (answer.version and answer.release):
         raise model.Refused("リリースした回答にはバージョンとリリース記録の PR が要る")
+    if errs := release_answer_errors(answer.result, answer.version):
+        raise model.Refused(f"まとめたリリースの --version は 1 行のリリースの識別子にする（product_version の形）: {'; '.join(errs)}")
     view, _ = lane.read_plan(conn, pid)
     for key in keys:
         _check_request(view, key)

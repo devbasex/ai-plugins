@@ -437,3 +437,72 @@ def test_a_handoff_file_that_cannot_be_made_keeps_the_previous_report(tmp_path, 
     assert code == causes.exit_code("precondition") and got == [] and out["cause"]["kind"] == "precondition"
     assert paths.report.read_text(encoding="utf-8") == "前の報告"
     assert paths.done.exists() and paths.result.read_text(encoding="utf-8") == "{}"
+
+
+# --- #4513: product_version の形を起動指示と ndf worker run の確かめで同じ値から決める ---------------------------------------
+
+from ndf.adapters.git import Git, GitError  # noqa: E402
+from ndf.core import branch_strategy  # noqa: E402
+
+
+def _strategy(kind: str) -> branch_strategy.Strategy:
+    return branch_strategy.Strategy({"release": {"version_store": {"kind": kind}}})
+
+
+def _release_handoff(tmp_path, monkeypatch, strategy):
+    """`release` の作業の `_work_handoff` を、設定を差し替えて打つ（git も worker も起動しない）。"""
+    state = tmp_path.resolve()
+    invoke.write_values(state, "release", {"repo": str(state)}, {"pr": 3}, True)
+    monkeypatch.setattr(entry, "_strategy_at", lambda _w: strategy)
+    handoff = entry._work_handoff("release", state, None)
+    os.close(handoff.fd)
+    return handoff
+
+
+@pytest.mark.parametrize(
+    ("strategy", "want"),
+    [(None, True), (_strategy("plugin_json"), True), (_strategy("none"), False)],
+)
+def test_the_version_number_shape_goes_to_the_prompt_and_the_argv_from_one_value(tmp_path, monkeypatch, strategy, want):
+    # 設定を読めないとき（None）と none 以外はバージョン番号の形を確かめる（#4513 の受け入れ条件 8）。none なら確かめない（条件 3）
+    handoff = _release_handoff(tmp_path, monkeypatch, strategy)
+    assert handoff.version_number is want
+    line = entry.VERSION_NUMBER_LINE if want else entry.DISTRIBUTION_ID_LINE
+    assert line in handoff.prompt
+    argv = gate.work_argv("release", handoff.state_dir, handoff.workdir, version_number=handoff.version_number)
+    assert worker._parser().parse_args(argv).require_version_number is want
+
+
+def test_a_work_without_product_version_reads_no_settings(tmp_path, monkeypatch):
+    state = tmp_path.resolve()
+    invoke.write_values(state, "fix", {"worktree": str(state), "branch": "b"}, {}, True)
+    monkeypatch.setattr(entry, "_strategy_at", lambda _w: pytest.fail("設定を読まない"))
+    handoff = entry._work_handoff("fix", state, "/w")
+    os.close(handoff.fd)
+    assert handoff.version_number is False and "product_version は" not in handoff.prompt
+    assert "--require-version-number" not in gate.work_argv("fix", state, Path("/w"))
+
+
+def test_the_settings_at_the_repo_root_are_read_without_git(tmp_path, monkeypatch):
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "project.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(Git, "run", lambda *_a, **_k: pytest.fail("git を起動しない"))
+    monkeypatch.setattr(branch_strategy, "load", lambda root: _strategy("none") if root == tmp_path else None)
+    assert entry._strategy_at(tmp_path).version_store == {"kind": "none"}
+
+
+def test_the_root_is_found_with_one_git_call_below_the_root(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(Git, "run", lambda self, *args: calls.append(args) or f"{tmp_path}\n")
+    monkeypatch.setattr(branch_strategy, "load", lambda root: _strategy("none"))
+    assert entry._strategy_at(tmp_path / "sub") is not None and calls == [("rev-parse", "--show-toplevel")]
+
+
+@pytest.mark.parametrize("error", [GitError("外"), branch_strategy.StrategyError("読めない"), OSError("無い")])
+def test_settings_that_cannot_be_read_are_none(tmp_path, monkeypatch, error):
+    def fail(*_a, **_k):
+        raise error
+
+    monkeypatch.setattr(Git, "run", fail)
+    monkeypatch.setattr(branch_strategy, "load", fail)
+    assert entry._strategy_at(tmp_path) is None

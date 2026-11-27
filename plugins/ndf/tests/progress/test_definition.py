@@ -561,3 +561,12 @@ def test_mode_definition_scenes(request, scene, values):
 def test_find_enum_scenes(request, scene, values):
     """出力のコントラクトの木から回答の enum を探す _find_enum の場面。"""
     scenes.play(request, scene, values)
+
+
+@pytest.mark.parametrize(("stage", "mode"), [("リリース後テスト", "standard"), ("体裁レビュー", "documentation")])
+def test_the_after_release_stages_take_a_distribution_id_that_is_not_a_version_number(stage, mode):
+    # #4513 の受け入れ条件 4: バージョン番号を持たないリポジトリの product_version で、後の工程の入力が組める
+    s = definition.load_definition(mode).stage(stage)
+    assert invoke.resolve_inputs(s, {"product_version": "main abc1234"}) == {"product_version": "main abc1234"}
+    with pytest.raises(invoke.StageInputInvalid):
+        invoke.resolve_inputs(s, {"product_version": "main\nabc1234"})
