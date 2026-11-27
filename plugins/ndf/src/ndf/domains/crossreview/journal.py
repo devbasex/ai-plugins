@@ -760,6 +760,7 @@ class FindingJournal:
                 bool(f.get(fin.REDLINE)),
                 f.get("by") == BY_NDF,
                 _text(f.get(REVIEW_DEFER)),
+                bool(f.get(PARKED)),
             )
             for f in self.rows.values()
             if f.get("outcome") in fin.OUTCOMES

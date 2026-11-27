@@ -15,6 +15,7 @@
   書かずに状態ファイルの記録を PR から戻す（保存の前に落ちた打ち直しで二重に書かない。不変条件 I4）
 - 未解決の指摘: スレッドを開いたまま残す（次の実行が `prior_decide.carried` で引き継ぐ）
 - 収束の妨げにならない重さ（`minor`・`nit`）の指摘はスレッドにしない（記録のコメントの表にだけ載る。#3941）
+- 線引きで直さずに残した指摘（`parked`）はスレッドにしない（#3780）
 - 書く操作が GitHub の二次レート制限に当たったら待って打ち直す（`patient`）。書き込みの間隔と、内容を作る書き込みを
   数えるウィンドウの上限はマシン全体の `WriteGate`（`github.write-spacing`・`github.content-window.minute`・
   `github.content-window.hour`）が持つ
@@ -222,12 +223,14 @@ def refreshed(finding: Mapping[str, Any], mark: Mapping[str, Any], thread: prior
 
 def _wanted(finding: Any, done: Mapping[str, Any], settled: set[str]) -> bool:
     """この実行でスレッドを扱う指摘か。最初のコメントの id を持つ指摘は扱い、無い指摘は収束の妨げになる重さで、
-    巻き直しの前に閉じていないものだけ扱う（PR 3944 の r5-3）。"""
+    線引きで直さずに残しておらず（#3780）、巻き直しの前に閉じていないものだけ扱う（PR 3944 の r5-3）。"""
     if not isinstance(finding, Mapping) or not isinstance(finding.get("id"), str):
         return False
     if _has_comment(done.get(finding["id"])):
         return True
-    return criteria_decide.blocking(criteria_decide.severity_of(finding.get("severity"))) and finding["id"] not in settled
+    if finding.get(journal.PARKED) or finding["id"] in settled:
+        return False
+    return criteria_decide.blocking(criteria_decide.severity_of(finding.get("severity")))
 
 
 def _has_comment(mark: Any) -> bool:
