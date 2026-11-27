@@ -44,27 +44,41 @@ description: |
 
 起動・上限つきの待ち・回収は `/ndf:external-ai` skill の「共通の実行手順」に従う（Codex 固有の差分は同 skill の `references/cli-codex.md`）。
 
-用途で起動の形が変わる。読むだけのレビューは `--use review` で起動し、Codex は worktree に書き込めない。結果は最終応答で返させ、標準出力から回収する。
+用途で起動の形が変わる。読むだけのレビューは `--use review` で起動し、結果を最終応答で返させて標準出力から回収する。
 実装などの書き込みを伴う作業だけを既定の用途（delegate）で起動し、結果ファイル `$FINAL` に書かせる。
 
-どちらも、対象のディレクトリに移れた場合だけ起動する（`cd` と `timeout` を `&&` でつなぐ）。移れないまま起動すると、元のディレクトリの承認で別の worktree を Codex に処理させてしまう。
+`--use review` を付けても、書き込みが必ず止まるわけではない。サンドボックスを利用できる場合は、`ndf delegate-run` が `-s read-only` を付けて起動するので、Codex は worktree に書き込めない。
+サンドボックスを利用できない環境では、利用者が `/ndf:launch-config` でサンドボックスなしの起動を承認していれば、`ndf delegate-run` はサンドボックスなしで起動し、Codex はファイルを変更できる。
+そのため、どちらの場合もレビューのプロンプトに「ファイルを変更しないこと」と書く。
+
+どちらの用途も、対象のディレクトリに移れた場合だけ起動する（`cd` と `timeout` を `&&` でつなぐ）。移れないまま起動すると、元のディレクトリの承認で別の worktree を Codex に処理させてしまう。
 安全装置の引数と作業ディレクトリの指定（`-C <今のディレクトリ>`）は `ndf delegate-run` が `'{args}'` に入れるので、自分では書かない。
 
-```bash
-# プロンプトを一意の一時ファイルに書く（本文はファイル書き込みツールで）
-TMP=$(mktemp -d)
+まず共通の準備をする。
 
-# 読むだけのレビュー: プロンプトでレビュー結果を最終応答に返すよう指示する。上限は 1200 + 120 秒
+```bash
+# プロンプトを一意の一時ファイルに書く（本文はファイル書き込みツールで $TMP/prompt.md に置く）
+TMP=$(mktemp -d)
+```
+
+次に、依頼された用途のコマンドを 1 つだけ起動する。2 つとも起動すると、同じプロンプトが書き込みのできる Codex にも渡り、ログも上書きされる。
+
+読むだけのレビュー（上限は 1200 + 120 秒）。プロンプトには、レビュー結果を最終応答で返すことと、ファイルを変更しないことを書く。
+
+```bash
 cd "<対象のディレクトリ>" && timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}' \
   --config model_reasoning_effort=medium < "$TMP/prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
+```
 
-# 書き込みを伴う作業: プロンプトに出力先 $FINAL を書く。上限は 3600 + 120 秒
+書き込みを伴う作業（上限は 3600 + 120 秒）。プロンプトには出力先 `$FINAL` を書く。
+
+```bash
 FINAL="$TMP/codex-result.md"
 cd "<対象のディレクトリ>" && timeout 3720 ndf delegate-run --runtime codex -- codex exec '{args}' \
   --config model_reasoning_effort=medium < "$TMP/prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
 ```
 
-- Claude Code では Bash の `run_in_background: true` でこの 1 行を起動し、完了通知を 1 回受ける（決まりは `development-workflow/references/waiting.md`）
+- Claude Code では Bash の `run_in_background: true` で、選んだ用途のコマンドを起動し、完了通知を 1 回受ける（決まりは `development-workflow/references/waiting.md`）
 - 読むだけのレビューは `$TMP/codex-stdout.log` を、書き込みを伴う作業は `$FINAL` を先に読み、無ければ `$TMP/codex-stdout.log` を読む。
   どちらも空なら、`/ndf:external-ai` skill の `references/cli-codex.md` の「最終出力をファイル経由で保証する」の表で、終了コードと `$TMP/codex-err.log` から次の手を決める
 - CLI の有無と認証は先に `command -v codex` と `codex login status` で確かめる
