@@ -11,6 +11,8 @@
     ndf records mvv answer [--version <バージョン>]         # 承認ゲートの回答（標準入力の JSON）を覆しの記録へ写す
     ndf records mvv gate --gate design|release [--machine <ID>] [--expect-pr <番号>]   # 承認ゲートの直前の MVV 判定（工程の入力は環境変数 NDF_STAGE_INPUT か --machine）
     ndf records mvv cite --gate design|release --base <ブランチ> <ファイル>...   # 承認資料の根拠の行を承認済みの MVV で確かめる
+    ndf records design check [--result <F>] (<ファイル>... | --base <ブランチ> [--remote <名前>])
+                                                   # 番号の無い「人へ残す判断」の行を止める設計の検査（#2912）
     ndf records preflight                          # 手順 0 の 3 つの確かめ（worktree の設定・設定・MVV）
     ndf records cleanup-stage <PR番号>...           # クリーンアップを終えた PR が閉じる課題に工程の記録を付ける
     ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか
@@ -40,8 +42,21 @@ from ndf.adapters import github as github_mod
 from ndf.adapters import publish
 from ndf.adapters.git import Git, GitError
 from ndf.contracts import result
-from ndf.domains.records import cleanup_stage, close_decide, glossary, gws, handoff, mvv, mvv_gate, preflight, reading, spec, usage
-from ndf.core import durable
+from ndf.domains.records import (
+    cleanup_stage,
+    close_decide,
+    design_check,
+    glossary,
+    gws,
+    handoff,
+    mvv,
+    mvv_gate,
+    preflight,
+    reading,
+    spec,
+    usage,
+)
+from ndf.core import durable, start_point
 from ndf.progress import command, definition, invoke, model, stage_inputs
 from ndf.progress.invoke import INPUT_ENV
 from ndf.domains.records import glossary_decide as gd
@@ -487,6 +502,34 @@ def _add_mvv(sub: Any) -> None:
     cite.set_defaults(handler=_mvv_cite)
 
 
+def _design_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    """ファイルか `--base` のどちらか一方で対象を集めて検査し、`--result` があれば同じ結果をそのファイルへも書く。"""
+    if bool(args.files) == (args.base is not None):
+        return result.stopped(TOOL, "invalid", "検査するファイルか --base のどちらか一方を渡す")
+    try:
+        if args.files:
+            targets = design_check.from_files(root, args.files)
+        else:
+            targets = design_check.from_base(root, args.base, args.remote if args.remote is not None else Git(root).remote())
+    except design_check.DesignCheckError as exc:
+        out = result.stopped(TOOL, "precondition", str(exc))
+    else:
+        out = design_check.check(targets)
+    if args.result is not None:
+        args.result.parent.mkdir(parents=True, exist_ok=True)
+        args.result.write_text(json.dumps(out, ensure_ascii=False) + "\n", encoding="utf-8")
+    return out
+
+
+def _add_design(sub: Any) -> None:
+    d = sub.add_parser("design").add_subparsers(dest="action", required=True).add_parser("check")
+    d.add_argument("files", nargs="*", metavar="ファイル", help="全行を検査するファイル（名前を問わない。--base とどちらか一方）")
+    d.add_argument("--base", default=None, help="マージ先のブランチ名。分岐点からの差分の設計成果物の、変えた行を検査する")
+    d.add_argument("--remote", default=None, help=f"起点のリモート名（既定は {start_point.WORKTREE_REMOTE}）")
+    d.add_argument("--result", type=Path, default=None, help="標準出力と同じ結果を書くファイル")
+    d.set_defaults(handler=_design_check)
+
+
 def _add_reading(sub: Any) -> None:
     r = sub.add_parser("reading").add_subparsers(dest="action", required=True)
     for action in _READING:
@@ -522,6 +565,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_handoff(sub)
     _add_usage(sub)
     _add_mvv(sub)
+    _add_design(sub)
     c = sub.add_parser("cleanup-stage")
     c.add_argument("prs", nargs="+", type=int, metavar="PR番号")
     c.set_defaults(handler=_cleanup_stage)

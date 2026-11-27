@@ -5,14 +5,14 @@ Markdown の解析は markdown-it-py、コードの字句は pygments だけが�
 - `block_kinds` は行ごとに、その行を含むブロックの種類（`BLOCK_KINDS`）を返す
 - `code_lines` はコードブロック（囲みとインデント）の中の行かどうかを返す。引用や箇条の中のコードも含む
 - `atx_headings` は文書の最上位の ATX の見出し（`## 題`）を返す。コードブロックと引用の中の `#` は見出しにしない
-- `tables` は文書の最上位の GFM の表を、見出しの欄と行ごとの欄の文で返す
+- `gfm_tables` は文書の最上位の GFM の表を、見出しの欄と行ごとの欄の文で返す
 - `mask_comments` はコードの行のコメントを同じ幅の空白に置き換える
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
@@ -113,41 +113,33 @@ def atx_headings(text: str) -> list[Heading]:
     return found
 
 
-def tables(text: str) -> list[Table]:
+def gfm_tables(text: str) -> list[Table]:
     """文書の最上位の表を、出てくる順に返す（コードブロック・引用・箇条の中の表は返さない）。
 
     欄の文は markdown-it-py の `inline` の `content` で、インラインコードの `` ` `` を残す。欄が見出しより少ない行は
     markdown-it-py が空の欄で埋める。
     """
+    tokens = _tokens(text)
     found: list[Table] = []
-    header: tuple[str, ...] = ()
-    rows: list[TableRow] = []
-    start: Optional[int] = None
-    row_line, cells, in_head = -1, [], False
-    for token in _tokens(text):
-        if token.type == "table_open":
-            if token.level == 0 and token.map is not None:
-                start, header, rows = token.map[0], (), []
+    for i, token in enumerate(tokens):
+        if token.type != "table_open" or token.level != 0 or token.map is None:
             continue
-        if start is None:
-            continue
-        if token.type == "thead_open":
-            in_head = True
-        elif token.type == "thead_close":
-            in_head = False
-        elif token.type == "tr_open":
-            row_line, cells = (token.map[0] if token.map is not None else -1), []
-        elif token.type == "inline":
-            cells.append(token.content)
-        elif token.type == "tr_close":
-            if in_head:
-                header = tuple(cells)
-            else:
-                rows.append(TableRow(row_line, tuple(cells)))
-        elif token.type == "table_close" and token.level == 0:
-            found.append(Table(start, header, tuple(rows)))
-            start = None
+        rows = _rows_to_close(tokens, i + 1)
+        found.append(Table(token.map[0], rows[0].cells if rows else (), tuple(rows[1:])))
     return found
+
+
+def _rows_to_close(tokens: tuple[Token, ...], start: int) -> list[TableRow]:
+    """`start` から表の閉じまでの行（見出しの行を先頭に含む）。"""
+    rows: list[TableRow] = []
+    for token in tokens[start:]:
+        if token.type == "table_close":
+            break
+        if token.type == "tr_open":
+            rows.append(TableRow(token.map[0] if token.map is not None else -1, ()))
+        elif token.type == "inline" and rows:
+            rows[-1] = rows[-1]._replace(cells=(*rows[-1].cells, token.content))
+    return rows
 
 
 def mask_comments(lines: list[str], suffix: str) -> list[str]:

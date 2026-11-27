@@ -811,10 +811,7 @@ COMPARE_FILES_CAP = 300
 # 比較の API を読む権限が無いときの HTTP の状態。非公開のリポジトリで権限が無いと 404、明示の拒否は 403（手元の git で読む）
 COMPARE_DENIED = (403, 404)
 # 手元の git で比較を読み直すときの差分の形（手元の Git の設定で出力の形が変わらないよう固定する。#3959）
-LOCAL_DIFF = (
-    "--merge-base", "--patch", "--no-color", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none",
-    "--submodule=short", "--src-prefix=a/", "--dst-prefix=b/", "-M",
-)  # fmt: skip
+LOCAL_DIFF = ("--merge-base", "--patch", "--ignore-submodules=none", "--submodule=short", "-M", *git_mod.FIXED_DIFF)
 
 
 def compare_files(hub: GitHub, g: git_mod.Git, remote: str, base: str, head: str) -> list[dict[str, Any]]:

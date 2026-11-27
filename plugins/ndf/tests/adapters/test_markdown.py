@@ -98,17 +98,17 @@ def test_mask_comments(lines: list[str], suffix: str, expected: list[str]) -> No
 
 def test_tables_reads_the_header_and_cells_with_line_numbers() -> None:
     """#2912: 最上位の表の見出しと行の欄（インラインのままの文）と、0 始まりの行番号。"""
-    (table,) = markdown.tables(MIXED)
+    (table,) = markdown.gfm_tables(MIXED)
     assert table == markdown.Table(4, ("a", "b"), (markdown.TableRow(6, ("1", "2")),))
 
 
 def test_tables_keeps_inline_code_and_pads_short_rows() -> None:
     text = "| 判断 | 番号 |\n| --- | --- |\n| `a \\| b` を足す | `C2` |\n| 空 |\n|  | |\n"
-    (table,) = markdown.tables(text)
+    (table,) = markdown.gfm_tables(text)
     assert [r.cells for r in table.rows] == [("`a | b` を足す", "`C2`"), ("空", ""), ("", "")]
     assert [r.line for r in table.rows] == [2, 3, 4]
 
 
 def test_tables_skips_tables_in_code_and_quotes() -> None:
     text = "```\n| a | b |\n| - | - |\n| 1 | 2 |\n```\n\n> | q | r |\n> | - | - |\n> | 1 | 2 |\n"
-    assert markdown.tables(text) == []
+    assert markdown.gfm_tables(text) == []

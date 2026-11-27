@@ -1,5 +1,8 @@
 """設計の検査の判定（`ndf records design check` と MVV 判定の表の確かめ。#2912 の決定 1・7）。
 
+詳細設計書は名前を `design_check_decide` としたが、Markdown の解析（`ndf.adapters.markdown`）を読むため、判断のモジュールの
+規則（`decide-pure`。名前が `_decide` で終わるモジュールは `ndf.adapters` を読まない）に合わせて名前を変えた。中身は副作用の無い判定である。
+
 文書の本文から、レッドラインの番号を示さずに判断を人に任せる行（番号の無い委ね方）と、「人へ残す判断」の表の行を判定する。
 ファイル・git・GitHub を読まない。委ねる語・番号・見る範囲の定数はこの 1 か所にだけ置き、MVV 判定（`mvv_gate`）も
 `redline_rows` を呼んで同じ定数を使う。
@@ -109,7 +112,7 @@ def decision_rows(text: str) -> list[DecisionRow]:
     """「人へ残す判断」で始まるセクションの表の行を、判断・番号・理由の欄に分けて返す。欠けた欄は空の文にする。"""
     ranges = _ranges(text, (TABLE_SECTION,))
     rows: list[DecisionRow] = []
-    for table in markdown.tables(text):
+    for table in markdown.gfm_tables(text):
         if not _within(table.line, ranges):
             continue
         header = [_normal(c) for c in table.header]
@@ -130,7 +133,7 @@ def _anchors(rows: Sequence[DecisionRow]) -> list[DecisionRow]:
     return [r for r in rows if r.numbers and not blank(r.decision) and not blank(r.reason)]
 
 
-def named(line: str, rows: Sequence[DecisionRow]) -> bool:
+def named_in_table(line: str, rows: Sequence[DecisionRow]) -> bool:
     """委ねる行が、表のどれか 1 行の「判断」の文と、その行と同じ打ち消されていない番号を両方含むか。"""
     numbers = set(numbers_in(line, negatable=True))
     plain = _normal(line)
@@ -159,7 +162,7 @@ def findings(text: str, path: str, lines: Optional[frozenset[int]] = None) -> li
         if not _within(i, ranges) or (i < len(code) and code[i]):
             continue
         row = table_rows.get(number)
-        if (row is not None and _unfilled(row)) or (delegates(line) and not named(line, rows)):
+        if (row is not None and _unfilled(row)) or (delegates(line) and not named_in_table(line, rows)):
             out.append(Finding(path, number, line.strip()))
     return out
 
@@ -169,7 +172,7 @@ def _pairs(text: str) -> set[tuple[str, str]]:
 
 
 def anchors_lost(before: str, after: str) -> bool:
-    """分岐点の本文 `before` の表で対応付けに使えた（判断, 番号）の組が、作業ツリーの本文 `after` の表から失われたか。"""
+    """分岐点の本文 `before` の表で対応付けに使えた（判断, 番号）の組が、worktree の本文 `after` の表から失われたか。"""
     return not _pairs(before) <= _pairs(after)
 
 

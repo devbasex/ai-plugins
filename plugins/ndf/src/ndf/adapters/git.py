@@ -51,6 +51,9 @@ NO_LAZY_FETCH = {"GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": ""}
 # （diff・log・rev-parse）と、`--` を受けないもの（merge）は `END_OF_OPTIONS`（git 2.24 以降）を ref の
 # 前に置き、checkout は SHA へ解決してから渡し、`--` の後を ref として読むもの（merge-base・show-ref・remote・fetch）は `--` の後に置く。`-` で始まる値は option にならず、ref として読めずに失敗する
 END_OF_OPTIONS = "--end-of-options"
+# 差分の形を利用者とプロジェクトの Git の設定によらず同じにする `git diff` の引数（色・外部 diff・本文の変換を止め、前後の接頭辞を
+# 固定する）。MVV 判定の手元の差分・cross-review の差分・設計の検査が同じ値を使う（#2912）
+FIXED_DIFF = ("--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/")
 
 
 class GitError(Exception):

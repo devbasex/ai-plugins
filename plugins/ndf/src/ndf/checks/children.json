@@ -27,7 +27,7 @@
     "M3b": {"issue": 3407, "packages": ["ndf.domains.relay"], "needs": ["D2", "AD2", "AD3", "T1"], "order": 4, "lane": "lr-fix-b", "closed": true},
     "X9": {"issue": 3604, "packages": ["ndf.__main__"], "needs": ["X0", "AD3", "M3b"], "order": 9, "lane": "lracct", "closed": true},
     "M3b+": {"issue": 3604, "packages": [], "needs": ["M3b", "S1e"], "order": 9, "lane": "lr-relay", "closed": false},
-    "C3": {"issue": 3292, "packages": ["ndf.core.route", "ndf.core.issue_docs"], "needs": ["C2", "B1"], "order": 5, "lane": "lr-flow", "closed": true},
+    "C3": {"issue": 3292, "packages": ["ndf.core.route", "ndf.core.issue_docs", "ndf.core.start_point"], "needs": ["C2", "B1"], "order": 5, "lane": "lr-flow", "closed": true},
     "C3+": {"issue": 3474, "packages": [], "needs": ["C3", "P1b"], "order": 6, "lane": "lr-flow", "closed": false},
     "C4": {"issue": 3293, "packages": ["ndf.core.refs"], "needs": ["C2", "AD1", "AD1+"], "order": 5, "lane": "lr-fix-a", "closed": false},
     "C5": {"issue": 3294, "packages": ["ndf.core.worker", "ndf.core.worker_outcome", "ndf.core.worker_append"], "needs": ["C2", "AD3", "AD3+"], "order": 5, "lane": "lr-fix-b", "closed": false},
