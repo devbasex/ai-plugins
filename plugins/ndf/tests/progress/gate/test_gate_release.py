@@ -454,3 +454,64 @@ def test_an_approval_without_the_value_fails_with_the_names_and_is_not_relaunche
 def test_the_recorded_delivery_is_kept_only_when_it_reaches_production(reply, want):
     # 外のオーガナイザーがベースブランチ向けの行を書いても、リリースの実績にしない
     assert release._recorded_where({"result": "released", **reply}) == want
+
+
+# --- 現状固定（I-003 の前に take_reply が承認・却下ごとに answer へ渡す出力と保存先を固定する） -----------------------
+
+
+def _replied(st, new_table, flow, tmp_path, monkeypatch, reply):
+    """外のオーガナイザーの回答ファイルに `reply` を置いて take_reply を通し、answer へ渡った Answer を返す（書き込みはしない）。"""
+    tid = new_table()
+    q = _now_at_release(st, tid, flow)
+    env = {**ORG_ENV, "NDF_ORGANIZER_DIR": str(tmp_path / "org")}
+    gate.request_release(st, run.read(st, tid), q, env)
+    answers = tmp_path / "org" / "answers"
+    answers.mkdir(parents=True, exist_ok=True)
+    (answers / f"{gate.request_id(q)}.json").write_text(json.dumps(reply))
+    given = []
+    monkeypatch.setattr(release, "answer", lambda _st, _tid, a, _observe, _post: given.append(a) or {"status": "ok"})
+    assert release.take_reply(st, tid, env) == {"status": "ok"}
+    (a,) = given
+    return a
+
+
+FULL = {"version": DIST, "release": "https://x/pull/9", "store": "none", "delivery": ROW}
+
+
+def test_current_an_approval_carries_the_version_the_record_pr_the_delivery_and_the_store(st, new_table, flow, tmp_path, monkeypatch):
+    a = _replied(st, new_table, flow, tmp_path, monkeypatch, {"result": "released", **FULL})
+    assert a.value == run.APPROVED and a.by == "organizer"
+    assert a.outputs == {"product_version": DIST, "release_pr": "https://x/pull/9", "delivery": ROW}
+    assert a.release_store == "none"
+
+
+def test_current_a_rejection_carries_no_outputs_and_no_store_even_with_them_in_the_reply(st, new_table, flow, tmp_path, monkeypatch):
+    a = _replied(st, new_table, flow, tmp_path, monkeypatch, {"result": "rejected", **FULL})
+    assert a.value == run.REJECTED and a.outputs == {} and a.release_store is None
+
+
+def test_current_an_approval_without_the_record_pr_carries_the_version_and_the_store_alone(st, new_table, flow, tmp_path, monkeypatch):
+    # 値の無いキーは書かず、届け先は種類が none でなければ残らない
+    reply = {"result": "released", "version": "11.0.0", "release": None, "store": "versioned", "delivery": ROW}
+    a = _replied(st, new_table, flow, tmp_path, monkeypatch, reply)
+    assert a.outputs == {"product_version": "11.0.0"} and a.release_store == "versioned"
+
+
+def test_current_an_approval_with_an_unknown_store_carries_the_version_without_the_delivery(st, new_table, flow, tmp_path, monkeypatch):
+    a = _replied(st, new_table, flow, tmp_path, monkeypatch, {"result": "released", **FULL, "store": "どれでもない"})
+    assert a.outputs == {"product_version": DIST, "release_pr": "https://x/pull/9"} and a.release_store is None
+
+
+def test_current_an_approval_writes_the_outputs_and_the_store_in_one_recorded_event(st, new_table, flow, tmp_path):
+    tid = new_table()
+    q = _now_at_release(st, tid, flow)
+    env = {**ORG_ENV, "NDF_ORGANIZER_DIR": str(tmp_path / "org")}
+    gate.request_release(st, run.read(st, tid), q, env)
+    (tmp_path / "org" / "answers").mkdir()
+    (tmp_path / "org" / "answers" / f"{gate.request_id(q)}.json").write_text(json.dumps({"result": "released", **FULL}))
+    assert gate.take_reply(st, tid, env)["status"] == "ok"
+    v = run.read(st, tid)
+    assert [e.draft.kind for e in v.events][-2:] == ["answered", "outputs_recorded"]
+    payload = v.events[-1].draft.payload
+    assert payload["release_store"] == "none" and payload["outputs"]["delivery"] == ROW
+    assert v.context()["product_version"] == DIST and v.context()["release_pr"] == "https://x/pull/9"
