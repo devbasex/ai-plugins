@@ -2383,7 +2383,7 @@
       "term": "不明",
       "context": "ndf-project-settings",
       "meaning": "解析が測れなかった・決められなかった項目の値。ai-plugins の値で埋めない",
-      "source": "docs/specifications/project-decl-ci-representative-run.md"
+      "source": "plugins/ndf/skills/development-workflow/references/project-analysis.md"
     },
     {
       "term": "測った値",
@@ -2415,18 +2415,6 @@
         "答え"
       ],
       "code": "answer"
-    },
-    {
-      "term": "ジョブを飛ばした run",
-      "context": "ndf-project-settings",
-      "meaning": "CI の成功した run のうち、conclusion が skipped のジョブを 1 つ以上含むもの。設定の解析は CI の所要を測る代表に採らない",
-      "source": "docs/specifications/project-decl-ci-representative-run.md"
-    },
-    {
-      "term": "代表の run",
-      "context": "ndf-project-settings",
-      "meaning": "設定の解析がワークフローごとに壁時計とテストの所要を測る 1 件の run。取得した候補（ワークフローごとに新しい順の成功の run を最大 5 件）のうち、ジョブを飛ばしていない最新のもの",
-      "source": "docs/specifications/project-decl-ci-representative-run.md"
     },
     {
       "term": "入力の指紋",
@@ -4398,15 +4386,9 @@
       "source": "docs/specifications/ndf-worker-report-prepare.md"
     },
     {
-      "term": "所要の記録",
-      "context": "ndf-ci-test",
-      "meaning": "`.ndf/project.json` の `test_duration.measured` にある全体テストの所要（秒。w）。出所は ndf-record → ci-junit → ci-steps の順に採る。設定の解析が書き、プランの作成と test-run.py が読む",
-      "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md"
-    },
-    {
       "term": "全体テストの実測",
       "context": "ndf-ci-test",
-      "meaning": "同じリポジトリで先に走った全体テストの壁時計の秒。所要の記録とは別に残し、後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631）",
+      "meaning": "同じリポジトリで先に走った全体テストの壁時計の秒。後のプランと test-run.py が予算なしのテストの上限を決めるときに読む（#1631）",
       "source": "docs/specifications/ndf-supervise-test-limits-from-whole-runs.md"
     },
     {
@@ -7777,15 +7759,13 @@
       "term": "解析の記録",
       "context": "ndf-project-settings",
       "meaning": "解析が書く、解析をどの入力で行ったかの値（解析器のバージョン・入力のファイルのハッシュ・ブランチの構成）と、その解析が書いた設定の指紋。設定が古くなっていないかの判定が読む。git で追跡しないファイルに置き、設定には置かない",
-      "source": "",
-      "pending_source": "issues/issue-4516-requirements.md"
+      "source": "docs/specifications/ndf-project-analysis-record.md"
     },
     {
       "term": "書いた値の指紋",
       "context": "ndf-project-settings",
       "meaning": "解析が書いた設定の値の SHA-256。今の値の指紋と一致すれば解析が書いた値、違えば人が直した値として扱う。設定の値が変わったときだけ変わるため、設定と一緒に追跡する",
-      "source": "",
-      "pending_source": "issues/issue-4516-requirements.md"
+      "source": "docs/specifications/ndf-project-analysis-record.md"
     },
     {
       "term": "ブランチ戦略",

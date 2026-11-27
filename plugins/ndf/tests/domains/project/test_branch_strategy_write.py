@@ -132,7 +132,7 @@ def test_lock_is_shared_with_the_10_series(tmp_path, monkeypatch):
     root = make_repo(tmp_path, {"project.json": {"version": 1}})
     plan = bw.plan_write(root, section("docs"))
     common = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
-    assert bw.lock_path(root) == common / "ndf-branch-strategy.lock"
+    assert bw.lock_path(root) == bw.lock_at(common) == common / "ndf-branch-strategy.lock"
     monkeypatch.setattr(bw.limits, "seconds", lambda name: 0.1)
     with FileLock(str(common / "ndf-branch-strategy.lock")):
         with pytest.raises(bw.WriteError) as e:
