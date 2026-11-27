@@ -122,11 +122,13 @@ def review_prompt(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Opt
 
 
 class Reviewed(NamedTuple):
-    """1 ラウンドのレビューの結果。`silent` は全員が結果を返さなかったか（席を埋めていない）。"""
+    """1 ラウンドのレビューの結果。`silent` は全員が結果を返さなかったか（席を埋めていない）。`full` は埋めた席が指摘を
+    出したときの、その席が読んだ全差分のファイル（ほかは None）。"""
 
     raised: list[dict[str, Any]]
     unread: dict[str, seats.Unread]
     silent: bool
+    full: Optional[Path] = None
 
 
 def review_round(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Optional[Path], launch: Launcher) -> Reviewed:
@@ -146,22 +148,23 @@ def review_round(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Opti
     targets = participants.fill_targets(run.seats, unread)
     if not targets:
         return Reviewed(raised, unread, False)
-    more, left = _fill_seats(run, round_no, prep, remarks, {t: unread[t] for t in targets}, launch)
-    return Reviewed(raised + more, left, False)
+    more, left, full = _fill_seats(run, round_no, prep, remarks, {t: unread[t] for t in targets}, launch)
+    return Reviewed(raised + more, left, False, full if more else None)
 
 
 def _fill_seats(
     run: ReviewingRun, round_no: int, prep: Prepared, remarks: Optional[Path], targets: Mapping[str, seats.Unread], launch: Launcher
-) -> tuple[list[dict[str, Any]], dict[str, seats.Unread]]:
+) -> tuple[list[dict[str, Any]], dict[str, seats.Unread], Path]:
     """結果の無い席を claude の読むだけの起動で 1 回ずつ埋める。埋めた claude はこの実行で初めて加わるので、前回の情報を含まない
-    リクエストと `--base` からの全差分を渡す。ラウンドの範囲（`prep.scope`）は変えない（記録の範囲を全差分にしない）。"""
+    リクエストと `--base` からの全差分を渡す。ラウンドの範囲（`prep.scope`）は変えない（記録の範囲を全差分にしない）。
+    指摘・結果の無い席・渡した全差分のファイルを返す。"""
     full = prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep)
     fresh = prep._replace(scope=scope_decide.Scope(scope_decide.FULL, None, prep.scope.unreviewed), diff=full, previous=None)
     prompt = review_prompt(run, round_no, fresh, remarks)
     prompts: dict[str, str] = {}
     for absent, why in targets.items():
         prompts[seats.fill_seat(run, absent, why.cause, f"round {round_no}")] = prompt
-    return seats.launch_reviewers(run, round_no, prompts, _prompt_diffs(run, fresh), launch)
+    return *seats.launch_reviewers(run, round_no, prompts, _prompt_diffs(run, fresh), launch), full
 
 
 def _prompt_diffs(run: ReviewingRun, prep: Prepared) -> tuple[Path, ...]:

@@ -19,7 +19,7 @@ from ndf.domains.records import mvv
 from ndf.domains.records import mvv_decide as md
 
 from ._judge import holding
-from .test_crossreview_run import IMPACT, Fake, _run, _state
+from .test_crossreview_run import FAIL, IMPACT, Fake, _run, _state
 
 NDF_BY = "ndf"
 
@@ -59,13 +59,16 @@ def test_issue_4363_instruction_lists_the_findings_without_their_author() -> Non
         _row("r2-3", text="三つ目"),
     ]
     criteria = ["1. 基準の行"]
-    text = verify_decide.instruction(rows, Path("/in/round2.diff"), Path("/work/tree"), criteria)
+    listed = verify_decide.listing(rows)
     for part in ("r2-1", "r2-2", "r2-3", "保存が止まる", "critical", "入力が消える", "src/a.py", "10", "a.md#見出し"):
-        assert part in text
-    for part in ("/in/round2.diff", "/work/tree", "1. 基準の行", "verdicts"):
+        assert part in listed
+    text = verify_decide.instruction(Path("/in/findings.jsonl"), Path("/in/round2.diff"), Path("/work/tree"), criteria)
+    for part in ("/in/findings.jsonl", "/in/round2.diff", "/work/tree", "1. 基準の行", "verdicts"):
         assert part in text
     assert all(kind in text for kind in criteria_decide.track_kinds())
-    assert "kiro-unique" not in text
+    assert "kiro-unique" not in listed + text
+    # 指示はプロセスの引数に載るので、指摘の文を書かない
+    assert "保存が止まる" not in text and "入力が消える" not in text
 
 
 def test_issue_4363_read_takes_the_valid_answers() -> None:
@@ -239,6 +242,11 @@ def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers
     assert argv[argv.index("--tools") + 1] == participants.READ_TOOLS and "--restricted" in argv
     assert [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"] == [str(diff.parent)]
     assert str(diff) in argv[-1] and spec.paths.out.name == "round1-verify.out"
+    listed = diff.parent / "round1-verify-findings.jsonl"
+    assert str(listed) in argv[-1] and not any("保存が止まる" in a for a in argv)
+    assert "保存が止まる" in listed.read_text(encoding="utf-8")
+    # 指摘の一覧と判定役の出力は、実行者だけが読める
+    assert {p.stat().st_mode & 0o777 for p in (listed, spec.paths.out, spec.paths.err)} == {0o600}
     assert run.notes == [(1, "verify", "判定役へ 1 件、有効な回答 1 件")]
 
 
@@ -325,6 +333,15 @@ def test_issue_4363_run_does_not_launch_the_judge_without_a_finding_to_ask(
     fake = Fake(tmp_path / "st", {"codex": [[found], []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok") and fake.judged == []
+
+
+def test_issue_4363_run_gives_the_judge_the_full_diff_read_by_a_filled_seat(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """差分を絞るラウンドで埋めた席が指摘を出したら、判定役もその席が読んだ全差分を読む。"""
+    other = {**HEAVY, "text": "読み込みが止まる"}
+    fake = Fake(tmp_path / "st", {"codex": [[HEAVY]], "kiro": [[], FAIL, FAIL], "claude": [[other]]})
+    _run(capsys, monkeypatch, fake, wt)
+    first, second = (spec.argv[-1] for spec in fake.judged[:2])
+    assert "round1.diff" in first and "round2-full.diff" in second
 
 
 def test_issue_4363_lowered_finding_is_not_counted_as_a_return(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

@@ -62,11 +62,16 @@ def select(rows: Sequence[Mapping[str, Any]], use_tracks: bool = False) -> list[
     return []
 
 
-def instruction(rows: Sequence[Mapping[str, Any]], diff: Path, worktree: Path, criteria: Sequence[str]) -> str:
-    """判定役への指示。`criteria` は指摘の基準の行。誰が書いた指摘かは載せない。"""
+def listing(rows: Sequence[Mapping[str, Any]]) -> str:
+    """判定役が読む指摘の一覧のファイルの中身（指摘 1 件が JSON の 1 行）。誰が書いた指摘かは載せない。"""
+    return "".join(json.dumps({k: row[k] for k in _SHOWN if row.get(k) is not None}, ensure_ascii=False) + "\n" for row in rows)
+
+
+def instruction(listed: Path, diff: Path, worktree: Path, criteria: Sequence[str]) -> str:
+    """判定役への指示。`listed` は指摘の一覧（`listing`）のファイル、`criteria` は指摘の基準の行。指示はプロセスの引数に
+    載るので、指摘の文は書かずにファイルのパスだけを書く。"""
     text = criteria_decide.verify_text()
     kinds = {"protect": "・".join(criteria_decide.protect_kinds()), "all": "・".join(criteria_decide.track_kinds())}
-    listed = [json.dumps({k: row[k] for k in _SHOWN if row.get(k) is not None}, ensure_ascii=False) for row in rows]
     return "\n".join(
         [
             text["system"],
@@ -77,7 +82,7 @@ def instruction(rows: Sequence[Mapping[str, Any]], diff: Path, worktree: Path, c
             *criteria,
             "## 指摘の一覧",
             text["data"],
-            *listed,
+            f"指摘の一覧のファイル: {listed}",
             "## 回答の形",
             text["tracks"].format(**kinds),
             text["answer"],

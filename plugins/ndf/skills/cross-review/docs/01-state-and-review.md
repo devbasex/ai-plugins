@@ -107,7 +107,7 @@ claude の席（起動の前に埋めた席・前のラウンドで埋めた席�
 
 | 段階 | 決まり |
 | --- | --- |
-| ジャーナルへ入れるとき | 上のとおり、1 文の無い `critical`・`major` は `minor` へ下げる。必ず人の承認が要る操作の指摘は下げない |
+| ジャーナルへ入れるとき | `impact` が空の `critical`・`major` は `minor` に下げる。MVV に反する指摘と、必ず人の承認が要る操作の指摘は重い扱いを保ち、`warnings` に指摘番号を載せる |
 | 判定役が確かめた後 | 起きる条件・経路・結果のどれかが成り立たないと、必要な記述とコードを読んだうえで分かった指摘を `minor` へ下げる。示せた指摘と、資料が足りず判断できない指摘は下げない |
 
 判定役が成り立たないと回答しても、次の指摘は下げない。
@@ -183,7 +183,7 @@ PR が足した MVV の根拠の記述の誤り（NDF が機械で確かめて�
 | キー | 中身 |
 | --- | --- |
 | `rounds[]` | `round`・`head`（レビューした head）・`base`（比較基点。`--base` と HEAD の merge-base の SHA）・`reviewers`（そのラウンドに座った席。埋めた後の並び）・`filled`（そのラウンドで claude が座っている埋めた席。`seat`・`for`（欠けた相手役。`allowed` のために起動の前に埋めたときは null）・`reason`。埋めた後のすべてのラウンドに書き、埋めていなければ書かない）・`focus`（そのラウンドで渡した重点）・`mvv`（レビューに使ったプロジェクト MVV。`id` は承認の状態・バージョン・本文と共通原則の sha256 から作る値、`mvv_branch` は MVV を読んだブランチ）・`mvv_checked`（その head の MVV の根拠の記述を確かめ終えたか。承認済みの MVV が無ければ真）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`） |
-| `findings[]` | ジャーナル。指摘ごとの `id`（`r<ラウンド>-<通し番号>`。引き継いだ指摘は `t<コメントの id>`、記録のコメントから戻した指摘は `p-<元の id>`、NDF が見つけた MVV の根拠の記述の誤りは `r<ラウンド>-n<通し番号>`）・`key`・`text`・`section`・`round`・`outcome`（`fixed` / `deferred` / `unresolved`）・`reason`・`by`。相手役が返したときだけ `path`・`line`。相手役が返した指摘の行は `severity`（ジャーナルへ入れるときに下げた後の値）・`raised_severity`（相手役が付けた元の重要度。尺度に無い・無いときは null）と、1 文があれば `impact` を持つ。保護の種類が示された行は `protect`、判定役が回答した行は `check`（`holds`・`condition`・`path`・`result`・`reason`・`tracks`・`lowered`。出し直しで下げた扱いを抜けた行は `unlowered` も）も持つ。引き継いだ指摘の行は記録された `severity` だけを持つ。MVV に反する指摘の行は `mvv`（反する項目）・`judged_mvv`（判定したときの MVV）と、重さを固定したなら `mvv_pinned`・`unpinned_severity`、必ず人の承認が要る操作に当たれば `redline`・`redline_items` も持つ |
+| `findings[]` | ジャーナル。指摘ごとの `id`（`r<ラウンド>-<通し番号>`。引き継いだ指摘は `t<コメントの id>`、記録のコメントから戻した指摘は `p-<元の id>`、NDF が見つけた MVV の根拠の記述の誤りは `r<ラウンド>-n<通し番号>`）・`key`・`text`・`section`・`round`・`outcome`（`fixed` / `deferred` / `unresolved`）・`reason`・`by`。相手役が返したときだけ `path`・`line`。相手役が返した指摘の行は `severity`（ジャーナルへ入れるときに下げた後の値）・`raised_severity`（相手役が付けた元の重要度。尺度に無い・無いときは null）と、1 文があれば `impact` を持つ。保護の種類が示された行は `protect`、`holds` が真か偽の有効な回答があった行には `check`（`holds`・`condition`・`path`・`result`・`reason`・`tracks`・`lowered`。出し直しで下げた扱いを抜けた行は `unlowered` も）を記録する。判断できないという回答や無回答には `check` を記録しない。引き継いだ指摘の行は記録された `severity` だけを持つ。MVV に反する指摘の行は `mvv`（反する項目）・`judged_mvv`（判定したときの MVV）と、重さを固定したなら `mvv_pinned`・`unpinned_severity`、必ず人の承認が要る操作に当たれば `redline`・`redline_items` も持つ |
 | `reviewed_sections` | 詳細レビューを通ったセクション（`<パス>#<見出し>`） |
 | `reviewed_mvv` | `reviewed_sections` のセクションを読んだときの `mvv` の `id` |
 | `unsent_citations` | 最後に残った手元のコミットが PR に届いていないときだけ、そのコミット（`head`）で見つけた MVV の根拠の記述の誤り（`errors`。確かめられなければ null と `detail` の原因）。PR の記録と結果 JSON には載せず、件数だけを判定に使う。状態ファイルは所有者だけが読める権限で置く |

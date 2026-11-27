@@ -229,7 +229,8 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `select` | `verify_decide.py` | 新設 | `select(rows: Sequence[Mapping[str, Any]], use_tracks: bool = False) -> list[Mapping[str, Any]]` | 呼び手が渡す指摘（このラウンドで新しく出たか戻った critical・major）のうち、判定役へ渡すものを返す |
-| `instruction` | `verify_decide.py` | 新設 | `instruction(rows: Sequence[Mapping[str, Any]], diff: Path, worktree: Path, criteria: Sequence[str]) -> str` | 判定役への指示を組む。誰が書いた指摘か（`by`）は載せない |
+| `instruction` | `verify_decide.py` | 新設 | `instruction(listed: Path, diff: Path, worktree: Path, criteria: Sequence[str]) -> str` | 判定役への指示を組む。指摘の文は載せず、指摘の一覧のファイル `listed` のパスを書く |
+| `listing` | `verify_decide.py` | 新設 | `listing(rows: Sequence[Mapping[str, Any]]) -> str` | 指摘の一覧のファイルの中身（指摘 1 件が JSON の 1 行）を組む。誰が書いた指摘か（`by`）は載せない |
 | `read` | `verify_decide.py` | 新設 | `read(found: Optional[Sequence[Mapping[str, Any]]], ids: Sequence[str]) -> Answers` | 回答の並びを指摘ごとの `Verdict` にし、読めない分を注意にする |
 | `lowers` | `verify_decide.py` | 新設 | `lowers(row: Mapping[str, Any], verdict: Verdict) -> bool` | 成り立たないと答えた指摘を minor へ下げてよいかを返す |
 
@@ -280,7 +281,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `select` | 新しい major を渡す | MVV の指摘と `protect` の指摘だけなら `use_tracks` が偽で空、真で渡る。ほかの指摘が 1 件あれば一緒に渡る | `redline` と NDF の行は常に渡らない |
-| `instruction` | 番号・本文・重要度・1 文・場所・差分のパスを含む | 1 文や場所の無い行 | 指摘の `by` の値が指示に現れない |
+| `listing`・`instruction` | 一覧が番号・本文・重要度・1 文・場所を持ち、指示が一覧と差分のパスを含む | 1 文や場所の無い行 | 指摘の本文と 1 文が指示に現れない。`by` の値が一覧にも指示にも現れない |
 | `read` | 有効な 2 件を読む | `holds` が null で `tracks` を持つ | `found` が None・知らない番号・回答の欠け・3 つの文の欠け・理由の無い偽・`holds` が文字列 |
 | `lowers` | 成り立たない普通の指摘は真 | `tracks` が `delivered`・`approval` だけなら真 | 保護の種類・知らない値・行の `protect`・`mvv`・`redline`・NDF は偽 |
 
@@ -295,21 +296,21 @@ plugins/ndf/
 | `ask` | `verify.py` | 新設 | `ask(run: VerifyRun, round_no: int, rows: Sequence[Mapping[str, Any]], diff: Path, launch: Launcher) -> verify_decide.Answers` | 読むだけの claude を 1 回起動し、回答を `Answers` にして返す。失敗は空の回答と注意にする |
 
 - `ask`
-  - 事前条件: `rows` は空でない。`run.input_dir`（この実行の資料のディレクトリ）に `diff` がある
+  - 事前条件: `rows` は空でない。`run.input_dir`（この実行の資料のディレクトリ）に `diff` がある。`diff` は指摘を書いた相手役が読んだ差分である
   - 事後条件: 例外で駆動を止めない。起動し直さない
-  - 指示の組み立て: `ask` は次の順で、`verify_decide.instruction` の `criteria` に渡す行を作る。`rows` は `_confirm_heavy` が `verify_decide.select` から受け取った指摘で、`run.documents` は PR の差分に Markdown のファイルがあるかである。この手順のために、`VerifyRun` は `run.cfg`・`run.snapshot`・`run.documents` を持つ
+  - 指示の組み立て: `ask` は次の順で、指摘の一覧のファイル（資料のディレクトリの `round<n>-verify-findings.jsonl`。中身は `verify_decide.listing(rows)`）を書き、`verify_decide.instruction` の `criteria` に渡す行を作る。`rows` は `_confirm_heavy` が `verify_decide.select` から受け取った指摘で、`run.documents` は PR の差分に Markdown のファイルがあるかである。この手順のために、`VerifyRun` は `run.cfg`・`run.snapshot`・`run.documents` を持つ
     1. 承認済みの MVV があれば（`criteria_decide.approved(run.snapshot)`）、MVV の本文（`path`）と共通原則（`principles_path`）を `run.input_dir` へ写す。元のファイルは利用者の状態の保存先にあり、判定役は読めないためである。読める場所は増やさない
     2. `criteria_decide.criteria_lines(run.cfg.settings.focus, snapshot)` を呼ぶ。`snapshot` は、承認済みの MVV があれば `run.snapshot._replace(path=<本文の写し>, principles_path=<共通原則の写し>)`、無ければ `run.snapshot` である
     3. 2 の戻り値の後に `criteria_decide.document_line(run.documents, rows)` の戻り値を加え、`instruction` に渡す
-  - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は状態の保存先の `round<n>-verify.*` に書く。過程の行と注意を `run.note` で足す
+  - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は状態の保存先の `round<n>-verify.*` に書く。指摘の一覧と、標準出力・標準エラーのファイルは、起動の前に権限 0600 で作る。過程の行と注意を `run.note` で足す
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `ask` | MVV の本文か共通原則を写せない | 写し元が無い・書けない | 写すときの `OSError` | 起動せず、既定値で続ける | `warnings` に 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
+| `ask` | 資料か出力のファイルを用意できない | MVV の写し元が無い・指摘の一覧や出力のファイルを書けない | 起動の前の `OSError` | 起動せず、既定値で続ける | `warnings` に 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
 | `ask` | 起動が終わらない | 利用上限・無進捗・監視の上限・起動の拒否 | `launch` の返す状態が `done` でない | 既定値で続ける（どの指摘も下げない） | `warnings` に状態を 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
-| `ask` | 差分を読めない | claude の `permission_denials` に差分のファイルがある | `participants.denied_reads` | 既定値で続ける | `warnings` に差分のファイル名（絶対パスは過程にだけ） | 同上 |
+| `ask` | 差分か指摘の一覧を読めない | claude の `permission_denials` にそのファイルがある | `participants.denied_reads` | 既定値で続ける | `warnings` にファイル名（絶対パスは過程にだけ） | 同上 |
 | `ask` | 回答が読めない | 出力が無い・JSON でない・`verdicts` の配列が無い | `participants.claude_answer` と `listed_of` | 既定値で続ける | `warnings` に 1 行 | 同上 |
 
 ### ログと記録の出力
@@ -431,6 +432,8 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
   - 副作用: `verify.ask` が claude を起動する。注意を `run.warnings` に足す
 
 `_confirm_heavy` は、`run.journal.fresh`（このラウンドで新しく出たか戻った行の番号）の行のうち、重要度が critical か major のものを `verify_decide.select` へ渡す。
+
+`_round` が `diff` に渡すのは、そのラウンドの差分である。差分を絞るラウンドで補充した相手役が指摘を出したときは、その相手役が読んだ全差分（`reviewing.Reviewed.full`）を渡す。
 
 `_round` は `enter` が返したキーの集合から `Checked.lowered` を除いたものを振動の判定の履歴（`run.history`）に足す。一部の相手役が読めなかったラウンドでも、読めた分は確かめる。
 

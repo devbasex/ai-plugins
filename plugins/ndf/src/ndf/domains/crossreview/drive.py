@@ -602,7 +602,8 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
     # 確認で下げた指摘は、振動の判定のキーに数えない
-    run.history.append(keys - _confirm_heavy(run, round_no, prep.diff, launch).lowered)
+    # 埋めた席の指摘は、その席が読んだ全差分で確かめる（ラウンドの差分には無い PR の変更を指しうる）
+    run.history.append(keys - _confirm_heavy(run, round_no, got.full or prep.diff, launch).lowered)
     record = _round_record(run, round_no, prep)
     rounds.append(record)
     if unread:
