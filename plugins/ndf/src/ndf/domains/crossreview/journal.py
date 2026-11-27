@@ -564,23 +564,14 @@ class FindingJournal:
 
     def _check_post_line(self, row: dict[str, Any], touched: leftover_decide.Touched) -> None:
         """投稿に使う行（`leftover_decide.location`。`path` が無ければ `section` と本文の先頭から読む）が、基準のコミットの PR の
-        差分に載らなければ、ファイルの位置にする。`touched` で確かめられるのは、位置の基準がこのラウンドの行だけである。直さずに
-        残す指摘は行番号を残して `OFF_DIFF` を付け、後のラウンドで元の位置のまま進むときに除く。"""
-        path, line = leftover_decide.location(row)
-        if path is None or line is None:
-            return
-        if (row.get(PLACED_ROUND) or row.get("round")) == self._round:
-            row.pop(leftover_decide.OFF_DIFF, None)
-            if leftover_decide.on_commentable_line({"path": path, "line": line}, touched):
-                return
-            if row.get(PARKED):
-                row[leftover_decide.OFF_DIFF] = True
-                return
-        elif row.get(PARKED) or not row.get(leftover_decide.OFF_DIFF):
+        差分に載らなければ、`OFF_DIFF` を付ける。`touched` で確かめられるのは位置の基準がこのラウンドの行だけなので、ほかの行は
+        前に付けた記録を保つ。記録は、線引きをしないラウンドで投稿するときにも効く。"""
+        if (row.get(PLACED_ROUND) or row.get("round")) != self._round:
             return
         row.pop(leftover_decide.OFF_DIFF, None)
-        row.pop("line", None)
-        row["path"] = leftover_decide.plain_path(path)
+        path, line = leftover_decide.location(row)
+        if line is not None and not leftover_decide.on_commentable_line({"path": path, "line": line}, touched):
+            row[leftover_decide.OFF_DIFF] = True
 
     def ingest_citations(
         self, errors: Optional[Sequence[Mapping[str, Any]]], mvv: Optional[str], round_no: int, *, recorded: bool = True

@@ -334,14 +334,17 @@ def test_sorting_checks_the_line_the_thread_reads_from_the_text(number: int, lin
     assert threads.location(journal.rows["r2-1"]) == ("a.py", line)
 
 
-def test_a_parked_line_outside_the_pr_diff_is_dropped_when_it_proceeds_without_a_path() -> None:
+@pytest.mark.parametrize("sorted_", [pytest.param(True, id="sorted"), pytest.param(False, id="not-sorted")])
+def test_a_parked_line_outside_the_pr_diff_is_not_posted_when_it_proceeds_without_a_path(sorted_: bool) -> None:
     journal = journal_mod.FindingJournal()
     journal.enter(2, [_told(path="a.py", line=99)])
     journal.sort(TOUCHED)
     row = journal.rows["r2-1"]
     assert (row[PARKED], row["line"]) == (True, 99)
     journal.enter(3, [_told(severity="critical")])
-    journal.sort(TOUCHED)
+    if sorted_:
+        journal.sort(TOUCHED)
+    assert PARKED not in row and row["line"] == 99
     assert threads.location(row) == ("a.py", None)
 
 

@@ -356,6 +356,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `kinds.filed` | 定数 | `contracts/data/review-criteria.json` | 上の 6 つ |
 | `PARKED = "parked"`・`ISSUE = "issue"`・`ISSUE_ERROR = "issue_error"` | 行のキー | `leftover_decide.py` | 無し |
 | `PLACED_ROUND = "placed_round"` | 行のキー | `journal.py` | 無し（無ければ `round`） |
+| `OFF_DIFF = "off_diff"` | 行のキー | `leftover_decide.py` | 無し（投稿の位置に行を使う） |
 
 ### 既存の部品の再利用
 
@@ -501,15 +502,12 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 
 位置を置き換えるのは、位置を取る出し直しに `path` があるときだけである。同じラウンドのどの出し直しからも `path` を取れなければ、元の `path`・`line`・`placed_round` をそのまま残す。投稿の処理は `path` の無い指摘の位置を `section` と本文の先頭の行番号から読むので、後の head を組み合わせると別の行を指すためである。
 
-`sort` は最後に、このラウンドで出た指摘の投稿に使う行を確かめる。投稿の処理と同じ関数（`leftover_decide.location`）で読むので、`path` の無い指摘は `section` と本文の先頭から読んだ行が対象になる。基準のコミットの PR の差分に載らない行は、投稿が拒否されて API 呼び出しが増えるので、次のとおり扱う。
+投稿が拒否されて API 呼び出しが増えないように、基準のコミットの PR の差分に載らない行は、投稿の位置に使わない。差分に載らないことは指摘の行の欄 `off_diff` に残す。
 
-| 指摘 | 扱い |
-| --- | --- |
-| 位置の基準がこのラウンドで、修正へ進む | `line` を除き、読んだ `path` のファイルの位置にする |
-| 位置の基準がこのラウンドで、直さずに残す | 起票の場所に使うので `line` は残し、行の欄 `off_diff` を真にする |
-| 位置の基準が前のラウンドで、`off_diff` があり、修正へ進むことになった | `line` を除き、ファイルの位置にする |
-
-位置の基準は変えない。位置を置き換えるか、直した指摘が戻ったときは、`off_diff` を消す。
+- 付けるのは `sort` である。このラウンドで出た指摘のうち、位置の基準がこのラウンドのものを確かめる。修正へ進む指摘も、直さずに残す指摘も対象にする。投稿の処理と同じ関数（`leftover_decide.location`）で読むので、`path` の無い指摘は `section` と本文の先頭から読んだ行を確かめる
+- 参照するのは `leftover_decide.location` である。`off_diff` を持つ指摘は行を返さず、ファイルの位置になる。線引きを省くラウンドで見送りが解けた指摘も、同じ扱いになる
+- 指摘の行の `path`・`line` と位置の基準は変えない。行番号は起票の「場所」に使うためである
+- 位置の基準が前のラウンドの指摘は、今の差分では確かめられないので、`off_diff` をそのまま保つ。位置を置き換えるか、直した指摘が戻ったときは消す
 
 指摘の行の位置を置き換えるときは、指摘が出たラウンド（`round`）を変えない。`path`・`line` と、その行番号の基準になるラウンド（`placed_round`）を一緒に書き換える。ジャーナルから投稿の処理（`threads.py`）へ渡す位置の取り決めは次のとおりである。
 
@@ -636,7 +634,14 @@ PR の差分に載らない行がレビュー投稿にまとめる指摘に混�
 
 線引きをするのは、実装の PR で、状態ファイルの通算で 2 ラウンド目以降で、`line_origin` があり、比較基点の変化で足すファイルが無いラウンドである。足すファイルの有無は、`read_origin` が無くて全差分になるラウンドでも、`line_origin` の比較基点が今と違えば `new_in_pr` で確かめる。`_confirm_heavy` の `use_tracks` を真にするのは、線引きをするラウンドで、このラウンドの新しい重い指摘に、MVV の項目を持ち `proceeds` が偽のものがある場合だけである。その指摘は、回答の指摘の種類によって、進むか（保護の種類が付く）、起票するかが変わる。
 
-保護の対象の指摘は `proceeds` の順 7 で進むと決まっていて、起票もしない。critical や変えた行の MVV の指摘も進むと決まっている。これらだけのラウンドでは、判定役を起動しない（ほかの理由で起動するラウンドでは、今のとおり一緒に渡る）。`proceeds` に渡す `touched` は、線引きをするラウンドで `_confirm_heavy` の前に `changes.touched_since(g, prep.lines, changes.Range(merge_base, prep.head), listed, since_lines)`（`merge_base` は `_ranges` に渡す今の比較基点） で 1 回読み、`_sort_leftovers` にも渡す（線引きをしないラウンドは None）。`since_lines` は、「git を起動する回数」の条件に当たるラウンドでは `since_diff` の返り、ほかは None である。`listed` は `prep.listed`（`_ranges` が読んだ差分の一覧。読んでいなければ空）で、一覧を読んだ範囲は読み直さない。
+保護の対象の指摘は `proceeds` の順 7 で進むと決まっていて、起票もしない。critical や変えた行の MVV の指摘も進むと決まっている。これらだけのラウンドでは、判定役を起動しない（ほかの理由で起動するラウンドでは、今のとおり一緒に渡る）。`proceeds` に渡す `touched` は、線引きをするラウンドで `_confirm_heavy` の前に `changes.touched_since(g, prep.lines, changes.Range(merge_base, prep.head), listed, since_lines, pr_lines)`（`merge_base` は `_ranges` に渡す今の比較基点） で 1 回読み、`_sort_leftovers` にも渡す（線引きをしないラウンドは None）。`since_lines` は、「git を起動する回数」の条件に当たるラウンドでは `since_diff` の返り、ほかは None である。`listed` は `prep.listed`（`_ranges` が読んだ差分の一覧。読んでいなければ空）で、一覧を読んだ範囲は読み直さない。
+
+`pr_lines` は、このラウンドで取得した今の PR の全差分である。相手役の起動と席の穴埋めが終わった後なので、次の順で最初に当たるファイルを `read_bytes().decode("utf-8")` で読んで渡す。
+
+1. 相手役へ渡す差分が全差分（`prep.scope.base` が None）なら `prep.diff`
+2. 根拠の確かめのために全差分を書いてあれば `run.last_target.full_diff`
+3. 席の穴埋めで全差分を書いてあれば `got.filled.diff`
+4. どれも無ければ None（`touched_since` が git で読む）
 
 `run.history`（振動の判定に使う、ラウンドごとの指摘のキーの集合）へは、`enter` が返したキーから、下げた指摘（`Checked.lowered`）と残した指摘（`_sort_leftovers` の返り）を除いて足す。どちらも修正担当へ渡らないので、後でもう一度出ても、直しては戻す往復には当たらないためである。
 
