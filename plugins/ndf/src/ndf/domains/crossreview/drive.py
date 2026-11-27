@@ -819,8 +819,7 @@ def _merge_base(run: _Run, head: str) -> str:
 
 
 def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
-    """前のラウンドを差分の起点や収束の再利用に使える条件（今回の値。席は今の席）。比較元のブランチは、`follow_base` かどうかに
-    よらず照らす。merge-base が同じでも `--base` を別のブランチへ替えた起動は、新しい比較元で詳細レビューをやり直す（PR 4638 の r1-1）。"""
+    """前のラウンドを差分の起点や収束の再利用に使える条件（今回の値。席は今の席。比較元のブランチも照らす。PR 4638 の r1-1）。"""
     unit = scope_decide.unit_id(run.cfg.unit)
     # 確認を求める起動は、読んだ PR が無ければラウンドの前に止まっている
     pr = run.read_pr.ident if run.cfg.check_pr and run.read_pr is not None else None
