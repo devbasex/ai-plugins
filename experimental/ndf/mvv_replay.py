@@ -777,7 +777,8 @@ def _drop_work_dir(result: Path) -> None:
 
     印の鍵を残したまま、片付けの途中の名前（`_drop_pattern`）へ移してから印を消し、ディレクトリを消す。印を消した後に強制終了して
     残った空のディレクトリは、次の起動がこの名前の形で確かめて消す。印を消さずに残す条件、回収できない一時ファイルが残る順序と
-    それに備えない理由は、詳細設計（issues/issue-2912-design-detail.md の「測定の回の区別（`tally`）」）にまとめてある。
+    それに備えない理由は、#2912 の詳細設計（https://github.com/devbasex/ai-plugins/blob/b6b347711ae5bd8bbcd88438c11fed6b3b54765f/issues/issue-2912-design-detail.md
+    の「測定の回の区別（`tally`）」）にまとめてある。
     """
     drop = _drop_pattern(result)
     for work in _work_existing(result):

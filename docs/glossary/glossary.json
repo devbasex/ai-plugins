@@ -7892,7 +7892,7 @@
     {
       "term": "設計の検査",
       "context": "ndf-design",
-      "meaning": "設計文書を書いた後に走らせる、言語モデルを呼ばない決まった検査（ndf records design check。設計のプランのステップ design-check）",
+      "meaning": "設計文書を書いた後に走らせる、言語モデルを呼ばない決まった検査（ndf records design check。設計・詳細設計・文書レビューのプランのステップ design-check）",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
