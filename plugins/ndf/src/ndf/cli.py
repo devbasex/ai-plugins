@@ -87,6 +87,7 @@ COMMANDS: dict[str, str] = {
     "manifests": "ndf.domains.manifests.cli",
     "materials": "ndf.domains.materials.cli",
     "launch-args": "ndf.adapters.cli",
+    "launch-config": "ndf.domains.settings.launch_config_cli",
     "loop": "ndf.domains.loop.cli",
     "notify": "ndf.adapters.notify",
     "plan": "ndf.core.plan.cli",

@@ -6,8 +6,8 @@ NDF は Claude Code / Codex 向けの開発支援プラグイン群です。mark
 
 | ランタイム | 導入方法 | 公開 Skill |
 |---|---|---|
-| Claude Code | `.claude-plugin/marketplace.json` の `ndf` | 49 個 |
-| Codex | `.claude-plugin/marketplace.json` の `ndf` | 45 個 |
+| Claude Code | `.claude-plugin/marketplace.json` の `ndf` | 50 個 |
+| Codex | `.claude-plugin/marketplace.json` の `ndf` | 46 個 |
 
 Skill の実体は `plugins/ndf/skills/` の 1 箇所だけです。ランタイム別の複製はありません。Skill や
 共通スクリプトを変更する場合は `plugins/ndf/` を直接編集します。
@@ -18,7 +18,7 @@ Skill の実体は `plugins/ndf/skills/` の 1 箇所だけです。ランタイ
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code（agents / hooks / skills 配列）
 ├── .codex-plugin/plugin.json    # Codex（hooks / skills 配列）
-├── skills/                      # 配る Skill の唯一の実体（49 個）
+├── skills/                      # 配る Skill の唯一の実体（50 個）
 ├── manifests/skills.json        # Skill ごとの配るランタイムの表
 ├── agents/                      # Claude Code のサブエージェント（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））
 ├── hooks/claude.json            # Claude Code の SessionStart / Stop hook
@@ -35,8 +35,8 @@ plugin install 時に build を実行する必要はありません。
 
 | Runtime | 読むもの |
 |---|---|
-| Claude Code | `.claude-plugin/plugin.json`（`agents/` 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、`hooks/claude.json`、`skills/` の 49 個）、`bin/`・`src/` |
-| Codex | `.codex-plugin/plugin.json`（`hooks/codex.json`、`skills` 配列 45 個）、`bin/`・`src/` |
+| Claude Code | `.claude-plugin/plugin.json`（`agents/` 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、`hooks/claude.json`、`skills/` の 50 個）、`bin/`・`src/` |
+| Codex | `.codex-plugin/plugin.json`（`hooks/codex.json`、`skills` 配列 46 個）、`bin/`・`src/` |
 
 同じディレクトリを 2 ランタイムが共有しますが、読む対象はマニフェストが決めるため、
 公開される Skill と hook はランタイムごとに異なります。Claude Code 専用の agents / statusline /

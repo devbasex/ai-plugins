@@ -165,6 +165,19 @@
 
 結果の `metrics`: 決まった項目を持たない。`items` の要素: `args`（array of string）・`kind`（string）・`reason`（string）
 
+## `ndf launch-config`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/launch-config.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/launch-config.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf launch-config approve` | `--sha256`（string・必須）: 示した承認の対象のハッシュ<br>`--request`（string・任意）: 承認のリクエストの識別子（質問で確認した場合）<br>`--candidate`（string・任意）: 反映する候補のパス |
+| `ndf launch-config draft` | 引数を受けない |
+| `ndf launch-config revoke` | `--sha256`（string・必須）: 取り消す承認の対象のハッシュ |
+| `ndf launch-config show` | `--candidate`（string・任意）: 候補のパス（draft が返したもの）<br>`--question`（string・任意・値 `approve`）: 承認の質問を作る |
+
+結果の `metrics`: `approved`（boolean）・`candidate`（string）・`cleanup_targets`（array of object）・`reflected`（boolean）・`request`（string）・`required`（boolean）・`sha256`（string）・`terminal`（string）。`items` の要素: `files`（array of object）・`input`（object）・`kind`（—）・`sha256`（string）・`steps`（object）・`unsandboxed`（array of string）
+
 ## `ndf loop`
 
 内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/loop.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/loop.result.schema.json)

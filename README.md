@@ -126,8 +126,8 @@ ndf に入るもの:
 ### NDF の Skill の一覧
 
 **NDFプラグイン v11.0.43** に入る Skill の数は、AI ツールごとに違います。
-Claude Code向け core 49個、Codex向け core 45個です（配る先は [manifests/skills.json](./plugins/ndf/manifests/skills.json) が決めます）。
-元Skills（49個）の内訳は次のとおりです。
+Claude Code向け core 50個、Codex向け core 46個です（配る先は [manifests/skills.json](./plugins/ndf/manifests/skills.json) が決めます）。
+元Skills（50個）の内訳は次のとおりです。
   - Pull Request とレビュー (7): pr, pr-tests, fix, pr-review, cherry-pick-pr, deploy, merged
   - 開発の進め方 (17): development-workflow, requirements-design, design, document-rebuild, document-sources, document-drafting, tdd-cycle, refactoring, quality-gates, release, release-verification, retrospective, out-of-scope, progress-tracking, backlog-refinement, layout-review, estimate
   - 原則と書き方 (11): ndf-policies, implementation-plan, plan-to-spec, investigation-rules, decision-request, problem-solving, logging-guidelines, document-style, notion-writing, issue-plan-strategy, ml-model-structure
@@ -135,7 +135,7 @@ Claude Code向け core 49個、Codex向け core 45個です（配る先は [mani
   - 外部サービス (2): google-workspace, document-systems
   - 複数の AI によるレビューとリファクタリング (3): cross-review, cross-refactoring, external-ai
   - 作業場所 (1): worktree
-  - 運用 (4): skill-stats, statusline, install-wrapper, restart
+  - 運用 (5): skill-stats, statusline, install-wrapper, restart, launch-config
 
 ## もっと知る
 

@@ -52,6 +52,12 @@ def _asked(target: Path, request_id: str = "q1", candidate: Path | None = None, 
         _answer(request_id, label)
 
 
+def _reflect(candidate: Path, record, sha256: str, request_id: str | None = None) -> la.Reflection:
+    """CLI と同じく、候補の今の中身と、候補の記録の反映先を照らしたものとして渡す。"""
+    expected = Path(la.candidate_destination(candidate))
+    return la.reflect(candidate, record, sha256, request_id, data=candidate.read_bytes(), expected=expected)
+
+
 def _approvals() -> list[dict]:
     path = la.state_file(la.APPROVALS)
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
@@ -112,7 +118,7 @@ def test_an_answer_long_after_the_request_is_still_pending_until_reflected(tmp_p
     def record() -> None:
         assert la.approve_by_answer("/r", SHA, "q1") == "人"
 
-    assert la.reflect(candidate, record, SHA, "q1")
+    assert _reflect(candidate, record, SHA, "q1")
     assert la.pending_request("/r", target) is None
 
 
@@ -321,7 +327,7 @@ def test_without_proc_reflected_and_outdated_candidates_are_listed(tmp_path, mon
     monkeypatch.setattr(lc, "_settleable", lambda: False)
     target = _worktree(tmp_path)
     candidate, edited, untouched = _candidate(target), _candidate(target, b"{}\n"), la.new_candidate("/r", target).candidate
-    assert la.reflect(candidate, lambda: None, SHA)
+    assert _reflect(candidate, lambda: None, SHA)
     assert candidate.exists() and untouched.exists()
     expected = [{"candidate": str(candidate), "reason": "reflected"}, {"candidate": str(untouched), "reason": "outdated"}]
     assert _by_path(la.cleanup_targets("/r")) == _by_path(expected)
@@ -510,7 +516,7 @@ def test_reflect_replaces_the_target_once_and_the_retry_succeeds_without_writing
     target = _worktree(tmp_path)
     candidate, edited, untouched = _candidate(target), _candidate(target, b"{}\n"), la.new_candidate("/r", target).candidate
     calls: list[int] = []
-    assert la.reflect(candidate, lambda: calls.append(1), SHA)
+    assert _reflect(candidate, lambda: calls.append(1), SHA)
     assert target.read_bytes() == NEW and calls == [1]
     assert not candidate.exists() and not untouched.exists()  # 反映元のバージョンが合わなくなった、直していない候補は消す
     assert edited.exists()  # 直した候補は、反映元のバージョンが合わなくなっても残す
@@ -522,7 +528,7 @@ def test_reflect_replaces_the_target_once_and_the_retry_succeeds_without_writing
 
 def test_reflect_into_a_missing_target(tmp_path):
     target = _worktree(tmp_path, content=None)
-    assert la.reflect(_candidate(target), lambda: None, SHA)
+    assert _reflect(_candidate(target), lambda: None, SHA)
     assert target.read_bytes() == NEW
 
 
@@ -530,7 +536,7 @@ def test_a_target_changed_after_the_draft_is_not_overwritten(tmp_path):
     target = _worktree(tmp_path)
     candidate = _candidate(target)
     target.write_bytes(b'{"version": 1, "mine": true}\n')
-    result = la.reflect(candidate, lambda: pytest.fail("記録しない"), SHA)
+    result = _reflect(candidate, lambda: pytest.fail("記録しない"), SHA)
     assert not result and result.saved is None
     assert target.read_bytes() == b'{"version": 1, "mine": true}\n' and candidate.exists()
 
@@ -547,7 +553,7 @@ def test_a_save_between_the_check_and_the_rename_is_kept(tmp_path, monkeypatch):
         rename(src, dst)
 
     monkeypatch.setattr(la.os, "rename", saved_first)
-    assert not la.reflect(candidate, lambda: None, SHA)
+    assert not _reflect(candidate, lambda: None, SHA)
     assert target.read_bytes() == b'{"version": 1, "saved": 1}\n'
     assert not target.with_name("launch.json.reflecting").exists()
 
@@ -563,7 +569,7 @@ def test_a_save_into_the_aside_after_placing_is_restored(tmp_path, monkeypatch):
         Path(str(dst) + la.REFLECTING).write_bytes(b'{"version": 1, "editor": 1}\n')
 
     monkeypatch.setattr(la.os, "link", editor_writes)
-    assert not la.reflect(candidate, lambda: None, SHA)
+    assert not _reflect(candidate, lambda: None, SHA)
     assert target.read_bytes() == b'{"version": 1, "editor": 1}\n'
 
 
@@ -587,14 +593,15 @@ def _interrupted(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 def test_after_an_interruption_right_after_placing_the_retry_succeeds(tmp_path):
     target, candidate, aside = _interrupted(tmp_path)
-    assert la.reflect(candidate, lambda: pytest.fail("反映は済んでいる"), SHA)
-    assert target.read_bytes() == NEW and not aside.exists()
+    calls: list[int] = []
+    assert _reflect(candidate, lambda: calls.append(1), SHA)  # 反映先が候補と同じでも、承認の行を確かめに record を呼ぶ
+    assert target.read_bytes() == NEW and not aside.exists() and calls == [1]
 
 
 def test_after_an_interruption_a_save_into_the_aside_is_put_back(tmp_path):
     target, candidate, aside = _interrupted(tmp_path)
     aside.write_bytes(b'{"version": 1, "saved": 1}\n')
-    assert not la.reflect(candidate, lambda: None, SHA)
+    assert not _reflect(candidate, lambda: None, SHA)
     assert target.read_bytes() == b'{"version": 1, "saved": 1}\n' and not aside.exists()
 
 
@@ -623,7 +630,7 @@ def test_reflect_tells_where_the_users_save_in_the_aside_was_kept(tmp_path):
     target, candidate, aside = _interrupted(tmp_path)
     target.write_bytes(b'{"version": 1, "a": 1}\n')
     aside.write_bytes(b'{"version": 1, "b": 1}\n')
-    result = la.reflect(candidate, lambda: pytest.fail("記録しない"), SHA)
+    result = _reflect(candidate, lambda: pytest.fail("記録しない"), SHA)
     assert not result and result.saved.read_bytes() == b'{"version": 1, "b": 1}\n'
 
 
@@ -663,7 +670,7 @@ def test_a_candidate_with_a_request_still_usable_is_neither_set_aside_nor_listed
     assert candidate.exists()
     if label is None:
         _answer("q1", la.APPROVE_LABEL.format("人"))
-    assert la.reflect(candidate, lambda: None, SHA, "q1")
+    assert _reflect(candidate, lambda: None, SHA, "q1")
 
 
 def test_a_candidate_whose_approval_was_revoked_after_the_request_is_swept(tmp_path):
@@ -679,9 +686,9 @@ def test_the_sweep_after_a_reflection_keeps_another_candidate_with_a_usable_appr
     target = _worktree(tmp_path)
     other, approved = _candidate(target), _candidate(target)
     _asked(target, candidate=approved)
-    assert la.reflect(other, lambda: None, SHA, None)
+    assert _reflect(other, lambda: None, SHA, None)
     assert approved.exists()
-    assert la.reflect(approved, lambda: None, SHA, "q1")
+    assert _reflect(approved, lambda: None, SHA, "q1")
 
 
 def test_a_record_replaced_by_a_fifo_does_not_stop_draft_or_show(tmp_path):

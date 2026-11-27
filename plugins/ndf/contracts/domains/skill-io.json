@@ -282,6 +282,16 @@
       "meaning": "課題を読み、並べて進める実装のプランを立てる"
     },
     {
+      "id": "launch-config",
+      "args": [],
+      "ndf_settings": [
+        "launch"
+      ],
+      "env": [],
+      "result": "none",
+      "meaning": "起動の設定（.ndf/launch.json）の候補を作り、利用者の承認を取ってから反映する（#1959）"
+    },
+    {
       "id": "layout-review",
       "args": [],
       "ndf_settings": [],

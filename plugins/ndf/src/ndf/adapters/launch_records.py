@@ -17,6 +17,14 @@ from typing import Any, Mapping, Optional
 TORN_END = b"\xff\n"
 
 
+def unattended(env: Mapping[str, str]) -> bool:
+    """回答を人でなく AI が返しうる会話か（NDF が起動した AI・人のいない実行・計画のレーン・外のオーガナイザーのレーン）。
+
+    hook `launch-answer` はこの会話の回答を記録せず、`ndf launch-config show` は質問を作らない。
+    """
+    return any(env.get(name) for name in ("NDF_AI_CHILD", "NDF_FACTORY_RUN", "NDF_RELAY_PLAN", "NDF_ORGANIZER_DIR"))
+
+
 def canonical_sha(value: Any) -> str:
     """キーの順にそろえた JSON の SHA-256。字下げとキーの順の違いでは変わらない。"""
     text = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

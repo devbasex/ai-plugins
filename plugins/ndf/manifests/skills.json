@@ -28,6 +28,7 @@
     {"name": "install-wrapper", "runtimes": ["claude"], "why": "中継（区切りで claude を再起動するラッパー）は Claude Code だけを起動する"},
     {"name": "investigation-rules", "runtimes": ["claude", "codex"]},
     {"name": "issue-plan-strategy", "runtimes": ["claude", "codex"]},
+    {"name": "launch-config", "runtimes": ["claude", "codex"]},
     {"name": "layout-review", "runtimes": ["claude", "codex"]},
     {"name": "logging-guidelines", "runtimes": ["claude", "codex"]},
     {"name": "merged", "runtimes": ["claude", "codex"]},

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "launch-config.result.schema.json",
+  "title": "ndf launch-config の結果 JSON",
+  "description": "ndf launch-config が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す",
+  "allOf": [{"$ref": "../result.schema.json"}],
+  "properties": {
+    "tool": {"const": "launch-config"},
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "承認の対象のハッシュ"},
+        "required": {"type": "boolean", "description": "承認の対象が許可を広げ、人の承認が要るか（show）。偽なら approve は承認の行を書かない"},
+        "approved": {"type": "boolean", "description": "このマシンでそのハッシュが承認済みか（show）"},
+        "reflected": {"type": "boolean", "description": "今の反映先の最後の完了の記録が指定した候補のもので、反映先と、残っていれば候補も、今もその中身か。--candidate を付けた show のうち、質問を作らない結果（--question を付けない呼び出しと、端末のコマンドを返す結果）にだけ入る"},
+        "candidate": {"type": "string", "description": "作った候補のパス（draft）"},
+        "request": {"type": "string", "description": "作った承認のリクエストの識別子（show --question approve）"},
+        "terminal": {"type": "string", "description": "利用者が端末で打つ approve のコマンド（回答を記録できない会話の show --question approve）"},
+        "cleanup_targets": {
+          "type": "array",
+          "description": "利用者が手で片付けてよい候補（draft・show）。対象が無ければ空配列",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["candidate", "reason"],
+            "properties": {
+              "candidate": {"type": "string", "description": "候補ファイル candidate.json の絶対パス"},
+              "reason": {"enum": ["denied", "worktree_gone", "reflected", "outdated"], "description": "片付けの理由"}
+            }
+          }
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+          "kind": {"enum": ["launch-target", "question"], "description": "launch-target は承認の対象の一覧（MCP の定義の中身を含まない）、question は AskUserQuestion にそのまま渡す入力（input）"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "launch-target: 承認の対象のハッシュ"},
+          "steps": {"type": "object", "description": "launch-target: 工程ごとの load・allow・mcp の指定"},
+          "unsandboxed": {"type": "array", "items": {"type": "string"}, "description": "launch-target: 安全装置を外してよいランタイム"},
+          "files": {"type": "array", "items": {"type": "object"}, "description": "launch-target: MCP の定義ファイルの場所・ハッシュ・サーバ名・コマンド名（定義の中身を含まない）"},
+          "input": {"type": "object", "description": "question: AskUserQuestion にそのまま渡す入力"}
+        }
+      }
+    }
+  }
+}

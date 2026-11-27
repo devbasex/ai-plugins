@@ -311,6 +311,7 @@ worktree レジストリの定義は [`../schemas/registry.schema.json`](../sche
 | --- | --- | --- |
 | `.ndf/worktree.json` | する | リポジトリの運用。clone した全員で同じ値のまま残る |
 | `.ndf/worktree.local.json` | **しない** | 各自の機械に依存する値 |
+| `.ndf/launch.json` | する | 非対話の起動で工程ごとに足す Tool・許可・MCP と、安全装置を外してよいランタイム。**承認はこのファイルに無く、各自の機械の状態の保存先に残る**ので、clone した各自が `/ndf:launch-config` で承認する。書き換えも同じ Skill で行う |
 
 ```json
 {

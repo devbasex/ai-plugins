@@ -9,8 +9,8 @@ Codex の 2 つです。Kiro CLI と agy へは配らず、cross-review / cross-
 
 | ランタイム | 公開 Skill | マニフェスト |
 | --- | --- | --- |
-| Claude Code | 49 個 | `.claude-plugin/plugin.json` |
-| Codex | 45 個 | `.codex-plugin/plugin.json` |
+| Claude Code | 50 個 | `.claude-plugin/plugin.json` |
+| Codex | 46 個 | `.codex-plugin/plugin.json` |
 
 **11.0.0 で中身を作り直しました。** 10 系の `scripts/` の下のスクリプトは無くなり、Skill と hook が呼ぶ処理は
 すべて 1 つのエントリポイント `bin/ndf` のサブコマンドになりました（下の「ndf コマンド」）。10 系の README は
@@ -24,7 +24,7 @@ plugins/ndf/
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト（manifests/skills.json から作る）
 ├── bin/ndf                      # サブコマンドのエントリポイント（ndf <サブコマンド>）
 ├── bin/ndf-claude               # NDF を読み込んだ claude の起動
-├── skills/                      # 配る Skill の唯一の実体（49 個）
+├── skills/                      # 配る Skill の唯一の実体（50 個）
 ├── skills/AUTHORING.md          # Skill 執筆の規約
 ├── manifests/skills.json        # Skill ごとの配るランタイムの表
 ├── agents/                      # Claude Code のサブエージェント定義（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））
