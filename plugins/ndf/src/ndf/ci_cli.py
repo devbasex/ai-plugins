@@ -16,7 +16,7 @@ import json
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from ndf import cli
 from ndf.adapters import git
@@ -501,6 +501,25 @@ def _merged(
     return result.stopped(TOOL, kind, outcome.detail, instance=outcome.head_sha, items=items)
 
 
+def _rejudge_of(hub: GitHub, pull: Pull, target: merge_approval.MergeTarget) -> Callable[[Optional[str]], Optional[MergeOutcome]]:
+    """`GitHub.merge` の直前の確かめで、読み直したプロジェクトのファイルから本番チャネルを判定し直す関数。"""
+
+    def rejudge(text: Optional[str]) -> Optional[MergeOutcome]:
+        again = _verdict_of(hub, pull.base_ref, text, hub.repo)
+        if not production_merge.needs_approval(again):
+            return None
+        try:
+            if _approval(hub, target) is not None:
+                return None
+        except merge_approval.TrailError as exc:
+            # 初めの判定と同じく、token の利用者を読めなければ precondition（approval_stale にしない）。
+            # キューにある PR は、`GitHub.merge` が確かめの応答の最新のキューの状態で外す
+            return MergeOutcome(False, "precondition", str(exc), pull.head_sha)
+        return MergeOutcome(False, _REJUDGED, again.value, pull.head_sha)
+
+    return rejudge
+
+
 def _merge(args: argparse.Namespace) -> dict:
     """PR を、確かめ・本番チャネルの判定・承認の証跡の確かめを通してから `GitHub.merge` でマージする（#2602・#4409）。
 
@@ -541,21 +560,7 @@ def _merge(args: argparse.Namespace) -> dict:
     approved_by, unapproved = _approved_by(args, hub, pull, target, verdict)
     if unapproved is not None:
         return unapproved
-
-    def rejudge(text: Optional[str]) -> Optional[MergeOutcome]:
-        again = _verdict_of(hub, pull.base_ref, text, hub.repo)
-        if not production_merge.needs_approval(again):
-            return None
-        try:
-            if _approval(hub, target) is not None:
-                return None
-        except merge_approval.TrailError as exc:
-            # 初めの判定と同じく、token の利用者を読めなければ precondition（approval_stale にしない）。
-            # キューにある PR は、`GitHub.merge` が確かめの応答の最新のキューの状態で外す
-            return MergeOutcome(False, "precondition", str(exc), pull.head_sha)
-        return MergeOutcome(False, _REJUDGED, again.value, pull.head_sha)
-
-    expect = MergeExpect(pull, pull.base_ref, pull.head_sha, PROJECT_FILE, oid, rejudge)
+    expect = MergeExpect(pull, pull.base_ref, pull.head_sha, PROJECT_FILE, oid, _rejudge_of(hub, pull, target))
     outcome = hub.merge(pull.number, expect_head=head if head is not None else pull.head_sha, method=args.method, expect=expect)
     return _merged(args, target, outcome, verdict, approved_by)
 
