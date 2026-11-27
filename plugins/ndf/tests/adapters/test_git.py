@@ -539,3 +539,123 @@ def test_commit_or_none_tells_unreadable_refs_from_git_failures() -> None:
     assert git.Git(runner=_fake_cwd(1)).commit_or_none("x") is None
     with pytest.raises(git.GitError, match="終了コード 128"):
         git.Git(runner=_fake_cwd(128, stderr="fatal\n")).commit_or_none("x")
+
+
+@pytest.mark.parametrize(
+    ("url", "repo", "secret"),
+    [
+        ("https://github.com/o/r", "o/r", False),
+        ("https://github.com/o/r.git", "o/r", False),
+        ("https://github.com/o/r.git/", "o/r", False),
+        ("https://github.com:443/o/r", "o/r", False),
+        ("HTTPS://GitHub.com/O/R.x_y-z", "O/R.x_y-z", False),
+        ("ssh://git@github.com/o/r.git", "o/r", False),
+        ("ssh://git@github.com:22/o/r", "o/r", False),
+        ("git@github.com:o/r.git", "o/r", False),
+        ("git@GITHUB.COM:o/r", "o/r", False),
+        ("https://dummytoken@github.com/o/r", "o/r", True),
+        ("https://x-access-token:dummy@github.com/o/r.git", "o/r", True),
+        ("https://@github.com/o/r", "o/r", True),
+        ("ssh://git:dummy@github.com/o/r", "o/r", True),
+    ],
+)
+def test_github_target_reads_the_whole_url(url: str, repo: str, secret: bool) -> None:
+    assert git.github_target(url) == git.GitHubTarget(repo, secret)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # 別ホストで所有者名とリポジトリ名が同じ
+        "https://notgithub.com/o/r",
+        "https://github.com.example.com/o/r",
+        "https://example.com/github.com/o/r",
+        "git@notgithub.com:o/r",
+        "https://ssh.github.com/o/r",
+        "ssh://git@ssh.github.com:443/o/r",
+        "https://github.com@example.com/o/r",
+        "https://a@example.com@github.com/o/r",
+        "https://example.com\\@github.com/o/r",
+        # 解析できない形
+        "file:///srv/o/r.git",
+        "/srv/github.com/o/r",
+        "../o/r",
+        "http://github.com/o/r",
+        "git://github.com/o/r",
+        "git@github-work:o/r",
+        "github.com:o/r",
+        "other@github.com:o/r",
+        "ssh://other@github.com/o/r",
+        "ssh://github.com/o/r",
+        "git@github.com:/o/r",
+        "https://github.com:8443/o/r",
+        "ssh://git@github.com:443/o/r",
+        "httpſ://github.com/o/r",
+        "https://github.com/o",
+        "https://github.com/o/r/extra",
+        "https://github.com//o/r",
+        "https://github.com/o/r//",
+        "https://github.com/o/r?x=1",
+        "https://github.com/o/r#x",
+        "https://github.com/o/r%2e",
+        "https://github.com/o/r x",
+        " https://github.com/o/r",
+        "https://github.com/o/r\n",
+        "https://github.com/./r",
+        "https://github.com/o/..",
+        "https://github.com/o/...git",
+        "https://github.com/o/.git",
+        "",
+    ],
+)
+def test_github_target_refuses_other_hosts_and_unreadable_forms(url: str) -> None:
+    assert git.github_target(url) is None
+
+
+def _repo_with_config(tmp_path: Path, *entries: tuple[str, str]) -> git.Git:
+    path, _ = _init_repo(tmp_path, {"a": "a\n"})
+    for key, value in entries:
+        git_sandbox.sh(path, "config", "--add", key, value, identity=True, strip=True)
+    return git.Git(path)
+
+
+def test_push_urls_lists_every_push_url_after_rewriting(tmp_path: Path) -> None:
+    g = _repo_with_config(
+        tmp_path,
+        ("remote.origin.url", "https://github.com/o/fetch.git"),
+        ("remote.origin.pushurl", "short:o/a"),
+        ("remote.origin.pushurl", "git@github.com:o/b.git"),
+        ("url.git@github.com:.insteadOf", "short:"),
+    )
+    assert g.push_urls("origin") == ["git@github.com:o/a", "git@github.com:o/b.git"]
+    with pytest.raises(git.GitError):
+        g.push_urls("nothing")
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "expected"),
+    [
+        ("url.https://other.invalid/.insteadOf", "git@github.com:", True),
+        ("url.https://other.invalid/.pushInsteadOf", "git@", True),
+        ("url.https://other.invalid/.insteadOf", "git@github.com:o/r.git", True),
+        ("remote.git@github.com:o/r.git.url", "/srv/other.git", True),
+        ("remote.git@github.com:o/r.git.pushurl", "/srv/other.git", True),
+        ("url.git@github.com:.insteadOf", "short:", False),
+        ("url.https://other.invalid/.pushInsteadOf", "github.com:", False),
+        ("url.https://other.invalid/.insteadOf", "GIT@github.com:", False),
+        ("remote.git@github.com:o/other.git.url", "/srv/other.git", False),
+    ],
+)
+def test_rewrites_again_tells_urls_that_git_would_replace(tmp_path: Path, key: str, value: str, expected: bool) -> None:
+    g = _repo_with_config(tmp_path, (key, value))
+    assert g.rewrites_again("git@github.com:o/r.git") is expected
+
+
+def test_rewrites_again_is_false_without_any_rule_or_remote(tmp_path: Path) -> None:
+    assert _repo_with_config(tmp_path).rewrites_again("git@github.com:o/r.git") is False
+
+
+def test_rewrites_again_does_not_read_a_git_failure_as_no_rules() -> None:
+    """設定を読めないとき（終了コード 1 以外の失敗）は、書き換えが無いと読まない。"""
+    with pytest.raises(git.GitError, match="終了コード 128"):
+        git.Git(runner=_fake(128, stderr="bad config")).rewrites_again("git@github.com:o/r.git")
