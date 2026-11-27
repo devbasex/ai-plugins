@@ -528,7 +528,7 @@ def advance(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, 
         return _drive(Drive(st, machine_id, cwd, env, inline=False))
 
 
-def _launching(st: store.Store, machine_id: str) -> bool:
+def launching(st: store.Store, machine_id: str) -> bool:
     """起動した作業がまだ排他を取っていないか（起動のマーカーがあり、マーカーの組が生きている）。"""
     try:
         raw = json.loads(launch_path(st.root, machine_id).read_text(encoding="utf-8"))
@@ -542,7 +542,7 @@ def is_live(st: store.Store, machine_id: str) -> bool:
     """同じステートマシンを流す作業（か `next`）が動いているか。排他を取れないか、起動した作業がまだ排他を取っていなければ動いている。"""
     try:
         with store.run_lock(st, machine_id):
-            held = _launching(st, machine_id)
+            held = launching(st, machine_id)
     except model.Refused:
         held = True
     return held

@@ -26,11 +26,11 @@ from ndf.adapters import git as git_mod
 from ndf.adapters import github
 from ndf.contracts import result
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
-from ndf.core import durable, route
+from ndf.core import durable, merge_approval, route
 from ndf.core.plan import model, transition_decide
 from ndf.core.plan.transition_decide import ANSWERED, AwaitAnswer, Outcome, RunStep
 from ndf.progress import command, gate, invoke, issue_values, run, store
-from ndf.progress.gate import asking
+from ndf.progress.gate import asking, finishing
 
 import scenes
 
@@ -256,6 +256,37 @@ def _reproduction_steps_do_not_merge_the_open_sprint_pr_before_the_release_gate(
         pytest.fail("リリース承認ゲートまで進まない")
     assert SPRINT_PR not in hub.merged
     assert {"pr", "merge", "plan-to-spec"} <= set(flow.plans)
+
+
+@pytest.mark.parametrize(("later", "revoked"), [("reopen", True), ("keep", False)])
+def test_ci_merge_refuses_the_approved_pr_after_the_stages_are_reopened(repo, st, capsys, monkeypatch, later, revoked):
+    """#4520: 承認の後に工程を開き直すと、HEAD とマージ先が同じでも、承認し直すまで `ndf ci merge` はマージしない。
+    `--later keep` で残した工程（デプロイ）の承認は残る。"""
+    hub = _hub()
+    flow = _flow(repo, monkeypatch, hub)
+    monkeypatch.setattr(finishing, "shared_hub", lambda cwd: lambda: hub)
+    monkeypatch.setattr(finishing, "github_records", lambda cwd: Records())
+    tid = _new(capsys, "standard")
+    gates: list[tuple[str, list[int]]] = []
+    for _ in range(MAX_TURNS):
+        _turn(st, tid, repo, flow, hub, gates)
+        if any(kind == "release" for kind, _ in gates):
+            break
+    else:
+        pytest.fail("リリース承認ゲートまで進まない")
+    target = merge_approval.MergeTarget(merge_hub.REPO, SPRINT_PR, "main", merge_hub.HEAD)
+    assert merge_approval.merge_judgment(merge_approval.merge_rows(hub, SPRINT_PR, hub.viewer()), target) is not None
+
+    finishing.main(["retry", tid, "設計", "--later", later, "--reason", "変更を求められた"])
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["status"] == OK
+
+    merge = ["merge", "--pr", str(SPRINT_PR), "--production-gate", "stale", "--approved-head", merge_hub.HEAD, "--approved-base", "main"]
+    got = _ci(merge, monkeypatch)
+    if revoked:
+        assert got["status"] == STOPPED and got["cause"]["kind"] == "approval_stale", got
+        assert SPRINT_PR not in hub.merged
+    else:
+        assert got["status"] == OK and SPRINT_PR in hub.merged, got
 
 
 @pytest.mark.parametrize(

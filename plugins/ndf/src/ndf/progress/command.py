@@ -5,7 +5,8 @@ ndf progress new <スプリント名> --mode <モード> --issues <番号>... [-
                  [--carry <中止したステートマシンの ID>]
 ndf progress new <スプリント名> --loop <ループの名前> --parent <レーンのステートマシンの ID>
 ndf progress show <ステートマシンの ID>
-ndf progress disable|enable|retry <ステートマシンの ID> <工程> --reason <理由>
+ndf progress disable|enable <ステートマシンの ID> <工程> --reason <理由>
+ndf progress retry <ステートマシンの ID> <工程> --reason <理由> [--later reopen|keep]
 ndf progress finish <ステートマシンの ID> <工程> --output <出力のファイル> --reason <理由>
 ndf progress check <ステートマシンの ID> <工程> --output <出力のファイル>
 ndf progress cancel <ステートマシンの ID> --reason <理由>
@@ -813,8 +814,11 @@ def parser() -> argparse.ArgumentParser:
     new.add_argument("--parent", help="親のステートマシン（レーンのステートマシン）の ID")
     new.add_argument("--carry", help="無効にした工程の出力のキーを、中止したこのステートマシンの文脈から写す")
     sub.add_parser("show", help="ステートマシンを表示する").add_argument("machine_id")
-    for name in ("disable", "enable", "retry"):
+    for name in ("disable", "enable"):
         add_stage_target(sub.add_parser(name, help=f"工程に {name} を書く"))
+    retry = sub.add_parser("retry", help="工程に retry を書く")
+    add_stage_target(retry)
+    retry.add_argument("--later", choices=("reopen", "keep"), help="終了した工程の開き直しで、後ろの工程を開き直すか残すか")
     finish = sub.add_parser("finish", help="工程に finish を書く")
     add_stage_target(finish)
     finish.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")

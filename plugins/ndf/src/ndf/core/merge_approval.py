@@ -6,6 +6,7 @@
 
 承認の対象は 4 つの値（ベースリポジトリ・PR の番号・マージ先・HEAD）で、証跡の行はその対象・回答・担い手・
 「本番へ反映されるか」・回答の記録の識別子を持つ。
+工程の開き直しは、承認した対象へ担い手 `reopen` の却下の行を足して承認を取り消す（`write_revocation`）。
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from typing import NamedTuple, Sequence
 from ndf import identity
 from ndf.adapters.github import Authored, GitHub, Viewer
 from ndf.adapters.publish import Publisher
-from ndf.core.approval_words import ANSWERS, APPROVED, BY_CHOICES, BY_LINE, MVV_BY, USER_BY, By  # noqa: F401
+from ndf.core.approval_words import ANSWERS, APPROVED, BY_CHOICES, BY_LINE, MVV_BY, REJECTED, REOPEN_BY, USER_BY, By  # noqa: F401
 
 # マージの承認の証跡のマーカー（#4409 の決定 7）。リリースの PR の証跡（`ndf:release-approval`）と別で、`ndf ci merge` だけが読む。
 # CD の workflow の承認の検査はリリースのマーカーを含むコメントだけで起動するので、この文字列はそれを含まない
@@ -80,7 +81,9 @@ def _parse_merge_row(body: str) -> MergeRow | None:
     answer, by, target = _line(body, ANSWER_LINE), _line(body, BY_LINE), _line(body, TARGET_LINE)
     production, record = _line(body, PRODUCTION_LINE), _line(body, RECORD_LINE)
     got = _TARGET.match(target) if target is not None else None
-    if answer not in ANSWERS or by not in BY_CHOICES or got is None or production not in (_YES, _NO) or not record:
+    # 開き直しの担い手は却下の行でだけ数える
+    known = by in BY_CHOICES or (by == REOPEN_BY and answer == REJECTED)
+    if answer not in ANSWERS or not known or got is None or production not in (_YES, _NO) or not record:
         return None
     if by == MVV_BY and MVV_NOTE_HEADING not in body:
         return None
@@ -138,6 +141,18 @@ def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer) -> bool:
     if any(r.record_id == row.record_id for r in merge_rows(hub, row.target.number, viewer)):
         return False
     Publisher(hub).comment(row.target.number, render_merge_row(row))
+    return True
+
+
+def write_revocation(hub: GitHub, target: MergeTarget, record_id: str, viewer: Viewer) -> bool:
+    """対象 `target` の最新の証跡が承認なら、担い手 `reopen` の却下の行を投稿して真。承認が無い・既に却下なら書かずに偽。
+
+    `ndf ci merge` は同じ対象の最新の行が却下なら承認が無いと扱う（`merge_judgment`）。打ち直しで行は増えない。
+    `viewer` のアカウント ID が読めていなければ `TrailError`（`merge_rows` が投げる）。"""
+    if merge_judgment(merge_rows(hub, target.number, viewer), target) is None:
+        return False
+    row = MergeRow(REJECTED, REOPEN_BY, target, True, record_id)
+    Publisher(hub).comment(target.number, render_merge_row(row))
     return True
 
 

@@ -111,9 +111,12 @@ def approved_head(v: run.View, kind: str, root: Optional[Path] = None) -> Option
 
     マージの側は、これを `--expect-head` へ渡し、承認の後に進んだ head をマージしない（#2147）。変更要求の後の承認だけを読む。
     承認の後に文書だけが加わって出し直さなかった（#3020）なら、そのときの head を返す（`root` は状態の保存先）。
+    工程の直近の開き直しより前の回答は読まない。
     最後の回答が数えない MVV 判定の回答（`model.mvv_answer_void`）なら、その前の回答へさかのぼらずに None を返す（#3959 の決定 3）。
     """
-    got = [ev for ev in v.events if ev.draft.kind == run.ANSWERED and run.event_payload(ev).get("gate") == kind]
+    answered = (ev for ev in v.events if ev.draft.kind == run.ANSWERED and run.event_payload(ev).get("gate") == kind)
+    # 開き直しより前の承認は読まない
+    got = [ev for ev in answered if ev.seq > v.last_reopened(str(ev.draft.row_key))]
     if not got or model.mvv_answer_void(run.event_payload(got[-1]), kind):
         return None
     last = next(a for a in answers(v) if a["seq"] == got[-1].seq)

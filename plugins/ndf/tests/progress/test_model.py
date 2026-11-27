@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ndf.progress import definition, model, stages
+from ndf.progress import definition, folding, model, stages
 
 AT = datetime(2026, 11, 14, tzinfo=UTC)
 
@@ -148,3 +148,42 @@ def test_progress_table_contract_is_consistent():
     assert set(table["gates"]) == {"design", "release"}
     assert model.branch_prefix("sprint") == "sprint/"
     assert model.label("disabled") == "無効"
+
+
+@pytest.mark.parametrize("state", ["pending", "running", "failed", "finished"])
+def test_a_stage_can_be_reopened_with_a_reason(state):
+    rows = {"実装": model.RowState(state, 1, AT)}
+    model.check_event("sprint", rows, "running", _d("reopened", "conductor", reason="変更を求められた"))
+    assert model.apply("sprint", rows, _d("reopened", "conductor", reason="r"), 2)["実装"].state == "pending"
+    with pytest.raises(model.Refused, match="理由が要る"):
+        model.check_event("sprint", rows, "running", _d("reopened", "conductor", reason=" "))
+
+
+@pytest.mark.parametrize("state", ["disabled", "cancelled"])
+def test_disabled_and_cancelled_stages_are_not_reopened(state):
+    with pytest.raises(model.Refused, match="書けない"):
+        model.check_event("sprint", {"実装": model.RowState(state, 1, AT)}, "running", _d("reopened", "conductor", reason="r"))
+
+
+def _reopened_events() -> list[model.Event]:
+    def outputs(row, values):
+        return model.EventDraft("outputs_recorded", "workflow", row, payload={"outputs": values}, rev=1)
+
+    return _events(
+        outputs("設計", {"design_pr": 7, "issues": [1]}),
+        outputs("実装", {"gathered": "a"}),
+        _d("reopened", "conductor", row="設計", reason="r"),
+        _d("reopened", "conductor", row="設計", reason="r"),
+    )
+
+
+def test_outputs_before_a_reopen_leave_the_context_except_the_issues():
+    events = _reopened_events()
+    assert stages.recorded_outputs(events, 1) == [{"issues": [1]}, {"gathered": "a"}]
+
+
+def test_each_reopen_advances_the_generation_and_drops_the_progress():
+    prog = folding.StepProgress(done={"design": {}}, retries=2, failed=True)
+    for ev in _reopened_events():
+        prog.see(ev)
+    assert (prog.generation, prog.done, prog.retries, prog.failed) == (2, {}, 0, False)

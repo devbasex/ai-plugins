@@ -26,4 +26,6 @@ class By(StrEnum):
 
 
 USER_BY, MVV_BY = By.USER.value, By.MVV.value
+# 工程の開き直しで承認を取り消す却下の行の担い手。人が `--by` で選ぶ値（`BY_CHOICES`）には入れない
+REOPEN_BY = "reopen"
 BY_CHOICES = tuple(b.value for b in By)

@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from ndf.contracts import facts, result
 from ndf.progress import invoke, model, stages
-from ndf.progress.run_view import ANSWERED, FAILED, FINISHED, STARTED, STEP_EVENT, View, event_payload
+from ndf.progress.run_view import ANSWERED, FAILED, FINISHED, REOPENED, STARTED, STEP_EVENT, View, event_payload
 
 
 def answer_word(word: str) -> str:
@@ -27,7 +27,7 @@ REQUEST_CHANGES = answer_word("request_changes")
 
 @dataclass
 class StepProgress:
-    """実行中の行のステップの進み。`generation` は変更要求の回数で、変更を要求するとステップを初めから流し直す。
+    """実行中の行のステップの進み。`generation` は変更要求と開き直しの回数で、どちらもステップを初めから流し直す。
 
     `anchor` は回答を数え始める事象の番号（行の開始・ステップの記録・変更要求の後の回答だけを使う）。
     `retries` は行の打ち直し（失敗の後の開始）の回数で、作業へ渡す（プランは打ち直すたびに新しい回を始める。同じ回のキーで
@@ -94,6 +94,14 @@ class StepProgress:
             self.held.add(step)
         self.anchor, self.answer = ev.seq, None
 
+    def _reopened(self, ev: model.Event, p: dict[str, Any]) -> None:
+        """開き直し。進み・待ち・回答・打ち直しの記録を捨てて世代を上げる（前の回のプランの実行の結果を使わない）。"""
+        self.generation += 1
+        self.retries, self.done, self.waiting, self.answer, self.anchor = 0, {}, None, None, ev.seq
+        self.failed = self.redo = False
+        self.held, self.resets, self.finished_at, self.again = set(), {}, {}, []
+        self.notes = p.get("notes")
+
     def _answered(self, ev: model.Event, p: dict[str, Any]) -> None:
         """回答。承認ゲートの変更要求なら世代を上げて初めから流し直し、ほかは数え始めの後の回答だけを残す。"""
         if p["answer"] == REQUEST_CHANGES and p["kind"] == invoke.LISTEN:
@@ -111,6 +119,7 @@ _SEES: dict[str, Callable[[StepProgress, model.Event, dict[str, Any]], None]] = 
     STARTED: StepProgress._started,
     FAILED: StepProgress._failed,
     STEP_EVENT: StepProgress._recorded,
+    REOPENED: StepProgress._reopened,
 }
 
 

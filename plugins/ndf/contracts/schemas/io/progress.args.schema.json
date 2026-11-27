@@ -337,6 +337,14 @@
         "--reason": {
           "type": "string"
         },
+        "--later": {
+          "type": "string",
+          "enum": [
+            "reopen",
+            "keep"
+          ],
+          "description": "終了した工程の開き直しで、後ろの工程を開き直すか残すか"
+        },
         "--cwd": {
           "type": "string",
           "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
