@@ -404,6 +404,9 @@ def test_issue_4363_kept_review_needs_the_same_request_but_not_the_citation_chec
     basis = scope_decide.Basis("b" * 40, ("codex",), (), approved, unit="")
     got = reviewing.kept(run, 1, now, basis)
     assert (got is not None and got.raised == [HEAVY]) is resumed
+    # 足すべき内容を持たない前のバージョンの記録は使わない（例外で止めない）
+    run.data[store.PENDING_REVIEW] = {k: v for k, v in held.items() if k != "handed"}
+    assert reviewing.kept(run, 1, now, basis) is None
 
 
 def test_issue_4363_ask_does_not_launch_when_the_mvv_cannot_be_copied(tmp_path: Path) -> None:
@@ -498,17 +501,6 @@ def test_issue_4363_run_gives_the_judge_the_diffs_read_by_the_seats_of_the_asked
     assert re.findall(r"round2[\w-]*\.diff", line) == ["round2.diff", "round2-full.diff"]
 
 
-def test_issue_4363_run_does_not_keep_a_round_with_an_unread_reviewer(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """結果の無い席が残るラウンドは判定待ちに保存せず、打ち直しがその席を起動できるようにする。"""
-    fake = Fake(tmp_path / "st", {"codex": [FAIL, FAIL], "kiro": [[HEAVY]], "claude": [FAIL]})
-    written: list[dict] = []
-    write = store.write_object
-    monkeypatch.setattr(store, "write_object", lambda path, value: (written.append(dict(value)), write(path, value)))
-    _run(capsys, monkeypatch, fake, wt)
-    assert len(fake.judged) == 1 and _state(fake.state_dir)["rounds"][-1]["verdict"] == fin.INCOMPLETE_REVIEWERS
-    assert not any(store.PENDING_REVIEW in value for value in written)
-
-
 def test_issue_4363_lowered_finding_is_not_counted_as_a_return(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """確認で下げた指摘は、そのラウンドの振動の判定のキーに数えない（後で保護の種類が付いて戻っても、往復と見ない）。"""
     other, third = {**HEAVY, "text": "読み込みが止まる"}, {**HEAVY, "text": "削除が止まる"}
@@ -537,4 +529,25 @@ def test_issue_4363_run_resumes_from_the_judge_without_launching_the_reviewers_a
     state = _state(second.state_dir)
     [row] = state["findings"]
     assert (row["id"], row["check"]["lowered"]) == ("r1-1", True)
+    assert len(state["rounds"]) == 1 and "pending_review" not in state
+
+
+def test_issue_4363_run_resumes_by_launching_only_the_seat_without_a_result(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """結果の無い席があるラウンドを判定役の待ちで中断した打ち直しは、成功した席の指摘を残し、結果の無い席だけを起動する。"""
+
+    def interrupted(_: dict) -> Optional[dict]:
+        raise KeyboardInterrupt
+
+    first = Fake(tmp_path / "st", {"codex": [FAIL, FAIL], "kiro": [[HEAVY]], "claude": [FAIL]})
+    first.verdict = interrupted
+    with pytest.raises(KeyboardInterrupt):
+        _run(capsys, monkeypatch, first, wt)
+    second = Fake(tmp_path / "st", {"claude": [[]]})
+    second.verdict = _broken
+    code, got = _run(capsys, monkeypatch, second, wt)
+    assert (code, got["status"]) == (0, "ok")
+    assert second.calls == ["claude"] and len(second.judged) == 1
+    state = _state(second.state_dir)
+    [row] = state["findings"]
+    assert (row["by"], row["check"]["lowered"]) == ("kiro", True)
     assert len(state["rounds"]) == 1 and "pending_review" not in state

@@ -22,9 +22,9 @@
 5. 修正担当（claude）を起動し、修正の結果ファイル（`store.fix_result_path`）の指摘ごとの「直した」「見送った（理由）」を
    ジャーナルへ読み込む。修正のコミットを `push.push_fix` で送る（拒まれたら 1 回だけマージする。#2440）
 
-相手役へ渡す資料と指示の組み立て、起動し直しと席の埋めは `reviewing` が持つ。判定役を起動するラウンドは、全席の結果がそろっていれば、起動の直前に相手役の
-結果を判定待ちのラウンド（`pending_review`）として保存し、ラウンドの記録を作る前に中断した打ち直しは、同じ対象と足すべき内容なら相手役を
-起動せずに 3 から続ける（#4363）。
+相手役へ渡す資料と指示の組み立て、起動し直しと席の埋めは `reviewing` が持つ。判定役を起動するラウンドは、起動の直前に相手役の
+結果を判定待ちのラウンド（`pending_review`）として保存する。ラウンドの記録を作る前に中断した打ち直しは、同じ対象と足すべき内容なら
+保存した結果を使い、結果の無い席だけを起動して 3 から続ける（#4363）。
 
 状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら、最後のコミットの根拠の記述を
 確かめてから `summary.json`（`finish_decide` が読む形）を書き、MVV に反するとした指摘を MVV の記録に残す（#4076）。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
@@ -603,14 +603,16 @@ def _round_record(run: _Run, round_no: int, prep: reviewing.Prepared) -> dict[st
 
 
 def _reviewed(run: _Run, round_no: int, prep: reviewing.Prepared, launch: Launcher) -> reviewing.Reviewed:
-    """相手役の結果。判定待ちで残った同じ対象のラウンドがあれば使い、無ければ起動して受け取る（#4363）。"""
+    """相手役の結果。判定待ちで残った同じ対象のラウンドがあれば使い、結果の無い席か、残っていなければ全部の席を起動して
+    受け取る（#4363）。"""
     held = reviewing.kept(run, round_no, prep, _basis(run, prep.head, run.cfg.may_fill))
-    if held is not None:
+    if held is not None and not held.unread:
         return held
     if run.unread_reviews is not None:
         run.remarks = [*run.remarks, *run.unread_reviews()]
         run.unread_reviews = None
-    got = reviewing.review_round(run, round_no, prep, reviewing.remarks_file(run, round_no, reviewing.remarks(run, prep)), launch)
+    remarks = reviewing.remarks_file(run, round_no, reviewing.remarks(run, prep))
+    got = reviewing.review_round(run, round_no, prep, remarks, launch, held)
     if got.silent:
         # 誰も差分を読めないまま収束と判定しない（#3893）。状態ファイルはこのラウンドを持たないので、直して打ち直せば続く。
         # precondition の詳細は手元にだけ返るので、標準エラーのログを絶対パスで示す（PR 4461 の r3-1）
@@ -643,10 +645,8 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     keys = run.journal.enter(round_no, raised, run.mvv_items, run.mvv)
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
-    # 結果の無い席が残るラウンドは判定待ちに保存しない（保存すると、打ち直しがその席を起動しない）
-    judging = launch if got.unread else _keeping(run, round_no, prep, got, launch)
-    checked = _confirm_heavy(run, round_no, prep.diff, judging, filled=got.filled)
     # 確認で下げた指摘は、振動の判定のキーに数えない
+    checked = _confirm_heavy(run, round_no, prep.diff, _keeping(run, round_no, prep, got, launch), filled=got.filled)
     run.history.append(keys - checked.lowered)
     record = _round_record(run, round_no, prep)
     if checked.record:  # 中断した起動の出力も保存先に残るので、このラウンドの起動の保存できた出力を名指す（回答の有無は表さない）

@@ -2,7 +2,7 @@
 
 PR の既存のコメントと差分のファイルを用意し、指示（指摘の基準・出力の形）を組んで今の席を並べて起動する。結果の無い claude
 以外の席は 1 度だけ起動し直し、それでも無ければ claude の読むだけの起動で埋める（`review_round`）。受け取った結果は判定待ちの
-ラウンドの形にし（`pending`）、打ち直しが同じ対象なら使う（`kept`）。ラウンドの範囲を決めるのと記録と保存は呼び手の `drive` がする。
+ラウンドの形にし（`pending`）、打ち直しが同じ対象なら使い、結果の無い席だけを起動する（`kept`・`review_round`）。ラウンドの範囲を決めるのと記録と保存は呼び手の `drive` がする。
 """
 
 from __future__ import annotations
@@ -36,6 +36,8 @@ FINDINGS_SHAPE = (
 # 既存のコメント 1 件と全体の字数の上限
 REMARK_CHARS = "cross-review.remark-chars"
 REMARKS_TOTAL = "cross-review.remarks-total"
+# 判定待ちの記録のうち、前のバージョンが持たないことのあるキー（欠けた記録は使わない）
+PENDING_KEYS = frozenset(("handed", "unread", "full_seats"))
 
 
 class ReviewingRun(seats.SeatRun, Protocol):
@@ -138,12 +140,13 @@ class FilledRead(NamedTuple):
 
 class Reviewed(NamedTuple):
     """1 ラウンドのレビューの結果。`silent` は全員が結果を返さなかったか（席を埋めていない）。`filled` は席を埋めたときだけ
-    持つ。"""
+    持つ。`full_seats` はこのラウンドで埋めて結果の無い席で、起動し直すときは全差分を渡す。"""
 
     raised: list[dict[str, Any]]
     unread: dict[str, seats.Unread]
     silent: bool
     filled: Optional[FilledRead] = None
+    full_seats: tuple[str, ...] = ()
 
 
 def _keys(raised: Sequence[Mapping[str, Any]]) -> frozenset[str]:
@@ -151,40 +154,72 @@ def _keys(raised: Sequence[Mapping[str, Any]]) -> frozenset[str]:
     return frozenset(oscillation.finding_key(t.strip()) for f in raised if isinstance(t := f.get("text"), str))
 
 
-def review_round(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Optional[Path], launch: Launcher) -> Reviewed:
+def review_round(
+    run: ReviewingRun,
+    round_no: int,
+    prep: Prepared,
+    remarks: Optional[Path],
+    launch: Launcher,
+    held: Optional[Reviewed] = None,
+) -> Reviewed:
     """今の席を並べて起動し、結果の無い claude 以外の席だけを同じラウンドで 1 度だけ起動し直す（#3941）。それでも結果の無い席が
-    どれも claude 以外なら、その席を claude の読むだけの起動で埋める（`participants.fill_targets`。#3955）。"""
+    どれも claude 以外なら、その席を claude の読むだけの起動で埋める（`participants.fill_targets`。#3955）。判定待ちで残った
+    結果 `held` があれば、結果の無い席だけを起動して結果を足す（#4363）。"""
+    before = Reviewed([], {}, False) if held is None else held
+    asked = list(run.seats if held is None else held.unread)
     prompt = review_prompt(run, round_no, prep, remarks)
     required = _prompt_diffs(run, prep)
-    raised, unread = seats.launch_reviewers(run, round_no, dict.fromkeys(run.seats, prompt), required, launch)
+    prompts = dict.fromkeys(asked, prompt)
+    full = None if before.filled is None else before.filled.diff
+    if before.full_seats:
+        full, full_prompt, full_required = _full_request(run, round_no, prep, remarks)
+        prompts.update(dict.fromkeys(before.full_seats, full_prompt))
+        required = tuple(dict.fromkeys((*required, *full_required)))
+    more, unread = seats.launch_reviewers(run, round_no, prompts, required, launch)
     retry = [s for s in unread if participants.runtime_of(s) != participants.FIXER]
     if retry:
-        more, again = seats.launch_reviewers(run, round_no, dict.fromkeys(retry, prompt), required, launch, RETRY_SUFFIX)
-        raised += more
+        again_found, again = seats.launch_reviewers(run, round_no, dict.fromkeys(retry, prompt), required, launch, RETRY_SUFFIX)
+        more += again_found
         merged = {**again, **{s: unread[s] for s in unread if s not in retry}}
         unread = {s: merged[s] for s in run.seats if s in merged}
-    if len(unread) == len(run.seats):
-        return Reviewed(raised, unread, True)
-    targets = participants.fill_targets(run.seats, unread)
-    if not targets:
-        return Reviewed(raised, unread, False)
-    more, left, full = _fill_seats(run, round_no, prep, remarks, {t: unread[t] for t in targets}, launch)
-    return Reviewed(raised + more, left, False, FilledRead(full, _keys(more), _keys(raised)))
+    # 全差分を読んだ席の指摘と、ラウンドの差分を読んだ席の指摘を分ける（判定役へ渡す差分が違う）
+    from_full = [f for f in more if f["by"] in before.full_seats]
+    from_round = [f for f in more if f["by"] not in before.full_seats]
+    raised = before.raised + more
+    targets = () if len(unread) == len(run.seats) else participants.fill_targets(run.seats, unread)
+    filled_now: tuple[str, ...] = ()
+    if targets:
+        found, left, full, filled_now = _fill_seats(run, round_no, prep, remarks, {t: unread[t] for t in targets}, launch)
+        raised += found
+        from_full += found
+        unread = left
+    read = None
+    if full is not None:
+        old = before.filled
+        others = _keys(before.raised) if old is None else old.others
+        keys = frozenset() if old is None else old.keys
+        read = FilledRead(full, keys | _keys(from_full), others | _keys(from_round))
+    full_seats = tuple(s for s in (*before.full_seats, *filled_now) if s in unread)
+    return Reviewed(raised, unread, len(unread) == len(run.seats), read, full_seats)
+
+
+def _full_request(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Optional[Path]) -> tuple[Path, str, tuple[Path, ...]]:
+    """埋めた席へ渡す全差分のファイル・リクエスト・読ませる差分。埋めた claude はこの実行で初めて加わるので、前回の情報を
+    含まないリクエストと `--base` からの全差分を渡す。ラウンドの範囲（`prep.scope`）は変えない（記録の範囲を全差分にしない）。"""
+    full = prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep)
+    fresh = prep._replace(scope=scope_decide.Scope(scope_decide.FULL, None, prep.scope.unreviewed), diff=full, previous=None)
+    return full, review_prompt(run, round_no, fresh, remarks), _prompt_diffs(run, fresh)
 
 
 def _fill_seats(
     run: ReviewingRun, round_no: int, prep: Prepared, remarks: Optional[Path], targets: Mapping[str, seats.Unread], launch: Launcher
-) -> tuple[list[dict[str, Any]], dict[str, seats.Unread], Path]:
-    """結果の無い席を claude の読むだけの起動で 1 回ずつ埋める。埋めた claude はこの実行で初めて加わるので、前回の情報を含まない
-    リクエストと `--base` からの全差分を渡す。ラウンドの範囲（`prep.scope`）は変えない（記録の範囲を全差分にしない）。
-    指摘・結果の無い席・渡した全差分のファイルを返す。"""
-    full = prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep)
-    fresh = prep._replace(scope=scope_decide.Scope(scope_decide.FULL, None, prep.scope.unreviewed), diff=full, previous=None)
-    prompt = review_prompt(run, round_no, fresh, remarks)
+) -> tuple[list[dict[str, Any]], dict[str, seats.Unread], Path, tuple[str, ...]]:
+    """結果の無い席を claude の読むだけの起動で 1 回ずつ埋める。指摘・結果の無い席・渡した全差分のファイル・埋めた席を返す。"""
+    full, prompt, required = _full_request(run, round_no, prep, remarks)
     prompts: dict[str, str] = {}
     for absent, why in targets.items():
         prompts[seats.fill_seat(run, absent, why.cause, f"round {round_no}")] = prompt
-    return *seats.launch_reviewers(run, round_no, prompts, _prompt_diffs(run, fresh), launch), full
+    return *seats.launch_reviewers(run, round_no, prompts, required, launch), full, tuple(prompts)
 
 
 def _handed(run: ReviewingRun) -> list[list[str]]:
@@ -193,7 +228,8 @@ def _handed(run: ReviewingRun) -> list[list[str]]:
 
 
 def pending(run: ReviewingRun, record: Mapping[str, Any], prep: Prepared, got: Reviewed) -> dict[str, Any]:
-    """全席の結果がそろった相手役の結果を、判定待ちのラウンドとして状態に残す形にする（#4363）。差分は中身を持たず、作り直せる範囲
+    """相手役の結果を、判定待ちのラウンドとして状態に残す形にする（#4363）。指摘は出した席（`by`）を持ち、結果の無い席は
+    `unread`、そのうち起動し直すときに全差分を渡す席は `full_seats` に残す。差分は中身を持たず、作り直せる範囲
     （`record` の head と比較基点、`scope_base`）と、指摘ごとの差分を選ぶキーを持つ。`unreviewed` は相手役へ詳細レビューを
     求めたセクション、`handed` は確かめさせた足すべき内容である。"""
     filled = got.filled
@@ -203,15 +239,18 @@ def pending(run: ReviewingRun, record: Mapping[str, Any], prep: Prepared, got: R
         "unreviewed": list(prep.scope.unreviewed),
         "handed": _handed(run),
         "raised": got.raised,
+        "unread": list(got.unread),
+        "full_seats": list(got.full_seats),
         "filled": None if filled is None else {"keys": sorted(filled.keys), "others": sorted(filled.others)},
     }
 
 
 def kept(run: ReviewingRun, round_no: int, prep: Prepared, basis: scope_decide.Basis) -> Optional[Reviewed]:
     """判定待ちで残ったラウンドが、今回のラウンドと同じ番号・head・範囲・詳細レビューを求めるセクション・足すべき内容で、
-    `basis` に合えば、その相手役の結果と席を返す（相手役を起動しない）。合わなければ None。"""
+    `basis` に合えば、その相手役の結果と席を返す。合わなければ None。返す結果の `unread` は結果の無い席で、呼び手がその席だけを
+    起動する（空なら相手役を起動しない）。キー（`PENDING_KEYS`）の欠けた前のバージョンの記録は合わないとする。"""
     held = run.data.get(store.PENDING_REVIEW)
-    if not isinstance(held, Mapping):
+    if not isinstance(held, Mapping) or not PENDING_KEYS <= held.keys():
         return None
     record = held["record"]
     seated = store.list_of(record, scope_decide.REVIEWERS)
@@ -228,8 +267,11 @@ def kept(run: ReviewingRun, round_no: int, prep: Prepared, basis: scope_decide.B
     if keys is not None:
         full = prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep)
         read = FilledRead(full, frozenset(keys["keys"]), frozenset(keys["others"]))
-    run.process.append({"run": f"round {round_no}", "result": "判定待ちで残った相手役の結果を使い、相手役を起動しない"})
-    return Reviewed(list(held["raised"]), {}, False, read)
+    # 結果の無い席の理由は、起動し直した結果で作り直す
+    unread = {seat: seats.Unread("", "", "") for seat in held["unread"]}
+    started = f"結果の無い席（{'・'.join(unread)}）だけを起動する" if unread else "相手役を起動しない"
+    run.process.append({"run": f"round {round_no}", "result": f"判定待ちで残った相手役の結果を使い、{started}"})
+    return Reviewed(list(held["raised"]), unread, False, read, tuple(held["full_seats"]))
 
 
 def _prompt_diffs(run: ReviewingRun, prep: Prepared) -> tuple[Path, ...]:
