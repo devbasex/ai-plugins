@@ -393,9 +393,11 @@ def test_the_question_and_the_items_show_the_model_and_effort_changes(repo, caps
     (changes,) = [i["changes"] for i in got["items"] if i["kind"] == "launch-experiments"]
     assert changes == [
         {"path": "experiments/enabled", "before": True},
-        {"path": "experiments/stages", "after": ARMS["experiments"]["stages"]},
+        {"path": "experiments/stages/impl/arms/claude", "after": ARMS["experiments"]["stages"]["impl"]["arms"]["claude"]},
     ]
-    assert "モデルと effort の変更 experiments/stages" in question["questions"][0]["question"]
+    # 質問の文は変わる工程と要点だけ（選択肢の全体は items に任せる）
+    text = question["questions"][0]["question"]
+    assert "experiments/stages/impl/arms/claude: 書かない（同梱の値） → 2 組の選択肢" in text and "sonnet" not in text
 
 
 def test_the_terminal_confirmation_shows_the_changes(repo, capsys, monkeypatch):
@@ -407,7 +409,7 @@ def test_the_terminal_confirmation_shows_the_changes(repo, capsys, monkeypatch):
     shown: list[str] = []
     monkeypatch.setattr(lc, "print", lambda text, **kw: shown.append(text), raising=False)
     assert _run(capsys, "approve", "--sha256", got["metrics"]["sha256"], "--candidate", str(candidate))["status"] == "ok"
-    assert any("モデルと effort の変更 experiments/stages" in t for t in shown)
+    assert any("モデルと effort の変更 experiments/stages/impl/arms/claude" in t and "sonnet" in t for t in shown)
 
 
 def test_no_experiment_item_without_a_change(repo, capsys):

@@ -27,7 +27,7 @@ REFUSED = {
     "duration_api_ms": 0,
     "num_turns": 1,
     "result": "There's an issue with the selected model (no-such-model-xyz). It may not exist or you may not have access to it.",
-    "session_id": "f00f8c10-3a0f-4b7c-a495-c5d7fd04f3b2",
+    "session_id": "00000000-0000-4000-8000-000000000000",  # 作り物の値（実測の値は残さない）
     "total_cost_usd": 0,
     "usage": {
         "input_tokens": 0,
@@ -205,6 +205,47 @@ def test_a_refused_model_switches_to_the_base_once_without_counting_a_retry(judg
     assert [(r["request_try"], "assign_id" in r) for r in recorder.rows] == [(1, True), (2, False)]
     assert recorder.outcomes == []  # 切り替えた単位は数えない
     assert [r["switched"] for r in _experiments(tmp_path / "store", "launch_error")] == [True]
+
+
+def test_the_switch_checks_the_material_before_launching_again(judge_repo, recorder) -> None:
+    refused = _parsed(REFUSED)._replace(launched=True, seconds=2.0)
+    checked: list[int] = []
+    assert llm.ask("質問", "材料", SCHEMA, 30, call=Calls(refused, _answer(GOOD)), before_retry=lambda: checked.append(1)).ok
+    assert checked == [1]
+
+
+def test_a_stale_material_stops_the_switch_without_a_switch_row(judge_repo, recorder, tmp_path) -> None:
+    def moved() -> None:
+        raise RuntimeError("材料が古い")
+
+    calls = Calls(_parsed(REFUSED)._replace(launched=True, seconds=2.0))
+    with pytest.raises(RuntimeError):
+        llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=moved)
+    assert len(calls.argv) == 1 and _experiments(tmp_path / "store", "launch_error") == []
+
+
+def test_a_refusal_with_no_time_left_does_not_switch(judge_repo, recorder, tmp_path) -> None:
+    refused = _parsed(REFUSED)._replace(launched=True, seconds=30.0)
+    calls = Calls(refused)
+    got = llm.ask("質問", "材料", SCHEMA, 30, call=calls)
+    assert not got.ok and len(calls.argv) == 1
+    assert _experiments(tmp_path / "store", "launch_error") == [] and recorder.outcomes[0][1] is None
+
+
+def test_the_retry_reuses_the_repository_key_and_the_answer_is_checked_once(judge_repo, recorder, monkeypatch) -> None:
+    keys: list[Path] = []
+    monkeypatch.setattr(model_choice.launch_approval, "repo_key", lambda root: keys.append(root) or os.path.realpath(root))
+    checks: list[object] = []
+    real = llm.check_answer
+    monkeypatch.setattr(llm, "check_answer", lambda answer, schema: checks.append(answer) or real(answer, schema))
+    assert llm.ask("質問", "材料", SCHEMA, 30, call=Calls(_answer({"decision": "?"}), _answer(GOOD))).ok
+    assert len(keys) == 1 and len(checks) == 2
+
+
+def test_a_key_given_by_the_caller_is_not_resolved_again(judge_repo, monkeypatch) -> None:
+    monkeypatch.setattr(model_choice.launch_approval, "repo_key", lambda root: pytest.fail("解決し直した"))
+    got = model_choice.launch_choice("judge", "ask", cwd=judge_repo, unit="u", repo="/r")
+    assert got.repo == "/r" and got.assign_id is not None
 
 
 def test_a_broken_effort_stops_the_judge_before_any_launch(judge_repo, monkeypatch) -> None:

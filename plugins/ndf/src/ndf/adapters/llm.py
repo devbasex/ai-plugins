@@ -109,17 +109,36 @@ def _head(reply: claude.ClaudeReply) -> str:
     return shown[:ANSWER_HEAD]
 
 
-def judge_outcome(reply: claude.ClaudeReply, schema: dict) -> str:
-    """判定の起動 1 回の終わり方（`valid`・`invalid`・`timeout`・`unknown`）。`timeout` は起動した後の期限切れ。"""
+def judge_outcome(reply: claude.ClaudeReply, schema: dict) -> tuple[str, list[str]]:
+    """判定の起動 1 回の終わり方（`valid`・`invalid`・`timeout`・`unknown`）と回答の誤り（空なら合う）。
+
+    `timeout` は起動した後の期限切れ。スキーマの検査は、正常に終わった回答だけに 1 回打つ。
+    """
     if reply.failure is claude.Failure.TIMEOUT:
-        return "timeout"
-    if reply.failure is not None or reply.error:
-        return "unknown"
-    return "invalid" if check_answer(reply.answer, schema) else "valid"
+        return "timeout", []
+    if reply.failure is not None:
+        return "unknown", []
+    if reply.error:
+        return "unknown", [reply.error]
+    errors = check_answer(reply.answer, schema)
+    return ("invalid" if errors else "valid"), errors
 
 
-def _choice(unit: str, retry: Optional[str] = None) -> Any:
-    return claude_choice.pick_values("judge", "ask", cwd=Path.cwd(), unit=unit, retry=retry)
+class _Checks:
+    """1 件の質問の回答の検査。同じ回答を使用量ログの行と打ち直しの判断の両方に使い、スキーマの検査を 1 回で済ませる。"""
+
+    def __init__(self, schema: dict) -> None:
+        self.schema = schema
+        self._last: Optional[tuple[claude.ClaudeReply, tuple[str, list[str]]]] = None
+
+    def of(self, reply: claude.ClaudeReply) -> tuple[str, list[str]]:
+        if self._last is None or self._last[0] is not reply:
+            self._last = (reply, judge_outcome(reply, self.schema))
+        return self._last[1]
+
+
+def _choice(unit: str, retry: Optional[str] = None, repo: Optional[str] = None) -> Any:
+    return claude_choice.pick_values("judge", "ask", cwd=Path.cwd(), unit=unit, retry=retry, repo=repo)
 
 
 @dataclass(frozen=True)
@@ -132,13 +151,18 @@ class _Ask:
     timeout: float
     call: Optional[Caller]
     before_retry: Optional[Callable[[], None]]
+    checks: _Checks
 
 
 def _launch_judge(run: claude_choice.ChoiceRun, q: _Ask, prompt: str) -> claude.ClaudeReply:
-    """選んだ値で 1 回起動する。モデルを理由に拒まれ基準へ切り替えられれば、残りの期限で 1 回だけ起動し直す。"""
+    """選んだ値で 1 回起動する。モデルを理由に拒まれ基準へ切り替えられれば、残りの期限で 1 回だけ起動し直す。
+
+    期限が残っていなければ切り替えない（切り替えの行を書かない）。起動し直す前には、打ち直しと同じく `before_retry` で材料が
+    古くなっていないかを確かめる（切り替えの行より先に呼ぶので、例外で止めれば行は書かない）。
+    """
     reply = _judge_once(run, q, prompt, q.timeout)
     left = q.timeout - (reply.seconds if reply.seconds is not None else 0.0)
-    if run.fall_back(reply) and left > 0:
+    if left > 0 and run.fall_back(reply, ready=q.before_retry):
         reply = _judge_once(run, q, prompt, left)
     return reply
 
@@ -147,7 +171,7 @@ def _judge_once(run: claude_choice.ChoiceRun, q: _Ask, prompt: str, timeout: flo
     """起動 1 回。子が終わるたびに行を渡す（差し替えた呼び出しは呼び出しの後に 1 行渡す）。"""
     call = claude.ClaudeCall(SYSTEM, claude.Permission.JUDGE, json_schema=q.schema, model=run.model, effort=run.effort)
     argv = claude.claude_args(call)
-    log = claude.LaunchLog({**claude.launch_meta("ask"), **run.meta()}, lambda r: {"outcome": judge_outcome(r, q.schema)})
+    log = claude.LaunchLog({**claude.launch_meta("ask"), **run.meta()}, lambda r: {"outcome": q.checks.of(r)[0]})
     with run_log.overlay_env(run.env_changes()):
         if q.call is None:
             reply = claude.call_claude(argv, prompt, timeout, None, claude.LaunchOptions(log=log))
@@ -171,7 +195,9 @@ def ask(
     `schema` は `answer_schema` の値。2 回とも合わなければ `cause` が `needs_human` で、2 回の回答の先頭を
     `detail` に持つ。claude が誤りで終えた・出力が JSON でないときは 1 回の外れと数える。起動できない・期限切れ・
     利用上限・基準でも拒まれたモデルはその回で止め、打ち直さない。`before_retry` は打ち直しの起動の直前に呼ぶ（1 回目の回答を待つ間に材料が
-    古くなっていないかを呼び手が確かめる）。例外を投げれば打ち直さず、例外をそのまま外へ出す。値の設定の誤りは起動せずに `precondition`。
+    古くなっていないかを呼び手が確かめる）。モデルを理由に拒まれて基準の組で起動し直す前にも呼ぶ。例外を投げれば打ち直さず、例外を
+    そのまま外へ出す。値の設定の誤りは起動せずに `precondition`。リポジトリのキーは 1 回目の値の選択で解決し、打ち直しの選択は
+    同じキーを使う（git を起動し直さない）。
     """
     request = uuid.uuid4().hex
     try:
@@ -180,7 +206,7 @@ def ask(
         return JudgeAnswer(False, None, causes.cause(exc.kind, str(exc)), 0, 0.0)
     assigned, ends = run.assign_id, []
     try:
-        return _attempts(run, _Ask(question, material, schema, timeout, call, before_retry), ends)
+        return _attempts(run, _Ask(question, material, schema, timeout, call, before_retry, _Checks(schema)), ends)
     except InternalError as exc:
         return JudgeAnswer(False, None, causes.cause(exc.kind, str(exc)), len(ends), 0.0)
     finally:
@@ -204,15 +230,15 @@ def _attempts(run: claude_choice.ChoiceRun, q: _Ask, ends: list[str]) -> JudgeAn
         if attempt > 1:
             if q.before_retry is not None:
                 q.before_retry()
-            run.choice, run.request_try = _choice(run.request_id, RETRY), run.request_try + 1
+            run.choice, run.request_try = _choice(run.request_id, RETRY, run.repo), run.request_try + 1
         reply = _launch_judge(run, q, _prompt(q.question, q.material, errors))
         cost += reply.cost
-        ends.append(judge_outcome(reply, q.schema))
+        outcome, errors = q.checks.of(reply)
+        ends.append(outcome)
         if reply.failure is not None:
             run_log.record("judge", attempts=attempt, valid=False, cost=cost, failure=str(reply.failure))
             kind = facts.value(claude.FAILURES, reply.failure, "judge_cause")
             return JudgeAnswer(False, None, causes.cause(kind, reply.error or str(reply.failure)), attempt, cost)
-        errors = [reply.error] if reply.error else check_answer(reply.answer, q.schema)
         if not errors:
             run_log.record("judge", attempts=attempt, valid=True, cost=cost)
             return JudgeAnswer(True, reply.answer, None, attempt, cost)

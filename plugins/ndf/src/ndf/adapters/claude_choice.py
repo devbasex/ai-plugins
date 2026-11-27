@@ -11,7 +11,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, Callable, Optional, Protocol
 
 from ndf.adapters import claude
 
@@ -19,12 +19,12 @@ log = logging.getLogger(__name__)
 
 
 class LaunchChooser(Protocol):
-    """起動の値を選ぶ処理（`ndf.adapters.model_choice` が満たす）。値（Choice）は `model`・`effort`・`assign_id`・
-    `cli_args()`・`env_changes()`・`row_fields()` を持つ。"""
+    """起動の値を選ぶ処理（`ndf.adapters.model_choice` が満たす）。値（Choice）は `model`・`effort`・`assign_id`・`repo`・
+    `cli_args()`・`env_changes()`・`row_fields()` を持つ。`repo` は選ぶときに解決したリポジトリのキー（解決しなければ None）。"""
 
     def launch_choice(self, layer: str, name: str, runtime: str = "claude", *, cwd: Path, **request: Any) -> Any: ...
 
-    def base_fallback(self, choice: Any, reason: str) -> Optional[Any]: ...
+    def base_fallback(self, choice: Any, reason: str, ready: Optional[Callable[[], None]] = None) -> Optional[Any]: ...
 
     def observed(self, choice: Any, model: str) -> None: ...
 
@@ -83,6 +83,11 @@ class ChoiceRun:
     def assign_id(self) -> Optional[str]:
         return None if self.choice is None else self.choice.assign_id
 
+    @property
+    def repo(self) -> Optional[str]:
+        """値を選んだときに解決したリポジトリのキー。打ち直しの選択へ渡し、解決し直さない。"""
+        return None if self.choice is None else self.choice.repo
+
     def env_changes(self) -> dict[str, Optional[str]]:
         """子の環境の変更（None の名前は外す）。"""
         return {} if self.choice is None else self.choice.env_changes()
@@ -100,11 +105,14 @@ class ChoiceRun:
             self._seen = True
             launch_chooser.observed(self.choice, found[0])
 
-    def fall_back(self, reply: claude.ClaudeReply) -> bool:
-        """`reply` がモデルを理由にした拒否で、基準の組へ切り替えられたら真。値を替え、`request_try` を 1 増やす。2 回目は切り替えない。"""
+    def fall_back(self, reply: claude.ClaudeReply, ready: Optional[Callable[[], None]] = None) -> bool:
+        """`reply` がモデルを理由にした拒否で、基準の組へ切り替えられたら真。値を替え、`request_try` を 1 増やす。2 回目は切り替えない。
+
+        `ready` は切り替えると決まった後、切り替えの行を書く前に呼ぶ（例外を投げれば切り替えず、行も書かない）。
+        """
         if reply.failure is not claude.Failure.MODEL_REFUSED or self.switched or launch_chooser is None or self.choice is None:
             return False
-        back = launch_chooser.base_fallback(self.choice, reply.error or str(reply.failure))
+        back = launch_chooser.base_fallback(self.choice, reply.error or str(reply.failure), ready)
         if back is None:
             return False
         self.choice, self.request_try, self.switched = back, self.request_try + 1, True

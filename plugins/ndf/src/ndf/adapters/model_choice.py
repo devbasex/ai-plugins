@@ -32,7 +32,7 @@ import random
 import re
 import uuid
 from collections import Counter
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -102,7 +102,9 @@ class Choice:
 
     `inherited_effort` は、ランタイム自身の effort の環境変数を子へ引き継ぐときの値（そのとき `effort` は None で、
     `--effort` を足さない）。`retry` は引き上げを求めた理由（引数か環境変数の指定の起動は None）で、`raised` は値が実際に
-    変わったか。`store` は選んだときの実験の記録の保存先で、`base_fallback` が同じ保存先へ書くために持つ。
+    変わったか。`store` は選んだときの実験の記録の保存先で、`base_fallback` が同じ保存先へ書くために持つ。`repo` は選ぶときに
+    解決したリポジトリのキー（同じリクエストの打ち直しが解決し直さないために持つ）。`assigned_at` は割り付けの行の日時で、
+    `observed` が読む月をその月からに絞るために持つ。
     """
 
     layer: str
@@ -122,6 +124,8 @@ class Choice:
     inherited_effort: Optional[str] = None
     retry: Optional[str] = None
     store: Optional[Path] = None
+    repo: Optional[str] = None
+    assigned_at: Optional[str] = None
 
     def cli_args(self) -> list[str]:
         """CLI に渡す引数（表 runtimes の `choice_args` の形。値の無い側は足さない）。"""
@@ -383,7 +387,11 @@ def _from_base(base: Optional[Mapping[str, str]], key: str) -> tuple[Optional[st
 
 @dataclass(frozen=True)
 class Request:
-    """`launch_choice` に渡す起動の手がかり。`charge_to` は手戻りの費用を負う割り付け ID（実験の記録を書くときに使う）。"""
+    """`launch_choice` に渡す起動の手がかり。`charge_to` は手戻りの費用を負う割り付け ID（実験の記録を書くときに使う）。
+
+    `repo` は呼び手が解決済みのリポジトリのキー（同じリクエストの打ち直しが前の値の `Choice.repo` を渡す）。渡されれば git を起動して
+    解決し直さない。
+    """
 
     unit: Optional[str] = None
     charge_to: Optional[str] = None
@@ -392,6 +400,7 @@ class Request:
     argument: tuple[Optional[str], Optional[str]] = (None, None)
     # 起動の引数を誤りの文で指す言い方（モデル・effort の順）。CLI ごとに引数の名前が違う起動（codex の委譲は `-c`）が変える
     argument_at: tuple[str, str] = ("引数 --model", "引数 --effort")
+    repo: Optional[str] = None
 
 
 # --- 実験の記録 --------------------------------------------------------------------------------------
@@ -800,7 +809,9 @@ def _from_arm(arm: Mapping[str, str], key: str) -> tuple[Optional[str], Source]:
 def _with_assignment(choice: Choice, row: Mapping[str, Any]) -> Choice:
     arm = row["arms"][row["chosen"]]
     (model, ms), (effort, es) = _from_arm(arm, "model"), _from_arm(arm, "effort")
-    return replace(choice, model=model, effort=effort, model_source=ms, effort_source=es, assign_id=row["assign_id"], arm=arm)
+    return replace(
+        choice, model=model, effort=effort, model_source=ms, effort_source=es, assign_id=row["assign_id"], arm=arm, assigned_at=row["at"]
+    )
 
 
 def _decide_assignment(led: Ledger, u: _Unit, choice: Choice) -> Choice:
@@ -862,14 +873,17 @@ def _prepared_store(env: Mapping[str, str], now: datetime, window_days: int) -> 
     return store
 
 
-def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
+def base_fallback(choice: Choice, reason: str, ready: Optional[Callable[[], None]] = None) -> Optional[Choice]:
     """割り付けた基準でない組の起動がモデルを理由に拒否されたとき、基準へ切り替えたことを持つ `launch_error` の行を書き、基準の組の値を返す。
 
     基準の組と割り付けの無い起動は None。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなくても基準の値を返す。
     引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、基準の組から引き上げ直す。
+    `ready` は切り替えると決まった後、行を書く前に呼ぶ（呼び手の材料の確かめ）。例外はそのまま送り、行を書かない。
     """
     if choice.assign_id is None or choice.arm is None or choice.arm == choice.base_arm:
         return None
+    if ready is not None:
+        ready()
     row = {"kind": "launch_error", "at": _time_text(_utc_now()), "assign_id": choice.assign_id, "stage": choice.stage}
     append_row({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}, choice.store)
     log.warning("組 %s は起動できなかったので、基準の組で続ける（工程 %s・単位 %s）", _arm_text(choice.arm), choice.stage, choice.unit)
@@ -881,14 +895,24 @@ def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
 def observed(choice: Choice, model: str) -> None:
     """割り付けを受けた単位の、引き上げでも基準への切り替えでもない起動が返した実際のモデルを、割り付け ID ごとに最初の 1 回だけ足す。
 
-    読むのは割り付けの期間の上限の日数で、掃除が消した月のファイルは無いとして読む。書けなければ警告を出して続ける。
+    読むのは割り付けの行の月から今月まで（同じ割り付け ID の `observed` の行は割り付けの後にしか無い）。割り付けの日時が無ければ
+    割り付けの期間の上限の日数を読む。掃除が消した月のファイルは無いとして読む。書けなければ警告を出して続ける。
     """
     if choice.assign_id is None or choice.arm is None or choice.raised:
         return
+    since = _row_time({"at": choice.assigned_at}) if choice.assigned_at is not None else _utc_now() - timedelta(days=MAX_WINDOW_DAYS)
     try:
-        with ledger(_utc_now() - timedelta(days=MAX_WINDOW_DAYS), choice.store) as led:
+        with ledger(since, choice.store) as led:
             if not any(r["kind"] == "observed" and r["assign_id"] == choice.assign_id for r in led.rows):
-                led.append({"kind": "observed", "at": _time_text(_utc_now()), "assign_id": choice.assign_id, "arm": dict(choice.arm), "model": model})
+                led.append(
+                    {
+                        "kind": "observed",
+                        "at": _time_text(_utc_now()),
+                        "assign_id": choice.assign_id,
+                        "arm": dict(choice.arm),
+                        "model": model,
+                    }
+                )
     except _STORE_ERRORS as exc:
         log.warning("実験の記録へ実際のモデルを書けない（割り付け %s）: %s", choice.assign_id, exc)
 
@@ -910,7 +934,7 @@ def launch_choice(
 ) -> Choice:
     """優先の順で値を決め、要れば割り付け、`retry` があれば引き上げる。値の誤り・壊れた設定は `precondition`。
 
-    `request` は `Request` の欄（`unit`・`charge_to`・`retry`・`mode`・`argument`・`argument_at`）。起動のたびに最初に月の掃除をする。
+    `request` は `Request` の欄（`unit`・`charge_to`・`retry`・`mode`・`argument`・`argument_at`・`repo`）。起動のたびに最初に月の掃除をする。
     `unit` の無い起動と工程の無い起動は、実験の記録を読み書きしない。`settings` は `table` へ渡す（渡されれば起動の設定を読み直さない）。
     """
     req = Request(**request)
@@ -948,7 +972,8 @@ def launch_choice(
     if stage is None or store is None or (req.unit is None and req.charge_to is None):
         return choice if manual.given or req.retry is None or stage is None else _raised_once(choice)
     metric = metric_of(stage)
-    where = Where(launch_approval.repo_key(root), stage, runtime, compatibility_key(arms, metric))
+    choice = replace(choice, repo=req.repo or launch_approval.repo_key(root))  # 解決したキーを値に持たせ、打ち直しへ渡す
+    where = Where(choice.repo, stage, runtime, compatibility_key(arms, metric))
     experiment = got.enabled and len(arms) > 1 and metric is not None
     u = _Unit(req.unit, req.mode, tuple(arms), got.allocation, experiment, got.enabled, where, now, store)
     if manual.given:

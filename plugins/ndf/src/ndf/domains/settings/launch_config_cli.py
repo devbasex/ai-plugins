@@ -145,9 +145,9 @@ def experiment_changes(root: Path, cand: Optional[Path]) -> list[dict[str, Any]]
 
 
 def _changes(before: Any, after: Any, at: str) -> list[dict[str, Any]]:
-    """2 つの値の違う葉。オブジェクトはキーごとに下り、配列（選択肢の並び）はまとめて比べる。"""
-    if isinstance(before, Mapping) and isinstance(after, Mapping):
-        keys = dict.fromkeys([*before, *after])
+    """2 つの値の違う葉。オブジェクトはキーごとに下り（片方に無いオブジェクトも下る）、配列（選択肢の並び）はまとめて比べる。"""
+    if _descends(before) and _descends(after) and (before is not _ABSENT or after is not _ABSENT):
+        keys = dict.fromkeys([*_keys(before), *_keys(after)])
         return [c for k in keys for c in _changes(_value(before, k), _value(after, k), f"{at}/{k}")]
     if before == after:
         return []
@@ -155,17 +155,35 @@ def _changes(before: Any, after: Any, at: str) -> list[dict[str, Any]]:
     return [{"path": at, **{k: v for k, v in sides.items() if v is not _ABSENT}}]
 
 
-def _value(obj: Mapping[str, Any], key: str) -> Any:
-    return obj[key] if key in obj else _ABSENT
+def _descends(value: Any) -> bool:
+    return value is _ABSENT or isinstance(value, Mapping)
 
 
-def _change_lines(changes: Sequence[Mapping[str, Any]]) -> list[str]:
-    """確認の画面に載せる、モデルと effort の変更の行。書いていない側は同梱の値を使う。"""
-    return [f"モデルと effort の変更 {c['path']}: {_side(c, 'before')} → {_side(c, 'after')}" for c in changes]
+def _keys(value: Any) -> list[str]:
+    return [] if value is _ABSENT else list(value)
 
 
-def _side(change: Mapping[str, Any], key: str) -> str:
-    return json.dumps(change[key], ensure_ascii=False) if key in change else "書かない（同梱の値）"
+def _value(obj: Any, key: str) -> Any:
+    return obj[key] if obj is not _ABSENT and key in obj else _ABSENT
+
+
+def _change_lines(changes: Sequence[Mapping[str, Any]], whole: bool = False) -> list[str]:
+    """確認の画面に載せる、モデルと effort の変更の行。書いていない側は同梱の値を使う。
+
+    質問の文（`whole` が偽）は、変わる場所と要点（選択肢の組の数か、1 つの値の前後）だけを載せ、選択肢の全体は結果の
+    `items` の `launch-experiments` に任せる（一度で読み切れる量にする）。端末の確認（`whole` が真）は値の全体を載せる。
+    """
+    return [f"モデルと effort の変更 {c['path']}: {_gist(c, 'before', whole)} → {_gist(c, 'after', whole)}" for c in changes]
+
+
+def _gist(change: Mapping[str, Any], key: str, whole: bool) -> str:
+    if key not in change:
+        return "書かない（同梱の値）"
+    value = change[key]
+    if whole or not isinstance(value, (list, Mapping)):
+        return json.dumps(value, ensure_ascii=False)
+    count = f"{len(value)} 組の選択肢" if isinstance(value, list) else "値"
+    return f"{count}（全体は結果の items の launch-experiments）"
 
 
 def _spec_text(value: Any) -> str:
@@ -306,7 +324,7 @@ def _confirm_terminal(t: ls.Target, destination: Optional[Path], changes: Sequen
     if not _terminal():
         return None
     head = [f"候補の内容で {destination} を置き換える"] if destination is not None else []
-    print("\n".join([*head, *_target_lines(t), *_change_lines(changes)]), file=sys.stderr)
+    print("\n".join([*head, *_target_lines(t), *_change_lines(changes, whole=True)]), file=sys.stderr)
     try:
         name, typed = _terminal_line("承認者の名前: "), _terminal_line(f"ハッシュの先頭 {PREFIX} 文字: ")
     except EOFError:  # noqa: NDF401 利用者の入力: 入力の中断は確認が無いとして呼び手が拒む

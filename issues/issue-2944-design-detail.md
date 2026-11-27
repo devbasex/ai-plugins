@@ -92,9 +92,9 @@ src/ndf/
 | `table` | `adapters/model_choice.py` | 新設 | `table(root: Path, settings: Optional[Settings] = None) -> Table` | 同梱とリポジトリの `experiments` を重ね、値の制約を検証する。`settings` を渡されれば `.ndf/launch.json` を読み直さずに使う。同梱の値はスキーマに照らさない（配布の後に変わらないので、CI のテストが `bundled_errors` で確かめる） |
 | `bundled_errors` | 同 | 新設 | `bundled_errors() -> list[str]` | 同梱の値が起動の設定のスキーマに合わない箇所を返す。起動の経路では呼ばず、CI のテストが呼ぶ |
 | `stage_of` | 同 | 新設 | `stage_of(layer: str, name: str) -> Optional[str]` | 層と作業の名前から工程を引く |
-| `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, unit: Optional[str] = None, charge_to: Optional[str] = None, retry: Optional[str] = None, mode: Optional[str] = None, argument: tuple[Optional[str], Optional[str]] = (None, None), environ: Optional[Mapping] = None, settings: Optional[Settings] = None) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる。`settings` は `table` へ渡す |
+| `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, unit: Optional[str] = None, charge_to: Optional[str] = None, retry: Optional[str] = None, mode: Optional[str] = None, argument: tuple[Optional[str], Optional[str]] = (None, None), environ: Optional[Mapping] = None, settings: Optional[Settings] = None, repo: Optional[str] = None) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる。`settings` は `table` へ渡す。`repo`（`Request` の欄）は呼び手が解決済みのリポジトリのキーで、渡されれば git を起動して解決し直さない。値の `repo` に解決したキーを持たせ、同じリクエストの打ち直しはそれを渡す |
 | `raised` | 同 | 新設 | `raised(runtime: str, model: Optional[str], effort: Optional[str]) -> tuple[Optional[str], Optional[str]]` | 設計書の「引き上げる起動」の上げ方の表を当てる |
-| `base_fallback` | 同 | 新設 | `base_fallback(choice: Choice, reason: str) -> Optional[Choice]` | 切り替える条件に当たれば `launch_error` の行を書き、基準の組の値を返す。当たらなければ None。行は `append_row(row, choice.store)` で、割り付けたときと同じ保存先に書く。呼び出しで環境変数を差し替えて保存先が既定と違っても、次の起動が同じ保存先から切り替えを読めるようにするためである |
+| `base_fallback` | 同 | 新設 | `base_fallback(choice: Choice, reason: str, ready: Optional[Callable[[], None]] = None) -> Optional[Choice]` | 切り替える条件に当たれば、`ready` を呼んでから `launch_error` の行を書き、基準の組の値を返す。当たらなければ None。行は `append_row(row, choice.store)` で、割り付けたときと同じ保存先に書く。呼び出しで環境変数を差し替えて保存先が既定と違っても、次の起動が同じ保存先から切り替えを読めるようにするためである |
 | `candidates` | 同 | 新設 | `candidates(arms: Sequence, rows: Sequence, entry: Optional[Mapping], now: datetime, where: Where) -> list[int]` | 打ち切った組と起動できない組を除いた添字。`launch_error` は割り付け ID で割り付けの行を引き、`where`（`repo`・`stage`・`runtime`・`key` を持つ組）が同じものだけを数える。引数の多い関数の検査（PLR0913）に合わせ、4 つのキーを 1 つの値にまとめた |
 | `compatibility_key` | 同 | 新設 | `compatibility_key(arms: Sequence, metric: str) -> str` | 選択肢の並びと指標のハッシュ |
 | `read_experiments` | 同 | 新設 | `read_experiments(since: datetime, root: Optional[Path] = None) -> list[dict]` | `since` の月から今月までの実験の記録を読む（ロックを取らない） |
@@ -221,6 +221,9 @@ src/ndf/
 | `ask` | `adapters/llm.py` | 変更 | 変えない | `request_id` を単位にして値を取得し、起動ごとに行を渡し、効果指標を書く |
 
 - 2 回目は `retry="invalid_answer"`。`MODEL_REFUSED` で `base_fallback` が値を返せば、判定の打ち直しの回数に数えずに 1 回だけ打ち直し、`request_try` を 1 増やす。期限は残りの時間
+- 期限が残っていなければ切り替えない（`base_fallback` を呼ばず、切り替えの行を書かない）。切り替えて起動し直す前には、打ち直しと同じく呼び手の `before_retry` で材料が古くなっていないかを確かめる。`base_fallback` の `ready` に渡し、切り替えの行より先に呼ぶので、例外で止めれば行は書かない
+- 2 回目の値の選択には、1 回目の値が持つリポジトリのキー（`Choice.repo`）を渡し、git を起動し直さない
+- 回答のスキーマの検査は起動 1 回につき 1 回にし、その結果から使用量ログの `outcome` と打ち直しの判断の両方を作る
 - `outcome` は `valid`・`invalid`・`timeout`・`unknown`。`timeout` は、子プロセスを起動した後の期限切れ（`Failure.TIMEOUT`）である。効果指標は 1 回目が `valid` なら 1、`invalid` か `timeout` なら 0（2 回目で合っても、2 回目が期限切れでも 0 は変わらない）、`unknown` と起動できない場合は null
 - 値を取得する作業場所は `Path.cwd()`。stop-wait の判定（`judge_child`）は変えない
 
