@@ -35,9 +35,10 @@ from ndf.adapters.github import Authored, GitHub, GitHubError, Pull
 from ndf.adapters.publish import Publisher
 from ndf.contracts import limits
 from ndf.core import branch_strategy
-from ndf.domains.release import delivery_confirm, names_decide, record, record_decide
+from ndf.domains.release import delivery_confirm, names_decide, record, record_decide, record_read
 from ndf.domains.release.delivery_confirm import DeliveriesAt
-from ndf.domains.release.record import KEPT, WRITTEN, RecordError, Selection, Written
+from ndf.domains.release.record import KEPT, WRITTEN, RecordError, Written
+from ndf.domains.release.record_read import Selection
 
 # 書いた後の読み直しで、前に同じ記録があったので消した PR の結果
 REMOVED = "removed"
@@ -155,7 +156,7 @@ class _Shape(NamedTuple):
     commit: str
     included: tuple[int, ...]
     holder: int
-    state: record.Candidates
+    state: record_read.Candidates
     targets: tuple[str, ...]
 
 
@@ -527,9 +528,9 @@ def sweep_shares(share: Path, older_than: float, now: Callable[[], float] = time
             _drop_stale_tmp(share, path, int(matched["number"]), older_than, now)
 
 
-def _trusted_state(hub: GitHub, number: int, version: str, commit: str, comments: Optional[Sequence[Authored]] = None) -> record.Candidates:
+def _trusted_state(hub: GitHub, number: int, version: str, commit: str, comments: Optional[Sequence[Authored]] = None) -> record_read.Candidates:
     """PR の信用する書き手の記録（値 `version` かコミット `commit` を起点に集めた有効な記録と、値ごとの正の一覧）。"""
-    return record.candidates(hub, number, Selection(version, None, None), commit, comments)
+    return record_read.candidates(hub, number, Selection(version, None, None), commit, comments)
 
 
 def _target_set(targets: Sequence[str]) -> tuple[str, ...]:
@@ -537,7 +538,7 @@ def _target_set(targets: Sequence[str]) -> tuple[str, ...]:
     return tuple(sorted(set(targets)))
 
 
-def _known_push(state: record.Candidates, version: str) -> Optional[record_decide.Push]:
+def _known_push(state: record_read.Candidates, version: str) -> Optional[record_decide.Push]:
     """記録の PR の同じ値の信用する記録が持つ push（無ければ None）。"""
     return next((r.push for r in state.valid if r.version == version and r.push is not None), None)
 
@@ -568,7 +569,7 @@ def _check_names(targets: tuple[str, ...], args: Unversioned) -> None:
         raise RecordError(f"--observed の {', '.join(stray)} は --environment に無い")
 
 
-def _check_records(state: record.Candidates, targets: tuple[str, ...], version: str, commit: str, number: int) -> None:
+def _check_records(state: record_read.Candidates, targets: tuple[str, ...], version: str, commit: str, number: int) -> None:
     """確かめ 5・6。正の一覧と、値とコミットの 1 対 1。"""
     authoritative = state.authoritative.get(version)
     if authoritative is not None and authoritative != targets:

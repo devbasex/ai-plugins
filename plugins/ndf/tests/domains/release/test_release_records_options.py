@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from ndf.domains.release import cli as release_cli
-from ndf.domains.release import record
+from ndf.domains.release import record, record_read
 
 PR = 42
 
@@ -31,8 +31,8 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
         return {"body": ""}
 
     monkeypatch.setattr(record, "read", read)
-    monkeypatch.setattr(record, "read_release", read_release)
-    monkeypatch.setattr(record, "pr_body_only", pr_body_only)
+    monkeypatch.setattr(record_read, "read_release", read_release)
+    monkeypatch.setattr(record_read, "pr_body_only", pr_body_only)
     return seen
 
 
@@ -52,19 +52,19 @@ def test_no_read_option_reads_all_records(tmp_path: Path, calls: list[tuple]) ->
 @pytest.mark.parametrize(
     ("extra", "select", "bodies", "issues"),
     [
-        (["--version", "1.2.3"], record.Selection("1.2.3", None, None), False, None),
-        (["--release", "7"], record.Selection(None, 7, None), False, None),
-        (["--unit", "ndf"], record.Selection(None, None, "ndf"), False, None),
-        (["--bodies"], record.Selection(None, None, None), True, None),
-        (["--issues", "3", "4"], record.Selection(None, None, None), False, [3, 4]),
-        (["--version", "1.2.3", "--bodies"], record.Selection("1.2.3", None, None), True, None),
+        (["--version", "1.2.3"], record_read.Selection("1.2.3", None, None), False, None),
+        (["--release", "7"], record_read.Selection(None, 7, None), False, None),
+        (["--unit", "ndf"], record_read.Selection(None, None, "ndf"), False, None),
+        (["--bodies"], record_read.Selection(None, None, None), True, None),
+        (["--issues", "3", "4"], record_read.Selection(None, None, None), False, [3, 4]),
+        (["--version", "1.2.3", "--bodies"], record_read.Selection("1.2.3", None, None), True, None),
     ],
 )
 def test_any_read_option_reads_the_release(
     tmp_path: Path,
     calls: list[tuple],
     extra: list[str],
-    select: record.Selection,
+    select: record_read.Selection,
     bodies: bool,
     issues: list[int] | None,
 ) -> None:

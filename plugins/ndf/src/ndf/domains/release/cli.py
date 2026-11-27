@@ -12,7 +12,7 @@
 | `merge` | workflow | `land`（証跡の後に、ブランチ戦略の設定の主体と方式で入れ、要ればベースブランチへ戻す PR） |
 | `record` | workflow | `record.write`（含めた PR の各々へリリース記録を書く。本番ブランチへのマージの後）。`--version` は `record_unversioned.write_unversioned`（バージョンの無いリリース記録を届け先ごとに確かめて書く）、`--correct-targets` は `record_unversioned.correct_targets` |
 | `verification-record` | 会話のセッション | `record.write_verification`（リリース後テストの記録を、リリース記録と同じ PR へ書く。リリースの PR なら記録を持つ PR を示して止まる） |
-| `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む）。`--version` などを渡すと `record.read_release`（閉じる手順の読み取り）、`--pr-body-only` は `record.pr_body_only` |
+| `records` | 会話のセッション | `record.read`（PR のリリース記録とリリース後テストの記録を読む）。`--version` などを渡すと `record_read.read_release`（閉じる手順の読み取り）、`--pr-body-only` は `record_read.pr_body_only` |
 | `publish` | workflow | `tagging`（タグと GitHub Release） |
 
 `assemble`・`materials`・`publish` は、メインディレクトリのブランチ戦略の設定（リリースの形・バージョンの保存先・名前の書式・
@@ -47,6 +47,7 @@ from ndf.domains.release import (
     names_decide,
     record,
     record_decide,
+    record_read,
     record_unversioned,
     route_decide,
     sync_decide,
@@ -356,15 +357,15 @@ def _release_names(args: argparse.Namespace) -> tuple[str | None, names_decide.N
 
 
 def cmd_records(args: argparse.Namespace) -> dict:
-    select = record.Selection(args.version, args.release, args.unit)
-    reads_release = select != record.Selection(None, None, None) or args.bodies or args.issues is not None
+    select = record_read.Selection(args.version, args.release, args.unit)
+    reads_release = select != record_read.Selection(None, None, None) or args.bodies or args.issues is not None
     if args.pr_body_only:
         if reads_release:
             raise record.RecordError("--pr-body-only は --version・--release・--unit・--bodies・--issues と一緒に渡さない")
-        outputs = record.pr_body_only(_hub(args), args.pr)
+        outputs = record_read.pr_body_only(_hub(args), args.pr)
         return result.result(TOOL, result.OK, f"#{args.pr} の本文を読んだ（リリース記録は選ばない）", outputs=outputs)
     if reads_release:
-        outputs = record.read_release(_hub(args), args.pr, select, args.bodies, args.issues)
+        outputs = record_read.read_release(_hub(args), args.pr, select, args.bodies, args.issues)
         version = outputs["release"]["version"] if outputs["release"] else "無し"
         detail = (
             f"#{args.pr} の今回のリリースのリリース記録（値 {version}）とリリース後テストの記録 {len(outputs['verifications'])} 件を読んだ"

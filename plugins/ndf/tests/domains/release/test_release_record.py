@@ -9,7 +9,7 @@ import pytest
 
 from ndf.adapters.github import Authored, PermissionUnknown
 from ndf.domains.release import cli as release_cli
-from ndf.domains.release import names_decide, record, record_decide
+from ndf.domains.release import names_decide, record, record_decide, record_read
 
 from ._fakes import FakeHub, pull, strategy
 
@@ -559,7 +559,7 @@ def _records_hub(*comments: Authored, trusted: tuple[str, ...] = ("octocat",), u
 
 
 def _read(hub: FakeHub, version: str | None = "main abc1234", release: int | None = None, unit: str | None = None, **kw) -> dict:
-    return record.read_release(hub, 11, record.Selection(version, release, unit), kw.get("bodies", False), kw.get("issues"))
+    return record_read.read_release(hub, 11, record_read.Selection(version, release, unit), kw.get("bodies", False), kw.get("issues"))
 
 
 def _rec(writer: str, made: record_decide.Record) -> Authored:
@@ -584,7 +584,7 @@ def test_records_outputs_match_the_one_definition_the_reader_checks() -> None:
 
     hub = _records_hub(_rec("octocat", _unversioned()))
     hub.bodies_of = {n: Authored("octocat", "OWNER", "Closes #3") for n in (11, 12)}
-    for got in (_read(hub, bodies=True), _read(hub, version="main def5678"), record.pr_body_only(hub, 11)):
+    for got in (_read(hub, bodies=True), _read(hub, version="main def5678"), record_read.pr_body_only(hub, 11)):
         assert contracts.schema_errors(got, RECORDS_OUTPUTS) == []
     assert contracts.schema_errors({**_read(hub), "command": "read"}, RECORDS_OUTPUTS) != []
 
@@ -718,7 +718,7 @@ def test_read_release_of_versioned_records_is_not_narrowed_by_targets() -> None:
 def test_pr_body_only_returns_that_pull_body_alone() -> None:
     hub = _records_hub(_rec("octocat", _unversioned()))
     hub.bodies_of = {7: Authored("octocat", "OWNER", "Closes #9")}
-    got = record.pr_body_only(hub, 7)
+    got = record_read.pr_body_only(hub, 7)
     assert got["bodies"] == [{"number": 7, "author": "octocat", "trusted": True, "body": "Closes #9"}]
     assert got["release"] is None and got["releases"] == [] and hub.asked == ["octocat"]
 

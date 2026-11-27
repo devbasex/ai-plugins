@@ -1,4 +1,4 @@
-"""`record.candidates` がコメントをリリース記録・テストの記録・訂正の記録へ分ける振る舞い（I-007 の切り出しの前に固定する）。
+"""`record_read.candidates` がコメントをリリース記録・テストの記録・訂正の記録へ分ける振る舞い（I-007 の切り出しの前に固定する）。
 
 分け方（手順 1・2）: リリース記録として読めればリリース記録（`commit` の有無でバージョン番号の有無を分ける）、読めなければ
 テストの記録、それも読めなければ訂正の記録として読む。壊れた JSON・形の違う記録は候補にせず書き手を照会しない。
@@ -12,7 +12,7 @@ import json
 import pytest
 
 from ndf.adapters.github import Authored, PermissionUnknown
-from ndf.domains.release import record, record_decide
+from ndf.domains.release import record_decide, record_read
 
 from ._fakes import FakeHub
 from .test_release_record import TARGETS, WEB, WORKER, X, Y, _check, _row, _unversioned
@@ -46,8 +46,8 @@ def _hub(*comments: Authored, unknown: tuple[str, ...] = ()) -> FakeHub:
     return hub
 
 
-def _get(hub: FakeHub, version: str | None = VALUE, release: int | None = None, unit: str | None = None, **kw) -> record.Candidates:
-    return record.candidates(hub, 11, record.Selection(version, release, unit), **kw)
+def _get(hub: FakeHub, version: str | None = VALUE, release: int | None = None, unit: str | None = None, **kw) -> record_read.Candidates:
+    return record_read.candidates(hub, 11, record_read.Selection(version, release, unit), **kw)
 
 
 def test_each_kind_goes_to_its_own_list() -> None:
