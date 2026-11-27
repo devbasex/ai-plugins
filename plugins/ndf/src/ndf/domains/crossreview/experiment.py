@@ -1,8 +1,8 @@
 """cross-review の実験の記録と、起動した AI の子の使用量ログの行（#2944）。
 
 状態ファイルの `experiment_units` は、実行の ID（`id`。1 回だけ作り、打ち直しでも同じ）・シートの割り付け ID（`seats`）・評価する設計か
-実装の割り付け ID（`charged`）と、その最初のレビューのラウンドで重大だった指摘の id（`first`）を持つ。シートの単位は
-`<実行の ID>:<シート>` である。値を選ぶ処理の差し込みが無い起動は、状態ファイルに何も足さず、行も書かない。
+実装の割り付け ID（`charged`）と、その最初のレビューのラウンドで重大だった指摘の id（`first`）を持つ。読めない相手役がいる間は
+`partial` を持つ。シートの単位は `<実行の ID>:<シート>` である。値を選ぶ処理の差し込みが無い起動は、状態ファイルに何も足さず、行も書かない。
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from ndf.adapters import agents, claude, claude_choice, launch_approval, launch_
 from ndf.contracts import facts
 from ndf.core.converge import participants
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview.journal import experiment_values
+from ndf.domains.crossreview.journal import experiment_values, undecided_serious
 from ndf.domains.records import usage
 
 # 状態ファイルのキー
@@ -46,17 +46,26 @@ def charge_to() -> Optional[str]:
     return None if value == "" else value
 
 
-def keep_first(data: dict[str, Any], round_no: int, serious: Sequence[str]) -> None:
+def keep_first(data: dict[str, Any], round_no: int, serious: Sequence[str], complete: bool) -> None:
     """評価する単位の最初のラウンドで重大だった指摘の id を、その割り付け ID と対で残す。
 
-    残すのは 1 ラウンド目と、費用を負う割り付けが残したものから変わった後の最初のラウンドである（同じ状態の保存先で別の実装の
-    変更を続けてレビューした場合に、前の実装の指摘で評価しない）。割り付けを指定しない打ち直しは、前の記録を変えない。
+    残し始めるのは 1 ラウンド目と、費用を負う割り付けが残したものから変わった後の最初のラウンドである（同じ状態の保存先で別の実装の
+    変更を続けてレビューした場合に、前の実装の指摘で評価しない）。読めない相手役がいた（`complete` が偽）ラウンドでは確定せず、
+    全員が読んだ最初のラウンドまでの指摘を足し合わせる。割り付けを指定しない打ち直しは、残した割り付けを変えない。
     """
     if KEY not in data:
         return
     held, charged = data[KEY], charge_to()
     if round_no == 1 or (charged is not None and ("charged" not in held or held["charged"] != charged)):
         held["first"], held["charged"] = list(serious), charged
+    elif "partial" in held:
+        held["first"] = list(dict.fromkeys([*held["first"], *serious]))
+    else:
+        return
+    if complete:
+        held.pop("partial", None)
+    else:
+        held["partial"] = True
 
 
 class Held(Protocol):
@@ -107,7 +116,8 @@ def seat_row(spec: agents.Launch, status: agents.AgentStatus, chosen: claude_cho
     if chosen.choice is None:
         return None
     if spec.agent == participants.FIXER:
-        # 出力は 1 つの JSON なので全体を読む（末尾だけでは、大きい回答の使用量と費用が欠ける）
+        # 出力は 1 つの JSON なので全体を読む（末尾だけでは、大きい回答の使用量と費用が欠ける）。回答と読み取りの拒否の
+        # 判定もこの解析結果を使う
         reply = claude_row(claude.LaunchLog(meta_of("review", chosen)), agents.whole_text(spec.paths.out), status)
         chosen.seen(reply)
         return reply
@@ -126,14 +136,16 @@ def record(data: dict[str, Any], rows: Sequence[dict[str, Any]], seats: Sequence
     """収束かラウンドの上限で終わったレビューの効果指標を書く: シートの単位と、費用を負う割り付け（評価した設計か実装の単位）。
 
     書けなくても警告だけで、レビューの結果は変えない。同じ割り付け ID の 2 回目の指標は書き込み処理が足さないので、ラウンドの
-    上限では値の決まらない指標（null）を書かず、再開して裁定した後の値を書けるようにする。
+    上限では値の決まらない指標（null）を書かず、再開して裁定した後の値を書けるようにする。シートの割合は、上限で裁定していない
+    重大な指摘がある間は決まらない。
     """
     if final not in RECORDED or KEY not in data:
         return
     held = data[KEY]
     count, shares = experiment_values(rows, held.get("first"), seats)
+    pending = final == fin.MAX_ROUNDS and undecided_serious(rows)
     for seat in seats:
-        if seat in held["seats"]:
+        if seat in held["seats"] and not pending:
             _report(held["seats"][seat], shares[seat], {"seats": len(seats)}, final)
     charged = charge_to()
     if charged is not None:

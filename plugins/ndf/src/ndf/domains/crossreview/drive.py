@@ -865,7 +865,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(local))
     run.history.append(run.journal.enter(round_no, raised, run.mvv_items, run.mvv))
     # 設計と実装の効果指標は修正の前の指摘とその時の重要度で数える（後のラウンドで行の round と重要度が変わる。#2944）
-    experiment.keep_first(run.data, round_no, run.journal.entered_serious())
+    experiment.keep_first(run.data, round_no, run.journal.entered_serious, not unread)
     run.warnings += run.journal.warnings
     _detach_revived(run)
     record = _round_record(run, round_no, prep)

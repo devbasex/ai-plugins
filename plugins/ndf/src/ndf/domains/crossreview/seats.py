@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf import identity
-from ndf.adapters import agents, claude_choice
+from ndf.adapters import agents, claude, claude_choice
 from ndf.contracts import facts
 from ndf.core.converge import participants
 from ndf.domains.crossreview import experiment, scope_decide, store
@@ -56,17 +56,19 @@ class _SeatResult(NamedTuple):
     denied: tuple[Path, ...] = ()
 
 
-def _seat_result(status: agents.AgentStatus, spec: agents.Launch, required: Sequence[Path]) -> _SeatResult:
+def _seat_result(
+    status: agents.AgentStatus, spec: agents.Launch, required: Sequence[Path], reply: Optional[claude.ClaudeReply] = None
+) -> _SeatResult:
     """完了した席の出力の指摘。claude は外側の JSON を 1 回だけ読み、`result` の指摘と `permission_denials` を取り出す（PR 4461 の
     r2-4）。渡した差分のファイルの読み取りを拒否されていれば、指摘が空でも結果が無い（r1-1）。完了でない・出力が無い・指摘の配列が
-    無ければ結果が無い。"""
+    無ければ結果が無い。使用量の行を書くために解析済みの claude の回答（`reply`）があれば、出力を読み直さない。"""
     if status.state != agents.AgentState.DONE:
         return _SeatResult(None)
     out = spec.paths.out
     try:
         if spec.agent != participants.FIXER:
             return _SeatResult(participants.findings_of(participants.answer_text(spec.agent, out)))
-        answer = participants.claude_answer(out)
+        answer = participants.claude_answer(out) if reply is None else participants.ClaudeAnswer(reply.raw, reply.denials)
     except OSError:  # 出力の無い相手役は回答しなかった扱い（呼び手が注意に載せる）
         return _SeatResult(None)
     denied = participants.denied_reads(answer.denials, required, spec.cwd)
@@ -114,8 +116,11 @@ def _seat_launch(run: SeatRun, seat: str, prompt: str, stem: Path, choice: Optio
 
 def _run_seat(
     spec_of: Callable[[Optional[Any]], agents.Launch], chosen: claude_choice.ChoiceRun, launch: Launcher
-) -> tuple[agents.Launch, agents.AgentStatus]:
-    """席を起動して行を書く。モデルを理由に拒まれたら、監視の上限の残りの時間で基準の組の起動へ 1 回だけ替える。"""
+) -> tuple[agents.Launch, agents.AgentStatus, Optional[claude.ClaudeReply]]:
+    """席を起動して行を書き、最後の起動・状態・解析した回答を返す。
+
+    モデルを理由に拒まれたら、監視の上限の残りの時間で基準の組の起動へ 1 回だけ替える。
+    """
     spec = spec_of(chosen.choice)
     deadline = claude_choice.deadline_after(spec.timeout)
     status = launch(spec)
@@ -124,8 +129,8 @@ def _run_seat(
     if left is not None and left > 0:
         spec = replace(spec_of(chosen.choice), timeout=left)
         status = launch(spec)
-        experiment.seat_row(spec, status, chosen)
-    return spec, status
+        reply = experiment.seat_row(spec, status, chosen)
+    return spec, status, reply
 
 
 class _Cause(NamedTuple):
@@ -165,9 +170,9 @@ def launch_reviewers(
     raised: list[dict[str, Any]] = []
     unread: dict[str, Unread] = {}
     again = "（起動し直した）" if suffix else ""
-    for seat, (spec, status) in zip(seats, ran):
+    for seat, (spec, status, reply) in zip(seats, ran):
         sandbox = agents.sandbox_failed(spec.paths)
-        got = _SeatResult(None) if sandbox is not None else _seat_result(status, spec, required)
+        got = _SeatResult(None) if sandbox is not None else _seat_result(status, spec, required, reply)
         found = got.findings
         if found is None:
             why = _unread_cause(sandbox, got, status)

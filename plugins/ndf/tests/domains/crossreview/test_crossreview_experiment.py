@@ -14,6 +14,7 @@ import pytest
 
 from ndf.adapters import agents, claude, claude_choice, git, model_choice
 from ndf.contracts import internal
+from ndf.core.converge import participants
 from ndf.domains.crossreview import drive, experiment, fixer, seats, settings
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.journal import FindingJournal, experiment_values
@@ -98,17 +99,24 @@ def test_each_seat_launch_writes_a_row_and_the_repository_key_is_resolved_once(t
     assert f"model_reasoning_effort={rows[0]['effort']}" in codex.argv and codex.env["NDF_CHARGE_TO"] is None
 
 
-def test_a_claude_seat_answer_longer_than_the_tail_keeps_its_cost(tmp_path: Path, outcomes) -> None:
+def test_a_large_claude_seat_answer_is_parsed_once_for_the_cost_and_the_denials(tmp_path: Path, monkeypatch, outcomes) -> None:
+    diff = tmp_path / "round1.diff"
+
     def large(spec: agents.Launch) -> agents.AgentStatus:
         body = "読んだ" * agents.TAIL_BYTES + "\n" + NO_FINDINGS
+        denied = [{"tool_name": "Read", "tool_input": {"file_path": str(diff)}}]
         spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
-        answer = {"type": "result", "result": body, "session_id": "s", "total_cost_usd": 0.5}
+        answer = {"type": "result", "result": body, "session_id": "s", "total_cost_usd": 0.5, "permission_denials": denied}
         spec.paths.out.write_text(json.dumps(answer, ensure_ascii=False), encoding="utf-8")
         return _done(spec)
 
-    _review(_held(tmp_path), 1, large, "claude")
+    def read_again(out: Path):
+        raise AssertionError(f"claude の出力を読み直した: {out}")
+
+    monkeypatch.setattr(participants, "claude_answer", read_again)
+    _, unread = seats.launch_reviewers(_held(tmp_path), 1, {"claude": "読む"}, [diff], large)
     (row,) = _rows(name="review")
-    assert row["session_cost_usd"] == 0.5
+    assert row["session_cost_usd"] == 0.5 and list(unread) == ["claude"]
 
 
 def test_a_refused_codex_arm_is_launched_once_more_with_the_base_arm(tmp_path: Path, monkeypatch, outcomes) -> None:
@@ -208,9 +216,9 @@ def _data() -> dict:
     return {experiment.KEY: {"id": "run", "seats": {"codex": "a-codex", "kiro": "a-kiro"}}}
 
 
-def _entered(data: dict, journal: FindingJournal, round_no: int, *items: dict) -> None:
+def _entered(data: dict, journal: FindingJournal, round_no: int, *items: dict, complete: bool = True) -> None:
     journal.enter(round_no, list(items))
-    experiment.keep_first(data, round_no, journal.entered_serious())
+    experiment.keep_first(data, round_no, journal.entered_serious, complete)
 
 
 def _decide(journal: FindingJournal, outcome: str) -> None:
@@ -258,9 +266,38 @@ def test_the_first_round_is_taken_again_only_when_the_charged_unit_changes(monke
             monkeypatch.delenv("NDF_CHARGE_TO")
         else:
             monkeypatch.setenv("NDF_CHARGE_TO", charged)
-        experiment.keep_first(data, round_no, [serious])
+        experiment.keep_first(data, round_no, [serious], True)
         seen.append((data[experiment.KEY]["charged"], data[experiment.KEY]["first"]))
     assert seen == [("impl-a", ["r1-1"]), ("impl-a", ["r1-1"]), ("impl-b", ["r3-1"]), ("impl-b", ["r3-1"])]
+
+
+def test_the_first_round_stays_open_until_every_seat_has_read(monkeypatch, outcomes) -> None:
+    monkeypatch.setenv("NDF_CHARGE_TO", "impl-unit")
+    data, journal = _data(), FindingJournal()
+    _entered(data, journal, 1, _major("一つ目", "codex"), complete=False)
+    _entered(data, journal, 2, _major("二つ目", "kiro"))
+    _entered(data, journal, 3, _major("三つ目", "kiro"))
+    assert data[experiment.KEY]["first"] == ["r1-1", "r2-1"] and "partial" not in data[experiment.KEY]
+
+
+def test_a_new_charged_unit_counts_the_severity_of_its_own_round(monkeypatch, outcomes) -> None:
+    data, journal = _data(), FindingJournal()
+    monkeypatch.setenv("NDF_CHARGE_TO", "impl-a")
+    _entered(data, journal, 1, _major("一つ目", "codex"))
+    monkeypatch.setenv("NDF_CHARGE_TO", "impl-b")
+    _entered(data, journal, 2, _major("一つ目", "codex", "minor"))
+    assert data[experiment.KEY]["first"] == []
+
+
+def test_the_round_limit_holds_the_seat_shares_while_a_serious_finding_is_undecided(outcomes) -> None:
+    data, journal = _data(), FindingJournal()
+    _entered(data, journal, 1, _major("一つ目", "codex"), _major("二つ目", "kiro"))
+    journal.rows["r1-1"]["outcome"] = fin.FIXED
+    _record(data, journal, fin.MAX_ROUNDS)
+    assert outcomes == {}
+    _decide(journal, fin.FIXED)
+    _record(data, journal, fin.CONVERGED)
+    assert (outcomes["a-codex"][0], outcomes["a-kiro"][0]) == (0.5, 0.5)
 
 
 def test_a_review_stopped_at_the_round_limit_leaves_unknown_values_for_the_resumed_run(monkeypatch, outcomes) -> None:
@@ -315,6 +352,6 @@ def test_an_undecided_first_round_finding_leaves_the_count_unknown() -> None:
 def test_the_journal_keeps_every_seat_that_raised_a_finding() -> None:
     journal = FindingJournal()
     journal.enter(1, [{"text": "同じ指摘", "by": "codex"}, {"text": "同じ指摘", "by": "kiro"}])
-    assert journal.rows["r1-1"]["raisers"] == ["codex", "kiro"] and journal.entered == ["r1-1"]
+    assert journal.rows["r1-1"]["raisers"] == ["codex", "kiro"]
     journal.enter(2, [{"text": "同じ指摘", "by": "codex"}, {"text": "別の指摘", "by": "kiro"}])
-    assert journal.rows["r1-1"]["raisers"] == ["codex", "kiro"] and len(journal.entered) == 2
+    assert journal.rows["r1-1"]["raisers"] == ["codex", "kiro"] and len(journal.rows) == 2

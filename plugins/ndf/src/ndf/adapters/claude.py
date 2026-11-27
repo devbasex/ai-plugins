@@ -463,14 +463,12 @@ def set_launch_recorder(recorder: Optional[LaunchRecorder]) -> None:
 class ClaudeReply(NamedTuple):
     """`claude -p --output-format json` の 1 回の回答。`answer` は縛った回答（`structured_output`）か本文の JSON。
 
-    `failure` は打ち直しても直らない失敗の理由（`Failure`）。None の失敗（誤りで終えた・出力が JSON でない）は
-    打ち直せば直りうる。
-
+    `failure` は打ち直しても直らない失敗の理由（`Failure`）。None の失敗（誤りで終えた・出力が JSON でない）は打ち直せば直りうる。
     使用量ログの行の元（#1959 の決定 6）: `session_id`・`usage`・`model_usage`（結果の `modelUsage`）・`session_cost_usd`
     （結果の `total_cost_usd`）は結果の JSON の値で、読めなければ None。`usage` は起動 1 回分、`model_usage` と
     `session_cost_usd` は会話の累計である（2026-11-27 に Claude Code 2.1.332 で同じ会話を 2 回再開して測った）。
     `launched` は子プロセスを起動できたか（スロット・下限・照らし直しで止まった起動と、起動に失敗した起動は偽）、
-    `launched_at`・`seconds` は起動した時刻（UTC）とかかった秒。
+    `launched_at`・`seconds` は起動した時刻（UTC）とかかった秒。`denials` は結果の `permission_denials` の要素（辞書だけ）。
     """
 
     ok: bool
@@ -486,6 +484,7 @@ class ClaudeReply(NamedTuple):
     launched: bool = False
     launched_at: Optional[str] = None
     seconds: Optional[float] = None
+    denials: tuple[dict[str, Any], ...] = ()
 
     @classmethod
     def failed(cls, raw: str, error: str, cost: float = 0.0, failure: Optional[Failure] = None) -> "ClaudeReply":
@@ -597,6 +596,7 @@ def _with_usage(reply: ClaudeReply, payload: Mapping[str, Any]) -> ClaudeReply:
     """回答に、使用量ログの行の元になる結果の値を持たせる。形の違う値は None にする（#1959）。"""
     sid, usage, models, spent = (payload.get(k) for k in ("session_id", "usage", "modelUsage", "total_cost_usd"))
     return reply._replace(
+        denials=tuple(d for d in found if isinstance(d, dict)) if isinstance(found := payload.get("permission_denials"), list) else (),
         session_id=sid if isinstance(sid, str) and sid else None,
         usage=usage if isinstance(usage, Mapping) else None,
         model_usage=models if isinstance(models, Mapping) else None,

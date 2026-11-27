@@ -221,6 +221,19 @@ def _serious(row: Mapping[str, Any]) -> bool:
     return severity is not None and criteria_decide.blocking(severity)
 
 
+def _accepted_serious(item: dict[str, Any], named: Optional[str]) -> bool:
+    """相手役の 1 件が、このラウンドで受け付けた重要度で重大か。行に残る前のラウンドの重さは見ない。"""
+    if named is not None and not criteria_decide.redline(named):  # MVV に反する指摘は重さを妨げになる側に固定する
+        return True
+    severity = _raised(item, named)["severity"]
+    return severity is not None and criteria_decide.blocking(severity)
+
+
+def undecided_serious(rows: Sequence[Mapping[str, Any]]) -> bool:
+    """相手役が挙げた重大な指摘に、直すか見送るかを決めていないものがあるか。"""
+    return any(_serious(r) and store.list_of(r, RAISERS) and r["outcome"] not in fin.DECIDED for r in rows)
+
+
 def experiment_values(
     rows: Sequence[Mapping[str, Any]], first: Optional[Collection[str]], seats: Sequence[str]
 ) -> tuple[Optional[int], dict[str, Optional[float]]]:
@@ -251,8 +264,8 @@ class FindingJournal:
         self.rows: dict[str, dict[str, Any]] = {str(f["id"]): f for f in rows if isinstance(f, dict) and "id" in f}
         # 直した・見送ったのに出し直されて未解決へ戻した指摘の id（呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
         self.revived: list[str] = []
-        # 最後の `enter` で相手役が挙げた指摘の id
-        self.entered: list[str] = []
+        # 最後の `enter` で相手役が挙げ、その回に受け付けた重要度が重大だった指摘の id（#2944 の効果指標）
+        self.entered_serious: list[str] = []
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
         # 最後の `carry` で、前の実行が残した MVV の判定を重ねて変わった、既にある指摘の id
@@ -275,6 +288,7 @@ class FindingJournal:
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
         unexplained: list[str] = []
+        serious: dict[str, None] = {}
         for item in raised:
             text = item.get("text")
             text = text.strip() if isinstance(text, str) else ""
@@ -299,13 +313,11 @@ class FindingJournal:
             elif named is None and items and _named_any(item):
                 unknown.append(str(known["id"]))
             touched[key] = known
+            if _accepted_serious(item, named):
+                serious[str(known["id"])] = None
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
-        self.entered = [str(row["id"]) for row in touched.values()]
+        self.entered_serious = list(serious)
         return frozenset(key for key, row in touched.items() if _blocking(row))
-
-    def entered_serious(self) -> list[str]:
-        """最後の `enter` で相手役が挙げた指摘のうち、今の重要度が重大なものの id。"""
-        return [i for i in self.entered if _serious(self.rows[i])]
 
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
