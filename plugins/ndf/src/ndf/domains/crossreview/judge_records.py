@@ -1,10 +1,12 @@
 """判定役の起動の記録（標準出力・標準エラーなど）を残し、期限を過ぎたものを片付ける（#4363）。
 
 記録は状態の保存先の下の記録専用のディレクトリ（`RECORD_DIR`）に置く。記録を公開する前に、記録ごとの登録ファイル（名前が
-記録の名前と、記録の inode 番号・更新時刻（ナノ秒）・サイズを持ち、中身がその名前と同じファイル）を同じディレクトリに作る。
-inode 番号は記録を消すと別のファイルに使われることがあるので、番号だけでは記録を見分けない。起動ごとの出力のディレクトリには、
-中身がディレクトリの名前と同じ所有ファイルを置く。片付けで消すのは、中身まで合う登録ファイル、その 3 つの値がすべて合う記録、
-中身の合う所有ファイルを持つ出力のディレクトリ（起動中か保存の途中でプロセスが止まって残ったもの）だけである。名前の形が同じ
+記録の名前と、記録の inode 番号・保存した時のサイズ・そのサイズまでの内容のハッシュを持ち、中身がその名前と同じファイル）を
+同じディレクトリに作る。inode 番号は記録を消すと別のファイルに使われることがあるので、番号だけでは記録を見分けない。更新時刻と
+現在のサイズは追記で変わるので使わない。空のファイルは内容で見分けられないので、記録として残さない。起動ごとの出力の
+ディレクトリには、中身がディレクトリの名前と同じ所有ファイルを置く。片付けで消すのは、中身まで合う登録ファイル、
+その 3 つの値がすべて合う記録、中身の合う所有ファイルを持つ出力のディレクトリ（起動中か保存の途中でプロセスが止まって
+残ったもの）だけである。名前の形が同じ
 だけのファイル・リンク・ディレクトリは消さない。登録ファイルは記録ごとに独立しているので、並行する実行が互いの登録を
 失わない。専用のディレクトリはリンクをたどらずに開き、保存と削除は開いたディレクトリを基準にする（確かめた後でリンクへ
 差し替えられても、先を触らない）。失敗は過程に残すだけで、判定の結果と駆動は変えない。
@@ -12,6 +14,7 @@ inode 番号は記録を消すと別のファイルに使われることがあ�
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -33,10 +36,12 @@ RECORD_KEEP = "cross-review.judge-record.keep"
 _HELD_NAME = r"round\d+-verify-[a-z0-9_]{8}"
 _HELD = re.compile(_HELD_NAME)
 _OWNER = "ndf-owner"
-# 登録ファイルの名前は `<記録の名前>.owned-<inode 番号>-<更新時刻のナノ秒>-<サイズ>`（後ろの 3 つは `_record_identity`）
+# 登録ファイルの名前は `<記録の名前>.owned-<inode 番号>-<保存した時のサイズ>-<内容のハッシュ>`（後ろの 3 つは `_record_identity`）
 _MARK_INFIX = ".owned-"
 _MARK = re.compile(
-    rf"(?P<record>{_HELD_NAME}(?:\.out|\.err\.log|-launch\.json|-progress\.log))" + re.escape(_MARK_INFIX) + r"(?P<identity>\d+-\d+-\d+)"
+    rf"(?P<record>{_HELD_NAME}(?:\.out|\.err\.log|-launch\.json|-progress\.log))"
+    + re.escape(_MARK_INFIX)
+    + r"(?P<identity>\d+-(?P<size>\d+)-[0-9a-f]{32})"
 )
 
 
@@ -78,9 +83,26 @@ def _signed(directory: int, name: str, signature: str) -> Optional[os.stat_resul
         os.close(fd)
 
 
-def _record_identity(found: os.stat_result) -> str:
-    """記録を見分ける値。消した記録の inode 番号を別のファイルが使っても、更新時刻は引き継がれない。"""
-    return f"{found.st_ino}-{found.st_mtime_ns}-{found.st_size}"
+def _record_identity(path: str | Path, size: Optional[int] = None, directory: Optional[int] = None) -> Optional[str]:
+    """記録を見分ける値（inode 番号・サイズ・先頭からそのサイズまでの内容のハッシュ）。`size` を省くと今の全体を読む。
+    追記しても保存した時の `size` で比べれば変わらず、消した記録の inode 番号を別のファイルが使っても内容は引き継がれない。
+    通常のファイルでない・空・`size` より短いものは None。リンクはたどらず、名前付きパイプを待たない。"""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    try:
+        found = os.fstat(fd)
+        length = found.st_size if size is None else size
+        if not stat.S_ISREG(found.st_mode) or not 0 < length <= found.st_size:
+            return None
+        digest, left = hashlib.sha256(), length
+        while left:
+            chunk = os.read(fd, min(left, 1 << 16))
+            if not chunk:
+                return None
+            digest.update(chunk)
+            left -= len(chunk)
+        return f"{found.st_ino}-{length}-{digest.hexdigest()[:32]}"
+    finally:
+        os.close(fd)
 
 
 def new_held(stem: Path) -> Path:
@@ -102,8 +124,11 @@ def _link_into(run: Noting, round_no: int, held: Path, stem: Path, into: int) ->
         name = held.name + record.name.removeprefix(stem.name)
         try:
             record.chmod(0o600)
+            identity = _record_identity(record)
+            if identity is None:  # 空の出力には診断に使う内容が無い
+                continue
             # 公開より先に登録する（間で止まっても、片付けの対象でない記録は残らない）
-            mark = f"{name}{_MARK_INFIX}{_record_identity(record.stat())}"
+            mark = f"{name}{_MARK_INFIX}{identity}"
             _sign(held / mark, mark)
             os.link(held / mark, mark, dst_dir_fd=into)  # 中身を書き終えたものだけが現れる
             os.link(record, name, dst_dir_fd=into)
@@ -138,7 +163,9 @@ def _drop_if_expired(run: Noting, round_no: int, directory: int, mark: re.Match[
             found = os.stat(name, dir_fd=directory, follow_symlinks=False)
         except FileNotFoundError:
             found = None
-        ours = found is not None and stat.S_ISREG(found.st_mode) and _record_identity(found) == mark["identity"]
+        ours = (
+            found is not None and stat.S_ISREG(found.st_mode) and _record_identity(name, int(mark["size"]), directory) == mark["identity"]
+        )
         dated = found if ours else registered
         if dated.st_mtime >= cutoff:
             return
