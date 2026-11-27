@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 from pathlib import Path
@@ -118,6 +119,8 @@ def test_pr_4638_r1_4_record_is_written_before_the_output_is_published(tmp_path:
     monkeypatch.setattr(outputs.os, "replace", replace)
     # 例外処理も走らずに残った状態へ戻す
     record.write_text(left["record"], encoding="utf-8")
+    # 実際の記録と同じ権限へ戻す（umask 022 では 0644 になり、権限の検査で止まる。PR 4638 の r5-3）
+    record.chmod(0o600)
     os.rename(tmp_path / "kept", left["tmp"])
     outputs.clear_stale(out)
     assert sorted(p.name for p in tmp_path.iterdir()) == []
@@ -246,3 +249,19 @@ def test_pr_4638_r4_6_record_is_kept_when_clearing_fails(tmp_path: Path, monkeyp
     monkeypatch.undo()
     outputs.clear_stale(out)
     assert (out.read_text(encoding="utf-8"), record.exists()) == ("", False)
+
+
+def test_pr_4638_r5_2_record_line_without_its_newline_is_not_taken(tmp_path: Path) -> None:
+    """PR 4638 の r5-2: 足した記録の行が末尾の改行だけを欠いて終わっても、JSON として読めるその行は使わず、前の書きかけの
+    記録で空へ戻す（書いた後の記録と取り違えて、呼び手の出力先を消さない）。"""
+    out = tmp_path / "h"
+    out.touch()
+    before = out.stat().st_ino
+    record = outputs.owner_record(out)
+    store.write_object(record, outputs._writing_record(out, HEAD))
+    out.write_text(HEAD, encoding="utf-8")
+    written = outputs._record(**{outputs.WRITTEN_KEY: outputs._file_identity(out)})
+    with record.open("ab") as cut:
+        cut.write(b"\n" + json.dumps(written, sort_keys=True).encode("utf-8"))
+    outputs.clear_stale(out)
+    assert (out.exists(), out.stat().st_ino, out.read_text(encoding="utf-8")) == (True, before, "")

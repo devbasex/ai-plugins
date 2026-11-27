@@ -15,8 +15,8 @@ NDF が書いたファイルとはみなさない（PR 4638 の r1-4）。
 起動は始めに記録のファイルに錠（`filelock`）を取り、終わるまで持つ（`claim`）。同じ出力先を使う起動が重なれば、後の起動は
 片付けの前に止まり、実行中の起動の一時のファイルや出力を消さない（PR 4638 の r3-4）。記録は置き換えでなく、錠を持った
 ファイルへその場で書く。置き換えると錠が新しいファイルへ移らないためで、記録のための一時のファイルも作らない（PR 4638 の r3-5）。
-出力や一時のファイルを指す記録は、前の記録の後ろへ 1 行として足し、読むときは最後の完全な行を使う。書き込みの途中で終了しても
-前の記録が残り、書き切れなかった行は読み飛ばす。何も指さない記録だけは切り詰めてから書き、記録を小さく保つ（PR 4638 の r4-5）。
+出力や一時のファイルを指す記録は、前の記録の後ろへ 1 行として足し、読むときは終端の改行まで書けた最後の行を使う。書き込みの
+途中で終了しても前の記録が残り、書き切れなかった行は読み飛ばす（PR 4638 の r5-2）。何も指さない記録だけは切り詰めてから書き、記録を小さく保つ（PR 4638 の r4-5）。
 記録には書く中身を残すので、所有者のほかに読み書きの権限がある既存の記録は使わずに止まる（PR 4638 の r4-4）。
 片付けや書き込みの後始末に失敗した起動は、記録が指す出力と一時のファイルを次の起動が片付けられるよう、記録を消さない
 （PR 4638 の r4-6・r4-7）。
@@ -151,16 +151,23 @@ class Claim:
         self._pointing = False
 
     def _read(self) -> Optional[dict[str, Any]]:
-        """記録の中身（最後の完全な行）。空か、何も指さない記録を書く途中で切れたなら `{}`（NDF は作った直後に種別を書くので、
-        空の記録は消さずに使うだけにする）、NDF の種別の記録でなければ None。"""
+        """記録の中身（終端の改行まで書けた最後の行）。空か、何も指さない記録を書く途中で切れたなら `{}`（NDF は作った直後に
+        種別を書くので、空の記録は消さずに使うだけにする）、NDF の種別の記録でなければ None。"""
         raw = os.pread(self._fd, os.fstat(self._fd).st_size, 0)
+        if b"\n" in raw:
+            # 最後の改行の後ろは、終端まで書けなかった行なので使わない。末尾の改行だけが欠けた行も JSON としては読めるので、
+            # 読めるかでなく終端の改行で書き切ったかを見る（PR 4638 の r5-2）
+            lines = raw.split(b"\n")[:-1]
+        else:
+            # 改行の無い 1 つの JSON（前の書き方の記録）
+            lines = [raw]
         found: Optional[dict[str, Any]] = None
-        for line in raw.split(b"\n"):
+        for line in lines:
             if not line:
                 continue
             try:
                 value = json.loads(line.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):  # noqa: NDF401 ファイル: 書き切れずに終了した行は読み飛ばす（PR 4638 の r4-5）
+            except (UnicodeDecodeError, json.JSONDecodeError):  # noqa: NDF401 ファイル: 改行の後ろへ足す途中で切れた行は読み飛ばす（PR 4638 の r4-5）
                 continue
             if not (isinstance(value, dict) and value.get(RECORD_KIND_KEY) == RECORD_KIND):
                 return None
