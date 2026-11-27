@@ -317,7 +317,7 @@ def cmd_scope(args: argparse.Namespace) -> int:
     rounds = store.list_of(data, store.ROUNDS)
     wt = Path(args.worktree)
     # `run` と同じ担当の指定と既定・重点・単位の指示で決める（担当を足した打ち直しで `run` と違う範囲を返さない。重点か単位の
-    # 指示を変えた打ち直しは全差分。PR 3944 の r3-4・r4-3、#4369）
+    # 指示を変えた打ち直しは、設計の PR なら全差分。PR 3944 の r3-4・r4-3、#4369・#3780）
     resolved = _or_stop(lambda: _resolve(wt, args.reviewer))
     if isinstance(resolved, int):
         return resolved

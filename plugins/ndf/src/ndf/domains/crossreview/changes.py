@@ -555,7 +555,7 @@ def new_in_pr(g: git.Git, previous: Range, current: Range, listed: Listings) -> 
 
 
 def _with_old_paths(entries: Mapping[str, _Entry], paths: Sequence[str]) -> list[str]:
-    """`paths` と、そのうち改名・複製の元のパス（元を指定しないと、足したファイルの差分になる）。"""
+    """`paths` と、そのうち改名の元のパス（元を指定しないと、足したファイルの差分になる）。"""
     return sorted({p for path in paths for p in ((entries[path].old, path) if path in entries else (path,))})
 
 
@@ -564,18 +564,45 @@ def _diff_of(g: git.Git, span: str, paths: Sequence[str]) -> str:
     return g.run_bytes("--literal-pathspecs", *_DIFF, span, "--", *paths).decode("utf-8", errors="replace")
 
 
-def since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str:
-    """前の head からの差分（PR が前のラウンドの時点か今に変えるファイルに絞る。ベースのマージで入った PR に関係の無い変更を
-    読ませない）に、`added`（`new_in_pr` の返り）の今の PR の差分を続けて返す（#3780）。"""
+def _pr_paths(g: git.Git, previous: Range, current: Range, listed: Listings) -> list[str]:
+    """PR が前のラウンドの時点か今に変えるファイル（改名の元のパスを含む）。"""
     seen, _ = _listing(g, f"{previous.base}...{previous.head}", listed)
     now, _ = _listing(g, f"{current.base}...{current.head}", listed)
-    paths = sorted({p for e in (*seen.values(), *now.values()) for p in (e.old, e.new)})
+    return sorted({p for e in (*seen.values(), *now.values()) for p in (e.old, e.new)})
+
+
+def _added_paths(g: git.Git, current: Range, added: Sequence[str], listed: Listings) -> list[str]:
+    """`added` のうち今の PR の差分として渡すパス（改名は元のパスを含む）。`added` が空なら一覧を読まない。"""
+    if not added:
+        return []
+    now, _ = _listing(g, f"{current.base}...{current.head}", listed)
+    return _with_old_paths(now, added)
+
+
+def since_files(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> tuple[str, ...]:
+    """`since_diff` が渡すファイルのパス（改名の元のパスを含む）。比較基点が違えば、前の head からの変更のうち PR が変える
+    ファイルに `added` の分を足す（ベースのマージで入った PR に関係の無いファイルを含めない）。"""
+    # 改名の元のパスも差分に出るので、改名を検出せずに読む
+    since = g.changed_files(previous.head, current.head, "--no-renames")
+    if previous.base != current.base:
+        paths = set(_pr_paths(g, previous, current, listed))
+        since = [p for p in since if p in paths]
+    return (*since, *_added_paths(g, current, added, listed))
+
+
+def since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str:
+    """前の head からの差分に、`added`（`new_in_pr` の返り）の今の PR の差分を続けて返す（#3780）。比較基点が違えば、
+    前の head からの差分を PR が前のラウンドの時点か今に変えるファイルに絞る（ベースのマージで入った PR に関係の無い変更を
+    読ませない）。比較基点が同じなら、前の head からの差分に出るファイルはどれも PR の変更なので、一覧を読まない。"""
+    if previous.base == current.base:
+        return review_diff(g, previous.head, current.head)
+    paths = _pr_paths(g, previous, current, listed)
     # パスの指定の無い `git diff` は全差分になるので、絞るファイルが無ければ打たない
     if not paths:
         return ""
     text = _diff_of(g, f"{previous.head}..{current.head}", paths)
     if added:
-        text += _diff_of(g, f"{current.base}...{current.head}", _with_old_paths(now, added))
+        text += _diff_of(g, f"{current.base}...{current.head}", _added_paths(g, current, added, listed))
     return text
 
 

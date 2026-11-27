@@ -166,12 +166,13 @@ def test_scope_stops_at_a_wrong_base_before_reading_the_sections(wt: Path, tmp_p
 
 @pytest.mark.parametrize("rounds", [0, 1])
 def test_scope_warns_of_an_unknown_mvv_only_after_the_first_round(rounds: int, wt: Path, tmp_path: Path, capsys) -> None:
-    """MVV を読むブランチを決められない注意は、前のラウンドがあるときだけ載せる。範囲はどちらも全差分。"""
+    """設計の PR で MVV を読むブランチを決められない注意は、前のラウンドがあるときだけ載せる。範囲はどちらも全差分。"""
     sha = sh(wt, "merge-base", "origin/main", "HEAD").strip()
     path = tmp_path / "st" / store.STATE_NAME.format(pr=PR)
     done = [{"round": 1, "head": sha, "base": sha, "reviewers": ["codex"]}] * rounds
     store.write_object(path, {store.ORIGIN_KEY: PR, store.ROUNDS: done})
-    code, got = run_cli(capsys, *_argv("review-scope", wt, tmp_path / "st", "--base", sha, "--reviewer", "codex"))
+    argv = _argv("review-scope", wt, tmp_path / "st", "--base", sha, "--reviewer", "codex", "--purpose", "design")
+    code, got = run_cli(capsys, *argv)
     assert (code, got["items"][0]["scope"]) == (0, scope_decide.FULL)
     assert got["summary"].startswith(f"round {rounds + 1} の範囲は full")
     assert len(got.get("warnings", [])) == rounds and all("MVV を読むブランチを決められない" in w for w in got.get("warnings", []))

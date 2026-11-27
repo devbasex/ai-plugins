@@ -1,16 +1,31 @@
-"""差分の起点に使える前のラウンドの head を git で確かめる（比較基点・相手役・重点が今回と合うかは `scope_decide`）。
+"""差分の起点に使える前のラウンドの head を git で確かめる（記録が今回の条件に合うかは `scope_decide`）。
 
-`run` の範囲も、文書の指摘の重要度の制限（#4285）も、`previous_head` が返す head だけを使う。範囲と制限が別の条件で
-決まると、全差分を読み直す相手役に「前に読んだ文」の制限がかかる。`review-scope` は `descended` で同じ範囲を決める。
+実装の PR の起点は `read_since`（相手役・読んだ PR・履歴だけを照らす。#3780）、設計の PR の起点は `previous_head`
+（比較基点・重点・MVV なども照らす）が決める。`run` と `review-scope` は同じ関数を使う。範囲と文書の指摘の重要度の
+制限（#4285）は同じ head を使う。別の条件で決まると、全差分を読み直す相手役に「前に読んだ文」の制限がかかる。
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf.adapters import git
 from ndf.domains.crossreview import changes, scope_decide
+
+# 比較基点が変わった打ち直しで、読んでいない変更を探せず全差分にしたときの注意
+UNCOMPARABLE = "比較基点が前のラウンドと違い、読んでいない変更を手元のコミットで探せないので、全差分を範囲にした"
+
+
+class Since(NamedTuple):
+    """実装の PR の差分の起点。`previous` は起点のラウンドの比較基点と head、`added` は比較基点が変わって新しく PR の変更に
+    なったファイル、`listed` は `changes.since_diff` へ渡す読んだ一覧、`comparable` はそのファイルを探せたか（偽なら呼び手は
+    全差分にする）。"""
+
+    previous: changes.Range
+    added: tuple[str, ...]
+    listed: changes.Listings
+    comparable: bool = True
 
 
 def previous_head(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str) -> Optional[str]:
@@ -30,6 +45,21 @@ def read_origin(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis,
     if not isinstance(base, str) or not base or not isinstance(prev, str) or not _reachable_from(g, prev, head):
         return None
     return changes.Range(base, prev)
+
+
+def read_since(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, current: changes.Range) -> Optional[Since]:
+    """実装の PR の差分の起点（`read_origin`）と、前の head からの差分に出ないので足すファイル。起点が無ければ None。"""
+    previous = read_origin(g, state, basis, current.head)
+    if previous is None:
+        return None
+    listed: changes.Listings = {}
+    if previous.base == current.base:
+        # 比較基点が同じなら新しく PR の変更になるファイルは無いので、差分を読まない
+        return Since(previous, (), listed)
+    added = changes.new_in_pr(g, previous, current, listed)
+    if added is None:
+        return Since(previous, (), listed, comparable=False)
+    return Since(previous, added, listed)
 
 
 def line_origin(g: git.Git, state: Mapping[str, Any], head: str) -> Optional[changes.Range]:

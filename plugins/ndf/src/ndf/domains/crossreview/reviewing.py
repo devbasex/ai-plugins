@@ -14,7 +14,7 @@ from typing import Any, NamedTuple, Optional, Protocol
 from ndf.adapters import git, run_log
 from ndf.contracts import limits
 from ndf.core.converge import oscillation, participants
-from ndf.domains.crossreview import changes, criteria_decide, prior_decide, scope_decide, seats, store
+from ndf.domains.crossreview import changes, criteria_decide, prior_decide, round_scope, scope_decide, seats, store
 from ndf.domains.crossreview.fixer import Launcher
 from ndf.domains.crossreview.journal import FindingJournal
 from ndf.domains.records import mvv
@@ -59,7 +59,8 @@ class ReviewingRun(seats.SeatRun, Protocol):
 
 class Prepared(NamedTuple):
     """ラウンドの前半で決めたもの（範囲・変わったセクション・詳細レビューを通ったセクション・レビューする head・差分のファイル・
-    PR の全差分で変わったファイル・比較基点の merge-base の SHA・今回の相手役の全員が読んだ前のラウンド）。"""
+    PR の全差分で変わったファイル・比較基点の merge-base の SHA・今回の相手役の全員が読んだ前のラウンド・ラウンドの差分を
+    実装の PR の起点から作ったときのその起点）。"""
 
     scope: scope_decide.Scope
     sections: list[str]
@@ -69,16 +70,18 @@ class Prepared(NamedTuple):
     files: tuple[str, ...]
     base: str
     previous: Optional[criteria_decide.Previous]
+    since: Optional[round_scope.Since] = None
 
 
 def remarks(run: ReviewingRun, prep: Prepared) -> list[str]:
     """PR に既にあるコメント（cross-review 自身の記録とスレッドの最初のコメントを除く）のうち、今のラウンドの差分に
     関わるものを相手役へ渡す行。1 件の字数（`REMARK_CHARS`）と全体の字数（`REMARKS_TOTAL`）で抑える。
     インラインのコメントは相手役へ渡す差分で変わったファイルで選ぶ（前の head からの差分なら、そこで変わったファイルだけ。
-    PR 3944 の r2-9）。その一覧はパスの付いたインラインのコメントがあるときだけ取る（git の起動を増やさない。r3-5）。"""
+    PR 3944 の r2-9。実装の PR の起点からの差分は、差分と同じ `changes.since_files`。#3780）。
+    その一覧はパスの付いたインラインのコメントがあるときだけ取る（git の起動を増やさない。r3-5）。"""
     found = prior_decide.others(run.remarks)
     if prior_decide.needs_files(found):
-        files = run.g.changed_files(prep.scope.base, "HEAD") if prep.scope.base else prep.files
+        files = _handed_diff_files(run, prep)
         found = prior_decide.relevant(found, set(files))
     # 秘密（`run_log.redact`）は字数で切る前の本文に伏せる（切った後では、上限で切れた資格情報の頭が形に当たらずに残る。
     # PR 3944 の r7-2）。本文は外部のランタイムへ渡る（PR 3944 の r6-5）
@@ -87,6 +90,16 @@ def remarks(run: ReviewingRun, prep: Prepared) -> list[str]:
     lines = prior_decide.remark_lines(masked, int(limits.value(REMARK_CHARS, "count")), int(limits.value(REMARKS_TOTAL, "count")))
     # 整形後の行も伏せる（インラインのコメントのファイルのパスや書き手の名前も外部のランタイムへ渡る。PR 3944 の r8-4）
     return [str(line) for line in run_log.redact(lines)]
+
+
+def _handed_diff_files(run: ReviewingRun, prep: Prepared) -> Sequence[str]:
+    """相手役へ渡すラウンドの差分のファイル。"""
+    if not prep.scope.base:
+        return prep.files
+    since = prep.since
+    if since is None:
+        return run.g.changed_files(prep.scope.base, "HEAD")
+    return changes.since_files(run.g, since.previous, changes.Range(prep.base, prep.head), since.added, since.listed)
 
 
 def remarks_file(run: ReviewingRun, round_no: int, lines: Sequence[str]) -> Optional[Path]:
@@ -312,4 +325,14 @@ def write_diff(run: ReviewingRun, round_no: int, suffix: str, base: str, head: s
     path = run.input_path(round_no, suffix)
     # 同じ SHA どうしの差分は空なので Git を起動しない
     path.write_text("" if base == head else changes.review_diff(run.g, base, head), encoding="utf-8")
+    return path
+
+
+def write_since_diff(run: ReviewingRun, round_no: int, since: round_scope.Since, current: changes.Range) -> Path:
+    """実装の PR の起点からの差分（`changes.since_diff`。#3780）をラウンドのファイルへ書く。"""
+    path = run.input_path(round_no, ".diff")
+    # 比較基点も head も起点と同じなら差分は空なので Git を起動しない
+    same = since.previous == current
+    text = "" if same else changes.since_diff(run.g, since.previous, current, since.added, since.listed)
+    path.write_text(text, encoding="utf-8")
     return path

@@ -220,7 +220,7 @@ def read_by_all_head(state: Mapping[str, Any], basis: Basis = Basis()) -> Option
     """相手役の全員が読めた最後のラウンドの head（無ければ None）。読めなかった相手役のいるラウンド
     （`finish_decide.INCOMPLETE_REVIEWERS`）の head を起点にすると、同じ head で打ち直したときに空の差分が渡り、
     読めなかった相手役が元の差分を一度も読まずに収束できるため、飛ばす（#3941）。そのラウンドの記録が `basis` に合わなければ
-    （`_matches`）None（PR の全差分を今回の相手役と重点と MVV で読み直す）。"""
+    （`_matches`）None。収束の使い回しと設計の PR の差分の起点が使う（実装の PR の起点は `origin_record`。#3780）。"""
     r = _last_read(state)
     if r is None:
         return None

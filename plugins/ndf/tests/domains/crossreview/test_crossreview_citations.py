@@ -420,7 +420,7 @@ def test_issue_4090_4_failed_check_stops_without_any_finding(repos: Repos, wt: P
     again = Fixer(tmp_path / "st", wt)
     code, got = _base(capsys, monkeypatch, again, wt)
     assert (code, got["status"], sorted(again.calls)) == (0, "ok", ["codex", "kiro"])
-    assert [(r["scope"], r["mvv_checked"]) for r in _state(again.state_dir)["rounds"]] == [("full", False), ("full", True)]
+    assert [(r["scope"], r["mvv_checked"]) for r in _state(again.state_dir)["rounds"]] == [("full", False), ("since", True)]
 
 
 def test_issue_4090_4_failed_round_is_checked_again_before_the_verdict(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

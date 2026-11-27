@@ -4,7 +4,9 @@
 
 1 ラウンドは次の順に進む:
 
-1. 範囲を決める（`scope_decide`。設計の PR は、詳細レビューを通らないセクションが残る間は全差分。#3181）。変わった
+1. 範囲を決める（`scope_decide`。実装の PR の 2 ラウンド目以降は前に全員が読んだ head からの差分で、全差分に戻すのは
+   一度も読まれていない内容が残る場合だけ（`round_scope.read_since`。#3780）。設計の PR は、詳細レビューを通らないセクションが
+   残る間と、比較基点・重点・MVV などが変わったときは全差分。#3181）。変わった
    Markdown が `cross-review.design-doc-lines` の行数を超えれば注意に載せる（止めない。#3941）。承認済みの MVV があれば、PR 全体で
    足した MVV の根拠の記述を機械で確かめ、誤りを NDF の指摘としてジャーナルへ入れる（`changes.citations`。解決も次の確かめだけが決める。#4076）
 2. 相手役（`ndf.core.converge.participants`）を並べて起動し、最後の 1 行の `{"findings": [...]}` を読む。相手役へは
@@ -488,6 +490,37 @@ def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
             run.warnings.append(f"設計文書 {path} が {n} 行ある（{limit} 行を超える）。読み手とレビューが追えるよう分けることを考える")
 
 
+class _Ranges(NamedTuple):
+    """ラウンドの差分の起点。`prev` は起点の head（無ければ全差分）、`since` は実装の PR の起点（設計の PR は None）。"""
+
+    prev: Optional[str]
+    since: Optional[round_scope.Since] = None
+
+
+def _ranges(run: _Run, current: changes.Range) -> _Ranges:
+    """目的ごとの差分の起点。設計の PR は収束の使い回しと同じ条件、実装の PR は相手役・読んだ PR・履歴だけで決める（#3780）。"""
+    basis = _basis(run, current.head)
+    if run.cfg.every_section:
+        return _Ranges(round_scope.previous_head(run.g, run.data, basis, current.head))
+    since = round_scope.read_since(run.g, run.data, basis, current)
+    if since is not None and not since.comparable:
+        run.warnings.append(round_scope.UNCOMPARABLE)
+        since = None
+    return _Ranges(None) if since is None else _Ranges(since.previous.head, since)
+
+
+def _round_diffs(run: _Run, round_no: int, scope: scope_decide.Scope, ranges: _Ranges, current: changes.Range) -> tuple[Path, Path]:
+    """相手役へ渡すラウンドの差分と、前の head からの差分のファイル（前の head が無ければ、後ろはラウンドの差分）。"""
+    if scope.base is not None and ranges.since is not None:
+        diff = reviewing.write_since_diff(run, round_no, ranges.since, current)
+        return diff, diff
+    diff = reviewing.write_diff(run, round_no, ".diff", scope.base or current.base, current.head)
+    if ranges.prev is None or scope.base is not None:
+        return diff, diff
+    # 全差分を渡すラウンドでも、前の head からの差分はここで 1 回だけ作り、相手役の全員に渡す（相手役ごとに作らせない。#4285）
+    return diff, reviewing.write_diff(run, round_no, "-since.diff", ranges.prev, current.head)
+
+
 def _prepare_round(run: _Run, round_no: int) -> reviewing.Prepared:
     """範囲を決めて差分のファイルを書き、PR 全体で足した根拠の記述を確かめる。head が PR に届いていなければ（前の起動の修正担当が
     コミットだけを残して終わった）、結果を指摘にせず手元の状態ファイルだけに残す。"""
@@ -499,13 +532,11 @@ def _prepare_round(run: _Run, round_no: int) -> reviewing.Prepared:
     sections = changes.sections(changed.docs)
     head = run.g.rev_parse("HEAD")
     merge_base = _merge_base(run, head)
-    prev = round_scope.previous_head(run.g, run.data, _basis(run, head), head)
-    scope = scope_decide.review_scope(cfg.every_section, round_no, prev, sections, reviewed)
-    diff = since = reviewing.write_diff(run, round_no, ".diff", scope.base or merge_base, head)
-    if prev is not None and scope.base is None:
-        # 全差分を渡すラウンドでも、前の head からの差分はここで 1 回だけ作り、相手役の全員に渡す（相手役ごとに作らせない。#4285）
-        since = reviewing.write_diff(run, round_no, "-since.diff", prev, head)
-    previous = None if prev is None else criteria_decide.Previous(prev, since)
+    current = changes.Range(merge_base, head)
+    ranges = _ranges(run, current)
+    scope = scope_decide.review_scope(cfg.every_section, round_no, ranges.prev, sections, reviewed)
+    diff, since = _round_diffs(run, round_no, scope, ranges, current)
+    previous = None if ranges.prev is None else criteria_decide.Previous(ranges.prev, since)
     full_diff = diff if scope.kind == scope_decide.FULL and scope.base is None else None
     if full_diff is None and _reads_full_diff(run, merge_base, head):
         # 根拠の確かめが全差分を読むので、ここで 1 回だけファイルへ書き、席を埋めるときにも使う（Git を 2 回起動しない。PR 4461 の r1-2）
@@ -518,7 +549,8 @@ def _prepare_round(run: _Run, round_no: int) -> reviewing.Prepared:
         _ingest_citations(run, changes.citations(run, run.last_target), round_no)
     else:
         _check_unsent(run, head)
-    return reviewing.Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base, previous)
+    since_origin = None if scope.base is None else ranges.since
+    return reviewing.Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base, previous, since_origin)
 
 
 def _reads_full_diff(run: _Run, merge_base: str, head: str) -> bool:
