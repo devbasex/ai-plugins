@@ -106,14 +106,15 @@ def _real_record_dir(record_dir: Path) -> Path:
     return record_dir if at is None else Path(*parts[:at]).resolve().joinpath(*parts[at:])
 
 
-def _text(wd: worker_paths.WorkDir, name: str, *, owned: bool = False) -> str:
+def _text(wd: worker_paths.WorkDir, name: str) -> str:
     """保存先の直下の通常ファイルの中身。ファイルのリンクは辿らない（外の中身を理由の文に出さない）。
 
-    `owned` なら、呼んだ利用者が持ち、ほかの利用者が書き込めないファイルだけを読む（`worker_paths.read_file`）。
+    呼んだ利用者が持ち、グループとほかの利用者が書き込めないファイルだけを読む。別の利用者が用意した値（PR・比較元・
+    検査結果）を承認の記録に入れないためである。指紋はファイルを書ける人なら計算し直せるので、指紋の代わりにはならない。
     """
     path = wd.path / name
     try:
-        held = worker_paths.read_file(wd, name, owned=owned)
+        held = worker_paths.read_file(wd, name, owned=True)
     except (worker_paths.EntryError, OSError) as exc:
         raise RecordUnreadable(f"{path} を読めない（{type(exc).__name__}）") from None
     found = "" if held is None else held.strip()
@@ -128,8 +129,7 @@ def _checked(wd: worker_paths.WorkDir, head: str) -> dict[str, Any]:
     if not _COMMIT_ID.fullmatch(head):
         raise RecordUnreadable(f"{record_dir / units_files.REVIEWED_HEAD}: コミットの ID の形でない")
     try:
-        # 指紋はファイルを書ける人なら計算し直せるので、別の利用者が用意できる検査結果は読まない
-        found = json.loads(_text(wd, plan_files.CHECKED_FILE, owned=True))
+        found = json.loads(_text(wd, plan_files.CHECKED_FILE))
     except json.JSONDecodeError:
         found = None
     if not isinstance(found, dict) or found.get(plan_files.RECORD_KIND_KEY) != plan_files.CHECKED_KIND:

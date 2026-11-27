@@ -31,6 +31,8 @@ TEXT_KEY = "written"
 FILE_KEY = "identity"
 # 記録には出力と同じ値（レビューした SHA・PR・ブランチ名）を書くので、出力の権限によらず所有者だけに読ませる（r1-3）
 RECORD_MODE = 0o600
+# 無い出力を作るときの権限。umask が 002 でも、承認の記録の読み手が拒むグループの書き込みを付けない
+OUTPUT_MODE = 0o644
 
 
 class Unowned(Exception):
@@ -126,7 +128,7 @@ def write_recorded(path: Path, text: str) -> None:
     書けなければ、出力を空に戻し記録を消してから `OSError` を返す。次の起動は同じ引数で続く（r3-3・r3-4）。
     """
     record = owner_record(path)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o666)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, OUTPUT_MODE)
     try:
         body = json.dumps({KIND_KEY: RECORD_KIND, TEXT_KEY: text, FILE_KEY: _file_of(os.fstat(fd))}, ensure_ascii=False)
         rfd = os.open(record, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, RECORD_MODE)

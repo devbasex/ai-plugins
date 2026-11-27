@@ -262,11 +262,12 @@ def test_build_refuses_a_check_whose_units_changed_after_it_was_written(checked)
     assert not (record_dir / "design-target.json").exists()
 
 
-def test_build_refuses_a_check_that_others_can_write(checked):
+@pytest.mark.parametrize("name", ["reviewed-pr", "reviewed-head", "reviewed-base", "checked.json"])
+def test_build_refuses_an_input_that_others_can_write(checked, name):
     record_dir, _ = checked
-    (record_dir / "checked.json").chmod(0o620)
+    (record_dir / name).chmod(0o620)
 
-    with pytest.raises(design_record.RecordUnreadable, match="checked.json を読めない"):
+    with pytest.raises(design_record.RecordUnreadable, match=f"{name} を読めない"):
         design_record.build(record_dir)
 
     assert not (record_dir / "design-target.json").exists()

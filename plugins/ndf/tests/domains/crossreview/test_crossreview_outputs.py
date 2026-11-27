@@ -30,6 +30,16 @@ def test_output_written_by_the_previous_run_is_emptied_in_place(tmp_path: Path) 
     assert not outputs.owner_record(out).exists()
 
 
+def test_new_output_is_not_writable_by_the_group(tmp_path: Path) -> None:
+    out = tmp_path / "reviewed-head"
+    old = os.umask(0o002)
+    try:
+        outputs.write_recorded(out, "a" * 40 + "\n")
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(out.stat().st_mode) == 0o644
+
+
 def test_record_is_readable_only_by_the_owner(tmp_path: Path) -> None:
     """記録は umask によらず所有者だけが読める（出力の値を他の利用者に見せない。r1-3）。"""
     out = tmp_path / "h"
