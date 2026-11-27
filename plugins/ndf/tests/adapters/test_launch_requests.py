@@ -587,8 +587,9 @@ def _interrupted(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 def test_after_an_interruption_right_after_placing_the_retry_succeeds(tmp_path):
     target, candidate, aside = _interrupted(tmp_path)
-    assert la.reflect(candidate, lambda: pytest.fail("反映は済んでいる"), SHA)
-    assert target.read_bytes() == NEW and not aside.exists()
+    calls: list[int] = []
+    assert la.reflect(candidate, lambda: calls.append(1), SHA)  # 反映先が候補と同じでも、承認の行を確かめに record を呼ぶ
+    assert target.read_bytes() == NEW and not aside.exists() and calls == [1]
 
 
 def test_after_an_interruption_a_save_into_the_aside_is_put_back(tmp_path):

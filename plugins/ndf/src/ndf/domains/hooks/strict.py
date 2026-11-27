@@ -472,20 +472,8 @@ def _remote_slug(repo_root: Path) -> Optional[str]:
     linked worktree からもメインディレクトリ（共通の git ディレクトリの親）の設定を読む（`Git.remote()` と同じ設定）。
     """
     git_dir = _git_dir(repo_root)
-    main_dir = git_dir.parent if git_dir else repo_root
-    try:
-        header = f'[remote "{git_mod.remote_of(main_dir)}"]'
-        text = (git_dir / "config").read_text(encoding="utf-8") if git_dir else ""
-    except (OSError, git_mod.RemoteError):  # noqa: NDF401 ファイル: 設定か設定を読めなければリモートは不明
-        return None
-    section = ""
-    for raw in text.splitlines():
-        line = raw.strip()
-        if line.startswith("["):
-            section = line
-        elif section == header and line.replace(" ", "").startswith("url="):
-            return slug_of_url(line.split("=", 1)[1].strip())
-    return None
+    url = git_mod.configured_remote_url(git_dir) if git_dir is not None else None
+    return slug_of_url(url) if url is not None else None
 
 
 def slug_of_url(url: str) -> Optional[str]:

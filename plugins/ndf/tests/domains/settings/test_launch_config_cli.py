@@ -26,7 +26,7 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.chdir(root)
     monkeypatch.setattr(la, "repo_key", lambda _root: "/r")
     monkeypatch.setattr(lc, "_approver_name", lambda _root: "人")
-    monkeypatch.setattr(lc, "_reading_recordable", lambda _root: True)
+    monkeypatch.setattr(lc, "_reading_recordable", lambda _repo: True)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s1")
     for name in ("NDF_AI_CHILD", "NDF_FACTORY_RUN", "NDF_RELAY_PLAN", "NDF_ORGANIZER_DIR"):
         monkeypatch.delenv(name, raising=False)
@@ -155,7 +155,7 @@ def test_where_answers_are_not_recorded_show_gives_the_terminal_command(repo, ca
 
 def test_without_a_github_remote_show_gives_the_terminal_command(repo, capsys, monkeypatch):
     candidate = _draft(capsys)
-    monkeypatch.setattr(lc, "_reading_recordable", lambda _root: False)  # 読み手役の確認を記録できない
+    monkeypatch.setattr(lc, "_reading_recordable", lambda _repo: False)  # 読み手役の確認を記録できない
     got = _run(capsys, "show", "--candidate", str(candidate), "--question", "approve")
     assert "terminal" in got["metrics"] and not la.state_file(la.QUESTIONS).exists()
 
@@ -173,8 +173,28 @@ def test_the_terminal_route_with_a_candidate_can_be_confirmed_after_the_reflecti
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(typed))
     assert _run(capsys, "approve", "--sha256", got["metrics"]["sha256"], "--candidate", str(candidate))["status"] == "ok"
     confirmed = _run(capsys, *got["routes"]["approved"]["argv"][2:])
-    assert confirmed["status"] == "ok" and confirmed["metrics"]["sha256"] == got["metrics"]["sha256"]
+    assert confirmed["status"] == "ok" and confirmed["metrics"]["reflected"]
     assert got["metrics"]["required"] and confirmed["metrics"]["approved"]
+
+
+def test_an_unreflected_candidate_with_the_same_hash_as_no_setting_is_not_reported_as_reflected(repo, capsys):
+    """許可の指定が無い候補は、設定が無い状態と承認の対象のハッシュが同じになる。反映したかは完了の記録で決める。"""
+    candidate = _draft(capsys, {"version": 1})
+    shown = _run(capsys, "show", "--candidate", str(candidate))
+    assert shown["metrics"]["reflected"] is False and not (repo / ".ndf" / "launch.json").exists()
+    assert _run(capsys, "approve", "--sha256", shown["metrics"]["sha256"], "--candidate", str(candidate))["status"] == "ok"
+    assert _run(capsys, "show", "--candidate", str(candidate))["metrics"]["reflected"]
+
+
+def test_approving_a_candidate_equal_to_the_hand_written_setting_records_the_approval(repo, capsys, monkeypatch):
+    _settings(repo, LSP)  # 利用者が手で書いた、未承認の許可
+    candidate = _draft(capsys, LSP)
+    sha = _run(capsys, "show", "--candidate", str(candidate))["metrics"]["sha256"]
+    monkeypatch.setattr(lc, "_terminal", lambda: True)
+    typed = iter(["山田", sha[:8]])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(typed))
+    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["status"] == "ok"
+    assert _run(capsys, "show")["metrics"]["approved"]
 
 
 def test_a_revoke_before_the_lock_stops_the_reflection(repo, capsys, monkeypatch):

@@ -580,6 +580,8 @@ def reflect(candidate: Path, record: Callable[[], None], sha256: str, request_id
     """承認の記録の錠の中で候補を反映先へ置く。置いたか反映済みなら真、反映先が変わっていたか途中で保存を見つけたら偽の結果を返す。
 
     先に `recover` で退避を片付け、反映先が反映元のバージョンと同じときだけ `record`（承認の行を書く）を呼んで置き換える。
+    反映先がすでに候補と同じ中身（手で同じ内容を書いた・置いた直後の中断）でも `record` を呼ぶ。承認の行が無いと次の起動が止まるためで、
+    `record` は承認済みなら何も書かない形にする。
     書けなければ片付けてから `precondition` で止める（承認の行は残る）。片付けで利用者の保存を別の名前で残したら、そのパスを
     結果の `saved` か、止める文に載せる。
     """
@@ -598,6 +600,7 @@ def reflect(candidate: Path, record: Callable[[], None], sha256: str, request_id
             "request_id": request_id,
         }
         if now == wanted:
+            record()
             _after_reflect(target, candidate, rec)
             return Reflection(True, saved)
         if now != source.get("base"):
@@ -706,10 +709,28 @@ def recover(target: Path) -> Optional[Path]:
     return saved
 
 
-def reflected(candidate: Path, sha256: str, request_id: Optional[str]) -> bool:
-    """候補が無い打ち直しで、完了の記録と反映先の中身を照らす。何も書かない。"""
+def _done_of(candidate: Path) -> Optional[dict[str, Any]]:
+    """候補を反映した完了の記録（反映先ごとに最後の 1 件）。無ければ None。"""
     for path in _store(REFLECTED).glob("*" + DONE):
         rec = read_launch_record(path)
-        if (rec.get("candidate"), rec.get("sha256"), rec.get("request_id")) == (candidate.parent.name, sha256, request_id):
-            return content_version(Path(rec["target"])) == rec.get("content")
-    return False
+        if rec.get("candidate") == candidate.parent.name and isinstance(rec.get("target"), str):
+            return rec
+    return None
+
+
+def reflected_candidate(candidate: Path) -> bool:
+    """候補を反映した完了の記録があり、反映先が今もその中身か。何も書かない。
+
+    承認の対象のハッシュは `permissions` と MCP の定義だけから求めるので、反映したかはハッシュでなく、候補の中身と反映先を結んだ完了の記録で確かめる。
+    """
+    return _still_placed(_done_of(candidate))
+
+
+def _still_placed(rec: Optional[Mapping[str, Any]]) -> bool:
+    return rec is not None and content_version(Path(str(rec["target"]))) == rec.get("content")
+
+
+def reflected(candidate: Path, sha256: str, request_id: Optional[str]) -> bool:
+    """候補が無い打ち直しで、完了の記録と反映先の中身を照らす。何も書かない。"""
+    rec = _done_of(candidate)
+    return rec is not None and (rec.get("sha256"), rec.get("request_id")) == (sha256, request_id) and _still_placed(rec)

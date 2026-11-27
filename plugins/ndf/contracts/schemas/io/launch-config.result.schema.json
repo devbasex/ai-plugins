@@ -13,6 +13,7 @@
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "承認の対象のハッシュ"},
         "required": {"type": "boolean", "description": "承認の対象が許可を広げ、人の承認が要るか（show）。偽なら approve は承認の行を書かない"},
         "approved": {"type": "boolean", "description": "このマシンでそのハッシュが承認済みか（show）"},
+        "reflected": {"type": "boolean", "description": "指定した候補を反映した完了の記録があり、反映先が今もその中身か（--candidate を付けた show）"},
         "candidate": {"type": "string", "description": "作った候補のパス（draft）"},
         "request": {"type": "string", "description": "作った承認のリクエストの識別子（show --question approve）"},
         "terminal": {"type": "string", "description": "利用者が端末で打つ approve のコマンド（回答を記録できない会話の show --question approve）"},

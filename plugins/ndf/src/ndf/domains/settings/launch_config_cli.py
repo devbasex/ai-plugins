@@ -77,14 +77,14 @@ def _approver_name(root: Path) -> str:
     return name if name else getpass.getuser()
 
 
-def _reading_recordable(root: Path) -> bool:
+def _reading_recordable(repo: str) -> bool:
     """読み手役の確認を記録できるか。`ndf records reading add` は GitHub のリモートの `<所有者>/<リポジトリ>` で記録するため、
-    それが無い作業場所では質問の前の記録を作れない（質問ではなく端末のコマンドを返す）。"""
-    try:
-        git.Git(root).remote_repo()
-    except (git.GitError, OSError):
-        return False
-    return True
+    それが無い作業場所では質問の前の記録を作れない（質問ではなく端末のコマンドを返す）。
+
+    `repo` は `la.repo_key` が求めた git の共通ディレクトリで、git を起動せずにその下の設定からリモートの URL を読む。
+    """
+    url = git.configured_remote_url(Path(repo))
+    return url is not None and git.repo_of_url(url) is not None
 
 
 def _widens(t: ls.Target) -> bool:
@@ -157,11 +157,17 @@ def _show(a: argparse.Namespace) -> dict[str, Any]:
 def _shown(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: str, target: Path, extra: dict[str, Any]) -> dict[str, Any]:
     """`show` の結果（続きのコマンド `extra` を添える）。設定を読めなければ `InternalError`。"""
     session = _session() if a.question else None
-    if session is not None and not _reading_recordable(root):
+    if session is not None and not _reading_recordable(repo):
         session = None
     if a.question is None or session is None:
-        t = _candidate_target(root, cand) if cand else ls.approval_target(ls.load(root))
-        metrics, items = _base_metrics(repo, t), [{"kind": "launch-target", **t.listing}]
+        # 候補を指定したときは、その候補を反映した完了の記録があり、反映先が今もその中身かを示す
+        reflected = la.reflected_candidate(cand) if cand else None
+        if reflected and not cand.is_file():  # 反映で片付けた候補は戻さず、反映先の今の設定を示す
+            t = ls.approval_target(ls.load(root))
+        else:
+            t = _candidate_target(root, cand) if cand else ls.approval_target(ls.load(root))
+        metrics = {**_base_metrics(repo, t), **({"reflected": reflected} if cand else {})}
+        items = [{"kind": "launch-target", **t.listing}]
         if a.question is None:
             return result.result(TOOL, result.OK, "承認の対象と状態。" + CLEANUP_NOTE, items, metrics, **extra)
         terminal = "cd {} && {}".format(
@@ -170,11 +176,10 @@ def _shown(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: str, t
         )
         summary = (
             "回答を記録できない会話。利用者に端末で metrics.terminal のコマンドを打ってもらい、打ち終えた後に routes.approved で確かめる。"
-            "その結果の metrics.sha256 がこの結果の metrics.sha256 と同じなら設定へ反映済み。metrics.required が真なら、"
+            "その結果の metrics.reflected が真なら設定へ反映済み（候補を指定したとき）。metrics.required が真なら、"
             "その結果の metrics.approved が真のときに起動の許可も記録済み"
         )
-        # 反映すると候補は片付けられるので、確かめるのは候補ではなく反映先の今の設定
-        routes = {"approved": result.command(TOOL, "show")}
+        routes = {"approved": result.command(TOOL, "show", *(["--candidate", str(cand)] if cand else []))}
         return result.result(TOOL, result.GATE, summary, items, {**metrics, "terminal": terminal}, routes=routes, **extra)
     request = uuid.uuid4().hex
     shown: dict[str, ls.Target] = {}

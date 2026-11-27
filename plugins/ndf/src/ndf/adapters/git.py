@@ -98,6 +98,27 @@ def remote_of(main_dir: Path) -> str:
     return value
 
 
+def configured_remote_url(git_dir: Path) -> Optional[str]:
+    """git を起動せずに、共通の git ディレクトリ `git_dir` の `config` から、この作業場所のリモート名（`remote_of`）の URL を読む。
+
+    リモート名はメインディレクトリ（`git_dir` の親）の設定から決める（`Git.remote()` と同じ設定）。設定かリモートを読めなければ None。
+    `insteadOf` などの書き換えは当てない（`git remote get-url` と違いうる）。
+    """
+    try:
+        header = f'[remote "{remote_of(git_dir.parent)}"]'
+        text = (git_dir / "config").read_text(encoding="utf-8")
+    except (OSError, RemoteError):  # noqa: NDF401 ファイル: 設定かリモートを読めなければリモートは不明
+        return None
+    section = ""
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            section = line
+        elif section == header and line.replace(" ", "").startswith("url="):
+            return line.split("=", 1)[1].strip()
+    return None
+
+
 class Completed(NamedTuple):
     """git の 1 回の起動の結果。"""
 
