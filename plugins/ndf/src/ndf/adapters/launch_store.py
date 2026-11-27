@@ -244,13 +244,14 @@ def _idle(root: Path, fd: int, files: Mapping[str, os.stat_result], now: datetim
 def _ndf_weights(data: Any) -> bool:
     """`data` が NDF の書く出現率のファイルの形（内部データの種類 `launch-weights` のスキーマ）か。
 
-    出現率の計算（#2944 の B2）は同じ種類として書き出す前に確かめるので、書き手と掃除・回収が同じ規則を使う。`version` の無い
-    ファイルや、必須の欄が欠けているか、スキーマに無い欄を持つファイルは、利用者が置いたものとして、掃除も回収もしない。
+    出現率の計算（#2944 の B2）は同じ種類として書き出す前に確かめるので、書き手と掃除・回収が同じ規則を使う。読んだ JSON は
+    古いバージョンから移さずにそのまま確かめる（移すと、NDF が書き出さない文字列の `version` のファイルも合ってしまう）。スキーマに
+    合わないファイルは、利用者が置いたものとして、掃除も回収もしない。
     """
-    if not isinstance(data, dict) or "version" not in data:
+    if not isinstance(data, dict):
         return False
     try:
-        internal.read_record(WEIGHTS, data)
+        internal.check_record(WEIGHTS, data)
     except internal.InternalError:  # noqa: NDF401 ファイル: NDF の書く形でないものは、利用者が置いたものとして変えない
         return False
     return True

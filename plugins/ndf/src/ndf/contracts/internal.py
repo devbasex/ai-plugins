@@ -139,6 +139,15 @@ def read_record(kind: str, raw: Mapping[str, Any]) -> Row:
     return row
 
 
+def check_record(kind: str, raw: Mapping[str, Any]) -> None:
+    """1 行を古いバージョンから移さずに、今のバージョンの形として確かめる。形が違えば `InternalError`。
+
+    NDF が今の形で書き出したものかを見分けるために使う。`read_record` は古い形を移してから確かめるので、移して初めて合う行
+    （文字列の `version` を持つ行など）も受け入れてしまう。
+    """
+    _require(kind, dict(raw))
+
+
 def read_line(kind: str, line: str) -> Row:
     """JSONL の 1 行を読む。JSON として読めない・辞書でない行も `InternalError`（`invalid`）。"""
     return read_record(kind, parse_line(line))

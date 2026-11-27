@@ -15,6 +15,9 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["repo", "stage", "runtime", "key", "at", "phase", "candidates", "allocation"],
+        "if": {"properties": {"phase": {"const": "adaptive"}}},
+        "then": {"required": ["probs"]},
+        "else": {"not": {"required": ["probs"]}},
         "properties": {
           "repo": {"type": "string", "minLength": 1, "description": "リポジトリのキー"},
           "stage": {"type": "string", "minLength": 1, "description": "工程"},
@@ -35,7 +38,7 @@
               "window_days": {"type": "integer", "minimum": 1, "maximum": 365}
             }
           },
-          "probs": {"type": "array", "items": {"type": "number", "minimum": 0}, "description": "組ごとの確率（adaptive のときだけ）"},
+          "probs": {"type": "array", "items": {"type": "number", "minimum": 0}, "description": "組ごとの確率。adaptive の項目は必ず持ち（割り付けがこの確率で抽選する）、burn_in の項目は持たない"},
           "models": {"type": "object", "additionalProperties": {"type": "string"}, "description": "計算に使った実際のモデル（まとまり → モデル）"},
           "counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}, "description": "組ごとの計算に使った件数"},
           "cutoffs": {
@@ -45,7 +48,7 @@
               "type": "object",
               "additionalProperties": false,
               "required": ["arm", "until"],
-              "properties": {"arm": {"type": "integer", "minimum": 0}, "until": {"type": "string", "minLength": 1}}
+              "properties": {"arm": {"type": "integer", "minimum": 0}, "until": {"$ref": "common.schema.json#/$defs/time", "description": "打ち切りの期限"}}
             }
           }
         }
