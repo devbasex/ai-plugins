@@ -39,18 +39,13 @@ DRAFT_TEMP = re.compile(r"\.(" + "|".join(re.escape(n) for n in DRAFT_FILES) + r
 
 
 def replace_private(path: Path, data: bytes) -> None:
-    """所有者だけが読めるファイルを、一時ファイルからの付け替えで書く。失敗したら作った一時ファイルを消してから止まる。"""
+    """所有者だけが読めるファイルを、一時ファイルからの付け替えで書く。"""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        os.replace(tmp, path)
-    except BaseException:
-        # 書き込みか付け替えに失敗したら、作った一時ファイルをここで消す（呼び手の片付けはこの名前を知らない。Value 6）
-        tmp.unlink(missing_ok=True)
-        raise
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)
 
 
 def write_launch_record(path: Path, obj: Mapping[str, Any]) -> None:

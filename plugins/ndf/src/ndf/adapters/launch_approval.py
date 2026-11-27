@@ -8,12 +8,10 @@
 
 from __future__ import annotations
 
-import contextlib
 import functools
 import hashlib
 import json
 import os
-import stat
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -84,31 +82,6 @@ def records_lock(path: Path) -> Any:
     from ndf.contracts import limits
 
     return records.file_lock(path, limits.seconds("launch.approvals-lock"))
-
-
-@contextlib.contextmanager
-def records_lock_or_stop(path: Path) -> Any:
-    """`records_lock` を取り、取れなければ `precondition` の `InternalError` にして止める（錠の場所と対処を示す）。
-
-    錠のディレクトリやファイルを作れない（権限・容量）か、待ちの上限を超えたときに、利用者が直せる前提の不足として返すためである。
-    変換するのは錠を取るまでで、錠の中の処理が投げる例外は、そのまま呼び手へ返す（片付けの失敗は `recover_or_stop` が扱う）。
-    """
-    from ndf.contracts import internal
-
-    where = Path(str(path) + ".lock")
-    try:
-        lock = records_lock(path)
-        lock.acquire()
-    except OSError as exc:
-        raise internal.InternalError(
-            "precondition",
-            f"承認の記録の錠 {where} を取れない（{type(exc).__name__}）。{where.parent} に書き込めるか、"
-            "ほかの承認の操作が終わっているかを確かめてから、同じコマンドを打ち直す",
-        ) from None
-    try:
-        yield
-    finally:
-        lock.release()
 
 
 def _at_now() -> str:
@@ -242,17 +215,13 @@ def request_answer(request_id: str) -> tuple[Optional[str], Optional[str]]:
     return (None, None) if index is None else _judged(_last_labels().get(request_id), requests.rows[index])
 
 
-def consent_by_answer(
-    request_id: str, repo: str, sha256: str, target: Path, candidate: Optional[Path], history: Optional[_History] = None
-) -> Optional[str]:
+def consent_by_answer(request_id: str, repo: str, sha256: str, target: Path, candidate: Optional[Path]) -> Optional[str]:
     """リクエストへの「承認する」の回答を、今回の操作（リポジトリ・承認の対象のハッシュ・反映先・候補）への人の同意として照らし、承認者を返す。
 
     リクエストが無い・操作が違う（別の反映先か別の候補への質問）・同じ反映先により新しいリクエストがある・回答が「承認する」でなければ None。
     承認の行を足すかとは別に、設定を書き換えてよいかを決める（承認の対象が空か承認済みでも、書き換えには毎回人の同意が要る）。
-    `history` を渡せば、その索引を使い、リクエストと回答の記録を読み直さない（同じ錠の中で `approve_by_answer` と共有する）。
     """
-    history = history if history is not None else _History()
-    requests = history.requests
+    requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
     index = requests.by_id.get(request_id)
     if index is None:
         return None
@@ -260,7 +229,7 @@ def consent_by_answer(
     asked = (req.get("repo"), req.get("action"), req.get("sha256"), req.get("target"), req.get("candidate"))
     if asked != (repo, Action.APPROVE, sha256, str(target), str(candidate) if candidate is not None else None) or requests.newer(index):
         return None
-    answer, name = _judged(history.labels.get(request_id), req)
+    answer, name = _judged(_last_labels().get(request_id), req)
     return name if answer == "approve" else None
 
 
@@ -274,26 +243,24 @@ def _source_record(candidate: Path) -> dict[str, Any]:
     return launch_candidates.record_object(launch_candidates.raw_record(candidate.parent / SOURCE_NAME))
 
 
-def approve_by_answer(repo: str, sha256: str, request_id: str, history: Optional[_History] = None) -> Optional[str]:
+def approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]:
     """承認の記録の錠の中で、リクエストの回答を設計書の「人の確認」の条件で照らし、承認の行を足して承認者を返す。使えなければ None。
 
     同じリクエストの承認の行があり承認済みなら、行を足さずに承認者を返す（中断の後の打ち直し）。リクエストの後の取り消しは、
     リクエストを作った時点の承認の記録の行数より後ろの行で見分ける（時刻は秒の単位なので、同じ秒の取り消しと区別できない）。
-    `history` を渡せば、その索引（リクエスト・回答・承認の記録）を使い、読み直さない。
     """
-    history = history if history is not None else _History()
-    requests = history.requests
+    requests = _Requests(records.whole_rows(state_file(QUESTIONS)))
     index = requests.by_id.get(request_id)
     if index is None:
         return None
     req = requests.rows[index]
     if (req.get("repo"), req.get("action"), req.get("sha256")) != (repo, Action.APPROVE, sha256):
         return None
-    approvals = history.approvals
+    approvals = _Approvals(records.whole_rows(state_file(APPROVALS)))
     used = approvals.used_row(req)
     if used is not None and approvals.approved(repo, sha256):
         return used.get("approver")
-    answer, name = _judged(history.labels.get(request_id), req)
+    answer, name = _judged(_last_labels().get(request_id), req)
     if answer != "approve" or _lapsed(requests, index, approvals, content_version(Path(req["target"]))):
         return None
     write_row(state_file(APPROVALS), approval_row(repo, sha256, Action.APPROVE, name, request_id))
@@ -386,16 +353,6 @@ class _History:
         if self._approvals is None:
             self._approvals = _Approvals(records.whole_rows(state_file(APPROVALS)))
         return self._approvals
-
-    def approved(self, repo: str, sha256: str) -> bool:
-        """`is_approved` と同じ判定を、この索引の承認の記録で行う。"""
-        return self.approvals.approved(repo, sha256)
-
-
-def answer_history() -> _History:
-    """リクエスト・回答の記録を 1 回ずつ読んだ索引（承認の記録は初めて使うときに読む）。承認の記録の錠の中で
-    `consent_by_answer` と `approve_by_answer` に同じものを渡し、履歴の走査を 1 回にする。"""
-    return _History()
 
 
 def _live(history: _History, candidate: Path, now: Optional[str], current: Callable[[], Optional[str]]) -> bool:
@@ -635,13 +592,14 @@ def new_candidate(repo: str, target: Path) -> Draft:
 
 @dataclass(frozen=True)
 class Reflection:
-    """`reflect` と `finished` の結果。`placed` は置いたか反映済みか。真偽は `placed` と同じ。
+    """`reflect` の結果。`placed` は置いたか反映済みか。`saved` は、利用者の保存を別の名前で残したパス（残さなければ None）。
 
-    `refusal` は、反映先か候補の中身が呼び手の照らしたものと違って拒んだときの理由。利用者の保存を別の名前で残したパスは、
-    結果でなく呼び手が渡す `kept` に足す（拒否・成功・例外のどれで終わっても、呼び手がすべてのパスを結果の文に載せるため）。
+    真偽は `placed` と同じ。偽（拒否）でも `saved` があれば、呼び手は拒否の文にそのパスを載せる。`refusal` は、反映先か候補の中身が
+    呼び手の照らしたものと違って拒んだときの理由（そのときは反映先を見ずに拒むので `saved` は無い）。
     """
 
     placed: bool
+    saved: Optional[Path] = None
     refusal: Optional[str] = None
 
     def __bool__(self) -> bool:
@@ -649,34 +607,20 @@ class Reflection:
 
 
 def reflect(
-    candidate: Path,
-    record: Callable[[], Optional[Mapping[str, Any]]],
-    approval: tuple[str, Optional[str]],
-    *,
-    data: bytes,
-    expected: Path,
-    kept: list[Path],
+    candidate: Path, record: Callable[[], None], sha256: str, request_id: Optional[str] = None, *, data: bytes, expected: Path
 ) -> Reflection:
     """承認の記録の錠の中で候補の中身 `data` を反映先へ置く。置いたか反映済みなら真、反映先が変わっていたか途中で保存を見つけたら偽の結果を返す。
 
     `data` は呼び手が承認の対象のハッシュを照らした候補のバイト列で、置くのはこのバイト列である。錠の中で、候補の記録の反映先が
     `expected`（今の作業場所の `.ndf/launch.json`）と違うか、候補の今の中身が `data` と違えば、何も書かずに `refusal` 付きの偽を返す。
-    先に `recover` で退避と反映の途中の記録を片付ける。前の反映の一時ファイルの片付けが済まず途中の記録が残れば、
-    その記録を上書きも削除もせずに `precondition` で止める（`_recover_into`）。反映先が候補と同じ中身なら、反映元のバージョンとも同じでも置き換えず、次のように扱う。
-    `recover` か前の実行が、この操作（候補・反映先・承認の対象のハッシュ・リクエスト）の完了の記録を確定していれば、`record` を呼ばずに
-    その記録を残して真を返す（中断の後の打ち直し。後から同じ反映先に新しいリクエストができても、反映済みの操作を拒まない）。
-    そうでなければ（利用者が候補と同じ中身を手で保存したなど）`record` を呼ぶ。承認の行が無いと次の起動が止まるためで、
-    `record` は承認済みなら何も書かない形にする。反映先が反映元のバージョンと同じときだけ `record` を呼んで置き換える。`record` が返した欄（書き換えに同意した人 `approver` と確認の経路 `route`）は、
-    承認の行を書いたかにかかわらず、反映の途中の記録と完了の記録に入れる（だれがどの経路で書き換えを認めたかを残す）。
-    書けなければ片付けてから `precondition` で止める（承認の行は残る）。置き換えの途中で止まったら片付け、完了にするのは
-    片付けが完了の記録を書いたとき（反映先が NDF の置いた候補のままの、手順 5 の停止）だけである。片付けで利用者の保存を別の名前で
-    残したら、そのパスを `kept` に足す（`record` が例外で止めた場合も足した後なので、呼び手が止める文に載せられる）。完了の記録が
-    前の実行で残したパスを持っていれば、それも足す。
-    `approval` は、承認の対象のハッシュとリクエスト（端末の経路は None）の組で、この操作を見分ける。
+    先に `recover` で退避を片付け、反映先が反映元のバージョンと同じときだけ `record`（人の同意を照らし、要れば承認の行を書く）を呼んで置き換える。
+    反映先がすでに候補と同じ中身（手で同じ内容を書いた・置いた直後の中断）でも `record` を呼ぶ。承認の行が無いと次の起動が止まるためで、
+    `record` は承認済みなら何も書かない形にする。
+    書けなければ片付けてから `precondition` で止める（承認の行は残る）。片付けで利用者の保存を別の名前で残したら、そのパスを
+    結果の `saved` か、止める文に載せる。
     """
     from ndf.contracts import internal
 
-    sha256, request_id = approval
     wanted = hashlib.sha256(data).hexdigest()
     with records_lock(state_file(APPROVALS)):
         source = _source_record(candidate)
@@ -688,7 +632,7 @@ def reflect(
         if content_version(candidate) != wanted:
             return Reflection(False, refusal="ハッシュを照らした後に候補が変わった。show で示し直して承認を取り直す")
         target = expected
-        _recover_into(target, kept)
+        saved = recover(target)
         now = content_version(target)
         rec = {
             "candidate": candidate.parent.name,
@@ -698,260 +642,44 @@ def reflect(
             "request_id": request_id,
         }
         if now == wanted:
-            done = _done_for(candidate, target, sha256, request_id, wanted)
-            if done is not None:  # 中断の前に置いた同じ操作の完了。同意した人と経路と、別の名前で残した保存は記録のまま引き継ぐ
-                _note_saved(done, kept)
-                _tidy_after_reflect(target, candidate, done)
-                return Reflection(True)
-            rec.update(record() or {})
+            record()
             _after_reflect(target, candidate, rec)
-            return Reflection(True)
+            return Reflection(True, saved)
         if now != source.get("base"):
-            return Reflection(False)
-        rec.update(record() or {})
+            return Reflection(False, saved)
+        record()
+        launch_candidates.write_launch_record(reflected_file(target, PENDING), rec)
         try:
-            placed = _place(target, data, rec)
+            placed = _replace(target, data, rec["base"])
         except OSError as exc:
-            _recover_into(target, kept)
+            saved = recover(target) or saved
+            kept = f"。利用者の保存を {saved} に残した" if saved is not None else ""
             raise internal.InternalError(
-                "precondition", f"{target} へ反映できない（{type(exc).__name__}）。同じコマンドを打ち直す"
+                "precondition", f"{target} へ反映できない（{type(exc).__name__}）{kept}。同じコマンドを打ち直す"
             ) from None
         if not placed:
-            # 片付けが完了の記録を書くのは、反映先が NDF の置いた候補のファイルのままのとき（手順 5 の停止）だけである。
-            # 手順 3・4 の停止では候補を置いていないので、反映先が候補と同じ中身でも完了にしない
-            _recover_into(target, kept)
-            done = _done_for(candidate, target, sha256, request_id, wanted)
-            if done is None:
-                return Reflection(False)
-            _tidy_after_reflect(target, candidate, done)
-            return Reflection(True)
+            return Reflection(False, recover(target) or saved)
         _after_reflect(target, candidate, rec)
-        return Reflection(True)
+        return Reflection(True, saved)
 
 
-def _recover_into(target: Path, kept: list[Path]) -> None:
-    """`recover` を呼び、利用者の保存を別の名前で残したらそのパスを `kept` に足す。一時ファイルの片付けが済んでいなければ止める。
-
-    `recover` は、設定案の写しを移す先を記録できずに一時ファイルを元の名前に残したとき、途中の記録を消さずに残す。
-    そのまま次の反映へ進むと、`_place` が同じ記録を新しい一時ファイルの名前で上書きするか、`_after_reflect` が記録を消し、
-    残った一時ファイルを次の片付けで特定できなくなる。そこで、途中の記録が残っていれば、`kept` に足した後で `precondition` で止める
-    （記録と一時ファイルはそのまま残し、打ち直しの `recover` が片付け直す）。
-    片付けのファイル操作が `OSError` で止まったときは `recover_or_stop` が `precondition` にして止める。
-    """
-    from ndf.contracts import internal
-
-    recover_or_stop(target, kept)
-    pending = reflected_file(target, PENDING)
-    if pending.exists():
-        left = read_launch_record(pending).get("placing")
-        # 残るのは、片付けの進み具合を途中の記録へ書けなかったとき（`_note`）なので、案内するのは記録の保存先である
-        raise internal.InternalError(
-            "precondition",
-            f"前の反映の一時ファイル（{left}）を片付ける途中で、途中の記録 {pending} を更新できなかった。"
-            f"一時ファイルと記録は残した。{pending.parent} に書き込めるか確かめてから、同じコマンドを打ち直す",
-        )
-
-
-def recover_or_stop(target: Path, kept: list[Path]) -> None:
-    """錠の中で `recover` を呼び、片付けのファイル操作が `OSError` で止まったら `precondition` の `InternalError` にして止める。
-
-    利用者の保存を別の名前で残したパスは、止まる前に `kept` に入っている（呼び手は `InternalError` の文に `kept` を添えて示す）。
-    反映の経路（`_recover_into`）と候補の無い `approve` が同じ文と同じ打ち直しの案内を使うよう、変換はここだけに置く。
-    錠は呼び手が取るので、錠を取れないときの例外はここを通らず、片付けの失敗と区別される。
-    """
-    from ndf.contracts import internal
-
-    try:
-        recover(target, kept)
-    except OSError as exc:
-        raise internal.InternalError(
-            "precondition", f"{target} の前の反映を片付けられない（{type(exc).__name__}）。同じコマンドを打ち直す"
-        ) from None
-
-
-def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
-    """置き換えの手順の 1〜5。途中で保存を見つけたら偽。
-
-    置く一時ファイルを先に作り、その実体（`st_dev`・`st_ino`）を `rec` の `placed` に入れてから反映の途中の記録を書く。中断の後の片付け
-    （`recover`）は、反映先がこの実体のままかで、NDF が候補を置いた後の停止か（手順 5 か、置いた直後の中断）を見分ける。中身だけで
-    見分けると、手順 4 の間に利用者が候補と同じ中身を手で保存したときも、置いた後の停止として完了にしてしまうためである。
-
-    一時ファイルは乱数の名前（`.launch.json.placing-<値>`）で、作る前にその名前を途中の記録の `placing` に書き、名前が空いている
-    ときだけ成功する作り方（`O_EXCL`）で作る。名前が重なれば、そのファイルには触れずに別の値で取り直す。中身は実体を途中の記録に
-    書いた後に書く。プロセスが強制終了しても、次の `recover` が途中の記録から一時ファイルを特定し、NDF が作ったと確かめられる
-    ものだけを消す（`_drop_placing`）。例外で止まったときの片付けも、呼び手の `recover` に任せる。ただし、実体を途中の記録へ書く処理が
-    例外になったときは、記録から実体を確かめられないので、この実行が手元に持つ実体でその場で消す。通常の終わりでも名前を直接は消さず、
-    その名前が作った実体のままのときだけ `_drop_placing` で消す（反映の間に利用者が同じ名前へ保存したファイルを消さないため）。
-    """
-    target.parent.mkdir(parents=True, exist_ok=True)
-    pending = reflected_file(target, PENDING)
-    while True:
-        tmp = target.with_name(f"{_PLACING_HEAD.format(target.name)}{uuid.uuid4().hex}")
-        rec.pop("placed", None)
-        rec["placing"] = str(tmp)
-        launch_candidates.write_launch_record(pending, rec)  # 作る前に名前を残す（強制終了の後に特定するため）
-        try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
-        except FileExistsError:  # noqa: NDF401 ファイル: 利用者の同じ名前のファイルには触れず、別の値で取り直す
-            continue
-        break
-    with os.fdopen(fd, "wb") as out:
-        made = os.fstat(out.fileno())
-        rec["placed"] = [made.st_dev, made.st_ino]
-        try:
-            launch_candidates.write_launch_record(pending, rec)
-        except BaseException:
-            # 実体を記録に書けなければ、次の `recover` はこのファイルを NDF が作ったと確かめられない。
-            # この実行は作った実体を手元に持っているので、その実体のままのときだけここで消してから止める。
-            # 中身をまだ書いていない空のファイルなので、移す先を記録できなくても移して消す
-            _drop_placing(target, rec, filled=False)
-            raise
-        out.write(data)
-    placed = _replace(target, tmp, rec["base"])
-    # 名前を直接消さない。反映の間に利用者が同じ名前へ保存していたら、作った実体と違うので残す
-    if not _drop_placing(target, rec):
-        # 設定案の写しを移す先を記録できなかった。写しは元の名前のまま残し、呼び手の `recover` が途中の記録から片付け直す
-        raise OSError("置き換えの一時ファイルを移す先を、反映の途中の記録へ書けない")
-    return placed
-
-
-# 置き換えの一時ファイルの名前の頭（後ろに乱数の値が付く）
-_PLACING_HEAD = ".{}.placing-"
-# 消す前に一時ファイルを移す、NDF 専用のディレクトリの名前の頭（後ろに乱数の値が付く）
-_DROPPING_HEAD = ".{}.dropping-"
-# 専用のディレクトリの中で、移した一時ファイルに付ける名前
-_DROPPING_FILE = "placing"
-
-
-def _drop_placing(target: Path, rec: dict[str, Any], *, filled: bool = True) -> bool:
-    """途中の記録 `rec` が名前を残した一時ファイルのうち、NDF が作ったと確かめられるものを消す。片付け直しが要るときだけ偽を返す。
-
-    確かめる条件は、記録した実体（`placed`）と同じことだけである。実体を記録する前に止まった場合は、その名前のファイルが空でも消さない。
-    名前が重なった利用者の空のファイルと見分けられないためで、NDF が作った空のファイルが残っても中身（設定案の写し）は無い。
-    名前が記録に無い・反映先と別のディレクトリ・頭が違う・実体が違うファイルも消さない（利用者の作ったものかもしれないため）。
-    対象は、記録した一時ファイルの名前と、記録した専用のディレクトリ（`dropping`）の中の 1 つだけで、ほかは走査しない。
-    専用のディレクトリは、前の実行が消す前に移した直後に強制終了した分を片付けるために先に見る（`_empty_box`）。
-    実体が記録に無ければ、どれも消さない。
-
-    `filled` は、一時ファイルに設定案の写しを書いたかもしれないか。偽（中身を書く前の空のファイル）なら、移す先を記録できなくても
-    移して消す。真なら、移す先の名前と実体を途中の記録へ書けたときだけ移し、書けなければ元の名前のまま残して偽を返す
-    （移した後に強制終了すると、次の片付けが写しを見つけられないため）。
-    """
-    name = rec.get("placing")
-    placed = rec.get("placed")
-    if not isinstance(name, str) or placed is None:
-        return True
-    tmp = Path(name)
-    if not _ours(target, tmp, _PLACING_HEAD):
-        return True
-    _empty_box(target, rec, placed)  # 前の実行が移した後に止まった分
-    return _drop_if_made(target, tmp, rec, placed, filled)
-
-
-def _ours(target: Path, path: Path, head: str) -> bool:
-    """`path` が反映先と同じディレクトリにあり、NDF が付ける頭 `head` の名前か。"""
-    return path.parent == target.parent and path.name.startswith(head.format(target.name))
-
-
-def _note(target: Path, rec: Mapping[str, Any]) -> bool:
-    """片付けの進み具合を反映の途中の記録に書く。書けたら真。"""
-    try:
-        launch_candidates.write_launch_record(reflected_file(target, PENDING), rec)
-    except OSError:  # noqa: NDF401 ファイル: 書けたかどうかで、呼び手が写しを移すかを決める
-        return False
-    return True
-
-
-def _empty_box(target: Path, rec: Mapping[str, Any], placed: Any) -> None:
-    """途中の記録の専用のディレクトリ（`dropping`）が、記録した実体（`box`）のままなら、中の一時ファイルを確かめて消し、空になったディレクトリを消す。
-
-    ディレクトリの作成元は、名前と空であることでなく、作った直後に途中の記録へ書いた実体（`st_dev`・`st_ino`）で確かめる。実体が記録に
-    無い・違う・ディレクトリでない（シンボリックリンクを含む）ものは、利用者の作ったものかもしれないので触れない。中身が残るディレクトリ
-    （実体が違って戻せなかった利用者のファイルを含む）も残す。
-    """
-    name, made = rec.get("dropping"), rec.get("box")
-    if not isinstance(name, str) or made is None or not _ours(target, Path(name), _DROPPING_HEAD):
-        return
-    box = Path(name)
-    try:
-        found = os.lstat(box)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 移した後に止まった分は無い
-        return
-    if not stat.S_ISDIR(found.st_mode) or made != [found.st_dev, found.st_ino]:
-        return
-    inside = box / _DROPPING_FILE
-    if _made(inside, placed):
-        inside.unlink(missing_ok=True)
-    try:
-        os.rmdir(box)
-    except OSError:  # noqa: NDF401 ファイル: 中身が残るディレクトリは消さない
-        return
-
-
-def _made(path: Path, placed: Any) -> bool:
-    """`path` が記録した実体 `placed`（`st_dev`・`st_ino`）か。"""
-    try:
-        found = os.lstat(path)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 無ければ NDF の作ったものも無い
-        return False
-    return placed == [found.st_dev, found.st_ino]
-
-
-def _drop_if_made(target: Path, path: Path, rec: dict[str, Any], placed: Any, filled: bool) -> bool:
-    """`path` が記録した実体なら消す。共有のディレクトリの名前を確かめた結果に頼らないよう、専用のディレクトリへ移してから確かめ直して消す。
-
-    専用のディレクトリは乱数の名前で、名前が空いているときだけ成功する `os.mkdir` で作り（所有者だけが使える権限）、名前が重なれば、
-    そのディレクトリには触れずに別の値で取り直す。作った後、名前と実体を 1 回の書き込みで途中の記録の `dropping`・`box` に書き、
-    書けてから移す。移した直後に強制終了しても、次の `recover` が記録から作成元を確かめて片付けられる（`_empty_box`）。
-    書けなければ、`filled` が真（設定案の写しかもしれない）なら移さずに作ったディレクトリを消し、偽を返す。偽（空のファイル）なら移して消す。
-    利用者のエディタなどは専用のディレクトリの中へ書かないので、移した後に確かめたファイルと消すファイルは同じになる。確かめてから
-    移すまでの間に `path` の名前が利用者のファイルへ置き換わっていれば、移した先で実体が違うと分かるので消さず、元の名前へ戻す
-    （元の名前が埋まっていれば専用のディレクトリの中に残す）。
-    """
-    if not _made(path, placed):
-        return True
-    while True:
-        box = target.with_name(f"{_DROPPING_HEAD.format(target.name)}{uuid.uuid4().hex}")
-        try:
-            os.mkdir(box, 0o700)
-        except FileExistsError:  # noqa: NDF401 ファイル: 利用者の同じ名前のものには触れず、別の値で取り直す
-            continue
-        break
-    found = os.lstat(box)
-    rec["dropping"], rec["box"] = str(box), [found.st_dev, found.st_ino]
-    if not _note(target, rec) and filled:  # 移す前に、作成元を確かめる名前と実体を残す
-        os.rmdir(box)
-        del rec["dropping"], rec["box"]
-        return False
-    inside = box / _DROPPING_FILE
-    try:
-        os.rename(path, inside)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 確かめた後に消えていれば片付けるものも無い
-        pass
-    else:
-        if not _made(inside, placed):
-            try:
-                os.link(inside, path, follow_symlinks=False)  # 名前が空いているときだけ戻し、置かれた利用者のファイルを上書きしない
-            except OSError:  # noqa: NDF401 ファイル: 戻せない利用者のファイルは、専用のディレクトリの中に残す
-                return True
-        inside.unlink()
-    os.rmdir(box)
-    del rec["dropping"], rec["box"]  # 片付け終えたディレクトリは、完了の記録に残さない
-    return True
-
-
-def _replace(target: Path, tmp: Path, base: Optional[str]) -> bool:
-    """置き換えの手順の 2〜5（退避・照らし直し・反映先が無いときだけ `tmp` を置く・もう一度照らす）。途中で保存を見つけたら偽。"""
+def _replace(target: Path, data: bytes, base: Optional[str]) -> bool:
+    """置き換えの手順の 2〜5（退避・照らし直し・反映先が無いときだけ置く・もう一度照らす）。途中で保存を見つけたら偽。"""
     aside = target.with_name(target.name + REFLECTING)
     had = target.exists()
     if had:
         os.rename(target, aside)
         if content_version(aside) != base:
             return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(f".{target.name}.{uuid.uuid4().hex}")
+    tmp.write_bytes(data)
     try:
         os.link(tmp, target)
     except FileExistsError:  # noqa: NDF401 ファイル: 置く間に保存された反映先は残し、呼び手が片付けて止める
         return False
+    finally:
+        tmp.unlink()
     if had:
         if content_version(aside) != base:
             return False
@@ -959,76 +687,9 @@ def _replace(target: Path, tmp: Path, base: Optional[str]) -> bool:
     return True
 
 
-def _placed(target: Path, rec: Mapping[str, Any]) -> bool:
-    """反映先が、反映の途中の記録 `rec` の操作で NDF が置いた候補のファイル（同じ実体で、中身も候補のまま）か。"""
-    try:
-        found = os.lstat(target)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 反映先が無ければ、置いた候補は残っていない
-        return False
-    return rec.get("placed") == [found.st_dev, found.st_ino] and content_version(target) == rec.get("content")
-
-
-def _note_saved(rec: Mapping[str, Any], kept: list[Path]) -> None:
-    """記録 `rec` が持つ、利用者の保存を別の名前で残したパスを `kept` に足す（まだ載っていなければ）。"""
-    noted = _noted_saved(rec)
-    if noted is not None and noted not in kept:
-        kept.append(noted)
-
-
-def _noted_saved(rec: Mapping[str, Any]) -> Optional[Path]:
-    """記録 `rec` の `saved`（利用者の保存を別の名前で残したパス）。無いか、そのファイルがもう無ければ None。"""
-    noted = rec.get("saved")
-    return Path(noted) if isinstance(noted, str) and os.path.lexists(noted) else None
-
-
-def _same_operation(rec: Mapping[str, Any], candidate: Path, sha256: str, request_id: Optional[str], content: str) -> bool:
-    """反映の途中か完了の記録 `rec` が、この操作（候補・承認の対象のハッシュ・リクエスト・置く中身）のものか。"""
-    return (rec.get("candidate"), rec.get("sha256"), rec.get("request_id"), rec.get("content")) == (
-        candidate.parent.name,
-        sha256,
-        request_id,
-        content,
-    )
-
-
-def _done_for(candidate: Path, target: Path, sha256: str, request_id: Optional[str], content: str) -> Optional[dict[str, Any]]:
-    """反映先 `target` の完了の記録がこの操作のもので、反映先が今もその中身なら、その記録。そうでなければ None。"""
-    rec = read_launch_record(reflected_file(target, DONE))
-    if rec.get("target") != str(target) or not _same_operation(rec, candidate, sha256, request_id, content):
-        return None
-    return rec if content_version(target) == content else None
-
-
-def finished(candidate: Path, target: Path, sha256: str, request_id: Optional[str], data: bytes, kept: list[Path]) -> Reflection:
-    """端末で人の確認を求める前に、この操作の反映が中断の前に済んでいるかを確かめる。済んでいれば候補を片付けて真の結果を返す。
-
-    承認の記録の錠の中で、反映先が候補の中身 `data` と同じで、反映の途中の記録がこの操作のものなら `recover` で完了の記録を確定する。
-    退避に利用者の保存があっても、反映先が NDF の置いた候補のままなら、保存を別の名前で残して途中の記録の同意から完了にする。
-    反映先が別の中身なら何も片付けない（利用者の保存を残した場所は、続く `reflect` の `recover` が結果に載せる）。
-    完了の記録がこの操作のものなら真を返す。端末で名前とハッシュを入れ直させず、同じ反映先の新しいリクエストで拒みもしない。
-    別の名前で残した保存のパスは、この実行で残したものも、完了の記録が持つ前の実行のものも、`kept` に足して呼び手へ返す（真偽にかかわらず）。
-    """
-    content = hashlib.sha256(data).hexdigest()
-    with records_lock(state_file(APPROVALS)):
-        if content_version(target) != content:
-            return Reflection(False)
-        if _same_operation(read_launch_record(reflected_file(target, PENDING)), candidate, sha256, request_id, content):
-            _recover_into(target, kept)
-        done = _done_for(candidate, target, sha256, request_id, content)
-        if done is None:
-            return Reflection(False)
-        _note_saved(done, kept)
-        _tidy_after_reflect(target, candidate, done)
-        return Reflection(True)
-
-
 def _write_done(target: Path, rec: Mapping[str, Any]) -> None:
-    """完了の記録を書く。反映の途中の記録は消さない。
-
-    途中の記録は置き換えの一時ファイルの名前を持つので、一時ファイルの片付けが済んだ後に呼び手が消す。完了を書いた直後に
-    中断しても、次の `recover` が一時ファイルを特定できるようにするためである。
-    """
     launch_candidates.write_launch_record(reflected_file(target, DONE), {**rec, "target": str(target)})
+    reflected_file(target, PENDING).unlink(missing_ok=True)
 
 
 def _candidate_version(made: Path) -> Optional[str]:
@@ -1044,12 +705,6 @@ def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> Non
     失わないため）。まだ人の回答で承認を済ませられるリクエストの候補（`_live`）も、`draft` の掃除と同じく退避しない。退避した候補は次の掃除が比べ直してから消す。
     """
     _write_done(target, rec)
-    reflected_file(target, PENDING).unlink(missing_ok=True)  # 一時ファイルは `_place` が片付け済み
-    _tidy_after_reflect(target, candidate, rec)
-
-
-def _tidy_after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> None:
-    """`_after_reflect` のうち、完了の記録を書いた後の候補の片付け（完了の記録は書き直さない）。"""
     now = content_version(target)
     home = candidate.parent.parent
     with records_lock(home):
@@ -1068,110 +723,40 @@ def _tidy_after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -
                 launch_candidates.set_aside(made)
 
 
-def recover(target: Path, kept: Optional[list[Path]] = None) -> Optional[Path]:
+def recover(target: Path) -> Optional[Path]:
     """錠の中で、退避（`launch.json.reflecting`）と反映の途中の記録を設計書の「退避が残っている場合の判定」の表で片付ける。
 
-    利用者の保存を別の名前（`launch.json.saved-<値>`）で残したらそのパスを返す。`kept` を渡せば、残した時点でそのパスを足す
-    （後の完了の記録や一時ファイルの片付けが例外で止まっても、呼び手が保存の場所を結果に載せられるようにするため）。反映先が NDF の置いた候補のファイルのまま
-    （`_placed`。途中の記録の実体と同じで、中身も候補のまま）なら、反映は済んでいるので、途中の記録（同意した人と確認の経路を含む）
-    から完了の記録を書く。退避が無い場合（反映先が無い状態から置いた・退避を消した直後の中断）も、退避に利用者の保存があって
-    別の名前で残した場合も同じである。途中の記録は人の同意を確かめた後にだけ書くので、記録の承認者をそのまま引き継げる。
-    中身が候補と同じでも、NDF の置いたファイルでなければ（手順 4 の間の手の保存）利用者の保存として扱い、完了にしない。
-    利用者のエディタは錠を取らないので、照らした後に反映先へ保存が入ることがある。退避を反映先へ戻すときは反映先を上書きせず、
-    反映先を消すことも一時の名前へ移すこともしない。別の名前は、退避を消す前に途中の記録の `saved` に書き、完了の記録にも残す。
-    退避を消した後に中断しても、次の片付けと打ち直しがそのパスを結果に載せられるようにするためである。
-    最後に、途中の記録が名前を残した置き換えの一時ファイルのうち、NDF が作ったと確かめられるものを消す（`_drop_placing`。強制終了した
-    実行の設定案の写しを作業場所に残さず、利用者の作ったファイルには触れない）。途中の記録は完了の記録を書いた後も残し、
-    一時ファイルの片付けが済んでから消す（片付けの前に再び中断しても、次の片付けが一時ファイルの名前を読めるようにするため）。
-    片付けが済まず途中の記録を残したことは、記録が残っていることで呼び手に伝わる。反映へ進む呼び手（`_recover_into`）は、
-    それを見て、記録を上書きも削除もせずに止める。
+    利用者の保存を別の名前（`launch.json.saved-<値>`）で残したらそのパスを返す。
     """
     pending_path = reflected_file(target, PENDING)
     rec = read_launch_record(pending_path)
     aside = target.with_name(target.name + REFLECTING)
     saved = None
-
     if aside.exists():
-        asided = content_version(aside)
-        if content_version(target) is None:
-            saved = _link_back(aside, target, rec, kept)
-        elif _placed(target, rec):
-            if asided == rec.get("base"):
+        now, kept = content_version(target), content_version(aside)
+        if now is None:
+            os.rename(aside, target)
+        elif now == rec.get("content"):
+            if kept == rec.get("base"):
                 aside.unlink()
+                _write_done(target, rec)
             else:
-                saved = _keep_as_saved(aside, target, rec, kept)
-            _write_done(target, rec)
-        elif asided == rec.get("base"):
+                os.replace(aside, target)
+        elif kept == rec.get("base"):
             aside.unlink()
         else:
-            saved = _keep_as_saved(aside, target, rec, kept)
-    else:
-        saved = _noted_saved(rec)  # 退避を別の名前で残し、退避を消した直後の中断
-        _tell(saved, kept)
-        if _placed(target, rec):
-            _write_done(target, rec)
-    # 置き換えの途中で止まったか強制終了した実行の一時ファイル。写しを移す先を記録できず残したときは、
-    # 次の片付けが名前を読めるよう途中の記録を消さない
-    if _drop_placing(target, rec):
-        pending_path.unlink(missing_ok=True)
+            saved = target.with_name(f"{target.name}.saved-{uuid.uuid4().hex[:8]}")
+            os.rename(aside, saved)
+    pending_path.unlink(missing_ok=True)
     return saved
 
 
-def _tell(path: Optional[Path], kept: Optional[list[Path]]) -> None:
-    """別の名前で残した保存のパスを呼び手の一覧 `kept` へ足す（まだ載っていなければ）。"""
-    if path is not None and kept is not None and path not in kept:
-        kept.append(path)
-
-
-def _keep_as_saved(path: Path, target: Path, rec: Optional[dict[str, Any]] = None, kept: Optional[list[Path]] = None) -> Path:
-    """利用者の保存 `path` を `launch.json.saved-<値>` へ名前を変えて残し、そのパスを返す。
-
-    `kept` を渡せば、保存を別の名前で置いた時点（`os.link` が済んだか、同じ実体の既存の名前を確かめた時点）でそのパスを足す。
-    続く `path` の削除が `OSError` で止まっても、保存は既に別の名前にあるので、呼び手が結果に載せられるようにするためである。
-
-    同じ名前の保存が既にあれば上書きしないよう、名前が空いているときだけ成功する `os.link` で置き、重なれば別の値で取り直す。
-    反映の途中の記録 `rec` を渡せば、`path` を消す前に、使う名前を途中の記録の `saved` に書く。前の実行が名前を書いた後に中断して
-    いれば、その名前を使い直す（同じ保存を 2 つの名前で残さない）。
-    """
-    planned = rec.get("saved") if rec else None
-    while True:
-        if isinstance(planned, str) and Path(planned).parent == target.parent and Path(planned).name.startswith(f"{target.name}.saved-"):
-            saved = Path(planned)
-        else:
-            saved = target.with_name(f"{target.name}.saved-{uuid.uuid4().hex[:8]}")
-        planned = None
-        if rec and rec.get("saved") != str(saved):
-            rec["saved"] = str(saved)
-            launch_candidates.write_launch_record(reflected_file(target, PENDING), rec)
-        try:
-            os.link(path, saved)
-        except FileExistsError:  # noqa: NDF401 ファイル: 前に残した保存と名前が重なれば、別の値で取り直す
-            if not _same_file(path, saved):
-                continue
-        _tell(saved, kept)
-        path.unlink()
-        return saved
-
-
-def _same_file(a: Path, b: Path) -> bool:
-    """`a` と `b` が同じ実体か（前の実行が `os.link` で残した後に中断した名前か）。"""
-    try:
-        x, y = os.lstat(a), os.lstat(b)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 片方が無ければ同じ実体ではない
-        return False
-    return (x.st_dev, x.st_ino) == (y.st_dev, y.st_ino)
-
-
-def _link_back(path: Path, target: Path, rec: Optional[dict[str, Any]] = None, kept: Optional[list[Path]] = None) -> Optional[Path]:
-    """`path` を反映先の名前へ戻す。反映先が既にあれば（照らした後の利用者の保存）上書きせず、`path` を別の名前で残してそのパスを返す。
-
-    別の名前で残したら、置いた時点でそのパスを `kept` に足す（`_keep_as_saved`）。
-    """
-    try:
-        os.link(path, target)
-    except FileExistsError:  # 照らした後に保存された反映先は残し、戻す側を別の名前で残す
-        return _keep_as_saved(path, target, rec, kept)
-    path.unlink()
+def _done_of(candidate: Path) -> Optional[dict[str, Any]]:
+    """候補を反映した完了の記録（反映先ごとに最後の 1 件）。無ければ None。"""
+    for path in _store(REFLECTED).glob("*" + DONE):
+        rec = read_launch_record(path)
+        if rec.get("candidate") == candidate.parent.name and isinstance(rec.get("target"), str):
+            return rec
     return None
 
 
@@ -1191,23 +776,7 @@ def _still_placed(rec: Optional[Mapping[str, Any]]) -> bool:
     return rec is not None and content_version(Path(str(rec["target"]))) == rec.get("content")
 
 
-@dataclass(frozen=True)
-class Reflected:
-    """`reflected` が照らした完了の記録から読んだ結果。`saved` は、その反映で利用者の保存を別の名前で残したパス（無ければ None）。"""
-
-    saved: Optional[Path] = None
-
-
-def reflected(candidate: Path, target: Path, sha256: str, request_id: Optional[str]) -> Optional[Reflected]:
-    """候補が無い打ち直しで、今の作業場所の反映先 `target` の完了の記録と反映先の中身を照らす。済んでいなければ None。何も書かない。
-
-    ほかの作業場所の完了の記録は見ない（別の worktree で打ち直したとき、その作業場所へ反映していないのに済んだとしないため）。
-    別の名前で残した保存のパスは、照らしたのと同じ 1 回の読み取りから返す。読み直すと、間に同じ反映先の次の反映が完了したとき、
-    この操作の結果に次の操作の保存先を付けてしまうためである。
-    """
-    rec = read_launch_record(reflected_file(target, DONE))
-    if rec.get("candidate") != candidate.parent.name or rec.get("target") != str(target):
-        return None
-    if (rec.get("sha256"), rec.get("request_id")) != (sha256, request_id) or not _still_placed(rec):
-        return None
-    return Reflected(_noted_saved(rec))
+def reflected(candidate: Path, sha256: str, request_id: Optional[str]) -> bool:
+    """候補が無い打ち直しで、完了の記録と反映先の中身を照らす。何も書かない。"""
+    rec = _done_of(candidate)
+    return rec is not None and (rec.get("sha256"), rec.get("request_id")) == (sha256, request_id) and _still_placed(rec)
