@@ -126,11 +126,13 @@ experimental/ndf/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
+| `findings` | `lines` があり、行番号が含まれない | 数えない |
 | `findings` | 行が見る範囲の外、またはコードブロックの中 | 数えない |
 | `findings` | 「人へ残す判断」の表の行で、「判断」が `blank`・番号が無い・「なぜ当たるか」が `blank` のどれか | 指摘する |
 | `findings` | `delegates` が真で `named` が偽 | 指摘する |
 | `findings` | `delegates` が真で `named` が真 | 指摘しない |
-| `findings` | `lines` があり、行番号が含まれない | 数えない |
+
+`findings` の行は、表の上から順に当て、最初に当たった行で結果を決める。`lines` の範囲の確認は、表の不備や委ね方を指摘する条件より先に行う。後に置くと、差分の外にある既存の不備まで指摘し、利用者は今回変更していない判断を直すまで PR を送れなくなるためである。ただし `named` が相手にする表の行は、`lines` に依らず文書全体の表から読む（差分の外の表の行も、委ねる行の対応付けの相手になる）。
 | `named` | 行の番号のどれかが、`blank` でない「判断」と「なぜ当たるか」を持つ表の行の番号と同じで、その表の行の正規化した「判断」が、正規化した委ねる行に含まれる | 真 |
 | `named` | 番号の直後が「に当たらない」「には当たらない」「に該当しない」 | その番号を数えない |
 
@@ -171,7 +173,7 @@ experimental/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `findings` | 設計文書の「行の例」の 2 つの表の行がすべて期待どおりに判定される | 3 つのセクションのどれか 1 つだけに委ねる行がある。コードブロックとインラインコードの中の語。`lines` が空集合 | 見る範囲の外の委ねる行を指摘しない |
+| `findings` | 設計文書の「行の例」の 2 つの表の行がすべて期待どおりに判定される | 3 つのセクションのどれか 1 つだけに委ねる行がある。コードブロックとインラインコードの中の語。`lines` が空集合。`lines` の外に欄を欠く表の行と番号の無い委ね方の行があり、`lines` の中に正常な表の行と番号を名指しした行がある文書は、指摘 0 件 | 見る範囲の外の委ねる行を指摘しない |
 | `decision_rows` | 3 欄の表を読む | 欄が `**` だけ・`—` だけ・`要確認` だけ。番号が `` `C2` `` | 欄の見出しの無い表は欠けた欄として指摘される |
 | `redline_rows` | 番号を持つ行だけを返す | 番号の欄が空 | 表が無ければ空 |
 | `anchors_lost` | 行を消す・「判断」か番号を書き換える・「なぜ当たるか」を `—` にすると真 | 行を足すだけ、「なぜ当たるか」を別の文にするだけは偽 | 分岐点に表が無ければ偽 |
@@ -233,7 +235,7 @@ experimental/ndf/
     - `heading_touched` が真のファイル
     - `added_lines` が None を返したファイル（読めない hunk の見出しがある）
   - 副作用: git を起動する（下の表）。取得（fetch）はしない
-  - 差分の形の固定: 解析する差分の出力は、利用者とプロジェクトの Git の設定に左右されない形に固定する。`git diff` には、既存の `mvv.LOCAL_DIFF` と同じく `--no-color`・`--no-ext-diff`・`--no-textconv`・`--src-prefix=a/`・`--dst-prefix=b/` を必ず付け、`-c core.quotePath=false` で起動する。外部 diff や textconv が働くと、hunk の行番号が作業ツリーの本文と合わなくなり、変えた行が検査から漏れるためである
+  - 差分の形の固定: 解析する差分の出力は、利用者とプロジェクトの Git の設定に左右されない形に固定する。`git diff` には、既存の `mvv.LOCAL_DIFF` と同じく `--no-color`・`--no-ext-diff`・`--no-textconv`・`--src-prefix=a/`・`--dst-prefix=b/` を必ず付け、`-c core.quotePath=false` で起動する。外部 diff や textconv が働くと、hunk の行番号が作業ツリーの本文と合わなくなり、変えた行が検査から漏れるためである。行番号を取る差分には `--inter-hunk-context=0` も付ける。利用者が `diff.interHunkContext` を設定していると、`-U0` でも近い hunk が 1 つに結合され、hunk の新しい側の範囲に変えていない行が入る。すると今回触れていない委ね方まで検査に掛かり、利用者は変更の外の書き直しを求められる
 - `check`
   - 事後条件: 指摘が無ければ `status: ok`（対象 0 件も含む）。あれば `stopped`（`check_failed`）で、`items` は `{"name": "<パス>:<行>", "rule": "unnamed_redline", "text": "<行の文>"}`。`metrics` に `failed_tests` を置かないので、`ndf route repeat` の同じ原因のキーは指摘の中身によらず `["check_failed", []]` になる
 - `_design_check`
@@ -246,7 +248,7 @@ experimental/ndf/
 | 1 | `start_point.resolve` の `rev-parse`（と、読めなければ `git remote`） | 起点の参照と SHA |
 | 2 | `Git.merge_base(<起点>, "HEAD")` | 分岐点 |
 | 3 | `git diff --name-status -z --find-renames --no-ext-diff --no-textconv <分岐点> --` と `git ls-files --others --exclude-standard -z` | 足した・変えた・名前を変えたパスと未追跡のパス |
-| 4 | `git -c core.quotePath=false diff -U0 --find-renames --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ <分岐点> -- <パス>...` を 1 回。パスには、追跡済みの対象の新しいパスと、名前を変えた対象の前のパスを全部渡す | 対象ごとの、足した・変えた行と、見出しに触れたか |
+| 4 | `git -c core.quotePath=false diff -U0 --inter-hunk-context=0 --find-renames --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ <分岐点> -- <パス>...` を 1 回。パスには、追跡済みの対象の新しいパスと、名前を変えた対象の前のパスを全部渡す | 対象ごとの、足した・変えた行と、見出しに触れたか |
 | 5 | `Git.blobs` に `<分岐点>:<前のパス>` をまとめて 1 回 | `anchors_lost` と `heading_touched` に渡す分岐点の本文 |
 
 4 で前のパスも渡すのは、Git が改名を見つけるのは比べる両側のパスがパスの指定に入っているときだけだからである。新しいパスだけを渡すと、Git は名前を変えたファイルを新規の追加として出し、全行を足した行として返す。その結果、変えていない既存の行まで検査に掛かり、利用者は今回の変更の外の書き直しを求められる。`--find-renames` を明示するのは、利用者の `diff.renames` の設定によらず改名を見つけるためである。
@@ -308,7 +310,7 @@ experimental/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `from_base` | Git のアダプターを差し替えた偽物（`git diff --name-status`・`ls-files`・`diff -U0`・`blobs` の出力を文字列で返す）で、追加・変更・名前の変更と、未コミット・未追跡のファイルを対象にし、削除のファイルを除く | 対象 0 件。表の行を消したファイル・見出しを足したファイル・読めない hunk の見出しを返したファイルが全行になる。表に行を足しただけのファイルは足した行だけ。名前を変えて一部を直したファイルは直した行だけで、本文を変えない改名は 0 行。行番号を取る `diff` は対象が複数でも 1 回で、名前を変えた対象の前のパスも渡し、`--find-renames`・`--no-ext-diff`・`--no-textconv`・`--no-color` を含む。空白を含むパスの部分（実際の形の `+++ b/a b.md<TAB>` と `rename to a b.md`）と、引用されたパスの部分（`+++ "b/t\tx.md"`）を正しい対象に結び付ける。4 の部分に結び付けられない対象と、改名の組が 3 と食い違う対象（3 では追加で 4 では改名）は全行になる | 起点が無いと `precondition`（ローカルブランチが無いだけでは失敗しない）。`GitError` で `precondition` |
+| `from_base` | Git のアダプターを差し替えた偽物（`git diff --name-status`・`ls-files`・`diff -U0`・`blobs` の出力を文字列で返す）で、追加・変更・名前の変更と、未コミット・未追跡のファイルを対象にし、削除のファイルを除く | 対象 0 件。表の行を消したファイル・見出しを足したファイル・読めない hunk の見出しを返したファイルが全行になる。表に行を足しただけのファイルは足した行だけ。名前を変えて一部を直したファイルは直した行だけで、本文を変えない改名は 0 行。行番号を取る `diff` は対象が複数でも 1 回で、名前を変えた対象の前のパスも渡し、`--find-renames`・`--no-ext-diff`・`--no-textconv`・`--no-color`・`--inter-hunk-context=0` を含む。空白を含むパスの部分（実際の形の `+++ b/a b.md<TAB>` と `rename to a b.md`）と、引用されたパスの部分（`+++ "b/t\tx.md"`）を正しい対象に結び付ける。4 の部分に結び付けられない対象と、改名の組が 3 と食い違う対象（3 では追加で 4 では改名）は全行になる | 起点が無いと `precondition`（ローカルブランチが無いだけでは失敗しない）。`GitError` で `precondition` |
 | `from_files` | 設計成果物でない名前のファイルも全行を見る | 空のファイル | 無いファイルで `precondition` |
 | `check` | 指摘なしは `ok` | 対象 0 件で `ok` | 指摘ありは `check_failed` と `items` の 3 つの欄 |
 | `_design_check` | `--result` に標準出力と同じ結果を書く | — | 入力が無い・両方ある組で `invalid` |
@@ -329,7 +331,9 @@ experimental/ndf/
 | ステップ `design-check-repeat` | 設定値（`run`: `["ndf", "route", "repeat", "--result", "{state_dir}/design-check.json", "--log", "{state_dir}/design-check-causes.jsonl"]`、`next`: `design-check-fix`） | 同上 | — |
 | ステップ `design-check-fix` | 設定値（`run`: `["{{worker}}", "design-check-fix"]`、`next`: `design-check`） | 同上 | — |
 | ステップ `design-check-reviewed` と、その `-repeat`・`-fix` | 設定値（上の 3 つと同じ形。結果は同じ `{state_dir}/design-check.json` に上書きし、直しの作業が直前の検査の結果を同じパスで読めるようにする。繰り返しの記録は分けて `{state_dir}/design-check-reviewed-causes.jsonl`。`design-check-reviewed-fix` の `next` は `review-fixed`、`design-check-reviewed` の `next` は `push-reviewed`） | `templates/design.json` | — |
-| ステップ `review-fixed` | 設定値（`run` は `review` のステップと同じ、`next`: `design-check-reviewed`。`on_cause` を持たないので、`incomplete` を含め完了しなければプランが止まる） | `templates/design.json` | — |
+| ステップ `review-fixed` | 設定値（`run`: `["{{review}}"]`、`next`: `design-check-reviewed`。`on_cause` を持たないので、`incomplete` を含め完了しなければプランが止まる） | `templates/design.json` | — |
+
+`review-fixed` の `run` には、`review` のステップが渡す `--findings {state_dir}/rebuild.json` を付けない。`rebuild.json` は組み直しが最初のレビューへ引き継いだ足すべき内容で、最初のレビューがすでに扱っている。直した版にもう一度渡すと、解決済みの組み直しの指摘が再び修正の対象になり、同じ修正のやり直しや、未完了による停止が起きる。直した版のレビューが見るのは、直した版そのものと、そのレビューが新しく出す指摘だけである。`document-review` の `review-fixed` も同じく `["{{review}}"]` で、`--findings` を持たない（もともと最初の `review` も持たない）。
 | 値 `base` | 設定値（`params` に足す） | `templates/design-detail.json` | `route.derived_locally` の `default_base` |
 
 `design.json` でつなぎ直す分岐は次のとおりである（設計文書の「処理の流れ」の表）。
@@ -347,7 +351,7 @@ experimental/ndf/
 
 | 対象 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `design` のプラン | 指摘が無ければ `design` → `rebuild` → `design-check` → `push` → … → `design-check-reviewed` → `push-reviewed` → `conflict-check` → `ci` | 1 回落ちて直すと検査へ戻る。`review` の `incomplete` は `design-check-reviewed` へ進む | 3 回目の `check_failed` で `fix_limit`。`review-fixed` の `incomplete` で止まる。`precondition` は直しへ回らない。`ci-fix`・`base-sync`・`fix-base`・`fix-push`・`fix-push-reviewed` の後に検査を通らずに push すると落ちる |
+| `design` のプラン | 指摘が無ければ `design` → `rebuild` → `design-check` → `push` → … → `design-check-reviewed` → `push-reviewed` → `conflict-check` → `ci` | 1 回落ちて直すと検査へ戻る。`review` の `incomplete` は `design-check-reviewed` へ進む | 3 回目の `check_failed` で `fix_limit`。`review-fixed` の `incomplete` で止まる。`precondition` は直しへ回らない。`ci-fix`・`base-sync`・`fix-base`・`fix-push`・`fix-push-reviewed` の後に検査を通らずに push すると落ちる。`review-fixed` の `run` が `--findings` を含むと落ちる |
 | `design-detail` のプラン | `work` → `design-check` → `push` | `fix-push` の後に検査へ戻る | `base` を渡さずに組むと、`.ndf/project.json` の `branch_strategy` のスプリントの PR のマージ先が入る。その宣言が無ければ `RouteError` |
 
 ## 文書レビューのプランのテンプレートと工程の定義
@@ -398,7 +402,7 @@ experimental/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_tabled` | `plugins/ndf/src/ndf/domains/records/mvv_gate.py` | 新設 | `(j: _Judging, rows: Sequence[Mapping[str, Any]], outcome: dict[str, Any]) -> dict[str, Any]` | 省く結果のときだけ、差分の設計成果物の head の表にレッドラインの番号を持つ行か、読めないファイルがあれば、`skip` を偽にし `target` を取り除いて `why` に理由を足す |
-| `_table_numbers` | `mvv_gate.py` | 新設 | `(hub: GitHub, head: str, paths: Sequence[str]) -> dict[str, Optional[tuple[str, ...]]]` | `paths` の本文を `hub.aliased` の 1 回の要求（件数が `github.graphql-batch` を超えた分だけ次の要求）で読み、パスごとに `design_check_decide.redline_rows` の番号を出てくる順に重複なく返す。本文が無いパス（Blob でない・応答に無い）は None にする。GitHub の失敗は `GitHubError` をそのまま送出する |
+| `_table_numbers` | `mvv_gate.py` | 新設 | `(hub: GitHub, head: str, paths: Sequence[str]) -> dict[str, Optional[tuple[str, ...]]]` | `paths` の本文を `hub.aliased` の 1 回の要求（件数が `github.graphql-batch` を超えた分だけ次の要求）で読み、パスごとに `design_check_decide.redline_rows` の番号を出てくる順に重複なく返す。本文が無いパス（Blob でない・応答に無い）と、本文が切り詰められたパス（`isTruncated` が真）は None にする。GitHub の失敗は `GitHubError` をそのまま送出する |
 | `_judged` | `mvv_gate.py` | 変更 | 変えない | 最後の `j.posted_if_current(_bound(j, …))` を `j.posted_if_current(_tabled(j, rows, _bound(j, …)))` にする |
 
 - `_tabled`
@@ -409,7 +413,8 @@ experimental/ndf/
   - `why` の形: 番号を持つファイル 1 件につき `TABLE_KEPT + "<パス>（<番号>・<番号>）"`、読めないファイル 1 件につき `TABLE_UNREADABLE + "<パス>（<理由>）"` を、差分の順に今の `why` の後ろへ足す。`<理由>` は、本文が無いときは「本文が無い」、`GitHubError` のときは `j.text("table_unreadable", exc)`（`failure_text` の定型文と診断の記録の識別子）である。`GitHubError` は要求の全体の失敗なので、そのときはすべてのパスを読めないファイルとして並べる
 - `_table_numbers`
   - 事前条件: `head` は判定した PR の head の SHA（`j.pull.head_sha`）
-  - 事後条件: パスごとの選択は `object(expression: "<SHA>:<パス>") { ... on Blob { oid text } }` になる（式の文字列は JSON の文字列として引用する）。ブランチ名でなく SHA を渡すので、判定の間に PR が進んでも判定した版を読む
+  - 事後条件: パスごとの選択は `object(expression: "<SHA>:<パス>") { ... on Blob { oid text isTruncated } }` になる（式の文字列は JSON の文字列として引用する）。ブランチ名でなく SHA を渡すので、判定の間に PR が進んでも判定した版を読む
+  - 切り詰めの扱い: GitHub は大きな blob の `text` を途中で切って返し、そのとき `isTruncated` を真にする。切られた本文で表を読むと、後ろにある「人へ残す判断」の表の行を見落とし、承認ゲートを省く側へ倒れる。そこで `isTruncated` が真のパスは、`text` が文字列でも読まずに None（本文が無い）として返す。実験版の「本文の読み取り」と同じ扱いである
 
 ### 異常系の処理
 
@@ -417,6 +422,7 @@ experimental/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `_table_numbers` | 本文を読めない | GitHub の失敗・上限・権限 | `aliased` の `GitHubError` | 送出する（`_tabled` が受ける） | 無し（`_tabled` が `why` に載せる） | 再実行できる |
 | `_table_numbers` | 本文が無い | パスが blob でない・応答に無い | 応答の `text` が文字列でない | そのパスの値を None にして返す | 無し（`_tabled` が `why` に載せる） | 再実行できる |
+| `_table_numbers` | 本文が切り詰められた | blob が GitHub の返す本文の上限を超える | 応答の `isTruncated` が真 | `text` を読まず、そのパスの値を None にして返す（省かない側へ倒す） | 無し（`_tabled` が `why` に「本文が無い」として載せる） | 同じ版では打ち直しても変わらない。人が承認ゲートで見る |
 | `_tabled` | 本文を読めないファイルがある | `_table_numbers` がそのパスに None を返すか、`GitHubError` を送出した | 戻り値と `except GitHubError` | 省かない側へ倒して続ける | 出力 `mvv_gate.skip` が偽、`why` に「設計文書の本文を読めないため、『人へ残す判断』の表を確かめられない: <パス>（<理由>）」。`<理由>` は「本文が無い」か `failure_text` の定型文と診断の記録の識別子で、GitHub の例外の文は載せない（全文は手元の診断の記録へ書く）。終了コードは今の `ndf records mvv gate` と同じ | 次の判定で読み直す |
 | `_tabled` | 番号を持つ行がある | 設計者が判断を人へ残した | `_table_numbers` のそのパスの値が空でない | 省かない | `skip` が偽、`why` に「設計文書の『人へ残す判断』の表に、レッドラインに当たる判断がある: <パス>（<番号>）」。`target` を持たない | 人の承認を待つ |
 
@@ -449,7 +455,7 @@ experimental/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_tabled`（`gate` を通して見る） | 回答が `follow` で boundary が空でも、表に番号を持つ行があれば `skip` が偽、`target` が無く、`why` にパスと番号。番号の無い表・表の無い設計成果物・差分に設計成果物の無い PR は省ける | 表の行が差分の外にある。番号が `` `C2` ``。同じ行がマージ先にもある（前に人が承認した行）でも省かない。削除した設計成果物は読まない | 本文を読めない（`GitHubError`・`text` が None）と省かない。設計成果物が 2 件でも GitHub の要求は 1 回。省けない判定では表を読む要求を送らない。承認の対象を読めないときは表を読まない。選択の式が head の SHA であること |
+| `_tabled`（`gate` を通して見る） | 回答が `follow` で boundary が空でも、表に番号を持つ行があれば `skip` が偽、`target` が無く、`why` にパスと番号。番号の無い表・表の無い設計成果物・差分に設計成果物の無い PR は省ける | 表の行が差分の外にある。番号が `` `C2` ``。同じ行がマージ先にもある（前に人が承認した行）でも省かない。削除した設計成果物は読まない | 本文を読めない（`GitHubError`・`text` が None）と省かない。`text` が文字列でも `isTruncated` が真なら省かず、`why` にそのパスが載る（切られた本文の前半に番号を持つ行が無く、後半にある場合を作る）。設計成果物が 2 件でも GitHub の要求は 1 回。省けない判定では表を読む要求を送らない。承認の対象を読めないときは表を読まない。選択の式が head の SHA であること |
 
 ## 起点の解決
 
