@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
@@ -90,9 +90,12 @@ def _local_sections(g: git.Git, base: str, wt: Path) -> tuple[list[str], Optiona
 
 
 def decide(
-    wt: Path, base: str, every_section: bool, data: Mapping[str, Any], resolved: ScopeSettings
+    wt: Path, base: str, every_section: Callable[[], bool], data: Mapping[str, Any], resolved: ScopeSettings
 ) -> tuple[scope_decide.Scope, list[str]]:
-    """次のラウンドの範囲と注意を、手元のオブジェクトと状態の記録 `data` から決める（リモートから取得しない）。"""
+    """次のラウンドの範囲と注意を、手元のオブジェクトと状態の記録 `data` から決める（リモートから取得しない）。
+
+    `every_section` は、範囲がセクションの読み取りで全差分に決まらないときだけ呼ぶ（呼ぶとルートのテンプレートを読んで検証する）。
+    """
     rounds = store.list_of(data, store.ROUNDS)
     g = git.Git.offline(wt)
     # `cli._resolve` が求めたメインディレクトリから読む（`g.remote()` は `git worktree list` を打ち直す）
@@ -107,6 +110,6 @@ def decide(
     unit = scope_decide.unit_id(resolved.unit)
     basis = scope_decide.Basis(merge_base, resolved.seats.names, resolved.settings.focus, now, unit=unit)
     prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_of(data, basis.mvv)
-    found = scope_decide.review_scope(every_section, len(rounds) + 1, prev, sections, reviewed)
+    found = scope_decide.review_scope(every_section(), len(rounds) + 1, prev, sections, reviewed)
     got = round_scope.descended(g, found, "HEAD")
     return got, unsure if rounds else []

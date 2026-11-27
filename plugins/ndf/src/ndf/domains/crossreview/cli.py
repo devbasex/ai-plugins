@@ -321,7 +321,7 @@ def cmd_scope(args: argparse.Namespace) -> int:
     resolved = _or_stop(lambda: _resolve(wt, args.reviewer))
     if isinstance(resolved, int):
         return resolved
-    got, warnings = local_scope.decide(wt, args.base, _every_section(args.purpose), data, resolved)
+    got, warnings = local_scope.decide(wt, args.base, lambda: _every_section(args.purpose), data, resolved)
     item = {"kind": "scope", "scope": got.kind, "base": got.base, "unreviewed": list(got.unreviewed)}
     summary = f"round {len(rounds) + 1} の範囲は {got.kind}（詳細レビューを通らないセクション {len(got.unreviewed)} 件）"
     return _ok(summary, [item], **({"warnings": warnings} if warnings else {}))
