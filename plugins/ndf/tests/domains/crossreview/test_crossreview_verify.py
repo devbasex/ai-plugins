@@ -451,6 +451,18 @@ def test_issue_4363_excerpt_lines_give_the_text_of_the_lines_the_full_diff_does_
     assert verify_decide.excerpt_lines("", "") == ""
 
 
+def test_issue_4363_judge_diffs_reads_the_diffs_without_converting_a_lone_cr(tmp_path: Path) -> None:
+    """全差分の行の中の単独の CR の後ろを追加行と読み違えず、全差分に載らない追加行の本文を抜粋に書く。"""
+    full, since, excerpt = tmp_path / "round2.diff", tmp_path / "since.diff", tmp_path / "excerpt.diff"
+    head = b"diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n"
+    full.write_bytes(head + b"@@ -1 +1 @@\n-old\n+a\r+b\n")
+    since.write_bytes(head + b"@@ -1 +1,2 @@\n a\n+restored\n")
+    run = SimpleNamespace(documents=True, input_path=lambda round_no, suffix: excerpt)
+    prep = SimpleNamespace(diff=full, previous=SimpleNamespace(diff=since))
+    assert reviewing.judge_diffs(run, 2, prep) == (full, excerpt)
+    assert "追加 新2: restored" in excerpt.read_text(encoding="utf-8").split("\n")
+
+
 def test_issue_4363_ask_lists_the_diffs_of_each_finding_when_they_differ(tmp_path: Path) -> None:
     """指示は渡す指摘の差分をすべて挙げ、一覧の各行はその指摘の差分だけを持つ。渡さない指摘の差分は挙げない。"""
     diff, seen = _diff(tmp_path), []
