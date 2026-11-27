@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -311,7 +312,9 @@ def _start_and_watch(spec: Launch, poll: Optional[float]) -> AgentStatus:
     """起動して見る。起動できない（実行ファイルが無い・実行権が無い）ときは `AgentState.FAILED` を返す。
 
     監視が割り込まれたら（Ctrl+C など）、子の組を止めてから割り込みを伝える。子は別セッションで端末の割り込みが届かず、
-    残すと監視の上限が効かないまま動き、起動のスロットを返した後や呼び元が入力を片付けた後も動き続ける。"""
+    残すと監視の上限が効かないまま動き、起動のスロットを返した後や呼び元が入力を片付けた後も動き続ける。停止を待つ間にもう一度
+    割り込まれたら、猶予を打ち切って組へ SIGKILL を送る（呼び元は、子が止まった前提で出力を移して片付ける）。
+    割り込みが届くのはメインスレッドで監視する起動だけである。"""
     try:
         proc = _start(spec)
     except OSError as exc:
@@ -320,7 +323,11 @@ def _start_and_watch(spec: Launch, poll: Optional[float]) -> AgentStatus:
     try:
         return watch(proc, spec, poll)
     except BaseException:
-        process_group.stop_group(proc)
+        try:
+            process_group.stop_group(proc)
+        except BaseException:
+            process_group.signal_group(proc.pid, signal.SIGKILL)  # `start_new_session` なので組の番号は子の pid
+            raise
         raise
 
 

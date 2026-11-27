@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import signal
+from types import SimpleNamespace
 
 import pytest
 
@@ -106,3 +108,19 @@ def test_issue_4363_interrupted_watch_stops_the_child_group_before_raising(monke
     with pytest.raises(KeyboardInterrupt):
         agents._start_and_watch(None, None)
     assert stopped == [child]
+
+
+def test_issue_4363_second_interrupt_during_the_stop_kills_the_child_group(monkeypatch):
+    """停止の猶予中の割り込みでは、SIGKILL を送ってから伝える（子は起動しない）。"""
+    child, sent = SimpleNamespace(pid=4363), []
+
+    def interrupted(*_):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(agents, "_start", lambda spec: child)
+    monkeypatch.setattr(agents, "watch", interrupted)
+    monkeypatch.setattr(agents.process_group, "stop_group", interrupted)
+    monkeypatch.setattr(agents.process_group, "signal_group", lambda pgid, sig: sent.append((pgid, sig)))
+    with pytest.raises(KeyboardInterrupt):
+        agents._start_and_watch(None, None)
+    assert sent == [(4363, signal.SIGKILL)]
