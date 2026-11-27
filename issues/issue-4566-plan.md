@@ -15,7 +15,7 @@
 | `src/ndf/testing/means.py`（新設） | テストを確かめる手段の判定 |
 | `src/ndf/domains/crossrefactor/protected_decide.py`・`local_gate.py`（新設） | テストの定義のファイルの判定、手元の最終ゲート |
 | `src/ndf/core/converge/worktree.py`・`src/ndf/testing/weight.py` | 取得済みの先頭を受け取る同期、リダイレクト先も含む語の並び |
-| `src/ndf/domains/crossrefactor/{cli.py, drive.py, workspace.py, final_gate.py, final_gate_decide.py, prompt_decide.py}` | 引数、経路の分岐、排他ロック、記録、指示文 |
+| `src/ndf/domains/crossrefactor/{cli.py, drive.py, workspace.py, final_gate.py, final_gate_decide.py, prompt_decide.py, store.py}` | 引数、経路の分岐、排他ロック、記録、指示文、状態ファイルのキーの説明 |
 | `src/ndf/progress/{command.py, refactor_values.py, invoke.py}`・`src/ndf/core/route/__init__.py` | 条件の語、起動の組み立て、プランの形 |
 | `contracts/workflow/{stages/refactor.json, ndf.schema.json}`・`contracts/templates/{cross-refactoring.json, parts/steps.json}` | 工程の条件、`follow` のステップ |
 | `contracts/{schemas/ndf-settings/project.schema.json, schemas/io/refactor.args.schema.json, version.json, limits/test-run.test.json, limits/cross-refactoring.gate-log.keep.json}`・`docs/contracts/commands.md`・`skills/development-workflow/schemas/project.schema.json` | 設定のキーとコントラクト |

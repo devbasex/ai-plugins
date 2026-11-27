@@ -19,11 +19,12 @@ plugins/ndf/
     core/converge/worktree.py
     testing/weight.py
     domains/crossrefactor/{cli.py, drive.py, workspace.py, final_gate.py, final_gate_decide.py,
-                           local_gate.py *, protected_decide.py *, prompt_decide.py}
+                           local_gate.py *, protected_decide.py *, prompt_decide.py, store.py}
   contracts/{workflow/, templates/, schemas/, limits/, version.json}
   docs/contracts/commands.md
   skills/{development-workflow, cross-refactoring}/
 docs/specifications/
+docs/{glossary.md, glossary/}
 ```
 
 依存は一方向である。`progress`・`domains/crossrefactor` が `testing` を読み、`testing/means.py` は `testing` の中の純粋な関数だけを読む。`core/route` は手段の判定を読まず、起動の引数に `--local-test` があるかだけを見る。`protected_decide.py` はファイルもプロセスも触らず、git を読むのは `local_gate.py` である。
@@ -48,12 +49,14 @@ docs/specifications/
 | `src/ndf/domains/crossrefactor/final_gate.py` | 変更 | 直しが対象範囲の外を変えていないかを調べる関数を、2 つの経路から呼べるようにする。CI の記録にチェックの名前を載せる | `final_gate_decide` | `final_gate` | △`check_fix`（旧 `_check_fix`）・`fix_or_undo`（旧 `_fix_or_undo`）・`run_gate` |
 | `src/ndf/domains/crossrefactor/final_gate_decide.py` | 変更 | 直しの範囲の判定に、除くファイルを足す | `testing.scoped` | `final_gate_decide` | △`verify_final_fix` |
 | `src/ndf/domains/crossrefactor/prompt_decide.py` | 変更 | 手元で落ちたときの指示文 | — | `prompt_decide` | △`final_fix` |
+| `src/ndf/domains/crossrefactor/store.py` | 変更 | モジュールの説明にある状態ファイルのキーの表へ、新しいキーを書き足す。関数は変えない | — | `store` | — |
 | `contracts/limits/test-run.test.json` | 変更 | `read_by` に `local_gate` を足す | — | — | — |
 | `contracts/limits/cross-refactoring.gate-log.keep.json` | 新設 | 手元の最終ゲートのログを残す秒（2592000 秒 = 30 日） | — | — | — |
 | `contracts/schemas/ndf-settings/project.schema.json`・`skills/development-workflow/schemas/project.schema.json` | 変更 | 設定のキー `test.protected_files` と `test.local_total_minutes` を足す。2 つ目のファイルは、1 つ目と 1 バイトも違わないコピーにする | — | — | — |
 | `contracts/schemas/io/refactor.args.schema.json`・`contracts/version.json`・`docs/contracts/commands.md` | 変更 | コマンドのコントラクト（生成して書き直す） | — | — | — |
 | `skills/development-workflow/SKILL.md`・`skills/cross-refactoring/SKILL.md` | 変更 | 手順書 | — | — | — |
 | `docs/specifications/` の 3 本（`ndf-ci-only-tests.md`・`ndf-review-units-and-refactoring-timing.md`・`ndf-stage-plan-work-prompts.md`） | 変更 | 確定仕様 | — | — | — |
+| `docs/glossary/glossary.json`・`docs/glossary.md`・`docs/glossary/ndf-ci-test.md` | 変更 | 用語集に「テストを確かめる手段」を足す | — | — | — |
 | `tests/testing/test_means.py`・`tests/domains/crossrefactor/{test_local_gate.py, test_protected.py}` | 新設 | 新しい部品のテスト | — | — | — |
 | `tests/progress/{test_model.py, test_run.py, test_invoke_refactor.py, test_sprint_templates.py}`・`tests/route/test_templates.py`・`tests/domains/crossrefactor/{test_drive.py, test_refactor_cli.py, test_prompt_decide.py}` | 変更 | 今あるテスト | — | — | — |
 
@@ -162,7 +165,7 @@ argparse の「どちらか 1 つ必須」は使わない。失敗が結果 JSON
 
 ## 手元の最終ゲート
 
-満たす決定: 決定 4・5・6・9・10、受け入れ条件 4
+満たす決定: 決定 4・5・6・9・10・11、受け入れ条件 4
 
 ### 関数の仕様
 
@@ -443,7 +446,7 @@ s=$(cat "$2") && [ -n "$s" ] && { [ "$(git rev-parse HEAD)" = "$s" ] || { git fe
 
 ## 最終ゲート修正の指示文
 
-満たす決定: 決定 6、受け入れ条件 4
+満たす決定: 決定 6・11、受け入れ条件 4
 
 ### 関数の仕様
 
@@ -468,5 +471,6 @@ s=$(cat "$2") && [ -n "$s" ] && { [ "$(git rev-parse HEAD)" = "$s" ] || { git fe
 | `skills/development-workflow/SKILL.md` | 工程の表の「リファクタリング」の行を、行を増やさずに書き換える。実行の条件、`workflow.stages` で止める書き方（キー・`reason` が必須・新しく作るスプリントから効く）、`test.protected_files`・`test.local_total_minutes` への参照 |
 | `skills/cross-refactoring/SKILL.md` | 引数の表に `--local-test`・`--pushed-out`、手元の最終ゲートの流れと停止理由、必須のチェックの経路が確かめる範囲 |
 | `docs/specifications/` の 3 本 | 「CI テストの設定が無いリポジトリでは通さない」を今の振る舞いとして書いている所を直す |
+| `docs/glossary/glossary.json`・`docs/glossary.md`・`docs/glossary/ndf-ci-test.md` | 設計文書の「用語」の表の「テストを確かめる手段」を、領域 `ndf-ci-test` に足す |
 
 `.md` の文言を照合するテストは書かない。
