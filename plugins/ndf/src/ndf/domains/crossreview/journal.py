@@ -554,7 +554,7 @@ class FindingJournal:
         self.revived: list[str] = []
         # 最後の `enter` で新しく出たか戻った指摘の id（判定役へ渡す候補。1 文の無いまま戻った指摘と、違う位置の重い報告が並ぶ指摘は除く。#4363）
         self.fresh: list[str] = []
-        # 最後の `enter` で新しく出たか戻った指摘の id ごとの、その行へ重ねた報告が全差分を読んだ席のものか（`FULL_DIFF`）
+        # 最後の `enter` で新しく出たか戻った指摘の id ごとの、その行をそろえた報告が全差分を読んだ席のものか（`FULL_DIFF`）
         self.read_full: dict[str, frozenset[bool]] = {}
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
@@ -622,7 +622,6 @@ class FindingJournal:
             touched[key] = known
             same.setdefault(str(known["id"]), []).append(item)
         self.fresh = self._align_fresh(fresh, same, denied, set(self.revived[before:]), items)
-        self.read_full = {fid: frozenset(bool(i.get(criteria_decide.FULL_DIFF)) for i in same[fid]) for fid in self.fresh}
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
 
@@ -635,10 +634,13 @@ class FindingJournal:
         items: Sequence[str],
     ) -> list[str]:
         """新しく出たか戻った行 `fresh` を出し直し `same` の 1 件にそろえ（`_align_report`）、判定役へ渡す候補の id を返す。
-        `denied` の行は、否定した内容の報告（`_denied_report`）を除いてそろえる。`back` は戻った行。"""
+        `denied` の行は、否定した内容の報告（`_denied_report`）を除いてそろえる。`back` は戻った行。判定役へ渡す差分を選ぶ
+        `read_full` も、除いた後の報告から作る。"""
+        self.read_full = {}
         out = []
         for fid in dict.fromkeys(fresh):
             reports = [i for i in same[fid] if not _denied_report(i, items, denied.get(fid))]
+            self.read_full[fid] = frozenset(bool(i.get(criteria_decide.FULL_DIFF)) for i in reports)
             aligned = _align_report(self.rows[fid], reports, items, denied.get(fid))
             if CHECK not in self.rows[fid] and aligned is not None and (aligned or fid not in back):
                 out.append(fid)

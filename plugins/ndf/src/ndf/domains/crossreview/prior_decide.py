@@ -62,7 +62,8 @@ class Carried(NamedTuple):
     """前の実行から引き継ぐ未解決の指摘 1 件。`comment` は開いたままのスレッドの最初のコメントの id（記録のコメントから
     戻した指摘は None）。`mvv` から `unpinned_severity` までは、記録のコメントにある MVV の判定（欄の意味は `report_decide.MARKS`）。
     `thread` は、記録のコメントから戻した指摘が持っていたスレッドの最初のコメントの id。`protect` は記録のコメントにある
-    保護の種類（#4363）。"""
+    保護の種類（#4363）。`split` は、記録のコメントで、本文の先頭が同じ指摘を 2 行に分けた後の方の行を表す
+    （`report_decide.SPLIT`。#4363）。"""
 
     id: str
     comment: Optional[int]
@@ -79,6 +80,7 @@ class Carried(NamedTuple):
     unpinned_severity: Optional[str] = None
     thread: Optional[int] = None
     protect: Sequence[str] = ()
+    split: bool = False
 
 
 # 記録のコメントから戻した指摘の id の頭（`p-<元の id>`。新しい実行の `r<ラウンド>-<n>` と重ねない）

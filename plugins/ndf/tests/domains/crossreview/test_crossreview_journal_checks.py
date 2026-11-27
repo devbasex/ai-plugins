@@ -37,6 +37,13 @@ def test_issue_4363_enter_remembers_the_new_and_revived_findings() -> None:
     assert journal.fresh == []
 
 
+def test_issue_4363_denied_report_does_not_add_its_diff_to_the_recheck() -> None:
+    """確かめ直しの差分は、否定済みとして除いた報告の席が読んだものを含めない。"""
+    journal, _ = _lowered(path="x.py")
+    journal.enter(2, [_told(path="x.py", full_diff=True), _told(path="x.py", impact="既存の設定が消える")], ITEMS, V11)
+    assert journal.fresh == ["r1-1"] and journal.read_full["r1-1"] == {False}
+
+
 @pytest.mark.parametrize("severity", ["major", "critical"])
 def test_issue_4363_3_finding_that_does_not_hold_is_lowered_and_not_handed(severity: str) -> None:
     journal = drive.FindingJournal()
