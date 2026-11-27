@@ -302,7 +302,8 @@ def test_sorting_prefers_a_line_over_a_file_only_report_only_when_it_takes_a_com
 def test_sorting_never_places_a_line_outside_the_pr_diff(reports: tuple[int, ...], line) -> None:
     journal = journal_mod.FindingJournal()
     journal.enter(2, [_told(path="a.py", line=n) for n in reports])
-    assert journal.sort(TOUCHED._replace(commentable={"a.py": frozenset({5})})) == frozenset()
+    # 5 行目は変えていない行なので、判定役の回答が無い扱いにして、両方の出し直しを進む側にする
+    assert journal.sort(TOUCHED._replace(commentable={"a.py": frozenset({5})}), {"r2-1"}) == frozenset()
     row = journal.rows["r2-1"]
     assert (row["path"], row.get("line")) == ("a.py", line)
 
