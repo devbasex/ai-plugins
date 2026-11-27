@@ -7,7 +7,7 @@ import pytest
 from ndf.domains.crossreview import criteria_decide, drive, journal as journal_mod, verify_decide
 from ndf.domains.crossreview import finish_decide as fin
 
-from .test_crossreview_journal import IMPACT, ITEMS, V11, _row, _told
+from .test_crossreview_journal import ITEMS, V11, _row, _told
 
 # --- 判定役の確認（#4363） ---------------------------------------------------------------------
 
@@ -127,7 +127,7 @@ def test_issue_4363_lowered_finding_stays_lowered_when_raised_again() -> None:
 )
 def test_issue_4363_lowered_finding_raised_with_other_content_is_unlowered_and_not_asked(other: dict, order: int) -> None:
     """下げた指摘は、行の番号だけが違う同じ内容の出し直しでは下げたまま、内容の違う重い出し直しでは元の重要度へ戻し、
-    本文と位置は行のまま、判定役へ渡し直さない。"""
+    本文と位置を今回の報告へ置き換えて、判定役へ渡し直さない。"""
     journal, row = _lowered(severity="critical", path="a.py", line=1)
     journal.enter(2, [_told(severity="critical", path="a.py", line=9)])
     assert (row["severity"], row["check"]["lowered"]) == ("minor", True)
@@ -139,7 +139,10 @@ def test_issue_4363_lowered_finding_raised_with_other_content_is_unlowered_and_n
         changed["text"] = "A" * 500 + other["text"]
     journal.enter(3, [same, changed][::order])
     assert (row["severity"], row["check"]["lowered"], journal.fresh) == ("critical", False, [])
-    assert (row["text"], row["impact"], row["path"], row["line"]) == ("A" * 500, IMPACT, "a.py", 1)
+    told = tuple(changed.get(k) for k in ("text", "impact", "path", "line", "section"))
+    assert tuple(row.get(k) for k in ("text", "impact", "path", "line", "section")) == told
+    # 前の本文のスレッドから切り離す
+    assert (row["round"], journal.revived) == (3, ["r1-1"])
 
 
 @pytest.mark.parametrize("order", [1, -1])

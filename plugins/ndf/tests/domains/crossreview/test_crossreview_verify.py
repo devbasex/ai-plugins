@@ -422,6 +422,9 @@ def test_issue_4363_ask_points_the_mvv_criterion_at_the_copies_in_the_input_dire
 def test_issue_4363_filled_read_gives_the_diffs_read_by_the_seats_of_the_finding(key: str, names: list) -> None:
     filled = reviewing.FilledRead(Path("full.diff"), frozenset({"filled", "both"}), frozenset({"other", "both"}))
     assert [d.name for d in filled.diffs(key, Path("round2.diff"))] == names
+    # 全差分でレビューし直すラウンドは、埋めていない席が前の head からの差分も読む
+    since = [d.name for d in filled.diffs(key, Path("round2.diff"), Path("round2-since.diff"))]
+    assert since == [n for name in names for n in ([name, "round2-since.diff"] if name == "round2.diff" else [name])]
 
 
 def test_issue_4363_ask_lists_the_diffs_of_each_finding_when_they_differ(tmp_path: Path) -> None:

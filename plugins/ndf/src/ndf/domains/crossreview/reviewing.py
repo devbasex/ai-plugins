@@ -132,11 +132,12 @@ class FilledRead(NamedTuple):
     keys: frozenset[str]
     others: frozenset[str]
 
-    def diffs(self, key: object, round_diff: Path) -> tuple[Path, ...]:
-        """キー `key` の指摘を出した席が読んだ差分。両方の席が出した指摘は、ラウンドの差分 `round_diff` と全差分の両方。"""
+    def diffs(self, key: object, *round_diffs: Path) -> tuple[Path, ...]:
+        """キー `key` の指摘を出した席が読んだ差分。`round_diffs` は埋めていない席が読んだ差分（`prompt_diffs`）で、
+        両方の席が出した指摘は、それと全差分の両方。"""
         if key not in self.keys:
-            return (round_diff,)
-        return tuple(dict.fromkeys((round_diff, self.diff))) if key in self.others else (self.diff,)
+            return round_diffs
+        return tuple(dict.fromkeys((*round_diffs, self.diff))) if key in self.others else (self.diff,)
 
 
 class Reviewed(NamedTuple):
@@ -169,7 +170,7 @@ def review_round(
     before = Reviewed([], {}, False) if held is None else held
     asked = list(run.seats if held is None else held.unread)
     prompt = review_prompt(run, round_no, prep, remarks)
-    required = _prompt_diffs(run, prep)
+    required = prompt_diffs(run, prep)
     prompts = dict.fromkeys(asked, prompt)
     full = None if before.filled is None else before.filled.diff
     if before.full_seats:
@@ -217,7 +218,7 @@ def _full_request(
     else:
         full = prep.diff if prep.scope.base is None else _full_diff(run, round_no, prep)
     fresh = prep._replace(scope=scope_decide.Scope(scope_decide.FULL, None, prep.scope.unreviewed), diff=full, previous=None)
-    return full, review_prompt(run, round_no, fresh, remarks), _prompt_diffs(run, fresh)
+    return full, review_prompt(run, round_no, fresh, remarks), prompt_diffs(run, fresh)
 
 
 def _fill_seats(
@@ -292,7 +293,7 @@ def kept(run: ReviewingRun, round_no: int, prep: Prepared, basis: scope_decide.B
     return Reviewed(list(held["raised"]), unread, False, read, tuple(held["full_seats"]))
 
 
-def _prompt_diffs(run: ReviewingRun, prep: Prepared) -> tuple[Path, ...]:
+def prompt_diffs(run: ReviewingRun, prep: Prepared) -> tuple[Path, ...]:
     """相手役のリクエスト（`review_prompt`）が読ませる差分のファイル。ラウンドの差分と、文書を含む PR で前のラウンドがあれば
     `criteria_decide.document_block` が読ませる前の head からの差分（PR 4461 の r2-2）。"""
     since = (prep.previous.diff,) if run.documents and prep.previous is not None else ()
