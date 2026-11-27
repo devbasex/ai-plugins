@@ -300,12 +300,21 @@ def own_commits(g: git.Git, remote: str, head: str) -> list[str]:
     return g.run("rev-list", "--reverse", "--no-merges", "--cherry-pick", "--right-only", f"{remote}...{head}").split()
 
 
-def _untracked_in_the_way(g: git.Git, remote: str) -> list[str]:
-    """未追跡のファイル（ignored を含む）のうち、`remote` が追跡するパスと重なる（reset で上書き・削除される）もの。"""
+def tracked_files(g: git.Git, commit: str) -> list[str]:
+    """コミットのツリーの追跡ファイル。"""
+    return [p for p in g.run("ls-tree", "-r", "--name-only", "-z", commit).split("\0") if p]
+
+
+def untracked_in_the_way(g: git.Git, commit: str) -> list[str]:
+    """未追跡のファイル（ignored を含む）のうち、`commit` が追跡するパスと重なる（`commit` へ reset すると上書き・削除される）もの。
+
+    親子のパスも重なりとして数える（追跡されるファイルの親のディレクトリにある未追跡のファイル、未追跡のファイルの下に追跡されるパス）。
+    リモートへの同期と、手元の最終ゲートの直す前の SHA へのロールバックが共に使う（#4566）。
+    """
     untracked = [p for p in g.run("ls-files", "--others", "-z").split("\0") if p]
     if not untracked:
         return []
-    files = {p for p in g.run("ls-tree", "-r", "--name-only", "-z", remote).split("\0") if p}
+    files = set(tracked_files(g, commit))
     dirs = {d for f in files for d in _parents(f)}
     return [p for p in untracked if _clashes(p, files, dirs)]
 
@@ -321,18 +330,29 @@ def _clashes(path: str, files: set[str], dirs: set[str]) -> bool:
     return path in files or path in dirs or any(p in files for p in _parents(path))
 
 
-def _refuse_lossy_sync(g: git.Git, remote: str, before: str) -> None:
+def _refuse_lossy_sync(g: git.Git, tip: str, before: str) -> None:
     """合わせると失うもの（送っていないマージのコミット・上書きされる未追跡のファイル）があれば `SyncRefused`。"""
-    merges = g.run("rev-list", "--merges", f"{remote}..{before}").split()
+    merges = g.run("rev-list", "--merges", f"{tip}..{before}").split()
     if merges:
         raise SyncRefused(
             f"送っていないマージのコミットがあり、載せ直すとマージで足した変更が消える。送ってから流し直す: {', '.join(merges)}"
         )
-    clashing = _untracked_in_the_way(g, remote)
+    clashing = untracked_in_the_way(g, tip)
     if clashing:
         raise SyncRefused(
             f"未追跡のファイルが origin の先頭の追跡するパスと重なり、合わせると上書きされる。移してから流し直す: {', '.join(clashing)}"
         )
+
+
+def dirty_tracked(g: git.Git) -> list[str]:
+    """追跡ファイルのうち commit していない変更があるパスの一覧（`git status --porcelain` の順）。"""
+    return [line[3:] for line in g.run("status", "--porcelain", "--untracked-files=no").splitlines() if line.strip()]
+
+
+def refuse_dirty(g: git.Git) -> None:
+    """追跡ファイルに commit していない変更があれば `SyncRefused`。"""
+    if dirty_tracked(g):
+        raise SyncRefused("worktree に commit していない変更がある。commit してから流し直す")
 
 
 def sync_worktree(g: git.Git, head_branch: str, remote: Optional[str] = None, base_branch: Optional[str] = None) -> SyncResult:
@@ -340,10 +360,17 @@ def sync_worktree(g: git.Git, head_branch: str, remote: Optional[str] = None, ba
 
     `base_branch` があれば同じ 1 回の取得でベースも取り、その先頭のコミットを `base` に返す。
     """
-    if g.run("status", "--porcelain", "--untracked-files=no").strip():
-        raise SyncRefused("worktree に commit していない変更がある。commit してから流し直す")
-    before = g.rev_parse("HEAD")
+    refuse_dirty(g)
     tip, base = fetch_tips(g, head_branch, remote, base_branch)
+    return sync_fetched(g, tip, base)
+
+
+def sync_fetched(g: git.Git, tip: str, base: str = "") -> SyncResult:
+    """取得済みの先頭 `tip` へ合わせ、送っていない自分のコミットを載せ直す。取得はしない（#4566。`sync_worktree` の後半）。
+
+    失うものがあれば何も変えずに `SyncRefused`。衝突したら前の HEAD へ戻して衝突したファイルを返す。
+    """
+    before = g.rev_parse("HEAD")
     _refuse_lossy_sync(g, tip, before)
     own = own_commits(g, tip, before)
     g.run("reset", "--hard", tip)

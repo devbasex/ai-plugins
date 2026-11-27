@@ -121,7 +121,7 @@ def test_refactor_without_the_workflow_settings_is_the_default_launch(tmp_path, 
     # 起点は読み込み済みの設定のマージ先（develop）を、工程の条件 code_in_diff と同じ規則で参照にしたもの
     seen = _watch_load(monkeypatch)
     values, _ = _refactor_values(tmp_path, monkeypatch, [1], lambda repo: None, DEFAULT_PROJECT)
-    assert values["refactor"] == route.refactor_launch("sprint/s1", "origin/develop", ["test"])
+    assert values["refactor"] == route.refactor_launch("sprint/s1", "origin/develop", ["--required", "test"])
     assert seen == []
 
 
@@ -132,13 +132,13 @@ def test_the_default_launch_takes_the_remote_of_the_worktree_as_the_stage_condit
 
     values, _ = _refactor_values(tmp_path, monkeypatch, [1], prepare, DEFAULT_PROJECT)
     repo = tmp_path / "repo"
-    assert values["refactor"] == route.refactor_launch("sprint/s1", "upstream/develop", ["test"])
+    assert values["refactor"] == route.refactor_launch("sprint/s1", "upstream/develop", ["--required", "test"])
     assert command.base_ref(Git(repo), "develop") == "upstream/develop"
 
 
 def test_the_default_launch_gets_the_candidates_after_it(tmp_path, monkeypatch):
     values, work = _refactor_values(tmp_path, monkeypatch, [1], lambda repo: _write_plan(repo, 1, "`invoke.py`"), DEFAULT_PROJECT)
-    launch = route.refactor_launch("sprint/s1", "origin/develop", ["test"])
+    launch = route.refactor_launch("sprint/s1", "origin/develop", ["--required", "test"])
     assert values["refactor"] == [*launch, "--candidates", str(work / "refactor-candidates.md")]
 
 
@@ -148,3 +148,36 @@ def test_refactor_without_the_required_checks_is_named_as_missing(tmp_path, monk
     with pytest.raises(invoke.TemplateValuesMissing) as got:
         _refactor_values(tmp_path, monkeypatch, [1], lambda repo: None, project)
     assert got.value.missing["refactor"] == invoke.FROM_PROJECT
+
+
+# #4566: 既定の起動は、工程の条件 tests_verifiable と同じ手段の判定（means.decide）で確かめ先を決める（不変条件 I1）
+SUITES = {"suites": [{"name": "unit", "runner": "pytest", "command": "pytest -q"}]}
+
+
+@pytest.mark.parametrize("ci", [{}, {"ci": {"only": False}}])
+def test_the_default_launch_without_required_checks_uses_the_local_test(tmp_path, monkeypatch, ci):
+    project = {"branch_strategy": DEFAULT_PROJECT["branch_strategy"], "test": {**SUITES, **ci}}
+    values, _ = _refactor_values(tmp_path, monkeypatch, [1], lambda repo: None, project)
+    assert values["refactor"] == route.refactor_launch("sprint/s1", "origin/develop", ["--local-test"])
+
+
+@pytest.mark.parametrize("ci", [{}, {"ci": {"only": False}}, {"ci": {"only": True}}])
+def test_the_default_launch_with_required_checks_waits_for_them_whatever_the_ci_test_setting(tmp_path, monkeypatch, ci):
+    # 受け入れ条件 1・2・3: 必須のチェックがあれば、CI テストの設定に関わらず --required で起動する
+    project = {**DEFAULT_PROJECT, "test": {**SUITES, **ci}}
+    values, _ = _refactor_values(tmp_path, monkeypatch, [1], lambda repo: None, project)
+    assert values["refactor"] == route.refactor_launch("sprint/s1", "origin/develop", ["--required", "test"])
+    assert "--local-test" not in values["refactor"]
+
+
+def test_ci_tests_without_required_checks_build_no_launch(tmp_path, monkeypatch):
+    # 決定 2: CI テストの設定があり必須のチェックが無ければ、手段は無し（条件の語も偽）
+    project = {"branch_strategy": DEFAULT_PROJECT["branch_strategy"], "test": {**SUITES, "ci": {"only": True}}}
+    with pytest.raises(invoke.TemplateValuesMissing):
+        _refactor_values(tmp_path, monkeypatch, [1], lambda repo: None, project)
+
+
+def test_a_given_launch_is_used_even_without_means(tmp_path, monkeypatch):
+    # 起動の指定は手段から組む起動より先に使う（優先順位の表の 3 行目）
+    values, _ = _refactor_values(tmp_path, monkeypatch, [1], lambda repo: None, REFACTOR_PROJECT)
+    assert values["refactor"] == ["ndf-refactor", "--pr", "7"]

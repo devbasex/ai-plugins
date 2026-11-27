@@ -430,10 +430,55 @@ def resolve(t: Template, given: Mapping[str, Value], *, local_tests: bool = True
     return values
 
 
+# `ndf refactor run` の手元の経路の引数と、手元の経路のプランが `refactor` の後に足す引数（#4566）
+LOCAL_TEST_FLAG = "--local-test"
+REFACTOR_TEMPLATE = "cross-refactoring"
+PUSHED_OUT = ["--pushed-out", "{state_dir}/pushed-sha"]
+
+
+class RouteUnsupported(RouteError):
+    """この変更では対応しない組み合わせ（手元の経路の `check` のプラン。#4472 で扱う）。停止理由は `precondition`。"""
+
+
+def _by_refactor_gate(name: str, plan: Mapping[str, Any], values: Mapping[str, Value]) -> dict[str, Any]:
+    """`{{refactor}}` の起動に `--local-test` があるかで、プランのステップを組み替える（#4566 の決定 6）。
+
+    `cross-refactoring` は、CI の経路なら `follow` を外し、手元の経路なら `push`・`fix-push` を外して `refactor` に
+    `--pushed-out` を足し `on_cause.incomplete` を消す（残すと `follow` を通らずに成功で終わる）。`check` の手元の経路は組まない。
+    """
+    launch = values["refactor"] if "refactor" in values else None
+    local = isinstance(launch, list) and LOCAL_TEST_FLAG in launch
+    if name == "check" and local:
+        raise RouteUnsupported(
+            "手元の経路（--local-test）の検査のプランは組まない。必須のチェックの無いリポジトリの検査のプランは #4472 で扱う"
+        )
+    if name != REFACTOR_TEMPLATE:
+        return dict(plan)
+    if not local:
+        return without_steps(plan, ["follow"])
+    return _local_refactor_plan(plan)
+
+
+def _local_refactor_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
+    """`cross-refactoring` の手元の経路のプラン。`push`・`fix-push` を外し、`refactor` のステップを組み替える。
+
+    `refactor` には `--pushed-out` を足し `on_cause.incomplete` を消す（残すと `follow` を通らずに成功で終わる）。
+    """
+    steps = []
+    for step in without_steps(plan, ["push", "fix-push"])["steps"]:
+        if step["id"] == "refactor":
+            causes_ = {k: v for k, v in step["on_cause"].items() if k != "incomplete"} if "on_cause" in step else {}
+            step = {k: v for k, v in step.items() if k != "on_cause"} | ({"on_cause": causes_} if causes_ else {})
+            step["run"] = [*step["run"], *PUSHED_OUT]
+        steps.append(step)
+    return {**plan, "steps": steps}
+
+
 def _built(t: Template, given: Mapping[str, Value], local_tests: bool) -> tuple[dict[str, Any], dict[str, Any]]:
-    """組んだプランと、埋める前に `use` を開いたプランの形（`expanded` の戻り値）。誤りは `RouteError`。"""
-    shape = expanded(t, local_tests=local_tests)
-    plan = _fill(shape, resolve(t, given, local_tests=local_tests))
+    """組んだプランと、埋める前のプランの形（`expanded` を `_by_refactor_gate` で組み替えたもの）。誤りは `RouteError`。"""
+    values = resolve(t, given, local_tests=local_tests)
+    shape = _by_refactor_gate(t.name, expanded(t, local_tests=local_tests), values)
+    plan = _fill(shape, values)
     try:
         model.parse(plan)
     except model.PlanError as exc:
@@ -445,13 +490,13 @@ def render(t: Template, given: Mapping[str, Value], *, local_tests: bool = True)
     """テンプレートを埋めたプラン（`model.parse` を通る形）。誤りは `RouteError`。
 
     `local_tests` が偽（CI テストの設定 `test.ci.only` があるリポジトリ）なら、手元でテストを打つステップ
-    （`LOCAL_TEST_STEPS`）を外して組む。テストは CI の結果で確かめる。
+    （`LOCAL_TEST_STEPS`）を外して組む。テストは CI の結果で確かめる。`{{refactor}}` の起動で経路を組み替える（`_by_refactor_gate`）。
     """
     return _built(t, given, local_tests)[0]
 
 
 def rendered(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> tuple[dict[str, Any], list[str]]:
-    """`render` と同じプランと、同じ展開から取った作業の名前（`kinds_of` と同じ並び。判定のために展開し直さない。#4513）。"""
+    """`render` と同じプランと、同じ形（`_built` の組み替えた形）から取った作業の名前（現れた順。判定のために展開し直さない。#4513）。"""
     plan, shape = _built(t, given, local_tests)
     return plan, list(dict.fromkeys(work_names(shape)))
 
@@ -695,13 +740,14 @@ def unit_review_launch(repo: str, command: Sequence[str]) -> list[str]:
     return ["sh", "-c", UNIT_REVIEW, repo, "{state_dir}", *command]
 
 
-def refactor_launch(branch: str, base_ref: str, required: Sequence[str]) -> list[str]:
+def refactor_launch(branch: str, base_ref: str, gate: Sequence[str]) -> list[str]:
     """設定が無いときの `{{refactor}}` の値（`REFACTOR_WITH_PR`）。PR の番号と触るファイルは打つ時点に読んで足す。
 
     位置引数は `$0` がブランチ、`$1` が起点で、本文の先頭の `shift` の後の `"$@"` が `ndf refactor run` の argv になる。
+    `gate` は最終ゲートの確かめ先の引数（`--required <名前>...` か `--local-test`。#4566）。
     """
     entry = identity.FIXED_WORDS["entrypoint"]
-    run = [entry, "refactor", "run", "--branch", branch, "--base", base_ref, "--required", *required]
+    run = [entry, "refactor", "run", "--branch", branch, "--base", base_ref, *gate]
     return ["bash", "-c", REFACTOR_WITH_PR, branch, base_ref, *run]
 
 

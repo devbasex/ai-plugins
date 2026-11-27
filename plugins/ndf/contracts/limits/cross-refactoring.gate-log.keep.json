@@ -1,0 +1,7 @@
+{
+  "summary": "手元の最終ゲートのログ（rf<PR>/logs/local-gate-*）を残す秒（30 日）。過ぎたものは次の refactor run・release が消す（#4566）",
+  "seconds": 2592000,
+  "read_by": [
+    "ndf.domains.crossrefactor.workspace"
+  ]
+}

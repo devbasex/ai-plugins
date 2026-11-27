@@ -819,6 +819,21 @@ PLAN_FAILURES = (
 )
 
 
+# 例外の型 → (停止理由の種類, 理由の文の形)。上から見て最初に当たった行を採る（派生の `RouteUnsupported` を `RouteError` より先に置く）
+_PLAN_STOPS: tuple[tuple[type[Exception], str, str], ...] = (
+    (route.RouteUnsupported, "precondition", "プランのテンプレート {name} を組まない: {exc}"),
+    (route.RouteError, "invalid", "プランのテンプレート {name} を埋められない: {exc}"),
+    (GitError, "precondition", "プランのテンプレート {name} の省いた値を決められない: {exc}"),
+    (FactUnknown, "precondition", "プランのテンプレート {name} のレビューの起点を決められない: {exc}"),
+    (OSError, "precondition", "プラン {name} の保存先へ書けない: {exc}"),
+    (
+        worker_paths.EntryError,
+        "precondition",
+        "プラン {name} の保存先のファイル（" + VALUES_FILE + " など）を安全に読み書きできない: {exc}",
+    ),
+)
+
+
 def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
     """プラン `name` を組めなかった例外の `stopped` の結果 JSON。分類に無い例外は None（呼び手が上げ直す）。
 
@@ -833,21 +848,12 @@ def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
     if isinstance(exc, (TemplateValuesMissing, KindInputsMissing)):
         detail = f"プラン {name} の差し込み {', '.join(exc.missing)} を決められない"
         return result.stopped(PLAN, "precondition", detail, items=exc.items)
-    if isinstance(exc, route.RouteError):
-        return result.stopped(PLAN, "invalid", f"プランのテンプレート {name} を埋められない: {exc}")
-    if isinstance(exc, GitError):
-        return result.stopped(PLAN, "precondition", f"プランのテンプレート {name} の省いた値を決められない: {exc}")
-    if isinstance(exc, FactUnknown):
-        return result.stopped(PLAN, "precondition", f"プランのテンプレート {name} のレビューの起点を決められない: {exc}")
     if isinstance(exc, github.GitHubError):
         detail = f"プランのテンプレート {name} の差し込みを GitHub から読めない: {exc}"
         return result.stopped(PLAN, _github_kind(exc), detail, retry_after=exc.retry_after)
-    if isinstance(exc, OSError):
-        return result.stopped(PLAN, "precondition", f"プラン {name} の保存先へ書けない: {exc}")
-    if isinstance(exc, worker_paths.EntryError):
-        return result.stopped(
-            PLAN, "precondition", f"プラン {name} の保存先のファイル（{VALUES_FILE} など）を安全に読み書きできない: {exc}"
-        )
+    found = next(((kind, form) for types, kind, form in _PLAN_STOPS if isinstance(exc, types)), None)
+    if found is not None:
+        return result.stopped(PLAN, found[0], found[1].format(name=name, exc=exc))
     if isinstance(exc, internal.InternalError):
         return result.stopped(PLAN, exc.kind, f"プラン {name} の前の回の結果を読めない: {exc}")
     return None

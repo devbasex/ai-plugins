@@ -146,3 +146,9 @@ def test_final_gate_passes_the_work_ndf_settings_to_the_failed_test_assembly(tmp
 def test_final_gate_default_reader_returns_empty_when_nothing_is_read():
     watched = ci.WatchResult(FAILED, 1, 0.0, 0.0)
     assert final_gate._failed_tests(_artifact_hub(broken_jobs=frozenset({1})), watched, ci.FailedTestSource()) == []  # type: ignore[arg-type]
+
+
+def test_excluded_files_count_as_outside_even_inside_the_scope():
+    # #4566: 手元の経路では、テストの定義のファイルを範囲の外として扱う
+    got = final_gate_decide.verify_final_fix({"a1": ["src/conftest.py", "src/a.py"]}, ["src"], lambda p: p.endswith("conftest.py"))
+    assert got.outside == (("a1", "src/conftest.py"),)

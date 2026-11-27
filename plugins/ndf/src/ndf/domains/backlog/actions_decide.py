@@ -31,7 +31,6 @@ CHANGE_KEYS = ("title", "body", "state", "state_reason", "add_labels", "remove_l
 STATES = ("open", "closed")
 KINDS = ("needs", "seeds", "policy")
 DECISION_LABEL = "needs-decision"
-FOLLOW = "follow"
 # 反映の区分（結果の items の result と metrics のキー）
 APPLIED, UNCHANGED, ALREADY, SKIPPED, WAITING, RETURNED_BUCKET, FAILED = (
     "applied", "unchanged", "already", "skipped_changed", "needs_approval", "returned", "failed",
@@ -199,7 +198,7 @@ def compose_body(c: dict[str, Any]) -> str:
 def create_labels(c: dict[str, Any]) -> list[str]:
     """起票のラベル。種類のラベルを足し、MVV の判定が follow でなければ要判断のマーカーを付ける。"""
     labels = list(dict.fromkeys([*(c["labels"] if "labels" in c else []), c["kind"]]))
-    if c.get("mvv_verdict") != FOLLOW and DECISION_LABEL not in labels:
+    if c.get("mvv_verdict") != "follow" and DECISION_LABEL not in labels:
         labels.append(DECISION_LABEL)
     return labels
 
