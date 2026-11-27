@@ -2370,7 +2370,7 @@
     {
       "term": "プロジェクトの設定",
       "context": "ndf-project-settings",
-      "meaning": "リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・デプロイ・課題の SSOT など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる",
+      "meaning": "リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（テスト・CI・ブランチ・デプロイなど）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる",
       "source": "plugins/ndf/skills/development-workflow/references/project-analysis.md"
     },
     {

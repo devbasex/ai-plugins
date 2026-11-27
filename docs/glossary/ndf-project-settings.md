@@ -7,7 +7,7 @@
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | SSOT |
 | --- | --- | --- | --- | --- | --- |
 | 設定 | — | リポジトリ側に置く .ndf/<名前>.json。無ければその機能は既定の動きだけになるか、何も動かない。「<対象>の設定」の形で呼ぶ（指示書チェックの設定・リリースの設定・ボードの設定・worktree の設定・用語集の設定）。git で追跡するものを共有設定、追跡しないものを個人設定と呼ぶ | 宣言 | — | `docs/specifications/ndf-instruction-files-check.md` |
-| プロジェクトの設定 | — | リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・デプロイ・課題の SSOT など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる | — | — | `plugins/ndf/skills/development-workflow/references/project-analysis.md` |
+| プロジェクトの設定 | — | リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（テスト・CI・ブランチ・デプロイなど）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる | — | — | `plugins/ndf/skills/development-workflow/references/project-analysis.md` |
 | 解析 | — | プロジェクトの設定を作るために、リポジトリと CI を決定論で測り、測った値から設定の中身を決めること | — | — | `docs/specifications/ndf-ci-only-tests.md` |
 | 不明 | — | 解析が測れなかった・決められなかった項目の値。ai-plugins の値で埋めない | — | — | `plugins/ndf/skills/development-workflow/references/project-analysis.md` |
 | 測った値 | — | 解析の測定が、ファイル・git・`gh` の出力から決定論で決めた項目の値 | — | — | `docs/specifications/ndf-next-closed-children-subcommands.md` |
