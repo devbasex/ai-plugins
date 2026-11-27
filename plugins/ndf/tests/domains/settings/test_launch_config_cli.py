@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
 from pathlib import Path
 
 import pytest
@@ -24,6 +26,7 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.chdir(root)
     monkeypatch.setattr(la, "repo_key", lambda _root: "/r")
     monkeypatch.setattr(lc, "_approver_name", lambda _root: "人")
+    monkeypatch.setattr(lc, "_reading_recordable", lambda _root: True)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s1")
     for name in ("NDF_AI_CHILD", "NDF_FACTORY_RUN", "NDF_RELAY_PLAN", "NDF_ORGANIZER_DIR"):
         monkeypatch.delenv(name, raising=False)
@@ -148,6 +151,54 @@ def test_where_answers_are_not_recorded_show_gives_the_terminal_command(repo, ca
     assert "launch-config approve --sha256 " + got["metrics"]["sha256"] in got["metrics"]["terminal"]
     assert not any(i["kind"] == "question" for i in got["items"])
     assert not la.state_file(la.QUESTIONS).exists()
+
+
+def test_without_a_github_remote_show_gives_the_terminal_command(repo, capsys, monkeypatch):
+    candidate = _draft(capsys)
+    monkeypatch.setattr(lc, "_reading_recordable", lambda _root: False)  # 読み手役の確認を記録できない
+    got = _run(capsys, "show", "--candidate", str(candidate), "--question", "approve")
+    assert "terminal" in got["metrics"] and not la.state_file(la.QUESTIONS).exists()
+
+
+def test_the_terminal_route_with_a_candidate_can_be_confirmed_after_the_reflection(repo, capsys, monkeypatch):
+    sub = repo / "sub"
+    sub.mkdir()
+    candidate = _draft(capsys)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+    monkeypatch.chdir(sub)
+    got = _run(capsys, "show", "--candidate", os.path.relpath(candidate, sub), "--question", "approve")
+    assert shlex.quote(str(candidate)) in got["metrics"]["terminal"]  # 根へ cd しても同じ候補を指す絶対パス
+    monkeypatch.setattr(lc, "_terminal", lambda: True)
+    typed = iter(["山田", got["metrics"]["sha256"][:8]])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(typed))
+    assert _run(capsys, "approve", "--sha256", got["metrics"]["sha256"], "--candidate", str(candidate))["status"] == "ok"
+    confirmed = _run(capsys, *got["routes"]["approved"]["argv"][2:])
+    assert confirmed["status"] == "ok" and confirmed["metrics"]["sha256"] == got["metrics"]["sha256"]
+    assert got["metrics"]["required"] and confirmed["metrics"]["approved"]
+
+
+def test_a_revoke_before_the_lock_stops_the_reflection(repo, capsys, monkeypatch):
+    candidate = _draft(capsys)
+    sha = _run(capsys, "show", "--candidate", str(candidate))["metrics"]["sha256"]
+    la.append("/r", sha, la.Action.APPROVE, approver="人")
+    reflect = la.reflect
+
+    def revoked_first(*args, **kwargs):
+        la.append("/r", sha, la.Action.REVOKE)  # 承認済みと見た後、錠を取る前の取り消し
+        return reflect(*args, **kwargs)
+
+    monkeypatch.setattr(la, "reflect", revoked_first)
+    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["cause"]["kind"] == "refused"
+    assert not (repo / ".ndf" / "launch.json").exists()
+
+
+def test_show_returns_the_continuation_even_when_the_setting_is_broken(repo, capsys):
+    _settings(repo, "{broken")
+    candidate = _draft(capsys)  # 壊れた設定を直す候補
+    got, question, _ = _ask(capsys, candidate)
+    _answer(question, la.APPROVE_LABEL.format("人"))
+    shown = _run(capsys, "show")
+    assert shown["cause"]["kind"] == "precondition" and shown["next"] == got["routes"]["approved"]
 
 
 def test_a_broken_setting_stops_show_but_a_candidate_can_still_be_shown(repo, capsys):

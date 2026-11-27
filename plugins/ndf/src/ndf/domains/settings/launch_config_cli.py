@@ -47,6 +47,10 @@ class _NoConsent(Exception):
     """承認の回答が使えない。"""
 
 
+class _Revoked(Exception):
+    """承認済みとして進めた内容の承認が、記録の錠を取るまでに取り消された（人の確認が要るようになった）。"""
+
+
 def _worktree_root() -> Path:
     return ls.launch_root(Path.cwd())
 
@@ -71,6 +75,21 @@ def _approver_name(root: Path) -> str:
     """承認の選択肢に出す名前（`git config user.name`。無ければログイン名）。"""
     name = git.Git(root).attempt("config", "user.name").stdout.strip()
     return name if name else getpass.getuser()
+
+
+def _reading_recordable(root: Path) -> bool:
+    """読み手役の確認を記録できるか。`ndf records reading add` は GitHub のリモートの `<所有者>/<リポジトリ>` で記録するため、
+    それが無い作業場所では質問の前の記録を作れない（質問ではなく端末のコマンドを返す）。"""
+    try:
+        git.Git(root).remote_repo()
+    except (git.GitError, OSError):
+        return False
+    return True
+
+
+def _widens(t: ls.Target) -> bool:
+    """承認の対象が許可を広げるか（空でなければ人の承認が要る）。"""
+    return bool(t.listing["unsandboxed"]) or any(t.listing["steps"].values())
 
 
 def _terminal() -> bool:
@@ -112,7 +131,12 @@ def _candidate_target(root: Path, cand: Path) -> ls.Target:
 
 
 def _base_metrics(repo: str, t: ls.Target) -> dict[str, Any]:
-    return {"sha256": t.sha256, "approved": la.is_approved(repo, t.sha256), "cleanup_targets": la.cleanup_targets(repo)}
+    return {
+        "sha256": t.sha256,
+        "required": _widens(t),
+        "approved": la.is_approved(repo, t.sha256),
+        "cleanup_targets": la.cleanup_targets(repo),
+    }
 
 
 def _show(a: argparse.Namespace) -> dict[str, Any]:
@@ -121,7 +145,20 @@ def _show(a: argparse.Namespace) -> dict[str, Any]:
     repo, target = la.repo_key(root), ls.launch_file(root)
     pending = la.pending_request(repo, target)
     extra = {"next": result.command(TOOL, *_approve_args(*(pending[k] for k in la.CONTINUATION)))} if pending else {}
+    try:
+        return _shown(a, root, cand, repo, target, extra)
+    except internal.InternalError as exc:
+        if not pending:
+            raise
+        # 回答済みの続きは、今の設定や MCP の定義を読めなくても返す（壊れた設定を直す候補への回答を失わない）
+        return result.stopped(TOOL, exc.kind, f"{exc}。回答済みで反映が済んでいない承認があるので、先に next のコマンドを打つ", **extra)
+
+
+def _shown(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: str, target: Path, extra: dict[str, Any]) -> dict[str, Any]:
+    """`show` の結果（続きのコマンド `extra` を添える）。設定を読めなければ `InternalError`。"""
     session = _session() if a.question else None
+    if session is not None and not _reading_recordable(root):
+        session = None
     if a.question is None or session is None:
         t = _candidate_target(root, cand) if cand else ls.approval_target(ls.load(root))
         metrics, items = _base_metrics(repo, t), [{"kind": "launch-target", **t.listing}]
@@ -129,12 +166,15 @@ def _show(a: argparse.Namespace) -> dict[str, Any]:
             return result.result(TOOL, result.OK, "承認の対象と状態。" + CLEANUP_NOTE, items, metrics, **extra)
         terminal = "cd {} && {}".format(
             shlex.quote(str(root)),
-            shlex.join([str(identity.entrypoint(identity.load().root)), TOOL, *_approve_args(t.sha256, None, a.candidate)]),
+            shlex.join([str(identity.entrypoint(identity.load().root)), TOOL, *_approve_args(t.sha256, None, str(cand) if cand else None)]),
         )
         summary = (
-            "回答を記録できない会話。利用者に端末で metrics.terminal のコマンドを打ってもらい、打ち終えた後に routes.approved で確かめる"
+            "回答を記録できない会話。利用者に端末で metrics.terminal のコマンドを打ってもらい、打ち終えた後に routes.approved で確かめる。"
+            "その結果の metrics.sha256 がこの結果の metrics.sha256 と同じなら設定へ反映済み。metrics.required が真なら、"
+            "その結果の metrics.approved が真のときに起動の許可も記録済み"
         )
-        routes = {"approved": result.command(TOOL, "show", *(["--candidate", str(cand)] if cand else []))}
+        # 反映すると候補は片付けられるので、確かめるのは候補ではなく反映先の今の設定
+        routes = {"approved": result.command(TOOL, "show")}
         return result.result(TOOL, result.GATE, summary, items, {**metrics, "terminal": terminal}, routes=routes, **extra)
     request = uuid.uuid4().hex
     shown: dict[str, ls.Target] = {}
@@ -142,12 +182,16 @@ def _show(a: argparse.Namespace) -> dict[str, Any]:
     def make_question() -> dict[str, Any]:
         # 候補は put_question が錠を取り、退避を戻してから読む（読む前に戻さないと、退避した候補を読めない）
         t = shown["t"] = ls.approval_target(ls.load(root, cand))
-        text = "\n".join([f"起動の設定を承認しますか（リクエスト {request}）", f"リポジトリ: {repo}", "操作: 承認", *_target_lines(t)])
+        if cand is not None:
+            head = f"この作業場所の {target} を候補の内容で置き換え、以下の起動時の許可を反映してよいですか"
+            effect = "この内容で起動してよい。承認を記録し、候補の内容で起動の設定を置き換える"
+        else:
+            head = f"この作業場所の {target} にある、以下の起動時の許可を承認してよいですか（設定ファイルは変えません）"
+            effect = "この内容で起動してよい。承認を記録する。設定ファイルは変えない"
+        # 識別子は、同じ内容の質問どうしを回答の記録で見分けるために入れる
+        text = "\n".join([head, *_target_lines(t), f"照合用のリクエストの識別子: {request}"])
         options = [
-            {
-                "label": la.APPROVE_LABEL.format(_approver_name(root)),
-                "description": "この内容で起動してよい。承認を記録し、起動の設定へ反映する",
-            },
+            {"label": la.APPROVE_LABEL.format(_approver_name(root)), "description": effect},
             {"label": la.DENY_LABEL, "description": "記録も反映もしない。起動の設定は変わらない"},
         ]
         question = {"questions": [{"question": text, "header": "起動の承認", "options": options, "multiSelect": False}]}
@@ -209,18 +253,23 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
     t = ls.approval_target(ls.load(root, cand))
     if t.sha256 != a.sha256:
         return _refused_config(f"示した内容（{a.sha256[:12]}…）と今の内容が違う。show で示し直して承認を取り直す")
-    needed = (bool(t.listing["unsandboxed"]) or any(t.listing["steps"].values())) and not la.is_approved(repo, t.sha256)
+    widens = _widens(t)
+    needed = widens and not la.is_approved(repo, t.sha256)
     approver = _confirm_terminal(t) if needed and a.request is None else None
     if needed and a.request is None and approver is None:
         return _refused_config("人の確認が無い。Skill の質問で回答するか、利用者が端末で打って名前とハッシュの先頭 8 文字を入れる")
 
     def record() -> None:
-        if not needed:
+        # 承認の記録の錠の中で呼ばれる。錠の外で見た「承認済み」は、錠を取るまでの取り消しで変わりうるので照らし直す
+        if not widens or (not needed and la.is_approved(repo, t.sha256)):
             return
-        if a.request is None:
+        if a.request is not None:
+            if la.approve_by_answer(repo, t.sha256, a.request) is None:
+                raise _NoConsent
+        elif approver is not None:
             la.write_row(la.state_file(la.APPROVALS), la.approval_row(repo, t.sha256, la.Action.APPROVE, approver))
-        elif la.approve_by_answer(repo, t.sha256, a.request) is None:
-            raise _NoConsent
+        else:
+            raise _Revoked
 
     try:
         if cand is None:
@@ -231,6 +280,8 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
             if not done:
                 kept = f"。利用者の保存を {done.saved} に残した" if done.saved is not None else ""
                 return _refused_config("候補を作った後に設定が別の作業で変わったため置き換えない。draft からやり直す" + kept)
+    except _Revoked:
+        return _refused_config("反映の直前に、この内容の承認が取り消された。記録も反映もしない。show で示し直して承認を取り直す")
     except _NoConsent:
         return _refused_config(
             "承認の回答が無いか使えない（未回答・承認しない・別の内容・より新しいリクエスト・取り消し・設定の変更）。質問を出し直す"
@@ -245,7 +296,9 @@ def _draft(a: argparse.Namespace) -> dict[str, Any]:
     root = _worktree_root()
     made = la.new_candidate(la.repo_key(root), ls.launch_file(root))
     metrics = {"candidate": str(made.candidate), "cleanup_targets": made.cleanup_targets}
-    return result.result(TOOL, result.OK, "候補を作った。直してから show --candidate で示す。" + CLEANUP_NOTE, metrics=metrics)
+    return result.result(
+        TOOL, result.OK, "候補を作った。直してから show --question approve --candidate で示す。" + CLEANUP_NOTE, metrics=metrics
+    )
 
 
 def _revoke(a: argparse.Namespace) -> dict[str, Any]:

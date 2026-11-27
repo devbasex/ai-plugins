@@ -62,7 +62,8 @@ ndf launch-config show
 ```
 
 - `metrics.approved` が今の内容がこのマシンで承認済みか、`items` の `launch-target` が承認の対象の一覧である
-- 結果に `next` があれば、回答済みで反映が済んでいない承認がある。先に `next.argv` のコマンドをそのまま打って片付ける
+- 結果に `next` があれば、回答済みで反映が済んでいない承認がある。先に `next.argv` のコマンドをそのまま打って片付ける。
+  今の設定が壊れていて `stopped` で止まった結果にも、`next` は付く
 - `metrics.cleanup_targets` は、利用者が手で消してよい候補の一覧である。利用者に示すときは、その候補を開いているエディタを閉じてから消すよう添える
 - **`stopped`（`precondition`）で止まっても、手順はそこで終えない。** 止まった文のファイルと位置を利用者に伝え、元のファイルは変えずに次へ進む
   - 壊れているのが `.ndf/launch.json` なら、手順 2 の候補の中身を読んで直す（`--candidate` を付けた `show` と `approve` は今の `.ndf/launch.json` を解析しない）
@@ -78,47 +79,66 @@ ndf launch-config draft
 利用者のリクエストに合わせて、この候補を編集する。MCP の定義ファイルが要るなら、パスを候補に書き、ファイルは利用者に書いてもらう。
 NDF が起動した AI の中（`NDF_AI_CHILD`）では `draft` は拒まれる。
 
-### 3. 承認の対象を示す
+### 3. 承認の対象を示し、承認の質問を作る
+
+候補を直し終えたら、承認の対象の一覧と承認の質問を、次の 1 回のコマンドで作る。
 
 ```bash
-ndf launch-config show --candidate <候補のパス>
+ndf launch-config show --question approve --candidate <候補のパス>
 ```
 
-`items` の `launch-target` から次を利用者に示す。MCP の定義の中身は出ないので、ファイルを開いて読むよう伝える。
+結果の `items` の `launch-target` から、次を利用者に示す。MCP の定義の中身は出ないので、ファイルを開いて読むよう伝える。
 
 - 工程ごとの `load`・`allow`・`mcp` の指定
 - MCP の定義ファイルごとの場所・ハッシュ・サーバ名・コマンド名
 - 安全装置を外してよいランタイム（`unsandboxed`）
 - 承認の対象のハッシュ（`metrics.sha256`）
 
-### 4. 承認の質問を出し、承認されたら反映する
+**承認の対象が空か承認済みでも、手順 4 を飛ばさない。** 手順 4 の進め方は、この結果の形で分かれる。
 
-```bash
-ndf launch-config show --question approve --candidate <候補のパス>
-```
-
-**承認の対象が空か承認済みでも、この手順を飛ばさない。** 結果の形で分かれる。
+### 4. 承認を取り、承認されたら反映する
 
 **`items` に `question` がある（Claude Code の対話の会話）**
 
-1. **読み手役に読ませる。** `items` の `question` の `input.questions[0].question`（質問の文）と、手順 3 で利用者に示した説明を 1 つのファイルに書き、
-   `ndf records reading prompt --file <JSON>` で読み手役への指示を作る。JSON は `files`（そのファイルのパス）・`reader`（`position`・`words`・`knowledge`。
-   読み手は起動の設定を承認する利用者）・`questions_kind`（`none`）を持つ。指示の文だけを渡して読み手役を起動する（Claude Code では新しい `ndf:worker`、
-   `description` は `検証: 読み手役（起動の承認・利用者）`）。直してよいのは手順 3 の説明だけで、質問の文は直さない
-2. **確認を記録する。** `input` の `questions` をそのまま入れた JSON を書き、`ndf records reading add --file <JSON>` を打つ。JSON は
-   `questions`・`prs`（空の配列）・`reads`（`question` と `material` の 2 行。`result` は合格なら `passed`、2 回目にも残ったなら `remained`）を持つ。
-   記録が無いと、hook の guard `reading-check` が質問を止める
+1. **読み手役に読ませる。** 手順 3 の結果の `items` の `question` にある `input.questions[0].question`（質問の文）と、手順 3 で利用者に示した説明を、
+   1 つのファイルに書く。`ndf records reading prompt --file <JSON>` で読み手役への指示を作り、指示の文だけを渡して読み手役を起動する
+   （Claude Code では新しい `ndf:worker`、`description` は `検証: 読み手役（起動の承認・利用者）`）。直してよいのは手順 3 の説明だけで、質問の文は直さない。
+   JSON には次の 3 つのキーだけを入れる。
+   - `files`: 書いたファイルのパスを 1 要素にした配列
+   - `reader`: `position`・`words`・`knowledge` の 3 つの空でない文字列を持つオブジェクト。読み手は起動の設定を承認する利用者
+   - `questions_kind`: `none`
+2. **確認を記録する。** `ndf records reading add --file <JSON>` を打つ。記録が無いと、hook の guard `reading-check` が質問を止める。
+   JSON には次の 3 つのキーだけを入れる。
+   - `questions`: `input` の `questions` をそのまま
+   - `prs`: 空の配列
+   - `reads`: 2 要素の配列。各要素に `name`（質問の文は `question`、手順 3 の説明は `material`）、`reader`（`承認する人`）、
+     `round`（1 か 2）、`result`（合格なら `passed`、2 回目にも残ったなら `remained`）を入れる
 3. **質問を出す。** `input` を 1 字も変えずに `AskUserQuestion` へ渡す。区分は `input.metadata.source` の `ndf-ask:redline:C7`（利用者の設定の書き換え）である
 4. 利用者が「承認する」を選んだら、`routes.approved.argv` のコマンドをそのまま打つ（`approve --sha256 <値> --request <リクエスト> --candidate <候補>`）。
    `ok` なら反映が済んだ。「承認しない」を選んだら何も打たず、記録も反映もしていないこと、`.ndf/launch.json` は変わっていないことを伝える
-5. 選択肢の承認者の名前は `git config user.name` から作る。利用者が名前が違うと回答したら、利用者に直してもらってから手順 4 をやり直す
+5. 選択肢の承認者の名前は `git config user.name` から作る。利用者が名前が違うと回答したら、利用者に直してもらってから手順 3 をやり直す
 
 **`items` に `question` が無く、`metrics.terminal` がある（回答を記録できない会話）**
 
-NDF が起動した AI・人のいない実行・計画のレーン・外のオーガナイザーのレーンと、`AskUserQuestion` の無いランタイム（Codex など）がここに当たる。
-`metrics.terminal` のコマンドを、区分の名前 `ndf-ask:redline:C7` を先頭に書いた文で利用者に伝え、利用者自身に端末で打ってもらう。
-コマンドは承認の対象を表示し、許可が広がる内容なら名前とハッシュの先頭 8 文字の入力を求める。打ち終えたと聞いたら、`routes.approved.argv`
-（`show`）を打って `metrics.approved` を確かめる。伝える文は、手順 4 の 1 と同じく読み手役に読ませてから出す（質問ではないので記録はしない）。
+次の場合がここに当たる。
+
+- NDF が起動した AI・人のいない実行・計画のレーン・外のオーガナイザーのレーン
+- `AskUserQuestion` の無いランタイム（Codex など）
+- GitHub のリモートが無い作業場所（`ndf records reading add` が GitHub のリポジトリの名前で記録するため、質問の前の確認を記録できない）
+
+1. **読み手役に読ませる。** 利用者に伝える文（`metrics.terminal` のコマンドと、手順 3 で示した説明）を 1 つのファイルに書き、
+   `items` に `question` がある場合の 1 と同じ入力（`files` はそのファイルのパスを 1 要素にした配列）で読み手役に読ませる。
+   質問ではないので、同じ場合の 2 の記録は作らない。
+   直してよいのは手順 3 の説明だけで、コマンドは変えない
+2. **端末で打ってもらう。** 読ませた文を、区分の名前 `ndf-ask:redline:C7` を先頭に書いて利用者に伝え、利用者自身に端末で打ってもらう。
+   コマンドは承認の対象を表示し、許可を広げる内容なら名前とハッシュの先頭 8 文字の入力を求める
+3. **結果を確かめる。** 打ち終えたと聞いたら、`routes.approved.argv` のコマンド（候補を付けない `show`）を打つ。反映すると候補は片付けられるので、
+   候補ではなく今の `.ndf/launch.json` を読む。次の 2 つを分けて確かめる。
+   - 設定へ反映したか: この結果の `metrics.sha256` が、手順 3 の結果の `metrics.sha256` と同じなら反映済み
+   - 起動の許可を記録したか: 手順 3 の結果の `metrics.required` が真（許可を広げる内容）なら、この結果の `metrics.approved` が真のときに記録済み。
+     `metrics.required` が偽なら、許可の記録は要らない
+
+   `show` が `stopped` で止まったときと、どちらかが済んでいないときは、端末に出た拒否の文を利用者に聞き、次の「`approve` が拒んだとき」の表に従う
 
 ### `approve` が拒んだとき
 
@@ -127,7 +147,8 @@ NDF が起動した AI・人のいない実行・計画のレーン・外のオ�
 | 文の中身 | すること |
 | --- | --- |
 | 示した内容と今の内容が違う | 候補か定義ファイルが変わった。手順 3 から示し直す |
-| 承認の回答が無いか使えない | 未回答・より新しい質問・取り消し・設定の変更のどれか。手順 4 の質問を出し直す |
+| 承認の回答が無いか使えない | 未回答・より新しい質問・取り消し・設定の変更のどれか。手順 3 から質問を作り直す |
+| 反映の直前に、この内容の承認が取り消された | 手順 3 から示し直し、承認を取り直す |
 | 候補を作った後に設定が別の作業で変わった | 手順 2 からやり直す。利用者の保存を別の名前で残したと書かれていれば、そのパスを伝える |
 | 候補が無く、反映も確かめられない | 手順 2 からやり直す |
 

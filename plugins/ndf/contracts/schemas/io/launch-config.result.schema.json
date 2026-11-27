@@ -11,6 +11,7 @@
       "additionalProperties": false,
       "properties": {
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "承認の対象のハッシュ"},
+        "required": {"type": "boolean", "description": "承認の対象が許可を広げ、人の承認が要るか（show）。偽なら approve は承認の行を書かない"},
         "approved": {"type": "boolean", "description": "このマシンでそのハッシュが承認済みか（show）"},
         "candidate": {"type": "string", "description": "作った候補のパス（draft）"},
         "request": {"type": "string", "description": "作った承認のリクエストの識別子（show --question approve）"},
