@@ -56,6 +56,11 @@ class Where:
     runtime: str
     key: str
 
+    @classmethod
+    def from_row(cls, row: Mapping[str, Any]) -> Where:
+        """`row`（割り付けの行か出現率の項目）が持つキー。"""
+        return cls(row["repo"], row["stage"], row["runtime"], row["key"])
+
     def of(self, row: Optional[Mapping[str, Any]]) -> bool:
         """`row`（割り付けの行か出現率の項目）が同じキーを持つか。"""
         return row is not None and all(row[k] == v for k, v in vars(self).items())

@@ -390,9 +390,10 @@ def _manual(
     )
 
 
-def _from_base(base: Optional[Mapping[str, str]], key: str) -> tuple[Optional[str], Source]:
-    value = base[key] if base is not None and key in base else None
-    return value, (Source.BASE if value is not None else Source.DEFAULT)
+def _from_arm(arm: Optional[Mapping[str, str]], key: str, source: Source) -> tuple[Optional[str], Source]:
+    """組 `arm` の `key` の値と出所。値があれば出所は `source`、組か値が無ければ `default`。"""
+    value = arm[key] if arm is not None and key in arm else None
+    return value, (source if value is not None else Source.DEFAULT)
 
 
 @dataclass(frozen=True)
@@ -640,7 +641,7 @@ def update_weights(store: Path, now: datetime, entry: Optional[Mapping[str, Any]
             found = []
         kept = [e for e in found if not _past(e, now)]
         if entry is not None:
-            at = Where(entry["repo"], entry["stage"], entry["runtime"], entry["key"])
+            at = Where.from_row(entry)
             kept = [e for e in kept if not at.of(e)] + [dict(entry)]
         elif len(kept) == len(found):
             return
@@ -766,14 +767,9 @@ def _left_experiment(rows: Sequence[Mapping[str, Any]], u: _Unit, own: Sequence[
     )
 
 
-def _from_arm(arm: Mapping[str, str], key: str) -> tuple[Optional[str], Source]:
-    value = arm[key] if key in arm else None
-    return value, (Source.EXPERIMENT if value is not None else Source.DEFAULT)
-
-
 def _with_assignment(choice: Choice, row: Mapping[str, Any]) -> Choice:
     arm = row["arms"][row["chosen"]]
-    (model, ms), (effort, es) = _from_arm(arm, "model"), _from_arm(arm, "effort")
+    (model, ms), (effort, es) = _from_arm(arm, "model", Source.EXPERIMENT), _from_arm(arm, "effort", Source.EXPERIMENT)
     return replace(choice, model=model, effort=effort, model_source=ms, effort_source=es, assign_id=row["assign_id"], arm=arm)
 
 
@@ -816,7 +812,7 @@ def _halt_manual(u: _Unit, charge_to: Optional[str]) -> None:
                 _halt(led, u, own[-1]["assign_id"] if own else None, Halt.MANUAL)
             charged = assigns(led.rows).get(charge_to) if charge_to is not None else None
             if charged is not None:
-                at = Where(charged["repo"], charged["stage"], charged["runtime"], charged["key"])
+                at = Where.from_row(charged)
                 _halt(led, replace(u, unit=charged["unit"], where=at), charged["assign_id"], Halt.MANUAL)
     except STORE_ERRORS as exc:
         log.warning("実験の記録へ手動の指定の停止を書けない（単位 %s）: %s", u.unit, exc)
@@ -848,7 +844,7 @@ def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
     row |= {"runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}
     append_row(row, choice.store)
     log.warning("組 %s は起動できなかったので、基準の組で続ける（工程 %s・単位 %s）", _arm_text(choice.arm), choice.stage, choice.unit)
-    (model, ms), (effort, es) = _from_base(choice.base_arm, "model"), _from_base(choice.base_arm, "effort")
+    (model, ms), (effort, es) = _from_arm(choice.base_arm, "model", Source.BASE), _from_arm(choice.base_arm, "effort", Source.BASE)
     back = replace(choice, model=model, effort=effort, model_source=ms, effort_source=es, assign_id=None, arm=None, raised=False)
     return _raised_once(back) if choice.retry is not None else back
 
@@ -904,8 +900,8 @@ def launch_choice(
     base = arms[0] if arms else None
     now = utc_now()
     store = _prepared_store(env, now, got.allocation["window_days"])
-    model, model_source = manual.model if manual.model is not None else _from_base(base, "model")
-    effort, effort_source = manual.effort if manual.effort is not None else _from_base(base, "effort")
+    model, model_source = manual.model if manual.model is not None else _from_arm(base, "model", Source.BASE)
+    effort, effort_source = manual.effort if manual.effort is not None else _from_arm(base, "effort", Source.BASE)
     if manual.inherited is not None:
         effort, effort_source = None, Source.ENVIRONMENT
     extra = dict(unit=req.unit, base_arm=base, inherited_effort=manual.inherited, retry=None if manual.given else req.retry, store=store)
