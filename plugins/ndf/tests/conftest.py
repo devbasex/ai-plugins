@@ -6,7 +6,7 @@
 テストの間にサブコマンドが出す結果 JSON は、すべて結果のコントラクト（形と、状態・停止理由と終了コードの対応）とサブコマンドの結果の
 スキーマ（`contracts/schemas/io/<サブコマンド>.result.schema.json`）で確かめる（fixture `_checked_emit`。#3518 の決定 9）。
 形の誤った結果をわざと作るテストはマーカー `ndf_bad_result` を付ける。全体の実行の終わりに、ok の出力を 1 度も確かめなかった
-サブコマンド（結果 JSON を出さない `cli.NO_RESULT_COMMANDS` を除く）があれば、その名前を出して落とす（`pytest_sessionfinish`）。CI はテストをファイル単位で 6 つのジョブへ分けるため、
+サブコマンド（結果 JSON を出すもの。`cli.RESULT_COMMANDS`）があれば、その名前を出して落とす（`pytest_sessionfinish`）。CI はテストをファイル単位で 6 つのジョブへ分けるため、
 環境変数 `NDF_OK_TOOLS_OUT` を渡された実行は記録を書くだけで、自分では確かめない。合わせて確かめるのは後のジョブ
 `pytest (NDF の ok の出力)` である。
 
@@ -117,7 +117,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         return
     if not is_full_run(config) or exitstatus != 0:
         return
-    missing = sorted(set(cli.COMMANDS) - _ok_tools - cli.NO_RESULT_COMMANDS)
+    missing = sorted(cli.RESULT_COMMANDS - _ok_tools)
     if missing:
         print(f"ok の出力が確かめられないサブコマンド: {', '.join(missing)}", file=sys.stderr)
         session.exitstatus = 1

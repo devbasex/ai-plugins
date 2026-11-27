@@ -111,6 +111,8 @@ COMMANDS: dict[str, str] = {
 DEVELOPER_COMMANDS = frozenset({"check", "manifests", "samples"})
 # 結果 JSON を出さないサブコマンド（標準出力を置き換えた CLI に渡し、失敗は標準エラーだけに書く。#1959 の `ndf delegate-run`）
 NO_RESULT_COMMANDS = frozenset({"delegate-run"})
+# ok の結果 JSON をテストで 1 度は確かめるサブコマンド（テストの全体の実行の終わりと CI のジョブ `pytest (NDF の ok の出力)` が使う）
+RESULT_COMMANDS = frozenset(COMMANDS) - NO_RESULT_COMMANDS
 # モジュールのパス → サブコマンドの名前（`tool_of` の引き。2 つの名前が同じモジュールを指すときは表の先の名前）
 _TOOL_OF: dict[str, str] = {path: name for name, path in reversed(COMMANDS.items())}
 
