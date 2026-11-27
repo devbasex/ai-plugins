@@ -66,8 +66,8 @@ def _watch_parser(sub: Any) -> None:
     w.add_argument(
         "--head",
         help="待つ PR の HEAD の SHA。チェック結果はこの SHA のものだけを読み、作業場所の HEAD は追わない。"
-        "待ちの開始時と、成功を返す直前に PR の HEAD を読み、この SHA と違えば approval_stale を返す。"
-        "成功を返す直前の読み直しで、成功 1 回につき PR の取得が 1 回増える"
+        "待ちの開始時と、必須チェックが通った時点に PR の HEAD を読み、この SHA と違えば approval_stale を返す。"
+        "必須チェックが通った起動は、approval_stale を返す場合も含めて PR の取得が 1 回増える"
         "（REST の上限に当たって GraphQL で読み替えるときは、API の要求がさらに 1 回増える）",
     )
     w.set_defaults(run=_watch)
@@ -249,7 +249,7 @@ def _watch(args: argparse.Namespace) -> dict:
     watched = watch.run()
     kind = watched.cause_by(classifier)
     if kind is None and args.head is not None:
-        # 成功を確定する前に PR を読み直す（待つ間に HEAD が動けば、読んだ結果は承認した HEAD のものと言えない。#3702）
+        # 必須チェックが通ったら PR を読み直す（チェックは承認した SHA に固定して読むので、PR の HEAD が動いても通る。#3702）
         moved = _moved_head(args, hub.pull(args.pr))
         if moved is not None:
             return moved
