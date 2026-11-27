@@ -240,3 +240,45 @@ def test_issue_1959_require_reports_whether_it_waited_for_the_version(tmp_path, 
     monkeypatch.setattr(cli_floor, "_read_version", lambda *a: "9.0.0")
     assert cli_floor.require("claude", str(exe)) is True
     assert cli_floor.require("claude", str(exe)) is False
+
+
+def test_issue_1959_require_waiting_for_another_threads_version_counts_as_waited(tmp_path, monkeypatch):
+    # #1959: 別のスレッドが `--version` を打っている間に錠を待った `require` も、記録に当たるが待ったとして真を返す
+    import threading
+
+    exe = tmp_path / "claude"
+    exe.write_text("", encoding="utf-8")
+    exe.chmod(0o755)
+    reading, release, queued = threading.Event(), threading.Event(), threading.Event()
+    real = cli_floor._LOCK
+
+    class Lock:
+        """錠を待たずに取れなかったことを知らせる錠（待つ側が錠の前に来たことを、時間を待たずに知るため）。"""
+
+        def acquire(self, blocking: bool = True) -> bool:
+            got = real.acquire(blocking)
+            if not got:
+                queued.set()
+            return got
+
+        def release(self) -> None:
+            real.release()
+
+    def read_version(*a):
+        reading.set()
+        assert release.wait(10)
+        return "9.0.0"
+
+    monkeypatch.setattr(cli_floor, "_LOCK", Lock())
+    monkeypatch.setattr(cli_floor, "_read_version", read_version)
+    got: dict[str, bool] = {}
+    first = threading.Thread(target=lambda: got.__setitem__("first", cli_floor.require("claude", str(exe))))
+    second = threading.Thread(target=lambda: got.__setitem__("second", cli_floor.require("claude", str(exe))))
+    first.start()
+    assert reading.wait(10)
+    second.start()
+    assert queued.wait(10)
+    release.set()
+    first.join(10)
+    second.join(10)
+    assert got == {"first": True, "second": True}

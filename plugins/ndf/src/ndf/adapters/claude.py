@@ -671,7 +671,7 @@ def _accounted(
 def require_claude(run: AccountRun, cwd: Optional[Path], check: bool, waited: Optional[list[bool]] = None) -> Optional[ClaudeReply]:
     """CLI の下限を確かめる。古ければ起動しない回答、下限を満たすか `check` が偽（確かめない）なら None。
 
-    `waited` を渡すと、確かめで `claude --version` を打って終わりを待ったか（記録を再利用したなら偽）を 1 つ足す。
+    `waited` を渡すと、確かめの間に待ったか（`claude --version` の終わりか、別の起動の `--version` を待つ錠。`cli_floor.require`）を 1 つ足す。
     """
     try:
         got = cli_floor.require("claude", run.argv[0], run.env, cwd) if check else False
@@ -684,8 +684,8 @@ def require_claude(run: AccountRun, cwd: Optional[Path], check: bool, waited: Op
 
 def _precheck(run: AccountRun, cwd: Optional[Path], options: LaunchOptions) -> Optional[ClaudeReply]:
     """起動の直前の確かめ。`run.recheck` が 1 行を返せば `Failure.REFUSED`、次に `options.verify` が 1 行を返せば
-    `Failure.LAUNCH`、次に CLI の下限（`require_claude`）。下限の確かめで `claude --version` の終わりを待った起動は、本体を起動する直前に
-    `options.verify` をもう一度打つ（記録を再利用して待たなかった起動は 1 回で済ませる）。
+    `Failure.LAUNCH`、次に CLI の下限（`require_claude`）。下限の確かめで待った起動（自分か別の起動の `claude --version` の終わりを待った）は、
+    本体を起動する直前に `options.verify` をもう一度打つ（待たずに記録を再利用した起動は 1 回で済ませる）。
     すべて通れば `options.ready` を打って None。
 
     照らし直しは子プロセスを起動しないので、`claude --version` を打つ下限より前に打つ（取り消しで止まる起動に `--version` を打たない）。

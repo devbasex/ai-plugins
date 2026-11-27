@@ -40,7 +40,7 @@ src/ndf/
 | `src/ndf/adapters/secret_forms.py` | 新設 | 秘密の形の表と、当たる文字列を伏せる処理 | — | モジュール | N: `SECRET_VALUE`・`ASSIGNED_SECRET`・`MASK`・`redact`（`domains/project/secret.py` から移す） |
 | `src/ndf/domains/project/secret.py` | 変更 | 移した表と処理を `secret_forms` から読み込む | secret_forms | モジュール | C: 定義の移動 |
 | `src/ndf/adapters/claude.py` | 変更 | 起動の引数と結果 | launch_settings | `ClaudeCall`・`ClaudeReply`・`LaunchOptions`・`LaunchRecorder` | C: `permission_args`・`_full_args`・`call_claude`・`_precheck`・`_parse_reply`・`context_window`・`_accounted`。N: `main_model`・`set_launch_recorder`・`report_launch` |
-| `src/ndf/adapters/cli_floor.py` | 変更 | CLI の最低バージョンの確認が、`--version` の終了を待ったかを返す（呼び出し元が待った間の取り消しを確かめ直すため） | — | モジュール | C: `require`（戻り値を `bool` にする）。N: `_version_read` |
+| `src/ndf/adapters/cli_floor.py` | 変更 | CLI の最低バージョンの確認が、確かめの間に待ったかを返す。自分が打った `--version` の終了を待ったときと、別のスレッドの `--version` の終了を錠で待ったときに真。呼び出し元が、待った間の取り消しを確かめ直すために使う | — | モジュール | C: `require`（戻り値を `bool` にする）。N: `_version_read` |
 | `src/ndf/adapters/agents.py` | 変更 | 相手役の起動 | identity | `Launch` | C: `_start`・`_guarded_run`・`Launch`（`verify`） |
 | `src/ndf/core/worker.py` | 変更 | worker の起動 | launch_settings・claude | `Caller` | C: `delegate`・`_args_for`・`_resume_until_written` |
 | `src/ndf/progress/invoke.py` | 変更 | Skill を回す起動 | launch_settings・claude | `SkillCaller` | C: `_call_skill` |
@@ -292,7 +292,7 @@ src/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_precheck` | 承認の対象が変わった | 起動の直前の書き換え・取り消し。CLI の最低バージョンの確認（`claude --version` の終了を待つ）の間の取り消しを含む | `options.verify`（最低バージョンの確認の前と、確認で `claude --version` の終了を待った起動では後にも打つ） | 呼び出し元へ返す | 呼び出し元の `precondition`。承認の案内のコマンドには、読み直した現在のハッシュを `--sha256` に載せる | 子を起動しない。承認して再実行 |
+| `_precheck` | 承認の対象が変わった | 起動の直前の書き換え・取り消し。CLI の最低バージョンの確認（`claude --version` の終了を待つ）の間の取り消しを含む | `options.verify`（最低バージョンの確認の前と、確認で `claude --version` の終了を待った起動では後にも打つ。別の起動の `--version` を錠で待った起動も含む） | 呼び出し元へ返す | 呼び出し元の `precondition`。承認の案内のコマンドには、読み直した現在のハッシュを `--sha256` に載せる | 子を起動しない。承認して再実行 |
 | `report_launch` | 書き込み処理が無い | エントリポイントを通らない呼び出し | None の判定 | 既定値（書かない）で続ける | 出力なし | — |
 | `_parse_reply` | 欄が無い・形が違う | CLI の出力の変化、JSON でない | 読み取り | 欄を None にして続ける | 行の `usage` が `unknown` | — |
 

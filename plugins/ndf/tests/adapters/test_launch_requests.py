@@ -447,9 +447,10 @@ def test_draft_reclaims_only_what_the_draft_record_identifies(tmp_path):
 
 # 作成途中の記録の中身ごとに、片付けの後に残るもの（ディレクトリ, 記録）。ディレクトリは空で作っておく
 INTERRUPTED = {
-    "torn_head": (True, False),  # 名前の行を書き終える前に落ちた（ディレクトリは NDF が作ったものでない）
-    "head": (False, False),  # 名前の行の後、実体の行を書き終える前に落ちた（空のディレクトリは NDF が作った）
-    "torn_body": (False, False),  # 実体の行の途中で落ちた
+    "empty": (True, True),  # 空の記録は、NDF が書いたと確かめられない（利用者が置いた同じ形の名前のファイルかもしれない）
+    "torn_head": (True, True),  # 名前の行がそろっていない記録も、NDF が書いたと確かめられない
+    "head": (True, False),  # 名前の行の後、実体の行を書き終える前に落ちた（空でも、ディレクトリを NDF が作ったと確かめられない）
+    "torn_body": (True, False),  # 実体の行の途中で落ちた
     "foreign": (True, True),  # NDF の記録の形でない
 }
 
@@ -462,7 +463,7 @@ def test_draft_reclaims_a_record_left_at_each_step(tmp_path, state):
     drafting = home / f"{lc.DRAFTING}half"
     drafting.mkdir()
     head = lc._draft_head("half")
-    texts = {"torn_head": head[:5], "head": head, "torn_body": head + '{"dev": 12', "foreign": "利用者のメモ\n"}
+    texts = {"empty": "", "torn_head": head[:5], "head": head, "torn_body": head + '{"dev": 12', "foreign": "利用者のメモ\n"}
     record = drafting.with_name(drafting.name + lc.DRAFT_RECORD)
     record.write_text(texts[state], encoding="utf-8")
     la.new_candidate("/r", target)

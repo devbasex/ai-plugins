@@ -350,12 +350,10 @@ DRAFT_BODY_FORM = '{"dev": 0, "ino": 0}'
 def _draft_state(text: str, name: str) -> tuple[str, Optional[dict[str, int]]]:
     """作成途中の記録の中身から、作成がどこまで進んだか。
 
-    `before`（名前の行を書き終える前。ディレクトリはまだ作っていない）、`pending`（名前の行の後で、実体の行を書き終える前。
-    ディレクトリは作ったか、作る前）、`made`（実体の行まで書いた。実体を返す）、`foreign`（NDF の記録の形でない）のどれか。
+    `pending`（名前の行の後で、実体の行を書き終える前。ディレクトリは作ったか、作る前）、`made`（実体の行まで書いた。実体を返す）、
+    `foreign`（名前の行がそろっていない。空の記録を含め、NDF が書いた記録と確かめられない）のどれか。
     """
     head = _draft_head(name)
-    if len(text) < len(head):
-        return ("before", None) if head.startswith(text) else ("foreign", None)
     if not text.startswith(head):
         return "foreign", None
     body = text[len(head) :]
@@ -374,16 +372,17 @@ def reclaim_drafts(home: Path) -> None:
     """候補の錠の中で、中断した作成の残りを片付ける。NDF が作ったと記録で確かめられたものだけを消す。
 
     記録の無い作成途中のディレクトリは、空でも消さない（名前の形が同じでも、利用者が作ったものかもしれないため）。
+    実体の行の無い記録のディレクトリも、空でも消さない。名前の行を書いた後、ディレクトリを作る前に中断することがあり、
+    名前の行だけでは、今あるディレクトリを NDF が作ったと確かめられないためである。
 
     | 作成途中の記録の中身 | ディレクトリ `.draft-<名前>` | 消すもの |
     | --- | --- | --- |
-    | 名前の行を書き終えていない（`before`） | — | 記録だけ（ディレクトリを作る前に落ちた） |
-    | 名前の行だけ（`pending`） | 空 | ディレクトリと記録（名前を記録してから NDF が作った。ファイルは実体の行の後に書くので中身は無い） |
-    | 名前の行だけ（`pending`） | 中身があるか、無い | 記録だけ（中身があれば、NDF が書いたものでない） |
+    | 空か、名前の行を書き終えていない（`foreign`） | — | 何も消さない（NDF が書いた記録と確かめられない） |
+    | 名前の行だけ（`pending`） | — | 記録だけ（ディレクトリは、空でも NDF が作ったと確かめられないので残す） |
     | 実体の行まで（`made`）で、実体が合う | 中が NDF の書くもの（`DRAFT_FILES` と書く途中の一時ファイル）だけ | 中身、ディレクトリ、記録 |
     | 実体の行まで（`made`）で、実体が合う | ほかの項目がある | NDF の書くものだけ（ディレクトリと記録は残す） |
     | 実体の行まで（`made`）で、実体が違うか無い | — | 記録だけ（ディレクトリは NDF が作ったものでない） |
-    | 記録の形でない（`foreign`）か、読めない | — | 何も消さない |
+    | ほかの形（`foreign`）か、読めない | — | 何も消さない |
     """
     for record in home.glob(f"{DRAFTING}*{DRAFT_RECORD}"):
         drafting = record.with_name(record.name.removesuffix(DRAFT_RECORD))
@@ -397,23 +396,11 @@ def reclaim_drafts(home: Path) -> None:
         state, obj = _draft_state(text, drafting.name.removeprefix(DRAFTING))
         if state == "foreign":
             continue
-        if state == "pending":
-            with contextlib.suppress(OSError):  # noqa: NDF401 ファイル: 中身のあるディレクトリは NDF が書いたものでないので残す
-                if _plain_dir(drafting):
-                    drafting.rmdir()
         if state == "made" and obj is not None and _same_dir(drafting, obj):
             _remove_draft_files(drafting)
             if _same_dir(drafting, obj):
                 continue  # 利用者の項目が残っているか、消し切れなかった。ディレクトリと記録を残す
         record.unlink(missing_ok=True)
-
-
-def _plain_dir(where: Path) -> bool:
-    """`where` がリンクでないディレクトリか。"""
-    try:
-        return stat.S_ISDIR(os.lstat(where).st_mode)
-    except OSError:  # noqa: NDF401 ファイル: 無いものはディレクトリでない
-        return False
 
 
 def _same_dir(where: Path, obj: Mapping[str, Any]) -> bool:
