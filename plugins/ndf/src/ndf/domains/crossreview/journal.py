@@ -298,15 +298,39 @@ def _report_rank(item: Mapping[str, Any], items: Sequence[str]) -> int:
     return 1 if criteria_decide.protect_of(item.get(PROTECT)) else 0
 
 
-def _heavy_in_other_file(item: Mapping[str, Any], items: Sequence[str], path: str) -> bool:
-    """出し直し 1 件が、`path` と違うファイルを指す重い報告（下げた扱いを解除する条件）か。"""
+class _Denied(NamedTuple):
+    """確認で否定した指摘の、ファイル・起きることの 1 文・見出し。"""
+
+    path: str
+    impact: Optional[str]
+    section: Optional[str]
+
+
+def _differs(before: Optional[str], now: Optional[str]) -> bool:
+    """両方に値があり、空白と大文字小文字をそろえても違うか（片方が省かれていれば、変わったとしない）。"""
+    return bool(before and now) and " ".join(before.split()).casefold() != " ".join(now.split()).casefold()
+
+
+def _other_path_or_condition(item: Mapping[str, Any], new: Mapping[str, Any], denied: _Denied) -> bool:
+    """出し直し 1 件の起きることの 1 文か見出しが、否定した指摘と違うか。行の番号は修正でずれるので比べない。"""
+    return _differs(denied.impact, new.get("impact")) or _differs(denied.section, _text(item.get("section")))
+
+
+def _heavy_elsewhere_than(item: Mapping[str, Any], items: Sequence[str], denied: _Denied) -> bool:
+    """出し直し 1 件が、否定した指摘と違うファイル・起きることの 1 文・見出しを示す重い報告（下げた扱いを解除する条件）か。
+    パスの無い報告は当たらない。"""
     new = _raised(dict(item), criteria_decide.mvv_item(item.get("mvv"), items))
-    return criteria_decide.blocking(new["severity"]) and new.get("path") not in (None, path)
+    if not criteria_decide.blocking(new["severity"]) or "path" not in new:
+        return False
+    return new["path"] != denied.path or _other_path_or_condition(item, new, denied)
 
 
-def _denied_report(item: Mapping[str, Any], items: Sequence[str], path: Optional[str]) -> bool:
-    """出し直し 1 件が、承認や保護の根拠が無いまま、確認で否定したファイル `path`（無ければ None）を指すか。"""
-    return path is not None and not _report_rank(item, items) and _located(item).get("path") == path
+def _denied_report(item: Mapping[str, Any], items: Sequence[str], denied: Optional[_Denied]) -> bool:
+    """出し直し 1 件が、承認や保護の根拠が無いまま、確認で否定した指摘 `denied`（無ければ None）と同じファイル・同じ内容を指すか。"""
+    if denied is None or _report_rank(item, items):
+        return False
+    new = _raised(dict(item))
+    return new.get("path") == denied.path and not _other_path_or_condition(item, new, denied)
 
 
 def _add_report(row: dict[str, Any], item: Mapping[str, Any]) -> None:
@@ -342,7 +366,7 @@ def _merge_reports(row: dict[str, Any], text: object) -> bool:
 
 
 def _align_report(
-    row: dict[str, Any], same: Sequence[Mapping[str, Any]], items: Sequence[str], denied: Optional[str] = None
+    row: dict[str, Any], same: Sequence[Mapping[str, Any]], items: Sequence[str], denied: Optional[_Denied] = None
 ) -> Optional[bool]:
     """このラウンドで新しく出たか戻った行の本文・1 文・位置を、出し直し 1 件のものにそろえ、判定役へ渡せる 1 文がこのラウンドに
     あるかを返す。`same` はこのラウンドのその指摘の出し直しである。
@@ -350,22 +374,23 @@ def _align_report(
     承認や保護の根拠となる出し直し（`_report_rank`）があれば、利用者と修正担当に別の操作の説明を見せないよう、1 文が無くてもその
     1 件を使う。根拠の強さが同じなら 1 文を持つもの、次に重いもの、次に先のものを選ぶ。根拠が無ければ 1 文を持つもののうちで選び、
     1 件も無ければ何も変えない。指摘のキーは本文の先頭だけで決まるので、判定役がある報告の発生条件を別の報告の位置で確かめない
-    ためでもある。根拠が無いのに、1 文を持つ重い出し直しが選んだ 1 件と違う位置（パス・行・見出し）にもあれば、それも本文に
-    書き足して None を返す。呼び手は判定役に渡さない（1 つの経路の否定で、ほかの経路の指摘まで下げないため）。
+    ためでもある。根拠が無いのに、選んだ 1 件と本文・1 文・位置（パス・行・見出し）のどれかが違う重い出し直しがあれば、それも
+    書き足して（`_add_report`）None を返す。呼び手は判定役に渡さない（同じ位置でも発生条件の違う報告は、1 つの否定でほかまで
+    下げないため）。
 
     根拠の 1 件を選んだときは、ほかの報告のうち次のものを本文に書き足す（`_add_report`）。必ず人の承認が要る操作を挙げた報告の
     すべてと、選んだ 1 件に 1 文が無いか、より重い場合の、1 文を持つ最も重い報告である。根拠のある指摘は確認で下げないので、
     書き足しても指摘を下げる材料は混ざらない。
 
-    `denied` は、下げた扱いを解除した行で、確認で否定したファイルである。このとき根拠の無い 1 件は、解除の条件を満たした出し直し
-    （`_heavy_in_other_file`）からだけ選ぶ。位置の無い重い報告は、1 件の選び方によらず本文へ書き足す。#4363"""
+    `denied` は、下げた扱いを解除した行の、確認で否定した指摘である。このとき根拠の無い 1 件は、解除の条件を満たした出し直し
+    （`_heavy_elsewhere_than`）からだけ選ぶ。位置の無い重い報告は、1 件の選び方によらず本文へ書き足す。#4363"""
     best: Optional[tuple[tuple[int, bool], Mapping[str, Any], dict[str, Any]]] = None
     told = False
     for item in same:
         new = _raised(dict(item))
         rank = _report_rank(item, items), "impact" in new
         told = told or rank[1]
-        if not any(rank) or (denied is not None and not rank[0] and not _heavy_in_other_file(item, items, denied)):
+        if not any(rank) or (denied is not None and not rank[0] and not _heavy_elsewhere_than(item, items, denied)):
             continue
         heavier = best is not None and criteria_decide.heavier(best[2]["severity"], new["severity"]) != best[2]["severity"]
         if best is None or rank > best[0] or (rank == best[0] and heavier):
@@ -385,19 +410,20 @@ def _align_report(
         for other in [*_other_reports(same, items, new if rank[1] else None), *placeless]:
             _add_report(row, other)
         return told
-    elsewhere = _heavy_elsewhere(row, same)
-    for other in elsewhere:
+    others = _heavy_others(row, same)
+    for other in others:
         _add_report(row, other)
-    return None if elsewhere else told
+    return None if others else told
 
 
-def _heavy_elsewhere(row: Mapping[str, Any], same: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    """出し直し `same` のうち、重い扱いで、行と違う位置（パス・行・見出し）を示すもの。"""
+def _heavy_others(row: Mapping[str, Any], same: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """出し直し `same` のうち、重い扱いで、行と本文・起きることの 1 文・位置（パス・行・見出し）のどれかが違うもの。"""
+    chosen = row["text"], row.get("impact"), row.get("path"), row.get("line"), row.get("section")
     out = []
     for item in same:
         new = _raised(dict(item))
-        place = new.get("path"), new.get("line"), _text(item.get("section"))
-        if criteria_decide.blocking(new["severity"]) and place != (row.get("path"), row.get("line"), row.get("section")):
+        told = str(item["text"]).strip(), new.get("impact"), new.get("path"), new.get("line"), _text(item.get("section"))
+        if criteria_decide.blocking(new["severity"]) and told != chosen:
             out.append(item)
     return out
 
@@ -465,8 +491,8 @@ class FindingJournal:
         収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。新しく出たか戻った行の本文・1 文・位置は、
         すべての指摘を重ねた後にそろえる（`_align_report`。承認や保護の根拠となる出し直しがあれば、その 1 件にする）。戻った指摘にこのラウンドの 1 文が 1 つも無ければ、行は前の 1 文と
         重さを持ち続けるが、`fresh` に入れず判定役に渡さない（前の経路の 1 文で下げないため）。承認や保護の根拠が
-        無く、違う位置の重い報告が並ぶ指摘も `fresh` に入れない（`_align_report` が None を返す）。確認で下げた指摘が
-        別のファイルの重い報告で出し直されたら、下げた扱いを解除してそのファイルの指摘にし、判定役には渡さない
+        無く、位置か内容の違う重い報告が並ぶ指摘も `fresh` に入れない（`_align_report` が None を返す）。確認で下げた指摘が
+        別のファイル・起きることの 1 文・見出しの重い報告で出し直されたら、下げた扱いを解除してその報告の指摘にし、判定役には渡さない
         （`_revive_elsewhere`。確認の結果を持つ行は `fresh` に入れない。#4363）。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
         touched: dict[str, dict[str, Any]] = {}
@@ -494,7 +520,7 @@ class FindingJournal:
                 by_key[key] = known
                 fresh.append(fid)
             elif not _denied_report(item, items, denied.get(str(known["id"]))):
-                # 確認で否定したファイルの根拠の無い報告は、重要度にも重ねない
+                # 確認で否定した内容の根拠の無い報告は、重要度にも重ねない
                 revived = len(self.revived)
                 self._raised_again(known, item, round_no, named, mvv)
                 fresh += self.revived[revived:]
@@ -517,12 +543,12 @@ class FindingJournal:
         self,
         fresh: Sequence[str],
         same: Mapping[str, Sequence[Mapping[str, Any]]],
-        denied: Mapping[str, str],
+        denied: Mapping[str, _Denied],
         back: set[str],
         items: Sequence[str],
     ) -> list[str]:
         """新しく出たか戻った行 `fresh` を出し直し `same` の 1 件にそろえ（`_align_report`）、判定役へ渡す候補の id を返す。
-        `denied` の行は、否定した位置のファイルの報告（`_denied_report`）を除いてそろえる。`back` は戻った行。"""
+        `denied` の行は、否定した内容の報告（`_denied_report`）を除いてそろえる。`back` は戻った行。"""
         out = []
         for fid in dict.fromkeys(fresh):
             reports = [i for i in same[fid] if not _denied_report(i, items, denied.get(fid))]
@@ -533,21 +559,23 @@ class FindingJournal:
 
     def _revive_elsewhere(
         self, by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str], round_no: int
-    ) -> dict[str, str]:
-        """確認で下げた指摘が、確かめた位置と違うファイルの重い報告で出し直されたら、下げた扱いを解除してその位置の指摘に
-        戻し、戻した指摘の id と、否定した位置のファイルを返す。キーは本文の先頭だけで決まるので、同じキーでも別の経路の
-        不具合でありうる。確認の結果は下げた扱いを抜けたことを書き加えて残すので、判定役には渡し直さず（呼び出し元と呼び出し先を
+    ) -> dict[str, _Denied]:
+        """確認で下げた指摘が、確かめたものと違うファイル・起きることの 1 文・見出しの重い報告で出し直されたら、下げた扱いを
+        解除してその報告の指摘に戻し、戻した指摘の id と、否定した指摘を返す。キーは本文の先頭だけで決まるので、同じキーでも
+        別の経路や発生条件の不具合でありうる。確認の結果は下げた扱いを抜けたことを書き加えて残すので、判定役には渡し直さず（呼び出し元と呼び出し先を
         交互に指す同じ指摘を、何度も確かめない）、保護の対象なら元の重要度へ戻る（`_restore_lowered`）。行の番号は修正で
-        ずれるので比べず、どちらかにファイルが無ければ戻さない。#4363"""
-        denied: dict[str, str] = {}
+        ずれるので比べず、どちらかにファイルが無ければ戻さない。1 文の言い換えだけでも戻すが、戻した指摘は下げ直さないので、
+        修正担当へ渡るのは指摘 1 件につき 1 回までである。#4363"""
+        denied: dict[str, _Denied] = {}
         for item in raised:
             text = item.get("text")
             row = by_key.get(oscillation.finding_key(text.strip())) if isinstance(text, str) and text.strip() else None
             if row is None or not _lowered(row) or not row.get("path"):
                 continue
-            if _heavy_in_other_file(item, items, row["path"]):
+            held = _Denied(row["path"], row.get("impact"), row.get("section"))
+            if _heavy_elsewhere_than(item, items, held):
                 new = _raised(dict(item), criteria_decide.mvv_item(item.get("mvv"), items))
-                denied[str(row["id"])] = row["path"]
+                denied[str(row["id"])] = held
                 check = row[CHECK] | {criteria_decide.LOWERED: False, UNLOWERED: True}
                 self._revive(row, new, _text(item.get("section")), round_no)
                 row[CHECK] = check
@@ -579,7 +607,7 @@ class FindingJournal:
             known["impact"] = new["impact"]
 
     def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
-        """直した・見送った指摘が出し直されたとき（下げた指摘が別のファイルで出たときも）、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
+        """直した・見送った指摘が出し直されたとき（下げた指摘が別のファイルや発生条件で出たときも）、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
         resolve 済みの古いスレッドへ結び付けない（#4016）。"""
         known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no, OCCURRENCE: new_occurrence()}
         self.revived.append(str(known["id"]))

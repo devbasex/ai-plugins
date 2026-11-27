@@ -37,7 +37,7 @@ FINDINGS_SHAPE = (
 REMARK_CHARS = "cross-review.remark-chars"
 REMARKS_TOTAL = "cross-review.remarks-total"
 # 判定待ちの記録のうち、前のバージョンが持たないことのあるキー（欠けた記録は使わない）
-PENDING_KEYS = frozenset(("handed", "unread", "full_seats"))
+PENDING_KEYS = frozenset(("handed", "unread", "full_seats", "history"))
 
 
 class ReviewingRun(seats.SeatRun, Protocol):
@@ -52,6 +52,7 @@ class ReviewingRun(seats.SeatRun, Protocol):
     documents: bool
     last_target: Optional[changes.Target]
     process: list[dict[str, str]]
+    history: list[frozenset[str]]
 
     def input_path(self, round_no: int, suffix: str) -> Path: ...
 
@@ -244,13 +245,15 @@ def pending(run: ReviewingRun, record: Mapping[str, Any], prep: Prepared, got: R
     """相手役の結果を、判定待ちのラウンドとして状態に残す形にする（#4363）。指摘は出した席（`by`）を持ち、結果の無い席は
     `unread`、そのうち起動し直すときに全差分を渡す席は `full_seats` に残す。差分は中身を持たず、作り直せる範囲
     （`record` の head と比較基点、`scope_base`）と、指摘ごとの差分を選ぶキーを持つ。`unreviewed` は相手役へ詳細レビューを
-    求めたセクション、`handed` は確かめさせた足すべき内容である。"""
+    求めたセクション、`handed` は確かめさせた足すべき内容である。`history` は振動の判定に使う、前の 2 ラウンドの指摘のキー
+    （このラウンドの分は、打ち直しが指摘を入れ直して作る）。"""
     filled = got.filled
     return {
         "record": dict(record),
         "scope_base": prep.scope.base,
         "unreviewed": list(prep.scope.unreviewed),
         "handed": _handed(run),
+        "history": [sorted(keys) for keys in run.history[-2:]],
         "raised": got.raised,
         "unread": list(got.unread),
         "full_seats": list(got.full_seats),
@@ -261,7 +264,7 @@ def pending(run: ReviewingRun, record: Mapping[str, Any], prep: Prepared, got: R
 def kept(run: ReviewingRun, round_no: int, prep: Prepared, basis: scope_decide.Basis) -> Optional[Reviewed]:
     """判定待ちで残ったラウンドが、今回のラウンドと同じ番号・head・範囲・詳細レビューを求めるセクション・足すべき内容で、
     `basis` に合えば、その相手役の結果と席を返す。合わなければ None。返す結果の `unread` は結果の無い席で、呼び手がその席だけを
-    起動する（空なら相手役を起動しない）。キー（`PENDING_KEYS`）の欠けた前のバージョンの記録は合わないとする。"""
+    起動する（空なら相手役を起動しない）。振動の判定の履歴（`run.history`）も、保存した値に戻す。キー（`PENDING_KEYS`）の欠けた前のバージョンの記録は合わないとする。"""
     held = run.data.get(store.PENDING_REVIEW)
     if not isinstance(held, Mapping) or not PENDING_KEYS <= held.keys():
         return None
@@ -272,6 +275,7 @@ def kept(run: ReviewingRun, round_no: int, prep: Prepared, basis: scope_decide.B
     if then != now or len(seated) != len(run.seats) or not scope_decide.same_review(record, basis):
         return None
     run.seats[:] = seated
+    run.history[:] = [frozenset(keys) for keys in held["history"]]
     filled = scope_decide.filled_of(record)
     run.warnings += [seats.filled_warning(f, f"中断した round {round_no}") for f in filled if f not in run.filled]
     run.filled[:] = filled

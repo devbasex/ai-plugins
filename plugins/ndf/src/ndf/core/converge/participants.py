@@ -22,11 +22,12 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
-from ndf.adapters import agents, claude, training
+from ndf.adapters import agents, claude, training, transcript
 from ndf.contracts import facts, limits
 
 RUNTIMES = "runtimes"
@@ -234,13 +235,26 @@ def review_launch(agent: str, worktree: Path, prompt: str, stem: Path, timeout: 
     return agents.Launch(agent, (row["executable"], *args, prompt), worktree, agents.AgentPaths.at(stem), limit)
 
 
+def _reading_call(system: str, readable: Sequence[Path]) -> claude.ClaudeCall:
+    """`READ_TOOLS` だけを許した、会話を残さない最小構成の呼び出し。"""
+    return claude.ClaudeCall(system=system, permission=claude.Permission.TOOLS, tools=READ_TOOLS, readable=tuple(readable))
+
+
+def _launch_call(call: claude.ClaudeCall, workdir: Path, prompt: str, stem: Path, timeout: Optional[float]) -> agents.Launch:
+    return agents.Launch(FIXER, (*claude.claude_args(call), prompt), workdir, agents.AgentPaths.at(stem), _review_limit(timeout))
+
+
 def read_only_launch(
     system: str, workdir: Path, prompt: str, stem: Path, timeout: Optional[float] = None, readable: Sequence[Path] = ()
 ) -> agents.Launch:
     """`READ_TOOLS` だけを許した、会話を残さない最小構成の `claude -p` の 1 回の起動（修正担当とは別のプロセスと会話）。
     `readable` を渡すと、読める場所を `workdir` とそれらだけに限る（#3955）。`timeout` を省けば相手役の監視の上限。"""
-    call = claude.ClaudeCall(system=system, permission=claude.Permission.TOOLS, tools=READ_TOOLS, readable=tuple(readable))
-    return agents.Launch(FIXER, (*claude.claude_args(call), prompt), workdir, agents.AgentPaths.at(stem), _review_limit(timeout))
+    return _launch_call(_reading_call(system, readable), workdir, prompt, stem, timeout)
+
+
+def traced_launch(system: str, workdir: Path, prompt: str, stem: Path, readable: Sequence[Path]) -> agents.Launch:
+    """`read_only_launch` と同じ起動で、出力を 1 歩ごとの行にする（呼び出した Tool を `read_files` で確かめる起動が使う）。"""
+    return _launch_call(replace(_reading_call(system, readable), stream=True), workdir, prompt, stem, None)
 
 
 class ClaudeReader(NamedTuple):
@@ -269,20 +283,45 @@ class ClaudeAnswer(NamedTuple):
     verified: bool = False
 
 
-def claude_answer(out: Path) -> ClaudeAnswer:
-    """claude の出力を 1 回だけ読み、本文と拒否を取り出す（読めなければ `OSError`）。"""
-    raw = out.read_text(encoding="utf-8", errors="replace")
+def _json_dict(text: str) -> Optional[dict[str, Any]]:
+    """`text` の全体が JSON の辞書ならその辞書、ほかは None。"""
     try:
-        payload = json.loads(raw)
-    except ValueError:  # 外側が JSON でなければ（途中で切れた出力）そのまま探す
-        payload = None
-    if not isinstance(payload, dict):
+        found = json.loads(text)
+    except ValueError:  # noqa: NDF401 外部コマンド: 途中で切れた出力と、JSON でない行
+        return None
+    return found if isinstance(found, dict) else None
+
+
+def claude_answer(out: Path) -> ClaudeAnswer:
+    """claude の出力を 1 回だけ読み、本文と拒否を取り出す（読めなければ `OSError`）。外側の JSON は、出力の全体か、
+    1 歩ごとの行の出力（stream-json）の最後の結果の行である。"""
+    raw = out.read_text(encoding="utf-8", errors="replace")
+    payload = _json_dict(raw)
+    if payload is None:
+        last = _json_dict(raw.strip().split("\n")[-1])
+        payload = last if last is not None and last.get("type") == "result" else None
+    if payload is None:
         return ClaudeAnswer(raw, ())
     body = payload.get("result")
     denials = payload.get("permission_denials")
     found = tuple(d for d in denials if isinstance(d, dict)) if isinstance(denials, list) else ()
     verified = isinstance(body, str) and isinstance(denials, list) and len(found) == len(denials)
     return ClaudeAnswer(body if isinstance(body, str) else raw, found, verified)
+
+
+def read_files(out: Path, workdir: Path) -> frozenset[Path]:
+    """1 歩ごとの行の出力（stream-json）から、`Read` が成功したファイル。相対パスは claude の作業ディレクトリ `workdir` から
+    解決する。出力を読めなければ空。"""
+    try:
+        lines = out.read_text(encoding="utf-8", errors="replace").split("\n")
+    except OSError:  # 出力の無い起動は、読んだファイルが無い
+        return frozenset()
+    return transcript.succeeded_reads(lines, workdir)
+
+
+def without_tool_results(data: bytes) -> bytes:
+    """1 歩ごとの行の出力から、Tool の結果の行（読んだファイルの中身を持つ）を除く。保存する記録に使う。"""
+    return b"".join(line for line in data.splitlines(keepends=True) if not line.startswith(b'{"type":"user"'))
 
 
 def answer_text(runtime: str, out: Path) -> str:

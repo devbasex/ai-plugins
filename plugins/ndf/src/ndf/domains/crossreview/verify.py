@@ -1,6 +1,6 @@
 """判定役を 1 回起動して回答を返す（#4363）。
 
-判定役は、修正担当・相手役とは別の、読むだけの claude の起動である（`participants.read_only_launch`）。読める場所は
+判定役は、修正担当・相手役とは別の、読むだけの claude の起動である（`participants.traced_launch`）。読める場所は
 レビューする worktree と、この起動の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV の写し）だけである。
 指摘の文はプロセスの引数に載せず、一覧のファイルで渡す。判定役へ渡す一覧・差分・MVV の写し・指示に埋める基準の行には、
 伏せ字（`run_log.redact`）を掛ける。この伏せ字が消すのは一部の形式だけで、秘密を守る境界ではない（相手役には差分を伏せずに
@@ -11,8 +11,9 @@
 `verify_decide`、回答を指摘の行へ当てるのは呼び手の `drive` である。
 
 失敗しても例外で駆動を止めず、起動し直さない。回答なしと注意にする（どの指摘も下がらない）。資料のほかのファイルの読み取りを
-拒否された起動と、外側の JSON の結果か拒否の一覧を確かめられない起動は、成り立たないとした回答だけを採らない
-（`verify_decide.unlowering`）。注意は PR の記録に載るので、
+拒否された起動と、外側の JSON の結果か拒否の一覧を確かめられない起動と、差分と指摘の一覧を `Read` した記録の無い起動は、
+成り立たないとした回答だけを採らない（`verify_decide.unlowering`）。記録を確かめるため出力は 1 歩ごとの行にし、保存する
+記録からは Tool の結果の行（読んだファイルの中身）を除く。注意は PR の記録に載るので、
 手元の絶対パス・指摘の本文・回答の中身を書かない。過程も結果 JSON に出るので、載せるのはエラーの種別と資料の種類・ファイル名までで、
 起動の状態の詳細（標準エラーの原文を含みうる）と絶対パスを含む詳細は、標準エラーのログとは別の、実行者だけが読める記録に残す。
 監視の早期の警告も種類だけを知らせ、標準エラーの行は載せない（`agents.Launch.private`）。
@@ -27,7 +28,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters import agents, run_log
 from ndf.core.converge import participants
@@ -84,6 +85,8 @@ def _save_records(run: VerifyRun, round_no: int, written: Path, stem: Path, name
         to = stem.with_name(name + record.name.removeprefix(stem.name))
         try:
             data = record.read_bytes()
+            if record.suffix == ".out":  # 読んだファイルの中身は、状態の保存先に残さない
+                data = participants.without_tool_results(data)
         except OSError as exc:
             run.note(round_no, "verify", f"判定役の記録 {to.name} を読めない（{type(exc).__name__}）")
         else:
@@ -105,13 +108,20 @@ def _unanswered(run: VerifyRun, round_no: int, count: int, why: str, warning: st
     return verify_decide.Answers({}, (warning,))
 
 
+class _Materials(NamedTuple):
+    """判定役が読む資料のファイル。`checked`（差分と指摘の一覧）は、読んだ記録が無ければ否定の回答を採らない。"""
+
+    checked: tuple[Path, ...]
+    others: tuple[Path, ...]
+
+
 def _prepare(
     run: VerifyRun,
     round_no: int,
     rows: Sequence[Mapping[str, Any]],
     diffs: Mapping[str, Sequence[Path]],
     into: Path,
-) -> tuple[str, tuple[Path, ...]]:
+) -> tuple[str, _Materials]:
     """資料のディレクトリ `into` を作って判定役の資料を置き、指示と、判定役が読む資料のファイルを返す。判定役へ渡すものは
     どれにも伏せ字（一部の形式だけ。秘密を守る境界ではない）を掛け、元の差分は変えない。用意できなければ `OSError`。"""
     into.mkdir(mode=0o700)
@@ -134,7 +144,7 @@ def _prepare(
     held = criteria_decide.approved(snap)
     # MVV の本文と共通原則の写しも、読めなければ確かめにならない資料である
     extra = () if held is None else tuple(p for p in (held.path, held.principles_path) if p is not None)
-    return prompt, (*shared, listed, *extra)
+    return prompt, _Materials((*shared, listed), extra)
 
 
 def ask(
@@ -164,15 +174,15 @@ def ask(
         into, written = Path(made, "in"), Path(made, "out")
         try:
             written.mkdir(mode=0o700)
-            prompt, required = _prepare(run, round_no, rows, diffs, into)
+            prompt, materials = _prepare(run, round_no, rows, diffs, into)
         except OSError as exc:
             return unprepared("判定役の資料", exc)
         system = str(criteria_decide.verify_text()["system"])
-        spec = participants.read_only_launch(system, run.cfg.worktree, prompt, written / stem.name, readable=(into,))
+        spec = participants.traced_launch(system, run.cfg.worktree, prompt, written / stem.name, (into,))
         # 判定役の標準エラーは接続先やアカウントを含みうるので、監視の警告に行を載せない
         spec = replace(spec, private=True)
         try:
-            answers = _answers(run, round_no, rows, spec, required, launch)
+            answers = _answers(run, round_no, rows, spec, materials, launch)
         finally:
             # 監視中の割り込みでも、起動の層（`agents`）が判定役を止めてから伝えるので、記録は書き終わっている
             saved = _save_records(run, round_no, written, stem, name)
@@ -185,10 +195,10 @@ def _answers(
     round_no: int,
     rows: Sequence[Mapping[str, Any]],
     spec: agents.Launch,
-    required: Sequence[Path],
+    materials: _Materials,
     launch: Launcher,
 ) -> verify_decide.Answers:
-    """起動 `spec` を打ち、指摘 `rows` への回答を読む。`required` は判定役が読む資料のファイルである。"""
+    """起動 `spec` を打ち、指摘 `rows` への回答を読む。"""
     count = len(rows)
     status = launch(spec)
     if status.state != agents.AgentState.DONE:
@@ -200,7 +210,7 @@ def _answers(
         answer = participants.claude_answer(spec.paths.out)
     except OSError:  # 出力の無い判定役は、回答を読めなかった扱いにする
         answer = participants.ClaudeAnswer("", ())
-    denied = participants.denied_reads(answer.denials, required, spec.cwd)
+    denied = participants.denied_reads(answer.denials, (*materials.checked, *materials.others), spec.cwd)
     if denied:
         warning = f"判定役が資料のファイル {'・'.join(p.name for p in denied)} の読み取りを拒否されたので下げない"
         _detail(run, round_no, spec, f"permission_denials: {' / '.join(map(str, denied))}")
@@ -215,6 +225,11 @@ def _answers(
     elif not answer.verified:
         # 外側の JSON を確かめられなければ拒否の有無が分からないので、本文の途中から読めた否定の回答を採らない
         answers = verify_decide.unlowering(answers, "判定役の出力の結果か拒否の一覧を確かめられない")
+    else:
+        read = participants.read_files(spec.paths.out, spec.cwd)
+        unread = [p.name for p in materials.checked if Path(os.path.normpath(p)) not in read]
+        if unread:
+            answers = verify_decide.unlowering(answers, f"判定役が資料のファイル {'・'.join(unread)} を読んだことを確かめられない")
     valid = sum(1 for verdict in answers.verdicts.values() if verdict.holds is not None)
     run.note(round_no, "verify", f"判定役へ {count} 件、有効な回答 {valid} 件")
     return answers

@@ -20,7 +20,7 @@ from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 from ndf.domains.records import mvv_decide as md
 
-from ._judge import holding
+from ._judge import holding, materials, output
 from .test_crossreview_run import FAIL, IMPACT, Fake, _run, _state
 
 NDF_BY = "ndf"
@@ -238,7 +238,7 @@ def _launcher(
         if denied is not None:
             path = _given(spec) / denied if isinstance(denied, str) else denied
             body["permission_denials"] = [{"tool_name": "Read", "tool_input": {"file_path": str(path)}}]
-        spec.paths.out.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        spec.paths.out.write_text(output(body, materials(spec)), encoding="utf-8")
         return agents.AgentStatus(spec.agent, state, 0, "", ())
 
     return launch
@@ -333,6 +333,23 @@ def test_issue_4363_ask_does_not_take_a_negative_answer_from_an_unverified_outpu
     verdict = answers.verdicts["r1-1"]
     assert (verdict.holds, verdict.tracks) == (None, ("secret",))
     assert any("確かめられない" in warning for warning in answers.warnings)
+
+
+@pytest.mark.parametrize("skipped", ["round1.diff", "round1-verify-findings.jsonl"])
+def test_issue_4363_ask_does_not_take_a_negative_answer_without_reading_the_materials(tmp_path: Path, skipped: str) -> None:
+    """差分か指摘の一覧を読んだ記録の無い起動の否定の回答は採らない。保存する記録に、読んだファイルの中身を残さない。"""
+
+    def launch(spec: agents.Launch) -> agents.AgentStatus:
+        body = {"result": json.dumps({"verdicts": [_answer()]}, ensure_ascii=False), "permission_denials": []}
+        read = [p for p in materials(spec) if Path(p).name != skipped]
+        spec.paths.out.write_text(output(body, read), encoding="utf-8")
+        return agents.AgentStatus(spec.agent, agents.AgentState.DONE, 0, "", ())
+
+    answers = verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, launch)
+    assert answers.verdicts["r1-1"].holds is None
+    assert any(skipped in warning for warning in answers.warnings)
+    saved = (tmp_path / f"{answers.record}.out").read_text(encoding="utf-8")
+    assert "tool_use" in saved and "読んだ中身" not in saved
 
 
 def test_issue_4363_ask_does_not_take_a_negative_answer_when_reading_the_implementation_is_denied(tmp_path: Path) -> None:
@@ -471,14 +488,15 @@ def test_issue_4363_kept_review_needs_the_same_request_but_not_the_citation_chec
     }
     scope = scope_decide.Scope(scope_decide.FULL, None, ())
     prep = reviewing.Prepared(scope, [], set(), "h" * 40, Path("round1.diff"), (), "b" * 40, None)
-    then = SimpleNamespace(cfg=SimpleNamespace(handed=()))
+    then = SimpleNamespace(cfg=SimpleNamespace(handed=()), history=[frozenset({"a"})])
     held = reviewing.pending(then, record, prep, reviewing.Reviewed([HEAVY], {}, False))
     cfg = SimpleNamespace(handed=handed)
-    run = SimpleNamespace(cfg=cfg, data={store.PENDING_REVIEW: held}, seats=["codex"], filled=[], warnings=[], process=[])
+    run = SimpleNamespace(cfg=cfg, data={store.PENDING_REVIEW: held}, seats=["codex"], filled=[], warnings=[], process=[], history=[])
     now = prep._replace(scope=scope._replace(unreviewed=asked))
     basis = scope_decide.Basis("b" * 40, ("codex",), (), approved, unit="")
     got = reviewing.kept(run, 1, now, basis)
     assert (got is not None and got.raised == [HEAVY]) is resumed
+    assert run.history == ([frozenset({"a"})] if resumed else [])
     # 足すべき内容を持たない前のバージョンの記録は使わない（例外で止めない）
     run.data[store.PENDING_REVIEW] = {k: v for k, v in held.items() if k != "handed"}
     assert reviewing.kept(run, 1, now, basis) is None
@@ -605,6 +623,27 @@ def test_issue_4363_run_resumes_from_the_judge_without_launching_the_reviewers_a
     [row] = state["findings"]
     assert (row["id"], row["check"]["lowered"]) == ("r1-1", True)
     assert len(state["rounds"]) == 1 and "pending_review" not in state
+
+
+def test_issue_4363_run_resumed_from_the_judge_still_sees_the_oscillation(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """指摘が戻った第 3 ラウンドの判定中に中断しても、打ち直しは前のラウンドの指摘を覚えていて振動で止める。"""
+    other = {**HEAVY, "text": "読み込みが止まる"}
+    asked: list[str] = []
+
+    def interrupted_on_the_return(row: dict) -> Optional[dict]:
+        if row["text"] == HEAVY["text"] and asked.count(HEAVY["text"]):
+            raise KeyboardInterrupt
+        asked.append(row["text"])
+        return holding(row)
+
+    first = Fake(tmp_path / "st", {"codex": [[HEAVY], [other], [HEAVY]], "kiro": [[], [], []]})
+    first.verdict = interrupted_on_the_return
+    with pytest.raises(KeyboardInterrupt):
+        _run(capsys, monkeypatch, first, wt)
+    second = Fake(tmp_path / "st", {})
+    _run(capsys, monkeypatch, second, wt)
+    assert second.calls == []
+    assert _state(second.state_dir)["rounds"][-1]["verdict"] == fin.OSCILLATING
 
 
 def test_issue_4363_run_resumes_by_launching_only_the_seat_without_a_result(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

@@ -12,7 +12,8 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping, Optional, Union
+from pathlib import Path
+from typing import Any, Iterable, Mapping, Optional, Union
 
 from ndf import values
 
@@ -138,6 +139,37 @@ def _reply_text(rec: Mapping[str, Any]) -> str:
 
 def _tool_ids(rec: Mapping[str, Any]) -> set:
     return {e["id"] for e in _elements(rec) if e.get("type") == "tool_use" and isinstance(e.get("id"), str)}
+
+
+def _line_elements(line: str) -> list:
+    """1 行の応答の要素。途中で切れた行、JSON の辞書でない行、`message` の無い行は空。"""
+    try:
+        rec = json.loads(line)
+    except ValueError:  # 途中で切れた行と、JSON でない行
+        return []
+    return _elements(rec) if isinstance(rec, dict) and isinstance(rec.get("message"), dict) else []
+
+
+def _read_path(part: Mapping[str, Any], workdir: Path) -> Optional[Path]:
+    """`Read` の呼び出しの要素が読むファイル。ほかの要素は None。"""
+    args = part.get("input")
+    if part.get("type") != "tool_use" or part.get("name") != "Read" or not isinstance(args, dict):
+        return None
+    value = args.get("file_path")
+    return Path(os.path.normpath(Path(workdir, value))) if isinstance(value, str) else None
+
+
+def succeeded_reads(lines: Iterable[str], workdir: Path) -> frozenset[Path]:
+    """会話の行（stream-json の出力の行も同じ形）から、`Read` が成功したファイル。相対パスは `workdir` から解決する。"""
+    asked: dict[str, Path] = {}
+    done: set[Path] = set()
+    for part in (part for line in lines for part in _line_elements(line)):
+        path = _read_path(part, workdir)
+        if path is not None:
+            asked[str(part.get("id"))] = path
+        elif part.get("type") == "tool_result" and not part.get("is_error") and str(part.get("tool_use_id")) in asked:
+            done.add(asked[str(part.get("tool_use_id"))])
+    return frozenset(done)
 
 
 def _squeeze(text: str) -> str:
