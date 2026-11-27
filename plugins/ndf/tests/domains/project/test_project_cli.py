@@ -149,8 +149,11 @@ def test_unknown_subcommand_is_a_usage_error():
 def _measure_file(tmp_path: Path, items: dict, repo: Path | None = None) -> Path:
     """測定の結果。`repo` を渡せば、入力のファイルのハッシュをそのリポジトリの今の HEAD から入れる。"""
     inputs = check.inputs(check.git.Git(repo)) if repo is not None else {}
+    data = {"analyzer": check.ANALYZER, "items": items, "inputs": inputs, "notes": ["注記"]}
+    if repo is not None:
+        data["branch_state"] = {"head": None, "present": []}  # 一時のリポジトリにはリモートが無い
     path = tmp_path / "measure.json"
-    path.write_text(json.dumps({"analyzer": check.ANALYZER, "items": items, "inputs": inputs, "notes": ["注記"]}), encoding="utf-8")
+    path.write_text(json.dumps(data), encoding="utf-8")
     return path
 
 
@@ -199,6 +202,7 @@ def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_resul
     measured = _measure_file(
         tmp_path,
         {"checks": {"status": "measured", "value": {"tools": []}}, "test": {"status": "question", "candidates": {}, "evidence": []}},
+        repo,
     )
     answers = _answers(tmp_path, {"test": {"value": {"suites": []}}, "nope": {"value": 1}})
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers), "--dry-run"]) == 0
@@ -218,6 +222,21 @@ def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_resul
     rows = {r["key"]: r for r in last_result(capsys.readouterr().out)["items"] if "key" in r}
     assert rows["checks"]["kind"] == "mismatch"
     assert json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))["checks"] == decl["checks"]
+
+
+def test_issue_4580_write_keeps_the_flow(repo, tmp_path, capsys, last_result):
+    """受け入れ条件 13・I3: project write は利用者の流れの設定（workflow の stages・close）を書き換えない。"""
+    flow = {
+        "stages": {"確定仕様化": {"enabled": False, "reason": "別の場所で管理する"}},
+        "close": {"release_verification": {"required": False, "reason": "監視で確かめる"}},
+    }
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "project.json").write_text(json.dumps({"version": 1, "workflow": flow}, ensure_ascii=False), encoding="utf-8")
+    measured = _measure_file(tmp_path, {"checks": {"status": "measured", "value": {"tools": []}}}, repo)
+    answers = _answers(tmp_path, {"test": {"value": {"suites": []}}})
+    assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
+    last_result(capsys.readouterr().out)
+    assert json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))["workflow"] == flow
 
 
 def test_write_refuses_broken_ndf_settings(repo, tmp_path):

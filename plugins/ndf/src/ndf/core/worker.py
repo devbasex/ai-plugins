@@ -67,7 +67,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import cli, identity
-from ndf.adapters import claude, git
+from ndf.adapters import claude, git, github_pulls
 from ndf.contracts import causes, exit_codes, facts, limits, result, worker_kinds, worker_paths, writing
 from ndf.contracts.exit_codes import OK
 from ndf.core import durable_locks, worker_append, worker_write
@@ -106,14 +106,8 @@ TMP_SUFFIX = ".tmp"
 # 進捗ログで、conductor の注意が要る state
 ATTENTION_STATES = ("failing", "stopped", "gate")
 
-# GitHub が課題をclosing keywords（https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue）。
-# 形は旧実装 plugins/ndf/scripts/lib/closing.py の CLOSING と同じ。語の後ろの `:` と空白は省いてよく（`Fix:#12`）、
-# 指し先は `#番号`・`<所有者>/<リポジトリ>#番号`・課題の URL（`https://github.com/<所有者>/<リポジトリ>/issues/<番号>`）
-CLOSING = re.compile(
-    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*"
-    r"(https?://github\.com/[\w.-]+/[\w.-]+/issues/\d+|[\w.-]+/[\w.-]+#\d+|#\d+)",
-    re.IGNORECASE,
-)
+# GitHub の closing keywords（SSOT は `github_pulls.CLOSING`。リリース記録の読み取りも同じ形で課題を集める）
+CLOSING = github_pulls.CLOSING
 # `git log` の 1 件の区切り（件名と本文に出ない文字）
 _RECORD_SEP, _FIELD_SEP = "\x1e", "\x1f"
 

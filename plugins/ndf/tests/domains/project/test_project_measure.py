@@ -171,11 +171,12 @@ def test_measure_calls_only_the_three_github_paths(tmp_path, monkeypatch):
     assert (got["merges"], got["github_issues"], got["hosts"], got["notes"]) == ({"main": 1}, 1, ["redmine.example.com"], [])
 
 
-def test_measure_without_head_skips_the_branch_rules(tmp_path, monkeypatch):
+def test_measure_without_head_skips_the_branch_rules_and_makes_ci_unknown(tmp_path, monkeypatch):
     called = _patch_gh(monkeypatch)
     got = _measure(tmp_path, head=None)
     assert [p for p in called if "/rules/" in p] == []
-    assert got["ci"] == forms.measured({"required_checks": []})
+    assert got["ci"]["status"] == "unknown"  # 空の一覧として書くと、解析が前に書いた必須のチェックを消す
+    assert [n for n in got["notes"] if n.startswith("CI を測れない: リモートの既定ブランチが分からない")]
 
 
 def test_measure_without_github_is_unknown_and_calls_nothing(tmp_path, monkeypatch):
@@ -194,11 +195,11 @@ def test_measure_time_up_on_the_branch_rules_makes_ci_unknown(tmp_path, monkeypa
     assert "CI を測れない: 時間切れ" in got["notes"]
 
 
-def test_measure_other_failure_on_the_branch_rules_is_an_empty_list(tmp_path, monkeypatch):
-    _patch_gh(monkeypatch, {"repos/o/r/rules/": measure_ci.GhUnavailable("gh が失敗した: 404")})
+def test_measure_other_failure_on_the_branch_rules_makes_ci_unknown(tmp_path, monkeypatch):
+    _patch_gh(monkeypatch, {"repos/o/r/rules/": measure_ci.GhUnavailable("gh が失敗した: 401")})
     got = _measure(tmp_path)
-    assert got["ci"] == forms.measured({"required_checks": []})
-    assert got["notes"] == []
+    assert got["ci"] == forms.unknown("gh が失敗した: 401")
+    assert "CI を測れない: gh が失敗した: 401" in got["notes"]
 
 
 # --- measure_repo.measure_languages: 言語の行はファイル数を持たず、名前の順に並ぶ（#4516 の決定 3） ---

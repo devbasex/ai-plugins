@@ -14,7 +14,9 @@ from ndf.domains.project.items import value_digest
 from ndf.domains.records import files
 
 INPUTS = {"pyproject.toml": "3634277f"}
-MEASURE = {"items": {}, "inputs": INPUTS, "notes": ["気づき"]}
+# リモートの無い一時のリポジトリのブランチの構成（計測時の値として測定の結果に入れる）
+NO_REMOTE = {"head": None, "present": []}
+MEASURE = {"items": {}, "inputs": INPUTS, "notes": ["気づき"], "branch_state": NO_REMOTE}
 IGNORE, RECORD, PROJECT = (files.relpath(k) for k in ("project-analysis-ignore", "project-analysis", "project"))
 
 
@@ -33,6 +35,8 @@ def repo(tmp_path, monkeypatch) -> Path:
 
 
 def _plan(repo: Path, existing=None, measure=MEASURE, answers=None, record=None) -> write.Plan:
+    """計画を決める。測定の結果にブランチの構成が無ければ、リモートの無い構成を計測時の値として入れる。"""
+    measure = {"branch_state": NO_REMOTE, **measure}
     return write.plan(write.Inputs(repo, repo, existing, measure, answers or {}, record))
 
 
@@ -58,7 +62,7 @@ def test_the_first_plan_writes_the_gitignore_the_settings_and_the_record(repo):
         "version": analysis_record.RECORD_VERSION,
         "analyzer": check.ANALYZER,
         "inputs": INPUTS,
-        "branches": check.branch_state(write.git.Git(repo), check.declared_branches(None)),
+        "branches": NO_REMOTE,
         "written_digest": analysis_record.written_digest(doc),
     }
     assert record == write.File(files.path(repo, "project-analysis"), RECORD, None, write.dumps(expected), "解析の記録。入力 1 件")
@@ -119,3 +123,38 @@ def test_a_plan_that_does_not_fit_the_schema_is_refused(repo, existing, inputs, 
     with pytest.raises(write.WriteError) as caught:
         _plan(repo, existing=existing, measure={"items": {}, "inputs": inputs})
     assert str(caught.value).startswith(head)
+
+
+def test_a_plan_whose_branches_changed_after_the_measure_is_refused(repo):
+    stale = {**MEASURE, "branch_state": {"head": "develop", "present": ["develop"]}}
+    with pytest.raises(write.WriteError) as caught:
+        _plan(repo, measure=stale)
+    assert str(caught.value).startswith("計測の後にブランチの構成が変わった")
+
+
+def test_a_changed_branch_is_shown_masked_and_a_secret_shaped_name_still_matches(repo, monkeypatch):
+    secret = "ghp_abcdefghijklmnopqrstuvwxyz"
+    now = {"head": secret, "present": []}
+    monkeypatch.setattr(write.check, "branch_state", lambda *_a, **_k: now)
+    masked = write.mask(now)
+    assert masked != now
+    planned = _plan(repo, measure={**MEASURE, "branch_state": masked})  # 測定の結果は伏せ字の後の値
+    assert json.loads(planned.files[-1].new)["branches"] == now  # 判定と同じ伏せ字の前の値を記録する
+    with pytest.raises(write.WriteError) as caught:
+        _plan(repo, measure={**MEASURE, "branch_state": NO_REMOTE})
+    assert secret not in str(caught.value)
+
+
+def test_a_new_default_branch_without_measured_checks_keeps_the_previous_branches(repo):
+    """既定ブランチが前の記録から変わり、必須のチェックを測れず前の値を残したら、記録の構成を前のままにして古いと判定させる。"""
+    ci = {"required_checks": ["old-check"]}
+    existing = {"version": 1, "ci": ci, "analysis": {"written": {"ci": value_digest(ci)}}}
+    doc, record = _first(repo)
+    _put(repo, "project", json.dumps(existing))
+    before = {**record, "branches": {"head": "master", "present": ["master"]}}
+    measure = {**MEASURE, "items": {"ci": {"status": "unknown", "reason": "gh が失敗した: 401"}}}
+    planned = _plan(repo, existing=existing, measure=measure, record=before)
+    assert json.loads(planned.files[-1].new)["branches"] == before["branches"]
+    assert json.loads(next(f.new for f in planned.files if f.name == PROJECT))["ci"] == ci
+    same = _plan(repo, existing=existing, measure=measure, record={**before, "branches": NO_REMOTE})
+    assert json.loads(same.files[-1].new)["branches"] == NO_REMOTE  # 既定ブランチが同じなら今の構成を書く

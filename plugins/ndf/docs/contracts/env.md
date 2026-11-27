@@ -36,6 +36,8 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `HOME` | user | path | — | 利用者のホームディレクトリ。worktree の書き込み先の判定が ~ で始まるパスを解くときと、学習の結果のキャッシュの保存先を求めるときに読む。無ければ ~ を空として解く | 内部（予告なく変えてよい） |
 | `KIRO_AGENT` | runtime | string | — | Kiro のエージェントの名前（ホストの推定） | 内部（予告なく変えてよい） |
 | `KIRO_PLUGIN_ROOT` | runtime | path | — | Kiro のプラグインの根（ホストの推定） | 内部（予告なく変えてよい） |
+| `LANG` | user | string | — | 利用者のロケール。届け先の結果を読むコマンドへそのまま渡す。無ければ渡さない | 内部（予告なく変えてよい） |
+| `LC_ALL` | user | string | — | 利用者のロケールの上書き。届け先の結果を読むコマンドへそのまま渡す。無ければ渡さない | 内部（予告なく変えてよい） |
 | `NDF_ACCOUNTS_DIR` | user | path | — | アカウントの登録の保存先（ndf relay account の登録のサブコマンド）。無ければ <共有の設定ディレクトリ>/ndf/accounts（旧いプラグインと同じ保存先） | 内部（予告なく変えてよい） |
 | `NDF_ACCOUNT_GENERATION` | ndf | string | — | 登録済みアカウントの子で、起動を確かめた登録の世代（空文字は世代の無い登録）。子の ndf plan がリースと上限の後の替え先の判断に使う。従量の接続と API キーの子には渡さない | 内部（予告なく変えてよい） |
 | `NDF_API_KEY_CHECK_MODEL` | user | string | — | API キーの確かめに使うモデル。無ければ claude-haiku-4-5 | 内部（予告なく変えてよい） |
@@ -85,6 +87,8 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `PATH` | user | string | — | 外部 CLI（gh・claude・codex）の実行ファイルを探す道。下限の比べ（cli_floor）が、起動へ渡す環境に無ければこのプロセスの値で、起動と同じ実行ファイルを解く。どちらにも無ければ既定の道（os.defpath） | 内部（予告なく変えてよい） |
 | `SLACK_BOT_TOKEN` | user | string | 秘密 | Slack の通知のトークン。無ければ通知しない | 内部（予告なく変えてよい） |
 | `SLACK_CHANNEL_ID` | user | string | — | Slack の通知先のチャンネル | 内部（予告なく変えてよい） |
+| `TMPDIR` | user | path | — | 一時ファイルの置き先。届け先の結果を読むコマンドへそのまま渡す。無ければ渡さない | 内部（予告なく変えてよい） |
+| `TZ` | user | string | — | 利用者のタイムゾーン。届け先の結果を読むコマンドへそのまま渡す。無ければ渡さない | 内部（予告なく変えてよい） |
 | `UV_PROJECT_ENVIRONMENT` | ndf | path | — | bin/ndf が NDF の依存の環境（<キャッシュ>/ndf/venv/<バージョン>）を指して uv へ渡す。中継が起動するセッションへ渡すと、セッションの中の uv run が NDF の環境を書き換えるため渡さない | 内部（予告なく変えてよい） |
 | `UV_RUN_RECURSION_DEPTH` | runtime | integer | — | uv run が入れ子の深さとして入れる。中継が起動するセッションへ渡すと、セッションの中の uv run の深さを誤って数えるため渡さない | 内部（予告なく変えてよい） |
 | `VIRTUAL_ENV` | runtime | path | — | uv run が NDF の依存の環境を指して入れる。中継が起動するセッションへ渡すと、セッションの中の uv と python が NDF の環境を使うため渡さない | 内部（予告なく変えてよい） |

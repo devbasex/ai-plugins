@@ -35,10 +35,10 @@
 
 | # | 確かめること |
 | --- | --- |
-| 0 | 引数の組。`--version` と `--environment` はそろえて、バージョン番号を持たないリポジトリでだけ受ける。配布先の宣言（`branch_strategy.release.deliveries`）が無ければ `--target` が 1 つ以上要り、あれば受けない |
+| 0 | 引数の組。`--version` と `--environment` はそろえて、バージョン番号を持たないリポジトリでだけ受ける。`--target` の要否は、push の時点の宣言を読むかで決まるので確かめ 3 で確かめる |
 | 1 | 本番の PR が本番ブランチへ入ったか（マージ済みか、`--production-sha` が正規の squash か）。入れたコミットを「反映したコミット」と呼ぶ |
 | 2 | 値の中に、反映したコミットの SHA の先頭 7 文字以上と一致する 16 進の語があるか |
-| 3 | 今回の対象の配布先（`targets`）を決める。宣言があれば、`paths` を持たない配布先と、本番の PR の差分と push の差分の両方に出るパスが当たる配布先。無ければ `--target` の集合。空なら止まる |
+| 3 | 作業ツリーの宣言は見ない。push を読むかと、どの時点の配布先の宣言（`branch_strategy.release.deliveries`）を読むかは、出典の「配布先の宣言を読む時点」の手順 1〜6 だけで決め、ここでは繰り返さない。対象の出典を配布した時点に固定し、宣言を外した後の初回の記録でも、同じ push の後の PR が宣言を足した場合でも、`--target` で受けないためである。push を使う場合は、`after` の宣言を前処理の共有の結果（「配布先ごとに並べて打つ呼び出しの共有」）から取る。共有の結果が無い場合だけ `deliveries_at` で 1 回読み、前処理の結果に含めて共有する。`after` に宣言があれば `--target` を受けず、無ければ要る。push を読まないのは、同じ値の記録に `push` が無く、追跡参照から反映したコミットまで第一親の履歴がつながり、反映したコミットに宣言が無く、その後に設定のファイルを変えたどのコミットにも宣言が無い場合だけで、`--target` が 1 つ以上要る。履歴がつながらなければ、宣言の有無を決めずに止まる。今回の対象の配布先（`targets`）を決める。宣言があれば、`paths` を持たない配布先と、本番の PR の差分と push の差分の両方に出るパスが当たる配布先。無ければ `--target` の集合。空なら止まる |
 | 4 | `--environment` が `targets` の部分集合か、`--observed` が `--environment` に含まれるか |
 | 5 | 今回の `targets` が正の `targets` と同じか |
 | 6 | 値とコミットが 1 対 1 か（同じコミットの記録が別の値で無いか、同じ値の記録が別のコミットで無いか） |
@@ -83,7 +83,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/contracts/data/workflow-kinds.json` | 新設 | 種類の名前と、種類ごとに行わない工程と理由 | — | データ | — |
 | `plugins/ndf/contracts/schemas/project-workflow.schema.json` | 変更 | `workflow` の `kind`・`modes`・`close` の形 | — | スキーマ | — |
-| `plugins/ndf/contracts/schemas/ndf-settings/project.schema.json` | 変更 | 同じ形を設定全体のスキーマに入れる。配布先の宣言に `paths`・`observe` を足す | — | スキーマ | — |
+| `plugins/ndf/contracts/schemas/ndf-settings/project.schema.json` | 変更 | 同じ形を設定全体のスキーマに入れる。配布先の宣言に `paths`・`observe`・`result.env`（予約した名前を `not` の `pattern` で拒む）を足す | — | スキーマ | — |
 | `plugins/ndf/skills/development-workflow/schemas/project.schema.json` | 変更 | 上の写し（`check-ndf-contracts.py` の写しの一致の検査の対象） | — | スキーマ | — |
 | `plugins/ndf/skills/development-workflow/references/project-flow.md` | 新設 | 流れの文書。生成の印で挟んだ範囲を `check-ndf-contracts.py --write` が書き、手では直さない | — | 文書 | — |
 | `plugins/ndf/skills/progress-tracking/SKILL.md` | 変更 | 「閉じる条件」のセクションに、`workflow.close` で外せる 2 つの条件と免除する範囲を書き足す（流れの文書の正本の 1 つ） | — | 文書 | — |
@@ -295,7 +295,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `records_verdict` | 5. 行の無い配布先があり `enforced` が偽 | `CLOSE`、`verified` は偽 |
 | `records_verdict` | 6. すべて `passed` | `CLOSE`、`verified` は真 |
 
-- 繰り返しの終わる条件: 対象の配布先ごとに `record_decide.decisive_row` を 1 回呼ぶ
+- 繰り返しの終わる条件: 対象の配布先ごとに `record_decide.pair_verdict` を 1 回呼ぶ
 
 ### 単体テストの観点
 
@@ -327,7 +327,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `render_correction`・`parse_correction` | `release/record_decide.py` | 新設 | `render_correction(c: Correction) -> str`・`parse_correction(body: str) -> Correction \| None` | 訂正の記録のコメントの本文と読み取り（マーカー `CORRECTION_MARK`） |
 | `value_matches` | `release/record_decide.py` | 新設 | `value_matches(value: str, sha: str) -> bool` | 確かめ 2。値の 16 進の語のどれかが SHA の先頭 7 文字以上と一致するか |
 | `production_deliveries` | `release/record_decide.py` | 新設 | `production_deliveries(rows: Sequence[Mapping]) -> list[Mapping]` | 決定 7 の「本番の配布先」の行 |
-| `glob_matches` | `release/record_decide.py` | 新設 | `glob_matches(pattern: str, path: str) -> bool` | git の pathspec の `:(glob)` と同じ一致（`**`・`*`・`?`・`[...]`、`*` は `/` を越えない） |
+| `glob_matches` | `release/record_decide.py` | 新設 | `glob_matches(pattern: str, path: str) -> bool` | git の pathspec の `:(glob)` と同じ一致（先に文字そのままで比べ、続けて `**`・`*`・`?`・`[...]`・`\` の打ち消しで照らす。括弧の中の POSIX の文字クラス `[[:alpha:]]` なども受ける。`*` は `/` を越えない。閉じない括弧と知らない文字クラスはどのパスにも当てない） |
 | `targets_of` | `release/record_decide.py` | 新設 | `targets_of(rows: Sequence[Mapping], pr_paths: frozenset[str], push_paths: frozenset[str]) -> tuple[str, ...]` | 確かめ 3。`paths` を持たない配布先と、両方の差分に出るパスが当たる配布先 |
 | `push_of` | `release/record_decide.py` | 新設 | `push_of(activities: Iterable[Mapping], landed: frozenset[str]) -> Push \| None` | 「反映したコミットを含む push」の手順 2。`landed` は手順 1 のコミットの集合 S（反映したコミットから本番ブランチの先端までの第一親のコミット）である。アクティビティを新しい順に読み、`after` が `landed` にあり、かつ `before` が `landed` に無い更新のうち、最初に当たった 1 件を返す。`after` が `landed` に無い更新に当たったら打ち切って None を返す |
 | `authoritative_targets` | `release/record_decide.py` | 新設 | `authoritative_targets(found: Sequence[Record], corrections: Sequence[Correction], version: str) -> tuple[str, ...] \| None` | 「正の `targets`」。最後の訂正、無ければ同じ値の最初の記録の一覧。`found` は `--release`・`--unit` で絞る前の有効な記録を渡す |
@@ -337,7 +337,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `confirm` | `release/record_decide.py` | 新設 | `confirm(delivery: Mapping, run: Mapping \| None, observed: Any, after: str) -> Confirmation` | 「配布先ごとの反映の確かめ」の表を 1 回評価する（`Confirmation(state, kind, reason, evidence: Evidence \| None)`。`state` は `ok`・`failed`・`pending`）。引数 `observed` は、`_observe` が読んだ `observe.pointer` の値で、`--observed` でその配布先を指定していないか、読めなかったときは `_MISSING` である。`kind` が `observed` のときだけ `evidence` を持ち、`url` は `delivery` の `observe.url`、`value` は `observed` の文字列である |
 | `json_pointer` | `release/record_decide.py` | 新設 | `json_pointer(doc: Any, pointer: str) -> Any` | RFC 6901 の 1 つの値（無ければ `_MISSING`） |
 | `representative` | `release/record_decide.py` | 新設 | `representative(found: Sequence[Record], targets: tuple[str, ...] \| None) -> Record \| None` | 読み取りの手順 5 |
-| `decisive_row` | `release/record_decide.py` | 新設 | `decisive_row(verifications: Sequence[Mapping], environment: str \| None, issue: int) -> Mapping \| None` | 「判定に使う行」。組の行を古い順にたどり、不合格の後は `retest_reason` のある行だけで置き換える |
+| `pair_verdict` | `release/record_decide.py` | 新設 | `pair_verdict(verifications: Sequence[Mapping], environment: str \| None, issue: int) -> str \| None` | 「判定に使う行」。組の行を古い順に並べ、最後に `retest_reason` を持つ行より前を捨て、残りを投稿の順によらずに合わせる（不合格が 1 つでもあれば `failed`、無ければ合格が 1 つでもあれば `passed`、保留だけなら `not_run`、行が無ければ `None`） |
 | `to_test` | `release/record_decide.py` | 新設 | `to_test(released: Sequence[str], issues: Sequence[int], verifications: Sequence[Mapping]) -> list[dict]` | 「テストする組の引き方」の表 |
 | `complete_of` | `release/record_decide.py` | 新設 | `complete_of(releases: Sequence[Record], representative: Record, targets: tuple[str, ...]) -> tuple[bool, tuple[str, ...]]` | 代表と `version`・`release`・`unit`・`commit` が同じで `targets` が正の一覧と同じ記録だけについて、`environments` の和集合が `targets` を覆うかと、まだの配布先 |
 
@@ -369,7 +369,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `parse_record` | `evidence` つきの `observed` の記録を `render_record` の出力から読み戻す | バージョン番号を持つリポジトリの記録は足した項目なしで今と同じに読む | `observed` で `evidence` の無い記録、`evidence` の値が文字列でない記録は None |
 | `authoritative_targets` | 最初の記録の一覧 | 最後の訂正が勝つ | 記録が無ければ None |
 | `confirm` | `cd`・`observed`・`attested` | `pointer` の外の SHA は数えない | CD の失敗は `failed`。CD が未確定で、`observed` が `_MISSING`・宣言に `observe` が無い・`pointer` の値が `after` と一致しない、のどれかなら `pending` |
-| `decisive_row` | 後の行が前の行に代わる | 不合格の後の理由の無い行は飛ばす | — |
+| `pair_verdict` | 合格と不合格の行がどちらの順でも `failed`。保留と合格は `passed` | `retest_reason` のある行より前の不合格は捨てる。理由の無い後の合格では不合格が覆らない | — |
 | `to_test` | 行の無い組と保留の組が入る | 一部の課題だけを確かめた配布先の残りの課題が入る | 合格と不合格の組は入らない |
 
 ## リリースの記録: 書き込みと読み取り
@@ -387,12 +387,14 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `write_unversioned` | `release/record.py` | 新設 | `write_unversioned(hub: GitHub, repo_git: Git, number: int, production: str, release: Mapping[str, Any], args: Unversioned) -> Outcome` | 設計書の確かめ 0〜8 と書く順の手順 1〜4 |
 | `correct_targets` | `release/record.py` | 新設 | `correct_targets(hub: GitHub, number: int, production: str, version: str, targets: tuple[str, ...], reason: str, production_sha: str \| None) -> str` | 確かめ 1・2・6 と訂正だけの確かめを通し、書く token の書き手を `_require_trusted_writer` で確かめてから、記録の PR へ訂正の記録を 1 件書く。書いたコメントの URL を返す |
 | `_landed_commit` | `release/record.py` | 新設 | `_landed_commit(hub: GitHub, number: int, production: str, production_sha: str \| None) -> tuple[Pull, str]` | 確かめ 1。`released` の着地の部分を使い、head の名前を問わずに反映したコミットを返す |
-| `_changed_paths` | `release/record.py` | 新設 | `_changed_paths(repo_git: Git, pull: Pull, commit: str, push: Push) -> tuple[frozenset[str], frozenset[str]]` | 「対象を決める変更の範囲」の 2 つの差分（`git diff --name-only --no-renames`、起動 2 回） |
+| `_changed_paths` | `release/record.py` | 新設 | `_changed_paths(repo_git: Git, pull: Pull, commit: str, push: Push) -> tuple[frozenset[str], frozenset[str]]` | 「対象を決める変更の範囲」の 2 つの差分（`git diff --name-only -z --no-renames`、起動 2 回）。出力は NUL で区切ってパスにする |
 | `_find_push` | `release/record.py` | 新設 | `_find_push(hub: GitHub, repo_git: Git, production: str, commit: str, known: Push \| None) -> Push` | 既存の記録の `push` があれば使い、無ければ `git rev-list --first-parent`（起動 1 回）と `branch_activity` で決める |
 | `_shared_prefix` | `release/record.py` | 新設 | `_shared_prefix(hub: GitHub, repo_git: Git, number: int, production: str, production_sha: str \| None, compute: Callable[[], Prefix]) -> Prefix` | 設計書の「処理の流れ」の共有の仕方。`<共通の git ディレクトリ>/ndf/release-record/<本番の PR>.json` を `filelock.FileLock` で取り、あれば反映したコミットを照らして使い、無いか違えば `compute` で作って書く |
-| `Prefix` | `release/record.py` | 新設 | `NamedTuple Prefix(commit: str, push: Push \| None, pr_paths: frozenset[str], push_paths: frozenset[str])` | 共有する前処理の結果（配布の結果によらず決まるものだけ） |
-| `_confirm_delivery` | `release/record.py` | 新設 | `_confirm_delivery(hub: GitHub, root: Path, delivery: Mapping, production: str, after: str, observed: bool, wait: bool, now: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep) -> Confirmation` | 「CD の結果の待ち」の 1〜4 を 1 つの配布先で行う。CD の結果は `result.workflow` なら `workflow_runs`、`result.command` なら `_command_result` で読む |
-| `_command_result` | `release/record.py` | 新設 | `_command_result(root: Path, command: str, after: str, deadline: float, now: Callable[[], float] = time.monotonic) -> Mapping` | `{revision}` を `after` に置き換えたコマンドをリポジトリの根で 1 回実行し、終了コード 0・75・1・それ以外を、成功・未完了・失敗・未確定の `run` の形（`status`・`conclusion`）にする（cd-setup.md の契約）。時間の上限は `deadline − now()`（期限までの残り）で、0 以下なら実行せずに未確定を返す |
+| `deliveries_at` | `release/record.py` | 新設 | `deliveries_at(repo_git: Git, after: str) -> DeliveriesAt` | 出典の「配布先の宣言を読む時点」。`git cat-file --batch` を 1 回起動し、`<after>^{commit}` と `<after>:.ndf/project.json` を読む。`branch_strategy.validate` の誤りの一覧で、`missing_ref`・`absent`・`broken`・`reserved`（予約した名前の誤りだけ。その配布先の名前を持つ）・`found` に分ける |
+| `DeliveriesAt` | `release/record.py` | 新設 | `NamedTuple DeliveriesAt(kind: str, deliveries: tuple[Mapping, ...], no_command: frozenset[str], reason: str)` | `no_command` は予約した名前があり、`result.command` を実行しない配布先の名前 |
+| `Prefix` | `release/record.py` | 新設 | `NamedTuple Prefix(commit: str, push: Push \| None, deliveries: Mapping \| None, pr_paths: frozenset[str], push_paths: frozenset[str])` | 共有する前処理の結果（配布の結果によらず決まるものだけ）。`deliveries` は push の `after` の配布先の宣言で、無ければ `None` |
+| `_confirm_delivery` | `release/record.py` | 新設 | `_confirm_delivery(hub: GitHub, root: Path, delivery: Mapping, production: str, after: str, observed: bool, wait: bool, now: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep) -> Confirmation` | 「CD の結果の待ち」の 1〜4 を 1 つの配布先で行う。CD の結果は `result.workflow` なら `workflow_runs`、`result.command` なら `_command_result` で読む。`result.command` の配布先では、`delivery` は push の `after` の宣言から読んだもの、`root` は `after` を取り出した一時の作業場所である。作業場所は、`write_unversioned` が `result.command` の配布先を照会するときに 1 回だけ作り、すべての配布先の判定を終えたら外す |
+| `_command_result` | `release/record.py` | 新設 | `_command_result(workdir: Path, command: str, env_names: Sequence[str], after: str, deadline: float, now: Callable[[], float] = time.monotonic) -> Mapping` | 設計書の分けたファイルの「結果を読むコマンドの実行の境界」のとおりに実行する。`command` と `env_names`（`result.env`）は push の `after` の宣言から `deliveries_at` で読んだもの、`workdir` は `after` を `git worktree add --detach` で取り出した一時の作業場所である。`{revision}` を `after` に置き換えたコマンドを `workdir` で 1 回実行する。環境変数は `PATH`・`HOME`・`LANG`・`LC_ALL`・`TZ`・`TMPDIR` と `env_names` だけを渡す。`DeliveriesAt.no_command` に入った配布先では呼ばれない（呼び出し元の `_confirm_delivery` が未確定として扱う）。`workdir` は `git -c core.hooksPath=/dev/null worktree add --detach` で、同じ環境変数だけを渡して作る。終了コード 0・75・1・それ以外を、成功・未完了・失敗・未確定の `run` の形（`status`・`conclusion`）にする（cd-setup.md の契約）。時間の上限は `deadline − now()`（期限までの残り）で、0 以下なら実行せずに未確定を返す |
 | `_observe` | `release/record.py` | 新設 | `_observe(delivery: Mapping, timeout: float) -> tuple[Any, str]` | `observe.url` を `httpx` で 1 回読み、`pointer` の値と読んだ URL を返す |
 | `_write_one` | `release/record.py` | 新設 | `_write_one(hub: GitHub, made: Record, holder: int, others: Sequence[int]) -> list[Written]` | 1 つの配布先の記録を書く順の手順 1〜4 で書き、重なりを自分のコメントの削除で戻す |
 | `_candidates` | `release/record.py` | 新設 | `_candidates(hub: GitHub, number: int, select: Selection) -> Candidates` | 設計書の読み取りの手順 1〜4 を行い、引数で絞った有効なリリース記録・値ごとの正の `targets`・訂正・テストの記録を返す（手順は下の箇条） |
@@ -400,7 +402,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `Selection` | `release/record.py` | 新設 | `NamedTuple Selection(version: str \| None, release: int \| None, unit: str \| None)` | `records` の絞り込みの引数 |
 | `read_release` | `release/record.py` | 新設 | `read_release(hub: GitHub, number: int, select: Selection, bodies: bool, issues: Sequence[int] \| None) -> dict[str, Any]` | 読み取りの手順 1〜6 と `to_test`。`records` の新しい `outputs` を返す |
 | `pr_body_only` | `release/record.py` | 新設 | `pr_body_only(hub: GitHub, number: int) -> dict[str, Any]` | `--pr-body-only`。その PR の本文と `trusted` だけを返す |
-| `write_verification` | `release/record.py` | 変更 | `write_verification(hub, number, payload, names=_no_names, unversioned: bool = False) -> str` | `unversioned` なら、記録の PR・`environments` の反映の記録・`unit`・`retest_reason` を確かめてから書く |
+| `write_verification` | `release/record.py` | 変更 | `write_verification(hub, number, payload, names=_no_names, unversioned: bool = False) -> str` | `unversioned` なら、記録の PR・`environments` の反映の記録・`unit`・`retest_reason` を確かめてから書く。`retest_reason` の要否は `pair_verdict` が `failed` を返すかで決める |
 | `cmd_record` | `release/cli.py` | 変更 | 今と同じ | 引数の組（確かめ 0）で `write`・`write_unversioned`・`correct_targets` を呼び分け、`record` の終わり方の表で状態を決める |
 | `_record_args` | `release/cli.py` | 新設 | `_record_args(args: argparse.Namespace, strategy: Strategy) -> Unversioned \| None` | 確かめ 0。バージョン番号を持つリポジトリ（`version_store.kind` が `none` でない）では `--version`・`--environment` を断る |
 | `cmd_records` | `release/cli.py` | 変更 | 今と同じ | 新しい引数があれば `read_release` か `pr_body_only`、無ければ今の `read` |
@@ -411,7 +413,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 - `write_unversioned`
   - 事前条件: バージョン番号を持たないリポジトリである。`args.environments` が 1 つ以上
   - 事後条件: 確かめ 0〜6 で止まれば、どの PR にも書いていない。書いた配布先ごとに、含めた PR の各々に、同じ値・同じ `environments`・正の `targets` の信用する記録がちょうど 1 件ある
-  - 副作用: GitHub のコメントの読み取り・書き込み・自分が書いたコメントの削除、git の起動 3 回（共有の置き場を使えたときは 0 回）、共有の置き場の読み書きと削除、CD の実行の照会、`observe.url` の HTTP の読み取り
+  - 副作用: GitHub のコメントの読み取り・書き込み・自分が書いたコメントの削除、git の起動は、記録が `push` を持たず共有の置き場にも結果が無ければ push を読むかの判定の 2 回（第一親の履歴と設定のファイルを変えたコミットを読む `git log` と、`git cat-file --batch` による先端の SHA と宣言の読み取り）と、push の時点の宣言を読むときに前処理の 3 回（差分の 2 回と、`git cat-file --batch` による宣言の読み取りの 1 回。K が 2 以上なら第一親をたどる 1 回を足す。共有の置き場を使えたときはどちらも 0 回）。共通の git ディレクトリは CLI が解決した値を使い、起動しない、`result.command` の配布先があれば作業場所の追加と削除の 2 回、共有の置き場の読み書きと削除、CD の実行の照会、`observe.url` の HTTP の読み取り
 - `_candidates`（番号は設計書の読み取りの手順のまま。「取得」はコメントを読むこと、「照会」は書き手の照会）
   - 手順 1: 記録の PR のコメントを 1 回だけ取得し（ページ送りを含む）、マーカーを持つコメントを候補にする
   - 手順 2: JSON の形が誤った候補を、照会せずに除く。バージョン番号を持つリポジトリの記録とテストの記録は、`--version`・`--release`・`--unit` のうち渡したものが一致する候補だけを残す
@@ -434,7 +436,8 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_record_args` | 引数の組の誤り | 確かめ 0 の「止まるとき」 | `_record_args` | 止める | `precondition`（3） | 何も書いていない。直して打ち直せる |
 | `_landed_commit` | 本番へ入っていない | 未マージで `--production-sha` が無いか正規の squash でない | `landed_squash` | 止める（`NotReleased`） | 今と同じ | 同上 |
 | `write_unversioned` | 値と反映したコミットが対応しない | 確かめ 2 | `value_matches` | 止める | `precondition`（3）。反映したコミットの SHA を載せる | 同上 |
-| `_find_push` | push を決められない | アクティビティにまだ載っていない | `push_of` が None | 止める | `precondition`（3）。時間を置いて打ち直すよう示す | 同上 |
+| `_find_push` | push を決められない | 手元の追跡参照が古い（GitHub でマージした直後に取得していない） | 先端から反映したコミットまで第一親の履歴がつながらないか、`git log` が失敗した | 止める（アクティビティは読まない） | `precondition`（3）。`git fetch <リモート> +refs/heads/<本番ブランチ>:refs/remotes/<リモート>/<本番ブランチ>` で取得してから打ち直すよう示す（取得先の追跡参照まで明示する）。浅い clone で履歴が途中で切れていれば、同じ参照の指定で `git fetch --unshallow` を示す | 同上 |
+| `_find_push` | push を決められない | アクティビティにまだ載っていないか、追跡参照が古く新しい更新が S の外にある | `push_of` が None | 止める | `precondition`（3）。追跡参照が古ければ `git fetch` で取得し、push の直後なら時間を置いて打ち直すよう示す | 同上 |
 | `write_unversioned` | 対象が空・正と違う・同じコミットに別の値 | 確かめ 3・5・6 | 各確かめ | 止める | `precondition`（3）。正の一覧と訂正の打ち方、または既にある値を載せる | 同上 |
 | `_confirm_delivery` | CD が失敗 | 実行の `conclusion` が `success` 以外 | `confirm` | 呼び出し元へ返す（`failed`） | 書けた配布先があれば `ok`（0）、無ければ `refused`（1） | その配布先は打ち直さず、配布の失敗として報告する |
 | `_confirm_delivery` | 未確定 | 実行が無い・未完了、`observe` で確かめられない、待ちの上限（`result.timeout_seconds`） | `confirm` | 呼び出し元へ返す（`pending`） | すべて未確定なら `precondition`（3）で `items` に理由 | その配布先だけで打ち直せる |
@@ -482,7 +485,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `_command_result` | 終了コード 0 で成功、1 で失敗 | 75 で未完了、それ以外で未確定。期限までの残りが時間の上限として渡る。残りが 0 なら実行しない | 時間の上限で未確定（実行するのは偽の `subprocess.run`、時刻は偽の `now`。子のプロセスを起動せず、本物の時間を待たない） |
-| `_shared_prefix` | 置き場が無ければ `compute` を 1 回呼んで書き、2 回目は呼ばない | 置き場の反映したコミットが今と違えば作り直す。`complete` で消える | 壊れた置き場は作り直す（ロックとファイルは一時ディレクトリ。子のプロセスを起動しない） |
+| `_shared_prefix` | 置き場が無ければ `compute` を 1 回呼んで書き、2 回目は呼ばない | 置き場の反映したコミットが今と違えば作り直す。`complete` で消える | 同じ名前で NDF が書いたものでないファイル（壊れた JSON を含む）は残し、`compute` の結果を書かずに返す。共有ファイルと同名の利用者のファイルは、`complete` 後の削除でも期限切れの掃除でも残す。期限切れの掃除では、`tmp/` に残った所定の名前（`<本番の PR の番号>.json.<16 進 16 文字>.ndf-tmp`）の一時ファイルを、書きかけでも削除する。ただし、同じ PR のロックをほかの呼び出しが持っている間は、期限を過ぎていても残す。`tmp/` にある所定の名前以外のファイルと FIFO は残し、掃除は続行する。`ndf/release-record/` 直下にある、一時ファイルと同じ形式の名前のファイルも残す。`tmp/` が塞がれているか、一時ファイルを開く操作が権限エラーになれば、ロックを外してから `compute` を呼び、その結果を書かずに返す（`compute` の中でロックをすぐに取れる）。`tmp/` を列挙できなければ掃除を飛ばす（ロックとファイルは一時ディレクトリ。子のプロセスを起動しない） |
 | `_confirm_delivery` | 期限の前に CD が成功すれば `cd` | 期限の直前に始めた照会・コマンド・実環境の確認には残り時間だけが上限として渡り、待機は残り時間で切られる | 期限を過ぎたら次の照会をせず `pending`（時刻は偽の `now`、待機は偽の `sleep` で、本物の時間を待たない） |
 | `write_unversioned` | 含めた PR の各々へ書き、作業の PR が無ければ本番の PR へ書く | 同じ引数の打ち直しで CD を照会しない。2 つの配布先の一方だけ完了で `recorded` と `pending` に分ける。並行した同じ引数の 2 回で記録が 1 件に戻る | 確かめ 0〜6 の各行で何も書かない。すべて未確定で `precondition`、書けた配布先が無く失敗があれば `refused` |
 | `correct_targets` | 訂正の記録を足し、前の記録を消さない | 訂正の後、新しい一覧で打ち直した配布先では前のテストの記録が判定に使われる | 宣言がある・記録が無い値で止まる。信用されない token では書かない |
@@ -511,7 +514,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_read_permission` | `adapters/github.py` | 変更 | `_read_permission(self, login: str) -> str \| None` | レート制限によるものでない 403・404 で `None` を返す（変換しない）。`none` への変換は `permission` が行う |
 | `trusts_strict` | `adapters/github.py` | 新設 | `trusts_strict(self, authored: Authored) -> bool` | `trusts` と同じ区分の扱いで、照会に `permission_strict` を使う |
 | `branch_activity` | `adapters/github.py` | 新設 | `branch_activity(self, branch: str) -> Iterator[dict]` | `GET /repos/{repo}/activity?ref=refs/heads/<branch>` を新しい順に 1 ページずつ返す（呼び出し元が打ち切れる） |
-| `workflow_runs` | `adapters/github.py` | 新設 | `workflow_runs(self, workflow: str, branch: str, commit: str, timeout: float \| None = None) -> list[dict]` | `GET /actions/workflows/<workflow>/runs?branch=&head_sha=`。`timeout` はこの照会の時間の上限（`None` は今の既定） |
+| `workflow_runs` | `adapters/github.py` | 新設 | `workflow_runs(self, workflow: str, branch: str, commit: str, timeout: float \| None = None) -> list[dict]` | `GET /actions/workflows/<workflow>/runs?branch=&head_sha=&event=push`。push で起動した実行だけを返す。`timeout` はこの照会の時間の上限（`None` は今の既定） |
 | `delete_comment` | `adapters/github.py` | 新設 | `delete_comment(self, comment_id: int) -> None` | `DELETE /issues/comments/<id>` |
 
 - `permission_strict`

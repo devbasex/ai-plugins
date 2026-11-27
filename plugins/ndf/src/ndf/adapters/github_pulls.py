@@ -2,10 +2,40 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.contracts import limits
+
+# GitHub の closing keywords（https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue）。
+# 形は旧実装 plugins/ndf/scripts/lib/closing.py の CLOSING と同じ。語の後ろの `:` と空白は省いてよく（`Fix:#12`）、
+# 指し先は `#番号`・`<所有者>/<リポジトリ>#番号`・課題の URL（`https://github.com/<所有者>/<リポジトリ>/issues/<番号>`）
+CLOSING = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*"
+    r"(https?://github\.com/[\w.-]+/[\w.-]+/issues/\d+|[\w.-]+/[\w.-]+#\d+|#\d+)",
+    re.IGNORECASE,
+)
+
+
+def same_repo(a: str, b: str) -> bool:
+    """2 つのリポジトリ名（`<所有者>/<リポジトリ>`）が同じか。GitHub の名前は大文字小文字を区別しない。"""
+    return a.lower() == b.lower()
+
+
+def closing_keyword_issues(body: str, repo: str) -> list[int]:
+    """本文の closing keywords が指す、リポジトリ `repo`（`<所有者>/<リポジトリ>`）の課題の番号（出た順・重複なし）。"""
+    out: list[int] = []
+    for m in CLOSING.finditer(body):
+        ref = m.group(1)
+        where, _sep, number = ref.rpartition("/issues/") if "/issues/" in ref else ref.rpartition("#")
+        owner_repo = where.removeprefix("https://github.com/").removeprefix("http://github.com/")
+        if owner_repo and not same_repo(owner_repo, repo):
+            continue
+        if int(number) not in out:
+            out.append(int(number))
+    return out
+
 
 # 一覧の 1 ページの件数（REST と GraphQL の上限。ページ数の上限は contracts/limits/ の github.check-runs・github.list-pages）
 PER_PAGE = 100
@@ -45,6 +75,29 @@ def graphql_string(value: str) -> str:
     return f'"{escaped}"'
 
 
+_FULL_SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def commit_pull_selections(shas: Iterable[str]) -> dict[str, str]:
+    """コミットごとに紐づく PR の番号を読む `repository` の下の選択（`GitHub.commits_pulls`。#4580）。
+    40 桁の 16 進でない SHA は `ValueError`（クエリへ埋め込むため）。"""
+    wanted = list(dict.fromkeys(shas))
+    bad = [s for s in wanted if not _FULL_SHA.fullmatch(s)]
+    if bad:
+        raise ValueError(f"40 桁の 16 進の SHA でない: {', '.join(bad)}")
+    fields = f"... on Commit {{ associatedPullRequests(first: {PER_PAGE}) {{ nodes {{ number }} }} }}"
+    return {s: f"object(oid: {graphql_string(s)}) {{ {fields} }}" for s in wanted}
+
+
+def pull_numbers(node: Any) -> Optional[list[int]]:
+    """`commit_pull_selections` の 1 つのコミットの節点から PR の番号。コミットが無い（null・Commit でない）なら None。"""
+    linked = node.get("associatedPullRequests") if isinstance(node, dict) else None
+    nodes = linked.get("nodes") if isinstance(linked, dict) else None
+    if not isinstance(nodes, list):
+        return None
+    return [int(n["number"]) for n in nodes if isinstance(n, dict) and "number" in n]
+
+
 def _from_fork(head: dict, base: dict) -> bool:
     """REST の PR の head のブランチがほかのリポジトリ（フォーク）にあるか。head の `repo` のキーが無ければ偽。
 
@@ -73,6 +126,8 @@ class Authored(NamedTuple):
     edited: bool = False
     # 書き手のアカウント ID（REST の `user.id`）。同じ名前の別のアカウントを分けるのに使う（#4409）。無ければ 0
     author_id: int = 0
+    # コメントの ID（REST の `id`。自分が書いたコメントを消すのに使う。#4580）。無ければ 0
+    comment_id: int = 0
 
     @classmethod
     def from_rest(cls, raw: dict) -> Authored:
@@ -80,7 +135,11 @@ class Authored(NamedTuple):
         created, updated = raw.get("created_at"), raw.get("updated_at")
         edited = isinstance(created, str) and isinstance(updated, str) and updated != created
         user = raw["user"]
-        return cls(_login(user), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited, account_id_of(user))
+        comment_id = raw.get("id")
+        comment_id = comment_id if isinstance(comment_id, int) and not isinstance(comment_id, bool) else 0
+        return cls(
+            _login(user), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited, account_id_of(user), comment_id
+        )
 
 
 class Pull(NamedTuple):

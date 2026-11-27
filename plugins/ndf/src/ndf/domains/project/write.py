@@ -23,7 +23,7 @@ from ndf.adapters import git
 from ndf.domains.project import analysis_record, check
 from ndf.domains.records import files
 from ndf.domains.project.items import MEASURED, QUESTION, obj, seq, value_digest
-from ndf.domains.project.secret import has_secret, redact
+from ndf.domains.project.secret import has_secret, mask, redact
 
 # 解析が測る設定の項目（スキーマの並びの順）。外すのは人が書く項目（検査が読む toolchain・budget を含む）・解析の記録・
 # 形のバージョン・非推奨のキーと、ndf project branch-strategy だけが書くブランチ戦略の設定
@@ -312,13 +312,36 @@ def _record_files(inp: Inputs, record: dict[str, Any], project: Optional[File]) 
     return out
 
 
-def _build_record(inp: Inputs, doc: dict[str, Any]) -> dict[str, Any]:
-    """書き出す設定 `doc` に対する解析の記録を組み立てる。形に合わなければ `WriteError`。"""
+def _measured_branches(inp: Inputs) -> dict[str, Any]:
+    """今のブランチの構成。測定の結果の構成（`branch_state`）と違えば `WriteError`。
+
+    必須のチェック（`ci.required_checks`）は計測時の既定ブランチから取るので、書き出しまでに構成が変わった計測を記録に残すと、
+    旧いブランチの値を「新しい」と判定させてしまう。違うときは書かずに計測からやり直させる。測定の結果は伏せ字を当てた後の値
+    なので、今の構成にも伏せ字を当ててから比べ、表示にも伏せ字の後の値だけを出す。記録には判定と同じ伏せ字の前の値を書く。"""
+    now = check.branch_state(git.Git(inp.root), check.declared_branches(inp.existing))
+    measured, shown = inp.measure.get("branch_state"), mask(now)
+    if measured != shown:
+        raise WriteError(f"計測の後にブランチの構成が変わった（計測時 {measured} → 今 {shown}）。ndf project measure からやり直す")
+    return now
+
+
+def _record_branches(inp: Inputs, now: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """記録に書くブランチの構成。既定ブランチが前の記録から変わったのに必須のチェックを測れず前の値を残したときは、前の記録の
+    構成を書き、`ndf project check` に「ブランチの構成が変わった」で古いと判定させる（測っていない値を新しいと記録しない）。"""
+    before = obj(obj(inp.record).get("branches"))
+    kept_ci = any(r["key"] == "ci" and r.get("kept_previous") for r in rows)
+    if kept_ci and inp.record is not None and before.get("head") != now["head"]:
+        return before
+    return now
+
+
+def _build_record(inp: Inputs, doc: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """書き出す設定 `doc` に対する解析の記録を組み立てる。`rows` は項目の出力の行。形に合わなければ `WriteError`。"""
     record = {
         "version": analysis_record.RECORD_VERSION,
         "analyzer": check.ANALYZER,
         "inputs": obj(inp.measure.get("inputs")),
-        "branches": check.branch_state(git.Git(inp.root), check.declared_branches(inp.existing)),
+        "branches": _record_branches(inp, _measured_branches(inp), rows),
         "written_digest": analysis_record.written_digest(doc),
     }
     errs = contracts.schema_errors(record, analysis_record.SCHEMA)
@@ -346,7 +369,7 @@ def plan(inp: Inputs) -> Plan:
     errs = contracts.schema_errors(doc, check.SCHEMA)
     if errs:
         raise WriteError(f"書き出す設定が形に合わない（解析器の誤り）: {'; '.join(errs[:3])}")
-    record = _build_record(inp, doc)
+    record = _build_record(inp, doc, item_rows)
     project = _project_file(inp, doc)
     out = _record_files(inp, record, project)
     notes = [{"kind": "note", "key": "notes", "text": n} for n in seq(inp.measure.get("notes"))]

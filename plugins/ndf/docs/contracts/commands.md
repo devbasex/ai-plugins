@@ -278,7 +278,7 @@
 | 呼び方 | 引数 |
 | --- | --- |
 | `ndf records cleanup-stage` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`prs`（array of integer・必須・位置） |
-| `ndf records close-check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`issue`（integer・必須・位置）<br>`--verification`（string・任意）: リリース後テストの記録（release-verification のスキーマの JSON）<br>`--require`（boolean・任意）: 記録が無ければ閉じない |
+| `ndf records close-check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`issue`（integer・必須・位置）<br>`--verification`（string・任意）: リリース後テストの記録（release-verification のスキーマの JSON）<br>`--records`（string・任意）: release-steps records --version の出力（結果 JSON）を保存したファイル。届け先ごとに判定する<br>`--require`（boolean・任意）: 記録が無ければ閉じない |
 | `ndf records design check` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`files`（array of string・任意・位置）: 全行を検査するファイル（名前を問わない。--base とどちらか一方）<br>`--base`（string・任意）: マージ先のブランチ名。分岐点からの差分の設計成果物の、変えた行を検査する<br>`--remote`（string・任意）: 起点のリモート名（既定は .ndf/worktree.json の remote）<br>`--result`（string・任意）: 標準出力と同じ結果を書くファイル |
 | `ndf records glossary meanings` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf records glossary render` | `--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ）<br>`--check`（boolean・任意）: 書かずに、今と違うファイルを出す |
@@ -375,12 +375,12 @@
 | `ndf release-steps present` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--material`（string・任意）: 承認資料のファイル（省けば PR の本文） |
 | `ndf release-steps publish` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--revision`（string・必須）<br>`--since`（string・任意）: 前の push の先頭。祖先なら --revision までの first-parent のコミットを古い順にすべて公開する |
 | `ndf release-steps pull-checks` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須） |
-| `ndf release-steps record` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--production`（string・必須）<br>`--production-sha`（string・任意）: 本番へ入れたコミット（strict の squash で閉じた PR の記録に要る） |
-| `ndf release-steps records` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須） |
+| `ndf release-steps record` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--production`（string・必須）<br>`--production-sha`（string・任意）: 本番へ入れたコミット（strict の squash で閉じた PR の記録に要る）<br>`--version`（string・任意）: 出したものを指す値（例 'main abc1234'。バージョンの保存先が none のリポジトリだけ）<br>`--environment`（array of string・任意）: 反映を確かめた届け先（繰り返せる。--version と一緒に）<br>`--target`（array of string・任意）: 今回の対象の届け先（push の時点に届け先の設定が無いときだけ。繰り返せる）<br>`--observed`（array of string・任意）: CD が未完了なら実環境の確認（設定の observe）で確かめる届け先（繰り返せる）<br>`--correct-targets`（boolean・任意）: 値の対象の一覧を --target の集合へ訂正する（--reason が要る）<br>`--reason`（string・任意）: 対象の一覧を訂正する理由（--correct-targets と一緒に） |
+| `ndf release-steps records` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--version`（string・任意）: 閉じるリリースの値（リリース記録の version）。渡した値の記録だけから代表とテストの記録を選ぶ<br>`--release`（integer・任意）: 本番の PR の番号。渡すとその本番の PR の記録だけから選ぶ<br>`--unit`（string・任意）: リリースの単位の名前（単位が 2 つ以上のリリース）。渡すとその単位の記録だけから選ぶ<br>`--bodies`（boolean・任意）: 代表のリリース記録の含めた PR の本文と、書き手を信用するかも返す<br>`--issues`（array of integer・任意）: テストする組（to_test）を作る課題の番号。渡すと含めた PR の本文を読まない<br>`--pr-body-only`（boolean・任意）: リリース記録を選ばず、--pr の PR の本文だけを返す（デプロイを飛ばした経路） |
 | `ndf release-steps sync-base` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--main-dir`（string・必須）<br>`--base`（string・必須） |
 | `ndf release-steps verification-record` | `--root`（string・任意・既定 `"."`）: リポジトリの根<br>`--repo`（string・任意）: <所有者>/<リポジトリ>。省けば origin<br>`--pr`（integer・必須）<br>`--record`（string・必須）: リリース後テストの記録の JSON（スキーマ release-verification） |
 
-結果の `metrics`: 決まった項目を持たない。`items` の要素: `change`（string）・`checks`（integer）・`checks_passed`（integer）・`checks_skipped`（integer）・`failed`（array of string）・`kind`（string）・`name`（string）・`number`（integer）・`path`（string）・`reason`（string）・`result`（string）
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `change`（string）・`checks`（integer）・`checks_passed`（integer）・`checks_skipped`（integer）・`failed`（array of string）・`kind`（string）・`name`（string）・`number`（integer）・`path`（string）・`reason`（string）・`result`（string）・`url`（string）
 
 ## `ndf route`
 

@@ -130,6 +130,15 @@ class Strategy:
         return self.base
 
 
+def without_version_number(read: Callable[[], Strategy]) -> bool:
+    """`read` が返す設定のリポジトリがバージョン番号を持たないか（`Strategy.has_version_number` の否定）。
+    設定が無いか読めなければ偽（バージョン番号を持つリポジトリとして確かめる）。"""
+    try:
+        return not read().has_version_number
+    except StrategyError:  # noqa: NDF401 利用者の入力: 設定の無いリポジトリは今のとおりバージョン番号を持つリポジトリとして確かめる
+        return False
+
+
 @contracts.cached_reader
 def _schema() -> tuple[dict, Draft202012Validator]:
     """project のスキーマの全体と、`$defs/BranchStrategy` の検証器（1 プロセスに 1 回だけ読む）。"""

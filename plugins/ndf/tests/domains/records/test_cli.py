@@ -158,6 +158,152 @@ def test_close_check_judges_only_the_rows_of_the_issue(repo: Path, capsys, last_
     assert code == 0 and got["items"] == [{"issue": 8, "closable": True, "reason": "リリース後テストに不合格と保留の行が無い"}]
 
 
+REQUIRED_CONDITIONS = {
+    "release_verification": {"excluded": False, "reason": None, "enforced": False},
+    "retrospective_line": {"excluded": False, "reason": None, "enforced": True},
+}
+
+
+def _flow(repo: Path, close: dict) -> None:
+    (repo / ".ndf").mkdir(exist_ok=True)
+    (repo / ".ndf" / "project.json").write_text(json.dumps({"workflow": {"close": close}}, ensure_ascii=False), encoding="utf-8")
+
+
+def _verification(repo: Path, *rows: tuple[int, str]) -> str:
+    path = repo / "verification.json"
+    issues = [{"number": n, "result": r, "evidence": "確かめた"} for n, r in rows]
+    path.write_text(json.dumps({"version": "1.2.3", "issues": issues}), encoding="utf-8")
+    return str(path)
+
+
+def test_issue_4580_close_check_without_a_flow_reports_both_conditions_as_required(repo: Path, capsys, last_result) -> None:
+    # 受け入れ条件 1: 流れの設定が無ければ判定は今と同じで、条件はどちらも外していない
+    code, got = _close_check(capsys, last_result, repo, "5", "--require")
+    assert code == 1 and got["summary"] == "#5 を閉じない: リリース後テストの記録が無い"
+    assert got["outputs"] == {
+        "conditions": {**REQUIRED_CONDITIONS, "release_verification": {"excluded": False, "reason": None, "enforced": True}},
+        "verified": False,
+    }
+    code, got = _close_check(capsys, last_result, repo, "7", "--verification", _verification(repo, (7, "passed")))
+    assert code == 0 and got["summary"] == "#7 を閉じてよい: リリース後テストに不合格と保留の行が無い"
+    assert got["outputs"] == {"conditions": REQUIRED_CONDITIONS, "verified": True}
+
+
+def test_issue_4580_excluded_verification_closes_without_a_record_and_names_the_reason(repo: Path, capsys, last_result) -> None:
+    # 受け入れ条件 6: テストの記録を外すと、--require でも記録なしで閉じてよく、外した条件と理由が載る
+    _flow(repo, {"release_verification": {"required": False, "reason": "監視で確かめる"}})
+    code, got = _close_check(capsys, last_result, repo, "5", "--require")
+    assert code == 0 and got["status"] == "ok"
+    assert got["outputs"]["conditions"]["release_verification"] == {"excluded": True, "reason": "監視で確かめる", "enforced": False}
+    assert got["outputs"]["verified"] is False
+    assert "release_verification（監視で確かめる）" in got["summary"]
+
+
+def test_issue_4580_excluded_retrospective_line_is_not_enforced(repo: Path, capsys, last_result) -> None:
+    # 受け入れ条件 7: 振り返りの行を外すと、その条件を求めないと返し、理由が載る
+    _flow(repo, {"retrospective_line": {"required": False, "reason": "週次の会で行う"}})
+    code, got = _close_check(capsys, last_result, repo, "5")
+    assert code == 0
+    assert got["outputs"]["conditions"]["retrospective_line"] == {"excluded": True, "reason": "週次の会で行う", "enforced": False}
+    assert "retrospective_line（週次の会で行う）" in got["summary"]
+
+
+def test_issue_4580_a_failed_row_keeps_the_issue_even_with_both_conditions_excluded(repo: Path, capsys, last_result) -> None:
+    # 受け入れ条件 8・I2: どの設定でも、渡した記録に不合格の行がある課題は閉じない
+    _flow(repo, {"release_verification": {"required": False, "reason": "x"}, "retrospective_line": {"required": False, "reason": "y"}})
+    path = _verification(repo, (7, "passed"), (7, "failed"))
+    code, got = _close_check(capsys, last_result, repo, "7", "--require", "--verification", path)
+    assert code == 1 and got["cause"]["kind"] == "refused"
+    assert got["outputs"]["verified"] is False
+
+
+def _web_trunk(repo: Path, close: dict | None = None) -> None:
+    """バージョン番号を持たないリポジトリ（`version_store.kind` が none）の設定。"""
+    from strategy_fixture import section
+
+    project = {"branch_strategy": section("web-trunk")} | ({"workflow": {"close": close}} if close else {})
+    (repo / ".ndf").mkdir(exist_ok=True)
+    (repo / ".ndf" / "project.json").write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+
+
+WEB, WORKER = "web", "worker"
+
+
+def _records(repo: Path, *checks: tuple[tuple[str, ...], int, str], environments: tuple[str, ...] = (WEB, WORKER), **change) -> str:
+    """`release-steps records --version` の出力を手順書のとおり 1 行の結果 JSON としてファイルに保存する。"""
+    made = {"version": "main abc1234", "release": 20, "included": [11, 20], "environments": list(environments), "commit": "a" * 40}
+    made |= {"targets": [WEB, WORKER], "confirmation": {e: "cd" for e in environments}}
+    verifications = [
+        {"version": "main abc1234", "environments": list(e), "issues": [{"number": n, "result": r, "evidence": "確かめた"}]}
+        for e, n, r in checks
+    ]
+    outputs = {"command": "records", "selection": {"version": "main abc1234", "release": None, "unit": None}, "release": made}
+    outputs |= {"releases": [made], "targets": [WEB, WORKER], "verifications": verifications, "bodies": None, "to_test": None}
+    got = result.result("release-steps", result.OK, "読んだ", outputs=outputs) | change
+    path = repo / "records.json"
+    path.write_text("人が読む行\n" + json.dumps(got, ensure_ascii=False) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def test_issue_4580_close_check_reads_the_records_output_per_target(repo: Path, capsys, last_result) -> None:
+    # 受け入れ条件 9: バージョンの無いリポジトリでは records の出力を --records で渡し、届け先ごとに判定する
+    _web_trunk(repo)
+    path = _records(repo, ((WEB,), 7, "passed"), ((WORKER,), 7, "passed"))
+    code, got = _close_check(capsys, last_result, repo, "7", "--records", path, "--require")
+    assert code == 0 and got["outputs"]["verified"] is True
+    assert got["outputs"]["release"] == {"complete": True, "missing": [], "unconfirmed": []}
+    code, got = _close_check(capsys, last_result, repo, "7", "--records", _records(repo, ((WEB,), 7, "passed"), environments=(WEB,)))
+    assert code == 1 and got["cause"]["kind"] == "refused" and got["outputs"]["release"]["missing"] == [WORKER]
+
+
+def test_issue_4580_records_with_a_failed_row_keep_the_issue_with_both_conditions_excluded(repo: Path, capsys, last_result) -> None:
+    # 受け入れ条件 8・I2: 不合格の記録を含む --records は、両方の条件を外しても閉じない
+    _web_trunk(repo, {"release_verification": {"required": False, "reason": "x"}, "retrospective_line": {"required": False, "reason": "y"}})
+    path = _records(repo, ((WEB,), 7, "passed"), ((WORKER,), 7, "failed"))
+    code, got = _close_check(capsys, last_result, repo, "7", "--records", path, "--require")
+    assert code == 1 and got["cause"]["kind"] == "refused" and got["outputs"]["verified"] is False
+
+
+def test_issue_4580_close_check_refuses_the_wrong_pair_of_records(repo: Path, capsys, last_result) -> None:
+    # バージョンの保存先が none のリポジトリは --verification を受けず、--records を示す。両方を渡すのも誤り
+    _web_trunk(repo)
+    code, got = _close_check(capsys, last_result, repo, "7", "--verification", _verification(repo, (7, "passed")))
+    assert code == 3 and got["cause"]["kind"] == "precondition" and "--records" in got["summary"]
+    path = _records(repo, ((WEB, WORKER), 7, "passed"))
+    code, got = _close_check(capsys, last_result, repo, "7", "--records", path, "--verification", _verification(repo, (7, "passed")))
+    assert code == 3 and got["cause"]["kind"] == "precondition"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"tool": "records"}, {"outputs": {"command": "records"}}, {"outputs": {"release": None}}],
+)
+def test_issue_4580_close_check_stops_on_records_of_the_wrong_shape(repo: Path, capsys, last_result, change: dict) -> None:
+    # records の成功の結果で outputs が $defs.records_outputs に合うものだけを受ける
+    _web_trunk(repo)
+    path = _records(repo, ((WEB, WORKER), 7, "passed"), **change)
+    code, got = _close_check(capsys, last_result, repo, "7", "--records", path)
+    assert code == 3 and got["cause"]["kind"] == "precondition"
+
+
+def test_issue_4580_close_check_without_records_does_not_ask_for_a_release(repo: Path, capsys, last_result) -> None:
+    # デプロイを飛ばした経路は --records も --verification も渡さず、リリース記録が無いことで閉じないとは返さない
+    _web_trunk(repo)
+    code, got = _close_check(capsys, last_result, repo, "7")
+    assert code == 0 and "release" not in got["outputs"]
+
+
+@pytest.mark.parametrize(
+    "close",
+    [{"release_verification": {"required": False}}, {"unknown": {"required": True}}],
+)
+def test_issue_4580_close_check_stops_on_a_broken_flow(repo: Path, capsys, last_result, close: dict) -> None:
+    # I5: 理由の無い除外と知らない条件は形の誤りで、閉じない
+    _flow(repo, close)
+    code, got = _close_check(capsys, last_result, repo, "5")
+    assert code == 3 and got["cause"]["kind"] == "precondition"
+
+
 def _handoff_body(now: str) -> str:
     """必須の 5 セクションを持つ引継ぎ文書の本体。`now` は「現在地」の本文。"""
     return (

@@ -191,7 +191,7 @@
     },
     "workflow": {
       "type": "object",
-      "description": "工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch）",
+      "description": "工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch）と、課題を閉じる条件の要否（close）",
       "properties": {
         "stages": {
           "type": "object",
@@ -199,6 +199,19 @@
           "additionalProperties": {
             "$ref": "#/$defs/StageToggle"
           }
+        },
+        "close": {
+          "type": "object",
+          "description": "課題を閉じる条件の要否。省いた条件は求める。外すときは reason が要る。外せるのはリリース後テストの記録（release_verification）と「振り返り:」の行（retrospective_line）だけ",
+          "properties": {
+            "release_verification": {
+              "$ref": "#/$defs/CloseRule"
+            },
+            "retrospective_line": {
+              "$ref": "#/$defs/CloseRule"
+            }
+          },
+          "additionalProperties": false
         },
         "launch": {
           "type": "object",
@@ -263,6 +276,10 @@
     {
       "by": "ndf progress",
       "when": "ステートマシンを作るときに workflow.stages の工程の有効・無効を読む"
+    },
+    {
+      "by": "ndf records close-check",
+      "when": "課題を閉じてよいかを決めるときに workflow.close の条件の要否を読む"
     }
   ],
   "examples": [
@@ -1471,6 +1488,38 @@
       "title": "CiExempt",
       "type": "object"
     },
+    "CloseRule": {
+      "type": "object",
+      "description": "課題を閉じる条件 1 つの要否。外すときは理由が要る",
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "条件を求めるか"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "条件を外す理由"
+        }
+      },
+      "required": [
+        "required"
+      ],
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "required": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reason"
+        ]
+      },
+      "title": "CloseRule"
+    },
     "CodeMeasure": {
       "additionalProperties": false,
       "properties": {
@@ -1618,6 +1667,52 @@
           ],
           "default": null,
           "title": "Publishes Release"
+        },
+        "paths": {
+          "anyOf": [
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "この届け先の CD が配るパス（git の pathspec の :(glob) の形。例 web/**）。本番の PR の差分と push の差分の両方に出るパスが当たる届け先だけをリリース記録の対象にする。無ければ毎回対象にする（#4580）"
+        },
+        "observe": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "url",
+                "pointer"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "pattern": "^https?://",
+                  "description": "この届け先で稼働しているバージョンを JSON で返す、認証の要らない URL"
+                },
+                "pointer": {
+                  "type": "string",
+                  "pattern": "^(/.*)?$",
+                  "description": "応答の中で稼働しているバージョンのコミットの SHA を持つ項目の JSON Pointer（RFC 6901。例 /build/commit）"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "実環境の確認（record --observed）で読む URL と項目。CD の結果が未確定のとき、値が push の after と一致すればリリース記録を書ける（#4580）"
         }
       },
       "required": [
@@ -1669,6 +1764,26 @@
           ],
           "default": null,
           "title": "Timeout Seconds"
+        },
+        "env": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "title": "result.env の予約した名前",
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "not": {
+                  "pattern": "^(GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|SSH_AUTH_SOCK|GIT_.*|NDF_.*)$"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "結果を読むコマンド（command）へ渡す環境変数の名前。PATH・HOME・LANG・LC_ALL・TZ・TMPDIR のほかはここに書いた名前だけを渡す。GitHub・git・NDF の操作に使う名前（not の pattern）は書けない（#4580）"
         }
       },
       "title": "DeliveryResult",

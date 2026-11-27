@@ -16,6 +16,7 @@ Issue・コメント・PR の本文を書く操作は、公開範囲を読むエ
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import subprocess
@@ -31,15 +32,17 @@ import httpx
 from githubkit import GitHub as Client
 from githubkit.exception import GraphQLFailed, PrimaryRateLimitExceeded, RateLimitExceeded, RequestError, RequestFailed
 
-from ndf.adapters import cli_floor, git, github_limits, github_merge, write_gate
+from ndf.adapters import cli_floor, github_limits, github_merge, github_pulls, write_gate
 from ndf.adapters.github_limits import GRAPHQL, REST, RetryWithin
-from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome, Verified
+from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeExpect, MergeOutcome
 
-# 呼び手（`ndf.domains.release.land`）が github から読む、github_merge の名前
+# 呼び手（`ndf.domains.release.land`・`publish`・`ci_cli`）が github から読む、github_merge の名前
 from ndf.adapters.github_merge import MERGE_COMMIT as MERGE_COMMIT
+from ndf.adapters.github_merge import landed as landed
 
-# `Pull`・`Authored`・`text_of` は呼び手が github から読む名前でもある
-from ndf.adapters.github_pulls import PER_PAGE, PULL_FIELDS, Authored, Pull, account_id_of, graphql_string, target_of, text_of
+# `Pull`・`Authored`・`text_of`・`same_repo` は呼び手が github から読む名前でもある
+from ndf.adapters.github_pulls import same_repo as same_repo
+from ndf.adapters.github_pulls import PER_PAGE, PULL_FIELDS, Authored, Pull, account_id_of, graphql_string, text_of
 from ndf.adapters.github_rules import NO_RULES, RuleFacts, classic_facts_of, merge_facts, rule_facts_of
 from ndf.contracts import limits
 
@@ -55,13 +58,19 @@ PULLS_PER_HEAD = 5
 TOKEN_ENV = ("GH_TOKEN", "GITHUB_TOKEN")
 # GitHub App の bot の login の末尾（`<アプリの slug>[bot]`。commit status の書き手からアプリを引く。#3506）
 BOT_SUFFIX = "[bot]"
-# マージの拒否を、拒否の後に読み直した `mergeStateStatus` で種類へ分ける（SF4）。標準エラーの文は読まない
-_REFUSAL_KINDS = {"dirty": "base_conflict", "blocked": "not_ci", "behind": "not_ci", "draft": "not_ci"}
+
+
 # マージ先の設定の読み取りに、token の利用者の login とアカウント ID（`viewer`）も同じ 1 回の要求で載せる（承認の証跡の書き手を照らす。#4409）
-_BRANCH_FILE = (
-    "query($owner: String!, $name: String!, $expr: String!) { viewer { login databaseId } repository(owner: $owner, name: $name) {"
-    " nameWithOwner object(expression: $expr) { ... on Blob { oid text } } } }"
-)
+def _branch_file_query(body: str = "") -> str:
+    """マージ先の設定を読む問い合わせ文。`body` は `repository` の下へ並べて載せる選択（空なら載せない）。"""
+    extra = f" {body}" if body else ""
+    return (
+        "query($owner: String!, $name: String!, $expr: String!) { viewer { login databaseId } repository(owner: $owner, name: $name) {"
+        f" nameWithOwner object(expression: $expr) {{ ... on Blob {{ oid text }} }}{extra} }} }}"
+    )
+
+
+_BRANCH_FILE = _branch_file_query()
 # token の利用者の login だけを読む問い合わせ。REST の `/user` と違い、GitHub App のインストールトークンと Actions の
 # `GITHUB_TOKEN` でもボットの login を返す
 _VIEWER = "query { viewer { login databaseId } }"
@@ -72,6 +81,8 @@ OWNER_ASSOCIATION = "OWNER"
 PERMISSION_CHECKED_ASSOCIATIONS = frozenset({"MEMBER", "COLLABORATOR"})
 # 権限の読み取り（REST の collaborators/{login}/permission の `permission`）で write 以上を表す値。maintain は write に写る
 WRITE_PERMISSIONS = frozenset({"admin", "write"})
+# 照会できない状態（#4580）。上限でない 403 と 404 は、権限や利用者が無いのか見えないだけかを区別できない
+UNREADABLE_STATUSES = (403, 404)
 # リポジトリの公開範囲（GraphQL の `visibility`）。読めないリポジトリは UNKNOWN で、公開でないとして扱う
 PUBLIC, UNKNOWN = "PUBLIC", "UNKNOWN"
 
@@ -106,6 +117,20 @@ class GitHubError(Exception):
         made = cls(failure.detail, failure.status, failure.retry_after, failure.quota, failure.unreached)
         made.secondary, made.hinted, made.reasons, made.recorded = failure.secondary, failure.hinted, failure.reasons, failure.recorded
         return made
+
+
+def unreadable(exc: GitHubError) -> bool:
+    """照会できない失敗（上限でない `UNREADABLE_STATUSES`）か。上限と他の失敗は偽で、呼び手はそのまま投げる。"""
+    return exc.quota is None and exc.status in UNREADABLE_STATUSES
+
+
+class PermissionUnknown(GitHubError):
+    """書き手の権限を照会できない（レート制限によるものでない `UNREADABLE_STATUSES`。#4580）。`login` は照会できなかった書き手。"""
+
+    def __init__(self, login: str, status: int = 0) -> None:
+        shown = status or "・".join(str(s) for s in UNREADABLE_STATUSES)
+        super().__init__(f"{login} の対象のリポジトリでの権限を照会できない（{shown}）。権限が無いとは扱わずに止める", status)
+        self.login = login
 
 
 def token() -> str:
@@ -158,25 +183,6 @@ class Unread(NamedTuple):
     error: GitHubError
 
 
-class MergeExpect(NamedTuple):
-    """`ndf ci merge` が判定に使った値（#4409 の決定 8）。`pull` は判定の前に読んだ PR で、先の確認と方式の選択に使う。
-
-    `rejudge` は確かめの応答の設定の本文（無ければ None）で判定をやり直し、送ってよければ None、止めるなら結果を返す。
-    """
-
-    pull: "Pull"
-    base: str
-    head: str
-    config_path: str
-    config_oid: Optional[str]
-    rejudge: Callable[[Optional[str]], Optional["MergeOutcome"]]
-
-
-def same_repo(a: str, b: str) -> bool:
-    """2 つのリポジトリ名（`<所有者>/<リポジトリ>`）が同じか。GitHub の名前は大文字小文字を区別しない。"""
-    return a.lower() == b.lower()
-
-
 def whole_blob_at(rev: str, path: str) -> str:
     """コミット `rev` のファイル `path` の本文を、切り詰めの有無と合わせて読む `repository` の下の選択（`WHOLE_BLOB`）。"""
     return f"object(expression: {json.dumps(f'{rev}:{path}')}) {WHOLE_BLOB}"
@@ -188,79 +194,18 @@ def whole_text(node: Any) -> Optional[str]:
     return text if isinstance(text, str) else None
 
 
-def landed(pull: Pull, method: str, base_ref: str, repo: git.Git) -> bool:
-    """PR の head が基底 `base_ref`（`origin/develop` など）に含まれたかを、マージの方式ごとに確かめる（3378-2）。
-
-    merge は head が基底の祖先か（git）、squash と rebase は PR がマージ済みか（`merged_at`）で読む。
-    """
-    if method not in github_merge.MERGE_METHODS:
-        raise ValueError(f"知らないマージの方式: {method}（{', '.join(github_merge.MERGE_METHODS)}）")
-    if github_merge.MERGE_METHODS[method] == github_merge.ANCESTRY:
-        return repo.is_ancestor(pull.head_sha, base_ref)
-    return pull.merged
-
-
-def refusal_kind(after: Pull, sent_sha: str) -> str:
-    """マージを断られた後に読み直した PR から、停止理由の種類を決める（SF4）。"""
-    if after.head_sha != sent_sha:
-        return "refused"
-    return _REFUSAL_KINDS.get(after.merge_state, "unknown")  # noqa: NDF502 ネットワーク: 表に無い mergeStateStatus（clean・unstable・unknown）は種類を決められない
-
-
-@dataclass(frozen=True)
-class _MergeRoute:
-    """マージの要求の打ち方。`send` が要求を打ってマージコミット（応答に無ければ空）を返し、`refused` が真とみなした誤りは断られたとして扱う。`how` は成功の文に
-    添える迂回のマーカー。`require_method` が真なら、キューの方式が選んだ方式と違うときキューへ入れずに断る。"""
-
-    send: Callable[[int, "Pull", str], str]
-    refused: Callable[["GitHubError"], bool]
-    how: str
-    require_method: bool = False
-    jump: bool = False
-
-
-def _refused_by_graphql(exc: GitHubError) -> bool:
-    """GraphQL の誤りが GitHub の断り（届いて断られた。上限でない）か。届かなかった・上限なら偽（呼び手が投げ直す）。"""
-    return exc.status == 0 and not exc.unreached and exc.quota is None
-
-
-def _file_at(repo: dict, key: str) -> FileAt:
-    """`object(expression)` の応答（キー `key`）を `FileAt` にする。Blob でない・無いなら本文と oid が None。"""
-    node = repo.get(key)
-    blob = node if isinstance(node, dict) and isinstance(node.get("oid"), str) else None
-    text = blob.get("text") if blob is not None and isinstance(blob.get("text"), str) else None
-    return FileAt(text_of(repo.get("nameWithOwner")), text, blob["oid"] if blob is not None else None)
-
-
-def _verified(repo: dict) -> Verified:
-    node = repo.get("pullRequest") if isinstance(repo.get("pullRequest"), dict) else {}
-    return Verified(*target_of(node), text_of(repo.get("nameWithOwner")), _file_at(repo, "config"))
-
-
-def _verify(number: int, fresh: Verified, expect: MergeExpect, repo: str) -> Optional[MergeOutcome]:
-    """確かめの応答 `fresh` と判定に使った値を比べる。マージ先・HEAD が違えば `github_merge.TARGET_MOVED`、
-    ベースリポジトリが違えば `refused`。設定の oid だけが違えば、同じ応答の本文で判定をやり直す（設定を読み直す要求を
-    足さない）。送ってよければ None。"""
-    moved = github_merge.TARGET_MOVED
-    if fresh.base != expect.base:
-        return MergeOutcome(
-            False, moved, f"#{number} のマージ先が判定した {expect.base} から {fresh.base} へ変わった（判定からやり直す）", fresh.head
-        )
-    if not git.sha_matches(expect.head, fresh.head):
-        return MergeOutcome(False, moved, f"#{number} の HEAD が判定した {expect.head[:12]} から {fresh.head[:12]} へ動いた", fresh.head)
-    if not same_repo(fresh.repo, repo):
-        return MergeOutcome(False, "refused", f"#{number} のベースリポジトリ {fresh.repo} が {repo} と違う", fresh.head)
-    if fresh.config.oid != expect.config_oid:
-        return expect.rejudge(fresh.config.text)
-    return None
-
-
 def _response_body(resp: Any) -> Any:
     if not resp.content:
         return None
     if "json" in resp.headers.get("content-type", ""):  # noqa: NDF502 ネットワーク: 応答に content-type が無いことがある
         return resp.json()
     return resp.text
+
+
+def _next_cursor(resp: Any) -> Optional[str]:
+    """応答の Link の `next` の URL のカーソル（`after`）。次のページが無ければ None。"""
+    nxt = resp.raw_response.links.get("next")
+    return httpx.URL(nxt["url"]).params.get("after") if isinstance(nxt, dict) and "url" in nxt else None
 
 
 def _alias(i: int) -> str:
@@ -285,7 +230,7 @@ def _only_not_found(exc: GraphQLFailed) -> bool:
     return bool(errors) and all(e.type == "NOT_FOUND" for e in errors)
 
 
-def _translated(exc: RequestFailed | RequestError | write_gate.Busy, label: str, detail_body: bool = False) -> GitHubError:
+def _as_github_error(exc: RequestFailed | RequestError | write_gate.Busy, label: str, detail_body: bool = False) -> GitHubError:
     """githubkit の失敗を `GitHubError` へ写す。`label` は要求の名前（`GET /path`・`graphql`）。写し方は `github_limits.failure_of`。"""
     return GitHubError.of(github_limits.failure_of(exc, label, detail_body, time.time()))
 
@@ -311,11 +256,11 @@ class _Counted(NamedTuple):
 
 @contextmanager
 def _translating(label: str, detail_body: bool = False, gate: Optional[write_gate.WriteGate] = None) -> Iterator[None]:
-    """失敗（順番の待ちの `write_gate.Busy` も）を `_translated` で `GitHubError` へ写して投げ直す。二次レート制限は `tell` で知らせる。"""
+    """失敗（順番の待ちの `write_gate.Busy` も）を `_as_github_error` で `GitHubError` へ写して投げ直す。二次レート制限は `tell` で知らせる。"""
     try:
         yield
     except (RateLimitExceeded, RequestFailed, RequestError, write_gate.Busy) as exc:
-        error = _translated(exc, label, detail_body)
+        error = _as_github_error(exc, label, detail_body)
         github_limits.tell(gate, error.secondary, error.retry_after, error.recorded)
         raise error from None
     except GitHubError as error:
@@ -331,6 +276,8 @@ class GitHub:
     api: Client
     # 書き手の login → 対象リポジトリでの権限（`permission`）。1 つの書き手を 1 回だけ読む
     _permissions: dict[str, str] = field(default_factory=dict, compare=False, repr=False)
+    # 権限を照会できなかった書き手の login → 照会の状態（403・404）。`permission` は `none` と読み、`permission_strict` は止める
+    _unreadable: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
     # token の利用者（`viewer`。1 回だけ読む。読んだら 1 件）
     _viewer: list[Viewer] = field(default_factory=list, compare=False, repr=False)
     # 二次レート制限の待ちの終わりを知らせる先。省けば `api` の throttler の `WriteGate`（A5）
@@ -485,11 +432,19 @@ class GitHub:
 
         OWNER はそのまま信用し、MEMBER・COLLABORATOR は対象リポジトリでの権限を読んで write 以上のときだけ信用する。
         """
+        return self._trusts_by(authored, self.permission)
+
+    def trusts_strict(self, authored: Authored) -> bool:
+        """`trusts` と同じ区分の扱いで、権限を照会できない書き手では偽を返さず `PermissionUnknown` を投げる（#4580）。"""
+        return self._trusts_by(authored, self.permission_strict)
+
+    @staticmethod
+    def _trusts_by(authored: Authored, read: Callable[[str], str]) -> bool:
         if authored.association == OWNER_ASSOCIATION:
             return True
         if authored.association not in PERMISSION_CHECKED_ASSOCIATIONS or not authored.author:
             return False
-        return self.permission(authored.author) in WRITE_PERMISSIONS
+        return read(authored.author) in WRITE_PERMISSIONS
 
     def token_trusted(self) -> bool:
         """このクライアントの token で書いた本文を、読み手が `trusts` で信用するか（#3487）。
@@ -500,7 +455,7 @@ class GitHub:
         try:
             raw = self.rest("GET", "/user")
         except GitHubError as exc:
-            if exc.quota is None and exc.status in (403, 404):
+            if unreadable(exc):
                 return False
             raise
         login = text_of(raw["login"]) if isinstance(raw, dict) and "login" in raw else ""
@@ -511,22 +466,83 @@ class GitHub:
 
         読めない（404・上限でない 403）なら `none` として信用しない。上限と他の失敗は `GitHubError` のまま投げる。
         """
-        if login not in self._permissions:
-            self._permissions[login] = self._read_permission(login)
-        return self._permissions[login]
+        if login not in self._permissions and login not in self._unreadable:
+            got = self._read_permission(login)
+            if got is not None:
+                self._permissions[login] = got
+        return self._permissions[login] if login in self._permissions else "none"
 
-    def _read_permission(self, login: str) -> str:
+    def permission_strict(self, login: str) -> str:
+        """`permission` と同じ照会で、照会できない（404・上限でない 403）書き手では `PermissionUnknown` を投げる（#4580）。
+
+        GitHub が 200 で返した値（`none` も）だけを保存し、照会できなかった書き手は別に覚えて照会し直さない。"""
+        got = self.permission(login)
+        if login in self._unreadable:
+            raise PermissionUnknown(login, self._unreadable[login])
+        return got
+
+    def _read_permission(self, login: str) -> Optional[str]:
+        """照会した権限。照会できない（404・上限でない 403）なら状態を `_unreadable` に覚えて None。"""
         try:
             raw = self.rest("GET", f"/repos/{self.repo}/collaborators/{quote(login, safe='')}/permission")
         except GitHubError as exc:
-            if exc.quota is None and exc.status in (403, 404):
-                return "none"
+            if unreadable(exc):
+                self._unreadable[login] = exc.status
+                return None
             raise
         return text_of(raw["permission"]).lower() if isinstance(raw, dict) and "permission" in raw else "none"
 
     def comments(self, number: int) -> list[Authored]:
         """Issue（か PR）のコメントを古い順にすべて読む（`github.list-pages` ページまで。超えたら `GitHubError`）。"""
         return [Authored.from_rest(c) for c in self._pages(f"/repos/{self.repo}/issues/{int(number)}/comments")]
+
+    def commits_pulls(self, shas: Sequence[str]) -> dict[str, Optional[list[int]]]:
+        """コミットごとに紐づく PR の番号（`associatedPullRequests`）を `github.graphql-batch` 件ずつ 1 回のクエリで読む（#4580）。
+        GitHub に無いコミットの値は None。"""
+        got = self.aliased(github_pulls.commit_pull_selections(shas))
+        return {s: github_pulls.pull_numbers(got[s]) for s in shas}
+
+    def pull_commit_count(self, number: int) -> int:
+        """PR `number` のコミットの数（REST の `commits`）。"""
+        return int(self.rest("GET", f"/repos/{self.repo}/pulls/{int(number)}")["commits"])
+
+    def delete_comment(self, comment_id: int) -> None:
+        """コメント `comment_id` を消す（`DELETE /issues/comments/<id>`。#4580 で自分が書いたコメントを消す）。失敗は `GitHubError`。"""
+        self.rest("DELETE", f"/repos/{self.repo}/issues/comments/{int(comment_id)}")
+
+    def branch_activity(self, branch: str) -> Iterator[dict]:
+        """ブランチ `branch` の更新（`GET /activity?ref=refs/heads/<branch>`。`before`・`after`・`activity_type`）を新しい順に返す。
+
+        ページはページ番号でなく Link の `next` のカーソル（`after`）で送り、要るだけ 1 ページずつ読む（呼び手が打ち切れる）。
+        `github.list-pages` ページを超えたら途中で切らずに `GitHubError`。"""
+        pages = _page_cap("github.list-pages")
+        path = f"/repos/{self.repo}/activity"
+        params: dict[str, Any] = {"ref": f"refs/heads/{branch}", "per_page": PER_PAGE}
+        for _ in range(pages):
+            with _translating(f"GET {path}", detail_body=True, gate=self.gate):
+                resp = self.api.request("GET", path, params=params)
+            yield from _response_body(resp)
+            cursor = _next_cursor(resp)
+            if cursor is None:
+                return
+            params = {**params, "after": cursor}
+        raise _too_many_pages(f"{path} が", pages, "github.list-pages")
+
+    def workflow_runs(self, workflow: str, branch: str, commit: str, timeout: Optional[float] = None) -> list[dict]:
+        """workflow `workflow` のうち、ブランチ `branch` のコミット `commit` を push で起動した実行（新しい順。1 ページ 100 件）。
+
+        起動のイベントを push で絞り、同じコミットの手動の実行を数えない（#4580）。`timeout` はこの照会の時間の上限の秒（None は既定）。"""
+        path = f"/repos/{self.repo}/actions/workflows/{quote(workflow, safe='')}/runs"
+        params = {"branch": branch, "head_sha": commit, "event": "push", "per_page": PER_PAGE}
+        body = self._limited_to(timeout).rest("GET", path, params=params)
+        return list(body["workflow_runs"])
+
+    def _limited_to(self, timeout: Optional[float]) -> GitHub:
+        """時間の上限を `timeout` 秒にした同じリポジトリの読み書き（None なら自分）。"""
+        if timeout is None:
+            return self
+        config = dataclasses.replace(self.api.config, timeout=type(self.api.config.timeout)(timeout))
+        return GitHub(self.repo, Client(self.api.auth, config=config), gate=self.gate)
 
     def commit_parents(self, sha: str) -> list[str]:
         """コミット `sha` の親の SHA（第 1 親から順）。"""
@@ -728,7 +744,7 @@ class GitHub:
         """
         data = self.graphql(_BRANCH_FILE, {**self._owner_name(), "expr": f"{base}:{path}"})
         self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
-        return _file_at(self._repository_of(data), "object")
+        return github_merge.file_at(self._repository_of(data), "object")
 
     def branch_file_with(self, base: str, path: str, selections: dict[str, str]) -> tuple[FileAt, dict[str, Any], list[Unread]]:
         """`branch_file` と同じ読み取りに、`repository` の下の選択 `selections`（名前 → 選択）を同じ要求で載せる。
@@ -748,11 +764,7 @@ class GitHub:
         first = names[: max(size - 1, 0)]
         chunk = {_alias(i): selections[k] for i, k in enumerate(first)}
         body = " ".join(f"{alias}: {sel}" for alias, sel in chunk.items())
-        query = (
-            "query($owner: String!, $name: String!, $expr: String!) { viewer { login databaseId } "
-            f"repository(owner: $owner, name: $name) {{ nameWithOwner object(expression: $expr) {{ ... on Blob {{ oid text }} }} {body} }} }}"
-        )
-        data = self.graphql(query, {**self._owner_name(), "expr": f"{base}:{path}"})
+        data = self.graphql(_branch_file_query(body), {**self._owner_name(), "expr": f"{base}:{path}"})
         self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
         repo = self._repository_of(data)
         out: dict[str, Any] = {k: repo[alias] if alias in repo else None for alias, k in zip(chunk, first)}
@@ -769,7 +781,7 @@ class GitHub:
                     break
                 out.update(dict.fromkeys(keys))
                 unread.append(Unread(tuple(keys), exc))
-        return _file_at(repo, "object"), out, unread
+        return github_merge.file_at(repo, "object"), out, unread
 
     def _remember_viewer(self, node: Any) -> None:
         if self._viewer:
@@ -813,14 +825,18 @@ class GitHub:
         `expect`（`ndf ci merge` の判定の値）があれば、PR を読み直さずに `expect.pull` で先の確認をし、要求を送る直前に
         マージ先・HEAD・設定の oid を照らす（#4409 の決定 8）。
         """
-        route = _MergeRoute(self._send_rest_merge, lambda exc: exc.status in github_merge.MERGE_REFUSED_STATUS, "", require_method, jump)
+        route = github_merge.MergeRoute(
+            self._send_rest_merge, lambda exc: exc.status in github_merge.MERGE_REFUSED_STATUS, "", require_method, jump
+        )
         return self._merge_with(number, expect_head, method, route, expect)
 
     def merge_as_admin(self, number: int, expect_head: str, method: Optional[str] = None) -> MergeOutcome:
         """PR を管理者の迂回でマージする（#3506 の決定 5）。`merge` と同じ先の確認を通り、GraphQL の `mergePullRequest` を
         読んだ HEAD（`expectedHeadOid`）を添えて打つ。断られたら PR を読み直して種類を返し、届かない・上限は投げ直す。
         """
-        return self._merge_with(number, expect_head, method, _MergeRoute(self._send_admin_merge, _refused_by_graphql, "管理者の迂回で"))
+        return self._merge_with(
+            number, expect_head, method, github_merge.MergeRoute(self._send_admin_merge, github_merge.refused_by_graphql, "管理者の迂回で")
+        )
 
     def _send_rest_merge(self, number: int, pull: Pull, chosen: str) -> str:
         body = self.rest("PUT", f"/repos/{self.repo}/pulls/{number}/merge", {"sha": pull.head_sha, "merge_method": chosen})
@@ -836,10 +852,15 @@ class GitHub:
         return text_of(commit.get("oid")) if isinstance(commit, dict) else ""
 
     def _merge_with(
-        self, number: int, expect_head: Optional[str], method: Optional[str], route: "_MergeRoute", expect: Optional[MergeExpect] = None
+        self,
+        number: int,
+        expect_head: Optional[str],
+        method: Optional[str],
+        route: "github_merge.MergeRoute",
+        expect: Optional[MergeExpect] = None,
     ) -> MergeOutcome:
         """`merge`・`merge_as_admin` の共通の手順。先の確認と方式の選択を通り、`route.send` で要求を打つ。`route.refused` が
-        真とみなした誤りは PR を読み直して種類を返し、ほかは投げ直す（`route` の各項目は `_MergeRoute`）。
+        真とみなした誤りは PR を読み直して種類を返し、ほかは投げ直す（`route` の各項目は `github_merge.MergeRoute`）。
         `expect` があれば最初の読み直しをやめ、方式の問い合わせの後・送る直前に照らす。"""
         pull = expect.pull if expect is not None else self.pull(number)
         early = github_merge.preflight(pull, number, expect_head)
@@ -864,7 +885,7 @@ class GitHub:
             if queued is not None:
                 return queued
             after = self.pull(number)
-            return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
+            return MergeOutcome(False, github_merge.refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
         return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha, landed)
 
     def _enqueue(
@@ -900,9 +921,9 @@ class GitHub:
         return self.repository(github_merge.MERGE_QUEUE_VERIFY_QUERY, {**variables, "expr": f"{expect.base}:{expect.config_path}"})
 
     def _verify_before_send(self, number: int, repo: dict[str, Any], expect: MergeExpect) -> Optional[MergeOutcome]:
-        """確かめの応答 `repo` を `_verify` で照らす。止めるとき（設定が変わり承認が要るようになった等）は、PR が
+        """確かめの応答 `repo` を `github_merge.verify` で照らす。止めるとき（設定が変わり承認が要るようになった等）は、PR が
         マージキューにあれば外す（止めた PR をキューがマージしない。読み直しの要求を足さない）。"""
-        stop = _verify(number, _verified(repo), expect, self.repo)
+        stop = github_merge.verify(number, github_merge.verified_of(repo), expect, self.repo)
         node = repo.get("pullRequest")
         if stop is not None and isinstance(node, dict) and node.get("isInMergeQueue") is True:
             self._leave_queue(node["id"])
