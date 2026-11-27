@@ -218,7 +218,7 @@
         },
         "review_units": {
           "type": "object",
-          "description": "レビューの単位の見込みの行数の目安と上限。片方だけ書けば、もう片方は既定（400 行と 1,000 行）を使う。目安が上限以上なら設定の誤りとして止まる",
+          "description": "レビューの単位の見込みの行数の目安と上限。片方だけ書けば、もう片方は上限の設定 review-units.target-lines・review-units.max-lines の既定を使う。目安が上限以上なら設定の誤りとして止まる",
           "properties": {
             "target_lines": {
               "type": "integer",
