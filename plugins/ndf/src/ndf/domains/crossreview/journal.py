@@ -373,11 +373,11 @@ class FindingJournal:
         # 最後の `enter` で出た指摘の id、そのうち直した後に戻った指摘の id（`sort` が使う。#3780）
         self.raised_ids: list[str] = []
         self.returned: list[str] = []
+        # 最後の `enter` が `parked` を外して位置を置き換えた指摘と、その位置の候補（`sort` が投稿できる位置かを確かめる）
+        self._moved: dict[str, list[dict[str, Any]]] = {}
         # 最後の `enter` で新しく出たか戻った指摘の id（`fresh` と違い、判定役へ渡さないものも含む）と、指摘ごとの出し直し、
         # そのラウンド
         self._arrived: frozenset[str] = frozenset()
-        # 最後の `enter` が `parked` を外して位置を置き換えた指摘と、その位置の候補（`sort` が投稿できる位置かを確かめる）
-        self._moved: dict[str, list[dict[str, Any]]] = {}
         self._reports: dict[str, list[Mapping[str, Any]]] = {}
         self._round = 0
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
