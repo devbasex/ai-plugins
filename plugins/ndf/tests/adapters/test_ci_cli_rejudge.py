@@ -52,14 +52,14 @@ def test_rejudge_merges_when_the_changed_config_needs_no_approval(monkeypatch, c
     assert "approved_by" not in found["metrics"] and "comments" not in hub.calls
 
 
-@pytest.mark.parametrize("after", [AUTO, UNSET, None, "not json"])
-def test_rejudge_merges_when_a_trail_covers_the_target(monkeypatch, capsys, last_result, after):
-    """判定し直して承認が要っても、今の承認の対象への証跡があればマージする（結果の判定と担い手は初めの判定のまま）。"""
+@pytest.mark.parametrize(("after", "verdict"), [(AUTO, "automatic"), (UNSET, "unset"), (None, "unknown"), ("not json", "unknown")])
+def test_rejudge_merges_when_a_trail_covers_the_target(monkeypatch, capsys, last_result, after, verdict):
+    """判定し直して承認が要っても、今の承認の対象への証跡があればマージし、結果には判定し直した値と証跡の担い手を残す。"""
     hub = _hub(monkeypatch, MANUAL, after)
     _approve(hub)
     code, found = _run(capsys, last_result, "--production-gate", "defer")
     assert code == 0 and hub.merged == [7]
-    assert found["metrics"]["verdict"] == "manual" and "approved_by" not in found["metrics"]
+    assert found["metrics"]["verdict"] == verdict and found["metrics"]["approved_by"] == "user"
     assert "comments" in hub.calls
 
 

@@ -16,7 +16,7 @@ import json
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from ndf import cli
 from ndf.adapters import git
@@ -501,23 +501,31 @@ def _merged(
     return result.stopped(TOOL, kind, outcome.detail, instance=outcome.head_sha, items=items)
 
 
-def _rejudge_of(hub: GitHub, pull: Pull, target: merge_approval.MergeTarget) -> Callable[[Optional[str]], Optional[MergeOutcome]]:
-    """`GitHub.merge` の直前の確かめで、読み直したプロジェクトのファイルから本番チャネルを判定し直す関数。"""
+class _Rejudge:
+    """`GitHub.merge` の直前の確かめで、読み直したプロジェクトのファイルから本番チャネルを判定し直す関数（`MergeExpect.rejudge`）。
 
-    def rejudge(text: Optional[str]) -> Optional[MergeOutcome]:
-        again = _verdict_of(hub, pull.base_ref, text, hub.repo)
+    判定し直して承認が要り、今の承認の対象への証跡でマージへ進むときは、その判定と証跡の担い手を `verdict`・`approved_by` に
+    採り、成功の結果へ引き継ぐ（だれの承認でどの経路のマージをしたかを結果に残す）。それ以外は初めの判定と担い手のまま。
+    """
+
+    def __init__(self, hub: GitHub, pull: Pull, target: merge_approval.MergeTarget, verdict: Verdict, approved_by: Optional[str]) -> None:
+        self._hub, self._pull, self._target = hub, pull, target
+        self.verdict, self.approved_by = verdict, approved_by
+
+    def __call__(self, text: Optional[str]) -> Optional[MergeOutcome]:
+        again = _verdict_of(self._hub, self._pull.base_ref, text, self._hub.repo)
         if not production_merge.needs_approval(again):
             return None
         try:
-            if _approval(hub, target) is not None:
-                return None
+            row = _approval(self._hub, self._target)
         except merge_approval.TrailError as exc:
             # 初めの判定と同じく、token の利用者を読めなければ precondition（approval_stale にしない）。
             # キューにある PR は、`GitHub.merge` が確かめの応答の最新のキューの状態で外す
-            return MergeOutcome(False, "precondition", str(exc), pull.head_sha)
-        return MergeOutcome(False, _REJUDGED, again.value, pull.head_sha)
-
-    return rejudge
+            return MergeOutcome(False, "precondition", str(exc), self._pull.head_sha)
+        if row is not None:
+            self.verdict, self.approved_by = again, row.by
+            return None
+        return MergeOutcome(False, _REJUDGED, again.value, self._pull.head_sha)
 
 
 def _invalid_args(args: argparse.Namespace) -> Optional[dict]:
@@ -568,9 +576,10 @@ def _merge(args: argparse.Namespace) -> dict:
     approved_by, unapproved = _approved_by(args, hub, pull, target, verdict)
     if unapproved is not None:
         return unapproved
-    expect = MergeExpect(pull, pull.base_ref, pull.head_sha, PROJECT_FILE, oid, _rejudge_of(hub, pull, target))
+    rejudge = _Rejudge(hub, pull, target, verdict, approved_by)
+    expect = MergeExpect(pull, pull.base_ref, pull.head_sha, PROJECT_FILE, oid, rejudge)
     outcome = hub.merge(pull.number, expect_head=head if head is not None else pull.head_sha, method=args.method, expect=expect)
-    return _merged(args, target, outcome, verdict, approved_by)
+    return _merged(args, target, outcome, rejudge.verdict, rejudge.approved_by)
 
 
 def _ask_approval(args: argparse.Namespace) -> dict:
