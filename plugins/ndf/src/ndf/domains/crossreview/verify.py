@@ -4,7 +4,7 @@
 レビューする worktree と、この実行の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV の写し）だけである。
 指摘の文はプロセスの引数に載せず一覧のファイルで渡す。一覧は、実行者だけが開ける資料のディレクトリに置く。判定役の出力は
 起動ごとに新しく作る実行者だけが開けるディレクトリに書かせ、起動の後で記録を起動ごとの名前で状態の保存先へ移してディレクトリを
-消す。ハードリンクを作れない保存先では、排他的に新規作成して写す。移した記録は残すだけで、片付けない。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の
+消す（移している途中で割り込まれたら、移していない記録をディレクトリに残す）。ハードリンクを作れない保存先では、排他的に新規作成して写す。移した記録は残すだけで、片付けない。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の
 `drive` である。
 
 失敗しても例外で駆動を止めず、起動し直さない。回答なしと注意にする（どの指摘も下がらない）。注意は PR の記録に載るので、
@@ -86,22 +86,21 @@ def _save_record(record: Path, to: Path) -> None:
 def _keep_records(run: VerifyRun, round_no: int, held: Path, stem: Path) -> bool:
     """起動ごとのディレクトリ `held` の記録を `stem` の隣へ保存し（`_save_record`）、`held` を消す。保存先の名前は、`stem` の
     名前の部分を `held` の名前（起動ごとに違う）に替えたものである。保存できない記録はディレクトリと一緒に消える。
-    保存中に割り込まれても `held` は消してから、割り込みを伝える。
+    保存中に割り込まれたら `held` を消さず、保存を終えた記録だけを取り除いて、移していない記録を回収できるように残す。
     1 つでも保存できたら真。"""
     saved = False
-    try:
-        for record in held.iterdir():
-            if record.is_symlink() or not record.is_file():
-                continue
-            name = held.name + record.name.removeprefix(stem.name)
-            try:
-                _save_record(record, stem.parent / name)
-                saved = True
-            except OSError as exc:  # 診断の記録を移せなくても、判定の結果と駆動は変えない
-                run.note(round_no, "verify", f"判定役の記録 {name} を移せない（{type(exc).__name__}）")
-                _private_log(run, round_no, stem, f"{name}: {exc}")
-    finally:  # 保存中に割り込まれても、この起動で作ったディレクトリは残さない
-        shutil.rmtree(held, ignore_errors=True)
+    for record in list(held.iterdir()):
+        if record.is_symlink() or not record.is_file():
+            continue
+        name = held.name + record.name.removeprefix(stem.name)
+        try:
+            _save_record(record, stem.parent / name)
+            saved = True
+            record.unlink()  # 後の記録の保存中に割り込まれても、`held` には移していない記録だけが残る
+        except OSError as exc:  # 診断の記録を移せなくても、判定の結果と駆動は変えない
+            run.note(round_no, "verify", f"判定役の記録 {name} を移せない（{type(exc).__name__}）")
+            _private_log(run, round_no, stem, f"{name}: {exc}")
+    shutil.rmtree(held, ignore_errors=True)
     return saved
 
 
