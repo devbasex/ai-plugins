@@ -415,7 +415,7 @@ def test_issue_3780_a_take_over_that_could_not_be_removed_is_not_used_by_anyone(
     # 残ったコメントを、投稿者本人の打ち直しも別のアカウントも起票の根拠にしない
     github.login = login
     again = Run(github, _row("r2-2", "別の指摘"))
-    again.data["issue_logins"] = ["outsider"]
+    again.data["issue_logins"] = ["app[bot]"]
     again.go()
     assert github.created() == (2 if login == "app[bot]" else 1)
 
