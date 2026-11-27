@@ -19,7 +19,7 @@
 `pr`・`base_sha`・`head_sha`・`paths`・`pr_body_sha256`・`flagged` は、`bodies` の出力の件の同じ名前の欄をそのまま写す。
 `tally` と `bodies` は、ベースと head の SHA・PR 本文の SHA-256 が材料と一致し、`paths` が材料の変えたファイルをすべて含む記録だけを採る。
 
-`judge` は、`--result` に同じモデル・Claude Code の版・指示文のコミットの結果ファイルがあれば、同じ測定の続きとして扱う。今の材料で
+`judge` は、`--result` に同じモデル・Claude Code の版・指示文のコミット・指示文のハッシュの結果ファイルがあれば、同じ測定の続きとして扱う。今の材料で
 有効な回答を得た行は打ち直さずに残し、欠けた行と失敗した行だけを打つ。同じ材料で `JUDGE_TRIES` 回まで打っても回答が無い行は
 打ち直さない（`tally` が保留の理由に挙げる）。
 """
@@ -109,15 +109,21 @@ def _read_json(path: Path) -> Any:
 
 
 def _write_json(path: Path, value: Any) -> None:
-    """所有者だけが読み書きできる権限（0600）で書く。既にあるファイルも 0600 にしてから書く。
+    """所有者だけが読み書きできる権限（0600）で、同じディレクトリの一時ファイルに書いてから名前を置き換える。
 
     認証して取得した PR の本文・差分・ファイルの全文を保存するため、umask に任せると同じホストのほかの利用者が読める。
+    置き換えなので、書く途中でプロセスが止まっても、前に保存した中身は壊れない（`judge` は判定 1 件ごとに書く）。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        os.fchmod(f.fileno(), 0o600)
-        f.write(json.dumps(value, ensure_ascii=False, indent=1) + "\n")
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            os.fchmod(f.fileno(), 0o600)
+            f.write(json.dumps(value, ensure_ascii=False, indent=1) + "\n")
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def _material(raw: Mapping[str, Any]) -> Material:
@@ -339,36 +345,50 @@ def _expect_misses(row: Mapping[str, Any], wanted: Sequence[str]) -> list[str]:
 def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
     question = prompt_at(REPO, args.prompt_commit)
     commit = args.prompt_commit or _source_commit(root)
-    info = {"model": args.model, "claude_version": _claude_version(), "prompt_commit": commit, "plugin_root": str(root)}
+    # 指示文のコミットだけでは、作業ツリーで書き換えた指示文や Git の外の置き場の指示文を見分けられない。送る指示文そのものの
+    # ハッシュも判定の条件に入れ、違えば前の結果を引き継がない
+    info = {
+        "model": args.model,
+        "claude_version": _claude_version(),
+        "prompt_commit": commit,
+        "prompt_sha256": _sha(question),
+        "plugin_root": str(root),
+    }
     prev = _read_json(args.result) if args.result.exists() else None
-    same = prev is not None and all(prev.get(k) == info[k] for k in ("model", "claude_version", "prompt_commit"))
-    # 同じ判定の条件の結果ファイルなら、同じ測定の続きとして実行の識別子と行を引き継ぎ、欠けた行だけを補う
+    same = prev is not None and all(prev.get(k) == info[k] for k in JUDGE_CONDITIONS)
+    # 同じ判定の条件の結果ファイルなら、同じ測定の続きとして実行の識別子と行を引き継ぎ、欠けた行だけを補う。識別子は判定の前に
+    # 決めて保存し、途中で止まっても、同じ --result で打ち直せば同じ測定として続く
     results: dict[str, Any] = dict(prev["results"]) if same and prev is not None else {}
+    state = {"run_id": str(prev["run_id"]) if same and prev is not None else str(uuid.uuid4()), **info, "results": results}
+
+    def save() -> None:
+        expect = {str(n): _expect_misses(results.get(str(n), {}), nums) for n, nums in (args.expect or {}).items()}
+        state.update(at=_now(), expect_missing=expect)
+        _write_json(args.result, state)
+
+    save()
     for number, material in _materials(args.materials).items():
         if args.prs and number not in args.prs:
             continue
         if material is None:
             results[str(number)] = {"ok": False, "cause": "材料が欠けた", "answer": None}
+            save()
             continue
         old = results.get(str(number))
         if _reusable(old, material) or _exhausted(old, material):
             continue
-        got = judge_once(question, material, args.model)
-        tries = int(old.get("tries", 1)) + 1 if _same_material(old, material) else 1
-        results[str(number)] = {
-            **got,
-            **info,
-            "base_sha": material.base_sha,
-            "head_sha": material.head_sha,
-            "material_sha256": material.sha256,
-            "tries": tries,
-        }
-    expect = {str(n): _expect_misses(results.get(str(n), {}), nums) for n, nums in (args.expect or {}).items()}
-    run_id = str(prev["run_id"]) if same and prev is not None else str(uuid.uuid4())
-    _write_json(args.result, {"run_id": run_id, "at": _now(), **info, "results": results, "expect_missing": expect})
-    return 1 if any(expect.values()) else 0
+        tries = int((old or {}).get("tries", 1)) + 1 if _same_material(old, material) else 1
+        mark = {**info, "base_sha": material.base_sha, "head_sha": material.head_sha, "material_sha256": material.sha256}
+        # 判定を呼ぶ前に試行の回数を保存する（判定の途中で止まっても、その回を数えて上限を超えて打たない）
+        results[str(number)] = {"ok": False, "cause": "判定の途中で止まった", "answer": None, **mark, "tries": tries}
+        save()
+        results[str(number)] = {**judge_once(question, material, args.model), **mark, "tries": tries}
+        save()
+    return 1 if any(state["expect_missing"].values()) else 0
 
 
+# 前の結果ファイルを同じ測定の続きとみなす判定の条件
+JUDGE_CONDITIONS = ("model", "claude_version", "prompt_commit", "prompt_sha256")
 # 1 件の PR の判定を打つ回数の上限（同じ材料で失敗が続いたら打ち直さず、その PR は `tally` が保留の理由に挙げる）
 JUDGE_TRIES = 2
 

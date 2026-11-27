@@ -67,6 +67,6 @@ def test_github_observe_reads_production_by_the_source_repo_and_the_text(
 @pytest.mark.parametrize(("base", "text", "file_repo", "verdict", "production"), CASES)
 def test_mvv_gate_target_reads_production_by_the_source_repo_and_the_text(base, text, file_repo, verdict, production) -> None:
     hub = _hub(base, text, file_repo)
-    got, tables = mvv_gate._target(hub, hub.pulls_of[7], [])
-    assert tables == {}
+    got, tables, unread = mvv_gate._target(hub, hub.pulls_of[7], [])
+    assert (tables, unread) == ({}, [])
     assert got == {"repo": merge_hub.REPO, "pr": 7, "base": base, "head": merge_hub.HEAD, "production": production}

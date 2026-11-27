@@ -384,3 +384,24 @@ def test_cli_writes_the_same_result_and_rejects_bad_inputs(
     assert _cli(tmp_path, monkeypatch) == 2
     assert _cli(tmp_path, monkeypatch, "--base", "main", "ok.md") == 2
     assert _cli(tmp_path, monkeypatch, "gone.md") == 3
+
+
+def test_cli_result_replaces_only_a_previous_result_and_keeps_it_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--result` は前の検査結果だけを置き換え、0600 で書く。検査した文書・ほかのファイル・リンクは書かずに invalid（2）。"""
+    _tree(tmp_path, {"d.md": "## 決定の記録\n\n利用者が決める\n", "note.txt": "残す\n"})
+    out = tmp_path / "state/check.json"
+    assert _cli(tmp_path, monkeypatch, "--result", str(out), "d.md") == 1
+    assert _cli(tmp_path, monkeypatch, "--result", str(out), "d.md") == 1  # 前の結果は置き換える
+    assert out.stat().st_mode & 0o777 == 0o600
+    assert [p.name for p in out.parent.iterdir()] == ["check.json"]  # 一時ファイルを残さない
+    capsys.readouterr()
+    assert _cli(tmp_path, monkeypatch, "--result", str(tmp_path / "d.md"), "d.md") == 2
+    assert _cli(tmp_path, monkeypatch, "--result", str(tmp_path / "note.txt"), "d.md") == 2
+    link = tmp_path / "state/link.json"
+    link.symlink_to(tmp_path / "elsewhere.json")  # リンク先が無いリンク
+    assert _cli(tmp_path, monkeypatch, "--result", str(link), "d.md") == 2
+    assert (tmp_path / "d.md").read_text(encoding="utf-8").startswith("## 決定の記録")
+    assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "残す\n"
+    assert not (tmp_path / "elsewhere.json").exists()

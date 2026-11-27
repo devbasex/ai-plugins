@@ -25,7 +25,7 @@ from typing import Any, NamedTuple, Optional
 from ndf import contracts, identity
 from ndf.adapters import llm, publish, run_log
 from ndf.adapters.git import Git, GitError
-from ndf.adapters.github import GitHub, GitHubError, Pull
+from ndf.adapters.github import GitHub, GitHubError, Pull, Unread
 from ndf.contracts import internal, limits
 from ndf.core import approval_words, issue_docs, merge_approval, production_merge
 from ndf.domains.records import design_check_rules, files, jsonfile, jsonl, mvv
@@ -463,25 +463,33 @@ def _design_paths(rows: Sequence[Mapping[str, Any]]) -> list[str]:
 def _bound(j: _Judging, rows: Sequence[Mapping[str, Any]], outcome: dict[str, Any]) -> dict[str, Any]:
     """承認ゲートを省く判定にだけ、承認の対象 `target` を持たせ、差分の設計文書の「人へ残す判断」の表を確かめる。
 
-    マージ先の設定と、差分の設計文書の head の本文を、GitHub の 1 回の要求で読む（#4409・#2912 の決定 7）。読めなければ、
-    判定を保ったまま省かない。表に番号を持つ行か、本文の無い・切られた設計文書があれば、`skip` を偽にして `target` を外し、
-    `why` にパスごとの理由を足す。前に人が承認した行かは問わない。省けない判定では何も読まない。
+    最初の要求でマージ先の設定と、残りの枠に収まる設計文書の head の本文を読み、残った文書は上限の件数ごとに分けて読む
+    （#4409・#2912 の決定 7）。最初の要求が失敗すれば、設定とすべての文書を読めなかったとして省かない。後続の要求だけが
+    失敗したときは、その要求に載せた文書だけを読めなかったとし、要求ごとに 1 件の診断の記録を指す。表に番号を持つ行か、
+    本文の無い・切られた・読めなかった設計文書があれば、`skip` を偽にして `target` を外し、`why` にパスごとの理由を足す。
+    前に人が承認した行かは問わない。省けない判定では何も読まない。
     """
     if not outcome["skip"]:
         return outcome
     paths = _design_paths(rows)
     try:
-        target, found = _target(j.hub, j.pull, paths)
+        target, found, unread = _target(j.hub, j.pull, paths)
     except (GitHubError, GitError) as exc:
         # 設定と本文は同じ要求なので、失敗の診断の記録は 1 件だけ書き、どの理由からも同じ識別子を指す
         ref = diagnosis("base_unreadable", exc, j.where)
         why = [*outcome["why"], f"マージ先の設定を読めない: {mm.STOP_REASONS['base_unreadable']}（{ref}）"]
         why += [f"{TABLE_UNREADABLE}{p}（{mm.STOP_REASONS['table_unreadable']}。{ref}）" for p in paths]
         return {**outcome, "skip": False, "why": why}
+    # 失敗した後続の要求ごとに診断の記録を 1 件だけ書き、その要求に載せた文書がすべて同じ識別子を指す
+    failed = {p: ref for u in unread for ref in (diagnosis("table_unreadable", u.error, j.where),) for p in u.names}
     kept = [
-        f"{TABLE_UNREADABLE}{p}（本文が無い）" if numbers is None else f"{TABLE_KEPT}{p}（{'・'.join(numbers)}）"
+        f"{TABLE_UNREADABLE}{p}（{mm.STOP_REASONS['table_unreadable']}。{failed[p]}）"
+        if p in failed
+        else f"{TABLE_UNREADABLE}{p}（本文が無い）"
+        if numbers is None
+        else f"{TABLE_KEPT}{p}（{'・'.join(numbers)}）"
         for p, numbers in found.items()
-        if numbers != ()
+        if p in failed or numbers != ()
     ]
     if kept:
         return {**outcome, "skip": False, "why": [*outcome["why"], *kept]}
@@ -503,19 +511,19 @@ def _table_numbers(got: Mapping[str, Any], paths: Sequence[str]) -> dict[str, Op
     return out
 
 
-def _target(hub: GitHub, pull: Pull, paths: Sequence[str]) -> tuple[dict[str, Any], dict[str, Optional[tuple[str, ...]]]]:
-    """判定した PR の承認の対象（出力 `mvv_gate.target`）と、設計文書 `paths` の表の番号（`_table_numbers`）。
+def _target(hub: GitHub, pull: Pull, paths: Sequence[str]) -> tuple[dict[str, Any], dict[str, Optional[tuple[str, ...]]], list[Unread]]:
+    """判定した PR の承認の対象（出力 `mvv_gate.target`）、設計文書 `paths` の表の番号（`_table_numbers`）、読めなかった後続の要求。
 
-    マージ先の設定と head の本文を、同じ GraphQL の要求で読む（承認ゲートを省く判定でだけ打つ。設計の費用表の増分に記録する）。
-    マージ先の設定を読めなければ本番へ反映され得るとして扱う。GitHub の失敗は `GitHubError` を送出する。
+    マージ先の設定と head の本文を `GitHub.branch_file_with` で読む（承認ゲートを省く判定でだけ打つ。設計の費用表の増分に記録する）。
+    マージ先の設定を読めなければ本番へ反映され得るとして扱う。最初の要求の失敗は `GitHubError` を送出する。
     """
     selection = "{ ... on Blob { oid text isTruncated } }"
     selections = {p: f"object(expression: {json.dumps(f'{pull.head_sha}:{p}')}) {selection}" for p in paths}
-    found, got = hub.branch_file_with(pull.base_ref, production_merge.PROJECT_FILE, selections)
+    found, got, unread = hub.branch_file_with(pull.base_ref, production_merge.PROJECT_FILE, selections)
     verdict = production_merge.judge_project_text(found.text, pull.base_ref, source_repo=found.repo, repo=hub.repo)
     production = production_merge.reaches_production(verdict)
     target = {"repo": hub.repo, "pr": pull.number, "base": pull.base_ref, "head": pull.head_sha, "production": production}
-    return target, _table_numbers(got, paths)
+    return target, _table_numbers(got, paths), unread
 
 
 def post_note(hub: GitHub, number: int, text: str) -> publish.Published:

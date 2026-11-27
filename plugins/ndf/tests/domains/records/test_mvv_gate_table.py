@@ -130,3 +130,14 @@ def test_the_table_is_not_read_when_the_gate_is_kept_anyway(repo: Path) -> None:
     assert out["skip"] is False and hub.selections == []
     out, hub = _gate_with(repo, {**DOCS, "blobs": {}})
     assert out["skip"] is True and hub.selections == []
+
+
+def test_a_failed_later_request_keeps_the_gate_only_for_its_documents(repo: Path) -> None:
+    """後続の要求だけが失敗したら、設定と先の要求の文書は読めたとし、その要求に載せた文書だけを読めないと書く。"""
+    unread = github.Unread((DETAIL_DOC,), github.GitHubError("届かない zz-fake-secret-89"))
+    case = {**_design_case({DESIGN_DOC: NO_TABLE}, (DESIGN_DOC, "modified"), (DETAIL_DOC, "added")), "unread": [unread]}
+    out, _ = _gate_with(repo, case)
+    assert (out["skip"], "target" in out) == (False, False)
+    (line,) = out["why"]
+    assert line.startswith(mvv_gate.TABLE_UNREADABLE + DETAIL_DOC) and "診断の記録" in line
+    assert "zz-fake-secret-89" not in json.dumps(out, ensure_ascii=False)

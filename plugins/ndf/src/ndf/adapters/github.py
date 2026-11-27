@@ -148,6 +148,13 @@ class Viewer(NamedTuple):
     account_id: int
 
 
+class Unread(NamedTuple):
+    """`GitHub.branch_file_with` の後続の要求のうち失敗した 1 回。`names` はその要求に載せた選択の名前、`error` は失敗。"""
+
+    names: tuple[str, ...]
+    error: GitHubError
+
+
 class MergeExpect(NamedTuple):
     """`ndf ci merge` が判定に使った値（#4409 の決定 8）。`pull` は判定の前に読んだ PR で、先の確認と方式の選択に使う。
 
@@ -709,14 +716,17 @@ class GitHub:
         self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
         return _file_at(self._repository_of(data), "object")
 
-    def branch_file_with(self, base: str, path: str, selections: dict[str, str]) -> tuple[FileAt, dict[str, Any]]:
+    def branch_file_with(self, base: str, path: str, selections: dict[str, str]) -> tuple[FileAt, dict[str, Any], list[Unread]]:
         """`branch_file` と同じ読み取りに、`repository` の下の選択 `selections`（名前 → 選択）を同じ要求で載せる。
 
-        返すのは `branch_file` の値と、`aliased` と同じ形の辞書（すべての名前をキーに持ち、読めなければ None）。
-        1 回の要求に載せる件数の上限（`github.graphql-batch`）を超えた分だけ、`aliased` で次の要求へ分ける。
+        返すのは `branch_file` の値、`aliased` と同じ形の辞書（すべての名前をキーに持ち、読めなければ None）、読めなかった
+        後続の要求ごとの `Unread` である。1 回の要求に載せる件数の上限（`github.graphql-batch`）には設定も 1 件と数え、
+        最初の要求は設定と選択を上限−1 件まで、残りの選択は上限の件数ごとに分けて読む。最初の要求の失敗は `GitHubError` を
+        送出する（設定を読めない）。後続の要求の失敗は送出せず、その要求に載せた名前と例外を `Unread` に入れて続ける。
         """
         names = list(selections)
-        first = names[: max(int(limits.value("github.graphql-batch", "count")) - 1, 0)]
+        size = int(limits.value("github.graphql-batch", "count"))
+        first = names[: max(size - 1, 0)]
         chunk = {_alias(i): selections[k] for i, k in enumerate(first)}
         body = " ".join(f"{alias}: {sel}" for alias, sel in chunk.items())
         query = (
@@ -727,10 +737,14 @@ class GitHub:
         self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
         repo = self._repository_of(data)
         out: dict[str, Any] = {k: repo[alias] if alias in repo else None for alias, k in zip(chunk, first)}
-        rest = names[len(first) :]
-        if rest:
-            out.update(self.aliased({k: selections[k] for k in rest}))
-        return _file_at(repo, "object"), out
+        unread: list[Unread] = []
+        for keys in _batches(names[len(first) :]):
+            try:
+                out.update(self.aliased({k: selections[k] for k in keys}))
+            except GitHubError as exc:
+                out.update(dict.fromkeys(keys))
+                unread.append(Unread(tuple(keys), exc))
+        return _file_at(repo, "object"), out, unread
 
     def _remember_viewer(self, node: Any) -> None:
         if self._viewer:

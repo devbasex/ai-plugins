@@ -27,9 +27,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import os
+import secrets
+import stat
 import sys
 from datetime import date
 from pathlib import Path
@@ -502,25 +505,61 @@ def _add_mvv(sub: Any) -> None:
     cite.set_defaults(handler=_mvv_cite)
 
 
-def _result_refusal(dest: Path, root: Path, inputs: list[str]) -> str | None:
-    """`--result` の `dest` へ書けない理由（書けるなら None）。
+def _write_result(dest: Path, root: Path, inputs: list[str], text: str) -> str | None:
+    """`--result` の `dest` へ `text` を書く。書けないときは書かずに理由を返す（書けたら None）。
 
-    シンボリックリンクは、リンク先が無くても書かない（検査した文書の行を、指定と別の場所へ書かない）。検査した文書と同じ
-    ファイルは書かない（未コミットの本文を検査結果で消さない）。既にあるファイルは、前の検査の結果（`tool` がこの CLI の
-    結果 JSON）だけを上書きする。プランが同じ保存先の結果を打ち直すたびに書き換えるため。
+    親のディレクトリを 1 度だけ開いて記述子に固定し、以後の確かめと書き込みはすべてその記述子からの名前で行う（途中の階層が
+    差し替えられても、確かめた場所と書く場所がずれない）。末尾の名前はリンクをたどらずに開き、開いた記述子で確かめる。
+    シンボリックリンクと通常ファイルでないものは書かない。検査した文書と同じファイルは書かない（未コミットの本文を消さない）。
+    既にあるファイルは、前の検査の結果（`tool` がこの CLI の結果 JSON）だけを置き換える（プランが同じ保存先を打ち直すため）。
+    書き込みは、同じディレクトリに所有者だけが読める（0600）一時ファイルを排他的に作り、名前の置き換えで差し替える。既にある
+    ファイルを切り詰めないので、確かめた後に名前が差し替えられても、別のファイルの中身は消えない。結果には設計文書の行の
+    原文が入るので、置き換えた後のファイルも 0600 になる。
     """
-    if dest.is_symlink():
-        return f"--result の {dest} はシンボリックリンクなので書かない"
-    if not dest.exists():
-        return None
-    real = dest.resolve()
-    for p in inputs:
-        if real == (root / p).resolve():
-            return f"--result に検査する文書 {p} を指定した（検査結果で本文を上書きしない）"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dfd = os.open(dest.parent, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        prev = json.loads(dest.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, ValueError):
-        prev = None
+        refused = _existing_refusal(dfd, dest, root, inputs)
+        if refused is not None:
+            return refused
+        tmp = f".{dest.name}.{secrets.token_hex(8)}.tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                os.fchmod(f.fileno(), 0o600)
+                f.write(text)
+            os.replace(tmp, dest.name, src_dir_fd=dfd, dst_dir_fd=dfd)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp, dir_fd=dfd)
+            raise
+        return None
+    finally:
+        os.close(dfd)
+
+
+def _existing_refusal(dfd: int, dest: Path, root: Path, inputs: list[str]) -> str | None:
+    """固定したディレクトリ `dfd` の `dest.name` が、置き換えてよいもの（無いか、前の検査の結果）か。開いた記述子で確かめる。"""
+    try:
+        fd = os.open(dest.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        # ELOOP（シンボリックリンク）と、開けないもの
+        return f"--result の {dest} はシンボリックリンクか開けないファイルなので書かない"
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            return f"--result の {dest} は通常ファイルでないので書かない"
+        for p in inputs:
+            with contextlib.suppress(OSError):
+                other = os.stat(root / p)
+                if (other.st_dev, other.st_ino) == (st.st_dev, st.st_ino):
+                    return f"--result に検査する文書 {p} を指定した（検査結果で本文を上書きしない）"
+        try:
+            prev = json.loads(f.read().decode("utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            prev = None
     if not (isinstance(prev, dict) and prev.get("tool") == TOOL):
         return f"--result の {dest} は前の検査結果でない既存のファイルなので上書きしない"
     return None
@@ -541,14 +580,10 @@ def _design_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     else:
         out = design_check.check(targets)
     if args.result is not None:
-        refused = _result_refusal(args.result, root, [*args.files, *(t.path for t in targets)])
+        inputs = [*args.files, *(t.path for t in targets)]
+        refused = _write_result(args.result, root, inputs, json.dumps(out, ensure_ascii=False) + "\n")
         if refused is not None:
             return result.stopped(TOOL, "invalid", refused)
-        args.result.parent.mkdir(parents=True, exist_ok=True)
-        # 確かめた後にリンクへ差し替えられても、リンクをたどらずに止める（O_NOFOLLOW）
-        fd = os.open(args.result, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o666)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(json.dumps(out, ensure_ascii=False) + "\n")
     return out
 
 

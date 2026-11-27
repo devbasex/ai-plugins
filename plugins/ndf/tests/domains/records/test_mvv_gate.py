@@ -155,11 +155,15 @@ class Hub:
         }
         return FileAt("o/r", json.dumps({"branch_strategy": section}), "c1")
 
-    def branch_file_with(self, base: str, path: str, selections: dict[str, str]) -> tuple[FileAt, dict[str, Any]]:
-        """マージ先の設定と、選択 `selections`（設計文書の head の本文）を 1 回の要求で読む。選択は `aliased` の偽物が答える。"""
+    def branch_file_with(self, base: str, path: str, selections: dict[str, str]) -> tuple[FileAt, dict[str, Any], list[Any]]:
+        """マージ先の設定と、選択 `selections`（設計文書の head の本文）を 1 回の要求で読む。選択は `aliased` の偽物が答える。
+
+        `case["unread"]` は、後続の要求で読めなかったとする名前の並びと例外の組（`github.Unread`）。
+        """
         self.requests += 1
         aliased = getattr(self, "aliased", None)
-        return self.branch_file(base, path), (aliased(selections) if selections and aliased is not None else {})
+        got = aliased(selections) if selections and aliased is not None else {}
+        return self.branch_file(base, path), got, list(self.case.get("unread", []))
 
     def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> dict:
         self.paths.append(path)
