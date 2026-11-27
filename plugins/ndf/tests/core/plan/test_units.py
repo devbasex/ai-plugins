@@ -311,3 +311,9 @@ def test_writing_a_record_does_not_follow_a_planted_link(tmp_path):
     (tmp_path / "models.tmp").symlink_to(victim)
     records._add_models(tmp_path, "run-1", "work", {"name": "impl"})
     assert victim.read_text(encoding="utf-8") == "keep"
+
+
+def test_the_next_write_removes_a_left_temporary_file(tmp_path):
+    (tmp_path / "models.tmp").write_text("{", encoding="utf-8")  # 書き込みの途中で強制終了した残り
+    records._add_models(tmp_path, "run-1", "work", {"name": "impl"})
+    assert [p.name for p in tmp_path.iterdir()] == [records.MODELS_FILE]
