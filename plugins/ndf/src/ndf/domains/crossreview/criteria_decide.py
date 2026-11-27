@@ -281,12 +281,15 @@ def unit_block(role: str, unit: str) -> list[str]:
     return [text["heading"], unit.rstrip(), text[role]]
 
 
-def document_line(documents: bool) -> list[str]:
+def document_line(documents: bool, source: Path) -> list[str]:
     """判定役の指示の「指摘の基準」に足す行（#4363）。文書を含む PR（`documents`）なら文書の基準の 1 行と、その行が指す
-    4 つの型と 2 つの区分のセクション、含まなければ空。基準の本文を読めなければ `writing.CriteriaBroken`。"""
+    基準を読む手順、含まなければ空。`source` は判定役が読める場所に保存した文書の基準のファイル。本文は指示に埋め込まず、
+    文書の指摘を確かめるときだけ読ませる。"""
     if not documents:
         return []
-    return [_document_item(), _table()["document"]["excerpt"], writing.types_section()]
+    doc = _table()["document"]
+    heading = writing.TYPES_HEADING.lstrip("# ")
+    return [_document_item(), doc["verify"].format(number=doc["number"], path=source, heading=heading)]
 
 
 def _document_item() -> str:

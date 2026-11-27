@@ -77,7 +77,7 @@ flowchart TD
 | 要素 | 責務 |
 | --- | --- |
 | 判定役の判断（`verify_decide.py`、新設） | 確かめる指摘を選ぶ・指示を組む・回答を読む・下げるかを決める。外部のコマンドを打たない |
-| 判定役の起動（`verify.py`、新設） | 読むだけの claude を 1 回起動し、回答を返す。起動には、結果の無い相手役の代わりに claude を読むだけで起動する既存の経路（`seats._seat_launch` から `participants.read_only_launch`）と同じ関数を使う。作業ディレクトリはレビューする worktree、使える Tool は読み取りだけ（`participants.READ_TOOLS`）、ほかに読めるのはこの実行の資料のディレクトリ（差分のファイル）だけである |
+| 判定役の起動（`verify.py`、新設） | 読むだけの claude を 1 回起動し、回答を返す。起動には、結果の無い相手役の代わりに claude を読むだけで起動する既存の経路（`seats._seat_launch` から `participants.read_only_launch`）と同じ関数を使う。作業ディレクトリはレビューする worktree、使える Tool は読み取りだけ（`participants.READ_TOOLS`）、ほかに読めるのはこの実行の資料のディレクトリ（差分のファイルと、文書を含む PR では文書の基準の写し）だけである |
 | 駆動（`drive.py`） | 指摘をジャーナルへ入れた直後、収束の判定の前に判定役を呼ぶ |
 | ジャーナル（`journal.py`） | 相手役の `protect` と確認の結果を指摘の行に書き、下げるかを決めて重要度を下げる。保護の対象と後で分かった行は元の重要度へ戻す。下げた指摘は、振動の判定（前々ラウンドの指摘が戻ったら止める）に使う指摘のキーの集合に入れない |
 | 指示の文（`contracts/data/review-criteria.json` の `verify`） | 判定役への指示 |

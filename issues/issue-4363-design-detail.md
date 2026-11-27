@@ -107,7 +107,7 @@ plugins/ndf/
 | `protect_kinds` | `criteria_decide.py` | 新設 | `protect_kinds() -> tuple[str, ...]` | 保護の種類 5 つを表から返す |
 | `track_kinds` | `criteria_decide.py` | 新設 | `track_kinds() -> tuple[str, ...]` | 指摘の種類の全部（保護の種類と `delivered`・`approval`）を返す |
 | `protect_of` | `criteria_decide.py` | 新設 | `protect_of(value: object) -> tuple[str, ...]` | 値が文字列の並びなら、保護の種類だけを表の順で重ねずに返し、ほかは空を返す |
-| `document_line` | `criteria_decide.py` | 新設 | `document_line(documents: bool) -> list[str]` | 文書を含む PR なら、判定役の指示に足す行として、基準 6 の 1 行と、その行が指す「4 つの型と 2 つの区分」のセクション（`writing.types_section`）を返す。基準 6 は指摘の基準の 6 番（この PR で変わった Markdown の、想定した読み手に通じない文）で、番号と文は `contracts/data/review-criteria.json` の `document` にある。今は相手役と修正担当の指示に `criteria_decide.document_block` が足している |
+| `document_line` | `criteria_decide.py` | 新設 | `document_line(documents: bool, source: Path) -> list[str]` | 文書を含む PR なら、判定役の指示に足す行として、基準 6 の 1 行と、その行が指す基準を読む手順を返す。手順は「基準 6 の指摘を確かめるときだけ、`source` のファイルの『4 つの型と 2 つの区分』のセクションを読む」である。セクションの本文は指示に埋め込まない。文書の指摘が無いラウンドで入力の token を増やさないためである。基準 6 は指摘の基準の 6 番（この PR で変わった Markdown の、想定した読み手に通じない文）で、番号と文は `contracts/data/review-criteria.json` の `document` にある。今は相手役と修正担当の指示に `criteria_decide.document_block` が足している |
 | `reviewer_block` | `criteria_decide.py` | 変更 | `reviewer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[str]` | 相手役へ `protect` の書き方の行を足す |
 | `downgraded` | `criteria_decide.py` | 変更 | `downgraded(row: Mapping[str, Any]) -> bool` | 判定役の確認で下げた行（`check.lowered`）を「入れるときに下げた行」に数えない |
 
@@ -129,7 +129,7 @@ plugins/ndf/
 | `protect_kinds` | `criteria_decide._table` | `grep -rn "def .*protect\|\"protect\"" --include=*.py src/ndf` | 保護の種類を返す関数は無い。表の読み口 `_table` を使う |
 | `track_kinds` | 同上 | 同上 | `_table` を使って作る |
 | `protect_of` | `journal._located`（位置の形の検査） | 同上 | 形の検査の書き方をそろえる。対象の値が違うので別の関数にする |
-| `document_line` | `criteria_decide.document_block` | `criteria_decide.py` を読んだ | `document_block` は文書の基準の全文を足すので、判定役には基準 6 の 1 行と型のセクションだけを返す関数を置く。1 行の文は同じ表の `document` から取り、セクションは `writing.types_section` を使う |
+| `document_line` | `criteria_decide.document_block` | `criteria_decide.py` を読んだ | `document_block` は文書の基準の全文を足すので、判定役には基準 6 の 1 行と読む手順だけを返す関数を置く。2 つの文は同じ表の `document` から取り、セクションの見出しは `writing.TYPES_HEADING` を使う |
 
 ### 単体テストの観点
 
@@ -343,6 +343,8 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
   - 事前条件: 直前に `run.journal.enter` を呼んでいる
   - 事後条件: 渡す指摘が無ければ判定役を起動せず、空の `Checked` を返す
   - 副作用: `verify.ask` が claude を起動する。注意を `run.warnings` に足す
+
+文書を含む PR では、`_confirm` は文書の基準の全文（`writing.criteria`）を `run.input_dir` に保存し、そのパスを `criteria_decide.document_line` へ渡す。判定役が読めるのは worktree と資料のディレクトリだけなので、プラグインの中の基準のパスは渡さない。
 
 `_confirm` は、`run.journal.fresh`（このラウンドで新しく出たか戻った行の番号）の行のうち、重要度が critical か major のものを `verify_decide.select` へ渡す。
 

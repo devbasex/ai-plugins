@@ -162,9 +162,10 @@ def test_issue_4363_lowers_nothing_else(row: dict, verdict: verify_decide.Verdic
 
 
 def test_issue_4363_document_line_is_the_sixth_criterion_only_for_documents() -> None:
-    assert criteria_decide.document_line(False) == []
-    line, *excerpt = criteria_decide.document_line(True)
+    source = Path("/in/writing-criteria.md")
+    assert criteria_decide.document_line(False, source) == []
+    line, step = criteria_decide.document_line(True, source)
     assert line.startswith("6. ")
-    assert writing.types_section() in excerpt
+    assert str(source) in step and writing.TYPES_HEADING.lstrip("# ") in step
     assert criteria_decide.track_kinds()[: len(criteria_decide.protect_kinds())] == criteria_decide.protect_kinds()
     assert criteria_decide.track_kinds()[len(criteria_decide.protect_kinds()) :] == ("delivered", "approval")
