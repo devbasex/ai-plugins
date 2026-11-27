@@ -148,6 +148,11 @@ def _read_share(path: Path, commit: str, push: Optional[record_decide.Push] = No
     return got
 
 
+def _share_lock(path: Path, timeout: Optional[float] = None) -> FileLock:
+    """保存先 `path` のロック（`path` に `.lock` を足した名前）。`timeout` を渡さなければ `SHARE_LOCK` の上限まで待つ。"""
+    return FileLock(str(path) + ".lock", timeout=limits.seconds(SHARE_LOCK) if timeout is None else timeout)
+
+
 def shared_prefix(
     share: Path, number: int, commit: str, compute: Callable[[], Prefix], push: Optional[record_decide.Push] = None
 ) -> Prefix:
@@ -159,7 +164,7 @@ def shared_prefix(
     待たせないためである（Value 5・6）。一時ファイルは `compute` の前に作り、作れるかを前処理の前に確かめる。"""
     path = _share_path(share, number)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with FileLock(str(path) + ".lock", timeout=limits.seconds(SHARE_LOCK)):
+    with _share_lock(path):
         got = _read_share(path, commit, push)
         if got is not None:
             return got
