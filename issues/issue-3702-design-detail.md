@@ -234,7 +234,7 @@ contracts/
   | キー | 値 |
   | --- | --- |
   | `ndf_record` | NDF の記録の種別（`design-units-check`） |
-  | `ndf_digest` | このキーを除く記録の中身の SHA-256。書いた後に中身が変わった記録を見分ける |
+  | `ndf_digest` | このキーを除く記録の中身の SHA-256（小文字の 16 進 64 桁）。書いた後に中身が変わった記録を見分ける。計算の仕方は下の「承認の記録」の節で定める |
   | `head` | 確かめで読んだコミット（`reviewed-head` の値）の ID。文字列 |
   | `issues` | 確かめた課題の番号の配列。扱いが「マージする」「閉じる」の課題も含む |
   | `handling` | 課題の扱い。`issues` の全課題について、課題の番号の文字列をキーにし、値を `{"handling": "<扱い>", "into": <番号か null>}` にするオブジェクト。たとえば `{"7": {"handling": "実装する", "into": null}}` |
@@ -280,9 +280,17 @@ contracts/
 
 `build` が読む 4 つの入力は、保存先の直下の通常ファイルに限る。シンボリックリンクはたどらない。保存先と途中のディレクトリは、`.git`（か `.ndf`）より上のリンクだけを解き、そこから下は 1 要素ずつリンクをたどらずに開く。理由の文に載せるコミットの ID は、ID の形（16 進の 40 桁か 64 桁）を確かめた値だけにする。保存先の外にあるファイルの中身が、停止の理由に出ないようにするためである。
 
+`checked.json` は、さらに、`build` を呼んだ利用者が持ち、グループとほかの利用者が書き込めないものに限る（`worker_paths.read_file(owned=True)`）。違えば `RecordUnreadable` にする。指紋はファイルを書ける人なら計算し直せるので、別の利用者が用意した検査結果を承認資料に載せないためである。
+
 `build` は `checked.json` の形を `contracts/workflow/design-units-check.schema.json` で確かめる。`handling` と `criteria` のキーが `issues` の課題と違う場合と、`omitted` に `issues` に無い課題がある場合も、形の違いとして扱う。違えば、ファイル名を理由に含む `RecordUnreadable` にする。承認ゲートが、壊れた検査の結果を承認資料や回答の記録にしないためである。
 
-ファイルの `ndf_record` は記録の種別、`ndf_digest` はそれ以外の中身の SHA-256 である。`build` は前の `design-target.json` を、この種別で中身が `ndf_digest` と合うものだけ消し、名前が空いているときだけ公開する（`checked.json` と同じ）。ほかのファイルは変えずに `RecordUnreadable` にする。種別だけで消すと、利用者が追記した記録や、同じ種別を持つ別の JSON まで消えるためである。
+ファイルの `ndf_record` は記録の種別、`ndf_digest` は記録の指紋である。指紋は次の手順で作る。書く側と読む側は、`core/plan/files.py` の共通の処理（`publish_record`・`unchanged_record`）を使う。
+
+1. `ndf_digest` を除いた JSON オブジェクト（`ndf_record` を含む）を取る
+2. Python の `json.dumps(body, sort_keys=True)` の形で文字列にする。すべての階層のキーを昇順に並べ、区切りは `, ` と `: `、改行と字下げは無し、非 ASCII 文字は `\uXXXX` にエスケープする
+3. その文字列のバイト列の SHA-256 を、小文字の 16 進数で保存する
+
+`build` は前の `design-target.json` を、この種別で中身が `ndf_digest` と合うものだけ消し、名前が空いているときだけ公開する（`checked.json` と同じ）。ほかのファイルは変えずに `RecordUnreadable` にする。種別だけで消すと、利用者が追記した記録や、同じ種別を持つ別の JSON まで消えるためである。
 
 `build` は、中身が `ndf_digest` と合わない `checked.json` も `RecordUnreadable` にする。確かめの後に単位や課題が書き換わった記録を、承認の対象にしないためである。
 

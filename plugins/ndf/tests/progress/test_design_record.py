@@ -262,10 +262,20 @@ def test_build_refuses_a_check_whose_units_changed_after_it_was_written(checked)
     assert not (record_dir / "design-target.json").exists()
 
 
+def test_build_refuses_a_check_that_others_can_write(checked):
+    record_dir, _ = checked
+    (record_dir / "checked.json").chmod(0o620)
+
+    with pytest.raises(design_record.RecordUnreadable, match="checked.json を読めない"):
+        design_record.build(record_dir)
+
+    assert not (record_dir / "design-target.json").exists()
+
+
 def _check_record(**changed: Any) -> dict[str, Any]:
     unit = {"kind": "unit", "file": "", "name": "issue-7", "order": 1, "merge": 1, "after": [], "issues": [7]}
     unit |= {"tasks": [{"id": "T1", "issue": 7}], "criteria": [], "lines": None, "touches": []}
-    held = {"ndf_record": "design-units-check", "head": "a" * 40, "branch": BRANCH, "issues": [7]}
+    held = {"ndf_record": "design-units-check", "ndf_digest": "0" * 64, "head": "a" * 40, "branch": BRANCH, "issues": [7]}
     held |= {"handling": {"7": {"handling": "実装する", "into": None}}, "omitted": [7]}
     held |= {"limits": {"target": 400, "max": 1000}, "criteria": {"7": 2}, "units": [unit]}
     return held | changed
@@ -282,6 +292,7 @@ def _check_record(**changed: Any) -> dict[str, Any]:
         {"limits": {"target": "400", "max": 1000}},
         {"criteria": {"7": "2"}},
         {"criteria": {}},
+        {"ndf_digest": "A" * 64},
     ],
 )
 def test_build_refuses_a_check_that_breaks_the_record_contract(tmp_path, changed):
@@ -289,6 +300,7 @@ def test_build_refuses_a_check_that_breaks_the_record_contract(tmp_path, changed
     (tmp_path / "reviewed-pr").write_text(f"{REPO}#12", encoding="utf-8")
     (tmp_path / "reviewed-base").write_text("main", encoding="utf-8")
     (tmp_path / "checked.json").write_text(json.dumps(_check_record(**changed)), encoding="utf-8")
+    (tmp_path / "checked.json").chmod(0o600)
 
     with pytest.raises(design_record.RecordUnreadable, match="checked.json の形が違う"):
         design_record.build(tmp_path)
