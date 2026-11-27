@@ -135,7 +135,7 @@ def redline_numbers(text: str) -> tuple[str, ...]:
 
 def _anchors(rows: Sequence[DecisionRow]) -> list[DecisionRow]:
     """対応付けの相手にできる行（判断と理由が実質空でなく、番号を持つ）。"""
-    return [r for r in rows if r.numbers and not blank(r.decision) and not blank(r.reason)]
+    return [r for r in rows if not _unfilled(r)]
 
 
 def named_in_table(line: str, rows: Sequence[DecisionRow]) -> bool:
