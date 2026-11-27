@@ -169,20 +169,30 @@ def reflected_file(target: Path, suffix: str) -> Path:
     return _store(REFLECTED) / f"{_short_hash(str(target))}{suffix}"
 
 
-def put_question(request: Mapping[str, Any], question: Mapping[str, Any], candidate: Optional[Path] = None) -> None:
-    """承認のリクエスト（`request_id`・`repo`・`sha256`・反映先 `target`・会話の id `session`）と、質問の中身（`questions`）のハッシュを残す。
+def put_question(
+    request: Mapping[str, Any], make_question: Callable[[], Mapping[str, Any]], candidate: Optional[Path] = None
+) -> Mapping[str, Any]:
+    """承認のリクエスト（`request_id`・`repo`・`sha256`・反映先 `target`・会話の id `session`）と、質問の中身（`questions`）のハッシュを残し、質問を返す。
 
     反映元のバージョンは候補の記録か、今の反映先のバージョン。質問が示した選択肢のラベル（`options`）と、その時点の承認の記録の行数
-    （`approvals_seen`。これより後ろの取り消しだけが、このリクエストの後の取り消し）も残す。候補があれば、候補の錠の中で作る。
-    掃除（`_sweep`）がリクエストの一覧を読んでから退避を決めるまでの間に、同じ候補のリクエストが増えないためである。
-    掃除が退避していた候補は元の名前へ戻す。
+    （`approvals_seen`。これより後ろの取り消しだけが、このリクエストの後の取り消し）も残す。候補があれば、候補の錠を取ってから、
+    退避していた候補を元の名前へ戻し、`make_question`（候補を読んで質問の中身を作る）を呼び、リクエストを足す。候補を読んでから
+    リクエストを足すまでの間に、掃除（`_sweep`・`_reclaim`）が同じ候補を退避したり消したりしないためである。戻せる候補が無ければ
+    リクエストを作らずに `precondition` で止める（消えた候補の承認を問わない）。
     """
     if candidate is None:
+        question = make_question()
         _put_request(request, question, None)
-        return
+        return question
+    from ndf.contracts import internal
+
     with records_lock(candidate.parents[1]):
         _restore(candidate)
+        if not candidate.exists():
+            raise internal.InternalError("precondition", f"候補 {candidate} が無い。`draft` で候補を作り直す")
+        question = make_question()
         _put_request(request, question, candidate)
+    return question
 
 
 def _put_request(request: Mapping[str, Any], question: Mapping[str, Any], candidate: Optional[Path]) -> None:
@@ -304,9 +314,37 @@ def _discard(made: Path, kept: Optional[str] = None) -> None:
         write_launch_record(aside / DISCARD_NAME, {"kept": kept})
 
 
+def _held_open(path: Path) -> Optional[bool]:
+    """ほかのプロセスがファイルを開いたままか。`/proc` の無い環境では確かめられないので None。
+
+    退避の名前は利用者に見えず、元のパスからは開けないので、開いたままのプロセスが無ければ、比べてから消すまでの間に書く者はいない。
+    """
+    try:
+        st = path.stat()
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 候補の中身が無ければ、開いて書く者もいない
+        return False
+    proc = Path("/proc")
+    if not (proc / "self" / "fd").is_dir():
+        return None
+    return any(_same_file(fd, st) for fd in proc.glob("[0-9]*/fd/*"))
+
+
+def _same_file(fd: Path, st: os.stat_result) -> bool:
+    """`/proc` の fd が `st` と同じファイルを指すか。調べる間に閉じた fd と、読めないほかのユーザーの fd は偽。"""
+    try:
+        opened = fd.stat()
+    except OSError:  # noqa: NDF401 ファイル: 調べる間に閉じた fd と、読めないほかのユーザーの fd は、候補を指さないものとして飛ばす
+        return False
+    return (opened.st_dev, opened.st_ino) == (st.st_dev, st.st_ino)
+
+
 def _settle(aside: Path) -> None:
-    """候補の錠の中で、前の掃除が退避した候補を、直されていなければ消し、直されていれば元の名前へ戻す。"""
-    if _untouched(aside, read_launch_record(aside / DISCARD_NAME).get("kept")):
+    """候補の錠の中で、前の掃除が退避した候補を、直されていなければ消し、直されていれば元の名前へ戻す。
+
+    ほかのプロセスが候補を開いたままか、それを確かめられない環境では、比べてから消すまでの間の書き込みを検出できないので、
+    消さずに元の名前へ戻す（利用者はそのまま編集を続けられる。次の掃除がもう一度退避する）。
+    """
+    if _held_open(aside / CANDIDATE_NAME) is False and _untouched(aside, read_launch_record(aside / DISCARD_NAME).get("kept")):
         shutil.rmtree(aside, ignore_errors=True)
     else:
         _put_back(aside)
@@ -337,7 +375,8 @@ def _sweep(home: Path) -> None:
     """候補の錠の中で、反映先の worktree が無い候補と、最新のリクエストに「承認しない」と回答した候補を退避する（直したものは残す）。
 
     「承認しない」の判定は、候補ごとの最新のリクエストで行う。否認の後に同じ候補で作り直したリクエストが回答待ちか承認済みなら、
-    その候補は消さない。比べるバージョンは、そのリクエストを作った時に記録した候補のバージョン（`candidate_version`）である。
+    その候補は消さない。どちらの場合も、片付けるのは作った時の中身のままの候補だけである。「承認しない」は反映を断る回答で、
+    利用者が書いた設定案を消してよいという回答ではないので、リクエストの前に直した候補も残す。
     リクエストは同じ錠の中で作るので（`put_question`）、ここで読んだリクエストの一覧は退避を決めるまで変わらない。
     """
     latest: dict[Any, dict[str, Any]] = {}
@@ -347,9 +386,8 @@ def _sweep(home: Path) -> None:
     labels = _last_labels()
     for made in _candidates(home):
         req = latest.get(str(made / CANDIDATE_NAME))
-        if req is not None and _judged(labels.get(req.get("request_id")), req)[0] == "deny":
-            _discard(made, req.get("candidate_version"))
-        elif _worktree_gone(read_launch_record(made / SOURCE_NAME).get("target")):
+        denied = req is not None and _judged(labels.get(req.get("request_id")), req)[0] == "deny"
+        if denied or _worktree_gone(read_launch_record(made / SOURCE_NAME).get("target")):
             _discard(made)
 
 

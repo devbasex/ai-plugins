@@ -29,7 +29,7 @@ def _answered(cwd, questions=QUESTION["questions"], label=LABEL, session="s1"):
 @pytest.fixture
 def asked(tmp_path):
     target = tmp_path / "wt" / ".ndf" / "launch.json"
-    la.put_question({"request_id": "q1", "repo": "/r", "sha256": "a" * 64, "target": str(target), "session": "s1"}, QUESTION)
+    la.put_question({"request_id": "q1", "repo": "/r", "sha256": "a" * 64, "target": str(target), "session": "s1"}, lambda: QUESTION)
     return target
 
 

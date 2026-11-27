@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from ndf.adapters import launch_approval as la
+from ndf.contracts import internal
 
 SHA = "a" * 64
 OLD = b'{"version": 1}\n'
@@ -46,7 +47,7 @@ def _answer(request_id: str, label: str) -> None:
 
 
 def _asked(target: Path, request_id: str = "q1", candidate: Path | None = None, label: str | None = la.APPROVE_LABEL.format("人")) -> None:
-    la.put_question(_request(request_id, target), _question(request_id), candidate)
+    la.put_question(_request(request_id, target), lambda: _question(request_id), candidate)
     if label is not None:
         _answer(request_id, label)
 
@@ -103,7 +104,7 @@ def test_a_revoke_written_before_the_request_does_not_cancel_its_answer(tmp_path
 def test_an_answer_long_after_the_request_is_still_pending_until_reflected(tmp_path):
     target = _worktree(tmp_path)
     candidate = _candidate(target)
-    la.put_question(_request("q1", target), _question("q1"), candidate)
+    la.put_question(_request("q1", target), lambda: _question("q1"), candidate)
     assert la.pending_request("/r", target) is None
     _answer("q1", la.APPROVE_LABEL.format("人"))
     assert la.pending_request("/r", target)["candidate"] == str(candidate)
@@ -186,6 +187,41 @@ def test_asking_again_with_a_set_aside_candidate_puts_it_back(tmp_path):
     assert candidate.exists() and not (candidate.parent / la.DISCARD_NAME).exists()
     la.new_candidate("/r", target)
     assert candidate.exists()
+
+
+def test_a_denied_candidate_edited_before_the_request_is_kept(tmp_path):
+    """「承認しない」は反映を断る回答で、リクエストの前に書いた設定案を消す許可ではない。"""
+    target = _worktree(tmp_path)
+    candidate = _candidate(target)
+    _asked(target, candidate=candidate, label=la.DENY_LABEL)
+    la.new_candidate("/r", target)
+    la.new_candidate("/r", target)
+    assert candidate.read_bytes() == NEW
+
+
+def test_a_set_aside_candidate_held_open_is_put_back_instead_of_deleted(tmp_path):
+    """比べてから消すまでの間の書き込みを検出できない候補（ほかに開いたままの fd がある）は、消さずに元の名前へ戻す。"""
+    target = _worktree(tmp_path)
+    candidate = la.new_candidate("/r", target)
+    _asked(target, candidate=candidate, label=la.DENY_LABEL)
+    la.new_candidate("/r", target)
+    with open(_aside(candidate), "rb"):
+        la.new_candidate("/r", target)
+    assert candidate.read_bytes() == OLD
+
+
+def test_a_question_is_not_made_for_a_candidate_that_is_gone(tmp_path):
+    """候補が消えていれば、質問の中身を作らず、リクエストも足さない。"""
+    target = _worktree(tmp_path)
+    candidate = la.new_candidate("/r", target)
+    _asked(target, candidate=candidate, label=la.DENY_LABEL)
+    la.new_candidate("/r", target)
+    la.new_candidate("/r", target)
+    assert not candidate.exists() and not _aside(candidate).exists()
+    with pytest.raises(internal.InternalError) as raised:
+        la.put_question(_request("q2", target), lambda: pytest.fail("質問を作らない"), candidate)
+    assert raised.value.kind == "precondition"
+    assert [r["request_id"] for r in la.records.whole_rows(la.state_file(la.QUESTIONS))] == ["q1"]
 
 
 def test_draft_reclaims_what_an_interrupted_draft_or_sweep_left(tmp_path):
