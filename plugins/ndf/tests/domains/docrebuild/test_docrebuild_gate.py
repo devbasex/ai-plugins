@@ -482,6 +482,20 @@ def test_one_failed_check_ends_only_a_document_that_must_not_be_fixed(tmp_path: 
     assert {"name": DESIGN, "reader": reading.ENGINEER, "round": 1, "result": "remained"} in checks_rows()[-1]["reads"]
 
 
+@pytest.mark.parametrize("name", [reading.QUESTION, reading.MATERIAL])
+def test_one_failed_check_ends_the_question_but_not_the_material(tmp_path: Path, name: str) -> None:
+    """#4621: 質問の文は直してよいファイルに入らないので、quotes つきの 1 回の不合格で終えてよい（欠けにしない）。
+    直してよい承認資料には、今どおり 2 回の確かめを求める。"""
+    w = world(tmp_path)
+    got = w.run(FakeWorker(_failing_once(name, "公開してよいですか")))
+    gaps = [g for g in got.get("gaps", []) if g["name"] == name]
+    if name == reading.MATERIAL:
+        assert gaps and "2 回の確かめ" in gaps[0]["reason"], got
+        return
+    assert gaps == [] and got["status"] == "ok", got
+    assert {"name": reading.QUESTION, "reader": reading.APPROVER, "round": 1, "result": "remained"} in checks_rows()[-1]["reads"]
+
+
 # --- 止まる経路（条件 2・5） ---------------------------------------------------------------------------------
 
 
