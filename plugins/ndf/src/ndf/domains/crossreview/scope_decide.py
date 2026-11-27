@@ -72,15 +72,21 @@ def sections_of(path: str, text: str) -> list[str]:
     return out
 
 
-def reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None, base_branch: Optional[str] = None) -> set[str]:
+def reviewed_of(
+    state: Mapping[str, Any], mvv: Optional[str] = None, base_branch: Optional[str] = None, pinned: Optional[str] = None
+) -> set[str]:
     """状態ファイルの中身から、前のラウンドまでに詳細レビューを通ったセクション（並びでなければ無し）。今の MVV を見分ける
     値 `mvv`（None は確かめない）と違う MVV で通ったセクションは、通っていないとみなす（#4076）。今の比較元のブランチ
     `base_branch`（None は確かめない）と違う比較元で通ったセクションも、通っていないとみなす。`run` はどの起動でも今の比較元を
     渡す（`--base` やマージ先を変えれば、新しい全差分のセクションを詳細レビューに通す。比較元が違う記録を範囲の決定に使うと、
-    今の比較元の名前で済んだと書き直す。#3702・PR 4638 の r2-2・r3-1）。"""
+    今の比較元の名前で済んだと書き直す。#3702・PR 4638 の r2-2・r3-1）。`pinned` は `--base` がコミットの起動での差分の起点
+    （そのコミットと HEAD の merge-base。ブランチなら None）で、記録の起点と違えば通っていないとみなす。比較元のブランチは
+    PR のマージ先なので、同じ PR で別のコミットを渡しても一致する（PR 4638 の r1-2）。"""
     if mvv is not None and _known(state.get(store.REVIEWED_MVV)) != mvv:
         return set()
     if base_branch is not None and state.get(store.REVIEWED_BASE_BRANCH) != base_branch:
+        return set()
+    if state.get(store.REVIEWED_BASE_COMMIT) != pinned:
         return set()
     return set(store.list_of(state, store.REVIEWED))
 

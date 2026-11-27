@@ -32,6 +32,8 @@ REVIEWED = "reviewed_sections"
 REVIEWED_MVV = "reviewed_mvv"
 # `reviewed_sections` のセクションを読んだときの比較元のブランチ（PR のマージ先に合わせる起動だけが比べる。#3702）
 REVIEWED_BASE_BRANCH = "reviewed_base_branch"
+# `--base` がコミットの起動で `reviewed_sections` を読んだときの差分の起点（そのコミットと HEAD の merge-base。ブランチなら無し。#3702）
+REVIEWED_BASE_COMMIT = "reviewed_base_commit"
 FINDINGS = "findings"
 # MVV の記録を書けなかった原因（保存先のパスを含むので手元だけに残す。書けたら消す。#4076）
 MVV_RECORD_ERROR = "mvv_record_error"

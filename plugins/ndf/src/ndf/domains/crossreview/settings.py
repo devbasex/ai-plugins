@@ -41,7 +41,8 @@ class RunConfig:
     `unit` はレビューの単位の指示の中身（単位の経路でなければ空。#4369）。`check_pr` は読んだ PR の確認を呼び手が求めるか
     （`--reviewed-pr-out`。真なら同じ PR を読んだラウンドだけを差分の起点と収束の再利用に使う。#4369）。`follow_base` は
     `base` でなく PR の今のマージ先を比較元にするか（`--reviewed-base-out`。真なら同じマージ先のラウンドだけを差分の起点と
-    収束の再利用に使う。#3702）。"""
+    収束の再利用に使う。#3702）。`base_pinned` は `base` がコミット（SHA・タグなど）か（起動の始めに決める。真なら詳細レビューを
+    通ったセクションを差分の起点が同じ記録だけ引き継ぐ。#3702）。"""
 
     worktree: Path
     branch: str
@@ -62,6 +63,7 @@ class RunConfig:
     unit: str = ""
     check_pr: bool = False
     follow_base: bool = False
+    base_pinned: bool = False
 
 
 def settings_path(root: Path, file_id: str) -> Path:

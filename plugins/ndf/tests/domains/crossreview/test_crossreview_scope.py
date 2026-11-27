@@ -312,6 +312,20 @@ def test_issue_3702_sections_reviewed_against_another_target_are_reviewed_again(
     assert scope_decide.reviewed_of(state, APPROVED, now) == reviewed
 
 
+@pytest.mark.parametrize(
+    ("recorded", "now", "reviewed"),
+    [("m1", "m1", {A, B}), ("m1", "m2", set()), (None, "m1", set()), ("m1", None, set()), (None, None, {A, B})],
+)
+def test_pr_4638_r1_2_sections_reviewed_from_another_pinned_start_are_reviewed_again(
+    recorded: str | None, now: str | None, reviewed: set[str]
+) -> None:
+    """`--base` がコミットの起動では、比較元のブランチ（PR のマージ先）が同じでも、差分の起点の merge-base が違う記録は引き継がない。"""
+    state = {store.REVIEWED: [A, B], store.REVIEWED_MVV: APPROVED, store.REVIEWED_BASE_BRANCH: "main"}
+    if recorded:
+        state[store.REVIEWED_BASE_COMMIT] = recorded
+    assert scope_decide.reviewed_of(state, APPROVED, "main", now) == reviewed
+
+
 @pytest.mark.parametrize(("recorded", "head"), [("main", "h1"), ("sprint/y", None), (None, None)])
 def test_issue_3702_round_base_branch_is_read_from_the_mvv_record(recorded: str | None, head: str | None) -> None:
     """PR 4638 の r1-4・r1-5: ラウンドの比較元のブランチは MVV を読んだブランチの記録で照らす（前のバージョンが書いたラウンドも使える）。"""
