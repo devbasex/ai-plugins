@@ -55,14 +55,14 @@ plugins/ndf/
 | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 指摘の種類の一覧と、相手役への `protect` の指示を持つ | `contracts` | モジュール | 新設: `protect_kinds`・`track_kinds`・`protect_of`・`document_line` / 変更: `reviewer_block`・`downgraded` |
 | `plugins/ndf/src/ndf/domains/crossreview/journal.py` | 変更 | 行に `protect` と `check` を書き、下げる・戻すを決める | `criteria_decide`・`verify_decide` | `FindingJournal`、`Checked` | 新設: `apply_checks` / 変更: `enter`・`_raised`・`_raised_again`・`_revive` |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | 指摘を入れた直後に判定役を呼ぶ | `carry`・`reviewing`・`verify` | `_Run` | 新設: `_confirm` / 変更: `_round` |
-| `plugins/ndf/src/ndf/domains/crossreview/report_decide.py` | 変更 | 下げた行の元の重要度と理由を表に出す | `criteria_decide` | モジュール | 変更: `_finding_rows` |
+| `plugins/ndf/src/ndf/domains/crossreview/report_decide.py` | 変更 | 下げた行の元の重要度と定型の理由を表に出す | `criteria_decide` | モジュール | 変更: `_finding_rows` |
 | `plugins/ndf/contracts/data/review-criteria.json` | 変更 | 判定役への指示の文と、指摘の種類の一覧を持つ | 無し | データ | — |
 | `plugins/ndf/contracts/limits/cross-review.remark-chars.json` | 変更 | 読み手のモジュールを `reviewing` にする | 無し | データ | — |
 | `plugins/ndf/contracts/limits/cross-review.remarks-total.json` | 変更 | 同上 | 無し | データ | — |
 | `plugins/ndf/skills/cross-review/docs/01-state-and-review.md` | 変更 | 「指摘の基準」に確認の決まりを足す | 無し | 文書 | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_verify.py` | 新設 | 判定役の判断・起動・適用を確かめる | 上の各モジュール | テスト | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py` | 変更 | `protect`・下げた行の出し直しを確かめる | `journal` | テスト | — |
-| `plugins/ndf/tests/domains/crossreview/test_crossreview_report.py` | 変更 | 表の元の重要度と理由を確かめる | `report_decide` | テスト | — |
+| `plugins/ndf/tests/domains/crossreview/test_crossreview_report.py` | 変更 | 表の元の重要度と定型の理由を確かめる | `report_decide` | テスト | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py` | 変更 | 移した関数の参照名と、`protect` の指示 | — | テスト | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_citations.py` | 変更 | 移した関数の参照名 | — | テスト | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_documents.py` | 変更 | 移した定数の参照名 | — | テスト | — |
@@ -376,13 +376,13 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_finding_rows` | `report_decide.py` | 変更 | シグネチャは変えない | `check.lowered` の行は、重要度の欄に「minor（確認の前は <`raised_severity`>）」、理由の欄に判定役の理由を出す |
+| `_finding_rows` | `report_decide.py` | 変更 | シグネチャは変えない | `check.lowered` の行は、重要度の欄に「minor（確認の前は <`raised_severity`>）」、理由の欄に定型文「判定役の確認で成り立たないと分かった」を出す。`check` の自由記述は公開のコメントに写さない（設計文書の「[回答の形](./issue-4363-design.md#回答の形)」） |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_finding_rows` | 下げた行の重要度の欄に元の重要度が、理由の欄に `check.reason` が現れる | 理由に表の区切り `\|` と改行がある | `check` の無い行・`lowered` が偽の行は今のとおり |
+| `_finding_rows` | 下げた行の重要度の欄に元の重要度が、理由の欄に定型文が現れる | 無し | `check` の無い行・`lowered` が偽の行は今のとおり。`check.reason` に作り物の非公開の値を入れても、コメントのどこにも出ない |
 
 ## 手順書
 
