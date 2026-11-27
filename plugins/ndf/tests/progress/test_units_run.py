@@ -305,35 +305,63 @@ def test_the_sprint_pr_is_not_opened_when_the_sprint_worktree_differs_from_the_r
     tip, head = _git(world.sprint, "rev-parse", f"origin/{BRANCH}"), _git(world.sprint, "rev-parse", "HEAD")
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
     assert f"{tip}..{head}" in got.cause["detail"] and "ndf progress next" in got.cause["detail"]
+    assert f"push -- origin HEAD:refs/heads/{BRANCH}" in got.cause["detail"]
     assert all(r.name != "pr" for r, _ in world.runs) and [i["status"] for i in got.report["items"]] == ["merged"] * 3
 
 
-def test_after_a_push_from_another_worktree_the_shown_step_lets_the_rerun_open_the_sprint_pr(world, tmp_path, monkeypatch):
+def test_after_a_push_from_another_worktree_the_shown_command_lets_the_rerun_open_the_sprint_pr(world, tmp_path, monkeypatch):
+    # 空白を含む場所の作業場所でも、停止の理由に出たコマンドをシェルへそのまま貼れば進められる
+    w = World(tmp_path / "空白 を含む")
+    monkeypatch.setattr(github_pulls, "merged_pulls", w.lookup)
     original = units_invoke.merge_unit
     other = tmp_path / "other"
 
     def then_a_push_from_elsewhere(ctx, branch, worktree, round_dir, ports):
         done = original(ctx, branch, worktree, round_dir, ports)
-        if branch == world.unit_names()["issue-4"]:
-            subprocess.run(["git", "clone", "-q", "-b", BRANCH, str(world.remote), str(other)], check=True)
+        if branch == w.unit_names()["issue-4"]:
+            subprocess.run(["git", "clone", "-q", "-b", BRANCH, str(w.remote), str(other)], check=True)
             _git(other, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "別の作業場所から")
             _git(other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
         return done
 
     monkeypatch.setattr(units_invoke, "merge_unit", then_a_push_from_elsewhere)
-    got = world.run()
+    got = w.run()
 
-    tip = _git(world.remote, "rev-parse", BRANCH)
+    tip = _git(w.remote, "rev-parse", BRANCH)
     assert got.status == "stopped" and got.cause["kind"] == "precondition"
-    assert f"merge --ff-only {tip}" in got.cause["detail"] and all(r.name != "pr" for r, _ in world.runs)
-    # 利用者が変更を確かめ、停止の理由が示した手順で作業場所を進めてから打ち直す
-    _git(world.sprint, "merge", "--ff-only", "-q", tip)
-    world.runs.clear()
+    command = got.cause["detail"].split("コマンド: ", 1)[1]
+    assert f"merge --ff-only {tip}" in command and f"switch {BRANCH}" in command and all(r.name != "pr" for r, _ in w.runs)
+    # 利用者が変更を確かめ、停止の理由が示したコマンドで作業場所を進めてから打ち直す
+    subprocess.run(["sh", "-c", command], check=True, capture_output=True)
+    w.runs.clear()
 
-    again = world.run()
+    again = w.run()
 
     assert again.status == "ok", again.report
-    assert world.impl_runs() == [] and world.runs[-1][0].name == "pr"
+    assert w.impl_runs() == [] and w.runs[-1][0].name == "pr"
+
+
+def test_a_diverged_sprint_worktree_is_not_told_to_push(world, monkeypatch, tmp_path):
+    original = units_invoke.merge_unit
+    other = tmp_path / "other"
+
+    def then_both_move(ctx, branch, worktree, round_dir, ports):
+        done = original(ctx, branch, worktree, round_dir, ports)
+        if branch == world.unit_names()["issue-4"]:
+            subprocess.run(["git", "clone", "-q", "-b", BRANCH, str(world.remote), str(other)], check=True)
+            _git(other, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "リモートで")
+            _git(other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+            _git(world.sprint, "fetch", "-q", "origin")
+            _git(world.sprint, "merge", "-q", "--ff-only", world.merged[branch].merge_sha)
+            _git(world.sprint, "commit", "-q", "--allow-empty", "-m", "手元で")
+        return done
+
+    monkeypatch.setattr(units_invoke, "merge_unit", then_both_move)
+
+    got = world.run()
+
+    assert got.status == "stopped" and got.cause["kind"] == "precondition"
+    assert "履歴が分かれている" in got.cause["detail"] and "コマンド: " not in got.cause["detail"]
 
 
 @pytest.mark.parametrize(("answer_sha", "lookups"), [(True, 1), (False, 2)])
@@ -345,6 +373,23 @@ def test_the_last_unit_is_looked_up_again_only_when_the_merge_answer_lacks_the_m
     assert got.status == "ok", got.report
     assert len(world.lookups) == lookups
     assert _git(world.sprint, "rev-parse", "HEAD") == _git(world.sprint, "rev-parse", f"origin/{BRANCH}")
+
+
+def test_a_github_failure_on_the_lookup_of_the_last_unit_keeps_the_kind_the_wait_and_every_unit(world, monkeypatch):
+    world.answer_sha = False
+    first = world.lookup
+
+    def fails_the_second(hub, heads, base):
+        if world.lookups:
+            raise github.GitHubError("上限に当たった", status=403, retry_after=60, quota="graphql")
+        return first(hub, heads, base)
+
+    monkeypatch.setattr(github_pulls, "merged_pulls", fails_the_second)
+
+    got = world.run()
+
+    assert got.status == "stopped" and got.cause["kind"] == "transient" and got.cause["retry_after"] == 60
+    assert [i["status"] for i in got.report["items"]] == ["merged"] * 3 and got.report["metrics"]["unit_ci"]["base"] == BRANCH
 
 
 def test_a_failed_lookup_of_the_last_unit_keeps_every_unit_and_the_ci_settings_in_the_result(world, monkeypatch):

@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -440,13 +441,19 @@ def _last_unit_pull(
 ) -> Optional[github_pulls.MergedPull]:
     """最後の単位の PR（マージコミットを持つ）。単位が無ければ None。
 
-    開始時の一覧かマージの応答がマージコミットを持てば、それを使う。持たないときだけ GitHub へ読み直す。
+    開始時の一覧かマージの応答がマージコミットを持てば、それを使う。持たないときだけ GitHub へ読み直す。読み直しの失敗は、
+    打ち直せば通りうるもの（不達・5xx・上限）を transient、ほかを precondition にし、待つ秒を持たせたまま単位の停止にする。
     """
     if branch is None or landed is None:
         return None
     if landed.merge_sha:
         return landed
-    found = github_pulls.merged_pulls(hub, [branch], ctx.branch)
+    try:
+        found = github_pulls.merged_pulls(hub, [branch], ctx.branch)
+    except github.GitHubError as exc:
+        kind = "transient" if exc.passing else "precondition"
+        detail = f"単位のブランチ {branch} の、{ctx.branch} へマージ済みの PR を GitHub から読めない: {exc}"
+        raise UnitsStopped(kind, detail, retry_after=exc.retry_after) from exc
     if branch not in found:
         raise UnitsStopped("precondition", f"単位のブランチ {branch} の、{ctx.branch} へマージ済みの PR を GitHub から読めない")
     return found[branch]
@@ -575,7 +582,8 @@ def _after_units(
     try:
         opened = sprint_pr(ctx, ports, landed())
     except UnitsStopped as exc:
-        return StageResult(result.stopped(plan_runner.TOOL, exc.kind, exc.detail, items=items, metrics=metrics), {})
+        report = result.stopped(plan_runner.TOOL, exc.kind, exc.detail, retry_after=exc.retry_after, items=items, metrics=metrics)
+        return StageResult(report, {})
     if opened.status != result.OK:
         stop = _unit_stop_of(opened.report, "スプリントの PR を開けない")
         gaps = opened.report["gaps"] if isinstance(opened.report.get("gaps"), list) else None
@@ -746,7 +754,7 @@ def sprint_pr(ctx: Context, ports: Ports, landed: Optional[github_pulls.MergedPu
     確かめてから、テンプレート `pr` を push のステップなしで流す。
 
     進めるのは、自分でマージした単位の結果までである。リモートの HEAD がそれと違えば、それ以上は進めず、push もせずに止める。
-    違うコミットは単位のレビューを経ていないので、利用者が確かめ、作業場所をリモートの HEAD まで自分で進めてから打ち直す。
+    違うコミットは単位のレビューを経ていないので、利用者が確かめ、停止の理由が示す手順で作業場所とリモートを揃えてから打ち直す。
     打ち直しは `prepare` を通らない（`units.json` を読む）ので、手元を進めるのは利用者の操作だけである。
     """
     g = Git(ctx.sprint)
@@ -761,20 +769,29 @@ def sprint_pr(ctx: Context, ports: Ports, landed: Optional[github_pulls.MergedPu
 
 
 def _tip_mismatch(g: Git, ctx: Context, tip: str, head: str) -> str:
-    """リモートの HEAD（`tip`）が作業場所の HEAD（`head`）と違うときの停止の理由。両方の SHA、片方にだけあるコミットの範囲、
-    確かめた後に作業場所を揃えて打ち直す手順を書く。"""
+    """リモートの HEAD（`tip`）が作業場所の HEAD（`head`）と違うときの停止の理由。両方の SHA、片方にだけあるコミットの範囲と、
+    確かめた後に作業場所を揃えて打ち直す手順を、履歴の関係（リモートが進んでいる・手元が進んでいる・分かれている）で分けて書く。
+
+    コマンドはシェルへそのまま貼れるように引数を引用し、先にスプリントブランチへ切り替える（別のブランチを進めない）。
+    """
+    where = ["git", "-C", str(ctx.sprint)]
     found = (
         f"{ctx.remote} の {ctx.branch} の HEAD（{tip}）がスプリントの作業場所 {ctx.sprint} の HEAD（{head}）と違う。"
         f"リモートにだけあるコミットは {head}..{tip}、手元にだけあるコミットは {tip}..{head} である。"
         "これらは単位のレビューを経ていない。"
     )
+    switch = shlex.join([*where, "switch", ctx.branch])
     if g.is_ancestor(head, tip):
-        step = (
-            f"その変更をスプリントの PR に含めてよいと確かめたら、git -C {ctx.sprint} merge --ff-only {tip} で作業場所を進めてから "
-            "ndf progress next を打ち直す"
-        )
+        command = f"{switch} && {shlex.join([*where, 'merge', '--ff-only', tip])}"
+        step = f"その変更をスプリントの PR に含めてよいと確かめたら、作業場所を進めてから ndf progress next を打ち直す。コマンド: {command}"
+    elif g.is_ancestor(tip, head):
+        command = f"{switch} && {shlex.join([*where, 'push', '--', ctx.remote, f'HEAD:{HEADS}{ctx.branch}'])}"
+        step = f"手元にだけあるコミットをスプリントの PR に含めてよいと確かめたら、{ctx.remote} へ送ってから ndf progress next を打ち直す。コマンド: {command}"
     else:
-        step = f"手元にだけあるコミットを {ctx.remote} へ push するか取り消して、作業場所を {ctx.remote} の {ctx.branch} と揃えてから ndf progress next を打ち直す"
+        step = (
+            "履歴が分かれているので、push も fast-forward もできない。両方の差分を確かめ、手元の変更を別のブランチへ退避してから"
+            f"作業場所を {ctx.remote} の {ctx.branch} に揃え、ndf progress next を打ち直す。手元の変更が要るなら、別の PR でレビューを経て取り込む"
+        )
     return found + step
 
 
