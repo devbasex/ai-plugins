@@ -32,7 +32,7 @@ src/ndf/
 
 依存の向き: 層は下から contracts・adapters・core・progress・domains の順で、下の層は上の層を読み込まない。値を選ぶ処理は全部の層から呼ぶので adapters に置き、割り付けに要る実験の記録と出現率のファイルの読み書きもそこに置く。`domains/records/experiments.py` は、adapters のこの読み書きを使って読む。adapters と core から出現率の計算（domains）を呼ぶ所は、下の層が上の層を読み込めないため、#1959 の起動記録のインターフェースに効果指標の関数を足して、差し込みで呼ぶ。
 
-値を選ぶ処理（`model_choice`）も、`claude -p` の起動の部品（`claude`・`llm`。子の表 `checks/children.json` の AD3）、worker（C5）、Skill の起動（P1b）からは直接読まない。`model_choice` の子（MC1）はこれらより後の順番で、子の表の依存の検査（IG1・IG2）が直接の import を拒むためである。`adapters/claude_choice.py`（AD3）が値を選ぶ処理の口（`LaunchChooser`・`set_launch_chooser`）と、選んだ値で起動する部品（`ChoiceRun`・`report_outcome`）を持ち、一番上のエントリポイント（`ndf.__main__`。子 X9 の先に要るものに MC1 を足した）が `model_choice` を差し込む（`claude.set_launch_recorder` と同じ形）。差し込みが無い呼び出し（エントリポイントを通らない呼び出しとテスト）は値を選ばずに起動する（2026-11-27、B3 の実装で決定）。
+Claude の起動処理・判定・worker・Skill の起動処理は、`model_choice` を直接 import しない。モジュールの依存関係の検査（`checks/children.json`）がこの import を禁止しているためである。代わりに `adapters/claude_choice.py` が、値を選ぶ処理を受け取る口（`set_launch_chooser`）と、選んだ値で起動する部品（`ChoiceRun`・`report_outcome`）を持つ。`ndf.__main__` は、`claude_choice.set_launch_chooser` を通じて選択処理（`adapters/model_chooser.py`）を登録する。使用量ログの書き込み処理（`claude.set_launch_recorder`）と同じ形である。エントリポイントを通らない呼び出しとテストは選択処理を登録しないので、値を選ばずに起動する（2026-11-27、B3 の実装で決定）。
 
 | パス | 種類 | 役割 | 依存する先 | クラスまたはモジュール | 新設（N）と変更（C） |
 | --- | --- | --- | --- | --- | --- |

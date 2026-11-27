@@ -30,6 +30,7 @@ from typing import Any, Optional
 
 from ndf import cli, identity
 from ndf.adapters import git, launch_approval as la, launch_candidates, launch_records, launch_settings as ls
+from ndf.adapters.secret_forms import holds_secret
 from ndf.contracts import internal, result
 
 TOOL = cli.tool_of(__name__)
@@ -44,9 +45,9 @@ WARNING = (
     "Kiro・agy に作業を任せる場合は毎回この扱いになります。コンテナなどで別途隔離している場合も、その環境内では同じ権限で動きます。"
 )
 # 片付けてよい候補の一覧に添える文
+CLEANUP_NOTE = "metrics.cleanup_targets の候補は消してよい。消す前に、その候補を開いているエディタでの編集を終えて閉じる"
 # 比べる 2 つの設定の片方に無いキーの値
 _ABSENT = object()
-CLEANUP_NOTE = "metrics.cleanup_targets の候補は消してよい。消す前に、その候補を開いているエディタでの編集を終えて閉じる"
 
 
 class _NoConsent(Exception):
@@ -133,7 +134,7 @@ def experiment_changes(root: Path, cand: Optional[Path]) -> list[dict[str, Any]]
 
     `experiments` は承認のハッシュに入らないが、反映すると worker・Skill・判定の起動のモデルと effort が変わるので、確認の画面に
     示す（#2944 の r1-1）。要素は `{path, before, after}` で、書いていない側は欄を省く（同梱の値を使う）。今の設定を読めなければ
-    空の設定と比べる。候補が無ければ空。
+    空の設定と比べる。候補が無ければ空。変わる値かキーに秘密の形（`holds_secret`）があれば、値を出さずに `_Refused` で拒む。
     """
     if cand is None:
         return []
@@ -141,7 +142,10 @@ def experiment_changes(root: Path, cand: Optional[Path]) -> list[dict[str, Any]]
         before = ls.load(root).experiments
     except internal.InternalError:  # ファイル: 壊れた今の設定は候補が直す。変更は空の設定からの差として示す
         before = {}
-    return _changes(before, ls.load(root, cand).experiments, "experiments")
+    changes = _changes(before, ls.load(root, cand).experiments, "experiments")
+    if holds_secret(json.dumps(changes, ensure_ascii=False)):
+        raise _Refused("候補か今の設定の experiments に秘密の形の値がある（値は表示しない）。秘密を書かずに候補を直してから示し直す")
+    return changes
 
 
 def _changes(before: Any, after: Any, at: str) -> list[dict[str, Any]]:
@@ -376,7 +380,10 @@ def _approve(a: argparse.Namespace) -> dict[str, Any]:
     needed = _widens(t) and not la.is_approved(repo, t.sha256)
     # 承認の行を足す条件（起動の許可）と、反映を許す条件（今回の書き換えへの同意）は別に判定する。書き換えは毎回人に確かめる
     asks = needed or cand is not None
-    shown = (target, experiment_changes(root, cand)) if cand else (None, [])
+    try:
+        shown = (target, experiment_changes(root, cand)) if cand else (None, [])
+    except _Refused as exc:
+        return _refused_config(str(exc))
     approver = _confirm_terminal(t, *shown) if asks and a.request is None else None
     if asks and a.request is None and approver is None:
         return _refused_config("人の確認が無い。Skill の質問で回答するか、利用者が端末で打って名前とハッシュの先頭 8 文字を入れる")

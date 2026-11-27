@@ -415,3 +415,15 @@ def test_the_terminal_confirmation_shows_the_changes(repo, capsys, monkeypatch):
 def test_no_experiment_item_without_a_change(repo, capsys):
     got, _, _ = _ask(capsys, _draft(capsys, LSP))
     assert not any(i["kind"] == "launch-experiments" for i in got["items"])
+
+
+def test_a_secret_shaped_value_in_experiments_is_refused_without_showing_it(repo, capsys, monkeypatch):
+    """r1-6: experiments の値に秘密の形があれば、表示と質問へ載せずに拒む。"""
+    fake = "gh" + "p_" + "A" * 24  # 秘密の形の作り物の値
+    content = {"version": 1, "experiments": {"stages": {"impl": {"arms": {"claude": [{}, {"model": fake}]}}}}}
+    candidate = _draft(capsys, content)
+    code = cli.main([lc.TOOL, "show", "--candidate", str(candidate), "--question", "approve"])
+    out = capsys.readouterr().out
+    got = json.loads(out.strip().splitlines()[-1])
+    assert code != 0 and got["cause"]["kind"] == "refused" and fake not in out
+    assert not la.state_file(la.QUESTIONS).exists()
