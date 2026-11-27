@@ -514,7 +514,8 @@ def _create_locked(result: Path) -> Optional[int]:
     別の起動が一時ファイルを残骸として消したときは、名前が埋まったものとして None を返す。
     """
     parent = result.absolute().parent
-    made = _work_tmp(result, retry=False)
+    # 排他を取る前なので `_exclusive` の終わりの片付けに入らない。作れずに止まるときは `_work_tmp` が片付ける
+    made = _work_tmp(result, retry=False, drop_on_error=True)
     if made is None:
         # 一時ファイルを作る前に、ロックを外した前の起動が専用ディレクトリを消した
         return None
@@ -602,7 +603,7 @@ def _work_existing(result: Path) -> list[Path]:
         return []
 
 
-def _work_tmp(result: Path, retry: bool = True) -> Optional[_Tmp]:
+def _work_tmp(result: Path, retry: bool = True, drop_on_error: bool = False) -> Optional[_Tmp]:
     """judge が作った専用ディレクトリに一時ファイル（0600）を作って返す。
 
     候補の名前（基本の名前と、末尾に `-1`〜`-99` を付けた名前の計 `WORK_TRIES` 個）を順に見て、judge が作った印のある
@@ -611,6 +612,8 @@ def _work_tmp(result: Path, retry: bool = True) -> Optional[_Tmp]:
     残したまま次の候補へ移る。全部の候補が使えなければ止める。一時ファイルは、印を確かめたのと同じ記述子を基準に、その印の鍵で
     作った judge の一時ファイルの名前（`_tmp_name`）で作る。ロックを外した前の起動が空の専用ディレクトリを消すことがあるので、
     作る前に消されたら作り直す。`retry` が偽なら作り直さずに None を返す。親のディレクトリが消えたときは止める。
+    `drop_on_error` が真なら、ディレクトリか一時ファイルを作れずに止まる前に、空の専用ディレクトリを片付ける。排他を取る前の
+    呼び出し（`_create_locked`）だけが真にする。排他を取った後の呼び出しは、片付けを `_exclusive` の `finally` の 1 回に任せる。
     """
     parent = result.absolute().parent
     while True:
@@ -639,8 +642,9 @@ def _work_tmp(result: Path, retry: bool = True) -> Optional[_Tmp]:
                 gone = True
                 break
             except OSError as exc:
-                # 作ったばかりの空の専用ディレクトリを残さない
-                _drop_work_dir(result)
+                # 作ったばかりの空の専用ディレクトリを残さない（排他を取った後なら `_exclusive` の終わりの片付けが消す）
+                if drop_on_error:
+                    _drop_work_dir(result)
                 raise Stop(f"--result（{result}）の一時ファイルを作れない: {exc}") from None
             try:
                 fd, name = _create_tmp(dfd, key)
@@ -652,7 +656,8 @@ def _work_tmp(result: Path, retry: bool = True) -> Optional[_Tmp]:
                 break
             except OSError as exc:
                 os.close(dfd)
-                _drop_work_dir(result)
+                if drop_on_error:
+                    _drop_work_dir(result)
                 raise Stop(f"--result（{result}）の一時ファイルを作れない: {exc}") from None
         if not gone:
             raise Stop(
