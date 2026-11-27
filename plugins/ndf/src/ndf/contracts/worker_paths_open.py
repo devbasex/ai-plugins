@@ -577,12 +577,24 @@ def held_dir_id(directory: Path) -> Optional[tuple[int, int]]:
     worker の中で保存先を開き直して書く手（`ndf contracts emit --out`・`ndf worker append`・`ndf worker draft`）が、開いた
     場所を `check_dir_id` で突き合わせるのに使う。worker の外か、別の場所へ書くとき・値の形が違うときは None（突き合わせない）。
     """
+    held = held_dir()
+    if held is None or held[0] != directory:
+        return None
+    return held[1]
+
+
+def held_dir() -> Optional[tuple[Path, tuple[int, int]]]:
+    """`ndf worker run` が渡した結果の保存先（`identity.WORKER_RESULT_DIR_ENV`）のパスと `(st_dev, st_ino)`。
+
+    worker の外か、値の形が違えば None。保存先の配下だけを書く手（`ndf worker write`）は、None なら書かずに止める。
+    この値は呼び出し元が変えられるので、開いた場所との一致を確かめるのに使い、`ndf worker run` が起動したプロセスだという証明には使わない。
+    """
     raw = os.environ.get(identity.WORKER_RESULT_DIR_ENV, "")
     dev, _, rest = raw.partition(":")
     ino, _, path = rest.partition(":")
-    if not (dev.isdigit() and ino.isdigit() and path) or Path(path) != directory:
+    if not (dev.isdigit() and ino.isdigit() and path and Path(path).is_absolute()):
         return None
-    return int(dev), int(ino)
+    return Path(path), (int(dev), int(ino))
 
 
 @contextlib.contextmanager
