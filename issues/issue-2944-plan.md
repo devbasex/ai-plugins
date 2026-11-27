@@ -22,7 +22,7 @@
 
 ### Task 2: 選択肢から値を選び、割り付ける
 
-- **対象ファイル:** `contracts/domains/launch-experiments.json`・`adapters/model_choice.py`・`contracts/schemas/internal/experiment.schema.json`・`usage.schema.json`（足す欄。Task 3 と 4 が使う）・`domains/records/models_cli.py`（`pick`）・`tests/adapters/test_model_choice.py`（新設）、`adapters/launch_settings.py`・`launch.schema.json`、`cli.py`、`env.json`・`ndf-files.json`、`contracts/schemas/io/models.*`、`skills/launch-config/SKILL.md`
+- **対象ファイル:** `contracts/domains/launch-experiments.json`・`adapters/model_choice.py`・`contracts/schemas/internal/experiment.schema.json`・`usage.schema.json`（足す欄。Task 3 と 4 が使う）・`domains/records/models_cli.py`（`launch_choice`）・`tests/adapters/test_model_choice.py`（新設）、`adapters/launch_settings.py`・`launch.schema.json`、`cli.py`、`env.json`・`ndf-files.json`、`contracts/schemas/io/models.*`、`skills/launch-config/SKILL.md`
 - **変更内容:** 詳細設計の「値を選ぶ処理」と `ndf models pick`
 - **満たす受け入れ条件:** 1・7・10・12・14・15・19
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
@@ -50,10 +50,10 @@
 - **設計承認で持ち越した項目:** プランの外の Skill の起動は実験に入れず基準の組で動くことと、I8 は `outcome` の表の呼び出し元に限ることを限界に書く
 - **設計承認で持ち越した項目（#1959 から移した）:** プランの実行が、工程のモードを環境変数でステップの子へ渡す所を、このタスクで入れる。
   - 渡す値: 工程の入力の `mode`（`standard` などの開発のモード。`progress/invoke.py` が `run.inputs` から読む値と同じ）
-  - 使う所: `pick` が引数 `mode` に受け、使用量ログの行の `mode` に記録する。`ndf models report` はモードごとの内訳に使う。割り付ける組と確率はモードで変えない（設計書の受け入れ条件 11）
+  - 使う所: `launch_choice` が引数 `mode` に受け、使用量ログの行の `mode` に記録する。`ndf models report` はモードごとの内訳に使う。割り付ける組と確率はモードで変えない（設計書の受け入れ条件 11）
   - 値が無い場合: 工程の入力に `mode` が無ければ、新設する環境変数をステップの子の環境から外す。付けないだけでは足りない。`core/plan/steps.py` の `_launch` は親の `os.environ` に値を重ねて子へ渡すので、親がモードを持っていると子がそれを継ぎ、そのステップの使用量が親のモードの費用として集計されるためである。外し方は、詳細設計の `_step_env` が `NDF_RETRY_CAUSE` などを外すのと同じく値を None にし、`_launch` が None の値を子の環境から消す。行の `mode` も省く
   - 環境変数の名前: `contracts/domains/env.json` に行を足して決め、書く側と読む側はそこから引く（未確認: 名前は #2944 の設計にまだ無い）
-  - 経緯: #1959 の A4（[issue-1959-plan.md](./issue-1959-plan.md) の Task 5）は、ステップの子へ渡す環境変数のうち `NDF_PLAN_RUN_ID`・`NDF_STEP_ID`・`NDF_STEP_ATTEMPT` の 3 つだけを入れた。モードの値を使うのはこの課題の `pick` なので、読み手の無い値を先に渡さないよう、渡す所もこの課題へ移した（2026-11-27 の決定）
+  - 経緯: #1959 の A4（[issue-1959-plan.md](./issue-1959-plan.md) の Task 5）は、ステップの子へ渡す環境変数のうち `NDF_PLAN_RUN_ID`・`NDF_STEP_ID`・`NDF_STEP_ATTEMPT` の 3 つだけを入れた。モードの値を使うのはこの課題の `launch_choice` なので、読み手の無い値を先に渡さないよう、渡す所もこの課題へ移した（2026-11-27 の決定）
 - **進め方:** 遷移の判断は純粋な関数のテストを先に書く。`impl` と `check` のプランのテンプレートで遷移を通す
 
 ### Task 6: 相手役のシートを単位にし、レビューから効果指標を書く
@@ -66,7 +66,7 @@
 ### Task 7: 委譲の起動にモデルと effort の選択を足す
 
 - **対象ファイル:** `domains/settings/delegate_run_cli.py`、`skills/external-ai/SKILL.md`・`references/cli-codex.md`・`references/cli-agy.md`・`references/cli-kiro.md`・`skills/qa-security-scan/03-report-template.md`・`agents/corder.md`
-- **変更内容:** 詳細設計の「`ndf models` と `ndf delegate-run`」（`--runtime` は codex・kiro・agy。kiro と agy は `pick` を呼ばない）と手順書の固定の `medium` の削除
+- **変更内容:** 詳細設計の「`ndf models` と `ndf delegate-run`」（`--runtime` は codex・kiro・agy。kiro と agy は `launch_choice` を呼ばない）と手順書の固定の `medium` の削除
 - **満たす受け入れ条件:** 3
 - **進め方:** CLI はテストを先に書く。手順書の起動の例は打って確かめる
 

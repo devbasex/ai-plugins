@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "models.result.schema.json",
   "title": "ndf models の結果 JSON",
-  "description": "ndf models が標準出力の最後の 1 行に出す結果 JSON（pick の --format json。--format args は結果 JSON を出さない）。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "description": "ndf models が標準出力の最後の 1 行に出す結果 JSON（pick。--args を付けた pick は結果 JSON を出さない）。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics と items の要素は閉じていて、載せた項目のほかの項目を持つと通らない",
   "allOf": [
     {
       "$ref": "../result.schema.json"
@@ -38,7 +38,7 @@
           "model_source": {"type": "string", "description": "モデルの出所（argument・environment・experiment・base・default）"},
           "effort_source": {"type": "string", "description": "effort の出所（model_source と同じ語）"},
           "raised": {"type": "boolean", "description": "同じ失敗への 2 回目以降の起動で、値を 1 つ上げたか"},
-          "args": {"type": "array", "items": {"type": "string"}, "description": "CLI に渡す引数の並び（--format args が 1 行 1 つで出すもの）"}
+          "args": {"type": "array", "items": {"type": "string"}, "description": "CLI に渡す引数の並び（--args が 1 行 1 つで出すもの）"}
         }
       }
     }

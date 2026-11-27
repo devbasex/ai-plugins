@@ -353,7 +353,7 @@ def _from_base(base: Optional[Mapping[str, str]], key: str) -> tuple[Optional[st
 
 @dataclass(frozen=True)
 class Request:
-    """`pick` に渡す起動の手がかり。`charge_to` は手戻りの費用を負う割り付け ID（実験の記録を書くときに使う）。"""
+    """`launch_choice` に渡す起動の手がかり。`charge_to` は手戻りの費用を負う割り付け ID（実験の記録を書くときに使う）。"""
 
     unit: Optional[str] = None
     charge_to: Optional[str] = None
@@ -362,7 +362,7 @@ class Request:
     argument: tuple[Optional[str], Optional[str]] = (None, None)
 
 
-def pick(
+def launch_choice(
     layer: str, name: str, runtime: str = "claude", *, cwd: Path, environ: Optional[Mapping[str, str]] = None, **request: Any
 ) -> Choice:
     """優先の順で値を決め、`retry` があれば引き上げる。値の誤り・壊れた設定は `precondition`。

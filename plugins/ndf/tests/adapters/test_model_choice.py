@@ -28,7 +28,7 @@ def _repo(tmp_path: Path, experiments: dict | None = None) -> Path:
 
 def _pick(root: Path, layer: str = "worker", name: str = "impl", runtime: str = "claude", **kw) -> mc.Choice:
     kw.setdefault("environ", {})
-    return mc.pick(layer, name, runtime, cwd=root, **kw)
+    return mc.launch_choice(layer, name, runtime, cwd=root, **kw)
 
 
 def _stopped(call) -> str:
@@ -251,5 +251,5 @@ def test_row_fields_fit_the_usage_log_row(tmp_path):
 def test_codex_reads_the_process_environment_without_an_inherited_variable(tmp_path, monkeypatch):
     """環境変数を渡さない起動（os.environ を読む）でも、自身の effort の変数を持たないランタイムは止まらない。"""
     monkeypatch.delenv(CODEX_EFFORT_ENV, raising=False)
-    got = mc.pick("seat", "review", "codex", cwd=_repo(tmp_path))
+    got = mc.launch_choice("seat", "review", "codex", cwd=_repo(tmp_path))
     assert got.effort == "low" and got.env_changes() == {}

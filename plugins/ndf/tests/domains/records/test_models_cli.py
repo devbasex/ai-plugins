@@ -34,19 +34,19 @@ def test_pick_returns_the_values_and_sources_as_a_result(repo, capsys, last_resu
 
 
 def test_pick_as_args_prints_one_argument_per_line(repo, capsys):
-    argv = ["models", "pick", "--layer", "seat", "--name", "review", "--runtime", "codex", "--format", "args"]
+    argv = ["models", "pick", "--layer", "seat", "--name", "review", "--runtime", "codex", "--args"]
     assert cli.main(argv) == 0
     assert capsys.readouterr().out == "-c\nmodel_reasoning_effort=low\n"
 
 
 def test_pick_as_args_without_a_choice_prints_nothing(repo, capsys):
-    assert cli.main(["models", "pick", "--layer", "seat", "--name", "fix", "--format=args"]) == 0
+    assert cli.main(["models", "pick", "--layer", "seat", "--name", "fix", "--args"]) == 0
     assert capsys.readouterr().out == ""
 
 
 def test_a_failure_as_args_writes_only_to_stderr(repo, capsys):
     (repo / ".ndf" / "launch.json").write_text(json.dumps({"version": 1, "experiments": {"allocation": {"min_units": 1}}}))
-    code = cli.main(["models", "pick", "--layer", "worker", "--name", "impl", "--format", "args"])
+    code = cli.main(["models", "pick", "--layer", "worker", "--name", "impl", "--args"])
     out = capsys.readouterr()
     assert code == causes.exit_code("precondition") and out.out == "" and "min_units" in out.err
 
@@ -58,6 +58,6 @@ def test_a_failure_as_json_is_a_stopped_result(repo, capsys, last_result):
 
 
 def test_a_usage_error_as_args_writes_nothing_to_stdout(repo, capsys):
-    code = cli.main(["models", "pick", "--name", "impl", "--format", "args"])
+    code = cli.main(["models", "pick", "--name", "impl", "--args"])
     out = capsys.readouterr()
     assert code != 0 and out.out == ""

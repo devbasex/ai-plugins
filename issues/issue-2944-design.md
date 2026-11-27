@@ -285,8 +285,8 @@ graph TD
 
 - `--layer` の値は `worker`・`skill`・`judge`・`seat` の 4 つで、ほかは `precondition` で止める
 - 表に無い組と、工程が「無し」の組（ほかの worker の作業、cross-review の修正担当など）は、引数を足さずに起動する。環境変数と起動の引数の指定は効く
-- cross-refactoring の相手役は `pick` を呼ばない
-- 応答の終わりの判定（`stop-wait`）は自分の設定で起動し、`pick` を呼ばない
+- cross-refactoring の相手役は `launch_choice` を呼ばない
+- 応答の終わりの判定（`stop-wait`）は自分の設定で起動し、`launch_choice` を呼ばない
 
 ### 実験の記録と出現率
 
@@ -346,8 +346,8 @@ Codex のシートは、今と同じく `--ephemeral` で起動し、会話の�
 
 | 名前 | 入力 | 出力 | 失敗の形 |
 | --- | --- | --- | --- |
-| `ndf models pick` | `--layer`・`--name`・`--runtime`（省けば claude）・`--unit`（省けば割り付けない）・`--retry <失敗の理由>`（省けば引き上げない。値は「引き上げる起動」）・`--format json\|args` | `json` は値と出所と割り付け ID を結果の JSON で返す。`args` は CLI に渡す引数を 1 行に 1 つずつ出す | 設定が壊れていれば `precondition` |
-| `ndf delegate-run`（#1959 に足す） | 入力は #1959 と同じ（`--runtime` と、`{args}` を持つ CLI のコマンド） | CLI の出力そのまま。codex は `{args}` にモデル・effort と安全装置の引数、kiro と agy は安全装置の引数だけが入る | 安全装置の引数を返せない状況、起動の設定が壊れている場合は CLI を起動せず `precondition`（確かめる範囲はランタイムで違う。下の「`args` の形と委譲の起動」） |
+| `ndf models pick` | `--layer`・`--name`・`--runtime`（省けば claude）・`--unit`（省けば割り付けない）・`--retry <失敗の理由>`（省けば引き上げない。値は「引き上げる起動」）・`--args`（真偽のフラグ） | 省けば値と出所と割り付け ID を結果の JSON で返す。`--args` を付ければ CLI に渡す引数を 1 行に 1 つずつ出す | 設定が壊れていれば `precondition` |
+| `ndf delegate-run`（#1959 に足す） | 入力は #1959 と同じ（`--runtime` と、`{args}` を持つ CLI のコマンド） | CLI の出力そのまま。codex は `{args}` にモデル・effort と安全装置の引数、kiro と agy は安全装置の引数だけが入る | 安全装置の引数を返せない状況、起動の設定が壊れている場合は CLI を起動せず `precondition`（確かめる範囲はランタイムで違う。下の「`--args` の形と委譲の起動」） |
 | `ndf models report` | `--since`・`--until`・`--stage` | リポジトリ × 工程 × ランタイム × 組ごとの、単位の数・効果の平均と区間・費用の平均・ROI・最良である確率・出現率・判断できるか。モードごとの内訳。起動の数・所要時間・トークン・成功率・やり直し率・指定と実際のモデルの食い違い | 行が無い組は「記録なし」 |
 | 環境変数 | `NDF_LAUNCH_MODEL`・`NDF_LAUNCH_EFFORT`（claude）、`NDF_LAUNCH_CODEX_MODEL`・`NDF_LAUNCH_CODEX_EFFORT` | すべての層に効く一時的な上書き | 無い effort は起動しない |
 | `ndf worker run` | `--unit`・`--mode` を足す | 結果の `metrics` に起動の値・割り付け ID・実際のモデル | — |
@@ -374,9 +374,9 @@ Codex のシートは、今と同じく `--ephemeral` で起動し、会話の�
 | この変数そのもの（順 3） | そのまま子へ引き継ぎ、選択肢の組からの `--effort` は足さない。モデルは上の規則で決まる。値は検証しない（Claude Code の変数のため） |
 | 実験の割り付け・基準の組・指定なし | この変数は元から無いので、何もしない |
 
-### `args` の形と委譲の起動
+### `--args` の形と委譲の起動
 
-`pick --format args` の標準出力は引数の配列で、1 行が引数 1 つである。引用符もエスケープも付けない。Codex で effort とモデルの指定があれば `-c`・`model_reasoning_effort=high`・`-m`・`<モデル>` の 4 行になる。改行を含むモデル名は、形の違いとして `precondition` にする。失敗したときは標準出力に何も出さず、理由を標準エラーに出して 0 以外で終える。
+`ndf models pick --args` の標準出力は引数の配列で、1 行が引数 1 つである。引用符もエスケープも付けない。Codex で effort とモデルの指定があれば `-c`・`model_reasoning_effort=high`・`-m`・`<モデル>` の 4 行になる。改行を含むモデル名は、形の違いとして `precondition` にする。失敗したときは標準出力に何も出さず、理由を標準エラーに出して 0 以外で終える。
 
 `external-ai` と `corder` の手順は、#1959 の `ndf delegate-run` を通して起動する。この設計は、このコマンドにモデルと effort の選択を足す。引数を受け取ってシェルで組み立てる形にはしない。
 
@@ -389,15 +389,15 @@ timeout 1320 ndf delegate-run --runtime codex -- codex exec '{args}' -C "$PWD" <
 - モデルと effort を選ぶ処理（`pick --layer seat --name delegate` と同じ）
 - 安全装置の引数を返す処理（#1959 の `delegate-run` が使うもの）
 
-モデルの選択と承認の確認は別の部品のままで、`delegate-run` はつなぐだけである。どちらかが失敗すれば、CLI を起動せずに 0 以外で終える。#1959 の実装の後に残る手順書の呼び出しの形は変わらないので、この設計で手順書から消すのは固定の `medium` だけである。**Kiro・agy の委譲では `pick` を呼ばず、`safety_args` の結果だけを足す。** `delegate` の工程の選択肢は Codex にしか無く、モデルと effort の指定を足す先が無いためである。
+モデルの選択と承認の確認は別の部品のままで、`delegate-run` はつなぐだけである。どちらかが失敗すれば、CLI を起動せずに 0 以外で終える。#1959 の実装の後に残る手順書の呼び出しの形は変わらないので、この設計で手順書から消すのは固定の `medium` だけである。**Kiro・agy の委譲では `launch_choice` を呼ばず、`safety_args` の結果だけを足す。** `delegate` の工程の選択肢は Codex にしか無く、モデルと effort の指定を足す先が無いためである。
 
 | `--runtime` | 呼ぶ処理 | `{args}` に入る引数 | `experiments` の値の検証と手動指定 |
 | --- | --- | --- | --- |
-| `codex` | `pick` と `safety_args` | モデル・effort と安全装置 | 検証し、手動指定を当てる |
+| `codex` | `launch_choice` と `safety_args` | モデル・effort と安全装置 | 検証し、手動指定を当てる |
 | `kiro`・`agy` | `safety_args` だけ | 安全装置だけ | 検証せず、`NDF_LAUNCH_*` も読まない |
 
 - Kiro・agy の安全装置の引数と、返せずに停止する条件は、[#1959 の設計](./issue-1959-design.md)の「安全装置を外す指定」の `delegate` の行のとおりである
-- `safety_args` は、これまでどおり `.ndf/launch.json` の全体の形（JSON とスキーマ）を確かめる。そのため、ファイルが読めないかスキーマに合わなければ、Kiro・agy の委譲も止まる。止まらないのは、順位に無い effort や値の制約の違反のように、`pick` だけが確かめる誤りである
+- `safety_args` は、これまでどおり `.ndf/launch.json` の全体の形（JSON とスキーマ）を確かめる。そのため、ファイルが読めないかスキーマに合わなければ、Kiro・agy の委譲も止まる。止まらないのは、順位に無い effort や値の制約の違反のように、`launch_choice` だけが確かめる誤りである
 
 #### 委譲で増えるプロセスと時間
 
@@ -458,7 +458,7 @@ sequenceDiagram
 
 判定は、基準の組への切り替えを除くと起動が最大 2 回なので、2 回目の起動で上げる。
 
-- `pick` は回数を数えない。`--retry <理由>` が付いていれば 1 つ上げ、無ければ上げない。表に無い理由は `precondition` にする
+- `launch_choice` は回数を数えない。`--retry <理由>` が付いていれば 1 つ上げ、無ければ上げない。表に無い理由は `precondition` にする
 - 修正の作業では、プランの実行が、ステップと失敗の理由ごとに入った回数を持つ。2 回目以降だけ、子の環境に `NDF_RETRY_CAUSE=<理由>` を付ける。1 回目とほかの起動では付けない（親から継いだ値は外す）。worker の起動は、この値を `--retry` として使う
 - 判定の起動は、同じプロセスの中で 2 回目の起動に `invalid_answer` を渡す
 - ローカルのテストの失敗を扱う集計ステップ `test-repeat` と、CI の失敗を扱う集計ステップ `repeat-check` は別のステップである（`contracts/templates/parts/steps.json`）。どちらを経由しても、プランの実行は元の失敗の理由を修正ステップへ引き継ぐ
@@ -754,7 +754,7 @@ worker の再開と修正担当の会話の再開は、中断の後に利用者�
 | 条件 13 | worker と修正担当の会話の再開の引数と `CLAUDE_CODE_EFFORT_LEVEL` の扱いが初回と同じで、後から変えた出現率と環境変数に影響されない。effort 指定なしで始めた会話は、再開の時に変数があっても子へ渡らない | 再開のたびに選び直すと落ちる |
 | 条件 14・I7 | 壊れた設定・effort で起動の呼び出しが 0 回になり、直す場所が文にある | 空の値として続けると落ちる |
 | 条件 4・9 | `report` は、同じ `launch_id` の行を 1 回だけ数え、費用が不明の起動を持つ単位を費用の平均に入れない。判断できる件数の 30 件（[allocation の「必要な件数」](./issue-2944-design-allocation.md#必要な件数と判断できる件数)）未満は「件数が足りない」、30 件以上で拮抗する組は「優劣を判定できない」と出す | 重なった行を足すと落ちる |
-| 条件 3 | `delegate-run` は、codex では選んだ組の引数と安全装置の引数を `{args}` の位置に入れ、安全装置が停止の状況では CLI を起動せずに失敗する。kiro と agy では `pick` を呼ばず、安全装置の引数だけを入れる | 片方の失敗を無視して残りを出すか、kiro と agy を `experiments` の検証に通すと落ちる |
+| 条件 3 | `delegate-run` は、codex では選んだ組の引数と安全装置の引数を `{args}` の位置に入れ、安全装置が停止の状況では CLI を起動せずに失敗する。kiro と agy では `launch_choice` を呼ばず、安全装置の引数だけを入れる | 片方の失敗を無視して残りを出すか、kiro と agy を `experiments` の検証に通すと落ちる |
 | 条件 3（手順書） | 手動: `external-ai`・`corder` の本文から固定の `medium` が消え、`delegate-run` の呼び出しになっていることをレビューで読んで確かめる（`.md` の文言のテストは置かない） | — |
 | 条件 5 | 手動: stream-json で、会話の途中の切り替えの cache の作成と読み込みを測り、確定仕様に書く | — |
 | 条件 6 | 手動（リリース後）: 2 スプリント以上の後の `report` を確定仕様に書く。判断できる件数に達していない組は、そう書く | — |

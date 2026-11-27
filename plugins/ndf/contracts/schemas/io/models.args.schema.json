@@ -33,14 +33,9 @@
           "type": "string",
           "description": "同じ失敗への 2 回目以降の起動の理由（省けば引き上げない）"
         },
-        "--format": {
-          "type": "string",
-          "enum": [
-            "json",
-            "args"
-          ],
-          "default": "json",
-          "description": "json は結果 JSON、args は 1 行 1 引数"
+        "--args": {
+          "type": "boolean",
+          "description": "CLI に渡す引数を 1 行に 1 つずつ出す（省けば結果 JSON）"
         }
       },
       "required": [
