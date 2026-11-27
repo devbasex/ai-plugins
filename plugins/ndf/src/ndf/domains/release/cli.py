@@ -220,7 +220,6 @@ def _record_args(args: argparse.Namespace, strategy: branch_strategy.Strategy) -
     """確かめ 0。`record` の引数の組。バージョンの無いリリース記録の引数なら `Unversioned`（`tip` は呼び手が埋める）、
     今の記録（バージョン番号を持つリポジトリ）なら None。`--correct-targets` は訂正の引数の規則で確かめて None。誤りは `RecordError`。"""
     none_store = strategy.version_store["kind"] == "none"
-    declared = record_decide.declared_deliveries(strategy.section["release"]) is not None
     if args.correct_targets:
         if not none_store:
             raise record.RecordError("--correct-targets はバージョンの保存先が none のリポジトリでだけ受ける")
@@ -237,8 +236,7 @@ def _record_args(args: argparse.Namespace, strategy: branch_strategy.Strategy) -
         raise record.RecordError("バージョンの保存先が none でないリポジトリでは --version・--environment・--target・--observed を渡さない")
     if args.version is None or not args.environment:
         raise record.RecordError("--version と --environment（1 つ以上）はそろえて渡す")
-    if not declared and not args.target:
-        raise record.RecordError("届け先の設定（release.deliveries）が無いリポジトリでは --target で今回の対象の届け先を 1 つ以上渡す")
+    # `--target` の要否は、同じ値の記録の push の時点の設定でも決まる（設定を外した後の打ち直し）ので確かめ 3 で確かめる
     environments = tuple(dict.fromkeys(args.environment))
     return record_unversioned.Unversioned(args.version, environments, tuple(args.target), frozenset(args.observed), args.production_sha, "")
 

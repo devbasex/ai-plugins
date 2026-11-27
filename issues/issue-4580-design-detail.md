@@ -35,10 +35,10 @@
 
 | # | 確かめること |
 | --- | --- |
-| 0 | 引数の組。`--version` と `--environment` はそろえて、バージョン番号を持たないリポジトリでだけ受ける。作業ツリーに配布先の宣言が無ければ `--target` が 1 つ以上要る |
+| 0 | 引数の組。`--version` と `--environment` はそろえて、バージョン番号を持たないリポジトリでだけ受ける。`--target` の要否は、push の時点の宣言を読むかで決まるので確かめ 3 で確かめる |
 | 1 | 本番の PR が本番ブランチへ入ったか（マージ済みか、`--production-sha` が正規の squash か）。入れたコミットを「反映したコミット」と呼ぶ |
 | 2 | 値の中に、反映したコミットの SHA の先頭 7 文字以上と一致する 16 進の語があるか |
-| 3 | 作業ツリーに配布先の宣言（`branch_strategy.release.deliveries`）があれば、push の `after` の宣言を `deliveries_at` で 1 回だけ読む（出典の「配布先の宣言を読む時点」）。push の時点に宣言があれば `--target` を受けず、無ければ要る。作業ツリーに宣言が無ければ push を読まない。今回の対象の配布先（`targets`）を決める。宣言があれば、`paths` を持たない配布先と、本番の PR の差分と push の差分の両方に出るパスが当たる配布先。無ければ `--target` の集合。空なら止まる |
+| 3 | 作業ツリーに配布先の宣言（`branch_strategy.release.deliveries`）があるか、記録の PR の同じ値の信用する記録が `push` を持てば、push の `after` の宣言を `deliveries_at` で 1 回だけ読む（出典の「配布先の宣言を読む時点」）。作業ツリーの宣言を外した後の打ち直しでも、push の時点の宣言で決めるためである。push の時点に宣言があれば `--target` を受けず、無ければ要る。どちらでもなければ push を読まず、`--target` が 1 つ以上要る。今回の対象の配布先（`targets`）を決める。宣言があれば、`paths` を持たない配布先と、本番の PR の差分と push の差分の両方に出るパスが当たる配布先。無ければ `--target` の集合。空なら止まる |
 | 4 | `--environment` が `targets` の部分集合か、`--observed` が `--environment` に含まれるか |
 | 5 | 今回の `targets` が正の `targets` と同じか |
 | 6 | 値とコミットが 1 対 1 か（同じコミットの記録が別の値で無いか、同じ値の記録が別のコミットで無いか） |
@@ -327,7 +327,7 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `render_correction`・`parse_correction` | `release/record_decide.py` | 新設 | `render_correction(c: Correction) -> str`・`parse_correction(body: str) -> Correction \| None` | 訂正の記録のコメントの本文と読み取り（マーカー `CORRECTION_MARK`） |
 | `value_matches` | `release/record_decide.py` | 新設 | `value_matches(value: str, sha: str) -> bool` | 確かめ 2。値の 16 進の語のどれかが SHA の先頭 7 文字以上と一致するか |
 | `production_deliveries` | `release/record_decide.py` | 新設 | `production_deliveries(rows: Sequence[Mapping]) -> list[Mapping]` | 決定 7 の「本番の配布先」の行 |
-| `glob_matches` | `release/record_decide.py` | 新設 | `glob_matches(pattern: str, path: str) -> bool` | git の pathspec の `:(glob)` と同じ一致（`**`・`*`・`?`・`[...]`、`*` は `/` を越えない） |
+| `glob_matches` | `release/record_decide.py` | 新設 | `glob_matches(pattern: str, path: str) -> bool` | git の pathspec の `:(glob)` と同じ一致（先に文字そのままで比べ、続けて `**`・`*`・`?`・`[...]`・`\` の打ち消しで照らす。括弧の中の POSIX の文字クラス `[[:alpha:]]` なども受ける。`*` は `/` を越えない。閉じない括弧と知らない文字クラスはどのパスにも当てない） |
 | `targets_of` | `release/record_decide.py` | 新設 | `targets_of(rows: Sequence[Mapping], pr_paths: frozenset[str], push_paths: frozenset[str]) -> tuple[str, ...]` | 確かめ 3。`paths` を持たない配布先と、両方の差分に出るパスが当たる配布先 |
 | `push_of` | `release/record_decide.py` | 新設 | `push_of(activities: Iterable[Mapping], landed: frozenset[str]) -> Push \| None` | 「反映したコミットを含む push」の手順 2。`landed` は手順 1 のコミットの集合 S（反映したコミットから本番ブランチの先端までの第一親のコミット）である。アクティビティを新しい順に読み、`after` が `landed` にあり、かつ `before` が `landed` に無い更新のうち、最初に当たった 1 件を返す。`after` が `landed` に無い更新に当たったら打ち切って None を返す |
 | `authoritative_targets` | `release/record_decide.py` | 新設 | `authoritative_targets(found: Sequence[Record], corrections: Sequence[Correction], version: str) -> tuple[str, ...] \| None` | 「正の `targets`」。最後の訂正、無ければ同じ値の最初の記録の一覧。`found` は `--release`・`--unit` で絞る前の有効な記録を渡す |
@@ -436,7 +436,8 @@ scripts/{check-ndf-contracts.py, contracts_lib/project_flow_doc.py *}
 | `_record_args` | 引数の組の誤り | 確かめ 0 の「止まるとき」 | `_record_args` | 止める | `precondition`（3） | 何も書いていない。直して打ち直せる |
 | `_landed_commit` | 本番へ入っていない | 未マージで `--production-sha` が無いか正規の squash でない | `landed_squash` | 止める（`NotReleased`） | 今と同じ | 同上 |
 | `write_unversioned` | 値と反映したコミットが対応しない | 確かめ 2 | `value_matches` | 止める | `precondition`（3）。反映したコミットの SHA を載せる | 同上 |
-| `_find_push` | push を決められない | アクティビティにまだ載っていない | `push_of` が None | 止める | `precondition`（3）。時間を置いて打ち直すよう示す | 同上 |
+| `_find_push` | push を決められない | 手元の追跡参照が古い（GitHub でマージした直後に取得していない） | 反映したコミットがコミットの集合 S に無いか、`git rev-list` が失敗した | 止める（アクティビティは読まない） | `precondition`（3）。`git fetch <リモート> <本番ブランチ>` で取得してから打ち直すよう示す | 同上 |
+| `_find_push` | push を決められない | アクティビティにまだ載っていないか、追跡参照が古く新しい更新が S の外にある | `push_of` が None | 止める | `precondition`（3）。追跡参照が古ければ `git fetch` で取得し、push の直後なら時間を置いて打ち直すよう示す | 同上 |
 | `write_unversioned` | 対象が空・正と違う・同じコミットに別の値 | 確かめ 3・5・6 | 各確かめ | 止める | `precondition`（3）。正の一覧と訂正の打ち方、または既にある値を載せる | 同上 |
 | `_confirm_delivery` | CD が失敗 | 実行の `conclusion` が `success` 以外 | `confirm` | 呼び出し元へ返す（`failed`） | 書けた配布先があれば `ok`（0）、無ければ `refused`（1） | その配布先は打ち直さず、配布の失敗として報告する |
 | `_confirm_delivery` | 未確定 | 実行が無い・未完了、`observe` で確かめられない、待ちの上限（`result.timeout_seconds`） | `confirm` | 呼び出し元へ返す（`pending`） | すべて未確定なら `precondition`（3）で `items` に理由 | その配布先だけで打ち直せる |

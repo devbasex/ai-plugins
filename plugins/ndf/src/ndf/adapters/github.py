@@ -31,7 +31,7 @@ import httpx
 from githubkit import GitHub as Client
 from githubkit.exception import GraphQLFailed, PrimaryRateLimitExceeded, RateLimitExceeded, RequestError, RequestFailed
 
-from ndf.adapters import cli_floor, git, github_limits, github_merge, write_gate
+from ndf.adapters import cli_floor, git, github_limits, github_merge, github_pulls, write_gate
 from ndf.adapters.github_limits import GRAPHQL, REST, RetryWithin
 from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome, Verified
 
@@ -547,11 +547,11 @@ class GitHub:
         """Issue（か PR）のコメントを古い順にすべて読む（`github.list-pages` ページまで。超えたら `GitHubError`）。"""
         return [Authored.from_rest(c) for c in self._pages(f"/repos/{self.repo}/issues/{int(number)}/comments")]
 
-    def commit_pulls(self, sha: str) -> list[int]:
-        """コミット `sha` に紐づく PR の番号（`GET /commits/<sha>/pulls`。PR のブランチにあるコミットと、PR を入れたコミット）。
-        GitHub に無いコミットは状態 422 の `GitHubError`。"""
-        body = self.rest("GET", f"/repos/{self.repo}/commits/{quote(sha, safe='')}/pulls", params={"per_page": PER_PAGE})
-        return [int(p["number"]) for p in body]
+    def commits_pulls(self, shas: Sequence[str]) -> dict[str, Optional[list[int]]]:
+        """コミットごとに紐づく PR の番号（`associatedPullRequests`）を `github.graphql-batch` 件ずつ 1 回のクエリで読む（#4580）。
+        GitHub に無いコミットの値は None。"""
+        got = self.aliased(github_pulls.commit_pull_selections(shas))
+        return {s: github_pulls.pull_numbers(got[s]) for s in shas}
 
     def pull_commit_count(self, number: int) -> int:
         """PR `number` のコミットの数（REST の `commits`）。"""

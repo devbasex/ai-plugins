@@ -76,10 +76,12 @@ class FakeHub:
     deleted: list[int] = field(default_factory=list)
     # 消すのに失敗するコメントの ID
     undeletable: set[int] = field(default_factory=set)
-    # PR のコミットの数（無ければ 1）・コミットに紐づく PR の番号（例外なら照会の失敗）と、照会したコミット
+    # PR のコミットの数（無ければ 1）・コミットに紐づく PR の番号（例外なら照会の失敗、None なら GitHub に無いコミット）と、
+    # 照会したコミットと照会の回数
     commit_counts: dict[int, int] = field(default_factory=dict)
     linked: dict[str, Any] = field(default_factory=dict)
     linked_asked: list[str] = field(default_factory=list)
+    linked_batches: int = 0
 
     def pull(self, number: int) -> Pull:
         return self.pulls[number]
@@ -143,12 +145,14 @@ class FakeHub:
     def pull_commit_count(self, number: int) -> int:
         return self.commit_counts.get(number, 1)
 
-    def commit_pulls(self, sha: str) -> list[int]:
-        self.linked_asked.append(sha)
-        got = self.linked.get(sha, [])
-        if isinstance(got, Exception):
-            raise got
-        return list(got)
+    def commits_pulls(self, shas: Any) -> dict[str, list[int] | None]:
+        self.linked_batches += 1
+        self.linked_asked.extend(shas)
+        failed = next((self.linked[s] for s in shas if isinstance(self.linked.get(s), Exception)), None)
+        if failed is not None:
+            raise failed
+        got = {s: self.linked.get(s, []) for s in shas}
+        return {s: list(v) if v is not None else None for s, v in got.items()}
 
     def delete_comment(self, comment_id: int) -> None:
         if comment_id in self.undeletable:

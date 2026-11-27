@@ -70,15 +70,25 @@ def test_delete_comment_sends_delete_and_raises_on_failure() -> None:
         hub(REPO, server).delete_comment(42)
 
 
-def test_commit_pulls_and_pull_commit_count() -> None:
-    """#4580: コミットに紐づく PR の番号と、PR のコミットの数（rebase の PR の差分の起点を決める）。"""
+def test_commits_pulls_reads_every_commit_in_one_query_and_pull_commit_count() -> None:
+    """#4580: コミットに紐づく PR の番号はコミットの数によらず 1 回のクエリで読み、GitHub に無いコミットは None。
+    PR のコミットの数（rebase の PR の差分の起点を決める）は REST の 1 回。"""
+    other = "1" * 40
+    answer = {
+        "data": {
+            "repository": {
+                "a0": {"associatedPullRequests": {"nodes": [{"number": 4485}, {"number": 12}]}},
+                "a1": None,
+            }
+        }
+    }
     routes = {
-        ("GET", f"/repos/{REPO}/commits/{HEAD}/pulls"): [httpx.Response(200, json=[{"number": 4485}, {"number": 12}])],
+        ("POST", "/graphql"): [httpx.Response(200, json=answer)],
         ("GET", f"/repos/{REPO}/pulls/4485"): [httpx.Response(200, json={"number": 4485, "commits": 26})],
     }
     server = RouteServer(routes)
-    assert hub(REPO, server).commit_pulls(HEAD) == [4485, 12]
+    assert hub(REPO, server).commits_pulls([HEAD, other]) == {HEAD: [4485, 12], other: None}
+    assert [r.method for r in server.seen] == ["POST"]
     assert hub(REPO, server).pull_commit_count(4485) == 26
-    failing = RouteServer({("GET", f"/repos/{REPO}/commits/{HEAD}/pulls"): [httpx.Response(422, json={"message": "No commit found"})]})
-    with pytest.raises(github.GitHubError):
-        hub(REPO, failing).commit_pulls(HEAD)
+    with pytest.raises(ValueError):
+        hub(REPO, server).commits_pulls(['x") { id } a: object(oid: "y'])

@@ -23,7 +23,7 @@ from typing import Any, ContextManager, NamedTuple, Optional
 
 from filelock import FileLock, Timeout
 
-from ndf.adapters.git import Git
+from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import Authored, GitHub, GitHubError, Pull
 from ndf.adapters.publish import Publisher
 from ndf.contracts import limits
@@ -148,20 +148,22 @@ def _diff_paths(repo_git: Git, base: str, head: str) -> frozenset[str]:
 def pull_base(hub: GitHub, repo_git: Git, number: int, commit: str) -> str:
     """本番の PR `number` の差分の起点。反映したコミット `commit` から第一親を PR のコミットの数までたどり、同じ PR に紐づく
     最後のコミットの第一親（squash とマージのコミットでは `commit` の第一親、rebase では PR のコミットの範囲の下）。
-    マージの方式は見分けない。紐づく PR を照会できなければ推測せずに `RecordError`。"""
+    マージの方式は見分けない。PR のコミットの数の照会が 1 回、紐づく PR の照会がたどったコミットをまとめた 1 回
+    （`github.graphql-batch` 件ごと。コミットが 1 つなら 0 回）。紐づく PR を照会できなければ推測せずに `RecordError`。"""
     count = hub.pull_commit_count(number)
     chain = repo_git.run("rev-list", "--first-parent", f"--max-count={count}", commit).split() if count > 1 else [commit]
+    try:
+        linked = hub.commits_pulls(chain[1:]) if len(chain) > 1 else {}
+    except GitHubError as exc:
+        if exc.retry_after is not None:
+            raise
+        raise RecordError(f"#{number} のコミットに紐づく PR を照会できず、差分の起点を決められない（{exc}）。時間を置いて打ち直す") from exc
     last = commit
     for sha in chain[1:]:  # PR のコミットの数までで、別の PR のコミットに当たれば止まる
-        try:
-            linked = hub.commit_pulls(sha)
-        except GitHubError as exc:
-            if exc.retry_after is not None:
-                raise
-            raise RecordError(
-                f"コミット {sha} に紐づく PR を照会できず、#{number} の差分の起点を決められない（{exc}）。時間を置いて打ち直す"
-            ) from exc
-        if number not in linked:
+        got = linked.get(sha)
+        if got is None:
+            raise RecordError(f"コミット {sha} が GitHub に無く、#{number} の差分の起点を決められない。時間を置いて打ち直す")
+        if number not in got:
             break
         last = sha
     return f"{last}^1"
@@ -172,14 +174,32 @@ def scope_paths(repo_git: Git, base: str, commit: str, push: record_decide.Push)
     return _diff_paths(repo_git, base, commit), _diff_paths(repo_git, push.before, push.after)
 
 
+def _fetch_hint(production: str, tip: str) -> str:
+    """手元の追跡参照が古いときに打つ取得のコマンド（`tip` は `refs/remotes/<リモート>/<本番ブランチ>`）。"""
+    parts = tip.split("/")
+    remote = parts[2] if len(parts) > 3 and parts[:2] == ["refs", "remotes"] else "origin"
+    return f"git fetch {remote} {production}"
+
+
 def find_push(hub: GitHub, repo_git: Git, production: str, commit: str, tip: str) -> record_decide.Push:
-    """反映したコミットを本番ブランチへ入れた push（git の起動 1 回とブランチの更新の読み取り）。決められなければ `RecordError`。"""
-    landed = frozenset(repo_git.run("rev-list", "--first-parent", f"{commit}^1..{tip}").split())
+    """反映したコミットを本番ブランチへ入れた push（git の起動 1 回とブランチの更新の読み取り）。決められなければ `RecordError`。
+
+    コミットの集合は手元の追跡参照 `tip` で作るので、GitHub でマージした直後は参照が古く、反映したコミットが集合に無いか、
+    新しい更新の `after` が集合の外になる。どちらも時間を置いても直らないので、止まる文で本番ブランチの取得を示す。"""
+    fetch = _fetch_hint(production, tip)
+    try:
+        landed = frozenset(repo_git.run("rev-list", "--first-parent", f"{commit}^1..{tip}").split())
+    except GitError as exc:
+        raise RecordError(
+            f"反映したコミット {commit} か {tip} が手元に無い（{exc}）。{fetch} で本番ブランチを取得してから打ち直す"
+        ) from exc
+    if commit not in landed:
+        raise RecordError(f"手元の {tip} に反映したコミット {commit} がまだ無い。{fetch} で本番ブランチを取得してから打ち直す")
     push = record_decide.push_of(hub.branch_activity(production), landed)
     if push is None:
         raise RecordError(
-            f"反映したコミット {commit} を入れた push を {production} の更新の記録から決められない"
-            "（push の直後はまだ載っていないことがある）。時間を置いて打ち直す"
+            f"反映したコミット {commit} を入れた push を {production} の更新の記録から決められない。"
+            f"手元の {tip} が古ければ {fetch} で取得し、push の直後でまだ更新の記録に載っていなければ時間を置いて打ち直す"
         )
     return push
 
@@ -257,12 +277,18 @@ def _target_set(targets: Sequence[str]) -> tuple[str, ...]:
     return tuple(sorted(set(targets)))
 
 
+def _known_push(state: record.Candidates, version: str) -> Optional[record_decide.Push]:
+    """記録の PR の同じ値の信用する記録が持つ push（無ければ None）。"""
+    return next((r.push for r in state.valid if r.version == version and r.push is not None), None)
+
+
 def _record_targets(prefix: Prefix, args: Unversioned) -> tuple[str, ...]:
     """確かめ 3。今回の対象の届け先。"""
     at = prefix.deliveries
     if at is None or at.kind == delivery_confirm.ABSENT:
         if not args.targets:
-            raise RecordError("push の時点に届け先の設定が無い。--target で今回の対象の届け先を渡して打ち直す")
+            where = "届け先の設定（release.deliveries）が無い" if at is None else "push の時点に届け先の設定が無い"
+            raise RecordError(f"{where}。--target で今回の対象の届け先を 1 つ以上渡して打ち直す")
         return _target_set(args.targets)
     if args.targets:
         raise RecordError("push の時点に届け先の設定があり、対象はそこから決まる。--target を渡さずに打ち直す")
@@ -304,10 +330,12 @@ def _shape(hub: GitHub, hands: Hands, number: int, production: str, release: Map
     pull, commit = _landed_value(hub, number, production, args.version, args.production_sha)
     included = _record_pulls(hub, pull, production, names_decide.formats_of(release))
     state = _trusted_state(hub, included[0], args.version, commit)
-    if record_decide.declared_deliveries(release) is None:
+    # 同じ値の記録に push があれば、今の設定の有無によらずその push の時点の設定で決める（設定を外した後の打ち直しでも、
+    # その push で要った CD の確かめを飛ばさない）
+    known = _known_push(state, args.version)
+    if record_decide.declared_deliveries(release) is None and known is None:
         prefix = Prefix(commit, None, None, frozenset(), frozenset())
     else:
-        known = next((r.push for r in state.valid if r.version == args.version and r.push is not None), None)
         prefix = shared_prefix(hands.repo_git, number, commit, lambda: _prefix(hub, hands, production, pull, args.tip, known))
     targets = _record_targets(prefix, args)
     _check_names(targets, args)
@@ -339,16 +367,25 @@ def _duplicated(hub: GitHub, number: int, made: record_decide.Record, own: int, 
     return _has(_trusted_state(hub, number, made.version, str(made.commit), before).valid, made)
 
 
-def write_one(hub: GitHub, made: record_decide.Record, holder: int, others: Sequence[int], present: frozenset[int]) -> list[Written]:
+class WroteOne(NamedTuple):
+    """`write_one` の結果。`reread` は手順 2 で読み直した記録の PR の有効な記録（読み直さなければ空）。"""
+
+    written: list[Written]
+    reread: tuple[record_decide.Record, ...]
+
+
+def write_one(hub: GitHub, made: record_decide.Record, holder: int, others: Sequence[int], present: frozenset[int]) -> WroteOne:
     """届け先 1 つの記録を、書く順の手順 1〜4 で含めた PR の各々へ書く。`present` は既に同じ記録がある PR。"""
     publisher, body = Publisher(hub), record_decide.render_record(made)
     written: dict[int, tuple[int, str]] = {}
     comments: Optional[Sequence[Authored]] = None
+    reread: tuple[record_decide.Record, ...] = ()
     if holder not in present:  # 手順 1
         got = publisher.comment(holder, body)
         written[holder] = (got.comment_id, got.url)
         comments = hub.comments(holder)  # 手順 2
         state = _trusted_state(hub, holder, made.version, str(made.commit), comments)
+        reread = tuple(state.valid)
         lost = state.authoritative.get(made.version) != made.targets
         conflict = record_decide.value_commit_conflict(state.valid, str(made.commit), made.version)
         if lost or conflict is not None:
@@ -364,7 +401,7 @@ def write_one(hub: GitHub, made: record_decide.Record, holder: int, others: Sequ
         if dup:
             _delete(hub, [(own, url)])
         out.append(Written(n, REMOVED if dup else WRITTEN))
-    return sorted(out)
+    return WroteOne(sorted(out), reread)
 
 
 def _lost_reason(made: record_decide.Record, authoritative: Optional[tuple[str, ...]], conflict: Optional[tuple[str, str]]) -> str:
@@ -375,12 +412,15 @@ def _lost_reason(made: record_decide.Record, authoritative: Optional[tuple[str, 
     return f"並行して書かれた記録が値 {made.version} の正の一覧（{listed}）になった。正の一覧で打ち直す"
 
 
-def _holding_pulls(hub: GitHub, shape: _Shape, version: str, environment: str) -> frozenset[int]:
-    """確かめ 7。届け先 `environment` の同じ値・正の一覧の記録が既にある PR。"""
-    probe = record_decide.Record(version, shape.pull.number, shape.included, None, (environment,), shape.targets, shape.commit)
-    got = {shape.holder} if _has(shape.state.valid, probe) else set()
-    got |= {n for n in shape.included[1:] if _has(_trusted_state(hub, n, version, shape.commit).valid, probe)}
-    return frozenset(got)
+def _holding_pulls(hub: GitHub, shape: _Shape, version: str, environments: Sequence[str]) -> dict[str, frozenset[int]]:
+    """確かめ 7。届け先ごとの、同じ値・正の一覧の記録が既にある PR。含めた PR のコメントは届け先の数によらず PR ごとに
+    1 回だけ読み（記録の PR は確かめ 5・6 で読んだもの）、届け先ごとの有無は読んだ記録の上で決める。"""
+    valid = {shape.holder: shape.state.valid, **{n: _trusted_state(hub, n, version, shape.commit).valid for n in shape.included[1:]}}
+    out = {}
+    for environment in environments:
+        probe = record_decide.Record(version, shape.pull.number, shape.included, None, (environment,), shape.targets, shape.commit)
+        out[environment] = frozenset(n for n, rows in valid.items() if _has(rows, probe))
+    return out
 
 
 def _made(shape: _Shape, prefix: Prefix, version: str, environment: str, got: record_decide.Confirmation) -> record_decide.Record:
@@ -425,7 +465,7 @@ class _Run(NamedTuple):
     present: Mapping[str, frozenset[int]]
 
 
-def _confirm_and_write(run: _Run, environment: str) -> tuple[str, record_decide.Confirmation, list[Written]]:
+def _confirm_and_write(run: _Run, environment: str) -> tuple[str, record_decide.Confirmation, WroteOne]:
     """届け先 1 つの確かめ 8 と書き込み。"""
     shape, args = run.shape, run.args
     at = run.prefix.deliveries
@@ -435,7 +475,7 @@ def _confirm_and_write(run: _Run, environment: str) -> tuple[str, record_decide.
     wait = len(args.environments) == 1
     got = delivery_confirm.confirm_delivery(run.reach, delivery, after, environment in args.observed, wait, runnable)
     if got.state != "ok":
-        return environment, got, []
+        return environment, got, WroteOne([], ())
     made = _made(shape, run.prefix, args.version, environment, got)
     return environment, got, write_one(run.hub, made, shape.holder, shape.included[1:], run.present[environment])
 
@@ -450,7 +490,7 @@ def write_unversioned(hub: GitHub, hands: Hands, number: int, production: str, r
     """`record --version`。確かめ 1〜8 と書く順の手順 1〜4（モジュールの説明）。`release` は worktree の設定の `release`。"""
     sweep_shares(hands.repo_git, _share_age(release))
     shape, prefix = _shape(hub, hands, number, production, release, args)
-    present = {e: _holding_pulls(hub, shape, args.version, e) for e in args.environments}
+    present = _holding_pulls(hub, shape, args.version, args.environments)
     kept = tuple(e for e in args.environments if present[e] >= set(shape.included))
     rest = [e for e in args.environments if e not in kept]
     if rest:
@@ -461,9 +501,12 @@ def write_unversioned(hub: GitHub, hands: Hands, number: int, production: str, r
             results = list(pool.map(lambda e: _confirm_and_write(run, e), rest))
     recorded = tuple(e for e, got, _w in results if got.state == "ok")
     rep = record_decide.Record(args.version, number, shape.included, None, (), shape.targets, shape.commit)
-    covered = [*shape.state.valid, *(rep._replace(environments=(e,)) for e in (*kept, *recorded))]
+    # 書く前に読んだ記録だけでは、並べて打った別の呼び出しが後に書いた届け先を見落とす。手順 2 で自分の記録を書いた後に
+    # 読み直した記録の PR の記録も数える（最後に書いた呼び出しの読み直しには、ほかの呼び出しの記録がすべて載る）
+    reread = [r for _e, _g, wrote in results for r in wrote.reread]
+    covered = [*shape.state.valid, *reread, *(rep._replace(environments=(e,)) for e in (*kept, *recorded))]
     complete, missing = record_decide.complete_of(covered, rep, shape.targets)
-    if complete and record_decide.declared_deliveries(release) is not None:
+    if complete and prefix.deliveries is not None:
         drop_share(hands.repo_git, number)
     return Outcome(
         rep,
@@ -473,7 +516,7 @@ def write_unversioned(hub: GitHub, hands: Hands, number: int, production: str, r
         {e: str(got.reason) for e, got, _w in results if got.state == "pending"},
         complete,
         missing,
-        [w for _e, _g, ws in results for w in ws] + [Written(n, KEPT) for e in kept for n in shape.included],
+        [w for _e, _g, wrote in results for w in wrote.written] + [Written(n, KEPT) for e in kept for n in shape.included],
     )
 
 
@@ -509,16 +552,22 @@ def correct_targets(
     if not same:
         raise RecordError(f"記録の PR #{holder} に値 {version} の信用するリリース記録が無い。先に record --version を打つ")
     _check_records(state, state.authoritative[version], version, commit, number)
-    if record_decide.declared_deliveries(release) is not None:
-        _refuse_declared(hands, same)
+    _refuse_declared(hands, release, _known_push(state, version))
     _require_writer(hub)
     made = record_decide.Correction(version, commit, _target_set(targets), state.authoritative[version], reason)
     return Publisher(hub).comment(holder, record_decide.render_correction(made)).url
 
 
-def _refuse_declared(hands: Hands, same: Sequence[record_decide.Record]) -> None:
-    """worktree に届け先の設定があるリポジトリでは、記録の push の `after` の時点に設定が無いときだけ訂正を受ける。"""
-    push = next((r.push for r in same if r.push is not None), None)
-    at = delivery_confirm.deliveries_at(hands.repo_git, push.after) if push is not None else None
-    if at is None or at.kind != delivery_confirm.ABSENT:
+def _refuse_declared(hands: Hands, release: Mapping[str, Any], push: Optional[record_decide.Push]) -> None:
+    """対象の一覧が設定で決まる記録の訂正を断る。同じ値の記録に push があれば、今の設定の有無によらず、その push の `after`
+    の時点に設定が無いときだけ受ける（設定を外した後でも、設定で決まった一覧を手で書き換えさせない）。push が無ければ、
+    今の設定が無いときだけ受ける。"""
+    if push is None:
+        if record_decide.declared_deliveries(release) is not None:
+            raise RecordError("届け先の設定があり、対象の一覧は設定から決まる。--correct-targets では直せない")
+        return
+    at = delivery_confirm.deliveries_at(hands.repo_git, push.after)
+    if at.kind == delivery_confirm.MISSING_REF:
+        raise RecordError(at.reason)
+    if at.kind != delivery_confirm.ABSENT:
         raise RecordError("push の時点に届け先の設定があり、対象の一覧は設定から決まる。--correct-targets では直せない")

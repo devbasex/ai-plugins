@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import re
+import string
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, NamedTuple
 
@@ -496,57 +497,123 @@ def production_deliveries(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str
     return [r for r in rows if r.get("channel") in (None, "production") and r.get("production") is not False]
 
 
-def _bracket(pattern: str, start: int) -> tuple[str, int] | None:
-    """`pattern[start]` の `[` で始まる括弧の正規表現と、閉じ括弧の次の位置。閉じ括弧が無ければ None。"""
-    i = start + 1
-    negate = i < len(pattern) and pattern[i] in "!^"
-    i += negate
-    body = i
-    if i < len(pattern) and pattern[i] == "]":
-        i += 1  # 先頭の `]` は文字そのもの
-    end = pattern.find("]", i)
-    if end < 0:
+# git の wildmatch が括弧の中で受ける POSIX の文字クラス（git の ctype と同じく ASCII だけ）
+_CLASSES = {
+    "alnum": string.ascii_letters + string.digits,
+    "alpha": string.ascii_letters,
+    "blank": " \t",
+    "cntrl": "".join(chr(c) for c in (*range(32), 127)),
+    "digit": string.digits,
+    "graph": "".join(chr(c) for c in range(33, 127)),
+    "lower": string.ascii_lowercase,
+    "print": "".join(chr(c) for c in range(32, 127)),
+    "punct": string.punctuation,
+    "space": " \t\n\r",
+    "upper": string.ascii_uppercase,
+    "xdigit": string.hexdigits,
+}
+
+
+def _class_at(pattern: str, i: int) -> tuple[str, int] | None:
+    """`pattern[i]` の `[:` で始まる文字クラスの文字と、閉じの `]` の位置。`:]` で閉じていなければ ("[", i)（`[` を文字に）。
+    閉じの `]` が無いか、知らない文字クラスなら None（git はパターンの誤りとして、どのパスにも当てない）。"""
+    close = pattern.find("]", i + 2)
+    if close < 0:
         return None
-    chars = "".join("-" if c == "-" else re.escape(c) for c in pattern[body:end])
-    return (f"[^/{chars}]" if negate else f"(?!/)[{chars}]"), end + 1
+    if close - 1 < i + 2 or pattern[close - 1] != ":":
+        return "[", i
+    chars = _CLASSES.get(pattern[i + 2 : close - 1])
+    return (chars, close) if chars is not None else None
 
 
-def _glob_regex(pattern: str) -> str:
-    """git の `:(glob)` のパターンを正規表現にする（`*`・`?`・括弧は `/` を越えない。末尾の `**` と、`/` に挟まれた `**/` は越える）。"""
+def _bracket_item(pattern: str, i: int, prev: str | None) -> tuple[str, str | None, int] | None:
+    """括弧の中の `pattern[i]` からの 1 項目。(文字の集合の正規表現の断片, 範囲の始まりにできる文字, 項目の最後の位置)。
+    `\\` は次の 1 文字をそのまま、範囲の端でない `-` は文字そのもの、逆向きの範囲は空。パターンの誤りは None。"""
+    n, c = len(pattern), pattern[i]
+    if c == "\\":
+        return (re.escape(pattern[i + 1]), pattern[i + 1], i + 1) if i + 1 < n else None
+    if c == "-" and prev is not None and i + 1 < n and pattern[i + 1] != "]":
+        j = i + 2 if pattern[i + 1] == "\\" else i + 1
+        if j >= n:
+            return None
+        return (f"{re.escape(prev)}-{re.escape(pattern[j])}" if prev <= pattern[j] else ""), None, j
+    if c == "[" and i + 1 < n and pattern[i + 1] == ":":
+        got = _class_at(pattern, i)
+        if got is None:
+            return None
+        chars, end = got
+        return (re.escape("["), "[", i) if end == i else ("".join(re.escape(ch) for ch in chars), None, end)
+    return re.escape(c), c, i
+
+
+def _bracket(pattern: str, start: int) -> tuple[str, int] | None:
+    """`pattern[start]` の `[` で始まる括弧の正規表現と、閉じ括弧の次の位置（git の wildmatch と同じ読み方）。先頭の `]` は
+    文字そのもの。括弧は `/` に当たらない。閉じ括弧が無いなどのパターンの誤りは None。"""
+    i, n = start + 1, len(pattern)
+    negate = i < n and pattern[i] in "!^"
+    i += negate
+    parts: list[str] = []
+    prev: str | None = None
+    while i < n and (not parts or pattern[i] != "]"):
+        got = _bracket_item(pattern, i, prev)
+        if got is None:
+            return None
+        part, prev, last = got
+        parts.append(part)
+        i = last + 1
+    if i >= n:
+        return None
+    body = "".join(parts)
+    if negate:
+        return (f"[^/{body}]" if body else "[^/]"), i + 1
+    return (f"(?!/)[{body}]" if body else "(?!)"), i + 1
+
+
+def _stars(pattern: str, i: int) -> tuple[str, int]:
+    """`pattern[i]` から続く `*` の正規表現と、次の位置。末尾の `**` と、`/` に挟まれた `**/` は `/` を越え、ほかは越えない。"""
+    n, j = len(pattern), i
+    while j < n and pattern[j] == "*":
+        j += 1
+    double = j - i >= 2
+    if double and j == n:
+        return ".*", j
+    if double and (i == 0 or pattern[i - 1] == "/") and pattern[j] == "/":
+        return "(?:[^/]*/)*", j + 1
+    return "[^/]*", j
+
+
+def _glob_regex(pattern: str) -> str | None:
+    """git の `:(glob)` のパターンの正規表現（`*`・`?`・括弧は `/` を越えない。`\\` は次の 1 文字をそのまま）。
+    パターンの誤り（閉じない括弧・知らない文字クラス・末尾の `\\`）は None で、git と同じくどのパスにも当てない。"""
     out, i, n = [], 0, len(pattern)
     while i < n:
         c = pattern[i]
         if c == "*":
-            j = i
-            while j < n and pattern[j] == "*":
-                j += 1
-            double = j - i >= 2
-            if double and j == n:
-                out.append(".*")
-            elif double and (i == 0 or pattern[i - 1] == "/") and pattern[j] == "/":
-                out.append("(?:[^/]*/)*")
-                j += 1
-            else:
-                out.append("[^/]*")
-            i = j
-            continue
-        got = _bracket(pattern, i) if c == "[" else None
-        if got is not None:
-            out.append(got[0])
-            i = got[1]
-            continue
-        out.append("[^/]" if c == "?" else re.escape(c))
-        i += 1
+            got = _stars(pattern, i)
+        elif c == "[":
+            got = _bracket(pattern, i)
+        elif c == "\\":
+            got = (re.escape(pattern[i + 1]), i + 2) if i + 1 < n else None
+        else:
+            got = ("[^/]" if c == "?" else re.escape(c)), i + 1
+        if got is None:
+            return None
+        out.append(got[0])
+        i = got[1]
     return "".join(out)
 
 
 def glob_matches(pattern: str, path: str) -> bool:
     """パス `path` が git の pathspec の `:(glob)` のパターン `pattern` に当たるか（大文字と小文字を区別する）。
-    ワイルドカードの無いパターンは、同じパスと、そのディレクトリの下のパスに当たる（git と同じ）。"""
-    if not any(c in pattern for c in "*?["):
-        stem = pattern.rstrip("/")
-        return path == stem or path.startswith(stem + "/")
-    return re.fullmatch(_glob_regex(pattern), path) is not None
+
+    git と同じく、先にパターンを文字そのままとして比べ、同じパスと、そのディレクトリの下のパスに当てる。ワイルドカード
+    （`*`・`?`・`[`・`\\`）があれば、続けて wildmatch で照らす。括弧は POSIX の文字クラス（`[[:alpha:]]` など）も受ける。"""
+    if path == pattern or (path.startswith(pattern) and (pattern.endswith("/") or path[len(pattern)] == "/")):
+        return True
+    if not any(c in pattern for c in "*?[\\"):
+        return False
+    regex = _glob_regex(pattern)
+    return regex is not None and re.fullmatch(regex, path) is not None
 
 
 def targets_of(rows: Sequence[Mapping[str, Any]], pr_paths: frozenset[str], push_paths: frozenset[str]) -> tuple[str, ...]:

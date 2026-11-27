@@ -816,6 +816,23 @@ def test_production_deliveries_take_the_production_channel_and_manual_ones() -> 
         ("web/", "web/x.ts", True),
         ("web", "webx.ts", False),
         ("web/a*", "web/ab/c.ts", False),
+        ("web/[[:alpha:]].ts", "web/x.ts", True),  # POSIX の文字クラス
+        ("web/[[:alpha:]].ts", "web/1.ts", False),
+        ("web/[![:alpha:]].ts", "web/1.ts", True),
+        ("web/[[:upper:]].ts", "web/x.ts", False),
+        ("web/[[:alnum:]_].ts", "web/_.ts", True),
+        ("web/[[:alpha:]-z].ts", "web/-.ts", True),  # 文字クラスの後の `-` は文字そのもの
+        ("web/[[:bogus:]].ts", "web/x.ts", False),  # 知らない文字クラスはどのパスにも当たらない
+        ("web/[[:alpha].ts", "web/:.ts", True),  # `:]` で閉じない `[:` は文字の並び
+        ("web/[x*", "web/[xyz", False),  # 閉じない括弧はどのパスにも当たらない
+        ("web/[x.ts", "web/[x.ts", True),  # 文字そのままで同じパスには当たる
+        ("web/a\\*b.ts", "web/a*b.ts", True),  # `\` は次の 1 文字をそのまま
+        ("web/a\\*b.ts", "web/ab.ts", False),
+        ("web/[\\]x].ts", "web/x.ts", True),
+        ("web/[c-a].ts", "web/b.ts", False),  # 逆向きの範囲
+        ("web/[a-].ts", "web/-.ts", True),
+        ("web/[]-a]", "web/^", True),
+        ("web/[]-a]", "web/x", False),
     ],
 )
 def test_glob_matches_like_the_glob_pathspec_of_git(pattern: str, path: str, matches: bool) -> None:

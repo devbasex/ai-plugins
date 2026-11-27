@@ -195,6 +195,7 @@ def test_all_pending_or_failed_write_nothing(tmp_path: Path) -> None:
         (_args("db"), None, "今回の対象の届け先"),  # 確かめ 4
         (_args(WEB, observed=frozenset({WORKER})), None, "--observed"),  # 確かめ 4
         (_args(WEB), "no_push", "時間を置いて打ち直す"),  # push を決められない
+        (_args(WEB), "stale", "git fetch origin main"),  # 手元の追跡参照に反映したコミットがまだ無い
         (_args(WEB), "cancelled", "打ち消された"),  # 確かめ 3: 対象が空
     ],
 )
@@ -203,6 +204,8 @@ def test_checks_one_to_six_write_nothing(tmp_path: Path, args: Any, change: str 
     repo = Repo(tmp_path)
     if change == "no_push":
         hub.activities = [{"before": "x" * 40, "after": "y" * 40}]
+    if change == "stale":
+        repo.run = lambda *a: f"{BEFORE}\n"  # type: ignore[method-assign]
     if change == "cancelled":
         repo.diffs[(BEFORE, AFTER)] = ["docs/readme.md"]
     with pytest.raises(record.RecordError, match=match):
@@ -216,21 +219,22 @@ R2, R1 = "r2" * 20, "r1" * 20
 @pytest.mark.parametrize(
     ("commits", "linked", "base", "asked"),
     [
-        (3, {R2: [11]}, f"{COMMIT}^1", [R2]),  # squash: 1 つ前は別の PR のコミット
+        (3, {R2: [11]}, f"{COMMIT}^1", [R2, R1]),  # squash: 1 つ前は別の PR のコミット
         (3, {R2: [PROD], R1: [PROD, 70]}, f"{R1}^1", [R2, R1]),  # rebase で 3 コミット
-        (3, {R2: [77], R1: [PROD]}, f"{COMMIT}^1", [R2]),  # 途中に別の PR のコミットが挟まる
+        (3, {R2: [77], R1: [PROD]}, f"{COMMIT}^1", [R2, R1]),  # 途中に別の PR のコミットが挟まる
         (1, {R2: [PROD]}, f"{COMMIT}^1", []),  # PR のコミットが 1 つなら照会しない
     ],
 )
 def test_the_pull_diff_starts_below_the_commits_linked_to_the_pull(
     tmp_path: Path, commits: int, linked: dict, base: str, asked: list
 ) -> None:
-    """本番の PR の差分の起点は、反映したコミットから第一親をたどり、同じ PR に紐づく最後のコミットの第一親（PR のコミットの数まで）。"""
+    """本番の PR の差分の起点は、反映したコミットから第一親をたどり、同じ PR に紐づく最後のコミットの第一親（PR のコミットの数まで）。
+    たどったコミットはコミットの数によらず 1 回の照会でまとめて読む。"""
     hub = _push_activity(_hub(cd_runs=[[SUCCESS]]))
     hub.commit_counts[PROD], hub.linked = commits, linked
     repo = Repo(tmp_path, diffs={(base, COMMIT): ["web/a.ts"], (BEFORE, AFTER): ["web/a.ts"]})
     got = _write(hub, repo, _args(WEB))
-    assert got.record.targets == (WEB,) and hub.linked_asked == asked
+    assert got.record.targets == (WEB,) and hub.linked_asked == asked and hub.linked_batches == (1 if asked else 0)
 
 
 def test_the_pull_diff_stops_when_links_cannot_be_read(tmp_path: Path) -> None:
@@ -238,8 +242,11 @@ def test_the_pull_diff_stops_when_links_cannot_be_read(tmp_path: Path) -> None:
 
     hub = _push_activity(_hub(cd_runs=[[SUCCESS]]))
     hub.commit_counts[PROD] = 3
-    hub.linked = {R2: GitHubError("No commit found", 422)}
+    hub.linked = {R2: GitHubError("Something went wrong", 502)}
     with pytest.raises(record.RecordError, match="打ち直す"):
+        _write(hub, Repo(tmp_path), _args(WEB))
+    hub.linked = {R2: [PROD], R1: None}  # GitHub に無いコミット
+    with pytest.raises(record.RecordError, match="GitHub に無く"):
         _write(hub, Repo(tmp_path), _args(WEB))
     assert hub.comments_of == {} and hub.run_queries == []
 
@@ -254,12 +261,30 @@ def test_targets_come_from_the_push_time_paths_and_moved_files(tmp_path: Path) -
 
 
 def test_a_repository_without_deliveries_takes_targets_and_attests(tmp_path: Path) -> None:
+    with pytest.raises(record.RecordError, match="--target"):
+        _write(_hub(), Repo(tmp_path), _args(WEB), _release(None))
     hub = _hub()
     repo = Repo(tmp_path)
     got = _write(hub, repo, _args(WEB, targets=(WORKER, WEB)), _release(None))
     assert got.recorded == (WEB,) and got.record.targets == (WEB, WORKER) and got.missing == (WORKER,)
     assert [r.confirmation for r in _written(hub, 11)] == [{WEB: "attested"}] and [r.push for r in _written(hub, 11)] == [None]
     assert repo.calls == [] and hub.activities == [] and not [r for r in hub.requests if r[1].endswith("/activity")]
+
+
+def test_a_rerun_after_removing_the_setting_still_uses_the_setting_of_the_push(tmp_path: Path) -> None:
+    """設定を外した後の打ち直しでも、同じ値の記録の push の時点の設定で対象と CD の確かめを決め、手入力の対象と訂正を断る。"""
+    hub = _push_activity(_hub(cd_runs=[[SUCCESS]]))
+    repo = Repo(tmp_path)
+    _write(hub, repo, _args(WEB))
+    (repo.common / "ndf-release-record" / f"{PROD}.json").unlink()
+    hub.activities = []  # 記録の push を使い、更新の記録を読まない
+    with pytest.raises(record.RecordError, match="--target を渡さず"):
+        _write(hub, repo, _args(WORKER, targets=(WEB, WORKER)), _release(None))
+    hub.cd_runs = [[FAILURE]]
+    got = _write(hub, repo, _args(WORKER), _release(None))
+    assert set(got.failed) == {WORKER} and got.recorded == ()
+    with pytest.raises(record.RecordError, match="--correct-targets では直せない"):
+        record_unversioned.correct_targets(hub, _hands(repo), PROD, "main", _release(None), (VALUE, (WEB,), "理由", None))
 
 
 def test_a_push_without_the_setting_needs_targets(tmp_path: Path) -> None:
@@ -344,6 +369,29 @@ def test_two_parallel_runs_with_the_same_arguments_end_with_one_record(tmp_path:
     got = _write(hub, Repo(tmp_path), _args(WEB, targets=(WEB,)), _release(None))
     assert got.recorded == (WEB,) and [len(_written(hub, n)) for n in (11, 12, PROD)] == [1, 1, 1]
     assert sorted(w.result for w in got.written if w.number in (11, 12)) == [record_unversioned.REMOVED, record_unversioned.REMOVED]
+
+
+def test_complete_counts_a_parallel_run_that_wrote_after_our_first_read(tmp_path: Path) -> None:
+    """届け先ごとに並べて打った別の呼び出しが、こちらの確かめの後に書いた記録も、書いた後の読み直しで complete に数える。"""
+    hub = _racing(_made(WORKER, (WEB, WORKER)))
+    got = _write(hub, Repo(tmp_path), _args(WEB, targets=(WEB, WORKER)), _release(None))
+    assert got.recorded == (WEB,) and (got.complete, got.missing) == (True, ())
+
+
+def test_check_seven_reads_each_included_pull_once_for_any_number_of_environments(tmp_path: Path) -> None:
+    hub = _hub()
+    repo = Repo(tmp_path)
+    _write(hub, repo, _args(WEB, WORKER, targets=(WEB, WORKER)), _release(None))
+    reads: list[int] = []
+    original = hub.comments
+
+    def counting(number: int) -> list[Authored]:
+        reads.append(number)
+        return original(number)
+
+    hub.comments = counting  # type: ignore[method-assign]
+    got = _write(hub, repo, _args(WEB, WORKER, targets=(WEB, WORKER)), _release(None))
+    assert got.kept == (WEB, WORKER) and sorted(reads) == [11, 12, PROD]
 
 
 def test_a_comment_that_cannot_be_removed_stops_with_its_url(tmp_path: Path) -> None:
@@ -436,7 +484,6 @@ def _cli_args(**more: Any) -> argparse.Namespace:
         ("web-develop", {"version": VALUE, "environment": [WEB]}, "none でない"),
         ("web-trunk", {"version": VALUE}, "そろえて"),
         ("web-trunk", {"environment": [WEB]}, "そろえて"),
-        ("web-trunk", {"version": VALUE, "environment": [WEB]}, "--target"),
         ("web-trunk", {"correct_targets": True, "version": VALUE, "target": [WEB]}, "--reason"),
         ("web-trunk", {"correct_targets": True, "version": VALUE, "target": [WEB], "reason": "r", "environment": [WEB]}, "受けない"),
         ("web-trunk", {"reason": "r"}, "--correct-targets と一緒"),
@@ -451,6 +498,8 @@ def test_record_args_take_the_unversioned_form() -> None:
     got = release_cli._record_args(_cli_args(version=VALUE, environment=[WEB, WEB], target=[WEB], observed=[WEB]), strategy("web-trunk"))
     assert got == record_unversioned.Unversioned(VALUE, (WEB,), (WEB,), frozenset({WEB}), None, "")
     assert release_cli._record_args(_cli_args(), strategy("web-develop")) is None
+    # 設定の無いリポジトリでも --target の要否は確かめ 3 で決める（同じ値の記録の push の時点に設定があれば受けない）
+    assert release_cli._record_args(_cli_args(version=VALUE, environment=[WEB]), strategy("web-trunk")).targets == ()
 
 
 def _outcome(**more: Any) -> record_unversioned.Outcome:

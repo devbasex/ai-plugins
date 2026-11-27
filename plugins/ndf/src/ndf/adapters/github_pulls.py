@@ -70,6 +70,29 @@ def graphql_string(value: str) -> str:
     return f'"{escaped}"'
 
 
+_FULL_SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def commit_pull_selections(shas: Iterable[str]) -> dict[str, str]:
+    """コミットごとに紐づく PR の番号を読む `repository` の下の選択（`GitHub.commits_pulls`。#4580）。
+    40 桁の 16 進でない SHA は `ValueError`（クエリへ埋め込むため）。"""
+    wanted = list(dict.fromkeys(shas))
+    bad = [s for s in wanted if not _FULL_SHA.fullmatch(s)]
+    if bad:
+        raise ValueError(f"40 桁の 16 進の SHA でない: {', '.join(bad)}")
+    fields = f"... on Commit {{ associatedPullRequests(first: {PER_PAGE}) {{ nodes {{ number }} }} }}"
+    return {s: f"object(oid: {graphql_string(s)}) {{ {fields} }}" for s in wanted}
+
+
+def pull_numbers(node: Any) -> Optional[list[int]]:
+    """`commit_pull_selections` の 1 つのコミットの節点から PR の番号。コミットが無い（null・Commit でない）なら None。"""
+    linked = node.get("associatedPullRequests") if isinstance(node, dict) else None
+    nodes = linked.get("nodes") if isinstance(linked, dict) else None
+    if not isinstance(nodes, list):
+        return None
+    return [int(n["number"]) for n in nodes if isinstance(n, dict) and "number" in n]
+
+
 def _from_fork(head: dict, base: dict) -> bool:
     """REST の PR の head のブランチがほかのリポジトリ（フォーク）にあるか。head の `repo` のキーが無ければ偽。
 
