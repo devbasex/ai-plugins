@@ -29,14 +29,14 @@ _SCP_URL = re.compile(r"^(?:[^@/:]+@)?(?P<host>[^/:]+):(?P<path>.+)$")
 # GitHub のリモートの URL のスキームと、そのスキームで GitHub を指すホスト（`ssh.github.com` は SSH を 443 番で使う接続先）
 _SSH_HOSTS = frozenset({"github.com", "ssh.github.com"})
 _GITHUB_HOSTS = {"https": frozenset({"github.com"}), "http": frozenset({"github.com"}), "git": frozenset({"github.com"}), "ssh": _SSH_HOSTS}
-# git の引数に渡してよい GitHub の URL の 3 つの形（全体一致で使う）。方式とホスト名だけ大文字小文字を区別しない。`re.ASCII` は
-# `ſ` などの別の文字が大文字小文字の同一視で一致するのを防ぐ。クエリ・`#`・空白・`%`・余分なパスの要素はどの形にも合わない
+# git の引数に渡してよい GitHub の URL の 3 つの形（全体一致で使う）。方式は小文字だけを受け（git は `HTTPS://` を `remote-HTTPS` という
+# 別の helper で読もうとして失敗する）、ホスト名だけ大文字小文字を区別しない。`re.ASCII` は `ı` などの別の文字が大文字小文字の同一視で一致するのを防ぐ。クエリ・`#`・空白・`%`・余分なパスの要素はどの形にも合わない
 _REPO_PATH = r"(?P<owner>[A-Za-z0-9_.-]+)/(?P<name>[A-Za-z0-9_.-]+)/?"
 _TARGET_URLS = tuple(
     re.compile(head + _REPO_PATH, re.ASCII)
     for head in (
-        r"(?i:https)://(?:(?P<secret>[^\s/?#@%\\]*)@)?(?i:github\.com)(?::443)?/",
-        r"(?i:ssh)://git(?P<secret>:[^\s/?#@%\\]*)?@(?i:github\.com)(?::22)?/",
+        r"https://(?:(?P<secret>[^\s/?#@%\\]*)@)?(?i:github\.com)(?::443)?/",
+        r"ssh://git(?P<secret>:[^\s/?#@%\\]*)?@(?i:github\.com)(?::22)?/",
         r"git@(?i:github\.com):",
     )
 )
