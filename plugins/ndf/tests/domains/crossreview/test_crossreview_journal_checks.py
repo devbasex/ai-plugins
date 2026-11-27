@@ -274,3 +274,8 @@ def test_issue_4363_lowered_finding_raised_differently_in_the_same_file_is_check
     assert journal.fresh == ["r1-1"] and journal.revived == [] and row[journal_mod.OCCURRENCE] == occurrence
     journal.apply_checks(journal.fresh, _answered())
     assert (row["severity"], journal.handable()) == ("minor", [])
+    # 確かめ直しは 1 回だけ。次の言い換えは下げたままで判定役にも渡さず、違うファイルの指摘は修正候補に戻す
+    journal.enter(4, [_told(path="a.py", line=20, section="doc.md#保存", impact="別の言い方で止まる")])
+    assert (row["severity"], row["check"]["lowered"], journal.fresh) == ("minor", True, [])
+    journal.enter(5, [_told(path="b.py", line=1)])
+    assert (row["severity"], row["path"], journal.fresh) == ("major", "b.py", [])

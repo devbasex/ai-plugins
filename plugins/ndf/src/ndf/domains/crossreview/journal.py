@@ -39,6 +39,8 @@ PROTECT = criteria_decide.PROTECT
 CHECK = criteria_decide.CHECK
 # 書き足した別の報告の起きることの 1 文の欄（状態ファイルだけに持つ。#4363）
 ALSO_IMPACTS = criteria_decide.ALSO_IMPACTS
+# 下げた指摘を、同じファイルの違う 1 文か見出しで確かめ直した行の欄（確かめ直しは 1 回だけ。直した指摘が戻れば外す。#4363）
+RECHECKED = "rechecked"
 # `CHECK` の中の欄。下げた指摘が出し直しで下げた扱いを抜けた（#4363）
 UNLOWERED = "unlowered"
 # 指摘がプロジェクト MVV に反するときの欄のうち、手元の状態ファイルだけに持つもの（#4076。記録のコメントにも載せる欄は
@@ -567,7 +569,9 @@ class FindingJournal:
         比べず、どちらかにファイルが無ければ解除しない。
 
         - 同じファイルで 1 文か見出しだけが違う指摘は、言い換えか別の条件かを文字列では決められないので、確認の結果を外して
-          判定役にもう一度確かめる（言い換えならまた下がり、修正担当へは渡らない）
+          判定役にもう一度確かめる（言い換えならまた下がり、修正担当へは渡らない）。確かめ直しは指摘 1 件につき 1 回で、
+          以後の同じファイルの出し直し（承認や保護の根拠がないもの）には否定の結果をそのまま使う（言い換えのたびに判定役の
+          起動と待ちを足さない）
         - 違うファイルの指摘（承認や保護の根拠がある出し直しを含むときも）は、直したとした指摘と同じに未解決へ戻し、確認の
           結果は下げた扱いを抜けたことを書き加えて残す。判定役には渡し直さず（呼び出し元と呼び出し先を交互に指す同じ指摘を、
           何度も確かめない）、保護の対象なら元の重要度へ戻る（`_restore_lowered`）。#4363"""
@@ -581,6 +585,8 @@ class FindingJournal:
             fid = str(row["id"])
             if _report_rank(item, items):
                 marked.add(fid)
+            if row.get(RECHECKED) and not _report_rank(item, items) and _located(item).get("path") == row["path"]:
+                continue
             held = _Denied(row["path"], row.get("impact"), row.get("section"))
             if _heavy_elsewhere_than(item, items, held):
                 found.setdefault(fid, (row, held, []))[2].append(item)
@@ -591,6 +597,7 @@ class FindingJournal:
             if fid not in marked and all(_located(r).get("path") == held.path for r in reports):
                 # 同じ指摘のままなので、発生の値（PR のスレッドの結び付け）は変えない。位置は今のラウンドの差分のものにする
                 row.pop(CHECK)
+                row[RECHECKED] = True
                 row["round"] = round_no
                 _place(row, new, section)
                 recheck.append(fid)
@@ -630,7 +637,7 @@ class FindingJournal:
         resolve 済みの古いスレッドへ結び付けない（#4016）。"""
         known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no, OCCURRENCE: new_occurrence()}
         self.revived.append(str(known["id"]))
-        for stale in (SKIPPED_MVV, REVIEW_DEFER, CHECK):
+        for stale in (SKIPPED_MVV, REVIEW_DEFER, CHECK, RECHECKED):
             known.pop(stale, None)
         # 位置は再発したラウンドの差分のものにする
         _place(known, new, section)
