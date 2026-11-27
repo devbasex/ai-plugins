@@ -500,6 +500,13 @@ class Ledger:
     root: Path
     rows: list[dict[str, Any]]
 
+    def read_back(self, since: datetime, start: datetime) -> None:
+        """`since` の月から `start`（この記録の読み始め）の前の月までを読み、`rows` の先頭へ足す。ロックを取り直さずに読む範囲を
+        広げる。古い月は追記されない（行は日時の月のファイルへ足す）ので、読み足した後に増える行は無い。読めない月は `OSError`。
+        """
+        months = _months(_month(since), _month(start))[:-1]
+        self.rows[:0] = [r for m in months for r in launch_records.rows_after(_month_file(self.root, m), 0)[0]]
+
     def append(self, row: Mapping[str, Any]) -> dict[str, Any]:
         """行の形を確かめて、行の日時の月のファイルへ足す（書きかけの末尾は閉じてから足す）。形が違えば `InternalError`。"""
         out = internal.write_record("experiment", row)
@@ -737,20 +744,16 @@ def model_group(arm: Mapping[str, str], arms: Sequence[Mapping[str, str]]) -> st
 
 
 def entry_fits(
-    entry: Mapping[str, Any],
-    rows: Sequence[Mapping[str, Any]],
-    where: Where,
-    arms: Sequence[Mapping[str, str]],
-    allocation: Mapping[str, Any],
-    now: datetime,
+    entry: Mapping[str, Any], observed: Mapping[str, str], arms: Sequence[Mapping[str, str]], allocation: Mapping[str, Any]
 ) -> bool:
     """項目を今の割り付けに使えるか: 割り付けの値が今の設定と同じで、添字と確率が選択肢に合い（`probs_fit`）、実際のモデルが
-    期間の中の同じキーの最も新しい `observed` の行（`observed_models`）と、まとまりごとに食い違わない。
+    期間の中の同じキーの最も新しい `observed` の行（呼び手が `observed_models` で求めた `observed`）と、まとまりごとに食い違わない。
+
+    観測は呼び手が 1 回だけ求め、出現率の計算は同じ結果を単位の絞り込みにも使う。
     """
     if entry["allocation"] != dict(allocation) or not probs_fit(entry, len(arms)):
         return False
-    latest = observed_models(rows, where, arms, now - timedelta(days=allocation["window_days"]))
-    return all(latest[g] == m for g, m in entry["models"].items() if g in latest)
+    return all(observed[g] == m for g, m in entry["models"].items() if g in observed)
 
 
 def observed_models(rows: Sequence[Mapping[str, Any]], where: Where, arms: Sequence[Mapping[str, str]], start: datetime) -> dict[str, str]:
@@ -789,7 +792,7 @@ def _drawn(probs: Sequence[float]) -> int:
 def _assignment(rows: Sequence[Mapping[str, Any]], u: _Unit) -> dict[str, Any]:
     """候補を決めて抽選した割り付けの行。調整した出現率を使えればその確率、使えなければ候補で均等。"""
     entry = weights_entry(u.store, u.where, u.now)
-    if entry is not None and not entry_fits(entry, rows, u.where, u.arms, u.allocation, u.now):
+    if entry is not None and not entry_fits(entry, observed_models(rows, u.where, u.arms, u.start), u.arms, u.allocation):
         entry = None  # 割り付けの値・選択肢の数・実際のモデルが合わない項目は、打ち切りも確率も読まない
     w = u.where
     cands = candidates(u.arms, rows, entry, u.now, w)

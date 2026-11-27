@@ -344,6 +344,17 @@ def test_refresh_waits_an_hour_unless_the_actual_model_changed(store, clock, roo
     assert ex.refresh(last)
 
 
+def test_write_outcome_of_an_old_assignment_ignores_observations_tied_to_it(store, clock, root):
+    # 期間の外の割り付けは古い月を読み足して見つけるが、計算は割り付けが読むのと同じ月の範囲の行だけを使う
+    last = _fill(store, root, 3)
+    old = _assign("old", 0, NOW - timedelta(days=90), repo=last["repo"])
+    seen = {"kind": "observed", "at": _at(NOW), "assign_id": "old", "arm": {}, "model": "claude-z"}
+    _ledger(store, old, internal.write_record("experiment", seen))
+    assert ex.write_outcome("old", 1.0, {})
+    (entry,) = _entries(store)
+    assert entry["models"] == {"default": "claude-x"} and entry["counts"] == [3, 3, 3]
+
+
 def test_write_outcome_uses_the_rows_it_read_and_skips_git_while_the_entry_is_fresh(store, clock, root, monkeypatch):
     last = _fill(store, root, 3)
     assert ex.refresh(last)

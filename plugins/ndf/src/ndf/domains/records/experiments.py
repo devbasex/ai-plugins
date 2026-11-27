@@ -16,7 +16,7 @@ import random
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -201,6 +201,15 @@ def _since(now: datetime, window_days: int) -> datetime:
     return now - timedelta(days=max(window_days, mc.records_rule()["refusal_days"]))
 
 
+def _read_range(rows: Sequence[Mapping[str, Any]], since: datetime) -> list[Mapping[str, Any]]:
+    """`rows` のうち、`since` の月から後の月のファイルにある行（`model_choice.read_experiments(since)` が読む範囲と同じ）。
+
+    行は日時（UTC）の年月のファイルにあるので、日時の文字列の年月で絞る。
+    """
+    first = f"{since.astimezone(UTC):%Y-%m}"
+    return [r for r in rows if r["at"][:7] >= first]
+
+
 def _table_here(cwd: Path) -> Optional[mc.Table]:
     """作業ディレクトリのリポジトリの今の設定。読めないか値が制約に合わなければ None（効果指標の記録は止めない）。"""
     try:
@@ -209,13 +218,20 @@ def _table_here(cwd: Path) -> Optional[mc.Table]:
         return None
 
 
-def _logged(assign_id: str, quality: Optional[float], detail: Mapping[str, Any], now: datetime, since: datetime) -> Optional[_Known]:
+def _logged(
+    assign_id: str, quality: Optional[float], detail: Mapping[str, Any], now: datetime, since: datetime, longest: datetime
+) -> Optional[_Known]:
     """`since` の月から読んだ記録で割り付けを引き、同じ割り付け ID の効果指標の行が無ければ足す。割り付けが無ければ None。
 
-    確認と追記は 1 つのロックの中で行う。効果指標の行は割り付けより後に書くので、割り付けが範囲にあれば先行する指標の行も範囲にある。
+    `since` の範囲に割り付けが無ければ、同じロックの中で `longest` の月から `since` の前の月までだけを読み足して探す（読んだ月を
+    読み直さず、ロックも取り直さない）。確認と追記は 1 つのロックの中で行う。効果指標の行は割り付けより後に書くので、割り付けが
+    範囲にあれば先行する指標の行も範囲にある。
     """
     with mc.ledger(since, mc.records_dir()) as led:
         assign = mc.assigns(led.rows).get(assign_id)
+        if assign is None and longest < since:
+            led.read_back(longest, since)
+            since, assign = longest, mc.assigns(led.rows).get(assign_id)
         if assign is None:
             return None
         if not any(r["kind"] == "outcome" and r["assign_id"] == assign_id for r in led.rows):
@@ -229,17 +245,17 @@ def write_outcome(assign_id: str, quality: Optional[float], detail: Mapping[str,
     """割り付けを引いて効果指標の行を足し、出現率を計算し直すかを判定する。同じ割り付け ID の行が既にあれば足さずに判定だけを行い、
     真を返す（再開で重なった呼び出し。前の呼び出しが判定の前に止まっていても、ここで反映する）。
 
-    割り付けはまず出現率の計算に要る期間（今の設定の `window_days`）から探し、無ければ記録を残す最長の期間から探す。期間の中で
-    見つかれば、そのとき読んだ記録を計算に渡して読み直さない。割り付けが無い（別のマシンの ID・消された記録）か記録を書けなければ、
+    割り付けはまず出現率の計算に要る期間（今の設定の `window_days`）から探し、無ければ同じロックの中で記録を残す最長の期間まで
+    古い月を読み足して探す。そのとき読んだ記録を計算に渡して読み直さない。割り付けが無い（別のマシンの ID・消された記録）か記録を書けなければ、
     警告を出して偽。指標の名前とバージョンは割り付けの工程の表から引く。確認と追記は 1 つのロックの中で行い、計算はロックを
     抜けてから行う。
     """
     now, cwd = mc.utc_now(), Path.cwd()
     got = _table_here(cwd)
     longest = now - timedelta(days=mc.LONGEST_WINDOW + mc.records_rule()["kept_extra_days"])
-    tries = ([_since(now, got.allocation["window_days"])] if got is not None else []) + [longest]
+    since = _since(now, got.allocation["window_days"]) if got is not None else longest
     try:
-        known = next((k for since in tries if (k := _logged(assign_id, quality, detail, now, since)) is not None), None)
+        known = _logged(assign_id, quality, detail, now, since, longest)
     except (*mc.STORE_ERRORS, internal.InternalError, contracts.ContractError) as exc:
         log.warning("実験の記録へ効果指標を書けない（割り付け %s）: %s", assign_id, exc)
         return False
@@ -324,16 +340,17 @@ def _recomputed(assign: Mapping[str, Any], now: datetime, cwd: Path, got: Option
         return False
     window = s.allocation["window_days"]
     since = _since(now, window)
-    rows = known.rows if known is not None and known.since <= since else mc.read_experiments(since, s.store)
+    # 長い期間で読んだ記録も、割り付けが読むのと同じ月の範囲に絞る（期間の外の割り付けに付いた拒否や観測を数えない）
+    rows = _read_range(known.rows, since) if known is not None and known.since <= since else mc.read_experiments(since, s.store)
+    observed = mc.observed_models(rows, s.where, s.arms, now - timedelta(days=window))
     entry = mc.weights_entry(s.store, s.where, now)
-    if entry is not None and not mc.entry_fits(entry, rows, s.where, s.arms, s.allocation, now):
+    if entry is not None and not mc.entry_fits(entry, observed, s.arms, s.allocation):
         entry = None  # 割り付けの値・選択肢の数・実際のモデルが合わない項目は、打ち切りも引き継がない
     if _fresh(entry, rows, s):
         return False
     if launch_approval.repo_key(root) != s.where.repo:
         return False  # 作業ディレクトリが割り付けと別のリポジトリなので、その設定では計算しない
     usage_rows, _ = jsonl.read_rows(s.store / facts.value("ndf-files", USAGE_LOG, "path"), kind="usage")
-    observed = mc.observed_models(rows, s.where, s.arms, now - timedelta(days=window))
     units = unit_values(rows, usage_rows, where=s.where, now=now, window_days=window, observed=observed)
     mc.update_weights(s.store, now, _computed(units, rows, entry, s, observed))
     return True
