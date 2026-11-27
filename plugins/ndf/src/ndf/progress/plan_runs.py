@@ -1,4 +1,4 @@
-"""工程の呼び出しと結果の型、プランの実行の記録の読み取り（`ndf.progress.invoke` が使う）。"""
+"""工程の呼び出しと結果の型、結果の組み立て、プランの実行の記録の読み取り（`ndf.progress.invoke` が使う）。"""
 
 from __future__ import annotations
 
@@ -8,14 +8,18 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf import contracts
 from ndf.contracts import result
 from ndf.contracts.worker_kinds import Recorded
 from ndf.core import durable, route
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
+from ndf.progress import definition, stages
 
 # 変更要求の指摘の本文を作業へ渡す環境変数
 NOTES_ENV = "NDF_STAGE_NOTES"
+# 作業を呼ばず承認ゲートの回答を待つ作業種別
+LISTEN = "listen"
 
 
 def _no_released() -> Optional[Recorded]:
@@ -96,6 +100,34 @@ class UnitsStopped(Exception):
         self.detail = detail
         self.items = [dict(i) for i in items]
         self.retry_after = retry_after
+
+
+# --- 作業の結果 ----------------------------------------------------------------------------
+
+
+def value_errors(values: Mapping[str, Any]) -> list[str]:
+    """文脈のキーと値の組を、スプリントの文脈のスキーマで確かめた誤り（3364-7）。"""
+    return [f"文脈の値: {e}" for e in contracts.schema_errors(dict(values), definition.CONTEXT)]
+
+
+def bad_report(run: StageRun, detail: str) -> StageResult:
+    out = result.stopped(_tool(run), "bad_report", f"作業 {run.kind} {run.name} が結果 JSON を返さない: {detail}")
+    return StageResult(out, {})
+
+
+def _tool(run: StageRun) -> str:
+    return __package__.rpartition(".")[2] if run.kind == LISTEN else run.kind
+
+
+def finished(run: StageRun, report: dict[str, Any]) -> StageResult:
+    """結果 JSON から、定義したキーだけの出力を取る。設定に無いキーは捨てて `warnings` に載せる。"""
+    given = report["outputs"] if isinstance(report.get("outputs"), dict) else {}
+    kept, dropped = stages.keep_declared(run.outputs, given)
+    warnings = tuple(f"工程の定義の outputs に無いキーを捨てた: {k}" for k in dropped)
+    errs = value_errors(kept)
+    if errs:
+        return bad_report(run, "; ".join(errs))
+    return StageResult(report, kept, warnings)
 
 
 # --- プランの実行の記録 ---------------------------------------------------------------------

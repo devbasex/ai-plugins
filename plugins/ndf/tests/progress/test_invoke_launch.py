@@ -9,8 +9,8 @@ import pytest
 
 from ndf import identity
 from ndf.adapters import claude, launch_settings, model_choice
-from ndf.contracts import result
-from ndf.progress import invoke
+from ndf.contracts import limits, result
+from ndf.progress import invoke, skill_invoke
 
 
 def _skill_run() -> invoke.StageRun:
@@ -141,7 +141,7 @@ def test_the_skill_does_not_relaunch_when_recording_the_switch_used_up_the_time(
     real = model_chooser.base_fallback
 
     def slow_record(choice, reason):  # 切り替えの記録の錠の待ちで期限を使い切る
-        now[0] += invoke.limits.seconds(invoke.SKILL_LIMIT)
+        now[0] += limits.seconds(skill_invoke.SKILL_LIMIT)
         return real(choice, reason)
 
     monkeypatch.setattr(model_chooser, "base_fallback", slow_record)

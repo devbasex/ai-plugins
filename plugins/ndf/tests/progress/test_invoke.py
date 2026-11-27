@@ -21,6 +21,7 @@ from ndf.core.plan import files as plan_files
 from ndf.core.plan import records as plan_records
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import definition, invoke, issue_values, model, plan_runs, stages
+from ndf.progress import skill_invoke as skills
 
 
 # 定義の読み込みは工程の文書をスキーマで確かめるため 1 回 0.3 秒ほどかかる。スナップショットは不変なのでモードごとに 1 回だけ読む
@@ -885,7 +886,7 @@ def test_script_argv_runs_a_subcommand_of_this_plugin_with_the_same_python():
 
 def test_skill_prompt_names_the_skill_and_carries_the_notes():
     run = invoke.StageRun("skill", "design", {"issues": [5]}, (), "none", "s", {"skill": "design"}, notes="ここを直す")
-    prompt = invoke.skill_prompt(run)
+    prompt = skills.skill_prompt(run)
     assert prompt.startswith("/") and ":design" in prompt.splitlines()[0]
     assert '"issues": [5]' in prompt and prompt.endswith("ここを直す")
 
@@ -897,10 +898,10 @@ def test_skill_prompt_names_the_skill_and_carries_the_notes():
 def test_skill_failures_map_to_causes(failure, kind):
     from ndf.adapters import claude
 
-    assert invoke._skill_cause(claude.Failure(failure) if failure else None) == kind
+    assert skills._skill_cause(claude.Failure(failure) if failure else None) == kind
 
 
-# --- 現状固定: _call_skill（I-025。`invoke` の call_claude で差し替えた `claude -p` の呼び出しと、回答から結果への写し） ---------------------
+# --- 現状固定: call_skill（I-025。`invoke` の call_claude で差し替えた `claude -p` の呼び出しと、回答から結果への写し） ---------------------
 
 
 def _skill_run() -> invoke.StageRun:
@@ -947,8 +948,8 @@ def test_skill_is_called_with_full_permission_the_result_schema_and_the_implemen
     box["reply"] = _reply(answer=result.result("skill", "ok", "済んだ", outputs={"pr": 3}))
     got = invoke.invoke(run, tmp_path, tmp_path / "w", call_claude=fake)
     schema = contracts.load_json(contracts.schema_path("result"))
-    want = claude.claude_args(claude.ClaudeCall(system=invoke.SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema))
-    assert seen == [{"argv": want, "prompt": invoke.skill_prompt(run), "timeout": limits.seconds(invoke.SKILL_LIMIT), "cwd": tmp_path}]
+    want = claude.claude_args(claude.ClaudeCall(system=skills.SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema))
+    assert seen == [{"argv": want, "prompt": skills.skill_prompt(run), "timeout": limits.seconds(skills.SKILL_LIMIT), "cwd": tmp_path}]
     assert got.status == "ok" and got.outputs == {"pr": 3} and got.warnings == () and not {"--model", "--effort"} & set(want)  # #2944
     # Skill の作業はプランの保存先を作らない
     assert not (tmp_path / "w").exists()

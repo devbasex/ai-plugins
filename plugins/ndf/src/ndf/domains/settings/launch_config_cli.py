@@ -277,10 +277,10 @@ def _show(a: argparse.Namespace) -> dict[str, Any]:
         return result.stopped(TOOL, exc.kind, f"{exc}。回答済みで反映が済んでいない承認があるので、先に next のコマンドを打つ", **extra)
 
 
-def _approval_question(
+def _launch_approval_question(
     target: Path, from_candidate: bool, t: ls.Target, changes: Sequence[Mapping[str, Any]], request: str, approver: str
 ) -> dict[str, Any]:
-    """承認の質問の文と選択肢（AskUserQuestion の `questions`）。候補を反映するかどうかで、問いと承認の効果の文が変わる。"""
+    """承認の質問の文と選択肢（AskUserQuestion の `questions`）。候補を反映するかどうかで、質問と承認の効果の文が変わる。"""
     if from_candidate:
         head = f"この作業場所の {target} を候補の内容で置き換え、以下の起動時の許可を反映してよいですか"
         effect = "この内容で起動してよい。承認を記録し、候補の内容で起動の設定を置き換える"
@@ -314,7 +314,7 @@ def _show_result(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: 
         changes = shown["changes"] = experiment_changes(root, cand)
         if cand is not None:  # 示した experiments をリクエストに残し、approve が反映する候補と照らす（r7-1）
             asked["experiments_sha"] = experiments_sha(cand.read_bytes())
-        question = _approval_question(target, cand is not None, t, changes, request, _approver_name(root))
+        question = _launch_approval_question(target, cand is not None, t, changes, request, _approver_name(root))
         return {**question, "sha256": t.sha256}
 
     asked = dict(request_id=request, repo=repo, sha256="", target=str(target), session=session)

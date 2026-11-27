@@ -1,4 +1,4 @@
-"""#1959 の決定 6: Skill を回す起動（`invoke._call_skill`）が使用量ログへ渡す行。`claude -p` は起動せず、偽の呼び出しを渡す。"""
+"""#1959 の決定 6: Skill を回す起動（`skill_invoke.call_skill`）が使用量ログへ渡す行。`claude -p` は起動せず、偽の呼び出しを渡す。"""
 
 from __future__ import annotations
 

@@ -344,7 +344,7 @@ contracts/limits/
    | 起動の経路 | CLI を外から打ち切るもの | CLI 自身の上限 |
    | --- | --- | --- |
    | NDF のコードが起動する（`ndf.adapters.agents`。cross-review・cross-refactoring） | `ndf.adapters.agents.watch` が、無進捗の許容と、監視の上限（`monitor.phase.<工程>` か、呼び出し元が渡した秒）で止める | 渡さない。`contracts/domains/runtimes.json` の `review_args` に時間の上限の引数を足すときは、監視の上限より長くする |
-   | 工程の Skill を動かす（`ndf.progress.invoke`） | `claude.call_claude` に渡す `monitor.phase.implement` で止める（無進捗は見ない） | 渡さない |
+   | 工程の Skill を動かす（`ndf.progress.skill_invoke`） | `claude.call_claude` に渡す `monitor.phase.implement` で止める（無進捗は見ない） | 渡さない |
    | Skill `external-ai` の手順で手で起動する | `timeout` が `monitor.phase.<工程>` + 120 秒で止める（無進捗は見ない） | agy の `--print-timeout` だけ。`timeout` の値 + 120 秒（`monitor.phase.<工程>` + 240 秒）を渡す |
 
 5. 新しい待ちのループがどうしても要るときは、`lib/waits.py` を通せないかを先に見る。通せないときだけ例外リストに理由つきの行を足す

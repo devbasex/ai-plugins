@@ -1,4 +1,4 @@
-"""現状固定（I-003）: Skill を回す起動（`invoke._call_skill`）の、準備・起動と切り替え・結果の組み立てをまたぐ振る舞い。
+"""現状固定（I-003）: Skill を回す起動（`skill_invoke.call_skill`）の、準備・起動と切り替え・結果の組み立てをまたぐ振る舞い。
 
 `claude -p` は起動せず、偽の呼び出しを `invoke` の `call_claude` へ渡す。
 """
@@ -13,8 +13,8 @@ import pytest
 
 from ndf import identity
 from ndf.adapters import claude, claude_choice, launch_settings, model_choice
-from ndf.contracts import result
-from ndf.progress import invoke
+from ndf.contracts import limits, result
+from ndf.progress import invoke, skill_invoke
 
 REFUSED = {"is_error": True, "api_error_status": 404, "result": "There's an issue with the selected model", "modelUsage": {}}
 REFUSED["usage"] = dict.fromkeys(claude.REFUSED_TOKENS, 0)
@@ -62,7 +62,7 @@ def _approve(root: Path, monkeypatch, spec: dict) -> str:
 def test_the_relaunch_gets_the_remaining_time_and_the_bound_but_the_first_launch_has_no_bound(tmp_path, unit, monkeypatch):
     monkeypatch.setattr(claude_choice, "_monotonic", lambda: now[0])
     now = [0.0]
-    limit = invoke.limits.seconds(invoke.SKILL_LIMIT)
+    limit = limits.seconds(skill_invoke.SKILL_LIMIT)
     replies, seen = [_refused(), _done(pr=3)], []
 
     def fake(argv, prompt, timeout, cwd, options):
@@ -73,7 +73,7 @@ def test_the_relaunch_gets_the_remaining_time_and_the_bound_but_the_first_launch
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=fake)
     assert got.status == "ok" and got.outputs == {"pr": 3}
     first, second = seen
-    assert first == (invoke.skill_prompt(_skill_run()), limit, tmp_path, None)
+    assert first == (skill_invoke.skill_prompt(_skill_run()), limit, tmp_path, None)
     assert second[:3] == (first[0], limit - 10, tmp_path)
     now[0] += 5
     assert second[3]() == limit - 25  # 起動し直しの期限の残りは、呼ぶたびに測る
