@@ -86,11 +86,12 @@ graph TB
 | リポジトリの測定（`measure_repo.py`） | `test`・`materials` の 2 項目を返す。指示書の注記と compose のサービス名を、項目にせず返す。言語・静的解析の Tool・方針・データベースを測る処理と、それだけが使う表を消す |
 | CI の測定（`measure_ci.py`） | 必須のチェックだけを測る。閉じた PR・課題の呼び出しと、`issues` の質問を消す |
 | 測定の組み立て（`cli.py`） | 指示書の注記と CI の注記を、測定の結果の注記に今と同じ順で並べる |
-| 書き出し（`write.py`） | 項目の番号の表（`p_number`）から 6 項目を消す。この番号（`P1` など）は、`measure` と `write` の出力の行と、開発の作業の開始の `不明 <番号>` の表示で、項目を指すために使う。残る `test`（P2）と `ci`（P4）の番号は振り直さない。回答できる項目は、測定の結果で `status: question` であり、かつ今の解析が書く項目に限る。解析の記録の `analyzer` には、測定の結果の `analyzer` を書く（どちらも下の「入出力のコントラクト」） |
+| 書き出し（`write.py`） | 項目の番号の表（`p_number`）から 6 項目を消す。この番号（`P1` など）は、`measure` と `write` の出力の行と、開発の作業の開始の `不明 <番号>` の表示で、項目を指すために使う。残る `test`（P2）と `ci`（P4）の番号は振り直さない。回答できる項目は、測定の結果で `status: question` であり、かつ今の解析が書く項目に限る。`test` の測定の結果が空の suite の一覧で、今の値に suite があるときは、今の値を残す（決定 6）。解析の記録の `analyzer` には、測定の結果の `analyzer` を書く（どちらも下の「入出力のコントラクト」） |
 | 旧い形のキー（`analysis_record.py`） | 項目ごと消すキーに 6 項目を足す。言語の行の中のキー（`languages[].files`）は、`languages` の項目ごと消える。そのため、配列の中のキーを取り除く処理は消す |
 | 判定（`check.py`） | 解析器のバージョンを上げる |
 | 言語の表（`contracts/domains/languages.json`） | 要約（`summary`）から「言語の計測」を外す。表と行は変えない |
 | 手順書と確定仕様（`project-analysis.md`・`ndf-project-analysis-record.md`）、生成物の `ndf-settings.md` | 新しい形を書く。`project-analysis.md` には、回答の適用結果の報告と無視した回答があるときの扱い（下の「入出力のコントラクト」）、再解析で今の値を引き継ぐ条件（決定 6）も書く |
+| `write` の引数 `--answers` の説明（`cli.py`。生成物の `project.args.schema.json`・`commands.md`） | 再解析で今の値を引き継ぐ規則を書く（決定 6） |
 | このリポジトリの `.ndf/project.json` | 6 項目とその指紋を消す |
 
 ## 入出力のコントラクト
@@ -106,8 +107,10 @@ graph TB
 | `ndf project check`（6 項目が残る設定） | — | 終了コード 3、理由は「旧い形の値が設定にある: <キー>」 |
 | 測定が呼ぶ GitHub の API | 必須のチェック・閉じた PR・課題 | 必須のチェック |
 | 注記「PR のマージ先と GitHub Issues を測れない」 | 測れないときに出る | 出ない |
+| `ndf project write` の `test`（測定の結果が `status: measured` の空の suite の一覧で、今の値に suite がある） | 解析が書いた値なら、空の一覧で置き換える | 今の値を残し、`kind: unknown`・`kept_previous` の行で理由「テストの手がかりが無い」を出す（決定 6） |
+| `ndf project write` の `--answers` の説明 | 回答の形だけを書く | 回答の形と、再解析で今の値を引き継ぐ規則を書く（決定 6） |
 
-サブコマンドの引数と終了コードは変えない。
+サブコマンドの引数の名前と終了コードは変えない。
 
 今の書き出し（`write.plan`）は、測定の結果で `status: question` の項目をすべて回答できる項目とみなす。スキーマからキーを消すだけでは、測定と書き出しの間に NDF を更新した利用者の `issues` と `ndf_policies` の回答が、設定に書かれないまま何も知らせずに捨てられる。そのため、回答できる項目を、今の解析が書く項目の一覧（`write.ITEM_KEYS`）で絞る。
 
@@ -151,7 +154,7 @@ sequenceDiagram
 
 ## 決定の記録
 
-各決定の「根拠」の Value は、このリポジトリの MVV（Mission・Vision・Value をまとめた文書。[.ndf/mvv.md](../.ndf/mvv.md)、バージョン 11）にある判断の基準の番号である。ここで引くのは次の 5 つである。
+各決定の「根拠」の Value は、このリポジトリの MVV（Mission・Vision・Value をまとめた文書。[.ndf/mvv.md](../.ndf/mvv.md)、バージョン 11）にある判断の基準の番号である。ここで引くのは次の 6 つである。
 
 | 番号 | 中身（MVV の本文の要約） |
 | --- | --- |
@@ -160,6 +163,7 @@ sequenceDiagram
 | Value 6 | 使うほど散らからない。使わなくなったコード・設定・文書は整理する。自動で片付けるのは NDF が自分で作ったものだけである |
 | Value 9 | 責務の分かれた設計で作る。まだ要らない仕組みは先回りして作らない |
 | Value 11 | 重複と冗長が無い。同じ規則や定義は 1 か所にまとめる |
+| Value 15 | 人も AI も同じ入口から使える。Skill の手順だけでなく、`ndf` のコマンドと規約（`plugins/ndf/contracts/`）から同じように呼べる |
 
 ### 決定 1: 既存の設定を止めずに移すため、6 項目を「旧い形のキー」に足して取り除く
 
@@ -204,17 +208,41 @@ sequenceDiagram
 - **代償**: 表の拡張子の列とプロダクションコードの列を読むのは、テストだけになる。解析が表を読まない状態でも `ndf check` が通ることは、読み取りを空にした 1 回の実行で確かめた（1749 ファイルに違反なし）
 - 根拠: Value 9（MVV バージョン 11）
 
-### 決定 6: 回答を再解析で失わないため、今も成り立つ設定の値はそのまま回答にする
+### 決定 6: 回答を再解析で失わないため、今も成り立つ値は引き継ぎ、空の測定値で suite を消さない
 
-- **質問**: 回答から書いた `test` と `materials` には解析が書いた値として指紋が付く。次の再解析で別の回答を作ると置き換わる。前の回答をどう引き継ぐか
-- **選んだ案**: 解析の手順書（`project-analysis.md`）の「回答方」に、次の条件を足す。質問になった項目で、次の 3 つがすべて成り立つときは、今の `.ndf/project.json` の値を変えずに `value` に書く。版 4 の回答を版 5 の `write` で適用した直後の再解析も、この条件に当たる
-  1. 今の値があり、不明（`unknown`）でない
-  2. 今の値が、今の設定の形に合う
-  3. 今の値が、測定の根拠・指示書・リポジトリのファイルと食い違わない
-- 条件に当たらないときは、今のとおり根拠から回答を作る。変えた理由は、利用者への報告に載せる
+- **質問**: 回答から書いた `test` と `materials` には解析が書いた値として指紋が付き、次の再解析の値で置き換わる。前の回答をどう引き継ぐか
+- **選んだ案**: 項目が質問にならない場合は `write` の規則で、質問になる場合は回答する側の規則で引き継ぐ
+
+**質問にならない場合（`write` が守る）**
+
+テストの手がかり（テストのツール、コマンド、指示書の記述）が無くなると、前は質問だった `test` が、測った値の空の suite の一覧になる。指示書からテストの記述を整理しただけでも、独自のスクリプトを走らせる前の回答は使える。手がかりが無いことは、使えなくなった根拠にならない。
+
+- 今の値に suite が 1 つ以上あれば、`write` は空の測定値を不明と同じに扱い、今の値を残す
+- 空の一覧を書くのは、`test` のキーが無いか、今の値が不明か、今の値の suite が 0 件のときだけである
+- テストをすべてやめたリポジトリでは、利用者が `.ndf/project.json` から `test` のキーを消す。次の書き出しが空の一覧を書く
+
+**質問になる場合（回答する側が守る）**
+
+回答は今の `.ndf/project.json` の値を元に作り、変える必要がある部分だけを置き換える。
+
+| 今の値の部分 | 回答への書き方 |
+| --- | --- |
+| 今の設定の形に合い、測定の根拠・指示書・リポジトリのファイルと食い違わない | 変えずに `value` に写す |
+| 形に合わないか、食い違う | その部分だけを根拠から作り直し、変えた理由を利用者への報告に載せる |
+| 人が書く部分（上の 2 行より優先する。`materials` の `needs`・`seeds.environment`・`deferred_milestones` など、測定の根拠から作り直せないもの） | 引き継ぐ。古くなったと考える根拠があっても値は変えず、利用者への報告に載せて確かめてもらう |
+
+- 今の値が無いか不明（`unknown`）なら、今のとおり根拠から回答を作る
+- 引き継ぐのは回答できるキーである。`test.ci.only` は回答に含めず、従来どおり `write` が決める
+- 項目の回答を省いた場合も、`write` は今の値を残す（今の振る舞い）
+- 版 4 の回答を版 5 の `write` で適用した直後の再解析も、この規則に当たる
+
+**規則を置く所**: Skill を通さずに `measure` と `write` を組み合わせる呼び出し元（Factory など）にも届くように、`write` の引数 `--answers` の説明に規則の要点を書く。この説明は、引数のスキーマ（`plugins/ndf/contracts/schemas/io/project.args.schema.json`）と `commands.md` に生成される。解析の手順書（`project-analysis.md`）の「回答方」には、上の表を書く。
+
 - 採らなかった案: `write` が回答から書いた値を置き換えないようにする（テストの走らせ方が変わっても、設定が更新されなくなる）
-- **代償**: 条件 3 は回答する AI の判断で、仕組みでは強制しない。手順書の文言を固定するテストは置かない
-- 根拠: Value 3（MVV バージョン 11）
+- 採らなかった案: `write` が回答と今の値を部分ごとに合わせる（部分が今も成り立つかは仕組みで決まらず、回答で値を消すこともできなくなる）
+- 採らなかった案: 規則を手順書にだけ書く（CLI を直接呼ぶ連携では、新しく作った回答が前の回答を置き換える）
+- **代償**: テストをすべてやめても、利用者が `test` のキーを消すまで前の suite が残る。質問になる場合の規則は回答する側の判断で、仕組みでは強制しない。手順書と説明の文言を固定するテストは置かない
+- 根拠: Value 3・Value 15（MVV バージョン 11）
 
 ## 影響と危険
 
@@ -226,6 +254,7 @@ sequenceDiagram
 | --- | --- |
 | 6 項目が残る設定で、解析の前に工程の前の確かめが走る | 知らないキーの警告が出る。止めない。次の書き出しで消える |
 | チームの中の古い NDF が書き出すと、6 項目が書き戻る | 要求仕様の「今の利用者への影響と互換」のとおり、チームで NDF のバージョンをそろえる。リリースの変更履歴に書く |
+| テストをすべてやめたリポジトリ | 前の suite が残る。利用者が `test` のキーを消すと、次の書き出しが空の一覧を書く（決定 6） |
 | 解析に失敗する・差分をコミットしない | 6 項目が残り、次の作業でまた「古い」になる。作業は止まらない |
 | #2239 が `issues.primary` を読む前提 | 要求仕様の「影響」のとおり、#2239 の実装で設定の形と作り方を決め直す |
 | 確定仕様 `ndf-issue-items.md`・`ndf-usage-ledger-by-runtime.md` が `issues.primary` を読むと書いている | どちらも NDF 10.x のスクリプトの記録で、今の `plugins`・`scripts` に読む処理は無い。`git grep` で当たるのは、設定の形の定義（スキーマ）、その説明（`ndf-settings.md`）、解析の手順書 `project-analysis.md` の「回答方」の表（回答の `value` の形）だけである。この変更では確定仕様の 2 本を書き換えない |
@@ -253,9 +282,19 @@ sequenceDiagram
 
 ただし、この間に `.ndf/project.json` を変える Pull Request がマージされると、未コミットの差分があるメインディレクトリは fast-forward で更新できない。更新が止まったときだけ、メインディレクトリで次を行う。
 
-1. `git diff HEAD -- .ndf/project.json > <リポジトリの外のファイル>` で、未コミットの差分を保存する
-2. `git restore --staged --worktree -- .ndf/project.json` でこのファイルを戻し、`git pull --ff-only` で更新する
-3. 保存した差分を読み、旧版の書き戻しのほかに残したい変更があれば、更新後のファイルに書き直す。6 項目と指紋は書き直さない
+1. 未コミットの差分を保存してから、このファイルを戻して更新する。ステージした変更と作業ファイルの変更は、別々のファイルに保存する。1 つにまとめると、ステージにだけ残した編集が消える。差分には未コミットの値が含まれるので、保存先は本人だけが読める新しいディレクトリ（`mktemp -d`）にする。コマンドは `&&` でつなぎ、保存に失敗したら戻さない
+
+   ```bash
+   SAVE="$(mktemp -d)" &&
+   git diff --cached --binary --no-ext-diff --no-textconv -- .ndf/project.json > "$SAVE/staged.patch" &&
+   git diff --binary --no-ext-diff --no-textconv -- .ndf/project.json > "$SAVE/unstaged.patch" &&
+   git restore --staged --worktree -- .ndf/project.json &&
+   git pull --ff-only
+   echo "$SAVE"
+   ```
+
+2. 保存した 2 つの差分を読み、旧版の書き戻しのほかに残したい変更があれば、更新後のファイルに書き直す。6 項目と指紋は書き直さない
+3. 書き直しが済んだら、保存先のディレクトリを消す
 
 追跡中の設定からの削除は、実装の Pull Request に含める。リリース版の導入まで遅らせる案は採らない。スキーマから 6 項目を消すと、6 項目が残る追跡中の設定では、その Pull Request の `ndf check` が通らないためである。
 
@@ -281,6 +320,7 @@ sequenceDiagram
 | —（決定 4） | 版 4 の測定の結果を書き出すと、直後の判定は終了コード 3 で、理由に解析器のバージョンが出る。同じ入力でもう 1 回書き出しても同じである | 解析の記録に `check.ANALYZER` を書くと、終了コード 0 になって落ちる |
 | 9 | 6 キーのどれかが残る設定の判定は終了コード 3 | キーを一覧から外すと終了コード 2 になって落ちる |
 | 10 | 解析が書いた値・人が直した値・指紋の 3 つがそろう設定から書き出すと 6 キーと指紋が消え、残る項目の「書いた」「手の値を保った」の区別は変わらない | 人が直した値を残すと落ちる |
+| —（決定 6） | 解析が書いた suite がある設定へ、`test` が空の suite の一覧の測定の結果を書き出すと、suite は残り、`kept_previous` の行が出る。`test` のキーが無い設定へ書き出すと、空の一覧が書かれる | 空の測定値で置き換えると落ちる |
 | 11 | 版 5 の測定の結果で 10 の書き出しをした後、同じ入力でもう 1 回書き出すと設定は変わらず、判定は終了コード 0 | 書き出しのたびに指紋が変わると落ちる |
 | 12 | 人が書いた `materials` が移行の書き出しの後も同じ値で残る | `materials` を解析の値で置き換えると落ちる |
 | 13 | `ndf check`（スキーマのコピー・キーの並び・生成物・設定の実物）と `check-skill-frontmatter.py` が通る | コピーか生成物を直し忘れると落ちる |
@@ -291,7 +331,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4521 | 実装する | — | `plugins/ndf/src/ndf/domains/project/measure_repo.py`、`plugins/ndf/src/ndf/domains/project/measure_ci.py`、`plugins/ndf/src/ndf/domains/project/cli.py`、`plugins/ndf/src/ndf/domains/project/write.py`、`plugins/ndf/src/ndf/domains/project/analysis_record.py`、`plugins/ndf/src/ndf/domains/project/check.py`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/languages.json`、`plugins/ndf/docs/contracts/ndf-settings.md`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`docs/specifications/ndf-project-analysis-record.md`、`.ndf/project.json`、`plugins/ndf/tests/domains/project/test_project_measure.py`、`plugins/ndf/tests/domains/project/test_project_cli.py`、`plugins/ndf/tests/domains/project/test_analysis_record.py`、`plugins/ndf/tests/domains/project/test_measure_project_branch_state.py` |
+| #4521 | 実装する | — | `plugins/ndf/src/ndf/domains/project/measure_repo.py`、`plugins/ndf/src/ndf/domains/project/measure_ci.py`、`plugins/ndf/src/ndf/domains/project/cli.py`、`plugins/ndf/src/ndf/domains/project/write.py`、`plugins/ndf/src/ndf/domains/project/analysis_record.py`、`plugins/ndf/src/ndf/domains/project/check.py`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/skills/development-workflow/schemas/project.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/domains/languages.json`、`plugins/ndf/docs/contracts/ndf-settings.md`、`plugins/ndf/contracts/schemas/io/project.args.schema.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/skills/development-workflow/references/project-analysis.md`、`docs/specifications/ndf-project-analysis-record.md`、`.ndf/project.json`、`plugins/ndf/tests/domains/project/test_project_measure.py`、`plugins/ndf/tests/domains/project/test_project_cli.py`、`plugins/ndf/tests/domains/project/test_analysis_record.py`、`plugins/ndf/tests/domains/project/test_measure_project_branch_state.py` |
 
 ## 人へ残す判断
 
