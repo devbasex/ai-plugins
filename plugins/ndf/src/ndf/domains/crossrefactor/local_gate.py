@@ -371,7 +371,7 @@ def _text(value: Any) -> str:
 def _check_untouched(g: git.Git, commit: str) -> None:
     """テストの後に `HEAD` が対象のコミットのままで、追跡ファイルに変更が無いことを確かめる。"""
     head = g.rev_parse("HEAD")
-    changed = [line[3:] for line in g.run("status", "--porcelain", "--untracked-files=no").splitlines() if line]
+    changed = worktree.dirty_tracked(g)
     if head != commit or changed:
         what = ", ".join(changed) if changed else f"HEAD が {commit} から {head} へ動いた"
         raise final_gate.GateStopped("precondition", f"テストが追跡ファイルを書き換えたか HEAD を動かした: {what}")

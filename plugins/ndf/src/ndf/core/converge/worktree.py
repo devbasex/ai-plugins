@@ -344,9 +344,14 @@ def _refuse_lossy_sync(g: git.Git, remote: str, before: str) -> None:
         )
 
 
+def dirty_tracked(g: git.Git) -> list[str]:
+    """追跡ファイルのうち commit していない変更があるパスの一覧（`git status --porcelain` の順）。"""
+    return [line[3:] for line in g.run("status", "--porcelain", "--untracked-files=no").splitlines() if line.strip()]
+
+
 def refuse_dirty(g: git.Git) -> None:
     """追跡ファイルに commit していない変更があれば `SyncRefused`。"""
-    if g.run("status", "--porcelain", "--untracked-files=no").strip():
+    if dirty_tracked(g):
         raise SyncRefused("worktree に commit していない変更がある。commit してから流し直す")
 
 
