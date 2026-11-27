@@ -7,7 +7,7 @@
 
     uv run --frozen --project . python experimental/ndf/mvv_replay.py material --prs 2214 2295 --store S.json --out M.json
     uv run --frozen --project . python experimental/ndf/mvv_replay.py material --case experimental/ndf/mvv_replay_cases/with-handling --out C.json
-    uv run --frozen --project . python experimental/ndf/mvv_replay.py judge --materials M.json --model <ID> [--prompt-commit c93e690ed] [--expect 2213=C2,C4] --result J.json
+    uv run --frozen --project . python experimental/ndf/mvv_replay.py judge --materials M.json --model <ID> [--prompt-commit c93e690ed] [--expect 2213=C2,C4] [--expect-claude-version <版>] [--expect-prompt-sha256 <SHA-256>] --result J.json
     uv run --frozen --project . python experimental/ndf/mvv_replay.py bodies --materials M.json --judged J_new.json J_old.json [--reviewed R.jsonl] --store S.json --out B.json
     uv run --frozen --project . python experimental/ndf/mvv_replay.py tally --materials M.json --judged J_new.json J_old.json [--judged ...] --reviewed R.jsonl --out T.json
     uv run --frozen --project . python experimental/ndf/mvv_replay.py guard-check --result G.json
@@ -28,12 +28,13 @@ from __future__ import annotations
 
 import argparse
 import ast
-import contextlib
 import dataclasses
 import fcntl
 import hashlib
 import json
 import os
+import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -356,63 +357,39 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
         "prompt_sha256": _sha(question),
         "plugin_root": str(root),
     }
+    # 再判定では、残す結果と同じ条件で打たないと tally が拒むので、LLM を呼ぶ前に照合して止める（費用を払ってから拒まれない）
+    for key, want in (("claude_version", args.expect_claude_version), ("prompt_sha256", args.expect_prompt_sha256)):
+        if want is not None and info[key] != want:
+            raise Stop(f"{key} が期待した値と違う（期待: {want} / 今: {info[key]}）。判定せずに止める", 2)
     # 材料は最初の保存の前に読む（読めずに止まるとき、前の結果ファイルを書き換えない）
     materials = _materials(args.materials)
-    # 同じ結果ファイルを補う起動を並べると、起動時に読んだ状態で互いの行を上書きするので、結果ファイルごとに 1 つだけ動かす
-    if args.result.name.endswith(LOCK_SUFFIX):
-        # 別の結果ファイルのロックを結果の保存で置き換えると、その結果ファイルの排他が崩れる
-        raise Stop(f"--result（{args.result}）は名前が {LOCK_SUFFIX} で終わる。ロックの置き場と重ならない名前を渡す")
-    args.result.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = f"{args.result}{LOCK_SUFFIX}"
-    _place_lock(lock_path)
+    # 同じ結果ファイルを補う起動を並べると、起動時に読んだ状態で互いの行を上書きするので、結果ファイルごとに 1 つだけ動かす。
+    # ロックは利用者のファイルと重ならないよう NDF の状態の保存先に置き、消さない（消さないので、消える前に開いた古いファイルを
+    # 掴んで排他が崩れることも、利用者のファイルを片付けることも無い）
+    lock_path = _lock_path(args.result)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        lock = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
-    except FileNotFoundError:
-        raise Stop(f"同じ --result（{args.result}）の judge が動いていた。打ち直す") from None
-    except OSError:
-        # ELOOP（シンボリックリンク）と、開けないもの
-        raise Stop(f"{lock_path} はこの実験版のロックでない既存のファイルなので触れない。別の --result を渡す") from None
+        # 置き場に FIFO などがあっても待たずに開き、通常のファイルかを確かめる
+        lock = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
+    except OSError as exc:
+        raise Stop(f"判定のロック {lock_path} を開けない: {exc}") from None
     try:
+        if not stat.S_ISREG(os.fstat(lock).st_mode):
+            raise Stop(f"判定のロック {lock_path} が通常のファイルでない。取り除いてから打ち直す")
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise Stop(f"同じ --result（{args.result}）の judge が動いている。終わってから打ち直す") from None
-        # 先の judge は終わるときにロックのファイルを消す。消される前に開いた古いファイルのロックでは排他にならないので、
-        # 取れたロックが今のパスのファイルかを確かめる
-        held = os.fstat(lock)
-        try:
-            now = os.stat(lock_path, follow_symlinks=False)
-        except FileNotFoundError:
-            now = None
-        if now is None or (now.st_dev, now.st_ino) != (held.st_dev, held.st_ino):
-            raise Stop(f"同じ --result（{args.result}）の judge が動いていた。打ち直す")
-        # 片付けてよいのはこの実験版が置いたロックだけなので、印の無いファイルは使わず、消さずに止める
-        if os.pread(lock, len(LOCK_MARK) + 1, 0) != LOCK_MARK:
-            raise Stop(f"{lock_path} はこの実験版のロックでない既存のファイルなので触れない。別の --result を渡す")
-        try:
-            return _judge_locked(args, question, info, materials)
-        finally:
-            # ロックを持ったまま消す（測定の結果を片付けたとき、役目を終えたロックのファイルを出力先に残さない）
-            with contextlib.suppress(FileNotFoundError):
-                os.unlink(lock_path)
+        return _judge_locked(args, question, info, materials)
     finally:
         os.close(lock)
 
 
-def _place_lock(lock_path: str) -> None:
-    """印 `LOCK_MARK` を書いた一時ファイルを `lock_path` へリンクで置く（既にあれば置かない）。
+def _lock_path(result: Path) -> Path:
+    """`--result` ごとのロックのパス（NDF の状態の保存先の下。名前は結果ファイルの絶対パスの SHA-256）。"""
+    from ndf import identity
 
-    ロックのファイルは、置いた瞬間から印を持つ。別の起動が、印を書く前の空のファイルを他人のファイルと見誤らないためである。
-    """
-    folder, name = os.path.split(lock_path)
-    fd, tmp = tempfile.mkstemp(prefix=f".{name}.", suffix=".tmp", dir=folder or ".")
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(LOCK_MARK)
-        with contextlib.suppress(FileExistsError):
-            os.link(tmp, lock_path)
-    finally:
-        os.unlink(tmp)
+    return identity.load().state_dir / "mvv-replay" / "judge-locks" / f"{_sha(str(result.resolve()))}.lock"
 
 
 def _judge_locked(args: argparse.Namespace, question: str, info: Mapping[str, Any], materials: Mapping[int, Optional[Material]]) -> int:
@@ -452,10 +429,6 @@ def _judge_locked(args: argparse.Namespace, question: str, info: Mapping[str, An
     return 1 if any(state["expect_missing"].values()) else 0
 
 
-# judge が結果ファイルの隣に置くロックの名前の後ろ（`--result` にこの名前で終わるパスは渡せない）
-LOCK_SUFFIX = ".lock"
-# judge が置いたロックのファイルの中身（これを持つファイルだけをロックに使い、終わるときに消す）
-LOCK_MARK = b"ndf mvv_replay judge lock\n"
 # 前の結果ファイルを同じ測定の続きとみなす判定の条件
 JUDGE_CONDITIONS = ("model", "claude_version", "prompt_commit", "prompt_sha256")
 # 1 件の PR の判定を打つ回数の上限（同じ材料で失敗が続いたら打ち直さず、その PR は `tally` が保留の理由に挙げる）
@@ -717,6 +690,32 @@ def _is_sha256(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
 
 
+def _redo_hint(args: argparse.Namespace, pairs: Sequence[Sequence[Mapping[str, Any]]], i: int, side: int, name: str) -> str:
+    """指示文のハッシュが無い 1 つの結果ファイルを判定し直す案内。
+
+    残す結果と同じ Claude Code の版と、同じ側のほかの回の指示文のハッシュ（あれば）を照合の引数に入れ、judge が LLM を呼ぶ前に
+    不一致で止まるようにする。指示文の取得元がコミットで決まるのは比較の基準の側だけである。変更後の側は `--prompt-commit` を
+    省いた起動（読み込んだ ndf の指示文）と見分けられないので、コマンドを示さず、元の起動方法を確かめる案内にする。
+    """
+    row = pairs[i - 1][side]
+    hashes = sorted({p[side]["prompt_sha256"] for p in pairs if _is_sha256(p[side].get("prompt_sha256"))})
+    check = ["--expect-claude-version", str(row.get("claude_version"))]
+    if len(hashes) == 1:
+        check += ["--expect-prompt-sha256", hashes[0]]
+    where = f"{i}回目の{name}: {args.judged[i - 1][side]}"
+    if side == 0:
+        return (
+            f"{where}（指示文の取得元を結果ファイルから特定できない。元の judge の起動方法（--prompt-commit・--plugin-root）を確かめ、"
+            f"同じ起動に次の引数を足して新しい --result へ判定する: {shlex.join(['--model', str(row.get('model')), *check])}）"
+        )
+    head = ["uv", "run", "--frozen", "--project", str(REPO), "python", str(REPO / "experimental" / "ndf" / "mvv_replay.py")]
+    if row.get("plugin_root"):
+        head += ["--plugin-root", str(row["plugin_root"])]
+    argv = [*head, "judge", "--materials", str(args.materials), "--model", str(row.get("model"))]
+    argv += ["--prompt-commit", str(row.get("prompt_commit")), *check]
+    return f"{where}（<新しいパス> を新しい結果ファイルのパスに置き換えて打つ: {shlex.join(argv)} --result <新しいパス>）"
+
+
 def _cmd_tally(args: argparse.Namespace) -> int:
     materials = {n: m for n, m in _materials(args.materials).items()}
     reviewed = _reviews(args.reviewed)
@@ -733,14 +732,16 @@ def _cmd_tally(args: argparse.Namespace) -> int:
     # 指示文のハッシュを持たない結果（この変更より前の形式）は、実際に送った指示文を照合できないので比べない。前の結果ファイルは
     # judge が条件の違いで続きに使わないので、欠けた側と回のファイルだけを挙げ、新しい保存先で打ち直す打ち方を示す
     redo = [
-        f"{i}回目の{name}: {args.judged[i - 1][side]}（judge --materials {args.materials} --model {pair[side].get('model')}"
-        f" --prompt-commit {pair[side].get('prompt_commit')} --result <新しいパス> で判定し、--judged のこのファイルを置き換える）"
+        _redo_hint(args, pairs, i, side, name)
         for i, pair in enumerate(pairs, 1)
         for side, name in ((0, "変更後"), (1, PREV_COMMIT))
         if not _is_sha256(pair[side].get("prompt_sha256"))
     ]
     if redo:
-        raise Stop("送った指示文の SHA-256 が無い判定結果がある。次の側と回だけを判定し直す:\n" + "\n".join(redo))
+        raise Stop(
+            "送った指示文の SHA-256 が無い判定結果がある。次の側と回だけを判定し直す。以前の結果ファイルは残す。"
+            "次の tally では、該当する --judged の引数に新しい結果ファイルのパスを渡す:\n" + "\n".join(redo)
+        )
     for side, name in ((0, "変更後"), (1, PREV_COMMIT)):
         conditions = {tuple(pair[side].get(k) for k in JUDGE_CONDITIONS) for pair in pairs}
         if len(conditions) > 1:
@@ -967,6 +968,8 @@ def _parser() -> argparse.ArgumentParser:
     j.add_argument("--prs", type=int, nargs="*", default=[])
     j.add_argument("--expect", type=_expect, nargs="*", default=[], help="<PR>=<番号>,<番号> の並び（順 1）")
     j.add_argument("--result", type=Path, required=True)
+    j.add_argument("--expect-claude-version", default=None, help="Claude Code の版がこれと違えば判定せずに止める")
+    j.add_argument("--expect-prompt-sha256", default=None, help="送る指示文の SHA-256 がこれと違えば判定せずに止める")
     b = sub.add_parser("bodies")
     b.add_argument("--materials", type=Path, required=True)
     b.add_argument("--judged", type=Path, nargs=2, required=True)
