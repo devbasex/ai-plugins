@@ -657,21 +657,36 @@ def test_after_an_interruption_a_save_into_the_aside_is_kept_and_the_consent_car
 
 @pytest.mark.parametrize("stop", ["killed", "oserror"])
 def test_the_placing_copy_is_removed_after_a_forced_stop_or_a_failed_write(tmp_path, monkeypatch, stop):
-    """置き換えの一時ファイルは決まった名前なので、強制終了の後の片付けも、書き込みの失敗の片付けも、作業場所に設定案の写しを残さない。"""
+    """置き換えの一時ファイルは作る前に名前を途中の記録へ残すので、強制終了の後の片付けも、書き込みの失敗の片付けも、作業場所に設定案の写しを残さない。"""
     target = _worktree(tmp_path)
     candidate = _candidate(target)
-    placing = target.with_name(".launch.json.placing")
+    users = target.with_name(".launch.json.placing-mine")  # 利用者が置いた同じ頭のファイル（Value 6: 消さない）
+    users.write_bytes(b"")
+    made: list[Path] = []
 
-    def fail(*_args):
+    def fail(_target, tmp, _base):
+        made.append(tmp)
         raise KeyboardInterrupt if stop == "killed" else OSError("書けない")
 
     monkeypatch.setattr(la, "_replace", fail)
     with pytest.raises(KeyboardInterrupt if stop == "killed" else internal.InternalError):
         _reflect(candidate, lambda: None, SHA)
     if stop == "killed":
-        assert placing.exists()  # 強制終了ではその場で消せない
+        assert made[0].exists()  # 強制終了ではその場で消せない
         la.recover(target)
-    assert not placing.exists() and target.read_bytes() == OLD
+    assert not made[0].exists() and target.read_bytes() == OLD and users.exists()
+
+
+def test_the_cleanup_keeps_a_file_the_record_names_but_ndf_did_not_make(tmp_path):
+    """途中の記録が名前を残していても、記録した実体と違い空でもないファイルは、利用者の作ったものかもしれないので消さない（Value 6）。"""
+    target, _, aside = _interrupted(tmp_path)
+    aside.unlink()
+    users = target.with_name(".launch.json.placing-" + "0" * 32)
+    users.write_bytes(b'{"version": 1, "mine": 1}\n')
+    pending = la.read_launch_record(la.reflected_file(target, la.PENDING))
+    lc.write_launch_record(la.reflected_file(target, la.PENDING), {**pending, "placing": str(users)})
+    la.recover(target)
+    assert users.read_bytes() == b'{"version": 1, "mine": 1}\n'
 
 
 def test_an_interruption_after_removing_the_aside_still_reports_the_saved_path(tmp_path, monkeypatch):

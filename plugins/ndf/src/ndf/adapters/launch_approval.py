@@ -12,6 +12,7 @@ import functools
 import hashlib
 import json
 import os
+import stat
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -715,24 +716,57 @@ def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
     （`recover`）は、反映先がこの実体のままかで、NDF が候補を置いた後の停止か（手順 5 か、置いた直後の中断）を見分ける。中身だけで
     見分けると、手順 4 の間に利用者が候補と同じ中身を手で保存したときも、置いた後の停止として完了にしてしまうためである。
 
-    一時ファイルは反映先ごとに決まった名前（`_placing`）で作り、承認の記録の錠の中でだけ作る。プロセスが強制終了しても、次の
-    `recover` がこの名前で見つけて消せる（途中の記録を書く前の終了も含む）。例外で止まったときの片付けも、呼び手の `recover` に任せる。
+    一時ファイルは乱数の名前（`.launch.json.placing-<値>`）で、作る前にその名前を途中の記録の `placing` に書き、名前が空いている
+    ときだけ成功する作り方（`O_EXCL`）で作る。名前が重なれば、そのファイルには触れずに別の値で取り直す。中身は実体を途中の記録に
+    書いた後に書く。プロセスが強制終了しても、次の `recover` が途中の記録から一時ファイルを特定し、NDF が作ったと確かめられる
+    ものだけを消す（`_drop_placing`）。例外で止まったときの片付けも、呼び手の `recover` に任せる。
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _placing(target)
-    tmp.unlink(missing_ok=True)  # 前の実行の残り（反映先と同じ実体のこともある）へ書き込まない
-    tmp.write_bytes(data)
-    made = os.lstat(tmp)
-    rec["placed"] = [made.st_dev, made.st_ino]
-    launch_candidates.write_launch_record(reflected_file(target, PENDING), rec)
+    pending = reflected_file(target, PENDING)
+    while True:
+        tmp = target.with_name(f"{_PLACING_HEAD.format(target.name)}{uuid.uuid4().hex}")
+        rec.pop("placed", None)
+        rec["placing"] = str(tmp)
+        launch_candidates.write_launch_record(pending, rec)  # 作る前に名前を残す（強制終了の後に特定するため）
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        except FileExistsError:  # noqa: NDF401 ファイル: 利用者の同じ名前のファイルには触れず、別の値で取り直す
+            continue
+        break
+    with os.fdopen(fd, "wb") as out:
+        made = os.fstat(out.fileno())
+        rec["placed"] = [made.st_dev, made.st_ino]
+        launch_candidates.write_launch_record(pending, rec)
+        out.write(data)
     placed = _replace(target, tmp, rec["base"])
     tmp.unlink()
     return placed
 
 
-def _placing(target: Path) -> Path:
-    """置き換えで反映先へ置く一時ファイル（`.launch.json.placing`）。"""
-    return target.with_name(f".{target.name}.placing")
+# 置き換えの一時ファイルの名前の頭（後ろに乱数の値が付く）
+_PLACING_HEAD = ".{}.placing-"
+
+
+def _drop_placing(target: Path, rec: Mapping[str, Any]) -> None:
+    """途中の記録 `rec` が名前を残した一時ファイルのうち、NDF が作ったと確かめられるものを消す。
+
+    確かめる条件は、記録した実体（`placed`）と同じか、実体を記録する前に止まった空のファイルである（中身は実体を記録した後に書く）。
+    名前が記録に無い・反映先と別のディレクトリ・頭が違う・条件に当たらないファイルは消さない（利用者の作ったものかもしれないため）。
+    """
+    name = rec.get("placing")
+    if not isinstance(name, str):
+        return
+    tmp = Path(name)
+    if tmp.parent != target.parent or not tmp.name.startswith(_PLACING_HEAD.format(target.name)):
+        return
+    try:
+        found = os.lstat(tmp)
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 一時ファイルが無ければ片付けるものも無い
+        return
+    mark = rec.get("placed")
+    ours = mark == [found.st_dev, found.st_ino] if mark is not None else (stat.S_ISREG(found.st_mode) and found.st_size == 0)
+    if ours:
+        tmp.unlink(missing_ok=True)
 
 
 def _replace(target: Path, tmp: Path, base: Optional[str]) -> bool:
@@ -869,7 +903,8 @@ def recover(target: Path) -> Optional[Path]:
     利用者のエディタは錠を取らないので、照らした後に反映先へ保存が入ることがある。退避を反映先へ戻すときは反映先を上書きせず、
     反映先を消すことも一時の名前へ移すこともしない。別の名前は、退避を消す前に途中の記録の `saved` に書き、完了の記録にも残す。
     退避を消した後に中断しても、次の片付けと打ち直しがそのパスを結果に載せられるようにするためである。
-    最後に、置き換えの一時ファイル（`_placing`）が残っていれば消す（強制終了した実行の設定案の写しを作業場所に残さない）。
+    最後に、途中の記録が名前を残した置き換えの一時ファイルのうち、NDF が作ったと確かめられるものを消す（`_drop_placing`。強制終了した
+    実行の設定案の写しを作業場所に残さず、利用者の作ったファイルには触れない）。
     """
     pending_path = reflected_file(target, PENDING)
     rec = read_launch_record(pending_path)
@@ -893,8 +928,8 @@ def recover(target: Path) -> Optional[Path]:
         saved = _noted_saved(rec)  # 退避を別の名前で残し、退避を消した直後の中断
         if _placed(target, rec):
             _write_done(target, rec)
+    _drop_placing(target, rec)  # 置き換えの途中で止まったか強制終了した実行の一時ファイル
     pending_path.unlink(missing_ok=True)
-    _placing(target).unlink(missing_ok=True)  # 置き換えの途中で止まったか強制終了した実行の一時ファイル
     return saved
 
 
