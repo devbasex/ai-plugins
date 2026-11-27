@@ -220,6 +220,41 @@ def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
 APPROVED = "approved:11:aaa:ccc"
 
 
+@pytest.mark.parametrize(
+    "now",
+    [
+        scope_decide.Basis(base="b2"),
+        scope_decide.Basis(reviewers=("codex", "kiro")),
+        scope_decide.Basis(focus=("足した重点",)),
+        scope_decide.Basis(unit="別の単位"),
+        scope_decide.Basis(pr="o/r#2"),
+    ],
+)
+def test_converged_round_is_not_reused_when_the_conditions_changed(now: scope_decide.Basis) -> None:
+    """#3780 の現状固定: 比較基点・相手役・重点・単位の指示・読んだ PR のどれかが違えば、前回の収束の使い回しに使わない。"""
+    row = {"round": 1, "head": "h1", "base": "b1", "reviewers": ["codex"], "pr": "o/r#1", "verdict": fin.CONVERGED}
+    same = scope_decide.Basis(base="b1", reviewers=("codex",), focus=(), unit="", pr="o/r#1")
+    assert scope_decide.read_by_all_head({"rounds": [row]}, same) == "h1"
+    assert scope_decide.read_by_all_head({"rounds": [row]}, now) is None
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [{"base": "origin/develop"}, {"reviewers": ["codex"]}, {"focus": ["前の重点"]}, {"unit": "前の単位"}, {scope_decide.MVV: {"id": APPROVED}}],
+)
+def test_design_pr_reads_the_full_diff_again_when_the_conditions_changed(scope_run, changed: dict) -> None:
+    """#3780 の現状固定: 設計の PR は、全セクションが詳細レビューを通っていても、前のラウンドの条件が違えば全差分を見る。"""
+    row = {"round": 1, "head": "abc", "base": MB, **changed}
+    got = scope_run("design", {"pr": 8, "rounds": [row], store.REVIEWED: _SECTIONS})[1]["items"][0]
+    assert (got["scope"], got["base"]) == (scope_decide.FULL, None)
+
+
+@pytest.mark.parametrize("every_section", [True, False])
+def test_round_one_is_the_full_diff_even_with_a_previous_head(every_section: bool) -> None:
+    """#3780 の受け入れ条件 4: 1 ラウンド目は、起点にできる head があっても差分の全体を見る。"""
+    assert scope_decide.review_scope(every_section, 1, "abc1234", [A], {A}) == scope_decide.Scope(scope_decide.FULL, None, ())
+
+
 def _read_with(mvv: object) -> dict:
     """MVV の記録が `mvv`（None なら記録が無い）の 1 ラウンドを持つ状態ファイルの中身。"""
     row = {"round": 1, "head": "h1", "verdict": "converged", fin.MVV_CHECKED: True}

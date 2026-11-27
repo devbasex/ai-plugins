@@ -303,6 +303,18 @@ def test_redline_findings_wait_for_a_person(repos: Repos, wt: Path, tmp_path: Pa
     assert [line for line in body.splitlines() if "人に聞く操作" in line and report_decide.REDLINE_LABEL in line]
 
 
+def test_redline_first_raised_in_round_two_waits_for_a_person(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """#3780 の現状固定: 2 ラウンド目に初めて出た、位置の無い必ず人の承認が要る操作の major も、直さずに閉じず人の判断を待つ。"""
+    _push_base(repos, text=REDLINE_BODY)
+    held = {"text": "人に聞く操作", "severity": "major", "impact": IMPACT, "mvv": "P1"}
+    fake = Recording(tmp_path / "st", {"codex": [[{**MAJOR, "mvv": "Value 1"}], [held]], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    assert (code, got["status"]) == (0, "ok")
+    assert got["summary"] == "2 ラウンドで converged。指摘 2 件（直した 1・見送った 0・未解決 0・人の承認を待つ 1）"
+    [row] = [r for r in _state(fake.state_dir)["findings"] if r["text"] == "人に聞く操作"]
+    assert (row["redline"], row["outcome"]) == (True, fin.UNRESOLVED)
+
+
 def test_new_mvv_drops_the_judgement_made_under_the_earlier_one(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """新しい MVV が承認された後の起動は、前の MVV で必ず人の承認が要る操作だった指摘の分類を外し、残りを普通の指摘として修正担当へ渡す。
     前の MVV での見送りは「出し直さない」の一覧に載せない。"""
