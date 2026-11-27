@@ -264,11 +264,17 @@ def live_value(reach: Reach, delivery: Mapping[str, Any], timeout: float) -> tup
     return record_decide.json_pointer(doc, str(spec["pointer"])), url
 
 
-def _timeout_of(delivery: Mapping[str, Any]) -> float:
-    """届け先 1 つの判定の上限の秒（`result.timeout_seconds`。無ければ `WAIT_LIMIT` の秒）。"""
+def declared_timeout(delivery: Mapping[str, Any]) -> Optional[float]:
+    """届け先 1 つの設定に書いた `result.timeout_seconds` の秒（無いか数でなければ None）。値を読む規則はここだけにある。"""
     result = delivery.get("result")
     got = result.get("timeout_seconds") if isinstance(result, Mapping) else None
-    return float(got) if isinstance(got, (int, float)) and not isinstance(got, bool) else limits.seconds(WAIT_LIMIT)
+    return float(got) if isinstance(got, (int, float)) and not isinstance(got, bool) else None
+
+
+def _timeout_of(delivery: Mapping[str, Any]) -> float:
+    """届け先 1 つの判定の上限の秒（`result.timeout_seconds`。無ければ `WAIT_LIMIT` の秒）。"""
+    got = declared_timeout(delivery)
+    return got if got is not None else limits.seconds(WAIT_LIMIT)
 
 
 def _cd_run(reach: Reach, delivery: Mapping[str, Any], after: str, deadline: float, runnable: bool) -> Optional[Mapping[str, Any]]:

@@ -801,8 +801,7 @@ def _share_age(release: Mapping[str, Any]) -> float:
     rows = record_decide.declared_deliveries(release)
     if rows is None:
         return limits.seconds(delivery_confirm.WAIT_LIMIT)
-    results = [r["result"] for r in rows if isinstance(r, Mapping) and isinstance(r.get("result"), Mapping)]
-    got = [float(r["timeout_seconds"]) for r in results if isinstance(r.get("timeout_seconds"), int)]
+    got = [t for r in rows if isinstance(r, Mapping) and (t := delivery_confirm.declared_timeout(r)) is not None]
     return max(got) if got else limits.seconds(delivery_confirm.WAIT_LIMIT)
 
 
