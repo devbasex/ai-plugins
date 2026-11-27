@@ -9,11 +9,12 @@ import json
 import pytest
 
 from ndf.checks import spec_model
-from ndf.progress import command, definition
+from ndf.progress import definition
+from ndf.progress.gate import finishing
 
 
 def _run(capsys, last_result, *argv: str) -> tuple[int, dict]:
-    code = command.main(list(argv))
+    code = finishing.main(list(argv))
     return code, last_result(capsys.readouterr().out)
 
 

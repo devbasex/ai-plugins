@@ -64,6 +64,7 @@ from ndf.progress.gate.asking import (
     present_material,
     question,
 )
+from ndf.progress.gate import finishing
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
 from ndf.progress.plan import external
@@ -646,10 +647,10 @@ def progress_main(argv: list[str]) -> int:
     """サブコマンド `ndf progress`（サブコマンドの表の `progress` の行が `ndf.progress.gate.progress_cli` を指す）。
 
     `reread` は承認ゲートの待ちの出し直し（#4446）。工程を流すサブコマンド（next・wait・answer・resync・work・show）は、スプリントの完了と同じトランザクションでレーンの行を
-    終える `Env`（`lane_env`。決定 17）で流す。ほか（new・disable など）は `command` へ渡す。P1b（`run`）はレーンを読まない
+    終える `Env`（`lane_env`。決定 17）で流す。ほか（new・disable・finish など）は `finishing.main` へ渡す。P1b（`run`）はレーンを読まない
     """
     if argv and argv[0] in run.COMMANDS:
         return command.run_main(run.parser(), lambda a, cwd: command.with_store(cwd, _progress, a), argv)
     if argv and argv[0] == "reread":
         return command.run_main(reread_parser(), lambda a, cwd: command.with_store(cwd, _cmd_reread, a), argv[1:])
-    return command.main(argv)
+    return finishing.main(argv)

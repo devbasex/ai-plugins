@@ -9,13 +9,14 @@ import pytest
 
 from ndf.core import durable
 from ndf.progress import command, definition, invoke, model, stage_inputs, store
+from ndf.progress.gate import finishing
 
 SHA = "a" * 64
 WORKTREE_OUT = {"worktree": "/work/repo/.worktrees/sprint/s1", "branch": "sprint/s1"}
 
 
 def _run(capsys, last_result, *argv: str) -> dict:
-    assert command.main(list(argv)) == 0
+    assert finishing.main(list(argv)) == 0
     return last_result(capsys.readouterr().out)
 
 

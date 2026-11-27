@@ -10,6 +10,7 @@
   `routes` を持つ（SF8）。終了コードは停止理由の種類から引く
 - 承認ゲート（`ndf.listen`）とプランの中の承認ゲートは、行を実行中のまま `work` を抜け、`next` が `gate` と `routes` を返す。
   回答は `answer`（と `ndf answer`。`ndf.progress.gate`）が事象 `answered` で残す。変更要求には指摘ファイルが要る（3365-4）。
+  書かれた回答を読む手と、回答が見た対象は `ndf.progress.run_approval` が持つ。
   直前の MVV 判定が省けると決めた承認ゲートは、回答した者 `service:mvv` の承認を書いて人へ質問せずに通す（#3745）
 - スプリントの完了と同じトランザクションで `Env.ended` を打つ（レーンの行を終える口。決定 17。`ndf.progress.gate.lane_env`）
 - 工程の出力は工程の出力の規約で照らしてから終了のマーカーを付ける。合わなければマーカーを付けず失敗にする（受け入れ条件 8）
@@ -20,14 +21,12 @@ from __future__ import annotations
 
 import argparse
 import functools
-import hashlib
 import json
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
-from enum import StrEnum
 from pathlib import Path
 from typing import Any, Optional
 
@@ -37,8 +36,9 @@ from ndf.contracts.worker_kinds import Recorded
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
 from ndf.progress import command, definition, invoke, issue_values, model, stages, store
-from ndf.progress.folding import REQUEST_CHANGES, StepProgress, answer_word, step_progress
+from ndf.progress.folding import REQUEST_CHANGES, Action, Move, StepProgress, answer_word, step_progress
 from ndf.progress.records import Records, github_records, sync_records
+from ndf.progress.run_approval import approved_seen, consume
 from ndf.progress.run_view import (
     ACTOR,
     ANSWERED,
@@ -53,8 +53,8 @@ from ndf.progress.run_view import (
     migrated_order,
     migration_drafts,
     event_payload,
-    read_accepted_head,
     released_answer,
+    work_root,
 )
 
 TOOL = __package__.rpartition(".")[2]
@@ -66,8 +66,7 @@ REJECTED = answer_word("rejected")
 # 外から待つ問い合わせの間隔と、作業が排他を取るまでの待ちの間隔（どちらも設定の値）
 WAIT_POLL = plan_cli.WAIT_POLL
 LOCK_POLL = durable.POLL
-# 作業の保存先（チェックアウトの保存先の下）と、起動した作業が排他を取るまで置く起動のマーカー（作業の保存先の下）
-WORK_DIR = "progress-work"
+# 起動した作業が排他を取るまで置く起動のマーカー（作業の保存先 `work_root` の下）
 LAUNCH_FILE = "launched.json"
 
 
@@ -112,29 +111,6 @@ def _write(st: store.Store, machine_id: str, *drafts: model.EventDraft) -> list[
 
 
 # --- 次の 1 手（純粋な判断） ----------------------------------------------------------------
-
-
-class Action(StrEnum):
-    """次の 1 手の種類（値は結果 JSON の `metrics.move` に載る）。"""
-
-    DONE = "done"
-    COMPLETE = "complete"
-    START = "start"
-    RESUME = "resume"
-    GATE = "gate"
-    CONSUME = "consume"
-    FAILED = "failed"
-
-
-@dataclass(frozen=True)
-class Move:
-    """次の 1 手。"""
-
-    action: Action
-    stage: Optional[stages.StageDef] = None
-    step: Optional[stages.StepDef] = None
-    progress: Optional[StepProgress] = None
-    event: Optional[model.Event] = None
 
 
 def _last(events: Iterable[model.Event], kind: str) -> Optional[model.Event]:
@@ -341,11 +317,6 @@ class Env:
     in_lane: Callable[[store.Store, str], bool] = lambda _st, _machine_id: False
 
 
-def work_root(root: Path, machine_id: str) -> Path:
-    """ステートマシンごとの作業の保存先（プランの実行の保存先と作業の記録）。名前はステートマシンの識別子の sha256 の頭。"""
-    return root / WORK_DIR / hashlib.sha256(machine_id.encode()).hexdigest()[: model.REPO_KEY_LENGTH]
-
-
 def resync(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:
     v = read(st, machine_id)
     items, errors = sync_records(v, cwd, env.records)
@@ -370,6 +341,16 @@ class Drive:
 
     def write(self, *drafts: model.EventDraft) -> None:
         _write(self.st, self.machine_id, *drafts)
+
+    def report(self, v: View, m: Move) -> dict[str, Any]:
+        return report(v, m)
+
+    def proceed(self, v: View, m: Move, summary: str) -> dict[str, Any]:
+        return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", self.machine_id))
+
+    def refuse(self, v: View, m: Move, detail: str) -> None:
+        assert m.stage is not None and m.step is not None
+        self.write(_failed(m.stage, m.step.id, v.rev, "refused", detail))
 
     def synced(self) -> None:
         """行を終えた後に進捗記録を書き直す。記録の失敗は工程を止めず警告に載せる。"""
@@ -487,44 +468,6 @@ def _launched(d: Drive, v: View, m: Move) -> dict[str, Any]:
     return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("wait", d.machine_id))
 
 
-def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
-    """承認ゲートのステップの出力（回答を持つ結果 JSON）。"""
-    p = event_payload(answer)
-    summary = f"承認ゲート {step.gate} の回答: {p['answer']}（{answer.draft.reason}）"
-    return result.result(TOOL, result.OK, summary, metrics={"answer": p["answer"], "seq": answer.seq})
-
-
-def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
-    """承認ゲートの回答を読む。回答が無ければ直前の MVV 判定が省けると決めた承認ゲートで、`service:mvv` の承認を書く。
-
-    省いた回答を書いたら、同じ駆動では読まずに `next` を返して止まる。回答を読む前の検証（`gate.recheck`）はサブコマンドの
-    エントリポイントでだけ打つため、続けて読むと判定の後に進んだ PR の head でも承認ゲートを省いてしまう。次の `next` が検証を通してから読む。
-    数えない MVV 判定の回答（`model.mvv_answer_void`）と、省けると決めた判定の無い手は、事象を書かずに承認ゲートの待ちを返す（#3959）。
-    """
-    assert m.stage is not None and m.step is not None and m.progress is not None
-    waiting = replace(m, action=Action.GATE, event=None)
-    if m.event is not None and model.mvv_answer_void(event_payload(m.event), m.step.gate):
-        return report(v, waiting)
-    if m.event is None:
-        held = model.mvv_skip(m.progress.done, m.stage.mvv_before(m.step.id), m.step.gate)
-        if held is None:
-            return report(v, waiting)
-        qid = model.question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
-        payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, held, qid)
-        d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
-        summary = f"{reason}。回答は検証を通してから読むので next を打つ"
-        return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", d.machine_id))
-    if event_payload(m.event)["answer"] == APPROVED:
-        rep = gate_report(m.step, m.event)
-        payload = {"step": m.step.id, "status": FINISHED, "report": rep, "generation": m.progress.generation}
-        d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=payload, rev=v.rev))
-        return None
-    detail = f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）"
-    d.write(_failed(m.stage, m.step.id, v.rev, "refused", detail))
-    d.synced()
-    return None
-
-
 def _complete(d: Drive, v: View) -> dict[str, Any]:
     done = model.EventDraft("completed", ACTOR, None, rev=v.rev)
     append(d.st, d.machine_id, lambda _v: [done], after=lambda conn: d.env.ended(conn, d.machine_id))
@@ -551,7 +494,7 @@ Hand = Callable[[Drive, View, Move], Optional[dict[str, Any]]]
 # 副作用を持つ手 → 打つ関数（表に無い手は副作用の無い結果 `report` を返す）
 _HANDS: dict[Action, Hand] = {
     Action.COMPLETE: lambda d, v, _m: _complete(d, v),
-    Action.CONSUME: _consume,
+    Action.CONSUME: consume,
     Action.START: lambda d, v, m: _start(d, v, m.stage) if m.stage is not None else None,
     Action.RESUME: _resume,
 }
@@ -811,27 +754,6 @@ def step_location(step: str, prog: StepProgress) -> str:
 def step_dir(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> Path:
     """ステップのプランの実行の保存先。`_start` と `_run_step` が同じ世代の同じ保存先を得る。"""
     return work_root(d.st.root, v.machine_id) / s.id / step_location(step.id, step_progress(v, s.name))
-
-
-def approved_seen(answers: StageAnswers, root: Path) -> Optional[dict[str, Any]]:
-    """工程の承認ゲートの最新の承認の回答が見た対象（事象の `seen`）。無ければ None（#4409 の決定 5）。
-
-    利用者の回答でも、MVV 判定が通した回答（`service:mvv`）でも同じ形で読む。マージが本番へ反映されない（`production` が偽）
-    承認は、出し直さずに繰り上げた head（`gate.recheck`）を重ねる。分からない・本番へ反映される承認には重ねない。
-    `root` は状態の保存先。最新の承認の回答は `answers` の走査から得る（#4513）。
-    """
-    ev = answers.approved()
-    if ev is None:
-        return None
-    p = event_payload(ev)
-    seen = p.get("seen")
-    if not isinstance(seen, dict):
-        return None
-    gate_id = p.get("gate_id")
-    carried = None
-    if seen.get("production") is False and gate_id:
-        carried = read_accepted_head(work_root(root, answers.machine_id), str(gate_id))
-    return {**seen, "head": carried} if carried else dict(seen)
 
 
 def _released_reader(answers: StageAnswers) -> Callable[[], Optional[Recorded]]:

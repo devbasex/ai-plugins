@@ -14,7 +14,7 @@ import pytest
 
 from ndf.adapters.github import FileAt
 from ndf.contracts import result
-from ndf.progress import gate, invoke, lane, model, run, stages, store
+from ndf.progress import gate, invoke, lane, model, run, run_approval, stages, store
 
 DESIGN_PR = 4565
 
@@ -153,7 +153,7 @@ def _consume_as_the_old_version(st, tid):
     v = run.read(st, tid)
     m = run.decide(v)
     assert m.action == run.Action.CONSUME
-    report = run.gate_report(m.step, m.event)
+    report = run_approval.gate_report(m.step, m.event)
     payload = {"step": m.step.id, "status": run.FINISHED, "report": report, "generation": m.progress.generation}
     run.append(st, tid, lambda now: [run.step_event(now, m.stage.name, payload)])
     assert m.step.id in run.step_progress(run.read(st, tid), m.stage.name).done

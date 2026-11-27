@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -40,10 +41,17 @@ RETRY_EVENT = _event_kind("retry")
 DEFINITION_MIGRATED = _event_kind("definition_migrated")
 # 移行で並べ替える工程（定義の id）。クリーンアップをデプロイの直後へ移す
 CLEANUP_STAGE_ID, DEPLOY_STAGE_ID = "cleanup", "deploy"
-# 承認資料の保存先（状態機械の作業の保存先 `run.work_root` の下）
+# 作業の保存先（チェックアウトの保存先の下）
+WORK_DIR = "progress-work"
+# 承認資料の保存先（状態機械の作業の保存先 `work_root` の下）
 MATERIAL_DIR = "gate-materials"
 # 承認の後に文書だけが加わって出し直さなかった head の保存先（承認資料の隣）
 ACCEPTED_SUFFIX = ".accepted.json"
+
+
+def work_root(root: Path, machine_id: str) -> Path:
+    """ステートマシンごとの作業の保存先（プランの実行の保存先と作業の記録）。名前はステートマシンの識別子の sha256 の頭。"""
+    return root / WORK_DIR / hashlib.sha256(machine_id.encode()).hexdigest()[: model.REPO_KEY_LENGTH]
 
 
 def _accepted_path(work: Path, gate_id: str) -> Path:
