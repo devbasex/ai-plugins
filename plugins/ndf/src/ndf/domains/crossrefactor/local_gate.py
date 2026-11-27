@@ -342,7 +342,11 @@ def run_suites(tree: Path, found: means.Means, budget: TestBudget, log: LogWrite
         remaining = budget.total - budget.used
         if remaining <= 0:
             raise _stop_limit(budget)
-        timeout = remaining if budget.suite is None else min(budget.suite, remaining)
+        # 全体の残りで縛ったかを 1 度だけ判定し、時間上限と時間切れの扱いの両方に使う
+        if budget.suite is None or budget.suite >= remaining:
+            timeout, by_total = remaining, True
+        else:
+            timeout, by_total = budget.suite, False
         began = ex.clock()
         try:
             code, output = _run_one(tree, found, command, timeout, ex)
@@ -350,7 +354,7 @@ def run_suites(tree: Path, found: means.Means, budget: TestBudget, log: LogWrite
             raise final_gate.GateStopped("precondition", f"テストの suite {shown} を起動できない（{type(exc).__name__}）") from None
         budget.used += max(0.0, ex.clock() - began - ex.waited(began))
         log(i, redact_output(f"{shown}\n$ {command}\n{output}"))
-        if code is None and (budget.suite is None or budget.suite >= remaining):
+        if code is None and by_total:
             raise _stop_limit(budget)
         if code != 0:
             failed.append(Failed(i, shown, code, command, output))
