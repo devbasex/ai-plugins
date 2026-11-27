@@ -555,7 +555,7 @@ def new_in_pr(g: git.Git, previous: Range, current: Range, listed: Listings) -> 
 
 
 def _with_old_paths(entries: Mapping[str, _Entry], paths: Sequence[str]) -> list[str]:
-    """`paths` と、そのうち改名・複製の元のパス（元を指定しないと、足したファイルの差分になる）。"""
+    """`paths` と、そのうち改名の元のパス（元を指定しないと、足したファイルの差分になる）。"""
     return sorted({p for path in paths for p in ((entries[path].old, path) if path in entries else (path,))})
 
 
@@ -565,14 +565,14 @@ def _diff_of(g: git.Git, span: str, paths: Sequence[str]) -> str:
 
 
 def _pr_paths(g: git.Git, previous: Range, current: Range, listed: Listings) -> list[str]:
-    """PR が前のラウンドの時点か今に変えるファイル（改名・複製の元のパスを含む）。"""
+    """PR が前のラウンドの時点か今に変えるファイル（改名の元のパスを含む）。"""
     seen, _ = _listing(g, f"{previous.base}...{previous.head}", listed)
     now, _ = _listing(g, f"{current.base}...{current.head}", listed)
     return sorted({p for e in (*seen.values(), *now.values()) for p in (e.old, e.new)})
 
 
 def _added_paths(g: git.Git, current: Range, added: Sequence[str], listed: Listings) -> list[str]:
-    """`added` のうち今の PR の差分として渡すパス（改名・複製は元のパスを含む）。`added` が空なら一覧を読まない。"""
+    """`added` のうち今の PR の差分として渡すパス（改名は元のパスを含む）。`added` が空なら一覧を読まない。"""
     if not added:
         return []
     now, _ = _listing(g, f"{current.base}...{current.head}", listed)

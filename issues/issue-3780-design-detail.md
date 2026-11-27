@@ -161,7 +161,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `new_in_pr` | `changes.py` | 新設 | `new_in_pr(g: git.Git, previous: Range, current: Range, listed: Listings) -> Optional[tuple[str, ...]]` | 比較基点が変わったことで、既読の差分にも今回渡す差分にも無い変更を持つファイルを返す。比べられなければ None |
 | `since_diff` | `changes.py` | 新設 | `since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str` | 前の head からの差分（比較基点が違えば PR が変えるファイルに絞る）に、`added` の今の PR の差分を続けて返す |
-| `since_files` | `changes.py` | 新設 | `since_files(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> tuple[str, ...]` | `since_diff` が渡すファイルのパスを返す。足すファイルが改名か複製なら、`since_diff` と同じく元のパスも含める。PR に既にあるインラインのコメントを選ぶ `reviewing.remarks` が使う |
+| `since_files` | `changes.py` | 新設 | `since_files(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> tuple[str, ...]` | `since_diff` が渡すファイルのパスを返す。足して渡す PR の差分に改名があれば、`since_diff` と同じく、改名前と改名後の両方のパスを返す。PR に既にあるインラインのコメントを選ぶ `reviewing.remarks` が使う |
 | `touched` | `changes.py` | 新設 | `touched(g: git.Git, since: str, head: str) -> leftover_decide.Touched` | `since` の後に変わったファイルと、足した行・書き換えた行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`read_origin`）ではない |
 
 - `new_in_pr`
