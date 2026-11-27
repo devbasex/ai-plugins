@@ -14,7 +14,7 @@ import pytest
 from ndf.adapters import agents
 from ndf.contracts import writing
 from ndf.core.converge import participants
-from ndf.domains.crossreview import criteria_decide, report_decide, verify, verify_decide
+from ndf.domains.crossreview import criteria_decide, report_decide, reviewing, verify, verify_decide
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 from ndf.domains.records import mvv_decide as md
@@ -278,6 +278,27 @@ def test_issue_4363_ask_points_the_mvv_criterion_at_the_copies_in_the_input_dire
         assert copied.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize(
+    "key, names",
+    [("other", ["round2.diff"]), ("filled", ["full.diff"]), ("both", ["round2.diff", "full.diff"])],
+)
+def test_issue_4363_filled_read_gives_the_diffs_read_by_the_seats_of_the_finding(key: str, names: list) -> None:
+    filled = reviewing.FilledRead(Path("full.diff"), frozenset({"filled", "both"}), frozenset({"other", "both"}))
+    assert [d.name for d in filled.diffs(key, Path("round2.diff"))] == names
+
+
+def test_issue_4363_ask_lists_the_diffs_of_each_finding_when_they_differ(tmp_path: Path) -> None:
+    """指示は渡す指摘の差分をすべて挙げ、一覧の各行はその指摘の差分だけを持つ。渡さない指摘の差分は挙げない。"""
+    diff, seen = _diff(tmp_path), []
+    full, unused = diff.parent / "round1-full.diff", diff.parent / "unused.diff"
+    diffs = {"r1-1": [diff], "r1-2": [diff, full], "r1-3": [unused]}
+    verify.ask(_AskRun(tmp_path), 1, [_row("r1-1"), _row("r1-2")], diffs, _launcher(seen, []))
+    prompt = seen[0].argv[-1]
+    assert str(full) in prompt and str(unused) not in prompt
+    listed = (diff.parent / "round1-verify-findings.jsonl").read_text(encoding="utf-8")
+    assert [json.loads(line)["diffs"] for line in listed.splitlines()] == [[str(diff)], [str(diff), str(full)]]
+
+
 @pytest.mark.parametrize("how", ["failed", "denied", "no-json", "empty"])
 def test_issue_4363_ask_failure_gives_no_answer_and_one_warning(tmp_path: Path, how: str) -> None:
     """起動の失敗・差分の読み取りの拒否・読めない回答・空の回答は、回答なしと注意 1 件にし、起動し直さない。"""
@@ -353,29 +374,17 @@ def test_issue_4363_run_does_not_launch_the_judge_without_a_finding_to_ask(
     assert (code, got["status"]) == (0, "ok") and fake.judged == []
 
 
-@pytest.mark.parametrize(
-    "from_codex, filled_text, filled_severity, diffs",
-    [
-        ([], "読み込みが止まる", "major", ["round2-full.diff"]),
-        (["削除が止まる"], "読み込みが止まる", "minor", ["round2.diff"]),
-        (["削除が止まる"], "読み込みが止まる", "major", ["round2.diff", "round2-full.diff"]),
-        ([("読み込みが止まる", "minor")], "読み込みが止まる", "major", ["round2.diff", "round2-full.diff"]),
-    ],
-    ids=["filled-only", "filled-not-asked", "both-seats-asked", "same-finding-from-both"],
-)
 def test_issue_4363_run_gives_the_judge_the_diffs_read_by_the_seats_of_the_asked_findings(
-    wt: Path, tmp_path: Path, capsys, monkeypatch, from_codex: list, filled_text: str, filled_severity: str, diffs: list
+    wt: Path, tmp_path: Path, capsys, monkeypatch
 ) -> None:
     """席を埋めたラウンドの判定役は 1 回の起動で、渡す指摘を出した席が読んだ差分をすべて読む。"""
-    said = [(f, "major") if isinstance(f, str) else f for f in from_codex]
-    codex = [{**HEAVY, "text": text, "severity": severity} for text, severity in said]
-    filled = {**HEAVY, "text": filled_text, "severity": filled_severity}
-    fake = Fake(tmp_path / "st", {"codex": [[HEAVY], codex], "kiro": [[], FAIL, FAIL], "claude": [[filled]]})
+    codex, filled = {**HEAVY, "text": "削除が止まる"}, {**HEAVY, "text": "読み込みが止まる"}
+    fake = Fake(tmp_path / "st", {"codex": [[HEAVY], [codex]], "kiro": [[], FAIL, FAIL], "claude": [[filled]]})
     _run(capsys, monkeypatch, fake, wt)
     first, second = (spec.argv[-1] for spec in fake.judged[:2])
     assert "round1.diff" in first
-    [line] = [line for line in second.splitlines() if line.startswith(("このラウンドの差分: ", "差分: "))]
-    assert re.findall(r"round2[\w-]*\.diff", line) == diffs
+    [line] = [line for line in second.splitlines() if line.startswith("差分: ")]
+    assert re.findall(r"round2[\w-]*\.diff", line) == ["round2.diff", "round2-full.diff"]
 
 
 def test_issue_4363_lowered_finding_is_not_counted_as_a_return(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
