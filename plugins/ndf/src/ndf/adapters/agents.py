@@ -178,7 +178,8 @@ class Warned:
 
 @dataclass(frozen=True)
 class Launch:
-    """外部 CLI の 1 回の起動。`timeout` は監視の上限の秒。`env` は足す環境変数。"""
+    """外部 CLI の 1 回の起動。`timeout` は監視の上限の秒。`env` は足す環境変数。`keep_fds` は子に引き継ぐファイル記述子
+    （親が終わっても、子が生きている間は `flock` の排他が解けないようにする）。"""
 
     agent: str
     argv: tuple[str, ...]
@@ -186,6 +187,7 @@ class Launch:
     paths: AgentPaths
     timeout: float
     env: Optional[dict[str, str]] = None
+    keep_fds: tuple[int, ...] = ()
 
 
 class AgentState(StrEnum):
@@ -294,7 +296,14 @@ def _start(spec: Launch) -> subprocess.Popen:
     spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
     with open(spec.paths.out, "wb") as out, open(spec.paths.err, "wb") as err:
         return subprocess.Popen(
-            list(spec.argv), cwd=spec.cwd, stdout=out, stderr=err, stdin=subprocess.DEVNULL, env=env, start_new_session=True
+            list(spec.argv),
+            cwd=spec.cwd,
+            stdout=out,
+            stderr=err,
+            stdin=subprocess.DEVNULL,
+            env=env,
+            start_new_session=True,
+            pass_fds=spec.keep_fds,
         )
 
 

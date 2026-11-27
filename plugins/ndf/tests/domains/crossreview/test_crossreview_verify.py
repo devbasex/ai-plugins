@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -194,7 +196,7 @@ class _AskRun:
     """`verify.ask` が読む、1 回の起動の値の偽物。"""
 
     def __init__(self, root: Path, snapshot: Optional[mvv.Snapshot] = None):
-        self.cfg = SimpleNamespace(worktree=root / "wt", settings=SimpleNamespace(focus=()))
+        self.cfg = SimpleNamespace(worktree=root / "wt", state_dir=root, settings=SimpleNamespace(focus=()))
         self.snapshot, self.documents, self.root = snapshot, False, root
         self.notes: list[tuple[int, str, str]] = []
 
@@ -392,38 +394,70 @@ def test_issue_4363_ask_leaves_no_partial_record_when_copying_is_interrupted(tmp
     assert "verdicts" in (held / seen[0].paths.out.name).read_text(encoding="utf-8")
 
 
+def _left(root: Path, name: str, output: str = "出力") -> Path:
+    """前の起動が残した、目印のある出力のディレクトリ。"""
+    held = root / name
+    held.mkdir()
+    (held / "round1-verify.out").write_text(output, encoding="utf-8")
+    (root / f"{name}.held").touch()
+    return held
+
+
 def test_issue_4363_recover_keeps_a_record_that_differs_from_the_saved_one(tmp_path: Path) -> None:
-    """保存先に同じ名前の違う中身があれば、どちらも変えずにディレクトリと名前を残す。同じ中身なら片付ける。"""
-    run = _AskRun(tmp_path)
-    run.cfg.state_dir = tmp_path
-    names = ["round1-verify-differs", "round1-verify-same"]
-    for name, saved in zip(names, ("書きかけ", "出力")):
-        (tmp_path / name).mkdir()
-        (tmp_path / name / "round1-verify.out").write_text("出力", encoding="utf-8")
-        (tmp_path / f"{name}.out").write_text(saved, encoding="utf-8")
-    data = {store.JUDGE_HELD: list(names)}
-    assert verify.recover(run, data) and data == {store.JUDGE_HELD: names[:1]}
+    """保存先に同じ名前の違う中身があれば、どちらも変えずにディレクトリと目印を残す。同じ中身なら片付ける。"""
+    differs, same = _left(tmp_path, "round1-verify-differs"), _left(tmp_path, "round1-verify-same")
+    (tmp_path / f"{differs.name}.out").write_text("書きかけ", encoding="utf-8")
+    (tmp_path / f"{same.name}.out").write_text("出力", encoding="utf-8")
     # 打ち直しても、同じ衝突の診断のファイルは増えない
-    assert not verify.recover(run, data) and len(list(tmp_path.glob("*.detail.log"))) == 1
-    assert (tmp_path / names[0] / "round1-verify.out").read_text(encoding="utf-8") == "出力"
-    assert (tmp_path / f"{names[0]}.out").read_text(encoding="utf-8") == "書きかけ"
-    assert not (tmp_path / names[1]).exists()
+    for _ in range(2):
+        verify.recover(_AskRun(tmp_path))
+    assert len(list(tmp_path.glob("*.detail.log"))) == 1
+    assert (differs / "round1-verify.out").read_text(encoding="utf-8") == "出力"
+    assert (tmp_path / f"{differs.name}.out").read_text(encoding="utf-8") == "書きかけ"
+    assert [p.name for p in tmp_path.glob("*.held")] == [f"{differs.name}.held"] and not same.exists()
 
 
-def test_issue_4363_recover_leaves_the_directory_of_a_running_judge(tmp_path: Path) -> None:
-    """重ねて起動した実行は、使っている最中のディレクトリを移さず消さず、名前を残す。"""
-    run, data = _AskRun(tmp_path), {}
-    run.cfg.state_dir = tmp_path
-    answered = _launcher([], [holding(_row())])
+def test_issue_4363_recover_waits_until_the_judge_process_releases_the_lock(tmp_path: Path) -> None:
+    """起動した実行が終わっても、排他を引き継いだ判定役が生きている間は回収しない。"""
+    run, held = _AskRun(tmp_path), tmp_path / "round1-verify-live"
+    held.mkdir()
+    (held / "round1-verify.out").write_text("書き込み中", encoding="utf-8")
+    parent = verify._claim(run, 1, held)
+    child = os.dup(parent)  # 子のプロセスが引き継ぐファイル記述子の代わり
+    os.close(parent)
+    verify.recover(run)
+    assert (held / "round1-verify.out").exists()
+    os.close(child)
+    verify.recover(run)
+    assert not held.exists() and not list(tmp_path.glob("*.held"))
+
+
+def test_issue_4363_ask_hands_the_lock_to_the_judge_and_keeps_its_directory(tmp_path: Path, monkeypatch) -> None:
+    """判定役の起動は排他を引き継ぎ、重ねて起動した実行は使っている最中のディレクトリを移さない。"""
+    run, answered, passed = _AskRun(tmp_path), _launcher([], [holding(_row())]), []
+    monkeypatch.setattr(agents.subprocess, "Popen", lambda argv, **kwargs: passed.append(kwargs["pass_fds"]))
 
     def launch(spec: agents.Launch) -> agents.AgentStatus:
         status = answered(spec)
-        verify.hold(data, spec)
-        assert not verify.recover(run, data) and spec.paths.out.exists()
+        verify.recover(run)
+        assert spec.paths.out.exists()
+        agents._start(replace(spec, paths=agents.AgentPaths.at(tmp_path / "popen")))
+        assert passed == [spec.keep_fds] and len(spec.keep_fds) == 1
         return status
 
     answers = verify.ask(run, 1, [_row()], {"r1-1": [_diff(tmp_path)]}, launch)
-    assert answers.verdicts and verify.recover(run, data) and data == {}
+    assert answers.verdicts and not list(tmp_path.glob("*.held"))
+
+
+def test_issue_4363_ask_launches_without_a_marker_when_the_state_dir_cannot_lock(tmp_path: Path, monkeypatch) -> None:
+    def no_lock(*_: object) -> None:
+        raise OSError("locks are not supported")
+
+    monkeypatch.setattr(verify.fcntl, "flock", no_lock)
+    run, seen = _AskRun(tmp_path), []
+    answers = verify.ask(run, 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher(seen, [holding(_row())]))
+    assert answers.verdicts and seen[0].keep_fds == () and not list(tmp_path.glob("*.held*"))
+    assert not list(tmp_path.glob(".round*")) and any("排他できない" in note[2] for note in run.notes)
 
 
 @pytest.mark.parametrize("asked, resumed", [((), True), (("a.md#見出し",), False)], ids=["unsent-head", "other-sections"])
@@ -553,11 +587,8 @@ def test_issue_4363_run_resumes_from_the_judge_without_launching_the_reviewers_a
     first.verdict = interrupted
     with pytest.raises(KeyboardInterrupt):
         _run(capsys, monkeypatch, first, wt)
-    # 出力の移動中の中断が残すディレクトリを作る。名前は起動の直前に状態ファイルへ残っている
-    [name] = _state(first.state_dir)["judge_held"]
-    held = first.state_dir / name
-    held.mkdir()
-    (held / "round1-verify.out").write_text("移していない出力", encoding="utf-8")
+    # 出力の移動中の中断が残すディレクトリと、目印の無いディレクトリ
+    held = _left(first.state_dir, "round1-verify-left", "移していない出力")
     foreign = first.state_dir / "round1-verify-notmine"
     foreign.mkdir()
     second = Fake(tmp_path / "st", {})
@@ -569,6 +600,6 @@ def test_issue_4363_run_resumes_from_the_judge_without_launching_the_reviewers_a
     [row] = state["findings"]
     assert (row["id"], row["check"]["lowered"]) == ("r1-1", True)
     assert len(state["rounds"]) == 1 and "pending_review" not in state
-    # 状態ファイルに名前のあるディレクトリだけを、出力を保存してから片付ける
-    assert not held.exists() and foreign.is_dir() and "judge_held" not in state
-    assert (second.state_dir / f"{name}.out").read_text(encoding="utf-8") == "移していない出力"
+    # 目印のあるディレクトリだけを、出力を保存してから片付ける
+    assert not held.exists() and foreign.is_dir()
+    assert (second.state_dir / "round1-verify-left.out").read_text(encoding="utf-8") == "移していない出力"

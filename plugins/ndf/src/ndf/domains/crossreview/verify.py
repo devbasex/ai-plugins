@@ -3,10 +3,10 @@
 判定役は、修正担当・相手役とは別の、読むだけの claude の起動である（`participants.read_only_launch`）。読める場所は
 レビューする worktree と、この実行の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV の写し）だけである。
 指摘の文はプロセスの引数に載せず一覧のファイルで渡す。一覧は、実行者だけが開ける資料のディレクトリに置く。判定役の出力は
-起動ごとに新しく作る実行者だけが開けるディレクトリに書かせ（名前は起動の直前に状態ファイルへ残す）、起動の後で記録を起動ごとの名前で状態の保存先へ移してディレクトリを
-消す。移している途中で割り込まれたら、移していない記録をディレクトリに残し、
-再開が、状態ファイルに名前のあるディレクトリのうち、起動したプロセスが排他を持っていないものだけから移して、
-空になれば消す（`recover`）。ハードリンクを作れない保存先では、排他的に新規作成して写す。移した記録は残すだけで、片付けない。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の
+起動ごとに新しく作る実行者だけが開けるディレクトリに書かせ、起動の後で記録を起動ごとの名前で状態の保存先へ移してディレクトリを
+消す。移している途中で割り込まれたら、移していない記録をディレクトリに残す。再開は、NDF が作った目印（`<ディレクトリ名>.held`）の
+あるディレクトリのうち、目印の排他（`flock`）を取れたものだけから移して、空になれば消す（`recover`）。排他は起動した実行と判定役の
+プロセスが持つ。ハードリンクを作れない保存先では、排他的に新規作成して写す。移した記録は残すだけで、片付けない。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の
 `drive` である。
 
 失敗しても例外で駆動を止めず、起動し直さない。回答なしと注意にする（どの指摘も下がらない）。注意は PR の記録に載るので、
@@ -22,20 +22,22 @@ import os
 import re
 import shutil
 import tempfile
-from collections.abc import Iterator, Mapping, MutableMapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
 from ndf.adapters import agents
 from ndf.core.converge import participants
-from ndf.domains.crossreview import criteria_decide, store, verify_decide
+from ndf.domains.crossreview import criteria_decide, verify_decide
 from ndf.domains.crossreview.fixer import Launcher
 from ndf.domains.crossreview.settings import RunConfig
 from ndf.domains.records import mvv
 
 # 起動ごとの出力のディレクトリの名前（記録の名前の部分とラウンドの番号）
 _HELD = re.compile(r"(round(\d+)-verify)-\w+")
+# 目印のファイル名の接尾辞（目印の名前は、ディレクトリの名前にこれを足したもの）
+_MARKER = ".held"
 
 
 class VerifyRun(Protocol):
@@ -99,22 +101,38 @@ def _save_record(record: Path, to: Path) -> None:
         raise
 
 
-@contextmanager
-def _owned(held: Path) -> Iterator[bool]:
-    """起動ごとのディレクトリ `held` の排他（`flock`）を待たずに取り、抜けるまで持つ。取れたら真。起動したプロセスが記録を移し
-    終えるまで持ち、プロセスが終われば OS が解く。開けないか排他を使えない保存先では偽。"""
-    fd = None
+def _marker(held: Path) -> Path:
+    """起動ごとのディレクトリ `held` の目印。目印は起動ごとに 1 つで、ほかの実行の保存で消えない。"""
+    return held.with_name(held.name + _MARKER)
+
+
+def _claim(run: VerifyRun, round_no: int, held: Path) -> Optional[int]:
+    """`held` の目印を作り、排他を持つファイル記述子を返す。排他してから目印の名前にするので、回収は持ち主のいる目印を排他できない。
+    排他できない保存先では、目印を作らず None を返す（判定役は起動する。中断で残ったディレクトリは回収しない）。"""
+    fd, made = None, None
     try:
-        try:
-            fd = os.open(held, os.O_RDONLY)
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            got = True
-        except OSError:
-            got = False
-        yield got
-    finally:
-        if fd is not None:
+        fd, made = tempfile.mkstemp(prefix=f".{held.name}.", suffix=".tmp", dir=held.parent)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.rename(made, _marker(held))
+        return fd
+    except OSError as exc:
+        why = f"判定役の出力のディレクトリを排他できないので、中断で残っても自動で片付けない（{type(exc).__name__}）"
+        run.note(round_no, "verify", why)
+        if fd is not None and made is not None:
             os.close(fd)
+            Path(made).unlink(missing_ok=True)
+        return None
+
+
+def _release(held: Path, fd: Optional[int]) -> None:
+    """`_claim` の排他を手放す。`held` が消えていれば目印も消し、残っていれば回収のために目印を残す。"""
+    if fd is None:
+        return
+    try:
+        if not held.exists():
+            _marker(held).unlink(missing_ok=True)
+    finally:
+        os.close(fd)
 
 
 def _move_records(run: VerifyRun, round_no: int, held: Path, stem: Path) -> bool:
@@ -150,37 +168,32 @@ def _keep_records(run: VerifyRun, round_no: int, held: Path, stem: Path) -> bool
     return saved
 
 
-def hold(data: MutableMapping[str, Any], spec: agents.Launch) -> None:
-    """起動 `spec` の出力のディレクトリの名前を、状態ファイルの中身 `data` に足す（NDF が作ったと再開が確かめる記録）。"""
-    data[store.JUDGE_HELD] = [*store.list_of(data, store.JUDGE_HELD), spec.paths.out.parent.name]
-
-
-def recover(run: VerifyRun, data: MutableMapping[str, Any]) -> bool:
-    """前の起動が残した出力のディレクトリのうち、状態ファイルの中身 `data` に名前のあるものから記録を移し、空になれば消す。
-    別の実行が使っている（排他を取れない）ディレクトリは触らず、名前を残す。移せない記録は消さずに残し、名前も残す（次の起動でもう一度移す）。`data` を変えたら真。"""
-    names = store.list_of(data, store.JUDGE_HELD)
-    left = []
-    for name in names:
-        found = _HELD.fullmatch(str(name))
-        held = run.cfg.state_dir / str(name)
-        if found is None or held.is_symlink() or not held.is_dir():
+def recover(run: VerifyRun) -> None:
+    """前の起動が残した出力のディレクトリのうち、目印のあるものから記録を移し、空になれば目印と一緒に消す。起動した実行か
+    判定役のプロセスが排他を持つ間は触らない。移せない記録は消さずに残し、目印も残す（次の起動でもう一度移す）。"""
+    for marker in sorted(run.cfg.state_dir.glob(f"round*-verify-*{_MARKER}")):
+        name = marker.name.removesuffix(_MARKER)
+        found = _HELD.fullmatch(name)
+        if found is None:
             continue
         round_no = int(found[2])
-        with _owned(held) as free:
-            if not free:
-                left.append(name)
-                continue
-            try:
+        held = run.cfg.state_dir / name
+        try:
+            fd = os.open(marker, os.O_RDWR | os.O_NOFOLLOW)
+        except OSError:  # 別の実行が片付けた直後の目印と、開けない目印は触らない
+            continue
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if held.is_dir() and not held.is_symlink():
                 _move_records(run, round_no, held, run.cfg.state_dir / found[1])
                 held.rmdir()  # 空のときだけ消える
-            except OSError as exc:
-                run.note(round_no, "verify", f"判定役の出力のディレクトリ {name} を片付けられない（{type(exc).__name__}）")
-                left.append(name)
-    if left:
-        data[store.JUDGE_HELD] = left
-    else:
-        data.pop(store.JUDGE_HELD, None)
-    return left != names
+            marker.unlink(missing_ok=True)
+        except BlockingIOError:  # 使っている最中
+            pass
+        except OSError as exc:
+            run.note(round_no, "verify", f"判定役の出力のディレクトリ {name} を片付けられない（{type(exc).__name__}）")
+        finally:
+            os.close(fd)
 
 
 def _detail(run: VerifyRun, round_no: int, spec: agents.Launch, text: str) -> None:
@@ -231,12 +244,17 @@ def ask(
     held_mvv = criteria_decide.approved(snap)
     # MVV の本文と共通原則の写しも、読めなければ確かめにならない資料である
     copied = () if held_mvv is None else tuple(p for p in (held_mvv.path, held_mvv.principles_path) if p is not None)
-    # 名前が状態ファイルに載る起動の前から、記録を移し終えるまで持つ（重ねて起動した実行の回収に触らせない）
-    with _owned(held):
+    claimed = _claim(run, round_no, held)
+    if claimed is not None:
+        # 判定役にも排他を引き継ぐ（この実行が強制終了されても、判定役が書き終えるまで回収させない）
+        spec = replace(spec, keep_fds=(claimed,))
+    try:
+        answers = _answers(run, round_no, rows, spec, (*used, listed, *copied), launch)
+    finally:
         try:
-            answers = _answers(run, round_no, rows, spec, (*used, listed, *copied), launch)
-        finally:
             saved = _keep_records(run, round_no, held, stem)
+        finally:
+            _release(held, claimed)
     # 保存できた出力が無ければ、ラウンドの記録から参照させない
     return answers._replace(record=held.name if saved else "")
 

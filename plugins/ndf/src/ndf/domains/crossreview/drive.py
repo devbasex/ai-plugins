@@ -304,8 +304,9 @@ def _start(cfg: RunConfig, reader_for: Optional[carry.ReaderFor], clean: report_
         seats=list(cfg.reviewers),
         filled=list(cfg.prefilled),
     )
-    if verify.recover(run, run.data) or rebound:
+    if rebound:
         _save(run)
+    verify.recover(run)
     _ingest_pending(run)
     _resend(run, synced)
     return run
@@ -623,7 +624,6 @@ def _keeping(run: _Run, round_no: int, prep: reviewing.Prepared, got: reviewing.
     def judging(spec: agents.Launch) -> agents.AgentStatus:
         data = store.read_state(run.ref)
         data[store.PENDING_REVIEW] = reviewing.pending(_round_record(run, round_no, prep), prep, got)
-        verify.hold(data, spec)
         store.write_object(run.ref.path, data)
         return launch(spec)
 
