@@ -254,7 +254,7 @@ def test_issue_4363_heavy_reports_at_different_places_are_kept_and_not_asked(ord
 @pytest.mark.parametrize("order", [1, -1])
 @pytest.mark.parametrize("basis", [{"mvv": "C7"}, {"mvv": "Value 5"}, {"protect": ["irreversible"]}])
 def test_issue_4363_finding_keeps_the_text_and_the_place_of_the_report_that_marked_it(basis: dict, order: int) -> None:
-    """承認や保護の根拠となる報告に 1 文が無くても、行は別の報告で上書きせず、1 文のある報告は本文に書き足す。"""
+    """承認や保護の根拠となる報告に 1 文が無くても、行は別の報告で上書きせず、1 文のある報告は本文に書き足し、その 1 文は公開しない欄に持つ。"""
     journal = drive.FindingJournal()
     told = [
         {"text": "A", "severity": "major", "path": "x.py", "line": 3, "by": "codex", **basis},
@@ -263,7 +263,7 @@ def test_issue_4363_finding_keeps_the_text_and_the_place_of_the_report_that_mark
     journal.enter(1, told[::order], ("Value 5", "C7"), "approved:11:aaa:ccc")
     row = journal.rows["r1-1"]
     assert (row["path"], row["line"], row.get("impact")) == ("x.py", 3, None)
-    assert row["text"].startswith(f"A{journal_mod.ALSO}a（y.py:5）") and IMPACT in row["text"]
+    assert row["text"] == f"A{journal_mod.ALSO}a（y.py:5）" and IMPACT in criteria_decide.fixer_impact(row)
 
 
 def test_issue_4363_every_operation_that_needs_approval_keeps_its_report() -> None:
@@ -878,7 +878,7 @@ def test_issue_4363_report_without_a_place_does_not_lead_the_unlowered_finding(s
     placeless = _told(severity=severity, impact="位置を示せない不具合")
     journal.enter(2, [placeless, _told(path="b.py", line=2, protect=protect)][::order])
     assert (row["severity"], row["path"], row["line"]) == (severity, "b.py", 2)
-    assert "位置を示せない不具合" in row["text"]
+    assert "位置を示せない不具合" in criteria_decide.fixer_impact(row) and "位置を示せない不具合" not in row["text"]
 
 
 @pytest.mark.parametrize("order", [1, -1])
@@ -889,7 +889,7 @@ def test_issue_4363_placeless_reports_all_reach_the_unlowered_finding_led_by_a_p
     plain = _told(impact="保存が止まる")
     journal.enter(2, [plain, protected, _told(path="b.py", line=2)][::order])
     assert (row.get("path"), row["impact"]) == (None, "秘密が記録に残る")
-    assert "保存が止まる" in row["text"]
+    assert "保存が止まる" in criteria_decide.fixer_impact(row) and "保存が止まる" not in row["text"]
 
 
 @pytest.mark.parametrize("order", [1, -1])

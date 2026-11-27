@@ -538,3 +538,15 @@ def test_issue_4363_a_lowered_finding_shows_the_raised_severity_and_only_the_fix
     assert "| minor（確認の前は major） |" in body
     assert "| 判定役の確認で成り立たないと分かった |" in body
     assert private not in body
+
+
+def test_issue_4363_the_impact_of_an_added_report_is_not_published() -> None:
+    """別の報告の 1 文（作り物の非公開の値）は、記録のコメントとスレッドと承認資料の元の本文に出さず、状態の記録に残す。"""
+    private = "https://sample-corp-internal-endpoint.invalid/"
+    rows = journal.FindingJournal()
+    marked = {"text": "保存が止まる", "severity": "major", "protect": ["secret"], "path": "a.py", "line": 1, "by": "codex"}
+    rows.enter(1, [marked, {**marked, "protect": [], "line": 2, "impact": private, "by": "kiro"}])
+    [row] = rows.rows.values()
+    assert private in str(row[journal.ALSO_IMPACTS]) and "a.py:2" in row["text"]
+    assert private not in report_decide.comment(1, {"findings": [row]}, None)
+    assert private not in threads.opening(row) + "".join(f.text for f in rows.findings())

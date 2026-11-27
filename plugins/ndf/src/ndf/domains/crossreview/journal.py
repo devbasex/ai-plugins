@@ -37,6 +37,8 @@ OCCURRENCE = "occurrence"
 PROTECT = criteria_decide.PROTECT
 # 判定役の確認の結果の欄（有効な回答のあった指摘だけが持つ。直した指摘が戻れば外す。#4363）
 CHECK = criteria_decide.CHECK
+# 書き足した別の報告の起きることの 1 文の欄（状態ファイルだけに持つ。#4363）
+ALSO_IMPACTS = criteria_decide.ALSO_IMPACTS
 # `CHECK` の中の欄。下げた指摘が出し直しで下げた扱いを抜けた（#4363）
 UNLOWERED = "unlowered"
 # 指摘がプロジェクト MVV に反するときの欄のうち、手元の状態ファイルだけに持つもの（#4076。記録のコメントにも載せる欄は
@@ -308,9 +310,10 @@ def _denied_report(item: Mapping[str, Any], items: Sequence[str], path: Optional
 
 
 def _add_report(row: dict[str, Any], item: Mapping[str, Any]) -> None:
-    """指摘の本文の後ろに、別の報告 `item` の本文・位置（パスと行、見出し）・起きることの 1 文を書き足す（行と同じ本文と位置の報告と、書き足し済みの
-    報告は足さない。起きることの 1 文が行と違う報告は足す）。欄を分けず本文に足すのは、修正担当・判定役・承認資料・記録のコメントがどれも本文を読み、公開の前の伏せ字も
-    本文に掛かるためである。#4363"""
+    """指摘の本文の後ろに、別の報告 `item` の本文・位置（パスと行、見出し）を書き足し、起きることの 1 文は本文・位置と組にして
+    `ALSO_IMPACTS` の欄に足す（行と同じ本文と位置の報告は本文に足さず、1 文が行と違えば欄にだけ足す。足してある報告は足さない）。
+    本文は PR のスレッドと記録のコメントで公開され、公開の前の伏せ字は自由記述の非公開の情報を防げないので、1 文は本文に足さない。
+    修正担当と判定役は欄を読む。#4363"""
     new = _raised(dict(item))
     text = str(item["text"]).strip()
     path, line, section = new.get("path"), new.get("line"), _text(item.get("section"))
@@ -318,8 +321,12 @@ def _add_report(row: dict[str, Any], item: Mapping[str, Any]) -> None:
     if same_place and new.get("impact") in (None, row.get("impact")):
         return
     place = "、".join(p for p in (f"{path}:{line}" if path and line else path, section) if p)
-    added = ALSO + text + (f"（{place}）" if place else "") + criteria_decide.fixer_impact(new)
-    _merge_reports(row, added)
+    part = text + (f"（{place}）" if place else "")
+    if not same_place:
+        _merge_reports(row, ALSO + part)
+    told = part + criteria_decide.fixer_impact(new)
+    if "impact" in new and told not in (held := store.list_of(row, ALSO_IMPACTS)):
+        row[ALSO_IMPACTS] = [*held, told]
 
 
 def _merge_reports(row: dict[str, Any], text: object) -> bool:
@@ -367,6 +374,7 @@ def _align_report(
         return False
     rank, item, new = best
     row["text"] = str(item["text"]).strip()
+    row.pop(ALSO_IMPACTS, None)
     if "impact" in new:
         row["impact"] = new["impact"]
     else:

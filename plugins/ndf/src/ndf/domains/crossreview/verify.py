@@ -2,8 +2,9 @@
 
 判定役は、修正担当・相手役とは別の、読むだけの claude の起動である（`participants.read_only_launch`）。読める場所は
 レビューする worktree と、この起動の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV の写し）だけである。
-指摘の文はプロセスの引数に載せず、一覧のファイルで渡す。判定役へ渡す一覧・差分・MVV の写し・指示に埋める基準の行は、どれも
-秘密（`run_log.redact`）を伏せる。資料と出力は、起動の間だけの一時ディレクトリ（`tempfile.TemporaryDirectory`。起動の関数の中で
+指摘の文はプロセスの引数に載せず、一覧のファイルで渡す。判定役へ渡す一覧・差分・MVV の写し・指示に埋める基準の行には、
+伏せ字（`run_log.redact`）を掛ける。この伏せ字が消すのは一部の形式だけで、秘密を守る境界ではない（相手役には差分を伏せずに
+渡し、相手役・修正担当・判定役は作業場所を直接読める）。資料と出力は、起動の間だけの一時ディレクトリ（`tempfile.TemporaryDirectory`。起動の関数の中で
 閉じる）の別々のディレクトリに置き、相手役が読んだ元の差分は変えず、判定役に読ませない。起動の後で、状態の保存先に
 起動ごとに違う名前の実行者だけが読めるファイルとして新規作成する（排他作成。前からあるファイルは置き換えない）。書けなければ過程に
 1 行残す。保存先の記録の片付けと、強制終了などで残った一時ディレクトリの回収は持たない。どの指摘を渡すかと回答の読み方は
@@ -49,7 +50,7 @@ class VerifyRun(Protocol):
 
 
 def _masked_copy(source: Path, into: Path) -> Path:
-    """`source` の秘密を伏せた写しを、資料のディレクトリ `into` に同じ名前で作る。写せなければ `OSError`。"""
+    """`source` に伏せ字（`run_log.redact`。一部の形式だけ）を掛けた写しを、資料のディレクトリ `into` に同じ名前で作る。写せなければ `OSError`。"""
     copied = into / source.name
     copied.write_text(run_log.redact(source.read_bytes()), encoding="utf-8")
     return copied
@@ -112,12 +113,12 @@ def _prepare(
     into: Path,
 ) -> tuple[str, tuple[Path, ...]]:
     """資料のディレクトリ `into` を作って判定役の資料を置き、指示と、判定役が読む資料のファイルを返す。判定役へ渡すものは
-    どれも秘密を伏せ、元の差分は変えない。用意できなければ `OSError`。"""
+    どれにも伏せ字（一部の形式だけ。秘密を守る境界ではない）を掛け、元の差分は変えない。用意できなければ `OSError`。"""
     into.mkdir(mode=0o700)
     used = tuple(dict.fromkeys(diff for row in rows for diff in diffs[str(row["id"])]))
     copies = {diff: _masked_copy(diff, into) for diff in used}
     snap = _readable_mvv(run.snapshot, into)
-    # 相手役が引用した認証情報も伏せる（差分のパスは変えないので、足す前に伏せる）
+    # 相手役が引用した認証情報にも伏せ字を掛ける（差分のパスは変えないので、足す前に伏せる）
     masked = run_log.redact([dict(row) for row in rows])
     # 差分が 1 つなら、行ごとに繰り返し書かない
     shown = masked if len(used) == 1 else [{**row, "diffs": [str(copies[d]) for d in diffs[str(row["id"])]]} for row in masked]
