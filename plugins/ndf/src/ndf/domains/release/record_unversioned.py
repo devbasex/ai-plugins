@@ -162,7 +162,7 @@ class _Shape(NamedTuple):
 
 def _record_pulls(hub: GitHub, pull: Pull, production: str, formats: names_decide.NameFormats) -> tuple[int, ...]:
     """含めた PR（本番の PR と作業の PR。小さい順）。作業の PR が無ければ本番の PR だけ。"""
-    return tuple(sorted({pull.number, *record._included(record._release_commits(hub, pull), pull, production, formats)}))
+    return tuple(sorted({pull.number, *record.included_pulls(record.release_commits(hub, pull), pull, production, formats)}))
 
 
 def _landed_value(hub: GitHub, number: int, production: str, version: str, production_sha: Optional[str]) -> tuple[Pull, str]:

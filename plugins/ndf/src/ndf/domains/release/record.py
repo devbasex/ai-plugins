@@ -101,7 +101,7 @@ class Records(NamedTuple):
     verifications: tuple[dict[str, Any], ...]
 
 
-def _release_commits(hub: GitHub, pull: Pull) -> list[dict]:
+def release_commits(hub: GitHub, pull: Pull) -> list[dict]:
     """リリースの PR `pull` のコミット。マージコミットが読めなければ `RecordError`。
 
     PR のコミットは `pulls/<番号>/commits`（250 件で切れる）ではなく、マージコミットの第 1 親（マージ前の本番
@@ -114,7 +114,7 @@ def _release_commits(hub: GitHub, pull: Pull) -> list[dict]:
     return hub.compare_commits(parents[0], pull.head_sha)
 
 
-def _included(commits: Sequence[dict], pull: Pull, production: str, formats: names_decide.NameFormats) -> list[int]:
+def included_pulls(commits: Sequence[dict], pull: Pull, production: str, formats: names_decide.NameFormats) -> list[int]:
     """リリースの PR `pull` に含めた PR の番号（小さい順）。
 
     組み立て（`assemble`）がリリースのコミットへ書いた「含む PR」の行（`record_decide.INCLUDED_TRAILER`）を、HEAD から
@@ -224,8 +224,8 @@ def released(
     version = formats.branch_version(landed.head_ref)
     if version is None:
         raise NotReleased(f"#{number} の head {landed.head_ref} はリリースブランチ（{formats.branch}）でない")
-    commits = _release_commits(hub, landed)
-    made = record_decide.Record(version, number, tuple(_included(commits, landed, production, formats)))
+    commits = release_commits(hub, landed)
+    made = record_decide.Record(version, number, tuple(included_pulls(commits, landed, production, formats)))
     by_unit = tuple(record_decide.Record(v, number, nums, unit) for unit, v, nums in record_decide.approved_units(commits, landed.head_sha))
     return landed, made, by_unit
 
