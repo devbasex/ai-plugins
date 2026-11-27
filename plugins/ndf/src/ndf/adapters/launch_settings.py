@@ -300,32 +300,6 @@ def launch_root(cwd: Path) -> Path:
     return here
 
 
-def repo_key(root: Path) -> str:
-    """実験の記録のリポジトリのキー: git の共通ディレクトリの実体の絶対パス。`.git` が無いか読めなければ `root` の実体。
-
-    `launch_approval.repo_key` と同じ値を、git を起動せずに `.git` と `commondir` のファイルから求める。記録のディレクトリを
-    決めるために起動のたびに求めるので、`git rev-parse` の子プロセスを増やさないためである（`root` は `launch_root` が `.git` を見つけた所）。
-    リンクされた worktree の `.git` はファイルで `gitdir: <場所>` を持ち、その場所の `commondir` が共通ディレクトリを指す。
-    """
-    dot = root / ".git"
-    try:
-        if dot.is_file():
-            text = dot.read_text(encoding="utf-8").strip()
-            if not text.startswith("gitdir:"):
-                return os.path.realpath(root)
-            gitdir = root / text.removeprefix("gitdir:").strip()
-        elif dot.is_dir():
-            gitdir = dot
-        else:
-            return os.path.realpath(root)
-        common = gitdir / "commondir"
-        if common.is_file():
-            gitdir = gitdir / common.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない `.git` は git の外と同じく `root` の実体をキーにする
-        return os.path.realpath(root)
-    return os.path.realpath(gitdir)
-
-
 def _approval_hint(root: Path, sha256: Optional[str] = None) -> str:
     """承認の手順の文（Skill と、端末で打つコマンド）。コマンドは `ndf` の絶対パスで出す（利用者の PATH に無くても打てる）。
 

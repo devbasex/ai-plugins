@@ -25,7 +25,6 @@
 from __future__ import annotations
 
 import enum
-import hashlib
 import json
 import logging
 import os
@@ -251,10 +250,6 @@ def _arms_errors(stage: str, runtime: str, arms: list[Any]) -> list[str]:
     return errs
 
 
-# window_days の上限。ほかのリポジトリの記録は、どの設定でも使わないこの日数（と records の行の kept_extra_days）を過ぎた月だけを消す
-WINDOW_LIMIT = 365
-
-
 def _allocation_errors(allocation: Mapping[str, Any], widest: int) -> list[str]:
     """割り付けの値の制約の誤り。`widest` は最も多い選択肢の数。"""
     at = "experiments/allocation"
@@ -266,8 +261,8 @@ def _allocation_errors(allocation: Mapping[str, Any], widest: int) -> list[str]:
         errs.append(f"{at}/min_units: 2 以上")
     if not 0 <= margin <= 1:
         errs.append(f"{at}/margin: 0 以上 1 以下")
-    if not 1 <= days <= WINDOW_LIMIT:
-        errs.append(f"{at}/window_days: 1 以上 {WINDOW_LIMIT} 以下")
+    if not 1 <= days <= 365:
+        errs.append(f"{at}/window_days: 1 以上 365 以下")
     return errs
 
 
@@ -396,9 +391,8 @@ WEIGHTS = "launch-weights"
 WEIGHTS_LOCK = "launch-weights-lock"
 PRUNED = "launch-pruned"
 PRUNED_LOCK = "launch-pruned-lock"
-# 月ごとのファイルの名前の、月の位置と、リポジトリごとのディレクトリの名前の位置
+# 月ごとのファイルの名前の、月の位置
 MONTH = "<YYYY-MM>"
-REPO = "<repo>"
 _MONTH_FORM = re.compile(r"\d{4}-\d{2}")
 # 錠の待ちの上限（contracts/limits）
 LOCK_LIMIT = "launch.experiments-lock"
@@ -457,10 +451,7 @@ def _rule() -> dict[str, Any]:
 
 
 def records_dir(env: Optional[Mapping[str, str]] = None) -> Path:
-    """実験の記録を置く場所（使用量ログと同じ）。記録はこの下のリポジトリごとのディレクトリ（`repo_store`）に置く。
-
-    決められなければ `LookupError` か `identity.IdentityError`。
-    """
+    """実験の記録の保存先（使用量ログと同じ）。決められなければ `LookupError` か `identity.IdentityError`。"""
     env = os.environ if env is None else env
     location = facts.value("ndf-files", LEDGER, "location")
     var = facts.value("locations", location, "env")
@@ -469,22 +460,12 @@ def records_dir(env: Optional[Mapping[str, str]] = None) -> Path:
     return identity.load().state_dir / facts.value("locations", location, "path")
 
 
-def repo_store(base: Path, repo: str) -> Path:
-    """リポジトリ `repo`（`repo_key` の値）の実験の記録のディレクトリ。名前はキーの SHA-256 の先頭 16 文字。
-
-    割り付け・出現率・集計はどれも同じリポジトリの記録しか使わず、残す期間もリポジトリの設定で決まるので、リポジトリごとに分ける。
-    """
-    name = hashlib.sha256(repo.encode("utf-8")).hexdigest()[:16]
-    return base / Path(facts.value("ndf-files", LEDGER, "path").replace(REPO, name)).parent
-
-
 def _store_file(root: Path, file_id: str) -> Path:
-    """リポジトリのディレクトリ `root` の中のファイル。"""
-    return root / Path(facts.value("ndf-files", file_id, "path")).name
+    return root / facts.value("ndf-files", file_id, "path")
 
 
 def _month_file(root: Path, month: str) -> Path:
-    return root / Path(facts.value("ndf-files", LEDGER, "path")).name.replace(MONTH, month)
+    return root / facts.value("ndf-files", LEDGER, "path").replace(MONTH, month)
 
 
 def _lock(path: Path) -> FileLock:
@@ -560,13 +541,9 @@ def prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None:
     """月の掃除。`launch-pruned` が今月なら何もしない。違えば古い月のファイルと期間を過ぎた出現率の項目を消し、全部成功したら
     今月を書く。失敗は呼び手へ送る（次の起動がやり直す）。
 
-    `root` はリポジトリのディレクトリ（`repo_store`）で、`window_days` はそのリポジトリの今の設定の値である。消すのは、掃除する
-    日時から「残す日数」を引いた日時より前に終わった月である。残す日数は、`window_days` と、このディレクトリに残る割り付けの行の
-    `window_days` の最大値に、記録を残す日数（records の行の `kept_extra_days`）を足したもの。行の値も見るのは、同じリポジトリの
-    別の作業ディレクトリが長い期間で割り付けていることがあるためである。読めない月が 1 つでもあれば何も消さずに `OSError` を
-    送る（その月の行が長い `window_days` を持つかもしれない）。続けて、使われなくなったリポジトリの記録を残さないために、ほかの
-    リポジトリのディレクトリから、どの設定でも使わない古さ（`WINDOW_LIMIT` ＋ `kept_extra_days` 日）の月を消す。この境は設定に
-    よらないので、どのリポジトリが掃除しても同じ月が残る。そうした月はもう追記されないのでロックを取らない。
+    消すのは、掃除する日時から「残す日数」を引いた日時より前に終わった月である。残す日数は、`window_days` と、記録に残る割り付けの
+    行の `window_days` の最大値に、記録を残す日数（records の行の `kept_extra_days`）を足したもの。保存先はリポジトリで
+    分かれないので、`window_days` の長い別のリポジトリが使う月を、短い側の掃除が消さないためである。
 
     掃除するのは、掃除の錠（`launch-pruned-lock`）を待たずに取れた起動だけである。取れなかった起動は掃除を飛ばす（錠を持つ
     起動が掃除している）。錠の中で `launch-pruned` を読み直すので、月替わりに起動が重なっても全部の月を読むのは 1 回で済む。
@@ -591,50 +568,20 @@ def _pruned(done: Path, month: str) -> bool:
     return done.is_file() and done.read_text(encoding="utf-8").strip() == month
 
 
-def _month_files(root: Path) -> dict[str, Path]:
-    """リポジトリのディレクトリ `root` にある月のファイル（月 → パス）。"""
-    head, tail = Path(facts.value("ndf-files", LEDGER, "path")).name.split(MONTH)
+def _prune_now(root: Path, now: datetime, window_days: int) -> None:
+    head, tail = facts.value("ndf-files", LEDGER, "path").split(MONTH)
     found: dict[str, Path] = {}
     for path in root.glob(f"{head}*{tail}"):
         name = path.name[len(head) : len(path.name) - len(tail)]
         if _MONTH_FORM.fullmatch(name):
             found[name] = path
-    return found
-
-
-def _drop_months(root: Path, edge: datetime) -> dict[str, Path]:
-    """`root` の月のファイルのうち `edge` より前に終わった月を消し、残った月を返す。"""
-    found = _month_files(root)
-    for name in [m for m in found if _month_start(m, 1) <= edge]:
-        found.pop(name).unlink(missing_ok=True)
-    return found
-
-
-def _prune_now(root: Path, now: datetime, window_days: int) -> None:
-    rows = [r for p in _month_files(root).values() for r in launch_records.read_rows(p, 0)[0]]  # 読めない月は OSError
+    rows = [r for p in found.values() for r in launch_records.whole_rows(p)]  # 読めない月は割り付けにも使われないので飛ばす
     days = max([window_days] + [r["window_days"] for r in rows if r["kind"] == "assign" and "window_days" in r])
-    _drop_months(root, now - timedelta(days=days + _rule()["kept_extra_days"]))
-    _prune_weights(root, now)
-    edge = now - timedelta(days=WINDOW_LIMIT + _rule()["kept_extra_days"])
-    for other in [p for p in root.parent.iterdir() if p.is_dir() and p != root]:
-        if not _drop_months(other, edge):
-            _drop_unused(other)
-
-
-def _drop_unused(other: Path) -> None:
-    """月のファイルが残らない、ほかのリポジトリのディレクトリを、その記録のロックを待たずに取れたときだけ消す。"""
-    lock = FileLock(str(_store_file(other, LEDGER_LOCK)), timeout=0)
-    try:
-        lock.acquire()
-    except Timeout:
-        log.info("実験の記録のディレクトリ %s は使われているので、次の月の掃除まで残す", other)
-        return
-    try:
-        for path in other.iterdir():
+    edge = now - timedelta(days=days + _rule()["kept_extra_days"])
+    for name, path in found.items():
+        if _month_start(name, 1) <= edge:
             path.unlink(missing_ok=True)
-        other.rmdir()
-    finally:
-        lock.release()
+    _prune_weights(root, now)
 
 
 def _past(entry: Mapping[str, Any], now: datetime) -> bool:
@@ -657,6 +604,32 @@ def _prune_weights(root: Path, now: datetime) -> None:
 
 
 # --- 割り付け ----------------------------------------------------------------------------------------
+
+
+def repo_key(root: Path) -> str:
+    """実験の記録のリポジトリのキー: git の共通ディレクトリの実体の絶対パス。`.git` が無いか読めなければ `root` の実体。
+
+    `launch_approval.repo_key` と同じ値を、git を起動せずに `.git` と `commondir` のファイルから求める。単位のある起動の
+    たびに求めるので、`git rev-parse` の子プロセスを増やさないためである（`root` は `launch_root` が `.git` を見つけた所）。
+    リンクされた worktree の `.git` はファイルで `gitdir: <場所>` を持ち、その場所の `commondir` が共通ディレクトリを指す。
+    """
+    dot = root / ".git"
+    try:
+        if dot.is_file():
+            text = dot.read_text(encoding="utf-8").strip()
+            if not text.startswith("gitdir:"):
+                return os.path.realpath(root)
+            gitdir = root / text.removeprefix("gitdir:").strip()
+        elif dot.is_dir():
+            gitdir = dot
+        else:
+            return os.path.realpath(root)
+        common = gitdir / "commondir"
+        if common.is_file():
+            gitdir = gitdir / common.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない `.git` は git の外と同じく `root` の実体をキーにする
+        return os.path.realpath(root)
+    return os.path.realpath(gitdir)
 
 
 def compatibility_key(arms: Sequence[Mapping[str, str]], metric: Optional[str]) -> str:
@@ -908,10 +881,10 @@ def _halt_manual(u: _Unit, charge_to: Optional[str]) -> None:
         log.warning("実験の記録へ手動の指定の停止を書けない（単位 %s）: %s", u.unit, exc)
 
 
-def _prepared_store(env: Mapping[str, str], now: datetime, window_days: int, repo: str) -> Optional[Path]:
-    """リポジトリ `repo` の記録のディレクトリを決め、月の掃除をする。決められなければ警告を出して None。掃除の失敗は警告だけ。"""
+def _prepared_store(env: Mapping[str, str], now: datetime, window_days: int) -> Optional[Path]:
+    """記録の保存先を決め、月の掃除をする。保存先を決められなければ警告を出して None。掃除の失敗は警告だけ。"""
     try:
-        store = repo_store(records_dir(env), repo)
+        store = records_dir(env)
     except (LookupError, identity.IdentityError) as exc:
         log.warning("実験の記録の保存先を決められないので、割り付けずに起動する: %s", exc)
         return None
@@ -962,8 +935,7 @@ def launch_choice(
     arms = got.arms[stage][runtime] if stage is not None and runtime in got.arms[stage] else ()
     base = arms[0] if arms else None
     now = _utc_now()
-    repo = launch_settings.repo_key(root)
-    store = _prepared_store(env, now, got.allocation["window_days"], repo)
+    store = _prepared_store(env, now, got.allocation["window_days"])
     model, model_source = manual.model if manual.model is not None else _from_base(base, "model")
     effort, effort_source = manual.effort if manual.effort is not None else _from_base(base, "effort")
     if manual.inherited is not None:
@@ -987,7 +959,7 @@ def launch_choice(
     if stage is None or store is None or (req.unit is None and req.charge_to is None):
         return choice if manual.given or req.retry is None or stage is None else _raised_once(choice)
     metric = metric_of(stage)
-    where = Where(repo, stage, runtime, compatibility_key(arms, metric))
+    where = Where(repo_key(root), stage, runtime, compatibility_key(arms, metric))
     experiment = got.enabled and len(arms) > 1 and metric is not None
     u = _Unit(req.unit, req.mode, tuple(arms), got.allocation, experiment, got.enabled, where, now, store)
     if manual.given:

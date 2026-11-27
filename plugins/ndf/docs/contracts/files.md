@@ -35,15 +35,14 @@ NDF の工程が書くファイル（設定・計測値・実行の記録・文�
 | `launch-answers` | `state-root` state:. | `launch-answers.jsonl` | record | — | 承認の質問への回答（hook launch-answer。#1959。追記だけ・所有者だけが読める） | kept | 公開 |
 | `launch-approvals` | `state-root` state:. | `launch-approvals.jsonl` | record | — | 起動の承認と取り消し（#1959。追記だけ・所有者だけが読める） | kept | 内部（予告なく変えてよい） |
 | `launch-candidates` | `state-root` state:. | `launch-candidates/<repo>/<id>/` | exchange | — | 起動の設定の候補と反映元のバージョン（ndf launch-config draft。#1959）。作成・掃除と候補を指すリクエストの作成はリポジトリごとの錠（<repo>.lock）の中で行う。作成途中は .draft-<id> に置き、片付ける候補は .removing-<id> へ退避して、次の掃除が比べ直してから消すか元へ戻す | cleanup | 内部（予告なく変えてよい） |
-| `launch-experiments` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `launch-experiments/<repo>/launch-experiments-<YYYY-MM>.jsonl` | record | — | モデルと effort の実験の記録（#2944。追記だけ・所有者だけが読める。<repo> はリポジトリのキーの SHA-256 の先頭 16 文字、<YYYY-MM> は行の日時の UTC の月）。リポジトリの選択の計算に使う期間（window_days）に約 30 日を足した期間より古い月は、そのリポジトリの起動の月の掃除が消す。ほかのリポジトリの月の掃除は、window_days の上限 365 日に 30 日を足した日数より古い月と、月のファイルが残らないディレクトリを消す | kept | 内部（予告なく変えてよい） |
-| `launch-experiments-lock` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `launch-experiments/<repo>/launch-experiments.lock` | exchange | — | 実験の記録の追記の排他（#2944。リポジトリごとに、全部の月で 1 つ） | kept | 内部（予告なく変えてよい） |
+| `launch-experiments` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `launch-experiments-<YYYY-MM>.jsonl` | record | — | モデルと effort の実験の記録（#2944。追記だけ・所有者だけが読める。<YYYY-MM> は行の日時の UTC の月）。選択の計算に使う期間（window_days）に約 30 日を足した期間より古い月は、起動の値を選ぶ処理の月の掃除が消す | kept | 内部（予告なく変えてよい） |
+| `launch-experiments-lock` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `launch-experiments.lock` | exchange | — | 実験の記録の追記の排他（#2944。全部の月で 1 つ） | kept | 内部（予告なく変えてよい） |
 | `launch-mcp` | `state-root` state:. | `launch-mcp/<id>/` | exchange | — | full の起動の準備（#1959。<id> は <PID>-<一意な値>。承認を確かめた MCP の定義のコピーで、所有者だけが読める） | run | 内部（予告なく変えてよい） |
-| `launch-pruned` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `launch-experiments/<repo>/launch-pruned` | record | — | そのリポジトリの月の掃除を終えた月（YYYY-MM。#2944） | replaced | 内部（予告なく変えてよい） |
-| `launch-pruned-lock` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `launch-experiments/<repo>/launch-pruned.lock` | exchange | — | 月の掃除の排他（#2944。リポジトリごと。待たずに取れた起動だけが掃除する） | kept | 内部（予告なく変えてよい） |
+| `launch-pruned` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `launch-pruned` | record | — | 月の掃除を終えた月（YYYY-MM。#2944） | replaced | 内部（予告なく変えてよい） |
 | `launch-questions` | `state-root` state:. | `launch-questions.jsonl` | record | — | 起動の承認のリクエスト（ndf launch-config show --question approve。#1959。追記だけ・所有者だけが読める） | kept | 公開 |
 | `launch-reflected` | `state-root` state:. | `launch-reflected/<id>.done.json` | record | — | 候補の反映の記録（ndf launch-config approve。#1959）。反映先の絶対パスのハッシュを <id> とし、反映の途中の記録を <id>.pending.json、完了の記録を <id>.done.json に保存する。どちらも反映先ごとに 1 件 | replaced | 内部（予告なく変えてよい） |
-| `launch-weights` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `launch-experiments/<repo>/launch-weights.json` | measured | — | 出現率の計算（#2944。実験の記録と使用量ログから作り直せるコピー）。期間を過ぎた項目は、出現率の計算と月の掃除が消す | replaced | 内部（予告なく変えてよい） |
-| `launch-weights-lock` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `launch-experiments/<repo>/launch-weights.json.lock` | exchange | — | 出現率のファイルの書き換えの排他（#2944。出現率の計算と月の掃除） | kept | 内部（予告なく変えてよい） |
+| `launch-weights` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `launch-weights.json` | measured | — | 出現率の計算（#2944。実験の記録と使用量ログから作り直せるコピー）。期間を過ぎた項目は、出現率の計算と月の掃除が消す | replaced | 内部（予告なく変えてよい） |
+| `launch-weights-lock` | `usage-log` state:usage（NDF_USAGE_DIR で差し替え） | `launch-weights.json.lock` | exchange | — | 出現率のファイルの書き換えの排他（#2944。出現率の計算と月の掃除） | kept | 内部（予告なく変えてよい） |
 | `loop-record` | `ndf-loop` main:.ndf/loop | `<loop>/loop.json` | record | — | 開発ループとスプリント（M1） | cleanup | 公開 |
 | `mvv` | `ndf` repo:.ndf | `mvv.json` | ndf_settings | 追跡 | 人の承認（M7） | kept | 内部（予告なく変えてよい） |
 | `mvv-body` | `ndf` repo:.ndf | `mvv.md` | ndf_settings | 追跡 | 人の承認（M7） | kept | 内部（予告なく変えてよい） |
