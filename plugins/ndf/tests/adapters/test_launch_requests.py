@@ -739,6 +739,21 @@ def test_the_cleanup_keeps_a_file_put_under_the_name_after_it_was_checked(tmp_pa
     assert not list(target.parent.glob(".launch.json.dropping-*"))
 
 
+def test_the_cleanup_finishes_a_move_before_removal_only_for_the_recorded_name(tmp_path):
+    """消す前に移した直後に止まった一時ファイルは、記録した名前から決まる移し先だけを片付け、ほかの同じ頭のファイルは見ない（Value 6）。"""
+    target = _worktree(tmp_path)
+    moved = target.with_name(".launch.json.dropping-0")  # 記録した名前 `.launch.json.placing-0` を移した先
+    moved.write_bytes(b"ndf")
+    other = target.with_name(".launch.json.dropping-1")  # 記録に無い名前は、実体が同じでも見ない
+    os.link(moved, other)
+    found = os.lstat(moved)
+    rec = {"placing": str(target.with_name(".launch.json.placing-0"))}
+    la._drop_placing(target, rec)  # 実体が記録に無ければ移し先も消さない
+    assert moved.exists()
+    la._drop_placing(target, {**rec, "placed": [found.st_dev, found.st_ino]})
+    assert not moved.exists() and other.exists()
+
+
 @pytest.mark.parametrize("body", [b'{"version": 1, "mine": 1}\n', b""])
 def test_the_cleanup_keeps_a_file_the_record_names_but_ndf_did_not_make(tmp_path, body):
     """途中の記録が名前を残していても、記録した実体と違うファイルは、利用者の作ったものかもしれないので消さない（Value 6）。

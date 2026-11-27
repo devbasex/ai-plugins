@@ -753,7 +753,7 @@ def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
 
 # 置き換えの一時ファイルの名前の頭（後ろに乱数の値が付く）
 _PLACING_HEAD = ".{}.placing-"
-# 消す前に一時ファイルを移す名前の頭（後ろに乱数の値が付く）。どの記録にも書かない名前で、移した後に実体を確かめてから消す
+# 消す前に一時ファイルを移す名前の頭。後ろには、一時ファイルの名前と同じ乱数の値か、どの記録にも書かない乱数の値が付く
 _DROPPING_HEAD = ".{}.dropping-"
 
 
@@ -763,17 +763,26 @@ def _drop_placing(target: Path, rec: Mapping[str, Any]) -> None:
     確かめる条件は、記録した実体（`placed`）と同じことだけである。実体を記録する前に止まった場合は、その名前のファイルが空でも消さない。
     名前が重なった利用者の空のファイルと見分けられないためで、NDF が作った空のファイルが残っても中身（設定案の写し）は無い。
     名前が記録に無い・反映先と別のディレクトリ・頭が違う・実体が違うファイルも消さない（利用者の作ったものかもしれないため）。
-    消す前に移す名前（`_DROPPING_HEAD`）のファイルも、記録した実体と同じものだけを消す。移した直後に強制終了した分を片付けるためである。
+    対象は、記録した名前と、その名前から決まる移し先（`_dropping_name`）の 2 つだけで、ディレクトリは走査しない。移し先は、前の実行が
+    消す前に移した直後に強制終了した分を片付けるために見る。実体が記録に無ければ、どちらも消さない。
     """
     name = rec.get("placing")
     placed = rec.get("placed")
     if not isinstance(name, str) or placed is None:
         return
     tmp = Path(name)
-    if tmp.parent != target.parent or not tmp.name.startswith(_PLACING_HEAD.format(target.name)):
+    head = _PLACING_HEAD.format(target.name)
+    if tmp.parent != target.parent or not tmp.name.startswith(head):
         return
-    for path in (tmp, *sorted(target.parent.glob(_DROPPING_HEAD.format(target.name) + "*"))):
-        _drop_if_made(target, path, placed)
+    aside = _dropping_name(target, tmp.name[len(head) :])
+    # 前の実行が移した先は、どの記録にも無い名前へ移し直してから確かめる（その名前のまま確かめて消さない）
+    _drop_if_made(aside, _dropping_name(target, uuid.uuid4().hex), placed)
+    _drop_if_made(tmp, aside, placed)
+
+
+def _dropping_name(target: Path, value: str) -> Path:
+    """消す前に一時ファイルを移す名前（`.<反映先の名前>.dropping-<値>`）。"""
+    return target.with_name(f"{_DROPPING_HEAD.format(target.name)}{value}")
 
 
 def _made(path: Path, placed: Any) -> bool:
@@ -785,16 +794,14 @@ def _made(path: Path, placed: Any) -> bool:
     return placed == [found.st_dev, found.st_ino]
 
 
-def _drop_if_made(target: Path, path: Path, placed: Any) -> None:
-    """`path` が記録した実体なら消す。確かめた実体と消す実体が同じになるよう、どの記録にも無い名前へ移してから確かめ直して消す。
+def _drop_if_made(path: Path, aside: Path, placed: Any) -> None:
+    """`path` が記録した実体なら消す。確かめた実体と消す実体が同じになるよう、`aside` へ移してから確かめ直して消す。
 
     確かめてから消すまでの間に `path` の名前が利用者のファイルへ置き換わっても、移した先で実体が違うと分かるので消さず、元の名前へ
-    戻す（元の名前が埋まっていれば、移した先の名前のまま残す）。移した先の名前はこの実行だけが知るので、確かめてから消すまでの間に
-    ほかのファイルが置かれることはない。
+    戻す（元の名前が埋まっていれば、移した先の名前のまま残す）。`aside` にファイルがあれば、上書きしないよう移さずに残す。
     """
-    if not _made(path, placed):
+    if not _made(path, placed) or os.path.lexists(aside):
         return
-    aside = target.with_name(f"{_DROPPING_HEAD.format(target.name)}{uuid.uuid4().hex}")
     try:
         os.rename(path, aside)
     except FileNotFoundError:  # noqa: NDF401 ファイル: 確かめた後に消えていれば片付けるものも無い
