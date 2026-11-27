@@ -229,19 +229,7 @@
         },
         "--path": {
           "type": "string",
-          "description": "`ndf worker run` で起動された worker の中で使う。その起動に渡された結果の保存先の配下のファイルを指定する。本文は標準入力に渡し、既定では全文を置き換える"
-        },
-        "--append": {
-          "type": "boolean",
-          "description": "本文を末尾へ追記する。--op が必須で、--edit と同時に指定できない"
-        },
-        "--edit": {
-          "type": "boolean",
-          "description": "標準入力で、`old` と `new` の文字列を持つオブジェクトの空でない JSON 配列を渡す。配列の順に置き換え、各 `old` はその時点の本文にちょうど 1 か所ある空でない文字列にする。--op が必須で、--append と同時に指定できない"
-        },
-        "--op": {
-          "type": "string",
-          "description": "--append・--edit の操作ごとに新しくする識別子。同じ ndf worker run の起動の中で、応答を受け取れなかった操作を同じ識別子と本文で打ち直すと、重ねて書かない。操作の記録は別の起動へ引き継がないので、新しい起動での打ち直しには効かない"
+          "description": "`ndf worker run` で起動された worker の中で使う。その起動に渡された結果の保存先の配下のファイルを指定する。本文は標準入力に渡し、全文を置き換える"
         }
       },
       "required": [
