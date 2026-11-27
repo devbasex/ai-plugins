@@ -7,7 +7,8 @@
 NDF が書いたファイルとはみなさない（PR 4638 の r1-4）。
 
 記録の無い既存の出力（記録を残さない前のバージョンが書いたものを含む）は、来歴を確かめられないので消さずに止まる
-（PR 4638 の r3-2）。NDF の工程（実装のテンプレート・単位のレビュー）は起動の前に自分の出力を消すので、ここでは止まらない。
+（PR 4638 の r3-2）。NDF の工程（実装のテンプレート）は自分の状態の保存先に置いた出力について `replace_unrecorded` を渡し、
+記録の無い出力を錠を取った後に消させる。錠の外で消すと、同じ出力先を使う実行中の起動が書いた出力まで消すためである（PR 4638 の r1-2）。
 
 記録には種別（`ndf_record`）を書き、片付けで消すのはこの種別の記録（と空の記録）と、その記録が指す一時のファイルだけである
 （PR 4638 の r2-5）。
@@ -27,7 +28,9 @@ NDF が書いたファイルとはみなさない（PR 4638 の r1-4）。
 部分であること）を確かめて消す（PR 4638 の r2-7）。一時のファイルは `write_text` と同じ作成時の権限（0666 から umask と親の
 デフォルト ACL が引かれる）で作り、後から権限を広げない（PR 4638 の r2-6）。
 
-呼び手が先に作った空の出力先は、その inode と権限を保つために直接書く（PR 4638 の r3-3）。書く前に、その inode と書く中身を
+呼び手が先に作った空の出力先は、その inode と権限を保つために直接書く（PR 4638 の r3-3）。書いた後の記録にも直接書いたこと
+（`into`）を残し、次の起動は消さずに空へ戻して同じ inode へ書く。消して作り直すと、呼び手が絞った権限（0600 など）が umask の
+既定（0644 など）へ広がるためである（PR 4638 の r1-3）。書く前に、その inode と書く中身を
 「書きかけ」の記録として残す。書いている途中や書いた後に終了しても、次の起動は inode が合い、中身が書く中身の先頭の部分である
 ことで今回の書き込みと確かめ、空へ戻して続く（PR 4638 の r2-8）。
 記録を残せなければ書く前の状態（無い・空）へ戻す。次の起動は記録の無い出力で止まらない（PR 4638 の r2-4）。
@@ -55,6 +58,8 @@ RECORD_KIND = "cross-review-output"
 WRITTEN_KEY = "written"
 WRITING_KEY = "writing"
 STAGING_KEY = "staging"
+# 書いた出力が、呼び手が先に作った空のファイルへ直接書いたものか（片付けで消さずに空へ戻す。PR 4638 の r1-3）
+INTO_KEY = "into"
 # 何も指さない記録の行（途中で切れた書き込みも、指す物の無い空の記録と同じに読む。PR 4638 の r4-5）
 _BARE = json.dumps({RECORD_KIND_KEY: RECORD_KIND}, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
 
@@ -189,7 +194,7 @@ class Claim:
         if os.pwrite(self._fd, line, offset) != len(line):
             raise OSError(f"出力の記録 {self.record} を書き切れない")
 
-    def clear(self) -> None:
+    def clear(self, replace_unrecorded: bool = False) -> None:
         """前の起動の出力を片付ける（`claim` の説明のとおり）。"""
         found = self._read()
         if found is None:
@@ -203,7 +208,7 @@ class Claim:
             self._pointing = bool(found.keys() - {RECORD_KIND_KEY})
             _collect_staging(self.path, found)
         if self.path.exists():
-            _clear_output(self.path, found)
+            _clear_output(self.path, found, replace_unrecorded)
         if self._pointing:
             self._put(_record())
             self._pointing = False
@@ -227,7 +232,8 @@ class Claim:
         try:
             self._put(_writing_record(self.path, text))
             self.path.write_text(text, encoding="utf-8")
-            self._put(_record(**{WRITTEN_KEY: _file_identity(self.path)}))
+            # 呼び手が用意したファイルであることを残し、次の起動も消さずに同じ inode へ書く（PR 4638 の r1-3）
+            self._put(_record(**{WRITTEN_KEY: _file_identity(self.path), INTO_KEY: True}))
         except BaseException as exc:
             try:
                 self.path.open("w", encoding="utf-8").close()
@@ -329,7 +335,7 @@ def _lock(path: Path) -> Claim:
 
 
 @contextmanager
-def claim(path: Path) -> Iterator[Claim]:
+def claim(path: Path, replace_unrecorded: bool = False) -> Iterator[Claim]:
     """出力先の錠を取り、前の起動の出力を片付けて、起動の終わりまで持つ（親が無い・書けない・記録の保存先がファイルでない・
     NDF が書いたと確かめられない記録がある・一時のファイルを確かめられなければ `OSError`、実行中の別の起動が使っていれば
     `Busy`、確かめられない出力があれば `Unowned`）。
@@ -340,24 +346,31 @@ def claim(path: Path) -> Iterator[Claim]:
       書いた後に記録を作るために読み直すので、読み書きの両方ができるかを確かめる（PR 4638 の r1-5）
     - ほかの既存のファイル（記録の無い・作り直された・書き換えられたもの）は、利用者のデータかもしれないので消さずに `Unowned`
     - 公開の前に落ちた起動の一時のファイルは、記録で確かめて消す（PR 4638 の r2-7）
+    - `replace_unrecorded` を渡せば、NDF の記録の無い既存の出力（記録を残さない前のバージョンが書いたもの）を錠を取った後に
+      消す。NDF の工程が自分の状態の保存先に置いた出力だけに使う（PR 4638 の r1-2）
     """
     held = _lock(path)
     try:
-        held.clear()
+        held.clear(replace_unrecorded)
         yield held
     finally:
         held.release()
 
 
-def _clear_output(path: Path, found: dict[str, Any]) -> None:
-    """既存の出力を、空なら読み書きできるかを確かめて残し、NDF が書いたと確かめられれば片付け、確かめられなければ `Unowned`。"""
+def _clear_output(path: Path, found: dict[str, Any], replace_unrecorded: bool = False) -> None:
+    """既存の出力を、空なら読み書きできるかを確かめて残し、NDF が書いたと確かめられれば片付け、確かめられなければ `Unowned`。
+    `replace_unrecorded` なら、記録の何も指さない出力のファイルは消す（`claim` の説明のとおり）。"""
     if path.is_file() and path.stat().st_size == 0:
         path.open("r+", encoding="utf-8").close()
+        return
+    if replace_unrecorded and not (found.keys() - {RECORD_KIND_KEY}) and path.is_file():
+        path.unlink()
         return
     owned = _owned(path, found) if found else None
     if owned is None:
         raise Unowned(str(path))
-    if owned == "writing":
+    if owned == "writing" or found.get(INTO_KEY) is True:
+        # 呼び手が用意したファイルは、inode と権限を保つために空へ戻して残す（PR 4638 の r1-3）
         path.open("w", encoding="utf-8").close()
     else:
         path.unlink()

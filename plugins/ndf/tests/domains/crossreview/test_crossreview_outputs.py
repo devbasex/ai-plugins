@@ -82,6 +82,31 @@ def test_pr_4638_r3_3_empty_output_keeps_its_inode_and_mode(tmp_path: Path) -> N
     assert (out.stat().st_ino, stat.S_IMODE(out.stat().st_mode), out.read_text(encoding="utf-8")) == (before, 0o600, HEAD)
 
 
+def test_pr_4638_r1_3_rerun_keeps_the_inode_and_mode_of_the_given_output(tmp_path: Path) -> None:
+    """PR 4638 の r1-3: 呼び手が 0600 で用意した出力先は、書いた後に同じ出力先で打ち直しても消さず、同じ inode と権限で書く。"""
+    out = tmp_path / "h"
+    out.touch(mode=0o600)
+    out.chmod(0o600)
+    before = out.stat().st_ino
+    outputs.write_output(out, HEAD)
+    outputs.write_output(out, "b" * 40 + "\n")
+    assert (out.stat().st_ino, stat.S_IMODE(out.stat().st_mode)) == (before, 0o600)
+    outputs.clear_stale(out)
+    assert (out.stat().st_ino, out.read_text(encoding="utf-8")) == (before, "")
+
+
+def test_pr_4638_r1_2_unrecorded_output_is_replaced_only_when_asked(tmp_path: Path) -> None:
+    """PR 4638 の r1-2: 記録の無い出力（前のバージョンが書いたもの）は、`replace_unrecorded` を渡したときだけ錠の内側で消す。"""
+    out = tmp_path / "head"
+    out.write_text(HEAD, encoding="utf-8")
+    with outputs.claim(out, replace_unrecorded=True) as held:
+        assert not out.exists()
+        held.write(HEAD)
+    with outputs.claim(out, replace_unrecorded=True):
+        # NDF が書いた出力は、引数によらず記録で確かめて消す
+        assert not out.exists()
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
 def test_pr_4638_r3_5_parent_without_write_permission_is_refused(tmp_path: Path) -> None:
     """PR 4638 の r3-5: 空の出力先に書けても、親のディレクトリに記録を作れなければ、始めの確かめで `OSError`。"""

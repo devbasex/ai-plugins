@@ -660,7 +660,7 @@ def _begin_run(args: argparse.Namespace, stack: contextlib.ExitStack, claims: di
         return _stop("invalid", str(exc))
     for stale in _output_paths(args):
         try:
-            claims[stale] = stack.enter_context(outputs.claim(Path(stale)))
+            claims[stale] = stack.enter_context(outputs.claim(Path(stale), args.replace_unrecorded_out))
         except outputs.Busy:
             # 実行中の起動の書き込みを片付けで壊さない（PR 4638 の r3-4）
             return _stop(
@@ -685,20 +685,35 @@ def _output_paths(args: argparse.Namespace) -> list[str]:
     return [p for p in (args.reviewed_out, args.reviewed_pr_out, args.reviewed_base_out) if p]
 
 
+def _file_keys(given: str) -> set[object]:
+    """同じファイルかを比べるキー。リンクと相対パスを解決したパスに、既にあるファイルならデバイス番号と inode を足す。
+    ハードリンクはパスを解決しても別の名前のままなので、inode で同じファイルと分かる（PR 4638 の r1-5）。"""
+    path = Path(given).resolve()
+    keys: set[object] = {path}
+    try:
+        st = os.stat(path)
+    except OSError:
+        # 無い出力先はパスだけで比べる（作るのはこの起動なので別名は無い）
+        return keys
+    keys.add((st.st_dev, st.st_ino))
+    return keys
+
+
 def _same_file(given: str, others: Sequence[str]) -> bool:
-    return Path(given).resolve() in {Path(o).resolve() for o in others}
+    mine = _file_keys(given)
+    return any(mine & _file_keys(o) for o in others)
 
 
 def _shared_output(args: argparse.Namespace) -> Optional[str]:
     """`--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out` のうち、同じファイルを指す出力先（重ならなければ None）。
-    リンクと相対パスは解決してから比べる。"""
-    seen: set[Path] = set()
+    リンクと相対パスは解決してから比べ、既にあるファイルはデバイス番号と inode でも比べる（ハードリンク。PR 4638 の r1-5）。"""
+    seen: set[object] = set()
     for given in (args.reviewed_out, args.reviewed_pr_out, args.reviewed_base_out):
         if given:
-            path = Path(given).resolve()
-            if path in seen:
+            keys = _file_keys(given)
+            if keys & seen:
                 return given
-            seen.add(path)
+            seen |= keys
     return None
 
 
@@ -885,6 +900,12 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
         "レビューした HEAD がその PR の HEAD と確認できたときだけ書く。"
         "--reviewed-out なしで渡すか、--reviewed-out・--reviewed-pr-out と同じ保存先を渡すと、レビューを始めずに invalid で停止する。マージ先を取得するリモートが PR のベースリポジトリと"
         "一致すると確かめられなければ、レビューを始めずに precondition で停止する。" + _OUTPUT_RULE,
+    )
+    r.add_argument(
+        "--replace-unrecorded-out",
+        action="store_true",
+        help="--reviewed-out・--reviewed-pr-out・--reviewed-base-out の出力先に NDF の記録の無いファイル（記録を残さない前の"
+        "バージョンが書いた出力）があれば、出力先の錠を取った後に消す。NDF の工程が自分の状態の保存先に置いた出力だけに使う",
     )
 
 
