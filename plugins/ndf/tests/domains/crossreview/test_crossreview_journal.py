@@ -288,6 +288,15 @@ def test_issue_4363_appended_reports_keep_the_record_key_and_reach_another_run()
     assert not held.merge_marks("r1-1", {"text": text}, (), None)
 
 
+def test_issue_4363_a_report_that_begins_another_report_is_kept() -> None:
+    """位置の無い報告の本文が、書き足し済みの別の報告の先頭と一致しても、別の報告として引き継ぐ。"""
+    longer, shorter = f"{journal_mod.ALSO}権限を消す操作", f"{journal_mod.ALSO}権限を消す"
+    held = drive.FindingJournal([_row("r1-1", f"A{longer}", 1)])
+    assert held.merge_marks("r1-1", {"text": f"A{shorter}"}, (), None)
+    assert held.rows["r1-1"]["text"] == f"A{longer}{shorter}"
+    assert not held.merge_marks("r1-1", {"text": f"A{shorter}{longer}"}, (), None)
+
+
 def test_issue_4014_carried_rows_are_not_rated_again() -> None:
     """#4014: 引き継いだ行は付け直さず、raised_severity を持たない。重要度の無い行は今のまま収束の妨げになり、
     相手役から出し直されても raised_severity を足さない。"""

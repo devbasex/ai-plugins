@@ -308,16 +308,16 @@ def _add_report(row: dict[str, Any], item: Mapping[str, Any]) -> None:
         return
     place = "、".join(p for p in (f"{path}:{line}" if path and line else path, section) if p)
     added = ALSO + text + (f"（{place}）" if place else "") + criteria_decide.fixer_impact(new)
-    if added not in row["text"]:
-        row["text"] += added
+    _merge_reports(row, added)
 
 
 def _merge_reports(row: dict[str, Any], text: object) -> bool:
-    """前の実行が残した本文 `text` に書き足された別の報告のうち、行に無いものを足し、足したら真。同じ指摘のスレッドは投稿した後に
-    書き換わらないので、書き足しは記録のコメントから届く。#4363"""
+    """本文 `text` に書き足された別の報告のうち、行に無いものを足し、足したら真。区切りで分けた報告の全体が一致するものだけを同じ
+    報告とみなす（別の報告の先頭と一致するだけの短い報告は残す）。前の実行が残した本文もここで重ねる。同じ指摘のスレッドは
+    投稿した後に書き換わらないので、書き足しは記録のコメントから届く。#4363"""
     added = False
     for part in text.split(ALSO)[1:] if isinstance(text, str) else ():
-        if ALSO + part not in row["text"]:
+        if part not in row["text"].split(ALSO)[1:]:
             row["text"] += ALSO + part
             added = True
     return added
