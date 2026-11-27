@@ -29,6 +29,19 @@ _SCP_URL = re.compile(r"^(?:[^@/:]+@)?(?P<host>[^/:]+):(?P<path>.+)$")
 # GitHub のリモートの URL のスキームと、そのスキームで GitHub を指すホスト（`ssh.github.com` は SSH を 443 番で使う接続先）
 _SSH_HOSTS = frozenset({"github.com", "ssh.github.com"})
 _GITHUB_HOSTS = {"https": frozenset({"github.com"}), "http": frozenset({"github.com"}), "git": frozenset({"github.com"}), "ssh": _SSH_HOSTS}
+# git の引数に渡してよい GitHub の URL の 3 つの形（全体一致で使う）。方式は小文字だけを受け（git は `HTTPS://` を `remote-HTTPS` という
+# 別の helper で読もうとして失敗する）、ホスト名だけ大文字小文字を区別しない。`re.ASCII` は `ı` などの別の文字が大文字小文字の同一視で一致するのを防ぐ。クエリ・`#`・空白・`%`・余分なパスの要素はどの形にも合わない
+_REPO_PATH = r"(?P<owner>[A-Za-z0-9_.-]+)/(?P<name>[A-Za-z0-9_.-]+)/?"
+_TARGET_URLS = tuple(
+    re.compile(head + _REPO_PATH, re.ASCII)
+    for head in (
+        r"https://(?:(?P<secret>[^\s/?#@%\\]*)@)?(?i:github\.com)(?::443)?/",
+        r"ssh://git(?P<secret>:[^\s/?#@%\\]*)?@(?i:github\.com)(?::22)?/",
+        r"git@(?i:github\.com):",
+    )
+)
+# git が URL の先頭を置き換える設定のキー（git はキーのセクション名と変数名を小文字で出す）
+_REWRITE_KEYS = r"^url\..*\.(insteadof|pushinsteadof)$"
 # `git cat-file --batch` がオブジェクトごとに置く見出しの行（無い名前の行は `<名前> missing`）
 _BATCH_HEAD = re.compile(rb"^[0-9a-f]{40,64} (\S+) ([0-9]+)$")
 # git の誤りの文に出る URL の、伏せる部分（利用者の情報と、`?`・`#` から後ろ）。トークンを URL に埋めたリモートの誤りに出る
@@ -189,6 +202,27 @@ def repo_of_url(url: str) -> Optional[str]:
     owner, _, name = path.strip("/").partition("/")
     name = name.removesuffix(".git")
     return f"{owner}/{name}" if owner and name and "/" not in name else None
+
+
+class GitHubTarget(NamedTuple):
+    """引数に渡す GitHub の URL の中身。URL そのものは認証情報を含み得るので持たない。"""
+
+    repo: str
+    secret: bool
+
+
+def github_target(url: str) -> Optional[GitHubTarget]:
+    """URL の全体が 3 つの形（https・ssh・scp）に合えばリポジトリと認証情報の有無。合わなければ None。
+
+    送り先を確かめる側が使う。`repo_of_url` と違い、前後の空白も、GitHub の別の接続先（`ssh.github.com`）も受けない。
+    """
+    m = next((m for m in (pattern.fullmatch(url) for pattern in _TARGET_URLS) if m), None)
+    if m is None:
+        return None
+    owner, name = m["owner"], m["name"].removesuffix(".git")
+    if owner in (".", "..") or name in ("", ".", ".."):
+        return None
+    return GitHubTarget(f"{owner}/{name}", m.groupdict().get("secret") is not None)
 
 
 class WorktreeEntry(NamedTuple):
@@ -426,6 +460,30 @@ class Git:
         """`git push <remote>` の送り先ごとの `<所有者>/<リポジトリ>`（`pushurl`・`pushInsteadOf` を反映する。GitHub の URL で
         なければ None）。"""
         return [repo_of_url(url) for url in self.run("remote", "get-url", "--push", "--all", "--", remote).splitlines()]
+
+    def push_urls(self, remote: str) -> list[str]:
+        """`git push <remote>` の送り先の URL（`pushurl`・`insteadOf`・`pushInsteadOf` を 1 回当てた値）。認証情報を含み得る。
+
+        バイト列で読み、git が URL ごとに足す LF だけで区切る。テキストで読んで `splitlines` すると、URL の末尾の CR が落ちて
+        設定の値と違う URL になる。UTF-8 でないバイトは、引数に渡すと元のバイトへ戻る形で持つ。
+        """
+        out = self.run_bytes("remote", "get-url", "--push", "--all", "--", remote)
+        return [line.decode("utf-8", "surrogateescape") for line in out.split(b"\n")[:-1]]
+
+    def rewrites_again(self, url: str) -> bool:
+        """`url` を `git fetch`・`git push` の引数に渡すと、git が別の値に読み替えうるか。
+
+        `insteadOf`・`pushInsteadOf` の置き換え元が URL の先頭に一致するか、URL と同じ名前のリモートがあれば真。
+        """
+        args = ("config", "--null", "--get-regexp", _REWRITE_KEYS)
+        done = self.attempt(*args)
+        if done.returncode not in (0, 1):  # 1 は一致する設定が無い
+            raise _failed(args, done.returncode, done.stderr)
+        for entry in done.stdout.split("\0"):
+            _, has_value, prefix = entry.partition("\n")
+            if has_value and url.startswith(prefix):
+                return True
+        return url in self.run("remote").splitlines()
 
     def remote_default_branch(self, remote: Optional[str] = None) -> Optional[str]:
         """リモートの既定ブランチ（取得済みの `refs/remotes/<remote>/HEAD` の指す先から `<remote>/` を外した名前）。
