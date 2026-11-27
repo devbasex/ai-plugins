@@ -65,7 +65,7 @@
 - **対象ファイル:** `answer_decide.py`・`secret.py`・`items.py`・`held.py`（`context_of`・`place_of`）・`check.py`（`repo_dirs`）・`write.py`・`cli.py`（`measure_project`・`_ask_context`・`_inputs`・`_write`）・`test_answer_decide.py`・`test_project_cli.py`・`test_write_plan.py`
 - **変更内容:** 詳細設計の「回答の照合と秘密」。この時点では保管はせず、`answer_held` の案内も出さない（Task 7 で保管と同時に足す）
 - **満たす受け入れ条件:** 14・15（照合・秘密・場所の部分）
-- **進め方:** 順序表の 12 行を先にテストにする。測定の結果を作るテストの補助に `context`・`branch_state`・`current` を足す。場所の指紋の鍵（`place_key`・`create_place_key`）と `measure` の説明の文もここで入れる
+- **進め方:** 順序表の 12 行を先にテストにする。測定の結果を作るテストの補助に `context`・`branch_state`・`current` を足す
 
 ### Task 7: 保管・再開・破棄
 - **対象ファイル:** `held.py`・`project-held-answers.schema.json`・`internal-names.json`・`ndf-files.json`（行 `project-held`）・`write.py`（`plan`・`cleanup_plan`）・`cli.py`（`_ask_context`・`_commit`）・`check.py`（`_stale_reasons`・`_held_reasons`・`judge`）・`project.result.schema.json`・`test_project_held.py`

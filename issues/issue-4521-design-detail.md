@@ -29,7 +29,7 @@ contracts/
 | `src/ndf/domains/project/cli.py` | 変更 | 測定の組み立て、書き込みの実行と表示 | 下の全部 | `cli`・`MeasurementContext` | 変更: `_ci_items`・`measure_project`・`_measure`・`_inputs`・`_write`・`_commit`・`_print_write`。新設: `_ask_context`・`_guard_store`。削除: `_instruction_notes` |
 | `src/ndf/domains/project/write.py` | 変更 | 設定の値と、書くファイル・保管の変更の計画を作る（何も書かない） | `check`・`held`・`answer_decide` | `Inputs`・`Plan`・`WriteError` | 変更: `merge_project`・`plan`・`p_number`・`row_line`・`_build_record`・`_project_file`・`_declare_ci_tests`。新設: `probe_inside`・`suites_note`・`removed_by_hand`・`veil_rows`・`check_measure`・`cleanup_plan` |
 | `src/ndf/domains/project/answer_decide.py` | 新設 | `current` の形、回答の順序表、回答の秘密の判定 | `analysis_record`・`secret`・`items` | `Case`・`Ruling` | `compare_value`・`current_entry`・`measure_problem`・`answer_tainted`・`judge_answer` |
-| `src/ndf/domains/project/held.py` | 新設 | 控えと、保管した回答の読み書き | `answer_decide`・`secret`・`items` | `Event`・`Changes` | `context_of`・`place_of`・`place_key`・`create_place_key`・`has_answers`・`replace_owner_only`・`read_place`・`awaits_resume`・`pick_held`・`plan_changes`・`gone_places`・`store_adds`・`store_drops` |
+| `src/ndf/domains/project/held.py` | 新設 | 控えと、保管した回答の読み書き | `answer_decide`・`secret`・`items` | `Event`・`Changes` | `context_of`・`place_of`・`has_answers`・`replace_owner_only`・`read_place`・`awaits_resume`・`pick_held`・`plan_changes`・`gone_places`・`store_adds`・`store_drops` |
 | `src/ndf/domains/project/analysis_record.py` | 変更 | 旧い形のキー | `items` | `analysis_record` | 変更: `strip_item`・`strip_legacy`。削除: `_old_keys` の配列の呼び出し |
 | `src/ndf/domains/project/items.py` | 変更 | 項目の値の共通の形 | — | `items` | 移す: `is_unknown`（`write.py` から） |
 | `src/ndf/domains/project/secret.py` | 変更 | 秘密の形の判定 | `adapters.secret_lines` | `secret` | 新設: `shows_secret` |
@@ -179,13 +179,14 @@ contracts/
 | `merge_project` | `write.py` | 変更 | `(existing, measure, answers, written_before) -> tuple[dict, list[dict], dict[str, Outcome]]` | 項目ごとの回答の扱い（`Outcome`: 順の番号・決着した比べる値の指紋・保管する理由）も返す |
 | `_build_record` | `write.py` | 変更 | シグネチャは今のまま | `analyzer` に測定の結果の `analyzer` を書く |
 | `measure_project` | `cli.py` | 変更 | シグネチャは今のまま | 結果に `context` を足し、質問の項目に `current`（と `held`）を載せる |
-| `_ask_context` | `cli.py` | 新設 | `(dirs: RepoDirs, decl: Optional[dict], data: dict) -> None` | `current`・`held`・保管の読み取りの注記を `data` に足す |
+| `_ask_context` | `cli.py` | 新設 | `(dirs: RepoDirs, decl: Optional[dict], data: dict) -> None` | `current`・`held`・`context.seen`・保管の読み取りの注記を `data` に足す |
 | `_inputs` | `cli.py` | 変更 | シグネチャは今のまま | 測定の結果を読めない場合は `result: remeasure` の行を持つ `WriteError`、回答を読めない場合は行の無い `WriteError` にする |
 
 - `WriteError` は `rows: list[dict]` を持つ（既定は空）。`cli._write` は `result.stopped` の `items` に、伏せ字を当てて渡す
 - `check_measure` の順: `measure_problem`（`remeasure`）→ `analyzer` が 5 以上なら場所の比較（`context_mismatch`）
-  - 場所の比較は、`context.place`（伏せる前の場所の値の指紋）と、今の場所の `context_of` の `place` を比べる。伏せ字を掛けた値どうしは比べない。`context_mismatch` の行に書く値だけを伏せる
-  - `measure_problem` は、`analyzer` が 5 以上の結果の `context.place` が 64 桁の小文字の 16 進数であることも確かめる
+  - 場所の比較は、`context.place`（場所の値の指紋）と、今の場所の `context_of` の `place` を比べる。伏せ字を掛けた値どうしは比べない。`context_mismatch` の行に書く値だけを伏せる
+  - `context.place` が `null` の場合は、回答にキーがあれば `place_hidden` で止め、無ければ場所を比べない
+  - `measure_problem` は、`analyzer` が 5 以上の結果の `context.place` が 64 桁の小文字の 16 進数か `null` であること、`context.seen` が文字列の一覧であることも確かめる
 - ブランチの構成は、#4580 の `_measured_branches` と `_record_branches` をそのまま使う。測定の `branch_state` と今の構成が違えば、何も書かずに終了コード 1 で終わる。同じ場合に記録する値は、測定の構成と同じである（決定 4）。ただし `_record_branches` の例外は残す。既定ブランチが前の記録から変わり、`ci` の行が `kept_previous`（必須のチェックを取れず前の値を残した）なら、前の記録の構成を書く。`veil_rows` が行を置き換えても `kept_previous` は落とさない。足す関数は無い
 - `ignored` の行は、回答のキーのうち `discard`・`unresume` でなく、`write.ITEM_KEYS` の質問でもないものに出す
 - `RepoDirs` に `worktree: Optional[str] = None`（git の管理名）を足す。`repo_dirs` は今の `rev-parse --show-toplevel` に `--absolute-git-dir` を足し、2 行目の親が `<git の共通ディレクトリ>/worktrees` のときだけ末尾の名前を入れる
@@ -227,6 +228,7 @@ contracts/
 | --- | --- | --- | --- | --- | --- | --- |
 | `check_measure` | 測定の結果の欠け・形の誤り | 旧い・壊れた測定の結果 | `measure_problem` | 止める | `result: remeasure` の行。終了コード 1 | 何も書いていない。測り直す |
 | `check_measure` | 場所が違う | 測った後の切り替え | 場所の値の比較 | 止める | `result: context_mismatch` の行（測った場所と今の場所）。終了コード 1 | 何も書いていない。設計の 2 つの経路 |
+| `check_measure` | 指紋の無い場所の測定の結果に回答を渡した | 名前が秘密の形に当たる作業場所 | `context.place` が `null` | 止める | `result: place_hidden` の行。終了コード 1 | 何も書いていない。`--answers` を外すか、名前を変えて測り直す |
 | `_ask_context` | 保管のファイルを読めない | 壊れた JSON・権限 | `held.read_place` | 既定値で続ける | 注記にパスと理由。終了コード 0 | ファイルは変えない |
 | `_inputs` | 読めない | ファイルが無い・JSON でない | `jsonfile.read_object` | 止める | 終了コード 1 | 打ち直せる |
 
@@ -251,9 +253,7 @@ contracts/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `context_of` | `held.py` | 新設 | `(repo: git.Git, common: Path, worktree: Optional[str], key: bytes) -> dict` | 伏せる前の `context`（`root`・`branch`・`commit`・`worktree`・`worktree_id`・`place`・`measure_id`） |
-| `place_key` | `held.py` | 新設 | `(main: Path) -> Optional[bytes]` | 鍵を読む。無ければ None、形が壊れていれば `ValueError` |
-| `create_place_key` | `held.py` | 新設 | `(main: Path) -> bytes` | 鍵を新規作成する。すでにあれば読む |
+| `context_of` | `held.py` | 新設 | `(repo: git.Git, common: Path, worktree: Optional[str]) -> dict` | 伏せる前の `context`（`root`・`branch`・`commit`・`worktree`・`worktree_id`・`place`・`measure_id`） |
 | `place_of` | `held.py` | 新設 | `(context: dict) -> dict` | 伏せる前の `context` から場所の値を作る |
 | `has_answers` | `held.py` | 新設 | `(main: Path) -> bool` | `held/*/*.json` に、`context.json` と `.` で始まるファイルのほかが 1 つでもあるか。見つかれば打ち切る |
 | `read_place` | `held.py` | 新設 | `(main: Path, context: dict) -> tuple[list[dict], list[tuple[Path, str]]]` | 今の場所の回答と、読めないファイル |
@@ -262,7 +262,7 @@ contracts/
 | `plan_changes` | `held.py` | 新設 | `(main: Path, entries: list[dict], event: Event) -> Changes` | 足す・消す・`resume` を下げるファイルと、案内の行を決める（何も書かない） |
 | `gone_places` | `held.py` | 新設 | `(main: Path, common: Path) -> list[Path]` | 作業場所が削除された場所のディレクトリ |
 | `store_adds` | `held.py` | 新設 | `(changes: Changes) -> None` | 同じ項目の古い回答の `resume` を下げてから、`context.json` と足す回答を書く |
-| `store_drops` | `held.py` | 新設 | `(changes: Changes) -> list[dict]` | 回答を消し、`unresume`・`held.id`・質問でない項目の `resume` を下げる。失敗した回答の行を返す |
+| `store_drops` | `held.py` | 新設 | `(changes: Changes) -> list[dict]` | 回答を消し、`unresume`・`held.id`・質問でない項目の `resume` を下げる。失敗した回答の行を返す（別の場所の片付けの失敗は、`result` の無い案内の行） |
 | `cleanup_plan` | `write.py` | 新設 | `(inp: Inputs) -> Plan` | `discard`・`unresume` だけの回答の計画（設定と記録を書かない） |
 | `plan` | `write.py` | 変更 | `(inp: Inputs) -> Plan` | `check_measure` を先に打ち、控えと保管の変更を `Plan` に載せる |
 | `_commit` | `cli.py` | 変更 | `(main: Path, planned: Plan) -> list[dict]` | 決定 8 の書き込みの順で書き、後処理の失敗の行を返す |
@@ -276,15 +276,12 @@ contracts/
   - 事前条件: `repo` は作業場所の根
   - 副作用: `git rev-parse HEAD --symbolic-full-name HEAD`（1 行目がコミット、2 行目が `refs/heads/<名前>` か `HEAD`）。コミットが無いリポジトリでは失敗するので、`git symbolic-ref -q HEAD` でブランチを取り、`commit` は `null` にする。起動が増える回数と、呼ぶ場面は設計の決定 8 の表のとおりである
   - `worktree_id` は、`worktree` があれば `<common>/worktrees/<worktree>/commondir` の `os.stat` の `st_ino` と `st_mtime_ns` を `:` でつないだ文字列、無ければ `null`
-  - `place` は、`place_of` の値をキーの順に並べた JSON の `hmac.new(key, …, "sha256")` の 16 進数。呼び出し元が `secret.mask` を掛ける前に作る
-- `create_place_key`
-  - 事前条件: `cli.measure_project` が、鍵が無いときだけ、`held/` を 0700 で作り `_guard_store(main, held, [鍵の相対パス])` を通してから呼ぶ
-  - 手順: `os.open` の `O_CREAT | O_EXCL`（0600）で作って `secrets.token_hex(32)` を書く。`FileExistsError` なら `place_key` で読む
-  - `branch` は `refs/heads/` を外した名前、`measure_id` は `uuid4` の hex
+  - `place` は `place_of` の値の `items.value_digest`。`place_of` の値のどれかが `secret.mask` で変わる場合は `null`。呼び出し元が `secret.mask` を掛ける前に作る
+  - `context_of` は `branch` から `refs/heads/` を除く。測定ごとに `uuid4` の 16 進表記を `measure_id` に入れる
 - `read_place`
   - 副作用: 場所のディレクトリ（名前は `context.place`）1 つの一覧と読み取り。`context.json` と、`.` で始まる一時ファイルは回答に数えない。一覧の後に消えたファイルは読めないファイルに数えない
 - `plan_changes`
-  - `Event`: 測定の `context`・`inputs` の指紋・`branch_state`、項目ごとの `Outcome`、回答の `resolves`・`discard`・`unresume`、測定の項目の `status`・`current`・`held.id`、`--answers` の有無
+  - `Event`: 測定の `context`・`inputs` の指紋・`branch_state`、項目ごとの `Outcome`、回答の `resolves`・`discard`・`unresume`、測定の項目の `status`・`current`・`held.id`、`context.seen`、`--answers` の有無
   - 事後条件: 受け取った `id` からパスを組み立てない。`entries` の `id` か `<id>@<measure_ids の最後の値>` と一致するものだけを対象にし、ほかは案内の行にする。同じ値かは `compare_value` の指紋で比べる
 - `gone_places`
   - 作業場所が削除された場所は、`worktree` があり、`<common>/worktrees/<worktree>` が無いか、その下の `commondir` から取れた識別子が `worktree_id` と違う場所である。ディレクトリがあるのに `commondir` を `stat` できない場所と、`worktree` が `null` の場所は返さない
@@ -301,7 +298,7 @@ contracts/
 | 1 | 今の `_guard_record`、続けて控えと保管の置き場の `_guard_store`（足す・書き換える・消すのどれかがある置き場。消すだけなら `rels` は空。控えは、再利用する場合も `rels` に載せる） | 何も書かず、何も消さず、終了コード 1 |
 | 2 | 控え、`store_adds`（古い回答の `resume` を下げてから足す） | 終了コード 1。足した回答と下げた `resume` は残る |
 | 3 | 今の順の `.gitignore`・記録・設定 | 終了コード 1。回答は消していない |
-| 4 | `store_drops`（作業場所が削除された回答を含む） | 終了コード 0。失敗した `id` の行を返す |
+| 4 | `store_drops`（作業場所が削除された回答を含む） | 終了コード 0。失敗した回答の行を返す |
 
 `resume` を決める順は、設計の決定 8 の「`resume` の決め方」の表を、そのまま述語の並びにする。この表により、1 つの場所で `resume` が `true` の回答は項目ごとに 1 件までになる。同じ項目を `resume: true` で保管するときに古い回答を `false` にする更新は、`_commit` の順 2 の `store_adds` が、新しい回答を書く前に行う。`Changes` は、この更新を後処理の更新と分けて持つ。
 
@@ -311,7 +308,7 @@ contracts/
 | --- | --- |
 | `check_measure` が失敗 | `WriteError` |
 | 回答のキーが空でなく、`discard`・`unresume` だけ | `cleanup_plan`。`analyzer` が 4 以下なら保管の変更は無い |
-| `analyzer` が 4 以下 | 設定の計画だけ。保管の追加と削除はしない |
+| `analyzer` が 4 以下か、`context.place` が `null` | 設定の計画だけ。保管の追加と削除はしない |
 | 一覧を取れない場所のディレクトリがある | `WriteError`（何も書かない） |
 | それ以外 | 設定の計画と保管の変更 |
 
@@ -319,13 +316,13 @@ contracts/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `place_key`・`create_place_key` | 鍵を作れない・読めない・形が壊れている | 権限・手の編集・書き込みの中断 | `cli` | 止める | `measure` は `測れない: <理由>`、`write` は理由と鍵のパス。終了コード 1。`check` は理由にしない | 壊れた鍵は利用者が消して打ち直す |
 | `context_of` | git か `commondir` の `stat` が失敗する | 壊れたリポジトリ | `context_of` | 呼び出し元へ返す（`CheckError` に直す） | `測れない: <理由>`。終了コード 1 | 打ち直せる |
 | `read_place` | 一覧を取れない | 権限 | `read_place` | 呼び出し元へ返す（`OSError`） | `write` は終了コード 1。`check` は理由にしない。`measure` は注記 | ファイルは変えない |
 | `read_place` | 1 件を読めない | 壊れた JSON・形の誤り | `read_place` | 既定値で続ける | パスと理由の案内の行か注記 | ファイルは変えない |
 | `gone_places` | `context.json` かブランチの一覧を読めない | 権限・git の失敗 | `gone_places` | 既定値で続ける（消さない） | 出力に出ない | 次の `write` がもう一度確かめる |
 | `store_adds` | 書けない | 権限・容量 | `_commit` | 止める | 終了コード 1 | 打ち直しても回答は増えない |
-| `store_drops` | 削除か更新に失敗 | 権限 | `store_drops` | 呼び出し元へ返す（行） | `result: held_delete_failed` か `held_resume_failed`、`name` に `<id>@<版>`。終了コード 0 | 後処理だけの打ち直し |
+| `store_drops` | 別の場所の片付けに失敗 | 権限 | `store_drops` | 呼び出し元へ返す（`result` の無い案内の行） | パスと理由。終了コード 0 | 次の通常の `write` が条件を確かめ直して片付ける |
+| `store_drops` | 今の場所の削除か更新に失敗 | 権限 | `store_drops` | 呼び出し元へ返す（行） | `result: held_delete_failed` か `held_resume_failed`、`name` に `<id>@<版>`。終了コード 0 | 後処理だけの打ち直し |
 
 ### 並行と排他
 
@@ -339,7 +336,7 @@ contracts/
 満たす決定: 決定 1・6・7・8、受け入れ条件 13
 
 - `cli.py` の `--answers` の説明（`_parser`）に、設計の入出力のコントラクトの最後の行の内容を書き、`ndf check --write-spec` で `project.args.schema.json` と `commands.md` を作り直す
-- `project.result.schema.json` の `result` の説明に、足す値（`remeasure`・`context_mismatch`・`answer_held`・`remeasure_v4`・`answer_secret`・`held_delete_failed`・`held_resume_failed`）を書く。`name` の説明に、後処理の失敗の行では `<id>@<版>` であることを足す
+- `project.result.schema.json` の `result` の説明に、足す値（`remeasure`・`context_mismatch`・`answer_held`・`remeasure_v4`・`answer_secret`・`held_delete_failed`・`held_resume_failed`・`place_hidden`）を書く。`name` の説明に、後処理の失敗の行では `<id>@<版>` であることを足す
 - `project-analysis.md`・`ndf-project-analysis-record.md` は、設計の構成要素の表の「手順書と確定仕様」の行の内容を書く
 - `.ndf/project.json` は、6 項目と `analysis.written` の該当の指紋を手で消す
 
@@ -363,7 +360,6 @@ contracts/
 | `shows_secret` | `secret.has_secret`・`secret.mask` | `secret.py` を読んだ | 使えない。前者は書かない値の形だけ、後者は辞書のキーを見ない。形の定義（`secret_lines`）は使う |
 | `compare_value` | `analysis_record.strip_item`・`items.value_digest` | `grep -rn "value_digest\|strip_item" plugins/ndf/src` | 2 つとも使う |
 | `current_entry`・`measure_problem`・`answer_tainted`・`judge_answer` | `write.resolve_item`・`write.item_problem` | `write.py` を読んだ | 値の解決と形の確かめは使う。照合の判定は今は無い |
-| `place_key`・`create_place_key` | `ndf` の中の `hmac`・`secrets` の利用 | `grep -rn "hmac" plugins/ndf/src/ndf` | 使える部品は無い。標準ライブラリを使う |
 | `context_of`・`place_of` | `check.repo_dirs`・`adapters.git.Git` | `git.py` の `rev-parse` を使う関数を読んだ | `Git.attempt` を使う |
 | `read_place`・`plan_changes`・`store_adds`・`store_drops`・`gone_places`・`pick_held`・`awaits_resume` | `jsonfile.read_object`・`contracts.schema_errors`・`items.value_digest` | `grep -rn "held" plugins/ndf/src/ndf/domains` | 読み取りと形の確かめは使う。保管の仕組みは今は無い |
 | `service_names`・`instruction_notes` | `compose_services`・`_old_guide_notes`・`instruction_files` | `measure_repo.py` を読んだ | 使う |
@@ -388,9 +384,9 @@ contracts/
 | `current_entry`・`measure_problem` | 3 つの形 | `digest: null`、`analyzer` 4 | 余分なキー、16 進数でない指紋、指紋の食い違い |
 | `judge_answer` | 順 1〜12 の 1 行ずつ | 版 4 でキーが無い・不明、`withheld` で同じ値 | 形に合わない `value` |
 | `merge_project`（秘密を含む回答） | — | キーが無い項目に、代入の形の理由を持つ `unknown` の回答 | 代入の形の値を持つ形に合わない `value`。どちらも設定の理由は固定の文 |
-| `context_of`・`place_of` | ブランチ。コミットを足しても `place` は同じ | detached HEAD、コミットが無い、同じパスとブランチ名で作り直した worktree は `place` が違う | 伏せると同じになる 2 つのブランチ名は `place` が違う。鍵が違えば `place` が違う |
-| `plan_changes` | 追加・同値の削除・`resolves`・`discard`。同じ項目を `resume: true` で足すと古い回答は `false`。足す前に止めても `true` は 1 件以下 | 同じ `measure_id` の打ち直し | `../` を含む `id`、別の場所の `id`、版の古い `<id>@<版>` |
-| `has_answers` | 回答があれば真 | 置き場が無い、`.gitignore` と鍵だけ、`context.json` だけは偽 | — |
+| `context_of`・`place_of` | ブランチ。コミットを足しても `place` は同じ | detached HEAD、コミットが無い、同じパスとブランチ名で作り直した worktree は `place` が違う | 代入の形に当たるブランチ名とパスは `place` が `null` |
+| `plan_changes` | 追加・同値の削除・`resolves`・`discard`。同じ項目を `resume: true` で足すと古い回答は `false`。足す前に止めても `true` は 1 件以下。版が `context.seen` に無い回答は、`held.id` が同じでも下げない | 同じ `measure_id` の打ち直し | `../` を含む `id`、別の場所の `id`、版の古い `<id>@<版>` |
+| `has_answers` | 回答があれば真 | 置き場が無い、`.gitignore` だけ、`context.json` だけは偽 | — |
 | `gone_places` | worktree とブランチの削除。削除して同じ名前で作り直し、前のブランチを消した場合 | 移動だけ・改名だけ、メインの作業場所、管理名のディレクトリがあって `commondir` が無い場所は残す | `context.json` が壊れている |
 | `plan`（控え） | 取り除く値があれば控えを 1 つ計画する | 同じ中身の控えがあれば計画しない。控えを作った直後に失敗させて打ち直しても 1 つ | 中身の違う控えと読めない控えは変えない。0644 の控えとリンクは使わない。追跡された控えの再利用は、設定を変えずに止まる |
 | `_guard_store` | 無視される | `.gitignore` を作る回。追跡済みのファイルを対象にした削除だけの計画は止まり、ファイルが残る | 追跡済み、親と子の両方の指定を外して無視されないパス |
