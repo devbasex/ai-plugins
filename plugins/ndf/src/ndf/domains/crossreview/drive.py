@@ -142,7 +142,7 @@ class _Run:
     mvv: Optional[str] = None
     mvv_branch: Optional[str] = None
     base_branch: str = ""  # 差分の比較元のブランチ（`follow_base` なら PR の今のマージ先。ラウンドの記録に残す。#3702）
-    followed: Optional[str] = None  # `follow_base` の比較元。同じマージ先のラウンドと詳細レビューの記録だけを使う（#3702）
+    followed: Optional[str] = None  # `follow_base` の比較元。同じマージ先のラウンドだけを差分の起点と再利用に使う（#3702）
     # PR に届いたと分かっている最後のコミット（始めの同期で取得した先頭か、この起動で送ったコミット）
     sent: str = ""
     # 始めに読めて、head ブランチとその先頭がレビューするブランチの取得した先頭と一致した PR
@@ -781,7 +781,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     changed = changes.changed(run.g, cfg.base_commit, cfg.worktree)
     _oversized_docs(run, changed.docs)
     run.documents = any(p.endswith(".md") for p in changed.files)
-    reviewed = scope_decide.reviewed_of(run.data, run.mvv, run.followed)
+    reviewed = scope_decide.reviewed_of(run.data, run.mvv, run.base_branch)
     sections = changes.sections(changed.docs)
     head = run.g.rev_parse("HEAD")
     merge_base = _merge_base(run, head)
@@ -903,7 +903,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         )
         return fin.INCOMPLETE_REVIEWERS
     if prep.scope.kind == scope_decide.FULL:
-        run.data[store.REVIEWED] = scope_decide.reviewed_after(run.data, prep.reviewed, prep.sections, run.base_branch)
+        run.data[store.REVIEWED] = sorted(prep.reviewed | set(prep.sections))
         run.data.update({store.REVIEWED_MVV: run.mvv, store.REVIEWED_BASE_BRANCH: run.base_branch})
     open_, handed = run.journal.pending(run.cfg.handed)
     record["verdict"] = _verdict(run, open_, handed)

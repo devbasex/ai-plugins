@@ -318,10 +318,12 @@ def _every_section(purpose: str) -> bool:
 
 
 class _LocalBase(NamedTuple):
-    """取得済みの参照だけから決めた、差分の比較元のコミットと、MVV を読む参照（決められなければ None）。"""
+    """取得済みの参照だけから決めた、差分の比較元のコミットと、MVV を読む参照（決められなければ None）と、`run` がラウンドに
+    記録する比較元のブランチ（決められなければ None。詳細レビューの記録を同じ比較元のものだけ使う。#3702）。"""
 
     commit: str
     mvv_ref: Optional[str]
+    branch: Optional[str] = None
 
 
 def _local_base(g: git.Git, remote: str, base: str, branch: Optional[str]) -> _LocalBase:
@@ -333,15 +335,16 @@ def _local_base(g: git.Git, remote: str, base: str, branch: Optional[str]) -> _L
     tracking = f"refs/remotes/{remote}"
     commit = base if git.FULL_SHA.match(base) else None
     if commit is None:
+        name = base.removeprefix(f"{remote}/")
         try:
-            tip = g.rev_parse(f"{tracking}/{base.removeprefix(f'{remote}/')}")
-            return _LocalBase(tip, tip)
+            tip = g.rev_parse(f"{tracking}/{name}")
+            return _LocalBase(tip, tip, name)
         except git.GitError:
             commit = g.commit_named(base)
     if commit is None:
         # リモートに無い手元だけのブランチ。`run` は止まるので、MVV を読む先も無い
         return _LocalBase(base, None)
-    return _LocalBase(commit, f"{tracking}/{branch}" if branch is not None else None)
+    return _LocalBase(commit, f"{tracking}/{branch}" if branch is not None else None, branch)
 
 
 def _local_mvv(wt: Path, ref: Optional[str]) -> tuple[str, list[str]]:
@@ -379,7 +382,7 @@ def _local_scope(wt: Path, args: argparse.Namespace, data: dict[str, Any], resol
     now, unsure = _local_mvv(wt, based.mvv_ref)
     unit = scope_decide.unit_id(resolved.unit)
     basis = scope_decide.Basis(merge_base, resolved.seats.names, resolved.settings.focus, now, unit=unit)
-    prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_of(data, basis.mvv)
+    prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_of(data, basis.mvv, based.branch)
     found = scope_decide.review_scope(_every_section(args.purpose), len(rounds) + 1, prev, sections, reviewed)
     got = round_scope.descended(g, found, "HEAD")
     return got, unsure if rounds else []

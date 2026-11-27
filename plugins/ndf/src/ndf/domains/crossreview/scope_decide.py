@@ -76,21 +76,14 @@ def sections_of(path: str, text: str) -> list[str]:
 def reviewed_of(state: Mapping[str, Any], mvv: Optional[str] = None, base_branch: Optional[str] = None) -> set[str]:
     """状態ファイルの中身から、前のラウンドまでに詳細レビューを通ったセクション（並びでなければ無し）。今の MVV を見分ける
     値 `mvv`（None は確かめない）と違う MVV で通ったセクションは、通っていないとみなす（#4076）。今の比較元のブランチ
-    `base_branch`（None は確かめない）と違う比較元で通ったセクションも、通っていないとみなす（マージ先が変われば、新しい
-    全差分のセクションを詳細レビューに通す。#3702）。"""
+    `base_branch`（None は確かめない）と違う比較元で通ったセクションも、通っていないとみなす。`run` はどの起動でも今の比較元を
+    渡す（`--base` やマージ先を変えれば、新しい全差分のセクションを詳細レビューに通す。比較元が違う記録を範囲の決定に使うと、
+    今の比較元の名前で済んだと書き直す。#3702・PR 4638 の r2-2・r3-1）。"""
     if mvv is not None and _known(state.get(store.REVIEWED_MVV)) != mvv:
         return set()
     if base_branch is not None and state.get(store.REVIEWED_BASE_BRANCH) != base_branch:
         return set()
     return set(store.list_of(state, store.REVIEWED))
-
-
-def reviewed_after(state: Mapping[str, Any], reviewed: Collection[str], sections: Iterable[str], base_branch: str) -> list[str]:
-    """全差分のラウンドの後に残す、詳細レビューを通ったセクション（`base_branch` と比べて通ったものだけ）。前の記録 `reviewed` は、
-    記録の比較元が `base_branch` と同じときだけ引き継ぐ。比較元が違う記録を今の比較元の名前で残すと、後でマージ先に合わせる起動が
-    確かめていないセクションを通ったと読む（PR 4638 の r2-2。#3702）。"""
-    kept = set(reviewed) if state.get(store.REVIEWED_BASE_BRANCH) == base_branch else set()
-    return sorted(kept | set(sections))
 
 
 def _known(value: object) -> str:

@@ -14,6 +14,8 @@ from ndf.domains.records import mvv
 from ._repos import Repos, commit, count_git, run_cli, sh
 
 A, B = "issues/d.md#セクション A", "issues/d.md#セクション B"
+# 詳細レビューを `--base origin/main` の比較元で通した記録（比較元が違う記録は引き継がない。#3702）
+ON_MAIN = {store.REVIEWED_BASE_BRANCH: "main"}
 # ラウンドの記録の比較基点（`--base` と HEAD の merge-base の SHA。PR 3944 の r2-1）。状態ファイルを書く前に本物の SHA へ置き換える
 MB = "<merge-base>"
 
@@ -56,7 +58,8 @@ def test_issue_3181_cli_reads_sections_of_changed_documents(repos: Repos, tmp_pa
     store.write_object(
         state / store.STATE_NAME.format(pr=8),
         _with_merge_base(
-            {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": sha, "base": MB}], store.REVIEWED: ["issues/d.md#設計", A]}, sha
+            {store.ORIGIN_KEY: 8, "rounds": [{"round": 1, "head": sha, "base": MB}], store.REVIEWED: ["issues/d.md#設計", A], **ON_MAIN},
+            sha,
         ),
     )
     base = ["review-scope", str(wt), "--state-dir", str(state), "--pr", "8", "--base", "origin/main"]
@@ -163,7 +166,7 @@ def test_scope_of_a_design_pr_treats_a_broken_reviewed_list_as_empty(scope_run) 
 
 def test_scope_of_a_design_pr_narrows_to_the_last_head_once_every_section_was_reviewed(scope_run) -> None:
     rounds = [{"round": 1, "head": "abc", "base": MB}, {"round": 2, "head": "def", "base": MB}]
-    code, got = scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})
+    code, got = scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS, **ON_MAIN})
     assert got["summary"] == "round 3 の範囲は since（詳細レビューを通らないセクション 0 件）"
     assert got["items"] == [_scope(scope_decide.SINCE, scope_run.heads["def"], [])]
 
@@ -178,7 +181,9 @@ def test_scope_that_is_full_does_not_ask_git_for_the_last_head(scope_run, monkey
     rounds = [{"round": 1, "head": "abc", "base": MB}]
     assert scope_run("design", {"pr": 8, "rounds": rounds})[1]["items"] == [_scope(scope_decide.FULL, None, _SECTIONS)]
     assert asked == []
-    assert scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})[1]["items"][0]["scope"] == scope_decide.SINCE
+    assert (
+        scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS, **ON_MAIN})[1]["items"][0]["scope"] == scope_decide.SINCE
+    )
     assert len(asked) == 1
 
 
@@ -301,11 +306,11 @@ def test_issue_3702_sections_reviewed_against_another_target_are_reviewed_again(
     assert scope_decide.reviewed_of(state, APPROVED, now) == reviewed
 
 
-@pytest.mark.parametrize(("recorded", "kept"), [("main", [A, B]), ("sprint/y", [B]), (None, [B])])
-def test_issue_3702_sections_from_another_target_are_not_saved_under_the_current_one(recorded: str | None, kept: list[str]) -> None:
-    """PR 4638 の r2-2: 比較元が今と違う記録は、今の比較元の名前で残す集合へ引き継がない（今のラウンドで通ったものだけ残す）。"""
-    state = {store.REVIEWED: [A]} | ({store.REVIEWED_BASE_BRANCH: recorded} if recorded else {})
-    assert scope_decide.reviewed_after(state, {A}, [B], "main") == kept
+def test_issue_3702_changed_base_sends_every_section_to_the_detailed_review(scope_run) -> None:
+    """PR 4638 の r3-1: `--base` を変えた起動は、前の比較元で通ったセクションも詳細レビューに通す（`run` と同じ範囲を返す）。"""
+    rounds = [{"round": 1, "head": "abc", "base": MB}]
+    state = {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS, store.REVIEWED_BASE_BRANCH: "sprint/y"}
+    assert scope_run("design", state)[1]["items"] == [_scope(scope_decide.FULL, None, _SECTIONS)]
 
 
 def test_branch_the_mvv_was_read_from_is_the_last_recorded_one() -> None:
