@@ -327,3 +327,17 @@ def test_layer_rows_keep_ledger_roles_out_of_p_and_rewrites():
     assert row[4] == "7.0" and row[9] == "1.00"  # k は全起動、書き直しは席の 2 起動で割る
     [only] = mod.layer_rows([ledger])
     assert only[3] == "-" and only[7] == "-" and only[9] == "-"
+
+
+def test_no_comparable_version_says_the_difference_was_not_computed():
+    """比べる版が無いときに、差が ±30% の内だったと書かない（観測値の無い状態を「差が小さい」と読ませない）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("token_usage_snapshot", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod._reading_lines([], []) == ["前の版と比べられる版が無いため、版ごとの差は算出できなかった（PR を作った会話のある版: 0 件）。"]
+    one = [({"version": "1.0.0"}, 1.0, None)]
+    assert mod._reading_lines([], one)[0].endswith("（PR を作った会話のある版: 1 件）。")
+    two = [({"version": "1.0.0"}, 1.0, None), ({"version": "1.0.1"}, 1.1, 0.1)]
+    assert mod._reading_lines([], two)[0].startswith("差の大きい版は無い")
