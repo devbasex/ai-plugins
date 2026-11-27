@@ -39,11 +39,6 @@ REDLINE_ITEMS = mvv_decide.REVIEW_REDLINE_ITEMS
 JUDGED = mvv_decide.REVIEW_JUDGED
 # 上の 5 つの欄
 MARKS = (MVV, PINNED, REDLINE_ITEMS, JUDGED, UNPINNED)
-# 同じ照合キーの本文を 2 行に分けたとき、後の行のキーへ足す印（`finding_key` は空白をそろえるので、改行を含むキーは本文から
-# 作られない。#4363）
-SIBLING = "\n2"
-# 記録のコメントの一覧で、キーに `SIBLING` を持つ行を表す欄。本文や起きることの 1 文を足さずに、分けた行を引き継ぐ
-SPLIT = "split"
 # NDF が機械で確かめて作った指摘の `by`
 BY_NDF = mvv_decide.BY_NDF
 # 状態ファイルのキー（書いた記録のコメントの URL。次からは同じコメントを書き換える）
@@ -118,7 +113,7 @@ def mvv_outputs(rows: Sequence[Mapping[str, Any]], snapshot: Snapshot, head: str
             unknown = [shown[t] for t in store.list_of(f.row, "unknown")]
             out["citations"].append({"id": f.row["id"], **place, "unknown": unknown, "outcome": f.outcome})
         elif f.outcome == fin.REDLINE:
-            out["redlines"].append({**ident, "text": shown[f.row["text"]] + mvv_decide.also_redlines_note(f.row)})
+            out["redlines"].append({**ident, "text": shown[f.row["text"]]})
         elif f.outcome == fin.SKIPPED:
             out["disputed"].append({**ident, "reason": shown.get(f.row.get("reason"))})
         else:
@@ -232,8 +227,6 @@ def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
         shown = OUTCOME_LABEL[outcome] if outcome in OUTCOME_LABEL else outcome
         if outcome == fin.UNRESOLVED and (f.get(fin.REDLINE) or _light(f)):
             shown = REDLINE_LABEL if f.get(fin.REDLINE) else LIGHT_LABEL
-        if f.get(fin.REDLINE):
-            shown = f"{shown}{mvv_decide.also_redlines_note(f)}"
         severity, reason = _cell(criteria_decide.severity_of(f.get("severity"))), f.get("reason")
         check = f.get(criteria_decide.CHECK)
         if isinstance(check, Mapping) and check.get(criteria_decide.LOWERED):
@@ -308,8 +301,6 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
         # 保護の種類は許可した値だけを書く（持たない指摘は欄を足さない。#4363）
         if kinds := criteria_decide.protect_of(f.get(criteria_decide.PROTECT)):
             keep[criteria_decide.PROTECT] = list(kinds)
-        if str(f.get("key") or "").endswith(SIBLING):
-            keep[SPLIT] = True
         items.append({**keep, "thread": thread if type(thread) is int else None})
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):

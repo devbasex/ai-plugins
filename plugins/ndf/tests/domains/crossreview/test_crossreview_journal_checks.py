@@ -7,7 +7,7 @@ import pytest
 from ndf.domains.crossreview import criteria_decide, drive, journal as journal_mod, verify_decide
 from ndf.domains.crossreview import finish_decide as fin
 
-from .test_crossreview_journal import ITEMS, V11, _row, _told
+from .test_crossreview_journal import IMPACT, ITEMS, V11, _row, _told
 
 # --- 判定役の確認（#4363） ---------------------------------------------------------------------
 
@@ -35,13 +35,6 @@ def test_issue_4363_enter_remembers_the_new_and_revived_findings() -> None:
     assert [journal.rows[fid]["text"] for fid in journal.fresh] == ["A", "C"]
     journal.enter(3, [])
     assert journal.fresh == []
-
-
-def test_issue_4363_denied_report_does_not_add_its_diff_to_the_recheck() -> None:
-    """確かめ直しの差分は、否定済みとして除いた報告の席が読んだものを含めない。"""
-    journal, _ = _lowered(path="x.py")
-    journal.enter(2, [_told(path="x.py", full_diff=True), _told(path="x.py", impact="既存の設定が消える")], ITEMS, V11)
-    assert journal.fresh == ["r1-1"] and journal.read_full["r1-1"] == {False}
 
 
 @pytest.mark.parametrize("severity", ["major", "critical"])
@@ -129,55 +122,35 @@ def test_issue_4363_lowered_finding_stays_lowered_when_raised_again() -> None:
 
 
 @pytest.mark.parametrize("order", [1, -1])
-def test_issue_4363_lowered_finding_raised_in_another_file_is_unlowered_and_not_asked(order: int) -> None:
-    """下げた指摘と同じ本文の重い報告が別のファイルで出たら、下げた扱いを解除して今回の位置の指摘にし、否定した位置は
-    主にせず、判定役へ渡し直さない（交互に出ても確かめ直さない）。"""
-    journal, row = _lowered(path="a.py", line=1)
-    journal.enter(2, [_told(path="a.py", line=9)])
-    assert (row["severity"], row["line"], journal.fresh) == ("minor", 1, [])
-    other = _told(path="b.py", line=2, impact="別の経路で保存が止まる")
-    journal.enter(3, [_told(path="a.py", line=1), other][::order])
-    assert (row["severity"], row["path"], row["line"], row["impact"]) == ("major", "b.py", 2, "別の経路で保存が止まる")
-    assert (row["check"]["lowered"], journal.fresh, journal.revived) == (False, [], ["r1-1"])
-    journal.enter(4, [_told(path="a.py", line=1)])
+@pytest.mark.parametrize(
+    "other", [{"text": "a の別の経路"}, {"impact": "既存の設定が消える"}, {"path": "b.py"}, {"section": "doc.md#移行"}]
+)
+def test_issue_4363_lowered_finding_raised_with_other_content_is_unlowered_and_not_asked(other: dict, order: int) -> None:
+    """下げた指摘は、行の番号だけが違う同じ内容の出し直しでは下げたまま、内容の違う重い出し直しでは元の重要度へ戻し、
+    本文と位置は行のまま、判定役へ渡し直さない。"""
+    journal, row = _lowered(severity="critical", path="a.py", line=1)
+    journal.enter(2, [_told(severity="critical", path="a.py", line=9)])
+    assert (row["severity"], row["check"]["lowered"]) == ("minor", True)
+    # 本文の違いは、指摘のキー（本文の先頭）より後ろに置く
+    row.update(text="A" * 500, key=journal_mod.oscillation.finding_key("A" * 500))
+    same = _told("A" * 500, path="a.py", line=1)
+    changed = {**same, **other}
+    if "text" in other:
+        changed["text"] = "A" * 500 + other["text"]
+    journal.enter(3, [same, changed][::order])
+    assert (row["severity"], row["check"]["lowered"], journal.fresh) == ("critical", False, [])
+    assert (row["text"], row["impact"], row["path"], row["line"]) == ("A" * 500, IMPACT, "a.py", 1)
+
+
+@pytest.mark.parametrize("order", [1, -1])
+@pytest.mark.parametrize("other", [{"impact": "既存の設定が消える"}, {"line": 2}, {"protect": ["secret"]}])
+def test_issue_4363_finding_with_a_different_or_protected_report_is_not_asked(other: dict, order: int) -> None:
+    """同じ指摘にまとまる重い報告の内容が違うか、保護の種類を挙げた報告があれば、判定役へ渡さず重いままにする。"""
+    journal = drive.FindingJournal()
+    journal.enter(1, [_told(path="a.py", line=1), _told(**{"path": "a.py", "line": 1, **other})][::order])
+    row = journal.rows["r1-1"]
     assert (row["severity"], journal.fresh) == ("major", [])
-
-
-@pytest.mark.parametrize("order", [1, -1])
-@pytest.mark.parametrize("severity, protect", [("critical", []), ("major", ["secret"])])
-def test_issue_4363_report_without_a_place_does_not_lead_the_unlowered_finding(severity: str, protect: list, order: int) -> None:
-    """下げた扱いを解除した指摘の代表は、解除の条件を満たした報告にする。位置の無い重い報告は、代表が保護の根拠を持つ場合も
-    本文に残す。"""
-    journal, row = _lowered(path="a.py", line=1)
-    placeless = _told(severity=severity, impact="位置を示せない不具合")
-    journal.enter(2, [placeless, _told(path="b.py", line=2, protect=protect)][::order])
-    assert (row["severity"], row["path"], row["line"]) == (severity, "b.py", 2)
-    assert "位置を示せない不具合" in criteria_decide.fixer_impact(row) and "位置を示せない不具合" not in row["text"]
-
-
-@pytest.mark.parametrize("order", [1, -1])
-def test_issue_4363_placeless_reports_all_reach_the_unlowered_finding_led_by_a_placeless_one(order: int) -> None:
-    """代表が位置の無い保護対象の報告でも、発生条件の違う位置の無い重い報告を本文に残す。"""
-    journal, row = _lowered(path="a.py", line=1)
-    protected = _told(impact="秘密が記録に残る", protect=["secret"])
-    plain = _told(impact="保存が止まる")
-    journal.enter(2, [plain, protected, _told(path="b.py", line=2)][::order])
-    assert (row.get("path"), row["impact"]) == (None, "秘密が記録に残る")
-    assert "保存が止まる" in criteria_decide.fixer_impact(row) and "保存が止まる" not in row["text"]
-
-
-@pytest.mark.parametrize("order", [1, -1])
-def test_issue_4363_denied_report_does_not_weigh_on_the_unlowered_finding(order: int) -> None:
-    """確認で否定したファイルの根拠の無い報告は、解除するラウンドの重要度に重ねない。"""
-    journal, row = _lowered(path="a.py", line=1)
-    journal.enter(2, [_told(severity="critical", path="a.py", line=1), _told(path="b.py", line=2)][::order])
-    assert (row["severity"], row["raised_severity"], row["path"]) == ("major", "major", "b.py")
-
-
-def test_issue_4363_protected_report_in_another_file_gets_the_first_severity_back() -> None:
-    journal, row = _lowered(severity="critical", path="a.py")
-    journal.enter(2, [_told(path="b.py", protect=["secret"])])
-    assert (row["severity"], row["path"], row["protect"]) == ("critical", "b.py", ["secret"])
+    assert row.get("protect") == other.get("protect")
 
 
 @pytest.mark.parametrize(

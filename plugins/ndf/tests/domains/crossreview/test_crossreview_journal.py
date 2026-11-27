@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ndf.domains.crossreview import criteria_decide, drive, journal as journal_mod, prior_decide, report_decide
+from ndf.domains.crossreview import criteria_decide, drive, journal as journal_mod, prior_decide
 from ndf.domains.records.mvv_decide import REVIEW_FIXED_AT
 from ndf.domains.crossreview import finish_decide as fin
 
@@ -218,19 +218,14 @@ def test_issue_4014_fixed_finding_coming_back_without_impact_stays_major_with_th
     assert [f["id"] for f in open_] == ["r1-1"]
 
 
-@pytest.mark.parametrize("order", [1, -1])
-def test_issue_4363_fixed_finding_coming_back_takes_the_impact_and_the_place_of_this_time(order: int) -> None:
-    """直した指摘が別の経路で戻ると、判定役が読む本文・1 文・位置は、出し直しの順によらず今回の同じ 1 件のものになる。"""
+def test_issue_4363_fixed_finding_coming_back_takes_the_impact_of_this_time() -> None:
+    """直した指摘が戻ると、本文は行のまま、1 文と位置は今回のものになり、内容が行と同じなら判定役へ渡る。"""
     journal = drive.FindingJournal()
-    journal.enter(1, [{"text": "A", "severity": "major", "impact": IMPACT, "path": "x.py", "line": 3, "by": "codex"}])
+    journal.enter(1, [_told(path="x.py", line=3)])
     journal.rows["r1-1"]["outcome"] = fin.FIXED
-    again = [
-        {"text": "A", "severity": "minor", "path": "x.py", "line": 9, "by": "codex"},
-        {"text": "a", "severity": "major", "impact": "別の経路で保存が止まる", "path": "y.py", "line": 5, "by": "kiro"},
-    ]
-    journal.enter(2, again[::order])
+    journal.enter(2, [_told(impact="別の経路で保存が止まる", path="y.py", line=5, by="kiro")])
     row = journal.rows["r1-1"]
-    assert (row["text"], row["impact"], row["path"], row["line"]) == ("a", "別の経路で保存が止まる", "y.py", 5)
+    assert (row["text"], row["impact"], row["path"], row["line"]) == ("A", "別の経路で保存が止まる", "y.py", 5)
     assert journal.fresh == ["r1-1"]
 
 
@@ -241,108 +236,6 @@ def test_issue_4363_finding_coming_back_without_impact_stays_major_and_is_not_as
     journal.rows["r1-1"]["outcome"] = fin.FIXED
     journal.enter(2, [{"text": "A", "severity": "major", "path": "y.py", "line": 5, "by": "kiro"}])
     assert journal.rows["r1-1"]["severity"] == "major" and journal.fresh == []
-
-
-@pytest.mark.parametrize("order", [1, -1])
-def test_issue_4363_heavy_reports_at_different_places_are_kept_and_not_asked(order: int) -> None:
-    """同じ本文で別々の経路を指す重い報告は、1 つの経路の否定で下がらないように判定役へ渡さず、どの位置も公開しない欄に残す。"""
-    journal = drive.FindingJournal()
-    journal.enter(1, [_told(path="a.py", line=1), _told(path="b.py", line=2, by="kiro")][::order])
-    row = journal.rows["r1-1"]
-    assert (row["severity"], journal.fresh) == ("major", [])
-    other = "b.py:2" if row["path"] == "a.py" else "a.py:1"
-    assert other in criteria_decide.fixer_impact(row) and other not in row["text"]
-
-
-@pytest.mark.parametrize("order", [1, -1])
-@pytest.mark.parametrize("basis", [{"mvv": "C7"}, {"mvv": "Value 5"}, {"protect": ["irreversible"]}])
-def test_issue_4363_finding_keeps_the_text_and_the_place_of_the_report_that_marked_it(basis: dict, order: int) -> None:
-    """承認や保護の根拠となる報告に 1 文が無くても、行は別の報告で上書きせず、1 文のある報告は公開しない欄に持つ。"""
-    journal = drive.FindingJournal()
-    told = [
-        {"text": "A", "severity": "major", "path": "x.py", "line": 3, "by": "codex", **basis},
-        {"text": "a", "severity": "major", "impact": IMPACT, "path": "y.py", "line": 5, "by": "kiro"},
-    ]
-    journal.enter(1, told[::order], ("Value 5", "C7"), "approved:11:aaa:ccc")
-    row = next(r for r in journal.rows.values() if r["text"] == "A")
-    assert (row["path"], row["line"], row.get("impact")) == ("x.py", 3, None)
-    if basis.get("mvv") == "C7":  # 承認の要る操作の行は修正担当へ渡らないので、別の所の不具合は別の行になる
-        assert [(r["text"], r["path"]) for r in journal.handable()] == [("a", "y.py")]
-    else:
-        assert f"a（y.py:5）— 起きること: {IMPACT}" in criteria_decide.fixer_impact(row)
-
-
-@pytest.mark.parametrize("rounds", [(1, 1), (1, 2)])
-@pytest.mark.parametrize("approval_first", [True, False])
-def test_issue_4363_defect_in_another_file_than_the_approval_reaches_the_fixer(approval_first: bool, rounds: tuple[int, int]) -> None:
-    """本文の先頭が同じでも、承認の要る操作と別のファイルの不具合は別の行にし、不具合は順によらず修正担当へ渡る。"""
-    journal = drive.FindingJournal()
-    told = [_told("A", mvv="C7", path="auth.py", line=1), _told("A", protect=["user_data"], path="config.py", line=2)]
-    told = told if approval_first else told[::-1]
-    if rounds == (1, 1):
-        journal.enter(1, told, ("C7",), V11)
-    else:
-        for round_no, item in zip(rounds, told):
-            journal.enter(round_no, [item], ("C7",), V11)
-    assert [r["path"] for r in journal.handable()] == ["config.py"]
-    assert [r["path"] for r in journal.rows.values() if r.get("redline")] == ["auth.py"]
-    journal.enter(3, told, ("C7",), V11)
-    assert len(journal.rows) == 2
-
-
-def test_issue_4363_every_operation_that_needs_approval_keeps_its_report() -> None:
-    """承認の要る操作が複数の報告に分かれても、どの操作の本文と位置も公開しない欄に残り、次の実行でも同じ指摘に重ねる。"""
-    journal = drive.FindingJournal()
-    ops = [_told("A", mvv=item, path=path, line=1) for item, path in (("C2", "auth.py"), ("C3", "move.py"), ("C7", "rule.md"))]
-    journal.enter(1, ops[:2], ("C2", "C3", "C7"), V11)
-    journal.enter(2, ops[2:], ("C2", "C3", "C7"), V11)
-    row = journal.rows["r1-1"]
-    assert (row["path"], row["text"]) == ("auth.py", "A") and all(p in str(row["also_reports"]) for p in ("move.py:1", "rule.md:1"))
-    again = drive.FindingJournal()
-    again.carry([prior_decide.Carried("t1", None, row["text"], None, None, None, None)])
-    again.enter(1, [_told("A")])
-    assert list(again.rows) == ["t1"]
-
-
-def test_issue_4363_defect_split_by_the_text_reaches_the_judge_with_its_own_diff_only() -> None:
-    """行を分けた指摘の差分は、その行へ重ねた報告の席が読んだものだけを選ぶ。"""
-    journal = drive.FindingJournal()
-    approval = _told("A", mvv="C7", path="auth.py", line=1, full_diff=True)
-    journal.enter(1, [approval, _told("A", path="config.py", line=2)], ("C7",), V11)
-    [fixing] = [r["id"] for r in journal.handable()]
-    assert journal.read_full[fixing] == {False}
-
-
-def test_issue_4363_split_rows_stay_apart_when_another_state_directory_takes_them_over() -> None:
-    """同じファイルで起きることの 1 文だけが違う 2 行は、記録のコメントから戻しても分かれたままで、1 文は公開しない。"""
-    journal = drive.FindingJournal()
-    approval = _told("A", mvv="C7", path="x.py", line=1)
-    defect = _told("A", path="x.py", line=1, impact="設定が壊れる")
-    journal.enter(1, [approval, defect], ("C7",), V11)
-    body = report_decide.open_block({"findings": list(journal.rows.values())})
-    assert "設定が壊れる" not in body
-    listed, _ = prior_decide.recorded([prior_decide.Remark("comment", "ndf", f"{report_decide.MARKER}\n{body}", trusted=True)])
-    again = drive.FindingJournal()
-    again.carry(listed, ("C7",), V11)
-    assert len(again.rows) == 2 and len(again.handable()) == 1
-    again.enter(1, [approval, defect], ("C7",), V11)
-    assert len(again.rows) == 2 and len(again.handable()) == 1
-
-
-@pytest.mark.parametrize("severity", ["major", "minor"])
-def test_issue_4363_mvv_defect_without_impact_is_split_from_the_approval(severity: str) -> None:
-    """MVV の項目で重さを固定する報告は、起きることの 1 文が無くても承認の要る行へ吸収しない。"""
-    journal = drive.FindingJournal()
-    approval = _told("A", mvv="C7", path="auth.py", line=1)
-    defect = {"text": "A", "severity": severity, "mvv": "Value 5", "path": "config.py", "line": 2, "by": "kiro"}
-    journal.enter(1, [approval, defect], ("Value 5", "C7"), V11)
-    assert [r["path"] for r in journal.handable()] == ["config.py"]
-
-
-def test_issue_4363_reports_that_name_different_sections_are_both_kept() -> None:
-    journal = drive.FindingJournal()
-    journal.enter(1, [_told("A", mvv="C7", section=f"doc.md#{name}") for name in ("認証", "移行")], ("C7",), V11)
-    assert "doc.md#移行" in str(journal.rows["r1-1"]["also_reports"])
 
 
 def test_issue_4014_carried_rows_are_not_rated_again() -> None:

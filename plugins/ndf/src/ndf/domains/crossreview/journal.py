@@ -15,9 +15,9 @@ from typing import Any, NamedTuple, Optional
 from ndf.core.converge import oscillation
 from ndf.domains.crossreview import criteria_decide, prior_decide, store, verify_decide
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, SIBLING, UNPINNED
+from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, UNPINNED
 from ndf.domains.records import jsonl
-from ndf.domains.records.mvv_decide import DEFERS, REVIEW_ALSO_REDLINES, REVIEW_DEFER, REVIEW_FIXED_AT, State, also_redlines_note
+from ndf.domains.records.mvv_decide import DEFERS, REVIEW_DEFER, REVIEW_FIXED_AT, State
 
 
 def _text(value: object) -> Optional[str]:
@@ -37,11 +37,6 @@ OCCURRENCE = "occurrence"
 PROTECT = criteria_decide.PROTECT
 # 判定役の確認の結果の欄（有効な回答のあった指摘だけが持つ。直した指摘が戻れば外す。#4363）
 CHECK = criteria_decide.CHECK
-# 同じ指摘の別の報告の欄（状態ファイルだけに持つ。#4363）
-ALSO_REPORTS = criteria_decide.ALSO_REPORTS
-# 下げた指摘を、同じファイルの違う 1 文か見出しで確かめ直した行の欄。値は先に否定した 1 文と見出し（`impact`・`section`）
-# （確かめ直しは 1 回だけ。直した指摘が戻れば外す。#4363）
-RECHECKED = "rechecked"
 # `CHECK` の中の欄。下げた指摘が出し直しで下げた扱いを抜けた（#4363）
 UNLOWERED = "unlowered"
 # 指摘がプロジェクト MVV に反するときの欄のうち、手元の状態ファイルだけに持つもの（#4076。記録のコメントにも載せる欄は
@@ -159,7 +154,7 @@ def _unclassify(row: dict[str, Any]) -> None:
     old = {k: row[k] for k in (JUDGED, MVV, REDLINE_ITEMS, "outcome", SKIPPED_MVV) if k in row}
     row[HISTORY] = [*store.list_of(row, HISTORY), old]
     _unpin(row)
-    for key in (MVV, fin.REDLINE, REDLINE_ITEMS, JUDGED, REVIEW_ALSO_REDLINES):
+    for key in (MVV, fin.REDLINE, REDLINE_ITEMS, JUDGED):
         row.pop(key, None)
 
 
@@ -186,20 +181,6 @@ def _skip_is_void(row: dict[str, Any], named: Optional[str], mvv: Optional[str])
         return False
     redline = criteria_decide.redline(named) and not row.get(fin.REDLINE)
     return redline or not _same_mvv(row.get(SKIPPED_MVV), mvv)
-
-
-def _carried_key(by_key: Mapping[Any, dict[str, Any]], c: prior_decide.Carried, items: Sequence[str]) -> str:
-    """引き継ぐ指摘 `c` を重ねる行のキー。前の実行が分けた行（`c.split`）は後の方のキーに戻す。どちらのキーでも、承認の要る
-    操作かどうかが違い、ファイルか見出しも違う行には重ねない（`_row_keys`）。"""
-    base = oscillation.finding_key(c.text)
-    asks = any(criteria_decide.redline(i) for i in _judged_items(c._asdict(), items))
-    spot = _Spot(c.path, None, _text(c.section))
-    slots = (base + SIBLING, base) if c.split else (base, base + SIBLING)
-    for key in slots:
-        row = by_key.get(key)
-        if row is None or bool(row.get(fin.REDLINE)) == asks or not _apart(spot, _spot(row)):
-            return key
-    return slots[0]
 
 
 def _judged_items(marks: Mapping[str, Any], items: Sequence[str]) -> list[str]:
@@ -266,91 +247,53 @@ def _inherit_protect(row: dict[str, Any], kinds: object) -> bool:
     return before != row
 
 
-class _Spot(NamedTuple):
-    """報告か行が指す、ファイル・起きることの 1 文・見出し。"""
-
-    path: Optional[str]
-    impact: Optional[str]
-    section: Optional[str]
-
-
-def _spot(item: Mapping[str, Any]) -> _Spot:
-    return _Spot(_located(item).get("path"), _text(item.get("impact")), _text(item.get("section")))
+def _other_content(row: Mapping[str, Any], item: Mapping[str, Any], named: Optional[str], *, line: bool = False) -> bool:
+    """出し直し `item`（反する MVV の項目は `named`）が重い報告で、内容（本文・起きることの 1 文・パス・見出し。`line` が真なら
+    行の番号も）が行 `row` と違うか。行の番号は修正でずれるので、下げた指摘の出し直しでは比べない。#4363"""
+    new = _raised(dict(item), named)
+    if not criteria_decide.blocking(new["severity"]):
+        return False
+    told = {**new, "text": str(item["text"]).strip(), "section": _text(item.get("section"))}
+    return any(told.get(k) != row.get(k) for k in ("text", "impact", "path", "section", *(("line",) if line else ())))
 
 
-def _apart(one: _Spot, other: _Spot) -> bool:
-    """ファイル・1 文・見出しのどれかが、両方にあって違うか。"""
-    return any(_differs(a, b) for a, b in zip(one, other))
+def _askable(row: dict[str, Any], reports: Sequence[Mapping[str, Any]], items: Sequence[str], back: bool) -> bool:
+    """新しく出たか戻った行 `row` を判定役へ渡す候補にするか。`reports` はこのラウンドのその指摘の出し直し、`back` は戻った行。
+
+    戻った行は 1 文を今回のものに置き換える。今回の 1 文が無ければ前の 1 文と重さを持ち続けるが、渡さない（前の経路の
+    1 文で下げないため）。保護の種類を挙げた報告があるか、行と内容の違う重い報告がある指摘も、1 つの否定でほかの報告まで
+    下げないように渡さない。必ず人の承認が要る操作の行は `verify_decide.select` が除く。#4363"""
+    if back:
+        told = next((t for i in reports if (t := _text(i.get("impact")))), None)
+        if told is None:
+            return False
+        row["impact"] = told.strip()
+    return not any(
+        criteria_decide.protect_of(i.get(PROTECT)) or _other_content(row, i, criteria_decide.mvv_item(i.get("mvv"), items), line=True)
+        for i in reports
+    )
 
 
-def _row_keys(by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str]) -> list[Optional[str]]:
-    """出し直し `raised` のそれぞれを重ねる行のキー（本文の無いものは None）。
-
-    照合キーは本文の先頭だけで決まる。必ず人の承認が要る操作の行は修正担当へ渡らないので、位置か内容の違う別の重い報告を
-    重ねると、その不具合が直されないまま収束する。そのような報告は、承認の要る操作とは別の行（`SIBLING`）にする。修正担当へ
-    渡る行がある所へ、別の位置の承認の要る操作が来たときも、行を分ける。#4363"""
-    texts = [item.get("text") for item in raised]
-    bases = [oscillation.finding_key(t.strip()) if isinstance(t, str) and t.strip() else None for t in texts]
-    approval = [criteria_decide.redline(criteria_decide.mvv_item(item.get("mvv"), items)) for item in raised]
-    spots: dict[str, list[_Spot]] = {}
-    for item, base, asks in zip(raised, bases, approval):
-        if base is not None and asks:
-            spots.setdefault(base, []).append(_spot(item))
-    out: list[Optional[str]] = []
-    for item, base, asks in zip(raised, bases, approval):
-        out.append(None if base is None else _row_key(by_key, base, item, items, asks, spots.get(base, [])))
-    return out
-
-
-def _row_key(
-    by_key: Mapping[Any, dict[str, Any]],
-    base: str,
-    item: Mapping[str, Any],
-    items: Sequence[str],
-    asks: bool,
-    spots: Sequence[_Spot],
-) -> str:
-    """本文のキーが `base` の報告 1 件を重ねる行のキー。`asks` は承認の要る操作の報告か、`spots` はこのラウンドの承認の要る
-    操作の報告が指す所。重いかは、MVV の項目で重さを固定した後（`_classify`）で決める。"""
-    slots = (base, base + SIBLING)
-    held = next((k for k in slots if k in by_key and by_key[k].get(fin.REDLINE)), None)
-    approving = held
-    if approving is None:
-        # 引き継ぎは、分けた行の後の方だけを戻すことがある
-        approving = next((k for k in slots if k in by_key), base)
-        if approving in by_key and spots:
-            row = by_key[approving]
-            if row.get("outcome") == fin.UNRESOLVED and _blocking(row) and all(_apart(s, _spot(row)) for s in spots):
-                approving = slots[1] if approving == base else base
-    if asks:
-        return approving
-    fixing = slots[1] if approving == base else base
-    known = [*([_spot(by_key[held])] if held else []), *spots]
-    spot = _spot(item)
-    named = criteria_decide.mvv_item(item.get("mvv"), items)
-    heavy = named is not None or criteria_decide.blocking(_raised(dict(item))["severity"])
-    if known and (heavy or fixing in by_key) and all(_apart(spot, s) for s in known):
-        return fixing
-    # 引き継いだ承認の要る行は 1 文を持たず、1 文だけが違う報告を見分けられないので、分けた行があればそちらへ重ねる
-    if held and spot.impact and fixing in by_key and by_key[held].get("impact") is None and not _apart(spot, _spot(by_key[fixing])):
-        return fixing
-    return approving
-
-
-def _unlower(
-    by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], keys: Sequence[Optional[str]], items: Sequence[str]
-) -> None:
+def _unlower(by_key: Mapping[Any, dict[str, Any]], raised: Sequence[Mapping[str, Any]], items: Sequence[str]) -> None:
     """判定役の確認で下げた指摘のうち、このラウンドの出し直し `raised` のどれかが保護の種類か、MVV の項目か必ず人の承認が
-    要る操作を挙げたものは、下げた扱いを解除する。
+    要る操作を挙げたもの、または内容の違う重い報告（`_other_content`）のものは、下げた扱いを解除する。内容の違う重い報告が
+    あれば、重要度を元の重要度（最低 major）へ戻す。本文と位置は行のまま変えない。
 
     重要度を重ねる前に解除するので、同じラウンドのほかの出し直しの重要度は、処理の順によらず重ねられる。分類は
-    `_classify`、元の重要度へ戻すのは `_restore_lowered` が行う。#4363"""
-    for item, key in zip(raised, keys):
-        row = by_key.get(key) if key else None
-        if row is None or not _lowered(row):
+    `_classify`、保護の対象を元の重要度へ戻すのは `_restore_lowered` が行う。#4363"""
+    lowered = {key for key, row in by_key.items() if _lowered(row)}
+    for item in raised:
+        text = item.get("text")
+        key = oscillation.finding_key(text.strip()) if isinstance(text, str) and text.strip() else None
+        if key not in lowered:
             continue
-        if criteria_decide.protect_of(item.get(PROTECT)) or criteria_decide.mvv_item(item.get("mvv"), items) is not None:
+        row = by_key[key]
+        named = criteria_decide.mvv_item(item.get("mvv"), items)
+        differs = _other_content(row, item, named)
+        if differs or named is not None or criteria_decide.protect_of(item.get(PROTECT)):
             row[CHECK] |= {criteria_decide.LOWERED: False, UNLOWERED: True}
+        if differs:
+            row["severity"] = criteria_decide.at_least_blocking(criteria_decide.severity_of(row.get("raised_severity")))
 
 
 def _restore_lowered(row: dict[str, Any]) -> None:
@@ -365,170 +308,6 @@ def _restore_lowered(row: dict[str, Any]) -> None:
     for key in ("severity", UNPINNED):
         if key in row:
             row[key] = criteria_decide.heavier(criteria_decide.severity_of(row[key]), restored)
-
-
-def _place(row: dict[str, Any], new: Mapping[str, Any], section: Optional[str]) -> None:
-    """指摘の位置とセクションを今回の値に置き換え、省かれていれば消す（行が動いた後の新しいスレッドを古い行に付けず、古い
-    セクションから場所を復元しない。PR 3944 の r7-3・r8-5）。"""
-    for stale in ("path", "line"):
-        row.pop(stale, None)
-    row |= {k: v for k, v in new.items() if k in ("path", "line")}
-    row["section"] = section
-
-
-def _report_rank(item: Mapping[str, Any], items: Sequence[str]) -> int:
-    """出し直し 1 件が、指摘を人の承認待ちか確認で下げない扱いにする根拠の強さ（必ず人の承認が要る操作・MVV の項目・保護の種類の順。
-    根拠でなければ 0）。"""
-    named = criteria_decide.mvv_item(item.get("mvv"), items)
-    if named is not None:
-        return 3 if criteria_decide.redline(named) else 2
-    return 1 if criteria_decide.protect_of(item.get(PROTECT)) else 0
-
-
-class _Denied(NamedTuple):
-    """確認で否定した指摘の、ファイル・起きることの 1 文・見出し。"""
-
-    path: str
-    impact: Optional[str]
-    section: Optional[str]
-
-
-def _differs(before: Optional[str], now: Optional[str]) -> bool:
-    """両方に値があり、空白と大文字小文字をそろえても違うか（片方が省かれていれば、変わったとしない）。"""
-    return bool(before and now) and " ".join(before.split()).casefold() != " ".join(now.split()).casefold()
-
-
-def _other_path_or_condition(item: Mapping[str, Any], new: Mapping[str, Any], denied: _Denied) -> bool:
-    """出し直し 1 件の起きることの 1 文か見出しが、否定した指摘と違うか。行の番号は修正でずれるので比べない。"""
-    return _differs(denied.impact, new.get("impact")) or _differs(denied.section, _text(item.get("section")))
-
-
-def _heavy_elsewhere_than(item: Mapping[str, Any], items: Sequence[str], denied: _Denied) -> bool:
-    """出し直し 1 件が、否定した指摘と違うファイル・起きることの 1 文・見出しを示す重い報告（下げた扱いを解除する条件）か。
-    パスの無い報告は当たらない。"""
-    new = _raised(dict(item), criteria_decide.mvv_item(item.get("mvv"), items))
-    if not criteria_decide.blocking(new["severity"]) or "path" not in new:
-        return False
-    return new["path"] != denied.path or _other_path_or_condition(item, new, denied)
-
-
-def _denied_contents(row: Mapping[str, Any]) -> tuple[_Denied, ...]:
-    """下げた指摘 `row` で否定した内容。今の行の内容が先で、確かめ直した行は先に否定した内容も持つ。"""
-    held = _Denied(row["path"], row.get("impact"), row.get("section"))
-    before = row.get(RECHECKED)
-    return (held, _Denied(row["path"], before.get("impact"), before.get("section"))) if before else (held,)
-
-
-def _denied_report(item: Mapping[str, Any], items: Sequence[str], denied: Optional[Sequence[_Denied]]) -> bool:
-    """出し直し 1 件が、承認や保護の根拠が無いまま、確認で否定した内容 `denied` のどれかと同じファイル・同じ内容を指すか。"""
-    if not denied or _report_rank(item, items):
-        return False
-    new = _raised(dict(item))
-    return any(new.get("path") == d.path and not _other_path_or_condition(item, new, d) for d in denied)
-
-
-def _add_report(row: dict[str, Any], item: Mapping[str, Any], items: Sequence[str]) -> None:
-    """別の報告 `item` の本文・位置（パスと行、見出し）・起きることの 1 文を、1 件の文字列にして `ALSO_REPORTS` の欄に足す（行と同じ
-    本文と位置で 1 文も増えない報告と、足してある報告は足さない）。本文 `text` は PR のスレッドと記録のコメントで公開され、公開の
-    前の伏せ字は自由記述の非公開の情報を防げないので、本文には何も足さない。修正担当と判定役が欄を読む。足した報告が必ず人の承認が
-    要る操作を挙げていれば、番号を `REVIEW_ALSO_REDLINES` に残し、承認資料には番号と定型の説明だけを出す。#4363"""
-    new = _raised(dict(item))
-    text = str(item["text"]).strip()
-    path, line, section = new.get("path"), new.get("line"), _text(item.get("section"))
-    same_place = (text, path, line, section) == (row["text"], row.get("path"), row.get("line"), row.get("section"))
-    if same_place and new.get("impact") in (None, row.get("impact")):
-        return
-    named = criteria_decide.mvv_item(item.get("mvv"), items)
-    if criteria_decide.redline(named):
-        row[REVIEW_ALSO_REDLINES] = [i for i in items if i == named or i in store.list_of(row, REVIEW_ALSO_REDLINES)]
-    place = "、".join(p for p in (f"{path}:{line}" if path and line else path, section) if p)
-    told = text + (f"（{place}）" if place else "") + criteria_decide.fixer_impact(new)
-    if told not in (held := store.list_of(row, ALSO_REPORTS)):
-        row[ALSO_REPORTS] = [*held, told]
-
-
-def _align_report(
-    row: dict[str, Any], same: Sequence[Mapping[str, Any]], items: Sequence[str], denied: Optional[Sequence[_Denied]] = None
-) -> Optional[bool]:
-    """このラウンドで新しく出たか戻った行の本文・1 文・位置を、出し直し 1 件のものにそろえ、判定役へ渡せる 1 文がこのラウンドに
-    あるかを返す。`same` はこのラウンドのその指摘の出し直しである。
-
-    承認や保護の根拠となる出し直し（`_report_rank`）があれば、利用者と修正担当に別の操作の説明を見せないよう、1 文が無くてもその
-    1 件を使う。根拠の強さが同じなら 1 文を持つもの、次に重いもの、次に先のものを選ぶ。根拠が無ければ 1 文を持つもののうちで選び、
-    1 件も無ければ何も変えない。指摘のキーは本文の先頭だけで決まるので、判定役がある報告の発生条件を別の報告の位置で確かめない
-    ためでもある。根拠が無いのに、選んだ 1 件と本文・1 文・位置（パス・行・見出し）のどれかが違う重い出し直しがあれば、それも
-    別の報告に足して（`_add_report`）None を返す。呼び手は判定役に渡さない（同じ位置でも発生条件の違う報告は、1 つの否定でほかまで
-    下げないため）。
-
-    根拠の 1 件を選んだときは、ほかの報告のうち次のものを別の報告に足す（`_add_report`）。必ず人の承認が要る操作を挙げた報告の
-    すべてと、選んだ 1 件に 1 文が無いか、より重い場合の、1 文を持つ最も重い報告である。根拠のある指摘は確認で下げないので、
-    足しても指摘を下げる材料は混ざらない。
-
-    `denied` は、下げた扱いを解除した行の、確認で否定した内容である。このとき根拠の無い 1 件は、解除の条件を満たした出し直し
-    （`_heavy_elsewhere_than`）からだけ選ぶ。位置の無い重い報告は、1 件の選び方によらず別の報告に足す。#4363"""
-    best: Optional[tuple[tuple[int, bool], Mapping[str, Any], dict[str, Any]]] = None
-    told = False
-    for item in same:
-        new = _raised(dict(item))
-        rank = _report_rank(item, items), "impact" in new
-        told = told or rank[1]
-        if not any(rank) or (denied and not rank[0] and not all(_heavy_elsewhere_than(item, items, d) for d in denied)):
-            continue
-        heavier = best is not None and criteria_decide.heavier(best[2]["severity"], new["severity"]) != best[2]["severity"]
-        if best is None or rank > best[0] or (rank == best[0] and heavier):
-            best = rank, item, new
-    if best is None:
-        return False
-    rank, item, new = best
-    row["text"] = str(item["text"]).strip()
-    row.pop(ALSO_REPORTS, None)
-    row.pop(REVIEW_ALSO_REDLINES, None)
-    if "impact" in new:
-        row["impact"] = new["impact"]
-    else:
-        row.pop("impact", None)
-    _place(row, new, _text(item.get("section")))
-    if rank[0]:
-        placeless = _heavy_placeless(same) if denied else []
-        for other in [*_other_reports(same, items, new if rank[1] else None), *placeless]:
-            _add_report(row, other, items)
-        return told
-    others = _heavy_others(row, same)
-    for other in others:
-        _add_report(row, other, items)
-    return None if others else told
-
-
-def _heavy_others(row: Mapping[str, Any], same: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    """出し直し `same` のうち、重い扱いで、行と本文・起きることの 1 文・位置（パス・行・見出し）のどれかが違うもの。"""
-    chosen = row["text"], row.get("impact"), row.get("path"), row.get("line"), row.get("section")
-    out = []
-    for item in same:
-        new = _raised(dict(item))
-        told = str(item["text"]).strip(), new.get("impact"), new.get("path"), new.get("line"), _text(item.get("section"))
-        if criteria_decide.blocking(new["severity"]) and told != chosen:
-            out.append(item)
-    return out
-
-
-def _heavy_placeless(same: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    """出し直し `same` のうち、重い扱いで、パスの無いもの。行の位置とは比べない（行にもパスが無いと、発生条件の違う報告を同じ
-    位置とみなして落とすためである。同じ報告は `_add_report` が足さない）。"""
-    return [i for i in same if "path" not in (new := _raised(dict(i))) and criteria_decide.blocking(new["severity"])]
-
-
-def _other_reports(same: Sequence[Mapping[str, Any]], items: Sequence[str], chosen: Optional[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    """行の別の報告に足す報告。`chosen` は行に選んだ報告の `_raised` の値で、その報告に 1 文が無ければ None。"""
-    out = [item for item in same if criteria_decide.redline(criteria_decide.mvv_item(item.get("mvv"), items))]
-    told = [(item, new) for item in same if "impact" in (new := _raised(dict(item)))]
-    if told:
-        top = told[0]
-        for pair in told:
-            if criteria_decide.heavier(top[1]["severity"], pair[1]["severity"]) != top[1]["severity"]:
-                top = pair
-        if chosen is None or criteria_decide.heavier(chosen["severity"], top[1]["severity"]) != chosen["severity"]:
-            out.append(top[0])
-    return out
 
 
 class Checked(NamedTuple):
@@ -552,10 +331,8 @@ class FindingJournal:
         self.rows: dict[str, dict[str, Any]] = {str(f["id"]): f for f in rows if isinstance(f, dict) and "id" in f}
         # 直した・見送ったのに出し直されて未解決へ戻した指摘の id（呼び手が古いスレッドの記録を切り離す。PR 3944 の r6-6）
         self.revived: list[str] = []
-        # 最後の `enter` で新しく出たか戻った指摘の id（判定役へ渡す候補。1 文の無いまま戻った指摘と、違う位置の重い報告が並ぶ指摘は除く。#4363）
+        # 最後の `enter` で新しく出たか戻った指摘のうち、判定役へ渡す候補の id（`_askable`。#4363）
         self.fresh: list[str] = []
-        # 最後の `enter` で新しく出たか戻った指摘の id ごとの、その行をそろえた報告が全差分を読んだ席のものか（`FULL_DIFF`）
-        self.read_full: dict[str, frozenset[bool]] = {}
         # 最後の `enter` か `carry` で、指摘の MVV の項目について結果に残す注意
         self.warnings: list[str] = []
         # 最後の `carry` で、前の実行が残した MVV の判定を重ねて変わった、既にある指摘の id
@@ -570,33 +347,25 @@ class FindingJournal:
     def enter(
         self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = (), mvv: Optional[str] = None
     ) -> frozenset[str]:
-        """指摘をジャーナルへ入れ、このラウンドで出た収束の妨げになるキーを返す（振動の判定に使う。どの行へ重ねるかは
-        `_row_keys` が決める）。`items` は承認済みの
+        """指摘をジャーナルへ入れ、このラウンドで出た収束の妨げになるキーを返す（振動の判定に使う）。`items` は承認済みの
         MVV の項目、`mvv` はその識別子。見送り済みは扱わず（MVV が変わっていれば判定し直す）、
         直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら（同じラウンドの中でも）重い方を残す。
-        収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。新しく出たか戻った行の本文・1 文・位置は、
-        すべての指摘を重ねた後にそろえる（`_align_report`。承認や保護の根拠となる出し直しがあれば、その 1 件にする）。戻った指摘にこのラウンドの 1 文が 1 つも無ければ、行は前の 1 文と
-        重さを持ち続けるが、`fresh` に入れず判定役に渡さない（前の経路の 1 文で下げないため）。承認や保護の根拠が
-        無く、位置か内容の違う重い報告が並ぶ指摘も `fresh` に入れない（`_align_report` が None を返す）。確認で下げた指摘が
-        別のファイル・起きることの 1 文・見出しの重い報告で出し直されたら、下げた扱いを解除してその報告の指摘にする
-        （`_revive_elsewhere`。同じファイルの 1 回目は `fresh` に入れて確かめ直し、違うファイルと確かめ直した後は確認の結果を
-        持つので入れない。#4363）。"""
+        収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。判定役へ渡す候補 `fresh` は、新しく出たか
+        戻った指摘のうち `_askable` が通すものである（#4363）。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
         touched: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
         unexplained: list[str] = []
+        fresh: list[str] = []
         same: dict[str, list[Mapping[str, Any]]] = {}
         before = len(self.revived)
-        keys = _row_keys(by_key, raised, items)
-        denied, recheck = self._revive_elsewhere(by_key, raised, keys, items, round_no)
-        fresh = [*self.revived[before:], *recheck]
-        _unlower(by_key, raised, keys, items)
-        # この呼び出しの前から行が持つ、必ず人の承認が要る操作の番号
-        approvals = {fid: tuple(store.list_of(row, REDLINE_ITEMS)) for fid, row in self.rows.items()}
-        for item, key in zip(raised, keys):
-            if key is None:
+        _unlower(by_key, raised, items)
+        for item in raised:
+            text = item.get("text")
+            text = text.strip() if isinstance(text, str) else ""
+            if not text:
                 continue
-            text = item["text"].strip()
+            key = oscillation.finding_key(text)
             named = criteria_decide.mvv_item(item.get("mvv"), items)
             known = by_key.get(key)
             if known is None:
@@ -605,15 +374,11 @@ class FindingJournal:
                 known = self.rows[fid] = row | _raised(item, named)
                 by_key[key] = known
                 fresh.append(fid)
-            elif not _denied_report(item, items, denied.get(str(known["id"]))):
-                # 確認で否定した内容の根拠の無い報告は、重要度にも重ねない
+            else:
                 revived = len(self.revived)
                 self._raised_again(known, item, round_no, named, mvv)
                 fresh += self.revived[revived:]
             if named is not None and known.get("by") != BY_NDF:
-                # 前からある指摘に、承認の要る別の操作が加わった（新しい指摘と戻った指摘は `_align_report` がそろえる）
-                if criteria_decide.redline(named) and known["id"] not in fresh and named not in approvals[known["id"]]:
-                    _add_report(known, item, items)
                 _classify(known, item, named, items, mvv)
                 if _text(item.get("impact")) is None:
                     unexplained.append(str(known["id"]))
@@ -621,89 +386,15 @@ class FindingJournal:
                 unknown.append(str(known["id"]))
             touched[key] = known
             same.setdefault(str(known["id"]), []).append(item)
-        self.fresh = self._align_fresh(fresh, same, denied, set(self.revived[before:]), items)
+        back = set(self.revived[before:])
+        self.fresh = [fid for fid in dict.fromkeys(fresh) if _askable(self.rows[fid], same[fid], items, fid in back)]
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
-
-    def _align_fresh(
-        self,
-        fresh: Sequence[str],
-        same: Mapping[str, Sequence[Mapping[str, Any]]],
-        denied: Mapping[str, Sequence[_Denied]],
-        back: set[str],
-        items: Sequence[str],
-    ) -> list[str]:
-        """新しく出たか戻った行 `fresh` を出し直し `same` の 1 件にそろえ（`_align_report`）、判定役へ渡す候補の id を返す。
-        `denied` の行は、否定した内容の報告（`_denied_report`）を除いてそろえる。`back` は戻った行。判定役へ渡す差分を選ぶ
-        `read_full` も、除いた後の報告から作る。"""
-        self.read_full = {}
-        out = []
-        for fid in dict.fromkeys(fresh):
-            reports = [i for i in same[fid] if not _denied_report(i, items, denied.get(fid))]
-            self.read_full[fid] = frozenset(bool(i.get(criteria_decide.FULL_DIFF)) for i in reports)
-            aligned = _align_report(self.rows[fid], reports, items, denied.get(fid))
-            if CHECK not in self.rows[fid] and aligned is not None and (aligned or fid not in back):
-                out.append(fid)
-        return out
-
-    def _revive_elsewhere(
-        self,
-        by_key: Mapping[Any, dict[str, Any]],
-        raised: Sequence[Mapping[str, Any]],
-        keys: Sequence[Optional[str]],
-        items: Sequence[str],
-        round_no: int,
-    ) -> tuple[dict[str, tuple[_Denied, ...]], list[str]]:
-        """確認で下げた指摘が、確かめたものと違うファイル・起きることの 1 文・見出しの重い報告で出し直されたら、下げた扱いを
-        解除してその報告の指摘にする。解除した指摘の id から否定した内容への対応と、判定役にもう一度確かめる id を返す。
-        キーは本文の先頭だけで決まるので、同じキーでも別の経路や発生条件の不具合でありうる。行の番号は修正でずれるので
-        比べず、どちらかにファイルが無ければ解除しない。
-
-        - 同じファイルで 1 文か見出しだけが違う指摘は、言い換えか別の条件かを文字列では決められないので、確認の結果を外して
-          判定役にもう一度確かめる（言い換えならまた下がり、修正担当へは渡らない）。確かめ直しは指摘 1 件につき 1 回で、
-          以後の同じファイルの出し直し（承認や保護の根拠がないもの）のうち、否定した 2 つの内容のどちらかと 1 文も見出しも
-          違わないものは下げたままにする。どちらとも違うものは、違うファイルの指摘と同じに扱う（判定役の起動と待ちを足さず、
-          確かめていない発生条件を修正担当へ届ける）
-        - 違うファイルの指摘（承認や保護の根拠がある出し直しを含むときも）は、直したとした指摘と同じに未解決へ戻し、確認の
-          結果は下げた扱いを抜けたことを書き加えて残す。判定役には渡し直さず（呼び出し元と呼び出し先を交互に指す同じ指摘を、
-          何度も確かめない）、保護の対象なら元の重要度へ戻る（`_restore_lowered`）。#4363"""
-        found: dict[str, tuple[dict[str, Any], tuple[_Denied, ...], list[Mapping[str, Any]]]] = {}
-        marked: set[str] = set()
-        for item, key in zip(raised, keys):
-            row = by_key.get(key) if key else None
-            if row is None or not _lowered(row) or not row.get("path"):
-                continue
-            fid = str(row["id"])
-            verified = _denied_contents(row)
-            # 承認や保護の根拠のある報告は、今の行の内容とだけ比べる
-            compared = verified
-            if _report_rank(item, items):
-                marked.add(fid)
-                compared = verified[:1]
-            if all(_heavy_elsewhere_than(item, items, d) for d in compared):
-                found.setdefault(fid, (row, verified, []))[2].append(item)
-        recheck = []
-        for fid, (row, verified, reports) in found.items():
-            held = verified[0]
-            new = _raised(dict(reports[0]), criteria_decide.mvv_item(reports[0].get("mvv"), items))
-            section = _text(reports[0].get("section"))
-            if not row.get(RECHECKED) and fid not in marked and all(_located(r).get("path") == held.path for r in reports):
-                # 同じ指摘のままなので、発生の値（PR のスレッドの結び付け）は変えない。位置は今のラウンドの差分のものにする
-                row.pop(CHECK)
-                row[RECHECKED] = {"impact": held.impact, "section": held.section}
-                row["round"] = round_no
-                _place(row, new, section)
-                recheck.append(fid)
-                continue
-            check = row[CHECK] | {criteria_decide.LOWERED: False, UNLOWERED: True}
-            self._revive(row, new, section, round_no)
-            row[CHECK] = check
-        return {fid: verified for fid, (_, verified, _reports) in found.items()}, recheck
 
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
         未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
-        1 文は既にある行に無いときだけ足し（戻した指摘の 1 文は `enter` がラウンドの後でそろえる）、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
+        1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
         行の値に今回の値を足す。判定役の確認で下げたままの指摘の重要度は変えず（下げた扱いの解除は先に `_unlower` が行う）、
         下げた扱いを抜けた指摘に保護の種類が付けば元へ戻す（`_restore_lowered`。#4363）。"""
         new = _raised(item, named)
@@ -726,14 +417,16 @@ class FindingJournal:
             known["impact"] = new["impact"]
 
     def _revive(self, known: dict[str, Any], new: dict[str, Any], section: Optional[str], round_no: int) -> None:
-        """直した・見送った指摘が出し直されたとき（下げた指摘が別のファイルや発生条件で出たときも）、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
+        """直した・見送った指摘が出し直されたとき、未解決へ戻して再発したラウンドの位置とセクションへ置き換える。発生の値も新しくし、
         resolve 済みの古いスレッドへ結び付けない（#4016）。"""
         known |= {"outcome": fin.UNRESOLVED, "reason": None, "round": round_no, OCCURRENCE: new_occurrence()}
         self.revived.append(str(known["id"]))
-        for stale in (SKIPPED_MVV, REVIEW_DEFER, CHECK, RECHECKED):
+        # 位置は再発したラウンドの差分のものにする（行が動いた後の新しいスレッドを古い行に付けない。PR 3944 の r7-3）
+        # セクションも今回の値で置き換え、省かれていれば消す（古いセクションから場所を復元しない。PR 3944 の r8-5）
+        for stale in ("path", "line", SKIPPED_MVV, REVIEW_DEFER, CHECK):
             known.pop(stale, None)
-        # 位置は再発したラウンドの差分のものにする
-        _place(known, new, section)
+        known |= {k: v for k, v in new.items() if k in ("path", "line")}
+        known["section"] = section
 
     def apply_checks(self, asked: Sequence[str], verdicts: Mapping[str, verify_decide.Verdict]) -> Checked:
         """判定役へ渡した指摘 `asked` に回答 `verdicts` を当てる。有効な回答は行の `check` に残し、下げてよい指摘
@@ -814,7 +507,7 @@ class FindingJournal:
         self.merged = []
         by_key = {f.get("key"): f for f in self.rows.values()}
         for c in carried:
-            key = _carried_key(by_key, c, items)
+            key = oscillation.finding_key(c.text)
             # スレッドの無い指摘の id（`p-<元の id>`）は別の保存先の違う指摘とも重なるので、同じ本文の行だけに判定を重ねる
             known = by_key.get(key) or (self.rows.get(c.id) if c.comment is not None else None)
             if known is not None:
@@ -836,21 +529,21 @@ class FindingJournal:
     def merge_marks(
         self, fid: str, marks: Mapping[str, Any], items: Sequence[str], mvv: Optional[str], place: Optional[Mapping[str, Any]] = None
     ) -> bool:
-        """前の実行が残した保護の種類（`marks` の `protect`）と、MVV の判定のうち
-        今回と同じ MVV `mvv` でのものを、既にある指摘 `fid` に重ねる。変わったら真。保護の種類は MVV によらず重ねる。
+        """前の実行が残した保護の種類（`marks` の `protect`）と、MVV の判定のうち今回と同じ MVV `mvv` でのものを、既にある指摘
+        `fid` に重ねる。変わったら真。保護の種類は MVV によらず重ねる。
 
         閉じた指摘は、必ず人の承認が要る操作と今回初めて分かったときだけ未解決へ戻す。`place`（位置とセクション）があれば別の場所で
         見つかった再発として戻し（`_revive`）、無ければ開いたままの同じスレッドの指摘として、スレッドを持ったまま戻す。"""
         row = self.rows[fid]
-        kept = _inherit_protect(row, marks.get(PROTECT))
+        protected = _inherit_protect(row, marks.get(PROTECT))
         named = _judged_items(marks, items)
         if not named or mvv is None or marks.get(JUDGED) != mvv or row.get("by") == BY_NDF:
-            return kept
+            return protected
         before = dict(row)
         closed = row.get("outcome") != fin.UNRESOLVED
         known = bool(row.get(fin.REDLINE)) and row.get(JUDGED) == mvv
         if closed and (known or not any(criteria_decide.redline(i) for i in named)):
-            return kept
+            return protected
         if row.get(JUDGED) not in (None, mvv):
             _unclassify(row)
         if closed and place is not None:
@@ -860,7 +553,7 @@ class FindingJournal:
             row.pop(SKIPPED_MVV, None)
         for item in named:
             _classify(row, {}, item, items, mvv)
-        return kept or before != row
+        return protected or before != row
 
     def restate(self, mvv: Optional[str]) -> list[str]:
         """`mvv` と違う MVV で決めた判定を外し、外した指摘の id を返す（出し直されない指摘に前の判定を残さない）。"""
@@ -940,7 +633,7 @@ class FindingJournal:
         return tuple(
             fin.Finding(
                 f["id"],
-                (f["text"] if isinstance(f.get("text"), str) else "") + also_redlines_note(f),
+                f["text"] if isinstance(f.get("text"), str) else "",
                 f["outcome"],
                 _text(f.get("reason")),
                 criteria_decide.severity_of(f.get("severity")),

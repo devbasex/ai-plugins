@@ -13,10 +13,8 @@ import pytest
 from ndf.adapters import publish
 from ndf.adapters.github import GitHubError
 from ndf.contracts import result
-from ndf.core.converge import oscillation
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import journal, report_decide, store, threads, verify_decide
-from ndf.domains.records import mvv_decide
 from ndf.domains.records.mvv import Snapshot
 
 from .conftest import FakePort
@@ -540,39 +538,3 @@ def test_issue_4363_a_lowered_finding_shows_the_raised_severity_and_only_the_fix
     assert "| minor（確認の前は major） |" in body
     assert "| 判定役の確認で成り立たないと分かった |" in body
     assert private not in body
-
-
-def test_issue_4363_an_added_report_is_not_published() -> None:
-    """別の報告の本文・位置・1 文（作り物の非公開の値）は、記録のコメントとスレッドと要約の本文に出さず、状態の記録に残す。"""
-    private = ("sample-corp-secret-plan", "internal/hidden.py", "hidden-section", "https://sample-corp-internal-endpoint.invalid/")
-    rows = journal.FindingJournal()
-    marked = {"text": "保存が止まる", "severity": "major", "protect": ["secret"], "path": "a.py", "line": 1, "by": "codex"}
-    # 指摘のキーは本文の先頭で決まるので、非公開の値は先頭より後ろに置く
-    head = "保存が止まる" * 100
-    marked["text"], text = head, head + private[0]
-    other = {"text": text, "severity": "major", "impact": private[3], "path": private[1], "line": 2, "section": private[2], "by": "kiro"}
-    rows.enter(1, [marked, other])
-    [row] = rows.rows.values()
-    assert all(value in str(row["also_reports"]) for value in private)
-    shown = report_decide.comment(1, {"findings": [row]}, None) + threads.opening(row) + "".join(f.text for f in rows.findings())
-    assert not any(value in shown for value in private)
-
-
-def test_issue_4363_an_operation_of_an_added_report_is_told_without_its_words() -> None:
-    """別の報告が挙げた承認の要る操作は、番号と定型の説明を承認資料（結果・MVV の記録・記録のコメント・要約）に出し、本文と位置は出さない。"""
-    private = ("未公開の取引先の名前を公開する", "internal/hidden.py")
-    snap = Snapshot("approved", 11, "a" * 64, None, ("P4", "C7"), {}, HEAD1, "c" * 64, None)
-    rows = journal.FindingJournal()
-    kept = {"text": "設定を変える", "severity": "major", "mvv": "C7", "path": "a.py", "line": 1, "by": "codex"}
-    rows.enter(1, [kept], snap.items, snap.identity)
-    text = "設定を変える" * 20
-    rows.rows["r1-1"].update(text=text, key=oscillation.finding_key(text))
-    rows.enter(2, [{**kept, "text": text + private[0], "mvv": "P4", "path": private[1], "line": 2}], snap.items, snap.identity)
-    [row] = rows.rows.values()
-    [redline] = report_decide.mvv_outputs([row], snap, HEAD1)["redlines"]
-    [found] = mvv_decide.judged_findings([row], snap.identity)
-    record = mvv_decide.review_entry(found, {text: text})["text"]
-    told = [redline["text"], record, rows.findings()[0].text, report_decide.comment(1, {"findings": [row]}, None)]
-    assert all("別の報告が操作 P4 を挙げた" in value for value in told)
-    assert not any(value in shown for value in private for shown in told)
-    assert private[0] in str(row["also_reports"])

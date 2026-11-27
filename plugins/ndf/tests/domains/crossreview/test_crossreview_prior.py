@@ -252,18 +252,6 @@ def test_protect_kinds_are_carried_from_the_record() -> None:
     assert held.merged == ["r1-1"]
 
 
-def test_split_mark_is_carried_from_the_record_with_or_without_a_thread() -> None:
-    """#4363: 分けた後の行の印は、スレッドの無い指摘にもスレッドのある指摘にも引き継ぐ。印の無い指摘は偽。"""
-    split = {**_OPEN_NO_THREAD, "key": "a" + report_decide.SIBLING}
-    threaded = {**split, "id": "r1-2"}
-    remark = _record([split, threaded], {"r1-2": {"comment": 77}}, "2026-11-20T00:00:00Z")
-    listed, marks = prior_decide.recorded([remark])
-    opened = prior_decide.carried([prior_decide.Thread(77, OPENING, False, "a.py", 9, True)], set(), marks)
-    assert [c.split for c in (*listed, *opened)] == [True, True]
-    plain = prior_decide.recorded([_record([_OPEN_NO_THREAD], {}, "2026-11-20T00:00:00Z")])[0]
-    assert [c.split for c in plain] == [False]
-
-
 def test_finding_whose_id_collides_with_another_text_is_carried_under_a_free_id() -> None:
     """#4363: 別の保存先の指摘は id が重なる。本文が違えば空いている id で入れ、保護の種類を失わない。読み直しても増えない。"""
     journal = FindingJournal()
