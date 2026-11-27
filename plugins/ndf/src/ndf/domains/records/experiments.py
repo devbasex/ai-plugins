@@ -210,6 +210,14 @@ def _read_range(rows: Sequence[Mapping[str, Any]], since: datetime) -> list[Mapp
     return [r for r in rows if r["at"][:7] >= first]
 
 
+def _rows_for(known: Optional[_Known], since: datetime, store: Path) -> Sequence[Mapping[str, Any]]:
+    """計算に使う `since` の月からの記録。効果指標を書いたときに読んだ記録が同じ範囲ならそのまま、古い月まで読み足していれば
+    割り付けが読むのと同じ月の範囲に絞り（期間の外の割り付けに付いた拒否や観測を数えない）、範囲が足りなければ読む。"""
+    if known is None or known.since > since:
+        return mc.read_experiments(since, store)
+    return known.rows if known.since == since else _read_range(known.rows, since)
+
+
 def _table_here(cwd: Path) -> Optional[mc.Table]:
     """作業ディレクトリのリポジトリの今の設定。読めないか値が制約に合わなければ None（効果指標の記録は止めない）。"""
     try:
@@ -223,22 +231,23 @@ def _logged(
 ) -> Optional[_Known]:
     """`since` の月から読んだ記録で割り付けを引き、同じ割り付け ID の効果指標の行が無ければ足す。割り付けが無ければ None。
 
-    `since` の範囲に割り付けが無ければ、同じロックの中で `longest` の月から `since` の前の月までだけを読み足して探す（読んだ月を
-    読み直さず、ロックも取り直さない）。確認と追記は 1 つのロックの中で行う。効果指標の行は割り付けより後に書くので、割り付けが
-    範囲にあれば先行する指標の行も範囲にある。
+    ロックの外で読んだ `since` の範囲に割り付けが無ければ、`longest` の月から `since` の前の月までだけを、ロックを取る前に
+    読み足して探す（読んだ月を読み直さず、ロックも取り直さない）。割り付けと効果指標の行の確認と追記は、1 つのロックの中で行う。
+    効果指標の行は割り付けより後に書くので、割り付けが範囲にあれば先行する指標の行も範囲にある。
     """
-    with mc.ledger(since, mc.records_dir()) as led:
+
+    def older(rows: Sequence[Mapping[str, Any]]) -> Optional[datetime]:
+        return None if any(r["kind"] == "assign" and r["assign_id"] == assign_id for r in rows) else longest
+
+    with mc.ledger(since, mc.records_dir(), older) as led:
         assign = mc.assigns(led.rows).get(assign_id)
-        if assign is None and longest < since:
-            led.read_back(longest, since)
-            since, assign = longest, mc.assigns(led.rows).get(assign_id)
         if assign is None:
             return None
         if not any(r["kind"] == "outcome" and r["assign_id"] == assign_id for r in led.rows):
             stage = facts.row(mc.TABLE, assign["stage"])
             row = {"kind": "outcome", "at": _text(now), "assign_id": assign_id, "metric": stage["metric"]}
             led.append({**row, "metric_version": stage["metric_version"], "quality": quality, "detail": dict(detail)})
-        return _Known(since, list(led.rows))
+        return _Known(led.since, list(led.rows))
 
 
 def write_outcome(assign_id: str, quality: Optional[float], detail: Mapping[str, Any]) -> bool:
@@ -340,8 +349,7 @@ def _recomputed(assign: Mapping[str, Any], now: datetime, cwd: Path, got: Option
         return False
     window = s.allocation["window_days"]
     since = _since(now, window)
-    # 長い期間で読んだ記録も、割り付けが読むのと同じ月の範囲に絞る（期間の外の割り付けに付いた拒否や観測を数えない）
-    rows = _read_range(known.rows, since) if known is not None and known.since <= since else mc.read_experiments(since, s.store)
+    rows = _rows_for(known, since, s.store)
     observed = mc.observed_models(rows, s.where, s.arms, now - timedelta(days=window))
     entry = mc.weights_entry(s.store, s.where, now)
     if entry is not None and not mc.entry_fits(entry, observed, s.arms, s.allocation):

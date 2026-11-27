@@ -32,7 +32,7 @@ import random
 import re
 import uuid
 from collections import Counter
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -495,17 +495,11 @@ def read_experiments(since: datetime, root: Optional[Path] = None) -> list[dict[
 
 @dataclass
 class Ledger:
-    """ロックの中の実験の記録。`rows` は読んだ行と、この中で足した行。"""
+    """ロックの中の実験の記録。`rows` は読んだ行と、この中で足した行。`since` は読み始めた日時（古い月を読み足せばその日時）。"""
 
     root: Path
     rows: list[dict[str, Any]]
-
-    def read_back(self, since: datetime, start: datetime) -> None:
-        """`since` の月から `start`（この記録の読み始め）の前の月までを読み、`rows` の先頭へ足す。ロックを取り直さずに読む範囲を
-        広げる。古い月は追記されない（行は日時の月のファイルへ足す）ので、読み足した後に増える行は無い。読めない月は `OSError`。
-        """
-        months = _months(_month(since), _month(start))[:-1]
-        self.rows[:0] = [r for m in months for r in launch_records.rows_after(_month_file(self.root, m), 0)[0]]
+    since: datetime
 
     def append(self, row: Mapping[str, Any]) -> dict[str, Any]:
         """行の形を確かめて、行の日時の月のファイルへ足す（書きかけの末尾は閉じてから足す）。形が違えば `InternalError`。"""
@@ -516,8 +510,11 @@ class Ledger:
 
 
 @contextmanager
-def ledger(since: datetime, root: Optional[Path] = None) -> Iterator[Ledger]:
+def ledger(
+    since: datetime, root: Optional[Path] = None, older: Optional[Callable[[Sequence[Mapping[str, Any]]], Optional[datetime]]] = None
+) -> Iterator[Ledger]:
     """ロックの外で `since` の月から読み、ロックを取ってからは追記された分（月が替われば新しい月のファイル）だけを読み足して渡す。
+    `older` が読んだ行を見て日時を返せば、その月から `since` の前の月までもロックの外で読む（古い月は追記されない）。
 
     無い月は空として読む。ある月を読めなければ `OSError` を送る（読めない月を空とみなすと、その月の割り付けを見失って同じ単位に
     別の組を割り付けるため）。
@@ -527,11 +524,14 @@ def ledger(since: datetime, root: Optional[Path] = None) -> Iterator[Ledger]:
     rows = [r for m in months[:-1] for r in launch_records.rows_after(_month_file(root, m), 0)[0]]
     last, offset = launch_records.rows_after(_month_file(root, months[-1]), 0)
     rows += last
+    if older is not None and (start := older(rows)) is not None and _month(start) < months[0]:
+        rows[:0] = [r for m in _months(_month(start), months[0])[:-1] for r in launch_records.rows_after(_month_file(root, m), 0)[0]]
+        since = start
     with _lock(_store_file(root, LEDGER_LOCK)):
         rows += launch_records.rows_after(_month_file(root, months[-1]), offset)[0]
         for m in _months(months[-1], _month(utc_now()))[1:]:
             rows += launch_records.rows_after(_month_file(root, m), 0)[0]
-        yield Ledger(root, rows)
+        yield Ledger(root, rows, since)
 
 
 def append_row(row: Mapping[str, Any], root: Optional[Path] = None) -> bool:
