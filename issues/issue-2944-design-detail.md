@@ -93,11 +93,12 @@ src/ndf/
 | `base_fallback` | 同 | 新設 | `base_fallback(choice: Choice, reason: str) -> Optional[Choice]` | 切り替える条件に当たれば `launch_error` の行を書き、基準の組の値を返す。当たらなければ None |
 | `candidates` | 同 | 新設 | `candidates(arms: Sequence, rows: Sequence, entry: Optional[Mapping], now: datetime, where: Where) -> list[int]` | 打ち切った組と起動できない組を除いた添字。`launch_error` は割り付け ID で割り付けの行を引き、`where`（`repo`・`stage`・`runtime`・`key` を持つ組）が同じものだけを数える。引数の多い関数の検査（PLR0913）に合わせ、4 つのキーを 1 つの値にまとめた |
 | `compatibility_key` | 同 | 新設 | `compatibility_key(arms: Sequence, metric: str) -> str` | 選択肢の並びと指標のハッシュ |
-| `read_experiments` | 同 | 新設 | `read_experiments(since: datetime, root: Optional[Path] = None) -> list[dict]` | リポジトリのディレクトリ `root` の、`since` の月から今月までの実験の記録を読む（ロックを取らない） |
-| `ledger` | 同 | 新設 | `ledger(since: datetime, root: Optional[Path] = None) -> ContextManager[Ledger]` | 設計書の「読み書き」の順で、リポジトリのディレクトリ `root` の読んだ行（`rows`）と追記（`append`）を、そのリポジトリの実験の記録のロックの中で渡す |
-| `append_row` | 同 | 新設 | `append_row(row: Mapping, root: Optional[Path] = None) -> bool` | `ledger` を開いてリポジトリのディレクトリ `root` に 1 行足す |
-| `repo_store` | 同 | 新設 | `repo_store(base: Path, repo: str) -> Path` | 実験の記録を置く場所 `base` の下の、リポジトリのキー `repo` のディレクトリ（`launch-experiments/<キーの SHA-256 の先頭 16 文字>`）。`launch_choice` がこれを保存先として持ち回り、記録・ロック・出現率・`launch-pruned` をすべてこの中に置く |
-| `prune` | 同 | 新設 | `prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)の月の掃除。`root` はリポジトリのディレクトリ、`window_days` はそのリポジトリの今の設定の値である。`launch-pruned` の月が今月なら何もしない。違えば、`root` の月ファイルをすべて読み、この値と割り付けの行の `window_days` の最大に 30 日を足した日数を `now` から引いた日時より前に終わった月のファイルを消す。読めない月ファイルが 1 つでもあれば何も消さず、`launch-pruned` も書かない。出現率の期限を過ぎた項目も消す（出現率のファイルはロックの中で読み直してから変える）。続けて、ほかのリポジトリのディレクトリから、終わってから 365 日＋30 日を過ぎた月のファイルを消す。月ファイルが残らないディレクトリは、そのリポジトリの記録のロックを待たずに取れたときだけ消す。全部成功したら今月を書く。`launch_choice` が呼び、失敗しても起動は続ける |
+| `read_experiments` | 同 | 新設 | `read_experiments(since: datetime, root: Path) -> list[dict]` | リポジトリのディレクトリ `root` の、`since` の月から今月までの実験の記録を読む（ロックを取らない） |
+| `ledger` | 同 | 新設 | `ledger(since: datetime, root: Path) -> ContextManager[Ledger]` | 設計書の「読み書き」の順で、リポジトリのディレクトリ `root` の読んだ行（`rows`）と追記（`append`）を、そのリポジトリの実験の記録のロックの中で渡す |
+| `append_row` | 同 | 新設 | `append_row(row: Mapping, root: Path) -> bool` | `ledger` を開いてリポジトリのディレクトリ `root` に 1 行足す |
+| `repo_store` | 同 | 新設 | `repo_store(base: Path, repo: str) -> Path` | 実験の記録を置く場所 `base` の下の、リポジトリのキー `repo` のディレクトリ（`launch-experiments/<キーの SHA-256 の先頭 16 文字>`）。`launch_choice` がこれを保存先として持ち回り、記録・ロック・出現率・`launch-pruned` をすべてこの中に置く。記録を読み書きする関数はどれもこのディレクトリを `root` に必須で受け、既定の保存先へ戻らない。戻ると、使用量ログと同じ場所に書いて割り付けから見えなくなり、掃除はその親の別の状態まで対象にするためである |
+| `prune` | 同 | 新設 | `prune(now: datetime, window_days: int, root: Path) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)の月の掃除。`root` はリポジトリのディレクトリ、`window_days` はそのリポジトリの今の設定の値である。`launch-pruned` の月が今月なら何もしない。違えば、記録のロックの中で `root` の月ファイルをすべて読み、この値と割り付けの行の `window_days` の最大に 30 日を足した日数を `now` から引いた日時より前に終わった月のファイルを消す。読めない月ファイルが 1 つでもあれば何も消さず、`launch-pruned` も書かない。出現率の期限を過ぎた項目も消す（出現率のファイルはロックの中で読み直してから変える）。全部成功したら今月を書く。続けて `_sweep` を呼ぶ。`launch_choice` が呼び、失敗しても起動は続ける |
+| `_sweep` | 同 | 新設 | `_sweep(base: Path, now: datetime) -> None` | 使われなくなったリポジトリの片付け。`launch-swept` が今月なら何もしない。違えば、片付けの錠を待たずに取れたときだけ、`base` にある 16 文字の 16 進数の名前のディレクトリ（シンボリックリンクは除く）から、終わってから 365 日＋30 日を過ぎた月のファイルと期限を過ぎた出現率の項目を消し、今月を書く。ディレクトリとロックのファイルは消さない |
 
 - `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm` を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄。`unit` は割り付けを受けた起動、つまり `assign_id` がある起動だけに置く）を返す
 - `launch_choice`
@@ -169,7 +170,7 @@ src/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `prune` | 古い月のファイルと項目が消え、`launch-pruned` が今月になる | `window_days` ＋ 30 日の境（境にかかる月は残る）、年をまたぐ。今月のファイルが先にあっても掃除する。完了の記録が今月なら一覧を調べない。同じリポジトリの割り付けの行が長い `window_days` を持てば、その日数で数える。ほかのリポジトリのディレクトリは、設定が短くても長くても、365 日＋30 日を過ぎた月だけが消える。同じ記録から、短い期間と長い期間の 2 つのリポジトリの掃除の順を入れ替えても、どちらのディレクトリにも同じ月が残る。期間を延ばした後の最初の呼び出しは、延ばした値で数える | 削除に失敗すると `launch-pruned` を書かず、次の呼び出しがやり直す。自分のディレクトリに読めない月ファイルがあれば何も消さない。月ファイルの無いディレクトリは、そのリポジトリのロックを取れなければ残る。起動は続く |
+| `prune` | 古い月のファイルと項目が消え、`launch-pruned` が今月になる | `window_days` ＋ 30 日の境（境にかかる月は残る）、年をまたぐ。今月のファイルが先にあっても掃除する。完了の記録が今月なら一覧を調べない。同じリポジトリの割り付けの行が長い `window_days` を持てば、その日数で数える。記録のロックの中で月を読んで消す。ほかのリポジトリのディレクトリは、設定が短くても長くても、365 日＋30 日を過ぎた月だけが消え、ディレクトリは残る。片付けは保存先全体で月に 1 回で、2 つ目のリポジトリの掃除では行わない。シンボリックリンクと、ほかの名前のディレクトリは消さない。同じ記録から、短い期間と長い期間の 2 つのリポジトリの掃除の順を入れ替えても、どちらのディレクトリにも同じ月が残る。期間を延ばした後の最初の呼び出しは、延ばした値で数える | 削除に失敗すると `launch-pruned` を書かず、次の呼び出しがやり直す。自分のディレクトリに読めない月ファイルがあれば何も消さない。起動は続く |
 | `table` | 工程とランタイムごとの置き換え | 選択肢 1 つ、`{}` の組 | 空の配列、同じ組、`floor` × 組の数 > 1、`min_units` 1、順位に無い effort |
 | `stage_of` | 表の各行 | 工程が「無し」の組 | 表に無い組 |
 | `launch_choice` | 同じ単位は同じ組。並列でも 1 行 | `unit` なし、`enabled` 偽、片側の指定、割り付けの後の手動指定と選択肢の削除、月をまたぐ割り付け | 壊れた設定。記録を書けない場合 |
@@ -413,7 +414,9 @@ src/ndf/
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | 再開の処理が重なった `record_outcome` | 実験の記録 | 確認と追記を同じロックの中で行う | 指標の行は割り付け ID ごとに 1 つ。壊れて 2 行ある記録は、どの集計も先に書いた行だけを使う |
-| 複数の `prune` | リポジトリのディレクトリの `launch-pruned.lock` | 同じリポジトリでは、待たずに錠を取れた起動だけが、錠の中で `launch-pruned` を読み直してから掃除する。取れなかった起動は掃除を飛ばす。ほかのリポジトリの古い月は、もう追記されないのでロックを取らずに消す。空のディレクトリは、そのリポジトリの記録のロックを待たずに取れたときだけ消す | 月のファイルをすべて読むのは、リポジトリごとに月に 1 回で済む。ほかのリポジトリの古い月を 2 つの起動が同時に消しても、結果は同じである。錠を持つ起動が失敗すれば、次の起動がやり直す |
+| 複数の `prune` | リポジトリのディレクトリの `launch-pruned.lock` | 同じリポジトリでは、待たずに錠を取れた起動だけが、錠の中で `launch-pruned` を読み直してから掃除する。取れなかった起動は掃除を飛ばす | 月のファイルをすべて読むのは、リポジトリごとに月に 1 回で済む。錠を持つ起動が失敗すれば、次の起動がやり直す |
+| `prune` と同じリポジトリの割り付け | `launch-experiments.lock` | 掃除は、月の読み取りから削除までをこのロックの中で行う | 読んだ後に書かれた長い `window_days` の割り付けを読み落として月を消すことがない |
+| 複数の `_sweep` | 保存先の `launch-swept.lock` | 待たずに錠を取れた起動だけが、錠の中で `launch-swept` を読み直してから片付ける。古い月はもう追記されないので、リポジトリのロックを取らずに消す。ディレクトリとロックのファイルは消さない | ディレクトリの一覧を読むのは、保存先全体で月に 1 回で済む。2 つの起動が同じ古い月を消しても結果は同じである |
 | 複数の `refresh` と `prune` | `launch-weights.json` | 計算はロックの外。書き換えるときは同じロックを取り、ロックの中で最新の内容を読み直してから変える（一時ファイルから `os.replace`） | 同じ項目の計算は後で書いた側が残る。掃除は期限を過ぎた項目だけを消すので、新しい項目は失われない |
 
 ### 単体テストの観点

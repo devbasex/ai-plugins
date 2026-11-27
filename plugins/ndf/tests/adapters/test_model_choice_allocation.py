@@ -376,8 +376,8 @@ def test_append_refuses_a_row_of_the_wrong_shape(store, clock):
 
 def test_append_row_returns_false_when_it_cannot_write(store, clock, caplog):
     store.parent.mkdir(parents=True, exist_ok=True)
-    store.write_text("", encoding="utf-8")
-    assert not mc.append_row({"kind": "halted", "at": _at(NOW), "unit": "u", **SCOPE, "assign_id": None, "reason": "manual"})
+    store.write_text("", encoding="utf-8")  # 保存先がファイルで、記録を書けない
+    assert not mc.append_row({"kind": "halted", "at": _at(NOW), "unit": "u", **SCOPE, "assign_id": None, "reason": "manual"}, store)
 
 
 # --- 月の掃除 ---
@@ -556,7 +556,7 @@ def test_each_repo_keeps_its_own_window_whichever_prunes_first(tmp_path, monkeyp
     now = datetime(2027, 1, 10, tzinfo=UTC)
     kept = []
     for order in (("short", "long"), ("long", "short")):
-        dirs = {name: base / f"{order[0]}-first" / name for name in order}
+        dirs = {name: mc.repo_store(base / f"{order[0]}-first", name) for name in order}
         for d in dirs.values():
             for m in ("2026-01", "2026-09"):
                 _month_file(d, m)
@@ -568,17 +568,46 @@ def test_each_repo_keeps_its_own_window_whichever_prunes_first(tmp_path, monkeyp
 
 def test_prune_sweeps_months_no_setting_uses_from_other_repos(store):
     # 2027-03-10 から 365 + 30 日前は 2026-02-08。ほかのリポジトリの 2026-01 は消え、2026-02 は境なので残る
-    gone, busy, used = (store.parent / name for name in ("gone", "busy", "used"))
-    _month_file(gone, "2025-12")
-    _month_file(busy, "2026-01")
-    files = {m: _month_file(used, m) for m in ("2026-01", "2026-02")}
-    from filelock import FileLock
-
-    with FileLock(str(busy / "launch-experiments.lock")):
-        mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
-    assert not gone.exists()  # 月のファイルが残らないディレクトリは片付く
-    assert busy.is_dir() and not mc._month_files(busy)  # 記録を書いている間はディレクトリを残す
+    files = {m: _month_file(store.parent / ("a" * 16), m) for m in ("2026-01", "2026-02")}
+    mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
     assert [m for m, p in files.items() if p.exists()] == ["2026-02"]
+    assert (store.parent / ("a" * 16)).is_dir()  # ディレクトリとロックのファイルは残す
+    assert (store.parent / "launch-swept").read_text(encoding="utf-8") == "2027-03"
+
+
+def test_the_sweep_runs_once_a_month_for_the_whole_store(tmp_path, store):
+    # 2 つ目のリポジトリの掃除は、同じ月の片付けをもう一度しない（ほかのディレクトリを読み直さない）
+    mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
+    late = _month_file(store.parent / ("a" * 16), "2026-01")
+    mc.prune(datetime(2027, 3, 11, tzinfo=UTC), 60, mc.repo_store(store.parent.parent, "/other"))
+    assert late.exists()
+
+
+def test_the_sweep_skips_links_and_names_it_did_not_make(tmp_path, store):
+    outside = tmp_path / "outside"
+    kept = [_month_file(outside, "2020-01"), _month_file(store.parent / "notes", "2020-01")]
+    (store.parent / ("b" * 16)).symlink_to(outside, target_is_directory=True)
+    mc.prune(datetime(2027, 3, 10, tzinfo=UTC), 60, store)
+    assert all(p.exists() for p in kept)
+
+
+def test_prune_reads_and_drops_months_inside_the_record_lock(store, monkeypatch):
+    # 同じリポジトリの別の作業ディレクトリが、読み取りと削除の間に長い window_days の割り付けを書けない
+    from filelock import FileLock, Timeout
+
+    _month_file(store, "2020-01")
+    real, held = mc._drop_months, []
+
+    def check(root, edge):
+        if root == store and not held:  # 最初の呼び出しが自分の月の削除（片付けは後で自分のディレクトリも通る）
+            with pytest.raises(Timeout):
+                FileLock(str(store / "launch-experiments.lock"), timeout=0).acquire()
+            held.append(root)
+        return real(root, edge)
+
+    monkeypatch.setattr(mc, "_drop_months", check)
+    mc.prune(NOW, 60, store)
+    assert held == [store]
 
 
 def test_records_of_two_repos_are_kept_apart(tmp_path, store, clock):

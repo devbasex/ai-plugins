@@ -396,9 +396,13 @@ WEIGHTS = "launch-weights"
 WEIGHTS_LOCK = "launch-weights-lock"
 PRUNED = "launch-pruned"
 PRUNED_LOCK = "launch-pruned-lock"
+SWEPT = "launch-swept"
+SWEPT_LOCK = "launch-swept-lock"
 # 月ごとのファイルの名前の、月の位置と、リポジトリごとのディレクトリの名前の位置
 MONTH = "<YYYY-MM>"
 REPO = "<repo>"
+# リポジトリのディレクトリの名前（repo_store）。ほかの名前のものとシンボリックリンクは掃除しない
+_REPO_DIR = re.compile(r"[0-9a-f]{16}")
 _MONTH_FORM = re.compile(r"\d{4}-\d{2}")
 # 錠の待ちの上限（contracts/limits）
 LOCK_LIMIT = "launch.experiments-lock"
@@ -492,9 +496,8 @@ def _lock(path: Path) -> FileLock:
     return FileLock(str(path), timeout=limits.seconds(LOCK_LIMIT))
 
 
-def read_experiments(since: datetime, root: Optional[Path] = None) -> list[dict[str, Any]]:
+def read_experiments(since: datetime, root: Path) -> list[dict[str, Any]]:
     """`since` の月から今月までの実験の記録（ロックを取らない）。壊れた行と書きかけの行は飛ばす。"""
-    root = records_dir() if root is None else root
     return [r for m in _months(_month(since), _month(_utc_now())) for r in launch_records.whole_rows(_month_file(root, m))]
 
 
@@ -514,13 +517,12 @@ class Ledger:
 
 
 @contextmanager
-def ledger(since: datetime, root: Optional[Path] = None) -> Iterator[Ledger]:
+def ledger(since: datetime, root: Path) -> Iterator[Ledger]:
     """ロックの外で `since` の月から読み、ロックを取ってからは追記された分（月が替われば新しい月のファイル）だけを読み足して渡す。
 
     無い月は空として読む。ある月を読めなければ `OSError` を送る（読めない月を空とみなすと、その月の割り付けを見失って同じ単位に
     別の組を割り付けるため）。
     """
-    root = records_dir() if root is None else root
     months = _months(_month(since), _month(_utc_now()))
     rows = [r for m in months[:-1] for r in launch_records.read_rows(_month_file(root, m), 0)[0]]
     last, offset = launch_records.read_rows(_month_file(root, months[-1]), 0)
@@ -532,7 +534,7 @@ def ledger(since: datetime, root: Optional[Path] = None) -> Iterator[Ledger]:
         yield Ledger(root, rows)
 
 
-def append_row(row: Mapping[str, Any], root: Optional[Path] = None) -> bool:
+def append_row(row: Mapping[str, Any], root: Path) -> bool:
     """`ledger` を開いて 1 行足す。書けなければ警告を出して偽。"""
     try:
         with ledger(_utc_now(), root) as led:
@@ -556,22 +558,13 @@ def _write_replacing(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
-def prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None:
-    """月の掃除。`launch-pruned` が今月なら何もしない。違えば古い月のファイルと期間を過ぎた出現率の項目を消し、全部成功したら
-    今月を書く。失敗は呼び手へ送る（次の起動がやり直す）。
+def prune(now: datetime, window_days: int, root: Path) -> None:
+    """リポジトリのディレクトリ `root`（`repo_store`）の月の掃除。`launch-pruned` が今月なら何もしない。失敗は呼び手へ送る。
 
-    `root` はリポジトリのディレクトリ（`repo_store`）で、`window_days` はそのリポジトリの今の設定の値である。消すのは、掃除する
-    日時から「残す日数」を引いた日時より前に終わった月である。残す日数は、`window_days` と、このディレクトリに残る割り付けの行の
-    `window_days` の最大値に、記録を残す日数（records の行の `kept_extra_days`）を足したもの。行の値も見るのは、同じリポジトリの
-    別の作業ディレクトリが長い期間で割り付けていることがあるためである。読めない月が 1 つでもあれば何も消さずに `OSError` を
-    送る（その月の行が長い `window_days` を持つかもしれない）。続けて、使われなくなったリポジトリの記録を残さないために、ほかの
-    リポジトリのディレクトリから、どの設定でも使わない古さ（`WINDOW_LIMIT` ＋ `kept_extra_days` 日）の月を消す。この境は設定に
-    よらないので、どのリポジトリが掃除しても同じ月が残る。そうした月はもう追記されないのでロックを取らない。
-
-    掃除するのは、掃除の錠（`launch-pruned-lock`）を待たずに取れた起動だけである。取れなかった起動は掃除を飛ばす（錠を持つ
-    起動が掃除している）。錠の中で `launch-pruned` を読み直すので、月替わりに起動が重なっても全部の月を読むのは 1 回で済む。
+    残す日数は、`window_days`（今の設定）と、`root` に残る割り付けの行の `window_days` の最大値に `kept_extra_days` を足したもの。
+    同じリポジトリの別の作業ディレクトリが長い期間で割り付けた行を読み落とさないよう、読み取りと削除は記録のロックの中で行う。
+    読めない月があれば何も消さない。掃除の錠を待たずに取れた起動だけが掃除し、全部成功したら今月を書く。続けて `_sweep` を呼ぶ。
     """
-    root = records_dir() if root is None else root
     done = _store_file(root, PRUNED)
     month = _month(now)
     if _pruned(done, month):
@@ -597,7 +590,7 @@ def _month_files(root: Path) -> dict[str, Path]:
     found: dict[str, Path] = {}
     for path in root.glob(f"{head}*{tail}"):
         name = path.name[len(head) : len(path.name) - len(tail)]
-        if _MONTH_FORM.fullmatch(name):
+        if _MONTH_FORM.fullmatch(name) and not path.is_symlink():
             found[name] = path
     return found
 
@@ -611,28 +604,37 @@ def _drop_months(root: Path, edge: datetime) -> dict[str, Path]:
 
 
 def _prune_now(root: Path, now: datetime, window_days: int) -> None:
-    rows = [r for p in _month_files(root).values() for r in launch_records.read_rows(p, 0)[0]]  # 読めない月は OSError
-    days = max([window_days] + [r["window_days"] for r in rows if r["kind"] == "assign" and "window_days" in r])
-    _drop_months(root, now - timedelta(days=days + _rule()["kept_extra_days"]))
+    with _lock(_store_file(root, LEDGER_LOCK)):
+        rows = [r for p in _month_files(root).values() for r in launch_records.read_rows(p, 0)[0]]  # 読めない月は OSError
+        days = max([window_days] + [r["window_days"] for r in rows if r["kind"] == "assign" and "window_days" in r])
+        _drop_months(root, now - timedelta(days=days + _rule()["kept_extra_days"]))
     _prune_weights(root, now)
-    edge = now - timedelta(days=WINDOW_LIMIT + _rule()["kept_extra_days"])
-    for other in [p for p in root.parent.iterdir() if p.is_dir() and p != root]:
-        if not _drop_months(other, edge):
-            _drop_unused(other)
+    _sweep(root.parent, now)
 
 
-def _drop_unused(other: Path) -> None:
-    """月のファイルが残らない、ほかのリポジトリのディレクトリを、その記録のロックを待たずに取れたときだけ消す。"""
-    lock = FileLock(str(_store_file(other, LEDGER_LOCK)), timeout=0)
+def _sweep(base: Path, now: datetime) -> None:
+    """使われなくなったリポジトリの記録を残さないよう、保存先 `base` の全リポジトリから、どの設定でも使わない古さ（`WINDOW_LIMIT` ＋
+    `kept_extra_days` 日）の月と期限を過ぎた出現率の項目を、月に 1 回（`launch-swept`）消す。そうした月はもう追記されない。
+    ディレクトリとロックのファイルは消さない（同じパスに別のロックができると排他が分かれる）。"""
+    done, month = _store_file(base, SWEPT), _month(now)
+    if _pruned(done, month):
+        return
+    lock = FileLock(str(_store_file(base, SWEPT_LOCK)), timeout=0)
     try:
         lock.acquire()
     except Timeout:
-        log.info("実験の記録のディレクトリ %s は使われているので、次の月の掃除まで残す", other)
+        log.info("ほかの起動が、使われなくなったリポジトリの実験の記録を片付けている")
         return
     try:
-        for path in other.iterdir():
-            path.unlink(missing_ok=True)
-        other.rmdir()
+        if _pruned(done, month):
+            return
+        edge = now - timedelta(days=WINDOW_LIMIT + _rule()["kept_extra_days"])
+        with os.scandir(base) as found:
+            dirs = [Path(e.path) for e in found if _REPO_DIR.fullmatch(e.name) and e.is_dir(follow_symlinks=False)]
+        for other in dirs:
+            _drop_months(other, edge)
+            _prune_weights(other, now)
+        _write_replacing(done, month)
     finally:
         lock.release()
 
@@ -928,7 +930,7 @@ def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
     基準の組と割り付けの無い起動は None。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなくても基準の値を返す。
     引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、基準の組から引き上げ直す。
     """
-    if choice.assign_id is None or choice.arm is None or choice.arm == choice.base_arm:
+    if choice.assign_id is None or choice.store is None or choice.arm is None or choice.arm == choice.base_arm:
         return None
     row = {"kind": "launch_error", "at": _time_text(_utc_now()), "assign_id": choice.assign_id, "stage": choice.stage}
     append_row({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}, choice.store)
