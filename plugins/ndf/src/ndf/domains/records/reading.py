@@ -368,7 +368,7 @@ def comment_has(comments: Iterable[str], file_sha256: str) -> bool:
 def release_form(root: Path) -> Optional[str]:
     """設定のリリースの形（`branch_strategy.release.form`）。無ければ None（質問を作れずに止まる）。読めなければ `FormMissing`。"""
     try:
-        section = branch_strategy.load(Path(Git(root).run("rev-parse", "--show-toplevel").strip())).section
+        section = branch_strategy.load(Git(root).toplevel()).section
     except (GitError, branch_strategy.StrategyError) as exc:
         raise FormMissing(f"設定のブランチ戦略を読めない: {exc}") from None
     release = section["release"] if isinstance(section.get("release"), dict) else {}

@@ -393,8 +393,8 @@ plugins/ndf/
 | `released_where` | `src/ndf/progress/plan/__init__.py` | 新設 | `released_where(strategy: Optional[branch_strategy.Strategy]) -> tuple[str, Optional[dict[str, Any]]]` | 種類を `none`・`versioned`・`unknown`（`strategy` が `None`）の 3 語で返す。種類が `none` なら `production_delivery` の行も返す |
 | `record_release` | `src/ndf/progress/plan/__init__.py` | 変更 | 今のまま | `released` の回答では、`store` と `delivery` を、`None` でなければ回答の記録に足す |
 | `_read_delivered` | `src/ndf/progress/plan/cli.py` | 新設 | `_read_delivered(a: argparse.Namespace, cwd: Path) -> None` | `released` の回答なら、打った作業ディレクトリの根の設定を `command.strategy(cwd)` で 1 回読み、`released_where` の結果を `a.delivered` に置く。DB のトランザクションを開く前に打つ |
-| `Git.toplevel` | `src/ndf/adapters/git.py` | 新設 | `Git.toplevel(self) -> Path` | `git rev-parse --show-toplevel` を 1 回打って作業場所の根を返す。根を解く `git` のコマンドはここだけに置き、`route.repo_root` と `command.repo_root` が使う（Value 11） |
-| `repo_root` | `src/ndf/progress/command.py` | 新設 | `repo_root(cwd: Path) -> Path` | 設定を読むリポジトリの根を `Git.toplevel` で決める。`cwd` に `.ndf/project.json` があっても根とはみなさない。`ndf_settings_path`・`strategy`・`_strategy_at` が根をこの関数で決める。`roots_once` の中では、同じ作業場所で先に求めた根を使う |
+| `Git.toplevel` | `src/ndf/adapters/git.py` | 新設 | `Git.toplevel(self) -> Path` | `git rev-parse --show-toplevel` を 1 回打って作業場所の根を返す。根を解く `git` のコマンドはここだけに置く（Value 11）。`route.repo_root`・`command.repo_root` のほか、同じ意味で根を求めていた `records.cli._root`・`records.reading.release_form`・`loop.check_trigger.run`・`loop.design_tests.run`・`backlog.depth.ndf_settings_path` もこれを使う。各入口の例外の扱いは変えない |
+| `repo_root` | `src/ndf/progress/command.py` | 新設 | `repo_root(cwd: Path) -> Path` | 設定を読むリポジトリの根を `Git.toplevel` で決める。`cwd` に `.ndf/project.json` があっても根とはみなさない。`ndf_settings_path`・`strategy`・`_strategy_at` が根をこの関数で決める。`roots_once` の中では、同じ作業場所で先に求めた根を使う。範囲の外ではパスを解決せず、`Git.toplevel` を 1 回打つだけにする |
 | `roots_once` | `src/ndf/progress/command.py` | 新設 | `roots_once() -> Iterator[None]`（コンテキストマネージャー） | 範囲の中の `repo_root` が、同じ作業場所の根を 1 回だけ求める。入れ子なら外の範囲を引き継ぐ。`facts_of`・`sprint_diff_kinds`・`base_refs_once` が範囲を開く |
 | `_recorded_where` | `src/ndf/progress/gate/release.py` | 新設 | `_recorded_where(reply: Mapping[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]` | 回答に残った種類と届け先。種類が 3 語のどれでもなければ `None`。届け先は、種類が `none` で、`on_channel(行, "production")` が真で、`fits_context` が真のときだけ返す。外のオーガナイザーが `channel: base` の行を書いても本番の配布の実績にしない |
 | `_released` | `src/ndf/progress/gate/release.py` | 変更 | `_released(reply: Mapping[str, Any], value: str, row: Optional[dict[str, Any]]) -> dict[str, Any]` | 渡された届け先 `row` があれば、承認の回答の出力に `delivery` として足す |
@@ -420,6 +420,18 @@ plugins/ndf/
   | `ndf lanes release` の `rejected` の回答 | 0 回 | 0 回 |
   | 工程の条件の判定（`facts_of`。1 回の判定で求める語の全体） | 読む設定ごとに 1 回（スプリントの差分の語で 2 回、`ci_declared`・`prod_branch` で 1 回ずつ、つなぎ目の差分で範囲ごとに 1 回） | 作業場所ごとに 1 回 |
   | スプリントの差分の判定（`sprint_diff_kinds` を単独で呼ぶ） | 2 回（`_sprint_range` の `strategy` と `range_diff_kinds` の `ndf_settings`） | 1 回 |
+
+  使い回しは正本（Git が返す根）の外に写した値なので、足す前に効果を実測した（Value 8）。使い回しの効果は、1 回の判定で Git の起動を何回減らせるかで決まる。根を求める `git rev-parse --show-toplevel` は 1 回ごとにプロセスを起動するので、パスの解決（`Path.resolve()`）より 2 桁ほど遅い。
+
+  測った条件は次のとおりである。2026-11-27 に、このリポジトリの worktree（8 コアの Linux、Git 2.53.0）で測った。代表の経路には、工程の始まりで「リファクタリング」の工程の条件（`code_in_diff`・`ci_declared`）を判定する処理を選んだ。工程の始まりと同じく、`base_refs_once` の中で `facts_of` を呼んだ。使い回しの有りと無しで 30 回ずつ打ち、中央値を取った。2 回測って、どちらも同じ傾向だった。
+
+  | 測ったもの | 使い回しなし | 使い回しあり |
+  | --- | --- | --- |
+  | 1 回の判定での `git rev-parse --show-toplevel` の回数 | 3 回 | 1 回 |
+  | 1 回の判定の所要時間（中央値） | 32.4 ms・33.1 ms | 29.4 ms・30.1 ms |
+  | 根を求める 1 回の所要時間（中央値、100 回） | 1.46 ms（`git rev-parse --show-toplevel`） | 0.009 ms（`Path.resolve()`、1000 回） |
+
+  使い回しで、判定 1 回あたり Git の起動が 2 回、時間が約 3 ms（約 9%）減る。使い回すために足したパスの解決は、Git の起動 1 回の 1% 未満である。そのうえ、パスの解決は使い回しの範囲の中でだけ打ち、範囲の外の `repo_root` は今までどおり Git を 1 回起動するだけにする。範囲は 1 回の呼び出しの中に限るので、使い回した根が古くなることはない。以上から、使い回しを採る
 
 ### 異常系の処理
 

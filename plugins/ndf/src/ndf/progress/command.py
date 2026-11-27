@@ -125,13 +125,12 @@ def repo_root(cwd: Path) -> Path:
     リポジトリの根の設定を読む（#4513）。`roots_once` の中では、同じ作業場所で先に求めた根を使う（git を打ち直さない）。
     """
     held = _ROOTS.get()
-    key = cwd.resolve()
-    if held is not None and key in held:
-        return held[key]
-    root = Git(cwd).toplevel()
-    if held is not None:
-        held[key] = root
-    return root
+    if held is None:
+        return Git(cwd).toplevel()
+    key = cwd.resolve()  # パスの解決は使い回す範囲の中だけで打つ（範囲の外では git の起動のほかに増やさない）
+    if key not in held:
+        held[key] = Git(cwd).toplevel()
+    return held[key]
 
 
 def ndf_settings_path(cwd: Path, name: str) -> Path:
