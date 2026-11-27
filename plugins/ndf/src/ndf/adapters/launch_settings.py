@@ -39,10 +39,9 @@ REPO_MCP = ".mcp.json"
 SPEC_KEYS = ("load", "allow", "mcp")
 # MCP の定義のコピーを置く保存先の行（表 ndf-files。`<id>` は `<PID>-<一意な値>`）
 COPIES = "launch-mcp"
-# コピーのディレクトリ `<id>/` の隣に置く 2 つのファイルの拡張子。`<id>.owner` は NDF が作ったコピーであることの記録
-# （`_owner_record`）、`<id>.inuse` はオーナーがコピーを使う間取り続ける錠。掃除は記録の合うものだけを、錠が外れていれば消す
+# コピーのディレクトリ `<id>/` の隣に置く管理ファイル `<id>.owner` の拡張子。オーナーはコピーを使う間このファイルの錠を
+# 取り続け、中身には NDF が作ったコピーであることの記録（`_owner_record`）を書く。掃除は錠が外れ、記録が合うものだけを消す
 OWNER_SUFFIX = ".owner"
-LOCK_SUFFIX = ".inuse"
 # コピーの `<id>`（`<PID>-<一意な値>`）の形。掃除はこの形の名前だけを見る
 COPY_ID = re.compile(r"[0-9]+-[0-9a-f]{16}")
 
@@ -340,12 +339,12 @@ def copies_dir() -> Path:
 def _copies(definitions: list[Any]) -> Iterator[tuple[Path, ...]]:
     """確かめた定義の中身を、所有者だけが読めるコピー（0700 のディレクトリの 0600 のファイル）にして渡し、抜けるときに消す。
 
-    ディレクトリより先に、錠（`<id>.inuse`）を取り、記録（`<id>.owner`）を書く。消すときは、ディレクトリ・錠のファイル・
-    記録の順に消す。途中で落ちても記録が残るので、次の掃除が残った定義を見つけて消せる。
+    作る順は、管理ファイルの錠を取る → ディレクトリを作る → 記録（ディレクトリの実体を含む）を書く → 定義のコピーを書く。
+    消すときは、ディレクトリを消し終えてから管理ファイルを消す。どこで落ちても、次の掃除が残りを見分けて消せる（`_sweep_copies`）。
     """
     base = copies_dir()
     ident = f"{os.getpid()}-{secrets.token_hex(8)}"
-    lock = _copy_lock(base, ident)
+    lock = _owner_lock(base, ident)
     try:
         base.mkdir(parents=True, exist_ok=True)
         _sweep_copies(base)
@@ -355,27 +354,35 @@ def _copies(definitions: list[Any]) -> Iterator[tuple[Path, ...]]:
     where = base / ident
     try:
         try:
-            _write_private(base / f"{ident}{OWNER_SUFFIX}", _owner_record(ident))
             where.mkdir(mode=0o700)
             os.chmod(where, 0o700)
+            _write_record(base, ident, where.lstat())
             paths = tuple(_write_private(where / f"{i}.json", json.dumps(raw, ensure_ascii=False)) for i, raw in enumerate(definitions))
         except OSError as exc:
             raise _precondition(f"MCP の定義のコピーを {where} に書けない（{type(exc).__name__}）") from None
         yield paths
     finally:
-        _remove_copy(base, ident)
+        _reclaim_locked(base, ident)
         lock.release()
 
 
-def _copy_lock(base: Path, ident: str) -> FileLock:
-    """コピー `<id>` の錠。待たずに取る（使用中なら `Timeout`）。flock の錠はカーネルが持つので、状態の保存先を共有する
-    PID 名前空間の違うコンテナどうしでも、使用中と分かる。"""
-    return FileLock(str(base / f"{ident}{LOCK_SUFFIX}"), timeout=0, mode=0o600)
+def _owner_lock(base: Path, ident: str) -> FileLock:
+    """コピー `<id>` の管理ファイルの錠。待たずに取る（使用中なら `Timeout`）。flock の錠はカーネルが持つので、状態の保存先を
+    共有する PID 名前空間の違うコンテナどうしでも、使用中と分かる。filelock は開くときにファイルを切り詰めないので、記録は残る。"""
+    return FileLock(str(base / f"{ident}{OWNER_SUFFIX}"), timeout=0, mode=0o600)
 
 
-def _owner_record(ident: str) -> str:
-    """記録のファイルに書く、NDF が作ったコピーであることの記録。掃除は中身がこれと一致するものだけを消す。"""
-    return json.dumps({"row": COPIES, "id": ident}, ensure_ascii=False)
+def _owner_record(ident: str, st: os.stat_result) -> dict[str, Any]:
+    """管理ファイルに書く記録。表 ndf-files の行の名前（`row`）、ディレクトリの名前（`id`）、作った直後のディレクトリの
+    実体（`lstat` の `dev`・`ino`）。掃除は JSON の値として比べ、書式（空白・キーの順）は問わない。"""
+    return {"row": COPIES, "id": ident, "dev": st.st_dev, "ino": st.st_ino}
+
+
+def _write_record(base: Path, ident: str, st: os.stat_result) -> None:
+    """錠を取った管理ファイル（空）に記録を書く。"""
+    fd = os.open(base / f"{ident}{OWNER_SUFFIX}", os.O_WRONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(_owner_record(ident, st), ensure_ascii=False))
 
 
 def _write_private(path: Path, text: str) -> Path:
@@ -386,46 +393,89 @@ def _write_private(path: Path, text: str) -> Path:
     return path
 
 
-def _remove_copy(base: Path, ident: str) -> None:
-    """コピーのディレクトリを消し、消し切れたときだけ錠のファイルと記録を消す（消し残りを次の掃除が見つけられるように）。"""
-    where = base / ident
-    if where.is_dir() and not where.is_symlink():
-        shutil.rmtree(where, ignore_errors=True)
-    if where.exists() or where.is_symlink():
-        return
-    (base / f"{ident}{LOCK_SUFFIX}").unlink(missing_ok=True)
-    (base / f"{ident}{OWNER_SUFFIX}").unlink(missing_ok=True)
-
-
 def _sweep_copies(base: Path) -> None:
-    """落ちた起動の消し残りを消す。消すのは、NDF の記録が合い、錠が外れているコピーだけである。
+    """落ちた起動の消し残りを消す。錠を待たずに取れた管理ファイルだけを見て、`_reclaim_locked` が消すものを決める。
 
-    記録の無いもの・記録の合わないもの・錠を取られているもの（使用中）は触らない。
+    錠を取られているもの（使用中）は触らない。
     """
-    for record in base.glob(f"*{OWNER_SUFFIX}"):
-        ident = record.name.removesuffix(OWNER_SUFFIX)
-        if COPY_ID.fullmatch(ident) and _recorded_as_copy(record, ident):
-            _reclaim(base, ident)
+    for owner in base.glob(f"*{OWNER_SUFFIX}"):
+        ident = owner.name.removesuffix(OWNER_SUFFIX)
+        if COPY_ID.fullmatch(ident) and not owner.is_symlink():
+            _reclaim_unused(base, ident)
 
 
-def _recorded_as_copy(record: Path, ident: str) -> bool:
-    """`record` が、NDF がコピー `<id>` を作ったときに書いた記録か。"""
-    if record.is_symlink() or not record.is_file():
-        return False
-    try:
-        return record.read_text(encoding="utf-8") == _owner_record(ident)
-    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない記録は NDF が作ったと確かめられないので消さない
-        return False
-
-
-def _reclaim(base: Path, ident: str) -> None:
-    """錠が外れていれば、コピー `<id>` を消す。オーナーが錠を取っている（使用中）なら何もしない。"""
-    lock = _copy_lock(base, ident)
+def _reclaim_unused(base: Path, ident: str) -> None:
+    """コピー `<id>` の錠が待たずに取れれば、`_reclaim_locked` で残りを消す。"""
+    lock = _owner_lock(base, ident)
     try:
         lock.acquire()
     except Timeout:  # noqa: NDF401 ファイル: オーナーが使用中のコピーは消さない
         return
     try:
-        _remove_copy(base, ident)
+        _reclaim_locked(base, ident)
     finally:
         lock.release()
+
+
+def _reclaim_locked(base: Path, ident: str) -> None:
+    """錠を取った管理ファイル `<id>.owner` の中身で、消すものを決めて消す。管理ファイルは最後に消す。
+
+    | 管理ファイルの中身 | ディレクトリ `<id>` | 消すもの |
+    | --- | --- | --- |
+    | 空（記録を書く前に落ちた） | 無いか空 | 空のディレクトリと管理ファイル（中身が無いので利用者のデータは失われない） |
+    | 空 | 中身がある | 何も消さない（NDF が作ったと確かめられない） |
+    | 記録が合う | 記録の `dev`・`ino` と同じ実体か、無い | ディレクトリと管理ファイル |
+    | 記録が合う | 実体が違う（記録の後に置き換わった） | 管理ファイルだけ（ディレクトリは NDF が作ったものでない） |
+    | 記録の形でない | — | 何も消さない |
+    """
+    owner, where = base / f"{ident}{OWNER_SUFFIX}", base / ident
+    text = _read_owner(owner)
+    if text is None:
+        return
+    if not text:
+        _remove_if_empty(where)
+    else:
+        record = _parsed_record(text)
+        if record is None or record["id"] != ident:
+            return
+        if _is_recorded_dir(where, record):
+            shutil.rmtree(where, ignore_errors=True)
+    if not text and where.exists():
+        return  # 空の管理ファイルの隣に中身のあるディレクトリがある。NDF が作ったと確かめられない
+    if text and where.exists() and _is_recorded_dir(where, _parsed_record(text)):
+        return  # 消し切れなかった。記録を残して、次の掃除に任せる
+    owner.unlink(missing_ok=True)
+
+
+def _remove_if_empty(where: Path) -> None:
+    """`where` が空のディレクトリなら消す。中身があるもの・ディレクトリでないものは消さない。"""
+    if where.is_dir() and not where.is_symlink() and not any(where.iterdir()):
+        where.rmdir()
+
+
+def _read_owner(owner: Path) -> Optional[str]:
+    """管理ファイルの中身。読めなければ None（NDF が作ったと確かめられないので消さない）。"""
+    try:
+        return owner.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない管理ファイルは消さない
+        return None
+
+
+def _parsed_record(text: str) -> Optional[dict[str, Any]]:
+    """記録の形（`_owner_record` と同じキーと型、`row` が `launch-mcp`）なら解いた値、違えば None。"""
+    try:
+        raw = json.loads(text)
+    except ValueError:  # noqa: NDF401 ファイル: JSON でない中身は NDF の記録でない
+        return None
+    shape = {"row": str, "id": str, "dev": int, "ino": int}
+    if not isinstance(raw, dict) or set(raw) != set(shape) or raw["row"] != COPIES:
+        return None
+    return raw if all(isinstance(raw[k], t) and not isinstance(raw[k], bool) for k, t in shape.items()) else None
+
+
+def _is_recorded_dir(where: Path, record: Optional[Mapping[str, Any]]) -> bool:
+    """`where` が記録の実体（`dev`・`ino`）と同じディレクトリか。リンクは同じと見なさない。"""
+    if record is None or where.is_symlink() or not where.is_dir():
+        return False
+    st = where.lstat()
+    return (st.st_dev, st.st_ino) == (record["dev"], record["ino"])
