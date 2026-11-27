@@ -295,22 +295,18 @@ def _unversioned_result(args: argparse.Namespace, strategy: branch_strategy.Stra
         for e, why in by.items()
     ]
     if got.recorded or got.kept:
-        detail = f"値 {given.version} のリリース記録を書いた（書いた届け先 {_listed_names(got.recorded)}・既にあった届け先 {_listed_names(got.kept)}）"
+        detail = f"値 {given.version} のリリース記録を書いた（書いた届け先 {record_decide.listed_names(got.recorded)}・既にあった届け先 {record_decide.listed_names(got.kept)}）"
         return result.result(TOOL, result.OK, detail, rows, outputs=outputs)
     if got.failed:
         return result.stopped(
             TOOL,
             "refused",
-            f"CD の結果が失敗した届け先がある（{_listed_names(tuple(got.failed))}）。何も書いていない",
+            f"CD の結果が失敗した届け先がある（{record_decide.listed_names(tuple(got.failed))}）。何も書いていない",
             items=rows,
             outputs=outputs,
         )
-    detail = f"どの届け先も反映を確かめられなかった（{_listed_names(tuple(got.pending))}）。結果が確定してから打ち直す"
+    detail = f"どの届け先も反映を確かめられなかった（{record_decide.listed_names(tuple(got.pending))}）。結果が確定してから打ち直す"
     return result.stopped(TOOL, "precondition", detail, items=rows, outputs=outputs)
-
-
-def _listed_names(names: tuple[str, ...]) -> str:
-    return record_decide.listed_names(names)
 
 
 def cmd_record(args: argparse.Namespace) -> dict:
