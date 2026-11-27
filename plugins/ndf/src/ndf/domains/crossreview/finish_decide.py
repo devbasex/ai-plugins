@@ -9,6 +9,7 @@
 - 上限（`max_rounds`）・振動（`oscillating`）・途中の誤り（`errored`）で終わっても、欠けが 0 件なら ok で次の工程へ進み、そう決めた理由を
   decisions に残す（conductor が手で review を飛ばさない）。1 ラウンドも終わらずに誤りで終わったら `work_stopped`
 - 収束の妨げにならない重さ（`minor`・`nit`。`criteria_decide.blocking`）の未解決の指摘は欠けにしない（#3941）
+- 線引きで直さずに残した指摘（`parked`）は、欠けにも未解決の件数にも入れない（#3780）
 - 必ず人の承認が要る操作に当たる指摘（`redline`）は、どの欠けにもせず、件数を要約に載せる。ほかの、プロジェクト MVV の項目に
   反する指摘（`mvv`）と、NDF が機械で確かめて作った指摘（`by_ndf`。MVV の根拠の記述の誤り）の未解決は、欠けの種類を分ける。
   最後の head で根拠の記述を確かめられなかったとき・PR に届いていないコミットに誤りがあるときも同じ種類の欠けにし、この種類が 1 件でもあれば、次の工程へ進まない
@@ -67,7 +68,7 @@ UNSENT_CITATIONS = "unsent_citations"
 class Finding(NamedTuple):
     """レビューの指摘 1 件。足すべき内容を扱った件は、その `id` を持つ。`severity` は重要度（分からなければ None）、
     `mvv` は反する MVV の項目（無ければ None）、`redline` は必ず人の承認が要る操作に当たるか、`by_ndf` は NDF が機械で確かめて
-    作った指摘か。`defer` は見送りの区分（無ければ None）。"""
+    作った指摘か。`defer` は見送りの区分（無ければ None）、`parked` は線引きで直さずに残した指摘か。"""
 
     id: str
     text: str
@@ -78,6 +79,7 @@ class Finding(NamedTuple):
     redline: bool = False
     by_ndf: bool = False
     defer: Optional[str] = None
+    parked: bool = False
 
 
 def blocking(f: Finding) -> bool:
@@ -126,11 +128,14 @@ def _gap_text(f: Finding) -> str:
     return f.text or f"指摘 {f.id} の本文が無い"
 
 
+def _left_open(f: Finding) -> bool:
+    """決めずに残った、収束の妨げになる指摘か（線引きで直さずに残した指摘は数えない）。"""
+    return f.outcome == UNRESOLVED and blocking(f) and not f.parked
+
+
 def _finding_gaps(findings: Sequence[Finding], *, mvv_checked: bool = True, unsent_citations: int = 0) -> list[dict[str, str]]:
     rest = [f for f in findings if not f.redline]
-    gaps = [
-        _gap(GAP_MVV if f.mvv or f.by_ndf else GAP_UNRESOLVED, f.id, _gap_text(f)) for f in rest if f.outcome == UNRESOLVED and blocking(f)
-    ]
+    gaps = [_gap(GAP_MVV if f.mvv or f.by_ndf else GAP_UNRESOLVED, f.id, _gap_text(f)) for f in rest if _left_open(f)]
     gaps += [_gap(GAP_NO_REASON, f.id, f"見送った理由が無い: {_gap_text(f)}") for f in rest if f.outcome == SKIPPED and not f.reason]
     if not mvv_checked:
         reason = "PR が足した根拠の記述が承認済みの MVV に合うかを、最後のコミットで確かめられなかった（原因は注意にある）"
@@ -180,7 +185,7 @@ def _handed(handed: Sequence[Handed], findings: Sequence[Finding]) -> tuple[list
 def _counts(findings: Sequence[Finding]) -> str:
     waiting = sum(1 for f in findings if f.outcome == UNRESOLVED and f.redline)
     rest = [f for f in findings if f.outcome != UNRESOLVED or not f.redline]
-    n = {o: sum(1 for f in rest if f.outcome == o and (o != UNRESOLVED or blocking(f))) for o in OUTCOMES}
+    n = {o: sum(1 for f in rest if f.outcome == o and (o != UNRESOLVED or _left_open(f))) for o in OUTCOMES}
     light = sum(1 for f in rest if f.outcome == UNRESOLVED and not blocking(f))
     tail = (f"・軽い指摘 {light}" if light else "") + (f"・人の承認を待つ {waiting}" if waiting else "")
     return f"指摘 {len(findings)} 件（直した {n[FIXED]}・見送った {n[SKIPPED]}・未解決 {n[UNRESOLVED]}{tail}）"
@@ -280,7 +285,7 @@ def as_findings(raw: Sequence[Any]) -> tuple[Finding, ...]:
         item_mvv = mvv if isinstance(mvv, str) else None
         found = Finding(name, text, item["outcome"], why, severity, item_mvv, bool(item.get(REDLINE)), bool(item.get(BY_NDF)))
         defer = item.get(mvv_decide.REVIEW_DEFER)
-        out.append(found._replace(defer=defer if isinstance(defer, str) else None))
+        out.append(found._replace(defer=defer if isinstance(defer, str) else None, parked=bool(item.get("parked"))))
     return tuple(out)
 
 

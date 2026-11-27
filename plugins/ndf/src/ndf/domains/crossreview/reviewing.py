@@ -60,7 +60,8 @@ class ReviewingRun(seats.SeatRun, Protocol):
 class Prepared(NamedTuple):
     """ラウンドの前半で決めたもの（範囲・変わったセクション・詳細レビューを通ったセクション・レビューする head・差分のファイル・
     PR の全差分で変わったファイル・比較基点の merge-base の SHA・今回の相手役の全員が読んだ前のラウンド・ラウンドの差分を
-    実装の PR の起点から作ったときのその起点）。"""
+    実装の PR の起点から作ったときのその起点・線引きの起点の head（線引きをしないラウンドは None）・このラウンドで読んだ差分の
+    一覧）。"""
 
     scope: scope_decide.Scope
     sections: list[str]
@@ -71,6 +72,8 @@ class Prepared(NamedTuple):
     base: str
     previous: Optional[criteria_decide.Previous]
     since: Optional[round_scope.Since] = None
+    lines: Optional[str] = None
+    listed: Optional[changes.Listings] = None
 
 
 def remarks(run: ReviewingRun, prep: Prepared) -> list[str]:

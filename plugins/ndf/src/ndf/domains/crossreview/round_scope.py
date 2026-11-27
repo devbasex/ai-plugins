@@ -35,14 +35,19 @@ def previous_head(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basi
     return prev if prev is not None and _reachable_from(g, prev, head) else None
 
 
-def read_origin(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str) -> Optional[changes.Range]:
+def read_origin(
+    g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str, confirmed: Optional[str] = None
+) -> Optional[changes.Range]:
     """差分の起点（`scope_decide.origin_record` のラウンドの比較基点と head。#3780）。起点の記録が無いか、比較基点の記録が
-    無いか、その head が `head` の祖先でなければ None。"""
+    無いか、その head が `head` の祖先でなければ None。`confirmed` は `head` の祖先と確かめ済みのコミットで、記録の head が
+    同じなら git を起動しない。"""
     record = scope_decide.origin_record(state, basis)
     if record is None:
         return None
     base, prev = record.get(scope_decide.BASE), record.get("head")
-    if not isinstance(base, str) or not base or not isinstance(prev, str) or not _reachable_from(g, prev, head):
+    if not isinstance(base, str) or not base or not isinstance(prev, str):
+        return None
+    if prev != confirmed and not _reachable_from(g, prev, head):
         return None
     return changes.Range(base, prev)
 
@@ -62,10 +67,10 @@ def read_since(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, 
     return Since(previous, added, listed)
 
 
-def line_origin(g: git.Git, state: Mapping[str, Any], head: str) -> Optional[changes.Range]:
+def line_origin(g: git.Git, state: Mapping[str, Any], head: str, confirmed: Optional[str] = None) -> Optional[changes.Range]:
     """線引きの起点（相手役の全員が結果を返した最後のラウンドの比較基点と head。#3780）。読んだ顔ぶれと PR は問わないので、
-    読んでいない相手役がいて全差分を読むラウンドにも残る。"""
-    return read_origin(g, state, scope_decide.Basis(), head)
+    読んでいない相手役がいて全差分を読むラウンドにも残る。`confirmed` は差分の起点の head（`read_origin` が確かめ済み）。"""
+    return read_origin(g, state, scope_decide.Basis(), head, confirmed)
 
 
 def descended(g: git.Git, scope: scope_decide.Scope, head: str) -> scope_decide.Scope:

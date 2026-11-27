@@ -44,6 +44,14 @@ def test_issue_2370_limit_with_no_unresolved_findings_moves_on_and_records_why(
     assert got["warnings"]
 
 
+@pytest.mark.parametrize("more", [{}, {"mvv": "Value 1"}], ids=["plain", "mvv"])
+def test_issue_3780_2_parked_findings_are_not_gaps(tmp_path: Path, capsys: pytest.CaptureFixture[str], more: dict) -> None:
+    parked = {"id": "F5", "text": "変えていない行", "outcome": fin.UNRESOLVED, "parked": True, **more}
+    code, got = run_cli(capsys, "finish", "--summary", str(_summary(tmp_path, fin.CONVERGED, 2, [FIXED, parked])))
+    assert (code, got["status"]) == (0, "ok")
+    assert got["outputs"]["gaps"] == [] and "未解決 0" in got["summary"]
+
+
 def test_issue_2370_unresolved_findings_stop_as_incomplete_with_gaps(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """#2370: 未解決が残れば incomplete（gaps つき）で止まり、プランの incomplete のルートが受ける。"""
     open_one = {"id": "F3", "text": "コントラクトが食い違う", "outcome": fin.UNRESOLVED}

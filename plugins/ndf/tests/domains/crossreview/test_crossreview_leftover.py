@@ -1,17 +1,24 @@
-"""2 ラウンド目以降の線引き（#3780）。修正へ進む指摘と直さずに残す指摘の分け方、ジャーナルの `parked`、変えた行の読み取り。"""
+"""2 ラウンド目以降の線引き（#3780）。修正へ進む指摘と直さずに残す指摘の分け方、ジャーナルの `parked`、変えた行の読み取り、
+`ndf cross-review run` の組み込み（相手役は偽物、git は一時の origin で本物を打つ）。"""
 
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from ndf.adapters import git
-from ndf.domains.crossreview import changes, criteria_decide, journal as journal_mod, leftover_decide, threads
+from ndf.domains.crossreview import changes, criteria_decide, drive, journal as journal_mod, leftover_decide, round_scope, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.leftover_decide import PARKED, Touched
 
+from ._judge import holding
+from ._repos import Repos
 from .test_crossreview_journal import ITEMS, V11, _told
+from .test_crossreview_mvv import _push_base, mvv_state  # noqa: F401
+from .test_crossreview_ranges import _read_against_target
+from .test_crossreview_run import IMPACT, Fake, _run, _state
 from .test_crossreview_scope import _head, _lines, _write
 
 # a.py の 10 行目だけを変えたラウンド（PR の差分には 2〜13 行目が載る）
@@ -392,3 +399,188 @@ def test_touched_since_reads_only_the_diffs_it_cannot_use(monkeypatch: pytest.Mo
 def test_touched_since_a_commit_that_is_not_local_raises(wt: Path) -> None:
     with pytest.raises(git.GitError):
         changes.touched_since(git.Git.offline(wt), "0" * 40, changes.Range("0" * 40, _head(wt)), {})
+
+
+# --- git と判定役を起動する条件 --------------------------------------------------------------
+
+
+def test_changed_lines_are_needed_only_for_findings_to_sort() -> None:
+    journal, _ = _parked()
+    assert journal.sortable()
+    journal.enter(3, [], ITEMS, V11)
+    assert not journal.sortable()
+
+
+@pytest.mark.parametrize(("severity", "wanted"), [("minor", False), ("nit", False), ("major", True), ("critical", True)])
+def test_changed_lines_are_not_read_for_new_light_findings(severity: str, wanted: bool) -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(2, [_told(severity=severity, **UNCHANGED)], ITEMS, V11)
+    assert journal.sortable() is wanted
+
+
+@pytest.mark.parametrize(
+    ("full", "severity", "number", "posted"),
+    [
+        pytest.param(True, "major", 7, 7, id="in-pr-diff"),
+        pytest.param(True, "major", 99, None, id="outside-pr-diff"),
+        pytest.param(True, "critical", 99, None, id="unparked-by-enter"),
+        pytest.param(False, "major", 7, None, id="no-full-diff"),
+    ],
+)
+def test_a_round_without_the_line_drawing_hands_over_a_parked_finding_raised_again(
+    tmp_path: Path, full: bool, severity: str, number: int, posted
+) -> None:
+    journal, row = _parked()
+    journal.enter(3, [_told(severity=severity, path="a.py", line=number)], ITEMS, V11)
+    diff = tmp_path / "full.diff"
+    diff.write_text("diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -7 +7 @@\n-x\n+y\n", encoding="utf-8")
+    run = SimpleNamespace(journal=journal, last_target=None)
+    prep = SimpleNamespace(scope=SimpleNamespace(base=None if full else "h2"), diff=diff)
+    got = SimpleNamespace(filled=None)
+    assert drive._sort_leftovers(run, None, drive.Checked(), prep, got) == frozenset()  # type: ignore[arg-type]
+    assert PARKED not in row and journal.handable() == [row]
+    assert (row["line"], row[journal_mod.PLACED_ROUND]) == (number, 3)
+    assert threads.location(row) == ("a.py", posted)
+
+
+def test_the_judge_is_not_asked_the_kinds_when_another_report_is_on_a_changed_line() -> None:
+    journal = journal_mod.FindingJournal()
+    # 軽い重大度の出し直しは内容の違う重い報告に数えないので、指摘は判定役へ渡す候補に残る
+    told = [_told(mvv="Value 1", **UNCHANGED), _told(severity="minor", mvv="Value 1", path="a.py", line=10)]
+    journal.enter(2, told, ITEMS, V11)
+    assert journal.fresh == ["r2-1"]
+    assert not drive._wants_tracks(SimpleNamespace(journal=journal), TOUCHED)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(("returned", "wanted"), [pytest.param([], True, id="new"), pytest.param(["r2-1"], False, id="returned")])
+def test_the_judge_is_not_asked_the_kinds_of_a_returned_finding(returned: list[str], wanted: bool) -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(2, [_told(mvv="Value 1", **UNCHANGED)], ITEMS, V11)
+    journal.returned = returned
+    assert drive._wants_tracks(SimpleNamespace(journal=journal), TOUCHED) is wanted  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(("confirmed", "asked"), [pytest.param("h1", 0, id="same-head"), pytest.param("h0", 1, id="other-head")])
+def test_line_origin_does_not_confirm_the_confirmed_head_again(confirmed: str, asked: int) -> None:
+    calls: list[tuple[str, str]] = []
+    g = SimpleNamespace(is_ancestor=lambda prev, head: calls.append((prev, head)) or True)
+    state = {"rounds": [{"round": 1, "base": "b", "head": "h1", "verdict": "changes_required"}]}
+    assert round_scope.line_origin(g, state, "h2", confirmed) == changes.Range("b", "h1")  # type: ignore[arg-type]
+    assert len(calls) == asked
+
+
+# --- 駆動（`run` を通す） --------------------------------------------------------------------
+
+
+def _said(text: str, path: str = "doc.md", line: int = 1, severity: str = "major", **other) -> dict:
+    """相手役の出力の指摘 1 件。既定の位置（`doc.md` の 1 行目）は、どのラウンドの修正も変えない行。"""
+    return {"text": text, "severity": severity, "impact": IMPACT, "path": path, "line": line, **other}
+
+
+def _rounds(tmp_path: Path, capsys, monkeypatch, wt: Path, *said: list, extra: tuple[str, ...] = ()) -> tuple[Fake, dict, dict]:
+    """codex が `said` の順に指摘する `run`。1 ラウンド目は `doc.md` の指摘で、偽の修正担当は `fix0.txt` を足す。"""
+    fake = Fake(tmp_path / "st", {"codex": [[_said("初めの指摘")], *said], "kiro": []})
+    code, got = _run(capsys, monkeypatch, fake, wt, *extra)
+    assert code == 0, got
+    return fake, got, _state(fake.state_dir)
+
+
+def _parked_texts(state: dict) -> list[str]:
+    return [f["text"] for f in state["findings"] if f.get(PARKED)]
+
+
+def test_issue_3780_2_only_unchanged_majors_and_minors_in_round_two_converge(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    second = [_said("古い行の指摘"), _said("細かい指摘", line=3, severity="minor")]
+    fake, got, state = _rounds(tmp_path, capsys, monkeypatch, wt, second)
+    assert (got["status"], got["outputs"]["gaps"]) == ("ok", [])
+    assert [r["verdict"] for r in state["rounds"]] == ["changes_required", fin.CONVERGED]
+    # 修正担当は 1 ラウンド目だけで、1 ラウンド目は変えていない行でも直す
+    assert fake.calls.count("claude") == 1
+    assert _parked_texts(state) == ["古い行の指摘"]
+    assert "未解決 0" in got["summary"]
+    assert not [body for *_, body in hub.port.opened if "古い行の指摘" in body]
+
+
+@pytest.mark.parametrize(
+    "finding",
+    [
+        pytest.param(_said("変えた行の指摘", path="fix0.txt"), id="changed-line"),
+        pytest.param(_said("critical の指摘", severity="critical"), id="critical"),
+        pytest.param(_said("秘密の指摘", protect=["secret"]), id="secret"),
+    ],
+)
+def test_issue_3780_5_round_two_findings_that_proceed_are_fixed(wt: Path, tmp_path: Path, capsys, monkeypatch, finding: dict) -> None:
+    fake, got, state = _rounds(tmp_path, capsys, monkeypatch, wt, [finding])
+    assert got["status"] == "ok" and len(state["rounds"]) == 3
+    assert fake.calls.count("claude") == 2 and _parked_texts(state) == []
+
+
+def test_issue_3780_5_a_protected_major_alone_does_not_launch_the_judge(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    fake, _, _ = _rounds(tmp_path, capsys, monkeypatch, wt, [_said("秘密の指摘", protect=["secret"])])
+    assert len(fake.judged) == 1 and fake.calls.count("claude") == 2
+
+
+def test_issue_3780_a_design_pr_is_not_sorted(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    fake, _, state = _rounds(tmp_path, capsys, monkeypatch, wt, [_said("古い行の指摘")], extra=("--purpose", "design"))
+    assert fake.calls.count("claude") == 2 and _parked_texts(state) == []
+
+
+def test_issue_3780_unreadable_changed_lines_let_every_finding_proceed(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    def fail(*args, **kwargs):
+        raise git.GitError("差分を読めない")
+
+    monkeypatch.setattr(changes, "touched_since", fail)
+    fake, got, state = _rounds(tmp_path, capsys, monkeypatch, wt, [_said("古い行の指摘")])
+    assert fake.calls.count("claude") == 2 and _parked_texts(state) == []
+    assert any("線引き" in w for w in got["warnings"])
+
+
+def test_the_changed_lines_are_read_from_the_handed_diff(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """比較基点が起点と同じラウンドは、相手役へ渡した差分を `since..head` の行の差分として渡し、読み直さない。"""
+    given: list[tuple] = []
+    read = changes.touched_since
+
+    def spy(g, since, current, listed, since_lines=None, pr_lines=None):
+        given.append((since, since_lines, pr_lines))
+        return read(g, since, current, listed, since_lines, pr_lines)
+
+    monkeypatch.setattr(changes, "touched_since", spy)
+    fake, _, state = _rounds(tmp_path, capsys, monkeypatch, wt, [_said("古い行の指摘")])
+    assert given == [(state["rounds"][0]["head"], fake.inputs["round2.diff"], None)]
+
+
+def test_a_parked_finding_is_not_counted_by_the_oscillation(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    old = _said("古い行の指摘")
+    said = (
+        [old, _said("変えた行の一つ目", path="fix0.txt")],
+        [_said("変えた行の二つ目", path="fix1.txt")],
+        [old, _said("変えた行の三つ目", path="fix2.txt")],
+    )
+    _, got, state = _rounds(tmp_path, capsys, monkeypatch, wt, *said, extra=("--max-rounds", "6"))
+    assert [r["verdict"] for r in state["rounds"]] == ["changes_required"] * 4 + [fin.CONVERGED]
+    assert got["status"] == "ok" and _parked_texts(state) == ["古い行の指摘"]
+
+
+@pytest.mark.parametrize(("tracks", "fixes"), [pytest.param([], 1, id="parked"), pytest.param(["safety"], 2, id="protected")])
+def test_issue_3780_the_judge_is_asked_the_kinds_of_an_unchanged_mvv_major(
+    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, tracks: list[str], fixes: int
+) -> None:
+    """変えていない行の MVV の major は下げないが、回答の指摘の種類で進むかが変わるので判定役へ渡す。"""
+    _push_base(repos)
+    fake = Fake(tmp_path / "st", {"codex": [[_said("初めの指摘")], [_said("古い行の指摘", mvv="Value 1")]], "kiro": []})
+    fake.verdict = lambda row: holding(row) | {"tracks": tracks if row["text"] == "古い行の指摘" else []}
+    code, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    assert code == 0, got
+    assert len(fake.judged) == 2 and fake.calls.count("claude") == fixes
+
+
+@pytest.mark.parametrize(("base", "fixes"), [pytest.param("origin/target", 0, id="same-base"), pytest.param("origin/main", 1, id="added")])
+def test_issue_3780_a_base_change_that_adds_files_is_not_sorted(
+    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, base: str, fixes: int
+) -> None:
+    """比較先を変えて新しく PR の変更になったファイルがあるラウンドは、線引きしない。"""
+    state_dir, _ = _read_against_target(repos, wt, tmp_path, capsys, monkeypatch)
+    fake = Fake(state_dir, {"codex": [[_said("古い行の指摘")]], "kiro": []})
+    code, got = _run(capsys, monkeypatch, fake, wt, "--base", base)
+    assert code == 0, got
+    assert fake.calls.count("claude") == fixes

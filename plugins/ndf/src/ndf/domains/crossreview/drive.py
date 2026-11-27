@@ -17,7 +17,9 @@
    claude の読むだけの起動で埋め、2 者の指摘で判定する。埋めた席は以後のラウンドも座り続ける（`participants.fill_targets`。#3955）
 3. 指摘をキー（`oscillation.finding_key`）で重ねずジャーナルへ入れる。見送り済みの指摘は出し直されても扱わない。このラウンドで
    新しく出たか戻った critical・major があれば、読むだけの claude（判定役。`verify`）を 1 回起動して起きるかを確かめ、
-   成り立たないと分かった指摘を minor へ下げる（下げない指摘は `verify_decide`。#4363）
+   成り立たないと分かった指摘を minor へ下げる（下げない指摘は `verify_decide`。#4363）。実装の PR の 2 ラウンド目以降は、
+   前のラウンドから変えていない行の major などを直さずに残す（線引き。`leftover_decide.proceeds`。比較先の変化で PR の変更に
+   ファイルが足されたラウンドと、変えた行を読めないラウンドはしない。#3780）
 4. 収束の妨げになる重さ（`criteria_decide.blocking`）の未解決の指摘と、まだ決めていない足すべき内容（`--findings`。#2444）が
    無ければ収束。必ず人の承認が要る操作に当たる指摘（`mvv` が `P`・`C` の番号）は、修正担当へ渡さず、収束も止めず、
    人の承認を待つ指摘として残す（#4076）。前々ラウンドの指摘が戻っていれば振動で止める
@@ -56,6 +58,7 @@ from ndf.domains.crossreview import (
     criteria_decide,
     fixer,
     fixgate_decide,
+    leftover_decide,
     prior_decide,
     report_decide,
     reviewed_pr,
@@ -491,10 +494,13 @@ def _oversized_docs(run: _Run, docs: dict[str, str]) -> None:
 
 
 class _Ranges(NamedTuple):
-    """ラウンドの差分の起点。`prev` は起点の head（無ければ全差分）、`since` は実装の PR の起点（設計の PR は None）。"""
+    """ラウンドの差分の起点。`prev` は起点の head（無ければ全差分）、`since` は実装の PR の起点（設計の PR は None）、`lines` は
+    線引きの起点の head（線引きをしないラウンドは None）、`listed` はこのラウンドで読んだ差分の一覧。"""
 
     prev: Optional[str]
     since: Optional[round_scope.Since] = None
+    lines: Optional[str] = None
+    listed: Optional[changes.Listings] = None
 
 
 def _ranges(run: _Run, current: changes.Range) -> _Ranges:
@@ -505,8 +511,26 @@ def _ranges(run: _Run, current: changes.Range) -> _Ranges:
     since = round_scope.read_since(run.g, run.data, basis, current)
     if since is not None and not since.comparable:
         run.warnings.append(round_scope.UNCOMPARABLE)
-        since = None
-    return _Ranges(None) if since is None else _Ranges(since.previous.head, since)
+        return _Ranges(None)
+    listed: changes.Listings = {} if since is None else since.listed
+    lines = _line_start(run, since, current, listed)
+    return _Ranges(None if since is None else since.previous.head, since, lines, listed)
+
+
+def _line_start(run: _Run, since: Optional[round_scope.Since], current: changes.Range, listed: changes.Listings) -> Optional[str]:
+    """線引きの起点の head。前に全員が結果を返したラウンドが無いか、比較基点の変化で PR の変更にファイルが足されたか、足されたかを
+    調べられなければ None（線引きをしない。全差分を読むラウンドでも起点があれば線引きする。#3780）。"""
+    # 差分の起点と同じ head なら、祖先の確かめを繰り返さない
+    origin = round_scope.line_origin(run.g, run.data, current.head, None if since is None else since.previous.head)
+    if origin is None:
+        return None
+    if origin.base != current.base:
+        # 差分の起点と同じラウンドなら、`read_since` が探した結果を使う
+        same = since is not None and since.previous == origin
+        added = since.added if same else changes.new_in_pr(run.g, origin, current, listed)
+        if added is None or added:
+            return None
+    return origin.head
 
 
 def _round_diffs(run: _Run, round_no: int, scope: scope_decide.Scope, ranges: _Ranges, current: changes.Range) -> tuple[Path, Path]:
@@ -550,7 +574,9 @@ def _prepare_round(run: _Run, round_no: int) -> reviewing.Prepared:
     else:
         _check_unsent(run, head)
     since_origin = None if scope.base is None else ranges.since
-    return reviewing.Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base, previous, since_origin)
+    return reviewing.Prepared(
+        scope, sections, reviewed, head, diff, changed.files, merge_base, previous, since_origin, ranges.lines, ranges.listed
+    )
 
 
 def _reads_full_diff(run: _Run, merge_base: str, head: str) -> bool:
@@ -601,6 +627,70 @@ def _heavy(severity: object) -> bool:
     """尺度にある収束の妨げになる重さ（critical・major）か。重要度の無い引き継いだ行は偽。"""
     known = criteria_decide.severity_of(severity)
     return known is not None and criteria_decide.blocking(known)
+
+
+def _full_diff_file(run: _Run, prep: reviewing.Prepared, got: reviewing.Reviewed) -> Optional[Path]:
+    """このラウンドで書いた PR の全差分のファイル（相手役へ渡した差分・根拠の確かめ・席の穴埋めの順。無ければ None）。"""
+    if prep.scope.base is None:
+        return prep.diff
+    if run.last_target is not None and run.last_target.full_diff is not None:
+        return run.last_target.full_diff
+    return None if got.filled is None else got.filled.diff
+
+
+def _touched(run: _Run, round_no: int, prep: reviewing.Prepared, got: reviewing.Reviewed) -> Optional[leftover_decide.Touched]:
+    """線引きに使う変えた行。線引きをしないラウンド、線引きにも投稿の位置の確かめにも使う指摘（critical・major）が無いラウンド、
+    読めないとき（すべての指摘を修正へ進める）は None。取得済みの差分は渡して読み直さない（ファイルは改行を変換せずに読む）。"""
+    if prep.lines is None or not run.journal.sortable():
+        return None
+    # 比較基点が差分の起点と同じなら、`since_diff` の返りは `since..head` の行の差分そのものである
+    handed = prep.since is not None and prep.since.previous == changes.Range(prep.base, prep.lines)
+    full = _full_diff_file(run, prep, got)
+    try:
+        since_lines = prep.diff.read_bytes().decode("utf-8") if handed else None
+        pr_lines = None if full is None else full.read_bytes().decode("utf-8")
+        listed = {} if prep.listed is None else prep.listed
+        return changes.touched_since(run.g, prep.lines, changes.Range(prep.base, prep.head), listed, since_lines, pr_lines)
+    except (git.GitError, OSError, UnicodeDecodeError) as exc:
+        run.warnings.append(f"round {round_no}: 線引きに使う変えた行を読めないので、指摘をすべて修正へ進める（{type(exc).__name__}）")
+        return None
+
+
+def _wants_tracks(run: _Run, touched: Optional[leftover_decide.Touched]) -> bool:
+    """判定役の回答の指摘の種類で、残すか進むかが変わる指摘があるか。新しい重い指摘のうち、MVV の項目を持ち（下げないので、
+    ほかに渡す指摘が無ければ判定役を起動しない）、今のままでは直さずに残すものである。残すかは `journal.sort` と同じく、
+    出し直しのすべての位置で決める（#3780）。"""
+    if touched is None:
+        return False
+    rows = run.journal.rows
+    return any(
+        rows[fid].get(md.REVIEW_ITEM) and _heavy(rows[fid].get("severity")) and not run.journal.passed(fid, touched)
+        for fid in run.journal.fresh
+    )
+
+
+def _commentable(run: _Run, prep: reviewing.Prepared, got: reviewing.Reviewed) -> leftover_decide.Touched:
+    """線引きをしないラウンドで投稿の位置を確かめる行。取得済みの全差分から読み、git は起動しない。全差分が無いか読めなければ
+    空（行を確かめられない指摘は、ファイルに付けるコメントになる）。"""
+    full = _full_diff_file(run, prep, got)
+    if full is None:
+        return leftover_decide.Touched()
+    try:
+        text = full.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return leftover_decide.Touched()
+    return leftover_decide.Touched(commentable=changes.commentable_lines(text))
+
+
+def _sort_leftovers(
+    run: _Run, touched: Optional[leftover_decide.Touched], checked: Checked, prep: reviewing.Prepared, got: reviewing.Reviewed
+) -> frozenset[str]:
+    """線引きをするラウンドなら指摘を分け、直さずに残した指摘のキーを返す。しないラウンドは、出し直された指摘の `parked` を
+    外し、置き換えた位置を確かめる。"""
+    if touched is None:
+        run.journal.unpark(_commentable(run, prep, got))
+        return frozenset()
+    return run.journal.sort(touched, checked.unconfirmed)
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
@@ -677,9 +767,12 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
     keys = run.journal.enter(round_no, raised, run.mvv_items, run.mvv)
     run.warnings += run.journal.warnings
     carry.detach_revived(run)
-    # 確認で下げた指摘は、振動の判定のキーに数えない
-    checked = _confirm_heavy(run, round_no, prep.diff, _keeping(run, round_no, prep, got, launch), filled=got.filled)
-    run.history.append(keys - checked.lowered)
+    touched = _touched(run, round_no, prep, got)
+    keeping = _keeping(run, round_no, prep, got, launch)
+    checked = _confirm_heavy(run, round_no, prep.diff, keeping, _wants_tracks(run, touched), got.filled)
+    parked = _sort_leftovers(run, touched, checked, prep, got)
+    # 確認で下げた指摘と直さずに残した指摘は、修正担当へ渡らないので振動の判定のキーに数えない
+    run.history.append(keys - checked.lowered - parked)
     record = _round_record(run, round_no, prep)
     if checked.record:  # 中断した起動の出力も保存先に残るので、このラウンドの起動の保存できた出力を名指す（回答の有無は表さない）
         record[verify_decide.ROUND_KEY] = checked.record
