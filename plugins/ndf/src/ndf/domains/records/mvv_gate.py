@@ -478,22 +478,40 @@ def _bound(j: _Judging, rows: Sequence[Mapping[str, Any]], outcome: dict[str, An
         # 設定と本文は同じ要求なので、失敗の診断の記録は 1 件だけ書き、どの理由からも同じ識別子を指す
         ref = diagnosis("base_unreadable", exc, j.where)
         why = [*outcome["why"], f"マージ先の設定を読めない: {mm.STOP_REASONS['base_unreadable']}（{ref}）"]
-        why += [f"{TABLE_UNREADABLE}{p}（{mm.STOP_REASONS['table_unreadable']}。{ref}）" for p in paths]
+        why += [_table_unreadable(p, ref) for p in paths]
         return {**outcome, "skip": False, "why": why}
-    # 失敗した後続の要求ごとに診断の記録を 1 件だけ書き、その要求に載せた文書がすべて同じ識別子を指す
-    failed = {p: ref for u in unread for ref in (diagnosis("table_unreadable", u.error, j.where),) for p in u.names}
-    kept = [
-        f"{TABLE_UNREADABLE}{p}（{mm.STOP_REASONS['table_unreadable']}。{failed[p]}）"
-        if p in failed
-        else f"{TABLE_UNREADABLE}{p}（本文が無い）"
-        if numbers is None
-        else f"{TABLE_KEPT}{p}（{'・'.join(numbers)}）"
-        for p, numbers in found.items()
-        if p in failed or numbers != ()
-    ]
+    kept = _kept_reasons(found, _unread_refs(j, unread))
     if kept:
         return {**outcome, "skip": False, "why": [*outcome["why"], *kept]}
     return {**outcome, "target": target}
+
+
+def _table_unreadable(path: str, ref: str) -> str:
+    """設計文書 `path` の本文を読めなかったときの省かない理由。`ref` は診断の記録を指す括弧の中（`diagnosis`）。"""
+    return f"{TABLE_UNREADABLE}{path}（{mm.STOP_REASONS['table_unreadable']}。{ref}）"
+
+
+def _unread_refs(j: _Judging, unread: Sequence[Unread]) -> dict[str, str]:
+    """失敗した後続の要求ごとに診断の記録を要求の順に 1 件だけ書き、その要求に載せた文書のパスから同じ識別子を引けるようにする。"""
+    refs: dict[str, str] = {}
+    for u in unread:
+        ref = diagnosis("table_unreadable", u.error, j.where)
+        for p in u.names:
+            refs[p] = ref
+    return refs
+
+
+def _kept_reasons(found: Mapping[str, Optional[tuple[str, ...]]], refs: Mapping[str, str]) -> list[str]:
+    """設計文書ごとの省かない理由を `found` の順に返す（読めなかった・本文が無い・表に番号を持つ行がある）。"""
+    kept: list[str] = []
+    for p, numbers in found.items():
+        if p in refs:
+            kept.append(_table_unreadable(p, refs[p]))
+        elif numbers is None:
+            kept.append(f"{TABLE_UNREADABLE}{p}（本文が無い）")
+        elif numbers:
+            kept.append(f"{TABLE_KEPT}{p}（{'・'.join(numbers)}）")
+    return kept
 
 
 def _table_numbers(got: Mapping[str, Any], paths: Sequence[str]) -> dict[str, Optional[tuple[str, ...]]]:
