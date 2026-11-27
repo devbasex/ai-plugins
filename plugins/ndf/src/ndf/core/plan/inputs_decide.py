@@ -3,9 +3,9 @@
 - 課題の本文の `## 受け入れ条件` のセクションが無い・空なら止める（#2246）
 - `## 受け入れ条件の確認` の表で区分の無い条件があれば止める（#2357）
 - 統合した課題の受け入れ条件が統合先の本文から落ちていれば止める（#2274）
-- 承認済みの課題の設計の結果を読めない・PR の単位が 2 つ以上なら止める（#2596・#2539）。実装を外したまま進めない
-- 設計の結果の触るファイルのセルが、パスを挙げずに別の設計文書へのリンクで委ねていれば止める（#2453）。リンク先は
+- 設計の結果の触るファイルのセルが、パスを挙げずに別の設計文書へのリンクで委ねた文書を拾う（#2453）。リンク先は
   たどらない（分割した文書のセクションに書式の定めが無い）。触るファイルは先頭の表のセルへ直に挙げる
+- 設計の結果の表から、課題ごとの扱いと統合先を読む（#3702）
 - テストの検証は、サブディレクトリからの相対のパスで書いた名前も実在として扱う（#2553・#1811）
 """
 
@@ -24,6 +24,10 @@ _FENCE = re.compile(r"^(```|~~~)")
 # セクションの終わり（`#` か `##` の見出し）
 SECTION_END = re.compile(r"^#{1,2} ")
 _CODE = re.compile(r"`([^`]+)`")
+# 設計書の「設計の結果」のセクションと、課題のセル・統合先のセルの課題の番号
+RESULTS_HEADING = "## 設計の結果"
+_ISSUE_CELL = re.compile(r"^#(\d+)$")
+_ISSUE_REF = re.compile(r"#(\d+)")
 _LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+\.md)(?:#[^)]*)?\)")
 _T = TypeVar("_T")
 
@@ -40,7 +44,7 @@ class DesignResult(NamedTuple):
 def files_cell(cell: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """触るファイルのセルから、バッククォートで囲んだパスと、触るファイルを委ねたリンク先の文書（`.md`）を返す。
 
-    リンクの外のバッククォートだけをパスとして拾う。委ねた文書が 1 つでもあれば、`design_gaps` が止める（#2453）。
+    リンクの外のバッククォートだけをパスとして拾う。委ねた文書（#2453）は、パスに数えずに 2 つ目の値で返す。
     """
     links = tuple(dict.fromkeys(_LINK.findall(cell)))
     files = tuple(dict.fromkeys(_CODE.findall(_LINK.sub("", cell))))
@@ -254,18 +258,27 @@ def absorbed_missing(target_body: str, absorbed: Mapping[int, str]) -> dict[int,
     return out
 
 
-def design_gaps(approved: Sequence[int], results: Mapping[int, Optional[DesignResult]]) -> list[str]:
-    """承認済みの課題の設計の結果から、実装のプランを組めない理由を並べる（#2596・#2539・#2453）。"""
-    reasons = []
-    for issue in approved:
-        found = results[issue] if issue in results else None
-        if found is None:
-            reasons.append(f"#{issue} の設計の結果を読めない（実装を外したまま進めない）")
-        elif found.delegated:
-            reasons.append(f"#{issue} の触るファイルを {'、'.join(found.delegated)} へ委ねている（設計の結果の表のセルへ直に挙げる）")
-        elif len(set(found.units)) > 1:
-            reasons.append(f"#{issue} の設計が PR を {len(set(found.units))} つに分けている（課題ごとに 1 本のプランで組めない）")
-    return reasons
+def design_handlings(text: str) -> dict[int, tuple[str, Optional[int]]]:
+    """設計書の「設計の結果」の表の {課題の番号: (扱い, 統合先の課題の番号)}（#3702）。
+
+    列は見出しの「課題」「扱い」「統合先」で探す（「統合先」の列は無くてよい）。統合先はセルの最初の `#<番号>` で、番号の
+    無いセル（`—`）は None。課題のセルが `#<番号>` でない行と、セクションの外・コードブロックの中の行は読まない。
+    """
+    found = section_lines(text, RESULTS_HEADING)
+    rows = [split_row(line) for line in found if line.strip().startswith("|")] if found is not None else []
+    if not rows or "課題" not in rows[0] or "扱い" not in rows[0]:
+        return {}
+    head = rows[0]
+    at_issue, at_handling = head.index("課題"), head.index("扱い")
+    at_target = head.index("統合先") if "統合先" in head else None
+    out: dict[int, tuple[str, Optional[int]]] = {}
+    for row in rows[1:]:
+        issue = _ISSUE_CELL.match(row[at_issue]) if len(row) > max(at_issue, at_handling) else None
+        if issue is None:
+            continue
+        target = _ISSUE_REF.search(row[at_target]) if at_target is not None and len(row) > at_target else None
+        out[int(issue.group(1))] = (row[at_handling], int(target.group(1)) if target else None)
+    return out
 
 
 def merged_files(results: Sequence[DesignResult]) -> tuple[str, ...]:

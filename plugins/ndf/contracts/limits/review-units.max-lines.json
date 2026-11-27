@@ -1,0 +1,7 @@
+{
+  "summary": "レビューの単位の見込みの行数の上限の既定（超えると止め、分け方の案を返す。.ndf/project.json の workflow.review_units.max_lines で替える。#3702）",
+  "count": 1000,
+  "read_by": [
+    "ndf.core.plan.units_files"
+  ]
+}

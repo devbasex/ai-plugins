@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
+
+from ndf import contracts
+from ndf.contracts import limits
 from ndf.core.plan.inputs_decide import (
     DesignResult,
     absorbed_missing,
     criteria,
-    design_gaps,
+    design_handlings,
     files_cell,
     kinds_lack,
     merged_files,
@@ -58,15 +62,6 @@ def test_absorbed_missing_lists_lost_criteria_per_issue():
     assert absorbed_missing(BODY, absorbed) == {10: ["C が動く"]}
 
 
-def test_design_gaps_stop_unread_and_split_designs():
-    """設計の結果を読めない課題・PR を分けた課題で止まる（#2596・#2539）。"""
-    results = {1: DesignResult(1, ("a.py",)), 2: None, 3: DesignResult(3, ("b.py",), ("x", "y"))}
-    gaps = design_gaps([1, 2, 3], results)
-    assert len(gaps) == 2
-    assert gaps[0].startswith("#2 ")
-    assert gaps[1].startswith("#3 ")
-
-
 def test_merged_files_keep_every_issue_of_the_theme():
     """主題で束ねた課題の触るファイルを先頭の課題の分だけにしない（#2056）。"""
     assert merged_files([DesignResult(1, ("a.py", "b.py")), DesignResult(2, ("b.py", "c.py"))]) == ("a.py", "b.py", "c.py")
@@ -81,17 +76,123 @@ def test_path_present_accepts_a_path_relative_to_a_subdirectory():
     assert not path_present("tests/test_b.py", files, "plugins/x")
 
 
-def test_a_cell_delegating_files_to_a_split_document_stops():
-    """#2453 の再現: 触るファイルのセルが分割した設計文書へのリンクで委ねていれば、拾ったパスだけで組まずに止まる。"""
+def test_a_cell_delegating_files_to_a_split_document_names_the_linked_document():
+    """#2453 の再現: 触るファイルのセルが分割した設計文書へのリンクで委ねていれば、リンクの中をパスに数えず委ねた文書として返す。"""
     cell = "`a.py`。ループの側の触るファイルは [issue-1-design-lane-loop.md](issue-1-design-lane-loop.md) にある"
-    files, delegated = files_cell(cell)
-    assert (files, delegated) == (("a.py",), ("issue-1-design-lane-loop.md",))
-    gaps = design_gaps([1], {1: DesignResult(1, files, delegated=delegated)})
-    assert len(gaps) == 1 and "issue-1-design-lane-loop.md" in gaps[0]
+    assert files_cell(cell) == (("a.py",), ("issue-1-design-lane-loop.md",))
     assert files_cell("`a.py`、`b.py`") == (("a.py", "b.py"), ())
 
 
-# --- 現状固定（I-003: acceptance_decide.read_checks と check_kinds の重複を寄せる前に、両方の読み方を記録する） ---
+# --- 設計の結果の扱いと統合先、単位のファイルの形と上限（#3702 の Task 1） ---
+
+RESULTS = """## 設計の結果
+
+前書き
+
+| 課題 | 扱い | 統合先 | 触るファイル |
+| --- | --- | --- | --- |
+| #7 | 実装する | — | `a.py` |
+| #8 | マージする | #7 | |
+| #9 | 閉じる | — | — |
+| #10 | 実装する | #4051 の実装の PR | `b.py` |
+| 合計 | x | y | z |
+
+```md
+| #11 | 実装する | — | `c.py` |
+```
+
+## 未確認のまま残ること
+
+| #12 | 実装する | — | `d.py` |
+"""
+
+
+def test_design_handlings_read_the_handling_and_the_target_of_each_issue_in_the_results_section():
+    # 統合先のセルの最初の課題の番号を読み、番号の無いセル（`—`）は None。セクションの外とコードブロックの中の行は読まない
+    assert design_handlings(RESULTS) == {7: ("実装する", None), 8: ("マージする", 7), 9: ("閉じる", None), 10: ("実装する", 4051)}
+
+
+def test_design_handlings_find_the_columns_by_the_header_and_return_empty_without_the_section():
+    swapped = "## 設計の結果\n\n| 扱い | 課題 | 触るファイル |\n| --- | --- | --- |\n| 閉じる | #3 | — |\n"
+    assert design_handlings(swapped) == {3: ("閉じる", None)}
+    assert design_handlings("## 設計\n\n| 課題 | 扱い | 統合先 |\n| --- | --- | --- |\n| #1 | 実装する | — |\n") == {}
+
+
+UNITS = "workflow/review-units.schema.json"
+# 設計書の「データ構造」の例
+UNIT_FILE = {
+    "version": 1,
+    "issues": [3672],
+    "tasks": [
+        {"id": "T1", "title": "既定の表を置く", "files": ["plugins/ndf/contracts/domains/a.json"], "lines": 320, "criteria": ["3672:2"], "after": []},
+        {"id": "T2", "title": "読む部品", "files": [".github/workflows/x.yml"], "lines": 0, "criteria": [], "after": ["T1"], "issue": 3672},
+    ],
+    "units": [
+        {"name": "コントラクト", "tasks": ["T1"], "after": []},
+        {"name": "読む部品", "tasks": ["T2"], "after": [{"unit": "コントラクト", "reason": "既定の表を読む", "issue": 3672}], "actual_lines": 12},
+    ],
+}
+
+
+def _task(**changes) -> dict:
+    return {**UNIT_FILE, "tasks": [{**UNIT_FILE["tasks"][0], **changes}]}
+
+
+def test_the_unit_file_of_the_design_example_fits_the_schema():
+    assert contracts.schema_errors(UNIT_FILE, UNITS) == []
+
+
+@pytest.mark.parametrize("path", ["/a.py", "a/", "a//b.py", "./a.py", "a/./b.py", "a/../b.py", "a/..", "..", "a*.py", "a?.py", "a[b].py", ""])
+def test_the_unit_file_refuses_paths_that_are_not_a_single_concrete_file(path):
+    assert contracts.schema_errors(_task(files=[path]), UNITS)
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {**UNIT_FILE, "version": 2},
+        {**UNIT_FILE, "order": 1},
+        {**UNIT_FILE, "issues": []},
+        _task(lines=-1),
+        _task(lines=1.5),
+        _task(id="Task 1"),
+        _task(criteria=["3672:1-3"]),
+        _task(after=["1"]),
+        _task(order=1),
+        {**UNIT_FILE, "units": [{"name": "a", "tasks": ["T1"], "after": [{"unit": "b", "reason": "r", "order": 2}]}]},
+        {**UNIT_FILE, "units": [{"name": "a", "tasks": ["T1"], "after": [], "merge": 1}]},
+    ],
+)
+def test_the_unit_file_refuses_other_shapes_and_order_numbers(doc):
+    # 実行順とマージの順は依存から導く値で、ファイルに書かない（要求の受け入れ条件 3）
+    assert contracts.schema_errors(doc, UNITS)
+
+
+def test_the_unit_file_requires_the_lines_and_the_title_of_each_task():
+    for key in ("title", "lines", "id", "files"):
+        task = {k: v for k, v in UNIT_FILE["tasks"][0].items() if k != key}
+        assert contracts.schema_errors({**UNIT_FILE, "tasks": [task]}, UNITS), key
+
+
+def test_the_limits_of_a_unit_default_to_400_and_1000_lines():
+    # 要求の受け入れ条件 6: 既定値は 11.0.10 の目安と同じ 400 行（目安）と 1,000 行（上限）
+    assert limits.value("review-units.target-lines", "count") == 400
+    assert limits.value("review-units.max-lines", "count") == 1000
+
+
+@pytest.mark.parametrize("schema", [contracts.schema_path("project-workflow"), contracts.schema_path("ndf-settings/project")])
+def test_the_project_declares_the_limits_of_a_unit_with_either_or_both_values(schema):
+    def errors(review_units) -> list[str]:
+        workflow = {"review_units": review_units}
+        return contracts.schema_errors(workflow if schema.endswith("project-workflow.schema.json") else {"version": 1, "workflow": workflow}, schema)
+
+    assert errors({"target_lines": 300, "max_lines": 800}) == []
+    assert errors({"max_lines": 800}) == [] and errors({"target_lines": 300}) == [] and errors({}) == []
+    for wrong in ({"target_lines": 0}, {"max_lines": "800"}, {"max_lines": 1.5}, {"lines": 800}):
+        assert errors(wrong), wrong
+
+
+# --- 現状固定（I-003:acceptance_decide.read_checks と check_kinds の重複を寄せる前に、両方の読み方を記録する） ---
 
 CHECKS_TABLE = """## 受け入れ条件の確認
 

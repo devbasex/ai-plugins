@@ -1,0 +1,7 @@
+{
+  "summary": "レビューの単位の見込みの行数の目安の既定（超えると警告し、分け方の案を返す。.ndf/project.json の workflow.review_units.target_lines で替える。#3702）",
+  "count": 400,
+  "read_by": [
+    "ndf.core.plan.units_files"
+  ]
+}

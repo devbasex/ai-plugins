@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review-units.schema.json",
+  "title": "単位のファイル",
+  "description": "実装計画と組になる issues/issue-<番号の並び>-plan.units.json の形（#3702）。レビューの単位（1 本の PR として実装・レビュー・マージするタスクのまとまり）と、その依存・触るファイル・見込みの行数・満たす受け入れ条件を持つ。実行順とマージの順は依存から導くので書かない。読む側は ndf.core.plan.units_files",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "issues", "tasks", "units"],
+  "properties": {
+    "version": {"const": 1},
+    "issues": {
+      "type": "array",
+      "description": "このファイルに載せる課題の番号。1 つの課題は 1 つのファイルにだけ載る",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/issue"}
+    },
+    "tasks": {"type": "array", "items": {"$ref": "#/$defs/task"}},
+    "units": {"type": "array", "items": {"$ref": "#/$defs/unit"}}
+  },
+  "$defs": {
+    "issue": {"type": "integer", "minimum": 1},
+    "task_id": {
+      "type": "string",
+      "description": "T と実装計画の「タスク分解」の番号（Task 2 は T2）。同じファイルの中だけを指す",
+      "pattern": "^T[1-9][0-9]*$"
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "files", "lines", "criteria", "after"],
+      "properties": {
+        "id": {"$ref": "#/$defs/task_id"},
+        "title": {"type": "string", "minLength": 1},
+        "issue": {"$ref": "#/$defs/issue", "description": "どの課題のタスクか。省けばファイルの唯一の課題"},
+        "files": {
+          "type": "array",
+          "description": "触るファイルのリポジトリの根からの相対パス。ディレクトリ・ワイルドカード・. と .. の区切りは書かない",
+          "items": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*/$)(?!.*//)(?!(.*/)?\\.\\.?(/|$))[^*?\\[\\]]+$"
+          }
+        },
+        "lines": {"type": "integer", "minimum": 0, "description": "見込みの差分の行数（追加と削除の和）"},
+        "criteria": {
+          "type": "array",
+          "description": "満たす受け入れ条件。<課題の番号>:<受け入れ条件の番号> を 1 件ずつ",
+          "items": {"type": "string", "pattern": "^[1-9][0-9]*:[1-9][0-9]*$"}
+        },
+        "after": {"type": "array", "description": "先に要るタスク", "items": {"$ref": "#/$defs/task_id"}}
+      }
+    },
+    "unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "tasks", "after"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "tasks": {"type": "array", "items": {"$ref": "#/$defs/task_id"}},
+        "after": {"type": "array", "description": "先に要る単位と理由", "items": {"$ref": "#/$defs/edge"}},
+        "actual_lines": {"type": "integer", "minimum": 0, "description": "実装の後に書き足す実際の差分の行数"}
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "reason"],
+      "properties": {
+        "unit": {"type": "string", "minLength": 1},
+        "reason": {"type": "string"},
+        "issue": {"$ref": "#/$defs/issue", "description": "別の単位のファイルの単位を指すときの、そのファイルに載る課題の番号のどれか"}
+      }
+    }
+  }
+}
