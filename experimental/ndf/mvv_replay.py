@@ -34,7 +34,6 @@ import fcntl
 import hashlib
 import json
 import os
-import re
 import shlex
 import stat
 import subprocess
@@ -54,8 +53,9 @@ BLOB = "{ ... on Blob { oid text isTruncated } }"
 TREE = "{ ... on Tree { entries { name } } }"
 FETCHED, ABSENT, FAILED = "取得済み", "本文が無い", "未取得"
 EXCLUDES, INCLUDES, UNKNOWN = "含まない", "含む", "判断できない"
-# このスクリプトが作る一時ファイルの名前の終わり。強制終了で残った分を、利用者のファイルと取り違えずに回収するために付ける
-TMP_SUFFIX = ".mvv-replay.tmp"
+# judge が結果ファイルの一時ファイルを作る、結果の隣の専用ディレクトリの名前の終わり（`.<結果のファイル名>` に続ける）。
+# 強制終了で残った一時ファイルを、利用者のファイルと取り違えずに、この中だけから回収する
+WORK_SUFFIX = ".mvv-replay"
 STAND_IN = {"verdict": "follow", "reasons": ["判定の代役（実物の LLM を呼ばない）"], "boundary": [], "basis": ["Value 1"]}
 
 
@@ -128,9 +128,13 @@ def _write_json(path: Path, value: Any, held: Optional[_Held] = None) -> None:
     認証して取得した PR の本文・差分・ファイルの全文を保存するため、umask に任せると同じホストのほかの利用者が読める。
     置き換えなので、書く途中でプロセスが止まっても、前に保存した中身は壊れない（`judge` は判定 1 件ごとに書く）。
     `held` を渡すと、置き換える前の一時ファイルにロックを掛けてから置き換え、ロックを新しい中身へ引き継ぐ（`_exclusive`）。
+    そのときの一時ファイルは、結果の隣の専用ディレクトリ（`_work_dir`）に作る。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=TMP_SUFFIX)
+    if held is None:
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    else:
+        fd, tmp = _work_tmp(path)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", closefd=held is None) as f:
             os.fchmod(f.fileno(), 0o600)
@@ -412,8 +416,9 @@ def _exclusive(result: Path) -> Iterator[_Held]:
     ファイルにロックを掛けてから `os.link` で結果のパスへ置く（`_create_locked`）。結果のパスに現れた時点で作った起動がロックを
     持っているので、並べた起動のどれが先に開いても、作った起動より先にロックを取る起動は無い。保存しないまま終わったときは、その起動が
     作ったファイル（作った inode のまま）だけを消す。利用者が置いた空のファイルは消さない。ロックのためのファイルを別に作らず、
-    プロセスが終われば自動で外れ、状態の保存先の環境変数にも依らない。ロックを取った後、前の起動が強制終了で残した一時ファイル
-    （`_leftovers`）を消す。保存先はハードリンクを作れるファイルシステムに限る（exFAT・FAT32 などは使えない）。
+    プロセスが終われば自動で外れ、状態の保存先の環境変数にも依らない。judge の一時ファイルは結果の隣の専用ディレクトリ
+    （`_work_dir`）にだけ作り、ロックを取った後、前の起動が強制終了で残した分をその中からだけ消す（`_sweep`）。結果ファイルが
+    まだ無いときは、保存先にハードリンクを作れることが要る（exFAT・FAT32 などでは新しい測定を始められない）。
     """
     result.absolute().parent.mkdir(parents=True, exist_ok=True)
     # FIFO などがあっても待たずに開き、通常のファイルかを確かめる
@@ -446,11 +451,9 @@ def _exclusive(result: Path) -> Iterator[_Held]:
             break
         # 先の起動が置き換えた後の古い中身か、消した空のファイルのロックを取った
         os.close(fd)
-    # ロックを持つ起動だけが保存の一時ファイルを書くので、残っている保存の一時ファイルは強制終了した前の起動のもの
-    for left in _leftovers(result):
-        left.unlink(missing_ok=True)
     held = _Held(fd)
     try:
+        _sweep(result)
         yield held
     finally:
         now = os.fstat(held.fd)
@@ -459,6 +462,9 @@ def _exclusive(result: Path) -> Iterator[_Held]:
             # 置き換えた新しい中身を指すので、ここには来ない）
             result.unlink(missing_ok=True)
         os.close(held.fd)
+        # ロックを外してから消す。空でなければ（次の起動が使い始めた）消えずに残り、その起動が後で消す
+        with contextlib.suppress(OSError):
+            os.rmdir(_work_dir(result))
 
 
 def _create_locked(result: Path) -> Optional[int]:
@@ -469,10 +475,11 @@ def _create_locked(result: Path) -> Optional[int]:
     別の起動が一時ファイルを残骸として消したときは、名前が埋まったものとして None を返す。
     """
     parent = result.absolute().parent
-    try:
-        fd, tmp = tempfile.mkstemp(dir=parent, prefix=f".{result.name}.", suffix=TMP_SUFFIX)
-    except OSError as exc:
-        raise Stop(f"--result（{result}）を作れない: {exc}") from None
+    made = _work_tmp(result, retry=False)
+    if made is None:
+        # 一時ファイルを作る前に、ロックを外した前の起動が専用ディレクトリを消した
+        return None
+    fd, tmp = made
     try:
         # 作ったばかりで誰も開いていないので、待たずに取れる
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -497,24 +504,51 @@ def _create_locked(result: Path) -> Optional[int]:
     return fd
 
 
-def _leftovers(result: Path) -> list[Path]:
-    """`result` を保存するときにこのスクリプトが作る名前（`.<結果の名前>.<乱数>` + `TMP_SUFFIX`）の、通常のファイル。"""
-    pattern = re.compile(rf"\.{re.escape(result.name)}\.[A-Za-z0-9_]+{re.escape(TMP_SUFFIX)}")
-    parent = result.absolute().parent
-    try:
-        names = os.listdir(parent)
-    except OSError:
-        return []
-    found = []
-    for name in names:
-        if not pattern.fullmatch(name):
-            continue
+def _work_dir(result: Path) -> Path:
+    """judge が `result` の一時ファイルを作る、結果の隣の専用ディレクトリ。"""
+    return result.absolute().parent / f".{result.name}{WORK_SUFFIX}"
+
+
+def _work_tmp(result: Path, retry: bool = True) -> Any:
+    """専用ディレクトリに一時ファイル（0600）を作り、`(記述子, パス)` を返す。
+
+    ロックを外した前の起動が空の専用ディレクトリを消すことがあるので、作る前に消されたら作り直す。`retry` が偽なら作り直さずに
+    None を返す。親のディレクトリが消えたときや、シンボリックリンクなど専用ディレクトリとして使えないものがあるときは止める。
+    """
+    work = _work_dir(result)
+    while True:
         try:
-            if stat.S_ISREG(os.stat(parent / name, follow_symlinks=False).st_mode):
-                found.append(parent / name)
-        except FileNotFoundError:
-            continue
-    return found
+            work.mkdir(mode=0o700, exist_ok=True)
+            if not stat.S_ISDIR(os.lstat(work).st_mode):
+                raise Stop(f"{work} が judge の作業用のディレクトリでない（シンボリックリンクなど）。消してから打ち直す")
+            return tempfile.mkstemp(dir=work, prefix="", suffix=".tmp")
+        except FileNotFoundError as exc:
+            if not result.absolute().parent.is_dir():
+                raise Stop(f"--result（{result}）を作れない: {exc}") from None
+            if not retry:
+                return None
+        except OSError as exc:
+            raise Stop(f"--result（{result}）の一時ファイルを作れない: {exc}") from None
+
+
+def _sweep(result: Path) -> None:
+    """専用ディレクトリに残った一時ファイル（強制終了した前の起動のもの）を消す。消せない分は残して続ける。
+
+    専用ディレクトリの中だけを見るので、利用者が結果の隣に置いたファイルには触れない。ロックを持つ起動だけが保存の一時ファイルを
+    作るので、ロックを取った時点で残っているものは前の起動のもの。結果ファイルを置く前の別の起動の一時ファイルを消しても、
+    その起動は置けずに開き直す（`_create_locked`）。
+    """
+    work = _work_dir(result)
+    try:
+        if not stat.S_ISDIR(os.lstat(work).st_mode):
+            return
+        names = os.listdir(work)
+    except OSError:
+        return
+    for name in names:
+        with contextlib.suppress(OSError):
+            if stat.S_ISREG(os.lstat(work / name).st_mode):
+                os.unlink(work / name)
 
 
 def _same_inode(fd: int, path: Path) -> bool:
