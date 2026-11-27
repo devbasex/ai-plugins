@@ -35,6 +35,7 @@ import hashlib
 import json
 import os
 import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -111,22 +112,38 @@ def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _write_json(path: Path, value: Any) -> None:
+@dataclasses.dataclass
+class _Held:
+    """`judge` が排他のロックを掛けている、結果ファイルの今の中身（inode）を開いたファイル記述子。"""
+
+    fd: int
+
+
+def _write_json(path: Path, value: Any, held: Optional[_Held] = None) -> None:
     """所有者だけが読み書きできる権限（0600）で、同じディレクトリの一時ファイルに書いてから名前を置き換える。
 
     認証して取得した PR の本文・差分・ファイルの全文を保存するため、umask に任せると同じホストのほかの利用者が読める。
     置き換えなので、書く途中でプロセスが止まっても、前に保存した中身は壊れない（`judge` は判定 1 件ごとに書く）。
+    `held` を渡すと、置き換える前の一時ファイルにロックを掛けてから置き換え、ロックを新しい中身へ引き継ぐ（`_exclusive`）。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8", closefd=held is None) as f:
             os.fchmod(f.fileno(), 0o600)
+            if held is not None:
+                # 作ったばかりで誰も開いていないので、待たずに取れる
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             f.write(json.dumps(value, ensure_ascii=False, indent=1) + "\n")
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
+        if held is not None:
+            os.close(fd)
         raise
+    if held is not None:
+        old, held.fd = held.fd, fd
+        os.close(old)
 
 
 def _material(raw: Mapping[str, Any]) -> Material:
@@ -346,6 +363,16 @@ def _expect_misses(row: Mapping[str, Any], wanted: Sequence[str]) -> list[str]:
 
 
 def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
+    # 結果は名前の置き換えで保存するので、最後の要素がシンボリックリンクだと初回の保存でリンクが消え、次の起動が別の宛先を読む
+    if args.result.is_symlink():
+        raise Stop(f"--result（{args.result}）はシンボリックリンク。リンクの先のパスを渡す")
+    # 同じ結果ファイルを補う起動を並べると、起動時に読んだ状態で互いの行を上書きするので、結果ファイルごとに 1 つだけ動かす。
+    # 競合は、指示文の読み出しや Claude Code の版の取得などの外部コマンドを起動する前に見つける
+    with _exclusive(args.result) as held:
+        return _judge_prepared(args, root, held)
+
+
+def _judge_prepared(args: argparse.Namespace, root: Path, held: _Held) -> int:
     question = prompt_at(REPO, args.prompt_commit)
     commit = args.prompt_commit or _source_commit(root)
     # 指示文のコミットだけでは、作業ツリーで書き換えた指示文や Git の外の置き場の指示文を見分けられない。送る指示文そのものの
@@ -368,41 +395,64 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
             raise Stop(f"{key} が期待した値と違う（期待: {want} / 今: {info[key]}）。判定せずに止める", 2)
     # 材料は最初の保存の前に読む（読めずに止まるとき、前の結果ファイルを書き換えない）
     materials = _materials(args.materials)
-    # 結果は名前の置き換えで保存するので、最後の要素がシンボリックリンクだと初回の保存でリンクが消え、次の起動が別の宛先を読む
-    if args.result.is_symlink():
-        raise Stop(f"--result（{args.result}）はシンボリックリンク。リンクの先のパスを渡す")
-    # 同じ結果ファイルを補う起動を並べると、起動時に読んだ状態で互いの行を上書きするので、結果ファイルのディレクトリごとに 1 つだけ動かす
-    with _exclusive(args.result):
-        return _judge_locked(args, question, info, materials)
+    return _judge_locked(args, question, info, materials, held)
 
 
 @contextlib.contextmanager
-def _exclusive(result: Path) -> Iterator[None]:
-    """結果ファイルを置くディレクトリの排他。取れなければ止める。
+def _exclusive(result: Path) -> Iterator[_Held]:
+    """結果ファイルごとの排他。取れなければ止める。
 
-    ディレクトリそのものに flock を掛ける。ロックはディレクトリの inode に付くので、同じ保存先を共有するプロセスどうしなら、
-    ネットワーク名前空間の違う別のコンテナから同じボリュームへ保存する起動とも排他になる。ロックのためのファイルを作らないので
-    片付けるものが残らず、プロセスが終われば自動で外れ、状態の保存先の環境変数にも依らない。同じディレクトリの別の結果ファイルとも
-    排他になるので、独立した測定は別のディレクトリの --result で並べる。
+    結果ファイルそのものに flock を掛ける。ロックは inode に付くので、結果の保存先を共有するプロセスどうしなら、ネットワーク
+    名前空間の違う別のコンテナから同じボリュームへ保存する起動とも排他になる。別の結果ファイルとは競合しない。保存は名前の置き換えで
+    inode が変わるので、`_write_json` が新しい中身にロックを掛けてから置き換え、ロックを引き継ぐ。置き換えの前の中身を開いて
+    ロックを取った起動は、取れた中身が今のパスのものかを確かめ、違えば開き直す。結果ファイルが無ければ空のファイルを作ってロックし、
+    保存しないまま終わったときはその空のファイルを消す。ロックのためのファイルを別に作らず、プロセスが終われば自動で外れ、状態の
+    保存先の環境変数にも依らない。
     """
-    folder = result.absolute().parent
-    folder.mkdir(parents=True, exist_ok=True)
-    fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    try:
+    result.absolute().parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        try:
+            # FIFO などがあっても待たずに開き、通常のファイルかを確かめる
+            fd = os.open(result, os.O_RDONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
+        except OSError as exc:
+            raise Stop(f"--result（{result}）を開けない: {exc}") from None
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            os.close(fd)
+            raise Stop(f"--result（{result}）が通常のファイルでない")
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise Stop(
-                f"同じディレクトリ（{folder}）に結果を保存する judge が動いている。同じ測定なら終わってから打ち直す。"
-                "別の測定なら、別のディレクトリの --result を渡せばすぐに始められる"
-            ) from None
-        yield
-    finally:
+            os.close(fd)
+            raise Stop(f"同じ --result（{result}）の judge が動いている。終わってから打ち直す") from None
+        if _same_inode(fd, result):
+            break
+        # 先の起動が置き換えた後の古い中身か、消した空のファイルのロックを取った
         os.close(fd)
+    held = _Held(fd)
+    try:
+        yield held
+    finally:
+        if os.fstat(held.fd).st_size == 0 and _same_inode(held.fd, result):
+            # 保存する前に止まった（作った空のファイルを残さない。ロックを持ったまま消す）
+            result.unlink(missing_ok=True)
+        os.close(held.fd)
 
 
-def _judge_locked(args: argparse.Namespace, question: str, info: Mapping[str, Any], materials: Mapping[int, Optional[Material]]) -> int:
-    prev = _read_json(args.result) if args.result.exists() else None
+def _same_inode(fd: int, path: Path) -> bool:
+    """開いたファイルが、今 `path` の名前が指す中身か。"""
+    try:
+        now = os.stat(path, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    got = os.fstat(fd)
+    return (now.st_dev, now.st_ino) == (got.st_dev, got.st_ino)
+
+
+def _judge_locked(
+    args: argparse.Namespace, question: str, info: Mapping[str, Any], materials: Mapping[int, Optional[Material]], held: _Held
+) -> int:
+    # 空のファイルは、排他のために作っただけで保存の前（前の起動が保存する前に止まった場合も含む）
+    prev = _read_json(args.result) if args.result.stat().st_size > 0 else None
     # 判定の条件が違う結果ファイルは別の測定なので、保存済みの判定を消さないよう書かずに止める
     if prev is not None and not all(prev.get(k) == info[k] for k in JUDGE_CONDITIONS):
         diff = [k for k in JUDGE_CONDITIONS if prev.get(k) != info[k]]
@@ -415,7 +465,7 @@ def _judge_locked(args: argparse.Namespace, question: str, info: Mapping[str, An
     def save() -> None:
         expect = {str(n): _expect_misses(results.get(str(n), {}), nums) for n, nums in (args.expect or {}).items()}
         state.update(at=_now(), expect_missing=expect)
-        _write_json(args.result, state)
+        _write_json(args.result, state, held)
 
     save()
     for number, material in materials.items():
@@ -771,11 +821,8 @@ def _cmd_tally(args: argparse.Namespace) -> int:
             f"モデルと Claude Code の版はすべて {env.get('model')} / {env.get('claude_version')} に揃える。"
             "次の tally では、該当する --judged の引数に新しい結果ファイルのパスを渡す:\n" + "\n".join(redo)
         )
-    # 集計に使う組の 2 つは、モデルと Claude Code の版が揃っていなければ比べない（指示文のハッシュを持たない結果は上で判定し直しへ
-    # 回すので、ここではすべてハッシュを持つ）
-    for new, old in pairs:
-        if (new["model"], new["claude_version"]) != (old["model"], old["claude_version"]):
-            raise Stop("比べる 2 つの判定でモデル ID か Claude Code のバージョンが違う")
+    # ここではすべての結果がハッシュを持つ。側ごとの全回の条件の一致と、両側の残す結果のモデルと版の一致を上で確かめたので、
+    # 組の 2 つのモデルと Claude Code の版も揃っている
     rounds = [_round(materials, pair, reviewed) for pair in pairs]
     verdict, reason = _verdict(rounds)
     selected = {n: latest_review(reviewed, m, n) for n, m in materials.items() if m is not None}
