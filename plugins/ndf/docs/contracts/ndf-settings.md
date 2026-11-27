@@ -253,7 +253,7 @@ worktree・チーム・公開・[release.schema.json](../../contracts/schemas/nd
 
 worktree・チーム・公開・[review.schema.json](../../contracts/schemas/ndf-settings/review.schema.json)。読む工程: `ndf loop`（レビューの引数を組むとき）・`工程: コードレビュー`（レビューの観点を足すとき）・`ndf cross-review run`（相手役と修正担当へ重点（基準 3）を渡すとき・修正担当の会話を続けるかを決めるとき。version 1 の focus と fixer_sessions と limits だけを読み、version 2・3 は invalid で止める（#3941・#4013・#2468））
 
-レビューで必ず見る観点の並びと、指摘の基準・見送り・返信を差し替えるプロファイル。ndf cross-review run は、メインディレクトリ（レビュー対象の worktree を作った元の clone）の .ndf/review.json を開き、シンボリックリンクならリンク先を読む。レビュー対象の worktree にある同じ名前のファイルは直接開かない。ただし、リンク先がそのファイルなら、そこに書いた値を読んで検証する。version 1 は focus と fixer_sessions と limits だけを読みほかのキーを無視し、version 2 は focus と profile、version 3 は focus と最上位の criteria・not_written と profiles を読む
+レビューで必ず見る観点の並びと、指摘の基準・見送り・返信を差し替えるプロファイル。ndf cross-review run は、メインディレクトリ（レビュー対象の worktree を作った元の clone）の .ndf/review.json を開き、シンボリックリンクならリンク先を読む。レビュー対象の worktree にある同じ名前のファイルは直接開かない。ただし、リンク先がそのファイルなら、そこに書いた値を読んで検証する。設定ファイルの実体がレビュー対象の worktree の中にある場合は、fixer_sessions を true にできない。true を指定すると、ndf cross-review run は相手役も修正担当も起動せずに invalid で停止する。version 1 は focus と fixer_sessions と limits だけを読みほかのキーを無視し、version 2 は focus と profile、version 3 は focus と最上位の criteria・not_written と profiles を読む
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
