@@ -150,7 +150,7 @@ graph TD
 | `kind` | `web-develop`・`web-trunk`・`mobile`・`docs`・`plugin` | 種類の既定を当てない |
 | `stages` | 工程の名前 → `enabled` と理由（今と同じ） | 今と同じ |
 | `modes.<モード>.stages` | そのモードだけの工程の指定 | モードごとの指定なし |
-| `close.<条件>` | `required` の真偽。偽なら `reason` が要る。条件は `release_verification` と `retrospective_line` の 2 つ | 今の手順書の経路ごとの指定に従う（`required: true` も同じ） |
+| `close.<条件>` | `required` の真偽。偽なら `reason` が要る。条件は `release_verification` と `retrospective_line` の 2 つ | 今と同じ。リリース後テストを通る経路でだけ、手順書が `--require` を付けて記録を求める（`required: true` も同じ。分けたファイルの「閉じる条件を外したときの閉じ方」） |
 
 工程の指定が重なるときは、次の順に勝つ。
 
@@ -453,7 +453,7 @@ graph TD
 
 ## 設計の結果
 
-詳細設計は別ファイル [issue-4580-design-detail.md](./issue-4580-design-detail.md) にする（新設する関数 52・シグネチャを変える関数 3。別ファイルにする条件は新設する関数が 2 つ以上か、シグネチャを変える関数があること）。
+詳細設計は別ファイル [issue-4580-design-detail.md](./issue-4580-design-detail.md) にする（新設する関数は 52 個、シグネチャを変える関数は 3 個。別ファイルにする条件は新設する関数が 2 つ以上か、シグネチャを変える関数があること）。
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
