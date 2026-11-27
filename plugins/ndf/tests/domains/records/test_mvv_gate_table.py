@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -117,6 +118,8 @@ def test_a_github_failure_keeps_the_gate_for_every_design_document(repo: Path) -
     assert out["skip"] is False and "target" not in out and len(out["why"]) == 3
     assert out["why"][0].startswith("マージ先の設定を読めない")
     assert all(w.startswith(mvv_gate.TABLE_UNREADABLE) and "診断の記録" in w for w in out["why"][1:])
+    # 1 回の要求の失敗なので、診断の記録は 1 件で、どの理由も同じ識別子を指す
+    assert len({re.search(r"診断の記録[^）]*", w).group(0) for w in out["why"]}) == 1  # type: ignore[union-attr]
     assert "zz-fake-secret-88" not in json.dumps(out, ensure_ascii=False)
 
 

@@ -509,18 +509,18 @@ MVV 判定（`mvv_gate.py`）の変更は、後の節「MVV 判定のステッ�
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `_bound` | `plugins/ndf/src/ndf/domains/records/mvv_gate.py` | 変更 | `(j: _Judging, rows: Sequence[Mapping[str, Any]], outcome: dict[str, Any]) -> dict[str, Any]` | 省く結果のときだけ、`_target` で承認の対象と差分の設計成果物の head の表を読む。読めない、表にレッドラインの番号を持つ行がある、本文を読めないファイルがある、のどれかなら `skip` を偽にし、`target` を持たせず `why` に理由を足す |
-| `_target` | `mvv_gate.py` | 変更 | `(hub: GitHub, pull: Pull, paths: Sequence[str]) -> tuple[dict[str, Any], dict[str, Optional[tuple[str, ...]]]]` | マージ先の設定と `paths` の head の本文を `hub.branch_file_with` の 1 回の要求（件数が `github.graphql-batch` を超えた分だけ次の要求）で読み、承認の対象と `_table_numbers` の結果を返す。GitHub の失敗は `GitHubError` をそのまま送出する |
+| `_target` | `mvv_gate.py` | 変更 | `(hub: GitHub, pull: Pull, paths: Sequence[str]) -> tuple[dict[str, Any], dict[str, Optional[tuple[str, ...]]]]` | マージ先の設定と `paths` の head の本文を `hub.branch_file_with` で読み（1 回目の要求はマージ先の設定 1 件と設計成果物を上限−1 件まで、2 回目以降の要求は設計成果物を上限の件数まで読む）、承認の対象と `_table_numbers` の結果を返す。GitHub の失敗は `GitHubError` をそのまま送出する |
 | `_table_numbers` | `mvv_gate.py` | 新設 | `(got: Mapping[str, Any], paths: Sequence[str]) -> dict[str, Optional[tuple[str, ...]]]` | 応答 `got` のパスごとの本文から、`design_check_decide.redline_rows` の番号を出てくる順に重複なく返す。本文が無いパス（Blob でない・応答に無い）と、本文が切り詰められたパス（`isTruncated` が真）は None にする |
 | `_design_paths` | `mvv_gate.py` | 新設 | `(rows: Sequence[Mapping[str, Any]]) -> list[str]` | `filename` が `issue_docs.DESIGN_FILE` に当たり `status` が `removed` でない行のパスを、出てくる順に返す |
 | `_judged` | `mvv_gate.py` | 変更 | 変えない | 最後の `j.posted_if_current(_bound(j, …))` を `j.posted_if_current(_bound(j, rows, …))` にする |
-| `GitHub.branch_file_with` | `plugins/ndf/src/ndf/adapters/github.py` | 新設 | `(base: str, path: str, selections: dict[str, str]) -> tuple[FileAt, dict[str, Any]]` | `branch_file` と同じ読み取りに、`repository` の下の選択を同じ要求で載せる。返す辞書は `aliased` と同じ形。件数の上限を超えた分だけ `aliased` で次の要求へ分ける |
+| `GitHub.branch_file_with` | `plugins/ndf/src/ndf/adapters/github.py` | 新設 | `(base: str, path: str, selections: dict[str, str]) -> tuple[FileAt, dict[str, Any]]` | `branch_file` と同じ読み取りに、`repository` の下の選択を同じ要求で載せる。返す辞書は `aliased` と同じ形。件数の上限 `github.graphql-batch` には設定も 1 件として数える。1 回目の要求はマージ先の設定 1 件と設計成果物を上限−1 件まで、2 回目以降の要求は設計成果物を上限の件数まで読む。2 回目以降は `aliased` で読む |
 
 - `_bound`
   - 事前条件: `outcome` は `mm.gate_outcome` の結果。`rows` は `_diff` が返した変えたファイル（GitHub の files の行の形）
   - 事後条件: 入力の `outcome["skip"]` が偽なら、何も読まずに同じ値を返す。真なら、`_design_paths` のパスを `_target` でマージ先の設定とまとめて読む。番号のあるファイルと読めないファイルが 1 つも無ければ `target` を持たせて返し、あれば `skip` が偽で `target` を持たない値を返す。`verdict` と `holds` は変えない
   - 読み方: マージ先の設定と差分の設計成果物を、すべて 1 回の要求で読み、パスごとの結果を見る。1 件ずつ読む形にしないのは、1 件目で省かないと決まっても残りを直列に待つことになるためである。設定と別の要求にしないのは、省ける判定のたびに GitHub の要求が 1 回増えるためである。すべてを読むので、省かない理由をパスごとに `why` の 1 項目にして、人が承認の場で全部を見られる
-  - 副作用: GitHub の GraphQL を 1 回（今もある設定の読み取りと同じ要求。設計成果物が `github.graphql-batch` 件を超えれば、超えた分ごとに 1 回増える）。省けない判定では 0 回
-  - `why` の形: 次の項目を、差分の順に今の `why` の後ろへ足す。番号を持つファイル 1 件につき `TABLE_KEPT + "<パス>（<番号>・<番号>）"`、読めないファイル 1 件につき `TABLE_UNREADABLE + "<パス>（<理由>）"` である。`<理由>` は、本文が無いときは「本文が無い」、`GitHubError` のときは `j.text("table_unreadable", exc)`（`failure_text` の定型文と診断の記録の識別子）である。`GitHubError` は要求の全体の失敗なので、そのときは「マージ先の設定を読めない」の項目に続けて、すべてのパスを読めないファイルとして並べる
+  - 副作用: GitHub の GraphQL を 1 回（今もある設定の読み取りと同じ要求）。設定が 1 回目の要求の 1 件を使うので、設計成果物が `github.graphql-batch` より 1 件少ない件数を超えたときだけ増え、超えた分は上限の件数ごとに 1 回増える。省けない判定では 0 回
+  - `why` の形: 次の項目を、差分の順に今の `why` の後ろへ足す。番号を持つファイル 1 件につき `TABLE_KEPT + "<パス>（<番号>・<番号>）"`、読めないファイル 1 件につき `TABLE_UNREADABLE + "<パス>（<理由>）"` である。`<理由>` は、本文が無いときは「本文が無い」、`GitHubError` のときは定型文 `table_unreadable` と診断の記録の識別子である。`GitHubError` は要求の全体の失敗なので、そのときは「マージ先の設定を読めない」の項目に続けて、すべてのパスを読めないファイルとして並べる。設定と本文は同じ要求なので、診断の記録は `diagnosis` で 1 件だけ書き、設定の項目とパスごとの項目のすべてが同じ識別子を指す。失敗のたびに記録が増えず、利用者には 1 つの障害に 1 つの識別子が見える
 - `_target` と `_table_numbers`
   - 事前条件: 本文の選択の SHA は判定した PR の head の SHA（`j.pull.head_sha`）
   - 事後条件: パスごとの選択は `object(expression: "<SHA>:<パス>") { ... on Blob { oid text isTruncated } }` になる（式の文字列は JSON の文字列として引用する）。ブランチ名でなく SHA を渡すので、判定の間に PR が進んでも判定した版を読む
@@ -676,7 +676,7 @@ MVV 判定（`mvv_gate.py`）の変更は、後の節「MVV 判定のステッ�
     6. 1 回目の `tally` が理由「再測定が要る」で保留を出したときだけ、2〜5 を 2 回くり返す。確認後の件数の差が 1〜2 件に見えても、理由が「未確認が残る」の保留なら再測定せず、未確認の PR を解消してから（`material` の打ち直しや本文の確認）1 回目の `tally` を打ち直す。再測定は判定を 1 回につき 24 件増やすので、未確認を解消すれば決まる結論のために打たない。最後の `tally` には、3 回分の判定結果を回の順に `--judged` で 3 回渡す（`--judged <1 回目の変更後> <1 回目の c93e690ed> --judged <2 回目の…> …`）
   - 回をまたぐ合否（`tally`）: `--judged` の 1 組を 1 回の測定とする。回ごとに、下の「未確認が残るときの値」で差の範囲（下限と上限）と見落としの可能性を求め、「承認必須の操作の見落とし」を当てる。そのうえで、全回の結果から次の順で最終の合否を 1 つ出す。保留には理由（「判定結果か材料が欠けた PR がある」「再測定が要る」「未確認が残る」「再測定でも差が残らない」のどれか）を付け、回ごとの差の範囲と結論も結果のファイルに残す
     1. どれかの回で「承認必須の操作の見落とし」に当たれば、不合格
-    2. どれかの回で、材料が欠けた PR か、どちらかの側の判定結果が無い・判定に失敗した PR があれば、保留（理由「判定結果か材料が欠けた PR がある」）。欠けた判定を省けない回答と同じに数えると、比べる前の側の判定だけが欠けた測定でも差が出て合格になり得るためである。欠けた PR は結果のファイルの回ごとの `gaps` に載せ、`material` か `judge` を打ち直してから `tally` を打ち直す
+    2. どれかの回で、材料が欠けた PR か、どちらかの側の判定結果が無い・判定に失敗した PR があれば、保留（理由「判定結果か材料が欠けた PR がある」）。欠けた判定を省けない回答と同じに数えると、比べる前の側の判定だけが欠けた測定でも差が出て合格になり得るためである。欠けた PR は結果のファイルの回ごとの `gaps` に載せる。材料が欠けた PR は `material` を打ち直す。判定が欠けた・失敗した PR は、同じ `--result` を渡して `judge` を打ち直す。`judge` は、同じモデル・Claude Code の版・指示文のコミットの結果ファイルを同じ測定の続きとして扱い、実行の識別子を引き継ぐ。今の材料で有効な回答を得た行は打ち直さず、欠けた行と失敗した行だけを打つ。成功した行まで打ち直すと、1 件の失敗を補うたびに残りの全件の判定の費用を払うためである。同じ材料で `JUDGE_TRIES`（2 回）まで打っても回答が無い PR は打ち直さず、保留の理由に残る。そのうえで `tally` を打ち直す
     3. どれかの回で、変更後の側に見落としの可能性が残れば、差の範囲にかかわらず保留（理由「未確認が残る」）
     4. 1 回目の差の範囲を、設計文書の決定 6 の「判定の揺れの扱い」の表に当てる。下限が 3 件以上なら合格、上限が 0 件以下なら不合格で、2 回目以降が渡されても合否に使わない。下限と上限がどちらも 1〜2 件なら、次へ進む。下限と上限が表の別の行に当たれば、保留（理由「未確認が残る」）
     5. 渡された回が 3 回に満たなければ、保留（理由「再測定が要る」）

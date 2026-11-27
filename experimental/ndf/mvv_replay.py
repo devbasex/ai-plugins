@@ -15,7 +15,13 @@
 
 `--plugin-root` を渡すと、その下の `src` から `ndf` を読み込む（導入した版の指示文・材料の組み立て・判定の部品）。省けばこのリポジトリの
 `plugins/ndf/src` を読む。本文の確認の結果（`--reviewed`）は追記だけで書く JSON Lines で、1 行が
-`{"at": <時刻>, "pr": <番号>, "head_sha": ..., "pr_body_sha256": ..., "flagged": <印の有無>, "verdict": "含まない|含む|判断できない", "numbers": [...], "basis": ...}` である。
+`{"at": <時刻>, "pr": <番号>, "base_sha": ..., "head_sha": ..., "paths": [...], "pr_body_sha256": ..., "flagged": <印の有無>, "verdict": "含まない|含む|判断できない", "numbers": [...], "basis": ...}` である。
+`pr`・`base_sha`・`head_sha`・`paths`・`pr_body_sha256`・`flagged` は、`bodies` の出力の件の同じ名前の欄をそのまま写す。
+`tally` と `bodies` は、ベースと head の SHA・PR 本文の SHA-256 が材料と一致し、`paths` が材料の変えたファイルをすべて含む記録だけを採る。
+
+`judge` は、`--result` に同じモデル・Claude Code の版・指示文のコミットの結果ファイルがあれば、同じ測定の続きとして扱う。今の材料で
+有効な回答を得た行は打ち直さずに残し、欠けた行と失敗した行だけを打つ。同じ材料で `JUDGE_TRIES` 回まで打っても回答が無い行は
+打ち直さない（`tally` が保留の理由に挙げる）。
 """
 
 from __future__ import annotations
@@ -334,24 +340,58 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
     question = prompt_at(REPO, args.prompt_commit)
     commit = args.prompt_commit or _source_commit(root)
     info = {"model": args.model, "claude_version": _claude_version(), "prompt_commit": commit, "plugin_root": str(root)}
-    results: dict[str, Any] = {}
+    prev = _read_json(args.result) if args.result.exists() else None
+    same = prev is not None and all(prev.get(k) == info[k] for k in ("model", "claude_version", "prompt_commit"))
+    # 同じ判定の条件の結果ファイルなら、同じ測定の続きとして実行の識別子と行を引き継ぎ、欠けた行だけを補う
+    results: dict[str, Any] = dict(prev["results"]) if same and prev is not None else {}
     for number, material in _materials(args.materials).items():
         if args.prs and number not in args.prs:
             continue
         if material is None:
             results[str(number)] = {"ok": False, "cause": "材料が欠けた", "answer": None}
             continue
+        old = results.get(str(number))
+        if _reusable(old, material) or _exhausted(old, material):
+            continue
         got = judge_once(question, material, args.model)
+        tries = int(old.get("tries", 1)) + 1 if _same_material(old, material) else 1
         results[str(number)] = {
             **got,
             **info,
             "base_sha": material.base_sha,
             "head_sha": material.head_sha,
             "material_sha256": material.sha256,
+            "tries": tries,
         }
     expect = {str(n): _expect_misses(results.get(str(n), {}), nums) for n, nums in (args.expect or {}).items()}
-    _write_json(args.result, {"run_id": str(uuid.uuid4()), "at": _now(), **info, "results": results, "expect_missing": expect})
+    run_id = str(prev["run_id"]) if same and prev is not None else str(uuid.uuid4())
+    _write_json(args.result, {"run_id": run_id, "at": _now(), **info, "results": results, "expect_missing": expect})
     return 1 if any(expect.values()) else 0
+
+
+# 1 件の PR の判定を打つ回数の上限（同じ材料で失敗が続いたら打ち直さず、その PR は `tally` が保留の理由に挙げる）
+JUDGE_TRIES = 2
+
+
+def _same_material(row: Optional[Mapping[str, Any]], material: Material) -> bool:
+    """前の行が、今の材料（ハッシュ・ベース・head）で打った判定か。"""
+    if row is None:
+        return False
+    return (row.get("material_sha256"), row.get("base_sha"), row.get("head_sha")) == (
+        material.sha256,
+        material.base_sha,
+        material.head_sha,
+    )
+
+
+def _reusable(row: Optional[Mapping[str, Any]], material: Material) -> bool:
+    """今の材料で打って有効な回答を得た行か（打ち直さずに残す）。"""
+    return _same_material(row, material) and bool((row or {}).get("ok")) and isinstance((row or {}).get("answer"), dict)
+
+
+def _exhausted(row: Optional[Mapping[str, Any]], material: Material) -> bool:
+    """今の材料で上限の回数まで打って、まだ有効な回答が無い行か。"""
+    return _same_material(row, material) and int((row or {}).get("tries", 1)) >= JUDGE_TRIES
 
 
 def _expect(value: str) -> tuple[int, list[str]]:

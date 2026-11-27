@@ -505,9 +505,12 @@ def _add_mvv(sub: Any) -> None:
 def _result_refusal(dest: Path, root: Path, inputs: list[str]) -> str | None:
     """`--result` の `dest` へ書けない理由（書けるなら None）。
 
-    検査した文書と同じファイルは書かない（未コミットの本文を検査結果で消さない）。既にあるファイルは、前の検査の結果
-    （`tool` がこの CLI の結果 JSON）だけを上書きする。プランが同じ保存先の結果を打ち直すたびに書き換えるため。
+    シンボリックリンクは、リンク先が無くても書かない（検査した文書の行を、指定と別の場所へ書かない）。検査した文書と同じ
+    ファイルは書かない（未コミットの本文を検査結果で消さない）。既にあるファイルは、前の検査の結果（`tool` がこの CLI の
+    結果 JSON）だけを上書きする。プランが同じ保存先の結果を打ち直すたびに書き換えるため。
     """
+    if dest.is_symlink():
+        return f"--result の {dest} はシンボリックリンクなので書かない"
     if not dest.exists():
         return None
     real = dest.resolve()
@@ -542,7 +545,10 @@ def _design_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         if refused is not None:
             return result.stopped(TOOL, "invalid", refused)
         args.result.parent.mkdir(parents=True, exist_ok=True)
-        args.result.write_text(json.dumps(out, ensure_ascii=False) + "\n", encoding="utf-8")
+        # 確かめた後にリンクへ差し替えられても、リンクをたどらずに止める（O_NOFOLLOW）
+        fd = os.open(args.result, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o666)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(out, ensure_ascii=False) + "\n")
     return out
 
 

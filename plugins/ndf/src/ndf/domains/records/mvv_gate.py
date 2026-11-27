@@ -256,7 +256,14 @@ def failure_text(kind: str, exc: BaseException | str, where: Mapping[str, Any]) 
     `where` の `gate`・`pr`・`head` を記録に写し（無ければ null）、`root` があれば記録の `repo` を解く。記録に書けなくても例外を
     出さず「<定型文>（診断の記録に書けない）」を返す。GitHub も公開範囲の照会も呼ばない。
     """
-    text = mm.STOP_REASONS[kind]
+    return f"{mm.STOP_REASONS[kind]}（{diagnosis(kind, exc, where)}）"
+
+
+def diagnosis(kind: str, exc: BaseException | str, where: Mapping[str, Any]) -> str:
+    """`failure_text` の括弧の中（「診断の記録 <id>」か「診断の記録に書けない」）。診断の記録を 1 件だけ書く。
+
+    1 つの失敗を複数の理由に載せるときは、これを 1 回だけ呼び、どの理由からも同じ識別子を指す。
+    """
     row = {
         "at": jsonl.now(),
         "repo": _repo_of(where),
@@ -267,8 +274,8 @@ def failure_text(kind: str, exc: BaseException | str, where: Mapping[str, Any]) 
     try:
         ident = mvv.record_failure(row)
     except (OSError, internal.InternalError):
-        return f"{text}（診断の記録に書けない）"
-    return f"{text}（診断の記録 {ident}）"
+        return "診断の記録に書けない"
+    return f"診断の記録 {ident}"
 
 
 def judge_with(ask: Ask, before_retry: Optional[Callable[[], None]] = None) -> mvv.Judge:
@@ -466,10 +473,10 @@ def _bound(j: _Judging, rows: Sequence[Mapping[str, Any]], outcome: dict[str, An
     try:
         target, found = _target(j.hub, j.pull, paths)
     except (GitHubError, GitError) as exc:
-        why = [*outcome["why"], "マージ先の設定を読めない: " + j.text("base_unreadable", exc)]
-        if paths:
-            reason = j.text("table_unreadable", exc)
-            why += [f"{TABLE_UNREADABLE}{p}（{reason}）" for p in paths]
+        # 設定と本文は同じ要求なので、失敗の診断の記録は 1 件だけ書き、どの理由からも同じ識別子を指す
+        ref = diagnosis("base_unreadable", exc, j.where)
+        why = [*outcome["why"], f"マージ先の設定を読めない: {mm.STOP_REASONS['base_unreadable']}（{ref}）"]
+        why += [f"{TABLE_UNREADABLE}{p}（{mm.STOP_REASONS['table_unreadable']}。{ref}）" for p in paths]
         return {**outcome, "skip": False, "why": why}
     kept = [
         f"{TABLE_UNREADABLE}{p}（本文が無い）" if numbers is None else f"{TABLE_KEPT}{p}（{'・'.join(numbers)}）"
