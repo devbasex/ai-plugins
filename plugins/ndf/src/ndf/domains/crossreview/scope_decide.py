@@ -20,6 +20,9 @@ SINCE = "since"
 # ラウンドの記録のキー（そのラウンドの比較基点。`--base` と HEAD の merge-base の SHA。ブランチ名だと参照先が動いても
 # 同じ値になり、変わった PR の全差分を見落とす。PR 3944 の r2-1）
 BASE = "base"
+# ラウンドの記録のキー（そのラウンドの比較元のブランチの名前。`--reviewed-base-out` の起動は PR の今のマージ先。マージ先が
+# 変わると merge-base が同じでも PR の差分の相手が変わるので、名前でも比べる。#3702）
+BASE_BRANCH = "base_branch"
 # ラウンドの記録のキー（そのラウンドを読んだ相手役の並び。PR 3944 の r2-2）
 REVIEWERS = "reviewers"
 # ラウンドの記録のキー（そのラウンドに claude が座っている、埋めた席の並び。`Filled.record()` の形。#3955）
@@ -148,7 +151,8 @@ class Basis(NamedTuple):
     （merge-base の SHA。PR 3944 の r2-1）、`reviewers` は今回の相手役（r2-2）、`focus` は今回の重点（r4-3）、`mvv` は今の
     MVV を見分ける値（確かめられなければ `UNKNOWN_MVV`。#4076）。`stand_in` が真なら、前のラウンドの埋めた席を、席の名前か
     欠けた相手役のどちらか一方として今回の席に割り当てる（同じ head の打ち直しの再利用だけが使う。#3955）。`unit` は今回の
-    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回読んだ PR（読んだ PR の確認を求めない起動は None。#4369）。"""
+    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回読んだ PR（読んだ PR の確認を求めない起動は None。#4369）。
+    `base_branch` は今回の比較元のブランチ（PR のマージ先に合わせない起動は None。#3702）。"""
 
     base: Optional[str] = None
     reviewers: Optional[Collection[str]] = None
@@ -157,6 +161,7 @@ class Basis(NamedTuple):
     stand_in: bool = False
     unit: Optional[str] = None
     pr: Optional[str] = None
+    base_branch: Optional[str] = None
 
 
 def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
@@ -173,6 +178,8 @@ def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
     if basis.unit is not None and (record[UNIT] if UNIT in record else "") != basis.unit:
         return False
     if basis.pr is not None and (record[PR] if PR in record else None) != basis.pr:
+        return False
+    if basis.base_branch is not None and (record[BASE_BRANCH] if BASE_BRANCH in record else None) != basis.base_branch:
         return False
     if basis.mvv is None:
         return True

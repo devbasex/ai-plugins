@@ -107,7 +107,8 @@ class Outcome(NamedTuple):
     相手役を起動せずに前回の収束を返したか（記録のコメントを書き直さない。PR 3944 の r2-10）。`mvv` は結果 JSON の `outputs.mvv`
     （承認済みのプロジェクト MVV が無ければ None。#4076）。`mvv_record_failed` は承認ゲートの判定に要る記録の行を書けなかったとき
     の、書けなかった行（`key`・`outcome`）と固定の注意（`finish_decide.finish` の `record_failed`。#3959）。`reviewed_pr` は
-    `reviewed_head` を head に持つと確かめた、実際に読んだ PR（`<所有者>/<リポジトリ>#<番号>`。確かめられなければ None。#4369）。"""
+    `reviewed_head` を head に持つと確かめた、実際に読んだ PR（`<所有者>/<リポジトリ>#<番号>`。確かめられなければ None。#4369）。
+    `reviewed_base` は `reviewed_head` を読んだラウンドの比較元のブランチ（`reviewed_head` が None なら None。#3702）。"""
 
     review: fin.Review
     summary_path: Path
@@ -118,6 +119,7 @@ class Outcome(NamedTuple):
     mvv: Optional[dict[str, Any]] = None
     mvv_record_failed: Optional[dict[str, Any]] = None
     reviewed_pr: Optional[str] = None
+    reviewed_base: Optional[str] = None
 
 
 @dataclass
@@ -139,6 +141,7 @@ class _Run:
     # MVV を見分ける値と、MVV を読んだブランチ（ラウンドの記録に残す。#4076）
     mvv: Optional[str] = None
     mvv_branch: Optional[str] = None
+    base_branch: str = ""  # 差分の比較元のブランチ（`follow_base` なら PR の今のマージ先。ラウンドの記録に残す。#3702）
     # PR に届いたと分かっている最後のコミット（始めの同期で取得した先頭か、この起動で送ったコミット）
     sent: str = ""
     # 始めに読めて、head ブランチとその先頭がレビューするブランチの取得した先頭と一致した PR
@@ -236,16 +239,16 @@ class _Prior(NamedTuple):
 def _merge_target(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> str:
     """PR のマージ先のブランチを GitHub から読む。読めなければ担当の起動前に止める。
 
-    `--base` がコミット（SHA・タグなど）のときだけ使う（理由は `worktree.fetch_base` にある）。
+    `--base` がコミット（SHA・タグなど）のとき（理由は `worktree.fetch_base`）と `follow_base` の起動（#3702）だけ使う。
     """
     pr = store.state_pr(cfg.state_dir, cfg.pr).current_pr
     if reader_for is None:
-        raise DriveStopped("precondition", f"PR #{pr} のマージ先のブランチを読む口が無い（--base がコミットなので要る）")
+        raise DriveStopped("precondition", f"PR #{pr} のマージ先のブランチを読む口が無い")
     try:
         return reader_for(pr).base()
     except Exception as exc:
-        # 認証・通信・応答のどの失敗でも、MVV を決められないので止める
-        raise DriveStopped("precondition", f"PR #{pr} のマージ先のブランチを読めないので、MVV を決められない: {exc}") from exc
+        # 認証・通信・応答のどの失敗でも、MVV と比較元を決められないので止める
+        raise DriveStopped("precondition", f"PR #{pr} のマージ先のブランチを読めないので、MVV と比較元を決められない: {exc}") from exc
 
 
 class _Based(NamedTuple):
@@ -262,12 +265,17 @@ def _sync(cfg: RunConfig, g: git.Git, reader_for: Optional[ReaderFor]) -> _Based
 
     `--base` がブランチなら、その先頭のコミットが MVV を読む先で、差分の比較元でもある。コミットなら、比較元はそのコミットの
     まま、MVV は PR のマージ先から読む（スプリントブランチへ単位の PR を集めた後のレビューは、集めた時点のコミットを渡す）。
+    `follow_base` なら `--base` を使わず PR の今のマージ先を取得し、MVV を読む先と比較元にする（#3702）。
     """
     remote = g.remote()
 
     def sync(branch: str) -> worktree.SyncResult:
         return worktree.sync_worktree(g, cfg.branch, remote, base_branch=branch)
 
+    if cfg.follow_base:
+        branch = _merge_target(cfg, reader_for)
+        synced = sync(branch)
+        return _Based(synced, branch, synced.base, remote)
     synced, base = worktree.fetch_base(g, cfg.base, remote, sync, lambda: _merge_target(cfg, reader_for))
     return _Based(synced, base.branch, base.commit if base.commit is not None else synced.base, remote)
 
@@ -312,6 +320,7 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide
         snapshot=snap,
         mvv=snap.identity,
         mvv_branch=based.branch,
+        base_branch=based.branch,
         sent=synced.remote,
         remote=based.remote,
         synced_head=synced.remote,
@@ -727,7 +736,8 @@ def _summary(run: _Run, final: str, rounds: int, reused: bool = False) -> Outcom
     read = reviewed_pr.read_by_all_this_run(run.data, rounds)
     # 注意を足すことがあるので、`run.warnings` を写す前に確かめる
     pr = reviewed_pr.confirmed(run, read)
-    return Outcome(review, path, tuple(run.warnings), tuple(run.process), read, reused, results, failed, pr)
+    base = run.base_branch if read is not None else None
+    return Outcome(review, path, tuple(run.warnings), tuple(run.process), read, reused, results, failed, pr, base)
 
 
 class _Prepared(NamedTuple):
@@ -812,7 +822,9 @@ def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
     unit = scope_decide.unit_id(run.cfg.unit)
     # 確認を求める起動は、読んだ PR が無ければラウンドの前に止まっている
     pr = run.read_pr.ident if run.cfg.check_pr and run.read_pr is not None else None
-    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr)
+    # マージ先に合わせる起動は、同じマージ先と比べたラウンドだけを使う（変われば新しいマージ先との全差分を読む。#3702）
+    branch = run.base_branch if run.cfg.follow_base else None
+    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr, branch)
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:
@@ -847,6 +859,7 @@ def _round_record(run: _Run, round_no: int, prep: _Prepared) -> dict[str, Any]:
         "round": round_no,
         "head": prep.head,
         scope_decide.BASE: prep.base,
+        scope_decide.BASE_BRANCH: run.base_branch,
         scope_decide.REVIEWERS: list(run.seats),
         scope_decide.FOCUS: list(run.cfg.settings.focus),
         scope_decide.MVV: {scope_decide.MVV_ID: run.mvv, scope_decide.MVV_BRANCH: run.mvv_branch},

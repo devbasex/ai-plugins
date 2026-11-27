@@ -519,6 +519,7 @@ def _run_config(args: argparse.Namespace) -> RunConfig:
         settings=got.settings,
         unit=got.unit,
         check_pr=args.reviewed_pr_out is not None,
+        follow_base=args.reviewed_base_out is not None,
     )
 
 
@@ -628,9 +629,9 @@ def _ready(args: argparse.Namespace) -> tuple[RunConfig, Optional[str]] | int:
 
 
 def _begin_run(args: argparse.Namespace) -> Optional[int]:
-    """前の起動が書いた `--reviewed-out`・`--reviewed-pr-out` を消し、`--repo` の対象のリポジトリを子の `gh` へ渡す。
-    `--repo` の形が違えば、止まった結果を出した終了コードを返す。"""
-    for stale in (args.reviewed_out, args.reviewed_pr_out):
+    """前の起動が書いた `--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out` を消し、`--repo` の対象のリポジトリを
+    子の `gh` へ渡す。`--repo` の形が違えば、止まった結果を出した終了コードを返す。"""
+    for stale in (args.reviewed_out, args.reviewed_pr_out, args.reviewed_base_out):
         if stale:
             Path(stale).unlink(missing_ok=True)
     if args.repo is not None:
@@ -642,11 +643,17 @@ def _begin_run(args: argparse.Namespace) -> Optional[int]:
 
 
 def _write_reviewed(args: argparse.Namespace, got: drive.Outcome) -> Optional[int]:
-    """レビューした HEAD があれば `--reviewed-out` へ書く。その HEAD を head に持つと確かめた PR を読めていれば、続けて
-    `--reviewed-pr-out` へ書く。PR を書けなければ、止まった結果を出した終了コードを返す。"""
+    """レビューした HEAD があれば `--reviewed-out` へ書く。その HEAD を読んだラウンドの比較元のブランチを `--reviewed-base-out`
+    へ、その HEAD を head に持つと確かめた PR を読めていれば `--reviewed-pr-out` へ、続けて書く。書けなければ、止まった結果を
+    出した終了コードを返す。"""
     if not args.reviewed_out or got.reviewed_head is None:
         return None
     Path(args.reviewed_out).write_text(got.reviewed_head + "\n", encoding="utf-8")
+    if args.reviewed_base_out and got.reviewed_base is not None:
+        try:
+            Path(args.reviewed_base_out).write_text(got.reviewed_base + "\n", encoding="utf-8")
+        except OSError as exc:
+            return _stop("precondition", f"レビューの比較元のブランチを {args.reviewed_base_out} へ書けない: {exc}")
     if args.reviewed_pr_out and got.reviewed_pr is not None:
         try:
             _write_reviewed_pr(Path(args.reviewed_pr_out), got.reviewed_pr)
@@ -668,6 +675,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     `--reviewed-out` を書くときに、実際に読めた PR を `<所有者>/<リポジトリ>#<番号>` で書く（始めに消す）。書くのは、レビューした
     HEAD が読んだ head か、この起動がその PR の head のリポジトリのブランチへ送った修正のコミットのときだけである。この引数を
     渡した起動は、始めに PR を読めないか head が取得した先頭と違えば、相手役を起動せずに `precondition` で止まる。
+
+    `--reviewed-base-out`（#3702）は `--reviewed-out` を書くときに、そのラウンドの比較元のブランチを書く（始めに消す）。この引数を
+    渡した起動は、`--base` でなく PR の今のマージ先を取得して比較元にし、マージ先が前のラウンドと違えば新しいマージ先との
+    全差分を読ませる。マージ先を読めなければ、相手役を起動せずに `precondition` で止まる。
     """
     refused = _begin_run(args)
     if refused is not None:
@@ -787,6 +798,11 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
         help="--reviewed-out と併用する。対象 PR の HEAD（起動時の head か、同じ起動でその PR のブランチへ push した修正コミット）を"
         "レビューしたと確認できた場合、指定ファイルに <所有者>/<リポジトリ>#<番号> を書く。指定した実行は、起動時に対象 PR を確認できなければ"
         "レビューを始めずに precondition で停止し、同じ PR を読んだ記録だけを差分の起点や収束結果の再利用に使う",
+    )
+    r.add_argument(
+        "--reviewed-base-out",
+        help="--reviewed-out と併用する。--base でなく PR の今のマージ先を比較元にし、レビューした HEAD のラウンドの比較元の"
+        "ブランチ名を指定ファイルに書く。マージ先が前のラウンドと違えば、新しいマージ先との全差分を読ませる",
     )
 
 
