@@ -469,7 +469,7 @@ def _holding_pulls(hub: GitHub, shape: _Shape, version: str, environments: Seque
 
 
 def _environment_record(shape: _Shape, version: str, environment: str) -> record_decide.Record:
-    """届け先 1 つ分の記録の共通部分（push・確かめの種類・証拠を持たない）。確かめ 7 の照合と書く記録の両方がこれから作る。"""
+    """届け先 1 つ分の記録の共通部分（push・確かめの種類・証拠を持たない）。確かめ 7 で突き合わせる記録と書く記録の両方がこれから作る。"""
     return record_decide.Record(version, shape.pull.number, shape.included, None, (environment,), shape.targets, shape.commit)
 
 

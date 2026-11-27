@@ -15,7 +15,7 @@ import string
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, NamedTuple, Optional, Protocol
 
 from filelock import FileLock, Timeout
 
@@ -25,7 +25,18 @@ from ndf.domains.release import record_decide
 from ndf.domains.release.delivery_confirm import DeliveriesAt
 
 if TYPE_CHECKING:
-    from ndf.domains.release.record_unversioned import Hands
+    from ndf.adapters.git import Git
+
+
+class _CommonDir(Protocol):
+    """`share_dir` が読む手段（`record_unversioned.Hands` がこの形を持つ）。"""
+
+    @property
+    def repo_git(self) -> Git: ...
+
+    @property
+    def common(self) -> Optional[Path]: ...
+
 
 # 共通の前処理の保存先のロックを待つ上限
 SHARE_LOCK = "release-record.share-lock"
@@ -86,7 +97,7 @@ class Prefix(NamedTuple):
         )
 
 
-def share_dir(hands: Hands) -> Path:
+def share_dir(hands: _CommonDir) -> Path:
     """共有の保存先のディレクトリ（共通の git ディレクトリの下）。呼び手が解決済みなら git を起動せず、無ければ 1 回起動する。"""
     common = hands.common if hands.common is not None else hands.repo_git.common_dir()
     return common / identity.load().name / _SHARE_DIR
