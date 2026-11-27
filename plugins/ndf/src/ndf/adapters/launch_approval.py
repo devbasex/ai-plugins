@@ -2,18 +2,17 @@
 
 承認の対象は呼び手（`launch_settings`）が読んだ値を引数で受け、このモジュールは `launch_settings` を読まない。承認の記録は利用者の状態の
 保存先にだけ置き（リポジトリのファイルは承認の根拠にしない）、追記だけで、所有者だけが読める。同じリポジトリのキーとハッシュの最後の行が
-`approve` なら承認済みである。hook からも読むので、モジュールの頭では標準ライブラリと `identity` だけを読み込む。
+`approve` なら承認済みである。hook からも読むので、モジュールの頭では標準ライブラリと `identity`・`launch_candidates`・`launch_records` だけを
+読み込む。候補のディレクトリの読み取り・所有の確かめ・退避と中断の後の片付けは `launch_candidates` が持つ。
 """
 
 from __future__ import annotations
 
-import errno
 import functools
 import hashlib
 import json
 import os
 import shutil
-import stat
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -22,23 +21,14 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
 from ndf import identity
-from ndf.adapters import launch_records as records
+from ndf.adapters import launch_candidates, launch_records as records
+from ndf.adapters.launch_candidates import CANDIDATE_NAME, DRAFTING, SOURCE_NAME, Read
 
 APPROVALS = "launch-approvals"
 QUESTIONS = "launch-questions"
 ANSWERS = "launch-answers"
 CANDIDATES = "launch-candidates"
 REFLECTED = "launch-reflected"
-# 候補のディレクトリの中身: 候補（反映先の写し）と、反映先・反映元のバージョン・作った時の候補のバージョンの記録
-CANDIDATE_NAME = "candidate.json"
-SOURCE_NAME = "source.json"
-# 退避した候補の中の、消してよいバージョン（「承認しない」と回答したリクエストの候補のバージョン）の記録
-DISCARD_NAME = "discard.json"
-# 候補のディレクトリの作業中の名前の頭。作成途中（DRAFTING）、退避（REMOVING）、消す前の隔離（SETTLING）。
-# 作成と掃除は候補の錠の中だけで行うので、錠の中で見つかる作成途中と隔離のディレクトリは中断の残りである
-DRAFTING = ".draft-"
-REMOVING = ".removing-"
-SETTLING = ".settling-"
 # 反映の途中で反映先を退避した名前の後ろと、反映の途中の記録・完了の記録の名前の後ろ
 REFLECTING = ".reflecting"
 PENDING = ".pending.json"
@@ -150,20 +140,6 @@ def read_launch_record(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _write_private(path: Path, data: bytes) -> None:
-    """所有者だけが読めるファイルを、一時ファイルからの付け替えで書く。"""
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "wb") as f:
-        f.write(data)
-    os.replace(tmp, path)
-
-
-def write_launch_record(path: Path, obj: Mapping[str, Any]) -> None:
-    _write_private(path, json.dumps(obj, ensure_ascii=False).encode("utf-8"))
-
-
 def reflected_file(target: Path, suffix: str) -> Path:
     """反映先ごとの反映の途中の記録（`PENDING`）か完了の記録（`DONE`）。"""
     return _store(REFLECTED) / f"{_short_hash(str(target))}{suffix}"
@@ -177,7 +153,7 @@ def put_question(
     反映元のバージョンは候補の記録か、今の反映先のバージョン。質問が示した選択肢のラベル（`options`）と、その時点の承認の記録の行数
     （`approvals_seen`。これより後ろの取り消しだけが、このリクエストの後の取り消し）も残す。候補があれば、候補の錠を取ってから、
     退避していた候補を元の名前へ戻し、`make_question`（候補を読んで質問の中身を作る）を呼び、リクエストを足す。候補を読んでから
-    リクエストを足すまでの間に、掃除（`_sweep`・`_reclaim`）が同じ候補を退避したり消したりしないためである。戻せる候補が無ければ
+    リクエストを足すまでの間に、掃除（`_sweep`・`launch_candidates.settle_aside`）が同じ候補を退避したり消したりしないためである。戻せる候補が無ければ
     リクエストを作らずに `precondition` で止める（消えた候補の承認を問わない）。`make_question` が `sha256`（候補から求めた承認の対象の
     ハッシュ）を返せば、リクエストのハッシュにはその値を使う。候補を読んだのと同じ錠の中で求めた値だからである。
     """
@@ -188,7 +164,7 @@ def put_question(
     from ndf.contracts import internal
 
     with records_lock(candidate.parents[1]):
-        _restore(candidate)
+        launch_candidates.restore_aside(candidate)
         if not candidate.exists():
             raise internal.InternalError("precondition", f"候補 {candidate} が無い。`draft` で候補を作り直す")
         question = make_question()
@@ -200,7 +176,7 @@ def _put_request(request: Mapping[str, Any], question: Mapping[str, Any], candid
     target = Path(request["target"])
     row = {
         **request, **({"sha256": question["sha256"]} if "sha256" in question else {}), "at": _at_now(), "action": str(Action.APPROVE), "target": str(target),
-        "base": _parsed(_raw(candidate.parent / SOURCE_NAME)).get("base") if candidate is not None else content_version(target),
+        "base": launch_candidates.record_object(launch_candidates.raw_record(candidate.parent / SOURCE_NAME)).get("base") if candidate is not None else content_version(target),
         "candidate": str(candidate) if candidate is not None else None,
         "candidate_version": content_version(candidate) if candidate is not None else None,
         "question_sha": canonical_sha(question["questions"]),
@@ -401,317 +377,6 @@ def _candidates(home: Path) -> list[Path]:
     return sorted(made for made in home.glob("*") if not made.name.startswith("."))
 
 
-def _untouched(made: Path, owned: _Owned, kept: Optional[str] = None) -> bool:
-    """候補が、作った時（`written`）か `kept` のバージョンのままか。作った後に直した候補（Skill か利用者が設定案を書いた候補）は掃除で消さない。
-
-    `written` は、所有を確かめた時に読んだ `source.json`（`owned`）から取り、開き直さない。候補も、所有を確かめた時と同じファイル
-    （`owned.stamp`）のときだけ読んだ中身を使う。読めない候補（権限の無いファイル・ディレクトリ・FIFO など）と、所有を確かめた
-    後に変わった候補は、直していないと確かめられないので偽を返す（掃除で消さず、一覧にも載せない）。
-    """
-    ok, now = _stamped_version(made, owned.stamp)
-    return ok and _unchanged(now, owned.record(SOURCE_NAME).get("written"), kept)
-
-
-def _stamped_version(made: Path, stamp: frozenset[tuple[str, int, int, int]]) -> tuple[bool, Optional[str]]:
-    """候補 `candidate.json` を `_read_regular` で読んだバージョン。`stamp`（ディレクトリを調べた時の状態）と同じファイルでなければ偽。"""
-    try:
-        read = _read_regular(made / CANDIDATE_NAME)
-    except FileNotFoundError:  # 無い候補は「無し」のバージョン。調べた時にあった候補が消えていれば、同じ状態ではない
-        return all(entry[0] != CANDIDATE_NAME for entry in stamp), None
-    except OSError:  # 読めない候補は、その候補だけを掃除から外す（呼び手が飛ばす）
-        return False, None
-    return (CANDIDATE_NAME, *read.ident[1:]) in stamp, hashlib.sha256(read.data).hexdigest()
-
-
-def _unchanged(now: Optional[str], written: Any, kept: Optional[str]) -> bool:
-    """読み終えた候補のバージョン `now` が、作った時（`written`）か `kept` のバージョンか（無い候補は真）。"""
-    return now is None or now in (written, kept)
-
-
-def _regular_version(path: Path, strict: bool = True) -> tuple[bool, Optional[str]]:
-    """普通のファイルだと確かめてから読んだ中身のバージョン（`_read_regular`）。無ければ `(True, None)`、FIFO・ディレクトリなど読めなければ `(False, None)`。
-
-    掃除が過去の反映先や候補を読むときに使う。利用者が置き換えた項目 1 つで、掃除の全体が止まらないようにするためである。
-    """
-    try:
-        return True, hashlib.sha256(_read_regular(path, strict).data).hexdigest()
-    except FileNotFoundError:  # 無い反映先は「無し」のバージョンとして照らす
-        return True, None
-    except OSError:  # 読めない項目は、その候補だけを掃除から外す（呼び手が飛ばす）
-        return False, None
-
-
-@dataclass(frozen=True)
-class _Read:
-    """読んだ中身と、読んだファイルの識別情報と状態（`_ident`。後で同じファイルのままかを照らす）。"""
-
-    data: bytes
-    ident: tuple[int, int, int, int]
-
-
-def _ident(st: os.stat_result) -> tuple[int, int, int, int]:
-    """ファイルの `(st_dev, st_ino, 大きさ, 更新時刻)`。同じ大きさと更新時刻の別のファイルへの置き換えも見分ける。"""
-    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns
-
-
-def _read_regular(path: Path, strict: bool = True) -> _Read:
-    """ファイルを開いた記述子で普通のファイルと確かめてから読む。FIFO は開く段階で待たない（`O_NONBLOCK`）。
-
-    `strict` なら、親のディレクトリとファイルのどちらもリンクをたどらない（候補のディレクトリの中の項目）。偽なら、利用者の
-    worktree の反映先のように、リンクをたどって開く。無ければ `FileNotFoundError`、普通のファイルでないか読む間に変わったら
-    `OSError`。
-    """
-    nofollow = os.O_NOFOLLOW if strict else 0
-    folder = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | nofollow | os.O_CLOEXEC)
-    try:
-        fd = os.open(path.name, os.O_RDONLY | nofollow | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=folder)
-    finally:
-        os.close(folder)
-    with os.fdopen(fd, "rb") as f:
-        before = os.fstat(f.fileno())
-        if not stat.S_ISREG(before.st_mode):
-            raise OSError(errno.EINVAL, "普通のファイルでない", str(path))
-        data = f.read()
-        after = os.fstat(f.fileno())
-    if _ident(before) != _ident(after):
-        raise OSError(errno.EAGAIN, "読む間に変わった", str(path))
-    return _Read(data, _ident(after))
-
-
-def _settleable() -> bool:
-    """退避した候補を消してよいかを確かめられる環境か（`/proc/<pid>/fd` がある）。無ければ候補を退避せず、元のパスに残す。"""
-    return Path("/proc/self/fd").is_dir()
-
-
-def _discard(made: Path, kept: Optional[str] = None) -> bool:
-    """候補の錠の中で、直していない候補を、消す前の退避（`REMOVING` の名前）へ移し、移したかを返す。中身はその場では消さない。
-
-    名前を変えた後は、元のパスへの保存はディレクトリが無いので失敗し、エディタの中の設定案は残る。名前を変える前に保存された
-    中身と、変えた後も開いたままのファイルへ書かれた中身は退避の中に残り、次の掃除（`_reclaim`）が比べて元の名前へ戻す。
-    消してよいかを確かめられない環境（`_settleable` が偽）では退避しない。退避しても次の掃除で戻すだけで、`draft` のたびに
-    元のパスで開けるかどうかが変わるためである。その候補は `cleanup_targets` が理由と共に返す。NDF が作ったファイルのほかに
-    項目がある候補も退避しない（次の掃除で消さずに戻すだけで、利用者の項目を退避の名前の下へ移すことになるため）。
-    """
-    owned = _ownership(made) if _settleable() else None
-    if owned is None or not _untouched(made, owned, kept):
-        return False
-    aside = made.with_name(REMOVING + made.name)
-    try:
-        os.rename(made, aside)
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 退避の前に無くなった候補は、退避するものが無い
-        return False
-    if kept is not None:
-        write_launch_record(aside / DISCARD_NAME, {"kept": kept})
-    return True
-
-
-def _open_inodes(wanted: set[tuple[int, int]]) -> Optional[set[tuple[int, int]]]:
-    """`wanted` のうち、いまどれかのプロセスが開いているもの（`(st_dev, st_ino)` の組）。`/proc` の無い環境では確かめられないので None。
-
-    退避した候補をまとめて 1 回だけ走査する。走査するのは `/proc/<pid>/fd/` の項目の `stat` だけで、子のプロセスは起動しない。
-    """
-    if not _settleable():
-        return None
-    if not wanted:
-        return set()
-    return {key for key in map(_fd_target, Path("/proc").glob("[0-9]*/fd/*")) if key in wanted}
-
-
-def _fd_target(fd: Path) -> Optional[tuple[int, int]]:
-    """`/proc` の fd が指すファイルの `(st_dev, st_ino)`。調べる間に閉じた fd と、読めないほかのユーザーの fd は None。"""
-    try:
-        opened = fd.stat()
-    except OSError:  # noqa: NDF401 ファイル: 調べる間に閉じた fd と、読めないほかのユーザーの fd は、候補を指さないものとして飛ばす
-        return None
-    return opened.st_dev, opened.st_ino
-
-
-# 候補のディレクトリの中で NDF が作るファイル。掃除が消すのはこれだけで、ほかの項目がある候補は消さずに元の名前へ戻す
-OWN_FILES = frozenset({CANDIDATE_NAME, SOURCE_NAME, DISCARD_NAME})
-# NDF が作る記録の欄。中身がこの欄だけを `write_launch_record` が書く形のまま持つ記録だけを、NDF が作ったままの記録とみなす
-# （`candidate.json` は中身を比べるバージョンと照らす `_untouched` が見る）
-RECORD_KEYS = {SOURCE_NAME: frozenset({"target", "base", "written"}), DISCARD_NAME: frozenset({"kept"})}
-
-
-def _raw(path: Path) -> Optional[_Read]:
-    """記録を、親のディレクトリと記録のどちらもリンクをたどらずに開き、開いた記述子で普通のファイルと確かめてから読む（`_read_regular`）。
-
-    無い・読めない・普通のファイルでない・読む間に変わった記録は None。FIFO は開く段階で待たない。
-    """
-    try:
-        return _read_regular(path)
-    except OSError:  # noqa: NDF401 ファイル: 無い・読めない記録は「記録が無い」と同じに扱い、所有の確かめで外す
-        return None
-
-
-def _ndf_record(path: Path, read: Optional[_Read] = None) -> bool:
-    """`path` が、NDF が書いたままの記録（普通のファイルで、`RECORD_KEYS` の欄だけを `write_launch_record` の形で持つ）か。
-
-    利用者が同じ名前の別のファイルやディレクトリへ置き換えていれば偽で、呼び手はそれを消さない。呼び手が読み終えた中身 `read` が
-    あれば、読み直さずに使う。
-    """
-    if read is None:
-        read = _raw(path)
-    if read is None:
-        return False
-    try:
-        obj = json.loads(read.data)
-    except ValueError:  # noqa: NDF401 ファイル: 壊れた記録は、NDF が書いたままと確かめられないので消さない
-        return False
-    return (
-        isinstance(obj, dict) and obj.keys() == RECORD_KEYS[path.name] and json.dumps(obj, ensure_ascii=False).encode("utf-8") == read.data
-    )
-
-
-@dataclass(frozen=True)
-class _Owned:
-    """候補のディレクトリが NDF の作ったものだけだと確かめた結果。`keys` は開いたままかを調べる `(st_dev, st_ino)` の組、
-    `stamp` は中の項目ごとの名前・inode・大きさ・更新時刻（後で同じ状態のままかを照らす）、`records` は確かめた時に読んだ記録の中身。"""
-
-    keys: frozenset[tuple[int, int]]
-    stamp: frozenset[tuple[str, int, int, int]]
-    records: tuple[tuple[str, bytes], ...] = ()
-
-    def record(self, name: str) -> dict[str, Any]:
-        """所有を確かめた時に読んだ記録 `name` の中身（無ければ空）。開き直さないので、確かめた後の置き換えに左右されない。"""
-        return _json_object(dict(self.records).get(name))
-
-
-def _entries(folder: Path) -> Optional[tuple[os.stat_result, list[tuple[str, os.stat_result]]]]:
-    """候補のディレクトリと中の項目の状態（`lstat`）。NDF が作る名前の普通のファイルのほかに項目があるか、状態を読めなければ None。"""
-    try:
-        top = os.lstat(folder)
-        with os.scandir(folder) as it:
-            entries = list(it)
-        if any(e.name not in OWN_FILES or not e.is_file(follow_symlinks=False) for e in entries):
-            return None
-        return top, [(e.name, e.stat(follow_symlinks=False)) for e in entries]
-    except OSError:  # noqa: NDF401 ファイル: 状態を読めない候補は、消してよいと確かめられないので消さない（呼び手が元の名前へ戻す）
-        return None
-
-
-def _stamp(stats: list[tuple[str, os.stat_result]]) -> frozenset[tuple[str, int, int, int]]:
-    return frozenset((name, st.st_ino, st.st_size, st.st_mtime_ns) for name, st in stats)
-
-
-def _ownership(folder: Path, known: Optional[Mapping[str, Optional[_Read]]] = None) -> Optional[_Owned]:
-    """候補のディレクトリの中が NDF の作った普通のファイルだけなら、その確かめた結果（`_Owned`）。
-
-    リンクをたどらずに調べる（`lstat`）。ほかの項目（利用者のファイル・シンボリックリンク・ディレクトリ）があるか、
-    記録（`source.json`・`discard.json`）が NDF の書いたままでないか（`_ndf_record`）、調べる途中で状態を読めなければ None を返し、
-    呼び手はその候補を消さない。`known` は呼び手が読み終えた記録（読めなければ None）で、読み直さずに使う。その記録が、ここで
-    調べた同じ名前の項目と識別情報・状態まで同じでなければ None を返す（読んだ後に別のファイルへ置き換わった記録の中身を、
-    新しいファイルの状態と組み合わせない）。
-    """
-    found = _entries(folder)
-    if found is None:
-        return None
-    top, stats = found
-    known = {} if known is None else known
-    present = {name for name, _ in stats}
-    if any(read is not None and name not in present for name, read in known.items()):
-        return None
-    read_records = []
-    for name, st in stats:
-        if name == CANDIDATE_NAME:
-            continue
-        read = known[name] if name in known else _raw(folder / name)
-        if read is None or read.ident != _ident(st) or not _ndf_record(folder / name, read):
-            return None
-        read_records.append((name, read.data))
-    keys = frozenset({(top.st_dev, top.st_ino)} | {(st.st_dev, st.st_ino) for _, st in stats})
-    return _Owned(keys, _stamp(stats), tuple(read_records))
-
-
-def _original_name(aside: Path) -> str:
-    """退避（`.removing-<名前>`）か、消す前の隔離（`.settling-<乱数>.<名前>`）の、候補の元の名前。"""
-    if aside.name.startswith(SETTLING):
-        return aside.name.rsplit(".", 1)[1]
-    return aside.name[len(REMOVING) :]
-
-
-def _put_back(aside: Path) -> Optional[Path]:
-    """退避か隔離の候補を元の名前へ戻し、戻したパスを返す。戻せなければ None（その候補は残し、次の掃除でやり直す）。
-
-    `discard.json` は NDF が書いたままのときだけ消す。同じ名前の利用者の項目（ファイル・ディレクトリ）には触れない。
-    """
-    discard = aside / DISCARD_NAME
-    back = aside.with_name(_original_name(aside))
-    try:
-        if _ndf_record(discard):
-            discard.unlink()
-        os.rename(aside, back)
-    except OSError:  # noqa: NDF401 ファイル: 戻せない候補は隔離の名前のまま残し、ほかの候補と呼び手の操作を続ける
-        return None
-    return back
-
-
-def _remove_own(aside: Path) -> None:
-    """NDF が作ったファイルだけを消してから、空になったディレクトリを消す。ほかの項目が増えていれば、ディレクトリを消せずに `OSError`。
-
-    呼び手は、記録が NDF の書いたままであることを `_ownership` で確かめてから呼ぶ。
-    """
-    for name in OWN_FILES:
-        (aside / name).unlink(missing_ok=True)
-    aside.rmdir()
-
-
-def _reclaim(home: Path) -> set[str]:
-    """候補の錠の中で、作業中のディレクトリを片付け、元の名前へ戻した候補の名前を返す。
-
-    作成途中は中断の残りなので消す。前の掃除が退避した候補は、消してよいと確かめられたものだけを消し、ほかは元の名前へ戻す。
-    戻した候補は、呼び手がこの掃除では退避し直さない（利用者が元のパスへ保存できるようにし、判定は次の掃除でやり直す）。
-
-    消す前に、退避した候補を乱数を含む名前（`SETTLING`）へ移してから、開いたままのプロセスを `/proc` で 1 回だけ調べ、
-    その後に中身を比べる。名前を変えた後は、退避前のパスでは候補を開けない。開いたままのプロセスがある候補、`/proc` が無く
-    確かめられない環境の候補、NDF が作ったファイルのほかに項目がある候補、状態を読めない候補は消さない。消すのは、作った時の
-    中身（NDF が作った写し）か反映した中身のままの候補の、NDF が作ったファイルだけである。1 つの候補で失敗しても、ほかの候補の
-    片付けと呼び手の操作は続ける。
-    """
-    for left in home.glob(DRAFTING + "*"):
-        shutil.rmtree(left, ignore_errors=True)
-    settling = [_isolate(left) for left in sorted([*home.glob(REMOVING + "*"), *home.glob(SETTLING + "*")])]
-    if not settling:
-        return set()
-    owned = {aside: _ownership(aside) for aside in settling}
-    held = _open_inodes(set().union(*(o.keys for o in owned.values() if o is not None)))
-    restored = set()
-    for aside in settling:
-        own = owned[aside]
-        removable = held is not None and own is not None and not own.keys & held
-        if not (removable and _untouched(aside, own, own.record(DISCARD_NAME).get("kept")) and _removed(aside)):
-            back = _put_back(aside)
-            if back is not None:
-                restored.add(back.name)
-    return restored
-
-
-def _removed(aside: Path) -> bool:
-    """`_remove_own` で消せたか。消す途中で項目が増えたなどで消せなければ偽を返し、呼び手が残りを元の名前へ戻す。"""
-    try:
-        _remove_own(aside)
-    except OSError:  # noqa: NDF401 ファイル: 消せなかった候補は、残った中身ごと元の名前へ戻す（呼び手が戻す）
-        return False
-    return True
-
-
-def _isolate(aside: Path) -> Path:
-    """退避した候補を、消す前の隔離の名前（`.settling-<乱数>.<元の名前>`）へ移す。"""
-    isolated = aside.with_name(f"{SETTLING}{uuid.uuid4().hex}.{_original_name(aside)}")
-    os.rename(aside, isolated)
-    return isolated
-
-
-def _restore(candidate: Path) -> None:
-    """候補の錠の中で、退避か隔離の途中で止まった候補を元の名前へ戻す（同じ候補でリクエストを作り直したとき）。"""
-    home, name = candidate.parents[1], candidate.parent.name
-    if candidate.parent.exists():
-        return
-    for aside in [home / f"{REMOVING}{name}", *home.glob(f"{SETTLING}*.{name}")]:
-        if aside.exists() and _put_back(aside) is not None:
-            return
-
-
 @dataclass(frozen=True)
 class _Due:
     """片付けの条件に当たる候補の判定。`stamp` は判定の時の候補のディレクトリの状態、`written` は作った時の候補のバージョン、
@@ -725,19 +390,6 @@ class _Due:
     current: Optional[str] = None
 
 
-def _parsed(raw: Optional[_Read]) -> dict[str, Any]:
-    return _json_object(None if raw is None else raw.data)
-
-
-def _json_object(data: Optional[bytes]) -> dict[str, Any]:
-    """記録のバイト列の JSON のオブジェクト。無い・壊れていれば空（記録が無いと同じ）。"""
-    try:
-        obj = json.loads(data) if data is not None else {}
-    except ValueError:
-        return {}
-    return obj if isinstance(obj, dict) else {}
-
-
 def _sweep_reasons(home: Path) -> dict[Path, _Due]:
     """片付けの条件に当たる候補と、その判定。
 
@@ -746,11 +398,11 @@ def _sweep_reasons(home: Path) -> dict[Path, _Due]:
     バージョンに反映先の今の中身を足す。反映の完了の記録は照らさない）。反映先が反映元のバージョンから変わった（`outdated`。この
     候補では `reflect` が拒む）。後の 2 つは、否認の後に作り直したリクエストの候補にも当てはめる。ただし、まだ人の回答で
     承認を済ませられるリクエスト（`_live`。回答待ちを含む）の候補は、どちらの理由にもしない。「承認しない」の判定は
-    候補ごとの最新のリクエストで行う。直したかどうかはここでは見ない（片付ける側の `_discard` か、読んだ `current` で見る）。
+    候補ごとの最新のリクエストで行う。直したかどうかはここでは見ない（片付ける側の `launch_candidates.set_aside` か、読んだ `current` で見る）。
 
     リクエストの否認、worktree の有無、反映先のバージョンから、片付けの対象になり得る候補を絞り、当たらない候補のディレクトリは
     調べない。候補の中身が要る判定（承認済みのリクエストがまだ使えるか、`reflected` か `outdated` か）では、先に NDF が作ったもの
-    だけかを確かめ（`_ownership`）、候補を読んでから決める。そうでない候補と、過去の反映先か候補が普通のファイルでなく読めない候補は外す。各候補の
+    だけかを確かめ（`launch_candidates.ownership`）、候補を読んでから決める。そうでない候補と、過去の反映先か候補が普通のファイルでなく読めない候補は外す。各候補の
     `source.json` は 1 回だけ読む。リクエストの履歴・回答の履歴・承認の記録・候補の一覧は 1 回ずつ読み、反映先のバージョンは反映先ごとに
     1 回だけ求める。
     """
@@ -758,8 +410,8 @@ def _sweep_reasons(home: Path) -> dict[Path, _Due]:
     versions: dict[str, tuple[bool, Optional[str]]] = {}
     reasons: dict[Path, _Due] = {}
     for made in _candidates(home):
-        raw = _raw(made / SOURCE_NAME)
-        source = _parsed(raw)
+        raw = launch_candidates.raw_record(made / SOURCE_NAME)
+        source = launch_candidates.record_object(raw)
         index = history.requests.latest.get(str(made / CANDIDATE_NAME))
         req = None if index is None else history.requests.rows[index]
         if req is not None and _judged(history.labels.get(req.get("request_id")), req)[0] == "deny":
@@ -773,15 +425,15 @@ def _sweep_reasons(home: Path) -> dict[Path, _Due]:
     return reasons
 
 
-def _inspect(made: Path, raw: Optional[_Read], source: Mapping[str, Any], reason: str) -> Optional[_Due]:
+def _inspect(made: Path, raw: Optional[Read], source: Mapping[str, Any], reason: str) -> Optional[_Due]:
     """条件に当たった候補が NDF の作ったものだけなら、その判定（候補はまだ読まない）。そうでなければ None。"""
-    owned = _ownership(made, {SOURCE_NAME: raw})
+    owned = launch_candidates.ownership(made, {SOURCE_NAME: raw})
     return None if owned is None else _Due(reason, owned.stamp, source.get("written"))
 
 
 def _moved_target(
     made: Path,
-    raw: Optional[_Read],
+    raw: Optional[Read],
     source: Mapping[str, Any],
     versions: dict[str, tuple[bool, Optional[str]]],
     history: _History,
@@ -796,7 +448,7 @@ def _moved_target(
     """
     target = str(source.get("target"))
     if target not in versions:
-        versions[target] = _regular_version(Path(target), strict=False)
+        versions[target] = launch_candidates.regular_version(Path(target), strict=False)
     readable, now = versions[target]
     if not readable or now == source.get("base"):
         return None
@@ -805,7 +457,7 @@ def _moved_target(
     def look() -> tuple[Optional[_Due], bool, Optional[str]]:
         if not looked:
             owned = _inspect(made, raw, source, "outdated")
-            looked.append((owned, *((False, None) if owned is None else _stamped_version(made, owned.stamp))))
+            looked.append((owned, *((False, None) if owned is None else launch_candidates.stamped_version(made, owned.stamp))))
         return looked[0]
 
     if _live(history, made / CANDIDATE_NAME, now, lambda: look()[2]):
@@ -829,16 +481,10 @@ def _listed(reasons: Mapping[Path, _Due], left_out: set[Path]) -> list[dict[str,
     for made, due in reasons.items():
         if made in left_out:
             continue
-        ok, now = (True, due.current) if due.read else _stamped_version(made, due.stamp)
-        if ok and _unchanged(now, due.written, due.kept) and _same_state(made, due):
+        ok, now = (True, due.current) if due.read else launch_candidates.stamped_version(made, due.stamp)
+        if ok and launch_candidates.unedited(now, due.written, due.kept) and launch_candidates.same_stamp(made, due.stamp):
             listed.append({"candidate": str(made / CANDIDATE_NAME), "reason": due.reason})
     return listed
-
-
-def _same_state(made: Path, due: _Due) -> bool:
-    """候補のディレクトリの項目と各項目の inode・大きさ・更新時刻が、判定の時（`due.stamp`）と同じか。"""
-    found = _entries(made)
-    return found is not None and _stamp(found[1]) == due.stamp
 
 
 def _sweep(home: Path, restored: set[str]) -> list[dict[str, str]]:
@@ -846,13 +492,13 @@ def _sweep(home: Path, restored: set[str]) -> list[dict[str, str]]:
 
     「承認しない」は反映を断る回答で、利用者が書いた設定案を消してよいという回答ではないので、リクエストの前に直した候補も残す。
     リクエストは同じ錠の中で作るので（`put_question`）、ここで読んだリクエストの一覧は退避を決めるまで変わらない。
-    同じ錠の中の `_reclaim` が元の名前へ戻した候補（`restored`）は、この掃除では退避せず、一覧にも載せない。開いたままの
+    同じ錠の中の `launch_candidates.settle_aside` が元の名前へ戻した候補（`restored`）は、この掃除では退避せず、一覧にも載せない。開いたままの
     ファイルを見つけて戻した候補を利用者が消すと、その後のエディタの保存が失われるためである。返す一覧は `cleanup_targets` と同じ
-    形で、同じ判定の結果から作る（履歴と候補を読み直さない）。退避の直前には、`_discard` が候補をもう一度読んで確かめる。
+    形で、同じ判定の結果から作る（履歴と候補を読み直さない）。退避の直前には、`launch_candidates.set_aside` が候補をもう一度読んで確かめる。
     """
     reasons = _sweep_reasons(home)
     back = {made for made in reasons if made.name in restored}
-    gone = {made for made, due in reasons.items() if made not in back and _discard(made, due.kept)}
+    gone = {made for made, due in reasons.items() if made not in back and launch_candidates.set_aside(made, due.kept)}
     return _listed(reasons, gone | back)
 
 
@@ -895,7 +541,7 @@ def new_candidate(repo: str, target: Path) -> Draft:
     """
     home = _store(CANDIDATES) / _short_hash(repo)
     with records_lock(home):
-        leftovers = _sweep(home, _reclaim(home))
+        leftovers = _sweep(home, launch_candidates.settle_aside(home))
         for record in _store(REFLECTED).glob("*" + DONE):
             if _worktree_gone(read_launch_record(record).get("target")):
                 record.unlink(missing_ok=True)
@@ -903,8 +549,10 @@ def new_candidate(repo: str, target: Path) -> Draft:
         drafting, made = home / f"{DRAFTING}{name}", home / name
         data, base = _snapshot(target)
         try:
-            _write_private(drafting / CANDIDATE_NAME, data)
-            write_launch_record(drafting / SOURCE_NAME, {"target": str(target), "base": base, "written": hashlib.sha256(data).hexdigest()})
+            launch_candidates.replace_private(drafting / CANDIDATE_NAME, data)
+            launch_candidates.write_launch_record(
+                drafting / SOURCE_NAME, {"target": str(target), "base": base, "written": hashlib.sha256(data).hexdigest()}
+            )
             os.rename(drafting, made)
         except BaseException:
             shutil.rmtree(drafting, ignore_errors=True)
@@ -935,7 +583,7 @@ def reflect(candidate: Path, record: Callable[[], None], sha256: str, request_id
     """
     from ndf.contracts import internal
 
-    source = _parsed(_raw(candidate.parent / SOURCE_NAME))
+    source = launch_candidates.record_object(launch_candidates.raw_record(candidate.parent / SOURCE_NAME))
     target = Path(str(source.get("target")))
     with records_lock(state_file(APPROVALS)):
         saved = recover(target)
@@ -953,7 +601,7 @@ def reflect(candidate: Path, record: Callable[[], None], sha256: str, request_id
         if now != source.get("base"):
             return Reflection(False, saved)
         record()
-        write_launch_record(reflected_file(target, PENDING), rec)
+        launch_candidates.write_launch_record(reflected_file(target, PENDING), rec)
         try:
             placed = _replace(target, candidate, rec["base"])
         except OSError as exc:
@@ -993,19 +641,19 @@ def _replace(target: Path, candidate: Path, base: Optional[str]) -> bool:
 
 
 def _write_done(target: Path, rec: Mapping[str, Any]) -> None:
-    write_launch_record(reflected_file(target, DONE), {**rec, "target": str(target)})
+    launch_candidates.write_launch_record(reflected_file(target, DONE), {**rec, "target": str(target)})
     reflected_file(target, PENDING).unlink(missing_ok=True)
 
 
 def _candidate_version(made: Path) -> Optional[str]:
-    """候補の今のバージョン（`_regular_version`）。読めなければ None。"""
-    return _regular_version(made / CANDIDATE_NAME)[1]
+    """候補の今のバージョン（`launch_candidates.regular_version`）。読めなければ None。"""
+    return launch_candidates.regular_version(made / CANDIDATE_NAME)[1]
 
 
 def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> None:
     """完了の記録を書いてから、候補の錠の中で、反映した候補と、反映元のバージョンが合わなくなった同じ反映先の候補を退避する。
 
-    先に前の掃除が退避した候補を片付ける（`_reclaim`）。そこで元の名前へ戻した候補は、この掃除では退避しない。反映した候補は、反映した中身か作った時の中身のままなら退避する。
+    先に前の掃除が退避した候補を片付ける（`launch_candidates.settle_aside`）。そこで元の名前へ戻した候補は、この掃除では退避しない。反映した候補は、反映した中身か作った時の中身のままなら退避する。
     ほかの候補は、作った時の中身のままのものだけを退避する。作った後に直した候補は、反映元が変わっても残す（書いた設定案を
     失わないため）。まだ人の回答で承認を済ませられるリクエストの候補（`_live`）も、`draft` の掃除と同じく退避しない。退避した候補は次の掃除が比べ直してから消す。
     """
@@ -1013,19 +661,19 @@ def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> Non
     now = content_version(target)
     home = candidate.parent.parent
     with records_lock(home):
-        restored = _reclaim(home)
+        restored = launch_candidates.settle_aside(home)
         if candidate.parent.name not in restored:
-            _discard(candidate.parent, rec.get("content"))
+            launch_candidates.set_aside(candidate.parent, rec.get("content"))
         history: Optional[_History] = None
         for made in _candidates(home):
             if made.name in restored or made == candidate.parent:
                 continue
-            source = _parsed(_raw(made / SOURCE_NAME))
+            source = launch_candidates.record_object(launch_candidates.raw_record(made / SOURCE_NAME))
             if source.get("target") != str(target) or source.get("base") == now:
                 continue
             history = history or _History()  # 照らす候補が出たときに初めて読む
             if not _live(history, made / CANDIDATE_NAME, now, functools.partial(_candidate_version, made)):
-                _discard(made)
+                launch_candidates.set_aside(made)
 
 
 def recover(target: Path) -> Optional[Path]:

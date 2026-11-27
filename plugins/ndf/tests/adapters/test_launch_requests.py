@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from ndf.adapters import launch_approval as la
+from ndf.adapters import launch_approval as la, launch_candidates as lc
 from ndf.contracts import internal
 
 SHA = "a" * 64
@@ -121,8 +121,8 @@ def test_two_candidates_are_separate_files_and_record_the_target_and_base(tmp_pa
     first, second = la.new_candidate("/r", target).candidate, la.new_candidate("/r", target).candidate
     assert first != second and first.read_bytes() == second.read_bytes() == OLD
     source = {"target": str(target), "base": la.content_version(target), "written": la.content_version(target)}
-    assert json.loads((first.parent / la.SOURCE_NAME).read_text()) == source
-    assert [p.name for p in first.parents[1].iterdir() if p.name.startswith(la.DRAFTING)] == []
+    assert json.loads((first.parent / lc.SOURCE_NAME).read_text()) == source
+    assert [p.name for p in first.parents[1].iterdir() if p.name.startswith(lc.DRAFTING)] == []
     missing = _worktree(tmp_path / "x", content=None)
     assert json.loads(la.new_candidate("/r", missing).candidate.read_text()) == {"version": 1}
 
@@ -161,7 +161,7 @@ def test_draft_keeps_a_denied_candidate_that_was_asked_again(tmp_path):
 
 
 def _aside(candidate: Path) -> Path:
-    return candidate.parents[1] / f"{la.REMOVING}{candidate.parent.name}" / la.CANDIDATE_NAME
+    return candidate.parents[1] / f"{lc.REMOVING}{candidate.parent.name}" / lc.CANDIDATE_NAME
 
 
 def test_a_swept_candidate_is_set_aside_and_deleted_by_the_next_sweep_only_if_still_untouched(tmp_path):
@@ -184,7 +184,7 @@ def test_asking_again_with_a_set_aside_candidate_puts_it_back(tmp_path):
     la.new_candidate("/r", target).candidate
     assert not candidate.exists()
     _asked(target, "q2", candidate=candidate, label=None)
-    assert candidate.exists() and not (candidate.parent / la.DISCARD_NAME).exists()
+    assert candidate.exists() and not (candidate.parent / lc.DISCARD_NAME).exists()
     la.new_candidate("/r", target).candidate
     assert candidate.exists()
 
@@ -220,8 +220,8 @@ def test_set_aside_candidates_are_checked_for_open_files_in_one_scan(tmp_path, m
     _asked(target, candidate=first, label=la.DENY_LABEL)
     _asked(target, "q2", candidate=second, label=la.DENY_LABEL)
     la.new_candidate("/r", target).candidate
-    scans, scan = [], la._open_inodes
-    monkeypatch.setattr(la, "_open_inodes", lambda wanted: scans.append(len(wanted)) or scan(wanted))
+    scans, scan = [], lc._open_inodes
+    monkeypatch.setattr(lc, "_open_inodes", lambda wanted: scans.append(len(wanted)) or scan(wanted))
     la.new_candidate("/r", target).candidate
     assert len(scans) == 1 and not _aside(first).parent.exists() and not _aside(second).parent.exists()
 
@@ -272,7 +272,7 @@ def test_a_dangling_symlink_beside_a_candidate_does_not_stop_the_sweep(tmp_path)
 
 def test_without_proc_a_cleanup_target_stays_at_its_path_and_is_listed(tmp_path, monkeypatch):
     """消してよいかを確かめられない環境では退避せず、何度 draft を打っても元のパスに残り、理由と共に一覧に出る。"""
-    monkeypatch.setattr(la, "_settleable", lambda: False)
+    monkeypatch.setattr(lc, "_settleable", lambda: False)
     target = _worktree(tmp_path)
     candidate = la.new_candidate("/r", target).candidate
     _asked(target, candidate=candidate, label=la.DENY_LABEL)
@@ -287,24 +287,24 @@ def test_a_record_replaced_by_the_user_is_not_deleted_by_the_sweep(tmp_path):
     target = _worktree(tmp_path)
     candidate = _denied_and_set_aside(target)
     mine = b'{"target": "mine"}\n'
-    (_aside(candidate).parent / la.SOURCE_NAME).write_bytes(mine)
+    (_aside(candidate).parent / lc.SOURCE_NAME).write_bytes(mine)
     la.new_candidate("/r", target)
-    assert candidate.exists() and (candidate.parent / la.SOURCE_NAME).read_bytes() == mine
+    assert candidate.exists() and (candidate.parent / lc.SOURCE_NAME).read_bytes() == mine
 
 
 def test_a_directory_named_like_the_discard_record_is_kept_and_the_draft_continues(tmp_path):
     """`discard.json` という名前の利用者のディレクトリがある候補は、そのディレクトリに触れずに戻し、候補の作成は続ける。"""
     target = _worktree(tmp_path)
     candidate = _denied_and_set_aside(target)
-    (_aside(candidate).parent / la.DISCARD_NAME).mkdir()
+    (_aside(candidate).parent / lc.DISCARD_NAME).mkdir()
     assert la.new_candidate("/r", target).candidate.exists()
-    assert candidate.exists() and (candidate.parent / la.DISCARD_NAME).is_dir()
+    assert candidate.exists() and (candidate.parent / lc.DISCARD_NAME).is_dir()
     assert la.new_candidate("/r", target).candidate.exists()
 
 
 def test_cleanup_targets_leave_out_candidates_with_the_users_items(tmp_path, monkeypatch):
     """一覧は利用者が消す手がかりなので、候補の隣に利用者の項目があるディレクトリは載せない。"""
-    monkeypatch.setattr(la, "_settleable", lambda: False)
+    monkeypatch.setattr(lc, "_settleable", lambda: False)
     target = _worktree(tmp_path)
     candidate = la.new_candidate("/r", target).candidate
     _asked(target, candidate=candidate, label=la.DENY_LABEL)
@@ -318,7 +318,7 @@ def _by_path(items: list[dict]) -> list[dict]:
 
 def test_without_proc_reflected_and_outdated_candidates_are_listed(tmp_path, monkeypatch):
     """`/proc` の無い環境では、反映した候補と、反映で古くなった直していない候補を一覧に載せる。直した候補は載せない。"""
-    monkeypatch.setattr(la, "_settleable", lambda: False)
+    monkeypatch.setattr(lc, "_settleable", lambda: False)
     target = _worktree(tmp_path)
     candidate, edited, untouched = _candidate(target), _candidate(target, b"{}\n"), la.new_candidate("/r", target).candidate
     assert la.reflect(candidate, lambda: None, SHA)
@@ -331,7 +331,7 @@ def test_without_proc_reflected_and_outdated_candidates_are_listed(tmp_path, mon
 
 def test_draft_reads_the_requests_once_for_both_the_sweep_and_the_list(tmp_path, monkeypatch):
     """`draft` の一覧は掃除の判定の結果から作り、リクエストと候補を読み直さない。"""
-    monkeypatch.setattr(la, "_settleable", lambda: False)
+    monkeypatch.setattr(lc, "_settleable", lambda: False)
     target = _worktree(tmp_path)
     candidate = la.new_candidate("/r", target).candidate
     _asked(target, candidate=candidate, label=la.DENY_LABEL)
@@ -343,7 +343,7 @@ def test_draft_reads_the_requests_once_for_both_the_sweep_and_the_list(tmp_path,
 
 def test_an_unreadable_old_target_or_candidate_only_leaves_that_candidate_out(tmp_path, monkeypatch):
     """過去の反映先や候補がディレクトリに置き換わっていても、その候補だけを外し、別の worktree の draft と show は続ける。"""
-    monkeypatch.setattr(la, "_settleable", lambda: False)
+    monkeypatch.setattr(lc, "_settleable", lambda: False)
     first, second, other = _worktree(tmp_path / "a"), _worktree(tmp_path / "b"), _worktree(tmp_path / "c")
     broken_candidate, broken_target = la.new_candidate("/r", first).candidate, la.new_candidate("/r", second).candidate
     first.write_bytes(NEW)
@@ -357,18 +357,18 @@ def test_an_unreadable_old_target_or_candidate_only_leaves_that_candidate_out(tm
 
 def test_the_list_reuses_the_candidate_read_by_the_sweep(tmp_path, monkeypatch):
     """反映元のバージョンが変わった候補は、判定で読んだ中身のハッシュを一覧でも使い、読み直さない。"""
-    monkeypatch.setattr(la, "_settleable", lambda: False)
+    monkeypatch.setattr(lc, "_settleable", lambda: False)
     target = _worktree(tmp_path)
     candidate = la.new_candidate("/r", target).candidate
     target.write_bytes(NEW)
-    monkeypatch.setattr(la, "_untouched", lambda *a: pytest.fail("候補を読み直さない"))
+    monkeypatch.setattr(lc, "_untouched", lambda *a: pytest.fail("候補を読み直さない"))
     assert la.cleanup_targets("/r") == [{"candidate": str(candidate), "reason": "outdated"}]
 
 
 @pytest.mark.parametrize("change", ["save", "sibling"])
 def test_a_candidate_changed_after_the_judgment_is_not_listed(tmp_path, monkeypatch, change):
     """判定の後に候補が保存されたか、隣に別案が置かれた候補は、判定の結果が古いので一覧に載せない。"""
-    monkeypatch.setattr(la, "_settleable", lambda: False)
+    monkeypatch.setattr(lc, "_settleable", lambda: False)
     target = _worktree(tmp_path)
     candidate = la.new_candidate("/r", target).candidate
     target.write_bytes(NEW)  # 反映元のバージョンが変わり、判定で候補を読む（outdated）
@@ -391,14 +391,14 @@ def test_an_unreadable_denied_candidate_is_left_out_and_other_drafts_continue(tm
     first, other = _worktree(tmp_path / "a"), _worktree(tmp_path / "b")
     candidate = la.new_candidate("/r", first).candidate
     _asked(first, candidate=candidate, label=la.DENY_LABEL)
-    read_regular = la._read_regular
+    read_regular = lc._read_regular
 
     def denied_read(path, strict=True):
         if path == candidate:
             raise PermissionError(13, "Permission denied", str(path))
         return read_regular(path, strict)
 
-    monkeypatch.setattr(la, "_read_regular", denied_read)
+    monkeypatch.setattr(lc, "_read_regular", denied_read)
     assert la.new_candidate("/r", other).cleanup_targets == [] and la.cleanup_targets("/r") == []
     assert candidate.parent.is_dir()
 
@@ -407,8 +407,8 @@ def test_candidates_outside_the_cleanup_conditions_are_not_inspected(tmp_path, m
     """履歴と反映先だけで片付けの条件に当たらないと決まる候補は、ディレクトリを調べない。"""
     target = _worktree(tmp_path)
     la.new_candidate("/r", target)
-    calls, ownership = [], la._ownership
-    monkeypatch.setattr(la, "_ownership", lambda folder, known=None: calls.append(folder) or ownership(folder, known))
+    calls, ownership = [], lc.ownership
+    monkeypatch.setattr(lc, "ownership", lambda folder, known=None: calls.append(folder) or ownership(folder, known))
     la.new_candidate("/r", target)
     assert la.cleanup_targets("/r") == [] and calls == []
 
@@ -418,9 +418,9 @@ def test_draft_reclaims_what_an_interrupted_draft_or_sweep_left(tmp_path):
     target = _worktree(tmp_path)
     edited = _candidate(target)
     home = edited.parents[1]
-    drafting = home / f"{la.DRAFTING}half"
+    drafting = home / f"{lc.DRAFTING}half"
     drafting.mkdir()
-    removing = home / f"{la.REMOVING}{edited.parent.name}"
+    removing = home / f"{lc.REMOVING}{edited.parent.name}"
     edited.parent.rename(removing)
     la.new_candidate("/r", target).candidate
     assert not drafting.exists() and not removing.exists() and edited.read_bytes() == NEW
@@ -499,7 +499,7 @@ def _interrupted(tmp_path: Path) -> tuple[Path, Path, Path]:
         "sha256": SHA,
         "request_id": None,
     }
-    la.write_launch_record(la.reflected_file(target, la.PENDING), pending)
+    lc.write_launch_record(la.reflected_file(target, la.PENDING), pending)
     os.rename(target, aside)
     target.write_bytes(NEW)
     return target, candidate, aside
@@ -609,8 +609,8 @@ def test_a_record_replaced_by_a_fifo_does_not_stop_draft_or_show(tmp_path):
     target = _worktree(tmp_path)
     candidate = la.new_candidate("/r", target).candidate
     _asked(target, candidate=candidate, label=la.DENY_LABEL)
-    (candidate.parent / la.SOURCE_NAME).unlink()
-    os.mkfifo(candidate.parent / la.SOURCE_NAME)
+    (candidate.parent / lc.SOURCE_NAME).unlink()
+    os.mkfifo(candidate.parent / lc.SOURCE_NAME)
     assert la.new_candidate("/r", target).cleanup_targets == [] and la.cleanup_targets("/r") == []
     assert candidate.exists()
 
@@ -620,17 +620,17 @@ def test_a_record_replaced_by_a_fifo_after_the_ownership_check_does_not_stop_dra
     target = _worktree(tmp_path)
     candidate = la.new_candidate("/r", target).candidate
     _asked(target, candidate=candidate, label=la.DENY_LABEL)
-    ownership = la._ownership
+    ownership = lc.ownership
 
     def then_fifo(folder, known=None):
         owned = ownership(folder, known)
-        source = folder / la.SOURCE_NAME
+        source = folder / lc.SOURCE_NAME
         if known is None and source.is_file():
             source.unlink()
             os.mkfifo(source)
         return owned
 
-    monkeypatch.setattr(la, "_ownership", then_fifo)
+    monkeypatch.setattr(lc, "ownership", then_fifo)
     la.new_candidate("/r", target)
 
 
