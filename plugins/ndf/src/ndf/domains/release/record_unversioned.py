@@ -1,7 +1,8 @@
 """バージョンの無いリリース記録を届け先ごとに確かめて書き、対象の一覧を訂正する（`record --version`・`--correct-targets`。#4580）。
 
-手順は設計書の分けたファイル（issues/issue-4580-design-release-records.md）の「バージョンの無いリリース記録の書き方」の
-確かめ 1〜8（確かめ 0 は引数の受け口の `cli._record_args`）と書く順の手順 1〜4、「対象の一覧の訂正」のとおりである。
+手順は確定仕様（docs/specifications/ndf-project-flow-close-and-unversioned-records.md）の
+「バージョンの無いリリース記録の書き方」の確かめ 1〜8（確かめ 0 は引数の受け口の `cli._record_args`）と書く順の手順 1〜4、
+「対象の一覧の訂正」のとおりである。
 
 - 確かめ 1〜7 は、記録の PR・リポジトリ・push の記録だけで決まるので、CD を照会する確かめ 8 より先に行う。1〜6 のどれかに
   当たれば、どの PR にも書かずに `RecordError` で止まる
