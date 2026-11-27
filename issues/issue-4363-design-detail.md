@@ -10,6 +10,9 @@
 | 判定役 | 相手役が書いた重い指摘（critical・major）が実際に起きるかを確かめる読むだけの claude |
 | 行 | 状態ファイルの指摘 1 件分の記録（`findings` の要素）。「処理の手順」の表の 1 行を指すときは「表の行」と書く |
 | 保護の種類 | `secret`・`authz`・`user_data`・`irreversible`・`safety` の 5 つ（秘密・認証認可・利用者のデータ・戻せない操作・人の安全）。相手役は指摘の `protect` に書く |
+| 元の重要度（`raised_severity`） | 行の既存のキー（#4014）。相手役がその指摘に付けた重要度（下げる決まりを当てる前の値）のうち、出し直しを含めて最も重いもの。下げる直前の行の重要度ではない |
+| 席 | 相手役 1 人分の枠。出力のファイル名と指摘の担当（`by`）は席の名前で呼ぶ |
+| 席の埋め | 結果を返さないか起動を断られた claude 以外の席を、claude の読むだけの起動で置き換えること |
 | 指摘の種類（`tracks`） | 判定役が回答の `tracks` に書く値。保護の種類の 5 つと、`delivered`（利用者に届いた不具合）・`approval`（承認資料の正しさ。承認する人へ見せる説明が事実と違う）の 7 つ |
 | `mvv` | 行のキー。相手役が、指摘がプロジェクトの判断基準（MVV）のどの項目に反するかを挙げた値。反する指摘は重要度を major 以上に固定する（今の `journal._classify`） |
 | `redline` | 行のキー。挙げた項目が「必ず人の承認が要る操作」（MVV の表の `P<番号>` と共通原則の表の `C<番号>`）である印。修正担当へ渡さず、収束も止めずに、人の承認を待つ |
@@ -104,7 +107,7 @@ plugins/ndf/
 | `protect_kinds` | `criteria_decide.py` | 新設 | `protect_kinds() -> tuple[str, ...]` | 保護の種類 5 つを表から返す |
 | `track_kinds` | `criteria_decide.py` | 新設 | `track_kinds() -> tuple[str, ...]` | 指摘の種類の全部（保護の種類と `delivered`・`approval`）を返す |
 | `protect_of` | `criteria_decide.py` | 新設 | `protect_of(value: object) -> tuple[str, ...]` | 値が文字列の並びなら、保護の種類だけを表の順で重ねずに返し、ほかは空を返す |
-| `document_line` | `criteria_decide.py` | 新設 | `document_line(documents: bool) -> list[str]` | 文書を含む PR なら基準 6 の 1 行を返す（判定役の指示用） |
+| `document_line` | `criteria_decide.py` | 新設 | `document_line(documents: bool) -> list[str]` | 文書を含む PR なら、判定役の指示に基準 6 の 1 行を返す。基準 6 は指摘の基準の 6 番（この PR で変わった Markdown の、想定した読み手に通じない文）で、番号と文は `contracts/data/review-criteria.json` の `document` にある。今は相手役と修正担当の指示に `criteria_decide.document_block` が足している |
 | `reviewer_block` | `criteria_decide.py` | 変更 | `reviewer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[str]` | 相手役へ `protect` の書き方の行を足す |
 | `downgraded` | `criteria_decide.py` | 変更 | `downgraded(row: Mapping[str, Any]) -> bool` | 判定役の確認で下げた行（`check.lowered`）を「入れるときに下げた行」に数えない |
 
@@ -151,7 +154,7 @@ plugins/ndf/
 
 重要度とラウンドで指摘を絞るのは呼び手（下の `drive._confirm`）で、`select` は指摘の持つ印だけを見る。
 
-`mvv` と `protect` を持つ指摘は、回答がどうであっても下げない。それでも渡す場合があるのは、回答の指摘の種類（`tracks`）を後の処理が使うためである。その指摘だけのために判定役を起動すると費用に見合わないので、起動するのは次のどちらかの場合に限る。
+`mvv` か `protect` のどちらか一方でも持つ指摘は、回答がどうであっても下げない。それでも渡す場合があるのは、回答の指摘の種類（`tracks`）を後の処理が使うためである。その指摘だけのために判定役を起動すると費用に見合わないので、起動するのは次のどちらかの場合に限る。
 
 - ほかに渡す指摘がある（起動の回数が増えない）
 - 呼び手が `use_tracks` を真にした。回答の種類を使う処理があるラウンドを表す。この課題の `drive` は常に偽で呼ぶ。#3780 は線引き（直さずに残す指摘を決めて起票する）をするラウンドで真にし、#2468 は突き合わせる見送り済みの指摘などがあるラウンドで真にする
@@ -261,7 +264,7 @@ plugins/ndf/
 
 - `apply_checks`
   - 事前条件: `asked` は `verify_decide.select` が返した行の番号
-  - 事後条件: 有効な回答（`holds` が真か偽）を持つ行は `check` を持つ。`holds` が null か回答の無い行は `check` を持たず、重要度が変わらない。どの場合も、回答の `tracks` のうち保護の種類は行の `protect` に足される。下げた行は `severity` が minor、`check.lowered` が真で、`raised_severity` を持つ
+  - 事後条件: 有効な回答（`holds` が真か偽）を持つ行は `check` を持つ。`holds` が null か回答の無い行は `check` を持たず、重要度が変わらない。`verdicts` にある回答（有効な回答と `holds` が null の回答）の `tracks` のうち保護の種類は、行の `protect` に足される。不正な回答は `verdicts` に入らないので、その `tracks` は使わない。下げた行は `severity` が minor、`check.lowered` が真で、`raised_severity` のキーを持つ
 
 ### 処理の手順
 
@@ -271,14 +274,26 @@ plugins/ndf/
 
 | 当たる出し直し | 扱い |
 | --- | --- |
-| A: 今回の `protect` が空でない | `check.lowered` を偽にする。行の重要度を、相手役が最初に付けた重要度（`raised_severity`）へ戻す。戻す値は `criteria_decide.at_least_blocking` を通すので、critical はそのまま、ほか（minor・不明を含む）は major になる。今回の出し直しの重要度のほうが重ければ、その重さにする |
-| B: 今回の出し直しが MVV の項目か必ず人の承認が要る操作を挙げた | `check.lowered` を偽にする。下げていない行と同じく、今回の重要度と行の重要度の重い方を残してから、今の `journal._classify` を当てる。`_classify` は、MVV の項目なら重要度を major 以上に固定し、承認の要る操作なら行に `redline` を付けて人の承認を待つ指摘にする |
+| A: 今回の `protect` が空でない | `check.lowered` を偽にする。行の重要度を元の重要度（`raised_severity`）へ戻す。戻す値は `criteria_decide.at_least_blocking` を通すので、critical はそのまま、ほか（minor・null を含む）は major になる。今回の出し直しの重要度のほうが重ければ、その重さにする |
+| B: 今回の出し直しが MVV の項目か必ず人の承認が要る操作を挙げた | `check.lowered` を偽にする。下げていない行と同じく、今回の重要度と行の重要度の重い方を残してから、今の `journal._classify` を当てる。結果は挙げたものによって違う（表の下） |
+
+B で `_classify` を当てた結果は次のとおりである。
+
+- MVV の項目（`Value 5` など）を挙げた: 重要度を major 以上に固定する
+- 必ず人の承認が要る操作（`P<番号>`・`C<番号>`）だけを挙げた: 行に `redline` を付けるが、`_classify` は重要度を変えない。重要度は、今回の出し直しの重要度と minor の重い方になる（今回が critical か major ならその値、minor か nit なら minor、重要度が書かれていなければ major）。minor のままでも `redline` を持つので、人の承認を待つ指摘として扱う
 
 A と B の両方に当たる場合は、A の次に B を当てる。保護の種類は行に残り、重さと `redline` は B の結果になる。
 
 B は I1 に定めの無い場合である。この詳細設計は、MVV に反する指摘と承認の要る操作の指摘を下げないという受け入れ条件 5 を優先する。確認で一度下げた指摘をこの 2 つの理由で重い扱いへ戻してよいかを、設計の承認で確かめる（[設計文書の「未確認のまま残ること」](./issue-4363-design.md#未確認のまま残ること)）。
 
-下げる行に `raised_severity` が無い（前の実行から引き継いだ行が戻った）場合は、下げる前の重要度を `raised_severity` に書いてから下げる（I3）。
+`raised_severity` を書き換えるのは次の 2 つの場合だけである。
+
+| 場合 | 書き方 |
+| --- | --- |
+| 出し直し（下げた行を含む） | 今の `_raised_again` のとおり、行にキーがあれば、今回の値と行の値の重い方にする（`criteria_decide.heavier_raised`） |
+| 下げるときに行にキーが無い（前の実行から引き継いだ行が戻った） | 相手役が付けた値が残っていないので、下げる前の行の重要度を代わりに書いてから下げる（I3） |
+
+下げる処理は、キーがあれば（値が null でも）上書きしない。記録のコメントの「元の重要度」はこのキーの値で、null なら表のほかの空の欄と同じ「—」になる。
 
 `apply_checks` が返す `Checked` の使い道は次のとおりである。
 
@@ -308,8 +323,8 @@ B は I1 に定めの無い場合である。この詳細設計は、MVV に反�
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `enter` | `protect` が行に残り、`fresh` に新しい行と戻った行だけが入る | 同じラウンドの 2 件の `protect` を合わせる | `protect` が文字列なら持たない |
-| `apply_checks` | 次の 4 つ。(1) 成り立たないと答えた普通の major は minor になり、`pending` に出ず、元の重要度が残る。(2) 起きると示せたと答えた指摘は重要度が変わらない。(3) 回答の `tracks` が `authz` と `user_data` の 2 つなら、指摘の `protect` に 2 つとも残り、下がらない。(4) 回答の `tracks` が `delivered` だけで成り立たないと答えた指摘は下がる | 下げる前の重要度が critical の指摘と、`raised_severity` が不明の指摘 | `holds` が null の回答と回答の無い指摘は、`check` が書かれず重要度が変わらず `unconfirmed` に入る。`mvv`・`redline`・`protect` を持つ指摘は、成り立たないと答えても下がらない |
-| `_raised_again` | 保護の種類も MVV の項目も無い出し直しでは、下げた行は minor のまま（I1） | `protect` 付きの出し直しで元の重要度へ戻り `check.lowered` が偽になる。`protect` と MVV の項目の両方を持つ出し直し | MVV の項目を挙げた出し直しは major 以上に固定され、承認の要る操作を挙げた出し直しは `redline` が付く |
+| `apply_checks` | 次の 4 つ。(1) 成り立たないと答えた普通の major は minor になり、`pending` に出ず、元の重要度が残る。(2) 起きると示せたと答えた指摘は重要度が変わらない。(3) 回答の `tracks` が `authz` と `user_data` の 2 つなら、指摘の `protect` に 2 つとも残り、下がらない。(4) 回答の `tracks` が `delivered` だけで成り立たないと答えた指摘は下がる | 下げる前の重要度が critical の指摘と、`raised_severity` が不明の指摘 | `holds` が null の回答と回答の無い指摘は、`check` が書かれず重要度が変わらず `unconfirmed` に入る。`mvv`・`redline`・`protect` のどれか 1 つでも持つ指摘は、成り立たないと答えても下がらない。不正な回答の `tracks` は `protect` に足されない |
+| `_raised_again` | 保護の種類も MVV の項目も無い出し直しでは、下げた行は minor のまま（I1） | `protect` 付きの出し直しで元の重要度へ戻り `check.lowered` が偽になる。`protect` と MVV の項目の両方を持つ出し直し | MVV の項目を挙げた出し直しは major 以上に固定され、承認の要る操作だけを挙げた出し直しは `redline` が付き、重要度は今回の値と minor の重い方になる |
 | `_revive` | 直した後の再発で `check` が消え、`protect` が残る。次の確認の `tracks` が空でも下がらない | 無し | 無し |
 
 ## 駆動への組み込み（drive）
@@ -360,7 +375,7 @@ B は I1 に定めの無い場合である。この詳細設計は、MVV に反�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_finding_rows` | `report_decide.py` | 変更 | シグネチャは変えない | `check.lowered` の行は、重要度の欄に「minor（確認の前は <元の重要度>）」、理由の欄に判定役の理由を出す |
+| `_finding_rows` | `report_decide.py` | 変更 | シグネチャは変えない | `check.lowered` の行は、重要度の欄に「minor（確認の前は <`raised_severity`>）」、理由の欄に判定役の理由を出す |
 
 ### 単体テストの観点
 

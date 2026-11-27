@@ -75,7 +75,7 @@
 
 ### Task 8: 起票と起票の記録
 - **対象ファイル:** `leftover.py`（新設）、`leftover_decide.py`、`github.list-pages.json`、`test_crossreview_leftover.py`
-- **変更内容:** `files_issue`・`identity`・`issue_parts`・`trusted`・`matches`・起票の記録・`file_issues`・`primary_of`。**指摘の全文の秘密を伏せてから題を切り出す。** 題の切り出しの長さの境目をまたぐ偽の秘密を持つ指摘を起票し、題にも本文にも断片が無いことを確かめるテストを置く。偽の秘密はテストの中で文字列を連結して作り、`scripts/check-repo-secrets.py` に当たらないようにする
+- **変更内容:** `files_issue`・`identity`・`issue_parts`・`trusted`・`matches`・起票の記録・`file_issues`・`primary_of`。作成の後に記録の結果の書き込みができなかった打ち直しは、コメントの更新時刻を試みた時刻にして Issue を探し、2 件作らないことをテストする。**指摘の全文の秘密を伏せてから題を切り出す。** 題の切り出しの長さの境目をまたぐ偽の秘密を持つ指摘を起票し、題にも本文にも断片が無いことを確かめるテストを置く。偽の秘密はテストの中で文字列を連結して作り、`scripts/check-repo-secrets.py` に当たらないようにする
 - **満たす受け入れ条件:** 3780:2
 - **進め方:** GitHub を差し替える偽物で失敗するテスト → 最小実装 → 整理
 
