@@ -292,11 +292,11 @@ def _before_approve(a: argparse.Namespace, cand: Optional[Path]) -> Optional[dic
         return _refused_config("NDF が起動した AI の中では承認できない。利用者が端末で打つ")
     if cand is not None and not cand.exists():
         # 今の作業場所の反映先の完了の記録だけを照らす（別の worktree の反映を、この作業場所の反映としない）
-        target = ls.launch_file(_worktree_root())
-        if la.reflected(cand, target, a.sha256, a.request):
-            # 反映のときに利用者の保存を別の名前で残していれば、打ち直しの結果にもそのパスを載せる
-            saved = la.saved_in_done(target)
-            return result.result(TOOL, result.OK, "反映は済んでいる" + _kept_note([saved] if saved else []), metrics={"sha256": a.sha256})
+        done = la.reflected(cand, ls.launch_file(_worktree_root()), a.sha256, a.request)
+        if done is not None:
+            # 反映のときに利用者の保存を別の名前で残していれば、打ち直しの結果にもそのパスを載せる（照らした記録のパスだけ）
+            note = _kept_note([done.saved] if done.saved else [])
+            return result.result(TOOL, result.OK, "反映は済んでいる" + note, metrics={"sha256": a.sha256})
         return _refused_config("候補が無く、反映も確かめられない（反映の後に設定が変わったか、候補が別の内容）。draft からやり直す")
     if a.request is not None and la.request_answer(a.request)[0] == "deny":
         return _refused_config("このリクエストには「承認しない」と回答している。記録も反映もしない")

@@ -651,7 +651,27 @@ def test_after_an_interruption_a_save_into_the_aside_is_kept_and_the_consent_car
     assert target.read_bytes() == placed and not aside.exists()
     assert [p.read_bytes() for p in kept] == [b'{"version": 1, "saved": 1}\n']
     assert (_done(target)["approver"], _done(target)["saved"]) == ("山田", str(kept[0]))
-    assert la.saved_in_done(target) == kept[0]  # 結果を受け取る前に止まって打ち直しても、完了の記録から残したパスを返せる
+    # 結果を受け取る前に止まって打ち直しても、照らした完了の記録から残したパスを返せる
+    assert la.reflected(candidate, target, SHA, None).saved == kept[0]
+
+
+@pytest.mark.parametrize("stop", ["killed", "oserror"])
+def test_the_placing_copy_is_removed_after_a_forced_stop_or_a_failed_write(tmp_path, monkeypatch, stop):
+    """置き換えの一時ファイルは決まった名前なので、強制終了の後の片付けも、書き込みの失敗の片付けも、作業場所に設定案の写しを残さない。"""
+    target = _worktree(tmp_path)
+    candidate = _candidate(target)
+    placing = target.with_name(".launch.json.placing")
+
+    def fail(*_args):
+        raise KeyboardInterrupt if stop == "killed" else OSError("書けない")
+
+    monkeypatch.setattr(la, "_replace", fail)
+    with pytest.raises(KeyboardInterrupt if stop == "killed" else internal.InternalError):
+        _reflect(candidate, lambda: None, SHA)
+    if stop == "killed":
+        assert placing.exists()  # 強制終了ではその場で消せない
+        la.recover(target)
+    assert not placing.exists() and target.read_bytes() == OLD
 
 
 def test_an_interruption_after_removing_the_aside_still_reports_the_saved_path(tmp_path, monkeypatch):

@@ -714,17 +714,25 @@ def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
     置く一時ファイルを先に作り、その実体（`st_dev`・`st_ino`）を `rec` の `placed` に入れてから反映の途中の記録を書く。中断の後の片付け
     （`recover`）は、反映先がこの実体のままかで、NDF が候補を置いた後の停止か（手順 5 か、置いた直後の中断）を見分ける。中身だけで
     見分けると、手順 4 の間に利用者が候補と同じ中身を手で保存したときも、置いた後の停止として完了にしてしまうためである。
+
+    一時ファイルは反映先ごとに決まった名前（`_placing`）で作り、承認の記録の錠の中でだけ作る。プロセスが強制終了しても、次の
+    `recover` がこの名前で見つけて消せる（途中の記録を書く前の終了も含む）。例外で止まったときの片付けも、呼び手の `recover` に任せる。
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_name(f".{target.name}.{uuid.uuid4().hex}")
+    tmp = _placing(target)
+    tmp.unlink(missing_ok=True)  # 前の実行の残り（反映先と同じ実体のこともある）へ書き込まない
     tmp.write_bytes(data)
-    try:
-        made = os.lstat(tmp)
-        rec["placed"] = [made.st_dev, made.st_ino]
-        launch_candidates.write_launch_record(reflected_file(target, PENDING), rec)
-        return _replace(target, tmp, rec["base"])
-    finally:
-        tmp.unlink(missing_ok=True)
+    made = os.lstat(tmp)
+    rec["placed"] = [made.st_dev, made.st_ino]
+    launch_candidates.write_launch_record(reflected_file(target, PENDING), rec)
+    placed = _replace(target, tmp, rec["base"])
+    tmp.unlink()
+    return placed
+
+
+def _placing(target: Path) -> Path:
+    """置き換えで反映先へ置く一時ファイル（`.launch.json.placing`）。"""
+    return target.with_name(f".{target.name}.placing")
 
 
 def _replace(target: Path, tmp: Path, base: Optional[str]) -> bool:
@@ -861,6 +869,7 @@ def recover(target: Path) -> Optional[Path]:
     利用者のエディタは錠を取らないので、照らした後に反映先へ保存が入ることがある。退避を反映先へ戻すときは反映先を上書きせず、
     反映先を消すことも一時の名前へ移すこともしない。別の名前は、退避を消す前に途中の記録の `saved` に書き、完了の記録にも残す。
     退避を消した後に中断しても、次の片付けと打ち直しがそのパスを結果に載せられるようにするためである。
+    最後に、置き換えの一時ファイル（`_placing`）が残っていれば消す（強制終了した実行の設定案の写しを作業場所に残さない）。
     """
     pending_path = reflected_file(target, PENDING)
     rec = read_launch_record(pending_path)
@@ -885,6 +894,7 @@ def recover(target: Path) -> Optional[Path]:
         if _placed(target, rec):
             _write_done(target, rec)
     pending_path.unlink(missing_ok=True)
+    _placing(target).unlink(missing_ok=True)  # 置き換えの途中で止まったか強制終了した実行の一時ファイル
     return saved
 
 
@@ -949,17 +959,23 @@ def _still_placed(rec: Optional[Mapping[str, Any]]) -> bool:
     return rec is not None and content_version(Path(str(rec["target"]))) == rec.get("content")
 
 
-def reflected(candidate: Path, target: Path, sha256: str, request_id: Optional[str]) -> bool:
-    """候補が無い打ち直しで、今の作業場所の反映先 `target` の完了の記録と反映先の中身を照らす。何も書かない。
+@dataclass(frozen=True)
+class Reflected:
+    """`reflected` が照らした完了の記録から読んだ結果。`saved` は、その反映で利用者の保存を別の名前で残したパス（無ければ None）。"""
+
+    saved: Optional[Path] = None
+
+
+def reflected(candidate: Path, target: Path, sha256: str, request_id: Optional[str]) -> Optional[Reflected]:
+    """候補が無い打ち直しで、今の作業場所の反映先 `target` の完了の記録と反映先の中身を照らす。済んでいなければ None。何も書かない。
 
     ほかの作業場所の完了の記録は見ない（別の worktree で打ち直したとき、その作業場所へ反映していないのに済んだとしないため）。
+    別の名前で残した保存のパスは、照らしたのと同じ 1 回の読み取りから返す。読み直すと、間に同じ反映先の次の反映が完了したとき、
+    この操作の結果に次の操作の保存先を付けてしまうためである。
     """
     rec = read_launch_record(reflected_file(target, DONE))
     if rec.get("candidate") != candidate.parent.name or rec.get("target") != str(target):
-        return False
-    return (rec.get("sha256"), rec.get("request_id")) == (sha256, request_id) and _still_placed(rec)
-
-
-def saved_in_done(target: Path) -> Optional[Path]:
-    """反映先 `target` の完了の記録が持つ、利用者の保存を別の名前で残したパス。無いか、そのファイルがもう無ければ None。何も書かない。"""
-    return _noted_saved(read_launch_record(reflected_file(target, DONE)))
+        return None
+    if (rec.get("sha256"), rec.get("request_id")) != (sha256, request_id) or not _still_placed(rec):
+        return None
+    return Reflected(_noted_saved(rec))
