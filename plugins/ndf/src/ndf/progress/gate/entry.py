@@ -205,11 +205,10 @@ def _strategy_at(workdir: Path) -> Optional[branch_strategy.Strategy]:
     """作業場所のリポジトリのブランチ戦略の設定。読めなければ None（バージョン番号を持つ扱い）。
 
     作業場所が設定を持つリポジトリの根なら `git` を起動しない。無いときだけ `git rev-parse --show-toplevel` で根を決める
-    （`progress/command.py` の `strategy` と同じ解き方。#4513）。
+    （根の解き方は `progress/command.py` の `strategy_root` だけに置く。#4513）。
     """
     try:
-        root = workdir if (workdir / branch_strategy.PROJECT).is_file() else Path(Git(workdir).run("rev-parse", "--show-toplevel").strip())
-        return branch_strategy.load(root)
+        return branch_strategy.load(command.strategy_root(workdir))
     except (branch_strategy.StrategyError, GitError, OSError) as exc:  # 設定: 読めなければバージョン番号を持つ扱いで形を確かめる
         log.info("ブランチ戦略の設定を読めないのでバージョン番号を持つ扱いにする", extra={"workdir": str(workdir), "error": str(exc)})
         return None
@@ -359,11 +358,28 @@ def released_outcome(work: str, saved: Mapping[str, Any], strategy: Optional[bra
         why = "承認を記録した時点で本番の届け先が 1 つに決まらず"
     detail = (
         f"オーガナイザーが出した後だが、{why}、このリリースの届け先が記録から確かめられない（worker を起動しない）。"
-        "設定を直して retry しても終わらない。次の操作: 実際の届け先を確かめ、delivery・product_version・記録済みの mvv_gate"
-        "（ndf progress show <ID> の metrics.history の出力の事象にある）を outputs に含む JSON のファイルを用意して、"
+        "設定を直して retry しても終わらない。次の操作: 実際の届け先を確かめ、次の形の JSON のファイルを用意する。"
+        "<…> の所は、実際の届け先の行と、ndf progress show <ID> の metrics.history でステップ release-mvv が書いた"
+        f"出力の事象にある mvv_gate のオブジェクトに置き換える: {json.dumps(manual_finish_example(recorded.version), ensure_ascii=False)}。"
+        "ndf progress check <ID> デプロイ --output <JSONファイル> で形を確かめてから、"
         "ndf progress finish <ID> デプロイ --output <JSONファイル> --reason <理由> で工程を終える"
     )
     return result.stopped(TOOL, "precondition", detail)
+
+
+def manual_finish_example(version: str) -> dict[str, Any]:
+    """届け先が記録から決まらずに止まったデプロイの工程を、`ndf progress finish` で手で終える出力の例（#4513）。
+
+    工程の出力の規約（`stage-io.schema.json` の `stage-out`）が必須とする `summary`・`steps` と、デプロイの工程の `outputs` の
+    3 つ（`product_version`・`delivery`・`mvv_gate`）を持つ。`product_version` は記録済みの配布識別子を入れ、`<…>` の所は
+    利用者が置き換える。`finish` は文脈にある値で出力の欠けを補わないので、記録済みの `mvv_gate` も入れる。
+    """
+    delivery = {"target": "<届け先>", "kind": "<auto か manual>", "trigger": "<届ける契機>", "channel": "production", "versioned": False}
+    return {
+        "summary": "届け先を確かめてデプロイの工程を手で終えた",
+        "steps": [],
+        "outputs": {PRODUCT_VERSION: version, DELIVERY: delivery, "mvv_gate": "<記録済みの mvv_gate のオブジェクト>"},
+    }
 
 
 class WorkHandoff(NamedTuple):

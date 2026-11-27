@@ -153,10 +153,20 @@ def behavior_declared(cwd: Path) -> bool:
     return isinstance(value, list) and all(isinstance(p, str) for p in value)
 
 
+def strategy_root(cwd: Path) -> Path:
+    """ブランチ戦略の設定を読むリポジトリの根。`cwd` が設定を持てばそのまま返し、`git` を起動しない。
+
+    持たないときだけ `git rev-parse --show-toplevel` を 1 回打つ（#4513）。`GitError` はそのまま上げる。
+    """
+    if (cwd / branch_strategy.PROJECT).is_file():
+        return cwd
+    return Path(Git(cwd).run("rev-parse", "--show-toplevel").strip())
+
+
 def strategy(cwd: Path) -> branch_strategy.Strategy:
     """リポジトリの根のブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）。読めなければ `FactUnknown`。"""
     try:
-        return branch_strategy.load(Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()))
+        return branch_strategy.load(strategy_root(cwd))
     except branch_strategy.StrategyError as exc:
         raise FactUnknown(f"ブランチ戦略の設定を読めない: {exc.reason}") from exc
 

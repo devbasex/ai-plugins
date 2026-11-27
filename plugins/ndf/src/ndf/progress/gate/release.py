@@ -139,27 +139,29 @@ def _recorded_where(reply: Mapping[str, Any]) -> tuple[Optional[str], Optional[d
     """オーガナイザーが配布の記録に残した、バージョンの保存先の種類と本番の届け先の 1 行（#4513）。
 
     レーンが回答を取り込む時点の設定で決め直さない（その間に設定が変わると、配布していない届け先を記録する）。種類が 3 つの語の
-    どれでもなければ記録されていないもの（None）とし、届け先は種類が `none` で文脈の `delivery` の形に合うときだけ返す。
+    どれでもなければ記録されていないもの（None）とする。届け先は、種類が `none` で、本番に届く行（`production_delivery` と同じ
+    `on_channel` の条件）で、文脈の `delivery` の形に合うときだけ返す。外のオーガナイザーがベースブランチ向けの行を書いても、
+    本番の配布の実績にしない。
     """
     kind = reply.get("store")
     known = kind if kind in RELEASE_STORES else None
     row = reply.get("delivery")
-    if known != store_kind_of(False) or not isinstance(row, Mapping) or not production_merge.fits_context(row):
+    production = production_merge.on_channel(row, production_merge.PRODUCTION_CHANNEL)
+    if known != store_kind_of(False) or not production or not isinstance(row, Mapping) or not production_merge.fits_context(row):
         return known, None
     return known, dict(row)
 
 
-def _released(reply: Mapping[str, Any], value: str) -> dict[str, Any]:
+def _released(reply: Mapping[str, Any], value: str, row: Optional[dict[str, Any]]) -> dict[str, Any]:
     """出した回答が持つバージョンとリリース記録の PR（文脈の `product_version`・`release_pr`）。後の工程（閉じ・リリース後テスト）は
     文脈から読み、リリースの PR を探さない（#2783）。承認しない回答や、値の無いキーは書かない。
 
-    オーガナイザーが配布の記録に届け先 `delivery` を残していれば足す（バージョン番号を持たないリポジトリで、本番に届く行が 1 つに
-    決まったときだけ残る）。デプロイの工程はこの記録だけから `delivery` を返し、worker を起動しない（#4513）。
+    オーガナイザーが配布の記録に残した届け先 `row`（`_recorded_where` が返したもの）があれば `delivery` として足す（バージョン番号を
+    持たないリポジトリで、本番に届く行が 1 つに決まったときだけ残る）。デプロイの工程はこの記録だけから `delivery` を返し、worker を起動しない（#4513）。
     """
     if value != run.APPROVED:
         return {}
     out: dict[str, Any] = {name: str(reply[key]) for key, name in RELEASED_OUTPUTS.items() if reply.get(key)}
-    row = _recorded_where(reply)[1]
     if row is not None:
         out[DELIVERY] = row
     return out
@@ -187,6 +189,8 @@ def take_reply(
     seen = json.loads(seen_file.read_text(encoding="utf-8")) if seen_file.exists() else None
     reason = str(reply["reason"]) if reply.get("reason") else f"オーガナイザーのリリースの回答（{reply['result']}）"
     target = Target.from_dict(seen)
+    # 回答の種類と届け先は承認ごとに 1 回だけ解釈し、出力と release_store の両方に使う
+    store_kind, row = _recorded_where(reply) if value == run.APPROVED else (None, None)
     given = Answer(
         q.id,
         value,
@@ -194,7 +198,7 @@ def take_reply(
         "organizer",
         f"organizer:{request_id(q)}",
         seen=target,
-        outputs=_released(reply, value),
-        release_store=_recorded_where(reply)[0] if value == run.APPROVED else None,
+        outputs=_released(reply, value, row),
+        release_store=store_kind,
     )
     return answer(st, machine_id, given, observe, post)

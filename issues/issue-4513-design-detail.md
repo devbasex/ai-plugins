@@ -310,7 +310,23 @@ plugins/ndf/
 - `released_outcome` は、届け先が記録から決まらないとき、デプロイの工程の時点の設定から選ばず、固定の値でも埋めずに止まる。設定は後から直せるので、今の設定は過去の配布先を確かめた根拠にならないためである（設計文書の「`delivery` は、その配布の記録から読み」の段落）。`stopped` の理由には、次の 3 つを書く
   - この配布の届け先が記録から確かめられないこと
   - 設定を直して retry しても終わらないこと
-  - 次の操作。実際の届け先を確かめ、`delivery`・`product_version`・記録済みの `mvv_gate`（`ndf progress show <ID>` の `metrics.history` で、ステップ `release-mvv` が書いた出力の事象にある）を `outputs` に含む JSON のファイルを用意する。続けて `ndf progress finish <ID> デプロイ --output <JSONファイル> --reason <理由>` で工程を終える。デプロイの工程はこの 3 つがそろわないと完了にならず、`finish` は文脈にある値で出力の欠けを補わない。そのため、`delivery` と `product_version` だけを渡すと、出力の規約に合わないとして断られる
+  - 次の操作。実際の届け先を確かめ、工程の出力の規約に合う JSON のファイルを用意する。`ndf progress check <ID> デプロイ --output <JSONファイル>` で形を確かめてから、`ndf progress finish <ID> デプロイ --output <JSONファイル> --reason <理由>` で工程を終える
+
+  用意する JSON は、次の例の形にする。停止理由には、この例を `manual_finish_example`（`src/ndf/progress/gate/entry.py`）で組んで載せる。`product_version` には記録済みの配布識別子が入る。`<…>` の所は、利用者が実際の届け先の行と、記録済みの `mvv_gate` のオブジェクトに置き換える。`mvv_gate` は、`ndf progress show <ID>` の `metrics.history` で、ステップ `release-mvv` が書いた出力の事象にある
+
+  ```json
+  {
+    "summary": "届け先を確かめてデプロイの工程を手で終えた",
+    "steps": [],
+    "outputs": {
+      "product_version": "main abc1234",
+      "delivery": {"target": "<届け先>", "kind": "<auto か manual>", "trigger": "<届ける契機>", "channel": "production", "versioned": false},
+      "mvv_gate": "<記録済みの mvv_gate のオブジェクト>"
+    }
+  }
+  ```
+
+  この形にする理由は 2 つある。工程の出力の規約（`contracts/workflow/stage-io.schema.json` の `stage-out`）は `summary` と `steps` を必須とする（`steps` は空の並びでよい）。また、デプロイの工程は `outputs` の 3 つがそろわないと完了にならず、`finish` は文脈にある値で出力の欠けを補わない。どれかが欠けると、`finish` は出力の規約に合わないとして断る
 - `_outputs_of` の 1 行は、`version_number` が真なら「`product_version` はバージョン番号（例 `1.2.3`）」、偽なら「`product_version` は出したものを指す空白だけでない文字列（例 `main abc1234`）」とする。作業の出力に `product_version` が無ければ、この行を書かない
 
 **工程が読んだ設定を使い回さない理由**: プランを組む `prepare_plan` も、1 回の試行に 1 回 `.ndf/project.json` を読む（`invoke._project`）。ただし、読む場所は工程の入力の作業場所（`work_location`）で、worker が動く承認の対象のリポジトリ（`_work_dir`）と同じとは限らない。また、`_project` は `.ndf/project.json` をそのまま読むだけで、`branch_strategy.load` が行う旧いキーとスキーマの検査をしない。そのため、worker の作業場所で `branch_strategy.load` を読む。工程の側で読んで `values.json` へ写す案は、写した値が正本の外のキャッシュになり（Value 8）、作業場所が同じかを確かめるにはやはり根を解く必要があるので採らない。増える処理は、`release` の作業を 1 回起動するごとに設定の読み込み 1 回である。`git rev-parse` は、作業場所が設定を持つリポジトリの根でないときだけ 1 回打つ。ほかの作業では、設定の読み込みも `git` の起動も増えない
@@ -349,7 +365,7 @@ plugins/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `_strategy_at` | `progress/command.py` の `strategy`、`domains/release/route_decide.py` の `route_of`、`progress/invoke.py` の `_project` | `grep -rn 'version_store' src/ndf --include=*.py`、`grep -n 'def _project' src/ndf/progress/invoke.py` | 使えない。`strategy` は読めないと `FactUnknown` を上げ、`route_of` は配布の経路全体を組む。`_project` は読む場所が違い、スキーマの検査をしない（上の「工程が読んだ設定を使い回さない理由」）。`branch_strategy.load` を使う |
+| `_strategy_at` | `progress/command.py` の `strategy`、`domains/release/route_decide.py` の `route_of`、`progress/invoke.py` の `_project` | `grep -rn 'version_store' src/ndf --include=*.py`、`grep -n 'def _project' src/ndf/progress/invoke.py` | 使えない。`strategy` は読めないと `FactUnknown` を上げ、`route_of` は配布の経路全体を組む。`_project` は読む場所が違い、スキーマの検査をしない（上の「工程が読んだ設定を使い回さない理由」）。`branch_strategy.load` を使う。根の解き方だけは `command.strategy_root` を共有する |
 | `production_delivery` | `forms_decide.deliveries_of`、`production_merge._automatic_row` | `grep -rn 'def deliveries_of\|def _automatic_row'` | 条件だけを `on_channel` に切り出して 3 つで使う。`deliveries_of` が返す形は行を縮めるので使わない |
 | `on_channel` | `deliveries_of` と `_automatic_row` の中の条件式 | 同上 | 式を移す。`reaches` は開発版のチャネルの語を `base` に読み替えて `on_channel` を呼ぶ |
 
@@ -381,9 +397,10 @@ plugins/ndf/
 | `released_where` | `src/ndf/progress/plan/__init__.py` | 新設 | `released_where(strategy: Optional[branch_strategy.Strategy]) -> tuple[str, Optional[dict[str, Any]]]` | 種類を `none`・`versioned`・`unknown`（`strategy` が `None`）の 3 語で返す。種類が `none` なら `production_delivery` の行も返す |
 | `record_release` | `src/ndf/progress/plan/__init__.py` | 変更 | 今のまま | `released` の回答では、`store` と `delivery` を、`None` でなければ回答の記録に足す |
 | `_read_delivered` | `src/ndf/progress/plan/cli.py` | 新設 | `_read_delivered(a: argparse.Namespace, cwd: Path) -> None` | `released` の回答なら、打った作業ディレクトリの根の設定を `command.strategy(cwd)` で 1 回読み、`released_where` の結果を `a.delivered` に置く。DB のトランザクションを開く前に打つ |
-| `_recorded_where` | `src/ndf/progress/gate/release.py` | 新設 | `_recorded_where(reply: Mapping[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]` | 回答に残った種類と届け先。種類が 3 語のどれでもなければ `None`。届け先は種類が `none` で `fits_context` が真のときだけ返す |
-| `_released` | `src/ndf/progress/gate/release.py` | 変更 | `_released(reply: Mapping[str, Any], value: str) -> dict[str, Any]` | `_recorded_where` が届け先を返せば、承認の回答の出力に `delivery` として足す |
-| `take_reply` | `src/ndf/progress/gate/release.py` | 変更 | 今のまま | 設定を読まない。承認の回答では、`Answer.release_store` に `_recorded_where` の種類を入れる |
+| `strategy_root` | `src/ndf/progress/command.py` | 新設 | `strategy_root(cwd: Path) -> Path` | 設定を読むリポジトリの根。`cwd` が `.ndf/project.json` を持てば `cwd` を返して `git` を起動しない。持たないときだけ `git rev-parse --show-toplevel` を 1 回打つ。`command.strategy` と `_strategy_at` が根をこの関数で決める |
+| `_recorded_where` | `src/ndf/progress/gate/release.py` | 新設 | `_recorded_where(reply: Mapping[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]` | 回答に残った種類と届け先。種類が 3 語のどれでもなければ `None`。届け先は、種類が `none` で、`on_channel(行, "production")` が真で、`fits_context` が真のときだけ返す。外のオーガナイザーが `channel: base` の行を書いても本番の配布の実績にしない |
+| `_released` | `src/ndf/progress/gate/release.py` | 変更 | `_released(reply: Mapping[str, Any], value: str, row: Optional[dict[str, Any]]) -> dict[str, Any]` | 渡された届け先 `row` があれば、承認の回答の出力に `delivery` として足す |
+| `take_reply` | `src/ndf/progress/gate/release.py` | 変更 | 今のまま | 設定を読まない。承認の回答では `_recorded_where` を 1 回だけ呼び、返った届け先を `_released` へ、種類を `Answer.release_store` へ渡す |
 | `Answer.release_store` | `src/ndf/progress/gate/answering.py` | 新設 | `release_store: Optional[str] = None`（データクラスの欄） | 回答が値を運ぶとき、出力の事象の payload に `outputs` と並べて `release_store` を書く。`None` なら書かない（ほかの回答は今のまま） |
 
 - **届け先と種類は、配布したリポジトリの設定から、回答を記録する時点に決める。** レーンが回答を取り込む時点の設定で決めると、取り込むまでに本番の届け先が A から B に変わったとき、A に出した配布識別子に B が実績として残る（Value 13）。また、レーンの側には設定を持つ作業ディレクトリの場所が無く、Git の保存先の位置から逆算すると、`git clone --separate-git-dir` で Git のデータを分けた構成で設定を読めない（Value 4）
@@ -402,7 +419,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `_read_delivered` | 設定が無い・読めない・`git` の中でない | 設定の誤り | `command.strategy` の `FactUnknown`、`GitError`・`OSError` | 届け先を記録せずに、種類を `unknown` として回答を記録する | 回答は記録される。デプロイの工程は、作業の時点で設定を読めるかに関わらず、worker を起動せずに `stopped`（`precondition`） | 利用者が実際の届け先を確かめ、`ndf progress finish` で工程を手で終える（上の `released_outcome` の停止理由） |
 | `production_delivery` | 本番に届く行が 0 か 2 つ以上・文脈の形に合わない・`deliveries` が配列でない | 設定から届け先が 1 つに決まらない | 関数の中 | `None` を返す | 同上 | 同上 |
-| `_recorded_where` | 回答の `store` が 3 語のどれでもない・`delivery` が文脈の形に合わない | 外のオーガナイザーが書いた値の誤り | 関数の中 | 種類か届け先を記録されていないものとする（回答は断らない） | 同上 | 同上 |
+| `_recorded_where` | 回答の `store` が 3 語のどれでもない・`delivery` が本番に届く行でない・文脈の形に合わない | 外のオーガナイザーが書いた値の誤り | 関数の中 | 種類か届け先を記録されていないものとする（回答は断らない） | 同上 | 同上 |
 
 ### 単体テストの観点
 
@@ -468,12 +485,13 @@ plugins/ndf/
 | `Outcome.summary` | `src/ndf/core/plan/transition_decide.py` | 新設 | `summary: str = ""`（`NamedTuple` の欄） | 遷移へステップの要約を渡す |
 | `_perform` | `src/ndf/core/plan/runner.py` | 変更 | 今のまま | `run_step` の結果の `summary` を `Outcome` に入れる |
 | `_after_gate` | `src/ndf/core/plan/transition_decide.py` | 変更 | `_after_gate(state: StepState, step: Step, summary: str) -> Next` | 続きの無い承認ゲートの要約に、止まったステップの要約を含める |
-| `_keep_step_missing` | `src/ndf/core/plan/records.py` | 新設 | `_keep_step_missing(state_dir: Path, step_id: str, names: Optional[list[str]]) -> None` | ステップの最後の回の `missing_outputs` を残す（無ければ外す） |
+| `_keep_step_missing` | `src/ndf/core/plan/records.py` | 新設 | `_keep_step_missing(state_dir: Path, step_id: str, status: str, names: Optional[list[str]]) -> None` | `status` が `gate` のときだけ、ステップの `missing_outputs` を残す（無ければ外す）。`gate` 以外では記録を読みも書きもしない。内容が変わらなければ書かない |
 | `recorded_step_missing` | `src/ndf/core/plan/records.py` | 新設 | `recorded_step_missing(state_dir: Path) -> dict[str, list[str]]` | 残した `missing_outputs` を読む |
-| `run_step` | `src/ndf/core/plan/runner.py` | 変更 | 今のまま | `_keep_step_gaps` と並べて、`steps.outcome_of` の `missing_outputs` を `_keep_step_missing` へ渡す |
+| `run_step` | `src/ndf/core/plan/runner.py` | 変更 | 今のまま | `_keep_step_gaps` と並べて、ステップの結果の `status` と、`steps.outcome_of` の `missing_outputs` を `_keep_step_missing` へ渡す |
 | `final_result` | `src/ndf/core/plan/runner.py` | 変更 | 今のまま | 承認ゲートで終わった回は、承認ゲートで止まったステップ（終わりの状態の `last`）の `missing_outputs` を結果の `metrics.missing_outputs` に載せる |
 
 - `_after_gate` の要約は `ステップ {step.id} が承認ゲートで止まった: {summary}`（`summary` が空なら今の文）
+- `_keep_step_missing` が `gate` のときだけ記録を読み書きするのは、記録を読むのが承認ゲートで止まった最後のステップのぶんだけだからである（`runner.final_result`）。そのステップは止まった回にこの関数を通って記録を書き直しているので、`gate` 以外の結果で前の回の記録を外さなくても、古い値は読まれない。これで、全ステップでのファイルの読み取りと、記録が作られた後の書き込みが増えない
 - `_keep_step_missing` は `_keep_step_gaps` と同じ形のファイル（ステップの id → 名前の並び）を `step-missing.json` に書く。`step-gaps.json` は `stopped` を返したステップの欠けを残すファイルなので、`gate` の欠けは混ぜない
 
 ### 単体テストの観点

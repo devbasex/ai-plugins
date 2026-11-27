@@ -14,7 +14,7 @@ import pytest
 from ndf import cli, contracts, identity
 from ndf.contracts import causes, result, worker_kinds, worker_paths
 from ndf.core import route, worker
-from ndf.progress import gate, invoke, model
+from ndf.progress import definition, gate, invoke, model
 from ndf.progress.gate import entry
 
 KIND_KEYS = {"work", "summary", "skills", "excerpt", "inputs", "cwd", "outputs"}
@@ -574,3 +574,12 @@ def test_a_versioned_record_launches_the_worker_with_the_version_number_shape(tm
     handoff = entry._work_handoff("release", state, None)
     os.close(handoff.fd)
     assert handoff.version_number is True
+
+
+def test_the_manual_finish_example_fits_the_deploy_stage_once_the_placeholders_are_filled():
+    # 停止理由が示す例の <…> を実際の届け先と記録済みの mvv_gate に置き換えれば、ndf progress finish の確かめを通る
+    example = entry.manual_finish_example("main abc1234")
+    example["outputs"]["delivery"] = ROW
+    example["outputs"]["mvv_gate"] = {"gate": "release", "skip": False, "why": ["人へ問う"]}
+    stage = definition.load_definition("standard").stage("デプロイ")
+    assert definition.check_stage_output(stage, example)[0] == []

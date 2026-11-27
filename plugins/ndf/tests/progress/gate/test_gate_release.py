@@ -439,3 +439,18 @@ def test_an_approval_without_the_value_fails_with_the_names_and_is_not_relaunche
     assert "足りない出力: product_version" in detail and "バージョンを返せない" in detail and "ndf progress retry" in detail
     flow.turn(tid, deploy)
     assert calls == ["release"]
+
+
+@pytest.mark.parametrize(
+    ("reply", "want"),
+    [
+        ({"store": "none", "delivery": ROW}, ("none", ROW)),
+        ({"store": "none", "delivery": {**ROW, "channel": "base"}}, ("none", None)),
+        ({"store": "versioned", "delivery": ROW}, ("versioned", None)),
+        ({"store": "どれでもない", "delivery": ROW}, (None, None)),
+        ({"delivery": ROW}, (None, None)),
+    ],
+)
+def test_the_recorded_delivery_is_kept_only_when_it_reaches_production(reply, want):
+    # 外のオーガナイザーがベースブランチ向けの行を書いても、本番の配布の実績にしない
+    assert release._recorded_where({"result": "released", **reply}) == want
