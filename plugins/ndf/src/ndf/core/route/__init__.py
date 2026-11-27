@@ -98,8 +98,6 @@ LAUNCH_SOURCES = {"acceptance": ("issue",)}
 # `ndf cross-review run` を、ステップを打つ時点でブランチの PR の番号を読んで `--pr` に足して打つ。設計のプランは PR を
 # プランの中（pr のステップ）で作るため、組む時点に番号が無い。打つ時点で読めば、PR を作った後の番号で組める
 REVIEW_STATE = "{state_dir}/cross-review"
-# 既定の実装のレビューの起動が足す、前のバージョンの出力を移して続ける引数（`review_command`）
-SET_ASIDE_UNRECORDED = "--set-aside-unrecorded-out"
 REVIEW_WITH_PR = 'n=$(gh pr view "$0" --json number --jq .number) && [ -n "$n" ] || exit 1; exec "$@" --pr "$n"'
 # 実装のテンプレートの既定の `{{review}}`: ブランチから引き直さず、`pr` のステップが保存した番号（`$0` のファイル）を読む
 # （#4369。同じブランチから別のマージ先へ出した PR をレビューしない）
@@ -674,16 +672,10 @@ def review_launch(template_name: str, branch: str, base: str) -> list[str]:
 
 
 def review_command(template_name: str, base: str) -> list[str]:
-    """設定が無いときのレビューの起動そのもの（`--pr` を持たない `ndf cross-review run`）。設計のテンプレートは purpose design。
-
-    実装のテンプレートは、出力（`reviewed-head`・`reviewed-pr`）を実行の保存先に置くので `--set-aside-unrecorded-out` を足し、
-    版上げをまたいで再開しても前のバージョンの出力で止まらない（#3702）。テンプレートの並びには書かない。設定
-    （`workflow.launch.review`）から渡す独自のレビューの起動は、この NDF 固有の引数を受け付けるとは限らないためである（PR 4638 の r1-6）。
-    """
+    """設定が無いときのレビューの起動そのもの（`--pr` を持たない `ndf cross-review run`）。設計のテンプレートは purpose design。"""
     purpose = "design" if template_name == "design" else "code"
     entry = identity.FIXED_WORDS["entrypoint"]
-    argv = [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
-    return [*argv, SET_ASIDE_UNRECORDED] if template_name == "impl" else argv
+    return [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
 
 
 def unit_review_launch(repo: str, command: Sequence[str]) -> list[str]:

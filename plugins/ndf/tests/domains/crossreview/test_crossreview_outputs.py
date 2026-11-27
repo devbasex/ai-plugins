@@ -1,365 +1,66 @@
-"""`cross-review run` の出力ファイルの片付けと書き出し（`outputs`。#3702）。リポジトリも相手役も使わない。"""
+"""`ndf.domains.crossreview.outputs`: 出力の片付けと書き込み（PR 4638 の C4、利用者が選んだ判断 A）。"""
 
 from __future__ import annotations
 
-import json
-import os
-import re
-import stat
 from pathlib import Path
 
 import pytest
 
-from ndf.domains.crossreview import outputs, store
-
-from ._repos import run_cli
-
-HEAD = "a" * 40 + "\n"
+from ndf.domains.crossreview import outputs
 
 
-def test_pr_4638_r1_4_recreated_output_is_not_taken_for_the_previous_one(tmp_path: Path) -> None:
-    """PR 4638 の r1-4: 消すと書いた出力の記録も消え、同じパスへ同じ中身で作り直したファイルは NDF の出力とみなさない。"""
-    out = tmp_path / "head"
-    outputs.write_output(out, HEAD)
-    outputs.clear_stale(out)
+def test_output_written_by_the_previous_run_is_cleared(tmp_path: Path) -> None:
+    """前の起動が書いた出力（記録と一致する）は、出力と記録の両方を消す。"""
+    out = tmp_path / "h"
+    outputs.write_recorded(out, "a" * 40 + "\n")
+    outputs.clear_previous(out)
     assert not out.exists() and not outputs.owner_record(out).exists()
-    outputs.write_output(out, HEAD)
-    out.unlink()
-    out.write_text(HEAD, encoding="utf-8")
-    # 時刻の刻みの粗いファイルシステムでも、後から作り直したファイルとして更新時刻を変える
-    os.utime(out, ns=(1, 1))
+
+
+@pytest.mark.parametrize("recorded", [None, "b" * 40 + "\n"], ids=["no-record", "other-text"])
+def test_file_not_matching_the_record_is_kept(tmp_path: Path, recorded: str | None) -> None:
+    """記録が無いか記録と一致しない中身のあるファイルは、消さずに `Unowned`（記録も残す）。"""
+    out = tmp_path / "h"
+    if recorded is not None:
+        outputs.write_recorded(out, recorded)
+    out.write_text("利用者のデータ\n", encoding="utf-8")
     with pytest.raises(outputs.Unowned):
-        outputs.clear_stale(out)
-    assert out.read_text(encoding="utf-8") == HEAD
+        outputs.clear_previous(out)
+    assert out.read_text(encoding="utf-8") == "利用者のデータ\n"
+    assert outputs.owner_record(out).exists() == (recorded is not None)
 
 
-def test_pr_4638_r3_2_output_without_a_record_is_kept(tmp_path: Path) -> None:
-    """PR 4638 の r3-2: 記録の無い中身のあるファイルは、中身が何であっても来歴を確かめられないので消さない。"""
-    out = tmp_path / "head"
-    out.write_text(HEAD, encoding="utf-8")
+def test_record_not_written_by_ndf_is_kept(tmp_path: Path) -> None:
+    """隣の記録が NDF の記録と読めなければ、出力も記録も消さずに `Unowned`。"""
+    out = tmp_path / "h"
+    outputs.owner_record(out).write_text("利用者のメモ", encoding="utf-8")
     with pytest.raises(outputs.Unowned):
-        outputs.clear_stale(out)
-    assert out.read_text(encoding="utf-8") == HEAD
+        outputs.clear_previous(out)
+    assert outputs.owner_record(out).read_text(encoding="utf-8") == "利用者のメモ"
 
 
-def test_pr_4638_r2_4_record_location_that_is_not_a_file_is_refused(tmp_path: Path) -> None:
-    """PR 4638 の r2-4・r3-7: 記録の保存先に同名のディレクトリがあれば、始めの確かめで `OSError`。"""
+def test_symlink_output_is_kept(tmp_path: Path) -> None:
+    """出力先がシンボリックリンクなら、リンクもリンク先も消さずに `Unowned`。"""
+    target = tmp_path / "target"
+    target.write_text("", encoding="utf-8")
     out = tmp_path / "h"
-    outputs.owner_record(out).mkdir()
-    with pytest.raises(OSError):
-        outputs.clear_stale(out)
-    assert not out.exists()
-
-
-@pytest.mark.parametrize("made_empty", [False, True], ids=["absent", "empty"])
-def test_pr_4638_r2_4_output_is_restored_when_the_record_cannot_be_written(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, made_empty: bool
-) -> None:
-    """PR 4638 の r2-4: 記録を残せなければ、出力を書く前の状態（無い・空）へ戻す（次の起動が記録の無い出力で止まらない）。"""
-    put = outputs.Claim._put
-
-    def broken(self, value):
-        if value.keys() & {outputs.STAGING_KEY, outputs.WRITING_KEY}:
-            raise OSError("書けない")
-        put(self, value)
-
-    out = tmp_path / "h"
-    if made_empty:
-        out.touch()
-    monkeypatch.setattr(outputs.Claim, "_put", broken)
-    with pytest.raises(OSError):
-        outputs.write_output(out, HEAD)
-    monkeypatch.undo()
-    assert (out.exists(), out.read_text(encoding="utf-8") if made_empty else "") == (made_empty, "")
-    outputs.clear_stale(out)
-
-
-def test_pr_4638_r3_3_empty_output_keeps_its_inode_and_mode(tmp_path: Path) -> None:
-    """PR 4638 の r3-3: 呼び手が 0600 で先に作った空の出力先は、その inode と権限のまま書く。"""
-    out = tmp_path / "h"
-    out.touch(mode=0o600)
-    out.chmod(0o600)
-    before = out.stat().st_ino
-    outputs.clear_stale(out)
-    outputs.write_output(out, HEAD)
-    assert (out.stat().st_ino, stat.S_IMODE(out.stat().st_mode), out.read_text(encoding="utf-8")) == (before, 0o600, HEAD)
-
-
-def test_pr_4638_r1_3_rerun_keeps_the_inode_and_mode_of_the_given_output(tmp_path: Path) -> None:
-    """PR 4638 の r1-3: 呼び手が 0600 で用意した出力先は、書いた後に同じ出力先で打ち直しても消さず、同じ inode と権限で書く。"""
-    out = tmp_path / "h"
-    out.touch(mode=0o600)
-    out.chmod(0o600)
-    before = out.stat().st_ino
-    outputs.write_output(out, HEAD)
-    outputs.write_output(out, "b" * 40 + "\n")
-    assert (out.stat().st_ino, stat.S_IMODE(out.stat().st_mode)) == (before, 0o600)
-    outputs.clear_stale(out)
-    assert (out.stat().st_ino, out.read_text(encoding="utf-8")) == (before, "")
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
-def test_pr_4638_r3_5_parent_without_write_permission_is_refused(tmp_path: Path) -> None:
-    """PR 4638 の r3-5: 空の出力先に書けても、親のディレクトリに記録を作れなければ、始めの確かめで `OSError`。"""
-    out = tmp_path / "d" / "h"
-    out.parent.mkdir()
-    out.touch()
-    out.parent.chmod(0o500)
-    try:
-        with pytest.raises(OSError):
-            outputs.clear_stale(out)
-    finally:
-        out.parent.chmod(0o700)
-
-
-def test_pr_4638_r1_4_record_is_written_before_the_output_is_published(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """PR 4638 の r1-4・r2-1・r2-7・r2-9・r3-5: 無い出力は、記録を残してから出力の名前へ置き換える。置き換えの前に強制終了
-    されて記録と一時のファイルが残っても、次の起動は記録から一時のファイルを見つけて消し、記録も消して続く。記録のための一時の
-    ファイルは作らないので、ディレクトリには何も残らない。"""
-    out = tmp_path / "h"
-    record = outputs.owner_record(out)
-    replace = os.replace
-    left: dict[str, str] = {}
-
-    def watching(src, dst):
-        if Path(dst) != out:  # 出力の名前への置き換えだけを止める
-            return replace(src, dst)
-        # 強制終了された時点の記録と一時のファイルを残しておく（hard link は inode を保つ）
-        left.update(record=record.read_text(encoding="utf-8"), tmp=str(src))
-        os.link(src, tmp_path / "kept")
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(outputs.os, "replace", watching)
-    with pytest.raises(KeyboardInterrupt):
-        outputs.write_output(out, HEAD)
-    monkeypatch.setattr(outputs.os, "replace", replace)
-    # 例外処理も走らずに残った状態へ戻す
-    record.write_text(left["record"], encoding="utf-8")
-    # 実際の記録と同じ権限へ戻す（umask 022 では 0644 になり、権限の検査で止まる。PR 4638 の r5-3）
-    record.chmod(0o600)
-    os.rename(tmp_path / "kept", left["tmp"])
-    outputs.clear_stale(out)
-    assert sorted(p.name for p in tmp_path.iterdir()) == []
-
-
-@pytest.mark.parametrize("written", [0, 10, len(HEAD)], ids=["none", "part", "all"])
-def test_pr_4638_r2_8_write_into_an_empty_output_is_resumable(tmp_path: Path, written: int) -> None:
-    """PR 4638 の r1-4・r2-8: 空の出力先へ書いている途中か書いた後に、書いた後の記録を残す前に落ちても、次の起動は書きかけの
-    記録で今回の書き込みと確かめ、inode を保ったまま空へ戻す。同じ書き込みをやり直せる。"""
-    out = tmp_path / "h"
-    out.touch()
-    before = out.stat().st_ino
-    store.write_object(outputs.owner_record(out), outputs._writing_record(out, HEAD))
-    out.write_text(HEAD[:written], encoding="utf-8")
-    outputs.clear_stale(out)
-    assert (out.stat().st_ino, out.read_text(encoding="utf-8"), outputs.owner_record(out).exists()) == (before, "", False)
-    outputs.write_output(out, HEAD)
-    assert (out.stat().st_ino, out.read_text(encoding="utf-8")) == (before, HEAD)
-
-
-@pytest.mark.parametrize("output", ["absent", "empty", "filled"])
-def test_pr_4638_r2_5_record_not_written_by_ndf_is_kept(tmp_path: Path, output: str) -> None:
-    """PR 4638 の r2-5: 記録の名前のファイルでも、NDF が書いた記録と確かめられなければ消さずに止まる。"""
-    out = tmp_path / "h"
-    if output != "absent":
-        out.write_text("" if output == "empty" else HEAD, encoding="utf-8")
-    record = outputs.owner_record(out)
-    record.write_text('{"note": "利用者のファイル"}', encoding="utf-8")
-    with pytest.raises((OSError, outputs.Unowned)):
-        outputs.clear_stale(out)
-    assert record.read_text(encoding="utf-8") == '{"note": "利用者のファイル"}'
-
-
-def test_pr_4638_r2_7_staging_file_that_does_not_match_the_record_is_kept(tmp_path: Path) -> None:
-    """PR 4638 の r2-7・r4-7: 記録の指す一時のファイルでも、inode が記録と違えば利用者のファイルとみなして消さない。
-    記録も消さず、次の起動も同じ確かめで止まる。"""
-    out = tmp_path / "h"
-    tmp = tmp_path / ".h.0.tmp"
-    tmp.write_text("利用者のファイル", encoding="utf-8")
-    staging = {"tmp": tmp.name, "dev": tmp.stat().st_dev, "ino": tmp.stat().st_ino + 1}
-    store.write_object(outputs.owner_record(out), outputs._record(**{outputs.STAGING_KEY: staging}))
-    with pytest.raises(OSError):
-        outputs.clear_stale(out)
-    assert (tmp.read_text(encoding="utf-8"), outputs.owner_record(out).exists()) == ("利用者のファイル", True)
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
-def test_pr_4638_r1_5_write_only_empty_output_is_refused(tmp_path: Path) -> None:
-    """PR 4638 の r1-5: 書いた後に記録を作るために読み直すので、読めない空の出力先は始めの確かめで `OSError`。"""
-    out = tmp_path / "h"
-    out.touch()
-    out.chmod(0o200)
-    with pytest.raises(OSError):
-        outputs.clear_stale(out)
-
-
-def test_pr_4638_r3_4_output_in_use_by_a_running_review_is_not_cleared(tmp_path: Path) -> None:
-    """PR 4638 の r3-4: 同じ出力先を実行中の起動が使っていれば、後の起動は片付けずに `Busy` で止まり、先の起動は書き終える。"""
-    out = tmp_path / "h"
-    with outputs.claim(out) as running:
-        with pytest.raises(outputs.Busy):
-            outputs.clear_stale(out)
-        running.write(HEAD)
-    assert out.read_text(encoding="utf-8") == HEAD
-    outputs.clear_stale(out)
-    assert not out.exists()
-
-
-def test_pr_4638_r4_4_record_readable_by_others_is_refused(tmp_path: Path) -> None:
-    """PR 4638 の r4-4: 他の利用者が読める既存の記録には書く中身を残さず、権限も変えずに止まる。"""
-    out = tmp_path / "h"
-    out.touch()
-    record = outputs.owner_record(out)
-    record.touch()
-    record.chmod(0o644)
-    with pytest.raises(OSError):
-        outputs.write_output(out, HEAD)
-    assert (stat.S_IMODE(record.stat().st_mode), record.read_bytes(), out.read_text(encoding="utf-8")) == (0o644, b"", "")
-
-
-def test_pr_4638_r4_5_cut_record_update_keeps_the_previous_record(tmp_path: Path) -> None:
-    """PR 4638 の r4-5: 書いた後の記録を足す途中で終了しても、前の書きかけの記録が残り、次の起動はそれで確かめて空へ戻す。"""
-    out = tmp_path / "h"
-    out.touch()
-    before = out.stat().st_ino
-    record = outputs.owner_record(out)
-    store.write_object(record, outputs._writing_record(out, HEAD))
-    out.write_text(HEAD, encoding="utf-8")
-    with record.open("ab") as cut:
-        cut.write(b'\n{"ndf_record": "cross-review-output", "wri')
-    outputs.clear_stale(out)
-    assert (out.stat().st_ino, out.read_text(encoding="utf-8"), record.exists()) == (before, "", False)
-
-
-def test_pr_4638_r4_5_short_record_write_is_detected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """PR 4638 の r4-5: 記録を書き切れなければ `OSError` で止まり、出力を書く前の状態へ戻す。"""
-    pwrite = os.pwrite
-
-    def short(fd, data, offset):
-        return pwrite(fd, data[:-1] if data.startswith(b"\n") else data, offset)
-
-    out = tmp_path / "h"
-    monkeypatch.setattr(outputs.os, "pwrite", short)
-    with pytest.raises(OSError):
-        outputs.write_output(out, HEAD)
-    monkeypatch.undo()
-    outputs.clear_stale(out)
-    assert sorted(p.name for p in tmp_path.iterdir()) == []
-
-
-def test_pr_4638_r4_6_record_is_kept_when_clearing_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """PR 4638 の r4-6: 書きかけの出力を空へ戻せずに止まっても記録を消さず、原因を直した次の起動がその記録で片付ける。"""
-    out = tmp_path / "h"
-    out.touch()
-    record = outputs.owner_record(out)
-    store.write_object(record, outputs._writing_record(out, HEAD))
-    out.write_text(HEAD, encoding="utf-8")
-
-    def denied(path, found):
-        raise PermissionError("空へ戻せない")
-
-    monkeypatch.setattr(outputs, "_clear_output", denied)
-    with pytest.raises(OSError):
-        outputs.clear_stale(out)
-    assert record.exists()
-    monkeypatch.undo()
-    outputs.clear_stale(out)
-    assert (out.read_text(encoding="utf-8"), record.exists()) == ("", False)
-
-
-def test_pr_4638_r5_2_record_line_without_its_newline_is_not_taken(tmp_path: Path) -> None:
-    """PR 4638 の r5-2: 足した記録の行が末尾の改行だけを欠いて終わっても、JSON として読めるその行は使わず、前の書きかけの
-    記録で空へ戻す（書いた後の記録と取り違えて、呼び手の出力先を消さない）。"""
-    out = tmp_path / "h"
-    out.touch()
-    before = out.stat().st_ino
-    record = outputs.owner_record(out)
-    store.write_object(record, outputs._writing_record(out, HEAD))
-    out.write_text(HEAD, encoding="utf-8")
-    written = outputs._record(**{outputs.WRITTEN_KEY: outputs._file_identity(out)})
-    with record.open("ab") as cut:
-        cut.write(b"\n" + json.dumps(written, sort_keys=True).encode("utf-8"))
-    outputs.clear_stale(out)
-    assert (out.exists(), out.stat().st_ino, out.read_text(encoding="utf-8")) == (True, before, "")
-
-
-def test_pr_4638_r1_5_hard_linked_outputs_are_invalid(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """PR 4638 の r1-5・r2-4: 同じ空のファイルへのハードリンクを別の出力先に渡すと、パスが違っても inode で重なりを見つけ、
-    リポジトリを読む前の引数の確かめで invalid で止まる（出力は書かない）。"""
-    head = tmp_path / "h"
-    head.touch()
-    (tmp_path / "b").hardlink_to(head)
-    argv = ["run", "--pr", "7", "--state-dir", str(tmp_path / "st"), "--base", "origin/main"]
-    code, got = run_cli(capsys, *argv, "--reviewed-out", str(head), "--reviewed-base-out", str(tmp_path / "b"))
-    assert (got["cause"]["kind"], head.read_text(encoding="utf-8")) == ("invalid", "")
-
-
-def test_pr_4638_r3_2_unrecorded_output_is_set_aside_without_deleting(tmp_path: Path) -> None:
-    """PR 4638 の r3-2・r3-3: `legacy` を渡せば、前のバージョンが書いた形の出力を消さずに隣の別名へ移し、記録付きの出力を
-    書いて続ける。指定しなければ従来どおり消さずに止まる。"""
-    out = tmp_path / "head"
-    out.write_text(HEAD, encoding="utf-8")
-    before = out.stat().st_ino
-    with pytest.raises(outputs.Unowned):
-        outputs.clear_stale(out)
-    with outputs.claim(out, outputs.LEGACY_HEAD) as held:
-        aside = held.set_aside_to
-        assert aside is not None and out.read_bytes() == b""
-        held.write("b" * 40 + "\n")
-    assert (aside.parent, aside.stat().st_ino, aside.read_text(encoding="utf-8")) == (tmp_path, before, HEAD)
-    # 書き直した出力は記録付きなので、次の起動は指定が無くても片付けられる（権限を保つため、空へ戻して残す。PR 4638 の r1-5）
-    outputs.clear_stale(out)
-    assert out.read_bytes() == b"" and aside.exists()
-
-
-@pytest.mark.parametrize("text", ["メモ\n", "a" * 40, "a" * 40 + "\nメモ\n"])
-def test_pr_4638_r1_2_only_outputs_of_the_old_version_are_set_aside(tmp_path: Path, text: str) -> None:
-    """PR 4638 の r1-2: 前のバージョンが書いた形に丸ごと合わない記録の無いファイルは、`legacy` を渡しても元の場所に残して止まる。"""
-    out = tmp_path / "head"
-    out.write_text(text, encoding="utf-8")
-    with pytest.raises(outputs.Unowned):
-        _claim_once(out, outputs.LEGACY_HEAD)
-    assert out.read_text(encoding="utf-8") == text
-    assert not list(tmp_path.glob("head.unrecorded-*"))
-
-
-def _claim_once(out: Path, legacy: "re.Pattern[bytes]") -> None:
-    with outputs.claim(out, legacy):
-        pass
-
-
-def test_pr_4638_r1_4_interrupted_set_aside_finishes_with_the_same_name(tmp_path: Path) -> None:
-    """PR 4638 の r1-4: 別名へのリンクを作った後に終了した移動は、次の起動が同じ別名で終え、別名を増やさない。"""
-    out = tmp_path / "head"
-    out.write_text(HEAD, encoding="utf-8")
-    left = tmp_path / "head.unrecorded-0011aabb"
-    os.link(out, left)
-    with outputs.claim(out, outputs.LEGACY_HEAD) as held:
-        assert held.set_aside_to == left
-    assert list(tmp_path.glob("head.unrecorded-*")) == [left]
-    assert (left.read_text(encoding="utf-8"), out.read_bytes()) == (HEAD, b"")
-
-
-def test_pr_4638_r1_5_set_aside_keeps_the_mode_of_the_old_output(tmp_path: Path) -> None:
-    """PR 4638 の r1-5: 移した後に書き直す出力は、umask によらず前の出力の権限（0600）を引き継ぐ。"""
-    out = tmp_path / "head"
-    out.write_text(HEAD, encoding="utf-8")
-    out.chmod(0o600)
-    old = os.umask(0o022)
-    try:
-        with outputs.claim(out, outputs.LEGACY_HEAD) as held:
-            held.write("b" * 40 + "\n")
-    finally:
-        os.umask(old)
-    assert stat.S_IMODE(out.stat().st_mode) == 0o600
-
-
-def test_pr_4638_r1_7_symlink_to_an_empty_file_is_refused(tmp_path: Path) -> None:
-    """PR 4638 の r1-7: 空のファイルを指すシンボリックリンクは、空のファイルの判定より先に断り、リンク先へ書かない。"""
-    target = tmp_path / "mine"
-    target.touch()
-    out = tmp_path / "head"
     out.symlink_to(target)
     with pytest.raises(outputs.Unowned):
-        _claim_once(out, outputs.LEGACY_HEAD)
-    assert out.is_symlink() and target.read_bytes() == b""
+        outputs.clear_previous(out)
+    assert out.is_symlink() and target.exists()
+
+
+def test_empty_output_is_kept_and_written(tmp_path: Path) -> None:
+    """空のファイルは消さずに残し、そこへ書ける。"""
+    out = tmp_path / "h"
+    out.write_text("", encoding="utf-8")
+    outputs.clear_previous(out)
+    assert out.exists()
+    outputs.write_recorded(out, "x\n")
+    assert out.read_text(encoding="utf-8") == "x\n"
+
+
+def test_missing_parent_is_an_os_error(tmp_path: Path) -> None:
+    """親のディレクトリが無ければ `OSError`（相手役を起動する前に止める）。"""
+    with pytest.raises(OSError):
+        outputs.clear_previous(tmp_path / "no-such-dir" / "h")
