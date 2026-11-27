@@ -8560,6 +8560,13 @@
       "code": "repo-knowledge"
     },
     {
+      "term": "流れの設定",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/project.json` の `workflow` のうち、リポジトリの種類・工程の要否・閉じる条件を指定する項目。書くのは利用者で、無ければ NDF の既定の流れになる",
+      "source": "",
+      "pending_source": "issues/issue-4580-design.md"
+    },
+    {
       "term": "起動の設定",
       "context": "ndf-agent-cli",
       "meaning": "NDF が AI を起動するときの、リポジトリごとの指定を持つ .ndf/launch.json。工程ごとの MCP と Tool の指定、安全装置を外すランタイム、起動の実験の指定を持つ",
