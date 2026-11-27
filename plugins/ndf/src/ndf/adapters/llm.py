@@ -163,20 +163,26 @@ def _clock() -> float:
 def _launch_judge(run: claude_choice.ChoiceRun, q: _Ask, prompt: str) -> claude.ClaudeReply:
     """選んだ値で 1 回起動する。モデルを理由に拒まれ基準へ切り替えられれば、残りの期限で 1 回だけ起動し直す。
 
-    期限は単調時計で持つ。起動し直す前に、打ち直しと同じく `before_retry` で材料が古くなっていないかを確かめ、その後で残りの期限を
-    測る。確かめは切り替えの行より先に呼ぶので、例外で止めれば行を書かない。確かめの間に期限を使い切れば、行を書かずに起動もしない。
+    期限は単調時計で持つ。切り替える前に残りの期限を測り、使い切っていれば材料を確かめずに 1 回目の回答を返す。残っていれば、
+    打ち直しと同じく `before_retry` で材料が古くなっていないかを確かめ（例外はそのまま送る）、その直後にもう一度期限を測る。
+    切り替えの記録は起動し直した後に書くので、記録のロックの待ちが起動し直しの期限を食わず、起動しなければ記録も残らない。
     """
     deadline = _clock() + q.timeout
     reply = _judge_once(run, q, prompt, q.timeout)
     deadline = min(deadline, _clock() + q.timeout - (reply.seconds if reply.seconds is not None else 0.0))
+    left: list[float] = []
 
     def ready() -> bool:
+        if deadline - _clock() <= 0:
+            return False
         if q.before_retry is not None:
             q.before_retry()
-        return deadline - _clock() > 0
+        left.append(deadline - _clock())
+        return left[-1] > 0
 
     if run.fall_back(reply, ready=ready):
-        reply = _judge_once(run, q, prompt, max(deadline - _clock(), 0.0))
+        reply = _judge_once(run, q, prompt, left[-1])
+        run.record_switch()
     return reply
 
 

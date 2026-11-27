@@ -32,7 +32,7 @@ import random
 import re
 import uuid
 from collections import Counter
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -102,7 +102,7 @@ class Choice:
 
     `inherited_effort` は、ランタイム自身の effort の環境変数を子へ引き継ぐときの値（そのとき `effort` は None で、
     `--effort` を足さない）。`retry` は引き上げを求めた理由（引数か環境変数の指定の起動は None）で、`raised` は値が実際に
-    変わったか。`store` は選んだときの実験の記録の保存先で、`base_fallback` が同じ保存先へ書くために持つ。`repo` は選ぶときに
+    変わったか。`store` は選んだときの実験の記録の保存先で、`record_base_switch` が同じ保存先へ書くために持つ。`repo` は選ぶときに
     解決したリポジトリのキー（同じリクエストの打ち直しが解決し直さないために持つ）。`assigned_at` は割り付けの行の日時で、
     `observed` が読む月をその月からに絞るために持つ。
     """
@@ -873,24 +873,38 @@ def _prepared_store(env: Mapping[str, str], now: datetime, window_days: int) -> 
     return store
 
 
-def base_fallback(choice: Choice, reason: str, ready: Optional[Callable[[], bool]] = None) -> Optional[Choice]:
-    """割り付けた基準でない組の起動がモデルを理由に拒否されたとき、基準へ切り替えたことを持つ `launch_error` の行を書き、基準の組の値を返す。
+def base_choice(choice: Choice) -> Optional[Choice]:
+    """割り付けた基準でない組の起動がモデルを理由に拒否されたときの、基準の組の値。記録は書かない（`record_base_switch` が書く）。
 
-    基準の組と割り付けの無い起動は None。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなくても基準の値を返す。
-    引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、基準の組から引き上げ直す。
-    `ready` は切り替えると決まった後、行を書く前に呼ぶ（呼び手の材料と残りの期限の確かめ）。偽なら行を書かずに None、例外はそのまま
-    送り、行を書かない。
+    基準の組と割り付けの無い起動は None。引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、
+    基準の組から引き上げ直す。
     """
     if choice.assign_id is None or choice.arm is None or choice.arm == choice.base_arm:
         return None
-    if ready is not None and not ready():
-        return None
-    row = {"kind": "launch_error", "at": _time_text(_utc_now()), "assign_id": choice.assign_id, "stage": choice.stage}
-    append_row({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}, choice.store)
-    log.warning("組 %s は起動できなかったので、基準の組で続ける（工程 %s・単位 %s）", _arm_text(choice.arm), choice.stage, choice.unit)
     (model, ms), (effort, es) = _from_base(choice.base_arm, "model"), _from_base(choice.base_arm, "effort")
     back = replace(choice, model=model, effort=effort, model_source=ms, effort_source=es, assign_id=None, arm=None, raised=False)
     return _raised_once(back) if choice.retry is not None else back
+
+
+def record_base_switch(choice: Choice, reason: str) -> None:
+    """拒否された組 `choice` から基準の組へ切り替えたことを持つ `launch_error` の行を書く。
+
+    行は割り付けと同じ保存先（`choice.store`）へ書き、書けなければ警告を出して続ける。呼び手は基準の組で起動し直した後に呼ぶ
+    （記録のロックの待ちが、切り替えるかの判断と起動し直しの期限を食わないようにするため）。
+    """
+    if choice.assign_id is None or choice.arm is None:
+        return
+    row = {"kind": "launch_error", "at": _time_text(_utc_now()), "assign_id": choice.assign_id, "stage": choice.stage}
+    append_row({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}, choice.store)
+    log.warning("組 %s は起動できなかったので、基準の組で続ける（工程 %s・単位 %s）", _arm_text(choice.arm), choice.stage, choice.unit)
+
+
+def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
+    """`base_choice` の値を返し、切り替えられるなら `record_base_switch` の行を書く（起動し直す前に記録してよい呼び手が使う）。"""
+    back = base_choice(choice)
+    if back is not None:
+        record_base_switch(choice, reason)
+    return back
 
 
 def observed(choice: Choice, model: str) -> None:

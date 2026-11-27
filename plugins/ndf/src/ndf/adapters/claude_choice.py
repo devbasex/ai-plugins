@@ -24,7 +24,9 @@ class LaunchChooser(Protocol):
 
     def launch_choice(self, layer: str, name: str, runtime: str = "claude", *, cwd: Path, **request: Any) -> Any: ...
 
-    def base_fallback(self, choice: Any, reason: str, ready: Optional[Callable[[], bool]] = None) -> Optional[Any]: ...
+    def base_choice(self, choice: Any) -> Optional[Any]: ...
+
+    def record_base_switch(self, choice: Any, reason: str) -> None: ...
 
     def observed(self, choice: Any, model: str) -> None: ...
 
@@ -70,6 +72,7 @@ class ChoiceRun:
     charge_to: Optional[str] = None
     switched: bool = False
     _seen: bool = False
+    _refused: Optional[tuple[Any, str]] = None
 
     @property
     def model(self) -> Optional[str]:
@@ -108,12 +111,20 @@ class ChoiceRun:
     def fall_back(self, reply: claude.ClaudeReply, ready: Optional[Callable[[], bool]] = None) -> bool:
         """`reply` がモデルを理由にした拒否で、基準の組へ切り替えられたら真。値を替え、`request_try` を 1 増やす。2 回目は切り替えない。
 
-        `ready` は切り替えると決まった後、切り替えの行を書く前に呼ぶ。偽を返すか例外を投げれば切り替えず、行も書かない。
+        `ready` は切り替えられると分かった後に呼ぶ。偽を返すか例外を投げれば切り替えない。切り替えの記録はここでは書かず、
+        基準の組で起動し直した後に `record_switch` で書く。
         """
         if reply.failure is not claude.Failure.MODEL_REFUSED or self.switched or launch_chooser is None or self.choice is None:
             return False
-        back = launch_chooser.base_fallback(self.choice, reply.error or str(reply.failure), ready)
-        if back is None:
+        back = launch_chooser.base_choice(self.choice)
+        if back is None or (ready is not None and not ready()):
             return False
+        self._refused = (self.choice, reply.error or str(reply.failure))
         self.choice, self.request_try, self.switched = back, self.request_try + 1, True
         return True
+
+    def record_switch(self) -> None:
+        """基準の組で起動し直した後に、切り替えの記録を書く（切り替えていなければ何もしない）。"""
+        if self._refused is not None and launch_chooser is not None:
+            refused, self._refused = self._refused, None
+            launch_chooser.record_base_switch(*refused)

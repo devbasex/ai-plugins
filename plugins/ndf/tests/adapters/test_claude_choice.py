@@ -224,10 +224,10 @@ def test_a_stale_material_stops_the_switch_without_a_switch_row(judge_repo, reco
     assert len(calls.argv) == 1 and _experiments(tmp_path / "store", "launch_error") == []
 
 
-def test_a_refusal_with_no_time_left_does_not_switch(judge_repo, recorder, tmp_path) -> None:
+def test_a_refusal_with_no_time_left_does_not_switch_nor_check_the_material(judge_repo, recorder, tmp_path) -> None:
     refused = _parsed(REFUSED)._replace(launched=True, seconds=30.0)
     calls = Calls(refused)
-    got = llm.ask("質問", "材料", SCHEMA, 30, call=calls)
+    got = llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=lambda: pytest.fail("期限切れで材料を確かめた"))
     assert not got.ok and len(calls.argv) == 1
     assert _experiments(tmp_path / "store", "launch_error") == [] and recorder.outcomes[0][1] is None
 
@@ -238,6 +238,19 @@ def test_a_check_that_uses_up_the_time_stops_the_switch(judge_repo, recorder, tm
     calls = Calls(_parsed(REFUSED)._replace(launched=True, seconds=2.0), _answer(GOOD))
     got = llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=lambda: clock.__setitem__(0, 30.0))
     assert not got.ok and len(calls.argv) == 1 and _experiments(tmp_path / "store", "launch_error") == []
+
+
+def test_the_switch_row_is_written_after_launching_again(judge_repo, recorder, tmp_path) -> None:
+    store = tmp_path / "store"
+    rows_at_launch: list[int] = []
+    calls = Calls(_parsed(REFUSED)._replace(launched=True, seconds=2.0), _answer(GOOD))
+
+    def launch(argv, prompt, timeout):
+        rows_at_launch.append(len(_experiments(store, "launch_error")))
+        return calls(argv, prompt, timeout)
+
+    assert llm.ask("質問", "材料", SCHEMA, 30, call=launch).ok
+    assert rows_at_launch == [0, 0] and len(_experiments(store, "launch_error")) == 1
 
 
 def test_the_retry_reuses_the_repository_key_and_the_answer_is_checked_once(judge_repo, recorder, monkeypatch) -> None:
