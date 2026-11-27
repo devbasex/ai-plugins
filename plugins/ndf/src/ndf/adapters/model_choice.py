@@ -792,12 +792,10 @@ def _own(rows: Sequence[Mapping[str, Any]], u: _Unit) -> list[Mapping[str, Any]]
 
 
 def _left_experiment(rows: Sequence[Mapping[str, Any]], u: _Unit, own: Sequence[Mapping[str, Any]]) -> bool:
-    """単位に、期間の中の停止の行（同じリポジトリ・工程・ランタイム）か、基準の組への切り替えの行があるか。"""
+    """単位に、期間の中の停止の行（同じリポジトリ・工程・ランタイム）か、基準の組への切り替えの行（`base_switch`）があるか。"""
     ids = {a["assign_id"] for a in own}
     return any(
-        _row_time(r) >= u.start
-        and (_halted(r, u.unit, u.where) or (r["kind"] == "launch_error" and r["switched"] and r["assign_id"] in ids))
-        for r in rows
+        _row_time(r) >= u.start and (_halted(r, u.unit, u.where) or (r["kind"] == "base_switch" and r["assign_id"] in ids)) for r in rows
     )
 
 
@@ -874,7 +872,7 @@ def _prepared_store(env: Mapping[str, str], now: datetime, window_days: int) -> 
 
 
 def base_choice(choice: Choice) -> Optional[Choice]:
-    """割り付けた基準でない組の起動がモデルを理由に拒否されたときの、基準の組の値。記録は書かない（`record_base_switch` が書く）。
+    """割り付けた基準でない組の起動がモデルを理由に拒否されたときの、基準の組の値。記録は書かない（`record_refusal` と `record_base_switch` が書く）。
 
     基準の組と割り付けの無い起動は None。引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、
     基準の組から引き上げ直す。
@@ -886,24 +884,39 @@ def base_choice(choice: Choice) -> Optional[Choice]:
     return _raised_once(back) if choice.retry is not None else back
 
 
-def record_base_switch(choice: Choice, reason: str) -> None:
-    """拒否された組 `choice` から基準の組へ切り替えたことを持つ `launch_error` の行を書く。
+def record_refusal(choice: Choice, reason: str) -> None:
+    """組 `choice` の起動がモデルを理由に拒否されたことを持つ `launch_error` の行を書く。
 
-    行は割り付けと同じ保存先（`choice.store`）へ書き、書けなければ警告を出して続ける。呼び手は基準の組で起動し直した後に呼ぶ
-    （記録のロックの待ちが、切り替えるかの判断と起動し直しの期限を食わないようにするため）。
+    呼び手は拒否を受けたその場で、基準の組で起動し直す前に呼ぶ。基準の組の応答を待つ間に並んで割り付ける起動も、`candidates` で
+    この拒否を数えて同じ組を選ばないようにするためである。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなければ警告を出して続ける。
     """
     if choice.assign_id is None or choice.arm is None:
         return
     row = {"kind": "launch_error", "at": _time_text(_utc_now()), "assign_id": choice.assign_id, "stage": choice.stage}
-    append_row({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}, choice.store)
+    append_row({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason}, choice.store)
+
+
+def record_base_switch(choice: Choice) -> None:
+    """拒否された組 `choice` の単位が基準の組で起動し直したことを持つ `base_switch` の行を書き、警告を出す。
+
+    呼び手は基準の組の子プロセスを実際に起動した後に呼ぶ（起動前に止まった切り替えを、切り替え済みと記録しないため）。行は
+    割り付けと同じ保存先（`choice.store`）へ書き、書けなければ警告を出して続ける。
+    """
+    if choice.assign_id is None or choice.arm is None:
+        return
+    append_row({"kind": "base_switch", "at": _time_text(_utc_now()), "assign_id": choice.assign_id}, choice.store)
     log.warning("組 %s は起動できなかったので、基準の組で続ける（工程 %s・単位 %s）", _arm_text(choice.arm), choice.stage, choice.unit)
 
 
 def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
-    """`base_choice` の値を返し、切り替えられるなら `record_base_switch` の行を書く（起動し直す前に記録してよい呼び手が使う）。"""
+    """`base_choice` の値を返し、切り替えられるなら拒否と切り替えの 2 行を書く（起動し直す前に記録してよい呼び手が使う）。
+
+    行を書けなくても、基準の組の値を返す。
+    """
     back = base_choice(choice)
     if back is not None:
-        record_base_switch(choice, reason)
+        record_refusal(choice, reason)
+        record_base_switch(choice)
     return back
 
 

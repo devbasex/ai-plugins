@@ -36,7 +36,7 @@ src/ndf/
 
 | パス | 種類 | 役割 | 依存する先 | クラスまたはモジュール | 新設（N）と変更（C） |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/adapters/model_choice.py` | 新設 | 値と出所を返す | launch_settings・launch_approval | `Choice` | N: `table`・`bundled_errors`・`stage_of`・`launch_choice`・`raised`・`base_choice`・`record_base_switch`・`base_fallback`・`candidates`・`compatibility_key`・`read_experiments`・`ledger`・`append_row` |
+| `src/ndf/adapters/model_choice.py` | 新設 | 値と出所を返す | launch_settings・launch_approval | `Choice` | N: `table`・`bundled_errors`・`stage_of`・`launch_choice`・`raised`・`base_choice`・`record_refusal`・`record_base_switch`・`base_fallback`・`candidates`・`compatibility_key`・`read_experiments`・`ledger`・`append_row` |
 | `src/ndf/adapters/launch_settings.py` | 変更 | `experiments` を返す | — | `Settings` | C: `load` |
 | `src/ndf/adapters/claude.py` | 変更 | 引数と拒否の判定 | — | `ClaudeCall`・`LaunchRecorder`・`LaunchLog` | C: `claude_launch`・`_error_reply`。N: `model_refused` |
 | `src/ndf/adapters/claude_choice.py` | 新設 | 値を選ぶ処理の差し込みと、選んだ値で起動する部品 | claude | `LaunchChooser`・`ChoiceRun` | N: `set_launch_chooser`・`choose`・`report_outcome` |
@@ -95,8 +95,9 @@ src/ndf/
 | `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, unit: Optional[str] = None, charge_to: Optional[str] = None, retry: Optional[str] = None, mode: Optional[str] = None, argument: tuple[Optional[str], Optional[str]] = (None, None), environ: Optional[Mapping] = None, settings: Optional[Settings] = None, repo: Optional[str] = None) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる。`settings` は `table` へ渡す。`repo`（`Request` の欄）は呼び手が解決済みのリポジトリのキーで、渡されれば git を起動して解決し直さない。値の `repo` に解決したキーを持たせ、同じリクエストの打ち直しはそれを渡す |
 | `raised` | 同 | 新設 | `raised(runtime: str, model: Optional[str], effort: Optional[str]) -> tuple[Optional[str], Optional[str]]` | 設計書の「引き上げる起動」の上げ方の表を当てる |
 | `base_choice` | 同 | 新設 | `base_choice(choice: Choice) -> Optional[Choice]` | 切り替える条件に当たれば基準の組の値を返す。当たらなければ None。記録は書かない |
-| `record_base_switch` | 同 | 新設 | `record_base_switch(choice: Choice, reason: str) -> None` | 拒否された組から基準の組へ切り替えたことを持つ `launch_error` の行を書く。行は `append_row(row, choice.store)` で、割り付けたときと同じ保存先に書く。呼び出しで環境変数を差し替えて保存先が既定と違っても、次の起動が同じ保存先から切り替えを読めるようにするためである。判定は基準の組で起動し直した後に呼ぶ（記録のロックの待ちが、起動し直しの期限を食わないようにするため） |
-| `base_fallback` | 同 | 新設 | `base_fallback(choice: Choice, reason: str) -> Optional[Choice]` | `base_choice` の値を返し、切り替えられるなら `record_base_switch` で行を書く。起動し直す前に記録してよい呼び手が使う |
+| `record_refusal` | 同 | 新設 | `record_refusal(choice: Choice, reason: str) -> None` | 組がモデルを理由に拒否されたことを持つ `launch_error` の行を書く。判定は拒否を受けたその場で、基準の組で起動し直す前に呼ぶ。基準の組の応答を待つ間に並んで割り付ける起動も、`candidates` でこの拒否を数えられるようにするためである |
+| `record_base_switch` | 同 | 新設 | `record_base_switch(choice: Choice) -> None` | 拒否された組の単位が基準の組で起動し直したことを持つ `base_switch` の行を書く。判定は基準の組の子プロセスを実際に起動した後（回答の `launched` が真）にだけ呼ぶ。起動前に止まった切り替えを、切り替え済みと記録しないためである |
+| `base_fallback` | 同 | 新設 | `base_fallback(choice: Choice, reason: str) -> Optional[Choice]` | `base_choice` の値を返し、切り替えられるなら `record_refusal` と `record_base_switch` で 2 行を書く。起動し直す前に記録してよい呼び手が使う |
 | `candidates` | 同 | 新設 | `candidates(arms: Sequence, rows: Sequence, entry: Optional[Mapping], now: datetime, where: Where) -> list[int]` | 打ち切った組と起動できない組を除いた添字。`launch_error` は割り付け ID で割り付けの行を引き、`where`（`repo`・`stage`・`runtime`・`key` を持つ組）が同じものだけを数える。引数の多い関数の検査（PLR0913）に合わせ、4 つのキーを 1 つの値にまとめた |
 | `compatibility_key` | 同 | 新設 | `compatibility_key(arms: Sequence, metric: str) -> str` | 選択肢の並びと指標のハッシュ |
 | `read_experiments` | 同 | 新設 | `read_experiments(since: datetime, root: Optional[Path] = None) -> list[dict]` | `since` の月から今月までの実験の記録を読む（ロックを取らない） |
@@ -104,6 +105,7 @@ src/ndf/
 | `append_row` | 同 | 新設 | `append_row(row: Mapping, root: Optional[Path] = None) -> bool` | `ledger` を開いて 1 行足す。`root` は記録の保存先で、省くと既定の保存先（`records_dir()`）に書く。書けなければ警告を出して偽を返す |
 | `prune` | 同 | 新設 | `prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)の月の掃除。`window_days` は今の設定の値である。残す日数は、この値と、記録に残る割り付けの行の `window_days` のうち最も大きい値に 30 日を足した日数で、`now` からその日数を引いた日時より前に終わった月のファイルを消す。`launch-pruned` の月が今月なら何もしない。違えば、古い月のファイルと出現率の項目を消し（出現率のファイルはロックの中で読み直してから変える）、全部成功したら今月を書く。`launch_choice` が呼び、失敗しても起動は続ける |
 
+- `record_refusal` と `record_base_switch` は、行を `append_row(row, choice.store)` で、割り付けたときと同じ保存先に書く。呼び出しで環境変数を差し替えて保存先が既定と違っても、次の起動が同じ保存先から拒否と切り替えを読めるようにするためである
 - `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm`・`store`（割り付けに使った記録の保存先。決められなければ None）を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄。`unit` は割り付けを受けた起動、つまり `assign_id` がある起動だけに置く）を返す
 - `launch_choice`
   - 事前条件: `layer` は `worker`・`skill`・`judge`・`seat`
@@ -120,7 +122,8 @@ src/ndf/
 | `launch_choice` | 値の誤り | 環境変数か引数の effort が順位に無い、モデル名に改行、表に無い `layer`・`retry` | 引数の確認 | 呼び出し元へ返す | 同上 | 起動しない |
 | `launch_choice` | 記録を書けない | 権限・容量・ロックの待ち | 追記 | 既定値（指定なし、割り付け ID なし）で続ける | 標準エラーに警告 | 単位は実験に数えない |
 | `read_experiments` | 壊れた行 | 書きかけ | 解析 | 飛ばして続ける | 出力なし | — |
-| `record_base_switch`・`base_fallback` | 切り替えの記録を書けない | 同上 | 追記 | 基準の値を返して続ける | 警告に起動できなかった組と基準で続けたこと | — |
+| `record_refusal`・`record_base_switch` | 拒否か切り替えの記録を書けない | 同上 | 追記 | 警告を出して終了する | 警告に書けなかった記録 | — |
+| `base_fallback` | 拒否か切り替えの記録を書けない | 同上 | 追記 | 追記に失敗しても、基準の組の値を返す | 同上 | — |
 
 ### 処理の手順
 
@@ -140,7 +143,7 @@ src/ndf/
 | --- | --- | --- | --- |
 | 工程・選択肢・順位・指標・割り付けの値 | 設定値 | `contracts/domains/launch-experiments.json` | 設計書の表 |
 | 起動できない組の条件 | 定数 | 同上 | 同じリポジトリ・工程・ランタイム・互換性のキー・組で、直近 7 日に、モデルを理由にした拒否が 2 件 |
-| 実験の記録の行 | 型 | `contracts/schemas/internal/experiment.schema.json` | `assign`・`outcome`・`launch_error`・`halted`・`observed`・`unpriced` |
+| 実験の記録の行 | 型 | `contracts/schemas/internal/experiment.schema.json` | `assign`・`outcome`・`launch_error`・`base_switch`・`halted`・`observed`・`unpriced` |
 
 ### 並行と排他
 
@@ -179,7 +182,7 @@ src/ndf/
 | `stage_of` | 表の各行 | 工程が「無し」の組 | 表に無い組 |
 | `launch_choice` | 同じ単位は同じ組。並列でも 1 行 | `unit` なし、`enabled` 偽、片側の指定、割り付けの後の手動指定と選択肢の削除、月をまたぐ割り付け | 壊れた設定。記録を書けない場合 |
 | `raised` | 表の各行 | `opus` の `xhigh` は変えない | 順位に無いモデル名 |
-| `base_fallback` | 基準へ切り替え、行が 1 つ | 基準の組の拒否は None | 2 件で候補から外れ、7 日で戻る。別のリポジトリと別のキーの行は数えない |
+| `base_fallback` | 基準へ切り替え、拒否と切り替えの行が 1 つずつ | 基準の組の拒否は None | 2 件で候補から外れ、7 日で戻る。別のリポジトリと別のキーの行は数えない |
 | `candidates` | 打ち切りの期限の後に戻る | 全部の非基準が外れると基準だけ | — |
 
 ## claude の起動と拒否の判定
@@ -223,13 +226,14 @@ src/ndf/
 | `ask` | `adapters/llm.py` | 変更 | 変えない | `request_id` を単位にして値を取得し、起動ごとに行を渡し、効果指標を書く |
 
 - 2 回目は `retry="invalid_answer"`。`MODEL_REFUSED` で `base_choice` が値を返せば、判定の打ち直しの回数に数えずに 1 回だけ打ち直し、`request_try` を 1 増やす。期限は残りの時間
-- 期限は単調時計で持つ。拒否を受けたら、次の順で進める
-  1. `base_choice` で基準の組へ切り替えられるかを調べる。切り替えられなければ 1 回目の回答を返す
-  2. 残りの期限を測る。使い切っていれば、材料を確かめずに 1 回目の回答を返す
-  3. 打ち直しと同じく、呼び手の `before_retry` で材料が古くなっていないかを確かめる。古ければ例外で止める
-  4. もう一度残りの期限を測る。使い切っていれば 1 回目の回答を返す
-  5. 残りの期限で基準の組を起動し直す
-  6. 起動し直した後に `record_base_switch` で切り替えの行を書く。起動し直さなかった場合は行を書かず、切り替えたとも数えない
+- 期限は単調時計で持つ。起動がモデルを理由に拒否されたら、次の順で進める。回答の形の不備で打ち直す 2 回目の判定（`retry="invalid_answer"`）でも同じ順で進め、打ち直す前の回答は返さない
+  1. `base_choice` で基準の組へ切り替えられるかを調べる。切り替えられなければ、今回の起動で受け取ったモデル拒否の結果を返す
+  2. `record_refusal` で拒否の行を書く。基準の組の応答を待つ間に並んで割り付ける起動も、この拒否を数えて同じ組を選ばないようにするためである。以下で起動し直さなかった場合も、この行は残す（拒否は起きた事実なので）
+  3. 残りの期限を測る。使い切っていれば、材料を確かめずに、今回の起動で受け取ったモデル拒否の結果を返す。拒否の行を書くロックの待ちも、ここで測る残りの期限に含まれる
+  4. 打ち直しと同じく、呼び手の `before_retry` で材料が古くなっていないかを確かめる。古ければ例外で止める
+  5. もう一度残りの期限を測る。使い切っていれば、今回の起動で受け取ったモデル拒否の結果を返す
+  6. 残りの期限で基準の組を起動し直す
+  7. 基準の組の子プロセスを実際に起動した（回答の `launched` が真）ときだけ、`record_base_switch` で切り替えの行を書き、切り替えたと数える。起動前のチェックやスロットの取得で止まった場合と、3・5 で起動し直さなかった場合は、切り替えの行を書かず、切り替えたとも数えない。その単位は割り付けの単位として効果指標を書く
 - 2 回目の値の選択には、1 回目の値が持つリポジトリのキー（`Choice.repo`）を渡し、git を起動し直さない
 - 回答のスキーマの検査は起動 1 回につき 1 回にし、その結果から使用量ログの `outcome` と打ち直しの判断の両方を作る
 - `outcome` は `valid`・`invalid`・`timeout`・`unknown`。`timeout` は、子プロセスを起動した後の期限切れ（`Failure.TIMEOUT`）である。効果指標は 1 回目が `valid` なら 1、`invalid` か `timeout` なら 0（2 回目で合っても、2 回目が期限切れでも 0 は変わらない）、`unknown` と起動できない場合は null

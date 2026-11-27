@@ -26,7 +26,9 @@ class LaunchChooser(Protocol):
 
     def base_choice(self, choice: Any) -> Optional[Any]: ...
 
-    def record_base_switch(self, choice: Any, reason: str) -> None: ...
+    def record_refusal(self, choice: Any, reason: str) -> None: ...
+
+    def record_base_switch(self, choice: Any) -> None: ...
 
     def observed(self, choice: Any, model: str) -> None: ...
 
@@ -63,7 +65,7 @@ class ChoiceRun:
     """選んだ値で `claude -p` を起動するリクエスト 1 件。`choice` は選んだ値（差し込みが無ければ None で、値を付けない）。
 
     `request_id` はリクエストごとの一意な値、`request_try` はそのリクエストの中の何番目の起動か（最初が 1）。`charge_to` は費用を
-    手戻りとして負う割り付け ID。`switched` は基準の組へ切り替えたか（リクエストの中で 1 回だけ）。
+    手戻りとして負う割り付け ID。`switched` は基準の組の子プロセスを実際に起動して切り替えを確定したか（リクエストの中で 1 回だけ）。
     """
 
     choice: Optional[Any]
@@ -72,7 +74,7 @@ class ChoiceRun:
     charge_to: Optional[str] = None
     switched: bool = False
     _seen: bool = False
-    _refused: Optional[tuple[Any, str]] = None
+    _refused: Optional[Any] = None  # 拒否された組の値。基準の組へ切り替えると決めたときに持つ
 
     @property
     def model(self) -> Optional[str]:
@@ -111,20 +113,29 @@ class ChoiceRun:
     def fall_back(self, reply: claude.ClaudeReply, ready: Optional[Callable[[], bool]] = None) -> bool:
         """`reply` がモデルを理由にした拒否で、基準の組へ切り替えられたら真。値を替え、`request_try` を 1 増やす。2 回目は切り替えない。
 
-        `ready` は切り替えられると分かった後に呼ぶ。偽を返すか例外を投げれば切り替えない。切り替えの記録はここでは書かず、
-        基準の組で起動し直した後に `record_switch` で書く。
+        切り替えられると分かったら、まず拒否の記録を書く（基準の組の応答を待つ間に並んで割り付ける起動も、この拒否を数えられるように）。
+        `ready` はその後に呼ぶ。偽を返すか例外を投げれば切り替えない。切り替えの記録はここでは書かず、基準の組を実際に起動した後に
+        `record_switch` で書く。それまで `switched` は偽のままである。
         """
-        if reply.failure is not claude.Failure.MODEL_REFUSED or self.switched or launch_chooser is None or self.choice is None:
+        if reply.failure is not claude.Failure.MODEL_REFUSED or self._refused is not None or launch_chooser is None or self.choice is None:
             return False
         back = launch_chooser.base_choice(self.choice)
-        if back is None or (ready is not None and not ready()):
+        if back is None:
             return False
-        self._refused = (self.choice, reply.error or str(reply.failure))
-        self.choice, self.request_try, self.switched = back, self.request_try + 1, True
+        launch_chooser.record_refusal(self.choice, reply.error or str(reply.failure))
+        if ready is not None and not ready():
+            return False
+        self._refused = self.choice
+        self.choice, self.request_try = back, self.request_try + 1
         return True
 
-    def record_switch(self) -> None:
-        """基準の組で起動し直した後に、切り替えの記録を書く（切り替えていなければ何もしない）。"""
-        if self._refused is not None and launch_chooser is not None:
-            refused, self._refused = self._refused, None
-            launch_chooser.record_base_switch(*refused)
+    def record_switch(self, reply: claude.ClaudeReply) -> None:
+        """基準の組の起動の回答 `reply` を受け、子プロセスを実際に起動していれば切り替えを確定して記録を書く。
+
+        起動前に止まった（`reply.launched` が偽）なら、記録を書かず `switched` も偽のままにする。
+        """
+        if self._refused is None or self.switched or not reply.launched:
+            return
+        self.switched = True
+        if launch_chooser is not None:
+            launch_chooser.record_base_switch(self._refused)

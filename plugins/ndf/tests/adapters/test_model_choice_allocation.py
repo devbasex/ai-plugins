@@ -220,7 +220,7 @@ def test_a_retry_raises_the_assigned_arm(tmp_path, store, clock):
 def _refusal(store: Path, assign: dict, when: datetime) -> None:
     arm = assign["arms"][assign["chosen"]]
     row = {"kind": "launch_error", "at": _at(when), "assign_id": assign["assign_id"], "stage": "impl", "runtime": "claude"}
-    _write(store, {**row, "arm": arm, "reason": "model_refused", "switched": True})
+    _write(store, {**row, "arm": arm, "reason": "model_refused"})
 
 
 def _candidates(root: Path, store: Path, entry=None, now: datetime = NOW, repo=None) -> list[int]:
@@ -336,8 +336,8 @@ def test_fallback_records_the_refusal_and_the_unit_stays_on_the_base(tmp_path, s
     with caplog.at_level(logging.WARNING):
         back = mc.base_fallback(choice, "model_refused")
     assert back is not None and back.model is None and back.model_source is mc.Source.DEFAULT and back.assign_id is None
-    (err,) = _rows(store, "launch_error")
-    assert err["switched"] and err["assign_id"] == choice.assign_id and err["arm"] == {"model": "sonnet", "effort": "high"}
+    (err,), (switch,) = _rows(store, "launch_error"), _rows(store, "base_switch")
+    assert err["assign_id"] == switch["assign_id"] == choice.assign_id and err["arm"] == {"model": "sonnet", "effort": "high"}
     assert "sonnet" in caplog.text
     again = _pick(root, unit="u", retry=None)
     assert again.assign_id is None and again.model is None
@@ -356,7 +356,7 @@ def test_fallback_of_the_base_or_an_unassigned_launch_is_none(tmp_path, store, c
     root = _repo(tmp_path)
     assert mc.base_fallback(_pick(root), "model_refused") is None
     assert mc.base_fallback(_pick(root, unit="u"), "model_refused") is None  # 乱数の既定 0 で基準の組
-    assert _rows(store, "launch_error") == []
+    assert _rows(store, "launch_error") == [] and _rows(store, "base_switch") == []
 
 
 # --- 記録の読み書き ---
@@ -509,7 +509,7 @@ def test_fallback_writes_to_the_store_the_choice_used(tmp_path, monkeypatch, clo
     draw["x"] = 0.9
     choice = _pick(root, unit="u", environ={"NDF_USAGE_DIR": str(other)})
     assert mc.base_fallback(choice, "model_refused") is not None
-    assert [r["switched"] for r in _rows(other, "launch_error")] == [True]
+    assert len(_rows(other, "launch_error")) == len(_rows(other, "base_switch")) == 1
     assert _pick(root, unit="u", environ={"NDF_USAGE_DIR": str(other)}).assign_id is None
 
 

@@ -163,9 +163,9 @@ def _clock() -> float:
 def _launch_judge(run: claude_choice.ChoiceRun, q: _Ask, prompt: str) -> claude.ClaudeReply:
     """選んだ値で 1 回起動する。モデルを理由に拒まれ基準へ切り替えられれば、残りの期限で 1 回だけ起動し直す。
 
-    期限は単調時計で持つ。切り替える前に残りの期限を測り、使い切っていれば材料を確かめずに 1 回目の回答を返す。残っていれば、
-    打ち直しと同じく `before_retry` で材料が古くなっていないかを確かめ（例外はそのまま送る）、その直後にもう一度期限を測る。
-    切り替えの記録は起動し直した後に書くので、記録のロックの待ちが起動し直しの期限を食わず、起動しなければ記録も残らない。
+    期限は単調時計で持つ。拒否の記録は切り替えられると分かったその場で書く（`fall_back`）。その後に残りの期限を測り、使い切っていれば
+    材料を確かめずに拒否の回答を返す。残っていれば、打ち直しと同じく `before_retry` で材料が古くなっていないかを確かめ（例外はそのまま
+    送る）、その直後にもう一度期限を測る。切り替えの記録は、基準の組の子プロセスを実際に起動した後に書く（`record_switch`）。
     """
     deadline = _clock() + q.timeout
     reply = _judge_once(run, q, prompt, q.timeout)
@@ -182,7 +182,7 @@ def _launch_judge(run: claude_choice.ChoiceRun, q: _Ask, prompt: str) -> claude.
 
     if run.fall_back(reply, ready=ready):
         reply = _judge_once(run, q, prompt, left[-1])
-        run.record_switch()
+        run.record_switch(reply)
     return reply
 
 

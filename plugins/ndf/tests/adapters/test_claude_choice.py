@@ -204,7 +204,8 @@ def test_a_refused_model_switches_to_the_base_once_without_counting_a_retry(judg
     assert got.ok and got.attempts == 1 and _value(calls.argv[1], "--model") is None
     assert [(r["request_try"], "assign_id" in r) for r in recorder.rows] == [(1, True), (2, False)]
     assert recorder.outcomes == []  # 切り替えた単位は数えない
-    assert [r["switched"] for r in _experiments(tmp_path / "store", "launch_error")] == [True]
+    store = tmp_path / "store"
+    assert len(_experiments(store, "launch_error")) == len(_experiments(store, "base_switch")) == 1
 
 
 def test_the_switch_checks_the_material_before_launching_again(judge_repo, recorder) -> None:
@@ -214,6 +215,11 @@ def test_the_switch_checks_the_material_before_launching_again(judge_repo, recor
     assert checked == [1]
 
 
+def _refused_only(store: Path) -> bool:
+    """拒否の行だけがあり、切り替えの行が無いか。"""
+    return len(_experiments(store, "launch_error")) == 1 and _experiments(store, "base_switch") == []
+
+
 def test_a_stale_material_stops_the_switch_without_a_switch_row(judge_repo, recorder, tmp_path) -> None:
     def moved() -> None:
         raise RuntimeError("材料が古い")
@@ -221,7 +227,7 @@ def test_a_stale_material_stops_the_switch_without_a_switch_row(judge_repo, reco
     calls = Calls(_parsed(REFUSED)._replace(launched=True, seconds=2.0))
     with pytest.raises(RuntimeError):
         llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=moved)
-    assert len(calls.argv) == 1 and _experiments(tmp_path / "store", "launch_error") == []
+    assert len(calls.argv) == 1 and _refused_only(tmp_path / "store")
 
 
 def test_a_refusal_with_no_time_left_does_not_switch_nor_check_the_material(judge_repo, recorder, tmp_path) -> None:
@@ -229,7 +235,7 @@ def test_a_refusal_with_no_time_left_does_not_switch_nor_check_the_material(judg
     calls = Calls(refused)
     got = llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=lambda: pytest.fail("期限切れで材料を確かめた"))
     assert not got.ok and len(calls.argv) == 1
-    assert _experiments(tmp_path / "store", "launch_error") == [] and recorder.outcomes[0][1] is None
+    assert _refused_only(tmp_path / "store") and recorder.outcomes[0][1] is None
 
 
 def test_a_check_that_uses_up_the_time_stops_the_switch(judge_repo, recorder, tmp_path, monkeypatch) -> None:
@@ -237,20 +243,28 @@ def test_a_check_that_uses_up_the_time_stops_the_switch(judge_repo, recorder, tm
     monkeypatch.setattr(llm, "_clock", lambda: clock[0])
     calls = Calls(_parsed(REFUSED)._replace(launched=True, seconds=2.0), _answer(GOOD))
     got = llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=lambda: clock.__setitem__(0, 30.0))
-    assert not got.ok and len(calls.argv) == 1 and _experiments(tmp_path / "store", "launch_error") == []
+    assert not got.ok and len(calls.argv) == 1 and _refused_only(tmp_path / "store")
 
 
-def test_the_switch_row_is_written_after_launching_again(judge_repo, recorder, tmp_path) -> None:
+def test_the_refusal_row_is_there_before_the_base_launch_and_the_switch_row_after(judge_repo, recorder, tmp_path) -> None:
     store = tmp_path / "store"
-    rows_at_launch: list[int] = []
+    rows_at_launch: list[tuple[int, int]] = []
     calls = Calls(_parsed(REFUSED)._replace(launched=True, seconds=2.0), _answer(GOOD))
 
     def launch(argv, prompt, timeout):
-        rows_at_launch.append(len(_experiments(store, "launch_error")))
+        rows_at_launch.append((len(_experiments(store, "launch_error")), len(_experiments(store, "base_switch"))))
         return calls(argv, prompt, timeout)
 
     assert llm.ask("質問", "材料", SCHEMA, 30, call=launch).ok
-    assert rows_at_launch == [0, 0] and len(_experiments(store, "launch_error")) == 1
+    assert rows_at_launch == [(0, 0), (1, 0)] and len(_experiments(store, "base_switch")) == 1
+
+
+def test_a_base_launch_stopped_before_starting_is_not_a_switch(judge_repo, recorder, tmp_path) -> None:
+    refused = _parsed(REFUSED)._replace(launched=True, seconds=2.0)
+    calls = Calls(refused, claude.ClaudeReply.failed("", "スロットが空かない", failure=claude.Failure.NO_SLOT))
+    got = llm.ask("質問", "材料", SCHEMA, 30, call=calls)
+    assert not got.ok and len(calls.argv) == 2 and _refused_only(tmp_path / "store")
+    assert recorder.outcomes[0][1] is None  # 切り替えていないので、割り付けの単位として指標を書く（拒否は取れない値）
 
 
 def test_the_retry_reuses_the_repository_key_and_the_answer_is_checked_once(judge_repo, recorder, monkeypatch) -> None:
