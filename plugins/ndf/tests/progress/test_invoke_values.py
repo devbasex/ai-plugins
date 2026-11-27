@@ -349,13 +349,13 @@ def test_a_plan_without_the_release_work_never_reads_the_recorded_value(tmp_path
 
 
 def test_plan_path_after_prepare_plan_uses_its_judgement_without_listing_the_works_again(tmp_path, monkeypatch):
-    # 工程の初回（plan_path が prepare_plan を呼ぶ回）は、prepare_plan の判定を引き継ぎ、作業の一覧を取り直さない
+    # 工程の初回（plan_path が prepare_plan を呼ぶ回）は、prepare_plan の判定を引き継ぎ、判定し直さない（判定は prepare_plan の 1 回だけ）
     _release_template(monkeypatch, params=("worker", "repo"))
     monkeypatch.setattr(invoke, "template_values", lambda *a, **k: {"repo": str(tmp_path)})
-    rendered = _counting(monkeypatch, "rendered", route)
+    judged = _counting(monkeypatch, "uses_released")
     work = tmp_path / "w"
     invoke.plan_path(_released_run("release-x", lambda: NOW), work, tmp_path)
-    assert rendered == [] and worker_kinds.released_of(invoke.read_values(work)) == NOW
+    assert len(judged) == 1 and worker_kinds.released_of(invoke.read_values(work)) == NOW
 
 
 def test_uses_released_reads_the_outputs_of_the_work_definitions():
