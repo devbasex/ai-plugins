@@ -365,6 +365,54 @@ def test_the_list_reuses_the_candidate_read_by_the_sweep(tmp_path, monkeypatch):
     assert la.cleanup_targets("/r") == [{"candidate": str(candidate), "reason": "outdated"}]
 
 
+@pytest.mark.parametrize("change", ["save", "sibling"])
+def test_a_candidate_changed_after_the_judgment_is_not_listed(tmp_path, monkeypatch, change):
+    """判定の後に候補が保存されたか、隣に別案が置かれた候補は、判定の結果が古いので一覧に載せない。"""
+    monkeypatch.setattr(la, "_settleable", lambda: False)
+    target = _worktree(tmp_path)
+    candidate = la.new_candidate("/r", target).candidate
+    target.write_bytes(NEW)  # 反映元のバージョンが変わり、判定で候補を読む（outdated）
+    judged = la._sweep_reasons
+
+    def then_changed(home):
+        reasons = judged(home)
+        if change == "save":
+            candidate.write_bytes(b'{"version": 1, "mine": true}\n')
+        else:
+            (candidate.parent / "mine.json").write_bytes(b"{}\n")
+        return reasons
+
+    monkeypatch.setattr(la, "_sweep_reasons", then_changed)
+    assert la.cleanup_targets("/r") == []
+
+
+def test_an_unreadable_denied_candidate_is_left_out_and_other_drafts_continue(tmp_path, monkeypatch):
+    """否認した候補の candidate.json が読めなくても、その候補だけを外し、別の worktree の draft と show は続ける。"""
+    first, other = _worktree(tmp_path / "a"), _worktree(tmp_path / "b")
+    candidate = la.new_candidate("/r", first).candidate
+    _asked(first, candidate=candidate, label=la.DENY_LABEL)
+    read_bytes = Path.read_bytes
+
+    def denied_read(self):
+        if self == candidate:
+            raise PermissionError(13, "Permission denied", str(self))
+        return read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", denied_read)
+    assert la.new_candidate("/r", other).cleanup_targets == [] and la.cleanup_targets("/r") == []
+    assert candidate.parent.is_dir()
+
+
+def test_candidates_outside_the_cleanup_conditions_are_not_inspected(tmp_path, monkeypatch):
+    """履歴と反映先だけで片付けの条件に当たらないと決まる候補は、ディレクトリを調べない。"""
+    target = _worktree(tmp_path)
+    la.new_candidate("/r", target)
+    calls, ownership = [], la._ownership
+    monkeypatch.setattr(la, "_ownership", lambda folder, known=None: calls.append(folder) or ownership(folder, known))
+    la.new_candidate("/r", target)
+    assert la.cleanup_targets("/r") == [] and calls == []
+
+
 def test_draft_reclaims_what_an_interrupted_draft_or_sweep_left(tmp_path):
     """候補の錠の中で見つかる作業中のディレクトリは中断の残り。作成途中は消し、消す途中で直されていた候補は元へ戻す。"""
     target = _worktree(tmp_path)
