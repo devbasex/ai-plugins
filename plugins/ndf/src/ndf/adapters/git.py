@@ -232,20 +232,23 @@ def _gitdir_matches(pattern: str, path: Path, own: Path, fold: bool) -> bool:
 
     `~` を展開し、`./` で始まれば、設定ファイル `path` の実体があるディレクトリに置き換えて、その部分は文字どおりに比べる。
     ほかの相対の形は先頭に `**/` を足し、`/` で終われば `**` を足す。残りは wildmatch（`_wildmatch`）で比べる。
-    `own` は実体のパスで比べ、当たらなければ、そのままの絶対パスでもう一度比べる。
+    `own` は実体のパスで比べ、当たらなければ、そのままの絶対パスでもう一度比べる（2 つが同じなら 1 回だけ比べる）。
+    文字どおりに比べる部分の長さは、エンコードした後のバイト数で数える（日本語などの多バイトの字を含むパスでも、
+    置き換えた部分の `[`・`*` をパターンとして評価しない）。
     """
     if pattern.startswith("~"):
         pattern = os.path.expanduser(pattern)
     prefix = 0
     if pattern.startswith("./"):
         base = os.path.dirname(os.path.realpath(path))
-        pattern, prefix = base + pattern[1:], len(base) + 1
+        pattern, prefix = base + pattern[1:], len(os.fsencode(base + "/"))
     elif not os.path.isabs(pattern):
         pattern = "**/" + pattern
     if pattern.endswith("/"):
         pattern += "**"
     pat = os.fsencode(pattern)
-    for text in (os.fsencode(os.path.realpath(own)), os.fsencode(os.path.abspath(own))):
+    real, absolute = os.fsencode(os.path.realpath(own)), os.fsencode(os.path.abspath(own))
+    for text in (real,) if real == absolute else (real, absolute):
         head, got = pat[:prefix], text[:prefix]
         if len(text) < prefix or (head.lower() != got.lower() if fold else head != got):
             return False

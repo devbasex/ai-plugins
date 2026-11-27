@@ -140,6 +140,13 @@ def test_configured_remote_slug_reads_included_config_files_like_git(tmp_path: P
     assert {name for name, here in places.items() if git.configured_remote_slug(here) == "a/b"} == hits
 
 
+def test_relative_gitdir_condition_compares_a_multibyte_bracketed_base_literally(tmp_path: Path) -> None:
+    # `./` を置き換えた基準ディレクトリは、多バイトの字の後ろの `[x]` も含めて文字どおりに比べる（git と同じ）
+    root = _repo_with_include(tmp_path / "日本語開発[x]", 'includeIf "gitdir:./worktrees/wt"')
+    assert git.configured_remote_slug(root / "sub" / "wt") == "a/b"
+    assert git.configured_remote_slug(root / "sub" / "1wt") is None
+
+
 def test_configured_remote_slug_reads_remote_after_a_reversed_range(tmp_path: Path) -> None:
     common = tmp_path / ".git"
     common.mkdir()
