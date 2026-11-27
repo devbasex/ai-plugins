@@ -372,29 +372,60 @@ def _check_unversioned(hub: GitHub, number: int, payload: Mapping[str, Any]) -> 
     4. `environments` のどれも、正の一覧にあり反映の記録がある（`record_decide.complete_of` で数える記録）
     5. 今の判定（`record_decide.pair_verdict`）が不合格の組の行は `retest_reason` を持つ。無ければ `RetestWithoutReason`"""
     version, unit, environments = payload["version"], payload.get("unit"), payload.get("environments")
+    _require_environments(environments)
+    got = candidates(hub, number, Selection(version, None, None))
+    _require_unit(got, version, unit)
+    targets = got.authoritative.get(version)
+    mine = [r for r in got.releases if r.unit == unit]
+    rep = _unversioned_representative(number, version, unit, mine, targets)
+    _require_record_pull(number, version, rep)
+    _require_reflected(environments, mine, rep, targets)
+    _require_retest_reasons(got, unit, environments, payload["issues"])
+
+
+def _require_environments(environments: Any) -> None:
+    """確かめ 1: `environments` がある。"""
     if not environments:
         raise RecordError("バージョンの保存先が none のリポジトリのリリース後テストの記録には environments（テストした届け先）が要る")
-    got = candidates(hub, number, Selection(version, None, None))
+
+
+def _require_unit(got: Any, version: str, unit: Optional[str]) -> None:
+    """確かめ 2 の前半: 値に単位があれば `unit` が要る。"""
     units = sorted({r.unit for r in got.releases if r.unit is not None})
     if unit is None and units:
         raise RecordError(f"値 {version} のリリースは単位を持つ（{', '.join(units)}）。unit にテストした単位の名前を書く")
-    targets = got.authoritative.get(version)
-    mine = [r for r in got.releases if r.unit == unit]
+
+
+def _unversioned_representative(number: int, version: str, unit: Optional[str], mine: list, targets: Any) -> Any:
+    """確かめ 2 の後半: 同じ値・同じ単位のリリース記録の代表を返す。無ければ `RecordError`。"""
     rep = record_decide.representative(mine, targets)
     if rep is None or rep.targets is None or targets is None:
         where = f"値 {version}" + (f"・単位 {unit}" if unit is not None else "")
         raise RecordError(f"#{number} は{where}のバージョンの無いリリース記録を持たない。先に release-steps record --version を打つ")
+    return rep
+
+
+def _require_record_pull(number: int, version: str, rep: Any) -> None:
+    """確かめ 3: PR `number` が記録の PR（代表の `included` のうち最小）である。"""
     if number != min(rep.included):
         raise NotRecordPull(number, version, min(rep.included))
+
+
+def _require_reflected(environments: Any, mine: list, rep: Any, targets: Any) -> None:
+    """確かめ 4: `environments` のどれも、正の一覧にあり反映の記録がある。"""
     _complete, missing = record_decide.complete_of(mine, rep, targets)
     outside = [e for e in environments if e not in targets or e in missing]
     if outside:
         raise RecordError(f"反映の記録が無い届け先がある（{', '.join(outside)}）。先にその届け先の release-steps record を打つ")
+
+
+def _require_retest_reasons(got: Any, unit: Optional[str], environments: Any, issues: Any) -> None:
+    """確かめ 5: 今の判定が不合格の組の行は `retest_reason` を持つ。"""
     checks = [v for v in got.verifications if v.get("unit") == unit]
     failed = [
         (e, row["number"])
         for e in environments
-        for row in payload["issues"]
+        for row in issues
         if not row.get("retest_reason") and record_decide.pair_verdict(checks, e, row["number"]) == "failed"
     ]
     if failed:
