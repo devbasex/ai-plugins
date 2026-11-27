@@ -30,6 +30,7 @@ from jsonschema.exceptions import SchemaError
 from ndf.adapters import claude, claude_choice, run_log
 from ndf.contracts import causes, facts
 from ndf.contracts.internal import InternalError
+from ndf.values import LastOne
 
 # 打つ回数（最初の 1 回を含む）。上限の設定ではなく docs/specifications/ndf-rebuild-scripted-flow.md の決定 60 で固定した回数
 ATTEMPTS = 2
@@ -128,13 +129,10 @@ class _Checks:
     """1 件の質問の回答の検査。同じ回答を使用量ログの行と打ち直しの判断の両方に使い、スキーマの検査を 1 回で済ませる。"""
 
     def __init__(self, schema: dict) -> None:
-        self.schema = schema
-        self._last: Optional[tuple[claude.ClaudeReply, tuple[str, list[str]]]] = None
+        self._memo: LastOne[claude.ClaudeReply, tuple[str, list[str]]] = LastOne(lambda reply: judge_outcome(reply, schema))
 
     def of(self, reply: claude.ClaudeReply) -> tuple[str, list[str]]:
-        if self._last is None or self._last[0] is not reply:
-            self._last = (reply, judge_outcome(reply, self.schema))
-        return self._last[1]
+        return self._memo.of(reply)
 
 
 def _choice(unit: str, retry: Optional[str] = None) -> Any:

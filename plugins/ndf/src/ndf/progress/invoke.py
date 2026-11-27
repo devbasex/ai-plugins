@@ -64,6 +64,7 @@ from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unrevi
 from ndf.progress.input_errors import KindInputsMissing, StageInputError, StageInputInvalid, StageInputMissing, TemplateValuesMissing  # noqa: F401  呼び手は invoke の名前で受ける
 from ndf.progress.plan_runs import StageResult, StageRun
 from ndf.testing import scoped, weight
+from ndf.values import LastOne
 
 # 作業種別と、工程の定義の call → 作業種別（plan はサブコマンド `ndf plan` の名前）
 PLAN = plan_cli.TOOL
@@ -956,13 +957,11 @@ class _Checked:
     """Skill の回答の検証（`result.received`）を、回答 1 つにつき 1 回にする。使用量ログの終わり方と工程の結果が同じ検証を使う。"""
 
     def __init__(self) -> None:
-        self._last: Optional[tuple[Any, Optional[dict[str, Any]]]] = None
+        self._memo: LastOne[Any, Optional[dict[str, Any]]] = LastOne(lambda answer: result.received(answer))
 
     def report(self, reply: claude.ClaudeReply) -> Optional[dict[str, Any]]:
         """回答の結果 JSON。形に合わなければ None。同じ回答（`answer` の同じオブジェクト）は検証し直さない。"""
-        if self._last is None or self._last[0] is not reply.answer:
-            self._last = (reply.answer, result.received(reply.answer))
-        return self._last[1]
+        return self._memo.of(reply.answer)
 
 
 def skill_outcome(reply: claude.ClaudeReply, checked: Optional[_Checked] = None) -> str:
