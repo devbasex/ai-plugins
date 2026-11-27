@@ -212,7 +212,7 @@ worktree（抑制コメントのキーはメインディレクトリ）・チー
 | `test_duration`（非推奨。読み手は読まない） | TestDuration か Unknown か null | — | — | 任意 | 読み手は読まない（今のバージョンの読み手が読む値。11.0.0 の後に消す） |
 | `toolchain` | Toolchain | — | — | 任意 | このリポジトリの CI が何で回すか。検査（ndf check の規則 toolchain）が読む。キーごとに独立して効き、無いキーは突き合わせない。NDF 自身が動く条件は配るコントラクト（contracts/data/toolchain.json）が持つ |
 | `version` | integer | — | `1` | 必須 | 設定の形のバージョン。読み手は知らないバージョンを読まない |
-| `workflow` | object | — | — | 任意 | 工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch） |
+| `workflow` | object | — | — | 任意 | 工程の有効・無効の設定（stages）と、プランのテンプレートの起動（launch）と、レビューの単位の行数の目安と上限（review_units） |
 
 例: `{"version": 1, "test": {"suites": [{"name": "pytest", "runner": "pytest", "command": "uv run pytest -q"}]}}`
 

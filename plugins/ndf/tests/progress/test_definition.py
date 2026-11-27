@@ -57,7 +57,6 @@ def _errors(mode_doc: dict, stage_docs: dict) -> list[str]:
 def _all_modes_pass_every_check(mode):
     snap = definition.load_definition(mode)
     assert snap.stages and len(snap.sha256) == 64
-    assert snap.stages[-1].name == "棚卸し"
     # 工程とステップのすべてに入出力の規約があり、参照の指す先がある（受け入れ条件 8）
     for stage in snap.stages:
         assert definition.ref_target(stage.input_ref) is not None
@@ -70,11 +69,8 @@ def _refactor_stage_takes_the_issues_to_read_their_implementation_plans(mode):
     assert definition.load_definition(mode).stage("リファクタリング").inputs == ("worktree", "branch", "issues")
 
 
-def test_standard_rows_run_from_requirements_to_backlog_and_hold_the_closing_stages():
-    names = [s.name for s in definition.load_definition("standard").stages]
-    assert names[0] == "要求と受け入れ条件" and names[-1] == "棚卸し"
-    assert len(names) == 18
-    # まとめの工程（確定仕様化・リリース後テスト・振り返り・棚卸し）も行にある
+def test_standard_puts_the_closing_stages_in_the_close_phase():
+    # 工程の並びと数は test_each_mode_keeps_its_current_stages_steps_and_gate_positions が確かめる。ここはまとめの工程の所属だけ
     closing = [s.name for s in definition.load_definition("standard").stages if s.phase == "close"]
     assert closing == ["確定仕様化", "リリース後テスト", "振り返り", "棚卸し"]
 
@@ -84,19 +80,69 @@ def test_modes_are_ordered_by_height():
     assert sorted(heights, key=heights.__getitem__) == ["light", "operation", "legacy-refactor", "standard", "documentation"]
 
 
+# 今の工程の並び（#3702 の Task 1 の退行テスト）。設計のフェーズの共通の並びと、閉じる側の並び
+_DESIGN_GATED = ("設計", ("design", "design-review", "design-mvv", "design-reading", "design-gate", "design-merge"))
+_DESIGN_PLAIN = ("設計", ("design", "design-review", "design-mvv", "design-merge"))
+_DOCS_REVIEW = ("ドキュメントレビュー", ("docs-pr", "docs-review", "docs-merge"))
+_IMPLEMENT = (("実装", ("implement", "gathered")),)
+_CHECKS = (("コードレビュー", ("code-review",)), ("完了判定", ("quality-gates",)), ("Pull Request", ("pr", "pr-merge")))
+_DEPLOY = (("デプロイ", ("release-mvv", "release-reading", "release-gate", "release")), ("クリーンアップ", ("cleanup",)))
+_AFTER = (("リリース後テスト", ("release-verification",)), ("振り返り", ("retrospective",)), ("棚卸し", ("backlog",)))
+_REFACTOR = (("リファクタリング", ("refactor",)),)
+_START = (("要求と受け入れ条件", ("requirements",)), ("作業場所の用意", ("worktree",)))
+_DESIGN_DOCS = (
+    _DESIGN_GATED,
+    ("詳細設計", ("design-detail",)),
+    ("ドキュメント再構成", ("document-rebuild",)),
+    _DOCS_REVIEW,
+    ("計画", ("plan",)),
+)
+_SPEC = (("確定仕様化", ("plan-to-spec",)),)
+CURRENT_ROWS = {
+    "standard": (*_START, *_DESIGN_DOCS, *_IMPLEMENT, *_REFACTOR, *_CHECKS, *_SPEC, *_DEPLOY, *_AFTER),
+    "legacy-refactor": (_START[1], *_DESIGN_DOCS, *_IMPLEMENT, *_REFACTOR, *_CHECKS, *_DEPLOY, *_AFTER),
+    "light": (*_START, _DESIGN_PLAIN, *_IMPLEMENT, *_CHECKS, *_DEPLOY, _AFTER[-1]),
+    "operation": (*_START, _DESIGN_PLAIN, ("計画", ("plan",)), *_IMPLEMENT, *_CHECKS, *_SPEC, *_DEPLOY, *_AFTER),
+    "documentation": (
+        *_START,
+        _DESIGN_GATED,
+        ("素材の収集と出典の確定", ("document-sources",)),
+        ("ドキュメント再構成", ("document-rebuild",)),
+        _DOCS_REVIEW,
+        ("計画", ("plan",)),
+        *_IMPLEMENT,
+        *_CHECKS,
+        *_SPEC,
+        *_DEPLOY,
+        ("体裁レビュー", ("layout-review",)),
+        *_AFTER,
+    ),
+}
+
+
+@pytest.mark.parametrize("mode", sorted(CURRENT_ROWS))
+def test_each_mode_keeps_its_current_stages_steps_and_gate_positions(mode):
+    # #3702 の Task 1: 工程の並びを変える前に、モードごとの流れるステップと承認ゲートのある工程を縛る。設計承認ゲートは
+    # 工程「設計」に、本番の承認ゲートは工程「デプロイ」にある。Task 18 は standard・legacy-refactor の分だけを書き換える
+    snap = definition.load_definition(mode)
+    assert tuple((s.name, tuple(st.id for st in s.steps)) for s in snap.stages) == CURRENT_ROWS[mode]
+    gated = {s.name: s.gates for s in snap.stages if s.gates}
+    assert gated == (
+        {"設計": ("design",), "デプロイ": ("release",)} if "design-gate" in dict(CURRENT_ROWS[mode])["設計"] else {"デプロイ": ("release",)}
+    )
+
+
 def test_gate_steps_name_which_gate_they_are():
-    # 承認ゲートの工程は承認ゲートを 1 つと数え、before はゲートの直前のステップを返す（#4446 の Task 1）
-    for name, gate in (("設計", "design"), ("デプロイ", "release")):
+    # before はゲートの直前のステップを返す（#4446 の Task 1）。ゲートのある工程は test_each_mode_keeps_its_current_stages_steps_and_gate_positions
+    for name in ("設計", "デプロイ"):
         stage = definition.load_definition("standard").stage(name)
         ids = [st.id for st in stage.steps]
         at = next(st.id for st in stage.steps if st.kind == "gate")
-        assert stage.gates == (gate,) and stage.before(at) == ids[ids.index(at) - 1] and stage.before(ids[0]) is None
+        assert stage.before(at) == ids[ids.index(at) - 1] and stage.before(ids[0]) is None
     # #1516: 設計の承認ゲートと本番の承認ゲートを書き分ける語が、ステップの定義から引ける
     snap = definition.load_definition("standard")
     gates = {st.gate: model.gate_label(st.gate) for st in snap.steps() if st.kind == "gate"}
-    assert set(gates) == {"design", "release"}
     assert gates["design"] != gates["release"]
-    assert snap.stage("設計").steps[[st.kind for st in snap.stage("設計").steps].index("gate")].gate == "design"
 
 
 def test_design_hands_the_review_result_to_the_gate_without_a_final_judge():
@@ -114,8 +160,8 @@ def test_design_hands_the_review_result_to_the_gate_without_a_final_judge():
 
 @pytest.mark.parametrize("mode", ["standard", "light"])
 def test_reading_step_sits_between_the_mvv_judge_and_the_gate_and_is_not_counted_as_a_gate(mode):
-    # #4446 の決定 2: design-reading は design-mvv と design-gate の間、release-reading は release-mvv と release-gate の間。
-    # 承認ゲートは 1 つと数え、MVV 判定は読み手役のステップを飛ばして探す。設計承認ゲートの無いモードには読み手役も無い
+    # #4446 の決定 2: MVV 判定は読み手役のステップを飛ばして探す。設計承認ゲートの無いモードには読み手役も無い。
+    # ステップの並び（design-mvv・design-reading・design-gate など）は test_each_mode_keeps_its_current_stages_steps_and_gate_positions が確かめる
     snap = definition.load_definition(mode)
     for name, gate, mvv in (("設計", "design", "design-mvv"), ("デプロイ", "release", "release-mvv")):
         if name not in [s.name for s in snap.stages]:
@@ -125,8 +171,7 @@ def test_reading_step_sits_between_the_mvv_judge_and_the_gate_and_is_not_counted
         if f"{gate}-gate" not in ids:
             assert stage.reading_for(gate) is None and all(st.kind != "reading" for st in stage.steps)
             continue
-        assert ids[ids.index(mvv) : ids.index(f"{gate}-gate") + 1] == [mvv, f"{gate}-reading", f"{gate}-gate"]
-        assert stage.gates == (gate,) and stage.mvv_before(f"{gate}-gate") == mvv
+        assert stage.mvv_before(f"{gate}-gate") == mvv
         assert stage.reading_for(gate).id == f"{gate}-reading" and stage.reading_for(gate).args["argv"][-1] == gate
     # 読み手役のステップの無い古い定義でも、MVV 判定は承認ゲートの直前のステップ
     old = dataclasses.replace(snap.stage("デプロイ"), steps=tuple(st for st in snap.stage("デプロイ").steps if st.kind != "reading"))
