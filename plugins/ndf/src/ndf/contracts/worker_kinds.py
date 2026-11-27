@@ -116,11 +116,6 @@ class Recorded(NamedTuple):
     store: Optional[str]
 
     @property
-    def without_number(self) -> bool:
-        """承認の時点でバージョン番号を持たないリポジトリだったか（保存先の種類が `none`）。"""
-        return self.store == STORE_NONE
-
-    @property
     def store_unknown(self) -> bool:
         """承認の時点で設定を読めず、保存先の種類が決まらなかったか。"""
         return self.store == STORE_UNKNOWN
