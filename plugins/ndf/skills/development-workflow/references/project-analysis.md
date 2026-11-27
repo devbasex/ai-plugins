@@ -7,8 +7,8 @@
 ## 例: carmo-system-console で手順 0 を通す
 
 1. `ndf project check` が 3 で終わる（`.ndf/project.json` が無い）
-2. conductor が `ndf project measure --out "$TMP/measure.json"` を打つ。言語（PHP 8.3・Laravel 10）・CI の JUnit の合計・
-   ワークフロー・必須のチェック・compose の `mysql` を「測った値」として、テストの走らせ方・課題の SSOT・
+2. conductor が `ndf project measure --out "$TMP/measure.json"` を打つ。言語（PHP 8.3・Laravel 10）・必須のチェック・
+   compose の `mysql` を「測った値」として、テストの走らせ方・課題の SSOT・
    NDF の方針の検査を「質問」として、候補と根拠を付けて返す
 3. conductor が質問に回答する。`AGENTS.md` の `docker compose exec app ./vendor/bin/phpunit` の行を根拠にテストを
    「PHPUnit・`app` のコンテナ越し」と決め、回答のファイルを書く
@@ -50,11 +50,15 @@ ndf project write --measure "$TMP/measure.json" --answers "$TMP/answers.json"; e
 `measure` の締め切りは 120 秒（`--budget`）で、`gh` の 1 回の呼び出しは残りと 30 秒の小さい方で打ち切る。
 `measure` が書くのは `--out` だけで、リポジトリの中へは置けない。`gh` へは読む要求（`gh api --method GET`）だけを渡す。
 
-CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-steps`・`ci-junit` は、ワークフローごとの代表の run から測る。
-代表の run は、直近 50 件の成功の run のうち、そのワークフローの新しい順に最大 5 件を見て、ジョブを飛ばしていない最新の 1 件である。
-ジョブを飛ばした run は、conclusion が `skipped` のジョブを 1 つ以上含む run で、ワークフローやジョブの名前では判定しない。
-5 件ともジョブを飛ばしていたワークフローは、壁時計を持たない行になり、注記に `飛ばしていない run が無い: <パス>（候補 <n> 件）` が出る。
-候補のジョブの取得が時間切れになったら、そのワークフローから後は壁時計を持たない行になり、注記に `候補のジョブを取れない（時間切れ）: <パス>` が出る。
+**CI について測るのは、既定ブランチの必須のチェック（`ci.required_checks`）だけである。**
+`gh` で呼ぶ API は、必須のチェック（`rules/branches`）・閉じた PR（`pulls`）・課題（`issues`）の 3 つだけである。
+CI の実行時間・JUnit の合計・ワークフローの一覧・言語ごとのファイル数は、読む仕組みが無いので測らない。
+テストの走らせ方（`test`）は、手がかりがあれば質問（`status: question`）になり、無ければ回答の要らない値になる。
+質問のときは、suite を次の順で決めて回答する。
+指示書・README にテストの走らせ方が書かれていれば、その記述に従う。
+書かれていなければ、測定が候補に挙げたテストの実行器とコマンド（`candidates` の `runners`・`commands`）から決め、使った設定ファイルやコマンドの行を `evidence` に挙げる。
+どちらからも走らせ方を確かめられなければ、`{"unknown": "<理由>"}` と回答する。`ci_jobs` は、どの場合もワークフローのファイルで確かめる。
+テストの実行器・テストを走らせるコマンド・指示書や README のテストの記述がどれも無いリポジトリでは、`test` は測った値（`status: measured`）の空の suite の一覧になるので、回答しない。
 
 ## 回答方
 
@@ -68,7 +72,7 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
 
 | 項目 | 回答の `value` の形 | 決め方 |
 | --- | --- | --- |
-| `test`（P2） | `{"strategy"?, "ci"?: {"check"?, "junit_artifacts"?}, "suites": [{"name", "runner", "command", "scope_command"?, "junit"?, "container"?: {"service", "compose_files"}, "needs", "paths", "kind"?, "ci_jobs"?}]}` | 指示書・README の走らせ方の行を正とする。コンテナ越しなら `container` を書き、`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）にシェルの引用で守った範囲のパスの並びが入る。入るパスの種類は場所で違い、cross-refactoring の改修の範囲テストではテストのファイルのパス（計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置く場所（ディレクトリかファイル）、静的解析の suite では変更したファイルのパスが入る。テストの `scope_command` はテストのファイルのパスを受けるコマンドで書く。ディレクトリしか受けないランナーは、範囲テストをファイルで受ける形と全体テストをディレクトリで走らせる形に分ける（unittest なら `scope_command` を `python3 -m unittest {paths}`、`command` を `python3 -m unittest discover -s <テストのディレクトリ>` にする。`python3 -m unittest tests/test_x.py tests/test_y.py` と `discover -s tests` はどちらも終了コード 0、`discover -s tests/test_x.py` は 1、テストの無いディレクトリを渡した `discover -s scripts/storylib` は 5 で終わる）。ファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分けて改修の前に止める。`command` と `scope_command` はシェルで走らせる。`kind` は suite の種別で、`test`（既定）か `lint`（静的解析。整形の検査を含む）。静的解析の suite は変更したファイルのうち `paths` に当たるものにかかり、`paths` の要素には接頭辞のほかに glob（`*.sh` など）を書ける。`junit` はコマンドが JUnit XML を書く相対パス（pytest は `-o junit_family=xunit1 --junitxml=<パス>` をコマンドに書く。無ければ落ちたテストの見分けが全体の走らせ直しへ落ちる）。`strategy` は `local-full`（全体テストを手元で走らせる）/ `local-scoped-ci-whole`（範囲は手元、全体は CI に任せる。`ci.check` に待つチェック、`ci.junit_artifacts` に JUnit の成果物の名前の glob）/ `round-only`（パスでテストを選べない。suite の `command` をそのまま走らせる）。空なら所要と suite から導く（600 秒を超え CI が読めれば `local-scoped-ci-whole`。`scope_command` が無ければ `round-only`。ほかは `local-full`）ので、その既定を回答として示し、手元で全体テストを回さない方針があるときだけ書き換える。`ci_jobs` は suite と同じ検査を走らせる CI のジョブ（`<ワークフローのファイル>#<job id>` か `<ワークフローのファイル>`）で、ワークフローのファイルから回答する。CI テストの設定（`ci.only`）は回答しない。書き出しが、テストの suite の `ci_jobs` のファイルがリポジトリにあれば `true` を書き、条件を満たさなくなれば解析が書いた値を消す（人が書いた値は変えない）。設定があれば手元でテストを走らせず、合否を PR の CI の結果で決める |
+| `test`（P2） | `{"strategy"?, "ci"?: {"check"?, "junit_artifacts"?}, "suites": [{"name", "runner", "command", "scope_command"?, "junit"?, "container"?: {"service", "compose_files"}, "needs", "paths", "kind"?, "ci_jobs"?}]}` | 指示書・README の走らせ方の行を正とする。コンテナ越しなら `container` を書き、`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）にシェルの引用で守った範囲のパスの並びが入る。入るパスの種類は場所で違い、cross-refactoring の改修の範囲テストではテストのファイルのパス（計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置く場所（ディレクトリかファイル）、静的解析の suite では変更したファイルのパスが入る。テストの `scope_command` はテストのファイルのパスを受けるコマンドで書く。ディレクトリしか受けないランナーは、範囲テストをファイルで受ける形と全体テストをディレクトリで走らせる形に分ける（unittest なら `scope_command` を `python3 -m unittest {paths}`、`command` を `python3 -m unittest discover -s <テストのディレクトリ>` にする。`python3 -m unittest tests/test_x.py tests/test_y.py` と `discover -s tests` はどちらも終了コード 0、`discover -s tests/test_x.py` は 1、テストの無いディレクトリを渡した `discover -s scripts/storylib` は 5 で終わる）。ファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分けて改修の前に止める。`command` と `scope_command` はシェルで走らせる。`kind` は suite の種別で、`test`（既定）か `lint`（静的解析。整形の検査を含む）。静的解析の suite は変更したファイルのうち `paths` に当たるものにかかり、`paths` の要素には接頭辞のほかに glob（`*.sh` など）を書ける。`junit` はコマンドが JUnit XML を書く相対パス（pytest は `-o junit_family=xunit1 --junitxml=<パス>` をコマンドに書く。無ければ落ちたテストの見分けが全体の走らせ直しへ落ちる）。`strategy` は `local-full`（全体テストを手元で走らせる）/ `local-scoped-ci-whole`（範囲は手元、全体は CI に任せる。`ci.check` に待つチェック、`ci.junit_artifacts` に JUnit の成果物の名前の glob）/ `round-only`（パスでテストを選べない。suite の `command` をそのまま走らせる）。解析はテストの所要時間を測らないので、`strategy` は指示書・README に書かれたテストの方針から選ぶ。既定は、`scope_command` が無ければ `round-only`、あれば `local-full` である。`local-scoped-ci-whole` を選ぶのは、全体テストを CI に任せる方針が指示書・README に書かれているときだけで、その行を回答の `evidence` に挙げる。CI のテストに時間がかかると分かっただけでは選ばない。方針が所要時間を理由にしているときは、所要時間を確かめた出所（指示書の記述や CI の実行の画面）も `evidence` に挙げる。方針を確かめられないときは、既定のままにする。`ci_jobs` は suite と同じ検査を走らせる CI のジョブ（`<ワークフローのファイル>#<job id>` か `<ワークフローのファイル>`）で、ワークフローのファイルから回答する。CI テストの設定（`ci.only`）は回答しない。書き出しが、テストの suite の `ci_jobs` のファイルがリポジトリにあれば `true` を書き、条件を満たさなくなれば解析が書いた値を消す（人が書いた値は変えない）。設定が `true` なら、`strategy` が `local-scoped-ci-whole` でも手元では範囲テストも走らせず、合否を PR の CI の結果で決める。そのため、`ci_jobs` を書くと、手元で範囲テストを走らせる方針のリポジトリでも手元のテストが止まる。その方針を守るときは、書き出しの後に人が `.ndf/project.json` の `test.ci.only` に `false` を書く。書き出しは `false` を書き換えない。ただし、書き出しは `test` を `ci.only` も含めた 1 つの値として、解析が書いた値かどうかを見分ける。そのため `false` を書いた後は `test` 全体が人の書いた値になり、解析をやり直しても suite やコマンドは更新されない（食い違いは出力に `設定 <値> / 解析 <値>` の行で出る）。テストの走らせ方を変えたときは、`test` を人が書き直す |
 | `issues`（P8） | `{"primary", "others"}`。名前は `github`・`markdown`・`redmine`・`external` など | 名前だけを書き、URL や識別子を書かない |
 | `ndf_policies`（P9） | `{"doc_lint": bool, "reject_md_wording_tests": bool}` | 指示書に NDF の文体の規則・`.md` の文言テストを退ける方針があるときだけ `true`。無ければ両方 `false` |
 | `materials` | `{"product"?: {"kind", "users"?}, "needs"?: {"usage", "market"}, "seeds"?: {"libraries", "environment"}, "deferred_milestones", "cause_types"?, "code_measures"?, "failures"?}` | 棚卸しの見直しと大整理が読む材料の設定（`backlog-refinement` の `references/research.md`）。候補は README の冒頭と直接の依存から出る。調べる依存（`seeds.libraries`）は候補から人が残すものだけにする。利用の記録（`needs.usage`）の読むコマンドと範囲（`scope.aggregate_only`・`days`・`mask`）・市場と競合・周辺環境・後回しのマイルストーンは人が書く。決められなければ `{"unknown": "<理由>"}` と書き、見直しはすべての側面を飛ばす |
@@ -84,7 +88,9 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
                                 "junit": "build/ndf/junit.xml",
                                 "container": {"service": "app", "compose_files": ["docker-compose.yml"]},
                                 "needs": ["mysql"], "paths": ["tests"]}]},
-          "reason": "AGENTS.md:34 の手順。全体は約 64 分で CI が 24 本に分けて回すため CI に任せる"}}
+          "evidence": [{"path": "AGENTS.md", "line": 34, "text": "docker compose exec app ./vendor/bin/phpunit"},
+                       {"path": "AGENTS.md", "line": 41, "text": "全体テストは約 64 分かかるので CI に任せ、手元では変えたテストだけを走らせる"}],
+          "reason": "走らせ方は AGENTS.md の手順に従い、全体テストを CI に任せる方針があるので local-scoped-ci-whole にした"}}
 ```
 
 `value` が項目の形に合わなければ、`write` はその項目を `{"unknown": "回答が形に合わない: <箇所>"}` にして続ける。
@@ -94,23 +100,97 @@ CI の壁時計（`ci.workflows[].wall_seconds`）とテストの所要の `ci-s
 - 手で書いた値は変えない。変えるのは、キーが無い項目と、前の `write` が書いた値のまま（`analysis.written` の指紋が一致する）の項目だけ。
   解析の値と食い違えば、出力に `設定 <値> / 解析 <値>` の行が出る
 - 新しい解析で不明になった項目は、前の値を残す
-- `ci` のワークフローの行に新しい解析の壁時計が無ければ、前の解析の同じパスの行の壁時計を残し、出力に `ci#<パス>: 不明（新しい解析に壁時計が無い）（前の値を残した）` の行が出る
 - 秘密の形の値は、手で書いた値でも捨てて `{"unknown": "秘密の形"}` にする。値は設定・差分・出力のどれにも出ない
 - ブランチ名とブランチ戦略（`branch_strategy`）は書かない。書くのは `ndf project branch-strategy` だけである
 - 解析の結果が前と同じなら、ファイルを書かない
 - 設定はメインディレクトリの `.ndf/` に書く。コミットするかは下の「`.ndf/` の追跡」に従う。`.gitignore` の対象なら、そのことが出力に出る
+- `write` は、設定と記録を読む前に、`ndf project branch-strategy` が設定を書くときと同じロック（git の共通ディレクトリの
+  `ndf-branch-strategy.lock`）を取り、最後のファイルを書くまで持つ。ロックはメインディレクトリと worktree で共通なので、
+  別の worktree から同時に打っても、設定と記録は 1 回の `write` が書いた組み合わせになる。
+  30 秒（上限の設定 `branch-strategy.write-lock`）待っても取れなければ、何も読まず書かずに 1 で終わり、
+  `別の実行が設定を書いています。終わってから打ち直してください` を出す。`--dry-run` はロックを取らない
+- 設定の `analysis` には、項目ごとの書いた値の指紋（`analysis.written`）だけが残る。
+  この指紋は、次の `write` が項目を前の `write` の値のままか、人が書き換えたかを見分けるためにある。設定と一緒にコミットする
+- `ndf project check` が読む解析の記録は、設定とは別のファイル（メインディレクトリの `.ndf/analysis/project.json`）に書く。
+  中身は、解析器のバージョン・入力のファイルのハッシュ・ブランチの構成・記録に対応する設定の指紋である。
+  このファイルはコミットしない（下の「`.ndf/` の追跡」）
+- 出力に差分が出るのは、`.ndf/project.json` を変えたときだけである。解析の記録とその `.gitignore` は、差分を出さず、書き込みごとに
+  `書いた: <パス>（<要約>）` の 1 行を出す。前の記録を書き換えるときは、書き出しの途中のマーカーを付ける書き込みと最後の記録の書き込みで、同じパスの行が 2 回出る
 
 設定の形は [../schemas/project.schema.json](../schemas/project.schema.json) にある（`ndf project schema` の生成物）。
 
 ## `.ndf/` の追跡
 
 **`.ndf/` は追跡する（コミットしてチームで共有する）のが標準である。** 設定（`project.json`・`worktree.json`・`mvv.md`・`mvv.json`・`glossary.json` など）は
-clone した全員と CI で同じ値のまま効き、変える Pull Request を承認ゲートで人が見る（共通原則の C7）。追跡から外すのは次の 2 種類だけである。
+clone した全員と CI で同じ値のまま効き、変える Pull Request を承認ゲートで人が見る（共通原則の C7）。追跡から外すのは次の 3 種類だけである。
 
 | 外すもの | 外し方 |
 | --- | --- |
 | 個人の値（`.ndf/worktree.local.json`） | `.ndf/.gitignore` に書く。`worktree` Skill の `ndf worktree init` が作る |
+| 解析の記録（`.ndf/analysis/project.json`） | `ndf project write` が、`.ndf/analysis/.gitignore`（中身は `*`）を無いときだけ作って外す。すでにある `.gitignore` は書き換えない |
 | 実行時の出力（`.ndf/handoff/` など） | コミットしない。`handoff/` は `.gitignore` にも書かない（[handoff.md](handoff.md)） |
+
+**旧い形の設定は、最初の `ndf project write` で新しい形へ移り、その差分を確かめてコミットする。**
+旧い形とは、解析の記録を設定の中に持っていた形である。`.ndf/project.json` に `analysis` の `written` 以外のキー・`test_duration`・
+`languages[].files`・`ci.workflows`・`ci.provider` のどれかが残っていると、`ndf project check` は `旧い形の値が設定にある` を理由に 3 で終わる。
+手順 0 の 3 手を通すと、`write` は次のように移す。
+
+1. 設定から旧い形のキーを取り除く。各項目を人が書いたか解析が書いたかの見分けは、移す前と変わらない
+2. `analysis.written` の指紋を、取り除いた後の値で書き直す
+3. 解析の記録を `.ndf/analysis/project.json` へ書き、`.ndf/analysis/.gitignore` が無ければ作る
+
+**移行の後は、書き出しの結果をメインディレクトリで確かめ、コミットは移行用のブランチをチェックアウトした作業ディレクトリで行う。**
+移行用のブランチとは、設定の変更を Pull Request にするために作る、既定ブランチ以外のブランチである。
+`write` は、リンクされた worktree から打っても、設定と記録をメインディレクトリへ書く。
+メインディレクトリが既定ブランチをチェックアウトしているときにそこでコミットすると、Pull Request を経ずに既定ブランチへコミットしてしまう。
+メインディレクトリが移行用のブランチをチェックアウトしているなら、2 つの場所は同じである。
+
+解析の記録（`.ndf/analysis/project.json`）は、設定をステージする前に、移行用のブランチで git の追跡と追加の対象から外す。
+先に `.ndf/` をまとめてステージすると、追跡済みの記録や除外されていない記録が、設定と一緒にコミットされるためである。
+追跡と除外は `git status` の表示では判定しない。未追跡のファイルがディレクトリ名にまとめて出る場合や、追跡済みのファイルに差分が無い場合を見落とすためである。
+
+1. メインディレクトリで、`.ndf/project.json` の差分を確かめる。差分には、旧い形のキーの削除・指紋の書き直し・解析で変わった項目が出る
+2. メインディレクトリの `.ndf/project.json` を、移行用のブランチの作業ディレクトリへコピーする。解析の記録はコピーしない。
+   ここから後の git コマンドは、すべて移行用のブランチの作業ディレクトリのルートで打つ
+3. `git ls-files -- .ndf/analysis/project.json` が何か出力したら、記録はこのブランチで追跡されている。`git rm --cached -- .ndf/analysis/project.json` で、
+   そのファイルだけを追跡から外す
+4. `git ls-files -- .ndf/analysis/.gitignore` が何か出力したら、記録の保存先の `.gitignore` をチームで共有している。
+   このときは `git check-ignore -- .ndf/analysis/project.json` を打ち、何も出力しなければ、その `.gitignore` に `/project.json` の行を足す。
+   `*` は足さない。同じディレクトリに利用者が置いた未追跡のファイルまで、`git status` と `git add` の対象から外れるためである。
+   この確かめは必ず 3 の後に行う。`git check-ignore` は、追跡しているファイルを除外の対象として報告しないためである。
+   共有していなければ、何もしない。各 clone では `write` が `*` の `.gitignore` を作り、その `.gitignore` は自分自身も除外するのでコミットされない
+5. 設定をステージする。4 で `.ndf/analysis/.gitignore` を直したときと、下の「止まったときの直し方」の表で `.gitignore` を作ったときは、
+   その `.gitignore` もステージする。
+   `git diff --cached --name-status` で、ステージした変更が設定・その `.gitignore`・3 の削除だけで、
+   `.ndf/analysis/project.json` の追加や変更が無いことを確かめてからコミットする
+
+**`write` は、`.ndf/analysis/` の下のファイルを 1 つでも書く前に、解析の記録が git に無視されることを確かめる。**
+無視されない、または確かめられないときは、設定も記録も `.gitignore` も書かずに 1 で終わり、理由を出す。
+まず、記録のパスを git が判定できるかを見る。`.ndf/analysis` が別の場所へのシンボリックリンクのときなど、git が判定できなければ、
+`.gitignore` の有無によらず止まる。判定できるときの確かめ方は、メインディレクトリに `.ndf/analysis/.gitignore` があるかどうかで次のように分かれる。
+
+| `.ndf/analysis/.gitignore` | 確かめ方 |
+| --- | --- |
+| ある | 設定が除外されているかを調べる `git check-ignore` で、記録のパスも一緒に調べる。無視の出所（`.ndf/analysis/.gitignore`・ルートの `.gitignore`・`.git/info/exclude`・`core.excludesFile`）は問わない。記録を追跡しているときと、否定の行（`!` で始まるパターン）に当たったときは、無視されないとみなす |
+| 無い | `git ls-files` で、`.ndf/analysis/` の下に追跡しているファイルが無いことを確かめてから、`*` の `.gitignore` を作る。同じディレクトリの `.gitignore` はほかのどの除外の設定よりも優先されるので、これで記録は無視される。ルートの `.gitignore` に `!.ndf/analysis/` のような否定の行があっても同じである |
+
+書くものが無い `write` は、この確かめでは止まらずに 0 で終わる。
+
+**止まったときに直すコマンドは、メインディレクトリのルートで打つ。** `write` が調べるのは、メインディレクトリの索引と `.gitignore` だからである。
+リンクされた worktree の作業ディレクトリで直しても、メインディレクトリの索引では記録の追跡が続き、打ち直した `write` がまた止まる。
+追跡を外した変更や共有の `.gitignore` を直した変更のコミットは、上の移行の手順のとおり、移行用のブランチの作業ディレクトリで行う。
+理由に複数のパスが出たときは、パスごとに当てはまる行の直し方を行う。ただし、追跡している `.ndf/analysis/.gitignore` が出たときは、
+ほかのパスより先にそれを戻す。記録とは別の追跡ファイルのために `.gitignore` を作るのは、戻した後も `.gitignore` が無いときに限る。
+戻した `.gitignore` を作り直すと、チームが共有している除外の行が失われるためである。
+
+| 出た理由 | 当てはまる状態 | 直し方 |
+| --- | --- | --- |
+| `.ndf/analysis/ の下のファイルが git に追跡されている: <パス>` で、パスが `.ndf/analysis/project.json` | 記録を追跡している | `git rm --cached -- .ndf/analysis/project.json` で記録だけを追跡から外してから打ち直す |
+| 同じ理由で、パスが `.ndf/analysis/.gitignore` | 追跡している `.gitignore` を手元で消した | `git restore -- .ndf/analysis/.gitignore` で戻し、移行の手順の 4 のとおり記録を外す行があるかを確かめてから打ち直す |
+| 同じ理由で、パスが上の 2 つ以外 | `.ndf/analysis/` に記録とは別のファイルを追跡している | 表示されたファイルの追跡はそのまま残す。`.ndf/analysis/.gitignore` を作って `/project.json` の行を書いてから打ち直す。この `.gitignore` はチームで共有する。移行の手順の 5 のとおり、移行用のブランチの作業ディレクトリにも同じ `.gitignore` を置き、設定と一緒にステージしてコミットする。共有しないと、別の clone の最初の `write` が同じ追跡ファイルで止まる |
+| `.ndf/analysis/project.json が git に無視されない。…` | 前からある `.ndf/analysis/.gitignore` が記録を外していない | その `.gitignore` に `/project.json` の行を足してから打ち直す。`.gitignore` を追跡しているかどうかによらず同じである。`*` は足さない。同じディレクトリに置いた別の未追跡のファイルまで、`git status` と `git add` の対象から外れるためである |
+| 同じ理由 | 記録を追跡している（`git ls-files -- .ndf/analysis/project.json` が何か出力する） | 1 行目と同じく、記録だけを追跡から外してから打ち直す |
+| `git が .ndf/analysis/ の追跡と無視を確かめられない: <git の出力>` | 索引が壊れている、`.ndf/analysis` が別の場所へのシンボリックリンクであるなど、git が判定できない | git の出力に従って直してから打ち直す |
 
 ルートの `.gitignore` が `.ndf/` を丸ごと外しているときは、利用者が `.gitignore` を直す（NDF は `.gitignore` を書き換えない）。
 設定を書くコマンド（`ndf project write`）は、設定が `.gitignore` の対象なら

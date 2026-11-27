@@ -269,5 +269,4 @@ ruleset（`protect main and develop`、`main` と `develop` が対象）は管�
 - [`plugins/ndf/scripts/lib/ci_workflows.py`](https://github.com/devbasex/ai-plugins/blob/30f9608fda36c712afac43fc3893ac6c038a0145/plugins/ndf/scripts/lib/ci_workflows.py)
 - [版とリリースの正本](../versioning-and-distribution.md)（`main` / `develop` の保護と、必須のチェックの一覧の読み方）
 - [ndf-workflow-unit-and-gates.md](ndf-workflow-unit-and-gates.md)（`pr-body-decisions-check` を必須にする決定）
-- [project-decl-ci-representative-run.md](project-decl-ci-representative-run.md)（解析が CI の所要を測るときの必須のチェックの扱い）
 - 課題: #653

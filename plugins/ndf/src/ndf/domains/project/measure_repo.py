@@ -14,7 +14,6 @@ import re
 import subprocess
 import time
 import tomllib
-from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, NamedTuple, Optional
 
@@ -304,14 +303,15 @@ def _versions(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, Optional
 
 
 def measure_languages(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, Any]:
-    counts = Counter(LANG_EXT[s] for s in (PurePosixPath(p).suffix.lower() for p in tree.files) if s in LANG_EXT)
+    """言語の行（`{name, frameworks, version?}`）を名前の順に並べる。ファイル数は言語を見つけるためだけに数え、行に書かない（#4516）。"""
+    found = {LANG_EXT[s] for s in (PurePosixPath(p).suffix.lower() for p in tree.files) if s in LANG_EXT}
     version_of = _versions(tree, deps)
     out = []
-    for lang, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+    for lang in sorted(found):
         dep_lang = "javascript" if lang == "typescript" else lang
         names = deps[dep_lang] if dep_lang in deps else {}
         fws = [f"{fw} {_first_number(names[dep])}".strip() for dep, fw in FRAMEWORKS if dep in names]
-        entry: dict[str, Any] = {"name": lang, "frameworks": fws, "files": n}
+        entry: dict[str, Any] = {"name": lang, "frameworks": fws}
         if version_of.get(lang):
             entry["version"] = version_of[lang]
         out.append(entry)

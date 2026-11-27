@@ -40,7 +40,7 @@
         }
       ],
       "default": null,
-      "description": "言語ごとの名前・フレームワーク・ファイルの数・バージョンの並び。解析（M7）が書く"
+      "description": "言語ごとの名前・フレームワーク・バージョンの並び（名前の順）。解析（M7）が書く"
     },
     "test": {
       "anyOf": [
@@ -70,7 +70,7 @@
         }
       ],
       "default": null,
-      "description": "CI の提供元・ワークフロー・必須のチェック"
+      "description": "CI の必須のチェック"
     },
     "services": {
       "anyOf": [
@@ -187,23 +187,7 @@
         }
       ],
       "default": null,
-      "description": "解析（M7）が書いた入力の sha256・ブランチ・書いたセクションの記録。人は書かない"
-    },
-    "test_duration": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/TestDuration"
-        },
-        {
-          "$ref": "#/$defs/Unknown"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "読み手は読まない（今のバージョンの読み手が読む値。11.0.0 の後に消す）",
-      "deprecated": true
+      "description": "解析（M7）が書いた値の指紋。人は書かない。解析の記録は .ndf/analysis/project.json（git で追跡しない）にある"
     },
     "workflow": {
       "type": "object",
@@ -299,25 +283,6 @@
     "Analysis": {
       "additionalProperties": false,
       "properties": {
-        "analyzer": {
-          "minimum": 1,
-          "title": "Analyzer",
-          "type": "integer"
-        },
-        "at": {
-          "title": "At",
-          "type": "string"
-        },
-        "inputs": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Inputs",
-          "type": "object"
-        },
-        "branches": {
-          "$ref": "#/$defs/BranchState"
-        },
         "written": {
           "additionalProperties": {
             "type": "string"
@@ -327,40 +292,7 @@
           "type": "object"
         }
       },
-      "required": [
-        "analyzer",
-        "at",
-        "inputs",
-        "branches"
-      ],
       "title": "Analysis",
-      "type": "object"
-    },
-    "BranchState": {
-      "additionalProperties": false,
-      "properties": {
-        "head": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Head"
-        },
-        "present": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Present",
-          "type": "array"
-        }
-      },
-      "title": "BranchState",
       "type": "object"
     },
     "BranchStrategy": {
@@ -1504,17 +1436,6 @@
     "Ci": {
       "additionalProperties": false,
       "properties": {
-        "provider": {
-          "title": "Provider",
-          "type": "string"
-        },
-        "workflows": {
-          "items": {
-            "$ref": "#/$defs/Workflow"
-          },
-          "title": "Workflows",
-          "type": "array"
-        },
         "required_checks": {
           "default": [],
           "items": {
@@ -1524,10 +1445,6 @@
           "type": "array"
         }
       },
-      "required": [
-        "provider",
-        "workflows"
-      ],
       "title": "Ci",
       "type": "object"
     },
@@ -1807,36 +1724,6 @@
       "title": "Docs",
       "type": "object"
     },
-    "Duration": {
-      "additionalProperties": false,
-      "properties": {
-        "seconds": {
-          "minimum": 0,
-          "title": "Seconds",
-          "type": "number"
-        },
-        "source": {
-          "enum": [
-            "ndf-record",
-            "ci-junit",
-            "ci-steps"
-          ],
-          "title": "Source",
-          "type": "string"
-        },
-        "detail": {
-          "title": "Detail",
-          "type": "string"
-        }
-      },
-      "required": [
-        "seconds",
-        "source",
-        "detail"
-      ],
-      "title": "Duration",
-      "type": "object"
-    },
     "Environment": {
       "additionalProperties": false,
       "properties": {
@@ -1963,16 +1850,10 @@
           },
           "title": "Frameworks",
           "type": "array"
-        },
-        "files": {
-          "minimum": 0,
-          "title": "Files",
-          "type": "integer"
         }
       },
       "required": [
-        "name",
-        "files"
+        "name"
       ],
       "title": "Language",
       "type": "object"
@@ -2548,24 +2429,6 @@
       "title": "TestCi",
       "type": "object"
     },
-    "TestDuration": {
-      "additionalProperties": false,
-      "properties": {
-        "measured": {
-          "items": {
-            "$ref": "#/$defs/Duration"
-          },
-          "minItems": 1,
-          "title": "Measured",
-          "type": "array"
-        }
-      },
-      "required": [
-        "measured"
-      ],
-      "title": "TestDuration",
-      "type": "object"
-    },
     "TestedDocs": {
       "additionalProperties": false,
       "description": "テストが読む文書（`paths`）と、それを読むテスト（`tests`）の組。",
@@ -2722,38 +2585,6 @@
         "aggregate_only"
       ],
       "title": "UsageScope",
-      "type": "object"
-    },
-    "Workflow": {
-      "additionalProperties": false,
-      "properties": {
-        "path": {
-          "title": "Path",
-          "type": "string"
-        },
-        "jobs": {
-          "minimum": 0,
-          "title": "Jobs",
-          "type": "integer"
-        },
-        "wall_seconds": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Wall Seconds"
-        }
-      },
-      "required": [
-        "path",
-        "jobs"
-      ],
-      "title": "Workflow",
       "type": "object"
     }
   }

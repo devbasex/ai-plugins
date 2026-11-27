@@ -134,8 +134,8 @@ def verbs() -> dict[str, Verb]:
 def handle(args: argparse.Namespace) -> int:
     """動詞（`init`・`measure`・`write`・`migrate`・`remove`）を受けて組み、作成の結果を 1 行の JSON で出す。"""
     try:
-        repo, _ = check.repo_dirs(Path(args.root).resolve())
-        return verbs()[args.verb](args, repo.cwd, bw.load_presets())
+        top = check.repo_dirs(Path(args.root).resolve()).top
+        return verbs()[args.verb](args, top.cwd, bw.load_presets())
     except check.CheckError as exc:
         sys.stderr.write(f"{exc}\n")
         return exit_codes.code_of(bs.UNREADABLE)
