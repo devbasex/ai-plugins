@@ -16,6 +16,7 @@ Issue・コメント・PR の本文を書く操作は、公開範囲を読むエ
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import time
@@ -46,6 +47,8 @@ T = TypeVar("T")
 NUMBERED_NODES = ("pullRequest", "issue", "issueOrPullRequest")  # GraphQL のエイリアスで引ける番号つきの節点
 # `issueOrPullRequest`（union）から本文を選ぶ選択。union なので、body は型ごとのインラインフラグメントで選ぶ（#3908 の r2-1）
 BODY_FIELDS = "... on Issue { body } ... on PullRequest { body }"
+# 1 つのファイルの本文を切り詰めの有無と合わせて読む選択（`object(expression:)` の後ろに置く。`whole_text` で取り出す）
+WHOLE_BLOB = "{ ... on Blob { oid text isTruncated } }"
 # head のブランチごとに読む PR の件数（新しい順）
 PULLS_PER_HEAD = 5
 # 認証の値を読む環境変数（先のものを優先する。利用者の手順へ渡さないときに消す名前も同じ）
@@ -148,6 +151,13 @@ class Viewer(NamedTuple):
     account_id: int
 
 
+class Unread(NamedTuple):
+    """`GitHub.branch_file_with` の後続の要求のうち失敗した 1 回。`names` はその要求に載せた選択の名前、`error` は失敗。"""
+
+    names: tuple[str, ...]
+    error: GitHubError
+
+
 class MergeExpect(NamedTuple):
     """`ndf ci merge` が判定に使った値（#4409 の決定 8）。`pull` は判定の前に読んだ PR で、先の確認と方式の選択に使う。
 
@@ -165,6 +175,17 @@ class MergeExpect(NamedTuple):
 def same_repo(a: str, b: str) -> bool:
     """2 つのリポジトリ名（`<所有者>/<リポジトリ>`）が同じか。GitHub の名前は大文字小文字を区別しない。"""
     return a.lower() == b.lower()
+
+
+def whole_blob_at(rev: str, path: str) -> str:
+    """コミット `rev` のファイル `path` の本文を、切り詰めの有無と合わせて読む `repository` の下の選択（`WHOLE_BLOB`）。"""
+    return f"object(expression: {json.dumps(f'{rev}:{path}')}) {WHOLE_BLOB}"
+
+
+def whole_text(node: Any) -> Optional[str]:
+    """`whole_blob_at` で読んだ応答の節点の本文。Blob でない・応答に無い・切り詰められた（`isTruncated`）本文は None。"""
+    text = node.get("text") if isinstance(node, dict) and node.get("isTruncated") is False else None
+    return text if isinstance(text, str) else None
 
 
 def landed(pull: Pull, method: str, base_ref: str, repo: git.Git) -> bool:
@@ -708,6 +729,47 @@ class GitHub:
         data = self.graphql(_BRANCH_FILE, {**self._owner_name(), "expr": f"{base}:{path}"})
         self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
         return _file_at(self._repository_of(data), "object")
+
+    def branch_file_with(self, base: str, path: str, selections: dict[str, str]) -> tuple[FileAt, dict[str, Any], list[Unread]]:
+        """`branch_file` と同じ読み取りに、`repository` の下の選択 `selections`（名前 → 選択）を同じ要求で載せる。
+
+        返すのは `branch_file` の値、`aliased` と同じ形の辞書（すべての名前をキーに持ち、読めなければ None）、読めなかった
+        後続の要求ごとの `Unread` である。1 回の要求に載せる件数の上限（`github.graphql-batch`）には設定も 1 件と数え、
+        最初の要求は設定と選択を上限−1 件まで、残りの選択は上限の件数ごとに分けて読む。最初の要求の失敗は `GitHubError` を
+        送出する（設定を読めない）。後続の要求の失敗は送出せず、その要求に載せた名前と例外を `Unread` に入れる。
+
+        後続の失敗の後に残りを送るのは、GitHub が要求を受けてその要求の中身を断った失敗（GraphQL の誤りなど）のときだけである。
+        別の要求に載せた選択は読める見込みがあり、選択ごとに読めた・読めなかったを診断に残せる。不達・5xx・上限・認証の失敗
+        （`passing`・`quota`・状態 401 と 403）は残りの要求も同じ理由で読めないので、残りを送らず 1 つの `Unread` にまとめる。
+        このため要求の数は、分けた後続の要求の数を超えず、失敗した要求を打ち直すこともない。
+        """
+        names = list(selections)
+        size = int(limits.value("github.graphql-batch", "count"))
+        first = names[: max(size - 1, 0)]
+        chunk = {_alias(i): selections[k] for i, k in enumerate(first)}
+        body = " ".join(f"{alias}: {sel}" for alias, sel in chunk.items())
+        query = (
+            "query($owner: String!, $name: String!, $expr: String!) { viewer { login databaseId } "
+            f"repository(owner: $owner, name: $name) {{ nameWithOwner object(expression: $expr) {{ ... on Blob {{ oid text }} }} {body} }} }}"
+        )
+        data = self.graphql(query, {**self._owner_name(), "expr": f"{base}:{path}"})
+        self._remember_viewer(data.get("viewer") if isinstance(data, dict) else None)
+        repo = self._repository_of(data)
+        out: dict[str, Any] = {k: repo[alias] if alias in repo else None for alias, k in zip(chunk, first)}
+        unread: list[Unread] = []
+        batches = list(_batches(names[len(first) :]))
+        for i, keys in enumerate(batches):
+            try:
+                out.update(self.aliased({k: selections[k] for k in keys}))
+            except GitHubError as exc:
+                if exc.passing or exc.quota is not None or exc.status in (401, 403):
+                    rest = tuple(k for b in batches[i:] for k in b)
+                    out.update(dict.fromkeys(rest))
+                    unread.append(Unread(rest, exc))
+                    break
+                out.update(dict.fromkeys(keys))
+                unread.append(Unread(tuple(keys), exc))
+        return _file_at(repo, "object"), out, unread
 
     def _remember_viewer(self, node: Any) -> None:
         if self._viewer:

@@ -64,6 +64,43 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "design check",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "全行を検査するファイル（名前を問わない。--base とどちらか一方）",
+          "x-ndf-positional": true
+        },
+        "--base": {
+          "type": "string",
+          "description": "マージ先のブランチ名。分岐点からの差分の設計成果物の、変えた行を検査する"
+        },
+        "--remote": {
+          "type": "string",
+          "description": "起点のリモート名（既定は .ndf/worktree.json の remote）"
+        },
+        "--result": {
+          "type": "string",
+          "description": "標準出力と同じ結果を書くファイル"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "glossary meanings",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },

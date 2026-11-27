@@ -162,7 +162,7 @@
 | [ndf-whole-test-duration.md](ndf-whole-test-duration.md) | 全体テストの所要を確かめる振る舞いを弱めずに縮める手段の当て方（テストヘルパーの待ち・永続ワークフローの待ちの間隔・起動の遅延 import）、起動を縮めないスクリプトとその理由、基準 6 で消したテスト、消したテストの照合、届いた値。削る基準と手段は `docs/plugin-development-guide.md` が正 |
 | [ndf-context-continue-or-cut-measurement.md](ndf-context-continue-or-cut-measurement.md) | conductor の文脈を続けるか切るかの計測（計測の回・計測の条件・復元の量・待ちの前に切る規則） |
 | [ndf-mechanical-turns-to-scripts.md](ndf-mechanical-turns-to-scripts.md) | 機械的なターンをスクリプトへ移す（状態の取り出し・PR と CI の照合・手順の連続実行・進行のまとめ記録） |
-| [ndf-design-ai-decisions-and-mvv-gate.md](ndf-design-ai-decisions-and-mvv-gate.md) | 設計の判断を AI が決めて記録し、人へ残す判断をレッドラインに限る（MVV 判定と設計の検査） |
+| [ndf-design-ai-decisions-and-mvv-gate.md](ndf-design-ai-decisions-and-mvv-gate.md) | 設計の判断を AI が決めて記録し、人へ残す判断をレッドラインに限る。番号の無い委ね方を止める設計の検査（ndf records design check）と、表にレッドラインがある設計の承認を省かない MVV 判定 |
 | [ndf-work-during-approval-wait-and-business-hours.md](ndf-work-during-approval-wait-and-business-hours.md) | 答え待ちの間も承認の要らない作業を進め、業務時間外の承認の依頼を溜めて業務時間にまとめて示す |
 | [ndf-sprint-close-plan-cost.md](ndf-sprint-close-plan-cost.md) | 仕上げのプランの費用と所要時間（振り返りと差分の棚卸しの間隔・CI の待ちを重ねる並び） |
 | [ndf-sprint-mode-from-judgment-basis.md](ndf-sprint-mode-from-judgment-basis.md) | 課題ごとの判定の根拠からスプリントのモードを決め、課題を外したら決め直す |

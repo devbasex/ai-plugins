@@ -65,7 +65,7 @@
       "design-review": {
         "call": "ndf.plan",
         "with": {
-          "plan": "cross-review"
+          "plan": "document-review"
         },
         "metadata": {
           "ndf": {

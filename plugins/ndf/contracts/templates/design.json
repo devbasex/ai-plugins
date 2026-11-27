@@ -1,7 +1,7 @@
 {
   "template": "design",
   "purpose": "design",
-  "summary": "設計: worker の設計 → 組み直し → push → PR → PR の head が手元の HEAD と同じかの確かめ（GitHub の反映の遅れを 5 秒おきに 3 回まで読み直す）→ レビュー（組み直しの「足すべき内容」を渡す）→ push → 衝突の確かめ → CI。worker が承認ゲートを返せば、プランを承認ゲートで終えて人の判断を待つ。PR が既にあれば作り直さず、本文を書き換えない。CI の合格は push の後の CI の待ちが確かめる",
+  "summary": "設計: worker の設計 → 組み直し → 設計の検査（番号の無い「人へ残す判断」の行。落ちれば同じ原因を数えて worker が直し、検査へ戻る）→ push → PR → PR の head が手元の HEAD と同じかの確かめ（GitHub の反映の遅れを 5 秒おきに 3 回まで読み直す）→ レビュー（組み直しの「足すべき内容」を渡す）→ 設計の検査（落ちれば worker が直し、直したバージョンをレビューし直してから検査へ戻る）→ push → 衝突の確かめ → CI。push へ向かう分岐はすべて手前の検査を通る。worker が承認ゲートを返せば、プランを承認ゲートで終えて人の判断を待つ。PR が既にあれば作り直さず、本文を書き換えない。CI の合格は push の後の CI の待ちが確かめる",
   "params": ["repo", "worktree", "branch", "remote", "base", "title", "body_file", "worker", "rebuild", "review", "ci_budget", "required", "tests"],
   "plan": {
     "name": "design-{{branch}}",
@@ -10,25 +10,26 @@
     "steps": [
       {"id": "design", "run": ["{{worker}}", "design"]},
       {"id": "rebuild", "run": ["{{rebuild}}", "--out", "{state_dir}/rebuild.json"]},
+      {"use": "design-check"},
+      {"use": "design-check-repeat"},
+      {"use": "design-check-fix"},
       {"use": "push", "on_fail": "fix-push"},
       {"use": "pr"},
-      {
-        "id": "head-check",
-        "run": ["sh", "-c", "h=$(gh pr view \"$0\" --json headRefOid --jq .headRefOid) || exit 2; [ -n \"$h\" ] || exit 2; test \"$h\" = \"$(git rev-parse HEAD)\"", "{{branch}}"],
-        "exit_cause": {"1": "precondition", "2": "precondition"},
-        "on_cause": {"precondition": "retry"},
-        "retry": {"precondition": {"attempts": 3, "interval": 5}}
-      },
-      {"id": "review", "run": ["{{review}}", "--findings", "{state_dir}/rebuild.json"], "on_cause": {"incomplete": "push-reviewed"}},
+      {"id": "head-check", "run": ["sh", "-c", "h=$(gh pr view \"$0\" --json headRefOid --jq .headRefOid) || exit 2; [ -n \"$h\" ] || exit 2; test \"$h\" = \"$(git rev-parse HEAD)\"", "{{branch}}"], "exit_cause": {"1": "precondition", "2": "precondition"}, "on_cause": {"precondition": "retry"}, "retry": {"precondition": {"attempts": 3, "interval": 5}}},
+      {"id": "review", "run": ["{{review}}", "--findings", "{state_dir}/rebuild.json"], "on_cause": {"incomplete": "design-check-reviewed"}},
+      {"use": "design-check", "id": "design-check-reviewed", "on_cause": {"check_failed": "design-check-reviewed-repeat"}, "next": "push-reviewed"},
+      {"use": "design-check-repeat", "id": "design-check-reviewed-repeat", "run": ["ndf", "route", "repeat", "--result", "{state_dir}/design-check.json", "--log", "{state_dir}/design-check-reviewed-causes.jsonl"], "next": "design-check-reviewed-fix"},
+      {"use": "design-check-fix", "id": "design-check-reviewed-fix", "next": "review-fixed"},
+      {"id": "review-fixed", "run": ["{{review}}", "--findings", "{state_dir}/rebuild.json"], "next": "design-check-reviewed"},
       {"use": "push", "id": "push-reviewed", "on_fail": "fix-push-reviewed"},
       {"use": "conflict-check"},
       {"use": "ci", "next": "end", "on_cause": {"test_failed": "repeat-check", "check_failed": "repeat-check", "base_conflict": "base-sync"}},
       {"use": "repeat-check"},
-      {"use": "ci-fix", "next": "push-reviewed"},
-      {"use": "fix-push"},
-      {"use": "fix-push", "id": "fix-push-reviewed", "next": "push-reviewed"},
-      {"use": "base-sync", "next": "push-reviewed"},
-      {"use": "fix-base", "next": "push-reviewed"}
+      {"use": "ci-fix", "next": "design-check-reviewed"},
+      {"use": "fix-push", "next": "design-check"},
+      {"use": "fix-push", "id": "fix-push-reviewed", "next": "design-check-reviewed"},
+      {"use": "base-sync", "next": "design-check-reviewed"},
+      {"use": "fix-base", "next": "design-check-reviewed"}
     ]
   }
 }
