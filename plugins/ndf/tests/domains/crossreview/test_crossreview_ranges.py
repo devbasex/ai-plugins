@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ndf.domains.crossreview import changes, prior_decide, reviewing, scope_decide
+from ndf.domains.crossreview import changes, prior_decide, reviewing, round_scope, scope_decide
 
 from ._repos import BRANCH, Repos, commit, sh
 from .test_crossreview_run import Fake, Recording, _focus_line, _run, _state
@@ -53,9 +53,7 @@ def test_issue_3780_changed_base_reads_from_the_previous_head_and_the_new_pr_fil
     assert "read.txt の中身" not in diff.replace("unread.txt の中身", "")
 
 
-def test_issue_3780_bases_that_cannot_be_compared_give_the_full_diff(
-    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch
-) -> None:
+def test_issue_3780_bases_that_cannot_be_compared_give_the_full_diff(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     state_dir, _ = _read_against_target(repos, wt, tmp_path, capsys, monkeypatch)
     monkeypatch.setattr(changes, "new_in_pr", lambda *a: None)
     record, diff, got = _second_round(capsys, monkeypatch, state_dir, wt)
@@ -63,9 +61,7 @@ def test_issue_3780_bases_that_cannot_be_compared_give_the_full_diff(
     assert any("全差分" in w for w in got["warnings"])
 
 
-def test_issue_3780_merged_base_changes_outside_the_pr_are_not_read(
-    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch
-) -> None:
+def test_issue_3780_merged_base_changes_outside_the_pr_are_not_read(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """#3780: ベースブランチをマージした 2 ラウンド目は、PR が変えるファイルの前の head からの差分だけを読む。"""
     state_dir = tmp_path / "st"
     _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
@@ -82,14 +78,20 @@ def test_issue_3780_merged_base_changes_outside_the_pr_are_not_read(
     assert "+直した" in diff and "+fix.txt の中身" in diff and "outside.txt" not in diff
 
 
-def test_issue_3780_comments_on_files_added_to_the_diff_are_handed_over() -> None:
-    """#3780: PR に既にあるインラインのコメントは、足して渡すファイルに付いたものも相手役へ渡す。"""
-    comments = [prior_decide.Remark("review_comment", "u", f"{p} の指摘", p, 1) for p in ("fix.txt", "added.txt", "read.txt")]
-    run = SimpleNamespace(remarks=comments, g=SimpleNamespace(changed_files=lambda *a: ["fix.txt"]))
+def test_issue_3780_comments_are_chosen_by_the_files_of_the_handed_diff() -> None:
+    """#3780: PR に既にあるインラインのコメントは、渡す差分と同じファイル（足して渡すファイルを含み、比較基点が変わった
+    ラウンドのベース側だけの変更を除く）に付いたものを相手役へ渡す。"""
+    names = ("fix.txt", "added.txt", "read.txt", "outside.txt")
+    comments = [prior_decide.Remark("review_comment", "u", f"{p} の指摘", p, 1) for p in names]
+    run = SimpleNamespace(remarks=comments, g=SimpleNamespace(changed_files=lambda *a: ["fix.txt", "outside.txt"]))
     scope = scope_decide.Scope(scope_decide.SINCE, "abc", ())
-    prep = reviewing.Prepared(scope, [], set(), "def", Path("d"), (), "ghi", None, ("added.txt",))
+    entry = changes._Entry("M", "fix.txt", "fix.txt", ("100644", "100644"), ("1", "2"))
+    listed: changes.Listings = {"old...abc": ({}, frozenset()), "ghi...def": ({"fix.txt": entry}, frozenset())}
+    since = round_scope.Since(changes.Range("old", "abc"), ("added.txt",), listed)
+    prep = reviewing.Prepared(scope, [], set(), "def", Path("d"), (), "ghi", None, since)
     handed = "\n".join(reviewing.remarks(run, prep))
-    assert "fix.txt の指摘" in handed and "added.txt の指摘" in handed and "read.txt の指摘" not in handed
+    assert "fix.txt の指摘" in handed and "added.txt の指摘" in handed
+    assert "read.txt の指摘" not in handed and "outside.txt の指摘" not in handed
 
 
 @pytest.mark.parametrize(("purpose", "kind"), [("cross-review", "since"), ("design", "full")])

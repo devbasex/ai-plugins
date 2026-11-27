@@ -549,8 +549,8 @@ def _prepare_round(run: _Run, round_no: int) -> reviewing.Prepared:
         _ingest_citations(run, changes.citations(run, run.last_target), round_no)
     else:
         _check_unsent(run, head)
-    added = () if ranges.since is None else ranges.since.added
-    return reviewing.Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base, previous, added)
+    since_origin = None if scope.base is None else ranges.since
+    return reviewing.Prepared(scope, sections, reviewed, head, diff, changed.files, merge_base, previous, since_origin)
 
 
 def _reads_full_diff(run: _Run, merge_base: str, head: str) -> bool:

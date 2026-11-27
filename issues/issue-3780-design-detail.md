@@ -160,7 +160,8 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `new_in_pr` | `changes.py` | 新設 | `new_in_pr(g: git.Git, previous: Range, current: Range, listed: Listings) -> Optional[tuple[str, ...]]` | 比較基点が変わったことで、既読の差分にも今回渡す差分にも無い変更を持つファイルを返す。比べられなければ None |
-| `since_diff` | `changes.py` | 新設 | `since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str` | 前の head からの差分（PR が変えるファイルに絞る）に、`added` の今の PR の差分を続けて返す |
+| `since_diff` | `changes.py` | 新設 | `since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str` | 前の head からの差分（比較基点が違えば PR が変えるファイルに絞る）に、`added` の今の PR の差分を続けて返す |
+| `since_files` | `changes.py` | 新設 | `since_files(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> tuple[str, ...]` | `since_diff` が渡すファイルを返す。既存のインラインのコメントを選ぶ `reviewing.remarks` が使う |
 | `touched` | `changes.py` | 新設 | `touched(g: git.Git, since: str, head: str) -> leftover_decide.Touched` | `since` の後に変わったファイルと、足した行・書き換えた行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`read_origin`）ではない |
 
 - `new_in_pr`
@@ -169,8 +170,8 @@ plugins/ndf/
   - 副作用: `git diff` と `git diff --raw` を打つ（読むだけ）
 - `since_diff`
   - 比較基点が前のラウンドと違う: 先に `new_in_pr` を呼び、その返りを `added` に、同じ辞書を `listed` に渡す。返りが None のときは全差分にするので、`since_diff` は呼ばない
-  - 比較基点が前のラウンドと同じ: `new_in_pr` は呼ばない。`added=()` と空の辞書の `listed` を渡す
-  - 事後条件: 絞るファイル（PR が前のラウンドの時点か今に変えるファイル）が 1 つも無ければ、空文字列を返す。`added` は今の PR が変えるファイルの一部なので、このとき足す分も無い。パスの指定の無い `git diff` は全差分になるため打たない
+  - 比較基点が前のラウンドと同じ: `new_in_pr` は呼ばない。`added=()` と空の辞書の `listed` を渡す。前の head からの差分に出るファイルはどれも PR の変更なので、一覧を読まず、絞らない
+  - 事後条件: 比較基点が違い、絞るファイル（PR が前のラウンドの時点か今に変えるファイル）が 1 つも無ければ、空文字列を返す。`added` は今の PR が変えるファイルの一部なので、このとき足す分も無い。パスの指定の無い `git diff` は全差分になるため打たない
 
 ### 異常系の処理
 
@@ -226,7 +227,7 @@ plugins/ndf/
 | ラウンド | 呼ぶ関数 | 起動の回数 |
 | --- | --- | --- |
 | 比較基点が変わった | `new_in_pr`（3 つの差分）と `since_diff` | `new_in_pr` が 6 回。`since_diff` は行の差分だけで 1 回、足すファイルがあれば 2 回 |
-| 比較基点が同じ | `since_diff` だけ | 一覧 2 回と行の差分 1 回 |
+| 比較基点が同じ | `since_diff` だけ | 行の差分 1 回 |
 
 同じ範囲の一覧は、`listed` で 2 つの関数が共有する。`listed` は git が返した一覧を 1 ラウンドの間だけメモリに持つ写しで、共有しない場合より起動が 2 回少ない。
 
@@ -244,7 +245,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | 分けているもの | 理由 | 採らなかった案 |
 | --- | --- | --- |
 | 一覧と行の差分 | NUL 区切りの一覧と行の差分を 1 つの出力にすると、両方を切り分ける読み取りを新しく作ることになる | `git diff --raw --numstat -p -z` で 1 回にまとめる（`new_in_pr` の起動が 3 回減る） |
-| `since_diff` の行の差分 | 渡す差分は PR が変えるファイルに絞る。`new_in_pr` が読んだ差分は絞っていない。比較基点が同じラウンドは `new_in_pr` を呼ばない | `new_in_pr` が読んだ差分の文字列を、ファイルごとに切り分けて組み立てる（起動が 1〜2 回減る） |
+| `since_diff` の行の差分 | 比較基点が違うときに渡す差分は PR が変えるファイルに絞る。`new_in_pr` が読んだ差分は絞っていない。比較基点が同じラウンドは `new_in_pr` を呼ばない | `new_in_pr` が読んだ差分の文字列を、ファイルごとに切り分けて組み立てる（起動が 1〜2 回減る） |
 
 `touched` の「変えた行」は、`since..head` の差分で足した行と書き換えた行の番号である。行を消しただけの箇所は、前後の行の番号を入れる。
 
@@ -268,7 +269,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `new_in_pr` | 分岐したブランチへ比較先を変えると、新しく PR の変更になったファイルが返る。取り込みの競合を解消して前の head の内容に戻したファイルも返る | 競合の無いベースの取り込みは空。head が同じまま比較先を変えて実行権限の変更が現れる。同じ文の追加が同じファイルの別の関数にある。比較先を変えて差分から消えただけのファイルは返らない。末尾の改行の有無だけが違う行は別の行にし、種別の変更の削除と追加は 1 つにまとめる。バイナリは変更前の blob が渡っていなければ返す（この 3 つは差分を入力にして確かめる）。消した行は、今回渡す差分と同じ内容でも位置が違えば未読にする（上の `R1`・`R2` の例。差分を入力にして確かめ、git を起動しない） | コミットが無ければ None |
-| `since_diff` | PR に関係の無いベースの変更を含まない。`added` のファイルの今の差分を含む | 絞るファイルが無ければ空文字列 | コミットが手元に無ければ `git.GitError` |
+| `since_diff` | PR に関係の無いベースの変更を含まない。`added` のファイルの今の差分を含む | 比較基点が違い、絞るファイルが無ければ空文字列 | コミットが手元に無ければ `git.GitError` |
 | `touched` | 足したソースの行と書き換えたソースの行 | 行を消しただけの箇所は前後の行。バイナリはファイルだけ | コミットが手元に無ければ `git.GitError` |
 
 ## 線引きと残し方（leftover_decide）

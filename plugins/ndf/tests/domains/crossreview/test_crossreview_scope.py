@@ -847,6 +847,19 @@ def test_the_listing_read_by_new_in_pr_is_not_read_again(monkeypatch: pytest.Mon
     assert listed_spans == ["b1...h1", "b2...h2", "h1..h2"]
 
 
+def test_since_diff_of_the_same_base_reads_no_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#3780: 比較基点が同じなら、変わったファイルの一覧を読まずに前の head からの差分を作る（git の応答を差し替える）。"""
+    calls: list[tuple[str, ...]] = []
+
+    def run_bytes(self: git.Git, *args: str, **kw: object) -> bytes:
+        calls.append(args)
+        return b""
+
+    monkeypatch.setattr(git.Git, "run_bytes", run_bytes)
+    assert changes.since_diff(git.Git(), changes.Range("b", "h1"), changes.Range("b", "h2"), (), {}) == ""
+    assert len(calls) == 1 and "--raw" not in calls[0] and "h1...h2" in calls[0]
+
+
 def test_since_diff_without_pr_files_is_empty(wt: Path) -> None:
     """絞るファイルが無いときに、パスの指定の無い `git diff`（全差分）を打たない。"""
     base = _head(wt)
