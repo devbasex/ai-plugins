@@ -18,6 +18,8 @@
     "tasks": {"type": "array", "items": {"$ref": "#/$defs/task"}},
     "units": {"type": "array", "items": {"$ref": "#/$defs/unit"}}
   },
+  "if": {"required": ["issues"], "properties": {"issues": {"minItems": 2}}},
+  "then": {"properties": {"tasks": {"items": {"required": ["issue"]}}}},
   "$defs": {
     "issue": {"type": "integer", "minimum": 1},
     "task_id": {
@@ -32,7 +34,7 @@
       "properties": {
         "id": {"$ref": "#/$defs/task_id"},
         "title": {"type": "string", "minLength": 1},
-        "issue": {"$ref": "#/$defs/issue", "description": "どの課題のタスクか。省けばファイルの唯一の課題"},
+        "issue": {"$ref": "#/$defs/issue", "description": "どの課題のタスクか。省けるのはファイルの課題が 1 件のときだけで、そのときはその課題になる。2 件以上なら必須（最上位の if / then）"},
         "files": {
           "type": "array",
           "description": "触るファイルのリポジトリの根からの相対パス。ディレクトリ・ワイルドカード・. と .. の区切りは書かない",

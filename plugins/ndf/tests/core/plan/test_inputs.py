@@ -204,18 +204,26 @@ def test_the_unit_file_requires_the_lines_and_the_title_of_each_task():
         assert contracts.schema_errors({**UNIT_FILE, "tasks": [task]}, UNITS), key
 
 
-@pytest.mark.parametrize("schema", [contracts.schema_path("project-workflow"), contracts.schema_path("ndf-settings/project")])
-def test_the_project_declares_the_limits_of_a_unit_with_either_or_both_values(schema):
-    def errors(review_units) -> list[str]:
-        workflow = {"review_units": review_units}
-        return contracts.schema_errors(
-            workflow if schema.endswith("project-workflow.schema.json") else {"version": 1, "workflow": workflow}, schema
-        )
+def test_a_task_may_omit_its_issue_only_when_the_file_has_a_single_issue():
+    # 課題が 1 件なら省いたタスクはその課題に属する。2 件以上では、省くと所属の課題を決められないので拒む
+    bare = {k: v for k, v in UNIT_FILE["tasks"][0].items() if k != "issue"}
+    assert contracts.schema_errors({**UNIT_FILE, "tasks": [bare]}, UNITS) == []
+    two = {**UNIT_FILE, "issues": [3672, 3698]}
+    assert contracts.schema_errors({**two, "tasks": [bare]}, UNITS)
+    assert contracts.schema_errors({**two, "tasks": [{**bare, "issue": 3698}]}, UNITS) == []
 
-    assert errors({"target_lines": 300, "max_lines": 800}) == []
-    assert errors({"max_lines": 800}) == [] and errors({"target_lines": 300}) == [] and errors({}) == []
+
+# 設定 workflow.review_units の形の SSOT。設定のスキーマ（.ndf/project.json の検証）の workflow はここを参照する
+REVIEW_UNITS = contracts.schema_path("ndf-settings/project") + "#/$defs/ReviewUnits"
+
+
+def test_the_project_declares_the_limits_of_a_unit_with_either_or_both_values():
+    assert contracts.schema_errors({"target_lines": 300, "max_lines": 800}, REVIEW_UNITS) == []
+    assert all(contracts.schema_errors(ok, REVIEW_UNITS) == [] for ok in ({"max_lines": 800}, {"target_lines": 300}, {}))
     for wrong in ({"target_lines": 0}, {"max_lines": "800"}, {"max_lines": 1.5}, {"lines": 800}):
-        assert errors(wrong), wrong
+        assert contracts.schema_errors(wrong, REVIEW_UNITS), wrong
+    project = contracts.schema_path("ndf-settings/project")
+    assert contracts.schema_errors({"version": 1, "workflow": {"review_units": {"lines": 800}}}, project)
 
 
 # --- 現状固定（I-003:acceptance_decide.read_checks と check_kinds の重複を寄せる前に、両方の読み方を記録する） ---

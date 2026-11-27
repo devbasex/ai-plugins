@@ -25,7 +25,10 @@
       "description": "実装計画のレビューの単位の Pull Request で待つ CI のチェックの名前。空の並びは単位の中で CI を待たない",
       "items": {"type": "string", "minLength": 1}
     },
-    "review_units": {"$ref": "#/$defs/review_units"},
+    "review_units": {
+      "type": "object",
+      "description": "レビューの単位の行数の目安と上限（#3702）。形の SSOT は ndf-settings/project.schema.json の $defs/ReviewUnits で、読む側がその定義（schemas/ndf-settings/project.schema.json#/$defs/ReviewUnits）で確かめる。この検証器はファイルをまたぐ $ref を解かないので、ここには形を重ねて書かない"
+    },
     "launch": {
       "type": "object",
       "additionalProperties": false,
@@ -38,15 +41,6 @@
     }
   },
   "$defs": {
-    "command": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
-    "review_units": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "レビューの単位の見込みの行数の目安と上限（#3702）。片方だけ書けば、もう片方は上限の設定 review-units.target-lines・review-units.max-lines の既定を使う。目安が上限以上なら設定の誤りとして止まる",
-      "properties": {
-        "target_lines": {"type": "integer", "minimum": 1},
-        "max_lines": {"type": "integer", "minimum": 1}
-      }
-    }
+    "command": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
   }
 }
