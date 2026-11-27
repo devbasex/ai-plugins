@@ -65,13 +65,19 @@ from ndf.domains.release import version_store as store_mod
 TOOL = cli.tool_of(__name__)
 
 
+def _cached_common_dir(args: argparse.Namespace) -> Optional[Path]:
+    """`args` に置いた共通の git ディレクトリのうち、今の `--root` で解決した値（無ければ None）。"""
+    cached = getattr(args, "_common_dir", None)
+    return cached[1] if cached is not None and cached[0] == Path(args.root) else None
+
+
 def _root_common_dir(args: argparse.Namespace) -> Optional[Path]:
     """`--root` の共通の git ディレクトリ（git の外なら None）。解決できた値は `--root` ごとに `args` に置いて使い回し、
     1 回の実行で設定・リモート名・リリース記録の共有の保存先を読むたびに git を起動し直さない。"""
+    cached = _cached_common_dir(args)
+    if cached is not None:
+        return cached
     root = Path(args.root)
-    cached = getattr(args, "_common_dir", None)
-    if cached is not None and cached[0] == root:
-        return cached[1]
     try:
         common = git_mod.Git(root).common_dir()
     except git_mod.GitError:  # noqa: NDF401 外部コマンド: git の外はメインディレクトリが無いので None
@@ -231,7 +237,7 @@ def cmd_merge(args: argparse.Namespace) -> dict:
 def _record_args(args: argparse.Namespace, strategy: branch_strategy.Strategy) -> record_unversioned.Unversioned | None:
     """確かめ 0。`record` の引数の組。バージョンの無いリリース記録の引数なら `Unversioned`（`tip` は呼び手が埋める）、
     今の記録（バージョン番号を持つリポジトリ）なら None。`--correct-targets` は訂正の引数の規則で確かめて None。誤りは `RecordError`。"""
-    none_store = strategy.version_store["kind"] == "none"
+    none_store = not strategy.has_version_number
     if args.correct_targets:
         if not none_store:
             raise record.RecordError("--correct-targets はバージョンの保存先が none のリポジトリでだけ受ける")
@@ -255,9 +261,7 @@ def _record_args(args: argparse.Namespace, strategy: branch_strategy.Strategy) -
 
 def _hands(args: argparse.Namespace) -> record_unversioned.Hands:
     # 共通の git ディレクトリは、先に設定を読んだとき（`_strategy`）に解決した値を使い、git を起動し直さない
-    cached = getattr(args, "_common_dir", None)
-    common = cached[1] if cached is not None and cached[0] == Path(args.root) else None
-    return record_unversioned.Hands(git_mod.Git(Path(args.root)), common=common)
+    return record_unversioned.Hands(git_mod.Git(Path(args.root)), common=_cached_common_dir(args))
 
 
 def _unversioned_result(args: argparse.Namespace, strategy: branch_strategy.Strategy, given: record_unversioned.Unversioned) -> dict:
@@ -338,10 +342,7 @@ def cmd_verification_record(args: argparse.Namespace) -> dict:
 
 def _unversioned_store(args: argparse.Namespace) -> bool:
     """バージョン番号を持たないリポジトリ（`version_store.kind` が none）か。設定が読めなければ偽（今の確かめで書く）。"""
-    try:
-        return _strategy(args).version_store["kind"] == "none"
-    except branch_strategy.StrategyError:  # noqa: NDF401 利用者の入力: 設定の無いリポジトリは今のとおりバージョン番号を持つリポジトリとして確かめる
-        return False
+    return branch_strategy.without_version_number(lambda: _strategy(args))
 
 
 def _release_names(args: argparse.Namespace) -> tuple[str | None, names_decide.NameFormats]:
@@ -356,12 +357,13 @@ def _release_names(args: argparse.Namespace) -> tuple[str | None, names_decide.N
 
 def cmd_records(args: argparse.Namespace) -> dict:
     select = record.Selection(args.version, args.release, args.unit)
+    reads_release = select != record.Selection(None, None, None) or args.bodies or args.issues is not None
     if args.pr_body_only:
-        if select != record.Selection(None, None, None) or args.bodies or args.issues is not None:
+        if reads_release:
             raise record.RecordError("--pr-body-only は --version・--release・--unit・--bodies・--issues と一緒に渡さない")
         outputs = record.pr_body_only(_hub(args), args.pr)
         return result.result(TOOL, result.OK, f"#{args.pr} の本文を読んだ（リリース記録は選ばない）", outputs=outputs)
-    if select != record.Selection(None, None, None) or args.bodies or args.issues is not None:
+    if reads_release:
         outputs = record.read_release(_hub(args), args.pr, select, args.bodies, args.issues)
         version = outputs["release"]["version"] if outputs["release"] else "無し"
         detail = (

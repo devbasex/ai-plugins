@@ -17,12 +17,12 @@
   信用されない書き手（Actions の `github.token` の github-actions[bot] など）の記録は読まれず、打ち直しで重なるため
 - 閉じる手順の読み取り（`read_release`。#4580）は、今回のリリースに当たる候補のコメントと本文の書き手だけを照会し、
   照会できない書き手がいれば記録を選ばずに `PermissionUnknown` で止まる（権限が無いとは扱わない）。手順は
-  `_candidates` の説明と設計書の「閉じる手順の読み取り」の手順 1〜6 のとおり
+  `candidates` の説明と設計書の「閉じる手順の読み取り」の手順 1〜6 のとおり
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, NamedTuple, NoReturn, Optional
 
 from ndf import contracts
@@ -237,7 +237,7 @@ def _trusted_bodies(hub: GitHub, number: int) -> list[str]:
     return [c.body for c in hub.comments(number) if hub.trusts(c)]
 
 
-def _require_trusted_writer(hub: GitHub) -> None:
+def require_trusted_writer(hub: GitHub) -> None:
     """書く token の書き手が読む側（`GitHub.trusts`）に信用されなければ `RecordError`。"""
     if not hub.token_trusted():
         raise RecordError(
@@ -256,7 +256,7 @@ def write(
     """リリースの PR `number` に含めた PR の各々へ、まだ無ければリリース記録を書く。書く token が信用されなければ `RecordError`。
     `production_sha` は本番へ入れたコミット（`strict` の squash で閉じた PR を読むため。`released`）。"""
     _pull, made, by_unit = released(hub, number, production, formats, production_sha)
-    _require_trusted_writer(hub)
+    require_trusted_writer(hub)
     publisher = Publisher(hub)
     out = []
     for rec in by_unit or (made,):  # 単位ごとの行があれば、PR へはその単位のバージョンの記録を書く
@@ -356,14 +356,13 @@ def write_verification(
         raise RecordError(f"リリース後テストの記録の形が違う: {'; '.join(errors)}")
     if unversioned:
         _check_unversioned(hub, number, payload)
-        _require_trusted_writer(hub)
-        return Publisher(hub).comment(number, record_decide.render_verification(payload)).url
-    version = payload["version"]
-    found = record_decide.records(_trusted_bodies(hub, number))
-    if record_decide.has_record_of(found, version):
-        _require_trusted_writer(hub)
-        return Publisher(hub).comment(number, record_decide.render_verification(payload)).url
-    _raise_without_record(hub, number, version, found, names)
+    else:
+        version = payload["version"]
+        found = record_decide.records(_trusted_bodies(hub, number))
+        if not record_decide.has_record_of(found, version):
+            _raise_without_record(hub, number, version, found, names)
+    require_trusted_writer(hub)
+    return Publisher(hub).comment(number, record_decide.render_verification(payload)).url
 
 
 def _check_unversioned(hub: GitHub, number: int, payload: Mapping[str, Any]) -> None:
@@ -377,7 +376,7 @@ def _check_unversioned(hub: GitHub, number: int, payload: Mapping[str, Any]) -> 
     version, unit, environments = payload["version"], payload.get("unit"), payload.get("environments")
     if not environments:
         raise RecordError("バージョンの保存先が none のリポジトリのリリース後テストの記録には environments（テストした届け先）が要る")
-    got = _candidates(hub, number, Selection(version, None, None))
+    got = candidates(hub, number, Selection(version, None, None))
     units = sorted({r.unit for r in got.releases if r.unit is not None})
     if unit is None and units:
         raise RecordError(f"値 {version} のリリースは単位を持つ（{', '.join(units)}）。unit にテストした単位の名前を書く")
@@ -425,7 +424,7 @@ class Selection(NamedTuple):
 
 
 class Candidates(NamedTuple):
-    """`_candidates` の結果。`releases` は引数で絞った有効なリリース記録（古い順）、`authoritative` は値ごとの正の対象の一覧
+    """`candidates` の結果。`releases` は引数で絞った有効なリリース記録（古い順）、`authoritative` は値ごとの正の対象の一覧
     （絞る前の有効な記録と訂正で決めた）、`corrections` は信用する書き手の組に合う訂正、`verifications` は絞ったテストの記録。"""
 
     releases: list[record_decide.Record]
@@ -457,6 +456,33 @@ def _check_of(body: str) -> Optional[dict[str, Any]]:
     return got if got is not None and isinstance(got.get("version"), str) and isinstance(got.get("issues"), list) else None
 
 
+class _Sorted(NamedTuple):
+    """コメントの分類（どれも古い順）。`versioned`・`unversioned` はリリース記録（コミットの有無で分ける）、`checks` はテストの記録、`fixes` は訂正の記録。"""
+
+    versioned: list[_Found]
+    unversioned: list[_Found]
+    checks: list[_Found]
+    fixes: list[_Found]
+
+
+def _sorted_comments(comments: Iterable[Authored]) -> _Sorted:
+    """手順 1・2。マーカーと JSON の形でコメントを分け、位置を保つ（書き手は照会しない）。"""
+    got = _Sorted([], [], [], [])
+    for at, c in enumerate(comments):
+        made = _read_marked(c.body, record_decide.parse_record)
+        if made is not None:
+            (got.versioned if made.commit is None else got.unversioned).append(_Found(at, c, made))
+            continue
+        check = _check_of(c.body)
+        if check is not None:
+            got.checks.append(_Found(at, c, check))
+            continue
+        fix = _read_marked(c.body, record_decide.parse_correction)
+        if fix is not None:
+            got.fixes.append(_Found(at, c, fix))
+    return got
+
+
 def _bridged(hub: GitHub, unversioned: Sequence[_Found], seeds: Sequence[_Found]) -> list[_Found]:
     """手順 3 の 2・3。起点の書き手を照会し、信用した記録と値かコミットを共有する記録へだけ広げる（古い順）。"""
     asked: set[int] = set()
@@ -472,7 +498,7 @@ def _bridged(hub: GitHub, unversioned: Sequence[_Found], seeds: Sequence[_Found]
     return sorted(kept, key=lambda f: f.at)
 
 
-def _candidates(
+def candidates(
     hub: GitHub, number: int, select: Selection, commit: Optional[str] = None, comments: Optional[Sequence[Authored]] = None
 ) -> Candidates:
     """設計書の「閉じる手順の読み取り」の手順 1〜4。照会できない書き手がいれば `PermissionUnknown`。
@@ -486,22 +512,7 @@ def _candidates(
     `commit` を渡すと、そのコミットの記録も起点にする（書く側の確かめ 6 が、同じコミットの別の値の記録を見るため）。
     `comments` を渡すと、PR のコメントを取得せずにそれを読む。
     """
-    versioned: list[_Found] = []
-    unversioned: list[_Found] = []
-    checks: list[_Found] = []
-    fixes: list[_Found] = []
-    for at, c in enumerate(hub.comments(number) if comments is None else comments):  # 手順 1・2
-        made = _read_marked(c.body, record_decide.parse_record)
-        if made is not None:
-            (versioned if made.commit is None else unversioned).append(_Found(at, c, made))
-            continue
-        check = _check_of(c.body)
-        if check is not None:
-            checks.append(_Found(at, c, check))
-            continue
-        fix = _read_marked(c.body, record_decide.parse_correction)
-        if fix is not None:
-            fixes.append(_Found(at, c, fix))
+    versioned, unversioned, checks, fixes = _sorted_comments(hub.comments(number) if comments is None else comments)  # 手順 1・2
     kept_versioned = [f for f in versioned if select.takes(f.value) and hub.trusts_strict(f.authored)]
     kept_checks = [f.value for f in checks if select.takes_check(f.value) and hub.trusts_strict(f.authored)]
     # 手順 3
@@ -541,7 +552,7 @@ def read_release(hub: GitHub, number: int, select: Selection, bodies: bool, issu
     手順 6: `bodies` なら代表の `included` の PR ごとに本文を読み、書き手を照会して `trusted` を付ける。代表が無ければ読まない。
     `to_test` は `bodies` か `issues` のときだけ返す。課題は `issues`、無ければ信用する書き手の本文の closing keywords から集める。
     照会できない書き手が候補か本文にいれば、何も選ばずに `PermissionUnknown`。"""
-    got = _candidates(hub, number, select)
+    got = candidates(hub, number, select)
     version = select.version if select.version is not None else (got.releases[-1].version if got.releases else None)
     targets = got.authoritative.get(version) if version is not None else None
     rep = record_decide.representative([r for r in got.releases if r.version == version], targets)
@@ -552,7 +563,7 @@ def read_release(hub: GitHub, number: int, select: Selection, bodies: bool, issu
     pairs = None
     if bodies or issues is not None:
         numbers = list(issues) if issues is not None else _issues_of(hub, views)
-        checks = [v for v in got.verifications if v.get("version") == rep.version and v.get("unit") == rep.unit]
+        checks = record_decide.verifications_of(got.verifications, rep.version, rep.unit)
         pairs = record_decide.to_test(_released_targets(got.releases, rep, targets), numbers, checks)
     return _records_outputs(
         select,

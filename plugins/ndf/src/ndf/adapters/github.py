@@ -73,6 +73,8 @@ OWNER_ASSOCIATION = "OWNER"
 PERMISSION_CHECKED_ASSOCIATIONS = frozenset({"MEMBER", "COLLABORATOR"})
 # 権限の読み取り（REST の collaborators/{login}/permission の `permission`）で write 以上を表す値。maintain は write に写る
 WRITE_PERMISSIONS = frozenset({"admin", "write"})
+# 照会できない状態（#4580）。上限でない 403 と 404 は、権限や利用者が無いのか見えないだけかを区別できない
+UNREADABLE_STATUSES = (403, 404)
 # リポジトリの公開範囲（GraphQL の `visibility`）。読めないリポジトリは UNKNOWN で、公開でないとして扱う
 PUBLIC, UNKNOWN = "PUBLIC", "UNKNOWN"
 
@@ -109,13 +111,17 @@ class GitHubError(Exception):
         return made
 
 
+def unreadable(exc: GitHubError) -> bool:
+    """照会できない失敗（上限でない `UNREADABLE_STATUSES`）か。上限と他の失敗は偽で、呼び手はそのまま投げる。"""
+    return exc.quota is None and exc.status in UNREADABLE_STATUSES
+
+
 class PermissionUnknown(GitHubError):
-    """書き手の権限を照会できない（レート制限によるものでない 403・404。#4580）。`login` は照会できなかった書き手。"""
+    """書き手の権限を照会できない（レート制限によるものでない `UNREADABLE_STATUSES`。#4580）。`login` は照会できなかった書き手。"""
 
     def __init__(self, login: str, status: int = 0) -> None:
-        super().__init__(
-            f"{login} の対象のリポジトリでの権限を照会できない（{status or '403・404'}）。権限が無いとは扱わずに止める", status
-        )
+        shown = status or "・".join(str(s) for s in UNREADABLE_STATUSES)
+        super().__init__(f"{login} の対象のリポジトリでの権限を照会できない（{shown}）。権限が無いとは扱わずに止める", status)
         self.login = login
 
 
@@ -441,7 +447,7 @@ class GitHub:
         try:
             raw = self.rest("GET", "/user")
         except GitHubError as exc:
-            if exc.quota is None and exc.status in (403, 404):
+            if unreadable(exc):
                 return False
             raise
         login = text_of(raw["login"]) if isinstance(raw, dict) and "login" in raw else ""
@@ -472,7 +478,7 @@ class GitHub:
         try:
             raw = self.rest("GET", f"/repos/{self.repo}/collaborators/{quote(login, safe='')}/permission")
         except GitHubError as exc:
-            if exc.quota is None and exc.status in (403, 404):
+            if unreadable(exc):
                 self._unreadable[login] = exc.status
                 return None
             raise

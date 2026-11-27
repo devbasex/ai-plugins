@@ -27,10 +27,15 @@ KEEP = "keep"
 ASK = "ask"
 
 
+def _rows_of(issue: int, verification: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """記録のうち、その課題の行。"""
+    return [r for r in verification if r.get("number") == issue]
+
+
 def _rows_with(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], outcome: str) -> list[Mapping[str, Any]]:
     if verification is None:
         return []
-    return [r for r in verification if r.get("number") == issue and r.get("result") == outcome]
+    return [r for r in _rows_of(issue, verification) if r.get("result") == outcome]
 
 
 def blocking_rows(issue: int, verification: Optional[Iterable[Mapping[str, Any]]]) -> list[Mapping[str, Any]]:
@@ -54,7 +59,7 @@ class Verdict(NamedTuple):
 
 def _all_passed(issue: int, rows: list[Mapping[str, Any]]) -> bool:
     """記録にその課題の行があり、すべて合格か。"""
-    mine = [r for r in rows if r.get("number") == issue]
+    mine = _rows_of(issue, rows)
     return bool(mine) and all(r.get("result") == "passed" for r in mine)
 
 
@@ -80,7 +85,7 @@ def verdict(issue: int, verification: Optional[Iterable[Mapping[str, Any]]], enf
 
 def _last_check(view: Mapping[str, Any], rep: Mapping[str, Any]) -> Optional[list[Mapping[str, Any]]]:
     """代表と `version`・`unit` が同じテストの記録のうち、最後の 1 件の行（無ければ None）。"""
-    same = [v for v in view["verifications"] if (v.get("version"), v.get("unit")) == (rep.get("version"), rep.get("unit"))]
+    same = record_decide.verifications_of(view["verifications"], rep.get("version"), rep.get("unit"))
     return list(same[-1]["issues"]) if same else None
 
 
@@ -94,11 +99,11 @@ class Reflection(NamedTuple):
 
 def _release_view(rep: record_decide.Record, releases: list[record_decide.Record], targets: tuple[str, ...]) -> Reflection:
     """反映の判定。数えるのは `record_decide.counted` の記録だけ。"""
-    complete, missing = record_decide.complete_of(releases, rep, targets)
     counted = record_decide.counted(releases, rep, targets)
+    missing = record_decide.missing_in(counted, targets)
     kinds = [(t, _confirmed_by(counted, t)) for t in targets]
     unconfirmed = [{"name": t, "kind": k} for t, k in kinds if k is not None and k != record_decide.CD]
-    return Reflection(complete, list(missing), unconfirmed)
+    return Reflection(not missing, list(missing), unconfirmed)
 
 
 def _confirmed_by(counted: list[record_decide.Record], name: str) -> Optional[str]:
@@ -128,7 +133,14 @@ def records_verdict(issue: int, view: Mapping[str, Any], enforced: bool) -> Verd
     release = reflection._asdict()
     if not reflection.complete:
         return Verdict(KEEP, f"反映がそろっていない（まだの届け先: {', '.join(reflection.missing)}）", False, release)
-    checks = [v for v in view["verifications"] if (v.get("version"), v.get("unit")) == (rep.version, rep.unit)]
+    checks = record_decide.verifications_of(view["verifications"], rep.version, rep.unit)
+    return _targets_verdict(issue, checks, targets, enforced, release)
+
+
+def _targets_verdict(
+    issue: int, checks: list[Mapping[str, Any]], targets: tuple[str, ...], enforced: bool, release: dict[str, Any]
+) -> Verdict:
+    """反映がそろったバージョンの無い代表の、対象の届け先ごとの判定（悪い方を優先する: 不合格 → 保留 → 行の無い届け先 → 合格）。"""
     got = {t: record_decide.pair_verdict(checks, t, issue) for t in targets}
     failed = [t for t, v in got.items() if v == "failed"]
     if failed:

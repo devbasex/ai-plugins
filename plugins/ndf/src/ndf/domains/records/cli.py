@@ -380,10 +380,7 @@ def _records_view(path: Path) -> tuple[dict[str, Any] | None, str | None]:
 
 def _without_versions(root: Path) -> bool:
     """バージョン番号を持たないリポジトリ（`branch_strategy.release.version_store.kind` が none）か。設定が無いか読めなければ偽。"""
-    try:
-        return branch_strategy.load(root).version_store["kind"] == "none"
-    except branch_strategy.StrategyError:  # noqa: NDF401 利用者の入力: 設定の無いリポジトリは今のとおりバージョン番号を持つリポジトリとして確かめる
-        return False
+    return branch_strategy.without_version_number(lambda: branch_strategy.load(root))
 
 
 def _pair_error(args: argparse.Namespace, root: Path) -> str | None:
