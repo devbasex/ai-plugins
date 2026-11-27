@@ -165,23 +165,22 @@ def _launch_judge(run: claude_choice.ChoiceRun, q: _Ask, prompt: str) -> claude.
 
     期限は単調時計で持つ。拒否を受けたら残りの期限を測り、使い切っていれば材料を確かめずに拒否の回答を返す。残っていれば、打ち直しと
     同じく `before_retry` で材料が古くなっていないかを確かめ（例外はそのまま送る）、その直後にもう一度期限を測る。どちらかで止まれば
-    切り替えの記録を書かない。通れば `fall_back` が切り替えの記録を書き、基準の組で起動し直す。
+    切り替えの記録を書かず、`fall_back` が拒否だけを記録する。通れば `fall_back` が切り替えの記録を書く。記録を読み書きする間
+    （錠の待ちを含む）も期限は進むので、書いた後にもう一度残りを測り、残っていれば基準の組で起動し直す（#2944 の r7-4）。
     """
     deadline = _clock() + q.timeout
     reply = _judge_once(run, q, prompt, q.timeout)
     deadline = min(deadline, _clock() + q.timeout - (reply.seconds if reply.seconds is not None else 0.0))
-    left: list[float] = []
 
     def ready() -> bool:
         if deadline - _clock() <= 0:
             return False
         if q.before_retry is not None:
             q.before_retry()
-        left.append(deadline - _clock())
-        return left[-1] > 0
+        return deadline - _clock() > 0
 
-    if run.fall_back(reply, ready=ready):
-        reply = _judge_once(run, q, prompt, left[-1])
+    if run.fall_back(reply, ready=ready) and (left := deadline - _clock()) > 0:
+        reply = _judge_once(run, q, prompt, left)
     return reply
 
 

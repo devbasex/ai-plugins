@@ -435,5 +435,11 @@ def test_a_candidate_removing_a_secret_shaped_value_shows_the_change_with_the_va
     _settings(repo, {"version": 1, "experiments": {"stages": {"impl": {"arms": {"claude": [{}, {"model": fake}]}}}}})
     got, question, _ = _ask(capsys, _draft(capsys, ARMS))
     (changes,) = [i["changes"] for i in got["items"] if i["kind"] == "launch-experiments"]
-    assert changes == [{"path": "experiments/stages/impl/arms/claude", "before": lc.MASKED, "after": ARMS["experiments"]["stages"]["impl"]["arms"]["claude"]}]
+    assert changes == [
+        {
+            "path": "experiments/stages/impl/arms/claude",
+            "before": lc.MASKED,
+            "after": ARMS["experiments"]["stages"]["impl"]["arms"]["claude"],
+        }
+    ]
     assert fake not in json.dumps(got, ensure_ascii=False) and fake not in question["questions"][0]["question"]

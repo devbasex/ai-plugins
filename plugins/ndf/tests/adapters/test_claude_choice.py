@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from ndf import identity
-from ndf.adapters import claude, claude_choice, llm, model_choice, run_log
+from ndf.adapters import claude, claude_choice, llm, model_choice, model_chooser, run_log
 
 # 実測の形（2026-11-27、Claude Code 2.1.332 を `--model no-such-model-xyz` で起動した結果。終了コード 1）。判定に要らない欄の一部は省いた
 REFUSED = {
@@ -215,8 +215,8 @@ def test_the_switch_checks_the_material_before_launching_again(judge_repo, recor
 
 
 def _refused_only(store: Path) -> bool:
-    """切り替えの行が無いか（切り替えないと決めた拒否は記録しない）。"""
-    return _experiments(store, "launch_error") == []
+    """拒否の行が切り替えなしの 1 行だけか（切り替えない拒否も、起動できない組を数えるために記録する。r7-7）。"""
+    return [r["switched"] for r in _experiments(store, "launch_error")] == [False]
 
 
 def test_a_stale_material_stops_the_switch_without_a_switch_row(judge_repo, recorder, tmp_path) -> None:
@@ -243,6 +243,23 @@ def test_a_check_that_uses_up_the_time_stops_the_switch(judge_repo, recorder, tm
     calls = Calls(_parsed(REFUSED)._replace(launched=True, seconds=2.0), _answer(GOOD))
     got = llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=lambda: clock.__setitem__(0, 30.0))
     assert not got.ok and len(calls.argv) == 1 and _refused_only(tmp_path / "store")
+
+
+def test_no_time_left_after_writing_the_switch_row_stops_the_base_launch(judge_repo, recorder, tmp_path, monkeypatch) -> None:
+    """r7-4: 切り替えの記録を書く間に期限を使い切れば、基準の組を起動しない。"""
+    clock = [0.0]
+    monkeypatch.setattr(llm, "_clock", lambda: clock[0])
+    real = model_choice.base_fallback
+
+    def slow(choice, reason):
+        clock[0] = 30.0  # 記録の読み取りと錠の待ちで期限を使い切った
+        return real(choice, reason)
+
+    monkeypatch.setattr(model_choice, "base_fallback", slow)
+    monkeypatch.setattr(model_chooser, "base_fallback", slow)
+    calls = Calls(_parsed(REFUSED)._replace(launched=True, seconds=2.0), _answer(GOOD))
+    got = llm.ask("質問", "材料", SCHEMA, 30, call=calls)
+    assert not got.ok and len(calls.argv) == 1
 
 
 def test_the_switch_row_is_written_before_the_base_launch(judge_repo, recorder, tmp_path) -> None:

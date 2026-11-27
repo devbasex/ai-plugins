@@ -26,6 +26,8 @@ class LaunchChooser(Protocol):
 
     def base_fallback(self, choice: Any, reason: str) -> Optional[Any]: ...
 
+    def refused(self, choice: Any, reason: str) -> None: ...
+
     def observed(self, choice: Any, model: str) -> None: ...
 
 
@@ -103,15 +105,23 @@ class ChoiceRun:
     def fall_back(self, reply: claude.ClaudeReply, ready: Optional[Callable[[], bool]] = None) -> bool:
         """`reply` がモデルを理由にした拒否で、基準の組へ切り替えられたら真。値を替え、`request_try` を 1 増やす。2 回目は切り替えない。
 
-        `ready` は切り替える前に呼ぶ（期限と材料の確かめ）。偽を返すか例外を投げれば切り替えず、記録も書かない。その後の
-        `base_fallback` が基準の組の値を返し、切り替えたことを持つ `launch_error` の行を書く。行は基準の組を起動する前に書かれる
-        （基準の組の値を受け取るのと記録が同じ呼び出しのため）。
+        `ready` は切り替える前に呼ぶ（期限と材料の確かめ）。偽を返すか例外を投げれば切り替えず、差し込まれた処理の `refused` が
+        拒否だけを記録する（切り替えない拒否も、起動できない組を数えるために残す。#2944 の r7-7）。通れば `base_fallback` が基準の
+        組の値を返し、切り替えたことを持つ `launch_error` の行を書く。行は基準の組を起動する前に書かれる（基準の組の値を受け取るのと
+        記録が同じ呼び出しのため）。どちらの場合も、1 回の拒否に書く行は 1 行である。
         """
         if reply.failure is not claude.Failure.MODEL_REFUSED or self.switched or launch_chooser is None or self.choice is None:
             return False
-        if ready is not None and not ready():
+        reason = reply.error or str(reply.failure)
+        try:
+            go = ready is None or ready()
+        except BaseException:
+            launch_chooser.refused(self.choice, reason)
+            raise
+        if not go:
+            launch_chooser.refused(self.choice, reason)
             return False
-        back = launch_chooser.base_fallback(self.choice, reply.error or str(reply.failure))
+        back = launch_chooser.base_fallback(self.choice, reason)
         if back is None:
             return False
         self.choice, self.request_try, self.switched = back, self.request_try + 1, True
