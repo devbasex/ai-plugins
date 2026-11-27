@@ -33,6 +33,8 @@ def _text(value: object) -> Optional[str]:
 OCCURRENCE = "occurrence"
 
 
+# 指摘に一度でも示された保護の種類の欄（`criteria_decide.protect_kinds`。足した値は外さない。#4363）
+PROTECT = "protect"
 # 指摘がプロジェクト MVV に反するときの欄のうち、手元の状態ファイルだけに持つもの（#4076。記録のコメントにも載せる欄は
 # `report_decide.MARKS`、必ず人の承認が要る操作に当たるかの欄は `finish_decide.REDLINE`）。識別子は、どの MVV かを表す文字列である
 # MVV が変わって外した判定の並び（追記だけ）
@@ -99,7 +101,8 @@ def _located(item: Mapping[str, Any]) -> dict[str, Any]:
 
 def _raised(item: dict[str, Any], named: Optional[str] = None) -> dict[str, Any]:
     """相手役の 1 件（反する MVV の項目は `named`）から、行に足す位置・下げた後の重要度（`severity`）・元の重要度
-    （`raised_severity`。尺度に無い・無いときは null）・起きることの 1 文（`impact`。あるときだけ）。#4014"""
+    （`raised_severity`。尺度に無い・無いときは null）・起きることの 1 文（`impact`）・保護の種類（`protect`）。後の 2 つは
+    あるときだけ持つ。#4014・#4363"""
     raised = criteria_decide.severity_of(item.get("severity"))
     out = {k: v for k, v in _located(item).items() if k != "severity"}
     effective = criteria_decide.effective_severity(raised, item.get("impact"), redline=criteria_decide.redline(named))
@@ -107,6 +110,9 @@ def _raised(item: dict[str, Any], named: Optional[str] = None) -> dict[str, Any]
     impact = _text(item.get("impact"))
     if impact is not None:
         out["impact"] = impact.strip()
+    kinds = criteria_decide.protect_of(item.get(PROTECT))
+    if kinds:
+        out[PROTECT] = list(kinds)
     return out
 
 
@@ -275,7 +281,8 @@ class FindingJournal:
     def _raised_again(self, known: dict[str, Any], item: dict[str, Any], round_no: int, named: Optional[str], mvv: Optional[str]) -> None:
         """既にある指摘が出し直されたとき。前の MVV での判定は外し、直した指摘と、判定し直す見送り（`_skip_is_void`）は
         未解決へ戻し、重要度は下げた後の値と既にある値の重い方を残す（重さを固定した指摘は、固定する前の重さも同じに残す）。
-        1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。"""
+        1 文は既にある行に無いときだけ足し、元の重要度は行が既に持つときだけ重い方へ更新する（#4014 の決定 4）。保護の種類は
+        行の値に今回の値を足す（#4363）。"""
         new = _raised(item, named)
         if known.get(JUDGED) not in (None, mvv):
             _unclassify(known)
@@ -288,6 +295,8 @@ class FindingJournal:
             known[UNPINNED] = criteria_decide.heavier(criteria_decide.severity_of(known[UNPINNED]), new["severity"])
         if "impact" not in known and "impact" in new:
             known["impact"] = new["impact"]
+        if PROTECT in new:
+            known[PROTECT] = list(criteria_decide.protect_of([*store.list_of(known, PROTECT), *new[PROTECT]]))
         if "raised_severity" in known:
             raised = criteria_decide.severity_of(known["raised_severity"])
             known["raised_severity"] = criteria_decide.heavier_raised(raised, new["raised_severity"])

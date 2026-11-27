@@ -123,6 +123,30 @@ def test_issue_4013_fixer_sessions_that_is_not_a_boolean_is_invalid(value: objec
         criteria_decide.fixer_sessions_of({"version": 1, "focus": [], "fixer_sessions": value}, "r")
 
 
+@pytest.mark.parametrize(
+    ("value", "want"),
+    [
+        (["secret", "user_data"], ("secret", "user_data")),
+        (["safety", "secret", "safety"], ("secret", "safety")),
+        (["delivered", "authz", "速さ", 3], ("authz",)),
+        ([], ()),
+        ("secret", ()),
+        (None, ()),
+        (3, ()),
+    ],
+)
+def test_issue_4363_protect_of_keeps_only_the_protect_kinds(value: object, want: tuple[str, ...]) -> None:
+    """#4363: 値が並びなら保護の種類だけを表の順で重ねずに返し、ほかは空を返す。"""
+    assert criteria_decide.protect_of(value) == want
+
+
+def test_issue_4363_reviewer_block_names_every_protect_kind() -> None:
+    """#4363: 相手役への指示に保護の種類の 5 つがすべて現れる。"""
+    assert criteria_decide.protect_kinds() == ("secret", "authz", "user_data", "irreversible", "safety")
+    text = "\n".join(criteria_decide.reviewer_block(()))
+    assert all(kind in text for kind in criteria_decide.protect_kinds())
+
+
 def test_issue_4014_reviewer_block_asks_for_the_impact_from_the_data(monkeypatch) -> None:
     """#4014 の決定 5: 重要度の行は critical・major に起きることの 1 文を求め（基準 2・3・4 の言い換えつき）、書けない指摘を
     minor にさせる。「基準に当たる指摘は」の文を持たず、行の文は review-criteria.json の impact から組む。"""
@@ -163,7 +187,7 @@ def _assert_only_table_criteria(fake: Recording, focus: tuple[str, ...], tmp_pat
     if focus:
         want["3"] = f"{table['focus_label']}: {' / '.join(focus)}"
     # 基準のほかの行の数（見出し・前置き・書かないものなど）。前と後ろの行は起動ごとに違う
-    for agent, build, others in (("codex", criteria_decide.reviewer_block, 5), ("claude", criteria_decide.fixer_block, 4)):
+    for agent, build, others in (("codex", criteria_decide.reviewer_block, 6), ("claude", criteria_decide.fixer_block, 4)):
         lines = next(p for a, _, p in fake.prompts if a == agent).splitlines()
         # `wt` は doc.md を変えるので、表の基準の後ろに文書の基準（#4285）が続く
         block = lines[lines.index("## 指摘の基準") : lines.index("## 文書の指摘の基準")]
@@ -180,7 +204,7 @@ def test_blocking_findings_go_to_the_fixer_with_the_criteria(wt: Path, tmp_path:
     assert (code, got["status"]) == (0, "ok")
     review = next(p for a, _, p in fake.prompts if a == "codex")
     assert all(line in review for line in criteria_decide.reviewer_block(()))
-    assert '"severity"' in review and '"impact"' in review and '"path"' in review and '"line"' in review
+    assert '"severity"' in review and '"impact"' in review and '"path"' in review and '"line"' in review and '"protect"' in review
     fix = next(p for a, _, p in fake.prompts if a == "claude")
     assert f"- r1-1: 止まる（major・doc.md:5）— 起きること: {IMPACT}" in fix and "r1-2" not in fix
     assert all(line in fix for line in criteria_decide.fixer_block(()))

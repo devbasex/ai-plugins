@@ -28,8 +28,9 @@ REMARKS_SUFFIX = ".remarks.txt"
 # 相手役のレビューの最後の行に出させる findings の JSON の形（`%s` には、承認済みの MVV があるときだけキー `mvv` を入れる）
 FINDINGS_SHAPE = (
     '最後の行に 1 行の JSON {"findings": [{"text": "<指摘>", "severity": "<重要度>", '
-    '"impact": "<critical・major のとき、利用者の経路で何が起きるか 1 文 か 空>", "path": "<ファイルのパス か 空>", '
-    '"line": <行の番号 か null>, "section": "<パス#見出し か 空>"%s}]} だけを出す。指摘が無ければ空の配列。'
+    '"impact": "<critical・major のとき、利用者の経路で何が起きるか 1 文 か 空>", "protect": [<当たる保護の種類>], '
+    '"path": "<ファイルのパス か 空>", "line": <行の番号 か null>, "section": "<パス#見出し か 空>"%s}]} だけを出す。'
+    "指摘が無ければ空の配列。"
 )
 
 # 既存のコメント 1 件と全体の字数の上限
