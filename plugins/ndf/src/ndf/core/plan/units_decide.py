@@ -102,6 +102,8 @@ class Judgement(NamedTuple):
 _Key = tuple[int, str]  # (ファイルの位置, 単位の名前)
 
 _SPLIT_REASON = "分け方の案: 依存の順"
+# 受け入れ条件のキー（単位のファイル・結果の項目・承認の記録）
+CRITERIA_KEY = "criteria"
 
 
 def parse(doc: Mapping, path: str) -> UnitFile:
@@ -114,7 +116,7 @@ def parse(doc: Mapping, path: str) -> UnitFile:
             t["issue"] if "issue" in t else issues[0],
             tuple(t["files"]),
             t["lines"],
-            tuple(t["criteria"]),
+            tuple(t[CRITERIA_KEY]),
             tuple(t["after"]),
         )
         for t in doc["tasks"]
