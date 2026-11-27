@@ -62,7 +62,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `src/ndf/domains/records/models_cli.py` | 新設 | `ndf models` | model_choice・experiments・allocation_decide・usage・usage_decide | モジュール | N: `main`・`_pick_command`・`_report`・`report_rows` |
 | `src/ndf/domains/settings/delegate_run_cli.py` | 変更 | 委譲の起動にモデルと effort を足す | model_choice・launch_settings | モジュール | C: `main` |
 | `src/ndf/domains/crossreview/seats.py` | 変更 | シートの単位 | claude_choice・experiment | `SeatRun` | C: `launch_reviewers`・`_seat_launch`・`_seat_result`。N: `_run_seat` |
-| `src/ndf/domains/crossreview/experiment.py` | 新設（B5） | 実験の記録と使用量ログの行 | claude_choice・usage・journal | モジュール | N: `start_run`・`keep_first`・`choose_seat`・`keep_seat`・`seat_row`・`claude_row`・`record` |
+| `src/ndf/domains/crossreview/experiment.py` | 新設（B5） | 実験の記録と使用量ログの行 | claude_choice・usage・journal | モジュール | N: `start_run`・`charge_env`・`charge_to`・`keep_first`・`choose_seat`・`keep_seat`・`meta_of`・`claude_row`・`seat_row`・`record` |
 | `src/ndf/domains/crossreview/fixer.py` | 変更 | 修正担当の値 | claude_choice・experiment | `FixRun` | C: `_fixer_launch`・`_launch_fixer`・`_keep_fixer`。N: `_held`・`_resumed`・`_run_fixer_child` |
 | `src/ndf/domains/crossreview/journal.py` | 変更 | 挙げた担当を全員持つ | — | `FindingJournal` | C: `enter`。N: `experiment_values` |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 効果指標を渡す | experiment | `_Run` | C: `_round`・`_summary`・`_drive_rounds` |
@@ -375,7 +375,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `_fixer_launch`・`_launch_fixer`・`_keep_fixer` | `domains/crossreview/fixer.py` | 変更 | 変えない | 修正担当の値と `charge_to`・`session_seq` を 1 回の駆動の中だけで持ち、同じ駆動の中の会話の再開に使う（状態ファイルには残さない） |
 | `enter` | `domains/crossreview/journal.py` | 変更 | 変えない | 同じ指摘を挙げた担当を `raisers` にすべて残す。そのラウンドで受け付けた重要度が重大だった指摘の id を `entered_serious` に置く |
 | `experiment_values` | 同 | 新設 | `experiment_values(rows: Sequence, first: Collection[str], seats: Sequence[str]) -> tuple[Optional[int], dict[str, Optional[float]]]` | 1 ラウンド目の採用された重大な指摘の数と、シートごとの挙げた割合を返す。`first` は 1 ラウンド目で受け付けた重要度が重大だった指摘の id で、その中に裁定していない指摘があれば数は None |
-| `_record_experiment` | `domains/crossreview/drive.py` | 新設 | `_record_experiment(run: _Run, final: str) -> None` | シートと、`NDF_CHARGE_TO` の単位の効果指標を書く |
+| `record`（以下の `_record_experiment` はこの処理） | `domains/crossreview/experiment.py` | 新設 | `record(data, rows, seats, final) -> None` | シートと、`NDF_CHARGE_TO` の単位の効果指標を書く。`drive._summary` から呼ぶ |
 
 - シートの単位は `<cross-review の実行の ID>:<シート>`。実行の ID は状態ファイルに 1 回だけ作り、打ち直しでも同じ値。1 ラウンド目で出た指摘のうち、そのラウンドで受け付けた重要度が重大だったものの id も状態ファイルに残す。前のラウンドの重い重要度は引き継がない。同じラウンドの同じ指摘への複数の報告は、ジャーナルの行と同じ規則で 1 つに重ねてから判定する。MVV の項目が付けば重要度を引き上げ、人の承認が必要な項目も付けば、そちらを優先して引き上げない。後のラウンドで担当が同じ指摘をもう一度挙げると、ジャーナルの行の `round` と重要度がそのラウンドの値に書き換わり、1 ラウンド目の指摘と当時の重要度が見分けられなくなるためである
 - 残した id は、その時の `NDF_CHARGE_TO` の割り付け ID と対にする。後の起動で `NDF_CHARGE_TO` が別の ID になったら、その起動の最初のラウンドの指摘で残し直す。同じ状態の保存先で別の実装の変更を続けてレビューした場合に、前の実装の指摘で評価しないためである。`NDF_CHARGE_TO` の無い起動は残し直さない
