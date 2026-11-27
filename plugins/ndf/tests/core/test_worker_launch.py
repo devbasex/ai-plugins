@@ -151,7 +151,7 @@ def test_each_child_of_a_resumed_worker_writes_one_row_in_order(tmp_path: Path, 
             reply = _ran(claude.ClaudeReply.failed("出力なし", "claude が終了コード 1 で終えた"))
         else:
             h.result_file.write_text('{"status": "ok"}', encoding="utf-8")
-            reply = _ran(claude._parse_reply('{"result": "{}", "usage": {"output_tokens": 3}, "total_cost_usd": 0.2}'))
+            reply = _ran(claude.parse_reply('{"result": "{}", "usage": {"output_tokens": 3}, "total_cost_usd": 0.2}'))
         options.log.report(reply)
         return reply
 

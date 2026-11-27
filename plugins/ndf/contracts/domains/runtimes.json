@@ -23,6 +23,7 @@
     "workdir_options": {"type": "array", "summary": "作業ディレクトリを指す引数の名前。ndf delegate-run は先頭の名前で今のディレクトリを入れ、コマンドがこれらの名前を自分で持てば拒む（承認とサンドボックスは今のディレクトリで確かめるため）", "optional": true},
     "model_options": {"type": "array", "summary": "モデルを指す引数の名前（#2944）。ndf delegate-run は、コマンドがこれらの名前でモデルを明示すれば、その値を起動の引数としてモデルの選択に渡し（環境変数より優先）、選んだモデルの引数を足さない", "optional": true},
     "effort_options": {"type": "array", "summary": "effort を渡す引数の名前（#2944）。値が choice_args の effort の形（codex は model_reasoning_effort=<値>）に合えば、ndf delegate-run はその値を起動の引数として effort の選択に渡し（環境変数より優先。順位に無い値は止める）、選んだ effort の引数を足さない", "optional": true},
+    "usage_args": {"type": "array", "summary": "値を選んだ相手役の起動に足す、使用量を出力から取る引数（#2944）。{answer} は回答を書くファイルに置き換える。cross-refactoring の起動には足さない", "optional": true},
     "choice_args": {"type": "array", "summary": "選んだモデルと effort を渡す引数の形（#2944）。引数の名前と値の 2 語ずつの並びで、値の {model} と {effort} に選んだ値を入れる。値の無い側の 2 語は足さない。並びの順に出す。無いランタイムは値を渡さない", "optional": true}
   },
   "rows": [
@@ -64,7 +65,8 @@
       "workdir_options": ["-C", "--cd"],
       "model_options": ["-m", "--model"],
       "effort_options": ["-c", "--config"],
-      "choice_args": ["-c", "model_reasoning_effort={effort}", "-m", "{model}"]
+      "choice_args": ["-c", "model_reasoning_effort={effort}", "-m", "{model}"],
+      "usage_args": ["--json", "-o", "{answer}"]
     },
     {
       "id": "agy",

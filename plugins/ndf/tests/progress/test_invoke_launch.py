@@ -106,7 +106,7 @@ def test_skill_without_a_unit_is_not_assigned(tmp_path: Path, unit_rows, monkeyp
 
 
 def test_skill_switches_to_the_base_once_after_a_refusal(tmp_path: Path, unit_rows) -> None:
-    refused = claude._parse_reply(json.dumps(REFUSED))._replace(launched=True)
+    refused = claude.parse_reply(json.dumps(REFUSED))._replace(launched=True)
     seen: list[list[str]] = []
     replies = [refused, claude.ClaudeReply(True, None, "", 0.0, launched=True)]
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=_replying(replies, seen))
@@ -127,7 +127,7 @@ def test_the_switch_builds_the_launch_args_once_and_checks_the_answer_once(tmp_p
     monkeypatch.setattr(claude, "claude_launch", lambda *a, **k: built.append(1) or build(*a, **k))
     real = result.received
     monkeypatch.setattr(result, "received", lambda obj: checked.append(1) or real(obj))
-    refused = claude._parse_reply(json.dumps(REFUSED))._replace(launched=True)
+    refused = claude.parse_reply(json.dumps(REFUSED))._replace(launched=True)
     done = claude.ClaudeReply(True, result.result("design", result.OK, "済"), "", 0.0, launched=True)
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=_replying([refused, done], []))
     assert got.status == "ok" and unit_rows[-1]["outcome"] == "ok" and (len(built), len(checked)) == (1, 1)
@@ -146,6 +146,6 @@ def test_the_skill_does_not_relaunch_when_recording_the_switch_used_up_the_time(
 
     monkeypatch.setattr(model_chooser, "base_fallback", slow_record)
     seen: list[list[str]] = []
-    refused = claude._parse_reply(json.dumps(REFUSED))._replace(launched=True)
+    refused = claude.parse_reply(json.dumps(REFUSED))._replace(launched=True)
     got = invoke.invoke(_skill_run(), tmp_path, tmp_path, call_claude=_replying([refused], seen))
     assert len(seen) == 1 and got.status == "stopped" and got.cause["kind"] == "interrupted"

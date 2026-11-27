@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
@@ -259,6 +260,21 @@ def reading_launch(
     return read_only_launch(reader.system, workdir, prompt, stem, timeout, readable=reader.readable)
 
 
+def with_choice(spec: agents.Launch, choice: Optional[Any]) -> agents.Launch:
+    """相手役か修正担当の起動 `spec` に、選んだ値（`claude_choice.pick_values` の Choice）の引数と環境を、最後の引数（質問）の前に足す。
+
+    ランタイムの表に `usage_args` があれば（codex）、使用量を出力から取る引数も足し、回答を `agents.codex_answer_path` へ書かせる。
+    `choice` が None の起動（cross-refactoring・値を選ばない起動）は変えない。
+    """
+    if choice is None:
+        return spec
+    row = facts.row(RUNTIMES, spec.agent)
+    usage = row["usage_args"] if "usage_args" in row else []
+    answer = str(agents.codex_answer_path(spec.paths.out))
+    added = (*choice.cli_args(), *(a.replace("{answer}", answer) for a in usage))
+    return agents.adding_env(replace(spec, argv=(*spec.argv[:-1], *added, spec.argv[-1])), choice.env_changes())
+
+
 class ClaudeAnswer(NamedTuple):
     """claude の `--output-format json` の出力を 1 回読んだもの。`text` は結果を探す本文（外側の JSON の `result`。外側が JSON で
     なければ出力のまま）、`denials` は外側の JSON の `permission_denials` の要素（辞書だけ）。"""
@@ -283,10 +299,14 @@ def claude_answer(out: Path) -> ClaudeAnswer:
 
 
 def answer_text(runtime: str, out: Path) -> str:
-    """担当の出力から結果を探す本文。claude は `--output-format json` の外側の JSON の `result` を本文にし、ほかは出力の末尾。"""
-    if runtime != FIXER:
-        return agents.tail(out)
-    return claude_answer(out).text
+    """担当の出力から結果を探す本文。claude は `--output-format json` の外側の JSON の `result` を本文にする。codex の
+    `--json` の出力（使用量を取る起動）は回答のファイル（`agents.codex_answer_path`）があればその本文を使う。ほかは出力の末尾
+    （前の起動の回答のファイルが残っていても読まない）。"""
+    if runtime == FIXER:
+        return claude_answer(out).text
+    answer = agents.codex_answer_path(out)
+    written = runtime == "codex" and answer.is_file() and bool(agents.codex_events(out))
+    return agents.tail(answer if written else out)
 
 
 # `READ_TOOLS` の Tool ごとの、読む場所を指す引数の名前（相対パスは claude の作業ディレクトリから解決される）

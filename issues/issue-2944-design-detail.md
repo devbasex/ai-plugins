@@ -363,11 +363,12 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `review_launch`・`read_only_launch`・`reading_launch` | `core/converge/participants.py` | 変更 | 末尾に `choice: Optional[Choice] = None` | 組の引数と環境を足し、Codex は `usage_args` を足す |
-| `answer_text` | 同 | 変更 | 変えない | `<出力>.answer` があれば、その本文を読む |
+| `with_choice` | `core/converge/participants.py` | 新設 | `with_choice(spec: agents.Launch, choice: Optional[Any]) -> agents.Launch` | `review_launch`・`read_only_launch`・`reading_launch` が組み立てた起動に組の引数と環境を足し、Codex は `usage_args` を足す |
+| `answer_text` | 同 | 変更 | 変えない | 結果を探す本文を返す。Codex の `--json` の出力では回答のファイルの末尾を返す。回答のファイルのパスと、ファイルが無い場合の扱いは、表の下の「Codex の回答の読み方」に従う |
 | `_start_and_watch` | `adapters/agents.py` | 変更 | 変えない | `AgentStatus.seconds` に起動から終了までの秒を入れる |
-| `codex_usage` | 同 | 新設 | `codex_usage(out: Path) -> Optional[dict]` | `turn.completed` の行の `usage` を足し合わせる |
-| `codex_cost` | `domains/records/usage.py` | 新設 | `codex_cost(usage: Mapping, model: Optional[str]) -> tuple[str, Optional[float]]` | 単価表から USD を返す。無いモデルは None |
+| `codex_usage` | 同 | 新設 | `codex_usage(out: Path) -> Optional[CodexUsage]` | `turn.completed` の行の `usage` を足し合わせる |
+| `codex_cost` | `domains/records/usage.py` | 新設 | `codex_cost(used: Any, model: Optional[str]) -> tuple[str, Optional[float]]`（`used` は `agents.CodexUsage`） | 換算に使ったモデルの名前と、単価表から求めた USD を返す。単価の無いモデルの USD は None |
+| `record_codex` | 同 | 新設 | `record_codex(used: Any, meta: Mapping[str, Any], choice: Any) -> None` | `caller` が `codex-exec` の行を使用量ログに書く。費用の欄と `unpriced` を記録する条件は、表の下の「Codex の費用と `unpriced` の記録」に従う |
 | `_seat_launch`・`launch_reviewers`・`_seat_result` | `domains/crossreview/seats.py` | 変更 | `_seat_launch(run, seat, prompt, stem, choice)` | シートの単位で値を取得し、起動ごとに行を書き、Codex の回答を `answer_text` で読む |
 | `_fixer_launch`・`_launch_fixer`・`_keep_fixer` | `domains/crossreview/fixer.py` | 変更 | 変えない | 修正担当の値と `charge_to`・`session_seq` を状態ファイルに残して再開に使う |
 | `enter` | `domains/crossreview/journal.py` | 変更 | 変えない | 同じ指摘を挙げた担当を `raisers` にすべて残す |
@@ -379,14 +380,33 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - `_record_experiment` は、終わり方が収束かラウンドの上限のときに書く。結果を読めないシートがあって終わった場合と、誤りで終わった場合は書かない。design と impl の指標は `1 / (1 + 1 ラウンド目の採用された重大な指摘の数)` で、数が None なら null
 - 修正担当は `launch_choice("seat", "fix")`（工程が無いので実験の引数を足さない）。環境変数と引数の指定は効く
 - シートの子の環境から `NDF_CHARGE_TO` を外す
-- `codex exec --json` で、利用上限とサンドボックスの失敗が今の検出（`agents.usage_limit`・`sandbox_failed`。行頭の文字列を読む）に掛かるかは未確認である。実装で失敗する条件を 1 回起動し、掛からなければ検出を `--json` の出力の形に合わせる
-- Codex の行は `session_seq` 0、費用は `codex_cost` の値を `session_cost_usd` に書く。単価が無ければ欄を置かず、`unpriced` の行を足す
+- Codex の回答の読み方
+  - 回答のファイルは、標準出力のログのファイル名に `.answer` を足したものである。標準出力のログが `review.out` なら、回答のファイルは `review.out.answer` になる
+  - 回答先の指定、起動前の削除、読み取りは、どれも `agents.codex_answer_path(out)`（`out` は標準出力のログのパス）で求めたパスを使う
+  - `--json` の出力を出した起動の回答は、回答のファイルにある。標準出力は回答の代わりにならない
+  - 回答のファイルが無い場合も、`answer_text` は標準出力の末尾を返し、回答の有無は判定しない
+  - この末尾はイベントの行である。回答やコマンドの出力はイベントの中の文字列になっているので、呼び出し元が結果の JSON（`findings` など）を探しても見つからず、回答なしになる
+  - `--json` でない出力の起動は、標準出力の末尾が回答である
+- `codex exec --json` は失敗の理由を標準エラーに出さないので、利用上限とサンドボックスの失敗は標準出力のイベントからも検出する
+  - 監視中の利用上限の検出は、`error`・`turn.failed` の行の文を `usage_limit` で調べる。`CodexTail` で追記された完全な行だけを読み、起動の終了時には改行のない最後の行も読む
+  - サンドボックスの失敗の検出（`sandbox_failed`）は、`codex_events` で標準出力全体を読み、`type` が `item.completed` のイベントから `item.type` が `command_execution` のものを抽出する。その `item` の `exit_code` が 0 以外で、かつ `aggregated_output` が `bwrap:` で始まる場合に、サンドボックスの失敗と判定する
+  - どちらも、標準出力の最初の行が `thread.started` イベントの場合だけ、後続の行を Codex のイベントとして扱う。最初の行がそうでなければ、後の行に `thread.started` があっても扱わない
+  - コマンドの出力で見つけた失敗は、出力の行でなく固定の文を返す。返す値は PR のコメントに載り、出力の行は手元のパスやコマンドが出したデータを含み得るためである
+- 回答のファイル（パスは上の「Codex の回答の読み方」）を回答先に指定した起動は、起動の前にそのファイルを消す（`_start`）。codex は失敗すると前の中身を残すためである。指定しない起動は消さない。`answer_text` が回答のファイルを読むのは codex の `--json` の出力だけなので、残った古い回答は読まれない
+- 実装で設計の形を変えた理由（B5）。振る舞いは変えていない
+  - 値を起動の組み立ての関数の引数にしないのは、引数を足すと上限（PLR0913。6）を超え、cross-refactoring が呼ぶ関数の形も変わるためである
+  - 使用量を辞書で持たないのは、欄の名前の文字列を複数のファイルに置くと重複の検査が落とすためである
+- Codex の使用量ログの行は `session_seq` が 0 である
+- Codex の費用と `unpriced` の記録
+  - 費用は `codex_cost` の値を、使用量ログの `session_cost_usd` に書く
+  - 使用量が取れない起動と、単価の無いモデルの起動では、`session_cost_usd` を省く
+  - 単価の無いモデルの起動に実験への割り付け ID がある場合は、その ID を付けて実験の記録に `unpriced` を記録する。割り付け ID が無い起動では記録しない
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `answer_text` | 回答のファイルが無い | 途中で終わった | 読み取り | 呼び出し元へ返す（回答なし） | 今の「読めなかった」と同じ | 起動の前に前の回答のファイルを消す |
+| `answer_text` | 回答のファイルが無い | 途中で終わった | 呼び出し元の結果の JSON の検索 | 標準出力の末尾を返す。呼び出し元は結果が見つからないので回答なしと扱う | 今の「読めなかった」と同じ | 起動の前に前の回答のファイルを消す |
 | `codex_usage` | 使用量の行が無い | 失敗した起動 | 解析 | None | 行の `usage` が `unknown` | — |
 | `codex_cost` | 単価が無い | 新しいモデル | 単価表 | None | `report` に不明の件数 | 単価表を足すと次から計算する |
 | `launch_reviewers` | 設定の誤り | `launch_choice` | 起動の前 | 呼び出し元へ返す | `stopped`・`precondition` | どのシートも起動しない |

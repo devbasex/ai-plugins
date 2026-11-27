@@ -13,12 +13,20 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from ndf import contracts
 from ndf.contracts import facts
 
 # 同梱の表
 TABLE = "launch-experiments"
 # 出現率の項目の確率の合計の許容差
 _SUM_TOLERANCE = 1e-6
+# Codex の起動の費用を換算する単価の表
+PRICES = "data/codex-prices.json"
+
+
+def codex_prices() -> dict[str, Any]:
+    """同梱の Codex の単価表（`default_model` と、モデル → 100 万トークンあたりの USD の `models`）。"""
+    return contracts.load_json(PRICES)
 
 
 def records_rule() -> dict[str, Any]:
@@ -142,13 +150,14 @@ def unpriced_models(rows: Sequence[Mapping[str, Any]], where: Where, start: date
     割り付けの段階を `uniform` にする条件（`model_choice._has_unpriced`）と `ndf models report` の表示が、同じ条件でモデルを決めるために共有する。
     """
     found = assigns(rows)
-    return sorted(
-        {
-            r["model"]
-            for r in rows
-            if r["kind"] == "unpriced" and where.of(a := found.get(r["assign_id"])) and a is not None and row_time(a) >= start
-        }
-    )
+    models = {
+        r["model"]
+        for r in rows
+        if r["kind"] == "unpriced" and where.of(a := found.get(r["assign_id"])) and a is not None and row_time(a) >= start
+    }
+    if not models:
+        return []
+    return sorted(models - set(codex_prices()["models"]))  # 行を書いた後に単価表へ載ったモデルは数えない
 
 
 def model_group(arm: Mapping[str, str], arms: Sequence[Mapping[str, str]]) -> str:

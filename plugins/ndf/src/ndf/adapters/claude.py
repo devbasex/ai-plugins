@@ -582,7 +582,7 @@ def _limit_hit(payload: dict, text: str) -> bool:
     return payload.get("api_error_status") == 429 or usage_limit(text) is not None
 
 
-def _parse_reply(stdout: str) -> ClaudeReply:
+def parse_reply(stdout: str) -> ClaudeReply:
     payload = _payload(stdout)
     if isinstance(payload, ClaudeReply):
         return payload
@@ -997,4 +997,4 @@ def _read_answer(proc: subprocess.Popen, prompt: str, timeout: float) -> ClaudeR
         limit = Failure.USAGE_LIMIT if usage_limit(stderr) else None
         return ClaudeReply.failed(stderr, f"claude が終了コード {proc.returncode} で終えた: {stderr[:200]}", failure=limit)
     record_cost(stdout)
-    return _parse_reply(stdout)
+    return parse_reply(stdout)

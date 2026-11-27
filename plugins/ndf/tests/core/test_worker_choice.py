@@ -66,7 +66,7 @@ def rows(monkeypatch) -> list[dict]:
 
 
 def _refused(seconds: float = 0.0) -> claude.ClaudeReply:
-    return claude._parse_reply(json.dumps(REFUSED))._replace(launched=True, seconds=seconds)
+    return claude.parse_reply(json.dumps(REFUSED))._replace(launched=True, seconds=seconds)
 
 
 class Fake:

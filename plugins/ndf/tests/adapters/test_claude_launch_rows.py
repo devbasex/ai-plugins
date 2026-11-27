@@ -56,21 +56,21 @@ def recorder(monkeypatch) -> Recorder:
 
 
 def _launched(**kw) -> claude.ClaudeReply:
-    base = claude._parse_reply(json.dumps(PAYLOAD))
+    base = claude.parse_reply(json.dumps(PAYLOAD))
     return base._replace(launched=True, launched_at="2026-11-27T01:00:00+00:00", seconds=3.5, **kw)
 
 
 @pytest.mark.parametrize("error", [False, True])
 def test_the_reply_keeps_the_session_usage_and_cost_on_success_and_on_error(error):
-    got = claude._parse_reply(json.dumps({**PAYLOAD, "is_error": error}))
+    got = claude.parse_reply(json.dumps({**PAYLOAD, "is_error": error}))
     assert got.ok is not error
     assert (got.session_id, got.usage, got.model_usage, got.session_cost_usd) == ("s-9", USAGE, MODEL_USAGE, 0.00080865)
 
 
 def test_the_reply_without_the_fields_or_json_has_none():
-    bare = claude._parse_reply(json.dumps({"result": "{}"}))
+    bare = claude.parse_reply(json.dumps({"result": "{}"}))
     assert (bare.session_id, bare.usage, bare.model_usage, bare.session_cost_usd) == (None, None, None, None)
-    broken = claude._parse_reply("JSON でない")
+    broken = claude.parse_reply("JSON でない")
     assert (broken.ok, broken.usage, broken.launched) == (False, None, False)
 
 

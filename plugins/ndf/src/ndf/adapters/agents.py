@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Callable, Iterator, NamedTuple, Optional
+from typing import Any, Callable, Iterator, Mapping, NamedTuple, Optional
 
 from ndf import identity, process_group
 from ndf.adapters import cli_floor, launch_slot
@@ -34,6 +34,9 @@ from ndf.contracts import facts, limits
 SANDBOX_FAILED = "bwrap:"
 # その行。行頭に限り、相手役が標準エラーへ写した差分・文書の中の語を拾わない（PR 3944 の差分の文書で誤って読めなかったとした）
 _SANDBOX_LINE = re.compile(r"^" + re.escape(SANDBOX_FAILED), re.MULTILINE)
+# コマンドの出力で見つけた失敗として返す固定の文。出力の行は手元のパスやコマンドが出したデータを含み得て、返す値は
+# PR のコメントに載るので写さない（原文は起動の `.out` に残る）
+SANDBOX_FAILED_IN_COMMAND = f"{SANDBOX_FAILED} サンドボックスの失敗でコマンドを打てなかった（出力の原文は手元の起動の .out に残る）"
 
 
 @functools.lru_cache(maxsize=1)
@@ -52,15 +55,137 @@ def user_namespaces() -> bool:
 
 
 def sandbox_failed(paths: "AgentPaths") -> Optional[str]:
-    """起動の標準エラーにサンドボックスの失敗（`SANDBOX_FAILED`）があればその行。無ければ None。
+    """サンドボックスの失敗（`SANDBOX_FAILED`）が起動の標準エラーにあればその行、`codex exec --json` のコマンドの出力にあれば
+    固定の文（`SANDBOX_FAILED_IN_COMMAND`）。無ければ None。
 
-    失敗は最初のコマンドで出て、その後の回答のログに埋もれるので、末尾でなく全体を読む。"""
-    try:
-        err = paths.err.read_text(encoding="utf-8", errors="replace")
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 標準エラーを書く前に落ちた起動はサンドボックスの失敗を持たない
-        return None
+    失敗は最初のコマンドで出て、その後の回答のログに埋もれるので、末尾でなく全体を読む。`--json` の起動は失敗を標準エラーに
+    出さず、失敗で終わったコマンドの出力が `bwrap:` で始まる。"""
+    err = _whole_text(paths.err)
     found = _SANDBOX_LINE.search(err)
-    return _line_at(err, found.start()) if found else None
+    if found:
+        return _line_at(err, found.start())
+    for item in (e.get("item") for e in codex_events(paths.out) if e.get("type") == "item.completed"):
+        if not isinstance(item, dict) or item.get("type") != "command_execution" or item.get("exit_code") == 0:
+            continue
+        if str(item.get("aggregated_output")).startswith(SANDBOX_FAILED):
+            return SANDBOX_FAILED_IN_COMMAND
+    return None
+
+
+# ---------------------------------------------------------------- codex exec --json の出力（#2944）
+
+# `--json` の出力の最初のイベント（ほかの CLI の本文と、`--json` でない codex の回答を見分ける）
+_CODEX_STARTED = "thread.started"
+# API がモデルか effort の指定を理由に断った `turn.failed` の文（2026-11-27 に codex-cli 0.172.0 の実際の出力で確かめた）
+_CODEX_REFUSAL = re.compile(r"model is not supported|reasoning\.effort")
+
+
+def codex_answer_path(out: Path) -> Path:
+    """`codex exec -o` で回答を書かせるファイル（出力の名前に `.answer` を足す）。"""
+    return out.with_name(out.name + ".answer")
+
+
+def _whole_text(path: Path) -> str:
+    """ファイル全体を文字で読む。無ければ空。"""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:  # noqa: NDF401 ファイル: 書く前に落ちた起動は中身を持たない
+        return ""
+
+
+def _codex_event(line: str) -> Optional[dict[str, Any]]:
+    if not line.startswith("{"):
+        return None
+    try:
+        found = json.loads(line)
+    except ValueError:  # noqa: NDF401 外部コマンド: 書きかけの行はイベントとして数えない
+        return None
+    return found if isinstance(found, dict) else None
+
+
+def _starts_codex_stream(first_line: str) -> bool:
+    """出力の最初の行が `thread.started` のイベントか（`--json` の出力か）。"""
+    first = _codex_event(first_line)
+    return first is not None and first.get("type") == _CODEX_STARTED
+
+
+def codex_events(out: Path) -> list[dict[str, Any]]:
+    """`codex exec --json` の出力のイベント。最初の行が `thread.started` でなければ（`--json` の出力でなければ）空。"""
+    lines = _whole_text(out).split("\n")
+    if not _starts_codex_stream(lines[0]):
+        return []
+    return [e for e in map(_codex_event, lines) if e is not None]
+
+
+@dataclass
+class CodexTail:
+    """監視の間、`--json` の出力に追記された行だけを読む。起動ごとに 1 つ持つ。
+
+    `offset` は読み終えた行の直後の位置で、改行の来ていない行は次の回に読む。最初の行が `thread.started` でなければ
+    （`other`）、その後は出力を開かない。
+    """
+
+    offset: int = 0
+    started: bool = False
+    other: bool = False
+
+    def new(self, out: Path, ended: bool) -> list[dict[str, Any]]:
+        """前の回より後のイベント。子が終わった（`ended`）なら、改行の無い最後の行も読む。"""
+        if self.other:
+            return []
+        try:
+            with open(out, "rb") as fh:
+                fh.seek(self.offset)
+                data = fh.read()
+        except FileNotFoundError:
+            return []
+        if not ended:
+            data = data[: data.rfind(b"\n") + 1]
+        if not data:
+            return []
+        self.offset += len(data)
+        lines = data.decode("utf-8", errors="replace").split("\n")
+        if not self.started:
+            self.started = _starts_codex_stream(lines[0])
+            self.other = not self.started
+            if self.other:
+                return []
+        return [e for e in map(_codex_event, lines) if e is not None]
+
+
+class CodexUsage(NamedTuple):
+    """`turn.completed` の行の `usage` のうち費用に要る欄。`cached_input_tokens` と `cache_write_input_tokens` は `input_tokens` の内数、
+    推論のトークン（`reasoning_output_tokens`）は `output_tokens` の内数なので読まない。"""
+
+    input_tokens: int
+    cached_input_tokens: int
+    cache_write_input_tokens: int
+    output_tokens: int
+
+
+def codex_usage(out: Path) -> Optional[CodexUsage]:
+    """`turn.completed` の行の `usage` の合計。行が無ければ（失敗した起動）None。"""
+    found = [e["usage"] for e in codex_events(out) if e.get("type") == "turn.completed" and isinstance(e.get("usage"), Mapping)]
+    if not found:
+        return None
+    return CodexUsage(*(sum(u[k] for u in found if isinstance(u.get(k), int)) for k in CodexUsage._fields))
+
+
+def _failure_message(event: Mapping[str, Any]) -> str:
+    """`error` か `turn.failed` のイベントの文。ほかは空。"""
+    if event.get("type") == "error":
+        return str(event.get("message"))
+    error = event.get("error")
+    return str(error.get("message")) if event.get("type") == "turn.failed" and isinstance(error, Mapping) else ""
+
+
+def codex_refused(out: Path) -> bool:
+    """API がモデルか effort の指定を理由に、実行を始める前に断ったか（回答も使用量も無く、`turn.failed` の文が当たる）。"""
+    events = codex_events(out)
+    items = [e.get("item") for e in events]
+    ran = any(e.get("type") == "turn.completed" for e in events)
+    ran = ran or any(isinstance(i, Mapping) and i.get("type") == "agent_message" for i in items)
+    return not ran and any(e.get("type") == "turn.failed" and _CODEX_REFUSAL.search(_failure_message(e)) for e in events)
 
 
 # ---------------------------------------------------------------- 監視（#1411・#2059）
@@ -178,7 +303,7 @@ class Warned:
 
 @dataclass(frozen=True)
 class Launch:
-    """外部 CLI の 1 回の起動。`timeout` は監視の上限の秒。`env` は足す環境変数。`verify` は起動の直前に打つ照らし直しで、
+    """外部 CLI の 1 回の起動。`timeout` は監視の上限の秒。`env` は足す環境変数（値が None の名前は子の環境から外す）。`verify` は起動の直前に打つ照らし直しで、
     理由の 1 行を返せば起動しない（安全装置を外す起動の承認の読み直し。#1959）。"""
 
     agent: str
@@ -186,8 +311,17 @@ class Launch:
     cwd: Path
     paths: AgentPaths
     timeout: float
-    env: Optional[dict[str, str]] = None
+    env: Optional[Mapping[str, Optional[str]]] = None
     verify: Optional[Callable[[], Optional[str]]] = None
+
+
+def adding_env(spec: Launch, changes: Mapping[str, Optional[str]]) -> Launch:
+    """`spec` の子の環境へ `changes` を足した起動（値が None の名前は外す）。"""
+    env: dict[str, Optional[str]] = {}
+    if spec.env is not None:
+        env.update(spec.env)
+    env.update(changes)
+    return replace(spec, env=env)
 
 
 class AgentState(StrEnum):
@@ -206,7 +340,8 @@ class AgentState(StrEnum):
 
 class AgentStatus(NamedTuple):
     """監視の結果。`state` は `AgentState`、`restore` は kiro のバックアップの結果（`RestoreState`。kiro 以外は None）。
-    `public` は `detail` が手元のパスを含むときの公開用の文面（無ければ `detail` をそのまま公開してよい。PR 4461 の r1-1）。"""
+    `public` は `detail` が手元のパスを含むときの公開用の文面（無ければ `detail` をそのまま公開してよい。PR 4461 の r1-1）。
+    `seconds` は起動した子の起動から終了までの秒（子を起動しなかったら None。#2944）。"""
 
     agent: str
     state: str
@@ -215,6 +350,7 @@ class AgentStatus(NamedTuple):
     warnings: tuple[str, ...]
     restore: Optional[str] = None
     public: Optional[str] = None
+    seconds: Optional[float] = None
 
     @property
     def shown(self) -> str:
@@ -238,6 +374,7 @@ class _Watch:
     last_change: float
     size: int = -1
     warned: Warned = field(default_factory=Warned)
+    events: CodexTail = field(default_factory=CodexTail)
 
     def progressed(self, now: float) -> None:
         size = sum(p.stat().st_size for p in self.spec.paths.watched() if p.exists())
@@ -250,8 +387,10 @@ def _report_warnings(w: _Watch) -> None:
         diag(f"[{w.spec.agent}] 早期の警告（{kind}）: {text}", kind=kind, agent=w.spec.agent)
 
 
-def _out_usage_limit(spec: Launch) -> Optional[str]:
-    """claude の標準出力の結果の JSON に利用上限があれば、その旨の文を返す（他の CLI の標準出力は読まない）。"""
+def _out_usage_limit(spec: Launch, seen: CodexTail, ended: bool) -> Optional[str]:
+    """claude の標準出力の結果の JSON か、`codex exec --json` の誤りのイベントに利用上限があれば返す（他の CLI の標準出力は読まない）。codex は `seen` の続きだけを読む。"""
+    if spec.agent == "codex":
+        return next((hit for e in seen.new(spec.paths.out, ended) if (hit := usage_limit(_failure_message(e)))), None)
     if spec.agent != "claude" or not CLAUDE_USAGE_LIMIT_JSON.search(tail(spec.paths.out)):
         return None
     return "標準出力の結果の JSON に api_error_status 429"
@@ -259,7 +398,7 @@ def _out_usage_limit(spec: Launch) -> Optional[str]:
 
 def _verdict(w: _Watch, code: Optional[int], now: float) -> Optional[tuple[str, str]]:
     """終わり方を決める。まだ続くなら None。利用上限は終了コードより先に見る。"""
-    hit = usage_limit(tail(w.spec.paths.err)) or _out_usage_limit(w.spec)
+    hit = usage_limit(tail(w.spec.paths.err)) or _out_usage_limit(w.spec, w.events, ended=code is not None)
     if hit:
         return AgentState.USAGE_LIMIT, hit
     if code is not None:
@@ -306,6 +445,9 @@ def _start(spec: Launch) -> subprocess.Popen:
     child = ai_child_env()
     env = child_process_env(child if spec.env is None else {**spec.env, **child})
     spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
+    answer = codex_answer_path(spec.paths.out)
+    if str(answer) in spec.argv:  # 回答先に指定した起動だけ消す。codex は失敗すると `-o` の前の中身を残す
+        answer.unlink(missing_ok=True)
     with open(spec.paths.out, "wb") as out, open(spec.paths.err, "wb") as err:
         return subprocess.Popen(
             list(spec.argv), cwd=spec.cwd, stdout=out, stderr=err, stdin=subprocess.DEVNULL, env=env, start_new_session=True
@@ -314,12 +456,14 @@ def _start(spec: Launch) -> subprocess.Popen:
 
 def _start_and_watch(spec: Launch, poll: Optional[float]) -> AgentStatus:
     """起動して見る。起動できない（実行ファイルが無い・実行権が無い）ときは `AgentState.FAILED` を返す。"""
+    started = time.monotonic()
     try:
         proc = _start(spec)
     except OSError as exc:
         # 文面はログ・実行ファイルの絶対パスを含み得るので、公開用はファイル名と理由だけにする（PR 4461 の r2-1）
         return AgentStatus(spec.agent, AgentState.FAILED, None, f"起動できない: {exc}", (), public=f"起動できない: {_os_error_public(exc)}")
-    return watch(proc, spec, poll)
+    status = watch(proc, spec, poll)
+    return status._replace(seconds=round(time.monotonic() - started, 3))
 
 
 def _os_error_public(exc: OSError) -> str:
