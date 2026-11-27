@@ -150,7 +150,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/src/ndf/progress/units_queue.py`
   - `plugins/ndf/src/ndf/progress/units_invoke.py`
   - `plugins/ndf/tests/progress/test_units_parallel.py`
-- **変更内容:** `units_queue.read`・`action` と、`run_stage` の待ちの一覧、打ち直しの前の状態の読み取り（先に要る: Task 5・12）
+- **変更内容:** `units_queue.read`・`action` と、`run_stage` の待ちの一覧、打ち直しの前の状態の読み取り。マージ済みでも作業場所へ取り込めていない単位の「取り込み待ち」の一覧（`units/ingest.json`）と、取り込み待ちのマージのコミットを 1 回でまとめて渡す `advance`。取り込み待ちの期限が最初に分かった時刻から数えられ、打ち直しても数え直さないことをテストで縛る（先に要る: Task 5・12）
 - **満たす受け入れ条件:** 3
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -210,6 +210,7 @@ Task 15 が使うので、番号の順でなくここに置く。
   - 反映（送るコミットの作成と照合。送り先と送るコミットの確かめは Task 15 の関数を使う）。担当の起動の前の取得も push も `push_url` を通った URL を相手にし、拒否する URL では通信しないことをテストで縛る
   - `per_unit` の無い定義で単位の欄があるときの分岐
   - push しないテンプレート `implementation-plan-convert`（差し込み `convert`）と、作業の定義の変換のときだけの指示
+  - 1 回の変換で担当を起動するのは 2 回まで（競合によるやり直しも数える）。2 回目でも違反か競合があれば、違反の一覧を `convert-violations.json` に書いて止まることをテストで縛る
   - 変換はこの単位のマージの時点から、単位の欄を持つ今のスプリントに働く。単位の欄が無いスプリントが今のまま流れることと、変換の再開の各段階をテストで縛る
 - **満たす受け入れ条件:** 3・4
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
