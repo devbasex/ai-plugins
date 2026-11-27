@@ -373,11 +373,20 @@ def test_issue_4363_ask_copies_the_records_when_the_state_dir_has_no_hard_links(
     assert record.stat().st_mode & 0o777 == 0o600 and "verdicts" in record.read_text(encoding="utf-8")
 
 
-def test_issue_4363_ask_leaves_no_partial_record_when_copying_is_interrupted(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("interrupts", [1, 2], ids=["once", "twice"])
+def test_issue_4363_ask_leaves_no_partial_record_when_copying_is_interrupted(tmp_path: Path, monkeypatch, interrupts: int) -> None:
+    """1 回の割り込みは残りを移し直して起動ごとのディレクトリを消し、移し直しにも割り込まれたら元ファイルを残す。"""
+
     def no_link(*_: object) -> None:
         raise PermissionError("hard links are not supported")
 
+    copy = verify.shutil.copyfileobj
+    left = [interrupts]
+
     def interrupted(source: Any, out: Any) -> None:
+        if not left[0]:
+            return copy(source, out)
+        left[0] -= 1
         out.write(b"{")
         raise KeyboardInterrupt
 
@@ -387,9 +396,10 @@ def test_issue_4363_ask_leaves_no_partial_record_when_copying_is_interrupted(tmp
     with pytest.raises(KeyboardInterrupt):
         verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher(seen, [holding(_row())]))
     held = seen[0].paths.out.parent
-    # 途中までの写しは残さず、移していない出力は起動ごとのディレクトリから回収できる
-    assert not (tmp_path / f"{held.name}.out").exists()
-    assert "verdicts" in (held / seen[0].paths.out.name).read_text(encoding="utf-8")
+    saved = tmp_path / f"{held.name}.out"
+    kept = saved if interrupts == 1 else held / seen[0].paths.out.name
+    assert "verdicts" in kept.read_text(encoding="utf-8")
+    assert (saved.exists(), held.exists()) == (interrupts == 1, interrupts == 2)
 
 
 @pytest.mark.parametrize("asked, resumed", [((), True), (("a.md#見出し",), False)], ids=["unsent-head", "other-sections"])
