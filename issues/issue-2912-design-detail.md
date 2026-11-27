@@ -78,7 +78,7 @@ experimental/ndf/
 | `plugins/ndf/contracts/worker/kinds.json` | 変更 | 検査の指摘を直す作業を足す | — | worker の作業の定義 | — |
 | `plugins/ndf/skills/design/SKILL.md` | 変更 | 手順 5・6 の委ね方の確かめを、読む形からコマンドへ変える | — | Skill の本文 | — |
 | `plugins/ndf/skills/design/references/decisions.md` | 変更 | 委ねる行の書き方（表の「判断」の文と番号を同じ行に書く）を定める | — | 参照文書 | — |
-| `experimental/ndf/mvv_replay.py` | 新設 | 過去の PR を指定の指示文で判定して数える。導入した版のゲートを、書き込みを捕まえて打つ | `ndf`（`--plugin-root` の下か、このリポジトリの `plugins/ndf/src`） | スクリプト | `main`・`judge_once`・`material_of`・`prompt_at`・`gate_once`・`GuardedApi`・`guarded_hub`・`guard_check`（新設） |
+| `experimental/ndf/mvv_replay.py` | 新設 | 過去の PR を指定の指示文で判定して数える。導入した版のゲートを、書き込みを捕まえて打つ | `ndf`（`--plugin-root` の下か、このリポジトリの `plugins/ndf/src`） | スクリプト | `main`・`judge_once`・`material_of`・`read_pairs`・`review_paths`・`prompt_at`・`gate_once`・`GuardedApi`・`guarded_hub`・`guard_check`（新設） |
 | `experimental/ndf/mvv_replay_cases/` | 新設 | 推定の扱いの有無だけが違う作り物の材料の対（要求仕様と設計書を 1 組にした材料を 2 つ） | — | 材料のファイル | — |
 | `plugins/ndf/tests/domains/records/test_design_check.py` | 新設 | 設計の検査の判定と集め方を縛る | `design_check_decide`・`design_check` | テスト | — |
 | `plugins/ndf/tests/domains/records/test_mvv_gate.py` | 変更 | 表の確かめの振る舞いを縛る | `mvv_gate` | テスト | — |
@@ -573,7 +573,9 @@ experimental/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `main` | `experimental/ndf/mvv_replay.py` | 新設 | `(argv: list[str]) -> int` | サブコマンド `material`（PR の材料を 1 回組んで保存する）、`judge`（保存した材料のファイルを指定の指示文で判定して数える）、`gate`（導入した版のゲートを打つ）、`guard-check`（GitHub へ送らずに差し替えの働きを確かめる）を受ける |
+| `main` | `experimental/ndf/mvv_replay.py` | 新設 | `(argv: list[str]) -> int` | サブコマンド `material`（PR の材料を 1 回組んで保存する）、`judge`（保存した材料のファイルを指定の指示文で判定して数える）、`bodies`（本文の確認に使う本文を読んで保存する）、`gate`（導入した版のゲートを打つ）、`guard-check`（GitHub へ送らずに差し替えの働きを確かめる）を受ける |
+| `read_pairs` | `mvv_replay.py` | 新設 | `(hub: GitHub, pairs: Sequence[tuple[str, str]], store: Path) -> dict[tuple[str, str], Optional[str]]` | （head の SHA, パス）の組の本文を、設計文書の決定 6 の「本文の読み取り」のとおりに読む。組の一覧を `github.graphql-batch` 件ずつに分け、1 つの分につき `aliased` を 1 回呼ぶ。組ごとの結果（「取得済み」と本文・「本文が無い」・「未取得」）を `store` へ書き、`store` にある「取得済み」と「本文が無い」の組は読まない。返す値は「取得済み」なら本文、ほかは None |
+| `review_paths` | `mvv_replay.py` | 新設 | `(hub: GitHub, prs: Sequence[ReviewTarget]) -> dict[int, list[tuple[str, str]]]` | 本文の確認で読む組を PR ごとに返す。PR が足したか変えたファイルすべてと、同じ課題の番号の要求仕様・設計書・詳細設計書（その PR で変えていないものも含む）である |
 | `prompt_at` | `mvv_replay.py` | 新設 | `(repo: Path, commit: Optional[str]) -> str` | 指示文を返す。`commit` があれば `git show <commit>:plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` を読み込んで `SYSTEM` を取り、無ければ読み込んだ `ndf` の `SYSTEM` |
 | `material_of` | `mvv_replay.py` | 新設 | `(hub: GitHub, g: Git, number: int) -> Optional[Material]` | 決定 5 の 4 つの順で、PR の材料の全文を組む。読んだベースと head の SHA、全文、全文の SHA-256 を返す。全文を取れなければ None。サブコマンド `material` が結果をファイルへ保存し、`judge` はこのファイルだけを読む（PR から組み直さない） |
 | `judge_once` | `mvv_replay.py` | 新設 | `(question: str, material: Material, model: str) -> dict[str, Any]` | `llm.ask` を、`--model` を足した `call` で 1 回呼び、回答と実行の情報（モデル ID・Claude Code のバージョン・指示文のコミット・材料のベースと head の SHA・材料のハッシュ）を返す |
@@ -595,10 +597,21 @@ experimental/ndf/
   - 通す経路: `Publisher.comment`（確認用 PR）、別の番号へのコメント、`Publisher` の課題の作成、`PATCH` による本文の書き換え、ラベルの付け替え（`POST .../labels`）、`mutation` を含む GraphQL、`artifact_zip` と同じく `api.request` を直接呼ぶ `GET`、`branch_file` の GraphQL の `query`
   - 合格: 作り物まで届いたのが `GET` と `query` の 2 件だけで、コメントの投稿は捕まり、ほかの書き込みはすべて `Refused` で拒まれた。合格しなければ終了コード 1 で、`gate` を打たない
 - `material_of`
-  - 表の確かめ: `material_of` は PR ごとに差分の設計成果物の（head の SHA, パス）の組を集めるだけで、本文を読まない。サブコマンド `material` が、対象のすべての PR の組をまとめて、設計文書の決定 6 の順 4 の「本文の読み取り」のとおりに読む（`github.graphql-batch` 件ずつの `aliased`、組ごとの「取得済み」「本文が無い」「未取得」の保存、未取得の組だけの 1 回の打ち直し）。組の結果がそろってから、PR ごとに `design_check_decide.redline_rows` を当て、`material_of` が返した `Material` の `tabled` を `_replace` で埋めてから保存する。指示文に依らないので、材料と一緒に 1 回だけ求める
+  - 表の確かめ: `material_of` は PR ごとに差分の設計成果物の（head の SHA, パス）の組を集めるだけで、本文を読まない。サブコマンド `material` が、対象のすべての PR の組をまとめて `read_pairs` で読む。組の結果がそろってから、PR ごとに `design_check_decide.redline_rows` を当て、`material_of` が返した `Material` の `tabled` を `_replace` で埋めてから保存する。指示文に依らないので、材料と一緒に 1 回だけ求める
   - `Material.tabled` の値: 「番号あり」は番号の空でないタプル、「番号なし」は空のタプル、「未確認」は None（組が 1 つでも「本文が無い」か「未取得」）。番号なしと未確認を同じ値にしない
+  - 材料に載せられない件: 材料を組むときに読んだ変えたファイルの一覧（`compare_files` の行）に、本番のゲートと同じ `mvv_material_decide.incomplete_patches` を当て、結果を `Material.incomplete` に入れて材料と一緒に保存する。ファイルごとの理由は、`patch` が無い（`changes` が 0 でない）か、行数が `PATCH_LINES` を超えるかで分ける。材料を組む 1 回の中で求めるので、判定も GitHub への要求も増えない。受け入れ条件 7 の値の横に記録する件数と、経路全体の値の試算に使い、合否には使わない
+- `read_pairs`
+  - 事後条件: `store` には、渡した組のすべてについて「取得済み」「本文が無い」「未取得」のどれかが書かれている。「本文が無い」は応答の `text` が null か `isTruncated` が真の組で、打ち直しても変わらないので読み直さない。「未取得」は、その組を載せた要求が `GitHubError` で失敗した組である
+  - 打ち直し: 同じ `store` で呼び直すと、「未取得」の組だけを読む。打ち直しは 1 回までとし、2 回目の呼び直しでも「未取得」が残れば、その組は最終の結果として「未取得」のままにする
+  - 分け方: 自分で `github.graphql-batch` 件ずつに分けてから `aliased` を呼ぶ。`aliased` は途中の要求が失敗すると、それまでに取れた本文も返さないためである。`aliased` の中でも同じ件数で分けるので、1 回の呼び出しは 1 回の要求になる
+- `review_paths`
+  - 処理: 課題の番号は、PR の差分の設計成果物の名前から `issue_docs.design_issues` で取る。PR ごとに head の `issues/` の一覧を `object(expression: "<head の SHA>:issues") { ... on Tree { entries { name } } }` で読み（`aliased` で PR をまとめて読む）、`issue-<番号>-requirements.md` と、`DESIGN_FILE` に当たり番号が重なる名前を選ぶ。PR が足したか変えたファイル（`status` が `removed` でない行）と合わせ、重複を除いて返す
+  - 使い方: サブコマンド `bodies` が、本文の確認に当てる PR（どちらかの側で `follow` で `boundary` が空になり、表の確かめが「番号なし」の PR）の組を `review_paths` で集め、`material` と同じ `store` を渡して `read_pairs` で読む。表の確かめで取得済みの組は読み直さない。本文の確認そのもの（承認が必要な操作を含むかの判断）は、リリース後テストの担当が保存した本文を読んで行い、実験版は判断しない
 - `main`
-  - 集計: 側ごとに、その側の判定が `follow` で `boundary` が空の PR を、設計文書の決定 6 の順 4 の「その側での扱い」の表に当てる。`Material.tabled` が空でないタプルなら省けない（表で止まる件）、None なら未確認、空のタプルなら本文の確認の結果で決める。確認後の件数は「省ける」の PR だけを数え、未確認の件数を併記する。片方の側の結果を、もう片方の側の件数から引かない。未確認の PR が残るときの合否は、設計文書の決定 6 の「未確認の PR があるときの合否」で決める。未確認の PR が、変更後の側ではすべて省けず変更前の側ではすべて省ける場合と、その逆の場合の 2 つで差を求める。2 つの差が同じ結論になるときだけ、その結論で合否を決め、違えば結論を保留する
+  - 集計: 設計文書の決定 6 の「件数と割合は 3 通り記録する」のとおり、判定上の値・確認後の値・経路全体の値を、側ごとに件数と 12 を分母にした割合で出す。合否に使うのは確認後の値だけである
+  - 判定上の値: その側の判定が `follow` で `boundary` が空の PR をすべて数える
+  - 経路全体の値: 両方の側で、`Material.incomplete` が空でない PR は省かない。そのうえで、`c93e690ed` の側は判定が `follow` で `boundary` が空の PR を数え、変更後の側はさらに `Material.tabled` が空のタプルの PR だけを数える。変更後の側で表の確かめが止めた件数（`incomplete` が空で、変更後の判定が `follow` で `boundary` が空で、`tabled` が空でないタプルか None の PR）を併記する。本文の確認の結果は使わない
+  - 確認後の値: 側ごとに、その側の判定が `follow` で `boundary` が空の PR を、設計文書の決定 6 の順 4 の「その側での扱い」の表に当てる。`Material.tabled` が空でないタプルなら省けない（表で止まる件）、None なら未確認、空のタプルなら本文の確認の結果で決める。確認後の件数は「省ける」の PR だけを数え、未確認の件数を併記する。片方の側の結果を、もう片方の側の件数から引かない。未確認の PR が残るときの合否は、設計文書の決定 6 の「未確認の PR があるときの合否」で決める。未確認の PR が、変更後の側ではすべて省けず変更前の側ではすべて省ける場合と、その逆の場合の 2 つで差を求める。2 つの差が同じ結論になるときだけ、その結論で合否を決め、違えば結論を保留する
   - 副作用: `--plugin-root` があれば、`<置き場>/src` を `sys.path` の先頭へ足してから `ndf` を読み込む。無ければこのリポジトリの `plugins/ndf/src` を足す
 
 ### 異常系の処理
@@ -611,6 +624,8 @@ experimental/ndf/
 | `gate_once` | 捕まえたコメントが 0 件 | 差し替えが働かない | 捕まえた件数 | 止める（「未確認」と記録する） | 結果のファイルと終了コード 1 | 直して打ち直す |
 | `gate_once` | 拒んだ要求が 1 件以上 | ゲートが想定の外の書き込みを試みた・許可の一覧が足りない | 拒んだ件数 | 止める（「未確認」と記録する）。拒んだ要求は GitHub へ届いていない | 結果のファイルと終了コード 1 | 一覧を見直し、`guard-check` から打ち直す |
 | `guard_check` | 書き込みが作り物まで届いた・コメントを捕まえない | 差し替えの抜け | 作り物が記録した要求 | 止める | 結果のファイルと終了コード 1 | 直して打ち直す |
+| `read_pairs` | 一部の要求が失敗した | GitHub の失敗・上限・権限 | `aliased` の `GitHubError` | その分の組を「未取得」として `store` に書いて続ける。ほかの分の結果は残す | 結果のファイルの組ごとの行 | 同じ `store` で 1 回だけ打ち直せる。残った組は表の確かめで「未確認」、本文の確認で「判断できない」になる |
+| `review_paths` | `issues/` の一覧を読めない | GitHub の失敗・head に `issues/` が無い | `aliased` の `GitHubError`・応答が Tree でない | その PR の同じ課題の文書を集めずに、PR が変えたファイルだけを返し、その PR に「一覧を読めない」と記録する | 結果のファイルの件ごとの行。その PR の本文の確認は「判断できない」になる | 再実行できる |
 | `main` | 材料が前の回と違う | 保存した材料のハッシュか、ベースと head の SHA が前の回と違う | 結果の集計 | その件を前の回と比べない | 標準エラーと結果のファイルの件ごとの行 | 同じ材料のファイルで打ち直す |
 | `prompt_at` | 指定のコミットを読めない | コミットが無い | `git show` の失敗 | 止める | 標準エラーと終了コード 2 | 取得してから打ち直す |
 
@@ -622,13 +637,18 @@ experimental/ndf/
 | 比べる PR の番号と、対照で挙がるべき番号 | 引数（`--prs`・`--expect`） | 実験版へ渡す。値は設計文書の決定 4・6 | — |
 | モデル | 引数（`--model`） | 実験版へ渡す | — |
 | 作り物の材料の対 | ファイル | `experimental/ndf/mvv_replay_cases/` | 対は 1 つ。「扱いあり」と「扱いなし」の 2 つの材料で、それぞれ要求仕様と設計書の 2 ファイル（設計書は同じ） |
-| `Material` | 型（NamedTuple: `base_sha: str`・`head_sha: str`・`text: str`・`sha256: str`・`tabled: Optional[tuple[str, ...]]`。None は表を確かめられなかった） | `mvv_replay.py` | — |
+| `Material` | 型（NamedTuple: `base_sha: str`・`head_sha: str`・`text: str`・`sha256: str`・`tabled: Optional[tuple[str, ...]]`・`incomplete: tuple[str, ...]`。`tabled` の None は表を確かめられなかった。`incomplete` は `incomplete_patches` の理由で、空なら差分の全体が材料に載る） | `mvv_replay.py` | — |
+| `ReviewTarget` | 型（NamedTuple: `number: int`・`head_sha: str`・`changed: tuple[str, ...]`。`changed` は削除を除く変えたファイルのパス） | `mvv_replay.py` | — |
+| 組ごとの読み取りの結果 | ファイル（組ごとに状態「取得済み」「本文が無い」「未取得」と、取得済みなら本文） | 引数 `--store` で渡す | — |
+| 本文の確認の結果 | ファイル（PR ごとに「含まない」「含む」「判断できない」と根拠。リリース後テストの担当が書く） | 引数 `--reviewed` で `judge` の集計へ渡す。無い PR は本文の確認が済んでいないものとして未確認に数える | — |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `material_of` | `mvv.compare_files`・`mvv_material_decide.patch_material` | `grep -n "def compare_files\|def patch_material" -r plugins/ndf/src/ndf/domains/records` | 使う。`patch_material` には `limit=None` を渡す |
+| `material_of` | `mvv.compare_files`・`mvv_material_decide.patch_material`・`mvv_material_decide.incomplete_patches` | `grep -n "def compare_files\|def patch_material\|def incomplete_patches" -r plugins/ndf/src/ndf/domains/records` | 使う。`patch_material` には `limit=None` を渡す。`incomplete_patches` は本番のゲートと同じ判定を引数を変えずに使う |
+| `read_pairs`・`review_paths` | `GitHub.aliased` | `grep -n "def aliased" -A6 plugins/ndf/src/ndf/adapters/github.py` | 使う。途中の失敗で一部の結果を返さないので、呼ぶ前に自分で件数ごとに分ける |
+| `review_paths` | `issue_docs.design_issues`・`DESIGN_FILE` | `grep -n "^def \|^[A-Z_]* =" plugins/ndf/src/ndf/core/issue_docs.py` | 使う。要求仕様の名前の定数は無いので、`issue-<番号>-requirements.md` の形をこの関数に書く |
 | `judge_once` | `llm.ask` の差し替え口 `call`（型 `Caller`） | `grep -n "def ask" -A8 plugins/ndf/src/ndf/adapters/llm.py` | 使う。`--model` を足す `call` を渡す |
 | `gate_once` | `mvv_gate.gate` の引数 `hub`（`OpenHub`）・`ask` と、環境変数 `NDF_MVV_STATE_DIR`（表 locations の `mvv-state`） | `grep -n "def gate(" -A8 plugins/ndf/src/ndf/domains/records/mvv_gate.py`・`grep -n "mvv-state" plugins/ndf/contracts/domains/locations.json` | 使う。書き込みの捕まえと記録の隔離を、ゲートを変えずに引数と環境変数で行う |
 | `prompt_at` | `mvv_material_decide.SYSTEM` | `grep -n "^SYSTEM" plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` | 使う。前の指示文はコミットの本文から同じ名前で取る |
