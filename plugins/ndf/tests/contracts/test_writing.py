@@ -35,16 +35,18 @@ def test_readers_section_is_cut_at_the_next_heading() -> None:
     assert [line for line in section.splitlines() if line.startswith("#")] == [writing.READERS_HEADING]
 
 
-def test_supplement_rule_is_only_the_paragraph_naming_the_supplement(criteria_file: Path) -> None:
-    rule = f"- {writing.SUPPLEMENT_NAME}の条件"
-    criteria_file.write_text(f"# 基準\n\n{writing.MULTIPLE_HEADING}\n\n{rule}\n- ほかの規則\n\n## 次の章\n", encoding="utf-8")
-    assert writing.supplement_rule() == rule
+def test_supplement_rules_are_only_the_marked_paragraphs(criteria_file: Path) -> None:
+    rules = [f"- {mark}の規則" for mark in writing.SUPPLEMENT_MARKS]
+    body = "\n".join([rules[0], "- ほかの規則", rules[1]])
+    criteria_file.write_text(f"# 基準\n\n{writing.MULTIPLE_HEADING}\n\n{body}\n\n## 次の章\n", encoding="utf-8")
+    assert writing.supplement_rules() == "\n".join(rules)
 
 
-def test_a_missing_supplement_paragraph_is_a_contract_error(criteria_file: Path) -> None:
-    criteria_file.write_text(f"# 基準\n\n{writing.MULTIPLE_HEADING}\n\n- ほかの規則\n", encoding="utf-8")
+@pytest.mark.parametrize("mark", writing.SUPPLEMENT_MARKS)
+def test_a_missing_supplement_paragraph_is_a_contract_error(criteria_file: Path, mark: str) -> None:
+    criteria_file.write_text(f"# 基準\n\n{writing.MULTIPLE_HEADING}\n\n- {mark}の規則\n", encoding="utf-8")
     with pytest.raises(contracts.ContractError, match="段落"):
-        writing.supplement_rule()
+        writing.supplement_rules()
 
 
 def test_types_section_keeps_subsections_and_reads_to_the_end(criteria_file: Path) -> None:

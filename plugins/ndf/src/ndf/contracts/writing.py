@@ -10,9 +10,9 @@ from ndf import contracts
 CRITERIA = "data/writing-criteria.md"
 # 文書の種類ごとの読み手のセクションの見出し
 READERS_HEADING = "### 文書の種類ごとの読み手"
-# 読み手が複数いる文書のセクションの見出しと、その中で補足の適用条件を持つ段落が書く見出しの名前
+# 読み手が複数いる文書のセクションの見出しと、その中で取り出す 2 つの段落が書く言葉（補足の適用条件、読み手を変えない規則）
 MULTIPLE_HEADING = "### 読み手が複数いる文書"
-SUPPLEMENT_NAME = "「エンジニア向けの補足」"
+SUPPLEMENT_MARKS = ("「エンジニア向けの補足」", "補足を除き")
 # 通じない文の 4 つの型と 2 つの区分のセクションの見出し
 TYPES_HEADING = "## 3. 読み手に通じない文の 4 つの型"
 _SECTION = "## "
@@ -35,17 +35,17 @@ def readers_section() -> str:
     return _section(READERS_HEADING, (_SECTION, _SUBSECTION))
 
 
-def supplement_rule() -> str:
-    """「エンジニア向けの補足」の適用条件の段落（読み手が複数いる文書のセクションのうち、補足の名前を書く行）。
-    見出しか段落が無ければ `CriteriaBroken`。
+def supplement_rules() -> str:
+    """読み手が複数いる文書のセクションのうち、「エンジニア向けの補足」の適用条件の段落と、補足を除き読み手を変えない段落
+    （`SUPPLEMENT_MARKS` の言葉を書く行）。見出しかどちらかの段落が無ければ `CriteriaBroken`。
 
-    補足をエンジニア向けに書けるのは、ほかの読み手が読まなくても判断できるときだけである。この条件が無いと、
-    読み手は見出しだけで補足の文への指摘を退ける。"""
+    適用条件が無いと、読み手は見出しだけで補足の文への指摘を退ける。読み手を変えない規則が無いと、本文の途中の読み手の指定を
+    根拠に、本文の文への指摘を退けうる。"""
     lines = _section(MULTIPLE_HEADING, (_SECTION, _SUBSECTION)).splitlines()[1:]
-    found = "\n".join(line for line in lines if SUPPLEMENT_NAME in line)
-    if not found:
-        raise CriteriaBroken(f"文書の基準 {CRITERIA} の「{MULTIPLE_HEADING}」に{SUPPLEMENT_NAME}の段落が無い")
-    return found
+    missing = [mark for mark in SUPPLEMENT_MARKS if not any(mark in line for line in lines)]
+    if missing:
+        raise CriteriaBroken(f"文書の基準 {CRITERIA} の「{MULTIPLE_HEADING}」に「{'」「'.join(missing)}」を書く段落が無い")
+    return "\n".join(line for line in lines if any(mark in line for mark in SUPPLEMENT_MARKS))
 
 
 def types_section() -> str:

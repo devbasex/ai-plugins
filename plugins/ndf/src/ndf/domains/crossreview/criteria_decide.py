@@ -283,7 +283,7 @@ def unit_block(role: str, unit: str) -> list[str]:
 
 def document_line(documents: bool, rows: Sequence[Mapping[str, Any]]) -> list[str]:
     """判定役の指示の「指摘の基準」に足す行（#4363）。文書を含む PR（`documents`）で、渡す指摘 `rows` に文書の指摘がありうる
-    ときは、文書の基準の 1 行と、文書の種類ごとの読み手のセクションと、補足の適用条件の段落（`writing.supplement_rule`）と、その行が指す 4 つの型と 2 つの区分のセクション。ほかは空で、
+    ときは、文書の基準の 1 行と、文書の種類ごとの読み手のセクションと、補足の扱いの段落（`writing.supplement_rules`）と、その行が指す 4 つの型と 2 つの区分のセクション。ほかは空で、
     基準を読めなければ `writing.CriteriaBroken`。4 つの型は想定した読み手で判定するので、読み手の表も渡す。
 
     文書の指摘がありうるのは、`path` が Markdown の指摘と、`path` の無い指摘（場所が分からないので含める）である。
@@ -294,7 +294,7 @@ def document_line(documents: bool, rows: Sequence[Mapping[str, Any]]) -> list[st
         _document_item(),
         _table()["document"]["excerpt"],
         writing.readers_section(),
-        writing.supplement_rule(),
+        writing.supplement_rules(),
         writing.types_section(),
     ]
 
