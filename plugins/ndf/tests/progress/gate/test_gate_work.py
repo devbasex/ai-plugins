@@ -14,7 +14,7 @@ import pytest
 from ndf import cli, contracts, identity
 from ndf.contracts import causes, result, worker_kinds, worker_paths
 from ndf.core import route, worker
-from ndf.progress import definition, gate, invoke, model
+from ndf.progress import command, definition, gate, invoke, model
 from ndf.progress.gate import entry
 
 KIND_KEYS = {"work", "summary", "skills", "excerpt", "inputs", "cwd", "outputs"}
@@ -483,19 +483,17 @@ def test_a_work_without_product_version_reads_no_settings(tmp_path, monkeypatch)
     assert "--require-version-number" not in gate.work_argv("fix", state, Path("/w"))
 
 
-def test_the_settings_at_the_repo_root_are_read_without_git(tmp_path, monkeypatch):
-    (tmp_path / ".ndf").mkdir()
-    (tmp_path / ".ndf" / "project.json").write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(Git, "run", lambda *_a, **_k: pytest.fail("git を起動しない"))
-    monkeypatch.setattr(branch_strategy, "load", lambda root: _strategy("none") if root == tmp_path else None)
-    assert entry._strategy_at(tmp_path).version_store == {"kind": "none"}
-
-
-def test_the_root_is_found_with_one_git_call_below_the_root(tmp_path, monkeypatch):
-    calls = []
+@pytest.mark.parametrize("read", [entry._strategy_at, command.strategy])
+def test_the_root_settings_are_read_even_when_the_subdirectory_has_its_own(tmp_path, monkeypatch, read):
+    # サブディレクトリに別の .ndf/project.json があっても、git が返したリポジトリの根の設定を読む（git の起動は 1 回）
+    sub = tmp_path / "sub"
+    (sub / ".ndf").mkdir(parents=True)
+    (sub / ".ndf" / "project.json").write_text("{}", encoding="utf-8")
+    calls, roots = [], []
     monkeypatch.setattr(Git, "run", lambda self, *args: calls.append(args) or f"{tmp_path}\n")
-    monkeypatch.setattr(branch_strategy, "load", lambda root: _strategy("none"))
-    assert entry._strategy_at(tmp_path / "sub") is not None and calls == [("rev-parse", "--show-toplevel")]
+    monkeypatch.setattr(branch_strategy, "load", lambda root: roots.append(root) or _strategy("none"))
+    assert read(sub).version_store == {"kind": "none"}
+    assert roots == [tmp_path] and calls == [("rev-parse", "--show-toplevel")]
 
 
 @pytest.mark.parametrize("error", [GitError("外"), branch_strategy.StrategyError("読めない"), OSError("無い")])

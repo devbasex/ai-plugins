@@ -154,12 +154,11 @@ def behavior_declared(cwd: Path) -> bool:
 
 
 def strategy_root(cwd: Path) -> Path:
-    """ブランチ戦略の設定を読むリポジトリの根。`cwd` が設定を持てばそのまま返し、`git` を起動しない。
+    """ブランチ戦略の設定を読むリポジトリの根（`git rev-parse --show-toplevel` を 1 回打つ）。`GitError` はそのまま上げる。
 
-    持たないときだけ `git rev-parse --show-toplevel` を 1 回打つ（#4513）。`GitError` はそのまま上げる。
+    `cwd` に `.ndf/project.json` があっても根とはみなさない。サブディレクトリに別の設定を置いたリポジトリで、そこから打っても
+    リポジトリの根の設定を読む（#4513）。根の解き方は `strategy` と `gate.entry._strategy_at` がここで共有する。
     """
-    if (cwd / branch_strategy.PROJECT).is_file():
-        return cwd
     return Path(Git(cwd).run("rev-parse", "--show-toplevel").strip())
 
 

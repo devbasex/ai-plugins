@@ -204,8 +204,8 @@ def _version_aware(kind: str) -> bool:
 def _strategy_at(workdir: Path) -> Optional[branch_strategy.Strategy]:
     """作業場所のリポジトリのブランチ戦略の設定。読めなければ None（バージョン番号を持つ扱い）。
 
-    作業場所が設定を持つリポジトリの根なら `git` を起動しない。無いときだけ `git rev-parse --show-toplevel` で根を決める
-    （根の解き方は `progress/command.py` の `strategy_root` だけに置く。#4513）。
+    根は `git rev-parse --show-toplevel` で決める。作業場所（`--cwd` は任意の場所を指せる）に `.ndf/project.json` があっても
+    根とはみなさない（根の解き方は `progress/command.py` の `strategy_root` だけに置く。#4513）。
     """
     try:
         return branch_strategy.load(command.strategy_root(workdir))
@@ -358,27 +358,40 @@ def released_outcome(work: str, saved: Mapping[str, Any], strategy: Optional[bra
         why = "承認を記録した時点で本番の届け先が 1 つに決まらず"
     detail = (
         f"オーガナイザーが出した後だが、{why}、このリリースの届け先が記録から確かめられない（worker を起動しない）。"
-        "設定を直して retry しても終わらない。次の操作: 実際の届け先を確かめ、次の形の JSON のファイルを用意する。"
-        "<…> の所は、実際の届け先の行と、ndf progress show <ID> の metrics.history でステップ release-mvv が書いた"
-        f"出力の事象にある mvv_gate のオブジェクトに置き換える: {json.dumps(manual_finish_example(recorded.version), ensure_ascii=False)}。"
-        "ndf progress check <ID> デプロイ --output <JSONファイル> で形を確かめてから、"
-        "ndf progress finish <ID> デプロイ --output <JSONファイル> --reason <理由> で工程を終える"
+        "設定を直して retry しても終わらない。次の操作: 実際の届け先を確かめ、次の JSON をファイルに書き、"
+        "ndf progress finish <ID> デプロイ --output <JSONファイル> --reason <理由> で工程を終える: "
+        f"{json.dumps(manual_finish_example(recorded.version), ensure_ascii=False)}。{MANUAL_FINISH_FILL}"
+        "finish は書く前に同じ確かめをし、合わなければ何も書かずに断る。書かずに形だけ確かめたいときは、"
+        "代わりに ndf progress check <ID> デプロイ --output <JSONファイル> を打てる"
     )
     return result.stopped(TOOL, "precondition", detail)
+
+
+# 手で終える出力の例（`manual_finish_example`）の置き換える所の説明。停止理由と詳細設計書が同じ説明を使う
+MANUAL_FINISH_FILL = (
+    "outputs.delivery は、実際の本番配布に対応する届け先のオブジェクト全体で置き換える"
+    "（.ndf/project.json の branch_strategy.release.deliveries の 1 行と同じ形）。"
+    "outputs.mvv_gate は、ndf progress show <ID> の metrics.history で payload.step が release-mvv の最後の記録から、"
+    "payload.report.outputs.mvv_gate をそのままコピーする。"
+)
 
 
 def manual_finish_example(version: str) -> dict[str, Any]:
     """届け先が記録から決まらずに止まったデプロイの工程を、`ndf progress finish` で手で終える出力の例（#4513）。
 
     工程の出力の規約（`stage-io.schema.json` の `stage-out`）が必須とする `summary`・`steps` と、デプロイの工程の `outputs` の
-    3 つ（`product_version`・`delivery`・`mvv_gate`）を持つ。`product_version` は記録済みの配布識別子を入れ、`<…>` の所は
-    利用者が置き換える。`finish` は文脈にある値で出力の欠けを補わないので、記録済みの `mvv_gate` も入れる。
+    3 つ（`product_version`・`delivery`・`mvv_gate`）を持つ。`product_version` は記録済みの配布識別子を入れる。`delivery` と
+    `mvv_gate` は値全体を置き換える印にする（届け先の一部だけを固定値で示すと、利用者が実際と違う属性を残しうる）。
+    `finish` は文脈にある値で出力の欠けを補わないので、記録済みの `mvv_gate` も入れる。
     """
-    delivery = {"target": "<届け先>", "kind": "<auto か manual>", "trigger": "<届ける契機>", "channel": "production", "versioned": False}
     return {
         "summary": "届け先を確かめてデプロイの工程を手で終えた",
         "steps": [],
-        "outputs": {PRODUCT_VERSION: version, DELIVERY: delivery, "mvv_gate": "<記録済みの mvv_gate のオブジェクト>"},
+        "outputs": {
+            PRODUCT_VERSION: version,
+            DELIVERY: "<実際の本番配布に対応する届け先のオブジェクト>",
+            "mvv_gate": "<記録済みの mvv_gate のオブジェクト>",
+        },
     }
 
 
