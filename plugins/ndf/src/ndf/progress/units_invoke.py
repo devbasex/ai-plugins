@@ -45,8 +45,12 @@ from ndf.testing import scoped
 REVIEWED_HEAD_FILE = "reviewed-head"
 STOPPED_HEAD_FILE = "stopped-head"
 MERGE_FILE = "merge.json"
-# 打ち直しの判定の、レビューのステップ（ほかのステップと停止理由の語は `resume_of` が持つ。定数にすると同じ語の別の事実と重なる）
+# 打ち直しの判定の、レビューのステップ（`resume_of` が使う）
 REVIEW_STEPS = frozenset({"review", "review-delta", "resolved"})
+# 打ち直しの判定の、マージだけを打ち直すマージの停止理由（CI の待ちと基盤の待ち）
+MERGE_ONLY_STOPS = frozenset({"ci_pending", "infra_wait"})
+# 打ち直しの判定の、テストより前のステップ（ここで止まった回は手元のテストから流し直さない）
+BEFORE_TEST_STEPS = frozenset({"work", "acceptance", "test", "test-repeat", "fix"})
 # 単位の PR で待つチェックの設定のキー（`workflow` の下。書かなければ `ci.required_checks` を読む。#4369 の決定 13）
 UNIT_CHECKS = "unit_required_checks"
 # `git ls-remote --exit-code` が、該当する ref が無いときに返す終了コード
@@ -386,19 +390,17 @@ def resume_of(state: RoundState, head: str, local_tests: bool) -> Resume:
     マージだけを打ち直すのは、マージが CI の待ち（マージキューの待ちを含む）か基盤の待ちで止まった回である。HEAD が変わった単位を
     手元のテストから流し直すのは、テストより後のステップで止まった回で、作業・受け入れ条件・テスト・修正で止まった回は含めない。
     """
-    merge_only = {"ci_pending", "infra_wait"}
-    before_test = {"work", "acceptance", "test", "test-repeat", "fix"}
     if not state.ran:
         return Resume("run", False, None)
     finished = state.done is not None and state.done.get("status") == result.OK
-    if finished and state.merge in merge_only and state.reviewed == head:
+    if finished and state.merge in MERGE_ONLY_STOPS and state.reviewed == head:
         return Resume("merge", False, None)
     step = _stopped_step(state.done)
     moved = state.stopped_head != head
     retest = "test" if local_tests else "push"
     if finished or step in REVIEW_STEPS:
         return Resume("run", True, retest if moved else "push")
-    if step is not None and step not in before_test and moved:
+    if step is not None and step not in BEFORE_TEST_STEPS and moved:
         return Resume("run", True, retest)
     return Resume("run", False, None)
 
