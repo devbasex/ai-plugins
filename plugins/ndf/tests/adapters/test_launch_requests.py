@@ -659,6 +659,9 @@ def test_a_rerun_without_rewriting_keeps_who_rewrote_the_target(tmp_path):
     assert _reflect(candidate, lambda: "別の人", SHA, "q9")
     done = la.read_launch_record(la.reflected_file(target, la.DONE))
     assert (done["approver"], done["route"]) == ("人", "terminal")
+    # 候補を片付けた後の打ち直しは、最初の反映の組でも、後から成功した再実行の組でも反映済みとして通す
+    assert la.reflected(candidate, SHA, None, target) and la.reflected(candidate, SHA, "q9", target)
+    assert not la.reflected(candidate, SHA, "q8", target)
 
 
 def test_reflect_returns_the_refusal_of_record_without_placing(tmp_path):

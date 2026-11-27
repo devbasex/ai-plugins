@@ -641,6 +641,7 @@ def reflect(
             "sha256": sha256,
             "request_id": request_id,
             "route": "answer" if request_id is not None else "terminal",
+            "confirmed": [[sha256, request_id]],  # 候補が無い打ち直しで照らす組。反映した人と経路（来歴）とは分けて足していく
         }
         if now != wanted and now != source.get("base"):
             return Reflection(False, saved)
@@ -652,9 +653,17 @@ def reflect(
             # 同じ候補・反映先・中身の完了の記録があれば、書き換えた人と経路の記録を、書き換えない再実行で上書きしない
             done = read_launch_record(reflected_file(target, DONE))
             kept = (done.get("candidate"), done.get("target"), done.get("content")) == (candidate.parent.name, str(target), wanted)
-            _after_reflect(target, candidate, {**done, "target": str(target)} if kept else rec)
+            _after_reflect(target, candidate, _confirmed_again(done, sha256, request_id) if kept else rec)
             return Reflection(True, saved)
         return _put_candidate(target, candidate, data, rec, saved)
+
+
+def _confirmed_again(done: Mapping[str, Any], sha256: str, request_id: Optional[str]) -> dict[str, Any]:
+    """反映した人と経路の来歴は残し、この再実行のハッシュとリクエストを、打ち直しで照らす組（`confirmed`）に足した完了の記録。"""
+    confirmed = _confirmed_pairs(done)
+    if [sha256, request_id] not in confirmed:
+        confirmed.append([sha256, request_id])
+    return {**done, "confirmed": confirmed}
 
 
 def _stale_reflect_input(candidate: Path, source: Mapping[str, Any], expected: Path, wanted: str) -> Optional[str]:
@@ -799,7 +808,19 @@ def _still_placed(rec: Optional[Mapping[str, Any]]) -> bool:
 
 
 def reflected(candidate: Path, sha256: str, request_id: Optional[str], target: Path) -> bool:
-    """候補が無い打ち直しで、今の作業場所の反映先 `target` の完了の記録と、反映先の中身を照らす。何も書かない。"""
+    """候補が無い打ち直しで、今の作業場所の反映先 `target` の完了の記録と、反映先の中身を照らす。何も書かない。
+
+    ハッシュとリクエストは、最初の反映と、反映先を書き換えずに成功した再実行の組（`confirmed`）のどれかと合えばよい。
+    """
     rec = read_launch_record(reflected_file(target, DONE))
-    key = (rec.get("candidate"), rec.get("target"), rec.get("sha256"), rec.get("request_id"))
-    return key == (candidate.parent.name, str(target), sha256, request_id) and _still_placed(rec)
+    if (rec.get("candidate"), rec.get("target")) != (candidate.parent.name, str(target)):
+        return False
+    return [sha256, request_id] in _confirmed_pairs(rec) and _still_placed(rec)
+
+
+def _confirmed_pairs(done: Mapping[str, Any]) -> list[list[Any]]:
+    """完了の記録の、打ち直しで照らす組の一覧。欄が無いか壊れていれば空。"""
+    pairs = done.get("confirmed")
+    if not isinstance(pairs, list):
+        return []
+    return [pair for pair in pairs if isinstance(pair, list)]
