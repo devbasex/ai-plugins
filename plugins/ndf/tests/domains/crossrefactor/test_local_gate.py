@@ -360,6 +360,8 @@ def test_a_restart_keeps_an_untracked_file_that_undoing_the_fix_would_overwrite(
     # 修正担当が範囲外のファイルを消してコミットした後に中断し、利用者が同じパスへ未追跡のファイルを書いた
     sh(w.work, "rm", "-q", "docs/old.md")
     sh(w.work, "commit", "-q", "-m", "rm")
+    # git rm は空になった docs/ も消すので、利用者が書く前に作り直す
+    (w.work / "docs").mkdir(exist_ok=True)
     (w.work / "docs/old.md").write_text("mine\n", encoding="utf-8")
     w.state["fixing"] = {"before": bad, "tip": w.tip, "labels": ["#1 unit"]}
     with pytest.raises(worktree.SyncRefused):
@@ -374,6 +376,8 @@ def test_a_restart_keeps_an_untracked_file_where_undoing_the_fix_needs_a_directo
     # 修正担当が範囲外のディレクトリを消してコミットした後に中断し、利用者が同じ名前で未追跡のファイルを書いた
     sh(w.work, "rm", "-q", "-r", "docs/old")
     sh(w.work, "commit", "-q", "-m", "rm")
+    # git rm は空になった docs/ も消すので、利用者が書く前に作り直す
+    (w.work / "docs").mkdir(exist_ok=True)
     (w.work / "docs/old").write_text("mine\n", encoding="utf-8")
     w.state["fixing"] = {"before": bad, "tip": w.tip, "labels": ["#1 unit"]}
     with pytest.raises(worktree.SyncRefused):
