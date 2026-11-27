@@ -1,4 +1,4 @@
-"""実装計画の単位の表の読み手（`ndf.core.plan.review_units_decide`）のテスト（#4369 の詳細設計の「単位の表の読み手」）。"""
+"""実装計画の単位の表の読み手（`ndf.core.plan.review_units_decide`）のテスト（docs/specifications/ndf-implement-stage-review-units.md の「単位の表の読み方」）。"""
 
 from __future__ import annotations
 

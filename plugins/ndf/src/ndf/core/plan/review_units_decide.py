@@ -1,7 +1,7 @@
-"""実装計画の「レビューの単位」の表の読み手（純粋な関数。#4369 の決定 2・7・9）。
+"""実装計画の「レビューの単位」の表の読み手（純粋な関数。docs/specifications/ndf-implement-stage-review-units-decisions.md の決定 2・7・9）。
 
-本文から単位の並びか、読めない理由を返す。ファイルも git も読まない。読み方は #4369 の設計書の「単位の表の読み方」と
-「順序」にあり、決めた形でない表は行を飛ばさず `UnitsUnreadable` で止める。実装計画の見出しの語もここが持つ。
+本文から単位の並びか、読めない理由を返す。ファイルも git も読まない。読み方は docs/specifications/ndf-implement-stage-review-units.md の
+「単位の表の読み方」と「順序と補った単位」にあり、決めた形でない表は行を飛ばさず `UnitsUnreadable` で止める。実装計画の見出しの語もここが持つ。
 見出し・表の範囲・コードブロックは markdown-it-py で読む（判断のモジュールは `ndf.adapters.markdown` を読めない）。
 表の範囲は Markdown の表のままで、行を打ち切らず飛ばさない。表の後ろの本文は空行で区切る。
 """

@@ -1,10 +1,10 @@
-"""工程「実装」を実装計画のレビューの単位ごとに流す処理（#4369 の詳細設計の「単位を流す処理」）。
+"""工程「実装」を実装計画のレビューの単位ごとに流す処理（docs/specifications/ndf-implement-stage-review-units.md）。
 
 ここにあるのは、開始前の確かめ（`prepare`）、打ち直しで単位の回をどう続けるかの判定（`round_state`・`resume_of`）と、
 単位を順に流す処理（`run_stage`。作業場所の用意・`impl`・マージ・スプリントの PR）である。
 開始前の確かめは、作業場所が今いるブランチをリモートから取得し、コミットされた実装計画に単位の見出しがあるかで経路を決める。
 単位の経路なら、手元をリモートに揃え、表をすべて読み、ブランチをリモートへ送ってから並びを `units.json` に書く。
-読み方と順序は設計書の「開始前の確かめ」、打ち直しの表は詳細設計書の「`resume_of` の判定表」にある。
+読み方と順序は docs/specifications/ndf-implement-stage-review-units.md の「開始前の確かめ」、打ち直しの表は同じ文書の「打ち直し」にある。
 
 `ndf.progress.invoke` を import しない（`invoke` がこのモジュールを呼ぶので、型は `plan_runs` が持つ）。プランを流すのと
 コマンドを打つのは `invoke` が渡す `Ports` を通す。`domains/` を import できないので、作業場所の用意は `ndf worktree create`、
@@ -126,7 +126,7 @@ class Context(NamedTuple):
 
 
 def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
-    """設計書の「開始前の確かめ」を行い、単位の経路なら並びを `work_dir/units.json` に書いて返す。これまでの経路なら None。
+    """docs/specifications/ndf-implement-stage-review-units.md の「開始前の確かめ」を行い、単位の経路なら並びを `work_dir/units.json` に書いて返す。これまでの経路なら None。
 
     これまでの経路では `units.json` に経路だけを書き、作業場所は変えない。止めるときは `UnitsStopped`（`units.json` を書かない）。
     git と GitHub の失敗のうちここで分けないものは、そのまま上げる（呼び手の `invoke.plan_failure` が分ける）。
@@ -381,7 +381,7 @@ def _stopped_step(done: Optional[Mapping[str, Any]]) -> Optional[str]:
 
 
 def resume_of(state: RoundState, head: str, local_tests: bool) -> Resume:
-    """打ち直しの扱い（詳細設計書の判定表。上の行を先に当てる）。`head` は、スプリントブランチをマージした後の単位の作業場所の HEAD。
+    """打ち直しの扱い（docs/specifications/ndf-implement-stage-review-units.md の「打ち直し」の表。上の行を先に当てる）。`head` は、スプリントブランチをマージした後の単位の作業場所の HEAD。
 
     マージだけを打ち直すのは、マージが CI の待ち（マージキューの待ちを含む）か基盤の待ちで止まった回である。HEAD が変わった単位を
     手元のテストから流し直すのは、テストより後のステップで止まった回で、作業・受け入れ条件・テスト・修正で止まった回は含めない。
@@ -608,7 +608,7 @@ def _fetch_sprint(g: Git, ctx: Context) -> str:
 
 
 def unit_worktree(ctx: Context, branch: str, ports: Ports) -> Path:
-    """単位の作業場所。スプリントブランチと単位のブランチを取得し直し、設計書の「単位のブランチと保存先」の表で用意する。
+    """単位の作業場所。スプリントブランチと単位のブランチを取得し直し、docs/specifications/ndf-implement-stage-review-units.md の「単位のブランチと作業場所」の表で用意する。
 
     既にある作業場所に未コミットの変更か進行中のマージがあれば、スプリントブランチのマージも `impl` もせずに止める（利用者の変更に触れない）。
     """
