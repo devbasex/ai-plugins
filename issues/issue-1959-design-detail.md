@@ -148,15 +148,16 @@ src/ndf/
 | `append` | 同 | 新設 | `append(repo: str, sha256: str, action: str, approver: Optional[str] = None, request_id: Optional[str] = None) -> dict` | 承認の記録へ 1 行足す |
 | `put_question` | 同 | 新設 | `put_question(request: Mapping, make_question: Callable[[], Mapping], candidate: Optional[Path] = None) -> Mapping` | 承認の依頼（識別子・リポジトリのキー・操作の種類・対象のハッシュ・反映先・反映元の版・候補・会話の id・日時）と、問いの中身のハッシュを残し、作った問いの中身を返す。候補があれば、候補のロックを取ってから、退避した候補を元の名前へ戻し、`make_question` を呼んで問いの中身を作り、依頼を追記する。`make_question` は `{"sha256": 承認の対象のハッシュ, "questions": 問いの中身}` を返し、依頼の対象のハッシュにはこの `sha256` を使う（候補を読んで求めるので、ロックの外では決めない）。この 3 つを同じロックの中で行うので、問いが示す候補は依頼を残すまで消えない。戻せる候補が無ければ、`make_question` を呼ばず、依頼も残さずに `precondition` で止める |
 | `record_answer` | 同 | 新設 | `record_answer(questions: Any, answers: Any, question_id: str, session: str) -> bool` | 残した問いと一致し、会話の id が依頼と同じ場合だけ、依頼の識別子を持つ答えを足す |
-| `approve_by_answer` | 同 | 新設 | `approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]` | `reflect` か自分が取ったロックの中で、依頼の答えを設計書の「人の確認」の条件の表で照らし、承認の行を足して承認者を返す。同じ依頼の承認の行があり承認済みなら、行を足さずに承認者を返す |
+| `approve_by_answer` | 同 | 新設 | `approve_by_answer(repo: str, sha256: str, request_id: str, history: Optional[_History] = None) -> Optional[str]` | `reflect` か自分が取ったロックの中で、依頼の答えを設計書の「人の確認」の条件の表で照らし、承認の行を足して承認者を返す。同じ依頼の承認の行があり承認済みなら、行を足さずに承認者を返す。`history` を渡されたら、その索引の依頼・答え・承認の記録を使い、読み直さない |
 | `pending_request` | 同 | 新設 | `pending_request(repo: str, target: Path) -> Optional[Mapping]` | その反映先で「承認する」と答えがあり、反映が済んでいない使える依頼を返す |
-| `consent_by_answer` | 同 | 新設 | `consent_by_answer(request_id: str, repo: str, sha256: str, target: Path, candidate: Optional[Path]) -> Optional[str]` | 依頼への「承認する」の答えを、今回の操作への人の同意として照らし、承認者を返す。依頼が無い、依頼のリポジトリ・操作・ハッシュ・反映先・候補のどれかが今回と違う、同じ反映先により新しい依頼がある、答えが「承認する」でなければ None。承認の行を足すかとは別に、設定を書き換えてよいかを決める。何も書かない |
+| `consent_by_answer` | 同 | 新設 | `consent_by_answer(request_id: str, repo: str, sha256: str, target: Path, candidate: Optional[Path], history: Optional[_History] = None) -> Optional[str]` | 依頼への「承認する」の答えを、今回の操作への人の同意として照らし、承認者を返す。依頼が無い、依頼のリポジトリ・操作・ハッシュ・反映先・候補のどれかが今回と違う、同じ反映先により新しい依頼がある、答えが「承認する」でなければ None。承認の行を足すかとは別に、設定を書き換えてよいかを決める。`history` を渡されたら、その索引を使い、依頼と答えの記録を読み直さない。何も書かない |
+| `answer_history` | 同 | 新設 | `answer_history() -> _History` | 依頼と答えの記録を 1 回ずつ読んだ索引を返す。承認の記録は、索引で初めて使うときに読む。承認の記録のロックの中で `consent_by_answer` と `approve_by_answer` に同じ索引を渡す。未承認の候補を反映するときに、依頼と答えの記録を 1 回ずつしか読まないためである |
 | `candidate_destination` | 同 | 新設 | `candidate_destination(candidate: Path) -> Optional[str]` | 候補の記録（`source.json`）が持つ反映先のパス。読めなければ None |
 | `new_candidate` | 同 | 新設 | `new_candidate(repo: str, target: Path) -> Draft` | `launch-candidates/<キーのハッシュ>/<一意な値>/` に候補（反映先の写し）と、反映先・反映元の版の記録を作る。その前に、設計書の「候補の掃除」のとおり、前の掃除が退避した候補を消すか元の名前へ戻し、片付けの条件（「承認しない」の依頼、反映先の worktree が無い、反映先が反映元の版から変わった）に当たる候補を退避し、反映先の worktree が無い完了の記録を消す。返す `Draft` は、作った候補のパス（`candidate`）と、掃除の後も元のパスに残った片付けの対象の一覧（`cleanup_targets`。形は `cleanup_targets` 関数と同じ）を持つ。一覧は掃除で求めた判定の結果から作り、依頼と回答の記録と候補の一覧を読み直さない |
 | `cleanup_targets` | 同 | 新設 | `cleanup_targets(repo: str) -> list[dict]` | 片付けの条件に当たるが元のパスに残っている候補のうち、利用者が消しても設定案と利用者の項目を失わないものを返す。対象は、比べる版のどれかと中身が一致し、ディレクトリの中に NDF が作ったファイルしか無い候補である。`new_candidate` が返す一覧は、同じ掃除で開いたままのファイルを見つけて元の名前へ戻した候補も外す。過去の反映先か `candidate.json` が普通のファイルでなく読めない候補は、その候補だけを判定から外し、ほかの候補の判定と呼び手の処理を続ける。依頼の否認、反映先の worktree の有無、反映先の版から、片付けの対象になり得る候補を絞り、当たらない候補のディレクトリは調べない。候補の中身が必要な判定では、先にディレクトリが NDF の作ったものだけかを確かめ、候補を読んでから、まだ使える依頼か、どの理由で片付けるかを確定する。履歴と反映先の版だけでまだ使える依頼と決まる候補は読まない。一覧を返す前に、候補のディレクトリの項目と、各項目の inode・大きさ・更新時刻が判定の時と同じかを照らし、変わった候補は載せない。判定に使った `source.json` と `candidate.json` は、リンクをたどらず、FIFO で待たずに開き、開いた記述子で普通のファイルと確かめてから読む。読んだファイルの inode・大きさ・更新時刻もこの照合に含める。設計書の「まだ使える依頼」がある候補は載せない（人が答えた後の `approve --candidate` がこの候補で承認を済ませるため）。答えが使えるかは `approve_by_answer` と同じ条件（`_lapsed`）で判定するので、取り消した依頼の候補は載る。答えで書いた承認の行がある依頼は、反映先が依頼の反映元の版か候補の今の中身と同じときだけ、まだ使える依頼とみなす。依頼の履歴と承認の記録は 1 回ずつ走査して索引を作り、承認の記録は照らす候補があるときにだけ読む。索引のキーに使う欄（依頼の識別子・反映先・候補・リポジトリのキー・ハッシュ）に、文字列でも null でもない値（配列など）がある行は、壊れた行として索引から外し、ほかの行で判定を続ける。各要素は `candidate`（候補ファイルのパス）と `reason`（片付けの理由。設計書の「候補の掃除」の `denied`・`worktree_gone`・`reflected`・`outdated`）を持つ。対象が無ければ空のリストを返す。何も書かない。`/proc` の無い環境では掃除が候補を退避しないので、`_show` がこの一覧を結果に載せる |
-| `reflect` | 同 | 新設 | `reflect(candidate: Path, record: Callable[[], None], sha256: str, request_id: Optional[str] = None, *, data: bytes, expected: Path) -> Reflection` | 承認の記録のロックの中で、候補の記録の反映先が `expected`（今の作業場所の `.ndf/launch.json`）と同じか、候補の今の中身が `data`（呼び手がハッシュを照らしたバイト列）と同じかを確かめ、違えば何も書かずに理由（`refusal`）付きで拒む。置くのは `data` で、候補を読み直さない。続けて `recover` を呼んでから、反映先を反映元の版と候補に照らす。版が同じなら `record` を呼び、設計書の「置き換えの手順」で置き、完了の記録を書いてから使えなくなった候補を消す。候補と同じなら完了の記録を書いて真、どちらでもないか途中で保存を見つけたら偽 |
+| `reflect` | 同 | 新設 | `reflect(candidate: Path, record: Callable[[], Optional[Mapping]], sha256: str, request_id: Optional[str] = None, *, data: bytes, expected: Path) -> Reflection` | 承認の記録のロックの中で、候補の記録の反映先が `expected`（今の作業場所の `.ndf/launch.json`）と同じか、候補の今の中身が `data`（呼び手がハッシュを照らしたバイト列）と同じかを確かめ、違えば何も書かずに理由（`refusal`）付きで拒む。置くのは `data` で、候補を読み直さない。続けて `recover` を呼んでから、反映先を反映元の版と候補に照らす。版が同じなら `record` を呼び、設計書の「置き換えの手順」で置き、完了の記録を書いてから使えなくなった候補を消す。`record` は、書き換えに同意した人（`approver`）と確認の経路（`route`。端末の入力は `terminal`、質問への答えは `question`）を返す。承認の行を書いたかにかかわらず、この 2 つを反映の途中の記録と完了の記録に入れる。候補と同じなら完了の記録を書いて真、どちらでもないか途中で保存を見つけたら偽 |
 | `recover` | 同 | 新設 | `recover(target: Path) -> Optional[Path]` | 承認の記録のロックの中で、設計書の「退避が残っている場合の判定」の表のとおりに退避と反映の途中の記録を片付ける。利用者の保存を別の名前で残した場合はそのパスを返す |
-| `reflected` | 同 | 新設 | `reflected(candidate: Path, sha256: str, request_id: Optional[str]) -> bool` | 候補が無い打ち直しで、完了の記録と反映先の中身を照らす。何も書かない |
+| `reflected` | 同 | 新設 | `reflected(candidate: Path, target: Path, sha256: str, request_id: Optional[str]) -> bool` | 候補が無い打ち直しで、今の作業場所の反映先 `target` の完了の記録と反映先の中身を照らす。ほかの作業場所の完了の記録は見ない。別の worktree で打ち直したときに、その作業場所へ反映していないのに「反映は済んでいる」と返さないためである。何も書かない |
 
 - このモジュールは hook から読むので、モジュールの頭では標準ライブラリと `identity` だけを読み込む
 - `append`・`put_question`・`record_answer`
@@ -239,7 +240,7 @@ src/ndf/
     1. まず反映先と候補の中身を比べる。同じなら置き換えはしない。人の同意を照らし、承認が要らないか承認済みなら、行を書かずに成功する。承認が要るのに未承認なら、人の確認を検証できた場合だけ承認の行を書いて成功し、検証できなければ拒む。利用者が候補と同じ設定を手で保存した場合と、置いた直後の中断の後がここに当たる。この判定を後に回すと、反映先が反映元の版から変わったとして拒み、許可が記録されないまま次の起動が止まる
     2. 中身が違い、反映先が候補を作った時点の版（反映元の版）から変わっていれば、行を足さず、置き換えずに拒む
     3. 中身が違い、反映先が反映元の版から変わっていなければ、人の同意と承認の状態を確かめる。同意が無ければ拒む。承認が要るのに未承認なら、人の確認を検証できた場合だけ承認の行を足し、検証できなければ拒む。行を足した後か、承認が要らないか承認済みなら、設計書の「置き換えの手順」で反映する
-  - 承認を確かめる関数は錠の中で呼ばれ、承認済みなら行を書かない。錠の外で承認済みと見た内容が錠を取るまでに取り消されていれば、人の確認が無い限り拒む。`NDF_AI_CHILD` があれば拒む。`--candidate` があるときは、今の `.ndf/launch.json` を設定として解析せず、版のハッシュだけを取る。候補のファイルが無ければ、`NDF_AI_CHILD` が無いことを確かめて `reflected` で判断し、人の確認を求めず、何も書かない（反映済みの確認で、書き換えないため）。`--candidate` が無いときは設定を書き換えないので、承認の行が要るときだけ人の確認を求める。このときも、承認の対象を読む前に `recover` を呼ぶ
+  - 承認を確かめる関数は錠の中で呼ばれ、承認済みなら行を書かない。錠の外で承認済みと見た内容が錠を取るまでに取り消されていれば、人の確認が無い限り拒む。`NDF_AI_CHILD` があれば拒む。`--candidate` があるときは、今の `.ndf/launch.json` を設定として解析せず、版のハッシュだけを取る。候補のファイルが無ければ、`NDF_AI_CHILD` が無いことを確かめて、今の作業場所の反映先を渡した `reflected` で判断し、人の確認を求めず、何も書かない（反映済みの確認で、書き換えないため）。`--candidate` が無いときは設定を書き換えないので、承認の行が要るときだけ人の確認を求める。このときも、承認の対象を読む前に `recover` を呼ぶ
   - 副作用: 承認の記録、`.ndf/launch.json`、候補の削除、標準入力の読み取り（端末のときだけ）
 - `_show`
   - 端末で承認する経路の確かめ方: 結果の `routes.approved` は、同じ候補を付けた `show` にする。その `show` は、反映したかを `reflected` で返す
@@ -247,11 +248,14 @@ src/ndf/
     - `reflected` が真なら、許可の状態（`required`・`approved`・`sha256`）は照らした反映先の設定から求める。反映で退避した候補は元の名前へ戻さない。偽なら、候補から求める
     - 承認の対象のハッシュは `permissions` と MCP の定義だけから求めるので、反映したかの確認には使わない（設定が無い状態と `{"version": 1}` の候補は同じハッシュになる）
     - `reflected` は、`--candidate` を付けた `show` のうち、質問を作らない結果（`--question` を付けない呼び出しと、端末のコマンドを返す結果）にだけ入れる。質問を作る結果には入れない。質問を作る結果を受けた手順は、反映したかを使わないためである
+    - 端末のコマンドを返す経路で `reflected` が真なら、端末のコマンドを返さず、`ok` と `reflected` を返す。候補の反映先は照らさない。端末で反映を済ませた利用者が同じ `show --question approve` を打ち直しても、1 回打った後と同じ結果になるようにするためである。反映先は、完了の記録がこの作業場所の反映先のものであることで確かめてある。片付けた候補の `source.json` を読むと、読めずに作業場所が違うとして拒んでしまう
   - 質問を出せるかの事前の確認: 読み手役の確認の記録（`ndf records reading add`）は、GitHub のリモートの `<所有者>/<リポジトリ>`（`Git.remote_repo()`）で記録する。`show` も `Git.remote_repo()` が求められるかで質問を出せるかを決める。求められない作業場所（リモートが無い・GitHub のリモートでないなど）では、記録を作れず質問を出しても止まるので、最初から端末のコマンドを返す
-    - 費用: 質問を作るたびに、`Git.remote_repo()` が `git worktree list` と `git remote get-url` で git を 2 回起動する
+    - 費用: 質問を作るたびに、`git remote get-url` で git を 1 回起動する。リモート名は `Git.remote_repo()` と同じく、メインディレクトリの `.ndf/worktree.json` の `remote` から求める。メインディレクトリは `la.repo_key` がすでに求めた git の共通ディレクトリの親なので、`git worktree list` は起動しない。共通ディレクトリの名前が `.git` でないとき（bare のリポジトリなど）だけ、`Git.remote_repo()` を呼び、git を 2 回起動する
     - 共有のモジュール（`adapters/git.py`・hook の `strict.py`・`records/reading.py`）は変えない。記録は `git remote get-url`（`insteadOf` を当てた後）の URL から、guard `reading-check` の照合は `.git/config` に書いた URL から識別子を求めるので、`insteadOf` でリモートの URL を書き換えるリポジトリでは 2 つが食い違って質問が止まり、リモートの URL を `include` で読み込む設定ファイルに書いたリポジトリでは guard が識別子を求められず、確かめずに通す。この食い違いは A2b の前からある、範囲の外の不具合として別の課題で直す
-  - 比べて採らなかった案は次の 2 つである
-    - 確かめずに質問を作り、`reading add` が拒んだら Skill が端末の経路へ切り替える: 拒まれた後に `show` を打ち直すので起動が増え、手順書の分岐も増える
+  - 比べて採らなかった案は次の 4 つである。git を 1 回起動するのは、記録の側と同じ判定を保つ案の中で起動が最も少ないためである
+    - 確かめずに質問を作り、`reading add` が拒んだら Skill が端末の経路へ切り替える: 利用者は質問に答えた後に止まり、端末の経路でやり直すことになる。拒まれた後に `show` を打ち直すので起動も増え、手順書の分岐も増える
+    - git を起動せず、`.git/config` に書いたリモートの URL を読む: 記録の側は `insteadOf` を当てた後の URL（`git remote get-url`）で識別子を求めるので、記録の側と判定が食い違う
+    - `Git.remote_repo()` をそのまま呼ぶ: `git worktree list` の分だけ起動が 1 回多い。メインディレクトリは `la.repo_key` の結果から求められるので、起動する理由が無い
     - 記録・guard・`show` が同じ識別子を求める関数を共有のモジュールに足す: 単位 A2b の範囲（`launch-config` のコマンドと Skill）の外の変更になる
 - `delegate_run_cli.main`
   - 事後条件: 成功すると戻らず、CLI がこのプロセスを置き換える。失敗は `InternalError` をここで受け、標準エラーへ書いて 0 以外で終える（`ndf.cli` の結果 JSON が標準出力へ出ないようにする）
@@ -268,7 +272,7 @@ src/ndf/
 | `_approve` | 反映先が変わった | 候補を作った後の別の作業の保存 | `reflect` | 止める | `stopped`・`refused`。候補を作り直すよう載せる | 行も反映もしない。`draft` からやり直す |
 | `_show`・`_approve` | 候補の反映先がこの作業場所でない | 別の作業場所で作った候補を渡した | 質問を作る前（錠の中）と、反映の前と `reflect` の錠の中 | 止める | `stopped`・`refused` | 質問も行も反映もしない。この作業場所で `draft` からやり直す |
 | `_approve` | 照らした後に候補が変わった | ハッシュを照らしてから錠を取るまでの候補の編集 | `reflect` の錠の中 | 止める | `stopped`・`refused` | 行も反映もしない。示し直して承認を取り直す |
-| `_approve` | 反映できない | `.ndf/launch.json` の名前の変更か書き込みの失敗 | `reflect` | `recover` で片付けて呼び出し元へ返す | `stopped`・`precondition`。承認の行は残る | 同じコマンドを打ち直すと、承認済みなので置き換える |
+| `_approve` | 反映できない | `.ndf/launch.json` の名前の変更か書き込みの失敗 | `reflect` | `recover` で片付けて呼び出し元へ返す | `stopped`・`precondition`。承認の行は残る | 同じコマンドを打ち直せる。起動の許可が承認済みでも、書き換えへの人の確認はやり直す。端末では、名前とハッシュの先頭 8 文字をもう一度入力する。質問への答えでは、`consent_by_answer` がその答えを今も使えるか（同じ反映先により新しい依頼が無いかなど）を確かめる。確認が取れたときだけ置き換える |
 | `_approve` | 置き換えの間に保存された | 利用者の手の保存 | `reflect` | 保存された中身を残して止める | `stopped`・`refused`。別の名前で残した場合はそのパスを載せる | 承認の行は残る。`draft` からやり直す |
 | `_approve` | 候補が無く、反映も確かめられない | 完了の記録が無いか、反映の後に設定が変わった | `reflected` | 止める | `stopped`・`refused` | 何も書かない。`draft` からやり直す |
 | `_confirm_terminal` | 打ち間違い・中断 | ハッシュの不一致、EOF | 入力の比較 | None を返す | 呼び出し元が拒む | 打ち直せる |
