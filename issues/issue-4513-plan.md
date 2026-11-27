@@ -68,12 +68,12 @@
 
 ### Task 4: 記録済みの値を `values.json` で渡し、worker を起動せずに終える
 
-- **対象ファイル:** `contracts/worker_kinds.py`（`Recorded`・`write_released`・`released_of`・`write_values`）・`progress/run.py`（`StageAnswers`・`released_answer`・`approved_seen`・`_prepare`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`core/route/__init__.py`（`_built`・`rendered`・`render`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`progress/gate/release.py`（`release_store_of`・`_released`・`take_reply`）・`progress/gate/answering.py`（`Answer.release_store`・`_outputs`）・`domains/release/forms_decide.py`（`reaches`・`production_delivery`）・`tests/progress/gate/test_gate_release.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
-- **変更内容:** 詳細設計書の「値のファイル」「工程の進行: 記録済みの値の読み方」「worker の起動」の記録済みの値の分と、「オーガナイザーの承認と一緒に届け先を記録する」
+- **対象ファイル:** `contracts/worker_kinds.py`（`Recorded`・`write_released`・`released_of`・`write_values`）・`progress/run.py`（`StageAnswers`・`released_answer`・`approved_seen`・`_prepare`・`_run_step`）・`progress/invoke.py`（`StageRun.released`・`PreparedPlan.released`・`PreparedPlan.uses_released`・`uses_released`・`prepare_plan`・`_prepared`・`plan_path`）・`core/route/__init__.py`（`_built`・`rendered`・`render`）・`progress/gate/entry.py`（`released_outcome`・`Released`・`_work_handoff`・`_cmd_work`）・`progress/gate/release.py`（`release_store_of`・`_released`・`take_reply`）・`progress/gate/answering.py`（`Answer.release_store`・`_outputs`）・`domains/release/forms_decide.py`（`reaches`・`production_delivery`）・`tests/progress/gate/test_gate_release.py`・`skills/release/SKILL.md`・`references/release-steps.md`・`skills/development-workflow/references/parallel.md`
+- **変更内容:** 詳細設計書の「値のファイル」「工程の進行: 記録済みの値の読み方」「worker の起動」の記録済みの値の分と、「オーガナイザーの承認と一緒に届け先を記録する」。工程の初回は `prepare_plan` の判定を `PreparedPlan.uses_released` で `plan_path` へ引き継ぎ、作業の一覧を取り直すのは保存済みの `values.json` からプランを再開する回だけにする。承認の時点の種類が `unknown` で worker を起動しないときは、Task 2 の形の確かめの指示も出さない
 - **満たす受け入れ条件:** 1・2
 - **進め方:**
   1. Task 3 のテストを通す
-  2. 設計書のテスト設計の決定 2・3 と条件 1 の行を足して通す。届け先の記録（承認を記録した時点で 1 行に決まって文脈の形に合うときだけ記録し、記録が無ければ worker を起動せずに `stopped`。止まった後に設定を直して retry しても `stopped` のまま）、承認の時点の種類（`none` ならデプロイの工程の時点で設定を読めなくても worker を起動しない。`unknown` なら `stopped`）、履歴の走査が 1 周を超えないこと、利用者の承認の回で worker を起動すること、前の `values.json` が残った retry、ハイフンと波括弧を含む値である
+  2. 設計書のテスト設計の決定 2・3 と条件 1 の行を足して通す。届け先の記録（承認を記録した時点で 1 行に決まって文脈の形に合うときだけ記録し、記録が無ければ worker を起動せずに `stopped`。止まった後に設定を直して retry しても `stopped` のまま）、承認の時点の種類（`none` ならデプロイの工程の時点で設定を読めなくても worker を起動しない。`unknown` なら `stopped`）、履歴の走査が 1 周を超えないこと、工程の初回の `plan_path` が作業の一覧を取り直さず `prepare_plan` の判定を使うこと、利用者の承認の回で worker を起動すること、前の `values.json` が残った retry、ハイフンと波括弧を含む値である
   3. 整理
 
 ### Task 5: 値をそろえた判断の求めへの承認で終わることを再現し、`gate` の出力を引き継ぐ
