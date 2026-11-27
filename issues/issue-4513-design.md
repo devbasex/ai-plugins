@@ -69,7 +69,7 @@ graph TD
 | 実行の保存先の値のファイル（`values.json`。形の定義は `src/ndf/contracts/worker_kinds.py`） | 差し込みの値とは別に、任意のキー `released_version`・`released_delivery`・`released_store` で記録済みの値（配布識別子、承認と一緒に記録した届け先、承認の時点のバージョンの保存先の種類）を持つ |
 | 工程の進行（`progress/invoke.py`・`progress/run.py`） | 直近のリリース承認ゲートの回答がオーガナイザーの承認なら、その回答が書いた `product_version`・`delivery`・`release_store` を `values.json` に書く（選び方は「記録済みの値の読み方」）。出力の足りない承認の失敗の理由を組み立てる |
 | 工程の定義の読み手（`progress/definition.py`） | ステップの出力の規約が `outputs` に必須とするキーの名前を返す |
-| オーガナイザーの承認の記録（`progress/gate/release.py`・`domains/release/forms_decide.py`） | オーガナイザーの承認をリリース承認ゲートの回答として書くとき、バージョンの保存先が `none` なら、その時点の設定から本番の届け先を 1 行に決めて `delivery` も書く（「`delivery` は、その配布の記録から読み」の段落）。あわせて、その時点のバージョンの保存先の種類（`none`・`versioned`・設定を読めなければ `unknown`）を `release_store` として同じ事象に書く |
+| オーガナイザーの承認の記録（`progress/plan/cli.py`・`progress/plan/__init__.py`・`progress/gate/release.py`・`core/production_merge.py`） | オーガナイザーがまとめたリリースの回答を記録するとき、配布したリポジトリの設定から、バージョンの保存先の種類（`none`・`versioned`・設定を読めなければ `unknown`）を決めて回答に残す。種類が `none` なら、本番の届け先も 1 行に決めて残す（「`delivery` は、その配布の記録から読み」の段落）。レーンは、回答をリリース承認ゲートの回答として書くとき、残った届け先を `delivery` に、種類を同じ事象の `release_store` に書く |
 | worker の起動（`progress/gate/entry.py`） | 記録済みの値があれば、承認の時点の種類（`release_store`）で決める。`none` なら worker を起動せずに記録済みの値で終え、`unknown` なら worker を起動せずに止める。種類が記録に無い（この変更の前に承認された）か記録済みの値が無いときだけ、作業の時点のバージョンの保存先の種類を読む。worker を起動するときは、返す値の形を起動指示と確かめの引数に入れる |
 | worker の結果の確かめ（`core/worker.py`・`core/worker_outcome.py`） | 必須の `outputs` を、結果 JSON の定義に加えて文脈の定義でも確かめる。指定されたときだけ、`product_version` がバージョン番号の形かも確かめ、違えば欠けにする。判断を求めた結果（`gate`）にも、確かめを通った必須の `outputs` を引き継ぎ、足りない必須の名前を `metrics.missing_outputs` に載せる |
 | プランの遷移（`core/plan/steps.py`・`transition_decide.py`・`runner.py`） | 承認ゲートで終わる結果の要約に止まったステップの要約を含め、そのステップの `metrics.missing_outputs` を結果に引き継ぐ |
@@ -101,13 +101,14 @@ graph TD
 
 **`delivery` は、その配布の記録から読み、デプロイの工程の時点の設定からは選ばない。** 設定は後から直せるので、今の設定は、過去にどこへ配布したかを確かめた根拠にならないためである（Value 13）。たとえば、配布の時点で本番の届け先が A と B の 2 つあり、止まった後に設定から B を外して retry すると、今の設定から選ぶ形では、同じ配布識別子に A だけが実績として残ってしまう。
 
-そこで、届け先は、オーガナイザーの承認をリリース承認ゲートの回答として書くとき（`gate/release.py` の `take_reply`）に 1 度だけ決める。決めた届け先は、`product_version` と同じ出力の事象に `delivery` として書く。決め方は次のとおりである。
+そこで、届け先は、オーガナイザーがまとめたリリースの回答を記録するとき（`ndf lanes release`。`progress/plan/cli.py`）に 1 度だけ決め、回答に残す。この時点の設定は、オーガナイザーが配布に使った設定である。レーンは、回答をリリース承認ゲートの回答として書くとき（`gate/release.py` の `take_reply`）に、回答に残った届け先を `product_version` と同じ出力の事象に `delivery` として書き、回答を取り込む時点の設定では決め直さない。取り込むまでに設定が変わると、配布していない届け先を記録してしまうためである。決め方は次のとおりである。
 
-1. 回答を書く時点の設定（ステートマシンの保存先のリポジトリの `.ndf/project.json`）を `branch_strategy.load` で読む。バージョンの保存先の種類が `none` のときだけ決める（`none` 以外は worker が `delivery` を返す）
-2. 配列 `branch_strategy.release.deliveries` から本番に届く要素を選ぶ。本番に届く要素は、`channel` が `production` か、省略か `null` の要素である（承認資料の `forms_decide.deliveries_of` が本番チャネルを選ぶ条件と同じ）。配列の順番は使わない
+1. `ndf lanes release` を打った作業ディレクトリ（配布したリポジトリ）の根の `.ndf/project.json` を `branch_strategy.load` で読む。Git の保存先の位置から設定の場所を逆算しない。`git clone --separate-git-dir` で Git のデータを別の場所に置くと、保存先の親が作業ディレクトリにならないためである。バージョンの保存先の種類が `none` のときだけ届け先を決める（`none` 以外は worker が `delivery` を返す）
+2. 配列 `branch_strategy.release.deliveries` から本番に届く要素を選ぶ。本番に届く要素は、`channel` が `production` か、省略か `null` の要素である。この条件は `core/production_merge.py` の `on_channel` だけに置き、`ndf ci merge` と hook の判定、承認資料の届け先（`forms_decide.reaches`）も同じ関数を使う。配列の順番は使わない
 3. 本番に届く要素が 1 つで、文脈の `delivery` の形に合うときだけ記録する。確かめるときは、文脈のスキーマ（`context.schema.json`）の全体へ `{"delivery": 要素}` を渡す。`$defs/delivery` だけを指定しない（理由は詳細設計の「オーガナイザーの承認と一緒に届け先を記録する」）。設定の形は `target`・`trigger` に空文字列を許すが、文脈の形は 1 文字以上を求める
-4. 0 か 2 つ以上か、形に合わないか、設定を読めないときは、`delivery` を記録しない。承認の回答そのものは断らない
-5. 承認の回答では、届け先を記録したかに関わらず、回答を書く時点のバージョンの保存先の種類を、同じ事象の `release_store` に書く。`none`・`versioned`（`none` 以外）・`unknown`（設定を読めない）のどれかである
+4. 0 か 2 つ以上か、形に合わないか、設定を読めないときは、`delivery` を記録しない。回答そのものは断らない
+5. 回答には、届け先を記録したかに関わらず、記録する時点のバージョンの保存先の種類を `store` として残す。`none`・`versioned`（`none` 以外）・`unknown`（設定を読めない）のどれかである。レーンは、この値を承認の回答と同じ事象の `release_store` に書く
+6. 外のオーガナイザー（Factory のランナーなど）は、回答のファイル `answers/<id>.json` に同じ `store` と `delivery` を書ける。書かなければ、種類は記録に無いもの（この変更の前に承認された記録と同じ扱い）になり、届け先も記録されない
 
 **worker を起動するかは、承認の時点の種類で決め、デプロイの工程の時点の設定で決め直さない。** `none` の配布はオーガナイザーが済ませているので、デプロイの工程の時点で設定を読めないからといってバージョン番号を持つ扱いに落とすと、worker が起動して同じものをもう一度出す（決定 2）。`ndf answer work` は、この記録を `values.json` 経由で受け取る（「記録済みの値の読み方」）。
 

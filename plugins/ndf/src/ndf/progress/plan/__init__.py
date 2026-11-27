@@ -25,7 +25,8 @@ import sqlalchemy as sa
 from ndf import cli as top
 from ndf import contracts
 from ndf.contracts import internal, limits, named_cap, result
-from ndf.contracts.worker_kinds import PRODUCT_VERSION
+from ndf.contracts.worker_kinds import PRODUCT_VERSION, store_kind_of
+from ndf.core import branch_strategy, production_merge
 from ndf.progress import lane, model, store
 from ndf.progress.lane import launch, liveness, machine
 
@@ -291,12 +292,28 @@ RELEASE_RESULTS = (RELEASED, REJECTED)
 
 @dataclass(frozen=True)
 class ReleaseAnswer:
-    """まとめたリリースの回答。`result` は released か rejected、`version` と `release` は出したバージョンとリリース記録の PR。"""
+    """まとめたリリースの回答。`result` は released か rejected、`version` と `release` は出したバージョンとリリース記録の PR。
+
+    `store` と `delivery` は、オーガナイザーが配布したリポジトリの設定から記録の時点に決めた、バージョンの保存先の種類
+    （`none`・`versioned`・`unknown`）と本番の届け先の 1 行（#4513）。レーンは回答を取り込む時点の設定で決め直さない。
+    """
 
     result: str
     reason: str
     version: Optional[str] = None
     release: Optional[str] = None
+    store: Optional[str] = None
+    delivery: Optional[dict[str, Any]] = None
+
+
+def released_where(strategy: Optional[branch_strategy.Strategy]) -> tuple[str, Optional[dict[str, Any]]]:
+    """配布したリポジトリの設定 `strategy`（読めなければ None）から決まる、バージョンの保存先の種類と本番の届け先の 1 行（#4513）。
+
+    届け先は種類が `none` で、本番に届く行が 1 つに決まるときだけ返す（`none` 以外は worker が `delivery` を返す）。
+    """
+    kind = store_kind_of(None if strategy is None else strategy.has_version_number)
+    row = production_merge.production_delivery(strategy.section) if strategy is not None and not strategy.has_version_number else None
+    return kind, row
 
 
 def release_answer_errors(result: str, version: Optional[str]) -> list[str]:
@@ -328,7 +345,9 @@ def record_release(conn: sa.Connection, pid: str, keys: list[str], answer: Relea
     view, _ = lane.read_plan(conn, pid)
     for key in keys:
         _check_request(view, key)
-    done = {"result": answer.result, "version": answer.version, "release": answer.release, "batch": list(keys)}
+    done: dict[str, Any] = {"result": answer.result, "version": answer.version, "release": answer.release, "batch": list(keys)}
+    if answer.result == RELEASED:
+        done.update({k: v for k, v in (("store", answer.store), ("delivery", answer.delivery)) if v is not None})
     drafts = [model.EventDraft("request_closed", "organizer", key, reason=answer.reason, payload={"release": done}) for key in keys]
     _append(conn, pid, drafts)
 

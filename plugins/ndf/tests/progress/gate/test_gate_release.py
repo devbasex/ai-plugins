@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from dataclasses import replace
 
@@ -290,8 +291,9 @@ def test_current_a_rejection_closes_the_open_plan_request_once(st, lane_sprint, 
 
 from ndf.contracts import result, worker_kinds  # noqa: E402
 from ndf.core import branch_strategy  # noqa: E402
-from ndf.progress import invoke  # noqa: E402
+from ndf.progress import command, invoke  # noqa: E402
 from ndf.progress.gate import entry  # noqa: E402
+from ndf.progress.plan import cli as plan_cli  # noqa: E402
 from result_json import last_result  # noqa: E402
 
 from .conftest import lanes as gate_lanes  # noqa: E402
@@ -305,21 +307,45 @@ def _strategy(kind: str, rows=(ROW,)) -> branch_strategy.Strategy:
 
 
 def _organizer_released(st, lane_sprint, flow, monkeypatch, strategy, version=DIST):
-    """オーガナイザーが `version` を記録して承認するまで流す。承認を記録する時点の設定は `strategy`（例外なら読めない）。"""
+    """オーガナイザーが `version` を記録して承認するまで流す。配布したリポジトリの設定は `strategy`（例外なら読めない）。
 
-    def load(_root):
-        if isinstance(strategy, Exception):
-            raise strategy
-        return strategy
-
-    monkeypatch.setattr(branch_strategy, "load", load)
+    届け先と保存先の種類はオーガナイザーが記録の時点に決める。レーンが回答を取り込むときは設定を読まない（#4513）。
+    """
     pid, tid = lane_sprint()
     q = _at_release(st, tid, flow)
     sent = gate.request_release(st, run.read(st, tid), q, {})
+    store_kind, row = plan.released_where(None if isinstance(strategy, Exception) else strategy)
+    answer = plan.ReleaseAnswer(plan.RELEASED, "出した", version, "https://x/pull/9", store_kind, row)
     with store.transaction(st) as conn:
-        plan.record_release(conn, pid, [sent["request"]], plan.ReleaseAnswer(plan.RELEASED, "出した", version, "https://x/pull/9"))
-    assert gate.take_reply(st, tid, {})["status"] == "ok"
+        plan.record_release(conn, pid, [sent["request"]], answer)
+    with monkeypatch.context() as m:
+        m.setattr(branch_strategy, "load", lambda _root: pytest.fail("回答を取り込む時点の設定を読まない"))
+        assert gate.take_reply(st, tid, {})["status"] == "ok"
     return tid
+
+
+@pytest.mark.parametrize(
+    ("found", "want"),
+    [
+        (_strategy("none"), ("none", ROW)),
+        (_strategy("plugin_json"), ("versioned", None)),
+        (command.FactUnknown("読めない"), ("unknown", None)),
+    ],
+)
+def test_the_organizer_records_the_delivery_from_the_directory_it_released_from(monkeypatch, tmp_path, found, want):
+    # ndf lanes release は打った作業ディレクトリの設定から決める（Git の保存先の位置から設定の場所を逆算しない）
+    seen = []
+
+    def strategy(cwd):
+        seen.append(cwd)
+        if isinstance(found, Exception):
+            raise found
+        return found
+
+    monkeypatch.setattr(command, "strategy", strategy)
+    a = argparse.Namespace(result=plan.RELEASED)
+    plan_cli._read_delivered(a, tmp_path)
+    assert a.delivered == want and seen == [tmp_path]
 
 
 def test_the_organizers_approval_records_the_delivery_and_the_store_kind_without_a_version_number(st, lane_sprint, flow, monkeypatch):

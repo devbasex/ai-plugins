@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -15,7 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.contracts.worker_kinds import DELIVERY, PRODUCT_VERSION, store_kind_of
-from ndf.core import branch_strategy, production_merge
+from ndf.core import production_merge
 from ndf.progress import lane, model, plan, run, store
 from ndf.progress.gate.answering import Answer, Observe, Post, answer, no_observe, no_post
 from ndf.progress.gate.asking import (
@@ -130,43 +129,40 @@ def _organizer_reply(st: store.Store, q: Question, env: Mapping[str, str]) -> Op
     return dict(held.release) if held is not None and held.release is not None else None
 
 
-log = logging.getLogger(__name__)
-
 # まとめたリリースの回答のキー → スプリントの文脈のキー（デプロイの出力）
 RELEASED_OUTPUTS = {"version": PRODUCT_VERSION, "release": "release_pr"}
+# 回答に残せるバージョンの保存先の種類（`ndf lanes release` が記録し、外のオーガナイザーは回答のファイルに書ける）
+RELEASE_STORES = (store_kind_of(False), store_kind_of(True), store_kind_of(None))
 
 
-def _released(reply: Mapping[str, Any], value: str, strategy: Optional[branch_strategy.Strategy] = None) -> dict[str, Any]:
+def _recorded_where(reply: Mapping[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    """オーガナイザーが配布の記録に残した、バージョンの保存先の種類と本番の届け先の 1 行（#4513）。
+
+    レーンが回答を取り込む時点の設定で決め直さない（その間に設定が変わると、配布していない届け先を記録する）。種類が 3 つの語の
+    どれでもなければ記録されていないもの（None）とし、届け先は種類が `none` で文脈の `delivery` の形に合うときだけ返す。
+    """
+    kind = reply.get("store")
+    known = kind if kind in RELEASE_STORES else None
+    row = reply.get("delivery")
+    if known != store_kind_of(False) or not isinstance(row, Mapping) or not production_merge.fits_context(row):
+        return known, None
+    return known, dict(row)
+
+
+def _released(reply: Mapping[str, Any], value: str) -> dict[str, Any]:
     """出した回答が持つバージョンとリリース記録の PR（文脈の `product_version`・`release_pr`）。後の工程（閉じ・リリース後テスト）は
     文脈から読み、リリースの PR を探さない（#2783）。承認しない回答や、値の無いキーは書かない。
 
-    バージョン番号を持たないリポジトリ（`strategy` の保存先の種類が `none`）では、本番に届く行が 1 つに決まれば届け先 `delivery`
-    も足す。デプロイの工程はこの記録だけから `delivery` を返し、worker を起動しない（#4513）。決まらなければ足さず、回答は断らない。
+    オーガナイザーが配布の記録に届け先 `delivery` を残していれば足す（バージョン番号を持たないリポジトリで、本番に届く行が 1 つに
+    決まったときだけ残る）。デプロイの工程はこの記録だけから `delivery` を返し、worker を起動しない（#4513）。
     """
     if value != run.APPROVED:
         return {}
     out: dict[str, Any] = {name: str(reply[key]) for key, name in RELEASED_OUTPUTS.items() if reply.get(key)}
-    if strategy is not None and not strategy.has_version_number:
-        row = production_merge.production_delivery(strategy.section)
-        if row is not None:
-            out[DELIVERY] = row
+    row = _recorded_where(reply)[1]
+    if row is not None:
+        out[DELIVERY] = row
     return out
-
-
-def release_store_of(strategy: Optional[branch_strategy.Strategy]) -> str:
-    """承認を記録する時点のバージョンの保存先の種類（`none`・`versioned`・設定を読めなければ `unknown`。#4513）。"""
-    return store_kind_of(None if strategy is None else strategy.has_version_number)
-
-
-def _strategy_of(state_root: Path) -> Optional[branch_strategy.Strategy]:
-    """ステートマシンの保存先（`<git の共通ディレクトリ>/ndf/state`）のリポジトリのメインディレクトリ（保存先の 2 つ上の親。
-    `command.repo_id` と同じ）のブランチ戦略の設定。読めなければ None（届け先を記録しない）。"""
-    root = state_root.parents[2]
-    try:
-        return branch_strategy.load(root)
-    except (branch_strategy.StrategyError, OSError) as exc:  # 設定: 読めなければ届け先を記録せず、種類を unknown として回答は書く
-        log.info("ブランチ戦略の設定を読めないので届け先を記録しない", extra={"root": str(root), "error": str(exc)})
-        return None
 
 
 def take_reply(
@@ -191,7 +187,6 @@ def take_reply(
     seen = json.loads(seen_file.read_text(encoding="utf-8")) if seen_file.exists() else None
     reason = str(reply["reason"]) if reply.get("reason") else f"オーガナイザーのリリースの回答（{reply['result']}）"
     target = Target.from_dict(seen)
-    strategy = _strategy_of(st.root) if value == run.APPROVED else None
     given = Answer(
         q.id,
         value,
@@ -199,7 +194,7 @@ def take_reply(
         "organizer",
         f"organizer:{request_id(q)}",
         seen=target,
-        outputs=_released(reply, value, strategy),
-        release_store=release_store_of(strategy) if value == run.APPROVED else None,
+        outputs=_released(reply, value),
+        release_store=_recorded_where(reply)[0] if value == run.APPROVED else None,
     )
     return answer(st, machine_id, given, observe, post)

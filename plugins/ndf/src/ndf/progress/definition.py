@@ -505,7 +505,7 @@ def answered_gap_detail(names: Sequence[str], waited: str) -> str:
     """出力の足りない承認の失敗の理由。足りない値の名前・判断を求めたステップの要約・次の操作を 1 つの文にする。"""
     return (
         f"足りない出力: {', '.join(names)}。判断を求めたステップの要約: {waited or '（要約なし）'}。"
-        "次の操作: ndf progress retry <ID> <工程> で工程を打ち直し、足りない値を返させる"
+        "次の操作: 足りない値を返せる状態にしてから、ndf progress retry <ID> <工程> --reason <理由> で工程を打ち直す"
     )
 
 

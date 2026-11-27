@@ -12,9 +12,7 @@ from enum import Enum
 from collections.abc import Mapping
 from typing import Any, Optional
 
-from ndf import contracts, identity
-from ndf.contracts import internal
-from ndf.contracts.worker_kinds import DELIVERY
+from ndf import identity
 
 # 判定に読むマージ先の設定のファイル（リポジトリの根からのパス）
 PROJECT_FILE = identity.FIXED_WORDS["ndf_settings_dir"] + "/project.json"
@@ -44,30 +42,48 @@ GATES = (STOP, DEFER, STALE)
 _NEEDS_APPROVAL = frozenset({Verdict.AUTOMATIC, Verdict.UNSET, Verdict.UNKNOWN})
 
 
-def _production_row(row: object) -> bool:
-    """本番に届く行か。`channel` の省略・`null` はどのチャネルにも当たる（`forms_decide.deliveries_of` と同じ）。"""
-    return isinstance(row, dict) and row.get("channel") in (None, "production")
+# 本番の届け先の行の `channel` の語
+PRODUCTION_CHANNEL = "production"
+
+
+def on_channel(row: object, channel: str) -> bool:
+    """届け先の行がチャネルの語 `channel`（`production`・`base`）に当たるか。`channel` の省略・`null` の行はどのチャネルにも当たる。
+
+    届け先の選び方の規則はここだけに置く。`ndf ci merge` と hook の判定、承認資料の届け先（`forms_decide.reaches`）、
+    配布の記録の届け先（`production_delivery`）が同じ規則を使う。
+    """
+    return isinstance(row, Mapping) and row.get("channel") in (None, channel)
 
 
 def _automatic_row(row: object) -> bool:
     """本番に適用される自動反映の行か。"""
-    return _production_row(row) and isinstance(row, dict) and row.get("kind") != "manual"
+    return on_channel(row, PRODUCTION_CHANNEL) and isinstance(row, dict) and row.get("kind") != "manual"
+
+
+def fits_context(row: Mapping[str, Any]) -> bool:
+    """届け先の行が工程の文脈の `delivery` の形に合うか（#4513）。
+
+    文脈のスキーマ全体へ `{"delivery": 行}` を渡して確かめる（`$defs/delivery` だけを引くと、`branch` の参照が
+    ルートの `properties` を指すので有効な行が参照の誤りで落ちる）。`ndf.contracts` は jsonschema を読むので、標準ライブラリだけで
+    動く hook がこのモジュールを読めるよう、関数の中で読む。
+    """
+    from ndf import contracts
+    from ndf.contracts import internal
+    from ndf.contracts.worker_kinds import DELIVERY
+
+    return not contracts.schema_errors({DELIVERY: dict(row)}, internal.CONTEXT)
 
 
 def production_delivery(section: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     """ブランチ戦略の設定 `section` の `release.deliveries` のうち、本番に届く行が 1 つで工程の文脈の `delivery` の形に合えば
-    その行（#4513）。ほかは None。
-
-    文脈の形は文脈のスキーマ全体へ `{"delivery": 行}` を渡して確かめる（`$defs/delivery` だけを引くと、`branch` の参照が
-    ルートの `properties` を指すので有効な行が参照の誤りで落ちる）。
-    """
+    その行（#4513）。ほかは None。"""
     release = section.get("release")
     rows = release.get("deliveries") if isinstance(release, Mapping) else None
-    found = [r for r in rows if _production_row(r)] if isinstance(rows, list) else []
+    found = [r for r in rows if on_channel(r, PRODUCTION_CHANNEL)] if isinstance(rows, list) else []
     if len(found) != 1:
         return None
     row = dict(found[0])
-    return None if contracts.schema_errors({DELIVERY: row}, internal.CONTEXT) else row
+    return row if fits_context(row) else None
 
 
 def automatic_rows(section: object) -> Verdict:

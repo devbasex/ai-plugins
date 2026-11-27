@@ -335,7 +335,7 @@ def released_outcome(work: str, saved: Mapping[str, Any], strategy: Optional[bra
 
     作業の出力が `product_version` と `delivery` を持ち（今は `release`）、記録済みの値があるときだけ、承認の時点の保存先の種類で
     決める。`none` ならオーガナイザーが出し終えているので、記録した届け先があれば ok、無ければ止まる。`unknown` も止まる。
-    `versioned` は起動する。種類が記録に無い（この変更の前に承認された）ときだけ、作業の時点の設定 `strategy` で決める。
+    `versioned` は起動する。種類が記録に無い（この変更の前に承認されたか、外のオーガナイザーが書かなかった）ときだけ、作業の時点の設定 `strategy` で決める。
     届け先は今の設定から選び直さない（設定は後から直せるので、過去の届け先の根拠にならない）。
     """
     outputs = work_kinds()[work]["outputs"]
@@ -351,11 +351,17 @@ def released_outcome(work: str, saved: Mapping[str, Any], strategy: Optional[bra
         out = {PRODUCT_VERSION: recorded.version, DELIVERY: dict(recorded.delivery)}
         summary = f"作業 {work} はオーガナイザーが出した値で終えた（worker を起動しない。バージョン番号を持たないリポジトリ）"
         return result.result(TOOL, result.OK, summary, outputs=out)
-    why = "承認を記録した時点で設定を読めず" if unknown else "承認を記録した時点で本番の届け先が 1 つに決まらず"
+    if unknown:
+        why = "承認を記録した時点で設定を読めず"
+    elif recorded.store is None:
+        why = "承認の記録に届け先が無く"
+    else:
+        why = "承認を記録した時点で本番の届け先が 1 つに決まらず"
     detail = (
         f"オーガナイザーが出した後だが、{why}、このリリースの届け先が記録から確かめられない（worker を起動しない）。"
-        "設定を直して retry しても終わらない。次の操作: 実際の届け先を確かめ、ndf progress finish で delivery と "
-        "product_version を渡して工程を手で終える"
+        "設定を直して retry しても終わらない。次の操作: 実際の届け先を確かめ、delivery・product_version・記録済みの mvv_gate"
+        "（ndf progress show <ID> の metrics.history の出力の事象にある）を outputs に含む JSON のファイルを用意して、"
+        "ndf progress finish <ID> デプロイ --output <JSONファイル> --reason <理由> で工程を終える"
     )
     return result.stopped(TOOL, "precondition", detail)
 

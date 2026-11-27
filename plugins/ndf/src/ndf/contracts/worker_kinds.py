@@ -98,7 +98,7 @@ class Recorded(NamedTuple):
     """記録済みの値（#4513）。まとめたリリースでオーガナイザーが記録したリリースの識別子・届け先・承認の時点の保存先の種類。
 
     `delivery` は承認と一緒に記録した届け先（記録できなければ None）。`store` は承認を記録した時点のバージョンの保存先の種類
-    （`none`・`versioned`・`unknown`。この変更の前に承認された記録は None）。
+    （`none`・`versioned`・`unknown`。この変更の前に承認された記録と、外のオーガナイザーが種類を書かなかった記録は None）。
     """
 
     version: str

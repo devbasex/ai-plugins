@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf.contracts import facts
+from ndf.core import production_merge
 from ndf.domains.release import version_decide
 
 # リリースの形の表
@@ -65,9 +66,8 @@ class Delivery(NamedTuple):
 
 def reaches(row: Mapping[str, Any], channel: str) -> bool:
     """届け先の行が承認資料のチャネル（`production`・`dev`）に当たるか（`channel` が `null`・省略の行はどれにも当たる）。"""
-    # 開発版はベースブランチから届く（届け先の行の channel の語は base）
-    want = "base" if channel == version_decide.DEV else channel
-    return row.get("channel") in (None, want)
+    # 開発版はベースブランチから届く（届け先の行の channel の語は base）。選び方の規則は production_merge.on_channel にある
+    return production_merge.on_channel(row, "base" if channel == version_decide.DEV else channel)
 
 
 def deliveries_of(rows: Sequence[Mapping[str, Any]], channel: str) -> tuple[Delivery, ...]:
