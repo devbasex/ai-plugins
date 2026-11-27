@@ -686,51 +686,7 @@ def test_the_sweep_keeps_a_repo_with_weights_or_unknown_files(store):
     (unknown / "notes.txt").write_text("", encoding="utf-8")
     mc.prune(SWEEP_AT, 60, store)
     assert (kept / "launch-weights.json").exists() and (unknown / "notes.txt").exists()
-    assert (unknown / "launch-experiments.lock").exists()  # 利用者が置いたものがあるディレクトリは、何も消さない
-
-
-def test_the_sweep_keeps_a_repo_whose_files_are_links(tmp_path, store):
-    target = tmp_path / "users-file"
-    target.write_text("2027-01", encoding="utf-8")
-    other = _idle_repo(store.parent / ("a" * 16), None)
-    (other / "launch-pruned").symlink_to(target)
-    mc.prune(SWEEP_AT, 60, store)
-    assert target.exists() and (other / "launch-pruned").is_symlink()
-
-
-def test_the_sweep_removes_a_half_written_file_ndf_left(store):
-    other = _idle_repo(store.parent / ("a" * 16))
-    (other / f".launch-weights.json.{'0' * 32}.tmp").write_text("{", encoding="utf-8")
-    mc.prune(SWEEP_AT, 60, store)
-    assert not other.exists()
-
-
-def test_a_failed_removal_keeps_its_mark_and_the_next_repo_goes_on(store, monkeypatch):
-    broken, fine = _idle_repo(store.parent / ("a" * 16)), _idle_repo(store.parent / ("b" * 16))
-    real = Path.unlink
-
-    def refuse(self, missing_ok=False):
-        if self.parent == broken and self.name == "launch-weights.json":
-            raise PermissionError("拒否")
-        return real(self, missing_ok=missing_ok)
-
-    monkeypatch.setattr(Path, "unlink", refuse)
-    mc.prune(SWEEP_AT, 60, store)
-    assert not fine.exists() and (broken / "launch-pruned").exists()  # launch-pruned は最後に消すので、翌月も候補になる
-
-
-def test_a_broken_store_lock_launches_without_records(tmp_path, store, clock, monkeypatch, caplog):
-    import sqlite3
-
-    from ndf.adapters import launch_store
-
-    def broken(self, *args, **kwargs):
-        raise sqlite3.DatabaseError("file is not a database")
-
-    monkeypatch.setattr(launch_store.ReadWriteLock, "acquire_read", broken)
-    with caplog.at_level(logging.WARNING):
-        choice = _pick(_repo(tmp_path), unit="u")
-    assert choice.assign_id is None and "共有ロック" in caplog.text
+    assert not (unknown / "launch-experiments.lock").exists()  # 知らない名前のファイルだけが残り、ディレクトリは残す
 
 
 def test_a_launch_using_the_store_holds_off_the_removal(store):
