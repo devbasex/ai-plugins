@@ -660,7 +660,7 @@ def _begin_run(args: argparse.Namespace, stack: contextlib.ExitStack, claims: di
         return _stop("invalid", str(exc))
     for stale in _output_paths(args):
         try:
-            claims[stale] = stack.enter_context(outputs.claim(Path(stale), args.replace_unrecorded_out))
+            claims[stale] = stack.enter_context(outputs.claim(Path(stale)))
         except outputs.Busy:
             # 実行中の起動の書き込みを片付けで壊さない（PR 4638 の r3-4）
             return _stop(
@@ -900,12 +900,6 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
         "レビューした HEAD がその PR の HEAD と確認できたときだけ書く。"
         "--reviewed-out なしで渡すか、--reviewed-out・--reviewed-pr-out と同じ保存先を渡すと、レビューを始めずに invalid で停止する。マージ先を取得するリモートが PR のベースリポジトリと"
         "一致すると確かめられなければ、レビューを始めずに precondition で停止する。" + _OUTPUT_RULE,
-    )
-    r.add_argument(
-        "--replace-unrecorded-out",
-        action="store_true",
-        help="--reviewed-out・--reviewed-pr-out・--reviewed-base-out の出力先に NDF の記録の無いファイル（記録を残さない前の"
-        "バージョンが書いた出力）があれば、出力先の錠を取った後に消す。NDF の工程が自分の状態の保存先に置いた出力だけに使う",
     )
 
 

@@ -11,6 +11,8 @@ import pytest
 
 from ndf.domains.crossreview import outputs, store
 
+from ._repos import run_cli
+
 HEAD = "a" * 40 + "\n"
 
 
@@ -93,18 +95,6 @@ def test_pr_4638_r1_3_rerun_keeps_the_inode_and_mode_of_the_given_output(tmp_pat
     assert (out.stat().st_ino, stat.S_IMODE(out.stat().st_mode)) == (before, 0o600)
     outputs.clear_stale(out)
     assert (out.stat().st_ino, out.read_text(encoding="utf-8")) == (before, "")
-
-
-def test_pr_4638_r1_2_unrecorded_output_is_replaced_only_when_asked(tmp_path: Path) -> None:
-    """PR 4638 の r1-2: 記録の無い出力（前のバージョンが書いたもの）は、`replace_unrecorded` を渡したときだけ錠の内側で消す。"""
-    out = tmp_path / "head"
-    out.write_text(HEAD, encoding="utf-8")
-    with outputs.claim(out, replace_unrecorded=True) as held:
-        assert not out.exists()
-        held.write(HEAD)
-    with outputs.claim(out, replace_unrecorded=True):
-        # NDF が書いた出力は、引数によらず記録で確かめて消す
-        assert not out.exists()
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root はアクセス権を無視する")
@@ -290,3 +280,14 @@ def test_pr_4638_r5_2_record_line_without_its_newline_is_not_taken(tmp_path: Pat
         cut.write(b"\n" + json.dumps(written, sort_keys=True).encode("utf-8"))
     outputs.clear_stale(out)
     assert (out.exists(), out.stat().st_ino, out.read_text(encoding="utf-8")) == (True, before, "")
+
+
+def test_pr_4638_r1_5_hard_linked_outputs_are_invalid(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """PR 4638 の r1-5・r2-4: 同じ空のファイルへのハードリンクを別の出力先に渡すと、パスが違っても inode で重なりを見つけ、
+    リポジトリを読む前の引数の確かめで invalid で止まる（出力は書かない）。"""
+    head = tmp_path / "h"
+    head.touch()
+    (tmp_path / "b").hardlink_to(head)
+    argv = ["run", "--pr", "7", "--state-dir", str(tmp_path / "st"), "--base", "origin/main"]
+    code, got = run_cli(capsys, *argv, "--reviewed-out", str(head), "--reviewed-base-out", str(tmp_path / "b"))
+    assert (got["cause"]["kind"], head.read_text(encoding="utf-8")) == ("invalid", "")

@@ -166,16 +166,6 @@ def test_issue_3702_shared_output_is_invalid_and_kept(wt: Path, tmp_path: Path, 
     assert (got["cause"]["kind"], fake.calls, shared.read_text(encoding="utf-8")) == ("invalid", [], "前の値\n")
 
 
-def test_pr_4638_r1_5_hard_linked_outputs_are_invalid(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """PR 4638 の r1-5: 同じ空のファイルへのハードリンクを別の出力先に渡すと、パスが違っても inode で重なりを見つけて止まる。"""
-    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
-    head = tmp_path / "h"
-    head.touch()
-    (tmp_path / "b").hardlink_to(head)
-    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(head), "--reviewed-base-out", str(tmp_path / "b"))
-    assert (got["cause"]["kind"], fake.calls) == ("invalid", [])
-
-
 def test_issue_3702_target_resolved_from_the_remote_is_not_read_again(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """対象のリポジトリを作業場所のリモートの URL から決めていれば、その値を取得元として使い、取得元を読み直さない。"""
     hub.port.fetched_from = hub.port.repo_name

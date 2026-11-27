@@ -7,8 +7,9 @@
 NDF が書いたファイルとはみなさない（PR 4638 の r1-4）。
 
 記録の無い既存の出力（記録を残さない前のバージョンが書いたものを含む）は、来歴を確かめられないので消さずに止まる
-（PR 4638 の r3-2）。NDF の工程（実装のテンプレート）は自分の状態の保存先に置いた出力について `replace_unrecorded` を渡し、
-記録の無い出力を錠を取った後に消させる。錠の外で消すと、同じ出力先を使う実行中の起動が書いた出力まで消すためである（PR 4638 の r1-2）。
+（PR 4638 の r3-2）。NDF の工程も、記録の無い出力を移行のために消すことはしない。自動で片付けるのは NDF が作ったと確かめられる
+ものだけで（MVV の Value 6）、記録の無い出力には確かめる根拠が無いためである（PR 4638 の r2-2）。工程は錠の外で出力を消さない。
+同じ出力先を使う実行中の起動が書いた出力まで消すためである（PR 4638 の r1-2）。
 
 記録には種別（`ndf_record`）を書き、片付けで消すのはこの種別の記録（と空の記録）と、その記録が指す一時のファイルだけである
 （PR 4638 の r2-5）。
@@ -194,7 +195,7 @@ class Claim:
         if os.pwrite(self._fd, line, offset) != len(line):
             raise OSError(f"出力の記録 {self.record} を書き切れない")
 
-    def clear(self, replace_unrecorded: bool = False) -> None:
+    def clear(self) -> None:
         """前の起動の出力を片付ける（`claim` の説明のとおり）。"""
         found = self._read()
         if found is None:
@@ -208,7 +209,7 @@ class Claim:
             self._pointing = bool(found.keys() - {RECORD_KIND_KEY})
             _collect_staging(self.path, found)
         if self.path.exists():
-            _clear_output(self.path, found, replace_unrecorded)
+            _clear_output(self.path, found)
         if self._pointing:
             self._put(_record())
             self._pointing = False
@@ -335,7 +336,7 @@ def _lock(path: Path) -> Claim:
 
 
 @contextmanager
-def claim(path: Path, replace_unrecorded: bool = False) -> Iterator[Claim]:
+def claim(path: Path) -> Iterator[Claim]:
     """出力先の錠を取り、前の起動の出力を片付けて、起動の終わりまで持つ（親が無い・書けない・記録の保存先がファイルでない・
     NDF が書いたと確かめられない記録がある・一時のファイルを確かめられなければ `OSError`、実行中の別の起動が使っていれば
     `Busy`、確かめられない出力があれば `Unowned`）。
@@ -346,25 +347,19 @@ def claim(path: Path, replace_unrecorded: bool = False) -> Iterator[Claim]:
       書いた後に記録を作るために読み直すので、読み書きの両方ができるかを確かめる（PR 4638 の r1-5）
     - ほかの既存のファイル（記録の無い・作り直された・書き換えられたもの）は、利用者のデータかもしれないので消さずに `Unowned`
     - 公開の前に落ちた起動の一時のファイルは、記録で確かめて消す（PR 4638 の r2-7）
-    - `replace_unrecorded` を渡せば、NDF の記録の無い既存の出力（記録を残さない前のバージョンが書いたもの）を錠を取った後に
-      消す。NDF の工程が自分の状態の保存先に置いた出力だけに使う（PR 4638 の r1-2）
     """
     held = _lock(path)
     try:
-        held.clear(replace_unrecorded)
+        held.clear()
         yield held
     finally:
         held.release()
 
 
-def _clear_output(path: Path, found: dict[str, Any], replace_unrecorded: bool = False) -> None:
-    """既存の出力を、空なら読み書きできるかを確かめて残し、NDF が書いたと確かめられれば片付け、確かめられなければ `Unowned`。
-    `replace_unrecorded` なら、記録の何も指さない出力のファイルは消す（`claim` の説明のとおり）。"""
+def _clear_output(path: Path, found: dict[str, Any]) -> None:
+    """既存の出力を、空なら読み書きできるかを確かめて残し、NDF が書いたと確かめられれば片付け、確かめられなければ `Unowned`。"""
     if path.is_file() and path.stat().st_size == 0:
         path.open("r+", encoding="utf-8").close()
-        return
-    if replace_unrecorded and not (found.keys() - {RECORD_KIND_KEY}) and path.is_file():
-        path.unlink()
         return
     owned = _owned(path, found) if found else None
     if owned is None:
