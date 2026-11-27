@@ -68,13 +68,13 @@ WRITING_KEY = "writing"
 STAGING_KEY = "staging"
 # 書いた出力が、呼び手が先に作った空のファイルへ直接書いたものか（片付けで消さずに空へ戻す。PR 4638 の r1-3）
 INTO_KEY = "into"
-# 何も指さない記録の行（途中で切れた書き込みも、指す物の無い空の記録と同じに読む。PR 4638 の r4-5）
+# 何も指さない記録の行（途中で切れた書き込みも、指す物の無い空の記録と同じに読む。PR 4638 の r4-5）。cli のヘルプもこの値から組む（r9-2）
 # 記録を残さない前のバージョンが書いた出力の中身の形（`claim` の `legacy`。PR 4638 の r1-2）。`--reviewed-out` はコミットの SHA
 # （SHA-1 か SHA-256）、`--reviewed-pr-out` は `<所有者>/<リポジトリ>#<番号>` を 1 行で書いた。`--reviewed-base-out` は記録と
 # 同時に足した出力なので、前のバージョンが書いた物は無い
 LEGACY_HEAD = re.compile(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})\n")
 LEGACY_PR = re.compile(rb"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\n")
-_BARE = json.dumps({RECORD_KIND_KEY: RECORD_KIND}, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
+BARE_RECORD = json.dumps({RECORD_KIND_KEY: RECORD_KIND}, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
 
 
 class Unowned(Exception):
@@ -191,7 +191,7 @@ class Claim:
             if not (isinstance(value, dict) and value.get(RECORD_KIND_KEY) == RECORD_KIND):
                 return None
             found = value
-        if found is None and _BARE.startswith(raw):
+        if found is None and BARE_RECORD.startswith(raw):
             return {}
         return found
 
