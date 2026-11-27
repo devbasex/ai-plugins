@@ -472,17 +472,7 @@ def _remote_slug(repo_root: Path) -> Optional[str]:
     linked worktree からもメインディレクトリ（共通の git ディレクトリの親）の設定を読む（`Git.remote()` と同じ設定）。
     """
     git_dir = _git_dir(repo_root)
-    url = git_mod.configured_remote_url(git_dir) if git_dir is not None else None
-    return slug_of_url(url) if url is not None else None
-
-
-def slug_of_url(url: str) -> Optional[str]:
-    """git の URL（https・ssh・scp の形）の `owner/repo`。"""
-    tail = url.rstrip("/")
-    if tail.endswith(".git"):
-        tail = tail[: -len(".git")]
-    parts = tail.replace(":", "/").split("/")
-    return "/".join(parts[-2:]) if len(parts) >= 2 and all(parts[-2:]) else None
+    return git_mod.configured_remote_slug(git_dir) if git_dir is not None else None
 
 
 def _deliveries(repo_root: Path) -> object:

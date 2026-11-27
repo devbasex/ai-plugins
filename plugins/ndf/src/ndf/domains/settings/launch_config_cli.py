@@ -78,13 +78,13 @@ def _approver_name(root: Path) -> str:
 
 
 def _reading_recordable(repo: str) -> bool:
-    """読み手役の確認を記録できるか。`ndf records reading add` は GitHub のリモートの `<所有者>/<リポジトリ>` で記録するため、
-    それが無い作業場所では質問の前の記録を作れない（質問ではなく端末のコマンドを返す）。
+    """読み手役の確認を記録できるか。記録（`ndf records reading add`）と hook の guard `reading-check` の照合は、
+    git の設定のリモートの URL から求める同じ識別子（`git.configured_remote_slug`）を使う。それを求められない作業場所では
+    質問の前の記録を作れないので、質問ではなく端末のコマンドを返す。
 
-    `repo` は `la.repo_key` が求めた git の共通ディレクトリで、git を起動せずにその下の設定からリモートの URL を読む。
+    `repo` は `la.repo_key` が求めた git の共通ディレクトリで、git を起動せずにその下の設定を読む。
     """
-    url = git.configured_remote_url(Path(repo))
-    return url is not None and git.repo_of_url(url) is not None
+    return git.configured_remote_slug(Path(repo)) is not None
 
 
 def _widens(t: ls.Target) -> bool:
@@ -160,9 +160,9 @@ def _shown(a: argparse.Namespace, root: Path, cand: Optional[Path], repo: str, t
     if session is not None and not _reading_recordable(repo):
         session = None
     if a.question is None or session is None:
-        # 候補を指定したときは、その候補を反映した完了の記録があり、反映先が今もその中身かを示す
-        reflected = la.reflected_candidate(cand) if cand else None
-        if reflected and not cand.is_file():  # 反映で片付けた候補は戻さず、反映先の今の設定を示す
+        # 候補を指定したときは、その候補を反映した完了の記録があり、反映先（と残っていれば候補）が今もその中身かを示す
+        reflected = la.reflected_candidate(cand, target) if cand else None
+        if reflected:  # 照らした反映先の設定から許可の状態を示す。片付けた候補は戻さない
             t = ls.approval_target(ls.load(root))
         else:
             t = _candidate_target(root, cand) if cand else ls.approval_target(ls.load(root))

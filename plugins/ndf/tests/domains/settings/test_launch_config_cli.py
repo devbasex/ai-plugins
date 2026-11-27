@@ -186,6 +186,17 @@ def test_an_unreflected_candidate_with_the_same_hash_as_no_setting_is_not_report
     assert _run(capsys, "show", "--candidate", str(candidate))["metrics"]["reflected"]
 
 
+def test_a_candidate_edited_after_the_reflection_is_not_reported_as_reflected(repo, capsys, monkeypatch):
+    monkeypatch.setattr(la.launch_candidates, "_settleable", lambda: False)  # 候補を退避できず、反映の後も残る環境
+    candidate = _draft(capsys, EMPTY)
+    sha = _run(capsys, "show", "--candidate", str(candidate))["metrics"]["sha256"]
+    assert _run(capsys, "approve", "--sha256", sha, "--candidate", str(candidate))["status"] == "ok"
+    assert candidate.exists() and _run(capsys, "show", "--candidate", str(candidate))["metrics"]["reflected"]
+    candidate.write_text(json.dumps(LSP), encoding="utf-8")  # 反映の後に直し直した
+    shown = _run(capsys, "show", "--candidate", str(candidate))
+    assert shown["metrics"]["reflected"] is False and shown["metrics"]["required"]
+
+
 def test_approving_a_candidate_equal_to_the_hand_written_setting_records_the_approval(repo, capsys, monkeypatch):
     _settings(repo, LSP)  # 利用者が手で書いた、未承認の許可
     candidate = _draft(capsys, LSP)

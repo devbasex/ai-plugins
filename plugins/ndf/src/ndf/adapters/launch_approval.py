@@ -718,12 +718,16 @@ def _done_of(candidate: Path) -> Optional[dict[str, Any]]:
     return None
 
 
-def reflected_candidate(candidate: Path) -> bool:
-    """候補を反映した完了の記録があり、反映先が今もその中身か。何も書かない。
+def reflected_candidate(candidate: Path, target: Path) -> bool:
+    """反映先 `target` の最後の完了の記録がこの候補のもので、反映先が今もその中身か。候補が残っていれば、候補もその中身か。何も書かない。
 
     承認の対象のハッシュは `permissions` と MCP の定義だけから求めるので、反映したかはハッシュでなく、候補の中身と反映先を結んだ完了の記録で確かめる。
+    候補を消せない環境では反映の後も候補が残り、利用者が直し直せるので、候補の今の中身も記録した中身と照らす。
     """
-    return _still_placed(_done_of(candidate))
+    rec = read_launch_record(reflected_file(target, DONE))
+    if rec.get("candidate") != candidate.parent.name or rec.get("target") != str(target) or not _still_placed(rec):
+        return False
+    return not candidate.exists() or content_version(candidate) == rec.get("content")
 
 
 def _still_placed(rec: Optional[Mapping[str, Any]]) -> bool:

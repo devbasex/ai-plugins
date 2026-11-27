@@ -119,6 +119,25 @@ def configured_remote_url(git_dir: Path) -> Optional[str]:
     return None
 
 
+def slug_of_url(url: str) -> Optional[str]:
+    """git の URL（https・ssh・scp の形）の `owner/repo`。ホストは問わない。"""
+    tail = url.rstrip("/")
+    if tail.endswith(".git"):
+        tail = tail[: -len(".git")]
+    parts = tail.replace(":", "/").split("/")
+    return "/".join(parts[-2:]) if len(parts) >= 2 and all(parts[-2:]) else None
+
+
+def configured_remote_slug(git_dir: Path) -> Optional[str]:
+    """読み手役の確認の記録と、hook の guard `reading-check` の照合に使うリポジトリの識別子。
+
+    `configured_remote_url` が読んだ URL の `owner/repo`（`slug_of_url`）で、読めなければ None。記録する側・照らす側・
+    質問を出せるかを決める側が、この 1 つの関数で同じ値を得る（`insteadOf` や `include` を当てた後の URL とは違いうるため）。
+    """
+    url = configured_remote_url(git_dir)
+    return slug_of_url(url) if url is not None else None
+
+
 class Completed(NamedTuple):
     """git の 1 回の起動の結果。"""
 

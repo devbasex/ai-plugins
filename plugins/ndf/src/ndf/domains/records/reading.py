@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf.adapters import git as git_mod
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub
 from ndf import contracts
@@ -340,14 +341,22 @@ def prompt(entry: Mapping[str, Any]) -> str:
 def add(entry: Mapping[str, Any], root: Path, repo: Optional[str] = None) -> dict[str, Any]:
     """確認の記録を 1 行追記し、追記した行を返す。形が違えば `ReadingInvalid` で、追記しない。GitHub を読まない。
 
-    `repo` を省けば作業場所 `root` のリモートから求める。
+    `repo` を省けば作業場所 `root` の git の設定から、hook の guard `reading-check` が照らすのと同じ識別子
+    （`git_mod.configured_remote_slug`）を求める。読めなければ `GitError`。
     """
     _require_keys(entry, ADD_KEYS)
     key = _key(entry["questions"])
-    row = {"repo": repo if repo is not None else Git(root).remote_repo(), "question_key": key, "prs": entry["prs"], "reads": entry["reads"]}
+    row = {"repo": repo if repo is not None else _configured_repo(root), "question_key": key, "prs": entry["prs"], "reads": entry["reads"]}
     if not rd.has_used_keys(row):
         raise ReadingInvalid("prs は、number（整数）・branch（1 つのブランチの名前）・head（SHA）を持つオブジェクトの配列にする")
     return _append_checked(checks_path, row, kind="reading-check")
+
+
+def _configured_repo(root: Path) -> str:
+    slug = git_mod.configured_remote_slug(Git(root).common_dir())
+    if slug is None:
+        raise GitError("リモートの URL を git の設定から読めない（リモートが無いか、.ndf/worktree.json の remote を読めない）")
+    return slug
 
 
 def rows() -> list[dict[str, Any]]:
