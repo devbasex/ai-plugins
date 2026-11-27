@@ -19,7 +19,6 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf.domains.crossreview import criteria_decide, report_decide
-from ndf.domains.records.mvv_decide import REVIEW_ALSO
 
 # スレッドの最初のコメント（`threads.opening`）の見出しと本文
 _OPENING = re.compile(
@@ -140,7 +139,7 @@ _NO_MARKS: Mapping[int, Mapping[str, Any]] = {}
 
 
 def carried(threads: Iterable[Thread], tracked: Collection[int], marks: Mapping[int, Mapping[str, Any]] = _NO_MARKS) -> list[Carried]:
-    """引き継ぐ指摘。`marks`（`recorded` が返す）に同じスレッドの MVV の判定と書き足しのある本文があれば重ねる。自分のスレッド（`MARKER` で始まり、書き手が信頼できる）で resolve されておらず、`tracked`（状態ファイルが
+    """引き継ぐ指摘。`marks`（`recorded` が返す）に同じスレッドの MVV の判定があれば重ねる。自分のスレッド（`MARKER` で始まり、書き手が信頼できる）で resolve されておらず、`tracked`（状態ファイルが
     持つスレッドの最初のコメント）に無いもの。書き手を確かめないと、PR にコメントできる人が同じ書式で書いた本文が修正担当へ渡る。"""
     out = []
     for t in threads:
@@ -150,9 +149,7 @@ def carried(threads: Iterable[Thread], tracked: Collection[int], marks: Mapping[
         if found is None or not found.group("text").strip():
             continue
         text, by, severity = found.group("text").strip(), found.group("by"), found.group("severity")
-        judged = dict(marks[t.comment]) if t.comment in marks else {}
-        # 別の報告を書き足した指摘の本文は、記録のコメントのほうが新しい
-        text = judged.pop("text", text)
+        judged = marks[t.comment] if t.comment in marks else {}
         out.append(Carried(f"t{t.comment}", t.comment, text, by, severity, t.path, t.line, **judged))
     return out
 
@@ -199,8 +196,7 @@ def recorded(
 ) -> tuple[list[Carried], dict[int, Mapping[str, Any]]]:
     """最新の記録のコメント（`MARKER` で始まる PR コメントのうち、書き手が信頼でき、最終更新の時刻が最も新しいもの）に残った
     未解決の指摘のうち、スレッドの無いもの（スレッドのある指摘は `carried` が引き継ぐ）と NDF が機械で確かめて作ったものと、
-    スレッドのある指摘の MVV の判定と保護の種類（スレッドの最初のコメントの id → 判定。ほかの保存先が本文に別の報告を書き足した
-    指摘は、その本文 `text` も持つ。#4363）。同じ保存先の打ち直しは記録の
+    スレッドのある指摘の MVV の判定と保護の種類（スレッドの最初のコメントの id → 判定）。同じ保存先の打ち直しは記録の
     コメントを書き換えるので、作った時刻でなく最終更新の時刻で選ぶ（PR 3944 の r2-5）。
 
     それが今の保存先の書いたコメント（`own` の URL）なら、状態ファイルが持つ指摘（`held` の id）は戻さない。コメントの本文は秘密や
@@ -215,8 +211,7 @@ def recorded(
         if one is None:
             continue
         if one.thread is not None:
-            appended = REVIEW_ALSO in one.text and _opt_text(item.get("id")) not in known
-            marks[one.thread] = judged | ({"text": one.text} if appended else {})
+            marks[one.thread] = judged
             if one.by != report_decide.BY_NDF:
                 continue
         if _opt_text(item.get("id")) not in known:

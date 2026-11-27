@@ -17,7 +17,7 @@ from ndf.domains.crossreview import criteria_decide, prior_decide, store, verify
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.report_decide import BY_NDF, JUDGED, MARKS, MVV, PINNED, REDLINE_ITEMS, UNPINNED
 from ndf.domains.records import jsonl
-from ndf.domains.records.mvv_decide import DEFERS, REVIEW_ALSO, REVIEW_DEFER, REVIEW_FIXED_AT, State
+from ndf.domains.records.mvv_decide import DEFERS, REVIEW_DEFER, REVIEW_FIXED_AT, State
 
 
 def _text(value: object) -> Optional[str]:
@@ -37,8 +37,8 @@ OCCURRENCE = "occurrence"
 PROTECT = criteria_decide.PROTECT
 # 判定役の確認の結果の欄（有効な回答のあった指摘だけが持つ。直した指摘が戻れば外す。#4363）
 CHECK = criteria_decide.CHECK
-# 書き足した別の報告の起きることの 1 文の欄（状態ファイルだけに持つ。#4363）
-ALSO_IMPACTS = criteria_decide.ALSO_IMPACTS
+# 同じ指摘の別の報告の欄（状態ファイルだけに持つ。#4363）
+ALSO_REPORTS = criteria_decide.ALSO_REPORTS
 # 下げた指摘を、同じファイルの違う 1 文か見出しで確かめ直した行の欄。値は先に否定した 1 文と見出し（`impact`・`section`）
 # （確かめ直しは 1 回だけ。直した指摘が戻れば外す。#4363）
 RECHECKED = "rechecked"
@@ -54,8 +54,6 @@ SKIPPED_MVV = "skipped_mvv"
 FIXER_REASON = "fixer_reason"
 # 根拠の記述の誤りの指摘が、次の確かめで同じ誤りかを見分ける欄（`citation_key`）
 CITATION_KEY = "citation_key"
-# 指摘の本文の後ろへ別の報告を書き足すときの区切り。指摘を見分けるキーはこの区切りより前の本文で作る（#4363）
-ALSO = REVIEW_ALSO
 
 
 def new_occurrence() -> str:
@@ -344,35 +342,19 @@ def _denied_report(item: Mapping[str, Any], items: Sequence[str], denied: Option
 
 
 def _add_report(row: dict[str, Any], item: Mapping[str, Any]) -> None:
-    """指摘の本文の後ろに、別の報告 `item` の本文・位置（パスと行、見出し）を書き足し、起きることの 1 文は本文・位置と組にして
-    `ALSO_IMPACTS` の欄に足す（行と同じ本文と位置の報告は本文に足さず、1 文が行と違えば欄にだけ足す。足してある報告は足さない）。
-    本文は PR のスレッドと記録のコメントで公開され、公開の前の伏せ字は自由記述の非公開の情報を防げないので、1 文は本文に足さない。
-    修正担当と判定役は欄を読む。#4363"""
+    """別の報告 `item` の本文・位置（パスと行、見出し）・起きることの 1 文を、1 件の文字列にして `ALSO_REPORTS` の欄に足す（行と同じ
+    本文と位置で 1 文も増えない報告と、足してある報告は足さない）。本文 `text` は PR のスレッドと記録のコメントで公開され、公開の
+    前の伏せ字は自由記述の非公開の情報を防げないので、本文には何も足さない。修正担当と判定役が欄を読む。#4363"""
     new = _raised(dict(item))
     text = str(item["text"]).strip()
     path, line, section = new.get("path"), new.get("line"), _text(item.get("section"))
-    same_place = (text, path, line, section) == (row["text"].split(ALSO)[0], row.get("path"), row.get("line"), row.get("section"))
+    same_place = (text, path, line, section) == (row["text"], row.get("path"), row.get("line"), row.get("section"))
     if same_place and new.get("impact") in (None, row.get("impact")):
         return
     place = "、".join(p for p in (f"{path}:{line}" if path and line else path, section) if p)
-    part = text + (f"（{place}）" if place else "")
-    if not same_place:
-        _merge_reports(row, ALSO + part)
-    told = part + criteria_decide.fixer_impact(new)
-    if "impact" in new and told not in (held := store.list_of(row, ALSO_IMPACTS)):
-        row[ALSO_IMPACTS] = [*held, told]
-
-
-def _merge_reports(row: dict[str, Any], text: object) -> bool:
-    """本文 `text` に書き足された別の報告のうち、行に無いものを足し、足したら真。区切りで分けた報告の全体が一致するものだけを同じ
-    報告とみなす（別の報告の先頭と一致するだけの短い報告は残す）。前の実行が残した本文もここで重ねる。同じ指摘のスレッドは
-    投稿した後に書き換わらないので、書き足しは記録のコメントから届く。#4363"""
-    added = False
-    for part in text.split(ALSO)[1:] if isinstance(text, str) else ():
-        if part not in row["text"].split(ALSO)[1:]:
-            row["text"] += ALSO + part
-            added = True
-    return added
+    told = text + (f"（{place}）" if place else "") + criteria_decide.fixer_impact(new)
+    if told not in (held := store.list_of(row, ALSO_REPORTS)):
+        row[ALSO_REPORTS] = [*held, told]
 
 
 def _align_report(
@@ -385,15 +367,15 @@ def _align_report(
     1 件を使う。根拠の強さが同じなら 1 文を持つもの、次に重いもの、次に先のものを選ぶ。根拠が無ければ 1 文を持つもののうちで選び、
     1 件も無ければ何も変えない。指摘のキーは本文の先頭だけで決まるので、判定役がある報告の発生条件を別の報告の位置で確かめない
     ためでもある。根拠が無いのに、選んだ 1 件と本文・1 文・位置（パス・行・見出し）のどれかが違う重い出し直しがあれば、それも
-    書き足して（`_add_report`）None を返す。呼び手は判定役に渡さない（同じ位置でも発生条件の違う報告は、1 つの否定でほかまで
+    別の報告に足して（`_add_report`）None を返す。呼び手は判定役に渡さない（同じ位置でも発生条件の違う報告は、1 つの否定でほかまで
     下げないため）。
 
-    根拠の 1 件を選んだときは、ほかの報告のうち次のものを本文に書き足す（`_add_report`）。必ず人の承認が要る操作を挙げた報告の
+    根拠の 1 件を選んだときは、ほかの報告のうち次のものを別の報告に足す（`_add_report`）。必ず人の承認が要る操作を挙げた報告の
     すべてと、選んだ 1 件に 1 文が無いか、より重い場合の、1 文を持つ最も重い報告である。根拠のある指摘は確認で下げないので、
-    書き足しても指摘を下げる材料は混ざらない。
+    足しても指摘を下げる材料は混ざらない。
 
     `denied` は、下げた扱いを解除した行の、確認で否定した内容である。このとき根拠の無い 1 件は、解除の条件を満たした出し直し
-    （`_heavy_elsewhere_than`）からだけ選ぶ。位置の無い重い報告は、1 件の選び方によらず本文へ書き足す。#4363"""
+    （`_heavy_elsewhere_than`）からだけ選ぶ。位置の無い重い報告は、1 件の選び方によらず別の報告に足す。#4363"""
     best: Optional[tuple[tuple[int, bool], Mapping[str, Any], dict[str, Any]]] = None
     told = False
     for item in same:
@@ -409,7 +391,7 @@ def _align_report(
         return False
     rank, item, new = best
     row["text"] = str(item["text"]).strip()
-    row.pop(ALSO_IMPACTS, None)
+    row.pop(ALSO_REPORTS, None)
     if "impact" in new:
         row["impact"] = new["impact"]
     else:
@@ -445,7 +427,7 @@ def _heavy_placeless(same: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any
 
 
 def _other_reports(same: Sequence[Mapping[str, Any]], items: Sequence[str], chosen: Optional[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    """行の本文に書き足す報告。`chosen` は行に選んだ報告の `_raised` の値で、その報告に 1 文が無ければ None。"""
+    """行の別の報告に足す報告。`chosen` は行に選んだ報告の `_raised` の値で、その報告に 1 文が無ければ None。"""
     out = [item for item in same if criteria_decide.redline(criteria_decide.mvv_item(item.get("mvv"), items))]
     told = [(item, new) for item in same if "impact" in (new := _raised(dict(item)))]
     if told:
@@ -732,7 +714,7 @@ class FindingJournal:
         self.merged = []
         by_key = {f.get("key"): f for f in self.rows.values()}
         for c in carried:
-            key = oscillation.finding_key(c.text.split(ALSO)[0])
+            key = oscillation.finding_key(c.text)
             # スレッドの無い指摘の id（`p-<元の id>`）は別の保存先の違う指摘とも重なるので、同じ本文の行だけに判定を重ねる
             known = by_key.get(key) or (self.rows.get(c.id) if c.comment is not None else None)
             if known is not None:
@@ -754,14 +736,13 @@ class FindingJournal:
     def merge_marks(
         self, fid: str, marks: Mapping[str, Any], items: Sequence[str], mvv: Optional[str], place: Optional[Mapping[str, Any]] = None
     ) -> bool:
-        """前の実行が残した保護の種類（`marks` の `protect`）・本文に書き足した別の報告（`marks` の `text`）と、MVV の判定のうち
-        今回と同じ MVV `mvv` でのものを、既にある指摘 `fid` に重ねる。変わったら真。保護の種類と別の報告は MVV によらず重ねる。
+        """前の実行が残した保護の種類（`marks` の `protect`）と、MVV の判定のうち
+        今回と同じ MVV `mvv` でのものを、既にある指摘 `fid` に重ねる。変わったら真。保護の種類は MVV によらず重ねる。
 
         閉じた指摘は、必ず人の承認が要る操作と今回初めて分かったときだけ未解決へ戻す。`place`（位置とセクション）があれば別の場所で
         見つかった再発として戻し（`_revive`）、無ければ開いたままの同じスレッドの指摘として、スレッドを持ったまま戻す。"""
         row = self.rows[fid]
-        reported = _merge_reports(row, marks.get("text"))
-        kept = _inherit_protect(row, marks.get(PROTECT)) or reported
+        kept = _inherit_protect(row, marks.get(PROTECT))
         named = _judged_items(marks, items)
         if not named or mvv is None or marks.get(JUDGED) != mvv or row.get("by") == BY_NDF:
             return kept

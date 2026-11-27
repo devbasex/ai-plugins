@@ -540,13 +540,17 @@ def test_issue_4363_a_lowered_finding_shows_the_raised_severity_and_only_the_fix
     assert private not in body
 
 
-def test_issue_4363_the_impact_of_an_added_report_is_not_published() -> None:
-    """別の報告の 1 文（作り物の非公開の値）は、記録のコメントとスレッドと承認資料の元の本文に出さず、状態の記録に残す。"""
-    private = "https://sample-corp-internal-endpoint.invalid/"
+def test_issue_4363_an_added_report_is_not_published() -> None:
+    """別の報告の本文・位置・1 文（作り物の非公開の値）は、記録のコメントとスレッドと要約の本文に出さず、状態の記録に残す。"""
+    private = ("sample-corp-secret-plan", "internal/hidden.py", "hidden-section", "https://sample-corp-internal-endpoint.invalid/")
     rows = journal.FindingJournal()
     marked = {"text": "保存が止まる", "severity": "major", "protect": ["secret"], "path": "a.py", "line": 1, "by": "codex"}
-    rows.enter(1, [marked, {**marked, "protect": [], "line": 2, "impact": private, "by": "kiro"}])
+    # 指摘のキーは本文の先頭で決まるので、非公開の値は先頭より後ろに置く
+    head = "保存が止まる" * 100
+    marked["text"], text = head, head + private[0]
+    other = {"text": text, "severity": "major", "impact": private[3], "path": private[1], "line": 2, "section": private[2], "by": "kiro"}
+    rows.enter(1, [marked, other])
     [row] = rows.rows.values()
-    assert private in str(row[journal.ALSO_IMPACTS]) and "a.py:2" in row["text"]
-    assert private not in report_decide.comment(1, {"findings": [row]}, None)
-    assert private not in threads.opening(row) + "".join(f.text for f in rows.findings())
+    assert all(value in str(row["also_reports"]) for value in private)
+    shown = report_decide.comment(1, {"findings": [row]}, None) + threads.opening(row) + "".join(f.text for f in rows.findings())
+    assert not any(value in shown for value in private)

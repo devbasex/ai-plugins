@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ndf.domains.crossreview import criteria_decide, drive, journal as journal_mod, prior_decide, report_decide
-from ndf.domains.records import mvv as mvv_records
+from ndf.domains.crossreview import criteria_decide, drive, journal as journal_mod, prior_decide
 from ndf.domains.records.mvv_decide import REVIEW_FIXED_AT
 from ndf.domains.crossreview import finish_decide as fin
 
@@ -246,19 +245,19 @@ def test_issue_4363_finding_coming_back_without_impact_stays_major_and_is_not_as
 
 @pytest.mark.parametrize("order", [1, -1])
 def test_issue_4363_heavy_reports_at_different_places_are_kept_and_not_asked(order: int) -> None:
-    """同じ本文で別々の経路を指す重い報告は、1 つの経路の否定で下がらないように判定役へ渡さず、どの位置も本文に残す。"""
+    """同じ本文で別々の経路を指す重い報告は、1 つの経路の否定で下がらないように判定役へ渡さず、どの位置も公開しない欄に残す。"""
     journal = drive.FindingJournal()
     journal.enter(1, [_told(path="a.py", line=1), _told(path="b.py", line=2, by="kiro")][::order])
     row = journal.rows["r1-1"]
     assert (row["severity"], journal.fresh) == ("major", [])
     other = "b.py:2" if row["path"] == "a.py" else "a.py:1"
-    assert other in row["text"]
+    assert other in criteria_decide.fixer_impact(row) and other not in row["text"]
 
 
 @pytest.mark.parametrize("order", [1, -1])
 @pytest.mark.parametrize("basis", [{"mvv": "C7"}, {"mvv": "Value 5"}, {"protect": ["irreversible"]}])
 def test_issue_4363_finding_keeps_the_text_and_the_place_of_the_report_that_marked_it(basis: dict, order: int) -> None:
-    """承認や保護の根拠となる報告に 1 文が無くても、行は別の報告で上書きせず、1 文のある報告は本文に書き足し、その 1 文は公開しない欄に持つ。"""
+    """承認や保護の根拠となる報告に 1 文が無くても、行は別の報告で上書きせず、1 文のある報告は公開しない欄に持つ。"""
     journal = drive.FindingJournal()
     told = [
         {"text": "A", "severity": "major", "path": "x.py", "line": 3, "by": "codex", **basis},
@@ -267,17 +266,17 @@ def test_issue_4363_finding_keeps_the_text_and_the_place_of_the_report_that_mark
     journal.enter(1, told[::order], ("Value 5", "C7"), "approved:11:aaa:ccc")
     row = journal.rows["r1-1"]
     assert (row["path"], row["line"], row.get("impact")) == ("x.py", 3, None)
-    assert row["text"] == f"A{journal_mod.ALSO}a（y.py:5）" and IMPACT in criteria_decide.fixer_impact(row)
+    assert row["text"] == "A" and f"a（y.py:5）— 起きること: {IMPACT}" in criteria_decide.fixer_impact(row)
 
 
 def test_issue_4363_every_operation_that_needs_approval_keeps_its_report() -> None:
-    """承認の要る操作が複数の報告に分かれても、どの操作の本文と位置も行に残り、次の実行でも同じ指摘に重ねる。"""
+    """承認の要る操作が複数の報告に分かれても、どの操作の本文と位置も公開しない欄に残り、次の実行でも同じ指摘に重ねる。"""
     journal = drive.FindingJournal()
     ops = [_told("A", mvv=item, path=path, line=1) for item, path in (("C2", "auth.py"), ("C3", "move.py"), ("C7", "rule.md"))]
     journal.enter(1, ops[:2], ("C2", "C3", "C7"), V11)
     journal.enter(2, ops[2:], ("C2", "C3", "C7"), V11)
     row = journal.rows["r1-1"]
-    assert row["path"] == "auth.py" and "move.py:1" in row["text"] and "rule.md:1" in row["text"]
+    assert (row["path"], row["text"]) == ("auth.py", "A") and all(p in str(row["also_reports"]) for p in ("move.py:1", "rule.md:1"))
     again = drive.FindingJournal()
     again.carry([prior_decide.Carried("t1", None, row["text"], None, None, None, None)])
     again.enter(1, [_told("A")])
@@ -287,29 +286,7 @@ def test_issue_4363_every_operation_that_needs_approval_keeps_its_report() -> No
 def test_issue_4363_reports_that_name_different_sections_are_both_kept() -> None:
     journal = drive.FindingJournal()
     journal.enter(1, [_told("A", mvv="C7", section=f"doc.md#{name}") for name in ("認証", "移行")], ("C7",), V11)
-    assert "doc.md#移行" in journal.rows["r1-1"]["text"]
-
-
-def test_issue_4363_appended_reports_keep_the_record_key_and_reach_another_run() -> None:
-    """書き足しは承認記録のキーを変えず、古い本文のスレッドを引き継ぐ実行にも記録のコメントから届く。"""
-    text = f"A{journal_mod.ALSO}a（move.py:1）"
-    assert mvv_records.record_key(text) == mvv_records.record_key("A")
-    body = f"{report_decide.MARKER}\n**cross-review の指摘 r1-1**（codex・ラウンド 1・major）\n\nA\n"
-    thread = prior_decide.Thread(7, body, False, "auth.py", 1, True)
-    [carried] = prior_decide.carried([thread], set(), {7: {"text": text}})
-    assert carried.text == text
-    held = drive.FindingJournal([_row("r1-1", "A", 1)])
-    assert held.merge_marks("r1-1", {"text": text}, (), None) and held.rows["r1-1"]["text"] == text
-    assert not held.merge_marks("r1-1", {"text": text}, (), None)
-
-
-def test_issue_4363_a_report_that_begins_another_report_is_kept() -> None:
-    """位置の無い報告の本文が、書き足し済みの別の報告の先頭と一致しても、別の報告として引き継ぐ。"""
-    longer, shorter = f"{journal_mod.ALSO}権限を消す操作", f"{journal_mod.ALSO}権限を消す"
-    held = drive.FindingJournal([_row("r1-1", f"A{longer}", 1)])
-    assert held.merge_marks("r1-1", {"text": f"A{shorter}"}, (), None)
-    assert held.rows["r1-1"]["text"] == f"A{longer}{shorter}"
-    assert not held.merge_marks("r1-1", {"text": f"A{shorter}{longer}"}, (), None)
+    assert "doc.md#移行" in str(journal.rows["r1-1"]["also_reports"])
 
 
 def test_issue_4014_carried_rows_are_not_rated_again() -> None:

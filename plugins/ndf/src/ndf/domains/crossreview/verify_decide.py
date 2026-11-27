@@ -19,7 +19,7 @@ from ndf.domains.records import mvv_decide
 # ラウンドの記録で、そのラウンドが判定役の起動を試み、出力を保存できたときの名前（ファイル名の拡張子より前）を持つキー。回答の有無は表さない
 ROUND_KEY = "judge_output"
 # 指示に載せる指摘の欄（書いた相手役 `by` は載せない）
-_SHOWN = ("id", "severity", "text", "impact", criteria_decide.ALSO_IMPACTS, "path", "line", "section", "diffs")
+_SHOWN = ("id", "severity", "text", "impact", criteria_decide.ALSO_REPORTS, "path", "line", "section", "diffs")
 
 
 class Verdict(NamedTuple):

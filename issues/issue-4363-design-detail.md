@@ -343,7 +343,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `enter` | `journal.py` | 変更 | `enter(self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = (), mvv: Optional[str] = None) -> frozenset[str]` | 今の登録に加え、このラウンドで新しく出たか戻った行と、同じファイルの違う `impact` か見出しで確かめ直す行の番号を `self.fresh` に残す。それらの行の本文・`impact`・位置は、出し直しをすべて重ねた後で、`impact` を持つ出し直しのうち最も重い 1 件のものにそろえる。戻った行で、どの出し直しにも `impact` が無いものは `self.fresh` に入れない。承認や保護の根拠となる出し直しが無く、`impact` を持つ重い出し直しの本文・`impact`・パス・行・見出しのどれかが食い違う行は、別の報告の本文と位置を指摘の本文に追記し、`impact` は状態ファイルの `also_impacts` に保存する。本文と位置が代表の報告と同じ場合は、`also_impacts` だけに追記する。この行は `self.fresh` に入れない |
+| `enter` | `journal.py` | 変更 | `enter(self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = (), mvv: Optional[str] = None) -> frozenset[str]` | 今の登録に加え、このラウンドで新しく出たか戻った行と、同じファイルの違う `impact` か見出しで確かめ直す行の番号を `self.fresh` に残す。それらの行の本文・`impact`・位置は、出し直しをすべて重ねた後で、`impact` を持つ出し直しのうち最も重い 1 件のものにそろえる。戻った行で、どの出し直しにも `impact` が無いものは `self.fresh` に入れない。承認や保護の根拠となる出し直しが無く、`impact` を持つ重い出し直しの本文・`impact`・パス・行・見出しのどれかが食い違う行は、別の報告（本文・位置・`impact`）を状態ファイルの欄 `also_reports` に足し、指摘の本文には何も足さない。この行は `self.fresh` に入れない |
 | `apply_checks` | `journal.py` | 新設 | `apply_checks(self, asked: Sequence[str], verdicts: Mapping[str, verify_decide.Verdict]) -> Checked` | 確認の結果を行に書き、下げる行を下げる |
 | `_raised_again` | `journal.py` | 変更 | シグネチャは変えない | 出し直しの `protect` を足し、下げた行の重要度の扱いを分ける |
 | `_revive` | `journal.py` | 変更 | シグネチャは変えない | 戻った行から `check` を外す（`protect` は残す） |
@@ -386,7 +386,7 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
 - `check` は `lowered` を偽、`unlowered` を真にして残す。残した `check` がある間は、行を `self.fresh` に入れず、判定役へ渡し直さない
 - 承認や保護の根拠が無いまま、否定した内容（同じファイル・`impact`・見出し）を指す報告は、行の重要度にも `raised_severity` にも重ねず、代表の報告にも選ばない
 - 代表の報告は、承認や保護の根拠となる報告が無ければ、解除の条件（違うファイル・`impact`・見出しを示す重い報告）を満たすものから選ぶ
-- 位置（パス）の無い重い報告は、代表の選び方によらず本文に書き足す（その `impact` は本文でなく `also_impacts` の欄に持つ。基本設計の「データ構造」）
+- 位置（パス）の無い重い報告は、代表の選び方によらず `also_reports` の欄に足す（基本設計の「データ構造」）
 
 この行を修正担当が直した後に同じ指摘が再び出た場合は、ほかの直した指摘と同じに扱う。`_revive` が `check` を外すので、`self.fresh` に入れる条件を満たせば判定役がもう一度確かめる。修正でコードが変わった後なので、前に否定した経路かどうかは区別しない。
 

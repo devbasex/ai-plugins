@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, Optional
 from ndf import contracts
 from ndf.contracts import facts, writing
 from ndf.contracts.result import SEVERITIES
-from ndf.domains.records.mvv_decide import REVIEW_ALSO, State
+from ndf.domains.records.mvv_decide import State
 
 if TYPE_CHECKING:
     from ndf.domains.records.mvv import Snapshot
@@ -36,9 +36,12 @@ REVIEWER, FIXER = "reviewer", "fixer"
 # 指摘の行の欄のうち、このモジュールと判定役の判断も読むもの。指摘に一度でも示された保護の種類と、判定役の確認の結果、
 # その中の「確認で下げた」を表す欄（#4363。書くのは `journal`）
 PROTECT, CHECK, LOWERED = "protect", "check", "lowered"
-# 指摘の行の欄のうち、書き足した別の報告の起きることの 1 文（本文・位置と 1 文の組の並び）。自由記述なので公開する本文 `text` には
-# 足さず、状態ファイルだけに持つ（記録のコメントにもスレッドにも載せない。#4363）
-ALSO_IMPACTS = "also_impacts"
+# 指摘の行の欄のうち、同じ指摘の別の報告（本文・位置・起きることの 1 文を 1 件ずつの文字列にした並び）。自由記述なので公開する
+# 本文 `text` には足さず、状態ファイルだけに持つ。読むのは修正担当への指示（`fixer_impact`）と判定役の指摘の一覧だけで、記録の
+# コメント・スレッド・承認資料には載せない（#4363）
+ALSO_REPORTS = "also_reports"
+# 修正担当への指示で、別の報告の前に置く区切り
+_ALSO_LABEL = " ／ 同じ指摘の別の報告: "
 # 修正担当の会話を保存するかのキー（#4013）
 FIXER_SESSIONS = "fixer_sessions"
 # 必ず人の承認が要る操作の番号（`P1`・`C7`。MVV の項目の `Value 5`・`Vision` と見分ける）
@@ -236,13 +239,13 @@ def reviewer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list
 
 
 def fixer_impact(row: Mapping[str, Any]) -> str:
-    """修正担当へ渡す指摘の行の末尾に添える起きることの 1 文（行が `impact` を持たなければ空。#4014）。別の報告の 1 文
-    （`ALSO_IMPACTS`）があれば、区切りを付けて続ける。"""
+    """修正担当へ渡す指摘の行の末尾に添える起きることの 1 文（行が `impact` を持たなければ空。#4014）。別の報告
+    （`ALSO_REPORTS`）があれば、区切りを付けて続ける。"""
     impact = row.get("impact")
     own = f"— {_table()['impact']['fixer_label']}: {impact.strip()}" if _has_impact(impact) else ""
-    others = row.get(ALSO_IMPACTS)
+    others = row.get(ALSO_REPORTS)
     if others:
-        own += "".join(REVIEW_ALSO + part for part in others)
+        own += "".join(_ALSO_LABEL + part for part in others)
     return own
 
 
