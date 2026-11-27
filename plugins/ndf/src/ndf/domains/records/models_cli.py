@@ -9,7 +9,7 @@ items に載せる。`--args` を付けると、CLI に渡す引数を 1 行に 
 
 `report` は使用量ログと実験の記録を、呼ばれた時点で集計し直す（出現率のファイルは読まず、書き換えない）。期間は JST の日付で、
 両端の日を含む（最後の日の翌日 0 時を含まない上限にする）。集計の順と区分は設計書（issue-2944-design.md）の「`ndf models report`
-は次の順で集計する」に従う。実験の組の集計は、割り付けの値（`.ndf/launch.json` の `allocation`）を読んだ作業ディレクトリの
+は次の順で集計する」に従う。実験の組の集計は、割り付けの値（`.ndf/launch.json` の `experiments.allocation`）を読んだ作業ディレクトリの
 リポジトリの割り付けだけを対象にする。
 """
 
@@ -258,7 +258,8 @@ def _arm_note(phase: str, verdict: ad.Verdict) -> str:
 class _Records:
     """実験の組の集計に使う記録と値。
 
-    `rows` はすべての実験の記録で、効果指標と停止を引く（評価や費用が期間の後に届いた単位も期間の単位として数える）。`upto` は期間の
+    `rows` は単位を作る記録で、効果指標と停止は期間の後の行も含み（評価や費用が期間の後に届いた単位も期間の単位として数える）、
+    `launch_error` は期間の終わりまでの行だけを含む（期間の後に基準へ切り替えた単位を、過去の集計から消さない）。`upto` は期間の
     終わりまでの行で、期間の終わりの時点の実際のモデル・起動できない組・費用を計算できないモデルを決める（期間の後の変化を当てない）。
     `usage` は使用量ログから 1 回だけ求めた費用と実際のモデル。
     """
@@ -270,19 +271,24 @@ class _Records:
     span: _Span
 
 
+def _units_from(where: model_choice.Where, arms: Sequence[Mapping[str, str]], rec: _Records, start: datetime) -> list:
+    """`where` のキーの、`start` から期間の終わりまでに割り付けた単位。実際のモデルは、同じ範囲の観測と単位だけから決める。"""
+    end = rec.span.end
+    observed = model_choice.observed_models(rec.upto, where, arms, start)
+    days = math.ceil((end - start) / timedelta(days=1))
+    found = experiments.unit_values(rec.rows, rec.usage, where=where, now=end, window_days=days, observed=observed)
+    return [u for u in found if start <= u.at < end]
+
+
 def _units_of(where: model_choice.Where, arms: Sequence[Mapping[str, str]], rec: _Records) -> tuple[list, list]:
     """`where` のキーの、期間に割り付けた単位と、期間の終わりまでの直近 `window_days` 日に割り付けた単位。
 
-    前者は表示する値と優劣、後者は打ち切りと出現率（期間の終わりの時点で割り付けが使う値）に使う。
+    前者は表示する値と優劣、後者は打ち切りと出現率（期間の終わりの時点で割り付けが使う値）に使う。範囲ごとに観測の開始日を
+    分け、片方の範囲の古い観測でもう片方の単位を除かない。2 つの範囲が同じなら 1 回だけ求める。
     """
-    span = rec.span
-    edge = span.end - timedelta(days=rec.allocation["window_days"])
-    start = min(span.since, edge)
-    observed = model_choice.observed_models(rec.upto, where, arms, start)
-    days = math.ceil((span.end - start) / timedelta(days=1))
-    found = experiments.unit_values(rec.rows, rec.usage, where=where, now=span.end, window_days=days, observed=observed)
-    found = [u for u in found if u.at < span.end]
-    return [u for u in found if span.holds(u.at)], [u for u in found if u.at >= edge]
+    edge = rec.span.end - timedelta(days=rec.allocation["window_days"])
+    period = _units_from(where, arms, rec, rec.span.since)
+    return period, period if edge == rec.span.since else _units_from(where, arms, rec, edge)
 
 
 def _experiment_items(where: model_choice.Where, assigned: Sequence[Mapping[str, Any]], rec: _Records) -> list[dict]:
@@ -292,8 +298,8 @@ def _experiment_items(where: model_choice.Where, assigned: Sequence[Mapping[str,
     seed = experiments.seed_of(where, allocation, recent)
     cut = ad.eliminated(recent, range(len(arms)), allocation["margin"], allocation["window_days"], random.Random(seed))
     cutoffs = [{"arm": i, "until": internal.stamp(t.timestamp())} for i, t in sorted(cut.items())]
-    cands = model_choice.candidates(arms, rec.upto, {"cutoffs": cutoffs}, end, where)
     refused = model_choice.refused_until(arms, rec.upto, end, where)
+    cands = model_choice.candidates(arms, rec.upto, {"cutoffs": cutoffs}, end, where, refused=refused)
     unpriced = model_choice.unpriced_models(rec.upto, where, end - timedelta(days=allocation["window_days"]))
     entry = ad.probabilities(recent, cands, allocation, random.Random(seed))
     shared = entry.best if units == recent else None  # 同じ単位なら最良である確率の標本を引き直さない
@@ -303,7 +309,7 @@ def _experiment_items(where: model_choice.Where, assigned: Sequence[Mapping[str,
     stats = [ad.weighted([u for u in used if u.arm == i]) for i in range(len(arms))]
     base_roi = stats[0].quality / stats[0].cost if stats[0].units and stats[0].cost else None
     modes = {aid: a["mode"] for aid, a in model_choice.assigns(assigned).items() if "mode" in a}
-    best = judge.best or entry.best
+    best = judge.best  # 期間の単位から求めた値だけを出す（出現率の計算に使う直近の単位の値は混ぜない）
     items = []
     for i, arm in enumerate(arms):
         item = _arm_item(where, arm, stats[i], base_roi) | {"arm": i, "phase": phase, "verdict": str(judge.verdict)}
@@ -313,8 +319,9 @@ def _experiment_items(where: model_choice.Where, assigned: Sequence[Mapping[str,
         item |= {"best": best[i]} if best is not None else {}
         item |= {"probability": entry.probs[i]} if not unpriced and entry.probs is not None else {}  # 確率は adaptive だけが持つ
         item |= {"leader": True} if judge.leader == i else {}
-        if i not in cands:
-            dropped, until = ("cutoff", cut[i]) if i in cut and end < cut[i] else ("refused", refused[i])
+        if i not in cands:  # 打ち切りと拒否が重なれば、候補へ戻るのは遅いほうの期限
+            reasons = ([("cutoff", cut[i])] if i in cut and end < cut[i] else []) + ([("refused", refused[i])] if i in refused else [])
+            dropped, until = max(reasons, key=lambda r: r[1])
             item |= {"dropped": dropped, "dropped_until": internal.stamp(until.timestamp())}
         items.append(item | ({"unpriced_models": unpriced} if unpriced else {}))
     return items
@@ -340,7 +347,7 @@ def report_rows(usage_rows: Sequence[Mapping[str, Any]], experiment_rows: Sequen
     span, stage = _Span(scope.since, scope.end), scope.stage
     items = _launch_items(usage_rows, experiments.refused_launches(experiment_rows), span, stage)
     upto = [r for r in experiment_rows if datetime.fromisoformat(r["at"]) < span.end]
-    rec = _Records(experiment_rows, upto, experiments.usage_index(usage_rows), scope.allocation, span)
+    rec = _Records(experiments.rows_for_units(experiment_rows, span.end), upto, experiments.usage_index(usage_rows), scope.allocation, span)
     assigned = model_choice.assigns(experiment_rows).values()
     found = [a for a in assigned if span.has(a) and a["repo"] == scope.repo and stage in (None, a["stage"])]
     keys = sorted({(a["repo"], a["stage"], a["runtime"], a["key"]) for a in found})

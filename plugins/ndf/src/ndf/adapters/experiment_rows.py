@@ -65,14 +65,21 @@ class Where:
 
 
 def candidates(
-    arms: Sequence[Mapping[str, str]], rows: Sequence[Mapping[str, Any]], entry: Optional[Mapping[str, Any]], now: datetime, where: Where
+    arms: Sequence[Mapping[str, str]],
+    rows: Sequence[Mapping[str, Any]],
+    entry: Optional[Mapping[str, Any]],
+    now: datetime,
+    where: Where,
+    *,
+    refused: Optional[Mapping[int, datetime]] = None,
 ) -> list[int]:
     """打ち切った組（出現率の項目の期限の前）と起動できない組を除いた添字。基準の組（添字 0）は除かない。
 
     起動できない組は、直近 `refusal_days` 日の `launch_error` の行のうち、割り付け ID で引いた割り付けの行がリポジトリ・工程・
     ランタイム・互換性のキーで今と同じで、組が同じものが `refusals` 件以上ある組。割り付けの行を引けない拒否は数えない。
+    `refused` は呼び手が同じ引数で求めた `refused_until` の結果で、渡されれば記録を走査し直さない（戻る日時も表示する呼び手が使う）。
     """
-    refused = refused_until(arms, rows, now, where)
+    refused = refused_until(arms, rows, now, where) if refused is None else refused
     cutoffs = entry["cutoffs"] if entry is not None else []
     cut = {c["arm"] for c in cutoffs if now < datetime.fromisoformat(c["until"])}
     return [i for i in range(len(arms)) if i == 0 or (i not in cut and i not in refused)]

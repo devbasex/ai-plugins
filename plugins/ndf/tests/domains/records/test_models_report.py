@@ -247,6 +247,22 @@ def test_an_unpriced_model_outside_the_window_does_not_make_it_uniform():
     assert _arms(_report(recent_launches, [*recent, fresh]))[0]["unpriced_models"] == ["m"]
 
 
+def test_a_switch_to_the_base_after_the_period_keeps_the_unit_in_the_period():
+    rows, launches = _units(0, 2, 0.8, 1.0)
+    more, more_launches = _units(1, 2, 0.8, 1.0)
+    later = _refusal("a1-0", "x1", ARMS[1], UNTIL + timedelta(hours=1))
+    assert _arms(_report(launches + more_launches, rows + more + [later]))[1]["units"] == 2
+
+
+def test_the_best_probability_comes_only_from_the_units_of_the_period():
+    old, old_launches = _units(0, 30, 0.9, 1.0, at=NOW - timedelta(days=10))
+    older, older_launches = _units(1, 30, 0.9, 0.5, at=NOW - timedelta(days=10))
+    rows = [*old, *older, _assign("p0", 0), _outcome("p0", 0.9), _assign("p1", 1), _outcome("p1", 0.9)]
+    launches = [*old_launches, *older_launches, _row("lp0", assign_id="p0"), _row("lp1", assign_id="p1", effort="high")]
+    base, other = _arms(_report(launches, rows, since=NOW - timedelta(hours=1)))
+    assert (base["units"], other["units"]) == (1, 1) and "best" not in base and "best" not in other
+
+
 def test_an_arm_without_units_says_no_records():
     rows, launches = _units(0, 2, 0.8, 1.0)
     base, other = _arms(_report(launches, rows))

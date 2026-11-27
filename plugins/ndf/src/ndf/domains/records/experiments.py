@@ -136,6 +136,14 @@ def refused_launches(rows: Sequence[Mapping[str, Any]]) -> Callable[[Mapping[str
     return lambda row: "launch_id" in row and row["launch_id"] in ids
 
 
+def rows_for_units(rows: Sequence[Mapping[str, Any]], end: datetime) -> list[Mapping[str, Any]]:
+    """過去の期間の単位を作る記録: `launch_error` の行は `end` より前のものだけ、ほかの行はすべて。
+
+    効果指標と停止は期間の後に届いても期間の単位に数え、期間の後に基準へ切り替えた単位は過去の集計から除かない（`ndf models report`）。
+    """
+    return [r for r in rows if r["kind"] != "launch_error" or _time(r) < end]
+
+
 @dataclass(frozen=True)
 class _Seen:
     """実際のモデルで絞る前の単位と、そのまとまり（`model_choice.model_group`）・評価した日時。"""

@@ -91,7 +91,7 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "description": "report の実験のキー（リポジトリ × 工程 × ランタイム × 互換性のキー）の組ごとの値。割り付けの値（.ndf/launch.json の allocation）を読んだ作業ディレクトリのリポジトリの割り付けだけを対象に、期間に割り付けた単位を呼ばれた時点で計算し直す。打ち切り・候補・段階・出現率は、期間の最後の日の終わりの時点で、その時点までの直近 window_days 日の単位と記録から求める",
+            "description": "report の実験のキー（リポジトリ × 工程 × ランタイム × 互換性のキー）の組ごとの値。作業ディレクトリのリポジトリにある .ndf/launch.json の experiments.allocation（割り付けの値）を計算に使い、そのリポジトリの割り付けだけを対象に、期間に割り付けた単位を呼ばれた時点で計算し直す。打ち切り・候補・段階・出現率は、期間の最後の日の終わりの時点で、その時点までの直近 window_days 日の単位と記録から求める",
             "required": ["kind", "repo", "stage", "runtime", "key", "arm", "units", "modes", "quality", "quality_interval", "cost_usd", "unpriced_units", "roi", "roi_ratio", "phase", "verdict", "note"],
             "properties": {
               "kind": {"const": "arm"},
