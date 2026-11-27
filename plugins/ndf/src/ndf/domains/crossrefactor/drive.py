@@ -691,15 +691,26 @@ def _final(run: _Run) -> None:
         return
     cfg = run.cfg
     gate = final_gate.GateConfig(cfg.pr, cfg.branch, cfg.required, cfg.tests, cfg.scope, cfg.max_fix)
+    fix = _final_fixer(run, cfg.scope)
+    hub = run.ports.github(run.work)
+    _record_final(run, lambda: final_gate.run_gate(run.work, hub, gate, fix, run.ports.sleep, run.ports.ci))
+
+
+def _final_fixer(run: _Run, scope: Sequence[str], *, local: bool = False) -> Callable[[Sequence[str], int], bool]:
+    """最終ゲートの落ちた周で修正担当を起動する関数を返す（起動できれば真）。"""
 
     def fix(failed: Sequence[str], round_no: int) -> bool:
         _record_phase(run, "final-fix")
-        prompt = prompt_decide.final_fix(cfg.pr, cfg.scope, failed)
+        prompt = prompt_decide.final_fix(run.cfg.pr, scope, failed, local=local)
         return _launch(run, launch.Request("final-fix", participants.FIXER, prompt, f"r{round_no}")) is not None
 
-    hub = run.ports.github(run.work)
+    return fix
+
+
+def _record_final(run: _Run, gate: Callable[[], dict[str, Any]]) -> None:
+    """最終ゲートを回して記録を保存する。止まれば止まった記録を保存して `DriveStopped` にする。"""
     try:
-        run.state["final"] = final_gate.run_gate(run.work, hub, gate, fix, run.ports.sleep, run.ports.ci)
+        run.state["final"] = gate()
     except final_gate.GateStopped as exc:
         run.state["final"] = exc.record
         run.save()
@@ -716,19 +727,8 @@ def _final_local(run: _Run) -> None:
         cfg.pr, cfg.branch, scope, cfg.max_fix, cfg.repo, run.ws.root,
         local_gate.total_seconds(work_project, _net(run).limit_minutes), local_gate.suite_seconds(work_project),
     )  # fmt: skip
-
-    def fix(failed: Sequence[str], round_no: int) -> bool:
-        _record_phase(run, "final-fix")
-        prompt = prompt_decide.final_fix(cfg.pr, scope, failed, local=True)
-        return _launch(run, launch.Request("final-fix", participants.FIXER, prompt, f"r{round_no}")) is not None
-
-    try:
-        run.state["final"] = local_gate.run_local_gate(run.work, gate, run.state, run.save, fix, run.ports.tests)
-    except final_gate.GateStopped as exc:
-        run.state["final"] = exc.record
-        run.save()
-        raise DriveStopped(exc.kind, exc.detail) from None
-    run.save()
+    fix = _final_fixer(run, scope, local=True)
+    _record_final(run, lambda: local_gate.run_local_gate(run.work, gate, run.state, run.save, fix, run.ports.tests))
 
 
 def _step_metrics(run: _Run) -> dict[str, Any]:
