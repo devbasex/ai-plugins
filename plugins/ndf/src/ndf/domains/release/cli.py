@@ -353,12 +353,13 @@ def _release_names(args: argparse.Namespace) -> tuple[str | None, names_decide.N
 
 def cmd_records(args: argparse.Namespace) -> dict:
     select = record.Selection(args.version, args.release, args.unit)
+    reads_release = select != record.Selection(None, None, None) or args.bodies or args.issues is not None
     if args.pr_body_only:
-        if select != record.Selection(None, None, None) or args.bodies or args.issues is not None:
+        if reads_release:
             raise record.RecordError("--pr-body-only は --version・--release・--unit・--bodies・--issues と一緒に渡さない")
         outputs = record.pr_body_only(_hub(args), args.pr)
         return result.result(TOOL, result.OK, f"#{args.pr} の本文を読んだ（リリース記録は選ばない）", outputs=outputs)
-    if select != record.Selection(None, None, None) or args.bodies or args.issues is not None:
+    if reads_release:
         outputs = record.read_release(_hub(args), args.pr, select, args.bodies, args.issues)
         version = outputs["release"]["version"] if outputs["release"] else "無し"
         detail = (
