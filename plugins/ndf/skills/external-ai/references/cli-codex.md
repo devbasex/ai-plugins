@@ -102,7 +102,17 @@ Codex は最終 message を返さなくても `apply_patch` でファイルを�
 回収は **ファイル → stdout → stderr** の順で行う。
 
 読むだけの用途（`--use review`。`-s read-only`）では、Codex は結果ファイルを書けない。この用途では、プロンプトで結果を最終応答に返すよう指示し、
-呼び出し元で stdout を回収する。最終応答が落ちて stdout が空なら、用途を既定の delegate に戻し、上の出力先の指示を付けて渡し直す。
+呼び出し元で stdout を回収する。
+
+stdout が空でも、すぐに渡し直さない。渡し直すと NDF と Codex の起動が 1 回ずつ増え、レビュー 1 回分の推論の費用がかかるので、
+同じ依頼で結果が得られる理由があるときだけにする。先に終了コードと stderr を読み、次の表で決める。
+
+| 終了コードと stderr | 原因 | 次の手 |
+|---|---|---|
+| stderr に `^tokens used$` がある（セッションは最後まで進んだ） | 最終応答を返さずにセッションが終わった（上の現象） | この場合だけ渡し直す。用途を既定の delegate に戻し、上の出力先の指示を付ける |
+| 終了コード 124 | 上限に当たった | 同じ依頼では同じく止まる。読むファイルを絞るか観点を分けてから渡し直す |
+| 終了コード 3 で、stderr に `ndf delegate-run` の理由がある | Codex を起動していない | 理由に従う（承認が要るなら呼び出し元へ返す） |
+| stderr に認証・利用上限・サンドボックスの失敗がある | 渡し直しても解けない | SKILL.md の「共通の実行手順」の表と、下の Q2・Q4 に従う |
 
 ## 完了検知
 
@@ -119,7 +129,7 @@ stderr の `^tokens used$` sentinel と結果ファイルで見て、上限は�
 cd /workspace
 timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}' --config model_reasoning_effort=medium \
   < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
-# => $TMP/codex-stdout.log を読む。空なら上の「最終出力をファイル経由で保証する」の末尾の手順で渡し直す
+# => $TMP/codex-stdout.log を読む。空なら、上の「最終出力をファイル経由で保証する」の末尾の表で、終了コードと stderr から次の手を決める
 ```
 
 ## Codex 固有のトラブルシューティング
