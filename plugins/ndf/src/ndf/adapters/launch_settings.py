@@ -12,15 +12,17 @@ full の起動 1 回の指定は `prepared` が解く。許可を広げる指定
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import os
+import re
+import secrets
 import shlex
 import shutil
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Union
+
+from filelock import FileLock, Timeout
 
 from ndf import contracts, identity
 from ndf.adapters import launch_approval
@@ -37,8 +39,12 @@ REPO_MCP = ".mcp.json"
 SPEC_KEYS = ("load", "allow", "mcp")
 # MCP の定義のコピーを置く保存先の行（表 ndf-files。`<id>` は `<PID>-<一意な値>`）
 COPIES = "launch-mcp"
-# コピーのディレクトリの持ち主の錠。NDF が作った印を兼ね、これが無いディレクトリは掃除で触らない
-OWNER_LOCK = "owner.lock"
+# コピーのディレクトリ `<id>/` の隣に置く 2 つのファイルの拡張子。`<id>.owner` は NDF が作ったコピーであることの記録
+# （`_owner_record`）、`<id>.inuse` はオーナーがコピーを使う間取り続ける錠。掃除は記録の合うものだけを、錠が外れていれば消す
+OWNER_SUFFIX = ".owner"
+LOCK_SUFFIX = ".inuse"
+# コピーの `<id>`（`<PID>-<一意な値>`）の形。掃除はこの形の名前だけを見る
+COPY_ID = re.compile(r"[0-9]+-[0-9a-f]{16}")
 
 Mcp = Union[None, str, tuple[str, ...]]
 
@@ -332,76 +338,94 @@ def copies_dir() -> Path:
 
 @contextlib.contextmanager
 def _copies(definitions: list[Any]) -> Iterator[tuple[Path, ...]]:
-    """確かめた定義の中身を、所有者だけが読めるコピー（0700 のディレクトリの 0600 のファイル）にして渡し、抜けるときに消す。"""
+    """確かめた定義の中身を、所有者だけが読めるコピー（0700 のディレクトリの 0600 のファイル）にして渡し、抜けるときに消す。
+
+    ディレクトリより先に、錠（`<id>.inuse`）を取り、記録（`<id>.owner`）を書く。消すときは、ディレクトリ・錠のファイル・
+    記録の順に消す。途中で落ちても記録が残るので、次の掃除が残った定義を見つけて消せる。
+    """
     base = copies_dir()
+    ident = f"{os.getpid()}-{secrets.token_hex(8)}"
+    lock = _copy_lock(base, ident)
     try:
         base.mkdir(parents=True, exist_ok=True)
         _sweep_copies(base)
-        where = Path(tempfile.mkdtemp(prefix=f"{os.getpid()}-", dir=base))  # mkdtemp は 0700 で作る
-    except OSError as exc:
+        lock.acquire()
+    except (OSError, Timeout) as exc:
         raise _precondition(f"MCP の定義のコピーの保存先 {base} を作れない（{type(exc).__name__}）") from None
-    try:
-        owner = _hold_owner_lock(where)
-    except OSError as exc:
-        shutil.rmtree(where, ignore_errors=True)
-        raise _precondition(f"MCP の定義のコピーの保存先 {where} に持ち主の錠を置けない（{type(exc).__name__}）") from None
+    where = base / ident
     try:
         try:
-            paths = tuple(_write_copy(where / f"{i}.json", raw) for i, raw in enumerate(definitions))
+            _write_private(base / f"{ident}{OWNER_SUFFIX}", _owner_record(ident))
+            where.mkdir(mode=0o700)
+            os.chmod(where, 0o700)
+            paths = tuple(_write_private(where / f"{i}.json", json.dumps(raw, ensure_ascii=False)) for i, raw in enumerate(definitions))
         except OSError as exc:
-            shutil.rmtree(where, ignore_errors=True)
             raise _precondition(f"MCP の定義のコピーを {where} に書けない（{type(exc).__name__}）") from None
-        try:
-            yield paths
-        finally:
-            shutil.rmtree(where, ignore_errors=True)
+        yield paths
     finally:
-        os.close(owner)  # 錠は閉じると外れる
+        _remove_copy(base, ident)
+        lock.release()
 
 
-def _write_copy(path: Path, raw: Any) -> Path:
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+def _copy_lock(base: Path, ident: str) -> FileLock:
+    """コピー `<id>` の錠。待たずに取る（使用中なら `Timeout`）。flock の錠はカーネルが持つので、状態の保存先を共有する
+    PID 名前空間の違うコンテナどうしでも、使用中と分かる。"""
+    return FileLock(str(base / f"{ident}{LOCK_SUFFIX}"), timeout=0, mode=0o600)
+
+
+def _owner_record(ident: str) -> str:
+    """記録のファイルに書く、NDF が作ったコピーであることの記録。掃除は中身がこれと一致するものだけを消す。"""
+    return json.dumps({"row": COPIES, "id": ident}, ensure_ascii=False)
+
+
+def _write_private(path: Path, text: str) -> Path:
+    """所有者だけが読めるファイル（0600）を新しく作って `text` を書く。"""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(raw, f, ensure_ascii=False)
+        f.write(text)
     return path
 
 
-def _hold_owner_lock(where: Path) -> int:
-    """`where` に持ち主の錠（`OWNER_LOCK`）を置いて排他で取り、その fd を返す。閉じるまで掃除はこのディレクトリを消さない。
-
-    錠は別名で作って取ってから `OWNER_LOCK` へ改名する。掃除が錠の無い瞬間のファイルを見て、取れたと判断しないためである。
-    錠（`flock`）はカーネルが持つので、状態の保存先を共有する PID 名前空間の違うコンテナどうしでも、使用中と分かる。
-    """
-    staged = where / f"{OWNER_LOCK}.new"
-    fd = os.open(staged, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 作ったばかりのファイルなので取れる
-        os.rename(staged, where / OWNER_LOCK)
-    except OSError:
-        os.close(fd)
-        raise
-    return fd
+def _remove_copy(base: Path, ident: str) -> None:
+    """コピーのディレクトリを消し、消し切れたときだけ錠のファイルと記録を消す（消し残りを次の掃除が見つけられるように）。"""
+    where = base / ident
+    if where.is_dir() and not where.is_symlink():
+        shutil.rmtree(where, ignore_errors=True)
+    if where.exists() or where.is_symlink():
+        return
+    (base / f"{ident}{LOCK_SUFFIX}").unlink(missing_ok=True)
+    (base / f"{ident}{OWNER_SUFFIX}").unlink(missing_ok=True)
 
 
 def _sweep_copies(base: Path) -> None:
-    """持ち主の錠が外れたコピーのディレクトリ（落ちた起動の消し残り）を消す。
+    """落ちた起動の消し残りを消す。消すのは、NDF の記録が合い、錠が外れているコピーだけである。
 
-    消すのは NDF が作った印（`OWNER_LOCK`）のあるディレクトリだけで、錠を待たずに取れたものに限る。印の無いもの・
-    リンク・錠を取られているものは触らない。
+    記録の無いもの・記録の合わないもの・錠を取られているもの（使用中）は触らない。
     """
-    for place in base.iterdir():
-        if place.is_symlink() or not place.is_dir():
-            continue
-        try:
-            fd = os.open(place / OWNER_LOCK, os.O_RDONLY | os.O_NOFOLLOW)
-        except OSError:  # NDF の印が無い（NDF が作ったものでない）か読めないものは消さない
-            continue
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:  # 持ち主が錠を持っている（使用中）
-            os.close(fd)
-            continue
-        try:
-            shutil.rmtree(place, ignore_errors=True)
-        finally:
-            os.close(fd)
+    for record in base.glob(f"*{OWNER_SUFFIX}"):
+        ident = record.name.removesuffix(OWNER_SUFFIX)
+        if COPY_ID.fullmatch(ident) and _recorded_as_copy(record, ident):
+            _reclaim(base, ident)
+
+
+def _recorded_as_copy(record: Path, ident: str) -> bool:
+    """`record` が、NDF がコピー `<id>` を作ったときに書いた記録か。"""
+    if record.is_symlink() or not record.is_file():
+        return False
+    try:
+        return record.read_text(encoding="utf-8") == _owner_record(ident)
+    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 読めない記録は NDF が作ったと確かめられないので消さない
+        return False
+
+
+def _reclaim(base: Path, ident: str) -> None:
+    """錠が外れていれば、コピー `<id>` を消す。オーナーが錠を取っている（使用中）なら何もしない。"""
+    lock = _copy_lock(base, ident)
+    try:
+        lock.acquire()
+    except Timeout:  # noqa: NDF401 ファイル: オーナーが使用中のコピーは消さない
+        return
+    try:
+        _remove_copy(base, ident)
+    finally:
+        lock.release()

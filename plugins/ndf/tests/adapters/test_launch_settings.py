@@ -309,33 +309,50 @@ def test_copies_are_removed_when_the_launch_fails(repo: Path) -> None:
     assert not grant.mcp_files[0].parent.exists()
 
 
-def _owned_copy_dir(name: str) -> Path:
-    place = ls.copies_dir() / name
-    place.mkdir(parents=True)
-    (place / ls.OWNER_LOCK).write_text("", encoding="utf-8")
-    return place
+def _left_copy(ident: str, record: bool = True) -> Path:
+    """落ちた起動が残したコピー（定義のディレクトリと、NDF の記録）。"""
+    base = ls.copies_dir()
+    (base / ident).mkdir(parents=True)
+    (base / ident / "0.json").write_text("{}", encoding="utf-8")
+    if record:
+        (base / f"{ident}{ls.OWNER_SUFFIX}").write_text(ls._owner_record(ident), encoding="utf-8")
+    return base / ident
 
 
-def test_only_copies_whose_owner_lock_is_free_are_removed(repo: Path) -> None:
-    """Value 6: 消すのは NDF の印（持ち主の錠）のある、錠の外れたディレクトリだけ。PID を見ないので、名前空間の違う
-    コンテナの使用中のコピーも、錠を持たれていれば消さない。印の無い利用者のディレクトリは数字始まりでも消さない。"""
-    gone = _owned_copy_dir("4194399-left")
-    held = _owned_copy_dir("4194398-other-container")
-    fd = os.open(held / ls.OWNER_LOCK, os.O_RDONLY)
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    users = ls.copies_dir() / "4194397-mine"
-    users.mkdir()
+def test_only_copies_recorded_by_ndf_and_not_in_use_are_removed(repo: Path) -> None:
+    """Value 6: 消すのは NDF の記録が合い、錠の外れたコピーだけ。PID を見ないので、名前空間の違うコンテナが使用中の
+    コピーも、錠を取られていれば消さない。記録の無いもの・記録の中身が違うものは、同じ形の名前でも消さない。"""
+    gone = _left_copy("4194399-00000000000000aa")
+    held = _left_copy("4194398-00000000000000bb")
+    users = _left_copy("4194397-00000000000000cc", record=False)
+    forged = _left_copy("4194396-00000000000000dd", record=False)
+    (ls.copies_dir() / f"{forged.name}{ls.OWNER_SUFFIX}").write_text("利用者のメモ", encoding="utf-8")
+    fd = os.open(ls.copies_dir() / f"{held.name}{ls.LOCK_SUFFIX}", os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)  # ほかのコンテナのオーナーが錠を取っている
     _write(repo, {"version": 1, "permissions": {"steps": {"*": {"mcp": [".ndf/mcp/a.json"]}}}})
     _write(repo, {"mcpServers": {}}, ".ndf/mcp/a.json")
     _approve(repo)
     try:
         with ls.prepared("impl", repo) as grant:
-            assert not gone.exists() and held.exists() and users.exists()
-            assert (grant.mcp_files[0].parent / ls.OWNER_LOCK).exists()
+            assert not gone.exists() and not (ls.copies_dir() / f"{gone.name}{ls.OWNER_SUFFIX}").exists()
+            assert held.exists() and users.exists() and forged.exists()
             with ls.prepared("impl", repo) as again:  # 使用中のコピーは、次の起動の掃除で消えない
                 assert grant.mcp_files[0].exists() and again.mcp_files[0].exists()
+        ident = grant.mcp_files[0].parent.name
+        assert not any(p.name.startswith(ident) for p in ls.copies_dir().iterdir())  # 抜けると記録と錠のファイルも消える
     finally:
         os.close(fd)
+
+
+def test_a_copy_whose_removal_stopped_halfway_is_removed_by_the_next_sweep(repo: Path) -> None:
+    """Value 6: 記録はディレクトリを消し終えてから消すので、掃除の途中で落ちて定義だけが残っても、次の掃除で消える。"""
+    left = _left_copy("4194395-00000000000000ee")
+    (ls.copies_dir() / f"{left.name}{ls.LOCK_SUFFIX}").unlink(missing_ok=True)
+    _write(repo, {"version": 1, "permissions": {"steps": {"*": {"mcp": [".ndf/mcp/a.json"]}}}})
+    _write(repo, {"mcpServers": {}}, ".ndf/mcp/a.json")
+    _approve(repo)
+    with ls.prepared("impl", repo):
+        assert not left.exists() and not (ls.copies_dir() / f"{left.name}{ls.OWNER_SUFFIX}").exists()
 
 
 @pytest.mark.parametrize("change", ["settings", "definition", "revoke"])
