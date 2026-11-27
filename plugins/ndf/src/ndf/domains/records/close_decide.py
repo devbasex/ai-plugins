@@ -129,6 +129,13 @@ def records_verdict(issue: int, view: Mapping[str, Any], enforced: bool) -> Verd
     if not reflection.complete:
         return Verdict(KEEP, f"反映がそろっていない（まだの届け先: {', '.join(reflection.missing)}）", False, release)
     checks = record_decide.verifications_of(view["verifications"], rep.version, rep.unit)
+    return _targets_verdict(issue, checks, targets, enforced, release)
+
+
+def _targets_verdict(
+    issue: int, checks: list[Mapping[str, Any]], targets: tuple[str, ...], enforced: bool, release: dict[str, Any]
+) -> Verdict:
+    """反映がそろったバージョンの無い代表の、対象の届け先ごとの判定（悪い方を優先する: 不合格 → 保留 → 行の無い届け先 → 合格）。"""
     got = {t: record_decide.pair_verdict(checks, t, issue) for t in targets}
     failed = [t for t, v in got.items() if v == "failed"]
     if failed:
