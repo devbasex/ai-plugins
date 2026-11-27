@@ -177,6 +177,8 @@ workflow でリリースする形では、リリース記録は含めた PR の�
 **課題を閉じる判定が読むのは、機械が読む記録である。** 表を書いた後に、同じ結果を
 [リリース後テストの記録のスキーマ](../../contracts/schemas/release-verification.schema.json) の JSON
 （`version` と、課題ごとの `number`・`result`（`passed` / `failed` / `not_run`）・`evidence`）にして、上の表で決めた PR へ書く。
+`version` は工程の文脈の `product_version` と同じ値を書く。バージョン番号を持たないリポジトリでは、バージョン番号の形でない
+出したものを指す値（例: `main abc1234`）も受け付ける。改行を含む値と空白だけの値は形の誤りになる。
 
 ```bash
 ndf release-steps verification-record --pr <上の表で決めた PR> --record <記録の JSON>

@@ -349,7 +349,10 @@ def _outputs(v: run.View, q: Question, a: Answer) -> list[model.EventDraft]:
     errs = invoke.value_errors(kept)
     if errs:
         raise model.Refused(f"工程 {q.stage} への回答が運ぶ値が文脈の形に合わない: {'; '.join(errs)}")
-    return [model.EventDraft(stages.OUTPUTS_EVENT, run.ACTOR, q.stage, payload={"outputs": kept}, rev=v.rev)]
+    payload: dict[str, Any] = {"outputs": kept}
+    if a.release_store is not None:
+        payload["release_store"] = a.release_store
+    return [model.EventDraft(stages.OUTPUTS_EVENT, run.ACTOR, q.stage, payload=payload, rev=v.rev)]
 
 
 def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Post) -> None:

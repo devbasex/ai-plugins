@@ -400,3 +400,36 @@ def test_issue_3852_cli_writes_to_a_holder_without_the_branch_strategy(
     # 設定が無いのでリリースの PR では探さず、items を持たずに止まる
     code, out = _verification_cli(tmp_path, monkeypatch, capsys, hub, RELEASE)
     assert code == 3 and out["cause"]["kind"] == "precondition" and not out.get("items")
+
+
+# --- #4513: バージョン番号を持たないリポジトリのリリースの識別子（受け入れ条件 4・決定 5） -------------------------------------------
+
+DIST_ID = "main abc1234"
+
+
+def test_a_one_line_verification_record_reads_back_the_same_version_and_issues() -> None:
+    payload = {"version": DIST_ID, "issues": [{"number": 4513, "result": "passed", "evidence": "工程が終わった"}]}
+    (got,) = record_decide.verifications([record_decide.render_verification(payload)])
+    assert (got["version"], got["issues"]) == (payload["version"], payload["issues"])
+
+
+def test_after_release_steps_do_not_stop_on_a_distribution_id_that_is_not_a_version_number(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """リリースの識別子の本番リリース記録を持つ PR へリリース後テストを記録し、投稿された記録で課題を閉じる判定まで通る。"""
+    from ndf.domains.records import cli as records_cli
+
+    hub = FakeHub(trusted={"octocat"})
+    body = record_decide.render_record(record_decide.Record(DIST_ID, RELEASE, (11,)))
+    hub.comments_of[11] = [Authored("octocat", "OWNER", body)]
+    path = tmp_path / "verification.json"
+    path.write_text(json.dumps({"version": DIST_ID, "issues": [{"number": 4513, "result": "passed", "evidence": "x"}]}), encoding="utf-8")
+    monkeypatch.setattr(release_cli, "_hub", lambda args, remote=None: hub)
+    code = release_cli.main(["verification-record", "--root", str(tmp_path), "--pr", "11", "--record", str(path)])
+    assert code == 0, capsys.readouterr().out
+    (posted,) = record.read(hub, 11).verifications
+    posted_file = tmp_path / "posted.json"
+    posted_file.write_text(json.dumps(posted), encoding="utf-8")
+    args = records_cli._parser().parse_args(["close-check", "4513", "--verification", str(posted_file), "--require"])
+    out = records_cli._close_check(args, tmp_path)
+    assert out["status"] == "ok" and out["items"][0]["closable"] is True

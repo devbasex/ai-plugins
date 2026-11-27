@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -41,7 +41,17 @@ from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
 from ndf.contracts import facts, internal, limits, result, worker_paths
-from ndf.contracts.worker_kinds import VALUES_FILE, kind_gaps, read_values, write_values
+from ndf.contracts.worker_kinds import (
+    PRODUCT_VERSION,
+    VALUES_FILE,
+    Recorded,
+    kind_gaps,
+    read_values,
+    released_of,
+    work_kinds,
+    write_released,
+    write_values,
+)
 from ndf.core import durable, production_merge, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
@@ -570,11 +580,23 @@ def _missing(names: Sequence[str], values: Mapping[str, route.Value], sources: M
 
 
 class PreparedPlan(NamedTuple):
-    """組んだ差し込みと描画の条件（手元のテストのステップを含めるか）。"""
+    """組んだ差し込みと描画の条件（手元のテストのステップを含めるか）。
+
+    `released` は組んだか読んだ `values.json` が今持つ記録済みの値。`uses_released` は `prepare_plan` が初回に判定した
+    「記録済みの値を使うプランか」で、`_prepared` が使い回す回は None（判定していない。#4513）。
+    """
 
     template: route.Template
     values: dict[str, route.Value]
     local_tests: bool
+    released: Optional[Recorded] = None
+    uses_released: Optional[bool] = None
+
+
+def uses_released(kinds: Iterable[str]) -> bool:
+    """作業の名前の並びに、出力に `product_version` を持つ作業（今は `release`）があるか。定義に無い名前は `KeyError`。"""
+    defs = work_kinds()
+    return any(PRODUCT_VERSION in defs[k]["outputs"] for k in kinds)
 
 
 def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> Optional[PreparedPlan]:
@@ -597,12 +619,16 @@ def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> Optional[PreparedP
     local_tests = not ci_only(project)
     values = template_values(t, run, work_dir, cwd, project=project, local_tests=local_tests)
     gaps: dict[str, str] = {}
-    for kind in route.kinds_of(t, local_tests):
+    kinds = route.kinds_of(t, local_tests)
+    for kind in kinds:
         gaps.update(kind_gaps(kind, values, run.inputs, sources=FILL_SOURCES, covers=route.LAUNCH_SOURCES))
     if gaps:
         raise KindInputsMissing(t.name, gaps)
-    write_values(work_dir, run.name, values, run.inputs, local_tests)
-    return PreparedPlan(t, values, local_tests)
+    # 記録済みの値を使うプランだけ、リリース承認ゲートの回答を探して同じ書き込みで残す（#4513。使わないプランは履歴をたどらない）
+    uses = uses_released(kinds)
+    released = run.released() if uses else None
+    write_values(work_dir, run.name, values, run.inputs, local_tests, released)
+    return PreparedPlan(t, values, local_tests, released, uses)
 
 
 def _prepared(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
@@ -612,7 +638,7 @@ def _prepared(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
     """
     t, held = _template_of(run), read_values(work_dir)
     if t is not None and held is not None and held["plan"] == run.name:
-        return PreparedPlan(t, held["values"], held["local_tests"])
+        return PreparedPlan(t, held["values"], held["local_tests"], released_of(held))
     prepared = prepare_plan(run, work_dir, cwd)
     assert prepared is not None  # 単位に分けない呼び出し（`invoke` が `plain` にしたもの）だけがここへ来る
     return prepared
@@ -624,12 +650,20 @@ def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
     差し込みは同じ試行で組んだ `values.json` の値を使い、無ければ `prepare_plan` で 1 回だけ組む（入力に無い値は出所の表
     `FILL_SOURCES` と打った場所から決め、欠ければ `TemplateValuesMissing`）。テンプレートが無ければ `model.Refused`。
 
+    記録済みの値を使うプラン（`uses_released`）は、保存済みの `values.json` から再開する回に今のテンプレートで判定し直し、
+    記録済みの値が前と違うときだけ `write_released` で書き直す（前の試行・直す前の NDF が残した値を使わない。#4513）。
+
     プランは `values.json` と同じく、開いた保存先の記述子から、ほかの利用者が書き込めないファイルとして公開する（リンクを
     たどって別のファイルを上書きしない）。`ndf plan next` はこのパスを開き直すので、返す前に、名前と保存先から根までのどの
     項目もほかの利用者が差し替えられないことを確かめる（`worker_paths.check_unshared`。書いたプランと別のプランを流さない）。
     """
-    t, values, local_tests = _prepared(run, work_dir, cwd)
-    plan = route.render(t, values, local_tests=local_tests)
+    ready = _prepared(run, work_dir, cwd)
+    if ready.uses_released is not None:  # 工程の初回: prepare_plan の判定と書き込みをそのまま使う
+        plan = route.render(ready.template, ready.values, local_tests=ready.local_tests)
+    else:  # 保存済みの values.json からの再開: 今のテンプレートで判定し、記録済みの値が変わったときだけ書き直す
+        plan, kinds = route.rendered(ready.template, ready.values, local_tests=ready.local_tests)
+        if uses_released(kinds) and (now := run.released()) != ready.released:
+            write_released(work_dir, now)
     name = f"{run.name}.json"
     with worker_paths.open_or_create(work_dir) as wd:
         worker_paths.write_file(wd, name, json.dumps(plan, ensure_ascii=False, indent=2) + "\n", private=True)
@@ -725,15 +759,28 @@ def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -
 
 
 def _no_route(run: StageRun, work_dir: Path, answer: Optional[str]) -> Optional[StageResult]:
-    """承認ゲートで終わった回への回答に続きが無いときの結果。承認ならプランは終わり、ほかは承認されなかった。続きがあれば None。"""
+    """承認ゲートで終わった回への回答に続きが無いときの結果。承認ならプランは終わり、ほかは承認されなかった。続きがあれば None。
+
+    承認の回答では、続きがあるかを見る前に、判断を求めたステップ自身の欠け（`metrics.missing_outputs`）を見て、あれば続けずに
+    bad_report で止める。続けた後のステップや先のステップが同じキーを返すと、欠けが合成した出力で隠れるためである（#4513）。
+    """
     routes = stored_gate_routes(work_dir) if answer else None
-    if routes is None or plan_runs.from_of(routes[answer] if answer in routes else None) is not None:
+    if routes is None:
+        return None
+    done = plan_runs.previous(work_dir)[1] if answer == APPROVED else None
+    missing = definition.waited_missing(done)
+    if missing:
+        detail = definition.answered_gap_detail(missing, definition.gate_summary_of(done))
+        return StageResult(result.stopped(PLAN, "bad_report", detail), {})
+    if plan_runs.from_of(routes[answer] if answer in routes else None) is not None:
         return None
     if answer == APPROVED:
-        _, done = plan_runs.previous(work_dir)
         assert done is not None
         outputs = done["outputs"] if isinstance(done.get("outputs"), dict) else {}
-        return finished(run, result.result(PLAN, result.OK, f"プラン {run.name} の最後の承認ゲートが承認された", outputs=outputs))
+        said = f"プラン {run.name} の最後の承認ゲートが承認された"
+        return finished(
+            run, result.result(PLAN, result.OK, said, metrics={definition.WAITED: definition.gate_summary_of(done)}, outputs=outputs)
+        )
     return StageResult(result.stopped(PLAN, "refused", f"プラン {run.name} の承認ゲートで承認されなかった（回答 {answer}）"), {})
 
 

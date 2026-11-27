@@ -480,13 +480,19 @@ def render(t: Template, given: Mapping[str, Value], *, local_tests: bool = True)
     `local_tests` が偽（CI テストの設定 `test.ci.only` があるリポジトリ）なら、手元でテストを打つステップ
     （`LOCAL_TEST_STEPS`）を外して組む。テストは CI の結果で確かめる。`{{refactor}}` の起動で経路を組み替える（`_by_refactor_gate`）。
     """
+    return rendered(t, given, local_tests=local_tests)[0]
+
+
+def rendered(t: Template, given: Mapping[str, Value], *, local_tests: bool = True) -> tuple[dict[str, Any], list[str]]:
+    """`render` と同じプランと、埋める前の形（`_by_refactor_gate` で組み替えたもの）から取った作業の名前（現れた順。#4513）。"""
     values = resolve(t, given, local_tests=local_tests)
-    plan = _fill(_by_refactor_gate(t.name, expanded(t, local_tests=local_tests), values), values)
+    shape = _by_refactor_gate(t.name, expanded(t, local_tests=local_tests), values)
+    plan = _fill(shape, values)
     try:
         model.parse(plan)
     except model.PlanError as exc:
         raise RouteError(f"テンプレート {t.name} から組んだプランが誤り: {exc}") from None
-    return plan
+    return plan, list(dict.fromkeys(work_names(shape)))
 
 
 # テンプレートの中で、作業の名前を後ろに置く worker の起動の差し込み
@@ -651,7 +657,7 @@ def repeated(history: Sequence[str], key: str, same_cause: int) -> bool:
 
 def repo_root(cwd: Path) -> str:
     """打った場所の git のworktreeの根（サブモジュールならそのworktree。共通の git ディレクトリから求めない）。"""
-    return git.Git(cwd).run("rev-parse", "--show-toplevel").strip()
+    return str(git.Git(cwd).toplevel())
 
 
 def default_base(repo: Path) -> str:

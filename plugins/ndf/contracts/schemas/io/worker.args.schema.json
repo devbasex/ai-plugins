@@ -208,6 +208,9 @@
           "items": {
             "type": "string"
           }
+        },
+        "--require-version-number": {
+          "type": "boolean"
         }
       },
       "required": [

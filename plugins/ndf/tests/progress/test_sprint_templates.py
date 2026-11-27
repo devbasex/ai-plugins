@@ -238,13 +238,13 @@ def _worktree_plan(repo: Path, plan_path: Path, report: dict, monkeypatch) -> di
     monkeypatch.setattr(runner, "_head", lambda plan: "0" * 40)
     inv = runner.prepare(repo / ".git" / "ndf" / "state", plan_path, None, None, repo)
     inv.state_dir.mkdir(parents=True, exist_ok=True)
-    checked, outputs = worker_outcome.require_outputs(report, worker_kinds.work_kinds()["worktree"]["outputs"])
+    checked, outputs, _ = worker_outcome.require_outputs(report, worker_kinds.work_kinds()["worktree"]["outputs"])
     said = worker_outcome.outcome_of("worktree", repo / "result.json", checked, [], {"attempts": 1}, outputs=outputs)
 
     def perform(act: transition_decide.RunStep) -> transition_decide.Outcome:
         out = steps.outcome_of(inv.plan.step(act.step), result.code_for(said), result.dumps_line(said))
         if out["outputs"]:
-            records._add_outputs(inv.state_dir, out["outputs"])
+            records._add_outputs(inv.state_dir, act.step, out["status"], out["outputs"])
         records._keep_step_gaps(inv.state_dir, act.step, out["gaps"])
         return transition_decide.Outcome(out["status"], out["kind"], out["retry_after"])
 
