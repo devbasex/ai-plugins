@@ -155,6 +155,8 @@ def unpriced_models(rows: Sequence[Mapping[str, Any]], where: Where, start: date
         for r in rows
         if r["kind"] == "unpriced" and where.of(a := found.get(r["assign_id"])) and a is not None and row_time(a) >= start
     }
+    if not models:
+        return []
     return sorted(models - set(codex_prices()["models"]))  # 行を書いた後に単価表へ載ったモデルは数えない
 
 

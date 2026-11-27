@@ -34,6 +34,9 @@ from ndf.contracts import facts, limits
 SANDBOX_FAILED = "bwrap:"
 # その行。行頭に限り、相手役が標準エラーへ写した差分・文書の中の語を拾わない（PR 3944 の差分の文書で誤って読めなかったとした）
 _SANDBOX_LINE = re.compile(r"^" + re.escape(SANDBOX_FAILED), re.MULTILINE)
+# コマンドの出力で見つけた失敗として返す固定の文。出力の行は手元のパスやコマンドが出したデータを含み得て、返す値は
+# PR のコメントに載るので写さない（原文は起動の `.out` に残る）
+SANDBOX_FAILED_IN_COMMAND = f"{SANDBOX_FAILED} サンドボックスの失敗でコマンドを打てなかった（出力の原文は手元の起動の .out に残る）"
 
 
 @functools.lru_cache(maxsize=1)
@@ -52,7 +55,8 @@ def user_namespaces() -> bool:
 
 
 def sandbox_failed(paths: "AgentPaths") -> Optional[str]:
-    """起動の標準エラーか、`codex exec --json` のコマンドの出力にサンドボックスの失敗（`SANDBOX_FAILED`）があればその行。無ければ None。
+    """サンドボックスの失敗（`SANDBOX_FAILED`）が起動の標準エラーにあればその行、`codex exec --json` のコマンドの出力にあれば
+    固定の文（`SANDBOX_FAILED_IN_COMMAND`）。無ければ None。
 
     失敗は最初のコマンドで出て、その後の回答のログに埋もれるので、末尾でなく全体を読む。`--json` の起動は失敗を標準エラーに
     出さず、失敗で終わったコマンドの出力が `bwrap:` で始まる。"""
@@ -63,9 +67,8 @@ def sandbox_failed(paths: "AgentPaths") -> Optional[str]:
     for item in (e.get("item") for e in codex_events(paths.out) if e.get("type") == "item.completed"):
         if not isinstance(item, dict) or item.get("type") != "command_execution" or item.get("exit_code") == 0:
             continue
-        output = str(item.get("aggregated_output"))
-        if output.startswith(SANDBOX_FAILED):
-            return _line_at(output, 0)
+        if str(item.get("aggregated_output")).startswith(SANDBOX_FAILED):
+            return SANDBOX_FAILED_IN_COMMAND
     return None
 
 
@@ -107,6 +110,43 @@ def codex_events(out: Path) -> list[dict[str, Any]]:
     if first is None or first.get("type") != _CODEX_STARTED:
         return []
     return [e for e in map(_codex_event, lines) if e is not None]
+
+
+@dataclass
+class CodexTail:
+    """監視の間、`--json` の出力に追記された行だけを読む。起動ごとに 1 つ持つ。
+
+    `offset` は読み終えた行の直後の位置で、改行の来ていない行は次の回に読む。最初の行が `thread.started` でなければ
+    （`other`）、その後は出力を開かない。
+    """
+
+    offset: int = 0
+    started: bool = False
+    other: bool = False
+
+    def new(self, out: Path, ended: bool) -> list[dict[str, Any]]:
+        """前の回より後のイベント。子が終わった（`ended`）なら、改行の無い最後の行も読む。"""
+        if self.other:
+            return []
+        try:
+            with open(out, "rb") as fh:
+                fh.seek(self.offset)
+                data = fh.read()
+        except FileNotFoundError:
+            return []
+        if not ended:
+            data = data[: data.rfind(b"\n") + 1]
+        if not data:
+            return []
+        self.offset += len(data)
+        lines = data.decode("utf-8", errors="replace").split("\n")
+        if not self.started:
+            first = _codex_event(lines[0])
+            self.started = first is not None and first.get("type") == _CODEX_STARTED
+            self.other = not self.started
+            if self.other:
+                return []
+        return [e for e in map(_codex_event, lines) if e is not None]
 
 
 class CodexUsage(NamedTuple):
@@ -330,6 +370,7 @@ class _Watch:
     last_change: float
     size: int = -1
     warned: Warned = field(default_factory=Warned)
+    events: CodexTail = field(default_factory=CodexTail)
 
     def progressed(self, now: float) -> None:
         size = sum(p.stat().st_size for p in self.spec.paths.watched() if p.exists())
@@ -342,10 +383,10 @@ def _report_warnings(w: _Watch) -> None:
         diag(f"[{w.spec.agent}] 早期の警告（{kind}）: {text}", kind=kind, agent=w.spec.agent)
 
 
-def _out_usage_limit(spec: Launch) -> Optional[str]:
-    """claude の標準出力の結果の JSON か、`codex exec --json` の誤りのイベントに利用上限があれば返す（他の CLI の標準出力は読まない）。"""
+def _out_usage_limit(spec: Launch, seen: CodexTail, ended: bool) -> Optional[str]:
+    """claude の標準出力の結果の JSON か、`codex exec --json` の誤りのイベントに利用上限があれば返す（他の CLI の標準出力は読まない）。codex は `seen` の続きだけを読む。"""
     if spec.agent == "codex":
-        return next((hit for e in codex_events(spec.paths.out) if (hit := usage_limit(_failure_message(e)))), None)
+        return next((hit for e in seen.new(spec.paths.out, ended) if (hit := usage_limit(_failure_message(e)))), None)
     if spec.agent != "claude" or not CLAUDE_USAGE_LIMIT_JSON.search(tail(spec.paths.out)):
         return None
     return "標準出力の結果の JSON に api_error_status 429"
@@ -353,7 +394,7 @@ def _out_usage_limit(spec: Launch) -> Optional[str]:
 
 def _verdict(w: _Watch, code: Optional[int], now: float) -> Optional[tuple[str, str]]:
     """終わり方を決める。まだ続くなら None。利用上限は終了コードより先に見る。"""
-    hit = usage_limit(tail(w.spec.paths.err)) or _out_usage_limit(w.spec)
+    hit = usage_limit(tail(w.spec.paths.err)) or _out_usage_limit(w.spec, w.events, ended=code is not None)
     if hit:
         return AgentState.USAGE_LIMIT, hit
     if code is not None:

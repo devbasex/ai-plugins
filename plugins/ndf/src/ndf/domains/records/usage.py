@@ -144,7 +144,7 @@ def record_codex(used: Any, meta: Mapping[str, Any], choice: Any) -> None:
         if cost is not None:
             row["session_cost_usd"] = cost
     record_cli(mapped, row)
-    if name not in experiment_rows.codex_prices()["models"] and choice.assign_id is not None:
+    if cost is None and choice.assign_id is not None:
         model_choice.append_row(dict(kind="unpriced", at=jsonl.now(), assign_id=choice.assign_id, model=name), choice.store)
 
 

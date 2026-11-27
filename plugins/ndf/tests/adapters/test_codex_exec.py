@@ -71,8 +71,9 @@ def test_a_run_without_a_completed_turn_has_no_usage(tmp_path, out):
 
 
 def test_a_sandbox_failure_is_found_in_the_command_output_of_the_stream(tmp_path):
-    """`--json` では bwrap の失敗は標準エラーに出ず、コマンドの出力の行に入る。"""
-    assert agents.sandbox_failed(_paths(tmp_path, THREAD + _command(BWRAP, 1, "failed") + USAGE)) == BWRAP.strip()
+    """`--json` では bwrap の失敗は標準エラーに出ず、コマンドの出力の行に入る。返す値は公開されるので、出力の行を写さない。"""
+    out = THREAD + _command("bwrap: Can't mkdir /home/someone/secret\n", 1, "failed") + USAGE
+    assert agents.sandbox_failed(_paths(tmp_path, out)) == agents.SANDBOX_FAILED_IN_COMMAND
 
 
 @pytest.mark.parametrize(
@@ -89,7 +90,7 @@ def test_a_quoted_sandbox_line_is_not_a_sandbox_failure(tmp_path, out):
 
 def _limit(tmp_path, out: str) -> object:
     spec = agents.Launch("codex", ("codex",), tmp_path, _paths(tmp_path, out), 60)
-    return agents._out_usage_limit(spec)
+    return agents._out_usage_limit(spec, agents.CodexTail(), ended=False)
 
 
 @pytest.mark.parametrize(
@@ -111,6 +112,22 @@ def test_a_usage_limit_is_found_in_the_error_events(tmp_path, message):
 )
 def test_a_quoted_or_transient_line_is_not_a_usage_limit(tmp_path, out):
     assert _limit(tmp_path, out) is None
+
+
+def test_the_watch_reads_only_the_complete_lines_added_since_the_last_check(tmp_path):
+    out = _paths(tmp_path, THREAD + '{"type":').out
+    seen = agents.CodexTail()
+    assert [e["type"] for e in seen.new(out, ended=False)] == ["thread.started", "turn.started"]
+    with out.open("a", encoding="utf-8") as fh:
+        fh.write('"error"}\n{"type":"turn.failed"}')
+    assert [e["type"] for e in seen.new(out, ended=False)] == ["error"]
+    assert [e["type"] for e in seen.new(out, ended=True)] == ["turn.failed"]
+
+
+def test_the_watch_stops_reading_an_output_that_is_not_json(tmp_path):
+    out = _paths(tmp_path, "本文\n").out
+    seen = agents.CodexTail()
+    assert seen.new(out, ended=False) == [] and seen.other
 
 
 @pytest.mark.parametrize("out", [MODEL_REFUSED, EFFORT_REFUSED])

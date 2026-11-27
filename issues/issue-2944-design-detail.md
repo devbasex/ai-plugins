@@ -361,11 +361,12 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `review_launch`・`read_only_launch`・`reading_launch` | `core/converge/participants.py` | 変更 | 末尾に `choice: Optional[Choice] = None` | 組の引数と環境を足し、Codex は `usage_args` を足す |
+| `with_choice` | `core/converge/participants.py` | 新設 | `with_choice(spec: agents.Launch, choice: Optional[Any]) -> agents.Launch` | `review_launch`・`read_only_launch`・`reading_launch` が組み立てた起動に組の引数と環境を足し、Codex は `usage_args` を足す |
 | `answer_text` | 同 | 変更 | 変えない | `<出力>.answer` があれば、その本文を読む |
 | `_start_and_watch` | `adapters/agents.py` | 変更 | 変えない | `AgentStatus.seconds` に起動から終了までの秒を入れる |
-| `codex_usage` | 同 | 新設 | `codex_usage(out: Path) -> Optional[dict]` | `turn.completed` の行の `usage` を足し合わせる |
-| `codex_cost` | `domains/records/usage.py` | 新設 | `codex_cost(usage: Mapping, model: Optional[str]) -> tuple[str, Optional[float]]` | 単価表から USD を返す。無いモデルは None |
+| `codex_usage` | 同 | 新設 | `codex_usage(out: Path) -> Optional[CodexUsage]` | `turn.completed` の行の `usage` を足し合わせる |
+| `codex_cost` | `domains/records/usage.py` | 新設 | `codex_cost(used: Any, model: Optional[str]) -> tuple[str, Optional[float]]`（`used` は `agents.CodexUsage`） | 換算に使ったモデルの名前と、単価表から求めた USD を返す。単価の無いモデルの USD は None |
+| `record_codex` | 同 | 新設 | `record_codex(used: Any, meta: Mapping[str, Any], choice: Any) -> None` | `caller` が `codex-exec` の行を書き、単価の無いモデルは実験の記録に `unpriced` の行を足す |
 | `_seat_launch`・`launch_reviewers`・`_seat_result` | `domains/crossreview/seats.py` | 変更 | `_seat_launch(run, seat, prompt, stem, choice)` | シートの単位で値を取得し、起動ごとに行を書き、Codex の回答を `answer_text` で読む |
 | `_fixer_launch`・`_launch_fixer`・`_keep_fixer` | `domains/crossreview/fixer.py` | 変更 | 変えない | 修正担当の値と `charge_to`・`session_seq` を状態ファイルに残して再開に使う |
 | `enter` | `domains/crossreview/journal.py` | 変更 | 変えない | 同じ指摘を挙げた担当を `raisers` にすべて残す |
@@ -377,11 +378,11 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - `_record_experiment` は、終わり方が収束かラウンドの上限のときに書く。結果を読めないシートがあって終わった場合と、誤りで終わった場合は書かない。design と impl の指標は `1 / (1 + 1 ラウンド目の採用された重大な指摘の数)` で、数が None なら null
 - 修正担当は `launch_choice("seat", "fix")`（工程が無いので実験の引数を足さない）。環境変数と引数の指定は効く
 - シートの子の環境から `NDF_CHARGE_TO` を外す
-- `codex exec --json` は理由を標準エラーに出さないので、利用上限は `error`・`turn.failed` の行の文を `usage_limit` で読み、サンドボックスの失敗は終了コードが 0 でない `command_execution` の出力が `bwrap:` で始まるかを `sandbox_failed` が読む。どちらも、最初の行が `thread.started` の出力だけを `--json` の出力と扱う（`codex_events`）
+- `codex exec --json` は理由を標準エラーに出さないので、利用上限は `error`・`turn.failed` の行の文を `usage_limit` で読み、サンドボックスの失敗は終了コードが 0 でない `command_execution` の出力が `bwrap:` で始まるかを `sandbox_failed` が読む。コマンドの出力で見つけた失敗は、出力の行でなく固定の文を返す。行は手元のパスやコマンドが出したデータを含み得て、PR のコメントに載るためである。監視の間の利用上限の確認は、追記された行だけを読む（`CodexTail`）。どちらも、最初の行が `thread.started` の出力だけを `--json` の出力と扱う（`codex_events`）
 - 起動の前に回答のファイル（`<出力>.out.answer`）を消す（`_start`）。codex は失敗すると前の中身を残すためである
-- 実装で設計の形を変えた所（B5）。振る舞いは変えていない
-  - 値は `review_launch`・`read_only_launch`・`reading_launch` の引数にせず、組み立てた起動に `participants.with_choice(launch, choice)` で足す。引数を足すと上限（PLR0913。6）を超え、cross-refactoring が呼ぶ関数の形も変わるためである
-  - `codex_usage` は辞書でなく `agents.CodexUsage`（4 つの欄）を返し、`codex_cost` はそれを受ける。欄の名前の文字列を複数のファイルに置くと重複の検査が落とすためである。`codex_cost` の返り値の 1 つ目は、換算に使ったモデルの名前である。行を書くのは `usage.record_codex`、行の `caller` は `codex-exec` である
+- 実装で設計の形を変えた理由（B5）。振る舞いは変えていない
+  - 値を起動の組み立ての関数の引数にしないのは、引数を足すと上限（PLR0913。6）を超え、cross-refactoring が呼ぶ関数の形も変わるためである
+  - 使用量を辞書で持たないのは、欄の名前の文字列を複数のファイルに置くと重複の検査が落とすためである
 - Codex の行は `session_seq` 0、費用は `codex_cost` の値を `session_cost_usd` に書く。単価が無ければ欄を置かず、`unpriced` の行を足す
 
 ### 異常系の処理
