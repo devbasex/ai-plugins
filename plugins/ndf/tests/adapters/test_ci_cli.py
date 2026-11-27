@@ -279,6 +279,14 @@ def test_watch_reads_the_pull_head_outside_its_branch() -> None:
     assert hub.read_shas == [HEAD]
 
 
+def test_issue_3702_watch_head_pins_the_reads_to_the_checked_sha() -> None:
+    """`pinned` があれば、作業場所の HEAD も PR の今の HEAD も追わず、渡した SHA のチェックだけを読む。"""
+    hub = _Hub([NEW], {HEAD: [run("pytest")], NEW: [run("pytest", conclusion="failure")]})
+    reader = ci_cli.HeadReader(hub, _pull(HEAD), None, ["pytest"], ["pytest"], pinned=HEAD)
+    assert reader().verdict == "passed" and reader().verdict == "passed"
+    assert hub.read_shas == [HEAD, HEAD]
+
+
 def test_local_head_only_on_the_pull_branch(tmp_path: Path) -> None:
     from ndf.adapters import git
 

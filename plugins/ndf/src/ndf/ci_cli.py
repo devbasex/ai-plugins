@@ -63,7 +63,11 @@ def _watch_parser(sub: Any) -> None:
     w.add_argument("--budget", type=float, required=True, help="待ちの合計の秒（ランナーの割り当ての待ちは数えない）")
     w.add_argument("--after-merge", action="store_true", help="マージの段階が落ちた後の判定")
     w.add_argument("--merge-failed", action="append", default=[], help="マージの段階が落ちたと読んだチェックの名前")
-    w.add_argument("--head", help="待つ PR の HEAD。待ちの開始か成功の確定の時点で PR の HEAD が違えば approval_stale で止まる")
+    w.add_argument(
+        "--head",
+        help="待つ PR の HEAD。このコミットのチェックだけを読み、作業場所の HEAD は追わない。"
+        "待ちの開始か成功の確定の時点で PR の HEAD が違えば approval_stale で止まる",
+    )
     w.set_defaults(run=_watch)
 
 
@@ -81,7 +85,7 @@ def _parser() -> argparse.ArgumentParser:
         type=int,
         help="PR の番号。--branch か --base を添えると、まず PR がその指定に合うかを確かめる。"
         "head のブランチ名かマージ先が指定と違う PR、フォークからの PR、マージされずに閉じた PR は refused で止まる。"
-        "--branch と --base を両方省くと、この確かめを省く。確かめを通った後も、省いた後も、次に PR がマージ済みかを調べる。マージ済みなら、マージ操作をせずに ok を返す。"
+        "--branch と --base を両方省くと、この確かめを省く。確かめを通った後も、省いた後も、次に PR がマージ済みかを調べる。マージ済みの場合はマージ操作を省く。--verify-merged の指定がなければ ok を返す。指定があれば、承認した HEAD とマージ先に PR が合うかを確かめ、違えば refused を返す。"
         "作業場所が無いときは、--branch を省き、--pr と --repo を渡す",
     )
     m.add_argument("--base", help="期待するマージ先。対象の PR のマージ先が違えばマージしない")
@@ -195,12 +199,25 @@ class HeadReader:
     `local`（作業場所の HEAD）を渡すと、PR の HEAD がそれに追いつくまでは PR を読み直し、結論の出ていない読み取り
     （待っているものは `BEHIND`）を返す。push の直後は GitHub の PR がまだ前のコミットを指し、そのまま読むと前の
     コミットの結果を返すため。待ちの間隔と予算は `Watch` が持つ。読んだ PR は `pull` に残る（結果 JSON が使う）。
+
+    `pinned`（`--head` と一致を確かめた PR の HEAD の完全な SHA）を渡すと、`local` を使わず、そのコミットのチェックだけを読む。
+    作業場所の未送信のコミットを待ったり、待つ間に PR が動いた先のコミットの結果を読んだりしないため（#3702）。
     """
 
-    def __init__(self, hub: GitHub, pull: github_mod.Pull, local: Optional[str], required: list[str], tests: list[str]) -> None:
-        self.hub, self.pull, self.local, self.required, self.tests = hub, pull, local, required, tests
+    def __init__(
+        self,
+        hub: GitHub,
+        pull: github_mod.Pull,
+        local: Optional[str],
+        required: list[str],
+        tests: list[str],
+        pinned: Optional[str] = None,
+    ) -> None:
+        self.hub, self.pull, self.local, self.required, self.tests, self.pinned = hub, pull, local, required, tests, pinned
 
     def __call__(self) -> Reading:
+        if self.pinned is not None:
+            return read(self.hub.check_runs(self.pinned), self.required, self.tests)
         if self.local is not None and self.pull.head_sha != self.local:
             self.pull = self.hub.pull(self.pull.number)
             if self.pull.head_sha != self.local:
@@ -220,7 +237,11 @@ def _watch(args: argparse.Namespace) -> dict:
     moved = _moved_head(args, pull)
     if moved is not None:
         return moved
-    reader = HeadReader(hub, pull, local_head(pull.head_ref), args.required, args.test)
+    if args.head is not None:
+        # 一致を確かめた PR の HEAD の完全な SHA にチェックの読み取りを固定する（作業場所の HEAD を追わない。#3702）
+        reader = HeadReader(hub, pull, None, args.required, args.test, pinned=pull.head_sha)
+    else:
+        reader = HeadReader(hub, pull, local_head(pull.head_ref), args.required, args.test)
     watch.reader = reader
     watched = watch.run()
     kind = watched.cause_by(classifier)
