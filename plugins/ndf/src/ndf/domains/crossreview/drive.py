@@ -306,7 +306,6 @@ def _start(cfg: RunConfig, reader_for: Optional[carry.ReaderFor], clean: report_
     )
     if rebound:
         _save(run)
-    verify.recover(run)
     _ingest_pending(run)
     _resend(run, synced)
     return run

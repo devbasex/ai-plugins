@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -261,10 +259,10 @@ def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers
     listed = diff.parent / "round1-verify-findings.jsonl"
     assert str(listed) in argv[-1] and not any("保存が止まる" in a for a in argv)
     assert "保存が止まる" in listed.read_text(encoding="utf-8")
-    # 出力はこの起動で作った実行者だけが開けるディレクトリに書かせ、記録を起動ごとの名前で状態の保存先へ移してディレクトリを消す
-    held = spec.paths.out.parent
-    assert held.parent == tmp_path and modes == [0o700] and not held.exists()
-    record = tmp_path / f"{held.name}.out"
+    # 出力はこの起動の間だけの実行者だけが開けるディレクトリに書かせ、起動ごとの名前で状態の保存先へ新規作成する
+    written = spec.paths.out.parent
+    assert modes == [0o700] and not written.exists()
+    record = tmp_path / f"{answers.record}.out"
     assert not record.is_symlink() and record.stat().st_mode & 0o777 == 0o600 and "verdicts" in record.read_text(encoding="utf-8")
     assert (tmp_path / "round1-verify.out").is_symlink()
     assert (tmp_path / "round1-verify.err.log").read_text(encoding="utf-8") == "前の記録"
@@ -272,22 +270,19 @@ def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers
     assert run.notes == [(1, "verify", "判定役へ 1 件、有効な回答 1 件")]
 
 
-def test_issue_4363_ask_keeps_the_records_of_every_launch_and_replaces_nothing(tmp_path: Path) -> None:
-    """同じラウンドの起動し直しでも前の記録は残る。移し先に同じ名前があれば、置き換えずに過程へ残す。"""
+def test_issue_4363_ask_keeps_the_records_of_every_launch_and_replaces_nothing(tmp_path: Path, monkeypatch) -> None:
+    """同じラウンドの起動し直しでも前の記録は残る。同じ名前があれば置き換えずに過程へ残し、判定の結果は変えない。"""
     run, diff, seen = _AskRun(tmp_path), _diff(tmp_path), []
     answered = _launcher(seen, [holding(_row())])
-
-    def taken(spec: agents.Launch) -> agents.AgentStatus:
-        (tmp_path / f"{spec.paths.out.parent.name}.out").write_text("前の記録", encoding="utf-8")
-        return answered(spec)
-
-    for launch in (answered, answered, taken):
-        assert verify.ask(run, 1, [_row()], {"r1-1": [diff]}, launch).verdicts["r1-1"].holds is True
-    first, second, third = (tmp_path / f"{spec.paths.out.parent.name}.out" for spec in seen)
-    assert first != second and all("verdicts" in p.read_text(encoding="utf-8") for p in (first, second))
-    assert third.read_text(encoding="utf-8") == "前の記録" and not seen[2].paths.out.parent.exists()
-    assert [note for note in run.notes if "移せない" in note[2]]
-    assert str(tmp_path) not in str(run.notes)
+    first, second = (verify.ask(run, 1, [_row()], {"r1-1": [diff]}, answered).record for _ in range(2))
+    assert first != second and all("verdicts" in (tmp_path / f"{n}.out").read_text(encoding="utf-8") for n in (first, second))
+    monkeypatch.setattr(verify.uuid, "uuid4", lambda: SimpleNamespace(hex="taken000"))
+    taken = tmp_path / "round1-verify-taken000.out"
+    taken.write_text("前の記録", encoding="utf-8")
+    answers = verify.ask(run, 1, [_row()], {"r1-1": [diff]}, answered)
+    assert answers.verdicts["r1-1"].holds is True and answers.record == ""
+    assert taken.read_text(encoding="utf-8") == "前の記録"
+    assert [note for note in run.notes if "書けない" in note[2]] and str(tmp_path) not in str(run.notes)
 
 
 @pytest.mark.parametrize("source", ["path", "principles_path"])
@@ -342,8 +337,7 @@ def test_issue_4363_ask_failure_gives_no_answer_and_one_warning(tmp_path: Path, 
     }[how]
     answers = verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [diff]}, launch)
     assert answers.verdicts == {} and len(answers.warnings) == 1 and len(seen) == 1
-    held = seen[0].paths.out.parent
-    assert not held.exists() and (tmp_path / f"{held.name}.out").is_file()
+    assert not seen[0].paths.out.parent.exists() and (tmp_path / f"{answers.record}.out").is_file()
     # 注意は PR の記録に載るので、手元の絶対パスを書かない
     assert str(tmp_path) not in answers.warnings[0]
 
@@ -361,46 +355,12 @@ def test_issue_4363_ask_keeps_the_failure_detail_out_of_the_process_and_in_the_p
     assert "private.example.test" not in str(run.notes) + str(answers.warnings)
     log = tmp_path / f"{answers.record}.detail.log"
     assert "private.example.test" in log.read_text(encoding="utf-8") and log.stat().st_mode & 0o777 == 0o600
-    err = tmp_path / seen[0].paths.err.name.replace(seen[0].paths.out.stem, answers.record)
+    err = tmp_path / f"{answers.record}.err.log"
     assert err.read_text(encoding="utf-8") == "usage limit"
 
 
-def test_issue_4363_ask_copies_the_records_when_the_state_dir_has_no_hard_links(tmp_path: Path, monkeypatch) -> None:
-    def no_link(*_: object) -> None:
-        raise PermissionError("hard links are not supported")
-
-    monkeypatch.setattr(verify.os, "link", no_link)
-    answers = verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher([], [holding(_row())]))
-    record = tmp_path / f"{answers.record}.out"
-    assert record.stat().st_mode & 0o777 == 0o600 and "verdicts" in record.read_text(encoding="utf-8")
-
-
-def test_issue_4363_ask_leaves_no_partial_record_when_copying_is_interrupted(tmp_path: Path, monkeypatch) -> None:
-    def no_link(*_: object) -> None:
-        raise PermissionError("hard links are not supported")
-
-    def interrupted(source: Any, out: Any) -> None:
-        out.write(b"{")
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(verify.os, "link", no_link)
-    monkeypatch.setattr(verify.shutil, "copyfileobj", interrupted)
-    seen: list = []
-    with pytest.raises(KeyboardInterrupt):
-        verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher(seen, [holding(_row())]))
-    held = seen[0].paths.out.parent
-    # 途中までの写しは残さず、移していない出力は起動ごとのディレクトリから回収できる
-    assert not (tmp_path / f"{held.name}.out").exists()
-    assert "verdicts" in (held / seen[0].paths.out.name).read_text(encoding="utf-8")
-
-
-def test_issue_4363_ask_saves_and_removes_its_directory_when_the_launch_is_interrupted(tmp_path: Path, monkeypatch) -> None:
-    """監視中の割り込みは判定役を止めた後に届くので、排他を使えない保存先でも出力を保存してディレクトリを残さない。"""
-
-    def no_lock(*_: Any) -> None:
-        raise OSError("排他を使えない")
-
-    monkeypatch.setattr(verify.fcntl, "flock", no_lock)
+def test_issue_4363_ask_saves_the_output_when_the_launch_is_interrupted(tmp_path: Path) -> None:
+    """監視中の割り込みは判定役を止めた後に届くので、出力を保存して一時ディレクトリを閉じてから伝える。"""
     seen: list = []
 
     def interrupted(spec: agents.Launch) -> agents.AgentStatus:
@@ -410,74 +370,8 @@ def test_issue_4363_ask_saves_and_removes_its_directory_when_the_launch_is_inter
 
     with pytest.raises(KeyboardInterrupt):
         verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [_diff(tmp_path)]}, interrupted)
-    held = seen[0].paths.out.parent
-    assert (tmp_path / f"{held.name}.out").read_text(encoding="utf-8") == "書きかけ" and not held.exists()
-
-
-def _left(root: Path, name: str, output: str = "出力") -> Path:
-    """前の起動が残した、目印のある出力のディレクトリ。"""
-    held = root / name
-    held.mkdir()
-    (held / "round1-verify.out").write_text(output, encoding="utf-8")
-    (root / f"{name}.held").touch()
-    return held
-
-
-def test_issue_4363_recover_keeps_a_record_that_differs_from_the_saved_one(tmp_path: Path) -> None:
-    """保存先に同じ名前の違う中身があれば、どちらも変えずにディレクトリと目印を残す。同じ中身なら片付ける。"""
-    differs, same = _left(tmp_path, "round1-verify-differs"), _left(tmp_path, "round1-verify-same")
-    (tmp_path / f"{differs.name}.out").write_text("書きかけ", encoding="utf-8")
-    (tmp_path / f"{same.name}.out").write_text("出力", encoding="utf-8")
-    # 打ち直しても、同じ衝突の診断のファイルは増えない
-    for _ in range(2):
-        verify.recover(_AskRun(tmp_path))
-    assert len(list(tmp_path.glob("*.detail.log"))) == 1
-    assert (differs / "round1-verify.out").read_text(encoding="utf-8") == "出力"
-    assert (tmp_path / f"{differs.name}.out").read_text(encoding="utf-8") == "書きかけ"
-    assert [p.name for p in tmp_path.glob("*.held")] == [f"{differs.name}.held"] and not same.exists()
-
-
-def test_issue_4363_recover_waits_until_the_judge_process_releases_the_lock(tmp_path: Path) -> None:
-    """起動した実行が終わっても、排他を引き継いだ判定役が生きている間は回収しない。"""
-    run, held = _AskRun(tmp_path), tmp_path / "round1-verify-live"
-    held.mkdir()
-    (held / "round1-verify.out").write_text("書き込み中", encoding="utf-8")
-    parent = verify._claim(run, 1, held)
-    child = os.dup(parent)  # 子のプロセスが引き継ぐファイル記述子の代わり
-    os.close(parent)
-    verify.recover(run)
-    assert (held / "round1-verify.out").exists()
-    os.close(child)
-    verify.recover(run)
-    assert not held.exists() and not list(tmp_path.glob("*.held"))
-
-
-def test_issue_4363_ask_hands_the_lock_to_the_judge_and_keeps_its_directory(tmp_path: Path, monkeypatch) -> None:
-    """判定役の起動は排他を引き継ぎ、重ねて起動した実行は使っている最中のディレクトリを移さない。"""
-    run, answered, passed = _AskRun(tmp_path), _launcher([], [holding(_row())]), []
-    monkeypatch.setattr(agents.subprocess, "Popen", lambda argv, **kwargs: passed.append(kwargs["pass_fds"]))
-
-    def launch(spec: agents.Launch) -> agents.AgentStatus:
-        status = answered(spec)
-        verify.recover(run)
-        assert spec.paths.out.exists()
-        agents._start(replace(spec, paths=agents.AgentPaths.at(tmp_path / "popen")))
-        assert passed == [spec.keep_fds] and len(spec.keep_fds) == 1
-        return status
-
-    answers = verify.ask(run, 1, [_row()], {"r1-1": [_diff(tmp_path)]}, launch)
-    assert answers.verdicts and not list(tmp_path.glob("*.held"))
-
-
-def test_issue_4363_ask_launches_without_a_marker_when_the_state_dir_cannot_lock(tmp_path: Path, monkeypatch) -> None:
-    def no_lock(*_: object) -> None:
-        raise OSError("locks are not supported")
-
-    monkeypatch.setattr(verify.fcntl, "flock", no_lock)
-    run, seen = _AskRun(tmp_path), []
-    answers = verify.ask(run, 1, [_row()], {"r1-1": [_diff(tmp_path)]}, _launcher(seen, [holding(_row())]))
-    assert answers.verdicts and seen[0].keep_fds == () and not list(tmp_path.glob("*.held*"))
-    assert not list(tmp_path.glob(".round*")) and any("排他できない" in note[2] for note in run.notes)
+    [record] = tmp_path.glob("round1-verify-*.out")
+    assert record.read_text(encoding="utf-8") == "書きかけ" and not seen[0].paths.out.parent.exists()
 
 
 @pytest.mark.parametrize("asked, resumed", [((), True), (("a.md#見出し",), False)], ids=["unsent-head", "other-sections"])
@@ -607,10 +501,6 @@ def test_issue_4363_run_resumes_from_the_judge_without_launching_the_reviewers_a
     first.verdict = interrupted
     with pytest.raises(KeyboardInterrupt):
         _run(capsys, monkeypatch, first, wt)
-    # 出力の移動中の中断が残すディレクトリと、目印の無いディレクトリ
-    held = _left(first.state_dir, "round1-verify-left", "移していない出力")
-    foreign = first.state_dir / "round1-verify-notmine"
-    foreign.mkdir()
     second = Fake(tmp_path / "st", {})
     second.verdict = _broken
     code, got = _run(capsys, monkeypatch, second, wt)
@@ -620,6 +510,3 @@ def test_issue_4363_run_resumes_from_the_judge_without_launching_the_reviewers_a
     [row] = state["findings"]
     assert (row["id"], row["check"]["lowered"]) == ("r1-1", True)
     assert len(state["rounds"]) == 1 and "pending_review" not in state
-    # 目印のあるディレクトリだけを、出力を保存してから片付ける
-    assert not held.exists() and foreign.is_dir()
-    assert (second.state_dir / "round1-verify-left.out").read_text(encoding="utf-8") == "移していない出力"

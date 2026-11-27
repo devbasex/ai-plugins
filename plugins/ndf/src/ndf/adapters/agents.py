@@ -179,8 +179,7 @@ class Warned:
 
 @dataclass(frozen=True)
 class Launch:
-    """外部 CLI の 1 回の起動。`timeout` は監視の上限の秒。`env` は足す環境変数。`keep_fds` は子に引き継ぐファイル記述子
-    （親が終わっても、子が生きている間は `flock` の排他が解けないようにする）。"""
+    """外部 CLI の 1 回の起動。`timeout` は監視の上限の秒。`env` は足す環境変数。"""
 
     agent: str
     argv: tuple[str, ...]
@@ -188,7 +187,6 @@ class Launch:
     paths: AgentPaths
     timeout: float
     env: Optional[dict[str, str]] = None
-    keep_fds: tuple[int, ...] = ()
 
 
 class AgentState(StrEnum):
@@ -297,14 +295,7 @@ def _start(spec: Launch) -> subprocess.Popen:
     spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
     with open(spec.paths.out, "wb") as out, open(spec.paths.err, "wb") as err:
         return subprocess.Popen(
-            list(spec.argv),
-            cwd=spec.cwd,
-            stdout=out,
-            stderr=err,
-            stdin=subprocess.DEVNULL,
-            env=env,
-            start_new_session=True,
-            pass_fds=spec.keep_fds,
+            list(spec.argv), cwd=spec.cwd, stdout=out, stderr=err, stdin=subprocess.DEVNULL, env=env, start_new_session=True
         )
 
 
@@ -313,7 +304,7 @@ def _start_and_watch(spec: Launch, poll: Optional[float]) -> AgentStatus:
 
     監視が割り込まれたら（Ctrl+C など）、子の組を止めてから割り込みを伝える。子は別セッションで端末の割り込みが届かず、
     残すと監視の上限が効かないまま動き、起動のスロットを返した後や呼び元が入力を片付けた後も動き続ける。停止を待つ間にもう一度
-    割り込まれたら、猶予を打ち切って組へ SIGKILL を送る（呼び元は、子が止まった前提で出力を移して片付ける）。
+    割り込まれたら、猶予を打ち切って組へ SIGKILL を送る（呼び元は、子が止まった前提で出力を保存する）。
     割り込みが届くのはメインスレッドで監視する起動だけである。"""
     try:
         proc = _start(spec)
