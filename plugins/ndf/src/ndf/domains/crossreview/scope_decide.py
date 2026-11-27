@@ -196,17 +196,36 @@ def _seated_read(record: Mapping[str, Any], basis: Basis) -> bool:
     return seats <= set(store.list_of(record, REVIEWERS))
 
 
+def _last_read(state: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
+    """相手役の全員が読めた最後のラウンドの記録（無ければ None）。"""
+    for r in reversed(store.list_of(state, store.ROUNDS)):
+        if isinstance(r, Mapping) and r.get("verdict") != fin.INCOMPLETE_REVIEWERS:
+            return r
+    return None
+
+
+def origin_record(state: Mapping[str, Any], basis: Basis) -> Optional[Mapping[str, Any]]:
+    """差分の起点にするラウンドの記録（#3780）。相手役の全員が読めた最後のラウンドで、今回の席（`basis.reviewers`）の全員が
+    読み、読んだ PR（`basis.pr`）が同じものを返し、ほかは None。比較基点・重点・単位の指示・MVV は見ない。収束を使い回す条件
+    （`read_by_all_head`）と違い、一度も読まれていない内容が残る場合だけ起点を無くす。"""
+    record = _last_read(state)
+    if record is None or not record.get("head"):
+        return None
+    if basis.reviewers is not None and not _seated_read(record, basis):
+        return None
+    return record if basis.pr is None or record.get(PR) == basis.pr else None
+
+
 def read_by_all_head(state: Mapping[str, Any], basis: Basis = Basis()) -> Optional[str]:
     """相手役の全員が読めた最後のラウンドの head（無ければ None）。読めなかった相手役のいるラウンド
     （`finish_decide.INCOMPLETE_REVIEWERS`）の head を起点にすると、同じ head で打ち直したときに空の差分が渡り、
     読めなかった相手役が元の差分を一度も読まずに収束できるため、飛ばす（#3941）。そのラウンドの記録が `basis` に合わなければ
     （`_matches`）None（PR の全差分を今回の相手役と重点と MVV で読み直す）。"""
-    for r in reversed(store.list_of(state, store.ROUNDS)):
-        if not isinstance(r, Mapping) or r.get("verdict") == fin.INCOMPLETE_REVIEWERS:
-            continue
-        head = r.get("head")
-        return head if _matches(r, basis) and isinstance(head, str) and head else None
-    return None
+    r = _last_read(state)
+    if r is None:
+        return None
+    head = r.get("head")
+    return head if _matches(r, basis) and isinstance(head, str) and head else None
 
 
 def review_scope(every_section: bool, round_no: int, prev_head: Optional[str], sections: Iterable[str], reviewed: Collection[str]) -> Scope:
