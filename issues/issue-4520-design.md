@@ -214,18 +214,22 @@ graph TD
 3. 排他を持ったまま冪等のキーをもう一度照らし、質問と対象を確かめ、開き直す工程を決める
 4. 下の「外への書き込みの順序」に従って書く
 
-`retry` は冪等のキーを持たないので、手順 2 から始める。
+`retry` は冪等のキーを持たないので、手順 2 から始める。手順 1 で終わる送り直しは、何も書かず、何も消さない。
 
 ### 外への書き込みの順序
 
-まとめて確定するのは DB の変更だけである。PR の証跡とファイルは DB の取り消しで戻らないので、次の順で書く。
+まとめて確定するのは DB の変更だけである。PR の証跡とファイルは DB の取り消しで戻らないので、DB より先に書き、途中で止まっても打ち直せる順にする。
 
 | 順 | 書くもの | 途中で止まったとき |
 | --- | --- | --- |
-| 1 | PR の却下の証跡（今の回答の処理と同じ。変更要求も却下として書く） | 証跡だけが残る。先の承認を取り消す記録なので、承認ゲートを通す根拠にはならない。同じキーの送り直しは証跡を重ねず、記録から続ける |
-| 2 | DB の変更。全工程の `reopened`、`answered`、`failed`、並行開発の計画のリリースのリクエストを閉じる事象を、1 つのトランザクションで追記する | 何も残らない |
-| 3 | 計画の外のオーガナイザーへ書いたリクエストのファイルを消す | ファイルが残る。失敗は警告にする。同じキーの送り直しと次の `next` が、開き直しより前のリクエストのファイルを消し直す |
+| 1 | PR の却下の証跡（今の回答の処理と同じ。変更要求も却下として書く） | DB に回答は無い。証跡は残るが、先の承認を取り消す記録なので、承認ゲートを通す根拠にはならない。打ち直しは下の「証跡の再利用」に従う |
+| 2 | 計画の外のオーガナイザーへ出した、このスプリントのリリースのリクエストのファイルを消す（`requests/` のうち `sprint_state` がこのステートマシンのもの）。リクエストの取り下げは、ファイルの削除で表す | 消せなければ、DB へ何も書かずに断る。打ち直すと残りを消して続ける。工程が回答待ちのままなら、次の `next` がリクエストを出し直す |
+| 3 | DB の変更。全工程の `reopened`、`answered`、`failed`、並行開発の計画のリリースのリクエストを閉じる事象を、1 つのトランザクションで追記する | 何も残らない。打ち直しは順 1 から続ける |
 | 4 | 進み具合の表を書き直す | 記録は戻さず、警告にする |
+
+ファイルを DB より先に消すので、開き直した記録があるのに古いリクエストのファイルが残ることはない。
+
+**証跡の再利用。** DB に回答が無い打ち直しは、初めての回答と同じ確かめ（質問の id と対象）を通る。そのうえで、PR に同じ記録の識別子（質問の id と提示の識別子）・同じ回答・同じ対象の証跡があれば、新しく書かずに使い、`answered` と `reopened` を確定する。どれかが違う証跡は別の回答のものなので使わず、新しく書く。今の重複の確かめは記録の識別子だけを見るので、回答と対象も見るように変える。打ち直しまでに対象や質問が変わっていれば、今と同じく断る。
 
 ## 処理の流れ
 
@@ -259,7 +263,7 @@ sequenceDiagram
 
 ```mermaid
 graph TD
-  F["finish"] --> O["出力を規約に照らす<br/>（mvv_gate は無くてよい）"]
+  F["finish"] --> O["出力を規約に照らす<br/>（設計は mvv_gate が無くてよい）"]
   O --> G{"承認ゲートを持つ"}
   G -- "持たない" --> DONE["終了"]
   G -- "持つ" --> A{"有効な承認がある"}
@@ -274,15 +278,16 @@ graph TD
   V -- "省けない・判定の失敗" --> H
 ```
 
-### 手の経路の工程の出力
+### 手の経路の工程の出力と MVV 判定
 
-`mvv_gate` は NDF が作る値とし、手の経路の工程の出力では必須にしない。今は工程の定義の `outputs` がすべて必須なので、そのままでは判定を打たない supervisor の出力が検査を通らない。
+手の経路の MVV 判定の結果 `mvv_gate` は、設計とデプロイで扱いが違う。設計は省略の根拠になるので NDF が作る値だけを使い、デプロイは省略しないので今の扱いを変えない。
 
-| 場面 | `check`・`finish` が受ける出力 | 文脈の `mvv_gate` |
+| 項目 | 設計の工程 | デプロイの工程 |
 | --- | --- | --- |
-| `finish` が判定を打った | `mvv_gate` が無くてよい。書かれていれば捨てて警告にする | NDF の判定の結果 |
-| 判定が失敗して結果が無い | 同上 | 書かない。承認資料は「判定できない」と示し、人に問う |
-| 有効な承認がある（判定を打たない） | 同上 | 書かない |
+| 判定を打つ人 | `finish`（決定 7） | supervisor（今のまま。`finish` は打たない） |
+| `check`・`finish` が受ける出力の `mvv_gate` | 無くてよい。書かれていれば捨てて警告にする。今は工程の定義の `outputs` がすべて必須なので、設計の `mvv_gate` を必須から外す | 今のまま必須で、書かれた値を使う。書き写す元も今の手順のまま（自動の流れの記録があれば `release-mvv` の記録） |
+| 文脈の `mvv_gate` | `finish` が打った判定の結果。判定の失敗と、有効な承認があって打たないときは書かない | 出力の値 |
+| NDF の承認資料の「MVV 判定」の欄が読む記録 | `finish_held` が持つ `design-mvv` の記録。無ければ「判定できない」 | `release-mvv` のステップの記録。無ければ「判定できない」。supervisor が打った判定は今と同じく supervisor の承認資料に載るので、conductor は両方を示して問う |
 
 ### 有効な承認
 
@@ -378,6 +383,7 @@ MVV 判定で省くときの順序は次のとおりである。
   - 変更要求の指摘: `reopened` に持たせ、流し直す作業へ今の経路で渡す
   - 待っていない未着手・実行中・失敗の工程への承認でない回答: 記録だけにする
   - 上のどの承認でない回答も、`late: true` で残す。同じ承認ゲートに承認が記録されるまで、`finish` も自動の流れの承認ゲートも MVV 判定で省かず、人へ質問する。`retry` と開き直しでは消えない
+  - 残っている間は、判定のコマンドにも省かないことを渡す（決定 7）。省く結果を返すと、判定のコマンドがマージに使える承認の証跡を PR へ書くためである
   - 自動の流れの回答待ちで受けた変更要求は、今と同じ扱いのままにする（省ける条件を変えないため）
 - 採らなかった案: 却下も変更要求と同じく扱う（`next` が却下された工程を流し直す）
 - 採らなかった案: 後ろの扱いを回答のたびに選ばせる（受け入れ条件 6 が開き直すと決めている）
@@ -411,9 +417,12 @@ MVV 判定で省くときの順序は次のとおりである。
 - **選んだ案**: 判定を打つ条件と、承認を省く条件を分ける
   - 打つ: 設計承認ゲートの工程で有効な承認が無ければ、`finish` が進め方（`pace`）によらず判定を打つ。`normal` でも承認資料に判定が載る（自動の流れと同じ）
   - 省く: 次のすべてを満たすときだけである。進め方が `auto` か `fast`、承認でない回答が残っていない（決定 4）、判定が省くと出した
+  - 承認の証跡: `ndf records mvv gate` は、省く結果のときに、マージに使える承認の証跡を判定の記録と一緒に PR へ書く。そこで、書く前に次の 2 つを判定のコマンドが確かめられるように、引数を渡す
+    - 承認でない回答が残るときは、省かないことを引数で渡す。判定と記録は今までどおりで、`skip` は偽になり、証跡は書かない。自動の流れの `design-mvv` も同じ引数を渡す
+    - `finish` は承認の対象の PR（出力の `design_pr`）を `--expect-pr` で渡す（今はリリースだけで受けるので、設計でも受ける）。判定する PR が違えば、判定せず、PR へ何も書かず、回答待ちにする
   - 判定の実行: 工程の定義から判定のステップ（`ndf records mvv gate`）と入力を解決する。自動の流れのステップと同じ作業ディレクトリ（入力の `worktree`）で実行する。`finish` を打った場所は使わない。判定する PR はその作業ディレクトリのブランチで決まるためである
   - 記録: 結果は `finish_held` が判定のステップの済みとして持つ。省くときだけ、承認ゲートの待ちの記録を付けない
-  - 承認: `finish` は承認を書かず、終了にもしない。`service:mvv` の承認を書くのは次の `next` で、読む前に判定した PR・HEAD を今の対象（`finish` の出力の `design_pr`）と照らす。違えば人へ質問する
+  - 承認: `finish` は承認を書かず、終了にもしない。`service:mvv` の承認を書くのは次の `next` で、読む前に判定した PR・HEAD を今の対象と照らす。違えば人へ質問する
   - 担当: 判定を打つのは `finish` の 1 か所にする。supervisor が手の経路の設計承認ゲートで判定を打つ決まり（`agent-layers.md` の規則 15・17 と `pace.md` の「supervisor の経路の打ち方」）から設計を外す。承認資料の「MVV 判定」の欄は、`finish` の後の `next` が返す資料で示す。リリースの判定は今のまま supervisor が打つ
 - 採らなかった案: `finish` の出力に書かれた `mvv_gate` を採る（手で書けるファイルを承認の根拠にすることになり、直前の判定だけを採る今の条件を緩める）
 - 採らなかった案: `finish` が承認を書いてその場で終了にする（判定の後に HEAD が進んだことと、判定した PR が違うことを確かめられない）
@@ -430,7 +439,7 @@ MVV 判定で省くときの順序は次のとおりである。
 - **打ち方が変わる箇所**: 手の経路の設計とデプロイは、承認を記録するまで次へ進まない。設計は、承認した PR をマージするまで次へ進まない
 - **流し直しで当たる外の状態**: 済んだマージ・リリースは取り消されない。流し直したステップが、マージ済みの PR やブランチを前に止まる可能性がある（未確認）
 - **PR の承認の証跡**: `retry` の開き直しは、PR に書いた承認の証跡を取り消さない。ステートマシンの中では改めて承認を求める
-- **リリースのリクエスト**: リリース承認の待ちを開き直すと、そのスプリントの開いたリクエストを、開き直しと同じトランザクションで閉じる（`request_closed`）。`ndf lanes wait` には、出し直したリクエストだけが出る。利用者の操作は要らない。計画の外のオーガナイザーへ書いたリクエストのファイルは NDF が消す（順序は「外への書き込みの順序」）
+- **リリースのリクエスト**: リリース承認の待ちを開き直すと、そのスプリントの開いたリクエストを、開き直しと同じトランザクションで閉じる（`request_closed`）。`ndf lanes wait` には、出し直したリクエストだけが出る。利用者の操作は要らない。計画の外のオーガナイザーへ書いたリクエストのファイルは、開き直しを確定する前に NDF が消す。消せなければ開き直さない（「外への書き込みの順序」）
 - **NDF のバージョンを戻した場合**: 古い NDF は `finish_held` の工程を普通の実行中と読み、工程のステップを初めから流す
 - **同じファイルを触る別の変更**: [#4431](https://github.com/devbasex/ai-plugins/issues/4431)（変更要求の指摘が担当の AI の起動指示に入らない）は回答と畳み込みの周りを触る。この変更は指摘を渡す経路を変えない
 
@@ -474,7 +483,10 @@ MVV 判定で省くときの順序は次のとおりである。
 | Value 6 | 開き直しの後、古いリリースのリクエストが閉じ、出し直したものだけが開いている | 閉じる事象を落とす |
 | 排他と送り直し | 開き直した後に同じキーで送り直すと、作業が流れていても同じ結果が返り記録は増えない。同じキーで質問の id・回答・回答者が違えば断る | 排他を冪等の照合より先に取る・キーだけで同じ結果を返す |
 | I4（起動直後） | 起動のマーカーがあり作業が排他を取る前の開き直しを断り、何も書かない | 排他だけを確かめる |
-| 外への書き込みの順序 | ファイルを消せなかった後の `next` が消し直す | 消し直しを外す |
+| 外への書き込みの順序 | リクエストのファイルを消せないと開き直しは何も記録しない。打ち直して消せれば開き直る | 削除を DB の確定の後に移す |
+| 証跡の再利用 | 証跡を書いた後に確定が失敗した回答を打ち直すと、証跡は増えず工程が開き直る。同じ識別子で回答の違う証跡は使わない | 識別子だけで重複を判定する |
+| 決定 7（証跡） | 承認でない回答が残る `finish` と自動の流れの判定、判定する PR が `design_pr` と違う `finish` では、承認の証跡が書かれない | 引数を渡さない |
+| 手の経路の出力（デプロイ） | デプロイの出力の `mvv_gate` は今と同じく必須で、文脈へ書く | 設計の扱いをデプロイにも当てる |
 | 有効な承認（対象） | HEAD が同じでマージ先か本番への反映が変わった承認では終了にならない | 比べる項目から外す |
 | 有効な承認（境界） | `recheck` が失効させた承認は、対象を元に戻しても使わない | 境界を `reopened` だけにする |
 | 手の経路の出力 | `mvv_gate` の無い設計の出力が `check` と `finish` を通り、書かれた `mvv_gate` は使わない | 必須のままにする |
@@ -493,7 +505,7 @@ MVV 判定で省くときの順序は次のとおりである。
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4520 | 実装する | — | `plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/run_view.py`、`plugins/ndf/src/ndf/progress/approval.py`（新設）、`plugins/ndf/src/ndf/progress/reopening.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/gate/release.py`、`plugins/ndf/src/ndf/progress/plan/external.py`、`plugins/ndf/tests/progress/test_reopen_operations.py`（新設）、`plugins/ndf/tests/progress/test_manual_gate.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-answer.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-workflow.md`、`docs/glossary.md` |
+| #4520 | 実装する | — | `plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/run_view.py`、`plugins/ndf/src/ndf/progress/approval.py`（新設）、`plugins/ndf/src/ndf/progress/reopening.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/gate/release.py`、`plugins/ndf/src/ndf/progress/plan/external.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/core/merge_approval.py`、`plugins/ndf/tests/progress/test_reopen_operations.py`（新設）、`plugins/ndf/tests/progress/test_manual_gate.py`（新設）、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-answer.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-workflow.md`、`docs/glossary.md` |
 
 [#3957](https://github.com/devbasex/ai-plugins/issues/3957)（手で終えると回答を待たずに次の工程が始まる）の受け入れ条件 3 件は、要求仕様の受け入れ条件 1・2・4 に含まれる。
 
