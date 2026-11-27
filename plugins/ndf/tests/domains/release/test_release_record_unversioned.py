@@ -625,7 +625,11 @@ def test_shared_prefix_keeps_a_file_it_did_not_write_and_sweeps_its_own_leftover
     for path, text in users.items():
         path.write_text(text, encoding="utf-8")
     # NDF の一時ファイルのディレクトリに残ったものは、空・書き終えたもの・途中まで書かれたもののどれも消す
-    leftovers = [ours / f"{PROD}.json.{name}.ndf-tmp" for name in ("d", "e", "f")]
+    leftovers = [ours / f"{PROD}.json.{name}.ndf-tmp" for name in ("abcd_123", "efgh_456", "ijkl_789")]
+    # NDF の一時ファイルのディレクトリでも、作る側と同じ形でない名前のものは残す
+    odd = [ours / name for name in ("x.json.abcd_123.ndf-tmp", f"{PROD}.json.short.ndf-tmp", "notes.txt")]
+    for path in odd:
+        path.write_text("", encoding="utf-8")
     for path, text in zip(leftovers, ("", whole, whole[:5])):
         path.write_text(text, encoding="utf-8")
     assert record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: made) == made
@@ -633,21 +637,37 @@ def test_shared_prefix_keeps_a_file_it_did_not_write_and_sweeps_its_own_leftover
     record_unversioned.sweep_shares(share, 60, now=lambda: foreign.stat().st_mtime + 3600)
     assert foreign.read_text(encoding="utf-8") == "{"
     assert all(path.read_text(encoding="utf-8") == text for path, text in users.items())
-    assert not any(path.exists() for path in leftovers)
+    assert not any(path.exists() for path in leftovers) and all(path.exists() for path in odd)
 
 
-def test_sweep_shares_does_not_open_a_fifo_or_follow_a_link(tmp_path: Path) -> None:
+def test_sweep_shares_does_not_open_a_fifo_or_follow_a_link(monkeypatch, tmp_path: Path) -> None:
     share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
     ours = share / "tmp"
     ours.mkdir(parents=True)
     fifo = share / f"{PROD}.json"
     os.mkfifo(fifo)
-    tmp_fifo = ours / f"{PROD}.json.a.ndf-tmp"
+    tmp_fifo = ours / f"{PROD}.json.abcd_123.ndf-tmp"
     os.mkfifo(tmp_fifo)
-    link = ours / f"{PROD}.json.b.ndf-tmp"
+    link = ours / f"{PROD}.json.efgh_456.ndf-tmp"
     link.symlink_to(fifo)
-    # FIFO を開いて読むと書き手が来るまで止まるので、ここで返ることが確かめになる
+    # 待つ開き方が戻ると FIFO で止まるので、開く前にその場で落とす（非ブロッキングとリンクをたどらない指定だけを通す）
+    real_open = os.open
+    opened: list[str] = []
+
+    def checked_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if str(path).startswith(str(share)):
+            assert flags & os.O_NONBLOCK and flags & os.O_NOFOLLOW, f"{path} を待つ開き方で開いた"
+            opened.append(str(path))
+        return real_open(path, flags, *args, **kwargs)
+
+    def no_path_open(self: Path, *args: Any, **kwargs: Any) -> Any:
+        raise AssertionError(f"{self} を Path.open で開いた（待つ開き方）")
+
+    monkeypatch.setattr(record_unversioned.os, "open", checked_open)
+    monkeypatch.setattr(Path, "open", no_path_open)
     record_unversioned.sweep_shares(share, 60, now=lambda: fifo.lstat().st_mtime + 3600)
+    monkeypatch.undo()
+    assert opened == [str(fifo)]
     assert fifo.exists() and tmp_fifo.exists() and link.is_symlink()
 
 

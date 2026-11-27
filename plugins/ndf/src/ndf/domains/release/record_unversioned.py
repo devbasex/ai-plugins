@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import tempfile
 import time
@@ -49,6 +50,8 @@ _SHARE_KIND = "ndf-release-record.prefix/v1"
 _SHARE_TMP = ".ndf-tmp"
 # 一時ファイルを作るディレクトリ（保存先のディレクトリの下）。NDF だけが作る場所で、掃除はここだけを見る
 _SHARE_TMP_DIR = "tmp"
+# NDF の一時ファイルの名前（`_publish` が `mkstemp` で作る `<本番の PR>.json.<乱数 8 文字>.ndf-tmp`）。掃除はこの名前だけを消す
+_SHARE_TMP_NAME = re.compile(r"\d+\.json\.[a-z0-9_]{8}" + re.escape(_SHARE_TMP))
 
 
 class Unversioned(NamedTuple):
@@ -417,6 +420,10 @@ def _publish(path: Path, got: Prefix) -> None:
     data = json.dumps(got.as_json(), ensure_ascii=False).encode("utf-8")
     tmp_dir = path.parent / _SHARE_TMP_DIR
     tmp_dir.mkdir(exist_ok=True)
+    if not stat.S_ISDIR(tmp_dir.lstat().st_mode):
+        raise RecordError(
+            f"一時ファイルのディレクトリ {tmp_dir} がディレクトリでない（リンクなど）。NDF が作るディレクトリなので、置いたものを移してから打ち直す"
+        )
     fd, tmp = tempfile.mkstemp(dir=tmp_dir, prefix=path.name + ".", suffix=_SHARE_TMP)
     try:
         with os.fdopen(fd, "wb") as out:
@@ -465,8 +472,15 @@ def sweep_shares(share: Path, older_than: float, now: Callable[[], float] = time
     消す（保存先はロックされていないものだけ）。"""
     for path in share.glob("*.json"):
         _drop_stale(path, older_than, now)
-    for path in (share / _SHARE_TMP_DIR).glob(f"*.json.*{_SHARE_TMP}"):
-        _drop_stale_tmp(path, older_than, now)
+    tmp_dir = share / _SHARE_TMP_DIR
+    try:
+        if not stat.S_ISDIR(tmp_dir.lstat().st_mode):
+            return
+    except OSError:  # noqa: NDF401 ファイル: 一時ファイルのディレクトリが無ければ消すものは無い
+        return
+    for path in tmp_dir.iterdir():
+        if _SHARE_TMP_NAME.fullmatch(path.name):
+            _drop_stale_tmp(path, older_than, now)
 
 
 def _trusted_state(hub: GitHub, number: int, version: str, commit: str, comments: Optional[Sequence[Authored]] = None) -> record.Candidates:
