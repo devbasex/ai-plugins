@@ -29,6 +29,7 @@ from ndf import contracts
 from ndf.adapters.github import Authored, GitHub, Pull, text_of
 from ndf.adapters.github_pulls import closing_keyword_issues
 from ndf.adapters.publish import Publisher
+from ndf.contracts import worker_kinds
 from ndf.domains.release import included_decide, names_decide, record_decide
 
 # リリース後テストの記録のスキーマ
@@ -82,7 +83,7 @@ class RetestWithoutReason(RecordError):
             f"今の判定が不合格の組（{listed}）をテストし直す行に retest_reason が無い。不合格の原因がリリースした変更でなく"
             "検証の側にあり、それが直ったときだけ、理由を書いて打ち直す"
         )
-        self.items = [{"kind": "delivery", "name": name, "number": issue, "result": "failed"} for name, issue in pairs]
+        self.items = [{"kind": worker_kinds.DELIVERY, "name": name, "number": issue, "result": "failed"} for name, issue in pairs]
 
 
 class Written(NamedTuple):

@@ -34,7 +34,7 @@ from ndf import cli
 from ndf.adapters import git as git_mod
 from ndf.adapters import github as github_mod
 from ndf.adapters.github import GitHub
-from ndf.contracts import result
+from ndf.contracts import result, worker_kinds
 from ndf.core import branch_strategy, merge_approval
 from ndf.domains.release import (
     approval_decide,
@@ -285,7 +285,7 @@ def _unversioned_result(args: argparse.Namespace, strategy: branch_strategy.Stra
     items = sorted({(w.number, w.result) for w in got.written})
     rows = [{"kind": "pull", "number": n, "result": r} for n, r in items]
     rows += [
-        {"kind": "delivery", "name": e, "result": state, "reason": why}
+        {"kind": worker_kinds.DELIVERY, "name": e, "result": state, "reason": why}
         for state, by in (("failed", got.failed), ("pending", got.pending))
         for e, why in by.items()
     ]
