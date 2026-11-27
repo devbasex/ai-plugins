@@ -94,6 +94,19 @@ def test_issue_3780_comments_are_chosen_by_the_files_of_the_handed_diff() -> Non
     assert "read.txt の指摘" not in handed and "outside.txt の指摘" not in handed
 
 
+def test_issue_3780_comments_on_the_old_path_of_an_added_rename_are_handed_over() -> None:
+    """#3780: head が同じまま比較先を変えて改名が差分に足されたら、改名前のパスに付いたコメントも相手役へ渡す。"""
+    comments = [prior_decide.Remark("review_comment", "u", f"{p} の指摘", p, 1) for p in ("old.txt", "new.txt")]
+    run = SimpleNamespace(remarks=comments, g=SimpleNamespace(changed_files=lambda *a: []))
+    scope = scope_decide.Scope(scope_decide.SINCE, "def", ())
+    entry = changes._Entry("R", "old.txt", "new.txt", ("100644", "100644"), ("1", "1"))
+    listed: changes.Listings = {"old...def": ({}, frozenset()), "ghi...def": ({"new.txt": entry}, frozenset())}
+    since = round_scope.Since(changes.Range("old", "def"), ("new.txt",), listed)
+    prep = reviewing.Prepared(scope, [], set(), "def", Path("d"), (), "ghi", None, since)
+    handed = "\n".join(reviewing.remarks(run, prep))
+    assert "old.txt の指摘" in handed and "new.txt の指摘" in handed
+
+
 @pytest.mark.parametrize(("purpose", "kind"), [("cross-review", "since"), ("design", "full")])
 def test_changed_focus_runs_again_with_the_range_of_the_purpose(
     repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, purpose: str, kind: str

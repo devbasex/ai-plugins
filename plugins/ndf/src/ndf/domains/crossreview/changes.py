@@ -571,15 +571,23 @@ def _pr_paths(g: git.Git, previous: Range, current: Range, listed: Listings) -> 
     return sorted({p for e in (*seen.values(), *now.values()) for p in (e.old, e.new)})
 
 
+def _added_paths(g: git.Git, current: Range, added: Sequence[str], listed: Listings) -> list[str]:
+    """`added` のうち今の PR の差分として渡すパス（改名・複製は元のパスを含む）。`added` が空なら一覧を読まない。"""
+    if not added:
+        return []
+    now, _ = _listing(g, f"{current.base}...{current.head}", listed)
+    return _with_old_paths(now, added)
+
+
 def since_files(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> tuple[str, ...]:
-    """`since_diff` が渡すファイル（今の head のパス）。比較基点が違えば、前の head からの変更のうち PR が変えるファイルに
-    `added` を足す（ベースのマージで入った PR に関係の無いファイルを含めない）。"""
+    """`since_diff` が渡すファイルのパス（改名の元のパスを含む）。比較基点が違えば、前の head からの変更のうち PR が変える
+    ファイルに `added` の分を足す（ベースのマージで入った PR に関係の無いファイルを含めない）。"""
     # 改名の元のパスも差分に出るので、改名を検出せずに読む
     since = g.changed_files(previous.head, current.head, "--no-renames")
     if previous.base != current.base:
         paths = set(_pr_paths(g, previous, current, listed))
         since = [p for p in since if p in paths]
-    return (*since, *added)
+    return (*since, *_added_paths(g, current, added, listed))
 
 
 def since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str:
@@ -594,8 +602,7 @@ def since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str]
         return ""
     text = _diff_of(g, f"{previous.head}..{current.head}", paths)
     if added:
-        now, _ = _listing(g, f"{current.base}...{current.head}", listed)
-        text += _diff_of(g, f"{current.base}...{current.head}", _with_old_paths(now, added))
+        text += _diff_of(g, f"{current.base}...{current.head}", _added_paths(g, current, added, listed))
     return text
 
 
