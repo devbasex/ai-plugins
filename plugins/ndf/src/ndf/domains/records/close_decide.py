@@ -94,11 +94,11 @@ class Reflection(NamedTuple):
 
 def _release_view(rep: record_decide.Record, releases: list[record_decide.Record], targets: tuple[str, ...]) -> Reflection:
     """反映の判定。数えるのは `record_decide.counted` の記録だけ。"""
-    complete, missing = record_decide.complete_of(releases, rep, targets)
     counted = record_decide.counted(releases, rep, targets)
+    missing = record_decide.missing_in(counted, targets)
     kinds = [(t, _confirmed_by(counted, t)) for t in targets]
     unconfirmed = [{"name": t, "kind": k} for t, k in kinds if k is not None and k != record_decide.CD]
-    return Reflection(complete, list(missing), unconfirmed)
+    return Reflection(not missing, list(missing), unconfirmed)
 
 
 def _confirmed_by(counted: list[record_decide.Record], name: str) -> Optional[str]:

@@ -336,10 +336,15 @@ def counted(releases: Sequence[Record], representative: Record, targets: tuple[s
     return [r for r in releases if (r.version, r.release, r.unit, r.commit) == key and r.targets == targets]
 
 
+def missing_in(counted_records: Sequence[Record], targets: tuple[str, ...]) -> tuple[str, ...]:
+    """`counted` で選んだ記録の `environments` が覆わない届け先（`targets` の順）。"""
+    covered = {e for r in counted_records for e in r.environments}
+    return tuple(t for t in targets if t not in covered)
+
+
 def complete_of(releases: Sequence[Record], representative: Record, targets: tuple[str, ...]) -> tuple[bool, tuple[str, ...]]:
     """`counted` の記録の `environments` が `targets` を覆うかと、まだ反映の記録が無い届け先（`targets` の順）。"""
-    covered = {e for r in counted(releases, representative, targets) for e in r.environments}
-    missing = tuple(t for t in targets if t not in covered)
+    missing = missing_in(counted(releases, representative, targets), targets)
     return not missing, missing
 
 
