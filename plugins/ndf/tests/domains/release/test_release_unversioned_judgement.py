@@ -28,7 +28,15 @@ def _release_args(root: Path) -> argparse.Namespace:
 
 
 def _cli_args(**more: object) -> argparse.Namespace:
-    base = {"version": None, "environment": [], "target": [], "observed": [], "correct_targets": False, "reason": None, "production_sha": None}
+    base = {
+        "version": None,
+        "environment": [],
+        "target": [],
+        "observed": [],
+        "correct_targets": False,
+        "reason": None,
+        "production_sha": None,
+    }
     return argparse.Namespace(**{**base, **more})
 
 
