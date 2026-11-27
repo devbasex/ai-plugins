@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters import git
-from ndf.adapters.github_pulls import Pull, target_of, text_of
+from ndf.adapters.github_pulls import Pull, same_repo, target_of, text_of
 from ndf.adapters.github_rules import PULL_REQUEST_RULE
 
 # マージの方式 → 「基底に含まれたか」の確かめ方（3378-2）。ancestry は head が基底の祖先か、merged は PR がマージ済み
@@ -239,11 +239,6 @@ class MergeExpect(NamedTuple):
     config_path: str
     config_oid: Optional[str]
     rejudge: Callable[[Optional[str]], Optional["MergeOutcome"]]
-
-
-def same_repo(a: str, b: str) -> bool:
-    """2 つのリポジトリ名（`<所有者>/<リポジトリ>`）が同じか。GitHub の名前は大文字小文字を区別しない。"""
-    return a.lower() == b.lower()
 
 
 def landed(pull: Pull, method: str, base_ref: str, repo: git.Git) -> bool:

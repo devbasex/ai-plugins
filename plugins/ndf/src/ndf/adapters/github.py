@@ -39,9 +39,9 @@ from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeExpect, 
 # 呼び手（`ndf.domains.release.land`・`publish`・`ci_cli`）が github から読む、github_merge の名前
 from ndf.adapters.github_merge import MERGE_COMMIT as MERGE_COMMIT
 from ndf.adapters.github_merge import landed as landed
-from ndf.adapters.github_merge import same_repo as same_repo
 
-# `Pull`・`Authored`・`text_of` は呼び手が github から読む名前でもある
+# `Pull`・`Authored`・`text_of`・`same_repo` は呼び手が github から読む名前でもある
+from ndf.adapters.github_pulls import same_repo as same_repo
 from ndf.adapters.github_pulls import PER_PAGE, PULL_FIELDS, Authored, Pull, account_id_of, graphql_string, text_of
 from ndf.adapters.github_rules import NO_RULES, RuleFacts, classic_facts_of, merge_facts, rule_facts_of
 from ndf.contracts import limits

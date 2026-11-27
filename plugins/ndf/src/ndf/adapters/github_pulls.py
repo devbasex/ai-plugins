@@ -18,6 +18,11 @@ CLOSING = re.compile(
 )
 
 
+def same_repo(a: str, b: str) -> bool:
+    """2 つのリポジトリ名（`<所有者>/<リポジトリ>`）が同じか。GitHub の名前は大文字小文字を区別しない。"""
+    return a.lower() == b.lower()
+
+
 def closing_keyword_issues(body: str, repo: str) -> list[int]:
     """本文の closing keywords が指す、リポジトリ `repo`（`<所有者>/<リポジトリ>`）の課題の番号（出た順・重複なし）。"""
     out: list[int] = []
@@ -25,7 +30,7 @@ def closing_keyword_issues(body: str, repo: str) -> list[int]:
         ref = m.group(1)
         where, _sep, number = ref.rpartition("/issues/") if "/issues/" in ref else ref.rpartition("#")
         owner_repo = where.removeprefix("https://github.com/").removeprefix("http://github.com/")
-        if owner_repo and owner_repo.lower() != repo.lower():
+        if owner_repo and not same_repo(owner_repo, repo):
             continue
         if int(number) not in out:
             out.append(int(number))
