@@ -529,7 +529,7 @@ def sweep_shares(share: Path, older_than: float, now: Callable[[], float] = time
 
 def _trusted_state(hub: GitHub, number: int, version: str, commit: str, comments: Optional[Sequence[Authored]] = None) -> record.Candidates:
     """PR の信用する書き手の記録（値 `version` かコミット `commit` を起点に集めた有効な記録と、値ごとの正の一覧）。"""
-    return record._candidates(hub, number, Selection(version, None, None), commit, comments)
+    return record.candidates(hub, number, Selection(version, None, None), commit, comments)
 
 
 def _target_set(targets: Sequence[str]) -> tuple[str, ...]:
@@ -768,7 +768,7 @@ def write_unversioned(hub: GitHub, hands: Hands, number: int, production: str, r
     kept = tuple(e for e in args.environments if present[e] >= set(shape.included))
     rest = [e for e in args.environments if e not in kept]
     if rest:
-        _require_writer(hub)
+        record.require_trusted_writer(hub)
     with _command_tree(hands, hub, production, prefix, rest) as workdir:
         run = _Run(hub, hands.reach(hub, production, workdir), shape, prefix, args, present)
         with _pool(len(rest)) as pool:
@@ -792,10 +792,6 @@ def write_unversioned(hub: GitHub, hands: Hands, number: int, production: str, r
         missing,
         [w for _e, _g, wrote in results for w in wrote.written] + [Written(n, KEPT) for e in kept for n in shape.included],
     )
-
-
-def _require_writer(hub: GitHub) -> None:
-    record._require_trusted_writer(hub)
 
 
 def _share_age(release: Mapping[str, Any]) -> float:
@@ -827,7 +823,7 @@ def correct_targets(
         raise RecordError(f"記録の PR #{holder} に値 {version} の信用するリリース記録が無い。先に record --version を打つ")
     _check_records(state, state.authoritative[version], version, commit, number)
     _refuse_declared(hands, production, commit, _known_push(state, version))
-    _require_writer(hub)
+    record.require_trusted_writer(hub)
     made = record_decide.Correction(version, commit, _target_set(targets), state.authoritative[version], reason)
     return Publisher(hub).comment(holder, record_decide.render_correction(made)).url
 
