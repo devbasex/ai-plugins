@@ -302,7 +302,7 @@ plugins/ndf/
     1. 承認済みの MVV があれば（`criteria_decide.approved(run.snapshot)`）、MVV の本文（`path`）と共通原則（`principles_path`）を `run.input_dir` へ写す。元のファイルは利用者の状態の保存先にあり、判定役は読めないためである。読める場所は増やさない
     2. `criteria_decide.criteria_lines(run.cfg.settings.focus, snapshot)` を呼ぶ。`snapshot` は、承認済みの MVV があれば `run.snapshot._replace(path=<本文の写し>, principles_path=<共通原則の写し>)`、無ければ `run.snapshot` である
     3. 2 の戻り値の後に `criteria_decide.document_line(run.documents, rows)` の戻り値を加え、`instruction` に渡す
-  - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は、状態の保存先に起動ごとに作るディレクトリ（`tempfile.mkdtemp`。権限 0700）の `round<n>-verify.*` に書く。前からあるファイルやシンボリックリンクは開かない。起動の後は、成功でも失敗でも、出力のファイルを権限 0600 にして状態の保存先へ移し、作ったディレクトリを消す。移し先の名前は、ファイル名の `round<n>-verify` を作ったディレクトリの名前（`round<n>-verify-<接尾辞>`。起動ごとに違う）に替えたものである。移すには `os.link` を使い、前からあるファイルやリンクは置き換えない（「[設計との食い違い](#設計との食い違い)」）。指摘の一覧は、権限 0700 の資料のディレクトリに書く。起動の前に、状態の保存先の `round<n>-verify-<接尾辞>.*` の形の通常のファイルのうち、更新から `cross-review.judge-record.keep`（30 日）を過ぎたものを消す。ほかの名前のファイルとリンクは消さない。過程の行と注意を `run.note` で足す
+  - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は、状態の保存先に起動ごとに作るディレクトリ（`tempfile.mkdtemp`。権限 0700）の `round<n>-verify.*` に書く。前からあるファイルやシンボリックリンクは開かない。起動の後は、成功でも失敗でも、出力のファイルを権限 0600 にして、状態の保存先の下の記録専用のディレクトリ `ndf-judge-records/`（無ければ権限 0700 で作る。シンボリックリンクなら書かない）へ移し、作ったディレクトリを消す。移し先の名前は、ファイル名の `round<n>-verify` を作ったディレクトリの名前（`round<n>-verify-<接尾辞>`。起動ごとに違う）に替えたものである。移すには `os.link` を使い、前からあるファイルやリンクは置き換えない（「[設計との食い違い](#設計との食い違い)」）。指摘の一覧は、権限 0700 の資料のディレクトリに書く。起動の前に、`ndf-judge-records/` の中の、名前が `round<n>-verify-<接尾辞>` に `.out`・`.err.log`・`-launch.json`・`-progress.log` のどれかを付けた形の通常のファイルのうち、更新から `cross-review.judge-record.keep`（30 日）を過ぎたものを消す。ほかの名前のファイル、リンク、`ndf-judge-records/` の外のファイルは消さない。`ndf-judge-records/` がシンボリックリンクなら何も消さない。過程の行と注意を `run.note` で足す
 
 ### 異常系の処理
 
@@ -312,7 +312,7 @@ plugins/ndf/
 | `ask` | 起動が終わらない | 利用上限・無進捗・監視の上限・起動の拒否 | `launch` の返す状態が `done` でない | 既定値で続ける（どの指摘も下げない） | `warnings` に状態を 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
 | `ask` | 差分・指摘の一覧・MVV の本文と共通原則の写しのどれかを読めない | claude の `permission_denials` にそのファイルがある | `participants.denied_reads` | 既定値で続ける | `warnings` にファイル名（絶対パスは過程にだけ） | 同上 |
 | `ask` | 回答が読めない | 出力が無い・JSON でない・`verdicts` の配列が無い | `participants.claude_answer` と `listed_of` | 既定値で続ける | `warnings` に 1 行 | 同上 |
-| `ask` | 出力の記録を状態の保存先へ移せない | 移し先が書けない・同じ名前のファイル・リンク・ディレクトリがある・保存先がハードリンクを作れない | 起動の後の `OSError` | 回答の扱いは変えず、記録を作ったディレクトリと一緒に消す | 過程にだけ 1 行。終了コードは変えない | 記録は残らない |
+| `ask` | 出力の記録を `ndf-judge-records/` へ移せない | `ndf-judge-records/` がシンボリックリンクかファイルである・移し先が書けない・同じ名前のファイル・リンク・ディレクトリがある・保存先がハードリンクを作れない | 起動の後の `OSError` | 回答の扱いは変えず、記録を作ったディレクトリと一緒に消す | 過程にだけ 1 行。終了コードは変えない | 記録は残らない |
 
 ### ログと記録の出力
 

@@ -264,7 +264,7 @@ def test_issue_4363_ask_launches_a_read_only_claude_once_and_returns_the_answers
     # 出力はこの起動で作った実行者だけが開けるディレクトリに書かせ、記録を起動ごとの名前で状態の保存先へ移してディレクトリを消す
     held = spec.paths.out.parent
     assert held.parent == tmp_path and modes == [0o700] and not held.exists()
-    record = tmp_path / f"{held.name}.out"
+    record = tmp_path / verify.RECORD_DIR / f"{held.name}.out"
     assert not record.is_symlink() and record.stat().st_mode & 0o777 == 0o600 and "verdicts" in record.read_text(encoding="utf-8")
     assert (tmp_path / "round1-verify.out").is_symlink()
     assert (tmp_path / "round1-verify.err.log").read_text(encoding="utf-8") == "前の記録"
@@ -278,20 +278,23 @@ def test_issue_4363_ask_keeps_the_records_of_every_launch_and_replaces_nothing(t
     answered = _launcher(seen, [holding(_row())])
 
     def taken(spec: agents.Launch) -> agents.AgentStatus:
-        (tmp_path / f"{spec.paths.out.parent.name}.out").write_text("前の記録", encoding="utf-8")
+        (tmp_path / verify.RECORD_DIR / f"{spec.paths.out.parent.name}.out").write_text("前の記録", encoding="utf-8")
         return answered(spec)
 
     for launch in (answered, answered, taken):
         assert verify.ask(run, 1, [_row()], {"r1-1": [diff]}, launch).verdicts["r1-1"].holds is True
-    first, second, third = (tmp_path / f"{spec.paths.out.parent.name}.out" for spec in seen)
+    first, second, third = (tmp_path / verify.RECORD_DIR / f"{spec.paths.out.parent.name}.out" for spec in seen)
     assert first != second and all("verdicts" in p.read_text(encoding="utf-8") for p in (first, second))
     assert third.read_text(encoding="utf-8") == "前の記録" and not seen[2].paths.out.parent.exists()
     assert [note for note in run.notes if "移せない" in note[2]]
 
 
 def test_issue_4363_ask_drops_only_its_own_records_past_the_keep_period(tmp_path: Path) -> None:
-    old = [tmp_path / f"round1-verify-ab12_cd3{suffix}" for suffix in (".out", ".err.log")]
-    kept = [tmp_path / "round1-verify-new00000.out", tmp_path / "round1-codex.out", tmp_path / "round1-verify-notes.txt"]
+    records = tmp_path / verify.RECORD_DIR
+    records.mkdir()
+    old = [records / f"round1-verify-ab12_cd3{suffix}" for suffix in (".out", ".err.log", "-launch.json", "-progress.log")]
+    # 新しい記録・記録の形でない名前・専用のディレクトリの外にある同じ形の名前は残す
+    kept = [records / "round1-verify-new00000.out", records / "round1-verify-notes.txt", tmp_path / "round1-verify-ab12_cd3.out"]
     for path in (*old, *kept):
         path.write_text("記録", encoding="utf-8")
     past = time.time() - limits.seconds(verify.RECORD_KEEP) - 60
@@ -354,7 +357,7 @@ def test_issue_4363_ask_failure_gives_no_answer_and_one_warning(tmp_path: Path, 
     answers = verify.ask(_AskRun(tmp_path), 1, [_row()], {"r1-1": [diff]}, launch)
     assert answers.verdicts == {} and len(answers.warnings) == 1 and len(seen) == 1
     held = seen[0].paths.out.parent
-    assert not held.exists() and (tmp_path / f"{held.name}.out").is_file()
+    assert not held.exists() and (tmp_path / verify.RECORD_DIR / f"{held.name}.out").is_file()
     # 注意は PR の記録に載るので、手元の絶対パスを書かない
     assert str(tmp_path) not in answers.warnings[0]
 

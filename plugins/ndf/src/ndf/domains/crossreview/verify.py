@@ -3,8 +3,9 @@
 判定役は、修正担当・相手役とは別の、読むだけの claude の起動である（`participants.read_only_launch`）。読める場所は
 レビューする worktree と、この実行の資料のディレクトリ（差分と指摘の一覧のファイル、承認済みの MVV の写し）だけである。
 指摘の文はプロセスの引数に載せず一覧のファイルで渡す。一覧は、実行者だけが開ける資料のディレクトリに置く。判定役の出力は
-起動ごとに新しく作る実行者だけが開けるディレクトリに書かせ、起動の後で記録を起動ごとの名前で状態の保存先へ移してディレクトリを消す。残す期間
-（`RECORD_KEEP`）を過ぎた記録は、次に判定役を起動するときに消す。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の `drive` である。
+起動ごとに新しく作る実行者だけが開けるディレクトリに書かせ、起動の後で記録を起動ごとの名前で状態の保存先の下の
+記録専用のディレクトリ（`RECORD_DIR`）へ移して、起動ごとのディレクトリを消す。そこで残す期間（`RECORD_KEEP`）を過ぎた記録は、次に判定役を
+起動するときに消す。どの指摘を渡すかと回答の読み方は `verify_decide`、回答を指摘の行へ当てるのは呼び手の `drive` である。
 
 失敗しても例外で駆動を止めず、起動し直さない。回答なしと注意にする（どの指摘も下がらない）。注意は PR の記録に載るので、
 手元の絶対パス・指摘の本文・回答の中身を書かない。詳しい原因は過程にだけ残す。
@@ -29,9 +30,11 @@ from ndf.domains.crossreview.fixer import Launcher
 from ndf.domains.crossreview.settings import RunConfig
 from ndf.domains.records import mvv
 
+# 判定役の記録だけを置く、状態の保存先の下のディレクトリ。古い記録の片付けはこの中だけを見る
+RECORD_DIR = "ndf-judge-records"
 # 判定役の記録を残す秒
 RECORD_KEEP = "cross-review.judge-record.keep"
-# `_keep_records` が付ける記録の名前（接尾辞は `tempfile.mkdtemp` の 8 字）。この形のファイルだけを古さで消す
+# `_keep_records` が付ける記録の名前（接尾辞は `tempfile.mkdtemp` の 8 字）。`RECORD_DIR` の中の、この形のファイルだけを古さで消す
 _RECORD = re.compile(r"round\d+-verify-[a-z0-9_]{8}(\.out|\.err\.log|-launch\.json|-progress\.log)")
 
 
@@ -61,25 +64,38 @@ def _readable_mvv(snap: Optional[mvv.Snapshot], into: Path) -> Optional[mvv.Snap
 
 
 def _keep_records(run: VerifyRun, round_no: int, held: Path, stem: Path) -> None:
-    """起動ごとのディレクトリ `held` の記録を、実行者だけが読めるファイルにして `stem` の隣へ移し、`held` を消す。移し先の名前は、
-    `stem` の名前の部分を `held` の名前（起動ごとに違う）に替えたものである。前からある同じ名前のファイルやリンクは置き換えない
-    （`os.link` は移し先があれば失敗する）。移せない記録はディレクトリと一緒に消える。"""
+    """起動ごとのディレクトリ `held` の記録を、実行者だけが読めるファイルにして `stem` の隣の `RECORD_DIR` へ移し、`held` を消す。
+    移し先の名前は、`stem` の名前の部分を `held` の名前（起動ごとに違う）に替えたものである。前からある同じ名前のファイルやリンクは
+    置き換えない（`os.link` は移し先があれば失敗する）。移せない記録はディレクトリと一緒に消える。"""
+    kept = stem.parent / RECORD_DIR
+    try:
+        if kept.is_symlink():  # リンクの先は NDF の記録の場所でないので、書かない
+            raise OSError("シンボリックリンクである")
+        kept.mkdir(mode=0o700, exist_ok=True)
+    except OSError as exc:
+        run.note(round_no, "verify", f"判定役の記録のディレクトリ {RECORD_DIR} を使えず、記録を残さない（{exc}）")
+        shutil.rmtree(held, ignore_errors=True)
+        return
     for record in held.iterdir():
         if record.is_symlink() or not record.is_file():
             continue
         name = held.name + record.name.removeprefix(stem.name)
         try:
             record.chmod(0o600)
-            os.link(record, stem.parent / name)
+            os.link(record, kept / name)
         except OSError as exc:  # 診断の記録を移せなくても、判定の結果と駆動は変えない
             run.note(round_no, "verify", f"判定役の記録 {name} を移せない（{exc}）")
     shutil.rmtree(held, ignore_errors=True)
 
 
 def _drop_old_records(run: VerifyRun, round_no: int, state_dir: Path) -> None:
-    """状態の保存先 `state_dir` の判定役の記録のうち、残す期間を過ぎた通常のファイル（リンクは除く）を消す。"""
+    """状態の保存先 `state_dir` の `RECORD_DIR` にある判定役の記録のうち、残す期間を過ぎた通常のファイル（リンクは除く）を消す。
+    `RECORD_DIR` の外と、`RECORD_DIR` がリンクのときは何も消さない。"""
+    kept = state_dir / RECORD_DIR
+    if kept.is_symlink() or not kept.is_dir():
+        return
     cutoff = time.time() - limits.seconds(RECORD_KEEP)
-    for record in state_dir.glob("round*-verify-*"):
+    for record in kept.iterdir():
         if not _RECORD.fullmatch(record.name) or record.is_symlink() or not record.is_file():
             continue
         try:
