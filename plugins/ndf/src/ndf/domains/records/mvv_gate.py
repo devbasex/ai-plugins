@@ -531,7 +531,7 @@ def _table_numbers(got: Mapping[str, Any], paths: Sequence[str]) -> dict[str, Op
     切られた本文では後ろにある表の行を見落とし、省く側へ倒れるので読まない。
     """
     out: dict[str, Optional[tuple[str, ...]]] = {}
-    for p in paths:
+    for p in paths:  # noqa: NDF201 上限: PR の差分の設計文書の数（数件）。応答の dict を読む純粋な関数で外部へは出ない
         text = github.whole_text(got.get(p))
         out[p] = None if text is None else design_check_rules.redline_numbers(text)
     return out
@@ -543,7 +543,7 @@ def _target(hub: GitHub, pull: Pull, paths: Sequence[str]) -> tuple[dict[str, An
     マージ先の設定と head の本文を `GitHub.branch_file_with` で読む（承認ゲートを省く判定でだけ打つ。設計の費用表の増分に記録する）。
     マージ先の設定を読めなければ本番へ反映され得るとして扱う。最初の要求の失敗は `GitHubError` を送出する。
     """
-    selections = {p: github.whole_blob_at(pull.head_sha, p) for p in paths}
+    selections = {p: github.whole_blob_at(pull.head_sha, p) for p in paths}  # noqa: NDF201 上限: PR の差分の設計文書の数（数件）。選択の文字列を組む純粋な関数で外部へは出ない
     found, got, unread = hub.branch_file_with(pull.base_ref, production_merge.PROJECT_FILE, selections)
     verdict = production_merge.judge_project_text(found.text, pull.base_ref, source_repo=found.repo, repo=hub.repo)
     production = production_merge.reaches_production(verdict)
