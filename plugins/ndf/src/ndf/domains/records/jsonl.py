@@ -59,15 +59,9 @@ def read_rows(
         if cut is not None:  # 途中で切れた書き込みの断片。断片だけを除き、前後につながった行は読む
             broken.append(Broken(number, cut, len(rows), None))
         for raw in raws:
-            try:
-                if wanted(raw):
-                    rows.append(internal.read_record(kind, raw))
-                else:
-                    internal.readable_version(kind, raw)
-            except internal.InternalError as exc:
-                if exc.kind != "invalid":
-                    raise
-                broken.append(Broken(number, str(exc), len(rows), raw))
+            reason = _read_one(raw, rows, kind=kind, wanted=wanted, check_version=True)
+            if reason is not None:
+                broken.append(Broken(number, reason, len(rows), raw))
     return rows, broken
 
 
@@ -95,15 +89,27 @@ def read_rows_after(
             continue
         raws, cut = _raw(chunk)
         broken += cut is not None
-        for raw in raws:
-            try:
-                if wanted(raw):
-                    rows.append(internal.read_record(kind, raw))
-            except internal.InternalError as exc:
-                if exc.kind != "invalid":
-                    raise
-                broken += 1
+        broken += sum(_read_one(raw, rows, kind=kind, wanted=wanted, check_version=False) is not None for raw in raws)
     return rows, broken, start + end
+
+
+def _read_one(
+    raw: dict[str, Any], rows: list[dict[str, Any]], *, kind: str, wanted: Callable[[Mapping[str, Any]], bool], check_version: bool
+) -> Optional[str]:
+    """1 つの辞書を読む。`wanted` が真なら今のバージョンの形にして `rows` へ足し、偽なら `check_version` のときだけバージョンを見る。
+
+    形が違えば足さずに理由を返し、読めれば None。新しいバージョンの行と知らない種類は `InternalError` を送る。
+    """
+    try:
+        if wanted(raw):
+            rows.append(internal.read_record(kind, raw))
+        elif check_version:
+            internal.readable_version(kind, raw)
+    except internal.InternalError as exc:
+        if exc.kind != "invalid":
+            raise
+        return str(exc)
+    return None
 
 
 def _raw(chunk: bytes) -> tuple[list[dict[str, Any]], Optional[str]]:
@@ -155,7 +161,7 @@ def _decoded(text: str, pos: int) -> Optional[tuple[dict[str, Any], int]]:
     try:
         raw, end = _DECODER.raw_decode(text, pos)
         text[pos:end].encode("utf-8")
-    except (json.JSONDecodeError, UnicodeEncodeError):
+    except (json.JSONDecodeError, UnicodeEncodeError):  # noqa: NDF401 ファイル: ここから読めない所は断片として呼び手（`_raw`）が数え、次の行の始まりから読み直す
         return None
     return (raw, end) if isinstance(raw, dict) else None
 
@@ -164,7 +170,7 @@ def _parsed(chunk: bytes) -> dict[str, Any] | str:
     """バイト列を UTF-8 の 1 つの辞書として読む。読めなければ、その理由の文字列。"""
     try:
         return internal.parse_line(chunk.decode("utf-8"))
-    except UnicodeDecodeError:
+    except UnicodeDecodeError:  # noqa: NDF401 ファイル: 読めない理由として呼び手へ返し、読めない行として結果に出る
         return "UTF-8 として読めない"
     except internal.InternalError as exc:
         return str(exc)
