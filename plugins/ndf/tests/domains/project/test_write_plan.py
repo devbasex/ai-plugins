@@ -150,6 +150,7 @@ def test_a_new_default_branch_without_measured_checks_keeps_the_previous_branche
     ci = {"required_checks": ["old-check"]}
     existing = {"version": 1, "ci": ci, "analysis": {"written": {"ci": value_digest(ci)}}}
     doc, record = _first(repo)
+    _put(repo, "project", json.dumps(existing))
     before = {**record, "branches": {"head": "master", "present": ["master"]}}
     measure = {**MEASURE, "items": {"ci": {"status": "unknown", "reason": "gh が失敗した: 401"}}}
     planned = _plan(repo, existing=existing, measure=measure, record=before)
