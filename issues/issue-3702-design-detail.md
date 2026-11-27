@@ -119,7 +119,7 @@ contracts/
 
 | 規則 | 判定の式 |
 | --- | --- |
-| U1 | ファイルの中でタスクの `id` か単位の名前が重なる。`parse` を通さずに渡された `UnitFile` で、1 つの単位の `tasks` に同じタスクが重なる（所属の数と行数は 1 回と数える）。1 つの課題を 2 つのファイルの `issues` が持つ。`after`・`units[].tasks` の指す先が無い。グラフに輪がある |
+| U1 | ファイルの中でタスクの `id` か単位の名前が重なる。`judge` が受け取った `UnitFile` で、1 つの単位の `tasks` に同じタスクが重なる。所属の数と行数は 1 回と数える。1 つの課題を 2 つのファイルの `issues` が持つ。`after`・`units[].tasks` の指す先が無い。グラフに輪がある |
 | U2 | ファイルにタスクか単位が無い。単位のタスクが 0 個。タスクが 0 個か 2 個以上の単位にある。タスクの `issue` がファイルの `issues` に無い。`criteria` が指す課題が引数 `criteria` のキーに無い（対象外の参照）。番号が 1 未満か、`criteria[課題]`（本文の受け入れ条件の数）より大きい |
 | U3 | タスク B の `after` のタスク A の単位が、B の単位でも B の単位の閉包の中でもない |
 | U4 | 互いに相手を閉包に持たない 2 単位の `touches` が重なる。`touches` はタスクの `files` の和で、文字列の一致で比べる。ファイルから触る単位を引く索引を作り、各単位について、入力順で後ろにあり、同じファイルを触る単位だけを重複なく集める。こうすると 1 つの組を 1 回だけ調べ、ファイルを共有しない組は調べない。ただし、多くの単位が同じファイルを共有していると、索引では同じ組を何度もたどる。この切り替えの目安には単位の数の 2 乗を使う（実際に比べる組の数ではない）。ファイルごとの触る単位の数の 2 乗の和がこの値を超えたら、索引を使わず、入力順で後ろにあるすべての単位を候補にする。どちらの場合も、依存で前後の決まる相手は、候補を並べる前と重なるファイルを求める前に外す。1 つの組の違反は、重なるファイルをまとめて 1 件にする |
@@ -173,7 +173,7 @@ contracts/
 | `Report` | 同上 | `judgement`・`missing`・`task_gaps`・`stale_tables` |
 | `review-units.target-lines.json`・`max-lines.json` | `contracts/limits/` | `{"summary", "count": 400 / 1000, "read_by": ["ndf.core.plan.units_files"]}` |
 
-`review-units.schema.json` は設計書の「データ構造」の例の形で、`additionalProperties: false`、`version` は定数 1 にする。`tasks[].files` の各値は、先頭と末尾の `/`、`//`、`.` と `..` の区切り、`*?[]` を断る `pattern` を持つ。`title` と `lines`（0 以上の整数）は必須である。`tasks`・`units`・各単位の `tasks` は 1 つ以上（`minItems: 1`）にする。各単位の `tasks` は `uniqueItems: true` にする。同じタスクを 2 回書いたファイルは、`load` が `invalid` で止め、`judge` まで進めない。`judge` の U1 の重複の判定は、`parse` を通さずに `UnitFile` を渡す呼び出し（テストや別の読み込み口）のための守りである。計画を省く課題は `single` で課題全体を 1 単位にするので、空の計画はファイルで表さない。行数の無い通常のタスクは `load` が `invalid` で止める。宣言 `workflow.review_units` は `{"target_lines", "max_lines"}`（1 以上の整数。どちらも任意）で、`project-workflow.schema.json` と `ndf-settings/project.schema.json` の両方に足す。
+`review-units.schema.json` は設計書の「データ構造」の例の形で、`additionalProperties: false`、`version` は定数 1 にする。`tasks[].files` の各値は、先頭と末尾の `/`、`//`、`.` と `..` の区切り、`*?[]` を断る `pattern` を持つ。`title` と `lines`（0 以上の整数）は必須である。`tasks`・`units`・各単位の `tasks` は 1 つ以上（`minItems: 1`）にする。各単位の `tasks` は `uniqueItems: true` にする。同じタスクを 2 回書いたファイルは、`load` が `invalid` で止め、`judge` まで進めない。`parse` はスキーマを検証しない。そのため `judge` は、受け取った `UnitFile` がスキーマを通ったかにかかわらず、単位の中の重複を U1 として返す。スキーマを通さずに辞書を `parse` して渡す呼び出し（テストや別の読み込み口）でも、重複を見落とさないためである。計画を省く課題は `single` で課題全体を 1 単位にするので、空の計画はファイルで表さない。行数の無い通常のタスクは `load` が `invalid` で止める。宣言 `workflow.review_units` は `{"target_lines", "max_lines"}`（1 以上の整数。どちらも任意）で、`project-workflow.schema.json` と `ndf-settings/project.schema.json` の両方に足す。
 
 ### 処理の手順
 
