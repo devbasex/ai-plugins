@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ndf.domains.crossreview import cli, drive, prior_decide, report_decide, store, threads
+from ndf.domains.crossreview import carry, cli, drive, prior_decide, report_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, Repos, commit, run_cli, sh
@@ -276,7 +276,7 @@ def test_thread_resolved_by_another_run_is_not_fixed_again(wt: Path, tmp_path: P
     assert (code, got["status"]) == (0, "ok") and "claude" not in fake.calls
     assert hub.port.replies == [] and hub.port.resolved == []
     [finding] = _state(state_dir)["findings"]
-    assert (finding["outcome"], finding["reason"]) == (fin.FIXED, drive.RESOLVED_ELSEWHERE)
+    assert (finding["outcome"], finding["reason"]) == (fin.FIXED, carry.RESOLVED_ELSEWHERE)
 
 
 def test_comments_are_chosen_from_the_files_of_the_diff_handed_over(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -429,4 +429,4 @@ def test_finding_that_comes_back_after_its_thread_was_resolved_is_detached(wt: P
     second._fixes = 1  # 前の起動の修正のコミットと別のファイルに書く
     _run(capsys, monkeypatch, second, wt, "--max-rounds", "1")
     [finding] = _state(state_dir)["findings"]
-    assert finding["outcome"] == fin.UNRESOLVED and finding["reason"] != drive.RESOLVED_ELSEWHERE
+    assert finding["outcome"] == fin.UNRESOLVED and finding["reason"] != carry.RESOLVED_ELSEWHERE

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from ndf.contracts import result
-from ndf.domains.crossreview import cli, drive, journal, reviewed_pr, scope_decide, store, threads
+from ndf.domains.crossreview import carry, cli, drive, journal, reviewed_pr, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.settings import RunConfig
 
@@ -400,8 +400,8 @@ def test_an_unconfirmed_pull_request_stops_before_the_reviewers(
     monkeypatch: pytest.MonkeyPatch, pr: threads.ReadPr | None, reason: str
 ) -> None:
     """確認を求める起動は、PR を読めないか head が違えば、相手役を起動せずに理由を返す。"""
-    monkeypatch.setattr(drive, "_reader", lambda cfg, reader_for, warnings: None)
-    monkeypatch.setattr(drive, "_read_prior", lambda prs, warnings: drive._Prior(pr=pr))
+    monkeypatch.setattr(carry, "reader", lambda cfg, reader_for, warnings: None)
+    monkeypatch.setattr(carry, "read_prior", lambda prs, warnings: carry.Prior(pr=pr))
     cfg = SimpleNamespace(check_pr=True, branch="feat/x")
     run = SimpleNamespace(cfg=cfg, synced_head="h0", sent="h0", read_pr=None, warnings=[])
     with pytest.raises(drive.DriveStopped, match=reason) as stopped:
