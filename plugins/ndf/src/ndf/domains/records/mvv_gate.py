@@ -443,16 +443,26 @@ def _judged(
         return j.posted_if_current(j.stopped("llm_no_answer", why, noted=False, holds=rec.holds))
     why = [] if unrecorded is None else ["判定を記録（mvv-validation.jsonl）に書けない: " + j.text("records_unwritable", unrecorded)]
     verdict = _verdict(row)
-    # 手順 (8): 進め方と区分は省くかだけを決める。記録に行の無い判定では省かない
-    ok, reasons = may_skip(facts, verdict, gate_name)
-    skip = ok and unrecorded is None
-    why += reasons
-    if inputs.get("pace") not in MVV_PACES:
-        skip, why = False, [f"進め方 {inputs.get('pace')} は承認ゲートを MVV 判定で省かない", *why]
-    if gate_name not in MVV_SKIP_GATES:
-        skip, why = False, [*why, RELEASE_KEPT]
+    skip, why = _skip_decision(facts, verdict, gate_name, inputs.get("pace"), recorded=unrecorded is None, why=why)
     outcome = _bound(j, rows, mm.gate_outcome(gate_name, verdict, skip, why, rec.holds, pull=(number, j.pull.head_sha)))
     return j.posted_if_current(outcome)
+
+
+def _skip_decision(
+    facts: MvvFacts, verdict: Any, gate_name: str, pace: Any, *, recorded: bool, why: Sequence[str]
+) -> tuple[bool, list[str]]:
+    """手順 (8): 承認ゲートを省くかと、省かない理由（`why` の後ろへ足したもの）を返す。副作用は無い。
+
+    進め方 `pace` と区分 `gate_name` は省くかだけを決める。記録に行の無い判定（`recorded` が偽）では省かない。
+    """
+    ok, reasons = may_skip(facts, verdict, gate_name)
+    skip = ok and recorded
+    out = [*why, *reasons]
+    if pace not in MVV_PACES:
+        skip, out = False, [f"進め方 {pace} は承認ゲートを MVV 判定で省かない", *out]
+    if gate_name not in MVV_SKIP_GATES:
+        skip, out = False, [*out, RELEASE_KEPT]
+    return skip, out
 
 
 def _design_paths(rows: Sequence[Mapping[str, Any]]) -> list[str]:
