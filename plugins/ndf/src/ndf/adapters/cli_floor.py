@@ -128,7 +128,7 @@ def _version_read(
     name: str, path: str, row: Mapping[str, object], env: Optional[Mapping[str, str]], cwd: Optional[Path]
 ) -> tuple[Optional[str], bool]:
     """`_version` と、確かめの間に待ったか。自分が `--version` を打って終わりを待ったときと、同じキーの `--version` を
-    別のスレッドが打っている間にその終わりを待ったときに真。記録を再利用したとき（記録の読み書きの錠 `_LOCK` だけを待ったときを含む）は偽。"""
+    別のスレッドが打っている間にその終わりを待ったときに真。待たずに記録を再利用したとき（記録の読み書きの錠 `_LOCK` だけを待ったときを含む）は偽。"""
     try:
         st = os.stat(path)
     except OSError:  # noqa: NDF401 外部コマンド: 消えた実行ファイルは比べずに通し、起動の失敗は今の起動の箇所が扱う
@@ -143,8 +143,8 @@ def _version_read(
         gate.acquire()
     try:
         with _LOCK:
-            if key in _SEEN:
-                return _SEEN[key], True
+            if key in _SEEN:  # 別のスレッドが記録を書き終えていた。その終わりを錠で待ったときだけ真
+                return _SEEN[key], queued
         version = _read_version(path, row, env, cwd)
         with _LOCK:
             _SEEN[key] = version

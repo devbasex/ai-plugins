@@ -453,7 +453,8 @@ def test_draft_reclaims_only_what_the_draft_record_identifies(tmp_path):
 INTERRUPTED = {
     "empty": (True, False),  # 記録を作った直後に落ちた。ディレクトリは作る前なので、その名前のディレクトリは NDF のものでない
     "torn_head": (True, False),  # 名前の行の途中で落ちた。同じくディレクトリは残す
-    "head": (False, False),  # 名前の行を書き終えた後に落ちた。乱数の名前のディレクトリは NDF が作った
+    "head": (False, False),  # 名前の行の後、実体の行の前に落ちた。NDF はまだ中に何も書いていないので、空のディレクトリだけを消す
+    "torn_body": (False, False),  # 実体の行の途中で落ちた。同じく空のディレクトリだけを消す
     "foreign": (True, True),  # NDF の記録の形でない
 }
 
@@ -466,12 +467,31 @@ def test_draft_reclaims_a_record_left_at_each_step(tmp_path, state):
     drafting = home / f"{lc.DRAFTING}{HALF}"
     drafting.mkdir()
     head = lc._draft_head(HALF)
-    texts = {"empty": "", "torn_head": head[:5], "head": head, "foreign": "利用者のメモ\n"}
+    texts = {"empty": "", "torn_head": head[:5], "head": head, "torn_body": head + '{"dev": 12', "foreign": "利用者のメモ\n"}
     record = drafting.with_name(drafting.name + lc.DRAFT_RECORD)
     record.write_text(texts[state], encoding="utf-8")
     la.new_candidate("/r", target)
     assert (drafting.exists(), record.exists()) == INTERRUPTED[state]
     assert not [p.name for p in home.iterdir() if p.name.startswith("..")]  # 記録の一時ファイルを残さない
+
+
+@pytest.mark.parametrize("finished", [False, True])
+def test_draft_keeps_a_directory_it_cannot_identify_as_its_own(tmp_path, finished):
+    """Value 6: 作成を中断した後、同じパスへ利用者がディレクトリを戻していれば、中の `candidate.json` を消さない。
+    実体の行まで書いた記録は実体と照らし、実体の行の前の記録では中身のあるディレクトリを NDF が作ったものと見なさない。"""
+    target = _worktree(tmp_path)
+    home = la.new_candidate("/r", target).candidate.parents[1]
+    drafting = lc.start_draft(home, HALF)
+    record = drafting.with_name(drafting.name + lc.DRAFT_RECORD)
+    if not finished:
+        record.write_text(lc._draft_head(HALF), encoding="utf-8")
+    users = home / "利用者のディレクトリ"  # 元のディレクトリがあるうちに作り、inode の使い回しで実体が合わないようにする
+    users.mkdir()
+    (users / lc.CANDIDATE_NAME).write_text("利用者の設定案", encoding="utf-8")
+    drafting.rmdir()
+    users.rename(drafting)
+    la.new_candidate("/r", target)
+    assert (drafting / lc.CANDIDATE_NAME).read_text(encoding="utf-8") == "利用者の設定案" and not record.exists()
 
 
 def test_draft_leaves_a_record_whose_name_is_not_a_random_id(tmp_path):

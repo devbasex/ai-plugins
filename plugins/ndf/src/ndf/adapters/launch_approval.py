@@ -536,8 +536,8 @@ def new_candidate(repo: str, target: Path) -> Draft:
 
     リポジトリごとの候補の錠の中で、中断の残りを片付け、掃除（`_sweep`）をしてから作る。完了の記録も、反映先の worktree が
     無ければ消す。候補は作成途中の名前（`DRAFTING`）のディレクトリで候補と記録をそろえてから付け替え、途中で失敗すれば消す。
-    作成途中のディレクトリは、乱数の名前で作り、作る前に隣へ記録を書き終える（`launch_candidates.start_draft`）。消すのはその記録で
-    確かめたディレクトリの、NDF が作ったファイルだけである（`launch_candidates.reclaim_drafts`）。
+    作成途中のディレクトリは、乱数の名前で作り、作る前後に隣の記録へ名前と実体を書く（`launch_candidates.start_draft`）。消すのは
+    その記録の実体と合うディレクトリの、NDF が作ったファイルだけである（`launch_candidates.reclaim_drafts`）。
     写しと反映元のバージョンは反映先の同じ読み取りから作る（別に読むと、間の保存で古い写しに新しいバージョンが付く）。
     """
     home = _store(CANDIDATES) / _short_hash(repo)

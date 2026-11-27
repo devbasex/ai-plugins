@@ -40,7 +40,7 @@ src/ndf/
 | `src/ndf/adapters/secret_forms.py` | 新設 | 秘密の形の表と、当たる文字列を伏せる処理 | — | モジュール | N: `SECRET_VALUE`・`ASSIGNED_SECRET`・`MASK`・`redact`（`domains/project/secret.py` から移す） |
 | `src/ndf/domains/project/secret.py` | 変更 | 移した表と処理を `secret_forms` から読み込む | secret_forms | モジュール | C: 定義の移動 |
 | `src/ndf/adapters/claude.py` | 変更 | 起動の引数と結果 | launch_settings | `ClaudeCall`・`ClaudeReply`・`LaunchOptions`・`LaunchRecorder` | C: `permission_args`・`_full_args`・`call_claude`・`_precheck`・`_parse_reply`・`context_window`・`_accounted`。N: `main_model`・`set_launch_recorder`・`report_launch` |
-| `src/ndf/adapters/cli_floor.py` | 変更 | CLI の最低バージョンの確認が、確かめの間に待ったかを返す。自分が打った `--version` の終了を待ったときと、同じ実行ファイルの `--version` を打つ別のスレッドの終了を、実行ファイルごとの錠で待ったときに真。キャッシュに当たったときは偽。呼び出し元が、待った間の取り消しを確かめ直すために使う | — | モジュール | C: `require`（戻り値を `bool` にする）。N: `_version_read` |
+| `src/ndf/adapters/cli_floor.py` | 変更 | CLI の最低バージョンの確認が、確かめの間に待ったかを返す。自分で `--version` の終了を待った場合と、同じ実行ファイルのバージョン取得を別スレッドに任せて、その終了を実行ファイルごとの錠で待った場合は真を返す。待った後にキャッシュを使う場合も真である。バージョン取得を待たずにキャッシュを使った場合は偽を返す。呼び出し元が、待った間の取り消しを確かめ直すために使う | — | モジュール | C: `require`（戻り値を `bool` にする）。N: `_version_read` |
 | `src/ndf/adapters/agents.py` | 変更 | 相手役の起動 | identity | `Launch` | C: `_start`・`_guarded_run`・`Launch`（`verify`） |
 | `src/ndf/core/worker.py` | 変更 | worker の起動 | launch_settings・claude | `Caller` | C: `delegate`・`_args_for`・`_resume_until_written` |
 | `src/ndf/progress/invoke.py` | 変更 | Skill を回す起動 | launch_settings・claude | `SkillCaller` | C: `_call_skill` |

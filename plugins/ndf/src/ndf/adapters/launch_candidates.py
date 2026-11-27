@@ -28,8 +28,8 @@ DISCARD_NAME = "discard.json"
 DRAFTING = ".draft-"
 REMOVING = ".removing-"
 SETTLING = ".settling-"
-# 作成途中のディレクトリ `.draft-<名前>` の隣に置く記録 `.draft-<名前>.record` の拡張子。ディレクトリを作る前に名前の行を書き終える。
-# 掃除は、名前の形でなくこの記録で NDF が作ったと確かめたものだけを片付ける
+# 作成途中のディレクトリ `.draft-<名前>` の隣に置く記録 `.draft-<名前>.record` の拡張子。ディレクトリを作る前に名前の行を書き終え、
+# 作った後に実体（`dev`・`ino`）の行を書き足す。掃除は、名前の形でなくこの記録で NDF が作ったと確かめたものだけを片付ける
 DRAFT_RECORD = ".record"
 # 作成途中の候補の名前の形。`new_candidate` が作る乱数（`uuid4().hex`）で、利用者が同じ名前のファイルやディレクトリを置くことはない
 DRAFT_ID = re.compile(r"[0-9a-f]{32}")
@@ -310,22 +310,26 @@ def _remove_own(aside: Path) -> None:
 def start_draft(home: Path, name: str) -> Path:
     """候補の錠の中で、作成途中のディレクトリ `.draft-<name>`（0700）を作り、ディレクトリを返す。`name` は乱数の名前（`DRAFT_ID`）。
 
-    ディレクトリを作る前に、隣の記録 `.draft-<name>.record` を一時ファイルを使わずに新しく作り、名前の行を書き終える。
-    記録はどの時点で落ちても隣の 1 つのファイルだけで、掃除が中身で見分ける（`reclaim_drafts`）。
+    ディレクトリを作る前に、隣の記録 `.draft-<name>.record` を一時ファイルを使わずに新しく作り、名前の行を書き終える。作った後に、
+    同じ記録へディレクトリの実体の行を書き足す。中に何かを書くのは、実体の行を書き終えた後（呼び手）だけである。
+    記録のための一時ファイルは作らない。どの時点で落ちても、残るのは記録と作成途中のディレクトリだけで、掃除が記録の中身で見分ける（`reclaim_drafts`）。
     """
     if not DRAFT_ID.fullmatch(name):
         raise ValueError(f"作成途中の候補の名前が乱数の形でない: {name}")
     home.mkdir(parents=True, exist_ok=True, mode=0o700)
     drafting = home / f"{DRAFTING}{name}"
     record = _draft_record(drafting)
-    fd = os.open(record, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    fd = os.open(record, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_APPEND, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(_draft_head(name))
-    try:
-        drafting.mkdir(mode=0o700)
-    except BaseException:
-        record.unlink(missing_ok=True)
-        raise
+        f.flush()  # 名前の行を、ディレクトリを作る前に書き終える
+        try:
+            drafting.mkdir(mode=0o700)
+        except BaseException:
+            record.unlink(missing_ok=True)
+            raise
+        st = drafting.lstat()
+        f.write(json.dumps({"dev": st.st_dev, "ino": st.st_ino}) + "\n")
     return drafting
 
 
@@ -340,25 +344,55 @@ def _draft_record(drafting: Path) -> Path:
 
 
 def _draft_head(name: str) -> str:
-    """作成途中の記録の中身（ディレクトリを作る前に書き終える名前の行）。"""
+    """作成途中の記録の 1 行目（ディレクトリを作る前に書き終える名前の行）。"""
     return json.dumps({"id": name}, ensure_ascii=False) + "\n"
+
+
+# 作成途中の記録の 2 行目（実体の行）の形。数字を 0 にそろえて、書きかけの行がこの形の頭かを比べる
+DRAFT_BODY_FORM = '{"dev": 0, "ino": 0}'
+
+
+def _draft_state(text: str, name: str) -> tuple[str, Optional[dict[str, int]]]:
+    """作成途中の記録の中身から、作成がどこまで進んだか。
+
+    `torn`（空か、名前の行の途中。ディレクトリを作る前に落ちた）、`pending`（名前の行の後で、実体の行を書き終える前。ディレクトリは
+    作ったか、作る前で、作っていれば空のまま）、`made`（実体の行まで書いた。実体を返す）、`foreign`（NDF の記録の形でない）のどれか。
+    """
+    head = _draft_head(name)
+    if head.startswith(text) and text != head:
+        return "torn", None
+    if not text.startswith(head):
+        return "foreign", None
+    body = text[len(head) :]
+    if not body.endswith("\n"):
+        return ("pending", None) if "\n" not in body and DRAFT_BODY_FORM.startswith(re.sub(r"[0-9]+", "0", body)) else ("foreign", None)
+    try:
+        obj = json.loads(body)
+    except ValueError:  # noqa: NDF401 ファイル: 壊れた実体の行は、NDF の記録の形でない
+        return "foreign", None
+    if not isinstance(obj, dict) or set(obj) != {"dev", "ino"} or not all(type(v) is int for v in obj.values()):
+        return "foreign", None
+    return ("made", obj) if json.dumps(obj) + "\n" == body else ("foreign", None)
 
 
 def reclaim_drafts(home: Path) -> None:
     """候補の錠の中で、中断した作成の残りを片付ける。NDF が作ったと記録で確かめられたものだけを消す。
 
-    NDF が作ったことは、乱数の名前（`DRAFT_ID`）と、ディレクトリより先に書き終える記録の中身で確かめる。乱数の名前の記録と
-    ディレクトリは、NDF のほかに作る人がいない。記録が名前の行の途中までなら、ディレクトリを作る前に落ちたので、その名前の
-    ディレクトリは NDF が作ったものでない。名前の行がそろっていれば、その名前のディレクトリは NDF が作ったものである。
-    記録の無い作成途中のディレクトリと、乱数の形でない名前のものは、空でも消さない（利用者が作ったものかもしれないため）。
+    記録の名前は NDF が作る乱数（`DRAFT_ID`）なので、その形の名前で記録の形の中身を持つ記録は NDF が書いたものである。
+    ディレクトリは、記録の実体（`dev`・`ino`）と合うときだけ NDF が作ったものとして中の NDF のファイルを消す。実体の行を書く前に
+    落ちた場合は実体と照らせないが、NDF はその時点でディレクトリの中に何も書いていない。そのため、空のディレクトリだけを消し、
+    中身のあるディレクトリは NDF が作ったものでないとして残す。記録の無い作成途中のディレクトリと、乱数の形でない名前のものは、
+    空でも消さない（利用者が作ったものかもしれないため）。
 
     | 作成途中の記録の中身 | ディレクトリ `.draft-<名前>` | 消すもの |
     | --- | --- | --- |
-    | 空か、名前の行の途中まで | — | 記録だけ（ディレクトリを作る前に落ちた） |
-    | 名前の行がそろっている | 中が NDF の書くもの（`DRAFT_FILES` と書く途中の一時ファイル）だけ | 中身、ディレクトリ、記録 |
-    | 名前の行がそろっている | ほかの項目がある | NDF の書くものだけ（ディレクトリと記録は残す） |
-    | 名前の行がそろっている | 無いか、ディレクトリでない | 記録だけ |
-    | ほかの形か、読めない | — | 何も消さない |
+    | 空か、名前の行の途中まで（`torn`） | — | 記録だけ（ディレクトリを作る前に落ちた） |
+    | 名前の行の後、実体の行を書き終える前（`pending`） | 空 | ディレクトリと記録 |
+    | 名前の行の後、実体の行を書き終える前（`pending`） | 中身があるか、無いか、ディレクトリでない | 記録だけ |
+    | 実体の行まで（`made`）で、実体が合う | 中が NDF の書くもの（`DRAFT_FILES` と書く途中の一時ファイル）だけ | 中身、ディレクトリ、記録 |
+    | 実体の行まで（`made`）で、実体が合う | ほかの項目がある | NDF の書くものだけ（ディレクトリと記録は残す） |
+    | 実体の行まで（`made`）で、実体が違うか無い | — | 記録だけ（ディレクトリは NDF が作ったものでない） |
+    | ほかの形（`foreign`）か、読めない | — | 何も消さない |
     """
     for record in home.glob(f"{DRAFTING}*{DRAFT_RECORD}"):
         drafting = record.with_name(record.name.removesuffix(DRAFT_RECORD))
@@ -370,12 +404,17 @@ def reclaim_drafts(home: Path) -> None:
             text = read.data.decode("utf-8") if read is not None else None
         except UnicodeDecodeError:  # noqa: NDF401 ファイル: 読めない記録は NDF の記録と確かめられないので消さない
             text = None
-        head = _draft_head(name)
-        if text is None or not head.startswith(text):
+        if text is None:
             continue
-        if text == head and _is_dir(drafting):
+        state, obj = _draft_state(text, name)
+        if state == "foreign":
+            continue
+        if state == "pending" and _is_dir(drafting):
+            with contextlib.suppress(OSError):  # noqa: NDF401 ファイル: 中身のあるディレクトリは NDF が作ったものでないので残す
+                drafting.rmdir()
+        if state == "made" and obj is not None and _same_dir(drafting, obj):
             _remove_draft_files(drafting)
-            if _is_dir(drafting):
+            if _same_dir(drafting, obj):
                 continue  # 利用者の項目が残っているか、消し切れなかった。ディレクトリと記録を残す
         record.unlink(missing_ok=True)
 
@@ -386,6 +425,15 @@ def _is_dir(where: Path) -> bool:
         return stat.S_ISDIR(os.lstat(where).st_mode)
     except OSError:  # noqa: NDF401 ファイル: 無いディレクトリは、片付けるものが無い
         return False
+
+
+def _same_dir(where: Path, obj: Mapping[str, Any]) -> bool:
+    """`where` が記録の実体（`dev`・`ino`）と同じディレクトリか。リンクは同じと見なさない。"""
+    try:
+        st = os.lstat(where)
+    except OSError:  # noqa: NDF401 ファイル: 無いディレクトリは、記録の実体と同じでない
+        return False
+    return stat.S_ISDIR(st.st_mode) and (st.st_dev, st.st_ino) == (obj["dev"], obj["ino"])
 
 
 def _remove_draft_files(drafting: Path) -> None:
