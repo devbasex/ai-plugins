@@ -207,7 +207,22 @@ def test_a_set_aside_candidate_held_open_is_put_back_instead_of_deleted(tmp_path
     la.new_candidate("/r", target)
     with open(_aside(candidate), "rb"):
         la.new_candidate("/r", target)
-    assert candidate.read_bytes() == OLD
+    assert candidate.read_bytes() == OLD  # 戻した候補は、同じ掃除で退避し直さない
+    la.new_candidate("/r", target)
+    assert not candidate.exists() and _aside(candidate).exists()  # 閉じた後の掃除で、もう一度退避する
+
+
+def test_set_aside_candidates_are_checked_for_open_files_in_one_scan(tmp_path, monkeypatch):
+    """退避した候補が何件あっても、開いたままのプロセスの走査は掃除 1 回につき 1 回。"""
+    target = _worktree(tmp_path)
+    first, second = la.new_candidate("/r", target), la.new_candidate("/r", target)
+    _asked(target, candidate=first, label=la.DENY_LABEL)
+    _asked(target, "q2", candidate=second, label=la.DENY_LABEL)
+    la.new_candidate("/r", target)
+    scans, scan = [], la._open_inodes
+    monkeypatch.setattr(la, "_open_inodes", lambda wanted: scans.append(len(wanted)) or scan(wanted))
+    la.new_candidate("/r", target)
+    assert len(scans) == 1 and not _aside(first).parent.exists() and not _aside(second).parent.exists()
 
 
 def test_a_question_is_not_made_for_a_candidate_that_is_gone(tmp_path):

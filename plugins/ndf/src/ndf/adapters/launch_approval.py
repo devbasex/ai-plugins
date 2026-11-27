@@ -31,10 +31,11 @@ CANDIDATE_NAME = "candidate.json"
 SOURCE_NAME = "source.json"
 # 退避した候補の中の、消してよいバージョン（「承認しない」と回答したリクエストの候補のバージョン）の記録
 DISCARD_NAME = "discard.json"
-# 候補のディレクトリの作業中の名前の頭。作成途中（DRAFTING）と、消す前に照らし直している途中（REMOVING）。
-# 作成と掃除は候補の錠の中だけで行うので、錠の中で見つかる作業中のディレクトリは中断の残りである
+# 候補のディレクトリの作業中の名前の頭。作成途中（DRAFTING）、退避（REMOVING）、消す前の隔離（SETTLING）。
+# 作成と掃除は候補の錠の中だけで行うので、錠の中で見つかる作成途中と隔離のディレクトリは中断の残りである
 DRAFTING = ".draft-"
 REMOVING = ".removing-"
+SETTLING = ".settling-"
 # 反映の途中で反映先を退避した名前の後ろと、反映の途中の記録・完了の記録の名前の後ろ
 REFLECTING = ".reflecting"
 PENDING = ".pending.json"
@@ -178,7 +179,8 @@ def put_question(
     （`approvals_seen`。これより後ろの取り消しだけが、このリクエストの後の取り消し）も残す。候補があれば、候補の錠を取ってから、
     退避していた候補を元の名前へ戻し、`make_question`（候補を読んで質問の中身を作る）を呼び、リクエストを足す。候補を読んでから
     リクエストを足すまでの間に、掃除（`_sweep`・`_reclaim`）が同じ候補を退避したり消したりしないためである。戻せる候補が無ければ
-    リクエストを作らずに `precondition` で止める（消えた候補の承認を問わない）。
+    リクエストを作らずに `precondition` で止める（消えた候補の承認を問わない）。`make_question` が `sha256`（候補から求めた承認の対象の
+    ハッシュ）を返せば、リクエストのハッシュにはその値を使う。候補を読んだのと同じ錠の中で求めた値だからである。
     """
     if candidate is None:
         question = make_question()
@@ -198,7 +200,7 @@ def put_question(
 def _put_request(request: Mapping[str, Any], question: Mapping[str, Any], candidate: Optional[Path]) -> None:
     target = Path(request["target"])
     row = {
-        **request, "at": _at_now(), "action": str(Action.APPROVE), "target": str(target),
+        **request, **({"sha256": question["sha256"]} if "sha256" in question else {}), "at": _at_now(), "action": str(Action.APPROVE), "target": str(target),
         "base": read_launch_record(candidate.parent / SOURCE_NAME).get("base") if candidate is not None else content_version(target),
         "candidate": str(candidate) if candidate is not None else None,
         "candidate_version": content_version(candidate) if candidate is not None else None,
@@ -301,7 +303,7 @@ def _discard(made: Path, kept: Optional[str] = None) -> None:
     """候補の錠の中で、直していない候補を、消す前の退避（`REMOVING` の名前）へ移す。中身はその場では消さない。
 
     名前を変えた後は、元のパスへの保存はディレクトリが無いので失敗し、エディタの中の設定案は残る。名前を変える前に保存された
-    中身と、変えた後も開いたままのファイルへ書かれた中身は退避の中に残り、次の掃除（`_settle`）が比べて元の名前へ戻す。
+    中身と、変えた後も開いたままのファイルへ書かれた中身は退避の中に残り、次の掃除（`_reclaim`）が比べて元の名前へ戻す。
     """
     if not _untouched(made, kept):
         return
@@ -314,70 +316,104 @@ def _discard(made: Path, kept: Optional[str] = None) -> None:
         write_launch_record(aside / DISCARD_NAME, {"kept": kept})
 
 
-def _held_open(path: Path) -> Optional[bool]:
-    """ほかのプロセスがファイルを開いたままか。`/proc` の無い環境では確かめられないので None。
+def _open_inodes(wanted: set[tuple[int, int]]) -> Optional[set[tuple[int, int]]]:
+    """`wanted` のうち、いまどれかのプロセスが開いているもの（`(st_dev, st_ino)` の組）。`/proc` の無い環境では確かめられないので None。
 
-    退避の名前は利用者に見えず、元のパスからは開けないので、開いたままのプロセスが無ければ、比べてから消すまでの間に書く者はいない。
+    退避した候補をまとめて 1 回だけ走査する。走査するのは `/proc/<pid>/fd/` の項目の `stat` だけで、子のプロセスは起動しない。
     """
-    try:
-        st = path.stat()
-    except FileNotFoundError:  # noqa: NDF401 ファイル: 候補の中身が無ければ、開いて書く者もいない
-        return False
     proc = Path("/proc")
     if not (proc / "self" / "fd").is_dir():
         return None
-    return any(_same_file(fd, st) for fd in proc.glob("[0-9]*/fd/*"))
+    if not wanted:
+        return set()
+    return {key for key in map(_fd_target, proc.glob("[0-9]*/fd/*")) if key in wanted}
 
 
-def _same_file(fd: Path, st: os.stat_result) -> bool:
-    """`/proc` の fd が `st` と同じファイルを指すか。調べる間に閉じた fd と、読めないほかのユーザーの fd は偽。"""
+def _fd_target(fd: Path) -> Optional[tuple[int, int]]:
+    """`/proc` の fd が指すファイルの `(st_dev, st_ino)`。調べる間に閉じた fd と、読めないほかのユーザーの fd は None。"""
     try:
         opened = fd.stat()
     except OSError:  # noqa: NDF401 ファイル: 調べる間に閉じた fd と、読めないほかのユーザーの fd は、候補を指さないものとして飛ばす
-        return False
-    return (opened.st_dev, opened.st_ino) == (st.st_dev, st.st_ino)
+        return None
+    return opened.st_dev, opened.st_ino
 
 
-def _settle(aside: Path) -> None:
-    """候補の錠の中で、前の掃除が退避した候補を、直されていなければ消し、直されていれば元の名前へ戻す。
-
-    ほかのプロセスが候補を開いたままか、それを確かめられない環境では、比べてから消すまでの間の書き込みを検出できないので、
-    消さずに元の名前へ戻す（利用者はそのまま編集を続けられる。次の掃除がもう一度退避する）。
-    """
-    if _held_open(aside / CANDIDATE_NAME) is False and _untouched(aside, read_launch_record(aside / DISCARD_NAME).get("kept")):
-        shutil.rmtree(aside, ignore_errors=True)
-    else:
-        _put_back(aside)
+def _inodes(folder: Path) -> set[tuple[int, int]]:
+    """候補のディレクトリそのものと、その中のファイルの `(st_dev, st_ino)`。ディレクトリの fd からファイルを開く書き手も見分ける。"""
+    keys = set()
+    for item in (folder, *folder.iterdir()):
+        st = item.stat()
+        keys.add((st.st_dev, st.st_ino))
+    return keys
 
 
-def _put_back(aside: Path) -> None:
+def _original_name(aside: Path) -> str:
+    """退避（`.removing-<名前>`）か、消す前の隔離（`.settling-<乱数>.<名前>`）の、候補の元の名前。"""
+    if aside.name.startswith(SETTLING):
+        return aside.name.rsplit(".", 1)[1]
+    return aside.name[len(REMOVING) :]
+
+
+def _put_back(aside: Path) -> Path:
     (aside / DISCARD_NAME).unlink(missing_ok=True)
-    os.rename(aside, aside.with_name(aside.name[len(REMOVING) :]))
+    back = aside.with_name(_original_name(aside))
+    os.rename(aside, back)
+    return back
 
 
-def _reclaim(home: Path) -> None:
-    """候補の錠の中で、作業中のディレクトリを片付ける。作成途中は中断の残りなので消し、退避した候補は `_settle` で扱う。"""
-    for left in home.glob(".*"):
-        if left.name.startswith(REMOVING):
-            _settle(left)
-        elif left.name.startswith(DRAFTING):
-            shutil.rmtree(left, ignore_errors=True)
+def _reclaim(home: Path) -> set[str]:
+    """候補の錠の中で、作業中のディレクトリを片付け、元の名前へ戻した候補の名前を返す。
+
+    作成途中は中断の残りなので消す。前の掃除が退避した候補は、消してよいと保証できるものだけを消し、ほかは元の名前へ戻す。
+    戻した候補は、呼び手がこの掃除では退避し直さない（利用者が元のパスへ保存できるようにし、判定は次の掃除でやり直す）。
+
+    消す前に、退避した候補を誰も知らない名前（`SETTLING` と乱数）へ移してから、開いたままのプロセスを `/proc` で 1 回だけ調べ、
+    その後に中身を比べる。移した後は、どのパスからも新しく開けない。そのため、調べた時点で開いているプロセスが無ければ、
+    比べた後に書き込む者はいない。開いたままのプロセスがある候補と、`/proc` が無く確かめられない環境の候補は消さない。
+    消すのは、作った時の中身（NDF が作った写し）か、反映した中身のままの候補だけである。
+    """
+    for left in home.glob(DRAFTING + "*"):
+        shutil.rmtree(left, ignore_errors=True)
+    settling = [_isolate(left) for left in sorted([*home.glob(REMOVING + "*"), *home.glob(SETTLING + "*")])]
+    if not settling:
+        return set()
+    keys = {aside: _inodes(aside) for aside in settling}
+    held = _open_inodes(set().union(*keys.values()))
+    restored = set()
+    for aside in settling:
+        if held is not None and not keys[aside] & held and _untouched(aside, read_launch_record(aside / DISCARD_NAME).get("kept")):
+            shutil.rmtree(aside, ignore_errors=True)
+        else:
+            restored.add(_put_back(aside).name)
+    return restored
+
+
+def _isolate(aside: Path) -> Path:
+    """退避した候補を、消す前の隔離の名前（`.settling-<乱数>.<元の名前>`）へ移す。"""
+    isolated = aside.with_name(f"{SETTLING}{uuid.uuid4().hex}.{_original_name(aside)}")
+    os.rename(aside, isolated)
+    return isolated
 
 
 def _restore(candidate: Path) -> None:
-    """候補の錠の中で、退避した候補を元の名前へ戻す（同じ候補でリクエストを作り直したとき）。"""
-    aside = candidate.parents[1] / f"{REMOVING}{candidate.parent.name}"
-    if not candidate.parent.exists() and aside.exists():
-        _put_back(aside)
+    """候補の錠の中で、退避か隔離の途中で止まった候補を元の名前へ戻す（同じ候補でリクエストを作り直したとき）。"""
+    home, name = candidate.parents[1], candidate.parent.name
+    if candidate.parent.exists():
+        return
+    for aside in [home / f"{REMOVING}{name}", *home.glob(f"{SETTLING}*.{name}")]:
+        if aside.exists():
+            _put_back(aside)
+            return
 
 
-def _sweep(home: Path) -> None:
+def _sweep(home: Path, restored: set[str]) -> None:
     """候補の錠の中で、反映先の worktree が無い候補と、最新のリクエストに「承認しない」と回答した候補を退避する（直したものは残す）。
 
     「承認しない」の判定は、候補ごとの最新のリクエストで行う。否認の後に同じ候補で作り直したリクエストが回答待ちか承認済みなら、
     その候補は消さない。どちらの場合も、片付けるのは作った時の中身のままの候補だけである。「承認しない」は反映を断る回答で、
     利用者が書いた設定案を消してよいという回答ではないので、リクエストの前に直した候補も残す。
     リクエストは同じ錠の中で作るので（`put_question`）、ここで読んだリクエストの一覧は退避を決めるまで変わらない。
+    同じ錠の中の `_reclaim` が元の名前へ戻した候補（`restored`）は、この掃除では退避しない。
     """
     latest: dict[Any, dict[str, Any]] = {}
     for row in records.whole_rows(state_file(QUESTIONS)):
@@ -385,6 +421,8 @@ def _sweep(home: Path) -> None:
             latest[row.get("candidate")] = row
     labels = _last_labels()
     for made in _candidates(home):
+        if made.name in restored:
+            continue
         req = latest.get(str(made / CANDIDATE_NAME))
         denied = req is not None and _judged(labels.get(req.get("request_id")), req)[0] == "deny"
         if denied or _worktree_gone(read_launch_record(made / SOURCE_NAME).get("target")):
@@ -409,8 +447,7 @@ def new_candidate(repo: str, target: Path) -> Path:
     """
     home = _store(CANDIDATES) / _short_hash(repo)
     with records_lock(home):
-        _reclaim(home)
-        _sweep(home)
+        _sweep(home, _reclaim(home))
         for record in _store(REFLECTED).glob("*" + DONE):
             if _worktree_gone(read_launch_record(record).get("target")):
                 record.unlink(missing_ok=True)
@@ -515,7 +552,7 @@ def _write_done(target: Path, rec: Mapping[str, Any]) -> None:
 def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> None:
     """完了の記録を書いてから、候補の錠の中で、反映した候補と、反映元のバージョンが合わなくなった同じ反映先の候補を退避する。
 
-    先に前の掃除が退避した候補を片付ける（`_reclaim`）。反映した候補は、反映した中身か作った時の中身のままなら退避する。
+    先に前の掃除が退避した候補を片付ける（`_reclaim`）。そこで元の名前へ戻した候補は、この掃除では退避しない。反映した候補は、反映した中身か作った時の中身のままなら退避する。
     ほかの候補は、作った時の中身のままのものだけを退避する。作った後に直した候補は、反映元が変わっても残す（書いた設定案を
     失わないため）。退避した候補は次の掃除が比べ直してから消す。
     """
@@ -523,11 +560,12 @@ def _after_reflect(target: Path, candidate: Path, rec: Mapping[str, Any]) -> Non
     now = content_version(target)
     home = candidate.parent.parent
     with records_lock(home):
-        _reclaim(home)
-        _discard(candidate.parent, rec.get("content"))
+        restored = _reclaim(home)
+        if candidate.parent.name not in restored:
+            _discard(candidate.parent, rec.get("content"))
         for made in _candidates(home):
             source = read_launch_record(made / SOURCE_NAME)
-            if source.get("target") == str(target) and source.get("base") != now:
+            if made.name not in restored and source.get("target") == str(target) and source.get("base") != now:
                 _discard(made)
 
 
