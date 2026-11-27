@@ -268,7 +268,8 @@ src/ndf/
 | `main_model` | 同 | 新設 | `main_model(models: Mapping) -> Optional[tuple[str, Mapping]]` | トークンの和が最大（同じなら窓の小さい方）のモデルを返す |
 | `context_window` | 同 | 変更 | 変えない | 主モデルの選び方を `main_model` にする |
 | `set_launch_recorder` | 同 | 新設 | `set_launch_recorder(recorder: Optional[LaunchRecorder]) -> None` | 書き込み処理を差し込む |
-| `report_launch` | 同 | 新設 | `report_launch(reply: ClaudeReply, meta: Mapping, seq: int) -> int` | `earlier` と回答のうち起動した子ごとに 1 行を渡し、渡した数を返す |
+| `report_launch` | 同 | 新設 | `report_launch(reply: ClaudeReply, meta: Mapping, seq: int) -> int` | `earlier` と回答のうち起動した子ごとに 1 行を渡し、起動した子の数を返す（書き込み処理が無ければ渡さないが、数は同じ。呼び出し元は `session_seq` をこの数だけ進める） |
+| `launch_meta` | 同 | 新設（A4） | `launch_meta(name: str, repo: Optional[str]) -> dict` | 行の `name`・`repo` と、環境変数の `run_id`・`step`・`attempt`。worker と Skill を回す起動が同じ組み立てを使う |
 
 - `permission_args` の full の並び: `--permission-mode acceptEdits --tools <同梱の読み込む一覧 + grant.load をカンマで連結> --allowed-tools <同梱の許可 13 個> <grant.allow の各件> [--strict-mcp-config] [--mcp-config <コピー>...]`。`inherit` は後ろの 2 つを付けない。`--allowed-tools` は複数の値を取る。後に続くプロンプトを値として読ませないよう、`plugins.args` が空のときも、後ろに `--append-system-prompt` を置く（今の `_full_args` の並び。`plugins.args` は空になりうるので、終端として数えない）。`grant` が None なら指定なしと同じ
 - 定数: `LOAD_TOOLS`（16 個）を足し、`FULL_TOOLS`（許可の 13 個）は変えない。`load` の名前は `--allowed-tools` に入れない
@@ -315,7 +316,7 @@ src/ndf/
 | `_call_skill` | `progress/invoke.py` | 変更 | 変えない | `prepared(run.name, cwd)` の中で起動し、記録する。`session_seq` は 0 から |
 
 - `Caller` と `SkillCaller` は 5 つ目の引数 `options: claude.LaunchOptions` を受ける形にする。テストの偽の呼び出しも直す
-- 行の `name` は作業の名前か Skill の名前、`repo` はリモートの URL を `git.repo_of_url` で読む。読めなければ欄を省く
+- 行の `name` は作業の名前か Skill の名前、`repo` はリモートの URL を `git.repo_of_url` で読む（`git.repo_or_none`。A4 で足した）。読めなければ欄を省く
 - `run_id`・`step`・`attempt` は、環境変数 `NDF_PLAN_RUN_ID`・`NDF_STEP_ID`・`NDF_STEP_ATTEMPT` があれば書く
 - 実装する worker は、PR を作る前に、工程が MCP の Tool を呼んだ件数を数え直し、結果を PR の本文へ書く。目的は、MCP を読み込まなくする前に、使っている工程が無いかを確かめることである。呼んだ工程があれば、このリポジトリの `.ndf/launch.json` に指定を足す。数えるのは、2026-11-24 から数える日までの、変更を入れる前のバージョンで起動した非対話の会話の記録である。起動の見分け方は設計書の決定 3 の表にある
 
@@ -345,6 +346,7 @@ src/ndf/
 | `_run` | `core/plan/transition_decide.py` | 変更 | 変えない | ステップを実行する指示（`RunStep`）に、そのステップの何回目かを持たせる |
 | `decide` | 同 | 変更 | 変えない | 打ち直し（待ちの後）の指示でも回数を 1 増やす |
 | `run_step` | `core/plan/runner.py` | 変更 | `run_step(spec, step_id, attempt, nth: int = 1)` | `run_id`・ステップの id・回数を子の環境にする |
+| `plan_step_env` | 同 | 新設（A4） | `plan_step_env(run_id: Optional[str], step_id: str, nth: int) -> dict[str, str]` | 子へ渡す 3 つの環境変数を、名前を環境変数の表から引いて組む |
 | `_launch` | `core/plan/steps.py` | 変更 | 変えない | `StepContext.env` を子の環境に重ねる |
 
 - `RunStep` に `nth: int = 1`、`StepState` に `runs: Mapping[str, int]`、`StepContext` に `env: Mapping[str, str]` を足す。`attempt`（打ち直しの回数）の意味は変えない

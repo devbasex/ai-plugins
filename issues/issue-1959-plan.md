@@ -40,7 +40,8 @@
 - **対象ファイル:** `adapters/claude.py`・`adapters/launch_settings.py`（`prepared`）・`core/worker.py`・`progress/invoke.py`、`contracts/domains/cli-floors.json`、`tests/progress/test_invoke.py` ほか
 - **変更内容:** `--tools`・`--strict-mcp-config`・`--mcp-config`、MCP の定義のコピー、起動の直前の照らし直し。`plugins/ndf/skills/` の本文を検索し、工程の中で使う Tool が一覧に無ければ足す（設計書の「壊れうる箇所」）。設計書の決定 3 の数え直しを行い、結果を PR の本文に書く
 - **満たす受け入れ条件:** 1・2・4・5・6・7・8・11・12
-- **設計承認で持ち越した項目:** プランの実行は工程のモードを子へ環境変数で渡す。ある工程の MCP 定義が読めないと承認の要る起動がすべて止まることを限界に書き、停止の文でそのファイルを示す
+- **設計承認で持ち越した項目:** プランの実行は工程のモードを子へ環境変数で渡す（下の決定で #2944 へ移した）。ある工程の MCP 定義が読めないと承認の要る起動がすべて止まることを限界に書き、停止の文でそのファイルを示す
+  - 決定（conductor、2026-11-27）: 設計書の「子へ渡す環境変数」の表の 3 つ（`NDF_PLAN_RUN_ID`・`NDF_STEP_ID`・`NDF_STEP_ATTEMPT`）は A4（Task 5）で入れた。工程の「モード」を子へ渡すのは #2944 の `pick` が値を使う所なので、#2944 の B4（プランの実行、[issue-2944-plan.md](./issue-2944-plan.md) の Task 5）へ移した。読み手の無い値を先に渡さないためである
 - **進め方:** 引数と停止はテストを先に書く。実際の起動の `system/init` と MCP の呼び出し、Skill・サブエージェント・編集は手で確かめ、最低バージョンの `claude` でも打つ
 
 ### Task 5: 起動 1 回ごとに使用量ログへ 1 行書く
