@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
+from ndf import contracts
 from ndf.core.plan import units_decide as ud
 
 LIMITS = ud.Limits(target=400, max=1000)
+FIXTURE_3672 = Path(__file__).parent / "fixtures" / "units" / "issue-3672.units.json"
 
 
 def _task(tid: str, *, lines: int = 10, files: tuple[str, ...] = (), after: tuple[str, ...] = (), criteria=(), **extra):
@@ -104,6 +109,9 @@ def test_single_makes_one_whole_unit_without_size_findings():
 def test_size_check_by_lines(lines, violations, warnings):
     j = _judge(_file([_task("T1", lines=lines)], [_unit("A", "T1")]))
     assert (_rules(j.violations), _rules(j.warnings)) == (violations, warnings)
+    # タスクが 1 つの単位は区切れないので、上限を超えるときだけ切り直すタスクを返す
+    expected = [ud.Proposal("issues/issue-7-plan.units.json", "A", (), ("T1",), (), ())] if violations else []
+    assert list(j.proposals) == expected
 
 
 def test_size_sums_the_tasks_of_a_unit():
@@ -226,3 +234,160 @@ def test_units_after_a_cycle_get_order_zero_and_keep_their_closure():
 def test_u5_blank_reason():
     units = [_unit("A", "T1"), _unit("B", "T2", after=[{"unit": "A", "reason": "  "}])]
     assert _rules(_judge(_file([_task("T1"), _task("T2")], units)).violations) == ["U5"]
+
+
+def _split_names(proposal):
+    return [(u.name, u.tasks, tuple((e.unit, e.reason) for e in u.after)) for u in proposal.units]
+
+
+def test_split_cuts_in_dependency_order_before_the_target():
+    tasks = [
+        _task("T1", lines=300, after=("T10",)),
+        _task("T2", lines=100),
+        _task("T10", lines=300),
+        _task("T3", lines=450),
+        _task("T4", lines=250, after=("T3",)),
+    ]
+    j = _judge(_file(tasks, [_unit("A", "T1", "T2", "T10", "T3", "T4")]))
+    (p,) = j.proposals
+    # 依存の深さ、同じ深さはタスクの番号の順（T2・T3・T10・T1・T4）。目安を超える T3 はそれだけで 1 区切り
+    reason = "分け方の案: 依存の順"
+    assert _split_names(p) == [
+        ("A 1", ("T2",), ()),
+        ("A 2", ("T3",), (("A 1", reason),)),
+        ("A 3", ("T10",), (("A 2", reason),)),
+        ("A 4", ("T1",), (("A 3", reason),)),
+        ("A 5", ("T4",), (("A 4", reason),)),
+    ]
+    assert (p.unit, p.resplit, p.remaining) == ("A", (), ())
+
+
+def test_split_moves_edges_to_the_first_and_the_last_piece():
+    base = _file([_task("T1")], [_unit("X", "T1")], issues=(10,), path="a.json")
+    big = _file(
+        [_task("T1", lines=400), _task("T2", lines=400)],
+        [_unit("A", "T1", "T2", after=[{"unit": "X", "reason": "X の型", "issue": 10}])],
+        issues=(20,),
+        path="b.json",
+    )
+    later = _file([_task("T1")], [_unit("Y", "T1", after=[{"unit": "A", "reason": "r", "issue": 20}])], issues=(30,), path="c.json")
+    p = ud.split((base, big, later), ("b.json", "A"), LIMITS)
+    assert (p.file, p.unit, p.repoint) == ("b.json", "A", (("c.json", "Y", 20),))
+    assert p.units[0].after == (ud.Edge("X", "X の型", 10),)
+    assert p.units[1].after == (ud.Edge("A 1", "分け方の案: 依存の順"),)
+    # 元の単位を指していた依存は最後の区切りへ付け替わるので、当てた後に違反は残らない
+    assert p.remaining == ()
+
+
+def _apply_proposal(files, p):
+    """返り値の欄だけを使って案を適用する。"""
+
+    def edges(f, u):
+        return tuple(
+            e._replace(unit=p.units[-1].name) if e.unit == p.unit and (f.path, u.name, e.issue) in p.repoint else e for e in u.after
+        )
+
+    applied = []
+    for f in files:
+        units = []
+        for u in f.units:
+            units += p.units if (f.path, u.name) == (p.file, p.unit) else [u._replace(after=edges(f, u))]
+        applied.append(f._replace(units=tuple(units)))
+    return applied
+
+
+def test_split_proposal_is_enough_to_apply_across_files():
+    big = _file(
+        [_task("T1", lines=400), _task("T2", lines=400), _task("T3")],
+        [_unit("A", "T1", "T2"), _unit("B", "T3", after=["A"])],
+        issues=(20,),
+        path="b.json",
+    )
+    later = _file([_task("T1")], [_unit("Y", "T1", after=[{"unit": "A", "reason": "r", "issue": 20}])], issues=(30,), path="c.json")
+    (p,) = _judge(big, later).proposals
+    assert p.repoint == (("b.json", "B", None), ("c.json", "Y", 20))
+    applied = _judge(*_apply_proposal((big, later), p))
+    assert (applied.violations, applied.warnings) == ((), ())
+
+
+def test_split_repoints_only_the_edge_to_the_split_unit_among_same_names():
+    other = _file([_task("T1")], [_unit("A", "T1")], issues=(10,), path="a.json")
+    big = _file([_task("T1", lines=400), _task("T2", lines=400)], [_unit("A", "T1", "T2")], issues=(20,), path="b.json")
+    edges = [{"unit": "A", "reason": "r", "issue": 10}, {"unit": "A", "reason": "r", "issue": 20}]
+    later = _file([_task("T1")], [_unit("Y", "T1", after=edges)], issues=(30,), path="c.json")
+    (p,) = _judge(other, big, later).proposals
+    assert p.repoint == (("c.json", "Y", 20),)
+    applied = _judge(*_apply_proposal((other, big, later), p))
+    assert applied.violations == ()
+    assert _views(applied)["Y"].after == (("a.json", "A", "r"), ("b.json", "A 2", "r"))
+
+
+def test_split_keeps_the_criteria_violation_left_after_applying():
+    tasks = [_task("T1", lines=400, criteria=("7:3",)), _task("T2", lines=400)]
+    j = _judge(_file(tasks, [_unit("A", "T1", "T2")]), criteria={7: 2})
+    (p,) = j.proposals
+    assert p.remaining == j.violations
+    assert _rules(p.remaining) == ["U2"]
+
+
+def test_split_returns_tasks_over_the_max_to_be_cut_again():
+    f = _file([_task("T1", lines=1001), _task("T2", lines=10), _task("T3", lines=2000)], [_unit("A", "T1", "T2", "T3")])
+    assert ud.split((f,), (f.path, "A"), LIMITS) == ud.Proposal(f.path, "A", (), ("T1", "T3"), (), ())
+
+
+def test_split_of_a_whole_unit_without_lines_has_no_units():
+    f = ud.single(7)
+    assert ud.split((f,), (f.path, "issue-7"), LIMITS) == ud.Proposal(f.path, "issue-7", (), (), (), ())
+
+
+def test_split_with_one_piece_has_no_units():
+    f = _file([_task("T1", lines=100), _task("T2", lines=100)], [_unit("A", "T1", "T2")])
+    assert ud.split((f,), (f.path, "A"), LIMITS) == ud.Proposal(f.path, "A", (), (), (), ())
+
+
+def test_split_reports_the_overlap_left_after_applying():
+    tasks = [_task("T1", lines=400, files=("x.py",)), _task("T2", lines=400), _task("T3", files=("x.py",))]
+    (p,) = _judge(_file(tasks, [_unit("A", "T1", "T2"), _unit("B", "T3")])).proposals
+    assert len(p.units) == 2
+    assert [(f.rule, f.unit) for f in p.remaining] == [("U4", "A 1")]
+
+
+def test_split_survives_a_task_cycle():
+    tasks = [_task("T1", lines=400, after=("T2",)), _task("T2", lines=400, after=("T1",))]
+    (p,) = _judge(_file(tasks, [_unit("A", "T1", "T2")])).proposals
+    assert [u.tasks for u in p.units] == [("T1",), ("T2",)]
+    assert _rules(p.remaining) == ["U1", "U3"]  # 後の区切りを先に要る T1 は U3
+
+
+def test_proposals_only_for_oversize_units():
+    tasks = [_task("T1", lines=200), _task("T2", lines=201), _task("T3", lines=401), _task("T4", lines=1)]
+    j = _judge(_file(tasks, [_unit("A", "T1", "T2"), _unit("B", "T3"), _unit("C", "T4")]))
+    # 目安を超える単位はタスクが 2 つ以上のときだけ案を作る
+    assert [p.unit for p in j.proposals] == ["A"]
+
+
+def test_issue_3672_design_splits_into_units_in_dependency_order():
+    doc = json.loads(FIXTURE_3672.read_text(encoding="utf-8"))
+    assert contracts.schema_errors(doc, "workflow/review-units.schema.json") == []
+    f = ud.parse(doc, FIXTURE_3672.name)
+    j = _judge(f)
+    assert _rules(j.violations) == ["U6"]
+    (p,) = j.proposals
+    assert (p.resplit, p.remaining) == ((), ())
+    assert len(p.units) > 1
+
+    applied = _judge(f._replace(units=p.units))
+    assert (applied.violations, applied.warnings, applied.proposals) == ((), (), ())
+    assert [v.order for v in applied.views] == list(range(1, len(p.units) + 1))
+
+    # 群の名前はタスクの題の先頭にある。実行順に並べた群が、依存の向きの順になる
+    group = {t.id: t.title.partition(":")[0] for t in f.tasks}
+    seen = [group[tid] for v in sorted(applied.views, key=lambda v: v.order) for tid in v.tasks]
+    assert list(dict.fromkeys(seen)) == [
+        "コントラクト",
+        "設定を読むプログラムと、設定を解析して書くコマンド",
+        "工程のプログラムの読み方の切り替え",
+        "旧いものの削除とテストの移し替え",
+    ]
+    assert seen == sorted(seen, key=list(dict.fromkeys(seen)).index)
+    assert sorted(tid for u in p.units for tid in u.tasks) == sorted(group)

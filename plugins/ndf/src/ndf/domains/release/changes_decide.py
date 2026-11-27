@@ -52,7 +52,7 @@ def _under(path: str, directory: str) -> str | None:
     return path[len(prefix) :] if path.startswith(prefix) else None
 
 
-def split(paths: Iterable[str], unit: str, directory: str, extra: Sequence[str]) -> Change:
+def change_of(paths: Iterable[str], unit: str, directory: str, extra: Sequence[str]) -> Change:
     """1 つの単位の下の変化を、リリース対象とそれ以外に分ける。リリース対象外の形は既定と `extra`（設定の形）の和。"""
     spec = pathspec.GitIgnoreSpec.from_lines([*default_undistributed(), *extra])
     inside = [(p, rel) for p in sorted(set(paths)) if (rel := _under(p, directory)) is not None]
@@ -65,7 +65,7 @@ def split(paths: Iterable[str], unit: str, directory: str, extra: Sequence[str])
 
 def changes(paths_by_unit: Mapping[str, Sequence[str]], unit_dirs: Mapping[str, str], extra: Sequence[str]) -> list[Change]:
     """単位ごとに、その単位の範囲の変わったファイルを分けた変化（変化のある単位だけ。名前の順）。"""
-    got = [split(paths_by_unit[name], name, unit_dirs[name], extra) for name in sorted(unit_dirs)]
+    got = [change_of(paths_by_unit[name], name, unit_dirs[name], extra) for name in sorted(unit_dirs)]
     return [c for c in got if c.touched]
 
 

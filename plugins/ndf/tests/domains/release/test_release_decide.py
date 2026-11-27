@@ -71,10 +71,10 @@ def test_issue_1756_plugin_dirs_come_from_the_caller_not_from_names() -> None:
 @pytest.mark.parametrize(("flag", "want"), [(False, False), (True, True)])
 def test_issue_2217_tests_only_change_bumps_only_when_declared(flag: bool, want: bool) -> None:
     """#2217: テストだけの変化は、設定 bump_undistributed が真のときだけバージョンを上げる。"""
-    change = changes_decide.split(["p/tests/test_a.py", "p/lib/conftest.py"], "p", "p", ())
+    change = changes_decide.change_of(["p/tests/test_a.py", "p/lib/conftest.py"], "p", "p", ())
     assert change.distributed == () and len(change.undistributed) == 2
     assert changes_decide.needs_bump(change, flag) is want
-    assert changes_decide.needs_bump(changes_decide.split(["p/a.py"], "p", "p", ()), False) is True
+    assert changes_decide.needs_bump(changes_decide.change_of(["p/a.py"], "p", "p", ()), False) is True
 
 
 def test_issue_2601_user_facing_change_is_decided_by_files() -> None:
@@ -88,7 +88,7 @@ def test_issue_2601_user_facing_change_is_decided_by_files() -> None:
 def test_issue_3615_tests_of_other_languages_are_undistributed_by_the_shared_table() -> None:
     """受け入れ条件 8: 既定はテストのファイルの表から作り、TypeScript・jest・PHP のテストだけの変化はリリース対象に数えない。"""
     paths = ["src/foo.test.ts", "src/__tests__/bar.ts", "tests/Unit/FooTest.php"]
-    change = changes_decide.split(paths, "web", "", ())
+    change = changes_decide.change_of(paths, "web", "", ())
     assert change.distributed == () and set(change.undistributed) == set(paths)
     assert changes_decide.needs_bump(change, False) is False
     assert "conftest.py" in changes_decide.default_undistributed()
@@ -96,7 +96,7 @@ def test_issue_3615_tests_of_other_languages_are_undistributed_by_the_shared_tab
 
 def test_issue_3615_declared_undistributed_is_added_to_the_default() -> None:
     """受け入れ条件 8: 設定の undistributed は既定へ足す（既定を置き換えない）。"""
-    change = changes_decide.split(["docs/a.md", "tests/test_a.py", "src/a.ts"], "web", "", ("docs/",))
+    change = changes_decide.change_of(["docs/a.md", "tests/test_a.py", "src/a.ts"], "web", "", ("docs/",))
     assert change.distributed == ("src/a.ts",) and change.undistributed == ("docs/a.md", "tests/test_a.py")
 
 
