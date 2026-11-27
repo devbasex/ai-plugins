@@ -7,9 +7,9 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Any
+
+from ndf.core.branch_strategy import digest_of
 
 MAX_EVIDENCE = 20
 # 項目の測定の状態（`status` の値）
@@ -41,4 +41,4 @@ def seq(value: Any) -> list[Any]:
 
 def value_digest(value: Any) -> str:
     """値を正規化した JSON の SHA-256（書いた値の指紋）。"""
-    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return digest_of(value)
