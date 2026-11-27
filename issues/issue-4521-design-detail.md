@@ -57,7 +57,7 @@ contracts/
 | `project-held` | `held` | 解析（M7） |
 | `project-removed` | `removed` | 解析（M7） |
 
-- `project-held-answers.schema.json`: 回答 1 件の形（設計の決定 8 の「保管する中身」の欄。すべて必須で、ほかの欄は許さない）を本体にし、`context.json` の形（`root`・`branch`・`commit`・`worktree`）を `$defs/Place` に置く
+- `project-held-answers.schema.json`: 回答 1 件の形（設計の決定 8 の「保管する中身」の欄。すべて必須で、ほかの欄は許さない）を本体にし、`context.json` の形（`root`・`branch`・`commit`・`worktree`・`worktree_id`。伏せる前の値）を `$defs/Place` に置く
 - `languages.json` は要約（`summary`）の「言語の計測・」だけを消す
 
 ## リポジトリと CI の測定
@@ -105,13 +105,14 @@ contracts/
 | `_measure` | `cli.py` | 変更 | シグネチャは今のまま | `--out` は親のディレクトリだけを解決し（末尾のリンクはたどらない）、リポジトリの中かを確かめて `replace_owner_only` で書く |
 | `p_number` | `write.py` | 変更 | `(key, default) -> str` | 番号の表を `test`（P2）・`ci`（P4）だけにする |
 | `replace_owner_only` | `held.py` | 新設 | `(path: Path, text: str) -> None` | 同じディレクトリに `tempfile.mkstemp` で作り、`os.replace` で置き換える（0600） |
-| `_guard_store` | `cli.py` | 新設 | `(main: Path, folder: str, rels: list[str]) -> None` | 保管か控えの置き場に追跡されたファイルが無く、書くパスがすべて git に無視されることを確かめる |
+| `_guard_store` | `cli.py` | 新設 | `(main: Path, folder: str, rels: list[str]) -> None` | 保管か控えの置き場に追跡されたファイルが無いことと、書くパスがすべて git に無視されることを確かめる。`rels` が空（消すだけ）なら追跡だけを確かめる |
 
 - `analysis_record` の定数は、`UNREAD_ITEMS`（6 項目）を足し、`OLD_ITEMS` を `test_duration` と `UNREAD_ITEMS` にする。`_OLD_IN_ITEMS` から `languages[].files` を消す
-- 控えは 1 回の書き出しにつき 1 ファイル `.ndf/analysis/removed/<uuid4 の hex>.json` で、中身は `{キー: 値}` である。`plan` が名前を決め、`cli._commit` が書く。`--dry-run` は案内の行だけで、名前を決めない
+- 控えは 1 回の書き出しにつき 1 ファイル `.ndf/analysis/removed/<uuid4 の hex>.json` で、中身は `{キー: 値}` である。`plan` は、取り除く値があるときだけ `removed/` の `*.json` を読み、`items.value_digest` が同じ控えがあればそのパスを使って、書くファイルに足さない。無ければ名前を決め、`cli._commit` が書く。読めないファイルは一致しないものとする。`--dry-run` は案内の行だけで、名前を決めない
 - `_guard_store`
   - 手順: `git ls-files -- <folder>`（出力があれば止める）→ `<folder>/.gitignore` が無ければ `*` を書く → `write.check_ignored(main, rels)` の結果で、`rels` がすべて `rules` にあることを確かめる。終了コードでは判定しない
   - 副作用: git の起動 2 回、`.gitignore` の作成
+  - `rels` が空なら、`git ls-files` の 1 回だけで終わる。`.gitignore` は作らない
   - `.gitignore` を今回作り、その後の確かめで止める場合は、作った `.gitignore` を消す
 
 ### 異常系の処理
@@ -145,11 +146,12 @@ contracts/
 | 絶対パス、`..` を含む、NUL を含む | `outside` |
 | 途中の要素がシンボリックリンク（`os.stat(part, dir_fd=…, follow_symlinks=False)`） | `outside` |
 | 途中の要素が無い、ディレクトリでない | `absent` |
-| 途中の要素を開く（`O_RDONLY | O_DIRECTORY | O_NOFOLLOW`）ことに失敗 | `outside` |
+| 途中の要素を、読み取り専用・ディレクトリ限定・リンク追跡禁止で開けない | `outside` |
 | 末尾の要素がシンボリックリンク | `outside` |
 | 末尾の要素が通常のファイル | `file` |
 | それ以外（無い、ディレクトリ） | `absent` |
 
+- 途中の要素を開くフラグは `O_RDONLY | O_DIRECTORY | O_NOFOLLOW` である
 - 繰り返しの終わる条件: パスの要素を使い切る。開いた参照は、次の参照を開いた時点と関数を抜ける時点で閉じる
 
 ### 異常系の処理
@@ -182,8 +184,9 @@ contracts/
 
 - `WriteError` は `rows: list[dict]` を持つ（既定は空）。`cli._write` は `result.stopped` の `items` に、伏せ字を当てて渡す
 - `check_measure` の順: `measure_problem`（`remeasure`）→ `analyzer` が 5 以上なら場所の比較（`context_mismatch`）
-  - 測定の結果は `measure` が伏せ字を当てた後の値なので、今の場所の値にも `secret.mask` を当ててから比べる
-- ブランチの構成は、#4580 の `_measured_branches` と `_record_branches` をそのまま使う。測定の `branch_state` と今の構成が違えば、何も書かずに終了コード 1 で終わる。同じ場合に記録する値は、測定の構成と同じである（決定 4）。足す関数は無い
+  - 場所の比較は、`context.place`（伏せる前の場所の値の指紋）と、今の場所の `context_of` の `place` を比べる。伏せ字を掛けた値どうしは比べない。`context_mismatch` の行に書く値だけを伏せる
+  - `measure_problem` は、`analyzer` が 5 以上の結果の `context.place` が 64 桁の小文字の 16 進数であることも確かめる
+- ブランチの構成は、#4580 の `_measured_branches` と `_record_branches` をそのまま使う。測定の `branch_state` と今の構成が違えば、何も書かずに終了コード 1 で終わる。同じ場合に記録する値は、測定の構成と同じである（決定 4）。ただし `_record_branches` の例外は残す。既定ブランチが前の記録から変わり、`ci` の行が `kept_previous`（必須のチェックを取れず前の値を残した）なら、前の記録の構成を書く。`veil_rows` が行を置き換えても `kept_previous` は落とさない。足す関数は無い
 - `ignored` の行は、回答のキーのうち `discard`・`unresume` でなく、`write.ITEM_KEYS` の質問でもないものに出す
 - `RepoDirs` に `worktree: Optional[str] = None`（git の管理名）を足す。`repo_dirs` は今の `rev-parse --show-toplevel` に `--absolute-git-dir` を足し、2 行目の親が `<git の共通ディレクトリ>/worktrees` のときだけ末尾の名前を入れる
 
@@ -195,14 +198,27 @@ contracts/
 | --- | --- | --- |
 | 1・2・3・6・7・12 | `pass` | 回答をそのまま今の `resolve_item`・`merge_item` へ渡す |
 | 4 | `keep_secret` | 今の値を残し、`kept`（`reason` あり）の行にする |
-| 5 | `drop_secret` | 回答を `{"unknown": …}` として渡し、行を `kept`（キーが無ければ `unknown`）と `result: answer_secret` に置き換える |
+| 5 | `drop_secret` | 回答を固定の理由の `{"unknown": …}` として渡し、行を `kept`（キーが無ければ `unknown`）と `result: answer_secret` に置き換える |
 | 8 | `keep_old` | 今の値を残し、`mismatch` と `result: remeasure_v4` の案内の行 |
 | 9・10 | `keep_stale` | 今の値を残し、`mismatch` と `result: answer_held` の案内の行。保管の理由は `remeasure` |
 | 11 | `keep_hand` | 今の値を残し、`mismatch` の行。保管の理由は `manual` |
 
 - 順 3 のうち形に合わない `value` は、保管の理由が `invalid` になる（今の値が出力で伏せる形なら保管しない）
-- `answer_tainted` が真の項目は、`veil_rows` が行を置き換える。順 8〜11 は `kind: kept` にして案内の行を出さない。保管の理由は消す。回答の `value` の適用は順序表のとおりである
-- 今の値が出力で伏せる形の項目は、回答の有無によらず `veil_rows` を通し、`declared`・`analyzed` を持つ行を出さない
+- 質問の項目で `answer_tainted` が真のとき、`resolve_item` が不明を返し、その不明が書かない値の形（`has_secret`）を含まなければ、`merge_item` へ渡す前に理由を固定の文に置き換える。`{"unknown": …}` の回答の理由と、形の誤りの説明に引用された回答の中身が、設定に入らないようにするためである。書かない値の形を含む不明は、今の `merge_item` が `{"unknown": "秘密の形"}` にする
+- `answer_tainted` が真の項目は、`veil_rows` が行を置き換える。順 8〜11 は案内の行を出さない。保管の理由は消す。回答の `value` の適用は順序表のとおりである
+- 今の値が出力で伏せる形の項目は、回答の有無と測定の `status` によらず `veil_rows` を通す
+- `veil_rows` は行の種類ごとに、次の欄だけを残す。`row_line` がその種類に必ず読む欄は、必ず残すか、種類を変える。`tainted` が真なら、どの行にも `result: answer_secret` を足す
+
+| 元の行 | 置き換えた行の欄 | `row_line` の表示 |
+| --- | --- | --- |
+| `mismatch` | `kind: kept`・`key`・固定の文の `reason`（`declared`・`analyzed` を持たない） | 「手の値を保った」に理由を添える |
+| `kept` | `kind: kept`・`key`・固定の文の `reason` | 同上 |
+| `unknown` | `kind: unknown`・`key`・固定の文の `reason`・元の行にあれば `kept_previous` | 今のまま |
+| `written` | `kind: written`・`key`・`origin`（値ではない） | 今のまま |
+| `secret` | `kind: secret`・`key` | 今のまま |
+| `ignored` | `kind: ignored`・`key`（名前が秘密の形なら `（伏せた）`） | 今のまま |
+| `note`（`suites_note` の行） | `kind: note`・`key`・残した理由と確かめていないことの固定の文（suite の名前とパスを持たない） | 今のまま（`text`） |
+
 - `row_line` は、`kept` の行が `reason` を持てば理由を添える
 
 ### 異常系の処理
@@ -235,8 +251,8 @@ contracts/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `context_of` | `held.py` | 新設 | `(repo: git.Git, worktree: Optional[str]) -> dict` | 測定の `context`（`root`・`branch`・`commit`・`worktree`・`measure_id`） |
-| `place_of` | `held.py` | 新設 | `(context: dict) -> dict` | 場所の値 |
+| `context_of` | `held.py` | 新設 | `(repo: git.Git, common: Path, worktree: Optional[str]) -> dict` | 伏せる前の `context`（`root`・`branch`・`commit`・`worktree`・`worktree_id`・`place`・`measure_id`） |
+| `place_of` | `held.py` | 新設 | `(context: dict) -> dict` | 伏せる前の `context` から場所の値を作る |
 | `read_place` | `held.py` | 新設 | `(main: Path, context: dict) -> tuple[list[dict], list[tuple[Path, str]]]` | 今の場所の回答と、読めないファイル |
 | `awaits_resume` | `held.py` | 新設 | `(entry: dict, inputs_digest: str, branches: dict, decl: Optional[dict]) -> bool` | `check` と `measure` が使う再開の条件 |
 | `pick_held` | `held.py` | 新設 | `(entries: list[dict], ready: set[str]) -> Optional[dict]` | AI に渡す 1 件（`id`・`value`・`reason`・`others`） |
@@ -250,20 +266,23 @@ contracts/
 | `_write` | `cli.py` | 変更 | シグネチャは今のまま | `_commit` が返す行を出力に足す |
 | `_stale_reasons` | `check.py` | 変更 | `(repo, record, decl) -> tuple[list[str], dict, dict]` | 判定で取った入力とブランチの構成も返す |
 | `_held_reasons` | `check.py` | 新設 | `(dirs: RepoDirs, decl, inputs: dict, branches: dict) -> list[str]` | 「保管した回答がある: <キー>」の理由 |
-| `judge` | `check.py` | 変更 | シグネチャは今のまま | ほかの理由が無いときだけ保管を読む。順は、古い理由、保管、`--force` |
+| `judge` | `check.py` | 変更 | シグネチャは今のまま | ほかの理由が無いときだけ保管を読む。`.ndf/analysis/held/` が無ければ `context_of` を呼ばない。順は、古い理由、保管、`--force` |
 
 - `Inputs` に `common: Optional[Path] = None` と `worktree: Optional[str] = None` を末尾に足す。`Plan` に `held: Optional[held.Changes] = None` を足す。今のテストの組み立て方は変わらない
 - `context_of`
   - 事前条件: `repo` は作業場所の根
-  - 副作用: `git rev-parse HEAD --symbolic-full-name HEAD`（1 行目がコミット、2 行目が `refs/heads/<名前>` か `HEAD`）。コミットが無いリポジトリでは失敗するので、`git symbolic-ref -q HEAD` でブランチを取り、`commit` は `null` にする
+  - 副作用: `git rev-parse HEAD --symbolic-full-name HEAD`（1 行目がコミット、2 行目が `refs/heads/<名前>` か `HEAD`）。コミットが無いリポジトリでは失敗するので、`git symbolic-ref -q HEAD` でブランチを取り、`commit` は `null` にする。起動が増える回数と、呼ぶ場面は設計の決定 8 の表のとおりである
+  - `worktree_id` は、`worktree` があれば `<common>/worktrees/<worktree>/commondir` の `os.stat` の `st_ino` と `st_mtime_ns` を `:` でつないだ文字列、無ければ `null`
+  - `place` は `place_of` の値の `items.value_digest`。呼び出し元が `secret.mask` を掛ける前に作る
   - `branch` は `refs/heads/` を外した名前、`measure_id` は `uuid4` の hex
 - `read_place`
-  - 副作用: 場所のディレクトリ 1 つの一覧と読み取り。`context.json` と、`.` で始まる一時ファイルは回答に数えない。一覧の後に消えたファイルは読めないファイルに数えない
+  - 副作用: 場所のディレクトリ（名前は `context.place`）1 つの一覧と読み取り。`context.json` と、`.` で始まる一時ファイルは回答に数えない。一覧の後に消えたファイルは読めないファイルに数えない
 - `plan_changes`
   - `Event`: 測定の `context`・`inputs` の指紋・`branch_state`、項目ごとの `Outcome`、回答の `resolves`・`discard`・`unresume`、測定の項目の `status`・`current`・`held.id`、`--answers` の有無
   - 事後条件: 受け取った `id` からパスを組み立てない。`entries` の `id` と一致するものだけを対象にし、ほかは案内の行にする。同じ値かは `compare_value` の指紋で比べる
 - `gone_places`
-  - 副作用: `root` と管理名の git ディレクトリの両方が無いブランチの場所があるときだけ、`git for-each-ref --format=%(refname) refs/heads` を 1 回打つ
+  - 作業場所が削除された場所は、`worktree` があり、`<common>/worktrees/<worktree>/commondir` が無いか、その識別子が `worktree_id` と違う場所である。`worktree` が `null` の場所は返さない
+  - 副作用: 作業場所が削除されたブランチの場所があるときだけ、`git for-each-ref --format=%(refname) refs/heads` を 1 回打つ
 - `store_drops` が消す場所のディレクトリは、回答と `context.json` を消して空になったときだけ消す。読めないファイルがあれば残す
 - 保管の欄の名前は設計の決定 8 の表のとおりで、スキーマに合わないファイルは「読めないファイル」である
 
@@ -273,12 +292,12 @@ contracts/
 
 | 順 | すること | 失敗の扱い |
 | --- | --- | --- |
-| 1 | 今の `_guard_record`、続けて控えと保管の置き場の `_guard_store`（足すか書き換える場合だけ） | 何も書かず終了コード 1 |
+| 1 | 今の `_guard_record`、続けて控えと保管の置き場の `_guard_store`（足す・書き換える・消すのどれかがある置き場。消すだけなら `rels` は空） | 何も書かず、何も消さず、終了コード 1 |
 | 2 | 控え、`store_adds` | 終了コード 1。足した回答は残る |
 | 3 | 今の順の `.gitignore`・記録・設定 | 終了コード 1。回答は消していない |
 | 4 | `store_drops`（作業場所が削除された回答を含む） | 終了コード 0。失敗した `id` の行を返す |
 
-`resume` を決める順は、設計の決定 8 の「`resume` の決め方」の表を、そのまま述語の並びにする。
+`resume` を決める順は、設計の決定 8 の「`resume` の決め方」の表を、そのまま述語の並びにする。この表により、1 つの場所で `resume` が `true` の回答は項目ごとに 1 件までになる。古い回答を `false` にする更新は、`_commit` の順 4（`store_drops`）で行う。
 
 `plan` の分岐は次のとおりである。
 
@@ -294,7 +313,7 @@ contracts/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `context_of` | git が失敗する | 壊れたリポジトリ | `context_of` | 呼び出し元へ返す（`CheckError` に直す） | `測れない: <理由>`。終了コード 1 | 打ち直せる |
+| `context_of` | git か `commondir` の `stat` が失敗する | 壊れたリポジトリ | `context_of` | 呼び出し元へ返す（`CheckError` に直す） | `測れない: <理由>`。終了コード 1 | 打ち直せる |
 | `read_place` | 一覧を取れない | 権限 | `read_place` | 呼び出し元へ返す（`OSError`） | `write` は終了コード 1。`check` は理由にしない。`measure` は注記 | ファイルは変えない |
 | `read_place` | 1 件を読めない | 壊れた JSON・形の誤り | `read_place` | 既定値で続ける | パスと理由の案内の行か注記 | ファイルは変えない |
 | `gone_places` | `context.json` かブランチの一覧を読めない | 権限・git の失敗 | `gone_places` | 既定値で続ける（消さない） | 出力に出ない | 次の `write` がもう一度確かめる |
@@ -356,10 +375,13 @@ contracts/
 | `instruction_notes` | 古い案内の注記 | 指示書が無い | — |
 | `probe_inside` | `file` | ディレクトリは `absent`、`.` を含む相対パス | 絶対パス・`..`・途中と末尾のリンクは `outside` |
 | `removed_by_hand` | 指紋が違う値を返す | 指紋が無い値を含む。すべて一致なら空 | — |
+| `veil_rows`・`row_line` | 置き換えた行をどの種類も表示できる | 代入の形の値を持つ手書きの suite に、空の測定値を回答なしで書き出すと、`kept` の行になり、書き出しは終了コード 0 | 行に `declared`・`analyzed`・suite の名前が残らない |
 | `shows_secret` | 辞書のキーの代入の形を見つける | 空の値は偽 | — |
 | `current_entry`・`measure_problem` | 3 つの形 | `digest: null`、`analyzer` 4 | 余分なキー、16 進数でない指紋、指紋の食い違い |
 | `judge_answer` | 順 1〜12 の 1 行ずつ | 版 4 でキーが無い・不明、`withheld` で同じ値 | 形に合わない `value` |
-| `context_of`・`place_of` | ブランチ | detached HEAD、コミットが無い | — |
-| `plan_changes` | 追加・同値の削除・`resolves`・`discard` | 同じ `measure_id` の打ち直し | `../` を含む `id`、別の場所の `id` |
-| `gone_places` | worktree とブランチの削除 | 移動だけ・改名だけは残す | `context.json` が壊れている |
-| `_guard_store` | 無視される | `.gitignore` を作る回 | 追跡済み、親と子の両方の指定を外して無視されないパス |
+| `merge_project`（秘密を含む回答） | — | キーが無い項目に、代入の形の理由を持つ `unknown` の回答 | 代入の形の値を持つ形に合わない `value`。どちらも設定の理由は固定の文 |
+| `context_of`・`place_of` | ブランチ。コミットを足しても `place` は同じ | detached HEAD、コミットが無い、同じパスとブランチ名で作り直した worktree は `place` が違う | 伏せると同じになる 2 つのブランチ名は `place` が違う |
+| `plan_changes` | 追加・同値の削除・`resolves`・`discard`。同じ項目を `resume: true` で足すと古い回答は `false` | 同じ `measure_id` の打ち直し | `../` を含む `id`、別の場所の `id` |
+| `gone_places` | worktree とブランチの削除。削除して同じ名前で作り直し、前のブランチを消した場合 | 移動だけ・改名だけ、メインの作業場所は残す | `context.json` が壊れている |
+| `plan`（控え） | 取り除く値があれば控えを 1 つ計画する | 同じ中身の控えがあれば計画しない。控えを作った直後に失敗させて打ち直しても 1 つ | 中身の違う控えと読めない控えは変えない |
+| `_guard_store` | 無視される | `.gitignore` を作る回。追跡済みのファイルを対象にした削除だけの計画は止まり、ファイルが残る | 追跡済み、親と子の両方の指定を外して無視されないパス |

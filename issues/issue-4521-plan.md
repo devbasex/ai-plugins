@@ -45,7 +45,7 @@
 
 ### Task 3: 設定の形から 6 項目を消し、解析器のバージョンを上げる
 - **対象ファイル:** 2 つの `project.schema.json`・`ndf-files.json`（行 `project`）・`languages.json`・`ndf-settings.md`・`analysis_record.py`・`check.py`（`ANALYZER`）・`write.py`（`p_number`・`_build_record`・`analyzer` の確かめ。確かめは Task 6 で `measure_problem` に移す）・`.ndf/project.json`・`test_analysis_record.py`・`test_project_cli.py`・`test_write_plan.py`
-- **変更内容:** スキーマと旧い形のキー、記録の `analyzer` を測定の値にする。今のテストが例に使う `checks`・`languages` は残る項目へ置き換える。`.ndf/project.json` は同じ変更で直す（直さないと `ndf check` が落ちる）
+- **変更内容:** スキーマと旧い形のキー、記録の `analyzer` を測定の値にする。記録の `branches` を決める `_record_branches` は変えない（必須のチェックを取れずに前の `ci` を残し、既定ブランチが変わった場合は、前の記録の構成を書く。この例外のテストが無ければ足す）。今のテストが例に使う `checks`・`languages` は残る項目へ置き換える。`.ndf/project.json` は同じ変更で直す（直さないと `ndf check` が落ちる）
 - **満たす受け入れ条件:** 2・3・4・8・9・11・12・14
 - **進め方:** 6 キーが残る設定の `check` が終了コード 3 になるテストを先に書く
 
@@ -109,7 +109,7 @@
 | リスク | 対処 |
 | --- | --- |
 | 単位の途中で、旧版の NDF の解析がメインディレクトリへ 6 項目を書き戻す | 設計の「このリポジトリだけの事情」の扱いに従う。実装の worktree の `.ndf/project.json` はメインディレクトリからコピーしない |
-| `write.py` を触るほかのスプリントが `main` へ先に入る | 各単位の始めに `main` を取り込み、#4580 の `_measured_branches`・`_record_branches` を残す |
+| `write.py` を触るほかのスプリントが `main` へ先に入る | 各単位の始めに `main` を取り込み、#4580 の `_measured_branches`・`_record_branches`（前の記録の構成を書く例外を含む）を残す |
 | 新しい関数名が `ndf check` の `copy-dup`、固定の文字列の集まりが `const-fact` に当たる | 詳細設計の名前と置き方に従い、各タスクの終わりに `ndf check` を打つ |
 
 ## 切り戻し手順
