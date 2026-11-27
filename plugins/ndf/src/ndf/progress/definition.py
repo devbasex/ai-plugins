@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from jsonschema import Draft202012Validator
@@ -508,6 +508,16 @@ def answered_gap_detail(names: Sequence[str], waited: str) -> str:
         f"足りない出力: {', '.join(names)}。判断を求めたステップの要約: {waited or '（要約なし）'}。"
         "次の操作: 足りない値を返せる状態にしてから、ndf progress retry <ID> <工程> --reason <理由> で工程を打ち直す"
     )
+
+
+def gap_failure_detail(reports: Iterable[Mapping[str, Any]], missing: Callable[[], Sequence[str]], fallback: str) -> str:
+    """出力が規約に合わない失敗の理由。結果の並び `reports` に承認の回答を経た結果（`metrics.waited`）があり、
+    足りない値の名前（`missing` が返す。承認の回答を経たときだけ求める）があれば `answered_gap_detail`、ほかは `fallback`（#4513）。"""
+    waited = next((w for rep in reports if (w := waited_of(rep)) is not None), None)
+    if waited is None:
+        return fallback
+    names = missing()
+    return answered_gap_detail(names, waited) if names else fallback
 
 
 def waited_of(report: Mapping[str, Any]) -> Optional[str]:

@@ -740,13 +740,13 @@ def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepPro
 def _step_gap_detail(step: stages.StepDef, report: Mapping[str, Any], errs: list[str]) -> str:
     """ステップの出力が規約に合わない失敗の理由。承認の回答を経た結果（`metrics.waited`）なら、規約が必須とするキーのうち
     結果に無い名前と、判断を求めたステップの要約と、次の操作を示す（#4513）。ほかは今の文。"""
-    waited = definition.waited_of(report)
-    if waited is not None and step.output_ref:
+    ref = step.output_ref
+
+    def missing() -> list[str]:
         outputs = report.get("outputs") if isinstance(report.get("outputs"), dict) else {}
-        names = [n for n in definition.required_outputs(step.output_ref) if n not in outputs]
-        if names:
-            return definition.answered_gap_detail(names, waited)
-    return f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}"
+        return [n for n in definition.required_outputs(ref) if n not in outputs] if ref else []
+
+    return definition.gap_failure_detail([report], missing, f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")
 
 
 def review_again_drafts(v: View, s: stages.StageDef, gate: Optional[str], report: Mapping[str, Any]) -> list[model.EventDraft]:
@@ -880,12 +880,8 @@ def _finish_stage(d: Drive, v: View, s: stages.StageDef) -> None:
     out, merged = _stage_output(s, step_progress(v, s.name))
     errs, gaps = definition.check_stage_output(s, out)
     if errs:
-        waited = next((w for rep in out["steps"] if (w := definition.waited_of(rep)) is not None), None)
-        names = [k for k, _ in gaps]
         why = f"工程 {s.name} の出力が規約に合わない: {'; '.join(errs)}"
-        d.write(
-            _failed(s, None, v.rev, "bad_report", definition.answered_gap_detail(names, waited) if waited is not None and names else why)
-        )
+        d.write(_failed(s, None, v.rev, "bad_report", definition.gap_failure_detail(out["steps"], lambda: [k for k, _ in gaps], why)))
         return
     draft, warnings = stages.outputs_draft(s, v.rev, merged, ACTOR)
     done = model.EventDraft(FINISHED, ACTOR, s.name, reason=out["summary"], payload={"steps": len(out["steps"])}, rev=v.rev)
