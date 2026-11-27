@@ -399,6 +399,7 @@ def test_cli_result_replaces_only_a_previous_result_and_keeps_it_private(
     capsys.readouterr()
     assert _cli(tmp_path, monkeypatch, "--result", str(tmp_path / "d.md"), "d.md") == 2
     assert _cli(tmp_path, monkeypatch, "--result", str(tmp_path / "note.txt"), "d.md") == 2
+    assert _cli(tmp_path, monkeypatch, "--result", str(tmp_path / "state"), "d.md") == 2  # 既存のディレクトリ
     link = tmp_path / "state/link.json"
     link.symlink_to(tmp_path / "elsewhere.json")  # リンク先が無いリンク
     assert _cli(tmp_path, monkeypatch, "--result", str(link), "d.md") == 2

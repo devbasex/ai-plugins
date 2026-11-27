@@ -547,10 +547,12 @@ def _existing_refusal(dfd: int, dest: Path, root: Path, inputs: list[str]) -> st
     except OSError:
         # ELOOP（シンボリックリンク）と、開けないもの
         return f"--result の {dest} はシンボリックリンクか開けないファイルなので書かない"
+    # fdopen はディレクトリの記述子で IsADirectoryError を出すので、種別は開く前に確かめる
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
+        os.close(fd)
+        return f"--result の {dest} は通常ファイルでないので書かない"
     with os.fdopen(fd, "rb") as f:
-        st = os.fstat(f.fileno())
-        if not stat.S_ISREG(st.st_mode):
-            return f"--result の {dest} は通常ファイルでないので書かない"
         for p in inputs:
             with contextlib.suppress(OSError):
                 other = os.stat(root / p)

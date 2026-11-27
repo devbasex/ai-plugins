@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import ast
 import dataclasses
+import fcntl
 import hashlib
 import json
 import os
@@ -354,12 +355,31 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
         "prompt_sha256": _sha(question),
         "plugin_root": str(root),
     }
+    # 材料は最初の保存の前に読む（読めずに止まるとき、前の結果ファイルを書き換えない）
+    materials = _materials(args.materials)
+    # 同じ結果ファイルを補う起動を並べると、起動時に読んだ状態で互いの行を上書きするので、結果ファイルごとに 1 つだけ動かす
+    args.result.parent.mkdir(parents=True, exist_ok=True)
+    lock = os.open(f"{args.result}.lock", os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Stop(f"同じ --result（{args.result}）の judge が動いている。終わってから打ち直す") from None
+        return _judge_locked(args, question, info, materials)
+    finally:
+        os.close(lock)
+
+
+def _judge_locked(args: argparse.Namespace, question: str, info: Mapping[str, Any], materials: Mapping[int, Optional[Material]]) -> int:
     prev = _read_json(args.result) if args.result.exists() else None
-    same = prev is not None and all(prev.get(k) == info[k] for k in JUDGE_CONDITIONS)
+    # 判定の条件が違う結果ファイルは別の測定なので、保存済みの判定を消さないよう書かずに止める
+    if prev is not None and not all(prev.get(k) == info[k] for k in JUDGE_CONDITIONS):
+        diff = [k for k in JUDGE_CONDITIONS if prev.get(k) != info[k]]
+        raise Stop(f"--result（{args.result}）は判定の条件 {diff} が違う測定の結果なので書かない。新しい --result を渡す")
     # 同じ判定の条件の結果ファイルなら、同じ測定の続きとして実行の識別子と行を引き継ぎ、欠けた行だけを補う。識別子は判定の前に
     # 決めて保存し、途中で止まっても、同じ --result で打ち直せば同じ測定として続く
-    results: dict[str, Any] = dict(prev["results"]) if same and prev is not None else {}
-    state = {"run_id": str(prev["run_id"]) if same and prev is not None else str(uuid.uuid4()), **info, "results": results}
+    results: dict[str, Any] = dict(prev["results"]) if prev is not None else {}
+    state = {"run_id": str(prev["run_id"]) if prev is not None else str(uuid.uuid4()), **info, "results": results}
 
     def save() -> None:
         expect = {str(n): _expect_misses(results.get(str(n), {}), nums) for n, nums in (args.expect or {}).items()}
@@ -367,7 +387,7 @@ def _cmd_judge(args: argparse.Namespace, root: Path) -> int:
         _write_json(args.result, state)
 
     save()
-    for number, material in _materials(args.materials).items():
+    for number, material in materials.items():
         if args.prs and number not in args.prs:
             continue
         if material is None:
@@ -655,6 +675,11 @@ def _cmd_tally(args: argparse.Namespace) -> int:
             raise Stop(f"組の指示文が違う（1 つ目は変更後、2 つ目は {PREV_COMMIT}）: {new['prompt_commit']} / {old['prompt_commit']}")
         if (new["model"], new["claude_version"]) != (old["model"], old["claude_version"]):
             raise Stop("比べる 2 つの判定でモデル ID か Claude Code のバージョンが違う")
+    # 回ごとに指示文や実行環境を変えると、公開する指示文で再現を確かめていない改善が合格になるので、側ごとに全回の条件を揃える
+    for side, name in ((0, "変更後"), (1, PREV_COMMIT)):
+        conditions = {tuple(pair[side].get(k) for k in JUDGE_CONDITIONS) for pair in pairs}
+        if len(conditions) > 1:
+            raise Stop(f"{name}の判定の条件（{', '.join(JUDGE_CONDITIONS)}）が回によって違う: {sorted(map(str, conditions))}")
     rounds = [_round(materials, pair, reviewed) for pair in pairs]
     verdict, reason = _verdict(rounds)
     selected = {n: latest_review(reviewed, m, n) for n, m in materials.items() if m is not None}

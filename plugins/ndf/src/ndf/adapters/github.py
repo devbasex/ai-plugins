@@ -722,7 +722,12 @@ class GitHub:
         返すのは `branch_file` の値、`aliased` と同じ形の辞書（すべての名前をキーに持ち、読めなければ None）、読めなかった
         後続の要求ごとの `Unread` である。1 回の要求に載せる件数の上限（`github.graphql-batch`）には設定も 1 件と数え、
         最初の要求は設定と選択を上限−1 件まで、残りの選択は上限の件数ごとに分けて読む。最初の要求の失敗は `GitHubError` を
-        送出する（設定を読めない）。後続の要求の失敗は送出せず、その要求に載せた名前と例外を `Unread` に入れて続ける。
+        送出する（設定を読めない）。後続の要求の失敗は送出せず、その要求に載せた名前と例外を `Unread` に入れる。
+
+        後続の失敗の後に残りを送るのは、GitHub が要求を受けてその要求の中身を断った失敗（GraphQL の誤りなど）のときだけである。
+        別の要求に載せた選択は読める見込みがあり、選択ごとに読めた・読めなかったを診断に残せる。不達・5xx・上限・認証の失敗
+        （`passing`・`quota`・状態 401 と 403）は残りの要求も同じ理由で読めないので、残りを送らず 1 つの `Unread` にまとめる。
+        このため要求の数は、分けた後続の要求の数を超えず、失敗した要求を打ち直すこともない。
         """
         names = list(selections)
         size = int(limits.value("github.graphql-batch", "count"))
@@ -738,10 +743,16 @@ class GitHub:
         repo = self._repository_of(data)
         out: dict[str, Any] = {k: repo[alias] if alias in repo else None for alias, k in zip(chunk, first)}
         unread: list[Unread] = []
-        for keys in _batches(names[len(first) :]):
+        batches = list(_batches(names[len(first) :]))
+        for i, keys in enumerate(batches):
             try:
                 out.update(self.aliased({k: selections[k] for k in keys}))
             except GitHubError as exc:
+                if exc.passing or exc.quota is not None or exc.status in (401, 403):
+                    rest = tuple(k for b in batches[i:] for k in b)
+                    out.update(dict.fromkeys(rest))
+                    unread.append(Unread(rest, exc))
+                    break
                 out.update(dict.fromkeys(keys))
                 unread.append(Unread(tuple(keys), exc))
         return _file_at(repo, "object"), out, unread
