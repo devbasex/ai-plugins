@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
@@ -26,6 +27,10 @@ FILLED = "filled"
 # ラウンドの記録のキー（そのラウンドで相手役へ渡したレビューの重点。重点を変えた打ち直しは前の収束も差分の起点も使わない。
 # PR 3944 の r4-3）
 FOCUS = "focus"
+# ラウンドの記録のキー（そのラウンドで渡したレビューの単位の指示を見分ける値。`unit_id`。単位の指示が無ければ書かない。#4369）
+UNIT = "unit"
+# ラウンドの記録のキー（そのラウンドの起動が実際に読んだ PR。`<所有者>/<リポジトリ>#<番号>`。読めなければ書かない。#4369）
+PR = "pr"
 # ラウンドの記録のキー（そのラウンドのレビューに使った MVV。#4076）と、その中身のキー。`MVV_ID` は MVV を見分ける値
 # （`mvv_decide.identity_of`）、`MVV_BRANCH` は MVV を読んだブランチ（`--base` がコミットのときに、`review-scope` が
 # GitHub へ問い合わせずに同じブランチの MVV を読むのに使う）
@@ -133,28 +138,41 @@ def assignable(seats: Collection[str], options: Sequence[Collection[str]]) -> bo
     return all(place(s, set()) for s in seats)
 
 
+def unit_id(unit: str) -> str:
+    """レビューの単位の指示の中身を見分ける値（指示が無ければ空）。"""
+    return hashlib.sha256(unit.encode("utf-8")).hexdigest() if unit else ""
+
+
 class Basis(NamedTuple):
     """前のラウンドの head を差分の起点や収束の再利用に使える条件（今回の値。None は確かめない）。`base` は比較基点
     （merge-base の SHA。PR 3944 の r2-1）、`reviewers` は今回の相手役（r2-2）、`focus` は今回の重点（r4-3）、`mvv` は今の
     MVV を見分ける値（確かめられなければ `UNKNOWN_MVV`。#4076）。`stand_in` が真なら、前のラウンドの埋めた席を、席の名前か
-    欠けた相手役のどちらか一方として今回の席に割り当てる（同じ head の打ち直しの再利用だけが使う。#3955）。"""
+    欠けた相手役のどちらか一方として今回の席に割り当てる（同じ head の打ち直しの再利用だけが使う。#3955）。`unit` は今回の
+    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回読んだ PR（読んだ PR の確認を求めない起動は None。#4369）。"""
 
     base: Optional[str] = None
     reviewers: Optional[Collection[str]] = None
     focus: Optional[Sequence[str]] = None
     mvv: Optional[str] = None
     stand_in: bool = False
+    unit: Optional[str] = None
+    pr: Optional[str] = None
 
 
 def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
     """ラウンドの記録が `basis` に合うか。`basis` の値があれば、比較基点（`BASE`）が違う・そのラウンドを読んだ相手役
-    （`REVIEWERS`）に無い相手役がいる・重点（`FOCUS`）か MVV（`MVV`）が違うときは合わない。承認済みの MVV があるのに、
+    （`REVIEWERS`）に無い相手役がいる・重点（`FOCUS`）か単位の指示（`UNIT`）か読んだ PR（`PR`）か MVV（`MVV`）が違うときは合わない。承認済みの MVV があるのに、
     そのラウンドの head で根拠の記述を確かめ終えていない（`finish_decide.MVV_CHECKED`）ときも合わない（#4090）。"""
     if basis.base is not None and record.get(BASE) != basis.base:
         return False
     if basis.reviewers is not None and not _seated_read(record, basis):
         return False
     if basis.focus is not None and store.list_of(record, FOCUS) != list(basis.focus):
+        return False
+    # 単位の指示の無いラウンドはキーを持たず、指示の無い起動（`unit_id` は空）と合う
+    if basis.unit is not None and (record[UNIT] if UNIT in record else "") != basis.unit:
+        return False
+    if basis.pr is not None and (record[PR] if PR in record else None) != basis.pr:
         return False
     if basis.mvv is None:
         return True

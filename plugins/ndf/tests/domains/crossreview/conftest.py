@@ -94,6 +94,9 @@ class FakePort:
             raise RuntimeError("PR を読めない")
         return self.base_ref
 
+    def read_pr(self):
+        return None
+
     def open_threads(self):
         self.thread_reads += 1
         out = []

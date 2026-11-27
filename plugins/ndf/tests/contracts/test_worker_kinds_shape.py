@@ -130,3 +130,21 @@ def test_write_released_changes_only_the_recorded_keys(tmp_path):
 def test_write_released_without_values_raises(tmp_path):
     with pytest.raises(OSError):
         wk.write_released(tmp_path, wk.Recorded("x", None, None))
+
+
+UNIT_KINDS = ("impl", "fix", "ci-fix", "fix-push", "fix-base")
+
+
+@pytest.mark.parametrize("kind", UNIT_KINDS)
+def test_unit_file_is_an_optional_input_of_the_kinds_that_change_code(kind):
+    # #4369 の決定 8: あれば起動指示の入力に載せて範囲に従わせ、無くても欠けにしない
+    assert "unit_file" in wk.work_kinds()[kind]["summary"]
+    assert wk.kind_values(kind, {"unit_file": "/s/unit.md"}, {})["unit_file"] == "/s/unit.md"
+    for empty in ({}, {"unit_file": ""}):
+        assert "unit_file" not in wk.kind_values(kind, empty, {})
+        assert "unit_file" not in wk.kind_gaps(kind, empty, {})
+
+
+def test_kinds_without_optional_inputs_ignore_unit_file():
+    others = [k for k in wk.work_kinds() if k not in UNIT_KINDS]
+    assert others and all("unit_file" not in wk.kind_values(k, {"unit_file": "/s/unit.md"}, {}) for k in others)

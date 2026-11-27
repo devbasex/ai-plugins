@@ -122,12 +122,6 @@ def last_json(stdout: str) -> Optional[dict[str, Any]]:
     return found if known else None
 
 
-def _prs(found: dict[str, Any]) -> list[int]:
-    """結果 JSON の items の PR の番号（`{"kind": "pr", "number": <整数>}`）。"""
-    items = found.get("items") if isinstance(found.get("items"), list) else []
-    return [i["number"] for i in items if isinstance(i, dict) and i.get("kind") == "pr" and type(i.get("number")) is int]
-
-
 def _plain(status: str, kind: Optional[str], summary: str, code: Optional[int]) -> dict[str, Any]:
     """結果 JSON を持たないステップの結果。"""
     return {
@@ -162,7 +156,7 @@ def outcome_of(step: Step, code: int, stdout: str) -> dict[str, Any]:
         "routes": found.get("routes") if found["status"] == GATE else None,
         "summary": str(found.get("summary")),
         "code": code,
-        "prs": _prs(found),
+        "prs": result.pr_numbers(found),
         "outputs": outputs if isinstance(outputs, dict) and outputs else None,
         "gaps": gaps if found["status"] == STOPPED and isinstance(gaps, list) and gaps else None,
         result.MISSING_OUTPUTS: _missing_outputs(found),

@@ -4,6 +4,8 @@
   （設計のプランの `--findings`）も指摘の候補として同じ 3 つで扱い、どれにもならなかった件は欠け（gaps）に載せる
 - 未解決・扱わなかった足すべき内容・理由の無い見送りが 1 件でもあれば `incomplete`（gaps つき）で止まる。
   プランは `incomplete` のルートへ進み、gaps は承認資料の「未確認の点」になる
+- `stop_on_hold`（単位の経路。#4369 の決定 14）なら、人の判断を待つ指摘（直していない `redline` と、区分 `defer` が
+  `needs_user`・無い・知らない値の見送り）も欠け（`held_finding`）にして `incomplete` で止まる。ほかの停止は変えない
 - 上限（`max_rounds`）・振動（`oscillating`）・途中の誤り（`errored`）で終わっても、欠けが 0 件なら ok で次の工程へ進み、そう決めた理由を
   decisions に残す（conductor が手で review を飛ばさない）。1 ラウンドも終わらずに誤りで終わったら `work_stopped`
 - 収束の妨げにならない重さ（`minor`・`nit`。`criteria_decide.blocking`）の未解決の指摘は欠けにしない（#3941）
@@ -47,6 +49,8 @@ GAP_UNRESOLVED = "unresolved_finding"
 GAP_UNHANDLED = "unhandled_finding"
 GAP_NO_REASON = "skip_without_reason"
 GAP_MVV = "mvv_unresolved"
+# 人の判断を待つ指摘（`stop_on_hold` のときだけ）
+GAP_HELD = "held_finding"
 # 承認ゲートの判定に要る MVV の記録の行を書けなかった（#3959）
 RECORD_FAILED = "mvv_record_failed"
 # 必ず人の承認が要る操作に当たる指摘かどうかの欄（ジャーナルと要約の指摘）
@@ -63,7 +67,7 @@ UNSENT_CITATIONS = "unsent_citations"
 class Finding(NamedTuple):
     """レビューの指摘 1 件。足すべき内容を扱った件は、その `id` を持つ。`severity` は重要度（分からなければ None）、
     `mvv` は反する MVV の項目（無ければ None）、`redline` は必ず人の承認が要る操作に当たるか、`by_ndf` は NDF が機械で確かめて
-    作った指摘か。"""
+    作った指摘か。`defer` は見送りの区分（無ければ None）。"""
 
     id: str
     text: str
@@ -73,6 +77,7 @@ class Finding(NamedTuple):
     mvv: Optional[str] = None
     redline: bool = False
     by_ndf: bool = False
+    defer: Optional[str] = None
 
 
 def blocking(f: Finding) -> bool:
@@ -136,6 +141,19 @@ def _finding_gaps(findings: Sequence[Finding], *, mvv_checked: bool = True, unse
     return gaps
 
 
+def _held(f: Finding) -> bool:
+    """人の判断を待つ指摘か。レッドラインは直していなければ、ほかは区分が承認ゲートの保留になる見送りなら当たる。"""
+    if f.redline:
+        return f.outcome != FIXED
+    return f.outcome == SKIPPED and mvv_decide.defer_holds(f.defer)
+
+
+def _held_gaps(findings: Sequence[Finding], gaps: Sequence[Mapping[str, str]]) -> list[dict[str, str]]:
+    """人の判断を待つ指摘のうち、同じ名前の欠けが `gaps` に無いものの欠け。"""
+    named = {g["name"] for g in gaps}
+    return [_gap(GAP_HELD, f.id, _gap_text(f)) for f in findings if _held(f) and f.id not in named]
+
+
 def _handed_decision(h: Handed, found: Finding) -> dict[str, str]:
     said = "直した" if found.outcome == FIXED else f"見送った（理由: {found.reason}）"
     return {"decision": f"足すべき内容 {h.id} を{said}", "basis": h.text or h.id}
@@ -191,10 +209,13 @@ def _bad_input(review: Review) -> Optional[str]:
     return None
 
 
-def finish(review: Review, handed: Sequence[Handed] = (), record_failed: Optional[Mapping[str, Any]] = None) -> Verdict:
-    """終わり方と指摘・足すべき内容から結果を決める。`record_failed` は承認ゲートの判定に要る MVV の記録の行を書けなかったときの
+def finish(
+    review: Review, handed: Sequence[Handed] = (), record_failed: Optional[Mapping[str, Any]] = None, *, stop_on_hold: bool = False
+) -> Verdict:
+    """終わり方と指摘・足すべき内容から結果を決める。`stop_on_hold` が真なら、人の判断を待つ指摘を `held_finding` の欠けにする。
+    `record_failed` は承認ゲートの判定に要る MVV の記録の行を書けなかったときの
     書けなかった行（`rows`）と注意（`cause`）で、あれば普段の判定の後に `mvv_record_failed` へ変える（欠けと判断は残す）。"""
-    verdict = _finish(review, handed)
+    verdict = _finish(review, handed, stop_on_hold)
     if not record_failed:
         return verdict
     rows = record_failed.get("rows")
@@ -206,7 +227,7 @@ def finish(review: Review, handed: Sequence[Handed] = (), record_failed: Optiona
     return Verdict(STOPPED, RECORD_FAILED, summary, verdict.gaps, verdict.decisions, warnings)
 
 
-def _finish(review: Review, handed: Sequence[Handed]) -> Verdict:
+def _finish(review: Review, handed: Sequence[Handed], stop_on_hold: bool) -> Verdict:
     bad = _bad_input(review)
     if bad is not None:
         return Verdict(STOPPED, "invalid", bad, (), (), ())
@@ -222,6 +243,8 @@ def _finish(review: Review, handed: Sequence[Handed]) -> Verdict:
     if left:
         summary = f"{review.rounds} ラウンドで {review.final}。MVV に関わる未解決が残る: {'・'.join(left)}。{counts}・欠け {len(gaps)} 件"
         return Verdict(STOPPED, "mvv_unresolved", summary, tuple(gaps), tuple(decisions), ())
+    if stop_on_hold:
+        gaps += _held_gaps(review.findings, gaps)
     if gaps:
         summary = f"{review.rounds} ラウンドで {review.final}。{counts}・欠け {len(gaps)} 件"
         return Verdict(STOPPED, "incomplete", summary, tuple(gaps), tuple(decisions), ())
@@ -243,7 +266,7 @@ def _text_of(item: dict[str, Any]) -> str:
 
 
 def as_findings(raw: Sequence[Any]) -> tuple[Finding, ...]:
-    """指摘の辞書（`id`・`text`・`outcome`・`reason`）の並びを読む。形が違えば `ValueError`。"""
+    """指摘の辞書（`id`・`text`・`outcome`・`reason`・`defer`）の並びを読む。形が違えば `ValueError`。"""
     out = []
     for i, item in enumerate(raw):
         if not isinstance(item, dict) or not isinstance(item.get("outcome"), str):
@@ -255,7 +278,9 @@ def as_findings(raw: Sequence[Any]) -> tuple[Finding, ...]:
         why = reason if reason else None  # noqa: NDF501 ファイル: 理由の無い指摘の結果は理由を持たない
         mvv = item.get("mvv")
         item_mvv = mvv if isinstance(mvv, str) else None
-        out.append(Finding(name, text, item["outcome"], why, severity, item_mvv, bool(item.get(REDLINE)), bool(item.get(BY_NDF))))
+        found = Finding(name, text, item["outcome"], why, severity, item_mvv, bool(item.get(REDLINE)), bool(item.get(BY_NDF)))
+        defer = item.get(mvv_decide.REVIEW_DEFER)
+        out.append(found._replace(defer=defer if isinstance(defer, str) else None))
     return tuple(out)
 
 

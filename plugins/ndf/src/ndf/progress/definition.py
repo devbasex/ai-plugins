@@ -393,6 +393,7 @@ def _stage_def(doc: Mapping[str, Any], mode: str) -> stages.StageDef:
         steps=tuple(_step_def(name, n, b) for n, b in _tasks(doc) if _in_mode(b, mode)),
         when=tuple(meta["when"]) if "when" in meta else (),
         per_issue=bool(meta.get("per_issue")),
+        per_unit=bool(meta.get("per_unit")),
         inputs=tuple(meta["inputs"]) if "inputs" in meta else (),
         outputs=tuple(meta["outputs"]) if "outputs" in meta else (),
         optional_inputs=tuple(meta["optional_inputs"]) if "optional_inputs" in meta else (),

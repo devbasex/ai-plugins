@@ -8,6 +8,7 @@
     "remote": {"summary": "取得・検証・差分の基準・送信に使う git のリモートの名前。省けば ndf route がリポジトリの根の .ndf/worktree.json の remote、無ければその既定にする"},
     "title": {"summary": "PR の題"},
     "body_file": {"summary": "PR の本文のファイル"},
+    "unit_file": {"summary": "レビューの単位の指示のファイル（単位の範囲）。空なら単位の指示は無い。実装のプランは最上位の unit_file に持ち、単位を流す処理が埋める", "default": ""},
     "issue": {"summary": "作業の課題の番号（課題が 1 つのとき課題から写す）。実装のプランは acceptance を省けば、worker の後にこの課題の受け入れ条件の確認の区分をすべて照らす（ndf loop acceptance check --issue <issue>）"},
     "acceptance": {"summary": "受け入れ条件の確かめ（ndf loop acceptance check）の引数の並び。既定は --issue <issue>（issue はこの既定を組むときだけ要る）。渡すときは --issue を必ず含め、--criteria <課題>:<条件> は値 1 つごとに繰り返す（例 --issue 1 --criteria 1:1 --criteria 1:2）。課題を束ねた単位は課題ごとの --issue", "list": true},
     "issues": {"summary": "作業の課題の番号の並び（工程の入力 issues から写す。課題が 2 つ以上のスプリントでも決まる）。完了判定は、この課題の設計文書に名前の出るテストが HEAD にあるかを判定する（ndf loop design-tests）", "list": true},

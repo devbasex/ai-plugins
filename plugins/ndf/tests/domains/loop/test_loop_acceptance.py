@@ -292,3 +292,18 @@ def test_check_over_several_issues_reads_the_bodies_in_one_query(monkeypatch, lo
     assert len(queries) == 1 and [g["name"] for g in got["gaps"]][:1] == ["1:1"]
     for n in (1, 2):
         assert f"issueOrPullRequest(number: {n}) {{ ... on Issue {{ body }} ... on PullRequest {{ body }} }}" in queries[0]
+
+
+def test_check_with_no_criteria_is_ok_without_reading_the_bodies(loop, monkeypatch: pytest.MonkeyPatch):
+    # #4369 の決定 9: 条件を持たない単位は、記録の無い条件があっても ok
+    monkeypatch.setattr(acceptance, "read_body", lambda cwd, n: pytest.fail("本文を読んだ"))
+    monkeypatch.setattr(acceptance, "read_bodies", lambda cwd, ns: pytest.fail("本文を読んだ"))
+    got = loop("check", "--issue", "1", "--issue", "2", "--no-criteria")
+    assert got["status"] == "ok" and "#1, #2" in got["summary"]
+
+
+def test_check_refuses_no_criteria_together_with_criteria(tmp_path: Path):
+    argv = ["--cwd", str(tmp_path), "acceptance", "check", "--issue", "1", "--criteria", "1:1", "--no-criteria"]
+    with pytest.raises(SystemExit) as stopped:
+        loop_cli.main(argv)
+    assert stopped.value.code != 0

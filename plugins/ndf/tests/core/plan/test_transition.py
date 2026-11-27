@@ -129,6 +129,12 @@ def test_the_step_limit_stops_the_plan():
     assert (final.status, final.kind) == ("stopped", "fix_limit")
 
 
+def test_the_detail_of_a_stopped_plan_carries_the_summary_of_the_step():
+    plan = _plan({"id": "a"})
+    _, final = _drive(plan, {"a": [Outcome("stopped", "precondition", summary="PR #12 の状態を取得できない")]})
+    assert (final.kind, final.detail) == ("precondition", "ステップ a が precondition で止まった: PR #12 の状態を取得できない")
+
+
 def test_a_gate_without_answers_ends_the_plan_at_the_gate():
     plan = _plan({"id": "ask"}, {"id": "release"})
     acts, final = _drive(plan, {"ask": [Outcome("gate")]})

@@ -18,21 +18,21 @@
 差し込みの値（`--set`）でなく、埋めたプランの作業場所（プランの `worktree`）で渡す。差し込みの `worktree` はプランの
 実行が決まった名前として持ち、上書きを断るためである。止まったプランを打ち直すときは、前の回の結果の打ち直し（`next` の `--from`）と
 同じく止まったステップから新しい回を始め、差し込み `progress_attempt` に打ち直しの数を載せて回のキーを変える。同じ引数で
-打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。skill と script は入力の作業場所で打つ。
+打ち直すと、プランは前の回のバックアップの結果を返すだけだからである。実装のプランが PR の番号の記録を持たずに、番号を読む
+ステップへ PR のステップを通らずに進む所で止まっていれば、PR のステップから始める（`plan_start`）。skill と script は入力の作業場所で打つ。
 
 工程の入力に無い差し込みは、値の性質ごとの出所（`FILL_SOURCES`）から埋める（#3092）。課題の題と本文は課題から写し、
 テストのコマンド・必須のチェック・レビューと組み直しとリファクタリングの起動は `.ndf/project.json` の設定から読み（レビューは設定が
-無ければ `ndf cross-review run` を、打つ時点のブランチの PR の番号で組む。`route.review_launch`）、worker と承認ゲートの
+無ければ `ndf cross-review run` を、打つ時点の PR の番号で組む。`route.review_launch`）、worker と承認ゲートの
 起動は `params.json` の既定を使う。どこからも決まらない差し込みは、名前と出所を挙げて invalid で止める。
 """
 
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -56,8 +56,9 @@ from ndf.core import durable, production_merge, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, issue_values, merge_pending, model, rebuild_values, refactor_values, stages
+from ndf.progress import definition, issue_values, merge_pending, model, plan_runs, rebuild_values, refactor_values, stages, units_invoke
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
+from ndf.progress.plan_runs import StageResult, StageRun
 from ndf.testing import scoped, weight
 
 # 作業種別と、工程の定義の call → 作業種別（plan はサブコマンド `ndf plan` の名前）
@@ -70,7 +71,6 @@ CALLS = {"ndf.plan": PLAN, "ndf.skill": SKILL, "ndf.script": SCRIPT, definition.
 NAME_ARG = {PLAN: "plan", SKILL: "skill", SCRIPT: "argv"}
 # script の作業へ入力を渡す環境変数
 INPUT_ENV = "NDF_STAGE_INPUT"
-NOTES_ENV = "NDF_STAGE_NOTES"
 # skill の作業の上限（Skill 1 本を回す起動は実装の工程と同じ桁）
 SKILL_LIMIT = "monitor.phase.implement"
 SKILL_SYSTEM = "工程の作業を 1 つ行い、最後に結果 JSON（統一 JSON レポート）だけを回答する。"
@@ -80,6 +80,9 @@ APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
 # プランの実行の保存先に残す、回の打ち直しの数（`plan_attempt`）と、それを渡す差し込みの名前
 ATTEMPT_FILE = "progress-attempt.json"
 ATTEMPT_SET = "progress_attempt"
+# 実装のプランの名前（`impl-<ブランチ>`）の頭と、PR の番号を保存するステップ（`plan_start`）
+IMPL_PLAN_PREFIX = "impl-"
+PR_STEP = "pr"
 
 
 class StageInputError(Exception):
@@ -151,59 +154,6 @@ class KindInputsMissing(route.RouteError):
         return [{"key": n, "source": s} for n, s in self.missing.items()]
 
 
-def _no_released() -> Optional[Recorded]:
-    """記録済みの値を読まない呼び出しの既定（工程の外の呼び出しとテスト）。"""
-    return None
-
-
-@dataclass(frozen=True)
-class StageRun:
-    """ステップ 1 つの呼び出し。`name` は呼ぶプラン・Skill の名前（script は argv の先頭）。"""
-
-    kind: str
-    name: str
-    inputs: dict[str, Any]
-    outputs: tuple[str, ...]
-    range: str
-    step: str
-    args: dict[str, Any] = field(default_factory=dict)
-    # 変更要求の指摘の本文（承認ゲートの request_changes の回答）。作業へは環境変数 NDF_STAGE_NOTES か質問の末尾で渡す
-    notes: Optional[str] = None
-    # 行の打ち直し（conductor の retry）の回数と、方針による自動の打ち直しか。プランはどちらでも新しい回を始める（`plan_attempt`）
-    retries: int = 0
-    again: bool = False
-    # 同じ工程の承認ゲートの最新の承認の回答が見た対象（事象の `seen`。`gate.Target.as_dict` の形）。無ければ None（#4409）
-    approved: Optional[dict[str, Any]] = None
-    # 工程が承認ゲートを持つか（light の設計のように持たない工程のマージは、承認をデプロイへ先送りする。#4409）
-    gated: bool = False
-    # 記録済みの値（まとめたリリースでオーガナイザーが記録した値）を読む関数。リリースの識別子を使うプランだけが呼ぶ（#4513）
-    released: Callable[[], Optional[Recorded]] = field(default=_no_released, compare=False)
-
-    def env(self, extra: Mapping[str, str]) -> dict[str, str]:
-        out = {**os.environ, **extra}
-        if self.notes is not None:
-            out[NOTES_ENV] = self.notes
-        return out
-
-
-@dataclass(frozen=True)
-class StageResult:
-    """作業の結果。`report` は結果 JSON、`outputs` は工程の定義が書くと定義したキーだけの値。"""
-
-    report: dict[str, Any]
-    outputs: dict[str, Any]
-    warnings: tuple[str, ...] = ()
-
-    @property
-    def status(self) -> str:
-        return str(self.report["status"])
-
-    @property
-    def cause(self) -> Optional[dict[str, Any]]:
-        held = self.report["cause"] if "cause" in self.report else None
-        return held if isinstance(held, dict) else None
-
-
 # 外部のコマンドを打つ関数（argv・作業ディレクトリ・環境変数 → 終了した子プロセス）。テストが差し替える
 Runner = Callable[[list[str], Path, dict[str, str]], "subprocess.CompletedProcess[str]"]
 
@@ -268,7 +218,8 @@ def stage_run(stage: stages.StageDef, step: stages.StepDef, inputs: Mapping[str,
         raise model.Refused(f"工程 {stage.name} のステップ {step.id} の call {step.call} は呼べない")
     kind = kind_of(step)
     name = _named(kind, step.args)
-    return StageRun(kind, name, dict(inputs), stage.outputs, step.range, step.id, dict(step.args), gated=bool(stage.gates))
+    gated = bool(stage.gates)
+    return StageRun(kind, name, dict(inputs), stage.outputs, step.range, step.id, dict(step.args), gated=gated, per_unit=stage.per_unit)
 
 
 def _named(kind: str, args: Mapping[str, Any]) -> str:
@@ -284,11 +235,6 @@ def _named(kind: str, args: Mapping[str, Any]) -> str:
 
 
 # --- 作業の結果 ----------------------------------------------------------------------------
-
-
-def read_report(stdout: str) -> Optional[dict[str, Any]]:
-    """標準出力の最後の空でない行の結果 JSON（新しいバージョンなら代わりの `stopped`。`result.received`）。読めないか形が違えば None。"""
-    return result.last_line(stdout)
 
 
 def bad_report(run: StageRun, detail: str) -> StageResult:
@@ -318,6 +264,11 @@ def template(name: str) -> Optional[route.Template]:
     """プランのテンプレート（`route.templates()` のキー `name`）。無ければ None。"""
     found = route.templates()
     return found[name] if name in found else None
+
+
+def _template_of(run: StageRun) -> Optional[route.Template]:
+    """呼び出しが描画するテンプレート。呼び出しの上書き（`run.template`）が無ければ、名前で引く。"""
+    return run.template if run.template is not None else template(run.name)
 
 
 def _param_value(value: Any) -> route.Value:
@@ -503,9 +454,10 @@ def _merge_method_first(
 def _fill_from_sources(
     t: route.Template, run: StageRun, *, project: Mapping[str, Any], local_tests: bool
 ) -> tuple[tuple[str, ...], dict[str, route.Value], dict[str, str]]:
-    """工程の入力と、出所の表（`FILL_SOURCES`）のうち課題を除く出所から埋めた値。プランが使う差し込みの名前・その値・
-    入力に無く出所の表から求める差し込み → 出所（課題の出所は呼び手が `_fill_from_issue` で後から埋める）を返す。"""
-    values = {k: _param_value(v) for k, v in run.inputs.items() if k in t.params}
+    """工程の入力と呼び出しの上書き（`run.overrides`）、出所の表（`FILL_SOURCES`）のうち課題を除く出所から埋めた値。プランが
+    使う差し込みの名前・その値・入力にも上書きにも無く出所の表から求める差し込み → 出所（課題の出所は呼び手が
+    `_fill_from_issue` で後から埋める）を返す。"""
+    values = {**{k: _param_value(v) for k, v in run.inputs.items() if k in t.params}, **run.overrides}
     names = route.needed(t, local_tests=local_tests, given=values)
     wanted = {n: FILL_SOURCES[n] for n in names if n not in values and n in FILL_SOURCES}
     values = {**values, **_fill_from_project(project, wanted), **_fill_branch(run, wanted), **_fill_gate(wanted)}
@@ -647,13 +599,19 @@ def uses_released(kinds: Iterable[str]) -> bool:
     return any(PRODUCT_VERSION in defs[k]["outputs"] for k in kinds)
 
 
-def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
+def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> Optional[PreparedPlan]:
     """プランの差し込みを 1 回だけ組み、作業ごとの入力と作業場所を確かめて `values.json` に残す（#3908 の決定 2・4）。
 
     設定は 1 回だけ読み、差し込みは `template_values` で組む。決まらなければ `TemplateValuesMissing`、`{{worker}}` の作業が読む
     入力か作業場所が決まらなければ `KindInputsMissing` を上げ、どちらも `values.json` を書かない。テンプレートが無ければ `model.Refused`。
+    単位ごとに流す工程（`per_unit`）は開始前の確かめ（`units_invoke.prepare`）を行い、単位の経路なら None（単位ごとの値は
+    単位を流すときに組む）、これまでの経路なら単位に分けない呼び出し（`StageRun.plain`）で組む（#4369）。
     """
-    t = template(run.name)
+    if run.per_unit:
+        if units_invoke.prepare(run, work_dir, cwd) is not None:
+            return None
+        run = run.plain()
+    t = _template_of(run)
     if t is None:
         raise model.Refused(f"プランのテンプレート {run.name} が無い")
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -674,11 +632,16 @@ def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
 
 
 def _prepared(run: StageRun, work_dir: Path, cwd: Path) -> PreparedPlan:
-    """同じ保存先に同じプランの `values.json` があればその値、無い（か別のプランのもの）なら `prepare_plan` で組んだ値。"""
-    t, held = template(run.name), read_values(work_dir)
+    """同じ保存先に同じプランの `values.json` があればその値、無い（か別のプランのもの）なら `prepare_plan` で組んだ値。
+
+    テンプレートはどちらも `_template_of` のもの（名前で引き直すと、上書きで外したステップが打ち直しで戻る）。
+    """
+    t, held = _template_of(run), read_values(work_dir)
     if t is not None and held is not None and held["plan"] == run.name:
         return PreparedPlan(t, held["values"], held["local_tests"], released_of(held))
-    return prepare_plan(run, work_dir, cwd)
+    prepared = prepare_plan(run, work_dir, cwd)
+    assert prepared is not None  # 単位に分けない呼び出し（`invoke` が `plain` にしたもの）だけがここへ来る
+    return prepared
 
 
 def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
@@ -708,33 +671,33 @@ def plan_path(run: StageRun, work_dir: Path, cwd: Path) -> Path:
         return wd.path / name
 
 
-def _previous(work_dir: Path) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
-    """保存先の前の回の記録（`run.json`）と、その回の結果のバックアップ（終わっていなければ None。新しいバージョンなら `InternalError`）。"""
-    record = plan_files.read_json(work_dir / plan_runner.RUN_FILE)
-    if record is None:
-        return None, None
-    return record, plan_runner.stored_result(work_dir, durable.run_name(record["key"]))
-
-
-def _from_of(command: Any) -> Optional[str]:
-    """結果のコマンド（`next`・`routes` の値）の `--from` の値。無ければ None。"""
-    argv = command["argv"] if isinstance(command, dict) and isinstance(command.get("argv"), list) else []
-    return str(argv[argv.index("--from") + 1]) if "--from" in argv[:-1] else None
-
-
 def plan_start(work_dir: Path) -> Optional[str]:
     """プランを打ち直す開始点。前の回が止まっていれば、その結果の打ち直し（`next`）の `--from`（止まったステップ）。
 
     止まっていなければ前の回の開始点（承認の回答を渡すときも同じ回に届く）。前の回が無ければ None（初めから）。
+    実装のプランは、PR の番号の記録の無い保存先を、番号を読むステップから流さない（`_before_pr_number`）。
     """
-    record, done = _previous(work_dir)
+    record, done = plan_runs.previous(work_dir)
     if record is None:
         return None
-    again = _from_of(done["next"]) if done is not None and done["status"] == result.STOPPED and "next" in done else None
-    if again is not None:
-        return again
-    start = record["start"] if "start" in record else None
-    return start if isinstance(start, str) else None
+    again = plan_runs.from_of(done["next"]) if done is not None and done["status"] == result.STOPPED and "next" in done else None
+    start = again if again is not None else record.get("start")
+    return _before_pr_number(work_dir, record, start) if isinstance(start, str) else None
+
+
+def _before_pr_number(work_dir: Path, record: Mapping[str, Any], start: str) -> str:
+    """保存先に PR の番号の記録が無い実装のプランが、`start` から `pr` のステップを通らずに番号を読むステップへ進みうるなら
+    `pr`。ほかは `start`（番号を読まずに終わる `resolved` は変えない）。進みうるかは実装のテンプレートの遷移から決める。
+
+    番号を保存する前のバージョンで始めた実装は、PR を作った後で止まっていても番号を持たず、衝突の確かめ・レビュー・CI が番号を
+    読めずに止まり続ける。`pr` のステップは開いた PR を探して番号を書き、続くステップを順に流す（#4369）。
+    """
+    impl = "name" in record and str(record["name"]).startswith(IMPL_PLAN_PREFIX)
+    saved = Path(route.PR_NUMBER_FILE.replace("{state_dir}", str(work_dir)))
+    if not impl or saved.is_file():
+        return start
+    plan = route.expanded(route.templates()["impl"])
+    return PR_STEP if route.may_read_pr_number(plan, start, PR_STEP) else start
 
 
 def stored_gate_routes(work_dir: Path) -> Optional[dict[str, Any]]:
@@ -742,7 +705,7 @@ def stored_gate_routes(work_dir: Path) -> Optional[dict[str, Any]]:
 
     終わった回へ `--answer` を渡しても、プランはバックアップの結果を返すだけである。続きは routes の開始点から新しい回で流す。
     """
-    _, done = _previous(work_dir)
+    _, done = plan_runs.previous(work_dir)
     if done is None or done["status"] != result.GATE or not isinstance(done.get("routes"), dict):
         return None
     return dict(done["routes"])
@@ -756,12 +719,12 @@ def plan_attempt(run: StageRun, work_dir: Path) -> int:
     """
     path = work_dir / ATTEMPT_FILE
     held = plan_files.read_json(path)
-    attempt = int(held["attempt"]) if held is not None else 0
-    seen = int(held["retries"]) if held is not None else 0
-    _, done = _previous(work_dir)
-    if (run.again or run.retries > seen) and done is not None:
+    attempt, seen = (int(held["attempt"]), int(held["retries"])) if held is not None else (0, 0)
+    retried = run.retries > seen
+    _, done = plan_runs.previous(work_dir)
+    if (run.again or retried) and done is not None:
         attempt += 1
-    if held is None or attempt != held["attempt"] or run.retries > seen:
+    if held is None or attempt != held["attempt"] or retried:
         plan_files.write_json(path, {"attempt": attempt, "retries": max(seen, run.retries)})
     return attempt
 
@@ -778,9 +741,10 @@ def plan_argv(run: StageRun, work_dir: Path, answer: Optional[str], cwd: Path) -
     """
     routes = stored_gate_routes(work_dir) if answer else None
     if routes is not None:
-        start, answer = _from_of(routes[answer] if answer in routes else None), None
+        start, answer = plan_runs.from_of(routes[answer] if answer in routes else None), None
     else:
         start = plan_start(work_dir)
+        start = start if start is not None else run.start
     attempt = plan_attempt(run, work_dir)
     argv = ndf_command(
         PLAN, "next", str(plan_path(run, work_dir, cwd)), *(["--from", start] if start else []), "--state-dir", str(work_dir)
@@ -803,12 +767,12 @@ def _no_route(run: StageRun, work_dir: Path, answer: Optional[str]) -> Optional[
     routes = stored_gate_routes(work_dir) if answer else None
     if routes is None:
         return None
-    done = _previous(work_dir)[1] if answer == APPROVED else None
+    done = plan_runs.previous(work_dir)[1] if answer == APPROVED else None
     missing = definition.waited_missing(done)
     if missing:
         detail = definition.answered_gap_detail(missing, definition.gate_summary_of(done))
         return StageResult(result.stopped(PLAN, "bad_report", detail), {})
-    if _from_of(routes[answer] if answer in routes else None) is not None:
+    if plan_runs.from_of(routes[answer] if answer in routes else None) is not None:
         return None
     if answer == APPROVED:
         assert done is not None
@@ -827,7 +791,7 @@ def same_run(before: StageResult, after: StageResult) -> bool:
 
 
 def _from_process(run: StageRun, done: subprocess.CompletedProcess[str]) -> StageResult:
-    report = read_report(done.stdout)
+    report = plan_runs.read_report(done.stdout)
     if report is None:
         return bad_report(run, f"終了コード {done.returncode}")
     return finished(run, report)
@@ -843,7 +807,16 @@ def _github_kind(exc: github.GitHubError) -> str:
 
 
 # プランを組むときに上がりうる例外（`plan_failure` が停止理由へ分ける型。`_call_plan` と `progress.run._start` が捕まえる）
-PLAN_FAILURES = (route.RouteError, GitError, FactUnknown, github.GitHubError, OSError, worker_paths.EntryError, internal.InternalError)
+PLAN_FAILURES = (
+    route.RouteError,
+    GitError,
+    FactUnknown,
+    github.GitHubError,
+    OSError,
+    worker_paths.EntryError,
+    internal.InternalError,
+    plan_runs.UnitsStopped,
+)
 
 
 def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
@@ -853,6 +826,10 @@ def plan_failure(name: str, exc: Exception) -> Optional[dict[str, Any]]:
     し、名前と出所を `items` に並べる（決定 4）。ほかの分類は工程から呼ぶ経路（`_call_plan`）と起動の前の確かめ
     （`progress.run._start`）で同じである。
     """
+    if isinstance(exc, plan_runs.UnitsStopped):
+        # 工程のステートマシンは `cause` だけを残すので、理由は `detail` の文に持たせる（#4369）
+        detail = f"プラン {name} を単位ごとに流せない: {exc.detail}"
+        return result.stopped(PLAN, exc.kind, detail, retry_after=exc.retry_after, items=exc.items)
     if isinstance(exc, (TemplateValuesMissing, KindInputsMissing)):
         detail = f"プラン {name} の差し込み {', '.join(exc.missing)} を決められない"
         return result.stopped(PLAN, "precondition", detail, items=exc.items)
@@ -896,7 +873,7 @@ def _checked_dir(work_dir: Path) -> Path:
 
 def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], runner: Runner) -> StageResult:
     try:
-        if template(run.name) is None:
+        if _template_of(run) is None:
             return StageResult(result.stopped(PLAN, "precondition", f"プランのテンプレート {run.name} が無い"), {})
         work_dir = _checked_dir(work_dir)  # 以後の読み書きと `--state-dir` は、プランと同じ確かめたディレクトリで行う
         ended = _no_route(run, work_dir, answer)
@@ -908,7 +885,7 @@ def _call_plan(run: StageRun, cwd: Path, work_dir: Path, answer: Optional[str], 
         if failed is None:
             raise
         return StageResult(failed, {})
-    got = _from_process(run, runner(argv, cwd, run.env({})))
+    got = _from_process(run, runner(argv, cwd, run.env(run.env_extra)))
     if merge_pending.refused(got.report, run.inputs):
         (work_dir / VALUES_FILE).unlink(missing_ok=True)  # 次の打ち直しが方式をもう一度問う
     return got
@@ -966,6 +943,11 @@ def invoke(
     `runner` は plan・script の子プロセスを、`call_claude` は skill の `claude -p` を打つ。skill と script は、入力に
     作業場所（`worktree`）があればそこで打つ（プランは埋めたプランの作業場所で受ける）。
     """
+    if run.kind == PLAN and run.per_unit:
+        units = _units_stage(run, cwd, work_dir, runner)
+        if units is not None:
+            return units
+        run = run.plain()
     if run.kind == PLAN:
         return _call_plan(run, cwd, work_dir, answer, runner)
     if run.kind not in (SCRIPT, SKILL):
@@ -976,6 +958,21 @@ def invoke(
     if run.kind == SCRIPT:
         return _call_script(run, location, runner)
     return _call_skill(run, location, call_claude)
+
+
+def _units_stage(run: StageRun, cwd: Path, work_dir: Path, runner: Runner) -> Optional[StageResult]:
+    """単位ごとに流す工程を `units_invoke.run_stage` で流した結果。これまでの経路なら None（#4369）。
+
+    単位のプランは単位の作業場所で組んで流し（`_call_plan`）、コマンドは `runner` で打つ。組めない例外は `plan_failure` が分ける。
+    """
+    ports = units_invoke.Ports(lambda r, wd: _call_plan(r, work_location(r, cwd), wd, None, runner), runner)
+    try:
+        return units_invoke.run_stage(run, work_dir, cwd, ports)
+    except PLAN_FAILURES as exc:
+        failed = plan_failure(run.name, exc)
+        if failed is None:
+            raise
+        return StageResult(failed, {})
 
 
 def work_location(run: StageRun, cwd: Path) -> Path:

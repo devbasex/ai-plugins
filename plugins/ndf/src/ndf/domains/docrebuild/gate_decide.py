@@ -64,8 +64,10 @@ def _is_quote(q: Any) -> bool:
     return isinstance(q, Mapping) and isinstance(q.get("quote"), str) and bool(q["quote"].strip()) and isinstance(q.get("why"), str)
 
 
-def record_gap(rec: Any) -> Optional[str]:
-    """worker の対象 1 件の記録の欠けの理由。欠けが無ければ None（`not_run` は欠けとしない。呼び手が止める）。"""
+def record_gap(rec: Any, *, one_fail_ends: bool = False) -> Optional[str]:
+    """worker の対象 1 件の記録の欠けの理由。欠けが無ければ None（`not_run` は欠けとしない。呼び手が止める）。
+
+    `one_fail_ends` が真（直してよいファイルに入らない文書）なら、quotes つきの 1 回の不合格で終えてよい（直せないので 2 回目を立てない。#4599）。"""
     if not isinstance(rec, Mapping) or rec.get("verdict") not in (PASS, FAIL, NOT_RUN):
         return f"verdict が {PASS}・{FAIL}・{NOT_RUN} のどれでもない"
     if rec["verdict"] == NOT_RUN:
@@ -75,6 +77,8 @@ def record_gap(rec: Any) -> Optional[str]:
         return "checks が、verdict（pass・fail）と hash を持つ 1 つか 2 つの確かめの並びでない"
     if checks[-1]["verdict"] != rec["verdict"] or (len(checks) == 2 and checks[0]["verdict"] != FAIL):
         return "checks の並びと verdict が合わない"
+    if rec["verdict"] == FAIL and one_fail_ends and len(checks) == 1:
+        return None if quotes_of(checks[-1]) else "直さない文書の fail は、確かめに quotes（quote・why）を書く"
     if rec["verdict"] == FAIL and (len(checks) != 2 or not quotes_of(checks[-1])):
         return "fail は 2 回の確かめで終え、2 回目に quotes（quote・why）を書く"
     return None
@@ -157,11 +161,15 @@ def row_verdict(round_no: int, passed: bool) -> str:
 
 
 def rows_of_record(name: str, rec: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """worker の記録 1 件を、回ごとの読ませた行にする。2 回目の不合格は remained（引用付き）。"""
+    """worker の記録 1 件を、回ごとの読ませた行にする。最後の確かめの不合格は remained（引用付き）。
+
+    最後の不合格は、2 回目か、直さない文書の 1 回目（`record_gap` が確かめた後）である。"""
     out: list[dict[str, Any]] = []
-    for i, check in enumerate(rec["checks"], 1):
+    checks = rec["checks"]
+    for i, check in enumerate(checks, 1):
         row: dict[str, Any] = {"name": name, "reader": reading.reader_of(name), "round": i, "hash": check["hash"]}
-        row["verdict"] = row_verdict(i, check["verdict"] == PASS)
+        passed = check["verdict"] == PASS
+        row["verdict"] = row_verdict(i, passed) if i < len(checks) or passed else reading.REMAINED
         if row["verdict"] == reading.REMAINED:
             row["quotes"] = quotes_of(check)
         out.append(row)

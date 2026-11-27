@@ -114,6 +114,14 @@ def severity_errors(items: object) -> list[str]:
     return [f"items/{i}/severity が重さの表（{facts.location(SEVERITIES)}）に無い" for i, word in words if word not in known]
 
 
+def pr_numbers(obj: Any) -> list[int]:
+    """結果 JSON の items の PR の番号（`{"kind": "pr", "number": <整数>}`）を並びの順に。items が無い・形が違えば空。
+
+    プランのステップの結果（`core.plan.steps`）と工程の出力の補い（`progress.stages.step_outputs`）が同じ規則で読む。"""
+    items = obj.get("items") if isinstance(obj, dict) and isinstance(obj.get("items"), list) else []
+    return [i["number"] for i in items if isinstance(i, dict) and i.get("kind") == "pr" and type(i.get("number")) is int]
+
+
 def item_fields() -> frozenset[str]:
     """結果のコントラクトが items の要素に形を決めた欄の名前。"""
     return frozenset(contracts.load_json(SCHEMA)["$defs"]["item"]["properties"])
