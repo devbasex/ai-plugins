@@ -139,6 +139,24 @@ def deliveries_at(repo_git: Git, after: str) -> DeliveriesAt:
     )
     if commit is None:
         return DeliveriesAt(MISSING_REF, reason=f"push の after {after} が手元に無い。本番ブランチを取得してから打ち直す")
+    return _classify(raw, after)
+
+
+def declared_among(repo_git: Git, commit: str, later: Sequence[str]) -> Optional[bool]:
+    """コミット `commit` と、その後に設定のファイルを変えたコミット `later` のどれかの時点に、届け先の設定があるか
+    （`git cat-file --batch` の起動 1 回。壊れた設定も、あるとみなす）。`commit` が手元に無ければ None。
+
+    設定のファイルを変えても届け先の設定が無いままなら、どの時点も設定が無いので、push を読まずに済む。"""
+    names = (commit, *later)
+    stdin = "".join([f"{commit}^{{commit}}\n", *(f"{c}:{branch_strategy.PROJECT}\n" for c in names)]).encode()
+    head, *raws = _batch_entries(repo_git.run_bytes("cat-file", "--batch", stdin=stdin), len(names) + 1)
+    if head is None:
+        return None
+    return any(_classify(raw, at).kind != ABSENT for raw, at in zip(raws, names))
+
+
+def _classify(raw: Optional[bytes], after: str) -> DeliveriesAt:
+    """`after` の時点の `.ndf/project.json` の中身 `raw`（無ければ None）の分類。"""
     if raw is None:
         return DeliveriesAt(ABSENT)
     try:

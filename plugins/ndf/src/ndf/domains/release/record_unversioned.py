@@ -5,8 +5,9 @@
 
 - 確かめ 1〜7 は、記録の PR・リポジトリ・push の記録だけで決まるので、CD を照会する確かめ 8 より先に行う。1〜6 のどれかに
   当たれば、どの PR にも書かずに `RecordError` で止まる
-- 反映したコミット・push・push の時点の届け先の設定・差分のパスは、届け先ごとに並べて打った呼び出しで 1 回だけ作り、
-  共通の git ディレクトリの下の保存先（`ndf-release-record/<本番の PR>.json`）で共有する（`shared_prefix`）
+- push を読むと決めたときの push・push の時点の届け先の設定・差分のパスは、届け先ごとに並べて打った呼び出しで 1 回だけ
+  作り、共通の git ディレクトリの下の保存先（`ndf-release-record/<本番の PR>.json`）で共有する（`shared_prefix`）。
+  push を読むかの判定は git の起動 2 回で済むので共有しない
 - 確かめ 8 と書き込みは届け先ごとにスレッドで並べ、互いを待たない。並行した書き込みの重なりは、書いた後の読み直しで
   自分のコメントを消して戻す（GitHub のコメントに条件つきの書き込みが無いため）
 """
@@ -146,12 +147,13 @@ def _diff_paths(repo_git: Git, base: str, head: str) -> frozenset[str]:
     return frozenset(p for p in repo_git.diff_between(base, head, "--name-only", "-z", "--no-renames").split("\0") if p)
 
 
-def pull_base(hub: GitHub, repo_git: Git, number: int, commit: str) -> str:
+def pull_base(hub: GitHub, repo_git: Git, number: int, commit: str) -> tuple[str, int]:
     """本番の PR `number` の差分の起点。反映したコミット `commit` から第一親を PR のコミットの数までたどり、同じ PR に紐づく
     最後のコミットの第一親（squash とマージのコミットでは `commit` の第一親、rebase では PR のコミットの範囲の下）。
     マージの方式は見分けない。PR のコミットの数の照会が 1 回と、紐づく PR の照会がたどったコミットを `github.graphql-batch`
     件ずつまとめた 1 回ずつ。バッチごとに判定し、別の PR のコミットに当たって起点が決まれば、後のバッチは照会しない
-    （squash とマージのコミットでは 1 回。コミットが 1 つなら 0 回）。紐づく PR を照会できなければ推測せずに `RecordError`。"""
+    （squash とマージのコミットでは 1 回。コミットが 1 つなら 0 回）。紐づく PR を照会できなければ推測せずに `RecordError`。
+    返すのは起点と PR のコミットの数（浅い clone で起点が手元に無いときに、取得する深さを示すため）。"""
     count = hub.pull_commit_count(number)
     chain = repo_git.run("rev-list", "--first-parent", f"--max-count={count}", commit).split() if count > 1 else [commit]
     size = int(limits.value("github.graphql-batch", "count"))
@@ -164,9 +166,9 @@ def pull_base(hub: GitHub, repo_git: Git, number: int, commit: str) -> str:
             if got is None:
                 raise RecordError(f"コミット {sha} が GitHub に無く、#{number} の差分の起点を決められない。時間を置いて打ち直す")
             if number not in got:
-                return f"{last}^1"
+                return f"{last}^1", count
             last = sha
-    return f"{last}^1"
+    return f"{last}^1", count
 
 
 def _linked_pulls(hub: GitHub, number: int, batch: Sequence[str]) -> Mapping[str, Optional[list[int]]]:
@@ -203,21 +205,24 @@ def _declared_at(repo_git: Git, commit: str, fetch: str) -> bool:
     return at.kind != delivery_confirm.ABSENT
 
 
-def landed_commits(repo_git: Git, production: str, commit: str, tip: str) -> frozenset[str]:
-    """反映したコミットから手元の追跡参照 `tip` が指す HEAD までの、本番ブランチの第一親のコミット（git の起動 1 回）。
+def _deepen_hint(production: str, tip: str, depth: int) -> str:
+    """浅い clone で親のコミットが手元に無いときに、本番ブランチの履歴を `depth` だけ深く取得するコマンド。"""
+    return _fetch_hint(production, tip).replace("git fetch ", f"git fetch --deepen={int(depth)} ", 1)
 
-    GitHub でマージした直後は参照が古く、反映したコミットが集合に無いか、手元に無くて git が失敗する。どちらも時間を
-    置いても直らないので、止まる文で本番ブランチの取得を示して `RecordError`。"""
-    fetch = _fetch_hint(production, tip)
+
+def landed_commits(repo_git: Git, production: str, commit: str, tip: str) -> frozenset[str]:
+    """反映したコミットと、そこから手元の追跡参照 `tip` が指す HEAD までの、本番ブランチの第一親のコミット（git の起動 1 回）。
+
+    反映したコミットの親は解決しない（`<反映したコミット>..<tip>` に反映したコミットを足す）。浅い clone の境界に反映した
+    コミットがあっても、親の無いまま集合を作れる。GitHub でマージした直後は参照が古く、git が失敗するか、新しい更新の
+    `after` が集合の外になる。前者はここで、後者は `find_push` で、本番ブランチの取得を示して `RecordError`。"""
     try:
-        landed = frozenset(repo_git.run("rev-list", "--first-parent", f"{commit}^1..{tip}").split())
+        later = repo_git.run("rev-list", "--first-parent", f"{commit}..{tip}").split()
     except GitError as exc:
         raise RecordError(
-            f"反映したコミット {commit} か {tip} が手元に無い（{exc}）。{fetch} で本番ブランチを取得してから打ち直す"
+            f"反映したコミット {commit} か {tip} が手元に無い（{exc}）。{_fetch_hint(production, tip)} で本番ブランチを取得してから打ち直す"
         ) from exc
-    if commit not in landed:
-        raise RecordError(f"手元の {tip} に反映したコミット {commit} がまだ無い。{fetch} で本番ブランチを取得してから打ち直す")
-    return landed
+    return frozenset((commit, *later))
 
 
 def find_push(hub: GitHub, production: str, commit: str, tip: str, landed: frozenset[str]) -> record_decide.Push:
@@ -233,40 +238,55 @@ def find_push(hub: GitHub, production: str, commit: str, tip: str, landed: froze
     return push
 
 
-def _push_needed(repo_git: Git, commit: str, tip: str, fetch: str) -> bool:
-    """同じ値の記録に push が無いとき、push を決めてその時点の設定を読むか（git の起動は最大 2 回）。
+def _push_needed(repo_git: Git, production: str, commit: str, tip: str) -> bool:
+    """同じ値の記録に push が無いとき、push を決めてその時点の設定を読むか（git の起動 2 回。親のコミットは解決しない）。
 
-    反映したコミットの時点に設定があるか、反映したコミットの後に第一親で設定のファイルを変えたコミットがあれば読む。
+    反映したコミットの時点か、その後に第一親で設定のファイルを変えたコミットのどれかの時点に届け先の設定があれば読む。
     後者は、同じ push の後の PR が設定を足した場合に、CD の結果を確かめずに `--target` で書かせないためである。
-    反映したコミットを含む追跡参照には、同じ push で入った `after` も含まれる（push は参照をまとめて動かす）ので、
-    追跡参照の HEAD までに設定のファイルを変えたコミットが無ければ、push の `after` の設定は反映したコミットの時点と同じである。"""
-    if _declared_at(repo_git, commit, fetch):
-        return True
-    return bool(repo_git.run("rev-list", "--first-parent", f"{commit}..{tip}", "--", branch_strategy.PROJECT).split())
+    push は参照をまとめて動かすので、反映したコミットを含む追跡参照には、同じ push の `after` も含まれる。`after` の
+    設定は、反映したコミットか、`after` までに設定のファイルを変えた最後のコミットの設定と同じなので、どの時点にも
+    届け先の設定が無ければ `after` にも無い。設定のファイルを変えても届け先の設定が無いままなら、push を読まない。"""
+    fetch = _fetch_hint(production, tip)
+    try:
+        later = repo_git.run("rev-list", "--first-parent", f"{commit}..{tip}", "--", branch_strategy.PROJECT).split()
+    except GitError as exc:
+        raise RecordError(
+            f"反映したコミット {commit} か {tip} が手元に無い（{exc}）。{fetch} で本番ブランチを取得してから打ち直す"
+        ) from exc
+    declared = delivery_confirm.declared_among(repo_git, commit, later)
+    if declared is None:
+        raise RecordError(f"反映したコミット {commit} が手元に無い。{fetch} で本番ブランチを取得してから打ち直す")
+    return declared
 
 
 def _prefix(hub: GitHub, hands: Hands, production: str, pull: Pull, tip: str, known: Optional[record_decide.Push]) -> Prefix:
-    """届け先によらない前処理（push を読むかの判定・push・push の時点の設定・差分）。`pull` は本番へ入った PR
-    （`merge_sha` が反映したコミット）。push を読まなければ、push も設定も持たない形（対象は `--target`）。止まるときは `RecordError`。"""
+    """push を読むと決めた後の前処理（push・push の時点の設定・差分）。`pull` は本番へ入った PR（`merge_sha` が反映した
+    コミット）、`known` は同じ値の記録の push（無ければここで決める）。止まるときは `RecordError`。"""
     commit = pull.merge_sha
-    if known is None:
-        fetch = _fetch_hint(production, tip)
-        landed = landed_commits(hands.repo_git, production, commit, tip)
-        if not _push_needed(hands.repo_git, commit, tip, fetch):
-            return Prefix(commit, None, None, frozenset(), frozenset())
-        known = find_push(hub, production, commit, tip, landed)
-    push = known
+    push = known if known is not None else find_push(hub, production, commit, tip, landed_commits(hands.repo_git, production, commit, tip))
     at = delivery_confirm.deliveries_at(hands.repo_git, push.after)
     if at.kind in (delivery_confirm.MISSING_REF, delivery_confirm.BROKEN):
         raise RecordError(f"{at.reason}。CD の結果が失敗のときと同じく、課題は人が確かめてから閉じる" if at.kind == "broken" else at.reason)
     if at.kind == delivery_confirm.ABSENT:
         return Prefix(commit, push, at, frozenset(), frozenset())
-    base = pull_base(hub, hands.repo_git, pull.number, commit)
-    return Prefix(commit, push, at, *scope_paths(hands.repo_git, base, commit, push))
+    base, count = pull_base(hub, hands.repo_git, pull.number, commit)
+    try:
+        return Prefix(commit, push, at, *scope_paths(hands.repo_git, base, commit, push))
+    except GitError as exc:
+        # 浅い clone では、本番の PR の差分の起点（反映したコミットから最大で PR のコミットの数だけ下の親）が手元に無い
+        raise RecordError(
+            f"#{pull.number} の差分を手元の git で読めない（{exc}）。浅い clone なら {_deepen_hint(production, tip, count + 1)} で"
+            f"履歴を深く取得し、そうでなければ {_fetch_hint(production, tip)} で本番ブランチを取得してから打ち直す"
+        ) from exc
 
 
-def _share_path(repo_git: Git, number: int) -> Path:
-    return repo_git.common_dir() / _SHARE_DIR / f"{int(number)}.json"
+def share_dir(repo_git: Git) -> Path:
+    """共有の置き場のディレクトリ（共通の git ディレクトリの下。git の起動 1 回。1 回の `record` で 1 回だけ解決して使い回す）。"""
+    return repo_git.common_dir() / _SHARE_DIR
+
+
+def _share_path(share: Path, number: int) -> Path:
+    return share / f"{int(number)}.json"
 
 
 def _read_share(path: Path, commit: str) -> Optional[Prefix]:
@@ -278,10 +298,10 @@ def _read_share(path: Path, commit: str) -> Optional[Prefix]:
     return got if got.commit == commit else None
 
 
-def shared_prefix(repo_git: Git, number: int, commit: str, compute: Callable[[], Prefix]) -> Prefix:
-    """届け先ごとに並べて打った呼び出しで共有する前処理。保存先のロックを取り、反映したコミットが同じものがあれば読み、
-    無いか違えば `compute` で作って書く。"""
-    path = _share_path(repo_git, number)
+def shared_prefix(share: Path, number: int, commit: str, compute: Callable[[], Prefix]) -> Prefix:
+    """届け先ごとに並べて打った呼び出しで共有する前処理（`share` は `share_dir`）。保存先のロックを取り、反映したコミットが
+    同じものがあれば読み、無いか違えば `compute` で作って書く。"""
+    path = _share_path(share, number)
     path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(path) + ".lock", timeout=limits.seconds(SHARE_LOCK)):
         got = _read_share(path, commit)
@@ -291,9 +311,9 @@ def shared_prefix(repo_git: Git, number: int, commit: str, compute: Callable[[],
     return got
 
 
-def drop_share(repo_git: Git, number: int) -> None:
-    """本番の PR の保存先を消す（`complete` が真になった呼び出し）。"""
-    path = _share_path(repo_git, number)
+def drop_share(share: Path, number: int) -> None:
+    """本番の PR の保存先を消す（push を読み、`complete` が真になった呼び出し）。"""
+    path = _share_path(share, number)
     with FileLock(str(path) + ".lock", timeout=limits.seconds(SHARE_LOCK)):
         path.unlink(missing_ok=True)
 
@@ -308,9 +328,9 @@ def _drop_stale(path: Path, older_than: float, now: Callable[[], float]) -> None
         return
 
 
-def sweep_shares(repo_git: Git, older_than: float, now: Callable[[], float] = time.time) -> None:
+def sweep_shares(share: Path, older_than: float, now: Callable[[], float] = time.time) -> None:
     """`complete` にならずに残った保存先のうち、ロックされておらず `older_than` 秒より長く経ったものを消す。"""
-    for path in (repo_git.common_dir() / _SHARE_DIR).glob("*.json"):
+    for path in share.glob("*.json"):
         _drop_stale(path, older_than, now)
 
 
@@ -372,18 +392,33 @@ def _check_records(state: record.Candidates, targets: tuple[str, ...], version: 
         raise RecordError(f"コミット {commit} の記録が別の値 {value} で既にある。その値で打ち直す")
 
 
-def _shape(hub: GitHub, hands: Hands, number: int, production: str, release: Mapping[str, Any], args: Unversioned) -> tuple[_Shape, Prefix]:
+class _Decided(NamedTuple):
+    """確かめ 1〜6 の結果。`share` は push を読んだときの共有の置き場（push を読まなければ None）。"""
+
+    shape: _Shape
+    prefix: Prefix
+    share: Optional[Path]
+
+
+def _shape(hub: GitHub, hands: Hands, number: int, production: str, release: Mapping[str, Any], args: Unversioned) -> _Decided:
     """確かめ 1〜6。通らなければ `RecordError`（何も書かない）。"""
     pull, commit = _landed_value(hub, number, production, args.version, args.production_sha)
     included = _record_pulls(hub, pull, production, names_decide.formats_of(release))
     state = _trusted_state(hub, included[0], args.version, commit)
-    # 対象の出典は worktree でなく本番へ反映した時点で決める（`_prefix`）。判定も、届け先ごとに並べて打った呼び出しで共有する
+    # 対象の出典は worktree でなく本番へ反映した時点で決める。push を読むかの判定は git の起動 2 回で済むので共有せず、
+    # 照会の多い push を読む前処理だけを、届け先ごとに並べて打った呼び出しで共有する
     known = _known_push(state, args.version)
-    prefix = shared_prefix(hands.repo_git, number, commit, lambda: _prefix(hub, hands, production, pull, args.tip, known))
+    share: Optional[Path] = None
+    if known is None and not _push_needed(hands.repo_git, production, commit, args.tip):
+        prefix = Prefix(commit, None, None, frozenset(), frozenset())
+    else:
+        share = share_dir(hands.repo_git)
+        sweep_shares(share, _share_age(release))
+        prefix = shared_prefix(share, number, commit, lambda: _prefix(hub, hands, production, pull, args.tip, known))
     targets = _record_targets(prefix, args)
     _check_names(targets, args)
     _check_records(state, targets, args.version, commit, number)
-    return _Shape(pull, commit, included, included[0], state, targets), prefix
+    return _Decided(_Shape(pull, commit, included, included[0], state, targets), prefix, share)
 
 
 def _has(found: Sequence[record_decide.Record], made: record_decide.Record) -> bool:
@@ -531,8 +566,7 @@ def _pool(size: int) -> Iterator[ThreadPoolExecutor]:
 
 def write_unversioned(hub: GitHub, hands: Hands, number: int, production: str, release: Mapping[str, Any], args: Unversioned) -> Outcome:
     """`record --version`。確かめ 1〜8 と書く順の手順 1〜4（モジュールの説明）。`release` は worktree の設定の `release`。"""
-    sweep_shares(hands.repo_git, _share_age(release))
-    shape, prefix = _shape(hub, hands, number, production, release, args)
+    shape, prefix, share = _shape(hub, hands, number, production, release, args)
     present = _holding_pulls(hub, shape, args.version, args.environments)
     kept = tuple(e for e in args.environments if present[e] >= set(shape.included))
     rest = [e for e in args.environments if e not in kept]
@@ -549,8 +583,8 @@ def write_unversioned(hub: GitHub, hands: Hands, number: int, production: str, r
     reread = [r for _e, _g, wrote in results for r in wrote.reread]
     covered = [*shape.state.valid, *reread, *(rep._replace(environments=(e,)) for e in (*kept, *recorded))]
     complete, missing = record_decide.complete_of(covered, rep, shape.targets)
-    if complete:
-        drop_share(hands.repo_git, number)
+    if complete and share is not None:
+        drop_share(share, number)
     return Outcome(
         rep,
         recorded,

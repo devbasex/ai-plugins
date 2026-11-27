@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from ndf.adapters.git import GitError
 from ndf.adapters.github import Authored, GitHubError
 from ndf.domains.release import cli as release_cli
 from ndf.domains.release import record, record_decide, record_unversioned
@@ -89,9 +90,12 @@ class Repo(FakeGit):
 
     def diff_between(self, a: str, b: str, *options: str) -> str:
         self.calls.append(("diff", a, b, *options))
+        if (a, b) not in self.diffs:  # 浅い clone の外の親など、手元に無いコミット
+            raise GitError(f"fatal: bad revision '{a}'")
         return "".join(f"{p}\0" for p in self.diffs[(a, b)])
 
     def common_dir(self) -> Path:
+        self.calls.append(("rev-parse", "--git-common-dir"))
         return self.common
 
 
@@ -137,6 +141,8 @@ def test_writes_each_environment_to_every_included_pull_with_the_push_and_target
         assert {tuple(r.confirmation.items()) for r in rows} == {((WEB, "cd"),), ((WORKER, "cd"),)}
     # CD は push の after で照会し、共通の前処理の保存先は complete で消える
     assert {q[2] for q in hub.run_queries} == {AFTER} and not (repo.common / "ndf-release-record" / f"{PROD}.json").exists()
+    # 共有の置き場は掃除・共有・削除で使い回し、共通の git ディレクトリを 1 回だけ解決する
+    assert [c[0] for c in repo.calls].count("rev-parse") == 1
 
 
 def test_writes_to_the_production_pull_when_it_has_no_work_pulls(tmp_path: Path) -> None:
@@ -289,8 +295,21 @@ def test_a_repository_without_deliveries_takes_targets_and_attests(tmp_path: Pat
     got = _write(hub, repo, _args(WEB, targets=(WORKER, WEB)), _release(None))
     assert got.recorded == (WEB,) and got.record.targets == (WEB, WORKER) and got.missing == (WORKER,)
     assert [r.confirmation for r in _written(hub, 11)] == [{WEB: "attested"}] and [r.push for r in _written(hub, 11)] == [None]
-    # 反映したコミットの時点の設定と、その後に設定のファイルを変えたコミットを読むだけで、push も差分も読まない
-    assert [c[0] for c in repo.calls] == ["rev-list", "cat-file", "rev-list"]
+    # 設定のファイルを変えたコミットの探索と、反映したコミットの時点の設定の読み取りだけで、push も差分も共有の置き場も使わない
+    assert [c[0] for c in repo.calls] == ["rev-list", "cat-file"]
+    assert not [r for r in hub.requests if r[1].endswith("/activity")]
+    assert not (repo.common / "ndf-release-record").exists()
+
+
+def test_a_later_change_without_deliveries_does_not_read_the_push(tmp_path: Path) -> None:
+    """反映したコミットの後に設定のファイルを変えても、どの時点にも届け先の設定が無ければ、push を読まずに --target で受ける。"""
+    hub = _hub()
+    repo = Repo(tmp_path, deliveries=None)
+    later = "e5" * 20
+    repo.objects[f"{later}:.ndf/project.json"] = repo.objects[f"{COMMIT}:.ndf/project.json"]
+    repo.project_changes = [later]
+    got = _write(hub, repo, _args(WEB, targets=(WEB,)), _release(None))
+    assert got.recorded == (WEB,) and [c[0] for c in repo.calls] == ["rev-list", "cat-file"]
     assert not [r for r in hub.requests if r[1].endswith("/activity")]
 
 
@@ -306,14 +325,28 @@ def test_a_setting_added_later_in_the_same_push_is_read_from_the_push(tmp_path: 
     assert set(got.failed) == {WEB} and got.recorded == ()
 
 
-def test_parallel_calls_share_the_decision_to_read_the_push(tmp_path: Path) -> None:
-    """届け先ごとに並べて打った呼び出しは、push を読むかの判定も共有の保存先から読み、同じコミットを読み直さない。"""
+def test_a_shallow_clone_without_the_parent_records_without_the_push(tmp_path: Path) -> None:
+    """push を読むかの判定は反映したコミットの親を解決しないので、浅い clone の境界に反映したコミットがあっても記録できる。"""
     hub = _hub()
     repo = Repo(tmp_path, deliveries=None)
-    _write(hub, repo, _args(WEB, targets=(WEB, WORKER)), _release(None))
-    calls = len(repo.calls)
-    _write(hub, repo, _args(WORKER, targets=(WEB, WORKER)), _release(None))
-    assert len(repo.calls) == calls
+    original = repo.run
+
+    def shallow(*args: str) -> str:
+        if any(a.endswith("^1") or "^1.." in a for a in args):
+            raise GitError("fatal: bad revision")
+        return original(*args)
+
+    repo.run = shallow  # type: ignore[method-assign]
+    assert _write(hub, repo, _args(WEB, targets=(WEB,)), _release(None)).recorded == (WEB,)
+
+
+def test_a_missing_parent_for_the_pull_diff_stops_with_a_deeper_fetch(tmp_path: Path) -> None:
+    """本番の PR の差分の起点が浅い clone の外にあれば、履歴を深く取得するコマンドを示して止まる。"""
+    hub = _push_activity(_hub(cd_runs=[[SUCCESS]]))
+    repo = Repo(tmp_path, diffs={(BEFORE, AFTER): ["web/a.ts"]})
+    with pytest.raises(record.RecordError, match=r"git fetch --deepen=2 origin \+refs/heads/main:refs/remotes/origin/main"):
+        _write(hub, repo, _args(WEB))
+    assert hub.comments_of == {}
 
 
 def test_the_first_record_after_removing_the_setting_uses_the_setting_of_the_commit(tmp_path: Path) -> None:
@@ -484,15 +517,16 @@ def test_shared_prefix_is_computed_once_and_redone_for_another_commit(tmp_path: 
         calls.append(commit)
         return record_unversioned.Prefix(commit, record_decide.Push(BEFORE, AFTER), None, frozenset({"a"}), frozenset())
 
-    first = record_unversioned.shared_prefix(repo, PROD, COMMIT, compute)
-    assert record_unversioned.shared_prefix(repo, PROD, COMMIT, compute) == first and calls == [COMMIT]
-    record_unversioned.shared_prefix(repo, PROD, "f" * 40, lambda: compute("f" * 40))
+    share = record_unversioned.share_dir(repo)
+    first = record_unversioned.shared_prefix(share, PROD, COMMIT, compute)
+    assert record_unversioned.shared_prefix(share, PROD, COMMIT, compute) == first and calls == [COMMIT]
+    record_unversioned.shared_prefix(share, PROD, "f" * 40, lambda: compute("f" * 40))
     assert calls == [COMMIT, "f" * 40]
     path = repo.common / "ndf-release-record" / f"{PROD}.json"
     path.write_text("{", encoding="utf-8")
-    record_unversioned.shared_prefix(repo, PROD, COMMIT, compute)
+    record_unversioned.shared_prefix(share, PROD, COMMIT, compute)
     assert calls[-1] == COMMIT and len(calls) == 3
-    record_unversioned.sweep_shares(repo, 60, now=lambda: path.stat().st_mtime + 61)
+    record_unversioned.sweep_shares(share, 60, now=lambda: path.stat().st_mtime + 61)
     assert not path.exists()
 
 
