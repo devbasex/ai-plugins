@@ -504,8 +504,9 @@ def _merged(
 class _Rejudge:
     """`GitHub.merge` の直前の確かめで、読み直したプロジェクトのファイルから本番チャネルを判定し直す関数（`MergeExpect.rejudge`）。
 
-    判定し直して承認が要り、今の承認の対象への証跡でマージへ進むときは、その判定と証跡の担い手を `verdict`・`approved_by` に
-    採り、成功の結果へ引き継ぐ（だれの承認でどの経路のマージをしたかを結果に残す）。それ以外は初めの判定と担い手のまま。
+    判定し直してマージへ進むときは、判定し直した値を `verdict` に採り、成功の結果へ引き継ぐ（だれの承認でどの経路のマージを
+    したかを結果に残す）。承認が要れば今の承認の対象への証跡の担い手を `approved_by` に採り、要らなければ空にする。
+    判定し直さなかったとき（設定の oid が同じ）は初めの判定と担い手のまま。
     """
 
     def __init__(self, hub: GitHub, pull: Pull, target: merge_approval.MergeTarget, verdict: Verdict, approved_by: Optional[str]) -> None:
@@ -515,6 +516,8 @@ class _Rejudge:
     def __call__(self, text: Optional[str]) -> Optional[MergeOutcome]:
         again = _verdict_of(self._hub, self._pull.base_ref, text, self._hub.repo)
         if not production_merge.needs_approval(again):
+            # 承認の要らない経路でマージするので、初めの判定で読んだ担い手を結果に残さない
+            self.verdict, self.approved_by = again, None
             return None
         try:
             row = _approval(self._hub, self._target)

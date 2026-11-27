@@ -42,14 +42,26 @@ def _run(capsys, last_result, *args: str) -> tuple[int, dict]:
     return code, last_result(capsys.readouterr().out)
 
 
-@pytest.mark.parametrize("after", [MANUAL, merge_hub.project_text(merge_hub.strategy(base="main", production="release"))])
-def test_rejudge_merges_when_the_changed_config_needs_no_approval(monkeypatch, capsys, last_result, after):
-    """設定が変わっても、判定し直して承認が要らなければ証跡を読まずにマージする。"""
+@pytest.mark.parametrize(
+    ("after", "verdict"),
+    [(MANUAL, "manual"), (merge_hub.project_text(merge_hub.strategy(base="main", production="release")), "not_production")],
+)
+def test_rejudge_merges_when_the_changed_config_needs_no_approval(monkeypatch, capsys, last_result, after, verdict):
+    """設定が変わっても、判定し直して承認が要らなければ証跡を読まずにマージし、結果には判定し直した値を残す。"""
     hub = _hub(monkeypatch, MANUAL, after)
     code, found = _run(capsys, last_result, "--production-gate", "defer")
     assert code == 0 and hub.merged == [7]
-    assert found["metrics"]["merge"] == "merged" and found["metrics"]["verdict"] == "manual"
+    assert found["metrics"]["merge"] == "merged" and found["metrics"]["verdict"] == verdict
     assert "approved_by" not in found["metrics"] and "comments" not in hub.calls
+
+
+def test_rejudge_to_no_approval_drops_the_first_approver(monkeypatch, capsys, last_result):
+    """初めの判定で証跡を読んでも、判定し直して承認が要らなくなれば、結果は判定し直した値で担い手を残さない。"""
+    hub = _hub(monkeypatch, AUTO, MANUAL)
+    _approve(hub)
+    code, found = _run(capsys, last_result, "--production-gate", "defer")
+    assert code == 0 and hub.merged == [7]
+    assert found["metrics"]["verdict"] == "manual" and "approved_by" not in found["metrics"]
 
 
 @pytest.mark.parametrize(("after", "verdict"), [(AUTO, "automatic"), (UNSET, "unset"), (None, "unknown"), ("not json", "unknown")])
