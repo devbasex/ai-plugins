@@ -59,6 +59,8 @@ WORK_SUFFIX = ".mvv-replay"
 # 専用ディレクトリを judge が作ったことを示す印のファイルの名前。作った起動が作った直後に中へ置く。印の無い同名のディレクトリ
 # （利用者が作ったものなど）は、中身を消さず、ディレクトリも消さない
 WORK_MARK = ".made-by-mvv-replay"
+# 専用ディレクトリの名前の候補の数。印の無い同名のディレクトリが続いても、候補を探し続けないための上限
+WORK_TRIES = 100
 STAND_IN = {"verdict": "follow", "reasons": ["判定の代役（実物の LLM を呼ばない）"], "boundary": [], "basis": ["Value 1"]}
 
 
@@ -131,7 +133,7 @@ def _write_json(path: Path, value: Any, held: Optional[_Held] = None) -> None:
     認証して取得した PR の本文・差分・ファイルの全文を保存するため、umask に任せると同じホストのほかの利用者が読める。
     置き換えなので、書く途中でプロセスが止まっても、前に保存した中身は壊れない（`judge` は判定 1 件ごとに書く）。
     `held` を渡すと、置き換える前の一時ファイルにロックを掛けてから置き換え、ロックを新しい中身へ引き継ぐ（`_exclusive`）。
-    そのときの一時ファイルは、結果の隣の専用ディレクトリ（`_work_dir`）に作る。
+    そのときの一時ファイルは、結果の隣の専用ディレクトリ（`_work_dirs`）に作る。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     if held is None:
@@ -420,7 +422,7 @@ def _exclusive(result: Path) -> Iterator[_Held]:
     持っているので、並べた起動のどれが先に開いても、作った起動より先にロックを取る起動は無い。保存しないまま終わったときは、その起動が
     作ったファイル（作った inode のまま）だけを消す。利用者が置いた空のファイルは消さない。ロックのためのファイルを別に作らず、
     プロセスが終われば自動で外れ、状態の保存先の環境変数にも依らない。judge の一時ファイルは結果の隣の専用ディレクトリ
-    （`_work_dir`）にだけ作り、ロックを取った後、前の起動が強制終了で残した分をその中からだけ消す（`_sweep`）。専用ディレクトリの
+    （`_work_dirs`）にだけ作り、ロックを取った後、前の起動が強制終了で残した分をその中からだけ消す（`_sweep`）。専用ディレクトリの
     中身を消すのも、ディレクトリを消すのも、judge が作った印（`WORK_MARK`）のあるディレクトリだけに限る。結果ファイルが
     まだ無いときは、保存先にハードリンクを作れることが要る（exFAT・FAT32 などでは新しい測定を始められない）。
     """
@@ -513,101 +515,153 @@ def _create_locked(result: Path) -> Optional[int]:
     return fd
 
 
-def _work_dir(result: Path) -> Path:
-    """judge が `result` の一時ファイルを作る、結果の隣の専用ディレクトリ。"""
-    return result.absolute().parent / f".{result.name}{WORK_SUFFIX}"
+def _work_dirs(result: Path) -> Iterator[Path]:
+    """judge が `result` の一時ファイルを作る専用ディレクトリの候補を、使う順に返す。
+
+    最初は `.<結果のファイル名>.mvv-replay`、その名前が judge の作った印の無いもので埋まっていれば `-1`・`-2`… を付けた名前を
+    使う。印の無いものは由来を確かめられないので、残したまま別の名前へ移る。
+    """
+    base = result.absolute().parent / f".{result.name}{WORK_SUFFIX}"
+    yield base
+    for i in range(1, WORK_TRIES):
+        yield base.with_name(f"{base.name}-{i}")
 
 
 def _work_tmp(result: Path, retry: bool = True) -> Any:
-    """専用ディレクトリに一時ファイル（0600）を作り、`(記述子, パス)` を返す。
+    """judge が作った専用ディレクトリに一時ファイル（0600）を作り、`(記述子, パス)` を返す。
 
-    ロックを外した前の起動が空の専用ディレクトリを消すことがあるので、作る前に消されたら作り直す。`retry` が偽なら作り直さずに
-    None を返す。親のディレクトリが消えたときや、シンボリックリンクなど専用ディレクトリとして使えないものがあるときは止める。
-    専用ディレクトリを作った起動は、作った直後に印のファイル（`WORK_MARK`）を中に置く。既にあったディレクトリには印を足さない。
+    候補の名前（`_work_dirs`）を順に見て、judge が作った印のあるディレクトリか、新しく作れたディレクトリを使う。作った起動は、
+    作ったディレクトリを開いた記述子を基準に、印のファイル（`WORK_MARK`）を置く。印の無い既存のディレクトリ（利用者が作った
+    もの、印を置く前に強制終了した起動のものなど）は、使わずに次の候補へ移る。ロックを外した前の起動が空の専用ディレクトリを
+    消すことがあるので、作る前に消されたら作り直す。`retry` が偽なら作り直さずに None を返す。親のディレクトリが消えたときは止める。
     """
-    work = _work_dir(result)
+    parent = result.absolute().parent
     while True:
-        try:
+        gone = False
+        for work in _work_dirs(result):
             try:
-                os.mkdir(work, 0o700)
-            except FileExistsError:
-                pass
-            else:
-                _mark(work)
-            if not stat.S_ISDIR(os.lstat(work).st_mode):
-                raise Stop(f"{work} が judge の作業用のディレクトリでない（シンボリックリンクなど）。消してから打ち直す")
-            return tempfile.mkstemp(dir=work, prefix="", suffix=".tmp")
-        except FileNotFoundError as exc:
-            if not result.absolute().parent.is_dir():
-                raise Stop(f"--result（{result}）を作れない: {exc}") from None
-            if not retry:
-                return None
-        except OSError as exc:
-            # 作ったばかりの空の専用ディレクトリを残さない
-            _drop_work_dir(result)
-            raise Stop(f"--result（{result}）の一時ファイルを作れない: {exc}") from None
+                try:
+                    os.mkdir(work, 0o700)
+                except FileExistsError:
+                    if not _made_by_judge(work):
+                        continue
+                else:
+                    with _opened_dir(work) as dfd:
+                        if dfd is None:
+                            continue
+                        _mark(dfd)
+                return tempfile.mkstemp(dir=work, prefix="", suffix=".tmp")
+            except FileNotFoundError as exc:
+                if not parent.is_dir():
+                    raise Stop(f"--result（{result}）を作れない: {exc}") from None
+                gone = True
+                break
+            except OSError as exc:
+                # 作ったばかりの空の専用ディレクトリを残さない
+                _drop_work_dir(result)
+                raise Stop(f"--result（{result}）の一時ファイルを作れない: {exc}") from None
+        if not gone:
+            raise Stop(
+                f"{parent} に judge の作業用のディレクトリを作れない（同じ名前のものが {WORK_TRIES} 個ある）。不要なものを消してから打ち直す"
+            )
+        if not retry:
+            return None
 
 
-def _mark(work: Path) -> None:
-    """専用ディレクトリに、judge が作ったことを示す印のファイルを置く。既にあればそのまま。"""
+@contextlib.contextmanager
+def _opened_dir(work: Path) -> Iterator[Optional[int]]:
+    """`work` のディレクトリそのもの（シンボリックリンクでない）を開いた記述子を渡す。開けなければ None を渡す。"""
     try:
-        os.close(os.open(work / WORK_MARK, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600))
+        dfd = os.open(work, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError:
+        yield None
+        return
+    try:
+        yield dfd
+    finally:
+        os.close(dfd)
+
+
+def _mark(dfd: int) -> None:
+    """開いた専用ディレクトリに、judge が作ったことを示す印のファイルを置く。既にあればそのまま。"""
+    try:
+        os.close(os.open(WORK_MARK, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd))
     except FileExistsError:
         pass
 
 
-def _made_by_judge(work: Path) -> bool:
-    """`work` が、この利用者の judge が作った専用ディレクトリか。
+def _marked(dfd: int) -> bool:
+    """開いたディレクトリが、この利用者の judge が作った専用ディレクトリか。
 
-    次の 3 つがそろうときだけ judge が作ったものとみなす。ディレクトリそのもの（シンボリックリンクでない）であること、中に印の
-    ファイル（`WORK_MARK`）が通常のファイルとしてあること、ディレクトリと印のファイルの所有者がこのプロセスの利用者であること。
+    ディレクトリと、中の印のファイル（`WORK_MARK`、通常のファイル）の所有者が、どちらもこのプロセスの利用者のときだけ真。
     """
     try:
-        d = os.lstat(work)
-        m = os.lstat(work / WORK_MARK)
+        m = os.stat(WORK_MARK, dir_fd=dfd, follow_symlinks=False)
     except OSError:
         return False
     uid = os.getuid()
-    return stat.S_ISDIR(d.st_mode) and stat.S_ISREG(m.st_mode) and d.st_uid == uid and m.st_uid == uid
+    return stat.S_ISREG(m.st_mode) and m.st_uid == uid and os.fstat(dfd).st_uid == uid
+
+
+def _made_by_judge(work: Path) -> bool:
+    """`work` が、この利用者の judge が作った専用ディレクトリか（`_marked`）。"""
+    with _opened_dir(work) as dfd:
+        return dfd is not None and _marked(dfd)
+
+
+def _same_dir(dfd: int, work: Path) -> bool:
+    """開いたディレクトリが、今 `work` の名前が指すディレクトリか。"""
+    try:
+        now = os.lstat(work)
+    except OSError:
+        return False
+    got = os.fstat(dfd)
+    return (now.st_dev, now.st_ino) == (got.st_dev, got.st_ino)
 
 
 def _drop_work_dir(result: Path) -> None:
-    """judge が作った専用ディレクトリが空なら（印のファイルのほかに何も無ければ）消す。印の無いディレクトリには触れない。
+    """judge が作った専用ディレクトリのうち、空のもの（印のファイルのほかに何も無いもの）を消す。印の無いディレクトリには触れない。
 
-    印を消してからディレクトリを消す。別の起動の一時ファイルがあって消せなければ、使われているので印を戻して残す。
+    印の確かめと操作は、開いたディレクトリの記述子を基準にする。印を消した後、名前がまだ同じディレクトリを指すときだけ名前で
+    消す。名前が別のものを指すか、別の起動の一時ファイルがあって消せなければ、開いたディレクトリに印を戻して残す。
     """
-    work = _work_dir(result)
-    if not _made_by_judge(work):
-        return
-    with contextlib.suppress(OSError):
-        os.unlink(work / WORK_MARK)
-        try:
-            os.rmdir(work)
-        except OSError:
-            _mark(work)
+    for work in _work_dirs(result):
+        with _opened_dir(work) as dfd:
+            if dfd is None or not _marked(dfd):
+                continue
+            with contextlib.suppress(OSError):
+                os.unlink(WORK_MARK, dir_fd=dfd)
+                try:
+                    if not _same_dir(dfd, work):
+                        raise FileNotFoundError(work)
+                    os.rmdir(work)
+                except OSError:
+                    _mark(dfd)
 
 
 def _sweep(result: Path) -> None:
-    """専用ディレクトリに残った一時ファイル（強制終了した前の起動のもの）を消す。消せない分は残して続ける。
+    """judge が作った専用ディレクトリに残った一時ファイルを消す。消せない分は残して続ける。
 
-    judge が作った印のある専用ディレクトリ（`_made_by_judge`）の中だけを見て、judge の一時ファイルの名前（終わりが `.tmp`）の
-    通常のファイルだけを消す。印の無いディレクトリや、ほかの名前のファイルには触れない。ロックを持つ起動だけが保存の一時ファイルを
-    作るので、ロックを取った時点で残っているものは前の起動のもの。結果ファイルを置く前の別の起動の一時ファイルを消しても、
-    その起動は置けずに開き直す（`_create_locked`）。
+    judge が作った印のある専用ディレクトリ（`_marked`）の中だけを見て、judge の一時ファイルの名前（終わりが `.tmp`）の通常の
+    ファイルだけを消す。印の無いディレクトリや、ほかの名前のファイルには触れない。保存の一時ファイルは結果のロックを取ってから
+    作るので、ロックを取った時点で残っている保存の一時ファイルは、強制終了した前の起動のもの。初回の結果ファイルを置くための
+    一時ファイル（`_create_locked`）は、ロックを取る前に作るので、別の起動が作っている途中のこともある。それを消しても、その
+    起動は `os.link` の元が消えたことを見て、結果ファイルを開き直す。
     """
-    work = _work_dir(result)
-    if not _made_by_judge(work):
-        return
-    try:
-        names = os.listdir(work)
-    except OSError:
-        return
-    for name in names:
-        if name == WORK_MARK or not name.endswith(".tmp"):
-            continue
-        with contextlib.suppress(OSError):
-            if stat.S_ISREG(os.lstat(work / name).st_mode):
-                os.unlink(work / name)
+    for work in _work_dirs(result):
+        with _opened_dir(work) as dfd:
+            if dfd is None or not _marked(dfd):
+                continue
+            try:
+                names = os.listdir(dfd)
+            except OSError:
+                continue
+            for name in names:
+                if name == WORK_MARK or not name.endswith(".tmp"):
+                    continue
+                with contextlib.suppress(OSError):
+                    if stat.S_ISREG(os.stat(name, dir_fd=dfd, follow_symlinks=False).st_mode):
+                        os.unlink(name, dir_fd=dfd)
 
 
 def _same_inode(fd: int, path: Path) -> bool:
