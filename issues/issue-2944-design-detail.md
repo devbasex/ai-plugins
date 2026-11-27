@@ -69,7 +69,7 @@ src/ndf/
 | `contracts/domains/claude-failures.json` | `model_refused` の行（どの呼び出し元の停止理由も `precondition`） |
 | `contracts/domains/runtimes.json` | codex の `usage_args: ["--json", "-o", "{answer}"]`、モデルと effort の引数の形 |
 | `contracts/domains/env.json` | `NDF_UNIT_ID`・`NDF_CHARGE_TO`・`NDF_RETRY_CAUSE`・`NDF_LAUNCH_MODEL`・`NDF_LAUNCH_EFFORT`・`NDF_LAUNCH_CODEX_MODEL`・`NDF_LAUNCH_CODEX_EFFORT`・`CLAUDE_CODE_EFFORT_LEVEL` |
-| `contracts/domains/ndf-files.json` | `launch-experiments-<YYYY-MM>.jsonl`・`launch-weights.json`・`launch-pruned`（保存先は使用量ログと同じ） |
+| `contracts/domains/ndf-files.json` | `launch-experiments-<YYYY-MM>.jsonl`・`launch-weights.json`・`launch-retention.json`・`launch-pruned`（保存先は使用量ログと同じ） |
 | `contracts/schemas/ndf-settings/launch.schema.json` | `experiments` のキー |
 | `contracts/schemas/internal/experiment.schema.json`（新設）・`usage.schema.json` | 実験の記録の行の形、使用量ログの足す欄 |
 | `contracts/schemas/io/models.*`・`docs/contracts/*.md` | 引数のスキーマと規約のページは生成し、結果のスキーマは手で書く |
@@ -96,7 +96,8 @@ src/ndf/
 | `read_experiments` | 同 | 新設 | `read_experiments(since: datetime, root: Optional[Path] = None) -> list[dict]` | `since` の月から今月までの実験の記録を読む（ロックを取らない） |
 | `ledger` | 同 | 新設 | `ledger(since: datetime, root: Optional[Path] = None) -> ContextManager[Ledger]` | 設計書の「読み書き」の順で、読んだ行（`rows`）と追記（`append`）を、実験の記録のロックの中で渡す |
 | `append_row` | 同 | 新設 | `append_row(row: Mapping) -> bool` | `ledger` を開いて 1 行足す |
-| `prune` | 同 | 新設 | `prune(now: datetime, window_days: int, root: Optional[Path] = None) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)の月の掃除。`window_days` は今の設定の値である。残す日数は、この値と、記録に残る割り付けの行の `window_days` のうち最も大きい値に 30 日を足した日数で、`now` からその日数を引いた日時より前に終わった月のファイルを消す。`launch-pruned` の月が今月なら何もしない。違えば、古い月のファイルと出現率の項目を消し（出現率のファイルはロックの中で読み直してから変える）、全部成功したら今月を書く。`launch_choice` が呼び、失敗しても起動は続ける |
+| `register_retention` | 同 | 新設 | `register_retention(now: datetime, repo: str, window_days: int, root: Optional[Path] = None) -> None` | [allocation の「保持する期間」](./issue-2944-design-allocation.md#実験の記録と出現率)の期間の届け出に、リポジトリの今の `window_days` を書く。項目の値が同じで、最後に届けた日時が今日（UTC）なら書かない。書くときは `launch-retention.lock` を待って取り、錠の中で読み直す。`launch_choice` が `prune` の前に呼び、失敗しても起動は続ける |
+| `prune` | 同 | 新設 | `prune(now: datetime, root: Optional[Path] = None) -> None` | 同じ節の月の掃除。残す日数は、期間の届け出に残る項目の `window_days` と、記録に残る割り付けの行の `window_days` のうち、最も大きい値に 30 日を足した日数である。`now` からその日数を引いた日時より前に終わった月のファイルを消す。掃除するリポジトリの設定は引数で受けず、届け出から読む。どのリポジトリが掃除しても同じ境界にするためである。`launch-pruned` の月が今月なら何もしない。違えば、古い月のファイル、出現率の項目、期限を過ぎた届け出の項目を消し（出現率のファイルと届け出は、それぞれのロックの中で読み直してから変える）、全部成功したら今月を書く。`launch_choice` が呼び、失敗しても起動は続ける |
 
 - `Choice` は `layer`・`name`・`runtime`・`stage`・`mode`・`model`・`effort`・`model_source`・`effort_source`・`unit`・`assign_id`・`raised`・`arm`・`base_arm` を持つ。返すものは、`cli_args() -> list[str]`（claude は `--model`・`--effort`、codex は `-c model_reasoning_effort=…`・`-m`）、`env_changes() -> dict[str, Optional[str]]`（`CLAUDE_CODE_EFFORT_LEVEL` を外すか引き継ぐか。None は外す）、`row_fields() -> dict`（使用量ログの欄。`unit` は割り付けを受けた起動、つまり `assign_id` がある起動だけに置く）を返す
 - `launch_choice`
@@ -168,7 +169,8 @@ src/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `prune` | 古い月のファイルと項目が消え、`launch-pruned` が今月になる | `window_days` ＋ 30 日の境（境にかかる月は残る）、年をまたぐ。今月のファイルが先にあっても掃除する。完了の記録が今月なら一覧を調べない | 削除に失敗すると `launch-pruned` を書かず、次の呼び出しがやり直す。起動は続く |
+| `register_retention` | 項目が無ければ足し、`window_days` が違えば書き換える | 値が同じで今日すでに届けていれば書かない。日付が替われば日時だけを書き換える。ほかのリポジトリの項目は変えない | 書けなくても例外を出さず、起動は続く |
+| `prune` | 古い月のファイルと項目が消え、`launch-pruned` が今月になる | `window_days` ＋ 30 日の境（境にかかる月は残る）、年をまたぐ。今月のファイルが先にあっても掃除する。完了の記録が今月なら一覧を調べない。届け出だけにある長い `window_days`（その設定での割り付けの行が無い）で数える。同じ届け出と記録から、短い期間と長い期間の 2 つのリポジトリの起動の順を入れ替えても、同じ月が残る。最後に届けた日時から `window_days` ＋ 30 日を過ぎた届け出の項目は消え、数えない | 削除に失敗すると `launch-pruned` を書かず、次の呼び出しがやり直す。起動は続く |
 | `table` | 工程とランタイムごとの置き換え | 選択肢 1 つ、`{}` の組 | 空の配列、同じ組、`floor` × 組の数 > 1、`min_units` 1、順位に無い effort |
 | `stage_of` | 表の各行 | 工程が「無し」の組 | 表に無い組 |
 | `launch_choice` | 同じ単位は同じ組。並列でも 1 行 | `unit` なし、`enabled` 偽、片側の指定、割り付けの後の手動指定と選択肢の削除、月をまたぐ割り付け | 壊れた設定。記録を書けない場合 |
@@ -412,6 +414,7 @@ src/ndf/
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | 再開の処理が重なった `record_outcome` | 実験の記録 | 確認と追記を同じロックの中で行う | 指標の行は割り付け ID ごとに 1 つ。壊れて 2 行ある記録は、どの集計も先に書いた行だけを使う |
+| 複数の `register_retention` と `prune` | `launch-retention.json` | 書き換える側は `launch-retention.lock` を待って取り、錠の中で最新の内容を読み直してから自分の項目だけを変える（一時ファイルから `os.replace`） | 届け出は起動ごとに読み直し、同じ値なら書かない。掃除は期限を過ぎた項目だけを消すので、届けたばかりの項目は失われない |
 | 複数の `prune` | `launch-pruned.lock` | 待たずに錠を取れた起動だけが、錠の中で `launch-pruned` を読み直してから掃除する。取れなかった起動は掃除を飛ばす | 月のファイルをすべて読むのは、保存先ごとに月に 1 回で済む。錠を持つ起動が失敗すれば、次の起動がやり直す |
 | 複数の `refresh` と `prune` | `launch-weights.json` | 計算はロックの外。書き換えるときは同じロックを取り、ロックの中で最新の内容を読み直してから変える（一時ファイルから `os.replace`） | 同じ項目の計算は後で書いた側が残る。掃除は期限を過ぎた項目だけを消すので、新しい項目は失われない |
 
