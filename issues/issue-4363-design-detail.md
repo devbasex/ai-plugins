@@ -297,8 +297,10 @@ plugins/ndf/
 - `ask`
   - 事前条件: `rows` は空でない。`run.input_dir`（この実行の資料のディレクトリ）に `diff` がある
   - 事後条件: 例外で駆動を止めない。起動し直さない
-  - 指示の組み立て: `verify_decide.instruction` の `criteria` には、`criteria_decide.criteria_lines(run.cfg.settings.focus, run.snapshot)` の行の後に、`criteria_decide.document_line(run.documents, rows)` の戻り値を加えて渡す。`rows` は `_confirm` が `verify_decide.select` から受け取った指摘で、`run.documents` は PR の差分に Markdown のファイルがあるかである。`VerifyRun` はこの 3 つの値を持つ
-  - 基準 5 の参照先: MVV の本文と共通原則のスナップショットは、判定役が読める場所の外（利用者の状態の保存先）にある。承認済みの MVV があれば（`criteria_decide.approved(run.snapshot)`）、`ask` は起動の前に `path` と `principles_path` の 2 つのファイルを `run.input_dir` へ写し、`criteria_lines` には `run.snapshot._replace(path=<本文の写し>, principles_path=<共通原則の写し>)` を渡す。読める場所は増やさない
+  - 指示の組み立て: `ask` は次の順で、`verify_decide.instruction` の `criteria` に渡す行を作る。`rows` は `_confirm` が `verify_decide.select` から受け取った指摘で、`run.documents` は PR の差分に Markdown のファイルがあるかである。この手順のために、`VerifyRun` は `run.cfg`・`run.snapshot`・`run.documents` を持つ
+    1. 承認済みの MVV があれば（`criteria_decide.approved(run.snapshot)`）、MVV の本文（`path`）と共通原則（`principles_path`）を `run.input_dir` へ写す。元のファイルは利用者の状態の保存先にあり、判定役は読めないためである。読める場所は増やさない
+    2. `criteria_decide.criteria_lines(run.cfg.settings.focus, snapshot)` を呼ぶ。`snapshot` は、承認済みの MVV があれば `run.snapshot._replace(path=<本文の写し>, principles_path=<共通原則の写し>)`、無ければ `run.snapshot` である
+    3. 2 の戻り値の後に `criteria_decide.document_line(run.documents, rows)` の戻り値を加え、`instruction` に渡す
   - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は状態の保存先の `round<n>-verify.*` に書く。過程の行と注意を `run.note` で足す
 
 ### 異常系の処理
