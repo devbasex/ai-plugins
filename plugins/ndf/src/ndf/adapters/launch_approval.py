@@ -267,15 +267,20 @@ def approve_by_answer(repo: str, sha256: str, request_id: str) -> Optional[str]:
 class _Requests:
     """依頼の履歴を 1 回だけ走査して作る索引。`by_id` は依頼の識別子ごと、`latest` は候補ごと、`newest` は反映先ごとの最新の位置。
 
-    キーに使う欄（識別子・反映先・候補）の型が壊れた行は `rows` に入れない（位置は `rows` の中の位置）。
+    キーに使う欄（識別子・反映先・候補と、承認の記録を引くリポジトリのキー・ハッシュ）の型が壊れた行は `rows` に入れない
+    （位置は `rows` の中の位置）。型の検査と索引の更新は同じ 1 回の走査で行う。
     """
 
     def __init__(self, rows: list[dict[str, Any]]) -> None:
-        self.rows = [row for row in rows if _keyable(row, "request_id", "target", "candidate")]
+        self.rows: list[dict[str, Any]] = []
         self.by_id: dict[Any, int] = {}
         self.latest: dict[Any, int] = {}
         self.newest: dict[Any, int] = {}
-        for i, row in enumerate(self.rows):
+        for row in rows:
+            if not _keyable(row, "request_id", "target", "candidate", "repo", "sha256"):
+                continue
+            i = len(self.rows)
+            self.rows.append(row)
             self.by_id[row.get("request_id")] = i
             self.newest[row.get("target")] = i
             if row.get("candidate") is not None:
