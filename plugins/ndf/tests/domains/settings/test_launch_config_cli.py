@@ -357,6 +357,19 @@ def test_approve_without_a_candidate_tells_the_saved_path_when_the_setting_is_br
     assert got["cause"]["kind"] == "precondition" and str(saved) in got["summary"]
 
 
+def test_approve_without_a_candidate_stops_with_the_lock_location_when_the_lock_cannot_be_taken(repo, capsys, monkeypatch):
+    """候補なしの approve が承認の記録の錠を作れなければ、unknown でなく precondition で止め、錠の場所を示す。"""
+    _settings(repo, LSP)
+
+    def unwritable(path):
+        raise PermissionError("mkdir")
+
+    monkeypatch.setattr(la, "records_lock", unwritable)
+    got = _run(capsys, "approve", "--sha256", "a" * 64)
+    assert got["cause"]["kind"] == "precondition"
+    assert str(la.state_file(la.APPROVALS)) + ".lock" in got["summary"]
+
+
 def test_show_of_a_missing_candidate_stops(repo, capsys):
     candidate = _draft(capsys)
     candidate.unlink()

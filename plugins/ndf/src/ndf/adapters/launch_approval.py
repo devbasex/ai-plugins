@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import hashlib
 import json
@@ -83,6 +84,31 @@ def records_lock(path: Path) -> Any:
     from ndf.contracts import limits
 
     return records.file_lock(path, limits.seconds("launch.approvals-lock"))
+
+
+@contextlib.contextmanager
+def records_lock_or_stop(path: Path) -> Any:
+    """`records_lock` を取り、取れなければ `precondition` の `InternalError` にして止める（錠の場所と対処を示す）。
+
+    錠のディレクトリやファイルを作れない（権限・容量）か、待ちの上限を超えたときに、利用者が直せる前提の不足として返すためである。
+    変換するのは錠を取るまでで、錠の中の処理が投げる例外は、そのまま呼び手へ返す（片付けの失敗は `recover_or_stop` が扱う）。
+    """
+    from ndf.contracts import internal
+
+    where = Path(str(path) + ".lock")
+    try:
+        lock = records_lock(path)
+        lock.acquire()
+    except OSError as exc:
+        raise internal.InternalError(
+            "precondition",
+            f"承認の記録の錠 {where} を取れない（{type(exc).__name__}）。{where.parent} に書き込めるか、"
+            "ほかの承認の操作が終わっているかを確かめてから、同じコマンドを打ち直す",
+        ) from None
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def _at_now() -> str:

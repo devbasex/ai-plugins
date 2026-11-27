@@ -366,9 +366,9 @@ def _approval_input(root: Path, cand: Optional[Path], target: Path, kept: list[P
     候補が無ければ、設定を読む前に退避を片付け、利用者の保存を別の名前で残したらそのパスを `kept` に足す。
     """
     if cand is None:
-        with la.records_lock(la.state_file(la.APPROVALS)):
-            # 片付けの失敗は反映の経路と同じ `precondition` にする（別の名前で残したパスは止まる前に `kept` に入る）。
-            # 錠を取れないときは片付けの失敗にせず、ほかの経路と同じく錠の例外のまま返す
+        # 錠を取れないときは錠の場所と対処を示す `precondition`、片付けの失敗は反映の経路と同じ `precondition` にする
+        # （別の名前で残したパスは止まる前に `kept` に入る）
+        with la.records_lock_or_stop(la.state_file(la.APPROVALS)):
             la.recover_or_stop(target, kept)
         return ls.approval_target(ls.load(root)), b""
     _check_destination(cand, target)
@@ -419,7 +419,7 @@ def _approve_and_place(
     `approval` は、承認の対象のハッシュとリクエストの組（`la.reflect` と同じ）。
     """
     if cand is None:
-        with la.records_lock(la.state_file(la.APPROVALS)):
+        with la.records_lock_or_stop(la.state_file(la.APPROVALS)):
             record()
         return None
     done = la.reflect(cand, record, approval, data=data, expected=target, kept=kept)
