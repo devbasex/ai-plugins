@@ -19,7 +19,6 @@ POLL = 0.05
         "You've hit your 5-hour limit · resets 12:30am (UTC)",
         "exceeded retry limit, last status: 429",
         "Monthly request limit reached",
-        '{"type":"result","api_error_status":429}',
         "HTTP/1.1 429 Too Many Requests",
     ],
 )
@@ -35,6 +34,7 @@ def test_usage_limit_reads_cli_lines(text):
         "+ quota exceeded",
         "# quota exceeded",
         "- quota exceeded のとき",
+        '{"type":"result","api_error_status":429}',  # claude の結果の JSON は行の形で見ない（launch_usage_limit が構造で見る）
     ],
 )
 def test_usage_limit_ignores_comment_snapshots_and_quotes(text):

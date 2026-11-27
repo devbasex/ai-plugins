@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "usage-limit.result.schema.json",
+  "title": "ndf usage-limit の結果 JSON",
+  "description": "ndf usage-limit が標準出力の最後の 1 行に出す結果 JSON。共通の欄は結果のコントラクト（result.schema.json）が持ち、ここは metrics と items の形だけを足す。metrics は閉じていて、載せた項目のほかの項目を持つと通らない",
+  "allOf": [
+    {
+      "$ref": "../result.schema.json"
+    }
+  ],
+  "properties": {
+    "tool": {
+      "const": "usage-limit"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "ndf usage-limit の判定（ok のときだけ載る）",
+      "additionalProperties": false,
+      "properties": {
+        "usage_limit": {
+          "type": "boolean",
+          "description": "起動の出力が利用上限を告げているか"
+        },
+        "line": {
+          "type": "string",
+          "description": "判定の根拠の行（利用上限のときだけ載る）"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ndf usage-limit の項目の並び（持たない）",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    }
+  }
+}

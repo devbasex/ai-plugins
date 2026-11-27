@@ -65,16 +65,14 @@ def sandbox_failed(paths: "AgentPaths") -> Optional[str]:
 
 # ---------------------------------------------------------------- 監視（#1411・#2059）
 
-# claude が標準出力へ出す結果の JSON の利用上限（`api_error_status: 429`）
-CLAUDE_USAGE_LIMIT_JSON = re.compile(r'^\{.*?"api_error_status"\s*:\s*429', re.MULTILINE)
 # 利用上限の行。CLI が出す行の形（行頭。codex の `ERROR:` の前置きだけを許す）に限り、コメントの写し
-# （`path:line [user] 本文`・`[PR-COMMENT] [user] 本文`）や差分・文書の中の語を拾わない
+# （`path:line [user] 本文`・`[PR-COMMENT] [user] 本文`）や差分・文書の中の語を拾わない。claude の結果の JSON の
+# `api_error_status` は行の形で見ず、`launch_usage_limit` が JSON の直下の値で見る（入れ子の 429 を拾わない）
 USAGE_LIMIT_LINES = (
     re.compile(r"^(?:ERROR:\s*)?(?:quota exceeded|rate limit exceeded)\b", re.IGNORECASE | re.MULTILINE),
     re.compile(r"^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ -]+ )?(?:limit|budget)\b", re.MULTILINE),  # 「5-hour limit」のハイフンも通す
     re.compile(r"^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b", re.MULTILINE),
     re.compile(r"^(?:ERROR:\s*)?Monthly request limit reached", re.MULTILINE),
-    CLAUDE_USAGE_LIMIT_JSON,
     re.compile(r"^HTTP/\d\S* 429 ", re.MULTILINE),
 )
 # 早期の警告（致命ではない）の行
@@ -262,7 +260,7 @@ def launch_usage_limit(agent: str, out: Path, err: Path) -> Optional[str]:
     標準エラー（`err`）は上限の行（`USAGE_LIMIT_LINES`）で見る。標準出力（`out`）は claude の結果の JSON の直下の
     `api_error_status` だけを見て、他の CLI の標準出力は読まない（調査の結果が行頭に `quota exceeded` を引用しても、
     結果の入れ子のデータに 429 があっても利用上限にしない）。
-    監視（`_verdict`）と、手順書の回収（`ndf delegate-run --usage-limit`）が同じ条件で判定するよう、ここだけに置く。"""
+    監視（`_verdict`）と、手順書の回収（`ndf usage-limit`）が同じ条件で判定するよう、ここだけに置く。"""
     hit = usage_limit(tail(err))
     if hit:
         return hit

@@ -104,6 +104,7 @@ COMMANDS: dict[str, str] = {
     "statusline": "ndf.domains.statusline.cli",
     "test-slot": "ndf.testing.command",
     "training": "ndf.adapters.training",
+    "usage-limit": "ndf.domains.settings.usage_limit_cli",
     "worker": "ndf.core.worker",
     "worktree": "ndf.domains.worktree.cli",
 }
