@@ -23,7 +23,7 @@
 状態ファイルへ rounds・reviewed_sections・ジャーナル（findings）をラウンドごとに書き、終わったら、最後のコミットの根拠の記述を
 確かめてから `summary.json`（`finish_decide` が読む形）を書き、MVV に反するとした指摘を MVV の記録に残す（#4076）。始めに worktree の管理情報を確かめ（#3109）、origin の先頭へ合わせ（#2440）、
 前の起動が残した修正の結果ファイルを読み込む（#2770）。別の保存先で始めた起動は、前の実行が PR に開いたまま残した
-自分の指摘のスレッドと、最新の記録のコメントに残ったスレッドの無い未解決の指摘を引き継ぐ（#3941）。最後のラウンドが収束で、その head と比較基点（`--base` と HEAD の
+自分の指摘のスレッドと、最新の記録のコメントに残ったスレッドの無い未解決の指摘を引き継ぐ（`carry`。#3941）。最後のラウンドが収束で、その head と比較基点（`--base` と HEAD の
 merge-base の SHA）と MVV とレビューの単位の指示が今と同じで、今回の相手役が全員そのラウンドを読んでいれば、相手役を起動せずに前回の結果を返す（#3941）。修正の結果は状態ファイルへ書いてから結果ファイルを
 ラウンドの名前へ移し、送る（push が例外で止まっても、次の起動が記録から再開できる）。前の起動が送れなかった修正の
 コミットが残っていれば、始めに送ってから進む。
@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -43,6 +43,7 @@ from ndf.adapters import agents, git, publish, run_log
 from ndf.contracts import internal, limits
 from ndf.core.converge import oscillation, participants, worktree
 from ndf.domains.crossreview import (
+    carry,
     changes,
     criteria_decide,
     fixer,
@@ -60,7 +61,7 @@ from ndf.domains.crossreview import (
 )
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.fixer import Launcher
-from ndf.domains.crossreview.journal import BY_NDF, FindingJournal
+from ndf.domains.crossreview.journal import FindingJournal
 from ndf.domains.crossreview.scope_decide import Filled
 from ndf.domains.crossreview.settings import DriveStopped, RunConfig
 from ndf.domains.records import jsonl, mvv
@@ -92,8 +93,6 @@ FINDINGS_SHAPE = (
     '"line": <行の番号 か null>, "section": "<パス#見出し か 空>"%s}]} だけを出す。指摘が無ければ空の配列。'
 )
 
-# PR のコメントを読む口を PR の番号から作る（作れなければ例外。注意に載せて読まずに進む）
-ReaderFor = Callable[[int], threads.Reader]
 # 設計文書の行数の上限・既存のコメント 1 件と全体の字数の上限
 DOC_LINES = "cross-review.design-doc-lines"
 REMARK_CHARS = "cross-review.remark-chars"
@@ -225,15 +224,7 @@ def _resend(run: _Run, synced: worktree.SyncResult) -> None:
         raise DriveStopped("work_stopped", f"前の起動の round {round_no} の修正を送れない: {run.warnings[-1]}")
 
 
-class _Prior(NamedTuple):
-    """起動の始めに PR から読んだ、引き継ぎの確かめに要るもの（スレッドと PR コメント）と、スレッドと同じ応答から読んだ PR。読めなければ空。"""
-
-    threads: Sequence[prior_decide.Thread] = ()
-    comments: Sequence[prior_decide.Remark] = ()
-    pr: Optional[threads.ReadPr] = None
-
-
-def _merge_target(cfg: RunConfig, reader_for: Optional[ReaderFor]) -> str:
+def _merge_target(cfg: RunConfig, reader_for: Optional[carry.ReaderFor]) -> str:
     """PR のマージ先のブランチを GitHub から読む。読めなければ担当の起動前に止める。
 
     `--base` がコミット（SHA・タグなど）のときだけ使う（理由は `worktree.fetch_base` にある）。
@@ -257,7 +248,7 @@ class _Based(NamedTuple):
     remote: str
 
 
-def _sync(cfg: RunConfig, g: git.Git, reader_for: Optional[ReaderFor]) -> _Based:
+def _sync(cfg: RunConfig, g: git.Git, reader_for: Optional[carry.ReaderFor]) -> _Based:
     """PR のブランチと MVV を読むブランチを 1 回で取得して同期する（ブランチの決め方は `worktree.fetch_base`）。
 
     `--base` がブランチなら、その先頭のコミットが MVV を読む先で、差分の比較元でもある。コミットなら、比較元はそのコミットの
@@ -280,7 +271,7 @@ def _snapshot(cfg: RunConfig, based: _Based) -> mvv.Snapshot:
         raise DriveStopped("precondition", str(exc)) from exc
 
 
-def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide.Cleaner) -> _Run:
+def _start(cfg: RunConfig, reader_for: Optional[carry.ReaderFor], clean: report_decide.Cleaner) -> _Run:
     worktree.registration(cfg.worktree)
     g = git.Git(cfg.worktree)
     based = _sync(cfg, g, reader_for)
@@ -324,129 +315,6 @@ def _start(cfg: RunConfig, reader_for: Optional[ReaderFor], clean: report_decide
     _ingest_pending(run)
     _resend(run, synced)
     return run
-
-
-def _reader(cfg: RunConfig, reader_for: Optional[ReaderFor], warnings: list[str]) -> Optional[threads.Reader]:
-    """PR のコメントを読む口。作れなければ注意に載せて None（読まずに進む）。"""
-    if reader_for is None:
-        return None
-    pr = store.state_pr(cfg.state_dir, cfg.pr).current_pr
-    try:
-        return reader_for(pr)
-    except Exception as exc:  # noqa: BLE001 ネットワーク: 読む口を作れなくてもレビューは進め、注意に残す
-        warnings.append(f"PR #{pr} のコメントを読む口を作れない（既存の指摘を相手役へ渡さず、残った指摘を引き継がない）: {exc}")
-        return None
-
-
-def _read_prior(prs: Optional[threads.Reader], warnings: list[str]) -> _Prior:
-    """引き継ぎの確かめに要るもの（PR のスレッドと PR コメント。1 回の起動で 1 回だけ読む）。読めなければ注意に載せて空。"""
-    if prs is None:
-        return _Prior()
-    read = None
-    try:
-        left = list(prs.open_threads())
-        read = prs.read_pr()
-    except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
-        warnings.append(f"PR のスレッドを読めない（前の実行が残した未解決の指摘を引き継がない）: {exc}")
-        left = []
-    try:
-        comments = list(prs.comments())
-    except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
-        warnings.append(f"PR のコメントを読めない（既存の指摘を相手役へ渡さず、記録のコメントの未解決の指摘を引き継がない）: {exc}")
-        comments = []
-    return _Prior(left, comments, read)
-
-
-def _read_reviews(prs: Optional[threads.Reader], warnings: list[str]) -> list[prior_decide.Remark]:
-    """相手役へ渡す参考資料のうち、インラインのレビューコメントとレビュー本文（相手役を起動するときだけ読む。PR 3944 の r2-10）。"""
-    if prs is None:
-        return []
-    try:
-        return list(prs.reviews())
-    except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
-        warnings.append(f"PR のレビューコメントを読めない（既存の指摘を相手役へ渡さない）: {exc}")
-        return []
-
-
-# 別の実行がスレッドを resolve した指摘の理由（PR 3944 の r2-6）
-RESOLVED_ELSEWHERE = "別の実行か人がスレッドを resolve した"
-
-
-def _settle_resolved(run: _Run, left: Sequence[prior_decide.Thread], done: dict[str, Any]) -> int:
-    """状態ファイルが追う自分のスレッドのうち、別の実行（か人）が resolve したものの未解決の指摘を、修正の対象から外す
-    （直したとして、そのスレッドへ返信も resolve もし直さない。PR 3944 の r2-6）。外した件数を返す。NDF が機械で確かめて作った
-    指摘は外さない（直ったかは次の確かめだけが決める。#4090）。"""
-    resolved = {t.comment for t in left if t.resolved}
-    settled = 0
-    for fid, mark in done.items():
-        row = run.journal.rows.get(fid)
-        if not isinstance(mark, dict) or mark.get("comment") not in resolved or row is None or row.get("outcome") != fin.UNRESOLVED:
-            continue
-        if row.get("by") == BY_NDF:
-            continue
-        row |= {"outcome": fin.FIXED, "reason": RESOLVED_ELSEWHERE}
-        mark |= {"replied": True, "resolved": True}
-        settled += 1
-    return settled
-
-
-def _carry(run: _Run, prior: _Prior) -> None:
-    """前の実行が PR に残した未解決の自分の指摘を未解決の指摘としてジャーナルへ入れる。開いたままのスレッドは `threads` に
-    結び（閉じたら返信して resolve する）、スレッドの無い指摘と、スレッドから引き継げなかった NDF の指摘（resolve 済みなど）は
-    最新の記録のコメントから戻す。状態ファイルが既に持つスレッド・指摘は引き継がずに MVV の判定だけを重ね、そのうち別の実行が
-    resolve したスレッドの指摘は修正の対象から外す。"""
-    done = run.data.setdefault(threads.THREADS, {})
-    settled = _settle_resolved(run, prior.threads, done)
-    tracked = {m.get("comment") for m in done.values() if isinstance(m, dict)}
-    listed, marks = prior_decide.recorded(prior.comments, run.data.get(report_decide.COMMENT_KEY), run.journal.rows)
-    carried = prior_decide.carried(prior.threads, tracked, marks)
-    held = tracked | {c.comment for c in carried}
-    carried += [c for c in listed if c.thread is None or c.thread not in held]
-    merged = _merge_tracked(run, prior.threads, done, marks, run.mvv_items)
-    added = set(run.journal.carry(carried, run.mvv_items, run.mvv))
-    run.warnings += run.journal.warnings
-    _detach_revived(run)
-    merged.update(run.journal.merged)
-    for c in carried:
-        if c.id in added and c.comment is not None:
-            done[c.id] = {"comment": c.comment}
-    if settled:
-        run.process.append({"run": "start", "result": f"別の実行が resolve したスレッドの指摘 {settled} 件を修正の対象から外した"})
-    if added:
-        run.process.append({"run": "start", "result": f"PR に残った未解決の指摘 {len(added)} 件を引き継いだ"})
-    if merged:
-        run.process.append({"run": "start", "result": f"記録のコメントにある MVV の判定を、既にある指摘 {len(merged)} 件に重ねた"})
-    if settled or added or merged:
-        _save(run)
-
-
-def _merge_tracked(
-    run: _Run,
-    left: Sequence[prior_decide.Thread],
-    done: Mapping[str, Any],
-    marks: Mapping[int, Mapping[str, Any]],
-    items: Sequence[str],
-) -> set[str]:
-    """状態ファイルが追うスレッドの指摘に、記録のコメントにある同じスレッドの MVV の判定を重ね、変わった指摘の id を返す。
-    閉じた指摘には、スレッドが開いていると読めたときだけ重ねる（人が resolve した指摘を戻さない）。"""
-    opened = {t.comment for t in left if not t.resolved}
-    merged = set()
-    for fid, mark in done.items():
-        row = run.journal.rows.get(fid)
-        comment = mark.get("comment") if isinstance(mark, dict) else None
-        if row is None or comment not in marks or (row.get("outcome") != fin.UNRESOLVED and comment not in opened):
-            continue
-        if run.journal.merge_marks(fid, marks[comment], items, run.mvv):
-            merged.add(fid)
-    return merged
-
-
-def _restate(run: _Run) -> None:
-    """MVV が前の起動から変わっていれば、前の MVV で決めた判定を指摘から外す（最初のラウンドの前に 1 回）。"""
-    stale = run.journal.restate(run.mvv)
-    if stale:
-        run.process.append({"run": "start", "result": f"MVV が変わったので、前の MVV で判定した指摘 {len(stale)} 件の判定を外した"})
-        _save(run)
 
 
 # --- 相手役 -----------------------------------------------------------------------------
@@ -575,7 +443,7 @@ def _save(run: _Run) -> None:
 def _ingest_citations(run: _Run, errors: Optional[list[dict[str, Any]]], round_no: int, recorded: bool = True) -> bool:
     """根拠の記述の確かめの結果をジャーナルへ入れる。ジャーナルが変わったら真。"""
     wrote = run.journal.ingest_citations(errors, run.mvv, round_no, recorded=recorded)
-    _detach_revived(run)
+    carry.detach_revived(run)
     return wrote
 
 
@@ -824,23 +692,6 @@ def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Ha
     return CHANGES_REQUIRED
 
 
-def _detach_revived(run: _Run) -> None:
-    """直した・見送ったのに出し直された指摘から、resolve した古いスレッドと巻き直しの前に済んだ記録を外す（PR 3944 の r6-6）。
-    外さないと、同じ保存先の再開は古い resolve を根拠に再発を直したとし（`_settle_resolved`）、別の保存先の再開は
-    閉じたスレッドと、スレッドを持つとした記録のコメントの双方から再発を取りこぼす。外した指摘は、記録の公開で新しい
-    スレッドを開くか、スレッドの無い未解決の指摘として記録のコメントに残る。"""
-    revived, run.journal.revived = run.journal.revived, []
-    if not revived:
-        return
-    done = run.data.get(threads.THREADS)
-    settled = run.data.get(report_decide.SETTLED_KEY)
-    for fid in revived:
-        if isinstance(done, dict):
-            done.pop(fid, None)
-        if isinstance(settled, list) and fid in settled:
-            settled.remove(fid)
-
-
 def _round_record(run: _Run, round_no: int, prep: _Prepared) -> dict[str, Any]:
     """状態ファイルに残すラウンドの記録。判定と修正の結果は、決まってから呼び手が足す。"""
     record = {
@@ -876,7 +727,7 @@ def _round(run: _Run, round_no: int, launch: Launcher) -> Optional[str]:
         raise DriveStopped("precondition", f"round {round_no} で相手役が誰も差分を読めなかった:\n" + "\n".join(local))
     run.history.append(run.journal.enter(round_no, raised, run.mvv_items, run.mvv))
     run.warnings += run.journal.warnings
-    _detach_revived(run)
+    carry.detach_revived(run)
     record = _round_record(run, round_no, prep)
     rounds.append(record)
     if unread:
@@ -931,7 +782,7 @@ def _reusable(run: _Run) -> bool:
 def drive(
     cfg: RunConfig,
     launch: Launcher = agents.run_agent,
-    reader_for: Optional[ReaderFor] = None,
+    reader_for: Optional[carry.ReaderFor] = None,
     clean: report_decide.Cleaner = run_log.redact,
 ) -> Outcome:
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
@@ -953,25 +804,27 @@ def drive(
             shutil.rmtree(run.input_dir, ignore_errors=True)
 
 
-def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[ReaderFor]) -> Outcome:
+def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[carry.ReaderFor]) -> Outcome:
     cfg = run.cfg
-    prs = _reader(cfg, reader_for, run.warnings)
-    prior = _read_prior(prs, run.warnings)
+    prs = carry.reader(cfg, reader_for, run.warnings)
+    prior = carry.read_prior(prs, run.warnings)
     run.read_pr = reviewed_pr.seen(run, prior.pr)
     reason = reviewed_pr.why_unread(run, prior.pr)
     if reason is not None:
         # 読めなかった原因は注意にある。結果へ載る文なので秘密を伏せる
         detail = [f"レビューを始める前に止めた。読んだ PR を確かめられない: {reason}", *run.warnings]
         raise DriveStopped("precondition", "\n".join(str(line) for line in run_log.redact(detail)))
-    _carry(run, prior)
-    _restate(run)
+    if carry.carry(run, prior):
+        _save(run)
+    if carry.restate(run):
+        _save(run)
     if _reusable(run):
         # 変わっていない PR を回し直さない（相手役の起動の分の費用をかけない。#3941）
         n = len(store.list_of(run.data, store.ROUNDS))
         run.process.append({"run": f"round {n}", "result": "head が変わっていないので前回の結果（converged）を返した"})
         seats.reused_warnings(run)
         return _summary(run, fin.CONVERGED, n, reused=True)
-    run.remarks = [*prior.comments, *_read_reviews(prs, run.warnings)]
+    run.remarks = [*prior.comments, *carry.read_reviews(prs, run.warnings)]
     run.warnings += [seats.filled_warning(f, "起動の前") for f in cfg.prefilled]
     seats.fill_refused(run)
     final, done = fin.MAX_ROUNDS, 0
