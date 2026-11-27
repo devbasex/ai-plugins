@@ -108,7 +108,8 @@ NDF には 4 つの CLI をまとめて起動するサブコマンドが無い�
      そのランタイムを承認したときだけ安全装置を外す。Kiro と agy の作業委譲は、起動の設定でそのランタイムの承認が有効な場合に実行できる。
      同じ設定であれば、起動ごとに承認し直す必要はない
    - 承認が無いと CLI を起動せず、理由と承認の手順を標準エラーに出して止まる（終了コード 3）。`/ndf:launch-config` で承認してから打ち直す
-   - 読むだけの委譲は `--use review` を付ける（codex は `-s read-only`、kiro は読むだけの指定で起動し、agy は止まる）
+   - 読むだけの委譲は `--use review` を付ける（codex は `-s read-only`、kiro は読むだけの指定で起動し、agy は止まる）。
+     読むだけの委譲では結果ファイルを書けないので、プロンプトで結果を最終応答に返すよう指示し、標準出力を回収する
    - コマンドが安全装置の引数（`-s`・`--sandbox`・`--dangerously-bypass-approvals-and-sandbox`・`--trust-all-tools`・`--trust-tools`・
      `--dangerously-skip-permissions` など）や作業ディレクトリの指定（codex の `-C`・`--cd`）を自分で持つと拒まれる
 
