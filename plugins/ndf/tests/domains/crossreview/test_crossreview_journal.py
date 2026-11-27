@@ -669,7 +669,9 @@ def test_issue_4363_enter_remembers_the_new_and_revived_findings() -> None:
     assert journal.fresh == ["r1-1", "r1-2"]
     journal.apply_fix([{"id": "r1-1", "outcome": fin.FIXED}], [], 1)
     journal.enter(2, [_told("A"), _told("B"), _told("C")])
-    assert journal.fresh == ["r1-1", "r2-1"]
+    # 戻った A はラウンド 2 の指摘に数えるので、新しい C の番号は r2-2 になる
+    assert journal.fresh == ["r1-1", "r2-2"]
+    assert [journal.rows[fid]["text"] for fid in journal.fresh] == ["A", "C"]
     journal.enter(3, [])
     assert journal.fresh == []
 
