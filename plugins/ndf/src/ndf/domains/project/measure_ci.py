@@ -13,7 +13,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Optional
 
 from ndf.adapters import cli_floor
 from ndf.domains.project.items import measured, obj, question, seq, unknown
@@ -105,11 +105,10 @@ def _measure_merges(gh: Gh) -> tuple[dict[str, int], list[str]]:
     return merges, sorted(hosts)
 
 
-def measure(tree: Tree, repo: Optional[str], head: Optional[str], deadline: float, environ: Mapping[str, str]) -> dict[str, Any]:
+def measure(tree: Tree, repo: Optional[str], head: Optional[str], deadline: float) -> dict[str, Any]:
     """P4 と、P6・P8 の GitHub の分を測る。返すのは `{"ci", "merges", "github_issues", "hosts", "notes"}`。
 
-    `gh` を呼ぶのは `rules/branches/<head>`（`head` があるとき）・閉じた PR・課題の 3 回だけである。`environ` は使わない
-    （呼ぶ側との形を変えないために受ける）。
+    `gh` を呼ぶのは `rules/branches/<head>`（`head` があるとき）・閉じた PR・課題の 3 回だけである。
     """
     out: dict[str, Any] = {"merges": None, "github_issues": None, "hosts": [], "notes": []}
     if not repo:

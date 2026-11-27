@@ -23,7 +23,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -100,7 +99,7 @@ def _instruction_notes(items: dict[str, Any]) -> list[str]:
 def _ci_items(tree: measure_repo.Tree, step: _Steps, ctx: MeasurementContext) -> list[str]:
     """`gh` と CI から測る項目を入れ、指示ファイルと CI の注記を返す。"""
     items = step.items
-    ci_part = step("ci", lambda: measure_ci.measure(tree, ctx.gh_repo, ctx.head, step.deadline, os.environ))
+    ci_part = step("ci", lambda: measure_ci.measure(tree, ctx.gh_repo, ctx.head, step.deadline))
     notes = _instruction_notes(items)
     if ci_part:
         items["ci"] = ci_part["ci"]

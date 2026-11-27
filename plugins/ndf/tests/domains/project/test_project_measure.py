@@ -154,7 +154,7 @@ def _patch_gh(monkeypatch, fail: dict[str, Exception] | None = None) -> list[str
 
 def _measure(tmp_path, repo="o/r", head="main"):
     tree = SimpleNamespace(root=tmp_path)
-    return measure_ci.measure(tree, repo, head, time.monotonic() + 30, {})
+    return measure_ci.measure(tree, repo, head, time.monotonic() + 30)
 
 
 def test_measure_calls_only_the_three_github_paths(tmp_path, monkeypatch):

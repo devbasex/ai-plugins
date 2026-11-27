@@ -313,7 +313,7 @@ def _ci_ctx(**over) -> cli.MeasurementContext:
 
 
 def _patch_ci(monkeypatch, ci, calls: list) -> None:
-    def fake_ci(tree, gh_repo, head, deadline, environ):
+    def fake_ci(tree, gh_repo, head, deadline):
         calls.append(("ci", tree, gh_repo, head))
         if isinstance(ci, Exception):
             raise ci
