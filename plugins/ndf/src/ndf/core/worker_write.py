@@ -25,8 +25,10 @@ from ndf.contracts.exit_codes import OK
 from ndf.core.worker_guard import WorkerError, check_held
 
 PATH_HELP = (
-    "`ndf worker run` が起動した worker の中で使う。`ndf worker run --result-file` に指定したファイルの親ディレクトリを基準に、"
-    "その配下のファイルを指定する（`--state-dir` は基準にならない）。本文は標準入力に渡し、全文を置き換える"
+    "書き込むファイル。書き込み先は `ndf worker run --result-file` の親ディレクトリの配下に限る（`--state-dir` の配下ではない）。"
+    "相対パスは、このコマンドを実行する作業ディレクトリから解決する。本文は標準入力に渡し、ファイルの全文を置き換える。"
+    "信頼済みの呼び出し元（`ndf worker run` が起動した worker など）が使う。環境変数で受け取った保存先の識別子と、"
+    "開いたディレクトリの識別子が一致するかを確かめる。呼び出し元が `ndf worker run` の起動した worker かどうかは検証しない"
 )
 
 
