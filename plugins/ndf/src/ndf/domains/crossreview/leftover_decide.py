@@ -37,6 +37,18 @@ def finding_kinds(row: Mapping[str, Any]) -> frozenset[str]:
     return frozenset(found)
 
 
+def _path(row: Mapping[str, Any]) -> str | None:
+    """指摘の `path`（先頭の `./` を除く）。無ければ None。"""
+    path = row.get("path")
+    return path.removeprefix("./") if isinstance(path, str) else None
+
+
+def on_touched_line(row: Mapping[str, Any], touched: Touched) -> bool:
+    """指摘の位置が、変えた行を指すか。"""
+    path = _path(row)
+    return path in touched.lines and row.get("line") in touched.lines[path]
+
+
 def proceeds(row: Mapping[str, Any], touched: Touched, *, returned: bool = False, unconfirmed: bool = False) -> bool:
     """指摘の行 `row` を直さずに残さないか（真なら `parked` を付けない）。`returned` は直した後にもう一度出た指摘、
     `unconfirmed` は判定役へ渡して有効な回答の無かった指摘。minor・nit も真だが、重要度で修正担当へは渡らない。
@@ -47,9 +59,8 @@ def proceeds(row: Mapping[str, Any], touched: Touched, *, returned: bool = False
     # 残すのは収束の妨げになる重さのうち最も軽いもの（major）だけ
     if criteria_decide.severity_of(row.get("severity")) != criteria_decide.at_least_blocking(None):
         return True
-    path, line = row.get("path"), row.get("line")
-    path = path.removeprefix("./") if isinstance(path, str) else None
-    if path in touched.lines and line in touched.lines[path]:
+    path, line = _path(row), row.get("line")
+    if on_touched_line(row, touched):
         return True
     if finding_kinds(row) & set(criteria_decide.protect_kinds()):
         return True

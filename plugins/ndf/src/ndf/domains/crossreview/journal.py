@@ -391,6 +391,8 @@ class FindingJournal:
         unexplained: list[str] = []
         fresh: list[str] = []
         same: dict[str, list[Mapping[str, Any]]] = {}
+        # このラウンドで `parked` を外した指摘の id と、外した出し直し
+        unparked: dict[str, Mapping[str, Any]] = {}
         before = len(self.revived)
         self.returned = []
         _unlower(by_key, raised, items)
@@ -420,10 +422,14 @@ class FindingJournal:
             elif named is None and items and _named_any(item):
                 unknown.append(str(known["id"]))
             if parked and PARKED not in known:
-                # 残していた行の位置は前の head の行番号なので、見送りを解いた出し直しのものにする
-                _move(known, _place(item), round_no)
+                unparked[str(known["id"])] = item
             touched[key] = known
             same.setdefault(str(known["id"]), []).append(item)
+        for fid, item in unparked.items():
+            # 残していた行の位置は前の head の行番号なので、見送りを解いた出し直しのものにする。位置が無ければ、同じラウンドの
+            # ほかの出し直しから補う
+            places = map(_place, (item, *same[fid]))
+            _move(self.rows[fid], next((p for p in places if "path" in p), {}), round_no)
         back = set(self.revived[before:])
         self.fresh = [fid for fid in dict.fromkeys(fresh) if _askable(self.rows[fid], same[fid], items, fid in back)]
         self.raised_ids, self._arrived, self._reports = list(same), frozenset(fresh), same
@@ -502,7 +508,8 @@ class FindingJournal:
         `unconfirmed` は判定役へ渡して有効な回答の無かった指摘の id。
 
         位置は今回の出し直しのものを 1 件ずつ当てる（残していた指摘の行の位置は、前の head の行番号である）。どれか 1 件が
-        進めば進め、指摘の行の位置をその出し直しのものに置き換える（`path` の無い出し直しなら元の位置を残す。`_move`。#3780）。"""
+        進めば進める。指摘の行の位置は、進んだ出し直しのうち、変えた行を指すもの、`path` を持つものの順に選んで置き換える
+        （どれにも `path` が無ければ元の位置を残す。`_move`。#3780）。"""
         parked: set[str] = set()
         for fid in self.raised_ids:
             row = self.rows[fid]
@@ -510,17 +517,17 @@ class FindingJournal:
                 continue
             base = {k: v for k, v in row.items() if k not in ("path", "line")}
             returned, unanswered = fid in self.returned, fid in unconfirmed
-            places = map(_place, self._reports[fid])
-            place = next(
-                (p for p in places if leftover_decide.proceeds(base | p, touched, returned=returned, unconfirmed=unanswered)),
-                None,
-            )
-            if place is None:
+            passed = [
+                p
+                for p in map(_place, self._reports[fid])
+                if leftover_decide.proceeds(base | p, touched, returned=returned, unconfirmed=unanswered)
+            ]
+            if not passed:
                 row[PARKED] = True
                 parked.add(row["key"])
             else:
                 row.pop(PARKED, None)
-                _move(row, place, self._round)
+                _move(row, max(passed, key=lambda p: (leftover_decide.on_touched_line(p, touched), "path" in p)), self._round)
         return frozenset(parked)
 
     def ingest_citations(

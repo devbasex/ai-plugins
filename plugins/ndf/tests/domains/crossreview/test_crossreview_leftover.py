@@ -251,6 +251,28 @@ def test_a_parked_finding_unparked_by_the_approval_item_takes_the_place_of_that_
     assert (row["round"], row["line"], row[journal_mod.PLACED_ROUND]) == (2, 7, 3)
 
 
+@pytest.mark.parametrize("sorted_", [pytest.param(True, id="sorted"), pytest.param(False, id="not-sorted")])
+def test_an_unparking_report_without_a_path_takes_the_place_of_another_report(sorted_: bool) -> None:
+    journal, row = _parked()
+    journal.enter(3, [_told(severity="critical"), _told(path="a.py", line=7)])
+    if sorted_:
+        journal.sort(TOUCHED)
+    assert PARKED not in row
+    assert (row["line"], row[journal_mod.PLACED_ROUND]) == (7, 3)
+
+
+@pytest.mark.parametrize(
+    "first",
+    [pytest.param({}, id="no-path"), pytest.param({"severity": "critical", **UNCHANGED}, id="unchanged-line")],
+)
+def test_sorting_prefers_the_report_on_a_changed_line(first: dict) -> None:
+    journal = journal_mod.FindingJournal()
+    journal.enter(2, [_told(**first), _told(path="a.py", line=10)])
+    assert journal.sort(TOUCHED) == frozenset()
+    row = journal.rows["r2-1"]
+    assert (row["path"], row["line"]) == ("a.py", 10)
+
+
 def test_the_thread_commit_of_a_moved_finding_is_the_head_of_the_placed_round() -> None:
     rounds = [{"round": 2, "head": "old"}, {"round": 3, "head": "new"}]
     assert threads._placed_head(rounds, {"round": 2}) == "old"
