@@ -24,7 +24,7 @@ _REPO = "devbasex/ai-plugins"
 
 def test_conflict_check_reports_dirty_pr_as_base_conflict(tmp_path):
     """#2752・#2680・#2273: マージ先と衝突した PR（mergeStateStatus が DIRTY）は待たずに base_conflict で返す。"""
-    step = step_of(plan_of("implement", branch="feat/x"), "conflict-check")
+    step = step_of(plan_of("check", branch="feat/x"), "conflict-check")
     dirty = fake_bin(tmp_path, "gh", "echo DIRTY")
     assert run_step(step, tmp_path, dirty)["kind"] == "base_conflict"
     clean = fake_bin(tmp_path, "gh", "echo CLEAN")
@@ -427,14 +427,16 @@ def test_pr_step_returns_pr_number_when_created_and_when_found(tmp_path):
     """PR を作ったときも、既にある PR を probe で見つけたときも、番号を items の kind: pr で返す（キューの {queue_prs}）。"""
     step = step_of(plan_of("close", branch="feat/x"), "pr")
     gh = fake_bin(tmp_path, "gh", 'case "$2" in create) echo https://github.com/o/r/pull/7 ;; view) echo 7 ;; list) echo 7 ;; esac')
-    assert run_step(step, tmp_path, gh)["prs"] == [7]
+    fill = {"state_dir": str(tmp_path)}
+    assert run_step(step, tmp_path, gh, fill)["prs"] == [7]
+    assert (tmp_path / "pr-number").read_text(encoding="utf-8") == "7\n"
     assert step.probe is not None
     probe = model.Step(id="pr-probe", run=step.probe)
-    assert run_step(probe, tmp_path, gh)["prs"] == [7]
+    assert run_step(probe, tmp_path, gh, fill)["prs"] == [7]
     open_only = fake_bin(tmp_path, "gh", 'case "$*" in *"--state open"*) echo 7 ;; esac')
-    assert run_step(probe, tmp_path, open_only)["prs"] == [7]
+    assert run_step(probe, tmp_path, open_only, fill)["prs"] == [7]
     none = fake_bin(tmp_path, "gh", "true")
-    found = run_step(probe, tmp_path, none)
+    found = run_step(probe, tmp_path, none, fill)
     assert (found["status"], found["code"], found["prs"]) == ("stopped", 1, [])
 
 
@@ -451,6 +453,7 @@ def test_design_pr_step_keeps_existing_pr_body(tmp_path, monkeypatch):
     gh = fake_bin(tmp_path, "gh", f'echo "$@" >> {shlex.quote(str(calls))}\ncase "$2" in list) echo 7 ;; *) exit 1 ;; esac')
     monkeypatch.setenv("PATH", f"{gh}:{os.environ['PATH']}")
     plan = _design_step(tmp_path, "pr")
+    (tmp_path / "state").mkdir()
     out = steps.run(steps.StepContext(plan, tmp_path / "state", {"state_dir": str(tmp_path / "state")}), plan.steps[0])
     assert out["status"] == "ok" and out["prs"] == [7]
     assert [line.split()[:2] for line in calls.read_text(encoding="utf-8").splitlines()] == [["pr", "list"]]

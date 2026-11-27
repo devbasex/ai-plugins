@@ -24,10 +24,14 @@
       "stage": "実装",
       "phase": "implement",
       "per_issue": true,
+      "per_unit": true,
       "inputs": [
         "issues",
         "worktree",
         "mode"
+      ],
+      "optional_inputs": [
+        "branch"
       ],
       "outputs": [
         "gathered"

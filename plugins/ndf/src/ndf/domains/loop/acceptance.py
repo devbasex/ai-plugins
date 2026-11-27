@@ -2,13 +2,14 @@
 
     ndf loop acceptance record --issue <N> [--pre-merge '<条件の番号>=<手段>']... [--post-release <条件の番号>]...
     ndf loop acceptance show   --issue <N>
-    ndf loop acceptance check  --issue <N>... [--criteria '<課題>:<条件の番号>']...
+    ndf loop acceptance check  --issue <N>... [--criteria '<課題>:<条件の番号>']... | --no-criteria
 
 - record: 今の表へ渡した番号の行を足すか置き換える（番号は本文の `## 受け入れ条件` にある番号だけを受ける）。
   課題ごとのロック（Git の共通ディレクトリの下）の中で読み・書き・読み直し、消されていれば 3 回まで当て直す（#3879）
 - check: 区分の記録の無い受け入れ条件が残れば、条件ごとの欠け（gaps）を付けて incomplete で止まる（受け入れ条件の
   無い課題は照らすものが無いので ok）。`--issue` を繰り返すと課題ごとに照らしてまとめ、`--criteria` に組のある課題は
-  その条件だけを照らす（レビューの単位が満たす条件だけを見る、#3879）。実装のプランは
+  その条件だけを照らす（レビューの単位が満たす条件だけを見る、#3879）。`--no-criteria` は条件を持たない単位のためで、
+  本文を読まずに ok を返す（`--criteria` とは一緒に受けない。#4369）。実装のプランは
   worker の後にこれを打ち、要求の手動確認（マージ前）を残したまま完了で返らない（#1682）。手動確認を行えなかった
   worker はマージ前の手段を書けないので、その条件は記録の無いまま残り、プランが止まって conductor に見える
 
@@ -33,8 +34,6 @@ from ndf.domains.loop import acceptance_decide as acc
 TOOL = cli.tool_of(f"{__package__}.cli")
 # 書いた後の読み直しで自分の記録がそろわないときに当て直す回数の方針（contracts/limits/）
 REAPPLY = "loop.acceptance-reapply"
-# `issueOrPullRequest`（union）から本文を選ぶ選択
-BODY_FIELDS = "... on Issue { body } ... on PullRequest { body }"
 
 
 def _hub(cwd: Path) -> github.GitHub:
@@ -53,8 +52,7 @@ def read_bodies(cwd: Path, issues: Sequence[int]) -> dict[int, str]:
     """
     if len(issues) == 1:
         return {issues[0]: read_body(cwd, issues[0])}
-    # issueOrPullRequest は union なので、body は型ごとのインラインフラグメントで選ぶ（#3908 の r2-1）
-    got = _hub(cwd).nodes(issues, "issueOrPullRequest", BODY_FIELDS)
+    got = _hub(cwd).nodes(issues, "issueOrPullRequest", github.BODY_FIELDS)
     unread = sorted(n for n in issues if n not in got or not isinstance(got[n].get("body"), str))
     if unread:
         raise acc.AcceptanceError(f"課題 {', '.join(f'#{n}' for n in unread)} の本文を読めない")
@@ -182,6 +180,9 @@ def _check_one(body: str, issue: int, wanted: set[int]) -> tuple[list[acc.Criter
 
 
 def _check(a: argparse.Namespace) -> dict[str, Any]:
+    if a.no_criteria:
+        where = ", ".join(f"#{n}" for n in a.issue)
+        return result.result(TOOL, result.OK, f"{where}: 確かめる受け入れ条件が無い（--no-criteria）")
     wanted = parse_criteria(a.criteria, a.issue)
     # 課題 1 つ・--criteria なしは今の形（名前は条件の番号だけ）。それ以外は名前に課題を付ける
     prefixed = len(a.issue) > 1 or bool(wanted)
@@ -218,6 +219,12 @@ def add_parsers(sub: Any) -> None:
     c = inner.add_parser("check", help="記録の無い受け入れ条件があれば incomplete で止まる")
     c.set_defaults(handler=_check)
     c.add_argument("--issue", action="append", type=int, required=True, help="照らす課題（繰り返せる）")
-    c.add_argument("--criteria", action="append", default=[], help="'<課題>:<条件の番号>'。その課題はこの条件だけを照らす")
+    only = c.add_mutually_exclusive_group()
+    only.add_argument("--criteria", action="append", default=[], help="'<課題>:<条件の番号>'。その課題はこの条件だけを照らす")
+    only.add_argument(
+        "--no-criteria",
+        action="store_true",
+        help="受け入れ条件を持たないレビュー単位では、記録を確認せずに ok を返す。--criteria と同時には指定できない",
+    )
     for name in ("record", "show"):
         inner.choices[name].add_argument("--issue", type=int, required=True)
