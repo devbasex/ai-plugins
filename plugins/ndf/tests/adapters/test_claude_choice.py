@@ -168,7 +168,7 @@ GOOD = {"decision": "fix", "reason": "r", "basis": []}
 
 
 def _experiments(store: Path, kind: str) -> list[dict]:
-    rows = [json.loads(line) for p in sorted(store.glob("launch-experiments-*.jsonl")) for line in p.read_text().splitlines()]
+    rows = [r for p in sorted(store.glob("launch-experiments-*.jsonl")) for r in model_choice.launch_records.whole_rows(p)]
     return [r for r in rows if r["kind"] == kind]
 
 

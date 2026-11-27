@@ -63,7 +63,7 @@ def _pick(root: Path, name: str = "impl", **kw) -> mc.Choice:
 def _rows(store: Path, kind: str | None = None) -> list[dict]:
     out = []
     for path in sorted(store.glob("launch-experiments-*.jsonl")):
-        out += [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("{")]
+        out += mc.launch_records.whole_rows(path)  # ロックを取らない追記が付ける、書きかけを閉じるバイト列の行は飛ばす
     return [r for r in out if kind is None or r["kind"] == kind]
 
 
@@ -333,11 +333,15 @@ def test_fallback_records_the_refusal_and_the_unit_stays_on_the_base(tmp_path, s
     root = _repo(tmp_path)
     draw["x"] = 0.9
     choice = _pick(root, unit="u")
-    with caplog.at_level(logging.WARNING):
-        back = mc.base_fallback(choice, "model_refused")
+    back = mc.base_fallback(choice, "model_refused")
     assert back is not None and back.model is None and back.model_source is mc.Source.DEFAULT and back.assign_id is None
-    (err,), (switch,) = _rows(store, "launch_error"), _rows(store, "base_switch")
-    assert err["assign_id"] == switch["assign_id"] == choice.assign_id and err["arm"] == {"model": "sonnet", "effort": "high"}
+    (err,) = _rows(store, "launch_error")
+    assert err["assign_id"] == choice.assign_id and err["arm"] == {"model": "sonnet", "effort": "high"}
+    assert _rows(store, "base_switch") == []  # 切り替えの行は、基準の組の起動を確かめた呼び手が書く
+    assert _pick(root, unit="u").assign_id == choice.assign_id
+    with caplog.at_level(logging.WARNING):
+        mc.record_base_switch(choice)
+    assert [r["assign_id"] for r in _rows(store, "base_switch")] == [choice.assign_id]
     assert "sonnet" in caplog.text
     again = _pick(root, unit="u", retry=None)
     assert again.assign_id is None and again.model is None
@@ -509,6 +513,7 @@ def test_fallback_writes_to_the_store_the_choice_used(tmp_path, monkeypatch, clo
     draw["x"] = 0.9
     choice = _pick(root, unit="u", environ={"NDF_USAGE_DIR": str(other)})
     assert mc.base_fallback(choice, "model_refused") is not None
+    mc.record_base_switch(choice)
     assert len(_rows(other, "launch_error")) == len(_rows(other, "base_switch")) == 1
     assert _pick(root, unit="u", environ={"NDF_USAGE_DIR": str(other)}).assign_id is None
 
