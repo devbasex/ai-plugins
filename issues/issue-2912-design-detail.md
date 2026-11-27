@@ -605,11 +605,11 @@ MVV 判定（`mvv_gate.py`）の変更は、後の節「MVV 判定のステッ�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `main` | `experimental/ndf/mvv_replay.py` | 新設 | `(argv: list[str]) -> int` | サブコマンド `material`（PR の材料を 1 回組んで保存する）、`judge`（保存した材料のファイルを指定の指示文で判定して数える）、`bodies`（本文の確認に使う本文を読んで保存する）、`gate`（導入した版のゲートを打つ）、`guard-check`（GitHub へ送らずに差し替えの働きを確かめる）を受ける |
-| `read_pairs` | `mvv_replay.py` | 新設 | `(hub: GitHub, pairs: Sequence[tuple[str, str]], store: Path) -> dict[tuple[str, str], Optional[str]]` | （head の SHA, パス）の組の本文を、設計文書の決定 6 の「本文の読み取り」のとおりに読む。組の一覧を `github.graphql-batch` 件ずつに分け、1 つの分につき `aliased` を 1 回呼ぶ。組ごとの結果（「取得済み」と本文・「本文が無い」・「未取得」）を `store` へ書き、`store` にある「取得済み」と「本文が無い」の組は読まない。返す値は「取得済み」なら本文、ほかは None |
-| `review_paths` | `mvv_replay.py` | 新設 | `(hub: GitHub, prs: Sequence[ReviewTarget]) -> dict[int, list[tuple[str, str]]]` | 本文の確認で読む組を PR ごとに返す。PR が足したか変えたファイルすべてと、同じ課題の番号の要求仕様・設計書・詳細設計書（その PR で変えていないものも含む）である |
+| `main` | `experimental/ndf/mvv_replay.py` | 新設 | `(argv: list[str]) -> int` | サブコマンド `material`（PR の材料を 1 回組んで保存する）、`judge`（保存した材料のファイルを指定の指示文で判定し、PR ごとの判定結果をファイルへ保存する。順 1・2 の `--expect` の照合もここで行う）、`bodies`（保存した判定結果から本文の確認に当てる PR を選び、確認に使う本文を読んで保存する）、`tally`（保存した判定結果・材料・本文の確認の結果だけから順 4 の 3 通りの値を集計する。LLM も GitHub も呼ばない）、`gate`（導入した版のゲートを打つ）、`guard-check`（GitHub へ送らずに差し替えの働きを確かめる）を受ける |
+| `read_pairs` | `mvv_replay.py` | 新設 | `(hub: GitHub, pairs: Sequence[tuple[str, str]], store: Path) -> dict[tuple[str, str], Optional[str]]` | （head の SHA, パス）の組の本文を、設計文書の決定 6 の「本文の読み取り」のとおりに読む。組の一覧を `github.graphql-batch` 件ずつに分け、1 つの分につき `aliased` を 1 回呼ぶ。組ごとの結果（「取得済み」と本文・「本文が無い」・「未取得」）と、その組を読みに行った回数を `store` へ書く。`store` にある「取得済み」と「本文が無い」の組、および読みに行った回数が 2 の「未取得」の組は読まない。返す値は「取得済み」なら本文、ほかは None |
+| `review_paths` | `mvv_replay.py` | 新設 | `(hub: GitHub, prs: Sequence[ReviewTarget]) -> dict[int, ReviewPaths]` | 本文の確認で読む組を PR ごとに返す。PR が足したか変えたファイルすべてと、同じ課題の番号の要求仕様・設計書・詳細設計書（その PR で変えていないものも含む）である。あわせて、PR ごとに `issues/` の一覧を読めたかを返す |
 | `prompt_at` | `mvv_replay.py` | 新設 | `(repo: Path, commit: Optional[str]) -> str` | 指示文を返す。`commit` があれば `git show <commit>:plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` を読み込んで `SYSTEM` を取り、無ければ読み込んだ `ndf` の `SYSTEM` |
-| `material_of` | `mvv_replay.py` | 新設 | `(hub: GitHub, g: Git, number: int) -> Optional[Material]` | 決定 5 の 4 つの順で、PR の材料の全文を組む。読んだベースと head の SHA、全文、全文の SHA-256 を返す。全文を取れなければ None。サブコマンド `material` が結果をファイルへ保存し、`judge` はこのファイルだけを読む（PR から組み直さない） |
+| `material_of` | `mvv_replay.py` | 新設 | `(hub: GitHub, g: Git, number: int) -> Optional[Material]` | 決定 5 の 4 つの順で、PR の材料の全文を組む。読んだベースと head の SHA、全文、全文の SHA-256 を返す。あわせて、SHA を読んだ PR の応答にある PR 本文と、その SHA-256 を返す（要求は増えない）。全文を取れなければ None。サブコマンド `material` が結果をファイルへ保存し、`judge` はこのファイルだけを読む（PR から組み直さない） |
 | `judge_once` | `mvv_replay.py` | 新設 | `(question: str, material: Material, model: str) -> dict[str, Any]` | `llm.ask` を、`--model` を足した `call` で 1 回呼び、回答と実行の情報（モデル ID・Claude Code のバージョン・指示文のコミット・材料のベースと head の SHA・材料のハッシュ）を返す |
 | `gate_once` | `mvv_replay.py` | 新設 | `(root: Path, answer: Literal["llm", "stand-in"], result: Path) -> int` | 導入した版の `mvv_gate.gate` を、`hub` の送る口を `guarded_hub` で差し替え、`NDF_MVV_STATE_DIR` を一時ディレクトリにして呼ぶ。`answer` は引数 `--answer` の値で、`llm` なら判定の呼び出し `ask` を差し替えず導入した版の `llm.ask` で実物の LLM に判定させ（設計文書の決定 6 の順 3 の 1 回目）、`stand-in` なら `follow` で `boundary` が空の回答を返す代役に差し替える（2 回目） |
 | `GuardedApi` | `mvv_replay.py` | 新設 | クラス（`GitHub.api` に差し替える、GitHub へ要求を送る口。`request` と `graphql._request` を持つ） | すべての要求を送る前に許可の一覧に照らす。読み取り（REST の `GET`、`mutation` と `subscription` を含まない GraphQL）だけを本物へ送る。確認用 PR へのコメントの投稿だけを捕まえて作り物の応答を返し、ほかの要求はすべて送らずに記録して `Refused` を送出する。要求を送らない属性（`config` など。`GitHub.__post_init__` が読む）は元の口へ委ねる |
@@ -640,18 +640,31 @@ MVV 判定（`mvv_gate.py`）の変更は、後の節「MVV 判定のステッ�
   - 表の確かめ: `material_of` は PR ごとに差分の設計成果物の（head の SHA, パス）の組を集めるだけで、本文を読まない。サブコマンド `material` が、対象のすべての PR の組をまとめて `read_pairs` で読む。組の結果がそろってから、PR ごとに `design_check_decide.redline_rows` を当てる。その結果で、`material_of` が返した `Material` の `tabled` を `_replace` で埋めてから保存する。指示文に依らないので、材料と一緒に 1 回だけ求める
   - `Material.tabled` の値: 「番号あり」は番号の空でないタプル、「番号なし」は空のタプル、「未確認」は None（組が 1 つでも「本文が無い」か「未取得」）。番号なしと未確認を同じ値にしない
   - 材料に載せられない件: 材料を組むときに読んだ変えたファイルの一覧（`compare_files` の行）に、本番のゲートと同じ `mvv_material_decide.incomplete_patches` を当てる。結果は `Material.incomplete` に入れて、材料と一緒に保存する。ファイルごとの理由は、`patch` が無い（`changes` が 0 でない）か、行数が `PATCH_LINES` を超えるかで分ける。材料を組む 1 回の中で求めるので、判定も GitHub への要求も増えない。受け入れ条件 7 の値の横に記録する件数と、経路全体の値の試算に使い、合否には使わない
+  - PR 本文: 本文の確認では、設計文書の決定 6 のとおり PR 本文もファイルの本文とあわせて読む。そこで `material` は、ベースと head の SHA を読んだ PR の応答の `body` を `Material.pr_body` に、その SHA-256 を `Material.pr_body_sha256` に入れて保存する。`body` が null（説明の無い PR）なら空の文字列とする。応答に `body` の項目が無ければ、どちらも None にする。材料と同じ時点の本文を残すので、後から PR 本文が書き換えられても確認の対象は変わらない
 - `read_pairs`
-  - 事後条件: `store` には、渡した組のすべてについて「取得済み」「本文が無い」「未取得」のどれかが書かれている。「本文が無い」は応答の `text` が null か `isTruncated` が真の組で、打ち直しても変わらないので読み直さない。「未取得」は、その組を載せた要求が `GitHubError` で失敗した組である
-  - 打ち直し: 同じ `store` で呼び直すと、「未取得」の組だけを読む。打ち直しは 1 回までとし、2 回目の呼び直しでも「未取得」が残れば、その組は最終の結果として「未取得」のままにする
+  - 事後条件: `store` には、渡した組のすべてについて「取得済み」「本文が無い」「未取得」のどれかと、その組を読みに行った回数（1 か 2）が書かれている。「本文が無い」は応答の `text` が null か `isTruncated` が真の組で、打ち直しても変わらないので読み直さない。「未取得」は、その組を載せた要求が `GitHubError` で失敗した組である
+  - 打ち直し: 1 つの組を読みに行くのは、最初の 1 回と打ち直しの 1 回の、計 2 回までである。同じ `store` で呼び直すと、「未取得」で読みに行った回数が 1 の組だけを読み、回数を 2 にする。回数が 2 の「未取得」の組は、最終の結果として「未取得」のままにし、3 回目は読みに行かない。回数を `store` に残すので、別の起動から呼び直しても上限を超えない
   - 分け方: 自分で `github.graphql-batch` 件ずつに分けてから `aliased` を呼ぶ。`aliased` は途中の要求が失敗すると、それまでに取れた本文も返さないためである。`aliased` の中でも同じ件数で分けるので、1 回の呼び出しは 1 回の要求になる
 - `review_paths`
-  - 処理: 課題の番号は、PR の差分の設計成果物の名前から `issue_docs.design_issues` で取る。PR ごとに head の `issues/` の一覧を `object(expression: "<head の SHA>:issues") { ... on Tree { entries { name } } }` で読む（`aliased` で PR をまとめて読む）。一覧から、`issue-<番号>-requirements.md` と、`DESIGN_FILE` に当たり番号が重なる名前を選ぶ。PR が足したか変えたファイル（`status` が `removed` でない行）と合わせ、重複を除いて返す
-  - 使い方: サブコマンド `bodies` が、本文の確認に当てる PR の組を `review_paths` で集め、`material` と同じ `store` を渡して `read_pairs` で読む。本文の確認に当てる PR は、どちらかの側で `follow` で `boundary` が空になり、表の確かめが「番号なし」の PR である。表の確かめで取得済みの組は読み直さない。本文の確認そのもの（承認が必要な操作を含むかの判断）は、リリース後テストの担当が保存した本文を読んで行い、実験版は判断しない
+  - 処理: 課題の番号は、PR の差分の設計成果物のパスから `issue_docs.design_issues` で取る。PR ごとに head の `issues/` の一覧を `object(expression: "<head の SHA>:issues") { ... on Tree { entries { name } } }` で読む（`aliased` で PR をまとめて読む）。`entries.name` は `issues/` の中のファイル名だけなので、先頭に `issues/` を付けたリポジトリ相対のパスにしてから照合する。`DESIGN_FILE` は `^issues/` から始まるパスにしか一致しないためである。そのパスから、`issues/issue-<番号>-requirements.md` と、`DESIGN_FILE` に当たり `design_issues` の番号が重なるパスを選ぶ。本文を読む組にも、同じリポジトリ相対のパスを使う。PR が足したか変えたファイル（`status` が `removed` でない行）と合わせ、重複を除く
+  - 戻り値: PR ごとに `ReviewPaths` を返す。`pairs` は読む（head の SHA, パス）の組で、`listed` は `issues/` の一覧を読めたかである。一覧を読めなかった PR は、`listed` を偽にし、`pairs` には PR が変えたファイルだけを入れる。こうすると `bodies` は、同じ課題の文書がもともと無い PR（`listed` が真で、足した組が無い）と、一覧を読めなかった PR を区別できる
+  - 使い方: サブコマンド `bodies` は、引数 `--judged` で両方の側の保存した判定結果を受け、本文の確認に当てる PR を選ぶ。選ぶのは、どちらかの側で `follow` で `boundary` が空になり、表の確かめが「番号なし」の PR である。選んだ PR の `ReviewTarget` を保存した材料のファイルから作り、組を `review_paths` で集め、`material` と同じ `store` を渡して `read_pairs` で読む。表の確かめで取得済みの組は読み直さない。判定は呼び直さない
+  - `bodies` の出力: PR ごとに、PR 番号・head の SHA・保存した PR 本文とその SHA-256・組ごとの本文と状態・`listed` を、確認担当（リリース後テストの担当）が読むファイルへ書く。次のどれかに当たる PR は「判断できない」の候補として印を付け、その理由も書く。`listed` が偽、組が 1 つでも「本文が無い」か「未取得」、`Material.pr_body` が None。印の付いた PR も、読めた分の本文は書くが、確認済みとして扱わない
+  - 本文の確認: 承認が必要な操作を含むかの判断は、確認担当が `bodies` の出力を読んで行い、実験版は判断しない。確認担当は、PR ごとに「含まない」「含む」「判断できない」と根拠を、本文の確認の結果のファイルへ書く。「含む」なら、当たる承認必須の操作の番号（`C7` など）も書く。各 PR には、`bodies` の出力からその PR の head の SHA と PR 本文の SHA-256 を写す。印の付いた PR は「判断できない」と書く
 - `main`
-  - 集計: 設計文書の決定 6 の「件数と割合は 3 通り記録する」のとおり、判定上の値・確認後の値・経路全体の値を、側ごとに件数と、12 を分母にした割合で出す。12 は、設計文書の決定 4 の対象 12 件である。合否に使うのは確認後の値だけである
+  - 順 4 の流れ: 判定の LLM を呼ぶのは `judge` だけで、測定 1 回につき両方の側で 1 回ずつである。後の工程は、保存した判定結果を引数 `--judged` で受け渡し、判定を呼び直さない
+    1. `material` で対象 12 件の材料を組んで保存する（表の確かめと PR 本文を含む）
+    2. `judge` を両方の側の指示文で打ち、それぞれの判定結果をファイルへ保存する
+    3. `bodies --judged <2 つの判定結果>` で本文の確認に使う本文を保存する
+    4. 確認担当が本文の確認の結果のファイルを書く
+    5. `tally --judged <2 つの判定結果> --reviewed <本文の確認の結果>` で 3 通りの値と合否を出す。合否を出し直すときも `tally` だけを打ち直す
+  - 本文の確認の結果の取り込み（`tally`）: `--reviewed` の各 PR の記録は、PR 番号に加えて、head の SHA と PR 本文の SHA-256 が、集計に使う材料の `Material.head_sha` と `Material.pr_body_sha256` の両方に一致したときだけ採る。どちらかが違う記録は、別の版の材料を確認した結果なので採らず、その PR は本文の確認が済んでいないものとして未確認に数え、採らなかった理由を結果のファイルの件ごとの行に書く。`--reviewed` に無い PR も未確認に数える
+  - 集計（`tally`）: 設計文書の決定 6 の「件数と割合は 3 通り記録する」のとおり、判定上の値・確認後の値・経路全体の値を、側ごとに件数と、12 を分母にした割合で出す。12 は、設計文書の決定 4 の対象 12 件である。合否に使うのは確認後の値だけである
   - 判定上の値: その側の判定が `follow` で `boundary` が空の PR をすべて数える
   - 経路全体の値: 両方の側で、`Material.incomplete` が空でない PR は省かない。そのうえで、変更前の指示文（`c93e690ed`）の側は判定が `follow` で `boundary` が空の PR を数え、変更後の側はさらに `Material.tabled` が空のタプルの PR だけを数える。変更後の側で表の確かめが止めた件数（`incomplete` が空で、変更後の判定が `follow` で `boundary` が空で、`tabled` が空でないタプルか None の PR）を併記する。本文の確認の結果は使わない
   - 確認後の値: 側ごとに、その側の判定が `follow` で `boundary` が空の PR を、設計文書の決定 6 の順 4 の「その側での扱い」の表に当てる。`Material.tabled` が空でないタプルなら省けない（表で止まる件）、None なら未確認、空のタプルなら本文の確認の結果で決める。確認後の件数は「省ける」の PR だけを数え、未確認の件数を併記する。片方の側の結果を、もう片方の側の件数から引かない。未確認の PR が残るときの合否は、設計文書の決定 6 の「未確認の PR があるときの合否」で決める。未確認の PR が、変更後の側ではすべて省けず変更前の側ではすべて省ける場合と、その逆の場合の 2 つで差を求める。2 つの差が同じ結論になるときだけ、その結論で合否を決め、違えば結論を保留する
+  - 承認必須の操作の見落とし: 本文の確認が「含む」の PR は、どちらの側でも確認後の件数に数えない。ただし分子から除くだけでは済ませない。変更後の側で判定が `follow` で `boundary` が空になり、本文の確認が「含む」の PR が 1 件でもあれば、受け入れ条件 7 は不合格とする。この不合格は、件数の差・「判定の揺れの扱い」の表・未確認の PR の扱いより優先し、差が 3 件以上でも合格にしない。変更後の指示文が承認必須の操作を見落としたことになり、見落としたまま合格と記録すると Value 13「確かめたことだけが済んだとされる」に反するためである
+  - #3017 へ記録する件: `tally` は、本文の確認が「含む」の PR のうち、どちらかの側で判定が `follow` で `boundary` が空になった PR を、結果のファイルの「#3017 へ記録する件」に一覧で書く。行ごとに、PR 番号・承認必須の操作の番号・見落とした側（変更後・`c93e690ed`・両方）を載せる。`c93e690ed` の側だけで見落とした PR は、合否を変えず、変更前の指示文が落としていた件として載せる。確認担当は、この一覧の PR と番号を [#3017](https://github.com/devbasex/ai-plugins/issues/3017) の本文へ書き足す。実験版は GitHub へ書かない
   - 副作用: `--plugin-root` があれば、`<置き場>/src` を `sys.path` の先頭へ足してから `ndf` を読み込む。無ければこのリポジトリの `plugins/ndf/src` を足す
 
 ### 異常系の処理
@@ -660,13 +673,14 @@ MVV 判定（`mvv_gate.py`）の変更は、後の節「MVV 判定のステッ�
 | --- | --- | --- | --- | --- | --- | --- |
 | `material_of` | 全文を取れない | API の応答に差分が無く、手元でも読み直せない | 戻り値 | 既定値で続ける（LLM を呼ばず「材料が欠けた」と記録する） | 結果のファイルの件ごとの行 | 再実行できる |
 | `judge_once` | 回答が無い・形が違う | 期限切れ・利用上限・2 回とも形が違う | `llm.ask` の `JudgeAnswer` | 既定値で続ける（読めない回答として分母に残す） | 結果のファイルの件ごとの行 | 再実行できる |
-| `main` | 比較に使えない組 | 比べる 2 つの判定でモデル ID か Claude Code のバージョンか材料のハッシュが違う | 結果の集計 | 止める（その組を比較に使わない） | 標準エラーと終了コード 1 | 揃えて打ち直す |
+| `main`（`tally`） | 比較に使えない組 | 比べる 2 つの判定でモデル ID か Claude Code のバージョンか材料のハッシュが違う | 結果の集計 | 止める（その組を比較に使わない） | 標準エラーと終了コード 1 | 揃えて打ち直す |
 | `gate_once` | 捕まえたコメントが 0 件 | 差し替えが働かない | 捕まえた件数 | 止める（「未確認」と記録する） | 結果のファイルと終了コード 1 | 直して打ち直す |
 | `gate_once` | 拒んだ要求が 1 件以上 | ゲートが想定の外の書き込みを試みた・許可の一覧が足りない | 拒んだ件数 | 止める（「未確認」と記録する）。拒んだ要求は GitHub へ届いていない | 結果のファイルと終了コード 1 | 一覧を見直し、`guard-check` から打ち直す |
 | `guard_check` | 書き込みが作り物まで届いた・コメントを捕まえない | 差し替えの抜け | 作り物が記録した要求 | 止める | 結果のファイルと終了コード 1 | 直して打ち直す |
 | `read_pairs` | 一部の要求が失敗した | GitHub の失敗・上限・権限 | `aliased` の `GitHubError` | その分の組を「未取得」として `store` に書いて続ける。ほかの分の結果は残す | 結果のファイルの組ごとの行 | 同じ `store` で 1 回だけ打ち直せる。残った組は表の確かめで「未確認」、本文の確認で「判断できない」になる |
-| `review_paths` | `issues/` の一覧を読めない | GitHub の失敗・head に `issues/` が無い | `aliased` の `GitHubError`・応答が Tree でない | その PR の同じ課題の文書を集めずに、PR が変えたファイルだけを返し、その PR に「一覧を読めない」と記録する | 結果のファイルの件ごとの行。その PR の本文の確認は「判断できない」になる | 再実行できる |
-| `main` | 材料が前の回と違う | 保存した材料のハッシュか、ベースと head の SHA が前の回と違う | 結果の集計 | その件を前の回と比べない | 標準エラーと結果のファイルの件ごとの行 | 同じ材料のファイルで打ち直す |
+| `review_paths` | `issues/` の一覧を読めない | GitHub の失敗・head に `issues/` が無い | `aliased` の `GitHubError`・応答が Tree でない | その PR の同じ課題の文書を集めずに、`pairs` に PR が変えたファイルだけを入れ、`listed` を偽にして返す。`bodies` はその PR に「一覧を読めない」と書き、「判断できない」の印を付ける | `bodies` の出力の件ごとの行。その PR の本文の確認は「判断できない」になる | 再実行できる |
+| `main`（`tally`） | 本文の確認の記録が材料と合わない | 記録の head の SHA か PR 本文の SHA-256 が、集計に使う材料と違う | 記録の取り込み | その記録を採らず、その PR を未確認に数える | 結果のファイルの件ごとの行 | 今の材料で `bodies` から打ち直し、確認し直す |
+| `main`（`tally`） | 材料が前の回と違う | 保存した材料のハッシュか、ベースと head の SHA が前の回と違う | 結果の集計 | その件を前の回と比べない | 標準エラーと結果のファイルの件ごとの行 | 同じ材料のファイルで打ち直す |
 | `prompt_at` | 指定のコミットを読めない | コミットが無い | `git show` の失敗 | 止める | 標準エラーと終了コード 2 | 取得してから打ち直す |
 
 ### 内部のデータと定数
@@ -677,10 +691,12 @@ MVV 判定（`mvv_gate.py`）の変更は、後の節「MVV 判定のステッ�
 | 比べる PR の番号と、対照で挙がるべき番号 | 引数（`--prs`・`--expect`） | 実験版へ渡す。値は設計文書の決定 4・6 | — |
 | モデル | 引数（`--model`） | 実験版へ渡す | — |
 | 作り物の材料の対 | ファイル | `experimental/ndf/mvv_replay_cases/` | 対は 1 つ。「扱いあり」と「扱いなし」の 2 つの材料で、それぞれ要求仕様と設計書の 2 ファイル（設計書は同じ） |
-| `Material` | 型（NamedTuple: `base_sha: str`・`head_sha: str`・`text: str`・`sha256: str`・`tabled: Optional[tuple[str, ...]]`・`incomplete: tuple[str, ...]`。`tabled` の None は表を確かめられなかった。`incomplete` は `incomplete_patches` の理由で、空なら差分の全体が材料に載る） | `mvv_replay.py` | — |
-| `ReviewTarget` | 型（NamedTuple: `number: int`・`head_sha: str`・`changed: tuple[str, ...]`。`changed` は削除を除く変えたファイルのパス） | `mvv_replay.py` | — |
-| 組ごとの読み取りの結果 | ファイル（組ごとに状態「取得済み」「本文が無い」「未取得」と、取得済みなら本文） | 引数 `--store` で渡す | — |
-| 本文の確認の結果 | ファイル（PR ごとに「含まない」「含む」「判断できない」と根拠。リリース後テストの担当が書く） | 引数 `--reviewed` で `judge` の集計へ渡す。無い PR は本文の確認が済んでいないものとして未確認に数える | — |
+| `Material` | 型（NamedTuple: `base_sha: str`・`head_sha: str`・`text: str`・`sha256: str`・`tabled: Optional[tuple[str, ...]]`・`incomplete: tuple[str, ...]`・`changed: tuple[str, ...]`・`pr_body: Optional[str]`・`pr_body_sha256: Optional[str]`。`tabled` の None は表を確かめられなかった。`incomplete` は `incomplete_patches` の理由で、空なら差分の全体が材料に載る。`changed` は削除を除く変えたファイルのパス。`pr_body` は材料を組んだ時点の PR 本文で、None は取得できなかった） | `mvv_replay.py` | — |
+| `ReviewTarget` | 型（NamedTuple: `number: int`・`head_sha: str`・`changed: tuple[str, ...]`。保存した材料の `Material` から作る） | `mvv_replay.py` | — |
+| `ReviewPaths` | 型（NamedTuple: `pairs: tuple[tuple[str, str], ...]`・`listed: bool`。`listed` が偽なら `issues/` の一覧を読めず、`pairs` は PR が変えたファイルだけ） | `mvv_replay.py` | — |
+| 組ごとの読み取りの結果 | ファイル（組ごとに状態「取得済み」「本文が無い」「未取得」と、読みに行った回数（1 か 2）と、取得済みなら本文） | 引数 `--store` で渡す | — |
+| 判定結果 | ファイル（側ごとに 1 つ。PR ごとの回答と `judge_once` の実行の情報） | `judge` が引数 `--result` へ書き、引数 `--judged` で `bodies` と `tally` へ渡す | — |
+| 本文の確認の結果 | ファイル（PR ごとに「含まない」「含む」「判断できない」と根拠、「含む」なら承認必須の操作の番号、確認した head の SHA と PR 本文の SHA-256。リリース後テストの担当が書く） | 引数 `--reviewed` で `tally` へ渡す。無い PR と、head の SHA か PR 本文の SHA-256 が材料と合わない PR は、本文の確認が済んでいないものとして未確認に数える | — |
 
 ### 既存の部品の再利用
 

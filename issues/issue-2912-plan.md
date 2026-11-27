@@ -13,7 +13,7 @@
 | ファイル | 変える中身 |
 | --- | --- |
 | `plugins/ndf/src/ndf/domains/records/mvv_material_decide.py` | `patch_material` に行数の引数 `limit`。指示文 `SYSTEM` に起票者の推定の扱いの箇条 |
-| `experimental/ndf/mvv_replay.py`（新設） | サブコマンド `material`・`judge`・`gate`・`guard-check`（`main`・`prompt_at`・`material_of`・`judge_once`・`gate_once`・`GuardedApi`・`guarded_hub`・`guard_check`） |
+| `experimental/ndf/mvv_replay.py`（新設） | サブコマンド `material`・`judge`・`bodies`・`tally`・`gate`・`guard-check`（`main`・`prompt_at`・`material_of`・`read_pairs`・`review_paths`・`judge_once`・`gate_once`・`GuardedApi`・`guarded_hub`・`guard_check`） |
 | `experimental/ndf/mvv_replay_cases/`（新設） | 推定の扱いの有無だけが違う作り物の材料の対（要求仕様と設計書を 1 組にした材料を 2 つ） |
 | `plugins/ndf/src/ndf/adapters/markdown.py` | `tables`（`Table`・`TableRow`） |
 | `plugins/ndf/src/ndf/domains/records/design_check_decide.py`（新設） | `decision_rows`・`redline_rows`・`findings`・`anchors_lost`・`added_lines`・`heading_touched`・`delegates`・`named`・`numbers_in`・`blank` と定数 |
@@ -56,7 +56,7 @@
 ### Task 3: 判定の比較の実験版と、対照の当たる操作を決める
 
 - **対象ファイル:** `experimental/ndf/mvv_replay.py`・`experimental/ndf/mvv_replay_cases/`・`issues/issue-2912-design.md`（決定 6 の対照の表の「当たる操作」の欄）
-- **変更内容:** サブコマンド `material` と `judge` を作る（`prompt_at`・`material_of`・`judge_once`）。材料は PR ごとに 1 回組んで保存し、比べる判定には同じファイルを渡す。この Task の `material` は、表の集計（`Material.tabled` を埋める処理）を持たず、`tabled` を None（未確認）のまま保存する。空のタプルは「番号なし」の意味なので使わない。表の集計は、後の単位で新設する `design_check_decide.redline_rows` を使うので Task 14 で足す。順 1・2 は表の集計を使わないので、この Task だけで打てる。推定の対を 1 つ（扱いありと扱いなしの 2 つの材料）置く。10 系の判定の記録の boundary から、対照 20 件の番号ごとに当たる操作を決めて設計書の表へ書く。2524 は元の差分から操作と番号を決め、当たらなければ根拠を #3017 に記録して対照から外す
+- **変更内容:** サブコマンド `material` と `judge` を作る（`prompt_at`・`material_of`・`judge_once`）。材料は PR ごとに 1 回組んで保存し、比べる判定には同じファイルを渡す。`material` は、材料を組んだ時点の PR 本文とその SHA-256（`Material.pr_body`・`pr_body_sha256`）と、変えたファイルのパス（`Material.changed`）も保存する。`judge` は PR ごとの判定結果をファイルへ保存し、後の `bodies` と `tally` が判定を呼び直さずに使えるようにする。この Task の `material` は、表の集計（`Material.tabled` を埋める処理）を持たず、`tabled` を None（未確認）のまま保存する。空のタプルは「番号なし」の意味なので使わない。表の集計は、後の単位で新設する `design_check_decide.redline_rows` を使うので Task 14 で足す。順 1・2 は表の集計を使わないので、この Task だけで打てる。推定の対を 1 つ（扱いありと扱いなしの 2 つの材料）置く。10 系の判定の記録の boundary から、対照 20 件の番号ごとに当たる操作を決めて設計書の表へ書く。2524 は元の差分から操作と番号を決め、当たらなければ根拠を #3017 に記録して対照から外す
 - **満たす受け入れ条件:** 5・6・7 の確かめの手段
 - **進め方:** 実験版は単体テストを持たない（設計書の決定 5）。手元で 1 件を判定して、結果のファイルにモデル ID・Claude Code のバージョン・指示文のコミット・材料のベースと head の SHA・材料のハッシュが載ることを確かめる
 
@@ -137,12 +137,23 @@
 ### Task 14: 実験版の材料に表の集計を足す
 
 - **対象ファイル:** `experimental/ndf/mvv_replay.py`
-- **変更内容:** サブコマンド `material` に、詳細設計書の「判定の比較（実験版）」の `material_of` の「表の確かめ」を足す。差分の設計成果物の（head の SHA, パス）の組をまとめて読み、組ごとの「取得済み」「本文が無い」「未取得」を保存し、PR ごとに `design_check_decide.redline_rows` を当てて `Material.tabled` を埋める。`main` の集計で `tabled` を使う
+- **変更内容:** サブコマンド `material` に、詳細設計書の「判定の比較（実験版）」の `material_of` の「表の確かめ」を足す。差分の設計成果物の（head の SHA, パス）の組を `read_pairs` でまとめて読み、組ごとの「取得済み」「本文が無い」「未取得」と読みに行った回数を保存し、PR ごとに `design_check_decide.redline_rows` を当てて `Material.tabled` を埋める
 - **満たす受け入れ条件:** 7（順 4 の確かめの手段）
 - **依存:** Task 3 と Task 6（`redline_rows`）
-- **進め方:** 実験版は単体テストを持たない（設計書の決定 5）。手元で、表に番号を持つ行がある PR・表の無い PR・本文が切り詰められるか読めない組を含む PR の 3 件で `material` を打ち、`tabled` が「番号あり」「番号なし」「未確認」に分かれることを確かめる
+- **進め方:** 実験版は単体テストを持たない（設計書の決定 5）。手元で、表に番号を持つ行がある PR・表の無い PR・本文が切り詰められるか読めない組を含む PR の 3 件で `material` を打ち、`tabled` が「番号あり」「番号なし」「未確認」に分かれることを確かめる。同じ `--store` で 2 回打ち直し、「未取得」の組を読みに行くのが計 2 回で止まることも確かめる
 
-決定 6 の順 3・4 は、リリースの後にリリース後テストの担当が Task 3・12・14 の実験版で打つ。実装のタスクには含めない。
+### Task 15: 本文の確認の材料を集め、結果を集計へ戻す
+
+- **対象ファイル:** `experimental/ndf/mvv_replay.py`
+- **変更内容:** 詳細設計書の「判定の比較（実験版）」の `review_paths`・`bodies`・`tally` を作る
+  - `review_paths`: `issues/` の一覧の名前に `issues/` を付けて照合し、PR ごとに `ReviewPaths`（読む組と、一覧を読めたか）を返す
+  - `bodies`: 保存した判定結果（`--judged`）から本文の確認に当てる PR を選び、PR 本文とファイルの本文を確認担当が読むファイルへ書く。「判断できない」の候補に印を付ける
+  - `tally`: 保存した判定結果・材料・本文の確認の結果（`--reviewed`）だけから、判定上の値・確認後の値・経路全体の値を出す。本文の確認の記録は head の SHA と PR 本文の SHA-256 が材料と一致したときだけ採る。変更後の側の「含む」で不合格とし、「#3017 へ記録する件」の一覧を書く
+- **満たす受け入れ条件:** 7（順 4 の確かめの手段）
+- **依存:** Task 14（`read_pairs` と `Material.tabled`）
+- **進め方:** 実験版は単体テストを持たない（設計書の決定 5）。手元で、Task 14 で保存した材料と、その材料を Task 3 の `judge` で判定した結果を使って `bodies` を打ち、同じ課題の要求仕様・設計書・詳細設計書が PR で変えていなくても出力に載ることを確かめる。続けて、作り物の本文の確認の結果で `tally` を 3 回打つ。1 回目は変更後の側で「含む」の PR を含めて不合格になること、2 回目は head の SHA を変えた記録が採られずに未確認へ数えられること、3 回目は `c93e690ed` の側だけの「含む」が合否を変えずに「#3017 へ記録する件」に載ることを確かめる。`tally` は LLM も GitHub も呼ばない
+
+決定 6 の順 3・4 は、リリースの後にリリース後テストの担当が Task 3・12・14・15 の実験版で打つ。実装のタスクには含めない。順 4 では、`material`・`judge`・`bodies`・`tally` の順に打ち、`bodies` の出力を確認担当が読んで本文の確認の結果を書く。
 
 ## レビューの単位
 
@@ -154,15 +165,15 @@
 | 設計の検査の判定 | Task 5・6 | 2912:4 | 約 550（判定 約 200、アダプター 約 40、テスト 約 310） | （実装の後に書き足す） |
 | 検査のコマンドと起点の解決 | Task 7・8 | 2912:4・2912:8 | 約 400（集め方と CLI 約 150、起点の移動 約 80、テスト 約 170） | （実装の後に書き足す） |
 | プランと手順書 | Task 9・11 | 2912:1〜4 | 約 350（テンプレートと工程と作業の定義 約 120、手順書 約 30、テスト 約 200） | （実装の後に書き足す） |
-| MVV 判定の表の確かめ | Task 10・13・14 | 2912:5c・2912:6・2912:7 の確かめの手段 | 約 280（ゲート 約 50、テスト 約 200、実験版の表の集計 約 30。Task 13 は確認だけで差分を持たない） | （実装の後に書き足す） |
+| MVV 判定の表の確かめ | Task 10・13・14・15 | 2912:5c・2912:6・2912:7 の確かめの手段 | 約 400（ゲート 約 50、テスト 約 200、実験版の表の集計 約 30、本文の確認の材料と集計 約 120。Task 13 は確認だけで差分を持たない） | （実装の後に書き足す） |
 
-依存の向き: 「設計の検査の判定」の `redline_rows` を「MVV 判定の表の確かめ」（Task 10 と Task 14）が、「検査のコマンドと起点の解決」のコマンドを「プランと手順書」が使う。「MVV 判定の表の確かめ」の Task 13 は、「判定の比較と指示文」の Task 12 のゲートのモードと、同じ単位の Task 10 を使う。Task 14 は、「判定の比較と指示文」の Task 3 の `material` に表の集計を足す。流す順は表の上から下で、「判定の比較と指示文」はほかの単位に依存しない。Task 4 が合格しないときも、Task 4 の `SYSTEM` の変更だけを外して単位を出す。
+依存の向き: 「設計の検査の判定」の `redline_rows` を「MVV 判定の表の確かめ」（Task 10 と Task 14）が、「検査のコマンドと起点の解決」のコマンドを「プランと手順書」が使う。「MVV 判定の表の確かめ」の Task 13 は、「判定の比較と指示文」の Task 12 のゲートのモードと、同じ単位の Task 10 を使う。Task 14 は、「判定の比較と指示文」の Task 3 の `material` に表の集計を足す。Task 15 は、Task 14 の `read_pairs` と Task 3 の判定結果を使う。流す順は表の上から下で、「判定の比較と指示文」はほかの単位に依存しない。Task 4 が合格しないときも、Task 4 の `SYSTEM` の変更だけを外して単位を出す。
 
 ## リファクタリングの時機
 
 | 時機 | 対象 | 理由 |
 | --- | --- | --- |
-| 実装の前（プレリファクタリング） | しない | 触るファイルの行数は `docrebuild/drive.py` 566・`records/cli.py` 549・`records/mvv_gate.py` 528・`records/mvv_material_decide.py` 283・`adapters/markdown.py` 124 で、どれも 600 行以下。別のタスクと同じファイルを触るタスクは 14 件中 10 件（Task 13 はファイルを触らない）で、1 つのファイルに集まるタスクは `mvv_replay.py` の Task 3・12・14 の 3 件が最大で、ほかは 2 件である（Task 1 と後のタスクのテストのファイル、`mvv_material_decide.py` の Task 2・4、`test_design_check.py` の Task 6・8）。`mvv_replay.py` は新設の実験版で、単体テストを持たず、3 件はサブコマンドごとに分かれるので、先に整える対象にしない。判定と集め方の本体は新しいファイルに入る。覆うテストは `test_mvv_gate.py` 48・`test_docrebuild_run.py` 33・`test_flows.py` 31・`test_mvv_material.py` 8・`test_markdown.py` 5。起点の解決の移動は、移動先が新しいファイルなので Task 7 の中で行う |
+| 実装の前（プレリファクタリング） | しない | 触るファイルの行数は `docrebuild/drive.py` 566・`records/cli.py` 549・`records/mvv_gate.py` 528・`records/mvv_material_decide.py` 283・`adapters/markdown.py` 124 で、どれも 600 行以下。別のタスクと同じファイルを触るタスクは 15 件中 11 件（Task 13 はファイルを触らない）で、1 つのファイルに集まるタスクは `mvv_replay.py` の Task 3・12・14・15 の 4 件が最大で、ほかは 2 件である（Task 1 と後のタスクのテストのファイル、`mvv_material_decide.py` の Task 2・4、`test_design_check.py` の Task 6・8）。`mvv_replay.py` は新設の実験版で、単体テストを持たず、4 件はサブコマンドごとに分かれるので、先に整える対象にしない。判定と集め方の本体は新しいファイルに入る。覆うテストは `test_mvv_gate.py` 48・`test_docrebuild_run.py` 33・`test_flows.py` 31・`test_mvv_material.py` 8・`test_markdown.py` 5。起点の解決の移動は、移動先が新しいファイルなので Task 7 の中で行う |
 | 実装の中 | 各タスクで行う | `tdd-cycle` のリファクタリングのステップ |
 | スプリントの終わり（cross-refactoring） | `design_check_decide` と `mvv_material_decide` の番号の正規表現（文中の番号と、MVV の表の行頭の番号）、3 つのテンプレートで同じ形の検査・繰り返しの数え・直しのステップ | 単位をまたいで同じ形の処理が 2 か所以上にできる。共通のステップへ寄せるか（`templates/parts/steps.json`）は、3 つのテンプレートがそろった後に比べる |
 
