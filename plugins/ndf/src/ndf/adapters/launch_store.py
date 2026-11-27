@@ -2,6 +2,10 @@
 
 記録は保存先の下のリポジトリごとのディレクトリ（`<repo>`）に置く。割り付けと自分のリポジトリの月の掃除は `model_choice` が行い、
 ここは名前の規則と、保存先全体を月に 1 回片付ける処理（`sweep`）を持つ。片付けは、ほかのリポジトリのロックを待たない。
+
+リポジトリのディレクトリのロックを取る起動は、その間、保存先の共有ロック（`launch-store.lock`。`using`）を持つ。役目を終えた
+ディレクトリの回収は、このロックを書き手として待たずに取れたときだけ行う。回収はロックのファイルも消すので、消したパスに起動が新しい
+ロックを作って取ると、回収とその起動が同時に進む。回収の対象の外にある共通のロックで、回収と起動を重ねない。
 """
 
 from __future__ import annotations
@@ -11,12 +15,13 @@ import logging
 import os
 import re
 import uuid
-from contextlib import ExitStack, suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from filelock import FileLock, Timeout
+from filelock import FileLock, ReadWriteLock, Timeout
 
 from ndf.contracts import facts
 
@@ -29,15 +34,15 @@ PRUNED = "launch-pruned"
 PRUNED_LOCK = "launch-pruned-lock"
 SWEPT = "launch-swept"
 SWEPT_LOCK = "launch-swept-lock"
+STORE_LOCK = "launch-store-lock"
 # 月ごとのファイルの名前の、月の位置と、リポジトリごとのディレクトリの名前の位置
 MONTH = "<YYYY-MM>"
 REPO = "<repo>"
 # リポジトリのディレクトリの名前（model_choice.repo_store）。ほかの名前のものとシンボリックリンクは片付けない
 _REPO_DIR = re.compile(r"[0-9a-f]{16}")
 _MONTH_FORM = re.compile(r"\d{4}-\d{2}")
-# 片付けで待たずに取るロックと、役目を終えたディレクトリから消すファイル
-_TIDY_LOCKS = (LEDGER_LOCK, WEIGHTS_LOCK, PRUNED_LOCK)
-_TIDY_FILES = (WEIGHTS, PRUNED, *_TIDY_LOCKS)
+# 役目を終えたディレクトリから消すファイル（NDF が作る名前だけ）
+_RETIRE_FILES = (WEIGHTS, PRUNED, LEDGER_LOCK, WEIGHTS_LOCK, PRUNED_LOCK)
 
 log = logging.getLogger(__name__)
 
@@ -108,27 +113,48 @@ def past(entry: Mapping[str, Any], now: datetime) -> bool:
     return datetime.fromisoformat(entry["at"]) + timedelta(days=entry["allocation"]["window_days"]) < now
 
 
+def _weights(path: Path, now: datetime) -> Optional[tuple[Optional[dict[str, Any]], list[Any]]]:
+    """出現率のファイルの中身と、期限の前の項目。ファイルが無ければ (None, [])、壊れていれば None。"""
+    if not path.is_file():
+        return None, []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data, [e for e in data["entries"] if not past(e, now)]
+    except (ValueError, KeyError, TypeError):  # noqa: NDF401 ファイル: 壊れた出現率のファイルは出現率の計算が作り直す
+        return None
+
+
 def prune_weights(root: Path, now: datetime) -> Optional[int]:
     """期限を過ぎた出現率の項目を消し、残りの数を返す（ファイルが無ければ 0、壊れていれば None）。出現率のロックの中で呼ぶ。"""
     path = store_file(root, WEIGHTS)
-    if not path.is_file():
-        return 0
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        kept = [e for e in data["entries"] if not past(e, now)]
-    except (ValueError, KeyError, TypeError):  # noqa: NDF401 ファイル: 壊れた出現率のファイルは出現率の計算が作り直す
+    got = _weights(path, now)
+    if got is None:
         return None
-    if len(kept) != len(data["entries"]):
+    data, kept = got
+    if data is not None and len(kept) != len(data["entries"]):
         write_replacing(path, json.dumps({**data, "entries": kept}, ensure_ascii=False))
     return len(kept)
 
 
-def sweep(base: Path, now: datetime, own: Path, edge: datetime) -> None:
-    """保存先 `base` の自分（`own`）以外のリポジトリを `_tidy` で片付ける。錠を待たずに取れた起動が、月に 1 回（`launch-swept`）行う。
+def _store_lock(base: Path, *, shared: bool = True) -> ReadWriteLock:
+    """保存先 `base` の共有ロック。起動は読み手（同じプロセスの入れ子を許す同じインスタンス）、回収は書き手（別のインスタンス）で取る。"""
+    base.mkdir(parents=True, exist_ok=True)
+    return ReadWriteLock(str(store_file(base, STORE_LOCK)), is_singleton=shared)
 
-    `edge` はどの設定でも使わない古さの境。今月か先月に自分の月の掃除を終えたリポジトリは、`launch-pruned` を読むだけで飛ばす。
-    自分の掃除は `edge` より新しい境で月を消し、出現率の項目も消すので、片付けで消すものが無いためである。1 つのリポジトリで
-    失敗しても警告を出して残りを続け、今月を書く。失敗した分は翌月にやり直す。起動のたびに保存先全体を読み直さないためである。
+
+@contextmanager
+def using(base: Path, timeout: float) -> Iterator[None]:
+    """保存先 `base` の共有ロックを読み手で持つ。リポジトリのディレクトリのロックは、この中で取る。回収が終わるのを最長 `timeout` 秒待つ。"""
+    with _store_lock(base).read_lock(timeout=timeout, blocking=timeout > 0):
+        yield
+
+
+def sweep(base: Path, now: datetime, own: Path, edge: datetime) -> None:
+    """保存先 `base` の自分（`own`）以外のリポジトリを片付け、役目を終えたものを回収する。錠を待たずに取れた起動が、月に 1 回
+    （`launch-swept`）行う。
+
+    `edge` はどの設定でも使わない古さの境。1 つのリポジトリで失敗しても警告を出して残りを続け、今月を書く。失敗した分は翌月に
+    やり直す。起動のたびに保存先全体を読み直さないためである。保存先の一覧を読めないなど全体が中断すれば今月を書かず、次の起動がやり直す。
     """
     done, name = store_file(base, SWEPT), month(now)
     if done_in(done, name):
@@ -141,37 +167,86 @@ def sweep(base: Path, now: datetime, own: Path, edge: datetime) -> None:
             return
         with os.scandir(base) as found:
             dirs = [Path(e.path) for e in found if _REPO_DIR.fullmatch(e.name) and e.is_dir(follow_symlinks=False)]
-        recent = (name, month(month_start(name, -1)))
-        for other in [d for d in dirs if d != own]:
-            try:
-                _tidy(other, now, edge, recent)
-            except OSError as exc:
-                log.warning("使われなくなったリポジトリの実験の記録を片付けられない（翌月にやり直す）: %s: %s", other, exc)
+        idle = [d for d in dirs if d != own and _tidied(d, now, edge)]
+        if idle:
+            _reclaim(base, idle, now)
         write_replacing(done, name)
     finally:
         lock.release()
 
 
-def _tidy(root: Path, now: datetime, edge: datetime, recent: tuple[str, ...]) -> None:
-    """ほかのリポジトリ `root` から、`edge` より前に終わった月のファイルと、期限を過ぎた出現率の項目を消す。
+def _pruned_month(root: Path) -> Optional[str]:
+    """リポジトリの月の掃除が `launch-pruned` に書いた月。無いか月の形でなければ None。"""
+    path = store_file(root, PRUNED)
+    text = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
+    return text if _MONTH_FORM.fullmatch(text) else None
 
-    月のファイルは、もう追記されない古さなので、ロックを取らずに名前の月だけで消す。出現率の項目は、ロックを取ってから読んで消す。
-    ロックはどれも待たずに取り、1 つでも使用中なら何もしない（使っているリポジトリは、自分の月の掃除で項目を消す）。月のファイルも
-    出現率の項目も残らなければ役目を終えたとみなし、状態とロックのファイルとディレクトリを消す。ロックのファイルを消しても
-    排他は分かれない。filelock は錠を取った後に、そのファイルが消されていれば（リンク数 0）取り直すためである。
+
+def _idle(root: Path, now: datetime) -> bool:
+    """回収してよいか。NDF の月の掃除が `launch-pruned` を書いたディレクトリ（NDF が作ったもの）で、最後の掃除が先月より前、
+
+    月のファイルも期限の前の出現率の項目も残らないもの。
     """
-    pruned = store_file(root, PRUNED)
-    if pruned.is_file() and pruned.read_text(encoding="utf-8").strip() in recent:
-        return  # 今月か先月に自分の月の掃除を終えたリポジトリには、消すものが無い
-    drop_months(root, edge)
-    locks = [FileLock(str(store_file(root, name)), timeout=0) for name in _TIDY_LOCKS]
-    with ExitStack() as held:
-        for lock in locks:
-            if not locked_now(lock):
-                return
-            held.callback(lock.release)
-        if prune_weights(root, now) == 0 and not month_files(root):
-            for name in _TIDY_FILES:
-                store_file(root, name).unlink(missing_ok=True)
-            with suppress(OSError):  # noqa: NDF402 ファイル: 片付けの知らない名前のファイルが残るディレクトリは消さない
-                root.rmdir()
+    last = _pruned_month(root)
+    if last is None or last >= month(month_start(month(now), -1)) or month_files(root):
+        return False
+    got = _weights(store_file(root, WEIGHTS), now)
+    return got is not None and not got[1]
+
+
+def _tidied(root: Path, now: datetime, edge: datetime) -> bool:
+    """ほかのリポジトリ `root` を片付け、回収の候補か（`_idle`）を返す。失敗は警告を出して偽（翌月にやり直す）。
+
+    今月に自分の月の掃除を終えたリポジトリは飛ばす（その掃除が `edge` より新しい境で月を消し、出現率の項目も消したため）。月ごとの
+    実験記録は、ファイル名の月で削除を判断し、もう追記されない古さなのでロックを取らずに消す。出現率ファイルはロックを取らずに読み、
+    期限を過ぎた項目があるときだけ、出現率のロックを待たずに取ってから読み直して消す。ロックが使用中なら、項目は消さずに飛ばす。
+    """
+    try:
+        if _pruned_month(root) == month(now):
+            return False
+        drop_months(root, edge)
+        got = _weights(store_file(root, WEIGHTS), now)
+        if got is not None and got[0] is not None and len(got[1]) != len(got[0]["entries"]):
+            _prune_weights_now(root, now)
+        return _idle(root, now)
+    except OSError as exc:
+        log.warning("使われなくなったリポジトリの実験の記録を片付けられない（翌月にやり直す）: %s: %s", root, exc)
+        return False
+
+
+def _prune_weights_now(root: Path, now: datetime) -> None:
+    lock = FileLock(str(store_file(root, WEIGHTS_LOCK)), timeout=0)
+    with using(root.parent, 0):  # 回収するのは片付けをしているこの起動だけなので、待たずに取れる
+        if not locked_now(lock):
+            return  # 使っているリポジトリは、自分の月の掃除で項目を消す
+        try:
+            prune_weights(root, now)
+        finally:
+            lock.release()
+
+
+def _reclaim(base: Path, roots: list[Path], now: datetime) -> None:
+    """保存先の共有ロックを書き手として待たずに取り、候補 `roots` を確かめ直してから回収する。取れなければ翌月に回す。
+
+    書き手を持つ間は、どの起動もリポジトリのディレクトリのロックを持たず、待ってもいないので、ロックのファイルも消せる。
+    NDF が作る名前のファイルだけを消し、ほかの名前のファイルが残るディレクトリは残す。
+    """
+    lock = _store_lock(base, shared=False)
+    try:
+        with lock.write_lock(timeout=0, blocking=False):
+            for root in [r for r in roots if _idle(r, now)]:
+                _drop_dir(root)
+    except Timeout:
+        log.info("起動が実験の記録を使っているので、役目を終えたリポジトリの回収を翌月に回す")
+    except OSError as exc:
+        log.warning("役目を終えたリポジトリの実験の記録を回収できない（翌月にやり直す）: %s", exc)
+    finally:
+        lock.close()
+
+
+def _drop_dir(root: Path) -> None:
+    """NDF が作る名前のファイルだけを消してから、ディレクトリを消す。"""
+    for name in _RETIRE_FILES:
+        store_file(root, name).unlink(missing_ok=True)
+    with suppress(OSError):  # noqa: NDF402 ファイル: 片付けの知らない名前のファイルが残るディレクトリは消さない
+        root.rmdir()
