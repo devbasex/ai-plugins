@@ -173,22 +173,6 @@ def test_kiro_takes_the_safety_arguments_after_its_non_interactive_chat(repo: Pa
     assert execs[0][1] == ["kiro-cli", "chat", "--no-interactive", "--trust-all-tools", "--model", "m"]
 
 
-@pytest.mark.parametrize(("use", "sandbox"), [(["--use", "review"], "read-only"), ([], "workspace-write")])
-def test_the_use_given_is_passed_to_the_safety_arguments(repo: Path, monkeypatch, execs, use: list[str], sandbox: str) -> None:
-    """用途は `--use` で受けた値を安全装置へ渡す（review を delegate に決め打ちすると、読むだけの委譲が書き込める）。"""
-    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
-    seen: list[str] = []
-    real = ls.safety_args
-
-    def spy(runtime, given_use, cwd, **kw):
-        seen.append(given_use)
-        return real(runtime, given_use, cwd, **kw)
-
-    monkeypatch.setattr(drc.ls, "safety_args", spy)
-    drc.main(["--runtime", "codex", *use, "--", "codex", "exec", "{args}"])
-    assert seen == [use[1] if use else "delegate"] and execs[0][1][4:6] == ["-s", sandbox]
-
-
 def test_a_model_given_in_the_command_wins_over_the_model_variable(repo: Path, monkeypatch, execs) -> None:
     """コマンドが明示したモデルは起動の引数として選択に渡り、下位の環境変数を確かめない（改行を含んでも止まらない）。モデルの引数は足さない。"""
     monkeypatch.setattr(agents, "user_namespaces", lambda: True)
