@@ -17,7 +17,7 @@ from filelock import FileLock
 from ndf.adapters.git import GitError
 from ndf.adapters.github import Authored, GitHubError
 from ndf.domains.release import cli as release_cli
-from ndf.domains.release import record, record_decide, record_unversioned
+from ndf.domains.release import record, record_decide, record_share, record_unversioned
 
 from ._fakes import FakeHub, pull, section, strategy
 from .test_release_delivery import FakeGit, FakeRun
@@ -420,9 +420,9 @@ def test_a_share_with_another_push_than_the_trusted_record_is_not_used(tmp_path:
     share = tmp_path / "share"
     other = record_unversioned.Prefix(COMMIT, record_decide.Push("e1" * 20, "e2" * 20), None, frozenset(), frozenset())
     trusted = record_decide.Push(BEFORE, AFTER)
-    record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: other)
+    record_share.shared_prefix(share, PROD, COMMIT, lambda: other)
     made = record_unversioned.Prefix(COMMIT, trusted, None, frozenset({"web/a.ts"}), frozenset())
-    assert record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: made, trusted) == made
+    assert record_share.shared_prefix(share, PROD, COMMIT, lambda: made, trusted) == made
 
 
 def test_a_missing_parent_for_the_pull_diff_stops_with_a_deeper_fetch(tmp_path: Path) -> None:
@@ -602,19 +602,19 @@ def test_shared_prefix_is_computed_once_and_redone_for_another_commit(tmp_path: 
         calls.append(commit)
         return record_unversioned.Prefix(commit, record_decide.Push(BEFORE, AFTER), None, frozenset({"a"}), frozenset())
 
-    share = record_unversioned.share_dir(_hands(repo))
-    first = record_unversioned.shared_prefix(share, PROD, COMMIT, compute)
-    assert record_unversioned.shared_prefix(share, PROD, COMMIT, compute) == first and calls == [COMMIT]
-    record_unversioned.shared_prefix(share, PROD, "f" * 40, lambda: compute("f" * 40))
+    share = record_share.share_dir(_hands(repo))
+    first = record_share.shared_prefix(share, PROD, COMMIT, compute)
+    assert record_share.shared_prefix(share, PROD, COMMIT, compute) == first and calls == [COMMIT]
+    record_share.shared_prefix(share, PROD, "f" * 40, lambda: compute("f" * 40))
     assert calls == [COMMIT, "f" * 40]
     path = repo.common / "ndf" / "release-record" / f"{PROD}.json"
     assert not list(path.parent.glob("**/*.ndf-tmp"))
-    record_unversioned.sweep_shares(share, 60, now=lambda: path.stat().st_mtime + 61)
+    record_share.sweep_shares(share, 60, now=lambda: path.stat().st_mtime + 61)
     assert not path.exists()
 
 
 def test_shared_prefix_keeps_a_file_it_did_not_write_and_sweeps_its_own_leftovers(tmp_path: Path) -> None:
-    share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
+    share = record_share.share_dir(_hands(Repo(tmp_path)))
     made = record_unversioned.Prefix(COMMIT, record_decide.Push(BEFORE, AFTER), None, frozenset({"a"}), frozenset())
     whole = json.dumps(made.as_json())
     ours = share / "tmp"
@@ -628,7 +628,7 @@ def test_shared_prefix_keeps_a_file_it_did_not_write_and_sweeps_its_own_leftover
     # 書く側が作って中断で残した一時ファイルは、空・書き終えたもの・途中まで書かれたもののどれも消す
     leftovers = []
     for text in ("", whole, whole[:5]):
-        opened = record_unversioned._open_tmp(share, PROD)
+        opened = record_share._open_tmp(share, PROD)
         assert opened is not None
         fd, path = opened
         with os.fdopen(fd, "w", encoding="utf-8") as out:
@@ -638,25 +638,25 @@ def test_shared_prefix_keeps_a_file_it_did_not_write_and_sweeps_its_own_leftover
     odd = [ours / name for name in (f"x.json.{'0' * 16}.ndf-tmp", f"{PROD}.json.short.ndf-tmp", "notes.txt")]
     for path in odd:
         path.write_text("", encoding="utf-8")
-    assert record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: made) == made
-    record_unversioned.drop_share(share, PROD)
-    record_unversioned.sweep_shares(share, 60, now=lambda: foreign.stat().st_mtime + 3600)
+    assert record_share.shared_prefix(share, PROD, COMMIT, lambda: made) == made
+    record_share.drop_share(share, PROD)
+    record_share.sweep_shares(share, 60, now=lambda: foreign.stat().st_mtime + 3600)
     assert foreign.read_text(encoding="utf-8") == "{"
     assert all(path.read_text(encoding="utf-8") == text for path, text in users.items())
     assert not any(path.exists() for path in leftovers) and all(path.exists() for path in odd)
 
 
 def test_shared_prefix_uses_its_own_result_when_the_temporary_directory_is_blocked(tmp_path: Path) -> None:
-    share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
+    share = record_share.share_dir(_hands(Repo(tmp_path)))
     made = record_unversioned.Prefix(COMMIT, record_decide.Push(BEFORE, AFTER), None, frozenset({"a"}), frozenset())
     share.mkdir(parents=True)
     (share / "tmp").write_text("利用者のメモ", encoding="utf-8")
-    assert record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: made) == made
+    assert record_share.shared_prefix(share, PROD, COMMIT, lambda: made) == made
     assert not (share / f"{PROD}.json").exists() and (share / "tmp").read_text(encoding="utf-8") == "利用者のメモ"
 
 
 def test_shared_prefix_releases_the_lock_before_computing_when_it_cannot_create_a_temporary_file(monkeypatch, tmp_path: Path) -> None:
-    share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
+    share = record_share.share_dir(_hands(Repo(tmp_path)))
     made = record_unversioned.Prefix(COMMIT, record_decide.Push(BEFORE, AFTER), None, frozenset({"a"}), frozenset())
     (share / "tmp").mkdir(parents=True)
     real = os.open
@@ -675,39 +675,39 @@ def test_shared_prefix_releases_the_lock_before_computing_when_it_cannot_create_
             locked.append(False)
         return made
 
-    assert record_unversioned.shared_prefix(share, PROD, COMMIT, compute) == made
+    assert record_share.shared_prefix(share, PROD, COMMIT, compute) == made
     assert locked == [False] and not (share / f"{PROD}.json").exists() and not list((share / "tmp").iterdir())
 
 
 def test_sweep_shares_keeps_a_temporary_file_while_its_pull_is_locked(tmp_path: Path) -> None:
-    share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
+    share = record_share.share_dir(_hands(Repo(tmp_path)))
     (share / "tmp").mkdir(parents=True)
-    opened = record_unversioned._open_tmp(share, PROD)
+    opened = record_share._open_tmp(share, PROD)
     assert opened is not None
     fd, path = opened
     os.close(fd)
     late = path.stat().st_mtime + 3600
     # 書く側が前処理の間ロックを持っていれば、期限を過ぎていても消さない
     with FileLock(str(share / f"{PROD}.json") + ".lock", timeout=0):
-        record_unversioned.sweep_shares(share, 60, now=lambda: late)
+        record_share.sweep_shares(share, 60, now=lambda: late)
         assert path.exists()
-    record_unversioned.sweep_shares(share, 60, now=lambda: late)
+    record_share.sweep_shares(share, 60, now=lambda: late)
     assert not path.exists()
 
 
 def test_sweep_shares_skips_a_temporary_directory_it_cannot_list(monkeypatch, tmp_path: Path) -> None:
-    share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
+    share = record_share.share_dir(_hands(Repo(tmp_path)))
     (share / "tmp").mkdir(parents=True)
 
     def denied(self: Path) -> Any:
         raise PermissionError(13, "Permission denied", str(self))
 
     monkeypatch.setattr(Path, "iterdir", denied)
-    record_unversioned.sweep_shares(share, 60, now=lambda: 0.0)
+    record_share.sweep_shares(share, 60, now=lambda: 0.0)
 
 
 def test_sweep_shares_does_not_open_a_fifo_or_follow_a_link(monkeypatch, tmp_path: Path) -> None:
-    share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
+    share = record_share.share_dir(_hands(Repo(tmp_path)))
     ours = share / "tmp"
     ours.mkdir(parents=True)
     fifo = share / f"{PROD}.json"
@@ -729,9 +729,9 @@ def test_sweep_shares_does_not_open_a_fifo_or_follow_a_link(monkeypatch, tmp_pat
     def no_path_open(self: Path, *args: Any, **kwargs: Any) -> Any:
         raise AssertionError(f"{self} を Path.open で開いた（待つ開き方）")
 
-    monkeypatch.setattr(record_unversioned.os, "open", checked_open)
+    monkeypatch.setattr(record_share.os, "open", checked_open)
     monkeypatch.setattr(Path, "open", no_path_open)
-    record_unversioned.sweep_shares(share, 60, now=lambda: fifo.lstat().st_mtime + 3600)
+    record_share.sweep_shares(share, 60, now=lambda: fifo.lstat().st_mtime + 3600)
     monkeypatch.undo()
     assert opened == [str(fifo)]
     assert fifo.exists() and tmp_fifo.exists() and link.is_symlink()

@@ -2,6 +2,6 @@
   "summary": "届け先ごとに並べて打った record --version が、共通の前処理（反映したコミット・push・push の時点の届け先の設定・差分のパス）の保存先のロックを待つ上限の秒。最初の呼び出しの前処理（約 1 秒）だけを待つ",
   "seconds": 120,
   "read_by": [
-    "ndf.domains.release.record_unversioned"
+    "ndf.domains.release.record_share"
   ]
 }
