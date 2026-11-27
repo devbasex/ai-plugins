@@ -228,13 +228,13 @@ def _fetch_hint(production: str, tip: str) -> str:
     return f"git fetch {remote} {tracking_refspec(remote, production)}"
 
 
-def _declared_at(repo_git: Git, commit: str, fetch: str) -> bool:
-    """反映したコミット `commit` の時点に届け先の設定があるか（`git cat-file --batch` の起動 1 回）。worktree の設定で
+def _declared_at(repo_git: Git, commit: str, fetch: str, what: str = "反映したコミット") -> bool:
+    """`what` が指すコミット `commit` の時点に届け先の設定があるか（`git cat-file --batch` の起動 1 回）。worktree の設定で
     決めると、同じリリースでも設定を外す前と後で対象の出典が変わり、外す前に失敗した CD の届け先を `--target` で
     記録できてしまう。コミットが手元に無ければ、`fetch` を示して `RecordError`。"""
     at = delivery_confirm.deliveries_at(repo_git, commit)
     if at.kind == delivery_confirm.MISSING_REF:
-        raise RecordError(f"反映したコミット {commit} が手元に無い。{fetch} で本番ブランチを取得してから打ち直す")
+        raise RecordError(f"{what} {commit} が手元に無い。{fetch} で本番ブランチを取得してから打ち直す")
     return at.kind != delivery_confirm.ABSENT
 
 
@@ -840,8 +840,5 @@ def _refuse_declared(hands: Hands, production: str, commit: str, push: Optional[
         if _declared_at(hands.repo_git, commit, fetch):
             raise RecordError("反映したコミットの時点に届け先の設定があり、対象の一覧は設定から決まる。--correct-targets では直せない")
         return
-    at = delivery_confirm.deliveries_at(hands.repo_git, push.after)
-    if at.kind == delivery_confirm.MISSING_REF:
-        raise RecordError(f"push の after {push.after} が手元に無い。{fetch} で本番ブランチを取得してから打ち直す")
-    if at.kind != delivery_confirm.ABSENT:
+    if _declared_at(hands.repo_git, push.after, fetch, "push の after"):
         raise RecordError("push の時点に届け先の設定があり、対象の一覧は設定から決まる。--correct-targets では直せない")
