@@ -439,13 +439,13 @@ def _same_dir(where: Path, obj: Mapping[str, Any]) -> bool:
 def _remove_draft_files(drafting: Path) -> None:
     """作成途中のディレクトリの中の、NDF が作る普通のファイルだけを消し、空になればディレクトリを消す。ほかの項目には触れない。"""
     with contextlib.suppress(OSError):  # noqa: NDF402 ファイル: 消せなかった残りは、ディレクトリごと次の掃除に任せる
-        for entry in _entries(drafting):
+        for entry in _draft_entries(drafting):
             if _is_draft_file(entry):
                 os.unlink(entry.path)
         drafting.rmdir()
 
 
-def _entries(where: Path) -> list[os.DirEntry[str]]:
+def _draft_entries(where: Path) -> list[os.DirEntry[str]]:
     """`where` の中の項目。読めなければ `OSError` を呼び手へ上げる。"""
     with os.scandir(where) as it:
         return list(it)

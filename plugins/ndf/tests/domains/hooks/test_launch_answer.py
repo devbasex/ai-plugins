@@ -26,8 +26,14 @@ def _answered(cwd, questions=QUESTION["questions"], label=LABEL, session="s1"):
     return sample("claude", "PostToolUse", cwd, **data)
 
 
+# 回答を記録しない会話を表す環境変数。テストを打つ会話がこれらの中で動いていても、記録する場合の期待が変わらないように外す
+UNATTENDED = ("NDF_AI_CHILD", "NDF_FACTORY_RUN", "NDF_RELAY_PLAN", "NDF_ORGANIZER_DIR")
+
+
 @pytest.fixture
-def asked(tmp_path):
+def asked(tmp_path, monkeypatch):
+    for name in UNATTENDED:
+        monkeypatch.delenv(name, raising=False)
     target = tmp_path / "wt" / ".ndf" / "launch.json"
     la.put_question({"request_id": "q1", "repo": "/r", "sha256": "a" * 64, "target": str(target), "session": "s1"}, lambda: QUESTION)
     return target
@@ -54,7 +60,7 @@ def test_an_answer_that_does_not_match_a_request_is_not_recorded(asked, tmp_path
     assert not la.state_file(la.ANSWERS).exists()
 
 
-@pytest.mark.parametrize("name", ["NDF_AI_CHILD", "NDF_FACTORY_RUN", "NDF_RELAY_PLAN", "NDF_ORGANIZER_DIR"])
+@pytest.mark.parametrize("name", UNATTENDED)
 def test_answers_that_an_ai_may_have_given_are_not_recorded(asked, tmp_path, monkeypatch, name):
     monkeypatch.setenv(name, "1")
     call_entry("claude", "PostToolUse", _answered(tmp_path))
