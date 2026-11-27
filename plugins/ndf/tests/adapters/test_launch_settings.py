@@ -108,7 +108,7 @@ def test_an_mcp_path_outside_the_root_stops(tmp_path: Path, rel: str) -> None:
     root.mkdir()
     (root / "link").symlink_to(outside)
     _write(root, {"version": 1, "permissions": {"steps": {"impl": {"mcp": [rel]}}}})
-    assert "permissions/steps/impl/mcp/0" in _stopped(ls.load, root)
+    assert "permissions/steps/impl/mcp/0" in _stopped(ls.approval_target, ls.load(root))
 
 
 def test_a_reflection_left_halfway_stops_instead_of_reading_no_spec(tmp_path: Path) -> None:
@@ -355,6 +355,10 @@ def test_a_definition_of_another_step_that_cannot_be_read_stops_every_approved_l
     assert ".ndf/mcp/gone.json" in text and "すべての工程" in text
     with ls.prepared("release", repo) as grant:
         assert grant.sha256 is None
+    _write(repo, {"version": 1, "permissions": {"steps": {"design": {"mcp": ["../outside.json"]}}}})
+    with ls.prepared("release", repo) as grant:  # ほかの工程のパスが根の外を指しても、指定の無い工程は止めない
+        assert grant.sha256 is None
+    assert "permissions/steps/design/mcp/0" in _prepare_stops("design", repo)
 
 
 def test_a_broken_settings_file_stops_the_launch(repo: Path) -> None:

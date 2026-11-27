@@ -105,7 +105,12 @@ def _launch_json(path: Path, label: str) -> Any:
 
 
 def load(root: Path, source: Optional[Path] = None) -> Settings:
-    """`<root>/.ndf/launch.json`（`source` があればそのファイル）を読み、ファイル全体を検証する。無ければ空の設定。"""
+    """`<root>/.ndf/launch.json`（`source` があればそのファイル）を読み、ファイル全体を検証する。無ければ空の設定。
+
+    検証するのはスキーマと `allow` の秘密の形まで。MCP の定義ファイルのパス（根の外を指さないか）は、定義ファイルを読む
+    承認の対象の組み立て（`_target_files`）で確かめる。指定の無い工程の起動は定義ファイルを読まないので、ほかの工程の
+    パスの誤りでは止まらない。
+    """
     path = source if source is not None else launch_file(root)
     if not path.exists():
         if path.with_name(path.name + REFLECTING).exists():
@@ -123,8 +128,6 @@ def load(root: Path, source: Optional[Path] = None) -> Settings:
                 raise _precondition(
                     f"{where}/allow/{i} に秘密の形の値がある（値は出さない）。資格情報は環境変数で渡し、指定子には $名前 の参照だけを書く"
                 )
-        for i, rel in enumerate(_mcp_files(spec)):
-            _in_root(root, rel, f"{where}/mcp/{i}")
     return Settings(root, path, permissions)
 
 
@@ -180,6 +183,9 @@ def approval_target(settings: Settings) -> Target:
 def _target_files(settings: Settings) -> dict[str, Any]:
     """承認の対象の定義ファイル（リポジトリの根からの相対パスから中身への対応。`inherit` の `.mcp.json` が無ければ None）。"""
     steps = _given_object(settings.permissions, "steps")
+    for name, spec in steps.items():  # 読む前に、書かれた位置を添えて根の外のパスを止める
+        for i, rel in enumerate(_mcp_files(spec)):
+            _in_root(settings.root, rel, f"{settings.path} の permissions/steps/{name}/mcp/{i}")
     files: dict[str, Any] = check_definitions(settings, sorted({rel for spec in steps.values() for rel in _mcp_files(spec)}))
     if any(spec.get("mcp") == INHERIT for spec in steps.values()):
         repo_mcp = _in_root(settings.root, REPO_MCP, REPO_MCP)  # リンクの先が根の外なら、読む前に止める
