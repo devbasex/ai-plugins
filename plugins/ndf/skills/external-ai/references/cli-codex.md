@@ -42,19 +42,18 @@ echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/00-local-user
 
 ## 起動コマンド
 
-次の形で起動する（`timeout <秒>` で包む。秒は SKILL.md の「共通の実行手順」）。プロンプトは **stdin へ流し**、
-作業ディレクトリへ移ってから `-C "$PWD"` で渡す。
+次の形で起動する（`timeout <秒>` で包む。秒は SKILL.md の「共通の実行手順」）。作業ディレクトリへ移ってから打ち、プロンプトは **stdin へ流す**。
+`'{args}'` は `codex exec` のすぐ後に置く。
 
 ```bash
 cd <workdir>
 ndf delegate-run --runtime codex -- codex exec '{args}' --config model_reasoning_effort=medium \
-  -C "$PWD" [--model M] < <prompt> > <stem>-stdout.log 2> <stem>-err.log
+  [--model M] < <prompt> > <stem>-stdout.log 2> <stem>-err.log
 ```
 
 | オプション | 用途 |
 |---|---|
-| `'{args}'` | 安全装置の引数を `ndf delegate-run` が入れる位置。`-s` などを自分で書くと拒まれる |
-| `-C "$PWD"` | 作業ディレクトリ。指定しないと cwd が想定と異なりファイルを読めなくなる。今のディレクトリと違う場所は拒まれる |
+| `'{args}'` | `ndf delegate-run` が、安全装置の引数と作業ディレクトリの指定（`-C <今のディレクトリ>`）を入れる位置。`codex exec` のすぐ後でないと拒まれる。`-s` や `-C` を自分で書いても拒まれる |
 | `--config model_reasoning_effort=medium` | `high` だと思考へ偏り最終 message を返さない頻度が上がるため、既定で `medium` を推奨 |
 | `-o <file>` | 最終 message を、呼び出した側が決めたファイルへ書かせる。プロンプトに出力先を書けないときに使う。最終 message が無ければ中身は得られない |
 | `--json` | JSON Lines でイベントを出力。`event.type=assistant_message` を grep すれば確実に本文を取れる |
@@ -102,6 +101,9 @@ Codex は最終 message を返さなくても `apply_patch` でファイルを�
 
 回収は **ファイル → stdout → stderr** の順で行う。
 
+読むだけの用途（`--use review`。`-s read-only`）では、Codex は結果ファイルを書けない。この用途では、プロンプトで結果を最終応答に返すよう指示し、
+呼び出し元で stdout を回収する。最終応答が落ちて stdout が空なら、用途を既定の delegate に戻し、上の出力先の指示を付けて渡し直す。
+
 ## 完了検知
 
 `ps -p` は zombie (defunct) にも 0 を返すため、PID の存在では判定しない。完了は
@@ -110,13 +112,14 @@ stderr の `^tokens used$` sentinel と結果ファイルで見て、上限は�
 
 ## 実例: レビューリクエスト
 
+読むだけのレビューなので `--use review` で起動し、結果は stdout から回収する。
+
 ```bash
-FINAL=$TMP/codex-api-v2-review.md
-# プロンプト（出力先に $FINAL を書く）はファイル書き込みツールで $TMP/review-prompt.md に置く
+# プロンプト（レビュー結果を最終応答で返すよう指示する）はファイル書き込みツールで $TMP/review-prompt.md に置く
 cd /workspace
 timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}' --config model_reasoning_effort=medium \
-  -C "$PWD" < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
-# => $FINAL があればそれを、無ければ $TMP/codex-stdout.log を読む
+  < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
+# => $TMP/codex-stdout.log を読む。空なら上の「最終出力をファイル経由で保証する」の末尾の手順で渡し直す
 ```
 
 ## Codex 固有のトラブルシューティング
@@ -139,7 +142,7 @@ timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}
 
 **原因**: サンドボックス有効で読み取りに失敗、またはプロンプトの相対パスと cwd の不一致。
 
-**対処**: プロンプトには絶対パスを書き、対象のディレクトリへ移ってから `-C "$PWD"` を渡す。サンドボックスが読み取りを止めたなら Q2 を見る。
+**対処**: プロンプトには絶対パスを書き、対象のディレクトリへ移ってから `ndf delegate-run` を打つ（作業ディレクトリは `ndf delegate-run` が今のディレクトリで入れる）。サンドボックスが読み取りを止めたなら Q2 を見る。
 
 ### Q4. 認証エラー（`Unauthorized` / `token expired`）
 

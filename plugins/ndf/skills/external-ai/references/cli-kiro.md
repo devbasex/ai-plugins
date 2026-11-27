@@ -23,14 +23,15 @@ ndf delegate-run --runtime kiro -- kiro-cli chat --no-interactive '{args}' \
   < prompt.md > /tmp/kiro-stdout.log 2> /tmp/kiro-err.log
 ```
 
-- 安全装置の引数は書かず、`ndf delegate-run` が `'{args}'` の位置へ入れる。kiro の委譲にはサンドボックスが無いので、
+- 安全装置の引数は書かず、`ndf delegate-run` が `'{args}'` の位置へ入れる。`'{args}'` は `kiro-cli chat --no-interactive` のすぐ後に置く。kiro の委譲にはサンドボックスが無いので、
   起動の設定（`.ndf/launch.json` の `permissions.unsandboxed`）で kiro を承認したときだけ `--trust-all-tools` で起動し、
   承認が無ければ起動せずに止まる（`/ndf:launch-config` で承認する）。読むだけの委譲は `--use review` で、承認の有無に関わらず
   `--trust-tools=fs_read` で起動する
 - `--no-interactive` は**標準入力からプロンプトを受け取る**（26KB で実測）。
   コマンド引数でも渡せるが、長いプロンプトのエスケープを避けるため標準入力に統一する
-- 作業ディレクトリの隔離が唯一のセキュリティ境界になるため、**必ず隔離した
-  worktree / コンテナの中で実行する**
+- Kiro に作業を委譲する場合は、ホストのファイルや認証情報へのアクセスを制限した**コンテナまたは仮想マシン**を使用する。
+  `--trust-all-tools` で起動した Kiro は任意のシェル実行とファイル編集を無確認で行うので、この制限が唯一の防御になる。
+  Git の worktree は作業ファイルを分けるために使う（worktree だけでは、ホストのファイルや認証情報へのアクセスを防げない）
 
 ## 4 つの落とし穴
 

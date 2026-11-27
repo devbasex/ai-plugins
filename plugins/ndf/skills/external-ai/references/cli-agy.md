@@ -42,7 +42,7 @@ left as an argument and ignored.
 次の形で起動する（`timeout <秒>` で包む）。`--print-timeout` は
 `timeout` の値 + 120 秒（工程の上限 + 240 秒）、`--add-dir` は作業ディレクトリと結果ファイルの置く場所である。
 使用量は JSON の出力にしか無いため `--output-format json` で起動し、本文は `response` のキーから
-読む。安全装置の引数は書かず、`ndf delegate-run` が `'{args}'` の位置へ入れる。agy にはサンドボックスが無いので、
+読む。安全装置の引数は書かず、`ndf delegate-run` が `'{args}'` の位置（`agy` のすぐ後）へ入れる。agy にはサンドボックスが無いので、
 起動の設定（`.ndf/launch.json` の `permissions.unsandboxed`）で agy を承認したときだけ `--dangerously-skip-permissions` で起動し、
 承認が無ければ起動せずに止まる（`/ndf:launch-config` で承認する）。読むだけの起動（`--use review`）は持たない。
 

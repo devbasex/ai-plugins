@@ -94,21 +94,23 @@ NDF には 4 つの CLI をまとめて起動するサブコマンドが無い�
    `ndf training check --runtime <claude|codex>` も打ち、学習に使わない設定を確かめる
 3. 補助ファイルの起動の形（codex・agy は「起動コマンド」、claude・kiro は「非対話実行」）を、`timeout <秒>` で包んで打つ。Claude Code では Bash の
    `run_in_background: true` で起動し、完了通知を 1 回受ける。標準出力と標準エラー出力は別のファイルへ逃がす。
-   codex・agy・kiro は `ndf delegate-run --runtime <名前> -- <CLI のコマンド>` で打ち、安全装置の引数は書かずに、入れる位置へ `'{args}'` を 1 つ置く。
-   作業ディレクトリは、対象のディレクトリへ移ってから `-C "$PWD"` で渡す（今のディレクトリと違う `-C` は拒まれる）
+   codex・agy・kiro は、対象のディレクトリへ移ってから `ndf delegate-run --runtime <名前> -- <CLI のコマンド>` で打つ。安全装置の引数と作業ディレクトリの
+   指定は書かず、`'{args}'` を 1 つ置く。`'{args}'` の位置は決まっていて、codex は `codex exec` の、kiro は `kiro-cli chat --no-interactive` の、
+   agy は `agy` のすぐ後に置く（ほかの位置は拒まれる）。codex の作業ディレクトリは、`ndf delegate-run` が今のディレクトリを `-C` で入れる
 
    ```bash
    cd <対象のディレクトリ>
    timeout 1320 ndf delegate-run --runtime codex -- codex exec '{args}' --config model_reasoning_effort=medium \
-     -C "$PWD" < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
+     < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
    ```
 
    - `ndf delegate-run` は、サンドボックスが使えればその中で起動し、使えなければ起動の設定（`.ndf/launch.json` の `permissions.unsandboxed`）で
-     そのランタイムを承認したときだけ安全装置を外す。Kiro と agy の委譲はサンドボックスを持たないので、毎回承認が要る
+     そのランタイムを承認したときだけ安全装置を外す。Kiro と agy の作業委譲は、起動の設定でそのランタイムの承認が有効な場合に実行できる。
+     同じ設定であれば、起動ごとに承認し直す必要はない
    - 承認が無いと CLI を起動せず、理由と承認の手順を標準エラーに出して止まる（終了コード 3）。`/ndf:launch-config` で承認してから打ち直す
    - 読むだけの委譲は `--use review` を付ける（codex は `-s read-only`、kiro は読むだけの指定で起動し、agy は止まる）
    - コマンドが安全装置の引数（`-s`・`--sandbox`・`--dangerously-bypass-approvals-and-sandbox`・`--trust-all-tools`・`--trust-tools`・
-     `--dangerously-skip-permissions` など）を自分で持つと拒まれる
+     `--dangerously-skip-permissions` など）や作業ディレクトリの指定（codex の `-C`・`--cd`）を自分で持つと拒まれる
 
 4. 回収する。結果ファイル → 標準出力（claude は JSON の `result`、agy は JSON の `response`、kiro は ANSI を除く） →
    標準エラー出力の末尾の順に読み、最初に中身のあったものを結果にする
