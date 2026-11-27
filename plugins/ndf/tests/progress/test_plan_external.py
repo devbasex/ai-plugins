@@ -89,6 +89,24 @@ def test_an_answer_is_none_until_written_and_must_name_its_result(tmp_path):
         external.read_answer(tmp_path, ident)
 
 
+@pytest.mark.parametrize("version", ["main\nabc1234", " ", None])
+def test_a_released_answer_with_a_version_that_is_not_one_line_is_refused_with_the_file_name(tmp_path, version):
+    # ndf lanes release と同じ規則で断り、どのファイルの何を直すかを示す（#4513）
+    ident = FIELDS["id"]
+    (tmp_path / "answers").mkdir()
+    (tmp_path / "answers" / f"{ident}.json").write_text(json.dumps({"result": "released", "version": version}), encoding="utf-8")
+    with pytest.raises(external.ExchangeError, match=rf"{ident}\.json の version"):
+        external.read_answer(tmp_path, ident)
+
+
+@pytest.mark.parametrize("body", [{"result": "released", "version": "main abc1234"}, {"result": "rejected"}])
+def test_a_one_line_distribution_id_and_a_rejection_are_taken(tmp_path, body):
+    ident = FIELDS["id"]
+    (tmp_path / "answers").mkdir()
+    (tmp_path / "answers" / f"{ident}.json").write_text(json.dumps(body), encoding="utf-8")
+    assert external.read_answer(tmp_path, ident) == body
+
+
 # --- 計画の記録の保存先 ----------------------------------------------------------------------------
 
 

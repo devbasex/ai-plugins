@@ -78,9 +78,9 @@ def _checked_emit(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureReques
     original = result_contract.emit
     allow_bad = request.node.get_closest_marker(BAD_RESULT_MARK) is not None
 
-    def checked(obj, code=None, stream=None):
+    def checked(obj, code=None, stream=None, **kwargs):
         record_output(obj, code, allow_bad)
-        return original(obj, code, stream)
+        return original(obj, code, stream, **kwargs)
 
     monkeypatch.setattr(result_contract, "emit", checked)
 
@@ -142,6 +142,8 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     # エントリポイント（`ndf.cli`）がサブコマンドの前に旧い保存先（`<CLAUDE_CONFIG_DIR>/<名前>/state` など）を退避しうるため
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
+    # SessionStart が PATH のエントリポイント（`ndf-relay`・`ndf`）を置き直すため、テストを流す人の `~/.local/bin` へ書かない
+    monkeypatch.setenv("XDG_BIN_HOME", str(tmp_path / "bin"))
 
 
 @pytest.fixture(scope="session")

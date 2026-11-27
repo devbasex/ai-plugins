@@ -10,10 +10,11 @@ from pathlib import Path
 import pytest
 from sprint_fixture import sprint_repo as _sprint_repo
 
+from ndf.adapters import github
 from ndf.contracts import result, worker_paths
 from ndf.core import durable, route
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import invoke
+from ndf.progress import invoke, issue_values
 
 PROJECT = {
     "test": {"suites": [{"name": "pytest", "command": "pytest -q"}]},
@@ -30,29 +31,29 @@ def _stage_run_of(name: str, repo: Path, issues: list[int]) -> invoke.StageRun:
 def test_issue_copies_others_can_write_are_not_used_for_the_plan(tmp_path, monkeypatch):
     # PR 4307 の r7-3: 共有の保存先に別の利用者が置ける題と本文のコピーを、作成者の権限を確かめずに worker へ渡さない
     repo = _sprint_repo(tmp_path, PROJECT)
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: pytest.fail("置かれたコピーで読み直して上書きしない"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: pytest.fail("置かれたコピーで読み直して上書きしない"))
     work = tmp_path / "w"
     work.mkdir()
-    for name, text in ((invoke.ISSUE_TITLE_FILE, '{"title": "差し替えた題"}'), (invoke.ISSUE_BODY_FILE, "差し替えた本文")):
+    for name, text in ((issue_values.ISSUE_TITLE_FILE, '{"title": "差し替えた題"}'), (issue_values.ISSUE_BODY_FILE, "差し替えた本文")):
         (work / name.format(number=3092)).write_text(text, encoding="utf-8")
         (work / name.format(number=3092)).chmod(0o666)
     with pytest.raises(worker_paths.EntryUnsafe) as e:
-        invoke._issue_values(_stage_run_of("impl", repo, [3092]), work, repo)
+        issue_values.issue_values(_stage_run_of("impl", repo, [3092]).inputs, work, repo)
     assert e.value.kind == "foreign"
 
 
 def test_issue_copies_are_written_without_write_access_for_others(tmp_path, monkeypatch):
     # PR 4307 の r7-3: コピーはグループとほかの利用者が書き込めない形で公開する（次の描画が私有のコピーとして読める）
     repo = _sprint_repo(tmp_path, PROJECT)
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"
     work.mkdir()
     before = os.umask(0o000)  # umask によらず書き込み権限を外す
     try:
-        got = invoke._issue_values(_stage_run_of("impl", repo, [3092]), work, repo)
+        got = issue_values.issue_values(_stage_run_of("impl", repo, [3092]).inputs, work, repo)
     finally:
         os.umask(before)
-    for name in (invoke.ISSUE_TITLE_FILE, invoke.ISSUE_BODY_FILE):
+    for name in (issue_values.ISSUE_TITLE_FILE, issue_values.ISSUE_BODY_FILE):
         assert (work / name.format(number=3092)).stat().st_mode & 0o022 == 0
     assert Path(got["body_file"]).read_text(encoding="utf-8") == "#3092 の本文"
 
@@ -60,22 +61,96 @@ def test_issue_copies_are_written_without_write_access_for_others(tmp_path, monk
 def test_issue_body_in_a_directory_others_can_rename_in_is_not_handed_to_the_pr_step(tmp_path, monkeypatch):
     # PR 4307 の r8-3: `gh pr create --body-file` は名前を開き直すので、ほかの利用者が名前を差し替えられる保存先のコピーを渡さない
     repo = _sprint_repo(tmp_path, PROJECT)
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     work = tmp_path / "w"
     work.mkdir()
     work.chmod(0o777)  # sticky bit の無い共有の保存先
     try:
         with pytest.raises(worker_paths.EntryUnsafe) as e:
-            invoke._issue_values(_stage_run_of("impl", repo, [3092]), work, repo)
+            issue_values.issue_values(_stage_run_of("impl", repo, [3092]).inputs, work, repo)
     finally:
         work.chmod(0o700)
     assert e.value.kind == "shared"
     work.chmod(0o1777)  # sticky bit があれば、呼んだ利用者のコピーはほかの利用者に消せない
     try:
-        got = invoke._issue_values(_stage_run_of("impl", repo, [3092]), work, repo)
+        got = issue_values.issue_values(_stage_run_of("impl", repo, [3092]).inputs, work, repo)
     finally:
         work.chmod(0o700)
     assert Path(got["body_file"]).read_text(encoding="utf-8") == "#3092 の本文"
+
+
+def _reading(monkeypatch) -> list[tuple[int, str | None]]:
+    """課題の題と本文の読み取りを差し替え、読んだ（番号, リポジトリ）を返す。"""
+    read: list[tuple[int, str | None]] = []
+
+    def fake(location, n, repo=None):
+        read.append((n, repo))
+        return f"{repo} #{n} の題", f"{repo} #{n} の本文"
+
+    monkeypatch.setattr(issue_values, "issue_text", fake)
+    return read
+
+
+def test_the_given_issue_and_repository_are_copied_and_reused(tmp_path, monkeypatch):
+    read = _reading(monkeypatch)
+    inputs, work = {"issues": [3, 4]}, tmp_path / "w"
+    for _ in range(2):
+        got = issue_values.issue_values(inputs, work, tmp_path, number=4, repo="o/r")
+    assert got["issue"] == "4" and got["title"] == "o/r #4 の題" and read == [(4, "o/r")]
+    assert json.loads((work / "issue-4-title.json").read_text()) == {"title": "o/r #4 の題", "repo": "o/r"}
+
+
+def test_a_copy_of_the_same_number_in_another_repository_is_not_reused(tmp_path, monkeypatch):
+    read = _reading(monkeypatch)
+    work = tmp_path / "w"
+    issue_values.issue_values({"issues": [3]}, work, tmp_path)
+    got = issue_values.issue_values({"issues": [3]}, work, tmp_path, repo="o/r")
+    assert read == [(3, None), (3, "o/r")] and Path(got["body_file"]).read_text(encoding="utf-8") == "o/r #3 の本文"
+
+
+def test_a_reread_stopped_in_the_middle_leaves_no_title_copy_for_the_other_body(tmp_path, monkeypatch):
+    # 題のコピーを消してから本文を書く。途中で止まっても、前のリポジトリの題が残って新しい本文と組にならない
+    _reading(monkeypatch)
+    work = tmp_path / "w"
+    issue_values.issue_values({"issues": [3]}, work, tmp_path)
+    held = worker_paths.write_file
+
+    def fail_on_title(wd, name, text, **kw):
+        if name.endswith("-title.json"):
+            raise OSError("書けない")
+        held(wd, name, text, **kw)
+
+    monkeypatch.setattr(worker_paths, "write_file", fail_on_title)
+    with pytest.raises(OSError):
+        issue_values.issue_values({"issues": [3]}, work, tmp_path, repo="o/r")
+    assert not (work / "issue-3-title.json").exists()
+
+
+def test_an_untrusted_author_of_the_given_issue_gives_no_values(tmp_path, monkeypatch):
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: None)
+    assert issue_values.issue_values({"issues": [3]}, tmp_path / "w", tmp_path, number=5, repo="o/r") is None
+    assert list((tmp_path / "w").iterdir()) == []
+
+
+def test_the_given_repository_is_read_and_its_permissions_are_asked(monkeypatch):
+    seen: list[str] = []
+
+    class Hub:
+        def __init__(self, repo, client):
+            seen.append(repo)
+
+        def issue_text(self, number):
+            return "題", github.Authored("owner", "OWNER", "本文")
+
+        def trusts(self, authored):
+            return True
+
+    monkeypatch.setattr(issue_values.github, "GitHub", Hub)
+    monkeypatch.setattr(issue_values.github, "client", lambda: None)
+    monkeypatch.setattr(issue_values.git.Git, "remote_repo", lambda self: "o/own")
+    assert issue_values.issue_text(Path("."), 1, "o/other") == ("題", "本文")
+    assert issue_values.issue_text(Path("."), 1) == ("題", "本文")
+    assert seen == ["o/other", "o/own"]
 
 
 def _plan_path(tmp_path: Path, monkeypatch, work: Path) -> Path:

@@ -1,6 +1,6 @@
 """`ndf relay` のサブコマンド。
 
-    ndf relay install [--replace-old] | uninstall | status   # 複製 ~/.claude/ndf/relay.py と PATH のエントリポイント ndf-relay
+    ndf relay install [--replace-old] | uninstall | status   # 複製 ~/.claude/ndf/relay.py と PATH のエントリポイント ndf-relay・ndf
     ndf relay account use <名前> | show | clear               # 子の claude を起動するアカウントの指定（#2464）
     ndf relay account add | add-bedrock | add-api-key | api-key-monthly | api-key-use | list | capacity | remove | check
                                                               # アカウントと従量の接続の登録（旧い保存先と同じ。#3569）
@@ -91,7 +91,7 @@ def plugin_version(root: Path) -> str:
 
 
 def _status_items(got: install.Installed) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = [{"path": str(s.path), "state": s.state} for s in (got.copy, got.entry)]
+    items: list[dict[str, Any]] = [{"path": str(s.path), "state": s.state} for s in (got.copy, got.entry, got.ndf)]
     if got.version is not None:
         items.append({"path": str(got.copy.path.parent / install.VERSION_FILE), "version": got.version})
     return items
@@ -117,7 +117,10 @@ def _do_install(replace_old: bool, code: int) -> install.Installed | int:
 
 def _emit_installed(got: install.Installed, foreign_warning: bool) -> int:
     """保存先の状態の結果を出す。`foreign_warning` が真なら、旧い NDF の複製が残ったことも警告する。"""
-    summary = f"複製: {got.copy.state}（{got.copy.path}）・エントリポイント: {got.entry.state}（{got.entry.path}）"
+    summary = (
+        f"複製: {got.copy.state}（{got.copy.path}）・エントリポイント: {got.entry.state}（{got.entry.path}）"
+        f"・{install.NDF_NAME}: {got.ndf.state}（{got.ndf.path}）"
+    )
     warnings = [] if got.on_path else [f'{got.entry.path.parent} が PATH に無い。export PATH="{got.entry.path.parent}:$PATH" を足す']
     if foreign_warning and got.copy.state == "foreign":
         warnings.append("旧い NDF の複製がある。旧いラッパーを止めてから ndf relay install --replace-old で置き換える")
@@ -315,11 +318,7 @@ def wrapper_settings(name: str, rest: list[str], parsed: Optional[claude_args.Pa
         stall=limits.seconds("relay.stall"),
         spin=hub.spin_of(environ),
         context_limit=context_thresholds.thresholds(environ, limits.value).limit,
-        guards=account_decide.Guards(
-            limits.value("relay.five-hour-guard", "count"),
-            limits.value("relay.weekly-prefer", "count"),
-            limits.value("relay.weekly-guard", "count"),
-        ),
+        guards=account_decide.Guards(limits.value("relay.five-hour-guard", "count"), limits.value("relay.weekly-guard", "count")),
         transcript_bytes=int(limits.value("relay.transcript-tail", "count")),
         ask_plan=lane_question.plan_asker(environ, name, cwd, ident.root, limits.seconds("relay.lanes-ask")),
         update=updater,

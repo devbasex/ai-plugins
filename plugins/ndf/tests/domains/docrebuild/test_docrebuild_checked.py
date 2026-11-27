@@ -177,3 +177,15 @@ def test_checked_stops_incomplete_only_for_the_missing_documents() -> None:
     assert got["status"] == "stopped"
     assert got["summary"] == "確かめの記録が欠けた文書が 1 件ある"
     assert got["gaps"] == [{"kind": "reader", "name": DESIGN, "reason": "記録が無い"}]
+
+
+def test_checked_stops_precondition_naming_every_document_not_run() -> None:
+    """読み手役を立てられなかった文書は対象の順に並べ、記録の欠け（`incomplete`）より先に止める。"""
+    targets = (Target(DESIGN, "design"), Target(PLAN, "plan"), Target(DOC_A, "manuscript"))
+    records = [{"doc": doc, "verdict": "not_run", "checks": [], "reason": "Tool が無い"} for doc in (DOC_A, DESIGN)]
+    got = drive._checked(_report((), records), targets, ["skip.md: x"])
+    detail = f"読み手役を立てられなかった文書がある: {DESIGN}・{DOC_A}。読み手役を立てられる環境に直してから打ち直す"
+    assert got["status"] == "stopped"
+    assert got["cause"]["kind"] == "precondition"
+    assert got["cause"]["detail"] == got["summary"] == detail
+    assert "gaps" not in got and "warnings" not in got and got["items"] == []

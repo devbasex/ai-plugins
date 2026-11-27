@@ -15,7 +15,9 @@
     ndf records cleanup-stage <PR番号>...           # クリーンアップを終えた PR が閉じる課題に工程の記録を付ける
     ndf records close-check <課題> [--verification <JSON>] [--require]   # スプリントで課題を閉じてよいか
     ndf records gws-check                          # gws の認証を確かめる
-    ndf records reading prompt|add|check --file <JSON>   # 読み手役への指示・確認の記録・質問を出す前に足りないもの
+    ndf records reading prompt|add --file <JSON>   # 読み手役への指示・確認の記録
+    ndf records reading check --gate <design|release> --pr <番号> [--material <ファイル>] --questions-out <ファイル>
+                                                   # 承認の質問を作り直し、出す前に足りないもの（#4446）
 
 どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
 """
@@ -53,7 +55,7 @@ VERIFICATION = "release-verification"
 
 def _root(args: argparse.Namespace) -> Path:
     where = args.cwd if args.cwd is not None else Path.cwd()
-    return Path(Git(where).run("rev-parse", "--show-toplevel").strip())
+    return Git(where).toplevel()
 
 
 def _hub(root: Path, remote: str | None = None) -> github_mod.GitHub:
@@ -390,15 +392,29 @@ def _reading_add(entry: Any, root: Path) -> dict[str, Any]:
     return result.result(TOOL, result.OK, "読み手役が確認した記録を 1 行足した", [reading.add(entry, root)])
 
 
-def _reading_check(entry: Any, root: Path) -> dict[str, Any]:
-    missing = reading.check(entry, root, _repo_hub)
+def _reading_check(args: argparse.Namespace, root: Path) -> dict[str, Any]:
+    """承認の質問を作り直して `--questions-out` へ書き、記録と突き合わせる（#4446 の「承認を問う側の手順」の 1）。"""
+    material = (root / args.material.expanduser()) if args.material is not None else None
+    try:
+        missing, questions = reading.check(args.gate, args.pr, material, root, _repo_hub)
+        (root / args.questions_out.expanduser()).write_text(
+            json.dumps({"questions": questions}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+    except reading.ReadingInvalid as exc:
+        return result.stopped(TOOL, "precondition", f"承認の質問を作れない: {exc}")
+    except OSError as exc:
+        return result.stopped(TOOL, "precondition", f"記録か承認資料か質問のファイルを読み書きできない: {exc}")
+    except (github_mod.GitHubError, reading.HeadUnknown) as exc:
+        return result.stopped(TOOL, "unknown", f"承認する PR を GitHub から読めない: {exc}")
     if missing:
         detail = "読み手役が確認した記録が足りない: " + "・".join(missing)
         return result.stopped(TOOL, "precondition", detail, items=[{"missing": word} for word in missing])
-    return result.result(TOOL, result.OK, "読み手役が確認した記録は、質問と承認する PR に合う")
+    return result.result(
+        TOOL, result.OK, "読み手役が確認した記録は、質問・承認する PR・承認資料に合う", outputs={"questions": str(args.questions_out)}
+    )
 
 
-_READING: dict[str, Callable[[Any, Path], dict[str, Any]]] = {"prompt": _reading_prompt, "add": _reading_add, "check": _reading_check}
+_READING: dict[str, Callable[[Any, Path], dict[str, Any]]] = {"prompt": _reading_prompt, "add": _reading_add}
 
 
 def _preflight(args: argparse.Namespace, root: Path) -> dict[str, Any]:
@@ -477,6 +493,12 @@ def _add_reading(sub: Any) -> None:
         a = r.add_parser(action)
         a.add_argument("--file", type=Path, required=True, help="入力の JSON のファイル")
         a.set_defaults(handler=_reading)
+    c = r.add_parser("check")
+    c.add_argument("--gate", required=True, choices=(mvv_gate.DESIGN, mvv_gate.RELEASE), help="承認ゲートの種類")
+    c.add_argument("--pr", type=int, required=True, help="承認する PR の番号")
+    c.add_argument("--material", type=Path, help="会話のセッションのリリースで present に渡す承認資料のファイル")
+    c.add_argument("--questions-out", type=Path, required=True, help="作り直した承認の質問（questions）を書くファイル")
+    c.set_defaults(handler=_reading_check)
 
 
 def _add_close_check(sub: Any) -> None:

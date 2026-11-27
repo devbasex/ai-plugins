@@ -4,14 +4,20 @@
 止まって同じ承認ゲートで止まり続けること（リリース 8 の 2026-11-14 の事例）が起きない。
 
 証跡の 1 件は、マーカー `TRAIL_MARK` と、回答の行・承認したコミットの行（40 桁の SHA）を持つコメントである。
-承認資料の提示（マーカー `REQUEST_MARK`）は証跡に数えない。判定は write 以上の権限を持つ書き手の証跡だけを読み、
-PR の今の HEAD に当てた最も新しい回答で決める。
+承認資料の提示（マーカー `REQUEST_MARK`）は証跡に数えず、提示した HEAD と資料の SHA-256 として読む（`parse_request`）。
+判定は write 以上の権限を持つ書き手の証跡だけを読み、PR の今の HEAD に当てた最も新しい回答で決める。
 
-| 信用する証跡 | 判定 |
+数える回答は担い手で分ける（#4446）。利用者の回答は、今の HEAD への最新の提示より後に、その提示と同じ資料の SHA-256
+（行 `回答した資料:`）を持つものだけを数える。資料を差し替えて提示し直すと、前の資料への回答では進まない。MVV 判定の回答は
+人に資料を示さずに通す経路なので head だけで数えるが、同じ HEAD にその回答より後の提示があれば数えない（人に問うと決め直した）。
+資料の SHA-256 を持たない旧いバージョンの利用者の回答は、同じ HEAD に行 `提示した資料:` を持つ提示が 1 件も無い間だけ数える
+（旧いバージョンで済んだ承認を取り直させない）。行の値の形が違う提示も、行を持つ提示に数える。
+
+| 数える証跡 | 判定 |
 | --- | --- |
 | 今の HEAD への最新の回答が承認 | `approved` |
 | 今の HEAD への最新の回答が変更要求 | `rejected` |
-| 今の HEAD への回答が無く、ほかのコミットへの回答がある（回答の後に HEAD が動いた） | `stale` |
+| 今の HEAD への回答が無く、ほかの証跡がある（回答の後に HEAD か資料が変わった） | `stale` |
 | 1 件も無い | `missing` |
 """
 
@@ -23,31 +29,45 @@ from typing import NamedTuple
 
 from ndf import identity
 
+# 回答の語・担い手の語・提示したコミットの行（`core.approval_words`）。REJECTED は読む側（`trail`・`domains.loop.cli`）へ見せるために読む
+from ndf.core.approval_words import ANSWERS, APPROVED, BY_LINE, HEAD_LINE, MVV_BY, REJECTED, USER_BY  # noqa: F401
+
 _NS = identity.FIXED_WORDS["workflow_namespace"]
 # 証跡のマーカーと、承認資料の提示のマーカー（提示は証跡に数えない）
 TRAIL_MARK = f"<!-- {_NS}:release-approval -->"
 REQUEST_MARK = f"<!-- {_NS}:release-approval-request -->"
 # 承認の判定を PR の HEAD へ付ける commit status の名前
 STATUS_CONTEXT = f"{_NS}/release-approval"
-# 回答の語（事実の表 answers の語と同じ綴り）
-APPROVED, REJECTED = "approved", "rejected"
-ANSWERS = (APPROVED, REJECTED)
 # 判定
 STALE, MISSING = "stale", "missing"
 # 証跡の行の見出し
 ANSWER_LINE = "回答:"
 COMMIT_LINE = "承認したコミット:"
-HEAD_LINE = "提示したコミット:"
+MATERIAL_LINE = "提示した資料:"
+ANSWERED_LINE = "回答した資料:"
 _SHA = re.compile(r"\b([0-9a-f]{40})\b")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class Trail(NamedTuple):
-    """読んだ証跡 1 件。`order` はコメントの並び（古い順の番号）。"""
+    """読んだ証跡 1 件。`order` はコメントの並び（古い順の番号）。`material` は利用者が回答した資料の SHA-256（無ければ None）。"""
 
     order: int
     author: str
     answer: str
     sha: str
+    by: str | None = None
+    material: str | None = None
+
+
+class Presentation(NamedTuple):
+    """読んだ提示 1 件（`order` はコメントの並び、`head` は提示したコミット、`material` は資料の SHA-256。形が違えば None）。
+    `hashed` は行 `提示した資料:` を持つか（持たないのは旧いバージョンの提示だけ）。"""
+
+    order: int
+    head: str
+    material: str | None
+    hashed: bool
 
 
 class Judgment(NamedTuple):
@@ -62,18 +82,19 @@ class Judgment(NamedTuple):
         return self.state == APPROVED
 
 
-def render_trail(answer: str, sha: str, by: str) -> str:
-    """証跡のコメントの本文。"""
+def render_trail(answer: str, sha: str, by: str, material_sha256: str | None = None) -> str:
+    """証跡のコメントの本文。担い手が利用者のときだけ、回答した資料の SHA-256 の行を足す（#4446）。"""
     if answer not in ANSWERS:
         raise ValueError(f"回答は {', '.join(ANSWERS)} のどれか（渡された値: {answer!r}）")
     if not _SHA.fullmatch(sha):
         raise ValueError(f"承認したコミットは 40 桁の SHA（渡された値: {sha!r}）")
-    return f"{TRAIL_MARK}\n## リリースの承認\n\n{ANSWER_LINE} {answer}\n{COMMIT_LINE} `{sha}`\n担い手: {by}\n"
+    answered = f"{ANSWERED_LINE} `{material_sha256}`\n" if by == USER_BY and material_sha256 else ""
+    return f"{TRAIL_MARK}\n## リリースの承認\n\n{ANSWER_LINE} {answer}\n{COMMIT_LINE} `{sha}`\n{BY_LINE} {by}\n{answered}"
 
 
-def render_request(material: str, head: str) -> str:
-    """承認資料の提示のコメントの本文（証跡に数えない）。"""
-    return f"{REQUEST_MARK}\n{HEAD_LINE} `{head}`\n\n{material.rstrip()}\n"
+def render_request(material: str, head: str, material_sha256: str) -> str:
+    """承認資料の提示のコメントの本文（証跡に数えない）。提示したコミットと資料の SHA-256 の行を持つ（#4446）。"""
+    return f"{REQUEST_MARK}\n{HEAD_LINE} `{head}`\n{MATERIAL_LINE} `{material_sha256}`\n\n{material.rstrip()}\n"
 
 
 def _line_value(body: str, label: str) -> str | None:
@@ -94,6 +115,11 @@ def material_head(material: str) -> str | None:
     return found.group(1) if found else None
 
 
+def _sha256_of(body: str, label: str) -> str | None:
+    got = _line_value(body, label)
+    return got if got is not None and _SHA256.fullmatch(got) else None
+
+
 def parse(order: int, author: str, body: str) -> Trail | None:
     """コメント 1 件を証跡として読む。証跡でない・形が違えば None（提示のコメントも None）。"""
     if TRAIL_MARK not in body or REQUEST_MARK in body:
@@ -101,7 +127,17 @@ def parse(order: int, author: str, body: str) -> Trail | None:
     answer, commit = _line_value(body, ANSWER_LINE), _line_value(body, COMMIT_LINE)
     if answer not in ANSWERS or commit is None or not _SHA.fullmatch(commit):
         return None
-    return Trail(order, author, answer, commit)
+    return Trail(order, author, answer, commit, _line_value(body, BY_LINE), _sha256_of(body, ANSWERED_LINE))
+
+
+def parse_request(order: int, author: str, body: str) -> Presentation | None:
+    """コメント 1 件を提示として読む（提示したコミットと資料の SHA-256）。提示でない・形が違えば None。"""
+    if REQUEST_MARK not in body:
+        return None
+    head = material_head(body)
+    if head is None:
+        return None
+    return Presentation(order, head, _sha256_of(body, MATERIAL_LINE), _line_value(body, MATERIAL_LINE) is not None)
 
 
 def trails(comments: Iterable[tuple[str, str, bool]]) -> list[Trail]:
@@ -114,14 +150,48 @@ def trails(comments: Iterable[tuple[str, str, bool]]) -> list[Trail]:
     return out
 
 
-def judge(found: Sequence[Trail], head: str) -> Judgment:
-    """今の HEAD `head`（40 桁）への最新の回答で判定する。"""
-    on_head = [t for t in found if t.sha == head]
+def presentations(comments: Iterable[tuple[str, str, bool]]) -> list[Presentation]:
+    """(書き手, 本文, 信用するか) の並び（古い順）から、信用する書き手の提示だけを読む。"""
+    out = []
+    for i, (author, body, trusted) in enumerate(comments):
+        got = parse_request(i, author, body) if trusted else None
+        if got is not None:
+            out.append(got)
+    return out
+
+
+def latest_presentation(presented: Sequence[Presentation], head: str) -> Presentation | None:
+    """今の HEAD `head` への最新の提示。無ければ None。"""
+    on_head = [p for p in presented if p.head == head]
+    return max(on_head, key=lambda p: p.order) if on_head else None
+
+
+def _counted(t: Trail, latest: Presentation | None, legacy: bool) -> bool:
+    """今の HEAD への回答 `t` を判定に数えるか（モジュールの説明の「数える回答」）。変更要求は担い手と資料を問わず数える
+    （承認の後の変更要求を捨てて進めない）。"""
+    if t.answer == REJECTED:
+        return True
+    if t.by == MVV_BY:
+        return latest is None or latest.order < t.order
+    if legacy:
+        return t.material is None  # 旧いバージョンの提示と回答だけの HEAD。人の回答はバージョンアップをまたいで数える
+    return latest is not None and latest.material is not None and t.material == latest.material and t.order > latest.order
+
+
+def judge(found: Sequence[Trail], presented: Sequence[Presentation], head: str) -> Judgment:
+    """今の HEAD `head`（40 桁）への最新の、数える回答で判定する（担い手で分ける。#4446）。"""
+    latest = latest_presentation(presented, head)
+    legacy = not any(p.hashed for p in presented if p.head == head)
+    on_head = [t for t in found if t.sha == head and _counted(t, latest, legacy)]
     if on_head:
         last = max(on_head, key=lambda t: t.order)
         verb = "承認した" if last.answer == APPROVED else "変更を要求した"
         return Judgment(last.answer, f"{last.author} が {head[:12]} を{verb}", last)
     if found:
         last = max(found, key=lambda t: t.order)
-        return Judgment(STALE, f"回答は {last.sha[:12]} へのもので、今の HEAD {head[:12]} への回答が無い（承認し直しが要る）", last)
+        return Judgment(
+            STALE,
+            f"回答は {last.sha[:12]} か前の資料へのもので、今の HEAD {head[:12]} と最新の資料への回答が無い（承認し直しが要る）",
+            last,
+        )
     return Judgment(MISSING, f"{head[:12]} への承認の証跡が無い")

@@ -9,6 +9,54 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "gate",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--gate": {
+          "type": "string",
+          "enum": [
+            "design",
+            "release"
+          ],
+          "description": "承認ゲートの種類"
+        },
+        "--pr": {
+          "type": "integer",
+          "description": "承認する PR の番号（省けば、設計は作業場所のブランチの PR、リリースは工程の入力の pr）"
+        },
+        "--material": {
+          "type": "string",
+          "description": "リリースの承認資料のファイル（ndf release-steps materials の出力。--gate release だけ）"
+        },
+        "--reviewed": {
+          "type": "string",
+          "description": "設計のレビューを済ませた再レビュー待ちのコミット"
+        },
+        "--no-doc-fix": {
+          "type": "boolean",
+          "description": "文書を直させず、残った文として承認資料に書かせる"
+        },
+        "--state-dir": {
+          "type": "string",
+          "description": "起動指示・承認資料の作業用のコピー・worker の結果ファイルの保存先"
+        },
+        "--out": {
+          "type": "string",
+          "description": "結果 JSON を書くファイル"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--gate",
+        "--state-dir",
+        "--out"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "run",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },

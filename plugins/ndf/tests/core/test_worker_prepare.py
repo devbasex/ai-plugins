@@ -511,3 +511,97 @@ def test_draft_refuses_a_draft_dir_that_is_a_link(tmp_path, capsys, monkeypatch)
     monkeypatch.setattr("sys.stdin", io.StringIO("本文"))
     code, out = _run(capsys, "draft", "--state-dir", str(state))
     assert _invalid(code, out) and list((tmp_path / "far").iterdir()) == []
+
+
+@pytest.mark.parametrize("same", [True, False])
+def test_write_replaces_a_file_only_in_the_result_dir_worker_run_opened(tmp_path, capsys, monkeypatch, same):
+    # #4590: Write・Edit の Tool が .git の下を拒むので、承認資料の作業用のファイルは Bash からこのサブコマンドで書く
+    state = tmp_path / "state"
+    state.mkdir()
+    material = state / "material.md"
+    material.write_text("前の資料\n", encoding="utf-8")
+    st = (state if same else tmp_path).stat()
+    monkeypatch.setenv(identity.WORKER_RESULT_DIR_ENV, f"{st.st_dev}:{st.st_ino}:{state}")
+    monkeypatch.setattr("sys.stdin", io.StringIO("直した資料\n"))
+    code, out = _run(capsys, "write", "--path", str(material))
+    if same:
+        assert code == 0 and material.read_text(encoding="utf-8") == "直した資料\n"
+    else:
+        assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
+        assert material.read_text(encoding="utf-8") == "前の資料\n"
+
+
+def _hold(monkeypatch, state: Path) -> None:
+    st = state.stat()
+    monkeypatch.setenv(identity.WORKER_RESULT_DIR_ENV, f"{st.st_dev}:{st.st_ino}:{state}")
+
+
+def test_write_refuses_a_subdir_that_is_a_link(tmp_path, capsys, monkeypatch):
+    state = tmp_path / "state"
+    state.mkdir()
+    (tmp_path / "far").mkdir()
+    (state / "sub").symlink_to(tmp_path / "far")
+    _hold(monkeypatch, state)
+    monkeypatch.setattr("sys.stdin", io.StringIO("本文"))
+    code, out = _run(capsys, "write", "--path", str(state / "sub" / "material.md"))
+    assert _invalid(code, out) and list((tmp_path / "far").iterdir()) == []
+
+
+def test_write_refuses_outside_a_worker(tmp_path, capsys, monkeypatch):
+    # PR 4591 の r1-1: 保存先の識別情報が無ければ書かない
+    material = tmp_path / "material.md"
+    material.write_text("前\n", encoding="utf-8")
+    monkeypatch.delenv(identity.WORKER_RESULT_DIR_ENV, raising=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO("後\n"))
+    code, out = _run(capsys, "write", "--path", str(material))
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
+    assert material.read_text(encoding="utf-8") == "前\n"
+
+
+@pytest.mark.parametrize("target", [".git/config", "state/../config", "state"])
+def test_write_refuses_a_path_outside_the_result_dir(tmp_path, capsys, monkeypatch, target):
+    # PR 4591 の r1-1: 保存先の外（.git の中のほかのファイルなど）は書かない
+    state = tmp_path / "state"
+    state.mkdir()
+    (tmp_path / ".git").mkdir()
+    for f in (tmp_path / ".git" / "config", tmp_path / "config"):
+        f.write_text("前\n", encoding="utf-8")
+    _hold(monkeypatch, state)
+    monkeypatch.setattr("sys.stdin", io.StringIO("後\n"))
+    code, out = _run(capsys, "write", "--path", str(tmp_path / target))
+    assert _invalid(code, out)
+    assert (tmp_path / ".git" / "config").read_text(encoding="utf-8") == "前\n"
+    assert (tmp_path / "config").read_text(encoding="utf-8") == "前\n"
+
+
+@pytest.mark.parametrize("swapped", [False, True])
+def test_write_checks_the_result_dir_before_a_file_in_a_subdir(tmp_path, capsys, monkeypatch, swapped):
+    # PR 4591 の r1-3: サブディレクトリの中のファイルも、保存先そのものの識別子を先に突き合わせてから書く
+    state = tmp_path / "state"
+    (state / "sub").mkdir(parents=True)
+    _hold(monkeypatch, state)
+    if swapped:
+        state.rename(tmp_path / "old")
+        (state / "sub").mkdir(parents=True)
+    material = state / "sub" / "material.md"
+    material.write_text("前\n", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", io.StringIO("後\n"))
+    code, out = _run(capsys, "write", "--path", str(material))
+    if swapped:
+        assert (out["status"], out["cause"]["kind"]) == ("stopped", "precondition")
+        assert material.read_text(encoding="utf-8") == "前\n"
+    else:
+        assert code == 0 and material.read_text(encoding="utf-8") == "後\n"
+
+
+@pytest.mark.parametrize("tail", ["/", "/."])
+def test_write_refuses_a_path_that_names_a_directory(tmp_path, capsys, monkeypatch, tail):
+    # PR 4591 の r1-2: 末尾の `/`・`/.` は `Path` が落とすので、生の引数で拒み、同名のファイルを上書きしない
+    state = tmp_path / "state"
+    state.mkdir()
+    material = state / "material.md"
+    material.write_text("前\n", encoding="utf-8")
+    _hold(monkeypatch, state)
+    monkeypatch.setattr("sys.stdin", io.StringIO("後\n"))
+    code, out = _run(capsys, "write", "--path", str(material) + tail)
+    assert _invalid(code, out) and material.read_text(encoding="utf-8") == "前\n"

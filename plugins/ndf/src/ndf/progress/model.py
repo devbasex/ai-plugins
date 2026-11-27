@@ -164,6 +164,26 @@ def mvv_skip(done: Mapping[str, Mapping[str, Any]], before: Optional[str], gate:
     return held if isinstance(held, dict) and held.get("gate") == gate and held.get("skip") is True else None
 
 
+def release_gate() -> str:
+    """リリース承認ゲートの区分の語（コントラクト `workflow/progress.json` の gates の行。表に無ければ `StopIteration`）。
+    import の時点で表を読まない（スキーマの定数を読み直すときに、ほかのコントラクトを開かない）。"""
+    return next(g for g in table()["gates"] if g == "release")
+
+
+def reading_skip(
+    done: Mapping[str, Mapping[str, Any]], before: Optional[str], gate: Optional[str], waiting_gate: bool, in_lane: bool
+) -> bool:
+    """読み手役のステップを打たずに済ませるか（#4446 の決定 2）。
+
+    直前の MVV 判定が同じゲートを省くと決めたとき（承認ゲートの待ちの記録 `waiting_gate` があれば人に問うので打つ）と、
+    計画のレーンの行にあるスプリントのリリース承認ゲートの前（リリースはまとめたリリースに入り、オーガナイザーが問う直前に
+    版上げの PR を読み手役に読ませる）で済ませる。設計承認ゲートの前はレーンでも打つ。
+    """
+    if not waiting_gate and mvv_skip(done, before, gate) is not None:
+        return True
+    return gate == release_gate() and in_lane
+
+
 def hold_checked(held: Any) -> bool:
     """判定の出力 `held` がレビューの保留を確かめて 0 件だったか（`holds` が空のリスト）。"""
     return isinstance(held, dict) and isinstance(held.get("holds"), list) and not held["holds"]
@@ -203,6 +223,9 @@ def mvv_answer(step: str, kind: str, answer: str, held: Optional[Mapping[str, An
     """
     gate = held.get("gate") if held is not None else None
     head = held.get("head") if held is not None else None
+    # 判定した PR の承認の対象（`mvv_gate.target`）を、人の回答と同じ形で見た対象に残す（デプロイのマージが読む。#4409）
+    target = held.get("target") if held is not None and isinstance(held.get("target"), dict) else {}
+    bound = {k: target[k] for k in ("repo", "pr", "base", "production") if k in target}
     payload = {
         "answer": answer,
         "step": step,
@@ -212,7 +235,7 @@ def mvv_answer(step: str, kind: str, answer: str, held: Optional[Mapping[str, An
         "gate": gate,
         "gate_id": gate_id,
         # 形は gate.Target.as_dict（承認資料は作らないので sha256 は無い）
-        "seen": {"head": head if isinstance(head, str) else None, "material_sha256": None},
+        "seen": {"head": head if isinstance(head, str) else None, "material_sha256": None, **bound},
         MVV_KEY: dict(held) if held is not None else None,
     }
     return payload, f"MVV 判定で承認ゲート {gate} を省いた"

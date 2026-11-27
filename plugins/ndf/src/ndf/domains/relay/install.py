@@ -1,12 +1,15 @@
-"""中継の複製 `~/.claude/ndf/relay.py` と PATH のエントリポイント `ndf-relay` の設置・撤去・有無（#2461・#2583・要求の 346 行）。
+"""中継の複製 `~/.claude/ndf/relay.py` と PATH のエントリポイント `ndf-relay`・`ndf` の設置・撤去・有無（#2461・#2583・#4528・要求の 346 行）。
 
 - 複製（`<CLAUDE_CONFIG_DIR か ~/.claude>/ndf/relay.py`）は標準ライブラリだけの小さな起動の部品で、隣の
   `relay.root`（プラグインの根のパス 1 行）が指すプラグインの `bin/ndf relay` を呼ぶ。中身はバージョンによらず同じで、
   プラグインを更新しても `relay.root` を書き換えるだけで済む（1 回の導入で動き続ける）
 - プラグインの更新で `relay.root` の指すバージョンの保存先が消えたら、複製は同じ親の下の最も新しいバージョンの保存先へ向け直す。
   見つからなければ理由と打ち直しのコマンドを 1 行出して止まる（何も出さずに失敗しない。#2583）
-- PATH のエントリポイントは `<XDG_BIN_HOME か ~/.local/bin>/ndf-relay` に置く 2 行のシェルのスクリプトで、複製を呼ぶ
-- どれも利用者が `ndf relay install` を打ったときだけ置く（黙って置かない）。置いた後は、SessionStart がプラグインの
+- PATH のエントリポイントは `<XDG_BIN_HOME か ~/.local/bin>/` に置く 2 つのシェルのスクリプトで、どちらも複製を呼ぶ。
+  `ndf-relay` は複製が `bin/ndf relay …` を呼び、`ndf` は目印の引数 `--ndf` を付けて複製を呼び、複製は `relay` を足さずに
+  `bin/ndf …` を呼ぶ（端末・tmux・Codex から `ndf` を打てる。#4528）。向け直しのしかけは複製の 1 か所にある
+- どれも利用者が `ndf relay install` を打ったときだけ置く（黙って置かない）。置いた後は、SessionStart が消えた
+  エントリポイントを置き直し（`restore_entries`。コンテナの再起動で `~/.local/bin` だけが消える環境のため。#4535）、プラグインの
   更新に合わせて `relay.root` と `relay.version` を向け直す（`follow`。旧いバージョンのディレクトリは更新で消えないため、
   消えたときの向け直しだけでは古いバージョンを呼び続ける）。撤去は、自分が置いたマーカーの行がある
   ファイルだけを消す（利用者が置いた同じ名前のファイルを消さない）
@@ -26,12 +29,16 @@ from ndf import identity
 from ndf.domains.relay import signals
 
 ENTRY_NAME = "ndf-relay"
+NDF_NAME = identity.FIXED_WORDS["entrypoint"]
+# `ndf` のエントリポイントが複製へ渡す先頭の引数。複製はこれを外し、`relay` を足さずにプラグインの `bin/ndf` へ渡す
+NDF_FLAG = "--ndf"
 COPY_NAME = "relay.py"
 ROOT_FILE = "relay.root"
 # 旧い NDF の `version_dir.py` の `copy_version_path` と同じ保存先と名前
 VERSION_FILE = "relay.version"
 MARK = "# 中継の複製（ndf relay install が置いた）"
 ENTRY_MARK = "# 中継の PATH のエントリポイント（ndf relay install が置いた）"
+NDF_MARK = "# ndf の PATH のエントリポイント（ndf relay install が置いた）"
 
 _LAUNCHER = """#!/usr/bin/env python3
 {mark}
@@ -64,7 +71,9 @@ def main():
               "プラグインの bin/{entry} relay install で置き直す", file=sys.stderr)
         return {code}
     ndf = str(root / "bin" / "{entry}")
-    os.execv(ndf, [ndf, "relay", *sys.argv[1:]])
+    args = sys.argv[1:]
+    args = args[1:] if args[:1] == ["{flag}"] else ["relay", *args]
+    os.execv(ndf, [ndf, *args])
 
 
 if __name__ == "__main__":
@@ -80,11 +89,12 @@ class Status(NamedTuple):
 
 
 class Installed(NamedTuple):
-    """設置の結果。`copy`・`entry` はそれぞれの状態、`on_path` はエントリポイントの保存先が PATH にあるか、
+    """設置の結果。`copy`・`entry`（`ndf-relay`）・`ndf` はそれぞれの状態、`on_path` はエントリポイントの保存先が PATH にあるか、
     `version` はこのときに `relay.version` へ書いたバージョン（書かなければ None）。"""
 
     copy: Status
     entry: Status
+    ndf: Status
     on_path: bool
     version: Optional[str] = None
 
@@ -99,11 +109,15 @@ def bin_dir(environ: Mapping[str, str]) -> Path:
 
 
 def launcher(missing_code: int) -> str:
-    return _LAUNCHER.format(mark=MARK, root_file=ROOT_FILE, code=missing_code, entry=identity.FIXED_WORDS["entrypoint"])
+    return _LAUNCHER.format(mark=MARK, root_file=ROOT_FILE, code=missing_code, entry=NDF_NAME, flag=NDF_FLAG)
 
 
 def entry_script(copy: Path) -> str:
     return f'#!/bin/sh\n{ENTRY_MARK}\nexec python3 {shlex.quote(str(copy))} "$@"\n'
+
+
+def ndf_script(copy: Path) -> str:
+    return f'#!/bin/sh\n{NDF_MARK}\nexec python3 {shlex.quote(str(copy))} {NDF_FLAG} "$@"\n'
 
 
 def _file_status(path: Path, mark: str, body: str) -> Status:
@@ -124,6 +138,7 @@ def status(environ: Mapping[str, str], missing_code: int) -> Installed:
     return Installed(
         _file_status(copy, MARK, launcher(missing_code)),
         _file_status(entry, ENTRY_MARK, entry_script(copy)),
+        _file_status(entry.parent / NDF_NAME, NDF_MARK, ndf_script(copy)),
         on_path,
     )
 
@@ -132,7 +147,7 @@ def install(environ: Mapping[str, str], plugin_root: Path, missing_code: int, re
     """複製とエントリポイントを置き、`relay.root` をこのプラグインへ向け、`relay.version` に `version` を書く。
 
     マーカーの無い複製（旧い NDF の複製）は `replace_foreign` が真のときだけ置き換える。置き換えないときは `relay.version` も
-    書かない。マーカーの無いエントリポイントは置き換えない。
+    書かない。マーカーの無いエントリポイント（利用者が置いた `ndf` など）は置き換えない。
     """
     now = status(environ, missing_code)
     copy = now.copy
@@ -143,11 +158,17 @@ def install(environ: Mapping[str, str], plugin_root: Path, missing_code: int, re
         signals.replace_text(copy.path.parent / VERSION_FILE, f"{version}\n", 0o644)
         written = version
         copy = Status(copy.path, "ours")
-    entry = now.entry
-    if entry.state in ("absent", "stale"):
-        signals.replace_text(entry.path, entry_script(copy.path), 0o755)
-        entry = Status(entry.path, "ours")
-    return Installed(copy, entry, now.on_path, written)
+    entry = _place(now.entry, entry_script(copy.path))
+    ndf = _place(now.ndf, ndf_script(copy.path))
+    return Installed(copy, entry, ndf, now.on_path, written)
+
+
+def _place(item: Status, body: str) -> Status:
+    """無いか中身の違う自分のエントリポイントを置き直す。マーカーの無いファイルは触らない。"""
+    if item.state not in ("absent", "stale"):
+        return item
+    signals.replace_text(item.path, body, 0o755)
+    return Status(item.path, "ours")
 
 
 def _version_key(text: str) -> Optional[tuple]:
@@ -180,6 +201,32 @@ def follow(environ: Mapping[str, str], plugin_root: Path, version: str) -> Optio
     return version
 
 
+def restore_entries(environ: Mapping[str, str]) -> list[Path]:
+    """SessionStart が呼ぶ。NDF が置いた複製があるのに PATH のエントリポイントが無ければ置き直し、置いたパスを返す（#4535）。
+
+    `~/.local/bin` がコンテナの使い捨ての領域で複製だけが残る環境では、再起動でエントリポイントだけが消える。
+    利用者が入れた状態を戻すだけで、複製の無い（入れていない・`uninstall` した）環境には置かない。
+    置き直すのは無いものだけで、マーカーの無いもの・中身の違うもの（別のアカウントの `CLAUDE_CONFIG_DIR` が
+    置いたものなど）は触らない。
+    """
+    copy = config_dir(environ) / COPY_NAME
+    try:
+        if MARK not in copy.read_text(encoding="utf-8"):
+            return []
+    except FileNotFoundError:  # 複製が無ければ入れていない
+        return []
+    entries = (
+        (bin_dir(environ) / ENTRY_NAME, entry_script(copy)),
+        (bin_dir(environ) / NDF_NAME, ndf_script(copy)),
+    )
+    placed = []
+    for path, body in entries:
+        if not path.exists() and not path.is_symlink():
+            signals.replace_text(path, body, 0o755)
+            placed.append(path)
+    return placed
+
+
 def points_at(environ: Mapping[str, str], version: str) -> bool:
     """NDF が置いた複製があり、`relay.version` が `version` 以上か（`relay.root` が既にそのバージョンか新しいほうを向く）。"""
     copy = config_dir(environ) / COPY_NAME
@@ -197,11 +244,11 @@ def uninstall(environ: Mapping[str, str], missing_code: int) -> Installed:
     """自分が置いた複製・向き先・エントリポイントだけを消す。"""
     now = status(environ, missing_code)
     out = []
-    for item in (now.copy, now.entry):
+    for item in (now.copy, now.entry, now.ndf):
         if item.state in ("ours", "stale"):
             item.path.unlink(missing_ok=True)
             item = Status(item.path, "absent")
         out.append(item)
     if out[0].state == "absent":
         (out[0].path.parent / ROOT_FILE).unlink(missing_ok=True)
-    return Installed(out[0], out[1], now.on_path)
+    return Installed(out[0], out[1], out[2], now.on_path)

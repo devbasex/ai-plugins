@@ -170,13 +170,17 @@ Pull Request が最後かどうかを判断できない。
 （バージョンの比較の URL・リリース対象の差分・**取り消しの手段とその限界**）。
 
 **承認資料の機械で作れる部分は `ndf release-steps materials` が組む。** 打ち方と `status` の読み方は
-[references/release-steps.md](references/release-steps.md) にある。
+[references/release-steps.md](references/release-steps.md) にある。判断の要る部分の書き足しと読み手役の確認は
+`ndf document-rebuild gate --gate release --pr <リリースの PR> --material <承認資料> --state-dir <保存先> --out <結果のファイル>` が行う
+（工程では読み手役のステップが打つ）。提示と質問には結果の `outputs.material` の資料を使い、会話のセッションは読み手役を起動しない
+（[approval-request.md の「読み手役の確認」](../development-workflow/references/approval-request.md#読み手役の確認)）。
 
 **承認の対象はリリースの PR の HEAD（40 桁）である。** 置き方は「リリースの場合」で変わる。
 
 - 証跡で承認する設定（`approval.via: gate`）: `ndf release-steps present --pr <リリースの PR> --material <承認資料>` で資料を PR へ置き、
-  承認を得たら `ndf release-steps answer --pr <リリースの PR> --answer approved --presented <present の outputs.head> --by user` で証跡を書く。
-  MVV 判定で通したときは `--by mvv` で書く。誰がいつ承認したかは証跡のコメントの作成者と作成時刻で読む
+  承認を得たら `present` の routes の `answer`（提示した HEAD と資料の SHA-256 を固定する）に `--by user` を足して証跡を書く。
+  承認の後に再開するときは、`present` の前に今の判定を読む（[release-steps.md](references/release-steps.md) の「承認を得たリリースを再開するとき」）。
+  MVV 判定で通したときは `--by mvv` で書く（`--material-sha256` は渡さない）。誰がいつ承認したかは証跡のコメントの作成者と作成時刻で読む
 - レビューで承認する設定（`approval.via: review`）: リリースの PR のレビューの承認がリリース承認である
 変更の要求を受けたら、その場で変更要求の記録へ 1 行書く（[approval-request.md](../development-workflow/references/approval-request.md) の「回答を記録する」）。
 
@@ -225,6 +229,10 @@ Pull Request が最後かどうかを判断できない。
 
 **版数を持たないリリースもある。** サービスでリビジョンだけで運用している場合がこれにあたる。
 その場合は何が出ているかを一意に指せる値（リビジョン・ビルド番号）を記録の対象にする。
+設定の `release.version_store.kind` が `none` のリポジトリでは、デプロイの工程の `product_version` は出したものを指す
+空白だけでない 1 行の値（例: `main abc1234`）にする。バージョン番号を作らない。値の形は worker の起動指示の 1 行が示す。
+まとめたリリースの後は、デプロイの工程が worker を起動せず、オーガナイザーが `ndf lanes release --version` で記録した値と、
+承認と一緒に記録した届け先で終わる（届け先が記録から決まらなければ `precondition` で止まり、`ndf progress finish` で手で終える）。
 
 ### 3. バージョンと説明文書を更新する
 

@@ -13,12 +13,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ndf import contracts
+from ndf import contracts, identity
 
 # 改名表（コントラクトの保存先からの相対パス）
 TABLE = "data/ndf-settings-renames.json"
 # ブランチ戦略のセクションの名前（`.ndf/project.json` の最上位のキー）
-SECTION = "branch_strategy"
+SECTION = identity.BRANCH_STRATEGY_SECTION
 
 
 def removes(row: Mapping[str, Any]) -> bool:

@@ -19,9 +19,11 @@ import pytest
 import sqlalchemy as sa
 
 from ndf import contracts, identity
+from ndf.adapters.github import FileAt
 from ndf.adapters import git, github, llm
 from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
+from ndf.core import merge_approval
 from ndf.domains.records import cli, jsonl, mvv, mvv_gate
 from ndf.progress import command, definition, invoke, model, stage_inputs, store
 from ndf.domains.records import mvv_decide as md
@@ -110,6 +112,10 @@ def notes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
     return posted
 
 
+# 判定した PR の承認の対象（Hub の PR 5 番・main 宛て・自動反映。#4409）
+_TARGET = {"repo": "o/r", "pr": 5, "base": "main", "head": "h" * 40, "production": True}
+
+
 class Hub:
     """GitHub の偽物。設計のブランチ design/x の開いた PR と、その本文・マージ先 main・head と、比較の変えたファイルを返す。
 
@@ -137,7 +143,16 @@ class Hub:
         if isinstance(moved, Exception):
             raise moved
         head = moved.get("head", self.case.get("head", HEAD))
-        return SimpleNamespace(body=moved.get("body", self.case["body"]), head_sha=head, base_ref=moved.get("base", "main"))
+        base = moved.get("base", "main")
+        return SimpleNamespace(body=moved.get("body", self.case["body"]), head_sha=head, base_ref=base, number=number)
+
+    def branch_file(self, base: str, path: str) -> FileAt:
+        """マージ先 main の設定（自動反映の本番チャネル。#4409）。"""
+        section = {
+            "branches": {"base": "main", "production": "main"},
+            "release": {"deliveries": [{"channel": "production", "kind": "auto"}]},
+        }
+        return FileAt("o/r", json.dumps({"branch_strategy": section}), "c1")
 
     def rest(self, method: str, path: str, payload: Any = None, params: Any = None) -> dict:
         self.paths.append(path)
@@ -205,6 +220,8 @@ def test_normal_pace_judges_and_keeps_the_gate(repo: Path, gate_name: str, notes
     out = mvv_gate.gate(repo, gate_name, _inputs(pace="normal", pr=5), _hub(5, DOCS), ask)
     assert len(ask.calls) == 1 and out["verdict"] == FOLLOW and out["skip"] is False
     assert (out["why"][0], out["head"], out["holds"], "stopped_by" in out) == (NORMAL, HEAD, None if gate_name == "release" else [], False)
+    # 省かない判定はマージ先の設定を読まない（承認の対象を持たない。#4409 の r1-7）
+    assert "target" not in out
     assert (out["noted"], out["note_url"]) == (True, "https://github.com/o/r/pull/5#issuecomment-1")
     ((number, text),) = notes
     assert number == 5 and "Value 1 に沿う" in text and NORMAL in text
@@ -477,9 +494,20 @@ def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, note
     ask = Ask(FOLLOW)
     out = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
     assert (out["skip"], out["why"], out["verdict"]["boundary"], out["head"]) == (True, [], [], HEAD)
+    # 承認ゲートを省くときだけ、マージ先の設定を読んで承認の対象を持つ（r1-7）
+    assert out["target"] == _TARGET
     # 承認ゲートを省いた判定も、理由を PR のコメントへ残す
     ((number, text),) = notes
     assert number == 5 and "## MVV 判定" in text and "Value 1 に沿う" in text
+    # 省いた判定の記録は、担い手 mvv のマージの承認の証跡の行を同じコメントに持つ（#4409 の決定 7。投稿は 1 件のまま）
+    hub = SimpleNamespace(comments=lambda n: [github.Authored("octocat", "OWNER", text, author_id=1)])
+    (row,) = merge_approval.merge_rows(hub, 5, github.Viewer("octocat", 1))  # type: ignore[arg-type]
+    assert (row.answer, row.by, row.target, row.production) == (
+        "approved",
+        "mvv",
+        merge_approval.MergeTarget("o/r", 5, "main", "h" * 40),
+        True,
+    )
     # 同じ材料の「従う」は記録を再利用し、理由とレッドラインも引き継ぐ
     again = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
     assert {**again, "note_url": ""} == {**out, "note_url": ""} and len(ask.calls) == 1

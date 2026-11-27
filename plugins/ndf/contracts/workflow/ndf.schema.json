@@ -6,6 +6,7 @@
   "$defs": {
     "diff_word": {"enum": ["code_in_diff", "docs_only_diff", "behavior_docs_in_diff"], "description": "スプリントの差分の種類を問う条件の語"},
     "checked_kind": {"enum": ["review", "test"], "description": "範囲を差分に限るステップの種類"},
+    "gated_kind": {"enum": ["gate", "reading"], "description": "承認ゲートの種類（gate）を書くステップの種類。承認ゲートと、その直前で承認資料と質問を読み手役に確かめさせるステップ（#4446）"},
     "mode": {
       "type": "object",
       "additionalProperties": false,
@@ -24,10 +25,11 @@
         "when": {
           "type": "array",
           "uniqueItems": true,
-          "items": {"anyOf": [{"$ref": "#/$defs/diff_word"}, {"enum": ["code_in_unreviewed_diff", "ci_declared", "prod_branch", "release_record", "retro_enabled", "design_pr"]}]},
+          "items": {"anyOf": [{"$ref": "#/$defs/diff_word"}, {"enum": ["code_in_unreviewed_diff", "ci_declared", "tests_verifiable", "prod_branch", "release_record", "retro_enabled", "design_pr"]}]},
           "description": "すべてが真のときだけ工程を流す条件。偽の語があれば、最初の偽の語を理由に無効にする。code_in_unreviewed_diff はつなぎ目（文脈の gathered から後のコミット）にコードのファイルがあるか（gathered が無ければ真）"
         },
         "per_issue": {"const": true, "description": "進め方 fast で、課題ごとの子の行にする工程"},
+        "per_unit": {"const": true, "description": "実装計画のレビューの単位ごとに流す工程"},
         "inputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が読むスプリントの文脈のキー"},
         "optional_inputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が文脈にあるときだけ読むスプリントの文脈のキー（無くても工程を流す）"},
         "outputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が書くスプリントの文脈のキー"}
@@ -38,10 +40,10 @@
       "additionalProperties": false,
       "required": ["kind", "range"],
       "properties": {
-        "kind": {"anyOf": [{"$ref": "#/$defs/checked_kind"}, {"enum": ["release", "verify", "merge", "work", "gate", "record"]}], "description": "順序の決まりの対象を決める種類。verify はリリースしたバージョンを確かめるステップで、マージの前の検査（review・test）と分ける"},
+        "kind": {"anyOf": [{"$ref": "#/$defs/checked_kind"}, {"enum": ["release", "verify", "merge", "work", "gate", "record", "reading"]}], "description": "順序の決まりの対象を決める種類。verify はリリースしたバージョンを確かめるステップで、マージの前の検査（review・test）と分ける。reading は承認ゲートの直前で承認資料と質問を読み手役に確かめさせるステップ（ndf document-rebuild gate。#4446）"},
         "range": {"enum": ["sprint_diff", "issue_diff", "unreviewed_diff", "released", "lane", "none"], "description": "ステップの入力の範囲。review と test は sprint_diff・issue_diff・unreviewed_diff のどれか、verify は released だけ。unreviewed_diff はつなぎ目（文脈の gathered から後のコミット）で、sprint_diff の一部として同じリリースで届く"},
         "subject": {"enum": ["code", "docs", "design"], "description": "レビューの対象。kind が review のときだけ書く"},
-        "gate": {"enum": ["design", "release"], "description": "承認ゲートの種類。kind が gate のときだけ書く。語の表示は progress.json の gates が持つ"},
+        "gate": {"enum": ["design", "release"], "description": "承認ゲートの種類。kind が gate と reading のときだけ書く（reading はどのゲートの前か）。語の表示は progress.json の gates が持つ"},
         "modes": {"type": "array", "uniqueItems": true, "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "ステップを流すモードの名前（modes/ の文書の名前）。無ければすべてのモードで流す。承認ゲートが掛かるモードはここで決める"}
       },
       "allOf": [
@@ -51,7 +53,7 @@
           "else": {"not": {"required": ["subject"]}}
         },
         {
-          "if": {"properties": {"kind": {"const": "gate"}}},
+          "if": {"properties": {"kind": {"$ref": "#/$defs/gated_kind"}}},
           "then": {"required": ["gate"]},
           "else": {"not": {"required": ["gate"]}}
         }

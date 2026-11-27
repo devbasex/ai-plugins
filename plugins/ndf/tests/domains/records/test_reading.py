@@ -89,12 +89,10 @@ def test_the_key_changes_with_what_the_person_reads(change: dict) -> None:
     assert rd.question_key([{**QUESTION, **change}]) != rd.question_key([QUESTION])
 
 
-def test_the_key_ignores_the_header_and_outer_spaces() -> None:
+def test_the_key_ignores_the_header_and_outer_spaces_and_keeps_the_boundary_of_the_texts() -> None:
     padded = {**QUESTION, "header": "別", "question": f" {QUESTION['question']}\n"}
     assert rd.question_key([padded]) == rd.question_key([QUESTION])
 
-
-def test_the_key_keeps_the_boundary_of_the_texts() -> None:
     def one(label: str, description: str) -> str:
         return rd.question_key([{"question": "q", "options": [{"label": label, "description": description}]}])
 
@@ -159,6 +157,7 @@ def test_add_fills_the_row_and_keeps_no_text(repo: Path, capsys, last_result) ->
     "change",
     [
         {"reads": [READS[1]]},
+        {"reads": [{**READS[0], "result": "failed"}]},
         {"reads": [{**READS[0], "result": "remained"}]},
         {"prs": [{"number": 7, "branch": "design/x"}]},
         {"prs": [{**PRS[0], "branch": "*"}]},
@@ -197,62 +196,40 @@ def test_rows_stop_on_a_newer_version(repo: Path) -> None:
         reading.rows()
 
 
-# --- 承認の手順の確かめ ---------------------------------------------------------------------------------
+# --- 承認の手順の確かめ（突き合わせそのものは tests/domains/docrebuild/test_docrebuild_gate.py が gate の記録で確かめる） ---------
 
 
-@pytest.mark.parametrize(("head", "words"), [(HEAD, []), (MOVED, [rd.HEAD_MOVED])])
-def test_check_compares_with_the_heads_on_github(
-    head: str, words: list[str], repo: Path, capsys, last_result, monkeypatch, fetched
+class _Hub:
+    """GitHub の偽物（題・本文・head を返す。`broken` なら読めない）。"""
+
+    def __init__(self, broken: bool = False) -> None:
+        self.broken, self.fetches = broken, 0
+
+    def repository(self, query: str, variables: Any = None) -> dict:
+        self.fetches += 1
+        if self.broken:
+            raise GitHubError("502", 502)
+        node = {"number": 7, "url": "u", "title": "題", "body": "本文", "headRefOid": HEAD, "headRefName": "design/x", "baseRefName": "main",
+                "changedFiles": 1, "additions": 1, "deletions": 0, "commits": {"totalCount": 1}, "comments": {"nodes": []}}  # fmt: skip
+        return {"found": node}
+
+
+@pytest.mark.parametrize(("broken", "kind"), [(False, "precondition"), (True, "unknown")])
+def test_check_writes_the_rebuilt_question_and_names_what_is_missing(
+    broken: bool, kind: str, repo: Path, capsys, last_result, monkeypatch, fetched
 ) -> None:
-    reading.add(ENTRY, repo)
-    asked = _hub(monkeypatch, {7: head})
-    code, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": [7]})
-    assert asked == [{7}]
-    assert fetched == [("origin", "+refs/heads/design/x:refs/remotes/origin/design/x")]
-    assert [i["missing"] for i in got["items"]] == words
-    assert (code == 0) is (words == []) and ("cause" not in got or got["cause"]["kind"] == "precondition")
-
-
-@pytest.mark.parametrize(("recorded", "prs", "word"), [(False, [7], rd.NO_RECORD), (True, [7, 8], "no_pr")])
-def test_check_returns_what_the_record_lacks_without_reading_github(
-    recorded: bool, prs: list[int], word: str, repo: Path, capsys, last_result, monkeypatch, fetched
-) -> None:
-    if recorded:
-        reading.add(ENTRY, repo)
-    asked = _hub(monkeypatch, {7: HEAD, 8: HEAD})
-    _, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": prs})
-    assert got["items"] == [{"missing": word}] and got["cause"]["kind"] == "precondition"
-    assert (asked, fetched) == ([], [])
-
-
-def test_check_without_a_pull_request_does_not_read_github(repo: Path, capsys, last_result, monkeypatch, fetched) -> None:
-    reading.add({**ENTRY, "prs": []}, repo)
-    asked = _hub(monkeypatch, {})
-    code, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": []})
-    assert (code, got["status"], asked, fetched) == (0, "ok", [], [])
-
-
-def test_check_stops_as_unknown_when_github_cannot_be_read(repo: Path, capsys, last_result, monkeypatch) -> None:
-    def broken(numbers: Any) -> dict:
-        raise GitHubError("502", 502)
-
-    monkeypatch.setattr(records_cli, "_repo_hub", lambda repo: SimpleNamespace(pulls=broken))
-    reading.add(ENTRY, repo)
-    _, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": [7]})
-    assert got["status"] == "stopped" and got["cause"]["kind"] == "unknown"
-
-
-@pytest.mark.parametrize(
-    ("heads", "prs", "kind"), [({}, [7, 8], "unknown"), ({7: HEAD}, [7], "unknown"), ({7: MOVED}, [7, 8], "precondition")]
-)
-def test_check_does_not_pass_a_pull_request_without_a_head(
-    heads: dict[int, str], prs: list[int], kind: str, repo: Path, capsys, last_result, monkeypatch
-) -> None:
-    """GitHub が None を返した PR は、確かめられていない。head が違うと分かった PR があれば、そちらを先に知らせる。"""
-    reading.add({**ENTRY, "prs": [*PRS, {"number": 8, "branch": "design/y", "head": HEAD}]}, repo)
-    _hub(monkeypatch, heads)
-    _, got = _run(capsys, last_result, repo, "check", {"questions": [QUESTION], "prs": prs})
-    assert got["status"] == "stopped" and got["cause"]["kind"] == kind
+    """`check --gate --pr` は PR を 1 回だけ読み、題から作り直した質問を --questions-out へ書く。記録が無ければ no_record、読めなければ unknown。"""
+    hub = _Hub(broken)
+    monkeypatch.setattr(records_cli, "_repo_hub", lambda repo: hub)
+    code = cli.main(["records", "--cwd", str(repo), "reading", "check", "--gate", "design", "--pr", "7", "--questions-out", "q.json"])
+    got = last_result(capsys.readouterr().out)
+    assert result.errors(got, code) == [] and got["cause"]["kind"] == kind and hub.fetches == 1
+    if broken:
+        return
+    assert got["items"] == [{"missing": rd.NO_RECORD}] and fetched == []
+    written = json.loads((repo / "q.json").read_text(encoding="utf-8"))["questions"]
+    assert written == reading.gate_questions("design", 7, "題", None)
+    assert cli.main(["records", "--cwd", str(repo), "reading", "check", "--file", "entry.json"]) != 0
 
 
 # --- 読み手役への指示 -----------------------------------------------------------------------------------

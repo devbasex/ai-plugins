@@ -106,8 +106,13 @@ def test_check_production_pr() -> None:
 # --- 承認済みのコミットだけを入れる（#3661。テスト設計の 17・19） -----------------------------------------------
 
 
-def _trail(answer: str, sha: str) -> Authored:
-    return Authored("octocat", "OWNER", approval_decide.render_trail(answer, sha, trail.USER_BY))
+MAT = trail.material_digest("資料")
+
+
+def _asked(answer: str, sha: str) -> list[Authored]:
+    """利用者が提示された資料（`MAT`）へ回答した証跡（提示と回答の 2 件。#4446）。"""
+    shown = Authored("octocat", "OWNER", approval_decide.render_request("資料", sha, MAT))
+    return [shown, Authored("octocat", "OWNER", approval_decide.render_trail(answer, sha, trail.USER_BY, MAT))]
 
 
 @dataclass
@@ -134,7 +139,7 @@ class StrategyHub(FakeHub):
 
 def _queue_hub(head: str, approved: str, **kw: Any) -> StrategyHub:
     """plugin（trunk・merge-queue）の版上げの PR。本番ブランチは merge queue（merge commit）を持つ。"""
-    hub = StrategyHub(pulls={7: pull(head=head)}, comments_of={7: [_trail("approved", approved)]}, **kw)
+    hub = StrategyHub(pulls={7: pull(head=head)}, comments_of={7: _asked("approved", approved)}, **kw)
     hub.versions = {TIP: "1.0.0", head: "1.0.1"}
     hub.responses[("GET", "/repos/o/r/rules/branches/main")] = [{"type": "merge_queue", "parameters": {"merge_method": "MERGE"}}]
     hub.graphql_data = {"repository": {"mergeQueue": {"entries": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}
@@ -217,7 +222,7 @@ def test_strict_reads_no_version_files() -> None:
     """strict は HEAD を含むかだけを見て、版数の保存先（マーケットプレイスの登録）も版数のファイルも読まない。"""
     s = section("docs")
     s["release"]["version_store"] = {"kind": "plugin"}
-    hub = _ReadingHub(pulls={7: pull(head=H1, ref="sprint/x")}, comments_of={7: [_trail("approved", H1)]})
+    hub = _ReadingHub(pulls={7: pull(head=H1, ref="sprint/x")}, comments_of={7: _asked("approved", H1)})
     hub.versions = {TIP: "1.0.0", H1: "1.0.0"}
     hub.responses[("GET", f"/repos/o/r/git/commits/{H1}")] = {"tree": {"sha": "t" * 40}}
     hub.responses[("POST", "/repos/o/r/git/commits")] = {"sha": "d" * 40}
@@ -249,7 +254,7 @@ def test_mismatched_or_unreadable_ruleset_stops_without_merging() -> None:
 
 def _strict_hub(head: str, approved: str, behind: int) -> StrategyHub:
     """docs（trunk・production_pr・strict）のスプリントの PR。本番ブランチに ruleset が無い（private の Free）。"""
-    hub = StrategyHub(pulls={7: pull(head=head, ref="sprint/x")}, comments_of={7: [_trail("approved", approved)]}, behind=behind)
+    hub = StrategyHub(pulls={7: pull(head=head, ref="sprint/x")}, comments_of={7: _asked("approved", approved)}, behind=behind)
     hub.responses[("GET", f"/repos/o/r/git/commits/{head}")] = {"tree": {"sha": "t" * 40}}
     hub.responses[("POST", "/repos/o/r/git/commits")] = {"sha": "d" * 40}
     return hub
@@ -376,10 +381,12 @@ def test_trail_writer_one_per_case_3671() -> None:
 def test_issue_3671_present_does_not_ask_again_when_the_head_has_an_answer() -> None:
     """#3671: 今の head への回答が既にあれば、承認資料を提示せず（質問を送らず）その判定を返す。古い head の回答なら問う。"""
     material = f"{approval_decide.HEAD_LINE} `{H1}`\n"
-    hub = FakeHub(pulls={7: pull(head=H1)}, comments_of={7: [_trail("approved", H1)]})
+    hub = FakeHub(pulls={7: pull(head=H1)})
+    trail.present(hub, 7, material)
+    trail.answer(hub, 7, "approved", trail.USER_BY, presented=trail.Shown(H1, trail.material_digest(material)))
     shown = trail.present(hub, 7, material)
-    assert not shown.asked and shown.judgment.approved and len(hub.comments(7)) == 1
-    hub = FakeHub(pulls={7: pull(head=H1)}, comments_of={7: [_trail("approved", H2)]})
+    assert not shown.asked and shown.judgment.approved and len(hub.comments(7)) == 2
+    hub = FakeHub(pulls={7: pull(head=H1)}, comments_of={7: _asked("approved", H2)})
     shown = trail.present(hub, 7, material)
     assert shown.asked and approval_decide.REQUEST_MARK in hub.comments(7)[-1].body
 
@@ -389,7 +396,7 @@ def test_issue_3671_only_the_answer_writer_writes_the_answer(writer: str) -> Non
     """#3671: 書き手が回答の手順でない設定では、回答の証跡を書かない（書き手を 2 つにしない）。"""
     hub = FakeHub(pulls={7: pull(head=H1)})
     with pytest.raises(trail.TrailError, match=writer):
-        trail.answer(hub, 7, "approved", trail.USER_BY, presented=H1, writer=writer)
+        trail.answer(hub, 7, "approved", trail.USER_BY, presented=trail.Shown(H1), writer=writer)
     assert hub.comments(7) == []
 
 
@@ -493,7 +500,7 @@ def _held_hub(open_at: list[tuple[int, str]]) -> StrategyHub:
     # `land` はリリースのブランチの PR だけを受ける（plugin）。#8 は版数が本番と同じで版上げでない
     hub.pulls[8] = pull(number=8, head=other)
     hub.pulls[9] = pull(number=9, head=H2)
-    hub.comments_of[8] = [_trail("approved", other)]
+    hub.comments_of[8] = _asked("approved", other)
     hub.versions.update({other: "1.0.0", H2: "1.0.2"})
     hub.open_at = open_at
     return hub

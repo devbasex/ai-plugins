@@ -8,7 +8,10 @@ import dataclasses
 import pytest
 
 from ndf import contracts
+from ndf.contracts import internal
 from ndf.progress import definition, invoke, model, run, stages
+
+import scenes
 
 E = "file:///workflow/stage-io.schema.json#/$defs/"
 # .ndf/project.json の delivery の 1 行の形
@@ -51,8 +54,7 @@ def _errors(mode_doc: dict, stage_docs: dict) -> list[str]:
     return info.value.errors
 
 
-@pytest.mark.parametrize("mode", ["light", "operation", "legacy-refactor", "standard", "documentation"])
-def test_all_modes_pass_every_check(mode):
+def _all_modes_pass_every_check(mode):
     snap = definition.load_definition(mode)
     assert snap.stages and len(snap.sha256) == 64
     assert snap.stages[-1].name == "棚卸し"
@@ -63,8 +65,7 @@ def test_all_modes_pass_every_check(mode):
         assert stage.steps and all(definition.ref_target(st.output_ref) is not None for st in stage.steps)
 
 
-@pytest.mark.parametrize("mode", ["legacy-refactor", "standard"])
-def test_refactor_stage_takes_the_issues_to_read_their_implementation_plans(mode):
+def _refactor_stage_takes_the_issues_to_read_their_implementation_plans(mode):
     # #3879 構成要素 2: 実装計画のスプリントの終わりの候補を読むため、工程「リファクタリング」は課題の一覧を受ける
     assert definition.load_definition(mode).stage("リファクタリング").inputs == ("worktree", "branch", "issues")
 
@@ -84,6 +85,12 @@ def test_modes_are_ordered_by_height():
 
 
 def test_gate_steps_name_which_gate_they_are():
+    # 承認ゲートの工程は承認ゲートを 1 つと数え、before はゲートの直前のステップを返す（#4446 の Task 1）
+    for name, gate in (("設計", "design"), ("デプロイ", "release")):
+        stage = definition.load_definition("standard").stage(name)
+        ids = [st.id for st in stage.steps]
+        at = next(st.id for st in stage.steps if st.kind == "gate")
+        assert stage.gates == (gate,) and stage.before(at) == ids[ids.index(at) - 1] and stage.before(ids[0]) is None
     # #1516: 設計の承認ゲートと本番の承認ゲートを書き分ける語が、ステップの定義から引ける
     snap = definition.load_definition("standard")
     gates = {st.gate: model.gate_label(st.gate) for st in snap.steps() if st.kind == "gate"}
@@ -95,14 +102,38 @@ def test_gate_steps_name_which_gate_they_are():
 def test_design_hands_the_review_result_to_the_gate_without_a_final_judge():
     # SF5: 設計の工程はレビューの結果をそのまま設計承認ゲートへ渡し、最後の判定を置かない。
     # #2935: 承認は承認ゲートのステップの回答（gate-answer）で受け、ラベルの有無をステップの入力にしない
-    # #3745: レビューと承認ゲートの間に置くのは MVV 判定のステップ（ndf records mvv gate）だけ
+    # #3745・#4446: レビューと承認ゲートの間に置くのは MVV 判定（ndf records mvv gate）と読み手役（ndf document-rebuild gate）だけ
     steps = definition.load_definition("standard").stage("設計").steps
     kinds = [st.kind for st in steps]
     between = steps[kinds.index("review") + 1 : kinds.index("gate")]
-    assert [st.args["argv"][1:4] for st in between] == [["records", "mvv", "gate"]]
+    assert [st.args["argv"][1:4] for st in between] == [["records", "mvv", "gate"], ["document-rebuild", "gate", "--gate"]]
     assert kinds[kinds.index("gate") + 1 :] == ["merge"]
     gate = steps[kinds.index("gate")]
     assert gate.output_ref.endswith("#/$defs/gate-answer") and not gate.args
+
+
+@pytest.mark.parametrize("mode", ["standard", "light"])
+def test_reading_step_sits_between_the_mvv_judge_and_the_gate_and_is_not_counted_as_a_gate(mode):
+    # #4446 の決定 2: design-reading は design-mvv と design-gate の間、release-reading は release-mvv と release-gate の間。
+    # 承認ゲートは 1 つと数え、MVV 判定は読み手役のステップを飛ばして探す。設計承認ゲートの無いモードには読み手役も無い
+    snap = definition.load_definition(mode)
+    for name, gate, mvv in (("設計", "design", "design-mvv"), ("デプロイ", "release", "release-mvv")):
+        if name not in [s.name for s in snap.stages]:
+            continue
+        stage = snap.stage(name)
+        ids = [st.id for st in stage.steps]
+        if f"{gate}-gate" not in ids:
+            assert stage.reading_for(gate) is None and all(st.kind != "reading" for st in stage.steps)
+            continue
+        assert ids[ids.index(mvv) : ids.index(f"{gate}-gate") + 1] == [mvv, f"{gate}-reading", f"{gate}-gate"]
+        assert stage.gates == (gate,) and stage.mvv_before(f"{gate}-gate") == mvv
+        assert stage.reading_for(gate).id == f"{gate}-reading" and stage.reading_for(gate).args["argv"][-1] == gate
+    # 読み手役のステップの無い古い定義でも、MVV 判定は承認ゲートの直前のステップ
+    old = dataclasses.replace(snap.stage("デプロイ"), steps=tuple(st for st in snap.stage("デプロイ").steps if st.kind != "reading"))
+    assert old.mvv_before("release-gate") == "release-mvv" and old.reading_for("release") is None
+    # 読み手役のステップを承認ゲートの後ろへ入れ替えると、定義の検査で落ちる
+    swapped = _stage_doc("x", "行", [_step("g", "gate", "none", gate="release"), _step("r", "reading", "none", gate="release")])
+    assert any("I11:" in e for e in _errors(_mode_doc([("行", "x")]), {"x": swapped}))
 
 
 def test_refactoring_suspension_is_not_a_code_constant():
@@ -342,8 +373,7 @@ def test_optional_inputs_must_be_keys_of_the_sprint_context():
     assert definition.build(_mode_doc([("行", "x")]), {"x": good}).stage("行").optional_inputs == ("gathered",)
 
 
-@pytest.mark.parametrize("mode", ["light", "operation", "legacy-refactor", "standard", "documentation"])
-def test_code_review_reviews_the_seam_after_gathering(mode):
+def _code_review_reviews_the_seam_after_gathering(mode):
     # #3879 構成要素 2: 実装が gathered を書き、コードレビューはそれを任意の入力に取り、つなぎ目にコードがあるときだけ流す
     snap = definition.load_definition(mode)
     stage = snap.stage("コードレビュー")
@@ -392,8 +422,7 @@ def _listen_steps(mode: str) -> list[stages.StepDef]:
     return [st for st in definition.load_definition(mode).steps() if st.call in invoke.CALLS and invoke.is_listen(st)]
 
 
-@pytest.mark.parametrize("mode", ["light", "operation", "legacy-refactor", "standard", "documentation"])
-def test_current_listen_steps_offer_the_answer_enum_of_their_output_contract(mode):
+def _current_listen_steps_offer_the_answer_enum_of_their_output_contract(mode):
     # 現状固定: 承認ゲートのステップの選択肢は出力の規約（gate-answer）の metrics.answer の enum の順
     listen = _listen_steps(mode)
     assert listen
@@ -401,12 +430,9 @@ def test_current_listen_steps_offer_the_answer_enum_of_their_output_contract(mod
         assert run.choices(run.Move(run.Action.GATE, None, st, run.StepProgress())) == ["approved", "rejected", "request_changes"]
 
 
-def test_current_standard_has_listen_steps_for_both_gates():
-    gates = {st.gate for st in _listen_steps("standard")}
-    assert gates == {"design", "release"}
-
-
 def test_current_listen_step_without_output_contract_offers_nothing():
+    # standard は両方の承認ゲートの listen のステップを持ち、出力の規約の無い listen のステップは選択肢を出さない
+    assert {st.gate for st in _listen_steps("standard")} == {"design", "release"}
     st = dataclasses.replace(_listen_steps("standard")[0], output_ref=None)
     assert run.choices(run.Move(run.Action.GATE, None, st, run.StepProgress())) == []
 
@@ -441,12 +467,12 @@ def test_current_non_listen_step_offers_the_known_routes_of_the_waiting_report()
 _find_enum = definition.find_enum
 
 
-def test_current_find_enum_reads_the_own_property_before_the_children():
+def _current_find_enum_reads_the_own_property_before_the_children():
     tree = {"properties": {"answer": {"enum": ["a"]}, "inner": {"properties": {"answer": {"enum": ["b"]}}}}}
     assert _find_enum(tree, "answer") == ["a"]
 
 
-def test_current_find_enum_walks_nested_objects_and_arrays_in_order_and_takes_the_first():
+def _current_find_enum_walks_nested_objects_and_arrays_in_order_and_takes_the_first():
     tree = {
         "allOf": [
             {"properties": {"other": {"enum": ["x"]}}},
@@ -457,13 +483,118 @@ def test_current_find_enum_walks_nested_objects_and_arrays_in_order_and_takes_th
     assert _find_enum(tree, "answer") == ["first", "second"]
 
 
-def test_current_find_enum_without_the_property_or_its_enum_is_none():
+def _current_find_enum_without_the_property_or_its_enum_is_none():
     assert _find_enum({"properties": {"answer": {"type": "string"}}}, "answer") is None
     assert _find_enum({"properties": {"answer": "not a node"}, "items": [1, "s", None]}, "answer") is None
     assert _find_enum({"properties": ["answer"]}, "answer") is None
     assert _find_enum(None, "answer") is None and _find_enum([], "answer") is None
 
 
-def test_current_find_enum_keeps_an_empty_enum_and_stops_there():
+def _current_find_enum_keeps_an_empty_enum_and_stops_there():
     tree = {"items": [{"properties": {"answer": {"enum": []}}}, {"properties": {"answer": {"enum": ["later"]}}}]}
     assert _find_enum(tree, "answer") == []
+
+
+def _cleanup_runs_right_after_deploy(mode):
+    """#4409 の決定 6: 5 つのモードで、クリーンアップはデプロイの直後にある（スプリントの PR はデプロイでマージされる）。"""
+    ids = [s.id for s in definition.load_definition(mode).stages]
+    assert ids.index("cleanup") == ids.index("deploy") + 1
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        *[
+            scenes.scene(_all_modes_pass_every_check, id=scenes.label("all_modes_pass_every_check", i, (v,)), mode=v)
+            for i, v in enumerate(["light", "operation", "legacy-refactor", "standard", "documentation"])
+        ],
+        *[
+            scenes.scene(
+                _refactor_stage_takes_the_issues_to_read_their_implementation_plans,
+                id=scenes.label("refactor_stage_takes_the_issues_to_read_their_implementation_plans", i, (v,)),
+                mode=v,
+            )
+            for i, v in enumerate(["legacy-refactor", "standard"])
+        ],
+        *[
+            scenes.scene(
+                _code_review_reviews_the_seam_after_gathering,
+                id=scenes.label("code_review_reviews_the_seam_after_gathering", i, (v,)),
+                mode=v,
+            )
+            for i, v in enumerate(["light", "operation", "legacy-refactor", "standard", "documentation"])
+        ],
+        *[
+            scenes.scene(
+                _current_listen_steps_offer_the_answer_enum_of_their_output_contract,
+                id=scenes.label("current_listen_steps_offer_the_answer_enum_of_their_output_contract", i, (v,)),
+                mode=v,
+            )
+            for i, v in enumerate(["light", "operation", "legacy-refactor", "standard", "documentation"])
+        ],
+        *[
+            scenes.scene(_cleanup_runs_right_after_deploy, id=scenes.label("cleanup_runs_right_after_deploy", i, (v,)), mode=v)
+            for i, v in enumerate(["standard", "light", "operation", "documentation", "legacy-refactor"])
+        ],
+    ],
+)
+def test_mode_definition_scenes(request, scene, values):
+    """モードごとの工程の定義の場面（検査・リファクタリングの入力・境目のレビュー・承認ゲートの回答・クリーンアップの位置）。"""
+    scenes.play(request, scene, values)
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        scenes.scene(
+            _current_find_enum_reads_the_own_property_before_the_children, id="current_find_enum_reads_the_own_property_before_the_children"
+        ),
+        scenes.scene(
+            _current_find_enum_walks_nested_objects_and_arrays_in_order_and_takes_the_first,
+            id="current_find_enum_walks_nested_objects_and_arrays_in_order_and_takes_the_first",
+        ),
+        scenes.scene(
+            _current_find_enum_without_the_property_or_its_enum_is_none, id="current_find_enum_without_the_property_or_its_enum_is_none"
+        ),
+        scenes.scene(_current_find_enum_keeps_an_empty_enum_and_stops_there, id="current_find_enum_keeps_an_empty_enum_and_stops_there"),
+    ],
+)
+def test_find_enum_scenes(request, scene, values):
+    """出力のコントラクトの木から回答の enum を探す _find_enum の場面。"""
+    scenes.play(request, scene, values)
+
+
+@pytest.mark.parametrize(("stage", "mode"), [("リリース後テスト", "standard"), ("体裁レビュー", "documentation")])
+def test_the_after_release_stages_take_a_distribution_id_that_is_not_a_version_number(stage, mode):
+    # #4513 の受け入れ条件 4: バージョン番号を持たないリポジトリの product_version で、後の工程の入力が組める
+    s = definition.load_definition(mode).stage(stage)
+    assert invoke.resolve_inputs(s, {"product_version": "main abc1234"}) == {"product_version": "main abc1234"}
+    with pytest.raises(invoke.StageInputInvalid):
+        invoke.resolve_inputs(s, {"product_version": "main\nabc1234"})
+
+
+def test_required_outputs_reads_the_nested_required_keys_of_the_contract():
+    # #4513: release-result は allOf の 2 つ目に入れ子で outputs.product_version を必須とする
+    step = next(st for st in definition.load_definition("standard").stage("デプロイ").steps if st.id == "release")
+    assert definition.required_outputs(step.output_ref) == ("product_version",)
+    gate = next(st for st in definition.load_definition("standard").stage("デプロイ").steps if st.id == "release-gate")
+    assert definition.required_outputs(gate.output_ref) == ()
+    with pytest.raises(contracts.ContractError):
+        definition.required_outputs("file:///workflow/no-such.schema.json#/$defs/x")
+
+
+def test_a_stage_declaring_per_unit_is_kept_through_the_snapshot_and_old_snapshots_read_false():
+    steps = [_step("work", "work", "none")]
+    docs = {"a": _stage_doc("a", "甲", steps, per_unit=True), "b": _stage_doc("b", "乙", steps)}
+    snap = definition.build(_mode_doc([("甲", "a"), ("乙", "b")]), docs)
+    assert [s.per_unit for s in snap.stages] == [True, False]
+    raw = {**stages.snapshot_dict(snap), "context": {}, "enablement": {}}
+    assert stages.snapshot_from(internal.read_record("stage-snapshot", raw)) == snap
+    for stage in raw["stages"]:
+        del stage["per_unit"]
+    assert [s.per_unit for s in stages.snapshot_from(raw).stages] == [False, False]
+
+
+def test_per_unit_is_declared_only_as_true():
+    docs = {"a": _stage_doc("a", "甲", [_step("work", "work", "none")], per_unit=False)}
+    assert any("per_unit" in e or "True was expected" in e for e in _errors(_mode_doc([("甲", "a")]), docs))

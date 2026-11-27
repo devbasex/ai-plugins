@@ -167,7 +167,7 @@ def make_settings(tmp_path: Path, **changes) -> wrapper.Settings:
         # 偽の時計は呼ぶたびに 1 秒しか進まず、どのセグメントも短い。再起動ループの検出を確かめるテストだけが秒を渡す
         spin=switch_decide.Spin(3, 0.0),
         context_limit=800_000,
-        guards=account_decide.Guards(85.0, 70.0, 90.0),
+        guards=account_decide.Guards(85.0, 90.0),
         transcript_bytes=4096,
     )
     values.update(changes)

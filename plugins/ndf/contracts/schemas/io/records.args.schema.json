@@ -338,14 +338,32 @@
           "type": "string",
           "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
         },
-        "--file": {
+        "--gate": {
           "type": "string",
-          "description": "入力の JSON のファイル"
+          "enum": [
+            "design",
+            "release"
+          ],
+          "description": "承認ゲートの種類"
+        },
+        "--pr": {
+          "type": "integer",
+          "description": "承認する PR の番号"
+        },
+        "--material": {
+          "type": "string",
+          "description": "会話のセッションのリリースで present に渡す承認資料のファイル"
+        },
+        "--questions-out": {
+          "type": "string",
+          "description": "作り直した承認の質問（questions）を書くファイル"
         }
       },
       "required": [
         "subcommand",
-        "--file"
+        "--gate",
+        "--pr",
+        "--questions-out"
       ]
     },
     {

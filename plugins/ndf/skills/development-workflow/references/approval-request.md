@@ -391,60 +391,78 @@ ndf records mvv cite --gate <design か release> --base <ベースブランチ> 
 
 ## 読み手役の確認
 
-**承認や判断を求める質問を出す前に、読み手役が質問の文と文書を読んで確かめる。** 読み手役・合格の条件・回数・直し方は
-[document-rebuild の「読み手役に読ませる」](../../document-rebuild/SKILL.md#読み手役に読ませる) にある。MVV 判定で承認ゲートを通し、
+**承認や判断を求める質問は、読み手役が質問の文と文書を読んで確かめてから出す。** 誰が読ませるかは質問の種類で分かれる。MVV 判定で承認ゲートを通し、
 人に尋ねないときは行わない。
 
-1. **読ませるものを決める。** 質問の文と、その直前に示す材料（承認資料）は、必ず読ませる。`ndf-ask:` の質問は、この 2 つだけを読ませる。承認の質問では、承認する Pull Request の対象の文書も次の表のとおりに読ませる
+| 質問 | 読ませる担当 | 質問を出す AI がすること |
+| --- | --- | --- |
+| 承認ゲート（`ndf-gate:1`・`ndf-gate:2`） | 工程のステップ（`ndf document-rebuild gate`。工程の外の承認は同じコマンドを打つ） | 記録と突き合わせて、記録した質問をそのまま出す。読み手役は自分で起動しない。判断の材料と質問の文も自分で書かない |
+| 判断の質問（`ndf-ask:`） | 質問を出す AI | 質問の文と、その直前に示す材料を読ませて記録する |
 
-   | 文書の状態 | 読ませるもの |
+### 承認ゲートの質問
+
+承認資料と質問の文は、工程の承認ゲートの直前のステップ（`design-reading`・`release-reading`）が作り、読み手役に読ませて記録する。
+流れは [document-rebuild の「承認の前の確認」](../../document-rebuild/SKILL.md#承認の前の確認) にある。設計承認の資料は、承認する
+Pull Request のコメントにある（PR の題と本文は書き換えない）。会話のセッションのリリース（[parallel.md の「まとめたリリース」](parallel.md#まとめたリリース)を含む）と、
+状態を持たない単発の承認では、承認を問う直前に
+`ndf document-rebuild gate --gate <design か release> [--pr <番号>] [--material <承認資料>] --state-dir <保存先> --out <結果のファイル>`
+を打つ（`--material` はリリースだけで、直した資料は結果の `outputs.material` のパスにある）。
+
+1. **記録と突き合わせる。** `ndf records reading check --gate <design か release> --pr <番号> --questions-out <ファイル>` を打つ（会話のセッションの
+   リリースでは `present` に渡す資料を `--material <ファイル>` で足す）。PR を 1 回読み、決まった形の質問を作り直してファイルへ書き、記録と
+   突き合わせる。別のセッションでも同じコマンドで質問を得る
+2. **合わなければ確認をやり直す。** `stopped` の `precondition` の語が `no_record`・`head_moved`・`material_changed` なら、読み手役を自分で
+   起動せず、承認の待ち方に合わせてやり直す。やり直した後は、前の質問・承認資料・回答のコマンドを使わず、手順 1 に戻る
+
+   | 承認の待ち方 | やり直し方 |
    | --- | --- |
-   | 一度も読ませていない | 全体（新しい確認の 1 回目） |
-   | 1 回目が不合格だった | 1 回目と同じ範囲（2 回目） |
-   | 確認を終えた後に、レビューなどで直した（読み手役の指摘で直しただけのものは含めない） | 直した部分とその前後の段落だけを、別のファイルに作って（新しい確認の 1 回目）。指示と合格の条件は、document-rebuild の表の「一部だけ読ませるとき」のとおり |
-   | 確認を終えた後に直していない | 読ませない |
+   | 工程の承認ゲートで待っている | `ndf progress reread <ステートマシンの ID>`。`ndf document-rebuild gate` は直接打たない。読み手役のステップを打ち直し、承認ゲートの待ちを新しい質問の id と今の対象で出し直す。結果に `metrics.gate` があれば、そこから head と回答のコマンドを読み直す。次の操作が作業の待ち（`wait`）なら、結果の `next` のコマンドを打ち、待った後の結果の `metrics.gate` から読み直す |
+   | 会話のセッションのリリース | 返った語が何でも、先に承認資料に記載されたコミットと今の PR の head を比べる。PR の題と head が一緒に変わると `head_moved` でなく `no_record` が返るので、語では head が動いたかを判断しない。違っていれば、今の head の承認資料を用意する。用意の仕方はリリースの PR の種類で違う（[release-steps.md の「承認資料の対象のコミットを合わせる」](../../release/references/release-steps.md#承認資料の対象のコミットを合わせる)）。続けて `ndf document-rebuild gate --gate release --pr <番号> --material <承認資料> --state-dir <保存先> --out <結果のファイル>` を打ち直し、`outputs.material.path` のファイルで `present` を打ち直す。資料か head が違えば提示し直される |
 
-2. **読み手役に読ませ、合格するか 2 回目が終わるまで直す。** レビューのラウンドごとには読ませず、レビューが終わった後に、直した部分をまとめて 1 つの確認で読ませる
-   - **読ませる担当**: 質問を出す AI である。作業を自動実行（`ndf plan`）で流したときは conductor が読ませる。supervisor が設計を進めたときは、文書と承認資料は supervisor が、質問の文は conductor が読ませる。オーガナイザーがまとめて出す質問の文は、オーガナイザーが読ませる
-   - **起動**: Claude Code では、新しい `ndf:worker` を起動する。ほかのランタイムでは、`external-ai` で別の CLI を呼ぶ。`prompt` は `ndf records reading prompt` が作った文だけにし、[agent-layers.md](agent-layers.md) の「supervisor → worker」の 7 項目を足さない（文書を書いた経緯を渡さないため）。`ndf:worker` の `description` は `検証: 読み手役（<文書>・<立場>）` とする。どちらの起動でも、返った文をそのまま使う（報告コピーと作業の結果ファイルを求めず、出力先のファイルも `prompt` に書かない）。起動できないときは、下の「読み手役を起動できないとき」に従う
-   - **質問の文と、その直前に示す材料**: どちらも承認する人の立場で読むので、同じ担当が確かめるときは 1 つのファイルの並び（`files`）に入れ、1 つの読み手役に 1 回で読ませる。`reads` には `question` と `material` の 2 行を書く。文書と承認資料を supervisor が確かめ、質問の文を conductor が確かめるときは、別々に読ませる
-3. **読み手役の指摘で直した差分を確かめる。** 承認を求める担当が、事実（数・日付・条件・決定など）が変わっていないことを差分で 1 回確かめ、確かめたコミットを承認資料に書く。確かめられれば、レビュー全体をやり直さない。レビューの上限に達した後の最後の直しがあるときは、最後の直しで変わった部分も読み手役に読ませ、2 つの直しを合わせた差分を 1 回で確かめる
-4. **2 回目に挙がった「判断や作業を誤らせる文」と、直さなかった「読みにくいだけの文」を承認資料に書く。** 書き方は document-rebuild の表の「2 回目にも残った文」「読みにくいだけの文」のとおり
-5. **記録する。** 出す質問と同じ `questions` を JSON ファイルに書き、`ndf records reading add --file <JSON>` を打つ。`reads` には、読ませたものと立場ごとに 1 行を書く。`result` は、合格なら `passed`、2 回目にも残ったなら `remained`。`head` は、確認を終えた時点（指摘で直したときは、その直しを含むコミット）の 40 桁の SHA。指摘で直したときは、push してから記録する。判断の質問と、Pull Request の無い承認では `prs` を空の配列にする
+   `no_pr`（記録に無い Pull Request を承認しようとしている）は、その Pull Request を指定して `gate` を打つ。`unknown`（GitHub から PR を読めない）なら、
+   理由を報告して、承認を求める手順をそこで止める。PR を読めるようになったら `check` を打ち直し、成功して書き出された質問を使う。
+   `ndf document-rebuild gate` が `stopped`（`precondition`。PR の題か本文の直しが要る）を返したら、PR の題か本文を
+   直してから、同じコマンドか工程を打ち直す
+3. **質問を出す。** 出し方はランタイムで違う
+   - **Claude Code**: 手順 1 が書いた `questions` を 1 字も変えずに `AskUserQuestion` へ渡す。`metadata.source` に区分（`ndf-gate:1` か
+     `ndf-gate:2`）を足す（質問のキーは変わらない）。変えると、記録と合わずに hook が質問を止める（[asking.md](asking.md) の「質問の前に調べること」）
+   - **ほかのランタイム**: 手順 1 が書いた質問の文と選択肢を変えずに、区分の名前を先頭に書いて出す（[asking.md](asking.md) の「ランタイムごとの扱い」）
+
+### 判断の質問
+
+読み手役・合格の条件・回数・直し方は [document-rebuild の「読み手役に読ませる」](../../document-rebuild/SKILL.md#読み手役に読ませる) にある。
+
+1. **読ませる。** 読ませるものは、質問の文と、その直前に示す材料である。1 回目が不合格なら同じ範囲で 2 回目まで直す
+   - **起動**: Claude Code では、新しい `ndf:worker` を起動する。ほかのランタイムでは、`external-ai` で別の CLI を呼ぶ。`prompt` は
+     `ndf records reading prompt` が作った文だけにし、[agent-layers.md](agent-layers.md) の「supervisor → worker」の 7 項目を足さない
+     （経緯を渡さないため）。`ndf:worker` の `description` は `検証: 読み手役（<文書>・<立場>）` とする。返った文をそのまま使う
+     （報告コピーと作業の結果ファイルを求めない）
+   - 質問の文と材料はどちらも同じ読み手の立場で読むので、1 つのファイルの並び（`files`）に入れて 1 回で読ませる。`reads` には
+     `question` と `material` の 2 行を書く
+2. **2 回目に挙がった「判断や作業を誤らせる文」と、直さなかった「読みにくいだけの文」を材料に書く。** 書き方は document-rebuild の表の
+   「2 回目にも残った文」「読みにくいだけの文」のとおり
+3. **記録して出す。** 出す質問と同じ `questions` を JSON ファイルに書き、`ndf records reading add --file <JSON>` を打つ。判断の質問は
+   `prs` を空の配列にする。`result` は、合格なら `passed`、2 回目にも残ったなら `remained`
 
    ```json
    {
-     "questions": [{"question": "<質問の文>", "header": "設計", "multiSelect": false, "options": [{"label": "承認する", "description": "<説明>"}]}],
-     "prs": [{"number": 12, "branch": "design/12-x", "head": "<40 桁の SHA>"}],
+     "questions": [{"question": "<質問の文>", "header": "判断", "multiSelect": false, "options": [{"label": "進める", "description": "<説明>"}]}],
+     "prs": [],
      "reads": [
-       {"name": "question", "reader": "承認する人", "round": 1, "result": "passed"},
-       {"name": "material", "reader": "承認する人", "round": 2, "result": "remained"},
-       {"name": "issues/issue-12-design.md", "reader": "エンジニア", "round": 1, "result": "passed"}
+       {"name": "question", "reader": "判断する人", "round": 1, "result": "passed"},
+       {"name": "material", "reader": "判断する人", "round": 2, "result": "remained"}
      ]
    }
    ```
 
-6. **承認の質問では、質問を出す直前に調べる（どのランタイムでも打つ）。** `questions` と、承認する Pull Request の番号の配列 `prs` を書いた JSON で `ndf records reading check --file <JSON>` を打つ。`ok` なら質問を出す。`stopped` の `precondition` なら、足りないものの語に従って直す。`unknown`（GitHub を読めない）なら、調べられなかったことを承認資料に書いて進む
-
-   | 足りないもの | すること |
-   | --- | --- |
-   | `no_record` | 出す質問と同じ文の記録が無い。質問の文を読ませて記録する |
-   | `no_pr` | 記録に無い Pull Request を承認しようとしている。その文書を読ませ、記録し直す |
-   | `head_moved` | 確認の後に Pull Request の head が変わった。手順 1 の対象の文書が変わっていれば、変わった部分だけを読ませる。変わっていなければ読ませない。どちらのときも、新しい head で記録し直す |
-
-7. **質問を出す。** 出し方はランタイムで違う
-   - **Claude Code**: 記録した `questions` を 1 字も変えずに `AskUserQuestion` へ渡す。変えると、記録と合わずに hook が質問を止める（[asking.md](asking.md) の「質問の前に調べること」）
-   - **ほかのランタイム**: 記録した質問の文と選択肢を変えずに、[asking.md](asking.md) の「ランタイムごとの扱い」のとおりに出す。質問を止める hook は無い
+   Claude Code では記録した `questions` を 1 字も変えずに `AskUserQuestion` へ渡す
 
 ### 読み手役を起動できないとき
 
-書いた担当が、読み手の立場で読み直す。起動できなかった理由と、読み直したもの（Pull Request の文書なら、その URL と読み直したときの head）を
-承認資料（判断の質問では材料）に書き、「読み手役が確認した」とは書かない。読み手役が読んでいないものは記録しない。
-
-- **質問の文を読ませられなかったとき**: 記録せずに手順 7 へ進む。Claude Code では、手順 6 の `check` を打たずに質問を出し、hook が止めたら同じ質問を
-  出し直す（止めるのは 2 回までで、3 回目は注意を付けて出せる）。ほかのランタイムの承認の質問では、`check` が返した足りないものを承認資料に書く
-- **一部の Pull Request の文書だけを読ませられなかったとき**: その Pull Request を、手順 5 の記録と手順 6 の `check` の `prs` から外す。ほかの
-  Pull Request は手順 6 のとおりに調べる
+判断の質問だけに当てる。書いた担当が読み手の立場で読み直し、起動できなかった理由と読み直したものを材料に書く。「読み手役が確認した」とは
+書かず、記録もしない。Claude Code では `check` を打たずに質問を出し、hook が止めたら同じ質問を出し直す（止めるのは 2 回までで、3 回目は
+注意を付けて出せる）。承認ゲートの確認で読み手役を起動できないときは、`gate` と工程が `stopped` で止まる。原因を直して打ち直し、読まずに
+承認を求めない。
 
 ## 止まる手段
 
@@ -466,15 +484,4 @@ ndf records mvv cite --gate <design か release> --base <ベースブランチ> 
 
 ## 回答を記録する
 
-**利用者が承認ゲートで回答したら、承認も変更要求もスプリントのステートマシンへ `ndf answer` で 1 行書く。** pace と MVV 判定の
-有無を問わない。利用者へ新しい確認は求めない。書いた回答は `ndf answer list <ステートマシン>` で古い順に読める。
-
-| 進め方 | 承認 | 変更要求 |
-| --- | --- | --- |
-| `reject` のステップを持つプランで止まった | `ndf answer <ステートマシン> --gate <質問の id> --result approved --reason <要約> --by human --key <冪等のキー>` | 直してから `ndf plan next <プラン> --from reject`（`reject` が変更要求を書いて再提示する） |
-| スプリントのステートマシンがある（`reject` の無いプラン） | 同上 | `ndf answer <ステートマシン> --gate <質問の id> --result request_changes --reason <要約> --by human --key <冪等のキー> [--notes <指摘ファイル>]` |
-| ステートマシンが無い（単発の変更など） | 記録しない。回答と要約を conductor の報告に書く | 同じ |
-
-`--gate` は承認ゲートの結果の `metrics.gate.id`、`--result` はその結果の `routes` のキーから写す。`--key` は回答ごとに決め、
-同じキーで打ち直しても 2 行にならない。終了コードが 0 以外（記録を書けない）なら、書けなかったことと `summary` を conductor の報告に出して先へ進む。
-設計承認ゲートで起票者の推定が変更を要求されたときの仕様の直し方は `requirements-design` の手順 1a にある。
+**利用者が承認ゲートで回答したら、承認も変更要求も記録する。** 打つコマンドと補う引数は [approval-answer.md](approval-answer.md) にある。

@@ -38,7 +38,7 @@ def _regular_blobs(g: git.Git, paths: Sequence[str]) -> dict[str, str]:
             continue
         meta, path = entry.split("\t", 1)
         mode, kind, oid = meta.split()
-        if kind == "blob" and mode in settings.REGULAR_MODES:
+        if kind == "blob" and mode in git.REGULAR_MODES:
             out[path] = oid
     return out
 
@@ -55,7 +55,7 @@ def _local_text(root: Path, path: str, oid: str) -> Optional[str]:
     except OSError:  # noqa: NDF401 ファイル: 作業場所に無い・読めなければ呼び手がコミットから読む
         return None
     for candidate in (raw, raw.replace(b"\r\n", b"\n")):
-        if settings.blob_id(candidate, len(oid)) == oid:
+        if mvv.blob_id(candidate, len(oid)) == oid:
             return candidate.decode("utf-8", errors="replace")
     return None
 
@@ -98,7 +98,7 @@ def _docs(g: git.Git, files: Sequence[str], root: Path) -> dict[str, str]:
     if missing:
         texts = _committed_texts(g, "HEAD", list(missing))
         # 手元に無い blob を、git grep は失敗にせずに飛ばす（遅延取得を止めたとき）。空のファイルなら行が無くてよい
-        unread = [p for p, oid in missing.items() if not texts[p] and oid != settings.blob_id(b"", len(oid))]
+        unread = [p for p, oid in missing.items() if not texts[p] and oid != mvv.blob_id(b"", len(oid))]
         if unread:
             raise git.GitError(f"HEAD の本文を読めない: {', '.join(unread)}")
         docs |= texts

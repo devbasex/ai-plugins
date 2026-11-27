@@ -88,26 +88,75 @@ workflow の `assemble`（`ndf release-steps assemble --channel production`）�
 | 会話のセッション | `verification-record` | リリース後テストの記録をリリース記録と同じ PR へ書く（`release-verification`） |
 | workflow | `assemble` | リリースブランチを組み立て（版上げ・CHANGELOG・設定の手順）、リリースの PR を作る |
 | workflow | `approval-check` | 証跡を読んで判定し、PR の HEAD へ commit status `ndf/release-approval` を付ける |
+| 会話のセッション | `approval-state` | `merge` と同じ承認の条件で判定する（`approval.via: review` では GitHub のレビューの承認を読む）。何も書かない |
+| 会話のセッション | `pull-checks` | 版上げの PR に含まれる各 PR の最新の CI の結果を取得し、対象の PR と検査の結果を承認資料に貼れる形で出力する |
 | workflow | `merge` | 証跡と必須のチェックの後に、ブランチ戦略の設定の `merge` の主体と方式で入れる。要ればベースブランチへ戻す PR も |
 | workflow | `record` | 本番ブランチへのマージの後に、含めた PR の各々へリリース記録を書く |
 | workflow | `publish` | 本番ブランチへ入ったコミットのバージョンで、タグと GitHub Release のうち足りないものを作る |
 
 ```bash
-ndf release-steps materials --base <ベースブランチ> --production <本番ブランチ> --channel production --out <承認資料>
-ndf release-steps present --pr <リリースの PR> --material <承認資料>   # outputs.head が提示した HEAD
-ndf release-steps answer --pr <リリースの PR> --answer approved --presented <提示した HEAD> --by user   # 承認を得てから
+ndf release-steps materials --base <ベースブランチ> --production <本番ブランチ> --channel production --out <承認資料>   # 版上げの PR では使わない（「承認資料の対象のコミットを合わせる」）
+ndf document-rebuild gate --gate release --pr <リリースの PR> --material <承認資料> --state-dir <保存先> --out <結果のファイル>   # 以後は outputs.material の資料を使う
+ndf release-steps present --pr <リリースの PR> --material <承認資料>   # routes が提示した HEAD と資料の SHA-256 を固定する
+ndf release-steps answer --pr <リリースの PR> --answer approved --presented <提示した HEAD> --material-sha256 <資料の SHA-256> --by user   # 承認を得てから
 ndf release-steps records --pr <リリース記録の PR>
 ```
 
-**`answer` は承認を得てから打つ。** `--by` は回答した担い手で、利用者が `user`、MVV 判定で通したときが `mvv` である
+**`answer` は承認を得てから打つ。** `--by` は回答した担い手で、利用者が `user`、MVV 判定で通したときが `mvv` である。
+利用者の回答は `present` の routes が固定した `--material-sha256` を渡す。最新の提示の資料と違えば書かれない（資料を差し替えて提示し直したら、新しい資料に回答を取り直す）。`mvv` の回答には渡さない
 （`pace: fast` と `pace: auto` だけ。条件は [pace.md](../../development-workflow/references/pace.md)）。管理者の迂回でマージする設定では、
 `user` の証跡だけを数える。却下は `--answer rejected` で書く。
 
+**承認を得たリリースを再開するときは、`present` の前に今の判定を読む。** `ndf release-steps approval-state --pr <リリースの PR>` は、`merge` と
+同じ承認の条件で判定し、何も書かない（管理者の迂回でマージする場合は、MVV 判定の承認を数えない）。
+`outputs.state` が `approved` なら、`gate` と `present` を打たず、承認を取り直さずに続きへ進む。旧いバージョンで得た承認（提示に行 `提示した資料:` が無い）は、
+同じ資料を渡しても `present` が新しい形式で提示し直し、その時点で承認が数えられなくなる。
+承認者に見せる内容を差し替える必要があるときと、`approved` でないときだけ、承認資料を用意し、`gate` で確かめた資料を `present` で提示して、回答を取り直す。
+
 **承認の後に HEAD が動けば、マージされない。** `merge` は証跡を読み直し、今の HEAD が承認されていることを確かめてから入れる。
-承認の後にリリースブランチへコミットを足したら、`materials` から組み直して `present` で見せ直し、承認を取り直す。
+承認の後にリリースブランチへコミットを足したら、下の手順で承認資料を作り直し、`gate`・`present` で見せ直して、承認を取り直す。
 
 workflow を置かないリポジトリ（ほかの CI・手元）では、workflow の 4 つを同じ並びで手で打つ（[release-workflow.md](release-workflow.md) の
 「ほかの CI から呼ぶ」）。
+
+### 承認資料の対象のコミットを合わせる
+
+**承認資料の行 `提示したコミット:` は、承認するリリースの PR の今の HEAD にする。** 違うと `gate` と `present` が止まる。
+承認資料の用意の仕方は、リリースの PR の種類で違う。
+
+| リリースの PR | 承認資料の用意の仕方 |
+| --- | --- |
+| `assemble` が作った版上げの PR | `materials` は使わない（この PR の HEAD ではないコミットが書かれる）。下の 4 手順で用意する |
+| 承認の対象が本番の PR（`approval.target: production_pr`） | `materials` に `--pr <番号>` を足して打つ |
+| ベースブランチから本番ブランチへの、版上げをしない PR | ベースブランチの HEAD を取り出した作業ディレクトリで `materials` を打つ |
+
+版上げの PR の 4 手順は次のとおりである。手順 3 は 2 つのコミットの間の差分から分かる項目を、手順 4 は含む PR と検査の結果を確かめる。
+
+1. `gh pr view <番号> --json body --jq .body > <承認資料>` で、`assemble` が PR の本文に書いた承認資料を写す
+2. `gh pr view <番号> --json headRefOid --jq .headRefOid` で今の HEAD を読み、行 `提示したコミット:` の SHA をその値に書き換える。
+   書き換える前の SHA は、次の手順で使う
+3. 2 つのコミットの間の差分を確かめ、承認資料の版数、届き方、利用者向けの変化、指示書と設定の変化を、今の HEAD の内容に合わせて
+   書き直す。確かめられない項目があれば、承認を求めずに止めて、その項目を報告する
+   - `git fetch <リモート> <書き換える前の SHA> <今の HEAD>` で 2 つのコミットを 1 回で取得する。GitHub の比較 API は、変わったファイルを
+     300 件までしか返さないので使わない
+   - `git diff --name-only --no-renames <書き換える前の SHA> <今の HEAD>` で、変わったファイルをすべて特定する
+   - `git diff <書き換える前の SHA> <今の HEAD> -- <パス>...` で、承認資料の上の項目に関係するファイルだけ差分の中身を読む
+   - 2 つの SHA は `...` でつながずに並べて渡す。`...` は共通の祖先との比較になり、コミットを amend して取り消した変更が現れない
+4. `ndf release-steps pull-checks --pr <版上げの PR>` を打ち、出力の「含む PR」と「検査の結果」で承認資料の同じセクションを置き換える。
+   差分に変更が無くても行う（チェックの結果は、コミットを変えずに変わる）。止まった場合は、承認を求めずに理由を報告する
+   - 含む PR は、`assemble` が版上げのコミットに書いた一覧である。リリース記録も同じ一覧の PR に書くので、番号を手で足したり消したりしない
+   - `assemble` の後に版上げの PR へ別の PR をマージしていると、このコマンドは止まる。次の順に直す
+     1. 版上げのブランチから退避するのは、組み立ての対象のブランチに入れる変更（機能の修正など）だけである。ファイル名や、自動で
+        生成したか手で書いたかではなく、変更の目的で選ぶ。このバージョンのために作った次の内容は退避せず、組み立て直した版上げの
+        ブランチで作り直す
+        - `assemble` が作った版上げのコミット（版数、CHANGELOG のセクション、設定の手順が書き出すファイル）
+        - その後に組み直した CHANGELOG の本文
+        - 設定の手順の `guide` に従って書き足した内容（冒頭の例では、計測の記録への追記）
+     2. 版上げの PR を閉じて、そのブランチを消す。ブランチの削除は戻せないので、削除の方法（`git push --delete`・GitHub の画面・`-D` など）にかかわらず、実行する前に人の承認を得る
+     3. 退避した変更だけを、組み立ての対象のブランチ（リリース方式により、本番ブランチ、ベースブランチ、スプリントブランチのどれか）へ、
+        そのブランチ宛ての PR でマージする。レビューとマージは、プロジェクトが定める手順に従う。対象が本番ブランチでも、直接コミットや
+        直接の push はしない
+     4. その PR がマージされたことを確かめてから、`assemble` で組み立て直す
 
 ### CHANGELOG の本文
 
@@ -145,6 +194,9 @@ workflow を置かないリポジトリ（ほかの CI・手元）では、workf
 | --- | --- |
 | workflow でリリースするもの | 本番ブランチへのマージの後に、workflow が `ndf release-steps record --pr <リリースの PR> --production <本番ブランチ> [--production-sha <本番へ入れたコミット>]` を打ち、含めた PR の各々へ書く。同じバージョンの記録が既にある PR には書かない |
 | それ以外 | SKILL.md の「出力物」と同じ 3 行の `## リリース記録` を、デプロイした値で記録の Pull Request へコメントで足す |
+
+**バージョン番号を持たないリポジトリでは、記録の `バージョン:` に出したものを指す値（例: `main abc1234`）を書く。**
+デプロイの工程の `product_version` と同じ値にする。後の工程（リリース後テスト・課題を閉じる処理）は値の形を問わない。
 
 書いた記録は `ndf release-steps records --pr <PR>` で読む。`record` は書く token の書き手が読み手に信用されるか（write 以上の権限）を
 先に確かめ、信用されなければ 1 件も書かずに `precondition`（3）で止まる。`github.token` で書いた記録は読まれない。

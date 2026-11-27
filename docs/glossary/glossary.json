@@ -740,11 +740,13 @@
     {
       "term": "即時修正",
       "context": "ndf-workflow",
-      "meaning": "4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと",
+      "meaning": "モード hotfix。4 つの条件（`development-workflow` の `references/mode-criteria.md`）を満たす不具合を、実装・完了判定・リリースを先に通し、リリースの後にリリース後レビューで見ること",
       "deprecated": [
         "その場で直す"
       ],
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md",
+      "code": "hotfix"
     },
     {
       "term": "棚卸し",
@@ -905,6 +907,18 @@
       "deprecated": [
         "元からの失敗"
       ]
+    },
+    {
+      "term": "判定役",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review で、相手役が書いた重い指摘が実際に起きるかを確かめる読むだけの AI",
+      "source": "plugins/ndf/skills/cross-review/docs/01-state-and-review.md"
+    },
+    {
+      "term": "直さずに残す指摘",
+      "context": "ndf-cross-review",
+      "meaning": "cross-review で、修正担当へ渡さず、次のラウンドを始める理由にも数えない指摘。Issue か PR の記録のコメントに残す",
+      "source": "plugins/ndf/skills/cross-review/docs/01-state-and-review.md"
     },
     {
       "term": "指摘",
@@ -6873,6 +6887,24 @@
       "source": "docs/specifications/ndf-review-units-and-refactoring-timing.md"
     },
     {
+      "term": "単位のファイル",
+      "context": "ndf-branch-strategy",
+      "meaning": "実装計画と組の JSON ファイル。タスクとレビューの単位の SSOT で、実装計画の単位の表はここから作る",
+      "source": "issues/issue-3702-design.md"
+    },
+    {
+      "term": "実行順",
+      "context": "ndf-branch-strategy",
+      "meaning": "レビューの単位の依存の深さを表す番号。先に要る単位の実行順の最大に 1 を足した値である。単位は、先に要る単位をすべてマージしたら始める",
+      "source": "issues/issue-3702-design.md"
+    },
+    {
+      "term": "分け方の案",
+      "context": "ndf-branch-strategy",
+      "meaning": "大きさの目安や上限を超えたレビューの単位を、タスクの依存の順に区切り直した案",
+      "source": "issues/issue-3702-design.md"
+    },
+    {
       "term": "つなぎ目",
       "context": "ndf-branch-strategy",
       "meaning": "スプリントの PR の差分のうち、すべての単位の PR をスプリントブランチへマージした時点（集めた時点）の後に入ったコミット。工程「コードレビュー」はここだけをレビューし、ここにコードのファイルが無ければ工程を飛ぶ",
@@ -7697,6 +7729,12 @@
       "source": "docs/specifications/ndf-next-ci-failed-tests-junit.md"
     },
     {
+      "term": "テストを確かめる手段",
+      "context": "ndf-ci-test",
+      "meaning": "工程「リファクタリング」が変更の後のテストの合否を確かめる先。必須のチェックがある場合は、指定されたチェックの通過を CI で確認する。テストの合否まで分かるのは、そのチェックにテストが含まれる場合である。必須のチェックが無ければ、CI テストの設定（test.ci.only）が無効で、実行コマンドを持つテストの suite（kind が lint でないもの。省けば test）がある場合に手元で確かめる。どちらも使えなければ、既定の実行条件では理由を記録して工程を飛ばす",
+      "source": "docs/specifications/cross-refactoring-local-test-gate.md"
+    },
+    {
       "term": "収集の確かめ",
       "context": "ndf-cross-refactoring",
       "meaning": "cross-refactoring が、足したテストを全体の実行が収集するかを suite の `collect_command` で確かめる工程。成功と読む終了コードは suite の設定から読み、設定が無ければ 0 だけ",
@@ -7848,7 +7886,7 @@
     {
       "term": "設計の検査",
       "context": "ndf-design",
-      "meaning": "設計文書を書いた後に工程が走らせる、言語モデルを呼ばない決まった検査（design-survey.py check。設計のプランのステップ survey-check）",
+      "meaning": "設計文書を書いた後に走らせる、言語モデルを呼ばない決まった検査（ndf records design check。設計のプランのステップ design-check）",
       "source": "docs/specifications/ndf-design-representative-repos.md"
     },
     {
@@ -8455,6 +8493,120 @@
       "context": "ndf-durable",
       "meaning": "GitHub が一次の上限とは別に、短い間の書き込みの多さ・同時の要求の多さで断る上限。403 か 429 と本文の secondary rate limit で返る",
       "source": "docs/specifications/ndf-github-write-gate.md"
+    },
+    {
+      "term": "触るシンボル",
+      "context": "ndf-design",
+      "meaning": "設計の結果の触るファイルのセルに `<パス>::<名前>` で書く、ファイルの中の関数・クラス・メソッドの名前。同じファイルでも触るシンボルが交わらない実装のプランは同時に流れる",
+      "code": "touch_symbol",
+      "pending_source": "issues/issue-4295-2037-design.md"
+    },
+    {
+      "term": "変えたファイル",
+      "context": "ndf-parallel",
+      "meaning": "単位の PR の差分に現れたファイル。計画を進める耐久ワークフローが拾ってレーンの行に記録し、重なりの知らせだけに使う。レーンの触る場所には足さない。計画の検査（I13）では断らない",
+      "code": "changed_files",
+      "pending_source": "issues/issue-4295-2037-design.md"
+    },
+    {
+      "term": "重なりの知らせ",
+      "context": "ndf-parallel",
+      "meaning": "同じ時間帯に動く 2 本のレーンの触る場所か変えたファイルが重なったことを、オーガナイザーへ伝えるリクエスト。別の計画のレーンとの重なりも含む",
+      "code": "touches_overlap",
+      "pending_source": "issues/issue-4295-2037-design.md"
+    },
+    {
+      "term": "リリース後レビュー",
+      "context": "ndf-workflow",
+      "meaning": "hotfix のリリースの後に、マージ済みの差分を cross-review の相手役が読み、指摘を戻す・直す・見送るに分ける工程",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md",
+      "code": "post_release_review"
+    },
+    {
+      "term": "計画の時点の判定",
+      "context": "ndf-workflow",
+      "meaning": "開発計画（並列の計画・実行計画・開発ループの周）の行に載せる課題ごとのモードと根拠（judgments）。行のモードはここからコードが決め、スプリントでは ndf progress new の --mode に渡る参考の値になる",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md"
+    },
+    {
+      "term": "判定の記録",
+      "context": "ndf-workflow",
+      "meaning": "工程「要求と受け入れ条件」の出力 mode_judgment。課題ごとのモードと根拠・スプリントのモード・参考の値を持ち、スプリントの工程表を決める",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md",
+      "code": "mode_judgment"
+    },
+    {
+      "term": "作業中の直し",
+      "context": "ndf-workflow",
+      "meaning": "作業の途中で見つけた、今の作業を妨げる不具合のうち、4 条件を満たし今の作業場所の中で直せるものを、今の変更に含めて直すこと。同じ PR で完了判定とレビューを通る。今の作業を妨げない不具合は起票して hotfix のスプリントにする",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md"
+    },
+    {
+      "term": "リポジトリの知識",
+      "context": "ndf-workflow",
+      "meaning": "documentation のタイプの 1 つ。docs/ と README.md を新しく書く・組み直す仕事で、読み手はこのリポジトリで作業するエンジニアと AI。素材の収集と出典の確定・体裁レビュー・確定仕様化・リリース後テストを通らない。既存の記述を直すだけなら light",
+      "source": "",
+      "pending_source": "issues/issue-4517-design.md",
+      "code": "repo-knowledge"
+    },
+    {
+      "term": "流れの設定",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/project.json` の `workflow` のうち、リポジトリの種類・工程の要否・閉じる条件を指定する項目。書くのは利用者で、無ければ NDF の既定の流れになる",
+      "source": "",
+      "pending_source": "issues/issue-4580-design.md"
+    },
+    {
+      "term": "起動の設定",
+      "context": "ndf-agent-cli",
+      "meaning": "NDF が AI を起動するときの、リポジトリごとの指定を持つ .ndf/launch.json。工程ごとの MCP と Tool の指定、安全装置を外すランタイム、起動の実験の指定を持つ",
+      "source": "issues/issue-1959-design.md"
+    },
+    {
+      "term": "起動の承認",
+      "context": "ndf-agent-cli",
+      "meaning": "起動の設定の許可を広げる指定を、利用者がそのマシンで認めた記録。内容のハッシュで持つ",
+      "source": "issues/issue-1959-design.md"
+    },
+    {
+      "term": "起動の選択肢",
+      "context": "ndf-agent-cli",
+      "meaning": "工程とランタイムごとに設定する、起動で選べるモデルと effort の組の並び。先頭が基準の組",
+      "source": "issues/issue-2944-design.md"
+    },
+    {
+      "term": "実験の単位",
+      "context": "ndf-agent-cli",
+      "meaning": "起動の組を 1 つ割り付け、効果指標を 1 つ記録する作業のまとまり",
+      "source": "issues/issue-2944-design.md"
+    },
+    {
+      "term": "効果指標",
+      "context": "ndf-agent-cli",
+      "meaning": "実験の単位の成果の良さを 0〜1 で表す値",
+      "source": "issues/issue-2944-design.md"
+    },
+    {
+      "term": "出現率",
+      "context": "ndf-agent-cli",
+      "meaning": "実験の割り付けで、組が選ばれる確率",
+      "source": "issues/issue-2944-design.md"
+    },
+    {
+      "term": "値の出所",
+      "context": "ndf-agent-cli",
+      "meaning": "起動のモデルか effort を決めた元（引数・環境変数・実験の割り付け・指定なし）",
+      "source": "issues/issue-2944-design.md"
+    },
+    {
+      "term": "値の引き上げ",
+      "context": "ndf-agent-cli",
+      "meaning": "同じ失敗への 2 回目以降の起動で、モデルか effort を 1 つ上にすること",
+      "source": "issues/issue-2944-design.md"
     }
   ]
 }

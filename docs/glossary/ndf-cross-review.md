@@ -7,6 +7,8 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | SSOT |
 | --- | --- | --- | --- | --- | --- |
 | 指摘ファイル | — | レビューする者（`cross-review` の担当・`pr-review` の LLM か外部 AI）が書く、指摘の全件と総評のファイル | 指摘のファイル | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 判定役 | — | cross-review で、相手役が書いた重い指摘が実際に起きるかを確かめる読むだけの AI | — | — | `plugins/ndf/skills/cross-review/docs/01-state-and-review.md` |
+| 直さずに残す指摘 | — | cross-review で、修正担当へ渡さず、次のラウンドを始める理由にも数えない指摘。Issue か PR の記録のコメントに残す | — | — | `plugins/ndf/skills/cross-review/docs/01-state-and-review.md` |
 | 指摘 | `finding` | 担当が出した 1 件の主張（review_findings[] の 1 要素） | — | — | `docs/specifications/cross-review-evidence-based.md` |
 | 反証条件 | — | 何が成り立てばその指摘を棄却できるか（falsification） | — | — | `docs/specifications/cross-review-evidence-based.md` |
 | 検証手順 | — | 指摘を実行できる形で確かめる手順（suggested_check） | — | — | `docs/specifications/cross-review-evidence-based.md` |

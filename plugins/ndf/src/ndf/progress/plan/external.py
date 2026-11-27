@@ -25,7 +25,7 @@ from typing import Any, Optional
 
 from ndf import contracts
 from ndf.contracts import facts
-from ndf.progress.plan import RELEASE_RESULTS
+from ndf.progress.plan import RELEASE_RESULTS, release_answer_errors
 
 # リクエストの ID（ファイル名になる。区切りや `..` を含めない）
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -73,8 +73,10 @@ def request_body(fields: Mapping[str, Any], ndf_version: str) -> dict[str, Any]:
 
 
 def _same_body(path: Path, body: Mapping[str, Any]) -> bool:
+    """既にあるリクエストと中身が同じか。書いた時刻（`at`）は打ち直すたびに変わるので比べない。"""
     try:
-        return bool(json.loads(path.read_text(encoding="utf-8")) == dict(body))
+        held = json.loads(path.read_text(encoding="utf-8"))
+        return isinstance(held, dict) and {**held, "at": None} == {**body, "at": None}
     except (OSError, ValueError):  # noqa: NDF401 ファイル: 読めない既存のリクエストは別の中身として断る
         return False
 
@@ -111,4 +113,8 @@ def read_answer(root: Path, ident: str) -> Optional[dict[str, Any]]:
         raise ExchangeError(f"回答 {path.name} を JSON として読めない: {e}") from e
     if not isinstance(body, dict) or body.get("result") not in RELEASE_RESULTS:
         raise ExchangeError(f"回答 {path.name} の result が {' / '.join(RELEASE_RESULTS)} のどれでもない")
+    if errs := release_answer_errors(body["result"], body.get("version")):
+        raise ExchangeError(
+            f"回答 {path.name} の version が product_version の形に合わない（1 行のリリースの識別子で回答のファイルを書き直す）: {'; '.join(errs)}"
+        )
     return body

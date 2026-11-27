@@ -34,8 +34,9 @@ from ndf.domains.relay import account_registry as reg
 PENDING_TTL = 600.0  # 登録の途中の状態の期限（秒。旧いと同じ）
 POLL_INTERVAL = 0.1  # 締め切りまで条件を見直す間隔（秒）
 PENDING_CONFIG, PENDING_FIFO, PENDING_OUT, PENDING_FILE = "config", "code.fifo", "login.out", "pending.json"
-URL_RE = re.compile(r"https://[^\s\x1b\"'<>]+")
-ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+URL_RE = re.compile(r"https://[^\s\x07\x1b\"'<>]+")
+# CSI（色など）と OSC（端末のリンク `ESC ] 8 ;; URL BEL 表示 ESC ] 8 ;; BEL` など）を落とす。OSC を残すとリンクの URL と表示の URL が BEL でつながって 1 本に読まれる
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 
 class LoginError(Exception):

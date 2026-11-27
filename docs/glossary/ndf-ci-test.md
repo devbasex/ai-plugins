@@ -55,3 +55,4 @@
 | 測る場所 | — | 秒数の上限と、同じマシンの上で測る相対の比を測るマシン。CI のランナーのように、スペックが設定で固定され、ほかの処理と CPU を取り合わない場所に限る。共有の開発機は当たらない | — | — | — |
 | JUnit の成果物 | `junit_artifacts` | CI のジョブが上げた artifact のうち、JUnit の XML を持つもの。設定ファイルの `test.ci.junit_artifacts` が名前の glob で指し、CI で落ちたテストをログより先に読む元になる | — | — | `docs/specifications/ndf-next-ci-failed-tests-junit.md` |
 | ログのパーサー | — | 1 つのテストランナー（suite の `runner`）の CI のログの形から、落ちたテストを `<テストのファイル>::<テストの名前>` の並びで読む部品。外部ライブラリを呼ぶ唯一のモジュールの意味の「アダプター」とは別 | — | — | `docs/specifications/ndf-next-ci-failed-tests-junit.md` |
+| テストを確かめる手段 | — | 工程「リファクタリング」が変更の後のテストの合否を確かめる先。必須のチェックがある場合は、指定されたチェックの通過を CI で確認する。テストの合否まで分かるのは、そのチェックにテストが含まれる場合である。必須のチェックが無ければ、CI テストの設定（test.ci.only）が無効で、実行コマンドを持つテストの suite（kind が lint でないもの。省けば test）がある場合に手元で確かめる。どちらも使えなければ、既定の実行条件では理由を記録して工程を飛ばす | — | — | `docs/specifications/cross-refactoring-local-test-gate.md` |

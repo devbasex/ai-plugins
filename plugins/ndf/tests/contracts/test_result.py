@@ -29,6 +29,9 @@ def _stopped(kind="test_failed", **extra):
         (_stopped("wait_timeout", next=result.command("test-slot", "run", "--", "pytest")), 3),
         (result.result("t", "ok", "済んだ", outputs={"pr": 3, "issues": [1, 2], "branch": "feat/x", "product_version": "11.0.0-dev.3"}), 0),
         (result.result("t", "ok", "済んだ", run_id="r1"), 0),
+        # バージョン番号を持たないリポジトリの出したものを指す値（#4513 の受け入れ条件 3）。形は ndf worker run が確かめる
+        (result.result("t", "ok", "済んだ", outputs={"product_version": "main abc1234"}), 0),
+        (result.result("t", "ok", "済んだ", outputs={"product_version": "ndf v11.0.0"}), 0),
         ({**result.result("t", "ok", "済んだ"), "version": 1}, 0),
     ],
 )
@@ -53,7 +56,9 @@ def test_valid_results(obj, code):
         # outputs は閉じた語彙の型付きの欄（#3367）
         (result.result("t", "ok", "済んだ", outputs={"pr": "12"}), 0),
         (result.result("t", "ok", "済んだ", outputs={"anything": 1}), 0),
-        (result.result("t", "ok", "済んだ", outputs={"product_version": "ndf v11.0.0"}), 0),
+        # 空文字・空白だけの product_version は受け付けない（#4513 の受け入れ条件 5）
+        (result.result("t", "ok", "済んだ", outputs={"product_version": ""}), 0),
+        (result.result("t", "ok", "済んだ", outputs={"product_version": " \t"}), 0),
         (result.result("t", "ok", "済んだ", outputs={"version": "11.0.0"}), 0),
         (_stopped(gaps=[GAP]), 1),
         (_stopped("incomplete"), 6),
@@ -160,9 +165,20 @@ def test_a_result_of_a_newer_version_is_received_as_stopped():
     assert result.received({**result.result("t", "ok", "済んだ"), "version": "1"}) is None
 
 
-@pytest.mark.parametrize(("version", "ok"), [("10.27.57", True), ("11.0.0-dev.2", True), ("ndf v10.27.57", False), ("v10.27.57", False)])
-def test_release_verification_version_is_bare(version, ok):
-    # #3115: 対象のバージョンは前置きを持たない版数だけで、本番のバージョンと文字列のまま検証できる
+@pytest.mark.parametrize(
+    ("version", "ok"),
+    [
+        ("10.27.57", True),
+        ("11.0.0-dev.2", True),
+        ("main abc1234", True),
+        ("main\nabc1234", False),
+        ("a\r", False),
+        ("", False),
+        (" ", False),
+    ],
+)
+def test_release_verification_version_is_one_line_distribution_id(version, ok):
+    # #3115: 本番のバージョンと文字列のまま検証できる。#4513: バージョン番号の形でないリリースの識別子も受け、1 行に限る（文脈の定義を参照する）
     record = {"version": version, "issues": [{"number": 3115, "result": "passed", "evidence": "PR #3102"}]}
     assert (contracts.schema_errors(record, contracts.schema_path("release-verification")) == []) is ok
 

@@ -2,6 +2,10 @@
 
 サブコマンドと作業は結果を標準出力へ 1 行の JSON で出し、終了コードで終える。読み手は `status` と `cause.kind`
 （と終了コード）だけで次の手を決め、`summary` や Markdown の文から判定しない。
+標準出力が端末のときだけ、同じ結果を人が読む文（`text_view`）で出す（#4003）。AI の Bash Tool・hook・スクリプト・`$(...)` の
+起動では標準出力が端末にならないので、読み手の受ける形は変わらない。エントリポイント（`cli`）が読んだ `--output-format=json|text` の明示は、
+端末かどうかより優先する（`choose_format`）。明示も端末の判定も標準出力へ出すときだけ効き、`stream` を渡した出力は常に JSON。
+形の確かめと終了コードは出す形によらず同じ。
 形は `contracts/schemas/result.schema.json`、`stopped` の終了コードは停止理由の表の種類から引く。
 """
 
@@ -9,15 +13,18 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Mapping, Sequence
 from typing import Any, Optional, TextIO
 
 from ndf import contracts, identity
-from ndf.contracts import causes, exit_codes, facts, internal
+from ndf.contracts import causes, exit_codes, facts, internal, text_view
 
 # 結果の status の語彙は exit_codes が持ち、ここから result.OK などとしても引ける
 from ndf.contracts.exit_codes import GATE, OK, STATUSES, STOPPED
 
 SCHEMA = contracts.schema_path("result")
+# 判断を求めた結果の metrics で、確かめを通らなかった必須の出力の名前を載せるキー（worker・プラン・工程の進行が読み書きする。#4513）
+MISSING_OUTPUTS = "missing_outputs"
 
 
 # 任意の項目のうち配列のもの（置くときは写しの list にする）
@@ -107,6 +114,14 @@ def severity_errors(items: object) -> list[str]:
     return [f"items/{i}/severity が重さの表（{facts.location(SEVERITIES)}）に無い" for i, word in words if word not in known]
 
 
+def pr_numbers(obj: Any) -> list[int]:
+    """結果 JSON の items の PR の番号（`{"kind": "pr", "number": <整数>}`）を並びの順に。items が無い・形が違えば空。
+
+    プランのステップの結果（`core.plan.steps`）と工程の出力の補い（`progress.stages.step_outputs`）が同じ規則で読む。"""
+    items = obj.get("items") if isinstance(obj, dict) and isinstance(obj.get("items"), list) else []
+    return [i["number"] for i in items if isinstance(i, dict) and i.get("kind") == "pr" and type(i.get("number")) is int]
+
+
 def item_fields() -> frozenset[str]:
     """結果のコントラクトが items の要素に形を決めた欄の名前。"""
     return frozenset(contracts.load_json(SCHEMA)["$defs"]["item"]["properties"])
@@ -164,6 +179,12 @@ def newer(obj: Any) -> bool:
     return found > internal.version() and found % 1 == 0  # JSON の 2.0 はスキーマでは整数
 
 
+def outputs_of(obj: Mapping[str, Any]) -> dict[str, Any]:
+    """結果や事象の `outputs`。dict でなければ空の dict。"""
+    found = obj.get("outputs")
+    return found if isinstance(found, dict) else {}
+
+
 def received(obj: Any) -> Optional[dict[str, Any]]:
     """ほかのプロセスや Skill から受けた結果。新しいバージョンなら代わりの `stopped`（precondition）、形が違えば None。"""
     refused = refused_newer(obj)
@@ -202,20 +223,59 @@ def _code_errors(obj: dict[str, Any], code: int) -> list[str]:
     return errs
 
 
+# 出力の形（`--output-format` の値）
+JSON, TEXT = "json", "text"
+FORMATS = (JSON, TEXT)
+# エントリポイントが読んだ明示の形（None なら標準出力が端末かどうかで決める）
+_chosen: Optional[str] = None
+
+
+def choose_format(fmt: Optional[str]) -> None:
+    """標準出力へ出す結果の形を明示する（None で明示を外す）。知らない形は `ValueError`。"""
+    global _chosen
+    if fmt is not None and fmt not in FORMATS:
+        raise ValueError(f"知らない出力の形: {fmt}")
+    _chosen = fmt
+
+
+def _format_for(stream: Optional[TextIO]) -> str:
+    """出す形。`stream` を渡した出力は JSON、標準出力は明示があればそれ、無ければ端末なら text。"""
+    if stream is not None and stream is not sys.stdout:
+        return JSON
+    if _chosen is not None:
+        return _chosen
+    try:
+        return TEXT if sys.stdout.isatty() else JSON
+    except (AttributeError, ValueError):  # 標準出力が閉じているか、差し替えで isatty が無いときは JSON
+        return JSON
+
+
+def _put_out(obj: dict[str, Any], stream: Optional[TextIO], columns: Optional[Sequence[text_view.Column]] = None) -> None:
+    """結果を出す形で 1 回書く。"""
+    text = text_view.render_text(obj, columns) if _format_for(stream) == TEXT else dumps_line(obj)
+    print(text, file=stream or sys.stdout)
+
+
 def dumps_line(obj: Any) -> str:
     """結果を 1 行の JSON にする（非 ASCII はそのまま）。"""
     return json.dumps(obj, ensure_ascii=False)
 
 
-def emit(obj: dict[str, Any], code: Optional[int] = None, stream: Optional[TextIO] = None) -> int:
+def emit(
+    obj: dict[str, Any],
+    code: Optional[int] = None,
+    stream: Optional[TextIO] = None,
+    columns: Optional[Sequence[text_view.Column]] = None,
+) -> int:
     """結果を確かめて 1 行で出し、終了コードを返す。形が違えば元の結果を出さず、値を含まない誤りの文を標準エラーへ書き、代わりの `stopped`（invalid）を
-    1 行で出して invalid の終了コードを返す。"""
+    1 行で出して invalid の終了コードを返す。標準出力が端末なら文で出す（`_format_for`）。`columns` は文の items の表の列と見出し
+    （省けば items のキーを並べる。JSON には効かない）。"""
     if code is None:
         code = code_for(obj)
     errs = _safe_errors(obj, code)
     if errs or code is None:
         return _emit_instead(errs or ["終了コードを決められない（stopped に cause が無い）"], stream)
-    print(dumps_line(obj), file=stream or sys.stdout)
+    _put_out(obj, stream, columns)
     return code
 
 
@@ -229,13 +289,13 @@ def _emit_instead(errs: list[str], stream: Optional[TextIO]) -> int:
         instead, code = stopped(ENTRY, "invalid", detail), causes.exit_code("invalid")
     except (contracts.ContractError, ValueError):  # 停止理由の表が読めないか、種類が無い
         return emit_unchecked(ENTRY, "invalid", detail)
-    print(dumps_line(instead), file=stream or sys.stdout)
+    _put_out(instead, stream)
     return code
 
 
 def emit_unchecked(tool: str, kind: str, detail: str, items: Optional[list] = None) -> int:
     """コントラクトの表が読めないとき、表で確かめずに `stopped` の結果を 1 行で出す。終了コードは事実の表の unreadable。"""
-    print(dumps_line(result(tool, STOPPED, detail, items=items, cause=causes.build(kind, detail))))
+    _put_out(result(tool, STOPPED, detail, items=items, cause=causes.build(kind, detail)), None)
     return exit_codes.unreadable_code()
 
 

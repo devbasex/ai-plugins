@@ -14,6 +14,8 @@ from ndf.core.plan import assemble_decide, model, records, runner
 
 from . import _plan_helpers as H
 
+import scenes
+
 
 # --- 現状固定テスト: `runner.prepare` を同じプロセスで呼ぶ（DBOS を開かない） ---
 
@@ -217,7 +219,7 @@ def test_final_result_ok_carries_the_recorded_prs_and_outputs(two_steps):
 def test_final_result_moves_outputs_recorded_before_the_rename(tmp_path):
     records.write_json(tmp_path / records.OUTPUTS_FILE, {"version": "11.0.23", "pr": 5})
     assert records.recorded_outputs(tmp_path) == ({"product_version": "11.0.23", "pr": 5}, [])
-    records._add_outputs(tmp_path, {"product_version": "11.0.24"})
+    records._add_outputs(tmp_path, "release", "ok", {"product_version": "11.0.24"})
     assert records.recorded_outputs(tmp_path) == ({"product_version": "11.0.24", "pr": 5}, [])
 
 
@@ -337,3 +339,138 @@ def test_result_of_with_gaps_in_the_given_outputs_is_incomplete(two_steps):
     gap = {"kind": "unresolved_finding", "name": "r1-1", "reason": "x"}
     out = runner._result_of(two_steps, {"status": "ok", "count": 2}, "SUCCESS", _records(two_steps, 2, {"gaps": [gap]}))
     assert (out["status"], out["cause"]["kind"], out["gaps"]) == ("stopped", "incomplete", [gap])
+
+
+# --- 承認待ちへの回答の記録（#4409 の決定 7） ---
+
+
+@pytest.fixture
+def gated(in_repo) -> runner.Invocation:
+    """承認待ちのステップ merge（on_answer を持つ）のプランの回。"""
+    steps = [H.py_step("merge", "pass", on_answer={"approved": "end", "rejected": "end"})]
+    rel = H.write_plan(in_repo, "g", steps)
+    inv = runner.prepare(_root(in_repo), Path(rel), None, None, in_repo)
+    inv.state_dir.mkdir(parents=True, exist_ok=True)
+    return inv
+
+
+def _routes_answer_with_the_user_as_the_actor(gated):
+    """受け入れ条件 4: 承認待ちの結果の経路は `ndf plan next <プラン> --answer <回答> --by human`。"""
+    argv = runner._routes(gated)["merge"]["approved"]["argv"]
+    assert argv[-4:] == ["--answer", "approved", "--by", "human"]
+
+
+def _the_answer_record_copies_the_presented_id_of_the_waiting_step(gated):
+    marker = {"step": "merge", "seq": 1, "run": gated.run_id, "shown": {"presented_id": "p1"}, "routes": {}}
+    runner._record_answer(gated, marker, "approved", "human")
+    got = json.loads(runner.answer_path(gated.state_dir, "merge").read_text(encoding="utf-8"))
+    assert (got["step"], got["answer"], got["by"], got["run"], got["presented_id"]) == ("merge", "approved", "human", gated.run_id, "p1")
+
+
+def _the_answer_record_without_a_presented_id_holds_null(gated):
+    runner._record_answer(gated, {"step": "merge", "seq": 1, "routes": {}}, "rejected", "human")
+    assert json.loads(runner.answer_path(gated.state_dir, "merge").read_text(encoding="utf-8"))["presented_id"] is None
+
+
+def _the_step_result_carries_the_presented_id_of_a_gate():
+    from ndf.core.plan import steps
+
+    step = model.Step(id="merge", run=["x"])
+    out = steps.outcome_of(
+        step, 10, json.dumps(result.result("ci", "gate", "待つ", metrics={"presented_id": "p1"}, routes={"approved": None})) + "\n"
+    )
+    assert out["presented_id"] == "p1"
+    ok = steps.outcome_of(step, 0, json.dumps(result.result("ci", "ok", "済んだ", metrics={"presented_id": "p1"})) + "\n")
+    assert ok["presented_id"] is None
+
+
+def _the_gate_result_carries_the_material_and_whether_it_reaches_production(gated):
+    """r1-1: 待っているステップが示した承認資料のパスと「本番へ反映されるか」を、プランの承認待ちの結果に載せる。"""
+    from ndf.core.plan import steps
+
+    shown = {"presented_id": "p1"}
+    gate_out = result.result("ci", "gate", "待つ", metrics={"presented_id": "p1", "production": True}, presentation_path="m.md")
+    out = steps.outcome_of(model.Step(id="merge", run=["x"]), 10, json.dumps(gate_out) + "\n")
+    assert (out["presentation_path"], out["production"]) == ("m.md", True)
+    shown.update(presentation_path=out["presentation_path"], production=out["production"])
+    routes = {"approved": result.command("plan", "next", "g.json"), "rejected": None}
+    marker = {"step": "merge", "seq": 2, "run": "r1", "shown": shown, "routes": routes}
+    # 目印の外にある別の提示の写し（後で出し直した資料）は読まない（r2-2）
+    runner.write_json(runner.step_presented_path(gated.state_dir, "merge"), {"step": "merge", "presented_id": "p9", "production": False})
+    got = runner.gate_result(gated, marker)
+    assert (got["presentation_path"], got["metrics"]["production"]) == ("m.md", True)
+    # 回答コマンドは示した回・待ち・提示に固定される（前の承認コマンドの再送が次の承認待ちへ届かない）
+    assert got["routes"]["approved"]["argv"][-4:] == ["--waiting", "r1:merge:2", "--presented", "p1"]
+    assert got["routes"]["rejected"] is None
+
+
+def _a_human_answer_must_name_the_waiting_and_the_presentation_shown(gated):
+    """r1-2: 利用者の回答は、今の待ちと提示の識別子が回答コマンドの固定と合うときだけ記録する。"""
+    baseline = {"step": "merge", "seq": 2, "run": "r2", "shown": {"presented_id": "p2"}, "routes": {}}
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "human", "r2:merge:2", "p2")) is None
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "human", "r2:merge:1", "p2")) is not None
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "human", "r2:merge:2", "p1")) is not None
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "human")) is not None
+    # 工程の進行の回答は証跡にならないので、固定が無くても通す（渡されたら照らす）
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "conductor")) is None
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "conductor", None, "p1")) is not None
+
+
+def _an_answer_to_the_same_step_of_an_earlier_run_is_refused():
+    """r2-3: 提示の識別子を持たない承認待ちでも、同じ保存先で流し直した前の回の回答コマンドは今の回へ記録しない。"""
+    baseline = {"step": "merge", "seq": 1, "run": "new", "shown": {}, "routes": {}}
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "human", "old:merge:1")) is not None
+    assert runner._pin_mismatch(baseline, runner.Reply("approved", "human", "new:merge:1")) is None
+
+
+def _an_unconfirmed_old_wait_is_matched_first_and_never_answered(tmp_path):
+    """PR 4502 r2-1・r2-2・r3-1: 提示を確かめられない旧い形の待ちは、先に待ちを照らし、合っても回答を記録も送信もせず、
+    打ち直しのコマンドを示さずに止まる。回の組み立ては Git を起動しないよう直接作る（r3-3）。"""
+    plan = model.parse({"name": "g", "steps": [H.py_step("merge", "pass", on_answer={"approved": "end", "rejected": "end"})]})
+    inv = runner.Invocation(Path("g.json"), plan, None, (), tmp_path, "k", 1, None, again=("g.json",))
+    baseline = {"step": "merge", "seq": 3, "run": inv.run_id, "shown": {}, runner.UNCONFIRMED: True, "routes": {}}
+    other = runner._deliver(inv, baseline, runner.Reply("rejected", "human", "old:merge:3"))
+    assert other["cause"]["kind"] == "approval_stale"
+    same = runner._deliver(inv, baseline, runner.Reply("rejected", "human", f"{inv.run_id}:merge:3"))
+    assert same["cause"]["kind"] == "precondition" and "next" not in same and "--fresh" not in same["cause"]["detail"]
+    assert not runner.answer_path(tmp_path, "merge").exists()
+
+
+def _next_refuses_an_actor_of_the_wrong_shape(capsys):
+    from ndf.core.plan import cli
+
+    assert cli.main(["next", "p.json", "--answer", "approved", "--by", "人"]) != 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cause"]["kind"] == "invalid"
+
+
+@pytest.mark.parametrize(
+    scenes.ARGS,
+    [
+        scenes.scene(_routes_answer_with_the_user_as_the_actor, id="routes_answer_with_the_user_as_the_actor"),
+        scenes.scene(
+            _the_answer_record_copies_the_presented_id_of_the_waiting_step,
+            id="the_answer_record_copies_the_presented_id_of_the_waiting_step",
+        ),
+        scenes.scene(_the_answer_record_without_a_presented_id_holds_null, id="the_answer_record_without_a_presented_id_holds_null"),
+        scenes.scene(_the_step_result_carries_the_presented_id_of_a_gate, id="the_step_result_carries_the_presented_id_of_a_gate"),
+        scenes.scene(
+            _the_gate_result_carries_the_material_and_whether_it_reaches_production,
+            id="the_gate_result_carries_the_material_and_whether_it_reaches_production",
+        ),
+        scenes.scene(
+            _a_human_answer_must_name_the_waiting_and_the_presentation_shown,
+            id="a_human_answer_must_name_the_waiting_and_the_presentation_shown",
+        ),
+        scenes.scene(
+            _an_answer_to_the_same_step_of_an_earlier_run_is_refused, id="an_answer_to_the_same_step_of_an_earlier_run_is_refused"
+        ),
+        scenes.scene(
+            _an_unconfirmed_old_wait_is_matched_first_and_never_answered,
+            id="an_unconfirmed_old_wait_is_matched_first_and_never_answered",
+        ),
+        scenes.scene(_next_refuses_an_actor_of_the_wrong_shape, id="next_refuses_an_actor_of_the_wrong_shape"),
+    ],
+)
+def test_answer_record_scenes(request, scene, values):
+    """承認ゲートの回答の記録と提示の識別子の場面（#4409 の決定 7）。"""
+    scenes.play(request, scene, values)

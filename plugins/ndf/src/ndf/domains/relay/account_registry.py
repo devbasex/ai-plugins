@@ -789,6 +789,9 @@ def parse_number(v: str) -> Optional[float]:
         return None
 
 
+DEFAULT_MONTHLY_USD = 200.0  # API キーの月の額の既定（ドル）。未設定でも使える
+
+
 def positive(v: Any) -> Optional[float]:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else None
 
@@ -843,6 +846,8 @@ def _oauth_rows(store: Path, pinned: Optional[str], usages: UsagesOf) -> tuple[l
                 "org_name": acc.org_name or None,  # noqa: NDF501 ファイル: 組織の無い登録は null で並べる
                 "pinned": n == pinned,
                 "percent": u.percent if u else None,
+                "five_hour": u.five if u else None,
+                "seven_day": u.seven if u else None,
                 "capacity_declared": capacity_view(acc.declared),
                 "state": _state(acc, u),
             }
@@ -862,14 +867,14 @@ def _api_key_rows(store: Path) -> tuple[list[dict[str, Any]], list[str]]:
     for k in sorted(book["keys"]):
         row = book["keys"][k]
         if isinstance(row, dict):
-            usd = positive(row.get("monthly_usd"))
+            usd = positive(row.get("monthly_usd")) or DEFAULT_MONTHLY_USD  # 未設定・0 は既定の額で使える
             rows.append(
                 {
                     "name": k,
                     "kind": "api_key",
                     "account": row.get("account"),
                     "monthly_usd": usd,
-                    "state": "使える" if usd else "月の額が未設定",
+                    "state": "使える",
                 }
             )
     return rows, warnings
@@ -930,3 +935,28 @@ def discard(path: Path) -> None:
     """登録の途中の保存先を消す（無ければ何もしない）。"""
     if path.exists():
         shutil.rmtree(path)
+
+
+# ---------------------------------------------------------------- 端末で読む一覧の表（#4003）
+
+
+def _percent_cell(key: str) -> Any:
+    """窓ごとの使用率の列（`five_hour`・`seven_day`）。無ければ None（`-`）。"""
+    return lambda row: f"{row[key]:g}%" if row.get(key) is not None else None
+
+
+def _monthly_cell(row: dict[str, Any]) -> Optional[str]:
+    """API キーの月の額の列。無ければ None（`-`）。"""
+    return f"{row['monthly_usd']:g} ドル" if row.get("monthly_usd") is not None else None
+
+
+# 端末で読む一覧（`list_rows` の行）の表の列（`result.emit` の columns。名前の前の `*` は指定のアカウント。識別は email・従量の接続先・API キーの組織の順に引く）
+LIST_COLUMNS = (
+    ("名前", lambda r: ("* " if r.get("pinned") else "  ") + str(r["name"])),
+    ("種類", "kind"),
+    ("識別", lambda r: r.get("email") or r.get("provider") or r.get("account") or r.get("source")),
+    ("5h", _percent_cell("five_hour")),
+    ("7d", _percent_cell("seven_day")),
+    ("月の額", _monthly_cell),
+    ("状態", "state"),
+)

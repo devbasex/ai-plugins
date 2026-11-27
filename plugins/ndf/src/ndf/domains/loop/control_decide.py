@@ -22,12 +22,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
+from ndf.core.actors import HUMAN
 from ndf.domains.loop import lap_decide
 from ndf.domains.release.approval_decide import APPROVED
 from ndf.domains.loop import record_decide as rec
 
 # 止める要求を置ける主体: 人・オーガナイザー（人の指示を受けて）
-STOP_BY = ("human", "organizer")
+STOP_BY = (HUMAN, "organizer")
 # 断りの種類（停止理由の表の種類）
 REFUSED, PRECONDITION, INVALID = "refused", "precondition", "invalid"
 # 次の 1 手のサブコマンドの名前（`Step.tool`）: 開発ループ自身と、結び付けたステートマシン

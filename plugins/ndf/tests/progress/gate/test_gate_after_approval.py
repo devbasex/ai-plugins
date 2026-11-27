@@ -9,34 +9,64 @@ from types import SimpleNamespace
 
 import pytest
 
-from ndf.progress import gate, model, run
-from ndf.progress.gate import answering
+from ndf.core import route
+from ndf.progress import gate, invoke, model, run
+from ndf.progress.gate import answering, asking
 
 BY = "human:reviewer"
 
 
-def _approve(st, tid, q, head, key="k-release", value="approved"):
-    return gate.answer(st, tid, gate.Answer(q.id, value, "出してよい", BY, key, seen=gate.Target(head=head)))
+def _approve(st, tid, q, head, key="k-release", value="approved", body=None):
+    return gate.answer(st, tid, gate.Answer(q.id, value, "出してよい", BY, key, seen=gate.Target(head=head, body=body)))
 
 
-def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new_table, release_question):
+# （提示した対象の「本番へ反映されるか」（None は提示した対象が無く分からない）・リリースのプランへ差し込む承認の head
+# （None は文書だけの追加でも承認の head を繰り上げず、待ちへ戻す））
+@pytest.mark.parametrize(
+    ("production", "injected"), [(False, "h2"), (None, "h1"), (True, None)], ids=["not-production", "unknown", "production"]
+)
+def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new_table, release_question, flow, env, production, injected):
     tid = new_table()
-    _approve(st, tid, release_question(tid), "h1")
+    q = release_question(tid)
+    if production is None:
+        _approve(st, tid, q, "h1")
+    else:
+        shown = replace(q, target=gate.Target("h1", None, "o/r", 7, "main", production))
+        gate.write_material(st.root, run.read(st, tid), shown)
+        presentation = asking.read_presented(st.root, q).presentation
+        seen = gate.Target(head="h1", presentation=presentation)
+        gate.answer(st, tid, gate.Answer(q.id, "approved", "出してよい", BY, "k-release", seen=seen))
     moved = lambda q, **_: gate.Target(head="h2")  # noqa: E731
     why = gate.recheck(st, tid, moved, lambda seen, now: (seen, now) == ("h1", "h2"))
+    if injected is None:
+        assert why is not None and "対象が変わった" in why
+        flow.turn(tid)  # 未了に戻した読み手役のステップを打ち直してから待つ（#4446）
+        new = gate.waiting(run.read(st, tid))
+        assert new is not None and new.id != q.id and new.gate == "release"
+        assert gate.approved_head(run.read(st, tid), "release", st.root) == "h1"
+        return
     assert why is not None and "文書だけ" in why
     assert run.decide(run.read(st, tid)).action == run.Action.CONSUME
     # マージの側が照らす head は、出し直さずに進めた今の head
     assert gate.approved_head(run.read(st, tid), "release", st.root) == "h2"
     assert gate.approved_head(run.read(st, tid), "release") == "h1"
+    # リリースのプランの `ndf ci merge --approved-head` へ差し込む値
+    called = []
+    spy = replace(env, invoker=lambda r, *a: called.append(r) or env.invoker(r, *a))
+    flow.turn(tid, spy)
+    got = invoke._fill_production_gate(route.templates()["release"], called[0])
+    assert got["approved_head"] == injected
 
 
-def test_a_range_with_code_after_the_release_approval_asks_again(st, new_table, release_question):
+@pytest.mark.parametrize(("body", "docs"), [("b1", False), ("b2", True)], ids=["code-range", "changed-body"])
+def test_a_range_with_code_or_a_changed_body_after_the_release_approval_asks_again(st, new_table, release_question, flow, body, docs):
     tid = new_table()
     old = release_question(tid)
-    _approve(st, tid, old, "h1")
-    why = gate.recheck(st, tid, lambda q, **_: gate.Target(head="h2"), lambda seen, now: False)
+    _approve(st, tid, old, "h1", body="b1")
+    # 本文が変わっていれば、加わった範囲が文書だけでも出し直す
+    why = gate.recheck(st, tid, lambda q, **_: gate.Target(head="h2", body=body), lambda seen, now: docs)
     assert why is not None and "対象が変わった" in why
+    flow.turn(tid)  # 未了に戻した読み手役のステップを打ち直してから待つ（#4446）
     new = gate.waiting(run.read(st, tid))
     assert new is not None and new.id != old.id and new.gate == "release"
 
@@ -47,6 +77,7 @@ def test_the_design_gate_asks_again_even_for_docs_only(st, new_table, flow):
     q = gate.waiting(run.read(st, tid))
     _approve(st, tid, q, "h1")
     gate.recheck(st, tid, lambda q, **_: gate.Target(head="h2"), lambda seen, now: True)
+    flow.turn(tid)
     assert gate.waiting(run.read(st, tid)) is not None
 
 
@@ -76,6 +107,15 @@ def test_git_docs_only_splits_the_range_like_the_sprint_diff_and_needs_the_behav
     (repo / ".ndf" / "project.json").write_text("{}")
     _commit(repo, ".ndf/project.json", "{}")
     assert gate.git_docs_only(repo)(base, doc) is False
+
+
+def test_git_docs_only_counts_the_old_name_of_code_renamed_to_markdown(repo):
+    (repo / ".ndf").mkdir()
+    (repo / ".ndf" / "project.json").write_text('{"docs": {"behavior": []}}')
+    base = _commit(repo, "src/a.py", "x = 1\n")
+    subprocess.run(["git", "-C", str(repo), "mv", "src/a.py", "src/a.md"], check=True)
+    renamed = _commit(repo, "docs/a.md", "# a\n")
+    assert gate.git_docs_only(repo)(base, renamed) is False
 
 
 def test_the_approved_head_is_the_head_seen_by_the_last_release_answer(st, repo, new_table, capsys, release_question):
@@ -119,7 +159,7 @@ def _material(st, q, head, text="資料 A\n"):
 
 
 def _hub(head):
-    return SimpleNamespace(pull=lambda n: SimpleNamespace(head_sha=head))
+    return SimpleNamespace(pull=lambda n: SimpleNamespace(head_sha=head, body="本文", title="題"))
 
 
 DOCS_ONLY = lambda seen, now: (seen, now) == ("hA", "hB")  # noqa: E731
@@ -142,7 +182,7 @@ SEEN = {
 
 
 @pytest.mark.parametrize("case", SEEN.values(), ids=SEEN.keys())
-def test_the_recheck_compares_only_the_material_the_answerer_saw(st, repo, new_table, release_question, monkeypatch, case):
+def test_the_recheck_compares_only_the_material_the_answerer_saw(st, repo, new_table, release_question, flow, monkeypatch, case):
     placed, hashed, change, now, expect, reads = case
     tid = new_table()
     q = release_question(tid)
@@ -165,6 +205,7 @@ def test_the_recheck_compares_only_the_material_the_answerer_saw(st, repo, new_t
     if expect == CARRIED:
         assert gate.approved_head(run.read(st, tid), "release", st.root) == "hB"
     if expect is not None and expect != CARRIED:
+        flow.turn(tid)  # 未了に戻した読み手役のステップを打ち直してから待つ（#4446）
         assert gate.waiting(run.read(st, tid)) is not None
     if expect == "head の SHA":
         assert "sha256" not in why

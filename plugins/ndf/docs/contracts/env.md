@@ -27,6 +27,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `CLAUDE_PLUGIN_ROOT` | runtime | path | — | プラグインの根。無ければ読み手の位置から求める。ホストの推定では Claude Code のマーカー。bin/ndf が自分の根を入れるため、中継が起動するセッションへ渡さない（セッションの hook には Claude Code が入れる） | 内部（予告なく変えてよい） |
 | `CODEX_HOME` | runtime | path | — | Codex の設定の保存先（ホストの推定と使用量の読み取り） | 内部（予告なく変えてよい） |
 | `CODEX_PLUGIN_ROOT` | runtime | path | — | Codex のプラグインの根（ホストの推定） | 内部（予告なく変えてよい） |
+| `GH_REPO` | ndf | string | — | gh の対象の owner/repo。ndf cross-review run --repo が相手役と修正担当の gh へ渡す値を入れる。gh pr merge を止める hook は、利用者の置いた値をマージ先のリポジトリの判定に読む | 内部（予告なく変えてよい） |
 | `GH_TOKEN` | user | string | 秘密 | GitHub の API のトークン | 公開 |
 | `GITHUB_EVENT_PATH` | ci | path | — | GitHub Actions の事象の JSON。検査が PR 本文を読む | 内部（予告なく変えてよい） |
 | `GITHUB_REPOSITORY` | ci | string | — | GitHub Actions が渡す owner/repo | 内部（予告なく変えてよい） |
@@ -77,6 +78,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_SHARED_CONFIG_DIR` | ndf | path | — | アカウントの子の中で、元の CLAUDE_CONFIG_DIR を持つ（空なら ~/.claude）。アカウントの登録の保存先を決める。登録済みアカウントの子には、親にあれば親の値、無ければ子へ渡す前の CLAUDE_CONFIG_DIR（無ければ空文字）を入れる | 内部（予告なく変えてよい） |
 | `NDF_STATE_HOME` | user | path | — | 状態の保存先の根。保存先は <値>/<プラグイン名>（XDG_STATE_HOME と同じ読み方。入れ替えの前に旧い NDF と同じ値を渡されても、旧い保存先を退避しない）。無ければ XDG_STATE_HOME の下 | 公開 |
 | `NDF_SUPERVISE_CLAUDE_FALLBACK` | user | string | 秘密 | 従量の接続の設定（KEY=VALUE を空白区切り）。定義されていれば保存した設定（metered.json）より先に読む | 内部（予告なく変えてよい） |
+| `NDF_UNIT_FILE` | ndf | path | — | レビューの単位の指示（単位の範囲）のファイル。ndf cross-review run が相手役と修正担当の指示に中身と例外を足す。無ければ単位の指示を足さない。指すファイルを読めなければ invalid で止まる | 内部（予告なく変えてよい） |
 | `NDF_UPKEEP_STATE_DIR` | user | path | — | 棚卸しの状態（候補・順位・却下・見積・付け直しの前の状態・深さの記録）の保存先。無ければメインディレクトリの .ndf/backlog/state | 内部（予告なく変えてよい） |
 | `NDF_USAGE_DIR` | user | path | — | 使用量の使用量ログ（usage.jsonl）の保存先。hook から書いてもスクリプトから書いても同じ保存先になる。無ければ状態の保存先の usage | 内部（予告なく変えてよい） |
 | `NDF_VERSION` | service | string | — | サービスの実行ジョブが入れた NDF のバージョン（開発版は <version>@<コミットの SHA>） | 公開 |

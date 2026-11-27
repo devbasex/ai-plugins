@@ -14,12 +14,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import sprint_fixture
 import strategy_fixture
 
 from ndf.contracts import result, worker_kinds
 from ndf.core import durable, loop, route, worker_outcome
 from ndf.core.plan import records, runner, steps, transition_decide
-from ndf.progress import command, definition, gate, invoke, run, store
+from ndf.progress import command, definition, gate, invoke, issue_values, run, store
 
 ISSUE = 3474
 BRANCH = "sprint/s1"
@@ -56,6 +57,7 @@ def sprint(repo, monkeypatch):
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
     subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "集めた"], cwd=repo, check=True)
     gathered = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    sprint_fixture.with_remote(repo)
     return _sprint(repo, monkeypatch, gathered)
 
 
@@ -71,7 +73,7 @@ def _sprint(repo: Path, monkeypatch, gathered: str, defaults: dict = DEFAULTS, p
     patched = {n: replace(p, default=defaults[n]) if n in defaults else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     values = {"worktree": str(repo), "branch": BRANCH, "design_pr": 7, "pr": 8, "product_version": "11.0.0", "gathered": gathered}
     values["delivery"] = {"target": "t", "kind": "auto", "trigger": "cd", "channel": "production", "versioned": True}
     # 承認ゲートの直前の MVV 判定は人へ問う側（省かない）に倒す（#3745）
@@ -236,13 +238,13 @@ def _worktree_plan(repo: Path, plan_path: Path, report: dict, monkeypatch) -> di
     monkeypatch.setattr(runner, "_head", lambda plan: "0" * 40)
     inv = runner.prepare(repo / ".git" / "ndf" / "state", plan_path, None, None, repo)
     inv.state_dir.mkdir(parents=True, exist_ok=True)
-    checked, outputs = worker_outcome.require_outputs(report, worker_kinds.work_kinds()["worktree"]["outputs"])
+    checked, outputs, _ = worker_outcome.require_outputs(report, worker_kinds.work_kinds()["worktree"]["outputs"])
     said = worker_outcome.outcome_of("worktree", repo / "result.json", checked, [], {"attempts": 1}, outputs=outputs)
 
     def perform(act: transition_decide.RunStep) -> transition_decide.Outcome:
         out = steps.outcome_of(inv.plan.step(act.step), result.code_for(said), result.dumps_line(said))
         if out["outputs"]:
-            records._add_outputs(inv.state_dir, out["outputs"])
+            records._add_outputs(inv.state_dir, act.step, out["status"], out["outputs"])
         records._keep_step_gaps(inv.state_dir, act.step, out["gaps"])
         return transition_decide.Outcome(out["status"], out["kind"], out["retry_after"])
 
@@ -311,7 +313,7 @@ def planned(repo, monkeypatch):
     patched = {n: replace(p, default=DEFAULTS[n]) if n in DEFAULTS else p for n, p in held.items()}
     monkeypatch.setattr(route, "params", lambda: patched)
     monkeypatch.setattr(route, "default_merge_method", lambda repo, base, remote=None, **_: "squash")
-    monkeypatch.setattr(invoke, "issue_text", lambda location, n: (f"#{n} の題", f"#{n} の本文"))
+    monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     return repo
 
 

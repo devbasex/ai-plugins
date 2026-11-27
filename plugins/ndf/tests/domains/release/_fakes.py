@@ -94,7 +94,7 @@ class FakeHub:
         if method == "POST" and path.endswith("/comments"):
             number = int(path.split("/")[-2])
             if not self.drop_comments:
-                self.comments_of.setdefault(number, []).append(Authored("octocat", "OWNER", payload["body"]))
+                self.comments_of.setdefault(number, []).append(Authored("octocat", "OWNER", payload["body"], author_id=1))
             return {"html_url": f"https://example.invalid/{number}"}
         got = self.responses.get((method, path))
         if isinstance(got, Exception):
