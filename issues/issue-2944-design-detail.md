@@ -34,7 +34,7 @@ src/ndf/
 
 | パス | 種類 | 役割 | 依存する先 | クラスまたはモジュール | 新設（N）と変更（C） |
 | --- | --- | --- | --- | --- | --- |
-| `src/ndf/adapters/model_choice.py` | 新設 | 値と出所を返す | launch_settings・launch_approval | `Choice` | N: `table`・`stage_of`・`launch_choice`・`raised`・`fallback`・`candidates`・`compatibility_key`・`read_rows`・`ledger`・`append_row` |
+| `src/ndf/adapters/model_choice.py` | 新設 | 値と出所を返す | launch_settings・launch_approval | `Choice` | N: `table`・`bundled_errors`・`stage_of`・`launch_choice`・`raised`・`fallback`・`candidates`・`compatibility_key`・`read_rows`・`ledger`・`append_row` |
 | `src/ndf/adapters/launch_settings.py` | 変更 | `experiments` を返す | — | `Settings` | C: `load` |
 | `src/ndf/adapters/claude.py` | 変更 | 引数と拒否の判定 | — | `ClaudeCall`・`LaunchRecorder` | C: `claude_launch`・`_error_reply`。N: `report_outcome` |
 | `src/ndf/adapters/llm.py` | 変更 | 判定の単位 | model_choice | モジュール | C: `ask` |
@@ -85,7 +85,8 @@ src/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `table` | `adapters/model_choice.py` | 新設 | `table(root: Path, settings: Optional[Settings] = None) -> Table` | 同梱とリポジトリの `experiments` を重ね、値の制約を検証する。`settings` を渡されれば `.ndf/launch.json` を読み直さずに使う。同梱の値のスキーマ検証はプロセスの中で初回だけ行う |
+| `table` | `adapters/model_choice.py` | 新設 | `table(root: Path, settings: Optional[Settings] = None) -> Table` | 同梱とリポジトリの `experiments` を重ね、値の制約を検証する。`settings` を渡されれば `.ndf/launch.json` を読み直さずに使う。同梱の値はスキーマに照らさない（配布の後に変わらないので、CI のテストが `bundled_errors` で確かめる） |
+| `bundled_errors` | 同 | 新設 | `bundled_errors() -> list[str]` | 同梱の値が起動の設定のスキーマに合わない箇所を返す。起動の経路では呼ばず、CI のテストが呼ぶ |
 | `stage_of` | 同 | 新設 | `stage_of(layer: str, name: str) -> Optional[str]` | 層と作業の名前から工程を引く |
 | `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, unit: Optional[str] = None, charge_to: Optional[str] = None, retry: Optional[str] = None, mode: Optional[str] = None, argument: tuple[Optional[str], Optional[str]] = (None, None), environ: Optional[Mapping] = None, settings: Optional[Settings] = None) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる。`settings` は `table` へ渡す |
 | `raised` | 同 | 新設 | `raised(runtime: str, model: Optional[str], effort: Optional[str]) -> tuple[Optional[str], Optional[str]]` | 設計書の「引き上げる起動」の上げ方の表を当てる |
@@ -435,10 +436,12 @@ src/ndf/
 | `_pick_command` | 同 | 新設 | `_pick_command(a: Namespace) -> int` | `--args` が無ければ結果 JSON、あれば 1 行 1 引数 |
 | `_report` | 同 | 新設 | `_report(a: Namespace) -> int` | 使用量ログと実験の記録を読んで結果を出す |
 | `report_rows` | 同 | 新設 | `report_rows(usage_rows, experiment_rows, since, until, stage) -> list[dict]` | 設計書の「集計」の順と区分で値を組む |
-| `main` | `domains/settings/delegate_run_cli.py` | 変更 | 引数は #1959 のまま | codex は `launch_settings.load` で起動の設定を 1 回だけ読んで検証し、その `Settings` を渡した `launch_choice("seat", "delegate", "codex", settings=…)` の引数と `safety_args("codex", "delegate", cwd, settings=…)` の引数の並びを続けて `{args}` に入れる。kiro と agy は `launch_choice` を呼ばず、`safety_args` の引数だけを入れる |
+| `main` | `domains/settings/delegate_run_cli.py` | 変更 | 引数は #1959 のまま | codex は `settings = launch_settings.load(launch_settings.launch_root(cwd))` で起動の設定を読み、同じ `cwd` と `settings` を渡した `launch_choice("seat", "delegate", "codex", cwd=cwd, settings=settings)` の引数と `safety_args("codex", "delegate", cwd, settings=settings)` の引数の並びを続けて `{args}` に入れる。kiro と agy は `launch_choice` を呼ばず、`safety_args` の引数だけを入れる |
 | `safety_args` | `adapters/launch_settings.py` | 変更 | `safety_args(runtime: str, use: str, cwd: Path, settings: Optional[Settings] = None) -> SafetyArgs` | #1959 の判定表のまま。サンドボックスなしで起動する経路で、`settings` を渡されれば `.ndf/launch.json` を読み直さずに使う。起動の直前の照らし直し（`verify`）は、これまでどおりファイルを読み直して承認と照らす |
 
-- `delegate-run` の codex の委譲では、起動の設定の読み取りと全体のスキーマ検証を 1 回にする。`launch_choice` と `safety_args` がそれぞれ `.ndf/launch.json` を読むと、サンドボックスなしの経路で読み取りと検証が 1 回ずつ増えるためである。承認を取り消した場合や、確かめた後にファイルを書き換えた場合は、起動の直前の `verify` が見つける
+- `delegate-run` の codex の委譲では、`.ndf/launch.json` の読み取りと全体のスキーマ検証を、起動の引数を組み立てる段階で 1 回にまとめる。`launch_choice` と `safety_args` がそれぞれ読むと、サンドボックスなしの経路で読み取りと検証が 1 回ずつ増えるためである
+  - サンドボックスなしで起動する経路では、起動の直前の承認の確認（`verify`）で、もう 1 回読み取りと検証を行う。`verify` は最初に読んだ `Settings` を使い回さず、ファイルを読み直す。使い回すと、引数を組み立てた後に `permissions.unsandboxed` から codex を外しても、古い設定のまま安全装置を外して起動するためである。読み取りと検証は合わせて 2 回になる
+  - `verify` が見つけるのは、承認のハッシュの対象（`permissions` と、そこから参照する MCP の定義ファイル）の変更と、承認の取り消しだけである。`experiments` だけの変更は、スキーマに合う限り見つけず、委譲を止めない。モデルと effort は、引数を組み立てる段階で最初に読んだ設定から選ぶ
 - `_pick_command` の `--args` の形は、`InternalError` を自分で受けて標準エラーへ書き、標準出力に何も出さずに 0 以外で終える。`delegate-run` の失敗の扱いは #1959 の詳細設計のとおりで、`launch_choice` の失敗も CLI を起動せずに同じ形で終える
 - `report` は呼ばれた時点で計算し直し、出現率のファイルを書き換えない
 

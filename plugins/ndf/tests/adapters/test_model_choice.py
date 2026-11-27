@@ -41,6 +41,11 @@ def _stopped(call) -> str:
 # --- table ---
 
 
+def test_the_bundled_choices_fit_the_settings_schema():
+    """同梱の値は起動のたびに照らさないので、形が起動の設定のスキーマに合うことをここで確かめる。"""
+    assert mc.bundled_errors() == []
+
+
 def test_table_without_settings_is_the_bundled_choices(tmp_path):
     got = mc.table(_repo(tmp_path))
     assert got.enabled and got.arms["impl"]["claude"][0] == {} and len(got.arms["impl"]["claude"]) == 3

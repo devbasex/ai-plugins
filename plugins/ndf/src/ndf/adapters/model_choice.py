@@ -22,7 +22,6 @@
 from __future__ import annotations
 
 import enum
-import functools
 import os
 import re
 from dataclasses import dataclass, replace
@@ -251,21 +250,16 @@ def _allocation_errors(allocation: Mapping[str, Any], widest: int) -> list[str]:
     return errs
 
 
-@functools.cache
-def _checked_bundled() -> dict[str, Any]:
-    """同梱の値を形（起動の設定のスキーマ）に照らして返す。同梱の値はプロセスの中で変わらないので、照らすのは初回だけ。"""
-    bundled = _bundled()
-    broken = contracts.broken_places({"version": 1, "experiments": bundled}, launch_settings.SCHEMA)
-    if broken:
-        raise _fail(f"{_bundled_path()} の選択肢が起動の設定の形に合わない: {'; '.join(broken)}")
-    return bundled
+def bundled_errors() -> list[str]:
+    """同梱の値が起動の設定の形（スキーマ）に合わない箇所。同梱の値は配布の後に変わらないので、起動のたびには照らさず CI のテストが呼ぶ。"""
+    return contracts.broken_places({"version": 1, "experiments": _bundled()}, launch_settings.SCHEMA)
 
 
 def table(root: Path) -> Table:
     """同梱の表とリポジトリ `root` の `experiments` を重ね、値の制約を確かめる。外れれば直す場所を載せて `precondition`。"""
     settings = launch_settings.load(root)
     given = settings.experiments
-    bundled = _checked_bundled()
+    bundled = _bundled()
     _given_keys(given, bundled, settings.path)
     merged = _overlaid(bundled, given)
     errs = [e for stage, by in merged["arms"].items() for runtime, arms in by.items() for e in _arms_errors(stage, runtime, arms)]
