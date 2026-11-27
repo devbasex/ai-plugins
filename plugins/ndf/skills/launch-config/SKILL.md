@@ -55,9 +55,9 @@ NDF が非対話で起動する AI（プランの worker・Skill を回す起動
 
 ### モデルと effort の実験（`experiments`）
 
-NDF は工程ごとの選択肢（モデルと effort の組）を同梱している。`ndf models pick` は、同梱の基準の組（各工程の選択肢の先頭の組）を使う。`experiments` で、工程とランタイムごとに基準の組を上書きできる。`experiments` は同梱の値のうち書いたキーだけを置き換える。
+今の `experiments` は、`ndf models pick` が返すモデルと effort を変えるだけで、worker や委譲の実際の起動には効かない。
 
-現在は `ndf models pick` で、設定に基づいて選ばれるモデルと effort を確認できる。worker や委譲の起動への反映と、単位ごとの抽選は今後の変更で有効になる。利用者には、設定を書き換えても今の worker や委譲の起動のモデルと effort は変わらないと伝える。
+NDF は工程ごとの選択肢（モデルと effort の組）を同梱している。各工程の選択肢の先頭の組を、基準の組と呼ぶ。`ndf models pick` は、設定で上書きした工程・ランタイムの基準の組を返す。`experiments` は同梱の値のうち書いたキーだけを置き換える。`enabled` による抽選の切り替えと、実際の起動への反映は今後対応する。利用者には、設定を書き換えても今の worker や委譲の起動のモデルと effort は変わらないと伝える。
 
 ```json
 {
@@ -70,17 +70,19 @@ NDF は工程ごとの選択肢（モデルと effort の組）を同梱して�
 }
 ```
 
-| キー | 意味 |
-| --- | --- |
-| `enabled` | 偽なら実験を止め、どの工程も基準の組（先頭の組）で起動する |
-| `stages.<工程>.arms.<ランタイム>` | その工程の選択肢。先頭が基準の組で、`{}` は指定なし（CLI の既定）。1 組だけならその値に固定する。工程とランタイムは同梱の表（`contracts/domains/launch-experiments.json`）にあるものだけ |
-| `allocation` | 割り付けの値（`floor`・`min_units`・`margin`・`window_days`）。省いたキーは同梱の値 |
+| キー | 今の動き（`ndf models pick` の結果） | 今後の動き（実際の起動への反映と抽選が入った後） |
+| --- | --- | --- |
+| `enabled` | 効かない。真でも偽でも基準の組を返す | 偽なら実験を止め、どの工程も基準の組で起動する |
+| `stages.<工程>.arms.<ランタイム>` | 先頭の組（基準の組）を返す。`{}` は指定なし（CLI の既定）で、引数を返さない | その工程の選択肢。単位ごとに選択肢から抽選する。1 組だけならその値に固定する |
+| `allocation` | 効かない。値の制約だけを確かめる | 割り付けの値（`floor`・`min_units`・`margin`・`window_days`）。省いたキーは同梱の値 |
+
+工程とランタイムは、同梱の表（`contracts/domains/launch-experiments.json`）にあるものだけを書ける。
 
 - **`experiments` は承認の対象ではない。** 承認のハッシュに入らないので、書き換えても承認をやり直さない。ただし `.ndf/launch.json` の書き換えなので、
   手順 2〜4 のとおり候補を直して、反映の前に利用者に確かめる
-- effort が順位に無い・選択肢が空か重なる・値の制約に外れると、値を使う起動が理由と直す場所を示して止まる。`ndf models pick --layer worker --name impl`
-  で、今の設定から選ばれる値を確かめられる
-- 一時的に上書きするときは、設定を書き換えずに環境変数 `NDF_LAUNCH_MODEL`・`NDF_LAUNCH_EFFORT`（Codex は `NDF_LAUNCH_CODEX_MODEL`・`NDF_LAUNCH_CODEX_EFFORT`）を使う。上書きした起動は実験に数えない
+- effort が順位に無い・選択肢が空か重なる・値の制約に外れると、`ndf models pick` が理由と直す場所を示して止まる。書き換えた後は
+  `ndf models pick --layer worker --name impl` で、今の設定から選ばれる値を確かめる
+- 一時的に上書きするときは、設定を書き換えずに環境変数 `NDF_LAUNCH_MODEL`・`NDF_LAUNCH_EFFORT`（Codex は `NDF_LAUNCH_CODEX_MODEL`・`NDF_LAUNCH_CODEX_EFFORT`）を使う。今は `ndf models pick` の結果だけが変わる。抽選が入った後は、上書きした起動を実験に数えない
 
 ## 手順
 
