@@ -659,9 +659,10 @@ def _begin_run(args: argparse.Namespace, stack: contextlib.ExitStack, claims: di
         slug = repo.resolve_target_repo(args.repo, None, Path.cwd()).slug if args.repo is not None else None
     except repo.RepoUnresolved as exc:
         return _stop("invalid", str(exc))
+    legacy = _legacy_shapes(args)
     for stale in _output_paths(args):
         try:
-            claims[stale] = held = stack.enter_context(outputs.claim(Path(stale), args.set_aside_unrecorded_out))
+            claims[stale] = held = stack.enter_context(outputs.claim(Path(stale), legacy.get(stale)))
         except outputs.Busy:
             # 実行中の起動の書き込みを片付けで壊さない（PR 4638 の r3-4）
             return _stop(
@@ -689,6 +690,14 @@ def _tell_set_aside(stale: str, held: outputs.Claim) -> None:
     """記録の無い出力を消さずに移したなら、移した先を標準エラーに出す（利用者が後で確かめられるように。PR 4638 の r3-2）。"""
     if held.set_aside_to is not None:
         print(f"出力先 {stale} の記録の無いファイルを、消さずに {held.set_aside_to} へ移した", file=sys.stderr)
+
+
+def _legacy_shapes(args: argparse.Namespace) -> dict[str, Any]:
+    """`--set-aside-unrecorded-out` のとき、出力先ごとの前のバージョンが書いた中身の形（移してよいと確かめる根拠。PR 4638 の r1-2）。"""
+    if not args.set_aside_unrecorded_out:
+        return {}
+    shapes = ((args.reviewed_out, outputs.LEGACY_HEAD), (args.reviewed_pr_out, outputs.LEGACY_PR))
+    return {path: shape for path, shape in shapes if path}
 
 
 def _output_paths(args: argparse.Namespace) -> list[str]:
@@ -874,8 +883,10 @@ def _parser() -> argparse.ArgumentParser:
 _OUTPUT_RULE = (
     "前の起動が書いた出力は始めに消す（書けなかった起動の後に前の値を残さない）。空のファイルは消さずに使う。出力の隣の記録"
     "（.<名前>.ndf-output.json）の保存先に書けなければ、レビューを始めずに precondition で停止する。"
-    "NDF が書いたと確かめられない中身のあるファイル（記録の無い・書き換えた・作り直したもの）があれば、消さずにレビューを始めずに "
-    "precondition で停止する。同じ出力先を実行中の別の起動が使っていれば、片付けずにレビューを始めずに precondition で停止する"
+    "NDF の記録の無い、中身のある通常のファイルがあると、既定では消さずに、レビューを始めずに precondition で停止する"
+    "（--set-aside-unrecorded-out を指定すると、その説明の条件に合うファイルだけを移して続ける）。"
+    "記録はあるが照合できないファイル（書き換えた・作り直したもの）と、シンボリックリンクがあれば、指定しても消さずに、"
+    "レビューを始めずに precondition で停止する。同じ出力先を実行中の別の起動が使っていれば、片付けずにレビューを始めずに precondition で停止する"
 )
 
 
@@ -905,9 +916,13 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument(
         "--set-aside-unrecorded-out",
         action="store_true",
-        help="--reviewed-out・--reviewed-pr-out・--reviewed-base-out の出力先に NDF の記録の無いファイル（記録を残さない前の"
-        "バージョンが書いた出力など）があれば、出力先の錠を取った後に、消さずに隣の別名（<名前>.unrecorded-<16 進>）へ移して続ける。"
-        "移した先は標準エラーに出す。版上げをまたいで再開する NDF の工程が使う",
+        help="既定では、出力先に NDF の記録の無い、中身のある通常のファイルがあると precondition で停止する。この引数を指定すると、"
+        "そのうち前のバージョンの NDF が書いたと確かめられるファイルだけを、出力先の錠を取った後に、消さずに隣の別名"
+        "（<名前>.unrecorded-<16 進>）へ移し、出力先には同じ権限の空のファイルを置いて続ける。確かめられるのは、起動した利用者が持ち、"
+        "所有者が読み書きでき、中身が 1 行だけ（--reviewed-out はコミットの SHA、--reviewed-pr-out は <所有者>/<リポジトリ>#<番号>）"
+        "のファイルである。移した先は標準エラーに出す。--reviewed-base-out の出力先のファイル、この条件に合わないファイル、"
+        "記録はあるが照合できないファイル、シンボリックリンクがあれば、指定しても移さずに precondition で停止する。"
+        "ndf route が組む実装の工程の既定のレビューの起動が指定する",
     )
     r.add_argument(
         "--reviewed-base-out",

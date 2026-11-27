@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 from pathlib import Path
 
@@ -294,18 +295,71 @@ def test_pr_4638_r1_5_hard_linked_outputs_are_invalid(tmp_path: Path, capsys: py
 
 
 def test_pr_4638_r3_2_unrecorded_output_is_set_aside_without_deleting(tmp_path: Path) -> None:
-    """PR 4638 の r3-2・r3-3: `set_aside` なら、記録の無い出力を消さずに隣の別名へ移し、記録付きの出力を書いて続ける。
-    指定しなければ従来どおり消さずに止まる。"""
+    """PR 4638 の r3-2・r3-3: `legacy` を渡せば、前のバージョンが書いた形の出力を消さずに隣の別名へ移し、記録付きの出力を
+    書いて続ける。指定しなければ従来どおり消さずに止まる。"""
     out = tmp_path / "head"
     out.write_text(HEAD, encoding="utf-8")
     before = out.stat().st_ino
     with pytest.raises(outputs.Unowned):
         outputs.clear_stale(out)
-    with outputs.claim(out, set_aside=True) as held:
+    with outputs.claim(out, outputs.LEGACY_HEAD) as held:
         aside = held.set_aside_to
-        assert aside is not None and not out.exists()
+        assert aside is not None and out.read_bytes() == b""
         held.write("b" * 40 + "\n")
     assert (aside.parent, aside.stat().st_ino, aside.read_text(encoding="utf-8")) == (tmp_path, before, HEAD)
-    # 書き直した出力は記録付きなので、次の起動は指定が無くても片付けられる
+    # 書き直した出力は記録付きなので、次の起動は指定が無くても片付けられる（権限を保つため、空へ戻して残す。PR 4638 の r1-5）
     outputs.clear_stale(out)
-    assert not out.exists() and aside.exists()
+    assert out.read_bytes() == b"" and aside.exists()
+
+
+@pytest.mark.parametrize("text", ["メモ\n", "a" * 40, "a" * 40 + "\nメモ\n"])
+def test_pr_4638_r1_2_only_outputs_of_the_old_version_are_set_aside(tmp_path: Path, text: str) -> None:
+    """PR 4638 の r1-2: 前のバージョンが書いた形に丸ごと合わない記録の無いファイルは、`legacy` を渡しても元の場所に残して止まる。"""
+    out = tmp_path / "head"
+    out.write_text(text, encoding="utf-8")
+    with pytest.raises(outputs.Unowned):
+        _claim_once(out, outputs.LEGACY_HEAD)
+    assert out.read_text(encoding="utf-8") == text
+    assert not list(tmp_path.glob("head.unrecorded-*"))
+
+
+def _claim_once(out: Path, legacy: "re.Pattern[bytes]") -> None:
+    with outputs.claim(out, legacy):
+        pass
+
+
+def test_pr_4638_r1_4_interrupted_set_aside_finishes_with_the_same_name(tmp_path: Path) -> None:
+    """PR 4638 の r1-4: 別名へのリンクを作った後に終了した移動は、次の起動が同じ別名で終え、別名を増やさない。"""
+    out = tmp_path / "head"
+    out.write_text(HEAD, encoding="utf-8")
+    left = tmp_path / "head.unrecorded-0011aabb"
+    os.link(out, left)
+    with outputs.claim(out, outputs.LEGACY_HEAD) as held:
+        assert held.set_aside_to == left
+    assert list(tmp_path.glob("head.unrecorded-*")) == [left]
+    assert (left.read_text(encoding="utf-8"), out.read_bytes()) == (HEAD, b"")
+
+
+def test_pr_4638_r1_5_set_aside_keeps_the_mode_of_the_old_output(tmp_path: Path) -> None:
+    """PR 4638 の r1-5: 移した後に書き直す出力は、umask によらず前の出力の権限（0600）を引き継ぐ。"""
+    out = tmp_path / "head"
+    out.write_text(HEAD, encoding="utf-8")
+    out.chmod(0o600)
+    old = os.umask(0o022)
+    try:
+        with outputs.claim(out, outputs.LEGACY_HEAD) as held:
+            held.write("b" * 40 + "\n")
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(out.stat().st_mode) == 0o600
+
+
+def test_pr_4638_r1_7_symlink_to_an_empty_file_is_refused(tmp_path: Path) -> None:
+    """PR 4638 の r1-7: 空のファイルを指すシンボリックリンクは、空のファイルの判定より先に断り、リンク先へ書かない。"""
+    target = tmp_path / "mine"
+    target.touch()
+    out = tmp_path / "head"
+    out.symlink_to(target)
+    with pytest.raises(outputs.Unowned):
+        _claim_once(out, outputs.LEGACY_HEAD)
+    assert out.is_symlink() and target.read_bytes() == b""

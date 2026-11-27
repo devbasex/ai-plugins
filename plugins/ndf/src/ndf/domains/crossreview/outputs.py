@@ -11,9 +11,11 @@ NDF が書いたファイルとはみなさない（PR 4638 の r1-4）。
 ものだけで（MVV の Value 6）、記録の無い出力には確かめる根拠が無いためである（PR 4638 の r2-2）。工程は錠の外で出力を消さない。
 同じ出力先を使う実行中の起動が書いた出力まで消すためである（PR 4638 の r1-2）。
 
-版上げをまたいで再開する NDF の工程（実装のテンプレート）は `set_aside` を渡す。錠を取った後に、記録の無い出力を消さずに
-隣の別名（`<名前>.unrecorded-<16 進>`）へ移して残し、出力の名前を空けて続ける。移すだけなので中身も inode も失わず、利用者に
-確かめや打ち直しを求めずに止まった所から続く（MVV の Value 1・Value 3。PR 4638 の r3-2・r3-3）。
+版上げをまたいで再開する NDF の工程（実装の工程の既定のレビューの起動）は `legacy`（前のバージョンがその出力へ書いた中身の形）
+を渡す。錠を取った後に、前のバージョンが書いたと確かめられる出力だけを消さずに隣の別名（`<名前>.unrecorded-<16 進>`）へ移して
+残し、出力の名前には前の出力と同じ権限の空のファイルを置いて続ける。移すだけなので中身も inode も失わず、利用者に確かめや
+打ち直しを求めずに止まった所から続く（MVV の Value 1・Value 3。PR 4638 の r3-2・r3-3）。来歴を確かめられないファイルは元の
+場所に残して止まる（MVV の Value 6。PR 4638 の r1-2）。シンボリックリンクは、リンク先が空でも使わずに止まる（PR 4638 の r1-7）。
 
 記録には種別（`ndf_record`）を書き、片付けで消すのはこの種別の記録（と空の記録）と、その記録が指す一時のファイルだけである
 （PR 4638 の r2-5）。
@@ -46,6 +48,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import stat
 from contextlib import contextmanager
@@ -66,6 +69,11 @@ STAGING_KEY = "staging"
 # 書いた出力が、呼び手が先に作った空のファイルへ直接書いたものか（片付けで消さずに空へ戻す。PR 4638 の r1-3）
 INTO_KEY = "into"
 # 何も指さない記録の行（途中で切れた書き込みも、指す物の無い空の記録と同じに読む。PR 4638 の r4-5）
+# 記録を残さない前のバージョンが書いた出力の中身の形（`claim` の `legacy`。PR 4638 の r1-2）。`--reviewed-out` はコミットの SHA
+# （SHA-1 か SHA-256）、`--reviewed-pr-out` は `<所有者>/<リポジトリ>#<番号>` を 1 行で書いた。`--reviewed-base-out` は記録と
+# 同時に足した出力なので、前のバージョンが書いた物は無い
+LEGACY_HEAD = re.compile(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})\n")
+LEGACY_PR = re.compile(rb"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\n")
 _BARE = json.dumps({RECORD_KIND_KEY: RECORD_KIND}, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
 
 
@@ -201,11 +209,11 @@ class Claim:
         if os.pwrite(self._fd, line, offset) != len(line):
             raise OSError(f"出力の記録 {self.record} を書き切れない")
 
-    def clear(self, set_aside: bool = False) -> None:
+    def clear(self, legacy: Optional[re.Pattern[bytes]] = None) -> None:
         """前の起動の出力を片付ける（`claim` の説明のとおり）。"""
         found = self._read()
         if found is None:
-            if self.path.exists() and not (self.path.is_file() and self.path.stat().st_size == 0):
+            if os.path.lexists(self.path) and not _empty_regular(self.path):
                 raise Unowned(str(self.path))
             # 記録の名前のファイルを NDF が書いたと確かめられない。利用者のファイルかもしれないので消さずに止まる（PR 4638 の r2-5）
             raise OSError(f"出力の記録の保存先 {self.record} に、NDF が書いたと確かめられないファイルがある")
@@ -214,15 +222,42 @@ class Claim:
             # 片付けを終えるまでは記録を消さない。途中で止まっても、次の起動が同じ記録で確かめて片付ける（PR 4638 の r4-6・r4-7）
             self._pointing = bool(found.keys() - {RECORD_KIND_KEY})
             _collect_staging(self.path, found)
-        if self.path.exists():
-            self.set_aside_to = _clear_output(self.path, found, set_aside)
+        if os.path.lexists(self.path):
+            if legacy is not None and not (found.keys() & {WRITTEN_KEY, WRITING_KEY}) and _legacy_output(self.path, legacy):
+                self.set_aside_to = self._set_aside()
+            else:
+                _clear_output(self.path, found)
         if self._pointing:
             self._put(_record())
             self._pointing = False
-        if not self.path.exists():
+        if not os.path.lexists(self.path):
             # 出力の名前にファイルを作れるか（公開は同じディレクトリの一時のファイルからの置き換え）
             self.path.open("x", encoding="utf-8").close()
             self.path.unlink()
+
+    def _set_aside(self) -> Path:
+        """前のバージョンが書いた出力を消さずに隣の別名へ移し、出力の名前には同じ権限の空のファイルを置く（移した先を返す）。
+
+        空のファイルは一時の名前で作って記録してから、出力の名前へ置き換える。出力の名前は途中のどの時点でも消えず、書き直しは
+        空の出力先へ直接書く経路になるので、前の出力の権限（0600 など）を新しい出力も引き継ぐ（PR 4638 の r1-5）。別名へのリンクを
+        作った後に終了しても、次の起動は同じ inode を指す別名を見つけて同じ移動を終える（PR 4638 の r1-4）。"""
+        st = os.lstat(self.path)
+        staging: dict[str, Any] = {"tmp": f".{self.path.name}.{secrets.token_hex(8)}.tmp", "text": ""}
+        tmp = self.path.parent / staging["tmp"]
+        # 記録は片付けの最後に何も指さない記録へ戻す。途中で止まれば、次の起動が記録で一時のファイルを確かめて消す
+        self._pointing = True
+        self._put(_record(**{STAGING_KEY: staging}))
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.fchmod(fd, stat.S_IMODE(st.st_mode) & 0o777)
+            made = os.fstat(fd)
+        finally:
+            os.close(fd)
+        staging.update(dev=made.st_dev, ino=made.st_ino)
+        self._put(_record(**{STAGING_KEY: staging}))
+        aside = _linked_aside(self.path, st) or _link_unused(self.path)
+        os.replace(tmp, self.path)
+        return aside
 
     def write(self, text: str) -> None:
         """出力を書き、書いたファイルの記録を残す。記録は出力を公開する前に残し、途中で落ちても次の起動が来歴を確かめられる
@@ -342,7 +377,7 @@ def _lock(path: Path) -> Claim:
 
 
 @contextmanager
-def claim(path: Path, set_aside: bool = False) -> Iterator[Claim]:
+def claim(path: Path, legacy: Optional[re.Pattern[bytes]] = None) -> Iterator[Claim]:
     """出力先の錠を取り、前の起動の出力を片付けて、起動の終わりまで持つ（親が無い・書けない・記録の保存先がファイルでない・
     NDF が書いたと確かめられない記録がある・一時のファイルを確かめられなければ `OSError`、実行中の別の起動が使っていれば
     `Busy`、確かめられない出力があれば `Unowned`）。
@@ -353,25 +388,34 @@ def claim(path: Path, set_aside: bool = False) -> Iterator[Claim]:
       書いた後に記録を作るために読み直すので、読み書きの両方ができるかを確かめる（PR 4638 の r1-5）
     - ほかの既存のファイル（記録の無い・作り直された・書き換えられたもの）は、利用者のデータかもしれないので消さずに `Unowned`
     - 公開の前に落ちた起動の一時のファイルは、記録で確かめて消す（PR 4638 の r2-7）
-    - `set_aside` を渡せば、記録の何も指さない出力のファイル（記録を残さない前のバージョンが書いたものなど）を消さずに隣の別名へ
-      移し、移した先を `Claim.set_aside_to` に残す（PR 4638 の r3-2）
+    - シンボリックリンクは、リンク先が空でも使わずに `Unowned`（利用者の別のファイルへ書かない。PR 4638 の r1-7）
+    - `legacy`（記録を残さない前のバージョンがこの出力へ書いた中身の形）を渡せば、前のバージョンが書いたと確かめられる出力
+      だけを消さずに隣の別名へ移し、移した先を `Claim.set_aside_to` に残す（PR 4638 の r3-2）。確かめる根拠は、NDF の書いた
+      記録が無いこと、起動した利用者が持つ通常のファイルで所有者が読み書きできること、中身がその形に丸ごと合うことである。
+      どれかに当たらないファイルは元の場所に残して `Unowned`（MVV の Value 6。PR 4638 の r1-2）
     """
     held = _lock(path)
     try:
-        held.clear(set_aside)
+        held.clear(legacy)
         yield held
     finally:
         held.release()
 
 
-def _clear_output(path: Path, found: dict[str, Any], set_aside: bool = False) -> Optional[Path]:
+def _empty_regular(path: Path) -> bool:
+    """`path` がシンボリックリンクでない空の通常のファイルか（リンク先はたどらない。PR 4638 の r1-7）。"""
+    st = os.lstat(path)
+    return stat.S_ISREG(st.st_mode) and st.st_size == 0
+
+
+def _clear_output(path: Path, found: dict[str, Any]) -> None:
     """既存の出力を、空なら読み書きできるかを確かめて残し、NDF が書いたと確かめられれば片付け、確かめられなければ `Unowned`。
-    `set_aside` なら、記録の何も指さない出力のファイルは隣の別名へ移し、移した先を返す（`claim` の説明のとおり）。"""
-    if path.is_file() and path.stat().st_size == 0:
+    シンボリックリンクは空のファイルの判定より先に `Unowned` にする（リンク先の利用者のファイルへ書かない。PR 4638 の r1-7）。"""
+    if os.path.islink(path):
+        raise Unowned(str(path))
+    if _empty_regular(path):
         path.open("r+", encoding="utf-8").close()
-        return None
-    if set_aside and not (found.keys() - {RECORD_KIND_KEY}) and path.is_file() and not path.is_symlink():
-        return _keep_unrecorded(path)
+        return
     owned = _owned(path, found) if found else None
     if owned is None:
         raise Unowned(str(path))
@@ -380,26 +424,52 @@ def _clear_output(path: Path, found: dict[str, Any], set_aside: bool = False) ->
         path.open("w", encoding="utf-8").close()
     else:
         path.unlink()
+
+
+# 前のバージョンの出力として移す中身の大きさの上限（どの形も 1 行の短い値）
+_LEGACY_MAX = 4096
+
+
+def _legacy_output(path: Path, legacy: re.Pattern[bytes]) -> bool:
+    """`path` が、記録を残さない前のバージョンの NDF が書いた出力と確かめられるか（`claim` の説明のとおり。PR 4638 の r1-2）。"""
+    try:
+        st = os.lstat(path)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o600 != 0o600:
+            return False
+        if not 0 < st.st_size <= _LEGACY_MAX:
+            return False
+        return legacy.fullmatch(path.read_bytes()) is not None
+    except OSError:  # noqa: NDF401 ファイル: 読めなければ前のバージョンの出力と確かめられないとして移さない
+        return False
+
+
+def _aside_names(path: Path) -> Iterator[Path]:
+    prefix = f"{path.name}.unrecorded-"
+    for entry in os.scandir(path.parent):
+        if entry.name.startswith(prefix):
+            yield path.parent / entry.name
+
+
+def _linked_aside(path: Path, st: os.stat_result) -> Optional[Path]:
+    """前の起動が移す途中で終了し、`path` と同じ inode を指したまま残った別名（無ければ None。PR 4638 の r1-4）。"""
+    if st.st_nlink < 2:
+        return None
+    for aside in _aside_names(path):
+        found = os.lstat(aside)
+        if stat.S_ISREG(found.st_mode) and (found.st_dev, found.st_ino) == (st.st_dev, st.st_ino):
+            return aside
     return None
 
 
-def _keep_unrecorded(path: Path) -> Path:
-    """記録の無い出力 `path` を消さずに、同じディレクトリの使われていない別名へ移す（既存のファイルを上書きしない）。"""
+def _link_unused(path: Path) -> Path:
+    """同じディレクトリの使われていない別名で `path` のハードリンクを作って返す（既存のファイルを上書きしない）。"""
     while True:
         aside = path.with_name(f"{path.name}.unrecorded-{secrets.token_hex(4)}")
-        if _link_new(path, aside):
-            # 別名で残せてから元の名前を外す
-            path.unlink()
-            return aside
-
-
-def _link_new(path: Path, aside: Path) -> bool:
-    """`aside` の名前で `path` のハードリンクを作る。その名前に既にファイルがあれば作らずに偽（上書きしない）。"""
-    try:
-        os.link(path, aside)
-    except FileExistsError:  # noqa: NDF401 ファイル: 名前が使われていれば、呼び手が別の名前を選び直す（上書きしない）
-        return False
-    return True
+        try:
+            os.link(path, aside)
+        except FileExistsError:  # noqa: NDF401 ファイル: 名前が使われていれば別の名前を選び直す（上書きしない）
+            continue
+        return aside
 
 
 def clear_stale(path: Path) -> None:
