@@ -61,12 +61,12 @@ def rows_from(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
     規則は `whole_rows` と同じ。読めないか所有者だけの形でなければ空で、位置は `offset` のまま。
     """
     try:
-        return read_rows(path, offset)
+        return rows_after(path, offset)
     except OSError:
         return [], offset
 
 
-def read_rows(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
+def rows_after(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
     """`rows_from` と同じ読み方で、無いファイルだけを空にする。読めないか所有者だけの形でなければ `OSError`。
 
     無いファイル（まだ書いていない月など）と、権限などで読めないファイルを呼び手が分けるためである。

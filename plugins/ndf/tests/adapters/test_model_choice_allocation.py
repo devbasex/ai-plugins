@@ -20,6 +20,12 @@ MODEL_ENV = identity.env_name("launch-model")
 SCOPE = {"repo": "/r", "stage": "impl", "runtime": "claude"}
 
 
+@pytest.fixture(autouse=True)
+def _no_git(monkeypatch):
+    """リポジトリのキーは git を起動せず、作業場所の実体にする（テストで子プロセスを起動しない）。"""
+    monkeypatch.setattr(mc.launch_approval, "repo_key", lambda root: os.path.realpath(root))
+
+
 @pytest.fixture
 def store(monkeypatch) -> Path:
     monkeypatch.delenv("NDF_USAGE_DIR", raising=False)
@@ -82,7 +88,7 @@ def _assign(
         "unit": unit,
         "stage": stage,
         "runtime": "claude",
-        "repo": repo or mc.repo_key(root),
+        "repo": repo or mc.launch_approval.repo_key(root),
         "arms": arms,
         "probs": [1 / len(arms)] * len(arms),
         "chosen": chosen,
@@ -107,7 +113,7 @@ def test_the_first_launch_of_a_unit_draws_and_the_next_takes_the_same_arm(tmp_pa
     assert (first.model, first.effort, first.model_source) == ("sonnet", "medium", mc.Source.EXPERIMENT)
     assert first.arm == again.arm == {"model": "sonnet", "effort": "medium"}
     assert row["chosen"] == 1 and row["phase"] == "burn_in" and row["probs"] == pytest.approx([1 / 3] * 3)
-    assert row["repo"] == mc.repo_key(root) and row["mode"] == "standard" and row["unit"] == "r1:impl"
+    assert row["repo"] == mc.launch_approval.repo_key(root) and row["mode"] == "standard" and row["unit"] == "r1:impl"
     assert row["key"] == mc.compatibility_key(row["arms"], mc.metric_of("impl"))
     assert (store / "launch-experiments-2026-11.jsonl").is_file()
 
@@ -221,7 +227,7 @@ def _candidates(root: Path, store: Path, entry=None, now: datetime = NOW, repo=N
     arms = list(mc.table(root).arms["impl"]["claude"])
     rows = mc.read_experiments(now - timedelta(days=60), store)
     key = mc.compatibility_key(arms, mc.metric_of("impl"))
-    return mc.candidates(arms, rows, entry, now, mc.Where(repo or mc.repo_key(root), "impl", "claude", key))
+    return mc.candidates(arms, rows, entry, now, mc.Where(repo or mc.launch_approval.repo_key(root), "impl", "claude", key))
 
 
 def test_two_refusals_in_seven_days_drop_the_arm_until_they_age(tmp_path, store, clock):
@@ -263,7 +269,7 @@ def test_a_refused_arm_is_not_drawn(tmp_path, store, clock, draw):
 def _weights(store: Path, root: Path, **entry) -> dict:
     arms = list(mc.table(root).arms["impl"]["claude"])
     base = {
-        "repo": mc.repo_key(root),
+        "repo": mc.launch_approval.repo_key(root),
         "stage": "impl",
         "runtime": "claude",
         "key": mc.compatibility_key(arms, mc.metric_of("impl")),
@@ -514,15 +520,3 @@ def test_fallback_raises_from_the_base_when_the_arm_was_at_its_top(tmp_path, sto
     assert (picked.model, picked.effort, picked.raised) == ("opus", "max", False)
     back = mc.base_fallback(picked, "model_refused")
     assert back is not None and (back.effort, back.raised) == ("high", True)
-
-
-def test_the_repo_key_of_a_linked_worktree_is_the_main_git_dir_without_git(tmp_path, monkeypatch):
-    main = tmp_path / "main"
-    (main / ".git" / "worktrees" / "w").mkdir(parents=True)
-    (main / ".git" / "worktrees" / "w" / "commondir").write_text("../..\n", encoding="utf-8")
-    tree = tmp_path / "w"
-    tree.mkdir()
-    (tree / ".git").write_text(f"gitdir: {main / '.git' / 'worktrees' / 'w'}\n", encoding="utf-8")
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: pytest.fail("git を起動した"))
-    assert mc.repo_key(tree) == mc.repo_key(main) == os.path.realpath(main / ".git")
-    assert mc.repo_key(tmp_path) == os.path.realpath(tmp_path)

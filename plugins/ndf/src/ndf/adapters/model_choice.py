@@ -42,7 +42,7 @@ from typing import Any, Mapping, Optional
 from filelock import FileLock, Timeout
 
 from ndf import contracts, identity
-from ndf.adapters import launch_records, launch_settings
+from ndf.adapters import launch_approval, launch_records, launch_settings
 from ndf.contracts import facts, internal, limits
 
 # 同梱の表
@@ -512,13 +512,13 @@ def ledger(since: datetime, root: Optional[Path] = None) -> Iterator[Ledger]:
     """
     root = records_dir() if root is None else root
     months = _months(_month(since), _month(_utc_now()))
-    rows = [r for m in months[:-1] for r in launch_records.read_rows(_month_file(root, m), 0)[0]]
-    last, offset = launch_records.read_rows(_month_file(root, months[-1]), 0)
+    rows = [r for m in months[:-1] for r in launch_records.rows_after(_month_file(root, m), 0)[0]]
+    last, offset = launch_records.rows_after(_month_file(root, months[-1]), 0)
     rows += last
     with _lock(_store_file(root, LEDGER_LOCK)):
-        rows += launch_records.read_rows(_month_file(root, months[-1]), offset)[0]
+        rows += launch_records.rows_after(_month_file(root, months[-1]), offset)[0]
         for m in _months(months[-1], _month(_utc_now()))[1:]:
-            rows += launch_records.read_rows(_month_file(root, m), 0)[0]
+            rows += launch_records.rows_after(_month_file(root, m), 0)[0]
         yield Ledger(root, rows)
 
 
@@ -595,32 +595,6 @@ def _prune_weights(root: Path, now: datetime) -> None:
 
 
 # --- 割り付け ----------------------------------------------------------------------------------------
-
-
-def repo_key(root: Path) -> str:
-    """実験の記録のリポジトリのキー: git の共通ディレクトリの実体の絶対パス。`.git` が無いか読めなければ `root` の実体。
-
-    `launch_approval.repo_key` と同じ値を、git を起動せずに `.git` と `commondir` のファイルから求める。単位のある起動の
-    たびに求めるので、`git rev-parse` の子プロセスを増やさないためである（`root` は `launch_root` が `.git` を見つけた所）。
-    リンクされた worktree の `.git` はファイルで `gitdir: <場所>` を持ち、その場所の `commondir` が共通ディレクトリを指す。
-    """
-    dot = root / ".git"
-    try:
-        if dot.is_file():
-            text = dot.read_text(encoding="utf-8").strip()
-            if not text.startswith("gitdir:"):
-                return os.path.realpath(root)
-            gitdir = root / text.removeprefix("gitdir:").strip()
-        elif dot.is_dir():
-            gitdir = dot
-        else:
-            return os.path.realpath(root)
-        common = gitdir / "commondir"
-        if common.is_file():
-            gitdir = gitdir / common.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeDecodeError):  # 読めない `.git` は git の外と同じく `root` の実体をキーにする
-        return os.path.realpath(root)
-    return os.path.realpath(gitdir)
 
 
 def compatibility_key(arms: Sequence[Mapping[str, str]], metric: Optional[str]) -> str:
@@ -957,7 +931,7 @@ def launch_choice(
     if stage is None or store is None or (req.unit is None and req.charge_to is None):
         return choice if manual.given or req.retry is None or stage is None else _raised_once(choice)
     metric = metric_of(stage)
-    where = Where(repo_key(root), stage, runtime, compatibility_key(arms, metric))
+    where = Where(launch_approval.repo_key(root), stage, runtime, compatibility_key(arms, metric))
     experiment = got.enabled and len(arms) > 1 and metric is not None
     u = _Unit(req.unit, req.mode, tuple(arms), got.allocation, experiment, got.enabled, where, now, store)
     if manual.given:

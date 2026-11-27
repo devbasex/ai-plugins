@@ -149,7 +149,7 @@ src/ndf/
 | `read_experiments`・`ledger`・`append_row` | `domains/records/jsonl.py` | 層の順序（adapters は domains を読めない） | 使えない。`filelock` と `contracts` の形の確認を使う |
 | `table` | `launch_settings.load` | #1959 の詳細設計 | 使う |
 | `compatibility_key` | `launch_approval.digest` の形 | 同上 | 同じ「キーの順にそろえた JSON の SHA-256」にする |
-| `launch_choice` のリポジトリのキー | `launch_approval.repo_key` | 実装（`git rev-parse` を 1 回起動する） | 使わない。同じ値を `.git` と `commondir` のファイルから求める `model_choice.repo_key` を新設する。単位のある起動のたびに求めるので、子プロセスを増やさないためである。呼び出し元からキーを受け取る案は、B3〜B5 の呼び出し元すべてに同じ計算を持たせることになるので採らない |
+| `launch_choice` のリポジトリのキー | `launch_approval.repo_key` | #1959 の詳細設計 | 使う。単位のある起動のたびに `git rev-parse` を 1 回起動するが、同じ値をファイルから求める関数を別に持つと、`.git` と `commondir` を読む処理がほかの 3 か所と重なる（重複の検査）。起動する CLI に比べて子プロセス 1 つの費用は小さい |
 | `stage_of` | `contracts/worker/kinds.json` | `ls contracts/worker` | 作業の名前は同じ。工程の対応は持たないので表に置く |
 | `raised`・`candidates`・`base_fallback` | — | `grep -rn "effort" src/ndf`（該当なし） | 新設する |
 | `report_outcome`・`record_outcome` | `report_launch`・`record_cli`（#1959） | #1959 の詳細設計 | 同じ差し込みに関数を足す |
