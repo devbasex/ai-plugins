@@ -205,14 +205,18 @@ def _final_line(body: str) -> str:
     return next((line.strip() for line in reversed(_lines_of(body)) if line.strip()), "")
 
 
-def matches_finding(listed: Listed, ident: str, pr_url: str, text: str) -> bool:
-    """Issue がこの指摘を扱うものか。目印が最後の行で、引用とコードブロックの外に元の PR の URL と指摘の本文（伏せた後の値）がある。
-    目印を含むだけの Issue は使わない。"""
+def matches_finding(listed: Listed, ident: str, origin_pr: int) -> bool:
+    """検索か一覧で読んだ Issue がこの指摘を扱うものか。目印が最後の行で、引用とコードブロックの外に元の PR の URL がある。
+    目印を含むだけの Issue は使わない。指摘の本文は比べない（伏せ字の結果は実行する環境で変わる。本文は目印の識別値が表す）。
+    URL は伏せ字が変えない末尾の `/pull/<番号>` で見る。"""
     if listed.is_pull or _final_line(listed.body) != _issue_mark(ident):
         return False
-    body = _prose(listed.body)
-    wanted = normalized(_prose(text))
-    return pr_url in body and bool(wanted) and wanted in normalized(body)
+    return re.search(rf"/pull/{int(origin_pr)}(?!\d)", _prose(listed.body)) is not None
+
+
+def names_finding(listed: Listed, ident: str) -> bool:
+    """起票の記録にある URL の Issue が、この指摘のものか。起票の後に本文へ書き足されることがあるので、目印の位置は問わない。"""
+    return not listed.is_pull and _issue_mark(ident) in listed.body
 
 
 def record_body(entries: Mapping[str, Mapping[str, Any]]) -> str:

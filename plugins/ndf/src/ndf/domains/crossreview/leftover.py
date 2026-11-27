@@ -1,7 +1,8 @@
 """直さずに残した指摘の起票と、起票の記録（#3780）。
 
 起票の記録は、元の PR（状態ファイルの `pr`）に置く専用のコメントである。Issue を作る前に、試みる指摘の識別値を書く。状態の
-保存先が違う打ち直しも同じコメントを読み、URL の無い識別値は検索と一覧で確かめてから起票する（2 件作らない）。何を起票するかと、
+保存先が違う打ち直しも同じコメントを読み、URL の無い識別値は検索と一覧で確かめてから起票する（2 件作らない）。記録の URL は、
+指す Issue を読んで確かめてから使う。今のアカウントで編集できない記録は、中身を引き継いだ新しいコメントにする。何を起票するかと、
 文と記録の形は `leftover_decide` が持つ。GitHub の失敗では指摘を失わず、行の `issue_error` と注意に残す。
 """
 
@@ -41,10 +42,10 @@ class Comment(NamedTuple):
 
 
 class TooMany(Exception):
-    """Issue の一覧が、確かめ終える前に `github.list-pages` のページ数（`cap`）を超えた。"""
+    """Issue の一覧が、確かめ終える前に `github.list-pages` のページ数（`cap`）を超えた。`listed` は超えるまでに読めた分。"""
 
-    def __init__(self, cap: int):
-        self.cap = cap
+    def __init__(self, cap: int, listed: Sequence[Listed] = ()):
+        self.cap, self.listed = cap, list(listed)
         super().__init__(f"Issue の一覧が {cap} ページを超える（上限 {threads.LIST_PAGES}）")
 
 
@@ -68,6 +69,8 @@ class Port(Protocol):
     def search(self, ident: str) -> list[Listed]: ...
 
     def recent(self, since: str) -> list[Listed]: ...
+
+    def issue(self, url: str) -> Optional[Listed]: ...
 
     def create(self, title: str, body: str) -> str: ...
 
@@ -121,6 +124,12 @@ def _refused(exc: Exception) -> bool:
     return type(status) is int and 400 <= status < 500
 
 
+def _not_editable(exc: Exception) -> bool:
+    """今のアカウントに編集の権限が無い失敗か（レート制限の 403 は含めない）。"""
+    limited = getattr(exc, "secondary", False) or getattr(exc, "quota", None) is not None
+    return getattr(exc, "status", None) == 403 and not limited
+
+
 def _reason(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
@@ -154,24 +163,28 @@ class _Filing:
             row.pop(Filed.ERROR, None)
 
     def read(self) -> None:
-        """起票の記録を読む。`url` も `at` も無い項目（記録を書いた後に中断した）には、コメントの更新時刻を `at` に当てる。"""
+        """起票の記録を読み、複数あれば 1 つにまとめる（URL のある項目を残す）。書き先は最も新しい記録である。`at` の無い項目
+        （記録を書いた後に中断した）には、コメントの更新時刻を当てる。"""
         self.me = self.port.viewer()
-        found = self._record()
-        if found is None:
+        found = self._records()
+        if not found:
             return
-        self.record_id = self.data[RECORD_ID] = found.id
-        self.entries = leftover_decide.record_entries(found.body)
-        for entry in self.entries.values():
-            if not entry:
-                entry["at"] = found.updated_at
+        self.record_id = self.data[RECORD_ID] = found[-1].id
+        for comment in found:
+            for ident, entry in leftover_decide.record_entries(comment.body).items():
+                entry.setdefault("at", comment.updated_at)
+                if "url" in entry or not self.url_of(ident):
+                    self.entries[ident] = entry
+
+    def _trusts(self, author: str, association: str) -> bool:
+        return leftover_decide.trusted(author, association, self.me, self.logins())
 
     def _usable(self, comment: Comment) -> bool:
-        return comment.body.startswith(leftover_decide.RECORD_MARK) and leftover_decide.trusted(
-            comment.author, comment.association, self.me, self.logins()
-        )
+        return comment.body.startswith(leftover_decide.RECORD_MARK) and self._trusts(comment.author, comment.association)
 
-    def _record(self) -> Optional[Comment]:
-        """起票の記録のコメント。番号を持てばその番号で読み、無い（消された）ときだけ元の PR のコメントの一覧から探す。"""
+    def _records(self) -> list[Comment]:
+        """起票の記録のコメント（古い順）。番号を持てばその番号の 1 件を読む。無い（消された）ときは元の PR のコメントの一覧を
+        最後まで読む（引き継いだ記録は後ろに足されるので、最初の 1 件で止めない）。"""
         known = self.data.get(RECORD_ID)
         if type(known) is int:
             try:
@@ -182,11 +195,11 @@ class _Filing:
                     raise
             else:
                 if self._usable(comment):
-                    return comment
-        return next((c for c in self.port.comments(self.ref.origin_pr) if self._usable(c)), None)
+                    return [comment]
+        return [c for c in self.port.comments(self.ref.origin_pr) if self._usable(c)]
 
     def redact(self, idents: Sequence[str]) -> None:
-        """突き合わせと起票に使う値を、全文のまま 1 回で伏せる（切り出しは伏せた後）。"""
+        """起票に使う値を、全文のまま 1 回で伏せる（切り出しは伏せた後）。"""
         prs = list(dict.fromkeys((self.ref.origin_pr, self.ref.current_pr)))
         raw = [self.port.pr_url(pr) for pr in prs]
         for ident in idents:
@@ -200,9 +213,7 @@ class _Filing:
     def _match(self, ident: str, listed: Sequence[Listed]) -> Optional[str]:
         """この指摘を扱う、信用する作者の Issue の URL。"""
         for issue in listed:
-            if leftover_decide.trusted(issue.author, issue.association, self.me, self.logins()) and leftover_decide.matches_finding(
-                issue, ident, self.urls[0], self.texts[ident][0]
-            ):
+            if self._trusts(issue.author, issue.association) and leftover_decide.matches_finding(issue, ident, self.ref.origin_pr):
                 return issue.url
         return None
 
@@ -228,18 +239,25 @@ class _Filing:
         if not idents:
             return {}, []
         full = self.data.get(LIST_FULL)
+        cut: Optional[TooMany] = None
         try:
             if not manual and type(full) is int and int(limits.value(threads.LIST_PAGES, "count")) <= full:
                 raise TooMany(full)
             listed = self.port.recent(min(self.entries[i]["at"] for i in idents))
+        except TooMany as exc:
+            # 読めた分の一致は使い、見つからない候補だけを保留する
+            cut, listed, self.data[LIST_FULL] = exc, exc.listed, exc.cap
         except Exception as exc:  # noqa: BLE001 ネットワーク: 無いと確かめられない候補は起票しない
-            if isinstance(exc, TooMany):
-                self.data[LIST_FULL] = exc.cap
             for ident in idents:
                 self.fail(ident, _reason(exc))
             return {}, []
         found = {i: url for i in idents if (url := self._match(i, listed)) is not None}
-        return found, [i for i in idents if i not in found]
+        missing = [i for i in idents if i not in found]
+        if cut is None:
+            return found, missing
+        for ident in missing:
+            self.fail(ident, _reason(cut))
+        return found, []
 
     def url_of(self, ident: str) -> Optional[str]:
         """起票の記録にある Issue の URL。"""
@@ -247,11 +265,21 @@ class _Filing:
         return str(entry["url"]) if "url" in entry else None
 
     def known(self) -> None:
-        """起票の記録に URL がある識別値は、起票せずその URL を行に書く。"""
+        """起票の記録に URL がある識別値は、その URL が信用する作者のこの指摘の Issue なら、起票せず行に書く。違えば記録の URL を
+        捨て、作成の結果が分からない識別値として確かめる。読めなければ起票も採用もしない。"""
         for ident in self.rows:
             url = self.url_of(ident)
-            if url:
+            if not url:
+                continue
+            try:
+                issue = self.port.issue(url)
+            except Exception as exc:  # noqa: BLE001 ネットワーク: 確かめられない URL は使わず、打ち直しで確かめる
+                self.fail(ident, _reason(exc))
+                continue
+            if issue and self._trusts(issue.author, issue.association) and leftover_decide.names_finding(issue, ident):
                 self.done(ident, url)
+            else:
+                del self.entries[ident]["url"]
 
     def sort(self, manual: bool) -> tuple[list[str], bool]:
         """URL の記録の無い候補を確かめ、作る識別値と、記録に無かった URL を見つけたかを返す。作成を試みた記録のある識別値は、
@@ -271,12 +299,17 @@ class _Filing:
         return [i for i in pending if i not in self.entries or i in absent], bool(found)
 
     def write(self) -> str:
-        """起票の記録を書き、GitHub が記録した更新時刻を返す。"""
+        """起票の記録を書き、GitHub が記録した更新時刻を返す。記録が無いか、今のアカウントで編集できなければ、全項目を持つ
+        新しいコメントを投稿する。"""
         body = leftover_decide.record_body(self.entries)
-        if self.record_id is None:
-            self.record_id, at = self.port.post(self.ref.origin_pr, body)
-        else:
-            self.record_id, at = self.port.edit(self.record_id, body)
+        written: Optional[tuple[int, str]] = None
+        if self.record_id is not None:
+            try:
+                written = self.port.edit(self.record_id, body)
+            except Exception as exc:
+                if not _not_editable(exc):
+                    raise
+        self.record_id, at = written or self.port.post(self.ref.origin_pr, body)
         self.data[RECORD_ID] = self.record_id
         return at
 
@@ -460,15 +493,35 @@ class GitHubIssues:
         return [_listed_of(r) for r in found["items"] if isinstance(r, dict)]
 
     def recent(self, since: str) -> list[Listed]:
-        """作成時刻が `since` 以後（同じ時刻を含む）の Issue と PR を、新しく作られた順に読む。"""
+        """作成時刻が `since` 以後（同じ時刻を含む）の Issue と PR を、新しく作られた順に読む。ページの上限を超えれば、読めた分を
+        持つ `TooMany`。"""
         out: list[Listed] = []
+        try:
+            for issue in self._newest():
+                if issue.created_at < since:
+                    break
+                out.append(issue)
+        except TooMany as exc:
+            raise TooMany(exc.cap, out) from None
+        return out
+
+    def _newest(self) -> Iterator[Listed]:
         params = {"state": "all", "sort": "created", "direction": "desc"}
         for rows in self._pages(f"/repos/{self.hub.repo}/issues", params):
-            for issue in map(_listed_of, rows):
-                if issue.created_at < since:
-                    return out
-                out.append(issue)
-        return out
+            yield from map(_listed_of, rows)
+
+    def issue(self, url: str) -> Optional[Listed]:
+        """`url` がこのリポジトリの Issue ならその中身。別の場所の URL と、無い（消された）Issue は None。"""
+        prefix = f"https://github.com/{self.hub.repo}/issues/"
+        number = url[len(prefix) :]
+        if not (url.lower().startswith(prefix.lower()) and number.isdecimal()):
+            return None
+        try:
+            return _listed_of(self.hub.rest("GET", f"/repos/{self.hub.repo}/issues/{number}"))
+        except self.errors as exc:
+            if getattr(exc, "status", None) in (404, 410):
+                return None
+            raise
 
     def create(self, title: str, body: str) -> str:
         return str(self._write(lambda: self.publisher.create_issue(title, body)).url)

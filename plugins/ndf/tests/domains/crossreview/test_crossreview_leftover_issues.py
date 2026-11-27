@@ -30,6 +30,7 @@ class FakeGitHub:
         self.calls: list[tuple[str, str]] = []
         self.fail: dict[tuple[str, str], int] = {}
         self.indexed = True
+        self.edits_others = True
         self.login = "me"
         self.viewed = 0
         self._tick = 0
@@ -70,6 +71,12 @@ class FakeGitHub:
             return ordered[start : start + params["per_page"]]
         if path == f"repos/{REPO}/issues":
             return self.issue(payload["body"], title=payload["title"])
+        tail = path.removeprefix(f"repos/{REPO}/issues/")
+        if method == "GET" and tail.isdecimal():
+            found = next((i for i in self.issues if i["number"] == int(tail)), None)
+            if found is None:
+                raise GitHubError("無い", 404)
+            return dict(found)
         return self._comment(method, path.removeprefix(f"repos/{REPO}/issues/"), payload)
 
     def _comment(self, method: str, tail: str, payload: Any) -> Any:
@@ -78,6 +85,8 @@ class FakeGitHub:
             if found is None:
                 raise GitHubError("無い", 404)
             if method == "PATCH":
+                if not self.edits_others and found["user"]["login"] != self.login:
+                    raise GitHubError("他人のコメントは編集できない", 403)
                 found.update(body=payload["body"], updated_at=self.now())
             return dict(found)
         pr = int(tail.split("/")[0])
@@ -150,15 +159,16 @@ def _listed(body: str, **other: Any) -> Listed:
     return Listed("u", body, "me", "NONE", "t", False)._replace(**other)
 
 
-def test_issue_3780_matches_finding_needs_the_mark_the_url_and_the_text_outside_quotes() -> None:
+def test_issue_3780_matches_finding_needs_the_mark_and_the_url_outside_quotes() -> None:
     text = "値を落とす\n\n```\n閉じていないコード"
     _, body = leftover_decide.issue_parts(text, "消える", "a.py:5", [PR_URL], "abc")
-    assert leftover_decide.matches_finding(_listed(body), "abc", PR_URL, text)
+    assert leftover_decide.matches_finding(_listed(body), "abc", 7)
+    assert not leftover_decide.matches_finding(_listed(body), "abc", 70)
     mark = body.rstrip().splitlines()[-1]
     quoted = "\n".join(f"> {line}" for line in body.splitlines()) + f"\n\n{mark}\n"
     for other in (quoted, body + "後ろの文\n", f"```\n{body}\n```\n{mark}\n"):
-        assert not leftover_decide.matches_finding(_listed(other), "abc", PR_URL, text)
-    assert not leftover_decide.matches_finding(_listed(body, is_pull=True), "abc", PR_URL, text)
+        assert not leftover_decide.matches_finding(_listed(other), "abc", 7)
+    assert not leftover_decide.matches_finding(_listed(body, is_pull=True), "abc", 7)
 
 
 @pytest.mark.parametrize(
@@ -298,6 +308,76 @@ def test_a_secret_across_the_title_cut_does_not_reach_the_issue() -> None:
     made = github.issues[0]
     for written in (made["title"], made["body"], github.records[0]["body"]):
         assert "ghp_" not in written and "Zq7x" not in written
+
+
+@pytest.mark.parametrize(
+    "text",
+    [pytest.param("```\nTraceback: 落ちる\n```", id="code-only"), pytest.param("> 引用だけの指摘", id="quote-only")],
+)
+def test_issue_3780_a_finding_without_prose_is_found_again(text: str) -> None:
+    github = FakeGitHub()
+    github.fail[("PATCH", "comments/500")] = 502
+    Run(github, _row(text=text)).go()
+    again = Run(github, _row(text=text))
+    assert again.go() == [] and again.row[Filed.URL] and github.created() == 1
+
+
+def test_issue_3780_a_rerun_that_redacts_differently_finds_the_issue() -> None:
+    github = FakeGitHub()
+    github.fail[("PATCH", "comments/500")] = 502
+    Run(github, _row(text="runner が値を落とす")).go()
+    again = Run(github, _row(text="runner が値を落とす"))
+    again.port.publisher = publish.Publisher(github, frozenset({"runner"}))
+    assert again.go() == [] and again.row[Filed.URL] and github.created() == 1
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("https://example.com/x", id="elsewhere"),
+        pytest.param(f"https://github.com/{REPO}/issues/100", id="unrelated-issue"),
+        pytest.param(f"https://github.com/{REPO}/issues/999", id="missing-issue"),
+    ],
+)
+def test_a_record_url_that_is_not_the_issue_of_the_finding_is_not_used(url: str) -> None:
+    github = FakeGitHub()
+    github.issue("無関係")
+    run = Run(github)
+    ident = leftover_decide.identity(7, run.row["text"])
+    forged = leftover_decide.record_body({ident: {"url": url}})
+    github.records.append({"id": 500, "pr": 7, "body": forged, "user": {"login": "x"}, "author_association": "MEMBER", "updated_at": "t"})
+    assert run.go() == [] and github.created() == 1
+    assert run.row[Filed.URL] == github.issues[-1]["html_url"] != url
+
+
+def test_issue_3780_a_record_of_another_account_that_cannot_be_edited_is_taken_over() -> None:
+    github = FakeGitHub()
+    github.login, github.edits_others = "app[bot]", False
+    first = Run(github)
+    first.go()
+    github.login = "human"
+    second = _row("r2-2", "別の指摘")
+    again = Run(github, _row(), second)
+    again.data["issue_logins"] = ["app[bot]"]
+    assert again.go() == [] and github.created() == 2
+    assert len(github.records) == 2 and len(leftover_decide.record_entries(github.records[1]["body"])) == 2
+    # 別の保存先は、両方の記録をまとめて読む
+    third = Run(github, _row(), second)
+    third.data["issue_logins"] = ["app[bot]", "human"]
+    assert third.go() == [] and github.created() == 2
+
+
+def test_a_match_on_a_read_page_is_used_when_the_list_is_over_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(leftover.limits, "value", lambda name, key: 1)
+    github = FakeGitHub()
+    github.indexed = False
+    github.fail[("PATCH", "comments/500")] = 502
+    Run(github).go()
+    for _ in range(PER_PAGE - 1):
+        github.issue("無関係")
+    again = Run(github)
+    assert again.go() == [] and again.row[Filed.URL] == github.issues[0]["html_url"]
+    assert github.created() == 1 and "issue_list_full" not in again.data
 
 
 @pytest.mark.parametrize(
