@@ -74,6 +74,11 @@ def load(main: Path) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     return record, None
 
 
+def written_digests(doc: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """前の `write` が書いた値の指紋（設定の `analysis.written`）。無ければ空。"""
+    return obj(obj(obj(doc).get("analysis")).get("written"))
+
+
 def written_digest(doc: Optional[dict[str, Any]]) -> str:
     """記録に対応する設定の指紋: 設定の書いた値の指紋（`analysis.written`。無ければ `{}`）の指紋。"""
-    return value_digest(obj(obj(obj(doc).get("analysis")).get("written")))
+    return value_digest(written_digests(doc))

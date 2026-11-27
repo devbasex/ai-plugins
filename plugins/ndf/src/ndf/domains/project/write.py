@@ -147,11 +147,6 @@ def merge_item(
     return value, rows + got, True
 
 
-def written_digests(doc: Optional[dict[str, Any]]) -> dict[str, Any]:
-    """前の `write` が書いた値の指紋（設定の `analysis.written`）。無ければ空。"""
-    return obj(obj(obj(doc).get("analysis")).get("written"))
-
-
 def merge_project(
     existing: Optional[dict[str, Any]],
     measure: dict[str, Any],
@@ -345,7 +340,7 @@ def plan(inp: Inputs) -> Plan:
     """書くファイルと出力の行を決める（何も書かない）。書き出す設定か解析の記録が形に合わなければ `WriteError`。"""
     questions = {k for k, m in obj(inp.measure.get("items")).items() if obj(m).get("status") == QUESTION}
     rows = [{"kind": "ignored", "key": k} for k in inp.answers if k not in questions]
-    written_before = written_digests(inp.existing)
+    written_before = analysis_record.written_digests(inp.existing)
     doc, item_rows = merge_project(inp.existing, inp.measure, inp.answers, written_before)
     doc, ci_row = _declare_ci_tests(doc, inp.existing, written_before, inp.root)
     errs = contracts.schema_errors(doc, check.SCHEMA)
