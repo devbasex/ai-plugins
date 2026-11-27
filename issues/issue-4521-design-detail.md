@@ -83,12 +83,13 @@ contracts/
 | `strip_legacy` | `analysis_record.py` | 変更 | `(doc) -> tuple[dict, list[str]]` | 6 項目を項目ごと取り除く |
 | `plan` | `write.py` | 変更 | シグネチャは今のまま | 回答できる項目を、`status: question` のうち `ITEM_KEYS` にあるものに絞る。ほかの回答は `ignored` の行にする |
 | `p_number` | `write.py` | 変更 | `(key, default) -> str` | 番号の表を `test`（P2）・`ci`（P4）だけにする |
-| `_build_record` | `write.py` | 変更 | シグネチャは今のまま | `analyzer` に測定の結果の `analyzer` を書く |
+| `_build_record` | `write.py` | 変更 | シグネチャは今のまま | `analyzer` に測定の結果の `analyzer` を書く。1 以上の整数でない値は、記録の形の確かめより前に止める |
 | `_project_file` | `write.py` | 変更 | `(inp, doc) -> Optional[File]` | 6 項目が残る設定では、差分の前の側を、6 項目の値を `（伏せた）` に置き換えて整形し直した文にする |
 
 - `analysis_record` の定数は、6 項目の並び `UNREAD_ITEMS` を足し、`OLD_ITEMS` を `test_duration` と `UNREAD_ITEMS` にする。`_OLD_IN_ITEMS` から `languages[].files` を消す
 - 6 項目の指紋は、`merge_project` が `analysis.written` を `ITEM_KEYS` の項目だけで作り直すので消える。足す処理は無い
 - `_project_file` が置き換えるのは差分の前の側（`File.old`）だけで、書く中身（`File.new`）は 6 項目を持たない
+- 不正な `analyzer` を記録の形の確かめ（`contracts.schema_errors`）に渡さない。そのエラー文は検証した値を含み、`write` は `WriteError` の文を出力と結果 JSON にそのまま載せるためである
 - ブランチの構成は、#4580 の `_measured_branches` と `_record_branches` をそのまま使う
 - `ANALYZER`（`check.py`）は 5 にする
 
@@ -96,7 +97,7 @@ contracts/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_build_record` | 測定の結果の `analyzer` が無いか整数でない | 壊れた測定の結果 | 今の記録の形の確かめ | 止める（`WriteError`） | 今の「書き出す解析の記録が形に合わない」の文。終了コード 1 | 何も書いていない。測り直す |
+| `_build_record` | 測定の結果の `analyzer` が無いか 1 以上の整数でない | 壊れた測定の結果 | `_build_record` の先頭の型の確かめ（真偽値と小数も不正） | 止める（`WriteError`） | 「測定の結果の analyzer は 1 以上の整数が必要（ndf project measure からやり直す）」。入力された値は出さない。終了コード 1 | 何も書いていない。測り直す |
 
 ## 手順書・確定仕様・このリポジトリの設定
 
@@ -104,7 +105,8 @@ contracts/
 
 - `project-analysis.md`
   - 「回答方」の表と例から `issues`・`ndf_policies` を消し、`gh` で呼ぶ API と質問の説明を今の項目に合わせる
-  - 旧い形の設定の説明に 6 項目を足し、次を書く。人が直した値も取り除く。控えは作らない。差分は取り除く値を伏せる。コミットしていない手の編集は戻せないので、打つ前に `git diff HEAD -- .ndf/project.json` で確かめる。設定を git で追跡していなければ、どの値も戻せない
+  - 旧い形の設定の説明に 6 項目を足し、次を書く。人が直した値も取り除く。控えは作らない。差分は取り除く値を伏せる。コミットしていない手の編集は戻せないので、打つ前に利用者本人がメインディレクトリで `git diff --cached -- .ndf/project.json`（ステージした変更）と `git diff -- .ndf/project.json`（ステージしていない変更）の両方を確かめる。設定を git で追跡していなければ、どの値も戻せない
+  - 「手順 0 での扱い」の「書き出した設定はコミットしない限り取り消せるので、承認を求めない」を書き直す。移行の説明に注意を足すだけでは、手順 0 だけを読む担当者が、コミット前ならすべて取り消せると判断するためである。書き直した後の内容は次の 3 つである。承認は今と同じく求めない。書き出した設定は、コミットしない限りチームに届かない。ただし、取り除く 6 項目などの旧い項目に手で加えてコミットしていない編集は、書き出すと取り消せない（設定を git で追跡していなければ、取り除いた値はどれも戻せない）
 - `ndf-project-analysis-record.md`: 解析が書く項目、解析器のバージョンの記録の仕方、上の取り除き方と理由を書く
 - `.ndf/project.json` は、6 項目と `analysis.written` の該当の指紋を手で消す
 
@@ -128,4 +130,5 @@ contracts/
 | `instruction_notes` | 古い案内の注記 | 指示書が無い | — |
 | `strip_legacy` | 6 項目を取り除き、キーの名前を返す | 6 項目の無い設定は変わらない | 値がスキーマに合わない 6 項目も取り除く |
 | `plan` | `test` の回答は適用される | 旧版の測定の結果の `issues` の回答は `ignored` | — |
+| `_build_record` | `analyzer` に測定の結果の値を書く | 1 は通る | 文字列・真偽値・小数・0・欠落は `WriteError`。文に入力された値が無い |
 | `_project_file` | 取り除くキーが差分に出て、値は伏せる | 6 項目の無い設定の差分は今と同じ | — |
