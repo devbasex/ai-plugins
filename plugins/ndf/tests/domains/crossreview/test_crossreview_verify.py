@@ -392,6 +392,22 @@ def test_issue_4363_ask_leaves_no_partial_record_when_copying_is_interrupted(tmp
     assert "verdicts" in (held / seen[0].paths.out.name).read_text(encoding="utf-8")
 
 
+def test_issue_4363_recover_keeps_a_record_that_differs_from_the_saved_one(tmp_path: Path) -> None:
+    """保存先に同じ名前の違う中身があれば、どちらも変えずにディレクトリと名前を残す。同じ中身なら片付ける。"""
+    run = _AskRun(tmp_path)
+    run.cfg.state_dir = tmp_path
+    names = ["round1-verify-differs", "round1-verify-same"]
+    for name, saved in zip(names, ("書きかけ", "出力")):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "round1-verify.out").write_text("出力", encoding="utf-8")
+        (tmp_path / f"{name}.out").write_text(saved, encoding="utf-8")
+    data = {store.JUDGE_HELD: list(names)}
+    assert verify.recover(run, data) and data == {store.JUDGE_HELD: names[:1]}
+    assert (tmp_path / names[0] / "round1-verify.out").read_text(encoding="utf-8") == "出力"
+    assert (tmp_path / f"{names[0]}.out").read_text(encoding="utf-8") == "書きかけ"
+    assert not (tmp_path / names[1]).exists()
+
+
 @pytest.mark.parametrize("asked, resumed", [((), True), (("a.md#見出し",), False)], ids=["unsent-head", "other-sections"])
 def test_issue_4363_kept_review_needs_the_same_sections_but_not_the_citation_check(asked: tuple, resumed: bool) -> None:
     """承認済みの MVV の根拠の記述を確かめ終えていない（head が PR に届いていない）結果は使い、詳細レビューを求める
@@ -519,6 +535,13 @@ def test_issue_4363_run_resumes_from_the_judge_without_launching_the_reviewers_a
     first.verdict = interrupted
     with pytest.raises(KeyboardInterrupt):
         _run(capsys, monkeypatch, first, wt)
+    # 出力の移動中の中断が残すディレクトリを作る。名前は起動の直前に状態ファイルへ残っている
+    [name] = _state(first.state_dir)["judge_held"]
+    held = first.state_dir / name
+    held.mkdir()
+    (held / "round1-verify.out").write_text("移していない出力", encoding="utf-8")
+    foreign = first.state_dir / "round1-verify-notmine"
+    foreign.mkdir()
     second = Fake(tmp_path / "st", {})
     second.verdict = _broken
     code, got = _run(capsys, monkeypatch, second, wt)
@@ -528,3 +551,6 @@ def test_issue_4363_run_resumes_from_the_judge_without_launching_the_reviewers_a
     [row] = state["findings"]
     assert (row["id"], row["check"]["lowered"]) == ("r1-1", True)
     assert len(state["rounds"]) == 1 and "pending_review" not in state
+    # 状態ファイルに名前のあるディレクトリだけを、出力を保存してから片付ける
+    assert not held.exists() and foreign.is_dir() and "judge_held" not in state
+    assert (second.state_dir / f"{name}.out").read_text(encoding="utf-8") == "移していない出力"
