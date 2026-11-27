@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from ndf.adapters import agents
-from ndf.contracts import facts
+from ndf.adapters import agents, launch_settings
+from ndf.contracts import facts, internal
 from ndf.core.converge import oscillation, participants
 
 SANDBOX_OFF = "--dangerously-bypass-approvals-and-sandbox"
@@ -34,16 +34,34 @@ def test_review_launch_fills_the_worktree_and_puts_the_prompt_last(tmp_path: Pat
     assert "{workdir}" not in " ".join(spec.argv) and spec.cwd == tmp_path
 
 
-@pytest.mark.parametrize(("namespaces", "present", "absent"), [(True, ["-s", "read-only"], SANDBOX_OFF), (False, [SANDBOX_OFF], "-s")])
-def test_issue_3893_codex_sandbox_follows_whether_user_namespaces_can_be_made(
-    tmp_path: Path, monkeypatch, namespaces: bool, present: list[str], absent: str
-) -> None:
-    """#3893: 名前空間を作れない環境では、codex のサンドボックス（bubblewrap）の代わりに外の隔離に任せる引数で起動する。"""
-    monkeypatch.setattr(agents, "user_namespaces", lambda: namespaces)
-    argv = participants.review_launch("codex", tmp_path, "質問", tmp_path / "round1-codex").argv
-    at = argv.index(present[0])
-    assert list(argv[at : at + len(present)]) == present and absent not in argv
-    assert "{sandbox}" not in argv and argv[-1] == "質問"
+def test_issue_3893_codex_uses_its_sandbox_when_namespaces_can_be_made(tmp_path: Path, monkeypatch) -> None:
+    """#3893・#1959: 名前空間を作れる環境では、承認の有無に関わらずサンドボックスで読むだけにする。照らし直しは置かない。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    spec = participants.review_launch("codex", tmp_path, "質問", tmp_path / "round1-codex")
+    at = spec.argv.index("-s")
+    assert list(spec.argv[at : at + 2]) == ["-s", "read-only"] and SANDBOX_OFF not in spec.argv and spec.verify is None
+    assert "{sandbox}" not in spec.argv and spec.argv[-1] == "質問"
+
+
+def _approve_codex(root: Path, monkeypatch) -> None:
+    monkeypatch.setattr(launch_settings.launch_approval, "repo_key", lambda r: str(r))
+    path = root / ".ndf" / "launch.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"version": 1, "permissions": {"unsandboxed": ["codex"]}}), encoding="utf-8")
+    sha = launch_settings.approval_target(launch_settings.load(root)).sha256
+    launch_settings.launch_approval.append(str(root), sha, launch_settings.launch_approval.Action.APPROVE, approver="人")
+
+
+def test_codex_without_namespaces_stops_before_any_launch_unless_approved(tmp_path: Path, monkeypatch) -> None:
+    """条件 13: 名前空間を作れない環境では、承認が無ければ起動を組まずに止まり、承認があれば外す引数と照らし直しを持つ。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: False)
+    monkeypatch.setattr(launch_settings.launch_approval, "repo_key", lambda r: str(r))
+    with pytest.raises(internal.InternalError) as got:
+        participants.review_launch("codex", tmp_path, "質問", tmp_path / "round1-codex")
+    assert got.value.kind == "precondition" and "launch-config" in str(got.value)
+    _approve_codex(tmp_path, monkeypatch)
+    spec = participants.review_launch("codex", tmp_path, "質問", tmp_path / "round1-codex")
+    assert SANDBOX_OFF in spec.argv and "-s" not in spec.argv and spec.verify is not None and spec.verify() is None
 
 
 def test_findings_are_read_from_the_last_json_line_and_missing_is_not_empty() -> None:

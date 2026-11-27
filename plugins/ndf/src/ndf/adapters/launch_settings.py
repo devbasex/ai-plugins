@@ -7,6 +7,9 @@
 full の起動 1 回の指定は `prepared` が解く。許可を広げる指定（`load`・`allow`・`mcp`）があれば承認を確かめ、`mcp` の定義ファイルは
 確かめた中身のコピーを渡す（元のパスを渡すと、確かめた後の書き換えがそのまま読まれる）。承認は全工程の定義ファイルをまとめたハッシュと照らすので、
 どれか 1 つが読めなければ、承認の要る起動はすべて止まる（設計書の「受け入れる限界」）。止まった文は読めなかったファイルを示す。
+
+相手役の起動と委譲の安全装置の引数は `safety_args` が返す（設計書の「安全装置を外す指定」）。承認は「サンドボックスが使えない環境で
+外してよい」の意味で、外す引数を返すときは起動の直前に打つ照らし直しを添える。
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Union
 from filelock import FileLock, Timeout
 
 from ndf import contracts, identity
-from ndf.adapters import launch_approval
+from ndf.adapters import agents, launch_approval
 from ndf.adapters.secret_forms import holds_secret
 from ndf.contracts import facts, internal
 
@@ -305,6 +308,64 @@ def _approval_hint(root: Path, sha256: Optional[str] = None) -> str:
     ndf = shlex.quote(str(identity.entrypoint(ident.root)))
     command = f"cd {shlex.quote(str(root))} && {ndf} launch-config approve" + (f" --sha256 {sha256}" if sha256 else "")
     return f"/{ident.prefix}launch-config で承認するか、端末で `{command}` を打ってから打ち直す"
+
+
+# ランタイムの表（安全装置の引数の列を持つ）
+RUNTIMES = "runtimes"
+# 安全装置の引数の用途: review は cross 系の相手役（読むだけ）、delegate は手順書に従う作業の委譲（ndf delegate-run）
+USES = ("review", "delegate")
+# 用途ごとの、サンドボックスの中で起動する引数の列（表 runtimes）
+SANDBOXED = {"review": "sandbox_args", "delegate": "delegate_sandbox_args"}
+# 安全装置を外す引数の列
+UNSANDBOXED = "unsandboxed_args"
+
+
+@dataclass(frozen=True)
+class SafetyArgs:
+    """安全装置の引数。`verify` は外す引数のときだけ持ち、起動の直前に承認の対象を読み直して、違うか取り消されていれば理由の 1 行を返す。"""
+
+    args: list[str]
+    verify: Optional[Callable[[], Optional[str]]] = None
+
+
+def safety_args(runtime: str, use: str, cwd: Path) -> SafetyArgs:
+    """ランタイム `runtime` を用途 `use` で `cwd` から起動するときの安全装置の引数（設計書の「安全装置を外す指定」の表）。
+
+    安全装置の列を 1 つも持たない行（claude）は引数なし。サンドボックスの引数を持ち、それが使える（名前空間が要らないか作れる）なら
+    その引数。review でサンドボックスの引数が無ければ止める。ほかは、`permissions.unsandboxed` にランタイムがあり今の内容が
+    承認済みのときだけ外す引数を返し、無ければ止める。
+    """
+    if use not in USES:
+        raise _precondition(f"安全装置の引数の用途 use は {' か '.join(USES)}（渡された値: {use}）")
+    row = facts.row(RUNTIMES, runtime)
+    if not any(column in row for column in (*SANDBOXED.values(), UNSANDBOXED)):
+        return SafetyArgs([])
+    sandboxed = row[SANDBOXED[use]] if SANDBOXED[use] in row else None
+    if sandboxed is not None and ("sandbox_needs_userns" not in row or not row["sandbox_needs_userns"] or agents.user_namespaces()):
+        return SafetyArgs(list(sandboxed))
+    if use == "review" and sandboxed is None:
+        raise _precondition(f"{runtime} は読むだけの起動を持たないので、review に使えない")
+    return _unsandboxed(runtime, row, cwd)
+
+
+def _unsandboxed(runtime: str, row: Mapping[str, Any], cwd: Path) -> SafetyArgs:
+    """承認があれば外す引数と照らし直しを返す。無ければ承認の手順を載せて止める。"""
+    root = launch_root(cwd)
+    settings = load(root)
+    why = f"{runtime} はこの環境でサンドボックスを使えない（名前空間を作れないか、サンドボックスの引数を持たない）"
+    if runtime not in _given_words(settings.permissions, "unsandboxed") or UNSANDBOXED not in row:
+        raise _precondition(
+            f"{why}。安全装置を外して起動するには、{settings.path} の permissions.unsandboxed に {runtime} を書いて承認する。"
+            f"{_approval_hint(root)}"
+        )
+    sha = _read_target(settings)[1]
+    repo = launch_approval.repo_key(root)
+    if not launch_approval.is_approved(repo, sha):
+        raise _precondition(
+            f"{why}。permissions.unsandboxed の {runtime} を含む起動の設定 {settings.path} は、このマシンで承認されていない"
+            f"（ハッシュ {sha[:8]}）。{_approval_hint(root, sha)}"
+        )
+    return SafetyArgs(list(row[UNSANDBOXED]), Grant(sha256=sha, root=root, repo=repo).verify)
 
 
 @contextlib.contextmanager

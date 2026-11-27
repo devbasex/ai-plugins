@@ -21,12 +21,12 @@ import time
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Iterator, NamedTuple, Optional
+from typing import Any, Callable, Iterator, NamedTuple, Optional
 
 from ndf import identity, process_group
 from ndf.adapters import cli_floor, launch_slot
 from ndf.adapters.run_log import child_process_env, diag, record, record_cost_file
-from ndf.contracts import limits
+from ndf.contracts import facts, limits
 
 # ---------------------------------------------------------------- サンドボックス（#3893）
 
@@ -178,7 +178,8 @@ class Warned:
 
 @dataclass(frozen=True)
 class Launch:
-    """外部 CLI の 1 回の起動。`timeout` は監視の上限の秒。`env` は足す環境変数。"""
+    """外部 CLI の 1 回の起動。`timeout` は監視の上限の秒。`env` は足す環境変数。`verify` は起動の直前に打つ照らし直しで、
+    理由の 1 行を返せば起動しない（安全装置を外す起動の承認の読み直し。#1959）。"""
 
     agent: str
     argv: tuple[str, ...]
@@ -186,6 +187,7 @@ class Launch:
     paths: AgentPaths
     timeout: float
     env: Optional[dict[str, str]] = None
+    verify: Optional[Callable[[], Optional[str]]] = None
 
 
 class AgentState(StrEnum):
@@ -196,7 +198,7 @@ class AgentState(StrEnum):
     USAGE_LIMIT = "usage_limit"
     STALLED = "stalled"
     TIMEOUT = "timeout"
-    # 起動しなかった: 学習に使わない設定と確かめられていない（`ndf training check` で直る）か、CLI が下限より古い
+    # 起動しなかった: 学習に使わない設定と確かめられていない（`ndf training check` で直る）か、CLI が下限より古いか、起動の直前の照らし直しが理由を返した
     REFUSED = "refused"
     # 起動しなかった: 重い起動のスロットが待ちの上限までに空かなかった
     NO_SLOT = "no_slot"
@@ -289,9 +291,19 @@ def watch(proc: subprocess.Popen, spec: Launch, poll: Optional[float] = None) ->
     return AgentStatus(spec.agent, state, proc.poll(), detail, tuple(sorted(w.warned.kinds)))
 
 
+def ai_child_env() -> dict[str, str]:
+    """NDF が非対話で起動した AI の子のマーカー（`NDF_AI_CHILD=1`）。子の環境に足す（#1959）。"""
+    return {identity.env_name("ai-child"): "1"}
+
+
+def executable(runtime: str) -> str:
+    """ランタイムの CLI の実行ファイルの名前（表 runtimes）。"""
+    return facts.value("runtimes", runtime, "executable")
+
+
 def _start(spec: Launch) -> subprocess.Popen:
     """相手役と修正担当の子を起動する。子の環境には NDF が起動した AI のマーカー（`NDF_AI_CHILD`）を足す（#1959）。"""
-    child = {identity.env_name("ai-child"): "1"}
+    child = ai_child_env()
     env = child_process_env(child if spec.env is None else {**spec.env, **child})
     spec.paths.out.parent.mkdir(parents=True, exist_ok=True)
     with open(spec.paths.out, "wb") as out, open(spec.paths.err, "wb") as err:
@@ -316,6 +328,10 @@ def _os_error_public(exc: OSError) -> str:
     return why if exc.filename is None else f"{why}: {Path(os.fsdecode(exc.filename)).name}"
 
 
+# 照らし直しで起動を止めたときの公開用の文面（理由は設定のパスと承認のコマンドを含むので、PR などへはこちらを載せる。#1959）
+VERIFY_REFUSED_PUBLIC = "起動の直前に読み直した起動の設定が、承認を確かめた後に変わったか取り消されていたので起動しなかった。launch-config で承認してから打ち直す"
+
+
 def _not_started(spec: Launch, state: AgentState, detail: str, public: Optional[str] = None) -> AgentStatus:
     record("agent", agent=spec.agent, state=state, exit=None, warnings=[])
     return AgentStatus(spec.agent, state, None, detail, (), public=public)
@@ -325,7 +341,7 @@ def run_agent(spec: Launch, poll: Optional[float] = None) -> AgentStatus:
     """外部 CLI を起動して見る。kiro はworktree の `.amazonq/cli-agents` を起動の前後で守る。
 
     学習に使わない設定と確かめられていなければ起動せず `AgentState.REFUSED`、重い起動のスロットが空かなければ
-    `AgentState.NO_SLOT` を返す。2 つを通った後、CLI が下限より古ければ起動せず `AgentState.REFUSED`（`cli_floor`）。
+    `AgentState.NO_SLOT` を返す。2 つを通った後、CLI が下限より古いか、起動の直前の照らし直し（`Launch.verify`）が理由を返せば起動せず `AgentState.REFUSED`。
     """
     try:
         with launch_slot.gate(spec.agent, cwd=spec.cwd, env=child_process_env(spec.env)) as slot_env:
@@ -339,6 +355,10 @@ def _guarded_run(spec: Launch, poll: Optional[float]) -> AgentStatus:
         cli_floor.require(spec.agent, spec.argv[0], child_process_env(spec.env), spec.cwd, args=spec.argv[1:])
     except cli_floor.TooOld as exc:
         return _not_started(spec, AgentState.REFUSED, str(exc), exc.public)
+    # スロットと CLI の確かめで待った間の取り消しも見るため、子を起動する直前に照らし直す（#1959）
+    why = spec.verify() if spec.verify is not None else None
+    if why is not None:
+        return _not_started(spec, AgentState.REFUSED, why, VERIFY_REFUSED_PUBLIC)
     guard = kiro_guard(spec.cwd, spec.paths) if spec.agent == "kiro" else contextlib.nullcontext({})
     with guard as kept:
         status = _start_and_watch(spec, poll)

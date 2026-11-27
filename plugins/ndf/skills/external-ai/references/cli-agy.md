@@ -42,18 +42,21 @@ left as an argument and ignored.
 次の形で起動する（`timeout <秒>` で包む）。`--print-timeout` は
 `timeout` の値 + 120 秒（工程の上限 + 240 秒）、`--add-dir` は作業ディレクトリと結果ファイルの置く場所である。
 使用量は JSON の出力にしか無いため `--output-format json` で起動し、本文は `response` のキーから
-読む。
+読む。安全装置の引数は書かず、`ndf delegate-run` が `'{args}'` の位置（`agy` のすぐ後）へ入れる。agy にはサンドボックスが無いので、
+起動の設定（`.ndf/launch.json` の `permissions.unsandboxed`）で agy を承認したときだけ `--dangerously-skip-permissions` で起動し、
+承認が無ければ起動せずに止まる（`/ndf:launch-config` で承認する）。読むだけの起動（`--use review`）は持たない。
 
 ```bash
-agy --dangerously-skip-permissions --output-format json --print-timeout <秒>s [--model M] \
-  --add-dir <workdir> --add-dir <結果ファイルの置く場所> -p="<プロンプトの本文>" \
+cd <workdir>
+ndf delegate-run --runtime agy -- agy '{args}' --output-format json --print-timeout <秒>s [--model M] \
+  --add-dir "$PWD" --add-dir <結果ファイルの置く場所> -p="<プロンプトの本文>" \
   < /dev/null > <stem>-stdout.log 2> <stem>-err.log
 ```
 
 | オプション | 用途 |
 | --- | --- |
 | `--add-dir <dir>` | 作業領域へディレクトリを足す。**繰り返し指定できる** |
-| `--dangerously-skip-permissions` | tool の承認要求を自動で承認する |
+| `'{args}'` | `ndf delegate-run` が、承認のあるときだけ `--dangerously-skip-permissions`（tool の承認要求を自動で承認する）を入れる位置 |
 | `--output-format text` | 最終応答の本文をそのまま標準出力へ出す |
 | `--output-format json` | 1 オブジェクトの JSON を出す（下の「出力ストリーム」） |
 | `--print-timeout <時間>` | print モードの待ち時間。**単位が要る**（既定 `5m0s`） |
@@ -82,8 +85,8 @@ mode cannot prompt for, so it was auto-denied.
 ```
 
 > ⚠️ **`--dangerously-skip-permissions` のセキュリティ注意**: 全 tool の自動承認は、任意の
-> シェル実行とファイル編集を無確認で許可する。コンテナ・仮想機械・CIの実行環境・
-> 隔離した worktree のいずれかの**中でだけ**使う。プロンプトへ「リポジトリ編集禁止」と
+> シェル実行とファイル編集を無確認で許可する。承認するのは、コンテナ・仮想機械・CIの実行環境の
+> いずれかの**中でだけ**にする。プロンプトへ「リポジトリ編集禁止」と
 > 書くことは有効だが、隔離の代わりにはならない。
 
 ## 実行時間の上限には単位を付ける

@@ -176,16 +176,11 @@ def test_a_worker_child_that_did_not_launch_writes_no_row(tmp_path: Path, monkey
     ("agent", "namespaces", "expected"),
     [
         ("codex", True, ["codex", "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-C", "{wt}", "質問"]),
-        (
-            "codex",
-            False,
-            ["codex", "exec", "--skip-git-repo-check", "--ephemeral", "--dangerously-bypass-approvals-and-sandbox", "-C", "{wt}", "質問"],
-        ),
-        ("kiro", True, ["kiro-cli", "chat", "--no-interactive", "--trust-tools=fs_read", "質問"]),
+        ("kiro", False, ["kiro-cli", "chat", "--no-interactive", "--trust-tools=fs_read", "質問"]),
     ],
 )
 def test_read_only_partner_arguments_are_unchanged(tmp_path: Path, monkeypatch, agent, namespaces, expected) -> None:
-    """読むだけの相手役の今の引数。codex は名前空間を作れなければ承認なしで安全装置を外す（Task 6 が承認つきに変える）。"""
+    """読むだけの相手役の引数。kiro は名前空間の有無に関わらず読むだけの指定（安全装置を外す codex は test_converge が見る）。"""
     monkeypatch.setattr(agents, "user_namespaces", lambda: namespaces)
     argv = participants.review_launch(agent, tmp_path, "質問", tmp_path / "round1").argv
     assert list(argv) == [a.replace("{wt}", str(tmp_path)) for a in expected]

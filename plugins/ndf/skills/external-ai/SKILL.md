@@ -55,7 +55,7 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 | 観点 | Codex | agy | Kiro | Claude |
 |---|---|---|---|---|
 | stdout の信頼性 | 最終 message が落ちることがある（ファイル書き出し必須） | stdout に response が直接出る | ANSI エスケープが必ず混ざる | `--output-format json` で構造化される |
-| 承認の与え方 | `--dangerously-bypass-approvals-and-sandbox` | `--dangerously-skip-permissions`（**作業領域の外への書き込みは止まらない**） | `--trust-all-tools`（**絞り込みは防御にならない**） | `--permission-mode acceptEdits` + `--allowed-tools` |
+| 安全装置の引数 | `ndf delegate-run` が入れる。サンドボックスが使えれば `-s workspace-write`、使えず承認があれば `--dangerously-bypass-approvals-and-sandbox` | `ndf delegate-run` が承認のあるときだけ `--dangerously-skip-permissions` を入れる（**作業領域の外への書き込みは止まらない**） | `ndf delegate-run` が承認のあるときだけ `--trust-all-tools` を入れる（**絞り込みは防御にならない**） | `--permission-mode acceptEdits` + `--allowed-tools` |
 | 非対話実行 | `codex exec` で完結。プロンプトは**標準入力必須** | `-p=<本文>` で渡す。**標準入力は受け取らない** | `chat --no-interactive` | `-p` |
 | 完了判定 | stderr の `^tokens used$` sentinel | プロセス終了（`kill -0` / `wait`） | **終了コードは使えない。** 結果ファイルと stderr の検証 | JSON の `is_error` / `subtype` |
 | 実測モデルの取得 | セッションの記録（`$CODEX_HOME/sessions`）から取れる | できない | **できない**（`auto` が選んだモデルは返らない） | `modelUsage` から取れる |
@@ -88,17 +88,35 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 LLM が決めるのは **どの CLI に渡すか**（上の表）と **プロンプトの中身**、**結果の解釈**だけである。
 NDF には 4 つの CLI をまとめて起動するサブコマンドが無いため、起動・上限つきの待ち・回収は次の手順で行う。
 
-1. プロンプトをファイルへ書く（ファイル書き込みツールで。テンプレートは「プロンプト設計」）。出力先のファイル
-   （下の `<結果>`）をプロンプトに書く
+1. プロンプトをファイルへ書く（ファイル書き込みツールで。テンプレートは「プロンプト設計」）。書き込みを伴う委譲では、出力先のファイル
+   （下の `<結果>`）を絶対パスでプロンプトに書く。読むだけの委譲（下の `--use review`）では出力先を書かず、結果を最終応答で返すことと、
+   ファイルを変更しないことを書く
 2. CLI の有無と認証を確かめる（`command -v <CLI>` と、補助ファイルのインストールとログインのセクションの確かめ方）。Claude Code と Codex では
    `ndf training check --runtime <claude|codex>` も打ち、学習に使わない設定を確かめる
 3. 補助ファイルの起動の形（codex・agy は「起動コマンド」、claude・kiro は「非対話実行」）を、`timeout <秒>` で包んで打つ。Claude Code では Bash の
-   `run_in_background: true` で起動し、完了通知を 1 回受ける。標準出力と標準エラー出力は別のファイルへ逃がす
+   `run_in_background: true` で起動し、完了通知を 1 回受ける。標準出力と標準エラー出力は別のファイルへ逃がす。
+   codex・agy・kiro は、対象のディレクトリへ移ってから `ndf delegate-run --runtime <名前> -- <CLI のコマンド>` で打つ。安全装置の引数と作業ディレクトリの
+   指定は書かず、`'{args}'` を 1 つ置く。`'{args}'` の位置は決まっていて、codex は `codex exec` の、kiro は `kiro-cli chat --no-interactive` の、
+   agy は `agy` のすぐ後に置く（ほかの位置は拒まれる）。codex の作業ディレクトリは、`ndf delegate-run` が今のディレクトリを `-C` で入れる
+
+   次の例は、読むだけのレビューを codex に頼む起動である。対象のディレクトリへ移れた場合だけ起動するよう、`cd` と `timeout` を `&&` でつなぐ。
+   書き込みを伴う委譲の起動は、`corder` エージェントの「Codex CLI」のセクションにある
 
    ```bash
-   timeout 1320 codex exec --dangerously-bypass-approvals-and-sandbox --config model_reasoning_effort=medium \
-     -C "$PWD" < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
+   cd <対象のディレクトリ> && timeout 1320 ndf delegate-run --runtime codex --use review -- codex exec '{args}' \
+     --config model_reasoning_effort=medium < "$TMP/review-prompt.md" > "$TMP/codex-stdout.log" 2> "$TMP/codex-err.log"
    ```
+
+   - `ndf delegate-run` は、サンドボックスが使えればその中で起動し、使えなければ起動の設定（`.ndf/launch.json` の `permissions.unsandboxed`）で
+     そのランタイムを承認したときだけ安全装置を外す。Kiro と agy の作業委譲は、起動の設定でそのランタイムの承認が有効な場合に実行できる。
+     同じ設定であれば、起動ごとに承認し直す必要はない
+   - 承認が無いと CLI を起動せず、理由と承認の手順を標準エラーに出して止まる（終了コード 3）。`/ndf:launch-config` で承認してから打ち直す
+   - 読むだけの委譲は `--use review` を付け、プロンプトで結果を最終応答に返すよう指示し、標準出力を回収する。
+     codex はサンドボックスが使える場合に `-s read-only` で起動する。kiro はサンドボックスの有無によらず読むだけの指定で起動し、agy は止まる。
+     サンドボックスが使えず、codex のサンドボックスなしの起動を承認している場合は、`--use review` でも codex はファイルを変更できる。
+     そのため、どちらの場合もプロンプトに「ファイルを変更しないこと」と書く
+   - コマンドが安全装置の引数（`-s`・`--sandbox`・`--dangerously-bypass-approvals-and-sandbox`・`--trust-all-tools`・`--trust-tools`・
+     `--dangerously-skip-permissions` など）や作業ディレクトリの指定（codex の `-C`・`--cd`）を自分で持つと拒まれる
 
 4. 回収する。結果ファイル → 標準出力（claude は JSON の `result`、agy は JSON の `response`、kiro は ANSI を除く） →
    標準エラー出力の末尾の順に読み、最初に中身のあったものを結果にする
@@ -107,7 +125,7 @@ NDF には 4 つの CLI をまとめて起動するサブコマンドが無い�
 |---|---|---|
 | 結果ファイルか標準出力に本文がある | 成功 | 本文を読む |
 | どれにも本文が無い | tool 呼び出しだけで終わった | 標準エラー出力の末尾を読み、プロンプトを直すか別の CLI へ渡す |
-| 終了コード 124（`timeout` が止めた） | 上限に当たった | 読むファイルを絞るか観点を分けて渡し直す |
+| 終了コード 124（`timeout` が止めた） | 上限に当たった | 読むファイルを絞るか観点を分けて渡し直す。省いたファイルや観点は未確認として結果とともに返す |
 | 標準エラー出力に利用上限の語がある | 利用上限 | 同じ CLI では解けない。別の CLI へ渡す |
 | CLI が無い・認証が切れている | 起動できない | 補助ファイルのログイン・インストールの手順を行う |
 
@@ -214,9 +232,10 @@ CLI 固有の症状（サンドボックス失敗、承認モードによるハ�
 3. **API コスト**: トークン従量課金。1 セッションで数千〜数万トークン消費することがあり、短時間で済むタスクには使わない
 4. **機密情報**: コードが外部 API へ送信される。社外秘コードの扱いは組織ポリシーに従う
 5. **モデル選択**: 既定モデルは時期により変動する。安定性が要るときは明示指定する
-6. **サンドボックス無効化フラグ**: Codex の `--dangerously-bypass-approvals-and-sandbox` と agy の
-   `--dangerously-skip-permissions` は、任意のシェル実行とファイル編集を無確認で許可する。**Docker / devcontainer / VM /
-   CI ランナー / 隔離 worktree などの外部隔離環境内でのみ使用**し、ホスト直接実行や本番リポジトリでは使わない
+6. **安全装置を外す引数**: Codex の `--dangerously-bypass-approvals-and-sandbox`、agy の `--dangerously-skip-permissions`、
+   Kiro の `--trust-all-tools` は、任意のシェル実行とファイル編集を無確認で許可する。`ndf delegate-run` は、起動の設定で承認した
+   ランタイムにだけこれらを入れる。承認する人は、**Docker / devcontainer / VM / CI ランナーなどの外部隔離環境の中**であることを
+   確かめる。ホスト直接実行や本番リポジトリでは承認しない
 
 ## 関連
 
