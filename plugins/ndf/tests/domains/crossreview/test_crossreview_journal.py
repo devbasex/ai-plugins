@@ -239,6 +239,20 @@ def test_issue_4363_finding_coming_back_without_impact_stays_major_and_is_not_as
     assert journal.rows["r1-1"]["severity"] == "major" and journal.fresh == []
 
 
+@pytest.mark.parametrize("order", [1, -1])
+@pytest.mark.parametrize("basis", [{"mvv": "C7"}, {"mvv": "Value 5"}, {"protect": ["irreversible"]}])
+def test_issue_4363_finding_keeps_the_text_and_the_place_of_the_report_that_marked_it(basis: dict, order: int) -> None:
+    """承認や保護の根拠となる報告に 1 文が無くても、行は別の報告の本文・1 文・位置で上書きしない。"""
+    journal = drive.FindingJournal()
+    told = [
+        {"text": "A", "severity": "major", "path": "x.py", "line": 3, "by": "codex", **basis},
+        {"text": "a", "severity": "major", "impact": IMPACT, "path": "y.py", "line": 5, "by": "kiro"},
+    ]
+    journal.enter(1, told[::order], ("Value 5", "C7"), "approved:11:aaa:ccc")
+    row = journal.rows["r1-1"]
+    assert (row["text"], row["path"], row["line"], row.get("impact")) == ("A", "x.py", 3, None)
+
+
 def test_issue_4014_carried_rows_are_not_rated_again() -> None:
     """#4014: 引き継いだ行は付け直さず、raised_severity を持たない。重要度の無い行は今のまま収束の妨げになり、
     相手役から出し直されても raised_severity を足さない。"""

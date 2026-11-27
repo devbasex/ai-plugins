@@ -285,23 +285,44 @@ def _place(row: dict[str, Any], new: Mapping[str, Any], section: Optional[str]) 
     row["section"] = section
 
 
-def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]]) -> bool:
-    """このラウンドで新しく出たか戻った行の本文・1 文・位置を、出し直し 1 件のものにそろえる。`same` はこのラウンドのその指摘の
-    出し直しで、1 文を持つもののうち最も重い（同じ重さなら先の）1 件を使う。1 件も 1 文を持たなければ何も変えずに偽を返す。
-    指摘のキーは本文の先頭だけで決まるので、判定役がある報告の発生条件を別の報告の位置で確かめないためである。#4363"""
-    best: Optional[tuple[Mapping[str, Any], dict[str, Any]]] = None
+def _basis(item: Mapping[str, Any], items: Sequence[str]) -> int:
+    """出し直し 1 件が、指摘を人の承認待ちか確認で下げない扱いにする根拠の強さ（必ず人の承認が要る操作・MVV の項目・保護の種類の順。
+    根拠でなければ 0）。"""
+    named = criteria_decide.mvv_item(item.get("mvv"), items)
+    if named is not None:
+        return 3 if criteria_decide.redline(named) else 2
+    return 1 if criteria_decide.protect_of(item.get(PROTECT)) else 0
+
+
+def _align_report(row: dict[str, Any], same: Sequence[Mapping[str, Any]], items: Sequence[str]) -> bool:
+    """このラウンドで新しく出たか戻った行の本文・1 文・位置を、出し直し 1 件のものにそろえ、判定役へ渡せる 1 文がこのラウンドに
+    あるかを返す。`same` はこのラウンドのその指摘の出し直しである。
+
+    承認や保護の根拠となる出し直し（`_basis`）があれば、利用者と修正担当に別の操作の説明を見せないよう、1 文が無くてもその
+    1 件を使う。根拠の強さが同じなら 1 文を持つもの、次に重いもの、次に先のものを選ぶ。根拠が無ければ 1 文を持つもののうちで選び、
+    1 件も無ければ何も変えない。指摘のキーは本文の先頭だけで決まるので、判定役がある報告の発生条件を別の報告の位置で確かめない
+    ためでもある。#4363"""
+    best: Optional[tuple[tuple[int, bool], Mapping[str, Any], dict[str, Any]]] = None
+    told = False
     for item in same:
         new = _raised(dict(item))
-        if "impact" not in new:
+        rank = _basis(item, items), "impact" in new
+        told = told or rank[1]
+        if not any(rank):
             continue
-        if best is None or criteria_decide.heavier(best[1]["severity"], new["severity"]) != best[1]["severity"]:
-            best = item, new
+        heavier = best is not None and criteria_decide.heavier(best[2]["severity"], new["severity"]) != best[2]["severity"]
+        if best is None or rank > best[0] or (rank == best[0] and heavier):
+            best = rank, item, new
     if best is None:
         return False
-    item, new = best
-    row |= {"text": str(item["text"]).strip(), "impact": new["impact"]}
+    _, item, new = best
+    row["text"] = str(item["text"]).strip()
+    if "impact" in new:
+        row["impact"] = new["impact"]
+    else:
+        row.pop("impact", None)
     _place(row, new, _text(item.get("section")))
-    return True
+    return told
 
 
 class Checked(NamedTuple):
@@ -345,7 +366,7 @@ class FindingJournal:
         MVV の項目、`mvv` はその識別子。見送り済みは扱わず（MVV が変わっていれば判定し直す）、
         直した指摘が戻れば未解決へ戻す。同じ指摘がより重い重要度で出し直されたら（同じラウンドの中でも）重い方を残す。
         収束の妨げになるかは、ラウンドのすべての指摘を重ねた後の重さで決める。新しく出たか戻った行の本文・1 文・位置は、
-        すべての指摘を重ねた後にそろえる（`_align_report`）。戻った指摘にこのラウンドの 1 文が 1 つも無ければ、行は前の 1 文と
+        すべての指摘を重ねた後にそろえる（`_align_report`。承認や保護の根拠となる出し直しがあれば、その 1 件にする）。戻った指摘にこのラウンドの 1 文が 1 つも無ければ、行は前の 1 文と
         重さを持ち続けるが、`fresh` に入れず判定役に渡さない（前の経路の 1 文で下げないため。#4363）。"""
         by_key = {f.get("key"): f for f in self.rows.values()}
         touched: dict[str, dict[str, Any]] = {}
@@ -382,7 +403,7 @@ class FindingJournal:
             touched[key] = known
             same.setdefault(str(known["id"]), []).append(item)
         back = set(self.revived[before:])
-        told = {fid: _align_report(self.rows[fid], same[fid]) for fid in dict.fromkeys(fresh)}
+        told = {fid: _align_report(self.rows[fid], same[fid], items) for fid in dict.fromkeys(fresh)}
         self.fresh = [fid for fid, aligned in told.items() if aligned or fid not in back]
         self.warnings = _mvv_warnings(round_no, unknown, unexplained)
         return frozenset(key for key, row in touched.items() if _blocking(row))
