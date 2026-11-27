@@ -538,7 +538,7 @@ def repeated(history: Sequence[str], key: str, same_cause: int) -> bool:
 
 def repo_root(cwd: Path) -> str:
     """打った場所の git のworktreeの根（サブモジュールならそのworktree。共通の git ディレクトリから求めない）。"""
-    return git.Git(cwd).run("rev-parse", "--show-toplevel").strip()
+    return str(git.Git(cwd).toplevel())
 
 
 def default_base(repo: Path) -> str:

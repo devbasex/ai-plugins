@@ -275,7 +275,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_strategy_at` | `src/ndf/progress/gate/entry.py` | 新設 | `_strategy_at(workdir: Path) -> Optional[branch_strategy.Strategy]` | 作業場所のリポジトリの根のブランチ戦略の設定を返し、読めなければ `None`。根は `command.strategy_root` で決める |
+| `_strategy_at` | `src/ndf/progress/gate/entry.py` | 新設 | `_strategy_at(workdir: Path) -> Optional[branch_strategy.Strategy]` | 作業場所のリポジトリの根のブランチ戦略の設定を返し、読めなければ `None`。根は `command.repo_root` で決める |
 | `released_outcome` | `src/ndf/progress/gate/entry.py` | 新設 | `released_outcome(work: str, saved: Mapping[str, Any], strategy: Optional[branch_strategy.Strategy]) -> Optional[dict]` | worker を起動せずに返す結果 JSON（`ok` か `stopped`）を組む。起動するときは `None` |
 | `Released` | `src/ndf/progress/gate/entry.py` | 新設 | `class Released(NamedTuple): outcome: dict` | worker を起動せずに終えるときの結果を `_cmd_work` へ渡す |
 | `WorkHandoff` | `src/ndf/progress/gate/entry.py` | 変更 | 欄 `version_number: bool` を足す | 起動指示を組んだときの値の形を、`work_argv` へ同じ値で渡す |
@@ -294,7 +294,7 @@ plugins/ndf/
   2. `recorded = released_of(saved)` を読む。`recorded` が無いか、`recorded.store` が `None`（この変更の前に承認された）ときだけ、`strategy = _strategy_at(workdir)` を読む。`recorded.store` があれば、作業の時点の設定は読まない（`strategy = None`）
   3. `released_outcome(kind, saved, strategy)` が結果を返せば、`Released(結果)` を返す。起動指示も、報告の初期化も、記述子の用意もしない。返さなければ、`version_number` を決める。`recorded.store` が `versioned` なら真である。それ以外は、`strategy` が `None` か、`strategy.version_store["kind"]` が `"none"` でないときに真である
   4. `work_prompt(kind, saved, workdir, paths, version_number=version_number)` で起動指示を組み、`WorkHandoff(..., version_number)` を返す
-- `_strategy_at` は、`workdir` で `git rev-parse --show-toplevel` を 1 回打って根を決めてから、根の設定を `branch_strategy.load` で読む（`command.strategy_root`。`progress/command.py` の `strategy` と同じ解き方）。`workdir` に `.ndf/project.json` があっても根とはみなさない。作業場所は `--cwd` で任意の場所を指せるので、サブディレクトリに別の設定を置いたリポジトリでは、根とみなすとリポジトリの設定と違う値を読むためである。ここで読むのは版の種類だけで、届け先は読まない（届け先は承認と一緒に記録した値を使う。下の「オーガナイザーの承認と一緒に届け先を記録する」）
+- `_strategy_at` は、`workdir` で `git rev-parse --show-toplevel` を 1 回打って根を決めてから、根の設定を `branch_strategy.load` で読む（`command.repo_root`。`progress/command.py` の `strategy` と同じ解き方）。`workdir` に `.ndf/project.json` があっても根とはみなさない。作業場所は `--cwd` で任意の場所を指せるので、サブディレクトリに別の設定を置いたリポジトリでは、根とみなすとリポジトリの設定と違う値を読むためである。ここで読むのは版の種類だけで、届け先は読まない（届け先は承認と一緒に記録した値を使う。下の「オーガナイザーの承認と一緒に届け先を記録する」）
 - `released_outcome`
   - 事前条件: `saved` は `values_in` で読んだ `values.json`
   - 事後条件: 作業 `work` の定義の `outputs` が `product_version` と `delivery` を持ち（今は `release` だけ）、`released_of(saved)` があるときだけ、下の表で結果 JSON を返す。それ以外は `None`
@@ -312,26 +312,11 @@ plugins/ndf/
   - 設定を直して retry しても終わらないこと
   - 次の操作。実際の届け先を確かめ、工程の出力の規約に合う JSON をファイルに書き、`ndf progress finish <ID> デプロイ --output <JSONファイル> --reason <理由>` で工程を終える
 
-  利用者が書く JSON は、次の例の形にする。停止理由には、この例を `manual_finish_example`（`src/ndf/progress/gate/entry.py`）で組んで載せる。`product_version` には記録済みの配布識別子が入るので、そのまま使う。
+  利用者が書く JSON の見本と、`<…>` の所を置き換える値の取り方は、停止理由に載る。見本は `manual_finish_example`、取り方の説明は `MANUAL_FINISH_FILL`（どちらも `src/ndf/progress/gate/entry.py`）が正本で、この文書には写さない。見本が満たす契約は次のとおりである。
 
-  ```json
-  {
-    "summary": "届け先を確かめてデプロイの工程を手で終えた",
-    "steps": [],
-    "outputs": {
-      "product_version": "main abc1234",
-      "delivery": "<実際の本番配布に対応する届け先のオブジェクト>",
-      "mvv_gate": "<記録済みの mvv_gate のオブジェクト>"
-    }
-  }
-  ```
-
-  `<…>` の 2 つは、値全体を次のように置き換える。停止理由も、同じ説明（`entry.MANUAL_FINISH_FILL`）を載せる。
-
-  | キー | 置き換える値 |
-  | --- | --- |
-  | `outputs.delivery` | 実際の本番配布に対応する届け先のオブジェクト全体。`.ndf/project.json` の `branch_strategy.release.deliveries` の 1 行と同じ形にする |
-  | `outputs.mvv_gate` | `ndf progress show <ID>` の `metrics.history` で、`payload.step` が `release-mvv` の最後の記録にある `payload.report.outputs.mvv_gate` をそのままコピーした値 |
+  - `summary` と `steps` を持つ（`steps` は空の並び）
+  - `outputs` に `product_version`・`delivery`・`mvv_gate` の 3 つを持つ。`product_version` には記録済みの配布識別子が入り、利用者はそのまま使う
+  - `delivery` と `mvv_gate` は、利用者が値全体を置き換える印にする。`delivery` は実際の本番配布に対応する届け先の行全体、`mvv_gate` はステップ `release-mvv` が記録した値である
 
   `delivery` を値全体の印にするのは、届け先の一部の項目（`channel` や `versioned`）だけを固定値で示すと、利用者がその固定値を残し、実際と違う属性が配布の実績として記録されうるためである。
 
@@ -376,7 +361,7 @@ plugins/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `_strategy_at` | `progress/command.py` の `strategy`、`domains/release/route_decide.py` の `route_of`、`progress/invoke.py` の `_project` | `grep -rn 'version_store' src/ndf --include=*.py`、`grep -n 'def _project' src/ndf/progress/invoke.py` | 使えない。`strategy` は読めないと `FactUnknown` を上げ、`route_of` は配布の経路全体を組む。`_project` は読む場所が違い、スキーマの検査をしない（上の「工程が読んだ設定を使い回さない理由」）。`branch_strategy.load` を使う。根の解き方だけは `command.strategy_root` を共有する |
+| `_strategy_at` | `progress/command.py` の `strategy`、`domains/release/route_decide.py` の `route_of`、`progress/invoke.py` の `_project` | `grep -rn 'version_store' src/ndf --include=*.py`、`grep -n 'def _project' src/ndf/progress/invoke.py` | 使えない。`strategy` は読めないと `FactUnknown` を上げ、`route_of` は配布の経路全体を組む。`_project` は読む場所が違い、スキーマの検査をしない（上の「工程が読んだ設定を使い回さない理由」）。`branch_strategy.load` を使う。根の解き方だけは `command.repo_root` を共有する |
 | `production_delivery` | `forms_decide.deliveries_of`、`production_merge._automatic_row` | `grep -rn 'def deliveries_of\|def _automatic_row'` | 条件だけを `on_channel` に切り出して 3 つで使う。`deliveries_of` が返す形は行を縮めるので使わない |
 | `on_channel` | `deliveries_of` と `_automatic_row` の中の条件式 | 同上 | 式を移す。`reaches` は開発版のチャネルの語を `base` に読み替えて `on_channel` を呼ぶ |
 
@@ -408,7 +393,9 @@ plugins/ndf/
 | `released_where` | `src/ndf/progress/plan/__init__.py` | 新設 | `released_where(strategy: Optional[branch_strategy.Strategy]) -> tuple[str, Optional[dict[str, Any]]]` | 種類を `none`・`versioned`・`unknown`（`strategy` が `None`）の 3 語で返す。種類が `none` なら `production_delivery` の行も返す |
 | `record_release` | `src/ndf/progress/plan/__init__.py` | 変更 | 今のまま | `released` の回答では、`store` と `delivery` を、`None` でなければ回答の記録に足す |
 | `_read_delivered` | `src/ndf/progress/plan/cli.py` | 新設 | `_read_delivered(a: argparse.Namespace, cwd: Path) -> None` | `released` の回答なら、打った作業ディレクトリの根の設定を `command.strategy(cwd)` で 1 回読み、`released_where` の結果を `a.delivered` に置く。DB のトランザクションを開く前に打つ |
-| `strategy_root` | `src/ndf/progress/command.py` | 新設 | `strategy_root(cwd: Path) -> Path` | 設定を読むリポジトリの根を `git rev-parse --show-toplevel` を 1 回打って決める。`cwd` に `.ndf/project.json` があっても根とはみなさない。`command.strategy` と `_strategy_at` が根をこの関数で決める |
+| `Git.toplevel` | `src/ndf/adapters/git.py` | 新設 | `Git.toplevel(self) -> Path` | `git rev-parse --show-toplevel` を 1 回打って作業場所の根を返す。根を解く `git` のコマンドはここだけに置き、`route.repo_root` と `command.repo_root` が使う（Value 11） |
+| `repo_root` | `src/ndf/progress/command.py` | 新設 | `repo_root(cwd: Path) -> Path` | 設定を読むリポジトリの根を `Git.toplevel` で決める。`cwd` に `.ndf/project.json` があっても根とはみなさない。`ndf_settings_path`・`strategy`・`_strategy_at` が根をこの関数で決める。`roots_once` の中では、同じ作業場所で先に求めた根を使う |
+| `roots_once` | `src/ndf/progress/command.py` | 新設 | `roots_once() -> Iterator[None]`（コンテキストマネージャー） | 範囲の中の `repo_root` が、同じ作業場所の根を 1 回だけ求める。入れ子なら外の範囲を引き継ぐ。`facts_of`・`sprint_diff_kinds`・`base_refs_once` が範囲を開く |
 | `_recorded_where` | `src/ndf/progress/gate/release.py` | 新設 | `_recorded_where(reply: Mapping[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]` | 回答に残った種類と届け先。種類が 3 語のどれでもなければ `None`。届け先は、種類が `none` で、`on_channel(行, "production")` が真で、`fits_context` が真のときだけ返す。外のオーガナイザーが `channel: base` の行を書いても本番の配布の実績にしない |
 | `_released` | `src/ndf/progress/gate/release.py` | 変更 | `_released(reply: Mapping[str, Any], value: str, row: Optional[dict[str, Any]]) -> dict[str, Any]` | 渡された届け先 `row` があれば、承認の回答の出力に `delivery` として足す |
 | `take_reply` | `src/ndf/progress/gate/release.py` | 変更 | 今のまま | 設定を読まない。承認の回答では `_recorded_where` を 1 回だけ呼び、返った届け先を `_released` へ、種類を `Answer.release_store` へ渡す |
@@ -423,6 +410,16 @@ plugins/ndf/
 - 外のオーガナイザーの回答のファイル（`answers/<id>.json`）も、`store` と `delivery` を同じ形で書ける。書かなければ種類は記録に無いものになり、デプロイの工程は作業の時点の種類で決める（上の `released_outcome` の表の「記録が無い」行）
 - `release_store` を文脈の値（`outputs`）でなく payload の別のキーに置くのは、後の工程へ渡す値ではなく、承認を記録した時点の事実だからである。工程の定義の `outputs` に無いキーを文脈へ書くと、`answering._outputs` が断る。デプロイの工程は、この記録を `released_answer` から `values.json` の `released_store` として受け取り、作業の時点の設定で決め直さない（上の「worker の起動」）
 - 増える処理は、`ndf lanes release` の `released` の回答 1 回ごとに設定の読み込み 1 回と `git rev-parse` 1 回である。レーンが回答を取り込む側では、設定の読み込みが無くなる
+- **根を毎回 `git` で解くが、1 回の呼び出しの中では使い回す。** `cwd` に `.ndf/project.json` があっても根とみなさないので、近道をせずに `git rev-parse --show-toplevel` を打つ。その代わり、同じ呼び出しで同じ作業場所の根を何度も求める経路は、`roots_once` の中で 1 回だけ求める。経路ごとの `git rev-parse --show-toplevel` の回数は次のとおりである
+
+  | 経路 | 変更前（`main`） | 変更後 |
+  | --- | --- | --- |
+  | `ndf answer work` で `release` の作業を起動する（承認の時点の種類が記録に無い回） | 0 回（設定を読まない） | 1 回（`_strategy_at`） |
+  | `ndf answer work` で `release` の作業を起動する（承認の時点の種類が記録にある回）・ほかの作業 | 0 回 | 0 回 |
+  | `ndf lanes release` の `released` の回答 | 0 回（設定を読まない） | 1 回（`_read_delivered`） |
+  | `ndf lanes release` の `rejected` の回答 | 0 回 | 0 回 |
+  | 工程の条件の判定（`facts_of`。1 回の判定で求める語の全体） | 読む設定ごとに 1 回（スプリントの差分の語で 2 回、`ci_declared`・`prod_branch` で 1 回ずつ、つなぎ目の差分で範囲ごとに 1 回） | 作業場所ごとに 1 回 |
+  | スプリントの差分の判定（`sprint_diff_kinds` を単独で呼ぶ） | 2 回（`_sprint_range` の `strategy` と `range_diff_kinds` の `ndf_settings`） | 1 回 |
 
 ### 異常系の処理
 
@@ -440,6 +437,7 @@ plugins/ndf/
 | `_read_delivered` | 種類が `none` の設定で `("none", 行)`。設定は渡した作業ディレクトリから読む | 種類が `none` 以外で `("versioned", None)` | 設定を読めなければ `("unknown", None)` |
 | `take_reply` | オーガナイザーの承認の出力の事象に `delivery` が `product_version` と並び、payload の `release_store` が `none`。回答を取り込むときに `branch_strategy.load` が呼ばれない | 回答に届け先が無ければ、`delivery` の無い出力で回答が書かれる | 回答の種類が `unknown` なら、`release_store` が `unknown` |
 | `reaches` | `channel: production` と省略で真 | `null` で真 | `base` で偽 |
+| `repo_root` | 根を `Git.toplevel` で 1 回求めて返す | `roots_once` の中（入れ子を含む）では、同じ作業場所の根を 2 回目から求め直さない。範囲の外では毎回求める | `Git.toplevel` の `GitError` をそのまま上げる |
 
 ## worker の結果の確かめ（`ndf worker run`）
 

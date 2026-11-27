@@ -590,6 +590,23 @@ def test_base_ref_is_resolved_once_while_a_stage_starts(tmp_path):
     assert command.base_ref(git, "develop") == "develop" and len(calls) == 2
 
 
+def test_repo_root_resolves_each_workdir_once_inside_roots_once(tmp_path, monkeypatch):
+    """`roots_once` の中では同じ作業場所の根を 1 回だけ求め、範囲の外では毎回求める（#4513）。"""
+    calls: list[Path] = []
+
+    def toplevel(self: Git) -> Path:
+        calls.append(self.cwd)
+        return tmp_path
+
+    monkeypatch.setattr(Git, "toplevel", toplevel)
+    with command.roots_once():
+        with command.roots_once():  # 入れ子は外の範囲を引き継ぐ
+            assert command.repo_root(tmp_path) == tmp_path
+        assert command.ndf_settings_path(tmp_path / ".", "x.json") == tmp_path / "x.json"
+    assert len(calls) == 1
+    assert command.repo_root(tmp_path) == tmp_path and len(calls) == 2
+
+
 def _commit(repo: Path, changed: dict[str, str]) -> str:
     """`changed` を書いてコミットし、そのコミットを返す。"""
     for name, text in changed.items():

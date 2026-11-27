@@ -97,9 +97,46 @@ def read_json(path: Path, failure: str = "を JSON として読めない") -> An
         raise contracts.ContractError(f"{path} {failure}: {exc}") from exc
 
 
+# `roots_once` の中で求めた根: 作業場所 → 根。範囲の外では None で、覚えない
+_ROOTS: contextvars.ContextVar[Optional[dict[Path, Path]]] = contextvars.ContextVar("roots", default=None)
+
+
+@contextlib.contextmanager
+def roots_once() -> Iterator[None]:
+    """この中の `repo_root` は、同じ作業場所の根を 1 回だけ求める（外の範囲の中なら、外で求めた根を引き継ぐ。#4513）。
+
+    工程の条件の判定は、ブランチ戦略の設定と `docs`・`test` の設定を同じ作業場所の根から読む。1 回の判定の中で
+    `git rev-parse --show-toplevel` を読む設定の数だけ打たない。
+    """
+    if _ROOTS.get() is not None:
+        yield
+        return
+    token = _ROOTS.set({})
+    try:
+        yield
+    finally:
+        _ROOTS.reset(token)
+
+
+def repo_root(cwd: Path) -> Path:
+    """設定を読むリポジトリの根（`Git.toplevel`）。`GitError` はそのまま上げる。
+
+    `cwd` に `.ndf/project.json` があっても根とはみなさない。サブディレクトリに別の設定を置いたリポジトリで、そこから打っても
+    リポジトリの根の設定を読む（#4513）。`roots_once` の中では、同じ作業場所で先に求めた根を使う（git を打ち直さない）。
+    """
+    held = _ROOTS.get()
+    key = cwd.resolve()
+    if held is not None and key in held:
+        return held[key]
+    root = Git(cwd).toplevel()
+    if held is not None:
+        held[key] = root
+    return root
+
+
 def ndf_settings_path(cwd: Path, name: str) -> Path:
     """リポジトリの根の設定のファイルのパス。"""
-    return Path(Git(cwd).run("rev-parse", "--show-toplevel").strip()) / name
+    return repo_root(cwd) / name
 
 
 def _read_ndf_settings(path: Path) -> dict[str, Any]:
@@ -153,19 +190,10 @@ def behavior_declared(cwd: Path) -> bool:
     return isinstance(value, list) and all(isinstance(p, str) for p in value)
 
 
-def strategy_root(cwd: Path) -> Path:
-    """ブランチ戦略の設定を読むリポジトリの根（`git rev-parse --show-toplevel` を 1 回打つ）。`GitError` はそのまま上げる。
-
-    `cwd` に `.ndf/project.json` があっても根とはみなさない。サブディレクトリに別の設定を置いたリポジトリで、そこから打っても
-    リポジトリの根の設定を読む（#4513）。根の解き方は `strategy` と `gate.entry._strategy_at` がここで共有する。
-    """
-    return Path(Git(cwd).run("rev-parse", "--show-toplevel").strip())
-
-
 def strategy(cwd: Path) -> branch_strategy.Strategy:
     """リポジトリの根のブランチ戦略の設定（`.ndf/project.json` の `branch_strategy`）。読めなければ `FactUnknown`。"""
     try:
-        return branch_strategy.load(strategy_root(cwd))
+        return branch_strategy.load(repo_root(cwd))
     except branch_strategy.StrategyError as exc:
         raise FactUnknown(f"ブランチ戦略の設定を読めない: {exc.reason}") from exc
 
@@ -194,7 +222,8 @@ def base_refs_once() -> Iterator[None]:
     """
     token = _BASE_REFS.set({})
     try:
-        yield
+        with roots_once():
+            yield
     finally:
         _BASE_REFS.reset(token)
 
@@ -256,10 +285,11 @@ def docs_only(git: Git, rng: str, cwd: Path) -> bool:
 
 
 def sprint_diff_kinds(context: Mapping[str, Any], cwd: Path) -> dict[str, bool]:
-    """スプリントの差分を分ける（`range_diff_kinds`）。"""
+    """スプリントの差分を分ける（`range_diff_kinds`）。ブランチ戦略と `docs` の設定は、1 回だけ求めた同じ根から読む。"""
     try:
-        git, rng = _sprint_range(context, cwd)
-        return range_diff_kinds(git, rng, cwd)
+        with roots_once():
+            git, rng = _sprint_range(context, cwd)
+            return range_diff_kinds(git, rng, cwd)
     except GitError as exc:
         raise FactUnknown(f"差分を求められない: {exc}") from exc
 
@@ -390,11 +420,12 @@ def facts_of(words: tuple[str, ...], context: Mapping[str, Any], cwd: Path) -> d
     if unknown:
         raise FactUnknown(f"条件 {unknown[0]} を求める手段が無い")
     out = {}
-    for w in words:
-        try:
-            out[w] = known[w]()
-        except FactUnknown as exc:
-            raise FactUnknown(f"条件 {w} を求められない（{exc}）") from exc
+    with roots_once():  # 語ごとに設定を読んでも、根は 1 回だけ求める
+        for w in words:
+            try:
+                out[w] = known[w]()
+            except FactUnknown as exc:
+                raise FactUnknown(f"条件 {w} を求められない（{exc}）") from exc
     return out
 
 

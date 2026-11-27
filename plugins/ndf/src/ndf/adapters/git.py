@@ -248,6 +248,13 @@ class Git:
             raise _failed(args, done.returncode, done.stderr.decode("utf-8", "replace"))
         return done.stdout
 
+    def toplevel(self) -> Path:
+        """作業場所の worktree の根（`git rev-parse --show-toplevel`。サブモジュールならそのworktree）。失敗は `GitError`。
+
+        設定を読むリポジトリの根の解き方はここだけに置く（`route.repo_root`・`progress.command.repo_root` が使う。#4513）。
+        """
+        return Path(self.run("rev-parse", "--show-toplevel").strip())
+
     def rev_parse(self, ref: str) -> str:
         """参照（短い SHA・ブランチ・タグ）をコミットの完全な SHA へ解決する（#2041）。"""
         sha = self.run("rev-parse", "--verify", "--quiet", END_OF_OPTIONS, f"{ref}^{{commit}}").strip()

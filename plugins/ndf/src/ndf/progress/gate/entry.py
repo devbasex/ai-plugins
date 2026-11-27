@@ -204,11 +204,11 @@ def _version_aware(kind: str) -> bool:
 def _strategy_at(workdir: Path) -> Optional[branch_strategy.Strategy]:
     """作業場所のリポジトリのブランチ戦略の設定。読めなければ None（バージョン番号を持つ扱い）。
 
-    根は `git rev-parse --show-toplevel` で決める。作業場所（`--cwd` は任意の場所を指せる）に `.ndf/project.json` があっても
-    根とはみなさない（根の解き方は `progress/command.py` の `strategy_root` だけに置く。#4513）。
+    根は `command.repo_root`（`git rev-parse --show-toplevel` を 1 回）で決める。作業場所（`--cwd` は任意の場所を指せる）に
+    `.ndf/project.json` があっても根とはみなさない（#4513）。
     """
     try:
-        return branch_strategy.load(command.strategy_root(workdir))
+        return branch_strategy.load(command.repo_root(workdir))
     except (branch_strategy.StrategyError, GitError, OSError) as exc:  # 設定: 読めなければバージョン番号を持つ扱いで形を確かめる
         log.info("ブランチ戦略の設定を読めないのでバージョン番号を持つ扱いにする", extra={"workdir": str(workdir), "error": str(exc)})
         return None
@@ -367,7 +367,7 @@ def released_outcome(work: str, saved: Mapping[str, Any], strategy: Optional[bra
     return result.stopped(TOOL, "precondition", detail)
 
 
-# 手で終える出力の例（`manual_finish_example`）の置き換える所の説明。停止理由と詳細設計書が同じ説明を使う
+# 手で終える出力の例（`manual_finish_example`）の置き換える所の説明。正本はここで、詳細設計書は写さずにここを指す
 MANUAL_FINISH_FILL = (
     "outputs.delivery は、実際の本番配布に対応する届け先のオブジェクト全体で置き換える"
     "（.ndf/project.json の branch_strategy.release.deliveries の 1 行と同じ形）。"
