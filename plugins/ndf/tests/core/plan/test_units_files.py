@@ -639,12 +639,17 @@ def _stage(monkeypatch, work: Path, **extra) -> None:
     monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps({k: v for k, v in held.items() if v is not None}))
 
 
-def test_cli_record_check_writes_checked_json_from_the_reviewed_commit(reviewed, work, capsys):
+def test_cli_record_check_writes_checked_json_from_the_reviewed_commit(reviewed, work, capsys, monkeypatch):
+    asked_docs: list[bool] = []
+    check = uf.check
+    monkeypatch.setattr(uf, "check", lambda *args: asked_docs.append(args[-1]) or check(*args))
     (work / "issues" / "issue-7-plan.units.json").write_text("壊れた", encoding="utf-8")
 
     _, out = _run(capsys, "check")
 
     assert (out["status"], out["outputs"]) == ("ok", {"design_pr": 12})
+    # `--docs` を渡さなくても、記録を書く前に実装計画と突き合わせる（食い違いの判定は test_check_docs_* が確かめる）
+    assert asked_docs == [True]
     checked = json.loads((reviewed / "checked.json").read_text(encoding="utf-8"))
     assert checked == {
         "head": Git(work).run("rev-parse", "HEAD").strip(),
@@ -660,13 +665,7 @@ def test_cli_record_check_writes_checked_json_from_the_reviewed_commit(reviewed,
 
 @pytest.mark.parametrize(
     ("change", "kind"),
-    [
-        ("head", "approval_stale"),
-        ("no_branch", "precondition"),
-        ("other_pr", "refused"),
-        ("no_file", "precondition"),
-        ("other_tasks", "invalid"),
-    ],
+    [("head", "approval_stale"), ("no_branch", "precondition"), ("other_pr", "refused"), ("no_file", "precondition")],
 )
 def test_cli_record_check_writes_nothing_when_it_stops(reviewed, work, capsys, monkeypatch, change, kind):
     (reviewed / "checked.json").write_text("{}", encoding="utf-8")
@@ -676,9 +675,6 @@ def test_cli_record_check_writes_nothing_when_it_stops(reviewed, work, capsys, m
         _stage(monkeypatch, work, branch=None)
     elif change == "other_pr":
         _stage(monkeypatch, work, design_pr=13)
-    elif change == "other_tasks":
-        _put(work, "issue-7-plan.md", _plan(1, 3))
-        (reviewed / "reviewed-head").write_text(_commit(work) + "\n", encoding="utf-8")
     else:
         (reviewed / "reviewed-pr").unlink()
 

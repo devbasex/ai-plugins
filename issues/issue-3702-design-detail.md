@@ -222,7 +222,7 @@ contracts/
 | サブコマンド | 引数 | 動き |
 | --- | --- | --- |
 | `check` | `[--issue N]... [--omitted N]... [<ファイル>...] [--docs]` | `check` の結果 JSON。`--issue` が無く、環境変数 `NDF_STAGE_INPUT` があれば、入力の `issues`・`plan_omitted`・`worktree` を使う（工程の `script` のステップは引数を組めないため） |
-| `render` | `--issue N... [--omitted N]...` | 表を書き直してから、同じプロセスで `check --docs` を返す |
+| `render` | `--issue N [--issue N]... [--omitted N]...` | 表を書き直してから、同じプロセスで `check --docs` を返す |
 
 環境変数 `NDF_DESIGN_RECORD_DIR` があるとき（工程「ドキュメントレビュー」の `units-check`）は、次のように動く。
 
