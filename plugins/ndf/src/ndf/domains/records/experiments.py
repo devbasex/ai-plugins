@@ -176,9 +176,12 @@ def _group_units(seen: Sequence[_Seen], observed: Optional[str] = None) -> list[
     return same + ([u for u in unknown if u.at >= min(after)] if after else [])
 
 
-def unit_pool(rows: Sequence[Mapping[str, Any]], usage: UsageIndex, *, where: mc.Where) -> list[_Seen]:
-    """`where`（リポジトリ・工程・ランタイム・互換性のキー）が同じで、今の指標の効果（null でない）がある単位のうち、停止と基準への
-    切り替えの無いもの（割り付けの日時では絞らない）。実験の記録を 1 回だけ走査し、範囲ごとの絞り込みは `pick_units` が行う。"""
+def unit_pool(
+    rows: Sequence[Mapping[str, Any]], usage: UsageIndex, *, where: mc.Where, start: datetime, end: Optional[datetime] = None
+) -> list[_Seen]:
+    """`where`（リポジトリ・工程・ランタイム・互換性のキー）が同じで、`start` 以降（`end` があればその前まで）に割り付け、今の指標の
+    効果（null でない）がある単位のうち、停止と基準への切り替えの無いもの。実験の記録を 1 回だけ走査し、範囲の外の割り付けは
+    単位の値に変換しない。範囲が複数ある呼び手は、すべてを覆う範囲を渡し、範囲ごとの絞り込みを `pick_units` に任せる。"""
     left, effects = _left(rows), _effects(rows, mc.metric_of(where.stage))
     costs, models = usage.costs, usage.models
     seen = []
@@ -186,7 +189,10 @@ def unit_pool(rows: Sequence[Mapping[str, Any]], usage: UsageIndex, *, where: mc
         aid = a["assign_id"] if a["kind"] == "assign" else None
         if aid is None or not where.of(a) or aid in left or aid not in effects or effects[aid]["quality"] is None:
             continue
-        value = UnitValue(aid, a["chosen"], tuple(a["probs"]), _time(a), effects[aid]["quality"], costs.get(aid), models.get(aid))
+        at = _time(a)
+        if at < start or (end is not None and at >= end):
+            continue
+        value = UnitValue(aid, a["chosen"], tuple(a["probs"]), at, effects[aid]["quality"], costs.get(aid), models.get(aid))
         seen.append(_Seen(value, mc.model_group(a["arms"][a["chosen"]], a["arms"]), _time(effects[aid])))
     return seen
 
@@ -220,7 +226,8 @@ def unit_values(
 
     `observed` は、まとまり → 最も新しい `observed` の行のモデル（`model_choice.observed_models`）。あるまとまりは、その
     モデルを今のモデルとする。`usage` は使用量ログから求めた単位の費用と実際のモデル（`usage_index`）で、呼び手が 1 回だけ求めて渡す。"""
-    return pick_units(unit_pool(rows, usage, where=where), now - timedelta(days=window_days), observed=observed)
+    start = now - timedelta(days=window_days)
+    return pick_units(unit_pool(rows, usage, where=where, start=start), start, observed=observed)
 
 
 def seed_of(where: mc.Where, allocation: Mapping[str, Any], units: Sequence[UnitValue]) -> int:

@@ -280,8 +280,9 @@ def _units_of(where: model_choice.Where, arms: Sequence[Mapping[str, str]], rec:
     """
     since, end = rec.span.since, rec.span.end
     edge = end - timedelta(days=rec.allocation["window_days"])
-    latest = model_choice.observed_latest(rec.upto, where, arms, min(since, edge))
-    pool = experiments.unit_pool(rec.rows, rec.usage, where=where)
+    first = min(since, edge)
+    latest = model_choice.observed_latest(rec.upto, where, arms, first)
+    pool = experiments.unit_pool(rec.rows, rec.usage, where=where, start=first, end=end)
 
     def pick(start: datetime) -> list:
         return experiments.pick_units(pool, start, end, {g: model for g, (at, model) in latest.items() if at >= start})
