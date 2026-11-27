@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/review.schema.json",
   "title": "レビューの観点の設定（.ndf/review.json）",
-  "description": "レビューで必ず見る観点の並びと、指摘の基準・見送り・返信を差し替えるプロファイル。ndf cross-review run は、メインディレクトリ（レビュー対象の worktree を作った元の clone）の .ndf/review.json を開き、シンボリックリンクならリンク先を読む。レビュー対象の worktree にある同じ名前のファイルは直接開かない。ただし、リンク先がそのファイルなら、そこに書いた値を読んで検証する。設定ファイルの実体がレビュー対象の worktree の中にある場合は、fixer_sessions を true にできない。true を指定すると、ndf cross-review run は相手役も修正担当も起動せずに invalid で停止する。version 1 は focus と fixer_sessions と limits だけを読みほかのキーを無視し、version 2 は focus と profile、version 3 は focus と最上位の criteria・not_written と profiles を読む",
+  "description": "レビューで必ず見る観点の並びと、指摘の基準・見送り・返信を差し替えるプロファイル。ndf cross-review run は、メインディレクトリ（レビュー対象の worktree を作った元の clone）の .ndf/review.json を開き、シンボリックリンクならリンク先を読む。レビュー対象の worktree にある同じ名前のファイルは直接開かない。ただし、リンク先がそのファイルなら、そこに書いた値を読んで検証する。設定ファイルの実体がレビュー対象の worktree の中にある場合は、fixer_sessions を true にできない。true を指定すると、ndf cross-review run は相手役も修正担当も起動せずに invalid で停止する。ndf cross-review run は version 1 の focus、fixer_sessions、limits を読んでほかのキーを無視し、version 2・3 は invalid で停止する。次のキーは設定スキーマ上の定義である。version 2 は focus と profile、version 3 は focus、最上位の criteria と not_written、profiles を定義する",
   "type": "object",
   "additionalProperties": false,
   "required": [
