@@ -5,7 +5,8 @@
 CLI のコマンドは、そのランタイムの実行ファイルと決まった語（ランタイムの表の `delegate_prefix`。codex は `exec`）で始め、
 そのすぐ後に NDF の引数を入れる位置 `{args}` を単独の引数として 1 つだけ持つ。`{args}` には、codex なら選んだモデルと
 effort の引数（`model_choice.launch_choice` の層 `seat`・作業 `delegate`。#2944）、安全装置の引数（`launch_settings.safety_args`）、
-作業ディレクトリを今のディレクトリにする引数（codex は `-C <今のディレクトリ>`）をこの順に入れる。kiro と agy は値を選ばない
+作業ディレクトリを今のディレクトリにする引数（codex は `-C <今のディレクトリ>`）をこの順に入れる。コマンドが `--model` でモデルを
+明示すれば、その値を起動の引数として値の選択に渡し（下位のモデルの環境変数を読まない）、選んだモデルの引数は足さない。kiro と agy は値を選ばない
 （モデルは手順書が `--model` で書く）。codex は起動の設定（`.ndf/launch.json`）を 1 回だけ読み、値の選択と安全装置の判定に渡す。外す引数なら起動の直前に承認の対象を読み直してから、子の環境に
 `NDF_AI_CHILD=1` を足してこのプロセスを CLI に置き換える（`exec`）。標準入力・標準出力・終了コードは CLI のものになる。
 
@@ -21,7 +22,9 @@ import argparse
 import os
 import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
+from typing import Optional
 
 from ndf import cli
 from ndf.adapters import agents, launch_settings as ls, model_choice
@@ -35,6 +38,8 @@ PLACE = "{args}"
 SAFETY_COLUMNS = (*ls.SANDBOXED.values(), ls.UNSANDBOXED, "safety_aliases")
 # 作業ディレクトリを指す引数の名前の列（先頭の名前で NDF が今のディレクトリを入れる）
 WORKDIR_COLUMN = "workdir_options"
+# モデルを指す引数の名前の列（コマンドが明示したモデルを、値の選択に起動の引数として渡す）
+MODEL_COLUMN = "model_options"
 # 実行ファイルのすぐ後に置く語の列（そのすぐ後が `{args}` の位置）
 PREFIX_COLUMN = "delegate_prefix"
 # 引数の終わり（これより後の語は CLI のオプションとして読まれない）
@@ -109,6 +114,28 @@ def _workdir_args(runtime: str, cwd: Path) -> list[str]:
     return [row[WORKDIR_COLUMN][0], str(cwd)] if WORKDIR_COLUMN in row else []
 
 
+def _given_model(runtime: str, command: Sequence[str]) -> Optional[str]:
+    """コマンドが明示したモデル（`--model M`・`--model=M`・`-mM`。複数あれば CLI と同じく最後）。無ければ None。"""
+    row = facts.row(RUNTIMES, runtime)
+    names = set(row[MODEL_COLUMN]) if MODEL_COLUMN in row else set()
+    words = _options(command)
+    found = None
+    for i, w in enumerate(words):
+        if w in names:
+            found = words[i + 1] if i + 1 < len(words) else found
+        elif _names(w, names):
+            found = w.partition("=")[2] if "=" in w else w[2:]
+    return found
+
+
+def _choice_args(runtime: str, command: Sequence[str], cwd: Path, settings: ls.Settings) -> list[str]:
+    """選んだモデルと effort の引数。コマンドが明示したモデルは起動の引数として渡し（設計書の「値の優先」の順 1）、引数は足さない
+    （コマンドがすでに持つ）。"""
+    model = _given_model(runtime, command)
+    choice = model_choice.launch_choice(*CHOICE_LAUNCH, runtime, cwd=cwd, settings=settings, argument=(model, None))
+    return (replace(choice, model=None) if model is not None else choice).cli_args()
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=f"ndf {TOOL}", description="外部 AI への委譲を、安全装置の引数を入れて起動する")
     p.add_argument("--runtime", required=True, choices=_delegates(), help="起動するランタイム")
@@ -126,7 +153,7 @@ def _launch(a: argparse.Namespace) -> None:
     settings = None
     if a.runtime in CHOOSES:
         settings = ls.load(ls.launch_root(cwd))
-        choice = model_choice.launch_choice(*CHOICE_LAUNCH, a.runtime, cwd=cwd, settings=settings).cli_args()
+        choice = _choice_args(a.runtime, command, cwd, settings)
     safety = ls.safety_args(a.runtime, a.use, cwd, settings=settings)
     argv = build_command(a.runtime, command, [*choice, *safety.args, *_workdir_args(a.runtime, cwd)])
     why = safety.verify() if safety.verify is not None else None

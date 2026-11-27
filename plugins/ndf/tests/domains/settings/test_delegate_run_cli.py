@@ -189,6 +189,14 @@ def test_the_use_given_is_passed_to_the_safety_arguments(repo: Path, monkeypatch
     assert seen == [use[1] if use else "delegate"] and execs[0][1][4:6] == ["-s", sandbox]
 
 
+def test_a_model_given_in_the_command_wins_over_the_model_variable(repo: Path, monkeypatch, execs) -> None:
+    """コマンドが明示したモデルは起動の引数として選択に渡り、下位の環境変数を確かめない（改行を含んでも止まらない）。モデルの引数は足さない。"""
+    monkeypatch.setattr(agents, "user_namespaces", lambda: True)
+    monkeypatch.setenv(identity.env_name("launch-codex-model"), "a\nb")
+    drc.main(["--runtime", "codex", "--", "codex", "exec", "{args}", "--model", "gpt-x"])
+    assert execs[0][1] == ["codex", "exec", *EFFORT, "-s", "workspace-write", "-C", str(repo), "--model", "gpt-x"]
+
+
 @pytest.mark.parametrize(("can", "reads"), [(True, 1), (False, 2)])
 def test_codex_reads_the_launch_settings_once_to_build_the_arguments(repo: Path, monkeypatch, execs, can: bool, reads: int) -> None:
     """引数の組み立てで読むのは 1 回。サンドボックスなしの経路だけ、起動の直前の照らし直しがもう 1 回読む。"""
