@@ -34,6 +34,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shlex
 import stat
 import subprocess
@@ -53,6 +54,8 @@ BLOB = "{ ... on Blob { oid text isTruncated } }"
 TREE = "{ ... on Tree { entries { name } } }"
 FETCHED, ABSENT, FAILED = "取得済み", "本文が無い", "未取得"
 EXCLUDES, INCLUDES, UNKNOWN = "含まない", "含む", "判断できない"
+# このスクリプトが作る一時ファイルの名前の終わり。強制終了で残った分を、利用者のファイルと取り違えずに回収するために付ける
+TMP_SUFFIX = ".mvv-replay.tmp"
 STAND_IN = {"verdict": "follow", "reasons": ["判定の代役（実物の LLM を呼ばない）"], "boundary": [], "basis": ["Value 1"]}
 
 
@@ -127,7 +130,7 @@ def _write_json(path: Path, value: Any, held: Optional[_Held] = None) -> None:
     `held` を渡すと、置き換える前の一時ファイルにロックを掛けてから置き換え、ロックを新しい中身へ引き継ぐ（`_exclusive`）。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=TMP_SUFFIX)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", closefd=held is None) as f:
             os.fchmod(f.fileno(), 0o600)
@@ -408,8 +411,9 @@ def _exclusive(result: Path) -> Iterator[_Held]:
     ロックを取った起動は、取れた中身が今のパスのものかを確かめ、違えば開き直す。結果ファイルが無ければ、同じディレクトリの一時
     ファイルにロックを掛けてから `os.link` で結果のパスへ置く（`_create_locked`）。結果のパスに現れた時点で作った起動がロックを
     持っているので、並べた起動のどれが先に開いても、作った起動より先にロックを取る起動は無い。保存しないまま終わったときは、その起動が
-    作ったファイル（作った inode のまま）だけを消す。利用者が置いた空のファイルは消さない。ロックのためのファイルを別に作らず、プロセスが終われば自動で外れ、状態の
-    保存先の環境変数にも依らない。
+    作ったファイル（作った inode のまま）だけを消す。利用者が置いた空のファイルは消さない。ロックのためのファイルを別に作らず、
+    プロセスが終われば自動で外れ、状態の保存先の環境変数にも依らない。ロックを取った後、前の起動が強制終了で残した一時ファイル
+    （`_leftovers`）を消す。保存先はハードリンクを作れるファイルシステムに限る（exFAT・FAT32 などは使えない）。
     """
     result.absolute().parent.mkdir(parents=True, exist_ok=True)
     # FIFO などがあっても待たずに開き、通常のファイルかを確かめる
@@ -442,6 +446,9 @@ def _exclusive(result: Path) -> Iterator[_Held]:
             break
         # 先の起動が置き換えた後の古い中身か、消した空のファイルのロックを取った
         os.close(fd)
+    # ロックを持つ起動だけが保存の一時ファイルを書くので、残っている保存の一時ファイルは強制終了した前の起動のもの
+    for left in _leftovers(result):
+        left.unlink(missing_ok=True)
     held = _Held(fd)
     try:
         yield held
@@ -458,10 +465,12 @@ def _create_locked(result: Path) -> Optional[int]:
     """空の結果ファイルを、ロックを掛けた状態で結果のパスへ置き、その記述子を返す。名前が既に埋まっていれば None を返す。
 
     一時ファイルを作ってロックしてから `os.link` で置くので、結果のパスに現れた時点でこの起動がロックを持っている。作れないとき
-    （親のディレクトリが消えたなど）は、開き直しを繰り返さずに止める。
+    （親のディレクトリが消えた、保存先がハードリンクを作れないなど）は、開き直しを繰り返さずに止める。置く前に、ロックを取った
+    別の起動が一時ファイルを残骸として消したときは、名前が埋まったものとして None を返す。
     """
+    parent = result.absolute().parent
     try:
-        fd, tmp = tempfile.mkstemp(dir=result.absolute().parent, prefix=f".{result.name}.", suffix=".tmp")
+        fd, tmp = tempfile.mkstemp(dir=parent, prefix=f".{result.name}.", suffix=TMP_SUFFIX)
     except OSError as exc:
         raise Stop(f"--result（{result}）を作れない: {exc}") from None
     try:
@@ -471,12 +480,41 @@ def _create_locked(result: Path) -> Optional[int]:
     except FileExistsError:
         os.close(fd)
         return None
+    except FileNotFoundError as exc:
+        os.close(fd)
+        if parent.is_dir() and not os.path.lexists(tmp):
+            # 結果ファイルを置いてロックを取った別の起動が、この一時ファイルを残骸として消した
+            return None
+        raise Stop(f"--result（{result}）を作れない: {exc}") from None
     except OSError as exc:
         os.close(fd)
-        raise Stop(f"--result（{result}）を作れない: {exc}") from None
+        # 作成と置き換えができても、ハードリンクを作れない保存先（exFAT・FAT32 など）ではここで止まる
+        raise Stop(
+            f"--result（{result}）を作れない: {exc}。judge の保存先は、ハードリンクを作れるファイルシステム（ext4・XFS・APFS など）に置く"
+        ) from None
     finally:
         Path(tmp).unlink(missing_ok=True)
     return fd
+
+
+def _leftovers(result: Path) -> list[Path]:
+    """`result` を保存するときにこのスクリプトが作る名前（`.<結果の名前>.<乱数>` + `TMP_SUFFIX`）の、通常のファイル。"""
+    pattern = re.compile(rf"\.{re.escape(result.name)}\.[A-Za-z0-9_]+{re.escape(TMP_SUFFIX)}")
+    parent = result.absolute().parent
+    try:
+        names = os.listdir(parent)
+    except OSError:
+        return []
+    found = []
+    for name in names:
+        if not pattern.fullmatch(name):
+            continue
+        try:
+            if stat.S_ISREG(os.stat(parent / name, follow_symlinks=False).st_mode):
+                found.append(parent / name)
+        except FileNotFoundError:
+            continue
+    return found
 
 
 def _same_inode(fd: int, path: Path) -> bool:
