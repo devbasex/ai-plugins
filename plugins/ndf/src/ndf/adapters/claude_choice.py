@@ -8,12 +8,14 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
 from ndf.adapters import claude
+from ndf.contracts import internal
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +25,8 @@ class LaunchChooser(Protocol):
     `repo`・`cli_args()`・`env_changes()`・`row_fields()` を持つ。"""
 
     def launch_choice(self, layer: str, name: str, runtime: str = "claude", *, cwd: Path, **request: Any) -> Any: ...
+
+    def precheck(self, runtime: str = "claude", *, cwd: Path, **given: Any) -> None: ...
 
     def base_fallback(self, choice: Any, reason: str) -> Optional[Any]: ...
 
@@ -44,6 +48,12 @@ def pick_values(layer: str, name: str, *, cwd: Path, **request: Any) -> Optional
     return None if launch_chooser is None else launch_chooser.launch_choice(layer, name, cwd=cwd, **request)
 
 
+def precheck_values(*, cwd: Path, **given: Any) -> None:
+    """差し込まれた処理で、起動の前に止まる値の誤りだけを確かめる（記録を読み書きしない）。差し込みが無ければ何もしない。"""
+    if launch_chooser is not None:
+        launch_chooser.precheck(cwd=cwd, **given)
+
+
 def report_outcome(assign_id: str, quality: Optional[float], detail: dict[str, Any]) -> None:
     """差し込まれた処理の `record_outcome` で効果指標を書く。受け口が無い・書けなければ警告を出して続ける（単位は数えない）。"""
     recorder = claude.launch_recorder
@@ -54,6 +64,21 @@ def report_outcome(assign_id: str, quality: Optional[float], detail: dict[str, A
         recorder.record_outcome(assign_id, quality, detail)
     except Exception as exc:  # noqa: BLE001 外部コマンド: 効果指標を書けなくても工程の結果を変えない（#2944 の詳細設計の異常系）
         log.warning("割り付け %s の効果指標を書けない: %s", assign_id, exc)
+
+
+def _monotonic() -> float:
+    """期限を測る単調時計の秒。テストが差し替える。"""
+    return time.monotonic()
+
+
+def deadline_after(timeout: float) -> float:
+    """今から `timeout` 秒後の期限（単調時計）。"""
+    return _monotonic() + timeout
+
+
+def left_until(deadline: float) -> float:
+    """期限までの残りの秒（過ぎていれば 0 以下）。"""
+    return deadline - _monotonic()
 
 
 @dataclass
@@ -82,6 +107,10 @@ class ChoiceRun:
     @property
     def assign_id(self) -> Optional[str]:
         return None if self.choice is None else self.choice.assign_id
+
+    def cli_args(self) -> list[str]:
+        """選んだ値の引数（`--model`・`--effort`）。値を選ばなかった起動は足さない。"""
+        return [] if self.choice is None else list(self.choice.cli_args())
 
     @property
     def repo(self) -> Optional[str]:
@@ -114,6 +143,8 @@ class ChoiceRun:
         """
         if reply.failure is not claude.Failure.MODEL_REFUSED or self.switched or launch_chooser is None or self.choice is None:
             return False
+        if not self.choice.switchable:  # 切り替える対象でない拒否は、期限も材料も確かめず、拒否のまま返す
+            return False
         if ready is not None and not ready():
             return False
         back = launch_chooser.base_fallback(self.choice, str(claude.Failure.MODEL_REFUSED))  # CLI の出力の本文は記録に残さない
@@ -121,3 +152,27 @@ class ChoiceRun:
             return False
         self.choice, self.request_try, self.switched = back, self.request_try + 1, True
         return True
+
+    def fall_back_until(
+        self, reply: claude.ClaudeReply, deadline: float, verify: Optional[Callable[[], Optional[str]]] = None
+    ) -> Optional[float]:
+        """`fall_back` を期限 `deadline`（`deadline_after`）の中で行い、基準の組で起動し直せる残りの秒を返す。
+
+        切り替えの記録の前に、期限の残り・起動の承認の対象（`verify`。`launch_settings.Grant.verifier`）・もう一度期限の残りの順に
+        確かめる。残りが無ければ切り替えず記録も書かずに 0 を返し、承認の対象が変わったか承認が取り消されていれば、記録を書かずに
+        `InternalError`（precondition）を送る。切り替えたら、記録を書いた後（錠の待ちを含む）に測り直した残りの秒を返す（0 以下なら
+        呼び手が起動し直さない）。切り替えなければ None。割り付けの無い起動と基準の組の拒否は、期限が切れていても None。
+        起動し直しには `LaunchOptions.left` で `deadline` の残りを渡す。
+        """
+        expired = False
+
+        def ready() -> bool:
+            nonlocal expired
+            if left_until(deadline) > 0 and verify is not None and (changed := verify()) is not None:
+                raise internal.InternalError("precondition", changed)
+            expired = left_until(deadline) <= 0
+            return not expired
+
+        if not self.fall_back(reply, ready=ready):
+            return 0.0 if expired else None
+        return left_until(deadline)

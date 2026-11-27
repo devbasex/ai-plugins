@@ -95,9 +95,10 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `table` | `adapters/model_choice.py` | 新設 | `table(root: Path, settings: Optional[Settings] = None) -> Table` | 同梱とリポジトリの `experiments` を重ね、値の制約を検証する。`settings` を渡されれば `.ndf/launch.json` を読み直さずに使う。同梱の値はスキーマに照らさない（配布の後に変わらないので、CI のテストが `bundled_errors` で確かめる） |
 | `bundled_errors` | 同 | 新設 | `bundled_errors() -> list[str]` | 同梱の値が起動の設定のスキーマに合わない箇所を返す。起動の経路では呼ばず、CI のテストが呼ぶ |
 | `stage_of` | 同 | 新設 | `stage_of(layer: str, name: str) -> Optional[str]` | 層と作業の名前から工程を引く |
-| `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, unit: Optional[str] = None, charge_to: Optional[str] = None, retry: Optional[str] = None, mode: Optional[str] = None, argument: tuple[Optional[str], Optional[str]] = (None, None), environ: Optional[Mapping] = None, settings: Optional[Settings] = None) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる。`settings` は `table` へ渡す |
+| `launch_choice` | 同 | 新設 | `launch_choice(layer: str, name: str, runtime: str = "claude", *, cwd: Path, environ: Optional[Mapping[str, str]] = None, settings: Optional[Settings] = None, **request: Any) -> Choice` | 優先の順で値を決め、要れば割り付けて引き上げる。`settings` は `table` へ渡す。`request` は `Request` の欄を名前で受ける |
+| `Request` | 同 | 新設 | `unit: Optional[str] = None`、`charge_to: Optional[str] = None`、`retry: Optional[str] = None`、`mode: Optional[str] = None`、`argument: tuple[Optional[str], Optional[str]] = (None, None)`、`argument_at: tuple[str, str] = ("引数 --model", "引数 --effort")` | `launch_choice` の `request` が受け付ける欄。ほかの名前を渡すと `TypeError` になる。`argument` はモデルと effort の引数の指定、`argument_at` は誤りの文でその引数を指す言い方 |
 | `raised` | 同 | 新設 | `raised(runtime: str, model: Optional[str], effort: Optional[str]) -> tuple[Optional[str], Optional[str]]` | 設計書の「引き上げる起動」の上げ方の表を当てる |
-| `base_fallback` | 同 | 新設 | `base_fallback(choice: Choice, reason: str) -> Optional[Choice]` | 切り替える条件に当たれば `launch_error` の行を書き、基準の組の値を返す。当たらなければ None。行は `append_row(row, choice.store)` で、割り付けたときと同じ保存先に書く。呼び出しで環境変数を差し替えて保存先が既定と違っても、次の起動が同じ保存先から切り替えを読めるようにするためである |
+| `base_fallback` | 同 | 新設 | `base_fallback(choice: Choice, reason: str) -> Optional[Choice]` | 切り替える条件（`Choice.switchable`。割り付けた、基準でない組）に当たれば `launch_error` の行を書き、基準の組の値を返す。当たらなければ None。行は `append_row(row, choice.store)` で、割り付けたときと同じ保存先に書く。呼び出しで環境変数を差し替えて保存先が既定と違っても、次の起動が同じ保存先から切り替えを読めるようにするためである |
 | `candidates` | 同 | 新設 | `candidates(arms: Sequence, rows: Sequence, entry: Optional[Mapping], now: datetime, where: Where, *, refused: Optional[Mapping[int, datetime]] = None) -> list[int]` | 打ち切った組と起動できない組を除いた添字。`refused` は呼び手が求めた `refused_until` の結果で、渡されれば記録を走査し直さない。`launch_error` は割り付け ID で割り付けの行を引き、`where`（`repo`・`stage`・`runtime`・`key` を持つ組）が同じものだけを数える。引数の多い関数の検査（PLR0913）に合わせ、4 つのキーを 1 つの値にまとめた |
 | `refused_until` | 同（本体は `adapters/experiment_rows.py`） | 新設（B2b） | `refused_until(arms, rows, now: datetime, where: Where) -> dict[int, datetime]` | 起動できない組 → 候補へ戻る日時。戻る日時は、新しいほうから `refusals` 件目の `launch_error` の行の日時に `refusal_days` を足した日時。`candidates` と `report` の `dropped_until` が同じ規則を使う |
 | `unpriced_models` | 同（本体は `adapters/experiment_rows.py`） | 新設（B2b） | `unpriced_models(rows, where: Where, start: datetime) -> list[str]` | `start` 以降に割り付けた同じキーの単位の、費用を計算できないモデル。割り付けの `uniform` の判定と `report` の表示が同じ条件を使う |
@@ -160,7 +161,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | `read_experiments`・`ledger`・`append_row` | `domains/records/jsonl.py` | 層の順序（adapters は domains を読めない） | 使えない。`filelock` と `contracts` の形の確認を使う |
 | `table` | `launch_settings.load` | #1959 の詳細設計 | 使う |
 | `compatibility_key` | `launch_approval.digest` の形 | 同上 | 同じ「キーの順にそろえた JSON の SHA-256」にする |
-| `launch_choice` のリポジトリのキー | `launch_approval.repo_key` | #1959 の詳細設計 | 使う。単位のある起動のたびに `git rev-parse` を 1 回起動するが、同じ値をファイルから求める関数を別に持つと、`.git` と `commondir` を読む処理がほかの 3 か所と重なる（重複の検査）。起動する CLI に比べて子プロセス 1 つの費用は小さい |
+| `launch_choice` のリポジトリのキー | `launch_approval.repo_key` | #1959 の詳細設計 | 使う。値の選択（単位のある起動）と起動の承認の確認（指定のある起動）の両方がキーを使い、それぞれがその時点で解く。承認の確認が、割り付けの記録を待つ前に解いたキーを使わないためである（[設計書の「受け入れる限界」](./issue-2944-design.md#受け入れる限界)）。同じ値をファイルから求める関数を別に持つと、`.git` と `commondir` を読む処理がほかの 3 か所と重なる（重複の検査） |
 | `stage_of` | `contracts/worker/kinds.json` | `ls contracts/worker` | 作業の名前は同じ。工程の対応は持たないので表に置く |
 | `raised`・`candidates`・`base_fallback` | — | `grep -rn "effort" src/ndf`（該当なし） | 新設する |
 | `report_outcome`・`record_outcome` | `report_launch`・`record_cli`（#1959） | #1959 の詳細設計 | 同じ差し込みに関数を足す |
@@ -271,6 +272,14 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 - 再開は、最初の起動の `--model`・`--effort`・割り付け ID・`CLAUDE_CODE_EFFORT_LEVEL` の扱いを保持して使う（設計書の「同じ会話を続ける起動」）。最初の起動の子にこの変数が無かった場合は、再開の子から外す
 - `charge_to`（費用を手戻りとして負う割り付け ID）は、作業が `fix`・`ci-fix` のときの `NDF_CHARGE_TO` の値である。ほかの作業は `charge_to` を書かず、子の環境から `NDF_CHARGE_TO` を外す
 - `outcome` は、結果ファイルがあればその `status`、無ければ `no_result`、起動の失敗の回答は `unknown`。基準へ切り替える打ち直しは `RESUMES` に数えない
+- worker・Skill・判定は、拒否を受けた起動が切り替える対象（`Choice.switchable`）かを最初に確かめる。割り付けの無い起動と基準の組の拒否は、期限が切れていても拒否のまま止まる（`precondition`）。次の確認と期限切れの扱いは、対象の起動だけに当てる
+- worker と Skill は、拒否の行を書く前に、残りの期限と起動の承認の対象（`Grant.verify`）を確かめる。承認の対象が変わったか承認が取り消されていれば、行を書かずに `precondition` で止まる
+- 基準の組で起動し直す起動は、最初の起動の前に決めた期限を超えない。`LaunchOptions.left` には、単調時計で管理する期限までの残り秒数を呼び出すたびに計算する関数を渡す。起動の部品はこの関数を次のように使う
+  - 重い起動のスロットを待つ上限は、待ち始める時点（学習に使わない設定の確認の後）の元の上限と残り秒数の小さい方にする。残りが無ければスロットを取り始めない。残りが無くなってスロットを取れなければ `interrupted` で止まる
+  - スロットを取った直後に残りが無ければ、承認の再確認と CLI の下限の確認をせずに `interrupted` で止まる
+  - 子を起動する直前と、中継の起動で子の実行を許す直前に残りを確かめ、無ければ起動せず `interrupted` で止まる
+  - 回答を待つ上限は、子を起動した後、待ち始める時点の残り秒数にする。中継の起動で子の起動の知らせを待つ上限も、残り秒数を超えない
+- 残りが無くて起動し直せないときは、worker も Skill も、元のモデルの拒否ではなく期限切れの `interrupted` を返す
 - `--mode` は、`ndf answer work` が作業の値に `mode` を持つ場合に渡す（`progress/gate/entry.py`）
 
 ### 異常系の処理
@@ -279,7 +288,7 @@ Claude の起動処理・判定・worker・Skill の起動処理は、`model_cho
 | --- | --- | --- | --- | --- | --- | --- |
 | `delegate` | 設定の誤り | `launch_choice` | 起動の前 | 呼び出し元へ返す | `stopped`・`precondition` | 起動しない |
 | `delegate` | 基準の組の拒否 | 使えないモデル | `MODEL_REFUSED` と `base_fallback` が None | 止める | `stopped`・`precondition`。理由と `.ndf/launch.json` を示す | 設定を直して再実行 |
-| `delegate` | 残りの期限が無い | 拒否に時間がかかった | 打ち直しの前 | 止める。拒否の行も切り替えの行も書かない | `stopped`・`interrupted` | 再実行は、同じ単位の期間の中の割り付けを引き継ぎ、元の組で起動する。拒否の件数で候補から外す規則は新しく割り付けるときの抽選だけに効き、既にある割り付けには効かない（[allocation の「割り付けの流れ」](./issue-2944-design-allocation.md#割り付けの流れ)）。元の組がまた拒否されれば、判定と同じ手順で基準の組へ切り替える |
+| `delegate` | 切り替える対象の起動で残りの期限が無い | 拒否に時間がかかった | 打ち直しの前 | 止める。拒否の行も切り替えの行も書かない | `stopped`・`interrupted` | 再実行は、同じ単位の期間の中の割り付けを引き継ぎ、元の組で起動する。拒否の件数で候補から外す規則は新しく割り付けるときの抽選だけに効き、既にある割り付けには効かない（[allocation の「割り付けの流れ」](./issue-2944-design-allocation.md#割り付けの流れ)）。元の組がまた拒否されれば、判定と同じ手順で基準の組へ切り替える |
 
 ### 単体テストの観点
 

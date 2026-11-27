@@ -28,8 +28,9 @@ from string import Template
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
+from ndf.adapters import claude_choice
 from ndf.adapters.git import Git, GitError
-from ndf.contracts import result, worker_paths
+from ndf.contracts import internal, result, worker_paths
 from ndf.contracts.worker_kinds import kind_gaps, kind_values, values_in, work_dir_of, work_kinds
 from ndf.core import route
 from ndf.progress import command, invoke, model, run, store
@@ -224,11 +225,13 @@ def work_argv(
     *,
     prompt_file: Optional[str] = None,
     result_dir_id: Optional[tuple[int, int]] = None,
+    mode: Optional[str] = None,
 ) -> list[str]:
     """作業名を `ndf worker run` の必須の引数へ合わせる。4 つのファイルの名前は `report_paths` が持つ（字面を持たない）。
 
     `prompt_file` は起動指示を読む場所（`ndf answer work` は継いだ記述子の `/dev/fd/<番号>` を渡す。省くと保存先の起動指示）。
     `result_dir_id` は開いた保存先の `(st_dev, st_ino)` で、`ndf worker run` が結果ファイルの保存先を開き直したときに突き合わせる。
+    `mode` は工程の入力のモードで、あれば `--mode` で渡す（使用量ログと実験の記録に残す。#2944）。
     """
     spec = _known(kind)
     try:
@@ -238,7 +241,8 @@ def work_argv(
     files = ("--prompt-file", prompt_file or str(paths.prompt), "--result-file", str(paths.result))
     held = ("--result-dir-id", f"{result_dir_id[0]}:{result_dir_id[1]}") if result_dir_id is not None else ()
     required = [arg for name in spec["outputs"] for arg in ("--require-output", name)]
-    return ["run", "--kind", kind, *files, *held, "--cwd", str(cwd), "--state-dir", str(state_dir), *required]
+    modes = ("--mode", mode) if mode else ()
+    return ["run", "--kind", kind, *files, *held, "--cwd", str(cwd), "--state-dir", str(state_dir), *required, *modes]
 
 
 def work_parser() -> argparse.ArgumentParser:
@@ -287,6 +291,7 @@ class WorkHandoff(NamedTuple):
     workdir: Path
     prompt: str
     fd: int
+    mode: Optional[str] = None  # 工程の入力のモード（#2944）
 
 
 def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff:
@@ -295,7 +300,8 @@ def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff
     保存先は祖先のリンクを解きながら 1 回だけ開き（`open_resolved`。macOS の `/tmp`・`/var` を経る保存先も開く。`..` が打ち消す
     要素がリンクなら止める）、`values.json` の読み取り（`values_in`）と報告の初期化・起動指示の書き込みを同じ記述子で
     行う。読んだ場所と書く場所が食い違わない。起動指示を継ぐ記述子（`_held_prompt`）は初期化より先に用意し、用意できなければ
-    前の報告一式を残して止まる。起動指示とコマンドの見本のパスは解いた場所で組む（worker の
+    前の報告一式を残して止まる。モデルと effort の値の誤り（`claude_choice.precheck_values`。`precondition`）も初期化の前に
+    確かめ、誤りなら前の報告一式を残して止まる（#2944）。起動指示とコマンドの見本のパスは解いた場所で組む（worker の
     `ndf worker append`・`ndf contracts emit --out` がリンクを経ずに開ける）。
     """
     _known(kind)
@@ -312,11 +318,15 @@ def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff
         if gaps:
             raise invoke.KindInputsMissing(saved["plan"], gaps)
         workdir = _work_dir(kind, saved, cwd)
+        # モデルと effort の値の誤り（`ndf worker run` が起動の前に止まるもの）を、前の報告一式を初期化する前に確かめる（#2944）
+        retry = os.environ.get(identity.env_name("retry-cause"))
+        claude_choice.precheck_values(cwd=workdir, retry=None if retry == "" else retry)
         body = work_prompt(kind, saved, workdir, paths)
         fd = _held_prompt(body)  # 前の報告一式を初期化する前に用意する（用意できなければ何も消さずに止まる）
         try:
             _write_prompt(wd, paths, body)
-            return WorkHandoff(kind, wd.path, worker_paths.dir_id(wd), workdir, body, fd)
+            mode = saved["inputs"].get("mode")
+            return WorkHandoff(kind, wd.path, worker_paths.dir_id(wd), workdir, body, fd, mode if isinstance(mode, str) else None)
         except BaseException:
             os.close(fd)
             raise
@@ -367,9 +377,13 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
         kind = next(c for t, c in WORK_STOPS if isinstance(exc, t))
         items = exc.items if isinstance(exc, invoke.KindInputsMissing) else []
         return result.emit(result.stopped(TOOL, kind, str(exc), items=items))
+    except internal.InternalError as exc:  # モデルと effort の値の誤り（`claude_choice.precheck_values`）。前の報告一式は残っている
+        return result.emit(result.stopped(TOOL, exc.kind, str(exc)))
     fd = handoff.fd
     try:
-        args = work_argv(handoff.kind, handoff.state_dir, handoff.workdir, prompt_file=f"/dev/fd/{fd}", result_dir_id=handoff.dir_id)
+        args = work_argv(
+            handoff.kind, handoff.state_dir, handoff.workdir, prompt_file=f"/dev/fd/{fd}", result_dir_id=handoff.dir_id, mode=handoff.mode
+        )
         # -I: 作業場所と呼び出し元の PYTHONPATH の ndf.py・ndf/ を NDF の src より先に読まない。置き換えた先も、呼び出し元が読む
         # 今の標準出力・標準エラーの文字コードで書く（プランのステップはロケールで読む。#4029）
         argv = invoke.ndf_command("worker", *args, keep_streams=True)

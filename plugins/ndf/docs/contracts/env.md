@@ -47,6 +47,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_CALLER_UV_PROJECT_ENVIRONMENT` | ndf | path | — | bin/ndf が子へ自分の値を入れる前に写した、呼び出し元の UV_PROJECT_ENVIRONMENT（無ければ写しを持たない）。bin/start.py が自分のパッケージを呼ぶ前に呼び出し元の値へ戻して消す（#4029）。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `NDF_CALLER_UV_RUN_RECURSION_DEPTH` | ndf | integer | — | bin/ndf が子へ自分の値を入れる前に写した、呼び出し元の UV_RUN_RECURSION_DEPTH（無ければ写しを持たない）。bin/start.py が自分のパッケージを呼ぶ前に呼び出し元の値へ戻して消す（#4029）。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `NDF_CALLER_VIRTUAL_ENV` | ndf | path | — | bin/ndf が子へ自分の値を入れる前に写した、呼び出し元の VIRTUAL_ENV（無ければ写しを持たない）。bin/start.py が自分のパッケージを呼ぶ前に呼び出し元の値へ戻して消す（#4029）。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
+| `NDF_CHARGE_TO` | ndf | string | — | プランの実行がステップの子へ渡す、その起動の費用を手戻りとして負う割り付け ID（#2944）。ndf worker run は作業 fix・ci-fix のときだけ使用量ログの行の charge_to にし、ほかの作業は worker の子の環境から外す | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_ACCOUNT` | user | string | — | 子の claude を起動する登録済みのアカウントの名前 | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_API_KEY_GENERATION` | ndf | integer | — | 子へ渡した API キーの世代。入れ子の監督が読む | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_API_KEY_NAME` | ndf | string | — | 子へ渡した API キーの名前。入れ子の監督が読む | 内部（予告なく変えてよい） |
@@ -80,12 +81,14 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_RELAY_SPIN` | user | seconds | — | 再起動ループとみなすセグメントの秒。0 で検出を切る。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_STOP_WAIT` | user | seconds | — | 名前つきの stop がラッパーの終わりを待つ上限。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_TMUX` | user | path | — | リレーハブが呼ぶ tmux の実行ファイル。無ければ PATH の tmux | 内部（予告なく変えてよい） |
+| `NDF_RETRY_CAUSE` | ndf | string | — | プランの実行が、同じ失敗への 2 回目以降の修正のステップの子へ渡す失敗の理由（#2944。表 launch-experiments の retries の値）。ndf worker run は失敗の理由をもとに、引き上げの規則に従ってモデルか effort を 1 段階上げる。手動の指定（引数か環境変数）が優先される場合や、規則で上げられる値が無い場合は、選んだ値のまま起動する。無いか空なら上げない。表に無い値なら起動せずに止まり、誤りの文に値を出さない | 内部（予告なく変えてよい） |
 | `NDF_RUNTIME_SESSION` | user | string | — | ランタイムのセッションを <pid>:<開始時刻> で指定する（テストと CI）。無ければ祖先のプロセスから探す | 内部（予告なく変えてよい） |
 | `NDF_SHARED_CONFIG_DIR` | ndf | path | — | アカウントの子の中で、元の CLAUDE_CONFIG_DIR を持つ（空なら ~/.claude）。アカウントの登録の保存先を決める。登録済みアカウントの子には、親にあれば親の値、無ければ子へ渡す前の CLAUDE_CONFIG_DIR（無ければ空文字）を入れる | 内部（予告なく変えてよい） |
 | `NDF_STATE_HOME` | user | path | — | 状態の保存先の根。保存先は <値>/<プラグイン名>（XDG_STATE_HOME と同じ読み方。入れ替えの前に旧い NDF と同じ値を渡されても、旧い保存先を退避しない）。無ければ XDG_STATE_HOME の下 | 公開 |
 | `NDF_STEP_ATTEMPT` | ndf | integer | — | プランの実行がステップの子へ渡す、そのプランの実行でそのステップを実行した何回目か（最初が 1。打ち直しと、遷移で戻った実行の両方で 1 増える）。使用量ログの行の attempt になる（#1959）。無いか 1 以上の整数でなければ行の欄を省く。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_STEP_ID` | ndf | string | — | プランの実行がステップの子へ渡す、ステップの id。使用量ログの行の step になる（#1959）。無ければプランの外の起動で、行の欄を省く。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_SUPERVISE_CLAUDE_FALLBACK` | user | string | 秘密 | 従量の接続の設定（KEY=VALUE を空白区切り）。定義されていれば保存した設定（metered.json）より先に読む | 内部（予告なく変えてよい） |
+| `NDF_UNIT_ID` | ndf | string | — | プランの実行がステップの子へ渡す、モデルと effort の割り付けの単位の ID（#2944）。ndf worker run は --unit が無ければこの値を単位にし、Skill を回す起動も読む。無いか空なら割り付けない。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_UPKEEP_STATE_DIR` | user | path | — | 棚卸しの状態（候補・順位・却下・見積・付け直しの前の状態・深さの記録）の保存先。無ければメインディレクトリの .ndf/backlog/state | 内部（予告なく変えてよい） |
 | `NDF_USAGE_DIR` | user | path | — | 使用量の使用量ログ（usage.jsonl）の保存先。hook から書いてもスクリプトから書いても同じ保存先になる。無ければ状態の保存先の usage | 内部（予告なく変えてよい） |
 | `NDF_VERSION` | service | string | — | サービスの実行ジョブが入れた NDF のバージョン（開発版は <version>@<コミットの SHA>） | 公開 |

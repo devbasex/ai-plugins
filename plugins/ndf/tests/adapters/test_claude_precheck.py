@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
@@ -13,8 +14,11 @@ from typing import Optional
 import pytest
 
 from ndf.adapters import claude, claude_precheck, cli_floor, launch_slot
+from ndf.contracts import limits
 
 REPLY = json.dumps({"type": "result", "is_error": False, "result": "{}", "total_cost_usd": 0.0})
+# 差し替える前の前置き（スロットの取得を含む）
+REAL_GATE = launch_slot.gate
 # 偽のスロットが子へ足す環境
 SLOT_ENV = {"NDF_SLOT_HELD": "1"}
 
@@ -218,3 +222,88 @@ def test_issue_1959_a_too_old_cli_stops_before_ready(seen, tmp_path):
     got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen))
 
     assert got.failure is claude.Failure.REFUSED and seen.order == ["slot", "recheck", "verify", "floor"] and seen.popen == []
+
+
+def test_issue_2944_a_deadline_used_up_while_waiting_stops_the_launch(seen, tmp_path):
+    """期限の残り（`left`）はスロットと確かめの後に測る。残りが無ければ起動も準備もせず `Failure.TIMEOUT`、あれば子の期限を残りにする。"""
+    spent = claude.LaunchOptions(left=lambda: 0.0, ready=lambda: seen.order.append("ready"))
+    got = claude._prefaced(_run(seen), "q", 30, tmp_path, spent)
+
+    assert got.failure is claude.Failure.TIMEOUT and seen.order == ["slot"] and seen.ended == [False]
+
+
+@pytest.mark.parametrize(("after_check", "failure", "taken"), [(0.0, claude.Failure.TIMEOUT, []), (5.0, claude.Failure.NO_SLOT, [5.0])])
+def test_issue_2944_the_slot_wait_is_bounded_by_the_deadline(seen, tmp_path, monkeypatch, after_check, failure, taken):
+    """上限は学習の設定の確かめの後の残りで決める。確かめの間に期限が切れたら、スロットを取り始めない。"""
+    remaining, waits = [30.0], []
+
+    @contextmanager
+    def held(agent, *, cwd=None, environ=None, wait=None):
+        waits.append(wait)
+        raise launch_slot.NoSlot("空かない")
+        yield {}
+
+    monkeypatch.setattr(launch_slot, "gate", REAL_GATE)
+    monkeypatch.setattr(launch_slot, "_refuse_if_needed", lambda *a: remaining.__setitem__(0, after_check))
+    monkeypatch.setattr(launch_slot, "held", held)
+    options = claude.LaunchOptions(left=lambda: remaining[0], slot_wait=60.0)
+    got = claude._prefaced(_run(seen), "q", 30, tmp_path, options)
+
+    assert waits == taken and got.failure is failure and seen.popen == []
+
+
+@pytest.mark.parametrize("gated", [False, True])
+def test_issue_2944_the_wait_after_the_start_uses_the_time_left(seen, tmp_path, monkeypatch, gated):
+    """直接の起動はプロセスを作った後の残りで回答を待つ。中継の起動の知らせは残りで打ち切り、期限切れにする。"""
+    remaining, given, ends = [7.0], [], []  # `ends` は関所の読む側。偽の子の代わりに開けておき、開けるための書き込みが通るようにする
+
+    def popen(argv, **kwargs):
+        if not gated:
+            remaining[0] = 3.0
+        return FakeProc()
+
+    def read_status(fd, seconds):
+        given.append(seconds)
+        remaining[0] = 0.0
+        return None
+
+    monkeypatch.setattr(claude.subprocess, "Popen", popen)
+    monkeypatch.setattr(FakeProc, "communicate", lambda self, prompt="", timeout=0: given.append(timeout) or (REPLY, ""))
+    monkeypatch.setattr(claude.process_group, "read_status", read_status)
+    monkeypatch.setattr(claude, "_stop", lambda proc: None)  # 偽の子（pid 0）の組へ信号を送らない
+
+    def wrapped(argv, r, w):
+        ends.append(os.dup(r))
+        return list(argv)
+
+    run = _run(seen)._replace(gate=wrapped if gated else None)
+    got = claude._prefaced(run, "q", 30, tmp_path, claude.LaunchOptions(left=lambda: remaining[0]))
+    for fd in ends:
+        os.close(fd)
+
+    if gated:
+        assert given == [min(7.0, limits.seconds("relay.gate-exec"))] and got.failure is claude.Failure.TIMEOUT
+    else:
+        assert given == [3.0] and got.ok
+
+
+@pytest.mark.parametrize("at", ["ready", "attach"])
+def test_issue_2944_a_deadline_ending_just_before_the_launch_stops_it(seen, tmp_path, monkeypatch, at):
+    """起動の準備の間か、中継の関所を開ける前に期限が切れたら、claude を実行させない。"""
+    remaining = [7.0]
+    monkeypatch.setattr(claude, "_stop", lambda proc: None)  # 偽の子（pid 0）の組へ信号を送らない
+    run = _run(seen)
+    if at == "attach":
+        run = run._replace(gate=lambda argv, r, w: list(argv), attach=lambda pid: remaining.__setitem__(0, 0.0))
+    ready = (lambda: remaining.__setitem__(0, 0.0)) if at == "ready" else None
+    got = claude._prefaced(run, "q", 30, tmp_path, claude.LaunchOptions(left=lambda: remaining[0], ready=ready))
+
+    assert got.failure is claude.Failure.TIMEOUT and not got.launched and seen.ended == [False]
+
+
+def test_issue_2944_the_child_gets_the_time_left_after_the_checks(seen, tmp_path, monkeypatch):
+    given: list[float] = []
+    monkeypatch.setattr(FakeProc, "communicate", lambda self, prompt="", timeout=0: given.append(timeout) or (REPLY, ""))
+    got = claude._prefaced(_run(seen), "q", 30, tmp_path, claude.LaunchOptions(left=lambda: 7.0))
+
+    assert got.ok and given == [7.0]

@@ -17,6 +17,8 @@ worker（`claude -p` の full の起動）へ渡す規則文を組み、作業�
 - 起動の設定の作業種別の指定を `launch_settings.prepared` で解き、壊れているか未承認なら起動しない（`precondition`。#1959）
 - 起動の間は子へ作業種別を環境変数 `identity.WORKER_KIND_ENV` で渡す。hook の guard `full-test` はこれで worker の中の
   全体テストを止める（#3112）
+- モデルと effort は会話の最初に選び、再開でも同じ引数と環境で起動する。拒まれたら基準の組と新しい会話で 1 回だけ起動し直し、
+  子ごとに値と終わり方を使用量ログの行にし、結果の `metrics.launch` に値と実際のモデルを載せる（`worker_choice`。#2944）
 - push の前に、コミットの件名と本文の closing keywords を照らし、当たれば push させない（`closing_commits`。#3129）
 - conductor がプランを書き換えるときは、前の中身をバックアップ、差分と理由をプランの進捗記録へ残す（`edit_plan`。#3111）
 - 進捗ログの注意は `state` の値だけで決め、本文の語（「止まった」など）では決めない（`needs_attention`。#1984）
@@ -24,7 +26,8 @@ worker（`claude -p` の full の起動）へ渡す規則文を組み、作業�
 サブコマンド `worker`（結果 JSON を標準出力へ 1 行で出す）:
 
 ndf worker run --kind <種類> --prompt-file <本文> --result-file <結果> --cwd <作業場所> --state-dir <保存先> [--sources <JSON>] [--timeout <秒>]
-    worker を起動し、結果ファイルが書かれるまで同じ会話を再起動する
+               [--unit <単位>] [--mode <モード>]
+    worker を起動し、結果ファイルが書かれるまで同じ会話を再起動する。単位を省けば NDF_UNIT_ID
 ndf worker prepare --dir <作業ディレクトリ> --name <worker の名前>
     報告の保存先を用意する。前の完了マーカーと結果ファイルを消し、報告を空にして 3 つの絶対パスを metrics.paths に返す
 ndf worker append --report <保存先> [--done]
@@ -61,14 +64,15 @@ import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf import cli, identity
-from ndf.adapters import claude, git, launch_settings
+from ndf.adapters import claude, claude_choice, git, launch_settings, run_log
 from ndf.contracts import causes, exit_codes, facts, limits, result, worker_kinds, worker_paths, writing
 from ndf.contracts.exit_codes import OK
-from ndf.core import durable_locks, worker_append
+from ndf.core import durable_locks, worker_append, worker_choice
 from ndf.core.plan import model, runner
 from ndf.core.plan.records import PROGRESS_FILE
 from ndf.core.worker_outcome import FreshResult, Uncleared, outcome_of, require_outputs
@@ -296,6 +300,11 @@ class Handoff:
     timeout: float = field(default_factory=work_timeout)
     # 結果ファイルを呼んだ利用者の私有のファイル（オーナーが自分で、グループとほかの利用者が書き込めない）だけ読むか
     owned: bool = False
+    # 値を選ぶ手がかり: 割り付けの単位・工程のモード・引き上げの理由・費用を負う割り付け ID（`worker_choice.choice_inputs`。#2944）
+    unit: Optional[str] = None
+    mode: Optional[str] = None
+    retry: Optional[str] = None
+    charge_to: Optional[str] = None
 
 
 @dataclass
@@ -309,6 +318,7 @@ class Delivery:
     detail: str = ""
     replies: list[str] = field(default_factory=list)
     notice: Optional[str] = None
+    launch: dict[str, Any] = field(default_factory=dict)  # 結果の metrics.launch（#2944）
 
 
 def _written(wd: worker_paths.WorkDir, name: str) -> bool:
@@ -358,36 +368,12 @@ def _missing_record(handoff: Handoff, wd: worker_paths.WorkDir) -> bool:
     return isinstance(report, dict) and report.get("status") == OK and search_record(report) is None
 
 
-def _reply_failed(reply: claude.ClaudeReply, out: Delivery) -> bool:
-    """再起動しても直らない失敗なら理由を `out` へ置いて真。"""
+def _reply_failed(reply: claude.ClaudeReply, out: Delivery) -> bool:  # 再起動しても直らない失敗なら理由を `out` へ置いて真
     if reply.failure is None:
         return False
     out.cause = facts.value(claude.FAILURES, reply.failure, "work_cause")
     out.detail = reply.error or str(reply.failure)
     return True
-
-
-@contextlib.contextmanager
-def _worker_env(kind: str, result_dir: Optional[worker_paths.WorkDir] = None) -> Iterator[None]:
-    """起動の間だけ、子へ作業種別（`identity.WORKER_KIND_ENV`）を渡す。hook の guard が worker の中かを見分ける（#3112）。
-
-    `result_dir` があれば、開いた結果の保存先の識別子とパス（`identity.WORKER_RESULT_DIR_ENV`）も渡す。worker は
-    `ndf contracts emit --out` で保存先を開き直すので、同名の別の実ディレクトリへの差し替えを子の側で突き合わせて拒む。
-    """
-    values = {identity.WORKER_KIND_ENV: kind}
-    if result_dir is not None:
-        dev, ino = worker_paths.dir_id(result_dir)
-        values[identity.WORKER_RESULT_DIR_ENV] = f"{dev}:{ino}:{result_dir.path}"
-    before = {key: os.environ.get(key) for key in values}
-    os.environ.update(values)
-    try:
-        yield
-    finally:
-        for key, value in before.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
 
 
 def _args_for(system: str, root: Optional[Path], cwd: Path, grant: Optional[launch_settings.Grant] = None) -> claude.PluginArgs:
@@ -419,10 +405,11 @@ def delegate(
     リンクになったか読めなければ、再起動せずに `bad_report` にする。指定の停止は `InternalError` で上げる（`ndf.cli` が結果 JSON にする）。
     """
     out = Delivery(session=session or str(uuid.uuid4()))
+    run = worker_choice.choose_values(handoff)  # 誤りは起動せずに止まる
     with launch_settings.prepared(handoff.kind, handoff.cwd) as grant:  # 起動できない指定なら、前の結果ファイルを消す前に止まる
         base, out.notice = _args_for(system, root, handoff.cwd, grant)
         try:
-            _resume_until_written(handoff, out, base, call, FreshResult(wd, handoff.result_file.name, grant.verifier))
+            _resume_until_written(handoff, out, base, call, FreshResult(wd, handoff.result_file.name, grant.verifier), run)
         except Uncleared as exc:
             out.cause, out.detail = "invalid", f"結果ファイル {handoff.result_file} を起動の前に消せない: {exc}"
         except worker_paths.EntryError as exc:
@@ -430,23 +417,37 @@ def delegate(
     return out
 
 
-def _resume_until_written(handoff: Handoff, out: Delivery, base: list[str], call: Caller, fresh: FreshResult) -> None:
+def _resume_until_written(
+    handoff: Handoff, out: Delivery, base: list[str], call: Caller, fresh: FreshResult, run: claude_choice.ChoiceRun
+) -> None:
     """`delegate` の起動と再起動（子ごとに `fresh.options` の照らし直しが起動の直前に打たれる）。結果ファイルが読めなければ `EntryError` を上げる。
-    起動した子が終わるたびに使用量ログへ 1 行渡す（1 回の委譲で 1 つの `claude.LaunchLog` が会話の中の番号を進める。#1959 の決定 6）。"""
-    wd = fresh.wd
-    argv = base + ["--session-id", out.session]
-    prompt = f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
-    log = claude.LaunchLog({**claude.launch_meta(handoff.kind), "session_id": out.session})
-    for attempt in range(RESUMES + 1):
-        with _worker_env(handoff.kind, wd):
-            reply = call(argv, prompt, handoff.timeout, handoff.cwd, replace(fresh.options, log=log))
-        out.attempts, out.cost = attempt + 1, out.cost + reply.cost
+    起動した子が終わるたびに使用量ログへ値と終わり方の 1 行を渡す（会話ごとの `claude.LaunchLog` が番号を進める。#1959 の決定 6）。
+    再開は最初の起動と同じ引数と環境で打ち、リクエストの番号（`request_try`）を 1 つ進める。拒否で基準の組へ切り替えれば `RESUMES` に数えず、
+    新しい会話で 1 回だけ、最初の起動の前から単調時計で持つ期限の残りで起動し直す（`ChoiceRun.fall_back_until`）。残りが無ければ `interrupted`、2 回目の拒否は `_reply_failed` が止める（#2944）。"""
+    wd, first = fresh.wd, f"{handoff.prompt}\n\n" + RESULT_FILE_LINE.format(result_file=handoff.result_file)
+    prompt, timeout, resumes, opening, deadline = first, handoff.timeout, 0, True, claude_choice.deadline_after(handoff.timeout)
+    bound: Optional[Callable[[], float]] = None  # 切り替えた起動だけが持つ期限の残り
+    read = partial(_read_result, wd, handoff.result_file.name, owned=handoff.owned)  # 子が起動した後は前の結果を消してある
+    while resumes <= RESUMES:
+        if opening:  # 会話の最初の起動: 引数・環境・行の書き手をここで決め、再開でも使う
+            (argv, env, log), opening = worker_choice.first_launch(handoff.kind, out.session, base, wd, run, read), False
+        with run_log.overlay_env(env):
+            reply = call(argv, prompt, timeout, handoff.cwd, replace(fresh.options, log=log, left=bound))
+        run.seen(reply)
+        out.attempts, out.cost, out.launch = out.attempts + 1, out.cost + reply.cost, worker_choice.launch_metrics(out.launch, run, reply)
         out.replies.append(reply.raw[:200])
+        if (left := run.fall_back_until(reply, deadline, fresh.options.verify) if resumes == 0 else None) is not None:
+            if left <= 0:
+                out.cause, out.detail = "interrupted", f"作業 {handoff.kind} の worker を基準の組で起動し直す期限が残っていない"
+                return
+            out.session, prompt, timeout, opening, bound = str(uuid.uuid4()), first, left, True, partial(claude_choice.left_until, deadline)
+            continue
         written = fresh.cleared and _written(wd, handoff.result_file.name)  # 前の結果を消す前は、残った前の結果を数えない
         if (written and not _missing_record(handoff, wd)) or _reply_failed(reply, out):
             return
-        argv = base + ["--resume", out.session]
-        prompt = RECORD_PROMPT if written else RESUME_PROMPT
+        argv = base + run.cli_args() + ["--resume", out.session]
+        worker_choice.next_try(run, log)
+        prompt, timeout, resumes, bound = (RECORD_PROMPT if written else RESUME_PROMPT), handoff.timeout, resumes + 1, None
     out.cause = "work_stopped"
     out.detail = _stopped_detail(handoff, wd)
 
@@ -707,9 +708,10 @@ def _cmd_run(a: argparse.Namespace) -> int:
             tuple(_load_sources(a.sources)),
             a.timeout if a.timeout is not None else work_timeout(),
             owned=a.result_dir_id is not None,
+            **worker_choice.choice_inputs(a.kind, a.unit, a.mode),
         )
         done, report = _deliver(handoff, system_prompt(handoff.kind, handoff.state_dir, root / SKILLS_DIR, handoff.sources), root, wd)
-    metrics: dict[str, Any] = {"attempts": done.attempts}
+    metrics: dict[str, Any] = {"attempts": done.attempts, **({"launch": done.launch} if done.launch else {})}
     if handoff.kind in RECORD_KINDS and done.cause is None:
         metrics[SEARCH_RECORD] = search_record(report)
     items = [{"kind": "session", "session": done.session, "result_file": str(handoff.result_file)}]
@@ -910,7 +912,8 @@ def _add_run(sub: Any) -> None:
     rn = sub.add_parser("run", help="worker を起動し、結果ファイルが書かれるまで再起動する")
     for name in ("--kind", "--prompt-file", "--result-file", "--cwd", "--state-dir"):
         rn.add_argument(name, required=True)
-    rn.add_argument("--sources")
+    for name in ("--sources", "--unit", "--mode"):  # --unit は値を選ぶ割り付けの単位（省けば NDF_UNIT_ID）、--mode は工程のモード（#2944）
+        rn.add_argument(name)
     rn.add_argument("--timeout", type=float)
     # 結果ファイルの保存先の <st_dev>:<st_ino>（`ndf answer work` が開いた保存先。開き直した保存先と突き合わせる）
     rn.add_argument("--result-dir-id")

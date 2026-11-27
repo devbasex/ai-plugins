@@ -94,8 +94,7 @@ def _env_names() -> dict[str, str]:
     }
 
 
-def _order_env(order: Mapping[str, Any], column: str) -> Optional[str]:
-    """順位の行の列 `column` が指す環境変数の名前。列が無ければ None。"""
+def _order_env(order: Mapping[str, Any], column: str) -> Optional[str]:  # 順位の行の列 `column` が指す環境変数の名前。列が無ければ None
     return _env_names()[order[column]] if column in order else None
 
 
@@ -136,6 +135,10 @@ class Choice:
     retry: Optional[str] = None
     store: Optional[Path] = None
     repo: Optional[str] = None
+
+    @property
+    def switchable(self) -> bool:  # モデルを理由に拒まれたら基準へ切り替える対象（割り付けた、基準でない組）
+        return self.assign_id is not None and self.arm is not None and self.arm != self.base_arm
 
     def cli_args(self) -> list[str]:
         """CLI に渡す引数（表 runtimes の `choice_args` の形。値の無い側は足さない）。"""
@@ -195,8 +198,7 @@ def _order_row(runtime: str) -> dict[str, Any]:
     return found[runtime]
 
 
-def _launch_stages() -> dict[tuple[str, str], str]:
-    """(層, 作業の名前) → 工程。"""
+def _launch_stages() -> dict[tuple[str, str], str]:  # (層, 作業の名前) → 工程
     return {(layer, name): r["id"] for r in _stage_rows() for layer, names in r["launches"].items() for name in names}
 
 
@@ -213,8 +215,7 @@ def _retries() -> set[str]:
     return {reason for r in _stage_rows() if "retries" in r for reason in r["retries"]}
 
 
-def _bundled() -> dict[str, Any]:
-    """同梱の値を起動の設定の `experiments` と同じ形で返す。"""
+def _bundled() -> dict[str, Any]:  # 同梱の値を起動の設定の `experiments` と同じ形で返す
     defaults = facts.rows(TABLE, kind="defaults")
     if len(defaults) != 1:
         raise _fail(f"{_bundled_path()} の defaults の行が {len(defaults)} 行ある（1 行だけ要る）")
@@ -222,8 +223,7 @@ def _bundled() -> dict[str, Any]:
     return {"enabled": defaults[0]["enabled"], "stages": stages, "allocation": defaults[0]["allocation"]}
 
 
-def _given(given: Mapping[str, Any], key: str) -> Mapping[str, Any]:
-    """リポジトリが書いたオブジェクトのキー。無ければ空（同梱の値を使う）。"""
+def _given(given: Mapping[str, Any], key: str) -> Mapping[str, Any]:  # リポジトリが書いたオブジェクトのキー。無ければ空（同梱の値を使う）
     return given[key] if key in given else {}
 
 
@@ -840,7 +840,7 @@ def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
     基準の組と割り付けの無い起動は None。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなくても基準の値を返す。
     引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、基準の組から引き上げ直す。
     """
-    if choice.assign_id is None or choice.arm is None or choice.arm == choice.base_arm:
+    if not choice.switchable:
         return None
     row = dict(kind="launch_error", at=_time_text(utc_now()), assign_id=choice.assign_id, stage=choice.stage)
     row |= {"runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}
@@ -854,6 +854,24 @@ def base_fallback(choice: Choice, reason: str) -> Optional[Choice]:
 def _raised_once(choice: Choice) -> Choice:
     up = raised(choice.runtime, choice.model, choice.effort)
     return replace(choice, model=up[0], effort=up[1], raised=True) if up != (choice.model, choice.effort) else choice
+
+
+def _checked(
+    runtime: str, cwd: Path, req: Request, env: Mapping[str, str], settings: Optional[launch_settings.Settings]
+) -> tuple[Path, Table, _Manual]:
+    """起動の前に止まる値の誤り（引き上げの理由・選択肢の表・引数と環境変数の指定）を確かめる。記録を読み書きせず、git も起動しない。
+
+    表に無い引き上げの理由は、誤りの文に値を出さない（環境変数から秘密が入りうる）。"""
+    if req.retry is not None and req.retry not in _retries():
+        name, reasons = identity.env_name("retry-cause"), "・".join(sorted(_retries()))
+        raise _fail(f"引き上げの理由（{name}）が表 {TABLE} の retries に無い（値は出さない。使える理由: {reasons}）")
+    root = launch_settings.launch_root(cwd)
+    return root, table(root, settings), _manual(runtime, req.argument, env, req.argument_at)
+
+
+def precheck(runtime: str = "claude", *, cwd: Path, environ: Optional[Mapping[str, str]] = None, **request: Any) -> None:
+    """`launch_choice` が起動の前に止まる値の誤りだけを確かめる（`_checked`）。前の成果を初期化する前に呼ぶ（#2944）。"""
+    _checked(runtime, cwd, Request(**request), os.environ if environ is None else environ, None)
 
 
 def launch_choice(
@@ -874,11 +892,7 @@ def launch_choice(
     req = Request(**request)
     env = os.environ if environ is None else environ
     stage = stage_of(layer, name)
-    if req.retry is not None and req.retry not in _retries():
-        raise _fail(f"打ち直しの理由 {req.retry} は無い（{'・'.join(sorted(_retries()))}）")
-    root = launch_settings.launch_root(cwd)
-    got = table(root, settings)
-    manual = _manual(runtime, req.argument, env, req.argument_at)
+    root, got, manual = _checked(runtime, cwd, req, env, settings)
     arms = got.arms[stage][runtime] if stage is not None and runtime in got.arms[stage] else ()
     base = arms[0] if arms else None
     now = utc_now()
@@ -887,22 +901,8 @@ def launch_choice(
     effort, effort_source = manual.effort if manual.effort is not None else _from_base(base, "effort")
     if manual.inherited is not None:
         effort, effort_source = None, Source.ENVIRONMENT
-    choice = Choice(
-        layer,
-        name,
-        runtime,
-        stage,
-        req.mode,
-        model,
-        effort,
-        model_source,
-        effort_source,
-        unit=req.unit,
-        base_arm=base,
-        inherited_effort=manual.inherited,
-        retry=None if manual.given else req.retry,
-        store=store,
-    )
+    extra = dict(unit=req.unit, base_arm=base, inherited_effort=manual.inherited, retry=None if manual.given else req.retry, store=store)
+    choice = Choice(layer, name, runtime, stage, req.mode, model, effort, model_source, effort_source, **extra)
     if stage is None or store is None or (req.unit is None and req.charge_to is None):
         return choice if manual.given or req.retry is None or stage is None else _raised_once(choice)
     metric = metric_of(stage)

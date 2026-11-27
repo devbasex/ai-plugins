@@ -500,9 +500,9 @@
 | `ndf worker plan-edit` | `plan`（string・必須・位置）<br>`--new`（string・必須）<br>`--reason`（string・必須）<br>`--state-dir`（string・任意） |
 | `ndf worker plan-edits` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意） |
 | `ndf worker prepare` | `--dir`（string・必須）<br>`--name`（string・必須） |
-| `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--timeout`（number・任意）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意） |
+| `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--unit`（string・任意）<br>`--mode`（string・任意）<br>`--timeout`（number・任意）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意） |
 
-結果の `metrics`: `attempts`（integer）・`attention`（integer）・`edits`（integer）・`expectation_search`（object か null）・`paths`（object）・`report`（string）。`items` の要素: `action`（string）・`at`（—）・`backup`（string）・`diff`（string か null）・`kind`（string）・`path`（string）・`plan`（string か null）・`reason`（string か null）・`result_file`（string）・`session`（string か null）・`sha`（string）・`state`（string）・`subject`（string）・`text`（—）・`words`（array of string）
+結果の `metrics`: `attempts`（integer）・`attention`（integer）・`edits`（integer）・`expectation_search`（object か null）・`launch`（object）・`paths`（object）・`report`（string）。`items` の要素: `action`（string）・`at`（—）・`backup`（string）・`diff`（string か null）・`kind`（string）・`path`（string）・`plan`（string か null）・`reason`（string か null）・`result_file`（string）・`session`（string か null）・`sha`（string）・`state`（string）・`subject`（string）・`text`（—）・`words`（array of string）
 
 ## `ndf worktree`
 
