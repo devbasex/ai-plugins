@@ -58,7 +58,7 @@ def _given_to_verification(current: command.Current) -> dict:
 def test_the_released_version_goes_from_the_record_to_the_verification_input(monkeypatch):
     made = record_decide.Record(VERSION, 50, (11,))
     monkeypatch.setattr(release_cli, "_hub", lambda args: None)
-    monkeypatch.setattr(release_cli, "_strategy", lambda args: argparse.Namespace(section={"release": {}}, version_store={"kind": "file"}))
+    monkeypatch.setattr(release_cli, "_strategy", lambda args: argparse.Namespace(section={"release": {}}, version_store={"kind": "file"}, has_version_number=True))
     monkeypatch.setattr(names_decide, "formats_of", lambda section: None)
     monkeypatch.setattr(record, "write", lambda *a: (made, []))
     report = release_cli.cmd_record(

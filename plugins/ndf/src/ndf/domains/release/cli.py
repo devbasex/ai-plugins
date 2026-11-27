@@ -231,7 +231,7 @@ def cmd_merge(args: argparse.Namespace) -> dict:
 def _record_args(args: argparse.Namespace, strategy: branch_strategy.Strategy) -> record_unversioned.Unversioned | None:
     """確かめ 0。`record` の引数の組。バージョンの無いリリース記録の引数なら `Unversioned`（`tip` は呼び手が埋める）、
     今の記録（バージョン番号を持つリポジトリ）なら None。`--correct-targets` は訂正の引数の規則で確かめて None。誤りは `RecordError`。"""
-    none_store = strategy.version_store["kind"] == "none"
+    none_store = not strategy.has_version_number
     if args.correct_targets:
         if not none_store:
             raise record.RecordError("--correct-targets はバージョンの保存先が none のリポジトリでだけ受ける")
@@ -338,10 +338,7 @@ def cmd_verification_record(args: argparse.Namespace) -> dict:
 
 def _unversioned_store(args: argparse.Namespace) -> bool:
     """バージョン番号を持たないリポジトリ（`version_store.kind` が none）か。設定が読めなければ偽（今の確かめで書く）。"""
-    try:
-        return _strategy(args).version_store["kind"] == "none"
-    except branch_strategy.StrategyError:  # noqa: NDF401 利用者の入力: 設定の無いリポジトリは今のとおりバージョン番号を持つリポジトリとして確かめる
-        return False
+    return branch_strategy.without_version_number(lambda: _strategy(args))
 
 
 def _release_names(args: argparse.Namespace) -> tuple[str | None, names_decide.NameFormats]:
