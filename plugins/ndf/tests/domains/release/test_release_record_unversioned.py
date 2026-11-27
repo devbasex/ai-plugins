@@ -607,7 +607,7 @@ def test_shared_prefix_is_computed_once_and_redone_for_another_commit(tmp_path: 
     record_unversioned.shared_prefix(share, PROD, "f" * 40, lambda: compute("f" * 40))
     assert calls == [COMMIT, "f" * 40]
     path = repo.common / "ndf" / "release-record" / f"{PROD}.json"
-    assert not list(path.parent.glob("*.ndf-tmp"))
+    assert not list(path.parent.glob("**/*.ndf-tmp"))
     record_unversioned.sweep_shares(share, 60, now=lambda: path.stat().st_mtime + 61)
     assert not path.exists()
 
@@ -615,20 +615,40 @@ def test_shared_prefix_is_computed_once_and_redone_for_another_commit(tmp_path: 
 def test_shared_prefix_keeps_a_file_it_did_not_write_and_sweeps_its_own_leftovers(tmp_path: Path) -> None:
     share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
     made = record_unversioned.Prefix(COMMIT, record_decide.Push(BEFORE, AFTER), None, frozenset({"a"}), frozenset())
-    share.mkdir(parents=True)
+    whole = json.dumps(made.as_json())
+    ours = share / "tmp"
+    ours.mkdir(parents=True)
     foreign = share / f"{PROD}.json"
     foreign.write_text("{", encoding="utf-8")
-    empty = share / f"{PROD}.json.abc.ndf-tmp"
-    empty.write_text("", encoding="utf-8")
-    written = share / f"{PROD}.json.def.ndf-tmp"
-    written.write_text(json.dumps(made.as_json()), encoding="utf-8")
-    users = share / f"{PROD}.json.ghi.ndf-tmp"
-    users.write_text("{", encoding="utf-8")
+    # 利用者が置き場のディレクトリに置いたファイルは、名前の形と中身が NDF の一時ファイルと同じでも残す
+    users = {share / f"{PROD}.json.{name}.ndf-tmp": text for name, text in (("a", ""), ("b", whole), ("c", "{"))}
+    for path, text in users.items():
+        path.write_text(text, encoding="utf-8")
+    # NDF の一時ファイルのディレクトリに残ったものは、空・書き終えたもの・途中まで書かれたもののどれも消す
+    leftovers = [ours / f"{PROD}.json.{name}.ndf-tmp" for name in ("d", "e", "f")]
+    for path, text in zip(leftovers, ("", whole, whole[:5])):
+        path.write_text(text, encoding="utf-8")
     assert record_unversioned.shared_prefix(share, PROD, COMMIT, lambda: made) == made
     record_unversioned.drop_share(share, PROD)
     record_unversioned.sweep_shares(share, 60, now=lambda: foreign.stat().st_mtime + 3600)
-    assert foreign.read_text(encoding="utf-8") == "{" and users.read_text(encoding="utf-8") == "{"
-    assert not empty.exists() and not written.exists()
+    assert foreign.read_text(encoding="utf-8") == "{"
+    assert all(path.read_text(encoding="utf-8") == text for path, text in users.items())
+    assert not any(path.exists() for path in leftovers)
+
+
+def test_sweep_shares_does_not_open_a_fifo_or_follow_a_link(tmp_path: Path) -> None:
+    share = record_unversioned.share_dir(_hands(Repo(tmp_path)))
+    ours = share / "tmp"
+    ours.mkdir(parents=True)
+    fifo = share / f"{PROD}.json"
+    os.mkfifo(fifo)
+    tmp_fifo = ours / f"{PROD}.json.a.ndf-tmp"
+    os.mkfifo(tmp_fifo)
+    link = ours / f"{PROD}.json.b.ndf-tmp"
+    link.symlink_to(fifo)
+    # FIFO を開いて読むと書き手が来るまで止まるので、ここで返ることが確かめになる
+    record_unversioned.sweep_shares(share, 60, now=lambda: fifo.lstat().st_mtime + 3600)
+    assert fifo.exists() and tmp_fifo.exists() and link.is_symlink()
 
 
 def _correction_hub() -> FakeHub:
