@@ -149,11 +149,11 @@ def _no_launch_chooser(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def launch_chooser(monkeypatch: pytest.MonkeyPatch):
     """起動の値を選ぶ処理（`model_choice`）をエントリポイントと同じく差し込む。リポジトリのキーは git を起動せず、作業場所の実体にする。"""
-    from ndf.adapters import claude_choice, model_choice
+    from ndf.adapters import claude_choice, model_choice, model_chooser
 
     monkeypatch.setattr(model_choice.launch_approval, "repo_key", lambda root: os.path.realpath(root))
-    monkeypatch.setattr(claude_choice, "launch_chooser", model_choice)
-    return model_choice
+    monkeypatch.setattr(claude_choice, "launch_chooser", model_chooser)
+    return model_chooser
 
 
 @pytest.fixture(autouse=True)

@@ -1,6 +1,6 @@
 import sys
 
-from ndf.adapters import claude, claude_choice, model_choice
+from ndf.adapters import claude, claude_choice, model_chooser
 from ndf.cli import main
 from ndf.domains.records import usage
 from ndf.domains.relay import plan_claude
@@ -10,5 +10,5 @@ claude.set_relay_checks(plan_claude)
 # 起動した子の使用量の行も、下の層は使用量ログの部品を読めないので同じ所で差し込む（#1959 の決定 6）
 claude.set_launch_recorder(usage)
 # 起動のモデルと effort を選ぶ処理も、下の層の起動の部品が読めないので同じ所で差し込む（#2944）
-claude_choice.set_launch_chooser(model_choice)
+claude_choice.set_launch_chooser(model_chooser)
 sys.exit(main())

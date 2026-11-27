@@ -86,6 +86,11 @@
       "type": "integer",
       "summary": "records の行: 実験の記録を残す期間のうち、window_days に足す日数。月の最後の日時がこれより前の月のファイルを、確認なしに消す",
       "optional": true
+    },
+    "refresh_minutes": {
+      "type": "integer",
+      "summary": "records の行: 効果指標を書いた後に出現率を計算し直す間隔の分。前の計算からこれより短ければ、候補・割り付けの値・実際のモデルが変わらない限り計算し直さない（使用量ログの読み取りの費用を抑える）",
+      "optional": true
     }
   },
   "rows": [
@@ -177,7 +182,8 @@
       "kind": "records",
       "refusal_days": 7,
       "refusals": 2,
-      "kept_extra_days": 30
+      "kept_extra_days": 30,
+      "refresh_minutes": 60
     }
   ]
 }

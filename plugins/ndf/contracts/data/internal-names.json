@@ -2,20 +2,20 @@
   "$schema": "../schemas/internal-names.schema.json",
   "summary": "内部データの名前の対応表。意味ごとに、使う 1 つの名前（key）・消した別名（aliases_removed）・使ってよい種類（where）を持つ。意味の違う値が同じ名前を使うときは、別の行に書く",
   "names": {
-    "形のバージョン": {"key": "version", "aliases_removed": ["schema"], "where": ["usage", "mvv-signals", "mvv-validation", "context-records", "loop-event", "context", "stage-snapshot", "reading-check", "result", "reading-docs", "mvv-gate-failure", "experiment"]},
-    "書いた時刻": {"key": "at", "aliases_removed": ["created_at", "updated_at", "started_at", "ts"], "where": ["usage", "mvv-signals", "mvv-validation", "context-records", "loop-event", "reading-check", "reading-docs", "mvv-gate-failure", "experiment"]},
+    "形のバージョン": {"key": "version", "aliases_removed": ["schema"], "where": ["usage", "mvv-signals", "mvv-validation", "context-records", "loop-event", "context", "stage-snapshot", "reading-check", "result", "reading-docs", "mvv-gate-failure", "experiment", "experiment-weights"]},
+    "書いた時刻": {"key": "at", "aliases_removed": ["created_at", "updated_at", "started_at", "ts"], "where": ["usage", "mvv-signals", "mvv-validation", "context-records", "loop-event", "reading-check", "reading-docs", "mvv-gate-failure", "experiment", "experiment-weights"]},
     "結果": {"key": "status", "aliases_removed": ["result", "outcome"], "where": ["result"]},
     "製品のバージョン": {"key": "product_version", "aliases_removed": [], "where": ["loop-event", "context"]},
     "MVV の設定のバージョン": {"key": "mvv_version", "aliases_removed": [], "where": ["mvv-signals", "mvv-validation"]},
     "工程の定義の文書のバージョン": {"key": "definition_version", "aliases_removed": [], "where": ["stage-snapshot"]},
-    "期限": {"key": "until", "aliases_removed": [], "where": ["loop-event"]},
+    "期限": {"key": "until", "aliases_removed": [], "where": ["loop-event", "experiment-weights"]},
     "起動した時刻": {"key": "launched_at", "aliases_removed": [], "where": ["usage"]},
     "再利用の元の判定を書いた時刻": {"key": "reused_from", "aliases_removed": [], "where": ["mvv-validation"]},
     "判定の結論": {"key": "verdict", "aliases_removed": [], "where": ["mvv-validation", "context-records", "reading-docs"]},
     "スプリント状態の名前": {"key": "state", "aliases_removed": [], "where": ["mvv-signals"]},
     "ループの 1 回の終わり方": {"key": "outcome", "aliases_removed": [], "where": ["loop-event"]},
     "cross-review の指摘の終わり方": {"key": "outcome", "aliases_removed": [], "where": ["mvv-validation"]},
-    "起動 1 回の終わり方": {"key": "outcome", "aliases_removed": [], "where": ["usage"]},
+    "起動の終わり方": {"key": "outcome", "aliases_removed": [], "where": ["usage"]},
     "読み手役の確認の結果": {"key": "result", "aliases_removed": [], "where": ["reading-check"]}
   }
 }

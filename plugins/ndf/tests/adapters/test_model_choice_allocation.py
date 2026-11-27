@@ -35,7 +35,7 @@ def store(monkeypatch) -> Path:
 @pytest.fixture
 def clock(monkeypatch):
     now = {"at": NOW}
-    monkeypatch.setattr(mc, "_utc_now", lambda: now["at"])
+    monkeypatch.setattr(mc, "utc_now", lambda: now["at"])
     return now
 
 

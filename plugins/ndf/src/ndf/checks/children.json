@@ -44,7 +44,7 @@
     "M4+": {"issue": 4076, "packages": [], "needs": ["M4", "M7"], "order": 8, "lane": "lr-data", "closed": false},
     "M5": {"issue": 3299, "packages": ["ndf.domains.crossreview"], "needs": ["C3", "AD1", "AD3", "T1", "M4"], "order": 7, "lane": "lr-flow", "closed": false},
     "M5+": {"issue": 4076, "packages": [], "needs": ["M5", "M7"], "order": 8, "lane": "lr-flow", "closed": false},
-    "M7": {"issue": 3302, "packages": ["ndf.domains.records", "ndf.domains.settings.cli"], "needs": ["P1b", "P2", "AD2", "M3a", "M2"], "order": 7, "lane": "lr-fix-b", "closed": false},
+    "M7": {"issue": 3302, "packages": ["ndf.domains.records", "ndf.domains.settings.cli"], "needs": ["P1b", "P2", "AD2", "M3a", "M2", "MC1"], "order": 7, "lane": "lr-fix-b", "closed": false},
     "M7+": {"issue": 4076, "packages": [], "needs": ["M7", "M4"], "order": 8, "lane": "lr-fix-b", "closed": false},
     "P4": {"issue": 3098, "packages": ["ndf.progress.reshape"], "needs": ["P3", "M1"], "order": 9, "lane": "lrebuild", "closed": false},
     "S1a": {"issue": 3303, "packages": [], "needs": ["M1", "M2", "M3a", "M3b", "M4", "M5", "M6", "M7", "M8", "C3+", "C5"], "order": 8, "lane": "lrebuild", "closed": true},
@@ -62,7 +62,7 @@
     "S3": {"issue": 3412, "packages": [], "needs": ["S2"], "order": 11, "lane": "lrebuild", "closed": false},
     "AD4": {"issue": 3616, "packages": [], "needs": ["AD1", "C3", "T1"], "order": 6, "lane": "lci-junit", "closed": false},
     "LC1": {"issue": 1959, "packages": ["ndf.adapters.launch_approval", "ndf.adapters.launch_candidates", "ndf.adapters.launch_records", "ndf.adapters.launch_settings", "ndf.adapters.secret_forms", "ndf.domains.settings.launch_config_cli"], "needs": ["X0", "D1", "AD1"], "order": 4, "lane": "lmodel", "closed": false},
-    "MC1": {"issue": 2944, "packages": ["ndf.adapters.model_choice", "ndf.domains.records.models_cli", "ndf.domains.settings.delegate_run_cli"], "needs": ["X0", "D1", "AD1", "LC1"], "order": 5, "lane": "lmodel", "closed": false}
+    "MC1": {"issue": 2944, "packages": ["ndf.adapters.model_choice", "ndf.adapters.model_chooser", "ndf.domains.records.models_cli", "ndf.domains.settings.delegate_run_cli"], "needs": ["X0", "D1", "AD1", "LC1"], "order": 5, "lane": "lmodel", "closed": false}
   },
   "tables": {
     "contracts/causes/": ["D1", "D1+"],
