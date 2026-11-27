@@ -24,7 +24,7 @@ class LaunchChooser(Protocol):
 
     def launch_choice(self, layer: str, name: str, runtime: str = "claude", *, cwd: Path, **request: Any) -> Any: ...
 
-    def base_fallback(self, choice: Any, reason: str, ready: Optional[Callable[[], None]] = None) -> Optional[Any]: ...
+    def base_fallback(self, choice: Any, reason: str, ready: Optional[Callable[[], bool]] = None) -> Optional[Any]: ...
 
     def observed(self, choice: Any, model: str) -> None: ...
 
@@ -105,10 +105,10 @@ class ChoiceRun:
             self._seen = True
             launch_chooser.observed(self.choice, found[0])
 
-    def fall_back(self, reply: claude.ClaudeReply, ready: Optional[Callable[[], None]] = None) -> bool:
+    def fall_back(self, reply: claude.ClaudeReply, ready: Optional[Callable[[], bool]] = None) -> bool:
         """`reply` がモデルを理由にした拒否で、基準の組へ切り替えられたら真。値を替え、`request_try` を 1 増やす。2 回目は切り替えない。
 
-        `ready` は切り替えると決まった後、切り替えの行を書く前に呼ぶ（例外を投げれば切り替えず、行も書かない）。
+        `ready` は切り替えると決まった後、切り替えの行を書く前に呼ぶ。偽を返すか例外を投げれば切り替えず、行も書かない。
         """
         if reply.failure is not claude.Failure.MODEL_REFUSED or self.switched or launch_chooser is None or self.choice is None:
             return False

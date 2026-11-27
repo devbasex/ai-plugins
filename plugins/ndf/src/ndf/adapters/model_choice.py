@@ -873,17 +873,18 @@ def _prepared_store(env: Mapping[str, str], now: datetime, window_days: int) -> 
     return store
 
 
-def base_fallback(choice: Choice, reason: str, ready: Optional[Callable[[], None]] = None) -> Optional[Choice]:
+def base_fallback(choice: Choice, reason: str, ready: Optional[Callable[[], bool]] = None) -> Optional[Choice]:
     """割り付けた基準でない組の起動がモデルを理由に拒否されたとき、基準へ切り替えたことを持つ `launch_error` の行を書き、基準の組の値を返す。
 
     基準の組と割り付けの無い起動は None。行は割り付けと同じ保存先（`choice.store`）へ書き、書けなくても基準の値を返す。
     引き上げを求めた起動（`retry` がある）は、元の組が上限で値が変わらなかった場合も、基準の組から引き上げ直す。
-    `ready` は切り替えると決まった後、行を書く前に呼ぶ（呼び手の材料の確かめ）。例外はそのまま送り、行を書かない。
+    `ready` は切り替えると決まった後、行を書く前に呼ぶ（呼び手の材料と残りの期限の確かめ）。偽なら行を書かずに None、例外はそのまま
+    送り、行を書かない。
     """
     if choice.assign_id is None or choice.arm is None or choice.arm == choice.base_arm:
         return None
-    if ready is not None:
-        ready()
+    if ready is not None and not ready():
+        return None
     row = {"kind": "launch_error", "at": _time_text(_utc_now()), "assign_id": choice.assign_id, "stage": choice.stage}
     append_row({**row, "runtime": choice.runtime, "arm": dict(choice.arm), "reason": reason, "switched": True}, choice.store)
     log.warning("組 %s は起動できなかったので、基準の組で続ける（工程 %s・単位 %s）", _arm_text(choice.arm), choice.stage, choice.unit)

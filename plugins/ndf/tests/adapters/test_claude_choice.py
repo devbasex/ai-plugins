@@ -232,6 +232,14 @@ def test_a_refusal_with_no_time_left_does_not_switch(judge_repo, recorder, tmp_p
     assert _experiments(tmp_path / "store", "launch_error") == [] and recorder.outcomes[0][1] is None
 
 
+def test_a_check_that_uses_up_the_time_stops_the_switch(judge_repo, recorder, tmp_path, monkeypatch) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(llm, "_clock", lambda: clock[0])
+    calls = Calls(_parsed(REFUSED)._replace(launched=True, seconds=2.0), _answer(GOOD))
+    got = llm.ask("質問", "材料", SCHEMA, 30, call=calls, before_retry=lambda: clock.__setitem__(0, 30.0))
+    assert not got.ok and len(calls.argv) == 1 and _experiments(tmp_path / "store", "launch_error") == []
+
+
 def test_the_retry_reuses_the_repository_key_and_the_answer_is_checked_once(judge_repo, recorder, monkeypatch) -> None:
     keys: list[Path] = []
     monkeypatch.setattr(model_choice.launch_approval, "repo_key", lambda root: keys.append(root) or os.path.realpath(root))

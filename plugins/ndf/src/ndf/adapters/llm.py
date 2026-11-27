@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import copy
 import json
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -154,16 +155,28 @@ class _Ask:
     checks: _Checks
 
 
+def _clock() -> float:
+    """期限を測る単調時計の秒。テストが差し替える。"""
+    return time.monotonic()
+
+
 def _launch_judge(run: claude_choice.ChoiceRun, q: _Ask, prompt: str) -> claude.ClaudeReply:
     """選んだ値で 1 回起動する。モデルを理由に拒まれ基準へ切り替えられれば、残りの期限で 1 回だけ起動し直す。
 
-    期限が残っていなければ切り替えない（切り替えの行を書かない）。起動し直す前には、打ち直しと同じく `before_retry` で材料が
-    古くなっていないかを確かめる（切り替えの行より先に呼ぶので、例外で止めれば行は書かない）。
+    期限は単調時計で持つ。起動し直す前に、打ち直しと同じく `before_retry` で材料が古くなっていないかを確かめ、その後で残りの期限を
+    測る。確かめは切り替えの行より先に呼ぶので、例外で止めれば行を書かない。確かめの間に期限を使い切れば、行を書かずに起動もしない。
     """
+    deadline = _clock() + q.timeout
     reply = _judge_once(run, q, prompt, q.timeout)
-    left = q.timeout - (reply.seconds if reply.seconds is not None else 0.0)
-    if left > 0 and run.fall_back(reply, ready=q.before_retry):
-        reply = _judge_once(run, q, prompt, left)
+    deadline = min(deadline, _clock() + q.timeout - (reply.seconds if reply.seconds is not None else 0.0))
+
+    def ready() -> bool:
+        if q.before_retry is not None:
+            q.before_retry()
+        return deadline - _clock() > 0
+
+    if run.fall_back(reply, ready=ready):
+        reply = _judge_once(run, q, prompt, max(deadline - _clock(), 0.0))
     return reply
 
 
