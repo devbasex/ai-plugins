@@ -94,7 +94,12 @@ RESULTS = """## 設計の結果
 | #8 | マージする | #7 | |
 | #9 | 閉じる | — | — |
 | #10 | 実装する | #4051 の実装の PR | `b.py` |
+| #13 | マージする | #7 の受け入れ条件へ | |
 | 合計 | x | y | z |
+
+| 触るファイル | 課題 | 扱い |
+| --- | --- | --- |
+| `e.py` | #7 | 閉じる |
 
 ```md
 | #11 | 実装する | — | `c.py` |
@@ -107,14 +112,23 @@ RESULTS = """## 設計の結果
 
 
 def test_design_handlings_read_the_handling_and_the_target_of_each_issue_in_the_results_section():
-    # 統合先のセルの最初の課題の番号を読み、番号の無いセル（`—`）は None。セクションの外とコードブロックの中の行は読まない
-    assert design_handlings(RESULTS) == {7: ("実装する", None), 8: ("マージする", 7), 9: ("閉じる", None), 10: ("実装する", 4051)}
+    # 統合先は「マージする」の行の、課題の番号だけのセルから読む。実装先の PR を書いた「実装する」の行（#10）と、番号に文が
+    # 続くセル（#13）は None。後続の補足の表（#7 を「閉じる」とする）・セクションの外・コードブロックの中の行は読まない
+    assert design_handlings(RESULTS) == {
+        7: ("実装する", None),
+        8: ("マージする", 7),
+        9: ("閉じる", None),
+        10: ("実装する", None),
+        13: ("マージする", None),
+    }
 
 
 def test_design_handlings_find_the_columns_by_the_header_and_return_empty_without_the_section():
     swapped = "## 設計の結果\n\n| 扱い | 課題 | 触るファイル |\n| --- | --- | --- |\n| 閉じる | #3 | — |\n"
     assert design_handlings(swapped) == {3: ("閉じる", None)}
     assert design_handlings("## 設計\n\n| 課題 | 扱い | 統合先 |\n| --- | --- | --- |\n| #1 | 実装する | — |\n") == {}
+    # 見出しの次が区切りでない表は対象の表ではない
+    assert design_handlings("## 設計の結果\n\n| 課題 | 扱い |\n| #1 | 実装する |\n") == {}
 
 
 UNITS = "workflow/review-units.schema.json"

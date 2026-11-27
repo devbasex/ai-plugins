@@ -24,10 +24,10 @@ _FENCE = re.compile(r"^(```|~~~)")
 # セクションの終わり（`#` か `##` の見出し）
 SECTION_END = re.compile(r"^#{1,2} ")
 _CODE = re.compile(r"`([^`]+)`")
-# 設計書の「設計の結果」のセクションと、課題のセル・統合先のセルの課題の番号
+# 設計書の「設計の結果」のセクションと、課題のセル・統合先のセルの課題の番号、統合先を読む扱い
 RESULTS_HEADING = "## 設計の結果"
 _ISSUE_CELL = re.compile(r"^#(\d+)$")
-_ISSUE_REF = re.compile(r"#(\d+)")
+MERGE_HANDLING = "マージする"
 _LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+\.md)(?:#[^)]*)?\)")
 _T = TypeVar("_T")
 
@@ -261,24 +261,55 @@ def absorbed_missing(target_body: str, absorbed: Mapping[int, str]) -> dict[int,
 def design_handlings(text: str) -> dict[int, tuple[str, Optional[int]]]:
     """設計書の「設計の結果」の表の {課題の番号: (扱い, 統合先の課題の番号)}（#3702）。
 
-    列は見出しの「課題」「扱い」「統合先」で探す（「統合先」の列は無くてよい）。統合先はセルの最初の `#<番号>` で、番号の
-    無いセル（`—`）は None。課題のセルが `#<番号>` でない行と、セクションの外・コードブロックの中の行は読まない。
+    読む表は、セクションの中で見出しに「課題」「扱い」があり、次の行が区切りの行である最初の表だけで、その表の本文の行だけを
+    読む（後続の補足の表は列の並びが違うので読まない）。列は見出しの「課題」「扱い」「統合先」で探す（「統合先」の列は無くて
+    よい）。統合先は扱いが「マージする」の行で、セルが課題の番号（`#<番号>` だけ）のときだけ読み、それ以外は None（「実装する」の
+    行の `#4051 の実装の PR` は実装先の PR で、統合先の課題ではない）。課題のセルが `#<番号>` でない行と、セクションの外・
+    コードブロックの中の行は読まない。
     """
-    found = section_lines(text, RESULTS_HEADING)
-    rows = [split_row(line) for line in found if line.strip().startswith("|")] if found is not None else []
-    if not rows or "課題" not in rows[0] or "扱い" not in rows[0]:
+    rows = _results_table(text)
+    if rows is None:
         return {}
     head = rows[0]
     at_issue, at_handling = head.index("課題"), head.index("扱い")
     at_target = head.index("統合先") if "統合先" in head else None
     out: dict[int, tuple[str, Optional[int]]] = {}
-    for row in rows[1:]:
+    for row in rows[2:]:
         issue = _ISSUE_CELL.match(row[at_issue]) if len(row) > max(at_issue, at_handling) else None
         if issue is None:
             continue
-        target = _ISSUE_REF.search(row[at_target]) if at_target is not None and len(row) > at_target else None
-        out[int(issue.group(1))] = (row[at_handling], int(target.group(1)) if target else None)
+        handling = row[at_handling]
+        target = (
+            _ISSUE_CELL.match(row[at_target]) if handling == MERGE_HANDLING and at_target is not None and len(row) > at_target else None
+        )
+        out[int(issue.group(1))] = (handling, int(target.group(1)) if target else None)
     return out
+
+
+def _results_table(text: str) -> Optional[list[list[str]]]:
+    """「設計の結果」の、見出しに「課題」「扱い」があり次の行が区切りの最初の表の行（見出し・区切り・本文）。無ければ None。
+
+    表は囲みの外で `|` から始まる行が続く範囲で、空行・本文の行・囲みで切れる。"""
+    lines = body_lines(text)
+    span = section_span(lines, RESULTS_HEADING)
+    if span is None:
+        return None
+    tables: list[list[str]] = []
+    last = -2
+    # 添字は本文の行のもの。囲みの行も数に入るので、囲みを挟んだ 2 つの表はつながらない
+    for i, line in outside_fences(lines[span[0] : span[1]]):
+        if not line.strip().startswith("|"):
+            continue
+        if i == last + 1 and tables:
+            tables[-1].append(line)
+        else:
+            tables.append([line])
+        last = i
+    for table in tables:
+        head = split_row(table[0])
+        if len(table) >= 2 and "課題" in head and "扱い" in head and _is_rule(table[1]):
+            return [split_row(line) for line in table]
+    return None
 
 
 def merged_files(results: Sequence[DesignResult]) -> tuple[str, ...]:
