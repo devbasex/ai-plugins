@@ -313,8 +313,8 @@ def test_weights_that_do_not_match_are_not_used(tmp_path, store, clock, entry):
 
 
 def test_probabilities_shorter_than_the_arms_are_not_drawn(tmp_path, store, clock):
-    # 出現率の計算は adaptive の項目に候補外の組も 0 として選択肢ごとに保存する（3 組なら [1, 0, 0]）。この短い配列は、
-    # 互換性のキーが一致したのに確率の数が現在の選択肢の数と異なる入力の例で、確率を使わず現在の候補から均等に抽選する
+    # 出現率の計算は候補外の組にも 0 を入れて選択肢の数だけ保存する（3 組なら [1, 0, 0]）。この短い配列は、
+    # 保存された長さが現在の選択肢の数と異なる入力の例で、使わずに残った候補の組から均等に抽選する
     root = _repo(tmp_path)
     until = _at(NOW + timedelta(days=1))
     _weights(store, root, candidates=[0], probs=[1.0], cutoffs=[{"arm": 1, "until": until}, {"arm": 2, "until": until}])
