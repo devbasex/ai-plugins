@@ -635,7 +635,8 @@ def reflect(
 
     `data` は呼び手が承認の対象のハッシュを照らした候補のバイト列で、置くのはこのバイト列である。錠の中で、候補の記録の反映先が
     `expected`（今の作業場所の `.ndf/launch.json`）と違うか、候補の今の中身が `data` と違えば、何も書かずに `refusal` 付きの偽を返す。
-    先に `recover` で退避と反映の途中の記録を片付ける。反映先が候補と同じ中身なら、反映元のバージョンとも同じでも置き換えず、次のように扱う。
+    先に `recover` で退避と反映の途中の記録を片付ける。前の反映の一時ファイルの片付けが済まず途中の記録が残れば、
+    その記録を上書きも削除もせずに `precondition` で止める（`_recover_into`）。反映先が候補と同じ中身なら、反映元のバージョンとも同じでも置き換えず、次のように扱う。
     `recover` か前の実行が、この操作（候補・反映先・承認の対象のハッシュ・リクエスト）の完了の記録を確定していれば、`record` を呼ばずに
     その記録を残して真を返す（中断の後の打ち直し。後から同じ反映先に新しいリクエストができても、反映済みの操作を拒まない）。
     そうでなければ（利用者が候補と同じ中身を手で保存したなど）`record` を呼ぶ。承認の行が無いと次の起動が止まるためで、
@@ -703,10 +704,26 @@ def reflect(
 
 
 def _recover_into(target: Path, kept: list[Path]) -> None:
-    """`recover` を呼び、利用者の保存を別の名前で残したらそのパスを `kept` に足す。"""
+    """`recover` を呼び、利用者の保存を別の名前で残したらそのパスを `kept` に足す。一時ファイルの片付けが済んでいなければ止める。
+
+    `recover` は、設定案の写しを移す先を記録できずに一時ファイルを元の名前に残したとき、途中の記録を消さずに残す。
+    そのまま次の反映へ進むと、`_place` が同じ記録を新しい一時ファイルの名前で上書きするか、`_after_reflect` が記録を消し、
+    残った一時ファイルを次の片付けで特定できなくなる。そこで、途中の記録が残っていれば、`kept` に足した後で `precondition` で止める
+    （記録と一時ファイルはそのまま残し、打ち直しの `recover` が片付け直す）。
+    """
+    from ndf.contracts import internal
+
     saved = recover(target)
     if saved is not None:
         kept.append(saved)
+    pending = reflected_file(target, PENDING)
+    if pending.exists():
+        left = read_launch_record(pending).get("placing")
+        raise internal.InternalError(
+            "precondition",
+            f"前の反映の一時ファイル（{left}）を片付けられず、途中の記録 {pending} を残した。"
+            f"{target.parent} に書き込めるか確かめてから、同じコマンドを打ち直す",
+        )
 
 
 def _place(target: Path, data: bytes, rec: dict[str, Any]) -> bool:
@@ -1022,6 +1039,8 @@ def recover(target: Path) -> Optional[Path]:
     最後に、途中の記録が名前を残した置き換えの一時ファイルのうち、NDF が作ったと確かめられるものを消す（`_drop_placing`。強制終了した
     実行の設定案の写しを作業場所に残さず、利用者の作ったファイルには触れない）。途中の記録は完了の記録を書いた後も残し、
     一時ファイルの片付けが済んでから消す（片付けの前に再び中断しても、次の片付けが一時ファイルの名前を読めるようにするため）。
+    片付けが済まず途中の記録を残したことは、記録が残っていることで呼び手に伝わる。反映へ進む呼び手（`_recover_into`）は、
+    それを見て、記録を上書きも削除もせずに止める。
     """
     pending_path = reflected_file(target, PENDING)
     rec = read_launch_record(pending_path)

@@ -777,6 +777,23 @@ def test_the_cleanup_moves_a_copy_only_after_recording_where_it_goes(tmp_path, m
     assert not list(target.parent.glob(".launch.json.dropping-*"))
 
 
+def test_reflection_stops_without_touching_the_record_while_a_copy_is_left(tmp_path, monkeypatch):
+    """片付けが写しを移せず途中の記録を残したら、反映へ進まずに止まり、記録も写しも残す（次の片付けが特定できる。Value 6）。"""
+    target = _worktree(tmp_path)
+    tmp = target.with_name(".launch.json.placing-0")
+    tmp.write_bytes(b"ndf")
+    found = os.lstat(tmp)
+    pending = la.reflected_file(target, la.PENDING)
+    rec = {"placing": str(tmp), "placed": [found.st_dev, found.st_ino]}
+    lc.write_launch_record(pending, rec)
+    monkeypatch.setattr(la, "_note", lambda target, rec: False)
+    kept: list[Path] = []
+    with pytest.raises(internal.InternalError) as raised:
+        la._recover_into(target, kept)
+    assert raised.value.kind == "precondition" and str(tmp) in str(raised.value)
+    assert tmp.read_bytes() == b"ndf" and la.read_launch_record(pending) == rec
+
+
 def test_the_cleanup_finishes_a_move_before_removal_only_for_the_recorded_directory(tmp_path):
     """消す前に専用のディレクトリへ移した直後に止まった一時ファイルは、記録した名前と実体のディレクトリだけを片付ける（Value 6）。"""
     target = _worktree(tmp_path)
