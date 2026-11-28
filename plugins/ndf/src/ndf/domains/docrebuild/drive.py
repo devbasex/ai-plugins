@@ -6,14 +6,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import stat
 import string
 import subprocess
+import tempfile
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -35,7 +37,7 @@ WORK_KIND = TOOL
 RESULT_SCHEMA = contracts.schema_path("io/document-rebuild.result")
 PROMPT_TEMPLATE = "contracts/worker/document-rebuild.md"
 SKILL = "skills/document-rebuild/SKILL.md"
-# 要求仕様のコピーを置く、保存先の下のディレクトリ
+# 要求仕様のコピーを置く、保存先の下の一時ディレクトリの名前の頭
 REQUIREMENTS_COPIES = "requirement-copies"
 ADD_PREFIX, READER_PREFIX = contracts.schema_enum(RESULT_SCHEMA, "/$defs/id_prefix")
 # `git diff A...B` で分岐点が無いときの終了コード（設計書の実測）
@@ -172,29 +174,38 @@ def requirements_of(cwd: Path, targets: Sequence[Target]) -> dict[str, list[str]
     return out
 
 
-def copy_requirements(cwd: Path, requirements: Mapping[str, Sequence[str]], state_dir: Path) -> dict[str, list[str]]:
-    """組になる要求仕様を保存先へ写し、設計書ごとのコピーの絶対パスを返す。
+@contextlib.contextmanager
+def copy_requirements(cwd: Path, requirements: Mapping[str, Sequence[str]], state_dir: Path) -> Iterator[dict[str, list[str]]]:
+    """組になる要求仕様を保存先の一時ディレクトリへ写し、設計書ごとのコピーの絶対パスを渡す。
 
-    worker は作業場所のパスを開き直さず、検査した記述子から読んだ内容のコピーだけを読む。安全に読めない・写せない要求仕様が
+    worker は作業場所のパスを開き直さず、検査した記述子から読んだ内容のコピーだけを読む。一時ディレクトリは実行ごとに新しく
+    作り（既にあるファイルの権限を引き継がない）、抜けるとき（途中の失敗を含む）に消す。安全に読めない・写せない要求仕様が
     あれば `Precondition`。
     """
     found = sorted({rel for rels in requirements.values() for rel in rels})
-    copies = {rel: str(_copy_requirement(cwd, rel, state_dir)) for rel in found}
-    return {design: [copies[rel] for rel in rels] for design, rels in requirements.items()}
+    if not found:
+        yield {}
+        return
+    try:
+        state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        scratch = tempfile.TemporaryDirectory(prefix=f"{REQUIREMENTS_COPIES}-", dir=state_dir)
+    except OSError as exc:
+        raise Precondition(f"要求仕様書を写す一時ディレクトリを保存先 {state_dir} に作れない: {exc}") from None
+    with scratch as top:
+        copies = {rel: str(_copy_requirement(cwd, rel, Path(top))) for rel in found}
+        yield {design: [copies[rel] for rel in rels] for design, rels in requirements.items()}
 
 
-def _copy_requirement(cwd: Path, rel: str, state_dir: Path) -> Path:
-    """`rel` をリンクをたどらずに開いてオーナーと権限を確かめ、読んだ内容を所有者だけの保存先へ置く。"""
+def _copy_requirement(cwd: Path, rel: str, into: Path) -> Path:
+    """`rel` をリンクをたどらずに開き、同じ記述子でオーナーと書き込み権限を確かめて読み、内容を `into` へ置く。"""
     source = Path(rel)
     try:
         with worker_paths.open_resolved(cwd) as top, worker_paths.open_subdir(top, str(source.parent)) as wd:
             worker_paths.check_unshared(wd, source.name)
-            worker_paths.check_owned(wd, [source.name])
-            text = worker_paths.read_file(wd, source.name)
+            text = worker_paths.read_file(wd, source.name, owned=True, private_group=True)
         if text is None:
             raise Precondition(f"要求仕様書 {rel} が無くなった")
-        state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        with worker_paths.open_or_create(state_dir / REQUIREMENTS_COPIES) as out:
+        with worker_paths.open_or_create(into) as out:
             worker_paths.check_unshared(out)
             worker_paths.write_file(out, source.name, text, private=True)
             return out.path / source.name
@@ -559,9 +570,9 @@ def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner:
         if not chosen.targets:
             summary = f"組み直す文書が無い（種類: {'・'.join(args.kinds)}・起点: {ref}）"
             return result.result(TOOL, result.OK, summary, [], {"targets": []}, warnings=chosen.skipped)
-        requirements = copy_requirements(args.cwd, requirements_of(args.cwd, chosen.targets), args.state_dir)
-        prompt = prompt_text(chosen.targets, requirements, _root() / SKILL)
-        out, result_file = run_worker_at(args.state_dir, args.cwd, WORK_KIND, prompt, runner)
+        with copy_requirements(args.cwd, requirements_of(args.cwd, chosen.targets), args.state_dir) as requirements:
+            prompt = prompt_text(chosen.targets, requirements, _root() / SKILL)
+            out, result_file = run_worker_at(args.state_dir, args.cwd, WORK_KIND, prompt, runner)
         attempts = out["metrics"].get("attempts") if isinstance(out.get("metrics"), dict) else None
         log.info("組み直す worker が終えた", extra={"worker_status": out.get("status"), "attempts": attempts})
         stopped, report = worker_report(out, result_file)

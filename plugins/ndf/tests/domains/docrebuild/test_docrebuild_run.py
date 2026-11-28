@@ -18,7 +18,7 @@ from typing import Any, Optional
 import pytest
 
 from ndf.adapters import git
-from ndf.contracts import causes
+from ndf.contracts import causes, worker_paths
 from ndf.domains.crossreview import finish_decide
 from ndf.core import start_point
 from ndf.domains.docrebuild import cli, drive
@@ -387,7 +387,8 @@ def test_drive_hands_only_this_issues_design(tmp_path: Path) -> None:
     assert got["status"] == "ok", got
     assert got["metrics"]["targets"] == [DESIGN]
     assert f"`{DESIGN}`" in worker.prompt and OTHER_DESIGN not in worker.prompt
-    assert f"requirement-copies/{Path(REQ).name}`" in worker.prompt and f"`{REQ}`" not in worker.prompt
+    assert "requirement-copies-" in worker.prompt and f"/{Path(REQ).name}`" in worker.prompt and f"`{REQ}`" not in worker.prompt
+    assert not list((tmp_path / "state").glob("requirement-copies-*"))
 
 
 def test_drive_pairs_requirements_with_each_design(tmp_path: Path) -> None:
@@ -399,7 +400,7 @@ def test_drive_pairs_requirements_with_each_design(tmp_path: Path) -> None:
     worker = FakeWorker(_report(readers=[_reader(design)]))
     assert _run(tmp_path, fake, worker, issues=(7,))["status"] == "ok"
     line = next(ln for ln in worker.prompt.splitlines() if "組になる要求仕様のコピー:" in ln)
-    assert "requirement-copies/issue-7-requirements.md`" in line and "requirement-copies/issue-8-requirements.md`" in line
+    assert "/issue-7-requirements.md`" in line and "/issue-8-requirements.md`" in line
 
 
 def test_copy_requirements_passes_a_private_copy_of_what_was_checked(tmp_path: Path) -> None:
@@ -407,10 +408,11 @@ def test_copy_requirements_passes_a_private_copy_of_what_was_checked(tmp_path: P
     cwd, state = tmp_path / "work", tmp_path / "state"
     rel = "issues/issue-7-requirements.md"
     _write(cwd, rel, "読んだ内容\n")
-    [copy] = drive.copy_requirements(cwd, {DESIGN: [rel]}, state)[DESIGN]
-    (cwd / rel).unlink()
-    (cwd / rel).symlink_to(tmp_path / "outside.md")
-    assert Path(copy).read_text(encoding="utf-8") == "読んだ内容\n"
+    with drive.copy_requirements(cwd, {DESIGN: [rel]}, state) as copies:
+        [copy] = copies[DESIGN]
+        (cwd / rel).unlink()
+        (cwd / rel).symlink_to(tmp_path / "outside.md")
+        assert Path(copy).read_text(encoding="utf-8") == "読んだ内容\n"
     assert Path(copy).parent.parent == state.resolve() and os.stat(copy).st_mode & 0o077 == 0
 
 
@@ -432,9 +434,29 @@ def test_copy_requirements_refuses_what_others_can_replace(tmp_path: Path, kind:
         (cwd / rel).chmod(0o666)
     if kind == "writable_directory":
         (cwd / "issues").chmod(0o777)
-    with pytest.raises(drive.Precondition):
-        drive.copy_requirements(cwd, {DESIGN: [rel]}, state)
-    assert not (state / drive.REQUIREMENTS_COPIES / Path(rel).name).exists()
+    with pytest.raises(drive.Precondition), drive.copy_requirements(cwd, {DESIGN: [rel]}, state):
+        pass
+    assert not list(state.glob(f"{drive.REQUIREMENTS_COPIES}-*"))
+
+
+def test_copy_requirements_removes_the_copies_made_before_a_failure(tmp_path: Path) -> None:
+    """途中の要求仕様を読めずに止まっても、先に写したコピーを残さない。"""
+    cwd, state = tmp_path / "work", tmp_path / "state"
+    first, gone = "issues/issue-7-requirements.md", "issues/issue-8-requirements.md"
+    _write(cwd, first)
+    with pytest.raises(drive.Precondition), drive.copy_requirements(cwd, {DESIGN: [first, gone]}, state):
+        pass
+    assert not list(state.glob(f"{drive.REQUIREMENTS_COPIES}-*"))
+
+
+def test_copy_requirements_checks_who_may_write_on_the_read_descriptor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """モードのビットに出ない書き込みの許可（拡張 ACL）がある要求仕様は、読まずに止める。"""
+    cwd, state = tmp_path / "work", tmp_path / "state"
+    rel = "issues/issue-7-requirements.md"
+    _write(cwd, rel)
+    monkeypatch.setattr(worker_paths, "_others_may_write", lambda fd, st, **_: True)
+    with pytest.raises(drive.Precondition), drive.copy_requirements(cwd, {DESIGN: [rel]}, state):
+        pass
 
 
 @pytest.mark.parametrize(("base", "remote"), [("main", "origin"), ("trunk", "up")])

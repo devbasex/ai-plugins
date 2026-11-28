@@ -903,7 +903,7 @@ plugins/ndf/src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `requirements_of` | `domains/docrebuild/drive.py` | 変更 | 今のまま | 作業場所の `issues/` のうち、`issue_docs.requirements_issues` が設計書の番号と重なる通常ファイルを組にする |
-| `copy_requirements` | `domains/docrebuild/drive.py` | 新設 | `(cwd: Path, requirements: Mapping[str, Sequence[str]], state_dir: Path) -> dict[str, list[str]]` | 組になる要求仕様書を、リンクをたどらずオーナーと権限を確かめて読み（`worker_paths`）、保存先のコピーのパスを worker へ渡す。確かめられなければ `precondition` で止める |
+| `copy_requirements` | `domains/docrebuild/drive.py` | 新設 | `(cwd: Path, requirements: Mapping[str, Sequence[str]], state_dir: Path) -> ContextManager[dict[str, list[str]]]` | 組になる要求仕様書をリンクをたどらずに開き、同じ記述子でオーナーと書き込み権限を確かめて読む（`worker_paths`。呼んだ利用者だけの個人グループの書き込みは許す）。内容は保存先に実行ごとに作る一時ディレクトリへコピーし、そのパスを渡す。一時ディレクトリは worker が終えたときと、途中で失敗したときに消す。確かめられなければ `precondition` で止める |
 
 変える前は `issues/issue-<番号>-requirements.md` だけを番号ごとに探したので、`issue-7-8-requirements.md` が組にならなかった。変えた後は番号の重なりで探し、定数 `REQUIREMENTS_FILE` を消す。
 
@@ -912,7 +912,7 @@ plugins/ndf/src/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `requirements_of` | `issue-7-8-design.md` と `issue-7-8-requirements.md` が組になる | 番号の一部（`78`）は当たらない | リンクは組にしない |
-| `copy_requirements` | 所有者だけが読めるコピーを渡す | 読んだ後に元を差し替えても中身は変わらない | リンク・ほかの利用者が書ける・消えた要求仕様書で止まる |
+| `copy_requirements` | 所有者だけが読めるコピーを渡し、抜けると消す | 読んだ後に元を差し替えても中身は変わらない | リンク・ほかの利用者が書ける・消えた要求仕様書で止まり、先に作ったコピーを残さない |
 
 ## worker の起動指示（`contracts/worker/`・`core/worker.py`）
 
@@ -924,7 +924,7 @@ plugins/ndf/src/ndf/
 | --- | --- | --- |
 | `core/worker.py` の `ACCEPTANCE_RULES` | `ndf loop acceptance record --issue <番号>` で区分を記録する | 単位の指示の `--run` と条件一覧の版を添えて `record` を打つ。条件の文は要求仕様書（`ndf records requirements show`）から読む |
 | `contracts/worker/kinds.json` | 要求の工程の worker が Issue の本文へ要求を書く | 要求仕様書のファイルへ書き、Issue の本文を変えない |
-| `contracts/worker/document-rebuild.md` | 要求仕様のコピー | 要求仕様書 |
+| `contracts/worker/document-rebuild.md` | 要求仕様のコピー（Issue の本文から作ったファイル）の、作業場所のパスを渡す。編集しない | 検査済みの要求仕様書を実行の保存先にコピーし、worker にはそのコピーのパスを渡す。元の要求仕様書とコピーは編集しない |
 
 ## 手順書と用語集
 

@@ -328,12 +328,12 @@ def _entry_fixed(parent: int, child: Optional[os.stat_result]) -> bool:
         return False
     if sys.platform == "darwin" and acl_lets_change_darwin(parent):
         return False
-    if not _others_write(up):
+    if not others_write(up):
         return True
     return child is not None and bool(up.st_mode & stat.S_ISVTX) and child.st_uid in (0, me)
 
 
-def _others_write(st: os.stat_result) -> bool:
+def others_write(st: os.stat_result) -> bool:
     """モードが、呼んだ利用者だけの個人グループ（`_private_group`）を除くグループかほかの利用者に書き込みを許すか。"""
     return bool(st.st_mode & 0o002 or (st.st_mode & 0o020 and not _private_group(st.st_gid)))
 
@@ -393,7 +393,7 @@ def check_owned(wd: WorkDir, names: Iterable[str]) -> None:
         st = _lstat(wd, name)
         if st is not None and stat.S_ISLNK(st.st_mode):
             raise EntryUnsafe(name, "symlink")
-        if st is not None and (st.st_uid not in (0, os.geteuid()) or _others_write(st)):
+        if st is not None and (st.st_uid not in (0, os.geteuid()) or others_write(st)):
             raise EntryUnsafe(name, "foreign")
 
 
