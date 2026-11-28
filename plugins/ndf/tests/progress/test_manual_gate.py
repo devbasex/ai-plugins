@@ -669,6 +669,22 @@ def test_a_rejection_voids_an_approval_whose_answer_was_not_recorded(repo, st, e
     assert [r.unconfirmed for r in approval_decide.stage_revocations(run.read(st, tid), DESIGN)] == [True]
 
 
+def test_an_approval_is_written_again_after_a_rejection_of_the_same_target(repo, st, env, capsys):
+    """未確定の承認の後に別の識別子の却下があれば、打ち直した承認を書き、PR の判定が承認になる。"""
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+    shown = _next(st, tid, repo, env)
+    write = answering.github_post(repo, hub=lambda: env.hub)
+    _fail_answer(st, tid, repo, env, shown, write)
+    target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
+    other = merge_approval.MergeRow("rejected", "user", target, True, "other")
+    merge_approval.write_merge_row(env.hub, other, env.hub.viewer())
+
+    _answer(st, tid, repo, env, shown, key="k-2", post=write)
+
+    assert merge_approval.merge_judgment(merge_approval.merge_rows(env.hub, DESIGN_PR, env.hub.viewer()), target) is not None
+
+
 @pytest.mark.parametrize("by", ["conductor", "service:bot"])
 def test_a_held_stage_is_approved_only_by_a_person(repo, st, env, capsys, by):
     """本番へ反映されないマージでも、手で終えた工程の承認は人の回答に限る。"""

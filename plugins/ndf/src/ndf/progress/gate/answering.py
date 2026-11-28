@@ -11,6 +11,7 @@ import contextlib
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
@@ -99,11 +100,13 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
     return observe
 
 
-# マージの承認の証跡を書く口（行を渡し、書いたら真、同じ記録の証跡が既にあれば偽）
-Post = Callable[[merge_approval.MergeRow], bool]
+class Post(Protocol):
+    """マージの承認の証跡を書く口（行を渡し、書いたら真、重なる証跡が既にあれば偽）。`resend` は DB に記録済みの回答の送り直し。"""
+
+    def __call__(self, row: merge_approval.MergeRow, *, resend: bool = False) -> bool: ...
 
 
-def no_post(row: merge_approval.MergeRow) -> bool:
+def no_post(row: merge_approval.MergeRow, *, resend: bool = False) -> bool:
     """証跡を書かない口（PR を読まないテストと、承認の対象を持たない質問）。"""
     return False
 
@@ -115,10 +118,10 @@ def github_post(cwd: Path, hub: Optional[Callable[[], GitHub]] = None) -> Post:
     書けない（利用者のアカウント ID を読めない・値が不正）なら `model.Refused`（回答は記録しない）。"""
     get_hub = shared_hub(cwd, hub)
 
-    def post(row: merge_approval.MergeRow) -> bool:
+    def post(row: merge_approval.MergeRow, *, resend: bool = False) -> bool:
         made = get_hub()
         try:
-            return merge_approval.write_merge_row(made, row, made.viewer(), by_answer=True)
+            return merge_approval.write_merge_row(made, row, made.viewer(), latest_only=not resend)
         except merge_approval.TrailError as exc:
             raise model.Refused(f"マージの承認の証跡を書けないので、回答を記録しない: {exc}") from None
 
@@ -264,15 +267,19 @@ def _relayed_by_organizer(conn: Any, q: Question, a: Answer) -> bool:
     return ORGANIZER_ANSWERS.get(str(reply.get("result"))) == a.value
 
 
-def _post_trail(q: Question, a: Answer, seen: Target, by: Optional[str], post: Post) -> None:
-    """照らした承認の対象と提示ごとの識別子（`presented_id`）で証跡の行を作り、`post` で書く。担い手 `by` が無ければ書かない。
+def _post_trail(q: Question, a: Answer, seen: Target, by: str, post: Post, *, resend: bool = False) -> None:
+    """照らした承認の対象と提示ごとの識別子（`presented_id`）で証跡の行を作り、`post` で書く。
 
     同じ提示への送り直しだけが重なりとして書かれない。資料を出し直した後の回答は、出し直す前の提示の証跡があっても書く。"""
     target = seen.binding()
-    if by is None or target is None or a.value not in _TRAIL_ANSWERS:
+    if target is None or a.value not in _TRAIL_ANSWERS:
         return
     record = presented_id(replace(q, target=seen))
-    post(merge_approval.MergeRow(_TRAIL_ANSWERS[a.value], by, target, seen.production is True, record))
+    row = merge_approval.MergeRow(_TRAIL_ANSWERS[a.value], by, target, seen.production is True, record)
+    if resend:
+        post(row, resend=True)
+    else:
+        post(row)
 
 
 def _note_posting(conn: Any, v: run.View, q: Question, a: Answer, seen: Target) -> Optional[int]:
@@ -335,6 +342,21 @@ def _commit_answer(conn: Any, v: run.View, got: _Checked, last_seq: int) -> tupl
     return store.append_events(conn, v.machine_id, drafts, last_seq), carried
 
 
+def _begin_answer(
+    conn: Any, v: run.View, a: Answer, observe: Observe, root: Path, text: Optional[str]
+) -> tuple[_Checked, Optional[str], int, Optional[tuple[list[int], Optional[str]]]]:
+    """回答の 1 つ目のトランザクション。確かめを通った回答、証跡の担い手、回答を書くときに期待する事象の番号、書いた結果を返す。
+
+    証跡を投稿しない回答（担い手が None）はここで書く。投稿する回答は書かず（結果は None）、本番へ反映される承認なら
+    投稿前の記録だけを追記する。"""
+    got, by = _check_answer(conn, v, a, observe, root, text)
+    last = v.events[-1].seq if v.events else 0
+    if by is None:
+        return got, by, last, _commit_answer(conn, v, got, last)
+    noted = _note_posting(conn, v, got.q, a, got.seen)
+    return got, by, last if noted is None else noted, None
+
+
 def _require_person(conn: Any, q: Question, a: Answer) -> None:
     """手で終えた工程の回答待ちの承認は工程を終了にするので、本番へ反映されないマージでも人の回答に限る（`model.Refused`）。
 
@@ -353,7 +375,8 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
     """回答を事象 `answered` に残す（外した課題の行と、今のスプリントの課題から外す事象も同じトランザクション）。
     同じ冪等のキーは書かずに同じ結果を返す。
 
-    回答の確かめから DB の確定までは、開き直しと共有する排他（`store.approval_lock`）の中で行う。
+    回答の確かめから DB の確定までは、開き直しと共有する排他（`store.approval_lock`）の中で行う。証跡の投稿は DB の
+    トランザクションの外で行う（SQLite は書くトランザクションの間、保存先全体の書き込みを止める）。
 
     承認の対象を持つ質問への回答は、記録の前にマージの承認の証跡を PR へ書く（`_trail_by`・`_post_trail`。#4409 の
     決定 7）。承認は本番へ反映され得るときだけ、却下はいつも書く。証跡を書けなければ回答を記録せず、同じ回答を
@@ -368,18 +391,20 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
             v = run.view(conn, machine_id)
             held = _answered_with_key(v, a.key)
             if held is not None:
-                return _same(held, a, machine_id, lambda: _ensure_trail(conn, v, held, a, post))
-            got, by = _check_answer(conn, v, a, observe, st.root, text)
-            posting = _note_posting(conn, v, got.q, a, got.seen) if by is not None else None
-            if posting is None:
-                _post_trail(got.q, a, got.seen, by, post)
-                seqs, carried = _commit_answer(conn, v, got, v.events[-1].seq if v.events else 0)
-        if posting is not None:
+                replayed = _same(held, a, machine_id)
+                send = _ensure_trail(conn, v, held, a, post)
+            else:
+                got, by, last, done = _begin_answer(conn, v, a, observe, st.root, text)
+        if held is not None:
+            send()
+            return replayed
+        if by is not None:
             # 投稿前の記録を確定してから投稿する（投稿の後に止まっても、DB から取り消す承認を指せる）
             _post_trail(got.q, a, got.seen, by, post)
             with store.transaction(st) as conn:
-                seqs, carried = _commit_answer(conn, v, got, posting)
-    q = got.q
+                done = _commit_answer(conn, v, got, last)
+    assert done is not None  # 証跡を投稿しない回答は 1 つ目のトランザクションで、投稿する回答は投稿の後に書いた
+    (seqs, carried), q = done, got.q
     summary = f"工程 {q.stage} へ回答 {a.value} を書いた（{a.by}）。続きは ndf progress next で流す"
     metrics = {"machine_id": machine_id, "seqs": seqs, "gate_id": q.id, "carried_row": carried}
     out = result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", machine_id))
@@ -411,8 +436,13 @@ def _outputs(v: run.View, q: Question, a: Answer) -> list[model.EventDraft]:
     return [model.EventDraft(stages.OUTPUTS_EVENT, run.ACTOR, q.stage, payload=payload, rev=v.rev)]
 
 
-def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Post) -> None:
-    """記録済みの回答の証跡が無ければ書く（証跡の後・記録の前でなく、記録の後に止まった送り直し）。
+def _no_trail() -> None:
+    """書く証跡が無い送り直し。"""
+
+
+def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Post) -> Callable[[], None]:
+    """記録済みの回答の証跡が無ければ書く関数を返す（証跡の後・記録の前でなく、記録の後に止まった送り直し）。呼び手は
+    返した関数をトランザクションの外で打つ。
 
     担い手は記録した回答した者（事象の `by`）から決める。送り直しの `a.by` は `_same` が記録と同じことを確かめている。
     承認の境界（`approval_decide.approval_boundary`）より前の回答には書かない（取り消した承認を、送り直しで PR へ戻さない）。
@@ -420,13 +450,13 @@ def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Po
     p = run.event_payload(held)
     rows = [ev for ev in v.events if ev.draft.row_key == held.draft.row_key]
     if held.seq < approval_decide.approval_boundary(rows, str(p.get("step"))):
-        return
+        return _no_trail
     if closes_only(p) and p.get("answer") == run.APPROVED:
-        return
+        return _no_trail
     seen = Target.from_dict(p.get("seen"))
     gate = p.get("gate")
     if seen.binding() is None or not isinstance(p.get("gate_id"), str):
-        return
+        return _no_trail
     q = Question(
         str(p["gate_id"]),
         v.machine_id,
@@ -437,18 +467,17 @@ def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Po
         target=seen,
     )
     by = _trail_by(conn, q, replace(a, by=str(p.get("by"))), seen)
-    if by is not None:
-        _post_trail(q, a, seen, by, post)
+    return _no_trail if by is None else partial(_post_trail, q, a, seen, by, post, resend=True)
 
 
-def _same(held: model.Event, a: Answer, machine_id: str, ensure: Callable[[], None] = lambda: None) -> dict[str, Any]:
+def _same(held: model.Event, a: Answer, machine_id: str) -> dict[str, Any]:
+    """同じ冪等のキーの送り直しが記録と同じ回答かを確かめ、結果を返す（違えば `model.Refused`）。"""
     p = run.event_payload(held)
     if p.get("answer") != a.value or p.get("gate_id") != a.gate_id:
         raise model.Refused(f"冪等のキー {a.key} は別の回答（{p.get('answer')}・質問 {p.get('gate_id')}）に使った")
     # 送り直しで回答した者を変えない（記録は自動の処理の回答なのに、送り直しの申告で利用者の証跡を書かない）
     if p.get("by") != a.by:
         raise model.Refused(f"冪等のキー {a.key} の回答は {p.get('by')} が書いた。送り直しの回答した者 {a.by} と違う")
-    ensure()
     summary = f"冪等のキー {a.key} の回答は書いてある（事象 {held.seq}）"
     metrics = {"machine_id": machine_id, "seqs": [held.seq], "gate_id": a.gate_id, "replayed": True}
     return result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", machine_id))

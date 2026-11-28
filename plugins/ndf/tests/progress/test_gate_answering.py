@@ -67,7 +67,7 @@ class Posts:
         self.rows: list[merge_approval.MergeRow] = []
         self.fail = fail
 
-    def __call__(self, row: merge_approval.MergeRow) -> bool:
+    def __call__(self, row: merge_approval.MergeRow, *, resend: bool = False) -> bool:
         if self.fail:
             raise GitHubError("届かない", unreached=True)
         if any(r.record_id == row.record_id for r in self.rows):

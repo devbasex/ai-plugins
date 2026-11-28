@@ -380,11 +380,11 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `_effects` | `progress/gate/answering.py` | 新設 | `(v: View, q: Question, a: Answer) -> Effects` | 回答の種類と工程の状態から、`late`・`after_release`・開き直し・`failed` の要否を返す |
 | `_drafts` | `progress/gate/answering.py` | 新設 | `(v, q, a, effects: Effects, extra: Mapping) -> list[EventDraft]` | `reopened`、`answered`、`failed`、出力、外した課題の順に下書きを並べる |
 | `_trail_by` | `progress/gate/answering.py` | 変更 | `(conn, q: Question, a: Answer, seen: Target) -> str \| None` | 追認（`after_release`）と `no_release` の承認では `None` を返す |
-| `_ensure_trail` | `progress/gate/answering.py` | 変更 | `(conn, v: View, held: Event, a: Answer, post: Post) -> None` | 記録した回答がもう有効でない（`boundary` より前、後の回答がある）ときは証跡を書かない |
-| `write_merge_row` | `core/merge_approval.py` | 変更 | `(hub, row: MergeRow, viewer, *, latest_only: bool = False) -> bool` | `latest_only`（DB に無い新しい回答）では、対象の最新の行の識別子と回答が同じときだけ書かない。偽（記録済みの回答の送り直しと `ndf ci answer`）では、識別子・回答・対象が同じ行が 1 件でもあれば書かない |
+| `_ensure_trail` | `progress/gate/answering.py` | 変更 | `(conn, v: View, held: Event, a: Answer, post: Post) -> Callable[[], None]` | 証跡を書く関数を返し、呼び手がトランザクションの外で打つ。記録した回答がもう有効でない（`boundary` より前、後の回答がある）ときは何も書かない関数を返す |
+| `write_merge_row` | `core/merge_approval.py` | 変更 | `(hub, row: MergeRow, viewer, *, latest_only: bool \| None = None) -> bool` | 真（DB に無い新しい回答）では、対象の最新の行の識別子と回答が同じときだけ書かない。偽（記録済みの回答の送り直し）では、識別子・回答・対象が同じ行が 1 件でもあれば書かない。指定しない `ndf ci answer` は、今と同じく識別子が同じ行があれば書かない |
 
 - `answer`
-  - 副作用: PR の証跡 1 件、リクエストのファイルの削除、事象の追記（1 トランザクション。本番へ反映される承認だけは、証跡の投稿前の記録を先に別のトランザクションで確定する）、`gate-rejections`、進み具合の表
+  - 副作用: PR の証跡 1 件、リクエストのファイルの削除、事象の追記（1 トランザクション。証跡を投稿する回答は、確かめと回答の追記を 2 つのトランザクションに分け、投稿をその間で行う。本番へ反映される承認は、1 つ目で投稿前の記録を確定する）、`gate-rejections`、進み具合の表
 - 開き直しを起こす回答は、却下の証跡の後に `revoke_approvals` を呼ぶ
 
 ### 異常系の処理
@@ -393,7 +393,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | --- | --- | --- | --- | --- | --- | --- |
 | `answer` | 同じキーで質問・回答・回答者が違う | 使い回し | `_same` | 止める | `refused` | — |
 | `answer` | 作業が流れている（変更要求・却下） | 排他 | `work_stopped` | 止める | `refused` | 何も書かない |
-| `answer` | 証跡を書けない | 権限・GitHub | `post` | 止める | `refused` | DB へ書かない。打ち直せる |
+| `answer` | 証跡を書けない | 権限・GitHub | `post` | 止める | `refused` | 回答は記録しない。本番へ反映される承認では、投稿の前に確定した事象 `approval_posting` は残す。GitHub が投稿を受け付けた後に応答を受け取れなくても、取り消す承認を指せるようにするためである。打ち直せる |
 | `answer` | リクエストのファイルを消せない | 権限・ファイル | `requests.withdraw` | 止める | `refused`。パスを示す | DB へ書かない。打ち直すと残りを消す |
 | `answer` | 追記の直前に事象が増えた | 競合 | `store.Conflict` | 呼び出し元へ返す | `stopped`（`transient`） | 打ち直すと証跡を再利用する |
 | `answer` | 表の更新の失敗 | GitHub | `sync_records` | 既定値で続ける | `warnings` に `ndf progress resync` | 回答は記録済み |

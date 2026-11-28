@@ -194,20 +194,31 @@ def _points_at(approvals: frozenset[str], row: MergeRow) -> bool:
     return not approvals.isdisjoint((row.record_id, row.url))
 
 
-def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer, *, by_answer: bool = False) -> bool:
-    """同じ `record_id` の証跡が無ければ投稿して真、あれば投稿せずに偽（送り直しで重ならない）。値が不正なら `TrailError`。
+def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer, *, latest_only: bool | None = None) -> bool:
+    """重なる証跡が無ければ投稿して真、あれば投稿せずに偽（送り直しで重ならない）。値が不正なら `TrailError`。
 
-    `by_answer`（工程の承認ゲート）は、同じ `record_id` の最新の行の回答と対象も同じときだけ書かない。承認を投稿した後に
-    回答の確定が失敗した提示へ却下すると、識別子が同じでも却下の行を足して先の承認を取り消すためである。
+    何を重なりとするかは `latest_only` で決まる（`_already_written`）。指定しない呼び手（`ndf ci answer`）は記録の識別子だけを見る。
 
     `viewer` のアカウント ID が読めていなければ、重なりを確かめられないので投稿せずに `TrailError`（`merge_rows` が投げる）。"""
     if row.answer not in ANSWERS or row.by not in BY_CHOICES:
         raise TrailError(f"#{row.target.number} の証跡の回答 {row.answer!r}・担い手 {row.by!r} を書けない")
-    held = [r for r in merge_rows(hub, row.target.number, viewer) if r.record_id == row.record_id]
-    if held and (not by_answer or (held[-1].answer == row.answer and held[-1].target.same(row.target))):
+    if _already_written(merge_rows(hub, row.target.number, viewer), row, latest_only):
         return False
     Publisher(hub).comment(row.target.number, render_merge_row(row))
     return True
+
+
+def _already_written(rows: Sequence[MergeRow], row: MergeRow, latest_only: bool | None) -> bool:
+    """`row` と重なる証跡が `rows`（古い順）にあるか。
+
+    真（DB に無い新しい回答）は、同じ対象の最新の行の識別子と回答が同じときだけ。後に別の識別子の却下があれば、承認を
+    もう一度書く。偽（DB に記録済みの回答の送り直し）は、識別子・回答・対象が同じ行が 1 件でもあるとき（古い回答を最新の
+    行にしない）。None は、同じ識別子の行があるとき。"""
+    if latest_only is None:
+        return any(r.record_id == row.record_id for r in rows)
+    same = [r for r in rows if r.target.same(row.target)]
+    held = same[-1:] if latest_only else same
+    return any((r.record_id, r.answer) == (row.record_id, row.answer) for r in held)
 
 
 def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Viewer) -> None:
