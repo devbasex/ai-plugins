@@ -20,7 +20,7 @@ from ndf.contracts import result
 from ndf.core import durable, route
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, invoke, issue_values, plan_runs, units_invoke
+from ndf.progress import definition, invoke, issue_values, plan_runs, units_flow, units_invoke
 from ndf.progress.plan_runs import StageResult, StageRun
 
 BRANCH = "sprint/s1"
@@ -259,7 +259,7 @@ def test_a_failing_unit_stops_the_stage_before_the_later_units_and_names_the_uni
     assert len([c for c in world.commands if c[:2] == ["ci", "merge"]]) == 1
     assert all(r.name != "pr" for r, _ in world.runs)
     assert [(i["name"], i["status"]) for i in got.report["items"]] == [("読み手", "merged"), ("書き手", "stopped")]
-    stopped_head = world.impl_runs()[1][1] / units_invoke.STOPPED_HEAD_FILE
+    stopped_head = world.impl_runs()[1][1] / units_flow.STOPPED_HEAD_FILE
     assert stopped_head.read_text().strip() == _git(Path(world.impl_runs()[1][0].inputs["worktree"]), "rev-parse", "HEAD")
 
 
@@ -270,7 +270,7 @@ def test_a_unit_that_cannot_be_merged_stops_and_keeps_the_kind_of_the_merge(worl
 
     assert got.status == "stopped" and got.cause["kind"] == "ci_pending" and got.cause["retry_after"] == 30
     assert "単位 読み手" in got.cause["detail"] and "PR #101 をマージできない" in got.cause["detail"]
-    assert json.loads((world.impl_runs()[0][1] / units_invoke.MERGE_FILE).read_text()) == {"kind": "ci_pending"}
+    assert json.loads((world.impl_runs()[0][1] / units_flow.MERGE_FILE).read_text()) == {"kind": "ci_pending"}
     assert len(world.impl_runs()) == 1
 
 
@@ -421,7 +421,7 @@ def test_a_rerun_after_a_merge_wait_only_merges_again(world):
 
     assert got.status == "ok", got.report
     assert [r.overrides["branch"] for r, _ in world.impl_runs()] == list(world.unit_names().values())[1:]
-    assert json.loads((world.work / "units" / world.unit_names()["読み手"] / "1" / units_invoke.MERGE_FILE).read_text())["kind"] == "merged"
+    assert json.loads((world.work / "units" / world.unit_names()["読み手"] / "1" / units_flow.MERGE_FILE).read_text())["kind"] == "merged"
 
 
 def test_a_rerun_after_the_queue_merged_the_last_unit_moves_the_sprint_worktree_and_opens_the_sprint_pr(world):

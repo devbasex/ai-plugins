@@ -11,24 +11,61 @@
   実行中も起動できるものも無くなった後に、課題の番号の順に 1 つずつ流す。キューの待ちで止まった単位がある間は始めない
   （その PR が後からマージされると競合しうる）
 - 実装計画の表から読んだ並び（依存を持たない）は、並びの順に 1 つずつ流す
+
+打ち直しで単位の回をどう続けるかの判定（`round_state`・`resume_of`）と、回の記録の読み書きもここが持つ。
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import json
+from collections.abc import Callable, Mapping, Sequence
 from concurrent import futures
 from graphlib import TopologicalSorter
+from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf.adapters import github, github_merge, github_pulls
-from ndf.contracts import result
+from ndf.contracts import result, worker_paths
 from ndf.core.plan import runner as plan_runner
+from ndf.core.plan import units_files
 from ndf.core.plan.review_units_decide import Unit, unit_key
 from ndf.core.plan.transition_decide import USAGE_LIMIT
+from ndf.progress import plan_runs
 from ndf.progress.plan_runs import StageResult, UnitsStopped
 
 # PR がキューに残りうる停止理由（待てば進むので、ほかの理由の失敗があればそちらを結果の種類にする。前ほど優先する）
 WAIT_KINDS = ("infra_wait", github_merge.MERGE_QUEUE_PENDING)
+
+
+# 単位の回の保存先のファイル（`reviewed-head` は `impl` のプラン、`stopped-head` と `merge.json` は単位を流す処理が書く）
+REVIEWED_HEAD_FILE = units_files.REVIEWED_HEAD
+STOPPED_HEAD_FILE = "stopped-head"
+MERGE_FILE = "merge.json"
+# 打ち直しの判定の、レビューのステップ（ほかのステップと停止理由の語は `resume_of` が持つ。定数にすると同じ語の別の事実と重なる）
+REVIEW_STEPS = frozenset({"review", "review-delta", "resolved"})
+
+class RoundState(NamedTuple):
+    """単位の、プランの実行の記録（`run.json`）を持つ最新の回。`ran` が偽なら回が無く、`round_dir` は 1 回目の保存先。
+
+    `done` はその回に保存した結果（終わっていなければ None）、`merge` は `merge.json` の結果の種類、`reviewed` は
+    `reviewed-head`、`stopped_head` は `stopped-head` の値（無ければどれも None）。
+    """
+
+    round_dir: Path
+    ran: bool
+    done: Optional[dict[str, Any]]
+    merge: Optional[str]
+    reviewed: Optional[str]
+    stopped_head: Optional[str]
+
+
+class Resume(NamedTuple):
+    """打ち直しの扱い。`action` は `run`（impl を流す）か `merge`（マージだけを打ち直す）、`new_round` は次の回の保存先を使うか、
+    `start` は新しい回の `--from`（None なら最初からか、プランの打ち直しに任せる）。"""
+
+    action: str
+    new_round: bool
+    start: Optional[str]
 
 
 class Started(NamedTuple):
@@ -266,3 +303,83 @@ def merged_pulls_of(hub: github.GitHub, base: str, landed: Sequence[tuple[str, g
     if any(branch not in found for branch in lacking):
         raise UnitsStopped("precondition", where)
     return [pull if pull.merge_sha else found[branch] for branch, pull in landed]
+
+
+# --- 打ち直しの判定 -----------------------------------------------------------------------------
+
+
+def _round_number(path: Path) -> Optional[int]:
+    return int(path.name) if path.is_dir() and path.name.isdigit() else None
+
+
+def saved_head(path: Path) -> Optional[str]:
+    return path.read_text(encoding="utf-8").strip() if path.is_file() else None
+
+
+def _own_records(round_dir: Path) -> tuple[Optional[str], Optional[str]]:
+    """この処理が書いた `merge.json` の結果の種類と `stopped-head` の値。呼んだ利用者が持ち、ほかが書き込めないものだけを読む。"""
+    with worker_paths.open_or_create(round_dir) as wd:
+        merged, stopped = (worker_paths.read_file(wd, n, owned=True) for n in (MERGE_FILE, STOPPED_HEAD_FILE))
+    try:
+        kind = json.loads(merged).get("kind") if merged is not None else None
+    except (ValueError, AttributeError):
+        kind = None
+    return (kind if isinstance(kind, str) else None), (stopped.strip() if stopped is not None else None)
+
+
+def write_record(round_dir: Path, name: str, text: str) -> None:
+    """回の保存先へ記録を書く。既存のファイルを開いて切り詰めず、ほかの利用者が名前を差し替えられない保存先にだけ書く。"""
+    with worker_paths.open_or_create(round_dir) as wd:
+        worker_paths.check_unshared(wd)
+        worker_paths.write_file(wd, name, text, private=True)
+
+
+def round_state(unit_dir: Path) -> RoundState:
+    """`run.json` を持つ最新の回の、結果・マージの結果・`reviewed-head`・`stopped-head`。記録の無い空の回は数えない。"""
+    latest = max(
+        (
+            (n, p)
+            for p in (unit_dir.iterdir() if unit_dir.is_dir() else [])
+            if (n := _round_number(p)) is not None and (p / plan_runner.RUN_FILE).is_file()
+        ),
+        default=None,
+    )
+    if latest is None:
+        return RoundState(round_dir=unit_dir / "1", ran=False, done=None, merge=None, reviewed=None, stopped_head=None)
+    path = latest[1]
+    _, done = plan_runs.previous(path)
+    kind, stopped = _own_records(path)
+    return RoundState(path, True, done, kind, saved_head(path / REVIEWED_HEAD_FILE), stopped)
+
+
+def stopped_step(done: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """止まった回の、結果の `items` の先頭（`kind` が `plan`）の `step`。止まっていないか無ければ None。"""
+    if done is None or done.get("status") != result.STOPPED:
+        return None
+    items = done.get("items")
+    first = items[0] if isinstance(items, list) and items and isinstance(items[0], Mapping) else {}
+    step = first.get("step") if first.get("kind") == plan_runner.TOOL else None
+    return step if isinstance(step, str) else None
+
+
+def resume_of(state: RoundState, head: str, local_tests: bool) -> Resume:
+    """打ち直しの扱い（docs/specifications/ndf-implement-stage-review-units.md の「打ち直し」の表。上の行を先に当てる）。`head` は、スプリントブランチをマージした後の単位の作業場所の HEAD。
+
+    マージだけを打ち直すのは、マージが CI の待ち（マージキューの待ちを含む）か基盤の待ちで止まった回である。HEAD が変わった単位を
+    手元のテストから流し直すのは、テストより後のステップで止まった回で、作業・受け入れ条件・テスト・修正で止まった回は含めない。
+    """
+    merge_only = set(WAIT_KINDS)
+    before_test = {"work", "acceptance", "test", "test-repeat", "fix"}
+    if not state.ran:
+        return Resume("run", False, None)
+    finished = state.done is not None and state.done.get("status") == result.OK
+    if finished and state.merge in merge_only and state.reviewed == head:
+        return Resume("merge", False, None)
+    step = stopped_step(state.done)
+    moved = state.stopped_head != head
+    retest = "test" if local_tests else "push"
+    if finished or step in REVIEW_STEPS:
+        return Resume("run", True, retest if moved else "push")
+    if step is not None and step not in before_test and moved:
+        return Resume("run", True, retest)
+    return Resume("run", False, None)

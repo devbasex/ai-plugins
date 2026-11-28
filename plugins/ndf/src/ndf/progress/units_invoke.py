@@ -1,6 +1,6 @@
 """工程「実装」を実装計画のレビューの単位ごとに流す処理（docs/specifications/ndf-implement-stage-review-units.md）。
 
-ここにあるのは、開始前の確かめ（`prepare`）、打ち直しで単位の回をどう続けるかの判定（`round_state`・`resume_of`）と、
+ここにあるのは、開始前の確かめ（`prepare`）、打ち直しで単位の回をどう続けるかの判定（`units_flow.round_state`・`units_flow.resume_of`）と、
 単位を流す処理（`run_stage`。作業場所の用意・`impl`・マージ・スプリントの PR。流す順と並列は `units_flow`）である。
 開始前の確かめは、作業場所が今いるブランチをリモートから取得し、コミットされた単位のファイルか実装計画の単位の見出しがあるかで
 経路を決める。分け方の承認が要るスプリントは常に単位の経路にする。単位の経路なら、手元をリモートに揃え、並びを読んで `units.json` に書く。
@@ -46,12 +46,6 @@ from ndf.progress.issue_values import UNITS_DIR, UNITS_FILE
 from ndf.progress.plan_runs import SprintPlan, StageResult, StageRun, UnitsStopped
 from ndf.testing import scoped
 
-# 単位の回の保存先のファイル（`reviewed-head` は `impl` のプラン、`stopped-head` と `merge.json` は単位を流す処理が書く）
-REVIEWED_HEAD_FILE = units_files.REVIEWED_HEAD
-STOPPED_HEAD_FILE = "stopped-head"
-MERGE_FILE = "merge.json"
-# 打ち直しの判定の、レビューのステップ（ほかのステップと停止理由の語は `resume_of` が持つ。定数にすると同じ語の別の事実と重なる）
-REVIEW_STEPS = frozenset({"review", "review-delta", "resolved"})
 # 単位の PR で待つチェックの設定のキー（`workflow` の下。書かなければ `ci.required_checks` を読む。#4369 の決定 13）
 UNIT_CHECKS = "unit_required_checks"
 # `git ls-remote --exit-code` が、該当する ref が無いときに返す終了コード
@@ -84,30 +78,6 @@ class Lineup(NamedTuple):
     unit_ci: dict[str, Any]
     source: str = ""
     bodies: Optional[Mapping[str, Sequence[str]]] = None
-
-
-class RoundState(NamedTuple):
-    """単位の、プランの実行の記録（`run.json`）を持つ最新の回。`ran` が偽なら回が無く、`round_dir` は 1 回目の保存先。
-
-    `done` はその回に保存した結果（終わっていなければ None）、`merge` は `merge.json` の結果の種類、`reviewed` は
-    `reviewed-head`、`stopped_head` は `stopped-head` の値（無ければどれも None）。
-    """
-
-    round_dir: Path
-    ran: bool
-    done: Optional[dict[str, Any]]
-    merge: Optional[str]
-    reviewed: Optional[str]
-    stopped_head: Optional[str]
-
-
-class Resume(NamedTuple):
-    """打ち直しの扱い。`action` は `run`（impl を流す）か `merge`（マージだけを打ち直す）、`new_round` は次の回の保存先を使うか、
-    `start` は新しい回の `--from`（None なら最初からか、プランの打ち直しに任せる）。"""
-
-    action: str
-    new_round: bool
-    start: Optional[str]
 
 
 class Ports(NamedTuple):
@@ -460,86 +430,6 @@ def unit_branch(sprint: str, unit: Unit) -> str:
     return f"{sprint}-u{unit.issue}-{digest}"
 
 
-# --- 打ち直しの判定 -----------------------------------------------------------------------------
-
-
-def _round_number(path: Path) -> Optional[int]:
-    return int(path.name) if path.is_dir() and path.name.isdigit() else None
-
-
-def _saved_head(path: Path) -> Optional[str]:
-    return path.read_text(encoding="utf-8").strip() if path.is_file() else None
-
-
-def _own_records(round_dir: Path) -> tuple[Optional[str], Optional[str]]:
-    """この処理が書いた `merge.json` の結果の種類と `stopped-head` の値。呼んだ利用者が持ち、ほかが書き込めないものだけを読む。"""
-    with worker_paths.open_or_create(round_dir) as wd:
-        merged, stopped = (worker_paths.read_file(wd, n, owned=True) for n in (MERGE_FILE, STOPPED_HEAD_FILE))
-    try:
-        kind = json.loads(merged).get("kind") if merged is not None else None
-    except (ValueError, AttributeError):
-        kind = None
-    return (kind if isinstance(kind, str) else None), (stopped.strip() if stopped is not None else None)
-
-
-def _write_record(round_dir: Path, name: str, text: str) -> None:
-    """回の保存先へ記録を書く。既存のファイルを開いて切り詰めず、ほかの利用者が名前を差し替えられない保存先にだけ書く。"""
-    with worker_paths.open_or_create(round_dir) as wd:
-        worker_paths.check_unshared(wd)
-        worker_paths.write_file(wd, name, text, private=True)
-
-
-def round_state(unit_dir: Path) -> RoundState:
-    """`run.json` を持つ最新の回の、結果・マージの結果・`reviewed-head`・`stopped-head`。記録の無い空の回は数えない。"""
-    latest = max(
-        (
-            (n, p)
-            for p in (unit_dir.iterdir() if unit_dir.is_dir() else [])
-            if (n := _round_number(p)) is not None and (p / plan_runner.RUN_FILE).is_file()
-        ),
-        default=None,
-    )
-    if latest is None:
-        return RoundState(round_dir=unit_dir / "1", ran=False, done=None, merge=None, reviewed=None, stopped_head=None)
-    path = latest[1]
-    _, done = plan_runs.previous(path)
-    kind, stopped = _own_records(path)
-    return RoundState(path, True, done, kind, _saved_head(path / REVIEWED_HEAD_FILE), stopped)
-
-
-def _stopped_step(done: Optional[Mapping[str, Any]]) -> Optional[str]:
-    """止まった回の、結果の `items` の先頭（`kind` が `plan`）の `step`。止まっていないか無ければ None。"""
-    if done is None or done.get("status") != result.STOPPED:
-        return None
-    items = done.get("items")
-    first = items[0] if isinstance(items, list) and items and isinstance(items[0], Mapping) else {}
-    step = first.get("step") if first.get("kind") == plan_runner.TOOL else None
-    return step if isinstance(step, str) else None
-
-
-def resume_of(state: RoundState, head: str, local_tests: bool) -> Resume:
-    """打ち直しの扱い（docs/specifications/ndf-implement-stage-review-units.md の「打ち直し」の表。上の行を先に当てる）。`head` は、スプリントブランチをマージした後の単位の作業場所の HEAD。
-
-    マージだけを打ち直すのは、マージが CI の待ち（マージキューの待ちを含む）か基盤の待ちで止まった回である。HEAD が変わった単位を
-    手元のテストから流し直すのは、テストより後のステップで止まった回で、作業・受け入れ条件・テスト・修正で止まった回は含めない。
-    """
-    merge_only = set(units_flow.WAIT_KINDS)
-    before_test = {"work", "acceptance", "test", "test-repeat", "fix"}
-    if not state.ran:
-        return Resume("run", False, None)
-    finished = state.done is not None and state.done.get("status") == result.OK
-    if finished and state.merge in merge_only and state.reviewed == head:
-        return Resume("merge", False, None)
-    step = _stopped_step(state.done)
-    moved = state.stopped_head != head
-    retest = "test" if local_tests else "push"
-    if finished or step in REVIEW_STEPS:
-        return Resume("run", True, retest if moved else "push")
-    if step is not None and step not in before_test and moved:
-        return Resume("run", True, retest)
-    return Resume("run", False, None)
-
-
 # --- 単位を流す -----------------------------------------------------------------------------------
 
 
@@ -586,7 +476,7 @@ def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optiona
     if flowed.failures:
 
         def pr_of(unit: Unit) -> Optional[int]:
-            return _pr_number(round_state(ctx.work_dir / UNITS_DIR / branches[units_flow.key_of(unit)]).round_dir)
+            return _pr_number(units_flow.round_state(ctx.work_dir / UNITS_DIR / branches[units_flow.key_of(unit)]).round_dir)
 
         return units_flow.stopped_stage(found.units, flowed, items, pr_of, {"unit_ci": ctx.unit_ci})
     ordered = [items[units_flow.key_of(u)] for u in found.units]
@@ -652,13 +542,13 @@ def _start_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> units_fl
     マージだけを打ち直す判定はスプリントブランチをマージする前の HEAD で行う（マージするとレビューした HEAD と合わなくなる）。
     """
     worktree = unit_worktree(ctx, branch, ports)
-    state = round_state(ctx.work_dir / UNITS_DIR / branch)
+    state = units_flow.round_state(ctx.work_dir / UNITS_DIR / branch)
     g = Git(worktree)
     call = None
     round_dir = state.round_dir
-    if resume_of(state, g.rev_parse("HEAD"), ctx.local_tests).action != "merge":
+    if units_flow.resume_of(state, g.rev_parse("HEAD"), ctx.local_tests).action != "merge":
         include_sprint(ctx, worktree)
-        resume = resume_of(state, g.rev_parse("HEAD"), ctx.local_tests)
+        resume = units_flow.resume_of(state, g.rev_parse("HEAD"), ctx.local_tests)
         round_dir = _next_round(state) if resume.new_round else state.round_dir
         planned = unit_run(ctx, unit, worktree, round_dir, resume.start)
 
@@ -668,7 +558,7 @@ def _start_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> units_fl
     def land(got: Optional[StageResult]) -> tuple[dict[str, Any], github_pulls.MergedPull]:
         """マージした PR（マージの応答にマージコミットが無ければ `merge_sha` は空）を返す。"""
         if got is not None:
-            _write_record(round_dir, STOPPED_HEAD_FILE, g.rev_parse("HEAD") + "\n")
+            units_flow.write_record(round_dir, units_flow.STOPPED_HEAD_FILE, g.rev_parse("HEAD") + "\n")
             if got.status != result.OK:
                 raise _unit_stop_of(got.report, "impl が止まった", _ci_note(ctx, got.report))
         report = merge_unit(ctx, branch, worktree, round_dir, ports)
@@ -691,18 +581,18 @@ def _merge_sha(report: Mapping[str, Any]) -> str:
     return sha if isinstance(sha, str) else ""
 
 
-def _next_round(state: RoundState) -> Path:
+def _next_round(state: units_flow.RoundState) -> Path:
     return state.round_dir.parent / str(int(state.round_dir.name) + 1)
 
 
 def _pr_number(round_dir: Path) -> Optional[int]:
-    held = _saved_head(round_dir / PR_NUMBER_FILE)
+    held = units_flow.saved_head(round_dir / PR_NUMBER_FILE)
     return int(held) if held is not None and held.isdigit() else None
 
 
 def _ci_note(ctx: Context, report: Mapping[str, Any]) -> str:
     """CI のステップで止まった単位の理由に足す、待つチェックの名前を読んだ設定のキー。"""
-    if _stopped_step(report) != "ci":
+    if units_flow.stopped_step(report) != "ci":
         return ""
     return f"（待つチェック {', '.join(ctx.unit_ci['required'])} は {ctx.unit_ci['key']} の設定）"
 
@@ -895,7 +785,7 @@ def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports
     PR の番号とレビューした HEAD は、同じ回の保存先から読む。どちらかが無ければマージを打たずに止める。
     スプリントの作業場所はここでは進めない（次の単位の作業場所はリモートのスプリントブランチから切る。進めるのは `sprint_pr`）。
     """
-    number, reviewed = _pr_number(round_dir), _saved_head(round_dir / REVIEWED_HEAD_FILE)
+    number, reviewed = _pr_number(round_dir), units_flow.saved_head(round_dir / units_flow.REVIEWED_HEAD_FILE)
     if number is None or not reviewed:
         raise UnitsStopped("precondition", f"回の保存先 {round_dir} に PR の番号かレビューした HEAD の記録が無いので、マージしない")
     argv = ndf_command(
@@ -905,7 +795,7 @@ def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports
     report = result.last_line(done.stdout)
     ok = report is not None and report["status"] == result.OK
     kind = "merged" if ok else ("bad_report" if report is None else _unit_stop_of(report, "").kind)
-    _write_record(round_dir, MERGE_FILE, json.dumps({"kind": kind}, ensure_ascii=False) + "\n")
+    units_flow.write_record(round_dir, units_flow.MERGE_FILE, json.dumps({"kind": kind}, ensure_ascii=False) + "\n")
     if report is None:
         raise UnitsStopped("bad_report", f"ndf ci merge が結果 JSON を返さない（終了コード {done.returncode}）")
     if not ok:
