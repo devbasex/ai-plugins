@@ -443,12 +443,15 @@ def lineup_with_waits(plans: Sequence[PlanDoc], criteria: Mapping[int, int], iss
 
 
 def without_sections(text: str, titles: Sequence[str]) -> str:
-    """単位の見出しのセクションと、見出しの文が `titles` のセクションを、見出しの行ごと除いた本文（空の行も除く）。"""
+    """単位の見出しのセクションと、見出しの文が `titles` のセクションを、見出しの行ごと除いた本文。
+
+    残る行は空行と行末の空白も変えない（コードブロックと改行の指定は中身である）。揃えるのは改行コードと末尾の改行だけである。
+    """
     doc = _parse(text)
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     found = [*_unit_headings(doc), *(h for h in doc.headings if h.level >= 2 and h.title in titles)]
     dropped = {at for h in found for at in (h.at, *range(h.at + 1, min(_section(doc, h).stop, len(lines))))}
-    return "\n".join(line.rstrip() for at, line in enumerate(lines) if at not in dropped and line.strip())
+    return "\n".join(line for at, line in enumerate(lines) if at not in dropped).rstrip("\n")
 
 
 def acceptance_args(unit: Unit) -> list[str]:

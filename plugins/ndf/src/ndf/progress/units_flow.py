@@ -17,6 +17,7 @@
 - 実装計画の表から読んだ並び（依存を持たない）は、並びの順に 1 つずつ流す
 
 打ち直しで単位の回をどう続けるかの判定（`round_state`・`resume_of`）と、回の記録の読み書きもここが持つ。
+開始前の確かめが読む実装計画と、手元と取得先の HEAD の読み取り（`read_start`）もここが持つ。
 """
 
 from __future__ import annotations
@@ -30,13 +31,13 @@ from types import MappingProxyType
 from typing import Any, NamedTuple, Optional
 
 from ndf.adapters import github, github_merge, github_pulls
-from ndf.adapters.git import Git
+from ndf.adapters.git import HEADS, Git, mask_urls
 from ndf.contracts import facts, result, worker_paths
 from ndf.core import route
 from ndf.core.issue_docs import plan_issues
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan import units_files
-from ndf.core.plan.review_units_decide import PlanDoc, Unit, unit_key
+from ndf.core.plan.review_units_decide import PlanDoc, Unit, has_units, unit_key
 from ndf.core.plan.transition_decide import USAGE_LIMIT
 from ndf.progress import plan_runs, units_queue
 from ndf.progress.plan_runs import StageResult, UnitsStopped
@@ -657,3 +658,82 @@ def worktree_plans(root: Path, paths: Sequence[str]) -> list[PlanDoc]:
     """worktree の `paths` にある実装計画（削除されたものは読まない）。"""
     found = (p for p in paths if plan_issues(p) and (root / p).is_file())
     return [PlanDoc(p, plan_issues(p), (root / p).read_text(encoding="utf-8")) for p in found]
+
+
+# `git ls-remote --exit-code` が、該当する ref が無いときに返す終了コード
+LS_REMOTE_ABSENT = 2
+
+
+class Seen(NamedTuple):
+    """コミット 1 つの、スプリントの課題の実装計画と、単位のファイルがあるか。"""
+
+    plans: list[PlanDoc]
+    unit_files: bool
+
+    def has_headings(self) -> bool:
+        """実装計画に単位の欄があるか（変換の対象）。"""
+        return any(has_units(p.text) for p in self.plans)
+
+    def has_units(self) -> bool:
+        return self.unit_files or self.has_headings()
+
+
+def seen_at(g: Git, commit: str, issues: Sequence[int]) -> Seen:
+    return Seen(*plans_at(g, commit, issues))
+
+
+class Start(NamedTuple):
+    """開始前の確かめが読む、手元と取得先の HEAD とその中身。取得先が無ければ `head` は "HEAD" で `tip` は None。
+
+    `checked_to` は、変換するスプリントで確かめて読んだ（送り先の URL, ブランチの HEAD）。
+    """
+
+    head: str
+    tip: Optional[str]
+    at_head: Seen
+    at_tip: Seen
+    checked_to: Optional[tuple[str, str]]
+
+
+def _fetched_tip(g: Git, remote: str, branch: str) -> Optional[tuple[str, str]]:
+    """手元の HEAD と、リモートから取得したブランチの HEAD の SHA（1 回の起動で解決する）。
+
+    リモートにブランチが無いと確かめられれば None、ほかの失敗は止める。
+    """
+    fetched = g.fetch_branch(remote, branch)
+    if fetched.returncode == 0:
+        head, tip = g.commits_of("HEAD", f"refs/remotes/{remote}/{branch}")
+        return head, tip
+    probe = g.attempt("ls-remote", "--exit-code", "--heads", remote, f"{HEADS}{branch}")
+    if probe.returncode == LS_REMOTE_ABSENT:
+        return None
+    raise UnitsStopped(
+        "precondition",
+        f"{remote} の {branch} を取得できない（開始前の確かめ）: {mask_urls(fetched.stderr.strip() or probe.stderr.strip())}",
+    )
+
+
+def read_start(
+    g: Git, remote: str, branch: Optional[str], issues: Sequence[int], destination: Optional[Callable[[Git, str], tuple[str, str]]]
+) -> Start:
+    """作業場所が今いるブランチの、手元と取得先の HEAD を読む。各コミットは 1 度だけ読む。
+
+    `destination` があれば（変換するスプリント）、最初の通信の前に送り先を確かめ、その URL から読んだ HEAD で以後を判定する。
+    単位の欄が取得先にだけあるときは、手元を進める前に送り先を確かめて、その URL の HEAD に置き換える。
+    """
+    here = None if destination is None else seen_at(g, "HEAD", issues)
+    checked_to = None
+    fetched = None
+    if destination is not None and branch is not None and here is not None and here.has_headings():
+        checked_to = destination(g, branch)
+        fetched = (g.rev_parse("HEAD"), checked_to[1])
+    elif branch is not None:
+        fetched = _fetched_tip(g, remote, branch)
+    head, tip = fetched if fetched is not None else ("HEAD", None)
+    at_head = here if here is not None else seen_at(g, head, issues)
+    at_tip = at_head if tip is None or tip == head else seen_at(g, tip, issues)
+    if destination is not None and checked_to is None and tip is not None and branch is not None and at_tip.has_headings():
+        checked_to = destination(g, branch)
+        tip = checked_to[1]
+        at_tip = at_head if tip == head else seen_at(g, tip, issues)
+    return Start(head, tip, at_head, at_tip, checked_to)

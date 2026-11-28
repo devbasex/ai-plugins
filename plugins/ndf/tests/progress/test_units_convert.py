@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from dataclasses import replace
@@ -34,6 +35,8 @@ from ndf.progress import (
     units_convert,
     units_invoke,
 )
+from ndf.progress import gate
+from ndf.progress.gate import design as gate_design
 from ndf.progress.plan_runs import StageResult, StageRun, UnitsStopped
 
 URL = "git@github.com:o/r.git"
@@ -608,7 +611,8 @@ def test_the_old_waits_follow_the_order_column():
 
 def test_a_reapproval_is_answered_only_with_ndf_answer():
     got = result.result("plan", result.GATE, "再承認が要る", routes={"approved": None, "rejected": None}, presentation_path="/m/r.md")
-    got[design_record.TARGET_KEY] = {"version": 1}
+    got[design_record.TARGET_KEY] = {"version": 1, "review": {"head": "a" * 40}}
+    got[design_record.MATERIAL_KEY] = {"path": "/m/r.md", "sha256": "b" * 64}
     step = stages.StepDef(id="implement", stage="実装", call="ndf.plan", kind="work", range="none")
     impl = stages.StageDef(id="implement", name="実装", phase="implement", steps=(step,))
     waiting = run.StepProgress(waiting={"step": "implement", "report": got})
@@ -620,3 +624,53 @@ def test_a_reapproval_is_answered_only_with_ndf_answer():
     assert asked["presentation_path"] == "/m/r.md"
     assert asked["routes"]["approved"]["argv"][:3] == ["ndf", "answer", "sprint:abc:s1"]
     assert asked["routes"]["approved"]["ask"] == ["reason", "by", "key"]
+    argv = asked["routes"]["approved"]["argv"]
+    assert argv[argv.index("--head") + 1] == "a" * 40 and argv[argv.index("--material-sha256") + 1] == "b" * 64
+
+
+@pytest.mark.parametrize(
+    ("by", "head", "material", "accepted"),
+    [
+        pytest.param("human", "a" * 40, None, True, id="利用者"),
+        pytest.param("conductor", "a" * 40, None, False, id="conductor"),
+        pytest.param("service:bot", "a" * 40, None, False, id="サービス"),
+        pytest.param("human", "c" * 40, None, False, id="別のコミット"),
+        pytest.param("human", "a" * 40, "d" * 64, False, id="別の資料"),
+    ],
+)
+def test_a_reapproval_binds_the_answer_to_a_person_and_the_presented_material(tmp_path, by, head, material, accepted):
+    path = tmp_path / "reapproval.md"
+    path.write_text("資料\n", encoding="utf-8")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    got = result.result("plan", result.GATE, "再承認が要る", routes={"approved": None}, presentation_path=str(path))
+    got[design_record.TARGET_KEY] = {"review": {"head": "a" * 40}}
+    got[design_record.MATERIAL_KEY] = {"path": str(path), "sha256": digest}
+    step = stages.StepDef(id="implement", stage="実装", call="ndf.plan", kind="work", range="none")
+    impl = stages.StageDef(id="implement", name="実装", phase="implement", steps=(step,))
+    waiting = model.EventDraft(
+        run_view.STEP_EVENT,
+        run_view.ACTOR,
+        "実装",
+        payload={"step": "implement", "status": "waiting", "report": got, "generation": 0},
+        rev=1,
+    )
+    events = [model.Event(1, datetime(2026, 11, 28, tzinfo=timezone.utc), waiting)]
+    view = run_view.View("sprint:abc:s1", 1, stages.Snapshot("standard", "1", "0" * 64, 4, (impl,)), {}, events)
+    question = gate.Question("q", view.machine_id, "実装", "implement", None, ("approved",))
+    answer = gate.Answer("q", "approved", "r", by, "k", seen=gate.Target(head, material or digest))
+
+    if accepted:
+        assert gate_design.reapproval(view, question, answer) == gate.Target("a" * 40, digest)
+    else:
+        with pytest.raises(model.Refused):
+            gate_design.reapproval(view, question, answer)
+
+
+def test_blank_lines_and_trailing_spaces_outside_the_sections_are_compared():
+    from ndf.core.plan import review_units_decide as rd
+
+    body = OLD_PLAN.replace("書く本文。", "```\na\n\nb\n```\n改行  ")
+    titles = (units_files.PARALLEL_TITLE,)
+
+    assert rd.without_sections(body, titles) != rd.without_sections(body.replace("a\n\nb", "a\nb"), titles)
+    assert rd.without_sections(body, titles) != rd.without_sections(body.replace("改行  ", "改行"), titles)

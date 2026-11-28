@@ -10,6 +10,7 @@ issues/issue-3702-design-detail.md の「この変更より前のスプリント
 from __future__ import annotations
 
 import functools
+import hashlib
 import re
 import shutil
 from collections.abc import Callable, Mapping, Sequence
@@ -38,13 +39,16 @@ from ndf.progress.plan_runs import ConvertRequest, SprintPlan, StageResult, Unit
 
 # スプリントの作業の保存先に置く、送ったコミットと確かめに使った承認の記録（`{"commit", "approval": {"kind", "head"}}`）
 CONVERT_FILE = units_invoke.CONVERT_FILE
-# 違反が 2 回続いたときの違反の一覧と、再承認の資料
+# 違反が 2 回続いたときの違反の一覧
 VIOLATIONS_FILE = "convert-violations.json"
-REAPPROVAL_FILE = "reapproval.md"
+# 再承認の資料の名前に付ける、中身の sha256 の先頭の字数（提示ごとに別のファイルで、書いた後は書き換えない）
+MATERIAL_HASH_CHARS = 16
 # 担当のプランの実行の保存先（スプリントの作業の保存先の下。起動ごとに番号を分ける）
 PLAN_DIR = "convert-plan"
 TEMPLATE = "implementation-plan-convert"
 REF_PREFIX = f"refs/{result.ENTRY}/convert/"
+# 送り先の HEAD を受ける一時の ref。同じリポジトリの別の fetch が書き換える `FETCH_HEAD` は読まない
+TIP_PREFIX = f"refs/{result.ENTRY}/convert-tip/"
 # 一時の作業場所の親（メインディレクトリの下。`.git` の下は担当が書けない）
 TREE_PARENT = Path(".worktrees") / "ndf-convert"
 # 1 回の `convert` で担当を起動する上限（最初の変換と、やり直し 1 回。競合のやり直しも数える）
@@ -78,8 +82,8 @@ def sprint_plan(v: run_view.View, s: stages.StageDef, root: Path, repo: Callable
     """単位ごとに流す工程の呼び出しに持たせる、承認の要否・承認の記録・省いた課題（#3702 の決定 11）。ほかの工程は None。
 
     `root` は状態の保存先。比較の関数は、記録と今の文脈を持たせて渡す（単位を流す処理は `design_record` を import できない）。
-    この変更より前の定義の工程「実装」（`per_unit` の無いものを含む）には、単位のファイルへの変換を持たせる（決定 10）。
-    `repo` はステートマシンの `repo` を読む。
+    この変更より前の定義の工程「実装」（`per_unit` の無いものを含む）には、単位のファイルへの変換と、その送り先の読み取り、
+    保存した並びを使い直せるかの確かめを持たせる（決定 10）。`repo` はステートマシンの `repo` を読む。
     """
     if not (s.per_unit or s.id == design_record.IMPLEMENT_DEFINITION.stem):
         return None
@@ -93,6 +97,8 @@ def sprint_plan(v: run_view.View, s: stages.StageDef, root: Path, repo: Callable
     job = Job(v, context, repo, root, work)
     return SprintPlan(
         convert=None if new_definition else functools.partial(convert, job),
+        destination=None if new_definition else functools.partial(destination, job),
+        reusable=None if new_definition else functools.partial(still_converted, job),
         branch=context["branch"] if "branch" in context else None,
         required=required,
         record=record,
@@ -172,7 +178,7 @@ class _Run(NamedTuple):
 
     @property
     def ref(self) -> str:
-        return REF_PREFIX + re.sub(r"[^A-Za-z0-9_-]+", "-", self.job.view.machine_id).strip("-")
+        return REF_PREFIX + _ref_name(self.job)
 
     @property
     def issues(self) -> tuple[int, ...]:
@@ -191,8 +197,15 @@ class _Checked(NamedTuple):
     bad: list[str]
 
 
+def _ref_name(job: Job) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]+", "-", job.view.machine_id).strip("-")
+
+
 def convert(job: Job, request: ConvertRequest, ports: units_invoke.Ports, answer: Optional[str]) -> Optional[StageResult]:
-    """変換の続きから進める。実装へ進めるなら None、再承認が要れば `gate` の結果。止めるときは `UnitsStopped`。"""
+    """変換の続きから進める。実装へ進めるなら None、再承認が要れば `gate` の結果。止めるときは `UnitsStopped`。
+
+    None を返すとき、手元の HEAD は確かめた送り先に届いているので、呼び手は送らない。
+    """
     g = Git(request.sprint_dir)
     root = Path(g.run("rev-parse", "--show-toplevel").strip())
     r = _Run(job, request, ports, Git(root), root, dict(request.count(request.issues)))
@@ -200,18 +213,22 @@ def convert(job: Job, request: ConvertRequest, ports: units_invoke.Ports, answer
     if answer == REJECTED:
         _drop_held(r)
         raise UnitsStopped("refused", "単位の分け直しの再承認が却下されたので、実装を始めない")
+    url, tip = request.destination if request.destination is not None else destination(job, r.git, request.branch)
     head = r.git.rev_parse("HEAD")
     if held is not None and r.git.is_ancestor(held, head):
         _drop_held(r)  # push の後に中断した打ち直し
         held = None
+    # 送り先に無いコミットは、再承認の資料の対象にも変換の送信にも含めない
+    if not r.git.is_ancestor(head, tip):
+        raise UnitsStopped("refused", f"手元の {request.branch}（{head}）に送り先に無いコミットがあるので、送らない")
     if held is None:
         # 変換の記録と合えば先に進む（実装の後に表の追記が単位のファイルとずれても、変換し直さない）
-        if _matches_conversion(r, head):
+        if _matches_conversion(r.git, r.root, job.work_root, head, r.issues):
             return None
         checked = _check_units(r, head)
         if checked.report is not None and not checked.bad:
-            return _published(r, head, checked.report)
-    return _reflect(r, held)
+            return _published(r, url, head, checked.report)
+    return _reflect(r, held, url, tip)
 
 
 def _plans(r: _Run, commit: str) -> list[PlanDoc]:
@@ -255,18 +272,21 @@ def _new_tree(r: _Run, commit: str) -> Path:
     return r.tree_path
 
 
-def _push_destination(r: _Run) -> tuple[str, str]:
+def destination(job: Job, git: Git, branch: str) -> tuple[str, str]:
     """確かめた送り先の URL と、そこから読んだスプリントブランチの HEAD。通らなければ通信せずに止める。"""
-    machine = github_target(r.job.machine_repo())
+    machine = github_target(job.machine_repo())
     if machine is None:
         raise UnitsStopped("refused", "スプリントのリポジトリを解析できないので、変換しない")
-    url, errors = units_sync.push_url(r.git, machine.repo)
+    url, errors = units_sync.push_url(git, machine.repo)
     if url is None:
         raise UnitsStopped("refused", "送り先を確かめられないので、変換しない: " + "; ".join(errors))
-    done = r.git.fetch(url, f"{HEADS}{r.request.branch}")
+    ref = TIP_PREFIX + _ref_name(job)
+    done = git.fetch(url, f"+{HEADS}{branch}:{ref}")
     if done.returncode != 0:
-        raise UnitsStopped("precondition", f"送り先の {r.request.branch} を読めない: {mask_urls(done.stderr.strip())}")
-    return url, r.git.rev_parse("FETCH_HEAD")
+        raise UnitsStopped("precondition", f"送り先の {branch} を読めない: {mask_urls(done.stderr.strip())}")
+    tip = git.rev_parse(ref)
+    git.run("update-ref", "-d", ref)
+    return url, tip
 
 
 # --- 担当の起動 -----------------------------------------------------------------------------------
@@ -430,12 +450,8 @@ def _differences_from_table(r: _Run, head: str, commit: str, report: units_files
     return found
 
 
-def _reflect(r: _Run, held: Optional[str]) -> Optional[StageResult]:
+def _reflect(r: _Run, held: Optional[str], url: str, tip: str) -> Optional[StageResult]:
     """旧い表との比較か再承認を確かめてから、送るコミットを push して作業場所を進める。"""
-    url, tip = _push_destination(r)
-    local = r.git.rev_parse("HEAD")
-    if not r.git.is_ancestor(local, tip):
-        raise UnitsStopped("refused", f"手元の {r.request.branch}（{local}）に送り先に無いコミットがあるので、送らない")
     send, report = _candidate(r, held, tip)
     _hold(r, send)
     record = design_record.reapproved_of(r.job.view)
@@ -462,7 +478,7 @@ def _record_conversion(r: _Run, commit: str, approval: Mapping[str, Any]) -> Non
 
 def _converted_record(r: _Run, commit: str, report: units_files.Report) -> dict[str, Any]:
     machine = github_target(r.job.machine_repo())
-    assert machine is not None, "送り先の確かめ（`_destination`）か保存したステートマシンが先に確かめる"
+    assert machine is not None, "送り先の確かめ（`destination`）か保存したステートマシンが先に確かめる"
     limits = units_files.limits_of(units_files.project_of(units_files.Tree(r.root, commit)))
     return design_record.converted(machine.repo, commit, r.request.branch, {"issues": list(r.issues)}, limits, report)
 
@@ -487,27 +503,41 @@ def _push_conversion(r: _Run, url: str, tip: str, send: str, report: units_files
 # --- 反映済み -------------------------------------------------------------------------------------
 
 
-def _same_unit_files(r: _Run, commit: str, head: str) -> bool:
+def _same_unit_files(root: Path, issues: Sequence[int], commit: str, head: str) -> bool:
     """スプリントの課題の単位のファイルが、実際の行数を除いて同じか。"""
-    old, new = units_files.Tree(r.root, commit), units_files.Tree(r.root, head)
+    old, new = units_files.Tree(root, commit), units_files.Tree(root, head)
     try:
-        before = units_files.paths_naming(old.names(), r.issues)
-        after = units_files.paths_naming(new.names(), r.issues)
+        before = units_files.paths_naming(old.names(), issues)
+        after = units_files.paths_naming(new.names(), issues)
         return before == after and not any(units_files.differs(units_files.load(old, p), units_files.load(new, p)) for p in before)
     except units_files.UnitsFileError:  # noqa: NDF401 利用者の入力: 読めないファイルは同じでないとみなし、再承認で理由を示す
         return False
 
 
-def _matches_conversion(r: _Run, head: str) -> bool:
+def _matches_conversion(git: Git, root: Path, work_root: Path, head: str, issues: Sequence[int]) -> bool:
     """変換の記録のコミットが `head` の祖先で、単位のファイルがそのコミットと同じか。"""
-    saved = plan_files.read_json(r.job.work_root / CONVERT_FILE)
-    if saved is None or r.git.commit_or_none(str(saved["commit"])) is None:
+    saved = plan_files.read_json(work_root / CONVERT_FILE)
+    if saved is None or git.commit_or_none(str(saved["commit"])) is None:
         return False
     commit = str(saved["commit"])
-    return r.git.is_ancestor(commit, head) and _same_unit_files(r, commit, head)
+    return git.is_ancestor(commit, head) and _same_unit_files(root, issues, commit, head)
 
 
-def _published(r: _Run, head: str, report: units_files.Report) -> Optional[StageResult]:
+def still_converted(job: Job, location: Path, source: str) -> bool:
+    """保存した単位の並び（本文を読むコミットが `source`）を使い直せるか。通信しない。
+
+    並びが変換の記録のコミットから作ったもので、手元の HEAD の単位のファイルがそのコミットと同じときだけ使い直す。
+    """
+    saved = plan_files.read_json(job.work_root / CONVERT_FILE)
+    if saved is None or str(saved["commit"]) != source:
+        return False
+    root = Path(Git(location).run("rev-parse", "--show-toplevel").strip())
+    git = Git(root)
+    issues = tuple(sorted(int(n) for n in job.context["issues"]))
+    return _matches_conversion(git, root, job.work_root, git.rev_parse("HEAD"), issues)
+
+
+def _published(r: _Run, url: str, head: str, report: units_files.Report) -> Optional[StageResult]:
     """送り先に確かめを通る単位のファイルがあり、変換の記録と合わない打ち直し。再承認の記録と合えば進み、ほかは再承認を求める。"""
     record = design_record.reapproved_of(r.job.view)
     if record is not None:
@@ -515,13 +545,12 @@ def _published(r: _Run, head: str, report: units_files.Report) -> Optional[Stage
         if (
             r.git.commit_or_none(approved) is not None
             and r.git.is_ancestor(approved, head)
-            and _same_unit_files(r, approved, head)
+            and _same_unit_files(r.root, r.issues, approved, head)
             and not _differences_from_record(r, record, head, report)
         ):
             _record_conversion(r, approved, {"kind": "reapproval", "head": approved})
             return None
     why = ["変換の記録の無い単位のファイルがあるか、変換の後に単位のファイルか実装計画が書き換わった"]
-    url, _ = _push_destination(r)
     if record is not None:
         why += _differences_from_record(r, record, head, report)
     return _ask_again(r, head, report, why, record, _old_approved_head(r, url))
@@ -586,10 +615,13 @@ def _ask_again(
     old: Optional[str],
 ) -> StageResult:
     """再承認の資料を書き、記録を持つ `gate` の結果を返す。回答は `ndf answer` が工程「実装」の事象に書く。"""
-    path = r.job.work_root / REAPPROVAL_FILE
+    body = _reapproval_material(r, commit, report, differences, record, old).encode("utf-8")
+    digest = hashlib.sha256(body).hexdigest()
+    path = r.job.work_root / f"reapproval-{digest[:MATERIAL_HASH_CHARS]}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_reapproval_material(r, commit, report, differences, record, old), encoding="utf-8")
+    path.write_bytes(body)
     summary = f"単位の分け方か実装計画が承認した内容と違うので、再承認を待つ（{path}）: {'; '.join(differences)}"
     got = result.result(plan_runner.TOOL, result.GATE, summary, routes={invoke.APPROVED: None, REJECTED: None}, presentation_path=str(path))
     got[design_record.TARGET_KEY] = _converted_record(r, commit, report)
+    got[design_record.MATERIAL_KEY] = {"path": str(path), "sha256": digest}
     return StageResult(got, {})

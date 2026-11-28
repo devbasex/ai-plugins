@@ -195,7 +195,7 @@ def routes(q: Question) -> dict[str, Any]:
     if q.target.head:
         seen += ["--head", q.target.head]
     if q.target.material:
-        seen += ["--material-sha256", q.target.material]
+        seen += [design_record.MATERIAL_FLAG, q.target.material]
     if q.target.body:
         seen += ["--body-sha256", q.target.body]
     if q.target.title:

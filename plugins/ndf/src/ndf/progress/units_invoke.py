@@ -40,7 +40,7 @@ from ndf.core.plan import files as plan_files
 from ndf.core.plan import inputs_decide, units_files
 from ndf.core.plan import units_decide as ud
 from ndf.core.plan import runner as plan_runner
-from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, acceptance_args, has_units, lineup, unit_key
+from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, acceptance_args, lineup, unit_key
 from ndf.core.plan.transition_decide import USAGE_LIMIT
 from ndf.progress import issue_values, refactor_values, units_flow, units_queue
 from ndf.progress.command import PROJECT_FILE, ndf_settings_in
@@ -50,8 +50,6 @@ from ndf.testing import scoped
 
 # 単位の PR で待つチェックの設定のキー（`workflow` の下。書かなければ `ci.required_checks` を読む。#4369 の決定 13）
 UNIT_CHECKS = "unit_required_checks"
-# `git ls-remote --exit-code` が、該当する ref が無いときに返す終了コード
-LS_REMOTE_ABSENT = 2
 # 単位のブランチ名に付ける、単位の名前の sha256 の先頭の字数
 UNIT_HASH_CHARS = 8
 # 承認した文書を送るコミットの記録（ステートマシンの作業の保存先。`{"record_head", "commit"}`）
@@ -122,16 +120,6 @@ class Context(NamedTuple):
     bodies: Mapping[str, Sequence[str]] = MappingProxyType({})
 
 
-class _Seen(NamedTuple):
-    """コミット 1 つの、スプリントの課題の実装計画と、単位のファイルがあるか。"""
-
-    plans: list[PlanDoc]
-    unit_files: bool
-
-    def has_units(self) -> bool:
-        return self.unit_files or any(has_units(p.text) for p in self.plans)
-
-
 # --- 開始前の確かめ -----------------------------------------------------------------------------
 
 
@@ -154,13 +142,9 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
     issues = sorted({int(n) for n in run.inputs["issues"]})
     branch = _current_branch(g)
     remote = g.remote()
-    fetched = _fetched_tip(g, remote, branch) if branch is not None else None
     uncommitted = _uncommitted(g, issues)
-    # 各コミットは 1 度だけ読む（手元と取得先が同じコミットなら取得先を読まず、進めた後も読み直さない）
-    head, tip = fetched if fetched is not None else ("HEAD", None)
-    at_head = _seen_at(g, head, issues)
-    at_tip = at_head if tip is None or tip == head else _seen_at(g, tip, issues)
-    left = _Seen(units_flow.worktree_plans(root, uncommitted), bool(units_files.paths_naming(uncommitted, issues)))
+    head, tip, at_head, at_tip, checked_to = units_flow.read_start(g, remote, branch, issues, sprint.destination)
+    left = units_flow.Seen(units_flow.worktree_plans(root, uncommitted), bool(units_files.paths_naming(uncommitted, issues)))
     if not (sprint.required or at_head.has_units() or at_tip.has_units() or left.has_units()):
         return _plain_route(work_dir)
     if uncommitted:
@@ -177,14 +161,17 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
         project = ndf_settings_in(root, PROJECT_FILE)
         branch = _checked_branch(run, branch, project)
     source, bodies = "", None
-    count = functools.partial(_count_sprint_criteria, g, remote)
-    asked, seen = _converted(g, sprint, seen, ConvertRequest(run, root, branch, tuple(issues), sprint.omitted, count), ports)
+    count = _counted_once(g, remote)
+    converting = sprint.convert is not None and not sprint.new_definition and seen.has_headings()
+    request = ConvertRequest(run, root, branch, tuple(issues), sprint.omitted, count, checked_to)
+    asked, seen = _converted(g, sprint, seen, request, ports)
     if asked is not None:
         return asked
     if sprint.required or seen.unit_files:
         units, source, checked, bodies = _units_from_files(g, root, sprint, issues, seen.plans, count)
-        # 送るのは記録との比較と確かめを通ったコミットだけにする（止まる実装の手元のコミットを、共有のブランチに残さない）
-        _push_sprint(g, remote, branch, checked)
+        # 送るのは記録との比較と確かめを通ったコミットだけにする（止まる実装の手元のコミットを、共有のブランチに残さない）。
+        # 変換を通ったスプリントは、手元の HEAD が確かめた送り先に届いているので送らない
+        _push_sprint(g, remote, branch, None if converting else checked)
     else:
         if sprint.new_definition:
             detail = "実装計画にレビューの単位の欄があるのに、単位のファイル（issues/issue-<番号>-plan.units.json）が無い"
@@ -194,18 +181,24 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
     return _announced(work_dir, branch, Lineup(units, _unit_ci(project, branch), source, bodies))
 
 
+def _counted_once(g: Git, remote: str) -> Callable[[Sequence[int]], dict[int, int]]:
+    """課題の受け入れ条件の数を数える。同じ課題の並びは 1 回だけ読み、変換と開始前の確かめで使い回す。"""
+    held = functools.cache(functools.partial(_count_sprint_criteria, g, remote))
+    return lambda issues: held(tuple(issues))
+
+
 def _converted(
-    g: Git, sprint: SprintPlan, seen: _Seen, request: ConvertRequest, ports: Optional[Ports]
-) -> tuple[Union[Lineup, StageResult, None], _Seen]:
+    g: Git, sprint: SprintPlan, seen: units_flow.Seen, request: ConvertRequest, ports: Optional[Ports]
+) -> tuple[Union[Lineup, StageResult, None], units_flow.Seen]:
     """古い定義のスプリントで実装計画に単位の欄があれば変換を通し（#3702 の決定 10）、（ここで返して終える値, 変換の後の読み取り）を返す。
     実装へ進むなら前者は None。担当を起動できない呼び出し（`ports` が無い）は並びを持たない `Lineup` を返し、単位を流すときに変換する。"""
-    if sprint.convert is None or sprint.new_definition or not any(has_units(p.text) for p in seen.plans):
+    if sprint.convert is None or sprint.new_definition or not seen.has_headings():
         return None, seen
     if ports is None:
         return Lineup((), {}), seen
     asked = sprint.convert(request, ports, ports.answer)
     # 変換がコミットを足すので読み直す
-    return asked, seen if asked is not None else _seen_at(g, "HEAD", request.issues)
+    return asked, seen if asked is not None else units_flow.seen_at(g, "HEAD", request.issues)
 
 
 def _converted_commit(sprint: SprintPlan) -> Optional[str]:
@@ -227,8 +220,10 @@ def _announced(work_dir: Path, branch: str, found: Lineup) -> Lineup:
     return found
 
 
-def _push_sprint(g: Git, remote: str, branch: str, commit: str) -> None:
-    """手元のコミット `commit` をスプリントブランチへ送る（単位の作業場所はリモートのスプリントブランチから切る）。"""
+def _push_sprint(g: Git, remote: str, branch: str, commit: Optional[str]) -> None:
+    """手元のコミット `commit` をスプリントブランチへ送る（単位の作業場所はリモートのスプリントブランチから切る）。None なら送らない。"""
+    if commit is None:
+        return
     pushed = g.attempt("push", "-q", "--no-follow-tags", "--", remote, f"{commit}:{HEADS}{branch}")
     if pushed.returncode != 0:
         raise UnitsStopped("precondition", f"{remote} の {branch} へ送れない: {mask_urls(pushed.stderr.strip())}")
@@ -311,25 +306,6 @@ def _current_branch(g: Git) -> Optional[str]:
     done = g.attempt("branch", "--show-current")
     name = done.stdout.strip()
     return name if done.returncode == 0 and name != "" else None
-
-
-def _fetched_tip(g: Git, remote: str, branch: str) -> Optional[tuple[str, str]]:
-    """手元の HEAD と、リモートから取得したブランチの HEAD の SHA（1 回の起動で解決する）。
-
-    リモートにブランチが無いと確かめられれば None、ほかの失敗は止める。
-    """
-    fetched = g.fetch_branch(remote, branch)
-    if fetched.returncode == 0:
-        head, tip = g.commits_of("HEAD", f"refs/remotes/{remote}/{branch}")
-        return head, tip
-    probe = g.attempt("ls-remote", "--exit-code", "--heads", remote, f"{HEADS}{branch}")
-    if probe.returncode == LS_REMOTE_ABSENT:
-        return None
-    raise UnitsStopped("precondition", f"{remote} の {branch} を取得できない: {mask_urls(fetched.stderr.strip() or probe.stderr.strip())}")
-
-
-def _seen_at(g: Git, commit: str, issues: Sequence[int]) -> _Seen:
-    return _Seen(*units_flow.plans_at(g, commit, issues))
 
 
 def _uncommitted(g: Git, issues: Sequence[int]) -> list[str]:
@@ -452,13 +428,15 @@ def unit_branch(sprint: str, unit: Unit) -> str:
 def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optional[StageResult]:
     """単位を依存の順に並列で流し、すべてマージしたらスプリントの PR を開く。これまでの経路なら None。
 
-    並びは `units.json` から読み、無ければ `prepare` で作る。マージ済みの単位は開始時に 1 回読んだ一覧で飛ばす（`already_merged`）。
+    並びは `units.json` から読み、無いか使い直せなければ（`_lineup_reusable`）`prepare` で作る。マージ済みの単位は開始時に 1 回読んだ一覧で飛ばす（`already_merged`）。
     止まった単位に依存する単位は始めず、止まった単位の名前・課題・PR の番号・理由を結果に持たせる（受け入れ条件 5）。同時に流す
     本数の上限は `named_cap` が読む値である。担当タスクの本文を読むコミットを持たない並び（実装計画の表）は、順に 1 つずつ流す。
     スプリントの作業場所は、マージが分かるたびにそのマージコミットまで進め（`advance`）、進めた単位の後の単位を始める。前の実行で
     マージされた単位（マージキューの待ちで止まった後にマージされたもの、マージの後の取得に失敗したもの）も、打ち直しで同じように進む。
     """
     held = plan_files.read_json(work_dir / UNITS_FILE)
+    if held is not None and not _lineup_reusable(run, cwd, held):
+        held = None
     found = _held_lineup(held) if held is not None else prepare(run, work_dir, cwd, ports)
     if found is None or isinstance(found, StageResult):
         return found
@@ -534,6 +512,14 @@ def _held_lineup(held: Mapping[str, Any]) -> Optional[Lineup]:
         for u in held["units"]
     )
     return Lineup(units, dict(held["unit_ci"]), str(held["source"]) if "source" in held else "")
+
+
+def _lineup_reusable(run: StageRun, cwd: Path, held: Mapping[str, Any]) -> bool:
+    """保存した並びを使い直せるか。変換するスプリントの単位の並びは、変換の記録と今の単位のファイルが合うときだけ使う。"""
+    sprint = run.sprint
+    if sprint is None or sprint.reusable is None or held["route"] != "units":
+        return True
+    return sprint.reusable(_work_location(run, cwd), str(held["source"]) if "source" in held else "")
 
 
 def _unit_context(run: StageRun, work_dir: Path, cwd: Path, found: Lineup) -> Context:

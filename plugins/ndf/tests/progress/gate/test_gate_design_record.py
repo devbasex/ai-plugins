@@ -426,17 +426,24 @@ def test_a_script_step_passes_the_extra_environment_to_its_child(tmp_path):
 # --- 工程「実装」の再承認 ------------------------------------------------------------------------
 
 
-def test_the_reapproval_of_the_implement_stage_carries_its_record(st, machine):
+def test_the_reapproval_of_the_implement_stage_carries_its_record(st, machine, tmp_path):
     machine.turn()
     _answer(st, machine.tid, _observe(machine))
     converted = {**machine.fake.record(), "review": {**machine.fake.reviewed, "pr": None}}
-    waiting = result.result("plan", result.GATE, "再承認を待つ", routes={"approved": None, "rejected": None})
-    machine.fake.script["impl"] = invoke.StageResult({**waiting, dr.TARGET_KEY: converted}, {})
+    material = tmp_path / "reapproval.md"
+    material.write_text("再承認の資料\n", encoding="utf-8")
+    digest = gate.material_sha256(material)
+    routes = {"approved": None, "rejected": None}
+    waiting = result.result("plan", result.GATE, "再承認を待つ", routes=routes, presentation_path=str(material))
+    machine.fake.script["impl"] = invoke.StageResult(
+        {**waiting, dr.TARGET_KEY: converted, dr.MATERIAL_KEY: {"path": str(material), "sha256": digest}}, {}
+    )
     machine.turn()
     machine.turn()
 
     q = gate.waiting(run.read(st, machine.tid))
     assert q is not None and q.stage == IMPLEMENT
-    gate.answer(st, machine.tid, gate.Answer(q.id, "approved", "分け方を承認", "human:reviewer", "k2"))
+    seen = gate.Target(converted["review"]["head"], digest)
+    gate.answer(st, machine.tid, gate.Answer(q.id, "approved", "分け方を承認", "human:reviewer", "k2", seen=seen))
 
     assert dr.reapproved_of(run.read(st, machine.tid)) == converted

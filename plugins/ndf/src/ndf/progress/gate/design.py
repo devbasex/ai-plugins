@@ -9,8 +9,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf.core import actors
 from ndf.progress import design_record, model, run, stages
-from ndf.progress.gate.asking import DESIGN_GATE, Question, Target
+from ndf.progress.gate.asking import DESIGN_GATE, Answer, Question, Target, material_sha256
 
 # 工程の先頭へ戻したことを知らせる文の末尾
 RESTARTED = "工程を初めから流し直すので、ndf progress next を打つ"
@@ -42,6 +43,31 @@ def outdated(v: run.View, q: Question, now: Target) -> Optional[str]:
 def reset(v: run.View, q: Question, why: str) -> list[model.EventDraft]:
     """質問の工程を、先頭から設計承認ゲートまで未了に戻す事象。"""
     return design_record.reset_drafts(v, v.snap.stage(q.stage), why)
+
+
+def reapproval(v: run.View, q: Question, a: Answer) -> Optional[Target]:
+    """工程「実装」の単位の分け直しの再承認への回答を確かめ、回答が結び付く対象（変換のコミットと承認資料）を返す。
+
+    再承認の待ちでなければ None。承認を確定するのは人だけで、提示した変換のコミットと承認資料を見ていない回答は
+    `model.Refused`。
+    """
+    if v.snap.stage(q.stage).id != design_record.IMPLEMENT_DEFINITION.stem:
+        return None
+    prog = run.step_progress(v, q.stage)
+    report = None if prog.waiting is None else prog.waiting["report"]
+    if report is None or design_record.TARGET_KEY not in report:
+        return None
+    if a.value == run.APPROVED and a.by.split(":", 1)[0] != actors.HUMAN:
+        raise model.Refused(f"回答した者 {a.by} は単位の分け直しの再承認を確定できない（利用者が --by human で回答する）")
+    head = str(report[design_record.TARGET_KEY]["review"]["head"])
+    material = report[design_record.MATERIAL_KEY]
+    digest, path = str(material["sha256"]), Path(material["path"])
+    if a.seen.head != head or a.seen.material != digest or not path.is_file() or material_sha256(path) != digest:
+        raise model.Refused(
+            f"回答が今の再承認の資料（{path}）と変換のコミット {head} を見たものでない。routes のコマンドの --head と"
+            " --material-sha256 のまま回答する"
+        )
+    return Target(head, digest)
 
 
 def stops_regardless(v: run.View, stage: stages.StageDef, payload: Mapping[str, Any]) -> bool:

@@ -20,6 +20,10 @@ from ndf.progress import folding, invoke, model, run_view, stages
 RECORD_VERSION = 1
 # 承認の回答の payload の、記録のキー
 TARGET_KEY = "design_target"
+# 再承認の待ちを返す結果の、承認資料（`{"path", "sha256"}`）のキー
+MATERIAL_KEY = "reapproval_material"
+# 回答のコマンドで、回答した者が見た承認資料を固定する引数
+MATERIAL_FLAG = "--material-sha256"
 # 記録を組む工程（定義の id）と承認ゲートの区分・単位を流す工程の定義（ファイル名が id）
 REVIEW_STAGE_ID, GATE = "document-review", "design"
 IMPLEMENT_DEFINITION = PurePosixPath("workflow/stages/implement.json")

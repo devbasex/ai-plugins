@@ -239,12 +239,13 @@ def _reapproval(m: Move) -> Optional[Mapping[str, Any]]:
 def _gate_routes(machine_id: str, rev: int, m: Move) -> dict[str, Any]:
     assert m.stage is not None
     out = {}
-    if _reapproval(m) is not None:
-        # 再承認は回答した者と記録を残すので、`ndf answer` で返す
+    if (held := _reapproval(m)) is not None:
+        # 再承認は回答した者と記録を残すので、`ndf answer` で返す。提示した変換のコミットと承認資料を引数に固定する
         assert m.step is not None and m.progress is not None
         qid = model.question_id(machine_id, rev, m.stage.name, m.step.id, m.progress.anchor)
-        asks = ("reason", "by", "key")
-        return {a: result.command("answer", machine_id, "--gate", qid, "--result", a, ask=asks) for a in choices(m)}
+        seen = ("--head", held[design_record.TARGET_KEY]["review"]["head"], design_record.MATERIAL_FLAG)
+        argv = ("answer", machine_id, "--gate", qid, *seen, held[design_record.MATERIAL_KEY]["sha256"], "--result")
+        return {a: result.command(*argv, a, ask=("reason", "by", "key")) for a in choices(m)}
     for a in choices(m):
         ask = ("notes", "reason") if a == REQUEST_CHANGES else ("reason",)
         out[a] = _cmd("answer", machine_id, m.stage.name, "--answer", a, ask=ask)
