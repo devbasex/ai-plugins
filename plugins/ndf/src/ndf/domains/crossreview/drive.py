@@ -40,7 +40,8 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import identity
 from ndf.adapters import agents, git, publish, run_log
-from ndf.contracts import internal, limits
+from ndf.contracts import internal, limits, writing
+from ndf.core import issue_docs
 from ndf.core.converge import oscillation, participants, worktree
 from ndf.domains.crossreview import (
     changes,
@@ -160,6 +161,7 @@ class _Run:
     fixer_last: Optional[resume_decide.Previous] = None
     fixer_growth: int = 0
     documents: bool = False  # PR の全差分に Markdown のファイルがあるか（文書の基準を指示に入れる。#4285）
+    distinction: bool = False  # 設計書か要求仕様のコピーを変えるか（偽なら書き分けの小見出しを外す。#4543）
     # 今の席・この実行で座っている埋めた席・この実行の資料のディレクトリ（#3955）
     seats: list[str] = field(default_factory=list)
     filled: list[Filled] = field(default_factory=list)
@@ -493,7 +495,8 @@ def _review_prompt(run: _Run, round_no: int, prep: _Prepared, remarks: Optional[
         lines.append("次のセクションはまだ詳細レビューを通っていない。1 セクションずつ読む: " + "・".join(scope.unreviewed))
     lines += criteria_decide.reviewer_block(run.cfg.settings.focus, run.snapshot)
     lines += criteria_decide.unit_block(criteria_decide.REVIEWER, run.cfg.unit)
-    lines += criteria_decide.document_block(criteria_decide.REVIEWER, run.documents, prep.previous)
+    block = criteria_decide.document_block(criteria_decide.REVIEWER, run.documents, prep.previous)
+    lines += block if run.distinction else map(writing.without_distinction, block)
     if run.cfg.handed:
         lines += ["組み直しが残した足すべき内容（足されたかを確かめる）:", *(f"- {h.id}: {h.text}" for h in run.cfg.handed)]
     if decided:
@@ -772,6 +775,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     changed = changes.changed(run.g, cfg.base_commit, cfg.worktree)
     _oversized_docs(run, changed.docs)
     run.documents = any(p.endswith(".md") for p in changed.files)
+    run.distinction = any(issue_docs.design_issues(p) or issue_docs.requirements_issues(p) for p in changed.files)
     reviewed = scope_decide.reviewed_of(run.data, run.mvv)
     sections = changes.sections(changed.docs)
     head = run.g.rev_parse("HEAD")

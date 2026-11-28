@@ -32,7 +32,7 @@ NO_SOURCES: Mapping[str, str] = MappingProxyType({})
 
 @contracts.cached_reader
 def work_kinds() -> dict[str, dict[str, Any]]:
-    """作業の名前 → 定義（`work`・`summary`・`skills`・`excerpt`・`inputs`・`optional_inputs`（持つ作業だけ）・`cwd`・`outputs`）。"""
+    """作業の名前 → 定義（`work`・`summary`・`skills`・`excerpt`・`inputs`・`optional_inputs`（持つ作業だけ）・`cwd`・`outputs`・`distinction`（持つ作業だけ））。"""
     return contracts.load_json(KINDS_FILE)["kinds"]
 
 

@@ -31,6 +31,11 @@ def _limit(head: str, diff: Path) -> str:
     return criteria_decide._table()["document"]["since"].format(since=head, diff=diff)
 
 
+def _stripped() -> str:
+    """設計書も要求仕様のコピーも変えない PR へ渡す基準（#4543 の決定 6）。"""
+    return writing.without_distinction(writing.criteria().rstrip())
+
+
 def _prompt(fake: Recording, name: str) -> str:
     return next(p for _, out, p in fake.prompts if out == name)
 
@@ -51,7 +56,7 @@ def test_issue_4285_document_pr_gives_the_criteria_to_both_prompts(wt: Path, tmp
     fake = Recording(tmp_path / "st", {"codex": [[MAJOR], []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok")
-    assert all(writing.criteria().rstrip() in p for _, _, p in fake.prompts)
+    assert all(_stripped() in p for _, _, p in fake.prompts)
     number = criteria_decide._table()["document"]["number"]
     assert all(f"\n{number}. " in p for _, _, p in fake.prompts)
 
@@ -61,7 +66,7 @@ def test_issue_4285_documents_are_read_from_the_whole_diff(repos: Repos, wt: Pat
     fake = Recording(tmp_path / "st", {"codex": [[MAJOR], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt)
     assert ".md" not in fake.inputs["round2.diff"]
-    assert writing.criteria().rstrip() in _prompt(fake, "round2-codex.out")
+    assert _stripped() in _prompt(fake, "round2-codex.out")
 
 
 def test_issue_4285_major_is_limited_from_the_second_round(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -191,3 +196,24 @@ def test_issue_3955_claude_first_seated_in_a_full_round_is_not_limited(wt: Path,
     seat = _prompt(fake, "round2-claude.out")
     assert criteria_decide._table()["document"]["since"].split("{")[0] not in seat
     assert _state(state_dir)["rounds"][-1]["scope"] == "full"
+
+
+@pytest.mark.parametrize(
+    ("path", "distinction"),
+    [("issues/issue-7-design.md", True), ("issues/issue-7-requirements.md", True), ("notes.md", False)],
+)
+def test_issue_4543_the_distinction_goes_only_with_design_documents(
+    repos: Repos, tmp_path: Path, capsys, monkeypatch, hub, path: str, distinction: bool
+) -> None:
+    """設計書か要求仕様のコピーを変える PR だけが、レビュー担当と修正担当へ書き分けの小見出しを渡す。"""
+    (repos.other / path).parent.mkdir(parents=True, exist_ok=True)
+    commit(repos.other, path, "# 文書\n\n本文\n", "文書")
+    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    sh(repos.main, "fetch", "-q", "origin")
+    finding = {**MAJOR, "path": path, "line": 3}
+    fake = Recording(tmp_path / "st", {"codex": [[finding], []], "kiro": [[], []]})
+    _run(capsys, monkeypatch, fake, repos.add_worktree(tmp_path / "doc"))
+    full = writing.criteria().rstrip()
+    assert {out for _, out, _ in fake.prompts} >= {"round1-codex.out", "round1-fix.out"}
+    assert all((full in p) is distinction for _, _, p in fake.prompts)
+    assert all((_stripped() in p) is not distinction for _, _, p in fake.prompts)

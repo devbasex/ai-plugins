@@ -33,6 +33,8 @@ RESTATE = {
     "design": "言い直しには、次の 2 つへの回答を含める。(a) どう解くか。(b) 何を採らなかったか、なぜか。",
 }
 PROMPT_KEYS = {"files", "reader", "questions_kind"}
+# 任意のキー（真偽。省けば真）。偽なら現状と改善の案の書き分けの小見出しを渡さない（#4543 の決定 6）
+DISTINCTION_KEY = "distinction"
 ADD_KEYS = {"questions", "prs", "reads"}
 
 
@@ -313,6 +315,9 @@ def prompt(entry: Mapping[str, Any]) -> str:
     """読み手役への指示。文書は加工しない（補足を外した文書・直した部分だけの文書は、頼む側が先に別のファイルへ作る）。"""
     _require_prompt(entry)
     files, reader, kind = entry["files"], entry["reader"], entry["questions_kind"]
+    types = writing.types_section()
+    if not entry.get(DISTINCTION_KEY, True):
+        types = writing.without_distinction(types)
     lines = [
         "次の文書を、下に示す読み手になったつもりで最初から最後まで読み、読み手に通じるかを確かめてください。",
         "読むのは次の文書だけです。ほかのファイル・Issue・Pull Request・会話の記録を読まず、ファイルを変えないでください。",
@@ -326,7 +331,7 @@ def prompt(entry: Mapping[str, Any]) -> str:
         "## 通じない文の見分け方",
         "次は、文書の書き方の基準の一部である。",
         "",
-        writing.types_section(),
+        types,
         "",
         "## 返すもの",
         "1. 要点を自分の言葉で言い直したもの。" + (RESTATE[kind] if kind in RESTATE else ""),
@@ -417,7 +422,7 @@ def _material_changed(
 
 
 def _require_prompt(entry: Any) -> None:
-    _require_keys(entry, PROMPT_KEYS)
+    _require_keys({k: v for k, v in entry.items() if k != DISTINCTION_KEY} if isinstance(entry, Mapping) else entry, PROMPT_KEYS)
     files, reader, kind = entry["files"], entry["reader"], entry["questions_kind"]
     if not (isinstance(files, list) and files and all(_is_text(f) for f in files)):
         raise ReadingInvalid("files は、読ませるファイルのパスの空でない配列にする")
@@ -425,6 +430,8 @@ def _require_prompt(entry: Any) -> None:
         raise ReadingInvalid(f"reader は、{'・'.join(READER)} の 3 つの空でない文字列を持つオブジェクトにする")
     if not (isinstance(kind, str) and (kind == "none" or kind in RESTATE)):
         raise ReadingInvalid(f"questions_kind は {'・'.join(RESTATE)}・none のどれかにする")
+    if not isinstance(entry.get(DISTINCTION_KEY, True), bool):
+        raise ReadingInvalid(f"{DISTINCTION_KEY} は、真偽（true か false）にする")
 
 
 def _is_text(value: Any) -> bool:
