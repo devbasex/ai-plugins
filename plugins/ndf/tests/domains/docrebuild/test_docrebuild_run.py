@@ -413,7 +413,8 @@ def test_copy_requirements_passes_a_private_copy_of_what_was_checked(tmp_path: P
         (cwd / rel).unlink()
         (cwd / rel).symlink_to(tmp_path / "outside.md")
         assert Path(copy).read_text(encoding="utf-8") == "読んだ内容\n"
-    assert Path(copy).parent.parent == state.resolve() and os.stat(copy).st_mode & 0o077 == 0
+        assert Path(copy).parent.parent == state.resolve() and os.stat(copy).st_mode & 0o077 == 0
+    assert not Path(copy).parent.exists()
 
 
 @pytest.mark.parametrize("kind", ["link", "linked_directory", "writable_file", "writable_directory", "gone"])

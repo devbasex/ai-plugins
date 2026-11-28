@@ -339,14 +339,19 @@ def others_write(st: os.stat_result) -> bool:
 
 
 def _private_group(gid: int) -> bool:
-    """`gid` が呼んだ利用者だけの個人グループ（呼んだ利用者の主グループで、利用者と同じ名前で、ほかの利用者を項目に持たない）なら真。
+    """`gid` が呼んだ利用者だけの個人グループ（呼んだ利用者の主グループで、利用者と同じ名前で、ほかの利用者を項目に持たず、
+    主グループにするほかの UID も無い）なら真。
 
     引けない（名前の無い gid・利用者）なら偽（共有のグループとみなす）。macOS の `staff` のような共有の主グループは名前が違うので偽。
     """
     if gid != os.getegid():
         return False
     # 引けないことを例外にしないよう一覧から探す（ここへ来るのはグループの書き込みのある親だけなので、一覧を読むのはまれ）
-    names = [u.pw_name for u in pwd.getpwall() if u.pw_uid == os.geteuid()]
+    users, me = pwd.getpwall(), os.geteuid()
+    # 主グループの所属は passwd の `pw_gid` に記録され、`gr_mem` には現れない
+    if any(u.pw_gid == gid and u.pw_uid != me for u in users):
+        return False
+    names = [u.pw_name for u in users if u.pw_uid == me]
     groups = [g for g in grp.getgrall() if g.gr_gid == gid]
     return bool(names and groups) and groups[0].gr_name == names[0] and set(groups[0].gr_mem) <= {names[0]}
 
