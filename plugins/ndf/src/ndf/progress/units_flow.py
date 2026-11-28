@@ -31,7 +31,7 @@ from types import MappingProxyType
 from typing import Any, NamedTuple, Optional
 
 from ndf.adapters import github, github_merge, github_pulls
-from ndf.adapters.git import HEADS, Git, mask_urls
+from ndf.adapters.git import HEADS, Completed, Git, mask_urls
 from ndf.contracts import facts, result, worker_paths
 from ndf.core import route
 from ndf.core.issue_docs import plan_issues
@@ -695,6 +695,11 @@ class Start(NamedTuple):
     checked_to: Optional[tuple[str, str]]
 
 
+def probe_branch(g: Git, source: str, branch: str) -> Completed:
+    """`source`（リモート名か URL）にブランチがあるかを読む。無ければ終了コードが `LS_REMOTE_ABSENT`。"""
+    return g.attempt("ls-remote", "--exit-code", "--heads", source, f"{HEADS}{branch}")
+
+
 def _fetched_tip(g: Git, remote: str, branch: str) -> Optional[tuple[str, str]]:
     """手元の HEAD と、リモートから取得したブランチの HEAD の SHA（1 回の起動で解決する）。
 
@@ -704,7 +709,7 @@ def _fetched_tip(g: Git, remote: str, branch: str) -> Optional[tuple[str, str]]:
     if fetched.returncode == 0:
         head, tip = g.commits_of("HEAD", f"refs/remotes/{remote}/{branch}")
         return head, tip
-    probe = g.attempt("ls-remote", "--exit-code", "--heads", remote, f"{HEADS}{branch}")
+    probe = probe_branch(g, remote, branch)
     if probe.returncode == LS_REMOTE_ABSENT:
         return None
     raise UnitsStopped(
@@ -714,26 +719,40 @@ def _fetched_tip(g: Git, remote: str, branch: str) -> Optional[tuple[str, str]]:
 
 
 def read_start(
-    g: Git, remote: str, branch: Optional[str], issues: Sequence[int], destination: Optional[Callable[[Git, str], tuple[str, str]]]
+    g: Git,
+    remote: str,
+    branch: Optional[str],
+    issues: Sequence[int],
+    destination: Optional[Callable[[Git, str], tuple[str, Optional[str]]]],
 ) -> Start:
     """作業場所が今いるブランチの、手元と取得先の HEAD を読む。各コミットは 1 度だけ読む。
 
-    `destination` があれば（変換するスプリント）、最初の通信の前に送り先を確かめ、その URL から読んだ HEAD で以後を判定する。
-    単位の欄が取得先にだけあるときは、手元を進める前に送り先を確かめて、その URL の HEAD に置き換える。
+    `destination` があれば（変換するスプリント）、取得は確かめた送り先の URL から 1 回だけ行う。送り先の確かめに通らない
+    ときは、手元に単位の欄があれば取得せずに止める。無ければリモート名で取得し、取得先に単位の欄があれば手元を進めずに止める。
     """
     here = None if destination is None else seen_at(g, "HEAD", issues)
     checked_to = None
     fetched = None
-    if destination is not None and branch is not None and here is not None and here.has_headings():
-        checked_to = destination(g, branch)
-        fetched = (g.rev_parse("HEAD"), checked_to[1])
-    elif branch is not None:
+    refused = None
+    by_name = branch is not None
+    if destination is not None and here is not None and branch is not None:
+        try:
+            url, found = destination(g, branch)
+        except UnitsStopped as exc:
+            # 変換しないスプリントは、送り先の確かめに通らなくても止めない
+            if exc.kind != "refused" or here.has_headings():
+                raise
+            refused = exc
+        else:
+            by_name = False
+            if found is not None:
+                checked_to = (url, found)
+                fetched = (g.rev_parse("HEAD"), found)
+    if by_name and branch is not None:
         fetched = _fetched_tip(g, remote, branch)
     head, tip = fetched if fetched is not None else ("HEAD", None)
     at_head = here if here is not None else seen_at(g, head, issues)
     at_tip = at_head if tip is None or tip == head else seen_at(g, tip, issues)
-    if destination is not None and checked_to is None and tip is not None and branch is not None and at_tip.has_headings():
-        checked_to = destination(g, branch)
-        tip = checked_to[1]
-        at_tip = at_head if tip == head else seen_at(g, tip, issues)
+    if refused is not None and at_tip.has_headings():
+        raise refused
     return Start(head, tip, at_head, at_tip, checked_to)

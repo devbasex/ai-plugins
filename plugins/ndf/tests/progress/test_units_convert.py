@@ -400,8 +400,11 @@ def test_files_written_before_an_interruption_are_committed_on_the_next_run(worl
     _pushed(world)
 
 
-def test_a_refused_push_url_never_launches_the_worker(world):
-    _sh(world.work, "config", "remote.origin.pushurl", "git@github.com:o/other.git")
+@pytest.mark.parametrize("fetch_differs", [False, True], ids=["push の URL が別", "取得の URL が別"])
+def test_a_refused_remote_url_never_launches_the_worker(world, fetch_differs):
+    if fetch_differs:
+        _sh(world.work, "config", "remote.origin.url", "git@github.com:o/other.git")
+    _sh(world.work, "config", "remote.origin.pushurl", URL if fetch_differs else "git@github.com:o/other.git")
 
     assert world.stopped().kind == "refused"
 
@@ -429,6 +432,8 @@ def test_an_advanced_tip_gets_the_held_commit_on_top(world):
     world.script = [lambda tree: world.convert_well(tree, merged=True)]
     got = world.convert()
     moved = world.push_remote({"README.md": "ほか\n"})
+    # 手元が遅れていても、回答の前は手元を進めない
+    assert world.convert().status == "gate" and world.local() == world.head
     world.reapproved(got)
 
     assert world.convert("approved") is None

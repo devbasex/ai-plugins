@@ -54,7 +54,7 @@ class SprintPlan:
     # この変更より前のスプリントの変換（`units_convert.convert`。`(ConvertRequest, ports, answer)`）。新しい定義は None
     convert: Optional[Callable[..., Any]] = None
     # 変換の送り先を確かめて、その URL から読む（`units_convert.destination`。`(git, ブランチ)`）。新しい定義は None
-    destination: Optional[Callable[..., tuple[str, str]]] = None
+    destination: Optional[Callable[..., tuple[str, Optional[str]]]] = None
     # 保存した単位の並びを使い直せるか（`units_convert.still_converted`。`(作業場所, 本文を読むコミット)`）。新しい定義は None
     reusable: Optional[Callable[..., bool]] = None
     # 文脈の branch（`per_unit` の無い定義は工程の入力に持たないことがある）

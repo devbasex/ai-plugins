@@ -204,7 +204,8 @@ def _ref_name(job: Job) -> str:
 def convert(job: Job, request: ConvertRequest, ports: units_invoke.Ports, answer: Optional[str]) -> Optional[StageResult]:
     """変換の続きから進める。実装へ進めるなら None、再承認が要れば `gate` の結果。止めるときは `UnitsStopped`。
 
-    None を返すとき、手元の HEAD は確かめた送り先に届いているので、呼び手は送らない。
+    判定には、手元の HEAD でなく送り先の HEAD を使う。手元が遅れていても、再承認を待つ間と却下の後は手元を動かさない。
+    None を返すときは、手元を確かめた送り先の HEAD まで進めてあるので、呼び手は送らない。
     """
     g = Git(request.sprint_dir)
     root = Path(g.run("rev-parse", "--show-toplevel").strip())
@@ -214,21 +215,36 @@ def convert(job: Job, request: ConvertRequest, ports: units_invoke.Ports, answer
         _drop_held(r)
         raise UnitsStopped("refused", "単位の分け直しの再承認が却下されたので、実装を始めない")
     url, tip = request.destination if request.destination is not None else destination(job, r.git, request.branch)
-    head = r.git.rev_parse("HEAD")
-    if held is not None and r.git.is_ancestor(held, head):
+    if tip is None:
+        raise UnitsStopped("precondition", f"送り先に {request.branch} が無いので、変換しない")
+    local = r.git.rev_parse("HEAD")
+    if held is not None and r.git.is_ancestor(held, tip):
         _drop_held(r)  # push の後に中断した打ち直し
         held = None
     # 送り先に無いコミットは、再承認の資料の対象にも変換の送信にも含めない
-    if not r.git.is_ancestor(head, tip):
-        raise UnitsStopped("refused", f"手元の {request.branch}（{head}）に送り先に無いコミットがあるので、送らない")
+    if not r.git.is_ancestor(local, tip):
+        raise UnitsStopped("refused", f"手元の {request.branch}（{local}）に送り先に無いコミットがあるので、送らない")
     if held is None:
         # 変換の記録と合えば先に進む（実装の後に表の追記が単位のファイルとずれても、変換し直さない）
-        if _matches_conversion(r.git, r.root, job.work_root, head, r.issues):
+        if _matches_conversion(r.git, r.root, job.work_root, tip, r.issues):
+            _fast_forward(r, local, tip)
             return None
-        checked = _check_units(r, head)
+        checked = _check_units(r, tip)
         if checked.report is not None and not checked.bad:
-            return _published(r, url, head, checked.report)
+            asked = _published(r, url, tip, checked.report)
+            if asked is None:
+                _fast_forward(r, local, tip)
+            return asked
     return _reflect(r, held, url, tip)
+
+
+def _fast_forward(r: _Run, local: str, commit: str) -> None:
+    """手元（`local`）を、送り先に届いているコミット `commit` まで fast-forward で進める。"""
+    if local == commit:
+        return
+    moved = r.git.merge_ff(commit)
+    if moved.returncode != 0:
+        raise UnitsStopped("precondition", f"作業場所を {commit} へ進められない: {mask_urls(moved.stderr.strip())}")
 
 
 def _plans(r: _Run, commit: str) -> list[PlanDoc]:
@@ -272,17 +288,38 @@ def _new_tree(r: _Run, commit: str) -> Path:
     return r.tree_path
 
 
-def destination(job: Job, git: Git, branch: str) -> tuple[str, str]:
-    """確かめた送り先の URL と、そこから読んだスプリントブランチの HEAD。通らなければ通信せずに止める。"""
+def checked_url(job: Job, git: Git) -> str:
+    """確かめた送り先の URL。通信しない。
+
+    push の URL と取得の URL の両方が、スプリントのリポジトリであることを求める。単位を流す処理は、受け入れ条件の取得と
+    単位の起動で使うリポジトリを取得の URL から決めるためである。違えば `UnitsStopped`（`refused`）。
+    """
     machine = github_target(job.machine_repo())
     if machine is None:
         raise UnitsStopped("refused", "スプリントのリポジトリを解析できないので、変換しない")
     url, errors = units_sync.push_url(git, machine.repo)
     if url is None:
         raise UnitsStopped("refused", "送り先を確かめられないので、変換しない: " + "; ".join(errors))
+    fetch = github_target(git.remote_url())
+    if fetch is None or fetch.repo.casefold() != machine.repo.casefold():
+        now = "解析できない" if fetch is None else fetch.repo
+        raise UnitsStopped("refused", f"取得の URL のリポジトリがスプリントと違う（スプリント {machine.repo}、今 {now}）ので、変換しない")
+    return url
+
+
+def destination(job: Job, git: Git, branch: str) -> tuple[str, Optional[str]]:
+    """確かめた送り先の URL と、そこから読んだスプリントブランチの HEAD（送り先にブランチが無ければ None）。
+
+    取得は 1 回で、読むための一時の ref と、リモート追跡の ref の両方を更新する。
+    """
+    url = checked_url(job, git)
     ref = TIP_PREFIX + _ref_name(job)
-    done = git.fetch(url, f"+{HEADS}{branch}:{ref}")
+    source = f"{HEADS}{branch}"
+    tracking = f"refs/remotes/{git.remote()}/{branch}"
+    done = git.fetch(url, f"+{source}:{ref}", f"+{source}:{tracking}")
     if done.returncode != 0:
+        if units_flow.probe_branch(git, url, branch).returncode == units_flow.LS_REMOTE_ABSENT:
+            return url, None
         raise UnitsStopped("precondition", f"送り先の {branch} を読めない: {mask_urls(done.stderr.strip())}")
     tip = git.rev_parse(ref)
     git.run("update-ref", "-d", ref)
@@ -465,9 +502,7 @@ def _reflect(r: _Run, held: Optional[str], url: str, tip: str) -> Optional[Stage
         return _ask_again(r, send, report, differences, record, old if record is None else _old_approved_head(r, url))
     approval = {"kind": "reapproval", "head": record["review"]["head"]} if record is not None else {"kind": "design", "head": old}
     _push_conversion(r, url, tip, send, report, approval)
-    moved = r.git.merge_ff(send)
-    if moved.returncode != 0:
-        raise UnitsStopped("precondition", f"作業場所を {send} へ進められない: {mask_urls(moved.stderr.strip())}")
+    _fast_forward(r, r.git.rev_parse("HEAD"), send)
     _drop_held(r)
     return None
 
@@ -478,7 +513,7 @@ def _record_conversion(r: _Run, commit: str, approval: Mapping[str, Any]) -> Non
 
 def _converted_record(r: _Run, commit: str, report: units_files.Report) -> dict[str, Any]:
     machine = github_target(r.job.machine_repo())
-    assert machine is not None, "送り先の確かめ（`destination`）か保存したステートマシンが先に確かめる"
+    assert machine is not None, "送り先の確かめ（`checked_url`）か保存したステートマシンが先に確かめる"
     limits = units_files.limits_of(units_files.project_of(units_files.Tree(r.root, commit)))
     return design_record.converted(machine.repo, commit, r.request.branch, {"issues": list(r.issues)}, limits, report)
 
@@ -527,6 +562,7 @@ def still_converted(job: Job, location: Path, source: str) -> bool:
     """保存した単位の並び（本文を読むコミットが `source`）を使い直せるか。通信しない。
 
     並びが変換の記録のコミットから作ったもので、手元の HEAD の単位のファイルがそのコミットと同じときだけ使い直す。
+    使い直せるときも、リモートの URL がスプリントのリポジトリでなくなっていれば `checked_url` が止める。
     """
     saved = plan_files.read_json(job.work_root / CONVERT_FILE)
     if saved is None or str(saved["commit"]) != source:
@@ -534,7 +570,10 @@ def still_converted(job: Job, location: Path, source: str) -> bool:
     root = Path(Git(location).run("rev-parse", "--show-toplevel").strip())
     git = Git(root)
     issues = tuple(sorted(int(n) for n in job.context["issues"]))
-    return _matches_conversion(git, root, job.work_root, git.rev_parse("HEAD"), issues)
+    if not _matches_conversion(git, root, job.work_root, git.rev_parse("HEAD"), issues):
+        return False
+    checked_url(job, git)
+    return True
 
 
 def _published(r: _Run, url: str, head: str, report: units_files.Report) -> Optional[StageResult]:

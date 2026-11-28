@@ -152,14 +152,12 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
         raise UnitsStopped("precondition", detail)
     project = ndf_settings_in(root, PROJECT_FILE)
     branch = _checked_branch(run, branch, project)
-    moved = tip is not None and _catch_up(g, remote, branch, head, tip)
-    seen = at_tip if moved else at_head
+    # 変換するスプリントは、再承認の回答と却下の前に手元を動かさない。実装へ進むと決めた変換が進める
+    move = not (sprint.convert is not None and not sprint.new_definition and at_tip.has_headings())
+    behind = tip is not None and _catch_up(g, remote, branch, head, tip, move)
+    seen = at_tip if behind else at_head
     if not (sprint.required or seen.has_units()):
         return _plain_route(work_dir)
-    if moved:
-        # 単位の経路を続けるときだけ、進めた先のコミットの設定でリリース先（I4）と単位の PR で待つチェックを決め直す
-        project = ndf_settings_in(root, PROJECT_FILE)
-        branch = _checked_branch(run, branch, project)
     source, bodies = "", None
     count = _counted_once(g, remote)
     converting = sprint.convert is not None and not sprint.new_definition and seen.has_headings()
@@ -167,6 +165,10 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
     asked, seen = _converted(g, sprint, seen, request, ports)
     if asked is not None:
         return asked
+    if behind:
+        # 単位の経路を続けるときだけ、進めた先のコミットの設定でリリース先（I4）と単位の PR で待つチェックを決め直す
+        project = ndf_settings_in(root, PROJECT_FILE)
+        branch = _checked_branch(run, branch, project)
     if sprint.required or seen.unit_files:
         units, source, checked, bodies = _units_from_files(g, root, sprint, issues, seen.plans, count)
         # 送るのは記録との比較と確かめを通ったコミットだけにする（止まる実装の手元のコミットを、共有のブランチに残さない）。
@@ -357,8 +359,10 @@ def _checked_branch(run: StageRun, branch: Optional[str], project: Mapping[str, 
     return registered
 
 
-def _catch_up(g: Git, remote: str, branch: str, head: str, tip: str) -> bool:
-    """手元（`head`）が遅れていればリモートの HEAD（`tip`）まで進め、進めたかを返す。分かれていれば止める（強制しない）。
+def _catch_up(g: Git, remote: str, branch: str, head: str, tip: str, move: bool = True) -> bool:
+    """手元（`head`）が遅れていればリモートの HEAD（`tip`）まで進め、遅れていたかを返す。分かれていれば止める（強制しない）。
+
+    `move` が偽なら、確かめるだけで進めない。
 
     進める先は確かめた `tip` の SHA である（追跡の ref は別の作業場所の fetch で動くので、検査と違うコミットへ進めない）。
     """
@@ -367,6 +371,8 @@ def _catch_up(g: Git, remote: str, branch: str, head: str, tip: str) -> bool:
     if not g.is_ancestor(head, tip):
         detail = f"手元の {branch}（{head}）と {remote} の {branch}（{tip}）が分かれている。揃えてから打ち直す"
         raise UnitsStopped("precondition", detail)
+    if not move:
+        return True
     done = g.merge_ff(tip)
     if done.returncode != 0:
         raise UnitsStopped("precondition", f"{branch} を {remote} の HEAD へ進められない: {mask_urls(done.stderr.strip())}")
