@@ -561,7 +561,7 @@ def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: 
     origin = hub.publishing(ref.origin_pr) if ref.origin_pr != ref.current_pr else contextlib.nullcontext()
     with origin:
         save = lambda: store.write_object(ref.path, data)  # noqa: E731
-        # ロックの待ちと GitHub の照合の間に許可が取り消されうるので、書く直前に読み直す
+        # ロックの待ちと GitHub の照合の間に許可が取り消されうるので、照合の前と書く直前に読み直す
         declared = lambda: leftover.primary_of(main)  # noqa: E731
         filed = leftover.file_issues(data, ref, hub.leftovers(ref.current_pr), save, primary, manual=filer.manual, declared=declared)
     return filed

@@ -193,7 +193,7 @@ class _Filing:
     note: Optional[str] = None
 
     def revoked(self) -> bool:
-        """GitHub へ書く直前に許可を読み直し、取り消されていれば真。一度取り消されたら、以後は書かない。"""
+        """許可を読み直し、取り消されていれば真。一度取り消されたら、以後は書かない。"""
         if not self.withdrawn and self.declared is not None:
             primary, note = self.declared()
             if primary != GITHUB:
@@ -409,6 +409,9 @@ class _Filing:
             self.done(ident, url)
 
     def run(self, manual: bool) -> list[str]:
+        # 公開のロックを待つ間に取り消されていれば、GitHub を読まずに見送る
+        if self.revoked():
+            return self._withdraw()
         try:
             self.read()
         except Exception as exc:  # noqa: BLE001 ネットワーク: 記録を読めなければ、どの候補も起票しない
@@ -467,7 +470,7 @@ def file_issues(
 ) -> list[str]:
     """起票の候補を起票し、行の `issue`・`issue_error`・`prior_issue` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて
     注意を返す。`primary` が `github` でないか候補が無ければ、GitHub を呼ばない。`manual` は利用者が打った公開である。
-    `declared` を渡せば、起票の記録と Issue を書く直前に許可を読み直し、取り消されていれば残りを見送る。
+    `declared` を渡せば、GitHub を読む前と、起票の記録と Issue を書く直前に許可を読み直し、取り消されていれば残りを見送る。
 
     呼び手は、今の PR の番号と元の PR の番号の公開のロック（同じ番号なら 1 回）を持つ。"""
     rows: dict[str, list[dict[str, Any]]] = {}

@@ -767,6 +767,34 @@ def test_issue_3780_2_filing_stops_when_the_settings_are_disabled_midway(tmp_pat
     assert state["issue_skipped"] is None and "issue_error" not in state["findings"][0] and len(hub.comments) == 1
 
 
+def test_issue_3780_2_filing_disabled_while_waiting_for_the_lock_reads_nothing(tmp_path: Path, monkeypatch, hub) -> None:
+    from ndf.domains.crossreview import cli
+
+    github = FakeGitHub()
+    port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
+    for name in ("viewer", "comment", "comments", "issues", "search", "recent"):
+        monkeypatch.setattr(port, name, lambda *a: pytest.fail("見送るのに起票の読み取りをした"))
+    hub.leftovers, hub.clean = lambda pr: port, list
+    monkeypatch.setattr(cli.leftover, "unconfirmed_target", lambda *a: None)
+    (tmp_path / ".ndf").mkdir()
+    settings_file = tmp_path / ".ndf" / "project.json"
+    settings_file.write_text(json.dumps({"issues": {"primary": "github"}}), encoding="utf-8")
+
+    @contextlib.contextmanager
+    def lock(pr: int) -> Iterator[None]:
+        # 元の PR のロックを待つ間に、起票を無効にする
+        if pr == 7:
+            settings_file.write_text(json.dumps({"issues": {"primary": "markdown"}}), encoding="utf-8")
+        yield
+
+    monkeypatch.setattr(cli, "HUB", lambda *a: hub.make(*a)._replace(publishing=lock))
+    monkeypatch.setattr(cli, "_main_of_cwd", lambda: tmp_path)
+    store.write_object(tmp_path / store.STATE_NAME.format(pr=7), {**_left_state(), "current_pr": 9})
+    assert cli.main(["report", "--state-dir", str(tmp_path), "--pr", "9"]) == 0
+    state = store.read_object(tmp_path / store.STATE_NAME.format(pr=7))
+    assert state["issue_skipped"] is None and len(hub.comments) == 1
+
+
 def test_filing_skipped_after_a_rewind_takes_no_lock_of_the_origin_pr(tmp_path: Path, monkeypatch, hub) -> None:
     from ndf.domains.crossreview import cli
 
