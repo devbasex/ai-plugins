@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from ndf.domains.project import items as forms
-from ndf.domains.project import measure_ci, measure_repo, secret
+from ndf.domains.project import cli, measure_ci, measure_repo, secret
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -46,6 +46,84 @@ def repo(tmp_path) -> Path:
 
 def _tree(repo: Path, seconds: float = 30) -> measure_repo.Tree:
     return measure_repo.Tree(repo, time.monotonic() + seconds)
+
+
+# --- 退行（#4521 の受け入れ条件 6・7）: 残る項目（test・materials・ci）と指示書の案内は、測定を絞る前と同じ ---
+
+
+def _add_commit(repo: Path, files: dict[str, str]) -> None:
+    for name, text in files.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add")
+
+
+def _measure_whole(repo: Path, monkeypatch) -> dict:
+    """GitHub の origin を持つリポジトリを `measure_project` で測る。`gh` は呼ばず、必須のチェックだけを返す。"""
+    _git(repo, "remote", "add", "origin", "https://github.com/o/r.git")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    monkeypatch.setattr(measure_ci.Gh, "get", lambda self, path: _RULES if "/rules/" in path else [])
+    return cli.measure_project(repo, 30)
+
+
+_SECRET_NOTE = "秘密の名前のファイルを開かなかった: .env"
+
+
+def _old_guide_note(where: str) -> str:
+    return f"古い NDF の案内 {where}（NDF_PLUGIN_GUIDE_START）。今の NDF を指さないので、読み込みを外すか消す"
+
+
+def test_regression_test_question_materials_ci_and_old_guide_note(repo, monkeypatch):
+    _add_commit(
+        repo,
+        {
+            "composer.json": '{"require": {"php": "^8.3", "sentry/sdk": "^3"}, "require-dev": {"phpunit/phpunit": "^10"}, '
+            '"scripts": {"test": "phpunit"}}',
+            "web/docker-compose.yml": "services:\n  web:\n    image: nginx\n  db:\n    image: mysql:8\n",
+            "README.md": "# 題\n\n説明\n",
+        },
+    )
+    got = _measure_whole(repo, monkeypatch)
+    assert got["items"]["test"] == {
+        "status": "question",
+        "candidates": {
+            "runners": [{"runner": "phpunit", "config": ["phpunit.xml"], "dependency": ["phpunit/phpunit"]}],
+            "commands": ["composer.json: test = phpunit"],
+            "compose_services": ["app", "db", "web"],
+        },
+        "evidence": [{"path": "AGENTS.md", "line": 1, "text": "テストは docker compose exec app phpunit で打つ"}],
+    }
+    assert got["items"]["materials"] == {
+        "status": "question",
+        "candidates": {
+            "product": None,
+            "needs": {"usage": [], "market": []},
+            "seeds": {
+                "libraries": [{"name": n, "ecosystem": "packagist", "alternatives": []} for n in ("phpunit/phpunit", "sentry/sdk")],
+                "environment": [],
+            },
+            "deferred_milestones": [],
+        },
+        "evidence": [{"file": "README.md", "text": "# 題"}, {"file": "README.md", "text": "説明"}, {"text": "packagist: sentry/sdk"}],
+    }
+    assert got["items"]["ci"] == forms.measured({"required_checks": ["pytest"]})
+    assert got["notes"] == [_old_guide_note("docs/guide.md を AGENTS.md が読み込んでいる"), _SECRET_NOTE]
+
+
+def test_regression_measured_test_and_missing_instructions_note(repo, monkeypatch):
+    for name in ("AGENTS.md", "composer.json", "phpunit.xml"):
+        _git(repo, "rm", "-q", name)
+    _git(repo, "commit", "-qm", "rm")
+    got = _measure_whole(repo, monkeypatch)
+    assert got["items"]["test"] == forms.measured({"suites": []})
+    assert got["notes"] == ["指示書（AGENTS.md・CLAUDE.md など）が無い。NDF と各ランタイムが読む指示書を置くとよい", _SECRET_NOTE]
+
+
+def test_regression_old_guide_in_an_instruction_file_note(repo, monkeypatch):
+    _add_commit(repo, {"AGENTS.md": "<!-- NDF_PLUGIN_GUIDE_START -->\n"})
+    assert _measure_whole(repo, monkeypatch)["notes"] == [_old_guide_note("AGENTS.md が指示書にある"), _SECRET_NOTE]
 
 
 def test_tree_skips_secret_files_and_masks_values(repo):
