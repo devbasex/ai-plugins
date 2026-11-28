@@ -529,12 +529,14 @@ def test_issue_3780_the_body_of_a_carried_issue_is_parsed_once(monkeypatch: pyte
     Run(github).go()
     url = github.issues[0]["html_url"]
     parsed: list[str] = []
-    real = leftover_decide.prose
+    extracted: list[str] = []
+    real, numbers = leftover_decide.prose, leftover_decide.pr_numbers
     monkeypatch.setattr(leftover_decide, "prose", lambda body: parsed.append(body) or real(body))
+    monkeypatch.setattr(leftover_decide, "pr_numbers", lambda text: extracted.append(text) or numbers(text))
     again = Run(github, _row(text="別の指摘"), _row("r2-2", text="さらに別の指摘"))
     again.data[leftover.CARRIED_URLS] = [url]
     again.go()
-    assert len(parsed) == 1
+    assert len(parsed) == 1 and len(extracted) == 1
 
 
 def test_issue_3780_a_carried_url_is_found_by_the_issue_mark_without_the_text_of_the_record() -> None:
