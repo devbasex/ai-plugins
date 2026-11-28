@@ -456,31 +456,42 @@ def _dequeue_queued(hub: GitHub, pull: Pull, comments: Optional[list[Authored]] 
         _withdraw_entry(hub, pull.number, pull.queue_entry, comments)
 
 
+def _enqueuer_approved(hub: GitHub, number: int, holder: github_merge.QueueHolder, comments: Optional[list[Authored]]) -> bool:
+    """キューの項目を入れたアカウントの有効な承認が、項目の対象（マージ先と HEAD）にあるか。"""
+    target = merge_approval.MergeTarget(hub.repo, number, holder.base, holder.head)
+    rows = merge_approval.merge_rows(hub, number, Viewer("", holder.account_id), comments)
+    return merge_approval.merge_judgment(rows, target) is not None
+
+
 def _withdraw_entry(hub: GitHub, number: int, seen_entry: str = "", comments: Optional[list[Authored]] = None) -> None:
     """今のキューの項目を外す。別のアカウントが入れ、そのアカウントの承認が項目の対象にある項目は残す（#4520）。
 
     `comments` は項目 `seen_entry` を確かめた後に読んだ一覧。判定する項目が同じなら使い回し、違うか確かめられなければ
     読み直す（承認は項目より先に書くので、項目を確かめた後の一覧にはその承認がある）。判定した項目の ID を添えて外し、
-    入れ替わっていれば新しい項目を判定し直す。判定のための読み取りに失敗したら、外してから投げ直す。"""
+    入れ替わっていれば新しい項目を判定し直す。判定のための読み取りに失敗しても、分かっている項目の ID を添えて同じ扱いにし、
+    最後にその失敗を投げる。"""
+    failure: Optional[Exception] = None
     for _ in range(_WITHDRAW_JUDGMENTS):
+        entry = seen_entry
         try:
             holder = hub.queue_holder(number)
             if holder is None:
-                return
+                break
+            entry = holder.entry
             # token の利用者を読めない（0）ときは、別のアカウントか分からないので残さない
-            if holder.account_id > 0 and hub.viewer().account_id not in (0, holder.account_id):
-                if comments is None or not seen_entry or holder.entry != seen_entry:
-                    comments, seen_entry = hub.comments(number), holder.entry
-                target = merge_approval.MergeTarget(hub.repo, number, holder.base, holder.head)
-                rows = merge_approval.merge_rows(hub, number, Viewer("", holder.account_id), comments)
-                if merge_approval.merge_judgment(rows, target) is not None:
-                    return
-        except (merge_approval.TrailError, github_mod.GitHubError):
-            hub.dequeue(number)
-            raise
-        if hub.dequeue(number, holder.entry):
-            return
-    hub.dequeue(number)
+            other = holder.account_id > 0 and hub.viewer().account_id not in (0, holder.account_id)
+            if other and (comments is None or not seen_entry or entry != seen_entry):
+                comments, seen_entry = hub.comments(number), entry
+            if other and _enqueuer_approved(hub, number, holder, comments):
+                break
+        except (merge_approval.TrailError, github_mod.GitHubError) as exc:
+            failure = exc
+        if hub.dequeue(number, entry):
+            break
+    else:
+        hub.dequeue(number)
+    if failure is not None:
+        raise failure
 
 
 def _approved_by(
@@ -514,13 +525,15 @@ def _withdrawn_in_queue(
     外すかは項目ごとに決める（`_withdraw_entry`。残した場合も結果は返す）。`seen_entry` は読み直しの前に確かめた項目の ID。
 
     証跡を読んでからキューへ入れるまでの間の工程の開き直しは、キューにまだ無い PR を外せない。読み直しより後に書かれた
-    取り消しは、開き直しの側がキューから外す。読み直せなければ、キューから外してから投げ直す。"""
+    取り消しは、開き直しの側がキューから外す。読み直せなければ、`seen_entry` の項目を外してから投げ直す
+    （入れ替わっていれば、新しい項目を判定する）。"""
     try:
         comments = hub.comments(target.number)
         if _approval(hub, target, comments) is not None:
             return None
     except (merge_approval.TrailError, github_mod.GitHubError):
-        hub.dequeue(target.number)
+        if not hub.dequeue(target.number, seen_entry):
+            _withdraw_entry(hub, target.number)
         raise
     _withdraw_entry(hub, target.number, seen_entry, comments)
     return _unapproved(args, target, verdict)

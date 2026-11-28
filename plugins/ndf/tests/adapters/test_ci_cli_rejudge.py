@@ -287,3 +287,48 @@ def test_an_entry_replaced_before_removal_is_judged_again(monkeypatch, capsys, l
     _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
 
     assert tried == ["e1"] and hub.calls.count("comments") == 2
+
+
+@pytest.mark.parametrize("queued_again", [False, True])
+def test_a_failed_read_removes_only_the_known_entry(monkeypatch, capsys, last_result, queued_again):
+    """一覧の読み直しに失敗したら、分かっている項目の ID で外す。入れ替わった項目は判定して残し、失敗は返す（#4520）。"""
+    hub = _hub(monkeypatch, AUTO, AUTO, pulls_of={7: merge_hub.pull()._replace(queued=None)})
+    hub.holders[7] = _other_entry(hub, "e1")
+    read, reads, tried = hub.comments, [], []
+
+    def comments(number):
+        reads.append(number)
+        if len(reads) == 2:  # 1 回目は呼び出し元の証跡を数える読み取り
+            raise github.GitHubError("一時的な障害")
+        return read(number)
+
+    def dequeue(number, entry=""):
+        tried.append(entry)
+        if not queued_again:
+            return True
+        hub.holders[7] = _other_entry(hub, "e2")
+        return False
+
+    monkeypatch.setattr(hub, "comments", comments)
+    monkeypatch.setattr(hub, "dequeue", dequeue)
+    _, result = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
+
+    assert tried == ["e1"] and len(reads) == (3 if queued_again else 2)
+    assert "一時的な障害" in result["cause"]["detail"]
+
+
+def test_an_entry_replaced_past_the_limit_is_removed_without_judging(monkeypatch, capsys, last_result):
+    """判定し直しの上限まで入れ替わりが続いたら、最後の項目を判定せずに外す。承認の無い項目を残さないためである（#4520）。"""
+    hub = _hub(monkeypatch, AUTO, AUTO, pulls_of={7: merge_hub.pull(queued=True)._replace(queue_entry="e1")})
+    hub.holders[7] = github_merge.QueueHolder(3, "main", merge_hub.HEAD, "e1")
+    tried: list[str] = []
+
+    def dequeue(number, entry=""):
+        tried.append(entry)
+        hub.holders[7] = github_merge.QueueHolder(3, "main", merge_hub.HEAD, f"e{len(tried) + 1}")
+        return not entry
+
+    monkeypatch.setattr(hub, "dequeue", dequeue)
+    _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
+
+    assert tried == ["e1", "e2", ""]
