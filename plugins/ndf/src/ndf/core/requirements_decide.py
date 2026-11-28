@@ -85,7 +85,7 @@ def _sentence(text: str) -> str:
             lines.append(line)
         elif line.strip():
             lines.append(line.strip())
-    return _NUMBER.sub("", "\n".join(lines).rstrip("\n"), count=1)
+    return _NUMBER.sub("", "\n".join(lines), count=1)
 
 
 def criterion_digest(block: str) -> str:

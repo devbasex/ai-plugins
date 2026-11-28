@@ -391,8 +391,9 @@ def uncommented(lines: Sequence[str]) -> list[tuple[str, bool]]:
     kept = [not head or bool(text.strip()) for text, head, _ in split]
     rows = [(i, text if kept[i] else "") for i, (text, _, start) in enumerate(split) if kept[i] or start not in paragraph_lines]
     texts = [text for _, text in rows]
-    if texts != list(lines):
-        tokens = _block_tokens(texts)
+    # 末尾の空行は、行の終わりの改行を足して解析しないと、閉じていないコードブロックの本文に数えられない
+    if texts != list(lines) or texts[-1:] == [""]:
+        tokens = _block_tokens([*texts, ""])
     code: dict[int, str] = {}
     for token in (t for t in tokens if t.type in ("fence", "code_block")):
         start = token.map[0] + (token.type == "fence")
@@ -427,6 +428,9 @@ def criteria_blocks(body: str) -> list[str]:
     空白と空行の整え方は、呼び手が決める。
     """
     lines = body_lines(body)
+    # 本文の最後の改行の後ろは行でない（閉じていないコードブロックの空行に数えない）
+    if lines[-1] == "":
+        lines.pop()
     found = _after_heading(lines, HEADING)
     if found is None:
         return []

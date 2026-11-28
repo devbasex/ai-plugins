@@ -117,6 +117,14 @@ def test_criterion_digest_keeps_the_literal_comment_mark(literal: str) -> None:
     assert got[0].digest != got[1].digest
 
 
+def test_criteria_keep_the_trailing_blank_lines_of_an_unclosed_fence() -> None:
+    def read(tail: str) -> rd.Criterion:
+        return rd.criteria_of(f"## 受け入れ条件\n- [ ] 甲\n  ```\n  hello\n{tail}")[0]
+
+    assert read("- [ ] 乙\n").text == read("").text == "甲\n```\nhello"
+    assert read("\n- [ ] 乙\n").text == read("\n").text == "甲\n```\nhello\n"
+
+
 def test_a_fence_in_a_comment_does_not_hide_the_following_criteria() -> None:
     got = rd.criteria_of(_doc_text(criteria="- [ ] 甲\n\n<details><!--\n\n```\n-->\n</details>\n\n- [ ] 乙\n"))
     assert [c.text.split("\n", 1)[0] for c in got] == ["甲", "乙"]
