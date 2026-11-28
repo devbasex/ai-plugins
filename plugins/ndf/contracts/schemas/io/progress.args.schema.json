@@ -370,6 +370,28 @@
         "subcommand",
         "machine_id"
       ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "units run",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "machine_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "machine_id"
+      ]
     }
   ]
 }

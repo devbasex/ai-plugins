@@ -557,7 +557,7 @@ _HANDS: dict[Action, Hand] = {
 }
 
 
-def _step(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
+def play_move(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     """1 手を打つ。続けて次の手を決めるなら None。"""
     play = _HANDS.get(m.action)
     return play(d, v, m) if play is not None else report(v, m)
@@ -569,23 +569,27 @@ def _drive(d: Drive) -> dict[str, Any]:
     # 足す。手の数はこの数を超えない。工程の無いステートマシン（開発ループの行。#3558）も完了の 1 手で終わる
     for _ in range(3 * (len(first.snap.stages) + len(first.snap.steps())) + 1):
         v = read(d.st, d.machine_id)
-        out = _step(d, v, decide(v))
+        out = play_move(d, v, decide(v))
         if out is not None:
             return command.with_warnings(out, before=d.warnings)
     raise AssertionError("手の数が行とステップの数を超えた")
 
 
+def working_report(machine_id: str) -> dict[str, Any]:  # 流す作業が動いていて、何も流さないときの結果
+    summary = f"ステートマシン {machine_id} を流す作業が動いている。終わりは wait で待つ"
+    return result.result(TOOL, result.OK, summary, metrics={"machine_id": machine_id}, next=_cmd("wait", machine_id))
+
+
 def advance(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:
     """`next`: 排他を取り、終わるか待つか作業を起動するまで手を進める。作業が動いていれば `wait` を返す。"""
     if is_live(st, machine_id):
-        summary = f"ステートマシン {machine_id} を流す作業が動いている。終わりは wait で待つ"
-        return result.result(TOOL, result.OK, summary, metrics={"machine_id": machine_id}, next=_cmd("wait", machine_id))
+        return working_report(machine_id)
     with store.run_lock(st, machine_id):
         migrate_definition(st, machine_id)
         return _drive(Drive(st, machine_id, cwd, env, inline=False))
 
 
-def _launching(st: store.Store, machine_id: str) -> bool:
+def launching(st: store.Store, machine_id: str) -> bool:
     """起動した作業がまだ排他を取っていないか（起動のマーカーがあり、マーカーの組が生きている）。"""
     try:
         raw = json.loads(launch_path(st.root, machine_id).read_text(encoding="utf-8"))
@@ -599,7 +603,7 @@ def is_live(st: store.Store, machine_id: str) -> bool:
     """同じステートマシンを流す作業（か `next`）が動いているか。排他を取れないか、起動した作業がまだ排他を取っていなければ動いている。"""
     try:
         with store.run_lock(st, machine_id):
-            held = _launching(st, machine_id)
+            held = launching(st, machine_id)
     except model.Refused:
         held = True
     return held
