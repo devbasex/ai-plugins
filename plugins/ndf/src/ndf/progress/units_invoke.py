@@ -580,11 +580,14 @@ def advance(
 
     マージのコミットが分からない単位は確かめられないので、反映できたとみなす（`sprint_pr` が読み直して進める）。取得した
     リモートにまだ見えないコミットは返さない。見えるのに作業場所を進められなければ止める。`overdue`（反映の上限を超えた単位）は
-    反映先の選定と止める判定に使わず、進めた後の HEAD が含むかだけを `pulls` とまとめて確かめる。
+    反映先の選定と止める判定に使わず、進めた後の HEAD が含むかだけを `pulls` とまとめて確かめる（`pulls` のどれも
+    マージのコミットを持たなければ、取得せずに今の HEAD で確かめる）。
     """
     known = [p for p in pulls.values() if p.merge_sha]
     if not known:
-        return frozenset(pulls)
+        # 反映先が無いので取得せず、期限切れは今の HEAD が含むかを確かめる
+        held = Git(ctx.sprint).contained((p.merge_sha for p in overdue.values()), "HEAD")
+        return frozenset(pulls) | {k for k, p in overdue.items() if p.merge_sha in held}
     g = Git(ctx.sprint)
     tip = _fetch_sprint(g, ctx)
     head = _catch_up_to(g, ctx, known, tip)
