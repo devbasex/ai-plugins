@@ -2,7 +2,7 @@
 
 条件のハッシュ値は条件の文の SHA-256 の先頭 `DIGEST_CHARS` 桁で、チェックボックスの記号と先頭の番号は文に数えない。
 条件の文は字下げした継続の行（`操作:`・`結果:` など）を含み、各行の前後の空白と空行は数えない。ただしコードブロックの中は、
-コード本体の相対的な字下げと空行を数える。
+コード本体の相対的な字下げと空行を数える。HTML コメントは数えない。
 並べ替えとチェックの付け外しでは変わらず、文を直すと変わる。条件一覧のハッシュ値は、条件のハッシュ値を番号の順に
 つないだもののハッシュ値である。
 """
@@ -71,17 +71,23 @@ def _digest(text: str) -> str:
 def _sentence(text: str) -> str:
     """チェックボックスの記号より後ろの文を、条件の文にする。
 
-    各行の前後の空白と空行を落とし、先頭の番号を除く。コードブロックの中の行は、リストに属する字下げだけを除いて残す。
+    HTML コメントを除き、各行の前後の空白と空行を落とし、先頭の番号を除く。コードブロックの中の行は、
+    リストに属する字下げだけを除いて残す。
     """
     first, *rest = text.split("\n")
     # 先頭の行は記号を除いてあるので、同じ字下げになるリスト項目の行を代わりに置いて、続きの行のコードブロックを読む
     code = inputs_decide.code_lines(["- x", *rest])
-    lines = [first.strip()] if first.strip() else []
-    for i, line in enumerate(rest, 1):
-        if i in code:
+    marker = "- x "
+    bare = inputs_decide.uncommented([marker + first, *rest])
+    head = (bare[0] or "")[len(marker) :].strip()
+    lines = [head] if head else []
+    for i, (line, cut) in enumerate(zip(rest, bare[1:]), 1):
+        if cut is None:
+            continue
+        if i in code and cut == line:
             lines.append(code[i])
-        elif line.strip():
-            lines.append(line.strip())
+        elif cut.strip():
+            lines.append(cut.strip())
     return _NUMBER.sub("", "\n".join(lines).rstrip("\n"), count=1)
 
 

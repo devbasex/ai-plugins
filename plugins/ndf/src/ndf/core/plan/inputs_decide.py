@@ -26,6 +26,8 @@ _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
 # コードブロックと HTML コメントの範囲を読む（リスト項目の中の字下げは、行頭からの字下げの数では判定できない）。
 # 使うのはブロックの範囲だけなので、インラインは解析しない
 _MARKDOWN = MarkdownIt("commonmark").disable(["inline", "text_join"])
+# コメントの開きと、中の `<!--` を読まないコード表記（バッククォートの並び）
+_COMMENT_OR_TICKS = re.compile(r"(`+)|<!--")
 # セクションの終わり（`#` か `##` の見出し）
 SECTION_END = re.compile(r"^#{1,2} ")
 _CODE = re.compile(r"`([^`]+)`")
@@ -63,13 +65,14 @@ def heading_at(lines: Sequence[str], heading: str) -> Optional[int]:
     return None if found is None else found[0]
 
 
-def _after_heading(lines: Sequence[str], heading: str) -> Optional[tuple[int, list[tuple[int, str]]]]:
-    """`heading_at` の添字と、それより後ろの囲みと HTML コメントの外の行（添字は `lines` のもの）。無ければ None。
+def _after_heading(lines: Sequence[str], heading: str) -> Optional[tuple[int, list[tuple[int, str]], set[int]]]:
+    """`heading_at` の添字、それより後ろの囲みと HTML コメントの外の行、コメントの行の添字（添字は `lines` のもの）。無ければ None。
 
     見出しの検索とセクションの読み出しが、1 回の解析を共有する。
     """
-    visible = list(outside_fences(lines))
-    return next(((i, visible[k + 1 :]) for k, (i, line) in enumerate(visible) if line.rstrip() == heading), None)
+    fenced, commented = _hidden_lines(lines)
+    visible = [(i, line) for i, line in enumerate(lines) if i not in fenced and i not in commented]
+    return next(((i, visible[k + 1 :], commented) for k, (i, line) in enumerate(visible) if line.rstrip() == heading), None)
 
 
 def section_lines(body: str, heading: str) -> Optional[list[str]]:
@@ -92,21 +95,80 @@ def _block_tokens(lines: Sequence[str]) -> list[Token]:
     return [t for t in _MARKDOWN.parse(text) if t.map]
 
 
-def _hidden(token: Token) -> bool:
-    """行を読まないブロック（囲みと HTML コメント。記入例を本物の見出し・条件・表として読まない）か。"""
-    return token.type == "fence" or (token.type == "html_block" and token.content.lstrip().startswith("<!--"))
+def _span(tokens: Iterable[Token], *kinds: str) -> set[int]:
+    """`kinds` の種類のトークンが占める行の添字。"""
+    return {i for t in tokens if t.type in kinds for i in range(*t.map)}
+
+
+def _split_comments(lines: Sequence[str], tokens: Sequence[Token]) -> list[tuple[str, bool]]:
+    """行ごとの (HTML コメントを除いた文, 行の最初の文字がコメントの中か)。
+
+    コードブロックの行と、コード表記の中の `<!--` はコメントとみなさない。`<details>` などの HTML のブロックの中や、
+    字下げした行のコメントも読む。行の途中の `<!--` が次の行へ続くのは、HTML のブロックの中か、同じ段落の中で閉じる
+    ときだけで、ほかはただの文字とする（後ろの別のコメントの `-->` までを隠さない）。
+    """
+    code = _span(tokens, "fence", "code_block")
+    html = _span(tokens, "html_block")
+    paragraph_end = {i: t.map[1] for t in tokens if t.type == "inline" for i in range(*t.map)}
+    out: list[tuple[str, bool]] = []
+    inside = False
+    for i, line in enumerate(lines):
+        if not inside and i in code:
+            out.append((line, False))
+            continue
+        kept, pos, head = "", 0, inside
+        while pos < len(line):
+            if inside:
+                end = line.find("-->", pos)
+                inside = end < 0
+                pos = len(line) if inside else end + 3
+                continue
+            found = _COMMENT_OR_TICKS.search(line, pos)
+            if not found:
+                kept += line[pos:]
+                break
+            if found.group(1):
+                close = re.compile(rf"(?<!`){found.group(1)}(?!`)").search(line, found.end())
+                stop = close.end() if close else found.end()
+            else:
+                at_head = not (kept + line[pos : found.start()]).strip()
+                closes = "-->" in line[found.end() :] or any("-->" in later for later in lines[i + 1 : paragraph_end.get(i, i)])
+                if at_head or i in html or closes:
+                    kept += line[pos : found.start()]
+                    head = head or at_head
+                    # `<!-->` も閉じるように、開きの `<!` の直後から閉じを探す
+                    inside, pos = True, found.start() + 2
+                    continue
+                stop = found.end()
+            kept += line[pos:stop]
+            pos = stop
+        out.append((kept, head))
+    return out
+
+
+def _hidden_lines(lines: Sequence[str]) -> tuple[set[int], set[int]]:
+    """読まない行の添字を (囲み, HTML コメント) で返す（記入例を本物の見出し・条件・表として読まない）。"""
+    tokens = _block_tokens(lines)
+    split = _split_comments(lines, tokens)
+    return _span(tokens, "fence"), {i for i, (_, head) in enumerate(split) if head}
+
+
+def uncommented(lines: Sequence[str]) -> list[Optional[str]]:
+    """行ごとの、HTML コメントを除いた文。コメントだけの行（中の空行を含む）は None。"""
+    split = _split_comments(lines, _block_tokens(lines))
+    return [None if head and not text.strip() else text for text, head in split]
 
 
 def outside_fences(lines: Iterable[str]) -> Iterator[tuple[int, str]]:
-    """囲み（` ``` ` か `~~~` のコードブロック）と HTML コメントのブロックの外の行を `(添字 0 始まり, 行)` で返す。
-    囲みの開閉の行と、`<!--` で始まるコメントの行は返さない。
+    """囲み（` ``` ` か `~~~` のコードブロック）と HTML コメントの外の行を `(添字 0 始まり, 行)` で返す。
+    囲みの開閉の行と、最初の文字がコメントの中にある行は返さない。
 
-    範囲は CommonMark の解析（markdown-it-py）で決める。リスト項目の中の囲みは、項目の本文の位置から字下げを数える。
+    囲みの範囲は CommonMark の解析（markdown-it-py）で決める。リスト項目の中の囲みは、項目の本文の位置から字下げを数える。
     """
     found = list(lines)
-    hidden = {i for t in _block_tokens(found) if _hidden(t) for i in range(*t.map)}
+    fenced, commented = _hidden_lines(found)
     for i, line in enumerate(found):
-        if i not in hidden:
+        if i not in fenced and i not in commented:
             yield i, line
 
 
@@ -139,7 +201,7 @@ def criteria_blocks(body: str) -> list[str]:
     found = _after_heading(lines, HEADING)
     if found is None:
         return []
-    at, visible = found
+    at, visible, commented = found
     outside = {i for i, _ in visible}
     blocks: list[list[str]] = []
     inside = False
@@ -153,7 +215,8 @@ def criteria_blocks(body: str) -> list[str]:
                 inside = True
                 continue
         if inside:
-            inside = not line.strip() or line.startswith((" ", "\t"))
+            # コメントの行は、字下げが無くても条件を終わらせない（条件の版を作る側が除く）
+            inside = i in commented or not line.strip() or line.startswith((" ", "\t"))
             if inside:
                 blocks[-1].append(line)
     return ["\n".join(block) for block in blocks]
@@ -196,7 +259,7 @@ def section_span(lines: Sequence[str], heading: str) -> Optional[tuple[int, int]
     found = _after_heading(lines, heading)
     if found is None:
         return None
-    at, visible = found
+    at, visible, _ = found
     end = next((i for i, line in visible if SECTION_END.match(line)), len(lines))
     return at + 1, end
 

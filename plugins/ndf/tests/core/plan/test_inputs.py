@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ndf.core.plan.inputs_decide import (
     DesignResult,
     absorbed_missing,
@@ -208,3 +210,11 @@ def test_recorded_body_keeps_the_html_comment_and_replaces_the_real_table():
     assert got.startswith(_COMMENTED)
     assert "古い" not in got
     assert read_checks(got)[1].means == "新しい"
+
+
+@pytest.mark.parametrize("opening", ["<details>\n<!--\n", "<details>\n<!--\n\n", "<details><!--\n"])
+def test_the_example_in_a_comment_inside_an_html_block_is_not_a_record(opening):
+    from ndf.domains.loop.acceptance_decide import read_checks
+
+    example = "## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 1 | マージ前 | 例 |\n"
+    assert read_checks(f"{opening}{example}-->\n</details>\n") == {}

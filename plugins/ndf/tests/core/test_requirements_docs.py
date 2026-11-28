@@ -86,6 +86,26 @@ def test_criteria_keep_the_indent_and_the_blank_lines_of_the_code() -> None:
     assert inside.digest != read("  if a:\n      f()\n\n      g()\n").digest
 
 
+@pytest.mark.parametrize("indent", ["  ", "      "])
+def test_criteria_do_not_count_the_html_comments(indent: str) -> None:
+    def block(example: str) -> str:
+        return f"- [ ] 甲 <!-- {example} -->\n{indent}<!--\n- [ ] {example}\n\n{indent}-->\n{indent}結果: 乙\n"
+
+    got = rd.criteria_of(_doc_text(criteria=block("A")))
+    assert [c.text for c in got] == ["甲\n結果: 乙"]
+    assert got[0].digest == rd.criterion_digest(block("B"))
+
+
+def test_the_comment_mark_in_the_text_does_not_hide_the_following_criteria() -> None:
+    got = rd.criteria_of(_doc_text(criteria="- [ ] 文中の <!-- を残す\n- [ ] 甲\n<!-- 注 -->\n- [ ] 乙\n"))
+    assert [c.text for c in got] == ["文中の <!-- を残す", "甲", "乙"]
+
+
+def test_criteria_keep_the_comment_mark_written_as_code() -> None:
+    got = rd.criteria_of(_doc_text(criteria="- [ ] `<!-- 印 -->` を残す\n  ```\n  <!-- 例 -->\n  ```\n"))
+    assert [c.text for c in got] == ["`<!-- 印 -->` を残す\n```\n<!-- 例 -->\n```"]
+
+
 @pytest.mark.parametrize(
     "example",
     [
