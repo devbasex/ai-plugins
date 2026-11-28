@@ -627,12 +627,15 @@ def test_write_removes_the_dropped_items_even_when_edited_by_hand(repo, tmp_path
 def test_the_diff_names_the_dropped_items_without_their_values(repo, tmp_path, capsys, dry_run):
     assigned, paired = "password=" + "hunter2hunter2", "p4ssw0rd-of-the-pair"
     doc = {"version": 1, "issues": {"primary": assigned}, "services": {"password": paired}}
+    digests = [value_digest(doc["issues"]), value_digest(doc["services"])]
+    doc["analysis"] = {"written": {"issues": digests[0], "services": digests[1]}}
     _declare(repo, None, doc)
     measure = _measure_file(tmp_path, {}, repo)
     args = ["write", "--root", str(repo), "--measure", str(measure), *(["--dry-run"] if dry_run else [])]
     assert cli.main(args) == 0
     out = capsys.readouterr().out  # 差分と結果 JSON の両方
     assert assigned not in out and paired not in out
+    assert not any(d in out for d in digests)  # 指紋からも値を照らせない
     assert '-  "issues": "（伏せた）"' in out and '-  "services": "（伏せた）"' in out
 
 

@@ -355,15 +355,27 @@ def _build_record(inp: Inputs, doc: dict[str, Any], rows: list[dict[str, Any]]) 
     return record
 
 
+def _mask_unread(existing: dict[str, Any]) -> Optional[str]:
+    """読み手の無い項目の値とその指紋（`analysis.written`）を伏せた、差分の前の側の文。どちらも無ければ None。
+    指紋は値のハッシュなので、形の決まった値は候補をハッシュして照らせば言い当てられる。"""
+    unread, written = analysis_record.UNREAD_ITEMS, analysis_record.written_digests(existing)
+    if not any(k in existing or k in written for k in unread):
+        return None
+    shown = {k: MASK if k in unread else v for k, v in existing.items()}
+    if written:
+        shown["analysis"] = {**existing["analysis"], "written": {k: MASK if k in unread else v for k, v in written.items()}}
+    return dumps(shown)
+
+
 def _project_file(inp: Inputs, doc: dict[str, Any]) -> Optional[File]:
-    """設定の File。今の設定と同じなら None（File を読まない）。読み手の無い項目が残る設定では、差分の前の側の値を伏せる
-    （旧い値に認証情報が入っていても、出力に写さない）。"""
+    """設定の File。今の設定と同じなら None（File を読まない）。読み手の無い項目かその指紋が残る設定では、差分の前の側の値と指紋を
+    伏せる（旧い値に認証情報が入っていても、出力に写さない）。"""
     if inp.existing is not None and value_digest(inp.existing) == value_digest(doc):
         return None
     path = files.path(inp.main, "project")
     old = path.read_text(encoding="utf-8") if inp.existing is not None else None
-    if inp.existing is not None and any(k in inp.existing for k in analysis_record.UNREAD_ITEMS):
-        old = dumps({k: MASK if k in analysis_record.UNREAD_ITEMS else v for k, v in inp.existing.items()})
+    if inp.existing is not None:
+        old = _mask_unread(inp.existing) or old
     return File(path, files.relpath("project"), old, dumps(doc))
 
 
