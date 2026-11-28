@@ -144,9 +144,12 @@ def test_rejudge_reads_the_text_passed_by_the_merge_check(monkeypatch):
     assert stop is not None and (stop.merged, stop.kind, stop.head_sha) == (False, "precondition", merge_hub.HEAD)
 
 
+@pytest.mark.parametrize("added", [True, False])
 @pytest.mark.parametrize("revoked", [True, False])
-def test_an_approval_revoked_while_entering_the_queue_leaves_the_queue(monkeypatch, capsys, last_result, revoked):
-    """承認の確認とキューへの追加の間に工程を開き直すと、入れた後の読み直しでキューから外す（#4520）。"""
+def test_an_approval_revoked_while_entering_the_queue_leaves_the_queue(monkeypatch, capsys, last_result, revoked, added):
+    """承認の確認とキューへの追加の間に開き直すと、読み直しでキューから外す（#4520）。
+
+    `added` が偽なのは、止まった別の呼び出しがキューへ入れた PR を、打ち直しが入れ直さずに見つける場合。"""
     hub = _hub(monkeypatch, AUTO, AUTO)
     _approve(hub)
     target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
@@ -158,7 +161,7 @@ def test_an_approval_revoked_while_entering_the_queue_leaves_the_queue(monkeypat
             merge_approval.write_revocations(hub, [merge_approval.Revocation(target, frozenset({"r0"}), "reopen:x")], hub.viewer())
             after_reopen.extend(hub.dequeued)
             hub.dequeued.clear()
-        return github.MergeOutcome(False, github.MERGE_QUEUE_PENDING, "キューへ入れた", merge_hub.HEAD, added_to_queue=True)
+        return github.MergeOutcome(False, github.MERGE_QUEUE_PENDING, "キューへ入れた", merge_hub.HEAD, added_to_queue=added)
 
     monkeypatch.setattr(hub, "merge", enqueue)
     _, found = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
@@ -169,14 +172,15 @@ def test_an_approval_revoked_while_entering_the_queue_leaves_the_queue(monkeypat
         assert hub.dequeued == [] and found["cause"]["kind"] == github.MERGE_QUEUE_PENDING
 
 
-def test_a_pr_already_in_the_queue_is_not_read_again(monkeypatch, capsys, last_result):
-    """打ち直しでキューにある PR は入れ直さないので、証跡の読み直しで通信を増やさない（#4520）。"""
-    hub = _hub(monkeypatch, AUTO, AUTO)
+@pytest.mark.parametrize(("added", "reads"), [(False, 1), (True, 2)])
+def test_a_pr_queued_before_the_approval_read_is_read_again_only_when_put_back(monkeypatch, capsys, last_result, added, reads):
+    """初めからキューにある PR の打ち直しは通信を増やさない。キューから出て入れ直したときは読み直す（#4520）。"""
+    hub = _hub(monkeypatch, AUTO, AUTO, pulls_of={7: merge_hub.pull(queued=True)})
     _approve(hub)
-    waiting = github.MergeOutcome(False, github.MERGE_QUEUE_PENDING, "キューにある", merge_hub.HEAD)
+    waiting = github.MergeOutcome(False, github.MERGE_QUEUE_PENDING, "キューの待ち", merge_hub.HEAD, added_to_queue=added)
     monkeypatch.setattr(hub, "merge", lambda number, **_kwargs: waiting)
 
     _, found = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
 
     assert found["cause"]["kind"] == github.MERGE_QUEUE_PENDING
-    assert hub.calls.count("comments") == 1 and hub.dequeued == []
+    assert hub.calls.count("comments") == reads and hub.dequeued == []

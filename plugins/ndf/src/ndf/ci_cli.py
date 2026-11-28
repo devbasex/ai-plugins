@@ -34,7 +34,7 @@ from ndf.adapters.ci import (
     read,
     watch_head,
 )
-from ndf.adapters.github import GitHub, MergeExpect, MergeOutcome, Pull
+from ndf.adapters.github import MERGE_QUEUE_PENDING, GitHub, MergeExpect, MergeOutcome, Pull
 from ndf.contracts import result
 from ndf.core import actors, approval_words, merge_approval, production_merge
 from ndf.core.production_merge import Verdict
@@ -468,7 +468,7 @@ def _approved_by(
 
 
 def _withdrawn_in_queue(args: argparse.Namespace, hub: GitHub, target: merge_approval.MergeTarget, verdict: Verdict) -> Optional[dict]:
-    """キューへ入れた後に証跡を読み直し、承認が取り消されていればキューから外して `--production-gate` の結果を返す（#4520）。
+    """PR がキューに入った後に証跡を読み直し、承認が取り消されていればキューから外して `--production-gate` の結果を返す（#4520）。
 
     証跡を読んでからキューへ入れるまでの間の工程の開き直しは、キューにまだ無い PR を外せない。読み直しより後に書かれた
     取り消しは、開き直しの側がキューから外す。読み直せなければ、キューから外してから投げ直す。"""
@@ -570,8 +570,8 @@ def _merge(args: argparse.Namespace) -> dict:
     マージし、無ければ `--production-gate` の形で終える。
     `--required` を受けたら、承認した対象を今の PR と照らした後に、マージする HEAD のチェックを待つ。マージ済みの PR は待たない。
     待つ間に HEAD かマージ先が変われば、`GitHub.merge` の直前の確かめが止める。
-    承認が要る PR をこの呼び出しでマージキューへ入れたら、証跡を読み直す（`_withdrawn_in_queue`）。既にキューにある PR は
-    読み直さない（開き直しの側がキューから外す）。
+    承認が要る PR がマージキューの待ちになったら、証跡を読み直す（`_withdrawn_in_queue`）。証跡を読む前から PR がキューにあり、
+    この呼び出しが入れ直してもいなければ読み直さない（読んだ後の開き直しは、キューから外せる）。
     """
     invalid = _invalid_args(args)
     if invalid is not None:
@@ -600,7 +600,9 @@ def _merge(args: argparse.Namespace) -> dict:
     rejudge = _Rejudge(hub, pull, target, verdict, approved_by)
     expect = MergeExpect(pull, pull.base_ref, pull.head_sha, PROJECT_FILE, oid, rejudge)
     outcome = hub.merge(pull.number, expect_head=head if head is not None else pull.head_sha, method=args.method, expect=expect)
-    if outcome.added_to_queue and rejudge.approved_by is not None:
+    # 初めは PR がキューに無かったのに今あるなら、別の呼び出しが開き直しの後に入れた場合がある
+    entered = outcome.kind == MERGE_QUEUE_PENDING and (outcome.added_to_queue or not pull.queued)
+    if entered and rejudge.approved_by is not None:
         withdrawn = _withdrawn_in_queue(args, hub, target, rejudge.verdict)
         if withdrawn is not None:
             return withdrawn
