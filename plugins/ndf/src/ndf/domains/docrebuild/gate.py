@@ -23,6 +23,7 @@ from ndf.adapters import git
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.adapters.publish import Publisher, redacted_pattern
 from ndf.contracts import result
+from ndf.core import issue_docs
 from ndf.domains.docrebuild import drive
 from ndf.domains.docrebuild import gate_decide as gd
 from ndf.domains.docrebuild.drive import Precondition, Stop
@@ -393,7 +394,8 @@ def _plan_doc(run: Run, plan: Plan, rows: Sequence[Mapping[str, Any]], path: str
         file = _put_file(run.state(PARTS_DIR) / path.replace("/", "__"), part)
         # 読ませた抜き出しの id は作った時点で決める（worker の終了後に読み直すと、書き換えられた中身で読み替えてしまう）
         plan.targets.append(Read(path, file, reading.ENGINEER, before, mvv.blob_id(part.encode("utf-8"), len(blob))))
-    if not run.args.no_doc_fix:
+    # 要求仕様のコピーの正は課題の本文なので、直させない（コピーだけの直しを push すると本文と食い違う。#4543）
+    if not run.args.no_doc_fix and not issue_docs.requirements_issues(path):
         plan.fixable.append(path)
 
 
@@ -428,6 +430,11 @@ def gate_prompt(run: Run, plan: Plan, facts: Path) -> str:
         fixable.append("- 承認資料のうち PR の本文から写した行は直さない（変更要求は 1 回まで。残った文として返す）")
     if run.args.no_doc_fix and plan.docs:
         fixable.append("- 文書は直さない（設計のレビューへ戻すのは 1 回まで。残った文として返す）")
+    if any(issue_docs.requirements_issues(p) for p in plan.docs):
+        fixable.append(
+            "- 要求仕様のコピー（`issues/issue-<番号>-requirements.md`）は直さない（正は課題の本文）。直す案"
+            "（課題の番号・見出し・直す前の文・直した後の文）を `quotes` の `why` に書き、残った文として返す"
+        )
     values = {
         "skill": str(root / SKILL_SECTION),
         "gate": run.args.gate,

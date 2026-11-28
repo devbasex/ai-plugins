@@ -796,6 +796,16 @@ def test_no_doc_fix_keeps_docs_out_of_the_fixable_files(tmp_path: Path) -> None:
     assert got["cause"]["kind"] == "incomplete" and "文書は直さない" in worker.prompts[0]
 
 
+def test_the_requirements_copy_is_never_fixed_by_the_gate(tmp_path: Path) -> None:
+    """#4543: 要求仕様のコピーは直してよいファイルに入らず、worker が直せば push せずに止める。"""
+    copy = "issues/issue-1-requirements.md"
+    w = world(tmp_path, {copy: "# 要求\n"})
+    worker = FakeWorker(edit=lambda state_dir: (w.cwd / copy).write_text("# 直した\n", encoding="utf-8"))
+    got = w.run(worker)
+    assert got["cause"]["kind"] == "incomplete" and {"outside"} <= {g["kind"] for g in got["gaps"]}
+    assert "要求仕様のコピー" in worker.prompts[0] and w.git.pushed == []
+
+
 # --- ndf records reading check の突き合わせ（Task 7、条件 6・7） ---------------------------------------------------
 
 

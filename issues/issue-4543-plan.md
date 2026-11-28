@@ -89,7 +89,7 @@
   - 小見出しの前後に `<!-- ndf-distinction-begin -->` と `<!-- ndf-distinction-end -->` を置く
   - `writing.py` に、目印の定数と、本文から目印で囲まれた範囲を除いて返す関数を足す。関数は見出しの文を持たない（決定 6）
   - `reading.py` の `prompt` は、任意のキー `distinction`（真偽。省けば真）を受け取り、偽なら小見出しを外す
-  - `document-rebuild` の SKILL.md の `prompt` の JSON の説明に、確定仕様、変更履歴、README・利用者への案内では `false` にすると足す
+  - `document-rebuild` の SKILL.md の `prompt` の JSON の説明に、変更履歴と、現状か案の片方しか書かない文書では `false` にすると足す
 - **満たす受け入れ条件:** 2・5
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理。テストは、`distinction` が無ければ小見出しがあること、`false` なら無いこと、小見出しの見出しの文を変えた本文でも外れることを見る。配っている基準から目印を消すと落ちる形にする。目印が対にならない本文で `CriteriaBroken` になることと、真偽でない `distinction` を拒むことも見る
 

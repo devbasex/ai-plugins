@@ -128,7 +128,7 @@ graph TD
 
 | 経路 | 小見出しを渡すとき | 外すとき | 判定の材料 |
 | --- | --- | --- | --- |
-| 読み手役（`ndf records reading prompt`） | 右の列の「外すとき」以外のすべて。指定が無ければ渡す | 確定仕様、変更履歴、README・利用者への案内を読ませるとき | 頼む側が指示の JSON の任意のキー `distinction` に `false` を書く |
+| 読み手役（`ndf records reading prompt`） | 右の列の「外すとき」以外のすべて。指定が無ければ渡す | 変更履歴を読ませるときと、現状か案の片方しか書かない文書（確定仕様、README・利用者への案内など）を読ませるとき | 頼む側が指示の JSON の任意のキー `distinction` に `false` を書く |
 | 作業の AI（基準の全文を受け取る作業） | 設計（`design`）、詳細設計（`design-detail`）、設計の検査の直し（`design-check-fix`）、要求（`requirements`） | 素材集め（`document-sources`）、実装計画（`implementation-plan`）、確定仕様化（`plan-to-spec`）、振り返り（`retrospective`） | 作業の定義 `contracts/worker/kinds.json` の作業ごとの値 |
 | cross-review（レビュー担当と修正担当） | PR の変更に、課題の設計書か要求仕様のコピーがある | どちらも無い（基準の残りはこれまでどおり渡す） | 変更したファイルの名前。名前の形は `ndf/core/issue_docs.py` だけに置く |
 
@@ -145,7 +145,9 @@ graph TD
 - **選んだ案**: PR の変更に要求仕様のコピーがあるときは、修正担当への指示に次の扱いを足す（2026-11-28 に利用者が選んだ）。指示の文は、ほかの指摘の基準と同じ `contracts/data/review-criteria.json` に置く。手順の細部は詳細設計の「cross-review の指示」にある
   - コピーのうち課題の本文から写した範囲への指摘では、課題の本文、コピー、PR の本文を書き替えない。直す案を見送りの理由に書き、利用者の判断が要る指摘（`deferred`・`defer: needs_user`）として返す
   - 実装計画など、コピーにだけあるセクションへの指摘は、そのセクションを直接直す
-  - どちらの範囲かは、コピーの名前の番号の課題の本文を読んで見分ける。読むだけで、書かない。見分けられないときは、写した範囲として扱う
+  - どちらの範囲かは、コピーの名前の番号の課題の本文と、その編集履歴を読んで見分ける。読むだけで、書かない。見分けられないときは、写した範囲として扱う
+  - 扱いの全文は、指摘がコピーに向くときだけ渡す。ほかの指摘だけのときは、写した範囲を書き替えないという短い制約を渡す
+  - 承認の前の確認（`ndf document-rebuild gate`）は、要求仕様のコピーを直してよいファイルに入れず、直す案を残った文として返す
   - 利用者が直すと決めた場合は、課題の本文を直し、`requirements-design` の手順 7 でコピーを作り直す。要求の変更が要る指摘を扱う今の手順書（`fix`）と同じ形である
 - 採らなかった案: 修正担当が課題の本文を直してからコピーを作り直し、設計 PR では PR の本文も直す。工程を止めずに直せるが、次の理由で採らない
   - 課題の本文と PR の本文は、書いた時点で反映される。承認ゲートを通らず、人の承認なしに利用者のデータを書き替えることになる
@@ -313,7 +315,7 @@ graph TD
 | `plugins/ndf/src/ndf/core/issue_docs.py` と `plugins/ndf/src/ndf/domains/docrebuild/drive.py` | 要求仕様のコピーの名前の形を `issue_docs.py` に置く。`drive.py` の `REQUIREMENTS_FILE` は定義をやめ、`issue_docs.py` の定義を参照する | 6 |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py`・`fixer.py` | 変更に設計書も要求仕様のコピーも無ければ、文書の基準の全文から小見出しを外す。変更に要求仕様のコピーがあれば、修正担当への指示に決定 7 の扱いを足す | 6・7 |
 | `plugins/ndf/contracts/data/review-criteria.json` と `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 修正担当へ足す、要求仕様のコピーへの指摘の扱いの文を JSON に置き、`criteria_decide.py` がそれを読む | 7 |
-| `plugins/ndf/skills/document-rebuild/SKILL.md` | `prompt` の JSON の説明に、確定仕様、変更履歴、README・利用者への案内では `distinction` を `false` にすると足す | 6 |
+| `plugins/ndf/skills/document-rebuild/SKILL.md` | `prompt` の JSON の説明に、変更履歴と、現状か案の片方しか書かない文書では `distinction` を `false` にすると足す | 6 |
 | `plugins/ndf/skills/design/references/design-template.md` | 「承認する人が読む欄」のセクションに「要約の段落と解き方の全体像は書き分けの小見出しに従って書く」という指示を足し、その小見出しを指す。テンプレート本体のコードブロックにある「解き方の全体像」の説明は、「この設計では〜」と分かる形で書くように直す。`legacy-refactor` の「目的」「目指す姿」にも同じ指示を足す | 1 |
 | `plugins/ndf/skills/pr/SKILL.md` | 「PR の作成・更新」の本文の書き方に、概要（`## Summary`・`## 概要`）は書き分けの小見出しに従って書くと足す。設計 PR と実装 PR の両方に当たると書き、「利用者向けの変化」「移行の手順」は対象外とする | 1 |
 | `plugins/ndf/skills/requirements-design/SKILL.md` | 手順 7 の「仕様の正は課題の本文である」の段落に、課題の本文は PR の本文にもなるので、概要に当たるセクションは書き分けの小見出しに従って書くと足し、その小見出しを指す | 1・5 |

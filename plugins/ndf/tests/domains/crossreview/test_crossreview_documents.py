@@ -219,9 +219,12 @@ def test_issue_4543_the_distinction_goes_only_with_design_documents(tmp_path: Pa
         assert (full in prompt) is distinction
         assert (_stripped() in prompt) is not distinction
     # 要求仕様のコピーを変える PR だけが、修正担当へコピーへの指摘の扱いを、基準の全文より前に渡す（決定 7）
-    handling = criteria_decide.fixer_requirements_copy()
+    handling = criteria_decide.fixer_requirements_copy(True)
     copy = path.endswith("-requirements.md")
     assert handling not in review
     assert (handling in fix) is copy
     if copy:
         assert fix.index(handling) < fix.index(full)
+        # 指摘がほかのファイルだけなら、全文の代わりに短い制約を渡す
+        other = fixer._fix_prompt(run, [{**MAJOR, "id": "r1-1", "path": "notes.md"}], (), tmp_path / "result.json")
+        assert handling not in other and criteria_decide.fixer_requirements_copy(False) in other

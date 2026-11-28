@@ -15,6 +15,7 @@ from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters import agents, claude, claude_choice, git
 from ndf.contracts import limits, writing
+from ndf.core import issue_docs
 from ndf.core.converge import participants
 from ndf.domains.crossreview import criteria_decide, experiment, push, resume_decide, store
 from ndf.domains.crossreview import finish_decide as fin
@@ -83,7 +84,9 @@ def _fix_prompt(run: FixRun, open_: Sequence[dict[str, Any]], handed: Sequence[f
     lines += criteria_decide.fixer_block(run.cfg.settings.focus, run.snapshot)
     lines += criteria_decide.unit_block(criteria_decide.FIXER, run.cfg.unit)
     if run.requirements_copy:
-        lines.append(criteria_decide.fixer_requirements_copy())
+        # 場所の無い指摘と足すべき内容は、コピーに向くかを決められないので全文を渡す
+        aimed = bool(handed) or any(not f.get("path") or issue_docs.requirements_issues(f["path"]) for f in open_)
+        lines.append(criteria_decide.fixer_requirements_copy(aimed))
     block = criteria_decide.document_block(criteria_decide.FIXER, run.documents)
     lines += block if run.distinction else map(writing.without_distinction, block)
     # 修正担当は hook の無い起動なので、テストを CI に寄せる決まりは指示で伝える（#4030）
