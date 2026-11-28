@@ -473,7 +473,7 @@ def test_issue_3780_2_a_left_finding_is_not_carried_and_its_issue_comes_back() -
     journal.enter(2, [{"text": left["text"], "severity": "major", "impact": "処理が止まる", "path": "a.py", "line": 5, "by": "codex"}])
     journal.sort(leftover_decide.Touched())
     row = journal.rows["r2-1"]
-    assert (row["parked"], row["issue"]) == (True, url)
+    assert (row["parked"], row["prior_issue"]) == (True, url) and "issue" not in row
 
 
 def test_broken_leftover_fields_in_the_record_are_ignored() -> None:

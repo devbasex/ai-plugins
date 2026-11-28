@@ -120,7 +120,7 @@ def unconfirmed_target(
 
 
 def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """起票の候補の行（直さずに残した未解決の指摘のうち、起票する種類を持ち、まだ起票していないもの）。"""
+    """起票の候補の行（直さずに残した未解決の指摘のうち、まだ起票しておらず、起票する種類か引き継いだ起票の URL を持つもの）。"""
     return [
         row
         for row in store.list_of(data, store.FINDINGS)
@@ -129,8 +129,18 @@ def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
         and row.get("outcome") == fin.UNRESOLVED
         and not row.get(Filed.URL)
         and isinstance(row.get("text"), str)
-        and leftover_decide.files_issue(row)
+        and (leftover_decide.files_issue(row) or row.get(Filed.PRIOR))
     ]
+
+
+def hold(rows: Iterable[dict[str, Any]], reason: Optional[str]) -> None:
+    """起票を見送った候補の行に理由を残し、設定か起票先を直した後の打ち直しが公開し直すようにする。`reason` が None
+    （起票先を GitHub にしないと宣言している）なら、打ち直さないので前の理由を消す。"""
+    for row in rows:
+        if reason is None:
+            row.pop(Filed.ERROR, None)
+        else:
+            row[Filed.ERROR] = reason
 
 
 def _str_of(row: Mapping[str, Any], key: str) -> str:
@@ -183,6 +193,7 @@ class _Filing:
         for row in self.rows[ident]:
             row[Filed.URL] = url
             row.pop(Filed.ERROR, None)
+            row.pop(Filed.PRIOR, None)
 
     def read(self) -> None:
         """起票の記録を読む。`at` の無い項目（記録を書いた後に中断した）には、コメントの更新時刻を当てる。"""
@@ -288,9 +299,12 @@ class _Filing:
         return str(entry["url"]) if "url" in entry else None
 
     def known(self) -> None:
-        """起票の記録に URL がある識別値は、その URL が信用する作者のこの指摘の Issue なら、起票せず行に書く。違えば記録の URL を
-        捨て、作成の結果が分からない識別値として確かめる。読めなければ起票も採用もしない。Issue はまとめて 1 回で読む。"""
-        urls = {ident: url for ident in self.rows if (url := self.url_of(ident))}
+        """起票の記録か行の引き継ぎ（`prior_issue`）に URL がある識別値は、その URL が信用する作者のこの指摘の Issue なら、
+        起票せず行に書く。違えば URL を捨て、起票の記録か作る候補として扱う。読めなければ起票も採用もしない。Issue はまとめて
+        1 回で読む。"""
+        recorded = {ident: url for ident in self.rows if (url := self.url_of(ident))}
+        carried = {ident: str(row[Filed.PRIOR]) for ident, rows in self.rows.items() for row in rows if row.get(Filed.PRIOR)}
+        urls = carried | recorded
         if not urls:
             return
         try:
@@ -307,15 +321,19 @@ class _Filing:
                 self.fail(ident, _reason(exc))
             return
         for ident, url in urls.items():
+            for row in self.rows[ident]:
+                row.pop(Filed.PRIOR, None)
             if ident in usable:
+                self.entries.setdefault(ident, {})["url"] = url
                 self.done(ident, url)
-            else:
+            elif ident in recorded:
                 del self.entries[ident]["url"]
 
     def sort(self, manual: bool) -> tuple[list[str], bool]:
         """URL の記録の無い候補を確かめ、作る識別値と、記録に無かった URL を見つけたかを返す。作成を試みた記録のある識別値は、
-        扱う Issue が無いと確かめられたときだけ作る。"""
-        pending = [i for i in self.rows if not self.url_of(i)]
+        扱う Issue が無いと確かめられたときだけ作る。引き継いだ URL を確かめられなかった識別値と、起票する種類を持たない
+        識別値は作らない。"""
+        pending = [i for i in self.rows if not self.url_of(i) and i not in self.errors]
         unknown = [i for i in pending if i in self.entries]
         if pending:
             self.redact(pending)
@@ -327,7 +345,8 @@ class _Filing:
             self.done(ident, url)
         if len(found) + len(absent) == len(unknown):
             self.data.pop(LIST_FULL, None)
-        return [i for i in pending if i not in self.entries or i in absent], bool(found)
+        fresh = [i for i in pending if i not in self.entries or i in absent]
+        return [i for i in fresh if any(map(leftover_decide.files_issue, self.rows[i]))], bool(found)
 
     def write(self) -> str:
         """起票の記録を書き、GitHub が記録した更新時刻を返す。"""
@@ -416,7 +435,7 @@ def file_issues(
     *,
     manual: bool = False,
 ) -> list[str]:
-    """起票の候補を起票し、行の `issue`・`issue_error` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて
+    """起票の候補を起票し、行の `issue`・`issue_error`・`prior_issue` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて
     注意を返す。`primary` が `github` でないか候補が無ければ、GitHub を呼ばない。`manual` は利用者が打った公開である。
 
     呼び手は、今の PR の番号と元の PR の番号の公開のロック（同じ番号なら 1 回）を持つ。"""

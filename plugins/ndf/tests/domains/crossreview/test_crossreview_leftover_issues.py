@@ -438,6 +438,25 @@ def test_a_match_on_a_read_page_is_used_when_the_list_is_over_the_limit(monkeypa
     assert github.created() == 1 and "issue_list_full" not in again.data
 
 
+def test_issue_3780_a_carried_url_is_used_only_after_the_issue_is_read() -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    github.records.clear()
+    # 起票する種類を今回の指摘が持たなくても、引き継いだ URL は確かめる
+    again = Run(github, _row(protect=[], prior_issue=url))
+    assert again.go() == [] and again.row[Filed.URL] == url and Filed.PRIOR not in again.row
+    assert github.created() == 1
+
+
+@pytest.mark.parametrize(("protect", "created"), [pytest.param(["user_data"], 1, id="filed-kind"), pytest.param([], 0, id="other-kind")])
+def test_issue_3780_a_carried_url_of_a_deleted_issue_is_dropped(protect: list, created: int) -> None:
+    github = FakeGitHub()
+    run = Run(github, _row(protect=protect, prior_issue=f"{ISSUES}999"))
+    assert run.go() == [] and github.created() == created and Filed.PRIOR not in run.row
+    assert run.row.get(Filed.URL) != f"{ISSUES}999"
+
+
 @pytest.mark.parametrize(
     ("decl", "primary", "noted"),
     [

@@ -652,9 +652,12 @@ def test_issue_3780_2_nothing_is_filed_unless_the_primary_is_github(
 ) -> None:
     github = _filing(monkeypatch, hub, repos, primary)
     state_dir = tmp_path / "st"
-    store.write_object(state_dir / store.STATE_NAME.format(pr=7), _left_state())
+    path = state_dir / store.STATE_NAME.format(pr=7)
+    store.write_object(path, _left_state())
     got = _report_of(state_dir, capsys)
     assert github.calls == [] and any("issues.primary" in w for w in got.get("warnings", ())) is noted
+    # 未設定の見送りは行に残り、打ち直しが公開し直す。GitHub にしない宣言は残さない
+    assert ("issue_error" in store.read_object(path)["findings"][0]) is noted
 
 
 def test_filing_after_a_rewind_also_takes_the_lock_of_the_origin_pr(repos: Repos, tmp_path: Path, capsys, monkeypatch, hub) -> None:

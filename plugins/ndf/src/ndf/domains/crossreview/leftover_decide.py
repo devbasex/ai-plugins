@@ -133,6 +133,8 @@ class Filed(StrEnum):
 
     URL = "issue"
     ERROR = "issue_error"
+    # 別の保存先から引き継いだ、まだ指す Issue を確かめていない URL
+    PRIOR = "prior_issue"
 
 
 class Listed(NamedTuple):

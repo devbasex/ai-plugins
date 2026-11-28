@@ -371,7 +371,7 @@ class FindingJournal:
         self.raised_ids: list[str] = []
         self.returned: list[str] = []
         # 前の実行が直さずに残して起票した指摘の、本文（`leftover_decide.normalized`）から Issue の URL（`carry` が読み、
-        # `sort` が残すときに戻す。#3780）
+        # `sort` が残すときに、確かめる前の URL として行に書く。#3780）
         self.filed: dict[str, str] = {}
         # 最後の `enter` が `parked` を外して位置を置き換えた指摘と、その位置の候補（`sort` が投稿できる位置かを確かめる）
         self._moved: dict[str, list[dict[str, Any]]] = {}
@@ -548,8 +548,10 @@ class FindingJournal:
             passed = self.passed(fid, touched, unconfirmed=fid in unconfirmed)
             if not passed:
                 row[PARKED] = True
-                if url := self.filed.get(leftover_decide.normalized(row["text"])):
-                    row.setdefault(leftover_decide.Filed.URL, url)
+                url = self.filed.get(leftover_decide.normalized(row["text"]))
+                if url and not row.get(leftover_decide.Filed.URL):
+                    # Issue が消されていることがあるので、起票の公開で確かめてから `issue` にする
+                    row[leftover_decide.Filed.PRIOR] = url
                 parked.add(row["key"])
             else:
                 row.pop(PARKED, None)

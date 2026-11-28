@@ -530,20 +530,24 @@ def _post_report(
 
 def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: Filer) -> list[str]:
     """直さずに残した指摘を起票し、注意を返す。起票の記録は元の PR に置くので、巻き直しの後は元の番号の公開のロックも取る。"""
-    if hub.leftovers is None or not leftover.candidates(data):
+    rows = leftover.candidates(data) if hub.leftovers is not None else []
+    if not rows:
         return []
     main = filer.locate()
     primary, note = leftover.primary_of(main)
     if primary == leftover.GITHUB and main is not None:
         # 別のリポジトリの設定で起票を許可しない（許可する設定と起票先を同じリポジトリにする）
-        refused = leftover.unconfirmed_target(main, filer.repo_arg, data.get(store.REPO_KEY))
-        if refused is not None:
-            return [refused]
+        note = leftover.unconfirmed_target(main, filer.repo_arg, data.get(store.REPO_KEY))
+    if primary != leftover.GITHUB or note is not None:
+        leftover.hold(rows, note)
+        # 記録のコメントを書けずに止まっても、打ち直しが起票を試みるように残す
+        store.write_object(ref.path, data)
+        return [note] if note else []
     origin = hub.publishing(ref.origin_pr) if ref.origin_pr != ref.current_pr else contextlib.nullcontext()
     with origin:
         save = lambda: store.write_object(ref.path, data)  # noqa: E731
         filed = leftover.file_issues(data, ref, hub.leftovers(ref.current_pr), save, primary, manual=filer.manual)
-    return ([note] if note else []) + filed
+    return filed
 
 
 def _publish(ref: store.StateRef, final: Optional[str], warnings: Optional[Sequence[str]], hub: Hub, filer: Filer) -> tuple[str, list[str]]:
@@ -716,7 +720,7 @@ def _report(
     previous = data.get(report_decide.COMMENT_KEY)
     # 今回の注意で比べる（状態ファイルへ残せなかった失敗も、前に載せた注意と違えば書き直す）
     now = report_decide.published_state(ref.current_pr, data, got.review.final, _mvv_notices(warnings))
-    # 起票に失敗した指摘があれば、同じ状態でも公開し直して起票を打ち直す（#3780）
+    # 起票に失敗するか起票を見送った指摘があれば、同じ状態でも公開し直して起票を打ち直す（#3780）
     retry = any(leftover_decide.Filed.ERROR in row for row in leftover.candidates(data))
     published = data.get(report_decide.PUBLISHED_KEY) == now and not retry
     if got.reused and isinstance(previous, str) and published:
