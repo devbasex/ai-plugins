@@ -524,6 +524,17 @@ def test_issue_3780_a_url_already_in_the_record_is_not_written_again() -> None:
     assert github.count("PATCH", "comments/500") + github.count("POST", "issues/7/comments") == writes
 
 
+def test_issue_3780_pr_numbers_are_not_extracted_when_the_current_mark_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    extracted: list[str] = []
+    monkeypatch.setattr(leftover_decide, "pr_numbers", lambda text: extracted.append(text) or ())
+    again = Run(github)
+    again.data[leftover.CARRIED_URLS] = [url]
+    assert again.go() == [] and again.row[Filed.URL] == url and extracted == []
+
+
 def test_issue_3780_the_body_of_a_carried_issue_is_parsed_once(monkeypatch: pytest.MonkeyPatch) -> None:
     github = FakeGitHub()
     Run(github).go()

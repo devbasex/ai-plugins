@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import re
@@ -245,16 +246,19 @@ def pr_numbers(text: str) -> tuple[int, ...]:
     return tuple(dict.fromkeys(int(n) for n in re.findall(r"/pull/(\d+)", text)))
 
 
-class ParsedBody(NamedTuple):
-    """引用とコードブロックを除いた Issue の本文と、そこにある PR の番号。"""
+class ParsedBody:
+    """引用とコードブロックを除いた Issue の本文（`prose`）。PR の番号（`prs`）は、初めて読むときに抽出して持つ。"""
 
-    prose: str
-    prs: tuple[int, ...]
+    def __init__(self, prose: str) -> None:
+        self.prose = prose
+
+    @functools.cached_property
+    def prs(self) -> tuple[int, ...]:
+        return pr_numbers(self.prose)
 
 
 def parse_body(body: str) -> ParsedBody:
-    text = prose(body)
-    return ParsedBody(text, pr_numbers(text))
+    return ParsedBody(prose(body))
 
 
 def _has_mark(body: str, ident: str, parse: Callable[[str], ParsedBody]) -> bool:
@@ -269,7 +273,8 @@ def names_finding(listed: Listed, ident: str, text: str, parse: Callable[[str], 
 
     目印は、今の識別値 `ident` か、本文の PR の URL の番号（起票時の元の PR）と指摘の本文 `text` の識別値を受ける。PR を
     巻き直して別の保存先から始めると元の番号が変わり、`ident` は巻き直し前に起票した Issue の目印と違うためである。
-    目印の照合と PR の番号は、本文の解析（`parse`）の結果を共有する。呼び手は本文ごとの結果を使い回す。"""
+    PR の番号は、今の識別値の目印が無いときだけ抽出する。呼び手は本文ごとの解析（`parse`）の結果を使い回し、抽出した番号も
+    その結果が持つ。"""
     if listed.is_pull:
         return False
     if _has_mark(listed.body, ident, parse):
