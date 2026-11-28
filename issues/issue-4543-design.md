@@ -128,7 +128,7 @@ graph TD
 
 | 経路 | 小見出しを渡すとき | 外すとき | 判定の材料 |
 | --- | --- | --- | --- |
-| 読み手役（`ndf records reading prompt`） | 右の列の「外すとき」以外のすべて。指定が無ければ渡す | 変更履歴を読ませるとき。確定仕様、README、利用者への案内は、小見出しの「当てる文章」がどこにも無いとき | 頼む側が指示の JSON の任意のキー `distinction` に `false` を書く |
+| 読み手役（`ndf records reading prompt`） | 右の列の「外すとき」以外のすべて。指定が無ければ渡す | 変更履歴を読ませるとき。確定仕様、README、利用者への案内は、小見出しの「当てる文章」「当てない文章」で判定して、対象の文章が文書に無いとき（一部を読ませる場合も元の文書全体で判定する） | 頼む側が指示の JSON の任意のキー `distinction` に `false` を書く |
 | 作業の AI（基準の全文を受け取る作業） | 設計（`design`）、詳細設計（`design-detail`）、設計の検査の直し（`design-check-fix`）、要求（`requirements`） | 素材集め（`document-sources`）、実装計画（`implementation-plan`）、確定仕様化（`plan-to-spec`）、振り返り（`retrospective`） | 作業の定義 `contracts/worker/kinds.json` の作業ごとの値 |
 | cross-review（レビュー担当と修正担当） | PR の変更に、課題の設計書か要求仕様のコピーがある | どちらも無い（基準の残りはこれまでどおり渡す） | 変更したファイルの名前。名前の形は `ndf/core/issue_docs.py` だけに置く |
 
