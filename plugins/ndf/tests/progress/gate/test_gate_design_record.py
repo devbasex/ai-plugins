@@ -292,6 +292,25 @@ def test_a_move_after_the_approval_starts_the_review_over(st, machine, change):
     assert run.decide(v).step.id == "design-pr-review"
 
 
+@pytest.mark.parametrize("value", ["rejected", "request_changes"])
+def test_a_base_change_after_a_non_approval_starts_the_review_over(st, repo, machine, tmp_path, value):
+    machine.turn()
+    shown = _present(st, machine.tid, repo, _observe(machine))
+    notes = tmp_path / "notes.md"
+    notes.write_text("直す", encoding="utf-8")
+    argv = shown["routes"][value]["argv"]
+    seen = gate.Target(machine.head, argv[argv.index("--material-sha256") + 1], presentation=argv[argv.index("--presentation") + 1])
+    q = gate.waiting(run.read(st, machine.tid))
+    extra = {"notes": notes} if value == "request_changes" else {}
+    gate.answer(st, machine.tid, gate.Answer(q.id, value, "理由", "human:reviewer", "k1", seen=seen, **extra), _observe(machine))
+
+    why = gate.recheck(st, machine.tid, _observe(machine, base="sprint/x"))
+
+    assert why is not None
+    assert _done(st, machine.tid) == []
+    assert run.decide(run.read(st, machine.tid)).step.id == "design-pr-review"
+
+
 def test_an_unchanged_pr_is_not_reset_after_the_approval(st, machine):
     machine.turn()
     _answer(st, machine.tid, _observe(machine))

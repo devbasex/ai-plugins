@@ -45,10 +45,18 @@ def reset(v: run.View, q: Question, why: str) -> list[model.EventDraft]:
 
 
 def moved_after_answer(v: run.View, q: Question, payload: Mapping[str, Any], now: Target) -> Optional[str]:
-    """承認した回答の記録と今の PR（head かマージ先など）の違い。違わないか、記録の無い回答・読めない PR なら None。"""
-    record = payload.get(design_record.TARGET_KEY)
-    if _stage_of(v, q) is None or not isinstance(record, Mapping) or now.pr is None or now.head is None:
+    """回答が見た PR と今の PR（head かマージ先など）の違い。違わないか、対象の無い回答・読めない PR なら None。
+
+    承認は回答の記録と照らす。記録を持たない回答（却下・変更要求）は、回答の確定時に保存した見た対象（`seen`）と照らす。
+    """
+    if _stage_of(v, q) is None or now.pr is None or now.head is None:
         return None
+    record = payload.get(design_record.TARGET_KEY)
+    if not isinstance(record, Mapping):
+        seen = Target.from_dict(payload.get("seen")).binding()
+        if seen is None:
+            return None
+        record = {"review": {"repo": seen.repo, "pr": seen.pr, "head": seen.head, "base": seen.base}}
     return design_record.moved(record, now.repo, now.pr, now.head, now.base)
 
 
