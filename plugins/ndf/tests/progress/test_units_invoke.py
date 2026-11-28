@@ -28,9 +28,22 @@ from ndf.core.plan import units_decide as ud
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan.review_units_decide import Unit
-from ndf.progress import command, definition, design_record, gate, invoke, issue_values, plan_runs, run, store, units_cli, units_invoke
+from ndf.progress import (
+    command,
+    definition,
+    design_record,
+    gate,
+    invoke,
+    issue_values,
+    plan_runs,
+    run,
+    store,
+    units_cli,
+    units_flow,
+    units_invoke,
+)
 from ndf.progress.plan_runs import StageRun
-from ndf.progress.units_invoke import RoundState
+from ndf.progress.units_flow import RoundState
 
 BRANCH = "sprint/s1"
 PROJECT = {"ci": {"required_checks": ["pytest"]}}
@@ -372,10 +385,10 @@ def test_the_round_state_reads_the_latest_round_with_a_run_record(tmp_path):
     unit_dir = tmp_path / "u"
     _round(unit_dir, 1, _stopped_at("review"))
     second = _round(unit_dir, 2, result.result("plan", result.OK, "通った"), reviewed_head="a" * 40 + "\n", stopped_head="b" * 40)
-    (second / units_invoke.MERGE_FILE).write_text(json.dumps({"kind": "ci_pending"}), encoding="utf-8")
+    (second / units_flow.MERGE_FILE).write_text(json.dumps({"kind": "ci_pending"}), encoding="utf-8")
     (unit_dir / "3").mkdir()  # 記録の無い空の回は数えない
 
-    got = units_invoke.round_state(unit_dir)
+    got = units_flow.round_state(unit_dir)
 
     assert got.round_dir == second and got.ran
     assert got.done is not None and got.done["status"] == result.OK
@@ -383,7 +396,7 @@ def test_the_round_state_reads_the_latest_round_with_a_run_record(tmp_path):
 
 
 def test_the_round_state_without_rounds_points_at_the_first_round(tmp_path):
-    got = units_invoke.round_state(tmp_path / "u")
+    got = units_flow.round_state(tmp_path / "u")
 
     assert got == RoundState(tmp_path / "u" / "1", False, None, None, None, None)
 
@@ -391,7 +404,7 @@ def test_the_round_state_without_rounds_points_at_the_first_round(tmp_path):
 def test_the_round_state_of_an_interrupted_round_has_no_result(tmp_path):
     first = _round(tmp_path / "u", 1, None)
 
-    got = units_invoke.round_state(tmp_path / "u")
+    got = units_flow.round_state(tmp_path / "u")
 
     assert got.round_dir == first and got.ran and got.done is None and got.stopped_head is None
 
@@ -414,6 +427,7 @@ OK_DONE = result.result("plan", result.OK, "通った")
         (_state(None, ran=False), HEAD, True, ("run", False, None)),
         (_state(OK_DONE, merge="ci_pending", reviewed=HEAD, stopped_head=HEAD), HEAD, True, ("merge", False, None)),
         (_state(OK_DONE, merge="infra_wait", reviewed=HEAD, stopped_head=HEAD), HEAD, True, ("merge", False, None)),
+        (_state(OK_DONE, reviewed=HEAD), HEAD, True, ("merge", False, None)),
         # マージを待つ回でも、HEAD がレビューした HEAD と違えばレビューからやり直す
         (_state(OK_DONE, merge="ci_pending", reviewed=OTHER, stopped_head=OTHER), HEAD, True, ("run", True, "test")),
         (_state(OK_DONE, merge="refused", reviewed=HEAD, stopped_head=HEAD), HEAD, True, ("run", True, "push")),
@@ -434,6 +448,7 @@ OK_DONE = result.result("plan", result.OK, "通った")
         "回が無い",
         "CI の待ちでマージだけ",
         "基盤の待ちでマージだけ",
+        "成功の後の中断でマージだけ",
         "マージの待ちで HEAD が違う",
         "マージを拒まれ HEAD が同じ",
         "マージを拒まれ HEAD が違う",
@@ -451,7 +466,7 @@ OK_DONE = result.result("plan", result.OK, "通った")
     ],
 )
 def test_resume_of_follows_the_table(state, head, local_tests, expected):
-    got = units_invoke.resume_of(state, head, local_tests)
+    got = units_flow.resume_of(state, head, local_tests)
 
     assert (got.action, got.new_round, got.start) == expected
 

@@ -344,6 +344,16 @@ def _cli_merge_at_the_reviewed_head_or_without_it_merges_as_before(monkeypatch, 
     assert merged == [(7, REVIEWED)]
 
 
+@pytest.mark.parametrize(("behind", "metrics"), [(True, {"behind": True}), (False, {})])
+def test_cli_merge_tells_a_refusal_for_a_stale_head_from_other_refusals(behind, metrics):
+    target = ci_cli.merge_approval.MergeTarget("o/r", 7, "main", HEAD)
+    outcome = github.MergeOutcome(False, "not_ci", "断った", HEAD, behind=behind)
+
+    got = ci_cli._merged(None, target, outcome, None, None)
+
+    assert got["cause"]["kind"] == "not_ci" and got["metrics"] == metrics
+
+
 def _cli_merge_refuses_a_head_other_than_the_reviewed_one(monkeypatch, capsys, last_result):
     merged: list[tuple[int, str]] = []
     _merge_with(monkeypatch, HEAD, merged)

@@ -99,22 +99,26 @@ def test_merge_proceeds_when_premerge_risk_is_checked() -> None:
 
 
 @pytest.mark.parametrize(
-    ("status", "after", "kind"),
+    ("status", "after", "kind", "behind"),
     [
-        (405, _pull(mergeable_state="dirty"), "base_conflict"),
-        (405, _pull(mergeable_state="blocked"), "not_ci"),
-        (405, _pull(mergeable_state="clean"), "unknown"),
-        (409, _pull(head=OTHER), "refused"),
+        (405, _pull(mergeable_state="dirty"), "base_conflict", False),
+        (405, _pull(mergeable_state="blocked"), "not_ci", False),
+        (405, _pull(mergeable_state="behind"), "not_ci", True),
+        (405, _pull(mergeable_state="clean"), "unknown", False),
+        (409, _pull(head=OTHER), "refused", False),
+        # 送った後に HEAD かマージ先が変わった PR の `behind` は、断りの理由と読まない
+        (409, _pull(head=OTHER, mergeable_state="behind"), "refused", False),
+        (405, {**_pull(mergeable_state="behind"), "base": {"ref": "main"}}, "not_ci", False),
     ],
 )
-def test_merge_refusal_is_classified_from_merge_state(status: int, after: dict, kind: str) -> None:
+def test_merge_refusal_is_classified_from_merge_state(status: int, after: dict, kind: str, behind: bool) -> None:
     # SF4: 拒否の理由は読み直した mergeStateStatus で決め、標準エラーの文を読まない
     server = Server({
         ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull()), httpx.Response(200, json=after)],
         ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(status, json={"message": "no"})],
     })  # fmt: skip
     out = _hub(server).merge(7)
-    assert (out.merged, out.kind) == (False, kind)
+    assert (out.merged, out.kind, out.behind) == (False, kind, behind)
 
 
 @pytest.mark.parametrize(("in_queue", "enqueued", "jump"), [(False, 1, False), (False, 1, True), (True, 0, True)])

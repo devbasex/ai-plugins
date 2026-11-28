@@ -936,7 +936,9 @@ def _units_stage(run: StageRun, cwd: Path, work_dir: Path, runner: Runner) -> Op
 
     単位のプランは単位の作業場所で組んで流し（`_call_plan`）、コマンドは `runner` で打つ。組めない例外は `plan_failure` が分ける。
     """
-    ports = units_invoke.Ports(lambda r, wd: _call_plan(r, work_location(r, cwd), wd, None, runner), runner)
+    ports = units_invoke.Ports(
+        lambda r, wd: _call_plan(r, work_location(r, cwd), wd, None, runner), runner, lambda exc: plan_failure(run.name, exc)
+    )
     try:
         return units_invoke.run_stage(run, work_dir, cwd, ports)
     except PLAN_FAILURES as exc:
