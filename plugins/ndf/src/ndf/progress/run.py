@@ -159,7 +159,9 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
     held = prog.waiting is not None or step.id in prog.held
     # 手で終えた回答待ちは、前に流したステップの判定で省かない
-    skip = listen and not held and not by_hand and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None
+    # 手で終えた回答待ちと、承認でない回答が残る承認ゲートは、判定で省かない
+    objected = listen and approval_decide.skip_barred(v.stage_events(s.name), step.gate, s.mvv_before(step.id))
+    skip = listen and not held and not by_hand and not objected and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None
     if waiting and answer is None and not skip:
         return Move(Action.GATE, s, step, prog)
     return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, answer)
@@ -327,6 +329,9 @@ class Env:
     forget: Callable[[], None] = lambda: None
     # 承認の境界が移る前に、PR の証跡の承認を取り消す口（GitHub へ書くのは `ndf.progress.gate`）
     revoke: Callable[[list[merge_approval.Revocation]], None] = lambda _revocations: None
+    # MVV 判定の承認を確定する前に、判定した対象の PR へ承認の証跡を書く口（GitHub へ書くのは `ndf.progress.gate`）。
+    # 利用者の却下があって書かなければ、その理由を返す
+    mvv_trail: Callable[[Mapping[str, Any]], Optional[approval_decide.Withheld]] = lambda _answered: None
     # 回答を対象と照らす口（作業の排他の中で読んだ記録と、読む回答の事象の番号。回答を読まない最初の手は None）。作業の排他の中で打ち、
     # 待ちへ戻したか繰り上げたら理由を返す
     verify: Callable[[View, Optional[int]], Optional[str]] = lambda _view, _seq: None
@@ -357,10 +362,10 @@ class Drive:
     def write(self, *drafts: model.EventDraft) -> None:
         _write(self.st, self.machine_id, *drafts)
 
-    def write_if_unchanged(self, v: View, *drafts: model.EventDraft) -> None:
-        """`v` を読んだ後に事象が増えていないときだけ書く。追記が読み直す記録で照らすので、確かめの読み取りは増えない。"""
+    def write_if_unchanged(self, v: View, *drafts: model.EventDraft) -> bool:
+        """`v` を読んだ後に事象が増えていないときだけ書き、書いたら真。追記が読み直す記録で照らすので、確かめの読み取りは増えない。"""
         seen = v.events[-1].seq
-        append(self.st, self.machine_id, lambda now: list(drafts) if now.events[-1].seq == seen else [])
+        return bool(append(self.st, self.machine_id, lambda now: list(drafts) if now.events[-1].seq == seen else []))
 
     def report(self, v: View, m: Move) -> dict[str, Any]:
         return report(v, m)
@@ -652,8 +657,13 @@ def answer_draft(v: View, stage: str, value: str, reason: str, text: Optional[st
     allowed = choices(m)
     if value not in allowed:
         raise model.Refused(f"工程 {stage} の回答は {', '.join(allowed)} のどれか（渡された値 {value}）")
-    payload = {"answer": value, "step": m.step.id, "kind": invoke.kind_of(m.step), "notes": text, **extra}
-    writer = ORGANIZER if "by" in extra and extra["by"] == ORGANIZER else CONDUCTOR
+    return answered_event(v, stage, m.step, reason, {"answer": value, "notes": text, **extra})
+
+
+def answered_event(v: View, stage: str, step: stages.StepDef, reason: str, answered: Mapping[str, Any]) -> model.EventDraft:
+    """ステップ `step` への回答の事象の下書き（待っているかは呼び手が確かめる）。`answered` は回答の語と指摘を持つ payload。"""
+    payload = {**answered, "step": step.id, "kind": invoke.kind_of(step)}
+    writer = ORGANIZER if "by" in answered and answered["by"] == ORGANIZER else CONDUCTOR
     return model.EventDraft(ANSWERED, writer, stage, reason=reason, payload=payload, rev=v.rev)
 
 
@@ -774,7 +784,9 @@ def _reading_inputs(v: View, s: stages.StageDef, gate: Optional[str], inputs: Ma
 def _reading_skipped(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef, prog: StepProgress) -> Optional[list[model.EventDraft]]:
     """読み手役のステップを打たずに済ませるなら、済ませた記録の事象。打つなら None（`model.reading_skip`）。"""
     gate = next((st for st in s.steps if st.kind == stages.GATE_KIND and st.gate == step.gate), None)
-    waiting_gate = gate is not None and gate.id in prog.held
+    # 承認でない回答が残る承認ゲートは人へ問うので、読み手役を打つ
+    objected = approval_decide.objection_remains(v.stage_events(s.name), step.gate)
+    waiting_gate = gate is not None and (gate.id in prog.held or objected)
     in_lane = step.gate == model.release_gate() and d.env.in_lane(d.st, v.machine_id)
     # 読み手役が文書を直すと承認した対象が変わるので、有効な先の承認がある設計では打たない
     approved = step.gate == approval_decide.DESIGN_GATE and gate is not None and standing_approval(d, v, s, gate) is not None
@@ -824,9 +836,17 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
     if step.kind == stages.READING_KIND:
         work_dir.mkdir(parents=True, exist_ok=True)
         run = _reading_run(v, s, step, run, work_dir)
+    run = _kept_by_objection(v, s, step, run)
     res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
     d.env.forget()  # 流したステップは PR へ push しうるので、次は対象を読み直してから比べる
     return _step_draft(v, s, step, prog, res)
+
+
+def _kept_by_objection(v: View, s: stages.StageDef, step: stages.StepDef, run: invoke.StageRun) -> invoke.StageRun:
+    """承認でない回答が残る設計の MVV 判定は `--no-skip` で打つ（`approval_decide.objection_bars_skip`）。"""
+    if not approval_decide.objection_bars_skip(lambda: v.stage_events(s.name), step.id):
+        return run
+    return replace(run, args={**run.args, "argv": [*run.args["argv"], "--no-skip"]})
 
 
 def _stage_output(s: stages.StageDef, prog: StepProgress) -> tuple[dict[str, Any], dict[str, Any]]:

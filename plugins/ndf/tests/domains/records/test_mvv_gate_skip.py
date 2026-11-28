@@ -53,4 +53,4 @@ def test_the_reasons_not_to_skip_are_ordered_by_pace_record_checks_and_gate(
     facts: MvvFacts, verdict: dict[str, Any], gate_name: str, pace: Any, unwritable: bool, expected: list[str]
 ) -> None:
     why = [UNWRITABLE] if unwritable else []
-    assert mvv_gate._skip_decision(facts, verdict, gate_name, pace, recorded=not unwritable, why=why) == (False, expected)
+    assert mvv_gate._skip_decision(facts, verdict, gate_name, {"pace": pace}, recorded=not unwritable, why=why) == (False, expected)

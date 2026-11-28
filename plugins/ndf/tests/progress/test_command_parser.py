@@ -29,6 +29,7 @@ def test_subcommands_keep_their_order():
         "retry",
         "finish",
         "check",
+        "question",
         "cancel",
         "restore",
         "docs-only",

@@ -27,13 +27,13 @@ from ndf.adapters import github, llm, publish, run_log
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, Pull, Unread
 from ndf.contracts import internal, limits
-from ndf.core import approval_words, issue_docs, merge_approval, production_merge
+from ndf.core import issue_docs, production_merge
 from ndf.domains.records import design_check_rules, files, jsonfile, jsonl, mvv
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress import definition
 from ndf.progress.gate.checks import MvvFacts, judgeable, may_skip, note, refusals
-from ndf.progress.model import MVV_GATE_STEPS, MVV_PACES, MVV_SKIP_GATES
+from ndf.progress.model import MVV_GATE_STEPS, MVV_PACES, MVV_SKIP_GATES, NO_SKIP
 
 # 判定の回答のスキーマ（contracts/schemas/mvv-verdict.schema.json）
 VERDICT_SCHEMA = "mvv-verdict"
@@ -45,6 +45,7 @@ DESIGN, RELEASE = "design", "release"
 GATE_STEPS = MVV_GATE_STEPS
 GATE_STAGES = {DESIGN: "design", RELEASE: "deploy"}
 # 省けない区分（リリース）の判定が why に足す理由（#3959 の決定 3）
+OBJECTION_KEPT = "承認でない回答（変更要求か却下）が残るので、MVV 判定で省かない"
 RELEASE_KEPT = "リリース承認ゲートは、保留を読む PR の範囲が決まるまで（#4105）MVV 判定で省かない"
 # 手元のどの参照にも MVV の設定が無いときの理由（`mvv_declared_locally`。#3959）
 NO_DECL = "MVV の設定が手元の HEAD にもリモートの追跡ブランチにも無いため、MVV 判定を打たない"
@@ -443,21 +444,25 @@ def _judged(
         return j.posted_if_current(j.stopped("llm_no_answer", why, noted=False, holds=rec.holds))
     why = [] if unrecorded is None else ["判定を記録（mvv-validation.jsonl）に書けない: " + j.text("records_unwritable", unrecorded)]
     verdict = _verdict(row)
-    skip, why = _skip_decision(facts, verdict, gate_name, inputs.get("pace"), recorded=unrecorded is None, why=why)
+    skip, why = _skip_decision(facts, verdict, gate_name, inputs, recorded=unrecorded is None, why=why)
     outcome = _bound(j, rows, mm.gate_outcome(gate_name, verdict, skip, why, rec.holds, pull=(number, j.pull.head_sha)))
     return j.posted_if_current(outcome)
 
 
 def _skip_decision(
-    facts: MvvFacts, verdict: Any, gate_name: str, pace: Any, *, recorded: bool, why: Sequence[str]
+    facts: MvvFacts, verdict: Any, gate_name: str, inputs: Mapping[str, Any], *, recorded: bool, why: Sequence[str]
 ) -> tuple[bool, list[str]]:
     """手順 (8): 承認ゲートを省くかと、省かない理由（`why` の後ろへ足したもの）を返す。副作用は無い。
 
-    進め方 `pace` と区分 `gate_name` は省くかだけを決める。記録に行の無い判定（`recorded` が偽）では省かない。
+    工程の入力の進め方 `pace`・`NO_SKIP` と区分 `gate_name` は省くかだけを決める。記録に行の無い判定（`recorded` が偽）では
+    省かない。
     """
     ok, reasons = may_skip(facts, verdict, gate_name)
     skip = ok and recorded
     out = [*why, *reasons]
+    pace = inputs.get("pace")
+    if inputs.get(NO_SKIP):
+        skip, out = False, [*out, OBJECTION_KEPT]
     if pace not in MVV_PACES:
         skip, out = False, [f"進め方 {pace} は承認ゲートを MVV 判定で省かない", *out]
     if gate_name not in MVV_SKIP_GATES:
@@ -559,18 +564,11 @@ def post_note(hub: GitHub, number: int, text: str) -> publish.Published:
 def _recorded(hub: GitHub, number: int, outcome: dict[str, Any], where: Mapping[str, Any]) -> dict[str, Any]:
     """判定の結果（省く・省かないの両方）を PR へ載せ、人が後から確かめられるようにする。
 
-    承認ゲートを省くと決めたときだけ、判定の記録の本文の後ろに担い手 `mvv` のマージの承認の証跡の行を入れて 1 件で書く
-    （#4409 の決定 7。投稿は増えない）。レッドラインや省かない判定では証跡の行を入れない。
+    マージに使える承認の証跡は、省くと決めた判定でもここでは書かない。判定は回答と排他できないので、変更要求・却下の後に
+    承認が並びうる。書くのは、`service:mvv` の承認を確定する `next` である（`progress.gate.mvv_trail`。#4520 の決定 7）。
     書けなければ判定を保ったまま省かない側へ倒し、`noted` を偽にする（原因は `failure_text` の定型文と識別子だけ）。
     """
     text = note(outcome["gate"], outcome["verdict"], outcome["why"], outcome["holds"], outcome.get("head"))
-    held = outcome.get("target")
-    if outcome["skip"] and isinstance(held, dict):
-        t = merge_approval.MergeTarget(held["repo"], held["pr"], held["base"], held["head"])
-        row = merge_approval.MergeRow(
-            approval_words.APPROVED, merge_approval.MVV_BY, t, bool(held["production"]), f"mvv:{outcome['gate']}:{t.head}"
-        )
-        text = f"{text}\n{merge_approval.render_merge_row(row)}"
     try:
         made = post_note(hub, number, text)
     except GitHubError as exc:
@@ -599,7 +597,8 @@ def gate(
 
     判定のステップはモードを問わず流れ（工程の出力 `mvv_gate` をどのモードでもそろえる）、承認ゲートを持たないモードでは判定しない。
     PR を読む前の失敗だけをここで受け、判定を持たない結果にする（PR を読んだ後の失敗は `_judged` が受ける）。
-    MVV 判定の記録に読めない行があれば `warnings` へ足す。
+    MVV 判定の記録に読めない行があれば `warnings` へ足す。`inputs` の `NO_SKIP` が真なら、承認でない回答が残る工程の
+    判定として省かない（#4520）。
     """
     if not has_gate(inputs.get("mode"), gate_name):
         return mm.stop_outcome(gate_name, "no_gate", [f"モード {inputs.get('mode')} は承認ゲート {gate_name} を持たない"])

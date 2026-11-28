@@ -1,7 +1,8 @@
 """ステートマシンの ID から、判定のステップの工程の入力を組む（`ndf records mvv gate --machine`。#3959 の決定 5・#4055）。
 
 プランの判定のステップが `NDF_STAGE_INPUT` に入れるのと同じ値（`invoke.resolve_inputs` の結果）を返す。プランの外
-（supervisor が回すフェーズ）でも、同じ入力で判定を打てるようにするためである。保存先は読むだけで書かない
+（supervisor が回すフェーズ）でも、同じ入力で判定を打てるようにするためである。プランの判定が `--no-skip` で打たれる
+回答履歴なら、`model.NO_SKIP` も足す。保存先は読むだけで書かない
 （作成・旧い形の退避・表の作成・バックアップをせず、要るときは `store.StoreNotReady` で止まる）。
 """
 
@@ -10,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ndf.progress import command, invoke, model, store
+from ndf.progress import approval_decide, command, invoke, model, store
 
 
 def stage_inputs_of(cwd: Path, machine_id: str, step_id: str) -> dict[str, Any]:
@@ -36,4 +37,7 @@ def stage_inputs_of(cwd: Path, machine_id: str, step_id: str) -> dict[str, Any]:
     found = [s for s in current.snapshot.stages if any(step.id == step_id for step in s.steps)]
     if not found:
         raise model.Refused(f"ステートマシンのモード {current.snapshot.mode} は判定のステップ {step_id} を持たない")
-    return invoke.resolve_inputs(found[0], command.machine_context(current))
+    inputs = invoke.resolve_inputs(found[0], command.machine_context(current))
+    if approval_decide.objection_bars_skip(lambda: [e for e in current.events if e.draft.row_key == found[0].name], step_id):
+        inputs[model.NO_SKIP] = True
+    return inputs

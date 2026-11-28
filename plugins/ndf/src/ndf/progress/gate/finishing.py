@@ -13,12 +13,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-from ndf.adapters.git import GitError
+from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.contracts import result
 from ndf.core import merge_approval
-from ndf.progress import approval_decide, command, definition, model, reopening, run, stages, store
-from ndf.progress.gate.answering import shared_hub
+from ndf.progress import approval_decide, command, definition, invoke, model, reopening, run, stages, store
+from ndf.progress.gate.answering import github_observe, shared_hub
+from ndf.progress.gate.asking import check_stage_pr, gate_result, gate_stage, off_wait_question, pr_url, question, show_question
 from ndf.progress.gate.rechecking import standing
 from ndf.progress.gate.targets import TargetReader
 from ndf.progress.run_view import FINISH_HELD
@@ -187,20 +188,6 @@ def _generated_warnings(read: _StageOutput) -> list[str]:
     return [f"工程 {read.stage.name} の {k} は NDF が作るので、手で書いた値は使わない" for k in read.generated]
 
 
-def _held_refusal(v: run.View, stage: str) -> Optional[str]:
-    """承認ゲートを持つ工程を手で終えられない状態の理由と、代わりに打てるコマンド。ほかの状態は追記の確かめに任せる。"""
-    row = v.rows.get(stage)
-    state = row.state if row is not None else None
-    if state == command.TOGGLE_KINDS["disable"]:
-        return f"承認ゲートを持つ工程 {stage} は無効のままでは終えない。ndf progress enable {v.machine_id} {stage} --reason <理由> で戻す"
-    if state == "running" and run.step_progress(v, stage).held_finish is not None:
-        return (
-            f"工程 {stage} は手で終えて承認を待っている。ndf progress next {v.machine_id} が返す回答のコマンドで回答する。"
-            f"直すなら ndf progress retry {v.machine_id} {stage} --reason <理由> --later reopen を打つ"
-        )
-    return None
-
-
 def _standing_answer(v: run.View, read: _StageOutput, cwd: Path, root: Path) -> Optional[model.Event]:
     """手で終える工程の有効な承認の事象。無ければ None（承認の記録が無ければ PR を読まない）。
 
@@ -221,6 +208,81 @@ def _standing_answer(v: run.View, read: _StageOutput, cwd: Path, root: Path) -> 
             f"承認した設計 PR #{pr} がマージされていない。承認済みのコミット {got.head} をマージしてから ndf progress finish を打ち直す"
         )
     return found
+
+
+def _finish_refusal(v: run.View, stage: str) -> Optional[str]:
+    """手で終えられない状態の理由と、代わりに打てるコマンド。終えられる状態は None（追記の確かめに任せる）。"""
+    if model.is_terminal(v.whole):
+        return f"ステートマシンは{model.label(v.whole)}で、工程を終えられない。状態は ndf progress show {v.machine_id} で確かめる"
+    found = v.snap.stage(stage)
+    row = v.rows.get(stage)
+    state = row.state if row is not None else None
+    if found.gates and state == command.TOGGLE_KINDS["disable"]:
+        return f"承認ゲートを持つ工程 {stage} は無効のままでは終えない。ndf progress enable {v.machine_id} {stage} --reason <理由> で戻す"
+    if state == run.FINISHED:
+        also = f"。変更を求められたなら ndf progress question {v.machine_id} {stage} の質問へ回答する" if found.gates else ""
+        return (
+            f"工程 {stage} は{model.label(state)}で、手で終えられない。直すなら "
+            f"ndf progress retry {v.machine_id} {stage} --reason <理由> --later reopen|keep を打つ{also}"
+        )
+    if state != "running":
+        return None
+    if run.step_progress(v, stage).held_finish is not None:
+        return (
+            f"工程 {stage} は手で終えて承認を待っている。ndf progress next {v.machine_id} が返す回答のコマンドで回答する。"
+            f"直すなら ndf progress retry {v.machine_id} {stage} --reason <理由> --later reopen を打つ"
+        )
+    m = run.decide(v)
+    if m.action == run.Action.GATE and m.stage is not None and m.stage.name == stage:
+        return f"工程 {stage} は承認ゲートの回答を待っている。ndf progress next {v.machine_id} が返す回答のコマンドで回答する"
+    return f"工程 {stage} は{model.label(state)}で、手で終えられない。ndf progress wait {v.machine_id} で作業の終わりを待つ"
+
+
+def ask_question(st: store.Store, machine_id: str, stage: str, pr: Optional[int], cwd: Path) -> dict[str, Any]:
+    """承認ゲートの工程の質問・承認資料・回答のコマンドを作る（`ndf progress question`）。回答を待っていれば今の質問を返す。
+
+    `--pr` は設計承認ゲートだけで受け、同じリポジトリの、head のブランチが工程のブランチの PR に限る。リリースのリクエストは
+    出さない。"""
+    v = run.read(st, machine_id)
+    found, step = gate_stage(v, stage)
+    hub = shared_hub(cwd)
+    observe = github_observe(cwd, st.root, hub, TargetReader(hub))
+    try:
+        repo: Optional[str] = Git(cwd).remote_repo()
+    except GitError:  # 表示の URL だけに使うので、無ければ番号で示す
+        repo = None
+    number = _question_pr(v, found, step.gate, pr)
+    m = run.decide(v)
+    waits = m.action == run.Action.GATE and m.stage is not None and m.stage.name == stage and invoke.is_listen(step)
+    q = question(v, m, repo=repo) if waits else off_wait_question(v, stage, pr=number, repo=repo)
+    # 対象の PR の記録が無い待ちの質問は、`--pr` の番号を対象にする
+    adopted = waits and q.pr is None and number is not None
+    if adopted:
+        q = replace(q, pr=number, pr_url=pr_url(repo, number))
+    if adopted or not waits:
+        check_stage_pr(v, found, step.gate, q.pr, observe(q, material=False))
+    q, path = show_question(st.root, v, q, observe, private=st.private)
+    # 結果の `tool` は打ったコマンド（回答のルートは `ndf answer` のまま）
+    return gate_result(q, {"machine_id": machine_id, "stage": stage}, path, tool=command.TOOL)
+
+
+def _question_pr(v: run.View, stage: stages.StageDef, gate: Optional[str], pr: Optional[int]) -> Optional[int]:
+    """質問の対象の PR。設計承認ゲートは記録した `design_pr`、無ければ `--pr`。ほかのゲートは文脈の `pr` だけ。"""
+    known = approval_decide.target_pr(v, stage, gate)
+    again = f"ndf progress question {v.machine_id} {stage.name}"
+    if gate != approval_decide.DESIGN_GATE:
+        if pr is not None:
+            raise model.Refused(f"工程 {stage.name} の承認ゲートは --pr を受けない（対象は文脈の pr）。{again} を打つ")
+        return known
+    if known is not None and pr is not None and pr != known:
+        raise model.Refused(f"工程 {stage.name} の対象の PR は #{known}。{again}（--pr は省くか #{known}）を打つ")
+    if known is None and pr is None:
+        raise model.Refused(f"工程 {stage.name} の設計 PR の記録が無い。{again} --pr <番号> を打つ")
+    return known if known is not None else pr
+
+
+def _cmd_off_wait(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
+    return ask_question(st, a.machine_id, a.stage, a.pr, cwd)
 
 
 def _finish_drafts(a: argparse.Namespace, v: run.View, read: _StageOutput, held: bool) -> tuple[list[model.EventDraft], list[str]]:
@@ -258,7 +320,7 @@ def _retried_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read
 def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read: _StageOutput) -> tuple[bool, list[int], list[str]]:
     """今の記録を読んで 1 回だけ決めて追記する。読んだ後に事象が増えていれば `store.Conflict`。"""
     v = run.read(st, a.machine_id)
-    refused = _held_refusal(v, a.stage)
+    refused = _finish_refusal(v, a.stage)
     if refused is not None:
         raise model.Refused(refused)
     held = _standing_answer(v, read, cwd, st.root) is None
@@ -293,7 +355,11 @@ def _cmd_finish(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, 
         dropped = []
 
         def build(rev: int, _snap: stages.Snapshot, events: list[model.Event]) -> list[model.EventDraft]:
-            drafts, dropped[:] = _finish_drafts(a, run.View(a.machine_id, rev, _snap, {}, events), read, held=False)
+            now = run.View(a.machine_id, rev, _snap, {}, events)
+            refused = _finish_refusal(now, a.stage)
+            if refused is not None:
+                raise model.Refused(refused)
+            drafts, dropped[:] = _finish_drafts(a, now, read, held=False)
             return drafts
 
         seqs = command._append(st, a.machine_id, build)
@@ -322,7 +388,11 @@ def _cmd_check(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, 
     return result.result(command.TOOL, result.OK, f"{a.stage} の出力は規約に合う", metrics=metrics)
 
 
-COMMANDS: dict[str, command.Command] = {**command._answer_commands((_cmd_retry, _cmd_finish)), "check": _cmd_check}
+COMMANDS: dict[str, command.Command] = {
+    **command._answer_commands((_cmd_retry, _cmd_finish)),
+    "check": _cmd_check,
+    "question": _cmd_off_wait,
+}
 
 
 def main(argv: list[str]) -> int:

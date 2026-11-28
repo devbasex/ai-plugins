@@ -122,19 +122,28 @@ class StepProgress:
         self.notes, self.held_finish = p.get("notes"), None
 
     def _finish_held(self, ev: model.Event, p: dict[str, Any]) -> None:
-        """手で終えた回答待ち。次のステップを承認ゲートにして、回答の数え始めをここへ移す。
+        """手で終えた回答待ち。次のステップを承認ゲートにして、回答の数え始めをここへ移す。"""
+        self._void_gate(p["step"])
+        self.held_finish, self.waiting, self.answer, self.anchor = p, None, None, ev.seq
 
-        前に済んだ承認ゲートと後ろのステップの完了は無効にする。承認されずに打ち直しても、前の承認でマージ・リリースへ
+    def _void_gate(self, gate: str) -> None:
+        """済んだ承認ゲート `gate` と後ろのステップの完了を無効にする。承認されずに打ち直しても、前の承認でマージ・リリースへ
         進まないためである。承認ゲートは待ちを持ったステップにして、MVV 判定で省かない。"""
-        gate = p["step"]
         if gate in self.done:
             at = self.finished_at[gate]
             self.done = {step: report for step, report in self.done.items() if self.finished_at[step] < at}
         self.held.add(gate)
-        self.held_finish, self.waiting, self.answer, self.anchor = p, None, None, ev.seq
 
     def _answered(self, ev: model.Event, p: dict[str, Any]) -> None:
-        """回答。承認ゲートの変更要求なら世代を上げて初めから流し直し、ほかは数え始めの後の回答だけを残す。"""
+        """回答。承認ゲートの変更要求なら世代を上げて初めから流し直し、ほかは数え始めの後の回答だけを残す。
+
+        待っていない工程への回答（`late`）は世代を上げず、待ちへの回答にも使わない。前の読んでいない回答も読まない。
+        承認でなければ、済んだ承認ゲートを無効にする（承認は `approval_decide` が事象から読む）。"""
+        if p.get("late"):
+            self.answer = None
+            if p["answer"] != invoke.APPROVED:
+                self._void_gate(p["step"])
+            return
         if p["answer"] == REQUEST_CHANGES and p["kind"] == invoke.LISTEN:
             self.generation += 1
             self.done, self.waiting, self.answer, self.anchor = {}, None, None, ev.seq

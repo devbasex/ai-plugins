@@ -1,6 +1,7 @@
 """承認ゲートへの回答（`ndf answer`）の記録と、回答する対象の読み取り（`ndf.progress.gate` の部品）。
 
-待っていない行（実行の前）・違う質問の id・今の対象と違う見た対象は断り、行は待ちのまま残る（3364-2）。同じ冪等のキーの
+違う質問の id・今の対象と違う見た対象は断り、行は待ちのまま残る（3364-2）。待っていない承認ゲートの工程への回答
+（`ndf progress question` の質問）も受け、終えた工程への承認でない回答は工程を開き直す（#4520）。同じ冪等のキーの
 回答し直しは書かずに同じ結果を返す。設計承認ゲートの承認で外した課題は、同じトランザクションの中でレーンの順番表の次の行へ
 入れる（#3097 の決定 99）。回答を読む前の確かめと、承認ゲートの待ちへの戻しは `rechecking`。
 """
@@ -8,16 +9,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters.git import Git
 from ndf.adapters.github import GitHub, client
 from ndf.contracts import result
 from ndf.core import actors, approval_words, merge_approval
-from ndf.progress import approval_decide, command, invoke, lane, model, plan, run, stages, store
+from ndf.progress import approval_decide, command, invoke, lane, model, plan, reopening, run, stages, store
 from ndf.progress.gate.asking import (
     ORGANIZER_ANSWERS,
     DESIGN_GATE,
@@ -27,12 +29,16 @@ from ndf.progress.gate.asking import (
     Answer,
     Question,
     Target,
+    check_stage_pr,
     material_path,
     material_sha256,
+    off_wait_question,
+    pr_url,
     presented_id,
     read_presented,
     release_request_of,
     waiting,
+    with_presented_pr,
 )
 from ndf.progress.gate.records import record_answer, rejections_path
 from ndf.progress.gate.targets import TargetReader
@@ -89,7 +95,7 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
     def observe(q: Question, *, material: bool = True, config: bool = False) -> Target:
         # 渡された読み手が無ければ、毎回読み直す
         reading = (held if held is not None else TargetReader(shared_hub(cwd, hub))).read(q, config=material or config)
-        got = replace(reading.target, merged=reading.merged)
+        got = replace(reading.target, merged=reading.merged, head_ref=reading.head_ref, cross_repository=reading.cross_repository)
         if not material:
             return got
         path = material_path(root, replace(q, target=Target(got.head)))
@@ -134,17 +140,78 @@ def _answered_with_key(v: run.View, key: str) -> Optional[model.Event]:
     return None
 
 
+def _matching_question(v: run.View, gate_id: str, root: Optional[Path]) -> Optional[Question]:
+    """質問の id が指す質問。待ちの質問、無ければ承認ゲートの工程ごとの待っていない質問から探す。対象の PR は提示した
+    対象から引く。無ければ None。"""
+    now = waiting(v)
+    if now is not None and now.id == gate_id:
+        return now if root is None else with_presented_pr(root, now)
+    if model.is_terminal(v.whole):
+        return None
+    rows = v.rows
+    for s in v.snap.stages:
+        state = rows[s.name].state if s.name in rows else None
+        if not s.gates or (model.is_terminal(state) and state != run.FINISHED):
+            continue
+        made = off_wait_question(v, s.name, pr=None)
+        if made.id != gate_id:
+            continue
+        shown = read_presented(root, made) if root is not None else Target()
+        number = shown.pr if shown.pr is not None else approval_decide.target_pr(v, s, made.gate)
+        # 提示していない対象への回答は、対象に結び付かない承認になるので受けない
+        if number is not None and shown.binding() is None:
+            return None
+        return replace(made, pr=number, pr_url=pr_url(shown.repo, number))
+    return None
+
+
+def _find_question(v: run.View, gate_id: str, root: Optional[Path]) -> Question:
+    """`_matching_question`。無ければ、代わりの操作を添えて `model.Refused`。"""
+    found = _matching_question(v, gate_id, root)
+    if found is not None:
+        return found
+    how = f"待っていない承認ゲートの工程へは ndf progress question {v.machine_id} <工程> で質問を作って回答する"
+    if model.is_terminal(v.whole):
+        raise model.Refused(
+            f"ステートマシン {v.machine_id} は{model.label(v.whole)}で、回答を待っていない。状態は ndf progress show {v.machine_id}"
+        )
+    now = waiting(v)
+    if now is None:
+        raise model.Refused(f"ステートマシン {v.machine_id} は回答を待っていない（実行の前か、済んだ回答）。{how}")
+    raise model.Refused(
+        f"質問 {gate_id} は今の質問 {now.id}（工程 {now.stage}）と違う。ndf progress next {v.machine_id} が返すコマンドで回答するか、{how}"
+    )
+
+
+@dataclass(frozen=True)
+class _Effects:
+    """回答の種類と工程の状態で決まる扱い。`late` は待ちへの回答でない、`reopen` は工程と後ろを開き直す、`fail` は
+    開き直した指定の工程を失敗にする。"""
+
+    late: bool = False
+    reopen: bool = False
+    fail: bool = False
+
+
+def _effects(v: run.View, q: Question, value: str) -> _Effects:
+    """手で終えた回答待ちの承認は次の `next` が読み、自動の流れの回答待ちは今のまま扱う。終えた工程と手で終えた回答待ちへの
+    承認でない回答は開き直す（#4520 の決定 4）。"""
+    held = run.step_progress(v, q.stage).held_finish is not None
+    now = waiting(v)
+    if (held and value == run.APPROVED) or (not held and now is not None and now.id == q.id):
+        return _Effects()
+    row = v.rows.get(q.stage)
+    reopen = value in REJECTING and (held or (row is not None and row.state == run.FINISHED))
+    return _Effects(True, reopen, reopen and value == run.REJECTED)
+
+
 def _refusal(v: run.View, a: Answer, observe: Observe, root: Optional[Path] = None) -> tuple[Question, Target]:
-    """回答を受けられるかを確かめ、待っている質問と、照らした対象を返す。断るなら `model.Refused`（行は待ちのまま残る）。
+    """回答を受けられるかを確かめ、回答する質問と、照らした対象を返す。断るなら `model.Refused`（行はそのまま残る）。
 
     提示した承認の対象（`read_presented`）があれば、照らした対象はその対象そのもので、今の承認の対象か回答した者の見た
     HEAD と違えば断る（質問の後に HEAD かマージ先が変わった。#4409）。回答が見た提示の識別子と、本番へ反映されるかが
     提示と違うときも断る（`_check_presented`）。無ければ（旧版の質問）回答した者の見た head を返す。"""
-    q = waiting(v)
-    if q is None:
-        raise model.Refused(f"ステートマシン {v.machine_id} は回答を待っていない（実行の前か、済んだ回答）")
-    if q.id != a.gate_id:
-        raise model.Refused(f"質問 {a.gate_id} は今の質問 {q.id}（工程 {q.stage}）と違う")
+    q = _find_question(v, a.gate_id, root)
     if a.value not in q.choices:
         raise model.Refused(f"工程 {q.stage} の回答は {', '.join(q.choices)} のどれか（渡された値 {a.value}）")
     if a.drop and not (a.value == run.APPROVED and q.gate == DESIGN_GATE):
@@ -154,7 +221,13 @@ def _refusal(v: run.View, a: Answer, observe: Observe, root: Optional[Path] = No
     now = observe(q)
     changed = now.differs(a.seen)
     if changed:
-        raise model.Refused(f"回答した後に対象が変わった。待ちへ戻すので、今の対象を見て回答し直す: {' / '.join(changed)}")
+        raise model.Refused(
+            f"回答した後に対象が変わった。待ちへ戻すので、今の対象を見て回答し直す: {' / '.join(changed)}"
+            f"（待っていない工程は ndf progress question {v.machine_id} {q.stage} で質問を作り直す）"
+        )
+    # 対象の PR の記録が無い待ちの質問の PR は `--pr` で指定したものなので、待っていない質問と同じく成果物かを確かめる
+    if _effects(v, q, a.value).late or approval_decide.target_pr(v, v.snap.stage(q.stage), q.gate) is None:
+        check_stage_pr(v, v.snap.stage(q.stage), q.gate, q.pr, now)
     shown = read_presented(root, q) if root is not None else Target()
     if shown.binding() is None:
         return q, shown.presented(a.seen if a.seen.head is not None else now)
@@ -301,13 +374,15 @@ def _note_posting(conn: Any, v: run.View, q: Question, a: Answer, seen: Target) 
 
 @dataclass(frozen=True)
 class _Checked:
-    """確かめを通った回答。`closes` は手で終えたデプロイの工程を閉じるだけの確認か。"""
+    """確かめを通った回答。`closes` は手で終えたデプロイの工程を閉じるだけの確認か。`planned` は回答に伴う開き直し。"""
 
     q: Question
     a: Answer
     seen: Target
     text: Optional[str]
     closes: bool
+    effects: _Effects
+    planned: Optional[reopening.Reopen]
 
 
 def _check_answer(conn: Any, v: run.View, a: Answer, observe: Observe, root: Path, text: Optional[str]) -> tuple[_Checked, Optional[str]]:
@@ -320,7 +395,47 @@ def _check_answer(conn: Any, v: run.View, a: Answer, observe: Observe, root: Pat
     by = _trail_by(conn, q, a, seen)
     if closes and a.value == run.APPROVED:
         by = None
-    return _Checked(q, a, seen, text, closes), by
+    effects = _effects(v, q, a.value)
+    return _Checked(q, a, seen, text, closes, effects, _plan_reopen(v, q, a, text, effects)), by
+
+
+def _plan_reopen(v: run.View, q: Question, a: Answer, text: Optional[str], effects: _Effects) -> Optional[reopening.Reopen]:
+    """回答に伴う開き直し（開き直さなければ None）。証跡を書く前に、理由の無い回答を断る。"""
+    if not effects.reopen:
+        return None
+    if not a.reason.strip():
+        raise model.Refused("工程を開き直す回答には理由が要る（--reason <理由>）")
+    trigger = {"by": "answer", "stage": q.stage, "key": a.key}
+    return reopening.plan_reopen(v, q.stage, later=reopening.REOPEN, reason=a.reason, trigger=trigger, notes=text)
+
+
+def _drafts(v: run.View, got: _Checked, extra: dict[str, Any]) -> list[model.EventDraft]:
+    """開き直し、回答、失敗、出力、外した課題の順の下書き。開き直しより後に置く回答は、新しい世代の回答になる。"""
+    q, a, planned = got.q, got.a, got.planned
+    stage = v.snap.stage(q.stage)
+    step = next(s for s in stage.steps if s.id == q.step)
+    now = waiting(v)
+    if now is not None and now.id == q.id and not got.effects.late:
+        answered = run.answer_draft(v, q.stage, a.value, a.reason, got.text, extra)
+    else:
+        answered = run.answered_event(v, q.stage, step, a.reason, {"answer": a.value, "notes": got.text, **extra})
+    drafts = [*(planned.drafts if planned is not None else []), answered]
+    if got.effects.fail:
+        detail = f"承認ゲート {q.gate} で承認されなかった（{a.reason}）"
+        drafts.append(run._failed(stage, q.step, v.rev, "refused", detail))
+    return [*drafts, *_outputs(v, q, a), *_dropped(v, q, a.drop), *_confirmed_pr(v, got)]
+
+
+def _confirmed_pr(v: run.View, got: _Checked) -> list[model.EventDraft]:
+    """文脈に `design_pr` の無い工程への承認（待ちへの回答も含む）は、回答者に提示した PR を文脈の `design_pr` にする。この世代の正式な対象が
+    決まり、承認を読む側と `ndf answer head` が同じ PR を引く。"""
+    q = got.q
+    if not (got.a.value == run.APPROVED and q.gate == DESIGN_GATE and q.pr is not None):
+        return []
+    if approval_decide.target_pr(v, v.snap.stage(q.stage), q.gate) is not None:
+        return []
+    payload = {"outputs": {stages.DESIGN_PR: q.pr}}
+    return [model.EventDraft(stages.OUTPUTS_EVENT, run.ACTOR, q.stage, payload=payload, rev=v.rev)]
 
 
 def _commit_answer(conn: Any, v: run.View, got: _Checked, last_seq: int) -> tuple[list[int], Optional[str]]:
@@ -339,10 +454,10 @@ def _commit_answer(conn: Any, v: run.View, got: _Checked, last_seq: int) -> tupl
         "carried_row": carried,
         "release_request": rejected,
         **({"closes_stage": True} if got.closes else {}),
+        **({"late": True} if got.effects.late else {}),
+        **({"reopened": got.planned.stages, "warnings": got.planned.warnings} if got.planned is not None else {}),
     }
-    draft = run.answer_draft(v, q.stage, a.value, a.reason, got.text, extra)
-    drafts = [draft, *_outputs(v, q, a), *_dropped(v, q, a.drop)]
-    return store.append_events(conn, v.machine_id, drafts, last_seq), carried
+    return store.append_events(conn, v.machine_id, _drafts(v, got, extra), last_seq), carried
 
 
 def _begin_answer(
@@ -350,17 +465,36 @@ def _begin_answer(
 ) -> tuple[_Checked, Optional[str], int, Optional[tuple[list[int], Optional[str]]]]:
     """回答の 1 つ目のトランザクション。確かめを通った回答、証跡の担い手、回答を書くときに期待する事象の番号、書いた結果を返す。
 
-    証跡を投稿しない回答（担い手が None）はここで書く。投稿する回答は書かず（結果は None）、投稿前の記録だけを追記する
-    （`_note_posting`）。"""
+    PR へ書くもの（証跡の投稿と承認の取り消し）が無い回答はここで書く。ある回答は書かず（結果は None）、投稿前の記録だけを
+    追記する（`_note_posting`）。"""
     got, by = _check_answer(conn, v, a, observe, root, text)
     last = v.events[-1].seq if v.events else 0
-    if by is None:
+    if by is None and (got.planned is None or not got.planned.revoke):
         return got, by, last, _commit_answer(conn, v, got, last)
-    noted = _note_posting(conn, v, got.q, a, got.seen)
+    noted = _note_posting(conn, v, got.q, a, got.seen) if by is not None else None
     return got, by, last if noted is None else noted, None
 
 
-def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_observe, post: Post = no_post) -> dict[str, Any]:
+def _no_revoke(revocations: list[merge_approval.Revocation]) -> None:
+    """承認の取り消しを書かない口（PR を読まないテスト）。"""
+
+
+def _needs_stopped_work(v: run.View, a: Answer, root: Path) -> bool:
+    """初めてのキーの回答 `a` が、待ちへの回答でない承認でない回答か。工程を流す作業が止まっているときだけ記録する。"""
+    if a.value not in REJECTING:
+        return False
+    q = _matching_question(v, a.gate_id, root)
+    return q is not None and _effects(v, q, a.value).late
+
+
+def answer(
+    st: store.Store,
+    machine_id: str,
+    a: Answer,
+    observe: Observe = no_observe,
+    post: Post = no_post,
+    revoke: reopening.Revoke = _no_revoke,
+) -> dict[str, Any]:
     """回答を事象 `answered` に残す（外した課題の行と、今のスプリントの課題から外す事象も同じトランザクション）。
     同じ冪等のキーは書かずに同じ結果を返す。
 
@@ -370,34 +504,80 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
     承認の対象を持つ質問への回答は、記録の前にマージの承認の証跡を PR へ書く（`_trail_by`・`_post_trail`。#4409 の
     決定 7）。承認は本番へ反映され得るときだけ、却下はいつも書く。証跡を書けなければ回答を記録せず、同じ回答を
     送り直すと続きから回復する。同じ冪等のキーの回答が既に
-    記録されていても、証跡が無ければ書いてから戻る。"""
+    記録されていても、証跡が無ければ書いてから戻る。
+
+    工程を開き直す回答は、却下の証跡と、開き直す工程の承認の取り消し（`revoke`）の後に、開き直しと回答を 1 回で追記する。
+    待ちへの回答でない承認でない回答は、工程を流す作業が動いていれば断る。"""
     if not ACTORS.match(a.by):
         raise model.Refused(actors.invalid_message(a.by))
     text = run.notes_text(a.value, a.notes)
-    # 回答の確かめから証跡の投稿と DB の確定まで、開き直しと同じ排他で守る
-    with store.approval_lock(st, machine_id):
+    ports = _Ports(observe, post, revoke)
+    out = _answer_locked(st, machine_id, a, text, ports, stopped=False)
+    if out is None:
+        # 作業の排他が要ると分かったら、何も書かずに排他を放し、取得の順を守って最初から読み直す
+        out = _answer_locked(st, machine_id, a, text, ports, stopped=True)
+    assert out is not None
+    return out
+
+
+class _Ports(NamedTuple):
+    """`answer` が受けた、対象を読む口・証跡を書く口・承認を取り消す口。"""
+
+    observe: Observe
+    post: Post
+    revoke: reopening.Revoke
+
+
+def _answer_locked(
+    st: store.Store, machine_id: str, a: Answer, text: Optional[str], ports: _Ports, *, stopped: bool
+) -> Optional[dict[str, Any]]:
+    """`answer` の排他の中。作業の排他が要るかは、回答の扱いを決めるのと同じ記録で決める。要るのに `stopped` が偽なら、
+    何も書かず None を返す。"""
+    with ExitStack() as stack:
+        # 作業の排他は、回答と開き直しの排他より先に取る
+        if stopped:
+            stack.enter_context(reopening.work_stopped(st, machine_id))
+        # 回答の確かめから証跡の投稿と DB の確定まで、開き直しと同じ排他で守る
+        stack.enter_context(store.approval_lock(st, machine_id))
         with store.transaction(st) as conn:
             v = run.view(conn, machine_id)
             held = _answered_with_key(v, a.key)
             if held is not None:
                 replayed = _same(held, a, machine_id)
-                send = _ensure_trail(conn, v, held, a, post)
+                send = _ensure_trail(conn, v, held, a, ports.post)
+            elif not stopped and _needs_stopped_work(v, a, st.root):
+                return None
             else:
-                got, by, last, done = _begin_answer(conn, v, a, observe, st.root, text)
+                got, by, last, done = _begin_answer(conn, v, a, ports.observe, st.root, text)
         if held is not None:
             send()
             return replayed
-        if by is not None:
+        if done is None:
             # 投稿前の記録を確定してから投稿する（投稿の後に止まっても、DB から取り消す承認を指せる）
-            _post_trail(got.q, a, got.seen, by, post)
+            if by is not None:
+                _post_trail(got.q, a, got.seen, by, ports.post)
+            if got.planned is not None:
+                reopening.revoke_approvals(got.planned, ports.revoke)
             with store.transaction(st) as conn:
                 done = _commit_answer(conn, v, got, last)
-    assert done is not None  # 証跡を投稿しない回答は 1 つ目のトランザクションで、投稿する回答は投稿の後に書いた
-    (seqs, carried), q = done, got.q
-    summary = f"工程 {q.stage} へ回答 {a.value} を書いた（{a.by}）。続きは ndf progress next で流す"
-    metrics = {"machine_id": machine_id, "seqs": seqs, "gate_id": q.id, "carried_row": carried}
-    out = result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", machine_id))
-    return command.with_warnings(out, after=record_answer(v, q, a, rejections_path))
+    return _answer_result(v, got, done)
+
+
+def _answer_result(v: run.View, got: _Checked, done: tuple[list[int], Optional[str]]) -> dict[str, Any]:
+    """書いた回答の結果 JSON。開き直した工程の一覧と取り消されない操作の警告を載せ、回答を `gate-rejections` へ写す。"""
+    (seqs, carried), q, a = done, got.q, got.a
+    reopened = got.planned.stages if got.planned is not None else []
+    note = f"。工程を開き直した: {'・'.join(reopened)}" if reopened else ""
+    summary = f"工程 {q.stage} へ回答 {a.value} を書いた（{a.by}）{note}。続きは ndf progress next で流す"
+    metrics = {"machine_id": v.machine_id, "seqs": seqs, "gate_id": q.id, "carried_row": carried}
+    following = result.command("progress", "next", v.machine_id)
+    out = result.result(TOOL, result.OK, summary, items=_reopened_items(reopened), metrics=metrics, next=following)
+    warned = got.planned.warnings if got.planned is not None else []
+    return command.with_warnings(out, after=[*warned, *record_answer(v, q, a, rejections_path)])
+
+
+def _reopened_items(names: Sequence[str]) -> list[dict[str, str]]:
+    return [{"kind": "reopened", "stage": name} for name in names]
 
 
 # 承認ゲートの回答だけが文脈へ書くキー（工程の定義の outputs には置かない）。まとめたリリースのリリース記録の PR は
@@ -441,6 +621,9 @@ def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Po
     rows = [ev for ev in v.events if ev.draft.row_key == held.draft.row_key]
     if held.seq < approval_decide.approval_boundary(rows, str(p.get("step"))):
         return _no_trail
+    # 同じ承認ゲートに後の回答があれば、前の回答の行を最新の行にしない
+    if any(e.seq > held.seq and e.draft.kind == run.ANSWERED and run.event_payload(e).get("gate") == p.get("gate") for e in rows):
+        return _no_trail
     if closes_only(p) and p.get("answer") == run.APPROVED:
         return _no_trail
     seen = Target.from_dict(p.get("seen"))
@@ -472,7 +655,16 @@ def _same(held: model.Event, a: Answer, machine_id: str) -> dict[str, Any]:
         raise model.Refused(f"冪等のキー {a.key} の回答は {p.get('by')} が書いた。送り直しの回答した者 {a.by} と違う")
     summary = f"冪等のキー {a.key} の回答は書いてある（事象 {held.seq}）"
     metrics = {"machine_id": machine_id, "seqs": [held.seq], "gate_id": a.gate_id, "replayed": True}
-    return result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", machine_id))
+    names, warnings = (p["reopened"] if "reopened" in p else []), (p["warnings"] if "warnings" in p else [])
+    out = result.result(
+        TOOL,
+        result.OK,
+        summary,
+        items=_reopened_items(names),
+        metrics=metrics,
+        next=result.command("progress", "next", machine_id),
+    )
+    return command.with_warnings(out, after=warnings)
 
 
 def lane_env(env: run.Env) -> run.Env:

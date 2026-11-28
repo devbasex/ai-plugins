@@ -104,6 +104,10 @@ class View:
         """スプリントの文脈。作成の時点の値に、工程が書いた出力（`outputs_recorded`）を順に重ねる。"""
         return stages.compose_context(self.doc["context"], stages.recorded_outputs(self.events, self.rev))
 
+    def stage_events(self, stage: str) -> list[model.Event]:
+        """工程のすべての改訂の事象（開き直しや改訂で消えない記録を読む）。"""
+        return [e for e in self.events if e.draft.row_key == stage]
+
     def last_reopened(self, stage: str) -> int:
         """工程の直近の開き直しの事象の番号（無ければ 0）。"""
         cut = stages.reopened_at(self.events)

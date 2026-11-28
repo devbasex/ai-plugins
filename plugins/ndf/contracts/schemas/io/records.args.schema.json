@@ -295,6 +295,10 @@
         "--expect-pr": {
           "type": "integer",
           "description": "承認する PR の番号（--gate release のときだけ）。判定に使う入力の PR と違えば、PR を読まず判定もコメントもせずに not_applicable で止まる"
+        },
+        "--no-skip": {
+          "type": "boolean",
+          "description": "承認ゲートを省かない（承認でない回答が残るとき）"
         }
       },
       "required": [

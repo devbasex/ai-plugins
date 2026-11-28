@@ -100,6 +100,8 @@ ndf progress new <スプリント名> --mode <モード> --issues <番号>... --
 
 **プランを使わずに工程を進めるとき（supervisor の経路）は、`--machine` で同じ判定を打つ。**
 
+この経路の判定は、マージに使える承認の証跡を書かない。本番へ反映される設計 PR は、判定が省けると出ても、利用者の承認を取ってからマージする。
+
 ```text
 ndf records mvv gate --gate <design か release> --machine <ステートマシンの ID> [--expect-pr <承認する PR の番号>]
 ```

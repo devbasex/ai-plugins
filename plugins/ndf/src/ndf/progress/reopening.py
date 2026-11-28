@@ -95,7 +95,13 @@ def plan_reopen(v: View, stage: str, *, later: str, reason: str, trigger: Mappin
     behind = [s.name for s in order[at + 1 :] if _progressed(v, rows, since, s.name)] if later == REOPEN else []
     names = [stage, *behind]
     payload = {"trigger": dict(trigger), "notes": notes, "later": later}
-    drafts = [model.EventDraft(REOPENED, CONDUCTOR, name, reason=reason, payload=payload, rev=v.rev) for name in names]
+    # 変更要求の指摘は指定の工程だけが持つ
+    drafts = [
+        model.EventDraft(
+            REOPENED, CONDUCTOR, name, reason=reason, payload={**payload, "notes": notes if name == stage else None}, rev=v.rev
+        )
+        for name in names
+    ]
     warnings = [f"工程 {s.name} のマージ・リリースは取り消されない" for s in order if s.name in names and _acted(rows, since, s)]
     return Reopen(drafts, names, warnings, approval_decide.revocations(since, v.machine_id, names))
 

@@ -508,15 +508,8 @@ def test_follow_without_redlines_skips_and_the_record_is_reused(repo: Path, note
     # 承認ゲートを省いた判定も、理由を PR のコメントへ残す
     ((number, text),) = notes
     assert number == 5 and "## MVV 判定" in text and "Value 1 に沿う" in text
-    # 省いた判定の記録は、担い手 mvv のマージの承認の証跡の行を同じコメントに持つ（#4409 の決定 7。投稿は 1 件のまま）
-    hub = SimpleNamespace(comments=lambda n: [github.Authored("octocat", "OWNER", text, author_id=1)])
-    (row,) = merge_approval.merge_rows(hub, 5, github.Viewer("octocat", 1))  # type: ignore[arg-type]
-    assert (row.answer, row.by, row.target, row.production) == (
-        "approved",
-        "mvv",
-        merge_approval.MergeTarget("o/r", 5, "main", "h" * 40),
-        True,
-    )
+    # 判定のコマンドはマージに使える承認の証跡を書かない（承認を確定する next が書く。#4520 の決定 7）
+    assert merge_approval.MERGE_MARK not in text
     # 同じ材料の「従う」は記録を再利用し、理由とレッドラインも引き継ぐ
     again = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), ask)
     assert {**again, "note_url": ""} == {**out, "note_url": ""} and len(ask.calls) == 1

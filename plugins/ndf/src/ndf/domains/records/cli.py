@@ -289,6 +289,8 @@ def _mvv_gate(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         if judged is not None and judged != args.expect_pr:
             return result.stopped(TOOL, "not_applicable", OTHER_PR)
     warnings: list[dict[str, Any]] = []
+    if args.no_skip:
+        inputs = {**inputs, mvv_gate.NO_SKIP: True}
     out = mvv_gate.gate(root, args.gate, inputs, _hub, warnings=warnings)
     summary = "MVV 判定で承認ゲートを省く" if out["skip"] else "承認ゲートを人へ問う: " + " / ".join(out["why"])
     return result.result(TOOL, result.OK, summary, warnings, outputs={model.MVV_KEY: out})
@@ -494,6 +496,7 @@ def _add_mvv(sub: Any) -> None:
         help="承認する PR の番号（--gate release のときだけ）。判定に使う入力の PR と違えば、PR を読まず判定もコメントもせずに"
         " not_applicable で止まる",
     )
+    gate.add_argument("--no-skip", action="store_true", help="承認ゲートを省かない（承認でない回答が残るとき）")
     gate.set_defaults(handler=_mvv_gate)
     cite = m.add_parser("cite")
     cite.add_argument(

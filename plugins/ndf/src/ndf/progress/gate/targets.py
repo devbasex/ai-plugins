@@ -7,7 +7,7 @@ push しうるので `forget` で捨てて読み直す。
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 from ndf.adapters.git import GitError
 from ndf.adapters.github import GitHub, GitHubError
@@ -17,10 +17,14 @@ from ndf.progress.gate.asking import Question, Target, text_sha256
 
 
 class Reading(NamedTuple):
-    """読んだ対象と、PR がマージ済みか。承認資料のハッシュは持たない（呼び手が保存したファイルから足す）。"""
+    """読んだ対象と、PR がマージ済みか。承認資料のハッシュは持たない（呼び手が保存したファイルから足す）。
+
+    `head_ref` と `cross_repository` は head のブランチと、それがフォークにあるか（`ndf progress question --pr` の確かめ）。"""
 
     target: Target
     merged: bool
+    head_ref: Optional[str] = None
+    cross_repository: bool = False
 
 
 class TargetReader:
@@ -53,8 +57,8 @@ class TargetReader:
             raise model.Refused(f"PR #{q.pr} の head を読めない（マージ先も読めない）ので、回答と対象を照らせない: {exc}") from None
         seen = Target(pull.head_sha, body=text_sha256(pull.body), title=text_sha256(pull.title))
         if found is None:
-            return Reading(seen, pull.merged)
+            return Reading(seen, pull.merged, pull.head_ref, pull.cross_repository)
         verdict = production_merge.judge_project_text(found.text, pull.base_ref, source_repo=found.repo, repo=hub.repo)
         production = production_merge.reaches_production(verdict)
         bound = Target(seen.head, None, hub.repo, pull.number, pull.base_ref, production, body=seen.body, title=seen.title)
-        return Reading(bound, pull.merged)
+        return Reading(bound, pull.merged, pull.head_ref, pull.cross_repository)
