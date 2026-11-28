@@ -76,11 +76,13 @@ class Lineup(NamedTuple):
     """単位の経路の並び。`unit_ci` は単位の PR のマージ先（`base`）・待つチェックの名前（`required`）・その名前を読んだ設定のキー（`key`）。
 
     `source` は担当タスクの本文を読むコミット（承認の記録の HEAD か、開始の HEAD）。実装計画の表から流すときは空。
+    `bodies` は開始前の確かめが `source` から読んだ本文（単位のキーごと）。`units.json` には書かず、読み直した並びでは None。
     """
 
     units: tuple[Unit, ...]
     unit_ci: dict[str, Any]
     source: str = ""
+    bodies: Optional[Mapping[str, Sequence[str]]] = None
 
 
 class RoundState(NamedTuple):
@@ -120,7 +122,7 @@ class Ports(NamedTuple):
 class Context(NamedTuple):
     """単位を流す間に変わらない値。`sprint` はスプリントの作業場所、`branch` はスプリントブランチ、`repo` は選んだリモートの
     `<所有者>/<リポジトリ>`、`review` は単位の PR のレビューの起動（`--pr` を持たない）、`local_tests` は手元のテストを打つか、
-    `source` は担当タスクの本文を読むコミット（`Lineup.source`）、`bodies` はそのコミットから読んだ単位のキーごとの本文。"""
+    `source` は担当タスクの本文を読むコミット（`Lineup.source`）、`bodies` はそのコミットの単位のキーごとの本文。"""
 
     run: StageRun
     work_dir: Path
@@ -188,9 +190,11 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
         # 単位の経路を続けるときだけ、進めた先のコミットの設定でリリース先（I4）と単位の PR で待つチェックを決め直す
         project = ndf_settings_in(root, PROJECT_FILE)
         branch = _checked_branch(run, branch, project)
-    source = ""
+    source, bodies = "", None
     if sprint.required or seen.unit_files:
-        units, source, checked = _units_from_files(g, root, sprint, issues, seen.plans, lambda ns: _count_sprint_criteria(g, remote, ns))
+        units, source, checked, bodies = _units_from_files(
+            g, root, sprint, issues, seen.plans, lambda ns: _count_sprint_criteria(g, remote, ns)
+        )
         # 送るのは照合と確かめを通ったコミットだけにする（止まる実装の手元のコミットを、共有のブランチに残さない）
         _push_sprint(g, remote, branch, checked)
     else:
@@ -199,7 +203,7 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
             raise UnitsStopped("invalid", detail)
         units = _read_units(g, remote, seen.plans, issues)
         _push_sprint(g, remote, branch, "HEAD")
-    found = Lineup(units, _unit_ci(project, branch), source)
+    found = Lineup(units, _unit_ci(project, branch), source, bodies)
     print(
         f"ndf progress: 単位の PR のマージ先 {branch}、待つチェック {', '.join(found.unit_ci['required']) or '無し'}"
         f"（{found.unit_ci['key']}）",
@@ -224,8 +228,8 @@ def _units_from_files(
     issues: Sequence[int],
     plans: Sequence[PlanDoc],
     counted: Callable[[Sequence[int]], dict[int, int]],
-) -> tuple[tuple[Unit, ...], str, str]:
-    """単位のファイルから読んだ並びと、担当タスクの本文を読むコミットと、確かめたコミット（開始の HEAD）。
+) -> tuple[tuple[Unit, ...], str, str, dict[str, list[str]]]:
+    """単位のファイルから読んだ並び・担当タスクの本文を読むコミット・確かめたコミット（開始の HEAD）・読んだ本文。
 
     読み元は開始の HEAD で、承認が要れば記録の値で確かめる。
 
@@ -251,10 +255,10 @@ def _units_from_files(
             reasons = "; ".join(f"{f.rule} {f.unit}: {f.reason}" for f in bad)
             raise UnitsStopped("invalid", f"単位のファイルが確かめを通らない: {reasons}")
         units = units_files.lineup_from_files(report.judgement.views, report.files)
-        units_files.task_texts(units_files.Tree(root, source), units)
+        bodies = units_files.task_texts(units_files.Tree(root, source), units)
     except units_files.UnitsFileError as exc:
         raise UnitsStopped("invalid", f"単位のファイルを読めない: {exc}") from None
-    return units, source, start_head
+    return units, source, start_head, bodies
 
 
 def _approved(g: Git, tree: units_files.Tree, sprint: SprintPlan, start_head: str) -> tuple[Mapping[str, Any], str]:
@@ -618,7 +622,10 @@ def _unit_context(run: StageRun, work_dir: Path, cwd: Path, found: Lineup) -> Co
     test = project["test"] if isinstance(project.get("test"), Mapping) else {}
     review = _review_command(project, f"{remote}/{branch}")
     repo = g.remote_repo(remote)
-    bodies = _task_texts(root, found.source, found.units) if found.source else {}
+    bodies = found.bodies
+    if bodies is None:
+        # `units.json` から読み直した並びは本文を持たないので、保存したコミットから読み直す
+        bodies = _task_texts(root, found.source, found.units) if found.source else {}
     return Context(run, work_dir, root, branch, remote, repo, found.unit_ci, review, not scoped.ci_only(test), found.source, bodies)
 
 

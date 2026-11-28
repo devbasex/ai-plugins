@@ -556,7 +556,7 @@ def test_unit_files_replace_the_table_and_an_issue_without_one_becomes_its_own_u
 
     assert got is not None and got.source == head
     assert [(u.name, u.issue, u.supplemented) for u in got.units] == [("読み手", 3, False), ("issue-4", 4, True), ("書き手", 3, False)]
-    assert units_invoke._held_lineup(_units_file(work)) == got
+    assert units_invoke._held_lineup(_units_file(work)) == got._replace(bodies=None)
     assert _remote_head(sprint) == head
 
 
@@ -598,14 +598,13 @@ def test_an_uncommitted_unit_file_stops(sprint, tmp_path):
     ],
     ids=["上限を超える", "形が違う", "タスクの本文が無い"],
 )
-def test_unit_files_that_fail_the_check_stop(sprint, tmp_path, doc, plan, word):
-    before = _remote_head(sprint)
+def test_unit_files_that_fail_the_check_stop(sprint, tmp_path, git_calls, doc, plan, word):
     _commit_files(sprint, doc, plan)
 
     stopped = _stopped(_run(sprint), tmp_path / "w", sprint)
 
     assert stopped.kind == "invalid" and word in stopped.detail
-    assert _remote_head(sprint) == before
+    assert [c for c in git_calls if c[0] == "push"] == []
 
 
 def test_an_approval_without_a_record_stops_before_touching_the_remote(sprint, tmp_path, git_calls):
@@ -647,8 +646,7 @@ def test_the_approved_documents_must_be_in_the_sprint_branch(sprint, tmp_path):
 
 
 @pytest.mark.parametrize("change", ["中身", "消す", "省いた課題"])
-def test_a_change_after_the_approval_stops(sprint, tmp_path, change):
-    before = _remote_head(sprint)
+def test_a_change_after_the_approval_stops(sprint, tmp_path, git_calls, change):
     head = _commit_files(sprint, _unit_doc())
     approval = _approval(sprint, head, tmp_path, context_omitted=() if change == "省いた課題" else None)
     if change == "中身":
@@ -660,7 +658,7 @@ def test_a_change_after_the_approval_stops(sprint, tmp_path, change):
     stopped = _stopped(_with(_run(sprint), approval), tmp_path / "w", sprint)
 
     assert stopped.kind == "refused" and "承認" in stopped.detail
-    assert _remote_head(sprint) == before
+    assert [c for c in git_calls if c[0] == "push"] == []
 
 
 def test_the_unit_instruction_holds_the_approved_task_bodies_in_dependency_order(sprint, tmp_path, monkeypatch):
@@ -674,6 +672,8 @@ def test_the_unit_instruction_holds_the_approved_task_bodies_in_dependency_order
     found = units_invoke.prepare(_with(_run(sprint), approval), work, sprint)
     assert found is not None and found.source == head
     monkeypatch.setattr(issue_values, "issue_values", lambda *a, **k: {})
+    # 開始前の確かめで読んだ本文を引き継ぎ、起動のために読み直さない
+    monkeypatch.setattr(units_files, "task_texts", lambda *a: pytest.fail("本文を読み直した"))
     ctx = units_invoke._unit_context(_run(sprint), work, sprint, found)
 
     run = units_invoke.unit_run(ctx, found.units[0], sprint, tmp_path / "round", None)
