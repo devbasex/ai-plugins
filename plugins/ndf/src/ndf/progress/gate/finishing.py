@@ -6,21 +6,26 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Mapping
-from contextlib import ExitStack
+import time
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf.adapters.git import GitError
 from ndf.adapters.github import GitHub, GitHubError
-from ndf.contracts import result
+from ndf.contracts import limits, result
 from ndf.core import merge_approval
 from ndf.progress import approval_decide, command, definition, model, reopening, run, stages, store
 from ndf.progress.gate.answering import shared_hub, standing
 from ndf.progress.gate.targets import TargetReader
 from ndf.progress.run_view import FINISH_HELD
 from ndf.progress.records import github_records, sync_records
+
+
+# 手で終える操作が、書いている回答の終わりを待つ方針（contracts/limits/）
+APPROVAL_WAIT = "progress.approval-lock"
 
 
 def revoker(get_hub: Callable[[], GitHub], not_done: str) -> reopening.Revoke:
@@ -252,6 +257,22 @@ def _retried_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read
     raise AssertionError("到達しない")
 
 
+@contextmanager
+def _after_answer(st: store.Store, machine_id: str) -> Iterator[None]:
+    """回答と共有する排他を、書いている回答が終わるまで待って取る。待ちの上限を越えれば `model.Refused`。"""
+    deadline = time.monotonic() + limits.value(APPROVAL_WAIT, "seconds")
+    with ExitStack() as stack:
+        while True:
+            try:
+                stack.enter_context(store.approval_lock(st, machine_id))
+                break
+            except model.Refused:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(limits.value(APPROVAL_WAIT, "interval"))
+        yield
+
+
 def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read: _StageOutput) -> tuple[bool, list[int], list[str]]:
     """今の記録を読んで 1 回だけ決めて追記する。読んだ後に事象が増えていれば `store.Conflict`。"""
     v = run.read(st, a.machine_id)
@@ -270,7 +291,9 @@ def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read:
     # 回答待ちを書くと先の承認は境界の前になるので、PR の証跡も先に取り消す。回答待ちを書けない状態なら、取り消す前に断る
     model.check_event("sprint", model.rows_for("sprint", v.events, drafts[0]), v.whole, drafts[0])
     # 取り消してから追記するまでは、回答の送り直しが取り消した承認を PR へ戻さないように、回答と共有する排他を持つ
-    with store.approval_lock(st, a.machine_id):
+    with _after_answer(st, a.machine_id):
+        if run.read(st, a.machine_id).events[-1].seq != v.events[-1].seq:
+            raise store.Conflict("排他を待つ間に事象が増えた")  # 確定した回答を読み直して、取り消す前に決め直す
         revoker(shared_hub(cwd), "回答待ちを書かない")(approval_decide.stage_revocations(v, a.stage))
         return append()
 

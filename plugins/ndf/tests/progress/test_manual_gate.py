@@ -504,3 +504,22 @@ def test_a_refused_finish_and_a_non_advancing_recheck_revoke_nothing(repo, st, e
 
     assert why is not None and "ndf progress next" in why
     assert env.hub.dequeued == [] and _kinds(st, tid, DESIGN) == before
+
+
+def test_a_hand_finish_waits_for_an_answer_being_written(repo, st, env, capsys, monkeypatch):
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+    writing = store.approval_lock(st, tid)
+    writing.__enter__()
+    waits: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        waits.append(seconds)
+        writing.__exit__(None, None, None)  # 回答を書き終える
+
+    monkeypatch.setattr(finishing, "time", SimpleNamespace(sleep=sleep, monotonic=lambda: 0.0))
+
+    out = _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR})
+
+    assert out["status"] == "ok" and len(waits) == 1, out
+    assert "finish_held" in _kinds(st, tid, DESIGN)

@@ -585,8 +585,9 @@ def _send_back(st: store.Store, v: run.View, m: run.Move, why: str, revoke: Call
         if undo:
             _uncarry(conn, v.machine_id, p.get("carried_row"), why)
 
+    # 回答と共有する排他は作業の排他の後に取る（作業の排他を待つ間の回答を断らない）。
     # 取り消してから境界を進めるまでの間に回答を送り直されると、取り消した承認が PR に戻るので、回答側も止める
-    with store.approval_lock(st, v.machine_id), _driving(st, v.machine_id):
+    with _driving(st, v.machine_id), store.approval_lock(st, v.machine_id):
         latest = run.read(st, v.machine_id)
         if not _still(latest, answered):
             return False
@@ -672,7 +673,7 @@ def _reopen_unbound(st: store.Store, machine_id: str, revoke: Callable[[list[mer
         if held:
             _uncarry(conn, machine_id, run.event_payload(held[0].answered).get("carried_row"), UNBOUND_REASON)
 
-    with store.approval_lock(st, machine_id), _driving(st, machine_id):
+    with _driving(st, machine_id), store.approval_lock(st, machine_id):
         v = run.read(st, machine_id)
         found = _unbound_approval(v)
         if found is not None:
@@ -731,8 +732,8 @@ def reread(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[st
         wait = _no_report_draft(now, stage.name, step.id, "waiting", n.progress.generation, REREAD_REASON)
         return [wait, *_reading_reset(now, stage.name, step.gate)]
 
-    # 回答（`approval_lock`）と回答を読む操作を止めてから、待ちが同じと確かめて取り消し、書き直す
-    with store.approval_lock(st, machine_id), _driving(st, machine_id):
+    # 回答を読む操作と回答（`approval_lock`）を止めてから、待ちが同じと確かめて取り消し、書き直す
+    with _driving(st, machine_id), store.approval_lock(st, machine_id):
         latest = run.read(st, machine_id)
         if build(latest):
             env.revoke(approval_decide.stage_revocations(latest, stage.name))
