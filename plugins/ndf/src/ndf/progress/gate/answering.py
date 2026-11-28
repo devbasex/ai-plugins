@@ -13,7 +13,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters.git import Git
 from ndf.adapters.github import GitHub, client
@@ -38,6 +38,7 @@ from ndf.progress.gate.asking import (
     read_presented,
     release_request_of,
     waiting,
+    with_presented_pr,
 )
 from ndf.progress.gate.records import record_answer, rejections_path
 from ndf.progress.gate.targets import TargetReader
@@ -144,7 +145,7 @@ def _matching_question(v: run.View, gate_id: str, root: Optional[Path]) -> Optio
     対象から引く。無ければ None。"""
     now = waiting(v)
     if now is not None and now.id == gate_id:
-        return now
+        return now if root is None else with_presented_pr(root, now)
     if model.is_terminal(v.whole):
         return None
     rows = v.rows
@@ -224,7 +225,8 @@ def _refusal(v: run.View, a: Answer, observe: Observe, root: Optional[Path] = No
             f"回答した後に対象が変わった。待ちへ戻すので、今の対象を見て回答し直す: {' / '.join(changed)}"
             f"（待っていない工程は ndf progress question {v.machine_id} {q.stage} で質問を作り直す）"
         )
-    if _effects(v, q, a.value).late:
+    # 対象の PR の記録が無い待ちの質問の PR は `--pr` で指定したものなので、待っていない質問と同じく成果物かを確かめる
+    if _effects(v, q, a.value).late or approval_decide.target_pr(v, v.snap.stage(q.stage), q.gate) is None:
         check_stage_pr(v, v.snap.stage(q.stage), q.gate, q.pr, now)
     shown = read_presented(root, q) if root is not None else Target()
     if shown.binding() is None:
@@ -425,10 +427,10 @@ def _drafts(v: run.View, got: _Checked, extra: dict[str, Any]) -> list[model.Eve
 
 
 def _confirmed_pr(v: run.View, got: _Checked) -> list[model.EventDraft]:
-    """文脈に `design_pr` の無い工程への承認は、回答者に提示した PR を文脈の `design_pr` にする。この世代の正式な対象が
+    """文脈に `design_pr` の無い工程への承認（待ちへの回答も含む）は、回答者に提示した PR を文脈の `design_pr` にする。この世代の正式な対象が
     決まり、承認を読む側と `ndf answer head` が同じ PR を引く。"""
     q = got.q
-    if not (got.effects.late and got.a.value == run.APPROVED and q.gate == DESIGN_GATE and q.pr is not None):
+    if not (got.a.value == run.APPROVED and q.gate == DESIGN_GATE and q.pr is not None):
         return []
     if approval_decide.target_pr(v, v.snap.stage(q.stage), q.gate) is not None:
         return []
@@ -477,14 +479,11 @@ def _no_revoke(revocations: list[merge_approval.Revocation]) -> None:
     """承認の取り消しを書かない口（PR を読まないテスト）。"""
 
 
-def _needs_stopped_work(st: store.Store, machine_id: str, a: Answer) -> bool:
-    """待ちへの回答でない、初めてのキーの承認でない回答か。工程を流す作業が止まっているときだけ記録する。"""
+def _needs_stopped_work(v: run.View, a: Answer, root: Path) -> bool:
+    """初めてのキーの回答 `a` が、待ちへの回答でない承認でない回答か。工程を流す作業が止まっているときだけ記録する。"""
     if a.value not in REJECTING:
         return False
-    v = run.read(st, machine_id)
-    if _answered_with_key(v, a.key) is not None:
-        return False
-    q = _matching_question(v, a.gate_id, st.root)
+    q = _matching_question(v, a.gate_id, root)
     return q is not None and _effects(v, q, a.value).late
 
 
@@ -512,9 +511,31 @@ def answer(
     if not ACTORS.match(a.by):
         raise model.Refused(actors.invalid_message(a.by))
     text = run.notes_text(a.value, a.notes)
+    ports = _Ports(observe, post, revoke)
+    out = _answer_locked(st, machine_id, a, text, ports, stopped=False)
+    if out is None:
+        # 作業の排他が要ると分かったら、何も書かずに排他を放し、取得の順を守って最初から読み直す
+        out = _answer_locked(st, machine_id, a, text, ports, stopped=True)
+    assert out is not None
+    return out
+
+
+class _Ports(NamedTuple):
+    """`answer` が受けた、対象を読む口・証跡を書く口・承認を取り消す口。"""
+
+    observe: Observe
+    post: Post
+    revoke: reopening.Revoke
+
+
+def _answer_locked(
+    st: store.Store, machine_id: str, a: Answer, text: Optional[str], ports: _Ports, *, stopped: bool
+) -> Optional[dict[str, Any]]:
+    """`answer` の排他の中。作業の排他が要るかは、回答の扱いを決めるのと同じ記録で決める。要るのに `stopped` が偽なら、
+    何も書かず None を返す。"""
     with ExitStack() as stack:
         # 作業の排他は、回答と開き直しの排他より先に取る
-        if _needs_stopped_work(st, machine_id, a):
+        if stopped:
             stack.enter_context(reopening.work_stopped(st, machine_id))
         # 回答の確かめから証跡の投稿と DB の確定まで、開き直しと同じ排他で守る
         stack.enter_context(store.approval_lock(st, machine_id))
@@ -523,18 +544,20 @@ def answer(
             held = _answered_with_key(v, a.key)
             if held is not None:
                 replayed = _same(held, a, machine_id)
-                send = _ensure_trail(conn, v, held, a, post)
+                send = _ensure_trail(conn, v, held, a, ports.post)
+            elif not stopped and _needs_stopped_work(v, a, st.root):
+                return None
             else:
-                got, by, last, done = _begin_answer(conn, v, a, observe, st.root, text)
+                got, by, last, done = _begin_answer(conn, v, a, ports.observe, st.root, text)
         if held is not None:
             send()
             return replayed
         if done is None:
             # 投稿前の記録を確定してから投稿する（投稿の後に止まっても、DB から取り消す承認を指せる）
             if by is not None:
-                _post_trail(got.q, a, got.seen, by, post)
+                _post_trail(got.q, a, got.seen, by, ports.post)
             if got.planned is not None:
-                reopening.revoke_approvals(got.planned, revoke)
+                reopening.revoke_approvals(got.planned, ports.revoke)
             with store.transaction(st) as conn:
                 done = _commit_answer(conn, v, got, last)
     return _answer_result(v, got, done)

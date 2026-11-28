@@ -16,6 +16,7 @@ import pytest
 import sqlalchemy as sa
 
 from ndf import contracts
+from ndf.core import merge_approval
 from ndf.domains.records import cli, mvv_gate
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress import command, definition, invoke, model, stage_inputs, store
@@ -44,6 +45,14 @@ def test_the_flat_plan_input_keeps_todays_outcome(repo: Path, notes: list[tuple[
     out = mvv_gate.gate(repo, "design", _plan_inputs(repo), _hub(5, DOCS), Ask(FOLLOW))
     assert (out["gate"], out["skip"], out["why"], out["verdict"]["verdict"], out["head"]) == ("design", True, [], "follow", HEAD)
     assert [n for n, _ in notes] == [5]
+
+
+def test_no_skip_keeps_the_gate_and_writes_no_approval_trail(repo: Path, notes: list[tuple[int, str]]) -> None:
+    # #4520: 承認でない回答が残る工程の判定は、省ける判定でも省かず、承認の証跡の行を書かない
+    out = mvv_gate.gate(repo, "design", {**_plan_inputs(repo), mvv_gate.NO_SKIP: True}, _hub(5, DOCS), Ask(FOLLOW))
+    assert (out["skip"], out["why"]) == (False, [mvv_gate.OBJECTION_KEPT]) and "target" not in out
+    ((_, text),) = notes
+    assert merge_approval.MERGE_MARK not in text
 
 
 def test_the_gate_steps_are_steps_of_the_named_stage_documents() -> None:

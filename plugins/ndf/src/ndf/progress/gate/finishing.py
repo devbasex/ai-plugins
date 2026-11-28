@@ -19,7 +19,7 @@ from ndf.contracts import result
 from ndf.core import merge_approval
 from ndf.progress import approval_decide, command, definition, invoke, model, reopening, run, stages, store
 from ndf.progress.gate.answering import github_observe, shared_hub
-from ndf.progress.gate.asking import check_stage_pr, gate_result, gate_stage, off_wait_question, question, show_question
+from ndf.progress.gate.asking import check_stage_pr, gate_result, gate_stage, off_wait_question, pr_url, question, show_question
 from ndf.progress.gate.rechecking import standing
 from ndf.progress.gate.targets import TargetReader
 from ndf.progress.run_view import FINISH_HELD
@@ -253,13 +253,17 @@ def ask_question(st: store.Store, machine_id: str, stage: str, pr: Optional[int]
         repo = None
     number = _question_pr(v, found, step.gate, pr)
     m = run.decide(v)
-    if m.action == run.Action.GATE and m.stage is not None and m.stage.name == stage and invoke.is_listen(step):
-        q = question(v, m, repo=repo)
-    else:
-        q = off_wait_question(v, stage, pr=number, repo=repo)
+    waits = m.action == run.Action.GATE and m.stage is not None and m.stage.name == stage and invoke.is_listen(step)
+    q = question(v, m, repo=repo) if waits else off_wait_question(v, stage, pr=number, repo=repo)
+    # 対象の PR の記録が無い待ちの質問は、`--pr` の番号を対象にする
+    adopted = waits and q.pr is None and number is not None
+    if adopted:
+        q = replace(q, pr=number, pr_url=pr_url(repo, number))
+    if adopted or not waits:
         check_stage_pr(v, found, step.gate, q.pr, observe(q, material=False))
     q, path = show_question(st.root, v, q, observe, private=st.private)
-    return gate_result(q, {"machine_id": machine_id, "stage": stage}, path)
+    # 結果の `tool` は打ったコマンド（回答のルートは `ndf answer` のまま）
+    return gate_result(q, {"machine_id": machine_id, "stage": stage}, path, tool=command.TOOL)
 
 
 def _question_pr(v: run.View, stage: stages.StageDef, gate: Optional[str], pr: Optional[int]) -> Optional[int]:

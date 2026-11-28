@@ -278,7 +278,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `judge_no_release` | `progress/delivery_decide.py` | 新設 | `(bodies: Sequence[str], *, sprint_pr: int) -> Verdict` | 最新の記録が `デプロイなし` かを確かめる |
 | `pick_run` | `progress/delivery_decide.py` | 新設 | `(runs: Sequence[Mapping]) -> Mapping \| None` | `push`、無ければ `workflow_dispatch` の最新を選ぶ |
 | `GitHub.workflow_runs` | `adapters/github.py` | 新設 | `(self, workflow: str, *, branch: str, head_sha: str) -> list[dict]` | workflow のファイル名・ブランチ・コミットで実行の一覧を読む |
-| `gate` | `domains/records/mvv_gate.py` | 変更 | `(root, gate_name, inputs, hub, ask=llm.ask, warnings=None, *, no_skip: bool = False) -> dict` | `no_skip` なら省かない。理由に「承認でない回答が残る」を足す |
+| `gate` | `domains/records/mvv_gate.py` | 変更 | `(root, gate_name, inputs, hub, ask=llm.ask, warnings=None) -> dict` | `inputs` の `no_skip`（コマンドの `--no-skip` が足す）が真なら省かない。理由に「承認でない回答が残る」を足す |
 | `_recorded` | `domains/records/mvv_gate.py` | 変更 | `(hub, number, outcome, where) -> dict` | 判定の記録だけを書き、証跡の行を書かない。投稿の識別子（判定の入力と結論から作る）を本文に入れ、同じ書き手の編集されていないコメントに同じ識別子があれば投稿せずに使う |
 
 - コマンドの引数: `ndf records mvv gate` に `--no-skip` を足し、`--expect-pr` を `--gate design` でも受ける

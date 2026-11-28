@@ -12,7 +12,9 @@ import merge_hub
 import pytest
 from result_json import last_result
 
-from ndf.progress import command, gate, model, run, store
+from ndf import contracts
+from ndf.contracts import result
+from ndf.progress import command, gate, invoke, model, run, store
 from ndf.progress.gate import answering, entry, finishing
 
 
@@ -180,17 +182,26 @@ def test_a_change_request_of_a_pending_stage_keeps_the_later_stages_waiting(repo
     """受け入れ条件 7。`auto` でも MVV 判定で省かず人へ問う。"""
     command.main(["new", "s1", "--mode", "standard", "--issues", str(manual.ISSUE), "--pace", pace])
     tid = last_result(capsys.readouterr().out)["metrics"]["machine_id"]
+    values = manual.lanes.values(repo, "sprint/s1")
     if pace == "auto":
         skip = {"gate": "design", "skip": True, "verdict": None, "why": [], "holds": [], "head": merge_hub.HEAD}
-        values = {**manual.lanes.values(repo, "sprint/s1"), "mvv_gate": skip}
-        env.script["design-mvv"] = [lambda r: manual.lanes.ok_result(r, values)]
+        values = {**values, "mvv_gate": skip}
     manual._before_design(capsys, repo, tid)
     shown = _question(capsys, tid, DESIGN, "--pr", str(DESIGN_PR))
     assert _give(capsys, repo, shown, "request_changes", "k-pending")["status"] == "ok"
+    judged: list[list[str]] = []
+
+    def judge(r):
+        judged.append(list(r.args["argv"]))
+        return manual.lanes.ok_result(r, values)
+
+    env.script["design-mvv"] = [judge]
 
     out = manual._next(st, tid, repo, env)
 
     assert out["status"] == "gate" and out["metrics"]["stage"] == DESIGN, out
+    # 判定は承認の証跡を書くので、否定の回答が残る間は省かない指定で打つ
+    assert [argv[-1] for argv in judged] == ["--no-skip"], judged
     assert manual._state(st, tid, DETAIL) == "pending"
 
 
@@ -234,6 +245,35 @@ def test_a_waiting_stage_returns_its_question(repo, st, env, board, capsys):
     out = _question(capsys, tid, DESIGN)
 
     assert out["status"] == "gate" and out["metrics"]["gate"]["id"] == shown["metrics"]["gate"]["id"], out
+    schema = contracts.load_json("schemas/io/progress.result.schema.json")
+    assert out["tool"] == schema["properties"]["tool"]["const"]
+    assert set(out["metrics"]) <= set(schema["properties"]["metrics"]["properties"]), out
+    assert out["routes"]["approved"]["argv"][1] == "answer", out
+
+
+def test_a_waiting_gate_without_a_recorded_pr_uses_the_given_pr(repo, st, env, board, capsys):
+    """設計 PR の記録が無い待ちでは、`--pr` の PR を提示し、回答の受理と承認の記録でも同じ PR を使う。"""
+    values = manual.lanes.values(repo, "sprint/s1")
+    del values["design_pr"]
+
+    def without_pr(r):
+        outputs = {k: values[k] for k in r.outputs if k in values}
+        return invoke.finished(r, result.result("plan", "ok", f"{r.step} を終えた", outputs=outputs))
+
+    for step in ("design", "design-review", "design-mvv", "design-reading"):
+        env.script[step] = [without_pr]
+    tid = manual._new(capsys)
+    manual._before_design(capsys, repo, tid)
+    assert manual._next(st, tid, repo, env)["metrics"]["gate"]["pr"] is None
+
+    shown = _question(capsys, tid, DESIGN, "--pr", str(DESIGN_PR))
+    assert shown["status"] == "gate" and shown["metrics"]["gate"]["pr"] == DESIGN_PR, shown
+    assert manual._next(st, tid, repo, env)["metrics"]["gate"]["pr"] == DESIGN_PR
+    out = _give(capsys, repo, shown, "approved", "k-given")
+
+    assert out["status"] == "ok", out
+    assert run.read(st, tid).context()["design_pr"] == DESIGN_PR
+    assert env.hub.comments_of[DESIGN_PR]
 
 
 def test_a_late_answer_is_checked_like_a_waiting_one(repo, st, env, board, capsys):
@@ -256,6 +296,19 @@ def test_a_late_answer_is_checked_like_a_waiting_one(repo, st, env, board, capsy
 
     assert again["metrics"]["replayed"] is True, again
     assert len(run.read(st, tid).events) == count and len(env.hub.comments_of[DESIGN_PR]) == comments
+
+
+def test_the_work_lock_is_taken_again_when_the_answer_turns_late(repo, st, env, board, capsys, monkeypatch):
+    """承認でない回答が待ちへの回答でないと分かったら、作業が流れている間は何も書かずに断る。"""
+    tid = _finished_with_later(st, capsys, repo, env)
+    shown = _question(capsys, tid, DESIGN)
+    before = len(run.read(st, tid).events)
+
+    with store.run_lock(st, tid):
+        out = _give(capsys, repo, shown, "request_changes", "k-busy")
+
+    assert out["status"] == "stopped" and "ndf progress wait" in out["cause"]["detail"], out
+    assert len(run.read(st, tid).events) == before
 
 
 def test_a_question_made_before_another_record_is_refused(repo, st, env, board, capsys):

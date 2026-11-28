@@ -833,9 +833,19 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
     if step.kind == stages.READING_KIND:
         work_dir.mkdir(parents=True, exist_ok=True)
         run = _reading_run(v, s, step, run, work_dir)
+    run = _kept_by_objection(v, s, step, run)
     res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
     d.env.forget()  # 流したステップは PR へ push しうるので、次は対象を読み直してから比べる
     return _step_draft(v, s, step, prog, res)
+
+
+def _kept_by_objection(v: View, s: stages.StageDef, step: stages.StepDef, run: invoke.StageRun) -> invoke.StageRun:
+    """承認でない回答が残る設計の MVV 判定は `--no-skip` で打つ。判定は省くと決めた時点で承認の証跡を PR へ書くので、
+    後の承認ゲートで省かないだけでは、人の再承認の前にマージできてしまう（#4520）。"""
+    gate = approval_decide.DESIGN_GATE
+    if step.id != model.MVV_GATE_STEPS[gate] or not approval_decide.objection_remains(v.stage_events(s.name), gate):
+        return run
+    return replace(run, args={**run.args, "argv": [*run.args["argv"], "--no-skip"]})
 
 
 def _stage_output(s: stages.StageDef, prog: StepProgress) -> tuple[dict[str, Any], dict[str, Any]]:

@@ -61,6 +61,7 @@ from ndf.progress.gate.asking import (
     gate_result,
     question,
     show_question,
+    with_presented_pr,
 )
 from ndf.progress.gate import finishing
 from ndf.progress.gate.rechecking import Recheck, git_docs_only, recheck, reread, standing, verifier
@@ -84,7 +85,7 @@ def present(
         repo: Optional[str] = Git(cwd).remote_repo()
     except GitError:
         repo = None
-    q, path = show_question(st.root, v, question(v, m, repo=repo), observe, private=st.private)
+    q, path = show_question(st.root, v, with_presented_pr(st.root, question(v, m, repo=repo)), observe, private=st.private)
     metrics = dict(out["metrics"]) if isinstance(out.get("metrics"), dict) else {}
     warned = list(out["warnings"]) if "warnings" in out else []
     try:

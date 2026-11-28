@@ -45,6 +45,9 @@ DESIGN, RELEASE = "design", "release"
 GATE_STEPS = MVV_GATE_STEPS
 GATE_STAGES = {DESIGN: "design", RELEASE: "deploy"}
 # 省けない区分（リリース）の判定が why に足す理由（#3959 の決定 3）
+# 工程の入力に `ndf records mvv gate --no-skip` が足すキー（工程の定義の inputs ではない）
+NO_SKIP = "no_skip"
+OBJECTION_KEPT = "承認でない回答（変更要求か却下）が残るので、MVV 判定で省かない"
 RELEASE_KEPT = "リリース承認ゲートは、保留を読む PR の範囲が決まるまで（#4105）MVV 判定で省かない"
 # 手元のどの参照にも MVV の設定が無いときの理由（`mvv_declared_locally`。#3959）
 NO_DECL = "MVV の設定が手元の HEAD にもリモートの追跡ブランチにも無いため、MVV 判定を打たない"
@@ -443,21 +446,25 @@ def _judged(
         return j.posted_if_current(j.stopped("llm_no_answer", why, noted=False, holds=rec.holds))
     why = [] if unrecorded is None else ["判定を記録（mvv-validation.jsonl）に書けない: " + j.text("records_unwritable", unrecorded)]
     verdict = _verdict(row)
-    skip, why = _skip_decision(facts, verdict, gate_name, inputs.get("pace"), recorded=unrecorded is None, why=why)
+    skip, why = _skip_decision(facts, verdict, gate_name, inputs, recorded=unrecorded is None, why=why)
     outcome = _bound(j, rows, mm.gate_outcome(gate_name, verdict, skip, why, rec.holds, pull=(number, j.pull.head_sha)))
     return j.posted_if_current(outcome)
 
 
 def _skip_decision(
-    facts: MvvFacts, verdict: Any, gate_name: str, pace: Any, *, recorded: bool, why: Sequence[str]
+    facts: MvvFacts, verdict: Any, gate_name: str, inputs: Mapping[str, Any], *, recorded: bool, why: Sequence[str]
 ) -> tuple[bool, list[str]]:
     """手順 (8): 承認ゲートを省くかと、省かない理由（`why` の後ろへ足したもの）を返す。副作用は無い。
 
-    進め方 `pace` と区分 `gate_name` は省くかだけを決める。記録に行の無い判定（`recorded` が偽）では省かない。
+    工程の入力の進め方 `pace`・`NO_SKIP` と区分 `gate_name` は省くかだけを決める。記録に行の無い判定（`recorded` が偽）では
+    省かない。省くかはここで決まり、承認の証跡の行は省くと決めた判定の記録にだけ入る。
     """
     ok, reasons = may_skip(facts, verdict, gate_name)
     skip = ok and recorded
     out = [*why, *reasons]
+    pace = inputs.get("pace")
+    if inputs.get(NO_SKIP):
+        skip, out = False, [*out, OBJECTION_KEPT]
     if pace not in MVV_PACES:
         skip, out = False, [f"進め方 {pace} は承認ゲートを MVV 判定で省かない", *out]
     if gate_name not in MVV_SKIP_GATES:
@@ -599,7 +606,8 @@ def gate(
 
     判定のステップはモードを問わず流れ（工程の出力 `mvv_gate` をどのモードでもそろえる）、承認ゲートを持たないモードでは判定しない。
     PR を読む前の失敗だけをここで受け、判定を持たない結果にする（PR を読んだ後の失敗は `_judged` が受ける）。
-    MVV 判定の記録に読めない行があれば `warnings` へ足す。
+    MVV 判定の記録に読めない行があれば `warnings` へ足す。`inputs` の `NO_SKIP` が真なら、承認でない回答が残る工程の
+    判定として省かず、承認の証跡も書かない（#4520）。
     """
     if not has_gate(inputs.get("mode"), gate_name):
         return mm.stop_outcome(gate_name, "no_gate", [f"モード {inputs.get('mode')} は承認ゲート {gate_name} を持たない"])

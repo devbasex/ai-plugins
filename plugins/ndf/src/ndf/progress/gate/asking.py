@@ -158,6 +158,15 @@ def waiting(v: run.View, **kw: Any) -> Optional[Question]:
     return question(v, m, **kw) if m.action == run.Action.GATE else None
 
 
+def with_presented_pr(root: Path, q: Question) -> Question:
+    """対象の PR の記録が無い待ちの質問は、`ndf progress question --pr` で提示した PR を対象にする（提示・回答の受理・記録で
+    同じ対象を使う）。提示していなければ `q` のまま。"""
+    if q.pr is not None:
+        return q
+    shown = read_presented(root, q)
+    return q if shown.pr is None else replace(q, pr=shown.pr, pr_url=pr_url(shown.repo, shown.pr))
+
+
 def gate_stage(v: run.View, stage: str) -> tuple[stages.StageDef, stages.StepDef]:
     """回答を記録できる承認ゲートの工程と、その承認ゲートのステップ。持たない・無効・中止の工程は、代わりの操作を添えて断る。"""
     found = v.snap.stage(stage)
@@ -233,13 +242,15 @@ def describe(q: Question) -> dict[str, Any]:
     }
 
 
-def gate_result(q: Question, metrics: Optional[Mapping[str, Any]] = None, presentation: Optional[Path] = None) -> dict[str, Any]:
-    """承認ゲートで止まった結果 JSON（status gate・質問・回答ごとのルート）。"""
+def gate_result(
+    q: Question, metrics: Optional[Mapping[str, Any]] = None, presentation: Optional[Path] = None, *, tool: str = TOOL
+) -> dict[str, Any]:
+    """承認ゲートで止まった結果 JSON（status gate・質問・回答ごとのルート）。`tool` は結果を返すコマンド。"""
     where = f"（{q.pr_url}）" if q.pr_url else ""
     summary = f"{q.label}の承認ゲートが回答を待っている: 工程 {q.stage}{where}"
     out = {**(metrics if metrics is not None else {}), "gate": describe(q)}
     return result.result(
-        TOOL, result.GATE, summary, metrics=out, routes=routes(q), presentation_path=str(presentation) if presentation else None
+        tool, result.GATE, summary, metrics=out, routes=routes(q), presentation_path=str(presentation) if presentation else None
     )
 
 

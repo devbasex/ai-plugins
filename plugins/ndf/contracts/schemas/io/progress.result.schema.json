@@ -44,6 +44,10 @@
           "type": "string",
           "description": "手のステップ（next・wait・work。ステップの手のときだけ）"
         },
+        "gate": {
+          "type": "object",
+          "description": "承認ゲートの質問（question）"
+        },
         "seqs": {
           "type": "array",
           "items": {
