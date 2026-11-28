@@ -8,18 +8,28 @@
 - 設計書: [issue-4543-design.md](./issue-4543-design.md)。詳細設計は [issue-4543-design-detail.md](./issue-4543-design-detail.md) にある。下の「決定」はこの設計書の「決定の記録」の番号である
 - モード: `standard`（機能追加で、AI への指示を組むプログラムと、配る手順書を変えるため）
 
-## 設計承認で利用者が決めること
+## 設計承認の結果と、Task 6 の前に残る判断
 
-次の 2 件は、利用者がまだ選んでいない。この実装計画では決めず、設計承認で利用者が決める。
+[設計 PR 4703](https://github.com/devbasex/ai-plugins/pull/4703) は、コミット `09167d277` を利用者が承認して 2026-11-28 にマージした。承認資料は「このまま承認すると、2 件は直さないまま実装へ進みます」と示していた。そのため、次の 2 件は要求と設計の今の記述のまま実装する。
 
-| 決めること | 選択肢 | 影響するタスク |
+- 受け入れ条件 3 で確かめる対象の PR は絞らない
+- PR の本文から承認資料へ写した行の扱いは変えない（工程を止めて、PR の本文の直しを求める）
+
+承認の後に足した詳細設計と決定 7 の直しは、[PR 4730](https://github.com/devbasex/ai-plugins/pull/4730)（2026-11-28 時点で未マージ）にある。その AI によるレビューは上限の回数で止まり、決定 7（要求仕様のコピーへの指摘の扱い）に次の 6 件が残った。**Task 6 は、利用者がこの判断をした後に着手する。** ほかのタスクは影響を受けない。
+
+| 指摘 | 中身 | 状態 |
 | --- | --- | --- |
-| 受け入れ条件 3 で確かめる対象の PR を絞るか | 絞る / 絞らない | 実装のタスクは無い。リリースの後の確かめの対象が変わる |
-| PR の本文から承認資料へ写した行に「現状と案を区別できない」指摘が出たとき、不合格にするか | 案 A: 不合格にせず、資料の末尾に載せる / 案 B: 今の設計のまま、工程を止める / 案 C: バージョンや書き手を記録して、対象の PR だけ止める | Task 7 の承認資料の手順書。案 A と案 C を選んだときは、下の修正対象の表に無いファイルが要るので、着手の前にこの計画を直す |
+| r1-1・r2-1・r3-1 | 修正担当が課題の本文と PR の本文を、人の承認なしに書き替える | 人の承認を待つ |
+| r2-2・r2-5・r2-6 | 同時の書き込み、AI 任せの切り出しと比較、中断した後の再開 | 見送り。利用者が次の案から選ぶ |
+
+- 案 A（レビューの推奨）: 修正担当は本文を書き替えず、直す案を添えて利用者の判断が要る指摘（`needs_user`）で返す
+- 案 B: 本文をそろえるコマンドを新しく作る。別の課題に分け、それまで案 A にする形もある
+
+案 A を選んだときは、着手の前に決定 7、詳細設計の「cross-review の指示」、この計画の Task 6 と修正対象を直す。
 
 ## 修正対象
 
-設計書の「どこを変えるか」の表から引き写した。パスは `plugins/ndf/` からの相対である。「足す」と書いた行は、表に無いファイルである。
+詳細設計書の「地図」から引き写した。パスは `plugins/ndf/` からの相対パスである。「足す」と書いた行は、地図の表に無いファイルである。
 
 | ファイル | 変える中身 | タスク |
 | --- | --- | --- |
@@ -28,15 +38,18 @@
 | `src/ndf/domains/records/reading.py` | 指示の JSON の任意のキー `distinction` を受け取る | 3 |
 | `skills/document-rebuild/SKILL.md` | `distinction` を `false` にする文書を足す | 3 |
 | `src/ndf/core/worker.py`、`contracts/worker/kinds.json` | 4 つの作業にだけ小見出しを渡す | 4 |
+| `src/ndf/contracts/worker_kinds.py`（足す） | 作業の定義のキーの説明に `distinction` を足す。詳細設計の「作業の AI への指示」が定めているためである | 4 |
 | `src/ndf/core/issue_docs.py`、`src/ndf/domains/docrebuild/drive.py` | 要求仕様のコピーの名前の形を `issue_docs.py` の 1 か所にする | 5 |
 | `src/ndf/domains/crossreview/drive.py`、`src/ndf/domains/crossreview/fixer.py` | 小見出しの渡し分けと、要求仕様のコピーの扱いの指示 | 5・6 |
 | `contracts/data/review-criteria.json` | 要求仕様のコピーへの指摘の扱いの文 | 6 |
 | `src/ndf/domains/crossreview/cli.py`、`src/ndf/domains/crossreview/settings.py` | 解決した対象のリポジトリを起動の引数に持たせる | 6 |
 | `src/ndf/domains/crossreview/criteria_decide.py` | 上の文を読み出す関数。指摘の基準の表を読むのがこのモジュールで、`fixer.py` から表を直接読まないため（今の `fixer_ci_only` と同じ形） | 6 |
 | `skills/design/references/design-template.md`、`skills/pr/SKILL.md`、`skills/requirements-design/SKILL.md`、`skills/development-workflow/references/approval-request.md`、`skills/decision-request/SKILL.md`、`skills/document-style/SKILL.md` | 小見出しを指す指示を足す | 7 |
-| `tests/contracts/test_writing.py`、`tests/domains/records/test_reading.py`、`tests/worker/test_rules.py`、`tests/domains/crossreview/test_crossreview_documents.py`（足す） | 理由は、設計書の「テスト設計」の渡し分けと決定 7 をテストで確かめるためである | 1・3〜6 |
+| `tests/contracts/test_writing.py`、`tests/domains/records/test_reading.py`、`tests/worker/test_rules.py`、`tests/domains/crossreview/test_crossreview_documents.py`、`tests/core/test_issue_docs.py`（足す） | 理由は、設計書の「テスト設計」と詳細設計の「単体テストの観点」をテストで確かめるためである | 1・3〜6 |
 
 ## タスク分解
+
+着手の前に `main` を取り込む。この計画を書いた後の `main` では、`crossreview/drive.py`、`crossreview/fixer.py`、`core/worker.py` が変わっている。
 
 テストはこのリポジトリの設定（`.ndf/project.json` の `test.ci.only`）に従い、手元では打たず、PR の CI で合否を読む。静的解析は手元で打ってよい。文書の文言を照合するテストは書かない。
 
@@ -47,6 +60,7 @@
   - `tests/domains/records/test_reading.py`
   - `tests/worker/test_rules.py`
   - `tests/domains/crossreview/test_crossreview_documents.py`
+  - `tests/core/test_issue_docs.py`
 - **変更内容:** 読み手役への指示に型の章が入ること、文書を書く作業と cross-review の指示に基準の全文が入ることを、3 つの経路の出力で確かめる。今のテストが確かめている振る舞いは足さない
 - **満たす受け入れ条件:** 5
 - **進め方:** 今の振る舞いを縛るテストを足し、製品のコードを変えずに通ることを CI で見る
@@ -73,15 +87,16 @@
   - `reading.py` の `prompt` は、任意のキー `distinction`（真偽。省けば真）を受け取り、偽なら小見出しを外す
   - `document-rebuild` の SKILL.md の `prompt` の JSON の説明に、確定仕様、変更履歴、README・利用者への案内では `false` にすると足す
 - **満たす受け入れ条件:** 2・5
-- **進め方:** 失敗するテスト → 通す最小実装 → 整理。テストは、`distinction` が無ければ小見出しがあること、`false` なら無いこと、小見出しの見出しの文を変えた本文でも外れることを見る。配っている基準から目印を消すと落ちる形にする
+- **進め方:** 失敗するテスト → 通す最小実装 → 整理。テストは、`distinction` が無ければ小見出しがあること、`false` なら無いこと、小見出しの見出しの文を変えた本文でも外れることを見る。配っている基準から目印を消すと落ちる形にする。目印が対にならない本文で `CriteriaBroken` になることと、真偽でない `distinction` を拒むことも見る
 
 ### Task 4: 作業の AI への指示で、小見出しを渡し分ける
 
 - **対象ファイル:**
   - `contracts/worker/kinds.json`
   - `src/ndf/core/worker.py`
+  - `src/ndf/contracts/worker_kinds.py`
   - `tests/worker/test_rules.py`
-- **変更内容:** `design`・`design-detail`・`design-check-fix`・`requirements` の定義にだけ、小見出しを渡す値を足す。`kinds.json` の `summary` にそのキーの説明を足す。ほかの作業へ渡す基準の全文からは小見出しを外す（決定 6）
+- **変更内容:** `design`・`design-detail`・`design-check-fix`・`requirements` の定義にだけ、小見出しを渡す値を足す。`kinds.json` の `summary` と `worker_kinds.work_kinds` の docstring にそのキーの説明を足す。ほかの作業へ渡す基準の全文からは小見出しを外す（決定 6）
 - **満たす受け入れ条件:** 1・5
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -93,13 +108,16 @@
   - `src/ndf/domains/crossreview/drive.py`
   - `src/ndf/domains/crossreview/fixer.py`
   - `tests/domains/crossreview/test_crossreview_documents.py`
+  - `tests/core/test_issue_docs.py`
 - **変更内容:**
   - 要求仕様のコピーの名前の形を `issue_docs.py` に置き、`docrebuild/drive.py` の `REQUIREMENTS_FILE` の定義をやめてそこを参照する
   - PR の変更に、課題の設計書も要求仕様のコピーも無ければ、レビュー担当と修正担当の指示の基準の全文から小見出しを外す。呼ぶ側で外すので、`document_block` のシグネチャは変えない
 - **満たす受け入れ条件:** 5
-- **進め方:** 失敗するテスト → 通す最小実装 → 整理。設計書がある、要求仕様のコピーだけがある、どちらも無い、の 3 つの変更で指示を組んで確かめる。子のプロセスは起動しない
+- **進め方:** 失敗するテスト → 通す最小実装 → 整理。設計書がある、要求仕様のコピーだけがある、どちらも無い、の 3 つの変更で指示を組んで確かめる。子のプロセスは起動しない。要求仕様のコピーを名前で見分ける関数は `test_issue_docs.py` で確かめる。`drive.py` への追加は 6 行以内にする（下の「リスクと対処」）
 
 ### Task 6: 修正担当の指示に、要求仕様のコピーへの指摘の扱いを足す
+
+着手の前に、上の「設計承認の結果と、Task 6 の前に残る判断」の回答が要る。下は今の決定 7 のとおりに書いている。
 
 - **対象ファイル:**
   - `contracts/data/review-criteria.json`
@@ -122,7 +140,7 @@
   - `skills/development-workflow/references/approval-request.md`
   - `skills/decision-request/SKILL.md`
   - `skills/document-style/SKILL.md`
-- **変更内容:** 設計書の「どこを変えるか」の表の各行のとおりに指示を足す（決定 1・3・5）。表は写さず、小見出しを指す。仕組みが読み取る見出しは変えない。承認資料の手順書で、PR の本文から写した行の扱いは、上の「設計承認で利用者が決めること」の結果に従う
+- **変更内容:** 設計書の「どこを変えるか」の表の各行のとおりに指示を足す（決定 1・3・5）。表は写さず、小見出しを指す。仕組みが読み取る見出しは変えない。承認資料の手順書では、PR の本文から写した行の扱いを変えない
 - **満たす受け入れ条件:** 1・4・5
 - **進め方:** 文書だけの変更なのでテストを書かない。次を確かめる
   - 参照切れの検査を打つ（`python3 scripts/check-markdown-links.py --root .`）
@@ -148,7 +166,7 @@
 
 | 時機 | 対象 | 理由 |
 | --- | --- | --- |
-| 実装の前（準備のリファクタリング） | しない | 触るプログラムの行数は `crossreview/drive.py` 986、`core/worker.py` 978、`docrebuild/drive.py` 537、`records/reading.py` 446、`crossreview/fixer.py` 227、`writing.py` 35、`issue_docs.py` 30。同じファイルを触るタスクは多くて 8 件中 2〜3 件。関係するテストのファイルのテストの数は、`test_crossreview_fixer_sessions.py` 20、`test_rules.py` 15、`test_reading.py` 14、`test_crossreview_documents.py` 12、`test_writing.py` 5。足すのは条件の分岐が数行ずつで、構造は変えない |
+| 実装の前（準備のリファクタリング） | しない | 2026-11-28 の `main` で測った行数は、`crossreview/drive.py` 994、`core/worker.py` 980、`docrebuild/drive.py` 537、`records/reading.py` 446、`worker_kinds.py` 286、`crossreview/fixer.py` 270、`writing.py` 35、`issue_docs.py` 30。1,000 行に近い 2 つを変えるタスクは、`drive.py` が 8 件中 2 件、`worker.py` が 1 件。テストの数は `test_crossreview_fixer_sessions.py` 20、`test_rules.py` 15、`test_reading.py` 14、`test_crossreview_documents.py` 12、`test_writing.py` 5、`test_issue_docs.py` 4。足すのは値と条件の分岐が数行ずつで、構造は変えない |
 | 実装の中 | 各タスクで行う | `tdd-cycle` のリファクタリングのステップ |
 | スプリントの終わり（cross-refactoring） | 3 つの経路の「基準の本文を受け取り、条件で小見出しを外す」処理 | `reading.py`・`worker.py`・`crossreview` の 3 か所が同じ形の処理を持つため、まとめられるかを見る |
 
@@ -156,7 +174,7 @@
 
 | リスク | 対処 |
 | --- | --- |
-| `crossreview/drive.py`（986 行）と `core/worker.py`（978 行）は、ファイルの行数の安全網（1,000 行）に近い | `drive.py` への追加は十数行に抑える。超えるときは、上限に合わせて切らず、責務で分ける形をこの計画に足してから進める |
+| `crossreview/drive.py`（`main` で 994 行）と `core/worker.py`（980 行）は、ファイルの行数の安全網（1,000 行を超えると検査が落ちる）に近い | `drive.py` への追加は、値の 2 つと分岐を合わせて 6 行以内にする。収まらないときは、上限に合わせて行を詰めたり切ったりせず、実装を止めて、責務で分けるリファクタリングを先に通すかの判断を仰ぐ |
 | `approval-request.md` は 487 行で、Markdown の分割の基準（500 行まで）に近い | 足すのは 2〜3 行にし、直し方は `document-rebuild` の SKILL.md を指す |
 | [テンプレートの形をそろえる PR 4548](https://github.com/devbasex/ai-plugins/pull/4548)（未マージ）が、手順書 6 ファイルのうち設計書のテンプレート・PR・要求・承認資料の手順書と、`kinds.json`・`document-rebuild` の SKILL.md を変える | 着手の時に状態を読む。先にマージされていれば main を取り込み、「承認する人が読む欄」が `design-writing.md` へ移っていれば、そちらへ指示を足す |
 | 読み手役の指摘が期待どおりに出ない | 小見出しの言い回しを直して読ませ直す。中身（設計書の表）を変える必要があれば、設計へ戻す |
@@ -169,4 +187,4 @@
 
 - [ ] 受け入れ条件 1・2・4・5 を満たし、条件ごとに検証手段と結果が対応している（1・4 は手順書の差分、2 は Task 8 の結果、5 は見出しの差分と CI の全体テスト）
 - [ ] CI のテストと静的解析が通っている
-- [ ] 受け入れ条件 3 は、この変更を含むバージョンを出した後に確かめる（要求仕様の「リリース後の確認の計画」。対象の PR を絞るかは設計承認で利用者が決める）
+- [ ] 受け入れ条件 3 は、この変更を含むバージョンを出した後に確かめる（要求仕様の「リリース後の確認の計画」。対象の PR は絞らない）
