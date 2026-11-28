@@ -489,6 +489,15 @@ def test_issue_3780_the_filed_urls_of_left_findings_are_kept_in_the_state() -> N
     assert not carry.carry(run, carry.Prior(comments=[remark]))
 
 
+def test_issue_3780_the_urls_of_findings_redacted_to_the_same_text_are_all_kept() -> None:
+    urls = ["https://github.com/o/r/issues/100", "https://github.com/o/r/issues/101"]
+    rows = [{**_OPEN_NO_THREAD, "id": f"r1-{n}", "parked": True, "issue": url} for n, url in enumerate(urls, 1)]
+    remark = _record(rows, {}, "2026-11-20T00:00:00Z")
+    run = types.SimpleNamespace(data={}, journal=FindingJournal(), warnings=[], process=[], mvv=None, mvv_items=())
+    assert carry.carry(run, carry.Prior(comments=[remark]))
+    assert run.data[leftover.CARRIED_URLS] == urls
+
+
 def test_issue_3780_an_unconfirmed_url_is_published_and_restored_apart_from_a_confirmed_one() -> None:
     url = "https://github.com/o/r/issues/100"
     row = {**_OPEN_NO_THREAD, "outcome": fin.UNRESOLVED, "prior_issue": url}

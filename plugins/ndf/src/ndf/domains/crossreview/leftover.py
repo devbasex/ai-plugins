@@ -126,7 +126,11 @@ def unconfirmed_target(main: Path, state_repo: Optional[str], make: Callable[[Pa
 
 
 def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """起票の候補の行（直さずに残した未解決の指摘のうち、まだ起票しておらず、起票する種類か引き継いだ起票の URL を持つもの）。"""
+    """起票の候補の行（直さずに残した未解決の指摘のうち、まだ起票しておらず、起票する種類か引き継いだ起票の URL を持つもの）。
+
+    状態に引き継いだ URL（`CARRIED_URLS`）があれば、どの指摘の Issue かは読むまで分からないので、残した指摘をすべて照合の
+    候補にする。起票する種類を持たない行は照合だけで、起票はしない（`_Filing.sort`）。"""
+    carried = bool(store.list_of(data, CARRIED_URLS))
     return [
         row
         for row in store.list_of(data, store.FINDINGS)
@@ -135,7 +139,7 @@ def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
         and row.get("outcome") == fin.UNRESOLVED
         and not row.get(Filed.URL)
         and isinstance(row.get("text"), str)
-        and (leftover_decide.files_issue(row) or row.get(Filed.PRIOR))
+        and (carried or leftover_decide.files_issue(row) or row.get(Filed.PRIOR))
     ]
 
 

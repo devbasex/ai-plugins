@@ -481,6 +481,17 @@ def test_issue_3780_a_carried_url_is_found_by_the_issue_mark_without_the_text_of
     assert github.created() == 2
 
 
+def test_issue_3780_a_finding_no_longer_filed_still_gets_its_carried_issue_back() -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    again = Run(github, _row(protect=[]), _row("r2-2", text="別の指摘", protect=[]))
+    again.data[leftover.CARRIED_URLS] = [url]
+    assert again.go() == [] and again.row[Filed.URL] == url
+    other = again.data["findings"][1]
+    assert Filed.URL not in other and Filed.ERROR not in other and github.created() == 1
+
+
 @pytest.mark.parametrize(("protect", "created"), [pytest.param(["user_data"], 1, id="filed-kind"), pytest.param([], 0, id="other-kind")])
 def test_issue_3780_a_carried_url_of_a_deleted_issue_is_dropped(protect: list, created: int) -> None:
     github = FakeGitHub()
