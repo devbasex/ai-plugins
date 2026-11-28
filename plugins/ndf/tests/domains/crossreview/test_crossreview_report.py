@@ -233,6 +233,26 @@ def test_issue_3780_2_report_writes_nothing_without_a_matching_target(
     assert (hub.made, hub.comments, hub.port.opened, hub.port.resolved) == (0, [], [], [])
 
 
+@pytest.mark.parametrize("changed", [{"target_repo": "acme/other"}, {"current_pr": 9}])
+def test_report_writes_nothing_when_the_state_read_in_the_lock_differs_from_the_connection(
+    tmp_path: Path, capsys, monkeypatch, hub, changed: dict
+) -> None:
+    from ndf.domains.crossreview import cli
+
+    path, state = tmp_path / store.STATE_NAME.format(pr=7), {**_state(), "target_repo": "acme/repo"}
+    store.write_object(path, state)
+
+    @contextlib.contextmanager
+    def lock(pr: int) -> Iterator[None]:
+        store.write_object(path, {**state, **changed})
+        yield
+
+    monkeypatch.setattr(cli, "HUB", lambda *a: hub.make(*a)._replace(publishing=lock))
+    code, got = run_cli(capsys, "report", "--state-dir", str(tmp_path), "--pr", "7")
+    assert code != 0 and "接続先" in got["cause"]["detail"]
+    assert (hub.comments, hub.port.opened, hub.port.resolved) == ([], [], [])
+
+
 def test_issue_3780_2_run_saves_the_repository_of_the_confirmed_pr(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     read = threads.ReadPr(f"o/r#{PR}", BRANCH, sh(wt, "rev-parse", "HEAD").strip(), "o/r")
     monkeypatch.setattr(hub.port, "read_pr", lambda: read)
@@ -701,7 +721,7 @@ def test_issue_3780_a_rerun_checks_the_target_once_and_reuses_the_comment_while_
     (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"issues": {"primary": "github"}}), encoding="utf-8")
     github.fail[("POST", "repos/o/r/issues")] = 422
     rerun()
-    # 未設定から github への変更は照合せずに公開し直し、リモートの照合は起票の前の 1 回だけ
+    # 未設定から github への変更は確認せずに公開し直し、リモートの確認は起票の前の 1 回だけ
     assert checked == ["target"]
     checked.clear()
     rerun()

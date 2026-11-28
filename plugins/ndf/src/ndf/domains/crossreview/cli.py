@@ -94,6 +94,7 @@ class Hub(NamedTuple):
     clean: Callable[[Sequence[str]], Sequence[str]] = _redacted
     publishing: Callable[[int], ContextManager[Any]] = lambda pr: contextlib.nullcontext()
     leftovers: Optional[Callable[[int], leftover.Port]] = None
+    repo: str = ""  # 接続先のリポジトリ（`<所有者>/<リポジトリ>`）
 
 
 def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -> Hub:
@@ -133,7 +134,7 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
         # 利用者の読み取りはスレッドの書き手の確認と同じ `GitHub.viewer` を使う（1 回だけ読む）
         return leftover.GitHubIssues(hub, publisher, gh.GitHubError, hub.viewer, block=gate.block)
 
-    return Hub(comment, port, port, clean, publishing, leftovers)
+    return Hub(comment, port, port, clean, publishing, leftovers, slug)
 
 
 # PR へ書く口を作る（テストは偽物に差し替える。#3939）
@@ -561,15 +562,19 @@ def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: 
     origin = hub.publishing(ref.origin_pr) if ref.origin_pr != ref.current_pr else contextlib.nullcontext()
     with origin:
         save = lambda: store.write_object(ref.path, data)  # noqa: E731
-        # ロックの待ちと GitHub の照合の間に許可が取り消されうるので、照合の前と書く直前に読み直す
+        # ロックの待ちと GitHub の確認の間に許可が取り消されうるので、確認の前と書く直前に読み直す
         declared = lambda: leftover.primary_of(main)  # noqa: E731
-        filed = leftover.file_issues(data, ref, hub.leftovers(ref.current_pr), save, primary, manual=filer.manual, declared=declared)
+        filed = leftover.file_issues(data, ref, hub.leftovers(ref.current_pr), save, manual=filer.manual, declared=declared)
     return filed
 
 
 def _publish(ref: store.StateRef, final: Optional[str], warnings: Optional[Sequence[str]], hub: Hub, filer: Filer) -> tuple[str, list[str]]:
     """同じ PR の公開のロックの中で、状態ファイルの読み取りから記録のコメントと状態の保存までを行う。"""
     data = store.read_state(ref)
+    # 接続先は公開のロックの前の状態で決めたので、読み直した状態の対象と違えば、何も書かずに止める（#3780）
+    target, current = store.repo_of(data), data.get(store.CURRENT_KEY, ref.origin_pr)  # noqa: NDF502 ファイル: 巻き直していなければ今の番号は元の番号
+    if (target and target.casefold() != hub.repo.casefold()) or current != ref.current_pr:
+        raise ReportFailed(f"状態の対象 {target} の PR #{current} が接続先 {hub.repo} の PR #{ref.current_pr} と違う")
     if warnings is None:
         # ロックを待つ間に別の起動が MVV の記録を書けていれば、失敗の注意を載せない
         warnings = [drive.RECORDS_UNWRITTEN] if store.MVV_RECORD_ERROR in data else []
@@ -741,7 +746,7 @@ def _report(
     skipped = None
     published = got.reused and isinstance(previous, str) and data.get(report_decide.PUBLISHED_KEY) == now
     # 起票に失敗するか起票を見送った指摘があれば、同じ状態でも公開し直して起票を打ち直す。今も同じ理由か同じ設定
-    # （起票先が GitHub でない）で見送るだけなら、公開済みの記録を使う。リモートの照合は、起票先の設定が github で、
+    # （起票先が GitHub でない）で見送るだけなら、公開済みの記録を使う。リモートの確認は、起票先の設定が github で、
     # 前回の見送りが設定によるものでないときだけにする（ほかは公開の中で確認する。#3780）
     if published and (rows := leftover.candidates(data)):
         if leftover.SKIPPED not in data:
@@ -753,7 +758,7 @@ def _report(
             if primary != leftover.GITHUB:
                 published = note == skipped
             else:
-                # 設定が変わって起票できるようになった打ち直しは、照合せずに公開し直す
+                # 設定が変わって起票できるようになった打ち直しは、確認せずに公開し直す
                 published = skipped not in (None, leftover.UNDECLARED) and _filing_target(data, main)[1] == skipped
     if published:
         items.append({"kind": "comment", "number": cfg.pr, "url": previous})

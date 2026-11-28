@@ -130,8 +130,8 @@ class Run:
         self.saved: list[str] = []
         self.port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
 
-    def go(self, primary: str | None = "github", **options: Any) -> list[str]:
-        return leftover.file_issues(self.data, self.ref, self.port, lambda: self.saved.append(json.dumps(self.data)), primary, **options)
+    def go(self, **options: Any) -> list[str]:
+        return leftover.file_issues(self.data, self.ref, self.port, lambda: self.saved.append(json.dumps(self.data)), **options)
 
     @property
     def row(self) -> dict[str, Any]:
@@ -252,7 +252,6 @@ def test_only_candidates_call_github() -> None:
     github = FakeGitHub()
     others = (_row(parked=False), _row(protect=["authz"]), _row(outcome="fixed"), _row(issue="u"))
     assert Run(github, *others).go() == []
-    assert Run(github).go("markdown") == [] and Run(github).go(None) == []
     assert github.calls == [] and github.viewed == 0
 
 

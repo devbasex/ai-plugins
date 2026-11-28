@@ -165,7 +165,7 @@ class FakeHub:
             return previous or f"https://github.com/{slug}/pull/{pr}#issuecomment-{len(self.comments)}"
 
         return cli.Hub(
-            comment, self.port.at, self.port.at, lambda texts: self.clean(texts), lambda pr: contextlib.nullcontext(), self.leftovers
+            comment, self.port.at, self.port.at, lambda texts: self.clean(texts), lambda pr: contextlib.nullcontext(), self.leftovers, slug
         )
 
 

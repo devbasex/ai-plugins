@@ -432,7 +432,11 @@ class _Filing:
         if at is not None:
             self.create(fresh, at)
         # 結果の書き込み（作ったとき、または作るものが無く、検索と一覧で見つけた URL を記録へ足すとき）
-        if (at is not None or (found and not fresh)) and not self.revoked():
+        return self._close(at is not None or bool(found and not fresh))
+
+    def _close(self, record: bool) -> list[str]:
+        """`record` なら起票の記録へ結果を書き（許可が取り消されていれば書かない）、注意を返す。"""
+        if record and not self.revoked():
             try:
                 self.write()
             except Exception as exc:  # noqa: BLE001 ネットワーク: 次の公開が、記録の識別値を検索と一覧で確かめる
@@ -463,20 +467,19 @@ def file_issues(
     ref: store.StateRef,
     port: Port,
     save: Callable[[], None],
-    primary: Optional[str],
     *,
     manual: bool = False,
     declared: Optional[Declared] = None,
 ) -> list[str]:
     """起票の候補を起票し、行の `issue`・`issue_error`・`prior_issue` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて
-    注意を返す。`primary` が `github` でないか候補が無ければ、GitHub を呼ばない。`manual` は利用者が打った公開である。
+    注意を返す。候補が無ければ GitHub を呼ばない。呼び手は起票先が `github` のときだけ呼ぶ。`manual` は利用者が打った公開である。
     `declared` を渡せば、GitHub を読む前と、起票の記録と Issue を書く直前に許可を読み直し、取り消されていれば残りを見送る。
 
     呼び手は、今の PR の番号と元の PR の番号の公開のロック（同じ番号なら 1 回）を持つ。"""
     rows: dict[str, list[dict[str, Any]]] = {}
     for row in candidates(data):
         rows.setdefault(leftover_decide.identity(ref.origin_pr, row["text"]), []).append(row)
-    if primary != GITHUB or not rows:
+    if not rows:
         return []
     return _Filing(data, ref, port, save, rows, declared=declared).run(manual)
 
