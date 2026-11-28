@@ -5,7 +5,8 @@
     ndf loop acceptance check  --issue <N>... [--criteria '<課題>:<条件の番号>']... | --no-criteria
 
 - record: 今の表へ渡した番号の行を足すか置き換える（番号は本文の `## 受け入れ条件` にある番号だけを受ける）。
-  課題ごとのロック（Git の共通ディレクトリの下）の中で読み・書き・読み直し、消されていれば 3 回まで当て直す（#3879）
+  課題ごとのロックの中で読み・書き・読み直し、消されていれば 3 回まで当て直す（#3879。書き換えは進捗記録と共通の
+  `ndf.core.issue_body.rewrite`）
 - check: 区分の記録の無い受け入れ条件が残れば、条件ごとの欠け（gaps）を付けて incomplete で止まる（受け入れ条件の
   無い課題は照らすものが無いので ok）。`--issue` を繰り返すと課題ごとに照らしてまとめ、`--criteria` に組のある課題は
   その条件だけを照らす（レビューの単位が満たす条件だけを見る、#3879）。`--no-criteria` は条件を持たない単位のためで、
@@ -20,14 +21,14 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from filelock import FileLock
-
-from ndf import cli, identity
+from ndf import cli
 from ndf.adapters import git, github
 from ndf.contracts import limits, result
+from ndf.core import issue_body
 from ndf.domains.loop import acceptance_decide as acc
 
 # 結果の tool は親のサブコマンド `ndf loop` の名前
@@ -42,7 +43,7 @@ def _hub(cwd: Path) -> github.GitHub:
 
 def read_body(cwd: Path, issue: int) -> str:
     """課題の本文（GitHub から読む）。テストが差し替える。"""
-    return _hub(cwd).issue_body(issue).body
+    return issue_body.GitHubBodies(_hub(cwd)).read(issue)
 
 
 def read_bodies(cwd: Path, issues: Sequence[int]) -> dict[int, str]:
@@ -61,8 +62,20 @@ def read_bodies(cwd: Path, issues: Sequence[int]) -> dict[int, str]:
 
 def write_body(cwd: Path, issue: int, body: str) -> None:
     """課題の本文を書き換える。テストが差し替える。"""
-    hub = _hub(cwd)
-    hub.rest("PATCH", f"/repos/{hub.repo}/issues/{int(issue)}", {"body": body})
+    issue_body.GitHubBodies(_hub(cwd)).write(issue, body)
+
+
+@dataclass(frozen=True)
+class _Bodies:
+    """`read_body`・`write_body` を本文の保存先（`issue_body.BodyStore`）にする。"""
+
+    cwd: Path
+
+    def read(self, number: int) -> str:
+        return read_body(self.cwd, number)
+
+    def write(self, number: int, body: str) -> None:
+        write_body(self.cwd, number, body)
 
 
 def _items(checks: dict[int, acc.Check]) -> list[dict[str, Any]]:
@@ -83,63 +96,50 @@ def parse_pre_merge(values: list[str]) -> dict[int, str]:
     return out
 
 
-def lock_path(cwd: Path, issue: int) -> Path:
-    """課題ごとの記録のロック。Git の共通ディレクトリの下に置き、同じリポジトリの worktree のすべてが共有する。"""
-    return git.Git(cwd).common_dir() / identity.load().name / f"acceptance-{int(issue)}.lock"
-
-
-def _unsettled(body: str, want: dict[int, acc.Check | None]) -> list[int]:
-    """`want` の条件のうち、本文の記録がそろっていない番号。`want` は書く本文の表から読み戻した値で、手段の表記の
-    変換（リテラルの `<br>` が改行に戻るなど）があっても読み戻し同士で比べる（#3886 の r1-1）。"""
-    have = acc.read_checks(body)
-    return [n for n, c in sorted(want.items()) if have.get(n) != c]
-
-
 def reapply_limit() -> int:
     """当て直す回数。"""
     return int(limits.value(REAPPLY, "count"))
-
-
-def _reapply(cwd: Path, issue: int, body: str, want: dict[int, acc.Check | None], pre: dict[int, str], post: list[int]) -> tuple[str, bool]:
-    """`want` の記録が本文にそろうまで書いて読み直す（最初の 1 回と当て直し `REAPPLY` の回数まで）。
-    最後に読んだ本文と、1 度でも書いたかを返す。ロックは呼び手が持つ。"""
-    current, wrote = body, False
-    for _ in range(1 + reapply_limit()):
-        if not _unsettled(current, want):
-            break
-        write_body(cwd, issue, acc.recorded_body(current, pre, post))
-        wrote = True
-        current = read_body(cwd, issue)
-    return current, wrote
 
 
 def _record(a: argparse.Namespace) -> dict[str, Any]:
     pre = parse_pre_merge(a.pre_merge)
     if not pre and not a.post_release:
         raise acc.AcceptanceError("--pre-merge か --post-release を 1 つ以上渡す")
-    path = lock_path(a.cwd, a.issue)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # 読む・書く・読み直すを課題ごとに直列にする。取れなければ Timeout（store_in_use）で何も書かない（#3879）
-    with FileLock(str(path), timeout=limits.seconds("locks.append")):
-        body = read_body(a.cwd, a.issue)
-        # 今回書く行だけを単独で読み戻す。本文の後続の表に同じ番号の古い行があっても、それで入力の誤りを隠さない（#3886 の r3-1）
-        want = acc.recorded_rows(body, pre, a.post_release)
-        # 読み戻せない行（手段が `—` で手段なしと読まれるなど）は、記録が無いまま ok で返らないよう止める（#3886 の r2-1）
-        lost = sorted(n for n, c in want.items() if c is None)
-        if lost:
-            raise acc.AcceptanceError(f"条件 {lost} の記録が表から読み戻せない（手段に `—` だけを渡していないか）")
-        current, wrote = _reapply(a.cwd, a.issue, body, want, pre, a.post_release)
-        left = _unsettled(current, want)
-    checks = acc.read_checks(current)
-    if left:
+    # 今回書く行を表から読み戻した値。ロックの中で最初に読んだ本文から 1 回だけ作る
+    want: dict[int, acc.Check | None] = {}
+
+    def unsettled(body: str) -> list[int]:
+        """記録がそろっていない番号。読み戻し同士で比べるので、手段の表記の変換（リテラルの `<br>` が改行に戻るなど）が
+        あっても書き直さない（#3886 の r1-1）。"""
+        if not want:
+            # 今回書く行だけを単独で読み戻す。本文の後続の表に同じ番号の古い行があっても、それで入力の誤りを隠さない（#3886 の r3-1）
+            want.update(acc.recorded_rows(body, pre, a.post_release))
+            # 読み戻せない行（手段が `—` で手段なしと読まれるなど）は、記録が無いまま ok で返らないよう止める（#3886 の r2-1）
+            lost = sorted(n for n, c in want.items() if c is None)
+            if lost:
+                raise acc.AcceptanceError(f"条件 {lost} の記録が表から読み戻せない（手段に `—` だけを渡していないか）")
+        have = acc.read_checks(body)
+        return [n for n, c in sorted(want.items()) if have.get(n) != c]
+
+    got = issue_body.rewrite(
+        _Bodies(a.cwd),
+        a.cwd,
+        a.issue,
+        lambda body: acc.recorded_body(body, pre, a.post_release),
+        verify=lambda body: not unsettled(body),
+        retries=reapply_limit(),
+    )
+    checks = acc.read_checks(got.body)
+    if not got.settled:
         # ロックの外の書き手が古い本文で上書きし続けた
+        left = unsettled(got.body)
         gaps = [{"kind": "criterion", "name": f"{a.issue}:{n}", "reason": "書いた記録が本文から消され続けた"} for n in left]
         detail = (
             f"#{a.issue}: 当て直しを {reapply_limit()} 回しても条件 {left} の記録が本文にそろわない（ロックの外の書き手が上書きしている）"
         )
         return result.stopped(TOOL, "incomplete", detail, items=_items(checks), gaps=gaps)
     pre_n = sum(c.kind == acc.PRE_MERGE for c in checks.values())
-    state = "記録した" if wrote else "変更なし"
+    state = "記録した" if got.wrote else "変更なし"
     return result.result(
         TOOL, result.OK, f"#{a.issue}: {state}（マージ前 {pre_n} 件・リリース後 {len(checks) - pre_n} 件）", _items(checks)
     )

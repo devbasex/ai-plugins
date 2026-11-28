@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -307,9 +308,10 @@ class Hub:
         self.patched.append(number)
 
 
-def test_record_cleanup_stage_records_skips_and_fails_per_issue() -> None:
+def test_record_cleanup_stage_records_skips_and_fails_per_issue(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     hub = Hub(bodies={1: _body(" "), 2: _body("x"), 3: ""}, closing={10: [1, 2], 11: [2, 3]}, broken={3})
-    got = cleanup_stage.record_cleanup_stage(hub, [11, 10])  # type: ignore[arg-type]
+    got = cleanup_stage.record_cleanup_stage(hub, [11, 10], tmp_path)  # type: ignore[arg-type]
     assert [(i["issue"], i["result"]) for i in got] == [(1, "recorded"), (2, "skipped"), (3, "failed")]
     assert hub.patched == [1] and "- [x] クリーンアップ" in hub.bodies[1]
 
