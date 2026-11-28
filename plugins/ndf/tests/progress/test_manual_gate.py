@@ -15,7 +15,7 @@ import pytest
 from result_json import last_result
 
 from ndf.progress import command, gate, invoke, run, store
-from ndf.progress.gate import answering, finishing, targets
+from ndf.progress.gate import answering, finishing, release, targets
 
 ISSUE = 4520
 DESIGN = "設計"
@@ -399,3 +399,63 @@ def test_a_human_approval_in_the_flow_is_asked_again_when_production_changes(rep
 
     assert out["status"] == "gate" and out["metrics"]["gate"]["id"] != shown["metrics"]["gate"]["id"], out
     assert "design-merge" not in env.calls
+
+
+def test_a_rejected_hand_finish_after_a_failed_merge_asks_again_and_drops_the_old_approval(repo, st, env, capsys):
+    tid = _approved_in_the_flow(st, capsys, repo, env)
+    _merge(env, merge_hub.OTHER)
+    assert _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR})["status"] == "ok"
+    assert gate.approved_head(run.read(st, tid), "design") is None
+    assert run.approved_seen(run.StageAnswers(run.read(st, tid), DESIGN), st.root) is None
+    shown = _next(st, tid, repo, env)
+    _answer(st, tid, repo, env, shown, "rejected", key="k-reject")
+    _next(st, tid, repo, env)
+    finishing.main(["retry", tid, DESIGN, "--reason", "やり直す"])
+    capsys.readouterr()
+    env.calls.clear()
+
+    out = _next(st, tid, repo, env)
+
+    assert out["status"] == "gate" and out["metrics"]["step"] == "design-gate", out
+    assert "design-merge" not in env.calls
+
+
+def test_a_hand_finished_deploy_does_not_issue_a_release_request(repo, st, env, capsys, monkeypatch):
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+    assert _finish(capsys, repo, tid, "Pull Request", {"pr": 8})["status"] == "ok"
+    assert _finish(capsys, repo, tid, DEPLOY, _released_values(repo))["status"] == "ok"
+    monkeypatch.setattr(release, "_plan_request", lambda *a: pytest.fail("リクエストを出した"))
+    q = release.Question("q", tid, DEPLOY, "release-gate", "release", ("approved",), 8)
+
+    assert release.request_release(st, run.read(st, tid), q, {}) is None
+
+
+def test_a_skipping_mvv_verdict_does_not_replace_a_recorded_approval(repo, st, env, capsys):
+    tid = _approved_in_the_flow(st, capsys, repo, env)
+    finishing.main(["retry", tid, DESIGN, "--reason", "やり直す"])
+    capsys.readouterr()
+    # 出力の失敗の後と同じ形にして、判定のステップから初めから流し直す
+    for kind, payload in (("started", {"inputs": {}}), ("failed", {"step": None})):
+        run._write(st, tid, run.model.EventDraft(kind, "workflow", DESIGN, payload=payload, rev=1))
+    finishing.main(["retry", tid, DESIGN, "--reason", "やり直す"])
+    capsys.readouterr()
+    held = {**lanes.values(repo, "sprint/s1")["mvv_gate"], "skip": True, "holds": [], "head": merge_hub.HEAD}
+    report = run.result.result("script", run.result.OK, "省ける", outputs={"mvv_gate": held})
+    env.script["design-mvv"] = [lambda r: invoke.finished(r, report)]
+    _merge(env)
+
+    _next(st, tid, repo, env)
+
+    answered = [ev.draft.payload["by"] for ev in run.read(st, tid).row_events(DESIGN) if ev.draft.kind == run.ANSWERED]
+    assert answered == ["human:reviewer"] and _state(st, tid, DESIGN) == "finished"
+
+
+def test_reread_is_refused_for_a_hand_finished_wait(repo, st, env, capsys):
+    tid = _held_design(st, capsys, repo, env)
+    before = _kinds(st, tid, DESIGN)
+
+    out = answering.reread(st, tid, repo, env.env)
+
+    assert out["status"] == "stopped" and "--later reopen" in out["cause"]["detail"], out
+    assert _kinds(st, tid, DESIGN) == before

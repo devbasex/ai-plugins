@@ -107,7 +107,15 @@ class StepProgress:
         self.notes, self.held_finish = p.get("notes"), None
 
     def _finish_held(self, ev: model.Event, p: dict[str, Any]) -> None:
-        """手で終えた回答待ち。次のステップを承認ゲートにして、回答の数え始めをここへ移す。"""
+        """手で終えた回答待ち。次のステップを承認ゲートにして、回答の数え始めをここへ移す。
+
+        前に済んだ承認ゲートと後ろのステップの完了は無効にする。承認されずに打ち直しても、前の承認でマージ・リリースへ
+        進まないためである。承認ゲートは待ちを持ったステップにして、MVV 判定で省かない。"""
+        gate = p["step"]
+        if gate in self.done:
+            at = self.finished_at[gate]
+            self.done = {step: report for step, report in self.done.items() if self.finished_at[step] < at}
+        self.held.add(gate)
         self.held_finish, self.waiting, self.answer, self.anchor = p, None, None, ev.seq
 
     def _answered(self, ev: model.Event, p: dict[str, Any]) -> None:

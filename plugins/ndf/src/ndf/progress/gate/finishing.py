@@ -205,8 +205,8 @@ def _standing_answer(v: run.View, read: _StageOutput, cwd: Path, root: Path) -> 
     設計の工程で、承認した PR が未マージなら `model.Refused`。"""
     gate_step = next(s for s in read.stage.steps if s.kind == stages.GATE_KIND)
     rows = v.row_events(read.stage.name)
-    found = approval_decide.latest_answer(rows, gate_step.gate, approval_decide.approval_boundary(rows, gate_step.id))
-    if found is None or run.event_payload(found)["answer"] != run.APPROVED:
+    found = approval_decide.counted_approval(rows, gate_step.gate, gate_step.id)
+    if found is None:
         return None
     # 手で書いた出力の値を、文脈より先に承認の対象にする
     context = {**v.context(), **read.outputs}

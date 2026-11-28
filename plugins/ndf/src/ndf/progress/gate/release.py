@@ -67,8 +67,10 @@ def request_release(st: store.Store, v: run.View, q: Question, env: Mapping[str,
     レーンならリクエストの事象（`plan.open_request`）。どちらでもなければ出さない（人が `ndf answer` で回答する）。
     リクエストを出したときに見た対象は承認資料の隣に残し、回答を書くときの見た対象にする。`q.target` は提示した承認の
     対象（`present` が `write_material` の後に渡す）で、リクエストの ID と見た対象の保存先は提示ごとに分かれる。
+    手で終えた回答待ちでは出さない。
     """
-    if q.gate != RELEASE_GATE:
+    # 手で終えた回答待ちは手で行ったデプロイを閉じるためのものなので、まとめたリリースのリクエストを出さない
+    if q.gate != RELEASE_GATE or run.step_progress(v, q.stage).held_finish is not None:
         return None
     seen = _seen_path(st.root, q)
     if not seen.exists():

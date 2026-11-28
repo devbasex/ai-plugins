@@ -10,7 +10,8 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf.progress import invoke, model, stages
-from ndf.progress.run_view import ANSWERED, FINISH_HELD, REOPENED, STEP_EVENT, View, event_payload
+from ndf.progress.folding import step_progress
+from ndf.progress.run_view import ANSWERED, STEP_EVENT, View, ends_approvals, event_payload
 
 # 設計承認ゲートの区分（承認した PR のマージまで確かめる承認ゲート）
 DESIGN_GATE = next(g for g in model.table()["gates"] if g == "design")
@@ -51,9 +52,7 @@ def approval_boundary(rows: Sequence[model.Event], gate_step: str) -> int:
     """工程の事象の列で、承認を数え始める事象の番号（直近の開き直し・手で終えた回答待ち・質問の出し直し。無ければ 0）。"""
     cut = 0
     for ev in rows:
-        p = event_payload(ev)
-        reasked = ev.draft.kind == STEP_EVENT and p.get("step") == gate_step and p.get("status") == "waiting" and p.get("report") is None
-        if ev.draft.kind in (REOPENED, FINISH_HELD) or reasked:
+        if ends_approvals(ev) and (ev.draft.kind != STEP_EVENT or event_payload(ev).get("step") == gate_step):
             cut = ev.seq
     return cut
 
@@ -66,6 +65,31 @@ def latest_answer(rows: Sequence[model.Event], gate: Optional[str], after: int) 
         if ev.seq > after and ev.draft.kind == ANSWERED and p.get("kind") == invoke.LISTEN and p.get("gate") == gate:
             found = ev
     return found
+
+
+def counted_approval(rows: Sequence[model.Event], gate: Optional[str], gate_step: str) -> Optional[model.Event]:
+    """対象を読まずに決まる承認の候補。境界より後の最新の回答が、数える承認でなければ None。"""
+    found = latest_answer(rows, gate, approval_boundary(rows, gate_step))
+    if found is None:
+        return None
+    p = event_payload(found)
+    return None if p.get("answer") != invoke.APPROVED or model.mvv_answer_void(p, gate) else found
+
+
+def target_pr(v: View, stage: stages.StageDef, gate: Optional[str]) -> Optional[int]:
+    """ステートマシンの今の記録で、工程 `stage` の承認ゲート `gate` の対象の PR。"""
+    prog = step_progress(v, stage.name)
+    return gate_pr(v.context(), stage, prog.done, gate, by_hand=prog.held_finish is not None)
+
+
+def saw_another_pr(v: View, stage: str, answer: Mapping[str, Any]) -> bool:
+    """回答の payload が見た PR が、工程の今の対象の PR と違うか（どちらかが分からなければ偽）。"""
+    seen, gate = answer.get("seen"), answer.get("gate")
+    held = seen.get("pr") if isinstance(seen, Mapping) else None
+    if held is None or not isinstance(gate, str):
+        return False
+    number = target_pr(v, v.snap.stage(stage), gate)
+    return number is not None and number != held
 
 
 def content_differences(now: Mapping[str, Any], seen: Mapping[str, Any]) -> list[str]:
@@ -99,9 +123,7 @@ def binding_differences(now: Mapping[str, Any], seen: Mapping[str, Any]) -> list
     ]
 
 
-def differences(
-    answer: Mapping[str, Any], now: Mapping[str, Any], *, gate: Optional[str], carried_head: Optional[str]
-) -> list[str]:
+def differences(answer: Mapping[str, Any], now: Mapping[str, Any], *, gate: Optional[str], carried_head: Optional[str]) -> list[str]:
     """回答の payload が承認として数えられない理由と、見た対象と今の対象の違い。空なら有効。
 
     `carried_head` は、承認の後に文書だけが加わって出し直さなかった head。今の側だけが承認の対象を持つ回答
@@ -114,6 +136,8 @@ def differences(
     seen: Mapping[str, Any] = held if isinstance(held, Mapping) else {}
     if carried_head is not None and now.get("head") == carried_head:
         seen = {**seen, "head": carried_head}
-    unbound = [f"{name}（見た値 無し・今の値 {now[key]}）" for key, name in _binding_names().items() if key in now and seen.get(key) is None]
+    unbound = [
+        f"{name}（見た値 無し・今の値 {now[key]}）" for key, name in _binding_names().items() if key in now and seen.get(key) is None
+    ]
     contents = content_differences({**now, model.MATERIAL_KEY: None}, seen)
     return [*unbound, *binding_differences(now, seen), *contents]

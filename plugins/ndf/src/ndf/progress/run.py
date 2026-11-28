@@ -495,7 +495,6 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
         _finish_stage(d, v, m.stage)
     else:
         d.write(*_run_step(d, v, m.stage, m.step))
-        d.env.forget()  # ステップが PR へ push しうるので、次は対象を読み直してから比べる
     if decide(read(d.st, d.machine_id)).stage != m.stage:
         d.synced()
     return None
@@ -798,6 +797,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
         work_dir.mkdir(parents=True, exist_ok=True)
         run = _reading_run(v, s, step, run, work_dir)
     res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
+    d.env.forget()  # 流したステップは PR へ push しうるので、次は対象を読み直してから比べる
     return _step_draft(v, s, step, prog, res)
 
 

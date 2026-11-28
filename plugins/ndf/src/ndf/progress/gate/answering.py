@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Any, Optional, Protocol
 
 from ndf.adapters.git import Git, GitError
-from ndf.adapters.github import GitHub, GitHubError, client
+from ndf.adapters.github import GitHub, client
 from ndf.contracts import result
-from ndf.core import actors, approval_words, merge_approval, production_merge
+from ndf.core import actors, approval_words, merge_approval
 from ndf.progress import approval_decide, command, invoke, lane, model, plan, run, stages, store
 from ndf.progress.gate.asking import (
     ORGANIZER_ANSWERS,
@@ -45,12 +45,13 @@ ACTORS = actors.ACTORS
 
 
 class Observe(Protocol):
-    """今の対象を読む口（質問を渡し、PR の head・本文と題の sha256 と承認資料の sha256 を返す）。`material` が偽なら資料を読まない。"""
+    """今の対象を読む口（質問を渡し、PR の head・本文と題の sha256 と承認資料の sha256 を返す）。`material` が偽なら資料を読まない。
+    マージ先の設定（承認の対象と本番へ反映されるか）は、`material` か `config` が真のときに読む。"""
 
-    def __call__(self, q: Question, *, material: bool = True) -> Target: ...
+    def __call__(self, q: Question, *, material: bool = True, config: bool = False) -> Target: ...
 
 
-def no_observe(q: Question, *, material: bool = True) -> Target:
+def no_observe(q: Question, *, material: bool = True, config: bool = False) -> Target:
     """今の対象を読まない（比べない）。"""
     return Target()
 
@@ -71,9 +72,7 @@ def shared_hub(cwd: Path, hub: Optional[Callable[[], GitHub]] = None) -> Callabl
     return get
 
 
-def github_observe(
-    cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = None, reader: Optional[TargetReader] = None
-) -> Observe:
+def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = None, reader: Optional[TargetReader] = None) -> Observe:
     """今の対象を読む: PR の head の SHA・本文と題の sha256（GitHub の同じ 1 回の取得。#4446）、その head の承認資料の
     sha256、承認の対象（ベースリポジトリ・番号・マージ先）と本番へ反映されるか（#4409）。読めなければ回答を受けない（`model.Refused`）。
 
@@ -87,9 +86,9 @@ def github_observe(
     push すると古い head を提示し、回答が必ず断られる。"""
     held = reader
 
-    def observe(q: Question, *, material: bool = True) -> Target:
+    def observe(q: Question, *, material: bool = True, config: bool = False) -> Target:
         # 渡された読み手が無ければ、毎回読み直す
-        got = (held if held is not None else TargetReader(shared_hub(cwd, hub))).read(q, config=material).target
+        got = (held if held is not None else TargetReader(shared_hub(cwd, hub))).read(q, config=material or config).target
         if not material:
             return got
         path = material_path(root, replace(q, target=Target(got.head)))
@@ -498,9 +497,9 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     q = question(v, replace(m, action=run.Action.GATE))
     # head を先に照らし、資料はその結論に要る 1 つだけを読む（#3959）。本文と題は head と同じ 1 回の取得で比べる（#4446）
     seen = Target.from_dict(p.get("seen"))
-    # マージ先の設定は、承認の対象を持つ回答のときだけ読む
-    now = observe(q, material=seen.base is not None)
-    texts = replace(now, head=None, material=None).differs(seen)
+    # マージ先の設定は、承認の対象を持つ回答のときだけ読む。資料は下の `_material_moved` が照らす
+    now = observe(q, material=False, config=seen.base is not None)
+    texts = replace(now, head=None).differs(seen)
     if now.binding() is not None:  # 今の対象が分かるときだけ比べる（ほかの項目と同じ）
         texts += approval_decide.binding_differences(now.as_dict(), seen.as_dict())
     if p.get("by") == model.MVV_SERVICE:
@@ -651,6 +650,12 @@ def reread(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[st
     m = run.decide(v)
     if m.action != run.Action.GATE or m.stage is None or m.step is None or m.progress is None or not invoke.is_listen(m.step):
         return result.stopped(TOOL, "precondition", f"ステートマシン {machine_id} の承認ゲートは人の回答を待っていない")
+    if m.progress.held_finish is not None:
+        detail = (
+            f"工程 {m.stage.name} は手で終えて承認を待っていて、承認の前の確認はやり直せない。直すなら "
+            f"ndf progress retry {machine_id} {m.stage.name} --reason <理由> --later reopen を打つ"
+        )
+        return result.stopped(TOOL, "precondition", detail)
     stage, step, anchor = m.stage, m.step, m.progress.anchor
 
     def build(now: run.View) -> list[model.EventDraft]:

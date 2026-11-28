@@ -205,9 +205,7 @@ def generated_outputs(stage_id: str) -> tuple[str, ...]:
     return tuple(meta["generated_outputs"]) if "generated_outputs" in meta else ()
 
 
-def check_stage_output(
-    stage: stages.StageDef, obj: Any, *, handwritten: bool = False
-) -> tuple[list[str], list[tuple[str, Optional[str]]]]:
+def check_stage_output(stage: stages.StageDef, obj: Any, *, handwritten: bool = False) -> tuple[list[str], list[tuple[str, Optional[str]]]]:
     """工程の出力を確かめ、誤りと、欠けた文脈のキーと取り場所の組（工程の定義の `outputs` の順）を返す。
 
     手で書いた出力（`handwritten`）には、NDF が作るキー（`generated_outputs`）を求めない。"""
