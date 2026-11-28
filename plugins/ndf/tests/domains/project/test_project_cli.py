@@ -232,7 +232,7 @@ def test_issue_4580_write_keeps_the_flow(repo, tmp_path, capsys, last_result):
     }
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text(json.dumps({"version": 1, "workflow": flow}, ensure_ascii=False), encoding="utf-8")
-    measured = _measure_file(tmp_path, {"ci": {"status": "measured", "value": {"required_checks": []}}}, repo)
+    measured = _checks_file(tmp_path, repo)
     answers = _answers(tmp_path, {"test": {"value": {"suites": []}}})
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
     last_result(capsys.readouterr().out)
@@ -382,6 +382,11 @@ def _measured(value) -> dict:
     return {"status": "measured", "value": value}
 
 
+def _checks_file(tmp_path: Path, repo: Path, checks: list[str] | None = None) -> Path:
+    """必須チェックだけを持つ測定の結果。"""
+    return _measure_file(tmp_path, {"ci": _measured({"required_checks": checks or []})}, repo)
+
+
 def _write_cli(repo: Path, measure: Path, answers: Path | None = None) -> int:
     return cli.main(["write", "--root", str(repo), "--measure", str(measure), *(["--answers", str(answers)] if answers else [])])
 
@@ -447,8 +452,7 @@ def test_an_old_settings_is_stale_not_broken(repo, capsys, last_result, doc):
 
 
 def test_the_second_write_writes_nothing_even_when_the_inputs_change(repo, tmp_path, capsys, last_result):
-    measure = _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)
-    assert _write_cli(repo, measure) == 0
+    measure = _first_write(repo, tmp_path)
     lines = capsys.readouterr().out.splitlines()
     record, decl = _record(repo), _settings(repo)
     assert f"書いた: {files.path(repo, 'project-analysis')}（解析の記録。入力 1 件）" in lines
@@ -462,16 +466,16 @@ def test_the_second_write_writes_nothing_even_when_the_inputs_change(repo, tmp_p
     assert last_result(capsys.readouterr().out)["metrics"]["written"] == 0
     (repo / "pyproject.toml").write_text("[project]\nname = 'y'\n", encoding="utf-8")
     _git(repo, "commit", "-qam", "change")
-    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)) == 0
+    assert _write_cli(repo, _checks_file(tmp_path, repo)) == 0
     written = last_result(capsys.readouterr().out)["metrics"]["files"]
     assert str(repo / ".ndf" / "project.json") not in written and str(files.path(repo, "project-analysis")) in written
     assert _judged(capsys, last_result, repo)[0] == 0
 
 
 def test_restoring_only_the_settings_is_stale_but_hand_values_are_not(repo, tmp_path, capsys, last_result):
-    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)) == 0
+    _first_write(repo, tmp_path)
     first = (repo / ".ndf" / "project.json").read_text(encoding="utf-8")
-    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": ["lint"]})}, repo)) == 0
+    assert _write_cli(repo, _checks_file(tmp_path, repo, ["lint"])) == 0
     capsys.readouterr()
     decl = _settings(repo)
     decl["materials"] = {"unknown": "人が直した"}  # analysis.written は変えない
@@ -503,7 +507,7 @@ def test_write_moves_an_old_settings_keeping_who_wrote_each_item(repo, tmp_path,
 
 def test_write_moves_an_old_settings_without_written_and_required_checks(repo, tmp_path, capsys, last_result):
     _declare(repo, None, {"version": 1, "ci": {"provider": "github-actions", "workflows": []}, "analysis": OLD_ANALYSIS})
-    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": ["lint"]})}, repo)) == 0
+    assert _write_cli(repo, _checks_file(tmp_path, repo, ["lint"])) == 0
     decl = _settings(repo)
     assert decl["ci"] == {} and set(decl["analysis"]) == {"written"}
 
@@ -520,8 +524,8 @@ def test_write_without_a_record_replaces_only_the_values_it_wrote(repo, tmp_path
 
 @pytest.mark.parametrize("target", ["project", "record"])
 def test_a_write_that_fails_after_the_pending_mark_leaves_it_stale(repo, tmp_path, monkeypatch, capsys, last_result, target):
-    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)) == 0
-    changed = _measure_file(tmp_path, {"ci": _measured({"required_checks": ["lint"]})}, repo)
+    _first_write(repo, tmp_path)
+    changed = _checks_file(tmp_path, repo, ["lint"])
     real = cli.signals.replace_text
 
     def failing(path, text):
@@ -594,7 +598,7 @@ def _stopped(capsys, last_result) -> str:
 
 
 def _first_write(repo: Path, tmp_path: Path) -> Path:
-    measure = _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)
+    measure = _checks_file(tmp_path, repo)
     assert _write_cli(repo, measure) == 0
     return measure
 
@@ -603,7 +607,7 @@ def test_an_empty_gitignore_stops_the_write_unless_git_ignores_the_record_elsewh
     ignore = files.path(repo, "project-analysis-ignore")
     ignore.parent.mkdir(parents=True)
     ignore.write_text("", encoding="utf-8")
-    measure = _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)
+    measure = _checks_file(tmp_path, repo)
     assert _write_cli(repo, measure) == 1
     assert _stopped(capsys, last_result).startswith(".ndf/analysis/project.json が git に無視されない")
     assert not (repo / ".ndf" / "project.json").exists() and not files.path(repo, "project-analysis").exists()
@@ -626,7 +630,7 @@ def test_a_tracked_record_stops_the_write_before_the_gitignore(repo, tmp_path, m
     _put_record(repo, {"tracked": True})
     _git(repo, "add", "-f", files.relpath("project-analysis"))
     calls = _count_guards(monkeypatch)
-    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)) == 1
+    assert _write_cli(repo, _checks_file(tmp_path, repo)) == 1
     assert calls == ["check-ignore", "ls-files"]
     assert _stopped(capsys, last_result) == f".ndf/analysis/ の下のファイルが git に追跡されている: {files.relpath('project-analysis')}"
     assert not files.path(repo, "project-analysis-ignore").exists() and not (repo / ".ndf" / "project.json").exists()
@@ -659,7 +663,7 @@ def test_updating_the_record_asks_git_once(repo, tmp_path, monkeypatch, capsys, 
     _first_write(repo, tmp_path)
     calls = _count_guards(monkeypatch)
     capsys.readouterr()
-    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": ["lint"]})}, repo)) == 0
+    assert _write_cli(repo, _checks_file(tmp_path, repo, ["lint"])) == 0
     assert calls == ["check-ignore"] and last_result(capsys.readouterr().out)["metrics"]["written"] > 0
 
 
@@ -715,7 +719,7 @@ def test_git_that_cannot_tell_leaves_the_tree_as_it_was(repo, tmp_path, monkeypa
         ignore.write_text(existing_ignore, encoding="utf-8")
     before = _tree(repo)
     calls = _count_guards(monkeypatch, {command: git.Completed(128, "", "fatal: index file corrupt\n")})
-    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)) == 1
+    assert _write_cli(repo, _checks_file(tmp_path, repo)) == 1
     summary = _stopped(capsys, last_result)
     assert summary.startswith("git が .ndf/analysis/ の追跡と無視を確かめられない: ") and summary.endswith("fatal: index file corrupt")
     assert calls == (list(GUARDS) if command == "ls-files" else ["check-ignore"])
@@ -746,7 +750,7 @@ def test_an_unanswered_ignore_check_stops_before_any_write(tmp_path, monkeypatch
 def test_a_held_lock_stops_the_write_without_reading(repo, tmp_path, monkeypatch, capsys, last_result):
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text("{", encoding="utf-8")  # 読めば終了コード 2 になる設定
-    measure = _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)
+    measure = _checks_file(tmp_path, repo)
     real = cli.limits.seconds
     monkeypatch.setattr(cli.limits, "seconds", lambda name: 0 if name == "branch-strategy.write-lock" else real(name))
     with FileLock(str(bw.lock_at(check.repo_dirs(repo).common))):
