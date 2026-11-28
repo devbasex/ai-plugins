@@ -60,11 +60,11 @@ plugins/ndf/src/ndf/
 | `progress/command.py` | 変更 | 文脈に実行の印を持たせ、要求の工程の出力を新設のモジュールへ渡す | `progress/requirements_stage` | モジュール | 変更 `_prepare_new`・`_cmd_finish`・`parser`。削除 `_requirements` |
 | `progress/requirements_stage.py` | 新設 | 実行の印、要求の工程の出力の記録、要求仕様書の移送を持つ | `core/requirements_docs`・`progress/store`・`contracts/worker_paths` | モジュール | `run_mark`・`context_run`・`recorded_docs`・`creation_finish`・`finish_requirements`・`MoveStep`・`resume_step`・`move_one`・`move_requirements`・`add_parser` |
 | `progress/invoke.py` | 変更 | 工程の入力のモードと実行の印をプランの値へ渡す | `progress/requirements_stage` | モジュール | 変更 `_fill_from_issue` |
-| `progress/issue_values.py` | 変更 | PR の本文の要求の部分を、要求仕様書へのリンクと `Refs` の行にする | `core/requirements_docs` | モジュール | 新設 `requirements_refs`。変更 `issue_values` |
+| `progress/issue_values.py` | 変更 | PR の本文の要求の部分（要求仕様書へのリンクと `Refs` の行）の文を組み立てる | `core/requirements_docs` の型 | モジュール | 新設 `requirements_refs` |
 | `progress/units_invoke.py` | 変更 | 条件の数と版を要求仕様書から作り、スプリント PR の前に全条件を照らす | `core/requirements_docs`・`core/plan/inputs_decide`（`read_tables`・`counted`） | モジュール | 新設 `_all_recorded`。変更 `_read_units`・`_unit_json`・`_held_lineup`・`sprint_pr`。削除 `_criteria_count` |
 | `progress/records.py` | 変更 | 進行の記録を共通の書き換えで書き、スプリント PR の「通した工程」に実行の行を足す | `core/issue_body`・`core/requirements_docs` | モジュール | 新設 `run_lines`。変更 `pr_section`・`sync_records`・`GitHubRecords` |
 | `domains/records/cleanup_stage.py` | 変更 | クリーンアップの記録を共通の書き換えで書く | `core/issue_body` | モジュール | 変更 `record_issue`・`record_cleanup_stage` |
-| `domains/records/requirements_cmd.py` | 新設 | `ndf records requirements show`・`stamp` の入口 | `core/requirements_docs`・`core/requirements_history`・`domains/release/acceptance_record` | モジュール | `add_parsers`・`_show`・`_stamp`・`write_out`・`stamp_plan` |
+| `domains/records/requirements_cmd.py` | 新設 | `ndf records requirements show`・`stamp`・`pr-body` の入口 | `core/requirements_docs`・`core/requirements_history`・`domains/release/acceptance_record`・`progress/issue_values` | モジュール | `add_parsers`・`_show`・`_stamp`・`_pr_body`・`write_out`・`stamp_plan` |
 | `domains/records/cli.py` | 変更 | `requirements` のサブコマンドを登録し、`close-check --verification` に実行の確かめを足す | `domains/records/requirements_cmd` | モジュール | 変更 `_parser`・`_judged`・`_add_close_check`。新設 `_skipped_deploy` |
 | `domains/records/close_decide.py` | 変更 | 確認対象の版が今と同じ行だけで合否を出す | `domains/release/record_decide` | モジュール | 変更 `records_verdict`・`_targets_verdict`・`_last_check`。新設 `current_rows` |
 | `domains/loop/acceptance_decide.py` | 変更 | 実行と要求仕様書の組ごとの確認の表を書き換える | `core/plan/inputs_decide`・`core/requirements_docs` の型 | `Check`・モジュール | 新設 `table_text`・`table_digest`・`without_tables`。変更 `Check`・`recorded_body`。削除 `criteria`・`read_checks`・`unrecorded`・`merged`・`checks_table`・`recorded_rows` |
@@ -80,7 +80,7 @@ plugins/ndf/src/ndf/
 | `domains/release/record_unversioned.py` | 変更 | バージョン番号を持たないリポジトリの最初の届け先の記録に `acceptance` を入れる | `domains/release/acceptance_record` | モジュール | 変更 `write_unversioned`・`_made` |
 | `domains/release/record_read.py` | 変更 | 対応の記録がある値で `outputs.issues`・`acceptance_targets` を返す | `domains/release/acceptance_record` | モジュール | 変更 `read_release`・`_records_outputs` |
 | `domains/release/cli.py` | 変更 | `record-acceptance` と `verification-record --records` の引数 | `domains/release/acceptance_record` | モジュール | 変更 `_parser`・`cmd_verification_record`・`cmd_records`・`_records_selection` |
-| `plugins/ndf/contracts/` の `workflow/context.schema.json`・`workflow/stages/requirements.json`・`workflow/stages/worktree.json`・`workflow/progress.json`・`schemas/internal/common.schema.json`・`schemas/release-verification.schema.json`・`schemas/io/{records,loop,progress,release-steps}.{args,result}.schema.json`・`schemas/io/materials.result.schema.json`・`templates/params.json`・`domains/ndf-files.json`・`worker/kinds.json`・`worker/document-rebuild.md` | 変更 | 文脈のキー（`run`・`requirements_docs`）・事象（`requirements_move`、完了した要求の工程への `outputs_recorded`）・内部データの形のバージョン・結果 JSON と引数・差し込みの値（`run`・`mode`）・起動指示の文 | — | — | — |
+| `plugins/ndf/contracts/` の `workflow/context.schema.json`・`workflow/stages/requirements.json`・`workflow/stages/worktree.json`・`workflow/progress.json`・`schemas/internal/common.schema.json`・`schemas/release-verification.schema.json`・`schemas/io/{records,loop,progress,release-steps}.{args,result}.schema.json`・`schemas/io/materials.result.schema.json`・`templates/params.json`・`templates/design.json`・`templates/impl.json`・`domains/ndf-files.json`・`worker/kinds.json`・`worker/document-rebuild.md` | 変更 | 文脈のキー（`run`・`requirements_docs`）・事象（`requirements_move`、完了した要求の工程への `outputs_recorded`）・内部データの形のバージョン・結果 JSON と引数・差し込みの値（`run`・`mode`）・設計と実装のプランの `pr-body` のステップ・起動指示の文 | — | — | — |
 
 手順書（Skill と参照）・用語集・`docs/contracts/` の変更は、最後の「手順書と用語集」にまとめる。
 
@@ -270,7 +270,7 @@ plugins/ndf/src/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `add_parsers` | `domains/records/requirements_cmd.py` | 新設 | `(sub: Any) -> None` | `records requirements show`・`stamp` の引数を登録する |
+| `add_parsers` | `domains/records/requirements_cmd.py` | 新設 | `(sub: Any) -> None` | `records requirements show`・`stamp`・`pr-body` の引数を登録する（`pr-body` の仕様は「工程へ渡す値の組み立て」） |
 | `_show` | `domains/records/requirements_cmd.py` | 新設 | `(args: argparse.Namespace, root: Path) -> dict[str, Any]` | 読み先を選んで要求仕様書を読み、要求仕様書 1 本につき 1 要素の結果 JSON を返す |
 | `write_out` | `domains/records/requirements_cmd.py` | 新設 | `(out: Path, docs: Sequence[Doc]) -> dict[str, str]` | 本文を所有者だけが読める権限で書き、パスごとの `body_path` を返す |
 | `_stamp` | `domains/records/requirements_cmd.py` | 新設 | `(args: argparse.Namespace, root: Path) -> dict[str, Any]` | `stamp_plan` を呼び、番号ごとの条件の文を結果 JSON で返す |
@@ -503,16 +503,30 @@ plugins/ndf/src/ndf/
 | `_all_recorded` | `progress/units_invoke.py` | 新設 | `(ctx: Context) -> None` | すべての単位のマージの後に、全 Issue の全条件を代表の Issue の本文の 1 回の照会で照らす |
 | `sprint_pr` | `progress/units_invoke.py` | 変更 | 今のまま | PR を開く前に `_all_recorded` を呼ぶ |
 | `requirements_refs` | `progress/issue_values.py` | 新設 | `(docs: Sequence[Doc], issues: Sequence[int], repo: str) -> str` | 要求仕様書ごとのリンクの行と、全 Issue の `Refs #<番号>` の行を作る |
-| `issue_values` | `progress/issue_values.py` | 変更 | `(inputs, work_dir, location, *, number=None, repo=None, head: Optional[str] = None) -> Optional[dict[str, route.Value]]` | `legacy-refactor` は今のまま Issue の本文、ほかは `requirements_refs` の文を `body_file` に書く |
+| `_pr_body` | `domains/records/requirements_cmd.py` | 新設 | `(args: argparse.Namespace, root: Path) -> dict[str, Any]` | push した head の要求仕様書から `requirements_refs` の文を作り、`--out` のファイルを置き換える |
 
 - `_all_recorded`
   - 事後条件: 記録の無い条件があれば、条件を挙げて `UnitsStopped("incomplete")`。区分 `リリース後` の行は検証の結果が無くても記録ありに数える
   - 副作用: `domains/loop/acceptance.read_bodies` と同じ形の 1 回の GraphQL の照会（`GitHub.nodes`）。子プロセスは起動しない
-- `issue_values`
-  - 事前条件: `head` は PR の head のコミット。`requirements_docs.find(..., ref=head)` で読み、作業場所の要求仕様書が `head` の内容と違えば止まる
-  - 事後条件: リンクは `https://github.com/<repo>/blob/<Doc.commit>/<path>`
+- `requirements_refs`
+  - 事後条件: リンクは `https://github.com/<repo>/blob/<Doc.commit>/<path>`。要求仕様書の行は重なりなし、`Refs #<番号>` は `issues` の全件
+- `_pr_body`（`ndf records requirements pr-body --issue=<番号>... --mode=<モード> --branch <ブランチ> --remote <名前> --out <ファイル>`）
+  - 事前条件: head は作業場所の `HEAD` を 1 回だけ解決した SHA。`--remote` の `refs/heads/<ブランチ>`（`git ls-remote`）がその SHA であること。`requirements_docs.find(..., ref=<SHA>)` で読み、作業場所の要求仕様書（`worktree_candidates`）が読んだ内容と同じであること
+  - 事後条件: `--issue` が 0 件か `--mode` が `legacy-refactor` なら、何も読まず書かずに `ok`。ほかは `--out` の中身が `requirements_refs` の文だけになる。モードが空なら要求仕様書を求める
+  - 副作用: `--out` を `worker_paths.write_file(private=True)` で置き換え、`check_unshared` を通す
 
-**`issue_values` を `head` つきで呼ぶ時点は、設計文書に決まりが無い。** 今の設計と実装のプラン（`contracts/templates/design.json`・`impl.json`）は、`body_file` をプランを組む時点（push の前）に作り、PR を作るステップがそのファイルを使う。設計文書の「PR の本文」は「push した後に head のコミットを `--ref` に渡して読む」と決めているので、push の後に本文を作り直すステップが要る。テンプレートにステップを足すか、プランを組む時点の作業場所の HEAD で読むかは、設計の判断として残した（設計文書の「設計の結果」の触るファイルにテンプレートが無い）。
+**PR の本文は、push の後に流すステップで head から作り直す。** 設計と実装のテンプレート（`contracts/templates/design.json`・`impl.json`）の `push` と `pr` の間に、次のステップを足す。
+
+```json
+{"id": "pr-body", "run": ["ndf", "records", "requirements", "pr-body", "--issue={{refs}}", "--mode={{mode}}", "--branch={{branch}}", "--remote={{remote}}", "--out={{body_file}}"]}
+```
+
+- 2 つのテンプレートの `params` に `refs` と `mode` を足し、`params.json` の `mode` の既定は空の文字列にする。`ndf progress` から組むと、`refs` は工程の入力のすべての Issue（今の `invoke._fill_refs`）、`mode` は工程の入力が入る。単位の経路の実装のプランも同じ値になる。`invoke` と `units_invoke` はこのために変えない
+- `issue_values` は変えない。プランを組む時点では今のまま Issue の本文を `body_file` に書き、`legacy-refactor` ではそれがそのまま PR の本文になる。ほかのモードはステップが置き換える。組む時点で要求仕様書を読まないのは、その時点の `HEAD` が PR の head ではなく、worker のコミットの前の内容を指すためである
+- `ndf route render`・`run` の単発の利用で `refs` を省くと、ステップは何もせず、渡した `body_file` がそのまま本文になる。`refs` を渡すと `body_file` を置き換えるので、`params.json` の `body_file` の説明に書く
+- 打ち直しは止まったステップから始まり、`push` を通らない。直したコミットを push せずに打ち直すと PR の head に無い内容へのリンクができるので、ステップがリモートの head と照らす
+- PR が既にあれば、今のまま `pr` のステップの `probe` がその番号を使い、本文は書き換えない。ステップはその場合も流れ、要求仕様書を読めなければ止まる
+- 置き場所を `ndf records requirements` にするのは、要求仕様書を読むコマンドと同じ読み方を使い、`domains` から `progress` の `requirements_refs` を呼ぶ向きが層の決まりに合うためである。`pr` のテンプレートと共有の `pr` のステップ（`parts/steps.json`）は変えないので、コミットから本文を組む経路と `fix`・`close` のテンプレートには影響しない
 
 ### 異常系の処理
 
@@ -522,7 +536,10 @@ plugins/ndf/src/ndf/
 | `lineup` | どの単位にも単位の外にも無い条件 | 割り当ての漏れ | 条件の集合の差 | 止める | `invalid`。条件を挙げる | 実装計画を直す |
 | `_read_units` | 要求仕様書を読めない | `RequirementsError` | `find` | 止める | `UnitsStopped(<cause>)` | 直して打ち直せる |
 | `_all_recorded` | 記録の無い条件 | 単位の外の条件・飛ばした単位 | `inputs_decide.counted` | 止める（PR を作らない） | `incomplete`。条件を挙げる | 記録してから打ち直す |
-| `issue_values` | 要求仕様書を読めない・作業場所と head が違う | 未コミット・head に無い | `find(ref=head)` と作業場所の比較 | 止める（PR を作らない） | `precondition`（`invoke.plan_failure` が扱う） | コミットして打ち直す |
+| `_pr_body` | head に要求仕様書が無い・読めない | 要求仕様書をコミットしていない、元の Issue の行が欠ける | `find(ref=head)` の `RequirementsError` | 止める（`--out` を書かず、PR を作らない） | `cause` をそのまま返す（無ければ `incomplete` で番号を `gaps` に載せる）。終了コード 1。プランは `pr-body` で止まる | コミットして push し、打ち直す |
+| `_pr_body` | 作業場所の要求仕様書が head の内容と違う | 未コミットの直し | 作業場所と head の内容の比較 | 同上 | `precondition`。パスを書く。終了コード 1 | コミットして push し、打ち直す |
+| `_pr_body` | リモートの head が作業場所の `HEAD` と違う・照会できない | 直した後に push せず打ち直した、リモートに届かない | `git ls-remote` の結果 | 同上 | `precondition`。`git push` を案内する。終了コード 1 | push して打ち直す |
+| `_pr_body` | `--out` を差し替えられる・リンク | 共有の環境 | `worker_paths` の検査（`EntryUnsafe`） | 同上 | `precondition`。終了コード 1 | 権限を直して打ち直す |
 
 ### 既存の部品の再利用
 
@@ -532,6 +549,8 @@ plugins/ndf/src/ndf/
 | `stamped` | `inputs_decide.section_span` | `core/plan/inputs_decide.py` を読んだ | 使えない（版の行は節に属さない）。行の置き換えで書く |
 | `_all_recorded` | `domains/loop/acceptance.read_bodies` | `domains/loop/acceptance.py` を読んだ | 使えない（`domains` の層にあり `progress` から呼べない）。同じ `GitHub.nodes` を呼び、表は `inputs_decide.read_tables`・`counted` で読む |
 | `requirements_refs` | `pr` のテンプレートの `Refs` の行（`contracts/templates/pr.json`） | `grep -rn Refs contracts/templates` | 使えない（コミットの件名から組む）。同じ行の形にそろえる |
+| `_pr_body` | `_show` の `--ref`・`--out`、`write_out` | 「読むコマンド」の節 | 使えない（要求仕様書の本文を書き出し、PR の本文の形を作らず、head の照らしもしない）。読み出しは `requirements_docs.find`、書き出しは `worker_paths.write_file` を使う |
+| `pr-body` のステップ | `parts/steps.json` の `pr`・`push` の `probe` | `contracts/templates/parts/steps.json` を読んだ | `pr` は `fix`・`close` と共有するので変えない。リモートの head の照らし方は `push` の `probe` と同じにする |
 
 ### 単体テストの観点
 
@@ -540,7 +559,9 @@ plugins/ndf/src/ndf/
 | `lineup` | 版が合えば今の並び | `digests` が None（`legacy-refactor`）は今のまま | 並べ替えの後の古い版・版の行の無い計画・割り当ての漏れで止まる |
 | `acceptance_args` | `--run`・`--mode`・`--criteria-digest` が付く | 補った単位も `--run` を持つ | — |
 | `_all_recorded` | 全件に記録があれば通る。区分 `リリース後` の記録だけで通る | 要求仕様書 3 本でも照会 1 回（呼び出しを差し替えて数える） | 単位の外の条件に記録が無ければ止まる |
-| `issue_values` | 要求仕様書ごとのリンクと全 Issue の `Refs` | `legacy-refactor` は Issue の本文 | 要求仕様書が無ければ止まる。`Refs` が 1 件欠けると落ちる |
+| `requirements_refs` | 要求仕様書ごとのリンクと全 Issue の `Refs` | 2 つの Issue が 1 本を指すとリンクは 1 行、`Refs` は 2 行 | `Refs` が 1 件欠けると落ちる |
+| `_pr_body` | `--out` が head のコミットを指すリンクと `Refs` に置き換わる | `legacy-refactor` と `--issue` 0 件は `--out` を変えずに `ok`。モードが空なら要求仕様書を求める | head に無い・作業場所と違う・リモートの head と違う場合は、`--out` を変えずに止まる |
+| 設計と実装のテンプレート | 組んだプランで `pr-body` が `push` の後、`pr` の前に流れる | `refs` を省いても組める。単位の経路のテンプレートにも残る | `pr-body` が止まれば `pr` のステップを流さない |
 
 ## 進行の記録・クリーンアップの記録（`progress/records.py`・`domains/records/cleanup_stage.py`）
 
