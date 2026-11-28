@@ -25,8 +25,8 @@ class SprintPlan:
     required: bool = False
     # 承認の記録（`design_record.approved_of`）。承認が要らないか、取れなければ None
     record: Optional[Mapping[str, Any]] = None
-    # 承認の記録と、読み元（`units_files.Tree`）の中身の違い（`design_record.mismatches`）。記録が無ければ None
-    differences: Optional[Callable[[Any], list[str]]] = None
+    # 承認の記録と、読み元（`units_files.Tree`）の中身の比較（`design_record.mismatches` の `Compared`）。記録が無ければ None
+    differences: Optional[Callable[[Any], Any]] = None
     # 実装計画を省いた課題（文脈の `plan_omitted`）
     omitted: tuple[int, ...] = ()
     # 保存した定義がこの変更より後のものか（工程の `optional_inputs` に `plan_omitted` がある）

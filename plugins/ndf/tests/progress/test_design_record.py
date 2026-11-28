@@ -218,7 +218,7 @@ def _record(root, context=CONTEXT) -> dict:
 
 
 def _mismatches(root, record, context=CONTEXT) -> list[str]:
-    return dr.mismatches(record, uf.Tree(root, "HEAD"), context)
+    return dr.mismatches(record, uf.Tree(root, "HEAD"), context).differences
 
 
 def test_converted_has_the_shape_of_a_built_record_without_a_pr(work):
@@ -238,7 +238,11 @@ def test_mismatches_ignores_actual_lines_only(work):
     _put(work, "issue-7-plan.units.json", _unit_doc(7, actual_lines=33))
     _commit(work)
 
-    assert _mismatches(work, record) == []
+    compared = dr.mismatches(record, uf.Tree(work, "HEAD"), CONTEXT)
+    assert compared.differences == []
+    # 比較が読んで解析した対象は、検査が読み直して組む対象と同じ
+    assert compared.targets is not None
+    assert compared.targets.found == uf.collect(uf.Tree(work, "HEAD"), CONTEXT["issues"], CONTEXT["plan_omitted"])
 
 
 @pytest.mark.parametrize(
@@ -306,7 +310,7 @@ def test_narrowed_record_matches_while_stale_files_of_an_omitted_issue_remain(tm
     narrowed = dr.narrowed(record, [8], tmp_path)
 
     assert narrowed["targets"]["issues"] == [7, 9]
-    assert dr.mismatches(narrowed, tree, {"issues": [7, 9], "plan_omitted": [9]}) == []
+    assert dr.mismatches(narrowed, tree, {"issues": [7, 9], "plan_omitted": [9]}).differences == []
 
 
 def test_without_refuses_to_split_a_file_of_two_issues(work):

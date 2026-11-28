@@ -12,6 +12,7 @@ import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
@@ -276,15 +277,36 @@ def collect(tree: Tree, issues: Sequence[int], omitted: Sequence[int]) -> Collec
     return _collect(tree, tree.listing(), issues, omitted)
 
 
-def _collect(tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int], omitted: Sequence[int]) -> Collected:
+def targets_from(
+    tree: Tree,
+    listing: Mapping[str, Optional[tuple[str, str, str]]],
+    issues: Sequence[int],
+    omitted: Sequence[int],
+    handled: Mapping[int, tuple[str, Optional[int]]],
+    parsed: Mapping[str, ud.UnitFile],
+) -> Targets:
+    """同じ `tree` から読み済みの項目の一覧・扱い・解析済みの単位のファイルで対象を組む（読んだものは読み直さない）。"""
+    return Targets(listing, _collect(tree, listing, issues, omitted, handled, parsed))
+
+
+def _collect(
+    tree: Tree,
+    listing: Mapping[str, Optional[tuple[str, str, str]]],
+    issues: Sequence[int],
+    omitted: Sequence[int],
+    handled: Optional[Mapping[int, tuple[str, Optional[int]]]] = None,
+    parsed: Mapping[str, ud.UnitFile] = MappingProxyType({}),
+) -> Collected:
     wanted = tuple(sorted(set(issues)))
-    handled, excluded = _handlings(tree, listing, wanted)
+    if handled is None:
+        handled = _handlings(tree, listing, wanted)[0]
+    excluded = tuple(n for n in wanted if handled[n][0] in EXCLUDED_HANDLINGS)
     skipped = tuple(n for n in wanted if n in set(omitted) and n not in excluded)
     rest = [n for n in wanted if n not in excluded and n not in skipped]
     found = find(tree, rest, sorted(listing))
     paths = list(dict.fromkeys(found[n] for n in rest if n in found))
-    texts = tree.read_all(paths, listing)
-    files = tuple(parse_text(path, texts[path]) for path in paths)
+    texts = tree.read_all([path for path in paths if path not in parsed], listing)
+    files = tuple(parsed[path] if path in parsed else parse_text(path, texts[path]) for path in paths)
     return Collected(files, skipped, excluded, tuple(n for n in rest if n not in found), handled)
 
 
@@ -319,9 +341,11 @@ def _handlings(
     return out, tuple(n for n in issues if out[n][0] in EXCLUDED_HANDLINGS)
 
 
-def handlings(tree: Tree, issues: Sequence[int]) -> dict[int, tuple[str, Optional[int]]]:
-    """課題ごとの、設計書の「設計の結果」の（扱い, 統合先）。"""
-    return _handlings(tree, tree.listing(), tuple(sorted(set(issues))))[0]
+def handlings(
+    tree: Tree, issues: Sequence[int], listing: Optional[Mapping[str, Optional[tuple[str, str, str]]]] = None
+) -> dict[int, tuple[str, Optional[int]]]:
+    """課題ごとの、設計書の「設計の結果」の（扱い, 統合先）。`listing` に `tree.listing()` を渡すと、一覧を取り直さない。"""
+    return _handlings(tree, tree.listing() if listing is None else listing, tuple(sorted(set(issues))))[0]
 
 
 def project_of(tree: Tree) -> dict[str, Any]:

@@ -244,11 +244,10 @@ def _units_from_files(
     tree = units_files.Tree(root, start_head)
     try:
         if sprint.required:
-            record, source = _approved(g, tree, sprint, start_head)
-            targets = record["targets"]
+            record, source, targets = _approved(g, tree, sprint, start_head)
             limits = ud.Limits(**record["limits"])
             criteria = {int(n): count for n, count in record[ud.CRITERIA_KEY].items()}
-            report = units_files.check(tree, targets["issues"], list(targets["omitted"]), limits, criteria, False)
+            report = units_files.check_collected(tree, targets, limits, criteria, False)
         else:
             source = start_head
             collected = units_files.supplemented(tree, issues, sprint.omitted, plans)
@@ -266,16 +265,17 @@ def _units_from_files(
     return units, source, start_head, bodies
 
 
-def _approved(g: Git, tree: units_files.Tree, sprint: SprintPlan, start_head: str) -> tuple[Mapping[str, Any], str]:
-    """承認の記録と、その HEAD。承認した文書がスプリントブランチに届き、記録と今の中身が同じことを確かめる。"""
+def _approved(g: Git, tree: units_files.Tree, sprint: SprintPlan, start_head: str) -> tuple[Mapping[str, Any], str, units_files.Targets]:
+    """承認の記録・その HEAD・比較が読んだ対象。承認した文書がスプリントブランチに届き、中身が記録と同じことを確かめる。"""
     record, differences = sprint.record, sprint.differences
     assert record is not None and differences is not None, "prepare が先に確かめる"
     head = str(record["review"]["head"])
     _check_delivered(g, sprint.work_root, head, start_head)
-    found = differences(tree)
-    if found:
-        raise UnitsStopped("refused", f"承認した分け方と今の中身が違うので、実装を始めない: {'; '.join(found)}")
-    return record, head
+    compared = differences(tree)
+    if compared.differences:
+        raise UnitsStopped("refused", f"承認した分け方と今の中身が違うので、実装を始めない: {'; '.join(compared.differences)}")
+    assert compared.targets is not None, "違いが無い比較は、読んだ対象を返す"
+    return record, head, compared.targets
 
 
 def _check_delivered(g: Git, work_root: Optional[Path], record_head: str, start_head: str) -> None:

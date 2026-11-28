@@ -290,7 +290,7 @@ contracts/
 | `stale` | 同上 | 新設 | `(record: Mapping, repo, pr, head, base) -> list[str]` | 今の PR と記録の違い |
 | `reset_drafts` | 同上 | 新設 | `(v, stage: stages.StageDef, why: str) -> list[EventDraft]` | 工程の先頭から設計承認ゲートまでを未了に戻すイベント |
 | `approved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「ドキュメントレビュー」の最新の回答が承認なら、その `design_target`。後の変更要求があれば None |
-| `mismatches` | 同上 | 新設 | `(record, tree, context) -> list[str]` | 設計書の決定 11 の表の 4 つの比較（単位のファイル・スプリントの課題・課題ごとの扱いと統合先・実装計画を省いた課題）。スプリントの課題は全体を比べ、ほかの比較は記録の `targets.issues` に絞る |
+| `mismatches` | 同上 | 新設 | `(record, tree, context) -> Compared(differences, targets)` | 設計書の決定 11 の表の 4 つの比較（単位のファイル・スプリントの課題・課題ごとの扱いと統合先・実装計画を省いた課題）。スプリントの課題は全体を比べ、ほかの比較は記録の `targets.issues` に絞る。違いが無ければ、比較で読んだ単位のファイルと扱いを `targets` に返し、続く検査は読み直さない |
 | `without` | 同上 | 新設 | `(record, drop, files) -> dict` | 課題を外す回答の記録の絞り込み。外せない形なら `Refused` |
 | `converted` | 同上 | 新設 | `(repo, head, branch, context, limits, report) -> dict` | 変換の再承認の記録。`build` の戻り値と同じ形で、`sprint_branch` は `branch`、`review.pr` は null、`head` は単位のファイルを含むコミット |
 | `reapproved_of` | 同上 | 新設 | `(v) -> Optional[dict]` | 工程「実装」の最新の回答が承認なら、その `design_target` |
@@ -678,7 +678,7 @@ contracts/
 | 失敗 | 扱い（停止理由の種類） | 利用者に見える理由 |
 | --- | --- | --- |
 | 承認の記録が無い | 始めない（`precondition`） | `ndf progress restore` で状態を戻すか、利用者に判断を求める。工程「ドキュメントレビュー」を流し直す案内はしない（設計 PR はもうマージ済みのため） |
-| `mismatches` がある | 始めない（`refused`） | 違う項目ごとの記録の値と今の値 |
+| `mismatches` に違いがある | 始めない（`refused`） | 違う項目ごとの記録の値と今の値 |
 | 単位の違反 | 始めない（`invalid`） | 規則の番号と単位 |
 | 上限の値が壊れている（`NamedCapError`） | 始めない（`invalid`） | 出所と値 |
 | プランのスレッドの例外 | その単位の失敗（`invoke.plan_failure` の分類） | 単位の名前 |
@@ -731,7 +731,7 @@ contracts/
 - 旧い承認の表は、実装計画を `git show` で読んで `review_units_decide.lineup` に通す。読むコミットは `records.approved_head(v, "design")` の head である
 - 担当の作業場所は、`units_sync.push_url` を通った URL から読んだスプリントブランチの先端から作る一時の作業場所（detached HEAD）である。通らなければ、取得も担当の起動もせずに `stopped`（`refused`）にする。期待するリポジトリは、ステートマシンの `repo` を解析した値である。手元のスプリントブランチからは作らない。手元が送り先より古いと、変換し直しても同じ古いコミットが起点になり、cherry-pick の競合を繰り返すためである。コミットは `refs/ndf/convert/<ステートマシンの ID>` で持ち、作業場所は消す。反映の前の照合と `mismatches` は、このコミットを読む
 - ref は、反映して push した後か、却下の回答を読んだ時点で消す
-- 照合が違えば、先に `design_record.reapproved_of` の記録を読む。`mismatches` が空なら有効で、下の「反映」へ進む
+- 照合が違えば、先に `design_record.reapproved_of` の記録を読む。`mismatches` に違いが無ければ有効で、下の「反映」へ進む
 - 有効な記録が無ければ、下の「再承認の資料」の内容を持つ `reapproval.md` を作業の保存先に書き、`design_record.converted` の記録を `report.design_target` に持つ `gate` の結果（選択肢は承認と却下）を返す
 - 回答は `ndf answer` が工程「実装」のイベントに書き、payload の `design_target` が記録になる。別のファイルは持たない
 - `ndf progress units run` は回答を引数で受けない。`convert` が `gate` を返したら、`next` と同じく回答の待ちをイベントに書いて返す
@@ -756,7 +756,7 @@ contracts/
 | 順 | 判定 | 扱い |
 | --- | --- | --- |
 | 1 | `convert.json` があり、その `commit` が `start_head` の祖先で、単位のファイルが `units[].actual_lines` を除いてそのコミットと同じ | 実装へ進む |
-| 2 | 1 に当たらない（`convert.json` が無い場合を含む）。`design_record.reapproved_of` の記録があり、その `head` が `start_head` の祖先で、単位のファイル（`units[].actual_lines` を除く）と実装計画の本文が記録の `head` と同じで、`mismatches` が空 | `convert.json` を `{"commit": <記録の head>, "approval": {"kind": "reapproval", "head": <記録の head>}}` に書き直し、実装へ進む。同じ承認を打ち直しのたびに問い直さないためである |
+| 2 | 1 に当たらない（`convert.json` が無い場合を含む）。`design_record.reapproved_of` の記録があり、その `head` が `start_head` の祖先で、単位のファイル（`units[].actual_lines` を除く）と実装計画の本文が記録の `head` と同じで、`mismatches` に違いが無い | `convert.json` を `{"commit": <記録の head>, "approval": {"kind": "reapproval", "head": <記録の head>}}` に書き直し、実装へ進む。同じ承認を打ち直しのたびに問い直さないためである |
 | 3 | 1 にも 2 にも当たらない（再承認の記録が無いか、記録の `head` の後に単位のファイルか実装計画の本文が変わった） | `start_head` を対象にした `design_record.converted` の記録で、再承認の `gate` を返す |
 
 1. `units_sync.push_url` で URL を照合し、その URL からスプリントブランチの先端を読む（「送るコミットの確かめ」と同じ読み方）。以後の手順は同じ URL を使い、読み直さない
