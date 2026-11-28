@@ -106,7 +106,7 @@
   - `src/ndf/domains/crossreview/fixer.py`
   - `src/ndf/domains/crossreview/drive.py`
   - `tests/domains/crossreview/test_crossreview_documents.py`
-- **変更内容:** 決定 7 の 2 つの扱い（課題の本文を直してからコピーを作り直す。本文を書き替えられなければ `needs_user` で返す）を `review-criteria.json` に置き、PR の変更に要求仕様のコピーがあるときだけ修正担当の指示に足す。JSON の `summary` にも、足したキーの説明を書く
+- **変更内容:** 決定 7 の扱い（詳細設計の「cross-review の指示」の手順と、`needs_user` で返す場合）を `review-criteria.json` に置き、PR の変更に要求仕様のコピーがあるときだけ修正担当の指示に足す。JSON の `summary` にも、足したキーの説明を書く
 - **満たす受け入れ条件:** 5（決定 7。受け入れ条件には対応する番号が無い）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理。コピーがあるときだけ指示に入ることを見る
 

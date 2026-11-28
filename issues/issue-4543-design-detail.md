@@ -69,7 +69,7 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `without_distinction` | 目印が対にならない（始まりだけ、終わりだけ、入れ子） | 基準の本文の編集の誤り | 行を読む中と読み終わり | 呼び出し元へ `CriteriaBroken` を返す | 呼び出し元の各経路は、基準を読めないときと同じ扱いにする（下の各セクションの「異常系の処理」） | 書き込みが無いので、基準を直して打ち直せる |
+| `without_distinction` | 目印が対にならない（始まりだけ、終わりだけ、入れ子） | 基準の本文の編集の誤り | 行を読む中と読み終わり | 呼び出し元へ `CriteriaBroken` を送出する | 呼び出し元の各経路は、基準を読めないときと同じ扱いにする（下の各セクションの「異常系の処理」） | 書き込みが無いので、基準を直して打ち直せる |
 
 ### 内部のデータと定数
 
@@ -109,8 +109,8 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_require_prompt` | `distinction` が真偽でない（`null`・文字列・数） | 指示の JSON の誤り | キーの確かめの後 | 呼び出し元へ `ReadingInvalid` を返す | 今の「入力の形が違う」の結果（`invalid`）と、その終了コード | 書き込みが無いので打ち直せる |
-| `prompt` | 基準が読めない・目印が対にならない | 配布物の欠け・編集の誤り | `writing` | 呼び出し元へ `CriteriaBroken` を返す | 基準を読めないときの今の扱いと同じ（この変更で扱いを足さない） | 同上 |
+| `_require_prompt` | `distinction` が真偽でない（`null`・文字列・数） | 指示の JSON の誤り | キーの確かめの後 | 呼び出し元へ `ReadingInvalid` を送出する | 今の「入力の形が違う」の結果（`invalid`）と、その終了コード | 書き込みが無いので打ち直せる |
+| `prompt` | 基準が読めない・目印が対にならない | 配布物の欠け・編集の誤り | `writing` | 呼び出し元へ `CriteriaBroken` を送出する | 基準を読めないときの今の扱いと同じ（この変更で扱いを足さない） | 同上 |
 
 ### 単体テストの観点
 
@@ -159,16 +159,18 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `requirements_issues` | `src/ndf/core/issue_docs.py` | 新設 | `(path: str) -> frozenset[int]` | パスが要求仕様のコピーの形なら課題の番号の集合を返し、違えば空集合を返す |
+| `requirements_issues` | `src/ndf/core/issue_docs.py` | 新設 | `(path: str) -> frozenset[int]` | パスが要求仕様のコピーの形なら課題の番号 1 つの集合を返し、違えば空集合を返す |
 
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `REQUIREMENTS_FILE` | 定数（書く側の書式） | `src/ndf/core/issue_docs.py`（`docrebuild/drive.py` から移し、定義を残さない） | `issues/issue-{number}-requirements.md` |
-| `REQUIREMENTS_PATH` | 定数（読む側の正規表現） | `src/ndf/core/issue_docs.py` | `^issues/issue-(\d+(?:-\d+)*)-requirements\.md$` |
+| `REQUIREMENTS_PATH` | 定数（読む側の正規表現） | `src/ndf/core/issue_docs.py` | `^issues/issue-(\d+)-requirements\.md$` |
 
 `docrebuild/drive.py` の `requirements_of` は `issue_docs.REQUIREMENTS_FILE` を読む。振る舞いは変えない。
+
+要求仕様のコピーは課題ごとに 1 本で、名前の番号は 1 つである（`requirements-design` の手順 7）。複数の課題をまとめた設計書でも、コピーは番号ごとに分かれる。読む側の形も番号 1 つに限り、名前の番号をコピーの直し先の課題にする（決定 7）。手順と違う、番号をまとめたコピーが過去の文書に 1 本ある（`issues/issue-4061-4062-4064-requirements.md`）。これは直し先の課題が名前から 1 つに決まらないので、対象にしない。
 
 ### 既存の部品の再利用
 
@@ -180,7 +182,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `requirements_issues` | 番号 1 つと `issue-7-8-requirements.md` | 番号の一部が一致するだけの課題を取り違えない | 設計書・実装計画・`issues/` の外のパスは空集合 |
+| `requirements_issues` | 番号 1 つのコピー | 番号の一部が一致するだけの課題を取り違えない | 番号が複数の `issue-7-8-requirements.md`、設計書、実装計画、`issues/` の外のパスは空集合 |
 
 ## cross-review の指示
 
@@ -198,7 +200,7 @@ plugins/ndf/
 - `_prepare_round`
   - 事後条件: `run.distinction` は、次の条件で真になる。変更したファイルのどれかで、`issue_docs.design_issues` か `issue_docs.requirements_issues` の結果が空でない。`run.requirements_copy` は後者に当たるファイルがあるとき真になる
 - `_review_prompt`・`_fix_prompt`
-  - `document_block` の返す各要素に `writing.without_distinction` を掛ける。目印の無い要素は変わらない。`document_block` は変えない
+  - `run.distinction` が偽の場合だけ、`document_block` の返す各要素に `writing.without_distinction` を掛ける。真の場合は呼ばない。目印の無い要素は変わらない。`document_block` は変えない
   - 指摘の文や単位の指示など、基準でない部分には掛けない（このリポジトリでは目印の文字列がそこへ現れうる）
 
 扱いの文は `fixer_ci_only` と同じく修正担当への指示だけに入れ、基準の全文より前（`unit_block` の後）に置く。
@@ -207,9 +209,9 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_review_prompt`・`_fix_prompt` | 目印が対にならない | 編集の誤り | `without_distinction` | 呼び出し元へ返す | `crossreview/cli.py` の今の `CriteriaBroken` の扱い（`invalid` で止める） | 指示を作る前なので担当を起動しない。直して打ち直せる |
+| `_review_prompt`・`_fix_prompt` | 目印が対にならない | 編集の誤り | `without_distinction` | `CriteriaBroken` を呼び出し元へそのまま送出する | `crossreview/cli.py` の今の `CriteriaBroken` の扱い（`invalid` で止める） | 指示を作る前なので担当を起動しない。直して打ち直せる |
 
-修正担当が扱いの文のとおりに課題の本文を書き替えようとして、書き替えられない場合がある。この場合はプログラムでは検出しない。修正担当が、指摘を `deferred`・`defer: needs_user` で返し、本文の案を見送りの理由に書く。結果の形は今のままである。
+修正担当が扱いの文の手順を終えられない場合（本文を書き替えられないなど）は、プログラムでは検出しない。修正担当が、下の「内部のデータと定数」に挙げる扱いのとおりに、指摘を `deferred`・`defer: needs_user` で返す。結果の形は今のままである。
 
 ### 内部のデータと定数
 
@@ -219,10 +221,18 @@ plugins/ndf/
 | `_Run.requirements_copy` | 内部の値（真偽）。`FixRun` にも足す | `domains/crossreview/drive.py` | 偽 |
 | `document.requirements_copy` | 修正担当へ足す文 | `contracts/data/review-criteria.json` | — |
 
-`document.requirements_copy` の文には、次の 2 つを書く。`summary` にもこのキーの説明を足す。
+`document.requirements_copy` の文には、要求仕様のコピー（`issues/issue-<番号>-requirements.md`）への指摘を直す次の手順を書く。直し先は、コピーの名前の番号の課題の本文である。`summary` にもこのキーの説明を足す。以下の「要求の範囲」は、本文の `## 進行` より前（`## 進行` が無ければ全文）を指す。
 
-1. 要求仕様のコピー（`issues/issue-<番号>-requirements.md`）への指摘は、`requirements-design` の手順 7 のとおりに課題の本文を直す。書き替えるのは `## 進行` より前だけである。その本文からコピーを作り直してコミットする
-2. 課題の本文を書き替えられないときは、コピーも変えない。指摘は `deferred`・`defer: needs_user` にし、本文の案を見送りの理由に書く
+1. `gh issue view <番号> --json body --jq .body` で本文を読み、直す前の要求の範囲を控える。その範囲に指摘の直しを加えた案を作る
+2. 書き込みの直前に本文をもう一度読む。要求の範囲が控えと違えば、上書きしない。同じなら、案の後ろに、このとき読んだ `## 進行` から末尾までを変えずに付け、`gh issue edit <番号> --body-file` で書く
+3. 書いた本文を読み直し、要求の範囲をコマンドの出力のままコピーへ書く（AI が書き写さない）。コピーのうち、直す前の本文に無い `## ` の見出しのセクション（実装計画など）は、後ろにそのまま残す
+4. 設計 PR の本文に直す前の文が写っていれば、`gh pr view` で読んで直した後の文へ置き換え、`gh pr edit --body-file` で書く。ほかの行は変えない
+5. コピーをコミットする。コピーの要求の範囲が課題の本文と一致し、PR の本文に直す前の文が残っていないことを、読み直して比べる。確かめてから指摘を `fixed` にする
+
+指摘は次の場合に `deferred`・`defer: needs_user` にし、直す案を見送りの理由に書く。
+
+- 課題の本文を書き替えられないか、手順 2 で要求の範囲が控えと違う。コピーも PR の本文も変えない
+- 課題の本文を書いた後で、PR の本文を直せないか、手順 5 の一致を確かめられない。コピーは書いた本文に合わせてコミットし、残った食い違いを見送りの理由に書く
 
 2 つの値はラウンドごとに決め直し、状態ファイルへは書かない（`documents` と同じ）。
 
