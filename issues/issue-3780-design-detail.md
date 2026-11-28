@@ -396,7 +396,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `primary_of` | `leftover.py` | 新設 | `primary_of(main: Optional[Path]) -> tuple[Optional[str], Optional[str]]` | メインディレクトリの `.ndf/project.json` の `issues.primary` と、注意（未設定のとき） |
-| `file_issues` | `leftover.py` | 新設 | `file_issues(data: dict[str, Any], ref: store.StateRef, port: Port, save: Callable[[], None], *, manual: bool = False, declared: Optional[Declared] = None) -> list[str]` | 起票の候補を設計の「起票の形」の順で扱い、行の `issue`・`issue_error` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて注意を返す |
+| `file_issues` | `leftover.py` | 新設 | `file_issues(data: dict[str, Any], ref: store.StateRef, port: Port, save: Callable[[], None], *, manual: bool = False) -> list[str]` | 起票の候補を設計の「起票の形」の順で扱い、行の `issue`・`issue_error` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて注意を返す |
 
 `Port`（テストは偽物）は次のメソッドを持ち、`GitHubIssues` が GitHub の API で実装する。記録の URL が指す Issue のまとめ読みは GraphQL、ほかは REST である。
 

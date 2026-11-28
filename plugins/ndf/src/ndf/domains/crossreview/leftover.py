@@ -37,8 +37,6 @@ UNDECLARED = (
     f"直さずに残した指摘を起票していない（起票するには {settings.settings_path(Path(), 'project').as_posix()} の "
     f"issues.primary を {GITHUB} に設定する）"
 )
-# 起票の許可の読み直し（`primary_of` の戻り値）
-Declared = Callable[[], tuple[Optional[str], Optional[str]]]
 # 起票の記録の URL が指す Issue を、GraphQL でまとめて読むときの欄
 ISSUE_FIELDS = "url body createdAt authorAssociation author { __typename login ... on User { databaseId } ... on Bot { databaseId } }"
 
@@ -187,18 +185,6 @@ class _Filing:
     texts: dict[str, tuple[str, str, str]] = field(default_factory=dict)
     urls: list[str] = field(default_factory=list)
     me: int = 0  # 実行しているアカウントの ID
-    declared: Optional[Declared] = None
-    # 起票の途中で許可が取り消されたかと、そのときの注意
-    withdrawn: bool = False
-    note: Optional[str] = None
-
-    def revoked(self) -> bool:
-        """許可を読み直し、取り消されていれば真。一度取り消されたら、以後は書かない。"""
-        if not self.withdrawn and self.declared is not None:
-            primary, note = self.declared()
-            if primary != GITHUB:
-                self.withdrawn, self.note = True, note
-        return self.withdrawn
 
     def account_ids(self) -> list[int]:
         return [x for x in store.list_of(self.data, ACCOUNT_IDS) if type(x) is int]
@@ -393,8 +379,6 @@ class _Filing:
 
     def create(self, idents: Sequence[str], at: str) -> None:
         for ident in idents:
-            if self.revoked():
-                return
             title, body = leftover_decide.issue_parts(*self.texts[ident], self.urls)
             try:
                 url = self.port.create(title, body, leftover_decide.issue_mark(ident))
@@ -409,9 +393,6 @@ class _Filing:
             self.done(ident, url)
 
     def run(self, manual: bool) -> list[str]:
-        # 公開のロックを待つ間に取り消されていれば、GitHub を読まずに見送る
-        if self.revoked():
-            return self._withdraw()
         try:
             self.read()
         except Exception as exc:  # noqa: BLE001 ネットワーク: 記録を読めなければ、どの候補も起票しない
@@ -426,8 +407,6 @@ class _Filing:
                 if not self.url_of(ident):
                     self.fail(ident, _reason(exc))
             return self._finish()
-        if fresh and self.revoked():
-            return self._withdraw()
         at = self.announce(fresh) if fresh else None
         if at is not None:
             self.create(fresh, at)
@@ -435,21 +414,13 @@ class _Filing:
         return self._close(at is not None or bool(found and not fresh))
 
     def _close(self, record: bool) -> list[str]:
-        """`record` なら起票の記録へ結果を書き（許可が取り消されていれば書かない）、注意を返す。"""
-        if record and not self.revoked():
+        """`record` なら起票の記録へ結果を書き、注意を返す。"""
+        if record:
             try:
                 self.write()
             except Exception as exc:  # noqa: BLE001 ネットワーク: 次の公開が、記録の識別値を検索と一覧で確かめる
                 return [*self._finish(), f"起票の記録に結果を書けなかった: {_reason(exc)}"]
-        return self._withdraw() if self.withdrawn else self._finish()
-
-    def _withdraw(self) -> list[str]:
-        """起票していない指摘を見送りにする。作れた Issue の URL は行に残り、記録に無い分は次の公開が検索と一覧で確かめる。"""
-        left = [row for rows in self.rows.values() for row in rows if not row.get(Filed.URL)]
-        if left:
-            defer(self.data, left, self.note)
-        self.save()
-        return [self.note] if left and self.note else []
+        return self._finish()
 
     def _finish(self) -> list[str]:
         """失敗を行に書いて保存し、理由ごとにまとめた注意を返す。"""
@@ -469,11 +440,9 @@ def file_issues(
     save: Callable[[], None],
     *,
     manual: bool = False,
-    declared: Optional[Declared] = None,
 ) -> list[str]:
     """起票の候補を起票し、行の `issue`・`issue_error`・`prior_issue` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて
     注意を返す。候補が無ければ GitHub を呼ばない。呼び手は起票先が `github` のときだけ呼ぶ。`manual` は利用者が打った公開である。
-    `declared` を渡せば、GitHub を読む前と、起票の記録と Issue を書く直前に許可を読み直し、取り消されていれば残りを見送る。
 
     呼び手は、今の PR の番号と元の PR の番号の公開のロック（同じ番号なら 1 回）を持つ。"""
     rows: dict[str, list[dict[str, Any]]] = {}
@@ -481,7 +450,7 @@ def file_issues(
         rows.setdefault(leftover_decide.identity(ref.origin_pr, row["text"]), []).append(row)
     if not rows:
         return []
-    return _Filing(data, ref, port, save, rows, declared=declared).run(manual)
+    return _Filing(data, ref, port, save, rows).run(manual)
 
 
 def _text(value: Any) -> str:
