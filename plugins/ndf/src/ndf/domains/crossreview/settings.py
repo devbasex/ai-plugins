@@ -59,8 +59,6 @@ class RunConfig:
     prefilled: tuple[scope_decide.Filled, ...] = ()
     unit: str = ""
     check_pr: bool = False
-    # 引数 `--repo` の対象のリポジトリ（無ければ状態ファイルかリモートから決める。#4543）
-    repo_arg: Optional[str] = None
 
 
 def settings_path(root: Path, file_id: str) -> Path:

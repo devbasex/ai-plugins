@@ -33,8 +33,6 @@ plugins/ndf/
 | `src/ndf/core/worker.py` | 変更 | worker の規則文を組む | `writing`・`worker_kinds` | `worker` | `system_prompt`（変更） |
 | `src/ndf/core/issue_docs.py` | 変更 | 課題の文書の名前の形を持つ | — | `issue_docs` | `requirements_issues`（新設） |
 | `src/ndf/domains/docrebuild/drive.py` | 変更 | 要求仕様のコピーの名前を `issue_docs` から読む | `issue_docs` | `drive` | `requirements_of`（参照先の定数だけ変える） |
-| `src/ndf/domains/records/requirements_copy.py` | 新設 | 要求仕様のコピーのうち直してよいセクションを決める | `adapters.markdown`・`adapters.github`・`issue_docs` | `requirements_copy` | `editable_sections`・`editable_of`・`unchanged_outside`・`all_outside`（新設） |
-| `src/ndf/domains/docrebuild/gate.py` | 変更 | 決まったセクションだけを直させ、ほかの範囲の変更を push せずに止める | `requirements_copy` | `gate` | `_allow_fix`・`_outside_sections`・`_only_protected_remain`（新設） |
 | `contracts/data/review-criteria.json` | 変更 | 修正担当へ足す扱いの文を持つ | — | — | — |
 | `src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 指摘の基準の文を表から読む | 表 | `criteria_decide` | `fixer_requirements_copy`（新設） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 変更したファイルから小見出しを渡すかを決め、レビュー担当の指示を組む | `issue_docs`・`writing`・`criteria_decide` | `_Run` | `_prepare_round`・`_review_prompt`（変更） |
@@ -194,18 +192,16 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `fixer_requirements_copy` | `src/ndf/domains/crossreview/criteria_decide.py` | 新設 | `(scope: str \| None) -> str` | 直してよいセクションの行があれば要求仕様のコピーへの指摘の扱いの全文、無ければ短い制約を表から返す |
-| `_prepare_round` | `src/ndf/domains/crossreview/drive.py` | 変更 | 変えない | 変更したファイルの名前から `run.distinction` と `run.requirements_copies` を決める |
+| `fixer_requirements_copy` | `src/ndf/domains/crossreview/criteria_decide.py` | 新設 | `() -> str` | 要求仕様のコピーへの指摘の扱いの文を表から返す |
+| `_prepare_round` | `src/ndf/domains/crossreview/drive.py` | 変更 | 変えない | 変更したファイルの名前から `run.distinction` と `run.requirements_copy` を決める |
 | `_review_prompt` | `src/ndf/domains/crossreview/drive.py` | 変更 | 変えない | `run.distinction` が偽なら、文書の基準のセクションから小見出しを外す |
 | `_fix_prompt` | `src/ndf/domains/crossreview/fixer.py` | 変更 | 変えない | 同じ条件で小見出しを外し、コピーがあれば扱いの文を足す |
 
 - `_prepare_round`
-  - 事後条件: `run.distinction` は、次の条件で真になる。変更したファイルのどれかで、`issue_docs.design_issues` か `issue_docs.requirements_issues` の結果が空でない。`run.requirements_copies` は後者に当たるファイルの並びになる
+  - 事後条件: `run.distinction` は、次の条件で真になる。変更したファイルのどれかで、`issue_docs.design_issues` か `issue_docs.requirements_issues` の結果が空でない。`run.requirements_copy` は後者に当たるファイルがあるとき真になる
 - `_review_prompt`・`_fix_prompt`
   - `run.distinction` が偽の場合だけ、`document_block` の返す各要素に `writing.without_distinction` を掛ける。真の場合は呼ばない。目印の無い要素は変わらない。`document_block` は変えない
   - 指摘の文や単位の指示など、基準でない部分には掛けない（このリポジトリでは目印の文字列がそこへ現れうる）
-
-扱いの全文を渡すのは、渡す指摘のどれかがコピーに向くとき（場所の無い指摘と「足すべき内容」を含む）だけである。ほかの指摘だけのときは、短い制約（`document.requirements_copy_keep`）を渡し、GitHub を読まない。
 
 扱いの文は `fixer_ci_only` と同じく修正担当への指示だけに入れ、基準の全文より前（`unit_block` の後）に置く。
 
@@ -215,66 +211,36 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `_review_prompt`・`_fix_prompt` | 目印が対にならない | 編集の誤り | `without_distinction` | `CriteriaBroken` を呼び出し元へそのまま送出する | `crossreview/cli.py` の今の `CriteriaBroken` の扱い（`invalid` で止める） | 指示を作る前なので担当を起動しない。直して打ち直せる |
 
-cross-review では、修正担当が扱いの文のとおりに動いたかをプログラムで検出しない。修正担当は、下の表に従って指摘を直すか、`deferred`・`defer: needs_user` で返す。結果の形は今のままである。
+修正担当が扱いの文のとおりに動いたかは、プログラムでは検出しない。修正担当は、下の「内部のデータと定数」の扱いに従って指摘を直すか、`deferred`・`defer: needs_user` で返す。結果の形は今のままである。
 
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `_Run.distinction` | 内部の値（真偽）。`FixRun` にも足す | `domains/crossreview/drive.py` | 偽 |
-| `_Run.requirements_copies` | 内部の値（変える要求仕様のコピーのパスの並び）。`FixRun` にも足す | `domains/crossreview/drive.py` | 空 |
-| `RunConfig.repo_arg` | 引数 `--repo` の値 | `domains/crossreview/settings.py` | 無し |
+| `_Run.requirements_copy` | 内部の値（真偽）。`FixRun` にも足す | `domains/crossreview/drive.py` | 偽 |
 | `document.requirements_copy` | 修正担当へ足す文 | `contracts/data/review-criteria.json` | — |
-
-`_Run.distinction` と `_Run.requirements_copies` はラウンドごとに決め直し、状態ファイルへは書かない（`documents` と同じ）。
 
 `document.requirements_copy` の文には、要求仕様のコピー（`issues/issue-<番号>-requirements.md`）への指摘の扱いを書く。`summary` にもこのキーの説明を足す。
 
-#### 直してよい範囲の判定
-
-直してよい範囲は `domains/records/requirements_copy.py` だけが決め、AI には判定させない。修正担当への指示と承認の前の確認の 2 つがこの判定を使う。
-
-1. 課題の本文を読む。`## 進行` より前（`## 進行` が無ければ全文）を、下では「要求の範囲」と呼ぶ
-2. コピーの `## ` の見出しのうち、要求の範囲に無いものを候補にする。候補が無いか、要求の範囲の見出しがコピーにそろっていなければ、直してよいものは無い
-3. 候補があるときだけ、本文の編集履歴（GraphQL の `userContentEdits`）を 1 回読む。コピーした後に本文から消したセクションを見分けるためである
-4. どの版の要求の範囲にも無かった候補だけを、直してよいセクションにする
-
-GitHub の説明では、版の `diff` は編集の要約である。実際の応答は版の本文の全文だった（2026-11-28 に、このリポジトリの 7 件の課題で、現在の本文と同じ版があることを確かめた）。履歴が空（本文を一度も編集していない）なら、現在の本文だけで判定する。履歴が 1 件以上あり、その中に現在の本文と一致する版が無ければ、直してよいセクションは無い。本文か履歴を読み切れない場合も、直してよいセクションは無い。
+修正担当は、コピーへの指摘があれば、コピーの名前の番号の課題の本文を `gh issue view <番号> --json body --jq .body` で読む。読むだけで、書かない。読んだ本文の `## 進行` より前（`## 進行` が無ければ全文）を、下の表では「要求の範囲」と呼ぶ。扱いは、指摘された場所で分ける。
 
 | 指摘された場所 | 扱い |
 | --- | --- |
-| 直してよいセクションの中 | 直してコミットする。`## ` の見出しは足さない・消さない・動かさない・変えない。課題の本文と PR の本文は変えない |
-| それ以外（本文から写した範囲と、見分けられない範囲） | 課題の本文、コピー、PR の本文を書き替えない。直す案を返し、利用者の判断を待つ |
+| 課題の本文から写した範囲（要求の範囲の `## ` の見出しと同じ見出しのセクションと、最初の `## ` より前） | 課題の本文、コピー、PR の本文を書き替えない。直す案を見送りの理由に書き、`deferred`・`defer: needs_user` にする |
+| コピーにだけあるセクション（見出しが要求の範囲に無い。実装計画など） | そのセクションを直接直してコミットする。課題の本文と PR の本文は変えない |
+| 見分けられない場合（本文を読めないか、要求の範囲の `## ` の見出しがコピーにそろっていない） | 写した範囲と同じ扱いにする |
 
-直す案には、直し先の課題の番号、セクションの見出し、直す前の文、直した後の文を書く。利用者がこの理由だけを読んで、直すかを決められるようにするためである。
+直す案には、直し先の課題の番号、セクションの見出し、直す前の文、直した後の文を書く。利用者がこの理由だけを読んで、直すかを決められるようにするためである。コピーの写した範囲は、ほかの文書への指摘を直すときも書き替えない。
 
-経路ごとの動きは次のとおりである。
+指示の 1 行目は変えず、レビュー対象のリポジトリは足さない。修正担当は課題と PR の本文へ書かないので、別のリポジトリの本文を書き替える経路が無いためである。本文の読み取りで `gh` が使うリポジトリは、次のとおりに決まる。
 
-| 経路 | 判定する時点 | 読むリポジトリ | 範囲の外を変えた場合 |
-| --- | --- | --- | --- |
-| cross-review の修正担当 | 指摘がコピーに向くときに、指示を組むプログラムが判定し、結果を指示の文に入れる | `--repo`、状態ファイル、作業場所のリモートの順で決める。決められなければ直してよいものは無い | 検出しない |
-| `ndf document-rebuild gate`（承認の前の確認） | コピーを直してよいファイルに入れるときに、worker の起動の前に判定し、結果を起動指示に書く | PR のリポジトリ | push せずに止める |
+- `--repo` を付けた起動では、`cli.py` が今も子のプロセスへ渡している `GH_REPO` のリポジトリ
+- 付けない起動では、作業場所のリモートから `gh` が決めるリポジトリ
 
-`gate` は、見出しの並びが同じで、直してよいセクションの外の中身と、直してよいセクションの見出しの行が同じことを確かめる。コピーを 1 回の不合格で終えてよいのは、残った文の引用がすべて直してよい範囲の外にあるときだけである。直してよいセクションでも、`## ` の見出しの行は範囲の外に数える。
+別のリポジトリの同じ番号の課題を読んだ場合は、見出しがそろわなければ写した範囲として扱う。見出しがそろう別の課題を読むと、写した範囲をコピーにだけあるセクションと取り違える余地が残る。この場合もコピーの直しはコミットとして PR の差分に残り、課題の本文は変わらない。
 
-`gate` は、worker の起動の前に判定する。直す側の worker が判定を書き換えられないようにするためである。判定はファイルに書き残さず、`gate` が持つ同じ値を、起動指示と worker の後の確かめの両方に使う。
-
-この方式では、指摘が無くて直さないコピーでも課題を読む。それでも採るのは、次の 3 つの条件を満たすからである。
-
-- worker の起動も、LLM の往復も増えない
-- 起動指示と worker の後の確かめが同じ判定を使うので、途中で課題の本文が変わっても 2 つが食い違わない
-- worker と `gate` の間に、新しい通信の仕組みが要らない
-
-方式ごとの費用の合計は比べていない。コピーを実際に直す割合と、下の表の採らない案で増える時間と token を測っていないためである。そのため、この方式の費用が最も小さいかは分からない。どの案でも、範囲の外を変えていないかは `gate` が自分の判定で確かめるので、保護は変わらない。
-
-| 案 | 直さない場合に増えるもの | 直す場合にかかるもの | 採否 |
-| --- | --- | --- | --- |
-| `gate` が worker の起動の前に読む | 本文の読み取り 1 回と、候補があれば編集履歴の読み取り 1 回 | 左と同じ読み取りだけ | 採る |
-| worker が直す前にコマンドで範囲を問い、`gate` は worker の後に自分で読み直す | 無し | 本文と編集履歴の読み取りが 2 回ずつと、コマンドの起動 1 回、その結果を読む LLM の往復。読む間に本文が変わると、2 つの判定が食い違う | 採らない |
-| 先に読み手役の確かめだけを行い、コピーを直す必要があるときに、`gate` が課題を読んで 2 つ目の worker を起動する | 無し | 読み取りに加えて、worker の起動がもう 1 回 | 採らない |
-| worker の実行中の問い合わせに `gate` が答える | 無し | 読み取り 1 回ずつ。ただし、worker と `gate` の間の通信の仕組みを新しく作る必要がある | 採らない |
-
-起動の前に増える時間の目安は、編集履歴も読む場合で、コピー 1 件につき約 0.9 秒である。これは、2026-11-28 にこのリポジトリの 7 件の課題で別々に測った 2 つの中央値（本文の読み取り 0.30 秒、編集履歴の読み取り 0.58 秒）を足した値である。本文の読み取りを始めてから判定が終わるまでを通した時間とその分布は、測っていない。そのため、約 0.9 秒は追加の待ち時間の上限ではない。承認の前の確認の worker は、手元に記録が残る 28 回の中央値が 407 秒、最短が 152 秒である（起動指示と結果ファイルの更新時刻の差）。同じ記録の設計の確認 26 回のうち、要求仕様のコピーを読ませたのは 21 回で、19 回は 1 件、2 回は 3 件だった。コピーは順に読むので、同じ目安で計算すると 3 件では約 2.7 秒になる。LLM の token は、起動指示に足す数行だけが増える。
+2 つの値はラウンドごとに決め直し、状態ファイルへは書かない（`documents` と同じ）。
 
 ### ログと記録の出力
 

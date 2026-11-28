@@ -13,15 +13,14 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
-from ndf.adapters import agents, claude, claude_choice, git, github
+from ndf.adapters import agents, claude, claude_choice, git
 from ndf.contracts import limits, writing
 from ndf.core.converge import participants
-from ndf.domains.crossreview import criteria_decide, experiment, push, repo, resume_decide, store
+from ndf.domains.crossreview import criteria_decide, experiment, push, resume_decide, store
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.journal import FindingJournal
 from ndf.domains.crossreview.settings import RunConfig
 from ndf.domains.records import mvv as mvv_records
-from ndf.domains.records import requirements_copy
 from ndf.testing import declared, scoped
 
 # 修正担当に許す Tool
@@ -55,7 +54,7 @@ class FixRun(Protocol):
     fixer_growth: int
     documents: bool
     distinction: bool
-    requirements_copies: tuple[str, ...]
+    requirements_copy: bool
 
     def round_stem(self, round_no: int, suffix: str) -> Path: ...
 
@@ -67,37 +66,6 @@ def _where(f: dict[str, Any]) -> str:
     place = f"{f['path']}:{f['line']}" if f.get("path") and f.get("line") else f.get("path") or f.get("section")
     parts = [p for p in (criteria_decide.severity_of(f.get("severity")), place) if p]
     return f"（{'・'.join(parts)}）" if parts else ""
-
-
-def _hub_of(slug: str) -> github.GitHub:
-    return github.GitHub(slug, github.client())
-
-
-# 要求仕様のコピーの判定が読む GitHub（テストは偽物に差し替える）
-HUB_OF: Callable[[str], github.GitHub] = _hub_of
-
-
-def _scope_line(run: FixRun, path: str) -> str:
-    """コピー 1 つの直してよいセクションの行。リポジトリは PR へ書く口と同じ順で決め、決められなければ何も直させない。"""
-
-    def hub() -> github.GitHub:
-        return HUB_OF(repo.resolve_target_repo(run.cfg.repo_arg, store.state_repo(run.ref), run.cfg.worktree).slug)
-
-    try:
-        found = requirements_copy.editable_of(hub, run.cfg.worktree, path)
-    except repo.RepoUnresolved:  # noqa: NDF401 git: 決められなければ直してよいセクションは無いとする（利用者の判断へ返る）
-        found = frozenset()
-    names = "・".join(f"`## {title}`" for title in sorted(found))
-    return f"- `{path}`: {names} のセクションの中" if names else f"- `{path}`: 直してよいセクションは無い"
-
-
-def _copy_scope(run: FixRun, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> Optional[str]:
-    """指摘が向くコピーの直してよいセクション。向くコピーが無ければ None（GitHub を読まない）。
-    場所の無い指摘と足すべき内容は、コピーに向くかを決められないので、すべてのコピーに向くとする。"""
-    anywhere = bool(handed) or any(not f.get("path") for f in open_)
-    paths = {f.get("path") for f in open_}
-    aimed = [p for p in run.requirements_copies if anywhere or p in paths]
-    return "\n".join(_scope_line(run, p) for p in aimed) if aimed else None
 
 
 def _fix_prompt(run: FixRun, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed], result_path: Path) -> str:
@@ -114,8 +82,8 @@ def _fix_prompt(run: FixRun, open_: Sequence[dict[str, Any]], handed: Sequence[f
     )
     lines += criteria_decide.fixer_block(run.cfg.settings.focus, run.snapshot)
     lines += criteria_decide.unit_block(criteria_decide.FIXER, run.cfg.unit)
-    if run.requirements_copies:
-        lines.append(criteria_decide.fixer_requirements_copy(_copy_scope(run, open_, handed)))
+    if run.requirements_copy:
+        lines.append(criteria_decide.fixer_requirements_copy())
     block = criteria_decide.document_block(criteria_decide.FIXER, run.documents)
     lines += block if run.distinction else map(writing.without_distinction, block)
     # 修正担当は hook の無い起動なので、テストを CI に寄せる決まりは指示で伝える（#4030）

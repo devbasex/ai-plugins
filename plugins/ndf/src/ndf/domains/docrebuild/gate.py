@@ -23,11 +23,10 @@ from ndf.adapters import git
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.adapters.publish import Publisher, redacted_pattern
 from ndf.contracts import result
-from ndf.core import issue_docs
 from ndf.domains.docrebuild import drive
 from ndf.domains.docrebuild import gate_decide as gd
 from ndf.domains.docrebuild.drive import Precondition, Stop
-from ndf.domains.records import mvv, pull_view, reading, requirements_copy
+from ndf.domains.records import mvv, pull_view, reading
 from ndf.domains.records.pull_view import PullView
 from ndf.domains.release import approval_decide
 
@@ -111,9 +110,6 @@ class Plan:
     fixable: list[str] = field(default_factory=list)
     title_file: Optional[Path] = None
     previous: Optional[Path] = None
-    # 直してよいファイルに入れた要求仕様のコピーの起動の前の中身と、起動の前に決めた直してよい見出し
-    guarded: dict[str, str] = field(default_factory=dict)
-    editable: dict[str, frozenset[str]] = field(default_factory=dict)
     # 変更要求を 1 回したので、PR の本文から写した行を直させない（そのときの写した本文）
     frozen_body: Optional[str] = None
 
@@ -398,17 +394,7 @@ def _plan_doc(run: Run, plan: Plan, rows: Sequence[Mapping[str, Any]], path: str
         # 読ませた抜き出しの id は作った時点で決める（worker の終了後に読み直すと、書き換えられた中身で読み替えてしまう）
         plan.targets.append(Read(path, file, reading.ENGINEER, before, mvv.blob_id(part.encode("utf-8"), len(blob))))
     if not run.args.no_doc_fix:
-        _allow_fix(run, plan, path)
-
-
-def _allow_fix(run: Run, plan: Plan, path: str) -> None:
-    """文書を直してよいファイルに入れる。要求仕様のコピーは、中身を控え、直してよい見出しを worker の起動の前に決める。
-    worker には決めた結果だけを渡し、worker の後の確かめも同じ値を使う（worker が書き換えられる場所に置かない。#4543）。"""
-    if issue_docs.requirements_issues(path):
-        before = doc_file(run, path).read_bytes().decode("utf-8", "replace")
-        plan.guarded[path] = before
-        plan.editable[path] = requirements_copy.editable_sections(run.hub, min(issue_docs.requirements_issues(path)), before)
-    plan.fixable.append(path)
+        plan.fixable.append(path)
 
 
 def write_facts(run: Run) -> Path:
@@ -426,15 +412,6 @@ def write_facts(run: Run) -> Path:
     return _put_file(run.state(FACTS_FILE), json.dumps(facts, ensure_ascii=False, indent=2) + "\n")
 
 
-def _fixable_line(plan: Plan, path: str) -> str:
-    if path not in plan.guarded:
-        return f"- `{path}`"
-    titles = "・".join(f"「{t}」" for t in sorted(plan.editable[path]))
-    if not titles:
-        return f"- `{path}`（直してよいセクションが無いので、直さない）"
-    return f"- `{path}`（直してよいのは、`## ` の見出しが {titles} のセクションの中だけ。見出しの行は直さない）"
-
-
 def gate_prompt(run: Run, plan: Plan, facts: Path) -> str:
     """起動指示のテンプレートへ、読ませるファイルと直してよいファイルを差し込む。"""
     root = identity.load().root
@@ -446,18 +423,11 @@ def gate_prompt(run: Run, plan: Plan, facts: Path) -> str:
         f"- `{t.name}`: `{t.file}`（{t.reader}" + (f"・ハッシュ `{plan.key}`" if t.name == reading.QUESTION else "") + "）"
         for t in plan.targets
     ]
-    fixable = [_fixable_line(plan, p) for p in plan.fixable] or ["- 無し"]
+    fixable = [f"- `{p}`" for p in plan.fixable] or ["- 無し"]
     if plan.frozen_body is not None:
         fixable.append("- 承認資料のうち PR の本文から写した行は直さない（変更要求は 1 回まで。残った文として返す）")
     if run.args.no_doc_fix and plan.docs:
         fixable.append("- 文書は直さない（設計のレビューへ戻すのは 1 回まで。残った文として返す）")
-    if any(issue_docs.requirements_issues(p) for p in plan.docs):
-        fixable.append(
-            "- 要求仕様のコピー（`issues/issue-<番号>-requirements.md`）は、上の行が挙げたセクションの中のほかは直さない"
-            "（正は課題の本文）。見出しは足さない・消さない・動かさない・変えない。直さない範囲への指摘は、直す案（課題の番号・見出し・"
-            "直す前の文・直した後の文）を `quotes` の `why` に書き、残った文として返す。`quotes` の `quote` は文書の字のとおりに写し、"
-            "指摘がすべて直さない範囲（`## ` の見出しの行を含む）にあるときだけ 2 回目を立てず、1 回の `fail` で終える"
-        )
     values = {
         "skill": str(root / SKILL_SECTION),
         "gate": run.args.gate,
@@ -513,7 +483,6 @@ def verify_worker(run: Run, plan: Plan, report: Mapping[str, Any], before: Mappi
         raise Precondition(drive.not_run_detail("対象", not_run))
     gaps = [g for g in (_target_gap(run, plan, t, found) for t in plan.targets) if g is not None]
     gaps.extend(_outside_fixable(run, plan, before))
-    gaps.extend(_outside_sections(run, plan))
     final = _file_text(plan.material)
     if run.publishable(final) != final:
         gaps.append({"kind": reading.MATERIAL, "name": reading.MATERIAL, "reason": "PR へ書く前に伏せる値（秘密など）がある"})
@@ -553,24 +522,11 @@ def _as_whole(run: Run, plan: Plan, t: Read, rec: Mapping[str, Any]) -> Mapping[
     return {**rec, "checks": renamed}
 
 
-def _only_protected_remain(run: Run, plan: Plan, name: str, rec: Optional[Mapping[str, Any]]) -> bool:
-    """要求仕様のコピーの 1 回の不合格で、残った指摘がすべて直してよいセクションの外にあるか。"""
-    checks = rec.get("checks") if rec is not None else None
-    if name not in plan.guarded or not isinstance(checks, list) or len(checks) != 1 or not isinstance(checks[0], Mapping):
-        return False
-    quotes = [q["quote"] for q in gd.quotes_of(checks[0])]
-    return bool(quotes) and requirements_copy.all_outside(quotes, plan.guarded[name], plan.editable[name])
-
-
 def _target_gap(run: Run, plan: Plan, t: Read, found: Mapping[str, Mapping[str, Any]]) -> Optional[dict[str, str]]:
     rec = found[t.name] if t.name in found else None
     # 直してよいファイルに入らない文書は、2 回目を立てられないので 1 回の不合格で終えてよい（#4599）。
     # 質問の文も同じ（#4621）。読ませるファイルは直してよいファイルに入らず、題の案は質問の文を変えず変更要求の材料になる
-    fixed_never = (
-        (t.name in plan.docs and t.name not in plan.fixable)
-        or (t.name == reading.QUESTION and str(t.file) not in plan.fixable)
-        or _only_protected_remain(run, plan, t.name, rec)
-    )
+    fixed_never = (t.name in plan.docs and t.name not in plan.fixable) or (t.name == reading.QUESTION and str(t.file) not in plan.fixable)
     why = "記録が無い" if rec is None else gd.record_gap(rec, one_fail_ends=fixed_never)
     if why is None and rec is not None and rec["checks"][-1]["hash"] != current_hash(run, plan, t.name):
         why = "最後に読ませた後に中身が変わった"
@@ -582,16 +538,6 @@ def _outside_fixable(run: Run, plan: Plan, before: Mapping[str, Optional[str]]) 
     after = dirty_files(run)
     changed = sorted(p for p in {*before, *after} if p not in before or p not in after or before[p] != after[p])
     return [{"kind": "outside", "name": p, "reason": "直してよいファイルの外を変えた"} for p in changed if p not in plan.fixable]
-
-
-def _outside_sections(run: Run, plan: Plan) -> list[dict[str, str]]:
-    """worker が、要求仕様のコピーの直してよいセクションの中のほかを変えていれば、その欠け。"""
-    out = []
-    for path, before in plan.guarded.items():
-        now = doc_file(run, path).read_bytes().decode("utf-8", "replace")
-        if now != before and not requirements_copy.unchanged_outside(before, now, plan.editable[path]):
-            out.append({"kind": "outside", "name": path, "reason": "課題の本文から写した範囲か、見出しの並びを変えた"})
-    return out
 
 
 # --- 手順 6〜8 --------------------------------------------------------------------------------------------

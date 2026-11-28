@@ -223,12 +223,9 @@ def fixer_ci_only() -> str:
     return str(_table()["fixer_ci_only"])
 
 
-def fixer_requirements_copy(scope: Optional[str]) -> str:
-    """要求仕様のコピーを変える PR で、修正担当への指示に足す文（#4543 の決定 7）。`scope`（指摘がコピーに向くときの、直して
-    よいセクションの行）があれば扱いの全文、無ければ写した範囲を書き替えないという短い制約。"""
-    if scope is None:
-        return str(_table()["document"]["requirements_copy_keep"])
-    return str(_table()["document"]["requirements_copy"]).replace("{scope}", scope)
+def fixer_requirements_copy() -> str:
+    """要求仕様のコピーを変える PR で、修正担当への指示に足すコピーへの指摘の扱い（#4543 の決定 7）。"""
+    return str(_table()["document"]["requirements_copy"])
 
 
 def fixer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[str]:

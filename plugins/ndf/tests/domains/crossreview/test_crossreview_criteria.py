@@ -330,7 +330,7 @@ def test_the_unit_file_reaches_the_reviewer_and_the_fixer_prompts(tmp_path: Path
         mvv=None,
         documents=False,
         distinction=False,
-        requirements_copies=(),
+        requirements_copy=False,
     )
     prep = SimpleNamespace(scope=scope_decide.Scope(scope_decide.FULL, None, ()), diff=tmp_path / "round1.diff", previous=None)
     prompts = {

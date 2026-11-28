@@ -209,7 +209,7 @@ def test_issue_4543_the_distinction_goes_only_with_design_documents(tmp_path: Pa
     monkeypatch.setattr(changes, "changed", lambda *_: changes.Changed((path,), {}))
     monkeypatch.setattr(changes, "review_diff", lambda *_: "")
     g = SimpleNamespace(rev_parse=lambda *_: "head", merge_base=lambda *_: "base")
-    cfg = settings.RunConfig(tmp_path, BRANCH, "origin/main", PR, tmp_path, False, ("codex",), repo_arg="o/r")
+    cfg = settings.RunConfig(tmp_path, BRANCH, "origin/main", PR, tmp_path, False, ("codex",))
     run = drive._Run(cfg, g, store.state_pr(tmp_path, PR), {}, FindingJournal(), [], [], [])  # type: ignore[arg-type]
     prep = drive._prepare_round(run, 1)
     review = drive._review_prompt(run, 1, prep)
@@ -219,22 +219,9 @@ def test_issue_4543_the_distinction_goes_only_with_design_documents(tmp_path: Pa
         assert (full in prompt) is distinction
         assert (_stripped() in prompt) is not distinction
     # 要求仕様のコピーを変える PR だけが、修正担当へコピーへの指摘の扱いを、基準の全文より前に渡す（決定 7）
+    handling = criteria_decide.fixer_requirements_copy()
     copy = path.endswith("-requirements.md")
-    handling = criteria_decide.fixer_requirements_copy(f"- `{path}`: 直してよいセクションは無い")
     assert handling not in review
     assert (handling in fix) is copy
     if copy:
         assert fix.index(handling) < fix.index(full)
-        # 指摘がほかのファイルだけなら、全文の代わりに短い制約を渡す
-        other = fixer._fix_prompt(run, [{**MAJOR, "id": "r1-1", "path": "notes.md"}], (), tmp_path / "result.json")
-        assert handling not in other and criteria_decide.fixer_requirements_copy(None) in other
-        # コピーがあれば、NDF が決めた直してよいセクションを指示に入れる（GitHub は偽物）
-        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / path).write_text("## 目的\n\n## 実装計画\n", encoding="utf-8")
-        hub = SimpleNamespace(
-            issue_body=lambda number: SimpleNamespace(body="## 目的\n"),
-            repository=lambda *_: {"issue": {"userContentEdits": {"totalCount": 0, "nodes": []}}},
-        )
-        monkeypatch.setattr(fixer, "HUB_OF", lambda slug: hub)
-        scoped_fix = fixer._fix_prompt(run, [{**MAJOR, "id": "r1-1", "path": path}], (), tmp_path / "result.json")
-        assert f"- `{path}`: `## 実装計画` のセクションの中" in scoped_fix
