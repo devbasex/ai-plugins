@@ -133,9 +133,12 @@ def record_current(ref: StateRef, current_pr: int) -> StateRef:
 
 def state_repo(ref: StateRef) -> Optional[str]:
     """状態ファイルが持つ対象のリポジトリ。状態ファイルが無ければ None。"""
-    if not ref.path.is_file():
-        return None
-    value = read_object(ref.path).get(REPO_KEY)
+    return repo_of(read_object(ref.path)) if ref.path.is_file() else None
+
+
+def repo_of(data: Mapping[str, Any]) -> Optional[str]:
+    """状態が持つ対象のリポジトリ。無いか、空でない文字列でなければ None（未確認）。"""
+    value = data.get(REPO_KEY)
     return value if isinstance(value, str) and value else None
 
 

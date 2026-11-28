@@ -241,6 +241,18 @@ def test_issue_3780_2_run_saves_the_repository_of_the_confirmed_pr(wt: Path, tmp
     assert store.state_repo(store.state_pr(fake.state_dir, PR)) == "o/r"
 
 
+@pytest.mark.parametrize("unconfirmed", [None, ""])
+def test_issue_3780_2_run_fills_an_unconfirmed_repository(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, hub, unconfirmed: Optional[str]
+) -> None:
+    read = threads.ReadPr(f"o/r#{PR}", BRANCH, sh(wt, "rev-parse", "HEAD").strip(), "o/r")
+    monkeypatch.setattr(hub.port, "read_pr", lambda: read)
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    store.write_object(fake.state_dir / store.STATE_NAME.format(pr=PR), {"pr": PR, "target_repo": unconfirmed})
+    _run(capsys, monkeypatch, fake, wt)
+    assert store.state_repo(store.state_pr(fake.state_dir, PR)) == "o/r"
+
+
 def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys, monkeypatch, hub) -> None:
     # 起票の候補が無ければ、主 worktree を調べない
     monkeypatch.setattr(location, "main_worktree", lambda g: pytest.fail("主 worktree を調べた"))
@@ -660,9 +672,9 @@ def test_issue_3780_2_nothing_is_filed_unless_the_primary_is_github(
     store.write_object(path, _left_state())
     got = _report_of(state_dir, capsys)
     assert github.calls == [] and any("issues.primary" in w for w in got.get("warnings", ())) is noted
-    # 未設定の見送りの理由は状態にだけ残す。GitHub にしない設定は残さない
+    # 未設定の見送りは理由を、GitHub にしない設定の見送りは null を状態にだけ残す
     state = store.read_object(path)
-    assert ("issue_skipped" in state) is noted and "issue_error" not in state["findings"][0]
+    assert (state["issue_skipped"] is not None) is noted and "issue_error" not in state["findings"][0]
 
 
 def test_issue_3780_a_rerun_checks_the_target_once_and_reuses_the_comment_while_skipped(tmp_path: Path, monkeypatch, hub) -> None:
@@ -692,6 +704,38 @@ def test_issue_3780_a_rerun_checks_the_target_once_and_reuses_the_comment_while_
     checked.clear()
     rerun()
     assert checked == ["target"] and len(hub.comments) == 3 and len(github.issues) == 1
+
+
+@pytest.mark.parametrize("before", ["markdown", "remote-differs"])
+def test_issue_3780_a_rerun_files_after_the_skip_is_resolved(tmp_path: Path, monkeypatch, hub, before: str) -> None:
+    from ndf.domains.crossreview import cli
+
+    github = FakeGitHub()
+    port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
+    hub.leftovers, hub.clean = lambda pr: port, list
+    checked: list[str] = []
+    note: list[Optional[str]] = ["リモートが違う" if before == "remote-differs" else None]
+    monkeypatch.setattr(cli.leftover, "unconfirmed_target", lambda *a: checked.append("target") or note[0])
+    state_dir = tmp_path / "st"
+    store.write_object(state_dir / store.STATE_NAME.format(pr=7), {**_left_state(), "target_repo": "o/r"})
+    cfg = types.SimpleNamespace(state_dir=state_dir, pr=7, main=tmp_path)
+    got = types.SimpleNamespace(review=types.SimpleNamespace(findings=[], final=fin.CONVERGED), warnings=[], reused=True)
+    (tmp_path / ".ndf").mkdir()
+    settings_file = tmp_path / ".ndf" / "project.json"
+    settings_file.write_text(json.dumps({"issues": {"primary": "markdown" if before == "markdown" else "github"}}), encoding="utf-8")
+
+    def rerun() -> None:
+        cli._report(cfg, got, lambda: cli.HUB(None, "o/r", tmp_path))
+
+    rerun()
+    rerun()
+    assert len(hub.comments) == 1 and github.issues == []
+    note[0] = None
+    settings_file.write_text(json.dumps({"issues": {"primary": "github"}}), encoding="utf-8")
+    checked.clear()
+    rerun()
+    # 公開し直すかの判定と起票の可否は、起票先の 1 回の確認を使う
+    assert checked == ["target"] and len(hub.comments) == 2 and len(github.issues) == 1
 
 
 def test_filing_after_a_rewind_also_takes_the_lock_of_the_origin_pr(repos: Repos, tmp_path: Path, capsys, monkeypatch, hub) -> None:

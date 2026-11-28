@@ -244,7 +244,7 @@ def test_defer_keeps_the_skip_reason_only_in_the_state(reason: str | None, kept:
     row = _row(issue_error="前の失敗")
     data = {leftover.SKIPPED: "前の理由", report_decide.PUBLISHED_KEY: "公開済み"}
     leftover.defer(data, [row], reason)
-    assert data.get(leftover.SKIPPED) == reason and Filed.ERROR not in row
+    assert data[leftover.SKIPPED] == reason and Filed.ERROR not in row
     assert (report_decide.PUBLISHED_KEY in data) is kept
 
 

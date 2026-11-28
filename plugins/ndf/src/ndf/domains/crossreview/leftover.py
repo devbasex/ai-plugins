@@ -27,7 +27,8 @@ from ndf.domains.crossreview.leftover_decide import PARKED, Filed, Listed
 ACCOUNT_IDS = "issue_account_ids"
 RECORD_ID = "issue_record_id"
 LIST_FULL = "issue_list_full"
-# 起票を見送った理由の状態のキー。見送りの理由はここにだけ持ち、行の `issue_error`（起票の失敗）と分ける
+# 起票を見送った理由の状態のキー。見送りの理由はここにだけ持ち、行の `issue_error`（起票の失敗）と分ける。
+# 起票先を GitHub にしない設定で見送ったときは値が null（キーが無い状態と分ける）
 SKIPPED = "issue_skipped"
 # 起票先を GitHub にする `.ndf/project.json` の `issues.primary` の値
 GITHUB = "github"
@@ -133,13 +134,10 @@ def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 def defer(data: dict[str, Any], rows: Iterable[dict[str, Any]], reason: Optional[str]) -> None:
     """起票を見送った理由を状態に残し、候補の行の前の起票の失敗を消す。`reason` が None（起票先を GitHub にしないと
-    設定している）なら、前の理由を消す。理由が変われば公開済みの記録は古いので、打ち直しが公開し直すようにする。"""
+    設定している）でもキーは null で残し、設定を変えた後の打ち直しが起票できるようにする。理由が変われば公開済みの記録は古いので、打ち直しが公開し直すようにする。"""
     if data.get(SKIPPED) != reason:
         data.pop(report_decide.PUBLISHED_KEY, None)
-    if reason is None:
-        data.pop(SKIPPED, None)
-    else:
-        data[SKIPPED] = reason
+    data[SKIPPED] = reason
     for row in rows:
         row.pop(Filed.ERROR, None)
 
