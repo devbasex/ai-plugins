@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import git_sandbox
 import pytest
+from plan_decls import REPO, decl, doc
 
 from ndf.adapters.git import Git
 from ndf.contracts import result
-from ndf.progress import definition, gate, invoke, lane, model, plan, run, run_view, stage_inputs, stages, store
+from ndf.progress import definition, gate, invoke, lane, model, plan, run, run_view, stage_inputs, stages, store, withdraw
 from ndf.progress import design_record as dr
 
 REVIEW, IMPLEMENT = "ドキュメントレビュー", "実装"
@@ -450,38 +452,61 @@ def _empty_lane(conn, pid: str, name: str, **extra) -> None:
     lane.cancel_row(conn, pid, name, first, lane.RowChange("conductor", "整理"))
 
 
+@pytest.fixture
+def carried_over(root):
+    """課題 8 を繰り越した直後のレーンと承認を、ストアにだけ組む（git のリポジトリを作らず、工程も流さない）。"""
+    with store.open_store(store.default_url(root), root) as st:
+        with store.transaction(st) as conn:
+            pid = plan.create_plan(conn, REPO, doc(decl("a", [[7, 8]])), True)
+            parent = lane.read_view(conn, pid)[0].lanes["a"].machine_id
+            tid = store.create_machine(conn, ("sprint", REPO, "s1"), parent, None, [])
+            lane.start_row(conn, pid, "a", "r1", tid)
+            carried = lane.carry_issues(conn, pid, "a", "r1", [8], "外す")
+        payload = {"dropped": [8], "carried_row": carried}
+        draft = model.EventDraft(run_view.ANSWERED, run.CONDUCTOR, REVIEW, payload=payload)
+        yield SimpleNamespace(
+            st=st,
+            pid=pid,
+            carried=carried,
+            view=SimpleNamespace(machine_id=tid, doc={"context": {"issues": [7, 8]}}, events=[], rev=1),
+            answered=model.Event(1, datetime.now(UTC), draft),
+        )
+
+
+def _taken_back(conn, c) -> list[dict]:
+    """承認を無効にして、文脈へ書く事象の payload を返す。"""
+    return [d.payload for d in withdraw.take_back(conn, c.view, REVIEW, c.answered, "無効")]
+
+
+_RESTORED = [{"outputs": {"issues": [7, 8]}}]
+
+
 @pytest.mark.parametrize("started", [False, True])
-def test_a_carried_row_moved_to_another_repository_is_left_as_it_is(st, machine, started):
-    pid, carried = _approved_with_a_drop(st, machine)
+def test_a_carried_row_moved_to_another_repository_is_left_as_it_is(carried_over, started):
+    st, pid, carried = carried_over.st, carried_over.pid, carried_over.carried
     with store.transaction(st) as conn:
         _empty_lane(conn, pid, "other", repo="example/other")
         moved = plan.move_row(conn, pid, ("a", carried), "other", "移す")
         if started:
             lane.start_row(conn, pid, "other", moved, "other-sprint")
-
-    machine.turn()
-
-    with store.transaction(st) as conn:
+        assert _taken_back(conn, carried_over) == _RESTORED
         rows = lane.read_view(conn, pid)[1]
+
     assert {r.key: r.state for r in rows["other"]}[moved] == ("running" if started else "pending")
-    assert run.read(st, machine.tid).context()["issues"] == [7, 8]
 
 
-def test_a_move_recorded_only_in_the_reason_is_followed(st, machine):
-    pid, carried = _approved_with_a_drop(st, machine)
+def test_a_move_recorded_only_in_the_reason_is_followed(carried_over):
+    st, pid, carried = carried_over.st, carried_over.pid, carried_over.carried
     with store.transaction(st) as conn:
         _empty_lane(conn, pid, "b")
         # `moved_from` を持たないバージョンの `ndf lanes move` が書いた事象と同じ形
         lane.cancel_row(conn, pid, "a", carried, lane.RowChange("organizer", "レーン b へ移す: 移す"))
         inp = {"kind": "sprint", "issues": [8], "args": []}
         moved = lane.add_row(conn, pid, "b", inp, lane.RowChange("organizer", f"レーン a の行 {carried} から移した: 移す"))
-
-    machine.turn()
-
-    with store.transaction(st) as conn:
+        assert _taken_back(conn, carried_over) == _RESTORED
         rows = lane.read_view(conn, pid)[1]
+
     assert {r.key: r.state for r in rows["b"]}[moved] == "cancelled"
-    assert run.read(st, machine.tid).context()["issues"] == [7, 8]
 
 
 # --- 入力の組み立て ------------------------------------------------------------------------------
