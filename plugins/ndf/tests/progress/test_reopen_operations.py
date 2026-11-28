@@ -649,6 +649,9 @@ def test_the_same_reopen_sent_again_returns_the_first_result(repo, st, env, caps
     assert again["status"] == "ok", again
     assert again["items"] == first["items"] and again["metrics"]["seqs"] == first["metrics"]["seqs"]
     assert _events(st, tid) == before and env.hub.calls == calls
+    # 排他を取れた場合も、取った後に読んだ記録で送り直しと見分ける
+    assert _retry(capsys, tid, DESIGN, "--later", "reopen")["metrics"]["seqs"] == first["metrics"]["seqs"]
+    assert _events(st, tid) == before and env.hub.calls == calls
     # 理由が違うか、一緒に開き直されただけの工程への打ち直しは、送り直しと扱わない
     assert _retry(capsys, tid, DESIGN, "--later", "reopen", reason="別の理由")["status"] != "ok"
     assert _retry(capsys, tid, "デプロイ", "--later", "reopen")["status"] != "ok"

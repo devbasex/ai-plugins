@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
@@ -114,24 +115,38 @@ def _replayed_reopen(a: argparse.Namespace, v: run.View) -> Optional[dict[str, A
 
 
 def _cmd_retry(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    """失敗の工程は事象 `retry` を書く（済んだステップを残す）。終了の工程は `--later` に従って開き直す。"""
+    """失敗の工程は事象 `retry` を書く（済んだステップを残す）。終了の工程は `--later` に従って開き直す。
+
+    確定した開き直しの送り直し（`_replayed_reopen`）は書かないので、作業の排他を取れなくても受ける。"""
     if not a.reason.strip():
         raise model.Refused("retry には理由が要る（--reason <理由>）")
-    # 送り直しは書かないので、排他の前に返す（開き直しの直後に起動した作業が排他を持っていても受ける）
-    replayed = _replayed_reopen(a, run.read(st, a.machine_id)) if a.later else None
+    with ExitStack() as stack:
+        try:
+            stack.enter_context(reopening.work_stopped(st, a.machine_id))
+        except model.Refused:
+            # 開き直しの直後に起動した作業が排他を持つ場合。履歴を読み足すのは、排他を取れないときだけにする
+            replayed = _replayed_reopen(a, run.read(st, a.machine_id)) if a.later else None
+            if replayed is None:
+                raise
+            return replayed
+        return _retry_stopped(a, cwd, st)
+
+
+def _retry_stopped(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
+    """作業の排他を取った後の `retry`。送り直しは、排他を取るまでの間に確定した開き直しも含めて、ここで読んだ記録で見分ける。"""
+    v = run.read(st, a.machine_id)
+    replayed = _replayed_reopen(a, v) if a.later else None
     if replayed is not None:
         return replayed
-    with reopening.work_stopped(st, a.machine_id):
-        v = run.read(st, a.machine_id)
-        v.snap.stage(a.stage)  # 工程の無い名前はここで断る
-        state = v.rows[a.stage].state
-        refused = _retry_refusal(a.machine_id, a.stage, state, a.later)
-        if refused is not None:
-            whole = f"ステートマシンは{model.label(v.whole)}。" if model.is_terminal(v.whole) else ""
-            raise model.Refused(whole + refused)
-        if state == "failed":
-            return command._changed(a, st, "retry", None)
-        return _reopen_stage(a, cwd, st)
+    v.snap.stage(a.stage)  # 工程の無い名前はここで断る
+    state = v.rows[a.stage].state
+    refused = _retry_refusal(a.machine_id, a.stage, state, a.later)
+    if refused is not None:
+        whole = f"ステートマシンは{model.label(v.whole)}。" if model.is_terminal(v.whole) else ""
+        raise model.Refused(whole + refused)
+    if state == "failed":
+        return command._changed(a, st, "retry", None)
+    return _reopen_stage(a, cwd, st)
 
 
 def _read_stage_output(a: argparse.Namespace, st: store.Store) -> tuple[Any, stages.StageDef, list[str], list[tuple[str, Optional[str]]]]:
