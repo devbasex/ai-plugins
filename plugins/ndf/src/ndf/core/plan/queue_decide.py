@@ -15,8 +15,9 @@ from typing import Any, NamedTuple, Optional
 
 from ndf.contracts.exit_codes import GATE, OK, STOPPED
 
-# 再開の開始点より前にあれば毎回通すステップ。ベースブランチと振り返りの範囲は前の実行の後に変わりうる
-RESUME_ALWAYS = ("base-sync", "deep-due")
+# 再開の開始点より前にあれば毎回通すステップ。ベースブランチと振り返りの範囲は前の実行の後に変わりうる。実装のプランの
+# 確かめ（guard）は、打ち直しの間に承認の記録が変わりうる（#3702 の決定 12）
+RESUME_ALWAYS = ("guard", "base-sync", "deep-due")
 
 
 class Queued(NamedTuple):

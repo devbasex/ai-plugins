@@ -118,7 +118,7 @@ def test_docs_only_check_skips_whole_tests():
 def test_merged_impl_plan_is_not_rerun():
     """#2349: マージ済みの実装のプランを流し直しても、worker も PR の作成も打たずに終える。"""
     visited, state = walk(plan_of("implement"), {"done-check": [stopped("not_applicable")]})
-    assert visited == ["done-check"]
+    assert visited == ["guard", "done-check"]
     assert state.status == OK
 
 
@@ -260,7 +260,7 @@ def test_impl_plan_ends_when_ci_passes_at_the_reviewed_head():
     """#3879 決定 2: 実装のプランは単位の PR をレビューしてから CI を待ち、CI が通った HEAD がレビューした HEAD なら終える。"""
     visited, state = walk(plan_of("implement"), {})
     assert visited == [
-        "done-check", "work", "acceptance", "test", "push", "pr", "conflict-check", "base-fetch", "review",
+        "guard", "done-check", "work", "acceptance", "test", "push", "pr", "conflict-check", "base-fetch", "review",
         "push-reviewed", "review-head", "ci", "head-reviewed", "resolved",
     ]  # fmt: skip
     assert state.status == OK

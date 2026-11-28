@@ -425,10 +425,10 @@ def test_unit_template_drops_the_done_check_and_gives_the_repository_to_ci():
     t = route.unit_template(route.choose("implement"), "o/r", ["done-check"])
     plan = route.render(t, values("implement"))
     ids = [s["id"] for s in plan["steps"]]
-    assert ids[0] == "work" and "done-check" not in ids
+    assert ids[:2] == ["guard", "work"] and "done-check" not in ids
     assert next(s for s in plan["steps"] if s["id"] == "ci")["run"][-2:] == ["--repo", "o/r"]
     # 元のテンプレートは変えない
-    assert [s["id"] for s in plan_of("implement")["steps"]][0] == "done-check"
+    assert [s["id"] for s in plan_of("implement")["steps"]][:2] == ["guard", "done-check"]
     assert "--repo" not in next(s for s in plan_of("implement")["steps"] if s["id"] == "ci")["run"]
 
 

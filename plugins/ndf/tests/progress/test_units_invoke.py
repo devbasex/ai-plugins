@@ -441,6 +441,8 @@ OK_DONE = result.result("plan", result.OK, "通った")
         (_state(_stopped_at("ci"), stopped_head=HEAD), HEAD, True, ("run", False, None)),
         (_state(_stopped_at("test"), stopped_head=OTHER), HEAD, True, ("run", False, None)),
         (_state(_stopped_at("work"), stopped_head=None), HEAD, True, ("run", False, None)),
+        # 実装のプランの確かめで止まった回は、後のステップから始めずに確かめから流し直す（#3702）
+        (_state(_stopped_at("guard"), stopped_head=OTHER), HEAD, True, ("run", False, None)),
         (_state(None), HEAD, True, ("run", False, None)),
         (_state(result.result("plan", result.GATE, "待つ")), HEAD, True, ("run", False, None)),
     ],
@@ -461,6 +463,7 @@ OK_DONE = result.result("plan", result.OK, "通った")
         "テストより後で止まり HEAD が同じ",
         "テストで止まった",
         "作業で止まった",
+        "実装のプランの確かめで止まった",
         "結果の無い中断",
         "承認の待ち",
     ],

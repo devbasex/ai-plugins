@@ -30,6 +30,12 @@ def test_resume_prelude_keeps_the_always_steps_before_the_start():
     assert resume_prelude(order, "deep-due") == ()
 
 
+def test_resume_prelude_runs_the_guard_before_any_later_start():
+    # #3702 の決定 12: 打ち直しで途中のステップから流すときも、実装のプランの確かめは毎回通す
+    assert resume_prelude(["guard", "work", "ci"], "ci") == ("guard",)
+    assert resume_prelude(["guard", "work", "ci"], "guard") == ()
+
+
 def test_resume_prelude_refuses_an_unknown_start():
     with pytest.raises(ValueError):
         resume_prelude(["a"], "b")

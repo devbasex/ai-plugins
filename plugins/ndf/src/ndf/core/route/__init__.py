@@ -679,8 +679,8 @@ def review_command(template_name: str, base: str) -> list[str]:
 
 
 def stopped_after_test(step: str) -> bool:
-    """止まったステップが手元のテストより後か。作業・受け入れ条件・テスト・テストの修正は後でない。"""
-    return step not in {"work", "acceptance", "test", "test-repeat", "fix"}
+    """止まったステップが手元のテストより後か。実装のプランの確かめ・作業・受け入れ条件・テスト・テストの修正は後でない。"""
+    return step not in {"guard", "work", "acceptance", "test", "test-repeat", "fix"}
 
 
 def unit_review_launch(repo: str, command: Sequence[str]) -> list[str]:
@@ -716,7 +716,10 @@ def _review_value(t: Template, values: Mapping[str, Value]) -> Optional[list[str
 
 
 def launch_values(t: Template, values: Mapping[str, Value], *, issues: Sequence[str] = ()) -> dict[str, Value]:
-    """テンプレートが使う差し込みのうち値の無い `review`・`acceptance` の補い（単発の経路と工程から組む経路で共有する）。
+    """テンプレートが使う差し込みのうち値の無い `review`・`acceptance`・`issue` の補い（単発の経路と工程から組む経路で共有する）。
+
+    実装のテンプレートで `issue` が無く `acceptance` があれば、その `--issue` の最小の番号にする（代表の課題。最初の確かめの
+    `guard` が読む。課題を束ねた単位は `acceptance` だけで組める）。
 
     `review` は `review_launch` で組み、`acceptance` は `issue` があれば `--issue <issue>`（課題の条件をすべて照らす）。
     課題をまとめた単位（`issues` が 2 つ以上）は、課題ごとの `--issue` を番号の順に並べる（#3908 の決定 7。代表の課題
@@ -728,10 +731,22 @@ def launch_values(t: Template, values: Mapping[str, Value], *, issues: Sequence[
         if review is not None:
             out["review"] = review
     issue = values.get("issue")
+    if t.name == "impl" and _omitted(t, values, "issue"):
+        smallest = _smallest_issue(values.get("acceptance"))
+        if smallest is not None:
+            out["issue"] = smallest
     if _omitted(t, values, "acceptance") and isinstance(issue, str) and issue:
         named = sorted({issue, *issues}, key=int) if len(issues) > 1 else [issue]
         out["acceptance"] = [arg for n in named for arg in (ACCEPTANCE_ISSUE, n)]
     return out
+
+
+def _smallest_issue(acceptance: Optional[Value]) -> Optional[str]:
+    """`acceptance` の並びの `--issue` の最小の番号。無ければ None（欠けは `check_acceptance` が断る）。"""
+    if not isinstance(acceptance, list):
+        return None
+    named = [value for flag, value in zip(acceptance, acceptance[1:]) if flag == ACCEPTANCE_ISSUE and value.isdigit()]
+    return min(named, key=int) if named else None
 
 
 def check_acceptance(values: Mapping[str, Value]) -> None:

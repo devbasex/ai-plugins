@@ -815,6 +815,9 @@ def unit_run(ctx: Context, unit: Unit, worktree: Path, round_dir: Path, start: O
     else:
         drop += CI_STEPS
     env = {GH_REPO_ENV: ctx.repo, **({UNIT_FILE_ENV: unit_file} if unit_file else {})}
+    if ctx.run.sprint is not None and ctx.run.sprint.launched is not None:
+        # 実装のプランの最初の確かめ（guard）が照らす記録を、起動の前に残す（#3702 の決定 12）
+        ctx.run.sprint.launched(overrides["branch"], ctx.branch, issue=unit.issue, unit_file=Path(unit_file) if unit_file else None)
     plain = ctx.run.plain()
     template = route.unit_template(route.templates()["impl"], ctx.repo, drop)
     inputs = {**plain.inputs, "worktree": str(worktree)}

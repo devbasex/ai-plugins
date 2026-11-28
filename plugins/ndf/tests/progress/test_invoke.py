@@ -306,7 +306,7 @@ def test_template_values_fill_the_worker_from_the_default_and_the_branch_from_th
     assert "ndf-worker" in text and "{{" not in text
 
 
-def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tmp_path, monkeypatch):
+def test_impl_with_an_acceptance_of_several_issues_takes_the_representative_issue(tmp_path, monkeypatch):
     # PR 3888 の指摘: 受け入れ条件（acceptance）を入力で渡せば、課題をまとめた単位でも issue を求めない。
     # 題と本文は代表の課題（番号の最も小さい #3）からコピーする（#3908 の決定 7）
     repo = _sprint_repo(tmp_path, PROJECT)
@@ -318,7 +318,8 @@ def test_impl_with_an_acceptance_of_several_issues_does_not_ask_for_the_issue(tm
     work = tmp_path / "w"
     work.mkdir()
     got = invoke.template_values(route.choose("implement"), run, work, repo, project=PROJECT, local_tests=True)
-    assert "issue" not in got and got["title"] == "#3 の題"
+    # 最初の確かめ（guard）が読む issue は代表の課題になる（#3702）
+    assert got["issue"] == "3" and got["title"] == "#3 の題"
 
 
 def test_quality_gates_builds_for_a_sprint_with_several_issues(tmp_path, monkeypatch):

@@ -475,6 +475,12 @@ def read_machine(conn: sa.Connection, machine_id: str) -> Optional[dict[str, Any
     return dict(row._mapping) if row is not None else None
 
 
+def read_machines(conn: sa.Connection, repo: str) -> list[dict[str, Any]]:
+    """リポジトリ `repo` のスプリントのステートマシンの一覧（作った順）。"""
+    q = sa.select(MACHINES).where(MACHINES.c.repo == repo, MACHINES.c.level == "sprint")
+    return [dict(r._mapping) for r in conn.execute(q.order_by(MACHINES.c.created_at, MACHINES.c.id))]
+
+
 def read_definition(conn: sa.Connection, machine_id: str) -> tuple[int, dict[str, Any]]:
     """最新の定義の改訂（改訂の番号, スナップショット）。"""
     q = sa.select(DEFINITIONS.c.rev, DEFINITIONS.c.definition).where(DEFINITIONS.c.machine_id == machine_id)

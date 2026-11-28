@@ -191,7 +191,7 @@ def test_the_start_of_the_run_is_used_only_without_a_start_from_the_record(tmp_p
     assert argv[argv.index("--from") + 1] == "a"
 
 
-PASSES_PR = ["done-check", "work", "acceptance", "test", "fix", "test-repeat", "push", "pr", "fix-push", "base-sync", "fix-base"]
+PASSES_PR = ["guard", "done-check", "work", "acceptance", "test", "fix", "test-repeat", "push", "pr", "fix-push", "base-sync", "fix-base"]
 # 番号を読まずに終わるステップ（保存した記録だけで完了を確かめる）
 NEVER_READS_PR = ["resolved"]
 
