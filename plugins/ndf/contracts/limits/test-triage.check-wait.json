@@ -5,6 +5,7 @@
   "max_interval": 120,
   "read_by": [
     "ndf.adapters.ci",
-    "ndf.domains.crossrefactor.final_gate"
+    "ndf.domains.crossrefactor.final_gate",
+    "ndf.progress.units_queue"
   ]
 }

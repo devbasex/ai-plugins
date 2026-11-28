@@ -1,7 +1,8 @@
 """工程「実装」を実装計画のレビューの単位ごとに流す処理（docs/specifications/ndf-implement-stage-review-units.md）。
 
 ここにあるのは、開始前の確かめ（`prepare`）、打ち直しで単位の回をどう続けるかの判定（`units_flow.round_state`・`units_flow.resume_of`）と、
-単位を流す処理（`run_stage`。作業場所の用意・`impl`・マージ・スプリントの PR。流す順と並列は `units_flow`）である。
+単位を流す処理（`run_stage`。作業場所の用意・`impl`・マージ・スプリントの PR。流す順と並列は `units_flow`、キューの待ちの状態と記録は
+`units_queue`）である。
 開始前の確かめは、作業場所が今いるブランチをリモートから取得し、コミットされた単位のファイルか実装計画の単位の見出しがあるかで
 経路を決める。分け方の承認が要るスプリントは常に単位の経路にする。単位の経路なら、手元をリモートに揃え、並びを読んで `units.json` に書く。
 単位のファイルがあるか承認が要れば、承認の記録と照らし、単位のファイルを読んで確かめてから、確かめたコミットをリモートへ送る
@@ -21,6 +22,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -28,7 +30,7 @@ from types import MappingProxyType
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
-from ndf.adapters import github, github_pulls
+from ndf.adapters import github, github_merge, github_pulls
 from ndf.adapters.git import HEADS, Git, mask_urls
 from ndf.cli import ndf_command
 from ndf.contracts import facts, named_cap, result, worker_paths
@@ -40,7 +42,7 @@ from ndf.core.plan import units_decide as ud
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, acceptance_args, has_units, lineup, unit_key
 from ndf.core.plan.transition_decide import USAGE_LIMIT
-from ndf.progress import issue_values, refactor_values, units_flow
+from ndf.progress import issue_values, refactor_values, units_flow, units_queue
 from ndf.progress.command import PROJECT_FILE, ndf_settings_in
 from ndf.progress.issue_values import UNITS_DIR, UNITS_FILE
 from ndf.progress.plan_runs import SprintPlan, StageResult, StageRun, UnitsStopped
@@ -62,6 +64,8 @@ CI_STEPS = ("ci", "repeat-check", "ci-fix", "ci-local", "push-fixed")
 # スプリントの PR を開くプランの保存先（工程の保存先の下）と、そのプランから外すステップ（単位の変更はマージで送り済み）
 SPRINT_PR_DIR = "sprint-pr"
 SPRINT_PR_DROP = ("push", "fix-push")
+# 工程の保存先の `units/` の下の、反映待ちの記録
+INGEST_FILE = "ingest.json"
 # 単位のプランの子へ渡す、`gh` の対象のリポジトリと単位の範囲の指示のファイル（`contracts/domains/env.json`）
 GH_REPO_ENV = identity.env_name("gh-repo")
 UNIT_FILE_ENV = identity.env_name("unit-file")
@@ -85,13 +89,15 @@ class Ports(NamedTuple):
 
     `call_plan` は呼び出しを保存先でプランとして流し、`command` は argv を作業ディレクトリと環境で打つ。`failure` は
     単位を流す間の例外を停止の結果 JSON にする（分けられない例外は None）。`call_plan` だけが並列に呼ばれ、`workers` は
-    それを流すプールと待ちである。
+    それを流すプールと待ちである。`clock` と `sleep` はキューと反映の待ちの時計と眠りである。
     """
 
     call_plan: Callable[[StageRun, Path], StageResult]
     command: Callable[[list[str], Path, dict[str, str]], "subprocess.CompletedProcess[str]"]
     failure: Callable[[Exception], Optional[dict[str, Any]]] = lambda exc: None
     workers: units_flow.Workers = units_flow.Workers()
+    clock: Callable[[], float] = time.time
+    sleep: Callable[[float], None] = time.sleep
 
 
 class Context(NamedTuple):
@@ -439,8 +445,8 @@ def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optiona
     並びは `units.json` から読み、無ければ `prepare` で作る。マージ済みの単位は開始時に 1 回読んだ一覧で飛ばす（`already_merged`）。
     止まった単位に依存する単位は始めず、止まった単位の名前・課題・PR の番号・理由を結果に持たせる（受け入れ条件 5）。同時に流す
     本数の上限は `named_cap` が読む値である。担当タスクの本文を読むコミットを持たない並び（実装計画の表）は、順に 1 つずつ流す。
-    スプリントの作業場所は、スプリントの PR を開く直前に最後にマージした単位のマージコミットまで進める。前の実行でマージされた
-    単位（マージキューの待ちで止まった後にマージされたもの、マージの後の取得に失敗したもの）も、打ち直しで同じように進む。
+    スプリントの作業場所は、マージが分かるたびにそのマージコミットまで進め（`advance`）、進めた単位の後の単位を始める。前の実行で
+    マージされた単位（マージキューの待ちで止まった後にマージされたもの、マージの後の取得に失敗したもの）も、打ち直しで同じように進む。
     """
     held = plan_files.read_json(work_dir / UNITS_FILE)
     found = _held_lineup(held) if held is not None else prepare(run, work_dir, cwd)
@@ -465,15 +471,20 @@ def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optiona
             raise exc
         return _unit_stop_of(report, "単位を流せない")
 
-    order = units_flow.Order(found.units, frozenset(done), chained=not found.source)
-    ops = units_flow.Ops(lambda u: _start_unit(ctx, u, branches[units_flow.key_of(u)], ports), failed, _usage_limited)
-    flowed = units_flow.flow(order, ops, limit, ports.workers)
+    # マージのコミットが分かる単位は、作業場所へ反映できたことを確かめてから後の単位を始める
+    landing = {k: p for k, p in done.items() if p.merge_sha}
+    order = units_flow.Order(found.units, frozenset(done) - landing.keys(), chained=not found.source)
+    watching = _watching(ctx, ports, hub)
+    ops = units_flow.Ops(
+        lambda u: _start_unit(ctx, u, branches[units_flow.key_of(u)], ports, watching.read), failed, _usage_limited, watching
+    )
+    flowed = units_flow.flow(order, ops, limit, ports.workers, landing)
     items = dict(flowed.items)
     for unit in found.units:
         key = units_flow.key_of(unit)
         if key in done:
             items[key] = units_flow.unit_item(unit, done[key].number, "already_merged")
-    if flowed.failures:
+    if flowed.failures or flowed.broken:
 
         def pr_of(unit: Unit) -> Optional[int]:
             return _pr_number(units_flow.round_state(ctx.work_dir / UNITS_DIR / branches[units_flow.key_of(unit)]).round_dir)
@@ -535,7 +546,46 @@ def _review_command(project: Mapping[str, Any], base: str) -> tuple[str, ...]:
     return tuple(route.review_command("impl", base))
 
 
-def _start_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> units_flow.Started:
+def _watching(ctx: Context, ports: Ports, hub: github.GitHub) -> units_queue.Watching:
+    """待ちの扱いの接点。待ちの上限は CI の待ちと同じ `ci_budget` である。"""
+    overrides = ctx.run.overrides
+    budget = overrides["ci_budget"] if "ci_budget" in overrides else route.params()["ci_budget"].default
+    return units_queue.Watching(
+        read=lambda numbers: units_queue.read(hub, numbers),
+        advance=lambda pulls: advance(ctx, pulls),
+        ingest=ctx.work_dir / UNITS_DIR / INGEST_FILE,
+        budget=float(str(budget)),
+        clock=ports.clock,
+        sleep=ports.sleep,
+    )
+
+
+def advance(ctx: Context, pulls: Mapping[str, github_pulls.MergedPull]) -> frozenset[str]:
+    """スプリントブランチを 1 回取得して作業場所をマージのコミットまで進め、反映できた単位のキーを返す。
+
+    マージのコミットが分からない単位は確かめられないので、反映できたとみなす（`sprint_pr` が読み直して進める）。取得した
+    リモートにまだ見えないコミットは返さない。見えるのに作業場所を進められなければ止める。
+    """
+    known = [p for p in pulls.values() if p.merge_sha]
+    if not known:
+        return frozenset(pulls)
+    g = Git(ctx.sprint)
+    tip = _fetch_sprint(g, ctx)
+    head = _catch_up_to(g, ctx, known, tip)
+
+    def within(sha: str, of: str) -> bool:
+        return g.commit_or_none(sha) is not None and g.is_ancestor(sha, of)
+
+    taken = frozenset(k for k, p in pulls.items() if not p.merge_sha or within(p.merge_sha, head))
+    if any(within(p.merge_sha, tip) for k, p in pulls.items() if k not in taken):
+        _check_sprint_branch(g, ctx)
+        raise UnitsStopped("precondition", _tip_mismatch(g, ctx, tip, head))
+    return taken
+
+
+def _start_unit(
+    ctx: Context, unit: Unit, branch: str, ports: Ports, read: Callable[[Sequence[int]], Mapping[int, units_queue.State]]
+) -> units_flow.Started:
     """単位 1 つの、作業場所の用意 → 打ち直しの判定 → スプリントブランチの HEAD のマージまでを行い、`impl` の呼び出しと、
     その後のマージを返す。
 
@@ -555,16 +605,31 @@ def _start_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> units_fl
         def call() -> StageResult:
             return ports.call_plan(planned, round_dir)
 
-    def land(got: Optional[StageResult]) -> tuple[dict[str, Any], github_pulls.MergedPull]:
+    waiting_file = units_queue.queue_file(ctx.work_dir / UNITS_DIR / branch)
+
+    def merge() -> tuple[dict[str, Any], github_pulls.MergedPull]:
         """マージした PR（マージの応答にマージコミットが無ければ `merge_sha` は空）を返す。"""
-        if got is not None:
-            units_flow.write_round_record(round_dir, units_flow.STOPPED_HEAD_FILE, g.rev_parse("HEAD") + "\n")
-            if got.status != result.OK:
-                raise _unit_stop_of(got.report, "impl が止まった", _ci_note(ctx, got.report))
-        report = merge_unit(ctx, branch, worktree, round_dir, ports)
+        try:
+            report = merge_unit(ctx, branch, worktree, round_dir, ports)
+        except units_flow.Queued as exc:
+            number = _pr_number(round_dir)
+            assert number is not None, "merge_unit は PR の番号が無ければマージせずに止まる"
+            exc.ticket = units_queue.Ticket(number, waiting_file, merge)
+            raise
         number = _pr_number(round_dir)
         assert number is not None, "merge_unit は PR の番号が無ければマージせずに止まる"
         return units_flow.unit_item(unit, number, "merged"), github_pulls.MergedPull(number, _merge_sha(report))
+
+    def land(got: Optional[StageResult]) -> tuple[dict[str, Any], github_pulls.MergedPull]:
+        if got is None:
+            number = _pr_number(round_dir)
+            if number is None:
+                return merge()
+            return units_flow.remerge(unit, units_queue.Ticket(number, waiting_file, merge), read, ports.clock)
+        units_flow.write_round_record(round_dir, units_flow.STOPPED_HEAD_FILE, g.rev_parse("HEAD") + "\n")
+        if got.status != result.OK:
+            raise _unit_stop_of(got.report, "impl が止まった", _ci_note(ctx, got.report))
+        return merge()
 
     return units_flow.Started(call, land)
 
@@ -783,8 +848,9 @@ def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports
     """`ndf ci merge` で単位の PR をマージし、結果の種類を `merge.json` に残す。
 
     PR の番号とレビューした HEAD は、同じ回の保存先から読む。どちらかが無ければマージを打たずに止める。
+    PR がマージキューの待ちになれば `units_flow.Queued` で返す。
     head が最新でないので断られ、単位を始め直せば進むときは `units_flow.Outdated` で止める。
-    スプリントの作業場所はここでは進めない（次の単位の作業場所はリモートのスプリントブランチから切る。進めるのは `sprint_pr`）。
+    スプリントの作業場所はここでは進めない（進めるのは `advance` と `sprint_pr`）。
     """
     number, reviewed = _pr_number(round_dir), units_flow.saved_head(round_dir / units_flow.REVIEWED_HEAD_FILE)
     if number is None or not reviewed:
@@ -801,6 +867,8 @@ def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports
         raise UnitsStopped("bad_report", f"ndf ci merge が結果 JSON を返さない（終了コード {done.returncode}）")
     if not ok:
         stop = _unit_stop_of(report, f"PR #{number} をマージできない")
+        if stop.kind == github_merge.MERGE_QUEUE_PENDING:
+            raise units_flow.Queued(stop.kind, stop.detail, retry_after=stop.retry_after)
         g = Git(worktree)
         # 最新化を必須とするスプリントブランチは、別の単位のマージで古くなった HEAD を断る。HEAD がスプリントブランチの HEAD を
         # 含むのに `behind` なら、始め直しても変わらないので失敗にする
