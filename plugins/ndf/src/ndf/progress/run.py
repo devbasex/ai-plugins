@@ -35,7 +35,7 @@ from ndf.contracts import causes, facts, limits, result
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import command, definition, design_record, invoke, issue_values, model, stages, store
+from ndf.progress import command, definition, design_record, invoke, issue_values, model, stages, store, withdraw
 from ndf.progress.folding import REQUEST_CHANGES, StepProgress, answer_word, step_progress
 from ndf.progress.records import Records, github_records, sync_records
 from ndf.progress.run_view import (
@@ -541,7 +541,7 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     if m.step is None:
         _finish_stage(d, v, m.stage)
     else:
-        d.write(*_run_step(d, v, m.stage, m.step))
+        write_step(d, v, m.stage, _run_step(d, v, m.stage, m.step))
     if decide(read(d.st, d.machine_id)).stage != m.stage:
         d.synced()
     return None
@@ -848,6 +848,23 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
         run = _reading_run(v, s, step, run, work_dir)
     res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
     return _step_draft(v, s, step, prog, res)
+
+
+def write_step(d: Drive, v: View, s: stages.StageDef, drafts: list[model.EventDraft]) -> None:
+    """ステップの結果の事象を書く。消費した設計の承認を無効にする（承認ゲートのステップを未了に戻す）なら、同じ
+    トランザクションで、回答が外した課題を戻し、課題を繰り越したレーンの行を取り消す。"""
+    answered = withdraw.consumed_answer(v, s, design_record.GATE, drafts)
+    if answered is None:
+        d.write(*drafts)
+        return
+    why = f"工程 {s.name} が {APPROVAL_STALE} で止まり、外した承認が無効になった"
+    # 失敗の事象（最後）は行を実行中でなくするので、課題を戻す事象はその前に置く
+    append(
+        d.st,
+        d.machine_id,
+        lambda now: [*drafts[:-1], *withdraw.undropped(now, s.name, answered), drafts[-1]],
+        lambda conn: withdraw.uncarry(conn, d.machine_id, answered, why),
+    )
 
 
 def _stage_output(s: stages.StageDef, prog: StepProgress) -> tuple[dict[str, Any], dict[str, Any]]:

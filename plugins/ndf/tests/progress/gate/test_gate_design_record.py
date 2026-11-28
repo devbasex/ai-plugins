@@ -356,11 +356,13 @@ def test_a_stale_check_returns_to_the_review(st, machine, step):
 
 def test_a_stale_merge_returns_to_the_review(st, machine):
     machine.turn()
-    _answer(st, machine.tid, _observe(machine))
+    _answer(st, machine.tid, _observe(machine), drop=(8,))
     machine.fake.script["design-merge-approved"] = _stale("design-merge-approved")
 
     machine.turn()
 
+    # 無効になった承認で外した課題は、今のスプリントへ戻る
+    assert run.read(st, machine.tid).context()["issues"] == [7, 8]
     _fail_and_retry(st, machine, "design-merge-approved")
 
 

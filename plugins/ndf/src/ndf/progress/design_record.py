@@ -132,8 +132,11 @@ def narrowed(record: Mapping[str, Any], drop: Sequence[int], root: Path) -> dict
         raise model.Refused(f"記録の HEAD {head} が手元に無く、取得もできないので課題を外せない")
     tree = units_files.Tree(root, head)
     try:
-        paths = dict.fromkeys(units_files.find(tree, record["targets"]["issues"]).values())
-        files = [units_files.load(tree, path) for path in sorted(paths)]
+        # 一覧は 1 回だけ取り、本文もまとめて読む（git の起動をファイル数に比例させない）
+        listing = tree.listing()
+        paths = sorted(set(units_files.find(tree, record["targets"]["issues"], sorted(listing)).values()))
+        texts = tree.read_all(paths, listing)
+        files = [units_files.parse_text(path, texts[path]) for path in paths]
     except (units_files.UnitsFileError, GitError) as exc:
         raise model.Refused(f"記録の HEAD の単位のファイルを読めないので課題を外せない: {exc}") from None
     return without_issues(record, drop, files)

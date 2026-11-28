@@ -517,15 +517,26 @@ def render_tables(plan: str, views: Sequence[ud.View], file: Optional[str] = Non
 
 
 def item_table(items: Sequence[Mapping[str, Any]]) -> list[str]:
-    """`unit_items` の単位の、承認資料の表の行（「レビューの単位」の表から「実際の行数」の列を除いたもの）。"""
+    """`unit_items` の単位の、承認資料の表の行（「レビューの単位」の表から「実際の行数」の列を除いたもの）。
+
+    別のファイルの依存先と、複数のファイルにある名前の単位は、名前にそのファイルの最小の課題の番号を添える。
+    """
+    issue = {(u["file"], u["name"]): min(u["issues"], default=0) for u in items}
+    count = Counter(name for _, name in issue)
+
+    def name(file: str, unit: str, other: bool = False, note: str = "") -> str:
+        marked = other or count[unit] > 1
+        notes = ([f"#{issue[(file, unit)]}"] if marked else []) + ([note] if note else [])
+        return f"{unit}（{'。'.join(notes)}）" if notes else unit
+
     rows = [
         [
-            u["name"],
+            name(u["file"], u["name"]),
             _JOIN.join(f"{t['id']}（#{t['issue']}）" for t in u["tasks"]),
             "・".join(u[ud.CRITERIA_KEY]) or _NONE,
             _NONE if u["lines"] is None else str(u["lines"]),
             str(u["order"]),
-            _JOIN.join(f"{a['unit']}（{a['reason']}）" for a in u["after"]) or _NONE,
+            _JOIN.join(name(a["file"], a["unit"], a["file"] != u["file"], a["reason"]) for a in u["after"]) or _NONE,
             str(u["merge"]),
         ]
         for u in items
