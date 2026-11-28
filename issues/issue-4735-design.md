@@ -615,7 +615,7 @@ Issue ごとに、`runs` のうちその Issue を含み、マージが最も新
 
 | 順 | すること |
 | --- | --- |
-| 1 | Issue の番号ごとのロックを取る。保存先は今の確認の記録のロックと同じで、同じリポジトリの worktree のすべてが共有する。確認の記録は代表の番号、ほかの 2 つは書き換える Issue の番号で取る |
+| 1 | Issue の番号ごとのロックを取る。ロックを置くディレクトリ（Git の共通ディレクトリの下）は、まとめて書く 1 回につき 1 度だけ求める。保存先は今の確認の記録のロックと同じで、同じリポジトリの worktree のすべてが共有する。確認の記録は代表の番号、ほかの 2 つは書き換える Issue の番号で取る |
 | 2 | ロックの中で本文を読み、自分のセクションだけを差し替える |
 | 3 | 本文が変わらなければ、PATCH もそれ以上の読み出しもせずに終える |
 | 4 | 変わるなら、すぐに PATCH する |
@@ -627,6 +627,13 @@ GitHub API の呼び出しは、今から増えない。
 | --- | --- | --- |
 | 進行の記録・クリーンアップの記録 | 読み 1 回 | 読み 1 回・PATCH 1 回 |
 | 確認の記録 | 読み 1 回 | 読み 1 回・PATCH 1 回・読み直し 1 回 |
+
+Git の起動は増える。ロックを置くディレクトリを求めるために、`git rev-parse` を起動する。進行の記録とクリーンアップの記録は今はロックを取らないので、この起動がそのまま増える分である。
+
+| 案 | `git rev-parse` の起動 | 採否と理由 |
+| --- | --- | --- |
+| まとめて書く 1 回につき 1 度だけ求め、番号ごとのロックのパスをそこから組み立てる | 進行の記録 1 回の同期、クリーンアップの記録 1 回の実行につき、それぞれ 1 回。対象の件数に依らない。確認の記録は今と同じ 1 回 | 採る |
+| 書き換える番号ごとに求める | 対象の Issue と PR の件数分。本文が変わらない対象でも起動する | 採らない。同じリポジトリの中では結果が変わらず、件数分の起動に得るものが無い |
 
 起票した人の画面での編集や、別のマシンからの書き込みは、このロックの外にある。GitHub の Issue の更新には「読んだ版のままなら書く」という条件指定が無いので、2 の読み出しと PATCH の間に入った編集は防げない。この間隔は読み出しの直後に PATCH して最も短くし、消えた内容は GitHub が持つ本文の編集履歴から戻す。次の 2 つの方法は採らない。
 
@@ -1078,6 +1085,14 @@ NDF の更新より前に実装がマージされた Issue（以下、旧方式�
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
 | #4735 | 実装する | — | `plugins/ndf/src/ndf/core/requirements_decide.py`（新設）、`plugins/ndf/src/ndf/core/requirements_docs.py`（新設）、`plugins/ndf/src/ndf/core/run_trailer_decide.py`（新設）、`plugins/ndf/src/ndf/core/requirements_history.py`（新設）、`plugins/ndf/src/ndf/progress/requirements_stage.py`（新設）、`plugins/ndf/src/ndf/domains/records/requirements_cmd.py`（新設）、`plugins/ndf/src/ndf/domains/records/close_release.py`（新設）、`plugins/ndf/contracts/domains/locations.json`、`plugins/ndf/src/ndf/domains/loop/acceptance_release.py`（新設）、`plugins/ndf/src/ndf/domains/release/acceptance_record.py`（新設）、`plugins/ndf/src/ndf/domains/release/acceptance_record_decide.py`（新設）、`plugins/ndf/src/ndf/core/issue_docs.py`、`plugins/ndf/src/ndf/core/issue_body.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/workflow/stages/requirements.json`、`plugins/ndf/contracts/workflow/stages/worktree.json`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/adapters/git.py`、`plugins/ndf/src/ndf/core/plan/inputs_decide.py`、`plugins/ndf/src/ndf/core/plan/review_units_decide.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/templates/design.json`、`plugins/ndf/contracts/templates/impl.json`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/loop/acceptance.py`、`plugins/ndf/src/ndf/domains/loop/acceptance_decide.py`、`plugins/ndf/src/ndf/domains/loop/cli.py`、`plugins/ndf/src/ndf/domains/materials/cli.py`、`plugins/ndf/src/ndf/domains/materials/collect.py`、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/domains/records/cleanup_stage.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_read.py`、`plugins/ndf/src/ndf/domains/release/record_unversioned.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/domains/records/close_decide.py`、`plugins/ndf/contracts/schemas/release-verification.schema.json`、`plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/src/ndf/contracts/internal.py`、`plugins/ndf/contracts/schemas/internal/common.schema.json`、`plugins/ndf/src/ndf/domains/release/cli.py`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/src/ndf/contracts/worker_paths.py`、`plugins/ndf/src/ndf/progress/issue_values.py`、`plugins/ndf/contracts/schemas/io/records.args.schema.json`、`plugins/ndf/contracts/schemas/io/loop.args.schema.json`、`plugins/ndf/contracts/schemas/io/loop.result.schema.json`、`plugins/ndf/contracts/schemas/io/progress.args.schema.json`、`plugins/ndf/contracts/schemas/io/progress.result.schema.json`、`plugins/ndf/contracts/schemas/io/release-steps.args.schema.json`、`plugins/ndf/contracts/schemas/io/release-steps.result.schema.json`、`plugins/ndf/contracts/schemas/io/records.result.schema.json`、`plugins/ndf/contracts/schemas/io/materials.result.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/contracts/worker/document-rebuild.md`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/docs/contracts/files.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/quality-gates/SKILL.md`、`plugins/ndf/skills/quality-gates/references/design-match.md`、`plugins/ndf/skills/quality-gates/references/definition-of-done.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/skills/fix/SKILL.md`、`plugins/ndf/skills/pr-review/SKILL.md`、`plugins/ndf/skills/pr/SKILL.md`、`plugins/ndf/skills/worktree/SKILL.md`、`plugins/ndf/skills/document-rebuild/SKILL.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-design.md`、`docs/glossary/ndf-workflow.md`、`plugins/ndf/tests/core/test_requirements_docs.py`（新設）、`plugins/ndf/tests/core/test_requirements_history.py`（新設）、`plugins/ndf/tests/core/test_issue_body.py`（新設）、`plugins/ndf/tests/progress/test_requirements_stage.py`（新設）、`plugins/ndf/tests/domains/records/test_requirements_cmd.py`（新設）、`plugins/ndf/tests/domains/loop/test_acceptance_release.py`（新設）、`plugins/ndf/tests/domains/release/test_acceptance_record.py`（新設）、`plugins/ndf/tests/core/test_issue_docs.py`、`plugins/ndf/tests/domains/loop/test_loop_acceptance.py`、`plugins/ndf/tests/domains/materials/test_materials_cli.py`、`plugins/ndf/tests/progress/test_units_run.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/progress/test_invoke_issue_copies.py`、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py` |
+
+## 子の表の変更
+
+`checks/children.json` で変える行を次に示す。この節は設計の承認の後、実装（レビューの単位 `body-rewrite`）で足した。承認した設計書に無かったためである。
+
+| 記号か表 | 項目 | 変更の前 | 変更の後 |
+| --- | --- | --- | --- |
+| `C3` | `packages` | `ndf.core.route`・`ndf.core.issue_docs`・`ndf.core.start_point` | `ndf.core.route`・`ndf.core.issue_docs`・`ndf.core.issue_body`・`ndf.core.start_point` |
 
 ## 未確認のまま残ること
 
