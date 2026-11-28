@@ -468,6 +468,19 @@ def test_issue_3780_a_carried_url_of_the_pr_before_a_rewind_is_used_from_another
     assert github.created() == 1
 
 
+def test_issue_3780_a_carried_url_is_found_by_the_issue_mark_without_the_text_of_the_record() -> None:
+    """記録の本文は伏せてあり行の URL を引けないことがあるので、状態の引き継ぎの URL を Issue の目印で指摘と照らす。"""
+    github = FakeGitHub()
+    Run(github).go()
+    Run(github, _row(text="別の指摘")).go()
+    urls = [i["html_url"] for i in github.issues]
+    again = Run(github)
+    again.ref = store.StateRef(9, 9, Path("unused"))
+    again.data[leftover.CARRIED_URLS] = list(reversed(urls))
+    assert again.go() == [] and again.row[Filed.URL] == urls[0]
+    assert github.created() == 2
+
+
 @pytest.mark.parametrize(("protect", "created"), [pytest.param(["user_data"], 1, id="filed-kind"), pytest.param([], 0, id="other-kind")])
 def test_issue_3780_a_carried_url_of_a_deleted_issue_is_dropped(protect: list, created: int) -> None:
     github = FakeGitHub()

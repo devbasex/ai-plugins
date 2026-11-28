@@ -27,6 +27,9 @@ from ndf.domains.crossreview.leftover_decide import PARKED, Filed, Listed
 ACCOUNT_IDS = "issue_account_ids"
 RECORD_ID = "issue_record_id"
 LIST_FULL = "issue_list_full"
+# 前の実行の記録のコメントから引き継いだ、直さずに残した指摘の起票の URL の並び。記録の本文は伏せてあり、伏せる値は実行する
+# 環境で変わるので、本文でなく Issue の目印で指摘と照らす
+CARRIED_URLS = "issue_carried_urls"
 # 起票を見送った理由の状態のキー。見送りの理由はここにだけ持ち、行の `issue_error`（起票の失敗）と分ける。
 # 起票先を GitHub にしない設定で見送ったときは値が null（キーが無い状態と分ける）
 SKIPPED = "issue_skipped"
@@ -301,34 +304,44 @@ class _Filing:
         entry = self.entries[ident] if ident in self.entries else {}
         return str(entry["url"]) if "url" in entry else None
 
+    def _named(self, ident: str, urls: Sequence[Optional[str]], read: Mapping[str, Optional[Listed]]) -> Optional[str]:
+        """`urls` のうち、指す Issue が信用する作者のこの指摘の Issue である最初の URL。"""
+        text = self.rows[ident][0]["text"]
+        for url in urls:
+            issue = read[url] if url else None
+            if (
+                issue
+                and leftover_decide.names_finding(issue, ident, text)
+                and self._trusts(issue.author, issue.author_id, issue.association)
+            ):
+                return url
+        return None
+
     def known(self) -> None:
-        """起票の記録か行の引き継ぎ（`prior_issue`）に URL がある識別値は、その URL が信用する作者のこの指摘の Issue なら、
-        起票せず行に書く。違えば URL を捨て、起票の記録か作る候補として扱う。読めなければ起票も採用もしない。Issue はまとめて
-        読む（`GitHub.nodes`）。"""
+        """起票の記録・行の引き継ぎ（`prior_issue`）・状態の引き継ぎ（`CARRIED_URLS`）の URL が信用する作者のこの指摘の Issue なら、
+        起票せず行に書く。起票の記録と行の URL が違えば捨て、起票の記録か作る候補として扱う。読めなければ起票も採用もしない。
+        Issue はまとめて読む（`GitHub.nodes`）。"""
         recorded = {ident: url for ident in self.rows if (url := self.url_of(ident))}
         carried = {ident: str(row[Filed.PRIOR]) for ident, rows in self.rows.items() for row in rows if row.get(Filed.PRIOR)}
         urls = carried | recorded
-        if not urls:
+        pool = [url for url in store.list_of(self.data, CARRIED_URLS) if isinstance(url, str)]
+        wanted = list(dict.fromkeys([*urls.values(), *pool]))
+        if not wanted:
             return
         try:
-            read = self.port.issues(list(urls.values()))
-            usable = {
-                ident
-                for ident, url in urls.items()
-                if (issue := read[url])
-                and leftover_decide.names_finding(issue, ident, self.rows[ident][0]["text"])
-                and self._trusts(issue.author, issue.author_id, issue.association)
-            }
+            read = self.port.issues(wanted)
+            usable = {ident: url for ident in self.rows if (url := self._named(ident, [urls.get(ident), *pool], read))}
         except Exception as exc:  # noqa: BLE001 ネットワーク: 確かめられない URL は使わず、打ち直しで確かめる
-            for ident in urls:
+            # 状態の引き継ぎの URL は、どの候補の Issue かが読むまで分からないので、全部の候補を保留する
+            for ident in self.rows if pool else urls:
                 self.fail(ident, _reason(exc))
             return
-        for ident, url in urls.items():
-            for row in self.rows[ident]:
+        for ident, rows in self.rows.items():
+            for row in rows:
                 row.pop(Filed.PRIOR, None)
             if ident in usable:
-                self.entries.setdefault(ident, {})["url"] = url
-                self.done(ident, url)
+                self.entries.setdefault(ident, {})["url"] = usable[ident]
+                self.done(ident, usable[ident])
             elif ident in recorded:
                 del self.entries[ident]["url"]
 

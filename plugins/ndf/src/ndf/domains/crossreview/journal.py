@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
 from ndf.core.converge import oscillation
@@ -527,17 +527,11 @@ class FindingJournal:
                 lowered.add(row["key"])
         return Checked(frozenset(lowered), frozenset(unconfirmed))
 
-    def sort(
-        self,
-        touched: leftover_decide.Touched,
-        unconfirmed: Collection[str] = (),
-        clean: Optional[Callable[[Sequence[str]], Sequence[str]]] = None,
-    ) -> frozenset[str]:
+    def sort(self, touched: leftover_decide.Touched, unconfirmed: Collection[str] = ()) -> frozenset[str]:
         """直前の `enter` で出た指摘のうち、新しく出たか戻った指摘と、直さずに残していた指摘に線引き
         （`leftover_decide.proceeds`）を当て、残した指摘のキーを返す。前から修正へ進むと決まっている指摘は分け直さない。
         `enter` が `parked` を外して置き換えた位置は、行コメントを付けられない行のときだけ選び直す。
-        `unconfirmed` は判定役へ渡して有効な回答の無かった指摘の id。`clean` は記録のコメントの本文に当てたのと同じ伏せ字
-        （前の実行の起票の URL を引くのに使う。`_filed_url`）。
+        `unconfirmed` は判定役へ渡して有効な回答の無かった指摘の id。
 
         位置は今回の出し直しのものを 1 件ずつ当てる（残していた指摘の行の位置は、前の head の行番号である）。どれか 1 件が
         進めば進める。指摘の行の位置は、進んだ出し直しから保存する位置（`_post_place`）を選んで置き換える（どれにも
@@ -554,7 +548,7 @@ class FindingJournal:
             passed = self.passed(fid, touched, unconfirmed=fid in unconfirmed)
             if not passed:
                 row[PARKED] = True
-                url = self._filed_url(row["text"], clean)
+                url = self.filed.get(leftover_decide.normalized(row["text"]))
                 if url and not row.get(leftover_decide.Filed.URL):
                     # Issue が消されていることがあるので、起票の公開で確かめてから `issue` にする
                     row[leftover_decide.Filed.PRIOR] = url
@@ -565,16 +559,6 @@ class FindingJournal:
         for fid in self.raised_ids:
             self._check_post_line(self.rows[fid], touched)
         return frozenset(parked)
-
-    def _filed_url(self, text: str, clean: Optional[Callable[[Sequence[str]], Sequence[str]]]) -> Optional[str]:
-        """本文 `text` の指摘を前の実行が起票した Issue の URL。記録のコメントから引き継いだ本文は伏せてあるので、そのままの
-        本文で引けなければ、`clean` で伏せた本文でも引く（前の実行の URL が無ければ `clean` を呼ばない）。"""
-        if not self.filed:
-            return None
-        url = self.filed.get(leftover_decide.normalized(text))
-        if url or clean is None:
-            return url
-        return self.filed.get(leftover_decide.normalized(clean([text])[0]))
 
     def passed(self, fid: str, touched: leftover_decide.Touched, *, unconfirmed: bool = False) -> list[dict[str, Any]]:
         """直前の `enter` で出た指摘 `fid` の出し直しの位置のうち、修正へ進むもの（空なら直さずに残す）。"""

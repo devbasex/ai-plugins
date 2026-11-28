@@ -204,7 +204,8 @@ claude の席（起動の前に埋めた席・前のラウンドで埋めた席�
 `https://github.com/<所有者>/<リポジトリ>/issues/<番号>` の形の URL だけを記録し、読み戻す。
 別の `--state-dir` で実行すると、以前に直さず残した指摘は修正の対象に戻さない。同じ指摘が再び出て残すことになり、
 以前の記録に Issue の URL があれば、`prior_issue` に引き継ぐ。
-記録の指摘の本文は秘密や手元のパスを伏せてあるので、本文が一致しなければ、再び出た指摘の本文も同じ方法で伏せて比べる。記録を公開するときに、その指摘の Issue だと確認できた URL を
+記録の指摘の本文は秘密や手元のパスを伏せてあり、本文で引けないことがある。そこで、引き継いだ URL はすべて状態ファイルの
+`issue_carried_urls` にも残し、起票の前に各 Issue の目印を再び出た指摘と照らす。記録を公開するときに、その指摘の Issue だと確認できた URL を
 `issue` に移す（下の「残す指摘の線引き」）。起票済みで直さずに残していない指摘は、URL を持ったまま引き継ぐ。
 
 有効な位置が無くスレッドにならなかった未解決の指摘（設計全体への指摘など）は、記録のコメントに埋めた一覧から戻す。書き手が
@@ -293,8 +294,8 @@ MVV が変われば通し直す。範囲だけを読むときは
 
 同じ指摘を 2 件起票しないため、起票前に、元の PR にある専用コメント（起票の記録）に指摘の識別値を記録する。起票後、NDF が
 同じコメントを更新して試行時刻と Issue 番号を残す。利用者はこのコメントを編集しない。打ち直しは記録・検索・Issue の一覧で
-確かめる。引き継いだ URL（`prior_issue`）と起票の記録の URL はまとめ、`github.graphql-batch` の上限の件数ごとに GitHub へ
-問い合わせる。その指摘の Issue だと確かめられない URL は捨てる。問い合わせに失敗した場合は、URL を残して打ち直しで確かめる。
+確かめる。引き継いだ URL（`prior_issue` と `issue_carried_urls`）と起票の記録の URL はまとめ、`github.graphql-batch` の上限の件数ごとに GitHub へ
+問い合わせる。その指摘の Issue だと確かめられない `prior_issue` と起票の記録の URL は捨てる。問い合わせに失敗した場合は、URL を残して打ち直しで確かめる。
 失敗した指摘は記録のコメントに残り、次の公開か `ndf cross-review report` で打ち直す。
 
 ## 状態ファイル
@@ -306,7 +307,7 @@ MVV が変われば通し直す。範囲だけを読むときは
 | --- | --- |
 | `rounds[]` | `round`・`head`（レビューした head）・`base`（比較基点。`--base` と HEAD の merge-base の SHA）・`reviewers`（そのラウンドに座った席。埋めた後の並び）・`filled`（そのラウンドで claude が座っている埋めた席。`seat`・`for`（欠けた相手役。`allowed` のために起動の前に埋めたときは null）・`reason`。埋めた後のすべてのラウンドに書き、埋めていなければ書かない）・`focus`（そのラウンドで渡した重点）・`mvv`（レビューに使ったプロジェクト MVV。`id` は承認の状態・バージョン・本文と共通原則の sha256 から作る値、`mvv_branch` は MVV を読んだブランチ）・`mvv_checked`（その head の MVV の根拠の記述を確かめ終えたか。承認済みの MVV が無ければ真）・`scope`・`verdict`・`fix`（修正の記録: `commit`・`reported`・`fixed`・送れたら `pushed`）・`judge_output`（判定役の起動を試み、出力を保存できたラウンドだけ。その出力ファイル名の接頭辞 `round<n>-verify-<接尾辞>`。回答を得られなくても記録するので、判定の有無は `findings[].check` で読む） |
 | `findings[]` | ジャーナル。指摘ごとの `id`（`r<ラウンド>-<通し番号>`。引き継いだ指摘は `t<コメントの id>`、記録のコメントから戻した指摘は `p-<元の id>`、NDF が見つけた MVV の根拠の記述の誤りは `r<ラウンド>-n<通し番号>`）・`key`・`text`・`section`・`round`・`outcome`（`fixed` / `deferred` / `unresolved`）・`reason`・`by`。相手役が返したときだけ `path`・`line`。相手役が返した指摘の行は `severity`（現在の重要度。ジャーナルに入れるときに決まり、判定役の回答で下がることがある）・`raised_severity`（相手役が付けた元の重要度。尺度に無い・無いときは null）と、1 文があれば `impact` を持つ。保護の種類が示された行は `protect`、`holds` が真か偽の有効な回答があった行には `check`（`holds`・`condition`・`path`・`result`・`reason`・`tracks`・`lowered`。出し直しで下げた扱いを抜けた行は `unlowered` も）を記録する。判断できないという回答や無回答には `check` を記録しない。引き継いだ指摘の行は記録された `severity` だけを持つ。MVV に反する指摘の行は `mvv`（反する項目）・`judged_mvv`（判定したときの MVV）と、重さを固定したなら `mvv_pinned`・`unpinned_severity`、必ず人の承認が要る操作に当たれば `redline`・`redline_items` も持つ。直さずに残す指摘は `parked` を持ち、位置を後のラウンドの出し直しに置き換えたら `placed_round`、行が PR の差分に載らなければ `off_diff`、起票したら `issue`、引き継いだ起票の URL をまだ確かめていなければ `prior_issue`、起票に失敗したら `issue_error` を持つ |
-| `issue_account_ids`・`issue_record_id`・`issue_list_full`・`issue_skipped` | 起票に使った GitHub のアカウント ID・起票の記録のコメントの番号・Issue の一覧が上限を超えたときの上限の値・起票を見送った理由（`issues.primary` に `github` と `unknown` 以外の起票先を指定して起票しなかったときは null。未設定と `unknown` は理由を残す） |
+| `issue_account_ids`・`issue_record_id`・`issue_list_full`・`issue_carried_urls`・`issue_skipped` | 起票に使った GitHub のアカウント ID・起票の記録のコメントの番号・Issue の一覧が上限を超えたときの上限の値・起票を見送った理由（`issues.primary` に `github` と `unknown` 以外の起票先を指定して起票しなかったときは null。未設定と `unknown` は理由を残す） |
 | `pending_review` | 判定役を起動する直前に書く。ラウンドの記録と同時に取り除く。判定役の起動前に中断した場合も残ることがある。中身は、記録の予定の値（`record`）・差分の起点（`scope_base`。全差分なら null）・詳細レビューを求めたセクション（`unreviewed`）・`--findings` の ID と本文（`handed`）・相手役が返した指摘（`raised`）・結果の無い席（`unread`）・そのうちこのラウンドで claude に埋めた席（`full_seats`。打ち直しは全差分を渡す）・埋めた席の指摘のキーとほかの席の指摘のキー（`filled`）。`history`（振動の判定に使う、前の 2 ラウンドの指摘のキー）も持つ。`handed`・`unread`・`full_seats` のどれかが無い記録（前のバージョンが書いたもの）は使わない。`history` だけが無い記録は、相手役の結果を使う。差分のファイルは打ち直しが head と起点から作り直す |
 | `reviewed_sections` | 詳細レビューを通ったセクション（`<パス>#<見出し>`） |
 | `reviewed_mvv` | `reviewed_sections` のセクションを読んだときの `mvv` の `id` |

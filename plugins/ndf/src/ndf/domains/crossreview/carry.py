@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview import prior_decide, report_decide, store, threads
+from ndf.domains.crossreview import leftover, prior_decide, report_decide, store, threads
 from ndf.domains.crossreview.journal import BY_NDF, FindingJournal
 from ndf.domains.crossreview.settings import RunConfig
 
@@ -102,6 +102,16 @@ def _settle_resolved(run: CarryRun, left: Sequence[prior_decide.Thread], done: d
     return settled
 
 
+def _keep_filed_urls(run: CarryRun) -> bool:
+    """引き継いだ、直さずに残した指摘の起票の URL を状態に残す（起票の公開が Issue の目印で指摘と照らす。#3780）。増えたら真。"""
+    held = store.list_of(run.data, leftover.CARRIED_URLS)
+    urls = list(dict.fromkeys([*held, *run.journal.filed.values()]))
+    if urls == held:
+        return False
+    run.data[leftover.CARRIED_URLS] = urls
+    return True
+
+
 def carry(run: CarryRun, prior: Prior) -> bool:
     """前の実行が PR に残した未解決の自分の指摘を未解決の指摘としてジャーナルへ入れる。開いたままのスレッドは `threads` に
     結び（閉じたら返信して resolve する）、スレッドの無い指摘と、スレッドから引き継げなかった NDF の指摘（resolve 済みなど）は
@@ -118,6 +128,7 @@ def carry(run: CarryRun, prior: Prior) -> bool:
     added = set(run.journal.carry(carried, run.mvv_items, run.mvv))
     run.warnings += run.journal.warnings
     detach_revived(run)
+    urls_added = _keep_filed_urls(run)
     merged.update(run.journal.merged)
     for c in carried:
         if c.id in added and c.comment is not None:
@@ -130,7 +141,7 @@ def carry(run: CarryRun, prior: Prior) -> bool:
         run.process.append(
             {"run": "start", "result": f"記録のコメントにある MVV の判定と保護の種類を、既にある指摘 {len(merged)} 件に重ねた"}
         )
-    return bool(settled or added or merged)
+    return bool(settled or added or merged or urls_added)
 
 
 def _merge_tracked(
