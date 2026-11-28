@@ -404,7 +404,9 @@ def test_an_approval_written_by_another_account_refuses_the_reopen(repo, st, env
 
     detail = out["cause"]["detail"]
     assert out["cause"]["kind"] == "refused" and "承認を書いたアカウント" in detail and "octocat" in detail, out
-    assert _events(st, tid) == before and env.hub.comments_of[target.number] == comments and env.hub.dequeued == []
+    assert _events(st, tid) == before and env.hub.comments_of[target.number] == comments
+    # 開き直しは断っても、取り消そうとした承認で PR がマージされないようにキューから外す
+    assert env.hub.dequeued == [target.number]
 
     env.hub.login, env.hub.account_id = "octocat", 1
     assert _retry(capsys, tid, DESIGN, "--later", "keep")["status"] == "ok"
@@ -449,6 +451,35 @@ def test_approvals_written_by_two_accounts_are_revoked_one_account_at_a_time():
     for account in (1, 2):
         hub.account_id = account
         assert merge_approval.merge_judgment(merge_approval.merge_rows(hub, 7, hub.viewer()), target) is None
+
+
+def test_the_same_record_id_written_by_two_accounts_is_still_held_by_the_other():
+    """投稿の後に確定が失敗した回答を別のアカウントで送り直すと、同じ識別子が両方のアカウントに残る。"""
+    hub = merge_hub.MergeHub()
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+    for account in (1, 2):
+        hub.account_id = account
+        merge_approval.write_merge_row(hub, merge_approval.MergeRow("approved", "user", target, True, "same"), hub.viewer())
+    revocation = merge_approval.Revocation(target, frozenset({"same"}), "reopen:x")
+
+    hub.account_id = 1
+    with pytest.raises(merge_approval.TrailError, match="承認を書いたアカウント"):
+        merge_approval.write_revocations(hub, [revocation], hub.viewer())
+    assert hub.dequeued == [7]
+    hub.account_id = 2
+    merge_approval.write_revocations(hub, [revocation], hub.viewer())
+    assert merge_approval.merge_judgment(merge_approval.merge_rows(hub, 7, hub.viewer()), target) is None
+
+
+def test_a_revocation_of_another_repository_touches_nothing():
+    hub = merge_hub.MergeHub()
+    target = merge_approval.MergeTarget("o/other", 7, "main", merge_hub.HEAD)
+    revocation = merge_approval.Revocation(target, frozenset({"r0"}), "reopen:x")
+
+    with pytest.raises(merge_approval.TrailError, match="o/other"):
+        merge_approval.write_revocations(hub, [revocation], hub.viewer())
+
+    assert hub.calls == [] and hub.dequeued == []
 
 
 def test_a_pr_that_cannot_leave_the_merge_queue_records_nothing_and_a_retry_dequeues(repo, st, env, capsys, monkeypatch):

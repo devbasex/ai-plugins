@@ -17,7 +17,7 @@ from collections import defaultdict
 from typing import Iterable, Iterator, NamedTuple, Sequence
 
 from ndf import identity
-from ndf.adapters.github import Authored, GitHub, Viewer
+from ndf.adapters.github import Authored, GitHub, Viewer, same_repo
 from ndf.adapters.publish import Publisher
 from ndf.core.approval_words import ANSWERS, APPROVED, BY_CHOICES, BY_LINE, MVV_BY, REJECTED, REOPEN_BY, USER_BY, By  # noqa: F401
 
@@ -172,13 +172,17 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
     """対象ごとに、最新の証跡が `approvals` の承認なら担い手 `reopen` の却下の行を投稿し、PR をマージキューから外す。
 
     承認が無い・既に却下なら行は書かない。最新の承認が別のもの（残す工程や別のステートマシンの承認）なら、行を書かず
-    キューからも外さない。キューは行を書いた後に外し（外した直後の `ndf ci merge` が入れ直さない）、行を書き終えた
-    打ち直しでも外す。
+    キューからも外さない。キューは行を書いた後に外し（キューへ入れた後に証跡を読み直す `ndf ci merge` と合わせて、
+    取り消した承認がキューに残らない）、行を書き終えた打ち直しでも外す。
 
-    `approvals` の証跡が別のアカウントのコメントにしか無く、そのアカウントで今も承認と数えるなら、token の利用者の分を
-    書いた後に `TrailError`（そのアカウントの `ndf ci merge` は通るため）。コメントの一覧は PR ごとに 1 回だけ読み、
-    公開範囲は全体で 1 回だけ照会する。打ち直しで行は増えない。`viewer` のアカウント ID が読めていなければ `TrailError`。"""
+    別のアカウントが `approvals` を今も承認と数えるなら、token の利用者の分を書いてキューから外した後に `TrailError`
+    （そのアカウントの `ndf ci merge` は通るため）。同じ識別子の承認を token の利用者が書いていても同じ。コメントの一覧は
+    PR ごとに 1 回だけ読み、公開範囲は全体で 1 回だけ照会する。打ち直しで行は増えない。`viewer` のアカウント ID が
+    読めていないか、承認の対象のリポジトリが `hub.repo` と違えば、何も読み書きせずに `TrailError`。"""
     _require_login(viewer)
+    foreign = sorted({r.target.repo for r in revocations if not same_repo(r.target.repo, hub.repo)})
+    if foreign:
+        raise TrailError(f"承認の対象のリポジトリ {'・'.join(foreign)} が今の {hub.repo} と違う。承認の対象のリポジトリで打ち直す")
     publisher = Publisher(hub)
     read: dict[int, list[tuple[Authored, MergeRow]]] = {}
     leaving: dict[int, None] = {}
@@ -188,25 +192,24 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
             read[target.number] = list(_unedited_rows(hub.comments(target.number)))
         found = read[target.number]
         mine = [row for c, row in found if same_writer(c, viewer)]
-        others.update(dict.fromkeys(_other_holders(found, mine, viewer, target, approvals)))
+        others.update(dict.fromkeys(_other_holders(found, viewer, target, approvals)))
         latest = merge_judgment(mine, target)
         if latest is not None and approvals.isdisjoint((latest.record_id, latest.url)):
             continue
         leaving[target.number] = None
         if latest is not None:
             publisher.comment(target.number, render_merge_row(MergeRow(REJECTED, REOPEN_BY, target, True, record_id)))
+    for number in leaving:
+        hub.dequeue(number)
     if others:
         names = "・".join(others)
         raise TrailError(f"取り消す承認の証跡を別のアカウント（{names}）が書いている。承認を書いたアカウントで打ち直す")
-    for number in leaving:
-        hub.dequeue(number)
 
 
-def _other_holders(
-    found: Sequence[tuple[Authored, MergeRow]], mine: Sequence[MergeRow], viewer: Viewer, target: MergeTarget, approvals: frozenset[str]
-) -> list[str]:
-    """`approvals` のうち token の利用者の証跡に無い承認を、今も対象の承認と数える別のアカウントの名前。"""
-    own = {value for r in mine if r.answer == APPROVED and r.target.same(target) for value in (r.record_id, r.url)}
+def _other_holders(found: Sequence[tuple[Authored, MergeRow]], viewer: Viewer, target: MergeTarget, approvals: frozenset[str]) -> list[str]:
+    """`approvals` の承認を、今も対象の承認と数える別のアカウントの名前。
+
+    識別子はアカウントの間で差し引かない（投稿の後に確定が失敗した回答を別のアカウントで送り直すと、同じ識別子が両方に残る）。"""
     theirs: defaultdict[int, list[tuple[str, MergeRow]]] = defaultdict(list)
     for c, row in found:
         if c.author_id > 0 and not same_writer(c, viewer):
@@ -214,7 +217,7 @@ def _other_holders(
     holders = []
     for written in theirs.values():
         latest = merge_judgment([row for _, row in written], target)
-        if latest is not None and not (approvals - own).isdisjoint((latest.record_id, latest.url)):
+        if latest is not None and not approvals.isdisjoint((latest.record_id, latest.url)):
             holders.append(written[-1][0])
     return holders
 

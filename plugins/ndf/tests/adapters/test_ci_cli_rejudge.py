@@ -142,3 +142,28 @@ def test_rejudge_reads_the_text_passed_by_the_merge_check(monkeypatch):
     hub.login, hub.account_id = "", 0
     stop = rejudge(AUTO)
     assert stop is not None and (stop.merged, stop.kind, stop.head_sha) == (False, "precondition", merge_hub.HEAD)
+
+
+@pytest.mark.parametrize("revoked", [True, False])
+def test_an_approval_revoked_while_entering_the_queue_leaves_the_queue(monkeypatch, capsys, last_result, revoked):
+    """承認の確認とキューへの追加の間に工程を開き直すと、入れた後の読み直しでキューから外す（#4520）。"""
+    hub = _hub(monkeypatch, AUTO, AUTO)
+    _approve(hub)
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+    after_reopen: list[int] = []
+
+    def enqueue(number, **_kwargs):
+        if revoked:
+            # 開き直しの側が外すのは、PR がキューへ入る前
+            merge_approval.write_revocations(hub, [merge_approval.Revocation(target, frozenset({"r0"}), "reopen:x")], hub.viewer())
+            after_reopen.extend(hub.dequeued)
+            hub.dequeued.clear()
+        return github.MergeOutcome(False, github.MERGE_QUEUE_PENDING, "キューへ入れた", merge_hub.HEAD)
+
+    monkeypatch.setattr(hub, "merge", enqueue)
+    _, found = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
+
+    if revoked:
+        assert after_reopen == [7] and hub.dequeued == [7] and found["cause"]["kind"] == "approval_stale"
+    else:
+        assert hub.dequeued == [] and found["cause"]["kind"] == github.MERGE_QUEUE_PENDING

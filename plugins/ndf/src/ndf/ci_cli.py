@@ -34,7 +34,7 @@ from ndf.adapters.ci import (
     read,
     watch_head,
 )
-from ndf.adapters.github import GitHub, MergeExpect, MergeOutcome, Pull
+from ndf.adapters.github import MERGE_QUEUE_PENDING, GitHub, MergeExpect, MergeOutcome, Pull
 from ndf.contracts import result
 from ndf.core import actors, approval_words, merge_approval, production_merge
 from ndf.core.production_merge import Verdict
@@ -467,6 +467,22 @@ def _approved_by(
     return None, unreadable if unreadable is not None else _unapproved(args, target, verdict)
 
 
+def _withdrawn_in_queue(args: argparse.Namespace, hub: GitHub, target: merge_approval.MergeTarget, verdict: Verdict) -> Optional[dict]:
+    """キューへ入れた後に証跡を読み直し、承認が取り消されていればキューから外して `--production-gate` の結果を返す（#4520）。
+
+    証跡を読んでからキューへ入れるまでの間の工程の開き直しは、キューにまだ無い PR を外せない。読み直しより後に書かれた
+    取り消しは、開き直しの側がキューから外す。読み直せなければ、キューから外してから投げ直す。"""
+    try:
+        row = _approval(hub, target)
+    except (merge_approval.TrailError, github_mod.GitHubError):
+        hub.dequeue(target.number)
+        raise
+    if row is not None:
+        return None
+    hub.dequeue(target.number)
+    return _unapproved(args, target, verdict)
+
+
 def _failed_checks(args: argparse.Namespace, hub: GitHub, pull: Pull) -> Optional[dict]:
     """`--required` を受けたら、マージする HEAD のチェックの結論を待つ。通らなければ止まる結果。
 
@@ -554,6 +570,7 @@ def _merge(args: argparse.Namespace) -> dict:
     マージし、無ければ `--production-gate` の形で終える。
     `--required` を受けたら、承認した対象を今の PR と照らした後に、マージする HEAD のチェックを待つ。マージ済みの PR は待たない。
     待つ間に HEAD かマージ先が変われば、`GitHub.merge` の直前の確かめが止める。
+    承認が要る PR をマージキューへ入れたら、証跡を読み直す（`_withdrawn_in_queue`）。
     """
     invalid = _invalid_args(args)
     if invalid is not None:
@@ -582,6 +599,10 @@ def _merge(args: argparse.Namespace) -> dict:
     rejudge = _Rejudge(hub, pull, target, verdict, approved_by)
     expect = MergeExpect(pull, pull.base_ref, pull.head_sha, PROJECT_FILE, oid, rejudge)
     outcome = hub.merge(pull.number, expect_head=head if head is not None else pull.head_sha, method=args.method, expect=expect)
+    if outcome.kind == MERGE_QUEUE_PENDING and rejudge.approved_by is not None:
+        withdrawn = _withdrawn_in_queue(args, hub, target, rejudge.verdict)
+        if withdrawn is not None:
+            return withdrawn
     return _merged(args, target, outcome, rejudge.verdict, rejudge.approved_by)
 
 
