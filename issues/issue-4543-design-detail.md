@@ -1,8 +1,8 @@
 # #4543 の詳細設計: 現状と改善の案の書き分け
 
-設計文書 [issue-4543-design.md](./issue-4543-design.md) の「どこを変えるか」を、ファイルと関数の粒度へ下ろした文書である。「決定」は設計文書の「決定の記録」の番号、「受け入れ条件」は[要求仕様](./issue-4543-requirements.md)の番号である。パスは、書き分けの無いものは `plugins/ndf/` からの相対である。
+設計文書 [issue-4543-design.md](./issue-4543-design.md) の「どこを変えるか」を、ファイルと関数の粒度へ下ろした文書である。「決定」は設計文書の「決定の記録」の番号、「受け入れ条件」は[要求仕様](./issue-4543-requirements.md)の番号である。断りの無いパスは `plugins/ndf/` からの相対パスである。
 
-新しい関数は 3 つで、シグネチャを変える既存の関数は無い。設計文書が挙げた「小見出しを外す関数」のほかに、要求仕様のコピーを名前で見分ける関数と、修正担当へ足す文を読む関数を足す。後の 2 つは、決定 6 の「名前の形は `issue_docs.py` だけに置く」と、決定 7 の「指示の文は `review-criteria.json` に置く」を、ほかのモジュールの内部に触れずに満たすためである。
+新しい関数は 3 つで、シグネチャを変える既存の関数は無い。設計文書が挙げた「小見出しを外す関数」のほかに、要求仕様のコピー（課題の本文から作る `issues/issue-<番号>-requirements.md`）を名前で見分ける関数と、修正担当へ足す文を読む関数を足す。後の 2 つを足すのは、次の 2 つの決定を、ほかのモジュールの内部に触れずに満たすためである。決定 6 の「名前の形は `issue_docs.py` だけに置く」と、決定 7 の「指示の文は `review-criteria.json` に置く」である。
 
 ## 地図
 
@@ -22,34 +22,34 @@ plugins/ndf/
         └── crossreview/{criteria_decide.py, drive.py, fixer.py}
 ```
 
-依存の向き: `domains` と `core` が `contracts` を読み、`domains` が `core` を読む一方向で、循環は無い。`domains/crossreview/drive.py` と `fixer.py` は `contracts/writing.py` を直接読む。外す条件は呼ぶ側が持ち、`writing.py` は条件を知らない（決定 6）。
+依存の向き: `domains` と `core` が `contracts` を読み、`domains` が `core` を読む一方向で、循環は無い。`domains/crossreview/drive.py` と `fixer.py` は `src/ndf/contracts/writing.py` を直接読む。外す条件は呼ぶ側が持ち、`writing.py` は条件を知らない（決定 6）。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `contracts/data/writing-criteria.md` | 変更 | 書き分けの小見出しと目印の正本 | — | — | — |
 | `src/ndf/contracts/writing.py` | 変更 | 基準の本文を読み、目印の範囲を外す | `ndf.contracts` | `writing` | `without_distinction`（新設） |
-| `src/ndf/domains/records/reading.py` | 変更 | 読み手役への指示を組む | `writing` | `reading` | `prompt`・`_require_prompt`（変更） |
+| `src/ndf/domains/records/reading.py` | 変更 | 読み手役（会話を知らずに読み手の立場で読む AI）への指示を組む | `writing` | `reading` | `prompt`・`_require_prompt`（変更） |
 | `contracts/worker/kinds.json` | 変更 | 小見出しを渡す作業を持つ | — | — | — |
 | `src/ndf/core/worker.py` | 変更 | worker の規則文を組む | `writing`・`worker_kinds` | `worker` | `system_prompt`（変更） |
 | `src/ndf/core/issue_docs.py` | 変更 | 課題の文書の名前の形を持つ | — | `issue_docs` | `requirements_issues`（新設） |
 | `src/ndf/domains/docrebuild/drive.py` | 変更 | 要求仕様のコピーの名前を `issue_docs` から読む | `issue_docs` | `drive` | `requirements_of`（参照先の定数だけ変える） |
 | `contracts/data/review-criteria.json` | 変更 | 修正担当へ足す扱いの文を持つ | — | — | — |
 | `src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 指摘の基準の文を表から読む | 表 | `criteria_decide` | `fixer_requirements_copy`（新設） |
-| `src/ndf/domains/crossreview/drive.py` | 変更 | 変更したファイルから渡し分けを決め、レビュー担当の指示を組む | `issue_docs`・`writing`・`criteria_decide` | `_Run` | `_prepare_round`・`_review_prompt`（変更） |
+| `src/ndf/domains/crossreview/drive.py` | 変更 | 変更したファイルから小見出しを渡すかを決め、レビュー担当の指示を組む | `issue_docs`・`writing`・`criteria_decide` | `_Run` | `_prepare_round`・`_review_prompt`（変更） |
 | `src/ndf/domains/crossreview/fixer.py` | 変更 | 修正担当の指示を組む | `writing`・`criteria_decide` | `FixRun` | `_fix_prompt`（変更） |
 | `skills/design/references/design-template.md` | 変更 | 要約・全体像・目的を書く指示 | 基準の小見出し | — | — |
 | `skills/pr/SKILL.md` | 変更 | PR の概要を書く指示 | 基準の小見出し | — | — |
 | `skills/requirements-design/SKILL.md` | 変更 | 課題の本文の概要を書く指示 | 基準の小見出し | — | — |
 | `skills/development-workflow/references/approval-request.md` | 変更 | 承認の文を書く指示 | 基準の小見出し | — | — |
 | `skills/decision-request/SKILL.md` | 変更 | 質問の文を書く指示 | 基準の小見出し | — | — |
-| `skills/document-style/SKILL.md` | 変更 | 現状の過去形は経緯でないと示す | 基準の小見出し | — | — |
-| `skills/document-rebuild/SKILL.md` | 変更 | `distinction` を指定する文書を示す | — | — | — |
+| `skills/document-style/SKILL.md` | 変更 | 現状を過去形で書くのは文書を直した経緯ではないと示す | 基準の小見出し | — | — |
+| `skills/document-rebuild/SKILL.md` | 変更 | 指示の JSON で `distinction` を `false` にする文書を示す | — | — | — |
 
 ## 基準の小見出しと手順書
 
 満たす決定: 決定 1・2・3・4・5、受け入れ条件 1・2・4・5
 
-プログラムの関数は無い。足す文は設計文書の「どこを変えるか」の 2 つの表のとおりである。目印の `<!-- ndf:distinction-begin -->` と `<!-- ndf:distinction-end -->` は、それぞれ 1 行を単独で使い、`### 現状と改善の案の書き分け` の前と、小見出しの最後（`## 4. 書き方` の前）に置く。3 章の中に収まるので、`writing.types_section` の切り出しにも入る。
+プログラムの関数は無い。足す文は設計文書の「どこを変えるか」の 2 つの表のとおりである。目印は `<!-- ndf:distinction-begin -->` と `<!-- ndf:distinction-end -->` で、それぞれ 1 行を単独で使う。置くのは、`### 現状と改善の案の書き分け` の前と、小見出しの最後（`## 4. 書き方` の前）である。3 章の中に収まるので、`writing.types_section` の切り出しにも入る。
 
 ## 小見出しを外す処理
 
@@ -69,7 +69,7 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `without_distinction` | 目印が対にならない（始まりだけ、終わりだけ、入れ子） | 基準の本文の編集の誤り | 行を読む中と読み終わり | 呼び出し元へ `CriteriaBroken` を返す | 呼ぶ経路が基準を読めないときと同じ扱いにする（下の各構成要素） | 書き込みが無いので、基準を直して打ち直せる |
+| `without_distinction` | 目印が対にならない（始まりだけ、終わりだけ、入れ子） | 基準の本文の編集の誤り | 行を読む中と読み終わり | 呼び出し元へ `CriteriaBroken` を返す | 呼び出し元の各経路は、基準を読めないときと同じ扱いにする（下の各セクションの「異常系の処理」） | 書き込みが無いので、基準を直して打ち直せる |
 
 ### 内部のデータと定数
 
@@ -110,7 +110,7 @@ plugins/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `_require_prompt` | `distinction` が真偽でない（`null`・文字列・数） | 指示の JSON の誤り | キーの確かめの後 | 呼び出し元へ `ReadingInvalid` を返す | 今の「入力の形が違う」の結果（`invalid`）と、その終了コード | 書き込みが無いので打ち直せる |
-| `prompt` | 基準が読めない・目印が対にならない | 配布物の欠け・編集の誤り | `writing` | 呼び出し元へ `CriteriaBroken` を返す | 今の基準を読めないときと同じ（この変更で扱いを足さない） | 同上 |
+| `prompt` | 基準が読めない・目印が対にならない | 配布物の欠け・編集の誤り | `writing` | 呼び出し元へ `CriteriaBroken` を返す | 基準を読めないときの今の扱いと同じ（この変更で扱いを足さない） | 同上 |
 
 ### 単体テストの観点
 
@@ -133,7 +133,7 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `system_prompt` | 基準が読めない・目印が対にならない | 配布物の欠け・編集の誤り | 今の `CriteriaBroken` の `try` の中で外す処理も呼ぶ | 止める（`WorkerError` の `precondition`） | 今の基準を読めないときと同じ。worker を起動しない | 直して打ち直せる |
+| `system_prompt` | 基準が読めない・目印が対にならない | 配布物の欠け・編集の誤り | 今の `CriteriaBroken` の `try` の中で外す処理も呼ぶ | 止める（`WorkerError` の `precondition`） | 基準を読めないときの今の扱いと同じ。worker を起動しない | 直して打ち直せる |
 
 ### 内部のデータと定数
 
@@ -141,7 +141,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `distinction` | 作業の定義の任意のキー（真偽） | `contracts/worker/kinds.json` の `design`・`design-detail`・`design-check-fix`・`requirements` に `true` | 無ければ偽（小見出しを外す） |
 
-`kinds.json` の `summary` と、`worker_kinds.work_kinds` の docstring のキーの並びに `distinction` を足す。読み手役の同じ名前のキーは省くと真で、作業の定義は省くと偽である。省いたときに多くの入力が望む側を、それぞれの既定にしている。
+`kinds.json` の `summary` と、`worker_kinds.work_kinds` の docstring のキーの並びに `distinction` を足す。読み手役の同じ名前のキーは省くと真で、作業の定義は省くと偽である。どちらも、省いたときに多くの入力が望むほうの値を既定にしている。
 
 ### 単体テストの観点
 
@@ -196,7 +196,7 @@ plugins/ndf/
 | `_fix_prompt` | `src/ndf/domains/crossreview/fixer.py` | 変更 | 変えない | 同じ条件で小見出しを外し、コピーがあれば扱いの文を足す |
 
 - `_prepare_round`
-  - 事後条件: `run.distinction` は、変更したファイルのどれかが `issue_docs.design_issues` か `issue_docs.requirements_issues` で空でないとき真になる。`run.requirements_copy` は後者に当たるファイルがあるとき真になる
+  - 事後条件: `run.distinction` は、次の条件で真になる。変更したファイルのどれかで、`issue_docs.design_issues` か `issue_docs.requirements_issues` の結果が空でない。`run.requirements_copy` は後者に当たるファイルがあるとき真になる
 - `_review_prompt`・`_fix_prompt`
   - `document_block` の返す各要素に `writing.without_distinction` を掛ける。目印の無い要素は変わらない。`document_block` は変えない
   - 指摘の文や単位の指示など、基準でない部分には掛けない（このリポジトリでは目印の文字列がそこへ現れうる）
@@ -209,7 +209,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `_review_prompt`・`_fix_prompt` | 目印が対にならない | 編集の誤り | `without_distinction` | 呼び出し元へ返す | `crossreview/cli.py` の今の `CriteriaBroken` の扱い（`invalid` で止める） | 指示を作る前なので担当を起動しない。直して打ち直せる |
 
-扱いの文に従って課題の本文を書き替えられない場合は、プログラムでは検出しない。修正担当が、指摘を `deferred`・`defer: needs_user` で返し、本文の案を見送りの理由に書く。結果の形は今のままである。
+修正担当が扱いの文のとおりに課題の本文を書き替えようとして、書き替えられない場合がある。この場合はプログラムでは検出しない。修正担当が、指摘を `deferred`・`defer: needs_user` で返し、本文の案を見送りの理由に書く。結果の形は今のままである。
 
 ### 内部のデータと定数
 
@@ -221,7 +221,7 @@ plugins/ndf/
 
 `document.requirements_copy` の文には、次の 2 つを書く。`summary` にもこのキーの説明を足す。
 
-1. 要求仕様のコピー（`issues/issue-<番号>-requirements.md`）への指摘は、`requirements-design` の手順 7 のとおりに課題の本文を直す（`## 進行` より前だけを書き替える）。その本文からコピーを作り直してコミットする
+1. 要求仕様のコピー（`issues/issue-<番号>-requirements.md`）への指摘は、`requirements-design` の手順 7 のとおりに課題の本文を直す。書き替えるのは `## 進行` より前だけである。その本文からコピーを作り直してコミットする
 2. 課題の本文を書き替えられないときは、コピーも変えない。指摘は `deferred`・`defer: needs_user` にし、本文の案を見送りの理由に書く
 
 2 つの値はラウンドごとに決め直し、状態ファイルへは書かない（`documents` と同じ）。

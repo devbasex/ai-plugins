@@ -41,7 +41,11 @@
 
 ### Task 1: 今の渡し方を固定する退行テストを置く
 
-- **対象ファイル:** `tests/contracts/test_writing.py`、`tests/domains/records/test_reading.py`、`tests/worker/test_rules.py`、`tests/domains/crossreview/test_crossreview_documents.py`
+- **対象ファイル:**
+  - `tests/contracts/test_writing.py`
+  - `tests/domains/records/test_reading.py`
+  - `tests/worker/test_rules.py`
+  - `tests/domains/crossreview/test_crossreview_documents.py`
 - **変更内容:** 読み手役への指示に型の章が入ること、文書を書く作業と cross-review の指示に基準の全文が入ることを、3 つの経路の出力で確かめる。今のテストが確かめている振る舞いは足さない
 - **満たす受け入れ条件:** 5
 - **進め方:** 今の振る舞いを縛るテストを足し、製品のコードを変えずに通ることを CI で見る
@@ -55,7 +59,13 @@
 
 ### Task 3: 読み手役の指示で、小見出しを渡し分ける
 
-- **対象ファイル:** `contracts/data/writing-criteria.md`、`src/ndf/contracts/writing.py`、`src/ndf/domains/records/reading.py`、`skills/document-rebuild/SKILL.md`、`tests/contracts/test_writing.py`、`tests/domains/records/test_reading.py`
+- **対象ファイル:**
+  - `contracts/data/writing-criteria.md`
+  - `src/ndf/contracts/writing.py`
+  - `src/ndf/domains/records/reading.py`
+  - `skills/document-rebuild/SKILL.md`
+  - `tests/contracts/test_writing.py`
+  - `tests/domains/records/test_reading.py`
 - **変更内容:**
   - 小見出しの前後に `<!-- ndf:distinction-begin -->` と `<!-- ndf:distinction-end -->` を置く
   - `writing.py` に、目印の定数と、本文から目印で囲まれた範囲を除いて返す関数を足す。関数は見出しの文を持たない（決定 6）
@@ -66,33 +76,55 @@
 
 ### Task 4: 作業の AI への指示で、小見出しを渡し分ける
 
-- **対象ファイル:** `contracts/worker/kinds.json`、`src/ndf/core/worker.py`、`tests/worker/test_rules.py`
-- **変更内容:** `design`・`design-detail`・`design-check-fix`・`requirements` の定義にだけ、小見出しを渡す値を足し、`kinds.json` の `summary` にそのキーの説明を足す。ほかの作業へ渡す基準の全文からは小見出しを外す（決定 6）
+- **対象ファイル:**
+  - `contracts/worker/kinds.json`
+  - `src/ndf/core/worker.py`
+  - `tests/worker/test_rules.py`
+- **変更内容:** `design`・`design-detail`・`design-check-fix`・`requirements` の定義にだけ、小見出しを渡す値を足す。`kinds.json` の `summary` にそのキーの説明を足す。ほかの作業へ渡す基準の全文からは小見出しを外す（決定 6）
 - **満たす受け入れ条件:** 1・5
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
 ### Task 5: cross-review の指示で、小見出しを渡し分ける
 
-- **対象ファイル:** `src/ndf/core/issue_docs.py`、`src/ndf/domains/docrebuild/drive.py`、`src/ndf/domains/crossreview/drive.py`、`src/ndf/domains/crossreview/fixer.py`、`tests/domains/crossreview/test_crossreview_documents.py`
+- **対象ファイル:**
+  - `src/ndf/core/issue_docs.py`
+  - `src/ndf/domains/docrebuild/drive.py`
+  - `src/ndf/domains/crossreview/drive.py`
+  - `src/ndf/domains/crossreview/fixer.py`
+  - `tests/domains/crossreview/test_crossreview_documents.py`
 - **変更内容:**
   - 要求仕様のコピーの名前の形を `issue_docs.py` に置き、`docrebuild/drive.py` の `REQUIREMENTS_FILE` の定義をやめてそこを参照する
-  - PR の変更に、課題の設計書も要求仕様のコピーも無ければ、相手役と修正担当の指示の基準の全文から小見出しを外す。呼ぶ側で外すので、`document_block` のシグネチャは変えない
+  - PR の変更に、課題の設計書も要求仕様のコピーも無ければ、レビュー担当と修正担当の指示の基準の全文から小見出しを外す。呼ぶ側で外すので、`document_block` のシグネチャは変えない
 - **満たす受け入れ条件:** 5
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理。設計書がある、要求仕様のコピーだけがある、どちらも無い、の 3 つの変更で指示を組んで確かめる。子のプロセスは起動しない
 
 ### Task 6: 修正担当の指示に、要求仕様のコピーへの指摘の扱いを足す
 
-- **対象ファイル:** `contracts/data/review-criteria.json`、`src/ndf/domains/crossreview/criteria_decide.py`、`src/ndf/domains/crossreview/fixer.py`、`src/ndf/domains/crossreview/drive.py`、`tests/domains/crossreview/test_crossreview_documents.py`
+- **対象ファイル:**
+  - `contracts/data/review-criteria.json`
+  - `src/ndf/domains/crossreview/criteria_decide.py`
+  - `src/ndf/domains/crossreview/fixer.py`
+  - `src/ndf/domains/crossreview/drive.py`
+  - `tests/domains/crossreview/test_crossreview_documents.py`
 - **変更内容:** 決定 7 の 2 つの扱い（課題の本文を直してからコピーを作り直す。本文を書き替えられなければ `needs_user` で返す）を `review-criteria.json` に置き、PR の変更に要求仕様のコピーがあるときだけ修正担当の指示に足す。JSON の `summary` にも、足したキーの説明を書く
 - **満たす受け入れ条件:** 5（決定 7。受け入れ条件には対応する番号が無い）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理。コピーがあるときだけ指示に入ることを見る
 
 ### Task 7: 手順書から小見出しを指す
 
-- **対象ファイル:** `skills/design/references/design-template.md`、`skills/pr/SKILL.md`、`skills/requirements-design/SKILL.md`、`skills/development-workflow/references/approval-request.md`、`skills/decision-request/SKILL.md`、`skills/document-style/SKILL.md`
+- **対象ファイル:**
+  - `skills/design/references/design-template.md`
+  - `skills/pr/SKILL.md`
+  - `skills/requirements-design/SKILL.md`
+  - `skills/development-workflow/references/approval-request.md`
+  - `skills/decision-request/SKILL.md`
+  - `skills/document-style/SKILL.md`
 - **変更内容:** 設計書の「どこを変えるか」の表の各行のとおりに指示を足す（決定 1・3・5）。表は写さず、小見出しを指す。仕組みが読み取る見出しは変えない。承認資料の手順書で、PR の本文から写した行の扱いは、上の「設計承認で利用者が決めること」の結果に従う
 - **満たす受け入れ条件:** 1・4・5
-- **進め方:** 文書だけの変更なのでテストを書かない。参照切れの検査（`python3 scripts/check-markdown-links.py --root .`）と行数の検査（`python3 scripts/check-doc-line-limit.py --root .`）を打ち、差分の `#` の行の変更が小見出しの追加だけであることを見る
+- **進め方:** 文書だけの変更なのでテストを書かない。次を確かめる
+  - 参照切れの検査を打つ（`python3 scripts/check-markdown-links.py --root .`）
+  - 行数の検査を打つ（`python3 scripts/check-doc-line-limit.py --root .`）
+  - 差分の `#` の行の変更が小見出しの追加だけであることを見る
 
 ### Task 8: 読み手役に例を読ませて確かめる
 
