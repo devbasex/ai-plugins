@@ -99,9 +99,10 @@ class _Hub:
 
 @pytest.fixture
 def sprint(tmp_path, monkeypatch):
-    """ブランチ sprint/s1 に居る作業場所と、そのリモート（origin。裸のリポジトリ）。実装計画は無く、リモートへ push 済み。"""
+    """ブランチ sprint/s1 に居る作業場所と、そのリモート（origin。裸のリポジトリ）。実装計画は無く、`.ndf` ごとリモートへ push 済み。"""
     repo = sprint_fixture.sprint_repo(tmp_path, PROJECT)
-    _git(repo, "commit", "-q", "--allow-empty", "-m", "start")
+    _git(repo, "add", ".ndf")  # 手元を進めない変換の経路は、設定を取得先のコミットから読む
+    _git(repo, "commit", "-q", "-m", "start")
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
     _git(repo, "remote", "add", "origin", str(remote))
@@ -270,8 +271,7 @@ def test_units_only_on_the_remote_send_an_older_definition_to_the_conversion(spr
 
     plan = plan_runs.SprintPlan(convert=lambda *args: pytest.fail("起動の前は変換しない"), destination=destination, branch=BRANCH)
     stage_run = replace(_run(sprint), per_unit=False, sprint=plan)
-
-    # 通常の入口の振り分け（by_units）を通り、単位に分けないプランは組まない
+    # 通常のエントリポイントの振り分け（by_units）を通り、単位に分けないプランは組まない
     assert invoke.prepare_plan(stage_run, tmp_path / "w", sprint) is None
     assert asked == [BRANCH] and [c[0] for c in git_calls].count("fetch") == 1
 

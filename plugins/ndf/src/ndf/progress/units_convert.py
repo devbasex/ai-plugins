@@ -35,6 +35,7 @@ from ndf.core.plan.review_units_decide import (
     without_sections,
 )
 from ndf.progress import design_record, folding, invoke, run_view, stages, store, units_flow, units_guard, units_invoke, units_sync
+from ndf.progress.command import without_userinfo
 from ndf.progress.plan_runs import ConvertRequest, SprintPlan, StageResult, UnitsStopped
 
 # スプリントの作業の保存先に置く、送ったコミットと確かめに使った承認の記録（`{"commit", "approval": {"kind", "head"}}`）
@@ -304,9 +305,13 @@ def check_fetch(job: Job, git: Git, remote: Optional[str] = None) -> None:
     """取得の URL がスプリントのリポジトリを指すことを確かめる。通信しない。違えば `refused`。
 
     取得は送り先と違い、GitHub の接続の形（SSH を 443 番で使う `ssh.github.com` を含む）をどれも受ける（`repo_of_url`）。
+    保存値と同じ URL（userinfo を除く）は、付け替えが無いので、GitHub の URL として読めなくても通す。
     """
+    url = git.remote_url(remote)
+    if without_userinfo(url) == job.machine_repo():
+        return
     expected = _sprint_repo(job)
-    actual = repo_of_url(git.remote_url(remote))
+    actual = repo_of_url(url)
     if actual is None or actual.casefold() != expected.casefold():
         now = "解析できない" if actual is None else actual
         raise UnitsStopped("refused", f"取得の URL のリポジトリがスプリントと違う（スプリント {expected}、今 {now}）ので、変換しない")

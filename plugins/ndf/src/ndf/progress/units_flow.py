@@ -17,7 +17,7 @@
 - 実装計画の表から読んだ並び（依存を持たない）は、並びの順に 1 つずつ流す
 
 打ち直しで単位の回をどう続けるかの判定（`round_state`・`resume_of`）と、回の記録の読み書きもここが持つ。
-開始前の確かめが読む実装計画と、手元と取得先の HEAD の読み取り（`read_start`）もここが持つ。
+開始前の確かめが読む実装計画と、手元と取得先の HEAD の読み取り（`read_start`）、承認の記録との比較（`approved_start`）もここが持つ。
 """
 
 from __future__ import annotations
@@ -37,12 +37,17 @@ from ndf.adapters.git import HEADS, Completed, Git, GitError, mask_urls
 from ndf.contracts import facts, result, worker_paths
 from ndf.core import route
 from ndf.core.issue_docs import plan_issues
+from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan import units_files
 from ndf.core.plan.review_units_decide import PlanDoc, Unit, has_units, unit_key
 from ndf.core.plan.transition_decide import USAGE_LIMIT
 from ndf.progress import plan_runs, units_queue
 from ndf.progress.plan_runs import SprintPlan, StageResult, StageRun, UnitsStopped
+
+# 承認した文書を送るコミットの記録（ステートマシンの作業の保存先。`{"record_head", "commit"}`）
+DESIGN_SYNC_FILE = "design-sync.json"
+
 
 # PR がキューに残りうる停止理由（待てば進むので、ほかの理由の失敗があればそちらを結果の種類にする。前ほど優先する）
 WAIT_KINDS = ("infra_wait", github_merge.MERGE_QUEUE_PENDING)
@@ -652,17 +657,17 @@ def plans_at(g: Git, commit: str, issues: Sequence[int]) -> tuple[list[PlanDoc],
     names = [p for p in listed.split("\0") if p]
     paths = [p for p in names if is_sprint_plan(p, issues)]
     blobs = g.blobs(*(f"{commit}:{p}" for p in paths)) if paths else []
-    plans = [_plan_doc(p, functools.partial(b.decode, "utf-8")) for p, b in zip(paths, blobs) if b is not None]
+    plans = [_decoded_plan(p, functools.partial(b.decode, "utf-8")) for p, b in zip(paths, blobs) if b is not None]
     return plans, bool(units_files.paths_naming(names, issues))
 
 
 def worktree_plans(root: Path, paths: Sequence[str]) -> list[PlanDoc]:
     """worktree の `paths` にある実装計画（削除されたものは読まない）。"""
     found = (p for p in paths if plan_issues(p) and (root / p).is_file())
-    return [_plan_doc(p, functools.partial((root / p).read_text, encoding="utf-8")) for p in found]
+    return [_decoded_plan(p, functools.partial((root / p).read_text, encoding="utf-8")) for p in found]
 
 
-def _plan_doc(path: str, read: Callable[[], str]) -> PlanDoc:
+def _decoded_plan(path: str, read: Callable[[], str]) -> PlanDoc:
     """`read` で読んだ実装計画。UTF-8 で読めなければ、パスと理由を添えて止める。"""
     try:
         text = read()
@@ -747,6 +752,12 @@ def peek(g: Git, remote: str, branch: Optional[str], issues: Sequence[int], here
     return Peeked(head, tip, at_head, at_head if tip is None or tip == head else seen_at(g, tip, issues))
 
 
+def branch_here(g: Git) -> Optional[str]:
+    """作業場所が今いるブランチ。ブランチに居なければ None。"""
+    name = g.run("branch", "--show-current").strip()
+    return None if name == "" else name
+
+
 def by_units(run: StageRun, location: Path) -> Optional[StageRun]:
     """単位を流す処理へ渡す呼び出し。渡さなければ None。`per_unit` の無い定義のスプリントは、実装計画に単位の欄があるとき
     渡す（#3702 の決定 10）。
@@ -765,8 +776,8 @@ def by_units(run: StageRun, location: Path) -> Optional[StageRun]:
         here = seen_at(g, "HEAD", issues)
         if any(has_units(p.text) for p in [*here.plans, *worktree_plans(root, changed)]):
             return run
-        branch = g.run("branch", "--show-current").strip()
-        if branch == "":
+        branch = branch_here(g)
+        if branch is None:
             return None
         remote = g.remote()
         if run.sprint.verify_fetch is not None:
@@ -818,3 +829,31 @@ def read_start(
                 f"取得先の {branch} の実装計画に単位の欄があるが、送り先の {branch} では確かめられないので、始めない",
             )
     return Start(head, tip, at_head, at_tip, checked_to)
+
+
+def approved_start(
+    g: Git, tree: units_files.Tree, sprint: SprintPlan, start_head: str
+) -> tuple[Mapping[str, Any], str, units_files.Targets]:
+    """承認の記録・その HEAD・比較が読んだ対象。承認した文書がスプリントブランチに届き、中身が記録と同じことを確かめる。"""
+    record, differences = sprint.record, sprint.differences
+    assert record is not None and differences is not None, "prepare が先に確かめる"
+    head = str(record["review"]["head"])
+    _check_delivered(g, sprint.work_root, head, start_head)
+    compared = differences(tree)
+    if compared.differences:
+        raise UnitsStopped("refused", f"承認した分け方と今の中身が違うので、実装を始めない: {'; '.join(compared.differences)}")
+    assert compared.targets is not None, "違いが無い比較は、読んだ対象を返す"
+    return record, head, compared.targets
+
+
+def _check_delivered(g: Git, work_root: Optional[Path], record_head: str, start_head: str) -> None:
+    """記録の HEAD か、その文書を送ったコミット（`design-sync.json`）が、開始の HEAD と同じか祖先であることを確かめる。"""
+    candidates = [record_head]
+    synced = None if work_root is None else plan_files.read_json(work_root / DESIGN_SYNC_FILE)
+    if synced is not None and "record_head" in synced and synced["record_head"] == record_head and "commit" in synced:
+        candidates.append(str(synced["commit"]))
+    for commit in candidates:
+        if g.commit_or_none(commit) is not None and g.is_ancestor(commit, start_head):
+            return
+    detail = f"承認した文書（コミット {record_head}）がスプリントブランチの HEAD（{start_head}）に届いていない"
+    raise UnitsStopped("precondition", detail)

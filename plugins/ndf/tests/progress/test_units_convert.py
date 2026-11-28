@@ -827,7 +827,7 @@ def test_a_release_branch_declared_at_the_tip_stops_before_the_conversion(tmp_pa
     empty = units_flow.Seen([], False)
     git = SimpleNamespace(run=lambda *args: str(tmp_path), remote=lambda: "origin", is_ancestor=lambda a, b: a == "local")
     monkeypatch.setattr(units_invoke, "Git", lambda path: git)
-    monkeypatch.setattr(units_invoke, "_current_branch", lambda g: SPRINT)
+    monkeypatch.setattr(units_flow, "branch_here", lambda g: SPRINT)
     monkeypatch.setattr(units_invoke, "_uncommitted", lambda g, issues: [])
     monkeypatch.setattr(units_flow, "read_start", lambda *args: units_flow.Start("local", "tip", empty, plan, None))
     monkeypatch.setattr(units_flow, "worktree_plans", lambda root, paths: [])

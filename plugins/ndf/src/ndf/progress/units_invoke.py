@@ -52,8 +52,6 @@ from ndf.testing import scoped
 UNIT_CHECKS = "unit_required_checks"
 # 単位のブランチ名に付ける、単位の名前の sha256 の先頭の字数
 UNIT_HASH_CHARS = 8
-# 承認した文書を送るコミットの記録（ステートマシンの作業の保存先。`{"record_head", "commit"}`）
-DESIGN_SYNC_FILE = "design-sync.json"
 # 単位の回の保存先の、PR の番号（`impl` の `pr` のステップが書く）と単位の範囲の指示（`unit_run` が書く）のファイル
 PR_NUMBER_FILE = Path(route.PR_NUMBER_FILE).name
 UNIT_FILE = "unit.md"
@@ -142,7 +140,7 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
     g = Git(location)
     root = Path(g.run("rev-parse", "--show-toplevel").strip())
     issues = sorted({int(n) for n in run.inputs["issues"]})
-    branch = _current_branch(g)
+    branch = units_flow.branch_here(g)
     remote = g.remote()
     uncommitted = _uncommitted(g, issues)
     head, tip, at_head, at_tip, checked_to = units_flow.read_start(g, remote, branch, issues, sprint, run.peeked)
@@ -163,12 +161,19 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
     converting = sprint.convert is not None and not sprint.new_definition and seen.has_headings()
     if behind:
         project, branch = _checked_ahead(run, root, branch, str(tip) if converting else None)
-    source, bodies = "", None
     count = _counted_once(g, remote)
     request = ConvertRequest(run, root, branch, tuple(issues), sprint.omitted, count, checked_to)
     asked, seen = _converted(g, sprint, seen, request, ports)
     if asked is not None:
         return asked
+    found = _start_lineup(g, remote, sprint, request, seen, converting)
+    return _announced(work_dir, branch, found._replace(unit_ci=_unit_ci(project, branch)))
+
+
+def _start_lineup(g: Git, remote: str, sprint: SprintPlan, request: ConvertRequest, seen: units_flow.Seen, converting: bool) -> Lineup:
+    """開始の並び（`unit_ci` は空）。単位のファイルか実装計画の表から読み、確かめを通ったら手元のコミットを送る。"""
+    root, branch, issues, count = request.sprint_dir, request.branch, request.issues, request.count
+    source, bodies = "", None
     if sprint.required or seen.unit_files:
         units, source, checked, bodies = _units_from_files(g, root, sprint, issues, seen.plans, count)
         # 送るのは記録との比較と確かめを通ったコミットだけにする（止まる実装の手元のコミットを、共有のブランチに残さない）。
@@ -180,7 +185,7 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
             raise UnitsStopped("invalid", detail)
         units = _read_units(g, remote, seen.plans, issues)
         _push_sprint(g, remote, branch, "HEAD")
-    return _announced(work_dir, branch, Lineup(units, _unit_ci(project, branch), source, bodies))
+    return Lineup(units, {}, source, bodies)
 
 
 def _counted_once(g: Git, remote: str) -> Callable[[Sequence[int]], dict[int, int]]:
@@ -250,7 +255,7 @@ def _units_from_files(
     tree = units_files.Tree(root, start_head)
     try:
         if sprint.required:
-            record, source, targets = _approved(g, tree, sprint, start_head)
+            record, source, targets = units_flow.approved_start(g, tree, sprint, start_head)
             limits = ud.Limits(**record["limits"])
             criteria = {int(n): count for n, count in record[ud.CRITERIA_KEY].items()}
             report = units_files.check_collected(tree, targets, limits, criteria, False)
@@ -271,43 +276,10 @@ def _units_from_files(
     return units, source, start_head, bodies
 
 
-def _approved(g: Git, tree: units_files.Tree, sprint: SprintPlan, start_head: str) -> tuple[Mapping[str, Any], str, units_files.Targets]:
-    """承認の記録・その HEAD・比較が読んだ対象。承認した文書がスプリントブランチに届き、中身が記録と同じことを確かめる。"""
-    record, differences = sprint.record, sprint.differences
-    assert record is not None and differences is not None, "prepare が先に確かめる"
-    head = str(record["review"]["head"])
-    _check_delivered(g, sprint.work_root, head, start_head)
-    compared = differences(tree)
-    if compared.differences:
-        raise UnitsStopped("refused", f"承認した分け方と今の中身が違うので、実装を始めない: {'; '.join(compared.differences)}")
-    assert compared.targets is not None, "違いが無い比較は、読んだ対象を返す"
-    return record, head, compared.targets
-
-
-def _check_delivered(g: Git, work_root: Optional[Path], record_head: str, start_head: str) -> None:
-    """記録の HEAD か、その文書を送ったコミット（`design-sync.json`）が、開始の HEAD と同じか祖先であることを確かめる。"""
-    candidates = [record_head]
-    synced = None if work_root is None else plan_files.read_json(work_root / DESIGN_SYNC_FILE)
-    if synced is not None and "record_head" in synced and synced["record_head"] == record_head and "commit" in synced:
-        candidates.append(str(synced["commit"]))
-    for commit in candidates:
-        if g.commit_or_none(commit) is not None and g.is_ancestor(commit, start_head):
-            return
-    detail = f"承認した文書（コミット {record_head}）がスプリントブランチの HEAD（{start_head}）に届いていない"
-    raise UnitsStopped("precondition", detail)
-
-
 def _work_location(run: StageRun, cwd: Path) -> Path:
     """入力の作業場所（`worktree`）。無ければ打った場所。"""
     held = run.inputs["worktree"] if "worktree" in run.inputs else None
     return Path(held) if isinstance(held, str) and held else cwd
-
-
-def _current_branch(g: Git) -> Optional[str]:
-    """作業場所が今いるブランチ。ブランチに居なければ None。"""
-    done = g.attempt("branch", "--show-current")
-    name = done.stdout.strip()
-    return name if done.returncode == 0 and name != "" else None
 
 
 def _uncommitted(g: Git, issues: Sequence[int]) -> list[str]:
@@ -545,7 +517,7 @@ def _unit_context(run: StageRun, work_dir: Path, cwd: Path, found: Lineup) -> Co
     g = Git(_work_location(run, cwd))
     root = Path(g.run("rev-parse", "--show-toplevel").strip())
     project = ndf_settings_in(root, PROJECT_FILE)
-    branch = _checked_branch(run, _current_branch(g), project)
+    branch = _checked_branch(run, units_flow.branch_here(g), project)
     if branch != found.unit_ci["base"]:
         detail = f"スプリントに登録されたブランチ {branch} が、単位の PR のマージ先 {found.unit_ci['base']}（{UNITS_FILE}）と違う"
         raise UnitsStopped("precondition", detail)
@@ -937,7 +909,7 @@ def _check_sprint_branch(g: Git, ctx: Context) -> None:
     別のブランチの HEAD で差分の範囲を示すと、利用者が確かめた範囲と、切り替えた後に進める範囲が食い違う。打ち直しで
     スプリントブランチの HEAD から範囲を取り直す。
     """
-    current = _current_branch(g)
+    current = units_flow.branch_here(g)
     if current != ctx.branch:
         command = shlex.join(["git", "-C", str(ctx.sprint), "switch", ctx.branch])
         detail = (

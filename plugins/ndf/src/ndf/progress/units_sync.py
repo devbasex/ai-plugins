@@ -23,7 +23,8 @@ from ndf.core import branch_strategy
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import units_files
 from ndf.progress import command, design_record, run_view, store
-from ndf.progress.units_invoke import DESIGN_SYNC_FILE, released_branches
+from ndf.progress.units_flow import DESIGN_SYNC_FILE
+from ndf.progress.units_invoke import released_branches
 
 # 反映する文書の名前（名前の番号の並びが課題）
 _DOCUMENT = re.compile(r"^issues/issue-(\d+(?:-\d+)*)-(?:plan\.units\.json|plan\.md|requirements\.md|design\.md|design-detail\.md)$")

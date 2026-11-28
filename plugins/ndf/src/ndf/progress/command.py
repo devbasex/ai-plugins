@@ -73,7 +73,7 @@ def store_root_of(cwd: Path) -> Path:
     return durable.store_root(identity.load().name, cwd)
 
 
-def _without_userinfo(url: str) -> str:
+def without_userinfo(url: str) -> str:
     """URL の userinfo（`user:token@`）を外す。トークンを DB へ残さず、トークンの入れ替えで識別を変えない。"""
     parts = urlsplit(url)
     if not parts.scheme or "@" not in parts.netloc:
@@ -85,7 +85,7 @@ def _without_userinfo(url: str) -> str:
 def repo_id(cwd: Path, root: Path) -> str:
     """リポジトリの識別。リモート名のリモートの URL（userinfo を外す）、無ければメインディレクトリの絶対パス（保存先の 2 つ上の親）。"""
     try:
-        return _without_userinfo(Git(cwd).remote_url())
+        return without_userinfo(Git(cwd).remote_url())
     except GitError:
         # リモートの無いリポジトリはメインディレクトリで識別する
         return str(root.parents[2])
