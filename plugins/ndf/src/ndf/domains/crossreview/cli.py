@@ -484,7 +484,7 @@ class ReportFailed(Exception):
 
 class Filer(NamedTuple):
     """直さずに残した指摘の起票の前提。起票先は `locate` が返すメインディレクトリの `.ndf/project.json` で決める（`locate` は
-    起票の候補があるときだけ呼ぶ）。`repo_arg` は `--repo`、`manual` は利用者が打った公開（上限を超えた一覧も読み直し、照合済みの指摘も照らし直す）。"""
+    起票の候補があるときだけ呼ぶ）。`repo_arg` は `--repo`、`manual` は利用者が打った公開（上限を超えた一覧も読み直し、Issue が無かった指摘も照らし直す）。"""
 
     locate: Callable[[], Optional[Path]] = lambda: None
     repo_arg: Optional[str] = None

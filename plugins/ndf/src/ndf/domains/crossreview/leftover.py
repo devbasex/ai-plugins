@@ -132,7 +132,7 @@ def _carried_urls(data: Mapping[str, Any]) -> list[str]:
 
 
 def _checked_value(text: str, urls: Sequence[str]) -> str:
-    """照合した指摘の本文と引き継いだ URL の組の値（どちらかが変われば違う値になる）。"""
+    """照らした指摘の本文と引き継いだ URL の組の値（どちらかが変われば違う値になる）。"""
     joined = "\n".join([leftover_decide.normalized(text), *sorted(urls)])
     return hashlib.sha256(joined.encode()).hexdigest()[:12]
 
@@ -140,8 +140,8 @@ def _checked_value(text: str, urls: Sequence[str]) -> str:
 def candidates(data: Mapping[str, Any], *, manual: bool = False) -> list[dict[str, Any]]:
     """起票の候補の行（直さずに残した未解決の指摘のうち、まだ起票しておらず、起票する種類か引き継いだ起票の URL を持つもの）。
 
-    状態に引き継いだ URL（`CARRIED_URLS`）があれば、どの指摘の Issue かは読むまで分からないので、残した指摘をすべて照合の
-    候補にする。起票する種類を持たない行は照合だけで、起票はしない（`_Filing.sort`）。同じ指摘と URL の組で照らして Issue が
+    状態に引き継いだ URL（`CARRIED_URLS`）があれば、どの指摘の Issue かは読むまで分からないので、残した指摘をすべて突き合わせの
+    候補にする。起票する種類を持たない行は突き合わせるだけで、起票はしない（`_Filing.sort`）。同じ指摘と URL の組で照らして Issue が
     無かった行（`Filed.CHECKED`）は、候補にしない。Issue の本文や作者の権限はこの組に入らないので、利用者が打った公開
     （`manual`）は照らし直す。"""
     pool = _carried_urls(data)

@@ -296,8 +296,8 @@ MVV が変われば通し直す。範囲だけを読むときは
 同じコメントを更新して試行時刻と Issue 番号を残す。利用者はこのコメントを編集しない。打ち直しは記録・検索・Issue の一覧で
 確かめる。引き継いだ URL（`prior_issue` と `issue_carried_urls`）と起票の記録の URL はまとめ、`github.graphql-batch` の上限の件数ごとに GitHub へ
 問い合わせる。その指摘の Issue だと確かめられない `prior_issue` と起票の記録の URL は捨てる。問い合わせに失敗した場合は、URL を残して打ち直しで確かめる。
-`issue_carried_urls` があるときは、起票の対象でない残した指摘もこの照合にかけ、既にある Issue の URL を戻す。照合だけの指摘からは Issue を作らない。Issue が無かった指摘は、指摘の本文と `issue_carried_urls` が変わるまで照合し直さない（行の `issue_checked`）。
-利用者が打った `ndf cross-review report` は、`issue_checked` があっても照合し直す。
+`issue_carried_urls` があるときは、起票の対象でない残した指摘も同じように突き合わせ、既にある Issue の URL を戻す。突き合わせるだけの指摘からは Issue を作らない。Issue が無かった指摘は、指摘の本文と `issue_carried_urls` が変わるまで突き合わせ直さない（行の `issue_checked`）。
+利用者が打った `ndf cross-review report` は、`issue_checked` があっても突き合わせ直す。
 失敗した指摘は記録のコメントに残り、次の公開か `ndf cross-review report` で打ち直す。
 
 ## 状態ファイル
