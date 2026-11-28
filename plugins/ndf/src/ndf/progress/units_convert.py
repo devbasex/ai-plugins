@@ -18,7 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-from ndf.adapters.git import HEADS, Git, github_target, mask_urls
+from ndf.adapters.git import HEADS, Git, github_target, mask_urls, repo_of_url
 from ndf.contracts import result
 from ndf.core import route
 from ndf.core.plan import files as plan_files
@@ -297,13 +297,18 @@ def _sprint_repo(job: Job) -> str:
     return machine.repo
 
 
-def check_fetch(job: Job, git: Git, repo: Optional[str] = None) -> None:
-    """取得の URL がスプリントのリポジトリ（`repo` を省けば解析する）を指すことを確かめる。通信しない。違えば `refused`。"""
-    repo = _sprint_repo(job) if repo is None else repo
-    fetch = github_target(git.remote_url())
-    if fetch is None or fetch.repo.casefold() != repo.casefold():
-        now = "解析できない" if fetch is None else fetch.repo
-        raise UnitsStopped("refused", f"取得の URL のリポジトリがスプリントと違う（スプリント {repo}、今 {now}）ので、変換しない")
+def check_fetch(job: Job, git: Git, remote: Optional[str] = None) -> None:
+    """取得の URL がスプリントのリポジトリを指すことを確かめる。通信しない。違えば `refused`。
+
+    取得は送り先と違い、GitHub の接続の形（SSH を 443 番で使う `ssh.github.com` を含む）をどれも受ける（`repo_of_url`）。
+    """
+    expected = repo_of_url(job.machine_repo())
+    if expected is None:
+        raise UnitsStopped("refused", "スプリントのリポジトリを解析できないので、変換しない")
+    actual = repo_of_url(git.remote_url(remote))
+    if actual is None or actual.casefold() != expected.casefold():
+        now = "解析できない" if actual is None else actual
+        raise UnitsStopped("refused", f"取得の URL のリポジトリがスプリントと違う（スプリント {expected}、今 {now}）ので、変換しない")
 
 
 def checked_url(job: Job, git: Git) -> str:
@@ -316,7 +321,7 @@ def checked_url(job: Job, git: Git) -> str:
     url, errors = units_sync.push_url(git, repo)
     if url is None:
         raise UnitsStopped("refused", "送り先を確かめられないので、変換しない: " + "; ".join(errors))
-    check_fetch(job, git, repo)
+    check_fetch(job, git)
     return url
 
 

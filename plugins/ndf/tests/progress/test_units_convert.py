@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import git_sandbox
 import pytest
 import strategy_fixture
-
+from ndf.adapters.git import GitError
 from ndf.contracts import result, worker_kinds
 from ndf.core import route
 from ndf.core.plan import units_decide as ud
@@ -26,6 +26,7 @@ from ndf.core.plan.review_units_decide import PlanDoc, Unit, unit_key
 from ndf.progress import (
     definition,
     design_record,
+    gate,
     invoke,
     issue_values,
     model,
@@ -37,7 +38,6 @@ from ndf.progress import (
     units_flow,
     units_invoke,
 )
-from ndf.progress import gate
 from ndf.progress.gate import design as gate_design
 from ndf.progress.plan_runs import StageResult, StageRun, UnitsStopped
 
@@ -690,6 +690,7 @@ UNREADABLE = UnitsStopped("precondition", "送り先を読めない")
         pytest.param(URL, URL, True, id="同じ"),
         pytest.param(URL, OTHER, False, id="push の URL が別"),
         pytest.param(OTHER, URL, False, id="取得の URL が別"),
+        pytest.param("ssh://git@ssh.github.com:443/o/r.git", URL, True, id="取得は SSH の 443 番の接続先も受ける"),
     ],
 )
 def test_both_remote_urls_must_be_the_sprint_repository(fetch, push, accepted):
@@ -762,7 +763,7 @@ def test_the_start_of_a_sprint_without_unit_headings(outcome, by_name, checked_t
 
 
 def test_a_refused_fetch_url_stops_before_any_fetch():
-    def refused(g):
+    def refused(g, remote):
         raise UnitsStopped("refused", "取得の URL が違う")
 
     git = SimpleNamespace(run=lambda *args: "", fetch_branch=lambda *args: pytest.fail("取得しない"))
@@ -770,6 +771,20 @@ def test_a_refused_fetch_url_stops_before_any_fetch():
 
     with pytest.raises(UnitsStopped, match="取得の URL"):
         units_flow.read_start(git, "origin", SPRINT, [3], sprint)
+
+
+def test_a_git_failure_of_the_route_stops_the_start_instead_of_meaning_no_units(tmp_path, monkeypatch):
+    def run(*args):
+        raise GitError("照会に失敗")
+
+    monkeypatch.setattr(units_flow, "Git", lambda path: SimpleNamespace(run=run))
+    sprint = plan_runs.SprintPlan(convert=lambda *args: pytest.fail("変換しない"))
+
+    routed = units_flow.by_units(StageRun("plan", "impl", {"issues": [3]}, (), "s", "i", sprint=sprint), tmp_path)
+
+    with pytest.raises(GitError) as raised:
+        units_flow.read_start(None, "origin", SPRINT, [3], sprint, routed.peeked)
+    assert raised.value is routed.peeked
 
 
 def test_units_seen_at_the_fetch_url_but_not_at_the_destination_stop():

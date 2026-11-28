@@ -533,7 +533,7 @@ def _lineup_reusable(run: StageRun, cwd: Path, held: Mapping[str, Any]) -> bool:
     """保存した並びを使い直せるか。変換するスプリントの単位の並びは、変換の記録と今の単位のファイルが合うときだけ使う。"""
     sprint = run.sprint
     if sprint is None or sprint.reusable is None or held["route"] != "units":
-        return True
+        return run.peeked is None or held["route"] == "units"  # 経路の判定が取得した回は、単位に分けない記録を使わない
     return sprint.reusable(_work_location(run, cwd), str(held["source"]) if "source" in held else "")
 
 

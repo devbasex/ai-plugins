@@ -29,7 +29,7 @@ from dataclasses import replace
 from graphlib import TopologicalSorter
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional, Union
 
 from ndf.adapters import github, github_merge, github_pulls
 from ndf.adapters.git import HEADS, Completed, Git, GitError, mask_urls
@@ -742,8 +742,8 @@ def by_units(run: StageRun, location: Path) -> Optional[StageRun]:
     渡す（#3702 の決定 10）。
 
     作業場所の実装計画に欄が無ければ、取得の URL を確かめてから今いるブランチを取得し、取得先の実装計画も読む。読んだ結果は
-    返す呼び出しに持たせ、開始前の確かめは取得し直さない。確かめか取得に失敗した場合も呼び出しを返し、開始前の確かめに理由を
-    返して止めさせる（欄が無いと確かめずに、課題全体の実装を流さない）。
+    返す呼び出しに持たせ、開始前の確かめは取得し直さない。確かめ・取得・読み取りに失敗した場合は、失敗を持たせた呼び出しを
+    返し、開始前の確かめがそれを上げて止まる（欄が無いと確かめずに、課題全体の実装を流さない）。
     """
     if run.per_unit or run.sprint is None or run.sprint.convert is None:
         return run if run.per_unit else None
@@ -758,13 +758,12 @@ def by_units(run: StageRun, location: Path) -> Optional[StageRun]:
         branch = g.run("branch", "--show-current").strip()
         if branch == "":
             return None
+        remote = g.remote()
         if run.sprint.verify_fetch is not None:
-            run.sprint.verify_fetch(g)
-        peeked = peek(g, g.remote(), branch, issues, here)
-    except UnitsStopped:
-        return run
-    except GitError:  # noqa: NDF401 外部コマンド: 読めない作業場所は、単位に分けない経路が理由を返す
-        return None
+            run.sprint.verify_fetch(g, remote)
+        peeked = peek(g, remote, branch, issues, here)
+    except (UnitsStopped, GitError) as exc:
+        return replace(run, peeked=exc)
     return replace(run, peeked=peeked) if peeked.at_tip.has_headings() else None
 
 
@@ -774,15 +773,17 @@ def read_start(
     branch: Optional[str],
     issues: Sequence[int],
     sprint: SprintPlan,
-    peeked: Optional[Peeked] = None,
+    peeked: Union[Peeked, Exception, None] = None,
 ) -> Start:
     """作業場所が今いるブランチの、手元と取得先の HEAD を読む。各コミットは 1 度だけ読む。
 
-    取得はリモート名で行う。経路の判定が取得していれば（`peeked`）取得し直さない。変換しうるスプリント（`sprint.destination`
+    取得はリモート名で行う。経路の判定が取得していれば（`peeked`）取得し直さず、判定が失敗していればその失敗を上げる。変換しうるスプリント（`sprint.destination`
     がある）は、取得の前に取得の URL を確かめ、単位の欄が見つかったときだけ、確かめた送り先の URL から HEAD を読む。
     手元に欄があればリモート名では取得せず、取得先にだけあれば送り先の HEAD で読み直す。送り先から単位の欄のある実装計画を
     読めなければ止める。変換しないスプリントは送り先を使わないので、取得と push で認証の経路が違っても止まらない。
     """
+    if isinstance(peeked, Exception):
+        raise peeked
     destination = sprint.destination
     local_headings = False
     if peeked is None:
@@ -792,7 +793,7 @@ def read_start(
             peeked = Peeked("HEAD", None, here, here)
         else:
             if branch is not None and sprint.verify_fetch is not None:
-                sprint.verify_fetch(g)
+                sprint.verify_fetch(g, remote)
             peeked = peek(g, remote, branch, issues, here)
     head, tip, at_head, at_tip = peeked
     checked_to = None
