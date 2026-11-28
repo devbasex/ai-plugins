@@ -534,9 +534,8 @@ def _post_report(
         raise ReportFailed(f"PR #{ref.current_pr} へ cross-review の記録を書けなかった: {type(exc).__name__}: {exc}") from exc
 
 
-def _filing_target(data: Mapping[str, Any], filer: Filer) -> tuple[Optional[str], Optional[str]]:
+def _filing_target(data: Mapping[str, Any], main: Optional[Path]) -> tuple[Optional[str], Optional[str]]:
     """起票先の設定の値と、起票を見送る理由（見送らないか、GitHub にしないと設定していれば None）。GitHub は呼ばない。"""
-    main = filer.locate()
     primary, note = leftover.primary_of(main)
     if primary == leftover.GITHUB and main is not None:
         # 別のリポジトリの設定で起票を許可しない（許可する設定と起票先を同じリポジトリにする）
@@ -549,18 +548,22 @@ def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: 
     rows = leftover.candidates(data) if hub.leftovers is not None else []
     if not rows:
         return []
+    # 起票の前提は、公開のロックの待ちとスレッドの同期の後に読む。公開し直すかの判定の結果は使い回さない
+    main = filer.locate()
+    primary, note = _filing_target(data, main)
+    if primary != leftover.GITHUB or note is not None:
+        # 見送るときは元の PR のロックを取らない（取れなくても記録のコメントを書く）
+        leftover.defer(data, rows, note)
+        # 記録のコメントを書けずに止まっても、打ち直しが起票を試みるように残す
+        store.write_object(ref.path, data)
+        return [note] if note else []
+    data.pop(leftover.SKIPPED, None)
     origin = hub.publishing(ref.origin_pr) if ref.origin_pr != ref.current_pr else contextlib.nullcontext()
     with origin:
-        # 起票の許可は、ロックの待ちとスレッドの同期の後、書く直前に読む。公開し直すかの判定の結果は使い回さない
-        primary, note = _filing_target(data, filer)
-        if primary != leftover.GITHUB or note is not None:
-            leftover.defer(data, rows, note)
-            # 記録のコメントを書けずに止まっても、打ち直しが起票を試みるように残す
-            store.write_object(ref.path, data)
-            return [note] if note else []
-        data.pop(leftover.SKIPPED, None)
         save = lambda: store.write_object(ref.path, data)  # noqa: E731
-        filed = leftover.file_issues(data, ref, hub.leftovers(ref.current_pr), save, primary, manual=filer.manual)
+        # ロックの待ちと GitHub の照合の間に許可が取り消されうるので、書く直前に読み直す
+        declared = lambda: leftover.primary_of(main)  # noqa: E731
+        filed = leftover.file_issues(data, ref, hub.leftovers(ref.current_pr), save, primary, manual=filer.manual, declared=declared)
     return filed
 
 
@@ -738,15 +741,20 @@ def _report(
     skipped = None
     published = got.reused and isinstance(previous, str) and data.get(report_decide.PUBLISHED_KEY) == now
     # 起票に失敗するか起票を見送った指摘があれば、同じ状態でも公開し直して起票を打ち直す。今も同じ理由か同じ設定
-    # （起票先が GitHub でない）で見送るだけなら、公開済みの記録を使う。起票先の確認は見送った後だけにする
-    # （ほかは公開の中で確認する。#3780）
+    # （起票先が GitHub でない）で見送るだけなら、公開済みの記録を使う。リモートの照合は、起票先の設定が github で、
+    # 前回の見送りが設定によるものでないときだけにする（ほかは公開の中で確認する。#3780）
     if published and (rows := leftover.candidates(data)):
         if leftover.SKIPPED not in data:
             published = not any(leftover_decide.Filed.ERROR in row for row in rows)
         else:
             skipped = data[leftover.SKIPPED]
-            primary, note = _filing_target(data, filer)
-            published = note == skipped and (note is not None or primary != leftover.GITHUB)
+            main = filer.locate()
+            primary, note = leftover.primary_of(main)
+            if primary != leftover.GITHUB:
+                published = note == skipped
+            else:
+                # 設定が変わって起票できるようになった打ち直しは、照合せずに公開し直す
+                published = skipped not in (None, leftover.UNDECLARED) and _filing_target(data, main)[1] == skipped
     if published:
         items.append({"kind": "comment", "number": cfg.pr, "url": previous})
         return items, warnings + ([skipped] if skipped else [])

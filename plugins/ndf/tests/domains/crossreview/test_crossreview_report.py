@@ -701,6 +701,8 @@ def test_issue_3780_a_rerun_checks_the_target_once_and_reuses_the_comment_while_
     (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"issues": {"primary": "github"}}), encoding="utf-8")
     github.fail[("POST", "repos/o/r/issues")] = 422
     rerun()
+    # 未設定から github への変更は照合せずに公開し直し、リモートの照合は起票の前の 1 回だけ
+    assert checked == ["target"]
     checked.clear()
     rerun()
     assert checked == ["target"] and len(hub.comments) == 3 and len(github.issues) == 1
@@ -735,23 +737,52 @@ def test_issue_3780_a_rerun_files_after_the_skip_is_resolved(tmp_path: Path, mon
     assert len(hub.comments) == 2 and len(github.issues) == 1
 
 
-def test_issue_3780_2_filing_reads_the_settings_after_the_threads_are_synced(
-    repos: Repos, tmp_path: Path, capsys, monkeypatch, hub
-) -> None:
+@pytest.mark.parametrize("during", ["sync", "comments", "post"])
+def test_issue_3780_2_filing_stops_when_the_settings_are_disabled_midway(tmp_path: Path, monkeypatch, hub, during: str) -> None:
     from ndf.domains.crossreview import cli
 
-    github = _filing(monkeypatch, hub, repos)
-    sync = cli.threads.sync
+    github = FakeGitHub()
+    port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
+    hub.leftovers, hub.clean = lambda pr: port, list
+    monkeypatch.setattr(cli.leftover, "unconfirmed_target", lambda *a: None)
+    (tmp_path / ".ndf").mkdir()
+    settings_file = tmp_path / ".ndf" / "project.json"
+    settings_file.write_text(json.dumps({"issues": {"primary": "github"}}), encoding="utf-8")
+    # スレッドの同期・起票の記録の読み取り・起票の記録の書き込みのどれかの間に、起票を無効にする
+    owner = cli.threads if during == "sync" else port
+    call = getattr(owner, during)
 
-    def disable_while_syncing(*args):
-        (repos.main / ".ndf" / "project.json").write_text(json.dumps({"issues": {"primary": "markdown"}}), encoding="utf-8")
-        return sync(*args)
+    def disable(*args):
+        settings_file.write_text(json.dumps({"issues": {"primary": "markdown"}}), encoding="utf-8")
+        return call(*args)
 
-    monkeypatch.setattr(cli.threads, "sync", disable_while_syncing)
-    state_dir = tmp_path / "st"
-    store.write_object(state_dir / store.STATE_NAME.format(pr=7), _left_state())
-    _report_of(state_dir, capsys)
-    assert github.calls == []
+    monkeypatch.setattr(owner, during, disable)
+    path = tmp_path / "st" / store.STATE_NAME.format(pr=7)
+    store.write_object(path, _left_state())
+    cfg = types.SimpleNamespace(state_dir=path.parent, pr=7, main=tmp_path)
+    got = types.SimpleNamespace(review=types.SimpleNamespace(findings=[], final=fin.CONVERGED), warnings=[], reused=False)
+    cli._report(cfg, got, lambda: cli.HUB(None, "o/r", tmp_path))
+    state = store.read_object(path)
+    assert github.issues == [] and len(github.records) == (1 if during == "post" else 0)
+    assert state["issue_skipped"] is None and "issue_error" not in state["findings"][0] and len(hub.comments) == 1
+
+
+def test_filing_skipped_after_a_rewind_takes_no_lock_of_the_origin_pr(tmp_path: Path, monkeypatch, hub) -> None:
+    from ndf.domains.crossreview import cli
+
+    hub.leftovers, hub.clean = lambda pr: pytest.fail("起票の口を作った"), list
+    locked: list[int] = []
+
+    @contextlib.contextmanager
+    def lock(pr: int) -> Iterator[None]:
+        locked.append(pr)
+        yield
+
+    store.write_object(tmp_path / store.STATE_NAME.format(pr=7), {**_left_state(), "current_pr": 9})
+    monkeypatch.setattr(cli, "HUB", lambda *a: hub.make(*a)._replace(publishing=lock))
+    monkeypatch.setattr(cli, "_main_of_cwd", lambda: tmp_path)
+    assert cli.main(["report", "--state-dir", str(tmp_path), "--pr", "9"]) == 0
+    assert locked == [9] and len(hub.comments) == 1
 
 
 def test_filing_after_a_rewind_also_takes_the_lock_of_the_origin_pr(repos: Repos, tmp_path: Path, capsys, monkeypatch, hub) -> None:
