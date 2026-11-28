@@ -33,8 +33,7 @@ plugins/ndf/
 | `src/ndf/core/worker.py` | 変更 | worker の規則文を組む | `writing`・`worker_kinds` | `worker` | `system_prompt`（変更） |
 | `src/ndf/core/issue_docs.py` | 変更 | 課題の文書の名前の形を持つ | — | `issue_docs` | `requirements_issues`（新設） |
 | `src/ndf/domains/docrebuild/drive.py` | 変更 | 要求仕様のコピーの名前を `issue_docs` から読む | `issue_docs` | `drive` | `requirements_of`（参照先の定数だけ変える） |
-| `src/ndf/domains/records/requirements_copy.py` | 新設 | 要求仕様のコピーのうち直してよいセクションを決める | `adapters.markdown`・`adapters.github`・`issue_docs` | `requirements_copy` | `editable_sections`・`editable_of`・`recorded`・`unchanged_outside`・`all_outside`（新設） |
-| `src/ndf/domains/docrebuild/cli.py` | 変更 | 直してよいセクションを返すサブコマンドを持つ | `requirements_copy` | `cli` | `editable`（新設） |
+| `src/ndf/domains/records/requirements_copy.py` | 新設 | 要求仕様のコピーのうち直してよいセクションを決める | `adapters.markdown`・`adapters.github`・`issue_docs` | `requirements_copy` | `editable_sections`・`editable_of`・`unchanged_outside`・`all_outside`（新設） |
 | `src/ndf/domains/docrebuild/gate.py` | 変更 | 決まったセクションだけを直させ、ほかの範囲の変更を push せずに止める | `requirements_copy` | `gate` | `_allow_fix`・`_outside_sections`・`_only_protected_remain`（新設） |
 | `contracts/data/review-criteria.json` | 変更 | 修正担当へ足す扱いの文を持つ | — | — | — |
 | `src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 指摘の基準の文を表から読む | 表 | `criteria_decide` | `fixer_requirements_copy`（新設） |
@@ -227,11 +226,13 @@ cross-review では、修正担当が扱いの文のとおりに動いたかを�
 | `RunConfig.repo_arg` | 引数 `--repo` の値 | `domains/crossreview/settings.py` | 無し |
 | `document.requirements_copy` | 修正担当へ足す文 | `contracts/data/review-criteria.json` | — |
 
+`_Run.distinction` と `_Run.requirements_copies` はラウンドごとに決め直し、状態ファイルへは書かない（`documents` と同じ）。
+
 `document.requirements_copy` の文には、要求仕様のコピー（`issues/issue-<番号>-requirements.md`）への指摘の扱いを書く。`summary` にもこのキーの説明を足す。
 
 #### 直してよい範囲の判定
 
-直してよい範囲は `domains/records/requirements_copy.py` だけが決め、AI には判定させない。修正担当への指示、承認の前の確認、`ndf document-rebuild editable` の 3 つがこの判定を使う。
+直してよい範囲は `domains/records/requirements_copy.py` だけが決め、AI には判定させない。修正担当への指示と承認の前の確認の 2 つがこの判定を使う。
 
 1. 課題の本文を読む。`## 進行` より前（`## 進行` が無ければ全文）を、下では「要求の範囲」と呼ぶ
 2. コピーの `## ` の見出しのうち、要求の範囲に無いものを候補にする。候補が無いか、要求の範囲の見出しがコピーにそろっていなければ、直してよいものは無い
@@ -252,14 +253,11 @@ GitHub の説明では、版の `diff` は編集の要約である。実際の�
 | 経路 | 判定する時点 | 読むリポジトリ | 範囲の外を変えた場合 |
 | --- | --- | --- | --- |
 | cross-review の修正担当 | 指摘がコピーに向くときに、指示を組むプログラムが判定し、結果を指示の文に入れる | `--repo`、状態ファイル、作業場所のリモートの順で決める。決められなければ直してよいものは無い | 検出しない |
-| 承認の前の確認の worker | 直す指摘があるときに `ndf document-rebuild editable --file <コピー> --record <ファイル>` を打つ | 作業場所のリモート | — |
-| `ndf document-rebuild gate` | worker がコピーを変えたときと、1 回の不合格で終えたときだけ確かめる。worker が書き残した判定があれば使い、無ければ判定する | PR のリポジトリ | push せずに止める |
+| `ndf document-rebuild gate`（承認の前の確認） | コピーを直してよいファイルに入れるときに、worker の起動の前に判定し、結果を起動指示に書く | PR のリポジトリ | push せずに止める |
 
-`gate` は、見出しの並びが同じで、直してよいセクションの外の中身が同じことを確かめる。コピーを 1 回の不合格で終えてよいのは、残った文の引用がすべて直してよい範囲の外にあるときだけである。直してよいセクションでも、`## ` の見出しの行は範囲の外に数える。
+`gate` は、見出しの並びが同じで、直してよいセクションの外の中身と、直してよいセクションの見出しの行が同じことを確かめる。コピーを 1 回の不合格で終えてよいのは、残った文の引用がすべて直してよい範囲の外にあるときだけである。直してよいセクションでも、`## ` の見出しの行は範囲の外に数える。
 
-worker と `gate` が別々に課題を読むと、読む間に本文が変わった場合に判定が食い違い、読み取りの回数も増える。そこで `editable` は、判定を、読んだリポジトリと直す前のコピーのハッシュと一緒に、`gate` の状態の置き場のファイルへ書き残す。`gate` は、リポジトリが PR のリポジトリと同じで、コピーが起動の前の中身と同じ場合だけ、この判定を使う。それ以外は自分で判定する。前の実行の記録は、worker を起動する前に消す。
-
-2 つの値はラウンドごとに決め直し、状態ファイルへは書かない（`documents` と同じ）。
+`gate` が worker の起動の前に判定するのは、直す側の worker が判定を書き換えられないようにするためである。判定はファイルに書き残さず、`gate` が持つ同じ値を、起動指示と worker の後の確かめの両方に使う。そのため、指摘が無くて直さない場合も、直してよいファイルに入れたコピー 1 件につき、本文の読み取りが 1 回、候補があれば編集履歴の読み取りが 1 回かかる。
 
 ### ログと記録の出力
 

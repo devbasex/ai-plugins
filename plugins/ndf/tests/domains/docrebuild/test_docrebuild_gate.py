@@ -19,7 +19,7 @@ import pytest
 from ndf.adapters import git
 from ndf.adapters import publish, run_log
 from ndf.domains.docrebuild import cli, gate, gate_decide
-from ndf.domains.records import reading, requirements_copy
+from ndf.domains.records import reading
 from ndf.domains.records import reading_decide as rd
 
 REPO = "o/r"
@@ -814,32 +814,36 @@ COPY_TEXT = "## 目的\n\n要求。\n\n## 実装計画\n\n計画。\n"
 
 
 @pytest.mark.parametrize(
-    ("past", "edit", "status", "reads"),
+    ("past", "edit", "status"),
     [
-        ([], None, "ok", (0, 0)),
-        ([], ("計画。", "直した計画。"), "ok", (1, 1)),
-        ([], ("要求。", "直した要求。"), "incomplete", (1, 1)),
-        ([], ("要求。", "## 実装計画\n\n要求。"), "incomplete", (1, 1)),
-        (["## 目的\n\n## 実装計画\n", "## 目的\n"], ("計画。", "直した計画。"), "incomplete", (1, 1)),
-        (["見出しを 1 つ消した"], ("計画。", "直した計画。"), "incomplete", (1, 1)),
+        ([], None, "ok"),
+        ([], ("計画。", "直した計画。"), "ok"),
+        ([], ("要求。", "直した要求。"), "incomplete"),
+        ([], ("要求。", "## 実装計画\n\n要求。"), "incomplete"),
+        ([], ("## 実装計画", "## 実装計画 ##"), "incomplete"),
+        (["## 目的\n\n## 実装計画\n", "## 目的\n"], ("計画。", "直した計画。"), "incomplete"),
+        (["見出しを 1 つ消した"], ("計画。", "直した計画。"), "incomplete"),
     ],
 )
 def test_only_sections_added_to_the_requirements_copy_are_fixed(
-    tmp_path: Path, past: list[str], edit: Optional[tuple[str, str]], status: str, reads: tuple[int, int]
+    tmp_path: Path, past: list[str], edit: Optional[tuple[str, str]], status: str
 ) -> None:
     """#4543: 直せるのはコピーにだけあるセクションの中だけ。写した範囲・同じ名前のセクションの新設・本文から消したセクション・
-    版の全文でない編集履歴は push せずに止める。直しが無ければ課題を読まない。"""
+    版の全文でない編集履歴・見出しの行の書き替えは push せずに止める。課題の読み取りは 1 回で、起動指示に直してよい見出しを書く。"""
     w = world(tmp_path, {COPY: COPY_TEXT})
     w.hub.past = past
 
     def fix(state_dir: Path) -> None:
+        assert w.hub.body_reads == 1  # 直してよい範囲は worker の起動の前に決まる
         if edit is not None:
             (w.cwd / COPY).write_text(COPY_TEXT.replace(*edit), encoding="utf-8")
 
-    got = w.run(FakeWorker(edit=fix))
+    worker = FakeWorker(edit=fix)
+    got = w.run(worker)
     assert (got["status"] if status == "ok" else got["cause"]["kind"]) == status, got
     assert len(w.git.pushed) == (1 if status == "ok" and edit else 0)
-    assert (w.hub.body_reads, w.hub.history_reads) == reads
+    assert (w.hub.body_reads, w.hub.history_reads) == (1, 1)
+    assert ("「実装計画」" in worker.prompts[0]) == (not past)  # 本文に出たことのある見出しは、直してよいものに挙げない
 
 
 @pytest.mark.parametrize(("quote", "status"), [("要求。", "ok"), ("## 実装計画", "ok"), ("計画。", "incomplete")])
@@ -855,19 +859,6 @@ def test_one_failed_check_of_the_copy_ends_only_outside_the_editable_sections(tm
 
     got = world(tmp_path, {COPY: COPY_TEXT}).run(FakeWorker(once))
     assert (got["status"] if status == "ok" else got["cause"]["kind"]) == status, got
-
-
-def test_the_gate_checks_with_the_judgement_the_worker_recorded(tmp_path: Path) -> None:
-    """#4543: worker の `editable` が書き残した判定で確かめ、課題の本文と編集履歴を読み直さない。"""
-    w = world(tmp_path, {COPY: COPY_TEXT})
-
-    def fix(state_dir: Path) -> None:
-        requirements_copy.editable_of(lambda: w.hub, w.cwd, COPY, state_dir / f"editable-{COPY.replace('/', '__')}.json")  # type: ignore[arg-type,return-value]
-        (w.cwd / COPY).write_text(COPY_TEXT.replace("計画。", "直した計画。"), encoding="utf-8")
-
-    got = w.run(FakeWorker(edit=fix))
-    assert got["status"] == "ok", got
-    assert (w.hub.body_reads, w.hub.history_reads) == (1, 1)
 
 
 # --- ndf records reading check の突き合わせ（Task 7、条件 6・7） ---------------------------------------------------

@@ -12,11 +12,7 @@
 - `gate`: 承認ゲートの 1 つ前に打つ（#4446）。決まった形の質問・承認資料・前に読ませた後で変わった文書の部分を読み手役に
   読ませ、質問を止める hook が見る記録へ残す。PR の題と本文は書き換えない
 
-    ndf document-rebuild editable --file <issues/issue-<番号>-requirements.md> [--record <ファイル>]
-
-- `editable`: 要求仕様のコピーのうち直してよい `## ` の見出しを `metrics.editable` に返す（#4543。gate の worker が直す前に打つ）。`--record` へは、判定を対象のリポジトリと読んだコピーにひも付けて書き残す（gate が確かめに使う）
-
-結果 JSON を `--out`（`editable` は無し）と標準出力の最後の 1 行へ同じ形で書く。形が違えば両方とも `stopped`（invalid）に差し替える。
+結果 JSON を `--out` と標準出力の最後の 1 行へ同じ形で書く。形が違えば両方とも `stopped`（invalid）に差し替える。
 """
 
 from __future__ import annotations
@@ -35,9 +31,9 @@ from ndf import cli, contracts, identity
 from ndf.contracts import causes, result
 from ndf.core import route, start_point
 from ndf.core.plan import files
-from ndf.adapters import git, github
+from ndf.adapters import github
 from ndf.domains.docrebuild import drive, gate, select_decide
-from ndf.domains.records import reading, requirements_copy
+from ndf.domains.records import reading
 from ndf.progress import invoke
 
 TOOL = cli.tool_of(__name__)
@@ -70,9 +66,6 @@ def _parser() -> argparse.ArgumentParser:
     g.add_argument("--no-doc-fix", action="store_true", help="文書を直させず、残った文として承認資料に書かせる")
     g.add_argument("--state-dir", required=True, help="起動指示・承認資料の作業用のコピー・worker の結果ファイルの保存先")
     g.add_argument("--out", required=True, help="結果 JSON を書くファイル")
-    e = sub.add_parser("editable", help="要求仕様のコピーのうち直してよい見出しを返す")
-    e.add_argument("--file", required=True, help="要求仕様のコピーのパス（作業場所からの相対）")
-    e.add_argument("--record", help="判定を書き残すファイル（gate の起動指示が渡す）")
     return p
 
 
@@ -144,18 +137,7 @@ def _form(cwd: Path) -> Optional[str]:
         raise gate.Precondition(str(exc)) from None
 
 
-def _editable(path: str, record: Optional[str]) -> dict[str, Any]:
-    cwd = Path.cwd()
-    g = git.Git(cwd)
-    found = sorted(
-        requirements_copy.editable_of(lambda: _github_of(g.remote_repo(g.remote())), cwd, path, cwd / record if record else None)
-    )
-    return result.result(TOOL, result.OK, f"直してよいセクションは {len(found)} 件", metrics={"editable": found})
-
-
 def _act(a: argparse.Namespace) -> dict[str, Any]:
-    if a.action == "editable":
-        return _editable(a.file, a.record)
     if a.action == "run":
         return drive.drive(_run_args(a))
     try:
@@ -175,8 +157,6 @@ def main(argv: list[str]) -> int:
     except Exception as exc:  # noqa: BLE001 外部コマンド: worker の起動の想定外の失敗も結果 JSON にして --out と標準出力へ書く
         got = result.stopped(TOOL, "unknown", f"想定外の例外: {type(exc).__name__}: {exc}")
     out, code = adopt(got)
-    if a.action == "editable":
-        return result.emit(out, code)
     try:
         files.write_json(Path(a.out), out)
     except OSError as exc:

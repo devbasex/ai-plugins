@@ -314,7 +314,7 @@ graph TD
 | `plugins/ndf/src/ndf/core/worker.py` と `plugins/ndf/contracts/worker/kinds.json` | 決定 6 の表の「渡すとき」の 4 つの作業の定義にだけ、小見出しを渡す値を持たせる。ほかの作業へ渡す全文からは外す | 6 |
 | `plugins/ndf/src/ndf/core/issue_docs.py` と `plugins/ndf/src/ndf/domains/docrebuild/drive.py` | 要求仕様のコピーの名前の形を `issue_docs.py` に置く。`drive.py` の `REQUIREMENTS_FILE` は定義をやめ、`issue_docs.py` の定義を参照する | 6 |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py`・`fixer.py` | 変更に設計書も要求仕様のコピーも無ければ、文書の基準の全文から小見出しを外す。変更に要求仕様のコピーがあれば、修正担当への指示に決定 7 の扱いを足す | 6・7 |
-| `plugins/ndf/src/ndf/domains/records/requirements_copy.py`（新設）と `plugins/ndf/src/ndf/domains/docrebuild/` の `gate.py`・`cli.py` | 要求仕様のコピーの直してよい範囲を 1 か所で判定し、承認の前の確認はその範囲だけを直させる。worker 向けに `ndf document-rebuild editable` を足す | 7 |
+| `plugins/ndf/src/ndf/domains/records/requirements_copy.py`（新設）と `plugins/ndf/src/ndf/domains/docrebuild/` の `gate.py` | 要求仕様のコピーの直してよい範囲を 1 か所で判定し、承認の前の確認はその範囲だけを直させる | 7 |
 | `plugins/ndf/contracts/data/review-criteria.json` と `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 修正担当へ足す、要求仕様のコピーへの指摘の扱いの文を JSON に置き、`criteria_decide.py` がそれを読む | 7 |
 | `plugins/ndf/skills/document-rebuild/SKILL.md` | `prompt` の JSON の説明に、変更履歴と、現状か案の片方だけを扱い概要欄・承認資料・質問を含まない文書では `distinction` を `false` にすると足す | 6 |
 | `plugins/ndf/skills/design/references/design-template.md` | 「承認する人が読む欄」のセクションに「要約の段落と解き方の全体像は書き分けの小見出しに従って書く」という指示を足し、その小見出しを指す。テンプレート本体のコードブロックにある「解き方の全体像」の説明は、「この設計では〜」と分かる形で書くように直す。`legacy-refactor` の「目的」「目指す姿」にも同じ指示を足す | 1 |
