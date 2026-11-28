@@ -48,6 +48,9 @@ class FakeChild:
     def write(self, data):
         self.written.append(data)
 
+    def setwinsize(self, rows, cols):
+        pass
+
     def terminate(self, force=False):
         self.alive, self.exitstatus = False, -9
         return True
