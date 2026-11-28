@@ -194,13 +194,17 @@ def _points_at(approvals: frozenset[str], row: MergeRow) -> bool:
     return not approvals.isdisjoint((row.record_id, row.url))
 
 
-def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer) -> bool:
+def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer, *, by_answer: bool = False) -> bool:
     """同じ `record_id` の証跡が無ければ投稿して真、あれば投稿せずに偽（送り直しで重ならない）。値が不正なら `TrailError`。
+
+    `by_answer`（工程の承認ゲート）は、同じ `record_id` の最新の行の回答と対象も同じときだけ書かない。承認を投稿した後に
+    回答の確定が失敗した提示へ却下すると、識別子が同じでも却下の行を足して先の承認を取り消すためである。
 
     `viewer` のアカウント ID が読めていなければ、重なりを確かめられないので投稿せずに `TrailError`（`merge_rows` が投げる）。"""
     if row.answer not in ANSWERS or row.by not in BY_CHOICES:
         raise TrailError(f"#{row.target.number} の証跡の回答 {row.answer!r}・担い手 {row.by!r} を書けない")
-    if any(r.record_id == row.record_id for r in merge_rows(hub, row.target.number, viewer)):
+    held = [r for r in merge_rows(hub, row.target.number, viewer) if r.record_id == row.record_id]
+    if held and (not by_answer or (held[-1].answer == row.answer and held[-1].target.same(row.target))):
         return False
     Publisher(hub).comment(row.target.number, render_merge_row(row))
     return True

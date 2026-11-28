@@ -155,13 +155,15 @@ def revocations(since: Mapping[str, Sequence[model.Event]], machine_id: str, nam
 
 
 def _unrecorded(rows: Sequence[model.Event]) -> list[tuple[merge_approval.MergeTarget, str]]:
-    """工程の事象の列で、証跡の投稿を試みて回答が記録されていない承認の対象と記録の識別子（古い順）。
+    """工程の事象の列で、証跡の投稿を試みて承認の回答が記録されていない承認の対象と記録の識別子（古い順）。
+
+    同じ提示への却下や変更要求が記録されても、投稿した承認は確定していないので数え続ける。
 
     回答は証跡を投稿した後の DB の確定に失敗しうるので、投稿の前の記録（`APPROVAL_POSTING`）から指す。直近の承認の境界より
     前の記録は数えない（境界へ移るときに取り消してある）。"""
     cut = max((ev.seq for ev in rows if ends_approvals(ev)), default=0)
     answered = (event_payload(ev) for ev in rows if ev.draft.kind == ANSWERED)
-    recorded = {_record_of(p) for p in answered}
+    recorded = {_record_of(p) for p in answered if p.get("answer") == invoke.APPROVED}
     posted = (event_payload(ev) for ev in rows if ev.seq > cut and ev.draft.kind == APPROVAL_POSTING)
     return [(merge_approval.MergeTarget(*p["target"]), p["record"]) for p in posted if p["record"] not in recorded]
 

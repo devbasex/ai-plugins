@@ -384,7 +384,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `write_merge_row` | `core/merge_approval.py` | 変更 | `(hub, row: MergeRow, viewer, *, latest_only: bool = False) -> bool` | `latest_only`（DB に無い新しい回答）では、対象の最新の行の識別子と回答が同じときだけ書かない。偽（記録済みの回答の送り直しと `ndf ci answer`）では、識別子・回答・対象が同じ行が 1 件でもあれば書かない |
 
 - `answer`
-  - 副作用: PR の証跡 1 件、リクエストのファイルの削除、事象の追記（1 トランザクション）、`gate-rejections`、進み具合の表
+  - 副作用: PR の証跡 1 件、リクエストのファイルの削除、事象の追記（1 トランザクション。本番へ反映される承認だけは、証跡の投稿前の記録を先に別のトランザクションで確定する）、`gate-rejections`、進み具合の表
 - 開き直しを起こす回答は、却下の証跡の後に `revoke_approvals` を呼ぶ
 
 ### 異常系の処理

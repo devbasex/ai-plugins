@@ -118,7 +118,7 @@ def github_post(cwd: Path, hub: Optional[Callable[[], GitHub]] = None) -> Post:
     def post(row: merge_approval.MergeRow) -> bool:
         made = get_hub()
         try:
-            return merge_approval.write_merge_row(made, row, made.viewer())
+            return merge_approval.write_merge_row(made, row, made.viewer(), by_answer=True)
         except merge_approval.TrailError as exc:
             raise model.Refused(f"マージの承認の証跡を書けないので、回答を記録しない: {exc}") from None
 
@@ -264,28 +264,75 @@ def _relayed_by_organizer(conn: Any, q: Question, a: Answer) -> bool:
     return ORGANIZER_ANSWERS.get(str(reply.get("result"))) == a.value
 
 
-def _post_trail(q: Question, a: Answer, seen: Target, by: str, post: Post) -> None:
-    """照らした承認の対象と提示ごとの識別子（`presented_id`）で証跡の行を作り、`post` で書く。
+def _post_trail(q: Question, a: Answer, seen: Target, by: Optional[str], post: Post) -> None:
+    """照らした承認の対象と提示ごとの識別子（`presented_id`）で証跡の行を作り、`post` で書く。担い手 `by` が無ければ書かない。
 
     同じ提示への送り直しだけが重なりとして書かれない。資料を出し直した後の回答は、出し直す前の提示の証跡があっても書く。"""
     target = seen.binding()
-    if target is None or a.value not in _TRAIL_ANSWERS:
+    if by is None or target is None or a.value not in _TRAIL_ANSWERS:
         return
     record = presented_id(replace(q, target=seen))
     post(merge_approval.MergeRow(_TRAIL_ANSWERS[a.value], by, target, seen.production is True, record))
 
 
-def _note_posting(st: store.Store, v: run.View, q: Question, a: Answer, seen: Target) -> run.View:
-    """本番へ反映される承認は、証跡を投稿する前に事象へ記録して確定する（`approval_decide.stage_revocations` が読む）。
-    事象を足した後の `View` を返す。ステートマシンの DB に置くので、別の保存先から開いた操作も読める。"""
+def _note_posting(conn: Any, v: run.View, q: Question, a: Answer, seen: Target) -> Optional[int]:
+    """本番へ反映される承認は、証跡を投稿する前に事象へ記録する（`approval_decide.stage_revocations` が読む）。
+    追記した事象の番号を返し、ほかの回答は何も書かずに None。呼び手は証跡を投稿する前にトランザクションを確定する。"""
     target = seen.binding()
     if target is None or a.value != run.APPROVED or not seen.production:
-        return v
+        return None
     payload = {"target": list(target), "record": presented_id(replace(q, target=seen))}
     draft = model.EventDraft(APPROVAL_POSTING, run.CONDUCTOR, q.stage, payload=payload, rev=v.rev)
-    with store.transaction(st) as conn:
-        store.append_events(conn, v.machine_id, [draft], v.events[-1].seq)
-        return run.view(conn, v.machine_id)
+    return store.append_events(conn, v.machine_id, [draft], v.events[-1].seq)[-1]
+
+
+@dataclass(frozen=True)
+class _Checked:
+    """確かめを通った回答。`closes` は手で終えたデプロイの工程を閉じるだけの確認か。"""
+
+    q: Question
+    a: Answer
+    seen: Target
+    text: Optional[str]
+    closes: bool
+
+
+def _check_answer(conn: Any, v: run.View, a: Answer, observe: Observe, root: Path, text: Optional[str]) -> tuple[_Checked, Optional[str]]:
+    """回答を受けられるかを確かめ、確かめを通った回答と証跡の担い手（証跡を書かないなら None）を返す。"""
+    q, seen = _refusal(v, a, observe, root)
+    # 以後の質問は照らした対象（提示した承認の対象）を持つ。リリースのリクエストと証跡の識別子を提示ごとに分ける
+    q = replace(q, target=seen)
+    by_hand = run.step_progress(v, q.stage).held_finish is not None
+    if by_hand:
+        _require_person(conn, q, a)
+    # 手で終えたデプロイの回答待ちへの回答は、工程を閉じる確認で、マージの事前の承認ではない
+    closes = by_hand and q.gate == RELEASE_GATE
+    by = _trail_by(conn, q, a, seen)
+    if closes and a.value == run.APPROVED:
+        by = None
+    return _Checked(q, a, seen, text, closes), by
+
+
+def _commit_answer(conn: Any, v: run.View, got: _Checked, last_seq: int) -> tuple[list[int], Optional[str]]:
+    """回答の事象と、それが運ぶ事象を追記し、番号と外した課題を入れた行を返す。`last_seq` の後に事象が増えていれば
+    `store.Conflict`。"""
+    q, a = got.q, got.a
+    carried = _carry(conn, v.machine_id, a.drop, a.reason)
+    rejected = _reject_release(conn, q, a)
+    extra = {
+        "gate_id": q.id,
+        "gate": q.gate,
+        "by": a.by,
+        "key": a.key,
+        "seen": got.seen.as_dict(),
+        "dropped": list(a.drop),
+        "carried_row": carried,
+        "release_request": rejected,
+        **({"closes_stage": True} if got.closes else {}),
+    }
+    draft = run.answer_draft(v, q.stage, a.value, a.reason, got.text, extra)
+    drafts = [draft, *_outputs(v, q, a), *_dropped(v, q, a.drop)]
+    return store.append_events(conn, v.machine_id, drafts, last_seq), carried
 
 
 def _require_person(conn: Any, q: Question, a: Answer) -> None:
@@ -322,36 +369,17 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
             held = _answered_with_key(v, a.key)
             if held is not None:
                 return _same(held, a, machine_id, lambda: _ensure_trail(conn, v, held, a, post))
-            q, seen = _refusal(v, a, observe, st.root)
-            # 以後の質問は照らした対象（提示した承認の対象）を持つ。リリースのリクエストと証跡の識別子を提示ごとに分ける
-            q = replace(q, target=seen)
-            by_hand = run.step_progress(v, q.stage).held_finish is not None
-            if by_hand:
-                _require_person(conn, q, a)
-            # 手で終えたデプロイの回答待ちへの回答は、工程を閉じる確認で、マージの事前の承認ではない
-            closes = by_hand and q.gate == RELEASE_GATE
-            by = _trail_by(conn, q, a, seen)
-        if by is not None and not (closes and a.value == run.APPROVED):
-            # 投稿前の記録は証跡の投稿より先に確定させる（投稿の後に止まっても、DB から取り消す承認を指せる）
-            v = _note_posting(st, v, q, a, seen)
-            _post_trail(q, a, seen, by, post)
-        with store.transaction(st) as conn:
-            carried = _carry(conn, machine_id, a.drop, a.reason)
-            rejected = _reject_release(conn, q, a)
-            extra = {
-                "gate_id": q.id,
-                "gate": q.gate,
-                "by": a.by,
-                "key": a.key,
-                "seen": seen.as_dict(),
-                "dropped": list(a.drop),
-                "carried_row": carried,
-                "release_request": rejected,
-                **({"closes_stage": True} if closes else {}),
-            }
-            draft = run.answer_draft(v, q.stage, a.value, a.reason, text, extra)
-            drafts = [draft, *_outputs(v, q, a), *_dropped(v, q, a.drop)]
-            seqs = store.append_events(conn, machine_id, drafts, v.events[-1].seq if v.events else 0)
+            got, by = _check_answer(conn, v, a, observe, st.root, text)
+            posting = _note_posting(conn, v, got.q, a, got.seen) if by is not None else None
+            if posting is None:
+                _post_trail(got.q, a, got.seen, by, post)
+                seqs, carried = _commit_answer(conn, v, got, v.events[-1].seq if v.events else 0)
+        if posting is not None:
+            # 投稿前の記録を確定してから投稿する（投稿の後に止まっても、DB から取り消す承認を指せる）
+            _post_trail(got.q, a, got.seen, by, post)
+            with store.transaction(st) as conn:
+                seqs, carried = _commit_answer(conn, v, got, posting)
+    q = got.q
     summary = f"工程 {q.stage} へ回答 {a.value} を書いた（{a.by}）。続きは ndf progress next で流す"
     metrics = {"machine_id": machine_id, "seqs": seqs, "gate_id": q.id, "carried_row": carried}
     out = result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", machine_id))

@@ -653,6 +653,22 @@ def test_an_unrecorded_approval_is_found_without_the_checkout_files(repo, st, en
     assert held.unconfirmed and held.target.number == DESIGN_PR
 
 
+def test_a_rejection_voids_an_approval_whose_answer_was_not_recorded(repo, st, env, capsys):
+    """同じ提示への却下は、投稿済みの未確定の承認を PR で取り消し、取り消し対象にも残す。"""
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+    shown = _next(st, tid, repo, env)
+    write = answering.github_post(repo, hub=lambda: env.hub)
+    _fail_answer(st, tid, repo, env, shown, write)
+
+    _answer(st, tid, repo, env, shown, "rejected", key="k-2", post=write)
+
+    target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
+    rows = merge_approval.merge_rows(env.hub, DESIGN_PR, env.hub.viewer())
+    assert merge_approval.merge_judgment(rows, target) is None
+    assert [r.unconfirmed for r in approval_decide.stage_revocations(run.read(st, tid), DESIGN)] == [True]
+
+
 @pytest.mark.parametrize("by", ["conductor", "service:bot"])
 def test_a_held_stage_is_approved_only_by_a_person(repo, st, env, capsys, by):
     """本番へ反映されないマージでも、手で終えた工程の承認は人の回答に限る。"""
