@@ -105,7 +105,7 @@ def _settle_resolved(run: CarryRun, left: Sequence[prior_decide.Thread], done: d
 def _keep_filed_urls(run: CarryRun) -> bool:
     """引き継いだ、直さずに残した指摘の起票の URL を状態に残す（起票の公開が Issue の目印で指摘と照らす。#3780）。増えたら真。"""
     held = store.list_of(run.data, leftover.CARRIED_URLS)
-    urls = list(dict.fromkeys([*held, *run.journal.filed_urls]))
+    urls = list(dict.fromkeys([*held, *(url for _, url in run.journal.filed)]))
     if urls == held:
         return False
     run.data[leftover.CARRIED_URLS] = urls

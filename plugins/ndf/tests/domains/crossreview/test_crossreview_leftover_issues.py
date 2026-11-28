@@ -485,11 +485,16 @@ def test_issue_3780_a_finding_no_longer_filed_still_gets_its_carried_issue_back(
     github = FakeGitHub()
     Run(github).go()
     url = github.issues[0]["html_url"]
-    again = Run(github, _row(protect=[]), _row("r2-2", text="別の指摘", protect=[]))
+    again = Run(github, _row(protect=[]), _row("r2-2", text="別の指摘", protect=[], issue_error="前の読み取りの失敗"))
     again.data[leftover.CARRIED_URLS] = [url]
     assert again.go() == [] and again.row[Filed.URL] == url
     other = again.data["findings"][1]
     assert Filed.URL not in other and Filed.ERROR not in other and github.created() == 1
+    # 指摘と引き継いだ URL の組が同じ間は照らし直さず、URL が増えれば照らし直す
+    calls = len(github.calls)
+    assert leftover.candidates(again.data) == [] and again.go() == [] and len(github.calls) == calls
+    again.data[leftover.CARRIED_URLS] = [url, f"{ISSUES}999"]
+    assert leftover.candidates(again.data) == [other]
 
 
 @pytest.mark.parametrize(("protect", "created"), [pytest.param(["user_data"], 1, id="filed-kind"), pytest.param([], 0, id="other-kind")])

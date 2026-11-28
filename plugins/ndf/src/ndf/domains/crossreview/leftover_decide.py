@@ -137,6 +137,8 @@ class Filed(StrEnum):
     ERROR = "issue_error"
     # 別の保存先から引き継いだ、まだ指す Issue を確かめていない URL
     PRIOR = "prior_issue"
+    # 起票しない行を引き継いだ URL と照らし、その指摘の Issue が無かったときの、指摘と URL の組の値
+    CHECKED = "issue_checked"
 
 
 class Listed(NamedTuple):

@@ -370,11 +370,9 @@ class FindingJournal:
         # 最後の `enter` で出た指摘の id、そのうち直した後に戻った指摘の id（`sort` が使う。#3780）
         self.raised_ids: list[str] = []
         self.returned: list[str] = []
-        # 前の実行が直さずに残して起票した指摘の、本文（`leftover_decide.normalized`）から Issue の URL（`carry` が読み、
-        # `sort` が残すときに、確かめる前の URL として行に書く。#3780）
-        self.filed: dict[str, str] = {}
-        # その起票の URL のすべて（伏せ字で同じ本文になった指摘は `filed` に 1 件しか残らないので、別に持つ。`carry` が読む）
-        self.filed_urls: list[str] = []
+        # 前の実行が直さずに残して起票した指摘の、本文（`leftover_decide.normalized`）と Issue の URL の組（`carry` が読み、
+        # `sort` が残すときに、確かめる前の URL として行に書く。伏せ字で同じ本文になった指摘の URL も落とさない。#3780）
+        self.filed: list[tuple[str, str]] = []
         # 最後の `enter` が `parked` を外して位置を置き換えた指摘と、その位置の候補（`sort` が投稿できる位置かを確かめる）
         self._moved: dict[str, list[dict[str, Any]]] = {}
         # 最後の `enter` で新しく出たか戻った指摘の id（`fresh` と違い、判定役へ渡さないものも含む）と、指摘ごとの出し直し、
@@ -543,6 +541,7 @@ class FindingJournal:
             if "line" in row and not leftover_decide.on_commentable_line(row, touched):
                 _move(row, _post_place(places, touched), self._round)
         parked: set[str] = set()
+        filed = dict(self.filed)
         for fid in self.raised_ids:
             row = self.rows[fid]
             if not self._sorts(fid):
@@ -550,7 +549,7 @@ class FindingJournal:
             passed = self.passed(fid, touched, unconfirmed=fid in unconfirmed)
             if not passed:
                 row[PARKED] = True
-                url = self.filed.get(leftover_decide.normalized(row["text"]))
+                url = filed.get(leftover_decide.normalized(row["text"]))
                 if url and not row.get(leftover_decide.Filed.URL):
                     # Issue が消されていることがあるので、起票の公開で確かめてから `issue` にする
                     row[leftover_decide.Filed.PRIOR] = url
@@ -659,7 +658,7 @@ class FindingJournal:
         だけをその行へ重ねる（`merge_marks`）。`items` は承認済みの MVV の項目、`mvv` はその識別子で、同じ MVV での判定だけを戻す。
 
         スレッドの無い指摘の id が本文の違う行と重なれば、空いている id で別の指摘として入れる（指摘と保護の種類を失わない）。
-        直さずに残した指摘（`parked`）は行にせず、起票の URL を `filed` と `filed_urls` に残す（#3780）。"""
+        直さずに残した指摘（`parked`）は行にせず、起票の URL を `filed` に残す（#3780）。"""
         added = []
         unknown = []
         self.merged = []
@@ -667,7 +666,7 @@ class FindingJournal:
         for c in carried:
             key = oscillation.finding_key(c.text)
             if c.parked and (url := c.issue or c.prior_issue):
-                self.filed_urls.append(url)
+                self.filed.append((leftover_decide.normalized(c.text), url))
             # スレッドの無い指摘の id（`p-<元の id>`）は別の保存先の違う指摘とも重なるので、同じ本文の行だけに判定を重ねる
             known = by_key.get(key) or (self.rows.get(c.id) if c.comment is not None else None)
             if known is not None:
@@ -676,8 +675,6 @@ class FindingJournal:
                     self.merged.append(str(known["id"]))
                 continue
             if c.parked:
-                if url := c.issue or c.prior_issue:
-                    self.filed[leftover_decide.normalized(c.text)] = url
                 continue
             fid = self._free_id(c.id)
             row = _journal_row(fid, 0, c.text, _text(c.by), key, _text(c.section))

@@ -506,7 +506,7 @@ def test_issue_3780_an_unconfirmed_url_is_published_and_restored_apart_from_a_co
     assert item["prior_issue"] == url and "issue" not in item
     journal = FindingJournal()
     journal.carry(prior_decide.recorded([_record([parked], {}, "2026-11-20T00:00:00Z")])[0])
-    assert list(journal.filed.values()) == [url]
+    assert [u for _, u in journal.filed] == [url]
     journal.carry(prior_decide.recorded([_record([row], {}, "2026-11-20T00:00:00Z")])[0])
     [carried] = journal.rows.values()
     assert carried["prior_issue"] == url and "issue" not in carried

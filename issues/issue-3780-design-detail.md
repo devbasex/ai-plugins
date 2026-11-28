@@ -360,7 +360,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `TITLE_CHARS` | 定数 | `leftover_decide.py` | 80（題にする本文の先頭の字数） |
 | `Listed(url, body, author, association, created_at, is_pull, author_id)` | 型 | `leftover_decide.py` | 無し |
 | `kinds.filed` | 定数 | `contracts/data/review-criteria.json` | 上の 6 つ |
-| `PARKED = "parked"`・`Filed.URL = "issue"`・`Filed.ERROR = "issue_error"`（`Filed` は StrEnum） | 行のキー | `leftover_decide.py` | 無し |
+| `PARKED = "parked"`・`Filed.URL = "issue"`・`Filed.ERROR = "issue_error"`・`Filed.CHECKED = "issue_checked"`（`Filed` は StrEnum） | 行のキー | `leftover_decide.py` | 無し |
 | `PLACED_ROUND = "placed_round"` | 行のキー | `journal.py` | 無し（無ければ `round`） |
 | `OFF_DIFF = "off_diff"` | 行のキー | `leftover_decide.py` | 無し（投稿の位置に行を使う） |
 
@@ -396,7 +396,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `primary_of` | `leftover.py` | 新設 | `primary_of(main: Optional[Path]) -> tuple[Optional[str], Optional[str]]` | メインディレクトリの `.ndf/project.json` の `issues.primary` と、注意（未設定のとき） |
-| `file_issues` | `leftover.py` | 新設 | `file_issues(data: dict[str, Any], ref: store.StateRef, port: Port, save: Callable[[], None], *, manual: bool = False) -> list[str]` | 起票の候補を設計の「起票の形」の順で扱い、行の `issue`・`issue_error` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて注意を返す |
+| `file_issues` | `leftover.py` | 新設 | `file_issues(data: dict[str, Any], ref: store.StateRef, port: Port, save: Callable[[], None], *, manual: bool = False) -> list[str]` | 起票の候補を設計の「起票の形」の順で扱い、行の `issue`・`issue_error`・`issue_checked` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて注意を返す |
 
 `Port`（テストは偽物）は次のメソッドを持ち、`GitHubIssues` が GitHub の API で実装する。記録の URL が指す Issue のまとめ読みは GraphQL、ほかは REST である。
 
@@ -416,7 +416,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 
 - `file_issues`
   - 事前条件: 呼び手は、記録の公開のロック（`write_gate.pr_lock` の今の PR 番号）に加えて、元の PR 番号のロックを持つ。2 つの番号が同じなら 1 回だけ取る（同じ番号を 2 回取ると、2 回目が待ち切れで失敗する）。順は今の番号が先である
-  - 事後条件: 起票の候補の行は `issue` か `issue_error` を持つ（照合だけの候補で、その指摘の Issue が無い行は、どちらも持たない）。Issue を作る前に `issue_account_ids` と起票の記録を保存している
+  - 事後条件: 起票の候補の行は `issue` か `issue_error` を持つ（照合だけの候補で、その指摘の Issue が無い行は、どちらも持たず `issue_checked` を持つ）。Issue を作る前に `issue_account_ids` と起票の記録を保存している
   - 副作用: 元の PR の起票の記録のコメントと、Issue を GitHub に書く。状態ファイルを `save` で書く
 
 ### 異常系の処理
@@ -436,7 +436,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 1. 記録を読む（本文とコメントの更新時刻）。`at` の無い識別値には、読んだ更新時刻を `at` として当てる
 2. `url` のある識別値は、指す Issue をまとめて読み、作者を信用できるかを確かめる。Issue の取得か作者の権限の照会に失敗した場合（`GitHubError` が返る通信の失敗・5xx・利用上限など）は、URL のある識別値をどれも起票せず、URL を記録に残したまま `issue_error` に理由を書いて保留する（順 3 の検索にも起票にも進まない）。権限の照会の応答が利用上限によらない 403・404 の場合は、失敗に数えない。`GitHub.permission` がこの応答を権限なし（`none`）として返すので、その作者は信用しない。どちらも失敗しなかった場合、URL が同じリポジトリの Issue を指し、作者を信用でき、本文に識別値の目印があれば、起票せずその URL を使う。目印の位置と元の PR の URL は問わない。満たさなければ `url` を捨て、順 3 で確かめる
 3. `url` の無い識別値（作成の結果が分からないもの）は、識別値で検索し、無ければ作成時刻が `at` 以後の Issue の一覧を読む
-4. 1 回目の書き込み: 記録に無い識別値と、順 3 でどちらにも無いと確認できた識別値を、`at` と `url` の無い項目として書く。試みた時刻はこの書き込みの応答の更新時刻なので、この本文には入れられない。書けなければ作らない
+4. 1 回目の書き込み: 起票の対象の種類を持つ候補のうち、記録に無い識別値と、順 3 でどちらにも無いと確認できた識別値を、`at` と `url` の無い項目として書く。試みた時刻はこの書き込みの応答の更新時刻なので、この本文には入れられない。書けなければ作らない
 5. 順 4 で書いた識別値の Issue を作る
 6. 2 回目の書き込み: 作れた識別値は `number` と `at` を、結果が分からない識別値は `at` を書き、GitHub がはっきり拒んだ（4xx）識別値は消す。作れた URL は指摘の行にも書く
 
@@ -480,7 +480,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `passed` | `journal.py` | 新設 | `passed(self, fid: str, touched: leftover_decide.Touched, *, unconfirmed: bool = False) -> list[dict[str, Any]]` | このラウンドの出し直しの位置のうち、修正へ進むものを返す（`sort` と `_wants_tracks` が使う） |
 | `unpark` | `journal.py` | 新設 | `unpark(self, touched: leftover_decide.Touched) -> None` | 線引きをしないラウンドで、出し直された指摘の `parked` を外して位置を置き換え、投稿できる行かを確かめる |
 | `enter` | `journal.py` | 変更 | シグネチャは変えない | このラウンドで出た指摘の番号を `self.raised_ids` に残し、`self.returned`（直した後に戻った指摘の番号）を呼び出しごとに空にする |
-| `carry` | `journal.py` | 変更 | シグネチャは変えない | 記録のコメントの `parked` の項目は指摘の行にせず、本文から URL への対応 `self.filed` と、URL すべての並び `self.filed_urls` に残す。引き継ぎの処理（`carry.py`）は `self.filed_urls` を状態の `issue_carried_urls` に残し、`file_issues` が Issue の目印で指摘と照らす。`issue` を持つほかの項目は指摘の行へ移す |
+| `carry` | `journal.py` | 変更 | シグネチャは変えない | 記録のコメントの `parked` の項目は指摘の行にせず、本文と URL の組の並び `self.filed` に残す。引き継ぎの処理（`carry.py`）はその URL すべてを状態の `issue_carried_urls` に残し、`file_issues` が Issue の目印で指摘と照らす。`issue` を持つほかの項目は指摘の行へ移す |
 | `_revive` | `journal.py` | 変更 | シグネチャは変えない | 直した（`fixed`）指摘が戻ったときに、番号を `self.returned` に足す |
 | `handable` | `journal.py` | 変更 | シグネチャは変えない | `parked` の指摘を返さない |
 | `_classify` | `journal.py` | 変更 | シグネチャは変えない | 必ず人の承認が要る操作と分かった指摘の `parked` を外す |

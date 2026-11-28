@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -125,12 +126,24 @@ def unconfirmed_target(main: Path, state_repo: Optional[str], make: Callable[[Pa
     return None
 
 
+def _carried_urls(data: Mapping[str, Any]) -> list[str]:
+    """状態に引き継いだ起票の URL。"""
+    return [url for url in store.list_of(data, CARRIED_URLS) if isinstance(url, str)]
+
+
+def _checked_value(text: str, urls: Sequence[str]) -> str:
+    """照合した指摘の本文と引き継いだ URL の組の値（どちらかが変われば違う値になる）。"""
+    joined = "\n".join([leftover_decide.normalized(text), *sorted(urls)])
+    return hashlib.sha256(joined.encode()).hexdigest()[:12]
+
+
 def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
     """起票の候補の行（直さずに残した未解決の指摘のうち、まだ起票しておらず、起票する種類か引き継いだ起票の URL を持つもの）。
 
     状態に引き継いだ URL（`CARRIED_URLS`）があれば、どの指摘の Issue かは読むまで分からないので、残した指摘をすべて照合の
-    候補にする。起票する種類を持たない行は照合だけで、起票はしない（`_Filing.sort`）。"""
-    carried = bool(store.list_of(data, CARRIED_URLS))
+    候補にする。起票する種類を持たない行は照合だけで、起票はしない（`_Filing.sort`）。同じ指摘と URL の組で照らして Issue が
+    無かった行（`Filed.CHECKED`）は、候補にしない。"""
+    pool = _carried_urls(data)
     return [
         row
         for row in store.list_of(data, store.FINDINGS)
@@ -139,7 +152,11 @@ def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
         and row.get("outcome") == fin.UNRESOLVED
         and not row.get(Filed.URL)
         and isinstance(row.get("text"), str)
-        and (carried or leftover_decide.files_issue(row) or row.get(Filed.PRIOR))
+        and (
+            leftover_decide.files_issue(row)
+            or row.get(Filed.PRIOR)
+            or (pool and row.get(Filed.CHECKED) != _checked_value(row["text"], pool))
+        )
     ]
 
 
@@ -204,6 +221,7 @@ class _Filing:
             row[Filed.URL] = url
             row.pop(Filed.ERROR, None)
             row.pop(Filed.PRIOR, None)
+            row.pop(Filed.CHECKED, None)
 
     def read(self) -> None:
         """起票の記録を読む。`at` の無い項目（記録を書いた後に中断した）には、コメントの更新時刻を当てる。"""
@@ -328,7 +346,7 @@ class _Filing:
         recorded = {ident: url for ident in self.rows if (url := self.url_of(ident))}
         carried = {ident: str(row[Filed.PRIOR]) for ident, rows in self.rows.items() for row in rows if row.get(Filed.PRIOR)}
         urls = carried | recorded
-        pool = [url for url in store.list_of(self.data, CARRIED_URLS) if isinstance(url, str)]
+        pool = _carried_urls(self.data)
         wanted = list(dict.fromkeys([*urls.values(), *pool]))
         if not wanted:
             return
@@ -440,12 +458,21 @@ class _Filing:
         return self._finish()
 
     def _finish(self) -> list[str]:
-        """失敗を行に書いて保存し、理由ごとにまとめた注意を返す。"""
+        """失敗を行に書いて保存し、理由ごとにまとめた注意を返す。失敗の無い行は前の失敗を消し、起票しない行で Issue が
+        無かったものには、照らした組を残す。"""
         reasons: dict[str, list[str]] = {}
         for ident, reason in self.errors.items():
             for row in self.rows[ident]:
                 row[Filed.ERROR] = reason
                 reasons.setdefault(reason, []).append(str(row.get("id")))
+        pool = _carried_urls(self.data)
+        for ident, rows in self.rows.items():
+            if ident in self.errors:
+                continue
+            for row in rows:
+                row.pop(Filed.ERROR, None)
+                if pool and not row.get(Filed.URL) and not leftover_decide.files_issue(row):
+                    row[Filed.CHECKED] = _checked_value(row["text"], pool)
         self.save()
         return [f"指摘 {'・'.join(ids)} を起票できなかった: {reason}" for reason, ids in reasons.items()]
 
