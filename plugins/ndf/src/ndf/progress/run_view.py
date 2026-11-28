@@ -37,6 +37,8 @@ FAILED = _event_kind("failed")
 FINISHED = _event_kind("finished")
 # 工程を開き直す事象。これより前の結果・出力・承認は、記録に残るが今の判断に使わない
 REOPENED = stages.REOPENED_EVENT
+# 承認ゲートの工程を手で終えて、承認を待つ事象（`ndf progress finish`）
+FINISH_HELD = _event_kind("finish_held")
 # 失敗した行を待ちへ戻す事象（`ndf progress retry` と同じ種類）
 RETRY_EVENT = _event_kind("retry")
 # 工程の定義の写しの工程の順を置き換えた事象（このリリースの前に始めた状態機械の移行。#4409 の決定 6）

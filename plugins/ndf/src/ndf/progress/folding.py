@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from ndf.contracts import facts, result
 from ndf.progress import invoke, model, stages
-from ndf.progress.run_view import ANSWERED, FAILED, FINISHED, REOPENED, STARTED, STEP_EVENT, View, event_payload
+from ndf.progress.run_view import ANSWERED, FAILED, FINISH_HELD, FINISHED, REOPENED, STARTED, STEP_EVENT, View, event_payload
 
 
 def answer_word(word: str) -> str:
@@ -33,6 +33,7 @@ class StepProgress:
     `retries` は行の打ち直し（失敗の後の開始）の回数で、作業へ渡す（プランは打ち直すたびに新しい回を始める。同じ回のキーで
     打つと、プランは終わった回のバックアップの結果を返すだけだからである）。`redo` は工程全体の出力が規約に合わずに行が失敗したか。
     真なら次の開始（`retry` の後）で終わったステップの記録を無効にし、ステップを初めから流し直す（同じ出力を照らし直すだけにしない）。
+    `held_finish` は手で終えて承認を待つ記録（事象 `finish_held` の payload）。待つ間は次のステップを承認ゲートにする。
     """
 
     generation: int = 0
@@ -49,8 +50,11 @@ class StepProgress:
     resets: dict[str, int] = field(default_factory=dict)
     finished_at: dict[str, int] = field(default_factory=dict)
     again: list[dict[str, Any]] = field(default_factory=list)
+    held_finish: Optional[dict[str, Any]] = None
 
     def next_step(self, stage: stages.StageDef) -> Optional[stages.StepDef]:
+        if self.held_finish is not None:
+            return next(st for st in stage.steps if st.kind == stages.GATE_KIND)
         for st in stage.steps:
             if st.id not in self.done:
                 return st
@@ -67,7 +71,7 @@ class StepProgress:
 
     def _started(self, ev: model.Event, _p: dict[str, Any]) -> None:
         """行の開始。数え始めをここへ移し、失敗の後の開始なら打ち直しを数える（出力の失敗なら済んだステップも捨てる）。"""
-        self.anchor, self.answer, self.waiting = ev.seq, None, None
+        self.anchor, self.answer, self.waiting, self.held_finish = ev.seq, None, None, None
         if self.failed:
             self.retries += 1
             self.done = {} if self.redo else self.done
@@ -75,7 +79,7 @@ class StepProgress:
 
     def _failed(self, _ev: model.Event, p: dict[str, Any]) -> None:
         """行の失敗。止まったステップが無い（工程全体の出力が規約に合わない）なら、次の開始で初めから流し直す。"""
-        self.failed = True
+        self.failed, self.held_finish = True, None
         self.redo = "step" in p and p["step"] is None
 
     def _recorded(self, ev: model.Event, p: dict[str, Any]) -> None:
@@ -100,14 +104,18 @@ class StepProgress:
         self.retries, self.done, self.waiting, self.answer, self.anchor = 0, {}, None, None, ev.seq
         self.failed = self.redo = False
         self.held, self.resets, self.finished_at, self.again = set(), {}, {}, []
-        self.notes = p.get("notes")
+        self.notes, self.held_finish = p.get("notes"), None
+
+    def _finish_held(self, ev: model.Event, p: dict[str, Any]) -> None:
+        """手で終えた回答待ち。次のステップを承認ゲートにして、回答の数え始めをここへ移す。"""
+        self.held_finish, self.waiting, self.answer, self.anchor = p, None, None, ev.seq
 
     def _answered(self, ev: model.Event, p: dict[str, Any]) -> None:
         """回答。承認ゲートの変更要求なら世代を上げて初めから流し直し、ほかは数え始めの後の回答だけを残す。"""
         if p["answer"] == REQUEST_CHANGES and p["kind"] == invoke.LISTEN:
             self.generation += 1
             self.done, self.waiting, self.answer, self.anchor = {}, None, None, ev.seq
-            self.held, self.again = set(), []
+            self.held, self.again, self.held_finish = set(), [], None
             self.notes = p["notes"]
         elif ev.seq > self.anchor:
             self.answer = ev
@@ -120,6 +128,7 @@ _SEES: dict[str, Callable[[StepProgress, model.Event, dict[str, Any]], None]] = 
     FAILED: StepProgress._failed,
     STEP_EVENT: StepProgress._recorded,
     REOPENED: StepProgress._reopened,
+    FINISH_HELD: StepProgress._finish_held,
 }
 
 

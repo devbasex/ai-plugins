@@ -215,6 +215,10 @@ def _outputs(report: Mapping[str, Any]) -> Mapping[str, Any]:
     return got if isinstance(got, dict) else {}
 
 
+# 見た対象（事象の `seen`）で、承認資料のハッシュを持つキー
+MATERIAL_KEY = "material_sha256"
+
+
 def mvv_answer(step: str, kind: str, answer: str, held: Optional[Mapping[str, Any]], gate_id: str) -> tuple[dict[str, Any], str]:
     """MVV 判定で承認ゲートを省いた回答の事象の payload と理由。回答した者は `MVV_SERVICE`、判定の結果（`mvv_skip`）を `MVV_KEY` に添える。
 
@@ -235,7 +239,7 @@ def mvv_answer(step: str, kind: str, answer: str, held: Optional[Mapping[str, An
         "gate": gate,
         "gate_id": gate_id,
         # 形は gate.Target.as_dict（承認資料は作らないので sha256 は無い）
-        "seen": {"head": head if isinstance(head, str) else None, "material_sha256": None, **bound},
+        "seen": {"head": head if isinstance(head, str) else None, MATERIAL_KEY: None, **bound},
         MVV_KEY: dict(held) if held is not None else None,
     }
     return payload, f"MVV 判定で承認ゲート {gate} を省いた"

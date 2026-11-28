@@ -16,7 +16,7 @@ from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import result
 from ndf.core import actors, approval_words, merge_approval, production_merge
-from ndf.progress import command, invoke, lane, model, plan, run, stages, store
+from ndf.progress import approval_decide, command, invoke, lane, model, plan, run, stages, store
 from ndf.progress.gate.asking import (
     ORGANIZER_ANSWERS,
     DESIGN_GATE,
@@ -31,12 +31,12 @@ from ndf.progress.gate.asking import (
     presented_id,
     question,
     read_presented,
-    text_sha256,
     release_request_of,
     waiting,
 )
 from ndf.progress.gate.records import record_answer, rejections_path
-from ndf.progress.run_view import write_accepted_head
+from ndf.progress.gate.targets import TargetReader
+from ndf.progress.run_view import read_accepted_head, write_accepted_head
 
 # 回答した者の形（人・conductor・サービス。サービスは `service:<主体>`。プランの承認待ちと共有する）
 ACTORS = actors.ACTORS
@@ -71,7 +71,9 @@ def shared_hub(cwd: Path, hub: Optional[Callable[[], GitHub]] = None) -> Callabl
     return get
 
 
-def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = None) -> Observe:
+def github_observe(
+    cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = None, reader: Optional[TargetReader] = None
+) -> Observe:
     """今の対象を読む: PR の head の SHA・本文と題の sha256（GitHub の同じ 1 回の取得。#4446）、その head の承認資料の
     sha256、承認の対象（ベースリポジトリ・番号・マージ先）と本番へ反映されるか（#4409）。読めなければ回答を受けない（`model.Refused`）。
 
@@ -83,30 +85,15 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
     退けた代わりの案: (1) 提示で読んだ値を回答で使う — 提示の後に head かマージ先の設定が変わったことを回答で断れなくなる
     （`_check_presented`）。(2) `ndf progress next` の確かめで読んだ PR を同じコマンドの提示で使う — 間に流れるステップが PR へ
     push すると古い head を提示し、回答が必ず断られる。"""
-    get_hub = shared_hub(cwd, hub)
+    held = reader
 
     def observe(q: Question, *, material: bool = True) -> Target:
-        pull = found = None
-        if q.pr is not None:
-            try:
-                hub = get_hub()
-                pull = hub.pull(q.pr)
-                # head だけを読むときは、マージ先の設定を読まない
-                found = hub.branch_file(pull.base_ref, production_merge.PROJECT_FILE) if material else None
-            except (GitHubError, GitError) as exc:
-                raise model.Refused(f"PR #{q.pr} の head を読めない（マージ先も読めない）ので、回答と対象を照らせない: {exc}") from None
-        seen = Target()
-        if pull is not None:
-            seen = Target(pull.head_sha, body=text_sha256(pull.body), title=text_sha256(pull.title))
+        # 渡された読み手が無ければ、毎回読み直す
+        got = (held if held is not None else TargetReader(shared_hub(cwd, hub))).read(q, config=material).target
         if not material:
-            return seen
-        path = material_path(root, replace(q, target=Target(seen.head)))
-        seen = replace(seen, material=material_sha256(path) if path.exists() else None)
-        if pull is None or found is None:
-            return seen
-        verdict = production_merge.judge_project_text(found.text, pull.base_ref, source_repo=found.repo, repo=hub.repo)
-        production = production_merge.reaches_production(verdict)
-        return replace(seen, repo=hub.repo, pr=pull.number, base=pull.base_ref, production=production)
+            return got
+        path = material_path(root, replace(q, target=Target(got.head)))
+        return replace(got, material=material_sha256(path) if path.exists() else None)
 
     return observe
 
@@ -472,8 +459,26 @@ def _accept(root: Path, q: Question, now: Target) -> None:
     write_accepted_head(run.work_root(root, q.machine_id), q.id, now.head)
 
 
+def standing(reader: TargetReader, root: Path) -> approval_decide.StandingOf:
+    """記録した承認の回答を今の対象に照らす口（`run.Env.standing`）。承認資料の比較と、文書だけが加わって
+    出し直さなかった head は、回答を読む前の確かめ（`recheck`）と同じ規則で扱う。"""
+
+    def of(v: run.View, gate: Optional[str], pr: Optional[int], answered: model.Event) -> approval_decide.Standing:
+        p = run.event_payload(answered)
+        q = Question(str(p.get("gate_id")), v.machine_id, str(answered.draft.row_key), str(p.get("step")), gate, (), pr)
+        got = reader.read(q)
+        seen = Target.from_dict(p.get("seen"))
+        carried = read_accepted_head(run.work_root(root, v.machine_id), q.id) if seen.production is False else None
+        found = approval_decide.differences(p, got.target.as_dict(), gate=gate, carried_head=carried)
+        moved = _material_moved(root, q, seen)
+        return approval_decide.Standing([*found, *([moved] if moved else [])], got.merged, got.target.head)
+
+    return of
+
+
 def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsOnly = never_docs_only) -> Optional[str]:
     """回答を読む前に、回答した者が見た対象と今の対象を比べる。違えば待ちへ戻し（質問は新しい id）、理由を返す（3364-2）。
+    承認の対象を持つ回答は、人の回答も MVV の回答も、マージ先と本番へ反映されるかを比べる（#4520 の懸念 1）。
 
     `ndf answer` が書いた回答（質問の id と見た対象を持つ）だけを比べる。どのサブコマンドでも、回答が読まれる前に打つ。待ちへ戻すのは承認ゲートのステップの
     待ちの記録で、回答はその後の回答だけが読まれる（`run.StepProgress`）。回答が課題を外していれば、同じトランザクションで
@@ -492,8 +497,12 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
         return None
     q = question(v, replace(m, action=run.Action.GATE))
     # head を先に照らし、資料はその結論に要る 1 つだけを読む（#3959）。本文と題は head と同じ 1 回の取得で比べる（#4446）
-    seen, now = Target.from_dict(p.get("seen")), observe(q, material=False)
+    seen = Target.from_dict(p.get("seen"))
+    # マージ先の設定は、承認の対象を持つ回答のときだけ読む
+    now = observe(q, material=seen.base is not None)
     texts = replace(now, head=None, material=None).differs(seen)
+    if now.binding() is not None:  # 今の対象が分かるときだけ比べる（ほかの項目と同じ）
+        texts += approval_decide.binding_differences(now.as_dict(), seen.as_dict())
     if p.get("by") == model.MVV_SERVICE:
         moved = _judged_elsewhere(p, q, seen, now)
     elif seen.head is None or now.head is None or seen.head == now.head:

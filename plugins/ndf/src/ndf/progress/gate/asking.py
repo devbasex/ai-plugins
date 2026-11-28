@@ -22,7 +22,7 @@ from filelock import FileLock
 from ndf import cli
 from ndf.contracts import limits, result
 from ndf.core import merge_approval
-from ndf.progress import lane, model, plan, run, stages
+from ndf.progress import approval_decide, lane, model, plan, run
 from ndf.progress.run_view import MATERIAL_DIR
 
 # 結果 JSON の tool（サブコマンドの表がこのパッケージを指す）
@@ -74,17 +74,8 @@ class Target:
         return merge_approval.MergeTarget(self.repo, int(self.pr), self.base, self.head)
 
     def differs(self, seen: Target) -> list[str]:
-        """回答した者が見た対象 `seen` と今の対象の違い（今の側が分かる項目だけを比べる）。
-
-        本文と題は、見た側も値を持つときだけ比べる。MVV 判定で省いた回答は head だけを見て書くためである。"""
-        out = []
-        for name, now, then in (("head の SHA", self.head, seen.head), ("承認資料の sha256", self.material, seen.material)):
-            if now is not None and then != now:
-                out.append(f"{name}（見た値 {then or '無し'}・今の値 {now}）")
-        for name, now, then in (("PR の本文の sha256", self.body, seen.body), ("PR の題の sha256", self.title, seen.title)):
-            if now is not None and then is not None and then != now:
-                out.append(f"{name}（見た値 {then}・今の値 {now}）")
-        return out
+        """回答した者が見た対象 `seen` と今の対象の中身の違い（`approval_decide.content_differences`）。"""
+        return approval_decide.content_differences(self.as_dict(), seen.as_dict())
 
     def as_dict(self) -> dict[str, Any]:
         """見た対象を記録する形（事象の payload の `seen` と、リクエストの隣の `.seen.json`）。承認の対象の値は分かるときだけ置く。"""
@@ -145,23 +136,12 @@ def pr_url(repo: Optional[str], number: Optional[int]) -> Optional[str]:
     return f"https://github.com/{repo}/pull/{number}" if repo and number else None
 
 
-def _waiting_context(v: run.View, stage: stages.StageDef, prog: run.StepProgress) -> dict[str, Any]:
-    """待っている工程から見た文脈。スプリントの文脈に、その工程の終わったステップの出力を順に重ねる。
-
-    工程の出力（`outputs_recorded`）は工程が終わる時にだけ書かれるため、工程の途中の承認ゲート（設計承認ゲートの
-    設計 PR など）はステップの記録（`step_recorded` の report.outputs。設計 PR は items でも補う: `stages.step_outputs`）から読む。"""
-    out = v.context()
-    out.update(stages.step_outputs(stage, prog.done))
-    return out
-
-
 def question(v: run.View, m: run.Move, *, repo: Optional[str] = None, target: Target = Target()) -> Question:
-    """待っている手 `m`（`run.Action.GATE`）の質問。PR は設計承認ゲートなら設計 PR、ほかはスプリントの PR。"""
+    """待っている手 `m`（`run.Action.GATE`）の質問。PR は設計承認ゲートなら設計 PR、ほかはスプリントの PR（`approval_decide.gate_pr`）。"""
     if m.action != run.Action.GATE or m.stage is None or m.step is None or m.progress is None:
         raise model.Refused("回答を待つ工程が無い")
-    ctx = _waiting_context(v, m.stage, m.progress)
-    key = stages.DESIGN_PR if m.step.gate == DESIGN_GATE else "pr"
-    number = ctx[key] if isinstance(ctx.get(key), int) else None
+    by_hand = m.progress.held_finish is not None
+    number = approval_decide.gate_pr(v.context(), m.stage, m.progress.done, m.step.gate, by_hand=by_hand)
     qid = question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
     return Question(qid, v.machine_id, m.stage.name, m.step.id, m.step.gate, tuple(run.choices(m)), number, pr_url(repo, number), target)
 

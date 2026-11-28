@@ -15,7 +15,9 @@
 - 回答の記録（`records`）: 回答を `gate-rejections.jsonl` へ写し（#3136）、conductor が読む回答の一覧（#2934・#3174）と
   承認で見た head（#2147）を返す
 - MVV 判定の前の機械の検査（`checks`）: 6 つの検査（PR 本文のセクションの中身は #2853）と、承認ゲートを省けるかの判定（#3017）・判定の記録（#2950）
-- 工程を手で扱うサブコマンド（`finishing`）: `ndf progress finish`・`check`・`retry`（終了した工程の開き直しは `progress.reopening`）
+- 工程を手で扱うサブコマンド（`finishing`）: `ndf progress finish`・`check`・`retry`（終了した工程の開き直しは `progress.reopening`）。
+  承認ゲートを持つ工程の `finish` は、有効な承認（`progress.approval_decide`）が無ければ回答待ちにする（#4520）
+- 承認の対象の読み取り（`targets`）: PR とマージ先の設定を 1 回の呼び出しで 1 回だけ読む
 - サブコマンドのエントリポイント（`entry`）: `ndf answer`（`main`）と `ndf progress`（`progress_main`。エントリポイントは `progress_cli`）
 """
 

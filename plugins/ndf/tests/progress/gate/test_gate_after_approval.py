@@ -159,7 +159,7 @@ def _material(st, q, head, text="資料 A\n"):
 
 
 def _hub(head):
-    return SimpleNamespace(pull=lambda n: SimpleNamespace(head_sha=head, body="本文", title="題"))
+    return SimpleNamespace(pull=lambda n: SimpleNamespace(head_sha=head, body="本文", title="題", merged=False))
 
 
 DOCS_ONLY = lambda seen, now: (seen, now) == ("hA", "hB")  # noqa: E731

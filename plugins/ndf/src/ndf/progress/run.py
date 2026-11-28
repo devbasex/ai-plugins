@@ -11,7 +11,8 @@
 - 承認ゲート（`ndf.listen`）とプランの中の承認ゲートは、行を実行中のまま `work` を抜け、`next` が `gate` と `routes` を返す。
   回答は `answer`（と `ndf answer`。`ndf.progress.gate`）が事象 `answered` で残す。変更要求には指摘ファイルが要る（3365-4）。
   書かれた回答を読む手と、回答が見た対象は `ndf.progress.run_approval` が持つ。
-  直前の MVV 判定が省けると決めた承認ゲートは、回答した者 `service:mvv` の承認を書いて人へ質問せずに通す（#3745）
+  直前の MVV 判定が省けると決めた承認ゲートは、回答した者 `service:mvv` の承認を書いて人へ質問せずに通す（#3745）。
+  手で終えた承認ゲートの工程は承認を読むまで終了にせず、同じ対象の先の承認があれば質問せずに通す（#4520）
 - スプリントの完了と同じトランザクションで `Env.ended` を打つ（レーンの行を終える口。決定 17。`ndf.progress.gate.lane_env`）
 - 工程の出力は工程の出力の規約で照らしてから終了のマーカーを付ける。合わなければマーカーを付けず失敗にする（受け入れ条件 8）
 - 課題の工程表とスプリント PR の「通した工程」は終了のマーカーから作る（受け入れ条件 6）。書けなくても工程は進め、`resync` で揃え直せる（3377-9）
@@ -35,10 +36,10 @@ from ndf.contracts import causes, facts, limits, result
 from ndf.contracts.worker_kinds import Recorded
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
-from ndf.progress import command, definition, invoke, issue_values, model, stages, store
+from ndf.progress import approval_decide, command, definition, invoke, issue_values, model, stages, store
 from ndf.progress.folding import REQUEST_CHANGES, Action, Move, StepProgress, answer_word, step_progress
 from ndf.progress.records import Records, github_records, sync_records
-from ndf.progress.run_approval import approved_seen, consume
+from ndf.progress.run_approval import approved_seen, consume, prior_approval, standing_approval
 from ndf.progress.run_view import (
     ACTOR,
     ANSWERED,
@@ -144,7 +145,9 @@ def _reopen(v: View, s: stages.StageDef, prog: StepProgress) -> None:
 
 def _running_move(v: View, s: stages.StageDef) -> Move:
     prog = step_progress(v, s.name)
-    _reopen(v, s, prog)
+    by_hand = prog.held_finish is not None
+    if not by_hand:
+        _reopen(v, s, prog)
     step = prog.next_step(s)
     if step is None:
         return Move(Action.RESUME, s, None, prog)
@@ -152,7 +155,8 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
     answer = None if _void_answer(v, prog.answer, step.gate) else prog.answer
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
     held = prog.waiting is not None or step.id in prog.held
-    skip = listen and not held and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None
+    # 手で終えた回答待ちは、前に流したステップの判定で省かない
+    skip = listen and not held and not by_hand and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None
     if waiting and answer is None and not skip:
         return Move(Action.GATE, s, step, prog)
     return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, answer)
@@ -315,6 +319,9 @@ class Env:
     ended: Callable[[Any, str], Any] = lambda _conn, _machine_id: None  # スプリントの完了と同じトランザクションで打つ
     # スプリントが計画のレーンの行にあるか（読み手役のステップを済ませる判定。レーンは `ndf.progress.gate.lane_env` が読む）
     in_lane: Callable[[store.Store, str], bool] = lambda _st, _machine_id: False
+    # 記録した承認を今の対象に照らす口と、読んだ対象を捨てる口（GitHub を読むのは `ndf.progress.gate`）
+    standing: approval_decide.StandingOf = approval_decide.unreadable
+    forget: Callable[[], None] = lambda: None
 
 
 def resync(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:
@@ -351,6 +358,9 @@ class Drive:
     def refuse(self, v: View, m: Move, detail: str) -> None:
         assert m.stage is not None and m.step is not None
         self.write(_failed(m.stage, m.step.id, v.rev, "refused", detail))
+
+    def warn(self, text: str) -> None:
+        self.warnings.append(text)
 
     def synced(self) -> None:
         """行を終えた後に進捗記録を書き直す。記録の失敗は工程を止めず警告に載せる。"""
@@ -485,6 +495,7 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
         _finish_stage(d, v, m.stage)
     else:
         d.write(*_run_step(d, v, m.stage, m.step))
+        d.env.forget()  # ステップが PR へ push しうるので、次は対象を読み直してから比べる
     if decide(read(d.st, d.machine_id)).stage != m.stage:
         d.synced()
     return None
@@ -495,6 +506,7 @@ Hand = Callable[[Drive, View, Move], Optional[dict[str, Any]]]
 _HANDS: dict[Action, Hand] = {
     Action.COMPLETE: lambda d, v, _m: _complete(d, v),
     Action.CONSUME: consume,
+    Action.GATE: prior_approval,
     Action.START: lambda d, v, m: _start(d, v, m.stage) if m.stage is not None else None,
     Action.RESUME: _resume,
 }
@@ -737,9 +749,12 @@ def _reading_skipped(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef
     gate = next((st for st in s.steps if st.kind == stages.GATE_KIND and st.gate == step.gate), None)
     waiting_gate = gate is not None and gate.id in prog.held
     in_lane = step.gate == model.release_gate() and d.env.in_lane(d.st, v.machine_id)
-    if not model.reading_skip(prog.done, s.before(step.id), step.gate, waiting_gate, in_lane):
+    # 読み手役が文書を直すと承認した対象が変わるので、有効な先の承認がある設計では打たない
+    approved = step.gate == approval_decide.DESIGN_GATE and gate is not None and standing_approval(d, v, s, gate) is not None
+    if not approved and not model.reading_skip(prog.done, s.before(step.id), step.gate, waiting_gate, in_lane):
         return None
     why = "計画のレーンの行にあるスプリントなので" if in_lane else "直前の MVV 判定が承認ゲートを省くので"
+    why = "同じ対象の承認が記録されているので" if approved else why
     rep = result.result(TOOL, result.OK, f"{why}、読み手役のステップ {step.id} を打たずに済ませた")
     payload = {"step": step.id, "status": FINISHED, "report": rep, "generation": prog.generation, "warnings": []}
     return [step_event(v, s.name, payload)]

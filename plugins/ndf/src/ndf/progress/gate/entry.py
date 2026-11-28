@@ -55,6 +55,7 @@ from ndf.progress.gate.answering import (
     recheck,
     reread,
     shared_hub,
+    standing,
 )
 from ndf.progress.gate.asking import (
     RELEASE_GATE,
@@ -67,6 +68,7 @@ from ndf.progress.gate.asking import (
 from ndf.progress.gate import finishing
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
+from ndf.progress.gate.targets import TargetReader
 from ndf.progress.plan import external
 
 
@@ -586,14 +588,23 @@ def ask_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _drive_env(st: store.Store, reader: TargetReader) -> run.Env:
+    """レーンの行を終え、記録した承認を今の対象に照らせる `Env`。"""
+    env = lane_env(run.Env(facts=command.facts_of))
+    return replace(env, standing=standing(reader, st.root), forget=reader.forget)
+
+
 def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Optional[Observe] = None) -> dict[str, Any]:
     """`ndf progress` の工程を流すサブコマンド。レーンの行を終える `Env` で流し、回答を読む前に対象を見直し、承認ゲートの
     待ちは質問と回答ごとのルートの結果にする。"""
     hub = shared_hub(cwd)
-    seen = observe if observe is not None else github_observe(cwd, st.root, hub)
+    reader = TargetReader(hub)  # 1 回の呼び出しで、対象の PR とマージ先の設定を 1 回だけ読む
+    seen = observe if observe is not None else github_observe(cwd, st.root, hub, reader)
     took = _took(st, a.machine_id, seen, github_post(cwd, hub) if observe is None else no_post)
     why = recheck(st, a.machine_id, seen, git_docs_only(cwd))
-    out = run.COMMANDS[a.action](run.with_env(a, lane_env(run.Env(facts=command.facts_of))), cwd, st)
+    out = run.COMMANDS[a.action](run.with_env(a, _drive_env(st, reader)), cwd, st)
+    if a.action in ("wait", "work"):
+        reader.forget()  # 待ちと作業の間に PR が変わりうるので、承認資料は読み直した対象で作る
     return command.with_warnings(present(st, a.machine_id, cwd, out, seen), before=[w for w in (took, why) if w])
 
 
@@ -609,7 +620,7 @@ def _took(st: store.Store, machine_id: str, observe: Observe, post: Post = no_po
 def _cmd_reread(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Optional[Observe] = None) -> dict[str, Any]:
     """`ndf progress reread <ID>`: 承認の前の確認をやり直し、承認ゲートの待ちを今の対象（head・本文・題）で出し直す（#4446）。"""
     seen = observe if observe is not None else github_observe(cwd, st.root)
-    out = reread(st, a.machine_id, cwd, lane_env(run.Env(facts=command.facts_of)))
+    out = reread(st, a.machine_id, cwd, _drive_env(st, TargetReader(shared_hub(cwd))))
     return present(st, a.machine_id, cwd, out, seen)
 
 

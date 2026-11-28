@@ -44,7 +44,7 @@ def _hub(head, production=True):
     config = json.dumps({"branch_strategy": {"branches": branches}})
     return SimpleNamespace(
         repo="o/r",
-        pull=lambda n: SimpleNamespace(head_sha=head, base_ref="main" if production else "develop", number=n, body="本文", title="題"),
+        pull=lambda n: SimpleNamespace(head_sha=head, base_ref="main" if production else "develop", number=n, body="本文", title="題", merged=False),
         branch_file=lambda base, path: FileAt("o/r", config, "c1"),
     )
 

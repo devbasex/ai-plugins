@@ -199,9 +199,21 @@ def _validate_stage(
     return validate_io(ref, obj) + [_missing_line(part, k, s) for k, s in missing], missing
 
 
-def check_stage_output(stage: stages.StageDef, obj: Any) -> tuple[list[str], list[tuple[str, Optional[str]]]]:
-    """工程の出力を確かめ、誤りと、欠けた文脈のキーと取り場所の組（工程の定義の `outputs` の順）を返す。"""
-    return _validate_stage(stage, obj, stage.output_ref, stage.outputs, "outputs", "出力")
+def generated_outputs(stage_id: str) -> tuple[str, ...]:
+    """今の工程の定義が、NDF が作ると指定した出力のキー（`metadata.ndf.generated_outputs`。ステートマシンの写しは持たない）。"""
+    meta = _ndf_meta(contracts.load_json(f"{STAGES_DIR}/{stage_id}.json"))
+    return tuple(meta["generated_outputs"]) if "generated_outputs" in meta else ()
+
+
+def check_stage_output(
+    stage: stages.StageDef, obj: Any, *, handwritten: bool = False
+) -> tuple[list[str], list[tuple[str, Optional[str]]]]:
+    """工程の出力を確かめ、誤りと、欠けた文脈のキーと取り場所の組（工程の定義の `outputs` の順）を返す。
+
+    手で書いた出力（`handwritten`）には、NDF が作るキー（`generated_outputs`）を求めない。"""
+    skipped = generated_outputs(stage.id) if handwritten else ()
+    keys = tuple(k for k in stage.outputs if k not in skipped)
+    return _validate_stage(stage, obj, stage.output_ref, keys, "outputs", "出力")
 
 
 def validate_stage_output(stage: stages.StageDef, obj: Any) -> list[str]:
