@@ -59,7 +59,7 @@ contracts/
 | `src/ndf/core/plan/review_units_decide.py` | 変更 | #4369 の `Unit` に並列で使う欄を足す | — | — |
 | `src/ndf/progress/design_record.py` | 新設 | 承認の記録をイベントの値から組む・照らす・読む | `units_files`・`folding` | `build`・`stale`・`reset_drafts`・`approved_of`・`required`・`mismatches`・`without`・`converted`・`reapproved_of` |
 | `src/ndf/progress/stages.py` | 変更 | 同じ工程の済んだステップから、後のステップへ渡す出力を取る | — | `carried`・`carried_inputs`（新設） |
-| `src/ndf/progress/units_invoke.py` | 変更 | 単位の読み元を単位のファイルにし、承認と照らし、並列に流す | 下の 3 つ・`units_files` | `prepare`・`run_stage`（変更）・`advance`（新設） |
+| `src/ndf/progress/units_invoke.py` | 変更 | 単位の読み元を単位のファイルにし、承認と照らし、並列に流す | 下の 3 つ・`units_files`・`units_sync` | `prepare`・`run_stage`（変更）・`advance`（新設） |
 | `src/ndf/progress/units_queue.py` | 新設 | マージキューで待つ単位の状態を読む | `github` | `read`・`action` |
 | `src/ndf/progress/units_convert.py` | 新設 | この変更より前の表を単位のファイルへ変換する | `review_units_decide`・`units_files`・`design_record`・`units_sync` | `convert`・`compare` |
 | `src/ndf/progress/units_sync.py` | 新設 | 送り先を確かめ、承認した文書をスプリントブランチへ取り込む | `git`・`github`・`design_record` | `destination_errors`・`outgoing_errors`・`sync` |
@@ -612,7 +612,7 @@ contracts/
 `prepare` は次の順に見る。上で止まれば下は見ない。
 
 1. `required(snap)` が真なら、`approved_of`。無ければ始めない
-2. #4369 の開始前の確かめを呼ぶ（取得・配布先として宣言したブランチでないこと・ff・push）。単位ごとに流すか、#4369 のこれまでの経路（`impl` を 1 回）で流すかは、実装計画の「レビューの単位」の見出しか単位のファイルがあるかで決める。どちらも、手元と取得した先端の両方で調べる。承認が要るスプリントは、常に単位の経路にする。ここで決まった HEAD を `start_head` とし、3 より後の照合・読み込み・起動の判定は、すべてこのコミットを読む
+2. #4369 の開始前の確かめを呼ぶ（取得・配布先として宣言したブランチでないこと・ff・push）。単位ごとに流すか、#4369 のこれまでの経路（`impl` を 1 回）で流すかは、実装計画の「レビューの単位」の見出しか単位のファイルがあるかで決める。どちらも、手元と取得した先端の両方で調べる。承認が要るスプリントは、常に単位の経路にする。ここで決まった HEAD を `start_head` とし、3 より後の照合・読み込み・起動の判定は、すべてこのコミットを読む。`required` が真なら、取得と push は下の「承認が要る場合の開始前の push」に従う
 3. `required` が真なら、承認した文書が届いていることを確かめる。次のどちらかのコミットが、`start_head` と同じか `start_head` の祖先なら通る（`git merge-base --is-ancestor <コミット> <start_head>`）。どちらでもなければ始めない。SHA の一致は条件にしない。単位をマージするたびにスプリントブランチが進むためである
    - 記録の head
    - 取り込みのコミット（`design-sync.json` の、`record_head` が記録の head と同じもの）
@@ -620,6 +620,15 @@ contracts/
 5. 古い定義で単位の欄があれば、単位のファイルの有無にかかわらず `units_convert.convert` を呼ぶ。変換が完了して承認も要らなければ、`convert` は None を返す。変換がコミットを足したら `start_head` を取り直す。この変更より後に作ったスプリントで、欄があるのに単位のファイルが無ければ始めない
 6. `required` が真なら、記録の `targets.omitted` の課題を、課題ごとの単位（`units_decide.single`）にする。全部の課題が省いた課題で欄もファイルも無くても、単位の経路を続ける。`required` が偽で、欄もファイルも無ければ、#4369 の「これまでの経路」（単位に分けず `impl` を 1 回）
 7. 単位のファイルを `units_files.check`（`docs` は偽）に通す。違反があれば始めない
+
+**承認が要る場合の開始前の push**: `required` が真のとき、開始前の確かめは、送り先に無いコミットを送らない。#4369 の push は手元の HEAD をそのまま送るので、承認の後に手元だけで足したコミットまで公開されるためである。
+
+- 最初に `units_sync.destination_errors` を通し、取得・不在の確かめ・push の相手を、返った URL にする。リモート名は使わない。取得は `git fetch --no-tags -- <URL> +refs/heads/<ブランチ>:refs/remotes/<remote>/<ブランチ>` で、#4369 の取得を置き換える
+- 取得した先端が手元の HEAD を含めば（手元が遅れていれば ff で進めた後）、送るものは無いので push しない
+- 手元に先端より後のコミットがあれば、push せずに `stopped`（`refused`）。コミットを示し、公開してよければ利用者が push してから打ち直すと書く。実際の行数の追記のコミットも同じである
+- 送り先にブランチが無く（`git ls-remote --exit-code` が終了コード 2）、手元の HEAD が記録の head そのものなら、その SHA を push してブランチを作り直す。マージした head ブランチを GitHub が自動で削除する設定が当たる。送る内容は設計 PR で公開済みである。HEAD が記録の head でなければ `stopped`（`refused`）
+
+`test_units_sync.py` では、手元だけのコミットがあるときに push が起きないこと、先端と同じなら push しないこと、削除されたブランチを記録の head でだけ作り直すこと、取得と push の引数が照合した URL であることを確かめる。
 
 「この変更より後に作ったスプリント」は、保存した定義の工程「実装」の `optional_inputs` に `plan_omitted` があることで見分ける。無いものが「古い定義」である。この変更が足すキーだからである。
 
@@ -869,7 +878,7 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 
 `sync` の手順は次のとおりである。取り込むファイルは、単位のファイルと実装計画と、番号の並びが一致する `-requirements.md`・`-design.md`・`-design-detail.md` である。記録の head にあるファイルは中身を取り込む。
 
-削除するファイルもある。`git diff --no-renames --diff-filter=D <merge-base> <記録の head>`（`merge-base` は記録の head と手元の HEAD の共通の起点）のうち、名前が単位のファイルか上の 4 種類の文書の形で、番号の並びに記録の課題を含むものである。改名は、元の名前の削除と新しい名前の追加になる。
+削除するファイルもある。`git diff --no-renames --name-only -z --diff-filter=D <merge-base> <記録の head>`（`merge-base` は記録の head と手元の HEAD の共通の起点）の出力を NUL で区切ったパスのうち、名前が単位のファイルか上の 4 種類の文書の形で、番号の並びに記録の課題を含むものである。改名は、元の名前の削除と新しい名前の追加になる。
 
 1. `approved_of`。無ければ `stopped`
 2. `destination_errors`。1 件でもあれば `stopped`（`refused`）。返った URL を、手順 3 以降の取得と push のすべてに使う
@@ -877,10 +886,7 @@ push は、手元の HEAD までのコミットをすべて公開する。その
    - 先端が `commit` を含めば `ok`
    - 手元の HEAD だけが含めば（push の失敗の後）、手順 8 へ進む
    - どちらも含まなければ（取り込みのコミットを手元で消した後など）、`design-sync.json` を使わずに手順 4 から進める。記録が今の手元を表さないためである。手順 6 と 8 の確かめは同じに通るので、手元だけの別のコミットは送らない
-4. 手元のスプリントブランチが記録の head を祖先に持てば、取り込むものは無い。PR は読まず、送り先の先端を読む（手順 3 で読んでいればその値）。`ndf progress next` の経路は、設計 PR の head がスプリントブランチ自身なので、ここで終わる
-   - 先端が記録の head を含めば `ok`
-   - 送り先にブランチが無く（`git ls-remote --exit-code -- <照合した URL> refs/heads/<記録の sprint_branch>` が終了コード 2）、手元の HEAD が記録の head そのものなら、記録の head の SHA を照合した URL へ push し、先端が含むことを確かめて `ok`。マージした head ブランチを GitHub が自動で削除する設定が当たる。送る内容は設計 PR で公開済みの承認した HEAD までである
-   - 先端が含まない場合と、ブランチが無く手元の HEAD が記録の head でない場合は、`stopped`（`refused`）。手元だけの内容を、工程「実装」の開始前の push に公開させないためである。ほかの理由で読めない場合は `stopped`（`precondition`）
+4. 手元のスプリントブランチが記録の head を祖先に持てば、取り込むものは無いので、PR も送り先の先端も読まずに `ok`。`ndf progress next` の経路は、設計 PR の head がスプリントブランチ自身なので、ここで終わる。手元だけのコミットを公開しない確かめは、実際に送る工程「実装」の開始前の push が持つ（「始める前」の「承認が要る場合の開始前の push」）
 5. 記録の PR を読み、マージ済み・head が記録の head・base が記録の base を確かめる。base の正しい宛先は、通常は `pr_target("doc", <branch>)`、設計 PR の head がスプリントブランチ自身なら `pr_target("sprint")` である
 6. 作業場所を検査する。取り込むファイルに未コミットの変更があるか（`git status --porcelain --untracked-files=all -- <ファイル>` が空でない）、マージの途中（`MERGE_HEAD` がある）なら `stopped`（`precondition`）。ファイルを書き換えない。ただし、インデックスと作業ツリーがどちらも記録の head と同じファイル（削除するファイルは、どちらにも無い）は、未コミットの変更に数えない。手順 7 のコミットの前に中断した打ち直しが残す状態で、コミットしても利用者の内容は失われないためである。次に `merge-base` から両側の変更を調べる。スプリント側も変えていて中身が違うファイルがあれば `stopped`。送り先の先端を読み（手順 3 で読んでいればその値を使い）、手元の HEAD で「送るコミットの確かめ」を通す。手元だけの別のコミットがあれば、取り込みのコミットを作らずに止まる。コミットの後、`design-sync.json` を書く前に中断した打ち直しでは、そのコミットは対象のファイルだけを持つ 1 コミットなので、この確かめを通る
 7. 記録の head にあるファイルは `git checkout <記録の head> -- <ファイル>`、削除するファイルは `git rm -q --ignore-unmatch -- <ファイル>` する。差があれば `git commit -- <差のあるファイル>` でそのファイルだけをコミットする（ほかのステージ済みの変更は含めない）。差が無ければ（コミットの直後に中断した打ち直し）コミットしない。HEAD の SHA を `design-sync.json` に書く
@@ -895,7 +901,6 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 | 送り先の違い | `refused`。項目ごとの記録の値と今の値 |
 | 未マージ・head か base の違い | `precondition`（未マージ）・`refused` |
 | 取り込むファイルの未コミットの変更・マージの途中 | `precondition`。ファイル名 |
-| 手元は記録の head を含むが、送り先の先端が含まない（手順 4 の作り直しに当たらない） | `refused`。push しない |
 | 競合 | `base_conflict`。ファイル名 |
 | コミットの中身が承認と違う | `refused`。push しない |
 | push の拒否 | `precondition`。強制しない |
@@ -920,7 +925,7 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 次も確かめる。
 
 - 取り込みと関係ないステージ済みの変更は、コミットに入らない
-- 手元が記録の head を含み送り先が含まなければ `ok` にしない。送り先のブランチが削除され、手元の HEAD が記録の head なら、その SHA でブランチを作り直す。手元に後のコミットがあれば何も push しない
+- 手元が記録の head を含めば、`git fetch` も `git push` も打たずに `ok` にする
 - checkout の後（コミットの前）とコミットの後（`design-sync.json` の前）に中断した打ち直しは、どちらも `ok` まで進む。記録の head と違う未コミットの編集は止まる
 - 承認した差分が削除したファイルと改名した元のファイルは、取り込みの後に残らない。スプリント側がそのファイルを変えていれば止まる
 - push が拒否された後の打ち直しは、競合にせず送り直し、リモートに届くまで `ok` にしない
