@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from ndf.adapters.github import Viewer
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import journal, prior_decide, report_decide, store, threads
 
@@ -331,8 +332,8 @@ def test_open_threads_keep_only_our_replies_other_than_the_first_comment() -> No
             }
             return {"pullRequest": {"reviewThreads": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [node]}}}
 
-        def graphql(self, query, variables):
-            return {"viewer": {"login": "bot"}}
+        def viewer(self):
+            return Viewer("bot", 1)
 
     [thread] = threads.GitHubPort(Hub(), _Guard(), 7, _Refused).open_threads()
     assert thread.trusted and thread.replies == ("直した",)

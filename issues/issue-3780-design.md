@@ -110,7 +110,7 @@ flowchart TD
 
 | キー | 中身 |
 | --- | --- |
-| `issue_logins` | この状態ファイルで起票に使った login の並び。Issue を作る前に保存する |
+| `issue_account_ids` | この状態ファイルで起票に使った GitHub のアカウント ID の並び。Issue を作る前に保存する |
 | `issue_record_id` | 起票の記録のコメント（下の「起票の形」）の番号。2 回目からは、コメントの一覧を読まずにこの番号で読む |
 | `issue_list_full` | 作成の結果が分からない候補を確かめるときに、一覧がページ数の上限を超えた場合の、その上限の値。確かめ終えたら消す |
 
@@ -155,31 +155,45 @@ flowchart TD
 
 識別値は、状態ファイルの元の PR 番号と、指摘の本文の全体（空白をまとめ、大文字小文字をそろえた値）をつないだ文字列の SHA-256 の先頭 12 字である。本文の先頭だけを使うと、書き出しが同じ別の指摘が同じ値になる。指摘の発生の値（`occurrence`）は、指摘が戻ったときと別の保存先で引き継いだときに変わるので使わない。
 
-起票の前に、この指摘を扱う Issue がすでにあるかを調べる。調べる元は、元の PR に置く**起票の記録**である。これは元の PR（状態ファイルの `pr`）の専用のコメントで、作成を試みた指摘の識別値、試みた時刻、起票できた Issue の URL を持つ。状態の保存先が違っても同じコメントを読むので、別の保存先で打ち直しても、作成を試みたことが分かる。
+起票の前に、この指摘を扱う Issue がすでにあるかを調べる。調べる元は、元の PR に置く**起票の記録**である。これは元の PR（状態ファイルの `pr`）の専用のコメントで、作成を試みた指摘の識別値、試みた時刻、起票できた Issue の番号を持つ。URL ではなく番号を書き、読むときに対象リポジトリの Issue の URL に組み立てる。公開のリポジトリの所有者名が手元のアカウント名と同じだと、伏せ字が URL の所有者名を伏せ、URL を読み戻せなくなるためである。状態の保存先が違っても同じコメントを読むので、別の保存先で打ち直しても、作成を試みたことが分かる。
 
 起票は次の順で行う。コメントの読み書きは、起票の記録を置く元の PR（状態ファイルの `pr`）の番号で取る公開のロックの中で行う。記録のコメントの公開は今の PR 番号（`current_pr`）でロックを取るので、番号が違えば（PR を巻き直した後）、今の番号のロックに続けて元の番号のロックも取る。今の番号のロックだけでは、巻き直しの前に始まった公開と後の公開が、同じ起票の記録を同時に読むためである。
 
+このロックはマシンの中のファイルのロックである。排他できるのは、同じロックの置き場を使う 1 台のマシンの中の実行だけである。別のマシンや CI が同じ PR を同時に公開した場合は排他できず、同じ指摘を 2 件起票しうる。時間をおいた打ち直しは、起票の記録で重複を防ぐ。
+
 1. 起票の記録を読む
 2. 記録に無い識別値は、まだ作成を試みていない。起票する識別値を記録へ書き足してから作成する。試みた時刻は、コメントを書いた応答の更新時刻にする（実行するマシンの時計に依らない）。記録を書けなければ作成しない
-3. URL がある識別値は起票せず、その URL を使う
+3. URL がある識別値は、その Issue を読んで確かめる。このリポジトリの Issue で、作者が下に挙げる者で、本文に識別値の目印があれば、起票せずその URL を使う。違えば URL を捨てて次の順 4 で調べる。Issue を読めないか、作者の権限の照会が失敗すれば、URL を残したまま起票せず `issue_error` に理由を書く。照会の応答が利用上限によらない 403・404 の場合は失敗ではなく、書き込みの権限が無い作者として扱う（NDF が権限を読むときに共通の扱い）
 4. 識別値があって URL が無い候補は、作成の結果が分からない。次の順で調べる
     1. 識別値で本文を検索する（`GET search/issues?q=repo:{owner}/{repo} is:issue "<識別値>" in:body`）。時間が経っていれば、検索に反映されている
     2. 見つからなければ、検索の反映が遅れている場合のために、Issue の一覧を新しく作られた順に読み、作成時刻が試みた時刻より前のものに達したら止める（`repos/{owner}/{repo}/issues?state=all&sort=created&direction=desc&per_page=100`）。作成時刻が試みた時刻以後（同じ時刻を含む）の Issue をすべて読んでも無ければ、記録の試みた時刻を書き直してから起票する
-5. 起票できた URL を記録へ書く。GitHub が作成をはっきり拒んだ（4xx）識別値は、記録から消す
+5. 起票できた Issue の番号を記録へ書く。GitHub が作成をはっきり拒んだ（4xx）識別値は、記録から消す
 
-読む範囲を試みた時刻以後に作られた Issue に限るのは、無関係な Issue の更新が多いリポジトリでも、打ち直しで確かめ終えられるようにするためである。一覧がページ数の上限 `github.list-pages` を超えた場合は、`issue_error` に理由を書き、`issue_list_full` にその上限の値を残して保留する。`issue_list_full` がある間、自動の公開は一覧を読まない。検索で見つかるか、今の `github.list-pages` がその値より大きいか、利用者が `ndf cross-review report` を打てば進む。本文の HTML コメントの中の文字列も検索に当たることは、2026-11-27 にこのリポジトリで確かめた。
+読む範囲を試みた時刻以後に作られた Issue に限るのは、無関係な Issue の更新が多いリポジトリでも、打ち直しで確かめ終えられるようにするためである。一覧がページ数の上限 `github.list-pages` を超えた場合、確かめ終えられなかった候補は起票せずに保留する。読めたページで見つかった Issue は使う。見つからない候補は `issue_error` に理由を書き、`issue_list_full` にそのときの上限の値を残す。
+
+`issue_list_full` がある間、自動の公開は一覧を読まない。保留した候補が進むのは、次の場合である。
+
+- 識別値の検索で Issue が見つかる
+- `github.list-pages` を `issue_list_full` の値より大きくする。自動の公開も一覧を読み直す
+- 利用者が手動で `ndf cross-review report` を実行する。現在のページ上限まで一覧を再取得するだけで、上限は解除しない。上限までに確認できなかった候補は保留する
+
+本文の HTML コメントの中の文字列も検索に当たることは、2026-11-27 にこのリポジトリで確かめた。
 
 起票の記録と Issue は、次に挙げる作者のものだけを使う。
 
-- リポジトリの所有者・メンバー・共同作業者（`author_association` が `OWNER`・`MEMBER`・`COLLABORATOR`）
-- 実行している login 自身
-- `issue_logins` にある login。bot が起票した後に、人のアカウントで打ち直しても見つけるためである
+- リポジトリの所有者（`author_association` が `OWNER`）と、対象リポジトリで write 以上の権限を持つメンバー・共同作業者（`MEMBER`・`COLLABORATOR`。`GitHub.trusts` で権限を読んで確かめる）
+- 実行しているアカウント自身
+- `issue_account_ids` にあるアカウント。bot が起票した後に、同じ状態の保存先を人のアカウントで打ち直しても見つけるためである
 
-公開のリポジトリで、第三者が目印を書いた Issue やコメントが起票を止めないようにする。目印を含むだけでは、同じ指摘を扱う Issue とはみなさない。次のすべてを満たす Issue だけを使う。
+実行しているアカウントと `issue_account_ids` は、login ではなくアカウント ID で照らす。手放された login は別のアカウントが取得でき、そのアカウントが作った Issue を起票済みとして採用してしまうためである。
+
+公開のリポジトリで、第三者が目印を書いた Issue やコメントが起票を止めないようにする。検索と一覧で見つけた Issue は、目印を含むだけでは同じ指摘を扱うものとみなさない。次のすべてを満たす Issue だけを使う。
 
 - Pull Request でない（REST の一覧は Pull Request も返す）
 - 本文の最後の空でない行が、目印だけの行である
-- 引用（`>` で始まる行）でもコードブロックの中でもない所に、元の PR の URL と、指摘の本文（伏せ字を通した後の形）がある
+- 引用（`>` で始まる行）でもコードブロックの中でもない所に、元の PR の URL（末尾の `/pull/<番号>` で見る）がある
+
+指摘の本文は比べない。伏せ字の結果は実行する環境で変わり、コードブロックや引用だけの指摘は比べる文が残らないためである。どの指摘の Issue かは、目印の識別値が表す。起票の記録の URL が指す Issue は、起票の後に本文へ書き足されることがあるので、目印の位置と PR の URL を問わない。
 
 条件を満たす Issue がある指摘は起票せず、その URL を `issue` に書く。
 
@@ -187,11 +201,13 @@ flowchart TD
 
 | 呼び出し | 回数 |
 | --- | --- |
-| 起票の記録の読み取り（GET） | 1 回。`issue_record_id` が無いときは、元の PR のコメントの一覧をページごとに読んで探す |
+| 起票の記録の読み取り（GET） | 1 回。`issue_record_id` が無いときは、元の PR のコメントの一覧をページごとに読み、記録が見つかったページで終える |
+| 記録の URL が指す Issue の読み取り（GraphQL） | 状態ファイルの行に `issue` がなく、起票の記録に URL がある候補を、`github.graphql-batch` 件（100 件）ずつ 1 回で読む。保存先が同じかは問わない。別の保存先で打ち直したときのほか、起票の記録に URL を書いた後、状態を保存する前に中断して同じ保存先で打ち直したときにも起きる |
 | 起票の記録の書き込み | 作成の前に 1 回、作成の結果を書くのに 1 回 |
+| 作者の権限の読み取り（GET） | 実行のアカウントと `issue_account_ids` に無い `MEMBER`・`COLLABORATOR` の作者ごとに最大 1 回 |
 | 識別値の検索（GET） | 作成の結果が分からない候補ごとに 1 回 |
 | 新しく作られた順の Issue の一覧（GET） | 作成の結果が分からない候補が検索で見つからないときだけ。試みた時刻に達するまでのページで、最大 `github.list-pages` 回。同じ起動の候補で共有する |
-| 実行している login の取得 | 同じ起動でまだ読んでいないときだけ、最大 1 回。スレッドの書き手を確かめるために読む `viewer`（`threads.GitHubPort`）を使い回す |
+| 実行しているアカウントの取得 | 同じ起動でまだ読んでいないときだけ、最大 1 回。`GitHub.viewer` で login とアカウント ID を一度に読み、スレッドの書き手の確認（`threads.GitHubPort`）と起票で同じ結果を使う。ID を読めなければ起票しない |
 | Issue の作成（POST） | 起票の記録に無いか、無いと確認できた候補ごとに、最大 1 回 |
 
 記録か検索か一覧の読み取りに失敗した場合と、無いと確認できない場合は起票せず、`issue_error` に理由を書いて次の起動か `ndf cross-review report` で打ち直す。検索の API には 1 分あたりの回数の上限があるので、上限に当たった残りの候補も同じ扱いにする。
@@ -310,7 +326,7 @@ flowchart TD
 | --- | --- |
 | 収束と判定されるのが早くなる。変えていない行の major が直されずに残る | 記録のコメントと結果の `items` に必ず出す |
 | MVV の指摘で止まる場合が減る（決定 4） | 残した指摘を記録のコメントと `decisions` に出し、リリース承認で人が確かめる |
-| 起票は GitHub への書き込みが増える（Issue と、元の PR の起票の記録のコメント） | 同じ指摘は 1 回だけ起票する。公開向けの伏せ字の処理を通す。起票の記録には識別値・時刻・URL だけを書く |
+| 起票は GitHub への書き込みが増える（Issue と、元の PR の起票の記録のコメント） | 同じ指摘は 1 回だけ起票する。公開向けの伏せ字の処理を通す。起票の記録には識別値・時刻・Issue の番号だけを書く |
 | #4363・#2468 と同じファイルを変える | #4363 の後、#2468 の前に実装する |
 
 ### 代表のリポジトリでの振る舞い
@@ -345,7 +361,7 @@ flowchart TD
 | 確認できない指摘と判定対象外 | 判定を依頼して確認できなかった、変えていない行の major は修正へ回る（直さずに残した指摘の出し直しも `parked` を外す）。判定対象外の指摘は、回答が無いことを理由に進めない | 2 つを区別せずに回答の無い指摘をすべて進めるか、すべて残すと落ちる |
 | 起票の伏せ字 | 題の切り出しの長さの境目をまたぐ偽の秘密を本文に持つ指摘を起票すると、題にも本文にも秘密の断片が残らない | 題を切り出してから伏せると落ちる |
 | 承認の要る操作の指摘（線引きの順 1） | 必ず人の承認が要る操作の指摘は、変えていない行の major で起票する種類を持っていても `parked` が付かず、起票されず、人の判断を待つ。以前の確認で指摘の種類（`check.tracks`）が付いた行、直さずに残した行に、後の出し直しで承認の要る操作が指摘された場合も同じで、`parked` が外れる | 線引きの順で承認の要る操作を後ろに置くと落ちる。残っている `check.tracks` や `parked` を優先すると落ちる |
-| I3 | 起票の失敗で指摘が記録に残り、打ち直しで 1 回だけ起票する。起票に成功して URL の保存に失敗した後の打ち直しは、同じ保存先でも別の保存先でも、PR を巻き直した後でも、URL を戻して起票しない。検索に反映される前は一覧で見つける。無関係な Issue の更新が多くても、読むページは試みた時刻より後に作られた分だけである。起票の記録を書けなければ起票しない。作成を試みていない候補だけなら、検索も Issue の一覧の取得もしない。`author_association` が当たらない bot で起票し、同じ保存先を別のアカウントで打ち直しても同じである。目印を引用しただけの Issue と、目印を持つ Pull Request は使わない。`issues.primary` が `github` でないか未設定なら起票しない | 失敗で行を落とすと落ちる。打ち直しで 2 件起票すると落ちる。作成の前に記録を書かないと落ちる。記録を状態ファイルだけに持つと落ちる。元の PR の作成時刻から読むと落ちる。作成を試みていない候補で検索すると落ちる。作った人で絞ると落ちる。`issue_logins` を読まないと落ちる。読み済みの login があるのに取り直すと落ちる。目印の一致だけで URL を使うと落ちる。未設定で起票すると落ちる |
+| I3 | 起票の失敗で指摘が記録に残り、打ち直しで 1 回だけ起票する。起票に成功して URL の保存に失敗した後の打ち直しは、同じ保存先でも別の保存先でも、PR を巻き直した後でも、URL を戻して起票しない。検索に反映される前は一覧で見つける。無関係な Issue の更新が多くても、読むページは試みた時刻より後に作られた分だけである。起票の記録を書けなければ起票しない。作成を試みていない候補だけなら、検索も Issue の一覧の取得もしない。`author_association` が当たらない bot で起票し、同じ保存先を別のアカウントで打ち直しても同じである。目印を引用しただけの Issue と、目印を持つ Pull Request は使わない。`issues.primary` が `github` でないか未設定なら起票しない | 失敗で行を落とすと落ちる。打ち直しで 2 件起票すると落ちる。作成の前に記録を書かないと落ちる。記録を状態ファイルだけに持つと落ちる。元の PR の作成時刻から読むと落ちる。作成を試みていない候補で検索すると落ちる。作った人で絞ると落ちる。`issue_account_ids` を読まないと落ちる。login の一致だけで信用すると落ちる。読み済みの利用者があるのに取り直すと落ちる。目印の一致だけで URL を使うと落ちる。未設定で起票すると落ちる |
 
 ## 設計の結果
 
@@ -355,6 +371,14 @@ flowchart TD
 | --- | --- | --- | --- |
 | #3780 | 実装する | — | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/round_scope.py`、`plugins/ndf/src/ndf/domains/crossreview/changes.py`、`plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/leftover.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/journal.py`、`plugins/ndf/src/ndf/domains/crossreview/finish_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/report_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/threads.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/contracts/limits/cross-review.max-rounds.json`、`plugins/ndf/contracts/limits/cross-review.max-rounds.design.json`（新設）、`plugins/ndf/contracts/schemas/io/cross-review.result.schema.json`、`plugins/ndf/contracts/schemas/io/cross-review.args.schema.json`、`plugins/ndf/skills/cross-review/SKILL.md`、`plugins/ndf/skills/cross-review/docs/01-state-and-review.md`、`plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_leftover.py`（新設）、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_report.py`、`plugins/ndf/src/ndf/domains/crossreview/local_scope.py`（新設）、`plugins/ndf/src/ndf/domains/crossreview/prior_decide.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/contracts/limits/github.list-pages.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/tests/domains/crossreview/test_crossreview_prior.py`、`plugins/ndf/tests/domains/crossreview/conftest.py` |
 
+## 設計との食い違い
+
+承認された設計から、次の 1 点を変えた。2026-11-27 にこのスプリントの conductor（AI）が決めた。利用者の承認ではない。信用する作者を狭める側の変更である。
+
+| 承認された設計 | 変えた後 | 理由 |
+| --- | --- | --- |
+| 起票の記録と Issue の作者は、`author_association` が `MEMBER`・`COLLABORATOR` なら信用する | 対象リポジトリで write 以上の権限を持つときだけ信用する（`GitHub.trusts`）。実行しているアカウントと `issue_account_ids` の扱いは変えない | 権限を持たないメンバー・共同作業者の書いた記録や Issue が、起票の判断に使われる |
+
 ## 未確認のまま残ること
 
 | 項目 | 内容 |
@@ -363,6 +387,8 @@ flowchart TD
 | ラウンド数の減り方 | リリース後の実行の記録で分かる |
 | 起票される件数 | 判定役の分類の偏りは動かすまで分からない。リリース後の実行の起票を数える |
 | 読んでいないレビュー担当の AI を足したラウンド | 範囲は全差分に戻るが、決定 2 により線引きは当たるので、足した相手役が挙げた、変えていない行の major は直さずに残る。要求仕様の受け入れ条件 1・2 の読み合わせを、設計の承認で確かめる。詳細設計は、線引きの起点を「相手役の顔ぶれを問わず、全員が結果を返した最後のラウンド」とする |
+| 別のマシンや CI から同じ PR を同時に公開した場合 | 公開のロックは 1 台のマシンの中だけに効くので、同じ指摘を 2 件起票しうる。マシンをまたぐ排他の方式は定めていない |
+| `author_association` が当たらない bot が起票した後、別の状態の保存先で別のアカウントが打ち直した場合 | `issue_account_ids` は状態ファイルにしか無いので、bot の記録と Issue を信用できず、同じ指摘を 2 件起票しうる。保存先をまたいで信用するアカウントの定め方は決めていない |
 | 起票の記録のコメントを人が編集した場合 | 時刻の無い項目の「試みた時刻」はコメントの更新時刻から取るので、人が編集すると時刻が後ろへ動く。作成済みの Issue が一覧の読み取りから漏れ、検索にも反映されていなければ、2 件目を作りうる。この場合の扱いは定めていない |
 
 ## 外部の調査

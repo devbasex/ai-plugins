@@ -442,10 +442,9 @@ class GitHubPort:
     ):
         """`errors` は GitHub が断ったときの例外の型（`github.GitHubError`）。`sleep` はテストが差し替える。
         `block`（`WriteGate.block`）へ二次レート制限の打ち直しの待ちを毎回知らせ、ほかのプロセスの書き込みも止める（#4016）。
-        信頼できる書き手は、今の実行の認証の login（GraphQL の `viewer`。1 回だけ読む）と同じ書き手だけである。"""
+        信頼できる書き手は、今の実行の認証の login（`GitHub.viewer`。起票と読み取りを共有する）と同じ書き手だけである。"""
         self.hub, self.publisher, self.pr, self.errors = hub, publisher, int(pr), errors
         self.sleep, self.block = sleep, block
-        self._me: Optional[str] = None
         self._pr_head: Optional[str] = None
         self._files: Optional[frozenset[str]] = None
         self._threads: Optional[dict[int, tuple[str, bool]]] = None
@@ -629,9 +628,7 @@ class GitHubPort:
         """書き手が今の実行の認証の login と同じか（cross-review 自身が書いたもの）。PR にコメントできるほかの人が同じ書式で
         書いた本文を、修正担当へ渡さない（PR 3944 の r1-3）。"""
         login = _text(author.get("login")) if isinstance(author, Mapping) else ""
-        if self._me is None:
-            self._me = _text(self.hub.graphql(VIEWER, {})["viewer"]["login"])
-        return bool(login) and login == self._me
+        return bool(login) and login == self.hub.viewer().login
 
     def _thread_of(self, comment_id: int) -> tuple[str, bool]:
         if self._threads is None or comment_id not in self._threads:
@@ -730,6 +727,4 @@ def path_unresolved(status: int, reasons: Sequence[str]) -> bool:
     return _unprocessable(status, reasons, (_PATH_UNRESOLVED,))
 
 
-# 今の実行の認証の login
-VIEWER = "query{viewer{login}}"
 RESOLVE = "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}"

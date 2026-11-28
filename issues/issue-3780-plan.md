@@ -75,12 +75,12 @@
 
 ### Task 8: 起票と起票の記録
 - **対象ファイル:** `leftover.py`（新設）、`leftover_decide.py`、`github.list-pages.json`、`test_crossreview_leftover.py`
-- **変更内容:** `files_issue`・`identity`・`issue_parts`・`trusted`・`matches`・起票の記録・`file_issues`・`primary_of`。作成の後に記録の結果の書き込みができなかった打ち直しは、コメントの更新時刻を試みた時刻にして Issue を探し、2 件作らないことをテストする。**指摘の全文の秘密を伏せてから題を切り出す。** 題の切り出しの長さの境目をまたぐ偽の秘密を持つ指摘を起票し、題にも本文にも断片が無いことを確かめるテストを置く。偽の秘密はテストの中で文字列を連結して作り、`scripts/check-repo-secrets.py` に当たらないようにする
+- **変更内容:** `files_issue`・`identity`・`issue_parts`・`trusted`・`matches_finding`・起票の記録・`file_issues`・`primary_of`。作成の後に記録の結果の書き込みができなかった打ち直しは、コメントの更新時刻を試みた時刻にして Issue を探し、2 件作らないことをテストする。**指摘の全文の秘密を伏せてから題を切り出す。** 題の切り出しの長さの境目をまたぐ偽の秘密を持つ指摘を起票し、題にも本文にも断片が無いことを確かめるテストを置く。偽の秘密はテストの中で文字列を連結して作り、`scripts/check-repo-secrets.py` に当たらないようにする
 - **満たす受け入れ条件:** 3780:2
 - **進め方:** GitHub を差し替える偽物で失敗するテスト → 最小実装 → 整理
 
 ### Task 9: 記録のコメント・結果・引き継ぎへの組み込み
-- **対象ファイル:** `report_decide.py`、`prior_decide.py`、`journal.py`（`carry`）、`threads.py`（`viewer`）、`cli.py`、`cross-review.result.schema.json`、`conftest.py`、`test_crossreview_report.py`、`test_crossreview_prior.py`
+- **対象ファイル:** `report_decide.py`、`prior_decide.py`、`journal.py`（`carry`）、`cli.py`、`cross-review.result.schema.json`、`conftest.py`、`test_crossreview_report.py`、`test_crossreview_prior.py`
 - **変更内容:** 表の残し方と URL、一覧の `parked`・`issue`、`Hub.leftovers`、`_github_hub`・`_publish`・`_post_report`・`_report`・`cmd_report`・`_with_leftovers`
 - **満たす受け入れ条件:** 3780:2
 - **進め方:** 失敗するテスト（結果の `items` に `disposition` と `url`、起票の失敗の後の打ち直しで 1 回だけ起票、別の保存先は残した指摘を引き継がず URL を戻す）→ 最小実装 → 整理
