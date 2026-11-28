@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ndf.contracts import facts
+from ndf.contracts import facts, writing
 from ndf.domains.crossreview import cli, criteria_decide, drive, fixer, report_decide, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records.mvv import Snapshot
@@ -209,7 +209,8 @@ def _between_findings_and_result(lines: list[str]) -> list[str]:
 def _fixer_lines() -> list[str]:
     """文書を変えた PR の修正担当への基準の行（`wt` は doc.md を変える）。"""
     block = criteria_decide.fixer_block(()) + criteria_decide.document_block(criteria_decide.FIXER, True)
-    return "\n".join(block).splitlines()
+    # `doc.md` は設計書でも要求仕様のコピーでもないので、書き分けの小見出しを外した基準が渡る（#4543）
+    return writing.without_distinction("\n".join(block)).splitlines()
 
 
 def test_issue_4030_ci_only_worktree_tells_the_fixer_not_to_run_tests(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
@@ -328,6 +329,8 @@ def test_the_unit_file_reaches_the_reviewer_and_the_fixer_prompts(tmp_path: Path
         snapshot=None,
         mvv=None,
         documents=False,
+        distinction=False,
+        requirements_copy=False,
     )
     prep = SimpleNamespace(scope=scope_decide.Scope(scope_decide.FULL, None, ()), diff=tmp_path / "round1.diff", previous=None)
     prompts = {

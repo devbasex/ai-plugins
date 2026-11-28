@@ -9,6 +9,7 @@ from ndf.contracts import worker_kinds, writing
 from ndf.core import worker
 
 _SKILLS = identity.ROOT / worker.SKILLS_DIR
+_DISTINCTION_KINDS = {"design", "design-detail", "design-check-fix", "requirements"}
 
 
 def _skills(tmp_path, name="fix", text="# fix の手順"):
@@ -49,11 +50,24 @@ def test_a_missing_procedure_stops_before_launch(tmp_path):
 
 def test_issue_4285_only_kinds_that_read_document_style_get_the_criteria(tmp_path):
     # 受け入れ条件 7・11: 文書を書く作業（kinds.json で document-style を読む作業）だけに、文書の基準の全文を渡す
+    # #4543 の決定 6: 書き分けの小見出しは設計と要求を書く 4 つの作業だけに渡し、ほかへは外した全文を渡す
+    full, stripped = writing.criteria(), writing.without_distinction(writing.criteria())
     for kind, row in worker_kinds.work_kinds().items():
         text = worker.system_prompt(kind, tmp_path / "state", _SKILLS)
-        assert (writing.criteria() in text) is ("document-style" in row["skills"]), kind
+        writes = "document-style" in row["skills"]
+        assert (full in text) is (writes and kind in _DISTINCTION_KINDS), kind
+        assert (stripped in text) is (writes and kind not in _DISTINCTION_KINDS), kind
+        assert writes or kind not in _DISTINCTION_KINDS, kind
     # 作業の定義に無い作業種別の規則文は、規則と手順書だけのまま
-    assert writing.criteria() not in worker.system_prompt("sweep", tmp_path / "state", _SKILLS)
+    sweep = worker.system_prompt("sweep", tmp_path / "state", _SKILLS)
+    assert full not in sweep and stripped not in sweep
+
+
+def test_issue_4543_unpaired_markers_stop_before_launch(tmp_path, monkeypatch):
+    monkeypatch.setattr(writing, "criteria", lambda: f"{writing.DISTINCTION_BEGIN}\n")
+    with pytest.raises(worker.WorkerError) as err:
+        worker.system_prompt("plan-to-spec", tmp_path, _SKILLS)
+    assert err.value.kind == "precondition"
 
 
 def test_issue_4285_the_rules_of_a_kind_without_documents_are_unchanged(tmp_path):

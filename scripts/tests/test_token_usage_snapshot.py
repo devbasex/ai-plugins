@@ -333,8 +333,10 @@ def test_no_comparable_version_says_the_difference_was_not_computed():
     """比べる版が無いときに、差が ±30% の内だったと書かない（観測値の無い状態を「差が小さい」と読ませない）。"""
     import importlib.util
 
+    sys.path.insert(0, str(SCRIPT.parent))
     spec = importlib.util.spec_from_file_location("token_usage_snapshot", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod  # dataclass が自分のモジュールを引く
     spec.loader.exec_module(mod)
     assert mod._reading_lines([], []) == ["前の版と比べられる版が無いため、版ごとの差は算出できなかった（PR を作った会話のある版: 0 件）。"]
     one = [({"version": "1.0.0"}, 1.0, None)]

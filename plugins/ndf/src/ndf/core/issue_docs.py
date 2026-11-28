@@ -1,6 +1,6 @@
 """課題の文書の名前（#4337 の決定 2）。
 
-設計書のパスの形・名前に含む課題の番号・実装計画のパスの書式を 1 か所で持つ。`ndf loop design-tests`・
+設計書のパスの形・名前に含む課題の番号・実装計画と要求仕様のコピーのパスの書式を 1 か所で持つ。`ndf loop design-tests`・
 リファクタリングの既定（`progress.refactor_values`）・ドキュメント再構成（`domains.docrebuild`）がここを読む。
 """
 
@@ -13,6 +13,9 @@ DESIGN_FILE = re.compile(r"^issues/issue-(\d+(?:-\d+)*)-design[^/]*\.md$")
 PLAN_FILE = "issues/issue-{number}-plan.md"
 # 読む側の実装計画のパス。名前の番号の並びは設計書と同じ
 PLAN_PATH = re.compile(r"^issues/issue-(\d+(?:-\d+)*)-plan\.md$")
+# 要求仕様のコピー（課題の本文から作る。課題ごとに 1 本）のパスの書式と、読む側の形
+REQUIREMENTS_FILE = "issues/issue-{number}-requirements.md"
+REQUIREMENTS_PATH = re.compile(r"^issues/issue-(\d+)-requirements\.md$")
 
 
 def _name_numbers(pattern: re.Pattern[str], path: str) -> frozenset[int]:
@@ -28,3 +31,8 @@ def design_issues(path: str) -> frozenset[int]:
 def plan_issues(path: str) -> frozenset[int]:
     """パスが実装計画の形（`issues/issue-<番号の並び>-plan.md`）なら、名前の番号の集合を返す。違えば空集合。"""
     return _name_numbers(PLAN_PATH, path)
+
+
+def requirements_issues(path: str) -> frozenset[int]:
+    """パスが要求仕様のコピーの形（`issues/issue-<番号>-requirements.md`）なら、課題の番号 1 つの集合を返す。違えば空集合。"""
+    return _name_numbers(REQUIREMENTS_PATH, path)

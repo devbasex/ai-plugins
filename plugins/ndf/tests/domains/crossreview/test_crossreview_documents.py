@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from ndf import contracts
 from ndf.contracts import writing
-from ndf.domains.crossreview import criteria_decide, drive, store
+from ndf.domains.crossreview import changes, criteria_decide, drive, fixer, settings, store
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.crossreview.journal import FindingJournal
 
 from ._repos import BRANCH, Repos, commit, sh
 from .test_crossreview_run import FAIL, PR, Recording, _run, _state
@@ -29,6 +31,11 @@ def code_wt(repos: Repos, tmp_path: Path) -> Path:
 
 def _limit(head: str, diff: Path) -> str:
     return criteria_decide._table()["document"]["since"].format(since=head, diff=diff)
+
+
+def _stripped() -> str:
+    """設計書も要求仕様のコピーも変えない PR へ渡す基準（#4543 の決定 6）。"""
+    return writing.without_distinction(writing.criteria().rstrip())
 
 
 def _prompt(fake: Recording, name: str) -> str:
@@ -51,7 +58,7 @@ def test_issue_4285_document_pr_gives_the_criteria_to_both_prompts(wt: Path, tmp
     fake = Recording(tmp_path / "st", {"codex": [[MAJOR], []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok")
-    assert all(writing.criteria().rstrip() in p for _, _, p in fake.prompts)
+    assert all(_stripped() in p for _, _, p in fake.prompts)
     number = criteria_decide._table()["document"]["number"]
     assert all(f"\n{number}. " in p for _, _, p in fake.prompts)
 
@@ -61,7 +68,7 @@ def test_issue_4285_documents_are_read_from_the_whole_diff(repos: Repos, wt: Pat
     fake = Recording(tmp_path / "st", {"codex": [[MAJOR], []], "kiro": [[], []]})
     _run(capsys, monkeypatch, fake, wt)
     assert ".md" not in fake.inputs["round2.diff"]
-    assert writing.criteria().rstrip() in _prompt(fake, "round2-codex.out")
+    assert _stripped() in _prompt(fake, "round2-codex.out")
 
 
 def test_issue_4285_major_is_limited_from_the_second_round(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -191,3 +198,30 @@ def test_issue_3955_claude_first_seated_in_a_full_round_is_not_limited(wt: Path,
     seat = _prompt(fake, "round2-claude.out")
     assert criteria_decide._table()["document"]["since"].split("{")[0] not in seat
     assert _state(state_dir)["rounds"][-1]["scope"] == "full"
+
+
+@pytest.mark.parametrize(
+    ("path", "distinction"),
+    [("issues/issue-7-design.md", True), ("issues/issue-7-requirements.md", True), ("notes.md", False)],
+)
+def test_issue_4543_the_distinction_goes_only_with_design_documents(tmp_path: Path, monkeypatch, path: str, distinction: bool) -> None:
+    """設計書か要求仕様のコピーを変える PR だけが、レビュー担当と修正担当へ書き分けの小見出しを渡す（git は起動しない）。"""
+    monkeypatch.setattr(changes, "changed", lambda *_: changes.Changed((path,), {}))
+    monkeypatch.setattr(changes, "review_diff", lambda *_: "")
+    g = SimpleNamespace(rev_parse=lambda *_: "head", merge_base=lambda *_: "base")
+    cfg = settings.RunConfig(tmp_path, BRANCH, "origin/main", PR, tmp_path, False, ("codex",))
+    run = drive._Run(cfg, g, store.state_pr(tmp_path, PR), {}, FindingJournal(), [], [], [])  # type: ignore[arg-type]
+    prep = drive._prepare_round(run, 1)
+    review = drive._review_prompt(run, 1, prep)
+    fix = fixer._fix_prompt(run, [{**MAJOR, "id": "r1-1", "path": path}], (), tmp_path / "result.json")
+    full = writing.criteria().rstrip()
+    for prompt in (review, fix):
+        assert (full in prompt) is distinction
+        assert (_stripped() in prompt) is not distinction
+    # 要求仕様のコピーを変える PR だけが、修正担当へコピーへの指摘の扱いを、基準の全文より前に渡す（決定 7）
+    handling = criteria_decide.fixer_requirements_copy()
+    copy = path.endswith("-requirements.md")
+    assert handling not in review
+    assert (handling in fix) is copy
+    if copy:
+        assert fix.index(handling) < fix.index(full)

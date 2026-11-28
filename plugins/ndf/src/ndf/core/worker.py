@@ -232,16 +232,23 @@ def skills_section(kind: str, skills_dir: Path) -> str:
     return "\n\n".join(parts)
 
 
+def writing_section(kind: str) -> str:
+    """文書の基準のセクション。文書を書かない作業種別は空。基準が壊れていれば `WorkerError`（precondition）。"""
+    row = worker_kinds.work_kinds().get(kind, {})  # noqa: NDF502 利用者の入力: 定義に無い作業種別（sweep など）は文書を書かない
+    if WRITING_SKILL not in row.get("skills", ()):  # noqa: NDF502 利用者の入力: 定義に無い作業種別は上で空にした
+        return ""
+    try:
+        text = writing.criteria()
+        return text if row.get("distinction") else writing.without_distinction(text)  # noqa: NDF502 省けば偽の任意のキー
+    except writing.CriteriaBroken as exc:
+        raise WorkerError("precondition", str(exc)) from None
+
+
 def system_prompt(kind: str, state_dir: Path, skills_dir: Path, sources: Sequence[Source] = ()) -> str:
     """worker へ渡す規則文（規則・手順書・書き手の付いた本文）。"""
     rules = "\n".join(WORK_RULES).format(pr_body_draft=pr_body_draft(state_dir), state_dir=shlex.quote(str(state_dir)))
     procedure = "\n".join(KIND_RULES.get(kind, ()))  # noqa: NDF502 利用者の入力: 手順を足さない作業種別は空
-    parts = [rules, procedure, skills_section(kind, skills_dir)]
-    if WRITING_SKILL in worker_kinds.work_kinds().get(kind, {}).get("skills", ()):  # noqa: NDF502 利用者の入力: 定義に無い作業種別（sweep など）は文書を書かない
-        try:
-            parts.append(writing.criteria())
-        except writing.CriteriaBroken as exc:
-            raise WorkerError("precondition", str(exc)) from None
+    parts = [rules, procedure, skills_section(kind, skills_dir), writing_section(kind)]
     if sources:
         parts.append("## 書き手の付いた本文\n" + "\n\n".join(quote_source(s) for s in sources))
     return "\n\n".join(p for p in parts if p)

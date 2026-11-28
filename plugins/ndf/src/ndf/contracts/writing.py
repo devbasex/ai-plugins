@@ -11,6 +11,9 @@ CRITERIA = "data/writing-criteria.md"
 # 通じない文の 4 つの型と 2 つの区分のセクションの見出し
 TYPES_HEADING = "## 3. 読み手に通じない文の 4 つの型"
 _SECTION = "## "
+# 現状と改善の案の書き分けの小見出しを囲む行。外す範囲は見出しの文ではなくこの 2 行で決める（#4543 の決定 6）
+DISTINCTION_BEGIN = "<!-- ndf-distinction-begin -->"
+DISTINCTION_END = "<!-- ndf-distinction-end -->"
 
 
 class CriteriaBroken(contracts.ContractError):
@@ -33,3 +36,21 @@ def types_section() -> str:
     rest = lines[start + 1 :]
     end = next((i for i, line in enumerate(rest) if line.startswith(_SECTION)), len(rest))
     return "\n".join([TYPES_HEADING, *rest[:end]]).strip()
+
+
+def without_distinction(text: str) -> str:
+    """目印の行で囲まれた範囲を、目印の行ごと除いた本文。目印が対にならなければ `CriteriaBroken`。"""
+    kept: list[str] = []
+    inside = False
+    for line in text.splitlines(keepends=True):
+        mark = line.strip()
+        if mark in (DISTINCTION_BEGIN, DISTINCTION_END):
+            opening = mark == DISTINCTION_BEGIN
+            if opening == inside:
+                raise CriteriaBroken(f"文書の基準 {CRITERIA} の目印 {mark} が対になっていない")
+            inside = opening
+        elif not inside:
+            kept.append(line)
+    if inside:
+        raise CriteriaBroken(f"文書の基準 {CRITERIA} の目印 {DISTINCTION_BEGIN} が閉じていない")
+    return "".join(kept)

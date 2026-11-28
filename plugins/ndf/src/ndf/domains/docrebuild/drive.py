@@ -35,7 +35,6 @@ WORK_KIND = TOOL
 RESULT_SCHEMA = contracts.schema_path("io/document-rebuild.result")
 PROMPT_TEMPLATE = "contracts/worker/document-rebuild.md"
 SKILL = "skills/document-rebuild/SKILL.md"
-REQUIREMENTS_FILE = "issues/issue-{number}-requirements.md"
 ADD_PREFIX, READER_PREFIX = contracts.schema_enum(RESULT_SCHEMA, "/$defs/id_prefix")
 # `git diff A...B` で分岐点が無いときの終了コード（設計書の実測）
 NO_MERGE_BASE = 128
@@ -158,7 +157,7 @@ def requirements_of(cwd: Path, targets: Sequence[Target]) -> dict[str, list[str]
     for t in targets:
         if t.kind != "design":
             continue
-        paths = [REQUIREMENTS_FILE.format(number=n) for n in sorted(issue_docs.design_issues(t.path))]
+        paths = [issue_docs.REQUIREMENTS_FILE.format(number=n) for n in sorted(issue_docs.design_issues(t.path))]
         found = [rel for rel in paths if _is_regular(cwd / rel)]
         if found:
             out[t.path] = found

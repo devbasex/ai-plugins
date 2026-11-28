@@ -28,7 +28,8 @@ description: "Before asking the user to decide or approve, lay out the findings,
 
 ## 示すもの
 
-**質問の前の応答の本文に、次の 5 つを書く。**
+**質問の前の応答の本文に、次の 5 つを書く。** 今の状態と、選んだ後に変わることは、
+[文書の書き方の基準の「現状と改善の案の書き分け」](../../contracts/data/writing-criteria.md#現状と改善の案の書き分け)に従って書き分ける。
 
 | # | 項目 | 書くこと |
 | ---: | --- | --- |

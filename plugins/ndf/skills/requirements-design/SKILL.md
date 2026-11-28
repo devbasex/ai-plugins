@@ -210,6 +210,8 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 当たらないセクションは見出しごと消す。**仕様の正は課題の本文である。**
 課題を読む人が GitHub の上で受け入れ条件を読めるように、要求の全文を本文へ書く
 （`gh issue edit <番号> --body-file <ファイル>`）。本文にファイルのパスだけを書かない。
+課題の本文は PR の本文にもなるので、概要に当たるセクション（「何が起きたか」と「目的」）は[文書の書き方の基準の「現状と改善の案の書き分け」](../../contracts/data/writing-criteria.md#現状と改善の案の書き分け)に従って書く。
+「今の姿」と「何を足すか・変えるか」も、同じ小見出しに従う。
 
 `standard` では、設計と要求を同じ差分でレビューするために、本文のコピー（仕様のコピー）を `issues/` に置く。
 
