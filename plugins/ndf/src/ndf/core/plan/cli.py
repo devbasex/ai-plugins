@@ -462,7 +462,9 @@ def _cmd_units(a: argparse.Namespace) -> int:
 _DESIGN_GATE_HELP = (
     f"承認ゲートの前の確かめ。{STAGE_INPUT_ENV} の issues に、スプリントの全課題の番号を 1 件以上の整数の配列で渡す。"
     "ほかに、絶対パスの worktree と、スプリントブランチ名の branch を渡す。"
-    "reviewed には、ndf cross-review run --follow-base を実行した結果の outputs.reviewed の値を渡す。"
+    "設計 PR のレビュー結果から outputs.reviewed を取り出し、reviewed に渡す。"
+    "既定の起動を使う場合は、ndf cross-review run に --follow-base を付けて実行する。"
+    "workflow.launch.review で起動を差し替えている場合は、その起動に --follow-base を渡して得た結果を使う。"
     "実装計画を省いた課題があれば、その番号を整数の配列（例 [3702]）として plan_omitted に渡す。位置引数、--issue、--omitted は指定しない。"
     "作業場所の HEAD が reviewed.head と一致し、そのコミットの検査を通ると outputs.design_units を返す"
 )
