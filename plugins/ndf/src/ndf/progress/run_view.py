@@ -184,9 +184,13 @@ def ends_approvals(ev: model.Event) -> bool:
     return ev.draft.kind == STEP_EVENT and p.get("status") == "waiting" and p.get("report") is None
 
 
+# 投稿前の記録（`APPROVAL_POSTING`）の payload で、却下か変更要求の投稿だと示すキー（値は承認ゲートの区分）
+REJECTING_KEY = "rejecting"
+
+
 def posts_rejection(ev: model.Event) -> bool:
-    """事象 `ev` が、却下か変更要求の投稿を試みた記録か（その承認ゲートの区分は payload の `rejecting`）。先の承認を失効させる。"""
-    return ev.draft.kind == APPROVAL_POSTING and "rejecting" in event_payload(ev)
+    """事象 `ev` が、却下か変更要求の投稿を試みた記録か（その承認ゲートの区分は payload の `REJECTING_KEY`）。先の承認を失効させる。"""
+    return ev.draft.kind == APPROVAL_POSTING and REJECTING_KEY in event_payload(ev)
 
 
 def closes_only(payload: Mapping[str, Any]) -> bool:

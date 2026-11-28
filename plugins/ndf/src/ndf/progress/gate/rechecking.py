@@ -174,13 +174,19 @@ def recheck(
     changed = [*([moved] if moved else []), *texts]
     if not changed:
         return None
-    why = "回答した後に対象が変わった: " + " / ".join(changed)
-    # 手で終えた工程はここで待ちへ戻り `consume_held` に届かないので、マージ済みの警告をここでも足す
-    if m.progress.held_finish is not None and now.merged:
-        why += approval_decide.merged_otherwise(p.get("seen"), now.head, now.base)
+    why = _changed_reason(changed, p, now, by_hand=m.progress.held_finish is not None)
     if not how.advancing:
         return why + later
     return why if _send_back(st, v, m, why, revoke, how.locked) else None
+
+
+def _changed_reason(changed: list[str], p: Mapping[str, Any], now: Target, *, by_hand: bool) -> str:
+    """回答の payload `p` の回答を待ちへ戻す理由（違いは `changed`）。"""
+    why = "回答した後に対象が変わった: " + " / ".join(changed)
+    # 手で終えた工程はここで待ちへ戻り `consume_held` に届かないので、マージ済みの警告をここでも足す
+    if by_hand and now.merged:
+        why += approval_decide.merged_otherwise(p.get("seen"), now.head, now.base)
+    return why
 
 
 def verifier(

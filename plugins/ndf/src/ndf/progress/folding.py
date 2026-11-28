@@ -19,6 +19,7 @@ from ndf.progress.run_view import (
     FAILED,
     FINISH_HELD,
     FINISHED,
+    REJECTING_KEY,
     REOPENED,
     STARTED,
     STEP_EVENT,
@@ -145,7 +146,7 @@ class StepProgress:
     def _posting(self, ev: model.Event, p: dict[str, Any]) -> None:
         """証跡の投稿を試みた記録。却下と変更要求なら、承認ゲートの区分を覚える。"""
         if posts_rejection(ev):
-            self.rejecting.add(p["rejecting"])
+            self.rejecting.add(p[REJECTING_KEY])
 
 
 # 事象の種類 → 進みを書き換える StepProgress のメソッド（表に無い種類は進みを変えない）

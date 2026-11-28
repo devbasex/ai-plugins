@@ -36,7 +36,7 @@ from ndf.progress.gate.asking import (
 )
 from ndf.progress.gate.records import record_answer, rejections_path
 from ndf.progress.gate.targets import TargetReader
-from ndf.progress.run_view import APPROVAL_POSTING, closes_only
+from ndf.progress.run_view import APPROVAL_POSTING, REJECTING_KEY, closes_only
 
 # 回答した者の形（人・conductor・サービス。サービスは `service:<主体>`。プランの承認待ちと共有する）
 ACTORS = actors.ACTORS
@@ -290,7 +290,7 @@ def _note_posting(conn: Any, v: run.View, q: Question, a: Answer, seen: Target) 
         return None
     record = presented_id(replace(q, target=seen))
     if _TRAIL_ANSWERS[a.value] == approval_words.REJECTED:
-        payload: dict[str, Any] = {"rejecting": q.gate, "record": record}
+        payload: dict[str, Any] = {REJECTING_KEY: q.gate, "record": record}
     elif seen.production:
         payload = {"target": list(target), "record": record}
     else:

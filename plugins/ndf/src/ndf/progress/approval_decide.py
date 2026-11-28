@@ -12,7 +12,17 @@ from typing import Any, NamedTuple, Optional
 from ndf.core import merge_approval
 from ndf.progress import invoke, model, stages
 from ndf.progress.folding import step_progress
-from ndf.progress.run_view import ANSWERED, APPROVAL_POSTING, STEP_EVENT, View, closes_only, ends_approvals, event_payload, posts_rejection
+from ndf.progress.run_view import (
+    ANSWERED,
+    APPROVAL_POSTING,
+    REJECTING_KEY,
+    STEP_EVENT,
+    View,
+    closes_only,
+    ends_approvals,
+    event_payload,
+    posts_rejection,
+)
 
 # 設計承認ゲートの区分（承認した PR のマージまで確かめる承認ゲート）
 DESIGN_GATE = next(g for g in model.table()["gates"] if g == "design")
@@ -81,7 +91,7 @@ def latest_answer(rows: Sequence[model.Event], gate: Optional[str], after: int) 
 
 def rejection_posted_after(rows: Sequence[model.Event], gate: Optional[str], seq: int) -> bool:
     """事象 `seq` の後に、承認ゲート `gate` への却下か変更要求の投稿を試みた記録があるか。"""
-    return any(ev.seq > seq and posts_rejection(ev) and event_payload(ev)["rejecting"] == gate for ev in rows)
+    return any(ev.seq > seq and posts_rejection(ev) and event_payload(ev)[REJECTING_KEY] == gate for ev in rows)
 
 
 def counted_approval(rows: Sequence[model.Event], gate: Optional[str], gate_step: str) -> Optional[model.Event]:
@@ -184,7 +194,7 @@ def _unrecorded(rows: Sequence[model.Event]) -> list[tuple[merge_approval.MergeT
     recorded = {_record_of(p) for p in answered if p.get("answer") == invoke.APPROVED}
     posted = (event_payload(ev) for ev in rows if ev.seq > cut and ev.draft.kind == APPROVAL_POSTING)
     # 却下と変更要求の投稿前の記録（`rejecting`）は、取り消す承認ではない
-    approvals = (p for p in posted if "rejecting" not in p)
+    approvals = (p for p in posted if REJECTING_KEY not in p)
     return [(merge_approval.MergeTarget(*p["target"]), p["record"]) for p in approvals if p["record"] not in recorded]
 
 
